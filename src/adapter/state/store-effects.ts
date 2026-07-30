@@ -1,0 +1,60 @@
+/**
+ * effect 層(P3 設計メモ §1): DomainEvent を購読して store I/O を行い、
+ * SystemCommand で reducer に還流する。reducer は純粋のまま。
+ *
+ * **直列化(storage review #5 の解消)**: store への op は 1 本の promise chain に
+ * 直列化する。worker handler が将来 async 化しても、app 側から見た op 順序は
+ * ここで保証される(「init 以外は同期」という暗黙 invariant に依存しない)。
+ */
+import type { Dispatcher } from './dispatcher';
+
+/** effect 層が必要とする store 面(test では fake を注入)。 */
+export interface StorePort {
+  getBody(lid: string): Promise<string | null>;
+  persistBody(lid: string, body: string): Promise<void>;
+}
+
+export function connectStoreEffects(
+  dispatcher: Dispatcher,
+  store: StorePort,
+): () => void {
+  let queue: Promise<void> = Promise.resolve();
+
+  /** 全 store op を単一 chain に直列化(順序保証)。op の失敗は chain を殺さない。 */
+  const enqueue = (op: () => Promise<void>): void => {
+    queue = queue.then(op, op);
+  };
+
+  const unsubscribe = dispatcher.onEvent((ev) => {
+    switch (ev.type) {
+      case 'REQUEST_BODY':
+        enqueue(async () => {
+          try {
+            const body = await store.getBody(ev.lid);
+            dispatcher.dispatch({ type: 'BODY_LOADED', lid: ev.lid, body: body ?? '' });
+          } catch (e) {
+            dispatcher.dispatch({
+              type: 'BODY_LOAD_FAILED',
+              lid: ev.lid,
+              error: String(e),
+            });
+          }
+        });
+        break;
+      case 'PERSIST_BODY':
+        enqueue(async () => {
+          try {
+            await store.persistBody(ev.lid, ev.body);
+            dispatcher.dispatch({ type: 'BODY_PERSISTED', lid: ev.lid });
+          } catch (e) {
+            dispatcher.dispatch({ type: 'SYS_ERROR', error: String(e) });
+          }
+        });
+        break;
+      case 'APP_ERROR':
+        break; // 表示系(P3-2 以降)が拾う
+    }
+  });
+
+  return unsubscribe;
+}
