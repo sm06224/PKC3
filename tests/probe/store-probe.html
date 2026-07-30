@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>PKC3 store probe</title>
+  </head>
+  <body>
+    <pre id="out">running…</pre>
+    <script type="module">
+      import { StoreClient } from '/src/adapter/platform/storage/store-client.ts';
+
+      async function run() {
+        const store = new StoreClient();
+        const steps = {};
+        steps.init = await store.request({ op: 'init', dbName: 'pkc3-store-probe' });
+        await store.request({ op: 'openContainer', cid: 'c1', title: 'probe' });
+        await store.request({
+          op: 'upsertEntry',
+          cid: 'c1',
+          entry: {
+            lid: 'e1', title: 'todo sample', archetype: 'todo',
+            body: '---\nstatus: open\ndate: 2026-08-01\n---\n\n# やること\n',
+            entryOrder: 1, status: 'open', date: '2026-08-01',
+          },
+        });
+        await store.request({
+          op: 'upsertEntry',
+          cid: 'c1',
+          entry: {
+            lid: 'e2', title: 'note', archetype: 'text',
+            body: '# PKC-Markdown 本文\n\n==ハイライト==', entryOrder: 2,
+          },
+        });
+        steps.metas = await store.request({ op: 'listEntryMetas', cid: 'c1' });
+        steps.metaHasNoBody = steps.metas.every((m) => !('body' in m));
+        steps.body = await store.request({ op: 'getBody', cid: 'c1', lid: 'e2' });
+        steps.counts = await store.request({ op: 'counts', cid: 'c1' });
+        await store.request({ op: 'deleteEntry', cid: 'c1', lid: 'e1' });
+        steps.countsAfterDelete = await store.request({ op: 'counts', cid: 'c1' });
+        await store.request({ op: 'close' });
+        store.terminate();
+        return { ok: true, steps };
+      }
+
+      run().then(
+        (r) => { window.__PROBE_RESULT__ = r; document.getElementById('out').textContent = JSON.stringify(r, null, 2); },
+        (e) => { window.__PROBE_RESULT__ = { ok: false, error: String(e) }; document.getElementById('out').textContent = String(e); },
+      );
+    </script>
+  </body>
+</html>
