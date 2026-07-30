@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>PKC3 lease probe</title>
+  </head>
+  <body>
+    <pre id="out">ready</pre>
+    <script type="module">
+      import { acquireWriterLease } from '/src/adapter/platform/storage/writer-lease.ts';
+      import { StoreClient } from '/src/adapter/platform/storage/store-client.ts';
+
+      let lease = null;
+      let store = null;
+
+      window.__LEASE__ = {
+        async tryAcquire() {
+          lease = acquireWriterLease('pkc3-writer-probe');
+          const immediate = await lease.immediate;
+          return { immediate, state: lease.state() };
+        },
+        async waitHeld() {
+          await lease.whenHeld;
+          return { state: lease.state() };
+        },
+        async initStore() {
+          store = new StoreClient();
+          return store.request({ op: 'init', dbName: 'pkc3-lease-probe' });
+        },
+        async closeAll() {
+          if (store) {
+            await store.request({ op: 'close' });
+            store.terminate();
+            store = null;
+          }
+          lease?.release();
+          return null;
+        },
+      };
+      document.getElementById('out').textContent = 'lease api ready';
+    </script>
+  </body>
+</html>

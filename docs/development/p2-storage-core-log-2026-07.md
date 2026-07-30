@@ -106,6 +106,30 @@ smoke 規模(1,000 件)であり PKC2 500MB 級ベースラインではない。
 4. 編集(単発 tx)の実書込 ~0.1MB/回は journal では動かない ── 将来の掃引軸は
    synchronous / page_size / debounce バッチ(未測定)
 
+## 2026-07-30: 規模掃引(batch=200 / truncate / 60 編集)
+
+| N | seed | seed 実書込 | metas 一覧 | edit p50 / p95 | session 実書込 | RSS max |
+|---|---|---|---|---|---|---|
+| 5,000 | 678ms | 13.6MB | 129ms | 6.1 / 7.2ms | 6.1MB | 895MB |
+| 15,000 | 2,522ms | 43.5MB | 573ms | 5.2 / 6.5ms | 5.7MB | 946MB |
+
+- **編集コストは規模非依存**(N=1k/5k/15k で p50 ~5〜7ms)── 行単位 UPDATE の狙いどおり
+- 観測メモ: metas 一覧が 15,000 行で 573ms(postMessage 直列化)。boot 1 回きりなので
+  現時点で問題視しないが、将来のチューニング軸として記録(chunk 転送 / cursor 化)
+- RSS は chromium tree 全体の絶対値(相対比較専用)
+
+## 2026-07-30: 多重タブ Web Locks writer リース(review #1a の恒久対策)
+
+`writer-lease.ts`: `navigator.locks` の ifAvailable → 待ち request の 2 段構え。
+held したタブだけが storage worker を init する規約(SAHPool 単一接続)。
+Web Locks 非対応環境は単一タブ前提で held 扱い。読取追従(BroadcastChannel)は
+P3 の app 層接続で足す。
+
+検証: `run-lease-probe.mjs`(2 タブ・実 OPFS)──
+tab1 即取得 + opfs-sahpool init → tab2 は immediate=false で待機 →
+tab1 close(lock 自動解放 + worker 終了で SAH 解放)→ tab2 昇格 →
+**opfs-sahpool で init 成功**(memory fallback なし)。全 assert pass。
+
 ## 残作業(P2)
 
 - [ ] 計測ハーネス移植(boot-rss / storage-write-io / edit-main-thread-block /

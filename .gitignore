@@ -3,3 +3,4 @@ dist/
 coverage/
 *.local
 .bench-profile/
+.lease-profile/
