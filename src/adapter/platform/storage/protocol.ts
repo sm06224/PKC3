@@ -15,8 +15,26 @@ export type StorageRequest =
   | { op: 'bulkAddRevisions'; cid: string; revisions: RevisionAdd[] }
   | { op: 'revisionCounts'; cid: string }
   | { op: 'getRevision'; cid: string; id: string }
+  | { op: 'putAssetMeta'; cid: string; meta: AssetMetaPut }
+  | { op: 'listAssetMetas'; cid: string }
+  | { op: 'deleteAssetMeta'; cid: string; key: string }
   | { op: 'counts'; cid: string }
   | { op: 'close' };
+
+/** assets 表は meta のみ(bytes は AssetBlobStore ── §4.2)。hash は遅延計算可。 */
+export interface AssetMetaPut {
+  key: string;
+  mime: string;
+  size: number;
+  hash?: string | null;
+}
+
+export interface AssetMetaRow {
+  key: string;
+  mime: string | null;
+  size: number | null;
+  hash: string | null;
+}
 
 /** revision の追加(P2 最小形: snapshot は平文。zstd segment 化は P5)。 */
 export interface RevisionAdd {
@@ -87,6 +105,9 @@ export interface ResultMap {
   bulkAddRevisions: null;
   revisionCounts: RevisionCountRow[];
   getRevision: string | null;
+  putAssetMeta: null;
+  listAssetMetas: AssetMetaRow[];
+  deleteAssetMeta: null;
   counts: CountsResult;
   close: null;
 }

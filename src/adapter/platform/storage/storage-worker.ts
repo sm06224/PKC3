@@ -223,6 +223,29 @@ const handlers: Handlers = {
     );
     return rows.length > 0 ? (rows[0]?.snapshot as string) : null;
   },
+  putAssetMeta: (req) => {
+    const m = req.meta;
+    need().exec({
+      sql: `INSERT INTO assets (cid, key, mime, size, hash)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(cid, key) DO UPDATE SET
+              mime = excluded.mime, size = excluded.size, hash = excluded.hash`,
+      bind: [req.cid, m.key, m.mime, m.size, m.hash ?? null],
+    });
+    return null;
+  },
+  listAssetMetas: (req) =>
+    need().selectObjects(
+      'SELECT key, mime, size, hash FROM assets WHERE cid = ? ORDER BY key',
+      [req.cid],
+    ) as unknown as ResultMap['listAssetMetas'],
+  deleteAssetMeta: (req) => {
+    need().exec({
+      sql: 'DELETE FROM assets WHERE cid = ? AND key = ?',
+      bind: [req.cid, req.key],
+    });
+    return null;
+  },
   counts: (req) => {
     const one = (sql: string): number =>
       Number(need().selectObjects(sql, [req.cid])[0]?.n ?? 0);
