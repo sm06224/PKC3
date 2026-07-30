@@ -20,7 +20,7 @@
           entry: {
             lid: 'e1', title: 'todo sample', archetype: 'todo',
             body: '---\nstatus: open\ndate: 2026-08-01\n---\n\n# やること\n',
-            entryOrder: 1, status: 'open', date: '2026-08-01',
+            entryOrder: 1, status: 'open', date: '2026-08-01', archived: false,
           },
         });
         await store.request({
@@ -29,6 +29,7 @@
           entry: {
             lid: 'e2', title: 'note', archetype: 'text',
             body: '# PKC-Markdown 本文\n\n==ハイライト==', entryOrder: 2,
+            status: null, date: null, archived: false,
           },
         });
         steps.metas = await store.request({ op: 'listEntryMetas', cid: 'c1' });

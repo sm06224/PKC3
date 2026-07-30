@@ -45,6 +45,25 @@ IDB-VFS は旧ブラウザ / OPFS 不可環境の fallback のみ(設計 doc §4
   counts → delete、全 pass
 - ⚠ 機能確認のみ。性能はハーネス移植後(下記)
 
+## 2026-07-30: storage core の code review(サブエージェント)と反映
+
+vendor 実装(sqlite-wasm index.mjs)まで読んだ精査で 9 指摘。**同 PR で修正**:
+#1 init の silent memory fallback(catch を OPFS 確保に絞る + fallbackReason を
+InitResult に載せる + schema 失敗は fallback せず error・接続 close)/
+#3 client の worker error 経路(onerror/onmessageerror で pending 全 reject、
+terminate 後は即 reject)/ #4 init 冪等化 / #6 typed dispatch table(handler の
+返り値型を ResultMap に pin)/ #7 `PRAGMA user_version` seam(未来 version は明示
+reject)/ #2 の最小対応(EntryUpsert の抽出列を optional にしない)。
+
+**P3 までに解消(pin)**:
+
+- [ ] **#2 抽出列の一元化**: フレーバー extractor(frontmatter → status/date/archived)を
+      唯一の書込経路にして test で pin(二重表現の乖離 = PKC2 #1022 型の予防)
+- [ ] **#5 「init 以外は同期」invariant**: handler を async 化するときは client 側の
+      直列化(queue)とセットで。それまで pin test を検討
+- [ ] **#8 deleteEntry の orphan**: FK + ON DELETE CASCADE か tx 内多表削除
+- [ ] **#9 close ≠ SAH 解放**: multi-tab リース設計時の前提として記録
+
 ## 残作業(P2)
 
 - [ ] 計測ハーネス移植(boot-rss / storage-write-io / edit-main-thread-block /

@@ -30,6 +30,8 @@ export interface InitResult {
   vfs: 'opfs-sahpool' | 'memory';
   libVersion: string;
   crossOriginIsolated: boolean;
+  /** memory fallback したときだけ入る、落ちた理由(観測可能性 ── review #1)。 */
+  fallbackReason?: string;
 }
 
 export interface CountsResult {

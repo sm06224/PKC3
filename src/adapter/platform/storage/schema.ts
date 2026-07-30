@@ -93,13 +93,19 @@ export interface EntryMetaRow {
   archived: number;
 }
 
+/**
+ * ⚠ 抽出列(status / date / archived)は body(frontmatter)と同一事実の二重表現。
+ * 抽出の一元化(フレーバー extractor を唯一の書込経路にする)は P3 で行う ── それまで
+ * caller 渡しだが、渡し忘れが型エラーになるよう **optional にしない**(review #2、
+ * PKC2 #1022 サイドカー型乖離の予防)。
+ */
 export interface EntryUpsert {
   lid: string;
   title: string;
   archetype: string;
   body: string;
   entryOrder: number;
-  status?: string | null;
-  date?: string | null;
-  archived?: boolean;
+  status: string | null;
+  date: string | null;
+  archived: boolean;
 }
