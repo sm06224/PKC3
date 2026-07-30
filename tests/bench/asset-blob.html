@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>PKC3 bench: asset blob</title>
+  </head>
+  <body>
+    <pre id="out">ready</pre>
+    <script type="module">
+      import { AssetBlobStore } from '/src/adapter/platform/storage/asset-blob-store.ts';
+      import { StoreClient } from '/src/adapter/platform/storage/store-client.ts';
+
+      const blobs = new AssetBlobStore();
+      const store = new StoreClient();
+
+      // 決定的な非ゼロパターンの buffer(乱数不使用)
+      function makeBuffer(bytes, seedByte) {
+        const buf = new Uint8Array(bytes);
+        for (let i = 0; i < bytes; i += 4096) buf[i] = (seedByte + i) & 0xff;
+        return buf;
+      }
+
+      window.__ASSETS__ = {
+        async init() {
+          return store.request({ op: 'init', dbName: 'pkc3-asset-bench' });
+        },
+        /** count 個 × sizeMB の Blob を格納 + sqlite に meta 行。buffer は都度手放す。 */
+        async seed(count, sizeMB) {
+          await store.request({ op: 'openContainer', cid: 'bench', title: 'bench' });
+          const bytes = sizeMB * 1024 * 1024;
+          const t0 = performance.now();
+          for (let i = 0; i < count; i++) {
+            const blob = new Blob([makeBuffer(bytes, i)], {
+              type: 'application/octet-stream',
+            });
+            await blobs.put('bench', 'a' + i, blob);
+            await store.request({
+              op: 'putAssetMeta',
+              cid: 'bench',
+              meta: { key: 'a' + i, mime: 'application/octet-stream', size: bytes },
+            });
+          }
+          return { count, sizeMB, ms: Math.round(performance.now() - t0) };
+        },
+        /** k 回の表示読み: Blob → ObjectURL 貸出 → 即 dispose(revoke 規律)。 */
+        async readLoop(k, count) {
+          const t0 = performance.now();
+          let found = 0;
+          for (let i = 0; i < k; i++) {
+            const lent = await blobs.lendObjectUrl('bench', 'a' + (i % count));
+            if (lent) {
+              found++;
+              lent.dispose();
+            }
+          }
+          return { k, found, ms: Math.round(performance.now() - t0) };
+        },
+        async metas() {
+          const t0 = performance.now();
+          const rows = await store.request({ op: 'listAssetMetas', cid: 'bench' });
+          const totalMB = rows.reduce((a, r) => a + (r.size ?? 0), 0) / (1024 * 1024);
+          return { count: rows.length, totalMB, ms: Math.round(performance.now() - t0) };
+        },
+        async closeAll() {
+          await store.request({ op: 'close' });
+          store.terminate();
+          blobs.close();
+          return null;
+        },
+      };
+      document.getElementById('out').textContent = 'asset bench ready';
+    </script>
+  </body>
+</html>

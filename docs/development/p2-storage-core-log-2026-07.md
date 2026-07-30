@@ -148,6 +148,24 @@ batch=200 / truncate、向きのみ):
 
 残るゼロ件次元: relations / assets(assets は P4 の Blob storage 実装後に計測)。
 
+## 2026-07-30: assets(P4 前倒し)── IDB Blob store + RSS ±0 の実測
+
+実装: `asset-blob-store.ts`(IDB Blob 直格納・base64 経由禁止・ObjectURL は
+`lendObjectUrl` が dispose を返し **revoke は借りた側の責務**)+ sqlite 側の
+assets meta op(putAssetMeta / listAssetMetas / deleteAssetMeta)。
+
+実測(計器 2 `run-asset-blob.mjs`、60 × 5MB = **300MB 論理**、向きのみ):
+
+| 項目 | 実測 | 読み |
+|---|---|---|
+| 表示読み 20 回(ObjectURL 貸出→dispose) | 計 15ms(0.75ms/件)/ **RSS +0.6MB**(917.9→918.5) | **bytes が heap を通らない**。PKC2 の base64 経路(200MB 読出 +293MB 常駐)が構造的に消えた |
+| seed 300MB | 4,252ms(~70MB/s)/ RSS は過渡 +70MB → settle で戻る | buffer 生成の過渡のみ。常駐しない |
+| meta 一覧(sqlite) | 60 行 6ms | bytes と分離された O(メタ) |
+
+⚠ 免責: seed の diskstats 4.6MB は IDB(LevelDB)の**遅延 writeback が計測窓に
+入っていない**疑いが濃い ── 書込量の数字としては**採用しない**(本計器の主張は RSS)。
+IDB の実書込を語るときは sync を強制するか長窓で測り直すこと。
+
 ## 残作業(P2)
 
 - [ ] 計測ハーネス移植(boot-rss / storage-write-io / edit-main-thread-block /
