@@ -1,13 +1,17 @@
-# PKC3 メジャーバージョンアップ設計 ── 継承・刷新・是正(2026-07)
+# PKC3 メジャーバージョンアップ設計 v2 ── 継承・刷新・是正(2026-07)
 
-> **Status**: 設計 doc(**P0 = 本 doc の裁定。裁定前に実装しない**)
+> **Status**: 設計 doc(**P0 = 本 doc の裁定。裁定前に実装しない**)。
+> v2 = 2026-07-30 第 2 次 user 指示(全 PKC-Markdown 化 / 総合的見直し必須 /
+> boot クローン / export 互換義務解除 / PWA / 将来領域)を反映した改訂。
 > **本 doc は PKC3 の founding doc**。PKC2 リポジトリは参照のみ(read-only)で、
 > PKC3 の開発はすべて本リポジトリで行う。
 > **調査根拠**: 2026-07-30 に PKC2 を 4 方面(storage / 交換形式 / PKC-Markdown・基本機能 /
 > 依存・CI)から実地調査した結果に基づく。evidence の file:line は
 > [`sm06224/PKC2`](https://github.com/sm06224/PKC2) の現 HEAD(2026-07-30 時点)を指す。
 
-## 0. user 指示(2026-07-30。本 doc の与件・不可侵)
+## 0. user 指示(与件・不可侵)
+
+### 0.1 第 1 次(2026-07-30)
 
 1. 「**PKC2からPKC3にメジャーバージョンアップします。パフォーマンス悪化したストレージ周りの
    設計を刷新します。PKC2の成果である可搬式埋め込み形式の発想とエクスポート形式、
@@ -20,283 +24,301 @@
 3. 「**flagsは最大15個の予算設定とし、フューチャー機能を盛り込みすぎないようにする。
    flagsと正規の設定を分けることとする**」(user 指示 2026-07-30)
 
-加えて、storage の方向 ①〜⑤(user 指示 2026-07-27。不可侵、CLAUDE.md 記載)を全部引き継ぐ:
-ゼロコピーと速やかな破棄 / 依存削減 ≠ 依存全廃(静的ビルドなら問題ない)/ 小さかろうが積む /
-JSON をそのままコンテナにしない(内部表現の話。交換形式の JSON は残る)/ boot 窓だけで測らない。
+### 0.2 第 2 次(2026-07-30)
 
-## 1. PKC3 の位置づけと戦略
+4. 「**コードを書き直さないというのはダメです。流用は良いが、リファクタリングや
+   総合的見直しはしてください。古い設計や積み上げで遅くなる実装はダメです。
+   PKC2はそれで失敗しました**」── v1 の「純リファクタはスコープ外(推奨)」は棄却された
+5. 「**すべてのアーキタイプはインポート後に新たなスキーマにします。全てをPKC-Markdownで、
+   アーキタイプ種別が見せ方や編集の仕方にフレーバーを与えるようにしましょう**」
+6. 「**単一HTMLという仕様を最大限に活用するために、埋め込まれたスクリプトや
+   埋め込み済みデータベースや基本構造はidbにクローニングし、DOM内に使わないものを
+   置かないようにしてください。メモリの節約とクローニング時の安定性のためです**」
+7. 「**エクスポート形式がPKC2と互換を持つ必要はありません**」── v1 §8.2 の
+   「PKC2 互換 export(降格書き出し)」は不要になった
+8. 「**上記は私の想いですが、ひとえに速く安く必要十分に利便性を最大にすればOKです**」
+   ── 本 doc 全体の北極星
+9. 「**mdファイルに対してサービスハンドラにしたいし、PWAインストールのメタも欲しい**」
+10. 「**PKC1から持って来れなかった複合フォームとフォーム記入済みデータからダッシュボードや
+    帳票を作成する機能もいつか追加したい。graphapiのアクセストークンを与えたら、
+    onenoteとかと接続する機能も欲しいとは思ってる**」──「いつか」= v3.0 に入れない。
+    §10 将来領域として拡張点のみ確保(指示 3「盛り込みすぎない」と整合)
+
+### 0.3 継承する不可侵(2026-07-27、PKC2 CLAUDE.md 記載)
+
+ゼロコピーと速やかな破棄 / 依存削減 ≠ 依存全廃(静的ビルドなら問題ない)/ 小さかろうが積む /
+JSON をそのままコンテナにしない(内部表現の話)/ boot 窓だけで測らない。
+※ ④ 付記の「JSON は交換形式として残る」は PKC2 文脈の裁定。PKC3 では指示 7 により
+PKC2 互換義務が解除されたため、PKC3 の export 形式は §9 で新規に裁定する。
+
+## 1. 北極星と戦略
+
+> **速く、安く、必要十分、利便性最大**(user 指示 8)
 
 | 論点 | 判断 | 理由 |
 |---|---|---|
-| リポジトリ | 新規 `sm06224/PKC3`。PKC2 は現行のまま残す | **in-place 移行を捨てる**のが最大の設計利得。旧ビルド互換(Invariant 5「互換は双方向」)は「PKC2 が PKC2 のデータを読み続ける」ことで構造的に満たされ、S1〜S4 型の移行事故クラス(移行専用書込経路の穴)が発生しえない |
-| データ移行経路 | **交換形式のみ**(PKC2 export → PKC3 import) | 必然でもある: Pages 配信の PKC3 は origin が異なり、PKC2 の IndexedDB は原理的に直接読めない。互換の主戦場を交換形式に固定する(wasm-sqlite 設計 doc §6 の裁定を継承) |
-| コード戦略 | PKC2 スナップショットを出発点に、**背骨(storage / persistence / メモリ像)を差し替える外科手術**。from-scratch 書き直しはしない | src ≈ 13.5 万行 + test 10,973 件は資産。ContainerStore / StorageAdapter / pkc-data-source という seam が既にあり、手術面が明確 |
-| v3.0.0 スコープ | **機能同等(feature parity)+ storage 刷新 + §4 の是正。新機能ゼロ** | 「フューチャー機能を盛り込みすぎない」(user 指示 2026-07-30)。PKC2 のプライム・ディレクティブ(機能を足さない)は PKC3 v3.0 スコープにもそのまま効く |
+| リポジトリ | 新規 `sm06224/PKC3`。PKC2 は現行のまま残す | in-place 移行を捨てる。旧ビルド互換(PKC2 Invariant 5「互換は双方向」)は「PKC2 が PKC2 のデータを読み続ける」ことで構造的に満たされ、移行事故クラス(S1〜S4 型)が発生しえない |
+| データ移行経路 | **PKC3 の import のみ**(PKC2 export → PKC3 import で新スキーマへ変換) | 必然でもある: Pages 配信の PKC3 は origin が異なり、PKC2 の IndexedDB は原理的に直接読めない |
+| コード戦略 | **流用 + 総合的見直し**(user 指示 4)。移植単位ごとに「流用 / 再設計 / 廃棄」を判定し、**見直しなしの丸写しを禁止**。「古い設計や積み上げで遅くなる実装」は移植対象から除外(§5 是正一覧 + P3 の見直し工程) | PKC2 の失敗 =「積み上げの温存」。ただし test 資産(10,973 件)と実測で正しさが確認済みの部品は流用してよい ── 速く安く、のため |
+| v3.0.0 スコープ | **PKC2 機能の必要十分セット + storage/スキーマ刷新 + 是正 + PWA 化(§8)。それ以外の新機能ゼロ** | 「フューチャー機能を盛り込みすぎない」(指示 3)。将来領域(指示 10)は §10 で拡張点のみ確保 |
 
 ## 2. 継承するもの(発想はそのまま)
 
 | 資産 | PKC2 実体 | PKC3 での扱い |
 |---|---|---|
-| **可搬式埋め込み形式** | 単一 HTML の `<script id="pkc-data" type="application/json">` に `{container, export_meta?}`。SLOT 契約 6 要素(pkc-root/data/meta/core/styles/theme、`src/runtime/contract.ts:5-12`)。pkc-data boot = **view-only**(開いただけで受信側 IDB を汚さない、明示 Import / Rehydrate で昇格) | **発想ごと維持**。SLOT 契約・view-only 不変条件・system entries merge(ビルド正本の About/Settings 反映)をそのまま持ち込む |
-| **交換形式** | export HTML(full/light × editable/readonly)/ ZIP `pkc2-package` v1(manifest + container.json + assets/*.bin、stored mode 自前実装)/ バンドル 5 系統(text / textlog / entry / mixed / folder-export) | **読み書き両対応で互換維持**(§8 に契約表)。 |
-| **PKC-Markdown** | markdown-it v14 + 独自 inline 8 種 + block 方言 + fence 規約 + リンク scheme(entry:/pkc://asset:)。実体は「preprocessor(PUA sentinel + lineMap)→ markdown-it → postprocessor」のパイプライン全体(`src/features/markdown/markdown-render.ts` 4,191 行)。方言は表示経路と AST export 経路(docx/pptx)に**二重実装** | **パイプライン丸ごと移植**(パーサだけ差し替えると sentinel / lineMap / source-line anchor 契約が壊れる)。二重実装も現状のまま持ち込み、IR 統一(`markdown.use_ir` scaffolding)は凍結継続 |
-| **基本機能** | archetype **12 種**(CLAUDE.md 記載の 8 + spreadsheet + system-* 3。`src/core/model/record.ts:7-31`)+ presenter 6 登録 + text fallback / view 5 種(detail/calendar/kanban/filer/launcher)/ relations / revisions / workspace | 全部維持。**spreadsheet を漏らさない**(CLAUDE.md の 8 種表記は実態と乖離) |
+| **可搬式埋め込み形式の発想** | 単一 HTML にアプリ + データを埋め込み、file:// で自立動作。`<script id="pkc-data">` + SLOT 契約(`src/runtime/contract.ts:5-12`) | **発想ごと維持**しつつ実装刷新: 埋め込みペイロードは boot でストレージへクローンし DOM から除去(§4.6、user 指示 6)。export・clone は DB から生成(live DOM を読む PKC2 方式は廃止) |
+| **PKC-Markdown** | markdown-it v14 + 独自 inline/block 方言 + fence 規約 + リンク scheme(entry:/pkc://asset:)。preprocessor(PUA sentinel + lineMap)→ markdown-it → postprocessor のパイプライン(`markdown-render.ts` 4,191 行) | **方言仕様ごと維持**し、地位はむしろ昇格 ── 全 body の唯一の形式になる(§3)。実装は移植時に見直し(表示 / AST export の二重実装の統一を再評価。ただし工数と計測で判断) |
+| **基本機能** | view 5 種(detail/calendar/kanban/filer/launcher)/ relations / revisions / workspace / アーキタイプの見せ方(kanban のトグル、calendar の日付、filer の表示 profile 等) | 機能として全部維持。データ表現は §3 の新スキーマに載せ替え |
 | **大物機能** | mermaid / chart.js / docx / pptxgenjs / Office export(2026-07-01 user 裁定: keep・強化対象) | keep 裁定を継承 |
-| **transport** | PKC-Message v1(envelope 10 種)/ v2(JSON-RPC 2.0)/ pkc-ext §3.8 wire(host-push、pull 経路なし、Tier S 封じ込め)。**fail-closed 既定**(空 allowlist = 全 deny、origin ピン留め、flood guard) | wire 契約・セキュリティ既定ごと維持。既存拡張 HTML がそのまま動くこと |
-| **アーキテクチャ規約** | 5-layer(core ← features ← adapter)/ `data-pkc-*` セレクタ / pure reducer + Renderer/ActionBinder/Presenter 分離 | 維持(§3.5 のメモリ像変更に合わせて reducer の持つ集約が「リーン」になる) |
-| **計測資産と規律** | `tests/bench/` 14 本 + `storage-arch-bench`(A〜E 構成・io・syscall・sink)+ perf-measurement skill の規律(対照群 / persistent profile / fixture のゼロ次元 / boot 窓で定常を語らない) | **P2 で最初に移植**。PKC3 の全段階の DoD は計測で書く |
-| **provenance** | pkc-meta(app/version/schema/kind(dev/stage/product)/timestamp/source_commit/code_integrity SHA-256) | 維持。Pages の dev 版 / product 版の区別にそのまま使う(§7) |
-| **巨大 export の実戦傷 3 点** | #960 parts 分割(V8 文字列長上限)/ #962 64MB Blob 畳み(peak 非比例)/ #966 8MB 超で全体無圧縮 | 実装は変わっても**性質を要件として継承**: 「単一巨大文字列を作らない・総量比例のヒープを持たない」 |
-| **backup ゲートの流儀** | pre-migration-backup(バックアップ ZIP を書けたことを確認するまで移行しない) | PKC3 では import / 破壊的操作の安全網として流儀を継承 |
+| **transport** | PKC-Message v1/v2 / pkc-ext §3.8 wire(host-push、Tier S 封じ込め)。**fail-closed 既定**(空 allowlist = 全 deny、origin ピン留め、flood guard) | wire 契約・セキュリティ既定ごと維持。既存拡張 HTML がそのまま動くこと |
+| **アーキテクチャ規約** | 5-layer / `data-pkc-*` セレクタ / pure reducer + Renderer/ActionBinder/Presenter 分離 | 規約は維持。実装は §5 の見直し対象(肥大 file の解体・描画モデル) |
+| **計測資産と規律** | `tests/bench/` 14 本 + `storage-arch-bench`(A〜E 構成・io・syscall・sink)+ perf-measurement 規律(対照群 / persistent profile / fixture のゼロ次元 / boot 窓で定常を語らない) | **P2 で最初に移植**。全段階の DoD は計測で書く |
+| **provenance** | pkc-meta(app/version/schema/kind/timestamp/source_commit/code_integrity) | 維持。Pages の dev/product 判別に使う(§8) |
+| **巨大 export の実戦傷** | #960 parts 分割 / #962 64MB Blob 畳み / #966 無圧縮 fallback | 実装は変わっても**性質を要件として継承**: 単一巨大文字列を作らない・総量比例のヒープを持たない |
+| **backup ゲートの流儀** | pre-migration-backup(バックアップを書けたことを確認するまで進まない) | import / 破壊的操作の安全網として流儀を継承 |
 
-## 3. 刷新 ①: storage(最重点)
+## 3. データモデル v3: 全部 PKC-Markdown、アーキタイプ = フレーバー(user 指示 5)
 
-`storage-wasm-sqlite-design-2026-07.md`(裁定済みの方向)を PKC3 の文脈で再定義する。
-**PKC2 との決定的な違い: 移行コードが 1 行も要らない。** PKC3 には旧データが存在しないので、
-「最初から sqlite が正本」で始められる(PKC2 案の P5 移行ゲートが丸ごと消える)。
+**原則: entry の body は常に PKC-Markdown テキスト。** PKC2 の「JSON 文字列 body」
+(todo / form / spreadsheet)は廃止し、**アーキタイプは「見せ方・編集の仕方」を決める
+フレーバー**になる(presenter 選択・編集 UI・抽出フィールド定義)。
 
-### 3.1 確定している実測(PKC2 の失敗の形 = PKC3 の受け入れ基準)
+| フレーバー | PKC2 の body | PKC3 の表現(案) |
+|---|---|---|
+| todo | JSON `{status, description, date?, archived?}` | frontmatter(`status` / `date` / `archived`)+ 本文 markdown。kanban のトグルは frontmatter 書換の構造化操作 |
+| form | JSON(固定 3 フィールド) | frontmatter のフィールド群 + 本文。**記入済みデータが機械可読**であること ── 将来のダッシュボード / 帳票(§10)がここから読む |
+| spreadsheet | JSON `{rows}` + 数式 + グラフ | **csv fence**(PKC-Markdown 既存の renderable fence)+ frontmatter(数式・グラフ定義)。表示・編集は flavor presenter が担う |
+| textlog | 専用構造 | 日時見出しの markdown 節(タイムスタンプ規約)。追記 UI は flavor が提供 |
+| attachment | asset 参照 | asset リンク markdown + frontmatter meta |
+| text / folder / generic / opaque | markdown 系 | ほぼそのまま |
+
+- **変換は import の一回だけ**(user 指示 5「インポート後に新たなスキーマ」)。PKC3 内部に
+  旧形式は存在しない ── PKC2 の「サイドカーがあれば正本、なければ inline」型の合流読みを
+  最初から作らない
+- **一様化の配当**: 検索・revisions(テキスト diff・圧縮効率)・AST export(docx/pptx)・
+  AI 連携・md export(§9)がすべて 1 形式に収束する。「速く安く必要十分」の中核
+- **速度の担保**: kanban / calendar が毎回全 body を parse しないよう、フレーバーが宣言する
+  抽出フィールド(status / date 等)を**保存時に entries 表の列へ抽出して index** する
+  (§4.3)。ビューは SQL query で O(表示分)
+
+## 4. storage(最重点)
+
+[PKC2 の wasm-sqlite 設計 doc](https://github.com/sm06224/PKC2/blob/main/docs/development/storage-wasm-sqlite-design-2026-07.md)
+(裁定済みの方向)を PKC3 の文脈で再定義する。**PKC3 には旧データが存在しないので、
+「最初から sqlite が正本」で始められる(移行コードが 1 行も要らない)。**
+
+### 4.1 確定している実測(PKC2 の失敗の形 = PKC3 の受け入れ基準)
 
 | PKC2 実測(500MB fixture、PR #1040) | 根本原因 | PKC3 での姿 |
 |---|---|---|
-| 毎起動 ~85MB の JSON を丸ごと parse | container = 単一 JSON record | `SELECT`(body 列を読まない)── boot は O(メタ) |
+| 毎起動 ~85MB の JSON を丸ごと parse | container = 単一 JSON record | SELECT(body 列を読まない)── boot は O(メタ) |
 | revisions 80MB が JS heap に永続常駐 | 同上 | COUNT + 要求時 1 行読み |
 | 初回索引構築で RSS 1.5〜1.6GB(OOM) | asset = base64 文字列 | bytes は Blob record(heap ±0) |
-| 定常 RSS 1.0GB | 上記の合成 | 常駐は「リーン集約」のみ(§3.5) |
-| 1 編集で container 全量書き(#1021/#1024 で対症済) | 同上 | 行単位 UPDATE ── 構造的に消滅 |
+| 定常 RSS 1.0GB | 上記の合成 | 常駐はリーン集約のみ(§4.4) |
+| 1 編集で container 全量書き | 同上 | 行単位 UPDATE ── 構造的に消滅 |
 
-### 3.2 構成: ハイブリッド(ゼロコピー 2 原則に従属)
+### 4.2 構成: ハイブリッド(ゼロコピー 2 原則に従属)
 
 | データ | 置き場 | 実測根拠 |
 |---|---|---|
-| entries(meta + body)/ revisions / relations / workspace / settings / flags | **wasm-sqlite**(official `@sqlite.org/sqlite-wasm`、OPFS SAHPool VFS) | 実ディスクで投入 2,295ms / cold 22ms / 追記 200ms(300MB、redesign doc §A.1 D 腕)── 実用水準 |
-| asset の bytes | **Blob storage**(IDB Blob record。`saveAssetBlob` seam の型を継承) | BLOB を WASM に入れると読み ~9 倍 + リニアメモリ常駐 +246MB 級。IDB Blob は heap ±0・読み 0.8ms・syscall 最少(§A.1/A.2/A.9) |
+| entries(meta + body)/ revisions / relations / workspace / settings / flags | **wasm-sqlite**(official `@sqlite.org/sqlite-wasm`、OPFS SAHPool VFS) | 実ディスクで投入 2,295ms / cold 22ms / 追記 200ms(300MB、PKC2 redesign doc §A.1 D 腕)── 実用水準 |
+| asset の bytes | **Blob storage**(IDB Blob record) | BLOB を WASM に入れると読み ~9 倍 + リニアメモリ常駐 +246MB 級。IDB Blob は heap ±0・読み 0.8ms・syscall 最少(§A.1/A.2/A.9) |
 
-メモリ 2 原則(wasm-sqlite doc §2)を全判断の上位に置く: **bytes は必要な瞬間だけ・必要な範囲だけ /
-生成物はライフサイクル終端で即破棄**(stmt finalize 徹底・WASM バッファ copy-out 後即解放・
-ObjectURL は所有者が revoke)。
+メモリ 2 原則: **bytes は必要な瞬間だけ・必要な範囲だけ / 生成物はライフサイクル終端で即破棄**
+(stmt finalize 徹底・WASM バッファ copy-out 後即解放・ObjectURL は所有者が revoke)。
 
-### 3.3 スキーマ v1
+※ user 語彙の「**idb にクローニング**」(指示 6)は「ブラウザ側の永続ストレージ層」の意と
+解釈した(構造 = sqlite on OPFS / bytes = IDB Blob のハイブリッド)。文字どおり
+IndexedDB 限定の意図であれば、sqlite の置き場を IDB-VFS 側へ寄せる構成も成立する
+(性能は P2 で実測比較できる)── §12-2 で確認。
 
-wasm-sqlite 設計 doc §3 の DDL を継承し、user 指示(flags と設定の分離)を反映して 1 点変更する:
-`kv` 1 表に混ぜず **`settings`(正規設定)と `flags`(実験)を別表にする**(§5)。
-assets 表は bytes を持たない(meta + Blob storage へのポインタ行のみ)。
+### 4.3 スキーマ v1
 
-### 3.4 実行形態: storage worker
+PKC2 wasm-sqlite doc §3 の DDL を土台に、本 doc の決定を反映する:
 
-OPFS SAHPool(`createSyncAccessHandle`)は Worker 必須。したがって **sqlite は専用 Worker 内で
-動き、メインスレッドは query/command の message API を叩く**。副産物として保存・読み込みの
-CPU コスト(直列化・圧縮)がメインスレッドから構造的に出ていく(PKC2 で「体感の主因は描画」
-だったことと合わせ、main thread は描画に専念できる)。
+- `entries.body` = **常に PKC-Markdown**(§3)。SELECT では既定で読まない
+- フレーバー抽出列(`status` / `date` 等、flavor 宣言に基づき保存時に抽出)+ index
+- `settings`(正規設定)と `flags`(実験)を**別表**にする(§6)
+- `assets` 表は meta + Blob storage へのポインタ行のみ(bytes を持たない)
 
-### 3.5 メモリ像: リーン集約(app 層への波及の本丸)
+### 4.4 実行形態: storage worker + リーン集約
 
-reducer / Renderer の**発想は維持**する。変わるのは reducer が持つ集約の中身:
+- sqlite は専用 **Worker** 内(OPFS SAHPool は Worker 必須)。メインスレッドは query/command の
+  message API。保存・直列化・圧縮の CPU がメインスレッドから構造的に出ていく
+- reducer / Renderer の発想は維持し、常駐は**リーン集約**のみ: entries の meta
+  (lid/title/archetype/dates/order/抽出列)+ relations + counters。15,000 entries でも数 MB
+- body / revisions / asset bytes は需要駆動。PKC2 の `lazy_entry_bodies` が退役に終わったのは
+  「単一 JSON 前提の上に後付け」だったから ── PKC3 は需要駆動が正規形なので、
+  「hydrate 済みか」という中間状態が型から消える
 
-- **常駐**: entries の **meta のみ**(lid/title/archetype/dates/order)+ relations + counters。
-  15,000 entries でも数 MB
-- **需要駆動**: body(選択・編集・検索時に store へ query)/ revisions(viewer を開いた時だけ)/
-  asset bytes(ObjectURL 経由、表示中のみ)
-- PKC2 の `lazy_entry_bodies` が退役に終わったのは「単一 JSON 前提の上に後付け」だったから
-  (未読 body の穴 = S3)。PKC3 は**需要駆動が正規形**なので、「hydrate 済みか」という
-  中間状態そのものが型から消える(body を持つのは editor / presenter のローカルスコープだけ)
+### 4.5 書込増幅・syscall・圧縮・並行性(PKC2 実測の宿題を持ち込む)
 
-ここが P3(app 層接続)の実工数の大半になる。renderer / search / export の同期的
-`container.entries[].body` 参照を、非同期 query に置き換える境界設計が必要。
+- 「**ディスク I/O に負荷をかけたくない。ゆるいストリーミング圧縮とチャンクパックは必須**」
+  (user 指示、PKC2 redesign doc §A.7。撤回されていない)── sqlite の journal_mode / WAL /
+  synchronous / page_size は **io-bench の型で実測してから決める**(P2 DoD)
+- §A.9 の SQLite WASM syscall chatter(読み 5,783 vs IDB Blob 97)は 300MB media を sqlite に
+  入れた workload の数字。PKC3 ハイブリッド(sqlite は MB 級の構造データのみ)の実 workload で
+  **run-syscall-profile を再計測**する(P2 DoD。憶測で「解決した」と言わない)
+- revisions: **zstd グループ圧縮**(587x は snapshot 群の一括圧縮の数字 ── app 層で
+  segment BLOB にしてから sqlite 格納)。ライブラリ選定は P5 で実測
+- 多重タブ: SAHPool は実質単一接続 → **Web Locks の writer リース + BroadcastChannel 追従**を
+  最初から。durability は要所のみ厳格化の二段構え。`navigator.storage.persist()` 要求
+- OPFS 不可環境は IDB-VFS へ fallback。第一候補 = **crossOriginIsolated 不要の非 Atomics
+  SAHPool**(GitHub Pages はヘッダ制御不可・単一 HTML も同様なので必須条件)── P2 冒頭で実機確認
 
-### 3.6 書込増幅と syscall(A.7 / A.9 の宿題を持ち込む)
+### 4.6 可搬 HTML の boot: ストレージへクローンし、DOM に残さない(user 指示 6)
 
-- 「**ディスク I/O に負荷をかけたくない。ゆるいストリーミング圧縮とチャンクパックは
-  スケールのために必須**」(user 指示、redesign doc §A.7。撤回されていない)── sqlite でこの軸を
-  満たす手段(journal_mode / WAL / synchronous / page_size)は **io-bench の型で実測してから決める**
-  (P2 DoD)。per-record IDB が LevelDB の WAL+SST で実書込 ~70% 増幅した轍を、SQLite の
-  journal で再演しないこと
-- §A.9 の D 腕は **syscall chatter が全フェーズで桁違い**(読み 5,783 vs E 97)だった。ただし
-  あの計測は 300MB の media BLOB を sqlite に入れた workload であり、PKC3 のハイブリッド
-  (sqlite は MB 級の構造データのみ)には直接適用できない。**PKC3 の実 workload で
-  run-syscall-profile を再計測する**(P2 DoD。憶測で「解決した」と言わない)
+- 可搬 HTML の埋め込みペイロード(アプリ script / **DB image** / 基本構造)は、boot で
+  **永続ストレージへクローンしたら DOM から除去**する。巨大 base64 を DOM に常駐させる
+  PKC2 方式(メモリを食い、export 時に live DOM を読む不安定さの元)を廃止
+- クローンは**冪等**(container_id + content hash をキーに、同じファイルを開き直しても
+  増殖しない)。PKC2 の view-only boot が守っていた「開いただけで受信側の環境を汚さない」は、
+  読取専用モードではなく**冪等クローン + 容易な破棄**で置き換える(§12-3 で確認)
+- export / clone は **DB から生成**(SLOT 契約は生成時の出力仕様として維持)
 
-### 3.7 revisions: zstd グループ圧縮
+## 5. 是正: 「古い設計や積み上げで遅くなる実装」を持ち込まない(user 指示 4)
 
-587 倍(zstd3)は snapshot 群の**一括**圧縮の数字で、行単独圧縮では取れない(§A.3)。
-→ app 層 codec で **segment BLOB(snapshot 群をグループ化)にしてから sqlite に格納**。
-PKC2 segments 実装(~1MB パック + CompressionStream)の設計を zstd で置き換えて継承する。
-zstd ライブラリの選定(`@bokuweb/zstd-wasm` 系 / 将来のフレーバー SQLite = sqlite-zstd 静的リンク)
-は P5 で実測して決める。フレーバー SQLite(sqlite-vec / FTS5 焼き込み)は**設計済み拡張点のまま凍結**
-(採用トリガは性能でなく機能。§A.5 の裁定を継承)。
+すべて「単一 JSON 内部表現 + base64 文字列」の上に積まれた補償機構、または積み上げで
+肥大した実装であり、**個別の延命をしない**。
 
-### 3.8 並行性・耐久性(redesign doc §A.8 の設計判断を継承)
-
-- **多重タブ**: SAHPool は実質単一接続。**Web Locks API の writer リース**(アクティブタブが
-  書込権、他タブは読取 + BroadcastChannel 追従)を最初から入れる
-- **durability**: 通常 relaxed 相当 + 要所(import 完了・明示保存)のみ厳格化の二段構え
-- **eviction 保護**: `navigator.storage.persist()` 要求
-
-### 3.9 環境戦略
-
-第一候補 = OPFS SAHPool(**crossOriginIsolated 不要の非 Atomics 構成**。GitHub Pages は
-COOP/COEP ヘッダを制御できず、単一 HTML も同様なので、これは選択でなく必須条件)。
-P2 の最初に実機確認し、OPFS 不可環境(古いブラウザ / 私的モード)は IDB 上の VFS へ fallback。
-成立しなければ IDB-VFS が主経路になる(wasm-sqlite doc §8-1 の未確定を P2 冒頭で潰す)。
-
-## 4. 是正: 「作り込みすぎてかえって悪かった部分」を持ち込まない
-
-すべて「JSON 内部表現 + base64 文字列」という土台の上に積まれた**補償機構**であり、
-土台を変える PKC3 では**構造ごと不要になる**。個別の延命をしない(user 指示 2026-07-30)。
-
-| 補償機構(PKC2 実体) | 何の緩和だったか | PKC3 |
+| 対象(PKC2 実体) | 何が問題だったか | PKC3 |
 |---|---|---|
-| layout marker 3 種(`__pkc_split__` / `__pkc_layout__` 2〜5 / `__pkc_bodyseg__`)+ サイドカー 5 種(`__entry__:` / `__rev__:` / `__body__:` / `__rel__:` / `__order__:`)+「サイドカーがあれば正本、無ければ inline」の合流読み(`idb-store.ts:274-348`) | 単一 JSON record の部分読み・部分書きの欠如 | **持ち込まない**。sqlite の行と index が正規形。#1022(合流読みが旧ビルドで静かに欠損)の事故クラスも同時に消える |
-| segments バケット(~1MB gzip パック、追記規約、compaction) | 同上(書込増幅の緩和) | 実装は持ち込まない。**設計だけ** §3.7 の zstd グループ圧縮として継承 |
-| asset working-set(48MB budget、`asset-working-set.ts:47`)+ 4MB 描画閾値 / 8MB export 無圧縮閾値(#964/#966 止血) | base64 文字列が heap を通ること | **概念ごと消滅**(Blob + ObjectURL でサイズ非依存)。ただし 8MB 無圧縮は **PKC2 互換 export の出力契約としてのみ**残す(§8.2) |
-| 形式切替 flag の系譜(`differential_save` / `lazy_entry_bodies`、いずれも retired。退役に 4 経路合成 + pin test が要った) | 形式が複数あること自体 | **形式は 1 つ**。切替 flag を作らない(「形式 flag は戻し道とセットでしか作れない」を PKC3 の規律として明文化) |
-| storage backend の user 選択 4 種(idb / opfs / fsa / memory、`storage-backend.ts:32-45`) | 単一 record 形式の性能問題からの逃げ道 | **sqlite 一本 + Blob storage**。memory は test 専用に残す。FSA folder sink(フォルダ同期バックアップ)だけは用途が別(可搬バックアップ)── 残すか裁定(§10-4) |
-| flags 85 個(実測。`defineFlag` 走査 2026-07-30) | 「設定」「出荷済み機能の toggle」「実験」の未分離 | §5 で分離・予算化 |
-| doc/コメントと実態の乖離(CLAUDE.md「OPFS は seam 予約のみ」実は実装済 / ci.yml の stale コメント 2 箇所 / 8 archetype 表記) | ── | PKC3 の founding doc は本 doc と実地調査を正とし、**乖離を移植しない** |
+| layout marker 3 種 + サイドカー 5 種 + 「あれば正本、なければ inline」合流読み(`idb-store.ts:274-348`) | 部分読み書きの欠如の補償。旧ビルド静音欠損事故(#1022)の温床 | **持ち込まない**。sqlite の行と index が正規形 |
+| segments バケット(~1MB gzip パック + 追記規約 + compaction) | 書込増幅の補償 | 実装は持ち込まず、**設計だけ** §4.5 の zstd グループ圧縮として継承 |
+| asset working-set(48MB budget)+ 4MB/8MB 閾値止血 | base64 が heap を通ることの補償 | **概念ごと消滅**(Blob + ObjectURL でサイズ非依存) |
+| 形式切替 flag の系譜(`differential_save` / `lazy_entry_bodies`、退役に 4 経路合成 + pin test を要した) | 形式が複数あること自体 | **形式は 1 つ**。切替 flag を作らない |
+| storage backend の user 選択 4 種(idb/opfs/fsa/memory) | 単一 record 形式の性能問題からの逃げ道 | **sqlite 一本 + Blob storage**。memory は test 専用。FSA folder sink は §12-6 で裁定 |
+| JSON 文字列 body(todo/form/spreadsheet の個別形式) | アーキタイプごとの専用 parse / 専用保存経路の積み上げ | **全 PKC-Markdown + フレーバー**(§3)で一本化 |
+| flags 85 個(実測) | 設定・出荷済み toggle・実験の未分離 | §6 で分離・予算化 |
+| `renderer.ts` 12,523 行 / `action-binder.ts` 11,939 行の単一 file、編集のたびサイドバー全行再構築だった描画モデル(#1030 系) | 積み上げの温存。「体感の主因は描画」(PKC2 実測)の震源 | **v3.0 スコープ内で見直す**(user 指示 4 で確定)。P3 で module 分割 + 描画モデルの再設計(差分描画。edit-main-thread-block 計器を DoD に) |
+| markdown の表示 / AST export 二重実装 | 方言追加のたび二重メンテ | P3 で統一を**再評価**(IR 統合の未完 scaffolding `markdown.use_ir` を土台にするか、二重のまま磨くかは工数と計測で判断) |
+| doc / コメントと実態の乖離(「OPFS は seam 予約のみ」実は実装済 / stale CI コメント / 8 archetype 表記) | ── | founding doc(本書)と実地調査を正とし、乖離を移植しない |
 
-**スコープ外の是正(裁定事項)**: `renderer.ts` 12,523 行 / `action-binder.ts` 11,939 行の
-単一 file 肥大は「悪い部分」ではあるが、storage 手術と独立の純リファクタは v3.0 スコープに
-**入れない**ことを推奨(手術と同時にやると事故率が上がる。§10-6)。
+## 6. flags と正規設定の分離(user 指示 3)
 
-## 5. flags と正規設定の分離(user 指示 2026-07-30)
-
-**実態**: PKC2 の flag は 85 個。内訳はおよそ ── (a) **実質「設定」**(theme.* / filer.thumb.* /
-caret_indicator.* / tag.* / guardrail 閾値 / debounce 等の tuning knob)が ~35、(b) **出荷済み
-機能の toggle**(shell.* 30 個、text.* 5 個など、畳まれなかった feature flag)が ~45、
-(c) 実験・scaffolding(markdown.use_ir、retired 2 種)が ~5。
-
-**PKC3 モデル**:
+**実態**: PKC2 の flag は 85 個(2026-07-30 実測)。(a) 実質「設定」(theme / thumb / 閾値等の
+tuning knob)~35、(b) 出荷済み機能の畳まれなかった toggle(shell.* 30 個等)~45、(c) 実験 ~5。
 
 | | 正規設定(settings) | flags |
 |---|---|---|
 | 目的 | user の恒久的な好み・調整 | 実験・段階導入・障害時の緊急脱出弁 |
-| 置き場 | sqlite `settings` 表 + 設定 UI(system-settings 継承) | sqlite `flags` 表 + URL/`?pkc-debug` 導線 |
-| 寿命 | 無期限 | **各 flag に「畳む条件」の宣言必須**(既定化 or 削除の期日・条件をメタとして持つ) |
-| 予算 | なし | **最大 15 個。CI test で pin**(`getRegisteredFlags().length <= 15` を assert し、超えたら CI が落ちる) |
+| 置き場 | sqlite `settings` 表 + 設定 UI | sqlite `flags` 表 + URL/`?pkc-debug` 導線 |
+| 寿命 | 無期限 | **各 flag に「畳む条件」の宣言必須** |
+| 予算 | なし | **最大 15 個。CI test で pin**(超えたら CI が落ちる) |
 
-**移行方針**: (a) は settings へ / (b) は既定 ON で焼き込み、toggle 自体を削除(裁定で「OFF に
-したい」ものだけ settings へ)/ (c) 実験中のみ flag 枠を使う。v3.0 出荷時点の flag は
-storage fallback 系など**数個**に収まる見込み(15 は上限であって目標ではない)。
+移行方針: (a) → settings へ / (b) → 既定 ON で焼き込み、toggle 削除 / (c) のみ flag 枠。
+v3.0 出荷時点の flag は数個に収まる見込み(15 は上限であって目標ではない)。
 
-## 6. 依存方針の転換(受容モード)
+## 7. 依存方針(受容モード)
 
-**PKC2 の実態**: prod 依存 6 個のみ(chart.js / docx / markdown-it / markdown-it-footnote /
-mermaid / pptxgenjs)。更新は self-hosted Renovate「主権モード」= 全 update が dashboard
-approval 必須 + 7 日 cooldown、Dependabot は 2026-05-17 に撤退済み。SBOM なし。
+**PKC2 実態**: prod 依存 6 個。Renovate「主権モード」(全 update approval + 7 日 cooldown)。
+Dependabot 撤退済み。SBOM なし。
 
-**PKC3 の方針**(user 指示: 依存は性能のために致し方なし、SBOM + GitHub の依存 PR で定期更新):
-
-| 項目 | 提案 |
+| 項目 | PKC3 提案 |
 |---|---|
-| 依存更新 | **Dependabot version updates**(GitHub ネイティブの「依存 PR」)週次、npm + github-actions の 2 ecosystem、minor/patch はグループ化。security updates は即時。CI 全 green の minor/patch は auto-merge、major は手動 review(裁定 §10-2。Renovate 主権モードの緩和でも同じ運用は組めるが、GITHUB_TOKEN では CI が auto-trigger されない既知制約があり、能動運用には Dependabot が素直) |
-| SBOM | **CycloneDX** を release workflow で生成(npm 内蔵 `npm sbom` か `@cyclonedx/cyclonedx-npm`)し **GitHub Release に添付**。dependency graph / Dependabot alerts は常時 ON |
-| 新規依存(性能のため) | `@sqlite.org/sqlite-wasm`(official ビルド。storage-arch-bench D 腕で検証済みの構成)/ zstd-wasm 系(P5 で実測選定)。既存 prod 6 依存は継承 |
-| 衛生 | `engines` + `.nvmrc`(Node 24)を**宣言する**(PKC2 は CI の '24' だけが正で未宣言)/ `.npmrc` に `ignore-scripts=true`(postinstall 面の封鎖)/ `npm audit --audit-level=high` blocking gate 継承 |
-| tripwire | size budget は**手違い検出**として継承(撤廃しない・報告は残量で書く、の運用ごと)。Pages 配信で code splitting する場合は初期チャンク budget に読み替える |
+| 依存更新 | **Dependabot version updates** 週次(npm + github-actions)、minor/patch グループ化。security updates 即時。CI 全 green の minor/patch は auto-merge、major は手動 review(§12-5) |
+| SBOM | **CycloneDX** を release workflow で生成し GitHub Release に添付。dependency graph / Dependabot alerts 常時 ON |
+| 新規依存(性能のため) | `@sqlite.org/sqlite-wasm`(official。PKC2 storage-arch-bench D 腕で検証済み)/ zstd-wasm 系(P5 実測選定)。既存 prod 6 依存は継承 |
+| 衛生 | `engines` + `.nvmrc`(Node 24)宣言 / `.npmrc` `ignore-scripts=true` / `npm audit --audit-level=high --omit=dev` blocking gate 継承(happy-dom 経由 `ws` の既知地雷メモごと) |
+| tripwire | size budget を「手違い検出」として継承(撤廃しない・報告は残量で)。Pages では初期チャンク budget に読み替え |
 
-⚠ 引き継ぐ地雷のメモ: happy-dom 経由の `ws` ≤8.20.1 HIGH は dev 側限定で、`ws` を上げると
-happy-dom の WebSocket 解決が壊れる既知問題(PKC2 `ci.yml:93-97`)。PKC3 でも audit gate は
-`--omit=dev` で開始する。
+## 8. 配信: GitHub Pages + PWA(user 指示 1・9)
 
-## 7. GitHub Pages デプロイ(dev 版とプロダクト版)
-
-**前提制約**: Pages はカスタムヘッダ不可 → COOP/COEP なし → crossOriginIsolated 不成立 →
-SharedArrayBuffer 不可。**§3.9 の非 Atomics SAHPool 構成はここでも必須**(単一 HTML と同じ
-制約なので、storage 設計は配信形態に依らず一本で済む)。
-
-**サイト構成案**(単一 Pages site、Actions deploy):
+**前提制約**: Pages はカスタムヘッダ不可 → COOP/COEP なし → **非 Atomics SAHPool 必須**
+(§4.5。単一 HTML と同じ制約なので storage 設計は配信形態に依らず一本)。
 
 ```
 https://sm06224.github.io/PKC3/        ← プロダクト版(最新 release tag、kind: product)
 https://sm06224.github.io/PKC3/dev/    ← dev 版(main HEAD、kind: dev)
 ```
 
-- workflow: push(main)と release(publish)で起動。dev 版は main HEAD をビルド、
-  プロダクト版は最新 release tag をビルドし、1 つの Pages artifact に合成して
-  `actions/deploy-pages` でデプロイ。kind / timestamp / code_integrity の刻印(pkc-meta 流儀)で
-  どちらの版かを機械判別できる
-- PKC2 の smoke 運用で確立した「**CI artifact に private data を載せない**」(2026-05-05
-  user direction)を Pages workflow にも適用(デプロイ対象はビルド生成物のみ)
-- PKC2 の公開導線(PKC-Public の安定版 / DEV / マニュアル 3 URL、renderer.ts にハードコード)は
-  PKC2 のまま触らない。PKC2 側の告知面に PKC3 リンクを足すかは着地後に裁定
+- workflow: push(main)/ release(publish)で起動、1 つの Pages artifact に両版を合成して
+  `actions/deploy-pages`。kind / timestamp / code_integrity(pkc-meta 流儀)で機械判別
+- **配信形態はマルチファイル静的ビルドで確定的**(v1 の案 A): PWA の service worker は
+  独立ファイルが必須であり、単一ファイル配信と両立しない。副次効果として sqlite3.wasm は
+  `instantiateStreaming`(base64 デコードも一括 heap 載せも無し)、mermaid ~3MB は
+  遅延チャンク化できる(PKC2 は inlineDynamicImports で「lazy import してもサイズ同梱」だった)
+- **PWA**(user 指示 9): manifest(install メタ)+ service worker(offline cache)+
+  **File Handling API で `.md` のハンドラ登録**(インストール済み PKC3 が md ファイルを
+  直接開ける。開いた md は取込 or その場閲覧)。※ file_handlers はインストール済み
+  Chromium 系 PWA の機能 ── 対応外ブラウザでは従来どおり drag&drop / picker で md を受ける
+- **可搬式単一 HTML は export 機能として維持**(§9)。file:// で SW なしに自立動作 ──
+  PKC2 の成果の核は配信形態と独立に守る
+- CI artifact に private data を載せない規律(PKC2 2026-05-05 user direction)を Pages workflow にも適用
 
-**配信形態(裁定 §10-1)**:
+## 9. import / export(user 指示 7 で v1 から改訂)
 
-| | 案 A: マルチファイル静的ビルド(推奨) | 案 B: 単一 HTML を配信(PKC2 同形) |
-|---|---|---|
-| sqlite3.wasm | 別ファイル → `instantiateStreaming`(base64 デコードも一括 heap 載せも無し ── メモリ 2 原則に合致) | base64 焼き込み(+~1.2MB、起動時に全量デコード) |
-| code splitting | 可(mermaid ~3MB を遅延チャンク化 ── PKC2 は inlineDynamicImports で「lazy import してもサイズは同梱」だった) | 不可(単一 IIFE) |
-| 実装 | Pages 用と可搬 HTML 用の 2 ビルドプロファイル | 1 プロファイル(PKC2 pipeline 流用) |
+### 9.1 import(PKC3 が読むもの → すべて新スキーマへ変換)
 
-**どちらの案でも「可搬式単一 HTML」は export 機能として維持する**(発想はそのまま)。
-export された HTML は wasm を内蔵し、file:// で自立動作する ── これが PKC2 の成果の核であり、
-配信形態の選択とは独立に守る。
-
-## 8. 交換形式の互換契約(import / export)
-
-### 8.1 PKC3 が読むもの(受理層)
-
-| 形式 | 契約(PKC2 実装の罠込みで要件化) |
+| 形式 | 契約 |
 |---|---|
-| PKC2 export HTML | `app:'pkc2'` + `schema:1` を**明示受理**して昇格 import(PKC2 の importer は厳密一致 reject なので、PKC3 側に受理層がないと移行経路が存在しない)。**shell 2 変種**(平文 pkc-core / gzip+loader)両対応。`<\/script>` エスケープ復元。`export_meta.asset_encoding` は artifact 全体で 1 つ(gzip+base64 / base64) |
-| PKC2 ZIP(pkc2-package v1) | stored mode(method 0)を必ず受理。container_id 新規採番(PKC2 の意味論を維持) |
-| バンドル 5 系統(.text.zip / .textlog.zip / entry / .mixed.zip / .folder-export.zip v1|2) | additive・failure-atomic の意味論ごと受理 |
+| PKC2 export HTML | `app:'pkc2'` + `schema:1` を明示受理。shell 2 変種(平文 pkc-core / gzip+loader)両対応。`<\/script>` エスケープ復元。`asset_encoding` は artifact 全体で 1 つ |
+| PKC2 ZIP(pkc2-package v1)| stored mode(method 0)受理。container_id 新規採番 |
+| PKC2 バンドル 5 系統 | additive・failure-atomic の意味論ごと受理 |
+| 生 md ファイル(単体・複数)| §8 の md ハンドラ / drag&drop と同根。frontmatter があれば流儀どおり解釈 |
 
-### 8.2 PKC3 が書くもの
+import 時に §3 のフレーバー変換(JSON body → PKC-Markdown)を実行。**ここが PKC2 資産の
+唯一の入口**であり、変換の正しさは PKC2 実データ由来の fixture で pin する(P6 DoD)。
 
-- **PKC3 形式 export**(`app:'pkc3'`, schema v1 から開始): 既定。HTML(可搬式)/ ZIP
-- **PKC2 互換 export**(明示メニュー): `app:'pkc2'` / `schema:1` に**降格して書く**。stored-mode
-  ZIP・`<\/script>` エスケープ・asset_encoding 単一・8MB 超で全体無圧縮、という**旧 reader の
-  読める形**を厳守。これが PKC3 における「互換は双方向」の形 ── **user はいつでも PKC2 に
-  戻れる**(旧 pkc2.html を手元に残す運用の継承)
-- sqlite ファイル(.sqlite3)そのままの持ち出しは拡張点として予約(裁定 §10-5)
+### 9.2 export(PKC3 独自形式。PKC2 互換の義務なし ── user 指示 7)
 
-### 8.3 判定法と pin
+| 形式 | 内容 |
+|---|---|
+| **① 可搬単一 HTML**(主) | アプリ + **圧縮 sqlite image** + assets を埋め込み。開いた側は boot でストレージへクローンし DOM から除去(§4.6)。file:// 自立動作 |
+| **② md + assets の ZIP** | 全 body が PKC-Markdown になった配当。人間可読・他ツール / AI 互換の交換形式 |
+| ③(裁定 §12-4) | 機械可読 JSON export を残すか / sqlite ファイルそのままの持ち出しを製品機能にするか |
 
-各形式の DoD に「**この変更を知らない読み手(旧 pkc2.html)がこのファイルを読んだら何が
-見えるか**」を書き出す(Invariant 5 の判定法を継承)。PKC2 互換 export は
-**旧ビルドの読み方を再現して assert する pin test**(`differential-save-retirement.test.ts` の型)を
-最低 1 件持つ。
+- PKC2 → PKC3 は一方通行(戻り道は作らない。PKC2 は手元に残り続けるので、戻る必要が
+  構造的に生じない ── §12-7 で確認)
+- 巨大 export の性質要件(§2 実戦傷)は形式に依らず適用
 
-## 9. 段階計画(小さく積む ── 各段階が単独で着地し、単独で計測できる)
+## 10. 将来領域(v3.0 に盛り込まない。新スキーマが排除しないことだけ担保)
+
+| 領域(user 指示 10) | v3.0 で確保する拡張点 | 実装時期 |
+|---|---|---|
+| **複合フォーム + 記入済みデータ → ダッシュボード / 帳票**(PKC1 由来) | form フレーバーの frontmatter が機械可読であること(§3)+ 抽出列の sqlite query(§4.3)。帳票生成は既存 AST export(docx/pptx)の延長線に置ける | v3.x(裁定で起動) |
+| **Graph API トークン → OneNote 等の外部接続** | pkc-ext 流儀の外部コネクタ拡張点(PKC2 の OneNote 送信拡張 v0 #924-925 が先行例)。トークンは settings(§6)に保存する前提の枠だけ | v3.x(裁定で起動) |
+| フレーバー SQLite(FTS5 / sqlite-vec 焼き込み) | §4 の VFS/ビルド層に拡張点(PKC2 §A.5 の裁定を継承: 採用トリガは性能でなく機能) | 凍結のまま |
+
+## 11. 段階計画(小さく積む ── 各段階が単独で着地し、単独で計測できる)
 
 | 段階 | 内容 | DoD(計測・test) |
 |---|---|---|
-| **P0** | 本 doc の裁定 | ── |
-| **P1** | repo bootstrap: PKC2 スナップショット移植 + toolchain(vite 8 / TS 6 / vitest 4 / Node 24 宣言付き)+ CI(PKC2 ci.yml から stale を除去した版)+ Dependabot + SBOM + Pages workflow | dev 版 URL で現行機能が動く(storage はまだ PKC2 形式のまま)。CI 全 green。SBOM が Release に付く |
-| **P2** | 計測ハーネス移植(boot-rss / storage-write-io / edit-main-thread-block / storage-arch-bench + **継続使用の編集セッション腕**)+ sqlite core(worker + SAHPool 実機確認が最初 / schema v1 / store API) | 非 Atomics SAHPool の成立可否が確定。PKC2 500MB fixture のベースライン(RSS 1.5〜1.6GB / 定常 1.0GB / boot 936ms 等)を PKC3 計器で再現取得 |
-| **P3** | **リーン集約への app 層接続**(meta 常駐 / body 需要駆動 / 検索・export の query 化)| boot O(メタ) を実測で確認。**編集セッション N 分の RSS 時系列**が PKC2 比で下がる(boot 窓だけで語らない ── user 指示⑤) |
-| **P4** | assets: sqlite meta 行 + Blob storage(ObjectURL 描画、revoke 規律) | 500MB fixture で asset 起因の RSS 山が消える。#964/#966 型の閾値が存在しないこと |
-| **P5** | revisions: COUNT / 要求時読み + zstd グループ圧縮(ライブラリ実測選定込み) | revisions 常駐 0。ディスク列が圧縮されている(587x は fixture 依存なので実データ系で再測) |
-| **P6** | 交換形式: §8.1 受理層 + §8.2 PKC2 互換 export + pin test | PKC2 実 export 資産(HTML 2 変種 / ZIP / バンドル 5 系統)の roundtrip が通る。旧 pkc2.html が PKC2 互換 export を読める(pin) |
-| **P7** | v3.0.0: Pages プロダクト版 + マニュアル + 移行ガイド(PKC2 → export → PKC3 import の導線) | product URL 稼働。release に SBOM / provenance |
+| **P0** | 本 doc(v2)の裁定 | ── |
+| **P1** | repo bootstrap: toolchain(vite 8 / TS 6 / vitest 4 / Node 24 宣言付き)+ CI + Dependabot + SBOM + Pages workflow(マルチファイル + PWA manifest/SW の骨格) | dev 版 URL で shell が動く。CI 全 green。SBOM が Release に付く |
+| **P2** | 計測ハーネス移植(boot-rss / storage-write-io / edit-main-thread-block / storage-arch-bench + **継続使用の編集セッション腕**)+ sqlite core(worker + 非 Atomics SAHPool 実機確認が最初 / schema v1 / store API / journal 設定の実測選定) | SAHPool 成立可否の確定。PKC2 500MB fixture のベースラインを PKC3 計器で再現取得 |
+| **P3** | **app 層の総合的見直し + リーン集約接続**(user 指示 4): module 分割(renderer / action-binder 解体)・描画モデル再設計(差分描画)・フレーバー presenter(§3)・検索 / export の query 化 | boot O(メタ)。**編集セッション N 分の RSS 時系列**と long task が PKC2 比で下がる(boot 窓だけで語らない) |
+| **P4** | assets: sqlite meta 行 + Blob storage(ObjectURL 描画、revoke 規律) | 500MB fixture で asset 起因の RSS 山が消える。閾値止血が存在しないこと |
+| **P5** | revisions: COUNT / 要求時読み + zstd グループ圧縮(ライブラリ実測選定込み) | revisions 常駐 0。実データ系 fixture で圧縮率を再測 |
+| **P6** | import(§9.1 受理層 + フレーバー変換)+ export(§9.2 ①②) | PKC2 実 export 資産の roundtrip が新スキーマで通る(fixture pin)。可搬 HTML の boot クローン→DOM 除去が機能 |
+| **P7** | v3.0.0: Pages プロダクト版 + PWA 仕上げ(md ハンドラ)+ マニュアル + 移行ガイド | product URL 稼働。install / md ハンドラ動作。release に SBOM / provenance |
 
-P1〜P2 は並行可。P3 が最大工数(§3.5)。**「効果が小さい」は棄却理由にしない**
-(積み上げ先 = 本 doc。user 指示③)。
+P1〜P2 は並行可。P3 が最大工数。**「効果が小さい」は棄却理由にしない**(積み上げ先 = 本 doc)。
 
-## 10. 裁定をもらいたい点
+## 12. 裁定をもらいたい点(v2)
 
-1. **Pages 配信形態**: 案 A(マルチファイル、推奨)か案 B(単一 HTML 配信)か(§7)
-2. **依存更新の運用**: Dependabot へ乗り換え(提案)か、Renovate 主権モードの緩和か。
-   minor/patch の auto-merge を許すか(§6)
-3. **PKC2 リポジトリの扱い**: 保守モード(bug fix のみ受け付け)を推奨。凍結(アーカイブ)まで
-   進めるかは PKC3 着地後に再裁定でよいか
-4. **FSA folder sink**(フォルダ同期バックアップ)を PKC3 に持ち込むか(§4。可搬バックアップと
-   しての用途は残るが、storage backend 一本化の例外になる)
-5. **sqlite ファイル export** を製品機能にするか、拡張点の予約に留めるか(§8.2)
-6. **純リファクタ(renderer / action-binder の分割)を v3.0 スコープに入れない**、で良いか(§4)
-7. **flags 15 個の運用ルール**(§5 の表: 畳む条件の宣言必須 + CI pin)で良いか
-8. **PKC3 の識別子**: `app:'pkc3'` / schema v1 / DB 名・localStorage prefix `pkc3.` / 生成物
-   `pkc3.html` で良いか
+1. **§3 データモデル v3**(全 PKC-Markdown + フレーバー + 抽出列)の方向はこれで良いか。
+   とくに spreadsheet の csv fence 化と textlog の markdown 節化は表現が大きく変わる
+2. **「idb にクローニング」の解釈**(§4.2 注記): 構造 = sqlite on OPFS / bytes = IDB Blob の
+   ハイブリッドで良いか。文字どおり IndexedDB 限定なら IDB-VFS 構成に寄せる(P2 で実測比較可)
+3. **view-only の置き換え**(§4.6): 可搬 HTML を開いたら冪等クローン(hash キー・開き直しで
+   増殖しない・容易な破棄)で良いか(PKC2 は「書かない view-only モード」だった)
+4. **export ③**(§9.2): 機械可読 JSON export を残すか / sqlite ファイル持ち出しを製品機能にするか
+5. **依存更新**: Dependabot 週次 + minor/patch auto-merge で良いか
+6. **FSA folder sink**(フォルダ同期バックアップ)を PKC3 に持ち込むか
+7. **PKC2 → PKC3 は一方通行**(戻り道 export を作らない)で良いか(§9.2)
+8. **PKC2 リポジトリの扱い**: 保守モード(bug fix のみ)推奨
+9. **flags 運用**(§6: 上限 15 CI pin + 畳む条件宣言必須)で良いか
+10. **識別子**: `app:'pkc3'` / schema v1 / DB 名・prefix `pkc3.` / 生成物 `pkc3.html` で良いか
 
-## 11. 参照(すべて PKC2 リポジトリ側。read-only)
+## 13. 参照(すべて PKC2 リポジトリ側。read-only)
 
 - [`storage-wasm-sqlite-design-2026-07.md`](https://github.com/sm06224/PKC2/blob/main/docs/development/storage-wasm-sqlite-design-2026-07.md) ── storage 方向の正本(user 指示 2026-07-27)。
-  本 doc §3 はこれの PKC3 文脈への再定義
+  本 doc §4 はこれの PKC3 文脈への再定義
 - [`storage-v3-redesign-2026-07.md`](https://github.com/sm06224/PKC2/blob/main/docs/development/storage-v3-redesign-2026-07.md) ── 実測の全記録(§A.1 アーキ 5 構成 / §A.3 zstd /
   §A.5 フレーバー SQLite / §A.7 書込増幅 / §A.8 並行性 / §A.9 syscall)
 - [`storage-default-layout-decision-2026-07-26.md`](https://github.com/sm06224/PKC2/blob/main/docs/development/storage-default-layout-decision-2026-07-26.md) ── 棄却済みの案(再提案しない)
 - [`session-handoff-2026-07-26.md`](https://github.com/sm06224/PKC2/blob/main/docs/development/session-handoff-2026-07-26.md) ── 直近の着地と教訓
-- [`docs/spec/schema-migration-policy.md`](https://github.com/sm06224/PKC2/blob/main/docs/spec/schema-migration-policy.md) ── schema 単調・明示 reject の規約(§8 の下敷き)
+- [`docs/spec/schema-migration-policy.md`](https://github.com/sm06224/PKC2/blob/main/docs/spec/schema-migration-policy.md) ── schema 単調・明示 reject の規約(§9 の下敷き)
 - [`docs/spec/pkc-message-api-v2.md`](https://github.com/sm06224/PKC2/blob/main/docs/spec/pkc-message-api-v2.md) ── transport の正本(§2 継承)
-- [PKC2 CLAUDE.md](https://github.com/sm06224/PKC2/blob/main/CLAUDE.md) Invariant 5 ──「互換は双方向」の判定法(§8.3 に継承)
+- [PKC2 CLAUDE.md](https://github.com/sm06224/PKC2/blob/main/CLAUDE.md) ── 不可侵指示群と Invariant 5 の判定法
