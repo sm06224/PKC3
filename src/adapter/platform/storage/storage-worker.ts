@@ -9,18 +9,21 @@
  */
 import sqlite3InitModule, { type Database } from '@sqlite.org/sqlite-wasm';
 import { DB_SCHEMA_VERSION, SCHEMA_DDL } from './schema';
-import type {
-  StorageRequest,
-  StorageResponse,
-  InitResult,
-  RequestFor,
-  ResultMap,
+import type { EntryUpsert } from './schema';
+import {
+  JOURNAL_MODES,
+  type JournalMode,
+  type StorageRequest,
+  type StorageResponse,
+  type InitResult,
+  type RequestFor,
+  type ResultMap,
 } from './protocol';
 
 let db: Database | null = null;
 let initResult: InitResult | null = null;
 
-async function init(dbName: string): Promise<InitResult> {
+async function init(dbName: string, journalMode?: JournalMode): Promise<InitResult> {
   // 冪等(review #4): 二重 init で WASM を二重化しない・旧 db を leak しない
   if (initResult) return initResult;
 
@@ -44,15 +47,24 @@ async function init(dbName: string): Promise<InitResult> {
   }
 
   // schema 適用の失敗は fallback ではなく error(review #1b ── open 済み接続は閉じる)
+  let actualJournalMode: string;
   try {
     applySchema(opened);
+    // journal_mode は allowlist 経由のみ(injection 防止)。読み戻し値を正とする
+    // (VFS 非対応なら要求と違う値が返る ── WAL は SAHPool 非対応を実測で確認済み)。
+    // 既定 = truncate: 2026-07-30 掃引で delete よりわずかに速く安全性同等。
+    // memory は最速だがクラッシュ時の DB 破損リスクがあり既定にしない(p2 log)
+    const requested: JournalMode =
+      journalMode && JOURNAL_MODES.includes(journalMode) ? journalMode : 'truncate';
+    actualJournalMode = String(opened.selectValue(`PRAGMA journal_mode=${requested}`));
   } catch (e) {
     opened.close();
     throw e;
   }
 
   db = opened;
-  initResult = fallbackReason ? { ...meta, vfs, fallbackReason } : { ...meta, vfs };
+  const base = { ...meta, vfs, journalMode: actualJournalMode };
+  initResult = fallbackReason ? { ...base, fallbackReason } : base;
   return initResult;
 }
 
@@ -87,8 +99,36 @@ type Handlers = {
   ) => ResultMap[Op] | Promise<ResultMap[Op]>;
 };
 
+const UPSERT_SQL = `INSERT INTO entries
+    (cid, lid, title, archetype, created_at, updated_at,
+     entry_order, status, date, archived, body)
+  VALUES (?, ?, ?, ?, datetime('now'), datetime('now'), ?, ?, ?, ?, ?)
+  ON CONFLICT(cid, lid) DO UPDATE SET
+    title = excluded.title,
+    archetype = excluded.archetype,
+    updated_at = excluded.updated_at,
+    entry_order = excluded.entry_order,
+    status = excluded.status,
+    date = excluded.date,
+    archived = excluded.archived,
+    body = excluded.body`;
+
+function bindUpsert(cid: string, e: EntryUpsert): (string | number | null)[] {
+  return [
+    cid,
+    e.lid,
+    e.title,
+    e.archetype,
+    e.entryOrder,
+    e.status,
+    e.date,
+    e.archived ? 1 : 0,
+    e.body,
+  ];
+}
+
 const handlers: Handlers = {
-  init: (req) => init(req.dbName),
+  init: (req) => init(req.dbName, req.journalMode),
   openContainer: (req) => {
     need().exec({
       sql: `INSERT INTO containers (cid, title, created_at, updated_at, schema_version)
@@ -114,33 +154,26 @@ const handlers: Handlers = {
     return rows.length > 0 ? (rows[0]?.body as string) : null;
   },
   upsertEntry: (req) => {
-    const e = req.entry;
-    need().exec({
-      sql: `INSERT INTO entries
-              (cid, lid, title, archetype, created_at, updated_at,
-               entry_order, status, date, archived, body)
-            VALUES (?, ?, ?, ?, datetime('now'), datetime('now'), ?, ?, ?, ?, ?)
-            ON CONFLICT(cid, lid) DO UPDATE SET
-              title = excluded.title,
-              archetype = excluded.archetype,
-              updated_at = excluded.updated_at,
-              entry_order = excluded.entry_order,
-              status = excluded.status,
-              date = excluded.date,
-              archived = excluded.archived,
-              body = excluded.body`,
-      bind: [
-        req.cid,
-        e.lid,
-        e.title,
-        e.archetype,
-        e.entryOrder,
-        e.status,
-        e.date,
-        e.archived ? 1 : 0,
-        e.body,
-      ],
-    });
+    need().exec({ sql: UPSERT_SQL, bind: bindUpsert(req.cid, req.entry) });
+    return null;
+  },
+  bulkUpsertEntries: (req) => {
+    // 1 tx に束ねる ── journal 増幅対策(計器 1 で実測した ~120 倍の主因が
+    // upsert 毎の暗黙 tx であることの検証と対策を兼ねる)
+    const database = need();
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      for (const e of req.entries)
+        database.exec({ sql: UPSERT_SQL, bind: bindUpsert(req.cid, e) });
+      database.exec('COMMIT');
+    } catch (err) {
+      try {
+        database.exec('ROLLBACK');
+      } catch {
+        /* rollback 失敗は元エラーを優先 */
+      }
+      throw err;
+    }
     return null;
   },
   deleteEntry: (req) => {
