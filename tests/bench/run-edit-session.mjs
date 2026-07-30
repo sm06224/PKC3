@@ -29,6 +29,7 @@ const EDITS = Number(args.edits ?? 100);
 const INTERVAL_MS = Number(args.interval ?? 50);
 const ARM = args.arm === 'nosave' ? 'nosave' : 'save';
 const BATCH = Number(args.batch ?? 0);
+const REVS = Number(args.revs ?? 0);
 const JOURNAL = args.journal ?? 'delete';
 const PORT = Number(args.port ?? 45731);
 const PROFILE_DIR = args.profile ?? '/home/user/PKC3/.bench-profile';
@@ -90,6 +91,29 @@ try {
 
   const metas = await page.evaluate(() => window.__BENCH__.metas());
 
+  // revisions 次元(--revs=K で entry あたり K 件を投入し、常駐ゼロ設計を検証)
+  let revisions = null;
+  if (REVS > 0) {
+    const rw0 = sectorsWritten();
+    const rssBefore = rssOfProfileMb();
+    const seedRevs = await page.evaluate(
+      ({ n, per, batch }) => window.__BENCH__.seedRevisions(n, per, batch),
+      { n: ENTRIES, per: REVS, batch: Math.max(BATCH, 200) },
+    );
+    const rw1 = sectorsWritten();
+    const stats = await page.evaluate(
+      (sid) => window.__BENCH__.revisionStats(sid),
+      'r-0-0',
+    );
+    const rssAfter = rssOfProfileMb();
+    revisions = {
+      seed: { ...seedRevs, diskWriteMB: mb(rw1 - rw0) },
+      stats,
+      rssBeforeMB: rssBefore,
+      rssAfterStatsMB: rssAfter,
+    };
+  }
+
   // 編集セッション腕: RSS を 500ms ごとにサンプルしつつ k 編集
   const rssSeries = [];
   const sampler = setInterval(() => rssSeries.push(rssOfProfileMb()), 500);
@@ -113,11 +137,13 @@ try {
           entries: ENTRIES,
           edits: EDITS,
           intervalMs: INTERVAL_MS,
-          zeroDims: ['revisions', 'relations', 'assets'], // 測っていない次元
+          revsPerEntry: REVS,
+          zeroDims: [...(REVS === 0 ? ['revisions'] : []), 'relations', 'assets'], // 測っていない次元
         },
         init,
         seed: { ...seed, diskWriteMB: mb(seedW1 - seedW0) },
         metas,
+        revisions,
         session: { ...session, diskWriteMB: mb(sesW1 - sesW0) },
         rssMB: {
           samples: rssSeries.length,

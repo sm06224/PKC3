@@ -130,6 +130,24 @@ tab1 即取得 + opfs-sahpool init → tab2 は immediate=false で待機 →
 tab1 close(lock 自動解放 + worker 終了で SAH 解放)→ tab2 昇格 →
 **opfs-sahpool で init 成功**(memory fallback なし)。全 assert pass。
 
+## 2026-07-30: revisions op + 45,000 revisions 次元の実測(常駐ゼロの検証)
+
+store op を追加: `bulkAddRevisions`(tx バッチ)/ `revisionCounts`(snapshot 非読込の
+GROUP BY)/ `getRevision`(要求時 1 行)。snapshot は P2 では平文(zstd segment 化 = P5)。
+
+実測(N=15,000 entries + **45,000 revisions**(~1KB snapshot ≈ 45MB 論理)、
+batch=200 / truncate、向きのみ):
+
+| 項目 | 実測 | 読み |
+|---|---|---|
+| revisions 投入 45,000 件 | 4,803ms / 実書込 104.8MB | バッチ済みでも論理比 ~2.3 倍(batch 粒度は将来の掃引軸) |
+| revisionCounts(全 15,000 entry) | **252ms** | snapshot を読まない index scan。PKC2 #1020 の O(N×M) が構造的に無い |
+| getRevision 単発 | 8.5ms | 要求駆動 |
+| **RSS(投入+stats 前後)** | **946.6 → 968.6MB** | **45MB 級の常駐が発生しない** ── PKC2 の「revisions 80MB が JS heap に永続常駐」が PKC3 では構造的に消えていることの実測。chromium tree 絶対値なので差分の向きのみ |
+| 編集セッション(revisions 45k 共存下) | p50 5.3ms | revisions の存在が編集を汚染しない |
+
+残るゼロ件次元: relations / assets(assets は P4 の Blob storage 実装後に計測)。
+
 ## 残作業(P2)
 
 - [ ] 計測ハーネス移植(boot-rss / storage-write-io / edit-main-thread-block /

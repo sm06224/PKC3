@@ -185,6 +185,44 @@ const handlers: Handlers = {
     });
     return null;
   },
+  bulkAddRevisions: (req) => {
+    const database = need();
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      for (const r of req.revisions) {
+        database.exec({
+          sql: `INSERT INTO revisions (cid, id, entry_lid, created_at, rev_order, snapshot)
+                VALUES (?, ?, ?, datetime('now'), ?, ?)
+                ON CONFLICT(cid, id) DO NOTHING`,
+          bind: [req.cid, r.id, r.entryLid, r.revOrder, r.snapshot],
+        });
+      }
+      database.exec('COMMIT');
+    } catch (err) {
+      try {
+        database.exec('ROLLBACK');
+      } catch {
+        /* rollback 失敗は元エラーを優先 */
+      }
+      throw err;
+    }
+    return null;
+  },
+  revisionCounts: (req) =>
+    // snapshot 列を読まない ── revisions は常駐ゼロ、件数は index scan(§4.1)
+    need().selectObjects(
+      `SELECT entry_lid, COUNT(*) AS n FROM revisions
+        WHERE cid = ? GROUP BY entry_lid`,
+      [req.cid],
+    ) as unknown as ResultMap['revisionCounts'],
+  getRevision: (req) => {
+    // 表示要求時に 1 行だけ読む(要求駆動 ── §4.1)
+    const rows = need().selectObjects(
+      'SELECT snapshot FROM revisions WHERE cid = ? AND id = ?',
+      [req.cid, req.id],
+    );
+    return rows.length > 0 ? (rows[0]?.snapshot as string) : null;
+  },
   counts: (req) => {
     const one = (sql: string): number =>
       Number(need().selectObjects(sql, [req.cid])[0]?.n ?? 0);
