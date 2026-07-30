@@ -1,8 +1,9 @@
 # PKC3 メジャーバージョンアップ設計 v2 ── 継承・刷新・是正(2026-07)
 
-> **Status**: 設計 doc(**P0 = 本 doc の裁定。裁定前に実装しない**)。
+> **Status**: **P0 裁定済み(2026-07-30、§12 裁定記録)── 実装 go**。
 > v2 = 2026-07-30 第 2 次 user 指示(全 PKC-Markdown 化 / 総合的見直し必須 /
 > boot クローン / export 互換義務解除 / PWA / 将来領域)を反映した改訂。
+> v2.1 = 同日の user 裁定(全面委任 + export 方向)を §12 に固定。
 > **本 doc は PKC3 の founding doc**。PKC2 リポジトリは参照のみ(read-only)で、
 > PKC3 の開発はすべて本リポジトリで行う。
 > **調査根拠**: 2026-07-30 に PKC2 を 4 方面(storage / 交換形式 / PKC-Markdown・基本機能 /
@@ -53,7 +54,8 @@ PKC2 互換義務が解除されたため、PKC3 の export 形式は §9 で新
 
 ## 1. 北極星と戦略
 
-> **速く、安く、必要十分、利便性最大**(user 指示 8)
+> **速く、安く、必要十分、利便性最大**(user 指示 8)──
+> 「**最強のノートアプリにするんだー**」(user 2026-07-30)
 
 | 論点 | 判断 | 理由 |
 |---|---|---|
@@ -265,11 +267,13 @@ import 時に §3 のフレーバー変換(JSON body → PKC-Markdown)を実行�
 | 形式 | 内容 |
 |---|---|
 | **① 可搬単一 HTML**(主) | アプリ + **圧縮 sqlite image** + assets を埋め込み。開いた側は boot でストレージへクローンし DOM から除去(§4.6)。file:// 自立動作 |
-| **② md + assets の ZIP** | 全 body が PKC-Markdown になった配当。人間可読・他ツール / AI 互換の交換形式 |
-| ③(裁定 §12-4) | 機械可読 JSON export を残すか / sqlite ファイルそのままの持ち出しを製品機能にするか |
+| **② 圧縮アーカイブ `.pkc3.zip`**(バックアップ・交換の主形式) | manifest + **sqlite image(圧縮)** + assets/。「sqlite をそのまま吐き出しても良い。ただし可搬を想定して圧縮したアーカイブが望ましい」(user 裁定 2026-07-30)をこの形式で満たす |
+| **③ md + assets の ZIP** | 全 body が PKC-Markdown になった配当。人間可読・他ツール / AI 互換の交換形式 |
 
-- PKC2 → PKC3 は一方通行(戻り道は作らない。PKC2 は手元に残り続けるので、戻る必要が
-  構造的に生じない ── §12-7 で確認)
+- 機械可読 JSON export は v3.0 では作らない(③ md ZIP が交換を担う。transport の
+  JSON payload は別物で維持)。需要が出たら拡張点
+- **PKC2 → PKC3 は一方通行**(user 裁定 2026-07-30「PKC3 のエクスポートは、PKC2 に
+  インポートしません」)。PKC2 は手元に残り続けるので、戻る必要が構造的に生じない
 - 巨大 export の性質要件(§2 実戦傷)は形式に依らず適用
 
 ## 10. 将来領域(v3.0 に盛り込まない。新スキーマが排除しないことだけ担保)
@@ -295,21 +299,28 @@ import 時に §3 のフレーバー変換(JSON body → PKC-Markdown)を実行�
 
 P1〜P2 は並行可。P3 が最大工数。**「効果が小さい」は棄却理由にしない**(積み上げ先 = 本 doc)。
 
-## 12. 裁定をもらいたい点(v2)
+## 12. 裁定記録(P0 クリア ── user 裁定 2026-07-30。不可侵)
 
-1. **§3 データモデル v3**(全 PKC-Markdown + フレーバー + 抽出列)の方向はこれで良いか。
-   とくに spreadsheet の csv fence 化と textlog の markdown 節化は表現が大きく変わる
-2. **「idb にクローニング」の解釈**(§4.2 注記): 構造 = sqlite on OPFS / bytes = IDB Blob の
-   ハイブリッドで良いか。文字どおり IndexedDB 限定なら IDB-VFS 構成に寄せる(P2 で実測比較可)
-3. **view-only の置き換え**(§4.6): 可搬 HTML を開いたら冪等クローン(hash キー・開き直しで
-   増殖しない・容易な破棄)で良いか(PKC2 は「書かない view-only モード」だった)
-4. **export ③**(§9.2): 機械可読 JSON export を残すか / sqlite ファイル持ち出しを製品機能にするか
-5. **依存更新**: Dependabot 週次 + minor/patch auto-merge で良いか
-6. **FSA folder sink**(フォルダ同期バックアップ)を PKC3 に持ち込むか
-7. **PKC2 → PKC3 は一方通行**(戻り道 export を作らない)で良いか(§9.2)
-8. **PKC2 リポジトリの扱い**: 保守モード(bug fix のみ)推奨
-9. **flags 運用**(§6: 上限 15 CI pin + 畳む条件宣言必須)で良いか
-10. **識別子**: `app:'pkc3'` / schema v1 / DB 名・prefix `pkc3.` / 生成物 `pkc3.html` で良いか
+> 「**idbは例として言いました。私が口を出しすぎて、前回失敗したから任せます**」
+> 「**PKC3のエクスポートは、PKC2にインポートしません。なんなら、sqliteをそのまま
+> 吐き出しても良い。ただし、可搬を想定して圧縮したアーカイブが望ましい**」
+> 「**良いよー任せる!最強のノートアプリにするんだー**」
+
+これにより **P0 はクリア、実装 go**。v2 で挙げた裁定 10 点は、明示裁定 2 件(export /
+「idb」は例示)+ 全面委任に基づき以下のとおり確定する(覆せるのは user の明示指示のみ):
+
+| # | 論点 | 確定 |
+|---|---|---|
+| 1 | データモデル v3 | §3 のとおり採用(spreadsheet = csv fence / textlog = markdown 節 含む) |
+| 2 | ストレージ構成 | ハイブリッド(構造 = sqlite on OPFS / bytes = IDB Blob)。「idb」は例示(user 裁定) |
+| 3 | view-only の置き換え | 冪等クローン(hash キー・増殖しない・容易な破棄)(§4.6) |
+| 4 | export | §9.2 のとおり: ①可搬 HTML ②圧縮アーカイブ(user 裁定を正式化)③md ZIP。JSON export は作らない |
+| 5 | 依存更新 | Dependabot 週次 + minor/patch は CI green で auto-merge、major は手動 |
+| 6 | FSA folder sink | v3.0 に持ち込まない(②アーカイブ export が代替。需要が出たら拡張点) |
+| 7 | PKC2 → PKC3 | **一方通行**(user 裁定) |
+| 8 | PKC2 リポジトリ | user 管理(本 repo の外)。PKC3 からは read-only 参照のみ |
+| 9 | flags 運用 | 上限 15 を CI test で pin + 各 flag に畳む条件の宣言必須(§6) |
+| 10 | 識別子 | `app:'pkc3'` / schema v1 / DB 名・prefix `pkc3.` / 生成物 `pkc3.html` |
 
 ## 13. 参照(すべて PKC2 リポジトリ側。read-only)
 
