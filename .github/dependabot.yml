@@ -1,0 +1,16 @@
+# PKC3 依存更新(設計 doc §7): 週次の依存 PR。minor/patch はグループ化して
+# CI green で auto-merge(dependabot-auto-merge.yml)、major は手動 review。
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        applies-to: version-updates
+        update-types: ["minor", "patch"]
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly

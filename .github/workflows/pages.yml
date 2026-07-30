@@ -1,0 +1,58 @@
+# PKC3 GitHub Pages デプロイ(設計 doc §8)
+#   /     = プロダクト版(最新 release tag。初回 release まで placeholder)
+#   /dev/ = dev 版(main HEAD)
+# CI artifact に private data を載せない規律(PKC2 2026-05-05 user direction)を継承:
+# デプロイ対象はビルド生成物のみ。
+name: Deploy Pages
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Build dev (main HEAD)
+        run: |
+          npm ci
+          VITE_PKC_KIND=dev npm run build
+          mkdir -p _site/dev
+          cp -r dist/. _site/dev/
+      - name: Build product (latest release tag; placeholder until first release)
+        run: |
+          TAG=$(git tag -l 'v*' --sort=-v:refname | head -1)
+          if [ -n "$TAG" ]; then
+            git worktree add ../product "$TAG"
+            (cd ../product && npm ci && VITE_PKC_KIND=product npm run build)
+            cp -r ../product/dist/. _site/
+          else
+            cp .github/pages-placeholder.html _site/index.html
+          fi
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

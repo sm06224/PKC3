@@ -1,0 +1,19 @@
+{
+  "name": "PKC3",
+  "short_name": "PKC3",
+  "description": "Portable knowledge container — PKC-Markdown native, wasm-sqlite storage",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "theme_color": "#0f172a",
+  "background_color": "#0f172a",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "file_handlers": [
+    {
+      "action": "./",
+      "accept": { "text/markdown": [".md", ".markdown"] }
+    }
+  ]
+}

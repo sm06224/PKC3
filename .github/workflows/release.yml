@@ -1,0 +1,34 @@
+# PKC3 Release — v* tag → build(kind:product)+ SBOM(CycloneDX)を GitHub Release に添付
+# (設計 doc §7)
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: VITE_PKC_KIND=product npm run build
+      - name: SBOM (CycloneDX)
+        run: npm sbom --sbom-format=cyclonedx --omit=dev > pkc3-sbom.cdx.json
+      - name: Archive dist
+        run: (cd dist && zip -r ../pkc3-dist.zip .)
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PRERELEASE=""
+          case "$GITHUB_REF_NAME" in
+            *-rc*|*-beta*|*-alpha*) PRERELEASE="--prerelease" ;;
+          esac
+          gh release create "$GITHUB_REF_NAME" pkc3-sbom.cdx.json pkc3-dist.zip \
+            --title "$GITHUB_REF_NAME" --generate-notes $PRERELEASE

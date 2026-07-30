@@ -38,6 +38,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   persistent profile で測る / fixture のゼロ件次元は「測っていない次元」/
   倍率より向き・百分率は分母を書く
 
+## プロセス指示(user 指示 2026-07-30。必ず遵守)
+
+- **必要な時にやる**: 常時監視・儀式的な定期実行はしない。予約・監視は「未完の作業が
+  残っているとき」だけ張り、着地したら畳む
+- **CI を長くしない**(PKC2 の「CI 長すぎ問題」の再発防止): PR gate は**速い lane に限定**
+  (typecheck / lint / unit / build ── 目標 5 分以内、workflow の timeout 10 分 = tripwire)。
+  重い検証(視覚テスト全量・ベンチ・全 matrix・カバレッジ集計)は main push / nightly /
+  手動 dispatch に逃がす。**gate を足すときは「これは PR で走る必要があるか」を毎回問う**
+- **品質はサブエージェント・スキルで守る**: 実装 PR は着地前に code review(サブエージェント)を
+  回す。性能の主張は perf-measurement の規律(測ってから言う)。視覚を持つ変更は視覚テスト
+- **視覚テスト**: PKC2 の視覚テスト資産(playwright-visual / visual-parity / shinsatsu)を
+  **遅くなりすぎないように改修して**使う。UI 実装が始まる P3 で導入 ──
+  PR gate には最小 smoke(数 spec・秒オーダー)のみ、全量は nightly
+
 ## Build & Development Commands
 
 ```bash
