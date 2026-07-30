@@ -1,4 +1,7 @@
 # PKC3 CI — verify(設計 doc §7・§11 P1)
+# PR gate は速い lane に限定(CLAUDE.md プロセス指示、user 指示 2026-07-30
+# 「PKC2 は CI 長すぎ問題があった」)。重い検証(視覚全量・ベンチ・matrix)は
+# main push / nightly / 手動 dispatch へ。timeout 10 分は速度予算の tripwire。
 name: CI
 on:
   push:
@@ -10,7 +13,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
