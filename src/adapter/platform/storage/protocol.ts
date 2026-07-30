@@ -12,8 +12,25 @@ export type StorageRequest =
   | { op: 'upsertEntry'; cid: string; entry: EntryUpsert }
   | { op: 'bulkUpsertEntries'; cid: string; entries: EntryUpsert[] }
   | { op: 'deleteEntry'; cid: string; lid: string }
+  | { op: 'bulkAddRevisions'; cid: string; revisions: RevisionAdd[] }
+  | { op: 'revisionCounts'; cid: string }
+  | { op: 'getRevision'; cid: string; id: string }
   | { op: 'counts'; cid: string }
   | { op: 'close' };
+
+/** revision の追加(P2 最小形: snapshot は平文。zstd segment 化は P5)。 */
+export interface RevisionAdd {
+  id: string;
+  entryLid: string;
+  revOrder: number;
+  snapshot: string;
+}
+
+/** entry ごとの revision 件数(snapshot は読まない ── 常駐ゼロの根拠)。 */
+export interface RevisionCountRow {
+  entry_lid: string;
+  n: number;
+}
 
 /** message 経由の値を PRAGMA に流すため allowlist で固定(injection 防止)。 */
 export const JOURNAL_MODES = [
@@ -67,6 +84,9 @@ export interface ResultMap {
   upsertEntry: null;
   bulkUpsertEntries: null;
   deleteEntry: null;
+  bulkAddRevisions: null;
+  revisionCounts: RevisionCountRow[];
+  getRevision: string | null;
   counts: CountsResult;
   close: null;
 }

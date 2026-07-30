@@ -59,6 +59,47 @@
           const rows = await store.request({ op: 'listEntryMetas', cid: 'bench' });
           return { count: rows.length, ms: Math.round(performance.now() - t0) };
         },
+        /** 各 entry に perEntry 件の revision snapshot(~1KB)をバッチ投入。 */
+        async seedRevisions(n, perEntry, batch) {
+          const t0 = performance.now();
+          let buf = [];
+          let total = 0;
+          for (let i = 0; i < n; i++) {
+            for (let r = 0; r < perEntry; r++) {
+              buf.push({
+                id: `r-${i}-${r}`,
+                entryLid: 'e' + i,
+                revOrder: r,
+                snapshot: makeBody(i, -1 - r),
+              });
+              total++;
+              if (buf.length >= batch) {
+                await store.request({ op: 'bulkAddRevisions', cid: 'bench', revisions: buf });
+                buf = [];
+              }
+            }
+          }
+          if (buf.length > 0)
+            await store.request({ op: 'bulkAddRevisions', cid: 'bench', revisions: buf });
+          return { total, ms: Math.round(performance.now() - t0) };
+        },
+        /** revision 件数(snapshot 非読込)と、単発の要求時読みの実測。 */
+        async revisionStats(sampleId) {
+          const t0 = performance.now();
+          const rows = await store.request({ op: 'revisionCounts', cid: 'bench' });
+          const countsMs = Math.round(performance.now() - t0);
+          const totalRevisions = rows.reduce((a, r) => a + r.n, 0);
+          const t1 = performance.now();
+          const snap = await store.request({ op: 'getRevision', cid: 'bench', id: sampleId });
+          const getMs = +(performance.now() - t1).toFixed(1);
+          return {
+            entriesWithRevisions: rows.length,
+            totalRevisions,
+            countsMs,
+            sampleGetMs: getMs,
+            sampleFound: snap !== null,
+          };
+        },
         /**
          * 編集セッション腕(user 指示⑤: boot 窓だけで測らない)。
          * k 回の編集を intervalMs 間隔で行う。save=false は対照群(Y 腕):
