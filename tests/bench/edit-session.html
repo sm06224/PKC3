@@ -19,28 +19,38 @@
         return `# entry ${i} (rev ${rev})\n\n${para.repeat(8)}`;
       }
 
+      function entryFor(i, rev) {
+        return {
+          lid: 'e' + i,
+          title: 'entry ' + i,
+          archetype: i % 10 === 0 ? 'todo' : 'text',
+          body: makeBody(i, rev),
+          entryOrder: i,
+          status: i % 10 === 0 ? 'open' : null,
+          date: null,
+          archived: false,
+        };
+      }
+
       window.__BENCH__ = {
-        async init(dbName) {
-          return store.request({ op: 'init', dbName });
+        async init(dbName, journalMode) {
+          return store.request({ op: 'init', dbName, journalMode });
         },
-        async seed(n) {
+        /** batch=0: 1 entry = 1 request(暗黙 tx 毎)。batch>0: bulkUpsertEntries で 1 tx に束ねる。 */
+        async seed(n, batch) {
           await store.request({ op: 'openContainer', cid: 'bench', title: 'bench' });
           const t0 = performance.now();
-          for (let i = 0; i < n; i++) {
-            await store.request({
-              op: 'upsertEntry',
-              cid: 'bench',
-              entry: {
-                lid: 'e' + i,
-                title: 'entry ' + i,
-                archetype: i % 10 === 0 ? 'todo' : 'text',
-                body: makeBody(i, 0),
-                entryOrder: i,
-                status: i % 10 === 0 ? 'open' : null,
-                date: null,
-                archived: false,
-              },
-            });
+          if (batch > 0) {
+            for (let at = 0; at < n; at += batch) {
+              const entries = [];
+              for (let i = at; i < Math.min(n, at + batch); i++)
+                entries.push(entryFor(i, 0));
+              await store.request({ op: 'bulkUpsertEntries', cid: 'bench', entries });
+            }
+          } else {
+            for (let i = 0; i < n; i++) {
+              await store.request({ op: 'upsertEntry', cid: 'bench', entry: entryFor(i, 0) });
+            }
           }
           return { ms: Math.round(performance.now() - t0) };
         },

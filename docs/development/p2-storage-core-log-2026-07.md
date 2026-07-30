@@ -81,6 +81,31 @@ reject)/ #2 の最小対応(EntryUpsert の抽出列を optional にしない)�
 smoke 規模(1,000 件)であり PKC2 500MB 級ベースラインではない。diskstats は
 ホスト装置全体でノイズ込み ── 腕間比較・向きのみに使う。
 
+## 2026-07-30: journal_mode × tx バッチ掃引 → 既定の採用
+
+計器 1(entries=1000 / edits=30、smoke 規模・向きのみ)で掃引:
+
+| batch | journal(要求→実際) | seed | seed 実書込 | edit p50 | edit 実書込 |
+|---|---|---|---|---|---|
+| なし | delete→delete | 5,422ms | **120.2MB** | 6.9ms | 3MB |
+| 200 | delete→delete | 203ms | **2.3MB** | 7.3ms | 3.5MB |
+| **200** | **truncate→truncate** | **177ms** | **2.8MB** | **5.6ms** | **3.2MB** |
+| 200 | memory→memory | 158ms | 1.8MB | 2.5ms | 1.6MB |
+| 200 | **wal→delete** | 195ms | 2.3MB | 7.2ms | 3.5MB |
+| なし | truncate→truncate | 5,080ms | 112.4MB | 6.8ms | 2.8MB |
+
+**結論と採用**:
+
+1. **増幅の主因は upsert 毎の暗黙 tx**(バッチ化で seed の時間・実書込とも ~50 分の 1)。
+   `bulkUpsertEntries` を追加し、**大量書込(import / seed)は必ずバッチ経路**を使う
+   (P6 import の実装規約として pin)
+2. **WAL は SAHPool 非対応**(要求しても delete に落ちる)── 実測で確定、選択肢から除外
+3. **既定 journal_mode = truncate** を採用(delete 比でわずかに速く安全性同等)。
+   memory は最速だが**クラッシュ時に rollback journal が無く DB 破損リスク** ──
+   ノートアプリの既定にしない(A.8 の durability 規律)
+4. 編集(単発 tx)の実書込 ~0.1MB/回は journal では動かない ── 将来の掃引軸は
+   synchronous / page_size / debounce バッチ(未測定)
+
 ## 残作業(P2)
 
 - [ ] 計測ハーネス移植(boot-rss / storage-write-io / edit-main-thread-block /

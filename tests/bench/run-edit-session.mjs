@@ -28,6 +28,8 @@ const ENTRIES = Number(args.entries ?? 5000);
 const EDITS = Number(args.edits ?? 100);
 const INTERVAL_MS = Number(args.interval ?? 50);
 const ARM = args.arm === 'nosave' ? 'nosave' : 'save';
+const BATCH = Number(args.batch ?? 0);
+const JOURNAL = args.journal ?? 'delete';
 const PORT = Number(args.port ?? 45731);
 const PROFILE_DIR = args.profile ?? '/home/user/PKC3/.bench-profile';
 const executablePath = process.env.PKC3_CHROMIUM ?? '/opt/pw-browsers/chromium';
@@ -74,10 +76,16 @@ try {
   await page.goto(`http://localhost:${PORT}/tests/bench/edit-session.html`);
   await page.waitForFunction(() => window.__BENCH__);
 
-  const init = await page.evaluate((name) => window.__BENCH__.init(name), 'pkc3-bench');
+  const init = await page.evaluate(
+    ({ name, journal }) => window.__BENCH__.init(name, journal),
+    { name: 'pkc3-bench', journal: JOURNAL },
+  );
 
   const seedW0 = sectorsWritten();
-  const seed = await page.evaluate((n) => window.__BENCH__.seed(n), ENTRIES);
+  const seed = await page.evaluate(
+    ({ n, batch }) => window.__BENCH__.seed(n, batch),
+    { n: ENTRIES, batch: BATCH },
+  );
   const seedW1 = sectorsWritten();
 
   const metas = await page.evaluate(() => window.__BENCH__.metas());
@@ -100,6 +108,7 @@ try {
     JSON.stringify(
       {
         arm: ARM,
+        config: { batch: BATCH, journalRequested: JOURNAL },
         fixture: {
           entries: ENTRIES,
           edits: EDITS,
