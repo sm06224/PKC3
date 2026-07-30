@@ -1,0 +1,28 @@
+# PKC3 CI — verify(設計 doc §7・§11 P1)
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Audit (prod deps, high+, blocking)
+        run: npm audit --audit-level=high --omit=dev
+      - name: Audit (full, informational)
+        run: npm audit || true
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
