@@ -9,7 +9,14 @@ export default tseslint.config(
     // Node で走る運用スクリプト(probe / ベンチ)。ブラウザ評価関数内の window も許す
     files: ['**/*.mjs'],
     languageOptions: {
-      globals: { process: 'readonly', console: 'readonly', window: 'readonly' },
+      globals: {
+        process: 'readonly',
+        console: 'readonly',
+        window: 'readonly',
+        setInterval: 'readonly',
+        clearInterval: 'readonly',
+        setTimeout: 'readonly',
+      },
     },
   },
 );

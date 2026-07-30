@@ -64,6 +64,23 @@ reject)/ #2 の最小対応(EntryUpsert の抽出列を optional にしない)�
 - [ ] **#8 deleteEntry の orphan**: FK + ON DELETE CASCADE か tx 内多表削除
 - [ ] **#9 close ≠ SAH 解放**: multi-tab リース設計時の前提として記録
 
+## 2026-07-30: 計器 1「編集セッション腕 + 実書込量」移植・初回スモーク
+
+`tests/bench/edit-session.html` + `run-edit-session.mjs`(persistent profile /
+固定ポート 45731 / diskstats 実書込 / RSS 時系列 / nosave 対照群)。
+**初回スモーク(entries=1000・edits=30・~1KB 本文)の結果と読み**:
+
+| 項目 | save 腕 | nosave 腕(対照) | 読み(規律どおり「向き」のみ) |
+|---|---|---|---|
+| seed 1,000 件 | 6,092ms / **実書込 120.8MB** | 6,520ms / 120.7MB | 論理 ~1MB に対し実書込 ~120MB ── **upsert 毎の暗黙 tx による journal 増幅**。A.7 の PKC2 教訓(per-record 増幅)が sqlite でも実測で出た。P2 の journal_mode / tx バッチの実測選定が次の計器 |
+| listEntryMetas 1,000 行 | 21ms | ── | body 非読込の O(メタ) が実測でも速い |
+| 編集 30 回 | p50 7.4ms / 実書込 3MB | p50 0ms / **0MB** | 書込は保存に帰属(対照群で確認)。1 編集 ~0.1MB は PKC2 既定パスの 1 編集 25.7MB(全量書き)と方向として桁違いに小さいが、**規模もデータも違うため倍率は主張しない** |
+| RSS(chromium tree 全体) | ~871MB | ~874MB | GPU/renderer 込みの絶対値なので相対比較専用。長時間セッションの時系列で使う |
+
+⚠ 免責: fixture は revisions / relations / assets **0 件**(測っていない次元)。
+smoke 規模(1,000 件)であり PKC2 500MB 級ベースラインではない。diskstats は
+ホスト装置全体でノイズ込み ── 腕間比較・向きのみに使う。
+
 ## 残作業(P2)
 
 - [ ] 計測ハーネス移植(boot-rss / storage-write-io / edit-main-thread-block /

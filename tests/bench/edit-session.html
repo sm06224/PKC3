@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>PKC3 bench: edit session</title>
+  </head>
+  <body>
+    <pre id="out">ready</pre>
+    <script type="module">
+      import { StoreClient } from '/src/adapter/platform/storage/store-client.ts';
+
+      const store = new StoreClient();
+
+      // 決定的な ~1KB の PKC-Markdown 本文(乱数不使用 ── 再現性のため)
+      function makeBody(i, rev) {
+        const para =
+          `パラグラフ ${i}-${rev}: PKC-Markdown の本文。==ハイライト== と ` +
+          '**強調** と `code` を含む行を繰り返して 1KB 級にする。\n';
+        return `# entry ${i} (rev ${rev})\n\n${para.repeat(8)}`;
+      }
+
+      window.__BENCH__ = {
+        async init(dbName) {
+          return store.request({ op: 'init', dbName });
+        },
+        async seed(n) {
+          await store.request({ op: 'openContainer', cid: 'bench', title: 'bench' });
+          const t0 = performance.now();
+          for (let i = 0; i < n; i++) {
+            await store.request({
+              op: 'upsertEntry',
+              cid: 'bench',
+              entry: {
+                lid: 'e' + i,
+                title: 'entry ' + i,
+                archetype: i % 10 === 0 ? 'todo' : 'text',
+                body: makeBody(i, 0),
+                entryOrder: i,
+                status: i % 10 === 0 ? 'open' : null,
+                date: null,
+                archived: false,
+              },
+            });
+          }
+          return { ms: Math.round(performance.now() - t0) };
+        },
+        async metas() {
+          const t0 = performance.now();
+          const rows = await store.request({ op: 'listEntryMetas', cid: 'bench' });
+          return { count: rows.length, ms: Math.round(performance.now() - t0) };
+        },
+        /**
+         * 編集セッション腕(user 指示⑤: boot 窓だけで測らない)。
+         * k 回の編集を intervalMs 間隔で行う。save=false は対照群(Y 腕):
+         * body 生成まで同一で、保存 request だけを発行しない。
+         */
+        async editSession(k, n, intervalMs, save) {
+          const perOpMs = [];
+          for (let i = 0; i < k; i++) {
+            const idx = (i * 37) % n;
+            const body = makeBody(idx, i + 1);
+            const t0 = performance.now();
+            if (save) {
+              await store.request({
+                op: 'upsertEntry',
+                cid: 'bench',
+                entry: {
+                  lid: 'e' + idx,
+                  title: 'entry ' + idx,
+                  archetype: idx % 10 === 0 ? 'todo' : 'text',
+                  body,
+                  entryOrder: idx,
+                  status: idx % 10 === 0 ? 'open' : null,
+                  date: null,
+                  archived: false,
+                },
+              });
+            }
+            perOpMs.push(performance.now() - t0);
+            if (intervalMs > 0) await new Promise((r) => setTimeout(r, intervalMs));
+          }
+          const sorted = [...perOpMs].sort((a, b) => a - b);
+          const pick = (q) => sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))];
+          return {
+            k,
+            p50: +pick(0.5).toFixed(2),
+            p95: +pick(0.95).toFixed(2),
+            max: +sorted[sorted.length - 1].toFixed(2),
+          };
+        },
+        async close() {
+          await store.request({ op: 'close' });
+          store.terminate();
+          return null;
+        },
+      };
+      document.getElementById('out').textContent = 'bench api ready';
+    </script>
+  </body>
+</html>
