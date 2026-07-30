@@ -17,6 +17,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.0",
+    "@playwright/test": "^1.62.0",
     "@types/node": "^25.9.5",
     "eslint": "^10.7.0",
     "happy-dom": "^20.10.6",
@@ -24,5 +25,8 @@
     "typescript-eslint": "^8.64.0",
     "vite": "^8.1.5",
     "vitest": "^4.1.9"
+  },
+  "dependencies": {
+    "@sqlite.org/sqlite-wasm": "^3.53.0-build1"
   }
 }

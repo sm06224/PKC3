@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>PKC3 SAHPool probe</title>
+  </head>
+  <body>
+    <pre id="out">running…</pre>
+    <script type="module">
+      const worker = new Worker(new URL('./sahpool-worker.ts', import.meta.url), {
+        type: 'module',
+      });
+      worker.onmessage = (ev) => {
+        window.__PROBE_RESULT__ = ev.data;
+        document.getElementById('out').textContent = JSON.stringify(ev.data, null, 2);
+      };
+      worker.onerror = (ev) => {
+        window.__PROBE_RESULT__ = { ok: false, error: 'worker error: ' + ev.message };
+        document.getElementById('out').textContent = JSON.stringify(window.__PROBE_RESULT__);
+      };
+    </script>
+  </body>
+</html>
