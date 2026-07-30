@@ -5,6 +5,8 @@ import { defineConfig } from 'vite';
 // base './' — Pages の / と /dev/ の両方で同一ビルドが動く相対パス配信
 export default defineConfig({
   base: './',
+  // @sqlite.org/sqlite-wasm は pre-bundle すると worker/wasm 解決が壊れる(公式指示)
+  optimizeDeps: { exclude: ['@sqlite.org/sqlite-wasm'] },
   resolve: {
     alias: {
       '@core': fileURLToPath(new URL('./src/core', import.meta.url)),
