@@ -123,8 +123,6 @@ export function connectStoreEffects(
           }
         });
         break;
-      case 'APP_ERROR':
-        break; // 表示系(P3-2 以降)が拾う
     }
   });
 

@@ -396,20 +396,17 @@ describe('effect layer: serialized store I/O', () => {
   });
 
   it('missing row is a failure, not an empty body (S3-bud guard, review C\')', async () => {
-    const events: string[] = [];
     const d = new Dispatcher();
     const off = connectStoreEffects(d, fakeStore([], {})); // 行なし
-    d.onEvent((e) => events.push(e.type));
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', 1)], relations: [] });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
     await new Promise((r) => setTimeout(r, 40));
-    expect(events).toContain('APP_ERROR');
+    expect(d.getState().error).toMatch(/entry row missing/); // state 駆動の可視エラー
     expect(d.getState().openBody).toBeNull(); // 「空のノート」に見せない
     off();
   });
 
-  it('load failure reports APP_ERROR without killing the queue', async () => {
-    const events: string[] = [];
+  it('load failure sets state.error without killing the queue, cleared on recovery', async () => {
     const d = new Dispatcher();
     let calls = 0;
     const store: StorePort = {
@@ -421,16 +418,51 @@ describe('effect layer: serialized store I/O', () => {
       async persistEntry() {},
     };
     const off = connectStoreEffects(d, store);
-    d.onEvent((e) => events.push(e.type));
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', 1)], relations: [] });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
     await new Promise((r) => setTimeout(r, 20));
-    expect(events).toContain('APP_ERROR');
+    expect(d.getState().error).toMatch(/boom/); // 次の成功 / 選択まで残る
     expect(d.getState().phase).toBe('ready'); // 読み失敗で app は死なない
     // 再クリック = retry(review C): queue は生きており復帰できる
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
     await new Promise((r) => setTimeout(r, 20));
     expect(d.getState().openBody?.body).toBe('recovered');
+    expect(d.getState().error).toBeNull(); // 成功でエラー通知はクリア
+    off();
+  });
+
+  it('RETRY_PERSIST: 保存失敗から再送で復帰する(baseline≠persisted の回収)', async () => {
+    const d = new Dispatcher();
+    let failNext = true;
+    const persisted: string[] = [];
+    const store: StorePort = {
+      async getBody() {
+        return '# A';
+      },
+      async persistEntry(e) {
+        if (failNext) throw new Error('disk full');
+        persisted.push(e.body);
+      },
+    };
+    const off = connectStoreEffects(d, store);
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', 1)], relations: [] });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await new Promise((r) => setTimeout(r, 20));
+    d.dispatch({ type: 'START_EDIT' });
+    d.dispatch({ type: 'UPDATE_OPEN_BODY', body: '# A2' });
+    d.dispatch({ type: 'COMMIT_EDIT' });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(d.getState().phase).toBe('error');
+    // 未達の証拠が残っている
+    expect(d.getState().openBody).toMatchObject({ baseline: '# A2', persisted: '# A' });
+
+    failNext = false;
+    d.dispatch({ type: 'RETRY_PERSIST' });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(persisted).toEqual(['# A2']); // baseline(最後の commit 内容)を再送
+    expect(d.getState().phase).toBe('ready');
+    expect(d.getState().error).toBeNull();
+    expect(d.getState().openBody?.persisted).toBe('# A2'); // ack で回収完了
     off();
   });
 

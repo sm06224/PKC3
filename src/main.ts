@@ -2,7 +2,11 @@ import { APP_ID, APP_VERSION, BUILD_KIND } from '@runtime/release-meta';
 import { Dispatcher } from '@adapter/state/dispatcher';
 import { connectStoreEffects } from '@adapter/state/store-effects';
 import { StoreClient } from '@adapter/platform/storage/store-client';
-import { createStorePort, metaFromRow } from '@adapter/platform/storage/store-port';
+import {
+  createStorePort,
+  metaFromRow,
+  relationFromRow,
+} from '@adapter/platform/storage/store-port';
 import { acquireWriterLease } from '@adapter/platform/storage/writer-lease';
 import type { InitResult } from '@adapter/platform/storage/protocol';
 import { installHtmlSandboxResizer } from '@features/markdown/html-sandbox';
@@ -62,6 +66,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   await client.request({ op: 'openContainer', cid: DEFAULT_CID, title: 'PKC3' });
   const rows = await client.request({ op: 'listEntryMetas', cid: DEFAULT_CID });
   const metas = rows.map(metaFromRow);
+  const relRows = await client.request({ op: 'listRelations', cid: DEFAULT_CID });
+  const relations = relRows.map(relationFromRow);
 
   const dispatcher = new Dispatcher();
   const regions = buildShell(root);
@@ -105,21 +111,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     statusShown = text;
     regions.status.textContent = text;
   };
+  // エラー表示は state 駆動のみ(P3-6b: BODY_LOAD_FAILED も state.error に
+  // 統一 ── 表示寿命は「次の成功 / 選択まで」で、event の一瞬表示問題は消滅)
   dispatcher.onState((state) => {
     showStatus(state.error ? `${statusBase} ⚠ エラー: ${state.error}` : statusBase);
-  });
-  // ⚠ APP_ERROR(event)による表示は次の state 変化で statusBase に戻る
-  // (BODY_LOAD_FAILED 系は state.error を立てないため寿命が「次の操作まで」)。
-  // エラーを state に持たせる整理は P3-6 で(p3 設計メモに記載)
-  dispatcher.onEvent((ev) => {
-    if (ev.type === 'APP_ERROR') showStatus(`${statusBase} ⚠ ${ev.error}`);
   });
 
   dispatcher.dispatch({
     type: 'SYS_BOOTED',
     cid: DEFAULT_CID,
     metas,
-    relations: [], // relations op の配線は P3-6(kanban/calendar)で
+    relations, // 常駐(§6: 肥大が数字で出たら SQL query 化へ移す)
   });
   return { dispatcher, storageVfs: init.vfs };
 }

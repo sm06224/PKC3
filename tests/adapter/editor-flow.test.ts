@@ -148,7 +148,7 @@ describe('editor flow (P3-5)', () => {
     expect(persisted).toHaveLength(0);
   });
 
-  it('保存失敗(error phase)では「編集」ボタンを出さない(無言の操作拒否を作らない)', async () => {
+  it('保存失敗 → 編集ボタン非表示 + 再保存導線 → 再送で復帰(error 復帰の e2e)', async () => {
     const root = document.createElement('div');
     document.body.append(root);
     const d = new Dispatcher();
@@ -156,10 +156,13 @@ describe('editor flow (P3-5)', () => {
     const detail = new DetailRenderer(regions.detail);
     d.onState((s) => detail.render(s));
     bindActions(root, d);
+    let failNext = true;
+    const persisted: string[] = [];
     connectStoreEffects(d, {
       getBody: async () => '# A',
-      persistEntry: async () => {
-        throw new Error('disk full');
+      persistEntry: async (e) => {
+        if (failNext) throw new Error('disk full');
+        persisted.push(e.body);
       },
     });
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a')], relations: [] });
@@ -174,6 +177,19 @@ describe('editor flow (P3-5)', () => {
     expect(d.getState().phase).toBe('error');
     // START_EDIT は ready 限定 ── ボタンを出したまま無言 no-op にしない
     expect(root.querySelector('[data-pkc-action="start-edit"]')).toBeNull();
+    // 未達の commit がある ── 再保存導線が出る
+    const retry = root.querySelector<HTMLElement>('[data-pkc-action="retry-persist"]');
+    expect(retry).not.toBeNull();
+
+    failNext = false;
+    retry!.click();
+    await tick(20);
+    expect(persisted).toEqual(['v2']);
+    expect(d.getState().phase).toBe('ready');
+    expect(d.getState().openBody?.persisted).toBe('v2');
+    // 復帰後は通常の編集導線に戻る
+    expect(root.querySelector('[data-pkc-action="start-edit"]')).not.toBeNull();
+    expect(root.querySelector('[data-pkc-action="retry-persist"]')).toBeNull();
   });
 
   it('copy-md-block は実 delegation 経路(rendered ⧉ ボタンのクリック)で動く', async () => {

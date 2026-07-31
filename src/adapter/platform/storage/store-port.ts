@@ -5,10 +5,22 @@
  * (FlavorSpec.extract 済みの抽出列込み ── review K / C-1 の解消形)。
  * ここでは meta の解決も抽出もしない ── 届いた行をそのまま upsert する。
  */
-import type { EntryMeta } from '@core/model/entry-meta';
+import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import type { StorePort } from '@adapter/state/store-effects';
 import type { EntryMetaRow } from './schema';
+import type { RelationRow } from './protocol';
 import type { StoreClient } from './store-client';
+
+export function relationFromRow(row: RelationRow): Relation {
+  return {
+    id: row.id,
+    fromLid: row.from_lid,
+    toLid: row.to_lid,
+    kind: row.kind,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
 
 export function metaFromRow(row: EntryMetaRow): EntryMeta {
   return {

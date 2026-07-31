@@ -77,7 +77,8 @@ export type UserAction =
   | { type: 'CANCEL_EDIT' }
   | { type: 'TOGGLE_TODO_STATUS'; lid: string }
   | { type: 'SET_CALENDAR_MONTH'; year: number; month: number }
-  | { type: 'TOGGLE_SHOW_ARCHIVED' };
+  | { type: 'TOGGLE_SHOW_ARCHIVED' }
+  | { type: 'RETRY_PERSIST' };
 
 export type SystemCommand =
   | { type: 'SYS_BOOTED'; cid: string; metas: EntryMeta[]; relations: Relation[] }
@@ -112,8 +113,7 @@ export type DomainEvent =
       title: string;
       entryOrder: number;
       nextStatus: 'open' | 'done';
-    }
-  | { type: 'APP_ERROR'; error: string };
+    };
 
 export interface ReduceResult {
   state: AppState;
@@ -151,9 +151,11 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       // (読み失敗後の再クリックが自然な retry になる ── review C)
       if (state.selectedLid === action.lid && state.openBody?.lid === action.lid)
         return { state, events: [] };
-      // 選択が変わったら旧 openBody は破棄(速やかな破棄の原則)し、新 body を要求
+      // 選択が変わったら旧 openBody は破棄(速やかな破棄の原則)し、新 body を要求。
+      // 通知エラー(読み失敗等)は新しい試行でクリア(エラーは state 駆動 ──
+      // 表示寿命が「次の操作まで」で終わらない、P3-5 review #3 の解消)
       return {
-        state: { ...state, selectedLid: action.lid, openBody: null },
+        state: { ...state, selectedLid: action.lid, openBody: null, error: null },
         events: [{ type: 'REQUEST_BODY', lid: action.lid }],
       };
     }
@@ -166,6 +168,7 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       return {
         state: {
           ...state,
+          error: null, // 読めた = 直前の読み失敗通知は用済み
           openBody: {
             lid: action.lid,
             body: action.body,
@@ -179,9 +182,11 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
     }
     case 'BODY_LOAD_FAILED': {
       if (state.selectedLid !== action.lid) return { state, events: [] };
+      // phase は落とさない(読み失敗はアプリ死ではない ── 再クリックが retry)。
+      // エラーは state に持つ: 次の成功 / 選択までステータスに残る
       return {
-        state,
-        events: [{ type: 'APP_ERROR', error: `body load failed: ${action.error}` }],
+        state: { ...state, error: `body load failed: ${action.error}` },
+        events: [],
       };
     }
     case 'SET_VIEW_MODE':
@@ -247,33 +252,35 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
         // openBody は SELECT_ENTRY(存在検査済)経由でしか確立しない ── ここに
         // 来たら不変量違反。書かずに可視エラーで終える(黙って捨てない)
         return {
-          state: { ...state, phase: 'ready' },
-          events: [{ type: 'APP_ERROR', error: `commit: unknown entry ${lid}` }],
+          state: { ...state, phase: 'ready', error: `commit: unknown entry ${lid}` },
+          events: [],
         };
       }
       // 抽出はイベント発火時(= この reduce)に同期で行い、行全体を確定して運ぶ
-      const ext = extractMeta(meta.archetype, body);
-      const changed =
-        meta.status !== ext.status ||
-        meta.date !== ext.date ||
-        meta.archived !== ext.archived;
-      // 抽出値が変わったときだけ Map を作り直す ── sidebar は参照 fingerprint で
-      // 差分検出するため、無変化 commit で参照を壊さない
-      const entryMetas = changed
-        ? new Map(state.entryMetas).set(lid, { ...meta, ...ext })
-        : state.entryMetas;
-      const entry: EntryUpsert = {
-        lid,
-        title: meta.title,
-        archetype: meta.archetype,
-        body,
-        entryOrder: meta.entryOrder,
-        status: ext.status,
-        date: ext.date,
-        archived: ext.archived,
-      };
+      const { entryMetas, entry } = buildPersist(state, meta, body);
       return {
         state: { ...next, entryMetas },
+        events: [{ type: 'PERSIST_ENTRY', entry }],
+      };
+    }
+    case 'RETRY_PERSIST': {
+      // persist 失敗(error phase)からの復帰: baseline(最後に commit した内容)が
+      // disk(persisted)に未達なら、現 meta で行を組み直して再送する。
+      // baseline ≠ persisted が「未達の証拠」── P3-5 で導入した分離の回収点
+      if (state.phase !== 'error' || !state.openBody) return { state, events: [] };
+      const { lid, baseline, persisted, diskAhead } = state.openBody;
+      if (baseline === persisted || diskAhead) return { state, events: [] };
+      const meta = state.entryMetas.get(lid);
+      if (!meta) return { state, events: [] };
+      const { entryMetas, entry } = buildPersist(state, meta, baseline);
+      return {
+        state: {
+          ...state,
+          phase: 'ready',
+          error: null,
+          entryMetas,
+          openBody: { lid, body: baseline, baseline, persisted, diskAhead: false },
+        },
         events: [{ type: 'PERSIST_ENTRY', entry }],
       };
     }
@@ -380,9 +387,43 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       };
     }
     case 'SYS_ERROR':
+      // エラーは state 駆動(表示は state.error を読む)── event 通知は廃止
       return {
         state: { ...state, phase: 'error', error: action.error },
-        events: [{ type: 'APP_ERROR', error: action.error }],
+        events: [],
       };
   }
+}
+
+/**
+ * meta + body から行全体を確定し、常駐 metas を追従させる(COMMIT_EDIT /
+ * RETRY_PERSIST 共用)。抽出は唯一経路 extractMeta。抽出値が変わらないときは
+ * entryMetas の参照を維持する(sidebar / kanban の断面指紋を無駄に壊さない)。
+ */
+function buildPersist(
+  state: AppState,
+  meta: EntryMeta,
+  body: string,
+): { entryMetas: ReadonlyMap<string, EntryMeta>; entry: EntryUpsert } {
+  const ext = extractMeta(meta.archetype, body);
+  const changed =
+    meta.status !== ext.status ||
+    meta.date !== ext.date ||
+    meta.archived !== ext.archived;
+  const entryMetas = changed
+    ? new Map(state.entryMetas).set(meta.lid, { ...meta, ...ext })
+    : state.entryMetas;
+  return {
+    entryMetas,
+    entry: {
+      lid: meta.lid,
+      title: meta.title,
+      archetype: meta.archetype,
+      body,
+      entryOrder: meta.entryOrder,
+      status: ext.status,
+      date: ext.date,
+      archived: ext.archived,
+    },
+  };
 }

@@ -36,8 +36,31 @@
         steps.metaHasNoBody = steps.metas.every((m) => !('body' in m));
         steps.body = await store.request({ op: 'getBody', cid: 'c1', lid: 'e2' });
         steps.counts = await store.request({ op: 'counts', cid: 'c1' });
+        // P3-6b: relations 書込・読出と deleteEntry の orphan 掃除(review #8)
+        await store.request({
+          op: 'bulkUpsertRelations',
+          cid: 'c1',
+          relations: [
+            { id: 'r1', fromLid: 'e1', toLid: 'e2', kind: 'structural' },
+            { id: 'r2', fromLid: 'e2', toLid: 'e1', kind: 'semantic' },
+            { id: 'r3', fromLid: 'e2', toLid: 'e2', kind: 'semantic' },
+          ],
+        });
+        await store.request({
+          op: 'bulkAddRevisions',
+          cid: 'c1',
+          revisions: [{ id: 'v1', entryLid: 'e1', revOrder: 1, snapshot: 'old' }],
+        });
+        steps.relations = await store.request({ op: 'listRelations', cid: 'c1' });
         await store.request({ op: 'deleteEntry', cid: 'c1', lid: 'e1' });
         steps.countsAfterDelete = await store.request({ op: 'counts', cid: 'c1' });
+        steps.relationsAfterDelete = await store.request({ op: 'listRelations', cid: 'c1' });
+        // e1 に触れる r1 / r2 と e1 の revision が同 tx で消え、r3 だけ残る
+        steps.orphanCleanOk =
+          steps.relations.length === 3 &&
+          steps.relationsAfterDelete.length === 1 &&
+          steps.relationsAfterDelete[0].id === 'r3' &&
+          steps.countsAfterDelete.revisions === 0;
         await store.request({ op: 'close' });
         store.terminate();
         return { ok: true, steps };
