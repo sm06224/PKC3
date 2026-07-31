@@ -54,6 +54,19 @@ describe('asset: refs in markdown (P4b)', () => {
     expect(host.textContent).toContain('[y](asset:k2)');
   });
 
+  it('alt / title の " は escape され、live な on* 属性が実体化しない', () => {
+    // image rule は手書き HTML 文字列 ── escapeHtmlAttr が落ちても型も lint も
+    // 気付かないため、ここで pin する(review mutation D: escape 除去の素通し対策)。
+    // key 側は markdown-it の normalizeLink が " を %22 化する二重防御だが、
+    // alt / title は URL 正規化を**通らない**ので escape が唯一の防壁
+    const host = renderToDom(`![a"onerror="x](asset:k1 't"onmouseover="y')`);
+    const img = host.querySelector('img.pkc-asset-ref')!;
+    expect(img.getAttribute('alt')).toBe('a"onerror="x'); // 文字列として保持
+    expect(img.getAttribute('title')).toBe('t"onmouseover="y');
+    for (const el of host.querySelectorAll('*'))
+      for (const n of el.getAttributeNames()) expect(n.startsWith('on')).toBe(false);
+  });
+
   it('通常の外部 link / image は従来どおり(退行なし)', () => {
     const host = renderToDom('[e](https://example.com) ![i](https://example.com/i.png)');
     const a = host.querySelector('a:not(.pkc-asset-link)')!;
