@@ -161,6 +161,7 @@ const ACTIONS: Record<string, ActionHandler> = {
   'toggle-show-archived': (dispatcher) =>
     dispatcher.dispatch({ type: 'TOGGLE_SHOW_ARCHIVED' }),
   'retry-persist': (dispatcher) => dispatcher.dispatch({ type: 'RETRY_PERSIST' }),
+  'filer-root': (dispatcher) => dispatcher.dispatch({ type: 'DESELECT_ENTRY' }),
 };
 
 function isEditorBody(el: EventTarget | null): el is HTMLTextAreaElement {

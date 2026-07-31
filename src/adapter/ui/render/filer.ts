@@ -1,0 +1,148 @@
+/**
+ * filer view の最小核(P3-7b): breadcrumb + explorer table の read-only ビュー。
+ *
+ * - scope = 選択が folder ならそれ / 最近傍祖先 folder / root(PKC2 と同じ)
+ * - 一覧は scope 直下(root scope なら正準親なし)を entryOrder 順で
+ * - folder click = その folder を選択(= scope が移る)、非 folder click = 選択
+ *   (SELECT_ENTRY 1 本 ── scope と selection を別 state にしない。PKC2 で
+ *   両者を混ぜた結果 lastFilerScopeLid という補助状態が要った教訓は、
+ *   「scope は selection の純関数」に振り切ることで回避する)
+ * - relation 作成 UI / subset profile(表示レンズ)/ DnD は持ち込まない
+ *
+ * 差分規律: scope・一覧内容が変わったときだけ table を作り直す。選択だけの
+ * 変化(scope 不変)は data-pkc-selected の属性 patch のみ(P3-7b review #2 ──
+ * 15k 平置き root で選択 1 クリック = 60,009 createElement の反例を封鎖)。
+ * ⚠ 既知の限界: 一覧変化時の rebuild は O(scope 直下)で、平置き container の
+ * root scope では「scope 直下 = 全 entry」になる。keyed 行再利用(sidebar 方式)
+ * は P6 import で平置き大 container が現実になった時に計測してから入れる。
+ */
+import type { EntryMeta, Relation } from '@core/model/entry-meta';
+import type { AppState } from '@adapter/state/app-state';
+import {
+  getStructuralChildren,
+  getRootEntries,
+  getAncestorFolders,
+  resolveFilerScope,
+} from '@features/relation/tree';
+
+const ARCHETYPE_LABELS: Record<string, string> = {
+  text: 'ノート',
+  todo: 'Todo',
+  textlog: 'ログ',
+  spreadsheet: 'シート',
+  folder: 'フォルダ',
+  attachment: '添付',
+  form: 'フォーム',
+};
+
+export class FilerRenderer {
+  private readonly region: HTMLElement;
+  private readonly rows = new Map<string, HTMLTableRowElement>();
+  private lastMetas: ReadonlyMap<string, EntryMeta> | null = null;
+  private lastRelations: readonly Relation[] | null = null;
+  private lastSelected: string | null = null;
+  private lastScopeLid: string | null = null;
+
+  constructor(region: HTMLElement) {
+    this.region = region;
+  }
+
+  render(state: AppState): void {
+    const listChanged =
+      state.entryMetas !== this.lastMetas || state.relations !== this.lastRelations;
+    const selectionChanged = state.selectedLid !== this.lastSelected;
+    if (!listChanged && !selectionChanged) return;
+
+    const scope = resolveFilerScope(state.selectedLid, state.entryMetas, state.relations);
+    const scopeLid = scope?.lid ?? null;
+
+    if (!listChanged && scopeLid === this.lastScopeLid) {
+      // 選択だけの変化(scope 不変)── 属性 patch のみで済ませる
+      if (this.lastSelected) {
+        this.rows.get(this.lastSelected)?.removeAttribute('data-pkc-selected');
+      }
+      if (state.selectedLid) {
+        this.rows.get(state.selectedLid)?.setAttribute('data-pkc-selected', '');
+      }
+      this.lastSelected = state.selectedLid;
+      return;
+    }
+
+    this.lastMetas = state.entryMetas;
+    this.lastRelations = state.relations;
+    this.lastSelected = state.selectedLid;
+    this.lastScopeLid = scopeLid;
+
+    const list = scope
+      ? getStructuralChildren(scope.lid, state.entryMetas, state.relations)
+      : getRootEntries(state.entryMetas, state.relations);
+
+    this.region.textContent = '';
+    this.rows.clear();
+
+    // breadcrumb: root / …祖先… / scope
+    const crumb = document.createElement('nav');
+    crumb.setAttribute('data-pkc-region', 'filer-breadcrumb');
+    const rootSeg = document.createElement('button');
+    rootSeg.type = 'button';
+    rootSeg.setAttribute('data-pkc-action', 'filer-root');
+    rootSeg.textContent = 'ルート';
+    crumb.append(rootSeg);
+    if (scope) {
+      const chain = [
+        ...getAncestorFolders(scope.lid, state.entryMetas, state.relations).reverse(),
+        scope,
+      ];
+      for (const seg of chain) {
+        crumb.append(document.createTextNode(' / '));
+        // crumb セグメントはそれ自身が entry(folder)を表す要素 ── data-pkc-entry
+        // の適用対象(P3-7a 規約が禁じるのは delete / toggle 等の操作ボタン直付け)
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.setAttribute('data-pkc-entry', seg.lid);
+        btn.setAttribute('data-pkc-action', 'select-entry');
+        btn.textContent = seg.title;
+        crumb.append(btn);
+      }
+    }
+    this.region.append(crumb);
+
+    const table = document.createElement('table');
+    table.setAttribute('data-pkc-region', 'filer-table');
+    const thead = document.createElement('thead');
+    const hr = document.createElement('tr');
+    for (const h of ['名前', '種別', '更新日']) {
+      const th = document.createElement('th');
+      th.textContent = h;
+      hr.append(th);
+    }
+    thead.append(hr);
+    const tbody = document.createElement('tbody');
+    for (const m of list) {
+      const tr = document.createElement('tr');
+      tr.setAttribute('data-pkc-entry', m.lid);
+      tr.setAttribute('data-pkc-action', 'select-entry');
+      tr.setAttribute('data-pkc-archetype', m.archetype);
+      if (m.lid === state.selectedLid) tr.setAttribute('data-pkc-selected', '');
+      const name = document.createElement('td');
+      name.setAttribute('data-pkc-field', 'title');
+      name.textContent = (m.archetype === 'folder' ? '📁 ' : '') + m.title;
+      const kind = document.createElement('td');
+      kind.textContent = ARCHETYPE_LABELS[m.archetype] ?? m.archetype;
+      const updated = document.createElement('td');
+      updated.textContent = m.updatedAt ?? '';
+      tr.append(name, kind, updated);
+      tbody.append(tr);
+      this.rows.set(m.lid, tr);
+    }
+    table.append(thead, tbody);
+    this.region.append(table);
+
+    if (list.length === 0) {
+      const empty = document.createElement('p');
+      empty.setAttribute('data-pkc-field', 'filer-empty');
+      empty.textContent = scope ? '(このフォルダは空です)' : '(entry がありません)';
+      this.region.append(empty);
+    }
+  }
+}
