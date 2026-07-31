@@ -86,6 +86,7 @@ export type UserAction =
   | { type: 'RETRY_PERSIST' }
   /** lid / title は binder が生成して渡す(reducer は純粋のまま ── Date を呼ばない)。 */
   | { type: 'CREATE_ENTRY'; archetype: string; lid: string; title: string }
+  | { type: 'DESELECT_ENTRY' }
   | { type: 'DELETE_ENTRY'; lid: string }
   | { type: 'RENAME_ENTRY_TITLE'; lid: string; title: string };
 
@@ -445,6 +446,16 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       if (ob.persisted === action.body) return { state, events: [] };
       return {
         state: { ...state, openBody: { ...ob, persisted: action.body } },
+        events: [],
+      };
+    }
+    case 'DESELECT_ENTRY': {
+      // filer の「ルート」導線(scope は selection の純関数なので、root 表示 =
+      // 選択解除)。openBody は速やかに破棄
+      if (state.phase !== 'ready') return { state, events: [] };
+      if (state.selectedLid === null) return { state, events: [] };
+      return {
+        state: { ...state, selectedLid: null, openBody: null, error: null },
         events: [],
       };
     }

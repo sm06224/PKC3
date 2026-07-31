@@ -13,6 +13,7 @@ const VIEW_BUTTONS: readonly { view: string; label: string }[] = [
   { view: 'detail', label: '詳細' },
   { view: 'kanban', label: 'かんばん' },
   { view: 'calendar', label: 'カレンダー' },
+  { view: 'filer', label: 'ファイラ' },
 ] as const;
 
 /**

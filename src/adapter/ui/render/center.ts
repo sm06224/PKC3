@@ -11,12 +11,15 @@ import type { AppState, ViewMode } from '@adapter/state/app-state';
 import { DetailRenderer } from './detail';
 import { KanbanRenderer } from './kanban';
 import { CalendarRenderer } from './calendar';
+import { FilerRenderer } from './filer';
 
-type PaneView = 'detail' | 'kanban' | 'calendar';
+type PaneView = 'detail' | 'kanban' | 'calendar' | 'filer';
 
-/** filer / launcher は P3-7 ── それまで detail pane に fallback。 */
+/** launcher は P4(assets)後 ── それまで detail pane に fallback。 */
 function toPane(view: ViewMode): PaneView {
-  return view === 'kanban' || view === 'calendar' ? view : 'detail';
+  return view === 'kanban' || view === 'calendar' || view === 'filer'
+    ? view
+    : 'detail';
 }
 
 export class CenterRouter {
@@ -24,6 +27,7 @@ export class CenterRouter {
   private readonly detail: DetailRenderer;
   private readonly kanban: KanbanRenderer;
   private readonly calendar: CalendarRenderer;
+  private readonly filer: FilerRenderer;
   private lastPane: PaneView = 'detail';
 
   constructor(region: HTMLElement, now?: () => Date) {
@@ -38,10 +42,12 @@ export class CenterRouter {
       detail: pane('detail'),
       kanban: pane('kanban'),
       calendar: pane('calendar'),
+      filer: pane('filer'),
     };
     this.detail = new DetailRenderer(this.panes.detail);
     this.kanban = new KanbanRenderer(this.panes.kanban);
     this.calendar = new CalendarRenderer(this.panes.calendar, now);
+    this.filer = new FilerRenderer(this.panes.filer);
   }
 
   render(state: AppState): void {
@@ -53,6 +59,7 @@ export class CenterRouter {
     }
     if (view === 'detail') this.detail.render(state);
     else if (view === 'kanban') this.kanban.render(state);
+    else if (view === 'filer') this.filer.render(state);
     else this.calendar.render(state);
   }
 }
