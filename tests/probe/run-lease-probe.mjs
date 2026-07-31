@@ -6,9 +6,12 @@
  */
 import { chromium } from '@playwright/test';
 import { rmSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 const PORT = Number(process.env.PKC3_BENCH_PORT ?? 45731);
-const PROFILE_DIR = '/home/user/PKC3/.lease-profile';
+const PROFILE_DIR =
+  process.env.PKC3_PROFILE_DIR ?? join(tmpdir(), 'pkc3-lease-profile');
 const executablePath = process.env.PKC3_CHROMIUM ?? '/opt/pw-browsers/chromium';
 const URL_ = `http://localhost:${PORT}/tests/probe/lease-probe.html`;
 

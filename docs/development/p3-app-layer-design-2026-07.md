@@ -135,7 +135,8 @@ interface FlavorSpec {
 | P3-5 | detail view + editor(openBody 経路) | 編集セッション計器で p50 維持(±向きのみ) |
 | P3-6 | calendar / kanban(抽出列 SQL query 駆動) | 15,000 件で描画 O(表示分) |
 | P3-7 | filer / launcher / 残 UI | ── |
-| P3-8 | Viewer popup / Split View / entry-window + 視覚 smoke 導入(shinsatsu 改修版、PR gate 外) | 視覚 parity 最小 1 件 |
+| P3-8 | 視覚 smoke 導入(visual-parity 方法論の Playwright 実装。**最小 smoke = PR gate、全量 = nightly** ── CLAUDE.md プロセス指示(user 指示 2026-07-30)に整合。当初この行の「PR gate 外」は誤りで訂正。shinsatsu(CDP 可搬 + 音)は音・官能の検査対象が生まれたら導入)| 視覚 parity 最小 1 件(elementFromPoint + 実マウス + 可視高さ)|
+| P3-8 残 | Viewer popup / Split View / entry-window(PKC2 の別 surface 群)| Split View は editor 拡張として P4 以降で判断。popup / entry-window は P7 前に「必要十分」の観点で取捨(user 裁定へ)|
 
 各単位: 全 gate + 必要な実ブラウザ probe + 計器再実行。実装 PR は着地前に code review
 エージェント(storage core と同じ運用)。

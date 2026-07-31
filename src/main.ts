@@ -131,6 +131,9 @@ function bootstrap(): void {
   if (!root) return;
   void startApp(root)
     .then((app) => {
+      // boot 完了の正本契約(P3-8): smoke / probe は DOM 属性で待つ。
+      // PKC2 の教訓 ── 「#root 存在待ち」は HTML load 段階で通過して flake 化する
+      root.setAttribute('data-pkc-boot', 'ready');
       if (import.meta.env.DEV) {
         // probe / 手元検証用の導線(DEV のみ)
         (window as unknown as Record<string, unknown>).__APP__ = app;
@@ -139,6 +142,7 @@ function bootstrap(): void {
     .catch((e: unknown) => {
       // boot 失敗を白画面にしない(review A-1)。とくに「未来ビルドの DB を
       // 明示 reject」(schema-migration-policy)はユーザーに見えなければ意味がない
+      root.setAttribute('data-pkc-boot', 'error');
       const message = e instanceof Error ? e.message : String(e);
       root.textContent = `起動に失敗しました: ${message}`;
     });
