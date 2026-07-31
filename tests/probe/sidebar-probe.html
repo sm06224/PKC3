@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ja" data-pkc-app="pkc3">
+  <head>
+    <meta charset="utf-8" />
+    <title>PKC3 sidebar probe</title>
+  </head>
+  <body>
+    <div data-pkc-slot="root">booting…</div>
+    <script type="module">
+      // 1) 空なら 15,000 件 seed(bulk)→ 2) 実アプリを boot(main.ts の bootstrap)
+      const { StoreClient } = await import('/src/adapter/platform/storage/store-client.ts');
+      const N = 15000;
+      const seeder = new StoreClient();
+      await seeder.request({ op: 'init', dbName: 'pkc3' });
+      await seeder.request({ op: 'openContainer', cid: 'default', title: 'PKC3' });
+      const counts = await seeder.request({ op: 'counts', cid: 'default' });
+      if (counts.entries < N) {
+        for (let at = counts.entries; at < N; at += 500) {
+          const entries = [];
+          for (let i = at; i < Math.min(N, at + 500); i++) {
+            entries.push({
+              lid: 'e' + i,
+              title: 'entry ' + i,
+              archetype: i % 10 === 0 ? 'todo' : 'text',
+              body: `# entry ${i}\n\n本文 ${i}`,
+              entryOrder: i,
+              status: i % 10 === 0 ? 'open' : null,
+              date: null,
+              archived: false,
+            });
+          }
+          await seeder.request({ op: 'bulkUpsertEntries', cid: 'default', entries });
+        }
+      }
+      await seeder.request({ op: 'close' });
+      seeder.terminate();
+
+      window.__BOOT_T0__ = performance.now();
+      await import('/src/main.ts');
+    </script>
+  </body>
+</html>

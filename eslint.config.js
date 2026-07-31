@@ -13,6 +13,8 @@ export default tseslint.config(
         process: 'readonly',
         console: 'readonly',
         window: 'readonly',
+        document: 'readonly',
+        performance: 'readonly',
         setInterval: 'readonly',
         clearInterval: 'readonly',
         setTimeout: 'readonly',
