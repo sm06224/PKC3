@@ -78,14 +78,19 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       const order = [...action.metas]
         .sort((a, b) => a.entryOrder - b.entryOrder)
         .map((m) => m.lid);
+      // 再 boot(コンテナ切替・error 復帰)で旧選択・旧 openBody を持ち越さない
+      // (lid 偶然衝突による cross-container 上書きの防止 ── review F)
       return {
         state: {
           ...state,
           phase: 'ready',
+          error: null,
           cid: action.cid,
           entryMetas: metas,
           order,
           relations: action.relations,
+          selectedLid: null,
+          openBody: null,
         },
         events: [],
       };
@@ -93,7 +98,10 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
     case 'SELECT_ENTRY': {
       if (state.phase === 'editing') return { state, events: [] }; // 編集中は選択遷移しない
       if (!state.entryMetas.has(action.lid)) return { state, events: [] };
-      if (state.selectedLid === action.lid) return { state, events: [] };
+      // 同一 lid でも openBody が確立していなければ再要求する
+      // (読み失敗後の再クリックが自然な retry になる ── review C)
+      if (state.selectedLid === action.lid && state.openBody?.lid === action.lid)
+        return { state, events: [] };
       // 選択が変わったら旧 openBody は破棄(速やかな破棄の原則)し、新 body を要求
       return {
         state: { ...state, selectedLid: action.lid, openBody: null },
@@ -101,6 +109,9 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       };
     }
     case 'BODY_LOADED': {
+      // 編集中は受理しない ── 遅延到着の応答が入力中の body/baseline を
+      // 巻き戻す事故の防止(review B)
+      if (state.phase === 'editing') return { state, events: [] };
       // 応答が現選択と食い違う(遅延到着)なら捨てる ── stale 反映防止
       if (state.selectedLid !== action.lid) return { state, events: [] };
       return {
@@ -140,6 +151,9 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
     case 'COMMIT_EDIT': {
       if (state.phase !== 'editing' || !state.openBody) return { state, events: [] };
       const { lid, body, baseline } = state.openBody;
+      // ⚠ baseline の確定は楽観(persist 完了前)── 現状 persist 失敗は SYS_ERROR で
+      // 終端するため silent loss は無いが、P3-5 でエラー復帰 / retry を足すときは
+      // baseline 確定を BODY_PERSISTED 側へ移すこと(review E の pin)
       const next: AppState = {
         ...state,
         phase: 'ready',
