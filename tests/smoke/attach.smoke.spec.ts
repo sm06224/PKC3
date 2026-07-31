@@ -59,5 +59,17 @@ test('添付取込 → entry 出現 → image preview が可視高さを持つ',
   await clickReal(page, 'a[data-pkc-action="download-asset"]');
   expect(page.url()).not.toContain('asset:'); // asset: へ遷移していない
 
+  // ── P4b: 「添付の整理」(orphan GC)の end-to-end 配線 ──
+  // この asset は attachment frontmatter と本文 asset: の両方から参照されて
+  // いるので、実 sqlite 走査の結果は「未参照なし」が正(scan が実際に走った証拠)
+  const dialogMsg = new Promise<string>((resolve) => {
+    page.once('dialog', (d) => {
+      resolve(d.message());
+      void d.accept();
+    });
+  });
+  await clickReal(page, '[data-pkc-action="purge-orphan-assets"]');
+  expect(await dialogMsg).toContain('未参照の添付データはありません');
+
   expect(errors).toEqual([]);
 });

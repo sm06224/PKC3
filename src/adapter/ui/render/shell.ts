@@ -44,6 +44,13 @@ export function buildShell(root: HTMLElement): ShellRegions {
     btn.textContent = label;
     topbar.append(btn);
   }
+  // 🧹 未参照 asset の掃除(P4b)── **明示 purge のみ**(自動 GC はしない)。
+  // status footer は textContent 上書き運用なのでボタンを置けない → topbar 端
+  const purge = document.createElement('button');
+  purge.type = 'button';
+  purge.setAttribute('data-pkc-action', 'purge-orphan-assets');
+  purge.textContent = '添付の整理';
+  topbar.append(purge);
 
   const sidebar = document.createElement('nav');
   sidebar.setAttribute('data-pkc-region', 'sidebar');

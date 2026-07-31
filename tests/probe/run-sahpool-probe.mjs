@@ -17,7 +17,10 @@ try {
   const handle = await page.waitForFunction(() => window.__PROBE_RESULT__, null, {
     timeout: 30_000,
   });
-  console.log(JSON.stringify(await handle.jsonValue(), null, 2));
+  const result = await handle.jsonValue();
+  console.log(JSON.stringify(result, null, 2));
+  // ok:false を exit 0 で握りつぶさない ── CI step は exit code しか見ない
+  if (!result || result.ok !== true) process.exitCode = 1;
 } finally {
   await browser.close();
 }

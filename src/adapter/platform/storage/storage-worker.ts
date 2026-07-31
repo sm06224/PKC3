@@ -89,6 +89,20 @@ function need(): Database {
 }
 
 /**
+ * scanAssetRefs 用の限定 unescape(markdown-it の unescapeAll 相当のうち、
+ * asset key の字母に効く 2 形だけ): backslash escape(ASCII 記号)と数値実体。
+ * 範囲外 code point は空に落とす(照合を広げないだけで安全)。
+ */
+function unescapeForScan(s: string): string {
+  const fromCode = (n: number): string =>
+    Number.isFinite(n) && n >= 0 && n <= 0x10ffff ? String.fromCodePoint(n) : '';
+  return s
+    .replace(/\\([!-/:-@[-`{-~])/g, '$1')
+    .replace(/&#(\d{1,7});/g, (_m, d: string) => fromCode(Number(d)))
+    .replace(/&#[xX]([0-9a-fA-F]{1,6});/g, (_m, h: string) => fromCode(parseInt(h, 16)));
+}
+
+/**
  * op → handler の typed dispatch(review #6): 返り値型を ResultMap に pin する。
  * ⚠ 現状 init 以外は同期実装で、message 間の interleave は起きない。handler を
  * async 化するときは client 側の直列化とセットで行うこと(review #5、p2 log に pin)。
@@ -300,6 +314,51 @@ const handlers: Handlers = {
       bind: [req.cid, req.key],
     });
     return null;
+  },
+  scanAssetRefs: (req) => {
+    // asset GC(P4b)の keep-set: 候補 key が**どこかの body に substring として
+    // 現れるか**で判定する。frontmatter(attachment.asset_key / app_icon_asset_key /
+    // extra 内 JSON)も本文の asset: 参照も、参照は必ず key 文字列そのものを含むので
+    // この 1 規則が全参照源を包摂する。誤差は false-keep 側にしか出ない
+    // (本文の無関係な散文が key 文字列を偶然含む)── GC で許されるのはその向きだけ。
+    // body は行ごとに callback で見て保持しない(全 body の同時 materialize は
+    // 500MB 級で OOM ── PKC2 の reconcile 走査の教訓)。
+    // ⚠ P5(revisions)着地時: 履歴 snapshot が参照する asset を消さないよう、
+    // revisions 表も同じ規則で走査に加えること
+    const remaining = new Set(req.candidates);
+    const referenced: string[] = [];
+    if (remaining.size > 0) {
+      need().exec({
+        sql: 'SELECT body FROM entries WHERE cid = ?',
+        bind: [req.cid],
+        rowMode: '$body', // 列値を直接受ける(行 object を作らない)
+        callback: (row) => {
+          if (remaining.size === 0) return false; // 全候補確定 ── 以降の行読みごと停止
+          const body = typeof row === 'string' ? row : '';
+          // ⚠ raw だけでは足りない(review F2 ── false-delete の反例):
+          // markdown-it は link destination を unescape してから key を取り出すので、
+          // `asset:ast\-key` / `asset:ast&#45;key` は**生きた参照なのに raw に key が
+          // 現れない**。backslash escape と数値実体だけ畳んだ第 2 形でも照合する
+          // (keep 側に広がるだけで安全)。正規 key の字母 [a-z0-9-] は名前付き
+          // 実体では書けない(英数字と '-' の名前付き実体が存在しない)ため 2 形で閉じる
+          const norm =
+            body.includes('\\') || body.includes('&#')
+              ? unescapeForScan(body)
+              : null;
+          for (const key of remaining) {
+            if (
+              key !== '' &&
+              (body.includes(key) || (norm !== null && norm.includes(key)))
+            ) {
+              referenced.push(key);
+              remaining.delete(key); // 反復中の自要素削除は Set 仕様で安全
+            }
+          }
+          if (remaining.size === 0) return false;
+        },
+      });
+    }
+    return { referenced };
   },
   counts: (req) => {
     const one = (sql: string): number =>
