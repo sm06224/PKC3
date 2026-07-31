@@ -115,10 +115,10 @@ export class KanbanRenderer {
     const card = document.createElement('article');
     card.setAttribute('data-pkc-entry', meta.lid);
     card.setAttribute('data-pkc-action', 'select-entry');
+    // data-pkc-entry はカード(entry を表す要素)にのみ ── binder は closest で引く
     const toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.setAttribute('data-pkc-action', 'toggle-todo');
-    toggle.setAttribute('data-pkc-entry', meta.lid);
     toggle.setAttribute('aria-label', '状態を切り替え');
     const title = document.createElement('span');
     title.setAttribute('data-pkc-field', 'title');

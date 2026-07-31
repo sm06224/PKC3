@@ -53,6 +53,29 @@ function defaultTitle(dispatcher: Dispatcher, archetype: string): string {
   return `${date} ${label} ${n + 1}`;
 }
 
+/**
+ * cancel 経路: fresh entry(作成直後)で title だけ入力されていた場合は、
+ * title を RENAME で保存してから cancel する ── 「title を打って Esc」で
+ * entry ごと消えて入力が失われる非対称の解消(P3-7a review 中)。
+ * 非 fresh の cancel は破棄の意味論どおり title input も捨てる。
+ */
+function cancelFromEditor(dispatcher: Dispatcher, from: HTMLElement): void {
+  const s = dispatcher.getState();
+  const lid = s.openBody?.lid;
+  if (lid && s.freshLid === lid) {
+    const scope = from.closest<HTMLElement>('[data-pkc-region="detail"]');
+    const input = scope?.querySelector<HTMLInputElement>(
+      '[data-pkc-field="editor-title"]',
+    );
+    const current = s.entryMetas.get(lid)?.title ?? '';
+    if (input && input.value.trim() !== '' && input.value.trim() !== current) {
+      // RENAME が fresh を解除する ── 直後の CANCEL は entry を残す
+      dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title: input.value });
+    }
+  }
+  dispatcher.dispatch({ type: 'CANCEL_EDIT' });
+}
+
 /** editor 表示中なら title input の現在値で RENAME を先行 dispatch する
  *  (楽観 meta 更新 → 直後の COMMIT_EDIT が新 title で行を組む。
  *  input が見つからなければ何もしない = 既存 title 維持 ── PKC2 の
@@ -78,7 +101,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     renameFromEditorInput(dispatcher, target);
     dispatcher.dispatch({ type: 'COMMIT_EDIT' });
   },
-  'cancel-edit': (dispatcher) => dispatcher.dispatch({ type: 'CANCEL_EDIT' }),
+  'cancel-edit': (dispatcher, target) => cancelFromEditor(dispatcher, target),
   'create-entry': (dispatcher, target) => {
     const archetype = target.getAttribute('data-pkc-archetype');
     if (!archetype) return;
@@ -93,13 +116,18 @@ const ACTIONS: Record<string, ActionHandler> = {
     });
   },
   'delete-entry': (dispatcher, target) => {
+    // 属性はボタン自身ではなく「entry を表す要素」(行 / カード)から closest で
+    // 引く ── ボタン直付けだと selectedLid fallback が別 entry を消す罠になる
     const lid =
-      target.getAttribute('data-pkc-entry') ?? dispatcher.getState().selectedLid;
+      target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ??
+      dispatcher.getState().selectedLid;
     if (!lid) return;
     const title = dispatcher.getState().entryMetas.get(lid)?.title ?? lid;
     // P3-7a は native confirm(inline dialog は UI 磨きの回で)。hard delete
-    // であることを文言で明示(trash / 復元は P5 revisions と合流予定)
-    if (!window.confirm(`「${title}」を削除しますか?(元に戻せません)`)) return;
+    // であることを文言で明示(trash / 復元は P5 revisions と合流予定)。
+    // confirm の無い環境(headless test)は自動化として通す
+    if (!(window.confirm?.(`「${title}」を削除しますか?(元に戻せません)`) ?? true))
+      return;
     dispatcher.dispatch({ type: 'DELETE_ENTRY', lid });
   },
   'copy-md-block': (_dispatcher, target) => handleCopyMdBlock(target),
@@ -109,7 +137,10 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: view as ViewMode });
   },
   'toggle-todo': (dispatcher, target) => {
-    const lid = target.getAttribute('data-pkc-entry');
+    // data-pkc-entry は「entry を表す要素」専用 ── ボタンからは closest で引く
+    const lid = target
+      .closest('[data-pkc-entry]')
+      ?.getAttribute('data-pkc-entry');
     if (lid) dispatcher.dispatch({ type: 'TOGGLE_TODO_STATUS', lid });
   },
   'calendar-nav': (dispatcher, target) => {
@@ -178,7 +209,7 @@ export function bindActions(root: HTMLElement, dispatcher: Dispatcher): () => vo
       dispatcher.dispatch({ type: 'COMMIT_EDIT' });
     } else if (ke.key === 'Escape') {
       ke.preventDefault();
-      dispatcher.dispatch({ type: 'CANCEL_EDIT' });
+      cancelFromEditor(dispatcher, ke.target as HTMLElement);
     }
   };
   root.addEventListener('click', onClick);

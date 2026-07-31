@@ -326,12 +326,16 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
         return removeEntryFromState(state, lid, [{ type: 'REQUEST_DELETE', lid }]);
       }
       // draft 破棄。disk 先行(diskAhead)なら disk を採用(review #4)。
-      // 自 commit の ack 待ちで persisted が遅れているだけなら baseline が正
+      // 自 commit の ack 待ちで persisted が遅れているだけなら baseline が正。
+      // fresh は非掃除分岐でも解除する ── draft を打った cancel は「残す意思」で
+      // あり、後日の無変更 Esc が作業済み entry を消してはならない
+      // (P3-7a review 中: toggle を跨いで freshLid が生き残る反例)
       const restored = diskAhead ? persisted : baseline;
       return {
         state: {
           ...state,
           phase: 'ready',
+          freshLid: state.freshLid === lid ? null : state.freshLid,
           openBody: {
             lid,
             body: restored,
@@ -545,19 +549,21 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
     case 'OP_FAILED':
       // 非致命: 通知のみ。phase は動かさない(kanban 等の操作性を殺さない)
       return { state: { ...state, error: action.error }, events: [] };
-    case 'SYS_ERROR':
+    case 'SYS_ERROR': {
       // エラーは state 駆動(表示は state.error を読む)── event 通知は廃止。
-      // editing 中の着弾(先行 commit の persist 失敗)では editing を維持する
-      // ── phase を落とすと renderer が editor を破棄し、RETRY が可視 draft を
-      // 巻き戻す(P3-6b review #3)。未達の証拠(baseline≠persisted)は残る
-      return {
-        state: {
-          ...state,
-          phase: state.phase === 'editing' ? 'editing' : 'error',
-          error: action.error,
-        },
-        events: [],
-      };
+      // - editing 中の着弾は editing 維持(draft 破壊防止 ── P3-6b review #3)
+      // - error phase に落とすのは「守るべき未達 commit(baseline ≠ persisted)が
+      //   ある」ときだけ ── error phase の意味は唯一の写しの保護であり、守る
+      //   ものが無いのに落とすと無言ロックになる(P3-7a review 重大: 作成 →
+      //   即 cancel × 初回 persist 失敗の合成で実証)。それ以外は通知のみ
+      const protecting =
+        state.openBody !== null &&
+        state.openBody.baseline !== state.openBody.persisted &&
+        !state.openBody.diskAhead;
+      const phase =
+        state.phase === 'editing' ? 'editing' : protecting ? 'error' : state.phase;
+      return { state: { ...state, phase, error: action.error }, events: [] };
+    }
   }
 }
 
@@ -575,6 +581,12 @@ function removeEntryFromState(
   entryMetas.delete(lid);
   const idx = state.order.indexOf(lid);
   const order = state.order.filter((l) => l !== lid);
+  // 常駐 relations も追従(worker は同 tx で掃除済み ── メモリだけ残すと
+  // relations を描く view が「削除したのにリンクが残る」になる)
+  const touches = state.relations.some((r) => r.fromLid === lid || r.toLid === lid);
+  const relations = touches
+    ? state.relations.filter((r) => r.fromLid !== lid && r.toLid !== lid)
+    : state.relations;
   let selectedLid = state.selectedLid;
   const events = [...extraEvents];
   if (state.selectedLid === lid) {
@@ -587,6 +599,7 @@ function removeEntryFromState(
       phase: 'ready',
       entryMetas,
       order,
+      relations,
       selectedLid,
       openBody: state.openBody?.lid === lid ? null : state.openBody,
       freshLid: state.freshLid === lid ? null : state.freshLid,
