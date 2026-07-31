@@ -37,5 +37,27 @@ test('添付取込 → entry 出現 → image preview が可視高さを持つ',
   // ダウンロード導線の可視 + クリック可能(占有チェック込み)
   await clickReal(page, '[data-pkc-action="download-asset"]');
 
+  // ── P4b: 本文 markdown の asset: 参照が実描画される(placeholder → hydrate)──
+  // 添付に割り当てられた key を DL ボタンから読み、text note の本文で参照する
+  const assetKey = await page
+    .locator('[data-pkc-action="download-asset"]')
+    .first()
+    .getAttribute('data-pkc-asset-key');
+  await clickReal(page, '[data-pkc-action="create-entry"][data-pkc-archetype="text"]');
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await expect(ta).toBeVisible();
+  await ta.click();
+  await page.keyboard.type(`![点](asset:${assetKey})\n\n[点をDL](asset:${assetKey})`);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  const refImg = page.locator('img[data-pkc-asset-key]');
+  await expect(refImg).toBeVisible();
+  await expect(refImg).toHaveAttribute('src', /^blob:/); // hydrator が実際に差した
+  const refBox = await refImg.boundingBox();
+  expect(refBox!.height).toBeGreaterThan(0);
+  // DL link も実クリック可能(href 無し ── ナビゲーションを起こさない)
+  await clickReal(page, 'a[data-pkc-action="download-asset"]');
+  expect(page.url()).not.toContain('asset:'); // asset: へ遷移していない
+
   expect(errors).toEqual([]);
 });

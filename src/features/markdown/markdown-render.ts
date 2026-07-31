@@ -99,21 +99,20 @@ md.use(footnotePlugin);
 // rule below then tags them for the right in-app behaviour (internal
 // navigation for `entry:`, cross-container placeholder for `pkc:`).
 //
-// `asset:` is intentionally NOT on this allowlist. Asset references
-// are preprocessed away by `asset-resolver.ts` BEFORE the text reaches
-// markdown-it (`![alt](asset:key)` → inline `<img src="data:…">`,
-// `[label](asset:key)` → inline chip link to `#asset-<key>`). If an
-// `asset:` URL somehow leaked past that preprocessor — or if a caller
-// invokes `renderMarkdown()` directly without running the resolver —
-// the safe default is for markdown-it's `validateLink` to reject it
-// so the raw text survives as plain characters instead of being
-// turned into a live `<a href="asset:…">` that points nowhere. The
-// card-presentation hook (§5, `pkc-card` core rule below) therefore
-// only sees `@[card](asset:…)` when the caller has arranged for the
-// tokens to be produced some other way; asset-target cards in the
-// normal pipeline are handled at the asset-resolver coordination
-// layer in a future slice, not here.
-const SAFE_URL_RE = /^(https?:|mailto:|tel:|ftp:|entry:|pkc:|#|\/|\.\/|\.\.\/|[^:]*$)/i;
+// `asset:` は PKC3 では allowlist に**載せる**(P4b。PKC2 からの総合的見直し)。
+// PKC2 は asset-resolver preprocessor が markdown-it の前に
+// `![alt](asset:key)` → `<img src="data:…">` に展開していた ── base64 を
+// render 結果に常駐させる、まさに廃止対象の経路。PKC3 に preprocessor は
+// 存在せず、代わりに:
+//   - image rule が `<img data-pkc-asset-key=…>`(src 無し)placeholder を出す
+//   - link_open rule が href を剥がして download-asset action の `<a>` にする
+// bytes は adapter 層の hydrator(DetailRenderer.hydrateAssetRefs)が表示の
+// 寿命に合わせて lend/dispose する(ObjectURL は次 render で必ず破棄 ──
+// user 指示 2026-07-27 不可侵)。features 層はここで key を運ぶだけで、
+// blob / URL には一切触れない(core ← features ← adapter の import 規律)。
+// どちらの rule も href/src から `asset:` を消すので、生きた
+// `<a href="asset:…">` / `<img src="asset:…">` が DOM に出ることはない。
+const SAFE_URL_RE = /^(https?:|mailto:|tel:|ftp:|entry:|pkc:|asset:|#|\/|\.\/|\.\.\/|[^:]*$)/i;
 const SAFE_DATA_IMG_RE = /^data:image\/(gif|png|jpeg|webp|svg\+xml);/i;
 const SAFE_OFFICE_URI_RE =
   /^(?:ms-(?:word|excel|powerpoint|visio|access|project|publisher|officeapp|spd|infopath)|onenote):/i;
@@ -420,7 +419,27 @@ md.renderer.rules.link_open = function (tokens, idx, options, env, self) {
   // `data-pkc-entry-ref` attribute carries the raw href so the
   // handler can read the unescaped original (the parser accepts
   // the same grammar formatted by `formatEntryRef`).
-  if (href.startsWith('entry:')) {
+  if (href.startsWith('asset:')) {
+    // P4b: `[label](asset:key)` はダウンロード導線。href は**剥がす**──
+    // binder の click delegation は preventDefault しないので、href を残すと
+    // ブラウザが `asset:` へのナビゲーションを試みる。href 無し `<a>` は
+    // ナビゲートしない(P4a の attachment DL ボタンと同じ action に載せる)
+    const key = href.slice('asset:'.length);
+    const hIdx = token.attrIndex('href');
+    if (hIdx >= 0) token.attrs!.splice(hIdx, 1);
+    // DL ファイル名はラベル文字列(挿入時の既定はファイル名)。空なら key
+    let label = '';
+    for (let j = idx + 1; j < tokens.length; j++) {
+      const t = tokens[j]!;
+      if (t.type === 'link_close') break;
+      if (t.type === 'text' || t.type === 'code_inline') label += t.content;
+    }
+    const cls = token.attrGet('class');
+    token.attrSet('class', cls ? `${cls} pkc-asset-link` : 'pkc-asset-link');
+    token.attrSet('data-pkc-action', 'download-asset');
+    token.attrSet('data-pkc-asset-key', key);
+    token.attrSet('data-pkc-asset-name', label || key);
+  } else if (href.startsWith('entry:')) {
     token.attrSet('data-pkc-action', 'navigate-entry-ref');
     token.attrSet('data-pkc-entry-ref', href);
   } else if (href.startsWith('pkc:')) {
@@ -543,6 +562,23 @@ md.renderer.rules.image = function (tokens, idx, options, env, self) {
   const token = tokens[idx]!;
   const srcIdx = token.attrIndex('src');
   const src = srcIdx >= 0 ? (token.attrs?.[srcIdx]?.[1] ?? '') : '';
+  if (src.startsWith('asset:')) {
+    // P4b: `![alt](asset:key)` は **src 無し** placeholder(hydrator が
+    // lend した blob: URL を後から差す)。`src="asset:…"` を出すと
+    // ブラウザが即 fetch を試みて console を汚す(entry: transclusion と
+    // 同じ理由)。alt はそのまま保持 ── missing 時の可視 fallback を兼ねる
+    const key = src.slice('asset:'.length);
+    const alt = token.content ?? '';
+    const title = token.attrGet('title');
+    return (
+      `<img class="pkc-asset-ref"` +
+      ` data-pkc-asset-key="${escapeHtmlAttr(key)}"` +
+      ` alt="${escapeHtmlAttr(alt)}"` +
+      (title !== null ? ` title="${escapeHtmlAttr(title)}"` : '') +
+      ` loading="lazy" decoding="async"` +
+      `${collectSourceLineAttrs(token)}>`
+    );
+  }
   if (src.startsWith('entry:')) {
     // markdown-it stashes the alt text on token.content by the time
     // the renderer runs (inline children were already linearized).

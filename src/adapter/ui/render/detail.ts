@@ -166,6 +166,7 @@ export class DetailRenderer {
       // writing / direction / align / layout の属性契約(dir 込みで 1 箇所)
       applyDocumentGlobals(rendered, extractDocumentGlobals(body));
       this.region.append(rendered);
+      void this.hydrateAssetRefs(rendered, this.hydrateToken);
     } else {
       // 方言判定 false は plain text 扱い(PKC2 と同じゲート)
       const pre = document.createElement('pre');
@@ -244,7 +245,51 @@ export class DetailRenderer {
       desc.setAttribute('data-pkc-field', 'detail-body');
       desc.innerHTML = renderMarkdown(description, { sourceLineAnchors: true });
       this.region.append(desc);
+      void this.hydrateAssetRefs(desc, this.hydrateToken);
     }
+  }
+
+  /**
+   * 本文 markdown 内の `asset:` 参照(P4b): markdown-render が出した
+   * `img[data-pkc-asset-key]`(src 無し placeholder)に blob: URL を差す。
+   * - **同一 key は 1 回だけ lend**(同じ asset を N 回参照しても URL は 1 本)
+   * - URL は lends に登録し、次 render / 選択遷移で必ず dispose(即破棄規律)
+   * - 選択が移っていたら(token 不一致)結果を捨てて即 dispose
+   * - 見つからない key は `data-pkc-asset-missing` を立てる(alt が可視 fallback)
+   */
+  private async hydrateAssetRefs(rootEl: HTMLElement, token: number): Promise<void> {
+    if (!this.assets) return;
+    const assets = this.assets;
+    const byKey = new Map<string, HTMLImageElement[]>();
+    for (const img of rootEl.querySelectorAll<HTMLImageElement>(
+      'img[data-pkc-asset-key]',
+    )) {
+      const key = img.getAttribute('data-pkc-asset-key') ?? '';
+      const group = byKey.get(key);
+      if (group) group.push(img);
+      else byKey.set(key, [img]);
+    }
+    if (byKey.size === 0) return;
+    await Promise.all(
+      [...byKey].map(async ([key, imgs]) => {
+        try {
+          const lent = await assets.lend(key);
+          if (token !== this.hydrateToken) {
+            lent?.dispose(); // stale ── 借りた瞬間に返す(DOM は破棄済み)
+            return;
+          }
+          if (!lent) {
+            for (const img of imgs) img.setAttribute('data-pkc-asset-missing', '');
+            return;
+          }
+          this.lends.push(lent.dispose);
+          for (const img of imgs) img.src = lent.url;
+        } catch {
+          if (token === this.hydrateToken)
+            for (const img of imgs) img.setAttribute('data-pkc-asset-missing', '');
+        }
+      }),
+    );
   }
 
   /**
