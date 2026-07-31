@@ -17,5 +17,7 @@
       "@runtime/*": ["./src/runtime/*"]
     }
   },
-  "include": ["src", "tests", "vite.config.ts"]
+  "include": ["src", "tests", "vite.config.ts"],
+  // harvest-from-pkc2.ts は PKC2 リポジトリ(CI に無い)から import する採取スクリプト
+  "exclude": ["tests/fixtures/markdown-goldens/harvest-from-pkc2.ts"]
 }

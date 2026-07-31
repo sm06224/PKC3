@@ -134,13 +134,73 @@ export function parseFrontmatter(body: string): FrontmatterResult {
   };
 }
 
+/**
+ * 行末 `# comment` を除去する(YAML 慣例: `#` の直前に空白があるときのみ)。
+ * ⚠ PKC2 版は `/\s+#.*$/` の一括 replace で **quote 内の `#` まで切り落として
+ * いた**(serializeFrontmatter が quote した値が parse で壊れる round-trip バグ)。
+ *
+ * PKC3 の意味論(parseVarValue / 実 YAML と同じ):**値の先頭が quote 文字の
+ * ときだけ** quote を追跡する。plain scalar 中の `'`(例: `title: it's a pen`)
+ * は quote 開始ではないので、素朴な行末コメント除去に落ちる(P3-4 review #4)。
+ */
+function stripTrailingComment(line: string): string {
+  const colon = findKeyColon(line);
+  let i = colon >= 0 ? colon + 1 : 0;
+  while (i < line.length && (line[i] === ' ' || line[i] === '\t')) i++;
+  const q = line[i];
+  if (q === '"' || q === "'") {
+    // 閉じ quote を探す(double は `\` escape、single は `''` escape)
+    let j = i + 1;
+    while (j < line.length) {
+      const ch = line[j];
+      if (q === '"' && ch === '\\') {
+        j += 2;
+        continue;
+      }
+      if (ch === q) {
+        if (q === "'" && line[j + 1] === "'") {
+          j += 2;
+          continue;
+        }
+        break;
+      }
+      j += 1;
+    }
+    if (j >= line.length) return line.trimEnd(); // 非終端 quote は触らない
+    const rest = line.slice(j + 1);
+    const m = /\s#/u.exec(rest);
+    if (m) return line.slice(0, j + 1 + m.index).trimEnd();
+    return line.trimEnd();
+  }
+  if (q === '[') {
+    // inline 配列: 要素が quote されうる(serializeScalar)ので quote 外の
+    // 空白+`#` だけをコメントと見なす
+    let inSingle = false;
+    let inDouble = false;
+    for (let j = i; j < line.length; j++) {
+      const ch = line[j];
+      if (ch === '\\' && inDouble) {
+        j += 1;
+        continue;
+      }
+      if (!inDouble && ch === "'") inSingle = !inSingle;
+      else if (!inSingle && ch === '"') inDouble = !inDouble;
+      else if (!inSingle && !inDouble && ch === '#' && /\s/u.test(line[j - 1]!)) {
+        return line.slice(0, j).trimEnd();
+      }
+    }
+    return line.trimEnd();
+  }
+  return line.replace(/\s+#.*$/u, '').trimEnd();
+}
+
 function parseFlatYaml(lines: readonly string[]): Record<string, FrontmatterValue> {
   const out: Record<string, FrontmatterValue> = {};
   let i = 0;
   while (i < lines.length) {
     const raw = lines[i] ?? '';
     i += 1;
-    const line = raw.replace(/\s+#.*$/u, '').trimEnd(); // strip trailing # comment
+    const line = stripTrailingComment(raw);
     if (line.trim() === '') continue;
     if (line.startsWith('#')) continue;
 
@@ -371,7 +431,10 @@ function scalarNeedsQuote(s: string): boolean {
   if (s !== s.trim()) return true;
   if (/^(~|null|Null|NULL|true|True|TRUE|false|False|FALSE)$/u.test(s)) return true;
   if (/^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/u.test(s)) return true;
-  if (/[:#"'[\]]/u.test(s)) return true;
+  // `,` を含む値は quote 必須 ── inline 配列要素が parseInlineArray の
+  // comma split で分裂する(P3-4 review #1: 無言のデータ破損)。scalar 値でも
+  // quote は無害なので一律に含める
+  if (/[:#"',[\]]/u.test(s)) return true;
   if (s.startsWith('-')) return true;
   if (/[\n\r]/u.test(s)) return true;
   return false;

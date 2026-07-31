@@ -83,11 +83,21 @@ interface FlavorSpec {
 | flavor | PKC-Markdown 表現 | 編集 UI |
 |---|---|---|
 | todo | frontmatter(status / date / archived)+ 本文 | kanban トグル = frontmatter 書換の構造化操作 |
-| textlog | 日時見出し節(`## YYYY-MM-DD HH:mm` 規約) | 追記 = 末尾節 append |
+| textlog | 日時見出し節(`## YYYY-MM-DD HH:mm:ss` 規約 ── 秒まで。高頻度ログの弁別、PKC2 textlog-readability-hardening の教訓。P3-4 で確定) | 追記 = 末尾節 append |
 | spreadsheet | csv fence(render 指定)+ frontmatter(数式・グラフ定義) | grid editor が fence 内容を編集 |
 | form | frontmatter フィールド群 + 本文(機械可読 ── 将来のダッシュボード / 帳票の読み口) | フィールド UI |
 | attachment | frontmatter(asset_key / mime)+ 説明 markdown | 表示は `lendObjectUrl`(dispose 規律) |
 | text / folder / generic / opaque | ほぼそのまま | text fallback |
+
+- P3-4 review で確定した残課題(P3-5 / P6 で拾う):
+  - **P3-5**: `parseFrontmatter` は fence 直後の空行 1 個を swallow する ── 本文先頭が
+    空行の body を `setFrontmatter` 系で書き換えると先頭空行が確定的に落ちる。
+    frontmatter 書換 UI(editor / kanban トグル)を実装するときに parse view ではなく
+    原文 splice で書くこと
+  - **P6**: textlog の PKC2 ログ id は fromPkc2 で復元不能になる ── ログ単位 permalink の
+    リンク書換は import パイプライン内で **fromPkc2 より前段**に置く(ordering 制約)
+  - **P6**: attachment の未知 field は `attachment.extra`(JSON scalar)に保全される ──
+    importer はこれを落とさず新スキーマへ運ぶ
 
 ## 4. PKC-Markdown パイプラインの移植単位
 

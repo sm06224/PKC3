@@ -8,6 +8,8 @@
  *   selectedLid が選択の単一情報源
  */
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
+import { extractMeta } from '@features/flavor';
+import type { EntryUpsert } from '@adapter/platform/storage/schema';
 
 export type AppPhase = 'initializing' | 'ready' | 'editing' | 'error';
 export type ViewMode = 'detail' | 'calendar' | 'kanban' | 'filer' | 'launcher';
@@ -60,10 +62,15 @@ export type SystemCommand =
 
 export type Dispatchable = UserAction | SystemCommand;
 
-/** effect 層が購読する副作用要求。body の書込は PERSIST_BODY(= openBody 由来)だけ。 */
+/**
+ * effect 層が購読する副作用要求。entry の書込は PERSIST_ENTRY(= openBody 由来)だけ。
+ * PERSIST_ENTRY は**行全体(抽出列込み)を reduce 時点で確定**して運ぶ ──
+ * effect 層が実行時に getState() で meta を解決する時間差窓(review C-1)を
+ * 構造的に無くし、抽出(FlavorSpec.extract)を唯一の経路にする(review K)。
+ */
 export type DomainEvent =
   | { type: 'REQUEST_BODY'; lid: string }
-  | { type: 'PERSIST_BODY'; lid: string; body: string }
+  | { type: 'PERSIST_ENTRY'; entry: EntryUpsert }
   | { type: 'APP_ERROR'; error: string };
 
 export interface ReduceResult {
@@ -161,7 +168,40 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       };
       // 変わっていないなら書かない(PKC2 #1024 の教訓を最初から)
       if (body === baseline) return { state: next, events: [] };
-      return { state: next, events: [{ type: 'PERSIST_BODY', lid, body }] };
+      const meta = state.entryMetas.get(lid);
+      if (!meta) {
+        // openBody は SELECT_ENTRY(存在検査済)経由でしか確立しない ── ここに
+        // 来たら不変量違反。書かずに可視エラーで終える(黙って捨てない)
+        return {
+          state: { ...state, phase: 'ready' },
+          events: [{ type: 'APP_ERROR', error: `commit: unknown entry ${lid}` }],
+        };
+      }
+      // 抽出はイベント発火時(= この reduce)に同期で行い、行全体を確定して運ぶ
+      const ext = extractMeta(meta.archetype, body);
+      const changed =
+        meta.status !== ext.status ||
+        meta.date !== ext.date ||
+        meta.archived !== ext.archived;
+      // 抽出値が変わったときだけ Map を作り直す ── sidebar は参照 fingerprint で
+      // 差分検出するため、無変化 commit で参照を壊さない
+      const entryMetas = changed
+        ? new Map(state.entryMetas).set(lid, { ...meta, ...ext })
+        : state.entryMetas;
+      const entry: EntryUpsert = {
+        lid,
+        title: meta.title,
+        archetype: meta.archetype,
+        body,
+        entryOrder: meta.entryOrder,
+        status: ext.status,
+        date: ext.date,
+        archived: ext.archived,
+      };
+      return {
+        state: { ...next, entryMetas },
+        events: [{ type: 'PERSIST_ENTRY', entry }],
+      };
     }
     case 'CANCEL_EDIT': {
       if (state.phase !== 'editing' || !state.openBody) return { state, events: [] };
