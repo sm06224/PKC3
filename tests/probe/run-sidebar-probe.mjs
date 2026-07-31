@@ -45,6 +45,13 @@ try {
 
   const result = await page.evaluate(async () => {
     const d = window.__APP__.dispatcher;
+    const until = async (pred) => {
+      for (let i = 0; i < 100; i++) {
+        if (pred(d.getState())) return true;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      return false;
+    };
     d.dispatch({ type: 'START_EDIT' });
     d.dispatch({ type: 'UPDATE_OPEN_BODY', body: '# entry 42\n\n編集後の本文' });
     d.dispatch({ type: 'COMMIT_EDIT' });
@@ -60,12 +67,19 @@ try {
         }
       }
     }
+    // DB 到達の実証(review D-3): 別 entry を経由して再読込し、DB から
+    // 編集後の本文が返ることを確認(楽観 baseline でなく実 roundtrip)
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'e43' });
+    await until((s) => s.openBody?.lid === 'e43');
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'e42' });
+    await until((s) => s.openBody?.lid === 'e42');
     const state = d.getState();
     return {
       rowsIdenticalThroughEditCycle: identical,
       selectedMarked:
         document.querySelector('[data-pkc-entry="e42"]')?.hasAttribute('data-pkc-selected') ?? false,
-      committedBaseline: state.openBody?.baseline?.includes('編集後') ?? false,
+      persistedRoundtrip: state.openBody?.body?.includes('編集後') ?? false,
+      storageVfs: window.__APP__.storageVfs,
       phase: state.phase,
     };
   });
@@ -74,7 +88,8 @@ try {
     steps.rowCount === 15000 &&
     result.rowsIdenticalThroughEditCycle &&
     result.selectedMarked &&
-    result.committedBaseline &&
+    result.persistedRoundtrip &&
+    result.storageVfs === 'opfs-sahpool' &&
     result.phase === 'ready';
   console.log(JSON.stringify({ ok, steps, result }, null, 2));
   process.exitCode = ok ? 0 : 1;

@@ -41,12 +41,21 @@ export class SidebarRenderer {
   }
 
   private reconcileRows(state: AppState): void {
-    const seen = new Set<string>();
+    // 削除を**先に**行う ── stale ノードが cursor に残ると、それ以降の全行が
+    // insertBefore(move)になる(review A-2: 先頭 1 行削除で 14,999 move の実測)
+    const wanted = new Set<string>();
+    for (const lid of state.order) if (state.entryMetas.has(lid)) wanted.add(lid);
+    for (const [lid, row] of this.rows) {
+      if (!wanted.has(lid)) {
+        row.remove();
+        this.rows.delete(lid);
+      }
+    }
+
     let cursor: ChildNode | null = this.list.firstChild;
     for (const lid of state.order) {
       const meta = state.entryMetas.get(lid);
       if (!meta) continue;
-      seen.add(lid);
       let row = this.rows.get(lid);
       if (!row) {
         row = this.createRow(meta);
@@ -54,17 +63,13 @@ export class SidebarRenderer {
       } else {
         this.patchRow(row, meta);
       }
-      // 既に正位置ならノードを動かさない(move も DOM 操作なので避ける)
+      // 既に正位置ならノードを動かさない(move も DOM 操作なので避ける)。
+      // ⚠ 既知の限界: 「先頭行を末尾へ move」型の並べ替えは O(n) move になる
+      // (LIS なし cursor 方式の本質)。reorder UI が入る P3-6/7 で計測して判断
       if (cursor === row) {
         cursor = row.nextSibling;
       } else {
         this.list.insertBefore(row, cursor);
-      }
-    }
-    for (const [lid, row] of this.rows) {
-      if (!seen.has(lid)) {
-        row.remove();
-        this.rows.delete(lid);
       }
     }
   }
