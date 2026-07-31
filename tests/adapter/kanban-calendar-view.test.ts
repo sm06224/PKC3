@@ -167,6 +167,40 @@ describe('kanban view (P3-6)', () => {
     await tick();
     expect(persisted).toHaveLength(0);
   });
+
+  it('トグル失敗は非致命 ── phase は ready のまま、通知が出て再クリックで復帰(review #1)', async () => {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const d = new Dispatcher();
+    const regions = buildShell(root);
+    const center = new CenterRouter(regions.detail, () => new Date(2026, 7, 15));
+    d.onState((s) => center.render(s));
+    bindActions(root, d);
+    let failNext = true;
+    const persisted: EntryUpsert[] = [];
+    connectStoreEffects(d, {
+      getBody: async () => '---\nstatus: open\n---\nx',
+      persistEntry: async (e) => {
+        if (failNext) throw new Error('flaky');
+        persisted.push(e);
+      },
+    });
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('e1')], relations: [] });
+    root.querySelector<HTMLElement>('[data-pkc-view="kanban"]')!.click();
+    root
+      .querySelector<HTMLElement>('[data-pkc-entry="e1"] [data-pkc-action="toggle-todo"]')!
+      .click();
+    await tick(20);
+    expect(d.getState().phase).toBe('ready'); // app は死なない
+    expect(d.getState().error).toMatch(/flaky/); // ただし黙らない
+    failNext = false;
+    root
+      .querySelector<HTMLElement>('[data-pkc-entry="e1"] [data-pkc-action="toggle-todo"]')!
+      .click();
+    await tick(20);
+    expect(persisted).toHaveLength(1); // 再クリック = retry
+    expect(d.getState().entryMetas.get('e1')?.status).toBe('done');
+  });
 });
 
 describe('calendar view (P3-6)', () => {

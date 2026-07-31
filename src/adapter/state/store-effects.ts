@@ -89,9 +89,9 @@ export function connectStoreEffects(
             const body = await store.getBody(ev.lid);
             if (disposed) return;
             if (body === null) {
-              // 行不在の toggle は不変量違反 ── 黙って何もしないより可視で止める
+              // 行不在の toggle: 可視通知(非致命 ── アプリごと止めない)
               dispatcher.dispatch({
-                type: 'SYS_ERROR',
+                type: 'OP_FAILED',
                 error: `todo toggle: entry row missing (${ev.lid})`,
               });
               return;
@@ -119,7 +119,10 @@ export function connectStoreEffects(
                 archived: ext.archived,
               });
           } catch (e) {
-            if (!disposed) dispatcher.dispatch({ type: 'SYS_ERROR', error: String(e) });
+            // toggle の失敗は非致命(local state は動いておらず、再クリックが
+            // retry)── phase を落として app を止めない(P3-6b review #1)
+            if (!disposed)
+              dispatcher.dispatch({ type: 'OP_FAILED', error: String(e) });
           }
         });
         break;

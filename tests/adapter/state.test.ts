@@ -331,6 +331,86 @@ describe('reducer: lean aggregate', () => {
     expect(s.openBody?.body).toBe('# A');
   });
 
+  it('error 通知は SELECT_ENTRY 単独でクリアされる(個別 pin)', () => {
+    let s = booted();
+    s = reduce(s, { type: 'SELECT_ENTRY', lid: 'a' }).state;
+    s = reduce(s, { type: 'BODY_LOAD_FAILED', lid: 'a', error: 'x' }).state;
+    expect(s.error).toMatch(/x/);
+    s = reduce(s, { type: 'SELECT_ENTRY', lid: 'b' }).state;
+    expect(s.error).toBeNull();
+  });
+
+  it('error 通知は BODY_LOADED 単独でクリアされる(個別 pin)', () => {
+    let s = booted();
+    s = reduce(s, { type: 'SELECT_ENTRY', lid: 'a' }).state;
+    s = reduce(s, { type: 'BODY_LOAD_FAILED', lid: 'a', error: 'x' }).state;
+    s = reduce(s, { type: 'BODY_LOADED', lid: 'a', body: 'ok' }).state;
+    expect(s.error).toBeNull();
+    expect(s.openBody?.body).toBe('ok');
+  });
+
+  it('error phase の SELECT_ENTRY はブロック ── 未達 commit(唯一の写し)を無警告破棄しない', () => {
+    let s = loadedA();
+    s = reduce(s, { type: 'START_EDIT' }).state;
+    s = reduce(s, { type: 'UPDATE_OPEN_BODY', body: '# v2' }).state;
+    s = reduce(s, { type: 'COMMIT_EDIT' }).state;
+    s = reduce(s, { type: 'SYS_ERROR', error: 'disk full' }).state;
+    expect(s.phase).toBe('error');
+    const after = reduce(s, { type: 'SELECT_ENTRY', lid: 'b' }).state;
+    expect(after).toBe(s); // 完全 no-op(openBody / error / 選択すべて保持)
+    expect(after.openBody?.baseline).toBe('# v2');
+  });
+
+  it('editing 中の SYS_ERROR は editing を維持する ── draft を破壊しない(review #3)', () => {
+    let s = loadedA();
+    s = reduce(s, { type: 'START_EDIT' }).state;
+    s = reduce(s, { type: 'UPDATE_OPEN_BODY', body: 'draft…' }).state;
+    s = reduce(s, { type: 'SYS_ERROR', error: 'late persist failure' }).state;
+    expect(s.phase).toBe('editing'); // editor は生きたまま
+    expect(s.openBody?.body).toBe('draft…');
+    expect(s.error).toMatch(/late persist failure/);
+  });
+
+  it('error phase への toggle ack は baseline に status を合流(両方の意図を保全 ── review #4)', () => {
+    const todo: EntryMeta = { ...meta('td', 1), archetype: 'todo' };
+    const pre = '---\nstatus: open\n---\nv1';
+    let s = reduce(initialState, {
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [todo],
+      relations: [],
+    }).state;
+    s = reduce(s, { type: 'SELECT_ENTRY', lid: 'td' }).state;
+    s = reduce(s, { type: 'BODY_LOADED', lid: 'td', body: pre }).state;
+    s = reduce(s, { type: 'START_EDIT' }).state;
+    s = reduce(s, { type: 'UPDATE_OPEN_BODY', body: '---\nstatus: open\n---\nv2' }).state;
+    s = reduce(s, { type: 'COMMIT_EDIT' }).state; // persist v2(失敗予定)
+    s = reduce(s, { type: 'SYS_ERROR', error: 'disk full' }).state;
+    // 後着の toggle(disk の旧内容基準)が成功して ack
+    const toggledOld = '---\nstatus: done\n---\nv1';
+    s = reduce(s, {
+      type: 'TODO_TOGGLED',
+      lid: 'td',
+      body: toggledOld,
+      status: 'done',
+      date: null,
+      archived: false,
+    }).state;
+    // 丸ごと差し替えず「未達の証拠」を保ったまま status を合流
+    const merged = '---\nstatus: done\n---\nv2';
+    expect(s.openBody).toMatchObject({
+      body: merged,
+      baseline: merged,
+      persisted: toggledOld,
+    });
+    // 再保存は v2 テキスト + 新 status の両方を書く
+    const r = reduce(s, { type: 'RETRY_PERSIST' });
+    const ev = r.events[0];
+    if (ev?.type !== 'PERSIST_ENTRY') throw new Error('PERSIST_ENTRY expected');
+    expect(ev.entry.body).toBe(merged);
+    expect(ev.entry.status).toBe('done');
+  });
+
   it('SET_VIEW_MODE keeps selection (PKC2 convention)', () => {
     let s = booted();
     s = reduce(s, { type: 'SELECT_ENTRY', lid: 'a' }).state;

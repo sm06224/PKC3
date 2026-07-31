@@ -9,6 +9,7 @@
  */
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import { extractMeta } from '@features/flavor';
+import { withTodoStatus } from '@features/flavor/todo-flavor';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 
 export type AppPhase = 'initializing' | 'ready' | 'editing' | 'error';
@@ -93,6 +94,12 @@ export type SystemCommand =
       date: string | null;
       archived: boolean;
     }
+  | {
+      /** 非致命の op 失敗(toggle 等)。通知のみで phase は落とさない ──
+       *  再操作が retry になる。fatal(SYS_ERROR)と混ぜない(P3-6b review #1)。 */
+      type: 'OP_FAILED';
+      error: string;
+    }
   | { type: 'SYS_ERROR'; error: string };
 
 export type Dispatchable = UserAction | SystemCommand;
@@ -146,6 +153,10 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
     }
     case 'SELECT_ENTRY': {
       if (state.phase === 'editing') return { state, events: [] }; // 編集中は選択遷移しない
+      // error phase(= persist 失敗)でも遷移しない ── openBody の baseline が
+      // 「disk 未達 commit の唯一の写し」であり、選択遷移は無警告破棄になる
+      // (P3-6b review #2)。出口は 再保存(RETRY_PERSIST)
+      if (state.phase === 'error') return { state, events: [] };
       if (!state.entryMetas.has(action.lid)) return { state, events: [] };
       // 同一 lid でも openBody が確立していなければ再要求する
       // (読み失敗後の再クリックが自然な retry になる ── review C)
@@ -347,6 +358,26 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
           // draft が勝つ(可視内容の last-write-wins)が、無変更 commit / cancel は
           // disk を採用する(review #4 ── 窓の外へ帰結を生き残らせない)
           openBody = { ...openBody, persisted: action.body, diskAhead: true };
+        } else if (
+          state.phase === 'error' &&
+          openBody.baseline !== openBody.persisted &&
+          !openBody.diskAhead
+        ) {
+          // persist 失敗中(未達 commit あり)に後着 toggle が成功した窓:
+          // 丸ごと差し替えると baseline===persisted になり「未達の証拠」ごと
+          // 消える(review #4 ── v2 が回収不能)。baseline に status を合流させ、
+          // 再保存が「未達のテキスト + 新しい status」の両方の意図を書く
+          const merged = withTodoStatus(
+            openBody.baseline,
+            action.status === 'done' ? 'done' : 'open',
+          );
+          openBody = {
+            lid: action.lid,
+            body: openBody.body === openBody.baseline ? merged : openBody.body,
+            baseline: merged,
+            persisted: action.body,
+            diskAhead: false,
+          };
         } else {
           // ready では body===baseline 不変量が立つので丸ごと差し替えで安全
           openBody = {
@@ -386,10 +417,20 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
         events: [],
       };
     }
+    case 'OP_FAILED':
+      // 非致命: 通知のみ。phase は動かさない(kanban 等の操作性を殺さない)
+      return { state: { ...state, error: action.error }, events: [] };
     case 'SYS_ERROR':
-      // エラーは state 駆動(表示は state.error を読む)── event 通知は廃止
+      // エラーは state 駆動(表示は state.error を読む)── event 通知は廃止。
+      // editing 中の着弾(先行 commit の persist 失敗)では editing を維持する
+      // ── phase を落とすと renderer が editor を破棄し、RETRY が可視 draft を
+      // 巻き戻す(P3-6b review #3)。未達の証拠(baseline≠persisted)は残る
       return {
-        state: { ...state, phase: 'error', error: action.error },
+        state: {
+          ...state,
+          phase: state.phase === 'editing' ? 'editing' : 'error',
+          error: action.error,
+        },
         events: [],
       };
   }
