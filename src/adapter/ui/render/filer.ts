@@ -2,15 +2,19 @@
  * filer view の最小核(P3-7b): breadcrumb + explorer table の read-only ビュー。
  *
  * - scope = 選択が folder ならそれ / 最近傍祖先 folder / root(PKC2 と同じ)
- * - 一覧は scope 直下(root scope なら structural 親なし)を entryOrder 順で
+ * - 一覧は scope 直下(root scope なら正準親なし)を entryOrder 順で
  * - folder click = その folder を選択(= scope が移る)、非 folder click = 選択
  *   (SELECT_ENTRY 1 本 ── scope と selection を別 state にしない。PKC2 で
  *   両者を混ぜた結果 lastFilerScopeLid という補助状態が要った教訓は、
  *   「scope は selection の純関数」に振り切ることで回避する)
- * - relation 作成 UI / subset profile(表示レンズ)/ DnD は持ち込まない ──
- *   profile は resolveProfile() の seam だけ将来のために残す(実装しない)
- * - 指紋: (entryMetas, relations, selectedLid)の参照。一覧規模は O(scope 直下)
- *   なので変化時は table ごと作り直す
+ * - relation 作成 UI / subset profile(表示レンズ)/ DnD は持ち込まない
+ *
+ * 差分規律: scope・一覧内容が変わったときだけ table を作り直す。選択だけの
+ * 変化(scope 不変)は data-pkc-selected の属性 patch のみ(P3-7b review #2 ──
+ * 15k 平置き root で選択 1 クリック = 60,009 createElement の反例を封鎖)。
+ * ⚠ 既知の限界: 一覧変化時の rebuild は O(scope 直下)で、平置き container の
+ * root scope では「scope 直下 = 全 entry」になる。keyed 行再利用(sidebar 方式)
+ * は P6 import で平置き大 container が現実になった時に計測してから入れる。
  */
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import type { AppState } from '@adapter/state/app-state';
@@ -33,31 +37,48 @@ const ARCHETYPE_LABELS: Record<string, string> = {
 
 export class FilerRenderer {
   private readonly region: HTMLElement;
+  private readonly rows = new Map<string, HTMLTableRowElement>();
   private lastMetas: ReadonlyMap<string, EntryMeta> | null = null;
   private lastRelations: readonly Relation[] | null = null;
   private lastSelected: string | null = null;
+  private lastScopeLid: string | null = null;
 
   constructor(region: HTMLElement) {
     this.region = region;
   }
 
   render(state: AppState): void {
-    if (
-      state.entryMetas === this.lastMetas &&
-      state.relations === this.lastRelations &&
-      state.selectedLid === this.lastSelected
-    )
+    const listChanged =
+      state.entryMetas !== this.lastMetas || state.relations !== this.lastRelations;
+    const selectionChanged = state.selectedLid !== this.lastSelected;
+    if (!listChanged && !selectionChanged) return;
+
+    const scope = resolveFilerScope(state.selectedLid, state.entryMetas, state.relations);
+    const scopeLid = scope?.lid ?? null;
+
+    if (!listChanged && scopeLid === this.lastScopeLid) {
+      // 選択だけの変化(scope 不変)── 属性 patch のみで済ませる
+      if (this.lastSelected) {
+        this.rows.get(this.lastSelected)?.removeAttribute('data-pkc-selected');
+      }
+      if (state.selectedLid) {
+        this.rows.get(state.selectedLid)?.setAttribute('data-pkc-selected', '');
+      }
+      this.lastSelected = state.selectedLid;
       return;
+    }
+
     this.lastMetas = state.entryMetas;
     this.lastRelations = state.relations;
     this.lastSelected = state.selectedLid;
+    this.lastScopeLid = scopeLid;
 
-    const scope = resolveFilerScope(state.selectedLid, state.entryMetas, state.relations);
-    const rows = scope
+    const list = scope
       ? getStructuralChildren(scope.lid, state.entryMetas, state.relations)
       : getRootEntries(state.entryMetas, state.relations);
 
     this.region.textContent = '';
+    this.rows.clear();
 
     // breadcrumb: root / …祖先… / scope
     const crumb = document.createElement('nav');
@@ -74,6 +95,8 @@ export class FilerRenderer {
       ];
       for (const seg of chain) {
         crumb.append(document.createTextNode(' / '));
+        // crumb セグメントはそれ自身が entry(folder)を表す要素 ── data-pkc-entry
+        // の適用対象(P3-7a 規約が禁じるのは delete / toggle 等の操作ボタン直付け)
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.setAttribute('data-pkc-entry', seg.lid);
@@ -95,7 +118,7 @@ export class FilerRenderer {
     }
     thead.append(hr);
     const tbody = document.createElement('tbody');
-    for (const m of rows) {
+    for (const m of list) {
       const tr = document.createElement('tr');
       tr.setAttribute('data-pkc-entry', m.lid);
       tr.setAttribute('data-pkc-action', 'select-entry');
@@ -110,11 +133,12 @@ export class FilerRenderer {
       updated.textContent = m.updatedAt ?? '';
       tr.append(name, kind, updated);
       tbody.append(tr);
+      this.rows.set(m.lid, tr);
     }
     table.append(thead, tbody);
     this.region.append(table);
 
-    if (rows.length === 0) {
+    if (list.length === 0) {
       const empty = document.createElement('p');
       empty.setAttribute('data-pkc-field', 'filer-empty');
       empty.textContent = scope ? '(このフォルダは空です)' : '(entry がありません)';

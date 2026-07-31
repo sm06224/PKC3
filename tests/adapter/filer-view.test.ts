@@ -100,6 +100,21 @@ describe('filer view (P3-7b)', () => {
     q<HTMLElement>('[data-pkc-action="filer-root"]')!.click();
     expect(rows()).toEqual(['f1']);
     expect(d.getState().selectedLid).toBeNull();
+    expect(d.getState().openBody).toBeNull(); // 速やかな破棄(review #4 pin)
+  });
+
+  it('同一 scope 内の選択変更は属性 patch のみ(table を作り直さない ── review #2)', async () => {
+    const { root, q, pane } = setup(METAS, RELS);
+    root.querySelector<HTMLElement>('[data-pkc-view="filer"]')!.click();
+    q<HTMLElement>('tbody [data-pkc-entry="f1"]')!.click(); // scope f1
+    await tick();
+    const rowA = q<HTMLElement>('tbody [data-pkc-entry="a"]')!;
+    const table = pane.querySelector('[data-pkc-region="filer-table"]');
+    rowA.click(); // 非 folder 選択 ── scope 不変
+    await tick();
+    expect(q('tbody [data-pkc-entry="a"]')).toBe(rowA); // 同一ノード
+    expect(pane.querySelector('[data-pkc-region="filer-table"]')).toBe(table);
+    expect(rowA.hasAttribute('data-pkc-selected')).toBe(true);
   });
 
   it('非 folder を選択すると最近傍祖先 folder の scope で選択印が付く', async () => {
