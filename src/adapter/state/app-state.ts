@@ -40,6 +40,10 @@ export interface AppState {
   openBody: OpenBody | null;
   selectedLid: string | null;
   viewMode: ViewMode;
+  /** calendar の表示月(null = 今日の月を renderer 側で解決)。 */
+  calendarMonth: { year: number; month: number } | null;
+  /** calendar で archived todo を見せるか(PKC2 の showArchived と同じ意味論)。 */
+  showArchived: boolean;
   error: string | null;
 }
 
@@ -52,6 +56,8 @@ export const initialState: AppState = {
   openBody: null,
   selectedLid: null,
   viewMode: 'detail',
+  calendarMonth: null,
+  showArchived: false,
   error: null,
 };
 
@@ -61,13 +67,24 @@ export type UserAction =
   | { type: 'START_EDIT' }
   | { type: 'UPDATE_OPEN_BODY'; body: string }
   | { type: 'COMMIT_EDIT' }
-  | { type: 'CANCEL_EDIT' };
+  | { type: 'CANCEL_EDIT' }
+  | { type: 'TOGGLE_TODO_STATUS'; lid: string }
+  | { type: 'SET_CALENDAR_MONTH'; year: number; month: number }
+  | { type: 'TOGGLE_SHOW_ARCHIVED' };
 
 export type SystemCommand =
   | { type: 'SYS_BOOTED'; cid: string; metas: EntryMeta[]; relations: Relation[] }
   | { type: 'BODY_LOADED'; lid: string; body: string }
   | { type: 'BODY_LOAD_FAILED'; lid: string; error: string }
   | { type: 'BODY_PERSISTED'; lid: string; body: string }
+  | {
+      type: 'TODO_TOGGLED';
+      lid: string;
+      body: string;
+      status: string | null;
+      date: string | null;
+      archived: boolean;
+    }
   | { type: 'SYS_ERROR'; error: string };
 
 export type Dispatchable = UserAction | SystemCommand;
@@ -81,6 +98,14 @@ export type Dispatchable = UserAction | SystemCommand;
 export type DomainEvent =
   | { type: 'REQUEST_BODY'; lid: string }
   | { type: 'PERSIST_ENTRY'; entry: EntryUpsert }
+  | {
+      /** かんばんトグル要求。meta snapshot は発火時(reduce)に捕獲(C-1 規律)。 */
+      type: 'REQUEST_TODO_TOGGLE';
+      lid: string;
+      title: string;
+      entryOrder: number;
+      nextStatus: 'open' | 'done';
+    }
   | { type: 'APP_ERROR'; error: string };
 
 export interface ReduceResult {
@@ -228,6 +253,69 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
         events: [],
       };
     }
+    case 'TOGGLE_TODO_STATUS': {
+      // ready 限定(editing 中の裏書換を作らない)。todo 以外・未知 lid は no-op
+      if (state.phase !== 'ready') return { state, events: [] };
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta || meta.archetype !== 'todo') return { state, events: [] };
+      const nextStatus = meta.status === 'done' ? 'open' : 'done';
+      // state はまだ動かさない ── store への書込が確定した TODO_TOGGLED(ack)で
+      // 列が動く(persisted 規律と同じ「enqueue と ack を混同しない」)
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_TODO_TOGGLE',
+            lid: meta.lid,
+            title: meta.title,
+            entryOrder: meta.entryOrder,
+            nextStatus,
+          },
+        ],
+      };
+    }
+    case 'TODO_TOGGLED': {
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] }; // 再 boot 済みなら捨てる
+      const entryMetas = new Map(state.entryMetas).set(action.lid, {
+        ...meta,
+        status: action.status,
+        date: action.date,
+        archived: action.archived,
+      });
+      let openBody = state.openBody;
+      if (openBody?.lid === action.lid) {
+        if (state.phase === 'editing') {
+          // toggle 直後に同じ entry の編集へ入った稀な窓: draft は触らず
+          // persisted(disk 事実)だけ追従する。commit すれば draft が勝つ
+          // (last-write-wins ── 単一窓内の自己競合として許容、ms 級の窓)
+          openBody = { ...openBody, persisted: action.body };
+        } else {
+          // ready では body===baseline 不変量が立つので丸ごと差し替えで安全
+          openBody = {
+            lid: action.lid,
+            body: action.body,
+            baseline: action.body,
+            persisted: action.body,
+          };
+        }
+      }
+      return { state: { ...state, entryMetas, openBody }, events: [] };
+    }
+    case 'SET_CALENDAR_MONTH': {
+      // 月送りの正規化(binder は 0 や 13 を送ってよい)
+      let { year, month } = action;
+      if (month < 1) {
+        year -= 1;
+        month = 12;
+      } else if (month > 12) {
+        year += 1;
+        month = 1;
+      }
+      return { state: { ...state, calendarMonth: { year, month } }, events: [] };
+    }
+    case 'TOGGLE_SHOW_ARCHIVED':
+      return { state: { ...state, showArchived: !state.showArchived }, events: [] };
     case 'BODY_PERSISTED': {
       // ack された内容を disk 事実として記録(選択が移って openBody が破棄
       // 済みなら捨てる ── stale ack で別 entry の作業域を汚さない)

@@ -7,6 +7,8 @@
  * ここで保証される(「init 以外は同期」という暗黙 invariant に依存しない)。
  */
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
+import { extractMeta } from '@features/flavor';
+import { withTodoStatus } from '@features/flavor/todo-flavor';
 import type { Dispatcher } from './dispatcher';
 
 /**
@@ -72,6 +74,49 @@ export function connectStoreEffects(
                 type: 'BODY_PERSISTED',
                 lid: ev.entry.lid,
                 body: ev.entry.body,
+              });
+          } catch (e) {
+            if (!disposed) dispatcher.dispatch({ type: 'SYS_ERROR', error: String(e) });
+          }
+        });
+        break;
+      case 'REQUEST_TODO_TOGGLE':
+        // read→rewrite→write を 1 op として直列 queue に載せる ── 同一 lid の
+        // 先行 persist の後に読むことが保証される(基底の取り違え防止)
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            const body = await store.getBody(ev.lid);
+            if (disposed) return;
+            if (body === null) {
+              // 行不在の toggle は不変量違反 ── 黙って何もしないより可視で止める
+              dispatcher.dispatch({
+                type: 'SYS_ERROR',
+                error: `todo toggle: entry row missing (${ev.lid})`,
+              });
+              return;
+            }
+            // 原文 splice(本文 byte 無傷)→ 唯一の抽出経路 → 行全体 upsert
+            const newBody = withTodoStatus(body, ev.nextStatus);
+            const ext = extractMeta('todo', newBody);
+            await store.persistEntry({
+              lid: ev.lid,
+              title: ev.title,
+              archetype: 'todo',
+              body: newBody,
+              entryOrder: ev.entryOrder,
+              status: ext.status,
+              date: ext.date,
+              archived: ext.archived,
+            });
+            if (!disposed)
+              dispatcher.dispatch({
+                type: 'TODO_TOGGLED',
+                lid: ev.lid,
+                body: newBody,
+                status: ext.status,
+                date: ext.date,
+                archived: ext.archived,
               });
           } catch (e) {
             if (!disposed) dispatcher.dispatch({ type: 'SYS_ERROR', error: String(e) });

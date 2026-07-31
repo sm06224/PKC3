@@ -14,6 +14,9 @@ import type { AppState } from '@adapter/state/app-state';
 export class SidebarRenderer {
   private readonly list: HTMLElement;
   private readonly rows = new Map<string, HTMLLIElement>();
+  /** 行ごとの描画済み meta 参照 ── 1 件の meta 変更で 15k 行を patch 歩行しない
+   *  (patch は querySelector を伴うので、参照一致で丸ごと skip する)。 */
+  private readonly rowMeta = new Map<string, EntryMeta>();
   private lastMetas: ReadonlyMap<string, EntryMeta> | null = null;
   private lastOrder: readonly string[] | null = null;
   private lastSelected: string | null = null;
@@ -49,6 +52,7 @@ export class SidebarRenderer {
       if (!wanted.has(lid)) {
         row.remove();
         this.rows.delete(lid);
+        this.rowMeta.delete(lid);
       }
     }
 
@@ -60,8 +64,10 @@ export class SidebarRenderer {
       if (!row) {
         row = this.createRow(meta);
         this.rows.set(lid, row);
-      } else {
+        this.rowMeta.set(lid, meta);
+      } else if (this.rowMeta.get(lid) !== meta) {
         this.patchRow(row, meta);
+        this.rowMeta.set(lid, meta);
       }
       // 既に正位置ならノードを動かさない(move も DOM 操作なので避ける)。
       // ⚠ 既知の限界: 「先頭行を末尾へ move」型の並べ替えは O(n) move になる

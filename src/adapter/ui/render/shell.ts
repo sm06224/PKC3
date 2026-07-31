@@ -3,15 +3,33 @@
  * この枠を作り直さない。機能セレクタは data-pkc-* のみ(PKC2 規約)。
  */
 export interface ShellRegions {
+  topbar: HTMLElement;
   sidebar: HTMLElement;
   detail: HTMLElement;
   status: HTMLElement;
 }
 
+const VIEW_BUTTONS: readonly { view: string; label: string }[] = [
+  { view: 'detail', label: '詳細' },
+  { view: 'kanban', label: 'かんばん' },
+  { view: 'calendar', label: 'カレンダー' },
+] as const;
+
 export function buildShell(root: HTMLElement): ShellRegions {
   root.textContent = '';
   const shell = document.createElement('div');
   shell.setAttribute('data-pkc-region', 'shell');
+
+  const topbar = document.createElement('header');
+  topbar.setAttribute('data-pkc-region', 'topbar');
+  for (const { view, label } of VIEW_BUTTONS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.setAttribute('data-pkc-action', 'set-view');
+    btn.setAttribute('data-pkc-view', view);
+    btn.textContent = label;
+    topbar.append(btn);
+  }
 
   const sidebar = document.createElement('nav');
   sidebar.setAttribute('data-pkc-region', 'sidebar');
@@ -25,7 +43,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const status = document.createElement('footer');
   status.setAttribute('data-pkc-region', 'status');
 
-  shell.append(sidebar, detail, status);
+  shell.append(topbar, sidebar, detail, status);
   root.append(shell);
-  return { sidebar, detail, status };
+  return { topbar, sidebar, detail, status };
 }

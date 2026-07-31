@@ -8,7 +8,7 @@ import type { InitResult } from '@adapter/platform/storage/protocol';
 import { installHtmlSandboxResizer } from '@features/markdown/html-sandbox';
 import { buildShell } from '@adapter/ui/render/shell';
 import { SidebarRenderer } from '@adapter/ui/render/sidebar';
-import { DetailRenderer } from '@adapter/ui/render/detail';
+import { CenterRouter } from '@adapter/ui/render/center';
 import { bindActions } from '@adapter/ui/actions/binder';
 
 const DB_NAME = 'pkc3';
@@ -66,10 +66,23 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const dispatcher = new Dispatcher();
   const regions = buildShell(root);
   const sidebar = new SidebarRenderer(regions.sidebar);
-  const detail = new DetailRenderer(regions.detail);
+  const center = new CenterRouter(regions.detail);
+  // topbar の active 印(変わったときだけ属性を触る)
+  let markedView: string | null = null;
+  const markView = (view: string) => {
+    if (view === markedView) return;
+    for (const btn of regions.topbar.querySelectorAll('[data-pkc-view]')) {
+      if (btn.getAttribute('data-pkc-view') === view)
+        btn.setAttribute('data-pkc-active', '');
+      else btn.removeAttribute('data-pkc-active');
+    }
+    markedView = view;
+  };
+  markView('detail');
   dispatcher.onState((state) => {
     sidebar.render(state);
-    detail.render(state);
+    center.render(state);
+    markView(state.viewMode);
   });
   bindActions(root, dispatcher);
   // html sandbox iframe の高さ追従。1 listener が message 内 id で iframe を

@@ -232,6 +232,58 @@ describe('reducer: lean aggregate', () => {
     expect(r.events[0]).toMatchObject({ type: 'PERSIST_ENTRY' });
   });
 
+  it('TOGGLE_TODO_STATUS: reduce 時に meta snapshot を捕獲し、state は ack まで動かさない', () => {
+    const todo: EntryMeta = { ...meta('td', 3), archetype: 'todo', status: 'open' };
+    let s = reduce(initialState, {
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [todo],
+      relations: [],
+    }).state;
+    const r = reduce(s, { type: 'TOGGLE_TODO_STATUS', lid: 'td' });
+    expect(r.events).toEqual([
+      {
+        type: 'REQUEST_TODO_TOGGLE',
+        lid: 'td',
+        title: 't-td',
+        entryOrder: 3,
+        nextStatus: 'done',
+      },
+    ]);
+    expect(r.state.entryMetas).toBe(s.entryMetas); // ack までカードは動かない
+    // editing 中は発火しない
+    s = reduce(s, { type: 'SELECT_ENTRY', lid: 'td' }).state;
+    s = reduce(s, { type: 'BODY_LOADED', lid: 'td', body: 'x' }).state;
+    s = reduce(s, { type: 'START_EDIT' }).state;
+    expect(reduce(s, { type: 'TOGGLE_TODO_STATUS', lid: 'td' }).events).toEqual([]);
+  });
+
+  it('TODO_TOGGLED: 編集中の同一 entry では draft を触らず persisted だけ追従', () => {
+    const todo: EntryMeta = { ...meta('td', 1), archetype: 'todo' };
+    let s = reduce(initialState, {
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [todo],
+      relations: [],
+    }).state;
+    s = reduce(s, { type: 'SELECT_ENTRY', lid: 'td' }).state;
+    s = reduce(s, { type: 'BODY_LOADED', lid: 'td', body: '---\nstatus: open\n---\nx' }).state;
+    s = reduce(s, { type: 'START_EDIT' }).state;
+    s = reduce(s, { type: 'UPDATE_OPEN_BODY', body: 'draft…' }).state;
+    const toggledBody = '---\nstatus: done\n---\nx';
+    s = reduce(s, {
+      type: 'TODO_TOGGLED',
+      lid: 'td',
+      body: toggledBody,
+      status: 'done',
+      date: null,
+      archived: false,
+    }).state;
+    expect(s.openBody?.body).toBe('draft…'); // draft は無傷
+    expect(s.openBody?.persisted).toBe(toggledBody); // disk 事実は追従
+    expect(s.entryMetas.get('td')?.status).toBe('done');
+  });
+
   it('CANCEL_EDIT restores baseline', () => {
     let s = loadedA();
     s = reduce(s, { type: 'START_EDIT' }).state;

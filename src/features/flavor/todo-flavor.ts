@@ -5,9 +5,18 @@
 import {
   parseFrontmatter,
   serializeFrontmatter,
+  spliceFrontmatterKeys,
   type FrontmatterValue,
 } from '../markdown/frontmatter';
 import type { FlavorSpec } from './flavor-spec';
+
+/**
+ * かんばんトグル等の構造化操作: status だけを原文 splice で書き換える
+ * (本文・他 key は byte 無傷 ── P3-4 review #5 の規律)。
+ */
+export function withTodoStatus(body: string, status: 'open' | 'done'): string {
+  return spliceFrontmatterKeys(body, { status });
+}
 
 /** 抽出列 date の受理形。列は SQL の範囲検索に使うため厳密に YYYY-MM-DD のみ。 */
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
