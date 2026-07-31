@@ -45,6 +45,7 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
   const persisted: EntryUpsert[] = [];
   connectStoreEffects(d, {
     getBody: async (lid) => store[lid] ?? null,
+    deleteEntry: async () => {},
     persistEntry: async (e) => {
       persisted.push(e);
       store[e.lid] = e.body;
@@ -180,6 +181,7 @@ describe('kanban view (P3-6)', () => {
     const persisted: EntryUpsert[] = [];
     connectStoreEffects(d, {
       getBody: async () => '---\nstatus: open\n---\nx',
+      deleteEntry: async () => {},
       persistEntry: async (e) => {
         if (failNext) throw new Error('flaky');
         persisted.push(e);

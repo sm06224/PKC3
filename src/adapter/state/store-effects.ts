@@ -21,6 +21,8 @@ import type { Dispatcher } from './dispatcher';
 export interface StorePort {
   getBody(lid: string): Promise<string | null>;
   persistEntry(entry: EntryUpsert): Promise<void>;
+  /** worker 側で relations / revisions 込みの同 tx 掃除(P3-6b)。冪等。 */
+  deleteEntry(lid: string): Promise<void>;
 }
 
 export function connectStoreEffects(
@@ -77,6 +79,51 @@ export function connectStoreEffects(
               });
           } catch (e) {
             if (!disposed) dispatcher.dispatch({ type: 'SYS_ERROR', error: String(e) });
+          }
+        });
+        break;
+      case 'REQUEST_DELETE':
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            await store.deleteEntry(ev.lid);
+          } catch (e) {
+            // UI からは既に消えている(楽観)── 失敗は通知し、reload で再出現する
+            // (非破壊側に倒れる)
+            if (!disposed)
+              dispatcher.dispatch({ type: 'OP_FAILED', error: String(e) });
+          }
+        });
+        break;
+      case 'REQUEST_RENAME':
+        // read→write を 1 op に(同一 lid の先行 persist の後に読む)。
+        // body は disk が正 ── 編集中 draft には触れない
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            const body = await store.getBody(ev.lid);
+            if (disposed) return;
+            if (body === null) {
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: `rename: entry row missing (${ev.lid})`,
+              });
+              return;
+            }
+            const ext = extractMeta(ev.archetype, body);
+            await store.persistEntry({
+              lid: ev.lid,
+              title: ev.title,
+              archetype: ev.archetype,
+              body,
+              entryOrder: ev.entryOrder,
+              status: ext.status,
+              date: ext.date,
+              archived: ext.archived,
+            });
+          } catch (e) {
+            if (!disposed)
+              dispatcher.dispatch({ type: 'OP_FAILED', error: String(e) });
           }
         });
         break;

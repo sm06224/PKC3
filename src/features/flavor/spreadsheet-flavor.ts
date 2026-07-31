@@ -53,6 +53,8 @@ function parsePkc2Spreadsheet(body: string): Pkc2Spreadsheet {
 
 export const spreadsheetFlavor: FlavorSpec = {
   archetype: 'spreadsheet',
+  // 「最初からセルが見えるべき」(PKC2 user direction 2026-06-02)── 5 列 × 3 行の空 grid
+  seed: () => '```csv-render noheader\n,,,,\n,,,,\n,,,,\n```',
   extract: () => NO_EXTRACT,
   fromPkc2(body) {
     const sheet = parsePkc2Spreadsheet(body);

@@ -454,6 +454,7 @@ describe('effect layer: serialized store I/O', () => {
         log.push('done:' + lid); // 完了順を記録(直列化の弁別に必須 ── review A)
         return bodies[lid] ?? null;
       },
+      async deleteEntry() {},
       async persistEntry(entry) {
         log.push(`put:${entry.lid}:${entry.body}`);
       },
@@ -495,6 +496,7 @@ describe('effect layer: serialized store I/O', () => {
         if (calls === 1) throw new Error('boom');
         return 'recovered';
       },
+      async deleteEntry() {},
       async persistEntry() {},
     };
     const off = connectStoreEffects(d, store);
@@ -519,6 +521,7 @@ describe('effect layer: serialized store I/O', () => {
       async getBody() {
         return '# A';
       },
+      async deleteEntry() {},
       async persistEntry(e) {
         if (failNext) throw new Error('disk full');
         persisted.push(e.body);
@@ -552,6 +555,7 @@ describe('effect layer: serialized store I/O', () => {
       async getBody() {
         return '# A';
       },
+      async deleteEntry() {},
       async persistEntry() {
         throw new Error('disk full');
       },
@@ -590,6 +594,7 @@ describe('effect layer: serialized store I/O', () => {
       async getBody() {
         return '---\nstatus: open\n---\n芝刈り';
       },
+      async deleteEntry() {},
       async persistEntry(entry) {
         persisted.push(entry);
       },
@@ -626,6 +631,7 @@ describe('effect layer: serialized store I/O', () => {
         await new Promise((r) => setTimeout(r, 20));
         return 'late';
       },
+      async deleteEntry() {},
       async persistEntry() {},
     });
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', 1)], relations: [] });

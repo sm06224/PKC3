@@ -8,7 +8,7 @@
  *   selectedLid が選択の単一情報源
  */
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
-import { extractMeta } from '@features/flavor';
+import { extractMeta, seedBodyFor } from '@features/flavor';
 import { withTodoStatus } from '@features/flavor/todo-flavor';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 
@@ -47,6 +47,9 @@ export interface AppState {
   relations: readonly Relation[];
   openBody: OpenBody | null;
   selectedLid: string | null;
+  /** 直近 CREATE_ENTRY で作られ、まだ一度も commit / rename されていない lid。
+   *  「未編集のまま cancel」で掃除する(PKC2 の空 entry 堆積の対策 ── P3-7a)。 */
+  freshLid: string | null;
   viewMode: ViewMode;
   /** calendar の表示月(null = 今日の月を renderer 側で解決)。 */
   calendarMonth: { year: number; month: number } | null;
@@ -63,6 +66,7 @@ export const initialState: AppState = {
   relations: [],
   openBody: null,
   selectedLid: null,
+  freshLid: null,
   viewMode: 'detail',
   calendarMonth: null,
   showArchived: false,
@@ -79,7 +83,11 @@ export type UserAction =
   | { type: 'TOGGLE_TODO_STATUS'; lid: string }
   | { type: 'SET_CALENDAR_MONTH'; year: number; month: number }
   | { type: 'TOGGLE_SHOW_ARCHIVED' }
-  | { type: 'RETRY_PERSIST' };
+  | { type: 'RETRY_PERSIST' }
+  /** lid / title は binder が生成して渡す(reducer は純粋のまま ── Date を呼ばない)。 */
+  | { type: 'CREATE_ENTRY'; archetype: string; lid: string; title: string }
+  | { type: 'DELETE_ENTRY'; lid: string }
+  | { type: 'RENAME_ENTRY_TITLE'; lid: string; title: string };
 
 export type SystemCommand =
   | { type: 'SYS_BOOTED'; cid: string; metas: EntryMeta[]; relations: Relation[] }
@@ -120,6 +128,16 @@ export type DomainEvent =
       title: string;
       entryOrder: number;
       nextStatus: 'open' | 'done';
+    }
+  | { type: 'REQUEST_DELETE'; lid: string }
+  | {
+      /** title 書換の永続化要求(body は effect が disk から読む)。snapshot は
+       *  発火時捕獲(C-1 規律)。title は新値。 */
+      type: 'REQUEST_RENAME';
+      lid: string;
+      title: string;
+      archetype: string;
+      entryOrder: number;
     };
 
 export interface ReduceResult {
@@ -147,6 +165,7 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
           relations: action.relations,
           selectedLid: null,
           openBody: null,
+          freshLid: null,
         },
         events: [],
       };
@@ -228,6 +247,7 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       const next: AppState = {
         ...state,
         phase: 'ready',
+        freshLid: state.freshLid === lid ? null : state.freshLid, // commit = 残す意思
         // 変更ありの commit は draft が正(可視内容の last-write-wins)── disk
         // 先行の印はここで畳む
         openBody: { lid, body, baseline: body, persisted, diskAhead: false },
@@ -242,6 +262,7 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
             state: {
               ...state,
               phase: 'ready',
+              freshLid: state.freshLid === lid ? null : state.freshLid,
               openBody: {
                 lid,
                 body: persisted,
@@ -297,7 +318,13 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
     }
     case 'CANCEL_EDIT': {
       if (state.phase !== 'editing' || !state.openBody) return { state, events: [] };
-      const { lid, baseline, persisted, diskAhead } = state.openBody;
+      const { lid, body, baseline, persisted, diskAhead } = state.openBody;
+      // 新規作成直後の未編集 cancel は entry ごと掃除する ── PKC2 は掃除が無く
+      // 「作成 → Esc」で既定 title の空 entry が堆積した(P3-7a)。draft を
+      // 打ち込んでからの cancel は PKC2 同様 entry を残す(誤 Esc で消さない)
+      if (state.freshLid === lid && body === baseline) {
+        return removeEntryFromState(state, lid, [{ type: 'REQUEST_DELETE', lid }]);
+      }
       // draft 破棄。disk 先行(diskAhead)なら disk を採用(review #4)。
       // 自 commit の ack 待ちで persisted が遅れているだけなら baseline が正
       const restored = diskAhead ? persisted : baseline;
@@ -417,6 +444,104 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
         events: [],
       };
     }
+    case 'CREATE_ENTRY': {
+      // ready 限定。lid 衝突は作らない(binder 生成の単調 lid が壊れた場合の防波堤)
+      if (state.phase !== 'ready') return { state, events: [] };
+      if (state.entryMetas.has(action.lid)) {
+        return {
+          state: { ...state, error: `create: lid collision (${action.lid})` },
+          events: [],
+        };
+      }
+      const body = seedBodyFor(action.archetype);
+      const ext = extractMeta(action.archetype, body);
+      const lastLid = state.order[state.order.length - 1];
+      const entryOrder = lastLid
+        ? (state.entryMetas.get(lastLid)?.entryOrder ?? 0) + 1
+        : 1;
+      const meta: EntryMeta = {
+        lid: action.lid,
+        title: action.title,
+        archetype: action.archetype,
+        createdAt: null, // worker が datetime('now') を刻む(次 boot で読み戻る)
+        updatedAt: null,
+        entryOrder,
+        status: ext.status,
+        date: ext.date,
+        archived: ext.archived,
+      };
+      // 作成 = 即永続(PKC2 と同じ)。この初回 PERSIST が失敗した場合、editing 中の
+      // 無変更 commit は skip するが、行は upsert なので次の変更 commit が自己修復する
+      // (二重故障窓のみ残る ── SYS_ERROR が可視。P3-7a 設計判断)
+      return {
+        state: {
+          ...state,
+          phase: 'editing', // 作成 → 即編集(PKC2 の遷移を維持)
+          entryMetas: new Map(state.entryMetas).set(action.lid, meta),
+          order: [...state.order, action.lid],
+          selectedLid: action.lid,
+          freshLid: action.lid,
+          error: null,
+          openBody: {
+            lid: action.lid,
+            body,
+            baseline: body,
+            persisted: body, // 楽観(ack 前)── 上記コメントの範囲で許容
+            diskAhead: false,
+          },
+        },
+        events: [
+          {
+            type: 'PERSIST_ENTRY',
+            entry: {
+              lid: action.lid,
+              title: action.title,
+              archetype: action.archetype,
+              body,
+              entryOrder,
+              status: ext.status,
+              date: ext.date,
+              archived: ext.archived,
+            },
+          },
+        ],
+      };
+    }
+    case 'DELETE_ENTRY': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      if (!state.entryMetas.has(action.lid)) return { state, events: [] };
+      // UI からは即時に消す(楽観)── worker 側 op は relations / revisions 込みの
+      // 同 tx 掃除(P3-6b)。失敗は OP_FAILED 通知(reload で再出現 = 非破壊)
+      return removeEntryFromState(state, action.lid, [
+        { type: 'REQUEST_DELETE', lid: action.lid },
+      ]);
+    }
+    case 'RENAME_ENTRY_TITLE': {
+      if (state.phase !== 'ready' && state.phase !== 'editing')
+        return { state, events: [] };
+      const meta = state.entryMetas.get(action.lid);
+      const title = action.title.trim();
+      if (!meta || title === '' || title === meta.title) return { state, events: [] };
+      // title はローカルが唯一の知識源なので楽観更新(sidebar が即応)。
+      // 永続化は effect が disk body を読んで行全体を書く(REQUEST_RENAME)。
+      // 直後に COMMIT_EDIT が続く場合も、更新済み meta から行を組むので title は保たれる
+      return {
+        state: {
+          ...state,
+          entryMetas: new Map(state.entryMetas).set(action.lid, { ...meta, title }),
+          freshLid: state.freshLid === action.lid ? null : state.freshLid,
+        },
+        events: [
+          {
+            type: 'REQUEST_RENAME',
+            lid: action.lid,
+            title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+          },
+        ],
+      };
+    }
     case 'OP_FAILED':
       // 非致命: 通知のみ。phase は動かさない(kanban 等の操作性を殺さない)
       return { state: { ...state, error: action.error }, events: [] };
@@ -434,6 +559,40 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
         events: [],
       };
   }
+}
+
+/**
+ * entry を常駐 state から外し、選択を隣へ移す(DELETE_ENTRY / fresh-cancel 共用)。
+ * 選択遷移は PKC2 nextSelectedAfterRemove と同じ「同 index → 末尾 fallback → null」。
+ * 新しい選択には REQUEST_BODY を発行する(openBody は破棄済みのため)。
+ */
+function removeEntryFromState(
+  state: AppState,
+  lid: string,
+  extraEvents: DomainEvent[],
+): ReduceResult {
+  const entryMetas = new Map(state.entryMetas);
+  entryMetas.delete(lid);
+  const idx = state.order.indexOf(lid);
+  const order = state.order.filter((l) => l !== lid);
+  let selectedLid = state.selectedLid;
+  const events = [...extraEvents];
+  if (state.selectedLid === lid) {
+    selectedLid = order[Math.min(idx, order.length - 1)] ?? null;
+    if (selectedLid) events.push({ type: 'REQUEST_BODY', lid: selectedLid });
+  }
+  return {
+    state: {
+      ...state,
+      phase: 'ready',
+      entryMetas,
+      order,
+      selectedLid,
+      openBody: state.openBody?.lid === lid ? null : state.openBody,
+      freshLid: state.freshLid === lid ? null : state.freshLid,
+    },
+    events,
+  };
 }
 
 /**

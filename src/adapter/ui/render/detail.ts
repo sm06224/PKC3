@@ -96,7 +96,13 @@ export class DetailRenderer {
       edit.type = 'button';
       edit.setAttribute('data-pkc-action', 'start-edit');
       edit.textContent = '編集';
-      bar.append(edit);
+      // ⚠ data-pkc-entry は「entry を表す要素」(行 / カード)専用の意味論 ──
+      // ボタンには付けない(binder は selectedLid に fallback する)
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.setAttribute('data-pkc-action', 'delete-entry');
+      del.textContent = '削除';
+      bar.append(edit, del);
       this.region.append(bar);
     } else if (
       // ⚠ この条件は baseline / persisted / diskAhead に依存するが、view の
@@ -150,7 +156,12 @@ export class DetailRenderer {
     this.lastBody = null;
 
     this.region.textContent = '';
-    this.region.append(this.title(state, open.lid));
+    // title は uncontrolled input(commit 時に binder が RENAME を先行 dispatch)
+    const titleInput = document.createElement('input');
+    titleInput.type = 'text';
+    titleInput.setAttribute('data-pkc-field', 'editor-title');
+    titleInput.value = state.entryMetas.get(open.lid)?.title ?? '';
+    this.region.append(titleInput);
 
     const bar = document.createElement('div');
     bar.setAttribute('data-pkc-field', 'detail-toolbar');

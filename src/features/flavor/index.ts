@@ -36,5 +36,10 @@ export function extractMeta(archetype: string, body: string): FlavorExtract {
   return getFlavor(archetype).extract(body);
 }
 
+/** 新規作成時の初期 body(P3-7a)。 */
+export function seedBodyFor(archetype: string): string {
+  return getFlavor(archetype).seed?.() ?? '';
+}
+
 export type { FlavorExtract, FlavorSpec };
 export { NO_EXTRACT } from './flavor-spec';
