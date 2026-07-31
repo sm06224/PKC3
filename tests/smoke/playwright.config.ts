@@ -40,7 +40,8 @@ export default defineConfig({
     command: `npx vite preview --port ${PORT} --strictPort`,
     cwd: repoRoot,
     url: `http://localhost:${PORT}`,
-    reuseExistingServer: true,
+    // CI では必ず自前で立てる(残留 server が別 dist を検品する事故の防止)
+    reuseExistingServer: !process.env.CI,
     timeout: 30_000,
   },
 });

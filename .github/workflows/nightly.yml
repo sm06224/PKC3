@@ -22,7 +22,9 @@ jobs:
       - run: npx playwright install chromium --with-deps
       - name: Resolve chromium path for probes
         run: echo "PKC3_CHROMIUM=$(node -e "const {chromium}=require('@playwright/test'); console.log(chromium.executablePath())")" >> "$GITHUB_ENV"
-      - name: Visual smoke (full)
+      # 現状は PR gate と同一 3 spec。nightly 専用の重い spec(mermaid 実 render
+      # 等の長待ち系)はここに追加していく ── PR gate には足さない
+      - name: Visual smoke
         run: npm run test:smoke
       - name: Start vite dev server (probe pages)
         run: |
@@ -31,6 +33,8 @@ jobs:
             curl -sf http://localhost:45731/ > /dev/null && break
             sleep 1
           done
+          # 起動失敗をここで fail-fast(loop は timeout しても exit 0 のため)
+          curl -sf http://localhost:45731/ > /dev/null
       - name: Probe — store (sqlite ops / orphan cascade)
         run: node tests/probe/run-sahpool-probe.mjs http://localhost:45731/tests/probe/store-probe.html
       - name: Probe — sahpool (VFS / journal)
@@ -41,3 +45,5 @@ jobs:
         run: node tests/probe/run-editor-probe.mjs
       - name: Probe — kanban (トグル往復 / move 数)
         run: node tests/probe/run-kanban-probe.mjs
+      # lease-probe(多重タブの writer 昇格)は SAH 解放待ちが最も flake しやすい
+      # ため nightly には入れない ── リース周りを触る PR で手動実行する運用

@@ -30,18 +30,24 @@ export function collectPageErrors(page: Page): string[] {
 export async function clickReal(page: Page, selector: string): Promise<void> {
   const el = page.locator(selector).first();
   await expect(el).toBeVisible();
+  await el.scrollIntoViewIfNeeded(); // fold 下の要素を「覆われている」と誤診しない
   const box = await el.boundingBox();
   expect(box, `${selector} に boundingBox が無い(画面に出ていない)`).not.toBeNull();
   const cx = box!.x + box!.width / 2;
   const cy = box!.y + box!.height / 2;
+  // 判定は「target 自身か、その子孫がヒット」のみ。祖先ヒットを許すと
+  // pointer-events:none 等の dead click が素通りする(binder は ev.target から
+  // closest するため、祖先ヒットでは target のハンドラに届かない ── review #2)
   const hit = await page.evaluate(
     ({ x, y, sel }) => {
       const at = document.elementFromPoint(x, y);
       const target = document.querySelector(sel);
-      return !!(at && target && (at === target || target.contains(at) || at.contains(target)));
+      return !!(at && target && (at === target || target.contains(at)));
     },
     { x: cx, y: cy, sel: selector },
   );
-  expect(hit, `${selector} の中心 (${cx},${cy}) が別要素に覆われている`).toBe(true);
+  expect(hit, `${selector} の中心 (${cx},${cy}) が別要素に覆われている / 届かない`).toBe(
+    true,
+  );
   await page.mouse.click(cx, cy);
 }
