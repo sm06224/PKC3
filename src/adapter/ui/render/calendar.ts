@@ -45,7 +45,12 @@ export class CalendarRenderer {
     const year = state.calendarMonth?.year ?? today.getFullYear();
     const month = state.calendarMonth?.month ?? today.getMonth() + 1;
 
-    const metas = [...state.entryMetas.values()];
+    // kanban と同じく state.order 順で組む(Map 挿入順に依存しない ── review #8)
+    const metas: EntryMeta[] = [];
+    for (const lid of state.order) {
+      const m = state.entryMetas.get(lid);
+      if (m) metas.push(m);
+    }
     const byDate = groupTodosByDate(metas, state.showArchived);
 
     this.region.textContent = '';

@@ -39,6 +39,14 @@ describe('spliceFrontmatterKeys(原文 splice ── P3-4 review #5 の規律)',
     expect(out).toBe('---\nstatus: done\n---\n段落\n\n---\n\n下の段落');
   });
 
+  it('重複 key は最後の一致行を書く(parseFlatYaml の last-wins に一致 ── review #5)', () => {
+    const body = '---\nstatus: open\nstatus: done\n---\nx';
+    const out = spliceFrontmatterKeys(body, { status: 'open' });
+    // 先頭行に書くと再抽出(last-wins)が変わらず永久 no-op になる
+    expect(parseFrontmatter(out).meta['status']).toBe('open');
+    expect(out).toBe('---\nstatus: open\nstatus: open\n---\nx');
+  });
+
   it('prefix が重なる key(date / date-done)を取り違えない', () => {
     const body = '---\ndate-done: 2026-01-01\ndate: 2026-08-01\n---\nx';
     const out = spliceFrontmatterKeys(body, { date: '2026-09-01' });

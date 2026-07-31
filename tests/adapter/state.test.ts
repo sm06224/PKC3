@@ -284,6 +284,44 @@ describe('reducer: lean aggregate', () => {
     expect(s.entryMetas.get('td')?.status).toBe('done');
   });
 
+  it('editing 窓に落ちた toggle ack は無変更 commit / cancel で disk が勝つ(review #4)', () => {
+    const todo: EntryMeta = { ...meta('td', 1), archetype: 'todo' };
+    const pre = '---\nstatus: open\n---\nx';
+    const toggled = '---\nstatus: done\n---\nx';
+    const boot = () => {
+      let s = reduce(initialState, {
+        type: 'SYS_BOOTED',
+        cid: 'c1',
+        metas: [todo],
+        relations: [],
+      }).state;
+      s = reduce(s, { type: 'SELECT_ENTRY', lid: 'td' }).state;
+      s = reduce(s, { type: 'BODY_LOADED', lid: 'td', body: pre }).state;
+      s = reduce(s, { type: 'START_EDIT' }).state;
+      // 編集中に toggle ack が着弾(draft は不触・persisted のみ追従)
+      return reduce(s, {
+        type: 'TODO_TOGGLED',
+        lid: 'td',
+        body: toggled,
+        status: 'done',
+        date: null,
+        archived: false,
+      }).state;
+    };
+    // 無変更 commit: pre-toggle の body を書き戻さず、disk(toggled)を採用
+    const committed = reduce(boot(), { type: 'COMMIT_EDIT' });
+    expect(committed.events).toEqual([]);
+    expect(committed.state.openBody).toMatchObject({
+      body: toggled,
+      baseline: toggled,
+      persisted: toggled,
+    });
+    // cancel も同じく disk へ
+    const cancelled = reduce(boot(), { type: 'CANCEL_EDIT' });
+    expect(cancelled.state.openBody?.body).toBe(toggled);
+    // 以後の再編集は toggled を基底にする ── 後日の commit がトグルを巻き戻さない
+  });
+
   it('CANCEL_EDIT restores baseline', () => {
     let s = loadedA();
     s = reduce(s, { type: 'START_EDIT' }).state;

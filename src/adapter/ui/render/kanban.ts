@@ -53,6 +53,16 @@ export class KanbanRenderer {
         this.cardMeta.delete(lid);
       }
     }
+    // 列を移ったカードも**先に**移動元列から外す ── 残った実ノードが cursor を
+    // 汚すと、そのカード以降の全カードが insertBefore(move)になる
+    // (P3-6a review #1: open 先頭 1 枚のトグルで後続 ~749 枚が move する実測)
+    for (const col of KANBAN_COLUMNS) {
+      const host = columns[col.status];
+      for (const m of grouped[col.status]) {
+        const card = this.cards.get(m.lid);
+        if (card && card.parentNode !== null && card.parentNode !== host) card.remove();
+      }
+    }
 
     for (const col of KANBAN_COLUMNS) {
       const host = columns[col.status];

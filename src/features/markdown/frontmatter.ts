@@ -545,7 +545,12 @@ export function spliceFrontmatterKeys(
   const fmParts = parts.slice(0, closeAt);
   for (const [key, value] of entries) {
     const keyRe = new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*:`);
-    const at = fmParts.findIndex((l) => keyRe.test(l));
+    // 重複 key は**最後の一致**を書く ── parseFlatYaml は last-wins なので、
+    // 先頭行を書くと再抽出が変わらず永久 no-op になる(P3-6a review #5)
+    let at = -1;
+    for (let i = 0; i < fmParts.length; i++) {
+      if (keyRe.test(fmParts[i]!)) at = i;
+    }
     const line = lineFor([key, value]);
     if (at >= 0) {
       if (line === null) {

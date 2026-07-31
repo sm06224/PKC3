@@ -98,6 +98,66 @@ describe('kanban view (P3-6)', () => {
     expect(d.getState().entryMetas.get('e1')?.status).toBe('done');
   });
 
+  it('列間 move は O(1): 先頭トグルで後続カードが insertBefore されない(cursor 汚染 pin)', async () => {
+    const metas = Array.from({ length: 8 }, (_, i) =>
+      meta('e' + i, { status: 'open' }),
+    );
+    const { q } = setup(metas, {
+      e0: '---\nstatus: open\n---\nx',
+    });
+    q<HTMLElement>('[data-pkc-view="kanban"]')!.click();
+    const openHost = q('[data-pkc-kanban-status="open"] [data-pkc-region="kanban-cards"]')!;
+    const doneHost = q('[data-pkc-kanban-status="done"] [data-pkc-region="kanban-cards"]')!;
+
+    let moves = 0;
+    for (const host of [openHost, doneHost]) {
+      const original = host.insertBefore.bind(host);
+      (host as { insertBefore: typeof host.insertBefore }).insertBefore = ((
+        node: Node,
+        ref: Node | null,
+      ) => {
+        moves++;
+        return original(node, ref);
+      }) as typeof host.insertBefore;
+    }
+    q<HTMLElement>('[data-pkc-entry="e0"] [data-pkc-action="toggle-todo"]')!.click();
+    await tick(20);
+
+    expect([...doneHost.children].map((c) => c.getAttribute('data-pkc-entry'))).toEqual([
+      'e0',
+    ]);
+    expect([...openHost.children]).toHaveLength(7);
+    // 移動カード 1 枚の done 列への挿入だけ ── 後続 7 枚は動かない
+    // (review #1: 修正前は移動元列の cursor 汚染で後続全カードが move した)
+    expect(moves).toBe(1);
+    // 行粒度 patch の pin(review #3): 列移動後のトグル印が ☑ に変わっている
+    expect(
+      q('[data-pkc-entry="e0"] [data-pkc-action="toggle-todo"]')?.textContent,
+    ).toBe('☑');
+  });
+
+  it('選択中 entry のトグル ack は openBody(body/baseline/persisted)を disk に揃える(review #2 pin)', async () => {
+    const pre = '---\nstatus: open\n---\nメモ';
+    const { d, q } = setup([meta('e1')], { e1: pre });
+    q<HTMLElement>('[data-pkc-view="kanban"]')!.click();
+    q<HTMLElement>('[data-pkc-entry="e1"]')!.click(); // 選択 → openBody 確立
+    await tick();
+    expect(d.getState().openBody?.body).toBe(pre);
+
+    q<HTMLElement>('[data-pkc-entry="e1"] [data-pkc-action="toggle-todo"]')!.click();
+    await tick(20);
+    const toggled = '---\nstatus: done\n---\nメモ';
+    // ready の openBody は丸ごと disk へ追従 ── stale baseline を残すと次の
+    // commit がトグルを黙って巻き戻す(review #2 の退行シナリオ)
+    expect(d.getState().openBody).toEqual({
+      lid: 'e1',
+      body: toggled,
+      baseline: toggled,
+      persisted: toggled,
+      diskAhead: false,
+    });
+  });
+
   it('編集中はトグル不可(ready 限定)/ 未知 lid・text は no-op', async () => {
     const { d, persisted } = setup([meta('e1'), meta('e4', { archetype: 'text' })], {
       e1: 'x',
