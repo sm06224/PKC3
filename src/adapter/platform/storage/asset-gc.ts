@@ -64,3 +64,47 @@ export async function purgeAssets(
   }
   return { deleted, failed };
 }
+
+export interface PurgeFlowDeps {
+  ports: AssetGcPorts;
+  /** confirm 待ちの間に編集が始まりうる ── 削除直前の再確認に使う。 */
+  isReady(): boolean;
+  confirm(message: string): boolean;
+  alert(message: string): void;
+  formatSize(bytes: number): string;
+}
+
+/**
+ * 「添付の整理」の明示フロー(走査 → confirm → **再確認 → 再走査交差** → 削除)。
+ *
+ * confirm は modal だが、それに寄りかからない(review F1 ── TOCTOU):
+ * confirm が返った後に (a) ready を再確認し (b) もう一度走査して**初回結果との
+ * 交差だけ**を消す。confirm 中に取込が進んで現れた「まだ entry の無い key」は
+ * 交差に入らず(初回に無い)、confirm 中に参照され直した key も交差に入らない
+ * (再走査で referenced)。将来 confirm を独自 async UI に替えても保険が残る。
+ * 呼び出し側は attach と排他の in-flight gate を張ること(main.ts)。
+ */
+export async function runExplicitPurge(deps: PurgeFlowDeps): Promise<void> {
+  const first = await findOrphanAssets(deps.ports);
+  if (first.keys.length === 0) {
+    deps.alert('未参照の添付データはありません');
+    return;
+  }
+  const ok = deps.confirm(
+    `どの entry からも参照されていない添付データ ${first.keys.length} 件` +
+      `(${deps.formatSize(first.knownBytes)})を削除します。よろしいですか?`,
+  );
+  if (!ok) return;
+  if (!deps.isReady()) {
+    deps.alert('編集が始まったため中止しました(整理は行っていません)');
+    return;
+  }
+  const second = await findOrphanAssets(deps.ports);
+  const firstSet = new Set(first.keys);
+  const keys = second.keys.filter((k) => firstSet.has(k));
+  const r = await purgeAssets(deps.ports, keys);
+  deps.alert(
+    `${r.deleted} 件を削除しました` +
+      (r.failed > 0 ? `(${r.failed} 件は失敗 ── 再実行で回収されます)` : ''),
+  );
+}

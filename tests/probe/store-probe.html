@@ -99,6 +99,24 @@
           steps.scan.referenced.length === 2 &&
           steps.scan.referenced.includes('ast-keep-body') &&
           steps.scan.referenced.includes('ast-keep-fm');
+        // review F2: markdown escape 済みの生きた参照(backslash / 数値実体)も
+        // keep される(raw substring に現れないが hydrate は成功する形)
+        await store.request({
+          op: 'upsertEntry', cid: 'c1',
+          entry: {
+            lid: 'e5', title: 'esc', archetype: 'text',
+            body: '![a](asset:ast\\-esc-bs) ![b](asset:ast&#45;esc-ent)',
+            entryOrder: 5, status: null, date: null, archived: false,
+          },
+        });
+        steps.scanEsc = await store.request({
+          op: 'scanAssetRefs', cid: 'c1',
+          candidates: ['ast-esc-bs', 'ast-esc-ent'],
+        });
+        steps.scanEscOk =
+          steps.scanEsc.referenced.length === 2 &&
+          steps.scanEsc.referenced.includes('ast-esc-bs') &&
+          steps.scanEsc.referenced.includes('ast-esc-ent');
         await store.request({ op: 'deleteAssetMeta', cid: 'c1', key: 'ast-orphan' });
         steps.assetMetasAfter = await store.request({ op: 'listAssetMetas', cid: 'c1' });
         steps.assetGcOk =
@@ -113,6 +131,7 @@
             steps.metaHasNoBody === true &&
             steps.orphanCleanOk === true &&
             steps.scanOk === true &&
+            steps.scanEscOk === true &&
             steps.assetGcOk === true,
           steps,
         };

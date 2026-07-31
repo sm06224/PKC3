@@ -11,7 +11,7 @@ import { acquireWriterLease } from '@adapter/platform/storage/writer-lease';
 import type { InitResult } from '@adapter/platform/storage/protocol';
 import { installHtmlSandboxResizer } from '@features/markdown/html-sandbox';
 import { AssetBlobStore } from '@adapter/platform/storage/asset-blob-store';
-import { findOrphanAssets, purgeAssets } from '@adapter/platform/storage/asset-gc';
+import { runExplicitPurge } from '@adapter/platform/storage/asset-gc';
 import { buildShell } from '@adapter/ui/render/shell';
 import { SidebarRenderer } from '@adapter/ui/render/sidebar';
 import { CenterRouter } from '@adapter/ui/render/center';
@@ -99,25 +99,46 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     center.render(state);
     markView(state.viewMode);
   });
+  // 🔒 attach と purge の排他 gate(review F1): 取込は putBlob → entry persist の
+  // 間に「bytes はあるが参照が無い」窓を持つ ── その窓で整理が走ると取込中の
+  // bytes を消す(実証済みのデータ消失)。同時実行は可視で拒否する
+  let assetOpBusy = false;
+  const withAssetGate = async (run: () => Promise<void>): Promise<void> => {
+    if (assetOpBusy) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '添付の取込/整理が実行中です。完了を待ってください',
+      });
+      return;
+    }
+    assetOpBusy = true;
+    try {
+      await run();
+    } finally {
+      assetOpBusy = false;
+    }
+  };
   const services: BinderServices = {
     attachFiles: (files) =>
-      void attachFiles(
-        dispatcher,
-        {
-          putBlob: (key, blob) => blobs.put(DEFAULT_CID, key, blob),
-          putMeta: async (m) => {
-            await client.request({
-              op: 'putAssetMeta',
-              cid: DEFAULT_CID,
-              meta: { key: m.key, mime: m.mime, size: m.size, hash: m.hash },
-            });
+      void withAssetGate(() =>
+        attachFiles(
+          dispatcher,
+          {
+            putBlob: (key, blob) => blobs.put(DEFAULT_CID, key, blob),
+            putMeta: async (m) => {
+              await client.request({
+                op: 'putAssetMeta',
+                cid: DEFAULT_CID,
+                meta: { key: m.key, mime: m.mime, size: m.size, hash: m.hash },
+              });
+            },
+            listMetas: () => client.request({ op: 'listAssetMetas', cid: DEFAULT_CID }),
+            estimate: navigator.storage?.estimate
+              ? () => navigator.storage.estimate()
+              : undefined,
           },
-          listMetas: () => client.request({ op: 'listAssetMetas', cid: DEFAULT_CID }),
-          estimate: navigator.storage?.estimate
-            ? () => navigator.storage.estimate()
-            : undefined,
-        },
-        files,
+          files,
+        ),
       ),
     downloadAsset: async (assetKey, name) => {
       try {
@@ -146,7 +167,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       }
     },
     purgeOrphanAssets: () =>
-      void (async () => {
+      void withAssetGate(async () => {
         try {
           // editing 中は draft が disk と違う参照を持ちうる ── ready 限定で可視ブロック
           if (dispatcher.getState().phase !== 'ready') {
@@ -156,48 +177,38 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             });
             return;
           }
-          const gcPorts = {
-            listMetas: () =>
-              client.request({ op: 'listAssetMetas', cid: DEFAULT_CID }),
-            listBlobKeys: () => blobs.listKeys(DEFAULT_CID),
-            scanReferenced: async (candidates: string[]) =>
-              (
-                await client.request({
-                  op: 'scanAssetRefs',
-                  cid: DEFAULT_CID,
-                  candidates,
-                })
-              ).referenced,
-            deleteBlob: (key: string) => blobs.delete(DEFAULT_CID, key),
-            deleteMeta: async (key: string) => {
-              await client.request({ op: 'deleteAssetMeta', cid: DEFAULT_CID, key });
+          await runExplicitPurge({
+            ports: {
+              listMetas: () =>
+                client.request({ op: 'listAssetMetas', cid: DEFAULT_CID }),
+              listBlobKeys: () => blobs.listKeys(DEFAULT_CID),
+              scanReferenced: async (candidates: string[]) =>
+                (
+                  await client.request({
+                    op: 'scanAssetRefs',
+                    cid: DEFAULT_CID,
+                    candidates,
+                  })
+                ).referenced,
+              deleteBlob: (key: string) => blobs.delete(DEFAULT_CID, key),
+              deleteMeta: async (key: string) => {
+                await client.request({ op: 'deleteAssetMeta', cid: DEFAULT_CID, key });
+              },
             },
-          };
-          const found = await findOrphanAssets(gcPorts);
-          if (found.keys.length === 0) {
-            window.alert?.('未参照の添付データはありません');
-            return;
-          }
-          // 一括削除なので fail closed(confirm が無い環境では実行しない ──
-          // 単発の delete-entry が ?? true なのとは桁が違う)
-          const ok =
-            window.confirm?.(
-              `どの entry からも参照されていない添付データ ${found.keys.length} 件` +
-                `(${formatSize(found.knownBytes)})を削除します。よろしいですか?`,
-            ) ?? false;
-          if (!ok) return;
-          const r = await purgeAssets(gcPorts, found.keys);
-          window.alert?.(
-            `${r.deleted} 件を削除しました` +
-              (r.failed > 0 ? `(${r.failed} 件は失敗 ── 再実行で回収されます)` : ''),
-          );
+            isReady: () => dispatcher.getState().phase === 'ready',
+            // 一括削除なので fail closed(confirm が無い環境では実行しない ──
+            // 単発の delete-entry が ?? true なのとは桁が違う)
+            confirm: (msg) => window.confirm?.(msg) ?? false,
+            alert: (msg) => window.alert?.(msg),
+            formatSize,
+          });
         } catch (e) {
           dispatcher.dispatch({
             type: 'OP_FAILED',
             error: `添付の整理に失敗しました: ${String(e)}`,
           });
         }
-      })(),
+      }),
   };
   bindActions(root, dispatcher, services);
   // html sandbox iframe の高さ追従。1 listener が message 内 id で iframe を

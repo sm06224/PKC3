@@ -37,7 +37,19 @@ function tx<T>(
   });
 }
 
-const key = (cid: string, assetKey: string): string => `${cid}:${assetKey}`;
+/**
+ * joiner が ':' のため、cid に ':' が入ると `a:b` の key 空間が cid `a` の
+ * prefix 範囲と交差し、**GC(listKeys → delete)が他コンテナの bytes を消す**
+ * (review F3)。cid を作る側の規約に頼らず、ここで構造的に拒否する。
+ */
+function assertCid(cid: string): void {
+  if (cid.includes(':')) throw new Error(`invalid cid (":" は使えない): ${cid}`);
+}
+
+const key = (cid: string, assetKey: string): string => {
+  assertCid(cid);
+  return `${cid}:${assetKey}`;
+};
 
 export class AssetBlobStore {
   private db: IDBDatabase | null = null;
@@ -49,24 +61,29 @@ export class AssetBlobStore {
 
   /** Blob をそのまま格納(base64 経由禁止 ── bytes を heap に通さない)。 */
   async put(cid: string, assetKey: string, blob: Blob): Promise<void> {
-    await tx(await this.need(), 'readwrite', (s) => s.put(blob, key(cid, assetKey)));
+    const k = key(cid, assetKey); // assert は IDB を触る前に
+    await tx(await this.need(), 'readwrite', (s) => s.put(blob, k));
   }
 
   async get(cid: string, assetKey: string): Promise<Blob | null> {
-    const v = await tx(await this.need(), 'readonly', (s) => s.get(key(cid, assetKey)));
+    const k = key(cid, assetKey);
+    const v = await tx(await this.need(), 'readonly', (s) => s.get(k));
     return v instanceof Blob ? v : null;
   }
 
   async delete(cid: string, assetKey: string): Promise<void> {
-    await tx(await this.need(), 'readwrite', (s) => s.delete(key(cid, assetKey)));
+    const k = key(cid, assetKey);
+    await tx(await this.need(), 'readwrite', (s) => s.delete(k));
   }
 
   /** cid 配下の asset key 一覧(GC の候補集めに使う。Blob 値は読まない)。 */
   async listKeys(cid: string): Promise<string[]> {
+    assertCid(cid);
     const prefix = `${cid}:`;
-    // 上界は prefix + U+FFFF(cid に ':' 以降の任意 key が続く範囲を閉じる)
+    // 上界は「':' の次の code unit ';'」の exclusive bound ── `cid:` で始まる
+    // key を全部含む(U+FFFF 始まりの asset key も漏らさない。review F3)
     const keys = await tx<IDBValidKey[]>(await this.need(), 'readonly', (s) =>
-      s.getAllKeys(IDBKeyRange.bound(prefix, prefix + '￿')),
+      s.getAllKeys(IDBKeyRange.bound(prefix, `${cid};`, false, true)),
     );
     return keys
       .filter((k): k is string => typeof k === 'string')

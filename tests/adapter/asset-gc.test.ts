@@ -8,8 +8,11 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   findOrphanAssets,
   purgeAssets,
+  runExplicitPurge,
   type AssetGcPorts,
+  type PurgeFlowDeps,
 } from '../../src/adapter/platform/storage/asset-gc';
+import { AssetBlobStore } from '../../src/adapter/platform/storage/asset-blob-store';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
@@ -81,6 +84,14 @@ describe('asset GC (P4b)', () => {
     ]);
   });
 
+  it('cid に ":" は拒否(joiner 交差で他コンテナの bytes を消す経路を構造的に塞ぐ)', async () => {
+    const store = new AssetBlobStore();
+    // assert は IDB を触る**前**に走る(happy-dom に indexedDB が無くても検定可能)
+    await expect(store.put('a:b', 'k1', new Blob(['x']))).rejects.toThrow(/cid/);
+    await expect(store.listKeys('a:b')).rejects.toThrow(/cid/);
+    await expect(store.delete('a:b', 'k1')).rejects.toThrow(/cid/);
+  });
+
   it('topbar の「添付の整理」click が services.purgeOrphanAssets に届く', () => {
     document.body.textContent = '';
     const root = document.createElement('div');
@@ -92,5 +103,79 @@ describe('asset GC (P4b)', () => {
       .querySelector<HTMLElement>('[data-pkc-action="purge-orphan-assets"]')!
       .click();
     expect(purge).toHaveBeenCalledTimes(1);
+  });
+});
+
+/** 明示フロー(review F1 の TOCTOU 保険)の pin。 */
+describe('runExplicitPurge (P4b)', () => {
+  function flowDeps(over: Partial<PurgeFlowDeps> = {}) {
+    const { ports, calls } = fakePorts();
+    const alerts: string[] = [];
+    const deps: PurgeFlowDeps = {
+      ports,
+      isReady: () => true,
+      confirm: () => true,
+      alert: (m) => alerts.push(m),
+      formatSize: (n) => `${n}B`,
+      ...over,
+    };
+    return { deps, calls, alerts };
+  }
+
+  it('orphan ゼロなら confirm を出さずに報告だけ', async () => {
+    const confirm = vi.fn(() => true);
+    const { deps, calls, alerts } = flowDeps({ confirm });
+    deps.ports.listMetas = async () => [];
+    deps.ports.listBlobKeys = async () => [];
+    await runExplicitPurge(deps);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(alerts[0]).toContain('未参照の添付データはありません');
+    expect(calls.filter((c) => c.startsWith('blob:'))).toHaveLength(0);
+  });
+
+  it('confirm 拒否なら何も消さない(fail closed)', async () => {
+    const { deps, calls } = flowDeps({ confirm: () => false });
+    await runExplicitPurge(deps);
+    expect(calls.filter((c) => c.startsWith('blob:'))).toHaveLength(0);
+  });
+
+  it('confirm 後に ready でなくなっていたら中止(編集開始の TOCTOU)', async () => {
+    let ready = true;
+    const { deps, calls, alerts } = flowDeps({
+      isReady: () => ready,
+      confirm: () => {
+        ready = false; // confirm ダイアログの間に編集が始まった
+        return true;
+      },
+    });
+    await runExplicitPurge(deps);
+    expect(alerts[0]).toContain('中止しました');
+    expect(calls.filter((c) => c.startsWith('blob:'))).toHaveLength(0);
+  });
+
+  it('confirm 後に再走査し、交差だけ消す(取込中 key / 参照され直した key を守る)', async () => {
+    let scanCount = 0;
+    const { ports, calls } = fakePorts({
+      // 2 回目の走査では世界が変わっている:
+      // - k-orphan-meta は参照され直した(referenced 入り)
+      // - k-inflight が取込中(blob だけ書かれた)として新たに現れる
+      listBlobKeys: async () =>
+        scanCount >= 1 ? ['k-ref', 'k-orphan-blob', 'k-inflight'] : ['k-ref', 'k-orphan-blob'],
+      scanReferenced: async () => {
+        scanCount += 1;
+        return scanCount === 1 ? ['k-ref'] : ['k-ref', 'k-orphan-meta'];
+      },
+    });
+    const alerts: string[] = [];
+    await runExplicitPurge({
+      ports,
+      isReady: () => true,
+      confirm: () => true,
+      alert: (m) => alerts.push(m),
+      formatSize: (n) => `${n}B`,
+    });
+    // 消してよいのは「両方の走査で orphan」だった k-orphan-blob だけ
+    expect(calls.filter((c) => c.startsWith('blob:'))).toEqual(['blob:k-orphan-blob']);
+    expect(alerts[0]).toContain('1 件を削除しました');
   });
 });
