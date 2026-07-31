@@ -42,5 +42,8 @@ export function createStorePort(client: StoreClient, cid: string): StorePort {
     persistEntry: async (entry) => {
       await client.request({ op: 'upsertEntry', cid, entry });
     },
+    deleteEntry: async (lid) => {
+      await client.request({ op: 'deleteEntry', cid, lid });
+    },
   };
 }

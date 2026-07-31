@@ -30,6 +30,12 @@ export interface FlavorSpec {
    * PKC2 の寛容 parse の意味論(不正 JSON を落とさない)を引き継ぐこと。
    */
   fromPkc2(body: string): string;
+  /**
+   * 新規作成時の初期 body(P3-7a)。省略時は ''(空 markdown)。
+   * フレーバーの frontmatter / fence 規約を最初から見せる seed に留め、
+   * テンプレート機能にしない(盛り込みすぎない)。
+   */
+  seed?(): string;
 }
 
 /** 抽出列を持たないフレーバーの返り値(共有・凍結)。 */

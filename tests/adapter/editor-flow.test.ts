@@ -43,6 +43,7 @@ function setup(bodies: Record<string, string>) {
   const persisted: EntryUpsert[] = [];
   connectStoreEffects(d, {
     getBody: async (lid) => bodies[lid] ?? null,
+    deleteEntry: async () => {},
     persistEntry: async (e) => {
       persisted.push(e);
     },
@@ -160,6 +161,7 @@ describe('editor flow (P3-5)', () => {
     const persisted: string[] = [];
     connectStoreEffects(d, {
       getBody: async () => '# A',
+      deleteEntry: async () => {},
       persistEntry: async (e) => {
         if (failNext) throw new Error('disk full');
         persisted.push(e.body);

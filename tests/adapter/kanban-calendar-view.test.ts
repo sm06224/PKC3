@@ -45,6 +45,7 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
   const persisted: EntryUpsert[] = [];
   connectStoreEffects(d, {
     getBody: async (lid) => store[lid] ?? null,
+    deleteEntry: async () => {},
     persistEntry: async (e) => {
       persisted.push(e);
       store[e.lid] = e.body;
@@ -131,9 +132,10 @@ describe('kanban view (P3-6)', () => {
     // (review #1: 修正前は移動元列の cursor 汚染で後続全カードが move した)
     expect(moves).toBe(1);
     // 行粒度 patch の pin(review #3): 列移動後のトグル印が ☑ に変わっている
-    expect(
-      q('[data-pkc-entry="e0"] [data-pkc-action="toggle-todo"]')?.textContent,
-    ).toBe('☑');
+    const toggleBtn = q('[data-pkc-entry="e0"] [data-pkc-action="toggle-todo"]')!;
+    expect(toggleBtn.textContent).toBe('☑');
+    // data-pkc-entry は entry 要素(カード)専用 ── ボタンには付かない(P3-7a 規約)
+    expect(toggleBtn.hasAttribute('data-pkc-entry')).toBe(false);
   });
 
   it('選択中 entry のトグル ack は openBody(body/baseline/persisted)を disk に揃える(review #2 pin)', async () => {
@@ -180,6 +182,7 @@ describe('kanban view (P3-6)', () => {
     const persisted: EntryUpsert[] = [];
     connectStoreEffects(d, {
       getBody: async () => '---\nstatus: open\n---\nx',
+      deleteEntry: async () => {},
       persistEntry: async (e) => {
         if (failNext) throw new Error('flaky');
         persisted.push(e);

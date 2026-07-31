@@ -15,6 +15,19 @@ const VIEW_BUTTONS: readonly { view: string; label: string }[] = [
   { view: 'calendar', label: 'カレンダー' },
 ] as const;
 
+/**
+ * 作成できる archetype(P3-7a)。attachment は file picker 経路(P4 assets)、
+ * form / generic / opaque は PKC2 の 2026-04-26 audit で作成導線が撤去済み
+ * (import 済データの表示・編集は可能)── その判断を引き継ぐ。
+ */
+const CREATE_BUTTONS: readonly { archetype: string; label: string }[] = [
+  { archetype: 'text', label: '+ノート' },
+  { archetype: 'todo', label: '+Todo' },
+  { archetype: 'textlog', label: '+ログ' },
+  { archetype: 'spreadsheet', label: '+シート' },
+  { archetype: 'folder', label: '+フォルダ' },
+] as const;
+
 export function buildShell(root: HTMLElement): ShellRegions {
   root.textContent = '';
   const shell = document.createElement('div');
@@ -33,9 +46,19 @@ export function buildShell(root: HTMLElement): ShellRegions {
 
   const sidebar = document.createElement('nav');
   sidebar.setAttribute('data-pkc-region', 'sidebar');
+  const createBar = document.createElement('div');
+  createBar.setAttribute('data-pkc-region', 'create-bar');
+  for (const { archetype, label } of CREATE_BUTTONS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.setAttribute('data-pkc-action', 'create-entry');
+    btn.setAttribute('data-pkc-archetype', archetype);
+    btn.textContent = label;
+    createBar.append(btn);
+  }
   const list = document.createElement('ul');
   list.setAttribute('data-pkc-region', 'entry-list');
-  sidebar.append(list);
+  sidebar.append(createBar, list);
 
   const detail = document.createElement('main');
   detail.setAttribute('data-pkc-region', 'detail');

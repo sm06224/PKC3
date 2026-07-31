@@ -43,6 +43,8 @@ function parsePkc2Todo(body: string): {
 
 export const todoFlavor: FlavorSpec = {
   archetype: 'todo',
+  // 新規 todo は status を明示した frontmatter から始める(規約が最初から見える)
+  seed: () => '---\nstatus: open\n---\n',
   extract(body) {
     const { meta } = parseFrontmatter(body);
     return {
