@@ -5,7 +5,10 @@ import { textlogFlavor } from '../../src/features/flavor/textlog-flavor';
 import { formFlavor, readFormFields } from '../../src/features/flavor/form-flavor';
 import { attachmentFlavor } from '../../src/features/flavor/attachment-flavor';
 import { spreadsheetFlavor } from '../../src/features/flavor/spreadsheet-flavor';
-import { parseFrontmatter } from '../../src/features/markdown/frontmatter';
+import {
+  parseFrontmatter,
+  serializeFrontmatter,
+} from '../../src/features/markdown/frontmatter';
 
 describe('flavor registry', () => {
   it('maps archetypes and falls back to text for folder/generic/opaque/unknown', () => {
@@ -189,6 +192,34 @@ describe('attachment flavor', () => {
     );
   });
 
+  it('sandbox_allow tokens containing a comma survive the inline-array round-trip (review #1)', () => {
+    const md = attachmentFlavor.fromPkc2(
+      JSON.stringify({ name: 'x', mime: 'text/html', sandbox_allow: ['a,b', 'c'] }),
+    );
+    expect(parseFrontmatter(md).meta['attachment.sandbox_allow']).toEqual(['a,b', 'c']);
+  });
+
+  it('unknown / future fields are preserved in attachment.extra (review #3 — PKC2 の whitelist copy 事故の型)', () => {
+    const md = attachmentFlavor.fromPkc2(
+      JSON.stringify({
+        name: 'x',
+        mime: 'text/html',
+        future_field: { nested: [1, 2] },
+        another: 'v',
+      }),
+    );
+    const { meta } = parseFrontmatter(md);
+    expect(JSON.parse(String(meta['attachment.extra']))).toEqual({
+      future_field: { nested: [1, 2] },
+      another: 'v',
+    });
+    // 既知 field だけなら extra は書かれない
+    const clean = attachmentFlavor.fromPkc2(
+      JSON.stringify({ name: 'y', mime: 'image/png' }),
+    );
+    expect(parseFrontmatter(clean).meta['attachment.extra']).toBeUndefined();
+  });
+
   it('refuses legacy inline data (bytes must be externalized first — no silent loss)', () => {
     const legacy = JSON.stringify({ name: 'f.png', mime: 'image/png', data: 'aGVsbG8=' });
     expect(() => attachmentFlavor.fromPkc2(legacy)).toThrow(/externalize/);
@@ -243,5 +274,26 @@ describe('spreadsheet flavor', () => {
   it('tolerant parse: invalid JSON becomes an empty sheet', () => {
     expect(spreadsheetFlavor.fromPkc2('nope')).toBe('```csv-render\n```');
     expect(spreadsheetFlavor.extract('```csv-render\n```')).toEqual(NO_EXTRACT);
+  });
+
+  it('cells containing backtick runs cannot break out of the fence (review #2)', () => {
+    const md = spreadsheetFlavor.fromPkc2(
+      JSON.stringify({ rows: [['```'], ['secret-data']] }),
+    );
+    // fence は内容の最長 backtick run より長い ── データが fence 外に漏れない
+    expect(md).toBe('````csv-render\n```\nsecret-data\n````');
+  });
+});
+
+describe('frontmatter round-trip hardening (P3-4 review)', () => {
+  it("plain scalar keeps YAML comment semantics: apostrophe doesn't open a quote (review #4)", () => {
+    const { meta } = parseFrontmatter("---\ntitle: it's a test # comment\n---\nx");
+    expect(meta['title']).toBe("it's a test");
+  });
+
+  it('quoted scalar / inline-array elements keep # and , intact (reviews #1/#4)', () => {
+    const src = { note: 'a #b', tags: ['x,y', 'z #w'] };
+    const body = `${serializeFrontmatter(src)}\nx`;
+    expect(parseFrontmatter(body).meta).toEqual(src);
   });
 });

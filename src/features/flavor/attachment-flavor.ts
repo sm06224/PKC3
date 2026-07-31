@@ -26,7 +26,28 @@ interface Pkc2Attachment {
   launcher_url?: string;
   app_group?: string;
   app_order?: number;
+  /** 既知 field 以外の残余(未知 / 将来 field)。黙って落とさず保全する。 */
+  extra?: Record<string, unknown>;
 }
+
+/** 既知 field 集合(PKC2 AttachmentBody の全 field。data は legacy 検査用)。 */
+const KNOWN_ATTACHMENT_KEYS: ReadonlySet<string> = new Set([
+  'name',
+  'mime',
+  'size',
+  'asset_key',
+  'data',
+  'sandbox_allow',
+  'registered_as_app',
+  'app_icon',
+  'app_icon_asset_key',
+  'pkc_extension',
+  'startup',
+  'extension_manifest',
+  'launcher_url',
+  'app_group',
+  'app_order',
+]);
 
 function parsePkc2Attachment(body: string): Pkc2Attachment {
   try {
@@ -65,6 +86,13 @@ function parsePkc2Attachment(body: string): Pkc2Attachment {
       launcher_url: typeof p.launcher_url === 'string' ? p.launcher_url : undefined,
       app_group: typeof p.app_group === 'string' ? p.app_group : undefined,
       app_order: typeof p.app_order === 'number' ? p.app_order : undefined,
+      extra: (() => {
+        // whitelist copy は未知 field を無言で破壊する ── PKC2 で launcher 設定
+        // 消失事故として教訓化済みの型(attachment-presenter.ts の警句)。
+        // 未知 / 将来 field は verbatim で保全する(review #3)
+        const rest = Object.entries(p).filter(([k]) => !KNOWN_ATTACHMENT_KEYS.has(k));
+        return rest.length > 0 ? Object.fromEntries(rest) : undefined;
+      })(),
     };
   } catch {
     return { name: '', mime: 'application/octet-stream' };
@@ -104,6 +132,7 @@ export const attachmentFlavor: FlavorSpec = {
     if (a.launcher_url !== undefined) meta['attachment.launcher_url'] = a.launcher_url;
     if (a.app_group !== undefined) meta['attachment.app_group'] = a.app_group;
     if (a.app_order !== undefined) meta['attachment.app_order'] = a.app_order;
+    if (a.extra !== undefined) meta['attachment.extra'] = JSON.stringify(a.extra);
     // body(説明 markdown 領域)は空で始める ── PKC2 の attachment body に自由記述は無い
     return serializeFrontmatter(meta);
   },

@@ -31,8 +31,12 @@ export const textlogFlavor: FlavorSpec = {
   extract: () => NO_EXTRACT,
   fromPkc2(body) {
     // PKC2: JSON { entries: [{ id, text, createdAt, flags }] }(寛容 parse)。
-    // ⚠ ログ id(ULID / legacy)は markdown へ持ち込まない ── PKC2 のログ単位
-    // permalink を参照するリンクの書換は P6 import の残課題として扱う
+    // ⚠ ログ id(ULID / legacy)は markdown へ持ち込まない ── 変換後は復元
+    // 不能なので、PKC2 のログ単位 permalink の書換は **P6 import パイプライン内で
+    // fromPkc2 より前**にしか置けない(ordering 制約 ── review #6)
+    // ⚠ ログ text 中の `## <日時>` 形の行は実節見出しと識別不能(エスケープ
+    // しない)。P3-5 の節 parse(append 実装)は末尾追記のみで節を再解釈しない
+    // 設計にすること
     const log = parseTextlogBody(body);
     return log.entries
       .map((e) => {

@@ -12,7 +12,7 @@ import { parseFrontmatter, extractVars } from '../../src/features/markdown/front
  * PKC-Markdown 移植の parity pin(P3-3)。
  * golden は **PKC2 の renderMarkdown(markdown-it 14.3.0)から採取**した実出力
  * (manual ch12 全文 1,431 行 + fixture 3 種 + 方言の縁スニペット 20 種)。
- * 採取手順: scratchpad/harvest-goldens.ts を cwd=PKC2 で tsx 実行。
+ * 採取手順: tests/fixtures/markdown-goldens/harvest-from-pkc2.ts(手順は同ファイル冒頭)。
  * ⚠ markdown-it のバージョンを動かすと golden ごと再検証が必要(14.3.0 に固定中)。
  */
 interface GoldenCase {

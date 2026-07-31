@@ -89,6 +89,16 @@ interface FlavorSpec {
 | attachment | frontmatter(asset_key / mime)+ 説明 markdown | 表示は `lendObjectUrl`(dispose 規律) |
 | text / folder / generic / opaque | ほぼそのまま | text fallback |
 
+- P3-4 review で確定した残課題(P3-5 / P6 で拾う):
+  - **P3-5**: `parseFrontmatter` は fence 直後の空行 1 個を swallow する ── 本文先頭が
+    空行の body を `setFrontmatter` 系で書き換えると先頭空行が確定的に落ちる。
+    frontmatter 書換 UI(editor / kanban トグル)を実装するときに parse view ではなく
+    原文 splice で書くこと
+  - **P6**: textlog の PKC2 ログ id は fromPkc2 で復元不能になる ── ログ単位 permalink の
+    リンク書換は import パイプライン内で **fromPkc2 より前段**に置く(ordering 制約)
+  - **P6**: attachment の未知 field は `attachment.extra`(JSON scalar)に保全される ──
+    importer はこれを落とさず新スキーマへ運ぶ
+
 ## 4. PKC-Markdown パイプラインの移植単位
 
 - **移植単位 = `renderMarkdown()` パイプライン丸ごと**(行単位 preprocessor(PUA sentinel

@@ -69,7 +69,12 @@ export const spreadsheetFlavor: FlavorSpec = {
     // noheader は csv fence の既存オプション規約(csv-table.ts)をそのまま使う
     const info = sheet.noHeader ? 'csv-render noheader' : 'csv-render';
     const csv = sheet.rows.map((r) => r.map(csvEscapeField).join(',')).join('\n');
-    const fence = csv === '' ? `\`\`\`${info}\n\`\`\`` : `\`\`\`${info}\n${csv}\n\`\`\``;
+    // fence 長は内容の最長 backtick run + 1(最低 3)── セルに ``` があっても
+    // fence が閉じない(review #2: fence 破壊でシートデータが fence 外に漏れ、
+    // grid editor の再保存で欠落する S3 経路を塞ぐ)
+    const longestRun = csv.match(/`+/g)?.reduce((n, s) => Math.max(n, s.length), 0) ?? 0;
+    const tick = '`'.repeat(Math.max(3, longestRun + 1));
+    const fence = csv === '' ? `${tick}${info}\n${tick}` : `${tick}${info}\n${csv}\n${tick}`;
     const fm = Object.keys(meta).length > 0 ? `${serializeFrontmatter(meta)}\n` : '';
     return `${fm}${fence}`;
   },
