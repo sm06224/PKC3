@@ -480,6 +480,9 @@ export function serializeFrontmatter(
 /**
  * body の frontmatter block を `meta` で置き換える(無ければ prepend)。
  * meta が空なら frontmatter を除去した本文のみを返す。
+ * ⚠ parse view 経由なので本文先頭の空行 1 個が落ちる既知の癖がある ──
+ * **既存 body の部分書換には使わず `spliceFrontmatterKeys` を使う**
+ * (P3-4 review #5 の規律: 書換は原文 splice で)。
  */
 export function setFrontmatter(
   body: string,
@@ -489,4 +492,78 @@ export function setFrontmatter(
   if (Object.keys(meta).length === 0) return rest;
   const fm = serializeFrontmatter(meta);
   return rest === '' ? fm : `${fm}\n${rest}`;
+}
+
+/**
+ * frontmatter の特定 key だけを**原文 splice**で書き換える(P3-6、かんばん
+ * トグル等の構造化操作用)。本文・他 key・空行・コメントは byte 単位で無傷。
+ *
+ * - key が既存 → その行だけ差し替え(最初の一致。値 undefined なら行を除去)
+ * - key が無い → 閉じ fence の直前に追加
+ * - frontmatter 自体が無い → fence を前置(本文は無傷のまま後続)
+ */
+export function spliceFrontmatterKeys(
+  body: string,
+  updates: Record<string, FrontmatterValue | undefined>,
+): string {
+  const entries = Object.entries(updates);
+  if (entries.length === 0) return body;
+  const lineFor = ([key, value]: [string, FrontmatterValue | undefined]):
+    | string
+    | null =>
+    value === undefined
+      ? null
+      : Array.isArray(value)
+        ? `${key}: [${value.map(serializeScalar).join(', ')}]`
+        : `${key}: ${serializeScalar(value)}`;
+
+  if (!OPEN_FENCE.test(body)) {
+    const lines = entries.map(lineFor).filter((l): l is string => l !== null);
+    if (lines.length === 0) return body;
+    return `---\n${lines.join('\n')}\n---\n${body}`;
+  }
+
+  const open = body.match(OPEN_FENCE)![0];
+  const afterOpen = body.slice(open.length);
+  // 行末記号(LF / CRLF)を各行に残したまま分割 ── 本文を byte 無傷で戻すため
+  const parts = afterOpen.split(/(?<=\n)/);
+  let closeAt = -1;
+  for (let i = 0; i < parts.length; i++) {
+    if (CLOSE_FENCE_LINE.test((parts[i] ?? '').replace(/\r?\n$/, ''))) {
+      closeAt = i;
+      break;
+    }
+  }
+  if (closeAt === -1) {
+    // 開き fence だけで閉じが無い = frontmatter 不在扱い(parseFrontmatter と同じ)
+    const lines = entries.map(lineFor).filter((l): l is string => l !== null);
+    if (lines.length === 0) return body;
+    return `---\n${lines.join('\n')}\n---\n${body}`;
+  }
+
+  const eol = body.includes('\r\n') ? '\r\n' : '\n'; // 新規行のみに使う
+  const fmParts = parts.slice(0, closeAt);
+  for (const [key, value] of entries) {
+    const keyRe = new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*:`);
+    // 重複 key は**最後の一致**を書く ── parseFlatYaml は last-wins なので、
+    // 先頭行を書くと再抽出が変わらず永久 no-op になる(P3-6a review #5)
+    let at = -1;
+    for (let i = 0; i < fmParts.length; i++) {
+      if (keyRe.test(fmParts[i]!)) at = i;
+    }
+    const line = lineFor([key, value]);
+    if (at >= 0) {
+      if (line === null) {
+        fmParts.splice(at, 1);
+      } else {
+        // 既存行の行末記号を保持して差し替え
+        const term = fmParts[at]!.match(/\r?\n$/)?.[0] ?? eol;
+        fmParts[at] = line + term;
+      }
+    } else if (line !== null) {
+      fmParts.push(line + eol);
+    }
+  }
+  const rest = parts.slice(closeAt).join(''); // 閉じ fence 行から後ろは原文 byte のまま
+  return `${open}${fmParts.join('')}${rest}`;
 }

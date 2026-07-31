@@ -13,9 +13,18 @@
  * 切り替える(その時に計測してから)。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
+import type { ViewMode } from '@adapter/state/app-state';
 import { handleCopyMdBlock } from './copy-md-block';
 
 type ActionHandler = (dispatcher: Dispatcher, target: HTMLElement) => void;
+
+const VIEW_MODES: ReadonlySet<string> = new Set([
+  'detail',
+  'calendar',
+  'kanban',
+  'filer',
+  'launcher',
+]);
 
 const ACTIONS: Record<string, ActionHandler> = {
   'select-entry': (dispatcher, target) => {
@@ -26,6 +35,32 @@ const ACTIONS: Record<string, ActionHandler> = {
   'commit-edit': (dispatcher) => dispatcher.dispatch({ type: 'COMMIT_EDIT' }),
   'cancel-edit': (dispatcher) => dispatcher.dispatch({ type: 'CANCEL_EDIT' }),
   'copy-md-block': (_dispatcher, target) => handleCopyMdBlock(target),
+  'set-view': (dispatcher, target) => {
+    const view = target.getAttribute('data-pkc-view') ?? '';
+    if (VIEW_MODES.has(view))
+      dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: view as ViewMode });
+  },
+  'toggle-todo': (dispatcher, target) => {
+    const lid = target.getAttribute('data-pkc-entry');
+    if (lid) dispatcher.dispatch({ type: 'TOGGLE_TODO_STATUS', lid });
+  },
+  'calendar-nav': (dispatcher, target) => {
+    // 遷移先は renderer が描画時に焼き込む(binder は「今の月」を推定しない)
+    const year = Number(target.getAttribute('data-pkc-nav-year'));
+    const month = Number(target.getAttribute('data-pkc-nav-month'));
+    if (!Number.isInteger(year) || !Number.isInteger(month)) return;
+    dispatcher.dispatch({ type: 'SET_CALENDAR_MONTH', year, month });
+  },
+  'calendar-today': (dispatcher) => {
+    const now = new Date();
+    dispatcher.dispatch({
+      type: 'SET_CALENDAR_MONTH',
+      year: now.getFullYear(),
+      month: now.getMonth() + 1,
+    });
+  },
+  'toggle-show-archived': (dispatcher) =>
+    dispatcher.dispatch({ type: 'TOGGLE_SHOW_ARCHIVED' }),
 };
 
 function isEditorBody(el: EventTarget | null): el is HTMLTextAreaElement {

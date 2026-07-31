@@ -3,8 +3,9 @@
  *
  * `extractMeta` は**保存経路の唯一の抽出関数**── entries 表の抽出列
  * (status / date / archived)は必ずここを通って書かれる。呼び出しは
- * reducer の COMMIT_EDIT(イベント発火時に同期で行全体を確定)と
- * P6 import の変換パイプラインのみ、が規約。
+ * reducer の COMMIT_EDIT(イベント発火時に同期で行全体を確定)、
+ * effect 層の REQUEST_TODO_TOGGLE(splice 書換後の行確定)、
+ * P6 import の変換パイプライン、の 3 箇所が規約。
  */
 import type { FlavorExtract, FlavorSpec } from './flavor-spec';
 import { todoFlavor } from './todo-flavor';

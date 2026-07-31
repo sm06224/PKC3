@@ -23,12 +23,19 @@ export type ViewMode = 'detail' | 'calendar' | 'kanban' | 'filer' | 'launcher';
  * - persisted: **BODY_PERSISTED で確認された disk 上の内容**。enqueue と ack を
  *   混同しない ── persist 失敗時は baseline ≠ persisted が「disk に未達」の
  *   事実として残り、エラー復帰 / retry(将来)の判定に使える
+ *
+ * baseline ≠ persisted には向きの異なる 2 原因がある(文字列比較では区別不能):
+ * (a) 自 commit の ack 待ち(persisted が遅れている)── baseline が正
+ * (b) editor 外の書込(かんばんトグル等)が ack 済み(persisted が進んでいる)
+ *     ── disk が正。こちらだけ diskAhead で印を付け、無変更 commit / cancel で
+ *     disk を採用する(stale baseline の巻き戻し防止 ── P3-6a review #4)
  */
 export interface OpenBody {
   lid: string;
   body: string;
   baseline: string;
   persisted: string;
+  diskAhead: boolean;
 }
 
 export interface AppState {
@@ -40,6 +47,10 @@ export interface AppState {
   openBody: OpenBody | null;
   selectedLid: string | null;
   viewMode: ViewMode;
+  /** calendar の表示月(null = 今日の月を renderer 側で解決)。 */
+  calendarMonth: { year: number; month: number } | null;
+  /** calendar で archived todo を見せるか(PKC2 の showArchived と同じ意味論)。 */
+  showArchived: boolean;
   error: string | null;
 }
 
@@ -52,6 +63,8 @@ export const initialState: AppState = {
   openBody: null,
   selectedLid: null,
   viewMode: 'detail',
+  calendarMonth: null,
+  showArchived: false,
   error: null,
 };
 
@@ -61,13 +74,24 @@ export type UserAction =
   | { type: 'START_EDIT' }
   | { type: 'UPDATE_OPEN_BODY'; body: string }
   | { type: 'COMMIT_EDIT' }
-  | { type: 'CANCEL_EDIT' };
+  | { type: 'CANCEL_EDIT' }
+  | { type: 'TOGGLE_TODO_STATUS'; lid: string }
+  | { type: 'SET_CALENDAR_MONTH'; year: number; month: number }
+  | { type: 'TOGGLE_SHOW_ARCHIVED' };
 
 export type SystemCommand =
   | { type: 'SYS_BOOTED'; cid: string; metas: EntryMeta[]; relations: Relation[] }
   | { type: 'BODY_LOADED'; lid: string; body: string }
   | { type: 'BODY_LOAD_FAILED'; lid: string; error: string }
   | { type: 'BODY_PERSISTED'; lid: string; body: string }
+  | {
+      type: 'TODO_TOGGLED';
+      lid: string;
+      body: string;
+      status: string | null;
+      date: string | null;
+      archived: boolean;
+    }
   | { type: 'SYS_ERROR'; error: string };
 
 export type Dispatchable = UserAction | SystemCommand;
@@ -81,6 +105,14 @@ export type Dispatchable = UserAction | SystemCommand;
 export type DomainEvent =
   | { type: 'REQUEST_BODY'; lid: string }
   | { type: 'PERSIST_ENTRY'; entry: EntryUpsert }
+  | {
+      /** かんばんトグル要求。meta snapshot は発火時(reduce)に捕獲(C-1 規律)。 */
+      type: 'REQUEST_TODO_TOGGLE';
+      lid: string;
+      title: string;
+      entryOrder: number;
+      nextStatus: 'open' | 'done';
+    }
   | { type: 'APP_ERROR'; error: string };
 
 export interface ReduceResult {
@@ -139,6 +171,7 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
             body: action.body,
             baseline: action.body,
             persisted: action.body,
+            diskAhead: false,
           },
         },
         events: [],
@@ -175,13 +208,40 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       const { lid, body, baseline, persisted } = state.openBody;
       // baseline := body(最終 commit 内容)。disk 確認は persisted が別に持つので
       // これは楽観確定ではない(review E は persisted の導入で解消)
+      const { diskAhead } = state.openBody;
       const next: AppState = {
         ...state,
         phase: 'ready',
-        openBody: { lid, body, baseline: body, persisted },
+        // 変更ありの commit は draft が正(可視内容の last-write-wins)── disk
+        // 先行の印はここで畳む
+        openBody: { lid, body, baseline: body, persisted, diskAhead: false },
       };
-      // 変わっていないなら書かない(PKC2 #1024 の教訓を最初から)
-      if (body === baseline) return { state: next, events: [] };
+      // 変わっていないなら書かない(PKC2 #1024 の教訓を最初から)。
+      // ローカル変更が無く disk が先行(編集中に toggle ack ── diskAhead)なら
+      // **disk が勝つ** ── stale baseline を持ち越すと、後日の無関係な commit が
+      // toggle を黙って巻き戻す(P3-6a review #4)
+      if (body === baseline) {
+        if (diskAhead) {
+          return {
+            state: {
+              ...state,
+              phase: 'ready',
+              openBody: {
+                lid,
+                body: persisted,
+                baseline: persisted,
+                persisted,
+                diskAhead: false,
+              },
+            },
+            events: [],
+          };
+        }
+        return {
+          state: { ...next, openBody: { ...next.openBody!, diskAhead: false } },
+          events: [],
+        };
+      }
       const meta = state.entryMetas.get(lid);
       if (!meta) {
         // openBody は SELECT_ENTRY(存在検査済)経由でしか確立しない ── ここに
@@ -219,26 +279,103 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
     }
     case 'CANCEL_EDIT': {
       if (state.phase !== 'editing' || !state.openBody) return { state, events: [] };
+      const { lid, baseline, persisted, diskAhead } = state.openBody;
+      // draft 破棄。disk 先行(diskAhead)なら disk を採用(review #4)。
+      // 自 commit の ack 待ちで persisted が遅れているだけなら baseline が正
+      const restored = diskAhead ? persisted : baseline;
       return {
         state: {
           ...state,
           phase: 'ready',
-          openBody: { ...state.openBody, body: state.openBody.baseline },
+          openBody: {
+            lid,
+            body: restored,
+            baseline: restored,
+            persisted,
+            diskAhead: false,
+          },
         },
         events: [],
       };
     }
+    case 'TOGGLE_TODO_STATUS': {
+      // ready 限定(editing 中の裏書換を作らない)。todo 以外・未知 lid は no-op
+      if (state.phase !== 'ready') return { state, events: [] };
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta || meta.archetype !== 'todo') return { state, events: [] };
+      const nextStatus = meta.status === 'done' ? 'open' : 'done';
+      // state はまだ動かさない ── store への書込が確定した TODO_TOGGLED(ack)で
+      // 列が動く(persisted 規律と同じ「enqueue と ack を混同しない」)。
+      // ack 前の連打は stale meta 基準で同方向になる(往復しない)── 安全側の
+      // debounce 的意味論として意図どおり(review #6)
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_TODO_TOGGLE',
+            lid: meta.lid,
+            title: meta.title,
+            entryOrder: meta.entryOrder,
+            nextStatus,
+          },
+        ],
+      };
+    }
+    case 'TODO_TOGGLED': {
+      // TODO(P6/P7 コンテナ切替導入時): cid を event/ack に載せて跨ぎ ack を
+      // 捨てる(lid 偶然衝突 ── review F と同型の穴。P3-6a review #7)
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] }; // 再 boot 済みなら捨てる
+      const entryMetas = new Map(state.entryMetas).set(action.lid, {
+        ...meta,
+        status: action.status,
+        date: action.date,
+        archived: action.archived,
+      });
+      let openBody = state.openBody;
+      if (openBody?.lid === action.lid) {
+        if (state.phase === 'editing') {
+          // toggle 直後に同じ entry の編集へ入った稀な窓: draft は触らず、
+          // persisted の追従 + **diskAhead の印**だけ付ける。変更ありの commit は
+          // draft が勝つ(可視内容の last-write-wins)が、無変更 commit / cancel は
+          // disk を採用する(review #4 ── 窓の外へ帰結を生き残らせない)
+          openBody = { ...openBody, persisted: action.body, diskAhead: true };
+        } else {
+          // ready では body===baseline 不変量が立つので丸ごと差し替えで安全
+          openBody = {
+            lid: action.lid,
+            body: action.body,
+            baseline: action.body,
+            persisted: action.body,
+            diskAhead: false,
+          };
+        }
+      }
+      return { state: { ...state, entryMetas, openBody }, events: [] };
+    }
+    case 'SET_CALENDAR_MONTH': {
+      // 月送りの正規化(binder は 0 や 13 を送ってよい)
+      let { year, month } = action;
+      if (month < 1) {
+        year -= 1;
+        month = 12;
+      } else if (month > 12) {
+        year += 1;
+        month = 1;
+      }
+      return { state: { ...state, calendarMonth: { year, month } }, events: [] };
+    }
+    case 'TOGGLE_SHOW_ARCHIVED':
+      return { state: { ...state, showArchived: !state.showArchived }, events: [] };
     case 'BODY_PERSISTED': {
       // ack された内容を disk 事実として記録(選択が移って openBody が破棄
       // 済みなら捨てる ── stale ack で別 entry の作業域を汚さない)
       if (!state.openBody || state.openBody.lid !== action.lid)
         return { state, events: [] };
-      if (state.openBody.persisted === action.body) return { state, events: [] };
+      const ob = state.openBody;
+      if (ob.persisted === action.body) return { state, events: [] };
       return {
-        state: {
-          ...state,
-          openBody: { ...state.openBody, persisted: action.body },
-        },
+        state: { ...state, openBody: { ...ob, persisted: action.body } },
         events: [],
       };
     }
