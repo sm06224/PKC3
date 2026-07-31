@@ -177,12 +177,67 @@ const handlers: Handlers = {
     return null;
   },
   deleteEntry: (req) => {
-    // TODO(P3): relations / revisions の orphan 掃除(FK + CASCADE か tx 内多表削除。
-    // review #8、p2 log に pin)
-    need().exec({
-      sql: 'DELETE FROM entries WHERE cid = ? AND lid = ?',
-      bind: [req.cid, req.lid],
-    });
+    // entry の削除は relations(両向き)/ revisions を**同 tx**で掃除する
+    // (storage review #8 の解消 ── orphan を作らない。FK+CASCADE ではなく
+    // 多表削除にしたのは、schema v1 を動かさず lid 複合キーの向き 2 本を
+    // 明示するため)。assets の掃除は body 参照ベースなので P4(asset GC)
+    const database = need();
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      database.exec({
+        sql: 'DELETE FROM relations WHERE cid = ? AND (from_lid = ? OR to_lid = ?)',
+        bind: [req.cid, req.lid, req.lid],
+      });
+      database.exec({
+        sql: 'DELETE FROM revisions WHERE cid = ? AND entry_lid = ?',
+        bind: [req.cid, req.lid],
+      });
+      database.exec({
+        sql: 'DELETE FROM entries WHERE cid = ? AND lid = ?',
+        bind: [req.cid, req.lid],
+      });
+      database.exec('COMMIT');
+    } catch (err) {
+      try {
+        database.exec('ROLLBACK');
+      } catch {
+        /* rollback 失敗は元エラーを優先 */
+      }
+      throw err;
+    }
+    return null;
+  },
+  listRelations: (req) =>
+    need().selectObjects(
+      `SELECT id, from_lid, to_lid, kind, created_at, updated_at
+         FROM relations WHERE cid = ? ORDER BY id`,
+      [req.cid],
+    ) as unknown as ResultMap['listRelations'],
+  bulkUpsertRelations: (req) => {
+    const database = need();
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      for (const r of req.relations) {
+        database.exec({
+          sql: `INSERT INTO relations (cid, id, from_lid, to_lid, kind, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+                ON CONFLICT(cid, id) DO UPDATE SET
+                  from_lid = excluded.from_lid,
+                  to_lid = excluded.to_lid,
+                  kind = excluded.kind,
+                  updated_at = excluded.updated_at`,
+          bind: [req.cid, r.id, r.fromLid, r.toLid, r.kind],
+        });
+      }
+      database.exec('COMMIT');
+    } catch (err) {
+      try {
+        database.exec('ROLLBACK');
+      } catch {
+        /* rollback 失敗は元エラーを優先 */
+      }
+      throw err;
+    }
     return null;
   },
   bulkAddRevisions: (req) => {

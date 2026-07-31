@@ -89,12 +89,18 @@ interface FlavorSpec {
 | attachment | frontmatter(asset_key / mime)+ 説明 markdown | 表示は `lendObjectUrl`(dispose 規律) |
 | text / folder / generic / opaque | ほぼそのまま | text fallback |
 
-- P3-5 review で確定した残課題(P3-6 で拾う):
-  - **error phase の復帰導線**: persist 失敗(SYS_ERROR)は terminal で、現状の復帰は
-    reload のみ。復帰 action(再 boot / retry ── `baseline ≠ persisted` が「disk 未達」の
-    判定材料)を設計する。編集ボタンの非表示(無言拒否の可視化)は P3-5 で実施済み
-  - **APP_ERROR の寿命**: event 駆動の status 表示は次の state 変化で消える
-    (BODY_LOAD_FAILED 系は state.error を立てない)。エラーは state に持たせる形へ整理
+- ~~P3-5 review で確定した残課題~~(**P3-6b で解消済み**): error 復帰導線 =
+  `RETRY_PERSIST` + 再保存ボタン(`baseline ≠ persisted` が未達の証拠)。エラーは
+  state 駆動に統一(APP_ERROR event 廃止)。error の等級を分離 ── 非致命は
+  `OP_FAILED`(通知のみ)、fatal(persist 失敗)だけが error phase で、editing 中の
+  着弾は editing 維持(draft 不破壊)・SELECT はブロック(唯一の写しを無警告破棄しない)
+- P3-6b review の残課題(P3-7 以降):
+  - BODY_LOAD_FAILED 時の detail pane が "(loading…)" のまま ── 失敗表示 +
+    再クリック導線の可視化(P3-7 の UI 磨きで)
+  - editing 中の topbar view 切替 / error phase の kanban トグルが無言 dead button
+    ── disabled 表示の整理(P3-7)
+  - worker 新 op(bulkUpsertRelations の update 分岐等)は browser probe のみで
+    CI 未 pin ── P6 で relation 書込が本格化する前に probe の CI 化を検討
 - P3-4 review で確定した残課題(P3-5 / P6 で拾う):
   - **P3-5**: `parseFrontmatter` は fence 直後の空行 1 個を swallow する ── 本文先頭が
     空行の body を `setFrontmatter` 系で書き換えると先頭空行が確定的に落ちる。

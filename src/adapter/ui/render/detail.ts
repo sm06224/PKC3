@@ -98,6 +98,26 @@ export class DetailRenderer {
       edit.textContent = '編集';
       bar.append(edit);
       this.region.append(bar);
+    } else if (
+      // ⚠ この条件は baseline / persisted / diskAhead に依存するが、view の
+      // skip 指紋は (lid, body, phase) のみ ── 「条件が変わる遷移は必ず phase か
+      // body も変わる」ことに依存している(P3-6b review #8 で全遷移を確認)。
+      // openBody の指紋次元を増やす変更をするときはここを再点検すること
+      state.phase === 'error' &&
+      state.openBody &&
+      state.openBody.baseline !== state.openBody.persisted &&
+      !state.openBody.diskAhead
+    ) {
+      // 保存失敗からの復帰導線: baseline ≠ persisted =「disk に未達の commit が
+      // ある」証拠(P3-5 の分離の回収点)。黙って死なせず再送を提示する
+      const bar = document.createElement('div');
+      bar.setAttribute('data-pkc-field', 'detail-toolbar');
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.setAttribute('data-pkc-action', 'retry-persist');
+      retry.textContent = '再保存';
+      bar.append(retry);
+      this.region.append(bar);
     }
 
     const fm = parseFrontmatter(body);

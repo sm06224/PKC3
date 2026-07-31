@@ -12,6 +12,8 @@ export type StorageRequest =
   | { op: 'upsertEntry'; cid: string; entry: EntryUpsert }
   | { op: 'bulkUpsertEntries'; cid: string; entries: EntryUpsert[] }
   | { op: 'deleteEntry'; cid: string; lid: string }
+  | { op: 'listRelations'; cid: string }
+  | { op: 'bulkUpsertRelations'; cid: string; relations: RelationUpsert[] }
   | { op: 'bulkAddRevisions'; cid: string; revisions: RevisionAdd[] }
   | { op: 'revisionCounts'; cid: string }
   | { op: 'getRevision'; cid: string; id: string }
@@ -34,6 +36,24 @@ export interface AssetMetaRow {
   mime: string | null;
   size: number | null;
   hash: string | null;
+}
+
+/** relations の行(P3-6b: boot 配線)。 */
+export interface RelationRow {
+  id: string;
+  from_lid: string;
+  to_lid: string;
+  kind: string;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+/** relations の一括書込(P6 import / 将来の relation 編集が使う)。 */
+export interface RelationUpsert {
+  id: string;
+  fromLid: string;
+  toLid: string;
+  kind: string;
 }
 
 /** revision の追加(P2 最小形: snapshot は平文。zstd segment 化は P5)。 */
@@ -102,6 +122,8 @@ export interface ResultMap {
   upsertEntry: null;
   bulkUpsertEntries: null;
   deleteEntry: null;
+  listRelations: RelationRow[];
+  bulkUpsertRelations: null;
   bulkAddRevisions: null;
   revisionCounts: RevisionCountRow[];
   getRevision: string | null;
