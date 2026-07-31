@@ -16,7 +16,11 @@ import type { Dispatcher } from '@adapter/state/dispatcher';
 import type { ViewMode } from '@adapter/state/app-state';
 import { handleCopyMdBlock } from './copy-md-block';
 
-type ActionHandler = (dispatcher: Dispatcher, target: HTMLElement) => void;
+type ActionHandler = (
+  dispatcher: Dispatcher,
+  target: HTMLElement,
+  services: BinderServices,
+) => void;
 
 const VIEW_MODES: ReadonlySet<string> = new Set([
   'detail',
@@ -37,9 +41,15 @@ const ARCHETYPE_LABELS: Record<string, string> = {
 
 /** lid: epoch(base36)+ セッション内単調 counter(PKC2 と同系の形式)。 */
 let lidCounter = 0;
-function generateLid(): string {
+export function generateLid(): string {
   lidCounter += 1;
   return `${Date.now().toString(36)}-${lidCounter.toString(36).padStart(4, '0')}`;
+}
+
+/** UI サービス面(storage 依存の操作は main が実体を注入。test は fake)。 */
+export interface BinderServices {
+  attachFiles?(files: File[]): void;
+  downloadAsset?(assetKey: string, name: string): void;
 }
 
 function defaultTitle(dispatcher: Dispatcher, archetype: string): string {
@@ -162,6 +172,19 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'TOGGLE_SHOW_ARCHIVED' }),
   'retry-persist': (dispatcher) => dispatcher.dispatch({ type: 'RETRY_PERSIST' }),
   'filer-root': (dispatcher) => dispatcher.dispatch({ type: 'DESELECT_ENTRY' }),
+  'attach-file': (_dispatcher, target) => {
+    // 常設の hidden input を開く(動的生成にしない ── smoke の setInputFiles と
+    // ブラウザの user-gesture 要件の両方に効く)
+    target
+      .closest('[data-pkc-region="shell"]')
+      ?.querySelector<HTMLInputElement>('[data-pkc-field="attach-input"]')
+      ?.click();
+  },
+  'download-asset': (dispatcher, target, services) => {
+    const key = target.getAttribute('data-pkc-asset-key');
+    const name = target.getAttribute('data-pkc-asset-name') ?? 'download';
+    if (key) services.downloadAsset?.(key, name);
+  },
 };
 
 function isEditorBody(el: EventTarget | null): el is HTMLTextAreaElement {
@@ -171,18 +194,33 @@ function isEditorBody(el: EventTarget | null): el is HTMLTextAreaElement {
   );
 }
 
-export function bindActions(root: HTMLElement, dispatcher: Dispatcher): () => void {
+export function bindActions(
+  root: HTMLElement,
+  dispatcher: Dispatcher,
+  services: BinderServices = {},
+): () => void {
   const onClick = (ev: Event) => {
     const el = (ev.target as HTMLElement | null)?.closest<HTMLElement>(
       '[data-pkc-action]',
     );
     if (!el || !root.contains(el)) return;
     const handler = ACTIONS[el.getAttribute('data-pkc-action') ?? ''];
-    handler?.(dispatcher, el);
+    handler?.(dispatcher, el, services);
   };
   const onInput = (ev: Event) => {
     if (isEditorBody(ev.target)) {
       dispatcher.dispatch({ type: 'UPDATE_OPEN_BODY', body: ev.target.value });
+    }
+  };
+  const onChange = (ev: Event) => {
+    const el = ev.target;
+    if (
+      el instanceof HTMLInputElement &&
+      el.getAttribute('data-pkc-field') === 'attach-input'
+    ) {
+      const files = el.files ? [...el.files] : [];
+      el.value = ''; // 同じファイルの再選択でも change が発火するように
+      if (files.length > 0) services.attachFiles?.(files);
     }
   };
   const onKeydown = (ev: Event) => {
@@ -215,10 +253,12 @@ export function bindActions(root: HTMLElement, dispatcher: Dispatcher): () => vo
   };
   root.addEventListener('click', onClick);
   root.addEventListener('input', onInput);
+  root.addEventListener('change', onChange);
   root.addEventListener('keydown', onKeydown);
   return () => {
     root.removeEventListener('click', onClick);
     root.removeEventListener('input', onInput);
+    root.removeEventListener('change', onChange);
     root.removeEventListener('keydown', onKeydown);
   };
 }

@@ -84,8 +84,17 @@ export type UserAction =
   | { type: 'SET_CALENDAR_MONTH'; year: number; month: number }
   | { type: 'TOGGLE_SHOW_ARCHIVED' }
   | { type: 'RETRY_PERSIST' }
-  /** lid / title は binder が生成して渡す(reducer は純粋のまま ── Date を呼ばない)。 */
-  | { type: 'CREATE_ENTRY'; archetype: string; lid: string; title: string }
+  /** lid / title は binder が生成して渡す(reducer は純粋のまま ── Date を呼ばない)。
+   *  body 省略時は flavor seed。edit:false は「作って選択するだけ」(添付取込等 ──
+   *  editor に入らず freshLid も立てない)。 */
+  | {
+      type: 'CREATE_ENTRY';
+      archetype: string;
+      lid: string;
+      title: string;
+      body?: string;
+      edit?: boolean;
+    }
   | { type: 'DESELECT_ENTRY' }
   | { type: 'DELETE_ENTRY'; lid: string }
   | { type: 'RENAME_ENTRY_TITLE'; lid: string; title: string };
@@ -468,7 +477,8 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
           events: [],
         };
       }
-      const body = seedBodyFor(action.archetype);
+      const body = action.body ?? seedBodyFor(action.archetype);
+      const wantsEdit = action.edit !== false;
       const ext = extractMeta(action.archetype, body);
       const lastLid = state.order[state.order.length - 1];
       const entryOrder = lastLid
@@ -491,11 +501,11 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       return {
         state: {
           ...state,
-          phase: 'editing', // 作成 → 即編集(PKC2 の遷移を維持)
+          phase: wantsEdit ? 'editing' : 'ready', // 既定は作成 → 即編集(PKC2 の遷移)
           entryMetas: new Map(state.entryMetas).set(action.lid, meta),
           order: [...state.order, action.lid],
           selectedLid: action.lid,
-          freshLid: action.lid,
+          freshLid: wantsEdit ? action.lid : null, // 非編集作成は fresh 掃除の対象外
           error: null,
           openBody: {
             lid: action.lid,

@@ -10,10 +10,12 @@ import {
 import { acquireWriterLease } from '@adapter/platform/storage/writer-lease';
 import type { InitResult } from '@adapter/platform/storage/protocol';
 import { installHtmlSandboxResizer } from '@features/markdown/html-sandbox';
+import { AssetBlobStore } from '@adapter/platform/storage/asset-blob-store';
 import { buildShell } from '@adapter/ui/render/shell';
 import { SidebarRenderer } from '@adapter/ui/render/sidebar';
 import { CenterRouter } from '@adapter/ui/render/center';
-import { bindActions } from '@adapter/ui/actions/binder';
+import { bindActions, type BinderServices } from '@adapter/ui/actions/binder';
+import { attachFiles } from '@adapter/ui/actions/attach';
 
 const DB_NAME = 'pkc3';
 const DEFAULT_CID = 'default';
@@ -72,7 +74,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const dispatcher = new Dispatcher();
   const regions = buildShell(root);
   const sidebar = new SidebarRenderer(regions.sidebar);
-  const center = new CenterRouter(regions.detail);
+  // assets: bytes は IDB Blob(sqlite には meta のみ)。表示は lend/dispose 規律
+  const blobs = new AssetBlobStore();
+  const center = new CenterRouter(regions.detail, undefined, {
+    lend: (key) => blobs.lendObjectUrl(DEFAULT_CID, key),
+    getBlob: (key) => blobs.get(DEFAULT_CID, key),
+  });
   // topbar の active 印(変わったときだけ属性を触る)
   let markedView: string | null = null;
   const markView = (view: string) => {
@@ -90,7 +97,54 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     center.render(state);
     markView(state.viewMode);
   });
-  bindActions(root, dispatcher);
+  const services: BinderServices = {
+    attachFiles: (files) =>
+      void attachFiles(
+        dispatcher,
+        {
+          putBlob: (key, blob) => blobs.put(DEFAULT_CID, key, blob),
+          putMeta: async (m) => {
+            await client.request({
+              op: 'putAssetMeta',
+              cid: DEFAULT_CID,
+              meta: { key: m.key, mime: m.mime, size: m.size, hash: m.hash },
+            });
+          },
+          listMetas: () => client.request({ op: 'listAssetMetas', cid: DEFAULT_CID }),
+          estimate: navigator.storage?.estimate
+            ? () => navigator.storage.estimate()
+            : undefined,
+        },
+        files,
+      ),
+    downloadAsset: async (assetKey, name) => {
+      try {
+        const lent = await blobs.lendObjectUrl(DEFAULT_CID, assetKey);
+        if (!lent) {
+          dispatcher.dispatch({
+            type: 'OP_FAILED',
+            error: `asset が見つかりません: ${name}`,
+          });
+          return;
+        }
+        const a = document.createElement('a');
+        a.href = lent.url;
+        a.download = name;
+        document.body.append(a);
+        a.click();
+        a.remove();
+        // click 直後の revoke は DL を中断しうる ── 1 秒で寿命終端
+        setTimeout(lent.dispose, 1000);
+      } catch (e) {
+        // IDB 障害等を unhandled rejection にしない(可視で終える)
+        dispatcher.dispatch({
+          type: 'OP_FAILED',
+          error: `ダウンロードに失敗しました(${name}): ${String(e)}`,
+        });
+      }
+    },
+  };
+  bindActions(root, dispatcher, services);
   // html sandbox iframe の高さ追従。1 listener が message 内 id で iframe を
   // 特定するので boot で 1 回だけ張る(規約 ── 多重 install ガードは無い)。
   // ⚠ 別 document の surface(Viewer popup 等、P3-8)には効かない ── その
