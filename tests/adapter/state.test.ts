@@ -188,6 +188,50 @@ describe('reducer: lean aggregate', () => {
     expect(r.state.entryMetas).not.toBe(s.entryMetas);
   });
 
+  it('commit does not confirm disk: persisted updates only on BODY_PERSISTED ack (review E)', () => {
+    let s = loadedA();
+    s = reduce(s, { type: 'START_EDIT' }).state;
+    s = reduce(s, { type: 'UPDATE_OPEN_BODY', body: '# A2' }).state;
+    s = reduce(s, { type: 'COMMIT_EDIT' }).state;
+    // enqueue と ack を混同しない: baseline は commit で、persisted は ack で動く
+    expect(s.openBody).toMatchObject({ body: '# A2', baseline: '# A2', persisted: '# A' });
+    s = reduce(s, { type: 'BODY_PERSISTED', lid: 'a', body: '# A2' }).state;
+    expect(s.openBody?.persisted).toBe('# A2');
+  });
+
+  it('stale BODY_PERSISTED (selection moved, openBody replaced) is discarded', () => {
+    let s = loadedA();
+    // 選択が b へ移り openBody は破棄 → 旧 lid の ack は無視
+    s = reduce(s, { type: 'SELECT_ENTRY', lid: 'b' }).state;
+    s = reduce(s, { type: 'BODY_LOADED', lid: 'b', body: 'B' }).state;
+    s = reduce(s, { type: 'BODY_PERSISTED', lid: 'a', body: '# A2' }).state;
+    expect(s.openBody).toMatchObject({ lid: 'b', persisted: 'B' });
+  });
+
+  it('cancel after an in-flight commit restores the committed content, not pre-commit', () => {
+    let s = loadedA();
+    s = reduce(s, { type: 'START_EDIT' }).state;
+    s = reduce(s, { type: 'UPDATE_OPEN_BODY', body: '# A2' }).state;
+    s = reduce(s, { type: 'COMMIT_EDIT' }).state; // ack 未着
+    s = reduce(s, { type: 'START_EDIT' }).state;
+    s = reduce(s, { type: 'UPDATE_OPEN_BODY', body: 'draft' }).state;
+    s = reduce(s, { type: 'CANCEL_EDIT' }).state;
+    expect(s.openBody?.body).toBe('# A2'); // 直前 commit へ戻る(disk 未確認でも)
+  });
+
+  it('re-committing the original content after an intermediate commit still writes (A→B→A)', () => {
+    let s = loadedA();
+    s = reduce(s, { type: 'START_EDIT' }).state;
+    s = reduce(s, { type: 'UPDATE_OPEN_BODY', body: '# B' }).state;
+    s = reduce(s, { type: 'COMMIT_EDIT' }).state;
+    s = reduce(s, { type: 'START_EDIT' }).state;
+    s = reduce(s, { type: 'UPDATE_OPEN_BODY', body: '# A' }).state;
+    const r = reduce(s, { type: 'COMMIT_EDIT' });
+    // skip 基準は「最後に enqueue した内容」(baseline)── 元に戻す commit も書く
+    expect(r.events).toHaveLength(1);
+    expect(r.events[0]).toMatchObject({ type: 'PERSIST_ENTRY' });
+  });
+
   it('CANCEL_EDIT restores baseline', () => {
     let s = loadedA();
     s = reduce(s, { type: 'START_EDIT' }).state;

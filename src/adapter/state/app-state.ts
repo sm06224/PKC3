@@ -14,11 +14,21 @@ import type { EntryUpsert } from '@adapter/platform/storage/schema';
 export type AppPhase = 'initializing' | 'ready' | 'editing' | 'error';
 export type ViewMode = 'detail' | 'calendar' | 'kanban' | 'filer' | 'launcher';
 
-/** 選択中 entry の body 作業域。baseline はキャンセル復帰・dirty 判定用。 */
+/**
+ * 選択中 entry の body 作業域。3 つの内容は意味が異なる(review E の解消形):
+ * - body: 編集中の現在値
+ * - baseline: **最後に commit した内容**。CANCEL_EDIT の復帰先であり、
+ *   「変わっていないなら書かない」(#1024)の skip 基準(= 最後に enqueue した
+ *   書込内容と常に一致するので、A→B→A の再 commit も正しく書かれる)
+ * - persisted: **BODY_PERSISTED で確認された disk 上の内容**。enqueue と ack を
+ *   混同しない ── persist 失敗時は baseline ≠ persisted が「disk に未達」の
+ *   事実として残り、エラー復帰 / retry(将来)の判定に使える
+ */
 export interface OpenBody {
   lid: string;
   body: string;
   baseline: string;
+  persisted: string;
 }
 
 export interface AppState {
@@ -57,7 +67,7 @@ export type SystemCommand =
   | { type: 'SYS_BOOTED'; cid: string; metas: EntryMeta[]; relations: Relation[] }
   | { type: 'BODY_LOADED'; lid: string; body: string }
   | { type: 'BODY_LOAD_FAILED'; lid: string; error: string }
-  | { type: 'BODY_PERSISTED'; lid: string }
+  | { type: 'BODY_PERSISTED'; lid: string; body: string }
   | { type: 'SYS_ERROR'; error: string };
 
 export type Dispatchable = UserAction | SystemCommand;
@@ -124,7 +134,12 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       return {
         state: {
           ...state,
-          openBody: { lid: action.lid, body: action.body, baseline: action.body },
+          openBody: {
+            lid: action.lid,
+            body: action.body,
+            baseline: action.body,
+            persisted: action.body,
+          },
         },
         events: [],
       };
@@ -157,14 +172,13 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
     }
     case 'COMMIT_EDIT': {
       if (state.phase !== 'editing' || !state.openBody) return { state, events: [] };
-      const { lid, body, baseline } = state.openBody;
-      // ⚠ baseline の確定は楽観(persist 完了前)── 現状 persist 失敗は SYS_ERROR で
-      // 終端するため silent loss は無いが、P3-5 でエラー復帰 / retry を足すときは
-      // baseline 確定を BODY_PERSISTED 側へ移すこと(review E の pin)
+      const { lid, body, baseline, persisted } = state.openBody;
+      // baseline := body(最終 commit 内容)。disk 確認は persisted が別に持つので
+      // これは楽観確定ではない(review E は persisted の導入で解消)
       const next: AppState = {
         ...state,
         phase: 'ready',
-        openBody: { lid, body, baseline: body },
+        openBody: { lid, body, baseline: body, persisted },
       };
       // 変わっていないなら書かない(PKC2 #1024 の教訓を最初から)
       if (body === baseline) return { state: next, events: [] };
@@ -214,8 +228,20 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
         events: [],
       };
     }
-    case 'BODY_PERSISTED':
-      return { state, events: [] };
+    case 'BODY_PERSISTED': {
+      // ack された内容を disk 事実として記録(選択が移って openBody が破棄
+      // 済みなら捨てる ── stale ack で別 entry の作業域を汚さない)
+      if (!state.openBody || state.openBody.lid !== action.lid)
+        return { state, events: [] };
+      if (state.openBody.persisted === action.body) return { state, events: [] };
+      return {
+        state: {
+          ...state,
+          openBody: { ...state.openBody, persisted: action.body },
+        },
+        events: [],
+      };
+    }
     case 'SYS_ERROR':
       return {
         state: { ...state, phase: 'error', error: action.error },

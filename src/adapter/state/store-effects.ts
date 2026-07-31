@@ -68,7 +68,11 @@ export function connectStoreEffects(
           try {
             await store.persistEntry(ev.entry);
             if (!disposed)
-              dispatcher.dispatch({ type: 'BODY_PERSISTED', lid: ev.entry.lid });
+              dispatcher.dispatch({
+                type: 'BODY_PERSISTED',
+                lid: ev.entry.lid,
+                body: ev.entry.body,
+              });
           } catch (e) {
             if (!disposed) dispatcher.dispatch({ type: 'SYS_ERROR', error: String(e) });
           }
