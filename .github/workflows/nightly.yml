@@ -1,0 +1,43 @@
+# PKC3 nightly — 重い検証の受け皿(CLAUDE.md プロセス指示: PR gate は速い lane
+# 限定、視覚全量・ベンチ・大規模 probe はここへ)。schedule + 手動 dispatch。
+name: Nightly
+on:
+  schedule:
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  heavy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install chromium --with-deps
+      - name: Resolve chromium path for probes
+        run: echo "PKC3_CHROMIUM=$(node -e "const {chromium}=require('@playwright/test'); console.log(chromium.executablePath())")" >> "$GITHUB_ENV"
+      - name: Visual smoke (full)
+        run: npm run test:smoke
+      - name: Start vite dev server (probe pages)
+        run: |
+          npx vite --port 45731 > /tmp/vite.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:45731/ > /dev/null && break
+            sleep 1
+          done
+      - name: Probe — store (sqlite ops / orphan cascade)
+        run: node tests/probe/run-sahpool-probe.mjs http://localhost:45731/tests/probe/store-probe.html
+      - name: Probe — sahpool (VFS / journal)
+        run: node tests/probe/run-sahpool-probe.mjs http://localhost:45731/tests/probe/sahpool-probe.html
+      - name: Probe — sidebar (15k 行の DOM 同一性)
+        run: node tests/probe/run-sidebar-probe.mjs
+      - name: Probe — editor (打鍵 / 対照群)
+        run: node tests/probe/run-editor-probe.mjs
+      - name: Probe — kanban (トグル往復 / move 数)
+        run: node tests/probe/run-kanban-probe.mjs

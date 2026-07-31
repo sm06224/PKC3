@@ -4,3 +4,4 @@ coverage/
 *.local
 .bench-profile/
 .lease-profile/
+test-results/
