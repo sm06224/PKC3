@@ -11,6 +11,8 @@ import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
+import * as clipboard from '../../src/adapter/platform/clipboard';
+import { vi } from 'vitest';
 
 function meta(lid: string): EntryMeta {
   return {
@@ -114,6 +116,84 @@ describe('editor flow (P3-5)', () => {
     await tick();
     expect(persisted).toHaveLength(1);
     expect(persisted[0]?.body).toBe('plain text v2');
+  });
+
+  it('IME 変換中の Esc は編集キャンセルに化けない(isComposing ガード)', async () => {
+    const { d, q } = setup({ a: '# 原文' });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    q('[data-pkc-action="start-edit"]')!.click();
+    const ta = q<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')!;
+    ta.value = '変換中の draft';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    // 変換中の Esc =「変換の取り消し」── 編集セッションは維持されること
+    ta.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, isComposing: true }),
+    );
+    expect(d.getState().phase).toBe('editing');
+    expect(d.getState().openBody?.body).toBe('変換中の draft');
+    expect(q('[data-pkc-field="editor-body"]')).toBe(ta);
+  });
+
+  it('キャンセルボタン(実クリック)も baseline へ戻す', async () => {
+    const { d, persisted, q } = setup({ a: '# 原文' });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    q('[data-pkc-action="start-edit"]')!.click();
+    const ta = q<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')!;
+    ta.value = '捨てる';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    q('[data-pkc-action="cancel-edit"]')!.click();
+    expect(q('[data-pkc-field="detail-body"]')?.textContent).toContain('原文');
+    expect(persisted).toHaveLength(0);
+  });
+
+  it('保存失敗(error phase)では「編集」ボタンを出さない(無言の操作拒否を作らない)', async () => {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const d = new Dispatcher();
+    const regions = buildShell(root);
+    const detail = new DetailRenderer(regions.detail);
+    d.onState((s) => detail.render(s));
+    bindActions(root, d);
+    connectStoreEffects(d, {
+      getBody: async () => '# A',
+      persistEntry: async () => {
+        throw new Error('disk full');
+      },
+    });
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a')], relations: [] });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    root.querySelector<HTMLElement>('[data-pkc-action="start-edit"]')!.click();
+    const ta = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')!;
+    ta.value = 'v2';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    root.querySelector<HTMLElement>('[data-pkc-action="commit-edit"]')!.click();
+    await tick(20);
+    expect(d.getState().phase).toBe('error');
+    // START_EDIT は ready 限定 ── ボタンを出したまま無言 no-op にしない
+    expect(root.querySelector('[data-pkc-action="start-edit"]')).toBeNull();
+  });
+
+  it('copy-md-block は実 delegation 経路(rendered ⧉ ボタンのクリック)で動く', async () => {
+    const spy = vi.spyOn(clipboard, 'copyMarkdownAndHtml').mockResolvedValue(true);
+    const { d, q, root } = setup({ a: '```js\nconst x = 1;\n```' });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    // renderMarkdown が生成した実ボタン → root delegation → handler → clipboard
+    const btn = root.querySelector<HTMLElement>(
+      '[data-pkc-field="detail-body"] [data-pkc-action="copy-md-block"]',
+    );
+    expect(btn).not.toBeNull();
+    btn!.click();
+    await tick(0);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]?.[0]).toContain('const x = 1;');
+    expect(q('[data-pkc-action="copy-md-block"]')?.getAttribute('data-pkc-flash')).toBe(
+      'true',
+    );
+    spy.mockRestore();
   });
 
   it('無変化の保存は書かない(#1024)', async () => {

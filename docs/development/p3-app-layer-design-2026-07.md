@@ -89,6 +89,12 @@ interface FlavorSpec {
 | attachment | frontmatter(asset_key / mime)+ 説明 markdown | 表示は `lendObjectUrl`(dispose 規律) |
 | text / folder / generic / opaque | ほぼそのまま | text fallback |
 
+- P3-5 review で確定した残課題(P3-6 で拾う):
+  - **error phase の復帰導線**: persist 失敗(SYS_ERROR)は terminal で、現状の復帰は
+    reload のみ。復帰 action(再 boot / retry ── `baseline ≠ persisted` が「disk 未達」の
+    判定材料)を設計する。編集ボタンの非表示(無言拒否の可視化)は P3-5 で実施済み
+  - **APP_ERROR の寿命**: event 駆動の status 表示は次の state 変化で消える
+    (BODY_LOAD_FAILED 系は state.error を立てない)。エラーは state に持たせる形へ整理
 - P3-4 review で確定した残課題(P3-5 / P6 で拾う):
   - **P3-5**: `parseFrontmatter` は fence 直後の空行 1 個を swallow する ── 本文先頭が
     空行の body を `setFrontmatter` 系で書き換えると先頭空行が確定的に落ちる。

@@ -30,7 +30,7 @@ const ACTIONS: Record<string, ActionHandler> = {
 
 function isEditorBody(el: EventTarget | null): el is HTMLTextAreaElement {
   return (
-    el instanceof HTMLElement &&
+    el instanceof HTMLTextAreaElement &&
     el.getAttribute('data-pkc-field') === 'editor-body'
   );
 }
@@ -52,13 +52,17 @@ export function bindActions(root: HTMLElement, dispatcher: Dispatcher): () => vo
   const onKeydown = (ev: Event) => {
     const ke = ev as KeyboardEvent;
     if (!isEditorBody(ke.target)) return;
+    // 🔴 IME ガード(PKC2 repo 慣行)── 変換中の Esc は「変換の取り消し」で
+    // あって編集キャンセルではない。ガードが無いと draft 丸ごと破棄になる
+    if (ke.isComposing) return;
     // PKC2 慣例: Ctrl/Cmd+S = 保存(ブラウザの保存ダイアログも抑止)、
     // Esc = キャンセル。Ctrl/Cmd+Enter も保存の別名として受ける
     // (PKC2 の章フォーカス編集が両対応だった ── append 系の Ctrl+Enter は
-    // textlog UI 側の文脈で導入する)
+    // textlog UI 側の文脈で導入する)。altKey は除外(AltGr = Ctrl+Alt 誤発火)
     if (
-      ((ke.key === 's' || ke.key === 'S') && (ke.ctrlKey || ke.metaKey)) ||
-      (ke.key === 'Enter' && (ke.ctrlKey || ke.metaKey))
+      !ke.altKey &&
+      (((ke.key === 's' || ke.key === 'S') && (ke.ctrlKey || ke.metaKey)) ||
+        (ke.key === 'Enter' && (ke.ctrlKey || ke.metaKey)))
     ) {
       ke.preventDefault();
       dispatcher.dispatch({ type: 'COMMIT_EDIT' });

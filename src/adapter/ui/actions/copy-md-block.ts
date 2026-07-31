@@ -66,6 +66,9 @@ export function extractMdBlockPlainText(inner: HTMLElement): string {
   return inner.textContent ?? '';
 }
 
+/** 連打時に先行 timer が後発 flash を早期に消さないための timer 台帳。 */
+const flashTimers = new WeakMap<HTMLElement, ReturnType<typeof setTimeout>>();
+
 /** click handler 本体(binder の ACTIONS から呼ばれる)。 */
 export function handleCopyMdBlock(target: HTMLElement): void {
   const block = target.closest<HTMLElement>('.pkc-md-block');
@@ -77,7 +80,15 @@ export function handleCopyMdBlock(target: HTMLElement): void {
   void copyMarkdownAndHtml(plain, source.outerHTML).then((ok) => {
     if (ok) {
       target.setAttribute('data-pkc-flash', 'true');
-      setTimeout(() => target.removeAttribute('data-pkc-flash'), 700);
+      const prev = flashTimers.get(target);
+      if (prev !== undefined) clearTimeout(prev);
+      flashTimers.set(
+        target,
+        setTimeout(() => {
+          target.removeAttribute('data-pkc-flash');
+          flashTimers.delete(target);
+        }, 700),
+      );
     }
   });
 }

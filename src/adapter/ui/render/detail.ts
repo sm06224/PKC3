@@ -21,7 +21,7 @@ import {
   extractHeadingNumberConfig,
   applyDocumentGlobals,
 } from '@features/markdown/document-globals';
-import type { AppState } from '@adapter/state/app-state';
+import type { AppState, AppPhase } from '@adapter/state/app-state';
 
 type Mode = 'empty' | 'view' | 'editor';
 
@@ -31,6 +31,8 @@ export class DetailRenderer {
   private lastSelected: string | null = null;
   /** view で最後に描いた body(null = openBody 不在の loading 表示)。 */
   private lastBody: string | null = null;
+  /** phase は toolbar の有無を変える(error では編集ボタンを出さない)。 */
+  private lastPhase: AppPhase | null = null;
 
   constructor(region: HTMLElement) {
     this.region = region;
@@ -45,10 +47,13 @@ export class DetailRenderer {
       return;
     }
     const body = state.openBody?.body ?? null;
+    // 指紋は (selectedLid, body, phase)。title 次元は含めていない ──
+    // title 編集が入る段階で entryMetas 参照を指紋に足すこと(現状到達不能)
     if (
       this.mode !== 'editor' &&
       state.selectedLid === this.lastSelected &&
-      body === this.lastBody
+      body === this.lastBody &&
+      state.phase === this.lastPhase
     )
       return;
     this.renderView(state, body);
@@ -65,6 +70,7 @@ export class DetailRenderer {
     this.mode = 'view';
     this.lastSelected = state.selectedLid;
     this.lastBody = body;
+    this.lastPhase = state.phase;
 
     this.region.textContent = '';
     if (!state.selectedLid) {
@@ -81,14 +87,18 @@ export class DetailRenderer {
       return;
     }
 
-    const bar = document.createElement('div');
-    bar.setAttribute('data-pkc-field', 'detail-toolbar');
-    const edit = document.createElement('button');
-    edit.type = 'button';
-    edit.setAttribute('data-pkc-action', 'start-edit');
-    edit.textContent = '編集';
-    bar.append(edit);
-    this.region.append(bar);
+    // error phase では「編集」を出さない ── START_EDIT は ready 限定なので、
+    // 出したまま無言 no-op にしない(review B-1 原則: 無言の操作拒否を作らない)
+    if (state.phase === 'ready') {
+      const bar = document.createElement('div');
+      bar.setAttribute('data-pkc-field', 'detail-toolbar');
+      const edit = document.createElement('button');
+      edit.type = 'button';
+      edit.setAttribute('data-pkc-action', 'start-edit');
+      edit.textContent = '編集';
+      bar.append(edit);
+      this.region.append(bar);
+    }
 
     const fm = parseFrontmatter(body);
     if (hasMarkdownSyntax(fm.body)) {

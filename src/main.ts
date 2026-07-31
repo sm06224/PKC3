@@ -83,15 +83,23 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const statusBase =
     `${APP_ID} v${APP_VERSION} (${BUILD_KIND}) — ${init.vfs}` +
     (init.fallbackReason ? ` ⚠ ${init.fallbackReason}` : '');
+  // textContent の setter は同一文字列でも子ノードを全置換する ── 打鍵ごとの
+  // state 変化で無駄な DOM 変異を起こさないよう、変わったときだけ書く
+  let statusShown = statusBase;
   regions.status.textContent = statusBase;
+  const showStatus = (text: string) => {
+    if (text === statusShown) return;
+    statusShown = text;
+    regions.status.textContent = text;
+  };
   dispatcher.onState((state) => {
-    regions.status.textContent = state.error
-      ? `${statusBase} ⚠ エラー: ${state.error}`
-      : statusBase;
+    showStatus(state.error ? `${statusBase} ⚠ エラー: ${state.error}` : statusBase);
   });
+  // ⚠ APP_ERROR(event)による表示は次の state 変化で statusBase に戻る
+  // (BODY_LOAD_FAILED 系は state.error を立てないため寿命が「次の操作まで」)。
+  // エラーを state に持たせる整理は P3-6 で(p3 設計メモに記載)
   dispatcher.onEvent((ev) => {
-    if (ev.type === 'APP_ERROR')
-      regions.status.textContent = `${statusBase} ⚠ ${ev.error}`;
+    if (ev.type === 'APP_ERROR') showStatus(`${statusBase} ⚠ ${ev.error}`);
   });
 
   dispatcher.dispatch({
