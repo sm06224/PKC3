@@ -71,12 +71,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     detail.render(state);
   });
   bindActions(root, dispatcher);
-  connectStoreEffects(
-    dispatcher,
-    createStorePort(client, DEFAULT_CID, (lid) =>
-      dispatcher.getState().entryMetas.get(lid),
-    ),
-  );
+  connectStoreEffects(dispatcher, createStorePort(client, DEFAULT_CID));
 
   // status: provenance + エラーの可視化(review B-1 ── 無言の操作拒否を作らない)
   const statusBase =

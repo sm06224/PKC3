@@ -6,17 +6,19 @@
  * 直列化する。worker handler が将来 async 化しても、app 側から見た op 順序は
  * ここで保証される(「init 以外は同期」という暗黙 invariant に依存しない)。
  */
+import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import type { Dispatcher } from './dispatcher';
 
 /**
  * effect 層が必要とする store 面(test では fake を注入)。
- * ⚠ 実装(P3-4/5)の persistBody は「body だけ書く」naive op にしないこと ──
- * 保存経路は必ず FlavorSpec.extract を通して抽出列(status/date/archived)ごと
- * upsert する(review K。抽出列 stale 化 = PKC2 #1022 型乖離の防止)。
+ * persistEntry は**行全体(抽出列込み)**を受け取る ── 抽出は reducer の
+ * COMMIT_EDIT が FlavorSpec.extract で行い、PERSIST_ENTRY イベントに載せて
+ * 届く(review K の解消)。effect 層は実行時に state を参照しない
+ * (時間差窓 C-1 の解消 ── 発火時に確定した行をそのまま書く)。
  */
 export interface StorePort {
   getBody(lid: string): Promise<string | null>;
-  persistBody(lid: string, body: string): Promise<void>;
+  persistEntry(entry: EntryUpsert): Promise<void>;
 }
 
 export function connectStoreEffects(
@@ -60,12 +62,13 @@ export function connectStoreEffects(
           }
         });
         break;
-      case 'PERSIST_BODY':
+      case 'PERSIST_ENTRY':
         enqueue(async () => {
           if (disposed) return;
           try {
-            await store.persistBody(ev.lid, ev.body);
-            if (!disposed) dispatcher.dispatch({ type: 'BODY_PERSISTED', lid: ev.lid });
+            await store.persistEntry(ev.entry);
+            if (!disposed)
+              dispatcher.dispatch({ type: 'BODY_PERSISTED', lid: ev.entry.lid });
           } catch (e) {
             if (!disposed) dispatcher.dispatch({ type: 'SYS_ERROR', error: String(e) });
           }

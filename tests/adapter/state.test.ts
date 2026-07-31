@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
+import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
+import { extractMeta } from '../../src/features/flavor';
 import { initialState, reduce } from '../../src/adapter/state/app-state';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects, type StorePort } from '../../src/adapter/state/store-effects';
@@ -119,7 +121,7 @@ describe('reducer: lean aggregate', () => {
     ).toBe('# A');
   });
 
-  it('COMMIT_EDIT emits PERSIST_BODY from openBody only, and skips when unchanged', () => {
+  it('COMMIT_EDIT emits PERSIST_ENTRY with the full row, and skips when unchanged', () => {
     let s = loadedA();
     s = reduce(s, { type: 'START_EDIT' }).state;
 
@@ -129,8 +131,61 @@ describe('reducer: lean aggregate', () => {
 
     s = reduce(s, { type: 'UPDATE_OPEN_BODY', body: '# A2' }).state;
     const committed = reduce(s, { type: 'COMMIT_EDIT' });
-    expect(committed.events).toEqual([{ type: 'PERSIST_BODY', lid: 'a', body: '# A2' }]);
+    expect(committed.events).toEqual([
+      {
+        type: 'PERSIST_ENTRY',
+        entry: {
+          lid: 'a',
+          title: 't-a',
+          archetype: 'text',
+          body: '# A2',
+          entryOrder: 2,
+          status: null,
+          date: null,
+          archived: false,
+        },
+      },
+    ]);
     expect(committed.state.openBody?.baseline).toBe('# A2');
+    // text フレーバーの commit は抽出値が変わらない ── entryMetas の参照を壊さない
+    // (sidebar は参照 fingerprint で差分検出するため)
+    expect(committed.state.entryMetas).toBe(s.entryMetas);
+  });
+
+  it('COMMIT_EDIT extracts flavor columns at reduce time (roundtrip pin, review K/C-1)', () => {
+    const todoMeta: EntryMeta = { ...meta('td', 1), archetype: 'todo' };
+    let s = reduce(initialState, {
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [todoMeta],
+      relations: [],
+    }).state;
+    s = reduce(s, { type: 'SELECT_ENTRY', lid: 'td' }).state;
+    s = reduce(s, {
+      type: 'BODY_LOADED',
+      lid: 'td',
+      body: '---\nstatus: open\n---\n買い物',
+    }).state;
+    s = reduce(s, { type: 'START_EDIT' }).state;
+    s = reduce(s, {
+      type: 'UPDATE_OPEN_BODY',
+      body: '---\nstatus: done\ndate: 2026-08-01\narchived: true\n---\n買い物',
+    }).state;
+    const r = reduce(s, { type: 'COMMIT_EDIT' });
+
+    const ev = r.events[0];
+    if (ev?.type !== 'PERSIST_ENTRY') throw new Error('PERSIST_ENTRY expected');
+    // 抽出列は body(frontmatter)と同一事実 ── event の行が既に一致している
+    // (worker は素通しなので、書込境界のこの一致が roundtrip の pin)
+    expect(ev.entry.status).toBe('done');
+    expect(ev.entry.date).toBe('2026-08-01');
+    expect(ev.entry.archived).toBe(true);
+    // 常駐 meta も同じ reduce で追従(sidebar / kanban が古い列を見ない)
+    const m = r.state.entryMetas.get('td');
+    expect(m?.status).toBe('done');
+    expect(m?.date).toBe('2026-08-01');
+    expect(m?.archived).toBe(true);
+    expect(r.state.entryMetas).not.toBe(s.entryMetas);
   });
 
   it('CANCEL_EDIT restores baseline', () => {
@@ -185,8 +240,8 @@ describe('effect layer: serialized store I/O', () => {
         log.push('done:' + lid); // 完了順を記録(直列化の弁別に必須 ── review A)
         return bodies[lid] ?? null;
       },
-      async persistBody(lid, body) {
-        log.push(`put:${lid}:${body}`);
+      async persistEntry(entry) {
+        log.push(`put:${entry.lid}:${entry.body}`);
       },
     };
   }
@@ -229,7 +284,7 @@ describe('effect layer: serialized store I/O', () => {
         if (calls === 1) throw new Error('boom');
         return 'recovered';
       },
-      async persistBody() {},
+      async persistEntry() {},
     };
     const off = connectStoreEffects(d, store);
     d.onEvent((e) => events.push(e.type));
@@ -251,7 +306,7 @@ describe('effect layer: serialized store I/O', () => {
       async getBody() {
         return '# A';
       },
-      async persistBody() {
+      async persistEntry() {
         throw new Error('disk full');
       },
     };
@@ -282,6 +337,42 @@ describe('effect layer: serialized store I/O', () => {
     off();
   });
 
+  it('persistEntry receives the reduce-time row: columns match re-extraction from body', async () => {
+    const persisted: EntryUpsert[] = [];
+    const d = new Dispatcher();
+    const off = connectStoreEffects(d, {
+      async getBody() {
+        return '---\nstatus: open\n---\n芝刈り';
+      },
+      async persistEntry(entry) {
+        persisted.push(entry);
+      },
+    });
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [{ ...meta('td', 1), archetype: 'todo' }],
+      relations: [],
+    });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'td' });
+    await new Promise((r) => setTimeout(r, 20));
+    d.dispatch({ type: 'START_EDIT' });
+    d.dispatch({
+      type: 'UPDATE_OPEN_BODY',
+      body: '---\nstatus: done\ndate: 2026-08-02\n---\n芝刈り',
+    });
+    d.dispatch({ type: 'COMMIT_EDIT' });
+    await new Promise((r) => setTimeout(r, 20));
+    const row = persisted[0];
+    if (!row) throw new Error('no entry persisted');
+    // store 境界の roundtrip pin: 書かれた行の抽出列 = body への extract 再適用
+    expect({ status: row.status, date: row.date, archived: row.archived }).toEqual(
+      extractMeta(row.archetype, row.body),
+    );
+    expect(row.status).toBe('done');
+    off();
+  });
+
   it('teardown stops in-flight results from dispatching (review H)', async () => {
     const d = new Dispatcher();
     const off = connectStoreEffects(d, {
@@ -289,7 +380,7 @@ describe('effect layer: serialized store I/O', () => {
         await new Promise((r) => setTimeout(r, 20));
         return 'late';
       },
-      async persistBody() {},
+      async persistEntry() {},
     });
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', 1)], relations: [] });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });

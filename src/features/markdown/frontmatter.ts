@@ -134,13 +134,44 @@ export function parseFrontmatter(body: string): FrontmatterResult {
   };
 }
 
+/**
+ * 行末 `# comment` を除去する(YAML 慣例: `#` の直前に空白があるときのみ)。
+ * ⚠ PKC2 版は `/\s+#.*$/` の一括 replace で **quote 内の `#` まで切り落として
+ * いた**(serializeFrontmatter が quote した値が parse で壊れる round-trip バグ)。
+ * PKC3 では quote 状態を追って quote 外の `#` だけをコメントと見なす
+ * (parseVarValue が quote 判定を先に行うのと同じ意味論に揃えた)。
+ */
+function stripTrailingComment(line: string): string {
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '\\' && (inSingle || inDouble)) {
+      i += 1;
+      continue;
+    }
+    if (!inDouble && ch === "'") inSingle = !inSingle;
+    else if (!inSingle && ch === '"') inDouble = !inDouble;
+    else if (
+      !inSingle &&
+      !inDouble &&
+      ch === '#' &&
+      i > 0 &&
+      /\s/u.test(line[i - 1]!)
+    ) {
+      return line.slice(0, i).trimEnd();
+    }
+  }
+  return line.trimEnd();
+}
+
 function parseFlatYaml(lines: readonly string[]): Record<string, FrontmatterValue> {
   const out: Record<string, FrontmatterValue> = {};
   let i = 0;
   while (i < lines.length) {
     const raw = lines[i] ?? '';
     i += 1;
-    const line = raw.replace(/\s+#.*$/u, '').trimEnd(); // strip trailing # comment
+    const line = stripTrailingComment(raw);
     if (line.trim() === '') continue;
     if (line.startsWith('#')) continue;
 

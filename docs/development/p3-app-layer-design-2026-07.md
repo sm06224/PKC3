@@ -83,7 +83,7 @@ interface FlavorSpec {
 | flavor | PKC-Markdown 表現 | 編集 UI |
 |---|---|---|
 | todo | frontmatter(status / date / archived)+ 本文 | kanban トグル = frontmatter 書換の構造化操作 |
-| textlog | 日時見出し節(`## YYYY-MM-DD HH:mm` 規約) | 追記 = 末尾節 append |
+| textlog | 日時見出し節(`## YYYY-MM-DD HH:mm:ss` 規約 ── 秒まで。高頻度ログの弁別、PKC2 textlog-readability-hardening の教訓。P3-4 で確定) | 追記 = 末尾節 append |
 | spreadsheet | csv fence(render 指定)+ frontmatter(数式・グラフ定義) | grid editor が fence 内容を編集 |
 | form | frontmatter フィールド群 + 本文(機械可読 ── 将来のダッシュボード / 帳票の読み口) | フィールド UI |
 | attachment | frontmatter(asset_key / mime)+ 説明 markdown | 表示は `lendObjectUrl`(dispose 規律) |
