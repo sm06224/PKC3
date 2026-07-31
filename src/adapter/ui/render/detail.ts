@@ -21,21 +21,41 @@ import {
   extractHeadingNumberConfig,
   applyDocumentGlobals,
 } from '@features/markdown/document-globals';
+import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import type { AppState, AppPhase } from '@adapter/state/app-state';
+
+/** 添付表示のための asset 面(main が AssetBlobStore を cid 束縛で注入)。 */
+export interface AssetLender {
+  lend(assetKey: string): Promise<{ url: string; dispose: () => void } | null>;
+  getBlob(assetKey: string): Promise<Blob | null>;
+}
 
 type Mode = 'empty' | 'view' | 'editor';
 
 export class DetailRenderer {
   private readonly region: HTMLElement;
+  private readonly assets: AssetLender | null;
   private mode: Mode = 'empty';
   private lastSelected: string | null = null;
   /** view で最後に描いた body(null = openBody 不在の loading 表示)。 */
   private lastBody: string | null = null;
   /** phase は toolbar の有無を変える(error では編集ボタンを出さない)。 */
   private lastPhase: AppPhase | null = null;
+  /** この render pass が貸し出した ObjectURL の dispose 群。**表示の寿命の
+   *  終わり(次の render / 選択遷移)で必ず全部呼ぶ**(生成物のライフサイクル
+   *  終端での即破棄 ── user 指示 2026-07-27 不可侵)。 */
+  private readonly lends: Array<() => void> = [];
+  /** 非同期 hydrate の stale 防止(選択が移ったら結果を捨てて即 dispose)。 */
+  private hydrateToken = 0;
 
-  constructor(region: HTMLElement) {
+  constructor(region: HTMLElement, assets: AssetLender | null = null) {
     this.region = region;
+    this.assets = assets;
+  }
+
+  private disposeLends(): void {
+    for (const d of this.lends.splice(0)) d();
+    this.hydrateToken += 1;
   }
 
   render(state: AppState): void {
@@ -72,6 +92,7 @@ export class DetailRenderer {
     this.lastBody = body;
     this.lastPhase = state.phase;
 
+    this.disposeLends(); // 前の表示が借りた URL はここで寿命終端
     this.region.textContent = '';
     if (!state.selectedLid) {
       this.mode = 'empty';
@@ -127,6 +148,11 @@ export class DetailRenderer {
     }
 
     const fm = parseFrontmatter(body);
+    const meta = state.selectedLid ? state.entryMetas.get(state.selectedLid) : null;
+    if (meta?.archetype === 'attachment') {
+      this.renderAttachment(body, fm.body);
+      return;
+    }
     if (hasMarkdownSyntax(fm.body)) {
       const rendered = document.createElement('div');
       rendered.className = 'pkc-md-rendered';
@@ -155,6 +181,7 @@ export class DetailRenderer {
     this.lastSelected = open.lid;
     this.lastBody = null;
 
+    this.disposeLends();
     this.region.textContent = '';
     // title は uncontrolled input(commit 時に binder が RENAME を先行 dispatch)
     const titleInput = document.createElement('input');
@@ -182,4 +209,117 @@ export class DetailRenderer {
     this.region.append(ta);
     ta.focus();
   }
+
+  /** attachment フレーバーの view(P4a): メタ + preview + 説明 markdown。 */
+  private renderAttachment(rawBody: string, description: string): void {
+    const meta = readAttachmentMeta(rawBody);
+    const info = document.createElement('div');
+    info.setAttribute('data-pkc-field', 'attachment-info');
+    const label = document.createElement('span');
+    label.textContent = `${meta.name || '(無名)'} — ${meta.mime}${
+      meta.size !== null ? ` — ${formatSize(meta.size)}` : ''
+    }`;
+    info.append(label);
+    if (meta.assetKey) {
+      const dl = document.createElement('button');
+      dl.type = 'button';
+      dl.setAttribute('data-pkc-action', 'download-asset');
+      dl.setAttribute('data-pkc-asset-key', meta.assetKey);
+      dl.setAttribute('data-pkc-asset-name', meta.name || 'download');
+      dl.textContent = 'ダウンロード';
+      info.append(dl);
+    }
+    this.region.append(info);
+
+    const host = document.createElement('div');
+    host.setAttribute('data-pkc-field', 'attachment-preview');
+    this.region.append(host);
+    if (this.assets && meta.assetKey) {
+      void this.hydratePreview(host, meta.assetKey, meta.mime, this.hydrateToken);
+    }
+
+    if (description.trim() !== '') {
+      const desc = document.createElement('div');
+      desc.className = 'pkc-md-rendered';
+      desc.setAttribute('data-pkc-field', 'detail-body');
+      desc.innerHTML = renderMarkdown(description, { sourceLineAnchors: true });
+      this.region.append(desc);
+    }
+  }
+
+  /**
+   * preview の非同期注入。ObjectURL は lends に登録し、次 render で必ず dispose
+   * (表示中だけ生きる ── 即破棄規律)。選択が移っていたら結果を捨てて即 dispose。
+   */
+  private async hydratePreview(
+    host: HTMLElement,
+    assetKey: string,
+    mime: string,
+    token: number,
+  ): Promise<void> {
+    const assets = this.assets!;
+    const missing = (): void => {
+      const p = document.createElement('p');
+      p.setAttribute('data-pkc-asset-missing', '');
+      p.textContent = '(asset が見つかりません)';
+      host.append(p);
+    };
+    try {
+      if (mime.startsWith('text/') || mime === 'application/json') {
+        const blob = await assets.getBlob(assetKey);
+        if (token !== this.hydrateToken) return; // stale ── DOM は既に破棄済み
+        if (!blob) return missing();
+        const text = await blob.text();
+        if (token !== this.hydrateToken) return;
+        const pre = document.createElement('pre');
+        pre.setAttribute('data-pkc-field', 'attachment-text');
+        pre.textContent = text.slice(0, 200_000);
+        host.append(pre);
+        return;
+      }
+      const kind = mime.startsWith('image/')
+        ? 'img'
+        : mime.startsWith('video/')
+          ? 'video'
+          : mime.startsWith('audio/')
+            ? 'audio'
+            : mime === 'application/pdf'
+              ? 'pdf'
+              : null;
+      if (!kind) return; // preview 無し(ダウンロードのみ)
+      const lent = await assets.lend(assetKey);
+      if (token !== this.hydrateToken) {
+        lent?.dispose(); // stale ── 借りた瞬間に返す
+        return;
+      }
+      if (!lent) return missing();
+      this.lends.push(lent.dispose);
+      if (kind === 'img') {
+        const img = document.createElement('img');
+        img.setAttribute('data-pkc-field', 'attachment-media');
+        img.src = lent.url;
+        host.append(img);
+      } else if (kind === 'video' || kind === 'audio') {
+        const media = document.createElement(kind);
+        media.setAttribute('data-pkc-field', 'attachment-media');
+        media.controls = true;
+        media.src = lent.url;
+        host.append(media);
+      } else {
+        const obj = document.createElement('object');
+        obj.setAttribute('data-pkc-field', 'attachment-media');
+        obj.type = 'application/pdf';
+        obj.data = lent.url;
+        host.append(obj);
+      }
+    } catch {
+      if (token === this.hydrateToken) missing();
+    }
+  }
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

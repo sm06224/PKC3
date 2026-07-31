@@ -3,8 +3,52 @@
  * asset の bytes は IDB Blob 側(§4.2)── body はメタとポインタのみを持ち、
  * 表示は `lendObjectUrl`(dispose 規律)で行う(P4 で結線)。
  */
-import { serializeFrontmatter, type FrontmatterValue } from '../markdown/frontmatter';
+import {
+  parseFrontmatter,
+  serializeFrontmatter,
+  type FrontmatterValue,
+} from '../markdown/frontmatter';
 import { NO_EXTRACT, type FlavorSpec } from './flavor-spec';
+
+/** PKC3 での新規添付 entry の body(P4a)。frontmatter メタ + 空の説明領域。 */
+export function attachmentBody(meta: {
+  name: string;
+  mime: string;
+  size: number;
+  assetKey: string;
+  hash?: string | null;
+}): string {
+  const fm: Record<string, FrontmatterValue> = {
+    'attachment.name': meta.name,
+    'attachment.mime': meta.mime,
+    'attachment.size': meta.size,
+    'attachment.asset_key': meta.assetKey,
+  };
+  if (meta.hash) fm['attachment.hash'] = meta.hash;
+  return serializeFrontmatter(fm);
+}
+
+/** 表示・DL が使う読み口(単一の解釈点)。不足 field は null。 */
+export function readAttachmentMeta(body: string): {
+  name: string;
+  mime: string;
+  size: number | null;
+  assetKey: string | null;
+} {
+  const { meta } = parseFrontmatter(body);
+  return {
+    name: typeof meta['attachment.name'] === 'string' ? meta['attachment.name'] : '',
+    mime:
+      typeof meta['attachment.mime'] === 'string'
+        ? meta['attachment.mime']
+        : 'application/octet-stream',
+    size: typeof meta['attachment.size'] === 'number' ? meta['attachment.size'] : null,
+    assetKey:
+      typeof meta['attachment.asset_key'] === 'string'
+        ? meta['attachment.asset_key']
+        : null,
+  };
+}
 
 /**
  * PKC2 attachment-presenter.ts の AttachmentBody と同じ field 集合・同じ寛容 parse。

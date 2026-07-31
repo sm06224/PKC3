@@ -57,6 +57,20 @@ export function buildShell(root: HTMLElement): ShellRegions {
     btn.textContent = label;
     createBar.append(btn);
   }
+  // 📎 添付取込(P4a): file picker は常設 hidden input(動的生成にしない ──
+  // user-gesture 要件と smoke の setInputFiles の両方に効く)
+  const attach = document.createElement('button');
+  attach.type = 'button';
+  attach.setAttribute('data-pkc-action', 'attach-file');
+  attach.textContent = '+添付';
+  createBar.append(attach);
+  const attachInput = document.createElement('input');
+  attachInput.type = 'file';
+  attachInput.multiple = true;
+  attachInput.hidden = true;
+  attachInput.setAttribute('data-pkc-field', 'attach-input');
+  createBar.append(attachInput);
+
   const list = document.createElement('ul');
   list.setAttribute('data-pkc-region', 'entry-list');
   sidebar.append(createBar, list);

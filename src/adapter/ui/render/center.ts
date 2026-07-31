@@ -8,7 +8,7 @@
  * active 化した瞬間の render が指紋差分で追いつく。
  */
 import type { AppState, ViewMode } from '@adapter/state/app-state';
-import { DetailRenderer } from './detail';
+import { DetailRenderer, type AssetLender } from './detail';
 import { KanbanRenderer } from './kanban';
 import { CalendarRenderer } from './calendar';
 import { FilerRenderer } from './filer';
@@ -30,7 +30,7 @@ export class CenterRouter {
   private readonly filer: FilerRenderer;
   private lastPane: PaneView = 'detail';
 
-  constructor(region: HTMLElement, now?: () => Date) {
+  constructor(region: HTMLElement, now?: () => Date, assets: AssetLender | null = null) {
     const pane = (view: PaneView): HTMLElement => {
       const el = document.createElement('div');
       el.setAttribute('data-pkc-view-pane', view);
@@ -44,7 +44,7 @@ export class CenterRouter {
       calendar: pane('calendar'),
       filer: pane('filer'),
     };
-    this.detail = new DetailRenderer(this.panes.detail);
+    this.detail = new DetailRenderer(this.panes.detail, assets);
     this.kanban = new KanbanRenderer(this.panes.kanban);
     this.calendar = new CalendarRenderer(this.panes.calendar, now);
     this.filer = new FilerRenderer(this.panes.filer);
