@@ -118,20 +118,30 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         files,
       ),
     downloadAsset: async (assetKey, name) => {
-      const lent = await blobs.lendObjectUrl(DEFAULT_CID, assetKey);
-      if (!lent) {
+      try {
+        const lent = await blobs.lendObjectUrl(DEFAULT_CID, assetKey);
+        if (!lent) {
+          dispatcher.dispatch({
+            type: 'OP_FAILED',
+            error: `asset が見つかりません: ${name}`,
+          });
+          return;
+        }
+        const a = document.createElement('a');
+        a.href = lent.url;
+        a.download = name;
+        document.body.append(a);
+        a.click();
+        a.remove();
+        // click 直後の revoke は DL を中断しうる ── 1 秒で寿命終端
+        setTimeout(lent.dispose, 1000);
+      } catch (e) {
+        // IDB 障害等を unhandled rejection にしない(可視で終える)
         dispatcher.dispatch({
           type: 'OP_FAILED',
-          error: `asset が見つかりません: ${name}`,
+          error: `ダウンロードに失敗しました(${name}): ${String(e)}`,
         });
-        return;
       }
-      const a = document.createElement('a');
-      a.href = lent.url;
-      a.download = name;
-      a.click();
-      // click 直後の revoke は DL を中断しうる ── 1 秒で寿命終端
-      setTimeout(lent.dispose, 1000);
     },
   };
   bindActions(root, dispatcher, services);

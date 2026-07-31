@@ -269,11 +269,14 @@ export class DetailRenderer {
         const blob = await assets.getBlob(assetKey);
         if (token !== this.hydrateToken) return; // stale ── DOM は既に破棄済み
         if (!blob) return missing();
-        const text = await blob.text();
+        // 全量を heap に読まない ── preview に要る分だけ slice して decode
+        // (multibyte の端欠けは preview 用途で許容。review #2)
+        const truncated = blob.size > 200_000;
+        const text = await blob.slice(0, 200_000).text();
         if (token !== this.hydrateToken) return;
         const pre = document.createElement('pre');
         pre.setAttribute('data-pkc-field', 'attachment-text');
-        pre.textContent = text.slice(0, 200_000);
+        pre.textContent = truncated ? `${text}\n…(先頭 200KB のみ表示)` : text;
         host.append(pre);
         return;
       }

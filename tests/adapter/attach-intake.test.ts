@@ -83,6 +83,22 @@ describe('attachFiles (P4a intake)', () => {
     expect(d.getState().phase).toBe('ready'); // 非致命
   });
 
+  it('編集中(phase!==ready)は put 前に可視ブロック ── bytes も entry も作らない', async () => {
+    const { d, deps, putBlobs, metas } = harness();
+    d.dispatch({ type: 'CREATE_ENTRY', archetype: 'text', lid: 'lid-editing', title: 'draft' });
+    expect(d.getState().phase).toBe('editing');
+
+    await attachFiles(d, deps, [new File(['x'], 'late.txt', { type: 'text/plain' })]);
+    await tick();
+
+    // put の前に止まる ── orphan asset(bytes だけ書かれ entry 黙殺)を作らない
+    expect(putBlobs).toHaveLength(0);
+    expect(metas).toHaveLength(0);
+    expect(d.getState().entryMetas.size).toBe(1); // draft entry のみ、添付 entry は増えない
+    expect(d.getState().error).toMatch(/編集を終了/); // 無言拒否にしない(可視)
+    expect(d.getState().phase).toBe('editing'); // draft は無傷
+  });
+
   it('mime fallback: file.type 空は拡張子から解決(PKC2 の欠落 hack を作らない)', () => {
     expect(resolveMime('doc.md', '')).toBe('text/markdown');
     expect(resolveMime('img.PNG', '')).toBe('image/png');

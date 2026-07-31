@@ -56,6 +56,7 @@ const EXT_MIME: Record<string, string> = {
 
 export function resolveMime(name: string, declared: string): string {
   if (declared) return declared;
+  if (!name.includes('.')) return 'application/octet-stream'; // 拡張子なし
   const ext = name.split('.').pop()?.toLowerCase() ?? '';
   return EXT_MIME[ext] ?? 'application/octet-stream';
 }
@@ -78,6 +79,15 @@ export async function attachFiles(
   files: readonly File[],
 ): Promise<void> {
   if (files.length === 0) return;
+  // put の**前に**可視で止める ── ready 以外で進めると bytes だけ書かれて
+  // CREATE_ENTRY が黙殺され、参照されない asset が残留する(P4a review #1)
+  if (dispatcher.getState().phase !== 'ready') {
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: '編集を終了してから添付してください',
+    });
+    return;
+  }
 
   // dedupe 台帳は batch 先頭で 1 回だけ引く(batch 内の重複は逐次 put が防ぐ)。
   // 台帳が引けなくても取込自体は続行(dedupe を諦めるだけ)
@@ -105,7 +115,11 @@ export async function attachFiles(
       const mime = resolveMime(file.name, file.type);
       const hash = file.size <= HASH_MAX_BYTES ? await sha256Hex(file) : null;
 
-      // bytes 同一(hash + size 一致)なら既存 asset を参照(put しない)
+      // bytes 同一(hash + size 一致)なら既存 asset を参照(put しない)。
+      // ⚠ 帰結 2 点(review #5): sqlite assets.mime は**初回 file のまま**
+      // (表示は entry frontmatter 側 mime を使うので正しい ── assets.mime を
+      // 信じる消費者を作らない)。asset 削除は参照カウント前提になる
+      // (将来の GC 設計の前提として記録)
       let assetKey = hash
         ? (known.find((m) => m.hash === hash && m.size === file.size)?.key ?? null)
         : null;

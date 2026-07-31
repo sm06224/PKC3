@@ -33,5 +33,5 @@ jobs:
       # プロセス指示)。別 job にしない ── npm ci / build の二重払い(PKC2 の
       # セットアップ税)を避けるため verify に同居。全量・重い検証は nightly.yml
       - run: npx playwright install chromium --with-deps
-      - name: Visual smoke (3 spec)
+      - name: Visual smoke (PR gate lane — 全量は nightly)
         run: npm run test:smoke
