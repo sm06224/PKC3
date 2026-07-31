@@ -5,6 +5,7 @@ import { StoreClient } from '@adapter/platform/storage/store-client';
 import { createStorePort, metaFromRow } from '@adapter/platform/storage/store-port';
 import { acquireWriterLease } from '@adapter/platform/storage/writer-lease';
 import type { InitResult } from '@adapter/platform/storage/protocol';
+import { installHtmlSandboxResizer } from '@features/markdown/html-sandbox';
 import { buildShell } from '@adapter/ui/render/shell';
 import { SidebarRenderer } from '@adapter/ui/render/sidebar';
 import { DetailRenderer } from '@adapter/ui/render/detail';
@@ -71,6 +72,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     detail.render(state);
   });
   bindActions(root, dispatcher);
+  // html sandbox iframe の高さ追従。1 listener が message 内 id で iframe を
+  // 特定するので boot で 1 回だけ張る(規約 ── 多重 install ガードは無い)。
+  // ⚠ 別 document の surface(Viewer popup 等、P3-8)には効かない ── その
+  // document ごとに再結線が要る(PKC2 で entry-window が高さ 0 のままだった教訓)
+  installHtmlSandboxResizer();
   connectStoreEffects(dispatcher, createStorePort(client, DEFAULT_CID));
 
   // status: provenance + エラーの可視化(review B-1 ── 無言の操作拒否を作らない)

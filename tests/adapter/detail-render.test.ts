@@ -53,6 +53,22 @@ describe('detail: PKC-Markdown text presenter (P3-3)', () => {
     expect(body?.textContent).toBe('ただのテキスト 1234');
   });
 
+  it('applies document globals (attrs + dir) and heading numbers from frontmatter', () => {
+    const root = document.createElement('div');
+    const detail = new DetailRenderer(buildShell(root).detail);
+    detail.render(
+      stateWithBody(
+        '---\nwriting: vertical\ndirection: rtl\nheading-number: true\n---\n# 序\n\n## 本',
+      ),
+    );
+    const rendered = root.querySelector('[data-pkc-field="detail-body"]');
+    expect(rendered?.getAttribute('data-pkc-writing')).toBe('vertical');
+    expect(rendered?.getAttribute('dir')).toBe('rtl');
+    // heading-number: true → 見出しにアウトライン番号が前置される(text レベル)
+    expect(rendered?.querySelector('h1')?.textContent).toMatch(/^1\.?\s*序|^1\s/);
+    expect(rendered?.querySelector('h2')?.textContent).toMatch(/1\.1/);
+  });
+
   it('strips frontmatter and expands vars from it', () => {
     const root = document.createElement('div');
     const detail = new DetailRenderer(buildShell(root).detail);
