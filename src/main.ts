@@ -11,9 +11,11 @@ import { acquireWriterLease } from '@adapter/platform/storage/writer-lease';
 import type { InitResult } from '@adapter/platform/storage/protocol';
 import { installHtmlSandboxResizer } from '@features/markdown/html-sandbox';
 import { AssetBlobStore } from '@adapter/platform/storage/asset-blob-store';
+import { findOrphanAssets, purgeAssets } from '@adapter/platform/storage/asset-gc';
 import { buildShell } from '@adapter/ui/render/shell';
 import { SidebarRenderer } from '@adapter/ui/render/sidebar';
 import { CenterRouter } from '@adapter/ui/render/center';
+import { formatSize } from '@adapter/ui/render/detail';
 import { bindActions, type BinderServices } from '@adapter/ui/actions/binder';
 import { attachFiles } from '@adapter/ui/actions/attach';
 
@@ -143,6 +145,59 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         });
       }
     },
+    purgeOrphanAssets: () =>
+      void (async () => {
+        try {
+          // editing 中は draft が disk と違う参照を持ちうる ── ready 限定で可視ブロック
+          if (dispatcher.getState().phase !== 'ready') {
+            dispatcher.dispatch({
+              type: 'OP_FAILED',
+              error: '編集を終了してから整理してください',
+            });
+            return;
+          }
+          const gcPorts = {
+            listMetas: () =>
+              client.request({ op: 'listAssetMetas', cid: DEFAULT_CID }),
+            listBlobKeys: () => blobs.listKeys(DEFAULT_CID),
+            scanReferenced: async (candidates: string[]) =>
+              (
+                await client.request({
+                  op: 'scanAssetRefs',
+                  cid: DEFAULT_CID,
+                  candidates,
+                })
+              ).referenced,
+            deleteBlob: (key: string) => blobs.delete(DEFAULT_CID, key),
+            deleteMeta: async (key: string) => {
+              await client.request({ op: 'deleteAssetMeta', cid: DEFAULT_CID, key });
+            },
+          };
+          const found = await findOrphanAssets(gcPorts);
+          if (found.keys.length === 0) {
+            window.alert?.('未参照の添付データはありません');
+            return;
+          }
+          // 一括削除なので fail closed(confirm が無い環境では実行しない ──
+          // 単発の delete-entry が ?? true なのとは桁が違う)
+          const ok =
+            window.confirm?.(
+              `どの entry からも参照されていない添付データ ${found.keys.length} 件` +
+                `(${formatSize(found.knownBytes)})を削除します。よろしいですか?`,
+            ) ?? false;
+          if (!ok) return;
+          const r = await purgeAssets(gcPorts, found.keys);
+          window.alert?.(
+            `${r.deleted} 件を削除しました` +
+              (r.failed > 0 ? `(${r.failed} 件は失敗 ── 再実行で回収されます)` : ''),
+          );
+        } catch (e) {
+          dispatcher.dispatch({
+            type: 'OP_FAILED',
+            error: `添付の整理に失敗しました: ${String(e)}`,
+          });
+        }
+      })(),
   };
   bindActions(root, dispatcher, services);
   // html sandbox iframe の高さ追従。1 listener が message 内 id で iframe を

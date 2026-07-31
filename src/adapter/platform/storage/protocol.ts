@@ -20,6 +20,7 @@ export type StorageRequest =
   | { op: 'putAssetMeta'; cid: string; meta: AssetMetaPut }
   | { op: 'listAssetMetas'; cid: string }
   | { op: 'deleteAssetMeta'; cid: string; key: string }
+  | { op: 'scanAssetRefs'; cid: string; candidates: string[] }
   | { op: 'counts'; cid: string }
   | { op: 'close' };
 
@@ -130,6 +131,7 @@ export interface ResultMap {
   putAssetMeta: null;
   listAssetMetas: AssetMetaRow[];
   deleteAssetMeta: null;
+  scanAssetRefs: { referenced: string[] };
   counts: CountsResult;
   close: null;
 }

@@ -301,6 +301,37 @@ const handlers: Handlers = {
     });
     return null;
   },
+  scanAssetRefs: (req) => {
+    // asset GC(P4b)の keep-set: 候補 key が**どこかの body に raw substring として
+    // 現れるか**で判定する。frontmatter(attachment.asset_key / app_icon_asset_key /
+    // extra 内 JSON)も本文の asset: 参照も、参照は必ず key 文字列そのものを含むので
+    // この 1 規則が全参照源を包摂する。誤差は false-keep 側にしか出ない
+    // (本文の無関係な散文が key 文字列を偶然含む)── GC で許されるのはその向きだけ。
+    // body は行ごとに callback で見て保持しない(全 body の同時 materialize は
+    // 500MB 級で OOM ── PKC2 の reconcile 走査の教訓)。
+    // ⚠ P5(revisions)着地時: 履歴 snapshot が参照する asset を消さないよう、
+    // revisions 表も同じ規則で走査に加えること
+    const remaining = new Set(req.candidates);
+    const referenced: string[] = [];
+    if (remaining.size > 0) {
+      need().exec({
+        sql: 'SELECT body FROM entries WHERE cid = ?',
+        bind: [req.cid],
+        rowMode: '$body', // 列値を直接受ける(行 object を作らない)
+        callback: (row) => {
+          if (remaining.size === 0) return; // 全候補確定後は行を素通し
+          const body = typeof row === 'string' ? row : '';
+          for (const key of remaining) {
+            if (key !== '' && body.includes(key)) {
+              referenced.push(key);
+              remaining.delete(key); // 反復中の自要素削除は Set 仕様で安全
+            }
+          }
+        },
+      });
+    }
+    return { referenced };
+  },
   counts: (req) => {
     const one = (sql: string): number =>
       Number(need().selectObjects(sql, [req.cid])[0]?.n ?? 0);

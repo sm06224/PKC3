@@ -61,6 +61,18 @@ export class AssetBlobStore {
     await tx(await this.need(), 'readwrite', (s) => s.delete(key(cid, assetKey)));
   }
 
+  /** cid 配下の asset key 一覧(GC の候補集めに使う。Blob 値は読まない)。 */
+  async listKeys(cid: string): Promise<string[]> {
+    const prefix = `${cid}:`;
+    // 上界は prefix + U+FFFF(cid に ':' 以降の任意 key が続く範囲を閉じる)
+    const keys = await tx<IDBValidKey[]>(await this.need(), 'readonly', (s) =>
+      s.getAllKeys(IDBKeyRange.bound(prefix, prefix + '￿')),
+    );
+    return keys
+      .filter((k): k is string => typeof k === 'string')
+      .map((k) => k.slice(prefix.length));
+  }
+
   /**
    * 表示用 ObjectURL の貸出。返る dispose を **表示の寿命の終わりに必ず呼ぶ**
    * (revoke は所有者の責務 ── メモリ 2 原則)。

@@ -50,6 +50,8 @@ export function generateLid(): string {
 export interface BinderServices {
   attachFiles?(files: File[]): void;
   downloadAsset?(assetKey: string, name: string): void;
+  /** 未参照 asset の掃除(P4b)。確認・報告の UI も実体側の責務。 */
+  purgeOrphanAssets?(): void;
 }
 
 function defaultTitle(dispatcher: Dispatcher, archetype: string): string {
@@ -184,6 +186,9 @@ const ACTIONS: Record<string, ActionHandler> = {
     const key = target.getAttribute('data-pkc-asset-key');
     const name = target.getAttribute('data-pkc-asset-name') ?? 'download';
     if (key) services.downloadAsset?.(key, name);
+  },
+  'purge-orphan-assets': (_dispatcher, _target, services) => {
+    services.purgeOrphanAssets?.();
   },
 };
 
