@@ -1,0 +1,112 @@
+import { describe, expect, it } from 'vitest';
+import type { EntryMeta } from '../../src/core/model/entry-meta';
+import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
+import { buildShell } from '../../src/adapter/ui/render/shell';
+import { SidebarRenderer } from '../../src/adapter/ui/render/sidebar';
+
+function meta(lid: string, order: number, title = 't-' + lid): EntryMeta {
+  return {
+    lid,
+    title,
+    archetype: 'text',
+    createdAt: null,
+    updatedAt: null,
+    entryOrder: order,
+    status: null,
+    date: null,
+    archived: false,
+  };
+}
+
+function bootedState(metas: EntryMeta[]): AppState {
+  return reduce(initialState, {
+    type: 'SYS_BOOTED',
+    cid: 'c1',
+    metas,
+    relations: [],
+  }).state;
+}
+
+function setup(metas: EntryMeta[]) {
+  const root = document.createElement('div');
+  const regions = buildShell(root);
+  const sidebar = new SidebarRenderer(regions.sidebar);
+  const state = bootedState(metas);
+  sidebar.render(state);
+  const rows = () =>
+    Array.from(root.querySelectorAll<HTMLElement>('[data-pkc-entry]'));
+  return { root, sidebar, state, rows };
+}
+
+describe('sidebar differential rendering (P3-2 DoD)', () => {
+  it('renders rows in entry_order', () => {
+    const { rows } = setup([meta('a', 2), meta('b', 1)]);
+    expect(rows().map((r) => r.getAttribute('data-pkc-entry'))).toEqual(['b', 'a']);
+  });
+
+  it('same snapshot → zero DOM mutation (node identity preserved)', () => {
+    const { sidebar, state, rows } = setup([meta('a', 1), meta('b', 2)]);
+    const before = rows();
+    sidebar.render(state); // 同一断面
+    const after = rows();
+    expect(after.length).toBe(before.length);
+    after.forEach((node, i) => expect(node).toBe(before[i]));
+  });
+
+  it('phase-only change (edit start/commit) does not touch the sidebar', () => {
+    const { sidebar, state, rows } = setup([meta('a', 1), meta('b', 2)]);
+    const before = rows();
+    let s = reduce(state, { type: 'SELECT_ENTRY', lid: 'a' }).state;
+    sidebar.render(s);
+    s = reduce(s, { type: 'BODY_LOADED', lid: 'a', body: '# A' }).state;
+    sidebar.render(s);
+    s = reduce(s, { type: 'START_EDIT' }).state;
+    sidebar.render(s);
+    s = reduce(s, { type: 'UPDATE_OPEN_BODY', body: 'x' }).state;
+    sidebar.render(s);
+    s = reduce(s, { type: 'COMMIT_EDIT' }).state;
+    sidebar.render(s);
+    const after = rows();
+    // 編集の開始〜確定を通して行ノードは 1 つも作り直されない(PKC2 #1030 の構造対策)
+    after.forEach((node, i) => expect(node).toBe(before[i]));
+  });
+
+  it('selection change patches attributes only, reusing row nodes', () => {
+    const { sidebar, state, rows } = setup([meta('a', 1), meta('b', 2)]);
+    const before = rows();
+    let s = reduce(state, { type: 'SELECT_ENTRY', lid: 'a' }).state;
+    sidebar.render(s);
+    expect(before[0]?.hasAttribute('data-pkc-selected')).toBe(true);
+    s = { ...s, selectedLid: 'b', openBody: null };
+    sidebar.render(s);
+    const after = rows();
+    after.forEach((node, i) => expect(node).toBe(before[i]));
+    expect(before[0]?.hasAttribute('data-pkc-selected')).toBe(false);
+    expect(before[1]?.hasAttribute('data-pkc-selected')).toBe(true);
+  });
+
+  it('title change patches the one row in place; others untouched', () => {
+    const { sidebar, state, rows } = setup([meta('a', 1), meta('b', 2)]);
+    const before = rows();
+    const newMetas = new Map(state.entryMetas);
+    newMetas.set('a', { ...meta('a', 1, 'renamed') });
+    sidebar.render({ ...state, entryMetas: newMetas });
+    const after = rows();
+    after.forEach((node, i) => expect(node).toBe(before[i]));
+    expect(before[0]?.querySelector('[data-pkc-field="title"]')?.textContent).toBe(
+      'renamed',
+    );
+  });
+
+  it('removing an entry drops only its row; remaining nodes reused', () => {
+    const { sidebar, state, rows } = setup([meta('a', 1), meta('b', 2), meta('c', 3)]);
+    const before = rows();
+    const newMetas = new Map(state.entryMetas);
+    newMetas.delete('b');
+    sidebar.render({ ...state, entryMetas: newMetas, order: ['a', 'c'] });
+    const after = rows();
+    expect(after.map((r) => r.getAttribute('data-pkc-entry'))).toEqual(['a', 'c']);
+    expect(after[0]).toBe(before[0]);
+    expect(after[1]).toBe(before[2]);
+  });
+});
