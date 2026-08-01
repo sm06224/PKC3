@@ -8,8 +8,9 @@
  * 内部完結 API のみを使う)/ 大きな値は保持しない。
  */
 import sqlite3InitModule, { type Database } from '@sqlite.org/sqlite-wasm';
-import { DB_SCHEMA_VERSION, SCHEMA_DDL } from './schema';
+import { DB_SCHEMA_VERSION, SCHEMA_DDL, REVISIONS_V2_COLUMNS } from './schema';
 import type { EntryUpsert } from './schema';
+import { contentHash64Hex } from './content-hash';
 import {
   JOURNAL_MODES,
   type JournalMode,
@@ -78,9 +79,39 @@ function applySchema(database: Database): void {
       `db user_version ${userVersion} is newer than supported ${DB_SCHEMA_VERSION}`,
     );
   }
-  database.exec('PRAGMA foreign_keys = ON');
-  for (const ddl of SCHEMA_DDL) database.exec(ddl);
-  database.exec(`PRAGMA user_version = ${DB_SCHEMA_VERSION}`);
+  database.exec('PRAGMA foreign_keys = ON'); // tx 内では効かないので外に置く
+  // 🔒 DDL → migration → 刻印を **1 tx に原子化**(review P5a F1)。非原子だと
+  // クラッシュ窓で 2 型の恒久破損を作る(実験で実証済み):
+  //   (d1) 表はあるが刻印なし(=0)→ 次回 open が migration を飛ばして
+  //        最新版と刻印 → 列欠損のまま無音で恒久失敗
+  //   (d2) ALTER 半端 + 旧版刻印 → 次回 open が duplicate column で毎回 throw
+  database.exec('BEGIN IMMEDIATE');
+  try {
+    // 新規 DB は最新 DDL がそのまま最新形を作る(既存 DB では no-op)
+    for (const ddl of SCHEMA_DDL) database.exec(ddl);
+    // v2(P5)migration: 判定は user_version ではなく**列の実在**(冪等)──
+    // 上記 (d1)(d2) の半端状態も次回 open で自己修復する(schema.ts の原則)
+    const revCols = new Set(
+      (
+        database.selectObjects(
+          `SELECT name FROM pragma_table_info('revisions')`,
+        ) as Array<{ name: string }>
+      ).map((r) => r.name),
+    );
+    for (const col of REVISIONS_V2_COLUMNS) {
+      if (!revCols.has(col))
+        database.exec(`ALTER TABLE revisions ADD COLUMN ${col} TEXT`);
+    }
+    database.exec(`PRAGMA user_version = ${DB_SCHEMA_VERSION}`);
+    database.exec('COMMIT');
+  } catch (err) {
+    try {
+      database.exec('ROLLBACK');
+    } catch {
+      /* rollback 失敗は元エラーを優先 */
+    }
+    throw err;
+  }
 }
 
 function need(): Database {
@@ -191,20 +222,51 @@ const handlers: Handlers = {
     return null;
   },
   deleteEntry: (req) => {
-    // entry の削除は relations(両向き)/ revisions を**同 tx**で掃除する
-    // (storage review #8 の解消 ── orphan を作らない。FK+CASCADE ではなく
-    // 多表削除にしたのは、schema v1 を動かさず lid 複合キーの向き 2 本を
-    // 明示するため)。assets の掃除は body 参照ベースなので P4(asset GC)
+    // entry の削除は relations(両向き)を**同 tx**で掃除する(storage
+    // review #8 ── orphan relation を作らない)。revisions は P5 から**消さない**:
+    // 削除直前の行から trash snapshot を同 tx で積み、「entries に居ない
+    // entry_lid の revisions」= ゴミ箱、が復元経路になる(掃除は purgeTrash)。
+    // assets の掃除は body 参照ベースなので asset GC(P4b)
     const database = need();
     database.exec('BEGIN IMMEDIATE');
     try {
+      const row = database.selectObjects(
+        'SELECT title, archetype, body FROM entries WHERE cid = ? AND lid = ?',
+        [req.cid, req.lid],
+      )[0] as { title: string; archetype: string; body: string } | undefined;
+      if (row) {
+        const hash = contentHash64Hex(row.body);
+        const last = database.selectObjects(
+          `SELECT rev_order, content_hash FROM revisions
+            WHERE cid = ? AND entry_lid = ?
+            ORDER BY rev_order DESC LIMIT 1`,
+          [req.cid, req.lid],
+        )[0] as { rev_order: number; content_hash: string | null } | undefined;
+        // 直前 revision と同一内容なら積まない(review P5a F3 ── 復元 → 無変更 →
+        // 削除の周回で同一 snapshot が積もる縁)。skip 時は既存の最新 revision が
+        // そのまま trash 行になる(listTrash は「最新」を返す)
+        if (!last || last.content_hash !== hash) {
+          database.exec({
+            sql: `INSERT INTO revisions
+                    (cid, id, entry_lid, created_at, rev_order, snapshot,
+                     title, archetype, content_hash)
+                  VALUES (?, ?, ?, datetime('now'), ?, ?, ?, ?, ?)`,
+            bind: [
+              req.cid,
+              `rev-${crypto.randomUUID()}`,
+              req.lid,
+              (last?.rev_order ?? 0) + 1,
+              row.body,
+              row.title,
+              row.archetype,
+              hash,
+            ],
+          });
+        }
+      }
       database.exec({
         sql: 'DELETE FROM relations WHERE cid = ? AND (from_lid = ? OR to_lid = ?)',
         bind: [req.cid, req.lid, req.lid],
-      });
-      database.exec({
-        sql: 'DELETE FROM revisions WHERE cid = ? AND entry_lid = ?',
-        bind: [req.cid, req.lid],
       });
       database.exec({
         sql: 'DELETE FROM entries WHERE cid = ? AND lid = ?',
@@ -260,10 +322,21 @@ const handlers: Handlers = {
     try {
       for (const r of req.revisions) {
         database.exec({
-          sql: `INSERT INTO revisions (cid, id, entry_lid, created_at, rev_order, snapshot)
-                VALUES (?, ?, ?, datetime('now'), ?, ?)
+          sql: `INSERT INTO revisions
+                  (cid, id, entry_lid, created_at, rev_order, snapshot,
+                   title, archetype, content_hash)
+                VALUES (?, ?, ?, datetime('now'), ?, ?, ?, ?, ?)
                 ON CONFLICT(cid, id) DO NOTHING`,
-          bind: [req.cid, r.id, r.entryLid, r.revOrder, r.snapshot],
+          bind: [
+            req.cid,
+            r.id,
+            r.entryLid,
+            r.revOrder,
+            r.snapshot,
+            r.title ?? null,
+            r.archetype ?? null,
+            contentHash64Hex(r.snapshot),
+          ],
         });
       }
       database.exec('COMMIT');
@@ -277,6 +350,95 @@ const handlers: Handlers = {
     }
     return null;
   },
+  addRevision: (req) => {
+    // P5 の通常経路(COMMIT_EDIT の変更前 body)。同 tx で
+    // ① 直前 revision と同一内容なら skip(content_hash ── PKC2 は field を
+    //   作って一度も使わなかった。PKC3 は最初から使う)
+    // ② rev_order = MAX+1 で挿入(採番も worker ── 競合面を作らない)
+    // ③ keepLatest 超過分を古い順に prune(生存 entry への書込時のみ走るので、
+    //   削除済み entry の trash snapshot が prune されることは構造的に無い)
+    const database = need();
+    const hash = contentHash64Hex(req.rev.body);
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      const last = database.selectObjects(
+        `SELECT rev_order, content_hash FROM revisions
+          WHERE cid = ? AND entry_lid = ?
+          ORDER BY rev_order DESC LIMIT 1`,
+        [req.cid, req.rev.entryLid],
+      )[0] as { rev_order: number; content_hash: string | null } | undefined;
+      if (last && last.content_hash === hash) {
+        database.exec('COMMIT');
+        return { added: false, pruned: 0 };
+      }
+      const nextOrder = (last?.rev_order ?? 0) + 1;
+      database.exec({
+        sql: `INSERT INTO revisions
+                (cid, id, entry_lid, created_at, rev_order, snapshot,
+                 title, archetype, content_hash)
+              VALUES (?, ?, ?, datetime('now'), ?, ?, ?, ?, ?)`,
+        bind: [
+          req.cid,
+          `rev-${crypto.randomUUID()}`,
+          req.rev.entryLid,
+          nextOrder,
+          req.rev.body,
+          req.rev.title,
+          req.rev.archetype,
+          hash,
+        ],
+      });
+      const keep = Math.max(1, req.keepLatest);
+      database.exec({
+        sql: `DELETE FROM revisions
+               WHERE cid = ? AND entry_lid = ? AND rev_order <= ?`,
+        bind: [req.cid, req.rev.entryLid, nextOrder - keep],
+      });
+      const pruned = database.changes();
+      database.exec('COMMIT');
+      return { added: true, pruned };
+    } catch (err) {
+      try {
+        database.exec('ROLLBACK');
+      } catch {
+        /* rollback 失敗は元エラーを優先 */
+      }
+      throw err;
+    }
+  },
+  listRevisionMetas: (req) =>
+    // snapshot 列を読まない ── 一覧は meta だけ、本文は getRevision で 1 行ずつ
+    need().selectObjects(
+      `SELECT id, entry_lid, rev_order, created_at, title, archetype
+         FROM revisions WHERE cid = ? AND entry_lid = ?
+        ORDER BY rev_order DESC`,
+      [req.cid, req.entryLid],
+    ) as unknown as ResultMap['listRevisionMetas'],
+  listTrash: (req) =>
+    // ゴミ箱 = 「entries に居ない entry_lid の最新 revision」ビュー(P5 設計 §1)。
+    // 独立 trash 機構は作らない ── PKC2 の設計を sqlite で自然に表現
+    need().selectObjects(
+      `SELECT r.id, r.entry_lid, r.rev_order, r.created_at, r.title, r.archetype
+         FROM revisions r
+         JOIN (SELECT entry_lid, MAX(rev_order) AS mx FROM revisions
+                WHERE cid = ?1 GROUP BY entry_lid) m
+           ON m.entry_lid = r.entry_lid AND m.mx = r.rev_order
+        WHERE r.cid = ?1
+          AND NOT EXISTS (SELECT 1 FROM entries e
+                           WHERE e.cid = r.cid AND e.lid = r.entry_lid)
+        ORDER BY r.created_at DESC, r.entry_lid`,
+      [req.cid],
+    ) as unknown as ResultMap['listTrash'],
+  purgeTrash: (req) => {
+    const database = need();
+    database.exec({
+      sql: `DELETE FROM revisions
+             WHERE cid = ?1
+               AND entry_lid NOT IN (SELECT lid FROM entries WHERE cid = ?1)`,
+      bind: [req.cid],
+    });
+    return { purged: database.changes() };
+  },
   revisionCounts: (req) =>
     // snapshot 列を読まない ── revisions は常駐ゼロ、件数は index scan(§4.1)
     need().selectObjects(
@@ -287,10 +449,16 @@ const handlers: Handlers = {
   getRevision: (req) => {
     // 表示要求時に 1 行だけ読む(要求駆動 ── §4.1)
     const rows = need().selectObjects(
-      'SELECT snapshot FROM revisions WHERE cid = ? AND id = ?',
+      'SELECT snapshot, title, archetype FROM revisions WHERE cid = ? AND id = ?',
       [req.cid, req.id],
     );
-    return rows.length > 0 ? (rows[0]?.snapshot as string) : null;
+    if (rows.length === 0) return null;
+    const r = rows[0]!;
+    return {
+      body: typeof r.snapshot === 'string' ? r.snapshot : '',
+      title: typeof r.title === 'string' ? r.title : null,
+      archetype: typeof r.archetype === 'string' ? r.archetype : null,
+    };
   },
   putAssetMeta: (req) => {
     const m = req.meta;
@@ -327,35 +495,44 @@ const handlers: Handlers = {
     // revisions 表も同じ規則で走査に加えること
     const remaining = new Set(req.candidates);
     const referenced: string[] = [];
+    const scanText = (row: unknown): false | void => {
+      if (remaining.size === 0) return false; // 全候補確定 ── 以降の行読みごと停止
+      const body = typeof row === 'string' ? row : '';
+      // ⚠ raw だけでは足りない(review F2 ── false-delete の反例):
+      // markdown-it は link destination を unescape してから key を取り出すので、
+      // `asset:ast\-key` / `asset:ast&#45;key` は**生きた参照なのに raw に key が
+      // 現れない**。backslash escape と数値実体だけ畳んだ第 2 形でも照合する
+      // (keep 側に広がるだけで安全)。正規 key の字母 [a-z0-9-] は名前付き
+      // 実体では書けない(英数字と '-' の名前付き実体が存在しない)ため 2 形で閉じる
+      const norm =
+        body.includes('\\') || body.includes('&#') ? unescapeForScan(body) : null;
+      for (const key of remaining) {
+        if (
+          key !== '' &&
+          (body.includes(key) || (norm !== null && norm.includes(key)))
+        ) {
+          referenced.push(key);
+          remaining.delete(key); // 反復中の自要素削除は Set 仕様で安全
+        }
+      }
+      if (remaining.size === 0) return false;
+    };
     if (remaining.size > 0) {
       need().exec({
         sql: 'SELECT body FROM entries WHERE cid = ?',
         bind: [req.cid],
         rowMode: '$body', // 列値を直接受ける(行 object を作らない)
-        callback: (row) => {
-          if (remaining.size === 0) return false; // 全候補確定 ── 以降の行読みごと停止
-          const body = typeof row === 'string' ? row : '';
-          // ⚠ raw だけでは足りない(review F2 ── false-delete の反例):
-          // markdown-it は link destination を unescape してから key を取り出すので、
-          // `asset:ast\-key` / `asset:ast&#45;key` は**生きた参照なのに raw に key が
-          // 現れない**。backslash escape と数値実体だけ畳んだ第 2 形でも照合する
-          // (keep 側に広がるだけで安全)。正規 key の字母 [a-z0-9-] は名前付き
-          // 実体では書けない(英数字と '-' の名前付き実体が存在しない)ため 2 形で閉じる
-          const norm =
-            body.includes('\\') || body.includes('&#')
-              ? unescapeForScan(body)
-              : null;
-          for (const key of remaining) {
-            if (
-              key !== '' &&
-              (body.includes(key) || (norm !== null && norm.includes(key)))
-            ) {
-              referenced.push(key);
-              remaining.delete(key); // 反復中の自要素削除は Set 仕様で安全
-            }
-          }
-          if (remaining.size === 0) return false;
-        },
+        callback: scanText,
+      });
+    }
+    if (remaining.size > 0) {
+      // P5: revisions(履歴 + ゴミ箱)が参照する asset も keep ── trash から
+      // 復元した entry の添付が purge 済み、を防ぐ(P4b worker コメントの義務)
+      need().exec({
+        sql: 'SELECT snapshot FROM revisions WHERE cid = ?',
+        bind: [req.cid],
+        rowMode: '$snapshot',
+        callback: scanText,
       });
     }
     return { referenced };
