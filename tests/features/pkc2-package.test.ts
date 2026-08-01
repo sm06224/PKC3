@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { readPkc2Package } from '../../src/features/import/pkc2-package';
-import { readZipEntry } from '../../src/features/import/zip-reader';
+import { readAssetSource } from '../../src/features/import/zip-reader';
 import { buildZip, bytesOf, type FixtureEntry } from './zip-fixture';
 
 const CONTAINER = {
@@ -76,11 +76,11 @@ describe('readPkc2Package', () => {
 
     expect(got.manifest.format).toBe('pkc2-package');
     expect((got.container as typeof CONTAINER).entries).toHaveLength(2);
-    expect([...got.assetEntries.keys()]).toEqual(['ast-x1']);
+    expect([...got.assetSources.keys()]).toEqual(['ast-x1']);
     expect(got.warnings).toEqual([]);
 
     // bytes は呼び出し側が 1 件ずつ読む(base64 を経由しない)
-    const blob = await readZipEntry(zip, got.assetEntries.get('ast-x1')!);
+    const blob = await readAssetSource(got.assetSources.get('ast-x1')!);
     expect(await blob.text()).toBe('画像の bytes');
   });
 
@@ -88,7 +88,7 @@ describe('readPkc2Package', () => {
     // bundle 系の「拡張子を剥がす」突合だと、この key はマッチせず無言で欠落する
     const zip = await pkg({ assets: { 'thumb-2026.07.31-a': bytesOf('x') } });
     const got = await readPkc2Package(zip);
-    expect([...got.assetEntries.keys()]).toEqual(['thumb-2026.07.31-a']);
+    expect([...got.assetSources.keys()]).toEqual(['thumb-2026.07.31-a']);
   });
 
   it('Office 文書は名指しで断る(不明に混ぜない)', async () => {
@@ -159,7 +159,7 @@ describe('readPkc2Package', () => {
       assets: { 'ast-x1': bytesOf('x') },
     });
     const got = await readPkc2Package(zip);
-    expect([...got.assetEntries.keys()]).toEqual(['ast-x1']);
+    expect([...got.assetSources.keys()]).toEqual(['ast-x1']);
     expect(got.warnings.some((w) => w.includes('README.txt'))).toBe(true);
   });
 
@@ -177,7 +177,7 @@ describe('readPkc2Package', () => {
       extra: [{ name: 'assets/', bytes: bytesOf(''), isDirectory: true }],
     });
     const got = await readPkc2Package(zip);
-    expect([...got.assetEntries.keys()]).toEqual(['ast-x1']);
+    expect([...got.assetSources.keys()]).toEqual(['ast-x1']);
     expect(got.warnings).toEqual([]); // ディレクトリは「想定外ファイル」ではない
   });
 
@@ -194,8 +194,8 @@ describe('readPkc2Package', () => {
       { name: 'assets/ast-x1.bin', bytes: bytesOf('圧縮された bytes'), method: 8 },
     ]);
     const got = await readPkc2Package(zip);
-    expect([...got.assetEntries.keys()]).toEqual(['ast-x1']);
-    expect(await (await readZipEntry(zip, got.assetEntries.get('ast-x1')!)).text()).toBe(
+    expect([...got.assetSources.keys()]).toEqual(['ast-x1']);
+    expect(await (await readAssetSource(got.assetSources.get('ast-x1')!)).text()).toBe(
       '圧縮された bytes',
     );
   });
@@ -210,7 +210,7 @@ describe('readPkc2Package', () => {
       { name: 'assets//absolute/path.bin', bytes: bytesOf('悪意') },
     ]);
     const got = await readPkc2Package(zip);
-    expect([...got.assetEntries.keys()]).toEqual(['ast-x1']);
+    expect([...got.assetSources.keys()]).toEqual(['ast-x1']);
     expect(got.warnings.filter((w) => w.includes('不正な名前'))).toHaveLength(2);
   });
 
@@ -228,6 +228,6 @@ describe('readPkc2Package', () => {
       { name: '添付メモ.txt', bytes: bytesOf('非 ASCII 名の同梱ファイル'), flags: 0 },
     ]);
     const got = await readPkc2Package(zip);
-    expect([...got.assetEntries.keys()]).toEqual(['ast-x1']);
+    expect([...got.assetSources.keys()]).toEqual(['ast-x1']);
   });
 });

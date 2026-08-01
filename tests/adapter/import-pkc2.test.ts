@@ -66,8 +66,14 @@ function harness(opts: HarnessOptions = {}) {
   const written: EntryUpsert[] = [];
   const relations: Array<{ id: string; fromLid: string; toLid: string; kind: string }> = [];
   const blobs = new Map<string, Blob>();
-  const metas: Array<{ key: string; mime: string; size: number }> = [];
+  // ⚠ **hash まで記録する**(review M-1)── 捨てていたせいで「content key を
+  // 使っているか / 巨大 asset だけ採番 key に落ちるか」を観測できず、
+  // HASH_MAX_BYTES 分岐を削っても反転させても 405 test 全部が通っていた
+  const metas: Array<{ key: string; mime: string; size: number; hash: string | null }> = [];
   const notices: string[] = [];
+  // ⚠ **注意の全件**はこちらに来る(review H-2)── notify の 1 行には件数しか
+  // 載らない。notes[0] だけを見る test は「2 件目以降が消えている」を検知できない
+  let reported: readonly string[] = [];
   // 🔑 **書込の順序**そのものを記録する ── 「bytes を先に、参照を後に」は
   // この commit の規約 1 番なのに、順序を反転しても全 test が通っていた
   // (review mutation M25)。別配列に積むだけでは順序が pin されない
@@ -117,7 +123,7 @@ function harness(opts: HarnessOptions = {}) {
     },
     putAssetMeta: async (m) => {
       opLog.push(`meta:${m.key}`);
-      metas.push({ key: m.key, mime: m.mime, size: m.size });
+      metas.push({ key: m.key, mime: m.mime, size: m.size, hash: m.hash });
     },
     // 実配線と同じく「書けたものを読み直して SYS_BOOTED」── 取込結果が
     // state に現れることまでを 1 本の網で見る
@@ -156,6 +162,7 @@ function harness(opts: HarnessOptions = {}) {
       });
     },
     notify: (m) => notices.push(m),
+    report: (n) => { reported = n; },
   };
   return {
     d,
@@ -165,6 +172,7 @@ function harness(opts: HarnessOptions = {}) {
     blobs,
     metas,
     notices,
+    reportedNotes: () => reported,
     opLog,
     revChains,
     reloadCount: () => reloads,
@@ -242,7 +250,12 @@ describe('importPkc2File (P6b 実行部)', () => {
     const [key, blob] = [...blobs.entries()][0]!;
     expect(await blob.text()).toBe(payload); // 展開されている(gzip のまま入れない)
     expect(metas).toEqual([
-      { key, mime: 'text/plain', size: new TextEncoder().encode(payload).length },
+      {
+        key,
+        mime: 'text/plain',
+        size: new TextEncoder().encode(payload).length,
+        hash: key.slice('ast-'.length),
+      },
     ]);
     // entry 側の参照も同じ新 key を指す(旧 key が残ると死んだ参照になる)
     expect(key).not.toBe('old-key');
@@ -272,7 +285,7 @@ describe('importPkc2File (P6b 実行部)', () => {
   });
 
   it('light export(assets が空オブジェクト)は bytes を書かず light と明言する', async () => {
-    const { d, deps, blobs, written, notices } = harness();
+    const { d, deps, blobs, written, notices, reportedNotes } = harness();
     const file = htmlFile({
       container: {
         meta: {},
@@ -286,7 +299,8 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(blobs.size).toBe(0);
     expect(written).toHaveLength(1);
     // mode を parse しているのに黙っていると、user は添付が入った気になる
-    expect(notices.at(-1)).toMatch(/添付の中身は含まれていない/);
+    expect(notices.at(-1)).toMatch(/注意 1 件/);
+    expect(reportedNotes().join('\n')).toMatch(/添付の中身は含まれていない/);
   });
 
   it('0 バイトの添付は「中身が無い」ではない ── 空ファイルとして取り込む', async () => {
@@ -323,7 +337,7 @@ describe('importPkc2File (P6b 実行部)', () => {
   });
 
   it('light export の attachment は「中身が無い」と件数で言う(開くまで気づかせない)', async () => {
-    const { d, deps, notices } = harness();
+    const { d, deps, notices, reportedNotes } = harness();
     const file = htmlFile({
       container: {
         meta: {},
@@ -345,8 +359,10 @@ describe('importPkc2File (P6b 実行部)', () => {
     });
 
     expect(await importPkc2File(d, deps, file)).toBe(1);
-    expect(notices.at(-1)).toMatch(/請求書\.pdf/);
     expect(notices.at(-1)).toMatch(/注意 2 件/); // light 本体 + 個別の欠損
+    // 🔑 **2 件目以降も届く**(H-2 の前は notes[0] しか出力されていなかった)
+    expect(reportedNotes()).toHaveLength(2);
+    expect(reportedNotes().join('\n')).toMatch(/請求書\.pdf/);
   });
 
   it('bytes を先に、参照を後に書く(順序そのものを pin する)', async () => {
@@ -421,7 +437,7 @@ describe('importPkc2File (P6b 実行部)', () => {
   });
 
   it('警告(端点不在の relation 等)は握りつぶさず可視化する ── ただし成功をエラーに見せない', async () => {
-    const { d, deps, relations, notices } = harness();
+    const { d, deps, relations, notices, reportedNotes } = harness();
     const file = htmlFile({
       container: {
         meta: {},
@@ -434,6 +450,7 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(await importPkc2File(d, deps, file)).toBe(1);
     expect(relations).toHaveLength(0);
     expect(notices.at(-1)).toMatch(/取込完了: 1 件 ⚠ 注意 1 件/);
+    expect(reportedNotes()).toEqual(['端点不在の relation を除外: r1']);
     // state.error に載せると status が「⚠ エラー:」で始まる ── 成功が失敗に見える
     expect(d.getState().error).toBeNull();
   });
@@ -471,7 +488,7 @@ describe('importPkc2File (P6b 実行部)', () => {
   });
 
   it('壊れた添付が 1 件あっても取込全体は止まらない(欠損は可視)', async () => {
-    const { d, deps, written, blobs, notices } = harness();
+    const { d, deps, written, blobs, reportedNotes } = harness();
     const file = htmlFile({
       container: {
         meta: {},
@@ -484,7 +501,7 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(await importPkc2File(d, deps, file)).toBe(1);
     expect(written).toHaveLength(1); // entry は取り込まれる
     expect(blobs.size).toBe(0); // 壊れた添付は書かれない
-    expect(notices.at(-1)).toMatch(/添付を復元できませんでした/);
+    expect(reportedNotes().join('\n')).toMatch(/添付を復元できませんでした/);
   });
 
   // ── review で実証された 4 経路(H-1〜H-4)の pin ──
@@ -798,7 +815,7 @@ describe('importPkc2File (P6b 実行部)', () => {
   // ── P6c 段②: .pkc2.zip(バックアップ正本)の取込 ──
 
   it('[P6c] .pkc2.zip を取り込む ── bytes は ZIP から直接流れる(base64 を経由しない)', async () => {
-    const { d, deps, written, blobs, opLog } = harness();
+    const { d, deps, written, blobs, opLog, metas } = harness();
     const container = {
       meta: { container_id: 'c-old' },
       entries: [
@@ -838,6 +855,14 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(blobs.size).toBe(1);
     const key = [...blobs.keys()][0]!;
     expect(await blobs.get(key)!.text()).toBe('生バイナリ');
+    // 🔑 ZIP 経路でも **key は中身の SHA-256**(content addressing / ZFS の発想)。
+    // これを見ていなかったので、HASH_MAX_BYTES 分岐を消しても反転させても
+    // 全 test が通っていた(review M-1)── 反転すると採番 key + hash:null になる
+    // ⚠ ハッシュは**べた書き**(実装から借りない ── 借りると実装が壊れても一致する)
+    expect(key).toBe('ast-df08ff17d4afa4ad9d950178b2fdbbd203ce98cf0ce5f04fe567e6342550c10e');
+    expect(metas).toEqual([
+      { key, mime: 'image/png', size: 15, hash: key.slice('ast-'.length) },
+    ]);
     // 参照は content key へ写っている(frontmatter と本文 markdown の両方)
     const att = written.find((e) => e.archetype === 'attachment')!;
     expect(readAttachmentMeta(att.body).assetKey).toBe(key);
@@ -846,6 +871,120 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(opLog.findIndex((o) => o.startsWith('blob:'))).toBeLessThan(
       opLog.indexOf('entries'),
     );
+  });
+
+  /** 内側の `.text.zip` を組む(batch fixture 用)。 */
+  async function innerTextBundle(
+    lid: string,
+    body: string,
+    assetBytes: Uint8Array | null,
+  ): Promise<Uint8Array> {
+    const zip = await buildZip([
+      {
+        name: 'manifest.json',
+        bytes: bytesOf(
+          JSON.stringify({
+            format: 'pkc2-text-bundle',
+            version: 1,
+            source_lid: lid,
+            source_title: lid,
+            assets: assetBytes ? { 'ast-shared': { name: 'dot.png', mime: 'image/png' } } : {},
+            compacted: false,
+          }),
+        ),
+      },
+      { name: 'body.md', bytes: bytesOf(body) },
+      ...(assetBytes ? [{ name: 'assets/ast-shared.png', bytes: assetBytes }] : []),
+    ]);
+    return new Uint8Array(await zip.arrayBuffer());
+  }
+
+  it('[P6c 段④] batch: 内側 ZIP を再入し、共有添付を 1 本の blob に畳む', async () => {
+    // 🔴 この PR の目玉。**内側 entry を外側 Blob から読む** mutation は
+    // typecheck も lint も通り、smoke でしか落ちなかった(review M-3)──
+    // ブラウザ無しで 1 秒未満に殺せるのに網が無かった
+    const { d, deps, written, blobs, metas, opLog } = harness();
+    const png = bytesOf('共有 PNG');
+    const zip = await buildZip([
+      {
+        name: 'manifest.json',
+        bytes: bytesOf(
+          JSON.stringify({
+            format: 'pkc2-mixed-container-bundle',
+            version: 1,
+            text_count: 2,
+            textlog_count: 0,
+            entries: [
+              { lid: 'n1', title: 'n1', archetype: 'text', filename: 'a.text.zip' },
+              { lid: 'n2', title: 'n2', archetype: 'text', filename: 'b.text.zip' },
+            ],
+          }),
+        ),
+      },
+      {
+        name: 'a.text.zip',
+        bytes: await innerTextBundle('n1', '# A\n![図](asset:ast-shared)\n', png),
+      },
+      {
+        name: 'b.text.zip',
+        bytes: await innerTextBundle('n2', '# B\n![図](asset:ast-shared)\n', png),
+      },
+    ]);
+
+    expect(await importPkc2File(d, deps, new File([zip], 'c.zip'))).toBe(3);
+
+    // 添付は **1 本**(content addressing + attachment の畳み込み)
+    expect(blobs.size).toBe(1);
+    const key = [...blobs.keys()][0]!;
+    expect(await blobs.get(key)!.text()).toBe('共有 PNG');
+    expect(metas).toEqual([
+      { key, mime: 'image/png', size: png.length, hash: key.slice('ast-'.length) },
+    ]);
+    // 両ノートの本文が**同じ content key** を指す
+    for (const lid of ['n1', 'n2']) {
+      expect(written.find((e) => e.lid === lid)!.body).toContain(`asset:${key}`);
+    }
+    // 規約は他経路と同じ ── bytes が先、参照が後
+    expect(opLog.findIndex((o) => o.startsWith('blob:'))).toBeLessThan(opLog.indexOf('entries'));
+  });
+
+  it('[P6c] 閾値超の添付は heap に載せず、採番 key + hash なしで入る', async () => {
+    // ⚠ この分岐は既定 64MB なので fixture では踏めない ── 閾値を下げて観測する。
+    // 分岐を丸ごと消す mutation が生存していた(review M-1 / MUTANT-2)
+    const { d, deps, written, blobs, metas } = harness();
+    deps.hashMaxBytes = 4; // 「生バイナリ」= 15 バイト > 4
+    const container = {
+      meta: {},
+      entries: [
+        {
+          lid: 'a1',
+          title: 'big.bin',
+          archetype: 'attachment',
+          body: JSON.stringify({ name: 'big.bin', mime: 'image/png', asset_key: 'ast-x1' }),
+        },
+      ],
+      relations: [],
+      revisions: [],
+      assets: {},
+    };
+    const zip = await buildZip([
+      {
+        name: 'manifest.json',
+        bytes: bytesOf(JSON.stringify({ format: 'pkc2-package', version: 1 })),
+      },
+      { name: 'container.json', bytes: bytesOf(JSON.stringify(container)) },
+      { name: 'assets/ast-x1.bin', bytes: bytesOf('生バイナリ') },
+    ]);
+
+    expect(await importPkc2File(d, deps, new File([zip], 'b.pkc2.zip'))).toBe(1);
+
+    const key = [...blobs.keys()][0]!;
+    // content key ではなく**採番 key**(= 重複排除の対象外)
+    expect(key).not.toBe('ast-df08ff17d4afa4ad9d950178b2fdbbd203ce98cf0ce5f04fe567e6342550c10e');
+    expect(metas).toEqual([{ key, mime: 'image/png', size: 15, hash: null }]);
+    // 破損検査は落としていない(CRC は stream で確かめている)ので中身は正しい
+    expect(await blobs.get(key)!.text()).toBe('生バイナリ');
+    expect(readAttachmentMeta(written[0]!.body).assetKey).toBe(key);
   });
 
   it('[P6c] .pkc2.zip の履歴も HTML 経路と同じ鎖へ合流する', async () => {

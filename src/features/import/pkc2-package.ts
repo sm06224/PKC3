@@ -23,7 +23,7 @@ import {
   readZipDirectory,
   readZipText,
   ZipReadError,
-  type ZipEntry,
+  type AssetSource,
 } from './zip-reader';
 
 /** PKC2 の PackageManifest(zip-package.ts:36-45 と同一の field 集合)。 */
@@ -42,8 +42,8 @@ export interface Pkc2Package {
   manifest: Pkc2PackageManifest;
   /** `container.json` の中身(shape 検査済み ── 変換は adapter が convert へ渡す)。 */
   container: unknown;
-  /** PKC2 の asset key → その bytes を持つ ZIP entry(**まだ読んでいない**)。 */
-  assetEntries: Map<string, ZipEntry>;
+  /** PKC2 の asset key → その bytes の在り処(**まだ読んでいない**)。 */
+  assetSources: Map<string, AssetSource>;
   warnings: string[];
 }
 
@@ -142,7 +142,7 @@ export async function readPkc2Package(zip: Blob): Promise<Pkc2Package> {
   // ── asset: `assets/<key>.bin` の**完全一致**で引く。
   // (bundle 系のように拡張子を剥がす突合はしない ── key に `.` が入ると
   //  マッチせず無言欠落する。package は writer が `.bin` 固定なので厳密に引ける)
-  const assetEntries = new Map<string, ZipEntry>();
+  const assetSources = new Map<string, AssetSource>();
   for (const e of dir) {
     if (e.isDirectory) continue;
     if (!e.name.startsWith('assets/')) continue;
@@ -160,10 +160,10 @@ export async function readPkc2Package(zip: Blob): Promise<Pkc2Package> {
       warnings.push(`asset key として不正な名前を無視しました: ${e.name}`);
       continue;
     }
-    if (assetEntries.has(key)) {
+    if (assetSources.has(key)) {
       throw new ZipReadError(`asset key が重複しています: ${key}(壊れた ZIP)`);
     }
-    assetEntries.set(key, e);
+    assetSources.set(key, { zip, entry: e });
   }
 
   // manifest のカウンタは PKC2 importer が一切照合していない ── PKC3 は照合して
@@ -184,7 +184,7 @@ export async function readPkc2Package(zip: Blob): Promise<Pkc2Package> {
         ? ((c as { revisions: unknown[] }).revisions).length
         : 0,
     ],
-    ['asset', manifest.asset_count, assetEntries.size],
+    ['asset', manifest.asset_count, assetSources.size],
   ];
   for (const [label, declared, actual] of counts) {
     if (typeof declared === 'number' && declared !== actual) {
@@ -192,5 +192,5 @@ export async function readPkc2Package(zip: Blob): Promise<Pkc2Package> {
     }
   }
 
-  return { manifest, container, assetEntries, warnings };
+  return { manifest, container, assetSources, warnings };
 }

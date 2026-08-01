@@ -16,7 +16,8 @@ import { sniffMagic, detectPkc2Format } from '@features/import/detect-format';
 import { parsePkc2Html } from '@features/import/pkc2-html';
 import { readPkc2Package, peekZipFormat } from '@features/import/pkc2-package';
 import { readTextBundle, readTextlogBundle } from '@features/import/pkc2-bundle';
-import { readZipEntry, type ZipEntry } from '@features/import/zip-reader';
+import { readContainerBundle, isBatchFormat } from '@features/import/pkc2-container-bundle';
+import { readAssetSource, type AssetSource } from '@features/import/zip-reader';
 import {
   convertPkc2Container,
   remapAssetKeys,
@@ -73,6 +74,21 @@ export interface ImportDeps {
   reload(): Promise<void>;
   /** 進捗・完了の可視化(件数が多いと無反応に見えるため)。 */
   notify?(message: string): void;
+  /**
+   * **注意の全件**を渡す(review H-2)。`notify` は 1 行の status footer なので
+   * `notes[0]` しか user に届かない ── 段④ は warning 件数が内側 bundle 数に
+   * 比例するので、全件を出せる面が要る。
+   */
+  report?(notes: readonly string[]): void;
+  /**
+   * ハッシュを取る上限(既定 `HASH_MAX_BYTES` = 64MB)。
+   *
+   * ⚠ **test の観測点として在る**(review M-1)。この閾値は WebCrypto に
+   * streaming digest が無いことに由来する実運用上の分岐だが、64MB の fixture は
+   * test で作れないため、下げられないと**分岐ごと消しても誰も気づかない**
+   * (実際に mutation が生存していた)。
+   */
+  hashMaxBytes?: number;
 }
 
 /** base64 → bytes。`fromBase64` があれば中間のバイナリ文字列を作らない。 */
@@ -111,6 +127,56 @@ export function consumeBase64(a: { base64: string }): string {
   const b = a.base64;
   a.base64 = '';
   return b;
+}
+
+/**
+ * 在り処を **引くと同時に手放す**(`consumeBase64` と対称。review M-4)。
+ *
+ * ⚠ `AssetSource` は **内側 ZIP の Blob を強参照する**。batch では内側 ZIP が
+ * 添付の数だけ map に載るので、参照を切らないと**全内側 ZIP が取込の最後まで
+ * 同時に生存する**。store なら view なので実体は増えないが、deflate の内側 ZIP は
+ * 実体化されている ── 「最大の内側 ZIP 1 個」を保つには参照を切る側が要る。
+ */
+function consumeSource(
+  map: Map<string, AssetSource> | null,
+  oldKey: string | null,
+): AssetSource | null {
+  if (map === null || oldKey === null) return null;
+  const src = map.get(oldKey) ?? null;
+  map.delete(oldKey);
+  return src;
+}
+
+/**
+ * 在り処を読む。**先頭が壊れていたら控えを試す**(review M-5)。
+ *
+ * batch では同じ添付が内側 ZIP ごとに丸ごと複製される。同一性の判定は中央
+ * ディレクトリの crc/size だけで bytes を読まないので、**データ部だけが腐って
+ * CD が無傷**なら「同一」と判定して畳んでしまう ── PKC2 は畳まなかったので
+ * 健全な複製が生き残っていた。畳み込みで冗長性まで捨てると PKC2 より弱くなる。
+ */
+async function readWithFallback(
+  src: AssetSource,
+  alternates: readonly AssetSource[] | undefined,
+  onFallback: (n: number) => void,
+): Promise<Blob> {
+  try {
+    return await readAssetSource(src);
+  } catch (first) {
+    let n = 0;
+    for (const alt of alternates ?? []) {
+      if (alt === src) continue;
+      n++;
+      try {
+        const blob = await readAssetSource(alt);
+        onFallback(n);
+        return blob;
+      } catch {
+        // 次の複製へ
+      }
+    }
+    throw first; // どれも読めなければ最初の理由を返す(原因が一番近い)
+  }
 }
 
 /** 1 メッセージに載せる履歴の目安(postMessage に全履歴を一度に載せない)。 */
@@ -193,7 +259,8 @@ export async function importPkc2File(
     let container: unknown;
     let gzipped = false;
     let light = false;
-    let zipAssets: Map<string, ZipEntry> | null = null;
+    let zipAssets: Map<string, AssetSource> | null = null;
+    let zipAlternates: Map<string, AssetSource[]> | null = null;
     const preWarnings: string[] = [];
 
     if (isZip) {
@@ -212,14 +279,18 @@ export async function importPkc2File(
             ? readTextBundle
             : format === 'pkc2-textlog-bundle'
               ? readTextlogBundle
-              : null;
+              : // batch 3 形式(段④)。folder-export / entry-bundle は**受けない**
+                isBatchFormat(format)
+                ? readContainerBundle
+                : null;
       if (!read) {
         // 未対応の形式は**名指しで**断る(「不明」に混ぜると原因を誤解する)
         return fail(`${format} の取込はまだ実装されていません(${file.name})`);
       }
       const pkg = await read(file);
       container = pkg.container;
-      zipAssets = pkg.assetEntries;
+      zipAssets = pkg.assetSources;
+      zipAlternates = 'assetAlternates' in pkg ? pkg.assetAlternates : null;
       preWarnings.push(...pkg.warnings);
     } else {
       const payload = parsePkc2Html(await file.text());
@@ -258,19 +329,47 @@ export async function importPkc2File(
         // ⚠ gzip は **export 単位**の符号化なので、body 内蔵だった legacy data
         // (oldKey === null)には掛かっていない(review M-9 ── 一律に展開すると
         //  legacy 添付だけが必ず復号に失敗して死んだ参照になる)
-        const zipEntryPeek = a.oldKey !== null ? (zipAssets?.get(a.oldKey) ?? null) : null;
+        const src = consumeSource(zipAssets, a.oldKey);
+        // 🔴 ZIP 経路では base64 が常に空なので、在り処を引けないまま下へ落ちると
+        // **SHA-256("") の key で 0 バイトの添付を無警告で書く**(review H-2)。
+        // 壊れた参照(= 開けない)ではなく「中身が空のファイル」として開けてしまう
+        // ので、user は欠損に気づけない。既存の per-asset catch に合流させて
+        // 「復元できませんでした」を出し、参照は壊れたまま温存する(§4-B)。
+        //
+        // ⚠ **いまは到達不能で、したがって test で pin できていない**(正直に書く)。
+        // convert は `assetKeys` に渡した key ぶんしか asset を返さず、その
+        // `assetKeys` は `zipAssets.keys()` から作っているため。**tripwire として置く**
+        // ── ① 上の `consumeSource` は引くと同時に消すので、同じ oldKey が 2 回来たら
+        // 2 回目がここに落ちる ② 段⑤以降で「複数 bundle の map を合成する」際に
+        // key 集合がずれると、その瞬間ここが唯一の防壁になる
+        if (zipAssets !== null && a.oldKey !== null && src === null) {
+          throw new Error(`ZIP の中に添付の実体がありません(${a.oldKey})`);
+        }
         // ⚠ 閾値超の asset は **heap に載せない** ── ハッシュを取らない
         // (= dedupe 対象外)ので読む理由が無く、読めばそのまま常駐する。
         // **破損検査は落とさない**: reader は stream で舐めて検証し view を返すので、
         // 全量を載せずに CRC を確かめられる(重複排除だけが外れる)
-        if (zipEntryPeek && zipEntryPeek.uncompressedSize > HASH_MAX_BYTES) {
-          const key = generateAssetKey();
+        if (src && src.entry.uncompressedSize > (deps.hashMaxBytes ?? HASH_MAX_BYTES)) {
+          // ⚠ 採番 key は `ast-<ms base36>-<6 桁 base36>` なので**同一 ms 内で
+          // 衝突しうる**。衝突すると putBlob が後勝ちで上書きし、2 つの添付が
+          // 同じ bytes を指す(無言のデータ消失)── convert 側は takenKeys で
+          // 守っているのに、この分岐だけ外にあった(review M-10)
+          let key = generateAssetKey();
+          while (known.has(key)) key = generateAssetKey();
+          known.add(key);
           keyMap.set(a.key, key);
-          await deps.putBlob(key, await readZipEntry(file, zipEntryPeek));
+          await deps.putBlob(
+            key,
+            await readWithFallback(src, zipAlternates?.get(a.oldKey!), (n) =>
+              result.warnings.push(
+                `添付が壊れていたので ${n} 個目の複製から復元しました: ${a.oldKey}`,
+              ),
+            ),
+          );
           await deps.putAssetMeta({
             key,
             mime: a.mime,
-            size: zipEntryPeek.uncompressedSize,
+            size: src.entry.uncompressedSize,
             hash: null,
           });
           result.warnings.push(
@@ -282,8 +381,18 @@ export async function importPkc2File(
         // ⚠ gzip は **export 単位**の符号化なので、body 内蔵だった legacy data
         // (oldKey === null)には掛かっていない(review M-9 ── 一律に展開すると
         //  legacy 添付だけが必ず復号に失敗して死んだ参照になる)
-        const bytes = zipEntryPeek
-          ? new Uint8Array(await (await readZipEntry(file, zipEntryPeek)).arrayBuffer())
+        // ⚠ 読むのは **`src.zip`**(外側の `file` ではない)── batch では内側 ZIP の
+        // entry なので、外側から読むと別位置を読んで壊れる
+        const bytes = src
+          ? new Uint8Array(
+              await (
+                await readWithFallback(src, zipAlternates?.get(a.oldKey!), (n) =>
+                  result.warnings.push(
+                    `添付が壊れていたので ${n} 個目の複製から復元しました: ${a.oldKey}`,
+                  ),
+                )
+              ).arrayBuffer(),
+            )
           : await decodeAssetBytes(consumeBase64(a), gzipped && a.oldKey !== null);
         const { key, hash } = await identifyBytes(bytes);
         keyMap.set(a.key, key); // ⚠ put を省いた時も**必ず**写す(review M-30)
@@ -362,12 +471,13 @@ export async function importPkc2File(
       ...(light ? ['添付の中身は含まれていない export です(light)'] : []),
     ];
     const revNote = revStats.added > 0 ? `(履歴 ${revStats.added} 版)` : '';
+    // ⚠ **全件を出す**(review H-2)。1 行の status には件数だけを載せ、中身は
+    // 閉じるまで残る面へ ── notes[0] だけ出して残りを捨てるのは「可視化」ではない
+    deps.report?.(notes);
     if (notes.length > 0) {
       // 警告は握りつぶさない。ただし**成功を失敗の見た目にしない** ──
       // OP_FAILED は state.error に載って「⚠ エラー」表示になる(review L-11)
-      deps.notify?.(
-        `取込完了: ${rows.length} 件${revNote} ⚠ 注意 ${notes.length} 件 — ${notes[0]}`,
-      );
+      deps.notify?.(`取込完了: ${rows.length} 件${revNote} ⚠ 注意 ${notes.length} 件`);
     } else {
       deps.notify?.(`取込完了: ${rows.length} 件${revNote}`);
     }

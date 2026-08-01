@@ -1,5 +1,5 @@
 /**
- * smoke #5: PKC2 の取込 end-to-end(単一 HTML / .pkc2.zip の 2 経路)。
+ * smoke #5: PKC2 の取込 end-to-end(単一 HTML / .pkc2.zip / batch bundle の 3 経路)。
  *
  * unit では届かないものを見る:
  * - 実 file picker(常設 hidden input)→ binder 配線。**accept に .zip が無いと
@@ -101,6 +101,49 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
   expect(errors).toEqual([]);
 });
 
+/** PKC2 の writer と同じ ZIP を組む(store 固定 / UTF-8 flag / 本物の CRC)。 */
+function zipOf(files: ReadonlyArray<{ name: string; data: Buffer }>): Buffer {
+  const local: Buffer[] = [];
+  const central: Buffer[] = [];
+  let offset = 0;
+  for (const f of files) {
+    const name = Buffer.from(f.name, 'utf-8');
+    const crc = crc32(f.data);
+    const lh = Buffer.alloc(30);
+    lh.writeUInt32LE(0x04034b50, 0);
+    lh.writeUInt16LE(20, 4);
+    lh.writeUInt16LE(0x0800, 6);
+    lh.writeUInt16LE(0, 8);
+    lh.writeUInt32LE(crc, 14);
+    lh.writeUInt32LE(f.data.length, 18);
+    lh.writeUInt32LE(f.data.length, 22);
+    lh.writeUInt16LE(name.length, 26);
+    local.push(lh, name, f.data);
+
+    const cd = Buffer.alloc(46);
+    cd.writeUInt32LE(0x02014b50, 0);
+    cd.writeUInt16LE(20, 4);
+    cd.writeUInt16LE(20, 6);
+    cd.writeUInt16LE(0x0800, 8);
+    cd.writeUInt16LE(0, 10);
+    cd.writeUInt32LE(crc, 16);
+    cd.writeUInt32LE(f.data.length, 20);
+    cd.writeUInt32LE(f.data.length, 24);
+    cd.writeUInt16LE(name.length, 28);
+    cd.writeUInt32LE(offset, 42);
+    central.push(cd, name);
+    offset += 30 + name.length + f.data.length;
+  }
+  const cdBuf = Buffer.concat(central);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(files.length, 8);
+  eocd.writeUInt16LE(files.length, 10);
+  eocd.writeUInt32LE(cdBuf.length, 12);
+  eocd.writeUInt32LE(offset, 16);
+  return Buffer.concat([...local, cdBuf, eocd]);
+}
+
 /** PKC2 の package writer と同じ形の ZIP を node 側で組む(store / 本物の CRC)。 */
 function pkc2Zip(): Buffer {
   const container = {
@@ -145,45 +188,7 @@ function pkc2Zip(): Buffer {
     { name: 'assets/ast-zip.bin', data: PNG_1X1 }, // 生バイナリ
   ];
 
-  const local: Buffer[] = [];
-  const central: Buffer[] = [];
-  let offset = 0;
-  for (const f of files) {
-    const name = Buffer.from(f.name, 'utf-8');
-    const crc = crc32(f.data);
-    const lh = Buffer.alloc(30);
-    lh.writeUInt32LE(0x04034b50, 0);
-    lh.writeUInt16LE(20, 4);
-    lh.writeUInt16LE(0x0800, 6); // UTF-8 名(PKC2 の writer と同じ)
-    lh.writeUInt16LE(0, 8); // store
-    lh.writeUInt32LE(crc, 14);
-    lh.writeUInt32LE(f.data.length, 18);
-    lh.writeUInt32LE(f.data.length, 22);
-    lh.writeUInt16LE(name.length, 26);
-    local.push(lh, name, f.data);
-
-    const cd = Buffer.alloc(46);
-    cd.writeUInt32LE(0x02014b50, 0);
-    cd.writeUInt16LE(20, 4);
-    cd.writeUInt16LE(20, 6);
-    cd.writeUInt16LE(0x0800, 8);
-    cd.writeUInt16LE(0, 10);
-    cd.writeUInt32LE(crc, 16);
-    cd.writeUInt32LE(f.data.length, 20);
-    cd.writeUInt32LE(f.data.length, 24);
-    cd.writeUInt16LE(name.length, 28);
-    cd.writeUInt32LE(offset, 42);
-    central.push(cd, name);
-    offset += 30 + name.length + f.data.length;
-  }
-  const cdBuf = Buffer.concat(central);
-  const eocd = Buffer.alloc(22);
-  eocd.writeUInt32LE(0x06054b50, 0);
-  eocd.writeUInt16LE(files.length, 8);
-  eocd.writeUInt16LE(files.length, 10);
-  eocd.writeUInt32LE(cdBuf.length, 12);
-  eocd.writeUInt32LE(offset, 16);
-  return Buffer.concat([...local, cdBuf, eocd]);
+  return zipOf(files);
 }
 
 test('.pkc2.zip 取込 → entry 出現 → 生バイナリ添付が blob: で描画される', async ({ page }) => {
@@ -213,6 +218,150 @@ test('.pkc2.zip 取込 → entry 出現 → 生バイナリ添付が blob: で�
   await clickReal(page, '[data-pkc-entry="z1"]');
   await clickReal(page, '[data-pkc-action="show-history"]');
   await expect(page.locator('[data-pkc-rev-order]')).toHaveCount(1);
+
+  expect(errors).toEqual([]);
+});
+
+/** 内側の `.text.zip` を 1 個組む(PKC2 の単体 export と同じ構造)。 */
+function textBundle(lid: string, title: string, body: string, withAsset: boolean): Buffer {
+  const assets = withAsset ? { 'ast-shared': { name: 'dot.png', mime: 'image/png' } } : {};
+  const files = [
+    {
+      name: 'manifest.json',
+      data: Buffer.from(
+        JSON.stringify({
+          format: 'pkc2-text-bundle',
+          version: 1,
+          source_lid: lid,
+          source_title: title,
+          body_length: body.length,
+          asset_count: withAsset ? 1 : 0,
+          missing_asset_count: 0,
+          missing_asset_keys: [],
+          assets,
+          compacted: false,
+        }),
+      ),
+    },
+    { name: 'body.md', data: Buffer.from(body, 'utf-8') },
+    ...(withAsset ? [{ name: 'assets/ast-shared.png', data: PNG_1X1 }] : []),
+  ];
+  return zipOf(files);
+}
+
+/**
+ * `pkc2-mixed-container-bundle`(ZIP-in-ZIP)。
+ * 🔑 **同じ添付を 2 ノートが参照している**形を作る ── PKC2 は内側 ZIP それぞれに
+ * 同じバイナリを丸ごと複製するので、取込側で畳まないと添付が 2 本になる。
+ */
+function batchZip(): Buffer {
+  const a = textBundle('n1', 'ノート A', '# A\n![図](asset:ast-shared)\n', true);
+  const b = textBundle('n2', 'ノート B', '# B\nこちらも ![図](asset:ast-shared)\n', true);
+  return zipOf([
+    {
+      name: 'manifest.json',
+      data: Buffer.from(
+        JSON.stringify({
+          format: 'pkc2-mixed-container-bundle',
+          version: 1,
+          exported_at: '2026-07-31T00:00:00.000Z',
+          source_cid: 'c-batch',
+          source_title: '旧コンテナ',
+          text_count: 2,
+          textlog_count: 0,
+          compact: false,
+          entries: [
+            { lid: 'n1', title: 'ノート A', archetype: 'text', filename: 'a-20260731.text.zip', body_length: 3, asset_count: 1, missing_asset_count: 0 },
+            { lid: 'n2', title: 'ノート B', archetype: 'text', filename: 'b-20260731.text.zip', body_length: 3, asset_count: 1, missing_asset_count: 0 },
+          ],
+        }),
+      ),
+    },
+    { name: 'a-20260731.text.zip', data: a },
+    { name: 'b-20260731.text.zip', data: b },
+  ]);
+}
+
+test('batch bundle 取込 → 内側 ZIP が再入され、共有添付が 1 本に畳まれる', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  await page.setInputFiles('[data-pkc-field="import-input"]', {
+    name: 'container-20260731.zip',
+    mimeType: 'application/zip',
+    buffer: batchZip(),
+  });
+
+  // 本体 2 件 + attachment 1 件 = 3(attachment が 2 件なら畳めていない)
+  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  await expect(rows).toHaveCount(3);
+
+  // 🔑 内側 ZIP の view から流した bytes が実 IDB に入り、実描画される。
+  // 内側 entry を**外側の Blob から**読んでいたらここで壊れる(段④の中核)
+  await clickReal(page, '[data-pkc-entry="n1"]');
+  await expectImageRendered(page, '[data-pkc-field="detail-body"] img');
+  await clickReal(page, '[data-pkc-entry="n2"]');
+  await expectImageRendered(page, '[data-pkc-field="detail-body"] img');
+
+  expect(errors).toEqual([]);
+});
+
+test('注意が複数あるとき **全件**が画面に出る(1 行の status に埋もれない)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  // 3 つの内側 bundle がそれぞれ「実体の無い添付」を宣言している状態を作る
+  const inner = (lid: string): Buffer =>
+    zipOf([
+      {
+        name: 'manifest.json',
+        data: Buffer.from(
+          JSON.stringify({
+            format: 'pkc2-text-bundle',
+            version: 1,
+            source_lid: lid,
+            source_title: lid,
+            assets: { [`ast-gone-${lid}`]: { name: 'x.png', mime: 'image/png' } },
+            compacted: false,
+          }),
+        ),
+      },
+      { name: 'body.md', data: Buffer.from(`# ${lid}\n`, 'utf-8') },
+    ]);
+  const lids = ['n1', 'n2', 'n3'];
+  const zip = zipOf([
+    {
+      name: 'manifest.json',
+      data: Buffer.from(
+        JSON.stringify({
+          format: 'pkc2-texts-container-bundle',
+          version: 1,
+          entry_count: 3,
+          entries: lids.map((lid) => ({ lid, title: lid, filename: `${lid}.text.zip` })),
+        }),
+      ),
+    },
+    ...lids.map((lid) => ({ name: `${lid}.text.zip`, data: inner(lid) })),
+  ]);
+
+  await page.setInputFiles('[data-pkc-field="import-input"]', {
+    name: 'notes.zip',
+    mimeType: 'application/zip',
+    buffer: zip,
+  });
+
+  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(3);
+
+  // 🔑 3 件とも出る。**1 件目だけ**なら段④ の「どのファイルか冠する」設計が空振り
+  const notices = page.locator('[data-pkc-region="notices"] [data-pkc-notice]');
+  await expect(notices).toHaveCount(3);
+  for (const lid of lids) {
+    await expect(notices.filter({ hasText: `${lid}.text.zip` })).toHaveCount(1);
+  }
+
+  // 閉じられる(画面を占有し続けない)
+  await clickReal(page, '[data-pkc-action="dismiss-notices"]');
+  await expect(notices).toHaveCount(0);
 
   expect(errors).toEqual([]);
 });
