@@ -9,7 +9,15 @@ export type StorageRequest =
   | { op: 'openContainer'; cid: string; title?: string }
   | { op: 'listEntryMetas'; cid: string }
   | { op: 'getBody'; cid: string; lid: string }
-  | { op: 'upsertEntry'; cid: string; entry: EntryUpsert }
+  | {
+      op: 'upsertEntry';
+      cid: string;
+      entry: EntryUpsert;
+      /** true = 変更前の body を履歴に 1 件積む(既定は amend ── 鎖の頭を張り替えるだけ)。 */
+      checkpoint?: boolean;
+      /** 生存 entry の保持上限(未指定は worker 既定)。 */
+      keepLatest?: number;
+    }
   | { op: 'bulkUpsertEntries'; cid: string; entries: EntryUpsert[] }
   | { op: 'deleteEntry'; cid: string; lid: string }
   | { op: 'listRelations'; cid: string }
@@ -17,7 +25,6 @@ export type StorageRequest =
   | { op: 'bulkAddRevisions'; cid: string; revisions: RevisionAdd[] }
   | { op: 'revisionCounts'; cid: string }
   | { op: 'getRevision'; cid: string; id: string }
-  | { op: 'addRevision'; cid: string; rev: RevisionInput; keepLatest: number }
   | { op: 'listRevisionMetas'; cid: string; entryLid: string }
   | { op: 'listTrash'; cid: string }
   | { op: 'purgeTrash'; cid: string }
@@ -61,7 +68,11 @@ export interface RelationUpsert {
   kind: string;
 }
 
-/** revision の一括追加(P6 import 用。P5 の通常経路は addRevision)。 */
+/**
+ * revision の一括追加(P6 import 用)。通常経路は upsertEntry の checkpoint。
+ * ⚠ 追加行は全文(kind='full')として入る ── **新規取込専用**。既存 entry の
+ * 鎖に割り込ませない(割り込ませると鎖の符号化前提が崩れる)。
+ */
 export interface RevisionAdd {
   id: string;
   entryLid: string;
@@ -69,18 +80,6 @@ export interface RevisionAdd {
   snapshot: string;
   title?: string | null;
   archetype?: string | null;
-}
-
-/**
- * 通常経路の revision 追加(P5)。id / rev_order / created_at / content_hash は
- * worker が採番・計算する(同 tx で「直前と同一内容なら skip → 挿入 →
- * keepLatest 超過分を prune」まで完結)。snapshot = body 原文(markdown)。
- */
-export interface RevisionInput {
-  entryLid: string;
-  title: string;
-  archetype: string;
-  body: string;
 }
 
 /** revision 一覧の行(snapshot は返さない ── 本文は getRevision で 1 行ずつ)。 */
@@ -163,7 +162,6 @@ export interface ResultMap {
   bulkAddRevisions: null;
   revisionCounts: RevisionCountRow[];
   getRevision: RevisionBody | null;
-  addRevision: { added: boolean; pruned: number };
   listRevisionMetas: RevisionMetaRow[];
   listTrash: RevisionMetaRow[];
   purgeTrash: { purged: number };

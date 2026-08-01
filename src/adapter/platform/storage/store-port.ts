@@ -36,25 +36,28 @@ export function metaFromRow(row: EntryMetaRow): EntryMeta {
   };
 }
 
-/** 生存 entry の保持上限(P5 設計 §3)。settings 表へ移す条件: user が変えたいと言ったとき。 */
-export const REVISION_KEEP_LATEST = 20;
+/**
+ * 生存 entry の保持上限(P5c)。**逆向き差分チェーン**により 1 件あたりの容量が
+ * 桁で下がったので、PKC2 相当の全文 20 件から 100 件へ引き上げている
+ * (実測は P5c-3 の probe で出す)。settings 表へ移す条件: user が変えたいと言ったとき。
+ */
+export const REVISION_KEEP_LATEST = 100;
 
 export function createStorePort(client: StoreClient, cid: string): StorePort {
   return {
     getBody: (lid) => client.request({ op: 'getBody', cid, lid }),
-    persistEntry: async (entry) => {
-      await client.request({ op: 'upsertEntry', cid, entry });
+    persistEntry: async (entry, opts) => {
+      await client.request({
+        op: 'upsertEntry',
+        cid,
+        entry,
+        checkpoint: opts?.checkpoint === true,
+        keepLatest: REVISION_KEEP_LATEST,
+      });
     },
     deleteEntry: async (lid) => {
       await client.request({ op: 'deleteEntry', cid, lid });
     },
-    addRevision: (rev) =>
-      client.request({
-        op: 'addRevision',
-        cid,
-        rev,
-        keepLatest: REVISION_KEEP_LATEST,
-      }),
     listRevisionMetas: (entryLid) =>
       client.request({ op: 'listRevisionMetas', cid, entryLid }),
     getRevision: (revId) => client.request({ op: 'getRevision', cid, id: revId }),

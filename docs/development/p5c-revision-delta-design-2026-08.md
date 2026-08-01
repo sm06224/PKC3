@@ -74,7 +74,7 @@ jj では「編集は常にスナップショットされ、区切るかどう�
   不一致が出たらそこより古い側を「復元不能」と表示する(嘘をつくより欠測を出す)
 - **prune が鎖を壊さない**: 依存は「古い → 新しい」の一方向。最古から消す分には
   残りが常に完結する ── 逆向きを選ぶ最大の理由
-- 容量の見積り(**未実測・probe で確認する**): 10KB の note を 200 バイト程度ずつ
+- 容量の見積り(**未実測 ── P5c-3 の probe で数字を出すまで主張しない**): 10KB の note を 200 バイト程度ずつ
   編集する典型なら、100 件保持で「全文 100 部 ≒ 1MB」→「tip 10KB + パッチ 100 個
   ≒ 数十 KB」の桁。**数字は P5c-3 の probe で出してから主張する**
 
@@ -122,21 +122,36 @@ operations(cid, id, seq, kind, ts, payload, undone_by)
 | content-addressed オブジェクト + GC | sqlite 行 + prune で同じ目的を、有限容量アプリにはより素直に達成できる |
 | 分散同期・push/pull | 将来領域(正本 doc §10)。着手は user の明示 go |
 
-## 8. ⚖ 裁定事項
+## 8. 裁定事項と現状
 
-1. **保持上限**: (a) 100 件へ引き上げ(推奨。差分化で 1 件の桁が下がる)/
-   (b) 無制限 + 明示 purge(完全に git 的。entry あたり合計 bytes の tripwire とセット)/
-   (c) 20 のまま
-2. **operation log(§5)の go**: 作る / 作らない / 後の段で再訪
-3. **P6 の PKC2 revisions**: 捨てる(推奨・現状の P6a 実装)/ 新形式に変換して持ち込む
+1. **保持上限**: **100 件で実装済み**(差分化で 1 件の桁が下がったため。
+   `REVISION_KEEP_LATEST`)。無制限 + 明示 purge へ寄せるかは、P5c-3 の実測を
+   見てから再訪する
+2. ⚖ **operation log(§5)の go**: 未着手。**新機能なので明示 go 待ち**
+3. ⚖ **P6 の PKC2 revisions**: 現状は捨てる(P6a 実装済み)。持ち込むなら
+   §5 の形へ変換する
 
-## 9. 実装順(1・2 は裁定不要 ── 方向が確定しているため先行できる)
+## 9. 実装状況
 
-1. **P5c-1**: 純 TS の行 diff/patch(`features/revision/line-patch.ts`)+ lossless pin
-   (CRLF / 末尾改行 / 空文字 / 単一行巨大 / 全置換 の縁)
-2. **P5c-2**: worker の `upsertEntry` に鎖維持(checkpoint / amend)を統合、
-   `getRevision` をチェーン復元 + hash 検証に、`addRevision` op を畳んで削除、schema v3。
-   worker unit(実物 node 実走)で mutation を pin
-3. **P5c-3**: probe に「tip + パッチ N」の容量と復元時間の実測を追加(nightly)。
-   ここで初めて容量の数字を主張する
-4. (裁定後)P5c-4: operation log + 万能 undo
+- ✅ **P5c-1**: 行 diff/patch(`features/revision/line-patch.ts`)+ lossless pin
+  (CRLF / 末尾改行 / 空 / 多バイト / 単一巨大行 / 全面書換 / ランダム往復 200 本)
+- ✅ **P5c-2**: `upsertEntry` に鎖維持(checkpoint / amend)を統合、`getRevision` を
+  チェーン復元 + hash 検証に、**`addRevision` op を畳んで削除**(op が 1 つ減った)、
+  schema v3(`kind` 列・列実在判定)。worker unit(実物 node 実走)+ store-probe
+  (実 sqlite / OPFS)で pin
+- ⏳ **P5c-3**: probe に容量と復元時間の実測を足す(nightly)。**ここで初めて
+  容量の数字を主張する**
+- ⚖ **P5c-4**(要 go): operation log + 万能 undo
+
+### 実装で確定した細部
+
+- **保存形の自動選択**: パッチが対象全文以上なら全文で持つ ── 小さい本文は
+  全文のままになる(差分にする意味が無いときに差分にしない)
+- **エラー体系**: 復元不能は `revision restore failed (no base | chain broken |
+  integrity check)` に統一。app 層は既存の「復元に失敗しました」で可視化される
+- **bulkUpsertEntries は鎖を維持しない**(新規取込専用と protocol に明記)。
+  既存 entry の tip を差し替えると鎖の前提が崩れるが、**hash 検証がそれを
+  捕まえて可視エラーにする**(黙って別の本文を返さない)ことを test で pin
+- **asset GC の網羅性は差分化後も成立**: 逆向き差分は「新しい側に無い行」を
+  必ず含むので、tip から消えた `asset:` 参照はパッチ本体に現れる ── 走査は
+  従来どおり keep 側に倒れる(worker unit で pin)
