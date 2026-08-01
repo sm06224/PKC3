@@ -1,14 +1,15 @@
 /**
- * smoke #5(P6b): PKC2 単一 HTML の取込 end-to-end。
+ * smoke #5: PKC2 の取込 end-to-end(単一 HTML / .pkc2.zip の 2 経路)。
  *
- * unit では届かないものを 1 本で見る:
- * - 実 file picker(常設 hidden input)→ binder 配線
- * - 実ブラウザの DecompressionStream で gzip+base64 添付が復号される
+ * unit では届かないものを見る:
+ * - 実 file picker(常設 hidden input)→ binder 配線。**accept に .zip が無いと
+ *   受理器が動いてもファイルを選べない**ので、accept 自体も assert する
+ * - 実ブラウザの DecompressionStream / 自前 ZIP reader で bytes が復元される
  * - 書いた bytes が**実 IDB** に入り、preview が blob: で**実際に描画**される
- * - 取り込んだ entry が sqlite 経由の再読込で sidebar に現れる
+ * - 取り込んだ entry と履歴が、実 sqlite 経由の再読込で画面に現れる
  */
 import { test, expect } from '@playwright/test';
-import { gzipSync } from 'node:zlib';
+import { gzipSync, crc32 } from 'node:zlib';
 import { gotoApp, collectPageErrors, clickReal, expectImageRendered } from './helpers';
 
 // 1x1 PNG(67 bytes)
@@ -96,6 +97,122 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
     els.map((e) => e.getAttribute('data-pkc-entry')),
   );
   expect(new Set(orders).size).toBe(4); // lid が再採番されている(重複なし)
+
+  expect(errors).toEqual([]);
+});
+
+/** PKC2 の package writer と同じ形の ZIP を node 側で組む(store / 本物の CRC)。 */
+function pkc2Zip(): Buffer {
+  const container = {
+    meta: { container_id: 'c-zip', title: 'バックアップ' },
+    entries: [
+      { lid: 'z1', title: 'ZIP のノート', archetype: 'text', body: '# ZIP\n本文\n' },
+      {
+        lid: 'z2',
+        title: 'dot.png',
+        archetype: 'attachment',
+        body: JSON.stringify({
+          name: 'dot.png',
+          mime: 'image/png',
+          size: PNG_1X1.length,
+          asset_key: 'ast-zip',
+        }),
+      },
+    ],
+    relations: [],
+    revisions: [
+      { id: 'rv1', entry_lid: 'z1', created_at: '2026-07-01T00:00:00Z', snapshot: '# ZIP\n古い本文\n' },
+    ],
+    assets: {}, // PKC2 の writer は assets を空にして container.json を書く
+  };
+  const files: Array<{ name: string; data: Buffer }> = [
+    {
+      name: 'manifest.json',
+      data: Buffer.from(
+        JSON.stringify({
+          format: 'pkc2-package',
+          version: 1,
+          exported_at: '2026-07-31T00:00:00.000Z',
+          source_cid: 'c-zip',
+          entry_count: 2,
+          relation_count: 0,
+          revision_count: 1,
+          asset_count: 1,
+        }),
+      ),
+    },
+    { name: 'container.json', data: Buffer.from(JSON.stringify(container)) },
+    { name: 'assets/ast-zip.bin', data: PNG_1X1 }, // 生バイナリ
+  ];
+
+  const local: Buffer[] = [];
+  const central: Buffer[] = [];
+  let offset = 0;
+  for (const f of files) {
+    const name = Buffer.from(f.name, 'utf-8');
+    const crc = crc32(f.data);
+    const lh = Buffer.alloc(30);
+    lh.writeUInt32LE(0x04034b50, 0);
+    lh.writeUInt16LE(20, 4);
+    lh.writeUInt16LE(0x0800, 6); // UTF-8 名(PKC2 の writer と同じ)
+    lh.writeUInt16LE(0, 8); // store
+    lh.writeUInt32LE(crc, 14);
+    lh.writeUInt32LE(f.data.length, 18);
+    lh.writeUInt32LE(f.data.length, 22);
+    lh.writeUInt16LE(name.length, 26);
+    local.push(lh, name, f.data);
+
+    const cd = Buffer.alloc(46);
+    cd.writeUInt32LE(0x02014b50, 0);
+    cd.writeUInt16LE(20, 4);
+    cd.writeUInt16LE(20, 6);
+    cd.writeUInt16LE(0x0800, 8);
+    cd.writeUInt16LE(0, 10);
+    cd.writeUInt32LE(crc, 16);
+    cd.writeUInt32LE(f.data.length, 20);
+    cd.writeUInt32LE(f.data.length, 24);
+    cd.writeUInt16LE(name.length, 28);
+    cd.writeUInt32LE(offset, 42);
+    central.push(cd, name);
+    offset += 30 + name.length + f.data.length;
+  }
+  const cdBuf = Buffer.concat(central);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(files.length, 8);
+  eocd.writeUInt16LE(files.length, 10);
+  eocd.writeUInt32LE(cdBuf.length, 12);
+  eocd.writeUInt32LE(offset, 16);
+  return Buffer.concat([...local, cdBuf, eocd]);
+}
+
+test('.pkc2.zip 取込 → entry 出現 → 生バイナリ添付が blob: で描画される', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  // ⚠ accept に .zip が無いと、受理器が動いてもここでファイルを選べない
+  const accept = await page
+    .locator('[data-pkc-field="import-input"]')
+    .getAttribute('accept');
+  expect(accept).toContain('.zip');
+
+  await page.setInputFiles('[data-pkc-field="import-input"]', {
+    name: 'backup.pkc2.zip',
+    mimeType: 'application/zip',
+    buffer: pkc2Zip(),
+  });
+
+  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  await expect(rows).toHaveCount(2);
+
+  // ZIP から直接流した bytes が実 IDB に入り、実描画される(base64 を経由しない)
+  await clickReal(page, '[data-pkc-entry="z2"]');
+  await expectImageRendered(page, '[data-pkc-field="attachment-media"]');
+
+  // 履歴も HTML 経路と同じ鎖へ入っている(実 sqlite の逆パッチ経路を通る)
+  await clickReal(page, '[data-pkc-entry="z1"]');
+  await clickReal(page, '[data-pkc-action="show-history"]');
+  await expect(page.locator('[data-pkc-rev-order]')).toHaveCount(1);
 
   expect(errors).toEqual([]);
 });
