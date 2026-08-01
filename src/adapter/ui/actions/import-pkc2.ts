@@ -14,7 +14,8 @@ import type { Dispatcher } from '@adapter/state/dispatcher';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import { sniffMagic, detectPkc2Format } from '@features/import/detect-format';
 import { parsePkc2Html } from '@features/import/pkc2-html';
-import { readPkc2Package } from '@features/import/pkc2-package';
+import { readPkc2Package, peekZipFormat } from '@features/import/pkc2-package';
+import { readTextBundle } from '@features/import/pkc2-bundle';
 import { readZipEntry, type ZipEntry } from '@features/import/zip-reader';
 import {
   convertPkc2Container,
@@ -196,7 +197,25 @@ export async function importPkc2File(
     const preWarnings: string[] = [];
 
     if (isZip) {
-      const pkg = await readPkc2Package(file);
+      // ⚠ 形式は **manifest.format** で決まる(拡張子でもファイル名でもない)。
+      // ネストした ZIP でも各段でこれを呼ぶ ── 判別は 1 段ぶんしか効かない
+      const format = await peekZipFormat(file);
+      if (format === null) {
+        return fail(
+          `${file.name}: manifest.json が無い ZIP です ── PKC2 の書出しファイルを選んでください`,
+        );
+      }
+      const read =
+        format === 'pkc2-package'
+          ? readPkc2Package
+          : format === 'pkc2-text-bundle'
+            ? readTextBundle
+            : null;
+      if (!read) {
+        // 未対応の形式は**名指しで**断る(「不明」に混ぜると原因を誤解する)
+        return fail(`${format} の取込はまだ実装されていません(${file.name})`);
+      }
+      const pkg = await read(file);
       container = pkg.container;
       zipAssets = pkg.assetEntries;
       preWarnings.push(...pkg.warnings);

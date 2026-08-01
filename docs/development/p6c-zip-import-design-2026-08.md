@@ -218,7 +218,8 @@ PKC3 側で `Pkc2Container` 形の合成物を組み立てて convert に渡す�
 |---|---|---|
 | ✅ ① | **ZIP reader**(`src/features/import/zip-reader.ts`)── Blob ベース / store + deflate / CD 正 / CRC 検証 / M1〜M3 込み | 全 8 形式の土台。形式知識ゼロの純機構なので合成 ZIP fixture だけで pin できた(21 件)。deflate も受理(§5-①)|
 | ② | **`pkc2-package`**(#1) | **変換 core をそのまま再利用できる唯一の形式**。ここで §2-4 の API 変更と「ZIP → putBlob の streaming 経路」を確立する ── **bundle 系全部の土台**。かつ user のバックアップ正本なので、**ここまでで「PKC2 から救出できる」が成立する** |
-| ③ | **`.text.zip`(#2)→ `.textlog.zip`(#3)** | §2-5 の合成 container 規約を単体 2 形式で確立してから batch へ。text が先なのは #3 が CSV 逆写像を追加で要求するため |
+| ✅ ③-前半 | **`.text.zip`(#2)**(`src/features/import/pkc2-bundle.ts`)| §2-5 の合成 container 規約を確立。🔑 **`manifest.assets` が key → {name, mime} の正本**と実地確認できたので、§4-A の「拡張子を剥がす突合」問題は**そもそも発生しない**(manifest の key を正として ZIP entry を引く)|
+| ③-後半 | **`.textlog.zip`(#3)** | CSV(RFC4180 / CRLF / 全 quote / 固定 8 列)→ PKC2 の textlog body JSON へ逆写像 → `fromPkc2`。土台は #2 側 |
 | ④ | **batch 3 形式**(#4 / #5 / #6) | 段③の再帰適用のみ。新概念は「内側 ZIP を Blob 化して reader を再入」の 1 点(M1 で用意済み)。3 形式は外側 manifest の形が違うだけで処理は同一 ── 1 段で 3 形式片付く |
 | ⑤ | **`folder-export` v1**(#7) | 段④ + 階層復元。`folders[]` → folder entry + `structural` relation。PKC3 は relation 表を直接持つので PKC2 の dispatch 経路 ▲ より素直に書ける |
 | ⑥ | **`pkc2-entry-bundle`(#8)+ v2** | 最後。残るのは「`entry.json` を entries[] に足す」「assets を base64 として読む」の 2 点だけ。PKC2 に import 経路が無く(round-trip の参照実装なし)、格納規約が違い、実体を 1 件も見ていない ✖ |
@@ -235,7 +236,7 @@ PKC3 側で `Pkc2Container` 形の合成物を組み立てて convert に渡す�
 
 | # | 縁 | PKC2 | PKC3 |
 |---|---|---|---|
-| A | **asset key ⇄ ファイル名の突合失敗**。bundle は `assets/<key><ext>` で、読み側が `^([A-Za-z0-9_-]+)\.[A-Za-z0-9]{1,8}$` で拡張子を剥がす ▲。key に `.` や非 ASCII が入ると**マッチせず無言欠落** | 参照が壊れたまま残る ✔ | **突合方式を変える**: `manifest.assets` の各 key について「`assets/<key>` で始まる ZIP entry」を全部列挙。0 件 → warning、**2 件以上 → ambiguous として断る**、1 件のときだけ採用 |
+| A ✅ | **asset key ⇄ ファイル名の突合失敗**。bundle は `assets/<key><ext>` で、読み側が `^([A-Za-z0-9_-]+)\.[A-Za-z0-9]{1,8}$` で拡張子を剥がす ▲。key に `.` や非 ASCII が入ると**マッチせず無言欠落** | 参照が壊れたまま残る ✔ | **実装済み**。`manifest.assets` の key を**正**として引く(剥がさない)。照合は「`assets/<key>` 完全一致 or `assets/<key>.` 始まり」── 前方一致だけだと key `k1` が `assets/k1x.png` に当たる。0 件 → warning / **2 件以上 → 断る** / 1 件のときだけ採用 |
 | B | manifest にあって ZIP に無い asset | keyMap に入れず参照を温存(意図的 ✔) | **同じ挙動**(壊れシグナルの保存)+ **key と件数を warning** |
 | C | ZIP にあって manifest に無い `assets/*` | 無言で無視 ▲ | **warning**(「入れたのに入らない」を検知できるように) |
 | D | `manifest.json` / `container.json` の重複 | first-wins + warning ▲ | **断る**。どちらが正か決められない = 片方を静かに捨てる方が危険 |
