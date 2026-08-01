@@ -875,18 +875,63 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(revChains[0]!.snapshots.map((s) => s.body)).toEqual(['v1\n', 'v2\n']);
   });
 
-  it('[P6c] ZIP が pkc2-package でなければ可視で断る ── 書込は 1 件も起きない', async () => {
+  it('[P6c] 未対応の ZIP 形式は**名指しで**断る ── 書込は 1 件も起きない', async () => {
     const { d, deps, written, blobs } = harness();
     const zip = await buildZip([
       {
         name: 'manifest.json',
-        bytes: bytesOf(JSON.stringify({ format: 'pkc2-text-bundle', version: 1 })),
+        bytes: bytesOf(JSON.stringify({ format: 'pkc2-folder-export-bundle', version: 1 })),
       },
     ]);
     expect(await importPkc2File(d, deps, new File([zip], 'b.zip'))).toBeNull();
     expect(written).toHaveLength(0);
     expect(blobs.size).toBe(0);
-    expect(d.getState().error).toMatch(/pkc2-package のみ/);
+    // 「不明」に混ぜず、何が未対応なのかを言う
+    expect(d.getState().error).toMatch(/pkc2-folder-export-bundle/);
+  });
+
+  it('[P6c] manifest.json の無い ZIP は可視で断る', async () => {
+    const { d, deps, written } = harness();
+    const zip = await buildZip([{ name: 'body.md', bytes: bytesOf('# x\n') }]);
+    expect(await importPkc2File(d, deps, new File([zip], 'x.zip'))).toBeNull();
+    expect(written).toHaveLength(0);
+    expect(d.getState().error).toMatch(/manifest\.json が無い/);
+  });
+
+  it('[P6c 段③] .text.zip を取り込む ── 合成 container が本経路に合流する', async () => {
+    const { d, deps, written, blobs } = harness();
+    const zip = await buildZip([
+      {
+        name: 'manifest.json',
+        bytes: bytesOf(
+          JSON.stringify({
+            format: 'pkc2-text-bundle',
+            version: 1,
+            source_lid: 'n1',
+            source_title: '単体ノート',
+            assets: { 'ast-k': { name: 'dot.png', mime: 'image/png' } },
+          }),
+        ),
+      },
+      { name: 'body.md', bytes: bytesOf('# 単体ノート\n![図](asset:ast-k)\n') },
+      { name: 'assets/ast-k.png', bytes: bytesOf('PNG bytes') },
+    ]);
+
+    expect(await importPkc2File(d, deps, new File([zip], 'note.text.zip'))).toBe(2);
+
+    // attachment + text の 2 件。JSON 文字列 body は**残らない**
+    expect(written.map((e) => e.archetype).sort()).toEqual(['attachment', 'text']);
+    const text = written.find((e) => e.archetype === 'text')!;
+    expect(text.title).toBe('単体ノート');
+    const att = written.find((e) => e.archetype === 'attachment')!;
+    expect(att.body).not.toContain('"asset_key"'); // PKC-Markdown へ変換済み
+
+    // bytes は ZIP から直接流れ、body の参照は content key へ写る
+    expect(blobs.size).toBe(1);
+    const key = [...blobs.keys()][0]!;
+    expect(await blobs.get(key)!.text()).toBe('PNG bytes');
+    expect(text.body).toContain(`asset:${key}`);
+    expect(readAttachmentMeta(att.body).assetKey).toBe(key);
   });
 
   it('[P6c] Office 文書は名指しで断る(不明に混ぜない)', async () => {

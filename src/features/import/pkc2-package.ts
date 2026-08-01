@@ -54,6 +54,28 @@ const ASSET_RE = /^assets\/(.+)\.bin$/;
 const VALID_KEY = /^[A-Za-z0-9_.-]+$/;
 
 /**
+ * ZIP の `manifest.json` から `format` だけを覗く(どの受理器に渡すかの判別)。
+ * ⚠ **`detectPkc2Format` は 1 段ぶんしか受けない**ので、ネストの各段でこれを呼ぶ。
+ * manifest が無い / 読めない場合は null(呼び出し側が可視で断る)。
+ */
+export async function peekZipFormat(zip: Blob): Promise<string | null> {
+  const dir = await readZipDirectory(zip);
+  if (dir.some((e) => e.name === '[Content_Types].xml')) {
+    throw new ZipReadError(
+      'これは Office 文書(.xlsx / .docx / .pptx)です ── 取込対象ではありません',
+    );
+  }
+  const hits = dir.filter((e) => e.name === MANIFEST);
+  if (hits.length !== 1) return null;
+  try {
+    const m = JSON.parse(await readZipText(zip, hits[0]!)) as { format?: unknown };
+    return typeof m.format === 'string' ? m.format : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * ZIP を `pkc2-package` として受理する。
  * **形が違えば必ず throw**(部分的に読めた気にさせない ── P6b で確立した規律)。
  */
