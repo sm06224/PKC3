@@ -60,8 +60,11 @@ export function buildShell(root: HTMLElement): ShellRegions {
   topbar.append(imp);
   const impInput = document.createElement('input');
   impInput.type = 'file';
-  // 判別は中身(magic)でやるので accept は誤選択を減らすためだけの補助
-  impInput.accept = '.html,.htm,text/html';
+  // 判別は中身(magic)でやるので accept は誤選択を減らすためだけの補助。
+  // ⚠ ここに .zip が無いと、**受理器が動いてもファイルを選べない**
+  // (accept を厳格に効かせるブラウザ / OS のピッカーがある)── 救出経路が
+  // 実装されているのに到達不能、という穴になる
+  impInput.accept = '.html,.htm,.zip,text/html,application/zip';
   impInput.hidden = true;
   impInput.setAttribute('data-pkc-field', 'import-input');
   topbar.append(impInput);
