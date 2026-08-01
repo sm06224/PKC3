@@ -13,12 +13,17 @@ import { describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import {
   identifyAsset,
+  identifyBytes,
   isContentKey,
   generateAssetKey,
   HASH_MAX_BYTES,
 } from '../../src/adapter/platform/storage/asset-key';
 import { attachFiles, type AttachDeps } from '../../src/adapter/ui/actions/attach';
-import { importPkc2File, type ImportDeps } from '../../src/adapter/ui/actions/import-pkc2';
+import {
+  importPkc2File,
+  consumeBase64,
+  type ImportDeps,
+} from '../../src/adapter/ui/actions/import-pkc2';
 import { readAttachmentMeta } from '../../src/features/flavor/attachment-flavor';
 import type { RevisionChain } from '../../src/features/import/pkc2-convert';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
@@ -82,7 +87,7 @@ function shared() {
     genRelationId: () => `rel-${++n}`,
     bulkUpsertEntries: async () => {},
     bulkUpsertRelations: async () => {},
-    listAssetKeys: async () => new Set(blobs.keys()),
+    listStoredBlobKeys: async () => new Set(blobs.keys()),
     importRevisionChains: async (chains) => {
       revChains.push(...chains);
       return {
@@ -261,5 +266,22 @@ describe('body の参照が content key へ写る', () => {
     expect(note.body).toContain(`asset:${key}`);
     expect(note.body).not.toContain('asset:ok');
     expect(note.body.match(new RegExp(`asset:${key}`, 'g'))).toHaveLength(2); // 2 箇所とも
+  });
+});
+
+describe('生成物の寿命', () => {
+  it('[M-15] base64 は取り出すと同時に手放す(参照を残さない)', () => {
+    const a = { base64: 'QUJD' };
+    expect(consumeBase64(a)).toBe('QUJD');
+    // 参照が残ると、復号済み bytes と base64 文字列が同時生存して常駐が積み上がる
+    expect(a.base64).toBe('');
+  });
+
+  it('[M-5] 取込は bytes から直接ハッシュを取る(Blob 経由でコピーを増やさない)', async () => {
+    const bytes = new TextEncoder().encode('中身');
+    const viaBytes = await identifyBytes(bytes as Uint8Array<ArrayBuffer>);
+    const viaBlob = await identifyAsset(new Blob([bytes]));
+    expect(viaBytes.key).toBe(viaBlob.key); // 経路が違っても同じ key
+    expect(viaBytes.hash).toBe(viaBlob.hash);
   });
 });

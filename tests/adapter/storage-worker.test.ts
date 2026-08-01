@@ -454,4 +454,44 @@ describe('revision chain (P5c ── 逆向き差分)', () => {
       '取込した版\n',
     );
   });
+
+  it('[M-24] 取込んだ版も content_hash 検証を通る(壊れた鎖から本文を作らない)', async () => {
+    const tip = Array.from({ length: 50 }, (_, i) => `行 ${i}`).join('\n') + '\n';
+    const old = tip.replace('行 7', '古い 7');
+    await request({ op: 'bulkUpsertEntries', cid: 'c1', entries: [entry('imp6', tip)] });
+    await request({
+      op: 'importRevisionChains',
+      cid: 'c1',
+      chains: [{ entryLid: 'imp6', snapshots: [{ body: old, createdAt: '2026-07-01T00:00:00Z' }] }],
+    });
+    const [meta] = await request({ op: 'listRevisionMetas', cid: 'c1', entryLid: 'imp6' });
+    expect((await request({ op: 'getRevision', cid: 'c1', id: meta!.id }))?.body).toBe(old);
+
+    // 鎖を壊す: **bulk 経路は maintainChain を通らない**ので、tip だけが
+    // 差し替わって頭のパッチが宙に浮く。行数を揃えてあるのでパッチは
+    // 「適用できてしまう」── content_hash が無ければそれらしい本文が黙って返る
+    const bogus = Array.from({ length: 50 }, (_, i) => `別物 ${i}`).join('\n') + '\n';
+    await request({ op: 'bulkUpsertEntries', cid: 'c1', entries: [entry('imp6', bogus)] });
+    await expect(request({ op: 'getRevision', cid: 'c1', id: meta!.id })).rejects.toThrow();
+  });
+
+  it('[M-28] keepLatest が 0 でも最低 1 版は残す(履歴を全部捨てない)', async () => {
+    await request({ op: 'bulkUpsertEntries', cid: 'c1', entries: [entry('imp7', 'tip\n')] });
+    const res = await request({
+      op: 'importRevisionChains',
+      cid: 'c1',
+      keepLatest: 0,
+      chains: [
+        {
+          entryLid: 'imp7',
+          snapshots: [
+            { body: 'v1\n', createdAt: '2026-07-01T00:00:00Z' },
+            { body: 'v2\n', createdAt: '2026-07-02T00:00:00Z' },
+          ],
+        },
+      ],
+    });
+    expect(res.added).toBe(1);
+    expect(res.droppedOverLimit).toBe(1);
+  });
 });

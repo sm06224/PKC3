@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { parseFrontmatter } from '../../src/features/markdown/frontmatter';
 import {
   convertPkc2Container,
+  remapAssetKeys,
   type Pkc2Container,
 } from '../../src/features/import/pkc2-convert';
 
@@ -250,5 +251,106 @@ describe('convertPkc2Container (P6a)', () => {
       opts(),
     );
     expect(r2.warnings.some((w) => w.includes('見積.xlsx'))).toBe(true);
+  });
+
+  it('[M-20] key が別 key の prefix でも取り違えない(旧 3 系統は prefix 関係になる)', () => {
+    const r2 = convertPkc2Container(
+      {
+        entries: [
+          { lid: 'n', title: 'n', archetype: 'text', body: '![a](asset:k1) ![b](asset:k10)\n' },
+        ],
+        assets: { k1: 'QQ==', k10: 'Qg==' },
+      },
+      opts(),
+    );
+    const body = r2.entries[0]!.body;
+    // 境界が無いと `asset:k10` が `asset:<k1 の写し先>0` に化ける
+    expect(body).toBe('![a](asset:ast-new-1) ![b](asset:ast-new-2)\n');
+  });
+
+  it('[M-20] remapAssetKeys も prefix 関係で取り違えない', () => {
+    const map = new Map([
+      ['ast-a1', 'ast-CONTENT-1'],
+      ['ast-a10', 'ast-CONTENT-2'],
+    ]);
+    expect(remapAssetKeys('x ast-a1 y ast-a10 z', map)).toBe(
+      'x ast-CONTENT-1 y ast-CONTENT-2 z',
+    );
+    // map に無い token は触らない(missing key は壊れシグナルとして保存する)
+    expect(remapAssetKeys('ast-unknown', map)).toBe('ast-unknown');
+  });
+
+  it('[M-6] legacy 内蔵 data は履歴の版数ぶん積み上げない(同じ base64 は 1 件)', () => {
+    const attBody = (data: string) =>
+      JSON.stringify({ name: 'a.bin', mime: 'application/zip', data });
+    const r2 = convertPkc2Container(
+      {
+        entries: [{ lid: 'att', title: 'a.bin', archetype: 'attachment', body: attBody('QUJD') }],
+        revisions: Array.from({ length: 20 }, (_, i) => ({
+          id: `r${i}`,
+          entry_lid: 'att',
+          created_at: `2026-07-${String(i + 1).padStart(2, '0')}T00:00:00Z`,
+          snapshot: attBody('QUJD'), // 同じ bytes
+        })),
+      },
+      opts(),
+    );
+    // 21 件になっていると、adapter が 21 回復号 + 21 回 SHA-256 してから
+    // 「同じ key だった」と気づく(disk は 1 部でもメモリと CPU は落ちない)
+    expect(r2.assets).toHaveLength(1);
+  });
+
+  it('[L-15] PKC2 側に同じ lid が 2 つあっても entry を落とさない', () => {
+    const r2 = convertPkc2Container(
+      {
+        entries: [
+          { lid: 'dup', title: '一つ目', archetype: 'text', body: 'A\n' },
+          { lid: 'dup', title: '二つ目', archetype: 'text', body: 'B\n' },
+        ],
+      },
+      opts(['dup']), // 既存とも衝突させる
+    );
+    expect(r2.entries).toHaveLength(2);
+    // 同じ新 lid を指すと bulk upsert の後勝ちで片方が無言で消える
+    expect(new Set(r2.entries.map((e) => e.lid)).size).toBe(2);
+  });
+
+  it('[L-12] 解釈できない created_at は空にして配列順へ落とす', () => {
+    const r2 = convertPkc2Container(
+      {
+        entries: [{ lid: 'n', title: 'n', archetype: 'text', body: 'いま\n' }],
+        revisions: [
+          { id: 'a', entry_lid: 'n', created_at: 'とんでもない文字列', snapshot: 'v1\n' },
+          { id: 'b', entry_lid: 'n', created_at: '', snapshot: 'v2\n' },
+        ],
+      },
+      opts(),
+    );
+    const snaps = r2.revisionChains[0]!.snapshots;
+    expect(snaps.map((s) => s.createdAt)).toEqual(['', '']);
+    expect(snaps.map((s) => s.body)).toEqual(['v1\n', 'v2\n']); // 追記順を保つ
+  });
+
+  it('[L-13] 未対応の *_asset_key は黙って死なせず警告に出す', () => {
+    const r2 = convertPkc2Container(
+      {
+        entries: [
+          {
+            lid: 'att',
+            title: 'x.png',
+            archetype: 'attachment',
+            body: JSON.stringify({
+              name: 'x.png',
+              mime: 'image/png',
+              asset_key: 'k',
+              thumbnail_asset_key: 'k-thumb', // 未知 field(extra へ verbatim 保全)
+            }),
+          },
+        ],
+        assets: { k: 'QQ==', 'k-thumb': 'Qg==' },
+      },
+      opts(),
+    );
+    expect(r2.warnings.some((w) => w.includes('thumbnail_asset_key'))).toBe(true);
   });
 });

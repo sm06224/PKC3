@@ -54,6 +54,8 @@ interface HarnessOptions {
   failRelations?: boolean;
   /** bulkUpsertEntries が呼ばれた瞬間に走る副作用(取込中の user 操作の再現)。 */
   onBulkEntries?(d: Dispatcher): void;
+  /** 履歴の書込を失敗させる(段の取り違えを検出する)。 */
+  failRevisions?: boolean;
 }
 
 function harness(opts: HarnessOptions = {}) {
@@ -91,9 +93,13 @@ function harness(opts: HarnessOptions = {}) {
       if (opts.failRelations) throw new Error('relations の書込に失敗(注入)');
       relations.push(...rels);
     },
-    listAssetKeys: async () => new Set(blobs.keys()),
+    listStoredBlobKeys: async () => new Set(blobs.keys()),
     importRevisionChains: async (chains) => {
-      revChains.push(...chains);
+      if (opts.failRevisions) throw new Error('履歴の書込に失敗(注入)');
+      // 実配線と同じく、送られた鎖は呼び出し側が手放す ── 記録は deep copy で
+      revChains.push(
+        ...chains.map((c) => ({ entryLid: c.entryLid, snapshots: c.snapshots.map((s) => ({ ...s })) })),
+      );
       return {
         added: chains.reduce((n, c) => n + c.snapshots.length, 0),
         skippedNoChange: 0,
@@ -106,6 +112,7 @@ function harness(opts: HarnessOptions = {}) {
       blobs.set(key, blob);
     },
     putAssetMeta: async (m) => {
+      opLog.push(`meta:${m.key}`);
       metas.push({ key: m.key, mime: m.mime, size: m.size });
     },
     // 実配線と同じく「書けたものを読み直して SYS_BOOTED」── 取込結果が
@@ -260,13 +267,13 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(await [...blobs.values()][0]!.text()).toBe('plain bytes');
   });
 
-  it('light export(assets 空)は bytes を書かず entry だけ取り込む + light と明言する', async () => {
+  it('light export(assets が空オブジェクト)は bytes を書かず light と明言する', async () => {
     const { d, deps, blobs, written, notices } = harness();
     const file = htmlFile({
       container: {
         meta: {},
         entries: [{ lid: 'a', title: 'n', archetype: 'text', body: '本文\n' }],
-        assets: { k: '' },
+        assets: {}, // PKC2 の light export は key ごと落とす({...c, assets: {}})
       },
       export_meta: { mode: 'light' },
     });
@@ -276,6 +283,39 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(written).toHaveLength(1);
     // mode を parse しているのに黙っていると、user は添付が入った気になる
     expect(notices.at(-1)).toMatch(/添付の中身は含まれていない/);
+  });
+
+  it('0 バイトの添付は「中身が無い」ではない ── 空ファイルとして取り込む', async () => {
+    // review M-3: base64 の空文字を light export と同一視して skip していたため、
+    // 空ファイルの添付が**無警告で死んだ参照**になっていた(実証済み)。
+    // content addressing なら空 bytes にも正当な key(sha256 of empty)がある
+    const { d, deps, blobs, written } = harness();
+    const file = htmlFile({
+      container: {
+        meta: {},
+        entries: [
+          {
+            lid: 'att',
+            title: 'empty.txt',
+            archetype: 'attachment',
+            body: JSON.stringify({ name: 'empty.txt', mime: 'text/plain', asset_key: 'k0' }),
+          },
+        ],
+        assets: { k0: '' }, // 0 バイトのファイル
+      },
+      export_meta: { mode: 'full' },
+    });
+
+    await importPkc2File(d, deps, file);
+
+    expect(blobs.size).toBe(1);
+    const [key, blob] = [...blobs.entries()][0]!;
+    expect(blob.size).toBe(0);
+    // 空 bytes の SHA-256 は既知の定数 ── 採番 key に落ちていないことの証拠
+    expect(key).toBe(
+      'ast-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+    );
+    expect(readAttachmentMeta(written[0]!.body).assetKey).toBe(key); // 参照が生きている
   });
 
   it('light export の attachment は「中身が無い」と件数で言う(開くまで気づかせない)', async () => {
@@ -549,5 +589,205 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(d.getState().phase).toBe('editing'); // editor から蹴り出さない
     expect(d.getState().openBody?.body).toBe('# 失いたくない下書き\n'); // draft 無傷
     expect(d.getState().error).toMatch(/編集を終了すると一覧に反映されます/); // 無言にしない
+  });
+
+  // ── 履歴の配線(review H-2 / M-5 / M-6 / M-25: adapter 層で 1 件も見ていなかった)──
+
+  it('[H-2] 履歴が鎖のまま storage へ届く(1 entry = 1 鎖・古い順)', async () => {
+    const { d, deps, revChains } = harness();
+    const file = htmlFile({
+      container: {
+        meta: {},
+        entries: [{ lid: 'e1', title: 'n', archetype: 'text', body: 'いま\n' }],
+        revisions: [
+          { id: 'r3', entry_lid: 'e1', created_at: '2026-07-03T00:00:00Z', snapshot: 'v3\n' },
+          { id: 'r1', entry_lid: 'e1', created_at: '2026-07-01T00:00:00Z', snapshot: 'v1\n' },
+          { id: 'r2', entry_lid: 'e1', created_at: '2026-07-02T00:00:00Z', snapshot: 'v2\n' },
+        ],
+      },
+      export_meta: {},
+    });
+
+    await importPkc2File(d, deps, file);
+
+    // 鎖を割ると worker は「既に履歴を持つ entry」として残りを丸ごと捨てる ──
+    // 1 entry = 1 鎖であることが、無音のデータ欠損を防ぐ条件
+    expect(revChains).toHaveLength(1);
+    expect(revChains[0]!.entryLid).toBe('e1');
+    expect(revChains[0]!.snapshots.map((s) => s.body)).toEqual(['v1\n', 'v2\n', 'v3\n']);
+    expect(revChains[0]!.snapshots.map((s) => s.createdAt)).toEqual([
+      '2026-07-01T00:00:00Z',
+      '2026-07-02T00:00:00Z',
+      '2026-07-03T00:00:00Z',
+    ]);
+  });
+
+  it('[H-2] 履歴が巨大でも鎖は割らない(batch 予算より鎖の完全性が優先)', async () => {
+    const big = 'x'.repeat(200_000) + '\n';
+    const { d, deps, revChains } = harness();
+    const file = htmlFile({
+      container: {
+        meta: {},
+        entries: [{ lid: 'e1', title: 'n', archetype: 'text', body: 'tip\n' }],
+        revisions: Array.from({ length: 40 }, (_, i) => ({
+          id: `r${i}`,
+          entry_lid: 'e1',
+          created_at: `2026-07-${String(i + 1).padStart(2, '0')}T00:00:00Z`,
+          snapshot: `${i}${big}`,
+        })),
+      },
+      export_meta: {},
+    });
+
+    await importPkc2File(d, deps, file);
+    // 8MB 相当 = 予算(4MB)超だが、鎖は 1 本のまま届く
+    expect(revChains).toHaveLength(1);
+    expect(revChains[0]!.snapshots).toHaveLength(40);
+  });
+
+  it('[H-2] 履歴の版数が完了通知に出る(黙って落とさない)', async () => {
+    const { d, deps, notices } = harness();
+    const file = htmlFile({
+      container: {
+        meta: {},
+        entries: [{ lid: 'e1', title: 'n', archetype: 'text', body: 'いま\n' }],
+        revisions: [
+          { id: 'r1', entry_lid: 'e1', created_at: '2026-07-01T00:00:00Z', snapshot: 'v1\n' },
+        ],
+      },
+      export_meta: {},
+    });
+    await importPkc2File(d, deps, file);
+    expect(notices.at(-1)).toMatch(/履歴 1 版/);
+  });
+
+  it('[M-30] 再取込でも body の参照が実在 key を指す(dedupe の本題)', async () => {
+    const { d, deps, written, blobs } = harness();
+    const mk = () =>
+      htmlFile({
+        container: {
+          meta: {},
+          entries: [
+            {
+              lid: 'att',
+              title: 'a.txt',
+              archetype: 'attachment',
+              body: JSON.stringify({ name: 'a.txt', mime: 'text/plain', asset_key: 'k' }),
+            },
+          ],
+          assets: { k: base64('同じ中身') },
+        },
+        export_meta: {},
+      });
+
+    await importPkc2File(d, deps, mk());
+    written.length = 0;
+    await importPkc2File(d, deps, mk()); // 2 回目は put を省く経路
+
+    // put を省いた側で暫定 key が残ると、2 部目の entry が死んだ参照を持つ
+    expect(readAttachmentMeta(written[0]!.body).assetKey).toBe([...blobs.keys()][0]);
+    expect(blobs.size).toBe(1);
+  });
+
+  it('[M-27] asset は bytes → meta の順で書く(逆だと dedupe 毒を自分で作る)', async () => {
+    const { d, deps, opLog, metas } = harness();
+    await importPkc2File(
+      d,
+      deps,
+      htmlFile({
+        container: {
+          meta: {},
+          entries: [
+            {
+              lid: 'att',
+              title: 'a.txt',
+              archetype: 'attachment',
+              body: JSON.stringify({ name: 'a.txt', mime: 'text/plain', asset_key: 'k' }),
+            },
+          ],
+          assets: { k: base64('bytes') },
+        },
+        export_meta: {},
+      }),
+    );
+    // meta が先に入ると、putBlob 失敗時に「meta あり / bytes なし」が残る
+    expect(opLog.findIndex((o) => o.startsWith('blob:'))).toBeLessThan(
+      opLog.indexOf(`meta:${metas[0]!.key}`),
+    );
+  });
+
+  it('[M-9] gzip export でも legacy 内蔵 data は素の base64 として読む', async () => {
+    // gzip は **export 単位**の符号化で、body 内蔵の data には掛かっていない
+    const { d, deps, blobs, written } = harness();
+    const file = htmlFile({
+      container: {
+        meta: {},
+        entries: [
+          {
+            lid: 'old',
+            title: 'legacy.txt',
+            archetype: 'attachment',
+            body: JSON.stringify({
+              name: 'legacy.txt',
+              mime: 'text/plain',
+              data: base64('body 内蔵だった bytes'),
+            }),
+          },
+        ],
+      },
+      export_meta: { mode: 'full', asset_encoding: 'gzip+base64' },
+    });
+
+    await importPkc2File(d, deps, file);
+
+    expect(blobs.size).toBe(1);
+    expect(await [...blobs.values()][0]!.text()).toBe('body 内蔵だった bytes');
+    expect(readAttachmentMeta(written[0]!.body).assetKey).toBe([...blobs.keys()][0]);
+  });
+
+  it('[H-1] bytes が消えている key は meta があっても書き直す(GC 途中失敗の自己修復)', async () => {
+    const { d, deps, blobs, opLog } = harness();
+    const mk = () =>
+      htmlFile({
+        container: {
+          meta: {},
+          entries: [
+            {
+              lid: 'att',
+              title: 'a.txt',
+              archetype: 'attachment',
+              body: JSON.stringify({ name: 'a.txt', mime: 'text/plain', asset_key: 'k' }),
+            },
+          ],
+          assets: { k: base64('取り戻したい bytes') },
+        },
+        export_meta: {},
+      });
+
+    await importPkc2File(d, deps, mk());
+    const key = [...blobs.keys()][0]!;
+    blobs.delete(key); // GC が deleteBlob 後 deleteMeta で失敗した状態
+    opLog.length = 0;
+
+    await importPkc2File(d, deps, mk());
+    expect(opLog).toContain(`blob:${key}`); // 省かずに書き直す
+    expect(blobs.has(key)).toBe(true);
+  });
+
+  it('[L-11] 履歴の書込で落ちたら「履歴」と言う(関連と混同しない)', async () => {
+    const { d, deps } = harness({ failRevisions: true });
+    const file = htmlFile({
+      container: {
+        meta: {},
+        entries: [{ lid: 'e1', title: 'n', archetype: 'text', body: 'いま\n' }],
+        revisions: [
+          { id: 'r1', entry_lid: 'e1', created_at: '2026-07-01T00:00:00Z', snapshot: 'v1\n' },
+        ],
+      },
+      export_meta: {},
+    });
+
+    expect(await importPkc2File(d, deps, file)).toBeNull();
+    expect(d.getState().error).toMatch(/履歴の書込で失敗/);
   });
 });

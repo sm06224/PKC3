@@ -217,12 +217,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             },
             importRevisionChains: (chains) =>
               client.request({ op: 'importRevisionChains', cid: DEFAULT_CID, chains }),
-            listAssetKeys: async () =>
-              new Set(
-                (await client.request({ op: 'listAssetMetas', cid: DEFAULT_CID })).map(
-                  (m) => m.key,
-                ),
-              ),
+            // ⚠ **bytes 側の台帳を見る**(review H-1)── meta 行の有無で判定すると、
+            // GC が deleteBlob → deleteMeta の途中で失敗した状態(設計上の想定内)で
+            // put を省いてしまい、参照だけが書かれる
+            listStoredBlobKeys: async () => new Set(await blobs.listKeys(DEFAULT_CID)),
             putBlob: (key, blob) => blobs.put(DEFAULT_CID, key, blob),
             putAssetMeta: async (m) => {
               await client.request({ op: 'putAssetMeta', cid: DEFAULT_CID, meta: m });

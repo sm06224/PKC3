@@ -104,10 +104,25 @@ const KNOWN_RELATION_KINDS = new Set([
   'provenance',
 ]);
 
-const esc = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-/** 境界付き置換(key / lid は [A-Za-z0-9_-]+ ── 後続が同字種なら別 token)。 */
-const tokenRe = (prefix: string, token: string): RegExp =>
-  new RegExp(`${prefix}${esc(token)}(?![A-Za-z0-9_-])`, 'g');
+/**
+ * `<prefix><token>` を 1 パスで写す。
+ *
+ * ⚠ token は `[A-Za-z0-9_-]+` を**最長一致**で取る ── これが境界の実体である。
+ * 貪欲でないと `asset:k10` の `k1` 部分だけが `k1` の写し先に化ける
+ * (PKC2 の旧 key 3 系統は prefix 関係になりうるので実際に起きる)。
+ * map に無い token はそのまま(missing key は壊れシグナルとして保存する)。
+ */
+function replacePrefixed(
+  body: string,
+  prefix: string,
+  map: ReadonlyMap<string, string>,
+): string {
+  if (map.size === 0) return body;
+  return body.replace(
+    new RegExp(`${prefix}[A-Za-z0-9_-]+`, 'g'),
+    (m) => prefix + (map.get(m.slice(prefix.length)) ?? m.slice(prefix.length)),
+  );
+}
 
 /**
  * 暫定 asset key を最終 key(= 中身のハッシュ)へ写す。
@@ -121,16 +136,25 @@ const tokenRe = (prefix: string, token: string): RegExp =>
  * 直後に現れる ── 前方境界を見なくても他の語の一部に当たらない。
  */
 export function remapAssetKeys(body: string, map: ReadonlyMap<string, string>): string {
-  let out = body;
-  for (const [from, to] of map) {
-    if (from === to) continue;
-    out = out.replace(tokenRe('', from), to);
-  }
-  return out;
+  if (map.size === 0) return body;
+  // 素の token を最長一致で拾って引く(map 全件ループをやめる ── review M-7)。
+  // 暫定 key は `ast-<ts36>-<rand6>` なので、`-` を含む 1 token として取れる
+  return body.replace(/[A-Za-z0-9_-]+/g, (t) => map.get(t) ?? t);
 }
 
 function str(v: unknown, fallback = ''): string {
   return typeof v === 'string' ? v : fallback;
+}
+
+/**
+ * 解釈できない created_at は空にする(review L-12)。
+ *
+ * 「時刻は捏造しない」は正しいが、**壊れた時刻をそのまま信じるのは別問題** ──
+ * この値は版の前後を決めるソートキーでもあるので、壊れていると鎖の順序が
+ * 入れ替わる。空にすれば安定ソートが配列順(= PKC2 の追記順)へ落ちる。
+ */
+function validTimestamp(raw: string): string {
+  return raw !== '' && !Number.isNaN(Date.parse(raw)) ? raw : '';
 }
 
 export function convertPkc2Container(
@@ -153,17 +177,23 @@ export function convertPkc2Container(
     users.push({ lid, title: str(e.title), archetype, body: str(e.body) });
   }
 
-  // ── ① lid 衝突の再採番
-  const lidMap = new Map<string, string>();
+  // ── ① lid 衝突の再採番。
+  // ⚠ 判定は **entry の出現ごと**に行う(review L-15)── lid を key にした Map
+  // だけで持つと、PKC2 側に同じ lid が 2 つあったとき両方が同じ新 lid を指し、
+  // bulk upsert の後勝ちで**片方が無言で消える**(実証済み)
+  const finalLidAt: string[] = [];
+  const lidMap = new Map<string, string>(); // 参照書換用(旧 lid → 新 lid、先勝ち)
   const taken = new Set(opts.existingLids);
   for (const u of users) {
     if (taken.has(u.lid)) {
       const next = opts.genLid();
-      lidMap.set(u.lid, next);
+      if (!lidMap.has(u.lid)) lidMap.set(u.lid, next);
       taken.add(next);
+      finalLidAt.push(next);
       warnings.push(`lid 衝突を再採番: ${u.lid} → ${next}`);
     } else {
       taken.add(u.lid);
+      finalLidAt.push(u.lid);
     }
   }
   const finalLid = (lid: string): string => lidMap.get(lid) ?? lid;
@@ -185,6 +215,12 @@ export function convertPkc2Container(
     return k;
   };
   for (const oldKey of Object.keys(assetsIn)) keyMap.set(oldKey, freshAssetKey());
+  // legacy 内蔵 data(body に base64 が入っていた旧形式)は **履歴の版数ぶん**
+  // 現れる ── 同じ base64 に同じ暫定 key を配らないと、`assetsOut` が同一 bytes を
+  // 版の数だけ**同時に**保持し、adapter がその回数だけ復号 + SHA-256 する
+  // (review M-6: 添付 1 個 + 履歴 50 版で 51 件になっていた)。
+  // disk 上は content addressing で 1 部に落ちるが、メモリと CPU は落ちない
+  const legacyKeyByData = new Map<string, string>();
 
   // mime は attachment body 側が持つ(container.assets には無い)── 先に回収
   const mimeByOldKey = new Map<string, string>();
@@ -213,19 +249,20 @@ export function convertPkc2Container(
   // ── ② textlog anchor 対応表(final lid を key に ── 参照書換は lid 書換より後)
   const anchorsByLid = new Map<string, Map<string, string>>();
   const firstLogOfDay = new Map<string, Map<string, string>>();
-  for (const u of users) {
-    if (u.archetype !== 'textlog') continue;
+  users.forEach((u, i) => {
+    if (u.archetype !== 'textlog') return;
     const converted = getFlavor('textlog').fromPkc2!(u.body);
     const anchors = buildTextlogAnchorMap(u.body, converted);
-    anchorsByLid.set(finalLid(u.lid), anchors);
-    firstLogOfDay.set(finalLid(u.lid), buildFirstLogOfDay(u.body, anchors));
-  }
+    anchorsByLid.set(finalLidAt[i]!, anchors);
+    firstLogOfDay.set(finalLidAt[i]!, buildFirstLogOfDay(u.body, anchors));
+  });
 
   // ── ③〜⑤ 1 本の body を PKC-Markdown へ写す(entry 本文にも履歴 snapshot にも
   // **同じ経路**を使う ── 別経路にすると履歴だけ JSON 文字列が残り、古い版の
   // asset 参照が書き換わらず GC に消される)
   const convertBody = (
     u: { lid: string; title: string; archetype: string },
+    selfLid: string, // textlog の自己参照解決に使う(出現ごとの最終 lid)
     rawBody: string,
     quiet: boolean, // 履歴 snapshot では警告を出さない(件数ぶん増えるだけ)
   ): string => {
@@ -236,15 +273,17 @@ export function convertPkc2Container(
         const p = JSON.parse(src) as Record<string, unknown>;
         const data = str(p.data);
         if (data !== '') {
-          // 同じ bytes は content addressing で 1 部に落ちるので、履歴側で
-          // 再度 externalize しても重複しない
-          const newKey = freshAssetKey();
-          assetsOut.push({
-            key: newKey,
-            oldKey: null, // PKC2 側に key が無い(body 内蔵だった)
-            base64: data,
-            mime: str(p.mime, 'application/octet-stream'),
-          });
+          let newKey = legacyKeyByData.get(data);
+          if (newKey === undefined) {
+            newKey = freshAssetKey();
+            legacyKeyByData.set(data, newKey);
+            assetsOut.push({
+              key: newKey,
+              oldKey: null, // PKC2 側に key が無い(body 内蔵だった)
+              base64: data,
+              mime: str(p.mime, 'application/octet-stream'),
+            });
+          }
           delete p.data;
           p.asset_key = newKey; // legacy は data 優先の規約だった ── bytes を正とする
           if (!quiet) warnings.push(`legacy 内蔵 data を asset 化: ${u.lid}`);
@@ -261,6 +300,21 @@ export function convertPkc2Container(
         }
         const icon = str(p.app_icon_asset_key);
         if (icon !== '' && keyMap.has(icon)) p.app_icon_asset_key = keyMap.get(icon);
+        // 未知の `*_asset_key`(将来 field)は `attachment.extra` に verbatim 保全
+        // されるので、**旧 PKC2 key を抱えたまま**残る = 死んだ参照(review L-13)。
+        // 保全方針は変えないが、黙って死なせない
+        if (!quiet) {
+          for (const k of Object.keys(p)) {
+            if (
+              k.endsWith('_asset_key') &&
+              k !== 'asset_key' &&
+              k !== 'app_icon_asset_key' &&
+              str(p[k]) !== ''
+            ) {
+              warnings.push(`未対応の添付参照は元のまま残ります: ${k}(${u.title || u.lid})`);
+            }
+          }
+        }
         src = JSON.stringify(p);
       } catch {
         /* 非 JSON は fromPkc2 の寛容 parse に任せる */
@@ -274,27 +328,22 @@ export function convertPkc2Container(
       if (!quiet) warnings.push(`変換失敗(text として保持): ${u.lid}: ${String(e)}`);
       body = src;
     }
-    // ⑤ 参照書換: lid → textlog permalink → asset key の順
-    for (const [oldLid, newLid] of lidMap) {
-      body = body.replace(tokenRe('entry:', oldLid), `entry:${newLid}`);
-    }
-    body = rewriteTextlogRefs(body, finalLid(u.lid), anchorsByLid, firstLogOfDay);
-    for (const [oldKey, newKey] of keyMap) {
-      body = body.replace(tokenRe('asset:', oldKey), `asset:${newKey}`);
-    }
+    // ⑤ 参照書換: lid → textlog permalink → asset key の順。
+    // ⚠ map 全件を回して 1 件ずつ replace すると O(map 件数 × 本文量) になる
+    // (review M-7: asset key 10 → 100 で 6.07 倍)。**1 パスで引く**
+    body = replacePrefixed(body, 'entry:', lidMap);
+    body = rewriteTextlogRefs(body, selfLid, anchorsByLid, firstLogOfDay);
+    body = replacePrefixed(body, 'asset:', keyMap);
     return body;
   };
 
-  const entries: ConvertedEntry[] = [];
-  for (const u of users) {
-    entries.push({
-      lid: finalLid(u.lid),
-      title: u.title,
-      archetype: u.archetype,
-      body: convertBody(u, u.body, false),
-      entryOrder: 0, // 下で採番
-    });
-  }
+  const entries: ConvertedEntry[] = users.map((u, i) => ({
+    lid: finalLidAt[i]!,
+    title: u.title,
+    archetype: u.archetype,
+    body: convertBody(u, finalLidAt[i]!, u.body, false),
+    entryOrder: 0, // 下で採番
+  }));
 
   // ── ⑥ entry_order: meta.entry_order(旧 lid 列)優先、無ければ配列順
   const orderSpec = Array.isArray(c.meta?.entry_order)
@@ -350,23 +399,35 @@ export function convertPkc2Container(
   // 履歴 = 逆向きパッチ)へ符号化する。符号化は bytes ではなく行の差分なので
   // 純関数では決められない部分が無く、ここでは「順に並んだ変換済み全文」まで作る。
   // 実際の逆パッチ化は worker(rev_order と隣接関係を持つ側)が行う
+  // ⚠ 引きは Map で(review M-7)── `users.find` だと O(entry 数 × revision 数)。
+  // 実測で entry 8,000 件 + revision 3,000 件の追加費用が 10 件時の 37.7 倍だった。
+  // 同じ lid が複数あるときは**最初の出現**に付ける(PKC2 側の entry_lid が
+  // どちらを指すか決められないため。再採番された 2 つ目以降には履歴が付かない)
+  const userAt = new Map<string, number>();
+  users.forEach((u, i) => {
+    if (!userAt.has(u.lid)) userAt.set(u.lid, i);
+  });
   const byLid = new Map<string, PendingRevision[]>();
   for (const raw of Array.isArray(c.revisions) ? c.revisions : []) {
     const r = raw as Record<string, unknown>;
     const lid = str(r.entry_lid);
-    const u = users.find((x) => x.lid === lid);
-    if (!u) continue; // system entry / 除外済み entry の履歴は持ち込まない
-    const list = byLid.get(finalLid(lid)) ?? [];
-    list.push({ body: convertBody(u, str(r.snapshot), true), createdAt: str(r.created_at) });
-    byLid.set(finalLid(lid), list);
+    const at = userAt.get(lid);
+    if (at === undefined) continue; // system entry / 除外済み entry の履歴は持ち込まない
+    const target = finalLidAt[at]!;
+    const list = byLid.get(target) ?? [];
+    list.push({
+      body: convertBody(users[at]!, target, str(r.snapshot), true),
+      createdAt: validTimestamp(str(r.created_at)),
+    });
+    byLid.set(target, list);
   }
   const revisionChains: RevisionChain[] = [];
   for (const [entryLid, snapshots] of byLid) {
     // PKC2 は追記順だが、created_at があるならそれを正とする(古い → 新しい)。
-    // 安定ソート(同時刻は元の並びを保つ)
+    // 安定ソート(同時刻・時刻なしは元の並びを保つ)
     const ordered = snapshots
       .map((s, i) => ({ s, i }))
-      .sort((a, b) => (a.s.createdAt || '').localeCompare(b.s.createdAt || '') || a.i - b.i)
+      .sort((a, b) => a.s.createdAt.localeCompare(b.s.createdAt) || a.i - b.i)
       .map((x) => x.s);
     revisionChains.push({ entryLid, snapshots: ordered });
   }

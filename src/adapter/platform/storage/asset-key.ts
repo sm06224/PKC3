@@ -32,11 +32,15 @@ export function generateAssetKey(): string {
   return `${PREFIX}${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export async function sha256Hex(blob: Blob): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
+async function hexDigest(data: BufferSource): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', data);
   return Array.from(new Uint8Array(digest))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
+}
+
+export async function sha256Hex(blob: Blob): Promise<string> {
+  return hexDigest(await blob.arrayBuffer());
 }
 
 export interface AssetIdentity {
@@ -46,8 +50,26 @@ export interface AssetIdentity {
 }
 
 /**
+ * **既に手元にある bytes** から key を決める(コピーを作らない)。
+ * 取込のように復号済み bytes を持っている経路はこちらを使う ── `identifyAsset`
+ * は Blob から `arrayBuffer()` でもう 1 部作ってしまう(review M-5)。
+ */
+export async function identifyBytes(
+  bytes: Uint8Array<ArrayBuffer>,
+): Promise<AssetIdentity> {
+  if (bytes.byteLength > HASH_MAX_BYTES) return { key: generateAssetKey(), hash: null };
+  const hash = await hexDigest(bytes);
+  return { key: `${PREFIX}${hash}`, hash };
+}
+
+/**
  * bytes から key を決める。**同じ bytes なら必ず同じ key**。
  * 閾値超のときだけ採番へ落ちる(その旨は hash === null で観測できる)。
+ *
+ * ⚠ **閾値以下では blob 全量を JS ヒープに載せる**(WebCrypto に streaming
+ * digest が無く `crypto.subtle.digest` が BufferSource を要求するため)。
+ * `HASH_MAX_BYTES` は「巨大ファイルではやらない」であると同時に
+ * 「**64MB までは常に全量を載せる**」という意味でもある。
  */
 export async function identifyAsset(blob: Blob): Promise<AssetIdentity> {
   if (blob.size > HASH_MAX_BYTES) return { key: generateAssetKey(), hash: null };
