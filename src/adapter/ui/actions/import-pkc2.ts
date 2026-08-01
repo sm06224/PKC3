@@ -15,7 +15,7 @@ import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import { sniffMagic, detectPkc2Format } from '@features/import/detect-format';
 import { parsePkc2Html } from '@features/import/pkc2-html';
 import { readPkc2Package, peekZipFormat } from '@features/import/pkc2-package';
-import { readTextBundle } from '@features/import/pkc2-bundle';
+import { readTextBundle, readTextlogBundle } from '@features/import/pkc2-bundle';
 import { readZipEntry, type ZipEntry } from '@features/import/zip-reader';
 import {
   convertPkc2Container,
@@ -210,7 +210,9 @@ export async function importPkc2File(
           ? readPkc2Package
           : format === 'pkc2-text-bundle'
             ? readTextBundle
-            : null;
+            : format === 'pkc2-textlog-bundle'
+              ? readTextlogBundle
+              : null;
       if (!read) {
         // 未対応の形式は**名指しで**断る(「不明」に混ぜると原因を誤解する)
         return fail(`${format} の取込はまだ実装されていません(${file.name})`);
