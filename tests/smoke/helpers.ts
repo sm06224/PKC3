@@ -51,3 +51,29 @@ export async function clickReal(page: Page, selector: string): Promise<void> {
   );
   await page.mouse.click(cx, cy);
 }
+
+/**
+ * 画像が **実際に読み込まれて描画されている**ことを確かめる。
+ *
+ * `src` 属性が blob: になった瞬間と、画像が decode されて面積を持つ瞬間は違う ──
+ * `![alt](asset:…)` は decode 前に alt テキストでボックスを持つので、
+ * 「toBeVisible → src を assert → boundingBox」は **src 設定直後にレイアウトが
+ * 一度潰れる窓**を踏みうる(CI で実際に踏んだ)。`naturalWidth` は decode 完了で
+ * しか立たないので、これを待ってから面積を見る(assert は弱めず強めている)。
+ */
+export async function expectImageRendered(page: Page, selector: string): Promise<void> {
+  const img = page.locator(selector).first();
+  await expect(img).toHaveAttribute('src', /^blob:/);
+  await expect
+    .poll(
+      () =>
+        img.evaluate(
+          (el) => (el as HTMLImageElement).complete && (el as HTMLImageElement).naturalWidth,
+        ),
+      { message: `${selector} が decode されない(blob: を差したのに読めていない)` },
+    )
+    .toBeTruthy();
+  const box = await img.boundingBox();
+  expect(box, `${selector} が画面に出ていない`).not.toBeNull();
+  expect(box!.height).toBeGreaterThan(0);
+}

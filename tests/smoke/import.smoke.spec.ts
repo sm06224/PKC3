@@ -9,7 +9,7 @@
  */
 import { test, expect } from '@playwright/test';
 import { gzipSync } from 'node:zlib';
-import { gotoApp, collectPageErrors, clickReal } from './helpers';
+import { gotoApp, collectPageErrors, clickReal, expectImageRendered } from './helpers';
 
 // 1x1 PNG(67 bytes)
 const PNG_1X1 = Buffer.from(
@@ -74,10 +74,7 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
 
   // 添付 entry を開くと、復号済み bytes が IDB から lend されて実描画される
   await clickReal(page, '[data-pkc-entry="a1"]'); // 衝突が無いので lid は保たれる
-  const img = page.locator('[data-pkc-field="attachment-media"]');
-  await expect(img).toBeVisible();
-  await expect(img).toHaveAttribute('src', /^blob:/);
-  expect((await img.boundingBox())!.height).toBeGreaterThan(0);
+  await expectImageRendered(page, '[data-pkc-field="attachment-media"]');
 
   // ── 取り込んだ asset は「参照されている」と実 sqlite 走査で判定される ──
   // (旧 key のまま body に残っていたら、ここで未参照として現れる)

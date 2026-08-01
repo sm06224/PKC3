@@ -3,7 +3,7 @@
  * 「実際に画面に出る」+ Blob 直 put 経路の end-to-end(実 IDB + 実 sqlite meta)。
  */
 import { test, expect } from '@playwright/test';
-import { gotoApp, collectPageErrors, clickReal } from './helpers';
+import { gotoApp, collectPageErrors, clickReal, expectImageRendered } from './helpers';
 
 // 1x1 PNG(67 bytes)
 const PNG_1X1 = Buffer.from(
@@ -28,11 +28,7 @@ test('添付取込 → entry 出現 → image preview が可視高さを持つ',
   await expect(row.first()).toContainText('dot.png');
 
   // preview の img が blob: URL で実際に描画される(lend 経路)
-  const img = page.locator('[data-pkc-field="attachment-media"]');
-  await expect(img).toBeVisible();
-  await expect(img).toHaveAttribute('src', /^blob:/);
-  const box = await img.boundingBox();
-  expect(box!.height).toBeGreaterThan(0);
+  await expectImageRendered(page, '[data-pkc-field="attachment-media"]');
 
   // ダウンロード導線の可視 + クリック可能(占有チェック込み)
   await clickReal(page, '[data-pkc-action="download-asset"]');
@@ -50,11 +46,7 @@ test('添付取込 → entry 出現 → image preview が可視高さを持つ',
   await page.keyboard.type(`![点](asset:${assetKey})\n\n[点をDL](asset:${assetKey})`);
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
-  const refImg = page.locator('img[data-pkc-asset-key]');
-  await expect(refImg).toBeVisible();
-  await expect(refImg).toHaveAttribute('src', /^blob:/); // hydrator が実際に差した
-  const refBox = await refImg.boundingBox();
-  expect(refBox!.height).toBeGreaterThan(0);
+  await expectImageRendered(page, 'img[data-pkc-asset-key]'); // hydrator が実際に差した
   // DL link も実クリック可能(href 無し ── ナビゲーションを起こさない)
   await clickReal(page, 'a[data-pkc-action="download-asset"]');
   expect(page.url()).not.toContain('asset:'); // asset: へ遷移していない
