@@ -13,6 +13,7 @@ import { installHtmlSandboxResizer } from '@features/markdown/html-sandbox';
 import { AssetBlobStore } from '@adapter/platform/storage/asset-blob-store';
 import { runExplicitPurge } from '@adapter/platform/storage/asset-gc';
 import { buildShell } from '@adapter/ui/render/shell';
+import { showNotices, clearNotices } from '@adapter/ui/render/notices';
 import { SidebarRenderer } from '@adapter/ui/render/sidebar';
 import { CenterRouter } from '@adapter/ui/render/center';
 import { formatSize } from '@adapter/ui/render/detail';
@@ -240,10 +241,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
               dispatcher.dispatch({ type: 'SYS_BOOTED', cid: DEFAULT_CID, ...snap });
             },
             notify: (message) => showStatus(`${statusBase} — ${message}`),
+            // 注意は**全件**を専用面へ(1 行の status では 1 件目しか届かない)
+            report: (notes) => showNotices(regions.notices, '取込時の注意', notes),
           },
           file,
         );
       }),
+    dismissNotices: () => clearNotices(regions.notices),
     purgeOrphanAssets: () =>
       void withAssetGate(async () => {
         try {

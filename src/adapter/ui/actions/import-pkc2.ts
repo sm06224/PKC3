@@ -75,6 +75,12 @@ export interface ImportDeps {
   /** 進捗・完了の可視化(件数が多いと無反応に見えるため)。 */
   notify?(message: string): void;
   /**
+   * **注意の全件**を渡す(review H-2)。`notify` は 1 行の status footer なので
+   * `notes[0]` しか user に届かない ── 段④ は warning 件数が内側 bundle 数に
+   * 比例するので、全件を出せる面が要る。
+   */
+  report?(notes: readonly string[]): void;
+  /**
    * ハッシュを取る上限(既定 `HASH_MAX_BYTES` = 64MB)。
    *
    * ⚠ **test の観測点として在る**(review M-1)。この閾値は WebCrypto に
@@ -139,6 +145,38 @@ function consumeSource(
   const src = map.get(oldKey) ?? null;
   map.delete(oldKey);
   return src;
+}
+
+/**
+ * 在り処を読む。**先頭が壊れていたら控えを試す**(review M-5)。
+ *
+ * batch では同じ添付が内側 ZIP ごとに丸ごと複製される。同一性の判定は中央
+ * ディレクトリの crc/size だけで bytes を読まないので、**データ部だけが腐って
+ * CD が無傷**なら「同一」と判定して畳んでしまう ── PKC2 は畳まなかったので
+ * 健全な複製が生き残っていた。畳み込みで冗長性まで捨てると PKC2 より弱くなる。
+ */
+async function readWithFallback(
+  src: AssetSource,
+  alternates: readonly AssetSource[] | undefined,
+  onFallback: (n: number) => void,
+): Promise<Blob> {
+  try {
+    return await readAssetSource(src);
+  } catch (first) {
+    let n = 0;
+    for (const alt of alternates ?? []) {
+      if (alt === src) continue;
+      n++;
+      try {
+        const blob = await readAssetSource(alt);
+        onFallback(n);
+        return blob;
+      } catch {
+        // 次の複製へ
+      }
+    }
+    throw first; // どれも読めなければ最初の理由を返す(原因が一番近い)
+  }
 }
 
 /** 1 メッセージに載せる履歴の目安(postMessage に全履歴を一度に載せない)。 */
@@ -222,6 +260,7 @@ export async function importPkc2File(
     let gzipped = false;
     let light = false;
     let zipAssets: Map<string, AssetSource> | null = null;
+    let zipAlternates: Map<string, AssetSource[]> | null = null;
     const preWarnings: string[] = [];
 
     if (isZip) {
@@ -251,6 +290,7 @@ export async function importPkc2File(
       const pkg = await read(file);
       container = pkg.container;
       zipAssets = pkg.assetSources;
+      zipAlternates = 'assetAlternates' in pkg ? pkg.assetAlternates : null;
       preWarnings.push(...pkg.warnings);
     } else {
       const payload = parsePkc2Html(await file.text());
@@ -310,9 +350,22 @@ export async function importPkc2File(
         // **破損検査は落とさない**: reader は stream で舐めて検証し view を返すので、
         // 全量を載せずに CRC を確かめられる(重複排除だけが外れる)
         if (src && src.entry.uncompressedSize > (deps.hashMaxBytes ?? HASH_MAX_BYTES)) {
-          const key = generateAssetKey();
+          // ⚠ 採番 key は `ast-<ms base36>-<6 桁 base36>` なので**同一 ms 内で
+          // 衝突しうる**。衝突すると putBlob が後勝ちで上書きし、2 つの添付が
+          // 同じ bytes を指す(無言のデータ消失)── convert 側は takenKeys で
+          // 守っているのに、この分岐だけ外にあった(review M-10)
+          let key = generateAssetKey();
+          while (known.has(key)) key = generateAssetKey();
+          known.add(key);
           keyMap.set(a.key, key);
-          await deps.putBlob(key, await readAssetSource(src));
+          await deps.putBlob(
+            key,
+            await readWithFallback(src, zipAlternates?.get(a.oldKey!), (n) =>
+              result.warnings.push(
+                `添付が壊れていたので ${n} 個目の複製から復元しました: ${a.oldKey}`,
+              ),
+            ),
+          );
           await deps.putAssetMeta({
             key,
             mime: a.mime,
@@ -331,7 +384,15 @@ export async function importPkc2File(
         // ⚠ 読むのは **`src.zip`**(外側の `file` ではない)── batch では内側 ZIP の
         // entry なので、外側から読むと別位置を読んで壊れる
         const bytes = src
-          ? new Uint8Array(await (await readAssetSource(src)).arrayBuffer())
+          ? new Uint8Array(
+              await (
+                await readWithFallback(src, zipAlternates?.get(a.oldKey!), (n) =>
+                  result.warnings.push(
+                    `添付が壊れていたので ${n} 個目の複製から復元しました: ${a.oldKey}`,
+                  ),
+                )
+              ).arrayBuffer(),
+            )
           : await decodeAssetBytes(consumeBase64(a), gzipped && a.oldKey !== null);
         const { key, hash } = await identifyBytes(bytes);
         keyMap.set(a.key, key); // ⚠ put を省いた時も**必ず**写す(review M-30)
@@ -410,12 +471,13 @@ export async function importPkc2File(
       ...(light ? ['添付の中身は含まれていない export です(light)'] : []),
     ];
     const revNote = revStats.added > 0 ? `(履歴 ${revStats.added} 版)` : '';
+    // ⚠ **全件を出す**(review H-2)。1 行の status には件数だけを載せ、中身は
+    // 閉じるまで残る面へ ── notes[0] だけ出して残りを捨てるのは「可視化」ではない
+    deps.report?.(notes);
     if (notes.length > 0) {
       // 警告は握りつぶさない。ただし**成功を失敗の見た目にしない** ──
       // OP_FAILED は state.error に載って「⚠ エラー」表示になる(review L-11)
-      deps.notify?.(
-        `取込完了: ${rows.length} 件${revNote} ⚠ 注意 ${notes.length} 件 — ${notes[0]}`,
-      );
+      deps.notify?.(`取込完了: ${rows.length} 件${revNote} ⚠ 注意 ${notes.length} 件`);
     } else {
       deps.notify?.(`取込完了: ${rows.length} 件${revNote}`);
     }

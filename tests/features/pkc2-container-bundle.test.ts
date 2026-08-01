@@ -7,7 +7,10 @@
  * 持たず、mixed は `text_count` + `textlog_count` で `archetype` を持つ。
  */
 import { describe, expect, it } from 'vitest';
-import { readContainerBundle } from '../../src/features/import/pkc2-container-bundle';
+import {
+  readContainerBundle,
+  isBatchFormat,
+} from '../../src/features/import/pkc2-container-bundle';
 import { readAssetSource } from '../../src/features/import/zip-reader';
 import { buildZip, bytesOf, type FixtureEntry } from './zip-fixture';
 
@@ -201,6 +204,108 @@ describe('readContainerBundle — texts', () => {
     await expect(readContainerBundle(zip)).rejects.toThrow(/違う中身/);
   });
 
+  it('🔴 crc が一致してもサイズが違えば断る(crc 比較だけでは足りない)', async () => {
+    // ⚠ CRC-32 は GF(2) 上で線形なので、**同じ crc で長さの違う**バイト列は
+    // 構成できる。サイズ比較を外しても既存 test(AAAA vs BBBB = 同サイズ)は
+    // 全部通っていた ── この対照が無いと片方の検査が死んでも気づけない
+    const short = new Uint8Array([0x4f, 0x52, 0x49, 0x47, 0x49, 0x4e, 0x41, 0x4c]); // 8 bytes
+    const long = new Uint8Array([
+      0x50, 0x41, 0x44, 0x44, 0x49, 0x4e, 0x47, 0x21, 0xef, 0x99, 0xc2, 0x8c,
+    ]); // 12 bytes、crc32 は上と同じ 0xe941ecc9
+    const zip = await outer(
+      {
+        format: 'pkc2-texts-container-bundle',
+        version: 1,
+        entries: [
+          { lid: 'n1', filename: 'a.text.zip' },
+          { lid: 'n2', filename: 'b.text.zip' },
+        ],
+      },
+      [
+        {
+          name: 'a.text.zip',
+          bytes: await textBundle({
+            lid: 'n1',
+            assets: { k: { name: 'x.bin', mime: 'application/octet-stream' } },
+            files: [{ name: 'assets/k.bin', bytes: short }],
+          }),
+        },
+        {
+          name: 'b.text.zip',
+          bytes: await textBundle({
+            lid: 'n2',
+            assets: { k: { name: 'x.bin', mime: 'application/octet-stream' } },
+            files: [{ name: 'assets/k.bin', bytes: long }],
+          }),
+        },
+      ],
+    );
+    await expect(readContainerBundle(zip)).rejects.toThrow(/違う中身/);
+  });
+
+  it('件数照合は texts / textlogs では entry_count を見る', async () => {
+    // mixed 側(text_count / textlog_count)だけが pin されていて、
+    // entry_count を text_count に取り違えても全 test が通っていた
+    const zip = await outer(
+      {
+        format: 'pkc2-texts-container-bundle',
+        version: 1,
+        entry_count: 9, // 実際は 1
+        entries: [{ lid: 'n1', filename: 'a.text.zip' }],
+      },
+      [{ name: 'a.text.zip', bytes: await textBundle({ lid: 'n1' }) }],
+    );
+    expect((await readContainerBundle(zip)).warnings).toEqual([
+      'manifest の entry 件数が中身と違います(9 ≠ 1)',
+    ]);
+  });
+
+  it('🔑 畳んだ相手が壊れていたら控えの複製から復元する(PKC2 より弱くしない)', async () => {
+    // 判定は中央ディレクトリの crc/size だけで bytes を読まない ── データ部だけが
+    // 腐って CD が無傷なら「同一」と判定して畳んでしまう。PKC2 は畳まなかったので
+    // 健全な複製が生き残っていた
+    const good = bytesOf('健全なバイト');
+    const a = await textBundle({
+      lid: 'n1',
+      assets: { k: { name: 'x.png', mime: 'image/png' } },
+      files: [{ name: 'assets/k.png', bytes: good }],
+    });
+    // a の data 部だけを**同じ長さで**壊す(CD の crc/size は無傷のまま)
+    const broken = Uint8Array.from(a);
+    const at = broken.indexOf(good[0]!, 200);
+    broken[at] = broken[at]! ^ 0xff;
+    const b = await textBundle({
+      lid: 'n2',
+      assets: { k: { name: 'x.png', mime: 'image/png' } },
+      files: [{ name: 'assets/k.png', bytes: good }],
+    });
+    const zip = await outer(
+      {
+        format: 'pkc2-texts-container-bundle',
+        version: 1,
+        entries: [
+          { lid: 'n1', filename: 'a.text.zip' },
+          { lid: 'n2', filename: 'b.text.zip' },
+        ],
+      },
+      [
+        { name: 'a.text.zip', bytes: broken },
+        { name: 'b.text.zip', bytes: b },
+      ],
+    );
+    const got = await readContainerBundle(zip);
+    // 畳んだうえで「同一」と判定している(= 壊れを検知していない)
+    expect([...got.assetSources.keys()]).toEqual(['k']);
+    expect(got.warnings).toEqual([]);
+    // 先頭は**実際に読めない**(この対照が無いと壊せていない fixture を見逃す)
+    await expect(readAssetSource(got.assetSources.get('k')!)).rejects.toThrow(/CRC/);
+    // 控えに健全な複製が残っており、そちらは読める
+    const alts = got.assetAlternates.get('k')!;
+    expect(alts).toHaveLength(2);
+    expect(alts[0]).toBe(got.assetSources.get('k'));
+    expect(await (await readAssetSource(alts[1]!)).text()).toBe('健全なバイト');
+  });
+
   it('同じ中身で name/mime だけ違うときは畳んだうえで warning', async () => {
     const png = bytesOf('same');
     const zip = await outer(
@@ -234,7 +339,7 @@ describe('readContainerBundle — texts', () => {
     const got = await readContainerBundle(zip);
     expect([...got.assetSources.keys()]).toEqual(['k']);
     expect(got.warnings).toEqual([
-      'b.text.zip: 添付 k の名前/種別が bundle ごとに違います(first.png を採ります)',
+      'b.text.zip: 添付 k の名前(first.png / second.png)か種別(image/png / image/webp)が bundle ごとに違います ── 先の方を採ります',
     ]);
   });
 });
@@ -324,7 +429,29 @@ describe('readContainerBundle — textlogs', () => {
     expect((got.container as Synth).entries.map((e) => e.archetype)).toEqual(['textlog']);
   });
 
-  it('内側 format が宣言と違えば断る(texts の中に textlog bundle)', async () => {
+  it('内側 format が宣言と違うものは落とすが、**残りは取り込む**(§5-③ partial)', async () => {
+    const zip = await outer(
+      {
+        format: 'pkc2-texts-container-bundle',
+        version: 1,
+        entries: [
+          { lid: 'g1', filename: 'g.text.zip' },
+          { lid: 'n1', filename: 'a.text.zip' },
+        ],
+      },
+      [
+        { name: 'g.text.zip', bytes: await textlogBundle({ lid: 'g1' }) },
+        { name: 'a.text.zip', bytes: await textBundle({ lid: 'n1' }) },
+      ],
+    );
+    // 🔑 1 件の事故で 100 件を失わない ── ただし**どのファイルを何故落としたか**を言う
+    const got = await readContainerBundle(zip);
+    expect((got.container as Synth).entries.map((e) => e.lid)).toEqual(['n1']);
+    expect(got.warnings[0]).toMatch(/g\.text\.zip: 取り込めませんでした.*pkc2-text-bundle/);
+    expect(got.warnings).toContain('1 件の bundle を取り込めませんでした(残りは取り込みます)');
+  });
+
+  it('🔴 全部落ちたら断る ──「取込完了 0 件」で成功に見せない', async () => {
     const zip = await outer(
       {
         format: 'pkc2-texts-container-bundle',
@@ -333,8 +460,7 @@ describe('readContainerBundle — textlogs', () => {
       },
       [{ name: 'g.text.zip', bytes: await textlogBundle({ lid: 'g1' }) }],
     );
-    // どの内側ファイルで落ちたのかを必ず言う
-    await expect(readContainerBundle(zip)).rejects.toThrow(/g\.text\.zip: .*pkc2-text-bundle/);
+    await expect(readContainerBundle(zip)).rejects.toThrow(/1 件も取り込めませんでした/);
   });
 });
 
@@ -387,6 +513,44 @@ describe('readContainerBundle — 黙って落とさない', () => {
       ],
     );
     await expect(readContainerBundle(zip)).rejects.toThrow(/同じ名前のファイルが 2 つ/);
+  });
+
+  it('ファイル名の正規化ゆれ(NFC / NFD)で「在るのに無い」と言わない', async () => {
+    // macOS の FS / Finder 経由で再梱包すると名前が NFD になる。PKC2 の batch
+    // filename はノート題名由来なので**日本語題名で現実的に踏む**
+    const nfc = 'がぎぐ.text.zip'.normalize('NFC');
+    const nfd = nfc.normalize('NFD');
+    expect(nfc).not.toBe(nfd); // fixture が前提を満たしていることを先に確かめる
+    const zip = await outer(
+      {
+        format: 'pkc2-texts-container-bundle',
+        version: 1,
+        entries: [{ lid: 'n1', filename: nfc }],
+      },
+      [{ name: nfd, bytes: await textBundle({ lid: 'n1' }) }],
+    );
+    const got = await readContainerBundle(zip);
+    expect((got.container as Synth).entries.map((e) => e.lid)).toEqual(['n1']);
+    // 黙って拾わない ── 名前が食い違っていること自体は言う
+    expect(got.warnings[0]).toMatch(/正規化形が違います/);
+  });
+
+  it('NFC に畳んでぶつかる 2 件があるときは曖昧なので拾わない', async () => {
+    const nfc = 'がぎぐ.text.zip'.normalize('NFC');
+    const nfd = nfc.normalize('NFD');
+    const zip = await outer(
+      {
+        format: 'pkc2-texts-container-bundle',
+        version: 1,
+        entries: [{ lid: 'n1', filename: 'べつ.text.zip' }],
+      },
+      [
+        { name: nfc, bytes: await textBundle({ lid: 'n1' }) },
+        { name: nfd, bytes: await textBundle({ lid: 'n2' }) },
+      ],
+    );
+    // 別物を掴むくらいなら「無い」と言う
+    await expect(readContainerBundle(zip)).rejects.toThrow(/ZIP に入っていません/);
   });
 
   it('manifest に無いファイルは warning(PKC2 は無言で捨てていた)', async () => {
@@ -482,6 +646,30 @@ describe('readContainerBundle — 黙って落とさない', () => {
       '1 件目: 目次の archetype(textlog)は形式(text)と違います ── 形式を採ります',
     ]);
     expect((got.container as Synth).entries[0]!.archetype).toBe('text');
+  });
+
+  it('🔴 Object.prototype の名前を batch 形式として受理しない', async () => {
+    // `format in BATCH_FORMATS` は **prototype chain を見る** ので
+    // 'toString' / 'constructor' / 'valueOf' が batch 形式として通り、
+    // BATCH_FORMATS[format] が Object.prototype の**関数**を返す。それが
+    // archetype として流れ、textlog が「JSON 文字列を本文に持つ text ノート」
+    // として無警告で保存される(PKC3 の「JSON 文字列 body を作らない」に反する)
+    for (const name of ['toString', 'constructor', 'valueOf', 'hasOwnProperty']) {
+      expect(isBatchFormat(name)).toBe(false);
+      const zip = await outer(
+        { format: name, version: 1, entries: [{ lid: 'g1', filename: 'g.textlog.zip' }] },
+        [{ name: 'g.textlog.zip', bytes: await textlogBundle({ lid: 'g1' }) }],
+      );
+      await expect(readContainerBundle(zip)).rejects.toThrow(/batch 形式のみ/);
+    }
+    // 本物の 3 形式は受ける(判定を厳しくしすぎて全部落とすのも退化)
+    for (const name of [
+      'pkc2-texts-container-bundle',
+      'pkc2-textlogs-container-bundle',
+      'pkc2-mixed-container-bundle',
+    ]) {
+      expect(isBatchFormat(name)).toBe(true);
+    }
   });
 
   it('batch でない format は断る / entries が配列でなければ断る', async () => {

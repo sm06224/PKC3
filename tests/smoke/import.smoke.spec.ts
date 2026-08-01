@@ -305,3 +305,63 @@ test('batch bundle 取込 → 内側 ZIP が再入され、共有添付が 1 本
 
   expect(errors).toEqual([]);
 });
+
+test('注意が複数あるとき **全件**が画面に出る(1 行の status に埋もれない)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  // 3 つの内側 bundle がそれぞれ「実体の無い添付」を宣言している状態を作る
+  const inner = (lid: string): Buffer =>
+    zipOf([
+      {
+        name: 'manifest.json',
+        data: Buffer.from(
+          JSON.stringify({
+            format: 'pkc2-text-bundle',
+            version: 1,
+            source_lid: lid,
+            source_title: lid,
+            assets: { [`ast-gone-${lid}`]: { name: 'x.png', mime: 'image/png' } },
+            compacted: false,
+          }),
+        ),
+      },
+      { name: 'body.md', data: Buffer.from(`# ${lid}\n`, 'utf-8') },
+    ]);
+  const lids = ['n1', 'n2', 'n3'];
+  const zip = zipOf([
+    {
+      name: 'manifest.json',
+      data: Buffer.from(
+        JSON.stringify({
+          format: 'pkc2-texts-container-bundle',
+          version: 1,
+          entry_count: 3,
+          entries: lids.map((lid) => ({ lid, title: lid, filename: `${lid}.text.zip` })),
+        }),
+      ),
+    },
+    ...lids.map((lid) => ({ name: `${lid}.text.zip`, data: inner(lid) })),
+  ]);
+
+  await page.setInputFiles('[data-pkc-field="import-input"]', {
+    name: 'notes.zip',
+    mimeType: 'application/zip',
+    buffer: zip,
+  });
+
+  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(3);
+
+  // 🔑 3 件とも出る。**1 件目だけ**なら段④ の「どのファイルか冠する」設計が空振り
+  const notices = page.locator('[data-pkc-region="notices"] [data-pkc-notice]');
+  await expect(notices).toHaveCount(3);
+  for (const lid of lids) {
+    await expect(notices.filter({ hasText: `${lid}.text.zip` })).toHaveCount(1);
+  }
+
+  // 閉じられる(画面を占有し続けない)
+  await clickReal(page, '[data-pkc-action="dismiss-notices"]');
+  await expect(notices).toHaveCount(0);
+
+  expect(errors).toEqual([]);
+});

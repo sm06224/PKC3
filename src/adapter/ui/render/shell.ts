@@ -7,6 +7,14 @@ export interface ShellRegions {
   sidebar: HTMLElement;
   detail: HTMLElement;
   status: HTMLElement;
+  /**
+   * 取込などの **複数件の注意**を全部見せる面(P6c review H-2)。
+   *
+   * ⚠ status footer は `textContent` 上書きの 1 行なので、**注意が N 件あっても
+   * 1 件目しか user に届かない**。段④ で warning に「どのファイルか」を冠したのは、
+   * 件数が内側 bundle 数に比例するから ── 出口が 1 行のままでは設計が空振りする。
+   */
+  notices: HTMLElement;
 }
 
 const VIEW_BUTTONS: readonly { view: string; label: string }[] = [
@@ -105,7 +113,12 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const status = document.createElement('footer');
   status.setAttribute('data-pkc-region', 'status');
 
-  shell.append(topbar, sidebar, detail, status);
+  // 既定は空(= 何も出さない)。注意が出たときだけ中身が入る
+  const notices = document.createElement('section');
+  notices.setAttribute('data-pkc-region', 'notices');
+  notices.hidden = true;
+
+  shell.append(topbar, sidebar, detail, notices, status);
   root.append(shell);
-  return { topbar, sidebar, detail, status };
+  return { topbar, sidebar, detail, status, notices };
 }

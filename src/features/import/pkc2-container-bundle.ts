@@ -65,7 +65,16 @@ const BATCH_FORMATS: Record<string, 'text' | 'textlog' | null> = {
   'pkc2-mixed-container-bundle': null,
 };
 
-export const isBatchFormat = (format: string): boolean => format in BATCH_FORMATS;
+/**
+ * ⚠ `format in BATCH_FORMATS` と書いてはいけない(review H-1)。`in` は
+ * prototype chain を見るので `'toString'` / `'constructor'` / `'valueOf'` が
+ * **batch 形式として受理され**、`BATCH_FORMATS[format]` が `Object.prototype` の
+ * 関数を返す ── それが archetype として通り、textlog が
+ * 「JSON 文字列を本文に持つ text ノート」として無警告で保存される
+ * (PKC3 の「JSON 文字列 body を作らない」に真っ向から反する状態が生まれる)。
+ */
+export const isBatchFormat = (format: string): boolean =>
+  Object.hasOwn(BATCH_FORMATS, format);
 
 interface OuterEntry {
   lid?: unknown;
@@ -95,6 +104,12 @@ export interface Pkc2ContainerBundle {
   manifest: Pkc2ContainerBundleManifest;
   container: unknown;
   assetSources: Map<string, AssetSource>;
+  /**
+   * 同じ key の**別の複製**(review M-5)。batch では同じ添付が内側 ZIP ごとに
+   * 丸ごと複製されるので、先頭が読めなくても他から復元できる ── 畳み込みで
+   * 冗長性まで捨てると PKC2 より弱くなる。先頭は `assetSources` と同じ。
+   */
+  assetAlternates: Map<string, AssetSource[]>;
   warnings: string[];
 }
 
@@ -109,6 +124,8 @@ function resolveArchetype(
   where: string,
   warnings: string[],
 ): 'text' | 'textlog' {
+  // ⚠ `where` は **filename**(review L-2)── 「3 件目」では 50 件あるとき
+  // どのノートか分からない。この PR が解決しようとした問題そのもの
   const fixed = BATCH_FORMATS[format];
   if (fixed !== null && fixed !== undefined) {
     // writer は書かない field なので、**在るのに食い違う**なら手で組んだ ZIP。
@@ -141,6 +158,7 @@ function resolveArchetype(
  */
 function mergeAssets(
   into: Map<string, BundleAsset>,
+  alternates: Map<string, AssetSource[]>,
   from: ReadonlyMap<string, BundleAsset>,
   filename: string,
   warnings: string[],
@@ -149,6 +167,7 @@ function mergeAssets(
     const prev = into.get(key);
     if (!prev) {
       into.set(key, a);
+      alternates.set(key, [a.source]);
       continue;
     }
     if (
@@ -160,10 +179,17 @@ function mergeAssets(
           ' ── PKC2 の書出しでは起きない形です(手で組み替えた ZIP の可能性)',
       );
     }
+    // 🔑 **複製を控えに残す**(review M-5)。判定は中央ディレクトリの crc/size
+    // だけで bytes を読まないので、**データ部だけが腐って CD が無傷**なら
+    // 「同一」と判定して畳んでしまう。PKC2 は畳まなかったので健全な複製が生き残り
+    // 添付を表示できていた ── 畳み込みで冗長性まで捨てると **PKC2 より弱くなる**。
+    // 読めなかったら控えへ回す(adapter が順に試す)
+    alternates.get(key)?.push(a.source);
     if (prev.name !== a.name || prev.mime !== a.mime) {
       // bytes は同じなので畳めるが、見え方が変わる ── 黙って選ばない
       warnings.push(
-        `${filename}: 添付 ${key} の名前/種別が bundle ごとに違います(${prev.name} を採ります)`,
+        `${filename}: 添付 ${key} の名前(${prev.name} / ${a.name})か種別` +
+          `(${prev.mime} / ${a.mime})が bundle ごとに違います ── 先の方を採ります`,
       );
     }
   }
@@ -204,18 +230,28 @@ export async function readContainerBundle(zip: Blob): Promise<Pkc2ContainerBundl
 
   // ZIP 側の索引。**同名は断る** ── PKC2 は Map 後勝ちで静かに片方を捨てていた
   const byName = new Map<string, ZipEntry>();
+  // NFC に畳んだ副索引(完全一致で引けなかったときだけ使う ── M-7)。
+  // 畳んだ結果ぶつかるものは**曖昧なので載せない**(黙って別物を掴まない)
+  const byNfc = new Map<string, ZipEntry>();
+  const nfcDup = new Set<string>();
   for (const e of dir) {
     if (e.isDirectory) continue;
     if (byName.has(e.name)) {
       throw new ZipReadError(`同じ名前のファイルが 2 つあります: ${e.name}(壊れた ZIP)`);
     }
     byName.set(e.name, e);
+    const n = e.name.normalize('NFC');
+    if (byNfc.has(n)) nfcDup.add(n);
+    byNfc.set(n, e);
   }
+  for (const n of nfcDup) byNfc.delete(n);
 
   const mains: Array<{ lid: string; title: string; archetype: string; body: string }> = [];
   const assets = new Map<string, BundleAsset>();
+  const alternates = new Map<string, AssetSource[]>();
   const used = new Set<string>();
   const counted = { text: 0, textlog: 0 };
+  const failed: string[] = [];
   let anyCompacted = manifest.compact === true;
 
   for (let i = 0; i < manifest.entries.length; i++) {
@@ -234,9 +270,20 @@ export async function readContainerBundle(zip: Blob): Promise<Pkc2ContainerBundl
     used.add(filename);
 
     const archetype = resolveArchetype(format, me, where, warnings);
-    const inner = byName.get(filename);
+    let inner = byName.get(filename);
     if (!inner) {
-      throw new ZipReadError(`manifest にあるファイルが ZIP に入っていません: ${filename}`);
+      // ⚠ macOS の FS / Finder 経由で再梱包すると **名前が NFD** になる。
+      // PKC2 の batch filename はノート題名由来なので、**日本語題名で現実的に
+      // 踏む**(review M-7)。完全一致で断ると「在るファイルを無いと言われる」
+      // ── 原因に辿り着けない。正規化して引き直し、当たったら**言う**
+      const hit = byNfc.get(filename.normalize('NFC'));
+      if (!hit) {
+        throw new ZipReadError(`manifest にあるファイルが ZIP に入っていません: ${filename}`);
+      }
+      warnings.push(
+        `${filename}: 目次と ZIP でファイル名の正規化形が違います(${hit.name} を使います)`,
+      );
+      inner = hit;
     }
 
     // ⚠ store なら slice = **view**。内側 ZIP は外側の view で、その中の asset は
@@ -248,8 +295,14 @@ export async function readContainerBundle(zip: Blob): Promise<Pkc2ContainerBundl
       // (texts の中に textlog bundle が入っていたら断る ── PKC2 も hard fail)
       parts = await readBundleParts(innerZip, archetype);
     } catch (e) {
-      // どの内側ファイルで落ちたのかを必ず言う(50 件あると原因が分からない)
-      throw new ZipReadError(`${filename}: ${e instanceof Error ? e.message : String(e)}`);
+      // 🔑 **1 件の事故で全部を失わない**(設計 doc §5-③ の裁定 = partial + 可視)。
+      // P6c の目的は「PKC2 バックアップからの救出」なので、100 件中 1 件が
+      // 未対応形式や破損だったときに 0 件になるのは方針と衝突する。
+      // 「読めるところだけ読む」が悪いのは**黙って**やるからで、
+      // どのファイルを何の理由で落としたかを言うなら静かではない
+      failed.push(filename);
+      warnings.push(`${filename}: 取り込めませんでした ── ${e instanceof Error ? e.message : String(e)}`);
+      continue;
     }
 
     counted[archetype]++;
@@ -279,7 +332,7 @@ export async function readContainerBundle(zip: Blob): Promise<Pkc2ContainerBundl
       }
       warnings.push(`${filename}: ${w}`);
     }
-    mergeAssets(assets, parts.assets, filename, warnings);
+    mergeAssets(assets, alternates, parts.assets, filename, warnings);
   }
 
   if (anyCompacted) warnings.push(COMPACTED_WARNING);
@@ -305,10 +358,24 @@ export async function readContainerBundle(zip: Blob): Promise<Pkc2ContainerBundl
     warnings.push(`manifest に無いファイルを無視しました: ${e.name}`);
   }
 
+  // 🔴 「読めたつもりで 0 件」を作らない ── この repo が一番嫌う結果。
+  // 全部落ちたなら理由ごと断る(取込完了 0 件で成功したように見せない)
+  if (mains.length === 0) {
+    throw new ZipReadError(
+      failed.length > 0
+        ? `内側の bundle を 1 件も取り込めませんでした(${failed.length} 件すべて失敗)── ${warnings.join(' / ')}`
+        : '取り込める entry が 1 件も入っていません(空の bundle)',
+    );
+  }
+  if (failed.length > 0) {
+    warnings.push(`${failed.length} 件の bundle を取り込めませんでした(残りは取り込みます)`);
+  }
+
   return {
     manifest,
     container: synthesize(assets, mains),
     assetSources: sourcesOf(assets),
+    assetAlternates: alternates,
     warnings,
   };
 }

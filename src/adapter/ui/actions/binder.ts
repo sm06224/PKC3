@@ -52,6 +52,8 @@ export interface BinderServices {
   downloadAsset?(assetKey: string, name: string): void;
   /** 未参照 asset の掃除(P4b)。確認・報告の UI も実体側の責務。 */
   purgeOrphanAssets?(): void;
+  /** 注意の面を閉じる(P6c review H-2)。 */
+  dismissNotices?(): void;
   /** PKC2 ファイルの取込(P6b)。判別・変換・書込は実体側の責務。 */
   importPkc2?(file: File): void;
 }
@@ -188,6 +190,9 @@ const ACTIONS: Record<string, ActionHandler> = {
     const key = target.getAttribute('data-pkc-asset-key');
     const name = target.getAttribute('data-pkc-asset-name') ?? 'download';
     if (key) services.downloadAsset?.(key, name);
+  },
+  'dismiss-notices': (_dispatcher, _target, services) => {
+    services.dismissNotices?.();
   },
   'purge-orphan-assets': (_dispatcher, _target, services) => {
     services.purgeOrphanAssets?.();
