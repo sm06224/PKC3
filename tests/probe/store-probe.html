@@ -55,12 +55,43 @@
         await store.request({ op: 'deleteEntry', cid: 'c1', lid: 'e1' });
         steps.countsAfterDelete = await store.request({ op: 'counts', cid: 'c1' });
         steps.relationsAfterDelete = await store.request({ op: 'listRelations', cid: 'c1' });
-        // e1 に触れる r1 / r2 と e1 の revision が同 tx で消え、r3 だけ残る
+        // e1 に触れる r1 / r2 は同 tx で消え、r3 だけ残る。revisions は P5 から
+        // 消さない: 既存 v1 + 削除時の trash snapshot = 2 件
         steps.orphanCleanOk =
           steps.relations.length === 3 &&
           steps.relationsAfterDelete.length === 1 &&
           steps.relationsAfterDelete[0].id === 'r3' &&
-          steps.countsAfterDelete.revisions === 0;
+          steps.countsAfterDelete.revisions === 2;
+        // P5: trash = 「entries に居ない entry_lid の最新 revision」ビュー
+        steps.trash = await store.request({ op: 'listTrash', cid: 'c1' });
+        const trashRow = steps.trash[0];
+        steps.trashSnap = trashRow
+          ? await store.request({ op: 'getRevision', cid: 'c1', id: trashRow.id })
+          : null;
+        steps.trashOk =
+          steps.trash.length === 1 &&
+          trashRow.entry_lid === 'e1' &&
+          trashRow.rev_order === 2 &&
+          trashRow.title === 'todo sample' &&
+          steps.trashSnap !== null &&
+          steps.trashSnap.title === 'todo sample' &&
+          steps.trashSnap.body.includes('# やること');
+        // P5: addRevision の hash skip / rev_order 採番 / keepLatest prune
+        const rev = (body) => ({ entryLid: 'e2', title: 'note', archetype: 'text', body });
+        steps.add1 = await store.request({ op: 'addRevision', cid: 'c1', rev: rev('rev v1'), keepLatest: 2 });
+        steps.add2 = await store.request({ op: 'addRevision', cid: 'c1', rev: rev('rev v1'), keepLatest: 2 });
+        steps.add3 = await store.request({ op: 'addRevision', cid: 'c1', rev: rev('rev v2'), keepLatest: 2 });
+        steps.add4 = await store.request({ op: 'addRevision', cid: 'c1', rev: rev('rev v3'), keepLatest: 2 });
+        steps.revMetas = await store.request({ op: 'listRevisionMetas', cid: 'c1', entryLid: 'e2' });
+        steps.addRevOk =
+          steps.add1.added === true &&
+          steps.add2.added === false && // 同一内容は skip(content_hash)
+          steps.add3.added === true &&
+          steps.add4.added === true &&
+          steps.add4.pruned === 1 && // keepLatest 2 → 最古が prune
+          steps.revMetas.length === 2 &&
+          steps.revMetas[0].rev_order === 3 &&
+          !('snapshot' in steps.revMetas[0]); // 一覧は本文を運ばない
         // P4b: asset GC の keep-set 走査(scanAssetRefs = raw substring 規則)。
         // 本文 asset: 参照 / frontmatter asset_key の両源が同じ規則で keep される
         await store.request({
@@ -117,6 +148,25 @@
           steps.scanEsc.referenced.length === 2 &&
           steps.scanEsc.referenced.includes('ast-esc-bs') &&
           steps.scanEsc.referenced.includes('ast-esc-ent');
+        // P5: revisions(履歴 / ゴミ箱)だけが参照する asset も keep される
+        await store.request({
+          op: 'addRevision', cid: 'c1',
+          rev: { entryLid: 'e3', title: 'ref', archetype: 'text',
+                 body: '旧本文 ![r](asset:ast-rev-keep)' },
+          keepLatest: 5,
+        });
+        steps.scanRev = await store.request({
+          op: 'scanAssetRefs', cid: 'c1', candidates: ['ast-rev-keep'],
+        });
+        steps.scanRevOk =
+          steps.scanRev.referenced.length === 1 &&
+          steps.scanRev.referenced[0] === 'ast-rev-keep';
+        // P5: ゴミ箱を空にする ── 削除済み lid の revision だけ消える
+        steps.purgeTrash = await store.request({ op: 'purgeTrash', cid: 'c1' });
+        steps.countsFinal = await store.request({ op: 'counts', cid: 'c1' });
+        steps.trashPurgeOk =
+          steps.purgeTrash.purged === 2 && // e1 の v1 + trash snapshot
+          steps.countsFinal.revisions === 3; // 生存 e2 の 2 件 + e3 の 1 件は残る
         await store.request({ op: 'deleteAssetMeta', cid: 'c1', key: 'ast-orphan' });
         steps.assetMetasAfter = await store.request({ op: 'listAssetMetas', cid: 'c1' });
         steps.assetGcOk =
@@ -130,8 +180,12 @@
           ok:
             steps.metaHasNoBody === true &&
             steps.orphanCleanOk === true &&
+            steps.trashOk === true &&
+            steps.addRevOk === true &&
             steps.scanOk === true &&
             steps.scanEscOk === true &&
+            steps.scanRevOk === true &&
+            steps.trashPurgeOk === true &&
             steps.assetGcOk === true,
           steps,
         };

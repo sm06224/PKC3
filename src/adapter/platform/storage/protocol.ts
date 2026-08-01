@@ -17,6 +17,10 @@ export type StorageRequest =
   | { op: 'bulkAddRevisions'; cid: string; revisions: RevisionAdd[] }
   | { op: 'revisionCounts'; cid: string }
   | { op: 'getRevision'; cid: string; id: string }
+  | { op: 'addRevision'; cid: string; rev: RevisionInput; keepLatest: number }
+  | { op: 'listRevisionMetas'; cid: string; entryLid: string }
+  | { op: 'listTrash'; cid: string }
+  | { op: 'purgeTrash'; cid: string }
   | { op: 'putAssetMeta'; cid: string; meta: AssetMetaPut }
   | { op: 'listAssetMetas'; cid: string }
   | { op: 'deleteAssetMeta'; cid: string; key: string }
@@ -57,12 +61,43 @@ export interface RelationUpsert {
   kind: string;
 }
 
-/** revision の追加(P2 最小形: snapshot は平文。zstd segment 化は P5)。 */
+/** revision の一括追加(P6 import 用。P5 の通常経路は addRevision)。 */
 export interface RevisionAdd {
   id: string;
   entryLid: string;
   revOrder: number;
   snapshot: string;
+  title?: string | null;
+  archetype?: string | null;
+}
+
+/**
+ * 通常経路の revision 追加(P5)。id / rev_order / created_at / content_hash は
+ * worker が採番・計算する(同 tx で「直前と同一内容なら skip → 挿入 →
+ * keepLatest 超過分を prune」まで完結)。snapshot = body 原文(markdown)。
+ */
+export interface RevisionInput {
+  entryLid: string;
+  title: string;
+  archetype: string;
+  body: string;
+}
+
+/** revision 一覧の行(snapshot は返さない ── 本文は getRevision で 1 行ずつ)。 */
+export interface RevisionMetaRow {
+  id: string;
+  entry_lid: string;
+  rev_order: number;
+  created_at: string | null;
+  title: string | null;
+  archetype: string | null;
+}
+
+/** getRevision の本文(P5 で JSON 包みを廃止 ── body 原文 + 列)。 */
+export interface RevisionBody {
+  body: string;
+  title: string | null;
+  archetype: string | null;
 }
 
 /** entry ごとの revision 件数(snapshot は読まない ── 常駐ゼロの根拠)。 */
@@ -127,7 +162,11 @@ export interface ResultMap {
   bulkUpsertRelations: null;
   bulkAddRevisions: null;
   revisionCounts: RevisionCountRow[];
-  getRevision: string | null;
+  getRevision: RevisionBody | null;
+  addRevision: { added: boolean; pruned: number };
+  listRevisionMetas: RevisionMetaRow[];
+  listTrash: RevisionMetaRow[];
+  purgeTrash: { purged: number };
   putAssetMeta: null;
   listAssetMetas: AssetMetaRow[];
   deleteAssetMeta: null;

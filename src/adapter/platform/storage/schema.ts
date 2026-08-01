@@ -8,7 +8,23 @@
  * - assets は meta + ポインタのみ(bytes は Blob storage 側 ── §4.2)
  * - settings(正規設定)と flags(実験、上限 15)は別表(§6)
  */
-export const DB_SCHEMA_VERSION = 1;
+export const DB_SCHEMA_VERSION = 2;
+
+/**
+ * 既存 DB の段階 migration(v(n-1) → vn の DDL 列)。新規 DB は SCHEMA_DDL が
+ * 最新形を作るので適用しない。未来 version の DB は従来どおり明示 reject
+ * (schema-migration-policy: 単調・明示 reject)。
+ */
+export const SCHEMA_MIGRATIONS: Readonly<Record<number, readonly string[]>> = {
+  // v2(P5): revisions に title / archetype / content_hash。
+  // snapshot(BLOB affinity)には body 原文(markdown)をそのまま入れる ──
+  // PKC2 の「JSON.stringify(Entry) 包み + 厳格 parse 契約」を構造ごと不要にする
+  2: [
+    `ALTER TABLE revisions ADD COLUMN title TEXT`,
+    `ALTER TABLE revisions ADD COLUMN archetype TEXT`,
+    `ALTER TABLE revisions ADD COLUMN content_hash TEXT`,
+  ],
+};
 
 export const SCHEMA_DDL: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS containers (
@@ -55,6 +71,9 @@ export const SCHEMA_DDL: readonly string[] = [
      rev_order INTEGER NOT NULL DEFAULT 0,
      seg_id TEXT,
      snapshot BLOB,
+     title TEXT,
+     archetype TEXT,
+     content_hash TEXT,
      PRIMARY KEY (cid, id)
    )`,
   `CREATE INDEX IF NOT EXISTS idx_rev_by_entry ON revisions (cid, entry_lid)`,
