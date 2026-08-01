@@ -41,6 +41,8 @@ export class DetailRenderer {
   private lastBody: string | null = null;
   /** phase は toolbar の有無を変える(error では編集ボタンを出さない)。 */
   private lastPhase: AppPhase | null = null;
+  /** 履歴 panel の断面(参照比較 ── P5b で view 指紋に加わった次元)。 */
+  private lastPanel: AppState['revisionPanel'] = null;
   /** この render pass が貸し出した ObjectURL の dispose 群。**表示の寿命の
    *  終わり(次の render / 選択遷移)で必ず全部呼ぶ**(生成物のライフサイクル
    *  終端での即破棄 ── user 指示 2026-07-27 不可侵)。 */
@@ -67,13 +69,14 @@ export class DetailRenderer {
       return;
     }
     const body = state.openBody?.body ?? null;
-    // 指紋は (selectedLid, body, phase)。title 次元は含めていない ──
-    // title 編集が入る段階で entryMetas 参照を指紋に足すこと(現状到達不能)
+    // 指紋は (selectedLid, body, phase, revisionPanel 参照)。title 次元は
+    // 含めていない ── title 編集が入る段階で entryMetas 参照を指紋に足すこと
     if (
       this.mode !== 'editor' &&
       state.selectedLid === this.lastSelected &&
       body === this.lastBody &&
-      state.phase === this.lastPhase
+      state.phase === this.lastPhase &&
+      state.revisionPanel === this.lastPanel
     )
       return;
     this.renderView(state, body);
@@ -91,6 +94,7 @@ export class DetailRenderer {
     this.lastSelected = state.selectedLid;
     this.lastBody = body;
     this.lastPhase = state.phase;
+    this.lastPanel = state.revisionPanel;
 
     this.disposeLends(); // 前の表示が借りた URL はここで寿命終端
     this.region.textContent = '';
@@ -123,8 +127,15 @@ export class DetailRenderer {
       del.type = 'button';
       del.setAttribute('data-pkc-action', 'delete-entry');
       del.textContent = '削除';
-      bar.append(edit, del);
+      const hist = document.createElement('button');
+      hist.type = 'button';
+      hist.setAttribute('data-pkc-action', 'show-history');
+      hist.textContent = '履歴';
+      bar.append(edit, del, hist);
       this.region.append(bar);
+      if (state.revisionPanel && state.revisionPanel.lid === state.selectedLid) {
+        this.region.append(renderHistoryPanel(state.revisionPanel.items));
+      }
     } else if (
       // ⚠ この条件は baseline / persisted / diskAhead に依存するが、view の
       // skip 指紋は (lid, body, phase) のみ ── 「条件が変わる遷移は必ず phase か
@@ -364,6 +375,39 @@ export class DetailRenderer {
       if (token === this.hydrateToken) missing();
     }
   }
+}
+
+/** 履歴 panel(P5b)。開いた時点のスナップショット ── 復元・選択遷移で畳まれる。 */
+function renderHistoryPanel(
+  items: readonly { id: string; revOrder: number; createdAt: string | null; title: string | null }[],
+): HTMLElement {
+  const panel = document.createElement('div');
+  panel.setAttribute('data-pkc-field', 'history-panel');
+  const head = document.createElement('div');
+  const label = document.createElement('span');
+  label.textContent = items.length === 0 ? '履歴はありません' : `履歴 ${items.length} 件`;
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.setAttribute('data-pkc-action', 'hide-history');
+  close.textContent = '閉じる';
+  head.append(label, close);
+  panel.append(head);
+  const list = document.createElement('ul');
+  for (const item of items) {
+    const li = document.createElement('li');
+    li.setAttribute('data-pkc-rev-order', String(item.revOrder));
+    const text = document.createElement('span');
+    text.textContent = `#${item.revOrder} ${item.createdAt ?? ''} ${item.title ?? '(無題)'}`;
+    const restore = document.createElement('button');
+    restore.type = 'button';
+    restore.setAttribute('data-pkc-action', 'restore-revision');
+    restore.setAttribute('data-pkc-rev-id', item.id);
+    restore.textContent = '復元';
+    li.append(text, restore);
+    list.append(li);
+  }
+  panel.append(list);
+  return panel;
 }
 
 export function formatSize(bytes: number): string {

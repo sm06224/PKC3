@@ -39,6 +39,23 @@ export interface OpenBody {
   diskAhead: boolean;
 }
 
+/** 履歴一覧の 1 行(P5b)。boot では持たない ── SHOW_HISTORY の要求時に引く。 */
+export interface RevisionItem {
+  id: string;
+  revOrder: number;
+  createdAt: string | null;
+  title: string | null;
+}
+
+/** ゴミ箱一覧の 1 行(= entries に居ない entry_lid の最新 revision)。 */
+export interface TrashItem {
+  revId: string;
+  entryLid: string;
+  createdAt: string | null;
+  title: string | null;
+  archetype: string | null;
+}
+
 export interface AppState {
   phase: AppPhase;
   cid: string | null;
@@ -55,6 +72,11 @@ export interface AppState {
   calendarMonth: { year: number; month: number } | null;
   /** calendar で archived todo を見せるか(PKC2 の showArchived と同じ意味論)。 */
   showArchived: boolean;
+  /** 選択 entry の履歴 panel(P5b)。開いた時点のスナップショット ── 選択遷移 /
+   *  編集開始 / view 切替で畳む。boot で revisions に触れない原則の受け皿。 */
+  revisionPanel: { lid: string; items: readonly RevisionItem[] } | null;
+  /** ゴミ箱 panel(filer)。開いた時点のスナップショット + 明示更新。 */
+  trashPanel: { items: readonly TrashItem[] } | null;
   error: string | null;
 }
 
@@ -70,6 +92,8 @@ export const initialState: AppState = {
   viewMode: 'detail',
   calendarMonth: null,
   showArchived: false,
+  revisionPanel: null,
+  trashPanel: null,
   error: null,
 };
 
@@ -97,7 +121,14 @@ export type UserAction =
     }
   | { type: 'DESELECT_ENTRY' }
   | { type: 'DELETE_ENTRY'; lid: string }
-  | { type: 'RENAME_ENTRY_TITLE'; lid: string; title: string };
+  | { type: 'RENAME_ENTRY_TITLE'; lid: string; title: string }
+  | { type: 'SHOW_HISTORY' }
+  | { type: 'HIDE_HISTORY' }
+  | { type: 'RESTORE_REVISION'; revId: string }
+  | { type: 'SHOW_TRASH' }
+  | { type: 'HIDE_TRASH' }
+  | { type: 'RESTORE_TRASH'; entryLid: string; revId: string }
+  | { type: 'PURGE_TRASH' };
 
 export type SystemCommand =
   | { type: 'SYS_BOOTED'; cid: string; metas: EntryMeta[]; relations: Relation[] }
@@ -118,7 +149,16 @@ export type SystemCommand =
       type: 'OP_FAILED';
       error: string;
     }
-  | { type: 'SYS_ERROR'; error: string };
+  | { type: 'SYS_ERROR'; error: string }
+  | { type: 'REVISION_LIST_LOADED'; lid: string; items: RevisionItem[] }
+  | { type: 'TRASH_LIST_LOADED'; items: TrashItem[] }
+  | {
+      /** 復元完了(履歴 / ゴミ箱共通)。meta は effect が抽出済みの行から組む。 */
+      type: 'ENTRY_RESTORED';
+      meta: EntryMeta;
+      body: string;
+    }
+  | { type: 'TRASH_PURGED'; purged: number };
 
 export type Dispatchable = UserAction | SystemCommand;
 
@@ -148,7 +188,36 @@ export type DomainEvent =
       title: string;
       archetype: string;
       entryOrder: number;
-    };
+    }
+  | {
+      /** revision の記録要求(P5b)。body = 変更前(baseline)。title / archetype
+       *  は発火時捕獲(C-1 規律)。失敗は非致命(編集を止めない)。 */
+      type: 'REQUEST_REVISION';
+      lid: string;
+      title: string;
+      archetype: string;
+      body: string;
+    }
+  | { type: 'REQUEST_REVISION_LIST'; lid: string }
+  | {
+      /** 履歴からの復元(前進変異): effect が「現状を addRevision → revision
+       *  内容で persist」の順に行う。meta snapshot は発火時捕獲。 */
+      type: 'REQUEST_RESTORE';
+      lid: string;
+      revId: string;
+      title: string;
+      archetype: string;
+      entryOrder: number;
+    }
+  | { type: 'REQUEST_TRASH_LIST' }
+  | {
+      /** ゴミ箱からの復元(entry 再作成)。entryOrder は reduce 時に採番。 */
+      type: 'REQUEST_TRASH_RESTORE';
+      entryLid: string;
+      revId: string;
+      entryOrder: number;
+    }
+  | { type: 'REQUEST_TRASH_PURGE' };
 
 export interface ReduceResult {
   state: AppState;
@@ -195,7 +264,13 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       // 通知エラー(読み失敗等)は新しい試行でクリア(エラーは state 駆動 ──
       // 表示寿命が「次の操作まで」で終わらない、P3-5 review #3 の解消)
       return {
-        state: { ...state, selectedLid: action.lid, openBody: null, error: null },
+        state: {
+          ...state,
+          selectedLid: action.lid,
+          openBody: null,
+          error: null,
+          revisionPanel: null, // panel は選択に従属(P5b)
+        },
         events: [{ type: 'REQUEST_BODY', lid: action.lid }],
       };
     }
@@ -230,16 +305,27 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       };
     }
     case 'SET_VIEW_MODE':
-      // selection は消さない(PKC2 規約)
+      // selection は消さない(PKC2 規約)。panel は view に従属するので畳む
       if (state.phase === 'editing') return { state, events: [] };
-      return { state: { ...state, viewMode: action.mode }, events: [] };
+      return {
+        state: {
+          ...state,
+          viewMode: action.mode,
+          revisionPanel: null,
+          trashPanel: null,
+        },
+        events: [],
+      };
     case 'START_EDIT': {
       // openBody が現選択の body を持っているときだけ編集に入れる
       // (= 未読 body の編集・保存が構造的に不可能)
       if (state.phase !== 'ready') return { state, events: [] };
       if (!state.openBody || state.openBody.lid !== state.selectedLid)
         return { state, events: [] };
-      return { state: { ...state, phase: 'editing' }, events: [] };
+      return {
+        state: { ...state, phase: 'editing', revisionPanel: null },
+        events: [],
+      };
     }
     case 'UPDATE_OPEN_BODY': {
       if (state.phase !== 'editing' || !state.openBody) return { state, events: [] };
@@ -300,10 +386,22 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       }
       // 抽出はイベント発火時(= この reduce)に同期で行い、行全体を確定して運ぶ
       const { entryMetas, entry } = buildPersist(state, meta, body);
-      return {
-        state: { ...next, entryMetas },
-        events: [{ type: 'PERSIST_ENTRY', entry }],
-      };
+      const events: DomainEvent[] = [];
+      // 変更前(baseline)を履歴に積む(P5b)。新規作成の初回 commit は積まない ──
+      // 「flavor seed へ戻す」だけの復元先はゴミ(PKC2 は無条件に積んで肥大した)。
+      // RETRY_PERSIST はここを通らないので再発行されない(重複は worker の
+      // hash skip が二重に守る)
+      if (state.freshLid !== lid) {
+        events.push({
+          type: 'REQUEST_REVISION',
+          lid,
+          title: meta.title,
+          archetype: meta.archetype,
+          body: baseline,
+        });
+      }
+      events.push({ type: 'PERSIST_ENTRY', entry });
+      return { state: { ...next, entryMetas }, events };
     }
     case 'RETRY_PERSIST': {
       // persist 失敗(error phase)からの復帰: baseline(最後に commit した内容)が
@@ -567,6 +665,130 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
         ],
       };
     }
+    case 'SHOW_HISTORY': {
+      // ready + 選択ありのみ。一覧は要求時に引く(boot で revisions に触れない)
+      if (state.phase !== 'ready' || !state.selectedLid)
+        return { state, events: [] };
+      return {
+        state,
+        events: [{ type: 'REQUEST_REVISION_LIST', lid: state.selectedLid }],
+      };
+    }
+    case 'HIDE_HISTORY':
+      return { state: { ...state, revisionPanel: null }, events: [] };
+    case 'REVISION_LIST_LOADED': {
+      // 遅延到着が現選択と食い違うなら捨てる(stale 反映防止 ── BODY_LOADED と同型)
+      if (state.selectedLid !== action.lid) return { state, events: [] };
+      if (state.phase !== 'ready') return { state, events: [] };
+      return {
+        state: { ...state, revisionPanel: { lid: action.lid, items: action.items } },
+        events: [],
+      };
+    }
+    case 'RESTORE_REVISION': {
+      if (state.phase !== 'ready' || !state.selectedLid)
+        return { state, events: [] };
+      const meta = state.entryMetas.get(state.selectedLid);
+      if (!meta) return { state, events: [] };
+      // panel は畳む(復元で履歴が 1 件伸びるので開き直しが正)。meta snapshot は
+      // 発火時捕獲(C-1 規律)
+      return {
+        state: { ...state, revisionPanel: null },
+        events: [
+          {
+            type: 'REQUEST_RESTORE',
+            lid: meta.lid,
+            revId: action.revId,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+          },
+        ],
+      };
+    }
+    case 'SHOW_TRASH': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      return { state, events: [{ type: 'REQUEST_TRASH_LIST' }] };
+    }
+    case 'HIDE_TRASH':
+      return { state: { ...state, trashPanel: null }, events: [] };
+    case 'TRASH_LIST_LOADED':
+      if (state.phase !== 'ready') return { state, events: [] };
+      return { state: { ...state, trashPanel: { items: action.items } }, events: [] };
+    case 'RESTORE_TRASH': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      if (state.entryMetas.has(action.entryLid)) {
+        // lid 衝突(同 lid が再作成済み)── 黙って上書きしない(可視で止める)
+        return {
+          state: {
+            ...state,
+            error: `復元できません: 同じ ID の entry が既に存在します (${action.entryLid})`,
+          },
+          events: [],
+        };
+      }
+      const lastLid = state.order[state.order.length - 1];
+      const entryOrder = lastLid
+        ? (state.entryMetas.get(lastLid)?.entryOrder ?? 0) + 1
+        : 1;
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_TRASH_RESTORE',
+            entryLid: action.entryLid,
+            revId: action.revId,
+            entryOrder,
+          },
+        ],
+      };
+    }
+    case 'PURGE_TRASH': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      return { state, events: [{ type: 'REQUEST_TRASH_PURGE' }] };
+    }
+    case 'ENTRY_RESTORED': {
+      // 履歴復元(既存 meta 置換)と trash 復元(再出現)の合流点。復元先を
+      // 選択して結果を見せる。openBody は disk 確定値で確立(persisted = body)
+      const entryMetas = new Map(state.entryMetas).set(action.meta.lid, action.meta);
+      const order = state.order.includes(action.meta.lid)
+        ? state.order
+        : [...state.order, action.meta.lid];
+      const trashPanel = state.trashPanel
+        ? {
+            items: state.trashPanel.items.filter(
+              (t) => t.entryLid !== action.meta.lid,
+            ),
+          }
+        : null;
+      return {
+        state: {
+          ...state,
+          entryMetas,
+          order,
+          trashPanel,
+          revisionPanel: null,
+          selectedLid: action.meta.lid,
+          openBody: {
+            lid: action.meta.lid,
+            body: action.body,
+            baseline: action.body,
+            persisted: action.body,
+            diskAhead: false,
+          },
+          error: null,
+        },
+        events: [],
+      };
+    }
+    case 'TRASH_PURGED':
+      return {
+        state: {
+          ...state,
+          trashPanel: state.trashPanel ? { items: [] } : null,
+        },
+        events: [],
+      };
     case 'OP_FAILED':
       // 非致命: 通知のみ。phase は動かさない(kanban 等の操作性を殺さない)
       return { state: { ...state, error: action.error }, events: [] };
@@ -624,6 +846,9 @@ function removeEntryFromState(
       selectedLid,
       openBody: state.openBody?.lid === lid ? null : state.openBody,
       freshLid: state.freshLid === lid ? null : state.freshLid,
+      // 削除で履歴・ゴミ箱の断面は古くなる ── 畳んで開き直しに任せる(P5b)
+      revisionPanel: null,
+      trashPanel: null,
     },
     events,
   };

@@ -13,6 +13,7 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { SidebarRenderer } from '../../src/adapter/ui/render/sidebar';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { stubRevisionOps } from '../helpers/revision-stub';
 
 function meta(lid: string, order: number, over: Partial<EntryMeta> = {}): EntryMeta {
   return {
@@ -54,6 +55,7 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
   const deleted: string[] = [];
   const persisted: EntryUpsert[] = [];
   connectStoreEffects(d, {
+    ...stubRevisionOps(),
     getBody: async (lid) => store[lid] ?? null,
     persistEntry: async (e) => {
       persisted.push(e);
@@ -128,6 +130,7 @@ describe('create (P3-7a)', () => {
     bindActions(root, d);
     let failNext = true;
     connectStoreEffects(d, {
+    ...stubRevisionOps(),
       getBody: async () => '# A',
       persistEntry: async () => {
         if (failNext) {

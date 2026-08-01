@@ -21,8 +21,39 @@ import type { Dispatcher } from './dispatcher';
 export interface StorePort {
   getBody(lid: string): Promise<string | null>;
   persistEntry(entry: EntryUpsert): Promise<void>;
-  /** worker 側で relations / revisions 込みの同 tx 掃除(P3-6b)。冪等。 */
+  /** worker 側で relations の同 tx 掃除 + trash snapshot(P5a)。冪等。 */
   deleteEntry(lid: string): Promise<void>;
+  /** 履歴の記録(P5b)。hash skip / prune は worker 内で完結。 */
+  addRevision(rev: {
+    entryLid: string;
+    title: string;
+    archetype: string;
+    body: string;
+  }): Promise<{ added: boolean; pruned: number }>;
+  listRevisionMetas(entryLid: string): Promise<
+    Array<{
+      id: string;
+      rev_order: number;
+      created_at: string | null;
+      title: string | null;
+      archetype: string | null;
+    }>
+  >;
+  getRevision(revId: string): Promise<{
+    body: string;
+    title: string | null;
+    archetype: string | null;
+  } | null>;
+  listTrash(): Promise<
+    Array<{
+      id: string;
+      entry_lid: string;
+      created_at: string | null;
+      title: string | null;
+      archetype: string | null;
+    }>
+  >;
+  purgeTrash(): Promise<{ purged: number }>;
 }
 
 export function connectStoreEffects(
@@ -124,6 +155,216 @@ export function connectStoreEffects(
           } catch (e) {
             if (!disposed)
               dispatcher.dispatch({ type: 'OP_FAILED', error: String(e) });
+          }
+        });
+        break;
+      case 'REQUEST_REVISION':
+        // 履歴の記録(P5b)。失敗は非致命 ── 編集の成立(PERSIST)を止めない。
+        // ⚠ 削除済み entry へは発行しない契約(発行元は COMMIT_EDIT のみで、
+        // editing 中に削除は起きない ── 設計 doc §7)
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            await store.addRevision({
+              entryLid: ev.lid,
+              title: ev.title,
+              archetype: ev.archetype,
+              body: ev.body,
+            });
+          } catch (e) {
+            if (!disposed)
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: `履歴の記録に失敗しました: ${String(e)}`,
+              });
+          }
+        });
+        break;
+      case 'REQUEST_REVISION_LIST':
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            const rows = await store.listRevisionMetas(ev.lid);
+            if (disposed) return;
+            dispatcher.dispatch({
+              type: 'REVISION_LIST_LOADED',
+              lid: ev.lid,
+              items: rows.map((r) => ({
+                id: r.id,
+                revOrder: r.rev_order,
+                createdAt: r.created_at,
+                title: r.title,
+              })),
+            });
+          } catch (e) {
+            if (!disposed)
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: `履歴の取得に失敗しました: ${String(e)}`,
+              });
+          }
+        });
+        break;
+      case 'REQUEST_RESTORE':
+        // 前進変異(P5 設計 §1): 現状を先に積んでから revision 内容で上書き。
+        // rewind ではないので「復元の取り消し」も履歴から戻れる
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            const rev = await store.getRevision(ev.revId);
+            if (disposed) return;
+            if (!rev) {
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: '復元対象の履歴が見つかりません',
+              });
+              return;
+            }
+            const current = await store.getBody(ev.lid);
+            if (disposed) return;
+            if (current === null) {
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: `restore: entry row missing (${ev.lid})`,
+              });
+              return;
+            }
+            await store.addRevision({
+              entryLid: ev.lid,
+              title: ev.title,
+              archetype: ev.archetype,
+              body: current,
+            });
+            // title も revision の値へ戻す(無ければ現 title 維持)。archetype は
+            // 現在値が正(PKC3 に flavor 変更 UI は無い ── PKC2 の archetype
+            // mismatch guard をフレーバー不変で単純化)
+            const title = rev.title ?? ev.title;
+            const ext = extractMeta(ev.archetype, rev.body);
+            await store.persistEntry({
+              lid: ev.lid,
+              title,
+              archetype: ev.archetype,
+              body: rev.body,
+              entryOrder: ev.entryOrder,
+              status: ext.status,
+              date: ext.date,
+              archived: ext.archived,
+            });
+            if (!disposed)
+              dispatcher.dispatch({
+                type: 'ENTRY_RESTORED',
+                meta: {
+                  lid: ev.lid,
+                  title,
+                  archetype: ev.archetype,
+                  createdAt: null,
+                  updatedAt: null,
+                  entryOrder: ev.entryOrder,
+                  status: ext.status,
+                  date: ext.date,
+                  archived: ext.archived,
+                },
+                body: rev.body,
+              });
+          } catch (e) {
+            if (!disposed)
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: `復元に失敗しました: ${String(e)}`,
+              });
+          }
+        });
+        break;
+      case 'REQUEST_TRASH_LIST':
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            const rows = await store.listTrash();
+            if (disposed) return;
+            dispatcher.dispatch({
+              type: 'TRASH_LIST_LOADED',
+              items: rows.map((r) => ({
+                revId: r.id,
+                entryLid: r.entry_lid,
+                createdAt: r.created_at,
+                title: r.title,
+                archetype: r.archetype,
+              })),
+            });
+          } catch (e) {
+            if (!disposed)
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: `ゴミ箱の取得に失敗しました: ${String(e)}`,
+              });
+          }
+        });
+        break;
+      case 'REQUEST_TRASH_RESTORE':
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            const rev = await store.getRevision(ev.revId);
+            if (disposed) return;
+            if (!rev) {
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: '復元対象の履歴が見つかりません',
+              });
+              return;
+            }
+            // bulk import 由来の行は title / archetype が NULL になりうる(P5a F5)
+            const archetype = rev.archetype ?? 'text';
+            const title = rev.title ?? '(無題)';
+            const ext = extractMeta(archetype, rev.body);
+            await store.persistEntry({
+              lid: ev.entryLid,
+              title,
+              archetype,
+              body: rev.body,
+              entryOrder: ev.entryOrder,
+              status: ext.status,
+              date: ext.date,
+              archived: ext.archived,
+            });
+            if (!disposed)
+              dispatcher.dispatch({
+                type: 'ENTRY_RESTORED',
+                meta: {
+                  lid: ev.entryLid,
+                  title,
+                  archetype,
+                  createdAt: null,
+                  updatedAt: null,
+                  entryOrder: ev.entryOrder,
+                  status: ext.status,
+                  date: ext.date,
+                  archived: ext.archived,
+                },
+                body: rev.body,
+              });
+          } catch (e) {
+            if (!disposed)
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: `復元に失敗しました: ${String(e)}`,
+              });
+          }
+        });
+        break;
+      case 'REQUEST_TRASH_PURGE':
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            const r = await store.purgeTrash();
+            if (!disposed)
+              dispatcher.dispatch({ type: 'TRASH_PURGED', purged: r.purged });
+          } catch (e) {
+            if (!disposed)
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: `ゴミ箱を空にできませんでした: ${String(e)}`,
+              });
           }
         });
         break;

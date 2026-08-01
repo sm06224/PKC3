@@ -10,6 +10,7 @@ import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer, type AssetLender } from '../../src/adapter/ui/render/detail';
 import { attachmentBody } from '../../src/features/flavor/attachment-flavor';
+import { stubRevisionOps } from '../helpers/revision-stub';
 
 function meta(lid: string, over: Partial<EntryMeta> = {}): EntryMeta {
   return {
@@ -40,6 +41,7 @@ function setup(bodies: Record<string, string>, lender: AssetLender) {
   const detail = new DetailRenderer(regions.detail, lender);
   d.onState((s) => detail.render(s));
   connectStoreEffects(d, {
+    ...stubRevisionOps(),
     getBody: async (lid) => bodies[lid] ?? null,
     persistEntry: async () => {},
     deleteEntry: async () => {},

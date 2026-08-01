@@ -7,6 +7,7 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { attachFiles, resolveMime, type AttachDeps } from '../../src/adapter/ui/actions/attach';
 import { readAttachmentMeta } from '../../src/features/flavor/attachment-flavor';
+import { stubRevisionOps } from '../helpers/revision-stub';
 
 function harness(estimate?: AttachDeps['estimate']) {
   const putBlobs: Array<{ key: string; size: number }> = [];
@@ -25,6 +26,7 @@ function harness(estimate?: AttachDeps['estimate']) {
   const d = new Dispatcher();
   const persisted: Array<{ lid: string; body: string }> = [];
   connectStoreEffects(d, {
+    ...stubRevisionOps(),
     getBody: async () => null,
     persistEntry: async (e) => {
       persisted.push({ lid: e.lid, body: e.body });
