@@ -2,8 +2,8 @@
  * 行ベースの lossless パッチ(P5c-1)。revision の逆向き差分チェーンが使う。
  *
  * 規律:
- * - **行末を含めて分割**(`(?<=\n)`)── CRLF / 末尾改行の有無まで byte 一致で
- *   復元する(frontmatter splice と同じ規約)。行の連結は素の join('')
+ * - **行末を含めて分割**── CRLF / 末尾改行の有無まで byte 一致で復元する
+ *   (frontmatter splice と同じ規約)。行の連結は素の join('')
  * - 適用は**全消費を要求**する(source を使い切らないパッチはエラー)── 壊れた
  *   パッチから「それらしい本文」を作らない
  * - diff は Myers(O(ND))。前後の共通部分を削ってから走らせ、編集距離が予算を
@@ -21,10 +21,31 @@ export interface LinePatch {
 /** 編集距離の予算(超えたら置換フォールバック)。典型的な編集は 1 桁で収まる。 */
 const MAX_EDIT_DISTANCE = 400;
 
-/** 行末を保持したまま分割(空文字は 0 行)。 */
+/**
+ * 行末を保持したまま分割(空文字は 0 行)。
+ *
+ * ⚠ 正規表現 `/(?<=\n)/` の split を使わない(R0-1、rust-wasm-strategy §3.4 / §4.1):
+ * lookbehind split が `diffLines` 全体の **88%** を占めていた。**出力は完全に
+ * 同一のまま**、実測で 47〜64% 短縮(分母 = 正規表現版。ascii/ja 20k 行・
+ * 200KB 相当・単一巨大行・改行少で計測)。改行を含まない巨大行では 99% 短縮
+ * (`indexOf` の native 走査が 1 回で終わるため ── charCodeAt ループ版はここで
+ * 逆に 16% 悪化したので採らなかった)。
+ *
+ * Rust/wasm 化の勝敗を測る前にこれを回収するのが要点 ── 「言語のせいではない
+ * 遅さ」を対照群に残したまま比較すると、間違った勝利宣言をする。
+ */
 export function splitLines(text: string): string[] {
   if (text === '') return [];
-  return text.split(/(?<=\n)/);
+  const out: string[] = [];
+  let start = 0;
+  for (;;) {
+    const nl = text.indexOf('\n', start);
+    if (nl === -1) break;
+    out.push(text.slice(start, nl + 1));
+    start = nl + 1;
+  }
+  if (start < text.length) out.push(text.slice(start));
+  return out;
 }
 
 type Step = { k: 'copy' } | { k: 'del' } | { k: 'ins'; line: string };
@@ -135,8 +156,18 @@ function stepsToOps(steps: readonly Step[]): Array<number | string[]> {
   return ops;
 }
 
+/**
+ * 直前の diffLines が編集距離の予算を超えて「中間まるごと置換」に落ちたか。
+ * 最小性を諦めた事実を観測可能にするためだけの印(挙動には影響しない)。
+ */
+let lastDiffFellBack = false;
+export function didLastDiffFallBack(): boolean {
+  return lastDiffFellBack;
+}
+
 /** `from` を `to` へ変換するパッチ。 */
 export function diffLines(from: string, to: string): LinePatch {
+  lastDiffFellBack = false;
   const a = splitLines(from);
   const b = splitLines(to);
 
@@ -159,7 +190,11 @@ export function diffLines(from: string, to: string): LinePatch {
   if (steps) {
     ops.push(...stepsToOps(steps));
   } else {
-    // 予算超過 ── 中間をまるごと置換(最小ではないが正しい)
+    // 予算超過 ── 中間をまるごと置換(最小ではないが**正しい**)。
+    // ⚠ 暗黙に劣化する経路なので、起きたことが分かるようにしておく(R0-④):
+    // パッチが膨らむと encodeReverse が全文保存を選び、容量が跳ねる。
+    // 「なぜか履歴が重い」の調査で最初に疑う場所
+    lastDiffFellBack = true;
     if (midA.length > 0) ops.push(-midA.length);
     if (midB.length > 0) ops.push(midB);
   }

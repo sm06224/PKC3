@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyLinePatch,
   diffLines,
+  didLastDiffFallBack,
   parseLinePatch,
   serializeLinePatch,
   splitLines,
@@ -78,6 +79,30 @@ describe('line patch (P5c-1)', () => {
       const withTail = rnd() < 0.3 ? a.replace(/\n$/, '') : a;
       expect(roundtrip(withTail, b)).toBe(b);
     }
+  });
+
+  it('splitLines: 改行の無い巨大入力・縁のケースでも分割が正しい(R0-1)', () => {
+    // 正規表現 split から手書き indexOf 走査へ替えた回(rust-wasm-strategy §4.1)。
+    // 出力の同一性が崩れたら復元が byte 一致でなくなるので、縁を pin する
+    expect(splitLines('\n')).toEqual(['\n']);
+    expect(splitLines('\n\n')).toEqual(['\n', '\n']);
+    expect(splitLines('a')).toEqual(['a']);
+    expect(splitLines('x'.repeat(50_000))).toEqual(['x'.repeat(50_000)]); // 改行なし巨大
+    const many = Array.from({ length: 5000 }, (_, i) => `行 ${i}\n`).join('');
+    expect(splitLines(many)).toHaveLength(5000);
+    expect(splitLines(many + '末尾')).toHaveLength(5001);
+  });
+
+  it('予算超過のフォールバックが観測できる(R0-④ ── 黙って最小性を諦めない)', () => {
+    const small = diffLines('a\nb\n', 'a\nB\n');
+    expect(didLastDiffFallBack()).toBe(false);
+    expect(applyLinePatch('a\nb\n', small)).toBe('a\nB\n');
+    // 交互に全行違う = 共通部分の削りが効かず編集距離が跳ねる形
+    const from = Array.from({ length: 3000 }, (_, i) => `A${i}\n`).join('');
+    const to = Array.from({ length: 3000 }, (_, i) => `B${i}\n`).join('');
+    const big = diffLines(from, to);
+    expect(didLastDiffFallBack()).toBe(true); // 落ちたことが分かる
+    expect(applyLinePatch(from, big)).toBe(to); // 落ちても**正しい**
   });
 
   it('壊れたパッチは throw(それらしい本文を作らない)', () => {
