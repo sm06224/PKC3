@@ -321,4 +321,177 @@ describe('revision chain (P5c ── 逆向き差分)', () => {
     // 生存 entry の lid も含む(union が衝突集合になる)
     expect(revLids).toContain('e3');
   });
+
+  it('importRevisionChains: 全文でなく**逆向きパッチ**として積み、各版が復元できる', async () => {
+    // user 裁定 2026-08-01「revisions の考え方は持ち込む」── ただし P5c の鎖へ。
+    // 全文で積むと取込だけが設計から外れ、PKC2 と同じ「履歴が本文の N 倍」に戻る
+    const lines = (tag: string) =>
+      Array.from({ length: 200 }, (_, i) => (i === 7 ? `${tag} の行` : `共通の行 ${i}`)).join(
+        '\n',
+      ) + '\n';
+    const v1 = lines('第1版');
+    const v2 = lines('第2版');
+    const tip = lines('いま');
+
+    await request({ op: 'bulkUpsertEntries', cid: 'c1', entries: [entry('imp1', tip)] });
+    const res = await request({
+      op: 'importRevisionChains',
+      cid: 'c1',
+      chains: [
+        {
+          entryLid: 'imp1',
+          snapshots: [
+            { body: v1, createdAt: '2026-07-01T00:00:00Z' },
+            { body: v2, createdAt: '2026-07-02T00:00:00Z' },
+          ],
+        },
+      ],
+    });
+    expect(res.added).toBe(2);
+
+    const metas = await request({ op: 'listRevisionMetas', cid: 'c1', entryLid: 'imp1' });
+    expect(metas).toHaveLength(2);
+    // 履歴の時刻は捏造しない(PKC2 の created_at をそのまま持ち込む)
+    expect(metas.map((m) => m.created_at)).toEqual([
+      '2026-07-02T00:00:00Z',
+      '2026-07-01T00:00:00Z',
+    ]);
+    // 各版が **byte 一致**で復元できる(鎖を tip から遡る実経路)
+    expect((await request({ op: 'getRevision', cid: 'c1', id: metas[0]!.id }))?.body).toBe(v2);
+    expect((await request({ op: 'getRevision', cid: 'c1', id: metas[1]!.id }))?.body).toBe(v1);
+
+    // 🔑 **保存形そのもの**を pin する。200 行中 1 行しか違わない版なので、
+    // 差分で持っていれば必ず 'patch' に落ちる ── 全文で積む実装に退化したら
+    // ここが 'full' になって落ちる(user 裁定の主題はまさにこれ)
+    expect(metas.map((m) => m.kind)).toEqual(['patch', 'patch']);
+  });
+
+  it('importRevisionChains: 無変更の版は畳む / tip と同じ最新版は積まない', async () => {
+    const body = '本文\n';
+    await request({ op: 'bulkUpsertEntries', cid: 'c1', entries: [entry('imp2', body)] });
+    const res = await request({
+      op: 'importRevisionChains',
+      cid: 'c1',
+      chains: [
+        {
+          entryLid: 'imp2',
+          snapshots: [
+            { body: '古い\n', createdAt: '2026-07-01T00:00:00Z' },
+            { body: '古い\n', createdAt: '2026-07-02T00:00:00Z' }, // 無変更
+            { body, createdAt: '2026-07-03T00:00:00Z' }, // tip と同じ
+          ],
+        },
+      ],
+    });
+    expect(res.added).toBe(1);
+    expect(res.skippedNoChange).toBe(2);
+    const metas = await request({ op: 'listRevisionMetas', cid: 'c1', entryLid: 'imp2' });
+    expect((await request({ op: 'getRevision', cid: 'c1', id: metas[0]!.id }))?.body).toBe(
+      '古い\n',
+    );
+  });
+
+  it('importRevisionChains: 既に履歴を持つ entry には積まない(既存の鎖を壊さない)', async () => {
+    await write('imp3', 'v1\n');
+    await write('imp3', 'v2\n', { checkpoint: true });
+    const before = await metasOf('imp3');
+    const res = await request({
+      op: 'importRevisionChains',
+      cid: 'c1',
+      chains: [
+        { entryLid: 'imp3', snapshots: [{ body: 'よそ者\n', createdAt: '2020-01-01T00:00:00Z' }] },
+        { entryLid: 'imp-nonexistent', snapshots: [{ body: 'x\n', createdAt: '' }] },
+      ],
+    });
+    expect(res.added).toBe(0);
+    expect(res.skippedEntries.sort()).toEqual(['imp-nonexistent', 'imp3']);
+    expect(await metasOf('imp3')).toHaveLength(before.length);
+  });
+
+  it('importRevisionChains: 保持上限を超えた古い版は捨て、件数を返す', async () => {
+    await request({ op: 'bulkUpsertEntries', cid: 'c1', entries: [entry('imp4', 'tip\n')] });
+    const res = await request({
+      op: 'importRevisionChains',
+      cid: 'c1',
+      keepLatest: 3,
+      chains: [
+        {
+          entryLid: 'imp4',
+          snapshots: Array.from({ length: 10 }, (_, i) => ({
+            body: `v${i}\n`,
+            createdAt: `2026-07-${String(i + 1).padStart(2, '0')}T00:00:00Z`,
+          })),
+        },
+      ],
+    });
+    expect(res.added).toBe(3);
+    expect(res.droppedOverLimit).toBe(7);
+    const metas = await request({ op: 'listRevisionMetas', cid: 'c1', entryLid: 'imp4' });
+    // 残るのは**直近**(v7/v8/v9)── 古い側から捨てる
+    expect((await request({ op: 'getRevision', cid: 'c1', id: metas[0]!.id }))?.body).toBe(
+      'v9\n',
+    );
+  });
+
+  it('取り込んだ履歴の後に編集しても鎖が伸びる(既存の checkpoint 経路と合流する)', async () => {
+    await request({ op: 'bulkUpsertEntries', cid: 'c1', entries: [entry('imp5', 'tip\n')] });
+    await request({
+      op: 'importRevisionChains',
+      cid: 'c1',
+      chains: [
+        { entryLid: 'imp5', snapshots: [{ body: '取込した版\n', createdAt: '2026-07-01T00:00:00Z' }] },
+      ],
+    });
+    await write('imp5', '編集した\n', { checkpoint: true });
+
+    const metas = await metasOf('imp5');
+    expect(metas).toHaveLength(2);
+    // 新しい方 = 編集直前の tip / 古い方 = 取り込んだ版。どちらも復元できる
+    expect((await request({ op: 'getRevision', cid: 'c1', id: metas[0]!.id }))?.body).toBe(
+      'tip\n',
+    );
+    expect((await request({ op: 'getRevision', cid: 'c1', id: metas[1]!.id }))?.body).toBe(
+      '取込した版\n',
+    );
+  });
+
+  it('[M-24] 取込んだ版も content_hash 検証を通る(壊れた鎖から本文を作らない)', async () => {
+    const tip = Array.from({ length: 50 }, (_, i) => `行 ${i}`).join('\n') + '\n';
+    const old = tip.replace('行 7', '古い 7');
+    await request({ op: 'bulkUpsertEntries', cid: 'c1', entries: [entry('imp6', tip)] });
+    await request({
+      op: 'importRevisionChains',
+      cid: 'c1',
+      chains: [{ entryLid: 'imp6', snapshots: [{ body: old, createdAt: '2026-07-01T00:00:00Z' }] }],
+    });
+    const [meta] = await request({ op: 'listRevisionMetas', cid: 'c1', entryLid: 'imp6' });
+    expect((await request({ op: 'getRevision', cid: 'c1', id: meta!.id }))?.body).toBe(old);
+
+    // 鎖を壊す: **bulk 経路は maintainChain を通らない**ので、tip だけが
+    // 差し替わって頭のパッチが宙に浮く。行数を揃えてあるのでパッチは
+    // 「適用できてしまう」── content_hash が無ければそれらしい本文が黙って返る
+    const bogus = Array.from({ length: 50 }, (_, i) => `別物 ${i}`).join('\n') + '\n';
+    await request({ op: 'bulkUpsertEntries', cid: 'c1', entries: [entry('imp6', bogus)] });
+    await expect(request({ op: 'getRevision', cid: 'c1', id: meta!.id })).rejects.toThrow();
+  });
+
+  it('[M-28] keepLatest が 0 でも最低 1 版は残す(履歴を全部捨てない)', async () => {
+    await request({ op: 'bulkUpsertEntries', cid: 'c1', entries: [entry('imp7', 'tip\n')] });
+    const res = await request({
+      op: 'importRevisionChains',
+      cid: 'c1',
+      keepLatest: 0,
+      chains: [
+        {
+          entryLid: 'imp7',
+          snapshots: [
+            { body: 'v1\n', createdAt: '2026-07-01T00:00:00Z' },
+            { body: 'v2\n', createdAt: '2026-07-02T00:00:00Z' },
+          ],
+        },
+      ],
+    });
+    expect(res.added).toBe(1);
+    expect(res.droppedOverLimit).toBe(1);
+  });
 });

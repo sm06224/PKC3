@@ -17,9 +17,10 @@ import { SidebarRenderer } from '@adapter/ui/render/sidebar';
 import { CenterRouter } from '@adapter/ui/render/center';
 import { formatSize } from '@adapter/ui/render/detail';
 import { bindActions, generateLid, type BinderServices } from '@adapter/ui/actions/binder';
-import { attachFiles, generateAssetKey } from '@adapter/ui/actions/attach';
+import { attachFiles } from '@adapter/ui/actions/attach';
 import { importPkc2File } from '@adapter/ui/actions/import-pkc2';
 import { createAssetGate } from '@adapter/ui/actions/asset-gate';
+import { generateAssetKey } from '@adapter/platform/storage/asset-key';
 
 const DB_NAME = 'pkc3';
 const DEFAULT_CID = 'default';
@@ -214,6 +215,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
                 relations,
               });
             },
+            importRevisionChains: (chains) =>
+              client.request({ op: 'importRevisionChains', cid: DEFAULT_CID, chains }),
+            // ⚠ **bytes 側の台帳を見る**(review H-1)── meta 行の有無で判定すると、
+            // GC が deleteBlob → deleteMeta の途中で失敗した状態(設計上の想定内)で
+            // put を省いてしまい、参照だけが書かれる
+            listStoredBlobKeys: async () => new Set(await blobs.listKeys(DEFAULT_CID)),
             putBlob: (key, blob) => blobs.put(DEFAULT_CID, key, blob),
             putAssetMeta: async (m) => {
               await client.request({ op: 'putAssetMeta', cid: DEFAULT_CID, meta: m });

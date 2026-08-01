@@ -14,7 +14,12 @@ import type { Dispatcher } from '@adapter/state/dispatcher';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import { sniffMagic, detectPkc2Format } from '@features/import/detect-format';
 import { parsePkc2Html } from '@features/import/pkc2-html';
-import { convertPkc2Container } from '@features/import/pkc2-convert';
+import {
+  convertPkc2Container,
+  remapAssetKeys,
+  type RevisionChain,
+} from '@features/import/pkc2-convert';
+import { identifyBytes } from '@adapter/platform/storage/asset-key';
 import { extractMeta } from '@features/flavor';
 
 export interface ImportDeps {
@@ -35,6 +40,21 @@ export interface ImportDeps {
   bulkUpsertRelations(
     relations: Array<{ id: string; fromLid: string; toLid: string; kind: string }>,
   ): Promise<void>;
+  /** 履歴を鎖として積む(全文では積まない ── P5c の符号化に合流させる)。 */
+  importRevisionChains(chains: RevisionChain[]): Promise<{
+    added: number;
+    skippedNoChange: number;
+    droppedOverLimit: number;
+    skippedEntries: string[];
+  }>;
+  /**
+   * 既に **bytes を持っている** key の集合。
+   * ⚠ **meta 行で代用しない**(review H-1)── bytes は IDB、meta は sqlite と
+   * 別ストアで、GC は `deleteBlob` → `deleteMeta` の順に消して途中失敗を
+   * 「次回 purge が回収する」設計にしている。つまり「bytes なし / meta あり」は
+   * **到達しうる状態**であり、そこで put を省くと参照だけが書かれる。
+   */
+  listStoredBlobKeys(): Promise<ReadonlySet<string>>;
   putBlob(assetKey: string, blob: Blob): Promise<void>;
   putAssetMeta(meta: {
     key: string;
@@ -60,21 +80,72 @@ function decodeBase64(base64: string): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
-/** base64 → Blob(gzip されていれば展開する)。1 件ずつ呼び、結果は保持しない。 */
-async function decodeAsset(
+/**
+ * base64 → bytes(gzip されていれば展開する)。1 件ずつ呼び、結果は保持しない。
+ * **Blob ではなく bytes を返す** ── 呼び出し側が hash を取るので、Blob に
+ * してから `arrayBuffer()` で読み直すとコピーが 1 部増える(review M-5)。
+ */
+async function decodeAssetBytes(
   base64: string,
-  mime: string,
   gzipped: boolean,
-): Promise<Blob> {
-  const bytes = decodeBase64(base64);
-  if (!gzipped) return new Blob([bytes], { type: mime });
+): Promise<Uint8Array<ArrayBuffer>> {
+  const raw = decodeBase64(base64);
+  if (!gzipped) return raw;
   // DecompressionStream はブラウザ標準(依存を増やさない)
-  const stream = new Blob([bytes])
-    .stream()
-    .pipeThrough(new DecompressionStream('gzip'));
-  const out = await new Response(stream).blob();
-  // mime の付け替えは slice(ゼロコピー)── new Blob([blob]) は中身を複製する
-  return out.slice(0, out.size, mime);
+  const stream = new Blob([raw]).stream().pipeThrough(new DecompressionStream('gzip'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+/**
+ * base64 を **取り出すと同時に手放す**。生成物の寿命をここで終端する規律を
+ * 1 箇所に閉じ込める(review M-15 ── 参照を切る行は消えても誰も気づかなかった)。
+ */
+export function consumeBase64(a: { base64: string }): string {
+  const b = a.base64;
+  a.base64 = '';
+  return b;
+}
+
+/** 1 メッセージに載せる履歴の目安(postMessage に全履歴を一度に載せない)。 */
+const REVISION_BATCH_BYTES = 4 * 1024 * 1024;
+
+/**
+ * 履歴を「1 メッセージあたりの全文量」で切って渡す。**鎖は割らない** ──
+ * 1 entry の履歴は隣接差分で符号化されるうえ、worker は「既に履歴を持つ entry」を
+ * 丸ごと skip するので、割ると **1 entry につき最古の 1 版しか入らず残りが黙って
+ * 落ちる**(review M-6 で実証)。
+ *
+ * ⚠ **1 本の鎖が巨大なとき予算は効かない**(鎖と鎖の間でしか切れないため)。
+ * 1 entry × 500 版で 10M chars を 1 メッセージで送る ── 既知の限界として記録する
+ * (割るには worker 側に「続きを積む」口が要る。P6c 以降の課題)。
+ *
+ * snapshot の暫定 asset key は **in-place** で写す ── 写しを作ると元と写しが
+ * 同時生存して 2 倍になる(review M-8)。`chains` は呼び出し側の作業用データで、
+ * この関数の外では使わない
+ */
+function* batchChains(
+  chains: readonly RevisionChain[],
+  keyMap: ReadonlyMap<string, string>,
+): Generator<RevisionChain[]> {
+  let batch: RevisionChain[] = [];
+  let bytes = 0;
+  for (const chain of chains) {
+    let size = 0;
+    for (const s of chain.snapshots) {
+      if (keyMap.size > 0) s.body = remapAssetKeys(s.body, keyMap);
+      size += s.body.length;
+    }
+    if (batch.length > 0 && bytes + size > REVISION_BATCH_BYTES) {
+      yield batch;
+      // 送り終えた鎖は手放す(次の batch を作る前に GC に返す)
+      for (const c of batch) c.snapshots = [];
+      batch = [];
+      bytes = 0;
+    }
+    batch.push(chain);
+    bytes += size;
+  }
+  if (batch.length > 0) yield batch;
 }
 
 /**
@@ -98,6 +169,7 @@ export async function importPkc2File(
   // 書込の到達点。失敗時に「どこまで書けたか」を user に言うために持つ ──
   // 「失敗しました」とだけ言って disk に残すと、素直な再取込が二重取込になる
   let entriesWritten = 0;
+  const revStats = { added: 0, dropped: 0, skipped: 0 };
 
   try {
     const head = new Uint8Array(await file.slice(0, 4096).arrayBuffer());
@@ -125,32 +197,35 @@ export async function importPkc2File(
       genAssetKey: deps.genAssetKey,
       genRelationId: deps.genRelationId,
     });
-    // 変換が済めば元の JSON は不要 ── 巨大 container の常駐を切る
-    const rows: EntryUpsert[] = result.entries.map((e) => {
-      const ext = extractMeta(e.archetype, e.body);
-      return {
-        lid: e.lid,
-        title: e.title,
-        archetype: e.archetype,
-        body: e.body,
-        entryOrder: e.entryOrder,
-        status: ext.status,
-        date: ext.date,
-        archived: ext.archived,
-      };
-    });
-
-    // ── assets: 1 件ずつ復号 → Blob → 即手放す(復号済み文字列を溜めない)
+    // ── assets: 1 件ずつ復号 → **中身のハッシュで key を決める** → 未所持なら書く
+    // (content addressing / user 指示 2026-08-01「ZFS と同じ発想」)。同じ bytes は
+    // 必ず同じ key に落ちるので、再取込も、取込と添付の混在も、1 回の取込の中の
+    // 重複も、すべて構造的に 1 部しか持たない
     // ⚠ 順序が規約: **bytes を先に、参照(entries)を後に**。逆順にすると
     // 「参照はあるが bytes が無い」entry が残る ── 逆向き(参照なし bytes)は
     // 明示 purge で回収できる。test は opLog で順序そのものを pin している
+    const known = new Set(await deps.listStoredBlobKeys());
+    // convert は純関数なので content key を決められない ── 暫定 key を配ってあり、
+    // ここで本物へ写す(body の書換は下の remapAssetKeys)
+    const keyMap = new Map<string, string>();
     for (const a of result.assets) {
-      if (a.base64 === '') continue; // light export(assets 空)
       try {
-        const blob = await decodeAsset(a.base64, a.mime, gzipped);
-        a.base64 = ''; // 参照を切って GC に返す(生成物の寿命をここで終端する)
-        await deps.putBlob(a.key, blob);
-        await deps.putAssetMeta({ key: a.key, mime: a.mime, size: blob.size, hash: null });
+        // ⚠ gzip は **export 単位**の符号化なので、body 内蔵だった legacy data
+        // (oldKey === null)には掛かっていない(review M-9 ── 一律に展開すると
+        //  legacy 添付だけが必ず復号に失敗して死んだ参照になる)
+        const bytes = await decodeAssetBytes(
+          consumeBase64(a),
+          gzipped && a.oldKey !== null,
+        );
+        const { key, hash } = await identifyBytes(bytes);
+        keyMap.set(a.key, key); // ⚠ put を省いた時も**必ず**写す(review M-30)
+        if (!known.has(key)) {
+          await deps.putBlob(key, new Blob([bytes], { type: a.mime }));
+          known.add(key);
+        }
+        // meta は bytes を書いたかに関わらず入れる ── upsert なので冪等で、
+        // 「bytes はあるが meta が無い」状態(GC の途中失敗)も自己修復する
+        await deps.putAssetMeta({ key, mime: a.mime, size: bytes.byteLength, hash });
       } catch (e) {
         // 1 件の添付が壊れていても取込全体は止めない(欠損は可視化する)
         a.base64 = '';
@@ -158,18 +233,49 @@ export async function importPkc2File(
       }
     }
 
+    const rows: EntryUpsert[] = result.entries.map((e) => {
+      const body = keyMap.size > 0 ? remapAssetKeys(e.body, keyMap) : e.body;
+      const ext = extractMeta(e.archetype, body);
+      return {
+        lid: e.lid,
+        title: e.title,
+        archetype: e.archetype,
+        body,
+        entryOrder: e.entryOrder,
+        status: ext.status,
+        date: ext.date,
+        archived: ext.archived,
+      };
+    });
+
     // ── entries / relations は bulk(1 行ずつ書かない ── journal 増幅の教訓)
     deps.notify?.(`取込中…(${rows.length} 件を書き込んでいます)`);
+    // どの段で落ちたかを user に正しく伝える(review L-11 ── 履歴で落ちても
+    // 「関連の書込で失敗」と出ていた)
+    let stage = '本文';
     try {
       await deps.bulkUpsertEntries(rows);
       entriesWritten = rows.length;
-      if (result.relations.length > 0) await deps.bulkUpsertRelations(result.relations);
+      if (result.relations.length > 0) {
+        stage = '関連';
+        await deps.bulkUpsertRelations(result.relations);
+      }
+      // 履歴は entries の**後**(worker が tip = entries.body を基準に符号化する)
+      if (result.revisionChains.length > 0) {
+        stage = '履歴';
+        for (const batch of batchChains(result.revisionChains, keyMap)) {
+          const r = await deps.importRevisionChains(batch);
+          revStats.added += r.added;
+          revStats.dropped += r.droppedOverLimit;
+          revStats.skipped += r.skippedEntries.length;
+        }
+      }
     } catch (e) {
       // 書けた分は必ず画面へ出す ── 「失敗」と言いながら disk に残すのが最悪
       await deps.reload().catch(() => {});
       return fail(
         entriesWritten > 0
-          ? `取込は ${entriesWritten} 件まで書き込まれました。関連の書込で失敗しています(このまま取り込み直すと二重になります): ${reason(e)}`
+          ? `取込は ${entriesWritten} 件まで書き込まれました。${stage}の書込で失敗しています(このまま取り込み直すと二重になります): ${reason(e)}`
           : `取込に失敗しました(書込は行われていません): ${reason(e)}`,
       );
     }
@@ -179,16 +285,23 @@ export async function importPkc2File(
     // 先頭に置くと、50 件欠けていても user は何が欠けたか分からない
     const notes = [
       ...result.warnings,
+      ...(revStats.dropped > 0
+        ? [`保持上限を超えた古い版 ${revStats.dropped} 件は取り込みませんでした`]
+        : []),
+      ...(revStats.skipped > 0
+        ? [`${revStats.skipped} 件の entry は既に履歴を持つため見送りました`]
+        : []),
       ...(light ? ['添付の中身は含まれていない export です(light)'] : []),
     ];
+    const revNote = revStats.added > 0 ? `(履歴 ${revStats.added} 版)` : '';
     if (notes.length > 0) {
       // 警告は握りつぶさない。ただし**成功を失敗の見た目にしない** ──
       // OP_FAILED は state.error に載って「⚠ エラー」表示になる(review L-11)
       deps.notify?.(
-        `取込完了: ${rows.length} 件 ⚠ 注意 ${notes.length} 件 — ${notes[0]}`,
+        `取込完了: ${rows.length} 件${revNote} ⚠ 注意 ${notes.length} 件 — ${notes[0]}`,
       );
     } else {
-      deps.notify?.(`取込完了: ${rows.length} 件`);
+      deps.notify?.(`取込完了: ${rows.length} 件${revNote}`);
     }
     return rows.length;
   } catch (e) {
