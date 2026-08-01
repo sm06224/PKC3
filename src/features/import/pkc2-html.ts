@@ -72,8 +72,11 @@ export function parsePkc2Html(html: string, parse: HtmlParse = defaultParse): Pk
   if (!data) {
     throw new Pkc2ParseError('コンテナが見つかりません(#pkc-data が無い)');
   }
-  // PKC2 は埋め込み時に `</script` を `<\/script` へ退避している ── 復元する
-  const raw = (data.textContent ?? '').replace(/<\\\/script>/gi, '</script>');
+  // PKC2 の退避は `json.replace(/<\/(script)/gi, '<\\/$1')` ── **JSON の `\/`
+  // エスケープ**なので、復元は JSON.parse が行う。ここで文字列置換すると
+  // ① case が潰れて `</SCRIPT>` を含む本文が静かに書き換わる ② 退避が `>` を
+  // 要求しない形なので取りこぼす。置換を持たないことが正しい(review M-5)
+  const raw = data.textContent ?? '';
   let payload: unknown;
   try {
     payload = JSON.parse(raw);

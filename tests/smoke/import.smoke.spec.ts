@@ -51,15 +51,21 @@ function pkc2Html(): string {
   </body></html>`;
 }
 
+const FILE = () => ({
+  name: 'container.html',
+  mimeType: 'text/html',
+  buffer: Buffer.from(pkc2Html(), 'utf-8'),
+});
+
 test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画される', async ({ page }) => {
   const errors = collectPageErrors(page);
   await gotoApp(page);
 
-  await page.setInputFiles('[data-pkc-field="import-input"]', {
-    name: 'container.html',
-    mimeType: 'text/html',
-    buffer: Buffer.from(pkc2Html(), 'utf-8'),
-  });
+  // ⚠ **ボタンを実際に押す**経路を通す(review mutation M21): hidden input へ
+  // 直接 setInputFiles すると、ボタン → picker の導線が壊れていても緑になる
+  const chooser = page.waitForEvent('filechooser');
+  await clickReal(page, '[data-pkc-action="import-pkc2"]');
+  await (await chooser).setFiles(FILE());
 
   // 再読込(sqlite から引き直し)を経て 2 件が sidebar に現れる
   const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
@@ -83,6 +89,16 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
   });
   await clickReal(page, '[data-pkc-action="purge-orphan-assets"]');
   expect(await dialogMsg).toContain('未参照の添付データはありません');
+
+  // ── 同じファイルをもう一度取り込む(review mutation M23 / M24 / H-2)──
+  // 既存 lid・既存 relation id・entryOrder のどれか 1 つでも見ていなければ、
+  // ここで 1 部目が**上書きされて消える**(4 件にならない)
+  await page.setInputFiles('[data-pkc-field="import-input"]', FILE());
+  await expect(rows).toHaveCount(4);
+  const orders = await page.locator('[data-pkc-entry]').evaluateAll((els) =>
+    els.map((e) => e.getAttribute('data-pkc-entry')),
+  );
+  expect(new Set(orders).size).toBe(4); // lid が再採番されている(重複なし)
 
   expect(errors).toEqual([]);
 });

@@ -19,6 +19,7 @@ import { formatSize } from '@adapter/ui/render/detail';
 import { bindActions, generateLid, type BinderServices } from '@adapter/ui/actions/binder';
 import { attachFiles, generateAssetKey } from '@adapter/ui/actions/attach';
 import { importPkc2File } from '@adapter/ui/actions/import-pkc2';
+import { createAssetGate } from '@adapter/ui/actions/asset-gate';
 
 const DB_NAME = 'pkc3';
 const DEFAULT_CID = 'default';
@@ -126,25 +127,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     showStatus(state.error ? `${statusBase} ⚠ エラー: ${state.error}` : statusBase);
   });
 
-  // 🔒 attach と purge の排他 gate(review F1): 取込は putBlob → entry persist の
-  // 間に「bytes はあるが参照が無い」窓を持つ ── その窓で整理が走ると取込中の
-  // bytes を消す(実証済みのデータ消失)。同時実行は可視で拒否する
-  let assetOpBusy = false;
-  const withAssetGate = async (run: () => Promise<void>): Promise<void> => {
-    if (assetOpBusy) {
-      dispatcher.dispatch({
-        type: 'OP_FAILED',
-        error: '添付の取込/整理が実行中です。完了を待ってください',
-      });
-      return;
-    }
-    assetOpBusy = true;
-    try {
-      await run();
-    } finally {
-      assetOpBusy = false;
-    }
-  };
+  // 🔒 attach / import と purge の排他 gate(review F1)。実体と pin は asset-gate.ts
+  const withAssetGate = createAssetGate(dispatcher);
   const services: BinderServices = {
     attachFiles: (files) =>
       void withAssetGate(() =>
@@ -200,7 +184,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         await importPkc2File(
           dispatcher,
           {
-            existingLids: () => new Set(dispatcher.getState().entryMetas.keys()),
+            // ⚠ 生存 entry だけでは足りない ── ゴミ箱の lid(entries に居ないが
+            // revisions を持つ)と衝突すると、その item がゴミ箱から消え、
+            // 取り込んだ entry が他人の履歴を背負う(review H-1、実 sqlite で実証)
+            existingLids: async () =>
+              new Set([
+                ...dispatcher.getState().entryMetas.keys(),
+                ...(await client.request({ op: 'listRevisionLids', cid: DEFAULT_CID })),
+              ]),
+            existingRelationIds: () =>
+              new Set(dispatcher.getState().relations.map((r) => r.id)),
             orderBase: () => {
               let max = 0;
               for (const m of dispatcher.getState().entryMetas.values()) {
@@ -210,6 +203,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             },
             genLid: generateLid,
             genAssetKey: generateAssetKey,
+            genRelationId: () => `rel-${crypto.randomUUID()}`,
             bulkUpsertEntries: async (entries) => {
               await client.request({ op: 'bulkUpsertEntries', cid: DEFAULT_CID, entries });
             },
@@ -226,6 +220,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             },
             reload: async () => {
               const snap = await loadSnapshot();
+              // ⚠ 取込の門は開始時の 1 回だけ ── 長い await の間に user は編集を
+              // 始められる。SYS_BOOTED は openBody / selectedLid をリセットするので、
+              // そのまま流すと打ちかけの本文が無警告で消える(review H-4、実証済み)
+              if (dispatcher.getState().phase !== 'ready') {
+                dispatcher.dispatch({
+                  type: 'OP_FAILED',
+                  error: '取込は完了しました。編集を終了すると一覧に反映されます',
+                });
+                return;
+              }
               dispatcher.dispatch({ type: 'SYS_BOOTED', cid: DEFAULT_CID, ...snap });
             },
             notify: (message) => showStatus(`${statusBase} — ${message}`),

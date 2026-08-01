@@ -45,12 +45,26 @@ const base64 = (text: string): string => {
   return btoa(bin);
 };
 
-function harness() {
+interface HarnessOptions {
+  /** 既存 lid(ゴミ箱 lid を含む ── 実配線は revisions からも集める)。 */
+  existingLids?: Set<string>;
+  orderBase?: number;
+  /** relations の書込を失敗させる(entries を書いた**後**で落ちる経路の再現)。 */
+  failRelations?: boolean;
+  /** bulkUpsertEntries が呼ばれた瞬間に走る副作用(取込中の user 操作の再現)。 */
+  onBulkEntries?(d: Dispatcher): void;
+}
+
+function harness(opts: HarnessOptions = {}) {
   const written: EntryUpsert[] = [];
   const relations: Array<{ id: string; fromLid: string; toLid: string; kind: string }> = [];
   const blobs = new Map<string, Blob>();
   const metas: Array<{ key: string; mime: string; size: number }> = [];
   const notices: string[] = [];
+  // 🔑 **書込の順序**そのものを記録する ── 「bytes を先に、参照を後に」は
+  // この commit の規約 1 番なのに、順序を反転しても全 test が通っていた
+  // (review mutation M25)。別配列に積むだけでは順序が pin されない
+  const opLog: string[] = [];
   let reloads = 0;
   let n = 0;
 
@@ -58,17 +72,25 @@ function harness() {
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
 
   const deps: ImportDeps = {
-    existingLids: () => new Set(d.getState().entryMetas.keys()),
-    orderBase: () => 0,
+    existingLids: async () =>
+      new Set([...d.getState().entryMetas.keys(), ...(opts.existingLids ?? [])]),
+    existingRelationIds: () => new Set(d.getState().relations.map((r) => r.id)),
+    orderBase: () => opts.orderBase ?? 0,
     genLid: () => `gen-lid-${++n}`,
     genAssetKey: () => `ast-gen-${++n}`,
+    genRelationId: () => `rel-gen-${++n}`,
     bulkUpsertEntries: async (entries) => {
+      opLog.push('entries');
+      opts.onBulkEntries?.(d);
       written.push(...entries);
     },
     bulkUpsertRelations: async (rels) => {
+      opLog.push('relations');
+      if (opts.failRelations) throw new Error('relations の書込に失敗(注入)');
       relations.push(...rels);
     },
     putBlob: async (key, blob) => {
+      opLog.push(`blob:${key}`);
       blobs.set(key, blob);
     },
     putAssetMeta: async (m) => {
@@ -78,6 +100,14 @@ function harness() {
     // state に現れることまでを 1 本の網で見る
     reload: async () => {
       reloads++;
+      // 実配線と同じく editing 中は state を差し替えない(H-4 の門)
+      if (d.getState().phase !== 'ready') {
+        d.dispatch({
+          type: 'OP_FAILED',
+          error: '取込は完了しました。編集を終了すると一覧に反映されます',
+        });
+        return;
+      }
       d.dispatch({
         type: 'SYS_BOOTED',
         cid: 'c1',
@@ -104,7 +134,17 @@ function harness() {
     },
     notify: (m) => notices.push(m),
   };
-  return { d, deps, written, relations, blobs, metas, notices, reloadCount: () => reloads };
+  return {
+    d,
+    deps,
+    written,
+    relations,
+    blobs,
+    metas,
+    notices,
+    opLog,
+    reloadCount: () => reloads,
+  };
 }
 
 describe('importPkc2File (P6b 実行部)', () => {
@@ -207,8 +247,8 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(await [...blobs.values()][0]!.text()).toBe('plain bytes');
   });
 
-  it('light export(assets 空)は bytes を書かず entry だけ取り込む', async () => {
-    const { d, deps, blobs, written } = harness();
+  it('light export(assets 空)は bytes を書かず entry だけ取り込む + light と明言する', async () => {
+    const { d, deps, blobs, written, notices } = harness();
     const file = htmlFile({
       container: {
         meta: {},
@@ -221,6 +261,64 @@ describe('importPkc2File (P6b 実行部)', () => {
     await importPkc2File(d, deps, file);
     expect(blobs.size).toBe(0);
     expect(written).toHaveLength(1);
+    // mode を parse しているのに黙っていると、user は添付が入った気になる
+    expect(notices.at(-1)).toMatch(/添付の中身は含まれていない/);
+  });
+
+  it('light export の attachment は「中身が無い」と件数で言う(開くまで気づかせない)', async () => {
+    const { d, deps, notices } = harness();
+    const file = htmlFile({
+      container: {
+        meta: {},
+        entries: [
+          {
+            lid: 'att',
+            title: '請求書.pdf',
+            archetype: 'attachment',
+            body: JSON.stringify({
+              name: '請求書.pdf',
+              mime: 'application/pdf',
+              asset_key: 'pkc2-old-key',
+            }),
+          },
+        ],
+        assets: {}, // light export ── keyMap が空なので旧 key のまま残る
+      },
+      export_meta: { mode: 'light' },
+    });
+
+    expect(await importPkc2File(d, deps, file)).toBe(1);
+    expect(notices.at(-1)).toMatch(/請求書\.pdf/);
+    expect(notices.at(-1)).toMatch(/注意 2 件/); // light 本体 + 個別の欠損
+  });
+
+  it('bytes を先に、参照を後に書く(順序そのものを pin する)', async () => {
+    const { d, deps, opLog } = harness();
+    const file = htmlFile({
+      container: {
+        meta: {},
+        entries: [
+          {
+            lid: 'att',
+            title: 'a.txt',
+            archetype: 'attachment',
+            body: JSON.stringify({ name: 'a.txt', mime: 'text/plain', asset_key: 'k' }),
+          },
+          { lid: 'n', title: 'n', archetype: 'text', body: 'x\n' },
+        ],
+        relations: [{ id: 'r1', from: 'n', to: 'att', kind: 'structural' }],
+        assets: { k: base64('bytes') },
+      },
+      export_meta: {},
+    });
+
+    await importPkc2File(d, deps, file);
+    // 逆順は「参照はあるが bytes が無い」entry を残す ── 逆向きの orphan bytes は
+    // 明示 purge で回収できる。この非対称が順序を規約にしている理由
+    const blobAt = opLog.findIndex((o) => o.startsWith('blob:'));
+    expect(blobAt).toBeGreaterThanOrEqual(0);
+    expect(blobAt).toBeLessThan(opLog.indexOf('entries'));
+    expect(opLog.indexOf('entries')).toBeLessThan(opLog.indexOf('relations'));
   });
 
   it('ZIP 形式は「まだ未実装」と可視で断る ── 書込は 1 件も起きない', async () => {
@@ -265,8 +363,8 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(d.getState().error).toMatch(/編集を終了/);
   });
 
-  it('警告(端点不在の relation 等)は握りつぶさず可視化する', async () => {
-    const { d, deps, relations } = harness();
+  it('警告(端点不在の relation 等)は握りつぶさず可視化する ── ただし成功をエラーに見せない', async () => {
+    const { d, deps, relations, notices } = harness();
     const file = htmlFile({
       container: {
         meta: {},
@@ -278,7 +376,9 @@ describe('importPkc2File (P6b 実行部)', () => {
 
     expect(await importPkc2File(d, deps, file)).toBe(1);
     expect(relations).toHaveLength(0);
-    expect(d.getState().error).toMatch(/取込完了\(1 件\)。ただし 1 件の注意/);
+    expect(notices.at(-1)).toMatch(/取込完了: 1 件 ⚠ 注意 1 件/);
+    // state.error に載せると status が「⚠ エラー:」で始まる ── 成功が失敗に見える
+    expect(d.getState().error).toBeNull();
   });
 
   it('lid 衝突は再採番して既存 entry を上書きしない', async () => {
@@ -314,7 +414,7 @@ describe('importPkc2File (P6b 実行部)', () => {
   });
 
   it('壊れた添付が 1 件あっても取込全体は止まらない(欠損は可視)', async () => {
-    const { d, deps, written, blobs } = harness();
+    const { d, deps, written, blobs, notices } = harness();
     const file = htmlFile({
       container: {
         meta: {},
@@ -327,6 +427,114 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(await importPkc2File(d, deps, file)).toBe(1);
     expect(written).toHaveLength(1); // entry は取り込まれる
     expect(blobs.size).toBe(0); // 壊れた添付は書かれない
-    expect(d.getState().error).toMatch(/添付を復元できませんでした/);
+    expect(notices.at(-1)).toMatch(/添付を復元できませんでした/);
+  });
+
+  // ── review で実証された 4 経路(H-1〜H-4)の pin ──
+
+  it('[H-1] ゴミ箱の lid とも衝突判定する ── 削除済み entry の履歴を奪わない', async () => {
+    // 実配線の existingLids は entries ∪ revisions。ゴミ箱 = 「entries に居ないが
+    // revisions を持つ lid」なので、生存 entry だけで判定すると素通りする
+    const { d, deps, written } = harness({ existingLids: new Set(['trashed-lid']) });
+    const file = htmlFile({
+      container: {
+        meta: {},
+        entries: [
+          { lid: 'trashed-lid', title: '取込', archetype: 'text', body: '新\n' },
+        ],
+      },
+      export_meta: {},
+    });
+
+    await importPkc2File(d, deps, file);
+    expect(written).toHaveLength(1);
+    // 同じ lid で書くと ① ゴミ箱からその item が消え ② 履歴に他人の版が並ぶ
+    expect(written[0]!.lid).not.toBe('trashed-lid');
+  });
+
+  it('[H-2] relation id は既存と衝突したら再採番する(upsert の後勝ちで潰さない)', async () => {
+    const { d, deps, relations } = harness();
+    // 既存 relation r1 が居る状態(1 回目の取込の後、と同じ形)
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [],
+      relations: [
+        {
+          id: 'r1',
+          fromLid: 'x',
+          toLid: 'y',
+          kind: 'structural',
+          createdAt: null,
+          updatedAt: null,
+        },
+      ],
+    });
+    const file = htmlFile({
+      container: {
+        meta: {},
+        entries: [
+          { lid: 'a', title: 'a', archetype: 'text', body: 'a\n' },
+          { lid: 'b', title: 'b', archetype: 'text', body: 'b\n' },
+          { lid: 'c', title: 'c', archetype: 'text', body: 'c\n' },
+        ],
+        // id 衝突 / id 欠落 の両方 ── どちらも既存を上書きしてはいけない
+        relations: [
+          { id: 'r1', from: 'a', to: 'b', kind: 'structural' },
+          { from: 'b', to: 'c', kind: 'semantic' },
+        ],
+      },
+      export_meta: {},
+    });
+
+    await importPkc2File(d, deps, file);
+    expect(relations).toHaveLength(2);
+    expect(relations.map((r) => r.id)).not.toContain('r1'); // 既存を潰さない
+    expect(relations.map((r) => r.id)).not.toContain(''); // id 欠落も潰さない
+    expect(new Set(relations.map((r) => r.id)).size).toBe(2); // 取込内でも一意
+  });
+
+  it('[H-3] entries を書いた後で失敗したら「書けた事実」を隠さない + 画面へ出す', async () => {
+    const { d, deps, written, reloadCount } = harness({ failRelations: true });
+    const file = htmlFile({
+      container: {
+        meta: {},
+        entries: [
+          { lid: 'a', title: 'a', archetype: 'text', body: 'a\n' },
+          { lid: 'b', title: 'b', archetype: 'text', body: 'b\n' },
+        ],
+        relations: [{ id: 'r1', from: 'a', to: 'b', kind: 'structural' }],
+      },
+      export_meta: {},
+    });
+
+    expect(await importPkc2File(d, deps, file)).toBeNull();
+    expect(written).toHaveLength(2); // disk には残っている
+    // 「失敗しました」とだけ言うと、素直な再取込が二重取込になる
+    expect(d.getState().error).toMatch(/2 件まで書き込まれました/);
+    expect(d.getState().error).toMatch(/二重になります/);
+    expect(reloadCount()).toBe(1); // 書けた分は必ず画面へ出す
+    expect(d.getState().entryMetas.size).toBe(2);
+  });
+
+  it('[H-4] 取込中に編集が始まったら draft を殺さない(再読込を延期する)', async () => {
+    const { d, deps, written } = harness({
+      onBulkEntries: (dd) => {
+        // 取込の await 中に user が編集を始める(UI に gate は無い)
+        dd.dispatch({ type: 'CREATE_ENTRY', archetype: 'text', lid: 'draft', title: 'd' });
+        dd.dispatch({ type: 'UPDATE_OPEN_BODY', body: '# 失いたくない下書き\n' });
+      },
+    });
+    const file = htmlFile({
+      container: { meta: {}, entries: [{ lid: 'a', title: 'n', archetype: 'text', body: 'x\n' }] },
+      export_meta: {},
+    });
+
+    await importPkc2File(d, deps, file);
+
+    expect(written).toHaveLength(1); // 取込自体は成功している
+    expect(d.getState().phase).toBe('editing'); // editor から蹴り出さない
+    expect(d.getState().openBody?.body).toBe('# 失いたくない下書き\n'); // draft 無傷
+    expect(d.getState().error).toMatch(/編集を終了すると一覧に反映されます/); // 無言にしない
   });
 });

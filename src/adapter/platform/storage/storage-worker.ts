@@ -517,6 +517,17 @@ const handlers: Handlers = {
         ORDER BY rev_order DESC`,
       [req.cid, req.entryLid],
     ) as unknown as ResultMap['listRevisionMetas'],
+  listRevisionLids: (req) =>
+    // 取込の lid 衝突判定は **entries だけでは足りない**(review H-1)。
+    // ゴミ箱は「entries に居ない entry_lid の revisions」ビューなので、削除済み lid は
+    // entryMetas に居ない ── そこへ同じ lid を書くと ① その item がゴミ箱から消え
+    // ② 取り込んだ entry の履歴に他人の版が並ぶ(復元で上書き)。両方とも実証済み
+    (
+      need().selectObjects(
+        'SELECT DISTINCT entry_lid FROM revisions WHERE cid = ?',
+        [req.cid],
+      ) as unknown as Array<{ entry_lid: string }>
+    ).map((r) => r.entry_lid),
   listTrash: (req) =>
     // ゴミ箱 = 「entries に居ない entry_lid の最新 revision」ビュー(P5 設計 §1)。
     // 独立 trash 機構は作らない ── PKC2 の設計を sqlite で自然に表現

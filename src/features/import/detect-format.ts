@@ -33,20 +33,32 @@ const MANIFEST_FORMAT: Record<string, Pkc2Format> = {
   'pkc2-entry-bundle': 'entry-bundle',
 };
 
+/** 先頭の空白を読み飛ばす窓(BOM + 長い前置き空白でも判定できる幅)。 */
+const SNIFF_WINDOW = 512;
+
 /** 先頭バイトの種別。ZIP かどうかだけ分かれば十分。 */
 export function sniffMagic(bytes: Uint8Array): 'zip' | 'text' | 'unknown' {
   if (bytes.length >= 4) {
-    // ZIP: "PK\x03\x04"(空 ZIP の "PK\x05\x06" も一応受ける)
+    // ZIP: "PK\x03\x04" / 空 ZIP "PK\x05\x06" / spanned "PK\x07\x08"
     if (bytes[0] === 0x50 && bytes[1] === 0x4b) {
       const c = bytes[2];
       const d = bytes[3];
-      if ((c === 0x03 && d === 0x04) || (c === 0x05 && d === 0x06)) return 'zip';
+      if (
+        (c === 0x03 && d === 0x04) ||
+        (c === 0x05 && d === 0x06) ||
+        (c === 0x07 && d === 0x08)
+      ) {
+        return 'zip';
+      }
     }
   }
+  // UTF-8 BOM(EF BB BF)は **3 バイトまとめて**飛ばす ── 1 バイト目だけ skip すると
+  // 2 バイト目 0xBB で unknown に落ち、中身は完全に読めるのに拒否される(review M-6)
+  let i = bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf ? 3 : 0;
   // 先頭の空白を飛ばして '<'(HTML)か '{'(JSON)を見る
-  for (let i = 0; i < Math.min(bytes.length, 64); i++) {
+  for (; i < Math.min(bytes.length, SNIFF_WINDOW); i++) {
     const b = bytes[i]!;
-    if (b === 0x20 || b === 0x09 || b === 0x0a || b === 0x0d || b === 0xef) continue; // BOM 含む
+    if (b === 0x20 || b === 0x09 || b === 0x0a || b === 0x0d) continue;
     if (b === 0x3c || b === 0x7b) return 'text';
     return 'unknown';
   }
@@ -84,23 +96,6 @@ export function detectPkc2Format(
   return 'unknown';
 }
 
-/** user 向けの説明(可視エラーに使う ── 何を入れれば良いか分かる文言にする)。 */
-export function describeFormat(f: Pkc2Format): string {
-  switch (f) {
-    case 'html':
-      return 'PKC2 の単一 HTML';
-    case 'package':
-      return 'PKC2 バックアップ(.pkc2.zip)';
-    case 'text-bundle':
-    case 'textlog-bundle':
-    case 'entry-bundle':
-      return 'PKC2 の単体 entry バンドル';
-    case 'texts-container-bundle':
-    case 'textlogs-container-bundle':
-    case 'mixed-container-bundle':
-    case 'folder-export-bundle':
-      return 'PKC2 の一括バンドル';
-    default:
-      return '不明な形式';
-  }
-}
+// `describeFormat`(形式 → user 向け文言)は P6c で ZIP の manifest を実際に
+// 読めるようになってから足す。呼ばれない説明関数は、実装が追いつく前に
+// 「対応済みに見える」嘘を作る(review L-10 で dead code として指摘された)

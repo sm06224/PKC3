@@ -26,6 +26,8 @@ export type StorageRequest =
   | { op: 'revisionCounts'; cid: string }
   | { op: 'getRevision'; cid: string; id: string }
   | { op: 'listRevisionMetas'; cid: string; entryLid: string }
+  /** revisions が存在する entry_lid の集合(= 生存 + ゴミ箱)。取込の lid 衝突判定用。 */
+  | { op: 'listRevisionLids'; cid: string }
   | { op: 'listTrash'; cid: string }
   | { op: 'purgeTrash'; cid: string }
   | { op: 'putAssetMeta'; cid: string; meta: AssetMetaPut }
@@ -163,6 +165,7 @@ export interface ResultMap {
   revisionCounts: RevisionCountRow[];
   getRevision: RevisionBody | null;
   listRevisionMetas: RevisionMetaRow[];
+  listRevisionLids: string[];
   listTrash: RevisionMetaRow[];
   purgeTrash: { purged: number };
   putAssetMeta: null;

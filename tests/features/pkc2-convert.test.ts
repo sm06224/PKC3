@@ -118,4 +118,83 @@ describe('convertPkc2Container (P6a)', () => {
     expect(r2.relations[0]).toMatchObject({ fromLid: 'b-note', toLid: 'new-1' });
     expect(r2.warnings.some((w) => w.includes('a-todo → new-1'))).toBe(true);
   });
+
+  it('asset key の採番が衝突したら引き直す(無言の上書きを作らない)', () => {
+    // 実体は `ast-<ts36>-<rand6>` ── 取込は同一 ms 内に何千件も採番するので、
+    // 実効エントロピーは 6 文字 base36 のみ。衝突すると putBlob が後勝ちで
+    // 上書きし、2 つの添付が同じ bytes を指す(review M-8)
+    let n = 0;
+    const collide = { ...opts(), genAssetKey: () => (++n <= 2 ? 'ast-DUP' : `ast-ok-${n}`) };
+    const r2 = convertPkc2Container(
+      { entries: [], assets: { k1: 'QQ==', k2: 'Qg==' } },
+      collide,
+    );
+    const keys = r2.assets.map((a) => a.key);
+    expect(new Set(keys).size).toBe(keys.length); // 一意
+  });
+
+  it('app_icon_asset_key も keyMap で書き換わる(死んだ参照を残さない)', () => {
+    const r2 = convertPkc2Container(
+      {
+        entries: [
+          {
+            lid: 'app',
+            title: 'app',
+            archetype: 'attachment',
+            body: JSON.stringify({
+              name: 'app.html',
+              mime: 'text/html',
+              asset_key: 'k-body',
+              app_icon_asset_key: 'k-icon',
+              registered_as_app: true,
+            }),
+          },
+        ],
+        assets: { 'k-body': 'QQ==', 'k-icon': 'Qg==' },
+      },
+      opts(),
+    );
+    const fm = parseFrontmatter(r2.entries[0]!.body).meta;
+    expect(fm['attachment.asset_key']).toBe('ast-new-1');
+    expect(fm['attachment.app_icon_asset_key']).toBe('ast-new-2');
+    expect(r2.warnings).toEqual([]); // 解決できたので欠損警告は出ない
+  });
+
+  it('relation id は既存衝突 / id 欠落で再採番される', () => {
+    const base = {
+      entries: [
+        { lid: 'p', title: 'p', archetype: 'text', body: 'p\n' },
+        { lid: 'q', title: 'q', archetype: 'text', body: 'q\n' },
+      ],
+      relations: [
+        { id: 'dup', from: 'p', to: 'q', kind: 'structural' },
+        { from: 'q', to: 'p', kind: 'semantic' },
+      ],
+    };
+    let relN = 0;
+    const r2 = convertPkc2Container(base, {
+      ...opts(),
+      existingRelationIds: new Set(['dup']),
+      genRelationId: () => `rel-new-${++relN}`,
+    });
+    expect(r2.relations.map((x) => x.id)).toEqual(['rel-new-1', 'rel-new-2']);
+  });
+
+  it('bytes を伴わない asset 参照(light export)は件数で警告する', () => {
+    const r2 = convertPkc2Container(
+      {
+        entries: [
+          {
+            lid: 'att',
+            title: '見積.xlsx',
+            archetype: 'attachment',
+            body: JSON.stringify({ name: '見積.xlsx', mime: 'x', asset_key: 'gone' }),
+          },
+        ],
+        assets: {},
+      },
+      opts(),
+    );
+    expect(r2.warnings.some((w) => w.includes('見積.xlsx'))).toBe(true);
+  });
 });

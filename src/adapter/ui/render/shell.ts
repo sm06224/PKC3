@@ -60,6 +60,8 @@ export function buildShell(root: HTMLElement): ShellRegions {
   topbar.append(imp);
   const impInput = document.createElement('input');
   impInput.type = 'file';
+  // 判別は中身(magic)でやるので accept は誤選択を減らすためだけの補助
+  impInput.accept = '.html,.htm,text/html';
   impInput.hidden = true;
   impInput.setAttribute('data-pkc-field', 'import-input');
   topbar.append(impInput);

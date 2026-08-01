@@ -302,4 +302,23 @@ describe('revision chain (P5c ── 逆向き差分)', () => {
     // 生存 entry の履歴は残る
     expect((await metasOf('e3')).length).toBeGreaterThan(0);
   });
+
+  it('listRevisionLids: ゴミ箱の lid も返す(取込の衝突判定はこれが正)', async () => {
+    // 生存 entry だけで lid 衝突を判定すると、削除済み lid が再採番されず
+    // ① その item がゴミ箱から消え ② 取り込んだ entry が他人の履歴を背負う
+    // (どちらも P6b review H-1 で実 sqlite 実証済み)
+    await write('e-trash', '消される版 v1\n');
+    await write('e-trash', '消される版 v2\n', { checkpoint: true });
+    await request({ op: 'deleteEntry', cid: 'c1', lid: 'e-trash' });
+
+    const live = new Set(
+      (await request({ op: 'listEntryMetas', cid: 'c1' })).map((m) => m.lid),
+    );
+    expect(live.has('e-trash')).toBe(false); // entries には居ない
+    const revLids = await request({ op: 'listRevisionLids', cid: 'c1' });
+    expect(revLids).toContain('e-trash'); // しかし衝突する
+    expect(new Set(revLids).size).toBe(revLids.length); // DISTINCT
+    // 生存 entry の lid も含む(union が衝突集合になる)
+    expect(revLids).toContain('e3');
+  });
 });
