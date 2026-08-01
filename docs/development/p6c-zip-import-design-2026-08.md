@@ -220,12 +220,45 @@ PKC3 側で `Pkc2Container` 形の合成物を組み立てて convert に渡す�
 | ② | **`pkc2-package`**(#1) | **変換 core をそのまま再利用できる唯一の形式**。ここで §2-4 の API 変更と「ZIP → putBlob の streaming 経路」を確立する ── **bundle 系全部の土台**。かつ user のバックアップ正本なので、**ここまでで「PKC2 から救出できる」が成立する** |
 | ✅ ③-前半 | **`.text.zip`(#2)**(`src/features/import/pkc2-bundle.ts`)| §2-5 の合成 container 規約を確立。🔑 **`manifest.assets` が key → {name, mime} の正本**と実地確認できたので、§4-A の「拡張子を剥がす突合」問題は**そもそも発生しない**(manifest の key を正として ZIP entry を引く)|
 | ✅ ③-後半 | **`.textlog.zip`(#3)**(`textlog-csv.ts` + `readTextlogBundle`)| CSV → PKC2 の TextlogBody JSON へ**逆写像**して合成 container に載せる ── `fromPkc2` がその JSON を取るので textlog 専用の変換を二重に持たない。⚠ 実地確認で判明: **列は固定位置ではなく header 名で引く**(PKC2 の parser も indexOf)。並び替え・追加列に強い。`flags` 列があればそれが正で、**空は「flags 無し」**(`important` に戻らない)|
-| ④ | **batch 3 形式**(#4 / #5 / #6) | 段③の再帰適用のみ。新概念は「内側 ZIP を Blob 化して reader を再入」の 1 点(M1 で用意済み)。3 形式は外側 manifest の形が違うだけで処理は同一 ── 1 段で 3 形式片付く |
+| ✅ ④ | **batch 3 形式**(#4 / #5 / #6)(`src/features/import/pkc2-container-bundle.ts`)| 段③の再帰適用 + 内側 ZIP の Blob 再入。⚠ **実地で 3 点覆った**(下記)|
 | ⑤ | **`folder-export` v1**(#7) | 段④ + 階層復元。`folders[]` → folder entry + `structural` relation。PKC3 は relation 表を直接持つので PKC2 の dispatch 経路 ▲ より素直に書ける |
 | ⑥ | **`pkc2-entry-bundle`(#8)+ v2** | 最後。残るのは「`entry.json` を entries[] に足す」「assets を base64 として読む」の 2 点だけ。PKC2 に import 経路が無く(round-trip の参照実装なし)、格納規約が違い、実体を 1 件も見ていない ✖ |
 
 ⚠ P6 doc §1 は #8 を「読むのは最も簡単」と書いている ▲。**簡単さと土台性は別**。
 #8 を先にやっても他形式は 1 ミリも進まない。
+
+### 段④ で覆った前提(2026-08-01、PKC2 writer の read-only 実地調査)
+
+**(1) batch 形式は 3 つではなく 4 つ**。`pkc2-folder-export-bundle` も batch である
+(`folder-export.ts:55`)。段④ は 3 形式のみ受け、folder-export は**名指しで断る**(段⑤)。
+
+**(2)「3 形式は外側 manifest の形が違うだけ」は誤り** ── field 集合が実際に違う:
+
+| format | 件数の field | `archetype` |
+|---|---|---|
+| `pkc2-texts-container-bundle` | `entry_count` | **無い**(format から決まる) |
+| `pkc2-textlogs-container-bundle` | `entry_count` | **無い** |
+| `pkc2-mixed-container-bundle` | `text_count` + `textlog_count`(`entry_count` は**無い**)| **ある** |
+
+さらに **`compact`(外側 top-level)と `compacted`(内側 top-level)は別綴りの別 field**。
+`body_length` / `log_entry_count` は**どちらか一方だけ書かれ、他方は key ごと不在**。
+
+**(3) 🔑 asset は内側 ZIP に完全複製される**。1 個の画像を 2 ノートが参照していると、
+同じバイナリが 2 つの `.text.zip` に丸ごと入る。PKC2 は取込時にこれを統合せず
+**attachment entry 2 個・asset 2 本**を作っていた(共有関係が失われる)。
+PKC3 は content addressing で bytes を 1 本に畳み、attachment entry も asset key で
+1 件に畳む ── user 指示「ZFS と同じ発想」がそのまま効く箇所。
+
+⚠ その帰結として **同じ key が複数の内側 bundle に出る**。中身が食い違っていたら
+片方が黙って消える(= あるノートが別ノートの画像を表示する。見て気づけない破損)。
+ZIP の中央ディレクトリは **CRC-32 とサイズを読まずに持っている**ので、そこで照合し、
+**食い違ったら断る**。これは §4 行 E(first-wins + warning)の**強化**である ──
+E は「PKC2 はバイト比較していない」を前提に書いたが、PKC3 は**読まずに比較できる**。
+
+**(4) ゼロコピーは store に限る**。PKC2 の writer は外側も内側も method 0 固定なので、
+内側 ZIP は外側の view・内側の asset はさらにその view で**どの段でもコピーしない**。
+⚠ ただし **deflate の内側 ZIP は実体化される**(`DecompressionStream` の出力を Blob に
+起こすため)── その経路の常駐量は**測っていない**ので、ゼロコピーを主張しない。
 
 ---
 

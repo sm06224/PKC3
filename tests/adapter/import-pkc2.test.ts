@@ -66,7 +66,10 @@ function harness(opts: HarnessOptions = {}) {
   const written: EntryUpsert[] = [];
   const relations: Array<{ id: string; fromLid: string; toLid: string; kind: string }> = [];
   const blobs = new Map<string, Blob>();
-  const metas: Array<{ key: string; mime: string; size: number }> = [];
+  // ⚠ **hash まで記録する**(review M-1)── 捨てていたせいで「content key を
+  // 使っているか / 巨大 asset だけ採番 key に落ちるか」を観測できず、
+  // HASH_MAX_BYTES 分岐を削っても反転させても 405 test 全部が通っていた
+  const metas: Array<{ key: string; mime: string; size: number; hash: string | null }> = [];
   const notices: string[] = [];
   // 🔑 **書込の順序**そのものを記録する ── 「bytes を先に、参照を後に」は
   // この commit の規約 1 番なのに、順序を反転しても全 test が通っていた
@@ -117,7 +120,7 @@ function harness(opts: HarnessOptions = {}) {
     },
     putAssetMeta: async (m) => {
       opLog.push(`meta:${m.key}`);
-      metas.push({ key: m.key, mime: m.mime, size: m.size });
+      metas.push({ key: m.key, mime: m.mime, size: m.size, hash: m.hash });
     },
     // 実配線と同じく「書けたものを読み直して SYS_BOOTED」── 取込結果が
     // state に現れることまでを 1 本の網で見る
@@ -242,7 +245,12 @@ describe('importPkc2File (P6b 実行部)', () => {
     const [key, blob] = [...blobs.entries()][0]!;
     expect(await blob.text()).toBe(payload); // 展開されている(gzip のまま入れない)
     expect(metas).toEqual([
-      { key, mime: 'text/plain', size: new TextEncoder().encode(payload).length },
+      {
+        key,
+        mime: 'text/plain',
+        size: new TextEncoder().encode(payload).length,
+        hash: key.slice('ast-'.length),
+      },
     ]);
     // entry 側の参照も同じ新 key を指す(旧 key が残ると死んだ参照になる)
     expect(key).not.toBe('old-key');
@@ -798,7 +806,7 @@ describe('importPkc2File (P6b 実行部)', () => {
   // ── P6c 段②: .pkc2.zip(バックアップ正本)の取込 ──
 
   it('[P6c] .pkc2.zip を取り込む ── bytes は ZIP から直接流れる(base64 を経由しない)', async () => {
-    const { d, deps, written, blobs, opLog } = harness();
+    const { d, deps, written, blobs, opLog, metas } = harness();
     const container = {
       meta: { container_id: 'c-old' },
       entries: [
@@ -838,6 +846,14 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(blobs.size).toBe(1);
     const key = [...blobs.keys()][0]!;
     expect(await blobs.get(key)!.text()).toBe('生バイナリ');
+    // 🔑 ZIP 経路でも **key は中身の SHA-256**(content addressing / ZFS の発想)。
+    // これを見ていなかったので、HASH_MAX_BYTES 分岐を消しても反転させても
+    // 全 test が通っていた(review M-1)── 反転すると採番 key + hash:null になる
+    // ⚠ ハッシュは**べた書き**(実装から借りない ── 借りると実装が壊れても一致する)
+    expect(key).toBe('ast-df08ff17d4afa4ad9d950178b2fdbbd203ce98cf0ce5f04fe567e6342550c10e');
+    expect(metas).toEqual([
+      { key, mime: 'image/png', size: 15, hash: key.slice('ast-'.length) },
+    ]);
     // 参照は content key へ写っている(frontmatter と本文 markdown の両方)
     const att = written.find((e) => e.archetype === 'attachment')!;
     expect(readAttachmentMeta(att.body).assetKey).toBe(key);
@@ -846,6 +862,45 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(opLog.findIndex((o) => o.startsWith('blob:'))).toBeLessThan(
       opLog.indexOf('entries'),
     );
+  });
+
+  it('[P6c] 閾値超の添付は heap に載せず、採番 key + hash なしで入る', async () => {
+    // ⚠ この分岐は既定 64MB なので fixture では踏めない ── 閾値を下げて観測する。
+    // 分岐を丸ごと消す mutation が生存していた(review M-1 / MUTANT-2)
+    const { d, deps, written, blobs, metas } = harness();
+    deps.hashMaxBytes = 4; // 「生バイナリ」= 15 バイト > 4
+    const container = {
+      meta: {},
+      entries: [
+        {
+          lid: 'a1',
+          title: 'big.bin',
+          archetype: 'attachment',
+          body: JSON.stringify({ name: 'big.bin', mime: 'image/png', asset_key: 'ast-x1' }),
+        },
+      ],
+      relations: [],
+      revisions: [],
+      assets: {},
+    };
+    const zip = await buildZip([
+      {
+        name: 'manifest.json',
+        bytes: bytesOf(JSON.stringify({ format: 'pkc2-package', version: 1 })),
+      },
+      { name: 'container.json', bytes: bytesOf(JSON.stringify(container)) },
+      { name: 'assets/ast-x1.bin', bytes: bytesOf('生バイナリ') },
+    ]);
+
+    expect(await importPkc2File(d, deps, new File([zip], 'b.pkc2.zip'))).toBe(1);
+
+    const key = [...blobs.keys()][0]!;
+    // content key ではなく**採番 key**(= 重複排除の対象外)
+    expect(key).not.toBe('ast-df08ff17d4afa4ad9d950178b2fdbbd203ce98cf0ce5f04fe567e6342550c10e');
+    expect(metas).toEqual([{ key, mime: 'image/png', size: 15, hash: null }]);
+    // 破損検査は落としていない(CRC は stream で確かめている)ので中身は正しい
+    expect(await blobs.get(key)!.text()).toBe('生バイナリ');
+    expect(readAttachmentMeta(written[0]!.body).assetKey).toBe(key);
   });
 
   it('[P6c] .pkc2.zip の履歴も HTML 経路と同じ鎖へ合流する', async () => {

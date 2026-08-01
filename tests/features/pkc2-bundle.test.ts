@@ -54,8 +54,8 @@ describe('readTextBundle', () => {
     // manifest に size は無いので**展開後のバイト長**を使う(PKC2 と同じ)
     expect(att.size).toBe(bytesOf('PNG の bytes').length);
 
-    expect([...got.assetEntries.keys()]).toEqual(['ast-x1']);
-    expect(await (await readAssetSource(got.assetEntries.get('ast-x1')!)).text()).toBe(
+    expect([...got.assetSources.keys()]).toEqual(['ast-x1']);
+    expect(await (await readAssetSource(got.assetSources.get('ast-x1')!)).text()).toBe(
       'PNG の bytes',
     );
     expect(got.warnings).toEqual([]);
@@ -69,7 +69,7 @@ describe('readTextBundle', () => {
       manifest: manifestOf({ assets: { [key]: { name: 'x.png', mime: 'image/png' } } }),
       extra: [{ name: `assets/${key}.png`, bytes: bytesOf('x') }],
     });
-    expect([...(await readTextBundle(zip)).assetEntries.keys()]).toEqual([key]);
+    expect([...(await readTextBundle(zip)).assetSources.keys()]).toEqual([key]);
   });
 
   it('拡張子が無い実体(未知 mime)も引ける', async () => {
@@ -77,7 +77,7 @@ describe('readTextBundle', () => {
       manifest: manifestOf({ assets: { k: { name: 'blob', mime: 'application/x-unknown' } } }),
       extra: [{ name: 'assets/k', bytes: bytesOf('bytes') }],
     });
-    expect([...(await readTextBundle(zip)).assetEntries.keys()]).toEqual(['k']);
+    expect([...(await readTextBundle(zip)).assetSources.keys()]).toEqual(['k']);
   });
 
   it('key が別 key の prefix でも取り違えない', async () => {
@@ -91,8 +91,8 @@ describe('readTextBundle', () => {
       ],
     });
     const got = await readTextBundle(zip);
-    expect(got.assetEntries.get('k1')!.entry.uncompressedSize).toBe(3);
-    expect(got.assetEntries.get('k1x')!.entry.uncompressedSize).toBe(5);
+    expect(got.assetSources.get('k1')!.entry.uncompressedSize).toBe(3);
+    expect(got.assetSources.get('k1x')!.entry.uncompressedSize).toBe(5);
   });
 
   it('実体が複数ある key は ambiguous として断る', async () => {
@@ -118,7 +118,7 @@ describe('readTextBundle', () => {
     const got = await readTextBundle(zip);
     expect(got.warnings.some((w) => w.includes('gone'))).toBe(true);
     expect(got.warnings.some((w) => w.includes('stowaway.bin'))).toBe(true);
-    expect([...got.assetEntries.keys()]).toEqual(['ast-x1']); // 取り込むのは実体のある 1 件
+    expect([...got.assetSources.keys()]).toEqual(['ast-x1']); // 取り込むのは実体のある 1 件
   });
 
   it('書出し時点の監査証跡(missing / compacted)を黙って捨てない', async () => {
@@ -283,7 +283,7 @@ describe('readTextlogBundle', () => {
       { name: 'assets/ast-k.png', bytes: bytesOf('PNG') },
     ]);
     const got = await readTextlogBundle(zip);
-    expect([...got.assetEntries.keys()]).toEqual(['ast-k']);
+    expect([...got.assetSources.keys()]).toEqual(['ast-k']);
     expect(got.warnings.some((w) => w.includes('既に失われていた'))).toBe(true);
     expect(got.warnings.some((w) => w.includes('compact mode'))).toBe(true);
   });

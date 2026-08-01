@@ -51,26 +51,41 @@ export interface Pkc2Bundle {
   manifest: Pkc2TextBundleManifest;
   /** convert に渡す合成 container(PKC2 入力の写し)。 */
   container: unknown;
-  assetEntries: Map<string, AssetSource>;
+  assetSources: Map<string, AssetSource>;
   warnings: string[];
+}
+
+/** 添付 1 件ぶん(在り処 + manifest が宣言した見え方)。 */
+export interface BundleAsset {
+  source: AssetSource;
+  name: string;
+  mime: string;
+}
+
+/** 本体 entry 1 件(合成 container に載る形)。 */
+export interface BundleMain {
+  lid: string;
+  title: string;
+  archetype: string;
+  body: string;
 }
 
 /** bundle 1 個ぶんの中身(batch はこれを集めて 1 個の container に畳む)。 */
-interface BundleParts {
+export interface BundleParts {
   manifest: Pkc2TextBundleManifest;
-  main: { lid: string; title: string; archetype: string; body: string };
-  assets: Map<string, { source: AssetSource; name: string; mime: string }>;
+  main: BundleMain;
+  assets: Map<string, BundleAsset>;
   warnings: string[];
 }
 
-const MANIFEST = 'manifest.json';
+export const MANIFEST = 'manifest.json';
 const BODY = 'body.md';
 const TEXTLOG = 'textlog.csv';
 /** 合成 attachment entry の lid(convert が衝突時に再採番する)。 */
 const ATTACHMENT_LID = (key: string): string => `bundle-att-${key}`;
 
-/** 同名が複数あるものを 1 件に絞る(0 / 2 以上は呼び出し側が決める)。 */
-function only(dir: readonly ZipEntry[], name: string): ZipEntry {
+/** 同名が複数あるものを 1 件に絞る(0 件も 2 件以上も断る)。 */
+export function onlyEntry(dir: readonly ZipEntry[], name: string): ZipEntry {
   const hits = dir.filter((e) => e.name === name);
   if (hits.length === 0) throw new ZipReadError(`${name} が入っていません(壊れた ZIP)`);
   if (hits.length > 1) {
@@ -89,7 +104,7 @@ async function readBundleCommon(
 ): Promise<{
   dir: ZipEntry[];
   manifest: Pkc2TextBundleManifest;
-  assets: Map<string, { source: AssetSource; name: string; mime: string }>;
+  assets: Map<string, BundleAsset>;
   warnings: string[];
 }> {
   const dir = await readZipDirectory(zip);
@@ -103,7 +118,7 @@ async function readBundleCommon(
 
   let manifest: Pkc2TextBundleManifest;
   try {
-    manifest = JSON.parse(await readZipText(zip, only(dir, MANIFEST))) as Pkc2TextBundleManifest;
+    manifest = JSON.parse(await readZipText(zip, onlyEntry(dir, MANIFEST))) as Pkc2TextBundleManifest;
   } catch (e) {
     if (e instanceof ZipReadError) throw e;
     throw new ZipReadError(`${MANIFEST} を解釈できません: ${String(e)}`);
@@ -123,7 +138,7 @@ async function readBundleCommon(
   // 拡張子は空になりうるので「完全一致 or `<key>.` 始まり」で照合する
   // (前方一致だけだと key `k1` が `assets/k1x.png` に当たる)
   const declared = manifest.assets ?? {};
-  const assets = new Map<string, { source: AssetSource; name: string; mime: string }>();
+  const assets = new Map<string, BundleAsset>();
   const claimed = new Set<string>();
   for (const key of Object.keys(declared)) {
     const exact = `assets/${key}`;
@@ -161,11 +176,15 @@ async function readBundleCommon(
     warnings.push(`書出し時点で既に失われていた添付: ${k}`);
   }
   if (manifest.compacted === true) {
-    warnings.push('書出し時に壊れた添付参照が本文から除かれています(compact mode)');
+    warnings.push(COMPACTED_WARNING);
   }
 
   return { dir, manifest, assets, warnings };
 }
+
+/** compact mode の warning(batch は export 単位の性質なので 1 回だけ出す)。 */
+export const COMPACTED_WARNING =
+  '書出し時に壊れた添付参照が本文から除かれています(compact mode)';
 
 /**
  * 合成 container を組む(§2-5)。attachment × N + 本体 × M。
@@ -175,12 +194,15 @@ async function readBundleCommon(
  *
  * ⚠ batch では **1 個の container にまとめて 1 回 convert する**(設計 doc §2-5)。
  * entry ごとに convert すると lid 衝突検査と asset key 採番検査が分断される。
- * attachment は **asset key で 1 件に畳む** ── 同じ添付を 2 つのノートが参照して
- * いるだけで attachment entry が 2 つできるのは正しくない
+ *
+ * ⚠ **ここは畳まない**(review M-2)── `assets` は key で引ける Map として
+ * 渡ってくるので、畳み込みは**渡す側**の責務である(batch は
+ * `pkc2-container-bundle.ts` の `mergeAssets` が行う)。この関数の役目は
+ * 「1 key = attachment 1 件」を保つことだけ
  */
-function synthesize(
-  assets: ReadonlyMap<string, { source: AssetSource; name: string; mime: string }>,
-  mains: ReadonlyArray<{ lid: string; title: string; archetype: string; body: string }>,
+export function synthesize(
+  assets: ReadonlyMap<string, BundleAsset>,
+  mains: readonly BundleMain[],
 ): unknown {
   const entries: unknown[] = [];
   for (const [key, a] of assets) {
@@ -200,13 +222,13 @@ function synthesize(
   return { meta: {}, entries, relations: [], revisions: [], assets: {} };
 }
 
-const sourcesOf = (
-  assets: ReadonlyMap<string, { source: AssetSource; name: string; mime: string }>,
+export const sourcesOf = (
+  assets: ReadonlyMap<string, BundleAsset>,
 ): Map<string, AssetSource> =>
   new Map([...assets].map(([k, a]) => [k, a.source]));
 
 /** 単体 bundle 1 個の中身を取り出す(batch はこれを集める)。 */
-async function readSingleBundleParts(
+export async function readBundleParts(
   zip: Blob,
   archetype: 'text' | 'textlog',
 ): Promise<BundleParts> {
@@ -215,9 +237,9 @@ async function readSingleBundleParts(
 
   let body: string;
   if (archetype === 'text') {
-    body = await readZipText(zip, only(dir, BODY)); // markdown verbatim
+    body = await readZipText(zip, onlyEntry(dir, BODY)); // markdown verbatim
   } else {
-    const csv = await readZipText(zip, only(dir, TEXTLOG));
+    const csv = await readZipText(zip, onlyEntry(dir, TEXTLOG));
     let parsed;
     try {
       parsed = parseTextlogCsv(csv);
@@ -256,11 +278,11 @@ async function readSingleBundleParts(
 
 /** `.text.zip` を受理する(`body.md` は markdown verbatim)。 */
 export async function readTextBundle(zip: Blob): Promise<Pkc2Bundle> {
-  const parts = await readSingleBundleParts(zip, 'text');
+  const parts = await readBundleParts(zip, 'text');
   return {
     manifest: parts.manifest,
     container: synthesize(parts.assets, [parts.main]),
-    assetEntries: sourcesOf(parts.assets),
+    assetSources: sourcesOf(parts.assets),
     warnings: parts.warnings,
   };
 }
@@ -273,11 +295,11 @@ export async function readTextBundle(zip: Blob): Promise<Pkc2Bundle> {
  * 二重に持たずに済む(P6a の anchor 対応表もこの JSON を前提にしている)。
  */
 export async function readTextlogBundle(zip: Blob): Promise<Pkc2Bundle> {
-  const parts = await readSingleBundleParts(zip, 'textlog');
+  const parts = await readBundleParts(zip, 'textlog');
   return {
     manifest: parts.manifest,
     container: synthesize(parts.assets, [parts.main]),
-    assetEntries: sourcesOf(parts.assets),
+    assetSources: sourcesOf(parts.assets),
     warnings: parts.warnings,
   };
 }

@@ -16,6 +16,7 @@ import { sniffMagic, detectPkc2Format } from '@features/import/detect-format';
 import { parsePkc2Html } from '@features/import/pkc2-html';
 import { readPkc2Package, peekZipFormat } from '@features/import/pkc2-package';
 import { readTextBundle, readTextlogBundle } from '@features/import/pkc2-bundle';
+import { readContainerBundle, isBatchFormat } from '@features/import/pkc2-container-bundle';
 import { readAssetSource, type AssetSource } from '@features/import/zip-reader';
 import {
   convertPkc2Container,
@@ -73,6 +74,15 @@ export interface ImportDeps {
   reload(): Promise<void>;
   /** 進捗・完了の可視化(件数が多いと無反応に見えるため)。 */
   notify?(message: string): void;
+  /**
+   * ハッシュを取る上限(既定 `HASH_MAX_BYTES` = 64MB)。
+   *
+   * ⚠ **test の観測点として在る**(review M-1)。この閾値は WebCrypto に
+   * streaming digest が無いことに由来する実運用上の分岐だが、64MB の fixture は
+   * test で作れないため、下げられないと**分岐ごと消しても誰も気づかない**
+   * (実際に mutation が生存していた)。
+   */
+  hashMaxBytes?: number;
 }
 
 /** base64 → bytes。`fromBase64` があれば中間のバイナリ文字列を作らない。 */
@@ -111,6 +121,24 @@ export function consumeBase64(a: { base64: string }): string {
   const b = a.base64;
   a.base64 = '';
   return b;
+}
+
+/**
+ * 在り処を **引くと同時に手放す**(`consumeBase64` と対称。review M-4)。
+ *
+ * ⚠ `AssetSource` は **内側 ZIP の Blob を強参照する**。batch では内側 ZIP が
+ * 添付の数だけ map に載るので、参照を切らないと**全内側 ZIP が取込の最後まで
+ * 同時に生存する**。store なら view なので実体は増えないが、deflate の内側 ZIP は
+ * 実体化されている ── 「最大の内側 ZIP 1 個」を保つには参照を切る側が要る。
+ */
+function consumeSource(
+  map: Map<string, AssetSource> | null,
+  oldKey: string | null,
+): AssetSource | null {
+  if (map === null || oldKey === null) return null;
+  const src = map.get(oldKey) ?? null;
+  map.delete(oldKey);
+  return src;
 }
 
 /** 1 メッセージに載せる履歴の目安(postMessage に全履歴を一度に載せない)。 */
@@ -212,14 +240,17 @@ export async function importPkc2File(
             ? readTextBundle
             : format === 'pkc2-textlog-bundle'
               ? readTextlogBundle
-              : null;
+              : // batch 3 形式(段④)。folder-export / entry-bundle は**受けない**
+                isBatchFormat(format)
+                ? readContainerBundle
+                : null;
       if (!read) {
         // 未対応の形式は**名指しで**断る(「不明」に混ぜると原因を誤解する)
         return fail(`${format} の取込はまだ実装されていません(${file.name})`);
       }
       const pkg = await read(file);
       container = pkg.container;
-      zipAssets = pkg.assetEntries;
+      zipAssets = pkg.assetSources;
       preWarnings.push(...pkg.warnings);
     } else {
       const payload = parsePkc2Html(await file.text());
@@ -258,12 +289,27 @@ export async function importPkc2File(
         // ⚠ gzip は **export 単位**の符号化なので、body 内蔵だった legacy data
         // (oldKey === null)には掛かっていない(review M-9 ── 一律に展開すると
         //  legacy 添付だけが必ず復号に失敗して死んだ参照になる)
-        const src = a.oldKey !== null ? (zipAssets?.get(a.oldKey) ?? null) : null;
+        const src = consumeSource(zipAssets, a.oldKey);
+        // 🔴 ZIP 経路では base64 が常に空なので、在り処を引けないまま下へ落ちると
+        // **SHA-256("") の key で 0 バイトの添付を無警告で書く**(review H-2)。
+        // 壊れた参照(= 開けない)ではなく「中身が空のファイル」として開けてしまう
+        // ので、user は欠損に気づけない。既存の per-asset catch に合流させて
+        // 「復元できませんでした」を出し、参照は壊れたまま温存する(§4-B)。
+        //
+        // ⚠ **いまは到達不能で、したがって test で pin できていない**(正直に書く)。
+        // convert は `assetKeys` に渡した key ぶんしか asset を返さず、その
+        // `assetKeys` は `zipAssets.keys()` から作っているため。**tripwire として置く**
+        // ── ① 上の `consumeSource` は引くと同時に消すので、同じ oldKey が 2 回来たら
+        // 2 回目がここに落ちる ② 段⑤以降で「複数 bundle の map を合成する」際に
+        // key 集合がずれると、その瞬間ここが唯一の防壁になる
+        if (zipAssets !== null && a.oldKey !== null && src === null) {
+          throw new Error(`ZIP の中に添付の実体がありません(${a.oldKey})`);
+        }
         // ⚠ 閾値超の asset は **heap に載せない** ── ハッシュを取らない
         // (= dedupe 対象外)ので読む理由が無く、読めばそのまま常駐する。
         // **破損検査は落とさない**: reader は stream で舐めて検証し view を返すので、
         // 全量を載せずに CRC を確かめられる(重複排除だけが外れる)
-        if (src && src.entry.uncompressedSize > HASH_MAX_BYTES) {
+        if (src && src.entry.uncompressedSize > (deps.hashMaxBytes ?? HASH_MAX_BYTES)) {
           const key = generateAssetKey();
           keyMap.set(a.key, key);
           await deps.putBlob(key, await readAssetSource(src));

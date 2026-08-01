@@ -11,6 +11,7 @@ import {
   readZipDirectory,
   readZipEntry,
   readZipText,
+  readAssetSource,
   crc32,
   ZipReadError,
 } from '../../src/features/import/zip-reader';
@@ -385,5 +386,45 @@ describe('実物の ZIP が持つ形(合成 fixture では見落とす縁)', () 
     const zip2 = new Blob([buf]);
     const [e] = await readZipDirectory(zip2);
     await expect(readZipEntry(zip2, e!)).rejects.toThrow(/圧縮データが壊れています|CRC/);
+  });
+
+  /**
+   * 🔴 段④(ZIP-in-ZIP)の中核。`ZipEntry` は「自分がどの Blob に属するか」を
+   * 持たないので、**内側 ZIP の entry を外側の Blob から読む**事故が書ける。
+   * offset は内側基準なので外側の別位置を読み、添付だけが無言で欠ける。
+   *
+   * review H-1 の指摘そのもの ── `AssetSource` を入れても「間違った形が書ける」
+   * ことは変わらず、単段 ZIP では `src.zip === file` なので既存 test は 1 件も
+   * 落ちなかった。**この事故を実際に再現して pin する**のがここ。
+   */
+  it('🔴 内側 ZIP の entry を外側から読むと必ず落ちる / AssetSource なら通る', async () => {
+    const inner = await buildZip([
+      { name: 'body.md', bytes: bytesOf('内側の本文') },
+      { name: 'assets/a.png', bytes: bytesOf('内側の添付バイト') },
+    ]);
+    // 外側は前にファイルを 1 個置く ── 内側の offset と外側の offset をずらす
+    // (同じなら「外側から読んでも偶然通る」ので事故を再現できない)
+    const outer = await buildZip([
+      { name: 'manifest.json', bytes: bytesOf('{"format":"x"}') },
+      { name: 'nested.text.zip', bytes: new Uint8Array(await inner.arrayBuffer()) },
+    ]);
+
+    const innerBlob = await readZipEntry(outer, (await readZipDirectory(outer))[1]!);
+    // store なので view がそのまま返る(コピーを作らない)
+    expect(innerBlob.size).toBe(inner.size);
+
+    const innerEntry = (await readZipDirectory(innerBlob)).find(
+      (e) => e.name === 'assets/a.png',
+    )!;
+
+    // ✅ 正しい読み方
+    expect(await readAssetSource({ zip: innerBlob, entry: innerEntry }).then((b) => b.text())).toBe(
+      '内側の添付バイト',
+    );
+
+    // 🔴 間違った読み方 ── **外側**の Blob から内側の entry を読む。
+    // 文面まで pin する:「署名が不正」= 内側基準の offset で外側を読んだ結果、
+    // local header がそこに無かった、ということ(= 別位置を読んだ実証)
+    await expect(readZipEntry(outer, innerEntry)).rejects.toThrow(/ヘッダ署名が不正/);
   });
 });
