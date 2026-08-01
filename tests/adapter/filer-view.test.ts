@@ -10,6 +10,7 @@ import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { CenterRouter } from '../../src/adapter/ui/render/center';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { stubRevisionOps } from '../helpers/revision-stub';
 
 function meta(lid: string, order: number, archetype = 'text'): EntryMeta {
   return {
@@ -51,6 +52,7 @@ function setup(metas: EntryMeta[], relations: Relation[]) {
   d.onState((s) => center.render(s));
   bindActions(root, d);
   connectStoreEffects(d, {
+    ...stubRevisionOps(),
     getBody: async () => '',
     persistEntry: async () => {},
     deleteEntry: async () => {},

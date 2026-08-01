@@ -42,6 +42,8 @@ export class FilerRenderer {
   private lastRelations: readonly Relation[] | null = null;
   private lastSelected: string | null = null;
   private lastScopeLid: string | null = null;
+  /** ゴミ箱 panel の断面(参照比較 ── P5b で指紋に加わった次元)。 */
+  private lastTrash: AppState['trashPanel'] = null;
 
   constructor(region: HTMLElement) {
     this.region = region;
@@ -51,12 +53,13 @@ export class FilerRenderer {
     const listChanged =
       state.entryMetas !== this.lastMetas || state.relations !== this.lastRelations;
     const selectionChanged = state.selectedLid !== this.lastSelected;
-    if (!listChanged && !selectionChanged) return;
+    const trashChanged = state.trashPanel !== this.lastTrash;
+    if (!listChanged && !selectionChanged && !trashChanged) return;
 
     const scope = resolveFilerScope(state.selectedLid, state.entryMetas, state.relations);
     const scopeLid = scope?.lid ?? null;
 
-    if (!listChanged && scopeLid === this.lastScopeLid) {
+    if (!listChanged && !trashChanged && scopeLid === this.lastScopeLid) {
       // 選択だけの変化(scope 不変)── 属性 patch のみで済ませる
       if (this.lastSelected) {
         this.rows.get(this.lastSelected)?.removeAttribute('data-pkc-selected');
@@ -72,6 +75,7 @@ export class FilerRenderer {
     this.lastRelations = state.relations;
     this.lastSelected = state.selectedLid;
     this.lastScopeLid = scopeLid;
+    this.lastTrash = state.trashPanel;
 
     const list = scope
       ? getStructuralChildren(scope.lid, state.entryMetas, state.relations)
@@ -144,5 +148,55 @@ export class FilerRenderer {
       empty.textContent = scope ? '(このフォルダは空です)' : '(entry がありません)';
       this.region.append(empty);
     }
+
+    // ── ゴミ箱(P5b)── filer の常設導線。一覧は明示ロード(SHOW_TRASH)
+    const trashBar = document.createElement('div');
+    trashBar.setAttribute('data-pkc-region', 'filer-trash');
+    if (!state.trashPanel) {
+      const open = document.createElement('button');
+      open.type = 'button';
+      open.setAttribute('data-pkc-action', 'show-trash');
+      open.textContent = 'ゴミ箱';
+      trashBar.append(open);
+    } else {
+      const head = document.createElement('div');
+      const label = document.createElement('span');
+      label.textContent =
+        state.trashPanel.items.length === 0
+          ? 'ゴミ箱は空です'
+          : `ゴミ箱 ${state.trashPanel.items.length} 件`;
+      const close = document.createElement('button');
+      close.type = 'button';
+      close.setAttribute('data-pkc-action', 'hide-trash');
+      close.textContent = '閉じる';
+      head.append(label, close);
+      if (state.trashPanel.items.length > 0) {
+        const purge = document.createElement('button');
+        purge.type = 'button';
+        purge.setAttribute('data-pkc-action', 'purge-trash');
+        purge.textContent = '空にする';
+        head.append(purge);
+      }
+      trashBar.append(head);
+      const ul = document.createElement('ul');
+      for (const t of state.trashPanel.items) {
+        const li = document.createElement('li');
+        li.setAttribute('data-pkc-trash-entry', t.entryLid);
+        const text = document.createElement('span');
+        text.textContent = `${t.title ?? '(無題)'}(${
+          ARCHETYPE_LABELS[t.archetype ?? ''] ?? t.archetype ?? '?'
+        } / ${t.createdAt ?? ''})`;
+        const restore = document.createElement('button');
+        restore.type = 'button';
+        restore.setAttribute('data-pkc-action', 'restore-trash');
+        restore.setAttribute('data-pkc-rev-id', t.revId);
+        restore.setAttribute('data-pkc-trash-lid', t.entryLid);
+        restore.textContent = '復元';
+        li.append(text, restore);
+        ul.append(li);
+      }
+      trashBar.append(ul);
+    }
+    this.region.append(trashBar);
   }
 }

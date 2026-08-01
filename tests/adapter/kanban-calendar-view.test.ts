@@ -13,6 +13,7 @@ import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { CenterRouter } from '../../src/adapter/ui/render/center';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { stubRevisionOps } from '../helpers/revision-stub';
 
 function meta(lid: string, over: Partial<EntryMeta> = {}): EntryMeta {
   return {
@@ -44,6 +45,7 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
   const store = { ...bodies };
   const persisted: EntryUpsert[] = [];
   connectStoreEffects(d, {
+    ...stubRevisionOps(),
     getBody: async (lid) => store[lid] ?? null,
     deleteEntry: async () => {},
     persistEntry: async (e) => {
@@ -181,6 +183,7 @@ describe('kanban view (P3-6)', () => {
     let failNext = true;
     const persisted: EntryUpsert[] = [];
     connectStoreEffects(d, {
+    ...stubRevisionOps(),
       getBody: async () => '---\nstatus: open\n---\nx',
       deleteEntry: async () => {},
       persistEntry: async (e) => {

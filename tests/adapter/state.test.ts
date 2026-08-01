@@ -5,6 +5,7 @@ import { extractMeta } from '../../src/features/flavor';
 import { initialState, reduce } from '../../src/adapter/state/app-state';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects, type StorePort } from '../../src/adapter/state/store-effects';
+import { stubRevisionOps } from '../helpers/revision-stub';
 
 function meta(lid: string, order: number): EntryMeta {
   return {
@@ -133,6 +134,14 @@ describe('reducer: lean aggregate', () => {
     const committed = reduce(s, { type: 'COMMIT_EDIT' });
     expect(committed.events).toEqual([
       {
+        // P5b: 変更ありの commit は変更前(baseline)を履歴に積む(persist より先)
+        type: 'REQUEST_REVISION',
+        lid: 'a',
+        title: 't-a',
+        archetype: 'text',
+        body: '# A',
+      },
+      {
         type: 'PERSIST_ENTRY',
         entry: {
           lid: 'a',
@@ -173,7 +182,7 @@ describe('reducer: lean aggregate', () => {
     }).state;
     const r = reduce(s, { type: 'COMMIT_EDIT' });
 
-    const ev = r.events[0];
+    const ev = r.events.find((e) => e.type === 'PERSIST_ENTRY');
     if (ev?.type !== 'PERSIST_ENTRY') throw new Error('PERSIST_ENTRY expected');
     // 抽出列は body(frontmatter)と同一事実 ── event の行が既に一致している
     // (worker は素通しなので、書込境界のこの一致が roundtrip の pin)
@@ -228,8 +237,10 @@ describe('reducer: lean aggregate', () => {
     s = reduce(s, { type: 'UPDATE_OPEN_BODY', body: '# A' }).state;
     const r = reduce(s, { type: 'COMMIT_EDIT' });
     // skip 基準は「最後に enqueue した内容」(baseline)── 元に戻す commit も書く
-    expect(r.events).toHaveLength(1);
-    expect(r.events[0]).toMatchObject({ type: 'PERSIST_ENTRY' });
+    // (P5b: 変更ありなので revision(変更前 = # B)+ persist の 2 event)
+    expect(r.events).toHaveLength(2);
+    expect(r.events[0]).toMatchObject({ type: 'REQUEST_REVISION', body: '# B' });
+    expect(r.events[1]).toMatchObject({ type: 'PERSIST_ENTRY' });
   });
 
   it('TOGGLE_TODO_STATUS: reduce 時に meta snapshot を捕獲し、state は ack まで動かさない', () => {
@@ -448,6 +459,7 @@ describe('dispatcher: re-entrancy linearization', () => {
 describe('effect layer: serialized store I/O', () => {
   function fakeStore(log: string[], bodies: Record<string, string>): StorePort {
     return {
+      ...stubRevisionOps(),
       async getBody(lid) {
         log.push('get:' + lid);
         await new Promise((r) => setTimeout(r, lid === 'a' ? 20 : 0)); // a を遅くする
@@ -491,6 +503,7 @@ describe('effect layer: serialized store I/O', () => {
     const d = new Dispatcher();
     let calls = 0;
     const store: StorePort = {
+      ...stubRevisionOps(),
       async getBody() {
         calls++;
         if (calls === 1) throw new Error('boom');
@@ -518,6 +531,7 @@ describe('effect layer: serialized store I/O', () => {
     let failNext = true;
     const persisted: string[] = [];
     const store: StorePort = {
+      ...stubRevisionOps(),
       async getBody() {
         return '# A';
       },
@@ -552,6 +566,7 @@ describe('effect layer: serialized store I/O', () => {
   it('persist failure transitions to error phase (no silent loss today)', async () => {
     const d = new Dispatcher();
     const store: StorePort = {
+      ...stubRevisionOps(),
       async getBody() {
         return '# A';
       },
@@ -591,6 +606,7 @@ describe('effect layer: serialized store I/O', () => {
     const persisted: EntryUpsert[] = [];
     const d = new Dispatcher();
     const off = connectStoreEffects(d, {
+    ...stubRevisionOps(),
       async getBody() {
         return '---\nstatus: open\n---\n芝刈り';
       },
@@ -627,6 +643,7 @@ describe('effect layer: serialized store I/O', () => {
   it('teardown stops in-flight results from dispatching (review H)', async () => {
     const d = new Dispatcher();
     const off = connectStoreEffects(d, {
+    ...stubRevisionOps(),
       async getBody() {
         await new Promise((r) => setTimeout(r, 20));
         return 'late';

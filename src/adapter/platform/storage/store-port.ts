@@ -36,6 +36,9 @@ export function metaFromRow(row: EntryMetaRow): EntryMeta {
   };
 }
 
+/** 生存 entry の保持上限(P5 設計 §3)。settings 表へ移す条件: user が変えたいと言ったとき。 */
+export const REVISION_KEEP_LATEST = 20;
+
 export function createStorePort(client: StoreClient, cid: string): StorePort {
   return {
     getBody: (lid) => client.request({ op: 'getBody', cid, lid }),
@@ -45,5 +48,17 @@ export function createStorePort(client: StoreClient, cid: string): StorePort {
     deleteEntry: async (lid) => {
       await client.request({ op: 'deleteEntry', cid, lid });
     },
+    addRevision: (rev) =>
+      client.request({
+        op: 'addRevision',
+        cid,
+        rev,
+        keepLatest: REVISION_KEEP_LATEST,
+      }),
+    listRevisionMetas: (entryLid) =>
+      client.request({ op: 'listRevisionMetas', cid, entryLid }),
+    getRevision: (revId) => client.request({ op: 'getRevision', cid, id: revId }),
+    listTrash: () => client.request({ op: 'listTrash', cid }),
+    purgeTrash: () => client.request({ op: 'purgeTrash', cid }),
   };
 }

@@ -13,6 +13,7 @@ import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import * as clipboard from '../../src/adapter/platform/clipboard';
 import { vi } from 'vitest';
+import { stubRevisionOps } from '../helpers/revision-stub';
 
 function meta(lid: string): EntryMeta {
   return {
@@ -42,6 +43,7 @@ function setup(bodies: Record<string, string>) {
   bindActions(root, d);
   const persisted: EntryUpsert[] = [];
   connectStoreEffects(d, {
+    ...stubRevisionOps(),
     getBody: async (lid) => bodies[lid] ?? null,
     deleteEntry: async () => {},
     persistEntry: async (e) => {
@@ -160,6 +162,7 @@ describe('editor flow (P3-5)', () => {
     let failNext = true;
     const persisted: string[] = [];
     connectStoreEffects(d, {
+    ...stubRevisionOps(),
       getBody: async () => '# A',
       deleteEntry: async () => {},
       persistEntry: async (e) => {

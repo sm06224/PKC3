@@ -190,6 +190,32 @@ const ACTIONS: Record<string, ActionHandler> = {
   'purge-orphan-assets': (_dispatcher, _target, services) => {
     services.purgeOrphanAssets?.();
   },
+  // ── P5b: 履歴 / ゴミ箱 ──
+  'show-history': (dispatcher) => dispatcher.dispatch({ type: 'SHOW_HISTORY' }),
+  'hide-history': (dispatcher) => dispatcher.dispatch({ type: 'HIDE_HISTORY' }),
+  'restore-revision': (dispatcher, target) => {
+    // 前進変異(復元前に現状が履歴に積まれる)なので confirm は要らない ──
+    // 「復元の取り消し」も履歴から戻れる
+    const revId = target.getAttribute('data-pkc-rev-id');
+    if (revId) dispatcher.dispatch({ type: 'RESTORE_REVISION', revId });
+  },
+  'show-trash': (dispatcher) => dispatcher.dispatch({ type: 'SHOW_TRASH' }),
+  'hide-trash': (dispatcher) => dispatcher.dispatch({ type: 'HIDE_TRASH' }),
+  'restore-trash': (dispatcher, target) => {
+    const revId = target.getAttribute('data-pkc-rev-id');
+    const entryLid = target.getAttribute('data-pkc-trash-lid');
+    if (revId && entryLid)
+      dispatcher.dispatch({ type: 'RESTORE_TRASH', entryLid, revId });
+  },
+  'purge-trash': (dispatcher) => {
+    // 一括・不可逆(revision の物理削除)なので fail closed(purge-orphan-assets
+    // と同じ倒し方 ── 単発 delete-entry の ?? true とは桁が違う)
+    const ok =
+      window.confirm?.(
+        'ゴミ箱を空にします(削除済み entry の履歴も消え、元に戻せません)。よろしいですか?',
+      ) ?? false;
+    if (ok) dispatcher.dispatch({ type: 'PURGE_TRASH' });
+  },
 };
 
 function isEditorBody(el: EventTarget | null): el is HTMLTextAreaElement {
