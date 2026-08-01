@@ -14,12 +14,18 @@ import type { Dispatcher } from '@adapter/state/dispatcher';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import { sniffMagic, detectPkc2Format } from '@features/import/detect-format';
 import { parsePkc2Html } from '@features/import/pkc2-html';
+import { readPkc2Package } from '@features/import/pkc2-package';
+import { readZipEntry, type ZipEntry } from '@features/import/zip-reader';
 import {
   convertPkc2Container,
   remapAssetKeys,
   type RevisionChain,
 } from '@features/import/pkc2-convert';
-import { identifyBytes } from '@adapter/platform/storage/asset-key';
+import {
+  identifyBytes,
+  generateAssetKey,
+  HASH_MAX_BYTES,
+} from '@adapter/platform/storage/asset-key';
 import { extractMeta } from '@features/flavor';
 
 export interface ImportDeps {
@@ -173,23 +179,40 @@ export async function importPkc2File(
 
   try {
     const head = new Uint8Array(await file.slice(0, 4096).arrayBuffer());
-    // ZIP は manifest.format を読まないと形式が確定しない ── 展開器は P6c。
-    // ここで「不明」に混ぜると user は原因を誤解するので、ZIP は ZIP として断る
-    if (sniffMagic(head) === 'zip') {
-      return fail(
-        `ZIP 形式(バックアップ / バンドル)の取込はまだ実装されていません(${file.name})── PKC2 の単一 HTML を選んでください`,
-      );
-    }
-    if (detectPkc2Format(head, null, file.name) !== 'html') {
-      return fail(`取り込めない形式です(${file.name})── PKC2 の HTML を選んでください`);
+    const isZip = sniffMagic(head) === 'zip';
+    if (!isZip && detectPkc2Format(head, null, file.name) !== 'html') {
+      return fail(`取り込めない形式です(${file.name})── PKC2 の HTML か .pkc2.zip を選んでください`);
     }
 
     deps.notify?.('取込中…(ファイルを読んでいます)');
-    const payload = parsePkc2Html(await file.text());
-    const gzipped = payload.exportMeta.assetEncoding === 'gzip+base64';
-    const light = payload.exportMeta.mode === 'light';
 
-    const result = convertPkc2Container(payload.container as never, {
+    // ── 入力の違いは「container をどう得るか」と「bytes をどこから取るか」だけ。
+    // それ以降(変換 → asset → entries → 履歴 → 再読込)は **1 本の経路**に合流する
+    // ── 経路ごとに取込の作法が違う状態を作らない
+    let container: unknown;
+    let gzipped = false;
+    let light = false;
+    let zipAssets: Map<string, ZipEntry> | null = null;
+    const preWarnings: string[] = [];
+
+    if (isZip) {
+      const pkg = await readPkc2Package(file);
+      container = pkg.container;
+      zipAssets = pkg.assetEntries;
+      preWarnings.push(...pkg.warnings);
+    } else {
+      const payload = parsePkc2Html(await file.text());
+      container = payload.container;
+      gzipped = payload.exportMeta.assetEncoding === 'gzip+base64';
+      light = payload.exportMeta.mode === 'light';
+    }
+
+    const result = convertPkc2Container(container as never, {
+      // ZIP では bytes が container の外(ZIP entry)にある ── convert には
+      // **key だけ**を渡す(`assetsIn[oldKey] ?? ''` がそのまま効く)
+      ...(zipAssets
+        ? { assetKeys: [...zipAssets.keys()] }
+        : {}),
       existingLids: await deps.existingLids(),
       existingRelationIds: deps.existingRelationIds(),
       orderBase: deps.orderBase(),
@@ -197,6 +220,7 @@ export async function importPkc2File(
       genAssetKey: deps.genAssetKey,
       genRelationId: deps.genRelationId,
     });
+    result.warnings.unshift(...preWarnings);
     // ── assets: 1 件ずつ復号 → **中身のハッシュで key を決める** → 未所持なら書く
     // (content addressing / user 指示 2026-08-01「ZFS と同じ発想」)。同じ bytes は
     // 必ず同じ key に落ちるので、再取込も、取込と添付の混在も、1 回の取込の中の
@@ -213,10 +237,34 @@ export async function importPkc2File(
         // ⚠ gzip は **export 単位**の符号化なので、body 内蔵だった legacy data
         // (oldKey === null)には掛かっていない(review M-9 ── 一律に展開すると
         //  legacy 添付だけが必ず復号に失敗して死んだ参照になる)
-        const bytes = await decodeAssetBytes(
-          consumeBase64(a),
-          gzipped && a.oldKey !== null,
-        );
+        const zipEntryPeek = a.oldKey !== null ? (zipAssets?.get(a.oldKey) ?? null) : null;
+        // ⚠ 閾値超の asset は **heap に載せない**。ハッシュを取らない(= dedupe
+        // 対象外)ので読む理由が無く、読めば 64MB 超がそのまま常駐する。
+        // Blob のまま流す ── ただし CRC 検証も読取りを要するので**外れる**。
+        // 黙って落とさず、検証していない事実を warning に出す
+        if (zipEntryPeek && zipEntryPeek.uncompressedSize > HASH_MAX_BYTES) {
+          const key = generateAssetKey();
+          keyMap.set(a.key, key);
+          const blob = await readZipEntry(file, zipEntryPeek, { verifyCrc: false });
+          await deps.putBlob(key, blob);
+          await deps.putAssetMeta({
+            key,
+            mime: a.mime,
+            size: zipEntryPeek.uncompressedSize,
+            hash: null,
+          });
+          result.warnings.push(
+            `大きすぎる添付は破損検査(CRC)と重複排除を省きました: ${a.oldKey}`,
+          );
+          continue;
+        }
+        // bytes の出どころは 2 通り。**それ以外は同じ**
+        // ⚠ gzip は **export 単位**の符号化なので、body 内蔵だった legacy data
+        // (oldKey === null)には掛かっていない(review M-9 ── 一律に展開すると
+        //  legacy 添付だけが必ず復号に失敗して死んだ参照になる)
+        const bytes = zipEntryPeek
+          ? new Uint8Array(await (await readZipEntry(file, zipEntryPeek)).arrayBuffer())
+          : await decodeAssetBytes(consumeBase64(a), gzipped && a.oldKey !== null);
         const { key, hash } = await identifyBytes(bytes);
         keyMap.set(a.key, key); // ⚠ put を省いた時も**必ず**写す(review M-30)
         if (!known.has(key)) {
