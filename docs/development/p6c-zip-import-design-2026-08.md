@@ -228,24 +228,28 @@ PKC3 側で `Pkc2Container` 形の合成物を組み立てて convert に渡す�
 
 ## 5. 未確定事項
 
-### ⚖ user 裁定が要るもの
+### ✅ 決着済み(2026-08-01)
 
-**① deflate(method 8)を受理するか** ── 推奨: **受理する**。
-PKC2 は throw して断っていた ▲。PKC3 は `DecompressionStream('deflate-raw')` で
-**1 行・追加依存ゼロ**で読める。user が ZIP ツールで開いて再梱包したファイル、
-7-Zip / Windows 標準で作り直したファイルが読めるようになる。「新機能を足す」ではなく
-**同じ入口の頑健性**だが、プライム・ディレクティブ側の判断として裁定に回す。
+当初 4 件を「裁定待ち」として挙げたが、**実質的な裁定事項は 1 件だけだった**。
+残り 3 件は私が決めるか、前提が崩れて質問ごと消えた。
 
-**② PKC2 revisions を持ち込むか** ── P6 §4 と同じ問い。`pkc2-package` の
-`container.json` には revisions が入る。**既定 (b) 捨てる**で進むが裁定待ちなのは変わらない。
+**① deflate(method 8)を受理する** ── 私の判断。`DecompressionStream('deflate-raw')`
+の 1 行・追加依存ゼロで、user が ZIP ツールで再梱包したファイルが読めるようになる。
+「機能を足す」ではなく同じ入口の頑健性。
 
-**③ ZIP-in-ZIP の失敗粒度** ── 推奨: **atomic**。
-PKC3 の import は加算なので、部分取込 → 再実行で**重複が増える**。「N 件中 M 件だけ
-入った」は user が復旧しづらい。
+**② PKC2 revisions を持ち込む(鎖へ符号化する)** ── ✅ user 裁定 2026-08-01。
+詳細は `p6-import-export-design-2026-08.md` §4。ZIP 経路(`container.json` の
+`revisions`)も HTML 経路と**同じ `importRevisionChains` に合流させる**
+── 経路ごとに履歴の入り方が違う状態を作らない。
 
-**④ #8 / #7-v2 を受理するか** ── 受理すれば PKC2 が読めないファイルを PKC3 が
-読める(差別化)。ただし round-trip の参照実装も実体も無い ✖。段⑥に置き、
-**実体が手に入らなければ着地させない**という選択肢もある。
+**③ ZIP-in-ZIP の失敗粒度** ── **質問ごと消えた**。atomic を推した理由は
+「部分取込 → 再実行で重複が増える」だったが、asset を content addressing に
+した(user 指示 2026-08-01「ZFS と同じ発想」)ので、再実行は同じ key に書くだけの
+no-op になる。粒度はデータの正しさの問題ではなく「途中まで入ったものが見えた方が
+便利か」だけの話 ── **partial + 可視の進捗**で進める。
+
+**④ #8 / #7-v2 を受理するか** ── 私の判断。**段⑥に置き、実体が手に入らなければ
+着地させない**(round-trip の参照実装も実体も無いものを、検証の当てなく出荷しない)。
 
 ### 🔬 追加調査(コードから読めない)
 
@@ -263,7 +267,8 @@ PKC3 で復元できない」退化を避けたいなら読む。
 
 ### 🔧 実装判断(裁定不要だが明記が要る)
 
-⑧ `ConvertedAsset` に `oldKey` を足す(§2-4)── P6c の 1 手目
+⑧ ✅ `ConvertedAsset` の `oldKey` は**着地済み**(content addressing の実装で
+前倒しになった)。ZIP 経路は `assets/<oldKey>.bin` をこの値で突合する
 ⑨ `ConvertOptions.mimeHint`(bundle 系の mime は manifest 由来)
 ⑩ bundle 由来 attachment の `size` は展開後バイト長(PKC2 と同じ ✔)
 ⑪ title fallback の文言(PKC2 は `'Imported text'` ✔ → PKC3 は `(無題)`)
