@@ -55,15 +55,12 @@ function setup(bodies: Record<string, string>, port: Partial<StorePort> = {}) {
   connectStoreEffects(d, {
     ...stubRevisionOps(),
     getBody: async (lid) => bodies[lid] ?? null,
-    persistEntry: async (e) => {
-      log.push(`persist:${e.lid}:${e.body}`);
+    persistEntry: async (e, opts) => {
+      // checkpoint = 「変更前の disk body を履歴に刻む」意思(実記録は worker)
+      log.push(`persist:${e.lid}:${e.body}${opts?.checkpoint ? ':cp' : ''}`);
     },
     deleteEntry: async () => {
       log.push('delete');
-    },
-    addRevision: async (rev) => {
-      log.push(`rev:${rev.entryLid}:${rev.body}`);
-      return { added: true, pruned: 0 };
     },
     ...port,
   });
@@ -81,13 +78,13 @@ describe('revision flow (P5b)', () => {
     d.dispatch({ type: 'UPDATE_OPEN_BODY', body: '# v2' });
     d.dispatch({ type: 'COMMIT_EDIT' });
     await tick();
-    expect(log).toEqual(['rev:e1:# v1', 'persist:e1:# v2']); // 変更前を先に積む
+    expect(log).toEqual(['persist:e1:# v2:cp']); // checkpoint 付きで書かれる
 
-    // 無変更 commit は persist も revision も出さない
+    // 無変更 commit は書込自体が出ない
     d.dispatch({ type: 'START_EDIT' });
     d.dispatch({ type: 'COMMIT_EDIT' });
     await tick();
-    expect(log).toHaveLength(2);
+    expect(log).toHaveLength(1);
   });
 
   it('fresh(新規作成)の初回 commit は revision を積まない ── seed へ戻す復元先はゴミ', async () => {
@@ -99,7 +96,7 @@ describe('revision flow (P5b)', () => {
     d.dispatch({ type: 'COMMIT_EDIT' });
     await tick();
     const added = log.slice(created);
-    expect(added).toEqual(['persist:n1:# 初稿']); // revision は無い
+    expect(added).toEqual(['persist:n1:# 初稿']); // checkpoint 無し = 刻まない
   });
 
   it('履歴 panel: SHOW_HISTORY → 一覧描画 → 復元 = 前進変異の順序 + panel 畳み', async () => {
@@ -124,8 +121,8 @@ describe('revision flow (P5b)', () => {
 
     d.dispatch({ type: 'RESTORE_REVISION', revId: 'r-9' });
     await tick();
-    // 前進変異: 現状(# 現在)を積んでから revision 内容で persist
-    expect(log).toEqual(['rev:e1:# 現在', 'persist:e1:# 復元先']);
+    // 前進変異: checkpoint 付きで書く = worker が現状(# 現在)を履歴に積む
+    expect(log).toEqual(['persist:e1:# 復元先:cp']);
     const s = d.getState();
     expect(s.openBody?.body).toBe('# 復元先');
     expect(s.entryMetas.get('e1')?.title).toBe('旧題'); // title も戻る
@@ -204,7 +201,7 @@ describe('revision flow (P5b)', () => {
     // draft を捨てる cancel → disk(復元内容)が勝つ(TODO_TOGGLED と同じ規律)
     d.dispatch({ type: 'CANCEL_EDIT' });
     expect(d.getState().openBody?.body).toBe('# 復元先');
-    expect(log).toContain('persist:e1:# 復元先'); // disk には復元が済んでいる
+    expect(log).toContain('persist:e1:# 復元先:cp'); // disk には復元が済んでいる
   });
 
   it('編集中の着弾・別 lid(trash 復元): 破棄 ── 選択も editor も動かない', async () => {
@@ -279,8 +276,7 @@ describe('revision flow (P5b)', () => {
     d.dispatch({ type: 'COMMIT_EDIT' });
     await tick();
     const added = log.slice(before);
-    expect(added.filter((l) => l.startsWith('rev:'))).toEqual([]); // 空 seed を積まない
-    expect(added).toContain('persist:n1:# 初稿');
+    expect(added).toEqual(['persist:n1:# 初稿']); // :cp が付かない = 空 seed を刻まない
   });
 
   it('SYS_BOOTED: entryOrder の tie は lid 辞書順で安定(F3 の無害化)', () => {

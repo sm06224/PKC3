@@ -14,8 +14,9 @@ const pad2 = (n: number): string => String(n).padStart(2, '0');
  * ISO timestamp → 見出し用のローカル時刻表記。PKC2 の textlog UI 表示が
  * ローカル時刻だったため、変換もローカルで焼く(見出しは読み物であり、
  * ISO の機械可読性は変換時点で確定的に手放す)。不正 ISO は原文を残す。
+ * export は P6 の textlog anchor 対応表(見出しテキストの再現)が使う。
  */
-function formatHeadingTimestamp(iso: string): string {
+export function formatHeadingTimestamp(iso: string): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
   return (

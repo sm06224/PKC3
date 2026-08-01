@@ -1,0 +1,7 @@
+# .wasm のバイトは rustc のバージョンで変わる(実測: 1.93.0 と 1.94.1 で別バイト)。
+# 出荷物を commit する運用なので pin は必須(rust-wasm-strategy §3.5 / §8)。
+# 上げるのは「上げる必要が出たとき」── 定期更新タスクは作らない(プロセス指示)。
+[toolchain]
+channel = "1.94.1"
+targets = ["wasm32-unknown-unknown"]
+profile = "minimal"

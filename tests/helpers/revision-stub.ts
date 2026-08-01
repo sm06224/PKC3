@@ -7,12 +7,11 @@ import type { StorePort } from '../../src/adapter/state/store-effects';
 
 type RevisionOps = Pick<
   StorePort,
-  'addRevision' | 'listRevisionMetas' | 'getRevision' | 'listTrash' | 'purgeTrash'
+  'listRevisionMetas' | 'getRevision' | 'listTrash' | 'purgeTrash'
 >;
 
 export function stubRevisionOps(): RevisionOps {
   return {
-    addRevision: async () => ({ added: false, pruned: 0 }), // 「積まれた」と主張しない(review P5b F5)
     listRevisionMetas: async () => [],
     getRevision: async () => null,
     listTrash: async () => [],

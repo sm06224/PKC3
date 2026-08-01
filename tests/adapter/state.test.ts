@@ -134,15 +134,10 @@ describe('reducer: lean aggregate', () => {
     const committed = reduce(s, { type: 'COMMIT_EDIT' });
     expect(committed.events).toEqual([
       {
-        // P5b: 変更ありの commit は変更前(baseline)を履歴に積む(persist より先)
-        type: 'REQUEST_REVISION',
-        lid: 'a',
-        title: 't-a',
-        archetype: 'text',
-        body: '# A',
-      },
-      {
         type: 'PERSIST_ENTRY',
+        // P5c: 変更ありの commit は checkpoint 付き(変更前 body の記録は worker が
+        // 同 tx で行う ── event は「刻む意思」だけを運ぶ)
+        checkpoint: true,
         entry: {
           lid: 'a',
           title: 't-a',
@@ -237,10 +232,8 @@ describe('reducer: lean aggregate', () => {
     s = reduce(s, { type: 'UPDATE_OPEN_BODY', body: '# A' }).state;
     const r = reduce(s, { type: 'COMMIT_EDIT' });
     // skip 基準は「最後に enqueue した内容」(baseline)── 元に戻す commit も書く
-    // (P5b: 変更ありなので revision(変更前 = # B)+ persist の 2 event)
-    expect(r.events).toHaveLength(2);
-    expect(r.events[0]).toMatchObject({ type: 'REQUEST_REVISION', body: '# B' });
-    expect(r.events[1]).toMatchObject({ type: 'PERSIST_ENTRY' });
+    expect(r.events).toHaveLength(1);
+    expect(r.events[0]).toMatchObject({ type: 'PERSIST_ENTRY', checkpoint: true });
   });
 
   it('TOGGLE_TODO_STATUS: reduce 時に meta snapshot を捕獲し、state は ack まで動かさない', () => {

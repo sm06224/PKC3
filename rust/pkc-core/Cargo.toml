@@ -1,0 +1,13 @@
+[package]
+name = "pkc-core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+# 外部 crate は 0 が既定(rust-wasm-strategy §5-10)。
+# 追加するなら「なぜ自前で書けないか」を doc に書いて都度裁定。
+[dependencies]

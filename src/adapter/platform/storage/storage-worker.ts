@@ -8,9 +8,15 @@
  * 内部完結 API のみを使う)/ 大きな値は保持しない。
  */
 import sqlite3InitModule, { type Database } from '@sqlite.org/sqlite-wasm';
-import { DB_SCHEMA_VERSION, SCHEMA_DDL, REVISIONS_V2_COLUMNS } from './schema';
+import { DB_SCHEMA_VERSION, SCHEMA_DDL, REVISION_ADDED_COLUMNS } from './schema';
 import type { EntryUpsert } from './schema';
 import { contentHash64Hex } from './content-hash';
+import {
+  applyLinePatch,
+  diffLines,
+  parseLinePatch,
+  serializeLinePatch,
+} from '@features/revision/line-patch';
 import {
   JOURNAL_MODES,
   type JournalMode,
@@ -98,7 +104,7 @@ function applySchema(database: Database): void {
         ) as Array<{ name: string }>
       ).map((r) => r.name),
     );
-    for (const col of REVISIONS_V2_COLUMNS) {
+    for (const col of REVISION_ADDED_COLUMNS) {
       if (!revCols.has(col))
         database.exec(`ALTER TABLE revisions ADD COLUMN ${col} TEXT`);
     }
@@ -172,6 +178,119 @@ function bindUpsert(cid: string, e: EntryUpsert): (string | number | null)[] {
   ];
 }
 
+// ── revision チェーン(P5c: jujutsu の「作業コピーはコミット」を写した形)──
+//
+// entries.body が **tip**(最新状態の全文。複製を持たない)。revisions は
+// 「1 つ新しい状態から遡る逆向きパッチ」だけを持つ:
+//   rev#k は rev#(k+1) の状態から遡り、鎖の頭は tip から遡る
+// 依存が「古い → 新しい」の一方向なので、prune(古い側の削除)が鎖を壊さない。
+//
+// 書込は 2 モード:
+//   checkpoint = 履歴を 1 件伸ばす(COMMIT_EDIT の変更あり)
+//   amend      = 伸ばさず、鎖の頭を新しい tip からの符号化に張り替える
+//                (todo toggle / rename ── 過去の状態そのものは不変)
+// **維持は upsertEntry / deleteEntry の同 tx 内に閉じる**(旧 body は worker が
+// 自分で読む ── app 層の協力に依存しない = 構造的に破れない)。
+
+/** 保持上限の既定(caller 未指定時)。差分保持なので PKC2 より大きく取れる。 */
+const DEFAULT_REVISION_KEEP = 100;
+
+interface RevRow {
+  id: string;
+  rev_order: number;
+  snapshot: string;
+  content_hash: string | null;
+  kind: string | null;
+}
+
+/** 鎖の頭(= 最も新しい revision 行)。 */
+function headRevision(database: Database, cid: string, lid: string): RevRow | null {
+  const rows = database.selectObjects(
+    `SELECT id, rev_order, snapshot, content_hash, kind FROM revisions
+      WHERE cid = ? AND entry_lid = ? ORDER BY rev_order DESC LIMIT 1`,
+    [cid, lid],
+  ) as unknown as RevRow[];
+  return rows[0] ?? null;
+}
+
+/** kind NULL は 'full' 扱い(v2 までの既存行はすべて全文)。 */
+const isFull = (row: RevRow): boolean => (row.kind ?? 'full') === 'full';
+
+/** row が復元する状態を得る(base = row の 1 つ新しい状態 = tip か次行の状態)。 */
+function materialize(row: RevRow, base: string): string {
+  return isFull(row) ? row.snapshot : applyLinePatch(base, parseLinePatch(row.snapshot));
+}
+
+/**
+ * 「base から target へ遡る」保存形を決める。パッチが全文以上に膨らむなら
+ * 全文で持つ(git と同じ判断 ── 差分にする意味が無いときは素直に全文)。
+ */
+function encodeReverse(base: string, target: string): { kind: string; snapshot: string } {
+  const patch = serializeLinePatch(diffLines(base, target));
+  return patch.length < target.length
+    ? { kind: 'patch', snapshot: patch }
+    : { kind: 'full', snapshot: target };
+}
+
+/**
+ * body 変更に伴う鎖の維持(同 tx で呼ぶこと)。
+ * @returns 積んだかどうか(checkpoint で新しい行を作ったら true)
+ */
+function maintainChain(
+  database: Database,
+  cid: string,
+  lid: string,
+  oldBody: string,
+  newBody: string,
+  oldTitle: string,
+  oldArchetype: string,
+  checkpoint: boolean,
+  keepLatest: number,
+): { added: boolean; pruned: number } {
+  const head = headRevision(database, cid, lid);
+  const oldHash = contentHash64Hex(oldBody);
+  // checkpoint かつ「頭が既に oldBody を記録していない」ときだけ 1 件伸ばす。
+  // このとき既存の頭は **oldBody を基準に符号化済み**(直前まで tip だった)なので
+  // 触らなくてよい ── 鎖はそのまま自然に伸びる
+  if (checkpoint && !(head && head.content_hash === oldHash)) {
+    const enc = encodeReverse(newBody, oldBody);
+    const nextOrder = (head?.rev_order ?? 0) + 1;
+    database.exec({
+      sql: `INSERT INTO revisions
+              (cid, id, entry_lid, created_at, rev_order, snapshot,
+               title, archetype, content_hash, kind)
+            VALUES (?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?)`,
+      bind: [
+        cid,
+        `rev-${crypto.randomUUID()}`,
+        lid,
+        nextOrder,
+        enc.snapshot,
+        oldTitle,
+        oldArchetype,
+        oldHash,
+        enc.kind,
+      ],
+    });
+    database.exec({
+      sql: `DELETE FROM revisions WHERE cid = ? AND entry_lid = ? AND rev_order <= ?`,
+      bind: [cid, lid, nextOrder - Math.max(1, keepLatest)],
+    });
+    return { added: true, pruned: database.changes() };
+  }
+  // amend: 頭が復元する状態は変えず、**新しい tip からの符号化**へ張り替える。
+  // 行の id / content_hash は保つ(change ID の安定 ── UI の「この版」が生き続ける)
+  if (head) {
+    const state = materialize(head, oldBody);
+    const enc = encodeReverse(newBody, state);
+    database.exec({
+      sql: `UPDATE revisions SET snapshot = ?, kind = ? WHERE cid = ? AND id = ?`,
+      bind: [enc.snapshot, enc.kind, cid, head.id],
+    });
+  }
+  return { added: false, pruned: 0 };
+}
+
 const handlers: Handlers = {
   init: (req) => init(req.dbName, req.journalMode),
   openContainer: (req) => {
@@ -199,7 +318,47 @@ const handlers: Handlers = {
     return rows.length > 0 ? (rows[0]?.body as string) : null;
   },
   upsertEntry: (req) => {
-    need().exec({ sql: UPSERT_SQL, bind: bindUpsert(req.cid, req.entry) });
+    // 本文の書込は**すべてここを通る** ── 鎖の維持を同 tx に閉じ込める唯一の場所。
+    // checkpoint(履歴を伸ばす)か amend(頭を張り替える)かだけが caller の裁量
+    const database = need();
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      const old = database.selectObjects(
+        'SELECT title, archetype, body FROM entries WHERE cid = ? AND lid = ?',
+        [req.cid, req.entry.lid],
+      )[0] as { title: string; archetype: string; body: string } | undefined;
+      if (old && old.body !== req.entry.body) {
+        // 🔒 **履歴より本文が上位**(review P5c F1 ── データ喪失方向で実証済み):
+        // 鎖が既に壊れていると amend の materialize が throw し、tx ごと巻き戻って
+        // **本文の保存が失敗する**。しかも toggle 系は永久に通らなくなる。
+        // 鎖の維持に失敗しても body の書込は続行する ── 壊れた鎖は読み側の
+        // 可視エラー(revision restore failed)で既に扱えている
+        try {
+          maintainChain(
+            database,
+            req.cid,
+            req.entry.lid,
+            old.body,
+            req.entry.body,
+            old.title,
+            old.archetype,
+            req.checkpoint === true,
+            req.keepLatest ?? DEFAULT_REVISION_KEEP,
+          );
+        } catch {
+          /* 履歴の維持失敗は本文の保存を巻き添えにしない */
+        }
+      }
+      database.exec({ sql: UPSERT_SQL, bind: bindUpsert(req.cid, req.entry) });
+      database.exec('COMMIT');
+    } catch (err) {
+      try {
+        database.exec('ROLLBACK');
+      } catch {
+        /* rollback 失敗は元エラーを優先 */
+      }
+      throw err;
+    }
     return null;
   },
   bulkUpsertEntries: (req) => {
@@ -235,27 +394,27 @@ const handlers: Handlers = {
         [req.cid, req.lid],
       )[0] as { title: string; archetype: string; body: string } | undefined;
       if (row) {
+        // 削除で tip(entries.body)が消えるので、鎖の base を**全文で確定**する。
+        // 頭が既に同内容を記録していれば、その行を全文化するだけでよい
+        // (行 id / content_hash は保つ ── change ID の安定)
         const hash = contentHash64Hex(row.body);
-        const last = database.selectObjects(
-          `SELECT rev_order, content_hash FROM revisions
-            WHERE cid = ? AND entry_lid = ?
-            ORDER BY rev_order DESC LIMIT 1`,
-          [req.cid, req.lid],
-        )[0] as { rev_order: number; content_hash: string | null } | undefined;
-        // 直前 revision と同一内容なら積まない(review P5a F3 ── 復元 → 無変更 →
-        // 削除の周回で同一 snapshot が積もる縁)。skip 時は既存の最新 revision が
-        // そのまま trash 行になる(listTrash は「最新」を返す)
-        if (!last || last.content_hash !== hash) {
+        const head = headRevision(database, req.cid, req.lid);
+        if (head && head.content_hash === hash) {
+          database.exec({
+            sql: `UPDATE revisions SET snapshot = ?, kind = 'full' WHERE cid = ? AND id = ?`,
+            bind: [row.body, req.cid, head.id],
+          });
+        } else {
           database.exec({
             sql: `INSERT INTO revisions
                     (cid, id, entry_lid, created_at, rev_order, snapshot,
-                     title, archetype, content_hash)
-                  VALUES (?, ?, ?, datetime('now'), ?, ?, ?, ?, ?)`,
+                     title, archetype, content_hash, kind)
+                  VALUES (?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, 'full')`,
             bind: [
               req.cid,
               `rev-${crypto.randomUUID()}`,
               req.lid,
-              (last?.rev_order ?? 0) + 1,
+              (head?.rev_order ?? 0) + 1,
               row.body,
               row.title,
               row.archetype,
@@ -324,8 +483,8 @@ const handlers: Handlers = {
         database.exec({
           sql: `INSERT INTO revisions
                   (cid, id, entry_lid, created_at, rev_order, snapshot,
-                   title, archetype, content_hash)
-                VALUES (?, ?, ?, datetime('now'), ?, ?, ?, ?, ?)
+                   title, archetype, content_hash, kind)
+                VALUES (?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, 'full')
                 ON CONFLICT(cid, id) DO NOTHING`,
           bind: [
             req.cid,
@@ -349,62 +508,6 @@ const handlers: Handlers = {
       throw err;
     }
     return null;
-  },
-  addRevision: (req) => {
-    // P5 の通常経路(COMMIT_EDIT の変更前 body)。同 tx で
-    // ① 直前 revision と同一内容なら skip(content_hash ── PKC2 は field を
-    //   作って一度も使わなかった。PKC3 は最初から使う)
-    // ② rev_order = MAX+1 で挿入(採番も worker ── 競合面を作らない)
-    // ③ keepLatest 超過分を古い順に prune(生存 entry への書込時のみ走るので、
-    //   削除済み entry の trash snapshot が prune されることは構造的に無い)
-    const database = need();
-    const hash = contentHash64Hex(req.rev.body);
-    database.exec('BEGIN IMMEDIATE');
-    try {
-      const last = database.selectObjects(
-        `SELECT rev_order, content_hash FROM revisions
-          WHERE cid = ? AND entry_lid = ?
-          ORDER BY rev_order DESC LIMIT 1`,
-        [req.cid, req.rev.entryLid],
-      )[0] as { rev_order: number; content_hash: string | null } | undefined;
-      if (last && last.content_hash === hash) {
-        database.exec('COMMIT');
-        return { added: false, pruned: 0 };
-      }
-      const nextOrder = (last?.rev_order ?? 0) + 1;
-      database.exec({
-        sql: `INSERT INTO revisions
-                (cid, id, entry_lid, created_at, rev_order, snapshot,
-                 title, archetype, content_hash)
-              VALUES (?, ?, ?, datetime('now'), ?, ?, ?, ?, ?)`,
-        bind: [
-          req.cid,
-          `rev-${crypto.randomUUID()}`,
-          req.rev.entryLid,
-          nextOrder,
-          req.rev.body,
-          req.rev.title,
-          req.rev.archetype,
-          hash,
-        ],
-      });
-      const keep = Math.max(1, req.keepLatest);
-      database.exec({
-        sql: `DELETE FROM revisions
-               WHERE cid = ? AND entry_lid = ? AND rev_order <= ?`,
-        bind: [req.cid, req.rev.entryLid, nextOrder - keep],
-      });
-      const pruned = database.changes();
-      database.exec('COMMIT');
-      return { added: true, pruned };
-    } catch (err) {
-      try {
-        database.exec('ROLLBACK');
-      } catch {
-        /* rollback 失敗は元エラーを優先 */
-      }
-      throw err;
-    }
   },
   listRevisionMetas: (req) =>
     // snapshot 列を読まない ── 一覧は meta だけ、本文は getRevision で 1 行ずつ
@@ -447,18 +550,99 @@ const handlers: Handlers = {
       [req.cid],
     ) as unknown as ResultMap['revisionCounts'],
   getRevision: (req) => {
-    // 表示要求時に 1 行だけ読む(要求駆動 ── §4.1)
-    const rows = need().selectObjects(
-      'SELECT snapshot, title, archetype FROM revisions WHERE cid = ? AND id = ?',
+    // 要求駆動(§4.1)。鎖を tip 側から目標まで遡って復元する ── 読むのは
+    // 「その entry の、目標以降の行」だけ(他 entry も古い側も触らない)
+    const database = need();
+    const target = database.selectObjects(
+      `SELECT entry_lid, rev_order, title, archetype, content_hash
+         FROM revisions WHERE cid = ? AND id = ?`,
       [req.cid, req.id],
-    );
-    if (rows.length === 0) return null;
-    const r = rows[0]!;
-    return {
-      body: typeof r.snapshot === 'string' ? r.snapshot : '',
-      title: typeof r.title === 'string' ? r.title : null,
-      archetype: typeof r.archetype === 'string' ? r.archetype : null,
-    };
+    )[0] as
+      | {
+          entry_lid: string;
+          rev_order: number;
+          title: string | null;
+          archetype: string | null;
+          content_hash: string | null;
+        }
+      | undefined;
+    if (!target) return null;
+
+    // ① まず **snapshot を読まずに** 骨組みだけ引き、出発点(anchor)を決める。
+    // 出発点 = 目標に最も近い全文行(あれば)/ 無ければ tip(entries.body)。
+    // ⚠ 先に snapshot 込みで全部読むと、anchor より新しい行の本文まで
+    // materialize してしまう(review P5c F5 ── 全面書換 100 世代で 14MB を
+    // 1 回の select で読む実測)。生成物を作らない = 即破棄以前の問題
+    const skeleton = database.selectObjects(
+      `SELECT rev_order, kind FROM revisions
+        WHERE cid = ? AND entry_lid = ? AND rev_order >= ?
+        ORDER BY rev_order DESC`,
+      [req.cid, target.entry_lid, target.rev_order],
+    ) as unknown as Array<{ rev_order: number; kind: string | null }>;
+    let anchorOrder: number | null = null;
+    for (let i = skeleton.length - 1; i >= 0; i--) {
+      if ((skeleton[i]!.kind ?? 'full') === 'full') {
+        anchorOrder = skeleton[i]!.rev_order;
+        break;
+      }
+    }
+    // ② 実際に遡る区間の snapshot だけを読む
+    const rows = (
+      anchorOrder === null
+        ? database.selectObjects(
+            `SELECT id, rev_order, snapshot, content_hash, kind FROM revisions
+              WHERE cid = ? AND entry_lid = ? AND rev_order >= ?
+              ORDER BY rev_order DESC`,
+            [req.cid, target.entry_lid, target.rev_order],
+          )
+        : database.selectObjects(
+            `SELECT id, rev_order, snapshot, content_hash, kind FROM revisions
+              WHERE cid = ? AND entry_lid = ? AND rev_order BETWEEN ? AND ?
+              ORDER BY rev_order DESC`,
+            [req.cid, target.entry_lid, target.rev_order, anchorOrder],
+          )
+    ) as unknown as RevRow[];
+
+    let state: string;
+    let from: number;
+    if (anchorOrder !== null) {
+      state = rows[0]!.snapshot; // 区間の先頭 = anchor(全文行)
+      from = 1;
+    } else {
+      const tip = database.selectObjects(
+        'SELECT body FROM entries WHERE cid = ? AND lid = ?',
+        [req.cid, target.entry_lid],
+      )[0] as { body: string } | undefined;
+      if (!tip) {
+        // 全文行も tip も無い = 鎖の base が失われている。**嘘の本文を返さない**
+        throw new Error(`revision restore failed (no base): ${target.entry_lid}`);
+      }
+      state = tip.body;
+      from = 0;
+    }
+    try {
+      // ⚠ 段ごとに parse → apply する(review M2): 全段を先に parse して
+      // 配列に持つと、パッチの ops が**同時生存**して JS ヒープの峰が増える
+      // (実測: 100 世代の全面書換で 15.8MB → 28.5MB、+80% の回帰だった)。
+      // wasm 経路を配線するときは「全段を 1 往復で渡す」形に戻すが、そのときは
+      // 中間の全文文字列が消える見返りがある ── 今は TS が本番経路なので、
+      // 峰を上げるだけの前借りはしない
+      for (let i = from; i < rows.length; i++) {
+        state = materialize(rows[i]!, state);
+      }
+    } catch (e) {
+      // パッチが base に噛み合わない = 鎖が壊れている(bulk 書込で tip を
+      // 差し替えた等)。復元不能として可視で終える
+      throw new Error(`revision restore failed (chain broken): ${String(e)}`, {
+        cause: e,
+      });
+    }
+    // git 的な整合性検証: 復元結果の hash が記録と食い違えば可視エラーで止める
+    // (壊れた鎖から「それらしい本文」を返さない ── S3 規律)
+    if (target.content_hash && contentHash64Hex(state) !== target.content_hash) {
+      throw new Error(`revision restore failed (integrity check): ${req.id}`);
+    }
+    return { body: state, title: target.title, archetype: target.archetype };
   },
   putAssetMeta: (req) => {
     const m = req.meta;
@@ -504,8 +688,15 @@ const handlers: Handlers = {
       // 現れない**。backslash escape と数値実体だけ畳んだ第 2 形でも照合する
       // (keep 側に広がるだけで安全)。正規 key の字母 [a-z0-9-] は名前付き
       // 実体では書けない(英数字と '-' の名前付き実体が存在しない)ため 2 形で閉じる
+      // ⚠ 2 回通す(review P5c F2 ── P5c で入った回帰):revisions.snapshot は
+      // patch のとき **JSON テキスト**なので backslash が二重化している
+      // (`asset:ast\-k` → snapshot 上は `ast\\-k`)。1 パスでは `\-k` までしか
+      // 戻らず、古い版にしか無い escape 済み参照を GC が消してしまう。
+      // 2 パスは keep 側にしか広がらないので安全
       const norm =
-        body.includes('\\') || body.includes('&#') ? unescapeForScan(body) : null;
+        body.includes('\\') || body.includes('&#')
+          ? unescapeForScan(unescapeForScan(body))
+          : null;
       for (const key of remaining) {
         if (
           key !== '' &&

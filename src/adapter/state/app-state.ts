@@ -173,7 +173,12 @@ export type Dispatchable = UserAction | SystemCommand;
  */
 export type DomainEvent =
   | { type: 'REQUEST_BODY'; lid: string }
-  | { type: 'PERSIST_ENTRY'; entry: EntryUpsert }
+  | {
+      type: 'PERSIST_ENTRY';
+      entry: EntryUpsert;
+      /** true = 変更前の disk body を履歴に 1 件積む(P5c: 鎖の維持は worker)。 */
+      checkpoint?: boolean;
+    }
   | {
       /** かんばんトグル要求。meta snapshot は発火時(reduce)に捕獲(C-1 規律)。 */
       type: 'REQUEST_TODO_TOGGLE';
@@ -191,15 +196,6 @@ export type DomainEvent =
       title: string;
       archetype: string;
       entryOrder: number;
-    }
-  | {
-      /** revision の記録要求(P5b)。body = 変更前(baseline)。title / archetype
-       *  は発火時捕獲(C-1 規律)。失敗は非致命(編集を止めない)。 */
-      type: 'REQUEST_REVISION';
-      lid: string;
-      title: string;
-      archetype: string;
-      body: string;
     }
   | { type: 'REQUEST_REVISION_LIST'; lid: string }
   | {
@@ -391,25 +387,19 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       }
       // 抽出はイベント発火時(= この reduce)に同期で行い、行全体を確定して運ぶ
       const { entryMetas, entry } = buildPersist(state, meta, body);
-      const events: DomainEvent[] = [];
-      // 変更前(baseline)を履歴に積む(P5b)。新規作成の初回 commit は積まない ──
-      // 「flavor seed へ戻す」だけの復元先はゴミ(PKC2 は無条件に積んで肥大した)。
+      // 変更前(baseline)を履歴に積むかどうか(P5c: 実際の記録は worker が
+      // 同 tx で行う ── ここは「刻むか / 頭を張り替えるだけか」の意思決定)。
+      // 新規作成の初回 commit は積まない ──「flavor seed へ戻す」だけの復元先は
+      // ゴミ(PKC2 は無条件に積んで肥大した)。
       // ⚠ freshLid だけでは足りない(review P5b F4): rename が fresh を解除する
       // ため「作成 → title → 本文 → 保存」の普通の流れで seed revision が積まれる
-      // ── baseline が flavor seed のままなら fresh 扱いで skip する。
-      // RETRY_PERSIST はここを通らないので再発行されない(重複は worker の
-      // hash skip が二重に守る)
-      if (state.freshLid !== lid && baseline !== seedBodyFor(meta.archetype)) {
-        events.push({
-          type: 'REQUEST_REVISION',
-          lid,
-          title: meta.title,
-          archetype: meta.archetype,
-          body: baseline,
-        });
-      }
-      events.push({ type: 'PERSIST_ENTRY', entry });
-      return { state: { ...next, entryMetas }, events };
+      // ── baseline が flavor seed のままなら fresh 扱いで skip する
+      const checkpoint =
+        state.freshLid !== lid && baseline !== seedBodyFor(meta.archetype);
+      return {
+        state: { ...next, entryMetas },
+        events: [{ type: 'PERSIST_ENTRY', entry, checkpoint }],
+      };
     }
     case 'RETRY_PERSIST': {
       // persist 失敗(error phase)からの復帰: baseline(最後に commit した内容)が
@@ -421,6 +411,10 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       const meta = state.entryMetas.get(lid);
       if (!meta) return { state, events: [] };
       const { entryMetas, entry } = buildPersist(state, meta, baseline);
+      // 再送でも刻む意思は同じ(worker 側の hash skip が重複を防ぐので二重に
+      // 積まれることはない ── 初回 persist が失敗していれば disk はまだ前の内容)
+      const checkpoint =
+        state.freshLid !== lid && persisted !== seedBodyFor(meta.archetype);
       return {
         state: {
           ...state,
@@ -429,7 +423,7 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
           entryMetas,
           openBody: { lid, body: baseline, baseline, persisted, diskAhead: false },
         },
-        events: [{ type: 'PERSIST_ENTRY', entry }],
+        events: [{ type: 'PERSIST_ENTRY', entry, checkpoint }],
       };
     }
     case 'CANCEL_EDIT': {

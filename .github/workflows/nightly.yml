@@ -26,6 +26,21 @@ jobs:
       # 等の長待ち系)はここに追加していく ── PR gate には足さない
       - name: Visual smoke
         run: npm run test:smoke
+      # Rust core: **出荷 .wasm を source から再ビルドして一致を見る**
+      # (PR gate では cargo を走らせない ── 再ビルド漏れをここで捕まえる。
+      #  rust-toolchain.toml が rustc を pin しているのでバイト一致が期待値)
+      - name: Rust wasm — 再ビルドして出荷物と一致するか
+        run: |
+          BEFORE=$(sha256sum src/adapter/platform/wasm/pkc_core.wasm | cut -d' ' -f1)
+          ./scripts/build-wasm.sh
+          AFTER=$(sha256sum src/adapter/platform/wasm/pkc_core.wasm | cut -d' ' -f1)
+          echo "committed=$BEFORE rebuilt=$AFTER"
+          if [ "$BEFORE" != "$AFTER" ]; then
+            echo "::error::出荷 .wasm が source と一致しない ── scripts/build-wasm.sh を実行して commit すること"
+            exit 1
+          fi
+      - name: Rust wasm — TS との等価性(再ビルド後の成果物で)
+        run: npx vitest run tests/adapter/wasm-parity.test.ts
       - name: Start vite dev server (probe pages)
         run: |
           npx vite --port 45731 > /tmp/vite.log 2>&1 &

@@ -1,0 +1,14 @@
+[workspace]
+members = ["pkc-core"]
+resolver = "2"
+
+# 出荷サイズと再現性のための設定(rust-wasm-strategy §3.5):
+# opt-level="z" はサイズだけでなく速度でも opt3 を上回った(i-cache 効果と推測)。
+# strip + incremental 無効 + codegen-units=1 で **同一 rustc なら同一バイト**。
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+incremental = false

@@ -8,12 +8,13 @@
  * - assets は meta + ポインタのみ(bytes は Blob storage 側 ── §4.2)
  * - settings(正規設定)と flags(実験、上限 15)は別表(§6)
  */
-export const DB_SCHEMA_VERSION = 2;
+export const DB_SCHEMA_VERSION = 3;
 
 /**
- * v2(P5)で revisions に追加された列。snapshot(BLOB affinity)には body
- * 原文(markdown)をそのまま入れる ── PKC2 の「JSON.stringify(Entry) 包み +
- * 厳格 parse 契約」を構造ごと不要にする。
+ * revisions の後付け列(v2: title / archetype / content_hash、v3: kind)。
+ * snapshot(BLOB affinity)には **kind='full' なら body 原文、'patch' なら
+ * 行パッチ JSON** が入る(P5c ── 逆向き差分チェーン)。PKC2 の
+ * 「JSON.stringify(Entry) 包み + 厳格 parse 契約」は構造ごと不要のまま。
  *
  * ⚠ migration の適用判定は user_version では**なく列の実在**
  * (pragma_table_info)で行う(review P5a F1): version 刻印だけを信じると、
@@ -21,11 +22,13 @@ export const DB_SCHEMA_VERSION = 2;
  * 恒久破損する。実在判定なら冪等で、半端状態の DB も次回 open で自己修復する。
  * 将来の migration も同じ原則で書くこと(判定 = あるべき状態の実在、
  * user_version = 未来 version の reject 用)。
+ * NULL の kind は 'full' 扱い ── v2 までの既存行はすべて全文なので互換で正しい。
  */
-export const REVISIONS_V2_COLUMNS: readonly string[] = [
+export const REVISION_ADDED_COLUMNS: readonly string[] = [
   'title',
   'archetype',
   'content_hash',
+  'kind',
 ];
 
 export const SCHEMA_DDL: readonly string[] = [
@@ -76,6 +79,7 @@ export const SCHEMA_DDL: readonly string[] = [
      title TEXT,
      archetype TEXT,
      content_hash TEXT,
+     kind TEXT,
      PRIMARY KEY (cid, id)
    )`,
   `CREATE INDEX IF NOT EXISTS idx_rev_by_entry ON revisions (cid, entry_lid)`,

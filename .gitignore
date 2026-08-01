@@ -5,3 +5,10 @@ coverage/
 .bench-profile/
 .lease-profile/
 test-results/
+
+# review エージェントが着地前検証で作る一時 test(終了時に自削除されるが、
+# 走行中に誤コミットしないよう ignore ── test-results/.last-run.json の誤コミット事故と同型)
+tests/tmp-review-*
+
+# Rust ビルド中間物(出荷物 src/adapter/platform/wasm/*.wasm は commit する)
+rust/target/
