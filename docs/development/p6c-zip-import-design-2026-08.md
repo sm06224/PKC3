@@ -2,7 +2,8 @@
 
 > `p6-import-export-design-2026-08.md` §6 の **P6c**。P6b で「ZIP magic を検出したら
 > 可視で断る」ところまで着地済み(`src/adapter/ui/actions/import-pkc2.ts`)。
-> 本書はその断りを外して受理器を積むための設計。**実装前の裁定待ち**(§5)。
+> 本書はその断りを外して受理器を積むための設計。裁定は全件決着(§5)。
+> **段① の ZIP reader は着地済み** ── 以降は形式ごとの受理器を積む段。
 
 ## 0. 検証の強さ(埋めた風にしない)
 
@@ -84,7 +85,9 @@
 - PKC2 の writer は method 0 固定 ▲ なので、deflate が効くのは
   **user が ZIP ツールで開いて再梱包した場合**。PKC2 はこれを throw して断っていた ▲
   → §5-① の裁定事項
-- ⚠ `'deflate-raw'` のブラウザ対応下限は**未確認**(§5-⑥)
+- ✅ `'deflate-raw'` は**同梱 Chromium(141)で往復を実測**(gzip / deflate / deflate-raw
+  の 3 形式すべて ok)。⚠ ただし**対応下限の版は未確認**のまま ── 対象ブラウザ表を
+  決める段で確認する(§5-⑥)
 
 ### 2-2. reader は PKC2 から流用 + 3 点の修正
 
@@ -94,7 +97,16 @@ PKC2 の streaming reader(zip-package.ts:477-588 ▲)が骨格として使える
 | # | PKC2 | PKC3 | 根拠 |
 |---|---|---|---|
 | M1 | 入力が `File` | **`Blob`**(`File extends Blob` なので呼び出しは不変) | ZIP-in-ZIP で内側を `new Blob([bytes])` にして**同じ reader を再入**できる。これが無いと内側を全量展開する羽目になる ✔ :477 |
-| M2 | general purpose flag(CD の `pos+8`)を**読まない**。名前は常に UTF-8 decode | flag bit 11 を読む。**立っていない かつ 名前に非 ASCII** → 「文字コードを判別できない ZIP」として断る | ✔ :515-524 が pos+8 を読み飛ばしている |
+| M2 | general purpose flag(CD の `pos+8`)を**読まない**。名前は常に UTF-8 decode | 🔴 **当初の処方が誤りだった**(下記)── flag は見ず、**バイト列が妥当な UTF-8 か**だけで決める | ✔ :515-524 が pos+8 を読み飛ばしている |
+
+> ⚠ **M2 の処方は実測で覆した**(2026-08-01、着地前レビュー)。
+> 「bit 11 が立っていない かつ 名前が非 ASCII なら断る」は誤り ──
+> **Info-ZIP(Linux / macOS の `zip`)は UTF-8 の名前を bit 11 を立てずに書く**ので、
+> 正しい ZIP を丸ごと拒否する。しかも deflate 対応の動機だった「ZIP ツールで
+> 再梱包したファイル」がまさにその形。逆に bit 11 さえ立っていれば壊れたバイトが
+> U+FFFD で黙って通っていた ── **判定が両方向とも逆**だった。
+> 正しい問いは「**バイト列が妥当な UTF-8 か**」で、`TextDecoder('utf-8', {fatal:true})`
+> の 1 か所で両方向が直る(CP932 等は妥当な UTF-8 ではないので断れる)。
 | M3 | **CRC-32 を検証しない**(writer は書く) | 検証する。不一致は断る | ✔ 照合コードが両経路に無い。破損検知が `JSON.parse` 失敗頼みだと、**asset だけ壊れた ZIP が無言で欠けた添付になる** |
 
 **そのまま流用してよい部分**: CD の値を正とする(data descriptor で local header の
@@ -102,7 +114,20 @@ size が 0 になっても CD には入っている ✔)/ EOCD は末尾 65557 �
 進捗コールバックの粒度。
 
 **断る条件**(すべて可視・黙って落とさない): ZIP64 / method が 0・8 以外 /
-flag bit 0(暗号化)/ CD signature 不正 / EOCD なし。
+flag bit 0(暗号化)/ **分割書庫(マルチディスク)** / CD signature 不正 / EOCD なし /
+CRC 不一致 / **サイズ不一致** / 名前が妥当な UTF-8 でない / **目次と件数の不整合**。
+
+⚠ **EOCD は署名の一致だけで採らない** ── 署名と同じ 4 バイトは本体にもコメントにも
+偶然現れる。**comment 長が残りバイトと一致する**候補だけを採る(これが無いと
+ZIP ですらないバイナリが「空 ZIP」として通り、上の受理器で「manifest が無い」に
+化けて user が原因を取り違える)。
+
+⚠ **前置バイトのある ZIP**(自己解凍書庫)は EOCD の実位置から前置量を逆算して
+読む ── 足さないと「壊れています」という**嘘の診断**になる。
+
+⚠ **検証を外す逃げ道は持たない**。`verifyCrc: false` の類はサイズ照合まで一緒に
+落として「他人の entry の中身が返る」経路を開ける。CRC は stream で舐めて確かめる
+ので、**全量を heap に載せずに検証できる**(下記)。
 
 ### 2-3. メモリ規律 ── base64 を一切経由しない
 
@@ -124,6 +149,12 @@ ZIP(Blob)
 ピークは「最大 asset 1 件 + CD」に有界。ZIP-in-ZIP でも「最大の内側 ZIP 1 個 +
 その中の最大 asset 1 件」。**例外は #8 のみ**(中身が base64 テキストなので +4/3 が
 発生するが、`.folder-export.zip` の内側にしか現れず 1 entry 単位なので許容)。
+
+⚠ **素朴に書くとこの主張は成り立たない**(2026-08-01 レビューで計測):
+`new Blob([bytes])` は**コピー**なので、store で 2 部・deflate で 3 部になる。
+- **store**: slice を stream で舐めて検証し、**slice(view)をそのまま返す** → 0 部
+- **deflate**: 展開しながら CRC を計算する(全量を `Uint8Array` に起こしてから
+  測らない)→ 返す 1 部のみ
 
 ### 2-4. 🔴 P6a の API に穴がある(P6c の 1 手目)
 
@@ -185,7 +216,7 @@ PKC3 側で `Pkc2Container` 形の合成物を組み立てて convert に渡す�
 
 | 段 | 内容 | なぜこの順か |
 |---|---|---|
-| ① | **ZIP reader**(Blob ベース / store / CD 正 / CRC 検証 / M1〜M3) | 全 8 形式の土台。形式知識ゼロの純機構なので合成 ZIP fixture だけで pin できる。deflate(§5-①)は 1 分岐 ── 裁定が来ていなければ store のみで着地し、method 8 は断る |
+| ✅ ① | **ZIP reader**(`src/features/import/zip-reader.ts`)── Blob ベース / store + deflate / CD 正 / CRC 検証 / M1〜M3 込み | 全 8 形式の土台。形式知識ゼロの純機構なので合成 ZIP fixture だけで pin できた(21 件)。deflate も受理(§5-①)|
 | ② | **`pkc2-package`**(#1) | **変換 core をそのまま再利用できる唯一の形式**。ここで §2-4 の API 変更と「ZIP → putBlob の streaming 経路」を確立する ── **bundle 系全部の土台**。かつ user のバックアップ正本なので、**ここまでで「PKC2 から救出できる」が成立する** |
 | ③ | **`.text.zip`(#2)→ `.textlog.zip`(#3)** | §2-5 の合成 container 規約を単体 2 形式で確立してから batch へ。text が先なのは #3 が CSV 逆写像を追加で要求するため |
 | ④ | **batch 3 形式**(#4 / #5 / #6) | 段③の再帰適用のみ。新概念は「内側 ZIP を Blob 化して reader を再入」の 1 点(M1 で用意済み)。3 形式は外側 manifest の形が違うだけで処理は同一 ── 1 段で 3 形式片付く |
@@ -259,7 +290,8 @@ no-op になる。粒度はデータの正しさの問題ではなく「途中�
   (b) `folders[]` を持たない旧 `.folder-export.zip`(コードは常に出力・doc は optional ▲)
   (c) legacy inline `data` 入り attachment を含む container
 
-⑥ `DecompressionStream('deflate-raw')` のブラウザ対応下限(`gzip` より後発)。
+⑥ `DecompressionStream('deflate-raw')` の**対応下限の版**。
+   同梱 Chromium 141 での往復は実測済み(2026-08-01)だが、下限は未確認。
 
 ⑦ `classifyFolderRestore` / `buildBatchImportPlan` ── どんなときに階層復元が
 拒否されるか。**再設計する前提なら読まなくてよい**が、「PKC2 で復元できたものが

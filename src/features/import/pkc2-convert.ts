@@ -11,7 +11,8 @@
  *   ⑤ 参照書換: entry:<lid>(lidMap)→ textlog permalink → asset:<key>(keyMap)
  *   ⑥ __x__ reserved lid / system-* archetype の除外、entry_order の採番
  *
- * revisions は**捨てる**(P6 設計 §4 の既定 (b) ── user 裁定があれば追加)。
+ * revisions は**持ち込む**(user 裁定 2026-08-01)── ただしここでは「古い順に
+ * 並んだ変換済み全文」までを作り、逆向きパッチへの符号化は worker が行う。
  * I/O は一切しない(HTML/ZIP の読取り・bytes decode・書込は adapter 側)。
  */
 import { getFlavor } from '../flavor';
@@ -90,6 +91,12 @@ export interface ConvertOptions {
   orderBase: number;
   /** 既存 relation id 集合(衝突は再採番 ── upsert が後勝ちで潰すため)。 */
   existingRelationIds?: ReadonlySet<string>;
+  /**
+   * asset の旧 key を **container の外**から渡す(ZIP 経路)。
+   * package/bundle は bytes が ZIP entry にあり `container.assets` は空なので、
+   * key だけをここで渡す ── 指定すると `container.assets` のキーより優先する。
+   */
+  assetKeys?: readonly string[];
   genLid(): string;
   genAssetKey(): string;
   genRelationId?(): string;
@@ -214,7 +221,9 @@ export function convertPkc2Container(
     takenKeys.add(k);
     return k;
   };
-  for (const oldKey of Object.keys(assetsIn)) keyMap.set(oldKey, freshAssetKey());
+  for (const oldKey of opts.assetKeys ?? Object.keys(assetsIn)) {
+    keyMap.set(oldKey, freshAssetKey());
+  }
   // legacy 内蔵 data(body に base64 が入っていた旧形式)は **履歴の版数ぶん**
   // 現れる ── 同じ base64 に同じ暫定 key を配らないと、`assetsOut` が同一 bytes を
   // 版の数だけ**同時に**保持し、adapter がその回数だけ復号 + SHA-256 する

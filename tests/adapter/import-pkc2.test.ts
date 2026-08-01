@@ -1,6 +1,9 @@
 /** @vitest-environment happy-dom */
 /**
- * P6b: PKC2 取込の**実行部** unit(判別 → 抽出 → 変換 → 書込 → 再読込)。
+ * PKC2 取込の**実行部** unit(判別 → 抽出 → 変換 → 書込 → 再読込)。
+ * P6b(単一 HTML)と P6c 段②(.pkc2.zip)の**両経路**を同じ網で見る ──
+ * 入力の違いは「container をどう得るか」「bytes をどこから取るか」だけで、
+ * それ以降は 1 本に合流するという設計そのものが検証対象。
  *
  * 網の狙いは 2 つ:
  * ① 取り込めたものが**実際に state へ現れる**こと(変換 core の unit だけでは
@@ -14,6 +17,7 @@ import { importPkc2File, type ImportDeps } from '../../src/adapter/ui/actions/im
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
 import type { RevisionChain } from '../../src/features/import/pkc2-convert';
 import { readAttachmentMeta } from '../../src/features/flavor/attachment-flavor';
+import { buildZip, bytesOf } from '../features/zip-fixture';
 
 /** PKC2 の export と同じ骨格(slot id と `<\/script` 退避)。 */
 function pkc2Html(payload: unknown): string {
@@ -374,14 +378,14 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(opLog.indexOf('entries')).toBeLessThan(opLog.indexOf('relations'));
   });
 
-  it('ZIP 形式は「まだ未実装」と可視で断る ── 書込は 1 件も起きない', async () => {
+  it('ZIP のふりをした壊れた入力は可視で断る ── 書込は 1 件も起きない', async () => {
     const { d, deps, written, blobs } = harness();
     const zip = new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0])], 'pkg.zip');
 
     expect(await importPkc2File(d, deps, zip)).toBeNull();
     expect(written).toHaveLength(0);
     expect(blobs.size).toBe(0);
-    expect(d.getState().error).toMatch(/まだ実装されていません/);
+    expect(d.getState().error).toMatch(/取込に失敗しました/);
     expect(d.getState().phase).toBe('ready'); // 非致命
   });
 
@@ -789,5 +793,135 @@ describe('importPkc2File (P6b 実行部)', () => {
 
     expect(await importPkc2File(d, deps, file)).toBeNull();
     expect(d.getState().error).toMatch(/履歴の書込で失敗/);
+  });
+
+  // ── P6c 段②: .pkc2.zip(バックアップ正本)の取込 ──
+
+  it('[P6c] .pkc2.zip を取り込む ── bytes は ZIP から直接流れる(base64 を経由しない)', async () => {
+    const { d, deps, written, blobs, opLog } = harness();
+    const container = {
+      meta: { container_id: 'c-old' },
+      entries: [
+        { lid: 'n1', title: 'ノート', archetype: 'text', body: '# 本文 ![図](asset:ast-x1)\n' },
+        {
+          lid: 'a1',
+          title: 'dot.png',
+          archetype: 'attachment',
+          body: JSON.stringify({ name: 'dot.png', mime: 'image/png', asset_key: 'ast-x1' }),
+        },
+      ],
+      relations: [],
+      revisions: [],
+      assets: {}, // ← PKC2 の writer は assets を空にする(bytes は ZIP entry へ)
+    };
+    const zip = await buildZip([
+      {
+        name: 'manifest.json',
+        bytes: bytesOf(
+          JSON.stringify({
+            format: 'pkc2-package',
+            version: 1,
+            entry_count: 2,
+            relation_count: 0,
+            revision_count: 0,
+            asset_count: 1,
+          }),
+        ),
+      },
+      { name: 'container.json', bytes: bytesOf(JSON.stringify(container)) },
+      { name: 'assets/ast-x1.bin', bytes: bytesOf('生バイナリ') },
+    ]);
+    const file = new File([zip], 'backup.pkc2.zip');
+
+    expect(await importPkc2File(d, deps, file)).toBe(2);
+
+    expect(blobs.size).toBe(1);
+    const key = [...blobs.keys()][0]!;
+    expect(await blobs.get(key)!.text()).toBe('生バイナリ');
+    // 参照は content key へ写っている(frontmatter と本文 markdown の両方)
+    const att = written.find((e) => e.archetype === 'attachment')!;
+    expect(readAttachmentMeta(att.body).assetKey).toBe(key);
+    expect(written.find((e) => e.lid === 'n1')!.body).toContain(`asset:${key}`);
+    // 規約は HTML 経路と同じ ── bytes が先、参照が後
+    expect(opLog.findIndex((o) => o.startsWith('blob:'))).toBeLessThan(
+      opLog.indexOf('entries'),
+    );
+  });
+
+  it('[P6c] .pkc2.zip の履歴も HTML 経路と同じ鎖へ合流する', async () => {
+    const { d, deps, revChains } = harness();
+    const container = {
+      meta: {},
+      entries: [{ lid: 'n1', title: 'n', archetype: 'text', body: 'いま\n' }],
+      relations: [],
+      revisions: [
+        { id: 'r1', entry_lid: 'n1', created_at: '2026-07-01T00:00:00Z', snapshot: 'v1\n' },
+        { id: 'r2', entry_lid: 'n1', created_at: '2026-07-02T00:00:00Z', snapshot: 'v2\n' },
+      ],
+      assets: {},
+    };
+    const zip = await buildZip([
+      {
+        name: 'manifest.json',
+        bytes: bytesOf(JSON.stringify({ format: 'pkc2-package', version: 1 })),
+      },
+      { name: 'container.json', bytes: bytesOf(JSON.stringify(container)) },
+    ]);
+
+    await importPkc2File(d, deps, new File([zip], 'b.pkc2.zip'));
+
+    // 経路ごとに履歴の入り方が違う状態を作らない
+    expect(revChains).toHaveLength(1);
+    expect(revChains[0]!.snapshots.map((s) => s.body)).toEqual(['v1\n', 'v2\n']);
+  });
+
+  it('[P6c] ZIP が pkc2-package でなければ可視で断る ── 書込は 1 件も起きない', async () => {
+    const { d, deps, written, blobs } = harness();
+    const zip = await buildZip([
+      {
+        name: 'manifest.json',
+        bytes: bytesOf(JSON.stringify({ format: 'pkc2-text-bundle', version: 1 })),
+      },
+    ]);
+    expect(await importPkc2File(d, deps, new File([zip], 'b.zip'))).toBeNull();
+    expect(written).toHaveLength(0);
+    expect(blobs.size).toBe(0);
+    expect(d.getState().error).toMatch(/pkc2-package のみ/);
+  });
+
+  it('[P6c] Office 文書は名指しで断る(不明に混ぜない)', async () => {
+    const { d, deps } = harness();
+    const zip = await buildZip([{ name: '[Content_Types].xml', bytes: bytesOf('<Types/>') }]);
+    expect(await importPkc2File(d, deps, new File([zip], 'sheet.xlsx'))).toBeNull();
+    expect(d.getState().error).toMatch(/Office 文書/);
+  });
+
+  it('[P6c] 壊れた ZIP(CRC 不一致)は取り込まず可視で断る', async () => {
+    const { d, deps, blobs } = harness();
+    const container = {
+      meta: {},
+      entries: [
+        {
+          lid: 'a1',
+          title: 'x.bin',
+          archetype: 'attachment',
+          body: JSON.stringify({ name: 'x.bin', mime: 'application/octet-stream', asset_key: 'k' }),
+        },
+      ],
+      relations: [],
+      assets: {},
+    };
+    const zip = await buildZip([
+      {
+        name: 'manifest.json',
+        bytes: bytesOf(JSON.stringify({ format: 'pkc2-package', version: 1 })),
+      },
+      { name: 'container.json', bytes: bytesOf(JSON.stringify(container)) },
+      { name: 'assets/k.bin', bytes: bytesOf('壊れた中身'), corruptCrc: true },
+    ]);
+
+    // 1 件の添付が壊れていても取込全体は止めない(欠損は可視化する)── HTML 経路と同じ
+    expect(await importPkc2File(d, deps, new File([zip], 'b.pkc2.zip'))).toBe(1);
+    expect(blobs.size).toBe(0);
   });
 });
