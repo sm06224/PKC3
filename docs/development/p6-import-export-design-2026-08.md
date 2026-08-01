@@ -96,10 +96,17 @@ container の 66.7%)。選択肢:
 
 ## 6. 着地計画
 
-- **P6a**: 受理器(判別 + HTML/pkc2-package 読取)+ 変換 core(①〜⑥)+
-  fixture pin。単独で「PKC2 の主 2 形式を読める」
-- **P6b**: bundle 系(#3〜#5)+ folder 階層復元
-- **P6c**: PKC3 export 3 形式
+- ✅ **P6a**(着地 #33): 変換 core(①〜⑥)+ textlog anchor 対応表 + fixture pin。
+  I/O を持たない純関数なので単独で pin できる
+- ✅ **P6b**(本段): 判別器(magic → manifest.format、拡張子を信じない)+
+  HTML 受理器(DOMParser・厳格検証)+ **取込の実行部と UI 配線**
+  (asset 1 件ずつ復号 → Blob → bulk 書込 → 再読込)。単独で
+  「PKC2 の単一 HTML を取り込んで使える」まで到達する。
+  ⚠ 当初計画では P6b = bundle 系だったが、**実行部と UI 配線を先に閉じた** ──
+  受理器だけ増やしても user は 1 件も取り込めず、「読めたつもり」の検証もできない
+- **P6c**: ZIP 系(pkc2-package + bundle 系 #3〜#5)+ folder 階層復元。
+  現状は ZIP magic を検出した時点で**可視で断る**(黙って落とさない)
+- **P6d**: PKC3 export 3 形式
 - fixture の variant(ゼロ件次元を作らない): light / readonly / gzip+base64 /
   無圧縮(8MB 超)/ revisions 入り / legacy data 直埋め attachment /
   legacy log-<ts>-<n> id 混在 textlog / 旧 tag_filter の saved_searches。
@@ -114,3 +121,12 @@ container の 66.7%)。選択肢:
   「rows のセル文字列に生で入る」前提の検証)
 - subset export の app_icon_asset_key 閉包漏れ(PKC2 側の既知の縁)──
   PKC3 は missing asset を broken-ref として可視受理するので実害は限定的
+- P6b の実行部で確定した規約(P6c もこれに従う):
+  - **bytes を先に、参照を後に書く**。逆順にすると「参照はあるが bytes が無い」
+    entry が残る ── 逆向き(参照なし bytes)は明示 purge で回収できる
+  - **取込は asset gate の内側**(attach / purge と排他)。取込は
+    putBlob → entry 書込の間に「bytes はあるが参照が無い」窓を持つので、
+    その窓で整理が走ると取込中の bytes を消す(P4b review F1 と同型)
+  - **判別できない入力は書込前に可視で断る**。ZIP は「不明」に混ぜず ZIP として
+    断る(user が原因を誤解しない文言にする)
+  - 復号済み base64 を配列に溜めない(1 件ずつ Blob 化してその場で手放す)

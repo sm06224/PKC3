@@ -52,12 +52,20 @@ export interface ConvertResult {
 }
 
 export interface ConvertOptions {
-  /** 既存 container の lid 集合(衝突は再採番)。 */
+  /**
+   * 既存 lid 集合(衝突は再採番)。
+   * ⚠ **生存 entry だけでは足りない**(review H-1)── ゴミ箱の lid(entries に
+   * 居ないが revisions を持つ)と衝突すると、その item がゴミ箱から消え、
+   * 取り込んだ entry が他人の履歴を背負う。呼び出し側が両方を合わせて渡すこと。
+   */
   existingLids: ReadonlySet<string>;
   /** 既存 entryOrder の最大値(採番はこの続き)。 */
   orderBase: number;
+  /** 既存 relation id 集合(衝突は再採番 ── upsert が後勝ちで潰すため)。 */
+  existingRelationIds?: ReadonlySet<string>;
   genLid(): string;
   genAssetKey(): string;
+  genRelationId?(): string;
 }
 
 const RESERVED_LID = /^__.+__$/;
@@ -114,8 +122,22 @@ export function convertPkc2Container(
   const finalLid = (lid: string): string => lidMap.get(lid) ?? lid;
 
   // ── asset keyMap(旧 3 系統 + 派生をすべて新 1 規則へ)
+  // ⚠ 生成値は検査する(review M-8)── 採番規則の実効エントロピーは 6 文字 base36 で、
+  // 取込は同一 ms 内に何千件も採番する。衝突すると putBlob が後勝ちで上書きし、
+  // 2 つの添付が同じ bytes を指す(無言のデータ消失)。lid 側と同じ規律を敷く
   const keyMap = new Map<string, string>();
-  for (const oldKey of Object.keys(assetsIn)) keyMap.set(oldKey, opts.genAssetKey());
+  const takenKeys = new Set<string>();
+  const freshAssetKey = (): string => {
+    let k = opts.genAssetKey();
+    for (let i = 0; takenKeys.has(k) && i < 1000; i++) k = opts.genAssetKey();
+    if (takenKeys.has(k)) {
+      // 1000 回引いて外れない = 生成器が壊れている。黙って上書きさせない
+      throw new Error('asset key の採番が衝突し続けています(生成器の不具合)');
+    }
+    takenKeys.add(k);
+    return k;
+  };
+  for (const oldKey of Object.keys(assetsIn)) keyMap.set(oldKey, freshAssetKey());
 
   // mime は attachment body 側が持つ(container.assets には無い)── 先に回収
   const mimeByOldKey = new Map<string, string>();
@@ -161,7 +183,7 @@ export function convertPkc2Container(
         const p = JSON.parse(src) as Record<string, unknown>;
         const data = str(p.data);
         if (data !== '') {
-          const newKey = opts.genAssetKey();
+          const newKey = freshAssetKey();
           assetsOut.push({
             key: newKey,
             base64: data,
@@ -173,6 +195,13 @@ export function convertPkc2Container(
         } else {
           const k = str(p.asset_key);
           if (k !== '' && keyMap.has(k)) p.asset_key = keyMap.get(k);
+          else if (k !== '') {
+            // light export(assets 空)や subset export の閉包漏れ。旧 key のまま
+            // 入るので開くまで気づけない ── 取込の時点で件数を言う(review M-7)
+            warnings.push(
+              `添付の中身がこの export に含まれていません: ${u.title || u.lid}`,
+            );
+          }
         }
         const icon = str(p.app_icon_asset_key);
         if (icon !== '' && keyMap.has(icon)) p.app_icon_asset_key = keyMap.get(icon);
@@ -223,6 +252,13 @@ export function convertPkc2Container(
   // ── relations(端点が変換集合に居ないものは捨てて警告)
   const lids = new Set(entries.map((e) => e.lid));
   const relations: ConvertResult['relations'] = [];
+  // ⚠ relation id も lid と同じく再採番する(review H-2)。worker は
+  // ON CONFLICT(cid, id) DO UPDATE なので、同じ id が来ると**上書き**される ──
+  // 同じファイルを 2 回取り込むと 1 回目の関連が disk から消え、PKC2 の relation に
+  // id が無ければ全部 '' で衝突して 1 本しか残らない(どちらも実証済み)
+  const takenRelIds = new Set(opts.existingRelationIds ?? []);
+  const genRelationId =
+    opts.genRelationId ?? (() => `rel-${Math.random().toString(36).slice(2, 10)}`);
   for (const raw of Array.isArray(c.relations) ? c.relations : []) {
     const r = raw as Record<string, unknown>;
     const from = finalLid(str(r.from));
@@ -236,7 +272,16 @@ export function convertPkc2Container(
       warnings.push(`未知 kind の relation を除外: ${str(r.id)} (${kind})`);
       continue;
     }
-    relations.push({ id: str(r.id), fromLid: from, toLid: to, kind });
+    let id = str(r.id);
+    if (id === '' || takenRelIds.has(id)) {
+      id = genRelationId();
+      for (let i = 0; takenRelIds.has(id) && i < 1000; i++) id = genRelationId();
+      if (takenRelIds.has(id)) {
+        throw new Error('relation id の採番が衝突し続けています(生成器の不具合)');
+      }
+    }
+    takenRelIds.add(id);
+    relations.push({ id, fromLid: from, toLid: to, kind });
   }
 
   const revCount = Array.isArray(c.revisions) ? c.revisions.length : 0;
