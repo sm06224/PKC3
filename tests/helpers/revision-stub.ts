@@ -12,7 +12,7 @@ type RevisionOps = Pick<
 
 export function stubRevisionOps(): RevisionOps {
   return {
-    addRevision: async () => ({ added: true, pruned: 0 }),
+    addRevision: async () => ({ added: false, pruned: 0 }), // 「積まれた」と主張しない(review P5b F5)
     listRevisionMetas: async () => [],
     getRevision: async () => null,
     listTrash: async () => [],

@@ -153,8 +153,11 @@ export type SystemCommand =
   | { type: 'REVISION_LIST_LOADED'; lid: string; items: RevisionItem[] }
   | { type: 'TRASH_LIST_LOADED'; items: TrashItem[] }
   | {
-      /** 復元完了(履歴 / ゴミ箱共通)。meta は effect が抽出済みの行から組む。 */
+      /** 復元完了(履歴 / ゴミ箱共通)。meta は effect が抽出済みの行から組む。
+       *  mode は着弾時の整合判定に使う: revision = entry が居るのが前提(削除
+       *  されていたら破棄)、trash = 居ないのが前提(二重復元の後着は破棄)。 */
       type: 'ENTRY_RESTORED';
+      mode: 'revision' | 'trash';
       meta: EntryMeta;
       body: string;
     }
@@ -228,8 +231,10 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
   switch (action.type) {
     case 'SYS_BOOTED': {
       const metas = new Map(action.metas.map((m) => [m.lid, m]));
+      // entryOrder の tie は lid 辞書順で安定化(review P5b F3 ── trash 復元と
+      // CREATE の並行採番は重複しうる。正準親の tie-break とも同じ規約)
       const order = [...action.metas]
-        .sort((a, b) => a.entryOrder - b.entryOrder)
+        .sort((a, b) => a.entryOrder - b.entryOrder || a.lid.localeCompare(b.lid))
         .map((m) => m.lid);
       // 再 boot(コンテナ切替・error 復帰)で旧選択・旧 openBody を持ち越さない
       // (lid 偶然衝突による cross-container 上書きの防止 ── review F)
@@ -389,9 +394,12 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       const events: DomainEvent[] = [];
       // 変更前(baseline)を履歴に積む(P5b)。新規作成の初回 commit は積まない ──
       // 「flavor seed へ戻す」だけの復元先はゴミ(PKC2 は無条件に積んで肥大した)。
+      // ⚠ freshLid だけでは足りない(review P5b F4): rename が fresh を解除する
+      // ため「作成 → title → 本文 → 保存」の普通の流れで seed revision が積まれる
+      // ── baseline が flavor seed のままなら fresh 扱いで skip する。
       // RETRY_PERSIST はここを通らないので再発行されない(重複は worker の
       // hash skip が二重に守る)
-      if (state.freshLid !== lid) {
+      if (state.freshLid !== lid && baseline !== seedBodyFor(meta.archetype)) {
         events.push({
           type: 'REQUEST_REVISION',
           lid,
@@ -748,6 +756,32 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       return { state, events: [{ type: 'REQUEST_TRASH_PURGE' }] };
     }
     case 'ENTRY_RESTORED': {
+      // 🔒 編集中の着弾(review P5b F1 ── 反例実験で draft 全損と editor
+      // 乗っ取りを実証): 選択と editor は絶対に乗っ取らない。
+      // - 同一 lid: disk 先行の印だけ付ける(TODO_TOGGLED の editing 分岐と同じ
+      //   意味論 ── 変更あり commit は draft が勝ち、無変更 commit / cancel は
+      //   disk = 復元内容が勝つ)
+      // - 別 lid: 破棄(復元は disk 側で完了済み ── 前進変異なので再操作で回収可)
+      if (state.phase === 'editing') {
+        if (state.openBody?.lid === action.meta.lid) {
+          return {
+            state: {
+              ...state,
+              entryMetas: new Map(state.entryMetas).set(action.meta.lid, action.meta),
+              openBody: { ...state.openBody, persisted: action.body, diskAhead: true },
+            },
+            events: [],
+          };
+        }
+        return { state, events: [] };
+      }
+      if (state.phase !== 'ready') return { state, events: [] };
+      // 整合判定(review P5b F2): 履歴復元は entry が居るのが前提 ── 発行後に
+      // 削除されていたら破棄(disk も queue 直列で「復元 → 削除」の順に終わって
+      // おり、捨てる = 整合)。trash 復元は居ないのが前提(二重復元の後着を破棄)
+      const exists = state.entryMetas.has(action.meta.lid);
+      if (action.mode === 'revision' ? !exists : exists)
+        return { state, events: [] };
       // 履歴復元(既存 meta 置換)と trash 復元(再出現)の合流点。復元先を
       // 選択して結果を見せる。openBody は disk 確定値で確立(persisted = body)
       const entryMetas = new Map(state.entryMetas).set(action.meta.lid, action.meta);

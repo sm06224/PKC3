@@ -173,6 +173,127 @@ describe('revision flow (P5b)', () => {
     expect(d.getState().error).toContain('既に存在します');
   });
 
+  it('編集中の着弾・同一 lid: draft 無傷 + diskAhead(無変更 cancel で復元内容が勝つ)', async () => {
+    let release: (v: { body: string; title: string | null; archetype: string | null }) => void =
+      () => {};
+    const { d, log } = setup(
+      { e1: '# 現在' },
+      {
+        getRevision: () =>
+          new Promise((r) => {
+            release = r;
+          }),
+      },
+    );
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
+    await tick();
+    d.dispatch({ type: 'RESTORE_REVISION', revId: 'r-9' });
+    await tick(); // effect が getRevision の gate に到達する
+    // gate で停止している間に編集開始・打鍵
+    d.dispatch({ type: 'START_EDIT' });
+    d.dispatch({ type: 'UPDATE_OPEN_BODY', body: '# 打鍵中の draft' });
+    release({ body: '# 復元先', title: null, archetype: 'text' });
+    await tick();
+
+    const s = d.getState();
+    expect(s.phase).toBe('editing'); // editor は乗っ取られない
+    expect(s.openBody?.body).toBe('# 打鍵中の draft'); // draft 無傷(F1 の反例封鎖)
+    expect(s.openBody?.diskAhead).toBe(true); // disk 先行の印
+    expect(s.openBody?.persisted).toBe('# 復元先');
+
+    // draft を捨てる cancel → disk(復元内容)が勝つ(TODO_TOGGLED と同じ規律)
+    d.dispatch({ type: 'CANCEL_EDIT' });
+    expect(d.getState().openBody?.body).toBe('# 復元先');
+    expect(log).toContain('persist:e1:# 復元先'); // disk には復元が済んでいる
+  });
+
+  it('編集中の着弾・別 lid(trash 復元): 破棄 ── 選択も editor も動かない', async () => {
+    let release: (v: { body: string; title: string | null; archetype: string | null }) => void =
+      () => {};
+    const { d } = setup(
+      { e1: '# live' },
+      {
+        listTrash: async () => [
+          { id: 'r-t', entry_lid: 'gone1', created_at: null, title: 'x', archetype: 'text' },
+        ],
+        getRevision: () =>
+          new Promise((r) => {
+            release = r;
+          }),
+      },
+    );
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' }); // 先に e1 の body を確立
+    await tick();
+    d.dispatch({ type: 'SET_VIEW_MODE', mode: 'filer' });
+    d.dispatch({ type: 'SHOW_TRASH' });
+    await tick();
+    d.dispatch({ type: 'RESTORE_TRASH', entryLid: 'gone1', revId: 'r-t' });
+    await tick(); // effect が gate に到達
+    d.dispatch({ type: 'START_EDIT' });
+    d.dispatch({ type: 'UPDATE_OPEN_BODY', body: 'draft' });
+    release({ body: '# 復元', title: 'x', archetype: 'text' });
+    await tick();
+
+    const s = d.getState();
+    expect(s.selectedLid).toBe('e1'); // 乗っ取りなし
+    expect(s.openBody?.body).toBe('draft'); // draft 無傷
+    expect(s.entryMetas.has('gone1')).toBe(false); // 着弾は破棄(disk には居る ──
+    // 前進変異なので再操作(reload / 再復元)で回収できる)
+  });
+
+  it('復元発行 → 即削除: 後着の ENTRY_RESTORED は破棄(幽霊 entry を作らない)', async () => {
+    let release: (v: { body: string; title: string | null; archetype: string | null }) => void =
+      () => {};
+    const { d, log } = setup(
+      { e1: '# 現在' },
+      {
+        getRevision: () =>
+          new Promise((r) => {
+            release = r;
+          }),
+      },
+    );
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
+    await tick();
+    d.dispatch({ type: 'RESTORE_REVISION', revId: 'r-9' });
+    await tick(); // effect が gate に到達
+    d.dispatch({ type: 'DELETE_ENTRY', lid: 'e1' }); // 楽観反映で state から消える
+    release({ body: '# 復元先', title: null, archetype: 'text' });
+    await tick();
+
+    const s = d.getState();
+    expect(s.entryMetas.has('e1')).toBe(false); // 幽霊は作らない(F2 の反例封鎖)
+    expect(s.selectedLid).toBeNull();
+    // disk は queue 直列で「復元 persist → 削除」の順に終わる = 最終状態は削除
+    expect(log.at(-1)).toBe('delete');
+  });
+
+  it('fresh → rename → 初回 commit は seed revision を積まない(F4)', async () => {
+    const { d, log } = setup({});
+    d.dispatch({ type: 'CREATE_ENTRY', archetype: 'text', lid: 'n1', title: 'ノート 1' });
+    await tick();
+    d.dispatch({ type: 'RENAME_ENTRY_TITLE', lid: 'n1', title: '買い物メモ' }); // fresh 解除
+    await tick();
+    const before = log.length;
+    d.dispatch({ type: 'UPDATE_OPEN_BODY', body: '# 初稿' });
+    d.dispatch({ type: 'COMMIT_EDIT' });
+    await tick();
+    const added = log.slice(before);
+    expect(added.filter((l) => l.startsWith('rev:'))).toEqual([]); // 空 seed を積まない
+    expect(added).toContain('persist:n1:# 初稿');
+  });
+
+  it('SYS_BOOTED: entryOrder の tie は lid 辞書順で安定(F3 の無害化)', () => {
+    const d = new Dispatcher();
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('b2', { entryOrder: 2 }), meta('a2', { entryOrder: 2 }), meta('c1', { entryOrder: 1 })],
+      relations: [],
+    });
+    expect(d.getState().order).toEqual(['c1', 'a2', 'b2']);
+  });
+
   it('purge-trash: confirm 不在は fail closed、承諾で TRASH_PURGED が panel を空にする', async () => {
     let purged = 0;
     const { d, root } = setup(

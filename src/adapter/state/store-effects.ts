@@ -253,6 +253,7 @@ export function connectStoreEffects(
             if (!disposed)
               dispatcher.dispatch({
                 type: 'ENTRY_RESTORED',
+                mode: 'revision',
                 meta: {
                   lid: ev.lid,
                   title,
@@ -330,6 +331,7 @@ export function connectStoreEffects(
             if (!disposed)
               dispatcher.dispatch({
                 type: 'ENTRY_RESTORED',
+                mode: 'trash',
                 meta: {
                   lid: ev.entryLid,
                   title,
