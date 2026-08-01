@@ -2,7 +2,8 @@
 
 > `p6-import-export-design-2026-08.md` §6 の **P6c**。P6b で「ZIP magic を検出したら
 > 可視で断る」ところまで着地済み(`src/adapter/ui/actions/import-pkc2.ts`)。
-> 本書はその断りを外して受理器を積むための設計。**実装前の裁定待ち**(§5)。
+> 本書はその断りを外して受理器を積むための設計。裁定は全件決着(§5)。
+> **段① の ZIP reader は着地済み** ── 以降は形式ごとの受理器を積む段。
 
 ## 0. 検証の強さ(埋めた風にしない)
 
@@ -84,7 +85,9 @@
 - PKC2 の writer は method 0 固定 ▲ なので、deflate が効くのは
   **user が ZIP ツールで開いて再梱包した場合**。PKC2 はこれを throw して断っていた ▲
   → §5-① の裁定事項
-- ⚠ `'deflate-raw'` のブラウザ対応下限は**未確認**(§5-⑥)
+- ✅ `'deflate-raw'` は**同梱 Chromium(141)で往復を実測**(gzip / deflate / deflate-raw
+  の 3 形式すべて ok)。⚠ ただし**対応下限の版は未確認**のまま ── 対象ブラウザ表を
+  決める段で確認する(§5-⑥)
 
 ### 2-2. reader は PKC2 から流用 + 3 点の修正
 
@@ -185,7 +188,7 @@ PKC3 側で `Pkc2Container` 形の合成物を組み立てて convert に渡す�
 
 | 段 | 内容 | なぜこの順か |
 |---|---|---|
-| ① | **ZIP reader**(Blob ベース / store / CD 正 / CRC 検証 / M1〜M3) | 全 8 形式の土台。形式知識ゼロの純機構なので合成 ZIP fixture だけで pin できる。deflate(§5-①)は 1 分岐 ── 裁定が来ていなければ store のみで着地し、method 8 は断る |
+| ✅ ① | **ZIP reader**(`src/features/import/zip-reader.ts`)── Blob ベース / store + deflate / CD 正 / CRC 検証 / M1〜M3 込み | 全 8 形式の土台。形式知識ゼロの純機構なので合成 ZIP fixture だけで pin できた(21 件)。deflate も受理(§5-①)|
 | ② | **`pkc2-package`**(#1) | **変換 core をそのまま再利用できる唯一の形式**。ここで §2-4 の API 変更と「ZIP → putBlob の streaming 経路」を確立する ── **bundle 系全部の土台**。かつ user のバックアップ正本なので、**ここまでで「PKC2 から救出できる」が成立する** |
 | ③ | **`.text.zip`(#2)→ `.textlog.zip`(#3)** | §2-5 の合成 container 規約を単体 2 形式で確立してから batch へ。text が先なのは #3 が CSV 逆写像を追加で要求するため |
 | ④ | **batch 3 形式**(#4 / #5 / #6) | 段③の再帰適用のみ。新概念は「内側 ZIP を Blob 化して reader を再入」の 1 点(M1 で用意済み)。3 形式は外側 manifest の形が違うだけで処理は同一 ── 1 段で 3 形式片付く |
@@ -259,7 +262,8 @@ no-op になる。粒度はデータの正しさの問題ではなく「途中�
   (b) `folders[]` を持たない旧 `.folder-export.zip`(コードは常に出力・doc は optional ▲)
   (c) legacy inline `data` 入り attachment を含む container
 
-⑥ `DecompressionStream('deflate-raw')` のブラウザ対応下限(`gzip` より後発)。
+⑥ `DecompressionStream('deflate-raw')` の**対応下限の版**。
+   同梱 Chromium 141 での往復は実測済み(2026-08-01)だが、下限は未確認。
 
 ⑦ `classifyFolderRestore` / `buildBatchImportPlan` ── どんなときに階層復元が
 拒否されるか。**再設計する前提なら読まなくてよい**が、「PKC2 で復元できたものが
