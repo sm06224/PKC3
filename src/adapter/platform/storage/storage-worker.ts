@@ -475,28 +475,86 @@ const handlers: Handlers = {
     }
     return null;
   },
-  bulkAddRevisions: (req) => {
+  importRevisionChains: (req) => {
+    // 取込の履歴を **P5c の鎖**として積む(user 裁定 2026-08-01
+    // 「revisions の考え方は持ち込む、ただし jujutsu 的に遡及パッチ」)。
+    // 符号化は maintainChain と同一 ── 行 k は「その版の状態」を復元し、
+    // tip(entries.body)から rev_order 降順に遡って materialize される。
+    //   行 m: encodeReverse(tip,   S_m)
+    //   行 k: encodeReverse(S_k+1, S_k)
+    // **全文で積む経路は持たない**(持つと取込だけが設計から外れ、PKC2 と同じ
+    // 「履歴が本文の N 倍」に戻る)。保存形は listRevisionMetas の kind で観測できる
     const database = need();
+    const keepLatest = Math.max(1, req.keepLatest ?? DEFAULT_REVISION_KEEP);
+    const out: ResultMap['importRevisionChains'] = {
+      added: 0,
+      skippedNoChange: 0,
+      droppedOverLimit: 0,
+      skippedEntries: [],
+    };
     database.exec('BEGIN IMMEDIATE');
     try {
-      for (const r of req.revisions) {
-        database.exec({
-          sql: `INSERT INTO revisions
-                  (cid, id, entry_lid, created_at, rev_order, snapshot,
-                   title, archetype, content_hash, kind)
-                VALUES (?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, 'full')
-                ON CONFLICT(cid, id) DO NOTHING`,
-          bind: [
-            req.cid,
-            r.id,
-            r.entryLid,
-            r.revOrder,
-            r.snapshot,
-            r.title ?? null,
-            r.archetype ?? null,
-            contentHash64Hex(r.snapshot),
-          ],
-        });
+      for (const chain of req.chains) {
+        const row = database.selectObjects(
+          'SELECT body, title, archetype FROM entries WHERE cid = ? AND lid = ?',
+          [req.cid, chain.entryLid],
+        )[0] as { body: string; title: string; archetype: string } | undefined;
+        // entry が居ない / 既に鎖を持つ ものには積まない ── 既存の鎖に割り込むと
+        // 符号化の前提(隣接する版の差分)が崩れる
+        if (!row || headRevision(database, req.cid, chain.entryLid)) {
+          out.skippedEntries.push(chain.entryLid);
+          continue;
+        }
+
+        // 無変更の版を畳む(PKC2 は本文が変わらなくても snapshot を作りうる)。
+        // 「変更あり commit だけ刻む」= P5b で確立した規律
+        const states: Array<{ body: string; createdAt: string }> = [];
+        for (const s of chain.snapshots) {
+          if (states.length > 0 && states[states.length - 1]!.body === s.body) {
+            out.skippedNoChange++;
+            continue;
+          }
+          states.push(s);
+        }
+        // 最新の版が tip と同じなら、その版は履歴として持つ意味がない
+        while (states.length > 0 && states[states.length - 1]!.body === row.body) {
+          states.pop();
+          out.skippedNoChange++;
+        }
+        // 保持上限(古い側から捨てる ── 直近を残すのが既定)
+        if (states.length > keepLatest) {
+          out.droppedOverLimit += states.length - keepLatest;
+          states.splice(0, states.length - keepLatest);
+        }
+
+        // 新しい側から符号化する(基準は 1 つ新しい版、先頭は tip)
+        let base = row.body;
+        for (let k = states.length - 1; k >= 0; k--) {
+          const st = states[k]!;
+          const enc = encodeReverse(base, st.body);
+          database.exec({
+            sql: `INSERT INTO revisions
+                    (cid, id, entry_lid, created_at, rev_order, snapshot,
+                     title, archetype, content_hash, kind)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            bind: [
+              req.cid,
+              `rev-${crypto.randomUUID()}`,
+              chain.entryLid,
+              // 履歴の時刻は捏造しない ── PKC2 の created_at をそのまま持ち込む
+              st.createdAt || new Date().toISOString(),
+              k + 1,
+              enc.snapshot,
+              // PKC2 の Revision は title / archetype を持たない ── entry の値を使う
+              row.title,
+              row.archetype,
+              contentHash64Hex(st.body),
+              enc.kind,
+            ],
+          });
+          out.added++;
+          base = st.body;
+        }
       }
       database.exec('COMMIT');
     } catch (err) {
@@ -507,12 +565,12 @@ const handlers: Handlers = {
       }
       throw err;
     }
-    return null;
+    return out;
   },
   listRevisionMetas: (req) =>
     // snapshot 列を読まない ── 一覧は meta だけ、本文は getRevision で 1 行ずつ
     need().selectObjects(
-      `SELECT id, entry_lid, rev_order, created_at, title, archetype
+      `SELECT id, entry_lid, rev_order, created_at, title, archetype, kind
          FROM revisions WHERE cid = ? AND entry_lid = ?
         ORDER BY rev_order DESC`,
       [req.cid, req.entryLid],
@@ -532,7 +590,7 @@ const handlers: Handlers = {
     // ゴミ箱 = 「entries に居ない entry_lid の最新 revision」ビュー(P5 設計 §1)。
     // 独立 trash 機構は作らない ── PKC2 の設計を sqlite で自然に表現
     need().selectObjects(
-      `SELECT r.id, r.entry_lid, r.rev_order, r.created_at, r.title, r.archetype
+      `SELECT r.id, r.entry_lid, r.rev_order, r.created_at, r.title, r.archetype, r.kind
          FROM revisions r
          JOIN (SELECT entry_lid, MAX(rev_order) AS mx FROM revisions
                 WHERE cid = ?1 GROUP BY entry_lid) m

@@ -1,7 +1,7 @@
 /**
  * P6a: PKC2 → PKC3 純変換 core の pin。
  * variant を必ず持つ(ゼロ件次元を作らない): legacy data 直埋め / legacy log id /
- * lid 衝突 / 未知 kind relation / system entries / revisions 捨て。
+ * lid 衝突 / 未知 kind relation / system entries / 履歴の持込。
  */
 import { describe, expect, it } from 'vitest';
 import { parseFrontmatter } from '../../src/features/markdown/frontmatter';
@@ -43,7 +43,24 @@ const FIXTURE: Pkc2Container = {
     { id: 'r3', from: 'b-note', to: 'a-todo', kind: 'weird-kind' }, // 未知 kind
   ],
   assets: { 'ast-old-1': 'UE5H' },
-  revisions: [{ id: 'v1' }, { id: 'v2' }],
+  revisions: [
+    // 履歴は **PKC2 形式の全文**(todo は JSON 文字列)── 本文と同じ経路で
+    // 変換されなければ、復元したときに JSON が出てくる
+    {
+      id: 'v2',
+      entry_lid: 'a-todo',
+      created_at: '2026-07-02T00:00:00Z',
+      snapshot: JSON.stringify({ status: 'open', description: '買い物(第2版)' }),
+    },
+    {
+      id: 'v1',
+      entry_lid: 'a-todo',
+      created_at: '2026-07-01T00:00:00Z',
+      snapshot: JSON.stringify({ status: 'open', description: '買い物(第1版)' }),
+    },
+    // 除外される system entry の履歴は持ち込まない
+    { id: 'v0', entry_lid: '__settings__', created_at: '2026-07-01T00:00:00Z', snapshot: '{}' },
+  ],
 };
 
 describe('convertPkc2Container (P6a)', () => {
@@ -105,8 +122,45 @@ describe('convertPkc2Container (P6a)', () => {
     expect(r.warnings.some((w) => w.includes('r3'))).toBe(true);
   });
 
-  it('revisions は持ち込まず、件数を警告に出す', () => {
-    expect(r.warnings.some((w) => w.includes('revisions 2 件'))).toBe(true);
+  it('履歴は持ち込む ── 古い → 新しい の順に並べ、本文と同じ経路で変換する', () => {
+    // user 裁定 2026-08-01「revisions の考え方は持ち込む」+ P5c の鎖へ符号化
+    expect(r.revisionChains).toHaveLength(1); // system entry の履歴は入らない
+    const chain = r.revisionChains[0]!;
+    expect(chain.entryLid).toBe('a-todo');
+    expect(chain.snapshots.map((s) => s.createdAt)).toEqual([
+      '2026-07-01T00:00:00Z',
+      '2026-07-02T00:00:00Z',
+    ]); // created_at 昇順(container の並びは逆だった)
+    // JSON 文字列 body を履歴にも作らない
+    for (const s of chain.snapshots) {
+      expect(s.body).not.toContain('"status"');
+      expect(s.body).toContain('買い物');
+    }
+    expect(chain.snapshots[0]!.body).toContain('第1版');
+  });
+
+  it('履歴 snapshot の asset 参照も書き換わる(GC に消されないため)', () => {
+    const r2 = convertPkc2Container(
+      {
+        entries: [
+          { lid: 'n', title: 'n', archetype: 'text', body: '今の本文\n' },
+        ],
+        assets: { 'old-k': 'QQ==' },
+        revisions: [
+          {
+            id: 'v1',
+            entry_lid: 'n',
+            created_at: '2026-07-01T00:00:00Z',
+            snapshot: '古い本文 ![x](asset:old-k)\n',
+          },
+        ],
+      },
+      opts(),
+    );
+    const snap = r2.revisionChains[0]!.snapshots[0]!.body;
+    // 旧 key のまま残ると、GC の走査が content key を見つけられず bytes が消える
+    expect(snap).toContain('asset:ast-new-1');
+    expect(snap).not.toContain('asset:old-k');
   });
 
   it('lid 衝突は再採番され、entry: 参照と relations が追従する', () => {

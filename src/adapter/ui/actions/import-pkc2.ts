@@ -14,7 +14,11 @@ import type { Dispatcher } from '@adapter/state/dispatcher';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import { sniffMagic, detectPkc2Format } from '@features/import/detect-format';
 import { parsePkc2Html } from '@features/import/pkc2-html';
-import { convertPkc2Container, remapAssetKeys } from '@features/import/pkc2-convert';
+import {
+  convertPkc2Container,
+  remapAssetKeys,
+  type RevisionChain,
+} from '@features/import/pkc2-convert';
 import { identifyAsset } from '@adapter/platform/storage/asset-key';
 import { extractMeta } from '@features/flavor';
 
@@ -36,6 +40,13 @@ export interface ImportDeps {
   bulkUpsertRelations(
     relations: Array<{ id: string; fromLid: string; toLid: string; kind: string }>,
   ): Promise<void>;
+  /** 履歴を鎖として積む(全文では積まない ── P5c の符号化に合流させる)。 */
+  importRevisionChains(chains: RevisionChain[]): Promise<{
+    added: number;
+    skippedNoChange: number;
+    droppedOverLimit: number;
+    skippedEntries: string[];
+  }>;
   /** 既に持っている asset key(content addressing なので存在確認だけで済む)。 */
   listAssetKeys(): Promise<ReadonlySet<string>>;
   putBlob(assetKey: string, blob: Blob): Promise<void>;
@@ -80,6 +91,40 @@ async function decodeAsset(
   return out.slice(0, out.size, mime);
 }
 
+/** 1 メッセージに載せる履歴の目安(postMessage に全履歴を一度に載せない)。 */
+const REVISION_BATCH_BYTES = 4 * 1024 * 1024;
+
+/**
+ * 履歴を「1 メッセージあたりの全文量」で切って渡す。**鎖は割らない** ──
+ * 1 entry の履歴は隣接差分で符号化されるので、途中で切ると鎖が壊れる。
+ * ついでに snapshot 内の暫定 asset key を content key へ写す。
+ */
+function* batchChains(
+  chains: readonly RevisionChain[],
+  keyMap: ReadonlyMap<string, string>,
+): Generator<RevisionChain[]> {
+  let batch: RevisionChain[] = [];
+  let bytes = 0;
+  for (const chain of chains) {
+    const mapped: RevisionChain = {
+      entryLid: chain.entryLid,
+      snapshots: chain.snapshots.map((s) => ({
+        body: keyMap.size > 0 ? remapAssetKeys(s.body, keyMap) : s.body,
+        createdAt: s.createdAt,
+      })),
+    };
+    const size = mapped.snapshots.reduce((n, s) => n + s.body.length, 0);
+    if (batch.length > 0 && bytes + size > REVISION_BATCH_BYTES) {
+      yield batch;
+      batch = [];
+      bytes = 0;
+    }
+    batch.push(mapped);
+    bytes += size;
+  }
+  if (batch.length > 0) yield batch;
+}
+
 /**
  * 取込本体。**失敗は必ず可視**(OP_FAILED)で終える。
  * @returns 取り込んだ entry 数(失敗時は null)
@@ -101,6 +146,7 @@ export async function importPkc2File(
   // 書込の到達点。失敗時に「どこまで書けたか」を user に言うために持つ ──
   // 「失敗しました」とだけ言って disk に残すと、素直な再取込が二重取込になる
   let entriesWritten = 0;
+  const revStats = { added: 0, dropped: 0, skipped: 0 };
 
   try {
     const head = new Uint8Array(await file.slice(0, 4096).arrayBuffer());
@@ -179,6 +225,15 @@ export async function importPkc2File(
       await deps.bulkUpsertEntries(rows);
       entriesWritten = rows.length;
       if (result.relations.length > 0) await deps.bulkUpsertRelations(result.relations);
+      // 履歴は entries の**後**(worker が tip = entries.body を基準に符号化する)
+      if (result.revisionChains.length > 0) {
+        for (const batch of batchChains(result.revisionChains, keyMap)) {
+          const r = await deps.importRevisionChains(batch);
+          revStats.added += r.added;
+          revStats.dropped += r.droppedOverLimit;
+          revStats.skipped += r.skippedEntries.length;
+        }
+      }
     } catch (e) {
       // 書けた分は必ず画面へ出す ── 「失敗」と言いながら disk に残すのが最悪
       await deps.reload().catch(() => {});
@@ -194,16 +249,23 @@ export async function importPkc2File(
     // 先頭に置くと、50 件欠けていても user は何が欠けたか分からない
     const notes = [
       ...result.warnings,
+      ...(revStats.dropped > 0
+        ? [`保持上限を超えた古い版 ${revStats.dropped} 件は取り込みませんでした`]
+        : []),
+      ...(revStats.skipped > 0
+        ? [`${revStats.skipped} 件の entry は既に履歴を持つため見送りました`]
+        : []),
       ...(light ? ['添付の中身は含まれていない export です(light)'] : []),
     ];
+    const revNote = revStats.added > 0 ? `(履歴 ${revStats.added} 版)` : '';
     if (notes.length > 0) {
       // 警告は握りつぶさない。ただし**成功を失敗の見た目にしない** ──
       // OP_FAILED は state.error に載って「⚠ エラー」表示になる(review L-11)
       deps.notify?.(
-        `取込完了: ${rows.length} 件 ⚠ 注意 ${notes.length} 件 — ${notes[0]}`,
+        `取込完了: ${rows.length} 件${revNote} ⚠ 注意 ${notes.length} 件 — ${notes[0]}`,
       );
     } else {
-      deps.notify?.(`取込完了: ${rows.length} 件`);
+      deps.notify?.(`取込完了: ${rows.length} 件${revNote}`);
     }
     return rows.length;
   } catch (e) {

@@ -66,23 +66,38 @@ slot id(`#pkc-meta` で app='pkc2' & schema=1 を厳格検証 → `#pkc-data` te
   merge は import 後の container 操作。必要になったら PKC2 merge-planner の
   意味論 ── lid remap / asset dedupe / revisions drop ── を参考に別途)
 
-## 4. PKC2 revisions の扱い ── ⚖ user 裁定事項
+## 4. PKC2 revisions の扱い ── ✅ 裁定済(user 2026-08-01)
 
-PKC2 の revisions は `JSON.stringify(Entry)` 全文 snapshot・上限なし(実測で
-container の 66.7%)。選択肢:
+> **「revisions の考え方は持ち込む、ただし前に言ったように jujutsu 的に
+> 遡及パッチを持つ結論ではなかったか?」**(user 2026-08-01)
 
-- **(a) 持ち込む**: 全 snapshot を「PKC2 Entry JSON → body 原文 + 列」に変換して
-  bulkAddRevisions。JSON body archetype は snapshot ごとに fromPkc2 が要る。
-  容量・変換コストが大きく、PKC3 の保持ポリシー(20 件)とも矛盾する
-- **(b) 捨てる(推奨)**: PKC3 の履歴は「PKC3 での編集履歴」として 0 から始める。
-  PKC2 の履歴が必要な場面では旧 pkc2.html が手元に残る(単一 HTML 製品の性質)。
-  ⚠ 帰結: PKC2 側で「削除済み(trash)」だった entry は import されない ──
-  必要なら PKC2 側で復元してから export する運用
-- (折衷 c) trash 相当(entries に居ない lid の最新 snapshot)だけ PKC3 の
-  trash として持ち込む ── 変換は (a) と同じ問題を小さく持つ
+**持ち込む。ただし P5c の鎖へ符号化する**(全文では積まない)。
 
-**実装は (b) を既定で進め、(a)/(c) は user 裁定があれば追加する**(P6a の
-パイプラインは revisions に依存しない構造にする)。
+当初この節は「捨てる / 持ち込む」の二択で書かれていたが、**天秤が嘘だった**。
+「持ち込むと保存量が増える」という側の重さは、取込経路だけが全文
+(`kind='full'`)で積む設計だったことに由来しており、P5c で決めた
+「tip = `entries.body` / 履歴 = 逆向きパッチ」に合流させれば消える。
+全文で積む経路(旧 `bulkAddRevisions`)は**削除した** ── 残すと取込だけが
+設計から外れ、PKC2 と同じ「履歴が本文の N 倍」に戻る。
+
+実装(`importRevisionChains`):
+
+- 変換は**本文と同じ経路**を通す(`convertBody`)── 通さないと履歴だけ
+  JSON 文字列が残り、古い版の `asset:` 参照が書き換わらず GC に消される
+- 並びは `created_at` 昇順(同時刻は元の並び)。**時刻は捏造しない** ──
+  PKC2 の `created_at` をそのまま持ち込む
+- 無変更の版は畳む(PKC2 は本文が変わらなくても snapshot を作りうる)。
+  最新版が tip と同じなら、その版は履歴として持つ意味がないので落とす
+- **既に履歴を持つ entry には積まない** ── 既存の鎖に割り込むと符号化の前提
+  (隣接する版の差分)が崩れる
+- 保持上限を超えた古い版は捨て、**件数を可視化する**(黙って落とさない)
+- PKC2 の `Revision` は title / archetype を持たないので、履歴行には entry の
+  値を入れる(「その時の題名」は PKC2 側に情報が無い ── 復元できない事実)
+
+取り込んだ鎖は既存の checkpoint 経路と自然に合流する(取込後の編集で頭が伸びる)。
+
+⚠ 帰結: **PKC2 の trash(entries に居ない lid の revisions)は取り込まれない**。
+PKC2 の container に居ない entry の履歴は、鎖の基準となる tip が無いため。
 
 ## 5. PKC3 export(P6c で実装)
 
@@ -117,8 +132,8 @@ container の 66.7%)。選択肢:
 
 ## 7. 残課題・記録
 
-- P5a review F4: bulkAddRevisions は rev_order 一意性を持たない ── P6 で
-  revisions を持ち込む裁定になった場合は再採番を入れる(捨てる場合は無関係)
+- ✅ P5a review F4(rev_order 一意性): `importRevisionChains` は「既に履歴を
+  持つ entry には積まない」ので、採番は常に 1..m の新規で衝突しない
 - spreadsheet の数式セル格納表現は fixture で確認(PKC2 spreadsheet-body.ts の
   「rows のセル文字列に生で入る」前提の検証)
 - subset export の app_icon_asset_key 閉包漏れ(PKC2 側の既知の縁)──

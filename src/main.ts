@@ -215,6 +215,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
                 relations,
               });
             },
+            importRevisionChains: (chains) =>
+              client.request({ op: 'importRevisionChains', cid: DEFAULT_CID, chains }),
             listAssetKeys: async () =>
               new Set(
                 (await client.request({ op: 'listAssetMetas', cid: DEFAULT_CID })).map(

@@ -57,10 +57,24 @@ export interface ConvertedAsset {
   mime: string;
 }
 
+/** 履歴 1 版(変換済み全文)。逆パッチ化は worker が行う。 */
+export interface PendingRevision {
+  body: string;
+  /** PKC2 の created_at(履歴の時刻は捏造しない ── 空なら worker が現在時刻)。 */
+  createdAt: string;
+}
+
+/** entry 1 件ぶんの履歴(**古い → 新しい**の順)。 */
+export interface RevisionChain {
+  entryLid: string;
+  snapshots: PendingRevision[];
+}
+
 export interface ConvertResult {
   entries: ConvertedEntry[];
   relations: Array<{ id: string; fromLid: string; toLid: string; kind: string }>;
   assets: ConvertedAsset[];
+  revisionChains: RevisionChain[];
   warnings: string[];
 }
 
@@ -207,16 +221,23 @@ export function convertPkc2Container(
     firstLogOfDay.set(finalLid(u.lid), buildFirstLogOfDay(u.body, anchors));
   }
 
-  // ── ③〜⑤ 各 entry の変換と参照書換
-  const entries: ConvertedEntry[] = [];
-  for (const u of users) {
-    let src = u.body;
+  // ── ③〜⑤ 1 本の body を PKC-Markdown へ写す(entry 本文にも履歴 snapshot にも
+  // **同じ経路**を使う ── 別経路にすると履歴だけ JSON 文字列が残り、古い版の
+  // asset 参照が書き換わらず GC に消される)
+  const convertBody = (
+    u: { lid: string; title: string; archetype: string },
+    rawBody: string,
+    quiet: boolean, // 履歴 snapshot では警告を出さない(件数ぶん増えるだけ)
+  ): string => {
+    let src = rawBody;
     if (u.archetype === 'attachment') {
       // ③ legacy data の externalize + keyMap 適用(JSON のまま前処理)
       try {
         const p = JSON.parse(src) as Record<string, unknown>;
         const data = str(p.data);
         if (data !== '') {
+          // 同じ bytes は content addressing で 1 部に落ちるので、履歴側で
+          // 再度 externalize しても重複しない
           const newKey = freshAssetKey();
           assetsOut.push({
             key: newKey,
@@ -226,11 +247,11 @@ export function convertPkc2Container(
           });
           delete p.data;
           p.asset_key = newKey; // legacy は data 優先の規約だった ── bytes を正とする
-          warnings.push(`legacy 内蔵 data を asset 化: ${u.lid}`);
+          if (!quiet) warnings.push(`legacy 内蔵 data を asset 化: ${u.lid}`);
         } else {
           const k = str(p.asset_key);
           if (k !== '' && keyMap.has(k)) p.asset_key = keyMap.get(k);
-          else if (k !== '') {
+          else if (k !== '' && !quiet) {
             // light export(assets 空)や subset export の閉包漏れ。旧 key のまま
             // 入るので開くまで気づけない ── 取込の時点で件数を言う(review M-7)
             warnings.push(
@@ -250,7 +271,7 @@ export function convertPkc2Container(
     try {
       body = getFlavor(u.archetype).fromPkc2?.(src) ?? src;
     } catch (e) {
-      warnings.push(`変換失敗(text として保持): ${u.lid}: ${String(e)}`);
+      if (!quiet) warnings.push(`変換失敗(text として保持): ${u.lid}: ${String(e)}`);
       body = src;
     }
     // ⑤ 参照書換: lid → textlog permalink → asset key の順
@@ -261,11 +282,16 @@ export function convertPkc2Container(
     for (const [oldKey, newKey] of keyMap) {
       body = body.replace(tokenRe('asset:', oldKey), `asset:${newKey}`);
     }
+    return body;
+  };
+
+  const entries: ConvertedEntry[] = [];
+  for (const u of users) {
     entries.push({
       lid: finalLid(u.lid),
       title: u.title,
       archetype: u.archetype,
-      body,
+      body: convertBody(u, u.body, false),
       entryOrder: 0, // 下で採番
     });
   }
@@ -319,11 +345,31 @@ export function convertPkc2Container(
     relations.push({ id, fromLid: from, toLid: to, kind });
   }
 
-  const revCount = Array.isArray(c.revisions) ? c.revisions.length : 0;
-  if (revCount > 0)
-    warnings.push(
-      `PKC2 revisions ${revCount} 件は持ち込まない(P6 設計 §4 既定 (b))`,
-    );
+  // ── 履歴(user 裁定 2026-08-01「revisions の考え方は持ち込む」)。
+  // ⚠ **全文では積まない** ── P5c で決めた jujutsu 由来の鎖(tip = entries.body、
+  // 履歴 = 逆向きパッチ)へ符号化する。符号化は bytes ではなく行の差分なので
+  // 純関数では決められない部分が無く、ここでは「順に並んだ変換済み全文」まで作る。
+  // 実際の逆パッチ化は worker(rev_order と隣接関係を持つ側)が行う
+  const byLid = new Map<string, PendingRevision[]>();
+  for (const raw of Array.isArray(c.revisions) ? c.revisions : []) {
+    const r = raw as Record<string, unknown>;
+    const lid = str(r.entry_lid);
+    const u = users.find((x) => x.lid === lid);
+    if (!u) continue; // system entry / 除外済み entry の履歴は持ち込まない
+    const list = byLid.get(finalLid(lid)) ?? [];
+    list.push({ body: convertBody(u, str(r.snapshot), true), createdAt: str(r.created_at) });
+    byLid.set(finalLid(lid), list);
+  }
+  const revisionChains: RevisionChain[] = [];
+  for (const [entryLid, snapshots] of byLid) {
+    // PKC2 は追記順だが、created_at があるならそれを正とする(古い → 新しい)。
+    // 安定ソート(同時刻は元の並びを保つ)
+    const ordered = snapshots
+      .map((s, i) => ({ s, i }))
+      .sort((a, b) => (a.s.createdAt || '').localeCompare(b.s.createdAt || '') || a.i - b.i)
+      .map((x) => x.s);
+    revisionChains.push({ entryLid, snapshots: ordered });
+  }
 
-  return { entries, relations, assets: assetsOut, warnings };
+  return { entries, relations, assets: assetsOut, revisionChains, warnings };
 }

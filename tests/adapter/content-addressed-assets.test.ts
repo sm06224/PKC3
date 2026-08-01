@@ -20,6 +20,7 @@ import {
 import { attachFiles, type AttachDeps } from '../../src/adapter/ui/actions/attach';
 import { importPkc2File, type ImportDeps } from '../../src/adapter/ui/actions/import-pkc2';
 import { readAttachmentMeta } from '../../src/features/flavor/attachment-flavor';
+import type { RevisionChain } from '../../src/features/import/pkc2-convert';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { stubRevisionOps } from '../helpers/revision-stub';
 
@@ -55,6 +56,7 @@ function shared() {
   const metas: Array<{ key: string; mime: string; size: number; hash: string | null }> =
     [];
   const putLog: string[] = [];
+  const revChains: RevisionChain[] = [];
   let n = 0;
 
   const d = new Dispatcher();
@@ -81,6 +83,15 @@ function shared() {
     bulkUpsertEntries: async () => {},
     bulkUpsertRelations: async () => {},
     listAssetKeys: async () => new Set(blobs.keys()),
+    importRevisionChains: async (chains) => {
+      revChains.push(...chains);
+      return {
+        added: chains.reduce((n, c) => n + c.snapshots.length, 0),
+        skippedNoChange: 0,
+        droppedOverLimit: 0,
+        skippedEntries: [],
+      };
+    },
     putBlob: put,
     putAssetMeta: async (m) => void metas.push(m),
     reload: async () => {},
@@ -92,7 +103,7 @@ function shared() {
     listMetas: async () => metas.map((m) => ({ key: m.key, size: m.size, hash: m.hash })),
   };
 
-  return { d, importDeps, attachDeps, blobs, metas, putLog };
+  return { d, importDeps, attachDeps, blobs, metas, putLog, revChains };
 }
 
 describe('identifyAsset (content addressing)', () => {

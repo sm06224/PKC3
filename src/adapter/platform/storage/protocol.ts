@@ -22,7 +22,17 @@ export type StorageRequest =
   | { op: 'deleteEntry'; cid: string; lid: string }
   | { op: 'listRelations'; cid: string }
   | { op: 'bulkUpsertRelations'; cid: string; relations: RelationUpsert[] }
-  | { op: 'bulkAddRevisions'; cid: string; revisions: RevisionAdd[] }
+  | {
+      /**
+       * 取込の履歴を**鎖として**積む(P5c の符号化 = tip は entries.body、
+       * 履歴は逆向きパッチ)。全文で積む経路は持たない ── 持つと取込だけが
+       * 設計から外れ、PKC2 と同じ「履歴が本文の N 倍」に戻る。
+       */
+      op: 'importRevisionChains';
+      cid: string;
+      chains: RevisionChainInput[];
+      keepLatest?: number;
+    }
   | { op: 'revisionCounts'; cid: string }
   | { op: 'getRevision'; cid: string; id: string }
   | { op: 'listRevisionMetas'; cid: string; entryLid: string }
@@ -71,17 +81,27 @@ export interface RelationUpsert {
 }
 
 /**
- * revision の一括追加(P6 import 用)。通常経路は upsertEntry の checkpoint。
- * ⚠ 追加行は全文(kind='full')として入る ── **新規取込専用**。既存 entry の
- * 鎖に割り込ませない(割り込ませると鎖の符号化前提が崩れる)。
+ * 取込む履歴 1 本(entry 1 件ぶん)。snapshots は**古い → 新しい**の順の全文で、
+ * worker が tip(entries.body)から遡る逆向きパッチへ符号化する。
+ *
+ * ⚠ **既に履歴を持つ entry には積まない**(worker が skip する)── 既存の鎖に
+ * 割り込ませると符号化の前提(隣接する版の差分)が崩れる。
  */
-export interface RevisionAdd {
-  id: string;
+export interface RevisionChainInput {
   entryLid: string;
-  revOrder: number;
-  snapshot: string;
-  title?: string | null;
-  archetype?: string | null;
+  snapshots: Array<{ body: string; createdAt: string }>;
+}
+
+/** importRevisionChains の結果(何が入って何が落ちたかを可視化する)。 */
+export interface ImportRevisionsResult {
+  /** 実際に積んだ行数。 */
+  added: number;
+  /** 変更が無くて畳んだ版の数(PKC2 は無変更でも snapshot を作りうる)。 */
+  skippedNoChange: number;
+  /** 保持上限を超えて捨てた古い版の数。 */
+  droppedOverLimit: number;
+  /** entry が居ない / 既に履歴を持つ等で丸ごと見送った鎖の entry_lid。 */
+  skippedEntries: string[];
 }
 
 /** revision 一覧の行(snapshot は返さない ── 本文は getRevision で 1 行ずつ)。 */
@@ -92,6 +112,12 @@ export interface RevisionMetaRow {
   created_at: string | null;
   title: string | null;
   archetype: string | null;
+  /**
+   * 保存形('patch' = 逆向き差分 / 'full' = 全文)。
+   * P5c の設計そのもの ── 一覧に出しておくと「差分で持っている」が**観測可能**に
+   * なる(出さないと、全文で積む実装に退化しても test が気づけない)。
+   */
+  kind: string | null;
 }
 
 /** getRevision の本文(P5 で JSON 包みを廃止 ── body 原文 + 列)。 */
@@ -161,7 +187,7 @@ export interface ResultMap {
   deleteEntry: null;
   listRelations: RelationRow[];
   bulkUpsertRelations: null;
-  bulkAddRevisions: null;
+  importRevisionChains: ImportRevisionsResult;
   revisionCounts: RevisionCountRow[];
   getRevision: RevisionBody | null;
   listRevisionMetas: RevisionMetaRow[];

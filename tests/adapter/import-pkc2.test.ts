@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { importPkc2File, type ImportDeps } from '../../src/adapter/ui/actions/import-pkc2';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
+import type { RevisionChain } from '../../src/features/import/pkc2-convert';
 import { readAttachmentMeta } from '../../src/features/flavor/attachment-flavor';
 
 /** PKC2 の export と同じ骨格(slot id と `<\/script` 退避)。 */
@@ -65,6 +66,7 @@ function harness(opts: HarnessOptions = {}) {
   // この commit の規約 1 番なのに、順序を反転しても全 test が通っていた
   // (review mutation M25)。別配列に積むだけでは順序が pin されない
   const opLog: string[] = [];
+  const revChains: RevisionChain[] = [];
   let reloads = 0;
   let n = 0;
 
@@ -90,6 +92,15 @@ function harness(opts: HarnessOptions = {}) {
       relations.push(...rels);
     },
     listAssetKeys: async () => new Set(blobs.keys()),
+    importRevisionChains: async (chains) => {
+      revChains.push(...chains);
+      return {
+        added: chains.reduce((n, c) => n + c.snapshots.length, 0),
+        skippedNoChange: 0,
+        droppedOverLimit: 0,
+        skippedEntries: [],
+      };
+    },
     putBlob: async (key, blob) => {
       opLog.push(`blob:${key}`);
       blobs.set(key, blob);
@@ -144,6 +155,7 @@ function harness(opts: HarnessOptions = {}) {
     metas,
     notices,
     opLog,
+    revChains,
     reloadCount: () => reloads,
   };
 }
