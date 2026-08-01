@@ -16,10 +16,22 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # 下の差分 tripwire が merge-base を要る
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
+      # rust/ を触ったのに出荷 .wasm を焼き直していない事故を 0 秒で止める
+      # (再ビルド一致の検査自体は nightly ── PR gate で cargo は走らせない)
+      - name: Rust を触ったなら .wasm も更新されているか
+        if: github.event_name == 'pull_request'
+        run: |
+          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD || true)
+          if echo "$CHANGED" | grep -q '^rust/' && ! echo "$CHANGED" | grep -q 'pkc_core\.wasm'; then
+            echo "::error::rust/ を変更したのに出荷 .wasm が古い ── ./scripts/build-wasm.sh を実行して commit すること"
+            exit 1
+          fi
       - run: npm ci
       - name: Audit (prod deps, high+, blocking)
         run: npm audit --audit-level=high --omit=dev

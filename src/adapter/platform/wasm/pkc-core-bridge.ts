@@ -24,8 +24,20 @@ interface CoreExports {
   pkc_restore_chain(ptr: number, len: number): number;
 }
 
-const ABI_VERSION = 1;
-const FRAME_VERSION = 1;
+const ABI_VERSION = 2;
+const FRAME_VERSION = 2;
+
+/**
+ * linear memory の高水位の上限(review H2)。wasm の memory は **縮まない**ので、
+ * 大きな本文を 1 回処理しただけで数百 MB が worker に居座る(実測: 34MB の本文で
+ * 206MB まで伸び、free しても戻らない)。閾値を超えたら **instance を作り直して
+ * メモリごと捨てる** ── 生成物のライフサイクル終端での即破棄(user 指示 2026-07-27)。
+ * Module を保持しているので再生成は同期・0.1ms 級で、次の呼び出しから即使える。
+ */
+const MEMORY_HIGH_WATER = 32 * 1024 * 1024;
+
+/** ops の値域(TS 側 applyLinePatch が受ける範囲。超えるものは wasm へ渡さない)。 */
+const MAX_OP_COUNT = 0x7fffffff;
 const KIND_FULL = 0;
 const KIND_PATCH = 1;
 const OP_COPY = 0;
@@ -42,6 +54,8 @@ const STATUS_MESSAGE: Record<number, string> = {
 };
 
 let core: CoreExports | null = null;
+/** 再生成用に compile 結果を保持する(instance だけ捨ててメモリを回収するため)。 */
+let compiled: WebAssembly.Module | null = null;
 let poisoned = false;
 let poisonReason: string | null = null;
 
@@ -50,6 +64,28 @@ function poison(reason: string): void {
   poisoned = true;
   poisonReason = reason;
   core = null; // 参照を落として linear memory ごと回収させる(高水位を残さない)
+  compiled = null;
+}
+
+/**
+ * 高水位を超えた instance を捨てて作り直す(H2)。Module は compile 済みなので
+ * 同期で差し替えられる。失敗しても機能は止めない(以後 TS へ落ちるだけ)。
+ */
+function recycleIfBloated(): void {
+  const ex = core;
+  if (!ex || !compiled) return;
+  if (ex.memory.buffer.byteLength <= MEMORY_HIGH_WATER) return;
+  try {
+    const inst = new WebAssembly.Instance(compiled, {});
+    core = inst.exports as unknown as CoreExports;
+  } catch {
+    core = null; // 作り直せないなら使わない(TS が本番経路として残っている)
+  }
+}
+
+/** 現在の linear memory サイズ(test / probe が高水位を観測するための口)。 */
+export function wasmMemoryBytes(): number {
+  return core ? core.memory.buffer.byteLength : 0;
 }
 
 export function wasmStatus(): { ready: boolean; poisoned: boolean; reason: string | null } {
@@ -63,13 +99,16 @@ export function wasmStatus(): { ready: boolean; poisoned: boolean; reason: strin
 export async function initPkcCore(bytes: BufferSource): Promise<boolean> {
   if (poisoned) return false;
   try {
-    const { instance } = await WebAssembly.instantiate(bytes, {});
+    // compile 結果を保持して instance だけ作り直せるようにする(H2 の回収経路)
+    const mod = await WebAssembly.compile(bytes);
+    const instance = new WebAssembly.Instance(mod, {});
     const ex = instance.exports as unknown as CoreExports;
     if (typeof ex.pkc_abi_version !== 'function' || ex.pkc_abi_version() !== ABI_VERSION) {
       poison(`abi mismatch (expected ${ABI_VERSION})`);
       return false;
     }
     core = ex;
+    compiled = mod;
     return true;
   } catch (e) {
     poison(`instantiate failed: ${String(e)}`);
@@ -80,6 +119,7 @@ export async function initPkcCore(bytes: BufferSource): Promise<boolean> {
 /** test / probe が明示的に落とすための口(毒状態も解除する)。 */
 export function resetPkcCore(): void {
   core = null;
+  compiled = null;
   poisoned = false;
   poisonReason = null;
 }
@@ -98,11 +138,8 @@ function frameSize(tip: Uint8Array, steps: readonly EncodedStep[]): number {
       n += 4; // n_ops
       for (const op of s.ops!) {
         n += 4; // tag
-        if (typeof op === 'number') n += 4;
-        else {
-          n += 4;
-          for (const line of op) n += 4 + line.length;
-        }
+        n += 4; // count もしくは byte_len
+        if (typeof op !== 'number') n += op.length;
       }
     }
   }
@@ -112,25 +149,45 @@ function frameSize(tip: Uint8Array, steps: readonly EncodedStep[]): number {
 interface EncodedStep {
   kind: number;
   body?: Uint8Array;
-  ops?: Array<number | Uint8Array[]>;
+  /** number = copy/delete の行数、Uint8Array = 挿入行の**連結**バイト列。 */
+  ops?: Array<number | Uint8Array>;
 }
 
 /**
  * JSON の解釈は **JS 側に残す**(§4.2)。unicode 正しさの実績がある JSON.parse を
  * 使い、wasm へ渡すのは既に解いた ops のバイト列だけにする ── Rust に JSON
  * パーサを書かない(そこは byte 一致を壊す事故の温床になる)。
+ *
+ * ⚠ 挿入行は **join('') してから 1 回で encode** する(review M4): 行ごとに
+ * encode すると、予算超過で数千行が 1 op に入る形(diffLines のフォールバック)で
+ * encode が支配項になっていた(実測 74.67ms のうち 45.55ms)。適用時は連結して
+ * 書き出すだけなので、行境界を保つ必要はない ── 出力は完全に同じ。
+ *
+ * @returns 値域外の ops を含むときは null(**TS へ落とす** ── review M1:
+ *   wasm と TS で解釈が割れると「壊れた鎖からそれらしい本文」を作ってしまう)
  */
-function encodeSteps(steps: readonly ChainStep[]): EncodedStep[] {
-  return steps.map((s) =>
-    s.kind === 'full'
-      ? { kind: KIND_FULL, body: encoder.encode(s.body) }
-      : {
-          kind: KIND_PATCH,
-          ops: s.ops.map((op) =>
-            typeof op === 'number' ? op : op.map((line) => encoder.encode(line)),
-          ),
-        },
-  );
+function encodeSteps(steps: readonly ChainStep[]): EncodedStep[] | null {
+  const out: EncodedStep[] = [];
+  for (const s of steps) {
+    if (s.kind === 'full') {
+      out.push({ kind: KIND_FULL, body: encoder.encode(s.body) });
+      continue;
+    }
+    const ops: Array<number | Uint8Array> = [];
+    for (const op of s.ops) {
+      if (typeof op === 'number') {
+        // 非整数 / u32 で潰れる値は TS と解釈が割れる ── 渡さない
+        if (!Number.isInteger(op) || Math.abs(op) > MAX_OP_COUNT) return null;
+        ops.push(op);
+      } else if (Array.isArray(op)) {
+        ops.push(encoder.encode(op.join('')));
+      } else {
+        return null; // 形が違う(TS 側の検査に委ねる)
+      }
+    }
+    out.push({ kind: KIND_PATCH, ops });
+  }
+  return out;
 }
 
 /**
@@ -142,8 +199,9 @@ export function restoreChainWasm(tipBody: string, steps: readonly ChainStep[]): 
   const ex = core;
   if (!ex) return null;
 
-  const tip = encoder.encode(tipBody);
   const enc = encodeSteps(steps);
+  if (!enc) return null; // 値域外 ── TS が正(review M1)
+  const tip = encoder.encode(tipBody);
   const size = frameSize(tip, enc);
 
   let inPtr = 0;
@@ -180,11 +238,8 @@ export function restoreChainWasm(tipBody: string, steps: readonly ChainStep[]): 
             putU32(Math.abs(op));
           } else {
             putU32(OP_INSERT);
-            putU32(op.length);
-            for (const line of op) {
-              putU32(line.length);
-              putBytes(line);
-            }
+            putU32(op.length); // 連結済みバイト長
+            putBytes(op);
           }
         }
       }
@@ -208,11 +263,16 @@ export function restoreChainWasm(tipBody: string, steps: readonly ChainStep[]): 
     }
     throw e; // status 由来の Error は caller へ(TS と同じ失敗として扱う)
   } finally {
-    // 借りたメモリは**必ず**返す(成功・失敗・throw のいずれでも)
+    // 借りたメモリは**必ず**返す(成功・失敗・status throw のいずれでも)。
+    // ⚠ 毒化した場合だけは live が null になるが、そのときは **instance ごと
+    // 捨てている**ので個別の free は不要(review L1 ── 以前のコメントは
+    // 「必ず返す」と書いていて、この経路の実態と食い違っていた)
     const live = core;
-    if (live) {
+    if (live === ex) {
       if (inPtr !== 0) live.pkc_free(inPtr, size);
       if (outPtr !== 0) live.pkc_free_result(outPtr);
     }
+    // 大きな入力を通した後は instance ごと作り直してメモリを返す(H2)
+    recycleIfBloated();
   }
 }

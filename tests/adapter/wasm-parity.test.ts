@@ -17,11 +17,20 @@ import {
   initPkcCore,
   resetPkcCore,
   restoreChainWasm,
+  wasmMemoryBytes,
   wasmStatus,
 } from '../../src/adapter/platform/wasm/pkc-core-bridge';
 
 // vitest は repo root を cwd に走る(import.meta.url は変換後に file: でなくなる)
 const WASM_PATH = resolve(process.cwd(), 'src/adapter/platform/wasm/pkc_core.wasm');
+
+/** parity が必ず覆う入力の種類(review L6 ── 網が狭まったら test が落ちる)。 */
+const REQUIRED_VARIANTS: Array<[string, (i: number) => string]> = [
+  ['ascii', (i) => `line ${i}\n`],
+  ['ja', (i) => `行 ${i} 日本語の本文です。\n`],
+  ['CRLF', (i) => `行 ${i}\r\n`],
+  ['絵文字', (i) => `🎌 ${i} テスト\n`],
+];
 
 /** TS 側の checkpoint と同じ形で「1 つ新しい状態から遡る」段を作る。 */
 function stepFrom(newer: string, older: string): ChainStep {
@@ -46,13 +55,7 @@ describe('wasm ↔ TS parity (R1/R2)', () => {
   });
 
   it('多世代の鎖で TS と byte 一致(ja / ascii / CRLF / 末尾改行なし)', () => {
-    const variants: Array<[string, (i: number) => string]> = [
-      ['ascii', (i) => `line ${i}\n`],
-      ['ja', (i) => `行 ${i} 日本語の本文です。\n`],
-      ['CRLF', (i) => `行 ${i}\r\n`],
-      ['絵文字', (i) => `🎌 ${i} テスト\n`],
-    ];
-    for (const [name, mk] of variants) {
+    for (const [name, mk] of REQUIRED_VARIANTS) {
       const gens: string[] = [];
       for (let g = 0; g < 12; g++) {
         gens.push(
@@ -135,6 +138,39 @@ describe('wasm ↔ TS parity (R1/R2)', () => {
       }
       expect(restoreChainWasm(tip, steps), `seed step ${t}`).toBe(restoreChain(tip, steps));
     }
+  });
+
+  it('必須次元(ja / CRLF / 絵文字)を落とさない ── 宣言的に pin', () => {
+    // review L6: 「ja 次元を消す」変異が検出されないのを防ぐ。ここが落ちたら
+    // parity の網が狭まっている(ゼロ件の次元は「測っていない次元」)
+    const required = ['ascii', 'ja', 'CRLF', '絵文字'];
+    const covered = REQUIRED_VARIANTS.map(([name]) => name);
+    expect(covered).toEqual(required);
+  });
+
+  it('値域外の ops は wasm に渡さず TS へ委譲する(解釈の分岐を作らない)', () => {
+    // review M1: putU32 は mod 2^32 に潰れ・小数を切り捨てるので、渡すと
+    // 「TS は throw、wasm はそれらしい本文」という分岐ができる
+    expect(restoreChainWasm('a\nb\n', [{ kind: 'patch', ops: [-4294967296, 1] }])).toBeNull();
+    expect(restoreChainWasm('a\nb\n', [{ kind: 'patch', ops: [1.5] }])).toBeNull();
+    // 巨大 count(Rust 側の境界検査を wrap で抜けようとする形)も渡さない
+    expect(restoreChainWasm('a\n', [{ kind: 'patch', ops: [1, 4294967295] }])).toBeNull();
+    expect(wasmStatus().poisoned).toBe(false); // 毒化させずに機能継続
+  });
+
+  it('大きな入力の後で linear memory を回収する(高水位を worker に残さない)', () => {
+    // review H2 / doc F4: wasm の memory は縮まないので、閾値超過で instance ごと
+    // 作り直す。これが無いと 34MB の本文 1 回で数百 MB が居座る(実測 206MB)
+    const before = wasmMemoryBytes();
+    const small = 'x\n'.repeat(50);
+    expect(restoreChainWasm(small, [{ kind: 'patch', ops: [50] }])).toBe(small);
+    const big = ('あ'.repeat(200) + '\n').repeat(20000); // UTF-8 で約 36MB
+    expect(restoreChainWasm(big, [{ kind: 'full', body: big }])).toBe(big);
+    const after = wasmMemoryBytes();
+    expect(after).toBeLessThanOrEqual(Math.max(before, 4 * 1024 * 1024));
+    // 回収後も普通に使える(捨てて作り直しただけ)
+    expect(restoreChainWasm(small, [{ kind: 'patch', ops: [50] }])).toBe(small);
+    expect(wasmStatus().ready).toBe(true);
   });
 
   it('壊れたパッチは TS と同じ文言で失敗する(可視エラーの互換)', () => {
