@@ -7,13 +7,16 @@
  *   上限は quota preflight(storage.estimate)に置き換える
  * - asset key 規則は `ast-<ts36>-<rand>` の **1 本**(PKC2 は 3 規則混在。
  *   旧規則は P6 import 側で受理する)
- * - dedupe は **bytes の SHA-256 + size** 一致で既存 key を再利用に統一
- *   (PKC2 は base64 文字列 hash で、経路により「toast のみ / 再利用」が不一致だった)
+ * - dedupe は **content addressing**(key = bytes の SHA-256)── 台帳を引かずに
+ *   構造的に一意になる(user 指示 2026-08-01「ZFS と同じ発想」)。実体は
+ *   `storage/asset-key.ts`。PKC2 は base64 文字列 hash で、経路により
+ *   「toast のみ / 再利用」が不一致だった
  * - hash/size メタは put と同時に書く(後付け reconcile 走査を構造的に不要にする
  *   ── PKC2 は走査が 500MB データで boot OOM を誘発した)
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { attachmentBody } from '@features/flavor/attachment-flavor';
+import { identifyAsset } from '@adapter/platform/storage/asset-key';
 import { generateLid } from './binder';
 
 export interface AttachDeps {
@@ -31,8 +34,6 @@ export interface AttachDeps {
   estimate?(): Promise<{ usage?: number; quota?: number }>;
 }
 
-/** SHA-256 は stream 化できないため、これ以上のファイルは hash なし(dedupe 対象外)。 */
-const HASH_MAX_BYTES = 64 * 1024 * 1024;
 
 /** file.type が空のときの拡張子 fallback(PKC2 は無くて後段の補正 hack を生んだ)。 */
 const EXT_MIME: Record<string, string> = {
@@ -61,18 +62,6 @@ export function resolveMime(name: string, declared: string): string {
   return EXT_MIME[ext] ?? 'application/octet-stream';
 }
 
-/** asset key の唯一の生成規則(P6 import も同じ規則で採番する)。 */
-export function generateAssetKey(): string {
-  return `ast-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-async function sha256Hex(blob: Blob): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
-
 /** 取込本体。file ごとに独立に成否を扱う(1 個の失敗が batch を殺さない)。 */
 export async function attachFiles(
   dispatcher: Dispatcher,
@@ -90,10 +79,11 @@ export async function attachFiles(
     return;
   }
 
-  // dedupe 台帳は batch 先頭で 1 回だけ引く(batch 内の重複は逐次 put が防ぐ)。
-  // 台帳が引けなくても取込自体は続行(dedupe を諦めるだけ)
-  const known: Array<{ key: string; size: number | null; hash: string | null }> =
-    await deps.listMetas().catch(() => []);
+  // content addressing なので**台帳を引かない**。同じ bytes は同じ key に落ちる
+  // ので、既に持っているかは key の存在だけで決まる(batch 内の重複も自動で潰れる)
+  const known = new Set(
+    (await deps.listMetas().catch(() => [])).map((m) => m.key),
+  );
 
   for (const file of files) {
     try {
@@ -114,21 +104,16 @@ export async function attachFiles(
       }
 
       const mime = resolveMime(file.name, file.type);
-      const hash = file.size <= HASH_MAX_BYTES ? await sha256Hex(file) : null;
-
-      // bytes 同一(hash + size 一致)なら既存 asset を参照(put しない)。
+      // key = 中身のハッシュ。同一 bytes なら**必ず**同じ key に落ちる
       // ⚠ 帰結 2 点(review #5): sqlite assets.mime は**初回 file のまま**
       // (表示は entry frontmatter 側 mime を使うので正しい ── assets.mime を
       // 信じる消費者を作らない)。asset 削除は参照カウント前提になる
-      // (将来の GC 設計の前提として記録)
-      let assetKey = hash
-        ? (known.find((m) => m.hash === hash && m.size === file.size)?.key ?? null)
-        : null;
-      if (!assetKey) {
-        assetKey = generateAssetKey();
+      // (PKC3 の GC は body 走査ベースなので元から正しい)
+      const { key: assetKey, hash } = await identifyAsset(file);
+      if (!known.has(assetKey)) {
         await deps.putBlob(assetKey, file);
         await deps.putMeta({ key: assetKey, mime, size: file.size, hash });
-        known.push({ key: assetKey, size: file.size, hash });
+        known.add(assetKey);
       }
 
       dispatcher.dispatch({

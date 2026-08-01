@@ -38,8 +38,21 @@ export interface ConvertedEntry {
   entryOrder: number;
 }
 
+/**
+ * 取り込むべき bytes 1 件。
+ *
+ * ⚠ **key は「暫定」である**(user 指示 2026-08-01 の content addressing)。
+ * 最終的な key は bytes のハッシュなので、**bytes を復号できる adapter しか
+ * 決められない** ── ここは純関数なので決められない。convert は暫定 key で
+ * body を書き換えておき、adapter が復号後に `remapAssetKeys` で本物へ置き換える。
+ *
+ * `oldKey` は PKC2 側の key(ZIP 経路では `assets/<oldKey>.bin` の突合に要る)。
+ * legacy 内蔵 data から externalize したものは null(PKC2 側に key が無い)。
+ */
 export interface ConvertedAsset {
+  /** 暫定 key。adapter が content key へ写した後は使わない。 */
   key: string;
+  oldKey: string | null;
   base64: string;
   mime: string;
 }
@@ -81,6 +94,26 @@ const esc = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** 境界付き置換(key / lid は [A-Za-z0-9_-]+ ── 後続が同字種なら別 token)。 */
 const tokenRe = (prefix: string, token: string): RegExp =>
   new RegExp(`${prefix}${esc(token)}(?![A-Za-z0-9_-])`, 'g');
+
+/**
+ * 暫定 asset key を最終 key(= 中身のハッシュ)へ写す。
+ *
+ * convert は純関数なので bytes を持たず、content key を決められない ──
+ * adapter が復号後にこれを呼ぶ。body 中の出現箇所は 2 通りある:
+ * ① markdown の `asset:<key>` ② frontmatter の `attachment.asset_key: <key>` /
+ * `attachment.app_icon_asset_key: <key>`。②は素の値なので prefix 無しで消す。
+ *
+ * 暫定 key は**この取込で生成した token**であり、body 中では必ず `:` か空白の
+ * 直後に現れる ── 前方境界を見なくても他の語の一部に当たらない。
+ */
+export function remapAssetKeys(body: string, map: ReadonlyMap<string, string>): string {
+  let out = body;
+  for (const [from, to] of map) {
+    if (from === to) continue;
+    out = out.replace(tokenRe('', from), to);
+  }
+  return out;
+}
 
 function str(v: unknown, fallback = ''): string {
   return typeof v === 'string' ? v : fallback;
@@ -157,6 +190,7 @@ export function convertPkc2Container(
   for (const [oldKey, newKey] of keyMap) {
     assetsOut.push({
       key: newKey,
+      oldKey,
       base64: assetsIn[oldKey] ?? '',
       mime: mimeByOldKey.get(oldKey) ?? 'application/octet-stream',
     });
@@ -186,6 +220,7 @@ export function convertPkc2Container(
           const newKey = freshAssetKey();
           assetsOut.push({
             key: newKey,
+            oldKey: null, // PKC2 側に key が無い(body 内蔵だった)
             base64: data,
             mime: str(p.mime, 'application/octet-stream'),
           });

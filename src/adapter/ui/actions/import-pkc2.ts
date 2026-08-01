@@ -14,7 +14,8 @@ import type { Dispatcher } from '@adapter/state/dispatcher';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import { sniffMagic, detectPkc2Format } from '@features/import/detect-format';
 import { parsePkc2Html } from '@features/import/pkc2-html';
-import { convertPkc2Container } from '@features/import/pkc2-convert';
+import { convertPkc2Container, remapAssetKeys } from '@features/import/pkc2-convert';
+import { identifyAsset } from '@adapter/platform/storage/asset-key';
 import { extractMeta } from '@features/flavor';
 
 export interface ImportDeps {
@@ -35,6 +36,8 @@ export interface ImportDeps {
   bulkUpsertRelations(
     relations: Array<{ id: string; fromLid: string; toLid: string; kind: string }>,
   ): Promise<void>;
+  /** 既に持っている asset key(content addressing なので存在確認だけで済む)。 */
+  listAssetKeys(): Promise<ReadonlySet<string>>;
   putBlob(assetKey: string, blob: Blob): Promise<void>;
   putAssetMeta(meta: {
     key: string;
@@ -125,38 +128,50 @@ export async function importPkc2File(
       genAssetKey: deps.genAssetKey,
       genRelationId: deps.genRelationId,
     });
-    // 変換が済めば元の JSON は不要 ── 巨大 container の常駐を切る
-    const rows: EntryUpsert[] = result.entries.map((e) => {
-      const ext = extractMeta(e.archetype, e.body);
-      return {
-        lid: e.lid,
-        title: e.title,
-        archetype: e.archetype,
-        body: e.body,
-        entryOrder: e.entryOrder,
-        status: ext.status,
-        date: ext.date,
-        archived: ext.archived,
-      };
-    });
-
-    // ── assets: 1 件ずつ復号 → Blob → 即手放す(復号済み文字列を溜めない)
+    // ── assets: 1 件ずつ復号 → **中身のハッシュで key を決める** → 未所持なら書く
+    // (content addressing / user 指示 2026-08-01「ZFS と同じ発想」)。同じ bytes は
+    // 必ず同じ key に落ちるので、再取込も、取込と添付の混在も、1 回の取込の中の
+    // 重複も、すべて構造的に 1 部しか持たない
     // ⚠ 順序が規約: **bytes を先に、参照(entries)を後に**。逆順にすると
     // 「参照はあるが bytes が無い」entry が残る ── 逆向き(参照なし bytes)は
     // 明示 purge で回収できる。test は opLog で順序そのものを pin している
+    const known = new Set(await deps.listAssetKeys());
+    // convert は純関数なので content key を決められない ── 暫定 key を配ってあり、
+    // ここで本物へ写す(body の書換は下の remapAssetKeys)
+    const keyMap = new Map<string, string>();
     for (const a of result.assets) {
       if (a.base64 === '') continue; // light export(assets 空)
       try {
         const blob = await decodeAsset(a.base64, a.mime, gzipped);
         a.base64 = ''; // 参照を切って GC に返す(生成物の寿命をここで終端する)
-        await deps.putBlob(a.key, blob);
-        await deps.putAssetMeta({ key: a.key, mime: a.mime, size: blob.size, hash: null });
+        const { key, hash } = await identifyAsset(blob);
+        keyMap.set(a.key, key);
+        if (!known.has(key)) {
+          await deps.putBlob(key, blob);
+          await deps.putAssetMeta({ key, mime: a.mime, size: blob.size, hash });
+          known.add(key);
+        }
       } catch (e) {
         // 1 件の添付が壊れていても取込全体は止めない(欠損は可視化する)
         a.base64 = '';
         result.warnings.push(`添付を復元できませんでした(${a.key}): ${reason(e)}`);
       }
     }
+
+    const rows: EntryUpsert[] = result.entries.map((e) => {
+      const body = keyMap.size > 0 ? remapAssetKeys(e.body, keyMap) : e.body;
+      const ext = extractMeta(e.archetype, body);
+      return {
+        lid: e.lid,
+        title: e.title,
+        archetype: e.archetype,
+        body,
+        entryOrder: e.entryOrder,
+        status: ext.status,
+        date: ext.date,
+        archived: ext.archived,
+      };
+    });
 
     // ── entries / relations は bulk(1 行ずつ書かない ── journal 増幅の教訓)
     deps.notify?.(`取込中…(${rows.length} 件を書き込んでいます)`);

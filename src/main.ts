@@ -17,9 +17,10 @@ import { SidebarRenderer } from '@adapter/ui/render/sidebar';
 import { CenterRouter } from '@adapter/ui/render/center';
 import { formatSize } from '@adapter/ui/render/detail';
 import { bindActions, generateLid, type BinderServices } from '@adapter/ui/actions/binder';
-import { attachFiles, generateAssetKey } from '@adapter/ui/actions/attach';
+import { attachFiles } from '@adapter/ui/actions/attach';
 import { importPkc2File } from '@adapter/ui/actions/import-pkc2';
 import { createAssetGate } from '@adapter/ui/actions/asset-gate';
+import { generateAssetKey } from '@adapter/platform/storage/asset-key';
 
 const DB_NAME = 'pkc3';
 const DEFAULT_CID = 'default';
@@ -214,6 +215,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
                 relations,
               });
             },
+            listAssetKeys: async () =>
+              new Set(
+                (await client.request({ op: 'listAssetMetas', cid: DEFAULT_CID })).map(
+                  (m) => m.key,
+                ),
+              ),
             putBlob: (key, blob) => blobs.put(DEFAULT_CID, key, blob),
             putAssetMeta: async (m) => {
               await client.request({ op: 'putAssetMeta', cid: DEFAULT_CID, meta: m });

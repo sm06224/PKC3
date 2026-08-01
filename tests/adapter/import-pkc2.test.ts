@@ -89,6 +89,7 @@ function harness(opts: HarnessOptions = {}) {
       if (opts.failRelations) throw new Error('relations の書込に失敗(注入)');
       relations.push(...rels);
     },
+    listAssetKeys: async () => new Set(blobs.keys()),
     putBlob: async (key, blob) => {
       opLog.push(`blob:${key}`);
       blobs.set(key, blob);
