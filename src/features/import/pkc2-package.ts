@@ -50,6 +50,8 @@ export interface Pkc2Package {
 const MANIFEST = 'manifest.json';
 const CONTAINER = 'container.json';
 const ASSET_RE = /^assets\/(.+)\.bin$/;
+/** PKC2 の asset key の字種(3 系統 + 派生。`.` を含む派生があるので許す)。 */
+const VALID_KEY = /^[A-Za-z0-9_.-]+$/;
 
 /**
  * ZIP を `pkc2-package` として受理する。
@@ -129,6 +131,13 @@ export async function readPkc2Package(zip: Blob): Promise<Pkc2Package> {
       continue;
     }
     const key = m[1]!;
+    // 名前の無害化は **key として使う側**の責務(reader は純機構)。
+    // `..` / 絶対パス / null バイト等は PKC3 では FS に書かないので traversal 自体は
+    // 無害だが、key としては不正 ── PKC2 も `INVALID_ASSET_KEY` で弾いていた
+    if (!VALID_KEY.test(key)) {
+      warnings.push(`asset key として不正な名前を無視しました: ${e.name}`);
+      continue;
+    }
     if (assetEntries.has(key)) {
       throw new ZipReadError(`asset key が重複しています: ${key}(壊れた ZIP)`);
     }

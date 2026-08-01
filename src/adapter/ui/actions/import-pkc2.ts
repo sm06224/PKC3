@@ -238,15 +238,14 @@ export async function importPkc2File(
         // (oldKey === null)には掛かっていない(review M-9 ── 一律に展開すると
         //  legacy 添付だけが必ず復号に失敗して死んだ参照になる)
         const zipEntryPeek = a.oldKey !== null ? (zipAssets?.get(a.oldKey) ?? null) : null;
-        // ⚠ 閾値超の asset は **heap に載せない**。ハッシュを取らない(= dedupe
-        // 対象外)ので読む理由が無く、読めば 64MB 超がそのまま常駐する。
-        // Blob のまま流す ── ただし CRC 検証も読取りを要するので**外れる**。
-        // 黙って落とさず、検証していない事実を warning に出す
+        // ⚠ 閾値超の asset は **heap に載せない** ── ハッシュを取らない
+        // (= dedupe 対象外)ので読む理由が無く、読めばそのまま常駐する。
+        // **破損検査は落とさない**: reader は stream で舐めて検証し view を返すので、
+        // 全量を載せずに CRC を確かめられる(重複排除だけが外れる)
         if (zipEntryPeek && zipEntryPeek.uncompressedSize > HASH_MAX_BYTES) {
           const key = generateAssetKey();
           keyMap.set(a.key, key);
-          const blob = await readZipEntry(file, zipEntryPeek, { verifyCrc: false });
-          await deps.putBlob(key, blob);
+          await deps.putBlob(key, await readZipEntry(file, zipEntryPeek));
           await deps.putAssetMeta({
             key,
             mime: a.mime,
@@ -254,7 +253,7 @@ export async function importPkc2File(
             hash: null,
           });
           result.warnings.push(
-            `大きすぎる添付は破損検査(CRC)と重複排除を省きました: ${a.oldKey}`,
+            `大きすぎる添付は重複排除の対象外です(破損検査は行いました): ${a.oldKey}`,
           );
           continue;
         }

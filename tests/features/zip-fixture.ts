@@ -17,6 +17,20 @@ export interface FixtureEntry {
   /** CRC を意図的に壊す(破損検知の test 用)。 */
   corruptCrc?: boolean;
   isDirectory?: boolean;
+  /**
+   * 名前を**生バイト**で書く(name の代わり)。
+   * 妥当な UTF-8 でない名前(CP932 等)を作るために要る ── 「decode 結果が
+   * ASCII か」ではなく「バイトが妥当な UTF-8 か」を見る判定の検証に使う。
+   */
+  rawName?: Uint8Array;
+  /**
+   * local header / 中央ディレクトリの extra フィールド。
+   * ⚠ **長さが違ってよい**(Info-ZIP は実際に違う: LH 28 / CD 24)。
+   * データ開始位置を CD の extra 長で計算する実装はここで落ちる
+   * ── 常に 0 の fixture では原理的に pin できなかった箇所(review M1/M2)。
+   */
+  localExtra?: Uint8Array;
+  centralExtra?: Uint8Array;
 }
 
 const enc = new TextEncoder();
@@ -47,9 +61,11 @@ export async function buildZip(
     const method = e.method ?? 0;
     const raw = e.bytes;
     const data = method === 8 ? await deflateRaw(raw) : raw;
-    const nameBytes = enc.encode(e.name);
+    const nameBytes = e.rawName ?? enc.encode(e.name);
     const nonAscii = [...nameBytes].some((b) => b > 0x7e || b < 0x20);
     const flags = e.flags ?? (nonAscii ? 0x800 : 0);
+    const lExtra = e.localExtra ?? new Uint8Array(0);
+    const cExtra = e.centralExtra ?? new Uint8Array(0);
     const crc = e.corruptCrc ? (crc32(raw) ^ 0xffff) >>> 0 : crc32(raw);
     const offset = local.length;
 
@@ -64,8 +80,9 @@ export async function buildZip(
       ...u32(data.length),
       ...u32(raw.length),
       ...u16(nameBytes.length),
-      ...u16(0), // extra
+      ...u16(lExtra.length),
       ...nameBytes,
+      ...lExtra,
       ...data,
     );
 
@@ -81,13 +98,14 @@ export async function buildZip(
       ...u32(data.length),
       ...u32(raw.length),
       ...u16(nameBytes.length),
-      ...u16(0), // extra
+      ...u16(cExtra.length),
       ...u16(0), // comment
       ...u16(0), // disk
       ...u16(0), // internal attrs
       ...u32(e.isDirectory ? 0x10 : 0), // external attrs
       ...u32(offset),
       ...nameBytes,
+      ...cExtra,
     );
   }
 

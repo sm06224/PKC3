@@ -45,13 +45,27 @@ describe('readZipDirectory', () => {
     expect((await readZipDirectory(zip))[0]!.name).toBe('添付/請求書.pdf');
   });
 
-  it('UTF-8 の印が無い非 ASCII 名は**推測せず断る**(mojibake を作らない)', async () => {
-    // PKC2 は flag を読まずに常に UTF-8 decode していた ── CP932 の ZIP が
-    // 文字化けした名前で通ってしまう
+  it('bit 11 が無くても **妥当な UTF-8 なら読む**(Info-ZIP が作る形)', async () => {
+    // 🔑 Linux / macOS の `zip` は UTF-8 の名前を bit 11 を立てずに書く。
+    // 「bit 11 が無い かつ 非 ASCII なら拒否」は**正しい ZIP を丸ごと拒否**する
+    // ── しかも deflate 対応の動機だった「ZIP ツールで再梱包したファイル」がそれ
     const zip = await buildZip([
-      { name: '添付.pdf', bytes: bytesOf('x'), flags: 0 }, // bit 11 を落とす
+      { name: '添付/請求書.pdf', bytes: bytesOf('x'), flags: 0 },
+      { name: 'manifest.json', bytes: bytesOf('{}'), flags: 0 },
     ]);
-    await expect(readZipDirectory(zip)).rejects.toThrow(/文字コードを判別できません/);
+    const dir = await readZipDirectory(zip);
+    expect(dir.map((e) => e.name)).toEqual(['添付/請求書.pdf', 'manifest.json']);
+  });
+
+  it('妥当な UTF-8 でない名前は**推測せず断る**(bit 11 の有無に関わらず)', async () => {
+    // CP932 の「添付」= 0x93 0x59 0x95 0x74。UTF-8 として不正
+    const cp932 = new Uint8Array([0x93, 0x59, 0x95, 0x74, 0x2e, 0x70, 0x64, 0x66]);
+    for (const flags of [0, 0x800]) {
+      // bit 11 が立っていても信じない ── 立っていれば通していた頃は
+      // 名前が U+FFFD に化け、`assets/<key>.bin` の照合が外れて添付が黙って欠けた
+      const zip = await buildZip([{ name: 'x', rawName: cp932, bytes: bytesOf('x'), flags }]);
+      await expect(readZipDirectory(zip)).rejects.toThrow(/文字コードを判別できません/);
+    }
   });
 
   it('ZIP でない / 壊れた入力は理由付きで断る', async () => {
@@ -150,8 +164,8 @@ describe('readZipEntry', () => {
     ]);
     const [e] = await readZipDirectory(zip);
     await expect(readZipEntry(zip, e!)).rejects.toThrow(/壊れています|CRC/);
-    // 明示的に外したときだけ通る(外すのは呼び出し側の宣言)
-    expect(await text(await readZipEntry(zip, e!, { verifyCrc: false }))).toBe('中身');
+    // ⚠ 検証を外す逃げ道は**持たない**。逃げ道はサイズ照合まで一緒に落として
+    // 「他人の entry の中身が返る」経路を開けていた(review M-5)
   });
 
   it('deflate でも CRC を検証する', async () => {
@@ -177,8 +191,9 @@ describe('readZipEntry', () => {
   });
 
   it('データが範囲外を指していたら断る', async () => {
-    const zip = await buildZip([{ name: 'a.txt', bytes: bytesOf('x') }]);
+    const zip = await buildZip([{ name: 'a.txt', bytes: bytesOf('x'.repeat(50)), method: 8 }]);
     const [e] = await readZipDirectory(zip);
+    // deflate なら「store のサイズ不整合」検査に掛からず、範囲検査まで到達する
     await expect(
       readZipEntry(zip, { ...e!, compressedSize: 999_999 }),
     ).rejects.toThrow(/範囲外/);
@@ -219,5 +234,156 @@ describe('crc32', () => {
     expect(crc32(bytesOf(''))).toBe(0);
     expect(crc32(bytesOf('123456789'))).toBe(0xcbf43926); // CRC-32/ISO-HDLC の標準値
     expect(crc32(bytesOf('The quick brown fox jumps over the lazy dog'))).toBe(0x414fa339);
+  });
+});
+
+describe('実物の ZIP が持つ形(合成 fixture では見落とす縁)', () => {
+  it('local header と中央ディレクトリで extra 長が違っても読める', async () => {
+    // Info-ZIP は LH extra 28 / CD extra 24 と**食い違う**値を書く。
+    // データ開始位置を CD の extra 長で計算する実装はここで CRC 不一致になり、
+    // user に「あなたの ZIP は壊れています」という嘘の診断を出す
+    const zip = await buildZip([
+      {
+        name: 'a.txt',
+        bytes: bytesOf('extra があっても読める'),
+        localExtra: new Uint8Array(28).fill(7),
+        centralExtra: new Uint8Array(24).fill(9),
+      },
+    ]);
+    const [e] = await readZipDirectory(zip);
+    expect(await (await readZipEntry(zip, e!)).text()).toBe('extra があっても読める');
+  });
+
+  it('中央ディレクトリの extra / comment を跨いで次の entry へ進む', async () => {
+    const zip = await buildZip([
+      { name: 'a.txt', bytes: bytesOf('A'), centralExtra: new Uint8Array(13).fill(1) },
+      { name: 'b.txt', bytes: bytesOf('B'), centralExtra: new Uint8Array(5).fill(2) },
+    ]);
+    const dir = await readZipDirectory(zip);
+    expect(dir.map((e) => e.name)).toEqual(['a.txt', 'b.txt']);
+    expect(await (await readZipEntry(zip, dir[1]!)).text()).toBe('B');
+  });
+
+  it('ディレクトリ判定は名前・外部属性の**どちらか片方**でも効く', async () => {
+    // python は名前だけ(末尾 /)、Info-ZIP は両方立てる ── 片方しか見ない実装は
+    // 実物のどちらかで必ず取りこぼす
+    const zip = await buildZip([
+      { name: 'byname/', bytes: bytesOf(''), isDirectory: false }, // 名前だけ
+      { name: 'byattr', bytes: bytesOf(''), isDirectory: true }, // 属性だけ
+    ]);
+    const dir = await readZipDirectory(zip);
+    expect(dir.map((e) => e.isDirectory)).toEqual([true, true]);
+  });
+
+  it('前置バイトのある ZIP(自己解凍書庫の形)を読む ── 嘘の「壊れています」を出さない', async () => {
+    const base = await buildZip([
+      { name: 'manifest.json', bytes: bytesOf('{"format":"pkc2-package"}') },
+      { name: 'assets/k.bin', bytes: bytesOf('前置があっても読める') },
+    ]);
+    const prefixed = new Blob([new Uint8Array(1000).fill(0x5a), base]);
+    const dir = await readZipDirectory(prefixed);
+    expect(dir.map((e) => e.name)).toEqual(['manifest.json', 'assets/k.bin']);
+    expect(await (await readZipEntry(prefixed, dir[1]!)).text()).toBe('前置があっても読める');
+  });
+
+  it('分割書庫(マルチディスク)は名指しで断る', async () => {
+    const base = await buildZip([{ name: 'a.txt', bytes: bytesOf('x') }]);
+    const buf = new Uint8Array(await base.arrayBuffer());
+    new DataView(buf.buffer).setUint16(buf.length - 22 + 4, 3, true);
+    await expect(readZipDirectory(new Blob([buf]))).rejects.toThrow(/分割された ZIP/);
+  });
+
+  it('EOCD 署名が偶然含まれていても本物を選ぶ(comment 長で検証する)', async () => {
+    // 本体に EOCD signature と同じ 4 バイトが並ぶだけで「空 ZIP」と誤読していた
+    const fake = new Uint8Array(64);
+    new DataView(fake.buffer).setUint32(10, 0x06054b50, true);
+    const zip = await buildZip([{ name: 'a.txt', bytes: fake }]);
+    expect((await readZipDirectory(zip)).map((e) => e.name)).toEqual(['a.txt']);
+  });
+
+  it('ZIP でないバイナリを「空 ZIP」として受理しない', async () => {
+    const junk = new Uint8Array(4096);
+    for (let i = 0; i < junk.length; i++) junk[i] = (i * 37) & 0xff;
+    // 途中に EOCD 署名 + 18 バイトのゼロ(= 件数 0 の EOCD に見える形)を置く
+    junk.set([0x50, 0x4b, 0x05, 0x06], 2000);
+    junk.fill(0, 2004, 2022);
+    await expect(readZipDirectory(new Blob([junk]))).rejects.toThrow(/EOCD|終端/);
+  });
+
+  it('EOCD の件数が中身と合わなければ断る(entry を黙って消さない)', async () => {
+    const base = await buildZip([
+      { name: 'a.txt', bytes: bytesOf('A') },
+      { name: 'b.txt', bytes: bytesOf('B') },
+    ]);
+    const buf = new Uint8Array(await base.arrayBuffer());
+    const view = new DataView(buf.buffer);
+    const eocd = buf.length - 22;
+    view.setUint16(eocd + 8, 1, true); // 件数だけ 1 に減らす
+    view.setUint16(eocd + 10, 1, true);
+    // 旧実装は b.txt をエラー無しで落としていた
+    await expect(readZipDirectory(new Blob([buf]))).rejects.toThrow(/件数が合いません/);
+  });
+
+  it('中央ディレクトリが名前の途中で切れていたら断る(名前を黙って縮めない)', async () => {
+    // `subarray` は範囲外を**黙って clamp** するので、境界を見ていないと
+    // 名前が静かに縮む(最後の 1 件は次の CD 署名検査にも掛からず素通りする)
+    const base = await buildZip([{ name: 'assets/very-long-key-name.bin', bytes: bytesOf('x') }]);
+    const buf = new Uint8Array(await base.arrayBuffer());
+    const view = new DataView(buf.buffer);
+    const cdOffset = view.getUint32(buf.length - 22 + 16, true);
+    // CD の nameLen だけを実体より大きく偽装する
+    view.setUint16(cdOffset + 28, 200, true);
+    await expect(readZipDirectory(new Blob([buf]))).rejects.toThrow(/切れて/);
+  });
+
+  it('local header の署名が壊れていたら断る(entry と ZIP を結ぶ唯一の検査)', async () => {
+    const zip = await buildZip([{ name: 'a.txt', bytes: bytesOf('x') }]);
+    const buf = new Uint8Array(await zip.arrayBuffer());
+    new DataView(buf.buffer).setUint32(0, 0xdeadbeef, true);
+    const zip2 = new Blob([buf]);
+    const [e] = await readZipDirectory(zip2);
+    await expect(readZipEntry(zip2, e!)).rejects.toThrow(/ヘッダ署名/);
+  });
+
+  it('store なのに圧縮前後のサイズが違う目次は断る', async () => {
+    const zip = await buildZip([{ name: 'a.txt', bytes: bytesOf('0123456789') }]);
+    const [e] = await readZipDirectory(zip);
+    await expect(readZipEntry(zip, { ...e!, compressedSize: 4 })).rejects.toThrow(
+      /store なのにサイズ/,
+    );
+  });
+
+  it('別 ZIP の entry を渡したら断る + 文面が user のデータを一方的に疑わない', async () => {
+    const a = await buildZip([{ name: 'a.txt', bytes: bytesOf('AAAAAAAAAA') }]);
+    const b = await buildZip([{ name: 'a.txt', bytes: bytesOf('BBBBBBBBBB') }]);
+    const [ea] = await readZipDirectory(a);
+    await expect(readZipEntry(b, ea!)).rejects.toThrow(/出所が違います/);
+  });
+
+  it('サイズだけが目次と違う壊れ方も断る(CRC が偶然一致する形)', async () => {
+    // 空の entry は CRC が 0。目次のサイズだけを 10 に偽装すると **CRC 検査は
+    // 通ってしまう** ── サイズ照合を持たないと「10 バイトのはずが 0 バイト」が
+    // 黙って通る(review M4: 照合を外しても誰も気づかなかった箇所)
+    const zip = await buildZip([{ name: 'empty.bin', bytes: bytesOf(''), method: 8 }]);
+    const buf = new Uint8Array(await zip.arrayBuffer());
+    const view = new DataView(buf.buffer);
+    const cdOffset = view.getUint32(buf.length - 22 + 16, true);
+    view.setUint32(cdOffset + 24, 10, true); // CD の uncompressedSize
+    const zip2 = new Blob([buf]);
+    const [e] = await readZipDirectory(zip2);
+    expect(e!.crc32).toBe(0); // CRC は一致する
+    await expect(readZipEntry(zip2, e!)).rejects.toThrow(/サイズが目次と違います/);
+  });
+
+  it('圧縮データが壊れていたら理由の分かる文面で断る', async () => {
+    const zip = await buildZip([
+      { name: 'b.txt', bytes: bytesOf('x'.repeat(500)), method: 8 },
+    ]);
+    const buf = new Uint8Array(await zip.arrayBuffer());
+    buf[40] = buf[40]! ^ 0xff; // 圧縮データを壊す
+    buf[41] = buf[41]! ^ 0xff;
+    const zip2 = new Blob([buf]);
+    const [e] = await readZipDirectory(zip2);
+    await expect(readZipEntry(zip2, e!)).rejects.toThrow(/圧縮データが壊れています|CRC/);
   });
 });

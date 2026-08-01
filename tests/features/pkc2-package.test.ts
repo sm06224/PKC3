@@ -199,4 +199,35 @@ describe('readPkc2Package', () => {
       '圧縮された bytes',
     );
   });
+
+  it('asset key として不正な名前は無視して警告に出す(無害化の担当はここ)', async () => {
+    // reader は純機構なので名前を無害化しない ── key として使う側が検査する
+    const zip = await buildZip([
+      { name: 'manifest.json', bytes: bytesOf(JSON.stringify(manifestOf({ asset_count: 1 }))) },
+      { name: 'container.json', bytes: bytesOf(JSON.stringify(CONTAINER)) },
+      { name: 'assets/ast-x1.bin', bytes: bytesOf('正しい') },
+      { name: 'assets/../../etc/passwd.bin', bytes: bytesOf('悪意') },
+      { name: 'assets//absolute/path.bin', bytes: bytesOf('悪意') },
+    ]);
+    const got = await readPkc2Package(zip);
+    expect([...got.assetEntries.keys()]).toEqual(['ast-x1']);
+    expect(got.warnings.filter((w) => w.includes('不正な名前'))).toHaveLength(2);
+  });
+
+  it('Info-ZIP で再梱包された package(bit 11 なしの UTF-8 名)も読める', async () => {
+    // Linux / macOS の `zip` は UTF-8 名を bit 11 を立てずに書く ── 拒否していると
+    // 「ZIP ツールで開いて保存し直した」という現実の入力が丸ごと通らない
+    const zip = await buildZip([
+      {
+        name: 'manifest.json',
+        bytes: bytesOf(JSON.stringify(manifestOf({ asset_count: 1 }))),
+        flags: 0,
+      },
+      { name: 'container.json', bytes: bytesOf(JSON.stringify(CONTAINER)), flags: 0 },
+      { name: 'assets/ast-x1.bin', bytes: bytesOf('日本語の中身'), flags: 0 },
+      { name: '添付メモ.txt', bytes: bytesOf('非 ASCII 名の同梱ファイル'), flags: 0 },
+    ]);
+    const got = await readPkc2Package(zip);
+    expect([...got.assetEntries.keys()]).toEqual(['ast-x1']);
+  });
 });
