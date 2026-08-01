@@ -948,6 +948,73 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(opLog.findIndex((o) => o.startsWith('blob:'))).toBeLessThan(opLog.indexOf('entries'));
   });
 
+  it('[P6c 段⑤] folder-export: 階層が relation として実際に入る', async () => {
+    // 🔑 unit(reader)は「合成 container の形」までしか見ない ── **convert を
+    // 通って relation が実際に書かれる**ところまでを 1 本の網で見る
+    const { d, deps, written, relations } = harness();
+    const inner = async (lid: string, title: string): Promise<Uint8Array> => {
+      const z = await buildZip([
+        {
+          name: 'manifest.json',
+          bytes: bytesOf(
+            JSON.stringify({
+              format: 'pkc2-text-bundle',
+              version: 1,
+              source_lid: lid,
+              source_title: title,
+              assets: {},
+              compacted: false,
+            }),
+          ),
+        },
+        { name: 'body.md', bytes: bytesOf(`# ${title}\n`) },
+      ]);
+      return new Uint8Array(await z.arrayBuffer());
+    };
+    const zip = await buildZip([
+      {
+        name: 'manifest.json',
+        bytes: bytesOf(
+          JSON.stringify({
+            format: 'pkc2-folder-export-bundle',
+            version: 1,
+            source_folder_lid: 'root',
+            source_folder_title: '仕事',
+            text_count: 1,
+            textlog_count: 0,
+            entries: [
+              {
+                lid: 'n1',
+                title: 'メモ',
+                archetype: 'text',
+                filename: 'n1.text.zip',
+                parent_folder_lid: 'sub',
+              },
+            ],
+            folders: [
+              { lid: 'root', title: '仕事', parent_lid: null },
+              { lid: 'sub', title: '2026', parent_lid: 'root' },
+            ],
+          }),
+        ),
+      },
+      { name: 'n1.text.zip', bytes: await inner('n1', 'メモ') },
+    ]);
+
+    // folder 2 件 + 本体 1 件
+    expect(await importPkc2File(d, deps, new File([zip], 'f.zip'))).toBe(3);
+
+    const byTitle = new Map(written.map((e) => [e.title, e.lid]));
+    expect(written.filter((e) => e.archetype === 'folder')).toHaveLength(2);
+    // 🔑 relation が **structural / fromLid = 親** で入っている
+    const t = new Map(relations.map((r) => [r.toLid, r.fromLid]));
+    expect(relations.every((r) => r.kind === 'structural')).toBe(true);
+    expect(t.get(byTitle.get('2026')!)).toBe(byTitle.get('仕事'));
+    expect(t.get(byTitle.get('メモ')!)).toBe(byTitle.get('2026'));
+    // ⚠ relation id が全部同じだと worker の upsert で 1 本しか残らない
+    expect(new Set(relations.map((r) => r.id)).size).toBe(relations.length);
+  });
+
   it('[P6c] 閾値超の添付は heap に載せず、採番 key + hash なしで入る', async () => {
     // ⚠ この分岐は既定 64MB なので fixture では踏めない ── 閾値を下げて観測する。
     // 分岐を丸ごと消す mutation が生存していた(review M-1 / MUTANT-2)
@@ -1019,14 +1086,15 @@ describe('importPkc2File (P6b 実行部)', () => {
     const zip = await buildZip([
       {
         name: 'manifest.json',
-        bytes: bytesOf(JSON.stringify({ format: 'pkc2-folder-export-bundle', version: 1 })),
+        // 段⑥ で受理予定(単体 `.entry.zip`)。段⑤ までは受けない
+        bytes: bytesOf(JSON.stringify({ format: 'pkc2-entry-bundle', version: 1 })),
       },
     ]);
     expect(await importPkc2File(d, deps, new File([zip], 'b.zip'))).toBeNull();
     expect(written).toHaveLength(0);
     expect(blobs.size).toBe(0);
     // 「不明」に混ぜず、何が未対応なのかを言う
-    expect(d.getState().error).toMatch(/pkc2-folder-export-bundle/);
+    expect(d.getState().error).toMatch(/pkc2-entry-bundle/);
   });
 
   it('[P6c] manifest.json の無い ZIP は可視で断る', async () => {

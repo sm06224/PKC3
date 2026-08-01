@@ -56,6 +56,7 @@ import {
   sourcesOf,
   synthesize,
   type BundleAsset,
+  type BundleMain,
 } from './pkc2-bundle';
 
 /** batch 形式 → 内側 archetype(null = `entries[].archetype` が正本)。 */
@@ -76,11 +77,47 @@ const BATCH_FORMATS: Record<string, 'text' | 'textlog' | null> = {
 export const isBatchFormat = (format: string): boolean =>
   Object.hasOwn(BATCH_FORMATS, format);
 
-interface OuterEntry {
+export interface OuterEntry {
   lid?: unknown;
   title?: unknown;
   archetype?: unknown;
   filename?: unknown;
+  /** folder-export のみ(段⑤)。直近の structural 親 folder の lid。 */
+  parent_folder_lid?: unknown;
+}
+
+/**
+ * 内側 bundle 1 件の読み取り結果。
+ *
+ * 🔑 **`outer` を `main` と組で持つ**のが要点(PKC2 の実バグ回避)。PKC2 は
+ * preview を **manifest 配列の添字**で持ちながら、取込は **未対応形式を飛ばして
+ * 詰めた配列**を返し、planner がその圧縮配列を**選択添字で引いて**いた ──
+ * 結果、v2 の folder-export で **選ばなかった entry が入り、選んだ entry が落ちる**
+ * (調査 S-2)。組で持てば添字の空間を混ぜる余地が構造的に無い。
+ */
+export interface InnerBundle {
+  main: BundleMain;
+  outer: OuterEntry;
+  filename: string;
+}
+
+/** 内側 bundle の読み方(未対応形式は 'skip' を返す ── 段⑤ v2 の `.entry.zip`)。 */
+export type ArchetypeResolver = (
+  me: OuterEntry,
+  where: string,
+  warnings: string[],
+) => 'text' | 'textlog' | 'skip';
+
+export interface InnerBundlesResult {
+  bundles: InnerBundle[];
+  assets: Map<string, BundleAsset>;
+  alternates: Map<string, AssetSource[]>;
+  counted: { text: number; textlog: number };
+  failed: string[];
+  skipped: string[];
+  anyCompacted: boolean;
+  used: Set<string>;
+  warnings: string[];
 }
 
 export interface Pkc2ContainerBundleManifest {
@@ -195,39 +232,17 @@ function mergeAssets(
   }
 }
 
-/** batch 3 形式を受理する。**形が違えば必ず throw**(部分的に読めた気にさせない)。 */
-export async function readContainerBundle(zip: Blob): Promise<Pkc2ContainerBundle> {
-  const dir = await readZipDirectory(zip);
+/**
+ * 外側 ZIP の索引を作り、`manifest.entries[]` の順に内側 bundle を読む。
+ * batch 3 形式(段④)と folder-export(段⑤)で**共有**する。
+ */
+export async function readInnerBundles(
+  zip: Blob,
+  dir: readonly ZipEntry[],
+  entries: readonly OuterEntry[],
+  archetypeOf: ArchetypeResolver,
+): Promise<InnerBundlesResult> {
   const warnings: string[] = [];
-
-  if (dir.some((e) => e.name === '[Content_Types].xml')) {
-    throw new ZipReadError(
-      'これは Office 文書(.xlsx / .docx / .pptx)です ── 取込対象ではありません',
-    );
-  }
-
-  let manifest: Pkc2ContainerBundleManifest;
-  try {
-    manifest = JSON.parse(
-      await readZipText(zip, onlyEntry(dir, MANIFEST)),
-    ) as Pkc2ContainerBundleManifest;
-  } catch (e) {
-    if (e instanceof ZipReadError) throw e;
-    throw new ZipReadError(`${MANIFEST} を解釈できません: ${String(e)}`);
-  }
-  const format = String(manifest?.format);
-  if (!isBatchFormat(format)) {
-    throw new ZipReadError(`この受理器は batch 形式のみ扱えます(format=${format})`);
-  }
-  if (manifest.version !== 1) {
-    throw new ZipReadError(
-      `未対応の bundle version です(version=${String(manifest.version)} ── 対応は 1)`,
-    );
-  }
-  if (!Array.isArray(manifest.entries)) {
-    throw new ZipReadError('manifest に entries の配列がありません(壊れた ZIP)');
-  }
-
   // ZIP 側の索引。**同名は断る** ── PKC2 は Map 後勝ちで静かに片方を捨てていた
   const byName = new Map<string, ZipEntry>();
   // NFC に畳んだ副索引(完全一致で引けなかったときだけ使う ── M-7)。
@@ -246,16 +261,17 @@ export async function readContainerBundle(zip: Blob): Promise<Pkc2ContainerBundl
   }
   for (const n of nfcDup) byNfc.delete(n);
 
-  const mains: Array<{ lid: string; title: string; archetype: string; body: string }> = [];
+  const bundles: InnerBundle[] = [];
   const assets = new Map<string, BundleAsset>();
   const alternates = new Map<string, AssetSource[]>();
   const used = new Set<string>();
   const counted = { text: 0, textlog: 0 };
   const failed: string[] = [];
-  let anyCompacted = manifest.compact === true;
+  const skipped: string[] = [];
+  let anyCompacted = false;
 
-  for (let i = 0; i < manifest.entries.length; i++) {
-    const me = manifest.entries[i] ?? {};
+  for (let i = 0; i < entries.length; i++) {
+    const me = entries[i] ?? {};
     const where = `${i + 1} 件目`;
     const filename = typeof me.filename === 'string' ? me.filename : '';
     // PKC2 は preview で**無言 skip**・import で hard fail という非対称を持つ
@@ -269,7 +285,12 @@ export async function readContainerBundle(zip: Blob): Promise<Pkc2ContainerBundl
     }
     used.add(filename);
 
-    const archetype = resolveArchetype(format, me, where, warnings);
+    const archetype = archetypeOf(me, where, warnings);
+    if (archetype === 'skip') {
+      // 未対応形式(段⑤ v2 の `.entry.zip`)── 名指しで言って残りは取り込む
+      skipped.push(filename);
+      continue;
+    }
     let inner = byName.get(filename);
     if (!inner) {
       // ⚠ macOS の FS / Finder 経由で再梱包すると **名前が NFD** になる。
@@ -322,7 +343,7 @@ export async function readContainerBundle(zip: Blob): Promise<Pkc2ContainerBundl
       warnings.push(`${filename}: 目次と中身でタイトルが違います(${me.title} ≠ ${innerTitle})`);
     }
 
-    mains.push(parts.main);
+    bundles.push({ main: parts.main, outer: me, filename });
     for (const w of parts.warnings) {
       // compact は **export 単位**の性質なので、内側の件数ぶん繰り返さない
       // (50 件あると 50 行出る)── 外側で 1 回だけ言う
@@ -334,6 +355,60 @@ export async function readContainerBundle(zip: Blob): Promise<Pkc2ContainerBundl
     }
     mergeAssets(assets, alternates, parts.assets, filename, warnings);
   }
+
+  return {
+    bundles,
+    assets,
+    alternates,
+    counted,
+    failed,
+    skipped,
+    anyCompacted,
+    used,
+    warnings,
+  };
+}
+
+/** batch 3 形式を受理する。**形が違えば必ず throw**(部分的に読めた気にさせない)。 */
+export async function readContainerBundle(zip: Blob): Promise<Pkc2ContainerBundle> {
+  const dir = await readZipDirectory(zip);
+  const warnings: string[] = [];
+
+  if (dir.some((e) => e.name === '[Content_Types].xml')) {
+    throw new ZipReadError(
+      'これは Office 文書(.xlsx / .docx / .pptx)です ── 取込対象ではありません',
+    );
+  }
+
+  let manifest: Pkc2ContainerBundleManifest;
+  try {
+    manifest = JSON.parse(
+      await readZipText(zip, onlyEntry(dir, MANIFEST)),
+    ) as Pkc2ContainerBundleManifest;
+  } catch (e) {
+    if (e instanceof ZipReadError) throw e;
+    throw new ZipReadError(`${MANIFEST} を解釈できません: ${String(e)}`);
+  }
+  const format = String(manifest?.format);
+  if (!isBatchFormat(format)) {
+    throw new ZipReadError(`この受理器は batch 形式のみ扱えます(format=${format})`);
+  }
+  if (manifest.version !== 1) {
+    throw new ZipReadError(
+      `未対応の bundle version です(version=${String(manifest.version)} ── 対応は 1)`,
+    );
+  }
+  if (!Array.isArray(manifest.entries)) {
+    throw new ZipReadError('manifest に entries の配列がありません(壊れた ZIP)');
+  }
+
+  const inner = await readInnerBundles(zip, dir, manifest.entries, (me, where, w) =>
+    resolveArchetype(format, me, where, w),
+  );
+  const mains = inner.bundles.map((b) => b.main);
+  const { assets, alternates, counted, failed, used } = inner;
+  warnings.push(...inner.warnings);
+  const anyCompacted = inner.anyCompacted || manifest.compact === true;
 
   if (anyCompacted) warnings.push(COMPACTED_WARNING);
 
