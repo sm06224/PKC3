@@ -16,8 +16,9 @@ import { buildShell } from '@adapter/ui/render/shell';
 import { SidebarRenderer } from '@adapter/ui/render/sidebar';
 import { CenterRouter } from '@adapter/ui/render/center';
 import { formatSize } from '@adapter/ui/render/detail';
-import { bindActions, type BinderServices } from '@adapter/ui/actions/binder';
-import { attachFiles } from '@adapter/ui/actions/attach';
+import { bindActions, generateLid, type BinderServices } from '@adapter/ui/actions/binder';
+import { attachFiles, generateAssetKey } from '@adapter/ui/actions/attach';
+import { importPkc2File } from '@adapter/ui/actions/import-pkc2';
 
 const DB_NAME = 'pkc3';
 const DEFAULT_CID = 'default';
@@ -68,10 +69,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
 
   const { client, init } = await initStorage(promoted);
   await client.request({ op: 'openContainer', cid: DEFAULT_CID, title: 'PKC3' });
-  const rows = await client.request({ op: 'listEntryMetas', cid: DEFAULT_CID });
-  const metas = rows.map(metaFromRow);
-  const relRows = await client.request({ op: 'listRelations', cid: DEFAULT_CID });
-  const relations = relRows.map(relationFromRow);
+  // boot と再読込は**同じ経路**で state を作る(取込後に別の作り方をしない ──
+  // 分岐が増えると「取込直後だけ壊れる」型の差分が入る)
+  const loadSnapshot = async () => ({
+    metas: (await client.request({ op: 'listEntryMetas', cid: DEFAULT_CID })).map(
+      metaFromRow,
+    ),
+    relations: (await client.request({ op: 'listRelations', cid: DEFAULT_CID })).map(
+      relationFromRow,
+    ),
+  });
+  const { metas, relations } = await loadSnapshot();
 
   const dispatcher = new Dispatcher();
   const regions = buildShell(root);
@@ -99,6 +107,25 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     center.render(state);
     markView(state.viewMode);
   });
+  // status: provenance + エラーの可視化(review B-1 ── 無言の操作拒否を作らない)
+  const statusBase =
+    `${APP_ID} v${APP_VERSION} (${BUILD_KIND}) — ${init.vfs}` +
+    (init.fallbackReason ? ` ⚠ ${init.fallbackReason}` : '');
+  // textContent の setter は同一文字列でも子ノードを全置換する ── 打鍵ごとの
+  // state 変化で無駄な DOM 変異を起こさないよう、変わったときだけ書く
+  let statusShown = statusBase;
+  regions.status.textContent = statusBase;
+  const showStatus = (text: string) => {
+    if (text === statusShown) return;
+    statusShown = text;
+    regions.status.textContent = text;
+  };
+  // エラー表示は state 駆動のみ(P3-6b: BODY_LOAD_FAILED も state.error に
+  // 統一 ── 表示寿命は「次の成功 / 選択まで」で、event の一瞬表示問題は消滅)
+  dispatcher.onState((state) => {
+    showStatus(state.error ? `${statusBase} ⚠ エラー: ${state.error}` : statusBase);
+  });
+
   // 🔒 attach と purge の排他 gate(review F1): 取込は putBlob → entry persist の
   // 間に「bytes はあるが参照が無い」窓を持つ ── その窓で整理が走ると取込中の
   // bytes を消す(実証済みのデータ消失)。同時実行は可視で拒否する
@@ -166,6 +193,46 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         });
       }
     },
+    // 📥 PKC2 取込(P6b)。asset gate の内側 ── 取込は putBlob → entry 書込の間に
+    // 「bytes はあるが参照が無い」窓を持つので、整理との同時実行は attach と同じ危険
+    importPkc2: (file) =>
+      void withAssetGate(async () => {
+        await importPkc2File(
+          dispatcher,
+          {
+            existingLids: () => new Set(dispatcher.getState().entryMetas.keys()),
+            orderBase: () => {
+              let max = 0;
+              for (const m of dispatcher.getState().entryMetas.values()) {
+                if (m.entryOrder > max) max = m.entryOrder;
+              }
+              return max;
+            },
+            genLid: generateLid,
+            genAssetKey: generateAssetKey,
+            bulkUpsertEntries: async (entries) => {
+              await client.request({ op: 'bulkUpsertEntries', cid: DEFAULT_CID, entries });
+            },
+            bulkUpsertRelations: async (relations) => {
+              await client.request({
+                op: 'bulkUpsertRelations',
+                cid: DEFAULT_CID,
+                relations,
+              });
+            },
+            putBlob: (key, blob) => blobs.put(DEFAULT_CID, key, blob),
+            putAssetMeta: async (m) => {
+              await client.request({ op: 'putAssetMeta', cid: DEFAULT_CID, meta: m });
+            },
+            reload: async () => {
+              const snap = await loadSnapshot();
+              dispatcher.dispatch({ type: 'SYS_BOOTED', cid: DEFAULT_CID, ...snap });
+            },
+            notify: (message) => showStatus(`${statusBase} — ${message}`),
+          },
+          file,
+        );
+      }),
     purgeOrphanAssets: () =>
       void withAssetGate(async () => {
         try {
@@ -217,25 +284,6 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   // document ごとに再結線が要る(PKC2 で entry-window が高さ 0 のままだった教訓)
   installHtmlSandboxResizer();
   connectStoreEffects(dispatcher, createStorePort(client, DEFAULT_CID));
-
-  // status: provenance + エラーの可視化(review B-1 ── 無言の操作拒否を作らない)
-  const statusBase =
-    `${APP_ID} v${APP_VERSION} (${BUILD_KIND}) — ${init.vfs}` +
-    (init.fallbackReason ? ` ⚠ ${init.fallbackReason}` : '');
-  // textContent の setter は同一文字列でも子ノードを全置換する ── 打鍵ごとの
-  // state 変化で無駄な DOM 変異を起こさないよう、変わったときだけ書く
-  let statusShown = statusBase;
-  regions.status.textContent = statusBase;
-  const showStatus = (text: string) => {
-    if (text === statusShown) return;
-    statusShown = text;
-    regions.status.textContent = text;
-  };
-  // エラー表示は state 駆動のみ(P3-6b: BODY_LOAD_FAILED も state.error に
-  // 統一 ── 表示寿命は「次の成功 / 選択まで」で、event の一瞬表示問題は消滅)
-  dispatcher.onState((state) => {
-    showStatus(state.error ? `${statusBase} ⚠ エラー: ${state.error}` : statusBase);
-  });
 
   dispatcher.dispatch({
     type: 'SYS_BOOTED',

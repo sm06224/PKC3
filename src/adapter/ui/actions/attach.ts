@@ -61,7 +61,8 @@ export function resolveMime(name: string, declared: string): string {
   return EXT_MIME[ext] ?? 'application/octet-stream';
 }
 
-function generateAssetKey(): string {
+/** asset key の唯一の生成規則(P6 import も同じ規則で採番する)。 */
+export function generateAssetKey(): string {
   return `ast-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 

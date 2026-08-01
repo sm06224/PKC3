@@ -52,6 +52,8 @@ export interface BinderServices {
   downloadAsset?(assetKey: string, name: string): void;
   /** 未参照 asset の掃除(P4b)。確認・報告の UI も実体側の責務。 */
   purgeOrphanAssets?(): void;
+  /** PKC2 ファイルの取込(P6b)。判別・変換・書込は実体側の責務。 */
+  importPkc2?(file: File): void;
 }
 
 function defaultTitle(dispatcher: Dispatcher, archetype: string): string {
@@ -190,6 +192,12 @@ const ACTIONS: Record<string, ActionHandler> = {
   'purge-orphan-assets': (_dispatcher, _target, services) => {
     services.purgeOrphanAssets?.();
   },
+  'import-pkc2': (_dispatcher, target) => {
+    target
+      .closest('[data-pkc-region="shell"]')
+      ?.querySelector<HTMLInputElement>('[data-pkc-field="import-input"]')
+      ?.click();
+  },
   // ── P5b: 履歴 / ゴミ箱 ──
   'show-history': (dispatcher) => dispatcher.dispatch({ type: 'SHOW_HISTORY' }),
   'hide-history': (dispatcher) => dispatcher.dispatch({ type: 'HIDE_HISTORY' }),
@@ -245,13 +253,16 @@ export function bindActions(
   };
   const onChange = (ev: Event) => {
     const el = ev.target;
-    if (
-      el instanceof HTMLInputElement &&
-      el.getAttribute('data-pkc-field') === 'attach-input'
-    ) {
+    if (!(el instanceof HTMLInputElement)) return;
+    const field = el.getAttribute('data-pkc-field');
+    if (field === 'attach-input') {
       const files = el.files ? [...el.files] : [];
       el.value = ''; // 同じファイルの再選択でも change が発火するように
       if (files.length > 0) services.attachFiles?.(files);
+    } else if (field === 'import-input') {
+      const file = el.files?.[0];
+      el.value = '';
+      if (file) services.importPkc2?.(file);
     }
   };
   const onKeydown = (ev: Event) => {
