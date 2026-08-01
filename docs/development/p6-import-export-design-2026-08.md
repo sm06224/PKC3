@@ -105,7 +105,9 @@ container の 66.7%)。選択肢:
   ⚠ 当初計画では P6b = bundle 系だったが、**実行部と UI 配線を先に閉じた** ──
   受理器だけ増やしても user は 1 件も取り込めず、「読めたつもり」の検証もできない
 - **P6c**: ZIP 系(pkc2-package + bundle 系 #3〜#5)+ folder 階層復元。
-  現状は ZIP magic を検出した時点で**可視で断る**(黙って落とさない)
+  現状は ZIP magic を検出した時点で**可視で断る**(黙って落とさない)。
+  設計は `p6c-zip-import-design-2026-08.md`(**裁定待ち 4 件**)。
+  ⚠ **8 形式すべて実体未確認** ── コードから読んだ事実であって実測ではない
 - **P6d**: PKC3 export 3 形式
 - fixture の variant(ゼロ件次元を作らない): light / readonly / gzip+base64 /
   無圧縮(8MB 超)/ revisions 入り / legacy data 直埋め attachment /
