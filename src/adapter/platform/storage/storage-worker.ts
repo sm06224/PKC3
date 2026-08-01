@@ -17,6 +17,7 @@ import {
   parseLinePatch,
   serializeLinePatch,
 } from '@features/revision/line-patch';
+import { restoreChain, type ChainStep } from '@features/revision/restore-chain';
 import {
   JOURNAL_MODES,
   type JournalMode,
@@ -621,9 +622,29 @@ const handlers: Handlers = {
       from = 0;
     }
     try {
+      // R2: **N 段ぶんの適用を 1 往復に畳む**(rust-wasm-strategy §4.2)。
+      // 従来は段ごとに境界を跨ぎ、全文の JS 文字列を段数ぶん生成していた ──
+      // 「巨大な中間生成物を作らない」という user 指示(2026-07-27)に直接応える形。
+      // JSON の解釈は JS 側に残す(unicode 正しさの実績がある JSON.parse を使う)。
+      // wasm が無い / 毒された環境では TS 参照実装がそのまま本番経路になる
+      const steps: ChainStep[] = [];
       for (let i = from; i < rows.length; i++) {
-        state = materialize(rows[i]!, state);
+        const r = rows[i]!;
+        steps.push(
+          isFull(r)
+            ? { kind: 'full', body: r.snapshot }
+            : { kind: 'patch', ops: parseLinePatch(r.snapshot).ops },
+        );
       }
+      // ⚠ ここは **TS が本番経路**(rust-wasm-strategy §4.2 の事前登録指標で棄却)。
+      // Rust/wasm 版(pkc-core-bridge の restoreChainWasm)は出力が byte 一致する
+      // ことを parity test で確認済みだが、**日本語では TS より遅い**:
+      //   ascii 2500 行 5/20/50 段 = 34/40/39% 短縮
+      //   ja   2500 行 5/20/50 段 = 97/15/13% **悪化**(分母 = TS、同一 fixture)
+      // 境界の UTF-16↔UTF-8 変換(とくに出力 decode)が仕事量を上回るため。
+      // PKC3 は日本語が主用途なので採らない ── 基盤(crate / 橋 / parity)は
+      // 次の候補(B1/B2 を満たす圧縮・索引構築)のために残してある
+      state = restoreChain(state, steps);
     } catch (e) {
       // パッチが base に噛み合わない = 鎖が壊れている(bulk 書込で tip を
       // 差し替えた等)。復元不能として可視で終える
