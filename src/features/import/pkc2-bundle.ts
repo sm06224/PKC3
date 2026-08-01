@@ -29,6 +29,7 @@ import {
   readZipDirectory,
   readZipText,
   ZipReadError,
+  type AssetSource,
   type ZipEntry,
 } from './zip-reader';
 import { parseTextlogCsv, TextlogCsvError } from './textlog-csv';
@@ -50,7 +51,15 @@ export interface Pkc2Bundle {
   manifest: Pkc2TextBundleManifest;
   /** convert に渡す合成 container(PKC2 入力の写し)。 */
   container: unknown;
-  assetEntries: Map<string, ZipEntry>;
+  assetEntries: Map<string, AssetSource>;
+  warnings: string[];
+}
+
+/** bundle 1 個ぶんの中身(batch はこれを集めて 1 個の container に畳む)。 */
+interface BundleParts {
+  manifest: Pkc2TextBundleManifest;
+  main: { lid: string; title: string; archetype: string; body: string };
+  assets: Map<string, { source: AssetSource; name: string; mime: string }>;
   warnings: string[];
 }
 
@@ -80,7 +89,7 @@ async function readBundleCommon(
 ): Promise<{
   dir: ZipEntry[];
   manifest: Pkc2TextBundleManifest;
-  assetEntries: Map<string, ZipEntry>;
+  assets: Map<string, { source: AssetSource; name: string; mime: string }>;
   warnings: string[];
 }> {
   const dir = await readZipDirectory(zip);
@@ -114,7 +123,7 @@ async function readBundleCommon(
   // 拡張子は空になりうるので「完全一致 or `<key>.` 始まり」で照合する
   // (前方一致だけだと key `k1` が `assets/k1x.png` に当たる)
   const declared = manifest.assets ?? {};
-  const assetEntries = new Map<string, ZipEntry>();
+  const assets = new Map<string, { source: AssetSource; name: string; mime: string }>();
   const claimed = new Set<string>();
   for (const key of Object.keys(declared)) {
     const exact = `assets/${key}`;
@@ -133,7 +142,11 @@ async function readBundleCommon(
         `添付の実体が複数あります(${key}): ${hits.map((h) => h.name).join(' / ')}`,
       );
     }
-    assetEntries.set(key, hits[0]!);
+    assets.set(key, {
+      source: { zip, entry: hits[0]! },
+      name: declared[key]?.name || key,
+      mime: declared[key]?.mime || 'application/octet-stream',
+    });
     claimed.add(hits[0]!.name);
   }
   // ZIP にあって manifest に無い assets/* ── user が「入れたのに入らない」を
@@ -151,61 +164,104 @@ async function readBundleCommon(
     warnings.push('書出し時に壊れた添付参照が本文から除かれています(compact mode)');
   }
 
-  return { dir, manifest, assetEntries, warnings };
+  return { dir, manifest, assets, warnings };
 }
 
 /**
- * 合成 container を組む(§2-5)。attachment × N + 本体 × 1。
+ * 合成 container を組む(§2-5)。attachment × N + 本体 × M。
  *
  * ⚠ attachment の JSON は *PKC2 入力の写し*であって、保存されるのは
  * `fromPkc2` を通した後の PKC-Markdown だけ ── 規律違反ではない。
+ *
+ * ⚠ batch では **1 個の container にまとめて 1 回 convert する**(設計 doc §2-5)。
+ * entry ごとに convert すると lid 衝突検査と asset key 採番検査が分断される。
+ * attachment は **asset key で 1 件に畳む** ── 同じ添付を 2 つのノートが参照して
+ * いるだけで attachment entry が 2 つできるのは正しくない
  */
 function synthesize(
-  manifest: Pkc2TextBundleManifest,
-  assetEntries: Map<string, ZipEntry>,
-  main: { archetype: string; body: string; fallbackLid: string },
+  assets: ReadonlyMap<string, { source: AssetSource; name: string; mime: string }>,
+  mains: ReadonlyArray<{ lid: string; title: string; archetype: string; body: string }>,
 ): unknown {
-  const declared = manifest.assets ?? {};
   const entries: unknown[] = [];
-  for (const [key, entry] of assetEntries) {
-    const meta = declared[key] ?? {};
+  for (const [key, a] of assets) {
     entries.push({
       lid: ATTACHMENT_LID(key),
-      title: meta.name || key,
+      title: a.name,
       archetype: 'attachment',
       body: JSON.stringify({
-        name: meta.name || key,
-        mime: meta.mime || 'application/octet-stream',
-        size: entry.uncompressedSize, // manifest に無いので展開後の長さ(PKC2 と同じ)
+        name: a.name,
+        mime: a.mime,
+        size: a.source.entry.uncompressedSize, // manifest に無いので展開後の長さ
         asset_key: key,
       }),
     });
   }
-  entries.push({
-    lid: manifest.source_lid || main.fallbackLid,
-    title: manifest.source_title || '(無題)',
-    archetype: main.archetype,
-    body: main.body,
-  });
+  entries.push(...mains);
   return { meta: {}, entries, relations: [], revisions: [], assets: {} };
+}
+
+const sourcesOf = (
+  assets: ReadonlyMap<string, { source: AssetSource; name: string; mime: string }>,
+): Map<string, AssetSource> =>
+  new Map([...assets].map(([k, a]) => [k, a.source]));
+
+/** 単体 bundle 1 個の中身を取り出す(batch はこれを集める)。 */
+async function readSingleBundleParts(
+  zip: Blob,
+  archetype: 'text' | 'textlog',
+): Promise<BundleParts> {
+  const format = archetype === 'text' ? 'pkc2-text-bundle' : 'pkc2-textlog-bundle';
+  const { dir, manifest, assets, warnings } = await readBundleCommon(zip, format);
+
+  let body: string;
+  if (archetype === 'text') {
+    body = await readZipText(zip, only(dir, BODY)); // markdown verbatim
+  } else {
+    const csv = await readZipText(zip, only(dir, TEXTLOG));
+    let parsed;
+    try {
+      parsed = parseTextlogCsv(csv);
+    } catch (e) {
+      if (e instanceof TextlogCsvError) throw new ZipReadError(e.message);
+      throw e;
+    }
+    // PKC2 は log_id の無い行を**黙って**捨てていた ── skip は踏襲しつつ可視化する
+    if (parsed.skippedRows > 0) {
+      warnings.push(`log_id の無い行を ${parsed.skippedRows} 行読み飛ばしました`);
+    }
+    if (
+      typeof manifest.entry_count === 'number' &&
+      manifest.entry_count !== parsed.entries.length
+    ) {
+      warnings.push(
+        `manifest の entry 件数が CSV と違います(${manifest.entry_count} ≠ ${parsed.entries.length})`,
+      );
+    }
+    // PKC2 入力の写し(fromPkc2 が PKC-Markdown へ変換する)
+    body = JSON.stringify({ entries: parsed.entries });
+  }
+
+  return {
+    manifest,
+    main: {
+      lid: manifest.source_lid || `bundle-${archetype}`,
+      title: manifest.source_title || '(無題)',
+      archetype,
+      body,
+    },
+    assets,
+    warnings,
+  };
 }
 
 /** `.text.zip` を受理する(`body.md` は markdown verbatim)。 */
 export async function readTextBundle(zip: Blob): Promise<Pkc2Bundle> {
-  const { dir, manifest, assetEntries, warnings } = await readBundleCommon(
-    zip,
-    'pkc2-text-bundle',
-  );
-  const body = await readZipText(zip, only(dir, BODY));
+  const parts = await readSingleBundleParts(zip, 'text');
   return {
-    manifest,
-    container: synthesize(manifest, assetEntries, {
-      archetype: 'text',
-      body, // text 系は fromPkc2 を持たないので素通り
-      fallbackLid: 'bundle-text',
-    }),
-    assetEntries,
-    warnings,
+    manifest: parts.manifest,
+    container: synthesize(parts.assets, [parts.main]),
+    assetEntries: sourcesOf(parts.assets),
+    warnings: parts.warnings,
   };
 }
 
@@ -217,39 +273,11 @@ export async function readTextBundle(zip: Blob): Promise<Pkc2Bundle> {
  * 二重に持たずに済む(P6a の anchor 対応表もこの JSON を前提にしている)。
  */
 export async function readTextlogBundle(zip: Blob): Promise<Pkc2Bundle> {
-  const { dir, manifest, assetEntries, warnings } = await readBundleCommon(
-    zip,
-    'pkc2-textlog-bundle',
-  );
-  const csv = await readZipText(zip, only(dir, TEXTLOG));
-  let parsed;
-  try {
-    parsed = parseTextlogCsv(csv);
-  } catch (e) {
-    if (e instanceof TextlogCsvError) throw new ZipReadError(e.message);
-    throw e;
-  }
-  // PKC2 は log_id の無い行を**黙って**捨てていた ── skip は踏襲しつつ可視化する
-  if (parsed.skippedRows > 0) {
-    warnings.push(`log_id の無い行を ${parsed.skippedRows} 行読み飛ばしました`);
-  }
-  if (
-    typeof manifest.entry_count === 'number' &&
-    manifest.entry_count !== parsed.entries.length
-  ) {
-    warnings.push(
-      `manifest の entry 件数が CSV と違います(${manifest.entry_count} ≠ ${parsed.entries.length})`,
-    );
-  }
+  const parts = await readSingleBundleParts(zip, 'textlog');
   return {
-    manifest,
-    container: synthesize(manifest, assetEntries, {
-      archetype: 'textlog',
-      // PKC2 入力の写し(fromPkc2 が PKC-Markdown へ変換する)
-      body: JSON.stringify({ entries: parsed.entries }),
-      fallbackLid: 'bundle-textlog',
-    }),
-    assetEntries,
-    warnings,
+    manifest: parts.manifest,
+    container: synthesize(parts.assets, [parts.main]),
+    assetEntries: sourcesOf(parts.assets),
+    warnings: parts.warnings,
   };
 }

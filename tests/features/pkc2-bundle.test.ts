@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { readTextBundle, readTextlogBundle } from '../../src/features/import/pkc2-bundle';
-import { readZipEntry } from '../../src/features/import/zip-reader';
+import { readAssetSource } from '../../src/features/import/zip-reader';
 import { buildZip, bytesOf, type FixtureEntry } from './zip-fixture';
 
 const manifestOf = (over: Record<string, unknown> = {}) => ({
@@ -55,7 +55,7 @@ describe('readTextBundle', () => {
     expect(att.size).toBe(bytesOf('PNG の bytes').length);
 
     expect([...got.assetEntries.keys()]).toEqual(['ast-x1']);
-    expect(await (await readZipEntry(zip, got.assetEntries.get('ast-x1')!)).text()).toBe(
+    expect(await (await readAssetSource(got.assetEntries.get('ast-x1')!)).text()).toBe(
       'PNG の bytes',
     );
     expect(got.warnings).toEqual([]);
@@ -91,8 +91,8 @@ describe('readTextBundle', () => {
       ],
     });
     const got = await readTextBundle(zip);
-    expect(got.assetEntries.get('k1')!.uncompressedSize).toBe(3);
-    expect(got.assetEntries.get('k1x')!.uncompressedSize).toBe(5);
+    expect(got.assetEntries.get('k1')!.entry.uncompressedSize).toBe(3);
+    expect(got.assetEntries.get('k1x')!.entry.uncompressedSize).toBe(5);
   });
 
   it('実体が複数ある key は ambiguous として断る', async () => {

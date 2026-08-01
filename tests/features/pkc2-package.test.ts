@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { readPkc2Package } from '../../src/features/import/pkc2-package';
-import { readZipEntry } from '../../src/features/import/zip-reader';
+import { readAssetSource } from '../../src/features/import/zip-reader';
 import { buildZip, bytesOf, type FixtureEntry } from './zip-fixture';
 
 const CONTAINER = {
@@ -80,7 +80,7 @@ describe('readPkc2Package', () => {
     expect(got.warnings).toEqual([]);
 
     // bytes は呼び出し側が 1 件ずつ読む(base64 を経由しない)
-    const blob = await readZipEntry(zip, got.assetEntries.get('ast-x1')!);
+    const blob = await readAssetSource(got.assetEntries.get('ast-x1')!);
     expect(await blob.text()).toBe('画像の bytes');
   });
 
@@ -195,7 +195,7 @@ describe('readPkc2Package', () => {
     ]);
     const got = await readPkc2Package(zip);
     expect([...got.assetEntries.keys()]).toEqual(['ast-x1']);
-    expect(await (await readZipEntry(zip, got.assetEntries.get('ast-x1')!)).text()).toBe(
+    expect(await (await readAssetSource(got.assetEntries.get('ast-x1')!)).text()).toBe(
       '圧縮された bytes',
     );
   });

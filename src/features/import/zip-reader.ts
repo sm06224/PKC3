@@ -328,3 +328,21 @@ export async function readZipEntry(zip: Blob, entry: ZipEntry): Promise<Blob> {
 export async function readZipText(zip: Blob, entry: ZipEntry): Promise<string> {
   return (await readZipEntry(zip, entry)).text();
 }
+
+/**
+ * bytes の在り処 =(どの ZIP の・どの entry か)。
+ *
+ * ⚠ **`ZipEntry` は自分がどの Blob に属するかを持たない**。段④(batch)では
+ * 内側 ZIP の entry を**外側の Blob から**読もうとして必ず壊れる ── offset は
+ * 内側基準なので、外側の別位置を読んで CRC 不一致か「壊れた ZIP」になる。
+ * 受け渡しは必ずこの組で行い、読み手は `readAssetSource` だけを使う。
+ */
+export interface AssetSource {
+  zip: Blob;
+  entry: ZipEntry;
+}
+
+/** `AssetSource` の中身を読む(ネストしていても正しい Blob から読む)。 */
+export async function readAssetSource(src: AssetSource): Promise<Blob> {
+  return readZipEntry(src.zip, src.entry);
+}
