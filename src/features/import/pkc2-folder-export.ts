@@ -33,6 +33,7 @@ import {
   sourcesOf,
   synthesize,
   type BundleMain,
+  type SynthRelation,
 } from './pkc2-bundle';
 import {
   readInnerBundles,
@@ -137,17 +138,19 @@ export async function readFolderExportBundle(zip: Blob): Promise<Pkc2ContainerBu
   if (inner.failed.length > 0) {
     warnings.push(`${inner.failed.length} 件の bundle を取り込めませんでした(残りは取り込みます)`);
   }
-  // 🔴 「読めたつもりで 0 件」を作らない
-  if (inner.bundles.length === 0 && (manifest.folders?.length ?? 0) === 0) {
+  // 🔴 内側が**全部失敗**したなら断る(段④ と同じ方針)── 空フォルダだけ作って
+  // 「成功」に見せない
+  if (inner.bundles.length === 0 && inner.failed.length > 0) {
     throw new ZipReadError(
-      `取り込めるものが 1 件もありませんでした ── ${warnings.join(' / ') || '空の書出しです'}`,
+      `内側の bundle を 1 件も取り込めませんでした(${inner.failed.length} 件すべて失敗)` +
+        ` ── ${warnings.join(' / ')}`,
     );
   }
 
   // ── 階層。`folders` が無い旧 bundle は**平坦取込 + 明示 warning**(§4-K)
   const mains: BundleMain[] = inner.bundles.map((b) => b.main);
   let folderEntries: BundleMain[] = [];
-  let relations: Array<{ id: string; from: string; to: string; kind: string }> = [];
+  let relations: SynthRelation[] = [];
 
   if (!Array.isArray(manifest.folders) || manifest.folders.length === 0) {
     warnings.push(
@@ -155,20 +158,68 @@ export async function readFolderExportBundle(zip: Blob): Promise<Pkc2ContainerBu
         `── ${mains.length} 件を最上位に取り込みます`,
     );
   } else {
-    const nodes: FolderNode[] = manifest.folders.map((f) => ({
-      lid: str(f.lid),
-      title: str(f.title),
-      // ⚠ `parent_lid: null` は export root だけ。欠落も root 扱いにする
-      parentLid: typeof f.parent_lid === 'string' && f.parent_lid !== '' ? f.parent_lid : null,
-    }));
+    const nodes: FolderNode[] = manifest.folders.map((f) => {
+      // ⚠ **型違いを黙って root にしない**(review M-4)。dangling には warning を
+      // 出すのに数値・オブジェクトだけ無警告で 1 段消えるのは非対称
+      const raw = f.parent_lid;
+      if (raw !== undefined && raw !== null && typeof raw !== 'string') {
+        warnings.push(
+          `フォルダの親 lid が文字列ではありません(${str(f.lid) || '?'}: ${typeof raw})` +
+            ' ── 最上位に置きます',
+        );
+      }
+      return {
+        lid: str(f.lid),
+        title: str(f.title),
+        // ⚠ `parent_lid: null` は export root だけ。欠落も root 扱いにする
+        parentLid: typeof raw === 'string' && raw !== '' ? raw : null,
+      };
+    });
+
+    // 🔴 **folder lid と本体 lid の衝突を先に解く**(review H-2)。
+    // `synthesize` は folder を先に並べるので、convert の再採番は必ず**本体側**に
+    // 当たり、参照書換表が旧 lid → 本体の新 lid を指す ── その結果 folder が
+    // 張った structural relation の端点が**本体 entry へ付け替えられ、階層が全滅する**
+    // (warning は「lid 衝突を再採番」しか出ず、階層が消えたことは誰も言わない)。
+    // reader は「どちらが folder か」を知っている唯一の場所なので、ここで避ける
+    const mainLids = new Set(mains.map((m) => m.lid));
+    const taken = new Set([...mainLids, ...nodes.map((n) => n.lid)]);
+    const renamed = new Map<string, string>();
+    for (const n of nodes) {
+      if (!mainLids.has(n.lid)) continue;
+      let fresh = `folder-${n.lid}`;
+      for (let i = 2; taken.has(fresh); i++) fresh = `folder-${n.lid}-${i}`;
+      taken.add(fresh);
+      renamed.set(n.lid, fresh);
+      warnings.push(
+        `フォルダとノートで lid がぶつかっています(${n.lid})── フォルダ側を ${fresh} にずらします`,
+      );
+    }
+    if (renamed.size > 0) {
+      for (const n of nodes) {
+        const self = renamed.get(n.lid);
+        if (self !== undefined) n.lid = self;
+        if (n.parentLid !== null) n.parentLid = renamed.get(n.parentLid) ?? n.parentLid;
+      }
+    }
     // 🔑 `main` と manifest entry を**組で**持っているので、飛ばした件があっても
     // 対応がずれない(PKC2 はここで選んだ entry を落としていた)
     const childOf = new Map<string, string>();
     for (const b of inner.bundles) {
       const p = str(b.outer.parent_folder_lid);
-      if (p !== '') childOf.set(b.main.lid, p);
+      if (p === '') continue;
+      // 重複 lid の 2 件目は所属が上書きされて**片方が黙って消える**(review H-1)。
+      // `readInnerBundles` が lid の重複自体は言うが、所属が落ちたことは別に言う
+      if (childOf.has(b.main.lid)) {
+        warnings.push(
+          `${b.filename}: lid が重複しているためフォルダ所属を復元できません(${b.main.lid})` +
+            ' ── 最上位に置きます',
+        );
+        continue;
+      }
+      childOf.set(b.main.lid, renamed.get(p) ?? p);
     }
-    const graph = buildFolderGraph(nodes, childOf);
+    const graph = buildFolderGraph(nodes, childOf, mainLids);
     warnings.push(...graph.warnings);
     folderEntries = graph.entries;
     relations = graph.edges.map((e, i) => ({
@@ -180,12 +231,23 @@ export async function readFolderExportBundle(zip: Blob): Promise<Pkc2ContainerBu
     }));
   }
 
+  // 🔴 「読めたつもりで 0 件」を作らない ── 判定は **実際に作れた entry 数**で行う
+  // (manifest の配列長で見ると、lid の無いフォルダ 1 件だけの書出しが素通りする)
+  if (folderEntries.length + mains.length === 0) {
+    throw new ZipReadError(
+      `取り込めるものが 1 件もありませんでした ── ${warnings.join(' / ') || '空の書出しです'}`,
+    );
+  }
+
   if (inner.anyCompacted || manifest.compact === true) warnings.push(COMPACTED_WARNING);
 
   // 件数照合(PKC2 は読んでさえいない)
   const declared: Array<[string, number | undefined, number]> = [
     ['text', manifest.text_count, inner.counted.text],
     ['textlog', manifest.textlog_count, inner.counted.textlog],
+    // ⚠ `other_count` も照合する(review M-5)── 宣言だけして読まないのは
+    // まさに PKC2 を批判している振る舞い。v1 では key ごと不在なので照合されない
+    ['ノート以外', manifest.other_count, inner.skipped.length],
   ];
   for (const [label, want, got] of declared) {
     if (typeof want === 'number' && want !== got) {
@@ -197,14 +259,9 @@ export async function readFolderExportBundle(zip: Blob): Promise<Pkc2ContainerBu
     warnings.push(`manifest に無いファイルを無視しました: ${e.name}`);
   }
 
-  const container = synthesize(inner.assets, [...folderEntries, ...mains]) as {
-    relations: unknown[];
-  };
-  container.relations = relations;
-
   return {
-    manifest: manifest as never,
-    container,
+    manifest,
+    container: synthesize(inner.assets, [...folderEntries, ...mains], relations),
     assetSources: sourcesOf(inner.assets),
     assetAlternates: inner.alternates,
     warnings,

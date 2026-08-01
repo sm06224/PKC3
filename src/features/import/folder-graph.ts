@@ -87,6 +87,8 @@ function breakCycles(
 export function buildFolderGraph(
   folders: readonly FolderNode[],
   childOf: ReadonlyMap<string, string>,
+  /** 本体 entry の lid(**folder ではない**もの)。文面を正しくするために要る。 */
+  nonFolderLids: ReadonlySet<string> = new Set(),
 ): FolderGraphResult {
   const warnings: string[] = [];
   const byLid = new Map<string, FolderNode>();
@@ -140,7 +142,14 @@ export function buildFolderGraph(
   // 本体 entry → 親 folder(循環しえない ── 本体は親になれない)
   for (const [child, parent] of childOf) {
     if (!byLid.has(parent)) {
-      warnings.push(`ノートの親フォルダが書出しに含まれていません: ${child}(最上位に置きます)`);
+      // ⚠ **2 つの原因を混ぜない**(review M-3)。PKC2 の structural は UI から
+      // 任意の entry 間に張れるので、「親が居ない」と「親は居るが folder ではない」
+      // は別の話 ── 前者を後者の文面で言うと user が原因を誤解する
+      warnings.push(
+        nonFolderLids.has(parent)
+          ? `ノートの親がフォルダではありません(${parent})── ${child} を最上位に置きます`
+          : `ノートの親フォルダが書出しに含まれていません(${parent})── ${child} を最上位に置きます`,
+      );
       continue;
     }
     edges.push({ fromLid: parent, toLid: child });

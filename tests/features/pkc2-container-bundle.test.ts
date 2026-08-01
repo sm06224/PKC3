@@ -614,6 +614,23 @@ describe('readContainerBundle — 黙って落とさない', () => {
     ]);
   });
 
+  it('外側だけ compact でも 1 回言う(内側が言うから通っている状態にしない)', async () => {
+    // ⚠ 既存 test は内側も compacted: true なので、**外側を見る行を消しても通る**
+    // (review P-3)── 内側 false で外側だけ true の対照が要る
+    const zip = await outer(
+      {
+        format: 'pkc2-texts-container-bundle',
+        version: 1,
+        compact: true,
+        entries: [{ lid: 'n1', filename: 'a.text.zip' }],
+      },
+      [{ name: 'a.text.zip', bytes: await textBundle({ lid: 'n1', compacted: false }) }],
+    );
+    expect((await readContainerBundle(zip)).warnings).toEqual([
+      '書出し時に壊れた添付参照が本文から除かれています(compact mode)',
+    ]);
+  });
+
   it('目次と中身で lid / タイトルが食い違えば warning(正は中身)', async () => {
     const zip = await outer(
       {

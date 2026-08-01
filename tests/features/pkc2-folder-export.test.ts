@@ -15,7 +15,7 @@ type Synth = {
   relations: Array<{ id: string; from: string; to: string; kind: string }>;
 };
 
-async function textBundle(lid: string, title = lid): Promise<Uint8Array> {
+async function textBundle(lid: string | null, title = lid ?? 'メモ'): Promise<Uint8Array> {
   const zip = await buildZip([
     {
       name: 'manifest.json',
@@ -23,7 +23,8 @@ async function textBundle(lid: string, title = lid): Promise<Uint8Array> {
         JSON.stringify({
           format: 'pkc2-text-bundle',
           version: 1,
-          source_lid: lid,
+          // null なら **source_lid を書かない**(readBundleParts が定数へ落ちる形)
+          ...(lid === null ? {} : { source_lid: lid }),
           source_title: title,
           assets: {},
           compacted: false,
@@ -229,6 +230,176 @@ describe('readFolderExportBundle', () => {
   it('🔴 取り込めるものが 1 件も無ければ断る(0 件で成功に見せない)', async () => {
     const zip = await outer(base({ entries: [], folders: [] }), []);
     await expect(readFolderExportBundle(zip)).rejects.toThrow(/1 件もありませんでした/);
+  });
+
+  it('🔴 内側 lid の重複でフォルダ所属が黙って消えない(review H-1)', async () => {
+    // `source_lid` が無い bundle は `bundle-text` という**定数**に落ちるので、
+    // 2 件あれば必ずぶつかる。convert は entry 自体は再採番して救うが、
+    // **フォルダ所属だけが片方消える** ── 見て気づきにくい欠損
+    const zip = await outer(
+      base({
+        text_count: 2,
+        entries: [
+          { lid: 'n1', title: 'A', archetype: 'text', filename: 'a.text.zip', parent_folder_lid: 'fa' },
+          { lid: 'n2', title: 'B', archetype: 'text', filename: 'b.text.zip', parent_folder_lid: 'fb' },
+        ],
+        folders: [
+          { lid: 'root', title: 'R', parent_lid: null },
+          { lid: 'fa', title: 'FA', parent_lid: 'root' },
+          { lid: 'fb', title: 'FB', parent_lid: 'root' },
+        ],
+      }),
+      [
+        { name: 'a.text.zip', bytes: await textBundle(null, 'A') },
+        { name: 'b.text.zip', bytes: await textBundle(null, 'B') },
+      ],
+    );
+    const got = await readFolderExportBundle(zip);
+    // 重複自体と、所属を復元できなかったことの**両方**を言う
+    expect(got.warnings.some((w) => /中身の lid が .* と同じです/.test(w))).toBe(true);
+    expect(
+      got.warnings.some((w) => /フォルダ所属を復元できません/.test(w)),
+    ).toBe(true);
+  });
+
+  it('🔑 childOf の key は**内側の lid**(目次と中身で lid が違っても効く)', async () => {
+    // reader は「目次と中身で lid が違います」warning を持っている = 実在する条件。
+    // 外側 lid で引くと**全ノートのフォルダ所属が落ちる**が、fixture が全部
+    // 一致していると差が出ない(review P-2)
+    const zip = await outer(
+      base({
+        text_count: 1,
+        entries: [
+          { lid: 'そとの lid', title: 'A', archetype: 'text', filename: 'a.text.zip', parent_folder_lid: 'fa' },
+        ],
+        folders: [
+          { lid: 'root', title: 'R', parent_lid: null },
+          { lid: 'fa', title: 'FA', parent_lid: 'root' },
+        ],
+      }),
+      [{ name: 'a.text.zip', bytes: await textBundle('なかの lid', 'A') }],
+    );
+    const got = await readFolderExportBundle(zip);
+    expect(tree(got.container as Synth)['なかの lid']).toBe('fa');
+  });
+
+  it('🔴 folder lid と本体 lid の衝突で階層が全滅しない(review H-2)', async () => {
+    // synthesize は folder を先に置くので convert の再採番は**本体側**に当たり、
+    // 参照書換表が旧 lid → 本体の新 lid を指す ── folder の relation 端点が
+    // 本体へ付け替えられて階層が消える。reader 側でずらして避ける
+    const zip = await outer(
+      base({
+        text_count: 2,
+        entries: [
+          { lid: 'sub', title: 'ぶつかるノート', archetype: 'text', filename: 'x.text.zip' },
+          { lid: 'n1', title: '子ノート', archetype: 'text', filename: 'n1.text.zip', parent_folder_lid: 'sub' },
+        ],
+        folders: [
+          { lid: 'root', title: '仕事', parent_lid: null },
+          { lid: 'sub', title: '2026', parent_lid: 'root' },
+        ],
+      }),
+      [
+        { name: 'x.text.zip', bytes: await textBundle('sub', 'ぶつかるノート') },
+        { name: 'n1.text.zip', bytes: await textBundle('n1', '子ノート') },
+      ],
+    );
+    const got = await readFolderExportBundle(zip);
+    const c = got.container as Synth;
+    const t = tree(c);
+    const byTitle = new Map(c.entries.map((e) => [e.title, e.lid]));
+    // 階層は保たれる ── 2026 は root の下、子ノートは 2026 の下
+    expect(t[byTitle.get('2026')!]).toBe(byTitle.get('仕事'));
+    expect(t[byTitle.get('子ノート')!]).toBe(byTitle.get('2026'));
+    expect(got.warnings.some((w) => /lid がぶつかっています/.test(w))).toBe(true);
+  });
+
+  it('🔴 lid の無いフォルダだけの書出しは断る(0 件で成功に見せない)', async () => {
+    // manifest の配列長で見ると素通りする(review M-1)
+    const zip = await outer(base({ entries: [], folders: [{ title: 'なまえだけ' }] }), []);
+    await expect(readFolderExportBundle(zip)).rejects.toThrow(/1 件もありませんでした/);
+  });
+
+  it('🔴 内側が全部失敗したら断る(段④ と方針を揃える / review M-2)', async () => {
+    const zip = await outer(
+      base({
+        text_count: 1,
+        entries: [{ lid: 'n1', title: 'A', archetype: 'text', filename: 'n1.text.zip' }],
+        folders: [{ lid: 'root', title: 'R', parent_lid: null }],
+      }),
+      [{ name: 'n1.text.zip', bytes: bytesOf('壊れている') }],
+    );
+    await expect(readFolderExportBundle(zip)).rejects.toThrow(/1 件も取り込めませんでした/);
+  });
+
+  it('parent_lid が文字列でなければ言う(黙って最上位にしない / review M-4)', async () => {
+    const zip = await outer(
+      base({
+        entries: [],
+        folders: [
+          { lid: 'root', title: 'R', parent_lid: null },
+          { lid: 'a', title: 'A', parent_lid: 12345 },
+        ],
+      }),
+      [],
+    );
+    const got = await readFolderExportBundle(zip);
+    expect(got.warnings.some((w) => /親 lid が文字列ではありません/.test(w))).toBe(true);
+  });
+
+  it('other_count も照合する(宣言だけして読まないのは PKC2 の振る舞い / review M-5)', async () => {
+    const zip = await outer(
+      base({
+        version: 2,
+        text_count: 1,
+        other_count: 5, // 実際に飛ばしたのは 1 件
+        entries: [
+          { lid: 'n1', title: 'A', archetype: 'text', filename: 'n1.text.zip' },
+          { lid: 't1', title: 'T', archetype: 'todo', filename: 't1.entry.zip' },
+        ],
+        folders: [{ lid: 'root', title: 'R', parent_lid: null }],
+      }),
+      [
+        { name: 'n1.text.zip', bytes: await textBundle('n1', 'A') },
+        { name: 't1.entry.zip', bytes: bytesOf('skip') },
+      ],
+    );
+    const got = await readFolderExportBundle(zip);
+    expect(got.warnings).toContain('manifest の ノート以外 件数が中身と違います(5 ≠ 1)');
+  });
+
+  it('外側 compact が内側の件数ぶん繰り返されない(review P-3)', async () => {
+    const zip = await outer(
+      base({
+        compact: true,
+        text_count: 2,
+        entries: [
+          { lid: 'n1', title: 'A', archetype: 'text', filename: 'a.text.zip' },
+          { lid: 'n2', title: 'B', archetype: 'text', filename: 'b.text.zip' },
+        ],
+        folders: [{ lid: 'root', title: 'R', parent_lid: null }],
+      }),
+      [
+        { name: 'a.text.zip', bytes: await textBundle('n1', 'A') },
+        { name: 'b.text.zip', bytes: await textBundle('n2', 'B') },
+      ],
+    );
+    const got = await readFolderExportBundle(zip);
+    expect(got.warnings.filter((w) => /compact mode/.test(w))).toHaveLength(1);
+  });
+
+  it('folders が空配列でも平坦取込 + 明示 warning(review P-4)', async () => {
+    const zip = await outer(
+      base({
+        text_count: 1,
+        entries: [{ lid: 'n1', title: 'A', archetype: 'text', filename: 'a.text.zip' }],
+        folders: [],
+      }),
+      [{ name: 'a.text.zip', bytes: await textBundle('n1', 'A') }],
+    );
+    const got = await readFolderExportBundle(zip);
+    expect((got.container as Synth).relations).toEqual([]);
+    expect(got.warnings[0]).toMatch(/フォルダ構造を復元できませんでした/);
   });
 
   it('件数の不一致は warning に出す(PKC2 は読んでさえいない)', async () => {

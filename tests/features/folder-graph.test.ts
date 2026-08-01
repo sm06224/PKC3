@@ -78,6 +78,24 @@ describe('buildFolderGraph — 壊れた入力を「直して見せる」', () =
     ]);
   });
 
+  it('🔴 warning が言う辺が**実際に外れた辺**である', () => {
+    // 🔴 review P-1: 切る辺を変えても「森になる」assert は素通りするので、
+    // **warning だけが嘘になる**。この PR の売りは「直した箇所を全部見せる」
+    // なので、見せている内容が正しいことを固定する
+    const r = buildFolderGraph(
+      [F('A', 'D'), F('B', 'A'), F('C', 'B'), F('D', 'C')], // A→D→C→B→A
+      new Map(),
+    );
+    const m = /: (.+) → (.+)$/.exec(r.warnings[0]!)!;
+    const [, childTitle, parentTitle] = m;
+    const t = parentOf(r);
+    // warning が「child → parent を外した」と言うなら、その辺は残っていない
+    expect(t[childTitle!]).not.toBe(parentTitle);
+    // かつ、それ以外の 3 本は残っている
+    expect(r.edges).toHaveLength(3);
+    expectAcyclic(t, ['A', 'B', 'C', 'D']);
+  });
+
   it('🔴 3 者の循環でも切るのは 1 本', () => {
     const r = buildFolderGraph([F('A', 'B'), F('B', 'C'), F('C', 'A')], new Map());
     expectAcyclic(parentOf(r), ['A', 'B', 'C']);
@@ -129,7 +147,18 @@ describe('buildFolderGraph — 壊れた入力を「直して見せる」', () =
     // PKC2 はこの 1 件で **bundle 全体を平坦取込**に落としていた
     const r = buildFolderGraph([F('root', null)], new Map([['n1', 'いない']]));
     expect(r.edges).toEqual([]);
-    expect(r.warnings[0]).toMatch(/ノートの親フォルダが書出しに含まれていません/);
+    expect(r.warnings).toEqual([
+      'ノートの親フォルダが書出しに含まれていません(いない)── n1 を最上位に置きます',
+    ]);
+  });
+
+  it('親が**フォルダでない**ときは別の文面で言う(原因を取り違えさせない)', () => {
+    // PKC2 の structural は UI から任意の entry 間に張れるので、親がノートに
+    // なっていることが実際にある ──「含まれていません」は事実と違う
+    const r = buildFolderGraph([F('root', null)], new Map([['n2', 'n1']]), new Set(['n1']));
+    expect(r.warnings).toEqual([
+      'ノートの親がフォルダではありません(n1)── n2 を最上位に置きます',
+    ]);
   });
 
   it('lid の無いフォルダは無視して言う', () => {

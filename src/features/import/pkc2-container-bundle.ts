@@ -268,6 +268,7 @@ export async function readInnerBundles(
   const counted = { text: 0, textlog: 0 };
   const failed: string[] = [];
   const skipped: string[] = [];
+  const lidSeen = new Map<string, string>();
   let anyCompacted = false;
 
   for (let i = 0; i < entries.length; i++) {
@@ -343,6 +344,20 @@ export async function readInnerBundles(
       warnings.push(`${filename}: 目次と中身でタイトルが違います(${me.title} ≠ ${innerTitle})`);
     }
 
+    // 🔴 内側 lid の重複を**言う**(review H-1)。`readBundleParts` は
+    // `source_lid` が無いと `bundle-<archetype>` という**定数**に落ちるので、
+    // source_lid 欠落の bundle が 2 件あれば必ずぶつかる。段⑤ ではこれが
+    // 「ノートのフォルダ所属が片方消える」に化ける(convert は entry 自体は
+    // 再採番して救うので、消えるのは所属だけ = 見て気づきにくい)
+    const dupOf = lidSeen.get(parts.main.lid);
+    if (dupOf !== undefined) {
+      warnings.push(
+        `${filename}: 中身の lid が ${dupOf} と同じです(${parts.main.lid})` +
+          ' ── 別の entry として取り込みます',
+      );
+    } else {
+      lidSeen.set(parts.main.lid, filename);
+    }
     bundles.push({ main: parts.main, outer: me, filename });
     for (const w of parts.warnings) {
       // compact は **export 単位**の性質なので、内側の件数ぶん繰り返さない

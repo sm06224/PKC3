@@ -412,6 +412,10 @@ function folderExportZip(): Buffer {
             { lid: 'sub', title: '2026', parent_lid: 'root' }, // ⚠ 子が先
             { lid: 'root', title: '仕事', parent_lid: null },
             { lid: 'empty', title: '空フォルダ', parent_lid: 'sub' }, // 空でも作る
+            // 🔴 **本物の循環**(cyc1 ⇄ cyc2)。PKC2 の writer は防いでいないので
+            // 実際に来る。切れていないと循環上の 2 件が root に出ず配下ごと消える
+            { lid: 'cyc1', title: '循環1', parent_lid: 'cyc2' },
+            { lid: 'cyc2', title: '循環2', parent_lid: 'cyc1' },
           ],
         }),
       ),
@@ -431,18 +435,18 @@ test('folder-export 取込 → filer で階層が実際にたどれる', async (
     buffer: folderExportZip(),
   });
 
-  // folder 3 件 + 本体 2 件
-  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(5);
+  // folder 5 件 + 本体 2 件
+  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(7);
 
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="filer"]');
   const rows = page.locator('[data-pkc-region="filer-table"] tbody tr');
 
-  // 🔑 最上位には **root フォルダだけ**が出る(階層が効いていれば 5 件並ばない)
-  await expect(rows).toHaveCount(1);
-  await expect(rows.first().locator('[data-pkc-field="title"]')).toHaveText('📁 仕事');
+  // 🔑 最上位は **root + 循環から救出された 1 件**(階層が効いていれば 7 件並ばない)。
+  // 🔴 循環が切れていないと循環上の 2 件は root にも配下にも出ず**完全に消える**
+  await expect(rows.locator('[data-pkc-field="title"]')).toHaveText(['📁 仕事', '📁 循環2']);
 
   // root へ入る → 「2026」フォルダと「直下メモ」
-  await clickReal(page, '[data-pkc-region="filer-table"] tbody tr');
+  await clickReal(page, '[data-pkc-region="filer-table"] tbody tr:first-child');
   await expect(rows).toHaveCount(2);
   await expect(rows.locator('[data-pkc-field="title"]')).toHaveText(['📁 2026', '直下メモ']);
 
