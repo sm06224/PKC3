@@ -7,7 +7,7 @@
  * `assets/<key><ext>` の ext は空になりうる)。
  */
 import { describe, expect, it } from 'vitest';
-import { readTextBundle } from '../../src/features/import/pkc2-bundle';
+import { readTextBundle, readTextlogBundle } from '../../src/features/import/pkc2-bundle';
 import { readZipEntry } from '../../src/features/import/zip-reader';
 import { buildZip, bytesOf, type FixtureEntry } from './zip-fixture';
 
@@ -174,5 +174,117 @@ describe('readTextBundle', () => {
   it('Office 文書は名指しで断る', async () => {
     const zip = await buildZip([{ name: '[Content_Types].xml', bytes: bytesOf('<Types/>') }]);
     await expect(readTextBundle(zip)).rejects.toThrow(/Office 文書/);
+  });
+});
+
+describe('readTextlogBundle', () => {
+  const HEADER =
+    '"log_id","timestamp_iso","timestamp_display","important","text_markdown","text_plain","asset_keys","flags"';
+  const csvOf = (...rows: string[]) => [HEADER, ...rows].join('\r\n');
+  const tlManifest = (over: Record<string, unknown> = {}) => ({
+    format: 'pkc2-textlog-bundle',
+    version: 1,
+    source_lid: 'log1',
+    source_title: '作業ログ',
+    entry_count: 2,
+    assets: {},
+    missing_asset_keys: [],
+    compacted: false,
+    ...over,
+  });
+
+  it('CSV を PKC2 の TextlogBody JSON へ逆写像して合成 container に載せる', async () => {
+    const zip = await buildZip([
+      { name: 'manifest.json', bytes: bytesOf(JSON.stringify(tlManifest())) },
+      {
+        name: 'textlog.csv',
+        bytes: bytesOf(
+          csvOf(
+            '"l1","2026-07-01T09:00:00Z","7/1","false","朝の記録","","",""',
+            '"l2","2026-07-01T18:00:00Z","7/1","true","夜の記録","","","important"',
+          ),
+        ),
+      },
+    ]);
+
+    const got = await readTextlogBundle(zip);
+    const c = got.container as { entries: Array<{ lid: string; archetype: string; body: string }> };
+    expect(c.entries).toHaveLength(1);
+    expect(c.entries[0]!.archetype).toBe('textlog');
+    expect(c.entries[0]!.lid).toBe('log1');
+    // fromPkc2 が取る形(PKC2 入力の写し)── ここは JSON でよい
+    const body = JSON.parse(c.entries[0]!.body) as { entries: Array<Record<string, unknown>> };
+    expect(body.entries).toHaveLength(2);
+    expect(body.entries[0]).toEqual({
+      id: 'l1',
+      text: '朝の記録',
+      createdAt: '2026-07-01T09:00:00Z',
+      flags: [],
+    });
+    expect(body.entries[1]!.flags).toEqual(['important']);
+    expect(got.warnings).toEqual([]);
+  });
+
+  it('log_id の無い行と manifest の件数ズレを警告に出す', async () => {
+    const zip = await buildZip([
+      { name: 'manifest.json', bytes: bytesOf(JSON.stringify(tlManifest({ entry_count: 5 }))) },
+      {
+        name: 'textlog.csv',
+        bytes: bytesOf(
+          csvOf('"l1","ts","d","false","a","","",""', '"","ts","d","false","壊れた","","",""'),
+        ),
+      },
+    ]);
+    const got = await readTextlogBundle(zip);
+    expect(got.warnings.some((w) => w.includes('1 行読み飛ばしました'))).toBe(true);
+    expect(got.warnings.some((w) => w.includes('entry 件数'))).toBe(true);
+  });
+
+  it('壊れた CSV は ZipReadError として理由付きで断る', async () => {
+    const zip = await buildZip([
+      { name: 'manifest.json', bytes: bytesOf(JSON.stringify(tlManifest())) },
+      { name: 'textlog.csv', bytes: bytesOf('"log_id","timestamp_iso"') },
+    ]);
+    await expect(readTextlogBundle(zip)).rejects.toThrow(/必須列/);
+  });
+
+  it('textlog.csv が無い / 形式違いは断る', async () => {
+    await expect(
+      readTextlogBundle(
+        await buildZip([{ name: 'manifest.json', bytes: bytesOf(JSON.stringify(tlManifest())) }]),
+      ),
+    ).rejects.toThrow(/textlog\.csv が入っていません/);
+    await expect(
+      readTextlogBundle(
+        await buildZip([
+          { name: 'manifest.json', bytes: bytesOf(JSON.stringify(tlManifest({ format: 'pkc2-text-bundle' }))) },
+          { name: 'textlog.csv', bytes: bytesOf(HEADER) },
+        ]),
+      ),
+    ).rejects.toThrow(/pkc2-textlog-bundle のみ/);
+  });
+
+  it('添付の突合・監査証跡の作法は .text.zip と揃っている', async () => {
+    const zip = await buildZip([
+      {
+        name: 'manifest.json',
+        bytes: bytesOf(
+          JSON.stringify(
+            tlManifest({
+              entry_count: 1,
+              assets: { 'ast-k': { name: 'p.png', mime: 'image/png' } },
+              missing_asset_keys: ['lost'],
+              compacted: true,
+            }),
+          ),
+        ),
+      },
+      { name: 'textlog.csv', bytes: bytesOf(csvOf('"l1","ts","d","false","![図](asset:ast-k)","","",""')) },
+      { name: 'assets/ast-k.png', bytes: bytesOf('PNG') },
+    ]);
+    const got = await readTextlogBundle(zip);
+    expect([...got.assetEntries.keys()]).toEqual(['ast-k']);
+    expect(got.warnings.some((w) => w.includes('既に失われていた'))).toBe(true);
+    expect(got.warnings.some((w) => w.includes('compact mode'))).toBe(true);
   });
 });

@@ -969,4 +969,45 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(await importPkc2File(d, deps, new File([zip], 'b.pkc2.zip'))).toBe(1);
     expect(blobs.size).toBe(0);
   });
+
+  it('[P6c 段③] .textlog.zip を取り込む ── CSV が PKC-Markdown へ変換される', async () => {
+    const { d, deps, written } = harness();
+    const zip = await buildZip([
+      {
+        name: 'manifest.json',
+        bytes: bytesOf(
+          JSON.stringify({
+            format: 'pkc2-textlog-bundle',
+            version: 1,
+            source_lid: 'log1',
+            source_title: '作業ログ',
+            entry_count: 2,
+            assets: {},
+          }),
+        ),
+      },
+      {
+        name: 'textlog.csv',
+        bytes: bytesOf(
+          [
+            '"log_id","timestamp_iso","timestamp_display","important","text_markdown","text_plain","asset_keys","flags"',
+            '"l1","2026-07-01T09:00:00Z","7/1","false","朝の記録","","",""',
+            '"l2","2026-07-01T18:00:00Z","7/1","true","夜の記録","","","important"',
+          ].join('\r\n'),
+        ),
+      },
+    ]);
+
+    expect(await importPkc2File(d, deps, new File([zip], 'log.textlog.zip'))).toBe(1);
+
+    const e = written[0]!;
+    expect(e.archetype).toBe('textlog');
+    expect(e.title).toBe('作業ログ');
+    // 🔑 JSON 文字列 body は**残らない** ── fromPkc2 が PKC-Markdown へ変換する
+    expect(e.body).not.toContain('"log_id"');
+    expect(e.body).not.toContain('"createdAt"');
+    expect(e.body).toContain('朝の記録');
+    expect(e.body).toContain('夜の記録');
+    expect(e.body).toContain('★'); // important は見出しの印になる
+  });
 });
