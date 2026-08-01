@@ -86,22 +86,107 @@ afterAll(async () => {
   await request({ op: 'close' });
 });
 
+/** パッチ経路を実際に通す大きさの本文(小さいと encodeReverse が全文を選ぶ)。 */
+const doc = (mark: string, lines = 200): string =>
+  Array.from({ length: lines }, (_, i) => (i === 7 ? `行 ${i} ${mark}\n` : `行 ${i}\n`)).join('');
+
 describe('revision chain (P5c ── 逆向き差分)', () => {
   it('checkpoint は履歴を伸ばし、amend は伸ばさない ── 過去の状態は amend で不変', async () => {
-    await write('e1', '# 初稿\n本文A\n');
-    await write('e1', '# 二稿\n本文A\n', { checkpoint: true }); // 初稿を刻む
+    // ⚠ 本文は**パッチが選ばれる大きさ**にする(review P5c F3: 小さい本文だと
+    // 全文保存になり、amend の再符号化を丸ごと外しても test が素通りしていた)
+    await write('e1', doc('初稿'));
+    await write('e1', doc('二稿'), { checkpoint: true });
     const afterFirst = await metasOf('e1');
     expect(afterFirst).toHaveLength(1);
     const revId = afterFirst[0]!.id;
-    expect(await bodyOf(revId)).toBe('# 初稿\n本文A\n');
+    expect(await bodyOf(revId)).toBe(doc('初稿'));
 
     // amend(toggle / rename 相当): 履歴は伸びず、id も保たれる(change ID の安定)
-    await write('e1', '# 二稿\n本文A\nトグル追記\n');
+    await write('e1', doc('二稿') + 'トグル追記\n');
     const afterAmend = await metasOf('e1');
     expect(afterAmend).toHaveLength(1);
     expect(afterAmend[0]!.id).toBe(revId);
     // tip が動いても、その revision が指す**過去の状態は変わらない**
-    expect(await bodyOf(revId)).toBe('# 初稿\n本文A\n');
+    // (= 頭のパッチが新しい tip 基準へ張り替わっている)
+    expect(await bodyOf(revId)).toBe(doc('初稿'));
+
+    // amend を連打しても劣化しない
+    for (let i = 0; i < 5; i++) await write('e1', doc('二稿') + `連打 ${i}\n`);
+    expect(await metasOf('e1')).toHaveLength(1);
+    expect(await bodyOf(revId)).toBe(doc('初稿'));
+  });
+
+  it('checkpoint と amend をランダムに交ぜても全世代が byte 一致で戻る', async () => {
+    // 決定的 PRNG(落ちたら同じ列で再現する)
+    let seed = 20260801;
+    const rnd = () => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed / 0x7fffffff;
+    };
+    const lid = 'e-fuzz';
+    let tip = doc('v0');
+    await write(lid, tip);
+    const recorded: string[] = []; // checkpoint で刻まれた本文(古い順)
+    for (let step = 1; step <= 40; step++) {
+      const next = doc(`v${step}`, 200 + (rnd() < 0.5 ? 0 : 3));
+      const checkpoint = rnd() < 0.5;
+      if (checkpoint) recorded.push(tip);
+      await write(lid, next, { checkpoint, keepLatest: 100 });
+      tip = next;
+    }
+    const metas = await metasOf(lid); // 新しい順
+    expect(metas).toHaveLength(recorded.length);
+    for (let i = 0; i < metas.length; i++) {
+      expect(await bodyOf(metas[i]!.id)).toBe(recorded[recorded.length - 1 - i]!);
+    }
+  });
+
+  it('hash 検証: 行数が一致する壊れ方でも「存在しなかった版」を返さない', async () => {
+    // 全消費要求(applyLinePatch)は行数が合うとすり抜ける ── そこを hash が守る
+    // (review P5c F4: この経路は従来 1 件も pin されていなかった)
+    const lid = 'e-hash';
+    await write(lid, doc('A'));
+    await write(lid, doc('B'), { checkpoint: true });
+    const revId = (await metasOf(lid))[0]!.id;
+    expect(await bodyOf(revId)).toBe(doc('A'));
+    // 鎖を維持しない経路で、**行数の同じ別内容**へ tip をすげ替える
+    await request({
+      op: 'bulkUpsertEntries',
+      cid: 'c1',
+      entries: [entry(lid, doc('B だが別の行が違う').replace('行 9\n', '行 9 改\n'))],
+    });
+    await expect(request({ op: 'getRevision', cid: 'c1', id: revId })).rejects.toThrow(
+      /integrity check/,
+    );
+  });
+
+  it('鎖が壊れていても本文の保存は通る ── 履歴の破損が編集を巻き添えにしない', async () => {
+    // review P5c F1(データ喪失方向): amend の materialize が throw して tx ごと
+    // 巻き戻ると、toggle 相当の書込が永久に失敗し user の編集が disk に届かない
+    const lid = 'e-resilient';
+    await write(lid, doc('A'));
+    await write(lid, doc('B'), { checkpoint: true });
+    await request({
+      op: 'bulkUpsertEntries',
+      cid: 'c1',
+      entries: [entry(lid, '全く別の本文\n')], // 鎖の前提を壊す
+    });
+    await write(lid, '全く別の本文(編集)\n'); // amend 経路 ── throw しない
+    expect(await request({ op: 'getBody', cid: 'c1', lid })).toBe('全く別の本文(編集)\n');
+    await write(lid, '更に編集\n'); // 連続でも通る(自己回復しない状態でも編集は生きる)
+    expect(await request({ op: 'getBody', cid: 'c1', lid })).toBe('更に編集\n');
+  });
+
+  it('古い版にしか無い escape 済み asset 参照も GC が keep する(patch は JSON 二重化)', async () => {
+    const lid = 'e-esc';
+    await write(lid, `${doc('参照あり')}![x](asset:ast\\-esc-key)\n`);
+    await write(lid, doc('参照を削除'), { checkpoint: true }); // tip から消える
+    const scan = await request({
+      op: 'scanAssetRefs',
+      cid: 'c1',
+      candidates: ['ast-esc-key'],
+    });
+    expect(scan.referenced).toEqual(['ast-esc-key']);
   });
 
   it('多世代の鎖を正しく復元し、保存は全文でなく差分(容量の前提)', async () => {

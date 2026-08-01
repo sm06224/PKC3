@@ -328,17 +328,26 @@ const handlers: Handlers = {
         [req.cid, req.entry.lid],
       )[0] as { title: string; archetype: string; body: string } | undefined;
       if (old && old.body !== req.entry.body) {
-        maintainChain(
-          database,
-          req.cid,
-          req.entry.lid,
-          old.body,
-          req.entry.body,
-          old.title,
-          old.archetype,
-          req.checkpoint === true,
-          req.keepLatest ?? DEFAULT_REVISION_KEEP,
-        );
+        // 🔒 **履歴より本文が上位**(review P5c F1 ── データ喪失方向で実証済み):
+        // 鎖が既に壊れていると amend の materialize が throw し、tx ごと巻き戻って
+        // **本文の保存が失敗する**。しかも toggle 系は永久に通らなくなる。
+        // 鎖の維持に失敗しても body の書込は続行する ── 壊れた鎖は読み側の
+        // 可視エラー(revision restore failed)で既に扱えている
+        try {
+          maintainChain(
+            database,
+            req.cid,
+            req.entry.lid,
+            old.body,
+            req.entry.body,
+            old.title,
+            old.archetype,
+            req.checkpoint === true,
+            req.keepLatest ?? DEFAULT_REVISION_KEEP,
+          );
+        } catch {
+          /* 履歴の維持失敗は本文の保存を巻き添えにしない */
+        }
       }
       database.exec({ sql: UPSERT_SQL, bind: bindUpsert(req.cid, req.entry) });
       database.exec('COMMIT');
@@ -559,28 +568,46 @@ const handlers: Handlers = {
       | undefined;
     if (!target) return null;
 
-    const rows = database.selectObjects(
-      `SELECT id, rev_order, snapshot, content_hash, kind FROM revisions
+    // ① まず **snapshot を読まずに** 骨組みだけ引き、出発点(anchor)を決める。
+    // 出発点 = 目標に最も近い全文行(あれば)/ 無ければ tip(entries.body)。
+    // ⚠ 先に snapshot 込みで全部読むと、anchor より新しい行の本文まで
+    // materialize してしまう(review P5c F5 ── 全面書換 100 世代で 14MB を
+    // 1 回の select で読む実測)。生成物を作らない = 即破棄以前の問題
+    const skeleton = database.selectObjects(
+      `SELECT rev_order, kind FROM revisions
         WHERE cid = ? AND entry_lid = ? AND rev_order >= ?
         ORDER BY rev_order DESC`,
       [req.cid, target.entry_lid, target.rev_order],
-    ) as unknown as RevRow[];
-
-    // 出発点: 目標に最も近い全文行(あればそこから)。無ければ tip(entries.body)。
-    // 目標より新しい全文行は読み飛ばせる ── 遡る距離を最小化する
-    // rows は rev_order の降順 ── 末尾に近いほど目標に近い。最後の全文行を採る
-    let startIdx = -1;
-    for (let i = rows.length - 1; i >= 0; i--) {
-      if (isFull(rows[i]!)) {
-        startIdx = i;
+    ) as unknown as Array<{ rev_order: number; kind: string | null }>;
+    let anchorOrder: number | null = null;
+    for (let i = skeleton.length - 1; i >= 0; i--) {
+      if ((skeleton[i]!.kind ?? 'full') === 'full') {
+        anchorOrder = skeleton[i]!.rev_order;
         break;
       }
     }
+    // ② 実際に遡る区間の snapshot だけを読む
+    const rows = (
+      anchorOrder === null
+        ? database.selectObjects(
+            `SELECT id, rev_order, snapshot, content_hash, kind FROM revisions
+              WHERE cid = ? AND entry_lid = ? AND rev_order >= ?
+              ORDER BY rev_order DESC`,
+            [req.cid, target.entry_lid, target.rev_order],
+          )
+        : database.selectObjects(
+            `SELECT id, rev_order, snapshot, content_hash, kind FROM revisions
+              WHERE cid = ? AND entry_lid = ? AND rev_order BETWEEN ? AND ?
+              ORDER BY rev_order DESC`,
+            [req.cid, target.entry_lid, target.rev_order, anchorOrder],
+          )
+    ) as unknown as RevRow[];
+
     let state: string;
     let from: number;
-    if (startIdx >= 0) {
-      state = rows[startIdx]!.snapshot;
-      from = startIdx + 1;
+    if (anchorOrder !== null) {
+      state = rows[0]!.snapshot; // 区間の先頭 = anchor(全文行)
+      from = 1;
     } else {
       const tip = database.selectObjects(
         'SELECT body FROM entries WHERE cid = ? AND lid = ?',
@@ -655,8 +682,15 @@ const handlers: Handlers = {
       // 現れない**。backslash escape と数値実体だけ畳んだ第 2 形でも照合する
       // (keep 側に広がるだけで安全)。正規 key の字母 [a-z0-9-] は名前付き
       // 実体では書けない(英数字と '-' の名前付き実体が存在しない)ため 2 形で閉じる
+      // ⚠ 2 回通す(review P5c F2 ── P5c で入った回帰):revisions.snapshot は
+      // patch のとき **JSON テキスト**なので backslash が二重化している
+      // (`asset:ast\-k` → snapshot 上は `ast\\-k`)。1 パスでは `\-k` までしか
+      // 戻らず、古い版にしか無い escape 済み参照を GC が消してしまう。
+      // 2 パスは keep 側にしか広がらないので安全
       const norm =
-        body.includes('\\') || body.includes('&#') ? unescapeForScan(body) : null;
+        body.includes('\\') || body.includes('&#')
+          ? unescapeForScan(unescapeForScan(body))
+          : null;
       for (const key of remaining) {
         if (
           key !== '' &&
