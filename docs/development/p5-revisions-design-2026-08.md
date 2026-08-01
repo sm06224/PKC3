@@ -77,8 +77,12 @@ ALTER TABLE revisions ADD COLUMN content_hash TEXT;
 -- snapshot(BLOB affinity)には body 原文(markdown)をそのまま入れる
 ```
 
-- `DB_SCHEMA_VERSION = 2`。applySchema は「新規 DB = 最新 DDL のみ / 既存 DB =
-  user_version+1..N の MIGRATIONS を順に適用」。未来 version は従来どおり明示 reject
+- `DB_SCHEMA_VERSION = 2`。⚠ **migration の適用判定は user_version ではなく
+  「列の実在」(pragma_table_info)で行い、DDL → migration → 刻印は 1 tx に
+  原子化する**(review P5a F1 ── version 刻印だけを信じると、クラッシュ窓で
+  「列欠損のまま最新版と刻印(無音の恒久失敗)」「ALTER 半端で毎回 throw」の
+  2 型の恒久破損を作ることを実験で実証)。user_version の役割は未来 version の
+  明示 reject のみ。将来の migration も同じ原則で書く
 - PKC2 の bulk_id / prev_rid は v1 では入れない(PKC3 に bulk 操作がまだ無い。
   P6 import で PKC2 の bulk 系譜を持ち込むと決めたときに列を足す)
 
@@ -86,7 +90,7 @@ ALTER TABLE revisions ADD COLUMN content_hash TEXT;
 
 | op | 内容 |
 |---|---|
-| `addRevision { cid, entryLid, title, archetype, body, contentHash, keepLatest }` | 同 tx: 直前 revision の hash 一致なら skip → INSERT(rev_order = MAX+1)→ 超過 prune。`{ added, pruned }` |
+| `addRevision { cid, rev: { entryLid, title, archetype, body }, keepLatest }` | 同 tx: 直前 revision の hash 一致なら skip → INSERT(rev_order = MAX+1)→ 超過 prune。`{ added, pruned }`。**content_hash と id は worker が計算・採番**(計算の一元化 ── client に渡させない) |
 | `listRevisionMetas { cid, entryLid }` | id / rev_order / created_at / title のみ(**body は返さない**) |
 | `getRevision { cid, id }` | `{ body, title, archetype } \| null`(要求時 1 行) |
 | `listTrash { cid }` | entries に居ない entry_lid の最新 revision(meta のみ) |
@@ -117,7 +121,9 @@ ALTER TABLE revisions ADD COLUMN content_hash TEXT;
 - UI: detail toolbar に「履歴」(選択 entry の revision 一覧 → 各行に「復元」)。
   filer root に「ゴミ箱」section(listTrash 一覧 → 「復元」/ 全体に
   「ゴミ箱を空にする」= confirm 付き)。sidebar への count badge は付けない
-  (boot で revisions に触れない原則。一覧は開いたときに引く)
+  (boot で revisions に触れない原則。一覧は開いたときに引く)。
+  bulk import 由来の行は title / archetype が NULL になりうる ── UI は
+  「(無題)」fallback を持つ(review P5a F5)
 - title の限界(記録): RENAME → COMMIT が同時のとき、revision の title は
   rename 後の値になる(body 履歴が本体であり、title の厳密な過去値は
   必要十分の外 ── PKC2 の「rename で body 全文 snapshot」の逆振れはしない)
@@ -127,11 +133,24 @@ ALTER TABLE revisions ADD COLUMN content_hash TEXT;
 - **P6 import 時の PKC2 revisions の扱い**: PKC2 は replace = 保全 / merge =
   全捨て と非対称。持ち込むなら snapshot 形式の変換(PKC2 Entry JSON →
   body 原文 + 列)も要る。P6 設計時に user へ提示して裁定
+- **P6 import の rev_order 重複**(review P5a F4): bulkAddRevisions は
+  (cid,id) PK のみで rev_order の一意性が無い ── 重複を後入れすると listTrash
+  が同一 entry を複数行返す(通常経路 addRevision / deleteEntry は worker 直列 +
+  同 tx MAX+1 で重複を作れないことは実験確認済み)。P6 で再採番か tie-break を
+  入れる
 - coalesce / zstd segment / bulk_id 系譜: §2 §3 §4 の「入れる条件」に従う
+- **削除済み entry への addRevision は発行しない**のは store-effects 側の契約
+  (worker は entry 生存を検証しない ── trash の「最新」を差し替えうるため、
+  P5b の effect は削除後に revision を発行しない順序を守る)
 
 ## 8. 着地計画
 
 - **P5a(storage)**: schema v2 + worker op + scanAssetRefs の revisions 対応 +
   store-probe 検定更新。単独で着地・単独で probe 検証可能
 - **P5b(app + UI)**: reducer / effects / 履歴・ゴミ箱 UI + smoke 1 拡張
-  (削除 → ゴミ箱に見える → 復元 → sidebar に戻る)
+  (削除 → ゴミ箱に見える → 復元 → sidebar に戻る)。
+  加えて **worker unit の常設**(review P5a F2): P5a の mutation 4 種が PR gate を
+  全て素通りし nightly probe だけが捕捉した ── `globalThis.self`/`postMessage` を
+  差して storage-worker.ts を dynamic import すると sqlite-wasm が :memory:
+  fallback で node 実走できる(レビュー実験でハーネス成立を実証、~0.5 秒)。
+  この型の unit を tests/adapter/ に置き、worker 意味論を PR gate で守る

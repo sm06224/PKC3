@@ -8,7 +8,7 @@
  * 内部完結 API のみを使う)/ 大きな値は保持しない。
  */
 import sqlite3InitModule, { type Database } from '@sqlite.org/sqlite-wasm';
-import { DB_SCHEMA_VERSION, SCHEMA_DDL, SCHEMA_MIGRATIONS } from './schema';
+import { DB_SCHEMA_VERSION, SCHEMA_DDL, REVISIONS_V2_COLUMNS } from './schema';
 import type { EntryUpsert } from './schema';
 import { contentHash64Hex } from './content-hash';
 import {
@@ -79,17 +79,39 @@ function applySchema(database: Database): void {
       `db user_version ${userVersion} is newer than supported ${DB_SCHEMA_VERSION}`,
     );
   }
-  database.exec('PRAGMA foreign_keys = ON');
-  // 新規 DB(user_version 0)は最新 DDL がそのまま最新形を作る。
-  // 既存 DB は CREATE IF NOT EXISTS が no-op になるので、v(n)+1..N の
-  // migration を順に適用して追い付かせる(v2 = P5 の revisions 列追加)
-  for (const ddl of SCHEMA_DDL) database.exec(ddl);
-  if (userVersion > 0) {
-    for (let v = userVersion + 1; v <= DB_SCHEMA_VERSION; v++) {
-      for (const ddl of SCHEMA_MIGRATIONS[v] ?? []) database.exec(ddl);
+  database.exec('PRAGMA foreign_keys = ON'); // tx 内では効かないので外に置く
+  // 🔒 DDL → migration → 刻印を **1 tx に原子化**(review P5a F1)。非原子だと
+  // クラッシュ窓で 2 型の恒久破損を作る(実験で実証済み):
+  //   (d1) 表はあるが刻印なし(=0)→ 次回 open が migration を飛ばして
+  //        最新版と刻印 → 列欠損のまま無音で恒久失敗
+  //   (d2) ALTER 半端 + 旧版刻印 → 次回 open が duplicate column で毎回 throw
+  database.exec('BEGIN IMMEDIATE');
+  try {
+    // 新規 DB は最新 DDL がそのまま最新形を作る(既存 DB では no-op)
+    for (const ddl of SCHEMA_DDL) database.exec(ddl);
+    // v2(P5)migration: 判定は user_version ではなく**列の実在**(冪等)──
+    // 上記 (d1)(d2) の半端状態も次回 open で自己修復する(schema.ts の原則)
+    const revCols = new Set(
+      (
+        database.selectObjects(
+          `SELECT name FROM pragma_table_info('revisions')`,
+        ) as Array<{ name: string }>
+      ).map((r) => r.name),
+    );
+    for (const col of REVISIONS_V2_COLUMNS) {
+      if (!revCols.has(col))
+        database.exec(`ALTER TABLE revisions ADD COLUMN ${col} TEXT`);
     }
+    database.exec(`PRAGMA user_version = ${DB_SCHEMA_VERSION}`);
+    database.exec('COMMIT');
+  } catch (err) {
+    try {
+      database.exec('ROLLBACK');
+    } catch {
+      /* rollback 失敗は元エラーを優先 */
+    }
+    throw err;
   }
-  database.exec(`PRAGMA user_version = ${DB_SCHEMA_VERSION}`);
 }
 
 function need(): Database {
@@ -208,17 +230,40 @@ const handlers: Handlers = {
     const database = need();
     database.exec('BEGIN IMMEDIATE');
     try {
-      database.exec({
-        sql: `INSERT INTO revisions
-                (cid, id, entry_lid, created_at, rev_order, snapshot,
-                 title, archetype, content_hash)
-              SELECT cid, ?1, lid, datetime('now'),
-                     COALESCE((SELECT MAX(rev_order) FROM revisions
-                                WHERE cid = ?2 AND entry_lid = ?3), 0) + 1,
-                     body, title, archetype, NULL
-                FROM entries WHERE cid = ?2 AND lid = ?3`,
-        bind: [`rev-${crypto.randomUUID()}`, req.cid, req.lid],
-      });
+      const row = database.selectObjects(
+        'SELECT title, archetype, body FROM entries WHERE cid = ? AND lid = ?',
+        [req.cid, req.lid],
+      )[0] as { title: string; archetype: string; body: string } | undefined;
+      if (row) {
+        const hash = contentHash64Hex(row.body);
+        const last = database.selectObjects(
+          `SELECT rev_order, content_hash FROM revisions
+            WHERE cid = ? AND entry_lid = ?
+            ORDER BY rev_order DESC LIMIT 1`,
+          [req.cid, req.lid],
+        )[0] as { rev_order: number; content_hash: string | null } | undefined;
+        // 直前 revision と同一内容なら積まない(review P5a F3 ── 復元 → 無変更 →
+        // 削除の周回で同一 snapshot が積もる縁)。skip 時は既存の最新 revision が
+        // そのまま trash 行になる(listTrash は「最新」を返す)
+        if (!last || last.content_hash !== hash) {
+          database.exec({
+            sql: `INSERT INTO revisions
+                    (cid, id, entry_lid, created_at, rev_order, snapshot,
+                     title, archetype, content_hash)
+                  VALUES (?, ?, ?, datetime('now'), ?, ?, ?, ?, ?)`,
+            bind: [
+              req.cid,
+              `rev-${crypto.randomUUID()}`,
+              req.lid,
+              (last?.rev_order ?? 0) + 1,
+              row.body,
+              row.title,
+              row.archetype,
+              hash,
+            ],
+          });
+        }
+      }
       database.exec({
         sql: 'DELETE FROM relations WHERE cid = ? AND (from_lid = ? OR to_lid = ?)',
         bind: [req.cid, req.lid, req.lid],

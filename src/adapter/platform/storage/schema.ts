@@ -11,20 +11,22 @@
 export const DB_SCHEMA_VERSION = 2;
 
 /**
- * 既存 DB の段階 migration(v(n-1) → vn の DDL 列)。新規 DB は SCHEMA_DDL が
- * 最新形を作るので適用しない。未来 version の DB は従来どおり明示 reject
- * (schema-migration-policy: 単調・明示 reject)。
+ * v2(P5)で revisions に追加された列。snapshot(BLOB affinity)には body
+ * 原文(markdown)をそのまま入れる ── PKC2 の「JSON.stringify(Entry) 包み +
+ * 厳格 parse 契約」を構造ごと不要にする。
+ *
+ * ⚠ migration の適用判定は user_version では**なく列の実在**
+ * (pragma_table_info)で行う(review P5a F1): version 刻印だけを信じると、
+ * 「DDL 適用後・刻印前にクラッシュした DB」が列欠損のまま最新版と刻まれて
+ * 恒久破損する。実在判定なら冪等で、半端状態の DB も次回 open で自己修復する。
+ * 将来の migration も同じ原則で書くこと(判定 = あるべき状態の実在、
+ * user_version = 未来 version の reject 用)。
  */
-export const SCHEMA_MIGRATIONS: Readonly<Record<number, readonly string[]>> = {
-  // v2(P5): revisions に title / archetype / content_hash。
-  // snapshot(BLOB affinity)には body 原文(markdown)をそのまま入れる ──
-  // PKC2 の「JSON.stringify(Entry) 包み + 厳格 parse 契約」を構造ごと不要にする
-  2: [
-    `ALTER TABLE revisions ADD COLUMN title TEXT`,
-    `ALTER TABLE revisions ADD COLUMN archetype TEXT`,
-    `ALTER TABLE revisions ADD COLUMN content_hash TEXT`,
-  ],
-};
+export const REVISIONS_V2_COLUMNS: readonly string[] = [
+  'title',
+  'archetype',
+  'content_hash',
+];
 
 export const SCHEMA_DDL: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS containers (
