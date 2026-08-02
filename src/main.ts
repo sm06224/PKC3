@@ -134,6 +134,60 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
 
   // 🔒 attach / import と purge の排他 gate(review F1)。実体と pin は asset-gate.ts
   const withAssetGate = createAssetGate(dispatcher);
+  /**
+   * 書出しの実行(P6d)。⚠ **asset gate の内側** ── 書出し中に添付が掃除されると
+   * 「meta はあるが bytes が無い」を掴んで欠けた書出しができる。
+   * 形式が増えても読み出し口は 1 つ(source)で共有する。
+   */
+  const runExport = (kind: 'archive' | 'html'): Promise<void> =>
+    withAssetGate(async () => {
+      await exportArchive(
+        dispatcher,
+        {
+          source: {
+            cid: DEFAULT_CID,
+            // ⚠ `openContainer` で刻んだ題名と**同じ文字列**を使う(別定数だと
+            // ファイル名と DB の題名が食い違う ── review L-2)
+            title: CONTAINER_TITLE,
+            listEntryMetas: () =>
+              client.request({ op: 'listEntryMetas', cid: DEFAULT_CID }),
+            listBodies: (after, maxBytes) =>
+              client.request({
+                op: 'listBodies',
+                cid: DEFAULT_CID,
+                maxBytes,
+                ...(after ? { after } : {}),
+              }),
+            listRelations: () => client.request({ op: 'listRelations', cid: DEFAULT_CID }),
+            listAssetMetas: () => client.request({ op: 'listAssetMetas', cid: DEFAULT_CID }),
+            getAssetBlob: (key) => blobs.get(DEFAULT_CID, key),
+            listRevisionLids: () =>
+              client.request({ op: 'listRevisionLids', cid: DEFAULT_CID }),
+            listRevisionMetas: (entryLid) =>
+              client.request({ op: 'listRevisionMetas', cid: DEFAULT_CID, entryLid }),
+            getRevision: (id) => client.request({ op: 'getRevision', cid: DEFAULT_CID, id }),
+          },
+          download: (name, blob) => {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = name;
+            document.body.append(a);
+            a.click();
+            a.remove();
+            // click 直後の revoke は DL を中断しうる ── 1 秒で寿命終端(添付 DL と同じ)
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+          },
+          notify: (message) => showStatus(`${statusBase} — ${message}`),
+          // ⚠ **注意の中身**を出す導線(review M1 で一度落ちた)。無いと user が
+          // 見るのは「⚠ 注意 1 件」だけで、**どの添付が欠けたか**が消える ──
+          // バックアップで一番知りたい情報がそこにある
+          report: (notes) => showNotices(regions.notices, '書出し時の注意', notes),
+        },
+        kind,
+      );
+    });
+
   const services: BinderServices = {
     attachFiles: (files) =>
       void withAssetGate(() =>
@@ -253,47 +307,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     dismissNotices: () => clearNotices(regions.notices),
     // 📤 バックアップ書出し(P6d)。⚠ **asset gate の内側** ── 書出し中に添付が
     // 掃除されると「meta はあるが bytes が無い」を掴んで欠けたアーカイブができる
-    exportArchive: () =>
-      void withAssetGate(async () => {
-        await exportArchive(dispatcher, {
-          source: {
-            cid: DEFAULT_CID,
-            // ⚠ `openContainer` で刻んだ題名と**同じ文字列**を使う(別定数だと
-            // ファイル名と DB の題名が食い違う ── review L-2)
-            title: CONTAINER_TITLE,
-            listEntryMetas: () =>
-              client.request({ op: 'listEntryMetas', cid: DEFAULT_CID }),
-            listBodies: (afterLid, maxBytes) =>
-              client.request({
-                op: 'listBodies',
-                cid: DEFAULT_CID,
-                maxBytes,
-                ...(afterLid ? { afterLid } : {}),
-              }),
-            listRelations: () => client.request({ op: 'listRelations', cid: DEFAULT_CID }),
-            listAssetMetas: () => client.request({ op: 'listAssetMetas', cid: DEFAULT_CID }),
-            getAssetBlob: (key) => blobs.get(DEFAULT_CID, key),
-            listRevisionLids: () =>
-              client.request({ op: 'listRevisionLids', cid: DEFAULT_CID }),
-            listRevisionMetas: (entryLid) =>
-              client.request({ op: 'listRevisionMetas', cid: DEFAULT_CID, entryLid }),
-            getRevision: (id) => client.request({ op: 'getRevision', cid: DEFAULT_CID, id }),
-          },
-          download: (name, blob) => {
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = name;
-            document.body.append(a);
-            a.click();
-            a.remove();
-            // click 直後の revoke は DL を中断しうる ── 1 秒で寿命終端(添付 DL と同じ)
-            setTimeout(() => URL.revokeObjectURL(url), 1000);
-          },
-          notify: (message) => showStatus(`${statusBase} — ${message}`),
-          report: (notes) => showNotices(regions.notices, '書出し時の注意', notes),
-        });
-      }),
+    exportArchive: () => void runExport('archive'),
+    exportHtml: () => void runExport('html'),
     purgeOrphanAssets: () =>
       void withAssetGate(async () => {
         try {

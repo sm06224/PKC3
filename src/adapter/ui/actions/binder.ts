@@ -56,6 +56,8 @@ export interface BinderServices {
   dismissNotices?(): void;
   /** アーカイブ書出し(P6d)。 */
   exportArchive?(): void;
+  /** 可搬 HTML の書出し(P6d 段③)。 */
+  exportHtml?(): void;
   /** PKC2 ファイルの取込(P6b)。判別・変換・書込は実体側の責務。 */
   importPkc2?(file: File): void;
 }
@@ -198,6 +200,9 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'export-archive': (_dispatcher, _target, services) => {
     services.exportArchive?.();
+  },
+  'export-html': (_dispatcher, _target, services) => {
+    services.exportHtml?.();
   },
   'purge-orphan-assets': (_dispatcher, _target, services) => {
     services.purgeOrphanAssets?.();
