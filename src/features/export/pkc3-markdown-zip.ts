@@ -42,6 +42,12 @@ const BODY_BATCH_BYTES = 4 * 1024 * 1024;
 const ASSET_DIR = 'assets/';
 /** 同じ注意を entry 数ぶん並べない(3000 件の `<li>` を作らせない)。 */
 const WARN_CAP = 10;
+/**
+ * **包含**の判定に使う広い走査(段③ 可搬 HTML と同じ書式)。
+ * ⚠ 書換の狭い規則と**取り違えない** ── 包含を狭くすると、アプリでは生きている
+ * 参照を取りこぼして添付が消える(review H-1)。誤差は false-keep 側だけに出す。
+ */
+const ASSET_REF_RE = /asset:([A-Za-z0-9_.-]+)/g;
 
 export interface MarkdownZipResult {
   blob: Blob;
@@ -118,31 +124,38 @@ export function slugForTitle(title: string): string {
 }
 
 /**
+ * ファイル名の同一視キー。⚠ 小文字化だけでは足りず **NFC 正規化も要る** ──
+ * macOS(APFS/HFS+)は正規化に依存せず同一視するので、NFC と NFD の「が」を
+ * 両方入れると展開時に片方が消える(review M-2 で実測)。
+ */
+const fold = (s: string): string => s.normalize('NFC').toLowerCase();
+
+/**
  * ZIP 内で一意な名前を配る。
  *
- * ⚠ **大文字小文字を同一視して**衝突を見る。macOS / Windows は `Memo.md` と
- * `memo.md` を同じファイルとして展開するので、両方入れると**ノートが消える**
- * (review H-3 で実測:3 件入れて展開したら 1 件しか残らなかった)。
+ * ⚠ **大文字小文字(と正規化)を同一視して**衝突を見る。macOS / Windows は
+ * `Memo.md` と `memo.md` を同じファイルとして展開するので、両方入れると
+ * **ノートが消える**(review H-3 で実測:3 件入れて展開したら 1 件だけ残った)。
  * ⚠ 番号は base ごとに継続する ── 毎回 2 から数え直すと同題 8000 件で O(k²)
- * になる(実測 7.6 秒)。
+ * になる(実測 7.6 秒 → 159ms)。
  */
 class NameAllocator {
   private readonly taken = new Set<string>();
   private readonly next = new Map<string, number>();
 
   claim(base: string, ext: string): string {
-    const key = `${base}.${ext}`.toLowerCase();
+    const key = fold(`${base}.${ext}`);
     if (!this.taken.has(key)) {
       this.taken.add(key);
       return `${base}.${ext}`;
     }
-    let n = this.next.get(base.toLowerCase()) ?? 2;
+    let n = this.next.get(fold(base)) ?? 2;
     for (;;) {
       const name = `${base}-${n}.${ext}`;
       n++;
-      if (!this.taken.has(name.toLowerCase())) {
-        this.taken.add(name.toLowerCase());
-        this.next.set(base.toLowerCase(), n);
+      if (!this.taken.has(fold(name))) {
+        this.taken.add(fold(name));
+        this.next.set(fold(base), n);
         return name;
       }
     }
@@ -164,7 +177,8 @@ function pkc3Meta(m: {
 
 /** markdown のリンクラベルに入れて安全な形にする(`]` 1 個でリンクが死ぬ)。 */
 function escapeLabel(s: string): string {
-  return s.replace(/[[\]\\]/g, '\\$&');
+  // ⚠ 改行が入ると markdown-it が段落を割ってリンクが死ぬ ── 1 行に潰す
+  return s.replace(/\s*\n\s*/g, ' ').replace(/[[\]\\]/g, '\\$&');
 }
 
 /**
@@ -182,33 +196,57 @@ function escapeLabel(s: string): string {
 function rewriteAssetLinks(
   text: string,
   resolve: (key: string) => string | undefined,
-): string {
+): { text: string; openFence: string | null } {
   let out = '';
   let i = 0;
+  let openFence: string | null = null;
   const n = text.length;
   const atLineStart = (): boolean => i === 0 || text[i - 1] === '\n';
+  /** 直前の連続バックスラッシュが奇数個 = この文字はエスケープされている。 */
+  const escaped = (): boolean => {
+    let k = i - 1;
+    let c = 0;
+    while (k >= 0 && text[k] === '\\') {
+      c++;
+      k--;
+    }
+    return c % 2 === 1;
+  };
 
   while (i < n) {
     const ch = text[i]!;
 
-    // ── コードフェンス(``` / ~~~ が行頭)は閉じるまで丸ごと通す
+    // ── コードフェンス(``` / ~~~ が行頭)は閉じるまで丸ごと通す。
+    // ⚠ 閉じ fence は **3 スペースまで字下げできる**(CommonMark)── 桁 0 固定で
+    // 探すと「閉じない fence」と誤判定して**以降の本文を全部飲む**(review H-1)
     if ((ch === '`' || ch === '~') && atLineStart()) {
       const m = /^(`{3,}|~{3,})/.exec(text.slice(i));
       if (m) {
         const fence = m[1]!;
-        const close = text.indexOf(`\n${fence}`, i + fence.length);
-        const end = close === -1 ? n : text.indexOf('\n', close + 1) === -1 ? n : text.indexOf('\n', close + 1) + 1;
-        out += text.slice(i, end);
-        i = end;
+        const closeRe = new RegExp(`\\n {0,3}${fence[0] === '`' ? '`' : '~'}{${fence.length},}[ \t]*(?:\\n|$)`);
+        const rest = text.slice(i + fence.length);
+        const cm = closeRe.exec(rest);
+        if (cm) {
+          const end = i + fence.length + cm.index + cm[0].length;
+          out += text.slice(i, end);
+          i = end;
+        } else {
+          out += text.slice(i); // 閉じない fence = ここから末尾まで全部コード
+          i = n;
+          openFence = fence;
+        }
         continue;
       }
     }
 
-    // ── インラインコード(バッククォート連の対応する閉じまで)
+    // ── インラインコード(バッククォート連の対応する閉じまで)。
+    // ⚠ markdown-it は**ブロックを越えて**コードスパンを作らない ── 空行を
+    // 跨いで対応付けると、野良バッククォート 2 個の間が丸ごと飛ぶ(review H-1)
     if (ch === '`') {
       const run = /^`+/.exec(text.slice(i))![0];
+      const limit = text.indexOf('\n\n', i);
       const close = text.indexOf(run, i + run.length);
-      if (close !== -1) {
+      if (close !== -1 && (limit === -1 || close < limit)) {
         out += text.slice(i, close + run.length);
         i = close + run.length;
         continue;
@@ -216,7 +254,7 @@ function rewriteAssetLinks(
     }
 
     // ── `](asset:key)` / `](<asset:key>)`。**宛先が asset: で始まるときだけ**
-    if (ch === ']' && text[i + 1] === '(') {
+    if (ch === ']' && text[i + 1] === '(' && !escaped()) {
       const m = /^\]\(\s*<?(asset:([A-Za-z0-9_.-]+))>?(\s*(?:"[^"]*"|'[^']*'))?\s*\)/.exec(
         text.slice(i),
       );
@@ -233,7 +271,7 @@ function rewriteAssetLinks(
     out += ch;
     i++;
   }
-  return out;
+  return { text: out, openFence };
 }
 
 /**
@@ -245,12 +283,17 @@ export async function writeMarkdownZip(
   exportedAt: string,
 ): Promise<MarkdownZipResult> {
   const warnings: string[] = [];
-  /** 同種の注意は上限まで ── 3000 件並べると誰も読まない(review L-2)。 */
-  const counted = new Map<string, number>();
-  const warnCapped = (bucket: string, message: string): void => {
-    const n = (counted.get(bucket) ?? 0) + 1;
-    counted.set(bucket, n);
-    if (n <= WARN_CAP) warnings.push(message);
+  /**
+   * 同種の注意は上限まで ── 3000 件並べると誰も読まない(review L-2)。
+   * ⚠ 畳んだ件数を言うとき、**内部の bucket 名を user に見せない**
+   * (`overwrite-title` のような英字スラグが日本語 UI に出ていた ── review M-1)。
+   */
+  const counted = new Map<string, { n: number; label: string }>();
+  const warnCapped = (bucket: string, label: string, message: string): void => {
+    const c = counted.get(bucket) ?? { n: 0, label };
+    c.n++;
+    counted.set(bucket, c);
+    if (c.n <= WARN_CAP) warnings.push(message);
   };
 
   const metas = await src.listEntryMetas();
@@ -281,7 +324,7 @@ export async function writeMarkdownZip(
     for (const r of rows) {
       const m = metaOf.get(r.lid);
       if (!m) {
-        warnCapped('orphan-body', `本文はあるが一覧に無い entry を飛ばしました: ${r.lid}`);
+        warnCapped('orphan-body', '一覧に無い entry の注意', `本文はあるが一覧に無い entry を飛ばしました: ${r.lid}`);
         continue;
       }
       // ⚠ **読むだけ**。書くのは原文 splice(冒頭の解説)
@@ -289,40 +332,66 @@ export async function writeMarkdownZip(
       for (const pw of parsed.warnings) {
         warnCapped(
           `fm-${pw.kind}`,
+          'frontmatter の読み取りの注意',
           `frontmatter を読み切れませんでした(${pw.detail}): ${m.title || m.lid}`,
         );
       }
 
       const mine = pkc3Meta(m);
-      for (const [k, v] of Object.entries(mine)) {
-        if (k in parsed.meta && parsed.meta[k] !== v) {
-          warnCapped(
-            `overwrite-${k}`,
-            `frontmatter の ${k} を entry の値で上書きしました: ${m.title || m.lid}`,
-          );
+      // ⚠ cap 超過で meta が空になった frontmatter では、上書きしたかどうかを
+      // **判定できない**。黙ると「上書きしていない」に見える(review H-2)
+      const blind = parsed.warnings.some((pw) => pw.kind === 'size_limit');
+      if (blind) {
+        warnCapped(
+          'fm-blind',
+          'frontmatter の読み取りの注意',
+          `frontmatter を読み切れないので title / archetype を上書きしたか確認できません: ${m.title || m.lid}`,
+        );
+      } else {
+        for (const [k, v] of Object.entries(mine)) {
+          if (k in parsed.meta && parsed.meta[k] !== v) {
+            warnCapped(
+              `overwrite-${k}`,
+              `frontmatter の ${k} の上書き`,
+              `frontmatter の ${k} を entry の値で上書きしました: ${m.title || m.lid}`,
+            );
+          }
         }
       }
 
-      // frontmatter に埋もれた添付参照(`attachment.asset_key` / `extra` の中身)。
-      // ⚠ 参照と見なせないと**その添付が落ちる** ── key は content hash なので
-      // 値の中から key らしき token を拾って照合するだけで足りる
-      const fmRefs: Array<{ key: string; label: string; direct: boolean }> = [];
+      // 🔴 **包含は広く、書換は狭く**(review H-1)。
+      // 書き換えの規則(リンクの宛先だけ)を「ZIP に入れるか」の判定にも使うと、
+      // 参照リンク定義 / 字下げされた閉じ fence / 段落を跨ぐバッククォート のように
+      // **アプリでは生きている参照**を取りこぼし、添付が丸ごと消える。しかも
+      // 「参照されていない」と嘘の注意まで出る。
+      // このリポジトリの規律は `asset-gc.ts` にある ── 誤差は **false-keep 側に
+      // しか出さない**(無関係な散文が key を偶然含む)。段③(可搬 HTML)も
+      // 同じく本文全体の raw 走査で包含を決めている。ここだけ狭くしない
+      const mark = (token: string): string | undefined => {
+        // 末尾の句読点を剥がして引き直す(`asset:ast-1.` のような書き方)
+        const key = pathOf.has(token) ? token : token.replace(/[.\-_]+$/, '');
+        if (!pathOf.has(key)) return undefined;
+        used.add(key);
+        return pathOf.get(key);
+      };
+      ASSET_REF_RE.lastIndex = 0;
+      for (let mm = ASSET_REF_RE.exec(r.body); mm; mm = ASSET_REF_RE.exec(r.body)) mark(mm[1]!);
+      // frontmatter に埋もれた参照(`attachment.asset_key` / `extra` の JSON)。
+      // ⚠ **原文全体**に掛ける ── parse できなかった frontmatter の中にも参照は居る
+      KEYISH.lastIndex = 0;
+      for (let mm = KEYISH.exec(r.body); mm; mm = KEYISH.exec(r.body)) mark(mm[0]);
+
+      // 添付 entry のリンク行に使う参照(こちらは meta が読めた時だけ = best effort)
+      const fmRefs: Array<{ key: string; label: string }> = [];
       for (const [k, v] of Object.entries(parsed.meta)) {
-        if (typeof v !== 'string' || v === '') continue;
-        const direct = k.endsWith('asset_key');
-        KEYISH.lastIndex = 0;
-        for (let mm = KEYISH.exec(v); mm; mm = KEYISH.exec(v)) {
-          const key = mm[0];
-          if (!pathOf.has(key)) continue;
-          used.add(key);
-          if (!direct) continue; // 埋もれた参照は拾うだけ(リンク行は足さない)
-          const nameKey = `${k.slice(0, -'asset_key'.length)}name`;
-          const label =
-            typeof parsed.meta[nameKey] === 'string' && parsed.meta[nameKey] !== ''
-              ? String(parsed.meta[nameKey])
-              : m.title || key;
-          fmRefs.push({ key, label, direct });
-        }
+        if (!k.endsWith('asset_key') || typeof v !== 'string' || v === '') continue;
+        if (!pathOf.has(v) || fmRefs.some((x) => x.key === v)) continue;
+        const nameKey = `${k.slice(0, -'asset_key'.length)}name`;
+        const label =
+          typeof parsed.meta[nameKey] === 'string' && parsed.meta[nameKey] !== ''
+            ? String(parsed.meta[nameKey])
+            : m.title || v;
+        fmRefs.push({ key: v, label });
       }
 
       // 🔑 本文の `asset:` 参照 → 相対パス(**宛先だけ**。fence / 素の文章は触らない)。
@@ -331,12 +400,21 @@ export async function writeMarkdownZip(
       // 「残骸は原文の suffix」という長さ演算が CRLF の本文で崩れ、
       // 切り出し位置がずれて**本文に 1 文字混入した**(実測で踏んだ)。
       // 宛先限定の書き換えなら frontmatter 部分を通しても実害が無い
-      const text = rewriteAssetLinks(r.body, (key) => {
-        const p = pathOf.get(key);
-        if (p === undefined) return undefined; // 知らない key は**そのまま**残す
-        used.add(key);
-        return p;
-      });
+      const { text, openFence } = rewriteAssetLinks(r.body, (key) => pathOf.get(key));
+
+      // 書き換えられずに残った参照は**外では開けない** ── 黙って出さない
+      ASSET_REF_RE.lastIndex = 0;
+      let leftover = 0;
+      for (let mm = ASSET_REF_RE.exec(text); mm; mm = ASSET_REF_RE.exec(text)) {
+        if (mark(mm[1]!) !== undefined) leftover++;
+      }
+      if (leftover > 0) {
+        warnCapped(
+          'leftover-ref',
+          'リンクの形になっていない添付参照の注意',
+          `リンクの形になっていない添付参照 ${leftover} 件はそのまま残ります(外では開けません): ${m.title || m.lid}`,
+        );
+      }
 
       // 添付 entry は body が frontmatter だけ ── 何も書かないと**空の .md** になる。
       // 外で開いて中身に辿り着けるよう、参照行を 1 本だけ足す
@@ -350,7 +428,12 @@ export async function writeMarkdownZip(
 
       // 🔴 本文は原文のまま。PKC3 のメタは**原文へ splice** する
       let doc = text;
-      if (extra.length > 0) doc += `${doc.endsWith('\n') || doc === '' ? '' : '\n'}\n${extra.join('\n')}\n`;
+      if (extra.length > 0) {
+        // ⚠ 本文が**開いたままの fence** で終わっていると、足した参照行が
+        // コードブロックの中に入って死ぬ ── 添付 entry では唯一の導線(review M-3)
+        const close = openFence ? `${doc.endsWith('\n') ? '' : '\n'}${openFence}\n` : '';
+        doc += close + `${doc.endsWith('\n') || doc === '' ? '' : '\n'}\n${extra.join('\n')}\n`;
+      }
       doc = spliceFrontmatterKeys(doc, mine);
 
       await w.add(mdNames.claim(slugForTitle(m.title), 'md'), [doc]);
@@ -382,7 +465,7 @@ export async function writeMarkdownZip(
     if (!blob) {
       // 参照は本文に残したまま ── 壊れた参照を隠さない(P6c §4-A と同じ規約)
       missing.push(a.key);
-      warnCapped('missing-asset', `添付の中身が見つかりませんでした: ${a.key}`);
+      warnCapped('missing-asset', '中身の無い添付の注意', `添付の中身が見つかりませんでした: ${a.key}`);
       continue;
     }
     await w.add(pathOf.get(a.key)!, [blob]);
@@ -401,8 +484,8 @@ export async function writeMarkdownZip(
     warnings.push(`履歴を持つノート ${revisionEntries} 件の履歴は落ちます`);
   }
   // 上限で畳んだぶんを最後に言う(黙って減らすと「全部出た」に見える)
-  for (const [bucket, n] of counted) {
-    if (n > WARN_CAP) warnings.push(`同種の注意(${bucket})はほか ${n - WARN_CAP} 件あります`);
+  for (const c of counted.values()) {
+    if (c.n > WARN_CAP) warnings.push(`${c.label}はほか ${c.n - WARN_CAP} 件あります`);
   }
 
   await w.add('manifest.json', [

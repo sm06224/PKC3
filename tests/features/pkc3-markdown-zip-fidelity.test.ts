@@ -303,13 +303,20 @@ describe('md ZIP — asset 参照の書き換えが誤爆しない', () => {
   });
 
   it('🔴 インラインコードの中は触らない', async () => {
-    const md = await withAsset('`asset:ast-1` と書きます\n');
-    expect(md).toContain('`asset:ast-1` と書きます');
+    // ⚠ 入力に `](` が無いと**宛先判定に元から掛からない**ので、inline code の
+    // 枝を丸ごと殺しても通ってしまう ── 空振りする test だった(review L-1)
+    const md = await withAsset('`![図](asset:ast-1)` と書きます\n');
+    expect(md).toContain('`![図](asset:ast-1)` と書きます');
   });
 
   it('🔴 URL の一部を壊さない', async () => {
     const md = await withAsset('[x](https://example.com/asset:ast-1/path)\n');
     expect(md).toContain('https://example.com/asset:ast-1/path');
+  });
+
+  it('🔴 エスケープされた `\\]` はリンクではない(アプリは平文として描く)', async () => {
+    const md = await withAsset('\\[not a link\\](asset:ast-1)\n');
+    expect(md).toContain('\\[not a link\\](asset:ast-1)');
   });
 
   it('🔴 素の文章に書いた `asset:` を勝手にパスにしない', async () => {
@@ -369,5 +376,177 @@ describe('md ZIP — 注意を出しすぎない', () => {
     const overwrites = out.warnings.filter((w) => w.includes('上書きしました'));
     expect(overwrites).toHaveLength(10);
     expect(out.warnings.some((w) => /ほか 15 件/.test(w))).toBe(true);
+  });
+});
+
+/**
+ * 🔴 **包含は広く、書換は狭く**(2 巡目 review H-1)。
+ *
+ * 書き換えの規則(リンクの宛先だけ)を「ZIP に入れるか」の判定に流用すると、
+ * アプリでは生きている参照を取りこぼして**添付が丸ごと消える**。しかも
+ * 「参照されていない」と嘘まで言う。誤差は false-keep 側にしか出さない
+ * ── `asset-gc.ts` に明記された規律で、段③(可搬 HTML)も同じ側に倒している。
+ */
+describe('md ZIP — 生きている参照の添付を落とさない', () => {
+  const withRef = async (body: string, mime = 'image/png') =>
+    writeMarkdownZip(
+      source({
+        entries: [{ lid: 'n1', body }],
+        assets: [{ key: 'ast-1', mime, bytes: enc.encode('PNG') }],
+      }),
+      NOW,
+    );
+
+  it.each([
+    ['参照リンク定義', '![x][y]\n\n[y]: asset:ast-1\n'],
+    ['閉じ fence が 2 スペース字下げ', '```\ncode\n  ```\n\n![y](asset:ast-1)\n'],
+    ['段落を跨ぐ野良バッククォート', '`x\n\n![y](asset:ast-1)\n\n`z\n'],
+    ['4 スペースのコードブロック', '    ![y](asset:ast-1)\n'],
+    ['素の文章の中の参照', '図は asset:ast-1 です\n'],
+  ])('🔴 %s でも添付は ZIP に入る', async (_label, body) => {
+    const out = await withRef(body);
+    const f = await files(out.blob);
+    expect([...f.keys()]).toContain('assets/ast-1.png');
+    expect(out.counts.assets).toBe(1);
+    // 「参照されていない」は**嘘になる** ── 出してはいけない
+    expect(out.warnings.some((w) => w.includes('参照されていない'))).toBe(false);
+  });
+
+  /**
+   * ⚠ 「添付が ZIP に入るか」だけを見る test では、**走査の穴を捕まえられない**
+   * (包含は別経路が救うので通ってしまう)。fence / inline code の判定が崩れると
+   * 出るのは「**書き換えが起きない**」ので、そちらを直接見る
+   */
+  it('🔴 字下げされた閉じ fence の**後ろ**が書き換わる(以降を全部飲まない)', async () => {
+    const out = await withRef('```\ncode\n  ```\n\n![y](asset:ast-1)\n');
+    const md = (await files(out.blob)).get('n1.md')!;
+    expect(md).toContain('![y](assets/ast-1.png)');
+  });
+
+  it('🔴 段落を跨ぐ野良バッククォートの間が飛ばされない', async () => {
+    // markdown-it はブロックを越えてコードスパンを作らない ── 越えて対応付けると
+    // 間の本文が丸ごとスキップされ、リンクが `asset:` のまま残る
+    const out = await withRef('`x\n\n![y](asset:ast-1)\n\n`z\n');
+    const md = (await files(out.blob)).get('n1.md')!;
+    expect(md).toContain('![y](assets/ast-1.png)');
+  });
+
+  it('🔴 書き換えられずに残った参照は言う(外では開けない)', async () => {
+    const out = await withRef('![x][y]\n\n[y]: asset:ast-1\n');
+    expect(
+      out.warnings.some((w) => w.includes('リンクの形になっていない添付参照 1 件')),
+    ).toBe(true);
+  });
+
+  it('リンクとして書き換わったなら「残った」とは言わない', async () => {
+    const out = await withRef('![x](asset:ast-1)\n');
+    expect(out.warnings).toEqual([]);
+  });
+
+  it('🔴 16KB 超 frontmatter でも添付が消えない(parser が諦める領域)', async () => {
+    const big = Array.from({ length: 400 }, (_, i) => `k${i}: ${'あ'.repeat(60)}`).join('\n');
+    const out = await withRef(
+      `---\ntitle: 元の題名\nattachment.asset_key: ast-1\n${big}\n---\n本文\n`,
+      'application/pdf',
+    );
+    expect([...(await files(out.blob)).keys()]).toContain('assets/ast-1.pdf');
+    // 上書きしたか**判定できない**ことを言う(黙ると「上書きしていない」に見える)
+    expect(out.warnings.some((w) => w.includes('上書きしたか確認できません'))).toBe(true);
+  });
+});
+
+describe('md ZIP — 足した参照行が死なない', () => {
+  it('🔴 本文が開いた fence で終わっていても、参照行がコードに飲まれない', async () => {
+    const out = await writeMarkdownZip(
+      source({
+        entries: [{ lid: 'a1', body: '---\nattachment.asset_key: ast-1\n---\n```\ncode\n' }],
+        assets: [{ key: 'ast-1', mime: 'application/pdf', bytes: enc.encode('PDF') }],
+      }),
+      NOW,
+    );
+    const md = (await files(out.blob)).get('a1.md')!;
+    // 参照行の**前に**閉じ fence がある = コードブロックの外に出ている
+    const link = md.indexOf('[a1](assets/ast-1.pdf)');
+    expect(link).toBeGreaterThan(-1);
+    expect(md.slice(0, link).match(/```/g)).toHaveLength(2); // 開き + 閉じ
+  });
+
+  it('名前に改行が入ってもリンクが段落で割れない', async () => {
+    const out = await writeMarkdownZip(
+      source({
+        entries: [
+          { lid: 'a1', body: '---\nattachment.name: "見積\\n\\n最新.pdf"\nattachment.asset_key: ast-1\n---\n' },
+        ],
+        assets: [{ key: 'ast-1', mime: 'application/pdf', bytes: enc.encode('PDF') }],
+      }),
+      NOW,
+    );
+    const md = (await files(out.blob)).get('a1.md')!;
+    const link = /\[[^\]]*\]\(assets\/ast-1\.pdf\)/.exec(md);
+    expect(link).not.toBeNull();
+    expect(link![0]).not.toContain('\n');
+  });
+});
+
+describe('md ZIP — 名前の同一視は正規化まで見る', () => {
+  it('🔴 NFC と NFD の題名が別ファイルになる(macOS で消えない)', async () => {
+    const nfd = 'が'.normalize('NFD');
+    const out = await writeMarkdownZip(
+      source({
+        entries: [
+          { lid: 'a', title: 'が', body: 'A' },
+          { lid: 'b', title: nfd, body: 'B' },
+        ],
+      }),
+      NOW,
+    );
+    const md = [...(await files(out.blob)).keys()].filter((n) => n.endsWith('.md'));
+    expect(md).toHaveLength(2);
+    // macOS は正規化に依存せず同一視する ── NFC に畳んでも一意でなければ消える
+    expect(new Set(md.map((n) => n.normalize('NFC').toLowerCase())).size).toBe(2);
+  });
+
+  it('連番は base ごとに継続する(同題を積んでも二次にならない)', async () => {
+    // ⚠ 「7.6 秒 → 159ms」の主張を支える性質。時間ではなく**振る舞い**を pin する
+    const entries = Array.from({ length: 200 }, (_, i) => ({ lid: `n${i}`, title: 'メモ', body: `${i}` }));
+    const out = await writeMarkdownZip(source({ entries }), NOW);
+    const md = [...(await files(out.blob)).keys()].filter((n) => n.endsWith('.md'));
+    expect(md).toHaveLength(200);
+    expect(md).toContain('メモ.md');
+    expect(md).toContain('メモ-200.md'); // 2..200 が連番で埋まっている
+  });
+
+  it('`メモ-2` という**題名**が実在しても取り違えない', async () => {
+    const out = await writeMarkdownZip(
+      source({
+        entries: [
+          { lid: 'a', title: 'メモ', body: 'A' },
+          { lid: 'b', title: 'メモ', body: 'B' },
+          { lid: 'c', title: 'メモ-2', body: 'C' },
+        ],
+      }),
+      NOW,
+    );
+    const f = await files(out.blob);
+    const md = [...f.keys()].filter((n) => n.endsWith('.md'));
+    expect(new Set(md).size).toBe(3);
+    // 中身の取り違えが無い(⚠ manifest の note に "PKC3" が入るので `.md` に限る)
+    expect(md.map((n) => f.get(n)!).filter((v) => v.includes('C'))).toHaveLength(1);
+  });
+});
+
+describe('md ZIP — 注意文に内部の識別子を出さない', () => {
+  it('🔴 畳み文言に英字スラグが混ざらない', async () => {
+    const entries = Array.from({ length: 25 }, (_, i) => ({
+      lid: `n${i}`,
+      title: `題名${i}`,
+      body: '---\ntitle: 別の題名\n---\n本文\n',
+    }));
+    const out = await writeMarkdownZip(source({ entries }), NOW);
+    const folded = out.warnings.filter((w) => w.includes('ほか'));
+    expect(folded.length).toBeGreaterThan(0);
+    for (const w of folded) {
+      expect(w).not.toMatch(/overwrite-|fm-|orphan-body|missing-asset|leftover-ref/);
+    }
   });
 });
