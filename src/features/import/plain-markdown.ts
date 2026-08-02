@@ -11,13 +11,37 @@
  * ここで parse するのは **題名と archetype を読むためだけ**で、書き戻さない。
  */
 import { parseFrontmatter } from '@features/markdown/frontmatter';
-import { getFlavor } from '@features/flavor';
+import { scanLinks } from '@features/markdown/link-scan';
 
 /** `file_handlers` が宣言する拡張子。⚠ manifest と parity test で縛る。 */
 export const MARKDOWN_EXTENSIONS = ['.md', '.markdown'] as const;
 
 /** 題名の上限。1 行に 100 万字の「題名」を作らせない(本文は原文のまま残る)。 */
 const TITLE_MAX = 200;
+
+/**
+ * frontmatter の `archetype` として受ける値。
+ *
+ * 🔴 **「フレーバーが登録されているか」で判定してはいけない**(review M-2)。
+ * `getFlavor` は登録の無い archetype を text にフォールバックするので、その式は
+ * `folder` / `generic` / `opaque` ── **一級の archetype なのに専用フレーバーを
+ * 持たないもの** ── を「未知」として拒む。⚠ 自分の md ZIP export は全 entry に
+ * `archetype: <値>` を書くので、**自分で書き出した md を取り込み直すと
+ * フォルダがノートに化け、しかも事実に反する「未知」注意が出て**いた。
+ *
+ * ⚠ `attachment` は入れない ── 単一 md は bytes を持ってこられないので、
+ * 受けると**中身の無い添付 entry**ができる(開けないのに壊れて見えない)。
+ */
+const ACCEPTED_ARCHETYPES: ReadonlySet<string> = new Set([
+  'text',
+  'todo',
+  'textlog',
+  'form',
+  'spreadsheet',
+  'folder',
+  'generic',
+  'opaque',
+]);
 
 export interface PlainMarkdownEntry {
   title: string;
@@ -53,13 +77,23 @@ export function titleFromFileName(fileName: string): string {
  * 説明できなくなる。宣言した規則(doc §1)は ATX だけである。
  */
 export function firstHeading(body: string): string | null {
-  let fence: string | null = null;
-  for (const line of body.split('\n')) {
+  let fence: { char: string; len: number } | null = null;
+  for (const raw of body.split('\n')) {
+    // 🔴 **`\r` を落とす**(review H-1)。`split('\n')` は行末に `\r` を残し、
+    // `.` は `\r` にマッチせず `$` は文字列末尾のみなので、`# 見出し\r` は
+    // **どうやってもマッチしない** ── CRLF の md(Windows / autocrlf)では
+    // 「先頭見出しを題名にする」規則が丸ごと死んでいた。
+    // ⚠ frontmatter 付きの入力では `parseFrontmatter` が CRLF を正規化して
+    // **救ってしまう**ので、pin するときは frontmatter 無しで見ること
+    const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
     const fenceMark = /^ {0,3}(`{3,}|~{3,})/.exec(line);
     if (fenceMark) {
       const mark = fenceMark[1]!;
-      if (fence === null) fence = mark[0]!;
-      else if (mark[0] === fence) fence = null;
+      // ⚠ **閉じは開き以上の長さ**(CommonMark)── 1 文字比較だと
+      // 「4 個で開いて 3 個で閉じる」= markdown を説明する文書が壊れ、
+      // コードブロックの中の見出しが題名になる(review M-1 で実証)
+      if (fence === null) fence = { char: mark[0]!, len: mark.length };
+      else if (mark[0] === fence.char && mark.length >= fence.len) fence = null;
       continue;
     }
     if (fence !== null) continue;
@@ -73,12 +107,19 @@ export function firstHeading(body: string): string | null {
   return null;
 }
 
-/** 相対パス参照(解決しない)を数える。⚠ 数えるだけで、本文は書き換えない。 */
+/**
+ * 相対パス参照(解決しない)を数える。⚠ 数えるだけで、本文は書き換えない。
+ *
+ * 🔴 走査は **`markdown/link-scan.ts` の 1 本**に寄せてある(review M-3)。
+ * 自前で `](…)` だけを見ていたときは、**参照形式リンクと HTML の `src`** ──
+ * つまり「黙って画像が壊れる」いちばん数えたい形 ── を取りこぼし、逆に
+ * fence / 行内コード / エスケープの中まで数えて**嘘の警告**を出していた
+ * (誤差が両方向に出ていた)。
+ */
 function scanUnresolvedRefs(text: string): string[] {
   const found = new Set<string>();
-  // `](dest)` の dest だけを見る(狭く当てる)。`<...>` 形も受ける
-  for (const m of text.matchAll(/\]\(\s*(?:<([^>]*)>|([^)\s]+))/g)) {
-    const dest = (m[1] ?? m[2] ?? '').trim();
+  for (const site of scanLinks(text).sites) {
+    const dest = site.dest.trim();
     if (dest === '') continue;
     // 外部 URL / 内部 anchor / 既に解決済みの添付参照は「未解決」ではない
     if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(dest) || dest.startsWith('#') || dest.startsWith('//')) {
@@ -118,10 +159,15 @@ export function readPlainMarkdown(text: string, fileName: string): PlainMarkdown
   const metaArchetype = parsed.meta['archetype'];
   let archetype = 'text';
   if (typeof metaArchetype === 'string' && metaArchetype !== '') {
-    if (getFlavor(metaArchetype).archetype === metaArchetype) archetype = metaArchetype;
-    else warnings.push(`未知の archetype "${metaArchetype}" は text として取り込みました`);
+    if (ACCEPTED_ARCHETYPES.has(metaArchetype)) archetype = metaArchetype;
+    else warnings.push(`archetype "${metaArchetype}" は受けられないので text にしました`);
   }
 
+  // ⚠ 走査は **原文**に対して行う ── frontmatter の値に書かれた `![](x.png)` は
+  // 本文の参照ではないが、`parsed.body` は cap 超過時に原文まるごとになる
+  // (諦めると `body === text`)ので、どちらを渡しても frontmatter を完全には
+  // 除けない。原文に統一して「多めに数える」側へ倒す ── 誤差の向きは
+  // **false-keep**(言い過ぎ)側であって、黙って落とす側ではない
   const unresolvedRefs = scanUnresolvedRefs(text);
   if (unresolvedRefs.length > 0) {
     // 🔑 **件数で言う**(doc §1)。単一 md は添付を持ってこないので、参照は原文の

@@ -183,6 +183,24 @@ describe('🔴 断るときは 1 件も書かない', () => {
     expect(h.opLog).toEqual([]);
   });
 
+  it('🔴 途中で読めなくなったら **bulk を呼ばない**(読めた分も書かない)', () => {
+    // review M-4: catch を丸ごと `void e` にしても 834 件が全部緑だった ──
+    // この file がいちばん強く宣言している規律が誰にも守られていなかった。
+    // ⚠ `written.length === 0` だけを見ると、**空配列を書く実装でも通る** ──
+    // 呼ばれたこと自体(opLog)を見る
+    const h = harness();
+    const broken = mdFile('# 二\n', 'b.md');
+    Object.defineProperty(broken, 'text', {
+      value: () => Promise.reject(new Error('読めない')),
+    });
+    return importMarkdownFiles(h.d, h.deps, [mdFile('# 一\n', 'a.md'), broken]).then((r) => {
+      expect(r).toBe(null);
+      expect(h.opLog).toEqual([]); // ← bulkUpsertEntries が**呼ばれていない**
+      expect(h.written).toEqual([]);
+      expect(h.d.getState().error).toContain('書込は行われていません');
+    });
+  });
+
   it('書込に失敗したら可視で終え、再読込する', async () => {
     const h = harness({ failWrite: true });
     expect(await importMarkdownFiles(h.d, h.deps, [mdFile('# x\n')])).toBe(null);
@@ -234,10 +252,13 @@ describe('振り分け(import-file)', () => {
     expect(h.d.getState().error).toContain('1 つずつ');
   });
 
-  it('0 件は何もしない', async () => {
+  it('0 件は何もしない(⚠ エラーも出さない ── user は何も選んでいない)', () => {
     const h = harness();
-    expect(await importFiles(h.d, h.deps, [])).toBe(null);
-    expect(h.opLog).toEqual([]);
+    return importFiles(h.d, h.deps, []).then((r) => {
+      expect(r).toBe(null);
+      expect(h.opLog).toEqual([]);
+      expect(h.d.getState().error).toBe(null);
+    });
   });
 
   it.each([

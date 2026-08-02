@@ -18,7 +18,10 @@ import {
 } from '../../src/features/import/plain-markdown';
 
 describe('🔴 manifest の宣言と受理器の parity', () => {
-  const manifest = JSON.parse(readFileSync('public/manifest.webmanifest', 'utf-8')) as {
+  // ⚠ cwd に依存させない(相対 path だと root 以外から vitest を起動すると壊れる)
+  const manifest = JSON.parse(
+    readFileSync(new URL('../../public/manifest.webmanifest', import.meta.url), 'utf-8'),
+  ) as {
     file_handlers?: Array<{ accept?: Record<string, string[]> }>;
   };
   const declared = (manifest.file_handlers ?? []).flatMap((h) =>
@@ -67,6 +70,14 @@ describe('題名の決まり方(frontmatter title → 先頭 # 見出し → フ
     expect(readPlainMarkdown('# 見出し\n本文\n', 'file.md').title).toBe('見出し');
   });
 
+  it('🔴 CRLF の md でも先頭見出しを題名にする', () => {
+    // review H-1: `split('\\n')` が残す `\\r` に `.` も `$` もマッチせず、
+    // **CRLF の md では題名の 2 段目が丸ごと死んでいた**(ファイル名に落ちていた)。
+    // ⚠ frontmatter を付けると `parseFrontmatter` の正規化に救われて素通りする
+    expect(firstHeading('# 見出し\r\n本文\r\n')).toBe('見出し');
+    expect(readPlainMarkdown('# 会議メモ\r\n本文\r\n', '2026-08-02.md').title).toBe('会議メモ');
+  });
+
   it('見出しも無ければファイル名(拡張子とディレクトリを落とす)', () => {
     expect(readPlainMarkdown('本文だけ\n', 'dir/sub/私のノート.md').title).toBe('私のノート');
   });
@@ -102,6 +113,21 @@ describe('先頭見出しの拾い方', () => {
     expect(firstHeading('```\n~~~\n# にせもの\n```\n# 本物\n')).toBe('本物');
   });
 
+  it('🔴 閉じ fence は**開き以上の長さ**が要る(4 個で開いて 3 個で閉じない)', () => {
+    // review M-1: 1 文字比較だと markdown を説明する文書(``` を ```` で囲む)で
+    // **コードブロックの中の見出しが題名になる** ── 当のコメントが防いだはずの故障
+    expect(firstHeading('````\n```\n# にせもの\n```\n````\n# 本物\n')).toBe('本物');
+  });
+
+  it('長い開きは長い閉じで閉じる', () => {
+    expect(firstHeading('````\n# にせもの\n````\n# 本物\n')).toBe('本物');
+  });
+
+  it('見出しの `#` は 6 個まで(7 個は見出しではない)', () => {
+    expect(firstHeading('####### 七つ\n# 本物\n')).toBe('本物');
+    expect(firstHeading('###### 六つ\n')).toBe('六つ');
+  });
+
   it('閉じ `#` を落とす', () => {
     expect(firstHeading('# 題名 ###\n')).toBe('題名');
   });
@@ -122,14 +148,37 @@ describe('先頭見出しの拾い方', () => {
   it('見出しが無ければ null', () => {
     expect(firstHeading('本文だけ\n')).toBe(null);
   });
+
+  it('🔴 frontmatter の中の `#` は題名にしない(走査対象は本文)', () => {
+    // ⚠ YAML のコメントは `#` で始まる ── 原文を走査すると
+    // `# メモ` が題名になる。走査対象がどちらかを test で宣言しておく
+    const r = readPlainMarkdown('---\n# メモ: 内部用\ntitle: ""\n---\n# 本物\n', 'f.md');
+    expect(r.title).toBe('本物');
+  });
 });
 
 describe('archetype', () => {
-  it('登録済みの archetype は採用する', () => {
-    expect(readPlainMarkdown('---\narchetype: todo\n---\n', 'f.md').archetype).toBe('todo');
+  // 🔴 **専用フレーバーの有無で決めてはいけない**(review M-2)。`folder` /
+  // `generic` / `opaque` は一級の archetype だがフレーバーは text にフォールバック
+  // するので、「登録されているか」で判定すると**自分の md ZIP export を
+  // 取り込み直したときにフォルダがノートに化ける**
+  it.each(['text', 'todo', 'textlog', 'form', 'spreadsheet', 'folder', 'generic', 'opaque'])(
+    '%s は受ける',
+    (archetype) => {
+      const r = readPlainMarkdown(`---\narchetype: ${archetype}\n---\n`, 'f.md');
+      expect(r.archetype).toBe(archetype);
+      expect(r.warnings).toEqual([]);
+    },
+  );
+
+  it('🔴 `attachment` は受けない(単一 md は bytes を持ってこられない)', () => {
+    // 受けると**中身の無い添付 entry**ができる ── 開けないのに壊れて見えない
+    const r = readPlainMarkdown('---\narchetype: attachment\n---\n', 'f.md');
+    expect(r.archetype).toBe('text');
+    expect(r.warnings.join('\n')).toContain('attachment');
   });
 
-  it('🔴 未知の archetype は text にして**言う**(黙って嘘を残さない)', () => {
+  it('🔴 受けられない archetype は text にして**言う**(黙って嘘を残さない)', () => {
     const r = readPlainMarkdown('---\narchetype: nonexistent\n---\n', 'f.md');
     expect(r.archetype).toBe('text');
     expect(r.warnings.join('\n')).toContain('nonexistent');
@@ -150,6 +199,13 @@ describe('🔴 本文は原文のまま', () => {
     // ⚠ `parseFrontmatter` は body の CRLF を LF に潰す ── その戻り値を body に
     // 使うと「原文のまま」が嘘になる
     const src = '---\r\ntitle: T\r\n---\r\n本文\r\n';
+    expect(readPlainMarkdown(src, 'f.md').body).toBe(src);
+  });
+
+  it('🔴 frontmatter **無し**の CRLF も原文のまま', () => {
+    // ⚠ frontmatter があると `parseFrontmatter` の正規化に救われる ── ここが
+    // 本当の観測点(review H-1 はこの次元がゼロだったせいで見逃されていた)
+    const src = '# 見出し\r\n本文\r\n';
     expect(readPlainMarkdown(src, 'f.md').body).toBe(src);
   });
 
@@ -185,12 +241,60 @@ describe('解決しない参照は件数で言う', () => {
     expect(r.unresolvedRefs).toEqual(['my file.png']);
   });
 
+  // 🔴 ここが**いちばん数えたい形**(黙って画像が壊れる)。review M-3 まで
+  // 取りこぼしていた ── 誤差が「言い過ぎ」ではなく「黙る」側に出ていた
+  it('🔴 参照形式リンクの定義行を拾う', () => {
+    const r = readPlainMarkdown('![図][a]\n\n[a]: images/a.png\n', 'f.md');
+    expect(r.unresolvedRefs).toEqual(['images/a.png']);
+  });
+
+  it('🔴 HTML の `src` / `href` を拾う', () => {
+    expect(readPlainMarkdown('<img src="images/a.png" alt="図">\n', 'f.md').unresolvedRefs).toEqual([
+      'images/a.png',
+    ]);
+    expect(readPlainMarkdown('<a href=docs/b.pdf>x</a>\n', 'f.md').unresolvedRefs).toEqual([
+      'docs/b.pdf',
+    ]);
+  });
+
+  // 🔴 こちらは**嘘の警告**を出していた側
+  it.each([
+    ['fence の中', '```md\n![例](images/example.png)\n```\n'],
+    ['行内コード', 'a `](foo.png)` b\n'],
+    ['エスケープ', 'a \\](notalink.png) b\n'],
+  ])('%s は数えない', (_label, src) => {
+    expect(readPlainMarkdown(src, 'f.md').unresolvedRefs).toEqual([]);
+  });
+
+  it('題名つきリンクは宛先だけを数える(`"題名"` を混ぜない)', () => {
+    expect(readPlainMarkdown('[a](path.png "題名")\n', 'f.md').unresolvedRefs).toEqual([
+      'path.png',
+    ]);
+  });
+
+  it('宛先の括弧 1 段は宛先の一部', () => {
+    expect(readPlainMarkdown('[a](path_(1).png)\n', 'f.md').unresolvedRefs).toEqual([
+      'path_(1).png',
+    ]);
+  });
+
   it('参照が 5 件を超えたら先頭 5 件だけ名前を出す(全件は件数で言う)', () => {
     const src = Array.from({ length: 7 }, (_, i) => `![](img/${i}.png)`).join('\n');
     const r = readPlainMarkdown(src, 'f.md');
     expect(r.unresolvedRefs).toHaveLength(7);
-    expect(r.warnings.join('\n')).toContain('7 件');
-    expect(r.warnings.join('\n')).toContain('…');
+    const w = r.warnings.join('\n');
+    expect(w).toContain('7 件');
+    expect(w).toContain('…');
+    // 件数の規則そのものを pin(5 件目まで名前が出て、6 件目は出ない)
+    expect(w).toContain('img/4.png');
+    expect(w).not.toContain('img/5.png');
+  });
+
+  it('ちょうど 5 件なら省略しない', () => {
+    const src = Array.from({ length: 5 }, (_, i) => `![](img/${i}.png)`).join('\n');
+    const w = readPlainMarkdown(src, 'f.md').warnings.join('\n');
+    expect(w).toContain('img/4.png');
+    expect(w).not.toContain('…');
   });
 });
 

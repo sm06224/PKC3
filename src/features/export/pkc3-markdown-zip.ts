@@ -35,6 +35,7 @@ import {
 } from '../markdown/frontmatter';
 import { ZipWriter } from './zip-writer';
 import type { ArchiveSource } from './pkc3-archive';
+import { scanLinks, rewriteLinkDests } from '@features/markdown/link-scan';
 
 export const MD_FORMAT = 'pkc3-markdown';
 export const MD_VERSION = 1;
@@ -182,95 +183,26 @@ function escapeLabel(s: string): string {
 }
 
 /**
- * 🔴 `asset:<key>` を**リンク/画像の宛先に限って**相対パスへ書き換える。
+ * `asset:` の宛先だけを相対パスへ書き換える。
  *
- * ⚠ 生テキスト全体を舐めてはいけない(review H-2 で実測した誤爆):
- * - コードフェンス内の `asset:ast-1`(= 書式の説明文)が改変される
- * - `https://example.com/asset:ast-1/path` のような **URL が壊れる**
- * - 素の文章に書いた `asset:ast-1` が勝手にパスになる
+ * 🔑 **走査は `features/markdown/link-scan.ts` の 1 本に寄せてある**
+ * (P7 段② review M-1 / M-3)── fence / 行内コード / エスケープの扱いを
+ * 取込側と別々に持っていた結果、取込側だけが誤差を**両方向**に出していた。
+ * ここが決めるのは「どの宛先を書き換えるか」だけ ── **狭く当てる**。
  *
- * アプリ本体(`markdown-render.ts`)は `href` / `src` の宛先だけを見るので、
- * ここも**宛先が `asset:` で始まるときだけ**書き換える。加えて
- * fence / inline code は丸ごと飛ばす。
+ * ⚠ 参照形式(`[a]: asset:k`)と HTML(`<img src="asset:k">`)も書き換える。
+ * 以前は `](…)` しか見ておらず、**添付は ZIP に入るのにリンクだけ繋がらない**
+ * (`asset:` のまま残る)状態だった。
  */
 function rewriteAssetLinks(
   text: string,
   resolve: (key: string) => string | undefined,
 ): { text: string; openFence: string | null } {
-  let out = '';
-  let i = 0;
-  let openFence: string | null = null;
-  const n = text.length;
-  const atLineStart = (): boolean => i === 0 || text[i - 1] === '\n';
-  /** 直前の連続バックスラッシュが奇数個 = この文字はエスケープされている。 */
-  const escaped = (): boolean => {
-    let k = i - 1;
-    let c = 0;
-    while (k >= 0 && text[k] === '\\') {
-      c++;
-      k--;
-    }
-    return c % 2 === 1;
-  };
-
-  while (i < n) {
-    const ch = text[i]!;
-
-    // ── コードフェンス(``` / ~~~ が行頭)は閉じるまで丸ごと通す。
-    // ⚠ 閉じ fence は **3 スペースまで字下げできる**(CommonMark)── 桁 0 固定で
-    // 探すと「閉じない fence」と誤判定して**以降の本文を全部飲む**(review H-1)
-    if ((ch === '`' || ch === '~') && atLineStart()) {
-      const m = /^(`{3,}|~{3,})/.exec(text.slice(i));
-      if (m) {
-        const fence = m[1]!;
-        const closeRe = new RegExp(`\\n {0,3}${fence[0] === '`' ? '`' : '~'}{${fence.length},}[ \t]*(?:\\n|$)`);
-        const rest = text.slice(i + fence.length);
-        const cm = closeRe.exec(rest);
-        if (cm) {
-          const end = i + fence.length + cm.index + cm[0].length;
-          out += text.slice(i, end);
-          i = end;
-        } else {
-          out += text.slice(i); // 閉じない fence = ここから末尾まで全部コード
-          i = n;
-          openFence = fence;
-        }
-        continue;
-      }
-    }
-
-    // ── インラインコード(バッククォート連の対応する閉じまで)。
-    // ⚠ markdown-it は**ブロックを越えて**コードスパンを作らない ── 空行を
-    // 跨いで対応付けると、野良バッククォート 2 個の間が丸ごと飛ぶ(review H-1)
-    if (ch === '`') {
-      const run = /^`+/.exec(text.slice(i))![0];
-      const limit = text.indexOf('\n\n', i);
-      const close = text.indexOf(run, i + run.length);
-      if (close !== -1 && (limit === -1 || close < limit)) {
-        out += text.slice(i, close + run.length);
-        i = close + run.length;
-        continue;
-      }
-    }
-
-    // ── `](asset:key)` / `](<asset:key>)`。**宛先が asset: で始まるときだけ**
-    if (ch === ']' && text[i + 1] === '(' && !escaped()) {
-      const m = /^\]\(\s*<?(asset:([A-Za-z0-9_.-]+))>?(\s*(?:"[^"]*"|'[^']*'))?\s*\)/.exec(
-        text.slice(i),
-      );
-      if (m) {
-        const path = resolve(m[2]!);
-        if (path !== undefined) {
-          out += `](${path}${m[3] ?? ''})`;
-          i += m[0]!.length;
-          continue;
-        }
-      }
-    }
-
-    out += ch;
-    i++;
-  }
+  const { sites, openFence } = scanLinks(text);
+  const out = rewriteLinkDests(text, sites, (site) => {
+    const m = /^asset:([A-Za-z0-9_.-]+)$/.exec(site.dest);
+    return m ? resolve(m[1]!) : undefined;
+  });
   return { text: out, openFence };
 }
 
