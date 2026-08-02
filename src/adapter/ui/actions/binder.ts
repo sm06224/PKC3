@@ -70,7 +70,8 @@ export interface BinderServices {
    */
   busy?(): boolean;
   /** PKC2 ファイルの取込(P6b)。判別・変換・書込は実体側の責務。 */
-  importPkc2?(file: File): void;
+  /** 取込(PKC2 の書出し / 素の Markdown)。振り分けは import-file.ts が持つ。 */
+  importFiles?(files: File[]): void;
 }
 
 function defaultTitle(dispatcher: Dispatcher, archetype: string): string {
@@ -240,7 +241,7 @@ const ACTIONS: Record<string, ActionHandler> = {
   'purge-orphan-assets': (_dispatcher, _target, services) => {
     services.purgeOrphanAssets?.();
   },
-  'import-pkc2': (_dispatcher, target) => {
+  'import-file': (_dispatcher, target) => {
     target
       .closest('[data-pkc-region="shell"]')
       ?.querySelector<HTMLInputElement>('[data-pkc-field="import-input"]')
@@ -308,9 +309,12 @@ export function bindActions(
       el.value = ''; // 同じファイルの再選択でも change が発火するように
       if (files.length > 0) services.attachFiles?.(files);
     } else if (field === 'import-input') {
-      const file = el.files?.[0];
-      el.value = '';
-      if (file) services.importPkc2?.(file);
+      // ⚠ 添付と同じく**全件**渡す ── md は複数選択できる(1 件ずつ entry に
+      // なる)。PKC2 の書出しが複数来たときに断るのは import-file.ts の仕事で、
+      // ここで 1 件目だけ拾って黙って落とさない
+      const files = el.files ? [...el.files] : [];
+      el.value = ''; // 同じファイルの再選択でも change が発火するように
+      if (files.length > 0) services.importFiles?.(files);
     }
   };
   const onKeydown = (ev: Event) => {

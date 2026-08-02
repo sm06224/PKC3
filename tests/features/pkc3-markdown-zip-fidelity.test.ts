@@ -287,8 +287,10 @@ describe('md ZIP — asset 参照の書き換えが誤爆しない', () => {
     expect(await withAsset('[x](asset:ast-1 "説明")\n')).toContain('[x](assets/ast-1.png "説明")');
   });
 
-  it('`<...>` で囲まれた宛先も替える', async () => {
-    expect(await withAsset('[x](<asset:ast-1>)\n')).toContain('[x](assets/ast-1.png)');
+  it('`<...>` で囲まれた宛先も替える(⚠ `<>` は**残す**)', async () => {
+    // 宛先だけを差し替えるので `<>` はそのまま。⚠ 以前は `<>` を落としていたが、
+    // 空白を含む path を書き出すようになった瞬間にリンクが壊れる形だった
+    expect(await withAsset('[x](<asset:ast-1>)\n')).toContain('[x](<assets/ast-1.png>)');
   });
 
   it('🔴 コードフェンスの中は触らない(書式の説明文が改変される)', async () => {
@@ -431,10 +433,29 @@ describe('md ZIP — 生きている参照の添付を落とさない', () => {
   });
 
   it('🔴 書き換えられずに残った参照は言う(外では開けない)', async () => {
-    const out = await withRef('![x][y]\n\n[y]: asset:ast-1\n');
+    // ⚠ **リンクの形をしていない**もの ── 散文の中の裸の `asset:` 参照。
+    // 参照形式や HTML は下の test のとおり書き換わるので、ここには使えない
+    const out = await withRef('添付は asset:ast-1 です\n');
     expect(
       out.warnings.some((w) => w.includes('リンクの形になっていない添付参照 1 件')),
     ).toBe(true);
+  });
+
+  it('🔴 参照形式リンク(`[y]: asset:k`)も書き換わる', async () => {
+    // P7 段② review M-3 まで、ここは `](…)` しか見ておらず
+    // **添付は ZIP に入るのにリンクだけ繋がらない**(`asset:` のまま残る)状態だった
+    const out = await withRef('![x][y]\n\n[y]: asset:ast-1\n');
+    const md = (await files(out.blob)).get('n1.md')!;
+    expect(md).toContain('[y]: assets/ast-1.png');
+    expect(md).not.toContain('asset:ast-1');
+    expect(out.warnings).toEqual([]);
+  });
+
+  it('🔴 HTML の `src` も書き換わる', async () => {
+    const out = await withRef('<img src="asset:ast-1" alt="図">\n');
+    const md = (await files(out.blob)).get('n1.md')!;
+    expect(md).toContain('<img src="assets/ast-1.png" alt="図">');
+    expect(out.warnings).toEqual([]);
   });
 
   it('リンクとして書き換わったなら「残った」とは言わない', async () => {

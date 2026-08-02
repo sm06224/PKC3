@@ -77,12 +77,14 @@ export function buildShell(root: HTMLElement): ShellRegions {
   expMd.setAttribute('data-pkc-action', 'export-markdown');
   expMd.textContent = 'Markdown';
   topbar.append(expMd);
-  // 📥 PKC2 取込(P6b): file picker は常設 hidden input(添付と同じ流儀 ──
-  // user-gesture 要件と smoke の setInputFiles の両方に効く)
+  // 📥 取込(P6b: PKC2 の書出し / P7 段②: 素の Markdown): file picker は常設
+  // hidden input(添付と同じ流儀 ── user-gesture 要件と smoke の setInputFiles の
+  // 両方に効く)
   const imp = document.createElement('button');
   imp.type = 'button';
-  imp.setAttribute('data-pkc-action', 'import-pkc2');
-  imp.textContent = 'PKC2 を取込';
+  imp.setAttribute('data-pkc-action', 'import-file');
+  imp.textContent = '取込';
+  imp.title = 'PKC2 の書出し(HTML / ZIP)と素の Markdown を取り込みます';
   topbar.append(imp);
   const impInput = document.createElement('input');
   impInput.type = 'file';
@@ -90,7 +92,12 @@ export function buildShell(root: HTMLElement): ShellRegions {
   // ⚠ ここに .zip が無いと、**受理器が動いてもファイルを選べない**
   // (accept を厳格に効かせるブラウザ / OS のピッカーがある)── 救出経路が
   // 実装されているのに到達不能、という穴になる
-  impInput.accept = '.html,.htm,.zip,text/html,application/zip';
+  // ⚠ **manifest が宣言する拡張子をここにも並べる** ── `file_handlers` で
+  // `.md` を宣言しながらピッカーで選べない、は宣言と実体のずれである
+  impInput.accept = '.html,.htm,.zip,.md,.markdown,text/html,application/zip,text/markdown';
+  // md は複数選択できる(1 件ずつ entry になる)。PKC2 の書出しが複数来たときは
+  // import-file.ts が断る
+  impInput.multiple = true;
   impInput.hidden = true;
   impInput.setAttribute('data-pkc-field', 'import-input');
   topbar.append(impInput);
