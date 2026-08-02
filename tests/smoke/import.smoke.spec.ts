@@ -105,6 +105,28 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
   expect(errors).toEqual([]);
 });
 
+/**
+ * ZIP の中央ディレクトリからファイル名を読む(**アプリの reader を使わない**)。
+ * 自前 writer の出力を自前 reader で読んで「一致した」と言うだけでは、
+ * 両方が同じように間違っている場合を捕まえられない ── 外から読む目を 1 つ持つ。
+ */
+function zipNames(buf: Buffer): string[] {
+  const eocd = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  if (eocd < 0) throw new Error('EOCD が見つかりません');
+  const count = buf.readUInt16LE(eocd + 10);
+  let p = buf.readUInt32LE(eocd + 16);
+  const names: string[] = [];
+  for (let i = 0; i < count; i++) {
+    if (buf.readUInt32LE(p) !== 0x02014b50) throw new Error('中央ディレクトリの署名が不正');
+    const nameLen = buf.readUInt16LE(p + 28);
+    const extraLen = buf.readUInt16LE(p + 30);
+    const commentLen = buf.readUInt16LE(p + 32);
+    names.push(buf.subarray(p + 46, p + 46 + nameLen).toString('utf-8'));
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  return names;
+}
+
 /** PKC2 の writer と同じ ZIP を組む(store 固定 / UTF-8 flag / 本物の CRC)。 */
 function zipOf(files: ReadonlyArray<{ name: string; data: Buffer }>): Buffer {
   const local: Buffer[] = [];
@@ -582,6 +604,42 @@ test('🔴 可搬 HTML: 書き出したファイルが**単体で開いて読め
     .toBe(true);
 
   expect(viewerErrors).toEqual([]);
+  expect(errors).toEqual([]);
+  await rm(file, { force: true });
+});
+
+test('🔴 md ZIP: 落ちるものを言い、添付が**相対パス**で入る', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  await page.setInputFiles('[data-pkc-field="import-input"]', {
+    name: 'backup.pkc2.zip',
+    mimeType: 'application/zip',
+    buffer: pkc2Zip(),
+  });
+  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(2);
+
+  const dl = page.waitForEvent('download');
+  await clickReal(page, '[data-pkc-action="export-markdown"]');
+  const download = await dl;
+  expect(download.suggestedFilename()).toMatch(/\.md\.zip$/);
+
+  // 🔴 **片道であること**が画面に出る(manifest を開かないと分からない形にしない)。
+  // 取り込んだ container は履歴を 1 件持つので、その件数まで言えているか
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('片道');
+  await expect(page.locator('[data-pkc-region="notices"]')).toContainText(
+    '履歴を持つノート 1 件の履歴は落ちます',
+  );
+
+  // 実ブラウザが書いた ZIP を node 側で開く(自前 writer の出力を外から検品する)
+  const file = join(tmpdir(), `pkc3-md-${process.pid}.zip`);
+  await download.saveAs(file);
+  const names = zipNames(readFileSync(file));
+  expect(names).toContain('manifest.json');
+  expect(names).toContain('ZIP のノート.md');
+  // 添付は拡張子つきの相対パス ── これが無いと外の markdown ビューアで開けない
+  expect(names.some((n) => /^assets\/.+\.png$/.test(n))).toBe(true);
+
   expect(errors).toEqual([]);
   await rm(file, { force: true });
 });

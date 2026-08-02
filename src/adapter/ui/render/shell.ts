@@ -71,6 +71,12 @@ export function buildShell(root: HTMLElement): ShellRegions {
   expHtml.setAttribute('data-pkc-action', 'export-html');
   expHtml.textContent = '閲覧用 HTML';
   topbar.append(expHtml);
+  // 📝 md ZIP(P6d 段④)── PKC3 を捨てても読める形。**片道**
+  const expMd = document.createElement('button');
+  expMd.type = 'button';
+  expMd.setAttribute('data-pkc-action', 'export-markdown');
+  expMd.textContent = 'Markdown';
+  topbar.append(expMd);
   // 📥 PKC2 取込(P6b): file picker は常設 hidden input(添付と同じ流儀 ──
   // user-gesture 要件と smoke の setInputFiles の両方に効く)
   const imp = document.createElement('button');

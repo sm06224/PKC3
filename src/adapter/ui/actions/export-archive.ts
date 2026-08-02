@@ -11,6 +11,7 @@
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { writeArchive, type ArchiveSource } from '@features/export/pkc3-archive';
 import { writePortableHtml } from '@features/export/pkc3-html';
+import { writeMarkdownZip } from '@features/export/pkc3-markdown-zip';
 
 export interface ExportDeps {
   source: ArchiveSource;
@@ -48,7 +49,7 @@ const stamp = (d: Date): string =>
   `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
 
 /** 書き出す形式。⚠ **可逆なのはアーカイブだけ**(UI でそう言う)。 */
-export type ExportKind = 'archive' | 'html';
+export type ExportKind = 'archive' | 'html' | 'markdown';
 
 /**
  * 書き出してダウンロードさせる。
@@ -68,7 +69,12 @@ export async function exportArchive(
     return fail('編集を終了してから書き出してください');
   }
 
-  deps.notify?.(kind === 'html' ? '閲覧用 HTML を書き出しています…' : '書き出しています…');
+  const STARTING: Record<ExportKind, string> = {
+    archive: '書き出しています…',
+    html: '閲覧用 HTML を書き出しています…',
+    markdown: 'Markdown を書き出しています…',
+  };
+  deps.notify?.(STARTING[kind]);
   try {
     const now = deps.now?.() ?? new Date();
     const base = `${safeName(deps.source.title)}-${stamp(now)}`;
@@ -87,6 +93,18 @@ export async function exportArchive(
       // ⚠ **可逆ではない**ことをその場で言う(後から見分けられない形にしない ──
       // PKC2 は light / full の別を manifest にしか書いておらず user が困っていた)
       detail = `${out.counts.entries} 件(添付 ${out.counts.assets})── 閲覧用(取り込み直せません)`;
+    } else if (kind === 'markdown') {
+      const md = await writeMarkdownZip(deps.source, iso);
+      out = md;
+      name = `${base}.md.zip`;
+      // 🔴 **何が落ちたかを件数で言う**(設計 doc §3-2)。PKC2 は落ちたことを
+      // 言わずに出していた ── 「片道です」だけでは user は損失量を測れない
+      const lost: string[] = [];
+      if (md.dropped.relations > 0) lost.push(`関連 ${md.dropped.relations}`);
+      if (md.dropped.revisionEntries > 0) lost.push(`履歴 ${md.dropped.revisionEntries} 件ぶん`);
+      detail =
+        `${md.counts.entries} 件(添付 ${md.counts.assets})── 片道` +
+        (lost.length > 0 ? `(${lost.join(' / ')}が落ちます)` : '(取り込み直せません)');
     } else {
       out = await writeArchive(deps.source, iso);
       name = `${base}.pkc3.zip`;
