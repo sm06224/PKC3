@@ -10,6 +10,7 @@
  */
 import { test, expect } from '@playwright/test';
 import { gzipSync, crc32 } from 'node:zlib';
+import { readFileSync } from 'node:fs';
 import { gotoApp, collectPageErrors, clickReal, expectImageRendered } from './helpers';
 
 // 1x1 PNG(67 bytes)
@@ -459,6 +460,26 @@ test('folder-export 取込 → filer で階層が実際にたどれる', async (
     .getAttribute('data-pkc-entry');
   await clickReal(page, `[data-pkc-entry="${subLid}"]`);
   await expect(rows.locator('[data-pkc-field="title"]')).toHaveText(['📁 空フォルダ', '議事録']);
+
+  expect(errors).toEqual([]);
+});
+
+test('段⑥: `.entry.zip` の base64 添付が実 IDB で画像として描画される', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  // 🔴 PKC2 の writer が実際に吐いたファイル。`assets/<key>` は **base64 テキスト**で、
+  // 復号せずに保存すると「開けないのに壊れて見えない」添付になる
+  await page.setInputFiles('[data-pkc-field="import-input"]', {
+    name: 'attachment.entry.zip',
+    mimeType: 'application/zip',
+    buffer: readFileSync(`${process.cwd()}/tests/fixtures/pkc2/attachment.entry.zip`),
+  });
+
+  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(1);
+  await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]');
+  // 実ブラウザが画像として decode できる = base64 が正しく復号されている
+  await expectImageRendered(page, '[data-pkc-field="attachment-media"]');
 
   expect(errors).toEqual([]);
 });

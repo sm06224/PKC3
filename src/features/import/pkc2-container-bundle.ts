@@ -58,6 +58,7 @@ import {
   type BundleAsset,
   type BundleMain,
 } from './pkc2-bundle';
+import { readEntryBundleParts } from './pkc2-entry-bundle';
 
 /** batch 形式 → 内側 archetype(null = `entries[].archetype` が正本)。 */
 const BATCH_FORMATS: Record<string, 'text' | 'textlog' | null> = {
@@ -106,13 +107,15 @@ export type ArchetypeResolver = (
   me: OuterEntry,
   where: string,
   warnings: string[],
-) => 'text' | 'textlog' | 'skip';
+) => 'text' | 'textlog' | 'entry' | 'skip';
 
 export interface InnerBundlesResult {
   bundles: InnerBundle[];
   assets: Map<string, BundleAsset>;
   alternates: Map<string, AssetSource[]>;
-  counted: { text: number; textlog: number };
+  counted: { text: number; textlog: number; entry: number };
+  /** `.entry.zip` にあったが PKC3 に持ち込めない field(段⑥)。 */
+  dropped: { fields: string[]; entries: number };
   failed: string[];
   skipped: string[];
   anyCompacted: boolean;
@@ -207,13 +210,33 @@ function mergeAssets(
       alternates.set(key, [a.source]);
       continue;
     }
+    // 🔴 **符号化が違うだけの同一添付は「違う中身」ではない**(2026-08-02、実物で判明)。
+    // PKC2 は添付を貼ると `ASSETS` サブフォルダを自動生成して attachment entry を
+    // そこへ置く(`app-state.ts:863-886`)。folder-export は descendant を再帰収集
+    // するので、**画像を貼ったノートを含むフォルダを書き出すと必ず**
+    // 「`.text.zip`(`assets/<key>.png` = 生バイト)」と
+    // 「`ASSETS/….entry.zip`(`assets/<key>` = base64)」が同居する。
+    // ⚠ ここを crc/size だけで見て断っていたので、**既定の形の書出しが全滅**して
+    // いた ── しかも「手で組み替えた ZIP の可能性」と user のデータを疑う文面で
+    const prevB64 = prev.source.base64 === true;
+    const aB64 = a.source.base64 === true;
+    if (prevB64 !== aB64) {
+      // 生バイト側を採る(復号が要らず、name/mime も bundle manifest 由来で正しい)
+      const list = alternates.get(key)!;
+      if (prevB64 && !aB64) {
+        into.set(key, a);
+        list.unshift(a.source); // 先頭 = 採用したもの
+      } else {
+        list.push(a.source);
+      }
+      continue;
+    }
     if (
       prev.source.entry.crc32 !== a.source.entry.crc32 ||
       prev.source.entry.uncompressedSize !== a.source.entry.uncompressedSize
     ) {
       throw new ZipReadError(
-        `同じ添付 key が違う中身で入っています(${key}: ${filename})` +
-          ' ── PKC2 の書出しでは起きない形です(手で組み替えた ZIP の可能性)',
+        `同じ添付 key が違う中身で入っています(${key}: ${filename})── 取り込めません`,
       );
     }
     // 🔑 **複製を控えに残す**(review M-5)。判定は中央ディレクトリの crc/size
@@ -265,7 +288,9 @@ export async function readInnerBundles(
   const assets = new Map<string, BundleAsset>();
   const alternates = new Map<string, AssetSource[]>();
   const used = new Set<string>();
-  const counted = { text: 0, textlog: 0 };
+  const counted = { text: 0, textlog: 0, entry: 0 };
+  const dropped: string[] = [];
+  let droppedEntries = 0;
   const failed: string[] = [];
   const skipped: string[] = [];
   const lidSeen = new Map<string, string>();
@@ -315,7 +340,17 @@ export async function readInnerBundles(
     try {
       // 内側 format と宣言 archetype の一致は readBundleParts が検査する
       // (texts の中に textlog bundle が入っていたら断る ── PKC2 も hard fail)
-      parts = await readBundleParts(innerZip, archetype);
+      // 段⑥: `.entry.zip` は payload の形が違う(entry.json + base64 assets)
+      if (archetype === 'entry') {
+        const ep = await readEntryBundleParts(innerZip);
+        if (ep.dropped.length > 0) {
+          dropped.push(...ep.dropped);
+          droppedEntries++;
+        }
+        parts = ep;
+      } else {
+        parts = await readBundleParts(innerZip, archetype);
+      }
     } catch (e) {
       // 🔑 **1 件の事故で全部を失わない**(設計 doc §5-③ の裁定 = partial + 可視)。
       // P6c の目的は「PKC2 バックアップからの救出」なので、100 件中 1 件が
@@ -327,7 +362,8 @@ export async function readInnerBundles(
       continue;
     }
 
-    counted[archetype]++;
+    if (archetype !== 'entry') counted[archetype]++;
+    else counted.entry++;
     // 外側 manifest は preview 用の写しで、**正は内側**(PKC2 も内側を採る)。
     // 食い違うのは組み立ての事故なので見せる
     const innerLid = parts.manifest.source_lid ?? '';
@@ -376,6 +412,7 @@ export async function readInnerBundles(
     assets,
     alternates,
     counted,
+    dropped: { fields: dropped, entries: droppedEntries },
     failed,
     skipped,
     anyCompacted,

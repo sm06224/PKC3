@@ -21,6 +21,7 @@ import {
   readFolderExportBundle,
   FOLDER_EXPORT_FORMAT,
 } from '@features/import/pkc2-folder-export';
+import { readEntryBundle, ENTRY_BUNDLE_FORMAT } from '@features/import/pkc2-entry-bundle';
 import { readAssetSource, type AssetSource } from '@features/import/zip-reader';
 import {
   convertPkc2Container,
@@ -163,9 +164,9 @@ async function readWithFallback(
   src: AssetSource,
   alternates: readonly AssetSource[] | undefined,
   onFallback: (n: number) => void,
-): Promise<Blob> {
+): Promise<{ blob: Blob; src: AssetSource }> {
   try {
-    return await readAssetSource(src);
+    return { blob: await readAssetSource(src), src };
   } catch (first) {
     let n = 0;
     for (const alt of alternates ?? []) {
@@ -174,13 +175,28 @@ async function readWithFallback(
       try {
         const blob = await readAssetSource(alt);
         onFallback(n);
-        return blob;
+        // ⚠ **復号は「実際に読めた在り処」の符号化で決める**(review M-5)。
+        // 控えは符号化が違いうる ── PKC2 は同じ添付を `.text.zip`(生バイト)と
+        // `.entry.zip`(base64)の両方に入れるので、先頭のフラグで解釈すると
+        // 控えから読んだ瞬間に base64 の文字列が添付として保存される
+        return { blob, src: alt };
       } catch {
         // 次の複製へ
       }
     }
     throw first; // どれも読めなければ最初の理由を返す(原因が一番近い)
   }
+}
+
+/**
+ * 在り処の中身をバイト列にする。
+ * ⚠ `pkc2-entry-bundle` の `assets/<key>` は **base64 テキスト**で、同じ ZIP の
+ * text/textlog bundle が書く**生バイト**と非互換(実物で確認、2026-08-02)。
+ * 取り違えると base64 の文字列が添付として保存され、**開けないのに壊れて見えない**。
+ */
+async function bytesOfSource(blob: Blob, src: AssetSource): Promise<Uint8Array<ArrayBuffer>> {
+  if (!src.base64) return new Uint8Array(await blob.arrayBuffer());
+  return decodeBase64(await blob.text());
 }
 
 /** 1 メッセージに載せる履歴の目安(postMessage に全履歴を一度に載せない)。 */
@@ -289,7 +305,10 @@ export async function importPkc2File(
                 : // フォルダ書出し(段⑤)── 階層まで復元する
                   format === FOLDER_EXPORT_FORMAT
                   ? readFolderExportBundle
-                  : null;
+                  : // 単体 `.entry.zip`(段⑥)
+                    format === ENTRY_BUNDLE_FORMAT
+                    ? readEntryBundle
+                    : null;
       if (!read) {
         // 未対応の形式は**名指しで**断る(「不明」に混ぜると原因を誤解する)
         return fail(`${format} の取込はまだ実装されていません(${file.name})`);
@@ -356,7 +375,10 @@ export async function importPkc2File(
         // (= dedupe 対象外)ので読む理由が無く、読めばそのまま常駐する。
         // **破損検査は落とさない**: reader は stream で舐めて検証し view を返すので、
         // 全量を載せずに CRC を確かめられる(重複排除だけが外れる)
-        if (src && src.entry.uncompressedSize > (deps.hashMaxBytes ?? HASH_MAX_BYTES)) {
+        // ⚠ **base64 の在り処はこの経路に乗せない**(段⑥)── そのまま putBlob すると
+        // **base64 の文字列そのものが添付として保存される**(開けないファイルができ、
+        // しかも「壊れている」とは見えない)。復号は下の共通経路で行う
+        if (src && !src.base64 && src.entry.uncompressedSize > (deps.hashMaxBytes ?? HASH_MAX_BYTES)) {
           // ⚠ 採番 key は `ast-<ms base36>-<6 桁 base36>` なので**同一 ms 内で
           // 衝突しうる**。衝突すると putBlob が後勝ちで上書きし、2 つの添付が
           // 同じ bytes を指す(無言のデータ消失)── convert 側は takenKeys で
@@ -367,11 +389,13 @@ export async function importPkc2File(
           keyMap.set(a.key, key);
           await deps.putBlob(
             key,
-            await readWithFallback(src, zipAlternates?.get(a.oldKey!), (n) =>
-              result.warnings.push(
-                `添付が壊れていたので ${n} 個目の複製から復元しました: ${a.oldKey}`,
-              ),
-            ),
+            (
+              await readWithFallback(src, zipAlternates?.get(a.oldKey!), (n) =>
+                result.warnings.push(
+                  `添付が壊れていたので ${n} 個目の複製から復元しました: ${a.oldKey}`,
+                ),
+              )
+            ).blob,
           );
           await deps.putAssetMeta({
             key,
@@ -390,17 +414,15 @@ export async function importPkc2File(
         //  legacy 添付だけが必ず復号に失敗して死んだ参照になる)
         // ⚠ 読むのは **`src.zip`**(外側の `file` ではない)── batch では内側 ZIP の
         // entry なので、外側から読むと別位置を読んで壊れる
-        const bytes = src
-          ? new Uint8Array(
-              await (
-                await readWithFallback(src, zipAlternates?.get(a.oldKey!), (n) =>
-                  result.warnings.push(
-                    `添付が壊れていたので ${n} 個目の複製から復元しました: ${a.oldKey}`,
-                  ),
-                )
-              ).arrayBuffer(),
-            )
-          : await decodeAssetBytes(consumeBase64(a), gzipped && a.oldKey !== null);
+        let bytes: Uint8Array<ArrayBuffer>;
+        if (src) {
+          const got = await readWithFallback(src, zipAlternates?.get(a.oldKey!), (n) =>
+            result.warnings.push(`添付が壊れていたので ${n} 個目の複製から復元しました: ${a.oldKey}`),
+          );
+          bytes = await bytesOfSource(got.blob, got.src);
+        } else {
+          bytes = await decodeAssetBytes(consumeBase64(a), gzipped && a.oldKey !== null);
+        }
         const { key, hash } = await identifyBytes(bytes);
         keyMap.set(a.key, key); // ⚠ put を省いた時も**必ず**写す(review M-30)
         if (!known.has(key)) {
