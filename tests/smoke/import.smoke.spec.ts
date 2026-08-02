@@ -11,6 +11,7 @@
 import { test, expect } from '@playwright/test';
 import { gzipSync, crc32 } from 'node:zlib';
 import { readFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gotoApp, collectPageErrors, clickReal, expectImageRendered } from './helpers';
@@ -152,7 +153,15 @@ function pkc2Zip(): Buffer {
   const container = {
     meta: { container_id: 'c-zip', title: 'バックアップ' },
     entries: [
-      { lid: 'z1', title: 'ZIP のノート', archetype: 'text', body: '# ZIP\n本文\n' },
+      {
+        lid: 'z1',
+        title: 'ZIP のノート',
+        archetype: 'text',
+        // 🔴 `<!--` → `<script` の並びは script data トークナイザを double escaped
+        // 状態へ入れる ── 退避が `</script` だけだと**書き出した HTML が丸ごと真っ白**
+        // になる(実 Chromium でしか観測できない。happy-dom は破綻を再現しない)
+        body: '# ZIP\n本文\nHTML のコメントは <!-- で始まり、<script src="x"> も書ける\n',
+      },
       {
         lid: 'z2',
         title: 'dot.png',
@@ -556,7 +565,11 @@ test('🔴 可搬 HTML: 書き出したファイルが**単体で開いて読め
   const items = viewer.locator('#list button');
   await expect(items).toHaveCount(2);
   await expect(viewer.locator('#title')).toHaveText('ZIP のノート');
+  // 🔴 本文の `<!--` + `<script` を**素通りで**読めている = トークナイザが
+  // 壊れていない。退避が足りないとページごと真っ白になり、ここへ到達しない
   await expect(viewer.locator('#body')).toContainText('本文');
+  await expect(viewer.locator('#body')).toContainText('<script src="x">');
+  await expect(viewer.locator('script')).toHaveCount(2); // データ用 + 閲覧 UI
 
   // 添付を持つ entry へ切り替えると、base64 から復元した画像が**実際に描画**される
   await items.nth(1).click();
@@ -570,4 +583,5 @@ test('🔴 可搬 HTML: 書き出したファイルが**単体で開いて読め
 
   expect(viewerErrors).toEqual([]);
   expect(errors).toEqual([]);
+  await rm(file, { force: true });
 });

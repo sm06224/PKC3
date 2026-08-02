@@ -7,10 +7,10 @@
  * 退避が無いとその 1 文字列で **HTML 全体が壊れる**。
  */
 /** @vitest-environment happy-dom */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   writePortableHtml,
-  escapeScriptEnd,
+  escapeForScriptData,
   HTML_FORMAT,
 } from '../../src/features/export/pkc3-html';
 import type { ArchiveSource } from '../../src/features/export/pkc3-archive';
@@ -102,22 +102,55 @@ describe('可搬 HTML', () => {
     ]);
   });
 
-  it('🔴 本文に `</script>` があっても HTML が壊れない', async () => {
-    // user が普通に書ける文字列。退避が無いとここで script 要素が終わり、
-    // 残りの JSON が**画面に地の文として出る**(しかも取り出せない)
-    const body = '説明: `</script>` と書くと壊れるやつ\n</SCRIPT foo>\n';
+  /**
+   * 🔴 **退避の実装形ではなく「data script の中に生の `<` が 1 個も無い」性質**を pin する。
+   * `</script` だけを退避していた版は、`<!--` → `<script` の並びで
+   * トークナイザが double escaped 状態に入り **ページが丸ごと真っ白**になった
+   * (review H1、実 Chromium 実測)。実装形を直書きで pin すると、その穴を
+   * 塞ぐ変更のほうが test に落とされる。
+   */
+  const dataScript = async (blob: Blob): Promise<string> => {
+    const html = await blob.text();
+    const i = html.indexOf('>', html.indexOf('<script id="pkc-data"')) + 1;
+    return html.slice(i, html.indexOf('</script>', i));
+  };
+
+  it.each([
+    ['`</script>` と書くと壊れるやつ\n</SCRIPT foo>\n', '閉じタグ'],
+    ['HTML のコメントは <!-- で始まる。\n<script src="x"> を書くと…', '🔴 <!-- + <script'],
+    ['<!-- のあとに <script foo> が出てくる話', '🔴 同一行の <!-- + <script'],
+    [`<!--${'x'.repeat(200)}<script bar>`, '🔴 200 文字離れていても'],
+    ['<!-- コメント --> の話と <script> の話', '--> で復帰する形'],
+  ])('🔴 本文が %j でも HTML が壊れない(%s)', async (body) => {
     const out = await writePortableHtml(source({ entries: [{ lid: 'n1', body }] }), NOW);
-    const html = await out.blob.text();
-    // 生の `</script` は**閉じタグ 1 個だけ**(データ内には現れない)
-    expect(html.match(/<\/script/gi)).toHaveLength(2); // データ用 + viewer 用
+    // data script の中身に**生の `<` が 1 個も無い**= トークナイザは何の状態にも入れない
+    expect(await dataScript(out.blob)).not.toContain('<');
     const d = await dataOf(out.blob);
     expect(d.entries[0]!.body).toBe(body); // 中身は完全に保たれる
   });
 
-  it('escapeScriptEnd は大文字小文字を問わない', () => {
-    expect(escapeScriptEnd('a</script>b</SCRIPT >c')).toBe('a<\\/script>b<\\/SCRIPT >c');
-    // それ以外は触らない(`<` 単独 / `</style` など)
-    expect(escapeScriptEnd('x < y </style>')).toBe('x < y </style>');
+  it('🔴 題名だけでも壊れない(1 個の script に全 entry を詰めているので合成する)', async () => {
+    // 無関係な 2 つのノートの**題名**が合成して全体を壊した(review H1)
+    const out = await writePortableHtml(
+      source({
+        entries: [
+          { lid: 'n1', title: '<!-- 下書き', body: 'a' },
+          { lid: 'n2', title: '<script の使い方', body: 'b' },
+        ],
+      }),
+      NOW,
+    );
+    expect(await dataScript(out.blob)).not.toContain('<');
+    const d = await dataOf(out.blob);
+    expect(d.entries.map((e) => e.title)).toEqual(['<!-- 下書き', '<script の使い方']);
+  });
+
+  it('escapeForScriptData は `<` を退避し、値は変えない', () => {
+    expect(escapeForScriptData('a</script>b<!--c')).toBe('a\\u003c/script>b\\u003c!--c');
+    expect(escapeForScriptData('x > y')).toBe('x > y'); // それ以外は触らない
+    // JSON の文字列としては同値 ── 読み手は素の JSON.parse でよい
+    const v = { s: '<!--<script>--></script>' };
+    expect(JSON.parse(escapeForScriptData(JSON.stringify(v)))).toEqual(v);
   });
 
   it('🔑 添付が base64 で往復する(チャンク境界を跨いでも壊れない)', async () => {
@@ -147,7 +180,7 @@ describe('可搬 HTML', () => {
   it('添付が複数あっても取り違えない', async () => {
     const out = await writePortableHtml(
       source({
-        entries: [{ lid: 'n1', body: 'x' }],
+        entries: [{ lid: 'n1', body: '![](asset:a) と ![](asset:b)' }],
         assets: [
           { key: 'a', mime: 'image/png', bytes: enc.encode('AAAA') },
           { key: 'b', mime: 'image/webp', bytes: enc.encode('BBBBBB') },
@@ -173,7 +206,7 @@ describe('可搬 HTML', () => {
   });
 
   it('bytes の無い添付は言う(黙って落とさない)', async () => {
-    const src = source({ entries: [{ lid: 'n1', body: 'x' }] });
+    const src = source({ entries: [{ lid: 'n1', body: '![](asset:gone)' }] });
     const withMissing: ArchiveSource = {
       ...src,
       listAssetMetas: async () => [{ key: 'gone', mime: 'image/png', size: 1, hash: null }],
@@ -182,6 +215,29 @@ describe('可搬 HTML', () => {
     const out = await writePortableHtml(withMissing, NOW);
     expect(out.warnings).toEqual(['添付の中身が見つかりませんでした: gone']);
     expect(out.counts.assets).toBe(0);
+  });
+
+  it('🔴 前進しないカーソルで無限に回らない', async () => {
+    // 進まない source を掴むと `for(;;)` は永久に回り、parts が膨らんで落ちる
+    // (UI は「書き出しています…」のまま)── 回り続けるより断る
+    // ⚠ ガードを外すとこの test は**落ちずに止まる**(実測: 10 分でも終わらない)。
+    // ハングは CI で原因が読めないので、source 側に打ち切りを持たせて
+    // 「違う理由で落ちる」に変える ── どちらにせよ test は赤くなる
+    const src = source({ entries: [{ lid: 'n1', body: 'a' }] });
+    let calls = 0;
+    const stuck: ArchiveSource = {
+      ...src,
+      listBodies: async () => {
+        if (++calls > 50) throw new Error('打ち切り: 前進チェックが働いていない');
+        return {
+          rows: [{ lid: 'n1', body: 'a' }],
+          done: false,
+          next: { entryOrder: 1, lid: 'n1' },
+        };
+      },
+    };
+    await expect(writePortableHtml(stuck, NOW)).rejects.toThrow(/前進していません/);
+    expect(calls).toBeLessThan(5); // 気づくのが早い(積み上げてから落ちない)
   });
 
   it('日本語の題名・本文が壊れない(UTF-8 の宣言込み)', async () => {
@@ -200,6 +256,110 @@ describe('可搬 HTML', () => {
     const html = await out.blob.text();
     expect(html).toContain('id="list"');
     expect(html).toContain('createObjectURL'); // 添付を見せる経路
+  });
+});
+
+/**
+ * 🔴 この module の**芯**:「全量を heap に載せない」。
+ *
+ * チャンクに割っても、符号化した**文字列を配列に積んだら**最後の `new Blob(parts)`
+ * まで全部が heap に常駐する ── 16MB の添付で 21.34MB 常駐していた(review H2)。
+ * チャンク化が抑えるのは*変換時のピーク*だけで、保持量は一切抑えない。
+ *
+ * ⚠ 出来上がった Blob からは中身の構成を見られないので、**構成部品を捕まえる**。
+ * `Blob` を丸ごと差し替えるのではなく**継承**する(CLAUDE.md: グローバルを
+ * 壊すと本物のエラーがそこに紛れる)。
+ */
+describe('可搬 HTML — heap に載せない', () => {
+  /** 最後に組み立てた Blob の構成部品を返す。 */
+  async function partsOfResult(run: () => Promise<{ blob: Blob }>): Promise<BlobPart[]> {
+    const seen: BlobPart[][] = [];
+    const Real = globalThis.Blob;
+    class Spy extends Real {
+      constructor(parts?: BlobPart[], opts?: BlobPropertyBag) {
+        super(parts, opts);
+        if (parts) seen.push(parts);
+      }
+    }
+    vi.stubGlobal('Blob', Spy);
+    try {
+      await run();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    return seen[seen.length - 1]!; // 最後 = 出力 HTML そのもの
+  }
+
+  it('🔴 添付の base64 が文字列として常駐しない(Blob 化して手放す)', async () => {
+    // チャンク 4 個ぶん。base64 にすると約 1MB になる
+    const bytes = new Uint8Array(3 * 64 * 1024 * 4);
+    for (let i = 0; i < bytes.length; i++) bytes[i] = i & 0xff;
+    const parts = await partsOfResult(() =>
+      writePortableHtml(
+        source({
+          entries: [{ lid: 'n1', body: '![](asset:k1)' }],
+          assets: [{ key: 'k1', mime: 'image/png', bytes }],
+        }),
+        NOW,
+      ),
+    );
+    const strChars = parts
+      .filter((p): p is string => typeof p === 'string')
+      .reduce((n, s) => n + s.length, 0);
+    // 文字列で残ってよいのは骨組み(doctype / JSON の括弧 / 閲覧 UI)だけ。
+    // base64 が 1 個でも文字列で残っていれば 80KB 以上になる
+    expect(strChars).toBeLessThan(8 * 1024);
+    // 添付の bytes は Blob の側に居る(= 出力自体は欠けていない)
+    const blobBytes = parts
+      .filter((p): p is Blob => p instanceof Blob)
+      .reduce((n, b) => n + b.size, 0);
+    expect(blobBytes).toBeGreaterThan(bytes.length); // base64 は 4/3 に膨らむ
+  });
+
+  it('🔴 本文もバッチごとに手放す(全本文が文字列で残らない)', async () => {
+    const entries = Array.from({ length: 40 }, (_, i) => ({
+      lid: `n${i}`,
+      body: 'あ'.repeat(2000),
+    }));
+    const parts = await partsOfResult(() => writePortableHtml(source({ entries, batch: 4 }), NOW));
+    const strChars = parts
+      .filter((p): p is string => typeof p === 'string')
+      .reduce((n, s) => n + s.length, 0);
+    expect(strChars).toBeLessThan(8 * 1024); // 本文だけで 80,000 文字ある
+  });
+});
+
+/**
+ * 🔴 これは**人に配るファイル**。バックアップと違い、消したノートの添付まで
+ * 焼き込んではいけない(review H3: 削除済みノートの添付が完全な形で載っていた)。
+ */
+describe('可搬 HTML — 参照されていない添付を載せない', () => {
+  it('🔴 どの本文からも参照されない添付は入らない(黙って落とさず数を言う)', async () => {
+    const out = await writePortableHtml(
+      source({
+        entries: [{ lid: 'n1', title: '公開してよいノート', body: 'これは共有してよい本文' }],
+        assets: [{ key: 'ast-deleted', mime: 'text/plain', bytes: enc.encode('SECRET-PAYROLL') }],
+      }),
+      NOW,
+    );
+    const html = await out.blob.text();
+    expect(html).not.toContain(btoa('SECRET-PAYROLL'));
+    expect(out.counts.assets).toBe(0);
+    expect(out.warnings).toEqual([
+      'どの本文からも参照されていない添付 1 件は含めませんでした',
+    ]);
+  });
+
+  it('frontmatter からしか参照されない添付は**残す**(添付 entry を殺さない)', async () => {
+    const out = await writePortableHtml(
+      source({
+        entries: [{ lid: 'a1', body: '---\nattachment.asset_key: ast-a\n---\n' }],
+        assets: [{ key: 'ast-a', mime: 'image/png', bytes: enc.encode('PNG') }],
+      }),
+      NOW,
+    );
+    expect(out.counts.assets).toBe(1);
+    expect(out.warnings).toEqual([]);
   });
 });
 
@@ -246,6 +406,45 @@ describe('可搬 HTML — 本文の外にある添付参照', () => {
     );
     const d = await dataOf(out.blob);
     expect(d.entries[0]).not.toHaveProperty('attach');
+    expect(d.entries[0]).not.toHaveProperty('fm');
+  });
+
+  /**
+   * 🔴 **書出し側に「4 つめのルール」を作らない**(review M2)。
+   * `body.startsWith('---\n')` のような手軽なガードは本物の `parseFrontmatter`
+   * より狭く、**アプリでは見えている添付が書出しでは消える** ── この PR が
+   * 「smoke で踏んで直した」と宣言しているのと同じ症状の再発だった。
+   * 判定は本物 1 つに寄せる、という性質をここで pin する。
+   */
+  it.each([
+    ['--- \nattachment.asset_key: ast-a\n---\n本文', '開始 fence の末尾に空白'],
+    ['---\r\nattachment.asset_key: ast-a\r\n---\r\n本文', 'CRLF'],
+    ['---\nattachment.asset_key: ast-a\n--- \n本文', '終了 fence の末尾に空白'],
+  ])('🔴 本物の parser が受理する形は全部拾う(%j / %s)', async (body) => {
+    const out = await writePortableHtml(
+      source({
+        entries: [{ lid: 'a1', body }],
+        assets: [{ key: 'ast-a', mime: 'image/png', bytes: enc.encode('PNG') }],
+      }),
+      NOW,
+    );
+    const d = await dataOf(out.blob);
+    expect((d.entries[0] as { attach?: string[] }).attach).toEqual(['ast-a']);
+    expect(out.counts.assets).toBe(1); // keep-set からも漏れない
+  });
+
+  it('添付の表示名を asset meta に載せる(1 ノートに 2 添付でも見分けられる)', async () => {
+    const body =
+      '---\nattachment.name: 見積A.pdf\nattachment.asset_key: ast-a\n---\n';
+    const out = await writePortableHtml(
+      source({
+        entries: [{ lid: 'a1', title: '見積の件', body }],
+        assets: [{ key: 'ast-a', mime: 'application/pdf', bytes: enc.encode('PDF') }],
+      }),
+      NOW,
+    );
+    const d = await dataOf(out.blob);
+    expect(d.assets[0]).toMatchObject({ key: 'ast-a', name: '見積A.pdf' });
   });
 });
 
@@ -256,7 +455,7 @@ describe('可搬 HTML — 本文の外にある添付参照', () => {
  */
 describe('可搬 HTML — 閲覧側を実行する', () => {
   /** 生成 HTML から DOM を組み立て、インライン script を実行する。 */
-  async function run(blob: Blob): Promise<void> {
+  async function run(blob: Blob, mutate?: (json: string) => string): Promise<void> {
     const html = await blob.text();
     const dataJson = /<script id="pkc-data" type="application\/json">([\s\S]*?)<\/script>/.exec(
       html,
@@ -268,7 +467,7 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
     const data = document.createElement('script');
     data.id = 'pkc-data';
     data.type = 'application/json';
-    data.textContent = dataJson; // 退避された `<\/script` は JSON として同値
+    data.textContent = mutate ? mutate(dataJson) : dataJson;
     document.body.appendChild(data);
     new Function(viewer)();
     await new Promise((r) => setTimeout(r, 0)); // 先頭 entry の自動表示を待つ
@@ -358,5 +557,87 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
     expect(document.getElementById('body')!.textContent).toBe('BBB');
     expect(btns[1]!.getAttribute('aria-current')).toBe('true');
     expect(btns[0]!.getAttribute('aria-current')).toBe('false');
+  });
+
+  it('CRLF の frontmatter も畳まれる(閲覧側に判定を持たせない)', async () => {
+    // 閲覧側で自前に `---\n` を探していた版はここで frontmatter を垂れ流した
+    const body = '---\r\nattachment.asset_key: ast-p\r\n---\r\n読める本文';
+    await run(
+      (await writePortableHtml(source({ entries: [{ lid: 'a1', body }], assets: [png] }), NOW)).blob,
+    );
+    const text = document.getElementById('body')!.textContent!;
+    expect(text).toContain('読める本文');
+    expect(text).not.toContain('attachment.asset_key');
+  });
+
+  it('添付の名前で保存できる(題名ではなく元のファイル名)', async () => {
+    const body =
+      '---\nattachment.name: 見積A.pdf\nattachment.asset_key: ast-x\n---\n';
+    await run(
+      (
+        await writePortableHtml(
+          source({
+            entries: [{ lid: 'a1', title: '見積の件', body }],
+            assets: [{ key: 'ast-x', mime: 'application/pdf', bytes: enc.encode('PDF') }],
+          }),
+          NOW,
+        )
+      ).blob,
+    );
+    // 題名を使うと、1 ノートに 2 添付あるとき同名・拡張子なしで落ちてくる
+    expect(document.querySelector<HTMLAnchorElement>('#body a')!.getAttribute('download')).toBe(
+      '見積A.pdf',
+    );
+  });
+
+  /**
+   * 🔴 「ゼロコピー・生成物のライフサイクル終端での即破棄」(user 指示 2026-07-27、不可侵)。
+   * 起動時に全添付を復号する版は、本文 1 行を読みたいだけでメインスレッドが止まった。
+   */
+  it('🔴 開いた添付だけ復号し、離れたら捨てる', async () => {
+    const create = vi.spyOn(URL, 'createObjectURL');
+    const revoke = vi.spyOn(URL, 'revokeObjectURL');
+    try {
+      const fm = (k: string): string => `---\nattachment.asset_key: ${k}\n---\n`;
+      await run(
+        (
+          await writePortableHtml(
+            source({
+              entries: [
+                { lid: 'a1', title: '一枚目', body: fm('ast-1') },
+                { lid: 'a2', title: '二枚目', body: fm('ast-2') },
+              ],
+              assets: [
+                { key: 'ast-1', mime: 'image/png', bytes: enc.encode('ONE') },
+                { key: 'ast-2', mime: 'image/png', bytes: enc.encode('TWO') },
+              ],
+            }),
+            NOW,
+          )
+        ).blob,
+      );
+      // 開いているのは 1 件目だけ ── 2 件目はまだ復号しない
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(revoke).not.toHaveBeenCalled();
+
+      document.querySelectorAll<HTMLButtonElement>('#list button')[1]!.click();
+      expect(create).toHaveBeenCalledTimes(2);
+      expect(revoke).toHaveBeenCalledTimes(1); // 離れた 1 件目は捨てる
+      expect(document.querySelectorAll('#body img')).toHaveLength(1);
+    } finally {
+      create.mockRestore();
+      revoke.mockRestore();
+    }
+  });
+
+  it('🔴 データが壊れていても理由を出す(黙って真っ白にしない)', async () => {
+    // DL が途中で終わったファイル = JSON が切れている
+    await run(
+      (await writePortableHtml(source({ entries: [{ lid: 'n1', body: 'x' }] }), NOW)).blob,
+      (json) => json.slice(0, Math.floor(json.length / 2)),
+    );
+    const fail = document.getElementById('fail');
+    expect(fail?.textContent).toContain('このファイルを表示できませんでした');
+    expect(fail?.textContent).toContain('ダウンロードが途中で終わっている');
   });
 });

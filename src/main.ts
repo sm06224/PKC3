@@ -178,7 +178,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             // click 直後の revoke は DL を中断しうる ── 1 秒で寿命終端(添付 DL と同じ)
             setTimeout(() => URL.revokeObjectURL(url), 1000);
           },
-          notify: (message) => showStatus(`${statusBase} — ${message}`)
+          notify: (message) => showStatus(`${statusBase} — ${message}`),
+          // ⚠ **注意の中身**を出す導線(review M1 で一度落ちた)。無いと user が
+          // 見るのは「⚠ 注意 1 件」だけで、**どの添付が欠けたか**が消える ──
+          // バックアップで一番知りたい情報がそこにある
+          report: (notes) => showNotices(regions.notices, '書出し時の注意', notes),
         },
         kind,
       );

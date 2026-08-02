@@ -142,6 +142,9 @@ const j = (v: unknown): string => JSON.stringify(v);
 export async function writeArchive(src: ArchiveSource, exportedAt: string): Promise<ArchiveResult> {
   const warnings: string[] = [];
   const metas = await src.listEntryMetas();
+  // ⚠ 断るなら**読み出しの前**に断る。末尾の判定だけだと、0 件でも本文・履歴を
+  // 舐めて全添付を ZIP に書いてから投げる ── 捨てるためだけの仕事(review L2)
+  if (metas.length === 0) throw new Error('書き出せる entry が 1 件もありません');
   const metaOf = new Map(metas.map((m) => [m.lid, m]));
 
   // ── container.json を**部品として**積む(丸ごと文字列にしない)

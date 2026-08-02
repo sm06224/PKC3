@@ -17,8 +17,16 @@ export interface ExportDeps {
   /** 生成した Blob を user に渡す(実配線は `<a download>`)。 */
   download(name: string, blob: Blob): void;
   notify?(message: string): void;
-  /** 注意の全件(1 行の status では 1 件目しか届かない ── P6c review H-2)。 */
-  report?(notes: readonly string[]): void;
+  /**
+   * 注意の全件(1 行の status では 1 件目しか届かない ── P6c review H-2)。
+   *
+   * ⚠ **optional にしない**(review M1)。リファクタでこの配線が落ちたとき、
+   * optional だと typecheck も lint も test も鳴らず、user が見るのは
+   * 「⚠ 注意 1 件」だけ ── **どの添付が欠けたか**が消える。必須にしておけば
+   * 配線を落とした瞬間に tsc が止める。要らない呼び出し側は `() => {}` を書く
+   * (書かされること自体が「注意を捨てている」の明示になる)
+   */
+  report(notes: readonly string[]): void;
   now?(): Date;
 }
 
@@ -86,7 +94,7 @@ export async function exportArchive(
       detail = `${c.entries} 件(関連 ${c.relations} / 履歴 ${c.revisions} / 添付 ${c.assets})`;
     }
     deps.download(name, out.blob);
-    deps.report?.(out.warnings);
+    deps.report(out.warnings);
     deps.notify?.(
       out.warnings.length > 0
         ? `書き出しました: ${detail} ⚠ 注意 ${out.warnings.length} 件`
