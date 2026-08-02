@@ -78,14 +78,22 @@ export function titleFromFileName(fileName: string): string {
  */
 export function firstHeading(body: string): string | null {
   let fence: { char: string; len: number } | null = null;
-  for (const raw of body.split('\n')) {
-    // 🔴 **`\r` を落とす**(review H-1)。`split('\n')` は行末に `\r` を残し、
-    // `.` は `\r` にマッチせず `$` は文字列末尾のみなので、`# 見出し\r` は
-    // **どうやってもマッチしない** ── CRLF の md(Windows / autocrlf)では
-    // 「先頭見出しを題名にする」規則が丸ごと死んでいた。
-    // ⚠ frontmatter 付きの入力では `parseFrontmatter` が CRLF を正規化して
-    // **救ってしまう**ので、pin するときは frontmatter 無しで見ること
-    const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
+  // 🔴 **`split('\n')` で全行を作らない**。見出しは普通いちばん上にあるのに、
+  // 3MB の md では**全部を配列にしてから 1 行目を見て**いた(実測 214ms)。
+  // 行境界を都度探して、見つけた時点で抜ける ── 同 0.01ms。
+  // 🔴 **行末は `\n` だけではない**。CommonMark の line ending は `\n` / `\r` /
+  // `\r\n` の 3 つで、markdown-it も `\r\n?` を `\n` に正規化してから parse する。
+  // `split('\n')` は `\r` を行末に残し、`.` は `\r` にマッチせず `$` は文字列末尾
+  // のみなので `# 見出し\r` は**どうやってもマッチしない** ── CRLF の md
+  // (Windows / autocrlf)では題名の 2 段目が丸ごと死んでいた(review H-1)。
+  // ⚠ frontmatter 付きの入力では `parseFrontmatter` が CRLF を正規化して
+  // **救ってしまう**ので、pin するときは frontmatter 無しで見ること
+  const EOL = /\r\n|[\r\n]/g;
+  for (let start = 0; start <= body.length; ) {
+    EOL.lastIndex = start;
+    const eol = EOL.exec(body);
+    const line = body.slice(start, eol ? eol.index : body.length);
+    start = eol ? eol.index + eol[0].length : body.length + 1;
     const fenceMark = /^ {0,3}(`{3,}|~{3,})/.exec(line);
     if (fenceMark) {
       const mark = fenceMark[1]!;

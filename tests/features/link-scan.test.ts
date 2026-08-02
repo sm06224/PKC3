@@ -81,6 +81,74 @@ describe('🔴 拾わない ── コードとエスケープ', () => {
   });
 });
 
+describe('🔴 行末は `\\n` だけではない(CommonMark: `\\n` / `\\r` / `\\r\\n`)', () => {
+  // ⚠ markdown-it は `\\r\\n?` を `\\n` に正規化してから parse する ── ここで `\\n` だけを
+  // 見ると**描画は正しいのに走査だけがずれる**(fence の中を書き換えてしまう)
+  it.each([
+    ['LF', '\n'],
+    ['CRLF', '\r\n'],
+    ['CR', '\r'],
+  ])('%s: fence の中は拾わない', (_label, eol) => {
+    expect(dests(`\`\`\`${eol}[a](x.png)${eol}\`\`\`${eol}[b](y.png)${eol}`)).toEqual(['y.png']);
+  });
+
+  it.each([
+    ['LF', '\n'],
+    ['CRLF', '\r\n'],
+    ['CR', '\r'],
+  ])('%s: 参照形式の定義は行頭で拾う', (_label, eol) => {
+    expect(dests(`本文${eol}[a]: images/a.png${eol}`)).toEqual(['images/a.png']);
+  });
+
+  it.each([
+    ['LF', '\n\n'],
+    ['CRLF', '\r\n\r\n'],
+    ['CR', '\r\r'],
+  ])('%s: 行内コードは空行を越えない', (_label, blank) => {
+    expect(dests(`\`x${blank}[a](y.png)${blank}\`z`)).toEqual(['y.png']);
+  });
+});
+
+describe('🔴 走査は線形(空行探索を毎回やり直さない)', () => {
+  // 実測: 空行の無い 3MB の md で **74.8 秒 → 53 ms**。バッククォート 1 個ごとに
+  // 残り全体を舐めていた(O(n²))。単調前進のキャッシュが壊れると戻る
+  it('空行を跨いで何度も走査しても結果が変わらない', () => {
+    const text = ['`a` [1](p1.png)', '', '`b` [2](p2.png)', '', '`c` [3](p3.png)'].join('\n');
+    expect(dests(text)).toEqual(['p1.png', 'p2.png', 'p3.png']);
+  });
+
+  it('空行の前後で「越えない」判定が正しい', () => {
+    // 前半の野良バッククォートは空行で切れる → 間の `[a]` は拾う。
+    // 後半は CommonMark どおり**左から順に**対応付く ── `` `z ` `` がコードスパンに
+    // なり、残りの `q [b](w.png) q` は本文なので `[b]` は**拾う**。
+    // ⚠ ここは最初「拾わない」と書いて test が落ちた ── 落ちたのは実装ではなく
+    // **期待値の側**だった(バッククォートの対応付けを誤解していた)
+    expect(dests('`x\n\n[a](y.png)\n\n`z `q [b](w.png) q`\n')).toEqual(['y.png', 'w.png']);
+  });
+
+  it('🔴 空行より後ろのコードスパンでも「越えない」判定が正しい(キャッシュの陳腐化)', () => {
+    // ⚠ 単調前進キャッシュを**無条件に**使い回すと、空行を過ぎたあとの
+    // バッククォートに**手前の空行位置**を返してしまい、コードスパンと認識
+    // されなくなる ── 中の `](…)` を本文として拾い、書出し側なら
+    // **コードブロックの中を書き換える**(変異試験で実際に生き残った)
+    expect(dests('`a`\n\nx `[b](w.png)` y\n')).toEqual([]);
+  });
+
+  it('空行が複数あっても、その先のコードスパンを取り違えない', () => {
+    expect(dests('`a`\n\n`b`\n\nx `[c](z.png)` y\n')).toEqual([]);
+  });
+
+  it('大きい入力でも現実的な時間で終わる(退行の tripwire)', () => {
+    const text = 'a `code` b [x](y.png) c\n'.repeat(40_000); // 約 1MB
+    const t0 = Date.now();
+    const r = scanLinks(text);
+    // ⚠ 絶対値ではなく**桁**を見る(CI の速度差で flake させない)。
+    // O(n²) に戻ると秒オーダーになるので 3 秒で十分に検出できる
+    expect(Date.now() - t0).toBeLessThan(3000);
+    expect(r.sites).toHaveLength(40_000);
+  });
+});
+
 describe('宛先だけを差し替える', () => {
   const upper = (text: string): string =>
     rewriteLinkDests(text, scanLinks(text).sites, (s) => s.dest.toUpperCase());

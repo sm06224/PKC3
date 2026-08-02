@@ -45,13 +45,35 @@ export interface LinkScan {
   openFence: string | null;
 }
 
+/**
+ * ⚠ 位置合わせは **sticky(`y`)**で行う。`text.slice(i)` を作って `^` で当てると
+ * 位置ごとに**残り全体をコピー**することになり、走査が O(n²) になる ──
+ * 実測で行内コードの多い 3MB の md が **74.8 秒**かかっていた。
+ */
 /** `](dest)` / `](<dest>)` / `](dest "title")`。宛先の括弧は 1 段まで。 */
 const INLINE_LINK =
-  /^\]\(\s*(?:<([^<>\n]*)>|((?:[^\s()\\]|\\.|\([^\s()]*\))*))(\s+(?:"[^"]*"|'[^']*'|\([^()]*\)))?\s*\)/;
+  /\]\(\s*(?:<([^<>\n]*)>|((?:[^\s()\\]|\\.|\([^\s()]*\))*))(\s+(?:"[^"]*"|'[^']*'|\([^()]*\)))?\s*\)/y;
 /** 参照形式の定義行 `[label]: dest "title"`。 */
-const REF_DEF = /^ {0,3}\[[^\]\n]+\]:[ \t]*(?:<([^<>\n]*)>|(\S+))/;
+const REF_DEF = / {0,3}\[[^\]\n]+\]:[ \t]*(?:<([^<>\n]*)>|(\S+))/y;
+/** コードフェンスの開き。 */
+const FENCE_OPEN = /(`{3,}|~{3,})/y;
+/** バッククォート連(行内コードの開き)。 */
+const TICK_RUN = /`+/y;
+/** 段落の切れ目(空行)。⚠ CR / CRLF / LF のどれでも切れる。 */
+const BLANK_LINE = /(?:\r\n|[\r\n])[ \t]*(?:\r\n|[\r\n])/g;
 /** HTML 属性 `src="..."` / `href='...'`。 */
 const HTML_ATTR = /\b(?:src|href)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi;
+/** HTML タグとして読む窓。⚠ 迷子の `<` で遠くまで slice しない。 */
+const TAG_WINDOW = 4096;
+
+/** 閉じ fence の正規表現(形ごとにコンパイルを使い回す)。 */
+const closeCache = new Map<string, RegExp>();
+
+/** sticky 正規表現を位置 `i` に当てる。 */
+function at(re: RegExp, text: string, i: number): RegExpExecArray | null {
+  re.lastIndex = i;
+  return re.exec(text);
+}
 
 /**
  * リンク宛先を走査する。**コードの中は見ない**。
@@ -64,7 +86,27 @@ export function scanLinks(text: string): LinkScan {
   let openFence: string | null = null;
   let i = 0;
   const n = text.length;
-  const atLineStart = (): boolean => i === 0 || text[i - 1] === '\n';
+  // ⚠ **行末は `\n` だけではない**。CommonMark の line ending は `\n` / `\r` /
+  // `\r\n` の 3 つで、markdown-it も `\r\n?` を `\n` に正規化してから parse する
+  // ── ここで `\n` だけを見ると、**描画は正しいのに走査だけがずれる**
+  const atLineStart = (): boolean =>
+    i === 0 || text[i - 1] === '\n' || text[i - 1] === '\r';
+  // 🔴 **単調前進をキャッシュする**。`i` は決して戻らないので、「i 以降で最初の
+  // 空行」も単調に進む ── 毎回 `i` から探し直すと、空行の無い本文では
+  // バッククォート 1 個ごとに残り全体を舐めて **O(n²)** になる。
+  // 実測: 行内コードの多い 3MB の md が **103.7 秒**(このキャッシュで 40ms 台)。
+  // ⚠ ここは元の書出し側にも同型で在った(`text.indexOf('\n\n', i)`)── 走査を
+  // 1 本に寄せたことで、両方まとめて直っている
+  let blankFrom = -1; // このキャッシュが有効な下限
+  let blankAt = -1; // その位置(-1 = 以降に空行なし)
+  const nextBlankLine = (from: number): number => {
+    if (blankFrom >= 0 && (blankAt === -1 || blankAt >= from) && from >= blankFrom) return blankAt;
+    BLANK_LINE.lastIndex = from;
+    const m = BLANK_LINE.exec(text);
+    blankFrom = from;
+    blankAt = m ? m.index : -1;
+    return blankAt;
+  };
   /** 直前の連続バックスラッシュが奇数個 = この文字はエスケープされている。 */
   const escaped = (): boolean => {
     let k = i - 1;
@@ -84,15 +126,22 @@ export function scanLinks(text: string): LinkScan {
     // ⚠ 閉じ fence は 3 スペースまで字下げできる ── 桁 0 固定で探すと
     // 「閉じない fence」と誤判定して以降を全部飲む
     if ((ch === '`' || ch === '~') && atLineStart()) {
-      const m = /^(`{3,}|~{3,})/.exec(text.slice(i));
+      const m = at(FENCE_OPEN, text, i);
       if (m) {
         const fence = m[1]!;
-        const closeRe = new RegExp(
-          `\\n {0,3}${fence[0] === '`' ? '`' : '~'}{${fence.length},}[ \t]*(?:\\n|$)`,
-        );
-        const cm = closeRe.exec(text.slice(i + fence.length));
+        // ⚠ 同じ形の fence が何万個も出るので**コンパイルを使い回す**
+        let closeRe = closeCache.get(fence);
+        if (!closeRe) {
+          closeRe = new RegExp(
+            `(?:\\r\\n|[\\r\\n]) {0,3}${fence[0] === '`' ? '`' : '~'}{${fence.length},}[ \t]*(?:\\r\\n|[\\r\\n]|$)`,
+            'g',
+          );
+          closeCache.set(fence, closeRe);
+        }
+        closeRe.lastIndex = i + fence.length;
+        const cm = closeRe.exec(text);
         if (cm) {
-          i += fence.length + cm.index + cm[0].length;
+          i = cm.index + cm[0].length;
         } else {
           i = n; // 閉じない fence = ここから末尾まで全部コード
           openFence = fence;
@@ -104,8 +153,8 @@ export function scanLinks(text: string): LinkScan {
     // ── 行内コード。⚠ markdown-it は**ブロックを越えて**コードスパンを作らない ──
     // 空行を跨いで対応付けると、野良バッククォート 2 個の間が丸ごと飛ぶ
     if (ch === '`') {
-      const run = /^`+/.exec(text.slice(i))![0];
-      const limit = text.indexOf('\n\n', i);
+      const run = at(TICK_RUN, text, i)![0];
+      const limit = nextBlankLine(i);
       const close = text.indexOf(run, i + run.length);
       if (close !== -1 && (limit === -1 || close < limit)) {
         i = close + run.length;
@@ -115,7 +164,7 @@ export function scanLinks(text: string): LinkScan {
 
     // ── 参照形式の定義行(行頭のみ)
     if (ch === '[' && atLineStart() && !escaped()) {
-      const m = REF_DEF.exec(text.slice(i));
+      const m = at(REF_DEF, text, i);
       if (m) {
         const dest = m[1] ?? m[2] ?? '';
         const destStart = i + m[0].length - dest.length - (m[1] !== undefined ? 1 : 0);
@@ -134,7 +183,7 @@ export function scanLinks(text: string): LinkScan {
 
     // ── インラインリンク / 画像
     if (ch === ']' && text[i + 1] === '(' && !escaped()) {
-      const m = INLINE_LINK.exec(text.slice(i));
+      const m = at(INLINE_LINK, text, i);
       if (m) {
         const dest = m[1] ?? m[2] ?? '';
         // 宛先の位置: `](` + 空白 + (`<`)
@@ -153,9 +202,10 @@ export function scanLinks(text: string): LinkScan {
     }
 
     // ── HTML の src / href(`<img src="…">` など)。閉じ `>` までを窓にする
-    if (ch === '<' && !escaped() && /^<[a-zA-Z]/.test(text.slice(i, i + 2))) {
+    if (ch === '<' && !escaped() && /[a-zA-Z]/.test(text[i + 1] ?? '')) {
       const close = text.indexOf('>', i);
-      if (close !== -1) {
+      // ⚠ 迷子の `<` で遠くまで slice しない
+      if (close !== -1 && close - i <= TAG_WINDOW) {
         const tag = text.slice(i, close + 1);
         HTML_ATTR.lastIndex = 0;
         for (let am = HTML_ATTR.exec(tag); am; am = HTML_ATTR.exec(tag)) {
