@@ -156,17 +156,21 @@ describe('🔴 実物: folder-export(段⑤)', () => {
     expect(got.warnings).toEqual([]);
   });
 
-  it('🔑 v2 ── `.entry.zip` を名指しで飛ばし、残りの階層は保つ', async () => {
+  it('🔑 v2 ── `.entry.zip` の todo まで取り込む(PKC2 は無言 skip していた)', async () => {
     const got = await readFolderExportBundle(load('folder-export-v2.zip'));
     const c = got.container as Synth;
     const t = new Map(c.relations.map((r) => [r.to, r.from]));
 
-    // todo は段⑥ 待ちなので入らないが、**それ以外は v1 と同じ**
-    expect(c.entries.some((e) => e.title === 'やること')).toBe(false);
+    // 🔑 段⑥: PKC2 が**読めない**形式の中身が入る
+    const todo = c.entries.find((e) => e.title === 'やること')!;
+    expect(todo.archetype).toBe('todo');
+    expect(JSON.parse(todo.body)).toMatchObject({ status: 'open', date: '2026-08-10' });
+    // 階層も保たれる(todo は export root 直下)
+    expect(t.get('t-1')).toBe('f-root');
     expect(t.get('n-1')).toBe('f-2026');
     expect(t.get('n-2')).toBe('f-root');
-    // 何を飛ばしたかを名指しで言う(PKC2 は無言 skip だった)
-    expect(got.warnings.some((w) => w.includes('.entry.zip'))).toBe(true);
+    // 飛ばしたものは無い
+    expect(got.warnings).toEqual([]);
   });
 
   it('🔴 v2 の manifest が実際に version 2 + other_count を持つ', async () => {

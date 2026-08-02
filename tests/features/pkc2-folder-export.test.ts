@@ -15,6 +15,23 @@ type Synth = {
   relations: Array<{ id: string; from: string; to: string; kind: string }>;
 };
 
+/** 段⑥: `.entry.zip`(entry.json + base64 assets)。 */
+async function entryBundle(lid: string, title: string, archetype: string): Promise<Uint8Array> {
+  const zip = await buildZip([
+    {
+      name: 'manifest.json',
+      bytes: bytesOf(
+        JSON.stringify({ format: 'pkc2-entry-bundle', version: 1, archetype, lid, title }),
+      ),
+    },
+    {
+      name: 'entry.json',
+      bytes: bytesOf(JSON.stringify({ lid, title, archetype, body: '{"status":"open"}' })),
+    },
+  ]);
+  return new Uint8Array(await zip.arrayBuffer());
+}
+
 async function textBundle(lid: string | null, title = lid ?? 'メモ'): Promise<Uint8Array> {
   const zip = await buildZip([
     {
@@ -145,7 +162,7 @@ describe('readFolderExportBundle', () => {
     expect((got.container as Synth).entries.map((e) => e.lid)).toEqual(['n1']);
   });
 
-  it('v2 の `.entry.zip` は名指しで飛ばして残りは取り込む(PKC2 は無言 skip)', async () => {
+  it('v2 の `.entry.zip` は**受理する**(段⑥ ── PKC2 は無言 skip していた)', async () => {
     const zip = await outer(
       base({
         version: 2,
@@ -159,13 +176,15 @@ describe('readFolderExportBundle', () => {
       }),
       [
         { name: 'n1.text.zip', bytes: await textBundle('n1', 'メモ') },
-        { name: 'todo-t1.entry.zip', bytes: bytesOf('中身は段⑥で読む') },
+        { name: 'todo-t1.entry.zip', bytes: await entryBundle('t1', 'やること', 'todo') },
       ],
     );
     const got = await readFolderExportBundle(zip);
     const c = got.container as Synth;
-    expect(c.entries.map((e) => e.lid)).toEqual(['root', 'n1']);
-    expect(got.warnings.some((w) => /todo-t1\.entry\.zip/.test(w))).toBe(true);
+    // 🔑 todo も入る(段⑤ の時点では飛ばしていた)
+    expect(c.entries.map((e) => e.lid)).toEqual(['root', 'n1', 't1']);
+    expect(c.entries.find((e) => e.lid === 't1')!.archetype).toBe('todo');
+    expect(got.warnings).toEqual([]);
   });
 
   it('🔑 飛ばした件があっても本体と親フォルダの対応がずれない', async () => {
@@ -178,7 +197,8 @@ describe('readFolderExportBundle', () => {
         text_count: 2,
         other_count: 1,
         entries: [
-          { lid: 'x', title: 'とばす', archetype: 'todo', filename: 'x.entry.zip' },
+          // archetype が無いので skip される(= 圧縮配列がずれる条件を作る)
+          { lid: 'x', title: 'とばす', filename: 'x.entry.zip' },
           { lid: 'n1', title: 'A', archetype: 'text', filename: 'n1.text.zip', parent_folder_lid: 'fa' },
           { lid: 'n2', title: 'B', archetype: 'text', filename: 'n2.text.zip', parent_folder_lid: 'fb' },
         ],
@@ -352,7 +372,7 @@ describe('readFolderExportBundle', () => {
       base({
         version: 2,
         text_count: 1,
-        other_count: 5, // 実際に飛ばしたのは 1 件
+        other_count: 5, // 実際は 1 件
         entries: [
           { lid: 'n1', title: 'A', archetype: 'text', filename: 'n1.text.zip' },
           { lid: 't1', title: 'T', archetype: 'todo', filename: 't1.entry.zip' },
@@ -361,7 +381,7 @@ describe('readFolderExportBundle', () => {
       }),
       [
         { name: 'n1.text.zip', bytes: await textBundle('n1', 'A') },
-        { name: 't1.entry.zip', bytes: bytesOf('skip') },
+        { name: 't1.entry.zip', bytes: await entryBundle('t1', 'T', 'todo') },
       ],
     );
     const got = await readFolderExportBundle(zip);

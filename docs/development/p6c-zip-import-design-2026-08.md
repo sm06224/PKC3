@@ -222,7 +222,7 @@ PKC3 側で `Pkc2Container` 形の合成物を組み立てて convert に渡す�
 | ✅ ③-後半 | **`.textlog.zip`(#3)**(`textlog-csv.ts` + `readTextlogBundle`)| CSV → PKC2 の TextlogBody JSON へ**逆写像**して合成 container に載せる ── `fromPkc2` がその JSON を取るので textlog 専用の変換を二重に持たない。⚠ 実地確認で判明: **列は固定位置ではなく header 名で引く**(PKC2 の parser も indexOf)。並び替え・追加列に強い。`flags` 列があればそれが正で、**空は「flags 無し」**(`important` に戻らない)|
 | ✅ ④ | **batch 3 形式**(#4 / #5 / #6)(`src/features/import/pkc2-container-bundle.ts`)| 段③の再帰適用 + 内側 ZIP の Blob 再入。⚠ **実地で 3 点覆った**(下記)|
 | ✅ ⑤ | **`folder-export`**(#7、v1 **と v2**)(`pkc2-folder-export.ts` + `folder-graph.ts`)| 段④ + 階層復元。⚠ **実地で 4 点覆った**(下記)|
-| ⑥ | **`pkc2-entry-bundle`(#8)+ v2** | 最後。残るのは「`entry.json` を entries[] に足す」「assets を base64 として読む」の 2 点だけ。PKC2 に import 経路が無く(round-trip の参照実装なし)、格納規約が違い、実体を 1 件も見ていない ✖ |
+| ✅ ⑥ | **`pkc2-entry-bundle`(#8)**(`pkc2-entry-bundle.ts`)| **P6c 完了**。実体が手に入った(2026-08-02)ので着地。⚠ 実物で確認: `assets/<key>` は **base64 テキスト**(text/textlog bundle の生バイトと非互換)/ `entry.json` は Entry verbatim で **created_at・tags・color_tag がここにしか無い** ── PKC3 に受け皿が無いので**落ちると言う** |
 
 ⚠ P6 doc §1 は #8 を「読むのは最も簡単」と書いている ▲。**簡単さと土台性は別**。
 #8 を先にやっても他形式は 1 ミリも進まない。

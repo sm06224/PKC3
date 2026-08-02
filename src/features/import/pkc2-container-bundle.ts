@@ -58,6 +58,7 @@ import {
   type BundleAsset,
   type BundleMain,
 } from './pkc2-bundle';
+import { readEntryBundleParts } from './pkc2-entry-bundle';
 
 /** batch 形式 → 内側 archetype(null = `entries[].archetype` が正本)。 */
 const BATCH_FORMATS: Record<string, 'text' | 'textlog' | null> = {
@@ -106,13 +107,15 @@ export type ArchetypeResolver = (
   me: OuterEntry,
   where: string,
   warnings: string[],
-) => 'text' | 'textlog' | 'skip';
+) => 'text' | 'textlog' | 'entry' | 'skip';
 
 export interface InnerBundlesResult {
   bundles: InnerBundle[];
   assets: Map<string, BundleAsset>;
   alternates: Map<string, AssetSource[]>;
-  counted: { text: number; textlog: number };
+  counted: { text: number; textlog: number; entry: number };
+  /** `.entry.zip` にあったが PKC3 に持ち込めない field 名(段⑥)。 */
+  dropped: string[];
   failed: string[];
   skipped: string[];
   anyCompacted: boolean;
@@ -265,7 +268,8 @@ export async function readInnerBundles(
   const assets = new Map<string, BundleAsset>();
   const alternates = new Map<string, AssetSource[]>();
   const used = new Set<string>();
-  const counted = { text: 0, textlog: 0 };
+  const counted = { text: 0, textlog: 0, entry: 0 };
+  const dropped: string[] = [];
   const failed: string[] = [];
   const skipped: string[] = [];
   const lidSeen = new Map<string, string>();
@@ -315,7 +319,14 @@ export async function readInnerBundles(
     try {
       // 内側 format と宣言 archetype の一致は readBundleParts が検査する
       // (texts の中に textlog bundle が入っていたら断る ── PKC2 も hard fail)
-      parts = await readBundleParts(innerZip, archetype);
+      // 段⑥: `.entry.zip` は payload の形が違う(entry.json + base64 assets)
+      if (archetype === 'entry') {
+        const ep = await readEntryBundleParts(innerZip);
+        dropped.push(...ep.dropped);
+        parts = ep;
+      } else {
+        parts = await readBundleParts(innerZip, archetype);
+      }
     } catch (e) {
       // 🔑 **1 件の事故で全部を失わない**(設計 doc §5-③ の裁定 = partial + 可視)。
       // P6c の目的は「PKC2 バックアップからの救出」なので、100 件中 1 件が
@@ -327,7 +338,8 @@ export async function readInnerBundles(
       continue;
     }
 
-    counted[archetype]++;
+    if (archetype !== 'entry') counted[archetype]++;
+    else counted.entry++;
     // 外側 manifest は preview 用の写しで、**正は内側**(PKC2 も内側を採る)。
     // 食い違うのは組み立ての事故なので見せる
     const innerLid = parts.manifest.source_lid ?? '';
@@ -376,6 +388,7 @@ export async function readInnerBundles(
     assets,
     alternates,
     counted,
+    dropped,
     failed,
     skipped,
     anyCompacted,

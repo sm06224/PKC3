@@ -340,6 +340,15 @@ export async function readZipText(zip: Blob, entry: ZipEntry): Promise<string> {
 export interface AssetSource {
   zip: Blob;
   entry: ZipEntry;
+  /**
+   * 中身が **base64 テキスト**である(`pkc2-entry-bundle` の `assets/<key>`)。
+   *
+   * ⚠ text/textlog bundle は同じ `assets/` に**生バイト**を書く ── 同じ ZIP の
+   * 中で格納形式が 2 通りある(実物で確認、2026-08-02)。読み手が取り違えると
+   * **base64 の文字列そのものが添付として保存される**(開けないファイルができ、
+   * しかも「壊れている」とは見えない)ので、在り処と一緒に運ぶ。
+   */
+  base64?: true;
 }
 
 /** `AssetSource` の中身を読む(ネストしていても正しい Blob から読む)。 */

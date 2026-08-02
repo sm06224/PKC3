@@ -11,6 +11,7 @@
  * ② 取り込めない入力で**書込が 1 件も起きない**こと(半端に書いてから失敗する
  *    経路を作らない ── PKC2 で実際にデータを壊した形)
  */
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { importPkc2File, type ImportDeps } from '../../src/adapter/ui/actions/import-pkc2';
@@ -1015,6 +1016,39 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(new Set(relations.map((r) => r.id)).size).toBe(relations.length);
   });
 
+  it('[P6c 段⑥] `.entry.zip` の base64 添付が **実バイト**として保存される', async () => {
+    // 🔴 base64 のまま putBlob すると「開けないのに壊れて見えない」添付ができる。
+    // 実物(PKC2 の writer が吐いた attachment.entry.zip)で end-to-end に確かめる
+    const { d, deps, written, blobs, metas } = harness();
+    const zip = readFileSync(`${process.cwd()}/tests/fixtures/pkc2/attachment.entry.zip`);
+
+    expect(await importPkc2File(d, deps, new File([zip], 'a.entry.zip'))).toBe(1);
+
+    expect(blobs.size).toBe(1);
+    const key = [...blobs.keys()][0]!;
+    const bytes = new Uint8Array(await blobs.get(key)!.arrayBuffer());
+    // 🔑 PNG の署名が立っている = base64 が復号されている
+    expect([...bytes.slice(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    // content addressing も効く(key は復号後の bytes のハッシュ)
+    expect(metas[0]!.hash).toBe(key.slice('ast-'.length));
+    expect(written[0]!.archetype).toBe('attachment');
+  });
+
+  it('[P6c 段⑥] 🔴 base64 の添付は**閾値超でも**直流ししない', async () => {
+    // 閾値超の経路は「Blob をそのまま putBlob」なので、base64 の在り処を
+    // 乗せると **base64 の文字列が添付として保存される**(開けないのに
+    // 壊れて見えない)。ここだけ除外していることを閾値を下げて確かめる
+    const { d, deps, blobs } = harness();
+    deps.hashMaxBytes = 4; // 96 バイトの base64 は余裕で超える
+    const zip = readFileSync(`${process.cwd()}/tests/fixtures/pkc2/attachment.entry.zip`);
+
+    expect(await importPkc2File(d, deps, new File([zip], 'a.entry.zip'))).toBe(1);
+
+    const bytes = new Uint8Array(await blobs.get([...blobs.keys()][0]!)!.arrayBuffer());
+    // 🔑 base64 のままなら先頭は 'i'(0x69)── PNG 署名が立っていること
+    expect([...bytes.slice(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47]);
+  });
+
   it('[P6c] 閾値超の添付は heap に載せず、採番 key + hash なしで入る', async () => {
     // ⚠ この分岐は既定 64MB なので fixture では踏めない ── 閾値を下げて観測する。
     // 分岐を丸ごと消す mutation が生存していた(review M-1 / MUTANT-2)
@@ -1086,15 +1120,15 @@ describe('importPkc2File (P6b 実行部)', () => {
     const zip = await buildZip([
       {
         name: 'manifest.json',
-        // 段⑥ で受理予定(単体 `.entry.zip`)。段⑤ までは受けない
-        bytes: bytesOf(JSON.stringify({ format: 'pkc2-entry-bundle', version: 1 })),
+        // 全 8 形式は受理済み ── 未知の形式は名指しで断る
+        bytes: bytesOf(JSON.stringify({ format: 'pkc2-future-format', version: 1 })),
       },
     ]);
     expect(await importPkc2File(d, deps, new File([zip], 'b.zip'))).toBeNull();
     expect(written).toHaveLength(0);
     expect(blobs.size).toBe(0);
     // 「不明」に混ぜず、何が未対応なのかを言う
-    expect(d.getState().error).toMatch(/pkc2-entry-bundle/);
+    expect(d.getState().error).toMatch(/pkc2-future-format/);
   });
 
   it('[P6c] manifest.json の無い ZIP は可視で断る', async () => {

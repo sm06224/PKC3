@@ -41,6 +41,7 @@ import {
   type Pkc2ContainerBundle,
 } from './pkc2-container-bundle';
 import { buildFolderGraph, type FolderNode } from './folder-graph';
+import { droppedFieldsWarning } from './pkc2-entry-bundle';
 
 export const FOLDER_EXPORT_FORMAT = 'pkc2-folder-export-bundle';
 
@@ -79,7 +80,7 @@ function resolveArchetype(
   me: OuterEntry,
   where: string,
   warnings: string[],
-): 'text' | 'textlog' | 'skip' {
+): 'text' | 'textlog' | 'entry' | 'skip' {
   const a = me.archetype;
   if (a === 'text' || a === 'textlog') return a;
   if (typeof a !== 'string' || a === '') {
@@ -87,7 +88,10 @@ function resolveArchetype(
     warnings.push(`${where}: archetype が書かれていません ── この 1 件を飛ばします`);
     return 'skip';
   }
-  return 'skip';
+  // 段⑥: それ以外の archetype は `.entry.zip`(v2)── **受理する**。
+  // PKC2 は無言 skip していた形式で、`entry.json` は Entry verbatim なので
+  // text/textlog bundle より情報量が多い
+  return 'entry';
 }
 
 /** `pkc2-folder-export-bundle` を受理する。 */
@@ -135,6 +139,8 @@ export async function readFolderExportBundle(zip: Blob): Promise<Pkc2ContainerBu
         `(${inner.skipped.join(' / ')})── ノート以外の entry です`,
     );
   }
+  // 段⑥: `.entry.zip` にしか無い情報のうち、PKC3 に受け皿が無いものを言う
+  warnings.push(...droppedFieldsWarning(inner.dropped));
   if (inner.failed.length > 0) {
     warnings.push(`${inner.failed.length} 件の bundle を取り込めませんでした(残りは取り込みます)`);
   }
@@ -246,8 +252,9 @@ export async function readFolderExportBundle(zip: Blob): Promise<Pkc2ContainerBu
     ['text', manifest.text_count, inner.counted.text],
     ['textlog', manifest.textlog_count, inner.counted.textlog],
     // ⚠ `other_count` も照合する(review M-5)── 宣言だけして読まないのは
-    // まさに PKC2 を批判している振る舞い。v1 では key ごと不在なので照合されない
-    ['ノート以外', manifest.other_count, inner.skipped.length],
+    // まさに PKC2 を批判している振る舞い。v1 では key ごと不在なので照合されない。
+    // 段⑥ で `.entry.zip` を受理するようになったので、実数は **entry 件数**
+    ['ノート以外', manifest.other_count, inner.counted.entry + inner.skipped.length],
   ];
   for (const [label, want, got] of declared) {
     if (typeof want === 'number' && want !== got) {
