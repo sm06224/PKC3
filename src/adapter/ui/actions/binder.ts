@@ -54,6 +54,8 @@ export interface BinderServices {
   purgeOrphanAssets?(): void;
   /** 注意の面を閉じる(P6c review H-2)。 */
   dismissNotices?(): void;
+  /** アーカイブ書出し(P6d)。 */
+  exportArchive?(): void;
   /** PKC2 ファイルの取込(P6b)。判別・変換・書込は実体側の責務。 */
   importPkc2?(file: File): void;
 }
@@ -193,6 +195,9 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'dismiss-notices': (_dispatcher, _target, services) => {
     services.dismissNotices?.();
+  },
+  'export-archive': (_dispatcher, _target, services) => {
+    services.exportArchive?.();
   },
   'purge-orphan-assets': (_dispatcher, _target, services) => {
     services.purgeOrphanAssets?.();

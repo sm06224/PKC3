@@ -20,11 +20,14 @@ import { formatSize } from '@adapter/ui/render/detail';
 import { bindActions, generateLid, type BinderServices } from '@adapter/ui/actions/binder';
 import { attachFiles } from '@adapter/ui/actions/attach';
 import { importPkc2File } from '@adapter/ui/actions/import-pkc2';
+import { exportArchive } from '@adapter/ui/actions/export-archive';
 import { createAssetGate } from '@adapter/ui/actions/asset-gate';
 import { generateAssetKey } from '@adapter/platform/storage/asset-key';
 
 const DB_NAME = 'pkc3';
 const DEFAULT_CID = 'default';
+/** container の題名(書出しのファイル名にも使う ── 1 箇所で決める)。 */
+const CONTAINER_TITLE = 'PKC3';
 
 export interface AppHandle {
   dispatcher: Dispatcher;
@@ -71,7 +74,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   }
 
   const { client, init } = await initStorage(promoted);
-  await client.request({ op: 'openContainer', cid: DEFAULT_CID, title: 'PKC3' });
+  await client.request({ op: 'openContainer', cid: DEFAULT_CID, title: CONTAINER_TITLE });
   // boot と再読込は**同じ経路**で state を作る(取込後に別の作り方をしない ──
   // 分岐が増えると「取込直後だけ壊れる」型の差分が入る)
   const loadSnapshot = async () => ({
@@ -248,6 +251,49 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         );
       }),
     dismissNotices: () => clearNotices(regions.notices),
+    // 📤 バックアップ書出し(P6d)。⚠ **asset gate の内側** ── 書出し中に添付が
+    // 掃除されると「meta はあるが bytes が無い」を掴んで欠けたアーカイブができる
+    exportArchive: () =>
+      void withAssetGate(async () => {
+        await exportArchive(dispatcher, {
+          source: {
+            cid: DEFAULT_CID,
+            // ⚠ `openContainer` で刻んだ題名と**同じ文字列**を使う(別定数だと
+            // ファイル名と DB の題名が食い違う ── review L-2)
+            title: CONTAINER_TITLE,
+            listEntryMetas: () =>
+              client.request({ op: 'listEntryMetas', cid: DEFAULT_CID }),
+            listBodies: (afterLid, maxBytes) =>
+              client.request({
+                op: 'listBodies',
+                cid: DEFAULT_CID,
+                maxBytes,
+                ...(afterLid ? { afterLid } : {}),
+              }),
+            listRelations: () => client.request({ op: 'listRelations', cid: DEFAULT_CID }),
+            listAssetMetas: () => client.request({ op: 'listAssetMetas', cid: DEFAULT_CID }),
+            getAssetBlob: (key) => blobs.get(DEFAULT_CID, key),
+            listRevisionLids: () =>
+              client.request({ op: 'listRevisionLids', cid: DEFAULT_CID }),
+            listRevisionMetas: (entryLid) =>
+              client.request({ op: 'listRevisionMetas', cid: DEFAULT_CID, entryLid }),
+            getRevision: (id) => client.request({ op: 'getRevision', cid: DEFAULT_CID, id }),
+          },
+          download: (name, blob) => {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = name;
+            document.body.append(a);
+            a.click();
+            a.remove();
+            // click 直後の revoke は DL を中断しうる ── 1 秒で寿命終端(添付 DL と同じ)
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+          },
+          notify: (message) => showStatus(`${statusBase} — ${message}`),
+          report: (notes) => showNotices(regions.notices, '書出し時の注意', notes),
+        });
+      }),
     purgeOrphanAssets: () =>
       void withAssetGate(async () => {
         try {

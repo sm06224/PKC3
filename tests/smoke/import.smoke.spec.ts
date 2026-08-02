@@ -483,3 +483,42 @@ test('段⑥: `.entry.zip` の base64 添付が実 IDB で画像として描画�
 
   expect(errors).toEqual([]);
 });
+
+test('🔴 バックアップ: 書き出して → 取り込み直すと中身が戻る(round-trip)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  // まず PKC2 から取り込んで中身を作る(添付つき = bytes まで往復させる)
+  await page.setInputFiles('[data-pkc-field="import-input"]', {
+    name: 'backup.pkc2.zip',
+    mimeType: 'application/zip',
+    buffer: pkc2Zip(),
+  });
+  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  await expect(rows).toHaveCount(2);
+
+  // 📤 書き出す(実ブラウザの Blob → <a download> 経路を通す)
+  const dl = page.waitForEvent('download');
+  await clickReal(page, '[data-pkc-action="export-archive"]');
+  const download = await dl;
+  expect(download.suggestedFilename()).toMatch(/\.pkc3\.zip$/);
+  const path = await download.path();
+  expect(path).not.toBeNull();
+
+  // 🔴 取り込み直す ── **自分の書出しを自分で読み戻せる**ことがバックアップの条件
+  await page.setInputFiles('[data-pkc-field="import-input"]', {
+    name: 'restored.pkc3.zip',
+    mimeType: 'application/zip',
+    buffer: readFileSync(path!),
+  });
+
+  // 同じ内容がもう 1 組入る(取込は常に追加 ── 上書きしない)
+  await expect(rows).toHaveCount(4);
+  // 添付も戻っている(content addressing なので blob は 1 本のまま)
+  const restored = rows.filter({ hasText: 'dot.png' });
+  await expect(restored).toHaveCount(2);
+  await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]:last-child');
+  await expectImageRendered(page, '[data-pkc-field="attachment-media"]');
+
+  expect(errors).toEqual([]);
+});

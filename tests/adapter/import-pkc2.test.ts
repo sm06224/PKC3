@@ -1108,6 +1108,42 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(bytes).toBe('PNGBYTES');
   });
 
+  it('[P6d] 🔴 アーカイブ復元で添付の mime が落ちない(preview が死ぬ)', async () => {
+    // mime を落とすと Blob の type と meta.mime が空になり、画像が preview されない
+    // ── 無言で(review M-4)
+    const { ZipWriter } = await import('../../src/features/export/zip-writer');
+    const { d, deps, metas, blobs } = harness();
+    const w = new ZipWriter();
+    await w.add('manifest.json', ['{"format":"pkc3-archive","version":1}']);
+    await w.add('container.json', [
+      JSON.stringify({
+        meta: {},
+        entries: [
+          {
+            lid: 'a1',
+            title: 'dot.png',
+            archetype: 'attachment',
+            body: '---\nattachment:\n  asset_key: k1\n---\n',
+            entryOrder: 1,
+            createdAt: null,
+            updatedAt: null,
+            status: null,
+            date: null,
+            archived: false,
+          },
+        ],
+        relations: [],
+        revisions: [],
+        assets: [{ key: 'k1', mime: 'image/png', size: 4, hash: null }],
+      }),
+    ]);
+    await w.add('assets/k1', [new Blob([bytesOf('PNGX')])]);
+
+    expect(await importPkc2File(d, deps, new File([w.finish()], 'a.pkc3.zip'))).toBe(1);
+    expect(metas[0]!.mime).toBe('image/png');
+    expect([...blobs.values()][0]!.type).toBe('image/png');
+  });
+
   it('[P6c 段⑥] 🔴 base64 の添付は**閾値超でも**直流ししない', async () => {
     // 閾値超の経路は「Blob をそのまま putBlob」なので、base64 の在り処を
     // 乗せると **base64 の文字列が添付として保存される**(開けないのに

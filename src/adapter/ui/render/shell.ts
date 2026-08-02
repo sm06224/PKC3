@@ -59,6 +59,12 @@ export function buildShell(root: HTMLElement): ShellRegions {
   purge.setAttribute('data-pkc-action', 'purge-orphan-assets');
   purge.textContent = '添付の整理';
   topbar.append(purge);
+  // 📤 アーカイブ書出し(P6d)── バックアップ正本。これさえあれば全部戻る
+  const exp = document.createElement('button');
+  exp.type = 'button';
+  exp.setAttribute('data-pkc-action', 'export-archive');
+  exp.textContent = 'バックアップ';
+  topbar.append(exp);
   // 📥 PKC2 取込(P6b): file picker は常設 hidden input(添付と同じ流儀 ──
   // user-gesture 要件と smoke の setInputFiles の両方に効く)
   const imp = document.createElement('button');

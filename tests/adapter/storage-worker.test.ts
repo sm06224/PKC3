@@ -494,4 +494,97 @@ describe('revision chain (P5c ── 逆向き差分)', () => {
     expect(res.added).toBe(1);
     expect(res.droppedOverLimit).toBe(1);
   });
+
+  // ── P6d: listBodies(書出し用の一括読み)
+  //
+  // 🔴 **実 SQL に当てる**。スタブで書いた round-trip test は配列 index で継続する
+  // ので、実装のカーソルが `ORDER BY` と噛み合っていなくても素通りしていた
+  // (review M-2: スタブが実装より正しい状態になっていた)
+
+  const listBodies = (
+    after: { entryOrder: number; lid: string } | undefined,
+    maxBytes: number,
+  ) => request({ op: 'listBodies', cid: 'c1', maxBytes, ...(after ? { after } : {}) });
+
+  /** カーソルを追って全部集める(書出しがやることと同じ)。 */
+  async function drain(maxBytes: number): Promise<string[]> {
+    const out: string[] = [];
+    let after: { entryOrder: number; lid: string } | undefined;
+    for (let guard = 0; guard < 1000; guard++) {
+      const r = await listBodies(after, maxBytes);
+      out.push(...r.rows.map((x) => x.lid));
+      if (r.done || !r.next) return out;
+      after = r.next;
+    }
+    throw new Error('カーソルが進んでいません(無限ループ)');
+  }
+
+  it('[P6d] 🔴 entry_order が重複していても 1 件も落とさない', async () => {
+    // app-state 自身が「trash 復元と CREATE の並行採番は重複しうる」と明記している。
+    // カーソルが `entry_order > ?` 単独だと、境界の順序値を共有する行が**全部飛ぶ**
+    // ── バックアップの中身が黙って減る
+    for (const lid of ['d1', 'd2', 'd3', 'd4', 'd5']) {
+      await request({
+        op: 'upsertEntry',
+        cid: 'c1',
+        entry: entry(lid, `本文 ${lid}`, { entryOrder: 500 }), // 🔴 全部同じ
+        checkpoint: false,
+      });
+    }
+    const got = await drain(1); // 1 件ずつ返させる(境界を毎回踏ませる)
+    expect(got.filter((l) => l.startsWith('d'))).toEqual(['d1', 'd2', 'd3', 'd4', 'd5']);
+  });
+
+  it('[P6d] 🔴 maxBytes より大きい本文が 1 件あっても進む(無限ループを作らない)', async () => {
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('big1', 'x'.repeat(5000), { entryOrder: 600 }),
+      checkpoint: false,
+    });
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('big2', 'y'.repeat(5000), { entryOrder: 601 }),
+      checkpoint: false,
+    });
+    // maxBytes=1 でも 1 件目は必ず返る ── 返さないと永遠に進まない
+    const got = await drain(1);
+    expect(got).toContain('big1');
+    expect(got).toContain('big2');
+  });
+
+  it('[P6d] 並びは entry_order → lid(書出しの並びの正本)', async () => {
+    await request({ op: 'upsertEntry', cid: 'c1', entry: entry('o-b', 'B', { entryOrder: 700 }), checkpoint: false });
+    await request({ op: 'upsertEntry', cid: 'c1', entry: entry('o-a', 'A', { entryOrder: 700 }), checkpoint: false });
+    await request({ op: 'upsertEntry', cid: 'c1', entry: entry('o-c', 'C', { entryOrder: 699 }), checkpoint: false });
+    const got = (await drain(1_000_000)).filter((l) => l.startsWith('o-'));
+    expect(got).toEqual(['o-c', 'o-a', 'o-b']);
+  });
+
+  it('[P6d] 本文が実際に返る(lid だけ合っていても意味がない)', async () => {
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('bd1', '# 見出し\n本文です\n', { entryOrder: 800 }),
+      checkpoint: false,
+    });
+    const r = await listBodies({ entryOrder: 799, lid: '' }, 1_000_000);
+    expect(r.rows.find((x) => x.lid === 'bd1')?.body).toBe('# 見出し\n本文です\n');
+  });
+
+  it('[P6d] 2 バッチ目以降も返る(done を常に true にしないこと)', async () => {
+    for (const [i, lid] of ['m1', 'm2', 'm3'].entries()) {
+      await request({
+        op: 'upsertEntry',
+        cid: 'c1',
+        entry: entry(lid, 'z'.repeat(100), { entryOrder: 900 + i }),
+        checkpoint: false,
+      });
+    }
+    const first = await listBodies({ entryOrder: 899, lid: '' }, 150);
+    expect(first.done).toBe(false);
+    expect(first.rows).toHaveLength(1);
+    expect(first.next).toEqual({ entryOrder: 900, lid: 'm1' });
+  });
 });

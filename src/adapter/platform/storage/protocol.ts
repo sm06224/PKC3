@@ -9,6 +9,30 @@ export type StorageRequest =
   | { op: 'openContainer'; cid: string; title?: string }
   | { op: 'listEntryMetas'; cid: string }
   | { op: 'getBody'; cid: string; lid: string }
+  /**
+   * 本文を **まとめて** 取る(P6d ── 書出し用)。
+   *
+   * ⚠ `getBody` を N 回呼ぶと 5000 entry の書出しが 5000 往復になる。
+   * `after` で続きから読み、**1 メッセージの合計バイト数**で切る
+   * (`importRevisionChains` の `REVISION_BATCH_BYTES` と同じ作法 ──
+   * postMessage に全量を載せない)。
+   * 🔑 **鎖と違って body は割ってよい**(1 entry = 1 独立単位)ので、
+   * `batchChains` が持つ「割ると静かに落ちる」問題は無い。
+   *
+   * 🔴 **カーソルは並び順と同じ複合キー**(`entry_order` + `lid`)。
+   * `entry_order` 単独では**取りこぼす** ── `entry_order` に UNIQUE は無く、
+   * app-state 自身が「trash 復元と CREATE の並行採番は重複しうる」と明記している。
+   * 境界の順序値を共有する残りの行が全部飛び、**バックアップの中身が減る**
+   * (実証済み: 同じ entry_order の 5 件 → 1 件しか出ない)。
+   * ⚠ lid だけを持ち回って worker 側で順序値を引き直すのも**駄目** ── その行が
+   * 消えていると位置が解決できず、先頭から読み直して重複する。
+   */
+  | {
+      op: 'listBodies';
+      cid: string;
+      after?: { entryOrder: number; lid: string };
+      maxBytes: number;
+    }
   | {
       op: 'upsertEntry';
       cid: string;
@@ -182,6 +206,15 @@ export interface ResultMap {
   openContainer: null;
   listEntryMetas: EntryMetaRow[];
   getBody: string | null;
+  /**
+   * `done` = これ以上ない。`rows` は `entry_order, lid` 順(並びの正本)。
+   * `next` = 続きのカーソル(呼び出し側はこれをそのまま渡す ── 自分で組まない)。
+   */
+  listBodies: {
+    rows: Array<{ lid: string; body: string }>;
+    done: boolean;
+    next?: { entryOrder: number; lid: string };
+  };
   upsertEntry: null;
   bulkUpsertEntries: null;
   deleteEntry: null;

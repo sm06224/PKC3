@@ -317,6 +317,42 @@ const handlers: Handlers = {
     );
     return rows.length > 0 ? (rows[0]?.body as string) : null;
   },
+  listBodies: (req) => {
+    // 🔴 **カーソルは ORDER BY と同じ複合キー**。`entry_order > ?` だけだと
+    // 境界の順序値を共有する行が全部飛ぶ(entry_order に UNIQUE は無い)。
+    // ⚠ lid だけ持ち回って worker 側で順序値を引き直す形も駄目 ── その行が
+    // 消えていると位置が解決できず、先頭から読み直して**重複する**
+    const database = need();
+    const a = req.after;
+    const rows = database.selectObjects(
+      a === undefined
+        ? `SELECT lid, body, entry_order FROM entries WHERE cid = ?
+             ORDER BY entry_order, lid`
+        : `SELECT lid, body, entry_order FROM entries
+             WHERE cid = ? AND (entry_order > ? OR (entry_order = ? AND lid > ?))
+             ORDER BY entry_order, lid`,
+      a === undefined ? [req.cid] : [req.cid, a.entryOrder, a.entryOrder, a.lid],
+    ) as unknown as Array<{ lid: string; body: string; entry_order: number }>;
+
+    // 1 メッセージの合計で切る。⚠ **1 件目は必ず返す** ── maxBytes より大きい
+    // body が 1 件あるだけで、そこから先が永遠に進まなくなる(無限ループ)
+    const out: Array<{ lid: string; body: string }> = [];
+    let total = 0;
+    for (const r of rows) {
+      const size = r.body.length;
+      if (out.length > 0 && total + size > req.maxBytes) {
+        const last = rows[out.length - 1]!;
+        return {
+          rows: out,
+          done: false,
+          next: { entryOrder: last.entry_order, lid: last.lid },
+        };
+      }
+      out.push({ lid: r.lid, body: r.body });
+      total += size;
+    }
+    return { rows: out, done: true };
+  },
   upsertEntry: (req) => {
     // 本文の書込は**すべてここを通る** ── 鎖の維持を同 tx に閉じ込める唯一の場所。
     // checkpoint(履歴を伸ばす)か amend(頭を張り替える)かだけが caller の裁量
