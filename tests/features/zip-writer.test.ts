@@ -19,7 +19,7 @@ import {
 } from '../../src/features/import/zip-reader';
 
 const enc = new TextEncoder();
-const bytesOf = (s: string): Uint8Array<ArrayBuffer> => enc.encode(s) as Uint8Array<ArrayBuffer>;
+const bytesOf = (s: string): Uint8Array<ArrayBuffer> => enc.encode(s);
 
 /** 書いて読む(この 2 つが対であることがこの module の存在意義)。 */
 async function roundTrip(

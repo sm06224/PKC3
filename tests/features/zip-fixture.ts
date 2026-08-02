@@ -124,4 +124,10 @@ export async function buildZip(
   return new Blob([new Uint8Array([...local, ...central, ...eocd])]);
 }
 
-export const bytesOf = (text: string): Uint8Array => enc.encode(text);
+/**
+ * ⚠ 戻り型は **`Uint8Array<ArrayBuffer>`**(素の `Uint8Array` にしない)。
+ * 素だと `ArrayBufferLike` に広がり、`new Blob([...])` に渡せない
+ * (`SharedArrayBuffer` かもしれない扱いになる)── 呼び出し側で毎回
+ * cast する羽目になる。
+ */
+export const bytesOf = (text: string): Uint8Array<ArrayBuffer> => enc.encode(text);
