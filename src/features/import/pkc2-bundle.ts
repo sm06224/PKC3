@@ -182,6 +182,18 @@ async function readBundleCommon(
   return { dir, manifest, assets, warnings };
 }
 
+/**
+ * 合成 container に載せる relation(PKC2 の container.json と同じ field 名)。
+ * ⚠ **`from` / `to`**(`from_lid` / `to_lid` ではない)── 間違えると convert が
+ * 「端点不在」で**全部黙って落とし**、階層だけが消えた形になる。
+ */
+export interface SynthRelation {
+  id: string;
+  from: string;
+  to: string;
+  kind: string;
+}
+
 /** compact mode の warning(batch は export 単位の性質なので 1 回だけ出す)。 */
 export const COMPACTED_WARNING =
   '書出し時に壊れた添付参照が本文から除かれています(compact mode)';
@@ -203,6 +215,7 @@ export const COMPACTED_WARNING =
 export function synthesize(
   assets: ReadonlyMap<string, BundleAsset>,
   mains: readonly BundleMain[],
+  relations: readonly SynthRelation[] = [],
 ): unknown {
   const entries: unknown[] = [];
   for (const [key, a] of assets) {
@@ -219,7 +232,7 @@ export function synthesize(
     });
   }
   entries.push(...mains);
-  return { meta: {}, entries, relations: [], revisions: [], assets: {} };
+  return { meta: {}, entries, relations, revisions: [], assets: {} };
 }
 
 export const sourcesOf = (

@@ -17,6 +17,10 @@ import { parsePkc2Html } from '@features/import/pkc2-html';
 import { readPkc2Package, peekZipFormat } from '@features/import/pkc2-package';
 import { readTextBundle, readTextlogBundle } from '@features/import/pkc2-bundle';
 import { readContainerBundle, isBatchFormat } from '@features/import/pkc2-container-bundle';
+import {
+  readFolderExportBundle,
+  FOLDER_EXPORT_FORMAT,
+} from '@features/import/pkc2-folder-export';
 import { readAssetSource, type AssetSource } from '@features/import/zip-reader';
 import {
   convertPkc2Container,
@@ -279,10 +283,13 @@ export async function importPkc2File(
             ? readTextBundle
             : format === 'pkc2-textlog-bundle'
               ? readTextlogBundle
-              : // batch 3 形式(段④)。folder-export / entry-bundle は**受けない**
+              : // batch 3 形式(段④)
                 isBatchFormat(format)
                 ? readContainerBundle
-                : null;
+                : // フォルダ書出し(段⑤)── 階層まで復元する
+                  format === FOLDER_EXPORT_FORMAT
+                  ? readFolderExportBundle
+                  : null;
       if (!read) {
         // 未対応の形式は**名指しで**断る(「不明」に混ぜると原因を誤解する)
         return fail(`${format} の取込はまだ実装されていません(${file.name})`);

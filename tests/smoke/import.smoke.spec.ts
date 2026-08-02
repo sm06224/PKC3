@@ -365,3 +365,100 @@ test('注意が複数あるとき **全件**が画面に出る(1 行の status �
 
   expect(errors).toEqual([]);
 });
+
+/** 内側の `.text.zip`(PKC2 の単体 export と同じ構造)。 */
+function innerText(lid: string, title: string): Buffer {
+  return zipOf([
+    {
+      name: 'manifest.json',
+      data: Buffer.from(
+        JSON.stringify({
+          format: 'pkc2-text-bundle',
+          version: 1,
+          source_lid: lid,
+          source_title: title,
+          assets: {},
+          compacted: false,
+        }),
+      ),
+    },
+    { name: 'body.md', data: Buffer.from(`# ${title}\n`, 'utf-8') },
+  ]);
+}
+
+/**
+ * `pkc2-folder-export-bundle`。**親が先に来ない**並びで、循環も 1 つ入れる
+ * (PKC2 の writer は循環を防いでいない ── 実際に来る形)。
+ */
+function folderExportZip(): Buffer {
+  return zipOf([
+    {
+      name: 'manifest.json',
+      data: Buffer.from(
+        JSON.stringify({
+          format: 'pkc2-folder-export-bundle',
+          version: 1,
+          source_folder_lid: 'root',
+          source_folder_title: '仕事',
+          scope: 'recursive',
+          text_count: 2,
+          textlog_count: 0,
+          compact: false,
+          entries: [
+            { lid: 'n1', title: '議事録', archetype: 'text', filename: 'n1.text.zip', parent_folder_lid: 'sub' },
+            { lid: 'n2', title: '直下メモ', archetype: 'text', filename: 'n2.text.zip', parent_folder_lid: 'root' },
+          ],
+          folders: [
+            { lid: 'sub', title: '2026', parent_lid: 'root' }, // ⚠ 子が先
+            { lid: 'root', title: '仕事', parent_lid: null },
+            { lid: 'empty', title: '空フォルダ', parent_lid: 'sub' }, // 空でも作る
+            // 🔴 **本物の循環**(cyc1 ⇄ cyc2)。PKC2 の writer は防いでいないので
+            // 実際に来る。切れていないと循環上の 2 件が root に出ず配下ごと消える
+            { lid: 'cyc1', title: '循環1', parent_lid: 'cyc2' },
+            { lid: 'cyc2', title: '循環2', parent_lid: 'cyc1' },
+          ],
+        }),
+      ),
+    },
+    { name: 'n1.text.zip', data: innerText('n1', '議事録') },
+    { name: 'n2.text.zip', data: innerText('n2', '直下メモ') },
+  ]);
+}
+
+test('folder-export 取込 → filer で階層が実際にたどれる', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  await page.setInputFiles('[data-pkc-field="import-input"]', {
+    name: 'folder-shigoto-20260731.folder-export.zip',
+    mimeType: 'application/zip',
+    buffer: folderExportZip(),
+  });
+
+  // folder 5 件 + 本体 2 件
+  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(7);
+
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="filer"]');
+  const rows = page.locator('[data-pkc-region="filer-table"] tbody tr');
+
+  // 🔑 最上位は **root + 循環から救出された 1 件**(階層が効いていれば 7 件並ばない)。
+  // 🔴 循環が切れていないと循環上の 2 件は root にも配下にも出ず**完全に消える**
+  await expect(rows.locator('[data-pkc-field="title"]')).toHaveText(['📁 仕事', '📁 循環2']);
+
+  // root へ入る → 「2026」フォルダと「直下メモ」
+  await clickReal(page, '[data-pkc-region="filer-table"] tbody tr:first-child');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.locator('[data-pkc-field="title"]')).toHaveText(['📁 2026', '直下メモ']);
+
+  // 「2026」へ入る → 空フォルダと議事録。
+  // ⚠ lid は取込時に採番し直されるので **DOM から引く**(`:has-text` は
+  // Playwright 専用セレクタで、実クリックの querySelector では使えない)
+  // ⚠ タイトルで絞ると更新日の「2026-08-01」にも当たる ── archetype で引く
+  const subLid = await page
+    .locator('[data-pkc-region="filer-table"] tbody tr[data-pkc-archetype="folder"]')
+    .getAttribute('data-pkc-entry');
+  await clickReal(page, `[data-pkc-entry="${subLid}"]`);
+  await expect(rows.locator('[data-pkc-field="title"]')).toHaveText(['📁 空フォルダ', '議事録']);
+
+  expect(errors).toEqual([]);
+});

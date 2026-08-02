@@ -221,7 +221,7 @@ PKC3 側で `Pkc2Container` 形の合成物を組み立てて convert に渡す�
 | ✅ ③-前半 | **`.text.zip`(#2)**(`src/features/import/pkc2-bundle.ts`)| §2-5 の合成 container 規約を確立。🔑 **`manifest.assets` が key → {name, mime} の正本**と実地確認できたので、§4-A の「拡張子を剥がす突合」問題は**そもそも発生しない**(manifest の key を正として ZIP entry を引く)|
 | ✅ ③-後半 | **`.textlog.zip`(#3)**(`textlog-csv.ts` + `readTextlogBundle`)| CSV → PKC2 の TextlogBody JSON へ**逆写像**して合成 container に載せる ── `fromPkc2` がその JSON を取るので textlog 専用の変換を二重に持たない。⚠ 実地確認で判明: **列は固定位置ではなく header 名で引く**(PKC2 の parser も indexOf)。並び替え・追加列に強い。`flags` 列があればそれが正で、**空は「flags 無し」**(`important` に戻らない)|
 | ✅ ④ | **batch 3 形式**(#4 / #5 / #6)(`src/features/import/pkc2-container-bundle.ts`)| 段③の再帰適用 + 内側 ZIP の Blob 再入。⚠ **実地で 3 点覆った**(下記)|
-| ⑤ | **`folder-export` v1**(#7) | 段④ + 階層復元。`folders[]` → folder entry + `structural` relation。PKC3 は relation 表を直接持つので PKC2 の dispatch 経路 ▲ より素直に書ける |
+| ✅ ⑤ | **`folder-export`**(#7、v1 **と v2**)(`pkc2-folder-export.ts` + `folder-graph.ts`)| 段④ + 階層復元。⚠ **実地で 4 点覆った**(下記)|
 | ⑥ | **`pkc2-entry-bundle`(#8)+ v2** | 最後。残るのは「`entry.json` を entries[] に足す」「assets を base64 として読む」の 2 点だけ。PKC2 に import 経路が無く(round-trip の参照実装なし)、格納規約が違い、実体を 1 件も見ていない ✖ |
 
 ⚠ P6 doc §1 は #8 を「読むのは最も簡単」と書いている ▲。**簡単さと土台性は別**。
@@ -282,6 +282,48 @@ review で一度潰した設計判断を、性能を理由に戻さない)。
   再梱包すると NFD になる。PKC2 の batch filename はノート題名由来なので**日本語
   題名で現実的に踏む** ── 完全一致で断ると「在るファイルを無いと言われる」。
   NFC 副索引で引き直し、当たったら言う。⚠ 畳んでぶつかる 2 件は**曖昧なので拾わない**
+
+### 段⑤ で覆った前提(2026-08-01、PKC2 writer / reader の read-only 実地調査)
+
+**(1) 🔴 writer は循環・自己親・重複 lid・dangling parent を一切防いでいない**
+(`folder-export.ts:114-137` に検査が無い)。PKC2 自身が循環の実在を認めている ──
+`tree.ts` の "F-cycle hotfix" コメント(循環すると sidebar から component ごと消えた)。
+`BULK_MOVE_TO_FOLDER` に自己・循環チェックが無く、folder を自分の子孫へ移せば作れる。
+
+🔴 **PKC3 で循環を作ると filer からフォルダごと消える**。`resolveCanonicalParents` は
+「正準親を持たない entry」を root 直下として出すので、循環上の folder は 1 つも root に
+出ず、配下ごと不可視になる。`tree.ts` 自身が「木の不変量は relation を**書く側**で
+守る ── 読み手は防御のみ」と宣言しているので、**その責務は取込側にある**。
+→ `folder-graph.ts` が正規化する。不変条件は「**循環があっても root が必ず 1 つ以上残る**」。
+
+**(2) `folders[]` に親が先に来る保証は無い**(トポロジカルソートしていない。
+PKC2 のテストが親→子順に見えるのは fixture の並びのせい)── 順序に依存しない。
+
+**(3) `entries[].parent_folder_lid` は `folders[]` に無い lid を指しうる** ── 2 経路:
+親が folder でない(structural は UI から任意の entry 間に張れる)/ 多重親の
+last-write-wins が部分木の外を指す。
+
+**(4) v1 の archetype は `'text'` / `'textlog'` の 2 値だけ** ── manifest に書かれるのは
+実 archetype ではなく**リテラル**だから。3 つ目の分岐で `other_count++` して v2 になる。
+
+### PKC2 から変えた点(段⑤)
+
+| | PKC2 | PKC3 |
+|---|---|---|
+| 壊れた辺が 1 本 | **階層を丸ごと捨てて平坦取込**、warning は 1 件で打ち切り | 壊れた辺**だけ**直して木は保つ。直した箇所は全部見せる(§4-K) |
+| 空フォルダ | 「選択 entry の祖先チェーン」しか作らず**無言で消える** | **全部作る**(§4-M) |
+| `.entry.zip`(v2) | **無言 skip**。件数表示とチェックボックス数が食い違い、理由がどこにも出ない | 名指しで warning + 残りは取り込む(段⑥ で受理予定) |
+| 添字 | preview は manifest 添字・取込は「飛ばして詰めた配列」で、planner が圧縮配列を選択添字で引く ── **選んだ entry が落ち、選ばなかった entry が入る**(v2 限定の実バグ) | `main` と manifest entry を**組で持つ**(`InnerBundle`)── 添字空間が存在しないので起こしようがない |
+
+⚠ **`folders` が無い旧 bundle** は平坦取込に落とすが、**必ず言う**(§4-K)。
+
+### 段⑤ で持ち越した損失(形式の限界。取込側では復元できない)
+
+`folder-export` は「階層 + 本文 + 添付」だけの形式で、**container のスナップショットではない**。
+export 時点で失われているもの: 非 structural relation(categorical / semantic / temporal)/
+revisions / text・textlog の `tags` `color_tag` `display_profile` `created_at` `updated_at`。
+⚠ 皮肉な非対称: **v2 の `.entry.zip` の方が text/textlog より情報量が多い**
+(`entry.json` が Entry verbatim)── 段⑥ の価値はここにある。
 
 ### 🔴 出口の問題(段④ で顕在化、review H-2)
 
