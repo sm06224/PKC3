@@ -134,6 +134,31 @@ describe('書出しの実行部 — 形式ごとの出口', () => {
     expect(a.messages.at(-1)).not.toContain('取り込み直せません');
   });
 
+  it('🔴 md ZIP は**何が落ちるか**を件数で言う(「片道です」だけにしない)', async () => {
+    const { dispatcher } = fakeDispatcher();
+    const withLoss: ArchiveSource = {
+      ...source(),
+      listRelations: async () => [
+        { id: 'r1', from_lid: 'a', to_lid: 'b', kind: 'link', created_at: null, updated_at: null },
+      ],
+      listRevisionLids: async () => ['n1', 'n2'],
+    };
+    const d = deps({ source: withLoss });
+    await exportArchive(dispatcher, d, 'markdown');
+    expect(d.files[0]!.name).toBe('わたしのノート-20260802.md.zip');
+    expect(d.messages.at(-1)).toContain('片道');
+    expect(d.messages.at(-1)).toContain('関連 1');
+    expect(d.messages.at(-1)).toContain('履歴 2 件ぶん');
+  });
+
+  it('落ちるものが無いなら「取り込み直せません」とだけ言う', async () => {
+    const { dispatcher } = fakeDispatcher();
+    const d = deps();
+    await exportArchive(dispatcher, d, 'markdown');
+    expect(d.messages.at(-1)).toContain('取り込み直せません');
+    expect(d.messages.at(-1)).not.toContain('関連');
+  });
+
   it('既定はアーカイブ(呼び出し側が省いても閲覧用にならない)', async () => {
     const { dispatcher } = fakeDispatcher();
     const d = deps();
@@ -166,7 +191,7 @@ describe('書出しの実行部 — 断るべきときに断る', () => {
     const { dispatcher } = fakeDispatcher();
     const listBodies = vi.fn(async () => ({ rows: [], done: true }));
     const empty: ArchiveSource = { ...source({ entries: [] }), listBodies };
-    for (const kind of ['html', 'archive'] as const) {
+    for (const kind of ['html', 'archive', 'markdown'] as const) {
       listBodies.mockClear();
       expect(await exportArchive(dispatcher, deps({ source: empty }), kind)).toBeNull();
       expect(listBodies).not.toHaveBeenCalled();

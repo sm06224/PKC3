@@ -20,7 +20,7 @@ import { formatSize } from '@adapter/ui/render/detail';
 import { bindActions, generateLid, type BinderServices } from '@adapter/ui/actions/binder';
 import { attachFiles } from '@adapter/ui/actions/attach';
 import { importPkc2File } from '@adapter/ui/actions/import-pkc2';
-import { exportArchive } from '@adapter/ui/actions/export-archive';
+import { exportArchive, type ExportKind } from '@adapter/ui/actions/export-archive';
 import { createAssetGate } from '@adapter/ui/actions/asset-gate';
 import { generateAssetKey } from '@adapter/platform/storage/asset-key';
 
@@ -139,7 +139,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 「meta はあるが bytes が無い」を掴んで欠けた書出しができる。
    * 形式が増えても読み出し口は 1 つ(source)で共有する。
    */
-  const runExport = (kind: 'archive' | 'html'): Promise<void> =>
+  const runExport = (kind: ExportKind): Promise<void> =>
     withAssetGate(async () => {
       await exportArchive(
         dispatcher,
@@ -309,6 +309,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // 掃除されると「meta はあるが bytes が無い」を掴んで欠けたアーカイブができる
     exportArchive: () => void runExport('archive'),
     exportHtml: () => void runExport('html'),
+    exportMarkdown: () => void runExport('markdown'),
     purgeOrphanAssets: () =>
       void withAssetGate(async () => {
         try {
