@@ -62,6 +62,13 @@ export interface BinderServices {
   exportMarkdown?(): void;
   /** このノートだけをアーカイブとして書き出す(P6f)。 */
   exportEntry?(lid: string): void;
+  /**
+   * 添付 gate(書出し / 取込 / 整理)が実行中か。
+   * ⚠ **破壊的操作を止めるために要る**(P6f review M-2)── 「書き出す」と「削除」を
+   * 隣に並べた以上、走査中に消せてしまうと **user は書き出したつもりでファイルが
+   * 1 個も落ちていない**状態になる。
+   */
+  busy?(): boolean;
   /** PKC2 ファイルの取込(P6b)。判別・変換・書込は実体側の責務。 */
   importPkc2?(file: File): void;
 }
@@ -139,7 +146,17 @@ const ACTIONS: Record<string, ActionHandler> = {
       title: defaultTitle(dispatcher, archetype),
     });
   },
-  'delete-entry': (dispatcher, target) => {
+  'delete-entry': (dispatcher, target, services) => {
+    // 🔴 書出し / 取込の実行中は消させない(P6f review M-2)。隣に並んだ
+    // 「書き出す」を押した直後にここを押せると、走査の途中で entry が消え、
+    // **書き出したつもりでファイルが落ちていない**が成立する
+    if (services.busy?.()) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '書き出し / 取込が実行中です。完了してから削除してください',
+      });
+      return;
+    }
     // 属性はボタン自身ではなく「entry を表す要素」(行 / カード)から closest で
     // 引く ── ボタン直付けだと selectedLid fallback が別 entry を消す罠になる
     const lid =
@@ -211,8 +228,13 @@ const ACTIONS: Record<string, ActionHandler> = {
   'export-markdown': (_dispatcher, _target, services) => {
     services.exportMarkdown?.();
   },
-  'export-entry': (dispatcher, _target, services) => {
-    const lid = dispatcher.getState().selectedLid;
+  'export-entry': (dispatcher, target, services) => {
+    // ⚠ 解決規則は `delete-entry` と**同じ**にする(review M-3)── 隣に並べる
+    // ボタンなので、片方だけ `selectedLid` 固定だと filer / sidebar の行に
+    // 並べた瞬間に「A を書き出して B を削除する」が成立する
+    const lid =
+      target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ??
+      dispatcher.getState().selectedLid;
     if (lid) services.exportEntry?.(lid);
   },
   'purge-orphan-assets': (_dispatcher, _target, services) => {

@@ -12,17 +12,8 @@
  * 読み戻し(`restoreArchive`)も既存のまま使う ── 形式が増えないので、
  * 「1 ノート用の書出しだけ壊れている」が起きようがない。
  */
+import { scanAssetRefsInto } from '../asset/asset-ref-scan';
 import type { ArchiveSource } from './pkc3-archive';
-
-/**
- * 添付 key らしき token。⚠ **raw 走査**でよい(`asset-gc.ts` と同じ規律)──
- * 誤差は false-keep 側にしか出ない(無関係な散文が key を偶然含む)。
- *
- * 🔑 **逆向きパッチの中も走査できる**。パッチは「古い版の行」を*挿入する*形で
- * 持つので、途中の版だけが参照していた添付も文字列として現れる。
- * materialize しなくても取りこぼさない。
- */
-const KEYISH = /[A-Za-z0-9_.-]*ast-[A-Za-z0-9_.-]+/g;
 
 export interface SingleEntryResult {
   source: ArchiveSource;
@@ -44,10 +35,11 @@ export async function singleEntrySource(
   const meta = metas.find((m) => m.lid === lid);
   if (!meta) throw new Error('書き出す entry が見つかりません');
 
-  // 本文は 1 件ぶんだけ引く(全 entry を舐めない)
-  let body: string | null = null;
+  // 本文は 1 件ぶんだけ引く。⚠ `getBody` があれば**必ずそれを使う** ──
+  // `listBodies` 走査は対象の何百倍もの本文を worker 境界へ流す(review M-1)
+  let body: string | null = (await base.getBody?.(lid)) ?? null;
   let after: { entryOrder: number; lid: string } | undefined;
-  for (;;) {
+  while (body === null) {
     const { rows, done, next } = await base.listBodies(after, 4 * 1024 * 1024);
     const hit = rows.find((r) => r.lid === lid);
     if (hit) {
@@ -70,14 +62,23 @@ export async function singleEntrySource(
     ? await base.getRevisionChain(lid)
     : [];
 
-  // ── この entry が**かつて 1 度でも**参照した添付を集める
+  // ── この entry が**かつて 1 度でも**参照した添付を集める。
+  // 🔴 判定は `features/asset/asset-ref-scan.ts` が正本(GC と**同じ規則**)。
+  // 「key らしき token を抽出して exact 一致」型に書いていたときは、
+  // `asset:ast-key.`(文末の句読点)や `asset:ast\-key`(escape 済み)を
+  // **無警告で落として**いた ── GC は keep する添付なのに(review H-1)。
+  //
+  // 🔑 **逆向きパッチの中も走査できる**。パッチは「古い版の行」を*挿入する*形で
+  // 持つので、途中の版だけが参照していた添付も文字列として現れる。
+  const allAssets = await base.listAssetMetas();
+  const remaining = new Set(allAssets.map((a) => a.key).filter((k) => k !== ''));
   const used = new Set<string>();
-  const scan = (text: string): void => {
-    KEYISH.lastIndex = 0;
-    for (let m = KEYISH.exec(text); m; m = KEYISH.exec(text)) used.add(m[0]);
-  };
-  scan(body);
-  for (const r of chain) scan(r.snapshot);
+  const found = (k: string): void => void used.add(k);
+  let more = scanAssetRefsInto(body, remaining, found);
+  for (const r of chain) {
+    if (!more) break;
+    more = scanAssetRefsInto(r.snapshot, remaining, found);
+  }
 
   // ── 関連は**落ちる**(相手の entry がこのアーカイブに居ない)。黙って落とさない
   const relations = await base.listRelations();
@@ -86,7 +87,6 @@ export async function singleEntrySource(
     warnings.push(`このノートに繋がる関連 ${touching.length} 件は含まれません(相手のノートが入らないため)`);
   }
 
-  const allAssets = await base.listAssetMetas();
   const assets = allAssets.filter((a) => used.has(a.key));
 
   return {

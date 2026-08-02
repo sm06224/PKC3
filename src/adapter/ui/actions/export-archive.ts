@@ -64,6 +64,14 @@ export async function exportEntry(
   deps: ExportDeps,
   lid: string,
 ): Promise<number | null> {
+  // ⚠ **読みの前**に断る(review M-2)。`singleEntrySource` は store を舐めるので、
+  // ガードが後ろにあると「30MB 読んでから編集中ですと言う」になる。
+  // さらに、読みの途中で編集が確定すると body と鎖の基準 tip が別時刻になり、
+  // 「読み → 編集 → 保存(ready へ戻る)→ ガード通過」で内部矛盾したアーカイブができる
+  if (dispatcher.getState().phase !== 'ready') {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから書き出してください' });
+    return null;
+  }
   try {
     const { source, warnings } = await singleEntrySource(deps.source, lid);
     const n = await exportArchive(dispatcher, { ...deps, source }, 'archive', warnings);

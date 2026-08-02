@@ -11,6 +11,7 @@ import sqlite3InitModule, { type Database } from '@sqlite.org/sqlite-wasm';
 import { DB_SCHEMA_VERSION, SCHEMA_DDL, REVISION_ADDED_COLUMNS } from './schema';
 import type { EntryUpsert } from './schema';
 import { contentHash64Hex } from './content-hash';
+import { scanAssetRefsInto } from '@features/asset/asset-ref-scan';
 import {
   applyLinePatch,
   diffLines,
@@ -125,20 +126,6 @@ function applySchema(database: Database): void {
 function need(): Database {
   if (!db) throw new Error('storage worker not initialized');
   return db;
-}
-
-/**
- * scanAssetRefs 用の限定 unescape(markdown-it の unescapeAll 相当のうち、
- * asset key の字母に効く 2 形だけ): backslash escape(ASCII 記号)と数値実体。
- * 範囲外 code point は空に落とす(照合を広げないだけで安全)。
- */
-function unescapeForScan(s: string): string {
-  const fromCode = (n: number): string =>
-    Number.isFinite(n) && n >= 0 && n <= 0x10ffff ? String.fromCodePoint(n) : '';
-  return s
-    .replace(/\\([!-/:-@[-`{-~])/g, '$1')
-    .replace(/&#(\d{1,7});/g, (_m, d: string) => fromCode(Number(d)))
-    .replace(/&#[xX]([0-9a-fA-F]{1,6});/g, (_m, h: string) => fromCode(parseInt(h, 16)));
 }
 
 /**
@@ -1048,20 +1035,9 @@ const handlers: Handlers = {
       // (`asset:ast\-k` → snapshot 上は `ast\\-k`)。1 パスでは `\-k` までしか
       // 戻らず、古い版にしか無い escape 済み参照を GC が消してしまう。
       // 2 パスは keep 側にしか広がらないので安全
-      const norm =
-        body.includes('\\') || body.includes('&#')
-          ? unescapeForScan(unescapeForScan(body))
-          : null;
-      for (const key of remaining) {
-        if (
-          key !== '' &&
-          (body.includes(key) || (norm !== null && norm.includes(key)))
-        ) {
-          referenced.push(key);
-          remaining.delete(key); // 反復中の自要素削除は Set 仕様で安全
-        }
-      }
-      if (remaining.size === 0) return false;
+      // 🔴 判定は **features/asset/asset-ref-scan.ts が正本**(P6f review H-1)──
+      // 同じ規則を別々に書くと、片方だけが「生きた参照」を落とす
+      if (!scanAssetRefsInto(body, remaining, (k) => referenced.push(k))) return false;
     };
     if (remaining.size > 0) {
       need().exec({

@@ -1,47 +1,43 @@
-import { APP_ID, APP_VERSION, BUILD_KIND } from "@runtime/release-meta";
-import { Dispatcher } from "@adapter/state/dispatcher";
-import { connectStoreEffects } from "@adapter/state/store-effects";
-import { StoreClient } from "@adapter/platform/storage/store-client";
+import { APP_ID, APP_VERSION, BUILD_KIND } from '@runtime/release-meta';
+import { Dispatcher } from '@adapter/state/dispatcher';
+import { connectStoreEffects } from '@adapter/state/store-effects';
+import { StoreClient } from '@adapter/platform/storage/store-client';
 import {
   createStorePort,
   metaFromRow,
   relationFromRow,
   REVISION_KEEP_LATEST,
-} from "@adapter/platform/storage/store-port";
-import { acquireWriterLease } from "@adapter/platform/storage/writer-lease";
-import type { InitResult } from "@adapter/platform/storage/protocol";
-import { installHtmlSandboxResizer } from "@features/markdown/html-sandbox";
-import { AssetBlobStore } from "@adapter/platform/storage/asset-blob-store";
-import { runExplicitPurge } from "@adapter/platform/storage/asset-gc";
-import { buildShell } from "@adapter/ui/render/shell";
-import { showNotices, clearNotices } from "@adapter/ui/render/notices";
-import { SidebarRenderer } from "@adapter/ui/render/sidebar";
-import { CenterRouter } from "@adapter/ui/render/center";
-import { formatSize } from "@adapter/ui/render/detail";
-import {
-  bindActions,
-  generateLid,
-  type BinderServices,
-} from "@adapter/ui/actions/binder";
-import { attachFiles } from "@adapter/ui/actions/attach";
-import { importPkc2File } from "@adapter/ui/actions/import-pkc2";
+} from '@adapter/platform/storage/store-port';
+import { acquireWriterLease } from '@adapter/platform/storage/writer-lease';
+import type { InitResult } from '@adapter/platform/storage/protocol';
+import { installHtmlSandboxResizer } from '@features/markdown/html-sandbox';
+import { AssetBlobStore } from '@adapter/platform/storage/asset-blob-store';
+import { runExplicitPurge } from '@adapter/platform/storage/asset-gc';
+import { buildShell } from '@adapter/ui/render/shell';
+import { showNotices, clearNotices } from '@adapter/ui/render/notices';
+import { SidebarRenderer } from '@adapter/ui/render/sidebar';
+import { CenterRouter } from '@adapter/ui/render/center';
+import { formatSize } from '@adapter/ui/render/detail';
+import { bindActions, generateLid, type BinderServices } from '@adapter/ui/actions/binder';
+import { attachFiles } from '@adapter/ui/actions/attach';
+import { importPkc2File } from '@adapter/ui/actions/import-pkc2';
 import {
   exportArchive,
   exportEntry,
   type ExportDeps,
   type ExportKind,
-} from "@adapter/ui/actions/export-archive";
-import { createAssetGate } from "@adapter/ui/actions/asset-gate";
-import { generateAssetKey } from "@adapter/platform/storage/asset-key";
+} from '@adapter/ui/actions/export-archive';
+import { createAssetGate } from '@adapter/ui/actions/asset-gate';
+import { generateAssetKey } from '@adapter/platform/storage/asset-key';
 
-const DB_NAME = "pkc3";
-const DEFAULT_CID = "default";
+const DB_NAME = 'pkc3';
+const DEFAULT_CID = 'default';
 /** container の題名(書出しのファイル名にも使う ── 1 箇所で決める)。 */
-const CONTAINER_TITLE = "PKC3";
+const CONTAINER_TITLE = 'PKC3';
 
 export interface AppHandle {
   dispatcher: Dispatcher;
-  storageVfs: InitResult["vfs"];
+  storageVfs: InitResult['vfs'];
 }
 
 /**
@@ -55,19 +51,19 @@ async function initStorage(promoted: boolean): Promise<{
   init: InitResult;
 }> {
   let client = new StoreClient();
-  let init = await client.request({ op: "init", dbName: DB_NAME });
-  if (promoted && init.vfs === "memory") {
+  let init = await client.request({ op: 'init', dbName: DB_NAME });
+  if (promoted && init.vfs === 'memory') {
     for (const delayMs of [200, 500, 1000]) {
       client.terminate();
       await new Promise((r) => setTimeout(r, delayMs));
       client = new StoreClient();
-      init = await client.request({ op: "init", dbName: DB_NAME });
-      if (init.vfs !== "memory") break;
+      init = await client.request({ op: 'init', dbName: DB_NAME });
+      if (init.vfs !== 'memory') break;
     }
-    if (init.vfs === "memory") {
+    if (init.vfs === 'memory') {
       client.terminate();
       throw new Error(
-        `ストレージを確保できませんでした(別タブが保持中の可能性): ${init.fallbackReason ?? "unknown"}`,
+        `ストレージを確保できませんでした(別タブが保持中の可能性): ${init.fallbackReason ?? 'unknown'}`,
       );
     }
   }
@@ -79,26 +75,21 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const lease = acquireWriterLease();
   const promoted = !(await lease.immediate);
   if (promoted) {
-    root.textContent =
-      "別のタブで開いています。そのタブを閉じると、ここで続きが開きます…";
+    root.textContent = '別のタブで開いています。そのタブを閉じると、ここで続きが開きます…';
     await lease.whenHeld;
   }
 
   const { client, init } = await initStorage(promoted);
-  await client.request({
-    op: "openContainer",
-    cid: DEFAULT_CID,
-    title: CONTAINER_TITLE,
-  });
+  await client.request({ op: 'openContainer', cid: DEFAULT_CID, title: CONTAINER_TITLE });
   // boot と再読込は**同じ経路**で state を作る(取込後に別の作り方をしない ──
   // 分岐が増えると「取込直後だけ壊れる」型の差分が入る)
   const loadSnapshot = async () => ({
-    metas: (
-      await client.request({ op: "listEntryMetas", cid: DEFAULT_CID })
-    ).map(metaFromRow),
-    relations: (
-      await client.request({ op: "listRelations", cid: DEFAULT_CID })
-    ).map(relationFromRow),
+    metas: (await client.request({ op: 'listEntryMetas', cid: DEFAULT_CID })).map(
+      metaFromRow,
+    ),
+    relations: (await client.request({ op: 'listRelations', cid: DEFAULT_CID })).map(
+      relationFromRow,
+    ),
   });
   const { metas, relations } = await loadSnapshot();
 
@@ -115,14 +106,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   let markedView: string | null = null;
   const markView = (view: string) => {
     if (view === markedView) return;
-    for (const btn of regions.topbar.querySelectorAll("[data-pkc-view]")) {
-      if (btn.getAttribute("data-pkc-view") === view)
-        btn.setAttribute("data-pkc-active", "");
-      else btn.removeAttribute("data-pkc-active");
+    for (const btn of regions.topbar.querySelectorAll('[data-pkc-view]')) {
+      if (btn.getAttribute('data-pkc-view') === view)
+        btn.setAttribute('data-pkc-active', '');
+      else btn.removeAttribute('data-pkc-active');
     }
     markedView = view;
   };
-  markView("detail");
+  markView('detail');
   dispatcher.onState((state) => {
     sidebar.render(state);
     center.render(state);
@@ -131,7 +122,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   // status: provenance + エラーの可視化(review B-1 ── 無言の操作拒否を作らない)
   const statusBase =
     `${APP_ID} v${APP_VERSION} (${BUILD_KIND}) — ${init.vfs}` +
-    (init.fallbackReason ? ` ⚠ ${init.fallbackReason}` : "");
+    (init.fallbackReason ? ` ⚠ ${init.fallbackReason}` : '');
   // textContent の setter は同一文字列でも子ノードを全置換する ── 打鍵ごとの
   // state 変化で無駄な DOM 変異を起こさないよう、変わったときだけ書く
   let statusShown = statusBase;
@@ -144,9 +135,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   // エラー表示は state 駆動のみ(P3-6b: BODY_LOAD_FAILED も state.error に
   // 統一 ── 表示寿命は「次の成功 / 選択まで」で、event の一瞬表示問題は消滅)
   dispatcher.onState((state) => {
-    showStatus(
-      state.error ? `${statusBase} ⚠ エラー: ${state.error}` : statusBase,
-    );
+    showStatus(state.error ? `${statusBase} ⚠ エラー: ${state.error}` : statusBase);
   });
 
   // 🔒 attach / import と purge の排他 gate(review F1)。実体と pin は asset-gate.ts
@@ -165,33 +154,30 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           // ファイル名と DB の題名が食い違う ── review L-2)
           title: CONTAINER_TITLE,
           listEntryMetas: () =>
-            client.request({ op: "listEntryMetas", cid: DEFAULT_CID }),
+            client.request({ op: 'listEntryMetas', cid: DEFAULT_CID }),
+          // ⚠ 1 件だけの読み口(P6f)── 無いと 1 ノート書出しが全 body を舐める
+          getBody: async (lid) =>
+            (await client.request({ op: 'getBody', cid: DEFAULT_CID, lid })) ?? null,
           listBodies: (after, maxBytes) =>
             client.request({
-              op: "listBodies",
+              op: 'listBodies',
               cid: DEFAULT_CID,
               maxBytes,
               ...(after ? { after } : {}),
             }),
-          listRelations: () =>
-            client.request({ op: "listRelations", cid: DEFAULT_CID }),
-          listAssetMetas: () =>
-            client.request({ op: "listAssetMetas", cid: DEFAULT_CID }),
+          listRelations: () => client.request({ op: 'listRelations', cid: DEFAULT_CID }),
+          listAssetMetas: () => client.request({ op: 'listAssetMetas', cid: DEFAULT_CID }),
           getAssetBlob: (key) => blobs.get(DEFAULT_CID, key),
           listRevisionLids: () =>
-            client.request({ op: "listRevisionLids", cid: DEFAULT_CID }),
+            client.request({ op: 'listRevisionLids', cid: DEFAULT_CID }),
           // ⚠ 鎖は**保存形のまま**取る(P6e)── `getRevision` で版ごとに
           // 全文へ復元すると、アーカイブが N×M に膨らみ kind が中身と食い違う
           getRevisionChain: (entryLid) =>
-            client.request({
-              op: "exportRevisionChain",
-              cid: DEFAULT_CID,
-              entryLid,
-            }),
+            client.request({ op: 'exportRevisionChain', cid: DEFAULT_CID, entryLid }),
         },
         download: (name, blob) => {
           const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
+          const a = document.createElement('a');
           a.href = url;
           a.download = name;
           document.body.append(a);
@@ -204,13 +190,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         // ⚠ **注意の中身**を出す導線(review M1 で一度落ちた)。無いと user が
         // 見るのは「⚠ 注意 1 件」だけで、**どの添付が欠けたか**が消える ──
         // バックアップで一番知りたい情報がそこにある
-        report: (notes) =>
-          showNotices(regions.notices, "書出し時の注意", notes),
+        report: (notes) => showNotices(regions.notices, '書出し時の注意', notes),
       };
       // 1 ノートだけの書出しも**同じ実行部・同じ形式**を通る(P6f)──
       // 別経路にすると「1 件書出しだけ壊れている」が起きる
-      if (typeof kind === "object")
-        await exportEntry(dispatcher, deps, kind.entryLid);
+      if (typeof kind === 'object') await exportEntry(dispatcher, deps, kind.entryLid);
       else await exportArchive(dispatcher, deps, kind);
     });
 
@@ -223,13 +207,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             putBlob: (key, blob) => blobs.put(DEFAULT_CID, key, blob),
             putMeta: async (m) => {
               await client.request({
-                op: "putAssetMeta",
+                op: 'putAssetMeta',
                 cid: DEFAULT_CID,
                 meta: { key: m.key, mime: m.mime, size: m.size, hash: m.hash },
               });
             },
-            listMetas: () =>
-              client.request({ op: "listAssetMetas", cid: DEFAULT_CID }),
+            listMetas: () => client.request({ op: 'listAssetMetas', cid: DEFAULT_CID }),
             estimate: navigator.storage?.estimate
               ? () => navigator.storage.estimate()
               : undefined,
@@ -242,12 +225,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         const lent = await blobs.lendObjectUrl(DEFAULT_CID, assetKey);
         if (!lent) {
           dispatcher.dispatch({
-            type: "OP_FAILED",
+            type: 'OP_FAILED',
             error: `asset が見つかりません: ${name}`,
           });
           return;
         }
-        const a = document.createElement("a");
+        const a = document.createElement('a');
         a.href = lent.url;
         a.download = name;
         document.body.append(a);
@@ -258,7 +241,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       } catch (e) {
         // IDB 障害等を unhandled rejection にしない(可視で終える)
         dispatcher.dispatch({
-          type: "OP_FAILED",
+          type: 'OP_FAILED',
           error: `ダウンロードに失敗しました(${name}): ${String(e)}`,
         });
       }
@@ -276,10 +259,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             existingLids: async () =>
               new Set([
                 ...dispatcher.getState().entryMetas.keys(),
-                ...(await client.request({
-                  op: "listRevisionLids",
-                  cid: DEFAULT_CID,
-                })),
+                ...(await client.request({ op: 'listRevisionLids', cid: DEFAULT_CID })),
               ]),
             existingRelationIds: () =>
               new Set(dispatcher.getState().relations.map((r) => r.id)),
@@ -294,31 +274,23 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             genAssetKey: generateAssetKey,
             genRelationId: () => `rel-${crypto.randomUUID()}`,
             bulkUpsertEntries: async (entries) => {
-              await client.request({
-                op: "bulkUpsertEntries",
-                cid: DEFAULT_CID,
-                entries,
-              });
+              await client.request({ op: 'bulkUpsertEntries', cid: DEFAULT_CID, entries });
             },
             bulkUpsertRelations: async (relations) => {
               await client.request({
-                op: "bulkUpsertRelations",
+                op: 'bulkUpsertRelations',
                 cid: DEFAULT_CID,
                 relations,
               });
             },
             importRevisionChains: (chains) =>
-              client.request({
-                op: "importRevisionChains",
-                cid: DEFAULT_CID,
-                chains,
-              }),
+              client.request({ op: 'importRevisionChains', cid: DEFAULT_CID, chains }),
             // ⚠ `keepLatest` を**明示で渡す**(review L-2)── 省くと worker の
             // 既定値が使われ、アプリ側の設定と偶然一致しているだけになる。
             // 片方を変えた瞬間に自分のバックアップが黙って削れる
             restoreRevisionChains: (chains) =>
               client.request({
-                op: "restoreRevisionChains",
+                op: 'restoreRevisionChains',
                 cid: DEFAULT_CID,
                 chains,
                 keepLatest: REVISION_KEEP_LATEST,
@@ -326,39 +298,28 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             // ⚠ **bytes 側の台帳を見る**(review H-1)── meta 行の有無で判定すると、
             // GC が deleteBlob → deleteMeta の途中で失敗した状態(設計上の想定内)で
             // put を省いてしまい、参照だけが書かれる
-            listStoredBlobKeys: async () =>
-              new Set(await blobs.listKeys(DEFAULT_CID)),
+            listStoredBlobKeys: async () => new Set(await blobs.listKeys(DEFAULT_CID)),
             putBlob: (key, blob) => blobs.put(DEFAULT_CID, key, blob),
             putAssetMeta: async (m) => {
-              await client.request({
-                op: "putAssetMeta",
-                cid: DEFAULT_CID,
-                meta: m,
-              });
+              await client.request({ op: 'putAssetMeta', cid: DEFAULT_CID, meta: m });
             },
             reload: async () => {
               const snap = await loadSnapshot();
               // ⚠ 取込の門は開始時の 1 回だけ ── 長い await の間に user は編集を
               // 始められる。SYS_BOOTED は openBody / selectedLid をリセットするので、
               // そのまま流すと打ちかけの本文が無警告で消える(review H-4、実証済み)
-              if (dispatcher.getState().phase !== "ready") {
+              if (dispatcher.getState().phase !== 'ready') {
                 dispatcher.dispatch({
-                  type: "OP_FAILED",
-                  error:
-                    "取込は完了しました。編集を終了すると一覧に反映されます",
+                  type: 'OP_FAILED',
+                  error: '取込は完了しました。編集を終了すると一覧に反映されます',
                 });
                 return;
               }
-              dispatcher.dispatch({
-                type: "SYS_BOOTED",
-                cid: DEFAULT_CID,
-                ...snap,
-              });
+              dispatcher.dispatch({ type: 'SYS_BOOTED', cid: DEFAULT_CID, ...snap });
             },
             notify: (message) => showStatus(`${statusBase} — ${message}`),
             // 注意は**全件**を専用面へ(1 行の status では 1 件目しか届かない)
-            report: (notes) =>
-              showNotices(regions.notices, "取込時の注意", notes),
+            report: (notes) => showNotices(regions.notices, '取込時の注意', notes),
           },
           file,
         );
@@ -366,44 +327,42 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     dismissNotices: () => clearNotices(regions.notices),
     // 📤 バックアップ書出し(P6d)。⚠ **asset gate の内側** ── 書出し中に添付が
     // 掃除されると「meta はあるが bytes が無い」を掴んで欠けたアーカイブができる
-    exportArchive: () => void runExport("archive"),
-    exportHtml: () => void runExport("html"),
-    exportMarkdown: () => void runExport("markdown"),
+    exportArchive: () => void runExport('archive'),
+    exportHtml: () => void runExport('html'),
+    exportMarkdown: () => void runExport('markdown'),
     exportEntry: (lid) => void runExport({ entryLid: lid }),
+    // 破壊的操作(削除)を止めるための観測点(P6f review M-2)
+    busy: () => withAssetGate.busy,
     purgeOrphanAssets: () =>
       void withAssetGate(async () => {
         try {
           // editing 中は draft が disk と違う参照を持ちうる ── ready 限定で可視ブロック
-          if (dispatcher.getState().phase !== "ready") {
+          if (dispatcher.getState().phase !== 'ready') {
             dispatcher.dispatch({
-              type: "OP_FAILED",
-              error: "編集を終了してから整理してください",
+              type: 'OP_FAILED',
+              error: '編集を終了してから整理してください',
             });
             return;
           }
           await runExplicitPurge({
             ports: {
               listMetas: () =>
-                client.request({ op: "listAssetMetas", cid: DEFAULT_CID }),
+                client.request({ op: 'listAssetMetas', cid: DEFAULT_CID }),
               listBlobKeys: () => blobs.listKeys(DEFAULT_CID),
               scanReferenced: async (candidates: string[]) =>
                 (
                   await client.request({
-                    op: "scanAssetRefs",
+                    op: 'scanAssetRefs',
                     cid: DEFAULT_CID,
                     candidates,
                   })
                 ).referenced,
               deleteBlob: (key: string) => blobs.delete(DEFAULT_CID, key),
               deleteMeta: async (key: string) => {
-                await client.request({
-                  op: "deleteAssetMeta",
-                  cid: DEFAULT_CID,
-                  key,
-                });
+                await client.request({ op: 'deleteAssetMeta', cid: DEFAULT_CID, key });
               },
             },
-            isReady: () => dispatcher.getState().phase === "ready",
+            isReady: () => dispatcher.getState().phase === 'ready',
             // 一括削除なので fail closed(confirm が無い環境では実行しない ──
             // 単発の delete-entry が ?? true なのとは桁が違う)
             confirm: (msg) => window.confirm?.(msg) ?? false,
@@ -412,7 +371,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           });
         } catch (e) {
           dispatcher.dispatch({
-            type: "OP_FAILED",
+            type: 'OP_FAILED',
             error: `添付の整理に失敗しました: ${String(e)}`,
           });
         }
@@ -427,7 +386,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   connectStoreEffects(dispatcher, createStorePort(client, DEFAULT_CID));
 
   dispatcher.dispatch({
-    type: "SYS_BOOTED",
+    type: 'SYS_BOOTED',
     cid: DEFAULT_CID,
     metas,
     relations, // 常駐(§6: 肥大が数字で出たら SQL query 化へ移す)
@@ -442,7 +401,7 @@ function bootstrap(): void {
     .then((app) => {
       // boot 完了の正本契約(P3-8): smoke / probe は DOM 属性で待つ。
       // PKC2 の教訓 ── 「#root 存在待ち」は HTML load 段階で通過して flake 化する
-      root.setAttribute("data-pkc-boot", "ready");
+      root.setAttribute('data-pkc-boot', 'ready');
       if (import.meta.env.DEV) {
         // probe / 手元検証用の導線(DEV のみ)
         (window as unknown as Record<string, unknown>).__APP__ = app;
@@ -451,14 +410,14 @@ function bootstrap(): void {
     .catch((e: unknown) => {
       // boot 失敗を白画面にしない(review A-1)。とくに「未来ビルドの DB を
       // 明示 reject」(schema-migration-policy)はユーザーに見えなければ意味がない
-      root.setAttribute("data-pkc-boot", "error");
+      root.setAttribute('data-pkc-boot', 'error');
       const message = e instanceof Error ? e.message : String(e);
       root.textContent = `起動に失敗しました: ${message}`;
     });
 
-  if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  if (import.meta.env.PROD && 'serviceWorker' in navigator) {
     // SW 不成立(file:// の可搬 HTML 等)でもアプリは動く
-    navigator.serviceWorker.register("./sw.js").catch(() => {});
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
   }
 }
 

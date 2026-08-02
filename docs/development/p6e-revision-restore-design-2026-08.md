@@ -180,7 +180,11 @@ fake の `getRevision` が保存形をそのまま返しており、**stub が�
 ### そのほか残る限界
 - **書出し中に編集されるとアーカイブが内部矛盾しうる**(entry の body と鎖の基準 tip が
   別時刻になる)。v1 は全文だったので影響しなかった ── 鎖のまま出したことで生まれた
-  依存。`contentHash` があるので**復元時に検出はできる**(黙って壊れはしない)
+  依存。`contentHash` で**復元時に検出できる**。
+  ⚠ 当初 `ArchiveRevision.contentHash` を optional にしていたため、
+  **writer が代入を落としても tsc が黙り、全アーカイブで検査が無効化されていた**
+  (P6f review H-2)。ここに「検出できる」と書いた時点では事実ではなかった ──
+  必須にして tsc が止めるようにし、実 sqlite の hash が届くことを test で pin した
 - **アーカイブ内で lid が重複すると、2 件目の履歴が 1 件目の鎖にマージされる**
   (`lidMap` は最初の出現のみ)。writer は重複を作らないので手組みアーカイブ限定
 - **`ArchiveRevision.id` は v2 から `<lid>#<revOrder>` の合成値**(実 id は復元時に

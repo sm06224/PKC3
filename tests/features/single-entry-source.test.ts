@@ -13,6 +13,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { singleEntrySource } from '../../src/features/export/single-entry-source';
+import { scanAssetRefsInto } from '../../src/features/asset/asset-ref-scan';
 import {
   writeArchive,
   readArchive,
@@ -157,6 +158,70 @@ describe('1 ノートの書出し — そのノートが丸ごと入る', () => 
     expect([...got.assetSources.keys()]).toEqual(['ast-old']);
   });
 
+  /**
+   * 🔴 **GC が keep する添付は、1 ノート書出しにも必ず入る**。
+   *
+   * この parity が無かったので、判定を「key らしき token の exact 一致」に
+   * 書いたときに**生きた参照を無警告で落とした**(review H-1)。
+   * user はそれを見て安心してノートを消す ── 導線としては最悪の壊れ方。
+   * 規則が 1 つであることを、**規則そのもの**に対して assert する。
+   */
+  it.each([
+    ['素の参照', '![図](asset:ast-aaa)'],
+    ['文末の句読点', '詳しくは asset:ast-aaa。'],
+    ['直後が英数字で終わる形', '`asset:ast-aaa` を見よ'],
+    ['backslash escape', '![図](asset:ast\\-aaa)'],
+    ['数値実体', '![図](asset:ast&#45;aaa)'],
+    ['frontmatter の asset_key', '---\nattachment.asset_key: ast-aaa\n---\n'],
+    ['extra の JSON に埋もれた参照', '---\nattachment.extra: {"icon":"ast-aaa"}\n---\n'],
+  ])('🔴 GC が keep する形は全部入る(%s)', async (_label, body) => {
+    const key = 'ast-aaa';
+    // ① GC の規則(正本)が keep するか
+    const remaining = new Set([key]);
+    const kept: string[] = [];
+    scanAssetRefsInto(body, remaining, (k) => kept.push(k));
+    expect(kept).toEqual([key]); // 前提: これは「生きた参照」である
+
+    // ② 1 ノート書出しも同じものを入れるか
+    const { source: one } = await singleEntrySource(
+      source({
+        entries: [{ lid: 'n1', body }],
+        assets: [{ key, mime: 'image/png', bytes: enc.encode('PNG') }],
+      }),
+      'n1',
+    );
+    const got = await readArchive((await writeArchive(one, NOW)).blob);
+    expect([...got.assetSources.keys()]).toEqual([key]);
+  });
+
+  it('🔴 履歴のパッチにだけ現れる escape 済み参照も拾う(JSON で二重化する)', async () => {
+    // patch の snapshot は JSON テキストなので backslash が二重化する ──
+    // unescape を 1 パスにすると、古い版にしか無い参照を落とす
+    const key = 'ast-bbb';
+    const { source: one } = await singleEntrySource(
+      source({
+        entries: [{ lid: 'n1', body: 'いまは画像なし' }],
+        chains: {
+          n1: [
+            { revOrder: 1, kind: 'patch', snapshot: JSON.stringify({ v: 1, ops: [['![](asset:ast\\-bbb)\n']] }) },
+          ],
+        },
+        assets: [{ key, mime: 'image/png', bytes: enc.encode('OLD') }],
+      }),
+      'n1',
+    );
+    const got = await readArchive((await writeArchive(one, NOW)).blob);
+    expect([...got.assetSources.keys()]).toEqual([key]);
+  });
+
+  it('meta も 1 件だけ(全 entry の一覧を流さない)', async () => {
+    const { source: one } = await singleEntrySource(
+      source({ entries: [{ lid: 'n1', body: 'a' }, { lid: 'n2', body: 'b' }] }),
+      'n1',
+    );
+    expect(await one.listEntryMetas()).toHaveLength(1);
+  });
+
   it('題名がファイル名の元になる(コンテナ名ではなく)', async () => {
     const { source: one } = await singleEntrySource(
       source({ entries: [{ lid: 'n1', title: '打ち合わせメモ', body: 'x' }] }),
@@ -180,6 +245,34 @@ describe('1 ノートの書出し — そのノートが丸ごと入る', () => 
     );
     const got = await readArchive((await writeArchive(one, NOW)).blob);
     expect(got.revisions).toEqual([]);
+  });
+
+  it('🔴 `getBody` があれば `listBodies` を舐めない(1 件のために全部読まない)', async () => {
+    // 実測: 300 件 × 100KB の container で、対象の **300 倍**の本文が worker 境界を
+    // 越えていた(review M-1)。「1 ノートだけ」の操作としては論外
+    let listCalls = 0;
+    const base = source({ entries: [{ lid: 'n1', body: 'x' }, { lid: 'n2', body: 'y' }] });
+    const withGetBody: ArchiveSource = {
+      ...base,
+      getBody: async (lid) => (lid === 'n2' ? 'y' : null),
+      listBodies: async (...args) => {
+        listCalls++;
+        return base.listBodies(...args);
+      },
+    };
+    const { source: one } = await singleEntrySource(withGetBody, 'n2');
+    expect(listCalls).toBe(0);
+    const got = await readArchive((await writeArchive(one, NOW)).blob);
+    expect(got.entries[0]!.body).toBe('y');
+  });
+
+  it('`getBody` が無い source でも動く(走査へ落ちる)', async () => {
+    const { source: one } = await singleEntrySource(
+      source({ entries: [{ lid: 'n1', body: 'a' }, { lid: 'n2', body: 'b' }] }),
+      'n2',
+    );
+    const got = await readArchive((await writeArchive(one, NOW)).blob);
+    expect(got.entries[0]!.body).toBe('b');
   });
 
   it('本文がバッチに割れていても見つける', async () => {
