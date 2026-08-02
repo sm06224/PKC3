@@ -43,8 +43,10 @@ describe('ビルド設定 — product に map を載せない', () => {
   });
 
   it('dev では sourcemap を出す(調査手段を失わない)', async () => {
-    // ⚠ `/dev/` は product と**同じ commit・同じコード**で map つき ──
-    // ここが false になると本番の調査手段が丸ごと消える
+    // ⚠ `/dev/` は product と**同じ commit**を map つきで焼いたもの ──
+    // ここが false になると本番の調査手段が丸ごと消える。
+    // ⚠ 「同じコード」ではない(`BUILD_KIND` の刻印で entry chunk が変わる)ので、
+    // product の trace を dev の map で読み替えることはできない ── 再現は dev 版 URL で
     expect((await loadConfig('dev')).build?.sourcemap).toBe(true);
   });
 

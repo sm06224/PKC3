@@ -30,8 +30,15 @@ const DIST = fileURLToPath(new URL('../dist', import.meta.url));
  */
 const SHIPPED_CAP_KB = 2400;
 
+/**
+ * 配る量の下限。KB。⚠ **cap だけでは片側しか見ていない** ── entry chunk を
+ * 0 バイトにしても「配る量が減った」だけで通っていた(レビュー 2 巡目 M-1)。
+ * 取り違え・chunk 欠落は**縮む方向**にも起きる。実測 1610.9 KB に対する床。
+ */
+const SHIPPED_FLOOR_KB = 1200;
+
 /** 中身を読む対象(テキストの生成物だけ。wasm は読まない)。 */
-const TEXTUAL = /\.(?:js|css|html|webmanifest|json)$/;
+const TEXTUAL = /\.(?:js|mjs|cjs|css|html|webmanifest|json)$/;
 
 function walk(dir) {
   const out = [];
@@ -72,7 +79,13 @@ for (const f of files) {
   }
 }
 
-const { lines, errors } = inspectDist({ kind, capKb: SHIPPED_CAP_KB, files, text });
+const { lines, errors } = inspectDist({
+  kind,
+  capKb: SHIPPED_CAP_KB,
+  floorKb: SHIPPED_FLOOR_KB,
+  files,
+  text,
+});
 for (const l of lines) console.log(l);
 if (errors.length > 0) {
   for (const e of errors) console.error(`  ✗ ${e}`);
