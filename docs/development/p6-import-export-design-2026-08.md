@@ -122,13 +122,15 @@ PKC2 の container に居ない entry の履歴は、鎖の基準となる tip �
 - **P6c**: ZIP 系(pkc2-package + bundle 系 #3〜#5)+ folder 階層復元。
   現状は ZIP magic を検出した時点で**可視で断る**(黙って落とさない)。
   設計は `p6c-zip-import-design-2026-08.md`(**裁定待ち 4 件**)。
-  ⚠ **8 形式すべて実体未確認** ── コードから読んだ事実であって実測ではない
+  ✅ **2026-08-02 に実体で確認済み**(PKC2 をビルドして writer を直接呼び、
+  全 8 形式の実体を `tests/fixtures/pkc2/` に生成 ── 合成 fixture で組んだ
+  7 形式が一発で読めた)
 - **P6d**: PKC3 export 3 形式
 - fixture の variant(ゼロ件次元を作らない): light / readonly / gzip+base64 /
   無圧縮(8MB 超)/ revisions 入り / legacy data 直埋め attachment /
   legacy log-<ts>-<n> id 混在 textlog / 旧 tag_filter の saved_searches。
-  実物 fixture は PKC2 の dist 産物 + 合成で賄い、実運用 export の検品は
-  user の手元データで行う(裁定時に依頼)
+  ✅ **実物 fixture は自分で作れる**(2026-08-02)── PKC2 をビルドして
+  writer を直接呼ぶ。user に依頼する必要は無かった
 
 ## 7. 残課題・記録
 

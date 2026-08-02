@@ -393,11 +393,26 @@ no-op になる。粒度はデータの正しさの問題ではなく「途中�
 
 ### 🔬 追加調査(コードから読めない)
 
-⑤ 🔴 **実体 fixture を 1 個ずつもらう(最優先)**。推定を一気に事実に変える最短路。
-とくに次の 3 つは**コードからは存在の有無すら判定できない**:
-  (a) 2026-04-12 以前の writer が書いた mtime 0/0 の古い `.pkc2.zip` ▲
-  (b) `folders[]` を持たない旧 `.folder-export.zip`(コードは常に出力・doc は optional ▲)
+⑤ ✅ **解決(2026-08-02)。実体は自分で作れた** ── user 指摘
+「テストデータが欲しいなら PKC2 を自分で動かしたらいいでしょう?」。
+**PKC2 をビルドして writer を直接呼ぶ**だけで全 8 形式の実体が出る
+(`tests/fixtures/pkc2/`、48KB)。⚠ PKC2 のソースは一切変更していない
+(ビルド産物は `git checkout` で復元済み)。生成手順は
+`tests/fixtures/pkc2/README.md`。
+
+**結果: 合成 fixture で組んだ 7 形式が、本物の出力を一発で読めた**
+(`tests/features/pkc2-real-fixtures.test.ts` 11 件)。ただし
+**合成では出せなかった性質**が実物で初めて通った:
+  - **ファイル名が日本語**(`議事録-20260731.text.zip`)── slugify が CJK を残す。
+    合成 fixture は ASCII 名しか作っていなかった
+  - 内側 ZIP が **store で外側に埋まる実バイト列**
+  - manifest の field 集合が**実際に**形式ごとに違うことの確認
+
+⚠ **まだ実体で確認できていないもの**(writer が現在の版しか作れないため):
+  (a) 2026-04-12 以前の writer が書いた mtime 0/0 の古い `.pkc2.zip`
+  (b) `folders[]` を持たない旧 `.folder-export.zip`(現行 writer は必ず出力する)
   (c) legacy inline `data` 入り attachment を含む container
+  → いずれも**旧版の writer が要る**ので、合成 fixture で代替したままにする
 
 ⑥ `DecompressionStream('deflate-raw')` の**対応下限の版**。
    同梱 Chromium 141 での往復は実測済み(2026-08-01)だが、下限は未確認。
