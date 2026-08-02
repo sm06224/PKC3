@@ -108,7 +108,7 @@ install した user は「オフラインで使える」「md を開ける」と
 
 | 段 | 内容 | なぜこの順か |
 |---|---|---|
-| ① | **product ビルドから `.map` を外す** + size の tripwire を Pages 用に読み替え | 1 行に近く、以降の全計測の前提が変わる |
+| ① | ✅ **product ビルドから `.map` を外す** + size の tripwire を Pages 用に読み替え | 1 行に近く、以降の全計測の前提が変わる |
 | ② | **素の md 受理器**(`readPlainMarkdown`)+ 取込導線 | ③ の前提。単体で価値がある(md を drag&drop できる) |
 | ③ | **`launchQueue` の受け口** ── 宣言と実体を一致させる | ② が無いと書けない |
 | ④ | **SW の precache**(生成 + navigation network-first + 旧 cache 掃除)+ オフライン smoke | 独立 |
@@ -117,6 +117,30 @@ install した user は「オフラインで使える」「md を開ける」と
 | ⑦ | **v3.0.0 release**(SBOM 添付は既存、provenance attestation を足す)→ product URL 稼働 | 最後 |
 
 ⚠ ⑥ は「実装が固まってから」。先に書くと**嘘のマニュアル**になる。
+
+### 段① 実装記録(2026-08-02 着地)
+
+| kind | ファイル | 配る量 | map |
+|---|---|---|---|
+| product | 9 件 | **1610.9 KB** | 0 件 / 0.0 KB |
+| dev | 12 件 | 1611.1 KB | 3 件 / **3227.3 KB** |
+
+🔑 **配る量の差は 0.2 KB しかない**(`//# sourceMappingURL=` の行だけ)。
+§5-2 の「`/dev/` は product と同じコード」が生成物の実測でも成り立っている
+── 捨てたのは product の配信量 3.2MB だけで、調査手段は 1 バイトも失っていない。
+
+🔑 この 0.2 KB という実測が、**PR gate に product ビルドを足さない**根拠でもある。
+配る量は kind でほぼ変わらないので、cap の tripwire は既存の dev ビルド 1 回で効く
+(CI を長くしない・user 指示 2026-07-30)。
+
+検査は 2 段構え ──
+`tests/build-config.test.ts` が **config の意図**を、`scripts/check-dist.mjs` が
+**実物のファイル一覧**を見る。plugin が map を足す経路は config を読んでも分からない。
+
+⚠ 変異試験で 1 件見つけた: `walk` が sub dir へ降りない変異を当てると `assets/` を
+丸ごと見落とし、配る量 1.7 KB・map 0 件で **product 側の検査が全部通った**
+(dev 側だけが「map が無い」で鳴った)。**数える前に、数えているものが本物かを見る**
+必要がある ── `index.html` / `manifest.webmanifest` / `.wasm` / `.js` の存在を先に assert した。
 
 ---
 

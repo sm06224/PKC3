@@ -36,6 +36,7 @@ jobs:
         run: |
           npm ci
           VITE_PKC_KIND=dev npm run build
+          node scripts/check-dist.mjs dev
           mkdir -p _site/dev
           cp -r dist/. _site/dev/
       - name: Build product (latest release tag; placeholder until first release)
@@ -43,7 +44,10 @@ jobs:
           TAG=$(git tag -l 'v*' --sort=-v:refname | head -1)
           if [ -n "$TAG" ]; then
             git worktree add ../product "$TAG"
-            (cd ../product && npm ci && VITE_PKC_KIND=product npm run build)
+            # ⚠ 検品は worktree の中で走らせる(script は自分の位置から dist を見る)。
+            # 古い tag には script が無いので、無ければ黙って飛ばす
+            (cd ../product && npm ci && VITE_PKC_KIND=product npm run build \
+              && { [ -f scripts/check-dist.mjs ] && node scripts/check-dist.mjs product || true; })
             cp -r ../product/dist/. _site/
           else
             cp .github/pages-placeholder.html _site/index.html

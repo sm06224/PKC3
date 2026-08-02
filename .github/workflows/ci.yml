@@ -41,6 +41,13 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      # 生成物の検品(P7 段①)。既定ビルド = map つきなので dev として見る。
+      # ⚠ product ビルドは PR gate に足さない ── 配る量は kind でほぼ変わらず
+      # (差は sourceMappingURL の行だけ)、cap の tripwire はこの 1 回で効く。
+      # 「product に map が無い」の pin は tests/build-config.test.ts(config)と
+      # pages/release workflow(実物)の 2 段構え
+      - name: dist の検品(map の有無 / 配る量の tripwire)
+        run: node scripts/check-dist.mjs dev
       # 視覚 smoke は「数 spec・秒オーダー」のみ PR gate に載せる(CLAUDE.md
       # プロセス指示)。別 job にしない ── npm ci / build の二重払い(PKC2 の
       # セットアップ税)を避けるため verify に同居。全量・重い検証は nightly.yml

@@ -17,7 +17,12 @@ export default defineConfig({
   },
   build: {
     target: 'es2022',
-    sourcemap: true,
+    // 🔴 **product では map を出さない**(P7 §5-2、user 委任 2026-08-02)。
+    // 生成物の 2/3(3.2MB)が map で、Pages の配信量・SW の precache 量に
+    // そのまま乗る ── 「速く、安く」に真っ向から反する。
+    // ⚠ 調査手段は失わない: `/dev/` は**同じ commit・同じコード**で map つき。
+    // 本番のスタックトレースは dev 版 URL で再現してもらう
+    sourcemap: process.env.VITE_PKC_KIND !== 'product',
   },
   test: {
     environment: 'happy-dom',
