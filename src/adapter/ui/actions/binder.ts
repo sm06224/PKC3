@@ -60,6 +60,8 @@ export interface BinderServices {
   exportHtml?(): void;
   /** md ZIP の書出し(P6d 段④)。 */
   exportMarkdown?(): void;
+  /** このノートだけをアーカイブとして書き出す(P6f)。 */
+  exportEntry?(lid: string): void;
   /** PKC2 ファイルの取込(P6b)。判別・変換・書込は実体側の責務。 */
   importPkc2?(file: File): void;
 }
@@ -208,6 +210,10 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'export-markdown': (_dispatcher, _target, services) => {
     services.exportMarkdown?.();
+  },
+  'export-entry': (dispatcher, _target, services) => {
+    const lid = dispatcher.getState().selectedLid;
+    if (lid) services.exportEntry?.(lid);
   },
   'purge-orphan-assets': (_dispatcher, _target, services) => {
     services.purgeOrphanAssets?.();

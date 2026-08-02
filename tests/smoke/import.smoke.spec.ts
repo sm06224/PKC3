@@ -589,6 +589,67 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
   expect(errors).toEqual([]);
 });
 
+test('🔴 このノートを書き出す ── 消す前の導線が実際に働く', async ({ page }) => {
+  // user 指示 2026-08-02:「そういうのは削除じゃなくて**アーカイブエクスポートの
+  // 導線**を用意すればいいのでは?」── 削除の隣にあり、押すと 1 件ぶんの
+  // `.pkc3.zip` が落ち、**そのまま取り込み直せる**ところまでを見る
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+  await page.evaluate(() => {
+    const orig = HTMLAnchorElement.prototype.click;
+    (window as unknown as { __n: string[] }).__n = [];
+    HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+      (window as unknown as { __n: string[] }).__n.push(`${this.download}|${this.isConnected}`);
+      return orig.call(this);
+    };
+  });
+
+  await page.setInputFiles('[data-pkc-field="import-input"]', {
+    name: 'backup.pkc2.zip',
+    mimeType: 'application/zip',
+    buffer: pkc2Zip(),
+  });
+  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  await expect(rows).toHaveCount(2);
+
+  // 履歴を持つノートを開く ── 書き出しは履歴ごと出る
+  await clickReal(page, '[data-pkc-entry="z1"]');
+  const dl = page.waitForEvent('download');
+  await clickReal(page, '[data-pkc-action="export-entry"]');
+  const download = await dl;
+  // ファイル名は**ノートの題名**(コンテナ名ではない)
+  // ⚠ ファイル名は `download.suggestedFilename()` では見ない ── **この headless
+  // Chromium は非 ASCII の download 名を丸ごと捨てて "download" にする**
+  // (実測: ASCII は通り、日本語は全部 "download")。実データの題名はほぼ日本語なので、
+  // ここで assert すると「環境の性質」を「アプリの不具合」と読み違える。
+  // アプリが制御しているのは `<a download>` の値なので、そこを直接見る
+  const anchorNames = await page.evaluate(
+    () => (window as unknown as { __n?: string[] }).__n ?? [],
+  );
+  expect(anchorNames).toHaveLength(1);
+  // 題名は**ノートのもの**(コンテナ名 "PKC3" ではない)
+  expect(anchorNames[0]).toMatch(/^ZIP-のノート-\d{8}\.pkc3\.zip\|true$/);
+
+  const path = await download.path();
+  const names = zipNames(readFileSync(path!));
+  expect(names).toContain('container.json');
+
+  // 🔴 取り込み直すと **1 件だけ**増える(他のノートが混ざっていない)
+  await page.setInputFiles('[data-pkc-field="import-input"]', {
+    name: 'one.pkc3.zip',
+    mimeType: 'application/zip',
+    buffer: readFileSync(path!),
+  });
+  await expect(rows).toHaveCount(3);
+
+  // 履歴も一緒に戻っている
+  await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]:last-child');
+  await clickReal(page, '[data-pkc-action="show-history"]');
+  await expect(page.locator('[data-pkc-rev-order]')).toHaveCount(2);
+
+  expect(errors).toEqual([]);
+});
+
 test('🔴 可搬 HTML: 書き出したファイルが**単体で開いて読める**', async ({ page }) => {
   const errors = collectPageErrors(page);
   await gotoApp(page);
