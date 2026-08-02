@@ -21,6 +21,15 @@ import type { Dispatcher } from './dispatcher';
 export interface StorePort {
   getBody(lid: string): Promise<string | null>;
   /**
+   * 本文を **まとめて** 取る(P6d ── 書出し用)。
+   * `getBody` を N 回呼ぶと 5000 entry の書出しが 5000 往復になる。
+   * `maxBytes` は 1 メッセージの合計の目安(1 件目は必ず返る)。
+   */
+  listBodies(
+    afterLid: string | undefined,
+    maxBytes: number,
+  ): Promise<{ rows: Array<{ lid: string; body: string }>; done: boolean }>;
+  /**
    * 本文の書込(P5c: 履歴の鎖の維持も worker が同 tx で行う)。
    * `checkpoint: true` = 変更前の body を履歴に 1 件積む。既定(amend)は
    * 履歴を伸ばさず鎖の頭を張り替えるだけ ── toggle / rename はこちら。

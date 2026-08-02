@@ -9,6 +9,17 @@ export type StorageRequest =
   | { op: 'openContainer'; cid: string; title?: string }
   | { op: 'listEntryMetas'; cid: string }
   | { op: 'getBody'; cid: string; lid: string }
+  /**
+   * 本文を **まとめて** 取る(P6d ── 書出し用)。
+   *
+   * ⚠ `getBody` を N 回呼ぶと 5000 entry の書出しが 5000 往復になる。
+   * `afterLid` で続きから読み、**1 メッセージの合計バイト数**で切る
+   * (`importRevisionChains` の `REVISION_BATCH_BYTES` と同じ作法 ──
+   * postMessage に全量を載せない)。
+   * 🔑 **鎖と違って body は割ってよい**(1 entry = 1 独立単位)ので、
+   * `batchChains` が持つ「割ると静かに落ちる」問題は無い。
+   */
+  | { op: 'listBodies'; cid: string; afterLid?: string; maxBytes: number }
   | {
       op: 'upsertEntry';
       cid: string;
@@ -182,6 +193,8 @@ export interface ResultMap {
   openContainer: null;
   listEntryMetas: EntryMetaRow[];
   getBody: string | null;
+  /** `done` = これ以上ない。`rows` は entry_order 順(書出しの並びと一致させる)。 */
+  listBodies: { rows: Array<{ lid: string; body: string }>; done: boolean };
   upsertEntry: null;
   bulkUpsertEntries: null;
   deleteEntry: null;

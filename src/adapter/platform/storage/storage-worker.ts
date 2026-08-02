@@ -317,6 +317,41 @@ const handlers: Handlers = {
     );
     return rows.length > 0 ? (rows[0]?.body as string) : null;
   },
+  listBodies: (req) => {
+    // ⚠ **entry_order 順**(書出しの並びと一致させる)。続きは `afterLid` ではなく
+    // 「その lid の entry_order より後」で追う ── lid の辞書順は並びと無関係
+    const database = need();
+    const after =
+      req.afterLid === undefined
+        ? null
+        : ((
+            database.selectObjects(
+              'SELECT entry_order FROM entries WHERE cid = ? AND lid = ?',
+              [req.cid, req.afterLid],
+            )[0] as { entry_order: number } | undefined
+          )?.entry_order ?? null);
+    const rows = database.selectObjects(
+      after === null
+        ? `SELECT lid, body FROM entries WHERE cid = ? ORDER BY entry_order, lid`
+        : `SELECT lid, body FROM entries WHERE cid = ? AND entry_order > ?
+             ORDER BY entry_order, lid`,
+      after === null ? [req.cid] : [req.cid, after],
+    ) as unknown as Array<{ lid: string; body: string }>;
+
+    // 1 メッセージの合計で切る。⚠ **1 件目は必ず返す** ── maxBytes より大きい
+    // body が 1 件あるだけで、そこから先が永遠に進まなくなる(無限ループ)
+    const out: Array<{ lid: string; body: string }> = [];
+    let total = 0;
+    for (const r of rows) {
+      const size = r.body.length;
+      if (out.length > 0 && total + size > req.maxBytes) {
+        return { rows: out, done: false };
+      }
+      out.push(r);
+      total += size;
+    }
+    return { rows: out, done: true };
+  },
   upsertEntry: (req) => {
     // 本文の書込は**すべてここを通る** ── 鎖の維持を同 tx に閉じ込める唯一の場所。
     // checkpoint(履歴を伸ばす)か amend(頭を張り替える)かだけが caller の裁量
