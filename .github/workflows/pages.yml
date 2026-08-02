@@ -45,9 +45,17 @@ jobs:
           if [ -n "$TAG" ]; then
             git worktree add ../product "$TAG"
             # ⚠ 検品は worktree の中で走らせる(script は自分の位置から dist を見る)。
-            # 古い tag には script が無いので、無ければ黙って飛ばす
-            (cd ../product && npm ci && VITE_PKC_KIND=product npm run build \
-              && { [ -f scripts/check-dist.mjs ] && node scripts/check-dist.mjs product || true; })
+            # 古い tag には script が無いので、無いときだけ飛ばす。
+            # 🔴 `[ -f X ] && node X || true` と書いてはいけない ── `&&` と `||` は
+            # 同順位・左結合なので `(([ -f X ] && node X) || true)` になり、
+            # **検品の失敗まで飛ばして** map 入りの dist をそのまま deploy する
+            # (レビュー H-1 で実証:検品が ✗ を出しても step は exit 0 だった)
+            (
+              cd ../product
+              npm ci
+              VITE_PKC_KIND=product npm run build
+              if [ -f scripts/check-dist.mjs ]; then node scripts/check-dist.mjs product; fi
+            )
             cp -r ../product/dist/. _site/
           else
             cp .github/pages-placeholder.html _site/index.html

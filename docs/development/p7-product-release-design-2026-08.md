@@ -125,22 +125,61 @@ install した user は「オフラインで使える」「md を開ける」と
 | product | 9 件 | **1610.9 KB** | 0 件 / 0.0 KB |
 | dev | 12 件 | 1611.1 KB | 3 件 / **3227.3 KB** |
 
-🔑 **配る量の差は 0.2 KB しかない**(`//# sourceMappingURL=` の行だけ)。
-§5-2 の「`/dev/` は product と同じコード」が生成物の実測でも成り立っている
-── 捨てたのは product の配信量 3.2MB だけで、調査手段は 1 バイトも失っていない。
+🔑 **配る量の差は 0.2 KB しかない**。捨てたのは product の配信量 3.2MB だけで、
+調査手段(`/dev/` の map)は 1 バイトも失っていない。
 
-🔑 この 0.2 KB という実測が、**PR gate に product ビルドを足さない**根拠でもある。
-配る量は kind でほぼ変わらないので、cap の tripwire は既存の dev ビルド 1 回で効く
-(CI を長くしない・user 指示 2026-07-30)。
+⚠ **「差は `sourceMappingURL` の行だけ」ではない**(レビュー M-1 で実測、当初の記述は誤り)。
+`BUILD_KIND`(`import.meta.env.VITE_PKC_KIND`)が bundle に焼き込まれるので:
+
+| | dev | product |
+|---|---|---|
+| entry chunk | `index-BBeB4SpM.js` 308,519 B | `index-BR29g7kI.js` 308,492 B |
+| 内訳 | `sourceMappingURL` 行 +42 B | 刻印 `` `product` `` −16 B(実質) |
+| content hash | **別**(= file 名が別) | |
+
+したがって **product のスタックトレースを dev の map で読み替えることはできない**
+── 縮小 bundle は実質 1 行で、刻印のぶんカラムが十数ずれる(同一マーカーで
++12〜+16、しかも一定ではない)。運用は「**`/dev/` の URL で再現してもらい、
+dev 自身の map で読む**」であって、「product の trace を dev の map に流し込む」ではない。
+
+🔑 それでも **PR gate に product ビルドを足さない**根拠は成立する ── 根拠は
+「同じコードだから」ではなく「**配る量が kind でほぼ変わらない(0.2 KB 差)から
+cap の tripwire は dev ビルド 1 回で効く**」である(CI を長くしない・user 指示 2026-07-30)。
+
+⚠ ただし **product bundle は PR gate が一度もビルドしない別成果物**になる。
+Pages の `/` に出るのはこちらなので、**nightly でビルド → 検品 → smoke** まで通す。
 
 検査は 2 段構え ──
 `tests/build-config.test.ts` が **config の意図**を、`scripts/check-dist.mjs` が
-**実物のファイル一覧**を見る。plugin が map を足す経路は config を読んでも分からない。
+**実物のファイル一覧と中身**を見る。plugin が map を足す経路は config を読んでも分からない。
 
-⚠ 変異試験で 1 件見つけた: `walk` が sub dir へ降りない変異を当てると `assets/` を
-丸ごと見落とし、配る量 1.7 KB・map 0 件で **product 側の検査が全部通った**
-(dev 側だけが「map が無い」で鳴った)。**数える前に、数えているものが本物かを見る**
-必要がある ── `index.html` / `manifest.webmanifest` / `.wasm` / `.js` の存在を先に assert した。
+### 🔴 検査そのものが空振りしていた(レビューで 2 件)
+
+| # | 空振りしていた検査 | 何に救われていたか | 実証 |
+|---|---|---|---|
+| 1 | `walk` が sub dir へ降りない変異 | ── | 配る量 1.7 KB・map 0 件で **product 側が全部通った** |
+| 2 | 「entry の `.js` が 1 件でもある」 | `sw.js`(public の静的コピー) | `rm dist/assets/index-*.js` しても **`✓ ok`**(起動不能な生成物が通過) |
+
+規律: **「それらしいファイルが在るか」で書かない。「参照されているものが実在するか」で書く。**
+前者は代替物に救われるが、後者は救われない。いまは
+① `index.html` が指す先 ② bundle が名指しする hash 付き生成物(worker / wasm)
+の 2 方向で実在を突き合わせ、**参照が 0 件なら「走査が空振りしている」として落とす**。
+
+### 🔴 件数を数える検査は、埋め込まれた実体を見落とす
+
+`--sourcemap inline` は `.map` を 1 件も出さない ── 4.3MB の base64 map を出荷しながら
+script は「map 0 件」と報告した(レビュー M-2 で実証)。しかも落ちたのは size cap の枝で、
+その文言は **「cap を引き上げてよい」という誤った処方**を出していた。
+`sourceMappingURL=data:` を中身から探し、inline も map として数える。
+
+### 🔴 shell の `&&` と `||` は同順位・左結合
+
+`pages.yml` の product 検品を `[ -f X ] && node X || true` と書いていた。これは
+`(([ -f X ] && node X) || true)` と解釈され、**「script が無いとき」ではなく
+「検品が失敗したとき」も飛ばす**。実証: 検品が `✗ product に map が 3 件ある` を
+出した直後に `cp -r ../product/dist/. _site/` へ到達し、**step は exit 0**
+── map 3.2MB を載せたまま Pages `/` に deploy されて job は green になる。
+`if [ -f X ]; then node X; fi` と書く。
 
 ---
 
