@@ -26,6 +26,16 @@ jobs:
       # 等の長待ち系)はここに追加していく ── PR gate には足さない
       - name: Visual smoke
         run: npm run test:smoke
+      # 🔴 product bundle は **PR gate が一度もビルドしない別成果物**である
+      # (`BUILD_KIND` が焼き込まれるので entry chunk の中身も content hash も
+      #  dev とは違う ── P7 段① レビュー M-1)。Pages の `/` に出るのはこちらなので、
+      # nightly で**ビルド → 検品 → smoke** まで通す。PR gate には足さない
+      # (CI を長くしない・user 指示 2026-07-30)
+      - name: Product ビルド ── 検品 + smoke(PR gate が触らない成果物)
+        run: |
+          VITE_PKC_KIND=product npm run build
+          node scripts/check-dist.mjs product
+          npm run test:smoke
       # Rust core: **出荷 .wasm を source から再ビルドして一致を見る**
       # (PR gate では cargo を走らせない ── 再ビルド漏れをここで捕まえる。
       #  rust-toolchain.toml が rustc を pin しているのでバイト一致が期待値)

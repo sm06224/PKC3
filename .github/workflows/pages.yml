@@ -36,6 +36,7 @@ jobs:
         run: |
           npm ci
           VITE_PKC_KIND=dev npm run build
+          node scripts/check-dist.mjs dev
           mkdir -p _site/dev
           cp -r dist/. _site/dev/
       - name: Build product (latest release tag; placeholder until first release)
@@ -43,7 +44,18 @@ jobs:
           TAG=$(git tag -l 'v*' --sort=-v:refname | head -1)
           if [ -n "$TAG" ]; then
             git worktree add ../product "$TAG"
-            (cd ../product && npm ci && VITE_PKC_KIND=product npm run build)
+            # ⚠ 検品は worktree の中で走らせる(script は自分の位置から dist を見る)。
+            # 古い tag には script が無いので、無いときだけ飛ばす。
+            # 🔴 `[ -f X ] && node X || true` と書いてはいけない ── `&&` と `||` は
+            # 同順位・左結合なので `(([ -f X ] && node X) || true)` になり、
+            # **検品の失敗まで飛ばして** map 入りの dist をそのまま deploy する
+            # (レビュー H-1 で実証:検品が ✗ を出しても step は exit 0 だった)
+            (
+              cd ../product
+              npm ci
+              VITE_PKC_KIND=product npm run build
+              if [ -f scripts/check-dist.mjs ]; then node scripts/check-dist.mjs product; fi
+            )
             cp -r ../product/dist/. _site/
           else
             cp .github/pages-placeholder.html _site/index.html

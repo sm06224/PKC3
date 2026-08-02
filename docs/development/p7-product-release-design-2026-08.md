@@ -108,7 +108,7 @@ install した user は「オフラインで使える」「md を開ける」と
 
 | 段 | 内容 | なぜこの順か |
 |---|---|---|
-| ① | **product ビルドから `.map` を外す** + size の tripwire を Pages 用に読み替え | 1 行に近く、以降の全計測の前提が変わる |
+| ① | ✅ **product ビルドから `.map` を外す** + size の tripwire を Pages 用に読み替え | 1 行に近く、以降の全計測の前提が変わる |
 | ② | **素の md 受理器**(`readPlainMarkdown`)+ 取込導線 | ③ の前提。単体で価値がある(md を drag&drop できる) |
 | ③ | **`launchQueue` の受け口** ── 宣言と実体を一致させる | ② が無いと書けない |
 | ④ | **SW の precache**(生成 + navigation network-first + 旧 cache 掃除)+ オフライン smoke | 独立 |
@@ -118,6 +118,103 @@ install した user は「オフラインで使える」「md を開ける」と
 
 ⚠ ⑥ は「実装が固まってから」。先に書くと**嘘のマニュアル**になる。
 
+### 段① 実装記録(2026-08-02 着地)
+
+| kind | ファイル | 配る量 | map |
+|---|---|---|---|
+| product | 9 件 | **1610.9 KB** | 0 件 / 0.0 KB |
+| dev | 12 件 | 1611.1 KB | 3 件 / **3227.3 KB** |
+
+🔑 **配る量の差は 0.2 KB しかない**。捨てたのは product の配信量 3.2MB だけで、
+調査手段(`/dev/` の map)は 1 バイトも失っていない。
+
+⚠ **「差は `sourceMappingURL` の行だけ」ではない**(レビュー M-1 → L-1 で実測、
+当初の記述は誤り)。`BUILD_KIND`(`import.meta.env.VITE_PKC_KIND`)が bundle に
+焼き込まれるので、**entry chunk だけが別物**になる:
+
+| 生成物 | dev | product | 中身 |
+|---|---|---|---|
+| entry chunk | `index-BBeB4SpM.js` 308,519 B | `index-BR29g7kI.js` 308,492 B | **別**(下記) |
+| `storage-worker-BlwWKbLI.js` | 231,638 B | 231,586 B | map コメントを除けば**完全一致** |
+| `sqlite3-worker1-d88FnpHp.js` | 210,772 B | 210,719 B | 同上 |
+| `sqlite3-opfs-async-proxy-D_xnb1D8.js` | 32,289 B | 32,289 B | 同上 |
+| `sqlite3-BVKGSWc-.wasm` | 864,752 B | 864,752 B | 完全一致 |
+
+entry chunk の内訳: dev は末尾に `sourceMappingURL` 行 43 B を持ち、コード部は
+**product のほうが 16 B 長い**(刻印 `` `product` `` のぶん)。content hash が変わるので
+**file 名も別**になる ── worker 3 本と wasm は kind をまたいで同名・同内容である。
+
+🔴 **product のスタックトレースを dev の map で読み替えることはできない**。理由は
+「カラムが十数ずれる」ではなく(bundle は 1 行ではなく 198 行、大半のマーカーは
+ズレ 0)、**縮小識別子の付番が丸ごとずれる**こと ── 刻印が 1 個増えた結果
+`i={frontmatter:…}` が `i=\`product\`,a={frontmatter:…}` になり、**198 行中 71 行**が別物になる。
+運用は「**`/dev/` の URL で再現してもらい、dev 自身の map で読む**」であって、
+「product の trace を dev の map に流し込む」ではない。
+
+🔑 それでも **PR gate に product ビルドを足さない**根拠は成立する ── 根拠は
+「同じコードだから」ではなく「**配る量が kind でほぼ変わらない(0.2 KB 差)から
+cap の tripwire は dev ビルド 1 回で効く**」である(CI を長くしない・user 指示 2026-07-30)。
+
+⚠ ただし **product bundle は PR gate が一度もビルドしない別成果物**になる。
+Pages の `/` に出るのはこちらなので、**nightly でビルド → 検品 → smoke** まで通す。
+
+検査は 2 段構え ──
+`tests/build-config.test.ts` が **config の意図**を、`scripts/check-dist.mjs` が
+**実物のファイル一覧と中身**を見る。plugin が map を足す経路は config を読んでも分からない。
+
+### 🔴 検査そのものが空振りしていた ── **2 ラウンドとも**
+
+| 巡 | 空振りしていた検査 | 何に救われていたか | 実証 |
+|---|---|---|---|
+| 1 | `walk` が sub dir へ降りない変異 | ── | 配る量 1.7 KB・map 0 件で **product 側が全部通った** |
+| 1 | 「entry の `.js` が 1 件でもある」 | `sw.js`(public の静的コピー) | `rm dist/assets/index-*.js` しても **`✓ ok`** |
+| 2 | 「index.html の `./` 参照」 | `manifest.webmanifest` / `icon.svg`(Vite が書き換えない `public/` 静的参照) | `--base /` でビルドすると entry が `/assets/…` になり走査対象外 → **entry を消しても `✓ ok`** |
+| 2 | cap(上限)だけを見る | ── | entry chunk を **0 バイト**にしても `✓ ok`(取り違えは**縮む方向**にも起きる) |
+
+🔑 **救い手が変わっただけだった。** 1 巡目の教訓「それらしいファイルが在るかで書かない」を
+守った結果が 2 巡目の穴で、**空振り防止のガード自体が代替物に満たされていた**
+(「参照が 1 件でもあるか」は `public/` の静的参照で満たせる)。
+
+いまの形:
+- **前方** ── index.html が指す先 / bundle が `new URL(…)` などで名指しする生成物が実在するか
+- **後方** ── hash 付き生成物のうち**誰からも参照されていない**ものが無いか
+- **空振りガード** ── index.html が **hash 付き生成物**を 1 つも参照していなければ落とす
+  (`public/` の静的参照では満たせない)
+- **下限** ── 0 バイトの出荷物 / 配る量が床を割ったら落とす
+
+### 🔴 参照は「形」ではなく「構文」で拾う ── 誤検知は release を偽の理由で止める
+
+「hash らしき 8 文字 + `.js`」という**形**で拾う実装は、出荷 bundle の**コメントや
+API 名の中に既にある**名前を誤検知した(実証済み: `sqlite3-vfs-opfs.js` /
+`sqlite3-worker1-promiser.js` / `markdown-it-footnote.js` ── いずれも実在)。
+上流のコメント整形ひとつで Pages deploy が止まる。
+
+→ `new URL(…)` / `import(…)` / `from …` の中の文字列リテラルだけを見る。さらに
+**場所で受け方を変える**:
+
+| 場所 | 規則 | 理由 |
+|---|---|---|
+| HTML 属性 / manifest の JSON field | 緩く(外部 URL と拡張子だけ見る) | 構造化されていて散文が混じらない |
+| コードの中 | 狭く(`./` `../` `/` 始まりか hash 付き名のみ) | 散文が混じる ── 実物に `` …invoked from`,`client-level… `` がある |
+
+⚠ **片方の規則をもう片方に流用しない**(CLAUDE.md「誤差の向きを決めて、両側に使い回さない」)。
+
+### 🔴 件数を数える検査は、埋め込まれた実体を見落とす
+
+`--sourcemap inline` は `.map` を 1 件も出さない ── 4.3MB の base64 map を出荷しながら
+script は「map 0 件」と報告した(レビュー M-2 で実証)。しかも落ちたのは size cap の枝で、
+その文言は **「cap を引き上げてよい」という誤った処方**を出していた。
+`sourceMappingURL=data:` を中身から探し、inline も map として数える。
+
+### 🔴 shell の `&&` と `||` は同順位・左結合
+
+`pages.yml` の product 検品を `[ -f X ] && node X || true` と書いていた。これは
+`(([ -f X ] && node X) || true)` と解釈され、**「script が無いとき」ではなく
+「検品が失敗したとき」も飛ばす**。実証: 検品が `✗ product に map が 3 件ある` を
+出した直後に `cp -r ../product/dist/. _site/` へ到達し、**step は exit 0**
+── map 3.2MB を載せたまま Pages `/` に deploy されて job は green になる。
+`if [ -f X ]; then node X; fi` と書く。
+
 ---
 
 ## 5. 裁定(2026-08-02、user 委任 → 採った側)
@@ -125,13 +222,18 @@ install した user は「オフラインで使える」「md を開ける」と
 | # | 論点 | 採った側 | なぜ |
 |---|---|---|---|
 | 1 | 素の md 受理器 | **足す** | `file_handlers` を宣言している以上、無ければ manifest が嘘。宣言を外す側に倒すと「md を開ける」という user 指示 9 を捨てることになる ── 指示は生きているので、実体の側を合わせる |
-| 2 | product の sourcemap | **外す** | 生成物の 2/3 が map。「速く、安く」に真っ向から反する。本番のスタックトレースは **dev 版 URL で再現**してもらう(`/dev/` は同じコードで map つき ── 捨てているのは product の配信量だけで、調査手段は失わない) |
+| 2 | product の sourcemap | **外す** | 生成物の 2/3 が map。「速く、安く」に真っ向から反する。本番のスタックトレースは **dev 版 URL で再現**してもらう(`/dev/` は同じ commit を map つきで焼いたもの ── 捨てているのは product の配信量だけで、調査手段は失わない) |
 | 3 | 更新通知 | **「再読込」ボタンを出す** | status に 1 行だと**読まれない**。押せば直る問題を、押せない形で伝えない |
 | 4 | フォルダ取込 | **別の段** | 単一 md と混ぜると「どっちの経路で壊れたか」が分からなくなる。P6c で 8 形式を 1 つずつ着地させたのと同じ理由 |
 
 ⚠ 2 について: `/dev/` にだけ map を置く形にするので、**dev 版のビルドは product と
-同じコード**でなければならない(map だけが違う)。ここがずれると「dev では再現しない」
-という最悪の調査状況になる ── Pages workflow は同じ commit から両方を作ること
+同じ commit**でなければならない ── Pages workflow は同じ commit から両方を作ること。
+
+🔴 ただし「**同じコード**」にはならない(段① 実装記録の実測)。`BUILD_KIND` の刻印で
+entry chunk だけは中身も content hash も変わる。したがって運用は「product の trace を
+dev の map に流し込む」ではなく「**`/dev/` の URL で再現してもらい、dev 自身の map で
+読む**」である。ここを取り違えると「dev では再現しない」ではなく
+「**map の指す場所が嘘だと気づかない**」という、より悪い調査状況になる
 
 ## 6. 参照
 
