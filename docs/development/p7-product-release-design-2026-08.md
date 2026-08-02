@@ -109,7 +109,7 @@ install した user は「オフラインで使える」「md を開ける」と
 | 段 | 内容 | なぜこの順か |
 |---|---|---|
 | ① | ✅ **product ビルドから `.map` を外す** + size の tripwire を Pages 用に読み替え | 1 行に近く、以降の全計測の前提が変わる |
-| ② | **素の md 受理器**(`readPlainMarkdown`)+ 取込導線 | ③ の前提。単体で価値がある(md を drag&drop できる) |
+| ② | ✅ **素の md 受理器**(`readPlainMarkdown`)+ 取込導線 | ③ の前提。単体で価値がある(md を drag&drop できる) |
 | ③ | **`launchQueue` の受け口** ── 宣言と実体を一致させる | ② が無いと書けない |
 | ④ | **SW の precache**(生成 + navigation network-first + 旧 cache 掃除)+ オフライン smoke | 独立 |
 | ⑤ | **更新通知**(新しい版があります) | ④ の上 |
@@ -214,6 +214,35 @@ script は「map 0 件」と報告した(レビュー M-2 で実証)。しかも
 出した直後に `cp -r ../product/dist/. _site/` へ到達し、**step は exit 0**
 ── map 3.2MB を載せたまま Pages `/` に deploy されて job は green になる。
 `if [ -f X ]; then node X; fi` と書く。
+
+### 段② 実装記録(2026-08-02 着地)
+
+`src/features/import/plain-markdown.ts`(純関数)+ `import-markdown.ts`(書込)+
+`import-file.ts`(振り分け)。既存の PKC2 経路には**合流させていない** ──
+1 ファイル = 1 entry で、asset / relation / 履歴には触らない。
+
+🔴 **拡張子で決める。中身では決めない。** どんなテキストも markdown として妥当なので、
+中身判定は必ず誤る。`file_handlers` も拡張子で宣言しているので、**宣言と実体を
+同じ規則で揃える**のが要点である。parity test は両方向で縛った ──
+「manifest が宣言する拡張子を受理器が受ける」だけでなく
+「受理器が受ける拡張子を manifest が宣言している」も見る(片側だけだと
+**file_handlers から開けないのに受理器だけが対応している**状態が通る)。
+
+⚠ **変異試験で 2 件生き残り、どちらも fixture のゼロ次元だった**:
+
+| 生き残った変異 | 何が測られていなかったか |
+|---|---|
+| 拡張子ではなく MIME で振り分ける | fixture が全部 `text/markdown` を持っていた ── 実機の OS ピッカーと `launchQueue` は `.md` に **MIME を付けない**ことが多く、そのままだと実機だけ PKC2 経路に落ちて断られる |
+| 抽出列(status / date / archived)を殺す | assert が「`undefined` ではない」だった ── `null` を素通しする実装でも通る |
+
+前者は smoke でも `mimeType: ''` で渡している(ここを `text/markdown` で埋めると
+「MIME で振り分ける」実装でも緑になる)。
+
+導線側で直したもの: ボタンの名前が「PKC2 を取込」のままだと**実態と食い違う**ので
+「取込」に、`accept` に `.md` / `.markdown` を追加(⚠ ここが無いと**受理器が動いても
+ファイルを選べない**)、`multiple` を有効化(md は複数選択 = 1 件ずつ entry)。
+混在(md + PKC2)と PKC2 の複数選択は**断る** ── 「md だけ入って PKC2 が黙って
+落ちた」を作らない。
 
 ---
 

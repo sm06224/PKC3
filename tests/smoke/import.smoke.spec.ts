@@ -69,7 +69,7 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
   // ⚠ **ボタンを実際に押す**経路を通す(review mutation M21): hidden input へ
   // 直接 setInputFiles すると、ボタン → picker の導線が壊れていても緑になる
   const chooser = page.waitForEvent('filechooser');
-  await clickReal(page, '[data-pkc-action="import-pkc2"]');
+  await clickReal(page, '[data-pkc-action="import-file"]');
   await (await chooser).setFiles(FILE());
 
   // 再読込(sqlite から引き直し)を経て 2 件が sidebar に現れる
@@ -533,6 +533,54 @@ test('段⑥: `.entry.zip` の base64 添付が実 IDB で画像として描画�
   await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]');
   // 実ブラウザが画像として decode できる = base64 が正しく復号されている
   await expectImageRendered(page, '[data-pkc-field="attachment-media"]');
+
+  expect(errors).toEqual([]);
+});
+
+test('🔴 P7 段②: 素の md を取り込む ── 宣言(file_handlers)と導線が一致する', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  // ⚠ **manifest が宣言する拡張子をピッカーでも選べる**こと。ここが欠けると
+  // `file_handlers` で `.md` を宣言しているのに、アプリからは選べない
+  const accept = await page
+    .locator('[data-pkc-field="import-input"]')
+    .getAttribute('accept');
+  expect(accept).toContain('.md');
+  expect(accept).toContain('.markdown');
+  // md は複数選択できる(1 件ずつ entry になる)
+  expect(
+    await page.locator('[data-pkc-field="import-input"]').getAttribute('multiple'),
+  ).not.toBeNull();
+
+  // ⚠ **ボタンを実際に押す**経路を通す(hidden input へ直接入れると導線の断線を見逃す)
+  const chooser = page.waitForEvent('filechooser');
+  await clickReal(page, '[data-pkc-action="import-file"]');
+  // ⚠ MIME は **空**で渡す ── OS のピッカーは `.md` に MIME を付けないことが多い。
+  // ここを text/markdown で埋めると「MIME で振り分ける」実装でも緑になる
+  await (await chooser).setFiles([
+    { name: '会議メモ.md', mimeType: '', buffer: Buffer.from('# 会議メモ\n\n決めたこと\n', 'utf-8') },
+    {
+      name: 'frontmatter.markdown',
+      mimeType: '',
+      buffer: Buffer.from('---\ntitle: 正本\nnested:\n  a: 1\n---\n本文\n', 'utf-8'),
+    },
+  ]);
+
+  // 実 sqlite からの再読込を経て 2 件が sidebar に現れる
+  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.locator('[data-pkc-field="title"]')).toHaveText(['会議メモ', '正本']);
+
+  // 🔴 **本文が原文のまま**入っている(frontmatter を再構築していない)。
+  // editor を開いて textarea の値そのものを見る ── rendered だけ見ると
+  // frontmatter は表示されないので、消えていても気づけない
+  const secondLid = await rows.nth(1).getAttribute('data-pkc-entry');
+  await clickReal(page, `[data-pkc-entry="${secondLid}"]`);
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await expect(page.locator('[data-pkc-field="editor-body"]')).toHaveValue(
+    '---\ntitle: 正本\nnested:\n  a: 1\n---\n本文\n',
+  );
 
   expect(errors).toEqual([]);
 });

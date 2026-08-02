@@ -20,7 +20,7 @@ import { CenterRouter } from '@adapter/ui/render/center';
 import { formatSize } from '@adapter/ui/render/detail';
 import { bindActions, generateLid, type BinderServices } from '@adapter/ui/actions/binder';
 import { attachFiles } from '@adapter/ui/actions/attach';
-import { importPkc2File } from '@adapter/ui/actions/import-pkc2';
+import { importFiles } from '@adapter/ui/actions/import-file';
 import {
   exportArchive,
   exportEntry,
@@ -246,11 +246,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         });
       }
     },
-    // 📥 PKC2 取込(P6b)。asset gate の内側 ── 取込は putBlob → entry 書込の間に
-    // 「bytes はあるが参照が無い」窓を持つので、整理との同時実行は attach と同じ危険
-    importPkc2: (file) =>
+    // 📥 取込(P6b: PKC2 の書出し / P7 段②: 素の Markdown)。asset gate の内側 ──
+    // 取込は putBlob → entry 書込の間に「bytes はあるが参照が無い」窓を持つので、
+    // 整理との同時実行は attach と同じ危険。⚠ 振り分けは import-file.ts が持つ
+    importFiles: (files) =>
       void withAssetGate(async () => {
-        await importPkc2File(
+        await importFiles(
           dispatcher,
           {
             // ⚠ 生存 entry だけでは足りない ── ゴミ箱の lid(entries に居ないが
@@ -321,7 +322,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             // 注意は**全件**を専用面へ(1 行の status では 1 件目しか届かない)
             report: (notes) => showNotices(regions.notices, '取込時の注意', notes),
           },
-          file,
+          files,
         );
       }),
     dismissNotices: () => clearNotices(regions.notices),
