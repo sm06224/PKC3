@@ -26,6 +26,8 @@ import { generateAssetKey } from '@adapter/platform/storage/asset-key';
 
 const DB_NAME = 'pkc3';
 const DEFAULT_CID = 'default';
+/** container の題名(書出しのファイル名にも使う ── 1 箇所で決める)。 */
+const CONTAINER_TITLE = 'PKC3';
 
 export interface AppHandle {
   dispatcher: Dispatcher;
@@ -72,7 +74,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   }
 
   const { client, init } = await initStorage(promoted);
-  await client.request({ op: 'openContainer', cid: DEFAULT_CID, title: 'PKC3' });
+  await client.request({ op: 'openContainer', cid: DEFAULT_CID, title: CONTAINER_TITLE });
   // boot と再読込は**同じ経路**で state を作る(取込後に別の作り方をしない ──
   // 分岐が増えると「取込直後だけ壊れる」型の差分が入る)
   const loadSnapshot = async () => ({
@@ -256,8 +258,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         await exportArchive(dispatcher, {
           source: {
             cid: DEFAULT_CID,
-            // container の題名は openContainer で刻んだもの(state は持たない)
-            title: APP_ID,
+            // ⚠ `openContainer` で刻んだ題名と**同じ文字列**を使う(別定数だと
+            // ファイル名と DB の題名が食い違う ── review L-2)
+            title: CONTAINER_TITLE,
             listEntryMetas: () =>
               client.request({ op: 'listEntryMetas', cid: DEFAULT_CID }),
             listBodies: (afterLid, maxBytes) =>

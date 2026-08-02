@@ -46,8 +46,8 @@ export const REVISION_KEEP_LATEST = 100;
 export function createStorePort(client: StoreClient, cid: string): StorePort {
   return {
     getBody: (lid) => client.request({ op: 'getBody', cid, lid }),
-    listBodies: (afterLid, maxBytes) =>
-      client.request({ op: 'listBodies', cid, maxBytes, ...(afterLid ? { afterLid } : {}) }),
+    listBodies: (after, maxBytes) =>
+      client.request({ op: 'listBodies', cid, maxBytes, ...(after ? { after } : {}) }),
     persistEntry: async (entry, opts) => {
       await client.request({
         op: 'upsertEntry',

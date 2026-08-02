@@ -104,12 +104,14 @@ export class ZipWriter {
   private readonly staged: Staged[] = [];
   private offset = 0;
   private readonly names = new Set<string>();
+  private closed = false;
 
   /**
    * 1 ファイル追加する。`parts` は連結した結果が中身になる。
    * @throws 同名 / 4GB 超 / 65535 件超 は**断る**(reader が読めないものを出さない)
    */
   async add(name: string, parts: readonly ZipPart[]): Promise<void> {
+    if (this.closed) throw new ZipWriteError('閉じた ZIP には追記できません');
     if (name === '') throw new ZipWriteError('名前が空のファイルは書けません');
     // ⚠ 同名を許すと reader が「後勝ちで片方を静かに捨てる」形になる ── 出さない
     if (this.names.has(name)) {
@@ -118,9 +120,11 @@ export class ZipWriter {
     if (this.staged.length >= MAX_ENTRIES) {
       throw new ZipWriteError(`ZIP に入る件数の上限(${MAX_ENTRIES})を超えました`);
     }
-    this.names.add(name);
     const nameBytes = enc.encode(name);
     const { crc, size, bytes } = await measure(parts);
+    // ⚠ 名前を確保するのは**成功が確定してから**(review L-3)── measure が投げた
+    // 後に名前だけ残ると、同じ名前での再試行が誤って「重複」と断られる
+    this.names.add(name);
     if (size > U32_MAX) {
       throw new ZipWriteError(`4GB を超えるファイルは書けません(ZIP64 未対応): ${name}`);
     }
@@ -149,6 +153,9 @@ export class ZipWriter {
 
   /** 中央ディレクトリと EOCD を足して閉じる。**ここでもコピーしない**。 */
   finish(): Blob {
+    // ⚠ 封じる ── finish 後に add すると中央ディレクトリの後ろにデータが付いた
+    // 壊れた ZIP ができる(review L-4)
+    this.closed = true;
     const cd: number[] = [];
     for (const s of this.staged) {
       cd.push(

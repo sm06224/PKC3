@@ -26,9 +26,13 @@ export interface StorePort {
    * `maxBytes` は 1 メッセージの合計の目安(1 件目は必ず返る)。
    */
   listBodies(
-    afterLid: string | undefined,
+    after: { entryOrder: number; lid: string } | undefined,
     maxBytes: number,
-  ): Promise<{ rows: Array<{ lid: string; body: string }>; done: boolean }>;
+  ): Promise<{
+    rows: Array<{ lid: string; body: string }>;
+    done: boolean;
+    next?: { entryOrder: number; lid: string };
+  }>;
   /**
    * 本文の書込(P5c: 履歴の鎖の維持も worker が同 tx で行う)。
    * `checkpoint: true` = 変更前の body を履歴に 1 件積む。既定(amend)は

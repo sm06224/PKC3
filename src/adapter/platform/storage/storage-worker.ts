@@ -318,25 +318,21 @@ const handlers: Handlers = {
     return rows.length > 0 ? (rows[0]?.body as string) : null;
   },
   listBodies: (req) => {
-    // ⚠ **entry_order 順**(書出しの並びと一致させる)。続きは `afterLid` ではなく
-    // 「その lid の entry_order より後」で追う ── lid の辞書順は並びと無関係
+    // 🔴 **カーソルは ORDER BY と同じ複合キー**。`entry_order > ?` だけだと
+    // 境界の順序値を共有する行が全部飛ぶ(entry_order に UNIQUE は無い)。
+    // ⚠ lid だけ持ち回って worker 側で順序値を引き直す形も駄目 ── その行が
+    // 消えていると位置が解決できず、先頭から読み直して**重複する**
     const database = need();
-    const after =
-      req.afterLid === undefined
-        ? null
-        : ((
-            database.selectObjects(
-              'SELECT entry_order FROM entries WHERE cid = ? AND lid = ?',
-              [req.cid, req.afterLid],
-            )[0] as { entry_order: number } | undefined
-          )?.entry_order ?? null);
+    const a = req.after;
     const rows = database.selectObjects(
-      after === null
-        ? `SELECT lid, body FROM entries WHERE cid = ? ORDER BY entry_order, lid`
-        : `SELECT lid, body FROM entries WHERE cid = ? AND entry_order > ?
+      a === undefined
+        ? `SELECT lid, body, entry_order FROM entries WHERE cid = ?
+             ORDER BY entry_order, lid`
+        : `SELECT lid, body, entry_order FROM entries
+             WHERE cid = ? AND (entry_order > ? OR (entry_order = ? AND lid > ?))
              ORDER BY entry_order, lid`,
-      after === null ? [req.cid] : [req.cid, after],
-    ) as unknown as Array<{ lid: string; body: string }>;
+      a === undefined ? [req.cid] : [req.cid, a.entryOrder, a.entryOrder, a.lid],
+    ) as unknown as Array<{ lid: string; body: string; entry_order: number }>;
 
     // 1 メッセージの合計で切る。⚠ **1 件目は必ず返す** ── maxBytes より大きい
     // body が 1 件あるだけで、そこから先が永遠に進まなくなる(無限ループ)
@@ -345,9 +341,14 @@ const handlers: Handlers = {
     for (const r of rows) {
       const size = r.body.length;
       if (out.length > 0 && total + size > req.maxBytes) {
-        return { rows: out, done: false };
+        const last = rows[out.length - 1]!;
+        return {
+          rows: out,
+          done: false,
+          next: { entryOrder: last.entry_order, lid: last.lid },
+        };
       }
-      out.push(r);
+      out.push({ lid: r.lid, body: r.body });
       total += size;
     }
     return { rows: out, done: true };

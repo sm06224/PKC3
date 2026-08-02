@@ -356,11 +356,13 @@ export async function importPkc2File(
           relations: restored.relations,
           // 暫定 key は使わない ── アーカイブの key はそのまま「旧 key」として扱い、
           // adapter が bytes のハッシュで最終 key を決める(content addressing)
-          assets: restored.assetKeys.map((k) => ({
-            key: k,
-            oldKey: k,
+          assets: restored.assets.map((a) => ({
+            key: a.key,
+            oldKey: a.key,
             base64: '',
-            mime: '',
+            // ⚠ mime を落とすと Blob の type と meta.mime が空になり、画像が
+            // preview されなくなる(無言で ── review M-4)
+            mime: a.mime,
           })),
           revisionChains: [] as RevisionChain[],
           warnings: [] as string[],

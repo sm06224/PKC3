@@ -30,7 +30,9 @@ function safeName(title: string): string {
     .join('');
   const s = cleaned.replace(/[\\/:*?"<>| ]+/g, '-').replace(/^[-.\s]+|[-.\s]+$/g, '');
   // ⚠ 空にしない ── 「.pkc3.zip」だけのファイル名は OS によっては隠しファイル
-  return s.slice(0, 60) || 'pkc3';
+  // ⚠ `slice` は**サロゲートペアを割る**(絵文字や一部の漢字が壊れる)──
+  // 制御文字処理でわざわざ [...] を使ったのに、最後で落とすと意味がない
+  return [...s].slice(0, 60).join('') || 'pkc3';
 }
 
 const stamp = (d: Date): string =>

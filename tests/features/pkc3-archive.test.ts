@@ -24,7 +24,9 @@ interface Fake {
     body: string;
     entry_order?: number;
     created_at?: string | null;
+    updated_at?: string | null;
     status?: string | null;
+    date?: string | null;
     archived?: number;
   }>;
   relations?: Array<{ id: string; from_lid: string; to_lid: string; kind: string }>;
@@ -43,10 +45,10 @@ function source(f: Fake): ArchiveSource {
     title: e.title ?? e.lid,
     archetype: e.archetype ?? 'text',
     created_at: e.created_at ?? null,
-    updated_at: null,
+    updated_at: e.updated_at ?? null,
     entry_order: e.entry_order ?? i + 1,
     status: e.status ?? null,
-    date: null,
+    date: e.date ?? null,
     archived: e.archived ?? 0,
     body: e.body,
   }));
@@ -60,13 +62,27 @@ function source(f: Fake): ArchiveSource {
         void body; // meta には本文を含めない(listBodies が別に返す)
         return m;
       }),
-    listBodies: async (afterLid) => {
-      const start = afterLid ? entries.findIndex((e) => e.lid === afterLid) + 1 : 0;
-      const size = f.batch ?? entries.length;
-      const slice = entries.slice(start, start + Math.max(1, size));
+    // 🔴 **本物のカーソル意味論を真似る**(review M-2)── 配列 index で継続する
+    // 楽な stub にすると、実装の複合キーのバグを**迂回して**素通りさせてしまう。
+    // 実際それで `entry_order` 重複の取りこぼしが test を通り抜けていた
+    listBodies: async (after) => {
+      const sorted = [...entries].sort(
+        (a, b) => a.entry_order - b.entry_order || a.lid.localeCompare(b.lid),
+      );
+      const rest = after
+        ? sorted.filter(
+            (e) =>
+              e.entry_order > after.entryOrder ||
+              (e.entry_order === after.entryOrder && e.lid > after.lid),
+          )
+        : sorted;
+      const size = Math.max(1, f.batch ?? sorted.length);
+      const slice = rest.slice(0, size);
+      const last = slice[slice.length - 1];
       return {
         rows: slice.map((e) => ({ lid: e.lid, body: e.body })),
-        done: start + slice.length >= entries.length,
+        done: slice.length >= rest.length,
+        ...(last ? { next: { entryOrder: last.entry_order, lid: last.lid } } : {}),
       };
     },
     listRelations: async () =>
@@ -173,6 +189,90 @@ describe('アーカイブ ZIP — round-trip', () => {
     // 並びも本文も保つ(バッチ境界で入れ替わらない)
     expect(got.entries.map((e) => e.lid)).toEqual(entries.map((e) => e.lid));
     expect(got.entries[24]!.body).toBe(`# 24\n${'あ'.repeat(24)}\n`);
+  });
+
+  it('🔴 entry_order が重複していても 1 件も落とさない(バックアップが減らない)', async () => {
+    // app-state が「trash 復元と CREATE の並行採番は重複しうる」と明記している形。
+    // カーソルが `entry_order > ?` 単独だと、境界の順序値を共有する行が**全部飛ぶ**
+    const entries = ['a', 'b', 'c', 'd', 'e'].map((lid) => ({
+      lid,
+      body: `本文 ${lid}`,
+      entry_order: 1, // 🔴 全部同じ
+    }));
+    const got = await readArchive((await writeArchive(source({ entries, batch: 2 }), NOW)).blob);
+    expect(got.entries.map((e) => e.lid)).toEqual(['a', 'b', 'c', 'd', 'e']);
+    expect(got.entries.map((e) => e.body)).toEqual(entries.map((e) => e.body));
+  });
+
+  it('🔴 一部だけ重複していても取りこぼさない', async () => {
+    const entries = [
+      { lid: 'p1', body: '1', entry_order: 1 },
+      { lid: 'p2', body: '2', entry_order: 1 },
+      { lid: 'p3', body: '3', entry_order: 1 },
+      { lid: 'p4', body: '4', entry_order: 2 },
+      { lid: 'p5', body: '5', entry_order: 3 },
+    ];
+    const got = await readArchive((await writeArchive(source({ entries, batch: 1 }), NOW)).blob);
+    expect(got.entries.map((e) => e.lid)).toEqual(['p1', 'p2', 'p3', 'p4', 'p5']);
+  });
+
+  it('🔑 抽出列が全部往復する(kanban / calendar が復元後に狂わない)', async () => {
+    // ⚠ `status` と `createdAt` だけ見ていて、**kanban / calendar が実際に使う
+    // `archived` と `date` が未 assert** だった(review M-5)
+    const src = source({
+      entries: [
+        {
+          lid: 'n1',
+          body: 'x',
+          entry_order: 7,
+          status: 'done',
+          archived: 1,
+        },
+      ],
+    });
+    const got = await readArchive((await writeArchive(src, NOW)).blob);
+    expect(got.entries[0]).toMatchObject({
+      entryOrder: 7,
+      status: 'done',
+      archived: true,
+    });
+  });
+
+  it('🔑 date / updatedAt も往復する(calendar が使う列)', async () => {
+    const src = source({
+      entries: [
+        { lid: 'n1', body: 'x', date: '2026-08-10', updated_at: '2026-08-01T00:00:00Z' },
+      ],
+    });
+    const got = await readArchive((await writeArchive(src, NOW)).blob);
+    expect(got.entries[0]).toMatchObject({
+      date: '2026-08-10',
+      updatedAt: '2026-08-01T00:00:00Z',
+    });
+  });
+
+  it('🔑 NULL を書出し側で正規化する(読み手に null を持ち回らせない)', async () => {
+    // schema v2 までの revision 行は kind が NULL / asset の mime・size も NULL がある
+    const base = source({
+      entries: [{ lid: 'n1', body: 'x' }],
+      revisions: { n1: [{ id: 'rv1', rev_order: 1, kind: 'full', snapshot: 'v1' }] },
+    });
+    const withNulls: ArchiveSource = {
+      ...base,
+      listRevisionMetas: async () => [
+        { id: 'rv1', rev_order: 1, created_at: null, title: null, archetype: null, kind: null },
+      ],
+      listAssetMetas: async () => [{ key: 'k', mime: null, size: null, hash: null }],
+      getAssetBlob: async () => new Blob([enc.encode('AB')]),
+    };
+    const got = await readArchive((await writeArchive(withNulls, NOW)).blob);
+    expect(got.revisions[0]!.kind).toBe('full'); // NULL → 'full'
+    expect(got.assets[0]).toEqual({
+      key: 'k',
+      mime: 'application/octet-stream',
+      size: 0,
+      hash: null,
+    });
   });
 
   it('日本語の題名・本文・asset key が往復する', async () => {

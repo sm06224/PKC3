@@ -90,9 +90,13 @@ export interface ArchiveSource {
     }>
   >;
   listBodies(
-    afterLid: string | undefined,
+    after: { entryOrder: number; lid: string } | undefined,
     maxBytes: number,
-  ): Promise<{ rows: Array<{ lid: string; body: string }>; done: boolean }>;
+  ): Promise<{
+    rows: Array<{ lid: string; body: string }>;
+    done: boolean;
+    next?: { entryOrder: number; lid: string };
+  }>;
   listRelations(): Promise<
     Array<{
       id: string;
@@ -143,9 +147,15 @@ export async function writeArchive(src: ArchiveSource, exportedAt: string): Prom
   // ── container.json を**部品として**積む(丸ごと文字列にしない)
   const parts: ZipPart[] = [`{"meta":${j({ cid: src.cid, title: src.title })},"entries":[`];
   let entryCount = 0;
-  let after: string | undefined;
+  let after: { entryOrder: number; lid: string } | undefined;
   for (;;) {
-    const { rows, done } = await src.listBodies(after, BODY_BATCH_BYTES);
+    const { rows, done, next } = await src.listBodies(after, BODY_BATCH_BYTES);
+    // 🔴 **バッチぶんの JSON は 1 個の Blob にして手放す**(review M-3)。
+    // 文字列のまま `parts` に積むと、`finish()` まで全 entry の本文が heap に
+    // 残る ── 実測で「本文の総量ぶん(96MB)heap が線形に増える」ことが示された。
+    // 「バッチごとに手放している」という当初の主張は**事実に反していた**。
+    // Blob にすれば文字列は次の周回で回収でき、Blob 側は実体を heap に持たない
+    let chunk = '';
     for (const r of rows) {
       const m = metaOf.get(r.lid);
       if (!m) {
@@ -165,14 +175,13 @@ export async function writeArchive(src: ArchiveSource, exportedAt: string): Prom
         archived: m.archived !== 0,
         body: r.body,
       };
-      parts.push(entryCount === 0 ? j(e) : `,${j(e)}`);
+      chunk += entryCount === 0 ? j(e) : `,${j(e)}`;
       entryCount++;
     }
-    // ⚠ **このバッチの本文はここで手放す**(次の周回で上書きされる)
+    if (chunk !== '') parts.push(new Blob([chunk]));
     if (done) break;
-    const last = rows[rows.length - 1];
-    if (!last) break; // 進まないなら止める(無限ループを作らない)
-    after = last.lid;
+    if (!next) break; // 進めないなら止める(無限ループを作らない)
+    after = next;
   }
   if (entryCount < metas.length) {
     warnings.push(`一覧にあって本文が取れなかった entry が ${metas.length - entryCount} 件あります`);
@@ -416,12 +425,25 @@ export function restoreArchive(
     entryOrder: number;
   }>;
   relations: Array<{ id: string; fromLid: string; toLid: string; kind: string }>;
-  assetKeys: string[];
+  /** ⚠ **key だけでなく mime も返す**(review M-4)── 落とすと Blob の type と
+   * meta.mime が空になり、画像が preview されなくなる(無言で) */
+  assets: Array<{ key: string; mime: string }>;
   warnings: string[];
 } {
   const warnings = [...archive.warnings];
   const taken = new Set(opts.existingLids);
   const lidMap = new Map<string, string>();
+  // 🔴 **アーカイブ内の lid 重複を先に言う**(review H-3)── 後勝ちで lidMap が
+  // 上書きされると、relation の端点が原本ではなく**複製**に付け替わる。
+  // 重複は本来 writer 側で起きない(H-1/H-2 を直した)が、手で組んだ / 壊れた
+  // アーカイブでは来る
+  const seenLid = new Set<string>();
+  for (const e of archive.entries) {
+    if (seenLid.has(e.lid)) {
+      warnings.push(`アーカイブの中で lid が重複しています: ${e.lid}(別の entry として取り込みます)`);
+    }
+    seenLid.add(e.lid);
+  }
 
   const entries = archive.entries.map((e, i) => {
     let lid = e.lid;
@@ -431,7 +453,9 @@ export function restoreArchive(
       lid = fresh;
     }
     taken.add(lid);
-    lidMap.set(e.lid, lid);
+    // ⚠ 重複した lid は**最初の出現**を関連の宛先にする(後勝ちだと relation が
+    // 複製を指す)。2 件目以降は entry としては入るが関連の宛先にはならない
+    if (!lidMap.has(e.lid)) lidMap.set(e.lid, lid);
     return {
       lid,
       title: e.title,
@@ -464,5 +488,12 @@ export function restoreArchive(
     );
   }
 
-  return { entries, relations, assetKeys: [...archive.assetSources.keys()], warnings };
+  // asset は meta の mime を持ち回る(key だけだと Blob の type が空になる)
+  const mimeOf = new Map(archive.assets.map((a) => [a.key, a.mime]));
+  const assets = [...archive.assetSources.keys()].map((key) => ({
+    key,
+    mime: mimeOf.get(key) ?? 'application/octet-stream',
+  }));
+
+  return { entries, relations, assets, warnings };
 }

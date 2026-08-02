@@ -137,6 +137,22 @@ describe('ZipWriter — 読めないものを出さない', () => {
     await expect(w.add('', ['x'])).rejects.toThrow(/名前が空/);
   });
 
+  it('measure が投げても名前を確保しない(同名で再試行できる)', async () => {
+    const w = new ZipWriter();
+    const broken = { stream: () => { throw new Error('読めない'); } } as unknown as Blob;
+    await expect(w.add('a.md', [broken])).rejects.toThrow();
+    // 名前だけ残っていると、正しい中身での再試行が「重複」で断られる
+    await w.add('a.md', ['ちゃんとした中身']);
+    expect(w.count).toBe(1);
+  });
+
+  it('finish 後の add は断る(壊れた ZIP を作らない)', async () => {
+    const w = new ZipWriter();
+    await w.add('a.md', ['x']);
+    w.finish();
+    await expect(w.add('b.md', ['y'])).rejects.toThrow(/閉じた/);
+  });
+
   it('件数を数えられる(0 件の ZIP を黙って出さないため)', async () => {
     const w = new ZipWriter();
     expect(w.count).toBe(0);
