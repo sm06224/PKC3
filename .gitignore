@@ -8,7 +8,11 @@ test-results/
 
 # review エージェントが着地前検証で作る一時 test(終了時に自削除されるが、
 # 走行中に誤コミットしないよう ignore ── test-results/.last-run.json の誤コミット事故と同型)
+# ⚠ **命名規約はエージェントに伝わらない**(2026-08-02、`tests/zz-probe.test.ts` が
+# 規約外の名前で残り、untracked として検出された)。走り書きに使われる形を広めに拾う
 tests/tmp-review-*
+tests/zz-*
+tests/*.probe.test.ts
 
 # Rust ビルド中間物(出荷物 src/adapter/platform/wasm/*.wasm は commit する)
 rust/target/
