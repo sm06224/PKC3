@@ -348,6 +348,10 @@ describe('md ZIP — 実在の OS で開けるファイル名', () => {
     ['メモ 🎉', 'メモ 🎉'], // サロゲートペアを割らない
     ['CON', 'CON-'], // Windows は `CON.md` を作れない
     ['nul', 'nul-'],
+    // ⚠ Win32 は**最初のドットより前**でデバイス解決する ── `con.txt.md` も作れない
+    ['con.txt', 'con.txt-'],
+    ['NUL.log', 'NUL.log-'],
+    ['console', 'console'], // 予約語で**始まる**だけの名前は触らない
     ['x'.repeat(200), 'x'.repeat(60)],
   ])('slugForTitle(%j) → %j', (title, expected) => {
     expect(slugForTitle(title)).toBe(expected);
