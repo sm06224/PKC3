@@ -22,6 +22,11 @@ import {
   FOLDER_EXPORT_FORMAT,
 } from '@features/import/pkc2-folder-export';
 import { readEntryBundle, ENTRY_BUNDLE_FORMAT } from '@features/import/pkc2-entry-bundle';
+import {
+  readArchive,
+  restoreArchive,
+  ARCHIVE_FORMAT,
+} from '@features/export/pkc3-archive';
 import { readAssetSource, type AssetSource } from '@features/import/zip-reader';
 import {
   convertPkc2Container,
@@ -279,6 +284,8 @@ export async function importPkc2File(
     let container: unknown;
     let gzipped = false;
     let light = false;
+    /** PKC3 のアーカイブ復元(convert を通さない ── body は既に PKC-Markdown)。 */
+    let restored: ReturnType<typeof restoreArchive> | null = null;
     let zipAssets: Map<string, AssetSource> | null = null;
     let zipAlternates: Map<string, AssetSource[]> | null = null;
     const preWarnings: string[] = [];
@@ -287,12 +294,28 @@ export async function importPkc2File(
       // ⚠ 形式は **manifest.format** で決まる(拡張子でもファイル名でもない)。
       // ネストした ZIP でも各段でこれを呼ぶ ── 判別は 1 段ぶんしか効かない
       const format = await peekZipFormat(file);
-      if (format === null) {
+      // 📦 **自分の書出しを自分で読み戻す**(P6d)── バックアップの復元。
+      // ⚠ PKC2 経路の convert を通さない(body は既に PKC-Markdown。通すと二重変換)
+      if (format === ARCHIVE_FORMAT) {
+        const archive = await readArchive(file);
+        restored = restoreArchive(archive, {
+          existingLids: await deps.existingLids(),
+          existingRelationIds: deps.existingRelationIds(),
+          orderBase: deps.orderBase(),
+          genLid: deps.genLid,
+          genRelationId: deps.genRelationId,
+        });
+        zipAssets = new Map(archive.assetSources);
+        preWarnings.push(...restored.warnings);
+        container = null;
+      } else if (format === null) {
         return fail(
           `${file.name}: manifest.json が無い ZIP です ── PKC2 の書出しファイルを選んでください`,
         );
       }
-      const read =
+      const read = restored
+        ? null // アーカイブ経路は PKC2 の受理器を通さない
+        :
         format === 'pkc2-package'
           ? readPkc2Package
           : format === 'pkc2-text-bundle'
@@ -309,15 +332,17 @@ export async function importPkc2File(
                     format === ENTRY_BUNDLE_FORMAT
                     ? readEntryBundle
                     : null;
-      if (!read) {
+      if (!read && !restored) {
         // 未対応の形式は**名指しで**断る(「不明」に混ぜると原因を誤解する)
         return fail(`${format} の取込はまだ実装されていません(${file.name})`);
       }
-      const pkg = await read(file);
-      container = pkg.container;
-      zipAssets = pkg.assetSources;
-      zipAlternates = 'assetAlternates' in pkg ? pkg.assetAlternates : null;
-      preWarnings.push(...pkg.warnings);
+      if (read) {
+        const pkg = await read(file);
+        container = pkg.container;
+        zipAssets = pkg.assetSources;
+        zipAlternates = 'assetAlternates' in pkg ? pkg.assetAlternates : null;
+        preWarnings.push(...pkg.warnings);
+      }
     } else {
       const payload = parsePkc2Html(await file.text());
       container = payload.container;
@@ -325,7 +350,22 @@ export async function importPkc2File(
       light = payload.exportMeta.mode === 'light';
     }
 
-    const result = convertPkc2Container(container as never, {
+    const result = restored
+      ? {
+          entries: restored.entries.map((e) => ({ ...e })),
+          relations: restored.relations,
+          // 暫定 key は使わない ── アーカイブの key はそのまま「旧 key」として扱い、
+          // adapter が bytes のハッシュで最終 key を決める(content addressing)
+          assets: restored.assetKeys.map((k) => ({
+            key: k,
+            oldKey: k,
+            base64: '',
+            mime: '',
+          })),
+          revisionChains: [] as RevisionChain[],
+          warnings: [] as string[],
+        }
+      : convertPkc2Container(container as never, {
       // ZIP では bytes が container の外(ZIP entry)にある ── convert には
       // **key だけ**を渡す(`assetsIn[oldKey] ?? ''` がそのまま効く)
       ...(zipAssets
@@ -337,7 +377,7 @@ export async function importPkc2File(
       genLid: deps.genLid,
       genAssetKey: deps.genAssetKey,
       genRelationId: deps.genRelationId,
-    });
+        });
     result.warnings.unshift(...preWarnings);
     // ── assets: 1 件ずつ復号 → **中身のハッシュで key を決める** → 未所持なら書く
     // (content addressing / user 指示 2026-08-01「ZFS と同じ発想」)。同じ bytes は

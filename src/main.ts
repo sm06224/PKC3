@@ -20,6 +20,7 @@ import { formatSize } from '@adapter/ui/render/detail';
 import { bindActions, generateLid, type BinderServices } from '@adapter/ui/actions/binder';
 import { attachFiles } from '@adapter/ui/actions/attach';
 import { importPkc2File } from '@adapter/ui/actions/import-pkc2';
+import { exportArchive } from '@adapter/ui/actions/export-archive';
 import { createAssetGate } from '@adapter/ui/actions/asset-gate';
 import { generateAssetKey } from '@adapter/platform/storage/asset-key';
 
@@ -248,6 +249,48 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         );
       }),
     dismissNotices: () => clearNotices(regions.notices),
+    // 📤 バックアップ書出し(P6d)。⚠ **asset gate の内側** ── 書出し中に添付が
+    // 掃除されると「meta はあるが bytes が無い」を掴んで欠けたアーカイブができる
+    exportArchive: () =>
+      void withAssetGate(async () => {
+        await exportArchive(dispatcher, {
+          source: {
+            cid: DEFAULT_CID,
+            // container の題名は openContainer で刻んだもの(state は持たない)
+            title: APP_ID,
+            listEntryMetas: () =>
+              client.request({ op: 'listEntryMetas', cid: DEFAULT_CID }),
+            listBodies: (afterLid, maxBytes) =>
+              client.request({
+                op: 'listBodies',
+                cid: DEFAULT_CID,
+                maxBytes,
+                ...(afterLid ? { afterLid } : {}),
+              }),
+            listRelations: () => client.request({ op: 'listRelations', cid: DEFAULT_CID }),
+            listAssetMetas: () => client.request({ op: 'listAssetMetas', cid: DEFAULT_CID }),
+            getAssetBlob: (key) => blobs.get(DEFAULT_CID, key),
+            listRevisionLids: () =>
+              client.request({ op: 'listRevisionLids', cid: DEFAULT_CID }),
+            listRevisionMetas: (entryLid) =>
+              client.request({ op: 'listRevisionMetas', cid: DEFAULT_CID, entryLid }),
+            getRevision: (id) => client.request({ op: 'getRevision', cid: DEFAULT_CID, id }),
+          },
+          download: (name, blob) => {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = name;
+            document.body.append(a);
+            a.click();
+            a.remove();
+            // click 直後の revoke は DL を中断しうる ── 1 秒で寿命終端(添付 DL と同じ)
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+          },
+          notify: (message) => showStatus(`${statusBase} — ${message}`),
+          report: (notes) => showNotices(regions.notices, '書出し時の注意', notes),
+        });
+      }),
     purgeOrphanAssets: () =>
       void withAssetGate(async () => {
         try {
