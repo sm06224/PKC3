@@ -11,6 +11,8 @@
 import { test, expect } from '@playwright/test';
 import { gzipSync, crc32 } from 'node:zlib';
 import { readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { gotoApp, collectPageErrors, clickReal, expectImageRendered } from './helpers';
 
 // 1x1 PNG(67 bytes)
@@ -520,5 +522,52 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
   await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]:last-child');
   await expectImageRendered(page, '[data-pkc-field="attachment-media"]');
 
+  expect(errors).toEqual([]);
+});
+
+test('🔴 可搬 HTML: 書き出したファイルが**単体で開いて読める**', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  // 添付つきの中身を作る(base64 の流し込みまで往復させる)
+  await page.setInputFiles('[data-pkc-field="import-input"]', {
+    name: 'backup.pkc2.zip',
+    mimeType: 'application/zip',
+    buffer: pkc2Zip(),
+  });
+  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(2);
+
+  const dl = page.waitForEvent('download');
+  await clickReal(page, '[data-pkc-action="export-html"]');
+  const download = await dl;
+  expect(download.suggestedFilename()).toMatch(/\.html$/);
+  // ⚠ `download.path()` は**拡張子の無い**一時ファイルを指す ── `file://` で開くと
+  // Chromium が HTML と判定せず、素のテキストとして表示される(= script が動かない)。
+  // 実際に user が受け取るのは `.html` なので、`.html` として保存してから開く
+  const file = join(tmpdir(), `pkc3-portable-${process.pid}.html`);
+  await download.saveAs(file);
+
+  // 🔴 **アプリではなく書き出したファイルそのものを開く** ── 単体で成立するか
+  const viewer = await page.context().newPage();
+  const viewerErrors = collectPageErrors(viewer);
+  await viewer.goto(`file://${file}`);
+
+  // 一覧が出て、最初の entry が自動で開く
+  const items = viewer.locator('#list button');
+  await expect(items).toHaveCount(2);
+  await expect(viewer.locator('#title')).toHaveText('ZIP のノート');
+  await expect(viewer.locator('#body')).toContainText('本文');
+
+  // 添付を持つ entry へ切り替えると、base64 から復元した画像が**実際に描画**される
+  await items.nth(1).click();
+  const img = viewer.locator('#body img');
+  await expect(img).toHaveCount(1);
+  await expect(img).toHaveAttribute('src', /^blob:/);
+  await expect
+    .poll(async () => viewer.locator('#body img').evaluate((el) =>
+      (el as HTMLImageElement).complete && (el as HTMLImageElement).naturalWidth > 0))
+    .toBe(true);
+
+  expect(viewerErrors).toEqual([]);
   expect(errors).toEqual([]);
 });

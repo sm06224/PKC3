@@ -10,6 +10,7 @@
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { writeArchive, type ArchiveSource } from '@features/export/pkc3-archive';
+import { writePortableHtml } from '@features/export/pkc3-html';
 
 export interface ExportDeps {
   source: ArchiveSource;
@@ -38,13 +39,17 @@ function safeName(title: string): string {
 const stamp = (d: Date): string =>
   `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
 
+/** 書き出す形式。⚠ **可逆なのはアーカイブだけ**(UI でそう言う)。 */
+export type ExportKind = 'archive' | 'html';
+
 /**
- * アーカイブを書き出してダウンロードさせる。
+ * 書き出してダウンロードさせる。
  * @returns 書き出した entry 数(失敗時は null)
  */
 export async function exportArchive(
   dispatcher: Dispatcher,
   deps: ExportDeps,
+  kind: ExportKind = 'archive',
 ): Promise<number | null> {
   const fail = (msg: string): null => {
     dispatcher.dispatch({ type: 'OP_FAILED', error: msg });
@@ -55,21 +60,39 @@ export async function exportArchive(
     return fail('編集を終了してから書き出してください');
   }
 
-  deps.notify?.('書き出しています…');
+  deps.notify?.(kind === 'html' ? '閲覧用 HTML を書き出しています…' : '書き出しています…');
   try {
     const now = deps.now?.() ?? new Date();
-    const out = await writeArchive(deps.source, now.toISOString());
-    deps.download(`${safeName(deps.source.title)}-${stamp(now)}.pkc3.zip`, out.blob);
+    const base = `${safeName(deps.source.title)}-${stamp(now)}`;
+    const iso = now.toISOString();
 
+    let out: {
+      blob: Blob;
+      warnings: string[];
+      counts: { entries: number; assets: number; relations?: number; revisions?: number };
+    };
+    let name: string;
+    let detail: string;
+    if (kind === 'html') {
+      out = await writePortableHtml(deps.source, iso);
+      name = `${base}.html`;
+      // ⚠ **可逆ではない**ことをその場で言う(後から見分けられない形にしない ──
+      // PKC2 は light / full の別を manifest にしか書いておらず user が困っていた)
+      detail = `${out.counts.entries} 件(添付 ${out.counts.assets})── 閲覧用(取り込み直せません)`;
+    } else {
+      out = await writeArchive(deps.source, iso);
+      name = `${base}.pkc3.zip`;
+      const c = out.counts;
+      detail = `${c.entries} 件(関連 ${c.relations} / 履歴 ${c.revisions} / 添付 ${c.assets})`;
+    }
+    deps.download(name, out.blob);
     deps.report?.(out.warnings);
-    const c = out.counts;
-    const detail = `${c.entries} 件(関連 ${c.relations} / 履歴 ${c.revisions} / 添付 ${c.assets})`;
     deps.notify?.(
       out.warnings.length > 0
         ? `書き出しました: ${detail} ⚠ 注意 ${out.warnings.length} 件`
         : `書き出しました: ${detail}`,
     );
-    return c.entries;
+    return out.counts.entries;
   } catch (e) {
     return fail(`書き出しに失敗しました: ${e instanceof Error ? e.message : String(e)}`);
   }
