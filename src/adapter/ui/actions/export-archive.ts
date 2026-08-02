@@ -12,6 +12,7 @@ import type { Dispatcher } from '@adapter/state/dispatcher';
 import { writeArchive, type ArchiveSource } from '@features/export/pkc3-archive';
 import { writePortableHtml } from '@features/export/pkc3-html';
 import { writeMarkdownZip } from '@features/export/pkc3-markdown-zip';
+import { singleEntrySource } from '@features/export/single-entry-source';
 
 export interface ExportDeps {
   source: ArchiveSource;
@@ -52,6 +53,39 @@ const stamp = (d: Date): string =>
 export type ExportKind = 'archive' | 'html' | 'markdown';
 
 /**
+ * このノートだけをアーカイブとして書き出す(P6f)。
+ *
+ * user 指示 2026-08-02:「そういうのは削除じゃなくて**アーカイブエクスポートの
+ * 導線**を用意すればいいのでは?」── 消す前に手元へ出せる場所を作る。
+ * 形式はバックアップと**同じ** `.pkc3.zip` なので、そのまま取り込み直せる。
+ */
+export async function exportEntry(
+  dispatcher: Dispatcher,
+  deps: ExportDeps,
+  lid: string,
+): Promise<number | null> {
+  // ⚠ **読みの前**に断る(review M-2)。`singleEntrySource` は store を舐めるので、
+  // ガードが後ろにあると「30MB 読んでから編集中ですと言う」になる。
+  // さらに、読みの途中で編集が確定すると body と鎖の基準 tip が別時刻になり、
+  // 「読み → 編集 → 保存(ready へ戻る)→ ガード通過」で内部矛盾したアーカイブができる
+  if (dispatcher.getState().phase !== 'ready') {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから書き出してください' });
+    return null;
+  }
+  try {
+    const { source, warnings } = await singleEntrySource(deps.source, lid);
+    const n = await exportArchive(dispatcher, { ...deps, source }, 'archive', warnings);
+    return n;
+  } catch (e) {
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: `書き出しに失敗しました: ${e instanceof Error ? e.message : String(e)}`,
+    });
+    return null;
+  }
+}
+
+/**
  * 書き出してダウンロードさせる。
  * @returns 書き出した entry 数(失敗時は null)
  */
@@ -59,6 +93,8 @@ export async function exportArchive(
   dispatcher: Dispatcher,
   deps: ExportDeps,
   kind: ExportKind = 'archive',
+  /** 呼び出し側が先に見つけた注意(1 ノート書出しの「関連は落ちる」等)。 */
+  extraWarnings: readonly string[] = [],
 ): Promise<number | null> {
   const fail = (msg: string): null => {
     dispatcher.dispatch({ type: 'OP_FAILED', error: msg });
@@ -112,10 +148,11 @@ export async function exportArchive(
       detail = `${c.entries} 件(関連 ${c.relations} / 履歴 ${c.revisions} / 添付 ${c.assets})`;
     }
     deps.download(name, out.blob);
-    deps.report(out.warnings);
+    const notes = [...extraWarnings, ...out.warnings];
+    deps.report(notes);
     deps.notify?.(
-      out.warnings.length > 0
-        ? `書き出しました: ${detail} ⚠ 注意 ${out.warnings.length} 件`
+      notes.length > 0
+        ? `書き出しました: ${detail} ⚠ 注意 ${notes.length} 件`
         : `書き出しました: ${detail}`,
     );
     return out.counts.entries;

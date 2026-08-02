@@ -641,6 +641,45 @@ describe('P6e ── 鎖を書き出して復元する', () => {
     expect(await statesOf('dst2')).toEqual(before);
   });
 
+  it('🔴 アーカイブに contentHash が**実際に載る**(検査が生きている条件)', async () => {
+    // optional にしていたので writer が代入を落としても tsc が黙り、
+    // **全アーカイブで噛み合わせ検査が無効化**されていた(review H-2)。
+    // 「検査を書いた」だけでは足りない ── 材料が届いていることを見る
+    const { writeArchive, readArchive } = await import(
+      '../../src/features/export/pkc3-archive'
+    );
+    await write('hash1', doc('もと'));
+    await write('hash1', doc('いま'), { checkpoint: true });
+    const src = {
+      cid: 'c1',
+      title: 'T',
+      listEntryMetas: async () => [
+        {
+          lid: 'hash1',
+          title: 't',
+          archetype: 'text',
+          created_at: null,
+          updated_at: null,
+          entry_order: 1,
+          status: null,
+          date: null,
+          archived: 0,
+        },
+      ],
+      listBodies: async () => ({ rows: [{ lid: 'hash1', body: doc('いま') }], done: true }),
+      listRelations: async () => [],
+      listAssetMetas: async () => [],
+      getAssetBlob: async () => null,
+      listRevisionLids: async () => ['hash1'],
+      getRevisionChain: (entryLid: string) =>
+        request({ op: 'exportRevisionChain', cid: 'c1', entryLid }),
+    };
+    const got = await readArchive((await writeArchive(src, 'NOW')).blob);
+    expect(got.revisions).toHaveLength(1);
+    // 実 sqlite が刻んだ hash がアーカイブまで届いている
+    expect(got.revisions[0]!.contentHash).toMatch(/^[0-9a-f]{16}$/);
+  });
+
   it('🔴 rows の向きが逆だと壊れる(契約が効いていることの確認)', async () => {
     await write('rev1', doc('A'));
     await write('rev1', doc('B'), { checkpoint: true });

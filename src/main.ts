@@ -21,7 +21,12 @@ import { formatSize } from '@adapter/ui/render/detail';
 import { bindActions, generateLid, type BinderServices } from '@adapter/ui/actions/binder';
 import { attachFiles } from '@adapter/ui/actions/attach';
 import { importPkc2File } from '@adapter/ui/actions/import-pkc2';
-import { exportArchive, type ExportKind } from '@adapter/ui/actions/export-archive';
+import {
+  exportArchive,
+  exportEntry,
+  type ExportDeps,
+  type ExportKind,
+} from '@adapter/ui/actions/export-archive';
 import { createAssetGate } from '@adapter/ui/actions/asset-gate';
 import { generateAssetKey } from '@adapter/platform/storage/asset-key';
 
@@ -140,54 +145,57 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 「meta はあるが bytes が無い」を掴んで欠けた書出しができる。
    * 形式が増えても読み出し口は 1 つ(source)で共有する。
    */
-  const runExport = (kind: ExportKind): Promise<void> =>
+  const runExport = (kind: ExportKind | { entryLid: string }): Promise<void> =>
     withAssetGate(async () => {
-      await exportArchive(
-        dispatcher,
-        {
-          source: {
-            cid: DEFAULT_CID,
-            // ⚠ `openContainer` で刻んだ題名と**同じ文字列**を使う(別定数だと
-            // ファイル名と DB の題名が食い違う ── review L-2)
-            title: CONTAINER_TITLE,
-            listEntryMetas: () =>
-              client.request({ op: 'listEntryMetas', cid: DEFAULT_CID }),
-            listBodies: (after, maxBytes) =>
-              client.request({
-                op: 'listBodies',
-                cid: DEFAULT_CID,
-                maxBytes,
-                ...(after ? { after } : {}),
-              }),
-            listRelations: () => client.request({ op: 'listRelations', cid: DEFAULT_CID }),
-            listAssetMetas: () => client.request({ op: 'listAssetMetas', cid: DEFAULT_CID }),
-            getAssetBlob: (key) => blobs.get(DEFAULT_CID, key),
-            listRevisionLids: () =>
-              client.request({ op: 'listRevisionLids', cid: DEFAULT_CID }),
-            // ⚠ 鎖は**保存形のまま**取る(P6e)── `getRevision` で版ごとに
-            // 全文へ復元すると、アーカイブが N×M に膨らみ kind が中身と食い違う
-            getRevisionChain: (entryLid) =>
-              client.request({ op: 'exportRevisionChain', cid: DEFAULT_CID, entryLid }),
-          },
-          download: (name, blob) => {
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = name;
-            document.body.append(a);
-            a.click();
-            a.remove();
-            // click 直後の revoke は DL を中断しうる ── 1 秒で寿命終端(添付 DL と同じ)
-            setTimeout(() => URL.revokeObjectURL(url), 1000);
-          },
-          notify: (message) => showStatus(`${statusBase} — ${message}`),
-          // ⚠ **注意の中身**を出す導線(review M1 で一度落ちた)。無いと user が
-          // 見るのは「⚠ 注意 1 件」だけで、**どの添付が欠けたか**が消える ──
-          // バックアップで一番知りたい情報がそこにある
-          report: (notes) => showNotices(regions.notices, '書出し時の注意', notes),
+      const deps: ExportDeps = {
+        source: {
+          cid: DEFAULT_CID,
+          // ⚠ `openContainer` で刻んだ題名と**同じ文字列**を使う(別定数だと
+          // ファイル名と DB の題名が食い違う ── review L-2)
+          title: CONTAINER_TITLE,
+          listEntryMetas: () =>
+            client.request({ op: 'listEntryMetas', cid: DEFAULT_CID }),
+          // ⚠ 1 件だけの読み口(P6f)── 無いと 1 ノート書出しが全 body を舐める
+          getBody: async (lid) =>
+            (await client.request({ op: 'getBody', cid: DEFAULT_CID, lid })) ?? null,
+          listBodies: (after, maxBytes) =>
+            client.request({
+              op: 'listBodies',
+              cid: DEFAULT_CID,
+              maxBytes,
+              ...(after ? { after } : {}),
+            }),
+          listRelations: () => client.request({ op: 'listRelations', cid: DEFAULT_CID }),
+          listAssetMetas: () => client.request({ op: 'listAssetMetas', cid: DEFAULT_CID }),
+          getAssetBlob: (key) => blobs.get(DEFAULT_CID, key),
+          listRevisionLids: () =>
+            client.request({ op: 'listRevisionLids', cid: DEFAULT_CID }),
+          // ⚠ 鎖は**保存形のまま**取る(P6e)── `getRevision` で版ごとに
+          // 全文へ復元すると、アーカイブが N×M に膨らみ kind が中身と食い違う
+          getRevisionChain: (entryLid) =>
+            client.request({ op: 'exportRevisionChain', cid: DEFAULT_CID, entryLid }),
         },
-        kind,
-      );
+        download: (name, blob) => {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = name;
+          document.body.append(a);
+          a.click();
+          a.remove();
+          // click 直後の revoke は DL を中断しうる ── 1 秒で寿命終端(添付 DL と同じ)
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        },
+        notify: (message) => showStatus(`${statusBase} — ${message}`),
+        // ⚠ **注意の中身**を出す導線(review M1 で一度落ちた)。無いと user が
+        // 見るのは「⚠ 注意 1 件」だけで、**どの添付が欠けたか**が消える ──
+        // バックアップで一番知りたい情報がそこにある
+        report: (notes) => showNotices(regions.notices, '書出し時の注意', notes),
+      };
+      // 1 ノートだけの書出しも**同じ実行部・同じ形式**を通る(P6f)──
+      // 別経路にすると「1 件書出しだけ壊れている」が起きる
+      if (typeof kind === 'object') await exportEntry(dispatcher, deps, kind.entryLid);
+      else await exportArchive(dispatcher, deps, kind);
     });
 
   const services: BinderServices = {
@@ -322,6 +330,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     exportArchive: () => void runExport('archive'),
     exportHtml: () => void runExport('html'),
     exportMarkdown: () => void runExport('markdown'),
+    exportEntry: (lid) => void runExport({ entryLid: lid }),
+    // 破壊的操作(削除)を止めるための観測点(P6f review M-2)
+    busy: () => withAssetGate.busy,
     purgeOrphanAssets: () =>
       void withAssetGate(async () => {
         try {

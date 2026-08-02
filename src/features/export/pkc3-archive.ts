@@ -75,8 +75,10 @@ export interface ArchiveRevision {
    * 無いと「鎖が tip とズレていても行数さえ合えば通る」= 誤った履歴が静かに
    * 書かれ、書いた側が hash を計算し直すので**永久に自己証明される**。
    * v1 のアーカイブは持たない ── その場合は検査しない。
+   * ⚠ **optional にしない**(review H-2)── optional だと writer が代入を
+   * 落としても tsc が黙り、**全アーカイブで検査が無効化される**。実際そうなっていた。
    */
-  contentHash?: string | null;
+  contentHash: string | null;
 }
 
 export interface ArchiveAsset {
@@ -103,6 +105,13 @@ export interface ArchiveSource {
       archived: number;
     }>
   >;
+  /**
+   * 1 件だけ本文を引く(P6f)。**1 ノート書出しのため**にある ──
+   * 無いと目的の lid に当たるまで全 body をページングで舐める(実測: 300 件 ×
+   * 100KB の container で、対象の 300 倍の本文が worker 境界を越えた)。
+   * ⚠ 任意 ── test の fake は `listBodies` だけでも動く
+   */
+  getBody?(lid: string): Promise<string | null>;
   listBodies(
     after: { entryOrder: number; lid: string } | undefined,
     maxBytes: number,
@@ -240,6 +249,8 @@ export async function writeArchive(src: ArchiveSource, exportedAt: string): Prom
         archetype: rv.archetype,
         kind: rv.kind,
         snapshot: rv.snapshot,
+        // 🔴 復元側の噛み合わせ検査に使う ── **落とすと検査が丸ごと無効化される**
+        contentHash: rv.contentHash,
       };
       parts.push(revCount === 0 ? j(rev) : `,${j(rev)}`);
       revCount++;
