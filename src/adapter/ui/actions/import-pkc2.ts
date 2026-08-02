@@ -164,9 +164,9 @@ async function readWithFallback(
   src: AssetSource,
   alternates: readonly AssetSource[] | undefined,
   onFallback: (n: number) => void,
-): Promise<Blob> {
+): Promise<{ blob: Blob; src: AssetSource }> {
   try {
-    return await readAssetSource(src);
+    return { blob: await readAssetSource(src), src };
   } catch (first) {
     let n = 0;
     for (const alt of alternates ?? []) {
@@ -175,7 +175,11 @@ async function readWithFallback(
       try {
         const blob = await readAssetSource(alt);
         onFallback(n);
-        return blob;
+        // ⚠ **復号は「実際に読めた在り処」の符号化で決める**(review M-5)。
+        // 控えは符号化が違いうる ── PKC2 は同じ添付を `.text.zip`(生バイト)と
+        // `.entry.zip`(base64)の両方に入れるので、先頭のフラグで解釈すると
+        // 控えから読んだ瞬間に base64 の文字列が添付として保存される
+        return { blob, src: alt };
       } catch {
         // 次の複製へ
       }
@@ -385,11 +389,13 @@ export async function importPkc2File(
           keyMap.set(a.key, key);
           await deps.putBlob(
             key,
-            await readWithFallback(src, zipAlternates?.get(a.oldKey!), (n) =>
-              result.warnings.push(
-                `添付が壊れていたので ${n} 個目の複製から復元しました: ${a.oldKey}`,
-              ),
-            ),
+            (
+              await readWithFallback(src, zipAlternates?.get(a.oldKey!), (n) =>
+                result.warnings.push(
+                  `添付が壊れていたので ${n} 個目の複製から復元しました: ${a.oldKey}`,
+                ),
+              )
+            ).blob,
           );
           await deps.putAssetMeta({
             key,
@@ -408,16 +414,15 @@ export async function importPkc2File(
         //  legacy 添付だけが必ず復号に失敗して死んだ参照になる)
         // ⚠ 読むのは **`src.zip`**(外側の `file` ではない)── batch では内側 ZIP の
         // entry なので、外側から読むと別位置を読んで壊れる
-        const bytes = src
-          ? await bytesOfSource(
-              await readWithFallback(src, zipAlternates?.get(a.oldKey!), (n) =>
-                result.warnings.push(
-                  `添付が壊れていたので ${n} 個目の複製から復元しました: ${a.oldKey}`,
-                ),
-              ),
-              src,
-            )
-          : await decodeAssetBytes(consumeBase64(a), gzipped && a.oldKey !== null);
+        let bytes: Uint8Array<ArrayBuffer>;
+        if (src) {
+          const got = await readWithFallback(src, zipAlternates?.get(a.oldKey!), (n) =>
+            result.warnings.push(`添付が壊れていたので ${n} 個目の複製から復元しました: ${a.oldKey}`),
+          );
+          bytes = await bytesOfSource(got.blob, got.src);
+        } else {
+          bytes = await decodeAssetBytes(consumeBase64(a), gzipped && a.oldKey !== null);
+        }
         const { key, hash } = await identifyBytes(bytes);
         keyMap.set(a.key, key); // ⚠ put を省いた時も**必ず**写す(review M-30)
         if (!known.has(key)) {

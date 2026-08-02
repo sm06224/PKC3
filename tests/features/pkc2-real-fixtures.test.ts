@@ -55,19 +55,12 @@ describe('🔴 実物: pkc2-package', () => {
     expect(got.warnings).toEqual([]);
 
     const res = convert(got.container, [...got.assetSources.keys()]);
-    // folder 3 + text 2 + textlog 1 + todo 1 + attachment 1
-    expect(res.entries).toHaveLength(8);
-    expect(res.entries.filter((e) => e.archetype === 'folder')).toHaveLength(3);
+    // folder 4(ASSETS 含む)+ text 2 + textlog 1 + todo 1 + attachment 1
+    expect(res.entries).toHaveLength(9);
+    expect(res.entries.filter((e) => e.archetype === 'folder')).toHaveLength(4);
     // 🔑 **非 structural の relation も入る**(package だけが container の完全な写し)
-    expect(res.relations.map((r) => r.kind).sort()).toEqual([
-      'semantic',
-      'structural',
-      'structural',
-      'structural',
-      'structural',
-      'structural',
-      'structural',
-    ]);
+    expect(res.relations.filter((r) => r.kind === 'structural')).toHaveLength(8);
+    expect(res.relations.filter((r) => r.kind === 'semantic')).toHaveLength(1);
     // 履歴も鎖として入る
     expect(res.revisionChains).toHaveLength(1);
     expect(res.revisionChains[0]!.snapshots).toHaveLength(2);
@@ -145,7 +138,7 @@ describe('🔴 実物: folder-export(段⑤)', () => {
     const t = new Map(c.relations.map((r) => [r.to, r.from]));
 
     expect([...byLid.values()].filter((e) => e.archetype === 'folder').map((e) => e.title)).toEqual(
-      ['仕事', '2026 年', '空フォルダ'],
+      ['仕事', '2026 年', '空フォルダ', 'ASSETS'],
     );
     // 実データの階層: 仕事 > 2026 年 > 議事録 / 作業ログ、仕事 > 直下メモ
     expect(t.get('f-2026')).toBe('f-root');
@@ -153,7 +146,11 @@ describe('🔴 実物: folder-export(段⑤)', () => {
     expect(t.get('n-1')).toBe('f-2026');
     expect(t.get('g-1')).toBe('f-2026');
     expect(t.get('n-2')).toBe('f-root');
-    expect(got.warnings).toEqual([]);
+    // ⚠ 実 PKC2 の entry は created_at / updated_at を必ず持つ ── 受け皿が無いので言う
+    expect(got.warnings).toEqual([
+      '1 件の entry で、この形式にしか無い情報を取り込めませんでした(created_at / updated_at)' +
+        ' ── PKC3 側に受け皿がまだありません',
+    ]);
   });
 
   it('🔑 v2 ── `.entry.zip` の todo まで取り込む(PKC2 は無言 skip していた)', async () => {
@@ -169,8 +166,30 @@ describe('🔴 実物: folder-export(段⑤)', () => {
     expect(t.get('t-1')).toBe('f-root');
     expect(t.get('n-1')).toBe('f-2026');
     expect(t.get('n-2')).toBe('f-root');
-    // 飛ばしたものは無い
-    expect(got.warnings).toEqual([]);
+    // 🔴 **添付が 1 件だけ**(H-2: assetsForSynthesis を通さないと幽霊が増える)
+    expect(c.entries.filter((e) => e.archetype === 'attachment')).toHaveLength(1);
+    // 落ちる情報は件数つきで言う(todo と attachment の 2 件)
+    expect(got.warnings).toEqual([
+      '2 件の entry で、この形式にしか無い情報を取り込めませんでした(created_at / updated_at)' +
+        ' ── PKC3 側に受け皿がまだありません',
+    ]);
+  });
+
+  it('🔴 実データ形: 画像を貼ったノートのフォルダを書き出しても全滅しない', async () => {
+    // 🔴 PKC2 は添付を貼ると ASSETS サブフォルダを自動生成して attachment entry を
+    // そこへ置く(app-state.ts:863-886)。folder-export は descendant を再帰収集
+    // するので、**画像を貼ったノートを含むフォルダを書き出すと必ず**
+    // `.text.zip`(生バイト)と `.entry.zip`(base64)が同じ key で同居する。
+    // これを「違う中身」と見て断っていたので、**既定の形の書出しが全滅していた**
+    const got = await readFolderExportBundle(load('folder-export-v2.zip'));
+    const c = got.container as Synth;
+    // 添付は 1 件に畳まれ、両方の符号化が控えとして残る
+    expect([...got.assetSources.keys()]).toEqual(['ast-shared']);
+    // 3 本 = 議事録.text.zip(生)+ 直下メモ.text.zip(生)+ attachment.entry.zip(base64)
+    expect(got.assetAlternates.get('ast-shared')).toHaveLength(3);
+    // 🔑 採用されるのは**生バイト側**(復号が要らず name/mime も正しい)
+    expect(got.assetSources.get('ast-shared')!.base64).toBeUndefined();
+    expect(c.entries.filter((e) => e.archetype === 'attachment')).toHaveLength(1);
   });
 
   it('🔴 v2 の manifest が実際に version 2 + other_count を持つ', async () => {
@@ -192,7 +211,9 @@ describe('🔴 実物: 形式判別', () => {
       ['mixed-container.zip', 'pkc2-mixed-container-bundle'],
       ['folder-export-v1.zip', 'pkc2-folder-export-bundle'],
       ['folder-export-v2.zip', 'pkc2-folder-export-bundle'],
-      ['single.entry.zip', 'pkc2-entry-bundle'], // 段⑥(まだ受理しない)
+      ['single.entry.zip', 'pkc2-entry-bundle'],
+      ['attachment.entry.zip', 'pkc2-entry-bundle'],
+      ['text-meta.entry.zip', 'pkc2-entry-bundle'],
     ];
     for (const [file, format] of cases) {
       expect(await peekZipFormat(load(file)), file).toBe(format);

@@ -1034,6 +1034,80 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(written[0]!.archetype).toBe('attachment');
   });
 
+  it('[P6c 段⑥] 🔴 控えから復元するとき **控え自身の符号化**で復号する', async () => {
+    // 生バイト側(先頭)を壊し、base64 の控えから復元させる。先頭のフラグで
+    // 解釈すると base64 の文字列がそのまま保存される(開けないのに壊れて見えない)
+    const png = bytesOf('PNGBYTES');
+    const b64 = bytesOf(btoa('PNGBYTES'));
+    const inner = async (
+      name: string,
+      files: Array<{ name: string; bytes: Uint8Array; corruptCrc?: boolean }>,
+      manifest: Record<string, unknown>,
+      payload: { name: string; bytes: Uint8Array },
+    ): Promise<Uint8Array> => {
+      const z = await buildZip([
+        { name: 'manifest.json', bytes: bytesOf(JSON.stringify(manifest)) },
+        payload,
+        ...files,
+      ]);
+      return new Uint8Array(await z.arrayBuffer());
+    };
+    const textZip = await inner(
+      'a',
+      [{ name: 'assets/k.png', bytes: png, corruptCrc: true }], // 🔴 壊す
+      {
+        format: 'pkc2-text-bundle',
+        version: 1,
+        source_lid: 'n1',
+        source_title: 'A',
+        assets: { k: { name: 'dot.png', mime: 'image/png' } },
+      },
+      { name: 'body.md', bytes: bytesOf('# A\n![図](asset:k)\n') },
+    );
+    const entryZip = await inner(
+      'b',
+      [{ name: 'assets/k', bytes: b64 }], // base64 の控え(健全)
+      { format: 'pkc2-entry-bundle', version: 1, archetype: 'attachment', lid: 'a1', title: 'dot.png' },
+      {
+        name: 'entry.json',
+        bytes: bytesOf(
+          JSON.stringify({
+            lid: 'a1',
+            title: 'dot.png',
+            archetype: 'attachment',
+            body: JSON.stringify({ name: 'dot.png', mime: 'image/png', asset_key: 'k' }),
+          }),
+        ),
+      },
+    );
+    const zip = await buildZip([
+      {
+        name: 'manifest.json',
+        bytes: bytesOf(
+          JSON.stringify({
+            format: 'pkc2-folder-export-bundle',
+            version: 2,
+            entries: [
+              { lid: 'n1', title: 'A', archetype: 'text', filename: 'n.text.zip' },
+              { lid: 'a1', title: 'dot.png', archetype: 'attachment', filename: 'a.entry.zip' },
+            ],
+            folders: [{ lid: 'root', title: 'R', parent_lid: null }],
+          }),
+        ),
+      },
+      { name: 'n.text.zip', bytes: textZip },
+      { name: 'a.entry.zip', bytes: entryZip },
+    ]);
+
+    const { d, deps, blobs } = harness();
+    await importPkc2File(d, deps, new File([zip], 'f.zip'));
+
+    expect(blobs.size).toBe(1);
+    const bytes = await blobs.get([...blobs.keys()][0]!)!.text();
+    // 🔑 控えは base64 なので、復号されて 'PNGBYTES' になる
+    expect(bytes).toBe('PNGBYTES');
+  });
+
   it('[P6c 段⑥] 🔴 base64 の添付は**閾値超でも**直流ししない', async () => {
     // 閾値超の経路は「Blob をそのまま putBlob」なので、base64 の在り処を
     // 乗せると **base64 の文字列が添付として保存される**(開けないのに

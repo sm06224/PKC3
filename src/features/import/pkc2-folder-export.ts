@@ -41,7 +41,7 @@ import {
   type Pkc2ContainerBundle,
 } from './pkc2-container-bundle';
 import { buildFolderGraph, type FolderNode } from './folder-graph';
-import { droppedFieldsWarning } from './pkc2-entry-bundle';
+import { assetsForSynthesis, droppedFieldsWarning } from './pkc2-entry-bundle';
 
 export const FOLDER_EXPORT_FORMAT = 'pkc2-folder-export-bundle';
 
@@ -140,7 +140,7 @@ export async function readFolderExportBundle(zip: Blob): Promise<Pkc2ContainerBu
     );
   }
   // 段⑥: `.entry.zip` にしか無い情報のうち、PKC3 に受け皿が無いものを言う
-  warnings.push(...droppedFieldsWarning(inner.dropped));
+  warnings.push(...droppedFieldsWarning(inner.dropped.fields, inner.dropped.entries));
   if (inner.failed.length > 0) {
     warnings.push(`${inner.failed.length} 件の bundle を取り込めませんでした(残りは取り込みます)`);
   }
@@ -268,7 +268,16 @@ export async function readFolderExportBundle(zip: Blob): Promise<Pkc2ContainerBu
 
   return {
     manifest,
-    container: synthesize(inner.assets, [...folderEntries, ...mains], relations),
+    // ⚠ **`assetsForSynthesis` を必ず通す**(review H-2)── v2 には attachment
+    // そのものの `.entry.zip` が入るので、素通しすると attachment が 2 件になる。
+    // しかも convert の `mimeByOldKey` は**先頭の attachment を採る**ので、
+    // 合成した幽霊(`application/octet-stream`)が本物の `image/png` を上書きし、
+    // putBlob の Blob type と meta.mime まで octet-stream に壊れる(無言)
+    container: synthesize(
+      assetsForSynthesis(inner.assets, [...folderEntries, ...mains]),
+      [...folderEntries, ...mains],
+      relations,
+    ),
     assetSources: sourcesOf(inner.assets),
     assetAlternates: inner.alternates,
     warnings,

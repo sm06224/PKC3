@@ -15,6 +15,37 @@ type Synth = {
   relations: Array<{ id: string; from: string; to: string; kind: string }>;
 };
 
+/** 段⑥: 添付つきの `.entry.zip`(`assets/<key>` は **base64 テキスト**)。 */
+async function entryBundleWithAsset(
+  lid: string,
+  title: string,
+  archetype: string,
+  key: string,
+  b64: Uint8Array,
+): Promise<Uint8Array> {
+  const zip = await buildZip([
+    {
+      name: 'manifest.json',
+      bytes: bytesOf(
+        JSON.stringify({ format: 'pkc2-entry-bundle', version: 1, archetype, lid, title }),
+      ),
+    },
+    {
+      name: 'entry.json',
+      bytes: bytesOf(
+        JSON.stringify({
+          lid,
+          title,
+          archetype,
+          body: JSON.stringify({ name: title, mime: 'image/png', asset_key: key }),
+        }),
+      ),
+    },
+    { name: `assets/${key}`, bytes: b64 },
+  ]);
+  return new Uint8Array(await zip.arrayBuffer());
+}
+
 /** 段⑥: `.entry.zip`(entry.json + base64 assets)。 */
 async function entryBundle(lid: string, title: string, archetype: string): Promise<Uint8Array> {
   const zip = await buildZip([
@@ -32,7 +63,11 @@ async function entryBundle(lid: string, title: string, archetype: string): Promi
   return new Uint8Array(await zip.arrayBuffer());
 }
 
-async function textBundle(lid: string | null, title = lid ?? 'メモ'): Promise<Uint8Array> {
+async function textBundle(
+  lid: string | null,
+  title = lid ?? 'メモ',
+  o: { assets?: Record<string, { name: string; mime: string }>; files?: FixtureEntry[] } = {},
+): Promise<Uint8Array> {
   const zip = await buildZip([
     {
       name: 'manifest.json',
@@ -43,12 +78,13 @@ async function textBundle(lid: string | null, title = lid ?? 'メモ'): Promise<
           // null なら **source_lid を書かない**(readBundleParts が定数へ落ちる形)
           ...(lid === null ? {} : { source_lid: lid }),
           source_title: title,
-          assets: {},
+          assets: o.assets ?? {},
           compacted: false,
         }),
       ),
     },
     { name: 'body.md', bytes: bytesOf(`# ${title}\n`) },
+    ...(o.files ?? []),
   ]);
   return new Uint8Array(await zip.arrayBuffer());
 }
@@ -420,6 +456,47 @@ describe('readFolderExportBundle', () => {
     const got = await readFolderExportBundle(zip);
     expect((got.container as Synth).relations).toEqual([]);
     expect(got.warnings[0]).toMatch(/フォルダ構造を復元できませんでした/);
+  });
+
+  it('🔴 base64 が先に来ても**生バイト側**を採る(復号が要らず mime も正しい)', async () => {
+    // ⚠ 実 fixture では text が先に来るので、この順序でしか差が出ない
+    // (= 採用側の選択が pin されない)。base64 を採ってしまうと、
+    // 復号が 1 回余計に走り、name/mime も octet-stream に落ちる
+    // ⚠ btoa は Latin-1 しか受けない ── fixture は ASCII で作る
+    const png = bytesOf('PNGBYTES');
+    const b64 = bytesOf(btoa('PNGBYTES'));
+    const zip = await outer(
+      base({
+        version: 2,
+        text_count: 1,
+        other_count: 1,
+        entries: [
+          // 🔑 **添付の .entry.zip が先**
+          { lid: 'a1', title: 'dot.png', archetype: 'attachment', filename: 'a.entry.zip' },
+          { lid: 'n1', title: 'A', archetype: 'text', filename: 'n1.text.zip' },
+        ],
+        folders: [{ lid: 'root', title: 'R', parent_lid: null }],
+      }),
+      [
+        {
+          name: 'a.entry.zip',
+          bytes: await entryBundleWithAsset('a1', 'dot.png', 'attachment', 'k', b64),
+        },
+        {
+          name: 'n1.text.zip',
+          bytes: await textBundle('n1', 'A', {
+            assets: { k: { name: 'dot.png', mime: 'image/png' } },
+            files: [{ name: 'assets/k.png', bytes: png }],
+          }),
+        },
+      ],
+    );
+    const got = await readFolderExportBundle(zip);
+    // 採用は生バイト側 ── base64 の印が付いていない
+    expect(got.assetSources.get('k')!.base64).toBeUndefined();
+    expect(got.assetAlternates.get('k')).toHaveLength(2);
+    // 先頭 = 採用したもの
+    expect(got.assetAlternates.get('k')![0]).toBe(got.assetSources.get('k'));
   });
 
   it('件数の不一致は warning に出す(PKC2 は読んでさえいない)', async () => {

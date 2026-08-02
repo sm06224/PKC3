@@ -15,6 +15,16 @@ cd /path/to/PKC2 && npx tsx <gen-fixtures.ts>   # ← cwd は PKC2(@features/* �
 cd /path/to/PKC2 && git checkout -- dist/       # 元に戻す
 ```
 
+🔴 **container は実データ形にしてある**(2026-08-02 の review 指摘):
+- PKC2 は添付を貼ると **`ASSETS` サブフォルダを自動生成**して attachment entry を
+  そこへ置く(`app-state.ts:863-886`)。folder-export は descendant を再帰収集するので、
+  **画像を貼ったノートを含むフォルダを書き出すと必ず**
+  「`.text.zip`(`assets/<key>.png` = 生バイト)」と
+  「`ASSETS/….entry.zip`(`assets/<key>` = base64)」が同じ key で同居する。
+  ⚠ これを「違う中身」と見て断っていたので**既定の形の書出しが全滅していた**
+- 実 PKC2 の `addEntry` は `created_at` / `updated_at` を**必ず**入れる ── 揃えてある
+  (揃えないと「warning 0 件」を pin してしまい、実データでは成立しない)
+
 生成スクリプトは PKC2 の `buildPackageZip` / `buildTextBundle` /
 `buildTextsContainerBundle` / `buildTextlogsContainerBundle` /
 `buildMixedContainerBundle` / `buildFolderExportBundle` / `buildEntryBundle` を
@@ -34,7 +44,9 @@ cd /path/to/PKC2 && git checkout -- dist/       # 元に戻す
 | `mixed-container.zip` | `pkc2-mixed-container-bundle` | ④ |
 | `folder-export-v1.zip` | `pkc2-folder-export-bundle`(v1) | ⑤ |
 | `folder-export-v2.zip` | `pkc2-folder-export-bundle`(v2、`.entry.zip` 入り) | ⑤ |
-| `single.entry.zip` | `pkc2-entry-bundle` | ⑥(**未受理**) |
+| `single.entry.zip` | `pkc2-entry-bundle`(todo) | ✅ ⑥ |
+| `attachment.entry.zip` | `pkc2-entry-bundle`(attachment + base64 asset) | ✅ ⑥ |
+| `text-meta.entry.zip` | `pkc2-entry-bundle`(created_at / tags / color_tag つき) | ✅ ⑥ |
 
 ## 旧版の writer が要るので実体を作れないもの
 

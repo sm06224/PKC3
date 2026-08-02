@@ -62,7 +62,11 @@ describe('readEntryBundle — 実物', () => {
     expect(c.entries).toHaveLength(1);
     expect(c.entries[0]).toMatchObject({ lid: 't-1', title: 'やること', archetype: 'todo' });
     expect(JSON.parse(c.entries[0]!.body)).toMatchObject({ status: 'open', date: '2026-08-10' });
-    expect(got.warnings).toEqual([]);
+    // ⚠ 実 PKC2 の entry は created_at / updated_at を必ず持つ ── 受け皿が無いので言う
+    expect(got.warnings).toEqual([
+      '1 件の entry で、この形式にしか無い情報を取り込めませんでした(created_at / updated_at)' +
+        ' ── PKC3 側に受け皿がまだありません',
+    ]);
   });
 
   it('🔑 `assets/<key>` の **base64 テキスト**を復号して扱う', async () => {
@@ -88,7 +92,9 @@ describe('readEntryBundle — 実物', () => {
   it('🔴 PKC3 に受け皿が無い field は**落ちると言う**', async () => {
     // text-meta.entry.zip は created_at / tags / color_tag を持つ実物
     const got = await readEntryBundle(real('text-meta.entry.zip'));
-    expect(got.warnings.join('\n')).toMatch(/取り込めませんでした.*created_at.*tags.*color_tag/);
+    expect(got.warnings.join('\n')).toMatch(
+      /1 件の entry で.*created_at.*updated_at.*tags.*color_tag/,
+    );
     // ただし本文と添付は入る(落ちるのはメタだけ)
     const c = got.container as Synth;
     expect(c.entries.find((e) => e.archetype === 'text')!.body).toContain('asset:ast-shared');
@@ -180,8 +186,33 @@ describe('assetsForSynthesis / droppedFieldsWarning', () => {
     expect([...out.keys()]).toEqual(['k1']);
   });
 
-  it('落ちる field が無ければ何も言わない', () => {
+  it('落ちる field が無ければ何も言わない / **件数を出す**', () => {
     expect(droppedFieldsWarning([])).toEqual([]);
+    expect(droppedFieldsWarning(['tags'], 0)).toEqual([]);
     expect(droppedFieldsWarning(['tags', 'tags'])).toHaveLength(1);
+    // 🔑 300 件の書出しで 1 件なのか 300 件なのかが分からないと判断できない
+    expect(droppedFieldsWarning(['tags'], 42)[0]).toMatch(/^42 件の entry で/);
+  });
+
+  it('missing_asset_count は唯一の監査証跡なので言う', async () => {
+    const zip = await buildZip([
+      {
+        name: 'manifest.json',
+        bytes: bytesOf(
+          JSON.stringify({
+            format: 'pkc2-entry-bundle',
+            version: 1,
+            archetype: 'text',
+            missing_asset_count: 2,
+          }),
+        ),
+      },
+      {
+        name: 'entry.json',
+        bytes: bytesOf(JSON.stringify({ lid: 'x', title: 'x', archetype: 'text', body: 'x' })),
+      },
+    ]);
+    const got = await readEntryBundle(zip);
+    expect(got.warnings[0]).toMatch(/書出し時点で既に失われていた添付が 2 件/);
   });
 });

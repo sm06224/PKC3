@@ -140,6 +140,15 @@ export async function readEntryBundleParts(
   if (typeof manifest.asset_count === 'number' && manifest.asset_count !== assets.size) {
     warnings.push(`manifest の asset 件数が中身と違います(${manifest.asset_count} ≠ ${assets.size})`);
   }
+  // ⚠ この形式には `missing_asset_keys` が**無い**ので、これが唯一の監査証跡
+  // (review M-3)── text/textlog bundle は key を名指しできるが、ここは件数だけ。
+  // 宣言だけして読まないのは PKC2 を批判している当の振る舞い
+  if (typeof manifest.missing_asset_count === 'number' && manifest.missing_asset_count > 0) {
+    warnings.push(
+      `書出し時点で既に失われていた添付が ${manifest.missing_asset_count} 件あります` +
+        '(この形式は key を記録しないので、どれかは分かりません)',
+    );
+  }
 
   const dropped = DROPPED_FIELDS.filter((f) => record[f] !== undefined && record[f] !== null);
 
@@ -181,12 +190,16 @@ export function assetsForSynthesis(
   return out;
 }
 
-/** 落ちる field を 1 行の warning にまとめる(件数 0 なら何も言わない)。 */
-export function droppedFieldsWarning(dropped: readonly string[]): string[] {
-  if (dropped.length === 0) return [];
+/**
+ * 落ちる field を 1 行の warning にまとめる。
+ * ⚠ **件数を必ず出す**(review M-2)── 300 件の書出しで 1 件なのか 300 件なのかが
+ * 分からないと、user は「無視してよい注意」か「取り込み直すべき」かを判断できない。
+ */
+export function droppedFieldsWarning(dropped: readonly string[], entries = 1): string[] {
+  if (dropped.length === 0 || entries === 0) return [];
   const uniq = [...new Set(dropped)].join(' / ');
   return [
-    `この形式にしか無い情報を取り込めませんでした(${uniq})` +
+    `${entries} 件の entry で、この形式にしか無い情報を取り込めませんでした(${uniq})` +
       ' ── PKC3 側に受け皿がまだありません',
   ];
 }
@@ -199,6 +212,6 @@ export async function readEntryBundle(zip: Blob): Promise<Pkc2Bundle> {
     manifest: parts.manifest,
     container: synthesize(assetsForSynthesis(parts.assets, mains), mains),
     assetSources: sourcesOf(parts.assets) as Map<string, AssetSource>,
-    warnings: [...parts.warnings, ...droppedFieldsWarning(parts.dropped)],
+    warnings: [...parts.warnings, ...droppedFieldsWarning(parts.dropped, 1)],
   };
 }
