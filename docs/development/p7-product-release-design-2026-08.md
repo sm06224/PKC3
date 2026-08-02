@@ -110,7 +110,7 @@ install した user は「オフラインで使える」「md を開ける」と
 |---|---|---|
 | ① | ✅ **product ビルドから `.map` を外す** + size の tripwire を Pages 用に読み替え | 1 行に近く、以降の全計測の前提が変わる |
 | ② | ✅ **素の md 受理器**(`readPlainMarkdown`)+ 取込導線 | ③ の前提。単体で価値がある(md を drag&drop できる) |
-| ③ | **`launchQueue` の受け口** ── 宣言と実体を一致させる | ② が無いと書けない |
+| ③ | ✅ **`launchQueue` の受け口** ── 宣言と実体を一致させる | ② が無いと書けない |
 | ④ | **SW の precache**(生成 + navigation network-first + 旧 cache 掃除)+ オフライン smoke | 独立 |
 | ⑤ | **更新通知**(新しい版があります) | ④ の上 |
 | ⑥ | **マニュアル + 移行ガイド**(PKC2 → PKC3) | 実装が固まってから書く |
@@ -299,6 +299,30 @@ markdown-it も `\r\n?` を `\n` に正規化してから parse する ── �
 ファイルを選べない**)、`multiple` を有効化(md は複数選択 = 1 件ずつ entry)。
 混在(md + PKC2)と PKC2 の複数選択は**断る** ── 「md だけ入って PKC2 が黙って
 落ちた」を作らない。
+
+### 段③ 実装記録(2026-08-02 着地)
+
+`adapter/platform/launch-queue.ts`(受け口)+ `main.ts` の配線。
+OS から md をダブルクリック → `window.launchQueue` → **段② の取込規則**へ流す。
+
+🔴 **受け口は `await` より前に張る。** `launchQueue` は「起動時に一度だけ」値を渡す
+契約なので、storage の初期化を待ってから登録すると**取りこぼす**。同期的に consumer を
+張って**溜めておき**、アプリが用意できてから流す形にした。
+
+🔑 **受け口は配線だけを持つ。** 何を受けるか(拡張子)も、どう entry にするかも
+`import-file.ts` / `plain-markdown.ts` がすでに規則を持っている ── 受け口が独自の
+判定を持つと、宣言と実体がまた 3 つに割れる。返り値の `AppHandle.importFiles` は
+**binder に配ったものと同じ関数**である(2 経路にしない)。
+
+parity は 3 者で縛った ── manifest の `accept` / `MARKDOWN_EXTENSIONS` / 受け口を
+通って届くファイル。`action` が `./` であること(別 URL を開くと受け口に届かない)も見る。
+
+⚠ 変異試験(13 件)で 3 件生き残り、**3 件とも「重ねたガード」だった**:
+`if (!handles || handles.length === 0)` の後半、`if (files.length === 0) return;`、
+どちらも `flush()` 側の同じ判定に救われていた。**消しても誰も気づかない枝**なので
+削って規則を 1 か所に寄せた。残る `!handles` は本当に必要(無いと TypeError)だが、
+「呼ばれないこと」だけを見る test では**投げても通って**しまうので、
+async 全体を try/catch で包んで `onError` に出し、**静かに成功していること**を assert した。
 
 ---
 

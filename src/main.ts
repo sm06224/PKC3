@@ -19,6 +19,7 @@ import { SidebarRenderer } from '@adapter/ui/render/sidebar';
 import { CenterRouter } from '@adapter/ui/render/center';
 import { formatSize } from '@adapter/ui/render/detail';
 import { bindActions, generateLid, type BinderServices } from '@adapter/ui/actions/binder';
+import { armLaunchQueue, type LaunchTarget } from '@adapter/platform/launch-queue';
 import { attachFiles } from '@adapter/ui/actions/attach';
 import { importFiles } from '@adapter/ui/actions/import-file';
 import {
@@ -38,6 +39,11 @@ const CONTAINER_TITLE = 'PKC3';
 export interface AppHandle {
   dispatcher: Dispatcher;
   storageVfs: InitResult['vfs'];
+  /**
+   * 外から取り込む唯一の入口(P7 段③)。`launchQueue` はこれを呼ぶ ──
+   * ⚠ 受け口が独自の判定を持つと、宣言と実体がまた割れる
+   */
+  importFiles(files: File[]): void;
 }
 
 /**
@@ -392,14 +398,32 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     metas,
     relations, // 常駐(§6: 肥大が数字で出たら SQL query 化へ移す)
   });
-  return { dispatcher, storageVfs: init.vfs };
+  return {
+    dispatcher,
+    storageVfs: init.vfs,
+    // ⚠ binder に配ったものと**同じ関数**を返す(2 経路にしない)
+    importFiles: (files) => services.importFiles?.(files),
+  };
 }
 
 function bootstrap(): void {
   const root = document.querySelector<HTMLElement>('[data-pkc-slot="root"]');
   if (!root) return;
+  // 🔴 **await より前**に受け口を張る(P7 段③)。`launchQueue` は起動時に一度だけ
+  // 値を渡す契約なので、storage の初期化を待ってから登録すると**取りこぼす**。
+  // 届いたファイルは intake が溜め、アプリが用意できてから流れる
+  // ⚠ アプリが出来る**前**にも失敗しうる(ファイルの読み取り権限が無い等)。
+  // その時点では画面が無いので属性に置き、ready 後は user に見える形へ流す
+  // ── 「md を開いたのに何も起きない」を無言で残さない
+  let showLaunchError = (message: string): void => {
+    root.setAttribute('data-pkc-launch-error', message);
+  };
+  const launch = armLaunchQueue(window as unknown as LaunchTarget, (m) => showLaunchError(m));
   void startApp(root)
     .then((app) => {
+      showLaunchError = (message) =>
+        app.dispatcher.dispatch({ type: 'OP_FAILED', error: message });
+      launch.deliverTo(app.importFiles);
       // boot 完了の正本契約(P3-8): smoke / probe は DOM 属性で待つ。
       // PKC2 の教訓 ── 「#root 存在待ち」は HTML load 段階で通過して flake 化する
       root.setAttribute('data-pkc-boot', 'ready');
