@@ -57,6 +57,27 @@ export type StorageRequest =
       chains: RevisionChainInput[];
       keepLatest?: number;
     }
+  | {
+      /**
+       * 鎖を**保存形のまま**取り出す(P6e)。⚠ materialize しない ──
+       * `getRevision` は要求駆動で全文へ復元するので、そちらで書き出すと
+       * アーカイブが N×M に膨らみ、しかも `kind` が中身と食い違う。
+       */
+      op: 'exportRevisionChain';
+      cid: string;
+      entryLid: string;
+    }
+  | {
+      /**
+       * 保存形の鎖を**復元する**(P6e)。worker の中で decode して
+       * `importRevisionChains` と**同じ書込経路**へ流す ── 移行専用の
+       * 書込経路を作らない(PKC2 の教訓)。codec も 1 つのまま。
+       */
+      op: 'restoreRevisionChains';
+      cid: string;
+      chains: EncodedChainInput[];
+      keepLatest?: number;
+    }
   | { op: 'revisionCounts'; cid: string }
   | { op: 'getRevision'; cid: string; id: string }
   | { op: 'listRevisionMetas'; cid: string; entryLid: string }
@@ -116,6 +137,33 @@ export interface RevisionChainInput {
   snapshots: Array<{ body: string; createdAt: string }>;
 }
 
+/**
+ * 保存形のままの revision 1 行(P6e)。`kind='patch'` の `snapshot` は
+ * **1 つ新しい版から遡るパッチ**であって全文ではない。
+ */
+export interface EncodedRevisionRow {
+  revOrder: number;
+  createdAt: string | null;
+  title: string | null;
+  archetype: string | null;
+  /** `'patch'` = 逆向き差分 / `'full'` = 全文。⚠ **中身と一致していること**。 */
+  kind: string;
+  snapshot: string;
+  /**
+   * 🔴 その版の**復元後の本文**のハッシュ。復元時の噛み合わせ検査に使う。
+   * ⚠ 無いと「鎖が tip とズレていても行数さえ合えば通る」= **誤った履歴が
+   * 静かに書かれ、書いた側が hash を計算し直すので永久に自己証明される**。
+   * v1 のアーカイブは持たない(`null`)── その場合は検査しない。
+   */
+  contentHash: string | null;
+}
+
+/** 復元する鎖 1 本。rows は **新しい → 古い**(rev_order の降順)。 */
+export interface EncodedChainInput {
+  entryLid: string;
+  rows: EncodedRevisionRow[];
+}
+
 /** importRevisionChains の結果(何が入って何が落ちたかを可視化する)。 */
 export interface ImportRevisionsResult {
   /** 実際に積んだ行数。 */
@@ -126,6 +174,11 @@ export interface ImportRevisionsResult {
   droppedOverLimit: number;
   /** entry が居ない / 既に履歴を持つ等で丸ごと見送った鎖の entry_lid。 */
   skippedEntries: string[];
+  /**
+   * 壊れていて復元できなかった鎖(`entry_lid: 理由`)。
+   * ⚠ 1 本の破損で**全部**を巻き戻さないための出口 ── 黙って落とさず名指しする。
+   */
+  brokenChains: string[];
 }
 
 /** revision 一覧の行(snapshot は返さない ── 本文は getRevision で 1 行ずつ)。 */
@@ -221,6 +274,8 @@ export interface ResultMap {
   listRelations: RelationRow[];
   bulkUpsertRelations: null;
   importRevisionChains: ImportRevisionsResult;
+  exportRevisionChain: EncodedRevisionRow[];
+  restoreRevisionChains: ImportRevisionsResult;
   revisionCounts: RevisionCountRow[];
   getRevision: RevisionBody | null;
   listRevisionMetas: RevisionMetaRow[];

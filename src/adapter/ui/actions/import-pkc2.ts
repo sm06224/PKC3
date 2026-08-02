@@ -12,6 +12,7 @@
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
+import type { EncodedChainInput } from '@adapter/platform/storage/protocol';
 import { sniffMagic, detectPkc2Format } from '@features/import/detect-format';
 import { parsePkc2Html } from '@features/import/pkc2-html';
 import { readPkc2Package, peekZipFormat } from '@features/import/pkc2-package';
@@ -64,6 +65,17 @@ export interface ImportDeps {
     skippedNoChange: number;
     droppedOverLimit: number;
     skippedEntries: string[];
+  }>;
+  /**
+   * アーカイブの**保存形の鎖**を復元する(P6e)。
+   * ⚠ decode は worker の中 ── ここで逆向きパッチを解くと codec が二重になる。
+   */
+  restoreRevisionChains(chains: EncodedChainInput[]): Promise<{
+    added: number;
+    skippedNoChange: number;
+    droppedOverLimit: number;
+    skippedEntries: string[];
+    brokenChains: string[];
   }>;
   /**
    * 既に **bytes を持っている** key の集合。
@@ -221,6 +233,30 @@ const REVISION_BATCH_BYTES = 4 * 1024 * 1024;
  * 同時生存して 2 倍になる(review M-8)。`chains` は呼び出し側の作業用データで、
  * この関数の外では使わない
  */
+/**
+ * 保存形の鎖も**予算で切って送る**(P6e、review M-3)。
+ * ⚠ `batchChains` と同じ作法 ── postMessage に全履歴を一度に載せない。
+ * 送り終えた鎖は手放す。
+ *
+ * ⚠ **1 本の鎖が巨大なとき予算は効かない**(鎖と鎖の間でしか切れない)──
+ * `batchChains` と同じ既知の限界。
+ */
+function* batchEncoded(chains: readonly EncodedChainInput[]): Generator<EncodedChainInput[]> {
+  let batch: EncodedChainInput[] = [];
+  let bytes = 0;
+  for (const chain of chains) {
+    const size = chain.rows.reduce((n, r) => n + r.snapshot.length, 0);
+    if (batch.length > 0 && bytes + size > REVISION_BATCH_BYTES) {
+      yield batch;
+      batch = [];
+      bytes = 0;
+    }
+    batch.push(chain);
+    bytes += size;
+  }
+  if (batch.length > 0) yield batch;
+}
+
 function* batchChains(
   chains: readonly RevisionChain[],
   keyMap: ReadonlyMap<string, string>,
@@ -365,6 +401,8 @@ export async function importPkc2File(
             mime: a.mime,
           })),
           revisionChains: [] as RevisionChain[],
+          /** アーカイブ経路だけが持つ**保存形の鎖**(P6e)。 */
+          encodedChains: restored.revisionChains,
           warnings: [] as string[],
         }
       : convertPkc2Container(container as never, {
@@ -518,6 +556,32 @@ export async function importPkc2File(
           revStats.skipped += r.skippedEntries.length;
         }
       }
+      // アーカイブの復元(P6e)── 保存形の鎖をそのまま worker へ渡す。
+      // ⚠ **パッチの中の asset key は書き換えられない**(差分を書き換えると壊れる)。
+      // PKC3 の key は content hash なので同じ bytes なら同じ key に落ちる =
+      // 通常は写像が恒等になる。恒等でなかったぶんだけ**言う**
+      const encoded = 'encodedChains' in result ? result.encodedChains : [];
+      if (encoded.length > 0) {
+        stage = '履歴';
+        const remapped = [...keyMap].filter(([from, to]) => from !== to).length;
+        if (remapped > 0) {
+          // ⚠ `preWarnings` はこの時点で**既に result.warnings へ写し終えている** ──
+          // ここで push しても user に届かない(review M-2 で実測した dead code)
+          result.warnings.push(
+            `履歴の中の添付参照 ${remapped} 件は元の key のままです(差分は書き換えられません)`,
+          );
+        }
+        for (const batch of batchEncoded(encoded)) {
+          const r = await deps.restoreRevisionChains(batch);
+          revStats.added += r.added;
+          revStats.dropped += r.droppedOverLimit;
+          revStats.skipped += r.skippedEntries.length;
+          // 壊れて復元できなかった鎖は**名指しで**言う(件数だけだと直しようがない)
+          for (const broken of r.brokenChains) {
+            result.warnings.push(`履歴を復元できませんでした ── ${broken}`);
+          }
+        }
+      }
     } catch (e) {
       // 書けた分は必ず画面へ出す ── 「失敗」と言いながら disk に残すのが最悪
       await deps.reload().catch(() => {});
@@ -537,7 +601,9 @@ export async function importPkc2File(
         ? [`保持上限を超えた古い版 ${revStats.dropped} 件は取り込みませんでした`]
         : []),
       ...(revStats.skipped > 0
-        ? [`${revStats.skipped} 件の entry は既に履歴を持つため見送りました`]
+        // ⚠ 見送りの理由は 1 つではない(既に鎖を持つ / 復元先に entry が無い)──
+        // 片方だけを名乗ると、もう片方を踏んだ user が原因を誤解する
+        ? [`${revStats.skipped} 件の entry は履歴を積みませんでした(既に履歴を持つ / 対象が無い)`]
         : []),
       ...(light ? ['添付の中身は含まれていない export です(light)'] : []),
     ];

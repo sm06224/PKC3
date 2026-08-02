@@ -77,8 +77,7 @@ function source(f: Fake): ArchiveSource {
       return a?.bytes ? new Blob([a.bytes as unknown as BlobPart]) : null;
     },
     listRevisionLids: async () => [],
-    listRevisionMetas: async () => [],
-    getRevision: async () => null,
+    getRevisionChain: async () => [],
   };
 }
 

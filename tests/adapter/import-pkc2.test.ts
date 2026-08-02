@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { importPkc2File, type ImportDeps } from '../../src/adapter/ui/actions/import-pkc2';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
+import type { EncodedChainInput } from '../../src/adapter/platform/storage/protocol';
 import type { RevisionChain } from '../../src/features/import/pkc2-convert';
 import { readAttachmentMeta } from '../../src/features/flavor/attachment-flavor';
 import { buildZip, bytesOf } from '../features/zip-fixture';
@@ -80,6 +81,7 @@ function harness(opts: HarnessOptions = {}) {
   // (review mutation M25)。別配列に積むだけでは順序が pin されない
   const opLog: string[] = [];
   const revChains: RevisionChain[] = [];
+  const restoredChains: EncodedChainInput[] = [];
   let reloads = 0;
   let n = 0;
 
@@ -105,6 +107,10 @@ function harness(opts: HarnessOptions = {}) {
       relations.push(...rels);
     },
     listStoredBlobKeys: async () => new Set(blobs.keys()),
+    restoreRevisionChains: async (chains) => {
+      restoredChains.push(...chains); // ⚠ 引数を捨てると「呼ばれた」ことすら pin できない
+      return { added: 0, skippedNoChange: 0, droppedOverLimit: 0, skippedEntries: [], brokenChains: [] };
+    },
     importRevisionChains: async (chains) => {
       if (opts.failRevisions) throw new Error('履歴の書込に失敗(注入)');
       // 実配線と同じく、送られた鎖は呼び出し側が手放す ── 記録は deep copy で
@@ -176,6 +182,7 @@ function harness(opts: HarnessOptions = {}) {
     reportedNotes: () => reported,
     opLog,
     revChains,
+    restoredChains,
     reloadCount: () => reloads,
   };
 }
@@ -1142,6 +1149,46 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(await importPkc2File(d, deps, new File([w.finish()], 'a.pkc3.zip'))).toBe(1);
     expect(metas[0]!.mime).toBe('image/png');
     expect([...blobs.values()][0]!.type).toBe('image/png');
+  });
+
+  it('[P6e] 🔴 アーカイブの履歴が**復元経路へ渡る**(捨てられない)', async () => {
+    // ⚠ 呼び出し自体を消す変異が生き残っていた(review M-4 の MUT11)──
+    // stub が引数を捨てていて「呼ばれたか」すら pin できなかった
+    const { ZipWriter } = await import('../../src/features/export/zip-writer');
+    const { d, deps, restoredChains } = harness();
+    const w = new ZipWriter();
+    await w.add('manifest.json', ['{"format":"pkc3-archive","version":2}']);
+    await w.add('container.json', [
+      JSON.stringify({
+        meta: {},
+        entries: [
+          {
+            lid: 'n1',
+            title: 'ノート',
+            archetype: 'text',
+            body: 'いま',
+            entryOrder: 1,
+            createdAt: null,
+            updatedAt: null,
+            status: null,
+            date: null,
+            archived: false,
+          },
+        ],
+        relations: [],
+        revisions: [
+          { id: 'r2', entryLid: 'n1', revOrder: 2, createdAt: null, title: null, archetype: null, kind: 'patch', snapshot: 'p2', contentHash: null },
+          { id: 'r1', entryLid: 'n1', revOrder: 1, createdAt: null, title: null, archetype: null, kind: 'full', snapshot: '最初', contentHash: null },
+        ],
+        assets: [],
+      }),
+    ]);
+
+    expect(await importPkc2File(d, deps, new File([w.finish()], 'a.pkc3.zip'))).toBe(1);
+    expect(restoredChains).toHaveLength(1);
+    // **新しい → 古い**の向きで渡っている(worker が tip から遡る向き)
+    expect(restoredChains[0]!.rows.map((r) => r.revOrder)).toEqual([2, 1]);
+    expect(restoredChains[0]!.entryLid).toBe('n1');
   });
 
   it('[P6c 段⑥] 🔴 base64 の添付は**閾値超でも**直流ししない', async () => {
