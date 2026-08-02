@@ -70,6 +70,13 @@ export interface ArchiveRevision {
   archetype: string | null;
   kind: string;
   snapshot: string;
+  /**
+   * 🔴 その版の**復元後の本文**のハッシュ(v2 で追加)。
+   * 無いと「鎖が tip とズレていても行数さえ合えば通る」= 誤った履歴が静かに
+   * 書かれ、書いた側が hash を計算し直すので**永久に自己証明される**。
+   * v1 のアーカイブは持たない ── その場合は検査しない。
+   */
+  contentHash?: string | null;
 }
 
 export interface ArchiveAsset {
@@ -133,6 +140,7 @@ export interface ArchiveSource {
       archetype: string | null;
       kind: string;
       snapshot: string;
+      contentHash: string | null;
     }>
   >;
 }
@@ -456,6 +464,7 @@ export function restoreArchive(
       archetype: string | null;
       kind: string;
       snapshot: string;
+      contentHash: string | null;
     }>;
   }>;
   warnings: string[];
@@ -542,6 +551,8 @@ export function restoreArchive(
         archetype: r.archetype,
         kind: r.kind,
         snapshot: r.snapshot,
+        // v1 は持たない ── 検査しない(そのころの行は全文なので噛み合わせは不要)
+        contentHash: r.contentHash ?? null,
       })),
   }));
 

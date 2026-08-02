@@ -104,6 +104,7 @@ function source(f: Fake): ArchiveSource {
         archetype: null,
         kind: r.kind,
         snapshot: r.snapshot,
+        contentHash: null,
       })),
   };
 }
@@ -256,7 +257,7 @@ describe('アーカイブ ZIP — round-trip', () => {
       ...base,
       // ⚠ worker 側で NULL → 'full' に正規化済みの値が来る(protocol の規約)
       getRevisionChain: async () => [
-        { revOrder: 1, createdAt: null, title: null, archetype: null, kind: 'full', snapshot: 'v1' },
+        { revOrder: 1, createdAt: null, title: null, archetype: null, kind: 'full', snapshot: 'v1', contentHash: null },
       ],
       listAssetMetas: async () => [{ key: 'k', mime: null, size: null, hash: null }],
       getAssetBlob: async () => new Blob([enc.encode('AB')]),

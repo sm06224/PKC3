@@ -68,6 +68,7 @@ const rev = (entryLid: string, revOrder: number, over: Partial<ArchiveRevision> 
   archetype: null,
   kind: 'patch',
   snapshot: `p${revOrder}`,
+  contentHash: null,
   ...over,
 });
 

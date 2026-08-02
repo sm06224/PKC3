@@ -149,6 +149,13 @@ export interface EncodedRevisionRow {
   /** `'patch'` = 逆向き差分 / `'full'` = 全文。⚠ **中身と一致していること**。 */
   kind: string;
   snapshot: string;
+  /**
+   * 🔴 その版の**復元後の本文**のハッシュ。復元時の噛み合わせ検査に使う。
+   * ⚠ 無いと「鎖が tip とズレていても行数さえ合えば通る」= **誤った履歴が
+   * 静かに書かれ、書いた側が hash を計算し直すので永久に自己証明される**。
+   * v1 のアーカイブは持たない(`null`)── その場合は検査しない。
+   */
+  contentHash: string | null;
 }
 
 /** 復元する鎖 1 本。rows は **新しい → 古い**(rev_order の降順)。 */
@@ -167,6 +174,11 @@ export interface ImportRevisionsResult {
   droppedOverLimit: number;
   /** entry が居ない / 既に履歴を持つ等で丸ごと見送った鎖の entry_lid。 */
   skippedEntries: string[];
+  /**
+   * 壊れていて復元できなかった鎖(`entry_lid: 理由`)。
+   * ⚠ 1 本の破損で**全部**を巻き戻さないための出口 ── 黙って落とさず名指しする。
+   */
+  brokenChains: string[];
 }
 
 /** revision 一覧の行(snapshot は返さない ── 本文は getRevision で 1 行ずつ)。 */

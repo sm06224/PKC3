@@ -6,6 +6,7 @@ import {
   createStorePort,
   metaFromRow,
   relationFromRow,
+  REVISION_KEEP_LATEST,
 } from '@adapter/platform/storage/store-port';
 import { acquireWriterLease } from '@adapter/platform/storage/writer-lease';
 import type { InitResult } from '@adapter/platform/storage/protocol';
@@ -276,8 +277,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             },
             importRevisionChains: (chains) =>
               client.request({ op: 'importRevisionChains', cid: DEFAULT_CID, chains }),
+            // ⚠ `keepLatest` を**明示で渡す**(review L-2)── 省くと worker の
+            // 既定値が使われ、アプリ側の設定と偶然一致しているだけになる。
+            // 片方を変えた瞬間に自分のバックアップが黙って削れる
             restoreRevisionChains: (chains) =>
-              client.request({ op: 'restoreRevisionChains', cid: DEFAULT_CID, chains }),
+              client.request({
+                op: 'restoreRevisionChains',
+                cid: DEFAULT_CID,
+                chains,
+                keepLatest: REVISION_KEEP_LATEST,
+              }),
             // ⚠ **bytes 側の台帳を見る**(review H-1)── meta 行の有無で判定すると、
             // GC が deleteBlob → deleteMeta の途中で失敗した状態(設計上の想定内)で
             // put を省いてしまい、参照だけが書かれる

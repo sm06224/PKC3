@@ -588,3 +588,164 @@ describe('revision chain (P5c ── 逆向き差分)', () => {
     expect(first.next).toEqual({ entryOrder: 900, lid: 'm1' });
   });
 });
+/**
+ * P6e: 鎖の書出しと復元。
+ *
+ * 🔴 「鎖の decode は worker の中なので unit では届かない」は**誤り**だった
+ * (review M-4)── この harness は実物の worker を node で動かしている。
+ * smoke の 1 アサーションだけを砦にしていると、向きや題名の取り違えが素通りする。
+ *
+ * ⚠ 見るのは「同じ**状態列**が戻るか」。バイト列は保証範囲外(decode → encode を
+ * 往復するので刈り込みと畳み込みが再適用される)。
+ */
+describe('P6e ── 鎖を書き出して復元する', () => {
+  /** その entry の全版を**古い → 新しい**で materialize して並べる。 */
+  const statesOf = async (lid: string): Promise<string[]> => {
+    const metas = await metasOf(lid);
+    const out: string[] = [];
+    for (const m of [...metas].reverse()) out.push((await bodyOf(m.id))!);
+    return out;
+  };
+
+  it('🔴 状態列が保たれる(2 周目も)', async () => {
+    await write('src1', doc('初稿'));
+    await write('src1', doc('二稿'), { checkpoint: true });
+    await write('src1', doc('三稿'), { checkpoint: true });
+    const before = await statesOf('src1');
+    expect(before).toHaveLength(2);
+
+    // 🔑 パッチ経路を通っていること ── 全部 full なら decode を検証していない
+    const chain = await request({ op: 'exportRevisionChain', cid: 'c1', entryLid: 'src1' });
+    expect(chain.some((r) => r.kind === 'patch')).toBe(true);
+    expect(chain.map((r) => r.revOrder)).toEqual([2, 1]); // 新しい → 古い
+
+    // 同じ tip を持つ別 entry へ復元する
+    await write('dst1', doc('三稿'));
+    const r = await request({
+      op: 'restoreRevisionChains',
+      cid: 'c1',
+      chains: [{ entryLid: 'dst1', rows: chain }],
+    });
+    expect(r.added).toBe(2);
+    expect(r.brokenChains).toEqual([]);
+    expect(await statesOf('dst1')).toEqual(before);
+
+    // 2 周目 ── 復元したものをもう一度書き出して復元しても同じ状態列
+    const again = await request({ op: 'exportRevisionChain', cid: 'c1', entryLid: 'dst1' });
+    await write('dst2', doc('三稿'));
+    await request({
+      op: 'restoreRevisionChains',
+      cid: 'c1',
+      chains: [{ entryLid: 'dst2', rows: again }],
+    });
+    expect(await statesOf('dst2')).toEqual(before);
+  });
+
+  it('🔴 rows の向きが逆だと壊れる(契約が効いていることの確認)', async () => {
+    await write('rev1', doc('A'));
+    await write('rev1', doc('B'), { checkpoint: true });
+    await write('rev1', doc('C'), { checkpoint: true });
+    const chain = await request({ op: 'exportRevisionChain', cid: 'c1', entryLid: 'rev1' });
+
+    await write('rev1dst', doc('C'));
+    const r = await request({
+      op: 'restoreRevisionChains',
+      cid: 'c1',
+      chains: [{ entryLid: 'rev1dst', rows: [...chain].reverse() }],
+    });
+    // ⚠ hash では捕まらない(各版は個別には正しく復元でき、hash も一致する)──
+    // 壊れるのは**並び**なので、向きの契約そのものを検査している
+    expect(r.added).toBe(0);
+    expect(r.brokenChains.join()).toMatch(/並びが新しい → 古いになっていません/);
+  });
+
+  it('🔴 改竄されたパッチを受け付けない(行数が合っていても)', async () => {
+    // `applyLinePatch` は行数さえ合えば通る ── hash が無いと**誤った履歴が
+    // 静かに書かれ、書込側が hash を計算し直すので永久に自己証明される**
+    await write('tam', doc('もと'));
+    await write('tam', doc('いま'), { checkpoint: true });
+    const chain = await request({ op: 'exportRevisionChain', cid: 'c1', entryLid: 'tam' });
+    const patched = chain.map((r) => ({
+      ...r,
+      snapshot: r.snapshot.replace('もと', 'ニセ'),
+    }));
+
+    await write('tamdst', doc('いま'));
+    const r = await request({
+      op: 'restoreRevisionChains',
+      cid: 'c1',
+      chains: [{ entryLid: 'tamdst', rows: patched }],
+    });
+    expect(r.added).toBe(0);
+    expect(r.brokenChains.join()).toMatch(/噛み合いません/);
+  });
+
+  it('🔴 1 本が壊れていても健全な鎖は残る(全部を巻き戻さない)', async () => {
+    await write('okA', doc('旧'));
+    await write('okA', doc('新'), { checkpoint: true });
+    const good = await request({ op: 'exportRevisionChain', cid: 'c1', entryLid: 'okA' });
+
+    await write('okDst', doc('新'));
+    await write('ngDst', doc('新'));
+    const r = await request({
+      op: 'restoreRevisionChains',
+      cid: 'c1',
+      chains: [
+        { entryLid: 'ngDst', rows: good.map((x) => ({ ...x, contentHash: 'ちがう' })) },
+        { entryLid: 'okDst', rows: good },
+      ],
+    });
+    expect(r.brokenChains).toHaveLength(1);
+    expect(await metasOf('okDst')).toHaveLength(1); // 健全な方は残る
+    expect(await metasOf('ngDst')).toHaveLength(0);
+  });
+
+  it('未対応の保存形は断る(生の JSON エラーを見せない)', async () => {
+    await write('kd', doc('x'));
+    const r = await request({
+      op: 'restoreRevisionChains',
+      cid: 'c1',
+      chains: [
+        {
+          entryLid: 'kd',
+          rows: [
+            { revOrder: 1, createdAt: null, title: null, archetype: null, kind: 'gzip', snapshot: 'ぐちゃ', contentHash: null },
+          ],
+        },
+      ],
+    });
+    expect(r.brokenChains.join()).toMatch(/未対応の履歴の保存形/);
+  });
+
+  it('版ごとの題名を保つ(entry の題名で塗り潰さない)', async () => {
+    await write('ttl', doc('v1'));
+    await write('ttl', doc('v2'), { checkpoint: true });
+    const chain = await request({ op: 'exportRevisionChain', cid: 'c1', entryLid: 'ttl' });
+    const named = chain.map((r) => ({ ...r, title: `版 ${r.revOrder} の題名` }));
+
+    await write('ttldst', doc('v2'));
+    await request({
+      op: 'restoreRevisionChains',
+      cid: 'c1',
+      chains: [{ entryLid: 'ttldst', rows: named }],
+    });
+    expect((await metasOf('ttldst')).map((m) => m.title)).toEqual(['版 1 の題名']);
+  });
+
+  it('保持上限は呼び出し側の値で効く(worker の既定に頼らない)', async () => {
+    await write('keep', doc('0'));
+    for (let i = 1; i <= 5; i++) await write('keep', doc(String(i)), { checkpoint: true });
+    const chain = await request({ op: 'exportRevisionChain', cid: 'c1', entryLid: 'keep' });
+    expect(chain).toHaveLength(5);
+
+    await write('keepdst', doc('5'));
+    const r = await request({
+      op: 'restoreRevisionChains',
+      cid: 'c1',
+      chains: [{ entryLid: 'keepdst', rows: chain }],
+      keepLatest: 2,
+    });
+    expect(r.droppedOverLimit).toBe(3);
+    expect(await metasOf('keepdst')).toHaveLength(2);
+  });
+});

@@ -26,6 +26,7 @@ import {
   type RequestFor,
   type ResultMap,
   type ImportRevisionsResult,
+  type EncodedChainInput,
 } from './protocol';
 
 let db: Database | null = null;
@@ -386,6 +387,130 @@ function writeChain(
   }
 }
 
+/**
+ * 鎖 1 本を**保存形から**復元する(P6e)。
+ *
+ * ⚠ **decode と encode を 1 パスに融合する**。全版を全文にして配列へ溜めてから
+ * 書き直すと、`getRevision` がわざわざ避けている「全面書換 100 世代で 14MB を
+ * 一度に持つ」形を復元が構造的にやることになる(review M-3)。
+ * decode の向き(新 → 古)と encode の向き(新 → 古)は**同じ**なので、
+ * 同時に生きるのは「1 つ新しい状態」と「いまの状態」の 2 本で済む。
+ *
+ * 積む行は**パッチ(小さい)**なので、`rev_order` を後から振るために貯めても
+ * 全文を持つことにはならない。
+ */
+function restoreOneChain(
+  database: Database,
+  cid: string,
+  chain: EncodedChainInput,
+  keepLatest: number,
+  out: ImportRevisionsResult,
+): void {
+  const head = database.selectObjects(
+    'SELECT body, title, archetype FROM entries WHERE cid = ? AND lid = ?',
+    [cid, chain.entryLid],
+  )[0] as { body: string; title: string; archetype: string } | undefined;
+  // entry が居ない / 既に鎖を持つ ものには積まない(writeChain と同じ規約)
+  if (!head || headRevision(database, cid, chain.entryLid)) {
+    out.skippedEntries.push(chain.entryLid);
+    return;
+  }
+
+  /** 新しい → 古い の順に積む(rev_order は件数が決まってから振る)。 */
+  const staged: Array<{
+    kind: string;
+    snapshot: string;
+    createdAt: string;
+    title: string | null;
+    archetype: string | null;
+    hash: string;
+  }> = [];
+  let base = head.body; // 符号化の基準 = 1 つ新しい状態(先頭は tip)
+  let prev = head.body; // 無変更の畳み込み用
+
+  let prevOrder = Number.POSITIVE_INFINITY;
+  for (const r of chain.rows) {
+    // 🔴 **向きの契約を検査する**(protocol: rows は新しい → 古い)。
+    // ⚠ hash では捕まえられない ── 順序が逆でも各版は個別には正しく復元でき、
+    // hash も一致する。壊れるのは**並び**で、`rev_order` を位置から振っている
+    // ここが黙って履歴を逆順に書く(review M-4 の MUT5 と同根)
+    if (!(r.revOrder < prevOrder)) {
+      throw new Error(
+        `履歴の並びが新しい → 古いになっていません(版 ${r.revOrder} が ${prevOrder} の後ろ)`,
+      );
+    }
+    prevOrder = r.revOrder;
+    // ⚠ 未知の保存形は**断る**(JSON parse の生エラーを user に見せない)
+    if (r.kind !== 'full' && r.kind !== 'patch') {
+      throw new Error(`未対応の履歴の保存形です: ${r.kind}`);
+    }
+    const state = materialize(
+      { id: '', rev_order: r.revOrder, snapshot: r.snapshot, content_hash: null, kind: r.kind },
+      base,
+    );
+    // 🔴 **噛み合わせ検査**(review H-1)。`applyLinePatch` は行数さえ合えば通るので、
+    // tip がズレた鎖・改竄されたパッチが**例外にならずに**通ってしまう。しかも
+    // 書込側は decode 結果から hash を計算し直すので、以後 `getRevision` の
+    // 整合性検査も通る = 誤りが自己証明されて固定される
+    const hash = contentHash64Hex(state);
+    if (r.contentHash !== null && hash !== r.contentHash) {
+      throw new Error(
+        `履歴が噛み合いません(版 ${r.revOrder})── アーカイブが壊れているか、本文が書き出し時と違います`,
+      );
+    }
+    // 「変更あり commit だけ刻む」= P5b の規律(取込経路と同じ)
+    if (state === prev) {
+      out.skippedNoChange++;
+      base = state;
+      continue;
+    }
+    if (staged.length >= keepLatest) {
+      // 保持上限。古い側から捨てる = 新しい側から数えて上限に達したら以降は不要
+      out.droppedOverLimit++;
+      base = state;
+      prev = state;
+      continue;
+    }
+    const enc = encodeReverse(base, state);
+    staged.push({
+      kind: enc.kind,
+      snapshot: enc.snapshot,
+      createdAt: r.createdAt ?? '',
+      title: r.title,
+      archetype: r.archetype,
+      hash,
+    });
+    base = state;
+    prev = state;
+  }
+
+  // rev_order は**古い = 1**。staged は新しい → 古い なので逆から振る
+  for (let i = 0; i < staged.length; i++) {
+    const st = staged[i]!;
+    database.exec({
+      sql: `INSERT INTO revisions
+              (cid, id, entry_lid, created_at, rev_order, snapshot,
+               title, archetype, content_hash, kind)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      bind: [
+        cid,
+        `rev-${crypto.randomUUID()}`,
+        chain.entryLid,
+        // 履歴の時刻は捏造しない
+        st.createdAt || new Date().toISOString(),
+        staged.length - i,
+        st.snapshot,
+        // 版ごとの題名を持っているならそちらを立てる(復元だけが持つ情報)
+        st.title ?? head.title,
+        st.archetype ?? head.archetype,
+        st.hash,
+        st.kind,
+      ],
+    });
+    out.added++;
+  }
+}
+
 const handlers: Handlers = {
   init: (req) => init(req.dbName, req.journalMode),
   openContainer: (req) => {
@@ -622,6 +747,7 @@ const handlers: Handlers = {
       skippedNoChange: 0,
       droppedOverLimit: 0,
       skippedEntries: [],
+      brokenChains: [],
     };
     database.exec('BEGIN IMMEDIATE');
     try {
@@ -649,6 +775,16 @@ const handlers: Handlers = {
    * decode → encode を往復するので、刈り込みと無変更版の畳み込みが再適用される
    * (user 裁定 2026-08-02「目的に合っていればそれでいい」)。
    */
+  /**
+   * 保存形の鎖を復元する(P6e)。**decode してから `writeChain` へ流す** ──
+   * 移行専用の書込経路を作らないための形(PKC2 の教訓: 移行専用の書込経路こそが
+   * 穴の空いていた場所)。codec(`materialize`)もここにしか無いので、
+   * 読み側と書き側がずれようがない。
+   *
+   * ⚠ 保証するのは「**同じ状態列**が戻る」ことで、同じバイト列ではない ──
+   * decode → encode を往復するので、刈り込みと無変更版の畳み込みが再適用される
+   * (user 裁定 2026-08-02「目的に合っていればそれでいい」)。
+   */
   restoreRevisionChains: (req) => {
     const database = need();
     const keepLatest = Math.max(1, req.keepLatest ?? DEFAULT_REVISION_KEEP);
@@ -657,41 +793,26 @@ const handlers: Handlers = {
       skippedNoChange: 0,
       droppedOverLimit: 0,
       skippedEntries: [],
+      brokenChains: [],
     };
     database.exec('BEGIN IMMEDIATE');
     try {
       for (const chain of req.chains) {
-        const tip = database.selectObjects(
-          'SELECT body FROM entries WHERE cid = ? AND lid = ?',
-          [req.cid, chain.entryLid],
-        )[0] as { body: string } | undefined;
-        if (!tip) {
+        // 🔴 **鎖ごとに救う**(review M-1)。1 本が壊れているだけで全 entry の
+        // 履歴が巻き戻ると、user に残るのは「本文はあるが履歴ゼロ」で、
+        // 取り直しても同じ場所で落ちる。添付は既に 1 件ずつ救っている
+        database.exec('SAVEPOINT chain');
+        try {
+          restoreOneChain(database, req.cid, chain, keepLatest, out);
+          database.exec('RELEASE chain');
+        } catch (e) {
+          database.exec('ROLLBACK TO chain');
+          database.exec('RELEASE chain');
           out.skippedEntries.push(chain.entryLid);
-          continue;
-        }
-        // rows は新しい → 古い。tip から順に遡って各版の状態を作る
-        // (`getRevision` の復元と**同じ向き・同じ codec**)
-        const snapshots: Array<{
-          body: string;
-          createdAt: string;
-          title: string | null;
-          archetype: string | null;
-        }> = [];
-        let base = tip.body;
-        for (const r of chain.rows) {
-          base = materialize(
-            { id: '', rev_order: r.revOrder, snapshot: r.snapshot, content_hash: null, kind: r.kind },
-            base,
+          out.brokenChains.push(
+            `${chain.entryLid}: ${e instanceof Error ? e.message : String(e)}`,
           );
-          snapshots.push({
-            body: base,
-            createdAt: r.createdAt ?? '',
-            title: r.title,
-            archetype: r.archetype,
-          });
         }
-        snapshots.reverse(); // writeChain は**古い → 新しい**を受ける
-        writeChain(database, req.cid, chain.entryLid, snapshots, keepLatest, out);
       }
       database.exec('COMMIT');
     } catch (err) {
@@ -708,7 +829,7 @@ const handlers: Handlers = {
   exportRevisionChain: (req) =>
     (
       need().selectObjects(
-        `SELECT rev_order, created_at, title, archetype, kind, snapshot
+        `SELECT rev_order, created_at, title, archetype, kind, snapshot, content_hash
            FROM revisions WHERE cid = ? AND entry_lid = ?
           ORDER BY rev_order DESC`,
         [req.cid, req.entryLid],
@@ -719,6 +840,7 @@ const handlers: Handlers = {
         archetype: string | null;
         kind: string | null;
         snapshot: string;
+        content_hash: string | null;
       }>
     ).map((r) => ({
       revOrder: r.rev_order,
@@ -728,7 +850,9 @@ const handlers: Handlers = {
       // ⚠ NULL は 'full' 扱い(schema の規約)── **書出しの時点で正規化する**
       kind: r.kind ?? 'full',
       snapshot: r.snapshot,
+      contentHash: r.content_hash,
     })),
+
   listRevisionMetas: (req) =>
     // snapshot 列を読まない ── 一覧は meta だけ、本文は getRevision で 1 行ずつ
     need().selectObjects(

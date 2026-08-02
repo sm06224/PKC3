@@ -88,7 +88,13 @@ function shared() {
     bulkUpsertEntries: async () => {},
     bulkUpsertRelations: async () => {},
     listStoredBlobKeys: async () => new Set(blobs.keys()),
-    restoreRevisionChains: async () => ({ added: 0, skippedNoChange: 0, droppedOverLimit: 0, skippedEntries: [] }),
+    restoreRevisionChains: async () => ({
+      added: 0,
+      skippedNoChange: 0,
+      droppedOverLimit: 0,
+      skippedEntries: [],
+      brokenChains: [],
+    }),
     importRevisionChains: async (chains) => {
       revChains.push(...chains);
       return {
