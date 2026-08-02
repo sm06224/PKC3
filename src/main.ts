@@ -163,9 +163,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             getAssetBlob: (key) => blobs.get(DEFAULT_CID, key),
             listRevisionLids: () =>
               client.request({ op: 'listRevisionLids', cid: DEFAULT_CID }),
-            listRevisionMetas: (entryLid) =>
-              client.request({ op: 'listRevisionMetas', cid: DEFAULT_CID, entryLid }),
-            getRevision: (id) => client.request({ op: 'getRevision', cid: DEFAULT_CID, id }),
+            // ⚠ 鎖は**保存形のまま**取る(P6e)── `getRevision` で版ごとに
+            // 全文へ復元すると、アーカイブが N×M に膨らみ kind が中身と食い違う
+            getRevisionChain: (entryLid) =>
+              client.request({ op: 'exportRevisionChain', cid: DEFAULT_CID, entryLid }),
           },
           download: (name, blob) => {
             const url = URL.createObjectURL(blob);
@@ -275,6 +276,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             },
             importRevisionChains: (chains) =>
               client.request({ op: 'importRevisionChains', cid: DEFAULT_CID, chains }),
+            restoreRevisionChains: (chains) =>
+              client.request({ op: 'restoreRevisionChains', cid: DEFAULT_CID, chains }),
             // ⚠ **bytes 側の台帳を見る**(review H-1)── meta 行の有無で判定すると、
             // GC が deleteBlob → deleteMeta の途中で失敗した状態(設計上の想定内)で
             // put を省いてしまい、参照だけが書かれる

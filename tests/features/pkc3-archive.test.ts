@@ -94,22 +94,17 @@ function source(f: Fake): ArchiveSource {
       return a?.bytes === undefined ? null : new Blob([enc.encode(a.bytes)]);
     },
     listRevisionLids: async () => Object.keys(revs),
-    listRevisionMetas: async (lid) =>
+    // 🔴 **保存形のまま**返す(P6e)── 実装が materialize してから書くと
+    // `kind` と中身が食い違う。stub も本物と同じ意味論にする
+    getRevisionChain: async (lid) =>
       (revs[lid] ?? []).map((r) => ({
-        id: r.id,
-        rev_order: r.rev_order,
-        created_at: null,
+        revOrder: r.rev_order,
+        createdAt: null,
         title: null,
         archetype: null,
         kind: r.kind,
+        snapshot: r.snapshot,
       })),
-    getRevision: async (id) => {
-      for (const list of Object.values(revs)) {
-        const hit = list.find((r) => r.id === id);
-        if (hit) return { body: hit.snapshot };
-      }
-      return null;
-    },
   };
 }
 
@@ -259,8 +254,9 @@ describe('アーカイブ ZIP — round-trip', () => {
     });
     const withNulls: ArchiveSource = {
       ...base,
-      listRevisionMetas: async () => [
-        { id: 'rv1', rev_order: 1, created_at: null, title: null, archetype: null, kind: null },
+      // ⚠ worker 側で NULL → 'full' に正規化済みの値が来る(protocol の規約)
+      getRevisionChain: async () => [
+        { revOrder: 1, createdAt: null, title: null, archetype: null, kind: 'full', snapshot: 'v1' },
       ],
       listAssetMetas: async () => [{ key: 'k', mime: null, size: null, hash: null }],
       getAssetBlob: async () => new Blob([enc.encode('AB')]),

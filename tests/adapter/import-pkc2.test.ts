@@ -105,6 +105,7 @@ function harness(opts: HarnessOptions = {}) {
       relations.push(...rels);
     },
     listStoredBlobKeys: async () => new Set(blobs.keys()),
+    restoreRevisionChains: async () => ({ added: 0, skippedNoChange: 0, droppedOverLimit: 0, skippedEntries: [] }),
     importRevisionChains: async (chains) => {
       if (opts.failRevisions) throw new Error('履歴の書込に失敗(注入)');
       // 実配線と同じく、送られた鎖は呼び出し側が手放す ── 記録は deep copy で

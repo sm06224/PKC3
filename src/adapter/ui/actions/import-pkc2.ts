@@ -12,6 +12,7 @@
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
+import type { EncodedChainInput } from '@adapter/platform/storage/protocol';
 import { sniffMagic, detectPkc2Format } from '@features/import/detect-format';
 import { parsePkc2Html } from '@features/import/pkc2-html';
 import { readPkc2Package, peekZipFormat } from '@features/import/pkc2-package';
@@ -60,6 +61,16 @@ export interface ImportDeps {
   ): Promise<void>;
   /** 履歴を鎖として積む(全文では積まない ── P5c の符号化に合流させる)。 */
   importRevisionChains(chains: RevisionChain[]): Promise<{
+    added: number;
+    skippedNoChange: number;
+    droppedOverLimit: number;
+    skippedEntries: string[];
+  }>;
+  /**
+   * アーカイブの**保存形の鎖**を復元する(P6e)。
+   * ⚠ decode は worker の中 ── ここで逆向きパッチを解くと codec が二重になる。
+   */
+  restoreRevisionChains(chains: EncodedChainInput[]): Promise<{
     added: number;
     skippedNoChange: number;
     droppedOverLimit: number;
@@ -365,6 +376,8 @@ export async function importPkc2File(
             mime: a.mime,
           })),
           revisionChains: [] as RevisionChain[],
+          /** アーカイブ経路だけが持つ**保存形の鎖**(P6e)。 */
+          encodedChains: restored.revisionChains,
           warnings: [] as string[],
         }
       : convertPkc2Container(container as never, {
@@ -517,6 +530,24 @@ export async function importPkc2File(
           revStats.dropped += r.droppedOverLimit;
           revStats.skipped += r.skippedEntries.length;
         }
+      }
+      // アーカイブの復元(P6e)── 保存形の鎖をそのまま worker へ渡す。
+      // ⚠ **パッチの中の asset key は書き換えられない**(差分を書き換えると壊れる)。
+      // PKC3 の key は content hash なので同じ bytes なら同じ key に落ちる =
+      // 通常は写像が恒等になる。恒等でなかったぶんだけ**言う**
+      const encoded = 'encodedChains' in result ? result.encodedChains : [];
+      if (encoded.length > 0) {
+        stage = '履歴';
+        const remapped = [...keyMap].filter(([from, to]) => from !== to).length;
+        if (remapped > 0) {
+          preWarnings.push(
+            `履歴の中の添付参照 ${remapped} 件は元の key のままです(差分は書き換えられません)`,
+          );
+        }
+        const r = await deps.restoreRevisionChains(encoded);
+        revStats.added += r.added;
+        revStats.dropped += r.droppedOverLimit;
+        revStats.skipped += r.skippedEntries.length;
       }
     } catch (e) {
       // 書けた分は必ず画面へ出す ── 「失敗」と言いながら disk に残すのが最悪

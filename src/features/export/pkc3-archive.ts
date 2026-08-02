@@ -24,7 +24,14 @@ import { ZipWriter, type ZipPart } from './zip-writer';
 import { readZipDirectory, readZipText, ZipReadError } from '../import/zip-reader';
 
 export const ARCHIVE_FORMAT = 'pkc3-archive';
-export const ARCHIVE_VERSION = 1;
+/**
+ * 2: revisions を**保存形の鎖**で出す(P6e)。
+ * 1: revisions が全文だが `kind` は保存形を書いていた ── **中身と食い違う**ので、
+ *    読み側で `kind: 'full'` へ正規化して受ける(そうしないと復元が壊れる)。
+ */
+export const ARCHIVE_VERSION = 2;
+/** 読める最古の版。 */
+const ARCHIVE_MIN_VERSION = 1;
 const MANIFEST = 'manifest.json';
 const CONTAINER = 'container.json';
 const ASSET_PREFIX = 'assets/';
@@ -113,18 +120,21 @@ export interface ArchiveSource {
   >;
   getAssetBlob(key: string): Promise<Blob | null>;
   listRevisionLids(): Promise<string[]>;
-  listRevisionMetas(entryLid: string): Promise<
+  /**
+   * 鎖を**保存形のまま**取り出す(P6e、新しい → 古い)。
+   * ⚠ 版ごとに `getRevision` で全文へ復元してはいけない ── アーカイブが N×M に
+   * 膨らみ(鎖の長さに対して O(k²))、しかも `kind` が中身と食い違う。
+   */
+  getRevisionChain(entryLid: string): Promise<
     Array<{
-      id: string;
-      rev_order: number;
-      created_at: string | null;
+      revOrder: number;
+      createdAt: string | null;
       title: string | null;
       archetype: string | null;
-      /** ⚠ **NULL がありうる**(schema v2 までの行)── 書出し時に 'full' へ正規化する。 */
-      kind: string | null;
+      kind: string;
+      snapshot: string;
     }>
   >;
-  getRevision(id: string): Promise<{ body: string } | null>;
 }
 
 export interface ArchiveResult {
@@ -209,23 +219,19 @@ export async function writeArchive(src: ArchiveSource, exportedAt: string): Prom
   parts.push('],"revisions":[');
   let revCount = 0;
   for (const lid of await src.listRevisionLids()) {
-    for (const rm of await src.listRevisionMetas(lid)) {
-      const body = await src.getRevision(rm.id);
-      if (!body) {
-        warnings.push(`履歴の中身を読めませんでした: ${lid} の ${rm.id}`);
-        continue;
-      }
+    // 🔴 **保存形のまま**出す(P6e)。以前は版ごとに `getRevision` で全文へ
+    // 復元しており、`kind: 'patch'` の行に全文が入る = **中身と食い違う**
+    // アーカイブを書いていた(復元を実装した瞬間に壊れる)
+    for (const rv of await src.getRevisionChain(lid)) {
       const rev: ArchiveRevision = {
-        id: rm.id,
+        id: `${lid}#${rv.revOrder}`,
         entryLid: lid,
-        revOrder: rm.rev_order,
-        createdAt: rm.created_at,
-        title: rm.title,
-        archetype: rm.archetype,
-        // ⚠ NULL の kind は 'full' 扱い(schema の規約)── 読み側で分岐が要るので
-        // **書出しの時点で正規化する**(null のまま出すと読み手が毎回判断を迫られる)
-        kind: rm.kind ?? 'full',
-        snapshot: body.body,
+        revOrder: rv.revOrder,
+        createdAt: rv.createdAt,
+        title: rv.title,
+        archetype: rv.archetype,
+        kind: rv.kind,
+        snapshot: rv.snapshot,
       };
       parts.push(revCount === 0 ? j(rev) : `,${j(rev)}`);
       revCount++;
@@ -332,9 +338,14 @@ export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
       `PKC3 のアーカイブではありません(format=${String(manifest?.format)})`,
     );
   }
-  if (manifest.version !== ARCHIVE_VERSION) {
+  const version = manifest.version;
+  if (
+    typeof version !== 'number' ||
+    version < ARCHIVE_MIN_VERSION ||
+    version > ARCHIVE_VERSION
+  ) {
     throw new ZipReadError(
-      `未対応のアーカイブ版です(version=${String(manifest.version)} ── 対応は ${ARCHIVE_VERSION})`,
+      `未対応のアーカイブ版です(version=${String(version)} ── 対応は ${ARCHIVE_MIN_VERSION}〜${ARCHIVE_VERSION})`,
     );
   }
 
@@ -386,11 +397,17 @@ export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
     }
   }
 
+  // 🔴 **version 1 の `kind` は嘘**(全文を書きながら保存形の kind を刻んでいた)。
+  // 読み側で `'full'` へ正規化する ── そうしないと復元がパッチとして適用して壊れる
+  const revisions = (c.revisions ?? []).map((r) =>
+    version < 2 ? { ...r, kind: 'full' } : r,
+  );
+
   return {
     manifest,
     entries: c.entries,
     relations: c.relations ?? [],
-    revisions: c.revisions ?? [],
+    revisions,
     assets: c.assets ?? [],
     assetSources,
     warnings,
@@ -405,10 +422,8 @@ export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
  * 通してはいけない(通すと二重変換で壊れる)。ここがやるのは
  * 「lid / relation id の衝突回避」と「asset key の写し」だけ。
  *
- * 🔴 **履歴はまだ復元しない**(この段の限界)。アーカイブは履歴を**鎖のまま**
- * 持っており、ファイルからは失われていない。ただし鎖の復元には逆向きパッチの
- * 意味論を worker の符号化側と突き合わせる必要があり、取り違えると**誤った履歴を
- * 書き込む** ── 書かない方がまだ回復できる。件数を warning に出す。
+ * 履歴は**鎖のまま**返す(P6e)。decode は worker の中で行う ── 逆向きパッチの
+ * codec をここに持ち込むと符号化側と二重実装になってずれる。
  */
 export function restoreArchive(
   archive: Pkc3Archive,
@@ -431,6 +446,18 @@ export function restoreArchive(
   /** ⚠ **key だけでなく mime も返す**(review M-4)── 落とすと Blob の type と
    * meta.mime が空になり、画像が preview されなくなる(無言で) */
   assets: Array<{ key: string; mime: string }>;
+  /** 保存形の鎖(新しい → 古い)。lid は写し先へ写像済み。 */
+  revisionChains: Array<{
+    entryLid: string;
+    rows: Array<{
+      revOrder: number;
+      createdAt: string | null;
+      title: string | null;
+      archetype: string | null;
+      kind: string;
+      snapshot: string;
+    }>;
+  }>;
   warnings: string[];
 } {
   const warnings = [...archive.warnings];
@@ -484,12 +511,39 @@ export function restoreArchive(
     relations.push({ id, fromLid: from, toLid: to, kind: r.kind });
   }
 
-  if (archive.revisions.length > 0) {
-    warnings.push(
-      `履歴 ${archive.revisions.length} 版は取り込みませんでした` +
-        '(アーカイブには入っています ── 復元は次の段)',
-    );
+  // ── 履歴: entry ごとに束ね、**新しい → 古い**へ整える(worker の decode 順)。
+  // ⚠ lid は写し先へ写像する ── 原本の lid をそのまま使うと、既存の同名 entry の
+  // 履歴に他人の版が並ぶ(P6c review H-1 で実証済みの事故)
+  const byLid = new Map<string, typeof archive.revisions>();
+  let orphanRevs = 0;
+  for (const r of archive.revisions) {
+    const to = lidMap.get(r.entryLid);
+    if (!to) {
+      orphanRevs++;
+      continue;
+    }
+    const list = byLid.get(to);
+    if (list) list.push(r);
+    else byLid.set(to, [r]);
   }
+  if (orphanRevs > 0) {
+    // entry が居ない履歴 = ゴミ箱の版。**今は復元しない**(entry が無いと鎖の
+    // 起点 = tip が無く、decode できない)── 黙って落とさず件数を言う
+    warnings.push(`entry の無い履歴 ${orphanRevs} 版は復元しませんでした(ゴミ箱の版)`);
+  }
+  const revisionChains = [...byLid].map(([entryLid, rows]) => ({
+    entryLid,
+    rows: [...rows]
+      .sort((a, b) => b.revOrder - a.revOrder) // 新しい → 古い
+      .map((r) => ({
+        revOrder: r.revOrder,
+        createdAt: r.createdAt,
+        title: r.title,
+        archetype: r.archetype,
+        kind: r.kind,
+        snapshot: r.snapshot,
+      })),
+  }));
 
   // asset は meta の mime を持ち回る(key だけだと Blob の type が空になる)
   const mimeOf = new Map(archive.assets.map((a) => [a.key, a.mime]));
@@ -498,5 +552,5 @@ export function restoreArchive(
     mime: mimeOf.get(key) ?? 'application/octet-stream',
   }));
 
-  return { entries, relations, assets, warnings };
+  return { entries, relations, assets, revisionChains, warnings };
 }

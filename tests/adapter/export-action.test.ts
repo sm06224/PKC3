@@ -64,8 +64,7 @@ function source(f: Fake = {}): ArchiveSource {
         : [],
     getAssetBlob: async () => null,
     listRevisionLids: async () => [],
-    listRevisionMetas: async () => [],
-    getRevision: async () => null,
+    getRevisionChain: async () => [],
   };
 }
 

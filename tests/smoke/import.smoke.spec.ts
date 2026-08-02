@@ -170,6 +170,19 @@ function zipOf(files: ReadonlyArray<{ name: string; data: Buffer }>): Buffer {
   return Buffer.concat([...local, cdBuf, eocd]);
 }
 
+/**
+ * ノート本文(1 行だけ差し替わる長文)。**長さが要る** ── 短いと
+ * `encodeReverse` が「パッチ > 全文」と判断して全行が `kind: 'full'` になり、
+ * 逆向きパッチの経路が 1 度も走らない。
+ */
+const NOTE_BODY = (marker: string): string =>
+  [
+    '# ZIP',
+    marker,
+    'HTML のコメントは <!-- で始まり、<script src="x"> も書ける',
+    ...Array.from({ length: 40 }, (_, i) => `共通の行 ${i}: 変わらない内容がここに続く`),
+  ].join('\n') + '\n';
+
 /** PKC2 の package writer と同じ形の ZIP を node 側で組む(store / 本物の CRC)。 */
 function pkc2Zip(): Buffer {
   const container = {
@@ -182,7 +195,12 @@ function pkc2Zip(): Buffer {
         // 🔴 `<!--` → `<script` の並びは script data トークナイザを double escaped
         // 状態へ入れる ── 退避が `</script` だけだと**書き出した HTML が丸ごと真っ白**
         // になる(実 Chromium でしか観測できない。happy-dom は破綻を再現しない)
-        body: '# ZIP\n本文\nHTML のコメントは <!-- で始まり、<script src="x"> も書ける\n',
+        //
+        // ⚠ **本文を長くしてある**(P6e)。短いと逆向きパッチが全文より大きくなり、
+        // 鎖の全行が `kind: 'full'` で保存される ── つまり**パッチ経路を 1 度も
+        // 通らない fixture** になり、復元の decode が検証されない
+        // (「fixture のゼロ件の次元は測っていない次元」)
+        body: NOTE_BODY('本文'),
       },
       {
         lid: 'z2',
@@ -197,8 +215,10 @@ function pkc2Zip(): Buffer {
       },
     ],
     relations: [],
+    // 2 世代ぶん ── 鎖が 2 段になり、decode が「tip → 版 2 → 版 1」と回る
     revisions: [
-      { id: 'rv1', entry_lid: 'z1', created_at: '2026-07-01T00:00:00Z', snapshot: '# ZIP\n古い本文\n' },
+      { id: 'rv1', entry_lid: 'z1', created_at: '2026-07-01T00:00:00Z', snapshot: NOTE_BODY('古い本文') },
+      { id: 'rv2', entry_lid: 'z1', created_at: '2026-07-02T00:00:00Z', snapshot: NOTE_BODY('中くらいの本文') },
     ],
     assets: {}, // PKC2 の writer は assets を空にして container.json を書く
   };
@@ -251,7 +271,7 @@ test('.pkc2.zip 取込 → entry 出現 → 生バイナリ添付が blob: で�
   // 履歴も HTML 経路と同じ鎖へ入っている(実 sqlite の逆パッチ経路を通る)
   await clickReal(page, '[data-pkc-entry="z1"]');
   await clickReal(page, '[data-pkc-action="show-history"]');
-  await expect(page.locator('[data-pkc-rev-order]')).toHaveCount(1);
+  await expect(page.locator('[data-pkc-rev-order]')).toHaveCount(2);
 
   expect(errors).toEqual([]);
 });
@@ -552,6 +572,19 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
   await expect(restored).toHaveCount(2);
   await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]:last-child');
   await expectImageRendered(page, '[data-pkc-field="attachment-media"]');
+
+  // 🔴 **履歴も戻る**(P6e)。ここは実 sqlite の逆向きパッチを通る唯一の検証 ──
+  // 鎖の decode は worker の中にしかないので、unit では届かない。
+  // ⚠ 見るのは件数ではなく**本文**。件数だけだと「別の状態列が入った」を見逃す
+  const restoredNote = rows.filter({ hasText: 'ZIP のノート' }).last();
+  await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]:nth-child(3)');
+  await expect(restoredNote).toBeVisible();
+  await clickReal(page, '[data-pkc-action="show-history"]');
+  await expect(page.locator('[data-pkc-rev-order]')).toHaveCount(2);
+  // ⚠ 件数だけでは「別の状態列が入った」を見逃す ── **本文**まで見る。
+  // 一番古い版を開いて、元の一番古い本文が戻ることを確かめる
+  await clickReal(page, '[data-pkc-rev-order]:last-child [data-pkc-rev-id]');
+  await expect(page.locator('[data-pkc-region="detail"]')).toContainText('古い本文');
 
   expect(errors).toEqual([]);
 });
