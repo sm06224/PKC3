@@ -8,12 +8,25 @@
   "theme_color": "#0f172a",
   "background_color": "#0f172a",
   "icons": [
-    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
   ],
+  "launch_handler": {
+    "client_mode": "focus-existing"
+  },
   "file_handlers": [
     {
       "action": "./",
-      "accept": { "text/markdown": [".md", ".markdown"] }
+      "accept": {
+        "text/markdown": [
+          ".md",
+          ".markdown"
+        ]
+      }
     }
   ]
 }
