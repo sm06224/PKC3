@@ -16,6 +16,7 @@ import {
   hasMarkdownSyntax,
 } from '@features/markdown/markdown-render';
 import { parseFrontmatter, extractVars } from '@features/markdown/frontmatter';
+import { hydrateMermaid } from './mermaid-hydrate';
 import {
   extractDocumentGlobals,
   extractHeadingNumberConfig,
@@ -55,9 +56,18 @@ export class DetailRenderer {
     this.assets = assets;
   }
 
+  /** 編集プレビューの予約を捨てる(編集を抜けるとき)。 */
+  private cancelPreview: (() => void) | null = null;
+  /** 図の後始末(ObjectURL の revoke と観測の解除)。 */
+  private disposeMermaid: (() => void) | null = null;
+
   private disposeLends(): void {
     for (const d of this.lends.splice(0)) d();
     this.hydrateToken += 1;
+    this.cancelPreview?.();
+    this.cancelPreview = null;
+    this.disposeMermaid?.();
+    this.disposeMermaid = null;
   }
 
   render(state: AppState): void {
@@ -173,6 +183,8 @@ export class DetailRenderer {
       applyDocumentGlobals(rendered, extractDocumentGlobals(body));
       this.region.append(rendered);
       void this.hydrateAssetRefs(rendered, this.hydrateToken);
+      // 🔑 図は **PNG 1 枚**にして置く(P8 段③)。後始末は次の描画で走る
+      this.disposeMermaid = hydrateMermaid(rendered);
     } else {
       // 方言判定 false は plain text 扱い(PKC2 と同じゲート)
       const pre = document.createElement('pre');
@@ -210,10 +222,49 @@ export class DetailRenderer {
     bar.append(commit, cancel);
     this.region.append(bar);
 
+    /**
+     * 🔑 **書きながら見える**(P8 段②)。3 列にしたので、中央を 2 分割すれば
+     * プレビューは「新機能」ではなく**配置の片側**として入る。
+     *
+     * ⚠ 更新は state ではなく **textarea の `input`** で駆動する ── `render()` は
+     * 編集中の同一 entry では早期 return する(カーソルと IME を壊さないため)ので、
+     * state 経由では届かない。
+     * ⚠ 1 打鍵ごとに描かない。**rAF で 1 フレームに畳む** ── 連打すると
+     * markdown の描画が打鍵に追いつかず「もっさり」になる。
+     */
+    const split = document.createElement('div');
+    split.setAttribute('data-pkc-region', 'editor-split');
     const ta = document.createElement('textarea');
     ta.setAttribute('data-pkc-field', 'editor-body');
     ta.value = open.body;
-    this.region.append(ta);
+    const preview = document.createElement('div');
+    preview.setAttribute('data-pkc-region', 'editor-preview');
+    preview.className = 'pkc-md-rendered';
+    split.append(ta, preview);
+    this.region.append(split);
+
+    let frame = 0;
+    const paint = (): void => {
+      frame = 0;
+      // ⚠ 外された後に描かない(編集を抜けた瞬間の 1 フレームで無駄な仕事をしない)
+      if (!preview.isConnected) return;
+      this.disposeMermaid?.();
+      preview.innerHTML = renderMarkdown(parseFrontmatter(ta.value).body, {
+        sourceLineAnchors: false,
+      });
+      // ⚠ プレビューでも図を出す ── 出さないと「保存するまで図が見えない」
+      this.disposeMermaid = hydrateMermaid(preview);
+    };
+    paint();
+    ta.addEventListener('input', () => {
+      if (frame !== 0) return; // 既に次フレームで描く予定
+      frame = requestAnimationFrame(paint);
+    });
+    // ⚠ 編集を抜けるときに予約を捨てる(detached なノードへ描かない)
+    this.cancelPreview = () => {
+      if (frame !== 0) cancelAnimationFrame(frame);
+      frame = 0;
+    };
     ta.focus();
   }
 

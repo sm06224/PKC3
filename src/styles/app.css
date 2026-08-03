@@ -373,11 +373,28 @@ select:focus-visible {
 }
 /* ⚠ 編集欄は**残りの高さいっぱい**に伸ばす ── 固定高だと下に死に領域ができる
  * (実測: 1280x800 で textarea が 525px で止まり、下に 260px の空白が残っていた) */
+/* ── 編集(左に原文・右にプレビュー)─────────────────
+ * 🔑 3 列にしたので、中央を 2 分割すればプレビューは配置の片側として入る。 */
+[data-pkc-region='editor-split'] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--s3);
+  flex: 1;
+  min-height: 0;
+}
+[data-pkc-region='editor-preview'] {
+  overflow: auto;
+  min-height: 0;
+  padding: var(--s3);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
 /* ⚠ **残りの高さを埋める**。以前は固定高で、下に 280px の死に領域があった */
 [data-pkc-field='editor-body'] {
   width: 100%;
   min-height: 12rem;
-  flex: 1;
   font-family: var(--font-mono);
   font-size: 12.5px;
   resize: none;
@@ -797,5 +814,15 @@ select:focus-visible {
   }
   [data-pkc-region='sidebar'] {
     max-height: 30vh;
+  }
+}
+
+/* 中央が狭いときはプレビューを畳む(原文が読めなくなるほうが困る) */
+@media (max-width: 900px) {
+  [data-pkc-region='editor-split'] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  [data-pkc-region='editor-preview'] {
+    display: none;
   }
 }
