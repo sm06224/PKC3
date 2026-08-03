@@ -788,3 +788,19 @@ describe('P6e ── 鎖を書き出して復元する', () => {
     expect(await metasOf('keepdst')).toHaveLength(2);
   });
 });
+
+describe('🔴 未知の op を名指しで断る', () => {
+  it('存在しない op は **op 名つき**のエラーになる', async () => {
+    // ⚠ 無条件に呼ぶと `TypeError: handler is not a function` になるだけで、
+    // **どの op が無いのか分からない** ── nightly の store probe が P5c で
+    // 消えた `bulkAddRevisions` を呼び続け、この文言だけを残して落ちていた。
+    // op の増減は改名で起きるので、名前を出す価値がある
+    await expect(
+      request({ op: 'bulkAddRevisions' } as never),
+    ).rejects.toThrow(/未知の op.*bulkAddRevisions/);
+  });
+
+  it('既知の op はそのまま通る(ガードが全部を塞いでいない)', async () => {
+    await expect(request({ op: 'counts', cid: 'c1' })).resolves.toBeTruthy();
+  });
+});

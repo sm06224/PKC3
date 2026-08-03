@@ -1081,9 +1081,18 @@ const handlers: Handlers = {
 
 self.onmessage = (ev: MessageEvent<{ id: number; req: StorageRequest }>) => {
   const { id, req } = ev.data;
-  const handler = handlers[req.op] as (r: StorageRequest) => unknown;
+  const handler = handlers[req.op] as ((r: StorageRequest) => unknown) | undefined;
   Promise.resolve()
-    .then(() => handler(req))
+    .then(() => {
+      // 🔴 **未知の op を名指しで断る**。無条件に呼ぶと `TypeError: handler is not
+      // a function` になるだけで、**どの op が無いのか分からない**(nightly の
+      // store probe が P5c で消えた `bulkAddRevisions` を呼び続け、この文言だけを
+      // 残して落ちていた)。op の増減は改名で起きるので、名前を出す価値がある
+      if (typeof handler !== 'function') {
+        throw new Error(`未知の op です: ${String((req as { op?: unknown }).op)}`);
+      }
+      return handler(req);
+    })
     .then(
       (result) => postMessage({ id, ok: true, result } satisfies StorageResponse),
       (err: unknown) =>
