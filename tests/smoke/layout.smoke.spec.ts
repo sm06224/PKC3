@@ -59,7 +59,7 @@ test('🔴 枠が組めている(2 ペイン / 列 / 重なりなし)', async ({
   await expect(page.locator('[data-pkc-slot="root"][data-pkc-boot="ready"]')).toBeAttached();
 
   // ④ サイドバーの行が**覆われていない**(実際にその点に居るのが自分の子孫か)
-  await clickReal(page, '[data-pkc-action="create-entry"][data-pkc-archetype="text"]');
+  await clickMenuItem(page, '[data-pkc-action="create-entry"][data-pkc-archetype="text"]');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   const row = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first();
   const box = await row.boundingBox();
@@ -75,7 +75,7 @@ test('🔴 枠が組めている(2 ペイン / 列 / 重なりなし)', async ({
   expect(covered, '一覧の行が何かに覆われている').toBe(false);
 
   // ⑤ かんばんの列が**横に並ぶ**(縦に積まれていない)
-  await clickReal(page, '[data-pkc-action="create-entry"][data-pkc-archetype="todo"]');
+  await clickMenuItem(page, '[data-pkc-action="create-entry"][data-pkc-archetype="todo"]');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="kanban"]');
   const cols = page.locator('[data-pkc-region="kanban-column"]');
@@ -170,4 +170,80 @@ test('🔴 役割メニュー ── 開く / 押せる / 閉じる', async ({ p
   await clickMenuItem(page, '[data-pkc-action="purge-orphan-assets"]');
   await expect.poll(() => asked, { timeout: 5_000 }).not.toBeNull();
   expect(asked!).toContain('添付');
+});
+
+/**
+ * P7b 段⑨c: **導線の再考**(user 指示 2026-08-03
+ * 「PKC2 の導線設計も再考する形で実装してください」)。
+ *
+ * 🔴 PKC3 には**検索・絞り込みの導線が 1 つも無かった** ── ノートが増えたときに
+ * 真っ先に要るのは「作る」ではなく「探す」である。サイドバーの先頭をそこに充てた。
+ */
+test('🔴 一覧を絞り込める(探す導線)', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await gotoApp(page);
+  for (const name of ['りんご', 'みかん', 'りんごジャム']) {
+    await clickMenuItem(page, '[data-pkc-action="create-entry"][data-pkc-archetype="text"]');
+    await page.locator('[data-pkc-field="editor-title"]').fill(name);
+    await clickReal(page, '[data-pkc-action="commit-edit"]');
+  }
+  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  await expect(rows).toHaveCount(3);
+
+  // 絞り込むと**行が減る**(隠すのではなく外す)
+  const box = page.locator('[data-pkc-field="entry-filter"]');
+  await expect(box).toBeVisible();
+  await box.fill('りんご');
+  await expect(rows).toHaveCount(2);
+  await box.fill('みかん');
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText('みかん');
+
+  // ⚠ **大文字小文字を問わない**(題名は日本語だけではない)
+  await box.fill('');
+  await clickMenuItem(page, '[data-pkc-action="create-entry"][data-pkc-archetype="text"]');
+  await page.locator('[data-pkc-field="editor-title"]').fill('Apple Pie');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await box.fill('apple');
+  await expect(rows).toHaveCount(1);
+
+  // 消せば全部戻る(絞り込みは**捨てていない**)
+  await box.fill('');
+  await expect(rows).toHaveCount(4);
+});
+
+/**
+ * P7b 段⑨c: 配色(user 指示 2026-08-03「最初はライトとダークのみに」)。
+ * ⚠ 「属性が付いた」で止めない ── **実際に色が変わる**ところまで見る。
+ */
+test('🔴 配色をライト / ダークで切り替えられる', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await gotoApp(page);
+  const bg = (): Promise<string> =>
+    page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+
+  await clickMenuItem(page, '[data-pkc-action="set-theme"][data-pkc-theme-value="light"]');
+  await expect(page.locator('html[data-pkc-theme="light"]')).toBeAttached();
+  const light = await bg();
+
+  await clickMenuItem(page, '[data-pkc-action="set-theme"][data-pkc-theme-value="dark"]');
+  await expect(page.locator('html[data-pkc-theme="dark"]')).toBeAttached();
+  const dark = await bg();
+
+  // 🔴 **実際に色が違う**(属性だけ付けて CSS が無い、を落とす)
+  expect(light).not.toBe(dark);
+  // 明るさの向き ── ライトのほうが明るい
+  const lum = (c: string): number => {
+    const [r, g, b] = (c.match(/\d+/g) ?? ['0', '0', '0']).map(Number) as [
+      number,
+      number,
+      number,
+    ];
+    return r + g + b;
+  };
+  expect(lum(light), 'ライトのほうが暗い').toBeGreaterThan(lum(dark));
+
+  // ⚠ **選んだ配色が再読込をまたぐ**(毎回選び直させない)
+  await page.reload();
+  await expect(page.locator('html[data-pkc-theme="dark"]')).toBeAttached();
 });

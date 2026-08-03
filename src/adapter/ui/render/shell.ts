@@ -113,6 +113,14 @@ export function buildShell(root: HTMLElement): ShellRegions {
   // 🧹 整える ── **明示 purge のみ**(自動 GC はしない)。⚠ 不可逆なので、
   // メニューの内側に置いて「押すまでに一手」を挟む
   item(menu('整理'), 'purge-orphan-assets', '添付の整理');
+  // 🎨 見た目(user 指示 2026-08-03「最初はライトとダークのみに」)。
+  // ⚠ 文言は**切り替え先**を書く(「ライト」= 押すとライトになる)── 現在地は
+  // 画面そのものが示しているので、ここに現在地を書くと二重で分かりにくい
+  const viewMenu = menu('表示');
+  item(viewMenu, 'set-theme', 'ライト', '配色をライトにします');
+  viewMenu.lastElementChild?.setAttribute('data-pkc-theme-value', 'light');
+  item(viewMenu, 'set-theme', 'ダーク', '配色をダークにします');
+  viewMenu.lastElementChild?.setAttribute('data-pkc-theme-value', 'dark');
   // ⚠ file picker は常設 hidden input(添付と同じ流儀 ── user-gesture 要件と
   // smoke の setInputFiles の両方に効く)。**メニューの外**に置く ── メニューを
   // 閉じると中の input は描画木から外れ、smoke の setInputFiles が届かない
@@ -134,15 +142,37 @@ export function buildShell(root: HTMLElement): ShellRegions {
 
   const sidebar = document.createElement('nav');
   sidebar.setAttribute('data-pkc-region', 'sidebar');
+  /**
+   * 🔑 **導線の再考**(user 指示 2026-08-03「PKC2 の導線設計も再考する形で」)。
+   * サイドバーの先頭は **絞り込み**にする ── ノートが増えたときに真っ先に要るのは
+   * 「作る」ではなく「**探す**」である(PKC3 にはこれまで検索導線が 1 つも無かった)。
+   * 作成は 6 ボタン常置をやめ、上部の役割メニューと同じ流儀で **1 つに畳む**。
+   */
   const createBar = document.createElement('div');
   createBar.setAttribute('data-pkc-region', 'create-bar');
+
+  const filter = document.createElement('input');
+  filter.type = 'search';
+  filter.setAttribute('data-pkc-field', 'entry-filter');
+  filter.placeholder = '絞り込み';
+  filter.title = '題名で絞り込みます(Esc で消す)';
+  createBar.append(filter);
+
+  const newMenu = document.createElement('details');
+  newMenu.setAttribute('data-pkc-menu', '新規');
+  const newHead = document.createElement('summary');
+  newHead.setAttribute('data-pkc-field', 'menu-label');
+  newHead.textContent = '新規';
+  const newItems = document.createElement('div');
+  newItems.setAttribute('data-pkc-menu-items', '');
+  newMenu.append(newHead, newItems);
   for (const { archetype, label } of CREATE_BUTTONS) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.setAttribute('data-pkc-action', 'create-entry');
     btn.setAttribute('data-pkc-archetype', archetype);
     btn.textContent = label;
-    createBar.append(btn);
+    newItems.append(btn);
   }
   // 📎 添付取込(P4a): file picker は常設 hidden input(動的生成にしない ──
   // user-gesture 要件と smoke の setInputFiles の両方に効く)
@@ -150,12 +180,16 @@ export function buildShell(root: HTMLElement): ShellRegions {
   attach.type = 'button';
   attach.setAttribute('data-pkc-action', 'attach-file');
   attach.textContent = '+添付';
-  createBar.append(attach);
+  newItems.append(attach);
+  createBar.append(newMenu);
+
   const attachInput = document.createElement('input');
   attachInput.type = 'file';
   attachInput.multiple = true;
   attachInput.hidden = true;
   attachInput.setAttribute('data-pkc-field', 'attach-input');
+  // ⚠ **メニューの外**に置く ── メニューを閉じると中の input は描画木から外れ、
+  // smoke の setInputFiles が届かない(取込の hidden input と同じ理由)
   createBar.append(attachInput);
 
   const list = document.createElement('ul');

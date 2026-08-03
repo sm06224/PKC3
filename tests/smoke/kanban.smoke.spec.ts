@@ -2,14 +2,14 @@
  * smoke #2(P3-8): todo 作成 → kanban 実クリックトグル → 列移動が画面に出る。
  */
 import { test, expect } from '@playwright/test';
-import { gotoApp, collectPageErrors, clickReal } from './helpers';
+import { gotoApp, collectPageErrors, clickReal, clickMenuItem } from './helpers';
 
 test('kanban のトグルが実クリックで列を移す', async ({ page }) => {
   const errors = collectPageErrors(page);
   await gotoApp(page);
 
   // todo を 1 件作成(seed frontmatter のまま保存)
-  await clickReal(page, '[data-pkc-action="create-entry"][data-pkc-archetype="todo"]');
+  await clickMenuItem(page, '[data-pkc-action="create-entry"][data-pkc-archetype="todo"]');
   await expect(page.locator('[data-pkc-field="editor-body"]')).toBeVisible();
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   // 無変更 commit は書かないが entry は残る(fresh は commit で解除)

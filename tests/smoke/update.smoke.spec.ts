@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { gotoApp, collectPageErrors, clickReal } from './helpers';
+import { gotoApp, collectPageErrors, clickReal, clickMenuItem } from './helpers';
 
 /**
  * P7 段⑤: **更新が user に届く**(設計 doc §2-3)。
@@ -32,7 +32,7 @@ test('🔴 新しい版が配られたら案内が出て、押すと入れ替わ
     await gotoApp(page);
 
     // 消えては困るものを 1 つ置く(更新で飛ばないことの観測点)
-    await clickReal(page, '[data-pkc-action="create-entry"][data-pkc-archetype="text"]');
+    await clickMenuItem(page, '[data-pkc-action="create-entry"][data-pkc-archetype="text"]');
     const ta = page.locator('[data-pkc-field="editor-body"]');
     await expect(ta).toBeVisible();
     await ta.click();

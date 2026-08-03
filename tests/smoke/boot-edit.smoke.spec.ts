@@ -3,13 +3,13 @@
  * happy-dom の e2e が保証しない層(実座標のクリック・可視高さ・pageerror 0)を検品。
  */
 import { test, expect } from '@playwright/test';
-import { gotoApp, collectPageErrors, clickReal } from './helpers';
+import { gotoApp, collectPageErrors, clickReal, clickMenuItem } from './helpers';
 
 test('boot → ノート作成 → 編集 → 保存が画面に反映される', async ({ page }) => {
   const errors = collectPageErrors(page);
   await gotoApp(page);
 
-  await clickReal(page, '[data-pkc-action="create-entry"][data-pkc-archetype="text"]');
+  await clickMenuItem(page, '[data-pkc-action="create-entry"][data-pkc-archetype="text"]');
   const ta = page.locator('[data-pkc-field="editor-body"]');
   await expect(ta).toBeVisible();
   await ta.click();

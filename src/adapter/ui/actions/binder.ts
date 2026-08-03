@@ -54,6 +54,10 @@ export interface BinderServices {
   purgeOrphanAssets?(): void;
   /** 注意の面を閉じる(P6c review H-2)。 */
   dismissNotices?(): void;
+  /** 配色を切り替える(P7b 段⑨c)。⚠ user の好みで、flag でも container でもない。 */
+  setTheme?(theme: string): void;
+  /** 一覧の絞り込み(P7b 段⑨c)。⚠ 検索導線はこれまで 1 つも無かった。 */
+  filterEntries?(query: string): void;
   /** 新しい版に交代する(P7 段⑤)。⚠ 交代を頼むだけ ── 再読込は交代後。 */
   applyUpdate?(): void;
   /** 更新の案内を見送る(次に開いたときに再び出る)。 */
@@ -228,6 +232,10 @@ const ACTIONS: Record<string, ActionHandler> = {
   'dismiss-notices': (_dispatcher, _target, services) => {
     services.dismissNotices?.();
   },
+  'set-theme': (_dispatcher, target, services) => {
+    const theme = target.getAttribute('data-pkc-theme-value');
+    if (theme) services.setTheme?.(theme);
+  },
   'apply-update': (_dispatcher, _target, services) => {
     services.applyUpdate?.();
   },
@@ -312,6 +320,16 @@ export function bindActions(
   const onInput = (ev: Event) => {
     if (isEditorBody(ev.target)) {
       dispatcher.dispatch({ type: 'UPDATE_OPEN_BODY', body: ev.target.value });
+      return;
+    }
+    // 🔑 一覧の絞り込み(P7b 段⑨c)。⚠ **state に写す** ── renderer は
+    // DOM から値を読まない、というこのリポジトリの規約
+    const el = ev.target;
+    if (
+      el instanceof HTMLInputElement &&
+      el.getAttribute('data-pkc-field') === 'entry-filter'
+    ) {
+      dispatcher.dispatch({ type: 'SET_ENTRY_FILTER', query: el.value });
     }
   };
   const onChange = (ev: Event) => {

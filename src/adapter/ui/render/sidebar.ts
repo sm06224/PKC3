@@ -20,6 +20,8 @@ export class SidebarRenderer {
   private lastMetas: ReadonlyMap<string, EntryMeta> | null = null;
   private lastOrder: readonly string[] | null = null;
   private lastSelected: string | null = null;
+  /** ⚠ 絞り込みも**指紋の一部** ── 入れないと、絞っても行が減らない。 */
+  private lastFilter: string | null = null;
 
   constructor(sidebarRegion: HTMLElement) {
     const list = sidebarRegion.querySelector<HTMLElement>(
@@ -30,8 +32,12 @@ export class SidebarRenderer {
   }
 
   render(state: AppState): void {
+    // ⚠ 絞り込みを指紋に入れる。当初は metas / order だけを見ており、
+    // **絞り込みを変えても `reconcileRows` が走らなかった**(smoke で実際に踏んだ)
     const listChanged =
-      state.entryMetas !== this.lastMetas || state.order !== this.lastOrder;
+      state.entryMetas !== this.lastMetas ||
+      state.order !== this.lastOrder ||
+      state.filterQuery !== this.lastFilter;
     const selectionChanged = state.selectedLid !== this.lastSelected;
     if (!listChanged && !selectionChanged) return; // 指紋一致 ── DOM に触れない
 
@@ -40,14 +46,34 @@ export class SidebarRenderer {
 
     this.lastMetas = state.entryMetas;
     this.lastOrder = state.order;
+    this.lastFilter = state.filterQuery;
     this.lastSelected = state.selectedLid;
   }
 
   private reconcileRows(state: AppState): void {
     // 削除を**先に**行う ── stale ノードが cursor に残ると、それ以降の全行が
     // insertBefore(move)になる(review A-2: 先頭 1 行削除で 14,999 move の実測)
+    /**
+     * 🔑 絞り込み(P7b 段⑨c、user 指示「導線を再考」)。**常駐 meta の題名だけ**を
+     * 見る ── 本文は常駐していないので、全文検索をここでやると全 body の読込が要る
+     * (それは別の段で、SQL 側に持たせる)。
+     *
+     * ⚠ 隠すのではなく**外す** ── `hidden` で残すと、行数を数える test や
+     * 「見えている中で n 番目」の操作が静かにずれる。
+     * ⚠ 判定は**この 1 パスだけ**でやる。当初は下の cursor ループの中で
+     * 消していて、**先に取った `cursor` が消えたノードを指す**ため以降の
+     * 挿入位置が壊れた(絞り込んでも行が減らない ── smoke で実際に踏んだ)。
+     */
+    const q = state.filterQuery.trim().toLowerCase();
+    const visible: string[] = [];
     const wanted = new Set<string>();
-    for (const lid of state.order) if (state.entryMetas.has(lid)) wanted.add(lid);
+    for (const lid of state.order) {
+      const meta = state.entryMetas.get(lid);
+      if (!meta) continue;
+      if (q !== '' && !meta.title.toLowerCase().includes(q)) continue;
+      wanted.add(lid);
+      visible.push(lid);
+    }
     for (const [lid, row] of this.rows) {
       if (!wanted.has(lid)) {
         row.remove();
@@ -57,7 +83,7 @@ export class SidebarRenderer {
     }
 
     let cursor: ChildNode | null = this.list.firstChild;
-    for (const lid of state.order) {
+    for (const lid of visible) {
       const meta = state.entryMetas.get(lid);
       if (!meta) continue;
       let row = this.rows.get(lid);

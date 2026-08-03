@@ -19,6 +19,7 @@ import { runExplicitPurge } from '@adapter/platform/storage/asset-gc';
 import { buildShell } from '@adapter/ui/render/shell';
 import { showNotices, clearNotices } from '@adapter/ui/render/notices';
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
+import { applyTheme, initialTheme, type Theme } from '@adapter/ui/render/theme';
 import { watchForUpdate, type UpdateContainer } from '@adapter/platform/sw/update-prompt';
 import { reloadOnPrebootSwap, type PrebootTarget } from '@adapter/platform/sw/preboot-swap';
 import { SidebarRenderer } from '@adapter/ui/render/sidebar';
@@ -113,6 +114,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const { metas, relations } = await loadSnapshot();
 
   const dispatcher = new Dispatcher();
+  // 🎨 配色は**枠より先**に当てる ── 後だと一瞬だけ既定色で描かれて瞬く
+  applyTheme(document.documentElement, initialTheme());
   const regions = buildShell(root);
   const sidebar = new SidebarRenderer(regions.sidebar);
   // assets: bytes は IDB Blob(sqlite には meta のみ)。表示は lend/dispose 規律
@@ -357,6 +360,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // 整理との同時実行は attach と同じ危険。⚠ 振り分けは import-file.ts が持つ
     importFiles: (files) => void withAssetGate(() => runImport(files)),
     dismissNotices: () => clearNotices(regions.notices),
+    // 🎨 配色(P7b 段⑨c、user 指示「最初はライトとダークのみに」)。
+    // ⚠ 属性は **`<html>`** に付ける ── `:root` の変数を上書きするため
+    setTheme: (theme) => {
+      if (theme === 'light' || theme === 'dark')
+        applyTheme(document.documentElement, theme as Theme);
+    },
     // 🔄 新しい版へ交代する(P7 段⑤)。⚠ 頼むだけ ── 再読込は交代が済んでから
     applyUpdate: () => updatePrompt.apply(),
     // ⚠ 見送っても待機中の worker は残るので、次に開いたときに再び出る

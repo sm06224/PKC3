@@ -51,6 +51,7 @@ function buttonLabels(action: string): string[] {
  */
 const EXPECTED_LABELS = {
   'create-entry': ['+ノート', '+Todo', '+ログ', '+シート', '+フォルダ'],
+  'set-theme': ['ライト', 'ダーク'],
   'set-view': ['詳細', 'かんばん', 'カレンダー', 'ファイラ'],
   'export-archive': ['バックアップ'],
   'export-html': ['閲覧用 HTML'],
@@ -120,7 +121,7 @@ describe('マニュアルと実装の突合', () => {
     const menus = [...root.querySelectorAll('[data-pkc-menu]')].map(
       (el) => el.getAttribute('data-pkc-menu') ?? '',
     );
-    expect(menus).toEqual(['取り込む', '書き出す', '整理']);
+    expect(menus).toEqual(['取り込む', '書き出す', '整理', '表示', '新規']);
     for (const label of menus) {
       expect(MANUAL, `マニュアルに「${label}」メニューが無い`).toContain(`**${label}**`);
     }

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, collectPageErrors, clickReal } from './helpers';
+import { gotoApp, collectPageErrors, clickReal, clickMenuItem } from './helpers';
 
 /**
  * P7 段④: オフラインで**中身が読める**(設計 doc §3)。
@@ -13,7 +13,7 @@ test('🔴 オフラインで再読込しても、作ったノートが読める
   await gotoApp(page);
 
   // ノートを 1 つ作る(オフライン後に「中身が読める」の観測点になる)
-  await clickReal(page, '[data-pkc-action="create-entry"][data-pkc-archetype="text"]');
+  await clickMenuItem(page, '[data-pkc-action="create-entry"][data-pkc-archetype="text"]');
   const ta = page.locator('[data-pkc-field="editor-body"]');
   await expect(ta).toBeVisible();
   await ta.click();

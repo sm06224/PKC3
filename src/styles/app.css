@@ -45,6 +45,35 @@
   color-scheme: dark;
 }
 
+/**
+ * ライト(user 指示 2026-08-03「テーマカラーは、最初はライトとダークのみに」)。
+ *
+ * ⚠ **上書きするのはトークンだけ**。ここから下の規則は 1 行も分岐しない ──
+ * 分岐を書いた瞬間に「片方でしか直っていない」が生まれる。
+ * ⚠ 緑は暗い側の色をそのまま白地に置くと目に刺さるので、**accent を濃く**して
+ * 役割(強調・現在地)だけ引き継ぐ。
+ */
+:root[data-pkc-theme='light'] {
+  --bg: #f6f7f2;
+  --surface: #ffffff;
+  --surface-2: #e8ede0;
+  --fg: #1b2416;
+  --muted: #5c6b50;
+  --accent: #197a37;
+  --accent-dim: #96ceA6;
+  --accent-fg: #ffffff;
+  --border: #c9d3bd;
+  --danger: #b3261e;
+  --warn: #8a5300;
+
+  color-scheme: light;
+}
+
+/* 明示指定がある側は OS を見ない(user が選んだほうが強い) */
+:root[data-pkc-theme='dark'] {
+  color-scheme: dark;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -216,7 +245,7 @@ textarea:focus-visible {
   background: var(--surface);
   border: 1px solid var(--accent-dim);
   border-radius: var(--radius);
-  box-shadow: 0 4px 12px rgb(0 0 0 / 60%);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 35%);
 }
 [data-pkc-menu-items] button {
   text-align: left;
@@ -244,16 +273,23 @@ textarea:focus-visible {
   }
 }
 
+/* サイドバー先頭 = **探す**(絞り込み)と **新規**。
+ * 🔑 導線の再考(user 指示 2026-08-03)── 増えたときに要るのは「作る」より「探す」。 */
 [data-pkc-region='create-bar'] {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--s1);
+  gap: var(--s2);
+  align-items: center;
   padding: var(--s2);
   border-bottom: 1px solid var(--border);
 }
-[data-pkc-region='create-bar'] button {
-  font-size: 0.85em;
-  padding: var(--s1) var(--s2);
+[data-pkc-field='entry-filter'] {
+  flex: 1;
+  min-width: 0;
+}
+[data-pkc-region='create-bar'] [data-pkc-menu-items] {
+  /* サイドバーは幅が狭い ── 右端からはみ出さないよう右寄せで開く */
+  left: auto;
+  right: 0;
 }
 
 [data-pkc-region='entry-list'] {

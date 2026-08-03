@@ -39,7 +39,7 @@ test('添付取込 → entry 出現 → image preview が可視高さを持つ',
     .locator('[data-pkc-action="download-asset"]')
     .first()
     .getAttribute('data-pkc-asset-key');
-  await clickReal(page, '[data-pkc-action="create-entry"][data-pkc-archetype="text"]');
+  await clickMenuItem(page, '[data-pkc-action="create-entry"][data-pkc-archetype="text"]');
   const ta = page.locator('[data-pkc-field="editor-body"]');
   await expect(ta).toBeVisible();
   await ta.click();

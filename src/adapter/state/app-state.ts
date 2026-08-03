@@ -77,6 +77,13 @@ export interface AppState {
   revisionPanel: { lid: string; items: readonly RevisionItem[] } | null;
   /** ゴミ箱 panel(filer)。開いた時点のスナップショット + 明示更新。 */
   trashPanel: { items: readonly TrashItem[] } | null;
+  /**
+   * 一覧の絞り込み(P7b 段⑨c、user 指示「導線を再考」)。
+   * ⚠ **state に持つ**(renderer が DOM から読まない、という規約)── 入力欄の
+   * 値を renderer が拾いに行くと、再描画のたびに「画面と state のどちらが正か」
+   * が曖昧になる。
+   */
+  filterQuery: string;
   error: string | null;
 }
 
@@ -90,6 +97,7 @@ export const initialState: AppState = {
   selectedLid: null,
   freshLid: null,
   viewMode: 'detail',
+  filterQuery: '',
   calendarMonth: null,
   showArchived: false,
   revisionPanel: null,
@@ -100,6 +108,7 @@ export const initialState: AppState = {
 export type UserAction =
   | { type: 'SELECT_ENTRY'; lid: string }
   | { type: 'SET_VIEW_MODE'; mode: ViewMode }
+  | { type: 'SET_ENTRY_FILTER'; query: string }
   | { type: 'START_EDIT' }
   | { type: 'UPDATE_OPEN_BODY'; body: string }
   | { type: 'COMMIT_EDIT' }
@@ -305,6 +314,11 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
         events: [],
       };
     }
+    case 'SET_ENTRY_FILTER':
+      // ⚠ 選択は消さない(`SET_VIEW_MODE` と同じ規約)── 絞り込んで消えた行を
+      // 選んでいても、解除すれば戻ってくる
+      if (state.filterQuery === action.query) return { state, events: [] };
+      return { state: { ...state, filterQuery: action.query }, events: [] };
     case 'SET_VIEW_MODE':
       // selection は消さない(PKC2 規約)。panel は view に従属するので畳む
       if (state.phase === 'editing') return { state, events: [] };
