@@ -14,6 +14,7 @@
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import type { ViewMode } from '@adapter/state/app-state';
+import { archetypeLabel } from '@adapter/ui/render/sidebar';
 import { handleCopyMdBlock } from './copy-md-block';
 
 type ActionHandler = (
@@ -31,13 +32,6 @@ const VIEW_MODES: ReadonlySet<string> = new Set([
 ]);
 
 /** 既定 title の種別ラベル(連番は同 archetype の現在数 + 1)。 */
-const ARCHETYPE_LABELS: Record<string, string> = {
-  text: 'ノート',
-  todo: 'Todo',
-  textlog: 'ログ',
-  spreadsheet: 'シート',
-  folder: 'フォルダ',
-};
 
 /** lid: epoch(base36)+ セッション内単調 counter(PKC2 と同系の形式)。 */
 let lidCounter = 0;
@@ -86,7 +80,7 @@ export interface BinderServices {
 }
 
 function defaultTitle(dispatcher: Dispatcher, archetype: string): string {
-  const label = ARCHETYPE_LABELS[archetype] ?? archetype;
+  const label = archetypeLabel(archetype);
   let n = 0;
   for (const m of dispatcher.getState().entryMetas.values()) {
     if (m.archetype === archetype) n += 1;
@@ -146,7 +140,15 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'cancel-edit': (dispatcher, target) => cancelFromEditor(dispatcher, target),
   'create-entry': (dispatcher, target) => {
-    const archetype = target.getAttribute('data-pkc-archetype');
+    // 🔑 種類は**隣の `<select>`**から取る(P8 ── ボタンを種類ぶん並べない)。
+    // ⚠ 旧来どおりボタン自身が `data-pkc-archetype` を持つ形も受ける
+    // (かんばん等の面から直接作る導線が将来生えても壊れない)
+    const archetype =
+      target.getAttribute('data-pkc-archetype') ??
+      target
+        .closest('[data-pkc-region="create-bar"]')
+        ?.querySelector<HTMLSelectElement>('[data-pkc-field="create-kind"]')?.value ??
+      null;
     if (!archetype) return;
     // 非 detail view で作ると editor が出ない(PKC2 PR-Δ19 の罠)── 先に切替
     if (dispatcher.getState().viewMode !== 'detail')
@@ -240,7 +242,11 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (lid) services.openTile?.(lid);
   },
   'set-theme': (_dispatcher, target, services) => {
-    const theme = target.getAttribute('data-pkc-theme-value');
+    // `<select>` なら選ばれた値、ボタンなら属性(どちらの形でも受ける)
+    const theme =
+      target instanceof HTMLSelectElement
+        ? target.value
+        : target.getAttribute('data-pkc-theme-value');
     if (theme) services.setTheme?.(theme);
   },
   'apply-update': (_dispatcher, _target, services) => {
@@ -341,6 +347,13 @@ export function bindActions(
   };
   const onChange = (ev: Event) => {
     const el = ev.target;
+    // 🔑 `<select>` は click ではなく change で決まる ── 配色のように
+    // 「選んだ瞬間に効く」ものはここで拾う(P8)
+    if (el instanceof HTMLSelectElement) {
+      const action = el.getAttribute('data-pkc-action');
+      if (action) ACTIONS[action]?.(dispatcher, el, services);
+      return;
+    }
     if (!(el instanceof HTMLInputElement)) return;
     const field = el.getAttribute('data-pkc-field');
     if (field === 'attach-input') {

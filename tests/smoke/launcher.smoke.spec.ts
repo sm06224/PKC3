@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { gzipSync } from 'node:zlib';
-import { gotoApp, clickReal, clickMenuItem, collectPageErrors } from './helpers';
+import { gotoApp, clickReal, collectPageErrors } from './helpers';
 
 /**
  * P7b 段⑩: **取り込んだランチャーのタイルが見えて、押すと開く**。
@@ -72,7 +72,7 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   const errors = collectPageErrors(page);
   await gotoApp(page);
 
-  await clickMenuItem(page, '[data-pkc-action="import-file"]');
+  await clickReal(page, '[data-pkc-action="import-file"]');
   await page.locator('[data-pkc-field="import-input"]').setInputFiles({
     name: 'container.html',
     mimeType: 'text/html',

@@ -19,11 +19,12 @@ import { runExplicitPurge } from '@adapter/platform/storage/asset-gc';
 import { buildShell } from '@adapter/ui/render/shell';
 import { showNotices, clearNotices } from '@adapter/ui/render/notices';
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
-import { applyTheme, chooseTheme, initialTheme, type Theme } from '@adapter/ui/render/theme';
+import { applyTheme, chooseTheme, initialTheme, isTheme } from '@adapter/ui/render/theme';
 import { launchTile } from '@adapter/ui/launch-tile';
 import { watchForUpdate, type UpdateContainer } from '@adapter/platform/sw/update-prompt';
 import { reloadOnPrebootSwap, type PrebootTarget } from '@adapter/platform/sw/preboot-swap';
 import { SidebarRenderer } from '@adapter/ui/render/sidebar';
+import { InspectorRenderer } from '@adapter/ui/render/inspector';
 import { CenterRouter } from '@adapter/ui/render/center';
 import { formatSize } from '@adapter/ui/render/detail';
 import { bindActions, generateLid, type BinderServices } from '@adapter/ui/actions/binder';
@@ -139,9 +140,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
 
   const dispatcher = new Dispatcher();
   // 🎨 配色は**枠より先**に当てる ── 後だと一瞬だけ既定色で描かれて瞬く
-  applyTheme(document.documentElement, initialTheme());
+  const bootTheme = initialTheme();
+  applyTheme(document.documentElement, bootTheme);
   const regions = buildShell(root);
+  // ⚠ 帯の選択欄を**いまの配色に合わせる** ── 合わせないと、保存済みの配色で
+  // 起動したのに欄は先頭(ライト)を指す = 画面が嘘をつく
+  const themeSelect = regions.brand.querySelector<HTMLSelectElement>(
+    '[data-pkc-field="theme-select"]',
+  );
+  if (themeSelect) themeSelect.value = bootTheme;
   const sidebar = new SidebarRenderer(regions.sidebar);
+  const inspector = new InspectorRenderer(regions.inspector);
   // assets: bytes は IDB Blob(sqlite には meta のみ)。表示は lend/dispose 規律
   const blobs = new AssetBlobStore();
   const center = new CenterRouter(regions.detail, undefined, {
@@ -152,7 +161,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   let markedView: string | null = null;
   const markView = (view: string) => {
     if (view === markedView) return;
-    for (const btn of regions.topbar.querySelectorAll('[data-pkc-view]')) {
+    for (const btn of regions.cmdbar.querySelectorAll('[data-pkc-view]')) {
       if (btn.getAttribute('data-pkc-view') === view)
         btn.setAttribute('data-pkc-active', '');
       else btn.removeAttribute('data-pkc-active');
@@ -163,12 +172,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   dispatcher.onState((state) => {
     sidebar.render(state);
     center.render(state);
+    inspector.render(state);
     markView(state.viewMode);
   });
   // status: provenance + エラーの可視化(review B-1 ── 無言の操作拒否を作らない)
+  // 🔑 常時見えるのは**版だけ**(P8)。`opfs-sahpool` のような開発者語は
+  // 出さない ── 出すと user は「何かのエラーか」と読む。
+  // ⚠ 捨てはしない ── 不具合報告のときに要るので `title`(ホバー)へ逃がす。
+  // ⚠ ただし **fallback(意図しない保存先)は見せる** ── これは user が
+  // 知るべき事実で、黙ると「編集が消える」の原因が見えなくなる
   const statusBase =
-    `${APP_ID} v${APP_VERSION} (${BUILD_KIND}) — ${init.vfs}` +
-    (init.fallbackReason ? ` ⚠ ${init.fallbackReason}` : '');
+    `${APP_ID} v${APP_VERSION}` + (init.fallbackReason ? ` ⚠ ${init.fallbackReason}` : '');
+  regions.status.title = `${APP_ID} v${APP_VERSION} (${BUILD_KIND}) — ${init.vfs}`;
   // textContent の setter は同一文字列でも子ノードを全置換する ── 打鍵ごとの
   // state 変化で無駄な DOM 変異を起こさないよう、変わったときだけ書く
   let statusShown = statusBase;
@@ -407,9 +422,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // 🎨 配色(P7b 段⑨c、user 指示「最初はライトとダークのみに」)。
     // ⚠ 属性は **`<html>`** に付ける ── `:root` の変数を上書きするため
     // ⚠ **ここだけが保存する** ── 起動時の適用は保存しない(review M-7)
+    // ⚠ **一覧は 1 か所**(`THEMES`)。ここに `light | dark` のような
+    // 別の一覧を書くと、テーマを足しても**黙って効かない**(実際に踏んだ)
     setTheme: (theme) => {
-      if (theme === 'light' || theme === 'dark')
-        chooseTheme(document.documentElement, theme as Theme);
+      if (isTheme(theme)) chooseTheme(document.documentElement, theme);
     },
     // 🔄 新しい版へ交代する(P7 段⑤)。⚠ 頼むだけ ── 再読込は交代が済んでから
     applyUpdate: () => updatePrompt.apply(),

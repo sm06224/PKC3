@@ -1,91 +1,25 @@
 /*
- * PKC3 の見た目(P7b 段⑨)。**1 枚で完結させる**。
+ * PKC3 の見た目(P8)。**1 枚で完結させる**(色は `tokens.css`)。
  *
- * 裁定(user 2026-08-03「全部推奨で」):
- *   - テーマ … **PKC2 の系統(ダーク基調)を継ぐ**
- *   - 密度 … **情報密度優先**(1 画面に多く)
- *   - 調整口 … **持たない**(倍率 flag を作らない ── flag 機構がまだ 1 つも無いので、
- *     見た目のために機構を建てるのは順番が逆)
- *
- * 🔑 **PKC2 を丸写ししない**(user 指示 2026-07-30)。PKC2 の `base.css` は
- * 13,801 行 / 398 KB。引き継ぐのは**方向性**(端末風の緑・低い角丸・詰めた余白)
- * であって物量ではない ── 目標は 1,000 行 / 12 KB 以下。
- * **削る理由は容量ではなく「次に読む人が読み切れる量に保つ」**ため。
+ * 🔑 **目指すのは業務画面**(user 指示 2026-08-03「シンプルかつ高機能さ」)。
+ * 具体的には次の 6 つで、これが以下の規則すべての理由である:
+ *   ① **地は無彩色、色は情報にだけ**(帯・選択・種別チップの 3 か所)
+ *   ② **隠さない** ── 主要な導線は畳まずに並べる(畳むと探す手間が増える)
+ *   ③ **同じものが常に同じ場所にある** ── モードが変わっても配置が動かない
+ *   ④ **1 画面で完結** ── 一覧・本文・付随情報が同時に見えている
+ *   ⑤ **区切りは枠**。一覧にフル幅の横線を引かない ── 線だけが目立って中身が散る
+ *   ⑥ **操作は対象の隣**(ペインの右上 / 行の右端)。共通ツールバーに集約しない
  *
  * 🔴 **機能セレクタは `data-pkc-*` のみ**(PKC2 から継承した規約)。
  * class 名で引っかけると minify や renderer の書き換えで静かに外れる ──
  * ここで使う class は `pkc-md-rendered`(markdown の器)だけである。
- */
-
-/* ── トークン ─────────────────────────────────────────────
- * ⚠ 増やしすぎない。**ここに無い色を本文で直書きしない**のが唯一の規律で、
- * それを守れる程度の数に抑える。 */
-:root {
-  --bg: #0d0f0a;
-  --surface: #111510;
-  --surface-2: #162010;
-  --fg: #c8d8b0;
-  --muted: #5a6e4a;
-  --accent: #33ff66;
-  --accent-dim: #1a7a33;
-  --accent-fg: #050a03;
-  /* ⚠ **`--accent-dim` の上に載る文字**。`--accent-fg`(= `--accent` の上)を
-   * 流用すると、ライトで白 on 淡緑 = 1.80:1 になって読めない(review M-9 実測)。
-   * 「accent の上」と「accent-dim の上」は別の役割である */
-  --accent-dim-fg: #eaffee;
-  --border: #1e2a16;
-  --danger: #ff4444;
-  --warn: #ffaa22;
-  /* 影(メニューの浮き)。⚠ トークン外の色を本文に直書きしないため(review L-8) */
-  --shadow: 0 4px 12px rgb(0 0 0 / 35%);
-  /* sandbox iframe の下地。⚠ **配色に追従させない** ── 中の HTML は
-   * 白地を前提に書かれている(取り込んだ他人の文書)ので、暗くすると読めなくなる */
-  --sandbox-bg: #ffffff;
-
-  --radius: 2px;
-  --s1: 0.125rem;
-  --s2: 0.25rem;
-  --s3: 0.5rem;
-  --s4: 0.75rem;
-  --s5: 1rem;
-
-  --font: 'BIZ UDGothic', 'Share Tech Mono', 'IBM Plex Mono', ui-monospace, monospace;
-
-  color-scheme: dark;
-}
-
-/**
- * ライト(user 指示 2026-08-03「テーマカラーは、最初はライトとダークのみに」)。
  *
- * ⚠ **上書きするのはトークンだけ**。ここから下の規則は 1 行も分岐しない ──
- * 分岐を書いた瞬間に「片方でしか直っていない」が生まれる。
- * ⚠ 緑は暗い側の色をそのまま白地に置くと目に刺さるので、**accent を濃く**して
- * 役割(強調・現在地)だけ引き継ぐ。
+ * ⚠ **単漢字マーク(文/了/録/表/箱/添)は全廃した**。日本語に無い書き方という
+ * だけでなく、`::before` が `<tr>` に当たって**匿名セルを作り、ファイラの表を
+ * 1 列ずらして全ヘッダを嘘にしていた**(実測)。種別はチップで出す。
  */
-:root[data-pkc-theme='light'] {
-  --bg: #f6f7f2;
-  --surface: #ffffff;
-  --surface-2: #e8ede0;
-  --fg: #1b2416;
-  --muted: #5c6b50;
-  --accent: #197a37;
-  --accent-dim: #96cea6;
-  --accent-fg: #ffffff;
-  /* 淡い緑の上は**濃い文字**(白だと 1.80:1 ── review M-9) */
-  --accent-dim-fg: #123318;
-  --border: #c9d3bd;
-  --danger: #b3261e;
-  --warn: #8a5300;
-  --shadow: 0 4px 12px rgb(0 0 0 / 18%);
-  --sandbox-bg: #ffffff;
 
-  color-scheme: light;
-}
-
-/* 明示指定がある側は OS を見ない(user が選んだほうが強い) */
-:root[data-pkc-theme='dark'] {
-  color-scheme: dark;
-}
+@import './tokens.css';
 
 * {
   box-sizing: border-box;
@@ -101,8 +35,9 @@ body {
   background: var(--bg);
   color: var(--fg);
   font-family: var(--font);
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
 }
 
 /* boot 前 / boot 失敗のときは shell が無く、素のテキストが root に入る */
@@ -115,48 +50,38 @@ body {
 }
 
 /* ── 枠 ───────────────────────────────────────────────
- * 🔴 これが無いと**サイドバーが本文の上に縦に流れる**(段⑨ 前の実際の姿)。 */
+ * 🔑 **3 列**(一覧 / 本文 / 付随情報)。編集に入っても列は動かない ── 以前は
+ * 編集すると本文以外が全部消えていた(「1 画面で完結」の逆)。 */
 [data-pkc-region='shell'] {
   display: grid;
-  grid-template-columns: minmax(180px, 22vw) 1fr;
-  /* ⚠ notices と update は**別の行**にする。同じ area に載せると、両方出たとき
-   * 重なって下の面が読めない(書いていて実際に一度そうした) */
-  grid-template-rows: auto 1fr auto auto auto;
+  grid-template-columns: minmax(200px, 18vw) minmax(0, 1fr) minmax(220px, 20vw);
+  /* ⚠ notices と update は**別の行**。同じ area に載せると、両方出たとき重なる */
+  grid-template-rows: auto auto 1fr auto auto auto;
   grid-template-areas:
-    'topbar topbar'
-    'sidebar detail'
-    'update update'
-    'notices notices'
-    'status status';
+    'brand   brand   brand'
+    'cmdbar  cmdbar  cmdbar'
+    'sidebar detail  inspector'
+    'update  update  update'
+    'notices notices notices'
+    'status  status  status';
   height: 100%;
+  gap: 0;
 }
 
-/* 狭い画面では 1 カラムへ折る(サイドバーは高さを抑えて上に置く) */
-@media (max-width: 720px) {
-  [data-pkc-region='shell'] {
-    grid-template-columns: 1fr;
-    grid-template-areas:
-      'topbar'
-      'sidebar'
-      'detail'
-      'update'
-      'notices'
-      'status';
-    grid-template-rows: auto auto 1fr auto auto auto;
-  }
-  [data-pkc-region='sidebar'] {
-    max-height: 32vh;
-  }
+[data-pkc-region='brand'] {
+  grid-area: brand;
 }
-
-[data-pkc-region='topbar'] {
-  grid-area: topbar;
+[data-pkc-region='cmdbar'] {
+  grid-area: cmdbar;
 }
 [data-pkc-region='sidebar'] {
   grid-area: sidebar;
 }
 [data-pkc-region='detail'] {
   grid-area: detail;
+}
+[data-pkc-region='inspector'] {
+  grid-area: inspector;
 }
 [data-pkc-region='update'] {
   grid-area: update;
@@ -168,24 +93,25 @@ body {
   grid-area: status;
 }
 
-/* ── ボタン ───────────────────────────────────────────
- * ⚠ 素の `<button>` を**全部**受ける。renderer は class を振らないので、
- * ここで拾えないと「ベタ並びの既定ボタン」に戻る。 */
+/* ── 部品 ─────────────────────────────────────────── */
 button {
-  background: var(--surface-2);
+  background: var(--surface);
   color: var(--fg);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: var(--s2) var(--s3);
+  padding: 0 var(--s3);
+  height: var(--row-h);
   font: inherit;
+  line-height: calc(var(--row-h) - 2px);
   cursor: pointer;
+  white-space: nowrap;
 }
 button:hover {
-  border-color: var(--accent-dim);
-  color: var(--accent);
+  background: var(--surface-2);
+  border-color: var(--muted);
 }
 button:active {
-  background: var(--bg);
+  background: var(--accent-dim);
 }
 button:focus-visible {
   outline: 2px solid var(--accent);
@@ -195,84 +121,103 @@ button:focus-visible {
 input,
 textarea,
 select {
-  background: var(--bg);
+  background: var(--surface);
   color: var(--fg);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: var(--s2) var(--s3);
+  padding: 0 var(--s3);
+  height: var(--row-h);
   font: inherit;
 }
+textarea {
+  height: auto;
+  padding: var(--s3);
+  line-height: 1.6;
+}
 input:focus-visible,
-textarea:focus-visible {
+textarea:focus-visible,
+select:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
 }
 
-/* ── topbar ──────────────────────────────────────── */
-[data-pkc-region='topbar'] {
+/* ── 最上部の帯 ────────────────────────────────────
+ * 🔑 **彩度のある色を置くのはここだけ**。アプリの現在地を 1 行で示す。 */
+[data-pkc-region='brand'] {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--s2);
   align-items: center;
+  gap: var(--s3);
+  height: 32px;
+  padding: 0 var(--s3);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+[data-pkc-field='brand-name'] {
+  font-size: 13px;
+}
+[data-pkc-field='brand-context'] {
+  font-weight: 400;
+  opacity: 0.85;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-pkc-field='brand-spacer'] {
+  margin-left: auto;
+}
+[data-pkc-region='brand'] select {
+  width: auto;
+  height: 22px;
+  padding: 0 var(--s2);
+  font-size: 12px;
+  background: color-mix(in srgb, var(--accent) 78%, #000);
+  color: var(--accent-fg);
+  border-color: color-mix(in srgb, var(--accent) 55%, #000);
+}
+
+/* ── 操作の帯 ──────────────────────────────────────
+ * ⚠ **畳まない**。以前は `取り込む▾ 書き出す▾ 整理▾ 表示▾` と畳んでいたが、
+ * 「隠さない」に反していた。役割ごとに区切って**全部見せる**。 */
+[data-pkc-region='cmdbar'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
   padding: var(--s2) var(--s3);
   background: var(--surface);
   border-bottom: 1px solid var(--border);
+  overflow-x: auto;
 }
-/* ── 役割メニュー(topbar の `<details>`)──────────────
- * ⚠ **本文の上に浮かせる**。inline に開くと topbar の高さが変わり、
- * 下のペインが押し下げられて「開くたびに画面が跳ねる」。 */
-[data-pkc-menu] {
-  position: relative;
+[data-pkc-field='cmd-sep'] {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 var(--s2);
+  flex: none;
 }
-[data-pkc-field='menu-label'] {
-  list-style: none;
-  cursor: pointer;
-  padding: var(--s2) var(--s3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface-2);
-  user-select: none;
-}
-/* ⚠ WebKit は `list-style: none` だけでは三角が消えない */
-[data-pkc-field='menu-label']::-webkit-details-marker {
-  display: none;
-}
-[data-pkc-field='menu-label']::after {
-  content: ' ▾';
-  color: var(--muted);
-}
-[data-pkc-menu][open] > [data-pkc-field='menu-label'] {
-  border-color: var(--accent-dim);
-  color: var(--accent);
-}
-[data-pkc-menu-items] {
-  position: absolute;
-  z-index: 10;
-  top: calc(100% + var(--s1));
-  left: 0;
-  min-width: max-content;
+[data-pkc-field='cmd-group'] {
   display: flex;
-  flex-direction: column;
-  gap: var(--s1);
-  padding: var(--s2);
-  background: var(--surface);
-  border: 1px solid var(--accent-dim);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  gap: var(--s2);
+  flex: none;
 }
-[data-pkc-menu-items] button {
-  text-align: left;
+/* いま居るビュー ── 塗るのではなく**下線**で示す(業務画面のタブの作法) */
+[data-pkc-region='cmdbar'] [data-pkc-action='set-view'] {
+  background: transparent;
+  border-color: transparent;
 }
-
-/* いま居るビューを塗る(`markView` が属性を付け外しする) */
-[data-pkc-region='topbar'] [data-pkc-active] {
+[data-pkc-region='cmdbar'] [data-pkc-action='set-view']:hover {
+  background: var(--surface-2);
+}
+[data-pkc-region='cmdbar'] [data-pkc-active] {
   background: var(--accent-dim);
-  /* ⚠ `--accent-fg` ではない ── ライトで白 on 淡緑 = 1.80:1 だった(review M-9) */
   color: var(--accent-dim-fg);
-  border-color: var(--accent);
+  border-color: var(--accent-dim);
+  box-shadow: inset 0 -2px 0 var(--accent);
+  font-weight: 600;
 }
 
-/* ── サイドバー ──────────────────────────────────── */
+/* ── サイドバー(一覧)────────────────────────────── */
 [data-pkc-region='sidebar'] {
   display: flex;
   flex-direction: column;
@@ -280,99 +225,129 @@ textarea:focus-visible {
   background: var(--surface);
   border-right: 1px solid var(--border);
 }
-@media (max-width: 720px) {
-  [data-pkc-region='sidebar'] {
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-  }
-}
-
-/* サイドバー先頭 = **探す**(絞り込み)と **新規**。
- * 🔑 導線の再考(user 指示 2026-08-03)── 増えたときに要るのは「作る」より「探す」。 */
+[data-pkc-region='find-bar'],
 [data-pkc-region='create-bar'] {
   display: flex;
   gap: var(--s2);
   align-items: center;
   padding: var(--s2);
+  padding-bottom: 0;
+}
+[data-pkc-region='create-bar'] {
+  padding-bottom: var(--s2);
   border-bottom: 1px solid var(--border);
 }
 [data-pkc-field='entry-filter'] {
   flex: 1;
   min-width: 0;
 }
-[data-pkc-region='create-bar'] [data-pkc-menu-items] {
-  /* サイドバーは幅が狭い ── 右端からはみ出さないよう右寄せで開く */
-  left: auto;
-  right: 0;
+[data-pkc-field='create-kind'] {
+  flex: 1;
+  min-width: 0;
 }
-
 [data-pkc-region='entry-list'] {
   list-style: none;
   margin: 0;
-  padding: 0;
-  overflow-y: auto;
-  min-height: 0;
+  padding: var(--s2);
+  overflow: auto;
   flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
+/* ⚠ **フル幅の横線を引かない**(区切りは背景と余白でつける)。
+ * 以前は全行に画面いっぱいの罫線があり、線だけが目立って中身が散っていた。 */
 [data-pkc-region='entry-list'] [data-pkc-entry] {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--s2);
-  padding: var(--s2) var(--s3);
-  border-bottom: 1px solid var(--border);
+  min-height: var(--row-h);
+  padding: 0 var(--s2);
+  border-radius: var(--radius);
   cursor: pointer;
+  border-left: 2px solid transparent;
 }
 [data-pkc-region='entry-list'] [data-pkc-entry]:hover {
   background: var(--surface-2);
 }
-/* 選択中(`data-pkc-selected` は sidebar / kanban が付ける) */
 [data-pkc-selected] {
-  background: var(--surface-2);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--accent-dim) !important;
+  color: var(--accent-dim-fg);
+  border-left-color: var(--accent) !important;
 }
 [data-pkc-entry] [data-pkc-field='title'] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-/* archetype の印(記号 1 文字ぶんだけ。密度優先で語は出さない)。
- * ⚠ **一覧の行にだけ**出す(review L-2)── スコープが無かったので、同じ属性を
- * 持つ「新規」メニューのボタンにも出て「文 +ノート」と表示されていた */
-:is([data-pkc-region='entry-list'], [data-pkc-region='filer-table']) [data-pkc-archetype]::before {
-  color: var(--muted);
-  font-size: 0.8em;
-}
-:is([data-pkc-region='entry-list'], [data-pkc-region='filer-table']) [data-pkc-archetype='text']::before {
-  content: '文 ';
-}
-:is([data-pkc-region='entry-list'], [data-pkc-region='filer-table']) [data-pkc-archetype='todo']::before {
-  content: '了 ';
-}
-:is([data-pkc-region='entry-list'], [data-pkc-region='filer-table']) [data-pkc-archetype='textlog']::before {
-  content: '録 ';
-}
-:is([data-pkc-region='entry-list'], [data-pkc-region='filer-table']) [data-pkc-archetype='spreadsheet']::before {
-  content: '表 ';
-}
-:is([data-pkc-region='entry-list'], [data-pkc-region='filer-table']) [data-pkc-archetype='folder']::before {
-  content: '箱 ';
-}
-:is([data-pkc-region='entry-list'], [data-pkc-region='filer-table']) [data-pkc-archetype='attachment']::before {
-  content: '添 ';
+  flex: 1;
+  min-width: 0;
 }
 
-/* ── 中央ペイン ──────────────────────────────────── */
+/* 種別のチップ ── **色が分類を担う**(裸の文字を本文の前に置かない)。
+ * ⚠ renderer が `data-pkc-chip` を持つ要素を作る。CSS の `content` では出さない
+ * (`::before` を行に当てると表のセル構造が壊れる ── 実測で踏んだ)。 */
+[data-pkc-chip] {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 2px;
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 600;
+  color: #fff;
+  background: var(--muted);
+}
+[data-pkc-chip='text'] {
+  background: #4a6fa5;
+}
+[data-pkc-chip='textlog'] {
+  background: #6b5b95;
+}
+[data-pkc-chip='spreadsheet'] {
+  background: #2f7d5c;
+}
+[data-pkc-chip='folder'] {
+  background: #8a6d3b;
+}
+[data-pkc-chip='attachment'] {
+  background: #6e7781;
+}
+[data-pkc-chip='todo'] {
+  background: #a05252;
+}
+
+/* ── 中央(本文)────────────────────────────────── */
 [data-pkc-region='detail'] {
+  display: flex;
+  flex-direction: column;
   overflow: auto;
   min-height: 0;
+  padding: var(--s3);
+  background: var(--bg);
+}
+[data-pkc-region='detail'] > [data-pkc-view-pane] {
+  flex: 1;
+  min-height: 0;
+}
+[data-pkc-view-pane='detail'] {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   padding: var(--s4);
 }
 [data-pkc-field='detail-title'] {
   margin: 0 0 var(--s3);
-  font-size: 1.15em;
-  color: var(--accent);
-  border-bottom: 1px solid var(--border);
+  font-size: 15px;
+  font-weight: 600;
   padding-bottom: var(--s2);
+  border-bottom: 1px solid var(--border);
 }
 [data-pkc-field='detail-toolbar'] {
   display: flex;
@@ -388,68 +363,84 @@ textarea:focus-visible {
 [data-pkc-action='delete-entry']:hover,
 [data-pkc-action='purge-trash']:hover {
   background: var(--danger);
-  color: var(--accent-fg);
-  border-color: var(--danger);
+  color: var(--surface);
 }
-
 [data-pkc-field='editor-title'] {
   width: 100%;
   margin-bottom: var(--s2);
+  font-size: 15px;
+  font-weight: 600;
 }
+/* ⚠ 編集欄は**残りの高さいっぱい**に伸ばす ── 固定高だと下に死に領域ができる
+ * (実測: 1280x800 で textarea が 525px で止まり、下に 260px の空白が残っていた) */
+/* ⚠ **残りの高さを埋める**。以前は固定高で、下に 280px の死に領域があった */
 [data-pkc-field='editor-body'] {
   width: 100%;
-  min-height: 50vh;
-  resize: vertical;
-  line-height: 1.6;
+  min-height: 12rem;
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  resize: none;
 }
 [data-pkc-field='detail-loading'] {
   color: var(--muted);
 }
 
-/* 履歴 / ゴミ箱の面 */
-[data-pkc-field='history-panel'],
-[data-pkc-region='filer-trash'] {
-  margin-top: var(--s4);
-  padding: var(--s3);
+/* ── 右(付随情報)──────────────────────────────── */
+[data-pkc-region='inspector'] {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-left: 1px solid var(--border);
 }
-[data-pkc-field='history-panel'] ul,
-[data-pkc-region='filer-trash'] ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-[data-pkc-field='history-panel'] li,
-[data-pkc-region='filer-trash'] li {
+[data-pkc-field='pane-title'] {
   display: flex;
   align-items: center;
-  gap: var(--s3);
-  padding: var(--s2) 0;
+  gap: var(--s2);
+  height: 24px;
+  padding: 0 var(--s3);
+  background: var(--surface-2);
   border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  flex: none;
 }
-
-/* 添付 */
-[data-pkc-field='attachment-info'] {
+[data-pkc-field='pane-title'] > [data-pkc-field='brand-spacer'] {
+  margin-left: auto;
+}
+[data-pkc-region='inspector'] dl {
+  margin: 0;
+  padding: var(--s3);
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--s2) var(--s3);
+  font-size: 12px;
+}
+[data-pkc-region='inspector'] dt {
+  color: var(--muted);
+  white-space: nowrap;
+}
+[data-pkc-region='inspector'] dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+[data-pkc-region='inspector'] [data-pkc-field='inspector-actions'] {
   display: flex;
-  align-items: center;
-  gap: var(--s3);
-  margin-bottom: var(--s3);
+  flex-wrap: wrap;
+  gap: var(--s2);
+  padding: var(--s3);
+  border-top: 1px solid var(--border);
+}
+[data-pkc-field='inspector-empty'] {
+  padding: var(--s4);
   color: var(--muted);
 }
-[data-pkc-field='attachment-preview'] img,
-[data-pkc-field='attachment-media'] {
-  max-width: 100%;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-[data-pkc-asset-missing] {
-  color: var(--danger);
-}
 
-/* ── markdown ────────────────────────────────────
- * ⚠ 器は `.pkc-md-rendered`(renderer が振る唯一の class)。 */
+/* ── markdown ───────────────────────────────────── */
 .pkc-md-rendered {
   overflow-wrap: anywhere;
 }
@@ -457,35 +448,35 @@ textarea:focus-visible {
 .pkc-md-rendered h2,
 .pkc-md-rendered h3,
 .pkc-md-rendered h4 {
-  color: var(--accent);
   margin: var(--s5) 0 var(--s2);
-  line-height: 1.25;
+  line-height: 1.3;
 }
 .pkc-md-rendered h1 {
-  font-size: 1.4em;
+  font-size: 1.35em;
 }
 .pkc-md-rendered h2 {
   font-size: 1.2em;
 }
 .pkc-md-rendered h3 {
-  font-size: 1.05em;
+  font-size: 1.08em;
 }
-.pkc-md-rendered p,
-.pkc-md-rendered ul,
-.pkc-md-rendered ol {
-  margin: var(--s3) 0;
+.pkc-md-rendered ol,
+.pkc-md-rendered ul {
+  padding-left: 1.4em;
 }
 .pkc-md-rendered a {
   color: var(--accent);
 }
 .pkc-md-rendered code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 0 var(--s1);
+  border-radius: 2px;
+  padding: 0 3px;
 }
 .pkc-md-rendered pre {
-  background: var(--surface);
+  background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--s3);
@@ -499,22 +490,17 @@ textarea:focus-visible {
 .pkc-md-rendered blockquote {
   margin: var(--s3) 0;
   padding-left: var(--s4);
-  border-left: 2px solid var(--accent-dim);
+  border-left: 3px solid var(--border);
   color: var(--muted);
 }
-/* 🔴 罫線が無いと表が「a b / 1 2」に見える(段⑨ 前の実際の姿) */
 .pkc-md-rendered table {
   border-collapse: collapse;
   margin: var(--s3) 0;
-  display: block;
-  overflow-x: auto;
-  max-width: 100%;
 }
-.pkc-md-rendered th,
-.pkc-md-rendered td {
+.pkc-md-rendered td,
+.pkc-md-rendered th {
   border: 1px solid var(--border);
   padding: var(--s2) var(--s3);
-  text-align: left;
 }
 .pkc-md-rendered th {
   background: var(--surface-2);
@@ -533,28 +519,41 @@ textarea:focus-visible {
   margin-top: var(--s5);
   padding-top: var(--s3);
   border-top: 1px solid var(--border);
-  font-size: 0.9em;
+  font-size: 0.92em;
   color: var(--muted);
 }
 .pkc-md-rendered .pkc-toc {
   margin: var(--s3) 0;
   padding: var(--s3);
-  background: var(--surface);
+  background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
 
-/* ── かんばん ────────────────────────────────────
- * 🔴 これが無いと列が**縦に積まれる**(段⑨ 前の実際の姿)。 */
+/* ── 添付 ───────────────────────────────────────── */
+[data-pkc-field='attachment-info'] {
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: var(--s3);
+}
+[data-pkc-field='attachment-media'] {
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+[data-pkc-asset-missing] {
+  color: var(--danger);
+}
+
+/* ── かんばん / カレンダー(封印中。解いたときに効く)──────── */
 [data-pkc-view-pane='kanban'] {
   display: flex;
   gap: var(--s3);
   align-items: flex-start;
-  overflow-x: auto;
 }
 [data-pkc-region='kanban-column'] {
-  flex: 1 1 0;
-  min-width: 180px;
+  flex: 1;
+  min-width: 0;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -562,209 +561,241 @@ textarea:focus-visible {
 [data-pkc-region='kanban-column'] > h3 {
   margin: 0;
   padding: var(--s2) var(--s3);
-  font-size: 0.95em;
-  color: var(--accent);
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--surface-2);
   border-bottom: 1px solid var(--border);
 }
 [data-pkc-region='kanban-cards'] {
-  list-style: none;
-  margin: 0;
-  padding: var(--s2);
   display: flex;
   flex-direction: column;
   gap: var(--s2);
+  padding: var(--s2);
+  min-height: 40px;
 }
 [data-pkc-region='kanban-cards'] [data-pkc-entry] {
-  display: flex;
-  align-items: baseline;
-  gap: var(--s2);
-  padding: var(--s2);
-  background: var(--surface-2);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  padding: var(--s2) var(--s3);
   cursor: pointer;
 }
 [data-pkc-region='kanban-cards'] [data-pkc-field='date'] {
-  margin-left: auto;
   color: var(--muted);
-  font-size: 0.85em;
+  font-size: 11px;
 }
-
-/* ── カレンダー ──────────────────────────────── */
 [data-pkc-field='calendar-toolbar'] {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: var(--s2);
   margin-bottom: var(--s3);
 }
 [data-pkc-field='calendar-month'] {
-  color: var(--accent);
+  font-weight: 600;
 }
 [data-pkc-region='calendar-grid'] {
   width: 100%;
   border-collapse: collapse;
-  table-layout: fixed;
 }
 [data-pkc-region='calendar-grid'] th,
 [data-pkc-region='calendar-grid'] td {
   border: 1px solid var(--border);
   vertical-align: top;
-  padding: var(--s1);
+  padding: var(--s2);
 }
 [data-pkc-region='calendar-grid'] th {
   background: var(--surface-2);
-  padding: var(--s2);
-  font-size: 0.85em;
-}
-[data-pkc-region='calendar-grid'] td {
-  height: 5.5em;
+  font-size: 11px;
+  color: var(--muted);
 }
 [data-pkc-field='day-number'] {
-  display: block;
+  font-size: 11px;
   color: var(--muted);
-  font-size: 0.8em;
 }
 [data-pkc-region='calendar-grid'] [data-pkc-entry] {
   display: block;
-  width: 100%;
-  text-align: left;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.85em;
-  padding: 0 var(--s1);
-  margin-top: var(--s1);
+  cursor: pointer;
+  font-size: 11px;
 }
 [data-pkc-archived] {
   opacity: 0.55;
 }
 
-/* ── ランチャー ────────────────────────────── */
+/* ── ランチャー ─────────────────────────────────── */
 [data-pkc-field='launcher-group'] {
-  margin: var(--s5) 0 var(--s2);
-  font-size: 0.95em;
-  color: var(--accent);
-  border-bottom: 1px solid var(--border);
-  padding-bottom: var(--s1);
+  margin: var(--s4) 0 var(--s2);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.04em;
 }
 [data-pkc-field='launcher-group']:first-child {
   margin-top: 0;
 }
 [data-pkc-region='launcher-grid'] {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: var(--s3);
 }
 [data-pkc-region='launcher-grid'] [data-pkc-tile] {
   display: flex;
   flex-direction: column;
-  gap: var(--s1);
   align-items: flex-start;
+  gap: var(--s1);
+  height: auto;
+  min-height: 46px;
   padding: var(--s3);
-  min-height: 3.5em;
-  background: var(--surface);
   text-align: left;
 }
 [data-pkc-region='launcher-grid'] [data-pkc-field='title'] {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 100%;
+  font-weight: 600;
 }
 [data-pkc-field='tile-url'] {
+  font-size: 11px;
   color: var(--muted);
-  font-size: 0.8em;
 }
-/* 外部サイトへ飛ぶタイルは印を付ける(押す前に分かるように) */
 [data-pkc-tile-kind='url'] [data-pkc-field='tile-url']::before {
   content: '↗ ';
 }
-[data-pkc-field='launcher-empty'],
 [data-pkc-field='launcher-loading'] {
   color: var(--muted);
 }
 
-/* ── ファイラ ────────────────────────────────── */
+/* ── ファイラ ───────────────────────────────────── */
 [data-pkc-region='filer-breadcrumb'] {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: var(--s2);
+  gap: var(--s1);
+  flex-wrap: wrap;
   margin-bottom: var(--s3);
-  color: var(--muted);
+  font-size: 12px;
 }
 [data-pkc-region='filer-table'] {
   width: 100%;
   border-collapse: collapse;
+  font-size: 12px;
 }
 [data-pkc-region='filer-table'] th,
 [data-pkc-region='filer-table'] td {
-  border-bottom: 1px solid var(--border);
-  padding: var(--s2) var(--s3);
+  border: 1px solid var(--border);
+  padding: var(--s1) var(--s3);
+  height: var(--row-h);
   text-align: left;
 }
 [data-pkc-region='filer-table'] th {
+  background: var(--surface-2);
+  font-size: 11px;
   color: var(--muted);
-  font-weight: normal;
-  font-size: 0.85em;
+  font-weight: 600;
 }
 [data-pkc-region='filer-table'] tr:hover td {
   background: var(--surface-2);
 }
 [data-pkc-field='filer-empty'] {
   color: var(--muted);
+  padding: var(--s3) 0;
 }
-
-/* ── 面(注意 / 更新)と status ───────────────── */
-[data-pkc-region='notices'] {
-  margin: 0 var(--s3) var(--s2);
-  padding: var(--s3);
-  background: var(--surface);
-  border: 1px solid var(--warn);
-  border-radius: var(--radius);
+[data-pkc-region='filer-trash'] {
+  margin-top: var(--s5);
+  padding-top: var(--s3);
+  border-top: 1px solid var(--border);
 }
-[data-pkc-field='notices-title'] {
+[data-pkc-region='filer-trash'] ul {
+  list-style: none;
+  margin: var(--s2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+}
+[data-pkc-region='filer-trash'] li {
   display: flex;
   align-items: center;
-  gap: var(--s3);
-  color: var(--warn);
+  gap: var(--s2);
+  font-size: 12px;
+}
+
+/* ── お知らせ / 更新 / ステータス ───────────────────── */
+[data-pkc-region='notices'] {
+  padding: var(--s3);
+  background: var(--surface-2);
+  border-top: 1px solid var(--border);
+}
+[data-pkc-field='notices-title'] {
+  font-weight: 600;
   margin-bottom: var(--s2);
 }
 [data-pkc-region='notices'] ul {
   margin: 0;
-  padding-left: var(--s5);
-  max-height: 30vh;
-  overflow-y: auto;
+  padding-left: 1.2em;
 }
-
 [data-pkc-region='update'] {
   display: flex;
   align-items: center;
   gap: var(--s3);
-  margin: 0 var(--s3) var(--s2);
-  padding: var(--s3);
-  background: var(--surface);
-  border: 1px solid var(--accent-dim);
-  border-radius: var(--radius);
+  padding: var(--s2) var(--s3);
+  background: var(--accent-dim);
+  color: var(--accent-dim-fg);
+  border-top: 1px solid var(--accent);
 }
 [data-pkc-field='update-text'] {
-  color: var(--accent);
+  flex: 1;
 }
-
 [data-pkc-region='status'] {
-  padding: var(--s1) var(--s3);
-  background: var(--surface);
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  height: 22px;
+  padding: 0 var(--s3);
+  background: var(--surface-2);
   border-top: 1px solid var(--border);
   color: var(--muted);
-  font-size: 0.8em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-size: 11px;
 }
 
-/* ⚠ 隠されている面は grid の行を占めない(`hidden` は display:block に
- * 負けるので、grid item には明示が要る) */
 [hidden] {
   display: none !important;
+}
+
+/* ── 画面幅に応じた上書き ─────────────────────────────
+ * 🔴 **file の最後に置く**。`@media` は詳細度を上げないので、同じ詳細度の規則が
+ * 後ろにあると**メディアクエリの側が負ける**。実際に一度踏んだ ──
+ * 付随情報を畳む `display: none` を上のほうに書いていたら、後段の
+ * `[data-pkc-region='inspector'] { display: flex }` に勝たれ、
+ * 480px 幅で 3 列のまま本文が **213px** に潰れていた(実測)。 */
+
+/* 中くらいの画面では付随情報を畳む(本文の幅を優先する) */
+@media (max-width: 1100px) {
+  [data-pkc-region='shell'] {
+    grid-template-columns: minmax(180px, 22vw) minmax(0, 1fr);
+    grid-template-areas:
+      'brand   brand'
+      'cmdbar  cmdbar'
+      'sidebar detail'
+      'update  update'
+      'notices notices'
+      'status  status';
+  }
+  [data-pkc-region='inspector'] {
+    display: none;
+  }
+}
+
+/* 狭い画面では 1 カラムへ折る */
+@media (max-width: 720px) {
+  [data-pkc-region='shell'] {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      'brand'
+      'cmdbar'
+      'sidebar'
+      'detail'
+      'update'
+      'notices'
+      'status';
+    grid-template-rows: auto auto auto 1fr auto auto auto;
+  }
+  [data-pkc-region='sidebar'] {
+    max-height: 30vh;
+  }
 }

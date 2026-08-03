@@ -19,6 +19,8 @@ import { showUpdateCard } from '../src/adapter/ui/render/update-card';
 import { RENDERABLE_FENCE_LANGS } from '../src/features/markdown/markdown-render';
 import { MARKDOWN_EXTENSIONS } from '../src/features/import/plain-markdown';
 import { REVISION_KEEP_LATEST } from '../src/adapter/platform/storage/store-port';
+import { THEMES } from '../src/adapter/ui/render/theme';
+import { SEALED_ARCHETYPES, SEALED_VIEWS } from '../src/features/sealed';
 
 /** src 配下の TS を全部集める(「無い」ことの主張を file 単位で逃さない)。 */
 function srcFiles(dir = 'src', out: string[] = []): string[] {
@@ -33,13 +35,18 @@ function srcFiles(dir = 'src', out: string[] = []): string[] {
 const MANUAL = readFileSync('docs/manual.md', 'utf-8');
 const MIGRATION = readFileSync('docs/migration-from-pkc2.md', 'utf-8');
 
+/** shell を 1 度だけ組んで、以後はこれを見る。 */
+const root = ((): HTMLElement => {
+  const el = document.createElement('div');
+  buildShell(el);
+  return el;
+})();
+
 /** shell が実際に描いたボタンの文言(`data-pkc-action` で引く)。 */
 function buttonLabels(action: string): string[] {
-  const root = document.createElement('div');
-  buildShell(root);
-  return [...root.querySelectorAll(`[data-pkc-action="${action}"]`)].map(
-    (b) => b.textContent ?? '',
-  );
+  return [...root.querySelectorAll(`[data-pkc-action="${action}"]`)]
+    .filter((b) => b.tagName === 'BUTTON')
+    .map((b) => b.textContent ?? '');
 }
 
 /**
@@ -50,15 +57,23 @@ function buttonLabels(action: string): string[] {
  * 改名したらここが落ちる = マニュアルも直せ、という合図になる。
  */
 const EXPECTED_LABELS = {
-  'create-entry': ['+ノート', '+Todo', '+ログ', '+シート', '+フォルダ'],
-  'set-theme': ['ライト', 'ダーク'],
-  'set-view': ['詳細', 'かんばん', 'カレンダー', 'ファイラ', 'ランチャー'],
+  // ⚠ 種類は `<select>` で選ぶので、ボタンは 1 つ(P8)
+  'create-entry': ['新規'],
+  'set-view': ['ノート', 'フォルダ', 'アプリ'],
   'export-archive': ['バックアップ'],
   'export-html': ['閲覧用 HTML'],
   'export-markdown': ['Markdown'],
-  'import-file': ['取込'],
-  'purge-orphan-assets': ['添付の整理'],
-  'attach-file': ['+添付'],
+  'import-file': ['取り込む'],
+  'purge-orphan-assets': ['使っていない添付を消す'],
+  'attach-file': ['添付'],
+} as const;
+
+/**
+ * 🔴 **選ぶもの**(`<select>` の option)も同じ規律で pin する。
+ * ボタンだけ見ていると、種類の改名がマニュアルとずれても気づかない。
+ */
+const EXPECTED_OPTIONS = {
+  'create-kind': ['ノート', 'ログ', '表', 'フォルダ'],
 } as const;
 
 describe('マニュアルと実装の突合', () => {
@@ -73,6 +88,48 @@ describe('マニュアルと実装の突合', () => {
       }
     },
   );
+
+  it.each(Object.entries(EXPECTED_OPTIONS))(
+    '🔴 %s の選択肢が pin と一致し、マニュアルにも在る',
+    (field, expected) => {
+      const sel = root.querySelector(`[data-pkc-field="${field}"]`);
+      const labels = [...(sel?.querySelectorAll('option') ?? [])].map(
+        (o) => o.textContent ?? '',
+      );
+      expect(labels).toEqual([...expected]);
+      for (const label of labels) {
+        expect(MANUAL, `マニュアルに「${label}」の説明が無い`).toContain(`**${label}**`);
+      }
+    },
+  );
+
+  it('🔴 封印中のものは導線に出ない(user 指示 2026-08-03)', () => {
+    // ⚠ 「消した」ではなく「畳んだ」ので、**戻せる形**であることも一緒に見る
+    for (const view of SEALED_VIEWS) {
+      expect(
+        root.querySelector(`[data-pkc-view="${view}"]`),
+        `封印したはずの ${view} が導線に出ている`,
+      ).toBeNull();
+    }
+    for (const archetype of SEALED_ARCHETYPES) {
+      const opts = [...root.querySelectorAll('[data-pkc-field="create-kind"] option')];
+      expect(
+        opts.some((o) => (o as HTMLOptionElement).value === archetype),
+        `封印したはずの ${archetype} が作成の選択肢に出ている`,
+      ).toBe(false);
+    }
+  });
+
+  it('🔴 配色の選択肢が CSS の定義と 1 対 1 である', () => {
+    // ⚠ 片方だけ増やしても壊れない ── 選べるのに CSS が無い(素の色が出る)/
+    // CSS はあるのに選べない(死んだ規則)の両方を落とす
+    const css = readFileSync('src/styles/tokens.css', 'utf-8');
+    const inCss = new Set(
+      [...css.matchAll(/\[data-pkc-theme='([a-z-]+)'\]/g)].map((m) => m[1]!),
+    );
+    const offered = THEMES.map((t) => t.id);
+    expect([...offered].sort()).toEqual([...inCss].sort());
+  });
 
   it('🔴 描画できる fence 言語が一致する', () => {
     expect(RENDERABLE_FENCE_LANGS.size).toBeGreaterThan(0);
@@ -113,32 +170,38 @@ describe('マニュアルと実装の突合', () => {
     expect(MANUAL).toContain('ドラッグ&ドロップは受けません');
   });
 
-  it('🔴 役割メニューの見出しが pin と一致し、マニュアルにも在る', () => {
-    // user 指示 2026-08-03「メニューは役割ごとにサブメニュー化してください」。
-    // ⚠ 見出しは**マニュアルの導線そのもの**(「取り込む → 取込」と書いてある)
-    const root = document.createElement('div');
-    buildShell(root);
-    const menus = [...root.querySelectorAll('[data-pkc-menu]')].map(
-      (el) => el.getAttribute('data-pkc-menu') ?? '',
-    );
-    expect(menus).toEqual(['取り込む', '書き出す', '整理', '表示', '新規']);
-    for (const label of menus) {
-      expect(MANUAL, `マニュアルに「${label}」メニューが無い`).toContain(`**${label}**`);
-    }
-    // ⚠ **ビューは畳まない**(常時使う主軸)── メニューに入れたら落とす
-    for (const el of root.querySelectorAll('[data-pkc-action="set-view"]')) {
-      expect(el.closest('[data-pkc-menu]'), 'ビューがメニューに入っている').toBeNull();
+  it('🔴 主要な導線を畳まない(業務画面の作法)', () => {
+    // user 指示 2026-08-03「シンプルかつ高機能」── 主要な導線を `<details>` へ
+    // 畳むと「どこにあるか探す」手間が増える。⚠ 以前は
+    // `取り込む▾ 書き出す▾ 整理▾ 表示▾` と畳んでいた(その形へ戻ったら落とす)
+    expect(root.querySelectorAll('details').length, '導線が畳まれている').toBe(0);
+    for (const action of ['import-file', 'export-archive', 'purge-orphan-assets']) {
+      const el = root.querySelector(`[data-pkc-action="${action}"]`);
+      expect(el, `${action} が見当たらない`).not.toBeNull();
+      expect(el?.closest('[hidden]'), `${action} が隠れている`).toBeNull();
     }
   });
 
-  it('🔴 詳細画面のボタン文言が pin と一致し、マニュアルにも在る', () => {
+  it('🔴 本文まわり / 情報ペインのボタン文言が pin と一致し、マニュアルにも在る', () => {
     // ⚠ `buildShell` だけを見ていたので、`detail.ts` の文言は**1 つも縛られて
-    // いなかった**(round-2 review M-7)── マニュアルは実際に 2 件間違えていた
-    // (「本文をクリックで編集」「このノートを書き出す」)
+    // いなかった**(round-2 review M-7)── マニュアルは実際に 2 件間違えていた。
+    // 🔑 P8 で**置き場所が変わった** ── 本文の上には「編集」だけを残し、
+    // entry に対する操作(書き出す / 履歴 / 削除)は右の情報ペインへ移した
     const detail = readFileSync('src/adapter/ui/render/detail.ts', 'utf-8');
-    const expected = ['編集', '削除', '履歴', '書き出す', '保存', 'キャンセル', '復元'];
-    for (const label of expected) {
-      expect(detail, `詳細画面から「${label}」が消えた`).toContain(`textContent = '${label}'`);
+    for (const label of ['編集', '保存', 'キャンセル', '復元']) {
+      expect(detail, `本文まわりから「${label}」が消えた`).toContain(
+        `textContent = '${label}'`,
+      );
+    }
+    const inspector = readFileSync('src/adapter/ui/render/inspector.ts', 'utf-8');
+    for (const label of ['書き出す', '履歴', '削除']) {
+      expect(inspector, `情報ペインから「${label}」が消えた`).toContain(`'${label}'`);
+    }
+    // ⚠ **2 か所に同じボタンを出さない**(押す場所が定まらなくなる)
+    for (const label of ['削除', '履歴']) {
+      expect(detail, `「${label}」が本文の上にも残っている`).not.toContain(
+        `textContent = '${label}'`,
+      );
     }
     for (const label of ['編集', '保存', 'キャンセル', '履歴', '書き出す']) {
       expect(MANUAL, `マニュアルに「${label}」が無い`).toContain(`**${label}**`);

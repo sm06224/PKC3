@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, clickMenuItem } from './helpers';
+import { gotoApp, clickReal, createEntry } from './helpers';
 
 /**
  * P7b 段⑨: **枠が組めている**(設計 doc §1-4)。
@@ -11,7 +11,7 @@ import { gotoApp, clickReal, clickMenuItem } from './helpers';
  * ⚠ 段⑨ 以前の実際の姿は「サイドバーが本文の**上に**縦に流れ、かんばんの列が
  * **縦に積まれる**」だった ── どちらもこの spec が落とす形である。
  */
-test('🔴 枠が組めている(2 ペイン / 列 / 重なりなし)', async ({ page }) => {
+test('🔴 枠が組めている(3 列 / 重なりなし)', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await gotoApp(page);
 
@@ -59,7 +59,7 @@ test('🔴 枠が組めている(2 ペイン / 列 / 重なりなし)', async ({
   await expect(page.locator('[data-pkc-slot="root"][data-pkc-boot="ready"]')).toBeAttached();
 
   // ④ サイドバーの行が**覆われていない**(実際にその点に居るのが自分の子孫か)
-  await clickMenuItem(page, '[data-pkc-action="create-entry"][data-pkc-archetype="text"]');
+  await createEntry(page, 'text');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   const row = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first();
   const box = await row.boundingBox();
@@ -74,24 +74,39 @@ test('🔴 枠が組めている(2 ペイン / 列 / 重なりなし)', async ({
   );
   expect(covered, '一覧の行が何かに覆われている').toBe(false);
 
-  // ⑤ かんばんの列が**横に並ぶ**(縦に積まれていない)
-  await clickMenuItem(page, '[data-pkc-action="create-entry"][data-pkc-archetype="todo"]');
-  await clickReal(page, '[data-pkc-action="commit-edit"]');
-  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="kanban"]');
-  const cols = page.locator('[data-pkc-region="kanban-column"]');
-  await expect(cols).toHaveCount(2);
-  const a = (await cols.nth(0).boundingBox())!;
-  const b = (await cols.nth(1).boundingBox())!;
-  expect(a.height).toBeGreaterThan(0);
-  expect(a.x + a.width).toBeLessThanOrEqual(b.x + 1);
+  // ⑤ 🔴 **右の情報ペインが本文の隣に居る**(P8 ── 1 画面で完結)
+  const inspector = (await page.locator('[data-pkc-region="inspector"]').boundingBox())!;
+  expect(inspector.width, '情報ペインが出ていない').toBeGreaterThan(0);
+  expect(detail!.x + detail!.width, '本文と情報ペインが重なっている').toBeLessThanOrEqual(
+    inspector.x + 1,
+  );
 
-  // ⑥ 表に**罫線がある**(段⑨ 以前は「a b / 1 2」に見えていた)
-  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="calendar"]');
-  const border = await page
-    .locator('[data-pkc-region="calendar-grid"] td')
+  // ⑥ 🔴 **編集に入っても列が動かない**(以前は本文以外が全部消えていた)
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  const inspector2 = (await page.locator('[data-pkc-region="inspector"]').boundingBox())!;
+  expect(inspector2.x, '編集に入ると情報ペインが動く').toBe(inspector.x);
+  const sidebar2 = (await page.locator('[data-pkc-region="sidebar"]').boundingBox())!;
+  expect(sidebar2.width, '編集に入ると一覧が動く').toBe(sidebar!.width);
+
+  // ⑦ 🔴 **編集欄が下まで伸びる**(以前は固定高で下に 280px の死に領域があった)
+  const ta = (await page.locator('[data-pkc-field="editor-body"]').boundingBox())!;
+  const pane = (await page.locator('[data-pkc-view-pane="detail"]').boundingBox())!;
+  const dead = pane.y + pane.height - (ta.y + ta.height);
+  expect(dead, `編集欄の下に ${Math.round(dead)}px の死に領域`).toBeLessThan(40);
+  await clickReal(page, '[data-pkc-action="cancel-edit"]');
+
+  // ⑧ ファイラの表が**列ズレしていない**(単漢字マークの ::before が匿名セルを
+  //    作って全ヘッダを 1 列ずらしていた ── 実測で見つけた本物のバグ)
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="filer"]');
+  const cells = await page
+    .locator('[data-pkc-region="filer-table"] tbody tr')
     .first()
-    .evaluate((el) => getComputedStyle(el).borderTopWidth);
-  expect(parseFloat(border), 'カレンダーの枠線が無い').toBeGreaterThan(0);
+    .evaluate((tr) => tr.children.length);
+  const heads = await page
+    .locator('[data-pkc-region="filer-table"] thead tr')
+    .first()
+    .evaluate((tr) => tr.children.length);
+  expect(cells, '表の列数がヘッダと合っていない').toBe(heads);
 });
 
 test('🔴 狭い画面では 1 カラムへ折る(横に潰れない)', async ({ page }) => {
@@ -102,74 +117,32 @@ test('🔴 狭い画面では 1 カラムへ折る(横に潰れない)', async (
   const detail = (await page.locator('[data-pkc-region="detail"]').boundingBox())!;
   // 縦に積まれる = サイドバーの下端が本文の上端以下
   expect(sidebar.y + sidebar.height).toBeLessThanOrEqual(detail.y + 1);
-  // 本文が画面幅いっぱいを使う
-  expect(detail.width).toBeGreaterThan(400);
+  // 本文が画面幅いっぱいを使う(480px 画面なので、余白を引いた分)
+  expect(detail.width).toBeGreaterThan(440);
+  // ⚠ 情報ペインは**畳まれる**(狭い画面で 3 列にすると本文が読めない)
+  expect(await page.locator('[data-pkc-region="inspector"]').isVisible()).toBe(false);
 });
 
 /**
- * P7b 段⑨b: **役割メニュー**(user 指示 2026-08-03)。
+ * P8: **畳まない**(user 指示 2026-08-03「シンプルかつ高機能さ」)。
  *
- * ⚠ 開閉は `<details>` の既定に任せているので、ここが見るのは
- * 「**閉じ方**」と「**畳んでも押せる**」ことである ── 素の `<details>` は
- * 外側を押しても Escape でも閉じず、開きっぱなしのパネルが本文を覆う。
+ * ⚠ 以前は `取り込む▾ 書き出す▾ 整理▾ 表示▾` と `<details>` に畳んでいた。
+ * 業務画面の作法では主要な導線は**全部見えている**ので、畳んだ形に戻ったら落とす。
  */
-test('🔴 役割メニュー ── 開く / 押せる / 閉じる', async ({ page }) => {
+test('🔴 主要な導線が畳まれず、その場で押せる', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await gotoApp(page);
 
-  const outMenu = page.locator('details[data-pkc-menu="書き出す"]');
-  const outItems = outMenu.locator('[data-pkc-menu-items]');
-  const impMenu = page.locator('details[data-pkc-menu="取り込む"]');
-
-  // ① 既定では**中身が見えない**(畳まれている)
-  await expect(outItems).toBeHidden();
-  // ⚠ ビューは畳まない(常時使う主軸)
-  await expect(page.locator('[data-pkc-action="set-view"]').first()).toBeVisible();
-
-  // ② 開くと中身が出る
-  await clickReal(page, 'details[data-pkc-menu="書き出す"] > summary');
-  await expect(outItems).toBeVisible();
-  await expect(outMenu.locator('[data-pkc-action="export-archive"]')).toBeVisible();
-
-  // ③ 🔴 **本文を押し下げない**(inline に開くと画面が跳ねる)
-  const detailBefore = (await page.locator('[data-pkc-region="detail"]').boundingBox())!;
-  await clickReal(page, 'details[data-pkc-menu="整理"] > summary');
-  const detailAfter = (await page.locator('[data-pkc-region="detail"]').boundingBox())!;
-  expect(detailAfter.y, 'メニューを開いたら本文が下がった').toBe(detailBefore.y);
-
-  // ④ 🔴 **排他** ── 別のメニューを開くと前のは閉じる
-  await expect(outItems).toBeHidden();
-
-  // ⑤ 🔴 **外側を押すと閉じる**(素の details は閉じない)
-  await expect(page.locator('details[data-pkc-menu="整理"] [data-pkc-menu-items]')).toBeVisible();
-  await page.mouse.click(900, 600);
-  await expect(
-    page.locator('details[data-pkc-menu="整理"] [data-pkc-menu-items]'),
-  ).toBeHidden();
-
-  // ⑥ 🔴 **Escape で閉じる**
-  await clickReal(page, 'details[data-pkc-menu="書き出す"] > summary');
-  await expect(outItems).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(outItems).toBeHidden();
-
-  // ⑦ 🔴 **項目を押したら閉じる** ── 開いたままだと、押した結果(注意の面など)を
-  //    メニューが覆って「押したのに何も起きていない」ように見える
-  await clickMenuItem(page, '[data-pkc-action="import-file"]');
-  await expect(impMenu.locator('[data-pkc-menu-items]')).toBeHidden();
-
-  // ⑧ 🔴 押した項目が**実際に働く**。⚠ 「閉じた」だけを見ていると、
-  //    `pointerdown` で閉じて **`click` が届かない**実装が素通りする
-  //    (メニューは畳まれるのに何も起きない ── 変異試験で実際に生き残った)。
-  //    観測点は「確認ダイアログが出たか」= ハンドラに届いた証拠
-  let asked: string | null = null;
-  page.once('dialog', (d) => {
-    asked = d.message();
-    void d.dismiss();
-  });
-  await clickMenuItem(page, '[data-pkc-action="purge-orphan-assets"]');
-  await expect.poll(() => asked, { timeout: 5_000 }).not.toBeNull();
-  expect(asked!).toContain('添付');
+  expect(await page.locator('details').count(), '導線が畳まれている').toBe(0);
+  for (const action of ['import-file', 'export-archive', 'export-html', 'export-markdown', 'purge-orphan-assets']) {
+    await expect(
+      page.locator(`[data-pkc-action="${action}"]`),
+      `${action} が見えていない`,
+    ).toBeVisible();
+  }
+  // 押せること(覆われていない)まで見る ── 見えていても押せない配置がある
+  page.once('dialog', (d) => void d.dismiss());
+  await clickReal(page, '[data-pkc-action="purge-orphan-assets"]');
 });
 
 /**
@@ -183,7 +156,7 @@ test('🔴 一覧を絞り込める(探す導線)', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await gotoApp(page);
   for (const name of ['りんご', 'みかん', 'りんごジャム']) {
-    await clickMenuItem(page, '[data-pkc-action="create-entry"][data-pkc-archetype="text"]');
+    await createEntry(page, 'text');
     await page.locator('[data-pkc-field="editor-title"]').fill(name);
     await clickReal(page, '[data-pkc-action="commit-edit"]');
   }
@@ -201,7 +174,7 @@ test('🔴 一覧を絞り込める(探す導線)', async ({ page }) => {
 
   // ⚠ **大文字小文字を問わない**(題名は日本語だけではない)
   await box.fill('');
-  await clickMenuItem(page, '[data-pkc-action="create-entry"][data-pkc-archetype="text"]');
+  await createEntry(page, 'text');
   await page.locator('[data-pkc-field="editor-title"]').fill('Apple Pie');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await box.fill('apple');
@@ -226,7 +199,7 @@ test('🔴 絞り込みを戻したとき、行は作り直されない', async 
   await page.setViewportSize({ width: 1280, height: 800 });
   await gotoApp(page);
   for (const name of ['りんご', 'みかん']) {
-    await clickMenuItem(page, '[data-pkc-action="create-entry"][data-pkc-archetype="text"]');
+    await createEntry(page, 'text');
     await page.locator('[data-pkc-field="editor-title"]').fill(name);
     await clickReal(page, '[data-pkc-action="commit-edit"]');
   }
@@ -255,68 +228,65 @@ test('🔴 絞り込みを戻したとき、行は作り直されない', async 
 });
 
 /**
- * P7b review L-2: archetype の印は**一覧の行にだけ**出す。
- * ⚠ スコープが無かったので、同じ属性を持つ「新規」メニューのボタンにも出て
- * 「文 +ノート」と表示されていた(実測)。
+ * P8: 種別は**チップ**で出す(裸の単漢字を地の文の前に置かない)。
+ * ⚠ 旧実装は CSS の `::before` で「文 」を生やしており、`<tr>` に当たると
+ * **匿名セルができてファイラの表が 1 列ずれ、全ヘッダが嘘になっていた**。
  */
-test('🔴 archetype の印がメニューのボタンに漏れない', async ({ page }) => {
+test('🔴 種別はチップで出る(地の文に裸の記号を混ぜない)', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await gotoApp(page);
-  await clickMenuItem(page, '[data-pkc-action="create-entry"][data-pkc-archetype="text"]');
+  await createEntry(page, 'text');
   await page.locator('[data-pkc-field="editor-title"]').fill('印の確認');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
-  const markOf = (sel: string): Promise<string> =>
-    page.evaluate((s) => {
-      const el = document.querySelector(s);
-      if (!el) return 'MISSING';
-      return getComputedStyle(el, '::before').content;
-    }, sel);
-
-  // メニューのボタンには出ない
-  await clickReal(page, '[data-pkc-menu="新規"] > [data-pkc-field="menu-label"]');
-  const onButton = await markOf(
-    '[data-pkc-menu-items] [data-pkc-action="create-entry"][data-pkc-archetype="text"]',
+  const row = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first();
+  // ① チップが**要素として**在る(CSS の生成文字ではない)
+  await expect(row.locator('[data-pkc-chip]')).toBeVisible();
+  // ② 題名は題名だけ ── 記号が混ざっていない
+  await expect(row.locator('[data-pkc-field="title"]')).toHaveText('印の確認');
+  // ③ 🔴 `::before` の生成文字が**どこにも生えていない**
+  const generated = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-pkc-archetype]')]
+      .map((el) => getComputedStyle(el, '::before').content)
+      .filter((c) => c && c !== 'none' && c !== 'normal' && c !== '""'),
   );
-  expect(onButton === 'none' || onButton === '""' || onButton === 'normal').toBe(true);
-
-  // ⚠ 空振り防止 ── 一覧の行には**出ている**(規則ごと消して通す、を落とす)
-  const onRow = await markOf('[data-pkc-region="entry-list"] [data-pkc-entry]');
-  expect(onRow).toContain('文');
+  expect(generated, 'archetype に生成文字が残っている').toEqual([]);
 });
 
 /**
- * P7b 段⑨c: 配色(user 指示 2026-08-03「最初はライトとダークのみに」)。
- * ⚠ 「属性が付いた」で止めない ── **実際に色が変わる**ところまで見る。
+ * P8: 配色は 9 つ(user 指示 2026-08-03「github と solarized と Dracula と Nord は欲しい」)。
+ *
+ * 🔴 「属性が付いた」で止めない ── **実際に色が変わる**ところまで見る。
+ * ⚠ この test が無かったせいで、`main.ts` に `light | dark` だけを通す古いガードが
+ * 残っていることに**スクリーンショットを見るまで気づかなかった**(選んでも何も
+ * 起きない = 9 つ中 7 つが死んでいた)。
  */
-test('🔴 配色をライト / ダークで切り替えられる', async ({ page }) => {
+test('🔴 配色を選ぶと実際に色が変わる(全テーマ)', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await gotoApp(page);
-  const bg = (): Promise<string> =>
-    page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  const select = page.locator('[data-pkc-field="theme-select"]');
+  const ids = await select.evaluate((el) =>
+    [...(el as HTMLSelectElement).options].map((o) => o.value),
+  );
+  expect(ids.length, '配色が少なすぎる').toBeGreaterThanOrEqual(9);
 
-  await clickMenuItem(page, '[data-pkc-action="set-theme"][data-pkc-theme-value="light"]');
-  await expect(page.locator('html[data-pkc-theme="light"]')).toBeAttached();
-  const light = await bg();
+  const seen = new Map<string, string>();
+  for (const id of ids) {
+    await select.selectOption(id);
+    await expect(page.locator(`html[data-pkc-theme="${id}"]`)).toBeAttached();
+    const bg = await page.evaluate(
+      () => getComputedStyle(document.body).backgroundColor,
+    );
+    // 🔴 **どれかと同じ色**なら、その配色は効いていない(既定に落ちている)
+    const dup = [...seen.entries()].find(([, v]) => v === bg);
+    expect(dup, `配色 ${id} が ${dup?.[0]} と同じ色 ── 効いていない`).toBeUndefined();
+    seen.set(id, bg);
+  }
 
-  await clickMenuItem(page, '[data-pkc-action="set-theme"][data-pkc-theme-value="dark"]');
-  await expect(page.locator('html[data-pkc-theme="dark"]')).toBeAttached();
-  const dark = await bg();
-
-  // 🔴 **実際に色が違う**(属性だけ付けて CSS が無い、を落とす)
-  expect(light).not.toBe(dark);
-  // 明るさの向き ── ライトのほうが明るい
-  const lum = (c: string): number => {
-    const [r, g, b] = (c.match(/\d+/g) ?? ['0', '0', '0']).map(Number) as [
-      number,
-      number,
-      number,
-    ];
-    return r + g + b;
-  };
-  expect(lum(light), 'ライトのほうが暗い').toBeGreaterThan(lum(dark));
-
-  // ⚠ **選んだ配色が再読込をまたぐ**(毎回選び直させない)
+  // 覚えていること(再読込しても選んだ配色のまま)
+  await select.selectOption('nord');
   await page.reload();
-  await expect(page.locator('html[data-pkc-theme="dark"]')).toBeAttached();
+  await expect(page.locator('[data-pkc-slot="root"][data-pkc-boot="ready"]')).toBeAttached();
+  await expect(page.locator('html[data-pkc-theme="nord"]')).toBeAttached();
+  await expect(select).toHaveValue('nord');
 });

@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { gotoApp, collectPageErrors, clickReal, expectImageRendered, clickMenuItem } from './helpers';
+import { gotoApp, collectPageErrors, clickReal, expectImageRendered } from './helpers';
 
 // 1x1 PNG(67 bytes)
 const PNG_1X1 = Buffer.from(
@@ -69,7 +69,7 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
   // ⚠ **ボタンを実際に押す**経路を通す(review mutation M21): hidden input へ
   // 直接 setInputFiles すると、ボタン → picker の導線が壊れていても緑になる
   const chooser = page.waitForEvent('filechooser');
-  await clickMenuItem(page, '[data-pkc-action="import-file"]');
+  await clickReal(page, '[data-pkc-action="import-file"]');
   await (await chooser).setFiles(FILE());
 
   // 再読込(sqlite から引き直し)を経て 2 件が sidebar に現れる
@@ -89,7 +89,7 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
       void d.accept();
     });
   });
-  await clickMenuItem(page, '[data-pkc-action="purge-orphan-assets"]');
+  await clickReal(page, '[data-pkc-action="purge-orphan-assets"]');
   expect(await dialogMsg).toContain('未参照の添付データはありません');
 
   // ── 同じファイルをもう一度取り込む(review mutation M23 / M24 / H-2)──
@@ -555,7 +555,7 @@ test('🔴 P7 段②: 素の md を取り込む ── 宣言(file_handlers)と�
 
   // ⚠ **ボタンを実際に押す**経路を通す(hidden input へ直接入れると導線の断線を見逃す)
   const chooser = page.waitForEvent('filechooser');
-  await clickMenuItem(page, '[data-pkc-action="import-file"]');
+  await clickReal(page, '[data-pkc-action="import-file"]');
   // ⚠ MIME は **空**で渡す ── OS のピッカーは `.md` に MIME を付けないことが多い。
   // ここを text/markdown で埋めると「MIME で振り分ける」実装でも緑になる
   await (await chooser).setFiles([
@@ -600,7 +600,7 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
 
   // 📤 書き出す(実ブラウザの Blob → <a download> 経路を通す)
   const dl = page.waitForEvent('download');
-  await clickMenuItem(page, '[data-pkc-action="export-archive"]');
+  await clickReal(page, '[data-pkc-action="export-archive"]');
   const download = await dl;
   expect(download.suggestedFilename()).toMatch(/\.pkc3\.zip$/);
   const path = await download.path();
@@ -711,7 +711,7 @@ test('🔴 可搬 HTML: 書き出したファイルが**単体で開いて読め
   await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(2);
 
   const dl = page.waitForEvent('download');
-  await clickMenuItem(page, '[data-pkc-action="export-html"]');
+  await clickReal(page, '[data-pkc-action="export-html"]');
   const download = await dl;
   expect(download.suggestedFilename()).toMatch(/\.html$/);
   // ⚠ `download.path()` は**拡張子の無い**一時ファイルを指す ── `file://` で開くと
@@ -762,7 +762,7 @@ test('🔴 md ZIP: 落ちるものを言い、添付が**相対パス**で入る
   await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(2);
 
   const dl = page.waitForEvent('download');
-  await clickMenuItem(page, '[data-pkc-action="export-markdown"]');
+  await clickReal(page, '[data-pkc-action="export-markdown"]');
   const download = await dl;
   expect(download.suggestedFilename()).toMatch(/\.md\.zip$/);
 

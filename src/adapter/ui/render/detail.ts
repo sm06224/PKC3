@@ -107,7 +107,7 @@ export class DetailRenderer {
     if (body === null) {
       const loading = document.createElement('p');
       loading.setAttribute('data-pkc-field', 'detail-loading');
-      loading.textContent = '(loading…)';
+      loading.textContent = '読み込んでいます…';
       this.region.append(loading);
       return;
     }
@@ -121,24 +121,12 @@ export class DetailRenderer {
       edit.type = 'button';
       edit.setAttribute('data-pkc-action', 'start-edit');
       edit.textContent = '編集';
+      // 🔑 **ここには「編集」だけ**(P8)。書き出す / 履歴 / 削除は右の情報ペインが
+      // 持つ ── 同じボタンを 2 か所に出すと、押す場所が定まらないうえ、
+      // 「本文の上」は**本文に対する操作**の場所であって entry に対する場所ではない。
       // ⚠ data-pkc-entry は「entry を表す要素」(行 / カード)専用の意味論 ──
       // ボタンには付けない(binder は selectedLid に fallback する)
-      const del = document.createElement('button');
-      del.type = 'button';
-      del.setAttribute('data-pkc-action', 'delete-entry');
-      del.textContent = '削除';
-      const hist = document.createElement('button');
-      hist.type = 'button';
-      hist.setAttribute('data-pkc-action', 'show-history');
-      hist.textContent = '履歴';
-      // 📤 このノートだけを書き出す(P6f)。**削除の隣に置く** ── 消す前に
-      // 通る場所に無いと導線として働かない(user 指示 2026-08-02:
-      // 「そういうのは削除じゃなくてアーカイブエクスポートの導線を用意すればいい」)
-      const expOne = document.createElement('button');
-      expOne.type = 'button';
-      expOne.setAttribute('data-pkc-action', 'export-entry');
-      expOne.textContent = '書き出す';
-      bar.append(edit, expOne, del, hist);
+      bar.append(edit);
       this.region.append(bar);
       if (state.revisionPanel && state.revisionPanel.lid === state.selectedLid) {
         this.region.append(renderHistoryPanel(state.revisionPanel.items));
@@ -324,7 +312,7 @@ export class DetailRenderer {
     const missing = (): void => {
       const p = document.createElement('p');
       p.setAttribute('data-pkc-asset-missing', '');
-      p.textContent = '(asset が見つかりません)';
+      p.textContent = '添付の中身が見つかりません';
       host.append(p);
     };
     try {

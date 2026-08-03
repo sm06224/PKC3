@@ -9,6 +9,7 @@ import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
 import { extractMeta } from '../../src/features/flavor';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
+import type { ViewMode } from '../../src/adapter/state/app-state';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { CenterRouter } from '../../src/adapter/ui/render/center';
@@ -28,6 +29,16 @@ function meta(lid: string, over: Partial<EntryMeta> = {}): EntryMeta {
     archived: false,
     ...over,
   };
+}
+
+/**
+ * 🔒 かんばん / カレンダーは**封印中**(`features/sealed.ts`)なので、切替ボタンが
+ * 画面に無い。導線ではなく直接 dispatch で見せる ── **封印は導線を畳んだだけで、
+ * 描画も state も生きている**という事実を、この test 自身が示している。
+ * 封印を解いたら、ここをボタンのクリックへ戻す。
+ */
+function showView(d: Dispatcher, mode: ViewMode): void {
+  d.dispatch({ type: 'SET_VIEW_MODE', mode });
 }
 
 async function tick(ms = 10): Promise<void> {
@@ -70,7 +81,7 @@ describe('kanban view (P3-6)', () => {
       ],
       { e1: '---\nstatus: open\n---\n\n買い物メモ' },
     );
-    q<HTMLElement>('[data-pkc-view="kanban"]')!.click();
+    showView(d, 'kanban');
 
     const colOpen = q('[data-pkc-kanban-status="open"] [data-pkc-region="kanban-cards"]')!;
     const colDone = q('[data-pkc-kanban-status="done"] [data-pkc-region="kanban-cards"]')!;
@@ -105,10 +116,10 @@ describe('kanban view (P3-6)', () => {
     const metas = Array.from({ length: 8 }, (_, i) =>
       meta('e' + i, { status: 'open' }),
     );
-    const { q } = setup(metas, {
+    const { d, q } = setup(metas, {
       e0: '---\nstatus: open\n---\nx',
     });
-    q<HTMLElement>('[data-pkc-view="kanban"]')!.click();
+    showView(d, 'kanban');
     const openHost = q('[data-pkc-kanban-status="open"] [data-pkc-region="kanban-cards"]')!;
     const doneHost = q('[data-pkc-kanban-status="done"] [data-pkc-region="kanban-cards"]')!;
 
@@ -143,7 +154,7 @@ describe('kanban view (P3-6)', () => {
   it('選択中 entry のトグル ack は openBody(body/baseline/persisted)を disk に揃える(review #2 pin)', async () => {
     const pre = '---\nstatus: open\n---\nメモ';
     const { d, q } = setup([meta('e1')], { e1: pre });
-    q<HTMLElement>('[data-pkc-view="kanban"]')!.click();
+    showView(d, 'kanban');
     q<HTMLElement>('[data-pkc-entry="e1"]')!.click(); // 選択 → openBody 確立
     await tick();
     expect(d.getState().openBody?.body).toBe(pre);
@@ -192,7 +203,7 @@ describe('kanban view (P3-6)', () => {
       },
     });
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('e1')], relations: [] });
-    root.querySelector<HTMLElement>('[data-pkc-view="kanban"]')!.click();
+    showView(d, 'kanban');
     root
       .querySelector<HTMLElement>('[data-pkc-entry="e1"] [data-pkc-action="toggle-todo"]')!
       .click();
@@ -211,7 +222,7 @@ describe('kanban view (P3-6)', () => {
 
 describe('calendar view (P3-6)', () => {
   it('date セルに todo が立ち、showArchived と月送りが効く', async () => {
-    const { q, qa } = setup(
+    const { d, q, qa } = setup(
       [
         meta('e1', { date: '2026-08-01' }),
         meta('e2', { date: '2026-08-01', archived: true }),
@@ -219,7 +230,7 @@ describe('calendar view (P3-6)', () => {
       ],
       {},
     );
-    q<HTMLElement>('[data-pkc-view="calendar"]')!.click();
+    showView(d, 'calendar');
 
     expect(q('[data-pkc-field="calendar-month"]')?.getAttribute('data-pkc-month')).toBe(
       '2026-08',
@@ -256,16 +267,16 @@ describe('calendar view (P3-6)', () => {
   });
 
   it('view 切替は pane の hidden 付替のみ(detail の DOM は生きている)', async () => {
-    const { d, q, root } = setup([meta('e1')], { e1: '# 本文' });
+    const { d, root } = setup([meta('e1')], { e1: '# 本文' });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
     await tick();
     const detailPane = root.querySelector<HTMLElement>('[data-pkc-view-pane="detail"]')!;
     const bodyBefore = detailPane.querySelector('[data-pkc-field="detail-body"]');
     expect(bodyBefore).not.toBeNull();
 
-    q<HTMLElement>('[data-pkc-view="kanban"]')!.click();
+    showView(d, 'kanban');
     expect(detailPane.hidden).toBe(true);
-    q<HTMLElement>('[data-pkc-view="detail"]')!.click();
+    showView(d, 'detail');
     expect(detailPane.hidden).toBe(false);
     // 中身は作り直されていない(常駐 pane ── ノード同一)
     expect(detailPane.querySelector('[data-pkc-field="detail-body"]')).toBe(bodyBefore);

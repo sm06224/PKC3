@@ -31,13 +31,14 @@ export function collectPageErrors(page: Page): string[] {
  * 開かなければ押せない。ここでその動線を再現する。
  * ⚠ 開けるかどうかも観測点である(`summary` が押せなければここで落ちる)。
  */
-export async function clickMenuItem(page: Page, actionSelector: string): Promise<void> {
-  const item = page.locator(actionSelector).first();
-  const menu = item.locator('xpath=ancestor::details[@data-pkc-menu]').first();
-  if ((await menu.count()) > 0 && !(await menu.evaluate((el: HTMLDetailsElement) => el.open))) {
-    await clickReal(page, `details[data-pkc-menu]:has(${actionSelector}) > summary`);
-  }
-  await clickReal(page, actionSelector);
+/**
+ * 🔑 新規作成の**実際の導線**(P8)。種類は `<select>` で選び、`新規` を押す。
+ * ⚠ 封印中の種類(`features/sealed.ts`)は選べない ── 選ぼうとすると
+ * playwright が落ちるので、それ自体が「封印が効いている」の観測点になる。
+ */
+export async function createEntry(page: Page, archetype: string): Promise<void> {
+  await page.locator('[data-pkc-field="create-kind"]').selectOption(archetype);
+  await clickReal(page, '[data-pkc-region="create-bar"] [data-pkc-action="create-entry"]');
 }
 
 /**

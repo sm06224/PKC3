@@ -1,20 +1,32 @@
 /**
- * app の枠(P3 設計メモ §2)。初回に 1 度だけ構築する ── 以後どの region も
- * この枠を作り直さない。機能セレクタは data-pkc-* のみ(PKC2 規約)。
+ * app の枠(P8)。初回に 1 度だけ構築する ── 以後どの region も作り直さない。
+ * 機能セレクタは data-pkc-* のみ(PKC2 規約)。
+ *
+ * 🔑 **隠さない**(user 指示 2026-08-03。業務画面の作法)。
+ * 以前は `取り込む▾ 書き出す▾ 整理▾ 表示▾` と畳んでいたが、主要な導線を畳むと
+ * 「どこにあるか探す」手間が増える。役割ごとに**区切って全部並べる**。
+ * ⚠ だから `<details>` のメニューはもう使わない(`menu.ts` も外した)。
+ *
+ * 🔑 **3 列**(一覧 / 本文 / 付随情報)。編集に入っても列は動かない。
  */
-import { installMenuDismiss } from './menu';
+import { SEALED_ARCHETYPES, SEALED_VIEWS } from '@features/sealed';
+import { THEMES } from './theme';
 
 export interface ShellRegions {
-  topbar: HTMLElement;
+  /** 最上部の帯。彩度のある色を置くのはここだけ。 */
+  brand: HTMLElement;
+  /** 操作の帯(ビュー切替 + コマンド)。 */
+  cmdbar: HTMLElement;
   sidebar: HTMLElement;
   detail: HTMLElement;
+  /** 右の付随情報。選んでいるものの素性と、それに対する操作。 */
+  inspector: HTMLElement;
   status: HTMLElement;
   /**
    * 取込などの **複数件の注意**を全部見せる面(P6c review H-2)。
    *
    * ⚠ status footer は `textContent` 上書きの 1 行なので、**注意が N 件あっても
-   * 1 件目しか user に届かない**。段④ で warning に「どのファイルか」を冠したのは、
-   * 件数が内側 bundle 数に比例するから ── 出口が 1 行のままでは設計が空振りする。
+   * 1 件目しか user に届かない**。
    */
   notices: HTMLElement;
   /**
@@ -26,25 +38,58 @@ export interface ShellRegions {
   update: HTMLElement;
 }
 
+/**
+ * 面の切替。⚠ 封印中のものは**ここに出さない**(`features/sealed.ts` が正本)。
+ */
 const VIEW_BUTTONS: readonly { view: string; label: string }[] = [
-  { view: 'detail', label: '詳細' },
+  { view: 'detail', label: 'ノート' },
+  { view: 'filer', label: 'フォルダ' },
   { view: 'kanban', label: 'かんばん' },
   { view: 'calendar', label: 'カレンダー' },
-  { view: 'filer', label: 'ファイラ' },
-  { view: 'launcher', label: 'ランチャー' },
+  { view: 'launcher', label: 'アプリ' },
 ] as const;
 
 /**
- * 作成できる archetype(P3-7a)。attachment は file picker 経路(P4 assets)、
- * form / generic / opaque は PKC2 の 2026-04-26 audit で作成導線が撤去済み
- * (import 済データの表示・編集は可能)── その判断を引き継ぐ。
+ * 作れるもの。⚠ 封印中のものは出さない。
+ * generic / opaque は PKC2 の 2026-04-26 audit で作成導線が撤去済み ── その判断を継ぐ。
  */
 const CREATE_BUTTONS: readonly { archetype: string; label: string }[] = [
-  { archetype: 'text', label: '+ノート' },
-  { archetype: 'todo', label: '+Todo' },
-  { archetype: 'textlog', label: '+ログ' },
-  { archetype: 'spreadsheet', label: '+シート' },
-  { archetype: 'folder', label: '+フォルダ' },
+  { archetype: 'text', label: 'ノート' },
+  { archetype: 'textlog', label: 'ログ' },
+  { archetype: 'spreadsheet', label: '表' },
+  { archetype: 'folder', label: 'フォルダ' },
+  { archetype: 'todo', label: 'Todo' },
+] as const;
+
+/** 押せるコマンド。**役割ごとに区切って全部並べる**(畳まない)。 */
+const COMMAND_GROUPS: readonly {
+  readonly items: readonly { action: string; label: string; title?: string }[];
+}[] = [
+  {
+    items: [
+      {
+        action: 'import-file',
+        label: '取り込む',
+        title: 'PKC2 の書き出し(HTML / ZIP)と Markdown を取り込みます',
+      },
+    ],
+  },
+  {
+    items: [
+      { action: 'export-archive', label: 'バックアップ', title: '元に戻せる形で保存します' },
+      { action: 'export-html', label: '閲覧用 HTML', title: '読むだけの 1 枚にまとめます' },
+      { action: 'export-markdown', label: 'Markdown', title: 'Markdown ファイルとして保存します' },
+    ],
+  },
+  {
+    items: [
+      {
+        action: 'purge-orphan-assets',
+        label: '使っていない添付を消す',
+        title: 'どのノートからも参照されていない添付を削除します(元に戻せません)',
+      },
+    ],
+  },
 ] as const;
 
 export function buildShell(root: HTMLElement): ShellRegions {
@@ -52,103 +97,88 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const shell = document.createElement('div');
   shell.setAttribute('data-pkc-region', 'shell');
 
-  const topbar = document.createElement('header');
-  topbar.setAttribute('data-pkc-region', 'topbar');
+  // ── 最上部の帯 ──────────────────────────────────
+  const brand = document.createElement('header');
+  brand.setAttribute('data-pkc-region', 'brand');
+  const brandName = document.createElement('span');
+  brandName.setAttribute('data-pkc-field', 'brand-name');
+  brandName.textContent = 'PKC3';
+  const brandContext = document.createElement('span');
+  brandContext.setAttribute('data-pkc-field', 'brand-context');
+  const spacer = document.createElement('span');
+  spacer.setAttribute('data-pkc-field', 'brand-spacer');
+  // 🎨 配色 ── **選ぶもの**なので `<select>`(9 つをボタンで並べると帯が埋まる)
+  const theme = document.createElement('select');
+  theme.setAttribute('data-pkc-action', 'set-theme');
+  theme.setAttribute('data-pkc-field', 'theme-select');
+  theme.setAttribute('aria-label', '配色');
+  theme.title = '配色を選びます';
+  for (const t of THEMES) {
+    const opt = document.createElement('option');
+    opt.value = t.id;
+    opt.textContent = t.label;
+    theme.append(opt);
+  }
+  brand.append(brandName, brandContext, spacer, theme);
+
+  // ── 操作の帯 ────────────────────────────────────
+  const cmdbar = document.createElement('div');
+  cmdbar.setAttribute('data-pkc-region', 'cmdbar');
+  const group = (): HTMLElement => {
+    const g = document.createElement('div');
+    g.setAttribute('data-pkc-field', 'cmd-group');
+    cmdbar.append(g);
+    return g;
+  };
+  const sep = (): void => {
+    const s = document.createElement('span');
+    s.setAttribute('data-pkc-field', 'cmd-sep');
+    cmdbar.append(s);
+  };
+
+  const views = group();
   for (const { view, label } of VIEW_BUTTONS) {
+    if (SEALED_VIEWS.includes(view)) continue; // 封印中(features/sealed.ts)
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.setAttribute('data-pkc-action', 'set-view');
     btn.setAttribute('data-pkc-view', view);
     btn.textContent = label;
-    topbar.append(btn);
+    views.append(btn);
   }
-  /**
-   * 🔑 **役割ごとのサブメニュー**(user 指示 2026-08-03「メニューは役割ごとに
-   * サブメニュー化してください」)。以前は 9 個のボタンがベタ並びで、
-   * 「見る」「入れる」「出す」「整える」が同じ重さに見えていた。
-   *
-   * ⚠ **ビューは畳まない** ── 表示の切替は常時使う主軸で、押すたびに開くのは邪魔。
-   * 畳むのは「たまに使う・押すと何かが起きる」ものだけである。
-   *
-   * ⚠ 実体は `<details>` + `<summary>`(素の HTML)。JS で開閉状態を持たない。
-   * 開閉の**閉じ方**(外側クリック / Escape / 項目を押したら閉じる)と**排他**は
-   * `installMenuDismiss` が一手に担う。
-   * ⚠ かつて `name` 属性(ブラウザ native の排他)も付けていたが、**dismiss 側と
-   * 重複していて外しても振る舞いが変わらなかった**(変異試験で生存)── 消した。
-   * ⚠ **項目の文言は変えない** ── `tests/docs-parity.test.ts` がマニュアルと
-   * 突合しているので、畳んでも user が読む語は同じである。
-   */
-  const menu = (label: string): HTMLElement => {
-    const box = document.createElement('details');
-    box.setAttribute('data-pkc-menu', label);
-    const head = document.createElement('summary');
-    head.setAttribute('data-pkc-field', 'menu-label');
-    head.textContent = label;
-    const items = document.createElement('div');
-    items.setAttribute('data-pkc-menu-items', '');
-    box.append(head, items);
-    topbar.append(box);
-    return items;
-  };
-  const item = (into: HTMLElement, action: string, label: string, title?: string): void => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.setAttribute('data-pkc-action', action);
-    btn.textContent = label;
-    if (title) btn.title = title;
-    into.append(btn);
-  };
 
-  // 📥 入れる(P6b: PKC2 の書出し / P7 段②: 素の Markdown)
-  item(
-    menu('取り込む'),
-    'import-file',
-    '取込',
-    'PKC2 の書出し(HTML / ZIP)と素の Markdown を取り込みます',
-  );
-  // 📤 出す ── バックアップだけが可逆。並び順で「正本」を先頭に置く
-  const outMenu = menu('書き出す');
-  item(outMenu, 'export-archive', 'バックアップ');
-  item(outMenu, 'export-html', '閲覧用 HTML');
-  item(outMenu, 'export-markdown', 'Markdown');
-  // 🧹 整える ── **明示 purge のみ**(自動 GC はしない)。⚠ 不可逆なので、
-  // メニューの内側に置いて「押すまでに一手」を挟む
-  item(menu('整理'), 'purge-orphan-assets', '添付の整理');
-  // 🎨 見た目(user 指示 2026-08-03「最初はライトとダークのみに」)。
-  // ⚠ 文言は**切り替え先**を書く(「ライト」= 押すとライトになる)── 現在地は
-  // 画面そのものが示しているので、ここに現在地を書くと二重で分かりにくい
-  const viewMenu = menu('表示');
-  item(viewMenu, 'set-theme', 'ライト', '配色をライトにします');
-  viewMenu.lastElementChild?.setAttribute('data-pkc-theme-value', 'light');
-  item(viewMenu, 'set-theme', 'ダーク', '配色をダークにします');
-  viewMenu.lastElementChild?.setAttribute('data-pkc-theme-value', 'dark');
-  // ⚠ file picker は常設 hidden input(添付と同じ流儀 ── user-gesture 要件と
-  // smoke の setInputFiles の両方に効く)。**メニューの外**に置く ── メニューを
-  // 閉じると中の input は描画木から外れ、smoke の setInputFiles が届かない
+  for (const g of COMMAND_GROUPS) {
+    sep();
+    const host = group();
+    for (const { action, label, title } of g.items) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.setAttribute('data-pkc-action', action);
+      btn.textContent = label;
+      if (title) btn.title = title;
+      host.append(btn);
+    }
+  }
+
+  // ⚠ file picker は常設 hidden input(user-gesture 要件と smoke の setInputFiles の
+  // 両方に効く)。⚠ **表示される要素の外**に置かない ── 隠れると setInputFiles が届かない
   const impInput = document.createElement('input');
   impInput.type = 'file';
-  // 判別は中身(magic)でやるので accept は誤選択を減らすためだけの補助。
+  // 判別は中身(magic)でやるので accept は誤選択を減らす補助。
   // ⚠ ここに .zip が無いと、**受理器が動いてもファイルを選べない**
-  // (accept を厳格に効かせるブラウザ / OS のピッカーがある)── 救出経路が
-  // 実装されているのに到達不能、という穴になる
-  // ⚠ **manifest が宣言する拡張子をここにも並べる** ── `file_handlers` で
-  // `.md` を宣言しながらピッカーで選べない、は宣言と実体のずれである
   impInput.accept = '.html,.htm,.zip,.md,.markdown,text/html,application/zip,text/markdown';
-  // md は複数選択できる(1 件ずつ entry になる)。PKC2 の書出しが複数来たときは
-  // import-file.ts が断る
   impInput.multiple = true;
   impInput.hidden = true;
   impInput.setAttribute('data-pkc-field', 'import-input');
-  topbar.append(impInput);
+  cmdbar.append(impInput);
 
+  // ── サイドバー(一覧)────────────────────────────
   const sidebar = document.createElement('nav');
   sidebar.setAttribute('data-pkc-region', 'sidebar');
-  /**
-   * 🔑 **導線の再考**(user 指示 2026-08-03「PKC2 の導線設計も再考する形で」)。
-   * サイドバーの先頭は **絞り込み**にする ── ノートが増えたときに真っ先に要るのは
-   * 「作る」ではなく「**探す**」である(PKC3 にはこれまで検索導線が 1 つも無かった)。
-   * 作成は 6 ボタン常置をやめ、上部の役割メニューと同じ流儀で **1 つに畳む**。
-   */
+  // 🔑 **探す**が先、**作る**が後(増えたときに要るのは探すほう)。
+  // ⚠ 1 行に詰めると絞り込み欄が潰れて「絞り」しか読めなくなる ── 2 段にする
+  const findBar = document.createElement('div');
+  findBar.setAttribute('data-pkc-region', 'find-bar');
   const createBar = document.createElement('div');
   createBar.setAttribute('data-pkc-region', 'create-bar');
 
@@ -156,51 +186,55 @@ export function buildShell(root: HTMLElement): ShellRegions {
   filter.type = 'search';
   filter.setAttribute('data-pkc-field', 'entry-filter');
   filter.placeholder = '絞り込み';
-  filter.title = '題名で絞り込みます(Esc で消す)';
-  // ⚠ `placeholder` は名前ではない ── 値を入れると読み上げから消える(review L-8)
+  filter.title = '題名で絞り込みます(Esc で消えます)';
+  // ⚠ `placeholder` は名前ではない ── 値を入れると読み上げから消える
   filter.setAttribute('aria-label', '題名で絞り込む');
-  createBar.append(filter);
+  findBar.append(filter);
 
-  const newMenu = document.createElement('details');
-  newMenu.setAttribute('data-pkc-menu', '新規');
-  const newHead = document.createElement('summary');
-  newHead.setAttribute('data-pkc-field', 'menu-label');
-  newHead.textContent = '新規';
-  const newItems = document.createElement('div');
-  newItems.setAttribute('data-pkc-menu-items', '');
-  newMenu.append(newHead, newItems);
+  /**
+   * 🔑 **新規は「何を作るか」を選ばせる `<select>` + 作るボタン**。
+   * ボタンを 5 つ並べると幅を食い、畳むと隠れる ── 業務画面の作法では
+   * 「選ぶもの」は select、「起きるもの」はボタンである。
+   */
+  const kind = document.createElement('select');
+  kind.setAttribute('data-pkc-field', 'create-kind');
+  kind.setAttribute('aria-label', '作るものの種類');
   for (const { archetype, label } of CREATE_BUTTONS) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.setAttribute('data-pkc-action', 'create-entry');
-    btn.setAttribute('data-pkc-archetype', archetype);
-    btn.textContent = label;
-    newItems.append(btn);
+    if (SEALED_ARCHETYPES.includes(archetype)) continue; // 封印中
+    const opt = document.createElement('option');
+    opt.value = archetype;
+    opt.textContent = label;
+    kind.append(opt);
   }
-  // 📎 添付取込(P4a): file picker は常設 hidden input(動的生成にしない ──
-  // user-gesture 要件と smoke の setInputFiles の両方に効く)
+  const create = document.createElement('button');
+  create.type = 'button';
+  create.setAttribute('data-pkc-action', 'create-entry');
+  create.textContent = '新規';
+  create.title = '選んだ種類で新しく作ります';
   const attach = document.createElement('button');
   attach.type = 'button';
   attach.setAttribute('data-pkc-action', 'attach-file');
-  attach.textContent = '+添付';
-  newItems.append(attach);
-  createBar.append(newMenu);
+  attach.textContent = '添付';
+  attach.title = 'ファイルを取り込んで添付にします';
+  createBar.append(kind, create, attach);
 
   const attachInput = document.createElement('input');
   attachInput.type = 'file';
   attachInput.multiple = true;
   attachInput.hidden = true;
   attachInput.setAttribute('data-pkc-field', 'attach-input');
-  // ⚠ **メニューの外**に置く ── メニューを閉じると中の input は描画木から外れ、
-  // smoke の setInputFiles が届かない(取込の hidden input と同じ理由)
   createBar.append(attachInput);
 
   const list = document.createElement('ul');
   list.setAttribute('data-pkc-region', 'entry-list');
-  sidebar.append(createBar, list);
+  sidebar.append(findBar, createBar, list);
 
   const detail = document.createElement('main');
   detail.setAttribute('data-pkc-region', 'detail');
+
+  // ── 右(付随情報)────────────────────────────────
+  const inspector = document.createElement('aside');
+  inspector.setAttribute('data-pkc-region', 'inspector');
 
   const status = document.createElement('footer');
   status.setAttribute('data-pkc-region', 'status');
@@ -215,10 +249,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   update.setAttribute('data-pkc-region', 'update');
   update.hidden = true;
 
-  shell.append(topbar, sidebar, detail, update, notices, status);
+  shell.append(brand, cmdbar, sidebar, detail, inspector, update, notices, status);
   root.append(shell);
-  // 役割メニューの閉じ方(外側クリック / Escape / 項目のクリック)。
-  // ⚠ 枠は 1 度しか作らないので、ここで 1 度張れば足りる
-  installMenuDismiss(shell);
-  return { topbar, sidebar, detail, status, notices, update };
+  return { brand, cmdbar, sidebar, detail, inspector, status, notices, update };
 }

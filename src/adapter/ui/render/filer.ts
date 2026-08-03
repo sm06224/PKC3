@@ -26,6 +26,13 @@ import {
 } from '@features/relation/tree';
 import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
 
+/** SQLite の UTC 文字列を「日付だけ」に落とす(見出しが「日」なので)。 */
+function shortDate(value: string | null): string {
+  if (!value) return '';
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  return m ? `${m[1]}/${m[2]}/${m[3]}` : value;
+}
+
 const ARCHETYPE_LABELS: Record<string, string> = {
   text: 'ノート',
   todo: 'Todo',
@@ -145,7 +152,9 @@ export class FilerRenderer {
       const kind = document.createElement('td');
       kind.textContent = ARCHETYPE_LABELS[m.archetype] ?? m.archetype;
       const updated = document.createElement('td');
-      updated.textContent = m.updatedAt ?? '';
+      // ⚠ 生の SQLite UTC 文字列(`2026-08-03 13:11:39`)を出さない。
+      // 見出しが「更新日」なのに時刻まで出ていた ── 日付だけに落とす
+      updated.textContent = shortDate(m.updatedAt);
       tr.append(name, kind, updated);
       tbody.append(tr);
       this.rows.set(m.lid, tr);
@@ -159,10 +168,10 @@ export class FilerRenderer {
       // ⚠ 「空」と「絞り込みで消えた」を混ぜない(ランチャーと同じ理由)
       empty.textContent =
         q !== ''
-          ? '(絞り込みに一致するものがありません)'
+          ? '絞り込みに一致するものがありません'
           : scope
-            ? '(このフォルダは空です)'
-            : '(entry がありません)';
+            ? 'このフォルダは空です'
+            : 'まだ何もありません';
       this.region.append(empty);
     }
 

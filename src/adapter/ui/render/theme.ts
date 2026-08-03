@@ -14,7 +14,30 @@
  * **アプリは動く** ── 既定に落ちるだけ。
  */
 
-export type Theme = 'light' | 'dark';
+/**
+ * 選べる配色。⚠ **id は `tokens.css` の `[data-pkc-theme='…']` と 1 対 1**。
+ * 片方だけ増やしても壊れないので、`tests/adapter/theme-contrast.test.ts` が
+ * 両方を突き合わせる(CSS に無い id を出さない / CSS にあるのに選べない、を落とす)。
+ */
+export const THEMES = [
+  { id: 'light', label: 'ライト', dark: false },
+  { id: 'dark', label: 'ダーク', dark: true },
+  { id: 'github', label: 'GitHub', dark: false },
+  { id: 'github-dark', label: 'GitHub ダーク', dark: true },
+  { id: 'solarized', label: 'Solarized', dark: false },
+  { id: 'solarized-dark', label: 'Solarized ダーク', dark: true },
+  { id: 'dracula', label: 'Dracula', dark: true },
+  { id: 'nord', label: 'Nord', dark: true },
+  { id: 'terminal', label: '端末', dark: true },
+] as const;
+
+export type Theme = (typeof THEMES)[number]['id'];
+
+const IDS: readonly string[] = THEMES.map((t) => t.id);
+
+export function isTheme(v: string): v is Theme {
+  return IDS.includes(v);
+}
 
 /** ⚠ 1 キーだけ。増やすなら設定機構を建ててからにする。 */
 const KEY = 'pkc3.theme';
@@ -22,7 +45,7 @@ const KEY = 'pkc3.theme';
 function readStored(): Theme | null {
   try {
     const v = localStorage.getItem(KEY);
-    return v === 'light' || v === 'dark' ? v : null;
+    return v !== null && isTheme(v) ? v : null;
   } catch {
     return null; // 使えない環境でも落ちない
   }
@@ -49,9 +72,10 @@ export function initialTheme(prefersDark?: boolean): Theme {
   return dark ? 'dark' : 'light';
 }
 
-/** 逆の配色。 */
+/** 明暗の逆側(既定の 2 つの間を往復する)。 */
 export function otherTheme(theme: Theme): Theme {
-  return theme === 'dark' ? 'light' : 'dark';
+  const cur = THEMES.find((t) => t.id === theme);
+  return cur?.dark === true ? 'light' : 'dark';
 }
 
 /**

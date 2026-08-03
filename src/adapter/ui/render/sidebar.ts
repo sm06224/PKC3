@@ -139,10 +139,18 @@ export class SidebarRenderer {
     const row = document.createElement('li');
     row.setAttribute('data-pkc-entry', meta.lid);
     row.setAttribute('data-pkc-action', 'select-entry');
+    // 🔑 種別は**チップ**で出す(P8)。⚠ 以前は CSS の `::before` で
+    // 「文 」「了 」のような単漢字を行の頭に生やしていたが、日本語として
+    // 存在しない書き方であるうえ、`::before` が `<tr>` に当たると**匿名セルが
+    // でき、ファイラの表が 1 列ずれて全ヘッダが嘘になっていた**(実測)。
+    const chip = document.createElement('span');
+    chip.setAttribute('data-pkc-chip', meta.archetype);
+    chip.textContent = chipLabel(meta.archetype);
+    chip.title = archetypeLabel(meta.archetype);
     const title = document.createElement('span');
     title.setAttribute('data-pkc-field', 'title');
     title.textContent = meta.title;
-    row.append(title);
+    row.append(chip, title);
     row.setAttribute('data-pkc-archetype', meta.archetype);
     return row;
   }
@@ -150,8 +158,15 @@ export class SidebarRenderer {
   private patchRow(row: HTMLLIElement, meta: EntryMeta): void {
     const title = row.querySelector('[data-pkc-field="title"]');
     if (title && title.textContent !== meta.title) title.textContent = meta.title;
-    if (row.getAttribute('data-pkc-archetype') !== meta.archetype)
+    if (row.getAttribute('data-pkc-archetype') !== meta.archetype) {
       row.setAttribute('data-pkc-archetype', meta.archetype);
+      const chip = row.querySelector('[data-pkc-chip]');
+      if (chip) {
+        chip.setAttribute('data-pkc-chip', meta.archetype);
+        chip.textContent = chipLabel(meta.archetype);
+        (chip as HTMLElement).title = archetypeLabel(meta.archetype);
+      }
+    }
   }
 
   private patchSelection(selected: string | null): void {
@@ -159,5 +174,54 @@ export class SidebarRenderer {
       this.rows.get(this.lastSelected)?.removeAttribute('data-pkc-selected');
     }
     if (selected) this.rows.get(selected)?.setAttribute('data-pkc-selected', '');
+  }
+}
+
+/**
+ * 種別の**名前**(user に見せる語)。⚠ 内部語(archetype / entry)は出さない。
+ */
+export function archetypeLabel(archetype: string): string {
+  switch (archetype) {
+    case 'text':
+      return 'ノート';
+    case 'textlog':
+      return 'ログ';
+    case 'spreadsheet':
+      return '表';
+    case 'folder':
+      return 'フォルダ';
+    case 'attachment':
+      return '添付';
+    case 'todo':
+      return 'Todo';
+    case 'form':
+      return 'フォーム';
+    default:
+      return archetype;
+  }
+}
+
+/**
+ * チップに入れる 1〜2 文字。⚠ **チップの中でだけ**使う ── 地の文の前に
+ * 裸で置くと「文 会議メモ」のような日本語に無い書き方になる(P8 で全廃した形)。
+ */
+function chipLabel(archetype: string): string {
+  switch (archetype) {
+    case 'text':
+      return 'ノ';
+    case 'textlog':
+      return 'ロ';
+    case 'spreadsheet':
+      return '表';
+    case 'folder':
+      return 'F';
+    case 'attachment':
+      return '添';
+    case 'todo':
+      return 'T';
+    case 'form':
+      return 'フ';
+    default:
+      return '・';
   }
 }

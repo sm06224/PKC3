@@ -90,7 +90,7 @@ export class CalendarRenderer {
     archived.type = 'checkbox';
     archived.checked = state.showArchived;
     archived.setAttribute('data-pkc-action', 'toggle-show-archived');
-    archivedLabel.append(archived, document.createTextNode(' archived も表示'));
+    archivedLabel.append(archived, document.createTextNode(' 片付けたものも表示'));
     bar.append(prev, label, next, todayBtn, archivedLabel);
     this.region.append(bar);
 

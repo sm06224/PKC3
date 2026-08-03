@@ -11,8 +11,8 @@ export type KanbanStatus = 'open' | 'done';
 
 /** 列の定義(表示順)。 */
 export const KANBAN_COLUMNS: readonly { status: KanbanStatus; label: string }[] = [
-  { status: 'open', label: 'Todo' },
-  { status: 'done', label: 'Done' },
+  { status: 'open', label: '未完了' },
+  { status: 'done', label: '完了' },
 ] as const;
 
 /**

@@ -11,9 +11,11 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { SidebarRenderer } from '../../src/adapter/ui/render/sidebar';
+import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { stubRevisionOps } from '../helpers/revision-stub';
+import { createByUi } from '../helpers/create-entry';
 
 function meta(lid: string, order: number, over: Partial<EntryMeta> = {}): EntryMeta {
   return {
@@ -46,9 +48,12 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
   const regions = buildShell(root);
   const sidebar = new SidebarRenderer(regions.sidebar);
   const detail = new DetailRenderer(regions.detail);
+  // 🔑 削除 / 履歴 / 書き出す は**情報ペイン**が持つ(P8)
+  const inspector = new InspectorRenderer(regions.inspector);
   d.onState((s) => {
     sidebar.render(s);
     detail.render(s);
+    inspector.render(s);
   });
   bindActions(root, d);
   const store = { ...bodies };
@@ -74,38 +79,39 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
 
 describe('create (P3-7a)', () => {
   it('作成ボタン → seed 付き editor + 即永続、保存で本文が確定する', async () => {
-    const { d, q, qa, persisted, store } = setup([meta('a', 1)], { a: 'x' });
-    q<HTMLElement>('[data-pkc-action="create-entry"][data-pkc-archetype="todo"]')!.click();
+    // ⚠ かつては todo で見ていたが、todo は封印中(features/sealed.ts)で
+    // select に出ない ── seed を持つ別の種類(表)で同じことを見る
+    const { root, d, q, qa, persisted, store } = setup([meta('a', 1)], { a: 'x' });
+    createByUi(root, 'spreadsheet');
     await tick();
 
     // 即永続(作成時点で行が存在 ── PKC2 と同じ)+ seed が editor に見える
     expect(persisted).toHaveLength(1);
     expect(persisted[0]).toMatchObject({
-      archetype: 'todo',
-      body: '---\nstatus: open\n---\n',
-      status: 'open',
+      archetype: 'spreadsheet',
+      body: '```csv-render noheader\n,,,,\n,,,,\n,,,,\n```',
       entryOrder: 2,
     });
     const lid = persisted[0]!.lid;
     expect(d.getState().phase).toBe('editing');
     const ta = q<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')!;
-    expect(ta.value).toBe('---\nstatus: open\n---\n');
+    expect(ta.value).toBe('```csv-render noheader\n,,,,\n,,,,\n,,,,\n```');
     // 既定 title(日付 + 種別 + 連番)が title input に入っている
     const title = q<HTMLInputElement>('[data-pkc-field="editor-title"]')!;
-    expect(title.value).toMatch(/^\d{4}-\d{2}-\d{2} Todo 1$/);
+    expect(title.value).toMatch(/^\d{4}-\d{2}-\d{2} 表 1$/);
     // sidebar に行が生えている
     expect(qa(`[data-pkc-entry="${lid}"]`).length).toBeGreaterThan(0);
 
-    ta.value = '---\nstatus: open\n---\n買い物';
+    ta.value = '```csv-render noheader\n,,,,\n,,,,\n,,,,\n```\n買い物';
     ta.dispatchEvent(new Event('input', { bubbles: true }));
     q<HTMLElement>('[data-pkc-action="commit-edit"]')!.click();
     await tick(20);
-    expect(store[lid]).toBe('---\nstatus: open\n---\n買い物');
+    expect(store[lid]).toBe('```csv-render noheader\n,,,,\n,,,,\n,,,,\n```\n買い物');
   });
 
   it('未編集のまま cancel → entry ごと掃除(PKC2 の空 entry 堆積の対策)', async () => {
-    const { d, q, qa, deleted } = setup([meta('a', 1)], { a: 'x' });
-    q<HTMLElement>('[data-pkc-action="create-entry"][data-pkc-archetype="text"]')!.click();
+    const { root, d, q, qa, deleted } = setup([meta('a', 1)], { a: 'x' });
+    createByUi(root, 'text');
     const lid = d.getState().selectedLid!;
     q<HTMLElement>('[data-pkc-action="cancel-edit"]')!.click();
     await tick(20);
@@ -141,11 +147,7 @@ describe('create (P3-7a)', () => {
       deleteEntry: async () => {},
     });
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', 1)], relations: [] });
-    root
-      .querySelector<HTMLElement>(
-        '[data-pkc-action="create-entry"][data-pkc-archetype="text"]',
-      )!
-      .click();
+    createByUi(root, 'text');
     // persist 失敗が届く前に cancel(fresh 掃除)── 同期で
     root.querySelector<HTMLElement>('[data-pkc-action="cancel-edit"]')!.click();
     await tick(30);
@@ -160,8 +162,8 @@ describe('create (P3-7a)', () => {
   });
 
   it('draft を打った cancel で fresh は解除 ── 後日の無変更 Esc が entry を消さない', async () => {
-    const { d, q } = setup([], {});
-    q<HTMLElement>('[data-pkc-action="create-entry"][data-pkc-archetype="text"]')!.click();
+    const { root, d, q } = setup([], {});
+    createByUi(root, 'text');
     const lid = d.getState().selectedLid!;
     const ta = q<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')!;
     ta.value = '下書き';
@@ -176,8 +178,8 @@ describe('create (P3-7a)', () => {
   });
 
   it('title だけ入力して Esc → title を保存して entry を残す(入力を失わない)', async () => {
-    const { d, q, qa } = setup([], {});
-    q<HTMLElement>('[data-pkc-action="create-entry"][data-pkc-archetype="text"]')!.click();
+    const { root, d, q, qa } = setup([], {});
+    createByUi(root, 'text');
     const lid = d.getState().selectedLid!;
     const title = q<HTMLInputElement>('[data-pkc-field="editor-title"]')!;
     title.value = '大事なタイトル';
@@ -190,8 +192,8 @@ describe('create (P3-7a)', () => {
   });
 
   it('一度 commit した entry は cancel でも消えない(fresh 解除)', async () => {
-    const { d, q } = setup([], {});
-    q<HTMLElement>('[data-pkc-action="create-entry"][data-pkc-archetype="text"]')!.click();
+    const { root, d, q } = setup([], {});
+    createByUi(root, 'text');
     const lid = d.getState().selectedLid!;
     const ta = q<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')!;
     ta.value = '本文';

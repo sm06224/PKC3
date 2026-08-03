@@ -4,13 +4,13 @@
  * ⚠ mermaid の実 render は 20s 級の待ちを持つため PR gate に入れない(nightly 検討)。
  */
 import { test, expect } from '@playwright/test';
-import { gotoApp, collectPageErrors, clickReal, clickMenuItem } from './helpers';
+import { gotoApp, collectPageErrors, clickReal, createEntry } from './helpers';
 
 test('csv 表と html sandbox iframe が可視高さを持つ', async ({ page }) => {
   const errors = collectPageErrors(page);
   await gotoApp(page);
 
-  await clickMenuItem(page, '[data-pkc-action="create-entry"][data-pkc-archetype="text"]');
+  await createEntry(page, 'text');
   const ta = page.locator('[data-pkc-field="editor-body"]');
   await ta.click();
   await page.keyboard.type(
