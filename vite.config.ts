@@ -1,10 +1,23 @@
 /// <reference types="vitest/config" />
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
+// ⚠ 拡張子なしの import は Vite の native config loader が警告を出すが、
+// tsconfig が \`allowImportingTsExtensions\` を許していないので付けられない。
+// vitest / vite ともこの形で解決できている(将来 loader が変わったら見直す)
+import { swPlugin } from './build/sw-plugin.ts';
+
+/**
+ * cache 名に入れる build id。⚠ **生成物ごとに変わる**必要がある ── 固定だと
+ * 新しい版が古い cache を使い続ける(PWA の定番事故)。CI では commit sha、
+ * 手元では時刻を使う(`Date.now()` はここ = ビルド時なので resume 規律の対象外)
+ */
+const buildId = (): string =>
+  process.env.GITHUB_SHA?.slice(0, 12) ?? `local-${Date.now().toString(36)}`;
 
 // base './' — Pages の / と /dev/ の両方で同一ビルドが動く相対パス配信
 export default defineConfig({
   base: './',
+  plugins: [swPlugin(buildId)],
   // @sqlite.org/sqlite-wasm は pre-bundle すると worker/wasm 解決が壊れる(公式指示)
   optimizeDeps: { exclude: ['@sqlite.org/sqlite-wasm'] },
   resolve: {
