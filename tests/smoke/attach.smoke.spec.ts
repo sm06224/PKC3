@@ -3,7 +3,7 @@
  * 「実際に画面に出る」+ Blob 直 put 経路の end-to-end(実 IDB + 実 sqlite meta)。
  */
 import { test, expect } from '@playwright/test';
-import { gotoApp, collectPageErrors, clickReal, expectImageRendered } from './helpers';
+import { gotoApp, collectPageErrors, clickReal, expectImageRendered, clickMenuItem } from './helpers';
 
 // 1x1 PNG(67 bytes)
 const PNG_1X1 = Buffer.from(
@@ -39,7 +39,7 @@ test('添付取込 → entry 出現 → image preview が可視高さを持つ',
     .locator('[data-pkc-action="download-asset"]')
     .first()
     .getAttribute('data-pkc-asset-key');
-  await clickReal(page, '[data-pkc-action="create-entry"][data-pkc-archetype="text"]');
+  await clickMenuItem(page, '[data-pkc-action="create-entry"][data-pkc-archetype="text"]');
   const ta = page.locator('[data-pkc-field="editor-body"]');
   await expect(ta).toBeVisible();
   await ta.click();
@@ -60,7 +60,7 @@ test('添付取込 → entry 出現 → image preview が可視高さを持つ',
       void d.accept();
     });
   });
-  await clickReal(page, '[data-pkc-action="purge-orphan-assets"]');
+  await clickMenuItem(page, '[data-pkc-action="purge-orphan-assets"]');
   expect(await dialogMsg).toContain('未参照の添付データはありません');
 
   expect(errors).toEqual([]);

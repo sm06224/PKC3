@@ -4,13 +4,18 @@
  * せず・何も見つからない」── 挙動を検証するテストは自前で上書きする。
  *
  * 対象: revision 面(P5b)+ 一括読み(P6d の `listBodies` ── 書出し専用なので
- * state のテストには関係しない)。
+ * state のテストには関係しない)+ 指定読み(P7b の `getBodies` ── ランチャー専用)。
  */
 import type { StorePort } from '../../src/adapter/state/store-effects';
 
 type RevisionOps = Pick<
   StorePort,
-  'listRevisionMetas' | 'getRevision' | 'listTrash' | 'purgeTrash' | 'listBodies'
+  | 'listRevisionMetas'
+  | 'getRevision'
+  | 'listTrash'
+  | 'purgeTrash'
+  | 'listBodies'
+  | 'getBodies'
 >;
 
 export function stubRevisionOps(): RevisionOps {
@@ -20,5 +25,8 @@ export function stubRevisionOps(): RevisionOps {
     listTrash: async () => [],
     purgeTrash: async () => ({ purged: 0 }),
     listBodies: async () => ({ rows: [], done: true }),
+    // ⚠ ランチャー(P7b)専用の読み ── 開かないテストには 1 件も返らないのが正しい。
+    // **観測するテストは自前で上書きする**(既定に意味を持たせない)
+    getBodies: async () => [],
   };
 }

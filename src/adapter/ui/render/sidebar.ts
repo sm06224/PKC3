@@ -10,9 +10,21 @@
  */
 import type { EntryMeta } from '@core/model/entry-meta';
 import type { AppState } from '@adapter/state/app-state';
+import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
 
 export class SidebarRenderer {
   private readonly list: HTMLElement;
+  /**
+   * lid → 行ノード。**絞り込みで外した行もここに残す**(review M-4)。
+   *
+   * 🔴 初版は絞り込みで外れた行を `rows` から削除していたので、絞り込みを
+   * 緩める / 消すたびに `createRow` で作り直していた。15,000 件で実測すると
+   * 打鍵ごとに 0.2〜0.75 秒メインスレッドが止まる ── CLAUDE.md が PKC2 の
+   * 体感悪化の主因として名指しした「5000 行のサイドバーを作り直す」と同型である。
+   * ⚠ `wanted` から外れた行は **DOM からは外す**(`hidden` で残さない ──
+   * 行数を数える test や「見えている中で n 番目」が静かにずれる)。
+   * ⚠ 一覧から**消えた** entry はここからも消す(でないと際限なく溜まる)。
+   */
   private readonly rows = new Map<string, HTMLLIElement>();
   /** 行ごとの描画済み meta 参照 ── 1 件の meta 変更で 15k 行を patch 歩行しない
    *  (patch は querySelector を伴うので、参照一致で丸ごと skip する)。 */
@@ -20,6 +32,11 @@ export class SidebarRenderer {
   private lastMetas: ReadonlyMap<string, EntryMeta> | null = null;
   private lastOrder: readonly string[] | null = null;
   private lastSelected: string | null = null;
+  /** ⚠ 絞り込みも**指紋の一部** ── 入れないと、絞っても行が減らない。 */
+  private lastFilter: string | null = null;
+
+  /** 絞り込み欄。⚠ **state が正** ── 欄の値は state に合わせて書き戻す。 */
+  private readonly filterInput: HTMLInputElement | null;
 
   constructor(sidebarRegion: HTMLElement) {
     const list = sidebarRegion.querySelector<HTMLElement>(
@@ -27,37 +44,75 @@ export class SidebarRenderer {
     );
     if (!list) throw new Error('sidebar shell missing entry-list region');
     this.list = list;
+    this.filterInput = sidebarRegion.querySelector<HTMLInputElement>(
+      '[data-pkc-field="entry-filter"]',
+    );
   }
 
   render(state: AppState): void {
+    // ⚠ 絞り込みを指紋に入れる。当初は metas / order だけを見ており、
+    // **絞り込みを変えても `reconcileRows` が走らなかった**(smoke で実際に踏んだ)
     const listChanged =
-      state.entryMetas !== this.lastMetas || state.order !== this.lastOrder;
+      state.entryMetas !== this.lastMetas ||
+      state.order !== this.lastOrder ||
+      state.filterQuery !== this.lastFilter;
     const selectionChanged = state.selectedLid !== this.lastSelected;
     if (!listChanged && !selectionChanged) return; // 指紋一致 ── DOM に触れない
+
+    // 🔑 欄の値を state に合わせる(review M-2)。新規作成が絞り込みを解除する
+    // ので、**欄だけ文字が残る**と「効いていないのに書いてある」嘘になる。
+    // ⚠ 打鍵中は `value === filterQuery` なので書き戻しは起きない(caret を壊さない)
+    if (this.filterInput && this.filterInput.value !== state.filterQuery)
+      this.filterInput.value = state.filterQuery;
 
     if (listChanged) this.reconcileRows(state);
     if (listChanged || selectionChanged) this.patchSelection(state.selectedLid);
 
     this.lastMetas = state.entryMetas;
     this.lastOrder = state.order;
+    this.lastFilter = state.filterQuery;
     this.lastSelected = state.selectedLid;
   }
 
   private reconcileRows(state: AppState): void {
     // 削除を**先に**行う ── stale ノードが cursor に残ると、それ以降の全行が
     // insertBefore(move)になる(review A-2: 先頭 1 行削除で 14,999 move の実測)
+    /**
+     * 🔑 絞り込み(P7b 段⑨c、user 指示「導線を再考」)。**常駐 meta の題名だけ**を
+     * 見る ── 本文は常駐していないので、全文検索をここでやると全 body の読込が要る
+     * (それは別の段で、SQL 側に持たせる)。
+     *
+     * ⚠ 隠すのではなく**外す** ── `hidden` で残すと、行数を数える test や
+     * 「見えている中で n 番目」の操作が静かにずれる。
+     * ⚠ 判定は**この 1 パスだけ**でやる。当初は下の cursor ループの中で
+     * 消していて、**先に取った `cursor` が消えたノードを指す**ため以降の
+     * 挿入位置が壊れた(絞り込んでも行が減らない ── smoke で実際に踏んだ)。
+     */
+    const q = normalizeQuery(state.filterQuery);
+    const visible: string[] = [];
     const wanted = new Set<string>();
-    for (const lid of state.order) if (state.entryMetas.has(lid)) wanted.add(lid);
+    // 一覧に**存在する** lid(絞り込み前)── 行キャッシュの掃除はこちらで判定する
+    const alive = new Set<string>();
+    for (const lid of state.order) {
+      const meta = state.entryMetas.get(lid);
+      if (!meta) continue;
+      alive.add(lid);
+      if (!matchesTitle(meta.title, q)) continue;
+      wanted.add(lid);
+      visible.push(lid);
+    }
     for (const [lid, row] of this.rows) {
-      if (!wanted.has(lid)) {
-        row.remove();
+      // 絞り込みで外れただけの行は **DOM から外すが、ノードは取っておく**
+      // (次の打鍵で戻ってくる ── 作り直しが M-4 の停止の正体だった)
+      if (!wanted.has(lid)) row.remove();
+      if (!alive.has(lid)) {
         this.rows.delete(lid);
         this.rowMeta.delete(lid);
       }
     }
 
     let cursor: ChildNode | null = this.list.firstChild;
-    for (const lid of state.order) {
+    for (const lid of visible) {
       const meta = state.entryMetas.get(lid);
       if (!meta) continue;
       let row = this.rows.get(lid);

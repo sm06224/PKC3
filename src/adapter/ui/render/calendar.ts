@@ -11,6 +11,7 @@ import {
   getMonthGrid,
   dateKey,
 } from '@features/calendar/calendar-data';
+import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
 
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'] as const;
 
@@ -21,6 +22,8 @@ export class CalendarRenderer {
   private lastMonth: AppState['calendarMonth'] = null;
   private lastShowArchived: boolean | null = null;
   private lastSelected: string | null = null;
+  /** ⚠ 絞り込みも指紋の一部(review M-3)。 */
+  private lastFilter: string | null = null;
 
   /** now は test 注入用(既定は実時刻)。 */
   constructor(region: HTMLElement, now: () => Date = () => new Date()) {
@@ -33,23 +36,27 @@ export class CalendarRenderer {
       state.entryMetas === this.lastMetas &&
       state.calendarMonth === this.lastMonth &&
       state.showArchived === this.lastShowArchived &&
+      state.filterQuery === this.lastFilter &&
       state.selectedLid === this.lastSelected
     )
       return;
     this.lastMetas = state.entryMetas;
     this.lastMonth = state.calendarMonth;
     this.lastShowArchived = state.showArchived;
+    this.lastFilter = state.filterQuery;
     this.lastSelected = state.selectedLid;
 
     const today = this.now();
     const year = state.calendarMonth?.year ?? today.getFullYear();
     const month = state.calendarMonth?.month ?? today.getMonth() + 1;
 
-    // kanban と同じく state.order 順で組む(Map 挿入順に依存しない ── review #8)
+    // kanban と同じく state.order 順で組む(Map 挿入順に依存しない ── review #8)。
+    // ⚠ 絞り込みは**全部の面**に同じ規則で効かせる(review M-3)
+    const q = normalizeQuery(state.filterQuery);
     const metas: EntryMeta[] = [];
     for (const lid of state.order) {
       const m = state.entryMetas.get(lid);
-      if (m) metas.push(m);
+      if (m && matchesTitle(m.title, q)) metas.push(m);
     }
     const byDate = groupTodosByDate(metas, state.showArchived);
 

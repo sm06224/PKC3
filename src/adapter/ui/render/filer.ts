@@ -24,6 +24,7 @@ import {
   getAncestorFolders,
   resolveFilerScope,
 } from '@features/relation/tree';
+import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
 
 const ARCHETYPE_LABELS: Record<string, string> = {
   text: 'ノート',
@@ -42,6 +43,8 @@ export class FilerRenderer {
   private lastRelations: readonly Relation[] | null = null;
   private lastSelected: string | null = null;
   private lastScopeLid: string | null = null;
+  /** ⚠ 絞り込みも指紋の一部(review M-3 ── 絞り込み中にファイラだけ全件出ていた)。 */
+  private lastFilter: string | null = null;
   /** ゴミ箱 panel の断面(参照比較 ── P5b で指紋に加わった次元)。 */
   private lastTrash: AppState['trashPanel'] = null;
 
@@ -51,7 +54,9 @@ export class FilerRenderer {
 
   render(state: AppState): void {
     const listChanged =
-      state.entryMetas !== this.lastMetas || state.relations !== this.lastRelations;
+      state.entryMetas !== this.lastMetas ||
+      state.relations !== this.lastRelations ||
+      state.filterQuery !== this.lastFilter;
     const selectionChanged = state.selectedLid !== this.lastSelected;
     const trashChanged = state.trashPanel !== this.lastTrash;
     if (!listChanged && !selectionChanged && !trashChanged) return;
@@ -76,10 +81,16 @@ export class FilerRenderer {
     this.lastSelected = state.selectedLid;
     this.lastScopeLid = scopeLid;
     this.lastTrash = state.trashPanel;
+    this.lastFilter = state.filterQuery;
 
-    const list = scope
-      ? getStructuralChildren(scope.lid, state.entryMetas, state.relations)
-      : getRootEntries(state.entryMetas, state.relations);
+    // ⚠ 絞り込みは**全部の面**に同じ規則で効かせる(review M-3)。
+    // scope(どのフォルダを見ているか)は動かさない ── 絞るのは**中身**だけ
+    const q = normalizeQuery(state.filterQuery);
+    const list = (
+      scope
+        ? getStructuralChildren(scope.lid, state.entryMetas, state.relations)
+        : getRootEntries(state.entryMetas, state.relations)
+    ).filter((m) => matchesTitle(m.title, q));
 
     this.region.textContent = '';
     this.rows.clear();
@@ -145,7 +156,13 @@ export class FilerRenderer {
     if (list.length === 0) {
       const empty = document.createElement('p');
       empty.setAttribute('data-pkc-field', 'filer-empty');
-      empty.textContent = scope ? '(このフォルダは空です)' : '(entry がありません)';
+      // ⚠ 「空」と「絞り込みで消えた」を混ぜない(ランチャーと同じ理由)
+      empty.textContent =
+        q !== ''
+          ? '(絞り込みに一致するものがありません)'
+          : scope
+            ? '(このフォルダは空です)'
+            : '(entry がありません)';
       this.region.append(empty);
     }
 

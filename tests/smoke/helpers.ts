@@ -24,6 +24,23 @@ export function collectPageErrors(page: Page): string[] {
 }
 
 /**
+ * 役割メニューの中の項目を押す(P7b 段⑨b)。
+ *
+ * ⚠ **メニューを開いてから押す**。畳んだ結果 `clickReal` が
+ * 「閉じたメニューの中は見えない」で落ちるのは**正しい** ── 実際の user も
+ * 開かなければ押せない。ここでその動線を再現する。
+ * ⚠ 開けるかどうかも観測点である(`summary` が押せなければここで落ちる)。
+ */
+export async function clickMenuItem(page: Page, actionSelector: string): Promise<void> {
+  const item = page.locator(actionSelector).first();
+  const menu = item.locator('xpath=ancestor::details[@data-pkc-menu]').first();
+  if ((await menu.count()) > 0 && !(await menu.evaluate((el: HTMLDetailsElement) => el.open))) {
+    await clickReal(page, `details[data-pkc-menu]:has(${actionSelector}) > summary`);
+  }
+  await clickReal(page, actionSelector);
+}
+
+/**
  * 実クリック: 中心座標の最前面要素が target(またはその子孫 / 祖先)であることを
  * 確認してから page.mouse.click。dead click / occlusion / zero-height を検出する。
  */
