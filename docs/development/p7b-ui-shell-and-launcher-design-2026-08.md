@@ -141,7 +141,7 @@ PKC2 の `src/styles/base.css` は **13,801 行 / 398 KB**(Fallout / PIP-Boy 風
 
 🔑 **見えない状態を解消する最小**に絞る。足りなければ次の段で足せる。
 
-### 2-3. ⚠ URL タイルは**そのままでは移せない**
+### 2-3. ⚠ URL タイルは**そのままでは移せない**(→ §9-2 で実測して解決)
 
 PKC2 は「オリジンを相手サイトに渡さない」ために**リダイレクト専用の小さな HTML を
 attachment 化**し、`window.open('') + document.write` 経由で開く。PKC3 は
@@ -372,3 +372,21 @@ Pages 上の PWA(`https://` オリジン)なので、**file:// 前提のこの�
 
 変異試験 13 件・生存 0(タイルの判断 5 / 効果 3 / 面 2 / 起動 2 / 経路 1)。
 配る量 1645.5 KB(cap 残量 754.5 KB / 31.4%)。
+
+### 9-2. 🔴 URL タイルの遮断 ── **測ったら中継ページは要らなかった**
+
+§2-3 で「PKC2 の referrer 遮断の理屈が `https://` オリジンでも成り立つか未検証」と
+書いて保留していたもの。**実測した**(実ブラウザ、`window.open(url, '_blank',
+'noopener,noreferrer')` で開いた先で `document.referrer` と `window.opener` を読む):
+
+```
+MEASURED {"referrer":"","hasOpener":false}
+```
+
+→ **相手サイトには来訪元も opener も渡らない**。PKC2 は file:// 前提で
+「リダイレクト専用の小さな HTML を attachment 化して `document.write` で挟む」
+という手の込んだ経路を組んでいたが、**PKC3 のオリジンでは `noopener,noreferrer` だけで
+同じ遮断が成立する** ── 中継ページを移植しなくてよい。
+
+⚠ これは「PKC2 に寄せる必要は無い」(user 指示 2026-08-03)の具体例である。
+**測らずに移植していたら、要らない仕組みを 1 つ抱えていた。**
