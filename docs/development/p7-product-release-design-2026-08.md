@@ -122,7 +122,7 @@ chunk を取りに行く経路で取り零す(Pages は deploy でツリーご�
 | ④ | ✅ **SW の precache**(生成 + navigation network-first + 旧 cache 掃除)+ オフライン smoke | 独立 |
 | ⑤ | ✅ **更新通知**(新しい版があります) | ④ の上 |
 | ⑥ | ✅ **マニュアル + 移行ガイド**(PKC2 → PKC3) | 実装が固まってから書く |
-| ⑦ | **v3.0.0 release**(SBOM 添付は既存、provenance attestation を足す)→ product URL 稼働 | 最後 |
+| ⑦ | 🟡 **v3.0.0 release**(SBOM 添付は既存、provenance attestation を足す)→ product URL 稼働 | 最後。**仕込みは完了・tag は user の go 待ち** |
 
 ⚠ ⑥ は「実装が固まってから」。先に書くと**嘘のマニュアル**になる。
 
@@ -510,6 +510,42 @@ README から両方へ導線。
 改名したらそこが落ちる = マニュアルも直せ、という合図になる。
 
 変異試験 9 件・生存 0(ボタン 3 / 語彙 3 / 数 2 / 「無い」ことの主張 1)。
+
+### 段⑦ 実装記録(2026-08-03。**tag は user の go 待ち**)
+
+仕込みは完了。**`v3.0.0` の tag を打つところだけ user の裁定を待つ** ──
+tag は release を作り Pages の `/` を placeholder から製品へ差し替える、
+**外向きで戻せない操作**である(段⑦ の他の部分は戻せる)。
+
+| 何を | どうしたか |
+|---|---|
+| 版 | `3.0.0-dev` → **`3.0.0`**(`package.json` / `release-meta.ts` の両方) |
+| provenance | `actions/attest-build-provenance@v3` を release workflow に追加。対象は **`pkc3-dist.zip` と `pkc3-sbom.cdx.json`**(配る物そのもの) |
+| 権限 | `id-token: write` + `attestations: write`(どちらか欠けると attest step が落ちる) |
+| tag の突合 | **build より前**に `v<tag>` と `package.json` を突合して落とす |
+
+#### 🔴 版は 3 か所に居る
+
+`package.json`(SBOM と npm が名乗る)/ `release-meta.ts`(画面下の status に出る)/
+**release tag**(Pages の `/` が何を配るかを決める)。**1 か所だけ上げるのは必ず起きる**ので
+`tests/release-meta.test.ts` が前 2 つを機械で縛り、tag との突合は workflow が
+**build より前**に行う ── 後ろに置くと、食い違ったままビルドして検品まで通り、
+最後の release 作成でようやく落ちる(時間を捨てるうえ、「配ったものと名乗る版が違う」
+provenance を作りかける)。
+
+#### ⚠ attestation は「何も証明しない形」で通る
+
+`subject-path` を書き忘れても step 自体は成功する。だから test が
+**subject-path の存在と対象名**まで見る ── 権限 2 つ、対象 2 つ、順序 2 つを pin した。
+
+#### ⚠ 変異試験で「変異が発火していなかった」
+
+「版の突合を build の後ろへ動かす」変異を、**block の前にダミー step を挿す**形で
+書いてしまい、順序が変わっていないのに「生き残り」と出た。CLAUDE.md の
+「**変異自体を疑う**」に該当 ── block を実際に切り貼りして順序が反転したことを
+assert してから流し直したら、落ちた。
+
+変異試験 9 件・生存 0(版 3 / attestation 4 / 順序 2)。
 
 ---
 
