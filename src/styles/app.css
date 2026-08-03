@@ -407,6 +407,26 @@ select:focus-visible {
   font-size: 15px;
   font-weight: 600;
 }
+/* ── 書式パネル(P8 段⑥)──────────────────────────
+ * 🔑 **編集欄のすぐ上**に、共有の 1 本線で貼り付ける(段④ の規約:境界線は共有、
+ * ギャップは置かない)。14 個入るので狭いときは折り返す ── 畳まない
+ * (user 指示「主要な導線を畳まない」)。 */
+[data-pkc-region='format-bar'] {
+  display: flex;
+  flex-wrap: wrap;
+  /* 線そのものを gap で作る ── ボタン同士がくっついた 1 枚の帯に見える */
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  margin-bottom: 0;
+}
+[data-pkc-region='format-bar'] button {
+  border: none;
+  border-radius: 0;
+  padding: 0 var(--s2);
+  font-size: 11.5px;
+}
 /* ⚠ 編集欄は**残りの高さいっぱい**に伸ばす ── 固定高だと下に死に領域ができる
  * (実測: 1280x800 で textarea が 525px で止まり、下に 260px の空白が残っていた) */
 /* ── 編集(左に原文・右にプレビュー)─────────────────
@@ -417,6 +437,8 @@ select:focus-visible {
   /* 共有の 1 本線で分ける(ギャップは置かない) */
   gap: 1px;
   background: var(--border);
+  /* ⚠ 書式パネルと**1 枚の面**に見せる(パネル側は border-bottom を持たない) */
+  border: 1px solid var(--border);
   flex: 1;
   min-height: 0;
 }

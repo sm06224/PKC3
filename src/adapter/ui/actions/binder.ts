@@ -15,12 +15,17 @@
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import type { ViewMode } from '@adapter/state/app-state';
 import { archetypeLabel } from '@adapter/ui/render/sidebar';
+import { applyFormat, appendAt, type FormatOp } from '@features/markdown/text-ops';
+import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
 import { handleCopyMdBlock } from './copy-md-block';
 
 type ActionHandler = (
   dispatcher: Dispatcher,
   target: HTMLElement,
   services: BinderServices,
+  /** 束ねた root。⚠ **押したボタンから辿れない**ときに使う ── 追記は
+   *  START_EDIT で detail を描き直すので、target は既に外れている */
+  root: HTMLElement,
 ) => void;
 
 const VIEW_MODES: ReadonlySet<string> = new Set([
@@ -131,6 +136,39 @@ function renameFromEditorInput(dispatcher: Dispatcher, from: HTMLElement): void 
     dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title: input.value });
 }
 
+/** いま画面に出ている編集欄(root にスコープする ── document 全域は他 root を拾う)。 */
+function editorBody(root: HTMLElement): HTMLTextAreaElement | null {
+  return root.querySelector<HTMLTextAreaElement>(
+    '[data-pkc-region="detail"] [data-pkc-field="editor-body"]',
+  );
+}
+
+/**
+ * 書き換えた本文を編集欄へ戻す。
+ *
+ * 🔴 **`input` を自分で撃つ**。ここで state へ直に `UPDATE_OPEN_BODY` を送ると、
+ * 経路が 2 本になる(binder の delegation と、この関数)── 片方を壊しても
+ * もう片方に救われて test が緑のまま通るので、**入口は 1 つに寄せる**。
+ * プレビューも textarea の `input` で駆動しているので、これ 1 発で state と
+ * 画面の両方が追いつく。
+ *
+ * ⚠ `value` の直代入はブラウザの取り消し履歴(Ctrl+Z)を捨てる。書式パネルは
+ * 「保存 / キャンセル」で丸ごと戻せるので、ここでは受け入れる ── 取り消しを
+ * 残すには `execCommand('insertText')` が要るが、経路が 2 本になる。
+ */
+function writeBack(
+  ta: HTMLTextAreaElement,
+  next: { text: string; start: number; end: number },
+  toBottom = false,
+): void {
+  ta.value = next.text;
+  ta.setSelectionRange(next.start, next.end);
+  ta.focus();
+  // 追記はカーソルが末尾 ── 見えていないと「押しても何も起きない」に見える
+  if (toBottom) ta.scrollTop = ta.scrollHeight;
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 const ACTIONS: Record<string, ActionHandler> = {
   'select-entry': (dispatcher, target) => {
     const lid = target.getAttribute('data-pkc-entry');
@@ -193,6 +231,33 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'DELETE_ENTRY', lid });
   },
   'copy-md-block': (_dispatcher, target) => handleCopyMdBlock(target),
+  /**
+   * 書式パネル(P8 段⑥)。⚠ **規則は `applyFormat` が持つ** ── ここは
+   * 「選択を読む → 渡す → 書き戻す」だけ。op ごとの知識をここに漏らさない。
+   */
+  'format-text': (_dispatcher, target, _services, root) => {
+    const op = target.getAttribute('data-pkc-format') as FormatOp | null;
+    const ta = editorBody(root);
+    if (!op || !ta) return;
+    writeBack(ta, applyFormat({ text: ta.value, start: ta.selectionStart, end: ta.selectionEnd }, op));
+  },
+  /**
+   * 追記(P8 段⑥)。**閲覧中に押しても効く** ── ログの既定の使い方は
+   * 「開く → 末尾に足す → 書く」なので、先に「編集」を押させない。
+   * ⚠ `START_EDIT` は同期 dispatch で detail を描き直す ── **押したボタンは
+   * その時点で外れている**ので、textarea は `root` から引き直す。
+   */
+  'append-section': (dispatcher, _target, _services, root) => {
+    const before = dispatcher.getState();
+    const lid = before.openBody?.lid ?? null;
+    const archetype = lid ? before.entryMetas.get(lid)?.archetype : undefined;
+    if (!lid || !isAppendable(archetype)) return;
+    if (before.phase === 'ready') dispatcher.dispatch({ type: 'START_EDIT' });
+    if (dispatcher.getState().phase !== 'editing') return;
+    const ta = editorBody(root);
+    if (!ta) return;
+    writeBack(ta, appendAt(ta.value, appendHeadingFor(archetype!, new Date())), true);
+  },
   /** 左の列の**探し方**を切り替える(P8 段⑤)。⚠ 中央のビューとは別の軸。 */
   'set-browse': (_dispatcher, target, services) => {
     const mode = target.closest('[data-pkc-browse]')?.getAttribute('data-pkc-browse');
@@ -318,6 +383,16 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
 };
 
+/**
+ * 近道のキー。⚠ **書式パネルに在る操作だけ**を割り当てる ── ここにしか無い
+ * 操作を作ると「キーを知っている人にしかできないこと」が生まれる。
+ */
+const FORMAT_KEYS: Readonly<Record<string, FormatOp>> = {
+  b: 'bold',
+  i: 'italic',
+  k: 'link',
+};
+
 function isEditorBody(el: EventTarget | null): el is HTMLTextAreaElement {
   return (
     el instanceof HTMLTextAreaElement &&
@@ -336,7 +411,15 @@ export function bindActions(
     );
     if (!el || !root.contains(el)) return;
     const handler = ACTIONS[el.getAttribute('data-pkc-action') ?? ''];
-    handler?.(dispatcher, el, services);
+    handler?.(dispatcher, el, services, root);
+  };
+  /**
+   * ⚠ 書式パネルのボタンは **focus を奪わない**。奪うと押すたびに編集欄が
+   * focus を失って画面がちらつく(選択位置自体は残るので壊れはしない)。
+   */
+  const onMousedown = (ev: Event) => {
+    const el = (ev.target as HTMLElement | null)?.closest<HTMLElement>('[data-pkc-action]');
+    if (el?.getAttribute('data-pkc-action') === 'format-text') ev.preventDefault();
   };
   const onInput = (ev: Event) => {
     if (isEditorBody(ev.target)) {
@@ -359,7 +442,7 @@ export function bindActions(
     // 「選んだ瞬間に効く」ものはここで拾う(P8)
     if (el instanceof HTMLSelectElement) {
       const action = el.getAttribute('data-pkc-action');
-      if (action) ACTIONS[action]?.(dispatcher, el, services);
+      if (action) ACTIONS[action]?.(dispatcher, el, services, root);
       return;
     }
     if (!(el instanceof HTMLInputElement)) return;
@@ -390,8 +473,10 @@ export function bindActions(
     if (ke.isComposing) return;
     // PKC2 慣例: Ctrl/Cmd+S = 保存(ブラウザの保存ダイアログも抑止)、
     // Esc = キャンセル。Ctrl/Cmd+Enter も保存の別名として受ける
-    // (PKC2 の章フォーカス編集が両対応だった ── append 系の Ctrl+Enter は
-    // textlog UI 側の文脈で導入する)。altKey は除外(AltGr = Ctrl+Alt 誤発火)
+    // (PKC2 の章フォーカス編集が両対応だった)。altKey は除外(AltGr = Ctrl+Alt 誤発火)
+    // ⚠ 追記(P8 段⑥)は**編集欄そのものを書き換える**ので、PKC2 のように
+    // 「追記専用の textarea + Ctrl+Enter で確定」を別に持たない ── 別経路にすると
+    // 編集中の draft と競合し、追記した節が保存で黙って消える(PKC2 の実測)
     if (
       !ke.altKey &&
       (((ke.key === 's' || ke.key === 'S') && (ke.ctrlKey || ke.metaKey)) ||
@@ -400,17 +485,36 @@ export function bindActions(
       ke.preventDefault();
       renameFromEditorInput(dispatcher, ke.target as HTMLElement);
       dispatcher.dispatch({ type: 'COMMIT_EDIT' });
+    } else if (
+      // 🔑 **キーボードは近道**(業務画面の作法 ── user 指示 2026-08-03)。
+      // 本文だけ。題名に太字を入れても意味が無い。⚠ `isComposing` は上で弾き済み
+      field === 'editor-body' &&
+      !ke.altKey &&
+      (ke.ctrlKey || ke.metaKey) &&
+      FORMAT_KEYS[ke.key.toLowerCase()] !== undefined
+    ) {
+      ke.preventDefault();
+      const ta = ke.target as HTMLTextAreaElement;
+      writeBack(
+        ta,
+        applyFormat(
+          { text: ta.value, start: ta.selectionStart, end: ta.selectionEnd },
+          FORMAT_KEYS[ke.key.toLowerCase()]!,
+        ),
+      );
     } else if (ke.key === 'Escape') {
       ke.preventDefault();
       cancelFromEditor(dispatcher, ke.target as HTMLElement);
     }
   };
   root.addEventListener('click', onClick);
+  root.addEventListener('mousedown', onMousedown);
   root.addEventListener('input', onInput);
   root.addEventListener('change', onChange);
   root.addEventListener('keydown', onKeydown);
   return () => {
     root.removeEventListener('click', onClick);
+    root.removeEventListener('mousedown', onMousedown);
     root.removeEventListener('input', onInput);
     root.removeEventListener('change', onChange);
     root.removeEventListener('keydown', onKeydown);

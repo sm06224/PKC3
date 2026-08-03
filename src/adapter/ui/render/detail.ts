@@ -18,6 +18,8 @@ import {
 import { parseFrontmatter, extractVars } from '@features/markdown/frontmatter';
 import { hydrateMermaid } from './mermaid-hydrate';
 import { iconButton } from './icons';
+import { buildFormatBar } from './format-bar';
+import { isAppendable } from '@features/flavor/append-spec';
 import {
   extractDocumentGlobals,
   extractHeadingNumberConfig,
@@ -135,6 +137,11 @@ export class DetailRenderer {
       // ⚠ data-pkc-entry は「entry を表す要素」(行 / カード)専用の意味論 ──
       // ボタンには付けない(binder は selectedLid に fallback する)
       bar.append(edit);
+      // 🔑 **追記**(P8 段⑥)。これは本文に対する操作なのでここに置く ──
+      // ログは「開く → 末尾に日時の節を足す → 書く」が既定の使い方であり、
+      // そこへ毎回スクロールさせるのは道具として成立していない
+      if (isAppendable(state.entryMetas.get(state.selectedLid)?.archetype))
+        bar.append(iconButton('append-section', '追記'));
       this.region.append(bar);
       if (state.revisionPanel && state.revisionPanel.lid === state.selectedLid) {
         this.region.append(renderHistoryPanel(state.revisionPanel.items));
@@ -212,7 +219,12 @@ export class DetailRenderer {
     const commit = iconButton('commit-edit', '保存');
     const cancel = iconButton('cancel-edit', 'キャンセル');
     bar.append(commit, cancel);
+    // ⚠ 編集中にも出す ── ログは「保存せずに 2 件目を足す」が普通にある
+    if (isAppendable(state.entryMetas.get(open.lid)?.archetype))
+      bar.append(iconButton('append-section', '追記'));
     this.region.append(bar);
+    // 🔑 **書式パネル**(P8 段⑥)。編集欄のすぐ上 ── 押す物と効く先を離さない
+    this.region.append(buildFormatBar());
 
     /**
      * 🔑 **書きながら見える**(P8 段②)。3 列にしたので、中央を 2 分割すれば

@@ -21,6 +21,9 @@ import { MARKDOWN_EXTENSIONS } from '../src/features/import/plain-markdown';
 import { REVISION_KEEP_LATEST } from '../src/adapter/platform/storage/store-port';
 import { THEMES } from '../src/adapter/ui/render/theme';
 import { SEALED_ARCHETYPES, SEALED_VIEWS } from '../src/features/sealed';
+import { buildFormatBar } from '../src/adapter/ui/render/format-bar';
+import { FORMAT_OPS } from '../src/features/markdown/text-ops';
+import { APPENDABLE_ARCHETYPES } from '../src/features/flavor/append-spec';
 
 /** src 配下の TS を全部集める(「無い」ことの主張を file 単位で逃さない)。 */
 function srcFiles(dir = 'src', out: string[] = []): string[] {
@@ -194,7 +197,7 @@ describe('マニュアルと実装の突合', () => {
     // entry に対する操作(書き出す / 履歴 / 削除)は右の情報ペインへ移した
     // ⚠ 図案つきボタンは `iconButton(action, label)` で作る ── 文言はその第 2 引数
     const detail = readFileSync('src/adapter/ui/render/detail.ts', 'utf-8');
-    for (const label of ['編集', '保存', 'キャンセル']) {
+    for (const label of ['編集', '保存', 'キャンセル', '追記']) {
       expect(detail, `本文まわりから「${label}」が消えた`).toContain(`, '${label}')`);
     }
     expect(detail, '復元が消えた').toContain("textContent = '復元'");
@@ -206,9 +209,32 @@ describe('マニュアルと実装の突合', () => {
     for (const label of ['削除', '履歴']) {
       expect(detail, `「${label}」が本文の上にも残っている`).not.toContain(`, '${label}')`);
     }
-    for (const label of ['編集', '保存', 'キャンセル', '履歴', '書き出す']) {
+    for (const label of ['編集', '保存', 'キャンセル', '履歴', '書き出す', '追記']) {
       expect(MANUAL, `マニュアルに「${label}」が無い`).toContain(`**${label}**`);
     }
+  });
+
+  it('🔴 書式パネルの文言が表と 1 対 1 で、マニュアルにも在る', () => {
+    // ⚠ **描いたボタン**と突き合わせる(`FORMAT_OPS` を 2 回読んでも何も
+    // 分からない)── 表に足してボタンを出し忘れる / 出したのに表から漏れる、
+    // どちらも落ちる
+    const bar = buildFormatBar();
+    const labels = [...bar.querySelectorAll('button')].map(
+      (b) => b.querySelector('[data-pkc-field="label"]')?.textContent ?? '',
+    );
+    expect(labels).toEqual(FORMAT_OPS.map((o) => o.label));
+    expect(labels.length).toBeGreaterThan(0);
+    for (const label of labels) {
+      expect(MANUAL, `マニュアルに書式「${label}」の説明が無い`).toContain(`**${label}**`);
+    }
+  });
+
+  it('🔴 「追記できる種類」がマニュアルと一致する', () => {
+    // マニュアルは「**ノート** と **ログ** には **追記** があります」と書いている。
+    // 🔴 ここは**もともと doc が先に嘘をついていた**箇所である ── マニュアルも
+    // `textlog-flavor.ts` も「追記型」と書きながら、その UI は存在しなかった
+    expect([...APPENDABLE_ARCHETYPES].sort()).toEqual(['text', 'textlog']);
+    expect(MANUAL).toContain('**ノート** と **ログ** には **追記** があります');
   });
 
   it('🔴 更新の案内の文言が pin と一致し、マニュアルにも在る', () => {

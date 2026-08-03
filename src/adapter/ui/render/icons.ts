@@ -29,6 +29,7 @@ export const ACTION_ICONS: Readonly<Record<string, string>> = {
   'create-entry': '＋',
   'attach-file': '📎',
   'start-edit': '✏',
+  'append-section': '⤵',
   'commit-edit': '💾',
   'cancel-edit': '✕',
   'export-entry': '⬆',
