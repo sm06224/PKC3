@@ -23,5 +23,7 @@
   },
   "include": ["src", "tests", "vite.config.ts"],
   // harvest-from-pkc2.ts は PKC2 リポジトリ(CI に無い)から import する採取スクリプト
-  "exclude": ["tests/fixtures/markdown-goldens/harvest-from-pkc2.ts"]
+  // ⚠ `zz*` は使い捨ての計測 probe(`.gitignore` が無視する綴り)。追跡しない物で
+  // typecheck を落とすと、計測のたびに gate が赤くなる
+  "exclude": ["tests/fixtures/markdown-goldens/harvest-from-pkc2.ts", "tests/**/zz*"]
 }
