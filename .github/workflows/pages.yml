@@ -41,7 +41,14 @@ jobs:
           cp -r dist/. _site/dev/
       - name: Build product (latest release tag; placeholder until first release)
         run: |
-          TAG=$(git tag -l 'v*' --sort=-v:refname | head -1)
+          # 🔴 prerelease を **product として配らない**(P7 段⑦ round-2 review M-5)。
+          # git の既定 `v:refname` は prerelease を**上位に**並べるので、
+          # `v3.0.0` と `v3.0.0-rc1` が在ると head -1 は **rc のほう**になる(実証済み)。
+          # 段⑦ で `release.yml` が `-rc` / `-beta` / `-alpha` を `--prerelease` として
+          # 正式に扱えるようにしたので、この経路は**今回新たに到達可能**になった。
+          # ⚠ 除外の綴りは `release.yml` の prerelease 判定と揃える
+          # (`tests/release-meta.test.ts` が 2 つの一致を pin している)
+          TAG=$(git tag -l 'v*' --sort=-v:refname | grep -Ev -- '-(rc|beta|alpha)' | head -1)
           if [ -n "$TAG" ]; then
             git worktree add ../product "$TAG"
             # ⚠ 検品は worktree の中で走らせる(script は自分の位置から dist を見る)。

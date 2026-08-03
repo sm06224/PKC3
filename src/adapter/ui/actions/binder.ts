@@ -54,6 +54,10 @@ export interface BinderServices {
   purgeOrphanAssets?(): void;
   /** 注意の面を閉じる(P6c review H-2)。 */
   dismissNotices?(): void;
+  /** 新しい版に交代する(P7 段⑤)。⚠ 交代を頼むだけ ── 再読込は交代後。 */
+  applyUpdate?(): void;
+  /** 更新の案内を見送る(次に開いたときに再び出る)。 */
+  dismissUpdate?(): void;
   /** アーカイブ書出し(P6d)。 */
   exportArchive?(): void;
   /** 可搬 HTML の書出し(P6d 段③)。 */
@@ -165,10 +169,14 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.getState().selectedLid;
     if (!lid) return;
     const title = dispatcher.getState().entryMetas.get(lid)?.title ?? lid;
-    // P3-7a は native confirm(inline dialog は UI 磨きの回で)。hard delete
-    // であることを文言で明示(trash / 復元は P5 revisions と合流予定)。
+    // P3-7a は native confirm(inline dialog は UI 磨きの回で)。
+    // 🔴 文言が**嘘になっていた**(P7 段⑥ round-2 review M-8)。P3-7a の時点では
+    // hard delete だったので「元に戻せません」と書いたが、P5b でゴミ箱と復元が
+    // 着地している(削除直前の snapshot を同 tx で積み、`RESTORE_TRASH` で戻せる)
+    // ── **必要以上に怖がらせる側の嘘**を出荷していた。
+    // ⚠ 「戻せる」ことは `docs/manual.md` §6 にも書いてある(そちらが正しかった)
     // confirm の無い環境(headless test)は自動化として通す
-    if (!(window.confirm?.(`「${title}」を削除しますか?(元に戻せません)`) ?? true))
+    if (!(window.confirm?.(`「${title}」を削除しますか?(ゴミ箱から戻せます)`) ?? true))
       return;
     dispatcher.dispatch({ type: 'DELETE_ENTRY', lid });
   },
@@ -219,6 +227,12 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'dismiss-notices': (_dispatcher, _target, services) => {
     services.dismissNotices?.();
+  },
+  'apply-update': (_dispatcher, _target, services) => {
+    services.applyUpdate?.();
+  },
+  'dismiss-update': (_dispatcher, _target, services) => {
+    services.dismissUpdate?.();
   },
   'export-archive': (_dispatcher, _target, services) => {
     services.exportArchive?.();

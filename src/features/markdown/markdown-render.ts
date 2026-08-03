@@ -156,7 +156,8 @@ const defaultFence = md.renderer.rules.fence ??
 export type RenderableFenceLang = 'html' | 'mermaid' | 'csv' | 'tsv' | 'psv';
 export type RenderableFenceMode = 'both' | 'render' | 'norender';
 
-const RENDERABLE_FENCE_LANGS: ReadonlySet<string> = new Set([
+/** ⚠ 公開しているのは `tests/docs-parity.test.ts` がマニュアルと突合するため。 */
+export const RENDERABLE_FENCE_LANGS: ReadonlySet<string> = new Set([
   'html', 'mermaid', 'csv', 'tsv', 'psv',
 ]);
 

@@ -45,6 +45,26 @@ export function cacheNameFor(scope: string, buildId: string): string {
   return `${CACHE_PREFIX}${encodeURIComponent(scope)}:${buildId}`;
 }
 
+/**
+ * 「いまどの版が使われているか」の印(P7 段⑤ review H-1)。
+ *
+ * 🔴 段⑤ で `install` の `skipWaiting()` を外した結果、**user が押すまで
+ * `activate` が走らない = 掃除も走らない**。main への push ごとに deploy されるので、
+ * 「あとで」を押し続ける user は 1 デプロイごとに precache 1 本(実測 2.65MB)を
+ * 溜め続ける ── 実測で 4 デプロイ後に 5 本 13.50MB、上限なし。
+ * origin の quota は **OPFS(= SQLite 本体)と共用**なので、これは
+ * **ノート本体の消失に接続する**(`navigator.storage.persist()` は未実装)。
+ *
+ * → `install` でも掃除する。ただし**使用中の cache を消してはいけない**ので、
+ * 「どれが active か」を知る必要がある。installing の worker は active の
+ * build id を知りようがないので、**activate した worker が自分で印を残す**。
+ *
+ * ⚠ 前置きは `pkc3-active:` ── `pkc3:` では**始まらない**ので、
+ * `isStaleCache` / activate の掃除に巻き込まれない(欄で分ける規律は同じ)。
+ * ⚠ 印が無い(この仕組みを持たない旧版が active)ときは**何も消さない**。
+ */
+export const ACTIVE_MARK_PREFIX = 'pkc3-active:';
+
 /** 掃除の対象か ── **同じ scope の、自分ではない** PKC3 cache だけ。 */
 export function isStaleCache(name: string, scope: string, buildId: string): boolean {
   if (!name.startsWith(CACHE_PREFIX)) return false; // 他人の cache は触らない
@@ -91,6 +111,13 @@ const PREFIX = ${JSON.stringify(CACHE_PREFIX)};
  */
 const SCOPE = encodeURIComponent(new URL(self.registration.scope).pathname);
 const CACHE = PREFIX + SCOPE + ':' + BUILD;
+/*
+ * 'いま使われている版' の印(review H-1)。activate した worker が自分で置く。
+ * installing の worker は active の build id を知りようがないので、これを見て
+ * '消してはいけない cache' を判別する。前置きが違うので掃除には巻き込まれない。
+ */
+const ACTIVE_PREFIX = ${JSON.stringify(ACTIVE_MARK_PREFIX)};
+const ACTIVE_MARK = ACTIVE_PREFIX + SCOPE + ':' + BUILD;
 const PRECACHE = ${list};
 const HASHED = ${HASHED_ASSET.toString()};
 /*
@@ -101,10 +128,70 @@ const HASHED = ${HASHED_ASSET.toString()};
  */
 const MATCH = { cacheName: CACHE, ignoreVary: true };
 
+/*
+ * 前置きと scope が一致する cache 名から build 欄を取り出す(合わなければ null)。
+ * 欄で比べるのは、ルート scope が dev scope の接頭辞で startsWith では分けられないため。
+ */
+function buildOf(prefix, key) {
+  if (!key.startsWith(prefix)) return null; // 他人の cache は触らない
+  const parts = key.slice(prefix.length).split(':');
+  if (parts.length < 2) return null; // build 欄が無いものは判断できない
+  if (parts[0] !== SCOPE) return null;
+  return parts.slice(1).join(':');
+}
+
 self.addEventListener('install', (event) => {
   // ⚠ 1 件でも失敗したら install を失敗させる(半端な cache でオフラインに
   // 入ると「開くのに中身が無い」という、いちばん分からない壊れ方をする)
-  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(PRECACHE)).then(() => self.skipWaiting()));
+  /*
+   * 🔴 ここで skipWaiting を呼ばない(段⑤)。呼ぶと user が何もしていないのに
+   * 交代が起き、activate が旧 build の cache を消す ── 開いている旧タブが
+   * 後から旧 hash の chunk を取りに行く経路(boot 中の storage worker 作り直し)で
+   * 取り零す。交代は user が押したときだけ(下の message)。
+   */
+  event.waitUntil(
+    caches
+      .open(CACHE)
+      .then((c) => c.addAll(PRECACHE))
+      /*
+       * 🔴 交代しない間に古い precache が積み上がるのを止める(review H-1)。
+       * activate が走らないので掃除も走らず、deploy ごとに 1 本(実測 2.65MB)
+       * 増え続けていた。quota は OPFS と共用なのでノート消失に接続する。
+       * ⚠ 消してよいのは '自分でも active でもない' もの ── 見送られたまま
+       * redundant になった版の残骸だけである。
+       */
+      .then(() => caches.keys())
+      .then((keys) => {
+        let activeBuild = null;
+        for (const k of keys) {
+          const b = buildOf(ACTIVE_PREFIX, k);
+          if (b !== null) activeBuild = b;
+        }
+        // 印が無い = この仕組みを持たない版が active。どれが使用中か分からないので
+        // 何も消さない(次に交代すれば activate が畳む)
+        if (activeBuild === null) return undefined;
+        return Promise.all(
+          keys
+            .filter((k) => {
+              const b = buildOf(PREFIX, k);
+              return b !== null && b !== BUILD && b !== activeBuild;
+            })
+            .map((k) => caches.delete(k)),
+        );
+      }),
+  );
+});
+
+/*
+ * 交代の合図。⚠ アプリ側が待機中の worker を見つけて user に見せ、
+ * 押されたときだけ送る(src/adapter/platform/sw/update-prompt.ts)。
+ * ⚠ waitUntil で囲う ── 囲わないと skipWaiting の完了前に SW が終了しうる。
+ */
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    if (event.waitUntil) event.waitUntil(self.skipWaiting());
+    else void self.skipWaiting();
+  }
 });
 
 self.addEventListener('activate', (event) => {
@@ -115,13 +202,38 @@ self.addEventListener('activate', (event) => {
         Promise.all(
           keys
             .filter((k) => {
-              if (!k.startsWith(PREFIX)) return false; // 他人の cache は触らない
-              const parts = k.slice(PREFIX.length).split(':');
-              // 同じ scope の、自分ではないものだけ
-              return parts.length >= 2 && parts[0] === SCOPE && parts.slice(1).join(':') !== BUILD;
+              // 同じ scope の、自分ではない precache
+              const b = buildOf(PREFIX, k);
+              if (b !== null) return b !== BUILD;
+              // 他の版が残した '使用中' の印も畳む(印は 1 scope 1 個)
+              const a = buildOf(ACTIVE_PREFIX, k);
+              return a !== null && a !== BUILD;
             })
             .map((k) => caches.delete(k)),
         ),
+      )
+      /*
+       * 🔑 '自分が active' の印を置く。次に installing する worker がこれを見て、
+       * 使用中の cache を消さずに残骸だけを掃除する(review H-1)。
+       * ⚠ claim より前に置く ── 逆順だと 'claim 済みなのに印が無い' 窓ができる。
+       */
+      .then(() => caches.open(ACTIVE_MARK))
+      /*
+       * 🔴 自分の precache が欠けていたら**入れ直す**(round-2 review M-1)。
+       * install と activate は互いを知らないので、deploy が交代と重なると
+       * 掃除が進行中の install の cache を消す(逆向きもある)── 実証済みの
+       * 結末は 'precache ゼロの build が active' で、オフラインが恒久的に死ぬ。
+       * しかも無兆候で、install は二度と走らないので自己修復しない。
+       * ⚠ ここで直せば、どちらの向きのレースも activate が畳む。
+       * ⚠ 失敗しても activate は止めない(オフラインで交代した等)── 止めると
+       * 'SW が activate できない' というもっと分からない壊れ方になる。
+       */
+      .then(() => caches.open(CACHE))
+      .then((c) =>
+        c
+          .keys()
+          .then((entries) => (entries.length === PRECACHE.length ? undefined : c.addAll(PRECACHE)))
+          .catch(() => {}),
       )
       .then(() => self.clients.claim()),
   );

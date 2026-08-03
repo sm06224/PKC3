@@ -1,11 +1,14 @@
-# PKC3 Release — v* tag → build(kind:product)+ SBOM(CycloneDX)を GitHub Release に添付
-# (設計 doc §7)
+# PKC3 Release — v* tag → build(kind:product)+ SBOM(CycloneDX)+ provenance
+# attestation を GitHub Release に添付(設計 doc §7 / P7 段⑦)
 name: Release
 on:
   push:
     tags: ['v*']
 permissions:
   contents: write
+  # 🔴 provenance attestation に要る 2 つ。どちらか欠けると attest step が落ちる
+  id-token: write
+  attestations: write
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -16,7 +19,28 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      # 🔴 **build より前**に版を突合する(P7 段⑦)。後ろに置くと、食い違ったまま
+      # ビルドして検品まで通り、最後の release 作成でようやく落ちる ── 時間の無駄で
+      # あるうえ、「配ったものと名乗る版が違う」provenance を作りかけることになる。
+      # ⚠ 突合の相手は package.json(SBOM が名乗る版)。画面の版は
+      # `tests/release-meta.test.ts` が package.json と一致することを pin している
+      - name: タグと package.json の版が一致するか
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG=$(node -p "require('./package.json').version")
+          echo "tag=$TAG package.json=$PKG"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::tag v$TAG と package.json の $PKG が食い違います"
+            exit 1
+          fi
       - run: npm ci
+      # 🔴 **tag push では `ci.yml` が走らない**(trigger は main への push と PR だけ)
+      # ── ここで走らせないと、CI を通っていない commit に tag を打てば
+      # `APP_VERSION` 不一致のまま出荷できる(round-2 review L-3)。
+      # ⚠ 「CI を長くしない」は **PR gate** の話であり、release は稀なので載せてよい
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
       - run: VITE_PKC_KIND=product npm run build
       # 出荷物に map が混ざっていないか(P7 段①)。ここが release の最終関門
       - name: dist の検品(product に map が無いこと)
@@ -25,6 +49,21 @@ jobs:
         run: npm sbom --sbom-format=cyclonedx --omit=dev > pkc3-sbom.cdx.json
       - name: Archive dist
         run: (cd dist && zip -r ../pkc3-dist.zip .)
+      # 🔴 **release に添付する物そのもの**に attestation を付ける(P7 段⑦)。
+      # ⚠ **Pages の `/` に出るのはこれではない**(round-2 review M-4)── `pages.yml` が
+      # 同じ tag から**別 job・別 worktree で独立にビルドした** `_site/` を配る。
+      # 同じ入力から作られるが別の成果物なので、attestation が担保するのは
+      # 「release zip の出所」であって「Pages で配っている物の出所」ではない。
+      # 検証したい人は release zip を落として `gh attestation verify` する。
+      # ⚠ 対象を書き忘れても step は通る ── 「何も証明しない attestation」になるので、
+      # `tests/release-meta.test.ts` が subject-path の存在まで pin している。
+      # 検証: gh attestation verify pkc3-dist.zip --repo <owner>/<repo>
+      - name: Provenance attestation
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: |
+            pkc3-dist.zip
+            pkc3-sbom.cdx.json
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}

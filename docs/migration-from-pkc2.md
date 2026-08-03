@@ -1,0 +1,137 @@
+# PKC2 から PKC3 へ移行する
+
+> ⚠ **この doc は「いま動くもの」だけを書く。** 最終更新: 2026-08-03(P7 段⑥ 時点)
+> 関連: [マニュアル](./manual.md) / [P7 設計 doc](./development/p7-product-release-design-2026-08.md)
+
+---
+
+## 0. 3 行でいうと
+
+1. **PKC2 で「バックアップ」を書き出す** → 2. **PKC3 の「取込」に渡す** → 終わり。
+2. PKC2 は消さずに残しておいてください(移行は**片道**です)。
+3. 落ちたもの・書き換えたものは、取込後に**画面に全件出ます**。黙って落としません。
+
+---
+
+## 1. 🔴 片道である(user 裁定 2026-07-30)
+
+| 向き | 可否 |
+|---|---|
+| PKC2 の書出し → **PKC3 に取り込む** | ✅ できる(全 9 形式) |
+| PKC3 の書出し → **PKC2 に取り込む** | ❌ **できない。対応する予定もない** |
+
+PKC3 のアーカイブの `format` は `pkc3-archive` で、PKC2 の取込器は `pkc2-*` に
+厳格一致するため、**取り違えて壊れることはありません**(読めないと断られます)。
+
+→ **PKC2 の `pkc2.html` は手元に残してください。** PKC3 へ移した後で
+「やっぱり PKC2 で見たい」と思っても、PKC3 から戻す道はありません。
+
+---
+
+## 2. 受け取れる形式
+
+PKC2 の書出しは全部そのまま渡せます。判別は**拡張子ではなく中身**
+(先頭バイトと `manifest.format`)で行います。
+
+| PKC2 の形式 | 拡張子 |
+|---|---|
+| 単一 HTML export | `.html` |
+| package(バックアップ正本) | `.zip` |
+| text bundle / textlog bundle | `.zip` |
+| texts / textlogs / mixed container bundle | `.zip` |
+| folder export bundle | `.zip` |
+| entry bundle | `.zip` |
+
+⚠ **迷ったら「package」を使ってください** ── PKC2 側でいちばん情報が落ちない形です。
+
+---
+
+## 3. 何がどう変わるか
+
+### 3-1. 🔑 本文はぜんぶ PKC-Markdown になる
+
+PKC2 は archetype ごとに **body が JSON 文字列**でした。PKC3 は
+**すべて PKC-Markdown 1 種類**で、archetype は「見せ方・編集の仕方」の
+フレーバーになります。
+
+| archetype | PKC2 の body | PKC3 の body |
+|---|---|---|
+| `text` / `folder` / `generic` / `opaque` | 素のテキスト | **そのまま**(恒等変換) |
+| `todo` | `{status, description, date?, archived?}` の JSON | frontmatter(`status` / `date` / `archived`)+ 本文 markdown |
+| `textlog` | エントリ配列の JSON | `## <日時>` の節を並べた markdown(秒まで) |
+| `spreadsheet` | セル配列の JSON | csv fence + frontmatter(レイアウト・グラフ・書式) |
+| `form` | フィールドの JSON | frontmatter のフィールド群 + 本文 |
+| `attachment` | メタ + **内蔵 base64** | frontmatter(`asset_key` / `mime` ほか)+ 説明。**bytes は別置き** |
+
+→ 移行後は**どのノートも素の markdown として読めます**。
+「Markdown」書出し(`.md.zip`)で外に出せば、PKC3 を捨てても読めます。
+
+### 3-2. 添付は本文から出て、別置きになる
+
+PKC2 が body に内蔵していた base64 は、取込時に取り出されて
+**IndexedDB の Blob** になり、本文には `asset:<key>` の参照が残ります。
+同じ bytes は 1 本に畳まれます。
+
+- 取り出したものは「`legacy` 内蔵 data を asset 化: `<lid>`」と出ます
+- **解決できなかった添付参照は、書き換えずに原文のまま残します**
+  (「未対応の添付参照は元のまま残ります: …」)── 推測で書き換えて壊すよりまし、という判断です
+
+### 3-3. 落ちるもの・変わるもの(全部あとで画面に出ます)
+
+| 何が | どうなる | 画面に出る文言 |
+|---|---|---|
+| `__…__` 形式の予約 lid / `system-*` archetype | **取り込まない**(PKC2 の内部用) | ── |
+| lid の衝突 | **再採番**する | `lid 衝突を再採番: <旧> → <新>` |
+| relation の端点が居ない | **除外** | `端点不在の relation を除外: <id>` |
+| relation の kind が未知 | **除外** | `未知 kind の relation を除外: <id> (<kind>)` |
+| body の変換に失敗 | **text として保持**(捨てない) | `変換失敗(text として保持): <lid>: …` |
+
+⚠ relation の kind は `structural` / `categorical` / `semantic` / `temporal` /
+`provenance` の 5 種を受けます。
+
+⚠ **relation の id も再採番します。** PKC2 の relation に id が無いと全部空文字で
+衝突し、**同じファイルを 2 回取り込むと 1 回目の関連が消えます** ── 実際に踏んだので、
+id は取込のたびに振り直します。
+
+### 3-4. 残るもの
+
+- **並び順** … PKC2 の `entry_order` があればそれを、無ければ配列順を引き継ぎます
+- **履歴** … PKC2 の revision は鎖ごと引き継ぎます(古い → 新しい)。
+  `created_at` があればそれを正とします
+- **ゴミ箱** … PKC2 のゴミ箱の lid も衝突検査の対象です
+  (見落とすと、その item がゴミ箱から消えます)
+
+---
+
+## 4. 手順
+
+1. **PKC2 で書き出す**(package 推奨)
+2. **PKC3 を開く**(product URL)
+3. 上部の **取込** → 書き出したファイルを選ぶ
+4. 画面に出た**注意を全部読む**。閉じるまで残ります
+5. **PKC3 側で「バックアップ」を書き出して保管する**(`.pkc3.zip`)
+6. **PKC2 の `pkc2.html` とその書出しは消さずに残す**
+
+⚠ 4 を飛ばさないでください。落ちたものはここでしか分かりません。
+
+### 分けて入れてもよい
+
+複数のファイルを順に取り込めます。lid が衝突したら再採番されるので、
+**同じものを 2 回入れると 2 つになります**(上書きにはなりません)。
+
+---
+
+## 5. PKC2 と何が違うか(移行後に気づく差)
+
+| | PKC2 | PKC3 |
+|---|---|---|
+| 製品の形 | **単一 HTML**(`pkc2.html`)を手元に置く | **Pages 上の PWA**。インストールして使う |
+| データの置き場 | IndexedDB(container を丸ごと) | **OPFS 上の SQLite**(本文・メタ・履歴)+ IndexedDB(添付の bytes) |
+| body | archetype ごとの JSON 文字列 | **全部 PKC-Markdown** |
+| オフライン | ファイルを開くだけなので常に動く | Service Worker が版を保存(一度オンラインで開けば以後動く) |
+| 更新 | 新しい `pkc2.html` を自分で置き換える | 画面に**案内が出て、押したときだけ**入れ替わる |
+| タブ | 複数開ける | **書き込みは 1 タブ**(2 枚目は待つ) |
+
+🔑 **「閲覧用 HTML」書出しが PKC2 の単一 HTML に近い立ち位置**です
+(1 ファイルで配れて、その場で読める)。ただし**可逆ではありません** ──
+バックアップは `.pkc3.zip` です。
