@@ -139,7 +139,15 @@ describe('🔴 release workflow が版と provenance を担保する', () => {
     expect(pages).not.toContain('git worktree add');
     expect(pages, 'product を再ビルドしている').not.toContain('VITE_PKC_KIND=product npm run build');
     // ⚠ 配る直前の検品も外さない(展開の取り違えはここでしか捕まらない)
-    expect(pages).toContain('check-dist.mjs product _site');
+    expect(pages).toMatch(/check-dist\.mjs product \S+/);
+    // 🔴 **`_site` を product として検品しない**。この時点の `_site` には既に
+    // `dev/`(map 込み)が入っているので、**dev の map を product の出荷物として
+    // 数えて必ず落ちる**(実測: ファイル 21 件 / map 3 件 / cap 854.8 KB 超過)。
+    // product だけを単独で検品してから合流させる
+    expect(pages, '_site をそのまま product として検品している').not.toContain(
+      'check-dist.mjs product _site',
+    );
+    expect(pages, 'product を _site へ直に展開している').not.toMatch(/unzip[^\n]*-d _site/);
   });
 
   it('product の検品を通してから release する', () => {

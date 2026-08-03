@@ -63,10 +63,16 @@ jobs:
                --jq '.assets[].name' | grep -qx 'pkc3-dist.zip'; then
             mkdir -p /tmp/product
             gh release download "$TAG" --pattern pkc3-dist.zip --dir /tmp/product
-            unzip -q /tmp/product/pkc3-dist.zip -d _site
+            # 🔴 **`_site` へ直に展開しない**。この時点の `_site` には既に `dev/`
+            # (map 込みの dev ビルド)が入っているので、`_site` を product として
+            # 検品すると **dev の map を product の出荷物として数えて必ず落ちる**
+            # (実測: ファイル 21 件 / map 3 件 / cap を 854.8 KB 超過)。
+            # **product だけを単独で検品してから**合流させる
+            unzip -q /tmp/product/pkc3-dist.zip -d /tmp/product/site
             # ⚠ 配る直前にもう一度検品する ── release 時に通っていても、
             # 展開の取り違え(空 / 別物)はここでしか捕まらない
-            node scripts/check-dist.mjs product _site
+            node scripts/check-dist.mjs product /tmp/product/site
+            cp -r /tmp/product/site/. _site/
           else
             echo "安定 release がまだ無いので placeholder を配る(tag='$TAG')"
             cp .github/pages-placeholder.html _site/index.html
