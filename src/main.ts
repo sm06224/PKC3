@@ -19,8 +19,11 @@ import { SidebarRenderer } from '@adapter/ui/render/sidebar';
 import { CenterRouter } from '@adapter/ui/render/center';
 import { formatSize } from '@adapter/ui/render/detail';
 import { bindActions, generateLid, type BinderServices } from '@adapter/ui/actions/binder';
+import { armLaunchQueue, type LaunchTarget } from '@adapter/platform/launch-queue';
+import { whenPhaseReady } from '@adapter/state/wait-for-ready';
 import { attachFiles } from '@adapter/ui/actions/attach';
 import { importFiles } from '@adapter/ui/actions/import-file';
+import type { ImportDeps } from '@adapter/ui/actions/import-pkc2';
 import {
   exportArchive,
   exportEntry,
@@ -38,6 +41,11 @@ const CONTAINER_TITLE = 'PKC3';
 export interface AppHandle {
   dispatcher: Dispatcher;
   storageVfs: InitResult['vfs'];
+  /**
+   * OS の `launchQueue` から来たファイルを取り込む(P7 段③)。
+   * ⚠ **断らない**版 ── 詳細は実装のコメント
+   */
+  importLaunchFiles(files: File[]): Promise<void>;
 }
 
 /**
@@ -198,6 +206,84 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       else await exportArchive(dispatcher, deps, kind);
     });
 
+  const importDeps: ImportDeps = {
+      // ⚠ 生存 entry だけでは足りない ── ゴミ箱の lid(entries に居ないが
+      // revisions を持つ)と衝突すると、その item がゴミ箱から消え、
+      // 取り込んだ entry が他人の履歴を背負う(review H-1、実 sqlite で実証)
+      existingLids: async () =>
+        new Set([
+          ...dispatcher.getState().entryMetas.keys(),
+          ...(await client.request({ op: 'listRevisionLids', cid: DEFAULT_CID })),
+        ]),
+      existingRelationIds: () =>
+        new Set(dispatcher.getState().relations.map((r) => r.id)),
+      orderBase: () => {
+        let max = 0;
+        for (const m of dispatcher.getState().entryMetas.values()) {
+          if (m.entryOrder > max) max = m.entryOrder;
+        }
+        return max;
+      },
+      genLid: generateLid,
+      genAssetKey: generateAssetKey,
+      genRelationId: () => `rel-${crypto.randomUUID()}`,
+      bulkUpsertEntries: async (entries) => {
+        await client.request({ op: 'bulkUpsertEntries', cid: DEFAULT_CID, entries });
+      },
+      bulkUpsertRelations: async (relations) => {
+        await client.request({
+          op: 'bulkUpsertRelations',
+          cid: DEFAULT_CID,
+          relations,
+        });
+      },
+      importRevisionChains: (chains) =>
+        client.request({ op: 'importRevisionChains', cid: DEFAULT_CID, chains }),
+      // ⚠ `keepLatest` を**明示で渡す**(review L-2)── 省くと worker の
+      // 既定値が使われ、アプリ側の設定と偶然一致しているだけになる。
+      // 片方を変えた瞬間に自分のバックアップが黙って削れる
+      restoreRevisionChains: (chains) =>
+        client.request({
+          op: 'restoreRevisionChains',
+          cid: DEFAULT_CID,
+          chains,
+          keepLatest: REVISION_KEEP_LATEST,
+        }),
+      // ⚠ **bytes 側の台帳を見る**(review H-1)── meta 行の有無で判定すると、
+      // GC が deleteBlob → deleteMeta の途中で失敗した状態(設計上の想定内)で
+      // put を省いてしまい、参照だけが書かれる
+      listStoredBlobKeys: async () => new Set(await blobs.listKeys(DEFAULT_CID)),
+      putBlob: (key, blob) => blobs.put(DEFAULT_CID, key, blob),
+      putAssetMeta: async (m) => {
+        await client.request({ op: 'putAssetMeta', cid: DEFAULT_CID, meta: m });
+      },
+      reload: async () => {
+        const snap = await loadSnapshot();
+        // ⚠ 取込の門は開始時の 1 回だけ ── 長い await の間に user は編集を
+        // 始められる。SYS_BOOTED は openBody / selectedLid をリセットするので、
+        // そのまま流すと打ちかけの本文が無警告で消える(review H-4、実証済み)
+        if (dispatcher.getState().phase !== 'ready') {
+          dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: '取込は完了しました。編集を終了すると一覧に反映されます',
+          });
+          return;
+        }
+        dispatcher.dispatch({ type: 'SYS_BOOTED', cid: DEFAULT_CID, ...snap });
+      },
+      notify: (message) => showStatus(`${statusBase} — ${message}`),
+      // 注意は**全件**を専用面へ(1 行の status では 1 件目しか届かない)
+      report: (notes) => showNotices(regions.notices, '取込時の注意', notes),
+  };
+
+  /**
+   * 取込の本体。⚠ **gate の外**に置く ── 断る版(user のクリック)と
+   * 待つ版(OS の launch。断ると選び直せない)の**両方**が同じ処理を呼ぶ。
+   * 2 本に分けると片方だけ直す事故が必ず起きる(P7 段③ review H2)
+   */
+  const runImport = (files: File[]): Promise<void> =>
+    importFiles(dispatcher, importDeps, files).then(() => {});
+
   const services: BinderServices = {
     attachFiles: (files) =>
       void withAssetGate(() =>
@@ -249,82 +335,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // 📥 取込(P6b: PKC2 の書出し / P7 段②: 素の Markdown)。asset gate の内側 ──
     // 取込は putBlob → entry 書込の間に「bytes はあるが参照が無い」窓を持つので、
     // 整理との同時実行は attach と同じ危険。⚠ 振り分けは import-file.ts が持つ
-    importFiles: (files) =>
-      void withAssetGate(async () => {
-        await importFiles(
-          dispatcher,
-          {
-            // ⚠ 生存 entry だけでは足りない ── ゴミ箱の lid(entries に居ないが
-            // revisions を持つ)と衝突すると、その item がゴミ箱から消え、
-            // 取り込んだ entry が他人の履歴を背負う(review H-1、実 sqlite で実証)
-            existingLids: async () =>
-              new Set([
-                ...dispatcher.getState().entryMetas.keys(),
-                ...(await client.request({ op: 'listRevisionLids', cid: DEFAULT_CID })),
-              ]),
-            existingRelationIds: () =>
-              new Set(dispatcher.getState().relations.map((r) => r.id)),
-            orderBase: () => {
-              let max = 0;
-              for (const m of dispatcher.getState().entryMetas.values()) {
-                if (m.entryOrder > max) max = m.entryOrder;
-              }
-              return max;
-            },
-            genLid: generateLid,
-            genAssetKey: generateAssetKey,
-            genRelationId: () => `rel-${crypto.randomUUID()}`,
-            bulkUpsertEntries: async (entries) => {
-              await client.request({ op: 'bulkUpsertEntries', cid: DEFAULT_CID, entries });
-            },
-            bulkUpsertRelations: async (relations) => {
-              await client.request({
-                op: 'bulkUpsertRelations',
-                cid: DEFAULT_CID,
-                relations,
-              });
-            },
-            importRevisionChains: (chains) =>
-              client.request({ op: 'importRevisionChains', cid: DEFAULT_CID, chains }),
-            // ⚠ `keepLatest` を**明示で渡す**(review L-2)── 省くと worker の
-            // 既定値が使われ、アプリ側の設定と偶然一致しているだけになる。
-            // 片方を変えた瞬間に自分のバックアップが黙って削れる
-            restoreRevisionChains: (chains) =>
-              client.request({
-                op: 'restoreRevisionChains',
-                cid: DEFAULT_CID,
-                chains,
-                keepLatest: REVISION_KEEP_LATEST,
-              }),
-            // ⚠ **bytes 側の台帳を見る**(review H-1)── meta 行の有無で判定すると、
-            // GC が deleteBlob → deleteMeta の途中で失敗した状態(設計上の想定内)で
-            // put を省いてしまい、参照だけが書かれる
-            listStoredBlobKeys: async () => new Set(await blobs.listKeys(DEFAULT_CID)),
-            putBlob: (key, blob) => blobs.put(DEFAULT_CID, key, blob),
-            putAssetMeta: async (m) => {
-              await client.request({ op: 'putAssetMeta', cid: DEFAULT_CID, meta: m });
-            },
-            reload: async () => {
-              const snap = await loadSnapshot();
-              // ⚠ 取込の門は開始時の 1 回だけ ── 長い await の間に user は編集を
-              // 始められる。SYS_BOOTED は openBody / selectedLid をリセットするので、
-              // そのまま流すと打ちかけの本文が無警告で消える(review H-4、実証済み)
-              if (dispatcher.getState().phase !== 'ready') {
-                dispatcher.dispatch({
-                  type: 'OP_FAILED',
-                  error: '取込は完了しました。編集を終了すると一覧に反映されます',
-                });
-                return;
-              }
-              dispatcher.dispatch({ type: 'SYS_BOOTED', cid: DEFAULT_CID, ...snap });
-            },
-            notify: (message) => showStatus(`${statusBase} — ${message}`),
-            // 注意は**全件**を専用面へ(1 行の status では 1 件目しか届かない)
-            report: (notes) => showNotices(regions.notices, '取込時の注意', notes),
-          },
-          files,
-        );
-      }),
+    importFiles: (files) => void withAssetGate(() => runImport(files)),
     dismissNotices: () => clearNotices(regions.notices),
     // 📤 バックアップ書出し(P6d)。⚠ **asset gate の内側** ── 書出し中に添付が
     // 掃除されると「meta はあるが bytes が無い」を掴んで欠けたアーカイブができる
@@ -392,7 +403,25 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     metas,
     relations, // 常駐(§6: 肥大が数字で出たら SQL query 化へ移す)
   });
-  return { dispatcher, storageVfs: init.vfs };
+  return {
+    dispatcher,
+    storageVfs: init.vfs,
+    /**
+     * OS の `launchQueue` から来たファイルを取り込む(P7 段③)。
+     *
+     * 🔴 **断らない**。user のクリック起点の取込は「編集中です」「整理中です」で
+     * 断ってよい(選び直せる)が、OS の launch は**一発限り**で picker が出ない
+     * ── 断った時点でファイルは失われる(review H2 で実証)。
+     * ready になるまで待ち、gate は順番待ちする版を使う。
+     * ⚠ 取込の**本体は binder と同じ** `runImport`(2 経路にしない)
+     */
+    importLaunchFiles: async (files) => {
+      await whenPhaseReady(dispatcher, () =>
+        showStatus(`${statusBase} — 編集を終えると、開いたファイルを取り込みます`),
+      );
+      await withAssetGate.queued(() => runImport(files));
+    },
+  };
 }
 
 function bootstrap(): void {
@@ -400,6 +429,15 @@ function bootstrap(): void {
   if (!root) return;
   void startApp(root)
     .then((app) => {
+      // 🔴 受け口は**アプリが受け取れるようになってから**張る(P7 段③)。
+      // 仕様上 LaunchParams は **consume されるまで無期限にバッファ**され、
+      // `setConsumer` 前に溜まっていたぶんは登録直後に渡される ──
+      // 早く張って自前バッファへ吸い出すと、**取りこぼしの責任がブラウザから
+      // アプリへ移る**だけで、boot が失敗すればファイルは消える(再読込でも戻らない)。
+      // ⚠ 当初これを逆に読んで「await より前に張らないと落ちる」と書いていた
+      armLaunchQueue(window as unknown as LaunchTarget, app.importLaunchFiles, (message) =>
+        app.dispatcher.dispatch({ type: 'OP_FAILED', error: message }),
+      );
       // boot 完了の正本契約(P3-8): smoke / probe は DOM 属性で待つ。
       // PKC2 の教訓 ── 「#root 存在待ち」は HTML load 段階で通過して flake 化する
       root.setAttribute('data-pkc-boot', 'ready');

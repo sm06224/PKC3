@@ -11,16 +11,55 @@
 import type { Dispatcher } from '@adapter/state/dispatcher';
 
 export interface AssetGate {
-  /** run を排他実行する。実行中なら**走らせずに**可視で断る。 */
+  /** run を排他実行する。実行中なら**走らせずに**可視で断る(user 操作用)。 */
   (run: () => Promise<void>): Promise<void>;
+  /**
+   * run を排他実行する。実行中なら**断らずに順番待ちする**。
+   *
+   * 🔴 **選び直せない経路のために在る**(P7 段③ review H2)。OS からの
+   * `launchQueue` は一発限りで、断っても user には picker が出ない ──
+   * 「完了してから、もう一度選び直してください」と言われた時点でファイルは失われる。
+   * ⚠ user のクリック起点の操作には**使わない**(断る側が正しい ── 待たされるより
+   * 「いま整理中です」と言われた方が分かる)。
+   */
+  queued(run: () => Promise<void>): Promise<void>;
   /** 実行中かどうか(観測用)。 */
   readonly busy: boolean;
 }
 
 export function createAssetGate(dispatcher: Dispatcher): AssetGate {
   let busy = false;
+  /**
+   * 鎖に並んでいて**まだ終わっていない**数。⚠ `busy` だけを見てはいけない ──
+   * `busy` が立つのは鎖の中(microtask のあと)なので、**同じ tick で 2 回**
+   * 呼ばれると 2 本とも「空いている」と見えて、断るはずの側が並んでしまう
+   * (P7 段③ で実際に踏んだ:断る test が timeout した)
+   */
+  let outstanding = 0;
+  /** 直列化の尾。⚠ 断る側も待つ側も**同じ鎖**に並ぶ(2 本あると排他が崩れる)。 */
+  let tail: Promise<void> = Promise.resolve();
+
+  const enqueue = (run: () => Promise<void>): Promise<void> => {
+    outstanding++;
+    const next = tail.then(async () => {
+      busy = true;
+      try {
+        await run();
+      } finally {
+        busy = false;
+        outstanding--;
+      }
+    });
+    // ⚠ 失敗を鎖に残さない(1 件の失敗で以降が全部落ちる)
+    tail = next.then(
+      () => {},
+      () => {},
+    );
+    return next;
+  };
+
   const gate = async (run: () => Promise<void>): Promise<void> => {
-    if (busy) {
+    if (outstanding > 0) {
       dispatcher.dispatch({
         type: 'OP_FAILED',
         error:
@@ -28,13 +67,9 @@ export function createAssetGate(dispatcher: Dispatcher): AssetGate {
       });
       return;
     }
-    busy = true;
-    try {
-      await run();
-    } finally {
-      busy = false;
-    }
+    await enqueue(run);
   };
   Object.defineProperty(gate, 'busy', { get: () => busy });
+  Object.defineProperty(gate, 'queued', { value: enqueue });
   return gate as AssetGate;
 }

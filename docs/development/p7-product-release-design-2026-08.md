@@ -110,7 +110,7 @@ install した user は「オフラインで使える」「md を開ける」と
 |---|---|---|
 | ① | ✅ **product ビルドから `.map` を外す** + size の tripwire を Pages 用に読み替え | 1 行に近く、以降の全計測の前提が変わる |
 | ② | ✅ **素の md 受理器**(`readPlainMarkdown`)+ 取込導線 | ③ の前提。単体で価値がある(md を drag&drop できる) |
-| ③ | **`launchQueue` の受け口** ── 宣言と実体を一致させる | ② が無いと書けない |
+| ③ | ✅ **`launchQueue` の受け口** ── 宣言と実体を一致させる | ② が無いと書けない |
 | ④ | **SW の precache**(生成 + navigation network-first + 旧 cache 掃除)+ オフライン smoke | 独立 |
 | ⑤ | **更新通知**(新しい版があります) | ④ の上 |
 | ⑥ | **マニュアル + 移行ガイド**(PKC2 → PKC3) | 実装が固まってから書く |
@@ -299,6 +299,63 @@ markdown-it も `\r\n?` を `\n` に正規化してから parse する ── �
 ファイルを選べない**)、`multiple` を有効化(md は複数選択 = 1 件ずつ entry)。
 混在(md + PKC2)と PKC2 の複数選択は**断る** ── 「md だけ入って PKC2 が黙って
 落ちた」を作らない。
+
+### 段③ 実装記録(2026-08-02 着地)
+
+`adapter/platform/launch-queue.ts`(受け口)+ `main.ts` の配線。
+OS から md をダブルクリック → `window.launchQueue` → **段② の取込規則**へ流す。
+
+🔴 **受け口は `startApp` の解決後に張る。** ⚠ 当初「`await` より前に張らないと
+取りこぼす」と書いて自前バッファを持ったが、**仕様の読み違いだった**(review H3):
+
+> LaunchParams are **buffered indefinitely** until they are consumed. Crucially, if any
+> LaunchParams are buffered into a LaunchQueue **before** a call to `setConsumer()`, they
+> will be **immediately passed into the consumer afterwards**.
+> ── [WICG/web-app-launch](https://github.com/WICG/web-app-launch/blob/main/launch_handler.md)
+
+ブラウザが既に無期限にバッファしている。早く張って自前バッファへ吸い出すと、
+**取りこぼしの責任がブラウザからアプリへ移る**だけで、boot が失敗すればファイルは
+消える(再読込でも戻らない)。自前バッファ(約 40 行 + その test)を捨てた。
+
+🔑 **受け口は配線だけを持つ。** 何を受けるか(拡張子)も、どう entry にするかも
+`import-file.ts` / `plain-markdown.ts` がすでに規則を持っている ── 受け口が独自の
+判定を持つと、宣言と実体がまた 3 つに割れる。返り値の `AppHandle.importFiles` は
+**binder に配ったものと同じ関数**である(2 経路にしない)。
+
+parity は 3 者で縛った ── manifest の `accept` / `MARKDOWN_EXTENSIONS` / 受け口を
+通って届くファイル。`action` が `./` であること(別 URL を開くと受け口に届かない)も見る。
+
+#### 🔴 レビューで設計ごと 3 件 ── 「断る」がデータ消失だった
+
+| # | 何が壊れていたか | 実証 |
+|---|---|---|
+| H1 | **配線が丸ごと無防備**。`launch.deliverTo(app.importFiles)` を消しても **918/918 green** ── 機能が production で死んでいても PR gate は緑 | 変異で実証 |
+| H2 | **編集中・整理中の launch でファイルが失われる**。OS の launch は**一発限り**で picker が出ないのに「もう一度選び直してください」と断っていた | 実 `importFiles` を繋ぐと `written = ["一通目"]`、二通目は消えた |
+| H3 | 「await より前に張らないと取りこぼす」は**仕様に反する** ── ブラウザが無期限にバッファしている | 仕様文(上記)|
+
+対処:
+- **断らない経路を用意した** ── `whenPhaseReady`(ready まで待つ)+ `AssetGate.queued`
+  (断らずに順番待ち)。⚠ **user のクリック起点は今までどおり断る**(選び直せるので、
+  待たされるより「いま整理中です」の方が分かる)。取込の**本体は 1 本**のまま
+  (`runImport`)── 2 本に分けると片方だけ直す事故が必ず起きる
+- **配線をソース本文で pin した**。`bootstrap()` は実 storage と実 window を要求し、
+  PWA を install した実ブラウザも CI に無いので、実行 test では守れない。
+  形の検査は脆いが**無検査よりは事故の桁を止める**(size cap と同じ位置づけ)──
+  「受け口を張っているか」「断らない版を渡しているか」「`startApp` の**後**か」の 3 点
+- **`launch_handler: focus-existing` を宣言した**(review M-5)。未宣言だと既定は
+  `auto` = UA 任せで、desktop は新 window を作りうる ── その window は
+  `acquireWriterLease` の Web Lock を取れず「別のタブで開いています…」のまま止まり、
+  **ファイルはそこで死ぬ**
+- フォルダ handle を**アプリの言葉で**断る(仕様の `files` は `FileSystemHandle[]`。
+  そのまま `getFile()` を呼ぶと `getFile is not a function` が user に出る)
+- `setConsumer` が投げても boot を道連れにしない(投げると「起動に失敗しました」の
+  表示にすら到達せず**白画面**になる)
+
+⚠ 変異試験は 2 巡で計 30 件・最終生存 0。1 巡目の 3 件は**すべて「重ねたガード」**で、
+`flush()` 側の同じ判定に救われていた ── 消しても誰も気づかない枝なので削った。
+2 巡目は「`phase` を見ずに解決する」が生き残った ── 編集中の**打鍵ひとつ**で
+取込が走って draft を壊す変異で、「編集を終えたら流れる」だけを見る test では
+救われていた(状態変化が 1 回しか起きない fixture だった)。
 
 ---
 
