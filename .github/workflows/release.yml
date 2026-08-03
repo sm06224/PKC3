@@ -4,6 +4,17 @@ name: Release
 on:
   push:
     tags: ['v*']
+  # 🔴 **手で押せる口**(2026-08-03)。tag push だけにしておくと、tag を push できない
+  # 環境(git proxy が tag を 403 で拒む / 手元に clone が無い)から**出荷そのものが
+  # できない**。⚠ Releases 画面から release を作る道は**罠** ── その tag で
+  # この workflow が走り、`gh release create` が「もう在る」で落ちる。
+  # だから **tag を作るのもこの workflow の仕事**にして、入口を 1 本にする。
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '打つ版(package.json と一致すること。v は付けない。例: 3.0.0)'
+        required: true
+        type: string
 permissions:
   contents: write
   # 🔴 provenance attestation に要る 2 つ。どちらか欠けると attest step が落ちる
@@ -26,13 +37,42 @@ jobs:
       # あるうえ、「配ったものと名乗る版が違う」provenance を作りかけることになる。
       # ⚠ 突合の相手は package.json(SBOM が名乗る版)。画面の版は
       # `tests/release-meta.test.ts` が package.json と一致することを pin している
-      - name: タグと package.json の版が一致するか
+      # 🔴 **版はここで 1 回だけ決める**。tag push なら tag から、手動起動なら入力から。
+      # ⚠ 入力を shell へ直接展開しない(`env:` 経由 ── script injection を作らない)
+      - name: 版を決めて package.json と突き合わせる
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            VER="$INPUT_VERSION"
+          else
+            VER="${GITHUB_REF_NAME#v}"
+          fi
+          case "$VER" in
+            v*) echo "::error::版に v を付けないでください(いま: $VER)"; exit 1 ;;
+            '') echo "::error::版が空です"; exit 1 ;;
+          esac
           PKG=$(node -p "require('./package.json').version")
-          echo "tag=$TAG package.json=$PKG"
-          if [ "$TAG" != "$PKG" ]; then
-            echo "::error::tag v$TAG と package.json の $PKG が食い違います"
+          echo "version=$VER package.json=$PKG event=$GITHUB_EVENT_NAME"
+          if [ "$VER" != "$PKG" ]; then
+            echo "::error::v$VER と package.json の $PKG が食い違います"
+            exit 1
+          fi
+          echo "TAG=v$VER" >> "$GITHUB_ENV"
+      # ⚠ 手動起動は **main からだけ** ── ほかの branch から打つと、tag が指す commit と
+      # `pages.yml` が焼く `/dev/`(main HEAD)がずれる。
+      # ⚠ 既存 tag への打ち直しも塞ぐ(黙って別 commit を同じ版で出荷しない)
+      - name: 手動起動の前提を確かめる
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::手動起動は main からのみ(いまは $GITHUB_REF)"
+            exit 1
+          fi
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::$TAG は既にあります(打ち直すなら先に消してください)"
             exit 1
           fi
       - run: npm ci
@@ -72,7 +112,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           PRERELEASE=""
-          case "$GITHUB_REF_NAME" in
+          case "$TAG" in
             *-rc*|*-beta*|*-alpha*) PRERELEASE="--prerelease" ;;
           esac
           # 🔴 **draft で作ってから公開する**(P7 段⑧)。`gh release create` は
@@ -81,9 +121,13 @@ jobs:
           # placeholder を配って終わり、次に main へ push するまで `/` が空のままになる。
           # draft のうちに上げ切り、`--draft=false` で公開すれば published は
           # **資産が揃ってから**しか飛ばない(競合そのものを消す)。
-          gh release create "$GITHUB_REF_NAME" pkc3-sbom.cdx.json pkc3-dist.zip \
-            --title "$GITHUB_REF_NAME" --generate-notes --draft $PRERELEASE
-          gh release edit "$GITHUB_REF_NAME" --draft=false
+          # ⚠ `--target` を渡す ── 手動起動では **tag がまだ無い**ので、
+          # 公開の瞬間に**この commit**へ tag が作られる(draft のうちは ref を作らない)。
+          # tag push 経路では既に tag が在るので無視される
+          gh release create "$TAG" pkc3-sbom.cdx.json pkc3-dist.zip \
+            --target "$GITHUB_SHA" \
+            --title "$TAG" --generate-notes --draft $PRERELEASE
+          gh release edit "$TAG" --draft=false
       # 🔴 **Pages を自分で起こす**(round-3 review M-1)。
       # GitHub Actions は **既定の `GITHUB_TOKEN` が起こしたイベントで新しい run を
       # 開始しない**ので、`pages.yml` の `release: types: [published]` は

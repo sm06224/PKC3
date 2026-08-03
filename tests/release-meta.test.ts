@@ -80,14 +80,14 @@ describe('🔴 release workflow が版と provenance を担保する', () => {
 
   /** `gh release create` に渡している成果物(= user が受け取る物)。 */
   function releasedArtifacts(): string[] {
-    const line = /gh release create "\$GITHUB_REF_NAME" (.*?) \\/.exec(wf)?.[1] ?? '';
+    const line = /gh release create "\$TAG" (.*?) \\/.exec(wf)?.[1] ?? '';
     return line.split(/\s+/).filter(Boolean);
   }
 
   it('tag と package.json の突合を **build より前**に行う', () => {
     // ⚠ 後ろに置くと、食い違ったまま**ビルドして検品まで通ってしまう**
     // (落ちるのは最後の gh release create なので、時間と CI を捨てる)
-    const check = wf.indexOf('GITHUB_REF_NAME#v');
+    const check = wf.indexOf('TAG=v$VER');
     const build = wf.indexOf('VITE_PKC_KIND=product npm run build');
     expect(check).toBeGreaterThan(-1);
     expect(build).toBeGreaterThan(-1);
@@ -132,7 +132,7 @@ describe('🔴 release workflow が版と provenance を担保する', () => {
     const tagLine = /TAG=\$\(git tag[^\n]*/.exec(pages)?.[0] ?? '';
     expect(tagLine, 'product tag の解決行が無い').not.toBe('');
     // ⚠ 綴りは release.yml の prerelease 判定と**同じ集合**であること
-    const kinds = [...(/case "\$GITHUB_REF_NAME" in\s*\n\s*([^)]+)\)/.exec(wf)?.[1] ?? '')
+    const kinds = [...(/case "\$TAG" in\s*\n\s*([^)]+)\)/.exec(wf)?.[1] ?? '')
       .matchAll(/-([a-z]+)\*/g)].map((m) => m[1]!);
     expect(kinds.length, 'release.yml の prerelease 判定が読めない').toBeGreaterThan(0);
     for (const kind of kinds) {
@@ -151,6 +151,66 @@ describe('🔴 release workflow が版と provenance を担保する', () => {
       expect(at, `release が ${gate} を走らせない`).toBeGreaterThan(-1);
       expect(at, `${gate} が build より後ろにある`).toBeLessThan(build);
     }
+  });
+
+  /**
+   * 🔴 **手で押せる口**(2026-08-03)。tag push だけにしておくと、tag を push できない
+   * 環境から**出荷そのものができない**(実際に git proxy が tag を 403 で拒んだ)。
+   * ⚠ Releases 画面から release を作る道は罠 ── その tag でこの workflow が走り、
+   * `gh release create` が「もう在る」で落ちる。入口は 1 本に保つ。
+   */
+  describe('手動起動', () => {
+    /** `workflow_dispatch` 起動でだけ走る前提確認 step の本文。 */
+    function guardStep(): string {
+      const at = wf.indexOf('手動起動の前提を確かめる');
+      if (at < 0) return '';
+      const rest = wf.slice(at);
+      const end = rest.search(/\n\s{6}- (?:name|run|uses):/);
+      return end < 0 ? rest : rest.slice(0, end);
+    }
+
+    it('版を入力して押せる', () => {
+      expect(wf).toContain('workflow_dispatch');
+      expect(wf, '版の入力口が無い').toMatch(/inputs:\s*\n\s*version:/);
+    });
+
+    it('🔴 入力を shell へ**直接展開しない**(script injection を作らない)', () => {
+      // ⚠ `run: |` の中に `${{ inputs.version }}` を書くと、入力がそのまま
+      // shell の一部になる。必ず `env:` を経由して `"$INPUT_VERSION"` で受ける
+      const runs = [...wfRaw.matchAll(/run: \|([\s\S]*?)(?=\n\s{6}- |\n\s{4}\w|$)/g)].map(
+        (m) => m[1]!,
+      );
+      for (const body of runs) {
+        expect(body, 'run の中で入力を直接展開している').not.toMatch(
+          /\$\{\{\s*(inputs|github\.event\.inputs)\./,
+        );
+      }
+      expect(wf, '入力を env 経由で受けていない').toContain('INPUT_VERSION: ${{ inputs.version }}');
+    });
+
+    it('🔴 手動起動は **main からだけ**', () => {
+      // ⚠ 別 branch から打つと、tag が指す commit と `pages.yml` が焼く
+      // `/dev/`(main HEAD)がずれる
+      const guard = guardStep();
+      expect(guard, '前提確認の step が無い').not.toBe('');
+      expect(guard).toContain('refs/heads/main');
+      expect(guard).toContain('exit 1');
+      expect(wf).toContain("if: github.event_name == 'workflow_dispatch'");
+    });
+
+    it('🔴 既にある版への**打ち直しを拒む**', () => {
+      // ⚠ 拒まないと、同じ版で別 commit を黙って出荷できる
+      const guard = guardStep();
+      expect(guard).toContain('git/ref/tags/$TAG');
+      expect(guard).toContain('既にあります');
+    });
+
+    it('🔴 tag は **この commit** に付く(`--target`)', () => {
+      // ⚠ 手動起動では tag がまだ無く、draft のうちは ref も作られない。
+      // `--target` が無いと**既定 branch の HEAD**に付き、
+      // 検品した成果物と tag が指す木が食い違う
+      expect(createCommand()).toContain('--target "$GITHUB_SHA"');
+    });
   });
 
   it('🔴 Pages は **attest した成果物そのもの**を配る(再ビルドしない)', () => {
