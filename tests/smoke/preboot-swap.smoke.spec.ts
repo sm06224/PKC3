@@ -65,13 +65,31 @@ test('🔴 lease 待ちのタブは、別タブの更新に気づいて読み直
       null,
       { timeout: 20_000 },
     );
-    // ⚠ **弁別しているのは上の probe だけ**である。A も「再読込」で自分を読み直す
-    // ので lease を手放し、B はそのまま起動する ── 「B が起動する」は
-    // preboot が無くてもこの環境では成立する(旧 hash の chunk が preview server
-    // にまだ在るため)。ここで見ているのは「**壊れて終わらない**」ことだけ
-    await expect(b.locator('[data-pkc-slot="root"][data-pkc-boot="ready"]')).toBeAttached({
-      timeout: 30_000,
-    });
+    // ⚠ **弁別しているのは上の probe だけ**である(document が入れ替わったか)。
+    // ここから下は「**壊れて終わっていない**」ことしか見ない。
+    //
+    // 🔴 当初ここに `data-pkc-boot="ready"` を待つ行を書いて **CI で落ちた**。
+    // A も「再読込」で自分を読み直すので lease を一瞬手放すが、**それを B が
+    // 取れるかは競争**である ── 手元では B が取って起動し、CI では A が取り直して
+    // B は待ちのまま。つまり**自分で flake を足していた**(しかも「弁別していない」と
+    // 注記した当の行)。⚠ 注記した時点で消すべきだった。
+    // 読み直した先で正しい状態は **2 つとも正しい** ── 両方受ける形にする
+    await b.waitForFunction(
+      () => {
+        const root = document.querySelector('[data-pkc-slot="root"]');
+        if (!root) return false;
+        return (
+          root.getAttribute('data-pkc-boot') === 'ready' ||
+          (root.textContent ?? '').includes('別のタブで開いています')
+        );
+      },
+      null,
+      { timeout: 20_000 },
+    );
+    // ⚠ error で終わっていない(= 旧 hash を掴んで起動不能、になっていない)
+    expect(await b.locator('[data-pkc-slot="root"]').getAttribute('data-pkc-boot')).not.toBe(
+      'error',
+    );
   } finally {
     writeFileSync(SW_PATH, original);
   }
