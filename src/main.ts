@@ -1,3 +1,6 @@
+// 見た目(P7b 段⑨)。⚠ **ここから import する**のが唯一の入り口 ── index.html に
+// `<link>` を書くと Vite の hash 付き出力に乗らず、SW の precache 一覧からも外れる
+import './styles/app.css';
 import { APP_ID, APP_VERSION, BUILD_KIND } from '@runtime/release-meta';
 import { Dispatcher } from '@adapter/state/dispatcher';
 import { connectStoreEffects } from '@adapter/state/store-effects';

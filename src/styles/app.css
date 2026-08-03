@@ -1,0 +1,628 @@
+/*
+ * PKC3 の見た目(P7b 段⑨)。**1 枚で完結させる**。
+ *
+ * 裁定(user 2026-08-03「全部推奨で」):
+ *   - テーマ … **PKC2 の系統(ダーク基調)を継ぐ**
+ *   - 密度 … **情報密度優先**(1 画面に多く)
+ *   - 調整口 … **持たない**(倍率 flag を作らない ── flag 機構がまだ 1 つも無いので、
+ *     見た目のために機構を建てるのは順番が逆)
+ *
+ * 🔑 **PKC2 を丸写ししない**(user 指示 2026-07-30)。PKC2 の `base.css` は
+ * 13,801 行 / 398 KB。引き継ぐのは**方向性**(端末風の緑・低い角丸・詰めた余白)
+ * であって物量ではない ── 目標は 1,000 行 / 12 KB 以下。
+ * **削る理由は容量ではなく「次に読む人が読み切れる量に保つ」**ため。
+ *
+ * 🔴 **機能セレクタは `data-pkc-*` のみ**(PKC2 から継承した規約)。
+ * class 名で引っかけると minify や renderer の書き換えで静かに外れる ──
+ * ここで使う class は `pkc-md-rendered`(markdown の器)だけである。
+ */
+
+/* ── トークン ─────────────────────────────────────────────
+ * ⚠ 増やしすぎない。**ここに無い色を本文で直書きしない**のが唯一の規律で、
+ * それを守れる程度の数に抑える。 */
+:root {
+  --bg: #0d0f0a;
+  --surface: #111510;
+  --surface-2: #162010;
+  --fg: #c8d8b0;
+  --muted: #5a6e4a;
+  --accent: #33ff66;
+  --accent-dim: #1a7a33;
+  --accent-fg: #050a03;
+  --border: #1e2a16;
+  --danger: #ff4444;
+  --warn: #ffaa22;
+
+  --radius: 2px;
+  --s1: 0.125rem;
+  --s2: 0.25rem;
+  --s3: 0.5rem;
+  --s4: 0.75rem;
+  --s5: 1rem;
+
+  --font: 'BIZ UDGothic', 'Share Tech Mono', 'IBM Plex Mono', ui-monospace, monospace;
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* boot 前 / boot 失敗のときは shell が無く、素のテキストが root に入る */
+[data-pkc-slot='root'] {
+  height: 100%;
+  padding: var(--s5);
+}
+[data-pkc-slot='root']:has([data-pkc-region='shell']) {
+  padding: 0;
+}
+
+/* ── 枠 ───────────────────────────────────────────────
+ * 🔴 これが無いと**サイドバーが本文の上に縦に流れる**(段⑨ 前の実際の姿)。 */
+[data-pkc-region='shell'] {
+  display: grid;
+  grid-template-columns: minmax(180px, 22vw) 1fr;
+  /* ⚠ notices と update は**別の行**にする。同じ area に載せると、両方出たとき
+   * 重なって下の面が読めない(書いていて実際に一度そうした) */
+  grid-template-rows: auto 1fr auto auto auto;
+  grid-template-areas:
+    'topbar topbar'
+    'sidebar detail'
+    'update update'
+    'notices notices'
+    'status status';
+  height: 100%;
+}
+
+/* 狭い画面では 1 カラムへ折る(サイドバーは高さを抑えて上に置く) */
+@media (max-width: 720px) {
+  [data-pkc-region='shell'] {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      'topbar'
+      'sidebar'
+      'detail'
+      'update'
+      'notices'
+      'status';
+    grid-template-rows: auto auto 1fr auto auto auto;
+  }
+  [data-pkc-region='sidebar'] {
+    max-height: 32vh;
+  }
+}
+
+[data-pkc-region='topbar'] {
+  grid-area: topbar;
+}
+[data-pkc-region='sidebar'] {
+  grid-area: sidebar;
+}
+[data-pkc-region='detail'] {
+  grid-area: detail;
+}
+[data-pkc-region='update'] {
+  grid-area: update;
+}
+[data-pkc-region='notices'] {
+  grid-area: notices;
+}
+[data-pkc-region='status'] {
+  grid-area: status;
+}
+
+/* ── ボタン ───────────────────────────────────────────
+ * ⚠ 素の `<button>` を**全部**受ける。renderer は class を振らないので、
+ * ここで拾えないと「ベタ並びの既定ボタン」に戻る。 */
+button {
+  background: var(--surface-2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--s2) var(--s3);
+  font: inherit;
+  cursor: pointer;
+}
+button:hover {
+  border-color: var(--accent-dim);
+  color: var(--accent);
+}
+button:active {
+  background: var(--bg);
+}
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+input,
+textarea,
+select {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--s2) var(--s3);
+  font: inherit;
+}
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* ── topbar ──────────────────────────────────────── */
+[data-pkc-region='topbar'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  align-items: center;
+  padding: var(--s2) var(--s3);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+/* いま居るビューを塗る(`markView` が属性を付け外しする) */
+[data-pkc-region='topbar'] [data-pkc-active] {
+  background: var(--accent-dim);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+
+/* ── サイドバー ──────────────────────────────────── */
+[data-pkc-region='sidebar'] {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+}
+@media (max-width: 720px) {
+  [data-pkc-region='sidebar'] {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+[data-pkc-region='create-bar'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
+  padding: var(--s2);
+  border-bottom: 1px solid var(--border);
+}
+[data-pkc-region='create-bar'] button {
+  font-size: 0.85em;
+  padding: var(--s1) var(--s2);
+}
+
+[data-pkc-region='entry-list'] {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+}
+[data-pkc-region='entry-list'] [data-pkc-entry] {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  padding: var(--s2) var(--s3);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+[data-pkc-region='entry-list'] [data-pkc-entry]:hover {
+  background: var(--surface-2);
+}
+/* 選択中(`data-pkc-selected` は sidebar / kanban が付ける) */
+[data-pkc-selected] {
+  background: var(--surface-2);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+[data-pkc-entry] [data-pkc-field='title'] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* archetype の印(記号 1 文字ぶんだけ。密度優先で語は出さない) */
+[data-pkc-archetype]::before {
+  color: var(--muted);
+  font-size: 0.8em;
+}
+[data-pkc-archetype='text']::before {
+  content: '文 ';
+}
+[data-pkc-archetype='todo']::before {
+  content: '了 ';
+}
+[data-pkc-archetype='textlog']::before {
+  content: '録 ';
+}
+[data-pkc-archetype='spreadsheet']::before {
+  content: '表 ';
+}
+[data-pkc-archetype='folder']::before {
+  content: '箱 ';
+}
+[data-pkc-archetype='attachment']::before {
+  content: '添 ';
+}
+
+/* ── 中央ペイン ──────────────────────────────────── */
+[data-pkc-region='detail'] {
+  overflow: auto;
+  min-height: 0;
+  padding: var(--s4);
+}
+[data-pkc-field='detail-title'] {
+  margin: 0 0 var(--s3);
+  font-size: 1.15em;
+  color: var(--accent);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: var(--s2);
+}
+[data-pkc-field='detail-toolbar'],
+[data-pkc-field='editor-toolbar'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin-bottom: var(--s3);
+}
+[data-pkc-action='delete-entry'],
+[data-pkc-action='purge-trash'] {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+[data-pkc-action='delete-entry']:hover,
+[data-pkc-action='purge-trash']:hover {
+  background: var(--danger);
+  color: var(--accent-fg);
+  border-color: var(--danger);
+}
+
+[data-pkc-field='editor-title'] {
+  width: 100%;
+  margin-bottom: var(--s2);
+}
+[data-pkc-field='editor-body'] {
+  width: 100%;
+  min-height: 50vh;
+  resize: vertical;
+  line-height: 1.6;
+}
+[data-pkc-field='detail-loading'] {
+  color: var(--muted);
+}
+
+/* 履歴 / ゴミ箱の面 */
+[data-pkc-field='history-panel'],
+[data-pkc-region='filer-trash'] {
+  margin-top: var(--s4);
+  padding: var(--s3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+[data-pkc-field='history-panel'] ul,
+[data-pkc-region='filer-trash'] ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+[data-pkc-field='history-panel'] li,
+[data-pkc-region='filer-trash'] li {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s2) 0;
+  border-bottom: 1px solid var(--border);
+}
+
+/* 添付 */
+[data-pkc-field='attachment-info'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  margin-bottom: var(--s3);
+  color: var(--muted);
+}
+[data-pkc-field='attachment-preview'] img,
+[data-pkc-field='attachment-media'] {
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+[data-pkc-asset-missing] {
+  color: var(--danger);
+}
+
+/* ── markdown ────────────────────────────────────
+ * ⚠ 器は `.pkc-md-rendered`(renderer が振る唯一の class)。 */
+.pkc-md-rendered {
+  overflow-wrap: anywhere;
+}
+.pkc-md-rendered h1,
+.pkc-md-rendered h2,
+.pkc-md-rendered h3,
+.pkc-md-rendered h4 {
+  color: var(--accent);
+  margin: var(--s5) 0 var(--s2);
+  line-height: 1.25;
+}
+.pkc-md-rendered h1 {
+  font-size: 1.4em;
+}
+.pkc-md-rendered h2 {
+  font-size: 1.2em;
+}
+.pkc-md-rendered h3 {
+  font-size: 1.05em;
+}
+.pkc-md-rendered p,
+.pkc-md-rendered ul,
+.pkc-md-rendered ol {
+  margin: var(--s3) 0;
+}
+.pkc-md-rendered a {
+  color: var(--accent);
+}
+.pkc-md-rendered code {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 var(--s1);
+}
+.pkc-md-rendered pre {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--s3);
+  overflow-x: auto;
+}
+.pkc-md-rendered pre code {
+  background: none;
+  border: none;
+  padding: 0;
+}
+.pkc-md-rendered blockquote {
+  margin: var(--s3) 0;
+  padding-left: var(--s4);
+  border-left: 2px solid var(--accent-dim);
+  color: var(--muted);
+}
+/* 🔴 罫線が無いと表が「a b / 1 2」に見える(段⑨ 前の実際の姿) */
+.pkc-md-rendered table {
+  border-collapse: collapse;
+  margin: var(--s3) 0;
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+}
+.pkc-md-rendered th,
+.pkc-md-rendered td {
+  border: 1px solid var(--border);
+  padding: var(--s2) var(--s3);
+  text-align: left;
+}
+.pkc-md-rendered th {
+  background: var(--surface-2);
+}
+.pkc-md-rendered hr {
+  border: none;
+  border-top: 1px solid var(--border);
+}
+.pkc-md-rendered iframe {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fff;
+}
+.pkc-md-rendered .footnotes {
+  margin-top: var(--s5);
+  padding-top: var(--s3);
+  border-top: 1px solid var(--border);
+  font-size: 0.9em;
+  color: var(--muted);
+}
+.pkc-md-rendered .pkc-toc {
+  margin: var(--s3) 0;
+  padding: var(--s3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+/* ── かんばん ────────────────────────────────────
+ * 🔴 これが無いと列が**縦に積まれる**(段⑨ 前の実際の姿)。 */
+[data-pkc-view-pane='kanban'] {
+  display: flex;
+  gap: var(--s3);
+  align-items: flex-start;
+  overflow-x: auto;
+}
+[data-pkc-region='kanban-column'] {
+  flex: 1 1 0;
+  min-width: 180px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+[data-pkc-region='kanban-column'] > h3 {
+  margin: 0;
+  padding: var(--s2) var(--s3);
+  font-size: 0.95em;
+  color: var(--accent);
+  border-bottom: 1px solid var(--border);
+}
+[data-pkc-region='kanban-cards'] {
+  list-style: none;
+  margin: 0;
+  padding: var(--s2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+[data-pkc-region='kanban-cards'] [data-pkc-entry] {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  padding: var(--s2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+[data-pkc-region='kanban-cards'] [data-pkc-field='date'] {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.85em;
+}
+
+/* ── カレンダー ──────────────────────────────── */
+[data-pkc-field='calendar-toolbar'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  margin-bottom: var(--s3);
+}
+[data-pkc-field='calendar-month'] {
+  color: var(--accent);
+}
+[data-pkc-region='calendar-grid'] {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+[data-pkc-region='calendar-grid'] th,
+[data-pkc-region='calendar-grid'] td {
+  border: 1px solid var(--border);
+  vertical-align: top;
+  padding: var(--s1);
+}
+[data-pkc-region='calendar-grid'] th {
+  background: var(--surface-2);
+  padding: var(--s2);
+  font-size: 0.85em;
+}
+[data-pkc-region='calendar-grid'] td {
+  height: 5.5em;
+}
+[data-pkc-field='day-number'] {
+  display: block;
+  color: var(--muted);
+  font-size: 0.8em;
+}
+[data-pkc-region='calendar-grid'] [data-pkc-entry] {
+  display: block;
+  width: 100%;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85em;
+  padding: 0 var(--s1);
+  margin-top: var(--s1);
+}
+[data-pkc-archived] {
+  opacity: 0.55;
+}
+
+/* ── ファイラ ────────────────────────────────── */
+[data-pkc-region='filer-breadcrumb'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  margin-bottom: var(--s3);
+  color: var(--muted);
+}
+[data-pkc-region='filer-table'] {
+  width: 100%;
+  border-collapse: collapse;
+}
+[data-pkc-region='filer-table'] th,
+[data-pkc-region='filer-table'] td {
+  border-bottom: 1px solid var(--border);
+  padding: var(--s2) var(--s3);
+  text-align: left;
+}
+[data-pkc-region='filer-table'] th {
+  color: var(--muted);
+  font-weight: normal;
+  font-size: 0.85em;
+}
+[data-pkc-region='filer-table'] tr:hover td {
+  background: var(--surface-2);
+}
+[data-pkc-field='filer-empty'] {
+  color: var(--muted);
+}
+
+/* ── 面(注意 / 更新)と status ───────────────── */
+[data-pkc-region='notices'] {
+  margin: 0 var(--s3) var(--s2);
+  padding: var(--s3);
+  background: var(--surface);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+}
+[data-pkc-field='notices-title'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  color: var(--warn);
+  margin-bottom: var(--s2);
+}
+[data-pkc-region='notices'] ul {
+  margin: 0;
+  padding-left: var(--s5);
+  max-height: 30vh;
+  overflow-y: auto;
+}
+
+[data-pkc-region='update'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  margin: 0 var(--s3) var(--s2);
+  padding: var(--s3);
+  background: var(--surface);
+  border: 1px solid var(--accent-dim);
+  border-radius: var(--radius);
+}
+[data-pkc-field='update-text'] {
+  color: var(--accent);
+}
+
+[data-pkc-region='status'] {
+  padding: var(--s1) var(--s3);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.8em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ⚠ 隠されている面は grid の行を占めない(`hidden` は display:block に
+ * 負けるので、grid item には明示が要る) */
+[hidden] {
+  display: none !important;
+}
