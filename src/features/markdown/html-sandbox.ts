@@ -47,10 +47,15 @@ export const HTML_SANDBOX_RESIZE_MSG_TYPE = 'pkc-html-render-resize';
 export function buildHtmlSandboxIframe(
   content: string,
   sourceLineAttrs: string = '',
+  /** 文書内の位置(token 添字)。同じ中身の fence を区別する。 */
+  position: number = 0,
 ): string {
-  // iframe ID:DOM 内 unique(postMessage で iframe を特定)。Math.random で
-  // 衝突確率は無視可能(同 doc 内 10K iframe で衝突 ~0.05%)。
-  const iframeId = `pkc-html-render-${Math.random().toString(36).slice(2, 10)}`;
+  // iframe ID:DOM 内 unique(postMessage で iframe を特定)。
+  // 🔴 **中身から決める**(乱数にしない ── P8 段⑩ で判明)。かつて
+  // `Math.random()` だったため、**同じ入力でも毎回ちがう HTML** になり、
+  // 差分反映から見ると「毎回変わった」ことになって、この塊が毎回作り直されていた
+  // (= iframe が毎回読み直され、中身が一度消える)。
+  const iframeId = `pkc-html-render-${stableKey(content, String(position))}`;
 
   // CSP:default-src は self + data:、image は asset URI 想定で *、script は
   // inline only(外部 src 禁止)、connect は none(fetch 禁止)、frame は none
@@ -147,4 +152,18 @@ export function installHtmlSandboxResizer(
   return () => {
     targetWindow.removeEventListener('message', handler);
   };
+}
+
+/**
+ * 決定的な id。⚠ **乱数にしない** ── 差分反映が毎回この塊を作り直す。
+ * 衝突しても壊れるのは resize の宛先だけなので、短い hash で十分。
+ */
+function stableKey(content: string, salt: string): string {
+  let h = 0x811c9dc5;
+  const text = content + '\u0000' + salt;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(36).padStart(7, '0');
 }

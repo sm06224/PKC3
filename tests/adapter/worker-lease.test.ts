@@ -13,6 +13,8 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { WorkerLease } from '../../src/adapter/platform/worker-lease';
+import { MarkdownClient } from '../../src/adapter/platform/render/markdown-client';
+import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 
 /** 実物と同じ形の偽 worker。⚠ 応答は**必ず非同期**(同期だと実物と意味が変わる)。 */
 class FakeWorker {
@@ -285,12 +287,12 @@ describe('🔴 落ちたとき・畳むとき(永久 hang を作らない)', () 
 });
 
 describe('使う側から見た振る舞い(MarkdownClient)', () => {
-  it('🔴 打鍵に追従するとき、飛ばすのは 1 件だけで最新が勝つ', async () => {
-    const { MarkdownClient } = await import(
-      '../../src/adapter/platform/render/markdown-client'
-    );
+  /** 打鍵の畳み込みは時計で決まるので、時計を握って測る。 */
+  function follower(onHtml: (h: string) => void, onError?: (e: unknown) => void) {
     FakeWorker.spawned = 0;
     let w: FakeWorker | null = null;
+    const clock = fakeClock();
+    let t = 0;
     const client = new MarkdownClient({
       spawn: () => {
         w = new FakeWorker();
@@ -298,31 +300,89 @@ describe('使う側から見た振る舞い(MarkdownClient)', () => {
       },
       idleMs: 100_000,
     });
+    const f = client.follower(onHtml, onError, {
+      quietMs: 500,
+      maxWaitMs: 3000,
+      setTimer: clock.setTimer,
+      clearTimer: clock.clearTimer,
+      now: () => t,
+    });
+    return {
+      client,
+      f,
+      worker: () => w!,
+      /** 時間を進める(時計と `now` を一緒に動かす ── ずれると意味が変わる)。 */
+      advance(ms: number) {
+        t += ms;
+        clock.advance(ms);
+      },
+    };
+  }
+
+  it('🔴 打鍵ごとには投げない。**止まってから**投げる', () => {
+    // > user 指示「1 打鍵ではなく、3 秒周期で差分反映してください」
+    const h = follower(() => undefined);
+    h.f.push('a');
+    h.advance(100);
+    h.f.push('ab');
+    h.advance(100);
+    h.f.push('abc');
+    // ⚠ ここまでで 1 度も投げていない(= 打鍵中の仕事はゼロ)
+    expect(FakeWorker.spawned, '打鍵のたびに起動している').toBe(0);
+    h.advance(500);
+    expect(h.worker().seen).toHaveLength(1);
+    expect((h.worker().seen[0]!.payload as { text: string }).text).toBe('abc');
+    h.client.dispose();
+  });
+
+  it('🔴 打ち続けても**上限で必ず反映される**(置いていかれない)', () => {
+    // ⚠ 静穏だけだと、打ち続けている間ずっと出ない ── user の言う「3 秒周期」は
+    // ここの上限として効く
+    const h = follower(() => undefined);
+    for (let i = 0; i < 20; i++) {
+      h.f.push('x'.repeat(i + 1));
+      h.advance(200); // 静穏(500ms)には届かない間隔で打ち続ける
+    }
+    expect(h.worker().seen.length, '打ち続けている間 1 度も反映されていない').toBeGreaterThan(0);
+    // ⚠ 3 秒に 1 回の桁 ── 4 秒ぶん打って 2 回を超えない
+    expect(h.worker().seen.length).toBeLessThanOrEqual(2);
+    h.client.dispose();
+  });
+
+  it('🔴 飛ばすのは 1 件だけで、最新が勝つ', () => {
     const got: string[] = [];
-    const follow = client.follower((html) => got.push(html));
-    follow.push('a');
-    follow.push('ab');
-    follow.push('abc');
-    // ⚠ 飛んでいるのは 1 件だけ ── 3 件同時に投げていない
-    expect(w!.seen).toHaveLength(1);
-    expect((w!.seen[0]!.payload as { text: string }).text).toBe('a');
-    w!.respondAll(() => '<p>a</p>');
-    await new Promise((r) => setTimeout(r, 0));
-    // 🔴 途中の結果は**載せない**(打った文字が消えて見える)
-    expect(got, '古い結果を載せた').toEqual([]);
-    // 畳まれた最新(abc)が飛んでいる
-    expect((w!.seen[1]!.payload as { text: string }).text).toBe('abc');
-    w!.respondAll(() => '<p>abc</p>');
-    await new Promise((r) => setTimeout(r, 0));
-    expect(got).toEqual(['<p>abc</p>']);
-    client.dispose();
+    const h = follower((html) => got.push(html));
+    h.f.push('a');
+    h.advance(600);
+    expect(h.worker().seen).toHaveLength(1);
+    // 飛んでいる間に 2 回打つ
+    h.f.push('ab');
+    h.advance(600);
+    h.f.push('abc');
+    h.advance(600);
+    expect(h.worker().seen, '飛んでいる間に追加で投げた').toHaveLength(1);
+    h.worker().respondAll(() => '<p>a</p>');
+    return Promise.resolve().then(() => {
+      // 🔴 途中の結果は**載せない**(打った文字が消えて見える)
+      expect(got, '古い結果を載せた').toEqual([]);
+      expect((h.worker().seen[1]!.payload as { text: string }).text).toBe('abc');
+      h.worker().respondAll(() => '<p>abc</p>');
+      return Promise.resolve().then(() => {
+        expect(got).toEqual(['<p>abc</p>']);
+        h.client.dispose();
+      });
+    });
+  });
+
+  it('flush はすぐ出す(編集に入った直後に待たせない)', () => {
+    const h = follower(() => undefined);
+    h.f.push('a');
+    h.f.flush();
+    expect(h.worker().seen).toHaveLength(1);
+    h.client.dispose();
   });
 
   it('ワーカーが無い環境では、その場で同じ関数を回す(白紙にしない)', async () => {
-    const [{ MarkdownClient }, { renderMarkdown }] = await Promise.all([
-      import('../../src/adapter/platform/render/markdown-client'),
-      import('../../src/features/markdown/markdown-render'),
-    ]);
     // happy-dom は `Worker` を持たない ── 既定はここへ落ちる
     const client = new MarkdownClient();
     expect(client.offloaded, 'この環境では worker は使えないはず').toBe(false);
@@ -332,18 +392,15 @@ describe('使う側から見た振る舞い(MarkdownClient)', () => {
   });
 
   it('⚠ 失敗は呼び側へ伝える(白紙で終わらせない)', async () => {
-    const { MarkdownClient } = await import(
-      '../../src/adapter/platform/render/markdown-client'
-    );
     const client = new MarkdownClient({
       spawn: () => {
         throw new Error('load failed');
       },
     });
     const onErr = vi.fn();
-    const follow = client.follower(() => undefined, onErr);
+    const follow = client.follower(() => undefined, onErr, { quietMs: 0, maxWaitMs: 0 });
     follow.push('a');
-    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 5));
     expect(onErr).toHaveBeenCalled();
   });
 });

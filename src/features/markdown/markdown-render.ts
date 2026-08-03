@@ -209,12 +209,14 @@ function buildRenderableSlotHtml(
   fence: RenderableFence,
   content: string,
   inlineRender: (text: string) => string,
+  /** 文書内の位置(token 添字)── 決定的な id を作るために要る。 */
+  position: number,
 ): string | null {
   switch (fence.lang) {
     case 'html':
       // reform-2026-05 PR-2M:iframe sandbox 経由で HTML を直接 render。
       // sandbox="allow-scripts" のみ(allow-same-origin 無し)で cross-origin 隔離。
-      return buildHtmlSandboxIframe(content);
+      return buildHtmlSandboxIframe(content, '', position);
     case 'mermaid': {
       // pgc-203 wave-α' polish #24:placeholder div のみ emit。実 SVG render は
       // adapter 層の `hydrateMermaidPlaceholders` が lazy import('mermaid') で
@@ -238,15 +240,37 @@ function buildRenderableSlotHtml(
  * (action-binder の `:scope > pre` がこれを拾う)と -both のソース面を兼ねる。
  * トグル状態は ephemeral(再 render で初期 = レンダリング側に戻る)。
  */
+/**
+ * トグルの id。⚠ **決定的**であること ── 乱数だと差分反映が毎回全部作り直す。
+ * 衝突しても壊れるのは「切替が連動する」だけなので、短い hash で十分。
+ */
+function toggleKey(content: string, salt: string): string {
+  let h = 0x811c9dc5;
+  const text = content + salt;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(36).padStart(7, '0');
+}
+
 function buildRenderableBlockHtml(
   fence: RenderableFence,
   slotHtml: string,
   content: string,
   sourceLineAttrs: string,
+  /** 文書内の位置(token 添字)。⚠ **同じ中身の fence を区別する**ために要る。 */
+  position: number,
 ): string {
   let toggleHtml = '';
   if (fence.mode === 'both') {
-    const id = `pkc-rv-${Math.random().toString(36).slice(2, 10)}`;
+    // 🔴 **中身から決める**(乱数にしない ── P8 段⑩ で判明)。
+    // かつて `Math.random()` を使っており、**同じ入力でも毎回ちがう HTML** に
+    // なっていた。差分反映(`apply-blocks.ts`)から見ると fence を含む塊は
+    // 「毎回変わった」ことになり、**図が毎回作り直されて絵が一度消える**
+    // (user 指摘「レンダリングで画面がガクガクする」の実体の 1 つ)。
+    // ⚠ 同じ文書に同じ内容の fence が 2 つあっても衝突しないよう、位置も混ぜる。
+    const id = `pkc-rv-${toggleKey(fence.lang + '\u0000' + content, String(position))}`;
     toggleHtml =
       `<input type="checkbox" id="${id}" class="pkc-render-toggle-input" aria-label="ソース / レンダリング切替">` +
       `<label for="${id}" class="pkc-render-toggle" title="ソース / レンダリング切替">‹/›</label>`;
@@ -277,9 +301,9 @@ md.renderer.rules.fence = function (tokens, idx, options, env, self) {
     // Pass inline renderer so CSV cells can carry markdown inline markup
     // (`**bold**` / `==highlight==` / `:text:attrs:` L-6 simple-inline 等)。
     const inlineRender = (text: string): string => md.renderInline(text, env);
-    const slot = buildRenderableSlotHtml(fence, content, inlineRender);
+    const slot = buildRenderableSlotHtml(fence, content, inlineRender, idx);
     if (slot !== null) {
-      return buildRenderableBlockHtml(fence, slot, content, sourceLineAttrs);
+      return buildRenderableBlockHtml(fence, slot, content, sourceLineAttrs, idx);
     }
     // csv 系 parse 失敗:従来どおり user のソースを可視で残す。
     return wrapWithCopyButton(renderFenceSourceHtml(content, fence.lang), 'code', sourceLineAttrs);

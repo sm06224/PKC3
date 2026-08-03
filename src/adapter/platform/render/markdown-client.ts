@@ -16,15 +16,35 @@
  * ⚠ **失敗したら呼び側へ知らせる**(白紙にしない)。呼び側は同期描画へ落とす。
  */
 import { WorkerLease } from '../worker-lease';
+import { appJobMonitor, type JobMonitor } from '../job-monitor';
 import { renderMarkdown, type RenderMarkdownOptions } from '@features/markdown/markdown-render';
 
 /** アイドルで畳むまで。⚠ 短いと連続操作のたびに作り直して**かえって重くなる**。 */
 export const MARKDOWN_WORKER_IDLE_MS = 30_000;
 
+/**
+ * 🔴 **打鍵が止まってから描くまで**(P8 段⑩)。
+ * > user 指示 2026-08-03「**1 打鍵ではなく、3 秒周期で差分反映してください /
+ * > 1 打鍵では、そんなことしたら、重たくなるし、レンダリングで画面がガクガクする**」
+ *
+ * ⚠ **固定周期にはしない**。3 秒の時計は「打っている最中に発火する」ことも
+ * 「止めてから 3 秒待たされる」ことも起きる。止まった瞬間に出るほうが速く感じ、
+ * かつ打鍵中の仕事は減る ── なので **止まって 500ms** で描く。
+ */
+export const PREVIEW_QUIET_MS = 500;
+/**
+ * ⚠ ただし**打ち続けている間も置いていかれない**ように上限を置く ── これが
+ * user の言う「3 秒周期」。連続入力でも 3 秒に 1 回は必ず反映される。
+ */
+export const PREVIEW_MAX_WAIT_MS = 3000;
+
 export interface MarkdownClientOptions {
   /** worker の作り方(test / bench が差し替える)。 */
   spawn?: () => Worker;
   idleMs?: number;
+  /** 可視化(P8 段⑩)。⚠ 既定でアプリ共通のものへ流す ── 付け忘れると
+   *  「設定の表に出ない」形で静かに死ぬので、既定を持たせる。 */
+  monitor?: JobMonitor;
 }
 
 export class MarkdownClient {
@@ -42,7 +62,8 @@ export class MarkdownClient {
       ? new WorkerLease({
           spawn,
           idleMs: options.idleMs ?? MARKDOWN_WORKER_IDLE_MS,
-          name: 'markdown worker',
+          name: 'markdown',
+          monitor: options.monitor ?? appJobMonitor,
         })
       : null;
   }
@@ -73,10 +94,25 @@ export class MarkdownClient {
   follower(
     onHtml: (html: string) => void,
     onError?: (e: unknown) => void,
-  ): { push(text: string, opts?: RenderMarkdownOptions): void; dispose(): void } {
+    timing: {
+      quietMs?: number;
+      maxWaitMs?: number;
+      setTimer?: (fn: () => void, ms: number) => unknown;
+      clearTimer?: (h: unknown) => void;
+      now?: () => number;
+    } = {},
+  ): { push(text: string, opts?: RenderMarkdownOptions): void; flush(): void; dispose(): void } {
+    const quietMs = timing.quietMs ?? PREVIEW_QUIET_MS;
+    const maxWaitMs = timing.maxWaitMs ?? PREVIEW_MAX_WAIT_MS;
+    const setTimer = timing.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
+    const clearTimer = timing.clearTimer ?? ((h) => clearTimeout(h as ReturnType<typeof setTimeout>));
+    const now = timing.now ?? (() => Date.now());
     let inFlight = false;
     let queued: { text: string; opts: RenderMarkdownOptions } | null = null;
     let disposed = false;
+    let timer: unknown = null;
+    /** 溜め始めた時刻(上限の起点)。null = 溜めていない。 */
+    let since: number | null = null;
 
     const pump = (): void => {
       if (disposed || inFlight || !queued) return;
@@ -100,15 +136,44 @@ export class MarkdownClient {
         });
     };
 
+    const cancel = (): void => {
+      if (timer !== null) {
+        clearTimer(timer);
+        timer = null;
+      }
+    };
+    const fire = (): void => {
+      cancel();
+      since = null;
+      pump();
+    };
+    /**
+     * 打鍵ごとに予約を張り直す。⚠ ただし**溜め始めから上限を超えたら伸ばさない**
+     * ── 伸ばし続けると、打ち続けている間ずっと反映されない
+     */
+    const schedule = (): void => {
+      const t = now();
+      if (since === null) since = t;
+      cancel();
+      const remaining = Math.max(0, since + maxWaitMs - t);
+      timer = setTimer(fire, Math.min(quietMs, remaining));
+    };
+
     return {
       push(text, opts = {}) {
         if (disposed) return;
         queued = { text, opts };
-        pump();
+        schedule();
+      },
+      /** すぐ出す(編集に入った直後など、待つ意味が無いとき)。 */
+      flush() {
+        if (disposed) return;
+        fire();
       },
       dispose() {
         disposed = true;
         queued = null;
+        cancel();
       },
     };
   }

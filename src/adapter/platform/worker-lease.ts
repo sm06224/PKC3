@@ -26,6 +26,8 @@
  * **計算のワーカー**(描画・圧縮・符号化)である。
  */
 
+import type { JobPhase } from './job-monitor';
+
 /** worker から返る 1 件の応答。⚠ 形は利用側が決める(この層は id だけ見る)。 */
 export interface LeaseResponse {
   id: number;
@@ -35,6 +37,11 @@ export interface LeaseResponse {
 }
 
 export interface WorkerLeaseOptions {
+  /**
+   * 可視化(P8 段⑩。user 指示「ジョブスケジューラーは可視化機構とセットで」)。
+   * ⚠ 無くても動く ── 計測のために本体の意味論を変えない。
+   */
+  monitor?: { record(lane: string, phase: JobPhase, opts?: { id?: number; note?: string; ms?: number }): void };
   /** worker を作る(遅延起動。**呼ばれるまで作らない**)。 */
   spawn(): Worker;
   /**
@@ -45,13 +52,17 @@ export interface WorkerLeaseOptions {
   /** タイマー(test が差し替える ── 実時間を待たないため)。 */
   setTimer?: (fn: () => void, ms: number) => unknown;
   clearTimer?: (h: unknown) => void;
-  /** 名前(エラー文に出る ── どのワーカーが落ちたか分からないと直せない)。 */
+  /** 名前(エラー文と可視化に出る ── どのワーカーか分からないと直せない)。 */
   name?: string;
+  /** いまの時刻(test が差し替える)。所要時間の計測に使う。 */
+  now?: () => number;
 }
 
 interface Waiter {
   resolve: (v: unknown) => void;
   reject: (e: Error) => void;
+  /** 投げた時刻(所要時間 = 返った時刻 - これ)。 */
+  at: number;
 }
 
 /** 起動待ちの間に溜めた 1 件。 */
@@ -62,7 +73,11 @@ interface Buffered {
 }
 
 export class WorkerLease {
-  private readonly opts: Required<Omit<WorkerLeaseOptions, 'name'>> & { name: string };
+  private readonly opts: Required<Omit<WorkerLeaseOptions, 'name' | 'monitor' | 'now'>> & {
+    name: string;
+  };
+  private readonly monitor: WorkerLeaseOptions['monitor'];
+  private readonly now: () => number;
   private worker: Worker | null = null;
   /** 起動の途中(spawn 済みだが最初の postMessage をまだ流していない)。 */
   private starting = false;
@@ -81,6 +96,13 @@ export class WorkerLease {
       clearTimer: options.clearTimer ?? ((h) => clearTimeout(h as ReturnType<typeof setTimeout>)),
       name: options.name ?? 'worker',
     };
+    this.monitor = options.monitor;
+    this.now = options.now ?? (() => Date.now());
+  }
+
+  /** 可視化へ 1 件。⚠ monitor が無いときは何もしない(本体の意味論は同じ)。 */
+  private note(phase: JobPhase, opts: { id?: number; note?: string; ms?: number } = {}): void {
+    this.monitor?.record(this.opts.name, phase, opts);
   }
 
   /** いま worker が生きているか(test と計測の観測点)。 */
@@ -101,12 +123,15 @@ export class WorkerLease {
   run<T>(payload: unknown, transfer: Transferable[] = []): Promise<T> {
     if (this.disposed) return Promise.reject(new Error(`${this.opts.name}: disposed`));
     const id = this.nextId++;
+    const at = this.now();
     const p = new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
+      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, at });
     });
+    this.note('enqueue', { id, note: describe(payload) });
     // アイドル kill の予約は**投函した時点で**畳む(飛んでいる間は殺さない)
     this.cancelIdle();
     if (this.worker && !this.starting) {
+      this.note('dispatch', { id });
       this.worker.postMessage({ id, payload }, transfer);
     } else {
       // 🔑 起動待ち ── **捨てずに溜める**。起動が済んだらまとめて流す
@@ -134,6 +159,7 @@ export class WorkerLease {
       this.failAll(new Error(`${this.opts.name}: spawn failed: ${String(e)}`));
       return;
     }
+    this.note('spawn');
     this.worker = w;
     w.onmessage = (ev: MessageEvent<LeaseResponse>) => this.onMessage(ev.data);
     w.onerror = (ev: ErrorEvent) => {
@@ -154,6 +180,7 @@ export class WorkerLease {
     const w = this.worker;
     if (!w) return;
     for (const job of this.buffer.splice(0)) {
+      this.note('dispatch', { id: job.id });
       w.postMessage({ id: job.id, payload: job.payload }, job.transfer);
     }
   }
@@ -162,8 +189,14 @@ export class WorkerLease {
     const waiter = this.pending.get(res.id);
     if (waiter) {
       this.pending.delete(res.id);
-      if (res.ok) waiter.resolve(res.result);
-      else waiter.reject(new Error(res.error ?? `${this.opts.name}: failed`));
+      const ms = this.now() - waiter.at;
+      if (res.ok) {
+        this.note('done', { id: res.id, ms, note: sizeOf(res.result) });
+        waiter.resolve(res.result);
+      } else {
+        this.note('fail', { id: res.id, ms, note: res.error });
+        waiter.reject(new Error(res.error ?? `${this.opts.name}: failed`));
+      }
     }
     this.armIdle();
   }
@@ -199,6 +232,7 @@ export class WorkerLease {
   /** worker だけを畳む(依頼は触らない ── 次の `run` で作り直される)。 */
   private dropWorker(): void {
     const w = this.worker;
+    if (w) this.note(this.disposed ? 'dispose' : 'kill');
     this.worker = null;
     this.starting = false;
     this.cancelIdle();
@@ -223,4 +257,17 @@ export class WorkerLease {
     for (const { reject } of this.pending.values()) reject(err);
     this.pending.clear();
   }
+}
+
+/** ログに出す短い手掛かり(payload の中身は出さない ── 本文が漏れる)。 */
+function describe(payload: unknown): string | undefined {
+  if (payload && typeof payload === 'object' && 'text' in payload) {
+    const t = (payload as { text?: unknown }).text;
+    if (typeof t === 'string') return `${Math.round(t.length / 100) / 10}k 文字`;
+  }
+  return undefined;
+}
+
+function sizeOf(result: unknown): string | undefined {
+  return typeof result === 'string' ? `${Math.round(result.length / 100) / 10}k 文字` : undefined;
 }

@@ -95,3 +95,110 @@ test('🔴 プレビューはワーカーが描いている(同期に落ちて�
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * P8 段⑩: **ジョブの可視化とログ**。
+ *
+ * > user 指示 2026-08-03「**ジョブスケジューラーは可視化機構とセットでお願いします /
+ * > ログもみたい**」
+ *
+ * ⚠ 「画面が出る」で止めない ── **実際のジョブが数字とログに現れる**ことを見る。
+ * 空の表を出すだけの実装でも「出た」は通ってしまう。
+ */
+test('🔴 設定にジョブの状態とログが出る', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+
+  // 何か仕事をさせる(プレビューを描かせる)
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-body"]').fill('# 見出し\n\n本文\n');
+  await expect(page.locator('[data-pkc-region="editor-preview"] h1')).toHaveText('見出し');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  await clickReal(page, '[data-pkc-view="settings"]');
+  const lanes = page.locator('[data-pkc-field="job-lanes"] tbody tr');
+  // ① 🔴 markdown のワーカーが行として出る
+  await expect(lanes.filter({ hasText: 'markdown' })).toHaveCount(1);
+  const row = lanes.filter({ hasText: 'markdown' }).first();
+  // ② 🔴 **完了件数が 1 以上**(空の表を出しているだけではない)
+  const done = await row.locator('td').nth(4).textContent();
+  expect(Number(done), '完了したジョブが数えられていない').toBeGreaterThan(0);
+  // ③ 中央値が出ている(所要時間を測っている)
+  await expect(row.locator('td').nth(7)).not.toHaveText('—');
+
+  // ④ 🔴 ログに実際の出来事が並ぶ
+  const log = page.locator('[data-pkc-field="job-log"] li');
+  await expect(log.first()).toBeVisible();
+  await expect(page.locator('[data-pkc-field="job-log"] li[data-pkc-phase="done"]').first()).toContainText('markdown');
+  await expect(page.locator('[data-pkc-field="job-log"] li[data-pkc-phase="spawn"]').first()).toBeVisible();
+
+  // ⑤ ⚠ ログに**本文の中身**は出さない(文字数だけ)
+  await expect(page.locator('[data-pkc-field="job-log"]')).not.toContainText('見出し');
+
+  expect(errors).toEqual([]);
+});
+
+/**
+ * P8 段⑩: 🔴 **打っても画面がガクガクしない**。
+ *
+ * > user 指示 2026-08-03「1 打鍵ではなく、3 秒周期で差分反映してください /
+ * > **1 打鍵では、そんなことしたら、重たくなるし、レンダリングで画面がガクガクする**」
+ *
+ * 🔴 「ガクガク」を long task の数字で語ると外す(計器側のコストに埋もれる ──
+ * 実際に埋もれた)。**user が見ているもの**を直接観測点にする:
+ *  ① スクロール位置が飛ばない
+ *  ② 触っていない図の `<img>` が**同じ実体のまま**残る(= 絵が消えて焼き直らない)
+ * 丸ごと差し替える実装では、この 2 つが必ず壊れる。
+ */
+test('🔴 打ってもスクロールが飛ばず、触っていない図が消えない', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  const preview = page.locator('[data-pkc-region="editor-preview"]');
+  const filler = Array.from({ length: 60 }, (_, i) => `## 節 ${i}\n\n段落 ${i}。\n`).join('\n');
+  await ta.fill('```mermaid\ngraph TD\n  A["始め"]-->B["終わり"]\n```\n\n' + filler);
+
+  const host = preview.locator('[data-pkc-mermaid-src]');
+  await expect(host).toHaveAttribute('data-pkc-mermaid-state', 'ready', { timeout: 30000 });
+  await page.evaluate(() => {
+    const img = document.querySelector(
+      '[data-pkc-region="editor-preview"] [data-pkc-field="mermaid-image"]',
+    );
+    (img as HTMLElement & { __mark?: string }).__mark = 'same-element';
+  });
+  const srcBefore = await preview.locator('[data-pkc-field="mermaid-image"]').getAttribute('src');
+
+  await preview.evaluate((el) => (el.scrollTop = 800));
+  const scrollBefore = await preview.evaluate((el) => el.scrollTop);
+  expect(scrollBefore, 'スクロールできていない(観測の前提が崩れている)').toBeGreaterThan(100);
+
+  await ta.evaluate((el) => {
+    const t = el as HTMLTextAreaElement;
+    t.value += '\n\n末尾に足した段落。\n';
+    t.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await expect(preview).toContainText('末尾に足した段落。', { timeout: 8000 });
+
+  const scrollAfter = await preview.evaluate((el) => el.scrollTop);
+  expect(Math.abs(scrollAfter - scrollBefore), 'スクロールが飛んだ').toBeLessThan(40);
+
+  const stillSame = await page.evaluate(
+    () =>
+      (
+        document.querySelector(
+          '[data-pkc-region="editor-preview"] [data-pkc-field="mermaid-image"]',
+        ) as (HTMLElement & { __mark?: string }) | null
+      )?.__mark ?? null,
+  );
+  expect(stillSame, '触っていない図まで作り直した(絵が一度消える)').toBe('same-element');
+  await expect(preview.locator('[data-pkc-field="mermaid-image"]')).toHaveAttribute(
+    'src',
+    srcBefore!,
+  );
+
+  expect(errors).toEqual([]);
+});

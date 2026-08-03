@@ -451,6 +451,65 @@ select:focus-visible {
   font-size: 15px;
   font-weight: 600;
 }
+/* ── ジョブの可視化(P8 段⑩)──────────────────────
+ * user 指示「ジョブスケジューラーは可視化機構とセットで / ログもみたい」。
+ * ⚠ 数字が読めることが第一 ── 等幅で桁を揃える。 */
+[data-pkc-region='jobs'] {
+  margin-top: var(--s4);
+  border-top: 1px solid var(--border);
+  padding-top: var(--s3);
+}
+[data-pkc-region='jobs'] h3,
+[data-pkc-region='jobs'] h4 {
+  margin: 0 0 var(--s2);
+  font-size: 13px;
+}
+[data-pkc-region='jobs'] h4 {
+  margin-top: var(--s3);
+}
+[data-pkc-field='job-lanes'] {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+[data-pkc-field='job-lanes'] th,
+[data-pkc-field='job-lanes'] td {
+  border: 1px solid var(--border);
+  padding: 2px var(--s2);
+  text-align: right;
+  white-space: nowrap;
+}
+[data-pkc-field='job-lanes'] th:first-child,
+[data-pkc-field='job-lanes'] td:first-child,
+[data-pkc-field='job-lanes'] th:nth-child(2),
+[data-pkc-field='job-lanes'] td:nth-child(2) {
+  text-align: left;
+}
+[data-pkc-field='job-log'] {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 16rem;
+  overflow: auto;
+  border: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+[data-pkc-field='job-log'] li {
+  padding: 0 var(--s2);
+  white-space: nowrap;
+}
+/* 色は**情報にだけ**使う(地は無彩色) */
+[data-pkc-field='job-log'] li[data-pkc-phase='fail'] {
+  color: var(--danger);
+}
+[data-pkc-field='job-log'] li[data-pkc-phase='spawn'],
+[data-pkc-field='job-log'] li[data-pkc-phase='kill'] {
+  color: var(--accent);
+}
+
 /* ── 図(P8 段③⑦)────────────────────────────────
  * 🔑 画面に置くのは PNG 1 枚。**保存の導線は図の中**に置く(押した所から
  * `closest` で原文に届く)。⚠ 消さない ── 「同じものが常に同じ場所にある」。

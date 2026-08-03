@@ -17,6 +17,7 @@ import {
 } from '@features/markdown/markdown-render';
 import { parseFrontmatter, extractVars } from '@features/markdown/frontmatter';
 import { hydrateMermaid } from './mermaid-hydrate';
+import { applyBlocks, EMPTY_VIEW, type BlockView } from './apply-blocks';
 import { iconButton } from './icons';
 import { buildFormatBar } from './format-bar';
 import { MarkdownClient } from '@adapter/platform/render/markdown-client';
@@ -258,14 +259,18 @@ export class DetailRenderer {
      * 「飛ばすのは 1 件、その間の変更は最後の 1 つに畳む」を持つ。
      * ⚠ HTML の parse(`innerHTML`)はメインに残る ── そこは DOM なので動かせない。
      */
+    let shown: BlockView = EMPTY_VIEW;
+    /** 図の後始末は**塊ごと**に持つ ── 全体に掛け直すと、生きている `<img>` の
+     *  ObjectURL を revoke してしまい、触っていない図が消える */
+    const mermaidDisposers: Array<() => void> = [];
     const follow = this.markdown.follower(
       (html) => {
         // ⚠ 外された後に描かない(編集を抜けた瞬間の結果で無駄な仕事をしない)
         if (!preview.isConnected) return;
-        this.disposeMermaid?.();
-        preview.innerHTML = html;
-        // ⚠ プレビューでも図を出す ── 出さないと「保存するまで図が見えない」
-        this.disposeMermaid = hydrateMermaid(preview);
+        const applied = applyBlocks(preview, html, shown);
+        shown = applied.view;
+        // 🔑 **新しく入った所だけ**図を面倒みる(触っていない図はそのまま)
+        for (const el of applied.inserted) mermaidDisposers.push(hydrateMermaid(el));
       },
       (e) => {
         // 🔴 **白紙にしない**。理由を出して原文だけは読めるようにする
@@ -273,22 +278,18 @@ export class DetailRenderer {
         preview.textContent = `プレビューを描けませんでした: ${String(e).slice(0, 120)}`;
       },
     );
-    let frame = 0;
-    const paint = (): void => {
-      frame = 0;
-      if (!preview.isConnected) return;
-      follow.push(parseFrontmatter(ta.value).body, { sourceLineAnchors: false });
-    };
-    paint();
+    // 編集に入った直後は待たせない(**その場で 1 回**)
+    follow.push(parseFrontmatter(ta.value).body, { sourceLineAnchors: false });
+    follow.flush();
     ta.addEventListener('input', () => {
-      if (frame !== 0) return; // 既に次フレームで投げる予定
-      frame = requestAnimationFrame(paint);
+      // ⚠ rAF で畳まない ── 畳み込みは follower(静穏 + 上限)が持つ。
+      //    2 か所で畳むと、どちらが効いているか分からなくなる
+      follow.push(parseFrontmatter(ta.value).body, { sourceLineAnchors: false });
     });
-    // ⚠ 編集を抜けるときに予約を捨てる(detached なノードへ描かない)
+    // ⚠ 編集を抜けるときに予約と図を畳む(detached なノードへ描かない)
     this.cancelPreview = () => {
-      if (frame !== 0) cancelAnimationFrame(frame);
-      frame = 0;
       follow.dispose();
+      for (const d of mermaidDisposers.splice(0)) d();
     };
     ta.focus();
   }
