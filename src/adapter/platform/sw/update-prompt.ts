@@ -10,10 +10,22 @@
  *
  * → 交代は **user が押したときだけ**。押した**そのタブだけ**を再読込する。
  *
- * ⚠ 残る露出: `clients.claim()` で他タブも新 SW に取られる。ただしその状態で
- * 旧 hash を取りに行って失敗する形は、**SW が無い素の静的 deploy と同じ**である
- * (Pages 側に旧ファイルが無いので、cache の有無に関わらず 404)。SW は
- * 「押したタブの precache を守る」側であって、露出を増やしてはいない。
+ * ⚠ **残る露出**(review M-4 で比較対象の誤りを指摘されて書き直した)。
+ * 比べるべきは「SW が無い素の静的 deploy」ではなく「**押す前の状態**」である ──
+ * 押す前は旧 cache が旧タブを守っており、押すとその保護が `clients.claim()` と
+ * cache 削除で**全タブぶん**消える。具体的には:
+ *
+ * - タブ B が lease 待ち(「別のタブで開いています…」)で止まっている
+ *   ── **storage worker はまだ作っていない**
+ * - タブ A が「再読込」 → 新 SW が activate → 旧 build の cache 削除 + claim
+ * - タブ B は `requested === false` なので設計どおり再読込しない。さらに
+ *   この見張りは `startApp` の解決後にしか張られないので**案内も出ない**
+ * - タブ A が閉じてタブ B が lease を取る → hash 付き URL で storage worker を
+ *   作る → 新 cache に無い → network → Pages はツリーごと差し替わっていて 404
+ *
+ * この窓は**まだ塞いでいない**。塞ぐなら「lease 待ちのタブにも案内を出す」か
+ * 「worker の URL を hash 無しにする」だが、どちらも段⑤ の範囲を越える。
+ * ここに書いてあるのは「**自動交代よりは明確に良いが、無害ではない**」という事実である。
  *
  * 🔑 **登録と見張りを分ける**。登録はアプリの boot を待たずに走らせ(boot が
  * 失敗しても次回オフラインで開ける)、見張りは shell ができてから attach する
@@ -77,25 +89,40 @@ export async function watchForUpdate(
     reload();
   });
 
-  // ⚠ 一度見せたら二度は見せない(`updatefound` は再検査のたびに来る)
-  let offered = false;
+  /**
+   * ⚠ **同じ worker を二度は見せない**。`updatefound` は再検査のたびに来る。
+   *
+   * 🔴 ただし「一度見せたら終わり」にしてはいけない(review H-2 で実証)。
+   * 次の deploy が来ると、掴んでいた worker は **`redundant` になり**、
+   * `registration.waiting` は別 object に差し替わる ── 真偽値のラッチだと
+   * 新しい版を提示できず、押しても `redundant` な worker へ送るだけになる。
+   * ⚠ Chromium は redundant への `postMessage` を**黙って捨てる**(例外も出ない)
+   * ので、**そのセッションでは二度と更新できない**まま何の兆候も出ない。
+   * → **worker の同一性**で見張り、別の worker が来たら出し直す。
+   */
+  let offeredWorker: UpdateWorker | null = null;
   const offer = (worker: UpdateWorker): void => {
-    if (offered) return;
-    offered = true;
+    if (offeredWorker === worker) return;
+    offeredWorker = worker;
     present(() => {
       requested = true;
-      worker.postMessage({ type: 'SKIP_WAITING' });
+      // 🔴 **押された時点の `waiting` を読み直す**。掴んだ worker は
+      // その後 redundant になっているかもしれない(上記)
+      const target = registration.waiting ?? worker;
+      target.postMessage({ type: 'SKIP_WAITING' });
     });
   };
 
   const watchInstalling = (worker: InstallingWorker): void => {
-    const check = (): void => {
-      // 🔴 `controller` を見るのが肝。**初回インストール**でも `installed` は
-      // 通るので、これが無いと「初めて開いた人」に更新の案内が出る
+    // 🔴 `controller` を見るのが肝。**初回インストール**でも `installed` は
+    // 通るので、これが無いと「初めて開いた人」に更新の案内が出る
+    worker.addEventListener('statechange', () => {
       if (worker.state === 'installed' && container.controller) offer(worker);
-    };
-    worker.addEventListener('statechange', check);
-    check(); // attach 前に既に `installed` まで進んでいることがある
+    });
+    // ⚠ ここで即 `check()` は**しない**。`installed` に達した worker は
+    // `registration.installing` から外れて `waiting` に入るので(実ブラウザで計測)、
+    // 「attach 時に既に installed だった installing worker」は存在しない ──
+    // その窓は下の `waiting` を見る行が拾う
   };
 
   // 既に待機している(前回見送った / 別タブが取ってきた / attach 前に済んだ)

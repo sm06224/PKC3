@@ -29,6 +29,9 @@ class FakeInstalling implements InstallingWorker {
   /** 本物の遷移を真似る: state を進めてから statechange を投げる。 */
   advance(state: string): void {
     this.state = state;
+    this.fire();
+  }
+  fire(): void {
     for (const fn of [...this.listeners]) fn();
   }
 }
@@ -44,6 +47,20 @@ class FakeRegistration implements UpdateRegistration {
   found(worker: FakeInstalling): void {
     this.installing = worker;
     for (const fn of [...this.listeners]) fn();
+  }
+  /**
+   * ⚠ **本物の欄の動きを真似る**(review 指摘: stub が本物より緩かった)。
+   * `installed` に達した worker は `installing` から外れて `waiting` に入り、
+   * 直前に waiting だった worker は **redundant** になる。
+   * これを真似ないと「掴んだ worker が redundant になる」形を test で作れない。
+   */
+  installed(worker: FakeInstalling): void {
+    const previous = this.waiting;
+    if (previous instanceof FakeInstalling) previous.advance('redundant');
+    worker.state = 'installed';
+    this.installing = null;
+    this.waiting = worker;
+    worker.fire();
   }
 }
 
@@ -120,30 +137,60 @@ describe('更新の案内 — いつ出すか', () => {
     expect(h.offers).toHaveLength(1);
   });
 
-  it('attach 前に installing まで進んでいても取り零さない', async () => {
+  it('attach 時に installing 中だったものを取り零さない', async () => {
     // ⚠ `updatefound` は attach 前に飛び終わっている ── listener を張るだけでは
-    // 届かないので、attach 時に**現況を見る**
+    // 届かないので、attach 時に**現況を見る**。
+    // ⚠ 「attach 時に既に installed だった installing worker」は**存在しない**
+    // (実ブラウザで計測: installed に達すると installing から外れて waiting に入る)
+    // ── その窓は `waiting` を見る行が拾う
     const w = new FakeInstalling();
     const h = await start((c, r) => {
       c.controller = {};
       r.installing = w;
     });
     expect(h.offers).toHaveLength(0); // まだ installing
-    w.advance('installed');
+    h.registration.installed(w);
     expect(h.offers).toHaveLength(1);
   });
 
-  it('🔴 二度は出さない(updatefound は再検査のたびに来る)', async () => {
+  it('🔴 同じ worker を二度は出さない(statechange は何度でも来る)', async () => {
     const h = await start((c) => {
       c.controller = {};
     });
     const a = new FakeInstalling();
     h.registration.found(a);
-    a.advance('installed');
+    h.registration.installed(a);
+    a.fire(); // 同じ worker から再度 statechange
+    a.fire();
+    expect(h.offers).toHaveLength(1);
+  });
+
+  it('🔴 次の版が来たら**出し直す**(掴んだ worker は redundant になる)', async () => {
+    // review H-2: 真偽値のラッチだと、次の deploy 以降**二度と更新できない**。
+    // 掴んだ worker は redundant になり、`registration.waiting` は別 object に
+    // 差し替わる ── Chromium は redundant への postMessage を黙って捨てるので、
+    // 押しても何も起きず、エラーも出ない
+    const h = await start((c) => {
+      c.controller = {};
+    });
+    const a = new FakeInstalling();
+    h.registration.found(a);
+    h.registration.installed(a);
     const b = new FakeInstalling();
     h.registration.found(b);
-    b.advance('installed');
-    expect(h.offers).toHaveLength(1);
+    h.registration.installed(b);
+    expect(a.state).toBe('redundant'); // ⚠ 前提が成立していることを見る
+    expect(h.offers).toHaveLength(2);
+  });
+
+  it('🔴 待機中の worker が在っても、制御されていなければ出さない', async () => {
+    // review M-3: `installing` 側にしか負のテストが無く、`waiting` 側の
+    // `container.controller` を落とす変異が**全緑で生き残った**。初回 install は
+    // waiting を経由してから activate するので、その窓に attach すると実際に出る
+    const h = await start((_c, r) => {
+      r.waiting = { postMessage: vi.fn() }; // controller は null のまま
+    });
+    expect(h.offers).toHaveLength(0);
   });
 
   it('登録が成立しない環境では何もしない(file:// の可搬 HTML)', async () => {
@@ -161,7 +208,7 @@ describe('更新の適用 — 押したときだけ、押したタブだけ', ()
     });
     const worker = new FakeInstalling();
     h.registration.found(worker);
-    worker.advance('installed');
+    h.registration.installed(worker);
     return { h, worker };
   };
 
@@ -169,6 +216,20 @@ describe('更新の適用 — 押したときだけ、押したタブだけ', ()
     const { h, worker } = await offered();
     h.offers[0]!();
     expect(worker.messages).toEqual([{ type: 'SKIP_WAITING' }]);
+  });
+
+  it('🔴 古い案内を押しても、**いま待機している** worker へ送る', async () => {
+    // review H-2: 案内が出たまま次の deploy が来ると、掴んだ worker は
+    // redundant になる。押した時点の `registration.waiting` を読み直さないと
+    // **黙って捨てられる合図**を送るだけになる(そのセッションで更新不能)
+    const { h, worker: stale } = await offered();
+    const fresh = new FakeInstalling();
+    h.registration.found(fresh);
+    h.registration.installed(fresh);
+    h.offers[0]!(); // ⚠ **古いほう**の案内を押す
+    expect(stale.state).toBe('redundant');
+    expect(stale.messages).toEqual([]); // 死んだ worker へは送らない
+    expect(fresh.messages).toEqual([{ type: 'SKIP_WAITING' }]);
   });
 
   it('🔴 押しただけでは再読込しない(交代が済んでから)', async () => {

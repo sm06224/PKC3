@@ -74,8 +74,8 @@ class FakeCache {
 interface Harness {
   caches: Map<string, FakeCache>;
   fire(type: 'install' | 'activate'): Promise<void>;
-  /** アプリからの合図(P7 段⑤)。⚠ `waitUntil` は無い ── 素の message event。 */
-  message(data: unknown): void;
+  /** アプリからの合図(P7 段⑤)。返るのは `waitUntil` に渡された promise の数。 */
+  message(data: unknown): number;
   /** fetch を発火し、SW が返した body(または `null` = 素通し)を返す。 */
   fetch(
     url: string,
@@ -190,7 +190,11 @@ function runSw(
       await Promise.all(waits);
     },
     message(data) {
-      listeners.get('message')?.({ data });
+      // ⚠ 本物の ExtendableMessageEvent は `waitUntil` を持つ ── 渡さないと
+      // 「waitUntil で囲っているか」を見分けられない(stub が緩いと test が空振り)
+      const held: Array<Promise<unknown>> = [];
+      listeners.get('message')?.({ data, waitUntil: (p: Promise<unknown>) => void held.push(p) });
+      return held.length;
     },
     async fetch(url, opts: {
       mode?: string;
@@ -308,6 +312,97 @@ describe('install ── 一覧を丸ごと入れる', () => {
     ]);
   });
 
+  /**
+   * 🔴 段⑤ で `install` の `skipWaiting()` を外した結果、**user が押すまで
+   * `activate` が走らない = 掃除も走らない**。main への push ごとに deploy
+   * されるので、「あとで」を押し続ける user は 1 デプロイごとに precache 1 本
+   * (実測 2.65MB)を溜め続けていた ── 4 デプロイ後に 5 本 13.50MB、上限なし
+   * (review H-1、実 Chromium で計測)。quota は OPFS と共用なので
+   * **ノート本体の消失に接続する**。
+   */
+  describe('🔴 交代しない間も積み上げない(review H-1)', () => {
+    /** active の印を置いた状態(= その版が使われている)。 */
+    const seedActive = (build: string) => (c: Map<string, FakeCache>) => {
+      c.set(`pkc3:%2F:${build}`, new FakeCache());
+      c.set(`pkc3-active:%2F:${build}`, new FakeCache());
+    };
+
+    it('見送られて redundant になった版の残骸を install で畳む', async () => {
+      const h = runSw(SOURCE, (c) => {
+        seedActive('active0')(c);
+        c.set('pkc3:%2F:skipped1', new FakeCache()); // 見送られた版
+        c.set('pkc3:%2F:skipped2', new FakeCache()); // その次に見送られた版
+      });
+      await h.fire('install');
+      expect([...h.caches.keys()].sort()).toEqual([
+        'pkc3-active:%2F:active0',
+        'pkc3:%2F:active0', // ⚠ 使用中 ── 消してはいけない
+        'pkc3:%2F:b1', // 自分
+      ]);
+    });
+
+    it('🔴 使用中(active)の cache は消さない ── 消すと開いている旧タブが壊れる', async () => {
+      const h = runSw(SOURCE, seedActive('active0'));
+      await h.fire('install');
+      expect(h.caches.has('pkc3:%2F:active0')).toBe(true);
+    });
+
+    it('🔴 印が無ければ何も消さない(どれが使用中か分からない)', async () => {
+      // ⚠ この仕組みを持たない旧版が active のとき。**推測で消さない**
+      const h = runSw(SOURCE, (c) => {
+        c.set('pkc3:%2F:old1', new FakeCache());
+        c.set('pkc3:%2F:old2', new FakeCache());
+      });
+      await h.fire('install');
+      expect([...h.caches.keys()].sort()).toEqual([
+        'pkc3:%2F:b1',
+        'pkc3:%2F:old1',
+        'pkc3:%2F:old2',
+      ]);
+    });
+
+    it('🔴 別 scope の残骸は触らない(/ の install が /dev/ を壊さない)', async () => {
+      const h = runSw(SOURCE, (c) => {
+        seedActive('active0')(c);
+        c.set('pkc3:%2Fdev%2F:skipped', new FakeCache());
+        c.set('pkc3-active:%2Fdev%2F:devactive', new FakeCache());
+      });
+      await h.fire('install');
+      expect(h.caches.has('pkc3:%2Fdev%2F:skipped')).toBe(true);
+      expect(h.caches.has('pkc3-active:%2Fdev%2F:devactive')).toBe(true);
+    });
+
+    it('他人の cache は触らない', async () => {
+      const h = runSw(SOURCE, (c) => {
+        seedActive('active0')(c);
+        c.set('pkc2:%2F:old', new FakeCache());
+        c.set('someone-else', new FakeCache());
+      });
+      await h.fire('install');
+      expect(h.caches.has('pkc2:%2F:old')).toBe(true);
+      expect(h.caches.has('someone-else')).toBe(true);
+    });
+
+    it('🔴 何度 deploy されても 2 本を超えない(上限があることを直接見る)', async () => {
+      // ⚠ 「1 回消えた」ではなく **上限に収束する**ことを見る ── 積み上がりは
+      // 「1 回ぶんは消えるが 2 回目から溜まる」形でも起きる
+      const map = new Map<string, FakeCache>();
+      seedActive('active0')(map);
+      const sameScopePrecaches = () =>
+        [...map.keys()].filter((k) => k.startsWith('pkc3:%2F:')).length;
+      for (const build of ['d1', 'd2', 'd3', 'd4', 'd5']) {
+        const h = runSw(swSource({ buildId: build, precache: ['./index.html'] }), (c) => {
+          for (const [k, v] of map) c.set(k, v);
+        });
+        await h.fire('install');
+        map.clear();
+        for (const [k, v] of h.caches) map.set(k, v);
+        // active(使用中)+ 自分 = 2 本
+        expect(sameScopePrecaches(), `deploy ${build} で溜まった`).toBe(2);
+      }
+    });
+  });
+
   it('🔴 install では交代しない(P7 段⑤ ── 勝手に旧 cache を消さない)', async () => {
     // ⚠ ここで `skipWaiting()` を呼ぶと、user が何もしていないのに `activate` が
     // 走り、**旧 build の cache を消す**。開いたままの旧タブが後から旧 hash の
@@ -320,7 +415,8 @@ describe('install ── 一覧を丸ごと入れる', () => {
   it('🔴 アプリが頼んだときだけ交代する', async () => {
     const h = runSw(SOURCE);
     await h.fire('install');
-    h.message({ type: 'SKIP_WAITING' });
+    // ⚠ `waitUntil` で囲う ── 囲わないと skipWaiting の完了前に SW が終了しうる
+    expect(h.message({ type: 'SKIP_WAITING' })).toBe(1);
     expect(h.skipped()).toBe(true);
   });
 
@@ -354,8 +450,28 @@ describe('activate ── 古い cache を消す', () => {
       c.set('pkc3:%2F:b1', new FakeCache());
     });
     await h.fire('activate');
-    expect([...h.caches.keys()]).toEqual(['pkc3:%2F:b1']);
+    expect([...h.caches.keys()].sort()).toEqual(['pkc3-active:%2F:b1', 'pkc3:%2F:b1']);
     expect(h.claimed()).toBe(true);
+  });
+
+  it('🔴 activate で「自分が使用中」の印を置く(次の install が見る)', async () => {
+    // ⚠ これが無いと installing 側は「どれが使用中か」を知りようがなく、
+    // **積み上がりを止められない**(review H-1)
+    const h = runSw(SOURCE);
+    await h.fire('activate');
+    expect(h.caches.has('pkc3-active:%2F:b1')).toBe(true);
+  });
+
+  it('🔴 古い版が残した印は畳む(印は 1 scope 1 個)', async () => {
+    const h = runSw(SOURCE, (c) => {
+      c.set('pkc3-active:%2F:old', new FakeCache());
+      c.set('pkc3-active:%2Fdev%2F:devactive', new FakeCache()); // 別 scope は残す
+    });
+    await h.fire('activate');
+    expect([...h.caches.keys()].sort()).toEqual([
+      'pkc3-active:%2F:b1',
+      'pkc3-active:%2Fdev%2F:devactive',
+    ]);
   });
 
   it('🔴 別 scope の cache は消さない(/ を開いて /dev/ を壊さない)', async () => {
@@ -370,6 +486,7 @@ describe('activate ── 古い cache を消す', () => {
     });
     await h.fire('activate');
     expect([...h.caches.keys()].sort()).toEqual([
+      'pkc3-active:%2F:b1', // 自分が使用中である印(review H-1)
       'pkc3:%2F:b1',
       'pkc3:%2Fdev%2F:b1',
       'pkc3:%2Fdev%2F:old',
@@ -398,7 +515,11 @@ describe('activate ── 古い cache を消す', () => {
       c.set('pkc3:%2F:old', new FakeCache());
     });
     await h.fire('activate');
-    expect([...h.caches.keys()].sort()).toEqual(['pkc2:%2F:old', 'someone-else']);
+    expect([...h.caches.keys()].sort()).toEqual([
+      'pkc2:%2F:old',
+      'pkc3-active:%2F:b1', // 自分が使用中である印(review H-1)
+      'someone-else',
+    ]);
   });
 });
 

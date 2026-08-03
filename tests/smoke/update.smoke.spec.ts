@@ -57,6 +57,57 @@ test('🔴 新しい版が配られたら案内が出て、押すと入れ替わ
     await expect(card).toBeVisible({ timeout: 20_000 });
     await expect(card.locator('[data-pkc-field="update-text"]')).toHaveText(/新しい版/);
 
+    // 🔴 ①' 先に「あとで」を押す(review M-1)。`main.ts` の
+    // `dismissUpdate: () => updatePrompt.dismiss()` を **`apply()` に変異させても
+    // 993 unit + 17 smoke が全緑**だった ── 「あとで」が「再読込」として動き、
+    // しかも未保存の下書きを巻き込んで reload しても、誰も気づかない配線だった。
+    // ⚠ 観測点は「**再読込が起きていない**」こと(面が消えるだけでは足りない)
+    await page.evaluate(() => {
+      (window as unknown as Record<string, unknown>).__beforeDismiss = true;
+    });
+    await clickReal(page, '[data-pkc-action="dismiss-update"]');
+    await expect(card).toBeHidden();
+    expect(
+      await page.evaluate(
+        () => (window as unknown as Record<string, unknown>).__beforeDismiss === true,
+      ),
+      '「あとで」で再読込が起きた',
+    ).toBe(true);
+
+    // ⚠ 見送っても待機中の worker は残る ── 開き直せばまた出る(そこから ② へ)
+    await page.reload();
+    await expect(page.locator('[data-pkc-slot="root"][data-pkc-boot="ready"]')).toBeAttached();
+    await expect(card).toBeVisible({ timeout: 20_000 });
+
+    // 🔴 ①'' 編集中に押したら**聞く**(review M-2 / M-1-b)。`main.ts` の
+    // `isEditing` の配線は unit からは届かない ── `() => false` に変異させても
+    // 全緑だった。再読込は open editor の本文を捨てる(本文は AppState にしか
+    // 無く `beforeunload` も無い)ので、ここが死ぬと**黙って下書きが消える**
+    // ⚠ 再読込後は何も選択されていない ── 先に開かないと編集導線が出ない
+    await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]');
+    await clickReal(page, '[data-pkc-action="start-edit"]');
+    await expect(page.locator('[data-pkc-field="editor-body"]')).toBeVisible();
+    let asked: string | null = null;
+    page.once('dialog', (d) => {
+      asked = d.message();
+      void d.dismiss(); // ⚠ **断る** ── 何も起きないことを見る
+    });
+    await page.evaluate(() => {
+      (window as unknown as Record<string, unknown>).__beforeConfirm = true;
+    });
+    await clickReal(page, '[data-pkc-action="apply-update"]');
+    await expect.poll(() => asked, { timeout: 5_000 }).not.toBeNull();
+    expect(asked!).toContain('編集中');
+    expect(
+      await page.evaluate(
+        () => (window as unknown as Record<string, unknown>).__beforeConfirm === true,
+      ),
+      '断ったのに再読込が起きた',
+    ).toBe(true);
+    // ⚠ 断ったら導線は残る(押し直せる)
+    await expect(page.locator('[data-pkc-action="apply-update"]')).toBeVisible();
+    await clickReal(page, '[data-pkc-action="cancel-edit"]');
+
     // ② 押すと交代して**再読込まで進む**(押しただけで止まらない)。
     // 🔴 観測点は「**この document が入れ替わったか**」。当初は
     // 「controller があって boot が ready」で待っていたが、**押す前の

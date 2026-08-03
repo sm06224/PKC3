@@ -445,10 +445,20 @@ Pages は deploy でツリーごと差し替わるので、**消えた cache の
 
 → `install` では交代しない。アプリが `SKIP_WAITING` を送ったときだけ交代する。
 
-⚠ **残る露出は正直に書く**: `clients.claim()` で他タブも新 SW に取られる。ただし
-その状態で旧 hash を取りに行って失敗する形は **SW が無い素の静的 deploy と同じ**
-(Pages 側に旧ファイルが無いので cache の有無に関わらず 404)── SW は
-「押したタブの precache を守る」側であって、露出を増やしてはいない。
+⚠ **残る露出**(review M-4 で比較対象の誤りを指摘され、書き直した)。比べるべきは
+「SW が無い素の静的 deploy」ではなく「**押す前の状態**」である ── 押す前は旧 cache が
+旧タブを守っており、押すとその保護が `clients.claim()` と cache 削除で**全タブぶん**消える:
+
+1. タブ B が lease 待ち(「別のタブで開いています…」)で止まる ── **storage worker は未生成**
+2. タブ A が「再読込」 → 新 SW が activate → 旧 build の cache 削除 + claim
+3. タブ B は `requested === false` なので再読込しない。見張りは `startApp` 解決後にしか
+   張られないので**案内も出ない**
+4. タブ A が閉じてタブ B が lease を取る → hash 付き URL で worker 生成 → 新 cache に無い
+   → network → Pages はツリーごと差し替わっていて 404 → **タブ B は起動不能**
+
+**この窓はまだ塞いでいない。** 塞ぐなら「lease 待ちのタブにも案内を出す」か
+「worker の URL を hash 無しにする」だが、どちらも段⑤ の範囲を越える ──
+書いてあるのは「**自動交代よりは明確に良いが、無害ではない**」という事実である。
 
 #### 押したタブだけを再読込する
 
@@ -474,6 +484,29 @@ unit は「アプリ側の判断」と「SW 側の応答」を別々に見てい
 
 変異試験 14 件・生存 0(SW 2 / 案内の判断 6 / 面と動き 4 / 配線 2)。
 うち 5 件は smoke でしか落ちない(配線)、6 件は unit でしか落ちない(観測不能)。
+
+#### レビュー指摘の反映(H-1 / H-2 / M-1〜M-4 / L)
+
+| # | 何が壊れていたか | どう直したか |
+|---|---|---|
+| H-1 | **交代するまで precache が無限に積み上がる**。`install` の `skipWaiting()` を外した結果、user が押すまで `activate` が走らない = **掃除も走らない**。実 Chromium で計測: 4 デプロイ後に cache 5 本・**13.50MB**(+2.65MB / デプロイ、上限なし)。main への push ごとに deploy されるので「あとで」を押し続ける user に効く。⚠ quota は **OPFS(SQLite 本体)と共用**、`storage.persist()` は未実装 ── **ノート消失に接続する** | `install` でも掃除する。ただし**使用中の cache は消せない**ので、`activate` した worker が `pkc3-active:<scope>:<build>` という**印**を残し、installing 側はそれを見て「自分でも active でもない残骸」だけ消す。⚠ 印が無い(旧版が active)ときは**何も消さない**。上限 2 本に収束することを test で直接見る |
+| H-2 | **2 回目の deploy 以降、押しても沈黙する**。`offer()` が worker を真偽値ラッチで**恒久的に掴む**ため、次の deploy でその worker が `redundant` になっても出し直さず、押すと死んだ worker へ送る。⚠ Chromium は redundant への `postMessage` を**黙って捨てる**(例外も出ない)ので、そのセッションでは二度と更新できないまま兆候が出ない | ラッチを**worker の同一性**に変え、別の worker が来たら出し直す。押された時点で `registration.waiting` を**読み直す**。⚠ 面ごと消すのもやめた ── 交代が成立しないと「押したのに何も起きず、導線だけ無くなった」になる。「切り替えています…」を残す |
+| M-1 | **「あとで」の配線を誰も見ていない**。`dismissUpdate` を `apply()` に変異させても **993 unit + 17 smoke が全緑** ── 「あとで」が「再読込」として動き、未保存の下書きを巻き込んでも気づかない | smoke に「あとで」を押す段を追加。⚠ 観測点は「**再読込が起きていない**」(面が消えるだけでは足りない) |
+| M-2 | **「再読込」が未保存の下書きを確認なしで捨てる**。本文は AppState にしか無く(永続は `PERSIST_ENTRY` のみ)、`beforeunload` も無い。案内は editor の隣に出る常設面 ── 同リポジトリの `delete-entry` / `purge-trash` は confirm を持つのに、ここだけ無かった | 編集中なら聞く(`isEditing` / `confirmDiscard` を注入)。⚠ 断られたら**何も変えない**(面も pending もそのまま = 押し直せる) |
+| M-3 | `waiting` 側の `container.controller` ガードに**負のテストが無く**、外す変異が全緑で生存(`installing` 側にしか無かった) | 「待機中の worker が在っても制御されていなければ出さない」を追加 |
+| M-4 | doc の「露出を増やしていない」の**比較対象が誤り**。比べるべきは「SW 無しの静的 deploy」ではなく「**押す前の状態**」 | §2-3 に**塞いでいない窓**(lease 待ちのタブが起動不能になる 4 段)を明記した |
+| L-1 | attach 時の即時 `check()` は**到達不能**(実ブラウザ計測: `installed` に達した worker は `installing` から外れて `waiting` に入る)。対応する test も現実に起きない状態を作っていた | 即時 `check()` を削除。窓は `waiting` を見る行が拾う ── test も実態に合わせた |
+| L-5 | `message` handler に `event.waitUntil` が無い(`skipWaiting()` 完了前に SW が終了しうる) | `event.waitUntil(self.skipWaiting())`。⚠ stub にも `waitUntil` を持たせないと**囲っているか見分けられない** |
+
+⚠ **stub が本物より緩かった**のもここで直した。`FakeRegistration` が
+「`installed` に達すると `installing` から外れて `waiting` に入り、直前の waiting は
+`redundant` になる」を真似ていなかった ── 真似ないと **H-2 の形を test で作れない**。
+
+反映後の変異試験 19 件・生存 0(H-1 7 / H-2 3 / M-2 5 / M-3 1 / 配線 3)。
+⚠ うち 2 件は 1 巡目で生き残った:
+- 「断られたのに pending を捨てる」は、test が**新しい prompt を作って**押し直していたので救われた
+  ── **同じ prompt を**押し直す形に変えた
+- 「編集中の確認を配線しない」は `main.ts` の配線で、unit からは届かない ── smoke へ回した
 
 ### 段⑥ 実装記録(2026-08-03 着地)
 
