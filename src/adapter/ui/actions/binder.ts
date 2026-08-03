@@ -54,6 +54,11 @@ export interface BinderServices {
   purgeOrphanAssets?(): void;
   /** 注意の面を閉じる(P6c review H-2)。 */
   dismissNotices?(): void;
+  /**
+   * ランチャーのタイルを起動する(P7b 段⑩)。
+   * ⚠ blob の貸し出し・`window.open` は実体側 ── binder は DOM を触らない。
+   */
+  openTile?(lid: string): void;
   /** 配色を切り替える(P7b 段⑨c)。⚠ user の好みで、flag でも container でもない。 */
   setTheme?(theme: string): void;
   /** 一覧の絞り込み(P7b 段⑨c)。⚠ 検索導線はこれまで 1 つも無かった。 */
@@ -231,6 +236,10 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'dismiss-notices': (_dispatcher, _target, services) => {
     services.dismissNotices?.();
+  },
+  'open-tile': (_dispatcher, target, services) => {
+    const lid = target.closest('[data-pkc-tile]')?.getAttribute('data-pkc-tile');
+    if (lid) services.openTile?.(lid);
   },
   'set-theme': (_dispatcher, target, services) => {
     const theme = target.getAttribute('data-pkc-theme-value');

@@ -52,7 +52,7 @@ function buttonLabels(action: string): string[] {
 const EXPECTED_LABELS = {
   'create-entry': ['+ノート', '+Todo', '+ログ', '+シート', '+フォルダ'],
   'set-theme': ['ライト', 'ダーク'],
-  'set-view': ['詳細', 'かんばん', 'カレンダー', 'ファイラ'],
+  'set-view': ['詳細', 'かんばん', 'カレンダー', 'ファイラ', 'ランチャー'],
   'export-archive': ['バックアップ'],
   'export-html': ['閲覧用 HTML'],
   'export-markdown': ['Markdown'],

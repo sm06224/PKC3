@@ -360,6 +360,46 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // 整理との同時実行は attach と同じ危険。⚠ 振り分けは import-file.ts が持つ
     importFiles: (files) => void withAssetGate(() => runImport(files)),
     dismissNotices: () => clearNotices(regions.notices),
+    /**
+     * 🚀 ランチャーのタイルを起動する(P7b 段⑩)。
+     *
+     * ⚠ **新しいタブで開く**。同じタブに載せると、開いた先から戻れない
+     * (PKC3 は SPA なので履歴が噛み合わない)。
+     * ⚠ `noopener` を付ける ── 開いた先から `window.opener` 経由で
+     * こちらを触られない(URL タイルは外部サイトである)。
+     * ⚠ blob は**開いた後に捨てる**。即 revoke すると新しいタブが読む前に消える
+     * ── 「ライフサイクル終端での即破棄」(user 指示 2026-07-27)の範囲内で、
+     * 読み終わるだけの猶予を置く
+     */
+    openTile: (lid) => {
+      const tile = dispatcher.getState().launcherTiles?.find((t) => t.lid === lid);
+      if (!tile) return;
+      if (tile.kind === 'url' && tile.url) {
+        window.open(tile.url, '_blank', 'noopener,noreferrer');
+        return;
+      }
+      if (!tile.assetKey) return;
+      void (async () => {
+        try {
+          const lent = await blobs.lendObjectUrl(DEFAULT_CID, tile.assetKey!);
+          if (!lent) {
+            dispatcher.dispatch({
+              type: 'OP_FAILED',
+              error: `「${tile.title}」の中身が見つかりません(添付が整理された可能性)`,
+            });
+            return;
+          }
+          window.open(lent.url, '_blank', 'noopener,noreferrer');
+          // 新しいタブが読み込むまでの猶予(添付の download と同じ流儀)
+          setTimeout(lent.dispose, 1000);
+        } catch (e) {
+          dispatcher.dispatch({
+            type: 'OP_FAILED',
+            error: `「${tile.title}」を開けませんでした: ${String(e)}`,
+          });
+        }
+      })();
+    },
     // 🎨 配色(P7b 段⑨c、user 指示「最初はライトとダークのみに」)。
     // ⚠ 属性は **`<html>`** に付ける ── `:root` の変数を上書きするため
     setTheme: (theme) => {

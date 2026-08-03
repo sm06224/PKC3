@@ -625,6 +625,51 @@ textarea:focus-visible {
   opacity: 0.55;
 }
 
+/* ── ランチャー ────────────────────────────── */
+[data-pkc-field='launcher-group'] {
+  margin: var(--s5) 0 var(--s2);
+  font-size: 0.95em;
+  color: var(--accent);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: var(--s1);
+}
+[data-pkc-field='launcher-group']:first-child {
+  margin-top: 0;
+}
+[data-pkc-region='launcher-grid'] {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--s3);
+}
+[data-pkc-region='launcher-grid'] [data-pkc-tile] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  align-items: flex-start;
+  padding: var(--s3);
+  min-height: 3.5em;
+  background: var(--surface);
+  text-align: left;
+}
+[data-pkc-region='launcher-grid'] [data-pkc-field='title'] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+[data-pkc-field='tile-url'] {
+  color: var(--muted);
+  font-size: 0.8em;
+}
+/* 外部サイトへ飛ぶタイルは印を付ける(押す前に分かるように) */
+[data-pkc-tile-kind='url'] [data-pkc-field='tile-url']::before {
+  content: '↗ ';
+}
+[data-pkc-field='launcher-empty'],
+[data-pkc-field='launcher-loading'] {
+  color: var(--muted);
+}
+
 /* ── ファイラ ────────────────────────────────── */
 [data-pkc-region='filer-breadcrumb'] {
   display: flex;

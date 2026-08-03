@@ -11,6 +11,7 @@ import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import { extractMeta, seedBodyFor } from '@features/flavor';
 import { withTodoStatus } from '@features/flavor/todo-flavor';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
+import type { LauncherTile } from '@features/launcher/tiles';
 
 export type AppPhase = 'initializing' | 'ready' | 'editing' | 'error';
 export type ViewMode = 'detail' | 'calendar' | 'kanban' | 'filer' | 'launcher';
@@ -84,6 +85,12 @@ export interface AppState {
    * が曖昧になる。
    */
   filterQuery: string;
+  /**
+   * ランチャーのタイル(P7b 段⑩)。⚠ `null` = **まだ読んでいない**。
+   * 元データは attachment の frontmatter で**常駐していない**ので、
+   * ランチャーを開いたときに要求して還流させる(履歴一覧と同じ流儀)。
+   */
+  launcherTiles: LauncherTile[] | null;
   error: string | null;
 }
 
@@ -98,6 +105,7 @@ export const initialState: AppState = {
   freshLid: null,
   viewMode: 'detail',
   filterQuery: '',
+  launcherTiles: null,
   calendarMonth: null,
   showArchived: false,
   revisionPanel: null,
@@ -109,6 +117,7 @@ export type UserAction =
   | { type: 'SELECT_ENTRY'; lid: string }
   | { type: 'SET_VIEW_MODE'; mode: ViewMode }
   | { type: 'SET_ENTRY_FILTER'; query: string }
+  | { type: 'LAUNCHER_TILES_LOADED'; tiles: LauncherTile[] }
   | { type: 'START_EDIT' }
   | { type: 'UPDATE_OPEN_BODY'; body: string }
   | { type: 'COMMIT_EDIT' }
@@ -182,6 +191,7 @@ export type Dispatchable = UserAction | SystemCommand;
  */
 export type DomainEvent =
   | { type: 'REQUEST_BODY'; lid: string }
+  | { type: 'REQUEST_LAUNCHER_TILES' }
   | {
       type: 'PERSIST_ENTRY';
       entry: EntryUpsert;
@@ -329,8 +339,15 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
           revisionPanel: null,
           trashPanel: null,
         },
-        events: [],
+        // 🔑 ランチャーを開いたら**そのとき**タイルを要求する(P7b 段⑩)。
+        // ⚠ 元データ(`registered_as_app` 等)は attachment の frontmatter で
+        // **常駐していない** ── boot で全部読むと、ランチャーを一度も開かない
+        // user にも全添付の body 読込を負わせることになる。
+        // ⚠ **毎回要求する** ── 添付を足した直後に開いても古い一覧を見せない
+        events: action.mode === 'launcher' ? [{ type: 'REQUEST_LAUNCHER_TILES' }] : [],
       };
+    case 'LAUNCHER_TILES_LOADED':
+      return { state: { ...state, launcherTiles: action.tiles }, events: [] };
     case 'START_EDIT': {
       // openBody が現選択の body を持っているときだけ編集に入れる
       // (= 未読 body の編集・保存が構造的に不可能)

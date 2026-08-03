@@ -18,6 +18,8 @@ import type { Dispatcher } from './dispatcher';
  * 届く(review K の解消)。effect 層は実行時に state を参照しない
  * (時間差窓 C-1 の解消 ── 発火時に確定した行をそのまま書く)。
  */
+import { buildTiles, type TileSource } from '@features/launcher/tiles';
+
 export interface StorePort {
   getBody(lid: string): Promise<string | null>;
   /**
@@ -166,6 +168,35 @@ export function connectStoreEffects(
           } catch (e) {
             if (!disposed)
               dispatcher.dispatch({ type: 'OP_FAILED', error: String(e) });
+          }
+        });
+        break;
+      case 'REQUEST_LAUNCHER_TILES':
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            // ⚠ **attachment だけ**を読む ── 全 entry の body を読むと、
+            // ランチャーを開くたびに全文を舐めることになる
+            const lids: Array<{ lid: string; title: string }> = [];
+            for (const meta of dispatcher.getState().entryMetas.values()) {
+              if (meta.archetype === 'attachment') lids.push({ lid: meta.lid, title: meta.title });
+            }
+            const sources: TileSource[] = [];
+            for (const { lid, title } of lids) {
+              const body = await store.getBody(lid);
+              if (disposed) return;
+              if (body !== null) sources.push({ lid, title, body });
+            }
+            dispatcher.dispatch({
+              type: 'LAUNCHER_TILES_LOADED',
+              tiles: buildTiles(sources),
+            });
+          } catch (e) {
+            if (!disposed)
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: `ランチャーの読込に失敗しました: ${String(e)}`,
+              });
           }
         });
         break;
