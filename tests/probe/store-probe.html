@@ -46,10 +46,18 @@
             { id: 'r3', fromLid: 'e2', toLid: 'e2', kind: 'semantic' },
           ],
         });
-        await store.request({
-          op: 'bulkAddRevisions',
+        // P5c で `bulkAddRevisions` は廃止 ── 履歴は**鎖として**積む
+        // (全文で積む経路は持たない)。⚠ tip = entries.body と**違う**本文を
+        // 渡さないと「変化なし」で見送られ、下の revisions 件数が合わなくなる
+        steps.chain = await store.request({
+          op: 'importRevisionChains',
           cid: 'c1',
-          revisions: [{ id: 'v1', entryLid: 'e1', revOrder: 1, snapshot: 'old' }],
+          chains: [
+            {
+              entryLid: 'e1',
+              snapshots: [{ body: 'old', createdAt: '2026-01-01T00:00:00.000Z' }],
+            },
+          ],
         });
         steps.relations = await store.request({ op: 'listRelations', cid: 'c1' });
         await store.request({ op: 'deleteEntry', cid: 'c1', lid: 'e1' });
