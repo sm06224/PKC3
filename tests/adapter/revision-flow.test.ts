@@ -14,6 +14,7 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import { FilerRenderer } from '../../src/adapter/ui/render/filer';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { reduce, initialState, type AppState } from '../../src/adapter/state/app-state';
 import { stubRevisionOps } from '../helpers/revision-stub';
 
 function meta(lid: string, over: Partial<EntryMeta> = {}): EntryMeta {
@@ -320,5 +321,40 @@ describe('revision flow (P5b)', () => {
     await tick();
     expect(purged).toBe(1);
     expect(d.getState().trashPanel?.items).toHaveLength(0);
+  });
+});
+
+describe('🔴 ゴミ箱一覧の後着(P8 段⑪ hotfix)', () => {
+  it('復元より後に届いた古い一覧で、戻したものが**ゴミ箱に生き返らない**', () => {
+    // ⚠ 「ゴミ箱を開く」→「すぐ復元する」の順で、一覧の要求のほうが遅いと起きる。
+    // 世代(token)ではなく**導出**で塞ぐ ── ゴミ箱の定義は
+    // 「entry が居ない revision」なので、届いた一覧をその場の真実で濾せばよい
+    // (どの順で着いても正しい)
+    const restored: EntryMeta = {
+      lid: 'x',
+      title: '戻したノート',
+      archetype: 'text',
+      createdAt: null,
+      updatedAt: null,
+      entryOrder: 1,
+      status: null,
+      date: null,
+      archived: false,
+    };
+    const base: AppState = {
+      ...initialState,
+      phase: 'ready',
+      entryMetas: new Map([['x', restored]]),
+      order: ['x'],
+      trashPanel: { items: [] },
+    };
+    const { state } = reduce(base, {
+      type: 'TRASH_LIST_LOADED',
+      items: [
+        { revId: 'r1', entryLid: 'x', createdAt: null, title: '戻したノート', archetype: 'text' },
+        { revId: 'r2', entryLid: 'y', createdAt: null, title: 'まだゴミ箱', archetype: 'text' },
+      ],
+    });
+    expect(state.trashPanel?.items.map((t) => t.entryLid), '戻したものが生き返った').toEqual(['y']);
   });
 });

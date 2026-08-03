@@ -59,6 +59,10 @@ test('boot → ノート作成 → 編集 → 保存が画面に反映される'
   await expect(
     page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]'),
   ).toHaveCount(1); // 復元で一覧に戻る
+  // ⚠ ゴミ箱は**フォルダのタブへ戻ってから**数える ── 隠れている面は描き直されない
+  // ので、一覧を出したまま数えると「前に描いた古い DOM」を見ることになる
+  // (3 回に 2 回落ちる flake の正体。user が見る形で観測する)
+  await clickReal(page, '[data-pkc-browse="filer"]');
   await expect(trash.locator('li')).toHaveCount(0);
 
   expect(errors).toEqual([]);

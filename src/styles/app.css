@@ -429,11 +429,20 @@ select:focus-visible {
   padding-bottom: var(--s2);
   border-bottom: 1px solid var(--border);
 }
+/* 🔑 **操作の帯は上に貼り付ける**(P8 段⑪)── 長いノートで「編集」を押すために
+ * 毎回先頭まで戻るのは、それ自体が余計な往復である(「同じものが常に同じ場所に
+ * ある」という業務画面の作法にも合う)。⚠ 地を塗る(本文が透けると読めない)。 */
+[data-pkc-field='detail-bar-slot'] {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+}
 [data-pkc-field='detail-toolbar'] {
   display: flex;
   flex-wrap: wrap;
   gap: var(--s2);
-  margin-bottom: var(--s3);
+  padding-bottom: var(--s3);
 }
 [data-pkc-action='delete-entry'],
 [data-pkc-action='purge-trash'] {

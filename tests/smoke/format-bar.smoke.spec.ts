@@ -125,3 +125,91 @@ test('🔴 編集中は追記できず、理由と出口が画面に出る(競�
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * P8 段⑪: 🔴 **描き直しても本文のスクロールがトップへ戻らない**。
+ *
+ * > user 指示 2026-08-03「**あとはレンダリングした後にスクロールがトップに戻る
+ * > no-op も塞いでね**」
+ *
+ * 🔴 view の描画は毎回 `region.textContent = ''` から組み直していたので、
+ * 本文が変わるたび(追記 / 保存 / トグルの ack)に**読んでいた位置が先頭へ飛んで**
+ * いた。長いログでは、追記した先が見えなくなる。
+ *
+ * ⚠ 観測点は 2 つ:
+ *  ① **追記しても位置が動かない**(同じノートを見続けている)
+ *  ② **保存して戻っても位置が戻る**(編集の面は別物なので、覚えて戻す)
+ * ⚠ 逆に「**別のノートへ移ったら先頭から**」は正しい ── そこも一緒に見る
+ * (「常に動かさない」実装だと、次のノートを途中から読まされる)。
+ */
+test('🔴 追記・保存しても本文のスクロールがトップへ戻らない', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+
+  // 長いログを 2 件(1 件目で位置を見る / 2 件目で「移ったら先頭」を見る)
+  const long = Array.from({ length: 80 }, (_, i) => `## 節 ${i}\n\n段落 ${i}。\n`).join('\n');
+  await createEntry(page, 'textlog');
+  await page.locator('[data-pkc-field="editor-body"]').fill(long);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await createEntry(page, 'textlog');
+  await page.locator('[data-pkc-field="editor-body"]').fill('2 件目\n\n' + long);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  const detail = page.locator('[data-pkc-region="detail"]');
+  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]');
+  await expect(page.locator('[data-pkc-field="detail-body"]')).toBeVisible();
+
+  await detail.evaluate((el) => (el.scrollTop = 700));
+  const parked = await detail.evaluate((el) => el.scrollTop);
+  expect(parked, 'スクロールできていない(観測の前提が崩れている)').toBeGreaterThan(100);
+
+  // ⚠ **同じ実体が残るか**も見る ── scroll だけだと「同じ tick で入れ替える」
+  // 実装が素通りする(層が崩れても scroll は clamp されない。変異試験で判明)
+  await page.evaluate(() => {
+    const b = document.querySelector('[data-pkc-field="detail-body"]');
+    b!.firstElementChild!.setAttribute('data-mark', 'V');
+  });
+
+  // ① 🔴 追記しても位置が動かない
+  await page.locator('[data-pkc-field="append-input"]').fill('追記した行');
+  await clickReal(page, '[data-pkc-action="append-entry"]');
+  await expect(page.locator('[data-pkc-field="detail-body"]')).toContainText('追記した行');
+  expect(
+    Math.abs((await detail.evaluate((el) => el.scrollTop)) - parked),
+    '追記でスクロールがトップへ飛んだ',
+  ).toBeLessThan(40);
+  expect(
+    await page.evaluate(
+      () =>
+        document
+          .querySelector('[data-pkc-field="detail-body"]')!
+          .firstElementChild!.getAttribute('data-mark'),
+    ),
+    '触っていない所まで作り直した(図や画像が焼き直しになる)',
+  ).toBe('V');
+
+  // ② 🔴 編集 → 保存で戻っても位置が戻る
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-field="detail-body"]')).toBeVisible();
+  expect(
+    Math.abs((await detail.evaluate((el) => el.scrollTop)) - parked),
+    '保存で戻ったらスクロールがトップへ飛んだ',
+  ).toBeLessThan(40);
+
+  // ③ ⚠ **別のノートへ移ったら先頭から**(ここは動いて正しい)
+  await rows.nth(1).click();
+  await expect(page.locator('[data-pkc-field="detail-body"]')).toContainText('2 件目');
+  expect(
+    await detail.evaluate((el) => el.scrollTop),
+    '別のノートを途中から見せている',
+  ).toBeLessThan(40);
+  await expect(rows).toHaveCount(2);
+
+  // ⚠ 「編集に入ったまま別のノートへ移る」経路は **unit** で見る
+  //    (`tests/adapter/detail-scroll.test.ts`)── 実機では編集中に一覧を
+  //    押しても切り替わらないので、smoke ではその窓を作れない
+  expect(errors).toEqual([]);
+});

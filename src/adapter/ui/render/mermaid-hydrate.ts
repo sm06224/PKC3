@@ -66,8 +66,19 @@ function widthOf(host: HTMLElement): number {
  * @returns 後始末(ObserverIdle の解除 + ObjectURL の revoke)。
  *   ⚠ **必ず呼ぶ** ── 呼ばないと焼いた PNG の URL が生き残る。
  */
-export function hydrateMermaid(root: ParentNode): () => void {
-  const hosts = [...root.querySelectorAll<HTMLElement>('[data-pkc-mermaid-src]')];
+export function hydrateMermaid(root: ParentNode | readonly ParentNode[]): () => void {
+  // ⚠ **複数の根をまとめて受ける**(P8 段⑪)── 差分反映は「新しく入った要素」を
+  // 何個も渡してくるので、1 個ずつ呼ぶと **要素の数だけ観測器ができる**
+  // (121 個の IntersectionObserver、121 個の idle ループ)。
+  // ⚠ 根そのものが器である場合も拾う(`querySelectorAll` は自分を含まない)
+  const roots: readonly ParentNode[] = Array.isArray(root)
+    ? (root as readonly ParentNode[])
+    : [root as ParentNode];
+  const hosts: HTMLElement[] = [];
+  for (const r of roots) {
+    if (r instanceof Element && r.matches('[data-pkc-mermaid-src]')) hosts.push(r as HTMLElement);
+    hosts.push(...r.querySelectorAll<HTMLElement>('[data-pkc-mermaid-src]'));
+  }
   if (hosts.length === 0) return () => undefined;
 
   const urls: string[] = [];

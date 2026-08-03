@@ -963,7 +963,20 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       return { state: { ...state, trashPanel: null }, events: [] };
     case 'TRASH_LIST_LOADED':
       if (state.phase !== 'ready') return { state, events: [] };
-      return { state: { ...state, trashPanel: { items: action.items } }, events: [] };
+      return {
+        state: {
+          ...state,
+          // 🔴 **いま存在する entry は「ゴミ箱」ではない**(P8 段⑪ の hotfix)。
+          // ゴミ箱の定義は「entry が居ない revision」なので、届いた一覧を
+          // **その場の真実で濾す**。これが無いと、開いた直後に復元したとき
+          // **先に飛んだ一覧要求の応答が後から着いて、復元したものを戻す**
+          // ── 画面には「復元したのにゴミ箱に残っている」が出る(smoke が
+          // 3 回に 2 回落ちる形で表面化していた)。
+          // ⚠ 世代(token)ではなく**導出**で塞ぐ ── どの順で着いても正しい
+          trashPanel: { items: action.items.filter((t) => !state.entryMetas.has(t.entryLid)) },
+        },
+        events: [],
+      };
     case 'RESTORE_TRASH': {
       if (state.phase !== 'ready') return { state, events: [] };
       if (state.entryMetas.has(action.entryLid)) {
