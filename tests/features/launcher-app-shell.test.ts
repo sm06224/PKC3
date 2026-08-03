@@ -29,7 +29,12 @@ describe('ランチャーの外殻', () => {
 
   it('🔴 添付の HTML は **srcdoc の中に escape されて**入る(素の markup として出ない)', () => {
     const html = buildLauncherAppShell('題', '<script>fetch("/steal")</scr' + 'ipt>');
+    // ⚠ `toContain('sandbox="…"')` は**前方一致**なので、末尾に権限を足されても
+    // 通ってしまう ── **生成物そのもの**に禁止語を当てる(定数の pin は上の it)。
+    // 🔴 これは空振りだった(P7b review の再レビューで発覚)。定数を汚す変異は
+    // 上で落ちるが、**組み立て側で足す**変異はここが唯一の関門である
     expect(html).toContain(`sandbox="${LAUNCHER_APP_SANDBOX}"`);
+    expect(html).not.toContain('allow-same-origin');
     expect(html).toContain('srcdoc="');
     // ⚠ 外殻の DOM に**素の script が生えない**ことが主張(escape の抜けの検出)
     expect(html).not.toContain('<script>');
