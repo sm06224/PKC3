@@ -164,7 +164,9 @@ export function inspectDist({ kind, capKb, floorKb, files, text }) {
   // ⚠ 生成器が空を吐いても**それ自体は誰も気づかない** ── ここで突き合わせる
   const swText = text.get('sw.js');
   if (swText !== undefined) {
-    const m = /const PRECACHE = (\[[^\]]*\]);/.exec(swText);
+    // ⚠ `[^\]]*` だと名前に `]` を含む生成物で**マッチしなくなり**、
+    // 「生成器が壊れている」という**嘘の診断**を出す(review L-6)。行末まで取る
+    const m = /const PRECACHE = (\[.*\]);/.exec(swText);
     if (!m) {
       errors.push('sw.js に precache 一覧が無い ── 生成器が壊れている');
     } else {

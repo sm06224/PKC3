@@ -22,12 +22,18 @@ test('🔴 オフラインで再読込しても、作ったノートが読める
   await expect(page.locator('[data-pkc-field="detail-body"] h1')).toBeVisible();
 
   // SW が **activate して制御を持つ**まで待つ(登録しただけでは cache は空)
-  await page.waitForFunction(() => navigator.serviceWorker?.controller !== null, null, {
+  // ⚠ `controller !== null` は `serviceWorker` 自体が無いと `undefined !== null` で
+  // **即通過**する(SW が無い環境でも緑)── 真偽値で見る
+  await page.waitForFunction(() => Boolean(navigator.serviceWorker?.controller), null, {
     timeout: 20_000,
   });
 
-  // ⚠ ここから本番:回線を切って**再読込**する
-  await context.setOffline(true);
+  // 🔴 ここから本番。⚠ **`setOffline` では足りない** ── あれはページ発の
+  // リクエストしか止めず、**Service Worker 自身の `fetch()` は生きたまま**になる。
+  // その状態だと「SW が cache から返した」のか「SW が network から取れた」のかを
+  // 区別できず、precache から `.wasm` を抜いても緑になった(review H-2 で実証)。
+  // route で abort すると SW の fetch まで止まる = 本当に cache だけで動くかを見る
+  await context.route('**/*', (route) => route.abort('internetdisconnected'));
   await page.reload({ waitUntil: 'commit' });
 
   // ① 白紙にならない(boot が ready まで進む)
@@ -43,6 +49,6 @@ test('🔴 オフラインで再読込しても、作ったノートが読める
     'オフラインで読む',
   );
 
-  await context.setOffline(false);
+  await context.unroute('**/*');
   expect(errors).toEqual([]);
 });

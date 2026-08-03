@@ -2,7 +2,7 @@ import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'node_modules/**', 'public/sw.js'] },
+  { ignores: ['dist/**', 'node_modules/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
@@ -21,6 +21,8 @@ export default tseslint.config(
         InputEvent: 'readonly',
         KeyboardEvent: 'readonly',
         MessageEvent: 'readonly',
+        URL: 'readonly',
+        Response: 'readonly',
       },
     },
   },

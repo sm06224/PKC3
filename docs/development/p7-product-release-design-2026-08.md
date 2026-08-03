@@ -395,6 +395,31 @@ unit で pin した(入れないと、実機でしか壊れない形を test で
 
 変異試験 19 件・生存 0(SW 13 / 検品 5 / plugin 1)。
 
+#### レビュー指摘の反映(H-1 / H-2 / M-1〜M-3)
+
+| # | 何が壊れていたか | どう直したか |
+|---|---|---|
+| H-1 | **CacheStorage は origin 単位で、scope 単位ではない**。`/`(product)と `/dev/` は同じ origin にあるので、前置きだけで「自分以外」を消すと**別 scope の precache まで消える** ── `/` を 1 回開いただけで `/dev/` がオフラインで開かなくなる | cache 名を `pkc3:<scope>:<build>` にして**欄で比較**。⚠ `/` は `/dev/` の接頭辞なので `startsWith` では分けられない。実ブラウザで実証: ① `/dev/` 起動後 `{"pkc3:%2Fdev%2F:…":8}` ② `/` も起動後は両方在る ③ オフラインで `/dev/` が `ready` |
+| H-2 | オフライン smoke が**オフラインを作れていなかった**。`context.setOffline(true)` は**ページ由来の要求しか止めない** ── SW 自身の `fetch()` は素通りするので、precache から `.wasm` を外す変異が**緑のまま通った** | `context.route('**/*', (r) => r.abort('internetdisconnected'))`。同じ変異が**落ちる**ことを確認 |
+| M-1 | build id が `GITHUB_SHA` だった ── product のバイト列が 1 バイトも変わらなくても main への push のたびに `sw.js` が変わり、**全 user が 1.6MB を再取得して再 precache**(北極星「速く、安く」に直接反する) | **配る物の一覧から**作る(`buildIdFor`)。precache 一覧は hash 付き名を含むので「一覧が同じ = 配る物が同じ」。実証: `GITHUB_SHA` を変えた 2 回のビルドで `sw.js` の md5 が一致 |
+| M-2 | その `buildIdFor` を誰も pin していない | `vite.config.ts` から export し `tests/build-config.test.ts` が性質(順序非依存 / 一覧が変われば変わる / 環境変数に依らない)を pin |
+| M-3 | `public/` の静的 file が precache から漏れる | plugin が `configResolved` で `publicDir` を捕まえ、再帰列挙して一覧に足す。`public/robots.txt` を置いて突合まで通ることを確認 |
+
+#### 🔴 2 ラウンド目の変異試験で見つけた「stub が実装より緩い」
+
+`caches.match(req, { cacheName })` を、fake の `caches` が**無視して全 cache を舐めて**
+いた。本物は **その cache だけ**を見て、無ければ `undefined` を返す ── stub が緩い分だけ
+「自分の cache 以外は覗かない」test は `cacheName` の有無を**一切見分けられず**、
+空振りしていた。本物の意味論に合わせたら、`MATCH` から `cacheName` を外す変異が落ちる。
+
+もう 1 件、**前置き検査が別の検査に救われて**いた。他人の cache を表す fixture が
+`someone-else`(欄が足りず長さ検査に救われる)と `other:%2F:old`(scope 欄がずれて
+救われる)しか無く、**前置き検査を丸ごと外しても両方 pass した**。前置きは 5 文字なので、
+撃ち抜けるのは「**同じ長さの別前置き + 自分と同形の後ろ**」だけ ── `pkc2:%2F:old` を
+足した(同 origin の兄弟 product という、実際に在りうる形でもある)。
+
+2 ラウンド目の変異試験 16 件・生存 0(SW 純関数 4 / 生成 SW 7 / precache 規則 2 / build 設定 3)。
+
 ---
 
 ## 5. 裁定(2026-08-02、user 委任 → 採った側)

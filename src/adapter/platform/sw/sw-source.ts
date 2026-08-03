@@ -10,10 +10,16 @@
  * test は生成した文字列を **実際に評価して**(偽の worker global の上で)確かめる
  * ── 文字列一致で見ると「それらしい形」に救われる(CLAUDE.md)。
  *
- * 🔴 **テンプレートの中でバッククォートと `${` を書かない**(実際に踏んだ)。
- * 生成ソースはこの file のテンプレートリテラルなので、コメントの中の 1 個の
- * バッククォートが**文字列を閉じてしまい**、config の読込ごと落ちる。
- * 生成ソース内の引用は素の `'` で書く。
+ * 🔴 **生成ソースの中では、閉じ記号になる文字を書かない**(2 回踏んだ)。
+ * ここはテンプレートリテラルで、中身は素の JS として評価される ──
+ * - バッククォート / `${` … **テンプレートを閉じる**(config の読込ごと落ちた)
+ * - ブロックコメントの閉じ記号(アスタリスク + スラッシュ)… **コメントを閉じる**。
+ *   ⚠ 強調の二重アスタリスクの直後にスラッシュを書くとそれになる。実際
+ *   `**` + `/dev/` と書いて以降が全部コードとして parse された。
+ *   ⚠⚠ **この注意書き自体でもう一度踏んだ** ── 説明の中に閉じ記号を書いて、
+ *   この file の TS コメントが閉じた。記号は言葉で書く
+ * 生成ソース内の引用は素の `'`、強調は使わない。`tests/adapter/sw-source.test.ts`
+ * が `new Function` で毎回 parse するので、踏めば必ず落ちる。
  *
  * ## 戦略(設計 doc §2-2)
  * - **navigation は network-first** → 失敗したら cache。
@@ -24,11 +30,27 @@
  */
 
 /** cache 名の前置き。⚠ これを手がかりに**古い cache を消す**ので変えない。 */
-export const CACHE_PREFIX = 'pkc3-';
+export const CACHE_PREFIX = 'pkc3:';
 
-/** cache 名。build id ごとに別 cache になる。 */
-export function cacheNameFor(buildId: string): string {
-  return `${CACHE_PREFIX}${buildId}`;
+/**
+ * cache 名。**scope と build id の両方**で分ける。
+ *
+ * 🔴 CacheStorage は **origin 単位で、scope 単位ではない**(review H-1 で実証)。
+ * Pages は同じ origin に `/`(product)と `/dev/` を置くので、前置きだけで
+ * 「自分以外」を消すと **別スコープの precache まで消える** ──
+ * `/` を 1 回開いただけで `/dev/` がオフラインで開かなくなった。
+ * ⚠ `/` は `/dev/` の接頭辞なので `startsWith` では分けられない。**欄で比較する**。
+ */
+export function cacheNameFor(scope: string, buildId: string): string {
+  return `${CACHE_PREFIX}${encodeURIComponent(scope)}:${buildId}`;
+}
+
+/** 掃除の対象か ── **同じ scope の、自分ではない** PKC3 cache だけ。 */
+export function isStaleCache(name: string, scope: string, buildId: string): boolean {
+  if (!name.startsWith(CACHE_PREFIX)) return false; // 他人の cache は触らない
+  const parts = name.slice(CACHE_PREFIX.length).split(':');
+  if (parts.length < 2) return false;
+  return parts[0] === encodeURIComponent(scope) && parts.slice(1).join(':') !== buildId;
 }
 
 /**
@@ -59,7 +81,16 @@ export interface SwSourceInput {
 export function swSource({ buildId, precache }: SwSourceInput): string {
   const list = JSON.stringify([...precache]);
   return `/* PKC3 service worker — build ${buildId}(自動生成。手で編集しない) */
-const CACHE = ${JSON.stringify(cacheNameFor(buildId))};
+const BUILD = ${JSON.stringify(buildId)};
+const PREFIX = ${JSON.stringify(CACHE_PREFIX)};
+/*
+ * CacheStorage は origin 単位で scope 単位ではない。Pages は同じ origin に
+ * product と dev を置くので、scope を混ぜると片方を開いただけで
+ * もう片方の precache が消える(review H-1 で実証)。
+ * ルート scope は dev scope の接頭辞なので startsWith では分けられない。欄で比べる。
+ */
+const SCOPE = encodeURIComponent(new URL(self.registration.scope).pathname);
+const CACHE = PREFIX + SCOPE + ':' + BUILD;
 const PRECACHE = ${list};
 const HASHED = ${HASHED_ASSET.toString()};
 /*
@@ -68,7 +99,7 @@ const HASHED = ${HASHED_ASSET.toString()};
  * 持つと(vite preview が実際に付ける)照合が外れ、**オフラインで本体が読めない**。
  * 実測: 単体では全部緑なのに、実ブラウザのオフライン再読込だけが白紙になった。
  */
-const MATCH = { ignoreVary: true };
+const MATCH = { cacheName: CACHE, ignoreVary: true };
 
 self.addEventListener('install', (event) => {
   // ⚠ 1 件でも失敗したら install を失敗させる(半端な cache でオフラインに
@@ -82,7 +113,14 @@ self.addEventListener('activate', (event) => {
       .keys()
       .then((keys) =>
         Promise.all(
-          keys.filter((k) => k !== CACHE && k.startsWith(${JSON.stringify(CACHE_PREFIX)})).map((k) => caches.delete(k)),
+          keys
+            .filter((k) => {
+              if (!k.startsWith(PREFIX)) return false; // 他人の cache は触らない
+              const parts = k.slice(PREFIX.length).split(':');
+              // 同じ scope の、自分ではないものだけ
+              return parts.length >= 2 && parts[0] === SCOPE && parts.slice(1).join(':') !== BUILD;
+            })
+            .map((k) => caches.delete(k)),
         ),
       )
       .then(() => self.clients.claim()),
@@ -98,10 +136,22 @@ self.addEventListener('fetch', (event) => {
   // 🔴 navigation は **network-first**。cache-first にすると新しい版が永久に届かない
   if (req.mode === 'navigate') {
     event.respondWith(
-      // 注: fallback の URL は precache に入れた綴りと同じにする
-      // ('index.html' と './index.html' は別 key になりうる)
+      // 注: 相対 URL は **SW script の URL 基準**で解決される(/dev/ の SW なら
+      // /dev/index.html)。precache に入れた綴りと揃えておく
       fetch(req).catch(() =>
-        caches.match(req, MATCH).then((hit) => hit || caches.match('./index.html', MATCH)),
+        caches
+          .match(req, MATCH)
+          .then((hit) => hit || caches.match('./index.html', MATCH))
+          // 注: ここで undefined を返すと respondWith が ERR_FAILED になり、
+          // user には白紙しか出ない。理由を出す
+          .then(
+            (hit) =>
+              hit ||
+              new Response(
+                '<!doctype html><meta charset="utf-8"><p>オフラインです。まだこの版を保存していないので、一度オンラインで開き直してください。</p>',
+                { status: 503, headers: { 'content-type': 'text/html; charset=utf-8' } },
+              ),
+          ),
       ),
     );
     return;
@@ -117,9 +167,14 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     fetch(req)
       .then((res) => {
-        if (res && res.ok) {
+        // 注: 200 だけを入れる。206(Partial)は Cache.put が TypeError を投げ、
+        // quota 超過も同じく reject する ── SW の unhandled rejection にしない
+        if (res && res.status === 200) {
           const copy = res.clone();
-          void caches.open(CACHE).then((c) => c.put(req, copy));
+          void caches
+            .open(CACHE)
+            .then((c) => c.put(req, copy))
+            .catch(() => {});
         }
         return res;
       })

@@ -17,16 +17,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 /** env を差してから config を**読み直す**(import 時に評価されるため)。 */
-async function loadConfig(kind: string | undefined): Promise<{
-  build?: { sourcemap?: boolean | 'inline' | 'hidden' };
+async function loadModule(kind: string | undefined): Promise<{
+  default: { build?: { sourcemap?: boolean | 'inline' | 'hidden' } };
+  buildIdFor: (precache: readonly string[]) => string;
 }> {
   vi.resetModules();
   const prev = process.env.VITE_PKC_KIND;
   if (kind === undefined) delete process.env.VITE_PKC_KIND;
   else process.env.VITE_PKC_KIND = kind;
   try {
-    const mod = (await import('../vite.config')) as { default: unknown };
-    return mod.default as { build?: { sourcemap?: boolean } };
+    return (await import('../vite.config')) as unknown as {
+      default: { build?: { sourcemap?: boolean | 'inline' | 'hidden' } };
+      buildIdFor: (precache: readonly string[]) => string;
+    };
   } finally {
     if (prev === undefined) delete process.env.VITE_PKC_KIND;
     else process.env.VITE_PKC_KIND = prev;
@@ -39,7 +42,7 @@ afterEach(() => {
 
 describe('ビルド設定 — product に map を載せない', () => {
   it('🔴 product では sourcemap を出さない', async () => {
-    expect((await loadConfig('product')).build?.sourcemap).toBe(false);
+    expect((await loadModule('product')).default.build?.sourcemap).toBe(false);
   });
 
   it('dev では sourcemap を出す(調査手段を失わない)', async () => {
@@ -47,10 +50,35 @@ describe('ビルド設定 — product に map を載せない', () => {
     // ここが false になると本番の調査手段が丸ごと消える。
     // ⚠ 「同じコード」ではない(`BUILD_KIND` の刻印で entry chunk が変わる)ので、
     // product の trace を dev の map で読み替えることはできない ── 再現は dev 版 URL で
-    expect((await loadConfig('dev')).build?.sourcemap).toBe(true);
+    expect((await loadModule('dev')).default.build?.sourcemap).toBe(true);
   });
 
   it('kind の指定が無いとき(ローカル開発)も sourcemap を出す', async () => {
-    expect((await loadConfig(undefined)).build?.sourcemap).toBe(true);
+    expect((await loadModule(undefined)).default.build?.sourcemap).toBe(true);
+  });
+});
+
+describe('🔴 SW の cache id は**配る物から**決まる(P7 段④ review M-1/M-2)', () => {
+  it('一覧が同じなら id も同じ(中身が変わっていないのに再 precache させない)', async () => {
+    // ⚠ `GITHUB_SHA` を使っていたときは、product のバイト列が同じでも main push の
+    // たびに `sw.js` が変わり、**全 user が 1.6MB を再取得**していた
+    const { buildIdFor } = await loadModule('dev');
+    expect(buildIdFor(['./a-AAAAAAAA.js', './b.html'])).toBe(
+      buildIdFor(['./b.html', './a-AAAAAAAA.js']),
+    );
+  });
+
+  it('🔴 一覧が変われば id も変わる(固定だと新しい版が古い cache を使い続ける)', async () => {
+    const { buildIdFor } = await loadModule('dev');
+    expect(buildIdFor(['./a-AAAAAAAA.js'])).not.toBe(buildIdFor(['./a-BBBBBBBB.js']));
+    expect(buildIdFor(['./a-AAAAAAAA.js'])).not.toBe(
+      buildIdFor(['./a-AAAAAAAA.js', './b.html']),
+    );
+  });
+
+  it('環境変数に依らない(同じ一覧なら kind をまたいでも同じ)', async () => {
+    const a = (await loadModule('dev')).buildIdFor(['./x-AAAAAAAA.js']);
+    const b = (await loadModule('product')).buildIdFor(['./x-AAAAAAAA.js']);
+    expect(a).toBe(b);
   });
 });

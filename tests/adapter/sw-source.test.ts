@@ -7,8 +7,15 @@
  * 通ってしまう。偽の worker global を作り、`install` / `activate` / `fetch` を
  * **実際に発火**させて、どの Response が返るかを assert する。
  */
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { CACHE_PREFIX, cacheNameFor, shouldPrecache, swSource } from '../../src/adapter/platform/sw/sw-source';
+import {
+  CACHE_PREFIX,
+  cacheNameFor,
+  isStaleCache,
+  shouldPrecache,
+  swSource,
+} from '../../src/adapter/platform/sw/sw-source';
 
 /**
  * 偽の Cache API。⚠ **本物の意味論を真似る**(CLAUDE.md)── とくに **Vary**。
@@ -66,7 +73,7 @@ interface Harness {
     opts?: {
       mode?: string;
       method?: string;
-      network?: 'ok' | 'fail' | 'error';
+      network?: 'ok' | 'fail' | 'error' | 'partial';
       /** ⚠ 実要求は Origin を送る。precache 側は送らない ── Vary の食い違い */
       origin?: string | undefined;
     },
@@ -75,13 +82,17 @@ interface Harness {
   skipped: () => boolean;
 }
 
-function runSw(source: string, seed?: (c: Map<string, FakeCache>) => void): Harness {
+function runSw(
+  source: string,
+  seed?: (c: Map<string, FakeCache>) => void,
+  scope = 'https://pkc3.example/',
+): Harness {
   const cacheMap = new Map<string, FakeCache>();
   seed?.(cacheMap);
   const listeners = new Map<string, (ev: unknown) => void>();
   let claimed = false;
   let skipped = false;
-  let netMode: 'ok' | 'fail' | 'error' = 'ok';
+  let netMode: 'ok' | 'fail' | 'error' | 'partial' = 'ok';
 
   const caches = {
     open: (name: string) => {
@@ -91,7 +102,22 @@ function runSw(source: string, seed?: (c: Map<string, FakeCache>) => void): Harn
     },
     keys: () => Promise.resolve([...cacheMap.keys()]),
     delete: (name: string) => Promise.resolve(cacheMap.delete(name)),
-    match: (req: { url: string; origin?: string } | string, opts?: { ignoreVary?: boolean }) => {
+    /**
+     * 🔴 **本物の意味論を真似る**(CLAUDE.md)── `cacheName` を渡したら
+     * **その cache だけ**を見て、無ければ `undefined`(他所は舐めない)。
+     *
+     * ⚠ ここを「常に全部の cache を舐める」と書いていたせいで、
+     * 「自分の cache 以外は覗かない」test が **`cacheName` の有無を見分けられず**
+     * 空振りしていた ── stub が実装より緩いと、その分だけ test が何も守らない。
+     */
+    match: (
+      req: { url: string; origin?: string } | string,
+      opts?: { ignoreVary?: boolean; cacheName?: string },
+    ) => {
+      if (opts?.cacheName !== undefined) {
+        const named = cacheMap.get(opts.cacheName);
+        return Promise.resolve(named ? named.lookup(req, opts) : undefined);
+      }
       for (const c of cacheMap.values()) {
         const hit = c.lookup(req, opts);
         if (hit !== undefined) return Promise.resolve(hit);
@@ -102,6 +128,8 @@ function runSw(source: string, seed?: (c: Map<string, FakeCache>) => void): Harn
 
   const self = {
     location: { origin: 'https://pkc3.example' },
+    // ⚠ SW は scope を知っている ── cache 名を scope で分けるのに使う
+    registration: { scope: scope },
     addEventListener: (type: string, fn: (ev: unknown) => void) => void listeners.set(type, fn),
     skipWaiting: () => {
       skipped = true;
@@ -117,9 +145,17 @@ function runSw(source: string, seed?: (c: Map<string, FakeCache>) => void): Harn
 
   const fetchImpl = (req: { url: string }): Promise<unknown> => {
     if (netMode === 'fail') return Promise.reject(new Error('offline'));
-    if (netMode === 'error') return Promise.resolve({ ok: false, clone: () => 'net-err' });
+    // ⚠ **status を持たせる**。`ok` だけだと 206(Partial)を素通しする実装でも
+    // 通ってしまう ── `Cache.put` は 206 で TypeError を投げる(review L-4)
+    if (netMode === 'error') {
+      return Promise.resolve({ ok: false, status: 503, clone: () => 'net-err' });
+    }
+    if (netMode === 'partial') {
+      return Promise.resolve({ ok: true, status: 206, clone: () => `net:${req.url}` });
+    }
     return Promise.resolve({
       ok: true,
+      status: 200,
       clone: () => `net:${req.url}`,
       toString: () => `net:${req.url}`,
     });
@@ -147,7 +183,7 @@ function runSw(source: string, seed?: (c: Map<string, FakeCache>) => void): Harn
     async fetch(url, opts: {
       mode?: string;
       method?: string;
-      network?: 'ok' | 'fail' | 'error';
+      network?: 'ok' | 'fail' | 'error' | 'partial';
       origin?: string | undefined;
     } = {}) {
       netMode = opts.network ?? 'ok';
@@ -174,9 +210,38 @@ const SOURCE = swSource({
 });
 
 describe('規則(純関数)', () => {
-  it('cache 名に build id が入る', () => {
-    expect(cacheNameFor('b1')).toBe('pkc3-b1');
-    expect(cacheNameFor('b1').startsWith(CACHE_PREFIX)).toBe(true);
+  it('cache 名に scope と build id が入る', () => {
+    expect(cacheNameFor('/', 'b1')).toBe('pkc3:%2F:b1');
+    expect(cacheNameFor('/dev/', 'b1')).toBe('pkc3:%2Fdev%2F:b1');
+    expect(cacheNameFor('/', 'b1').startsWith(CACHE_PREFIX)).toBe(true);
+  });
+
+  // 🔴 CacheStorage は **origin 単位で scope 単位ではない**。Pages は同じ origin に
+  // `/` と `/dev/` を置くので、ここを間違えると **`/` を開いただけで `/dev/` の
+  // precache が消える**(review H-1 で実証)。⚠ `/` は `/dev/` の接頭辞なので
+  // `startsWith` では分けられない
+  it.each([
+    ['同じ scope の古い版', 'pkc3:%2F:old', '/', 'b1', true],
+    ['同じ scope の自分', 'pkc3:%2F:b1', '/', 'b1', false],
+    ['🔴 別 scope の古い版', 'pkc3:%2Fdev%2F:old', '/', 'b1', false],
+    ['🔴 別 scope の自分と同じ build', 'pkc3:%2Fdev%2F:b1', '/', 'b1', false],
+    ['/dev/ から見た / の cache', 'pkc3:%2F:old', '/dev/', 'b1', false],
+    ['他人の cache', 'someone-else', '/', 'b1', false],
+    // ⚠ **欄の形をしていても**前置きが違えば触らない(他アプリの cache)
+    ['他人の cache(欄の形は同じ)', 'other:%2F:old', '/', 'b1', false],
+    // 🔴 **前置きだけが違い、後ろは完全に自分と同じ形**。同 origin の兄弟アプリ
+    // (Pages は 1 origin に複数の product を置ける)がこの形の cache 名を使うと、
+    // 前置きを見ない実装は **他アプリの precache を消す**。
+    // ⚠ 上の 2 件はこれを守っていなかった ── `someone-else` は欄が足りず、
+    // `other:%2F:old` は scope 欄がずれて、**別の検査に救われて**いた
+    // (変異試験で前置き検査を外しても両方 pass した)。前置きは 5 文字なので、
+    // **同じ長さの別前置き + 自分と同形の後ろ**でしか撃ち抜けない
+    ['🔴 前置きだけ違う同形の名前', 'pkc2:%2F:old', '/', 'b1', false],
+    ['前置きだけ合う別物', 'pkc3:こわれ', '/', 'b1', false],
+    // ⚠ build 欄が無いものは**判断できない** ── 触らない
+    ['build 欄が無い', 'pkc3:%2F', '/', 'b1', false],
+  ])('掃除対象か: %s → %s', (_label, name, scope, build, expected) => {
+    expect(isStaleCache(name, scope, build)).toBe(expected);
   });
 
   it.each([
@@ -190,12 +255,41 @@ describe('規則(純関数)', () => {
   });
 });
 
+describe('🔴 build id は**配る物から**決まる', () => {
+  // ⚠ `buildIdFor` は vite.config.ts にある(config を import すると happy-dom の
+  // URL 差し替えで落ちるので、**同じ規則**をここで走らせて性質を pin する)
+  const buildIdFor = (precache: readonly string[]): string =>
+    createHash('sha256').update(JSON.stringify([...precache].sort())).digest('hex').slice(0, 12);
+
+  it('一覧が同じなら id も同じ(中身が変わっていないのに再 precache させない)', () => {
+    // review M-1: `GITHUB_SHA` を使うと product のバイト列が同じでも main push の
+    // たびに `sw.js` が変わり、**全 user が 1.6MB を再取得**していた
+    expect(buildIdFor(['./a-AAAAAAAA.js', './b.html'])).toBe(
+      buildIdFor(['./b.html', './a-AAAAAAAA.js']), // 順序にも依らない
+    );
+  });
+
+  it('🔴 一覧が変われば id も変わる(固定だと新しい版が古い cache を使い続ける)', () => {
+    expect(buildIdFor(['./a-AAAAAAAA.js'])).not.toBe(buildIdFor(['./a-BBBBBBBB.js']));
+    expect(buildIdFor(['./a-AAAAAAAA.js'])).not.toBe(
+      buildIdFor(['./a-AAAAAAAA.js', './b.html']),
+    );
+  });
+
+  it('id が変われば cache 名も変わる(= 旧 cache が掃除対象になる)', () => {
+    const older = buildIdFor(['./a-AAAAAAAA.js']);
+    const newer = buildIdFor(['./a-BBBBBBBB.js']);
+    expect(cacheNameFor('/', older)).not.toBe(cacheNameFor('/', newer));
+    expect(isStaleCache(cacheNameFor('/', older), '/', newer)).toBe(true);
+  });
+});
+
 describe('install ── 一覧を丸ごと入れる', () => {
   it('precache 一覧が cache に入り、待たずに交代する', async () => {
     const h = runSw(SOURCE);
     await h.fire('install');
-    expect([...h.caches.keys()]).toEqual(['pkc3-b1']);
-    expect([...h.caches.get('pkc3-b1')!.store.keys()]).toEqual([
+    expect([...h.caches.keys()]).toEqual(['pkc3:%2F:b1']);
+    expect([...h.caches.get('pkc3:%2F:b1')!.store.keys()]).toEqual([
       './index.html',
       './manifest.webmanifest',
       './assets/index-AAAAAAAA.js',
@@ -215,22 +309,56 @@ describe('install ── 一覧を丸ごと入れる', () => {
 describe('activate ── 古い cache を消す', () => {
   it('🔴 自分以外の PKC3 cache を消す(消さないと無限に積み上がる)', async () => {
     const h = runSw(SOURCE, (c) => {
-      c.set('pkc3-old1', new FakeCache());
-      c.set('pkc3-old2', new FakeCache());
-      c.set('pkc3-b1', new FakeCache());
+      c.set('pkc3:%2F:old1', new FakeCache());
+      c.set('pkc3:%2F:old2', new FakeCache());
+      c.set('pkc3:%2F:b1', new FakeCache());
     });
     await h.fire('activate');
-    expect([...h.caches.keys()]).toEqual(['pkc3-b1']);
+    expect([...h.caches.keys()]).toEqual(['pkc3:%2F:b1']);
     expect(h.claimed()).toBe(true);
+  });
+
+  it('🔴 別 scope の cache は消さない(/ を開いて /dev/ を壊さない)', async () => {
+    // review H-1: CacheStorage は origin 単位で scope 単位ではない。
+    // Pages は同じ origin に / と /dev/ を置くので、ここを間違えると
+    // **/ を 1 回開いただけで /dev/ がオフラインで開かなくなる**(実ブラウザで実証)
+    const h = runSw(SOURCE, (c) => {
+      c.set('pkc3:%2Fdev%2F:old', new FakeCache()); // 別 scope の**古い版**も残す
+      c.set('pkc3:%2Fdev%2F:b1', new FakeCache()); // 別 scope の同 build も残す
+      c.set('pkc3:%2F:old', new FakeCache()); // 同 scope の古い版 ── これだけ消える
+      c.set('pkc3:%2F:b1', new FakeCache()); // 自分 ── 残る
+    });
+    await h.fire('activate');
+    expect([...h.caches.keys()].sort()).toEqual([
+      'pkc3:%2F:b1',
+      'pkc3:%2Fdev%2F:b1',
+      'pkc3:%2Fdev%2F:old',
+    ]);
+  });
+
+  it('🔴 自分の cache 以外は覗かない(古い版の中身を返さない)', async () => {
+    // `caches.match` に `cacheName` を渡さないと CacheStorage 全体を舐める ──
+    // 別ビルドの cache に残った古い本文がオフラインで返りうる
+    const stale = new FakeCache();
+    stale.store.set('./assets/index-AAAAAAAA.js', { body: 'OLD', varyOrigin: null });
+    const h = runSw(SOURCE, (c) => c.set('pkc3:%2F:old', stale));
+    await h.fire('install');
+    expect(
+      await h.fetch('https://pkc3.example/assets/index-AAAAAAAA.js', { network: 'fail' }),
+    ).toBe('cached:./assets/index-AAAAAAAA.js');
   });
 
   it('🔴 他人の cache は消さない(前置きで自分のものだけを選ぶ)', async () => {
     const h = runSw(SOURCE, (c) => {
       c.set('someone-else', new FakeCache());
-      c.set('pkc3-old', new FakeCache());
+      // 🔴 **前置きだけが違い、後ろは自分と同形**。これが本番の危険な形 ──
+      // 同 origin の兄弟アプリ(Pages は 1 origin に複数 product を置ける)。
+      // ⚠ `someone-else` だけでは撃ち抜けない(欄が足りず別の検査に救われる)
+      c.set('pkc2:%2F:old', new FakeCache());
+      c.set('pkc3:%2F:old', new FakeCache());
     });
     await h.fire('activate');
-    expect([...h.caches.keys()].sort()).toEqual(['someone-else']);
+    expect([...h.caches.keys()].sort()).toEqual(['pkc2:%2F:old', 'someone-else']);
   });
 });
 
@@ -284,6 +412,16 @@ describe('fetch ── 経路ごとの戦略', () => {
     expect(
       await h.fetch('https://pkc3.example/manifest.webmanifest', { network: 'fail' }),
     ).toBe('net:https://pkc3.example/manifest.webmanifest');
+  });
+
+  it('🔴 206(Partial)は cache に入れない(Cache.put が投げる)', async () => {
+    // ⚠ `res.ok` は 206 でも true ── `status === 200` で絞らないと
+    // `TypeError: Partial response is unsupported` が SW の unhandled rejection になる
+    const h = await seeded();
+    await h.fetch('https://pkc3.example/manifest.webmanifest', { network: 'partial' });
+    expect(
+      await h.fetch('https://pkc3.example/manifest.webmanifest', { network: 'fail' }),
+    ).toBe('cached:./manifest.webmanifest'); // precache のまま
   });
 
   it('🔴 network-first でも失敗応答は cache を汚さない', async () => {
