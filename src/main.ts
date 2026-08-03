@@ -44,7 +44,7 @@ import { createAssetGate } from '@adapter/ui/actions/asset-gate';
 import { generateAssetKey } from '@adapter/platform/storage/asset-key';
 import { downloadBlob, downloadUrl } from '@adapter/platform/download';
 import { diagramFileName } from '@features/export/file-name';
-import { renderToSvg } from '@adapter/ui/render/mermaid-raster';
+import { renderToSvg, readPalette } from '@adapter/ui/render/mermaid-raster';
 
 const DB_NAME = 'pkc3';
 const DEFAULT_CID = 'default';
@@ -459,9 +459,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     exportDiagram: (source, index) => {
       const lid = dispatcher.getState().selectedLid;
       const title = (lid ? dispatcher.getState().entryMetas.get(lid)?.title : '') || '図';
-      void (async () => {
+      // ⚠ **Promise を返す**(P8 段⑬ review M-3)── 押した側が待ちを出せるように。
+      //    投げない(失敗は OP_FAILED で可視化する)ので、呼び側は finally だけでよい
+      return (async () => {
         try {
-          const svg = await renderToSvg(source);
+          // ⚠ 画面と**同じ配色**で起こす(見えている図と落ちる物の色を違えない)
+          const svg = await renderToSvg(source, readPalette());
           // ⚠ mermaid は `<?xml?>` を付けない ── 素の `<svg>` でも image/svg+xml で
           // ブラウザは開ける。ここで宣言を足すと二重宣言の壊れた形になりうる
           downloadBlob(

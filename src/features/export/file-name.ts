@@ -7,6 +7,22 @@
  * 片方でだけファイルが壊れる**(検証の規律「同じ判定が 2 か所に生えたら規則を寄せる」)。
  */
 
+/**
+ * Windows が**装置名として予約している**名前(P8 段⑬ review L-2)。
+ * ⚠ 判定は「最初の `.` より前」に掛かるので、`CON.pkc3.zip` も弾かれる ──
+ * 拡張子を付けているから安全、ではない。⚠ 大文字小文字を区別しない。
+ */
+const RESERVED = new Set(
+  [
+    'CON',
+    'PRN',
+    'AUX',
+    'NUL',
+    ...Array.from({ length: 9 }, (_, i) => `COM${i + 1}`),
+    ...Array.from({ length: 9 }, (_, i) => `LPT${i + 1}`),
+  ].map((n) => n.toLowerCase()),
+);
+
 /** ファイル名に使えない文字を落とす(OS 差を避けて保守的に)。 */
 export function safeName(title: string): string {
   // ⚠ 制御文字は**正規表現に書かない**(no-control-regex。文字クラスに直接
@@ -18,7 +34,10 @@ export function safeName(title: string): string {
   // ⚠ 空にしない ── 「.pkc3.zip」だけのファイル名は OS によっては隠しファイル
   // ⚠ `slice` は**サロゲートペアを割る**(絵文字や一部の漢字が壊れる)──
   // 制御文字処理でわざわざ [...] を使ったのに、最後で落とすと意味がない
-  return [...s].slice(0, 60).join('') || 'pkc3';
+  const cut = [...s].slice(0, 60).join('') || 'pkc3';
+  // ⚠ 予約名は**切り詰めた後**に見る ── 61 文字目以降を落として初めて `CON` に
+  //    なることがある。逃がし方は接尾辞 1 つ(中身は変えない)
+  return RESERVED.has(cut.toLowerCase()) ? `${cut}-file` : cut;
 }
 
 /**

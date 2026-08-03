@@ -119,3 +119,87 @@ test('🔴 図を保存すると、画面の PNG ではなくベクタが落ち�
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * P8 段⑬: 🔴 **図の色が配色に従う**。
+ *
+ * 🔴 直す前に測った(焼いた PNG の平均輝度。同じ図・同じ幅):
+ * ```
+ * light      231.1      dark    231.1      dracula 231.1
+ * nord       231.1      terminal 231.1
+ * ```
+ * 鍵にテーマは入っていたので**焼き直しは走っていた**が、`mermaid.initialize()` に
+ * 配色を渡していなかったので **絵が全部同じ** ── ダーク系 5 テーマで、暗い地に
+ * 白い図が 1 枚だけ浮いていた。さらに配色を切り替えても `<img src>` が変わらず、
+ * `docs/manual.md` の「配色を変えると焼き直します」は**両方向とも嘘**だった。
+ *
+ * ⚠ 観測点は **焼いた画素**。設定の中身は `tests/adapter/mermaid-palette.test.ts`
+ * が見る ── 片端だけだと「設定は渡っているが絵は変わらない」を見逃す。
+ */
+test('🔴 配色を変えると図も焼き直り、暗い配色では図も暗い', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('図の色');
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill('```mermaid\ngraph TD\n  A["始め"]-->B["終わり"]\n```\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  const host = page.locator('[data-pkc-field="detail-body"] [data-pkc-mermaid-src]');
+  await expect(host).toHaveAttribute('data-pkc-mermaid-state', 'ready', { timeout: 30000 });
+  const img = host.locator('img');
+
+  /** 焼いた PNG の平均輝度(不透明な画素だけ)。 */
+  const luma = (): Promise<number> =>
+    img.evaluate(
+      (el: HTMLImageElement) =>
+        new Promise<number>((resolve) => {
+          const go = (): void => {
+            const c = document.createElement('canvas');
+            c.width = el.naturalWidth;
+            c.height = el.naturalHeight;
+            const ctx = c.getContext('2d')!;
+            ctx.drawImage(el, 0, 0);
+            const d = ctx.getImageData(0, 0, c.width, c.height).data;
+            let sum = 0;
+            let n = 0;
+            for (let i = 0; i < d.length; i += 4) {
+              if (d[i + 3]! < 128) continue;
+              n++;
+              sum += (d[i]! + d[i + 1]! + d[i + 2]!) / 3;
+            }
+            resolve(n === 0 ? -1 : sum / n);
+          };
+          if (el.complete && el.naturalWidth > 0) go();
+          else el.onload = go;
+        }),
+    );
+
+  const srcOf = (): Promise<string> => img.evaluate((el) => el.getAttribute('src') ?? '');
+
+  const light = await luma();
+  const lightSrc = await srcOf();
+  expect(light, '明るい配色なのに図が暗い').toBeGreaterThan(140);
+
+  // 🔴 設定から配色を変える(実際の導線)
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await page.locator('[data-pkc-field="theme-select"]').selectOption('dark');
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+
+  // 焼き直しは非同期 ── src が変わるまで待つ(固定 sleep を積まない)
+  await expect
+    .poll(async () => (await srcOf()) !== lightSrc, { timeout: 30000 })
+    .toBe(true);
+  const dark = await luma();
+  expect(dark, '暗い配色にしたのに図が明るいまま').toBeLessThan(120);
+
+  // ⚠ **戻せる**ことも見る(片道だけ直っている実装を落とす)
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await page.locator('[data-pkc-field="theme-select"]').selectOption('light');
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await expect.poll(async () => await luma(), { timeout: 30000 }).toBeGreaterThan(140);
+
+  expect(errors).toEqual([]);
+});

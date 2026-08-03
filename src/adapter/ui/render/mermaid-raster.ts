@@ -33,10 +33,114 @@ export interface RasterKey {
   source: string;
   /** 配色(テーマを変えたら焼き直す)。 */
   theme: string;
+  /**
+   * その配色の実際の色。
+   * 🔴 **必須にする**(P8 段⑬)── optional にすると、渡し忘れても tsc が黙り、
+   * 「鍵だけテーマで散って、絵は全部同じ」という**今まさに直している不具合**が
+   * そのまま戻る(この repo の規律:「材料が届いていることを pin する」)。
+   */
+  palette: DiagramPalette;
   /** 表示幅(CSS px)。⚠ 端数で鍵が散らないよう呼び側が丸める。 */
   width: number;
   /** 画素密度(Retina で焼き直す)。 */
   dpr: number;
+}
+
+/**
+ * 図に使う色。**`tokens.css` の変数がそのまま出どころ**(P8 段⑬)。
+ *
+ * 🔴 なぜ mermaid の組み込みテーマ(`dark` / `forest` …)を使わないか ──
+ * テーマは 9 つあり、**組み込みは 5 つしか無い**。名前で対応表を作ると
+ * 「テーマを足したのに図の対応を足し忘れる」が必ず起きる(この repo の規律:
+ * **判定を増やさない**)。CSS 変数から引けば、テーマを足した瞬間に図も追随する。
+ */
+export interface DiagramPalette {
+  /** 図の地(`--surface`)。 */
+  bg: string;
+  /** 節点の面(`--surface-2`)。 */
+  alt: string;
+  /** 文字(`--fg`)。 */
+  fg: string;
+  /** 線(`--muted`)── 矢印は文字よりわずかに退く。 */
+  line: string;
+  /** 枠(`--border`)。 */
+  border: string;
+  /** 強調(`--accent`)。 */
+  accent: string;
+  /** 地が暗いか。mermaid が派生色を作る向きが変わる。 */
+  dark: boolean;
+}
+
+/** `#abc` / `#aabbcc` / `rgb(…)` を 0–255 の 3 値へ。読めなければ null。 */
+function parseColor(value: string): [number, number, number] | null {
+  const v = value.trim();
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(v);
+  if (hex) {
+    const h = hex[1] ?? '';
+    const full =
+      h.length === 3
+        ? h
+            .split('')
+            .map((c) => c + c)
+            .join('')
+        : h;
+    return [
+      parseInt(full.slice(0, 2), 16),
+      parseInt(full.slice(2, 4), 16),
+      parseInt(full.slice(4, 6), 16),
+    ];
+  }
+  const rgb = /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/i.exec(v);
+  if (rgb) return [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])];
+  return null;
+}
+
+/**
+ * 地が暗いか。⚠ **テーマ名の一覧で判定しない** ── 一覧は必ず古くなる。
+ * 実際の色の明るさ(sRGB の相対輝度)で決めれば、新しいテーマにも自動で効く。
+ */
+export function isDarkColor(value: string): boolean {
+  const rgb = parseColor(value);
+  if (!rgb) return false; // 読めないなら明るい側に倒す(既定は light)
+  const lin = (c: number): number => {
+    const s = c / 255;
+    return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * lin(rgb[0]) + 0.7152 * lin(rgb[1]) + 0.0722 * lin(rgb[2]) < 0.4;
+}
+
+/** 既定(CSS が読めない環境 ── happy-dom の unit test など)。 */
+const FALLBACK: DiagramPalette = {
+  bg: '#ffffff',
+  alt: '#f5f6f8',
+  fg: '#16191d',
+  line: '#59616b',
+  border: '#cdd2d9',
+  accent: '#14663c',
+  dark: false,
+};
+
+/**
+ * いま効いている配色を CSS 変数から読む。
+ * ⚠ 変数が空(未定義 / 読めない)なら**その項目だけ**既定に落ちる ── 全体を
+ * 既定に落とすと、1 つ欠けただけで図の色が全部戻る。
+ */
+export function readPalette(el: HTMLElement = document.documentElement): DiagramPalette {
+  const cs = getComputedStyle(el);
+  const v = (name: string, fallback: string): string => {
+    const raw = cs.getPropertyValue(name).trim();
+    return raw === '' ? fallback : raw;
+  };
+  const bg = v('--surface', FALLBACK.bg);
+  return {
+    bg,
+    alt: v('--surface-2', FALLBACK.alt),
+    fg: v('--fg', FALLBACK.fg),
+    line: v('--muted', FALLBACK.line),
+    border: v('--border', FALLBACK.border),
+    accent: v('--accent', FALLBACK.accent),
+    dark: isDarkColor(bg),
+  };
 }
 
 /**
@@ -83,28 +187,94 @@ function db(): Promise<IDBDatabase> {
 /** mermaid 本体は**必要になるまで読まない**(初期ロードに載せない)。 */
 let mermaidPromise: Promise<typeof import('mermaid').default> | null = null;
 async function mermaid(): Promise<typeof import('mermaid').default> {
-  mermaidPromise ??= import('mermaid').then((m) => {
-    m.default.initialize({
-      startOnLoad: false,
-      securityLevel: 'strict',
-      /**
-       * 🔴 **`htmlLabels` を切る**(実測で踏んだ)。既定の mermaid はラベルを
-       * `<foreignObject>` で描くが、**`foreignObject` を含む SVG を canvas に
-       * 描くと canvas が汚染され**、`toBlob` が
-       * `SecurityError: Tainted canvases may not be exported.` で落ちる。
-       * ラベルを素の `<text>` にすれば焼ける。
-       * ⚠ 書き出し(ベクタ)側も同じ設定で起こす ── 画面と書き出しで
-       * **図の形が変わらない**ようにするため、初期化は 1 か所に保つ。
-       */
-      htmlLabels: false,
-      flowchart: { htmlLabels: false },
-    });
-    return m.default;
-  });
+  mermaidPromise ??= import('mermaid').then((m) => m.default);
   return mermaidPromise;
 }
 
+/**
+ * mermaid に渡す設定。**配色ごとに作り直す**(P8 段⑬)。
+ *
+ * 🔴 かつてここは `initialize()` を **1 回だけ**呼び、`theme` を渡していなかった。
+ * 鍵にはテーマが入っているので焼き直しは走るが、**焼き上がる絵は全テーマ同一**
+ * ── ダーク系 5 テーマで図だけ明るいままだった(実測: 平均輝度 231.1 が
+ * light / dark / dracula / nord / terminal で完全一致)。
+ *
+ * ⚠ `theme: 'base'` + `themeVariables` にする ── 組み込みテーマを名前で選ぶと
+ * 対応表が要り、テーマを足すたびに更新漏れが起きる。
+ */
+export function configFor(p: DiagramPalette): Parameters<
+  Awaited<ReturnType<typeof mermaid>>['initialize']
+>[0] {
+  return {
+    startOnLoad: false,
+    securityLevel: 'strict',
+    /**
+     * 🔴 **`htmlLabels` を切る**(実測で踏んだ)。既定の mermaid はラベルを
+     * `<foreignObject>` で描くが、**`foreignObject` を含む SVG を canvas に
+     * 描くと canvas が汚染され**、`toBlob` が
+     * `SecurityError: Tainted canvases may not be exported.` で落ちる。
+     * ラベルを素の `<text>` にすれば焼ける。
+     * ⚠ 書き出し(ベクタ)側も同じ設定で起こす ── 画面と書き出しで
+     * **図の形が変わらない**ようにするため、初期化は 1 か所に保つ。
+     */
+    htmlLabels: false,
+    flowchart: { htmlLabels: false },
+    theme: 'base',
+    themeVariables: {
+      darkMode: p.dark,
+      background: p.bg,
+      mainBkg: p.alt,
+      primaryColor: p.alt,
+      primaryTextColor: p.fg,
+      primaryBorderColor: p.border,
+      secondaryColor: p.bg,
+      tertiaryColor: p.bg,
+      lineColor: p.line,
+      textColor: p.fg,
+      nodeBorder: p.border,
+      clusterBkg: p.bg,
+      clusterBorder: p.border,
+      titleColor: p.fg,
+      // ⚠ 辺のラベルは**地と同じ色で塗る** ── 既定(薄黄)だと線の上で浮く
+      edgeLabelBackground: p.bg,
+      noteBkgColor: p.alt,
+      noteTextColor: p.fg,
+      noteBorderColor: p.border,
+      // 系列色つきの図(pie / journey)は**強調色を起点**にする
+      pie1: p.accent,
+    },
+  };
+}
+
 let seq = 0;
+
+/**
+ * 🔴 **図は 1 枚ずつ焼く**(P8 段⑬)。
+ *
+ * `initialize()` は mermaid の**全体設定**を書き換えるので、2 枚を同時に
+ * 走らせると「後から始まった方の配色で、先の 1 枚が焼ける」が起きうる
+ * (先読みと「見えたから描く」は実際に重なる)。列に並べれば起きない。
+ * ⚠ 重い仕事を並べても損はしない ── mermaid は DOM を使うので、
+ * どのみちメインスレッドで 1 枚ずつしか進まない。
+ */
+let chain: Promise<unknown> = Promise.resolve();
+function serialized<T>(run: () => Promise<T>): Promise<T> {
+  const next = chain.then(run, run);
+  // ⚠ 失敗を鎖に残さない(残すと次の 1 枚が未処理の reject に巻き込まれる)
+  chain = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  return next;
+}
+
+/** 設定を当ててから描く。⚠ **この 2 手はいつも隣り合う**(離すと混ざる)。 */
+async function renderWith(id: string, source: string, p: DiagramPalette): Promise<string> {
+  const m = await mermaid();
+  m.initialize(configFor(p));
+  const { svg } = await m.render(id, source);
+  return svg;
+}
 
 /**
  * SVG 文字列を PNG の Blob に焼く。
@@ -148,21 +318,26 @@ export async function renderToPng(key: RasterKey): Promise<Blob> {
   const hit = await tx<unknown>(await db(), 'readonly', (s) => s.get(k)).catch(() => null);
   if (hit instanceof Blob) return hit;
 
-  const m = await mermaid();
-  seq += 1;
-  const { svg } = await m.render(`pkc3-mmd-${seq}`, key.source);
-  const png = await rasterize(svg, key.width, key.dpr);
+  const png = await serialized(async () => {
+    seq += 1;
+    const svg = await renderWith(`pkc3-mmd-${seq}`, key.source, key.palette);
+    return rasterize(svg, key.width, key.dpr);
+  });
   // ⚠ 保存に失敗しても**描画は続ける**(キャッシュは速さの話で、正しさの話ではない)
   await tx(await db(), 'readwrite', (s) => s.put(png, k)).catch(() => undefined);
   return png;
 }
 
-/** 書き出し用のベクタ(**画面には使わない**)。 */
-export async function renderToSvg(source: string): Promise<string> {
-  const m = await mermaid();
-  seq += 1;
-  const { svg } = await m.render(`pkc3-mmd-x${seq}`, source);
-  return svg;
+/**
+ * 書き出し用のベクタ(**画面には使わない**)。
+ * ⚠ 画面と**同じ配色**で起こす ── 見えている図と落ちるファイルの色が違うのは、
+ * 「いま見えている物を保存した」という期待を裏切る。
+ */
+export async function renderToSvg(source: string, palette: DiagramPalette): Promise<string> {
+  return serialized(async () => {
+    seq += 1;
+    return renderWith(`pkc3-mmd-x${seq}`, source, palette);
+  });
 }
 
 /** キャッシュを空にする(図は原文から再生成できるので、いつ捨ててもよい)。 */

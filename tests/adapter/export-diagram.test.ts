@@ -86,6 +86,20 @@ describe('書き出す名前(P8 段⑦)', () => {
     // 生バイトのまま書かない(`tests/repo-hygiene.test.ts` が止める)
     expect(safeName('あ\u0001い\u007fう')).toBe('あ-い-う');
   });
+
+  it('🔴 Windows の予約名を避ける(P8 段⑬ review L-2)', () => {
+    // ⚠ 判定は「最初の `.` より前」に掛かる ── `CON.pkc3.zip` も保存できない。
+    //    「拡張子を付けているから安全」は誤り
+    expect(safeName('CON')).toBe('CON-file');
+    expect(safeName('nul')).toBe('nul-file'); // 大文字小文字を区別しない
+    expect(safeName('COM1')).toBe('COM1-file');
+    expect(safeName('LPT9')).toBe('LPT9-file');
+    // ⚠ 予約名を**含むだけ**の題名は普通に通す(過剰に書き換えない)
+    expect(safeName('CONTENTS')).toBe('CONTENTS');
+    expect(safeName('会議CON')).toBe('会議CON');
+    // 図の名前は接尾辞が付くので、そもそも予約名にならない
+    expect(diagramFileName('CON', 0)).toBe('CON-file-図1.svg');
+  });
 });
 
 describe('落とさせ方(P8 段⑦)', () => {
@@ -119,5 +133,88 @@ describe('落とさせ方(P8 段⑦)', () => {
     expect(revoked).toEqual(created);
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+});
+
+/**
+ * P8 段⑬ review L-1: 🔴 **失敗しても URL の寿命は終わらせる**。
+ *
+ * `click()` が投げる経路(拡張機能 / DL 抑止 / detached document)で、かつては
+ * `<a>` が body に残り `release` が**永久に呼ばれなかった** ── 即破棄規律
+ * (user 指示 2026-07-27、不可侵)に穴が開いていた。
+ */
+describe('書き出しが失敗したとき(P8 段⑬)', () => {
+  it('🔴 click が投げても `<a>` は消え、URL は解放される', () => {
+    vi.useFakeTimers();
+    const before = document.querySelectorAll('a[download]').length;
+    const release = vi.fn();
+    // ⚠ **投げる形**を作る ── HTMLAnchorElement 自体の click を差す
+    const spy = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => {
+        throw new Error('拒否された');
+      });
+    expect(() => downloadUrl('x.svg', 'blob:fake', release)).toThrow('拒否された');
+    spy.mockRestore();
+    expect(document.querySelectorAll('a[download]').length, '<a> が残った').toBe(before);
+    vi.advanceTimersByTime(1001);
+    expect(release, 'URL が永久に解放されない').toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+});
+
+/**
+ * P8 段⑬ review M-3: 🔴 **無言で待たせない**。
+ *
+ * ベクタは原文から焼き直すので、mermaid 本体の読み込みを含めて秒が掛かる。
+ * 何も起きないように見えると user は連打する。
+ */
+describe('書き出し中の見え方(P8 段⑬)', () => {
+  function pending(): { root: HTMLElement; btn: HTMLButtonElement; settle: (ok: boolean) => void } {
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-region', 'detail');
+    const host = document.createElement('div');
+    host.setAttribute('data-pkc-mermaid-src', 'graph TD\n A-->B');
+    const btn = document.createElement('button');
+    btn.setAttribute('data-pkc-action', 'export-diagram');
+    const label = document.createElement('span');
+    label.setAttribute('data-pkc-field', 'label');
+    label.textContent = '図を保存';
+    btn.append(label);
+    host.append(btn);
+    root.append(host);
+    document.body.append(root);
+
+    let settle!: (ok: boolean) => void;
+    const p = new Promise<void>((resolve, reject) => {
+      settle = (ok) => (ok ? resolve() : reject(new Error('失敗')));
+    });
+    bindActions(root, new Dispatcher(), { exportDiagram: () => p });
+    return { root, btn, settle };
+  }
+
+  it('🔴 押している間は押せなくなり、そう見える', async () => {
+    const { root, btn, settle } = pending();
+    btn.click();
+    expect(btn.disabled, '書き出し中も押せてしまう(連打できる)').toBe(true);
+    expect(btn.textContent).toContain('書き出し中');
+    expect(btn.hasAttribute('data-pkc-busy')).toBe(true);
+
+    settle(true);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(btn.disabled).toBe(false);
+    expect(btn.textContent, '押せる状態の文言に戻っていない').toContain('図を保存');
+    root.remove();
+  });
+
+  it('🔴 失敗しても押せる状態へ戻す(死んだボタンを残さない)', async () => {
+    const { root, btn, settle } = pending();
+    btn.click();
+    expect(btn.disabled).toBe(true);
+    settle(false);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(btn.disabled, '失敗したまま押せないボタンが残った').toBe(false);
+    expect(btn.textContent).toContain('図を保存');
+    root.remove();
   });
 });

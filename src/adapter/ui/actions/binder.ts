@@ -80,7 +80,8 @@ export interface BinderServices {
    * ⚠ 画面に置くのは PNG、書き出すのは SVG(user 指示 2026-08-03)。
    * @param index 同じ本文の中で**何枚目か**(0 始まり ── 名前は 1 始まりにする)
    */
-  exportDiagram?(source: string, index: number): void;
+  /** ⚠ **Promise を返す** ── 押した側が「終わった」を知らないと待ちを出せない。 */
+  exportDiagram?(source: string, index: number): void | Promise<void>;
   /**
    * 添付 gate(書出し / 取込 / 整理)が実行中か。
    * ⚠ **破壊的操作を止めるために要る**(P6f review M-2)── 「書き出す」と「削除」を
@@ -343,7 +344,27 @@ const ACTIONS: Record<string, ActionHandler> = {
     const source = host?.getAttribute('data-pkc-mermaid-src');
     if (!host || !source) return;
     const all = [...root.querySelectorAll('[data-pkc-mermaid-src]')];
-    services.exportDiagram?.(source, Math.max(0, all.indexOf(host)));
+    const done = services.exportDiagram?.(source, Math.max(0, all.indexOf(host)));
+    // 🔴 **無言で待たせない**(P8 段⑬ review M-3)。ベクタは原文から焼き直すので、
+    //    mermaid 本体の読み込みを含めて秒が掛かる。何も起きないように見えると
+    //    user は連打する ── 押せなくして、そのボタン自身に状態を出す
+    const btn = target.closest<HTMLButtonElement>('[data-pkc-action="export-diagram"]');
+    if (!btn || !(done instanceof Promise)) return;
+    const label = btn.querySelector<HTMLElement>('[data-pkc-field="label"]');
+    const was = label?.textContent ?? '';
+    btn.disabled = true;
+    btn.setAttribute('data-pkc-busy', '');
+    if (label) label.textContent = '書き出し中…';
+    const reset = (): void => {
+      btn.disabled = false;
+      btn.removeAttribute('data-pkc-busy');
+      if (label) label.textContent = was;
+    };
+    // ⚠ **`finally` ではなく `then(reset, reset)`** ── `finally` は元の失敗を
+    //    そのまま流すので、service が reject すると**未処理の rejection**になる
+    //    (実際に test の stderr で出た。この repo は stderr 0 行を保つ規律)。
+    //    失敗の**報告**は service 側が持つ ── ここは見た目を戻すだけ
+    void done.then(reset, reset);
   },
   'download-asset': (dispatcher, target, services) => {
     const key = target.getAttribute('data-pkc-asset-key');

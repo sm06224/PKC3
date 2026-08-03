@@ -13,12 +13,43 @@
  * - **同じ図は焼き直さない** ── 鍵(原文 + テーマ + 幅 + dpr)が一致すれば IDB から
  * - **ObjectURL は要素の寿命終端で revoke**(2026-07-27 の不可侵指示)
  */
-import { renderToPng } from './mermaid-raster';
+import { renderToPng, readPalette } from './mermaid-raster';
 
 /** 1 つの器を埋めるのに要る情報。 */
 interface Pending {
   host: HTMLElement;
   source: string;
+}
+
+/**
+ * 配色が変わったら教える口(P8 段⑬)。
+ *
+ * 🔴 **観測器は全体で 1 つ**。`hydrateMermaid` は差分反映のたびに呼ばれる
+ * (塊の数だけ)ので、呼ぶたびに `MutationObserver` を作ると観測器が積もる ──
+ * 段⑪ で `IntersectionObserver` を 121 個作っていたのと同じ失敗になる。
+ */
+const themeWatchers = new Set<() => void>();
+let themeObserver: MutationObserver | null = null;
+
+function watchTheme(cb: () => void): () => void {
+  themeWatchers.add(cb);
+  if (themeObserver === null && typeof MutationObserver === 'function') {
+    themeObserver = new MutationObserver(() => {
+      for (const w of [...themeWatchers]) w();
+    });
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-pkc-theme'],
+    });
+  }
+  return () => {
+    themeWatchers.delete(cb);
+    // ⚠ 誰も見ていないなら止める(表示を畳んだ後も回り続けない)
+    if (themeWatchers.size === 0) {
+      themeObserver?.disconnect();
+      themeObserver = null;
+    }
+  };
 }
 
 /**
@@ -81,25 +112,27 @@ export function hydrateMermaid(root: ParentNode | readonly ParentNode[]): () => 
   }
   if (hosts.length === 0) return () => undefined;
 
-  const urls: string[] = [];
+  /** 器 → いま貸している ObjectURL。**焼き直したら前のを返す**。 */
+  const urlOf = new Map<HTMLElement, string>();
   let disposed = false;
   let idle = 0;
   const queue: Pending[] = [];
   const done = new WeakSet<HTMLElement>();
 
-  const paint = async (p: Pending): Promise<void> => {
-    if (disposed || done.has(p.host)) return;
+  const paint = async (p: Pending, force = false): Promise<void> => {
+    if (disposed) return;
+    if (!force && done.has(p.host)) return;
     done.add(p.host);
     try {
       const png = await renderToPng({
         source: p.source,
         theme: themeOf(),
+        palette: readPalette(),
         width: widthOf(p.host),
         dpr: window.devicePixelRatio || 1,
       });
       if (disposed) return;
       const url = URL.createObjectURL(png);
-      urls.push(url);
       const img = document.createElement('img');
       img.setAttribute('data-pkc-field', 'mermaid-image');
       img.alt = '図';
@@ -111,12 +144,34 @@ export function hydrateMermaid(root: ParentNode | readonly ParentNode[]): () => 
       p.host.textContent = '';
       p.host.append(img, saveButton());
       p.host.setAttribute('data-pkc-mermaid-state', 'ready');
+      // ⚠ **差し替えてから**前の URL を捨てる(生成物の寿命終端 ── 不可侵指示)
+      const prev = urlOf.get(p.host);
+      urlOf.set(p.host, url);
+      if (prev !== undefined) URL.revokeObjectURL(prev);
     } catch (e) {
       // ⚠ 失敗しても**原文は残す**(器の中の `<pre>` を消すのは成功したときだけ)
       p.host.setAttribute('data-pkc-mermaid-state', 'failed');
       p.host.setAttribute('data-pkc-mermaid-error', String(e).slice(0, 120));
     }
   };
+
+  /**
+   * 🔑 **配色を変えたら焼き直す**(P8 段⑬)。
+   *
+   * 🔴 これが無いと、鍵にテーマが入っていても**画面は前の色のまま**である
+   * (実測: ダークにしても `<img src>` が変わらず、平均輝度 231.2 のまま)。
+   * `docs/manual.md` の「配色を変えると焼き直します」は嘘だった。
+   *
+   * ⚠ 焼き直すのは**すでに焼いた器だけ** ── まだ見えていない器は、見えたときに
+   * 新しい配色で焼かれるので、ここで先回りすると遅延読みの意味が消える。
+   */
+  const unwatchTheme = watchTheme(() => {
+    if (disposed) return;
+    for (const host of [...urlOf.keys()]) {
+      if (!host.isConnected) continue;
+      void paint({ host, source: host.getAttribute('data-pkc-mermaid-src') ?? '' }, true);
+    }
+  });
 
   // 🔑 見えたら描く
   const io = new IntersectionObserver((entries) => {
@@ -154,8 +209,10 @@ export function hydrateMermaid(root: ParentNode | readonly ParentNode[]): () => 
   return () => {
     disposed = true;
     io.disconnect();
+    unwatchTheme();
     if (idle !== 0 && typeof cancelIdleCallback === 'function') cancelIdleCallback(idle);
     // ⚠ **表示の寿命終端で捨てる**(生成物を残さない)
-    for (const u of urls.splice(0)) URL.revokeObjectURL(u);
+    for (const u of urlOf.values()) URL.revokeObjectURL(u);
+    urlOf.clear();
   };
 }

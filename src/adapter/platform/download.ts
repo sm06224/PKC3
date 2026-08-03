@@ -21,10 +21,16 @@ export function downloadUrl(name: string, url: string, release: () => void): voi
   const a = document.createElement('a');
   a.href = url;
   a.download = name;
-  document.body.append(a);
-  a.click();
-  a.remove();
-  setTimeout(release, RELEASE_DELAY_MS);
+  try {
+    document.body.append(a);
+    a.click();
+  } finally {
+    // 🔴 **`finally` で片付ける**(P8 段⑬ review L-1)。`click()` が投げると、
+    //    かつては `<a>` が body に残り、**URL が永久に解放されなかった** ──
+    //    即破棄規律(2026-07-27 不可侵)に穴が開く。失敗しても寿命は終わらせる
+    a.remove();
+    setTimeout(release, RELEASE_DELAY_MS);
+  }
 }
 
 /** Blob を落とさせる(URL の生成と破棄はここが持つ)。 */

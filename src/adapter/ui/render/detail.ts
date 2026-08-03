@@ -455,6 +455,10 @@ export class DetailRenderer {
       desc.innerHTML = renderMarkdown(description, { sourceLineAnchors: true });
       host.append(desc);
       void this.hydrateAssetRefs(desc, this.hydrateToken);
+      // 🔴 添付の説明にも図が書ける(P8 段⑬ review L-3)。かつてここだけ
+      //    `hydrateMermaid` を呼んでおらず、**器が空のまま**残っていた ──
+      //    「本文なら描けるのに、添付の説明だと描けない」という一貫性の穴
+      this.mermaidDisposers.push(hydrateMermaid(desc));
     }
   }
 

@@ -3,7 +3,7 @@
  * attachment view(P4a)の表示と **lend/dispose 規律**(生成物のライフサイクル
  * 終端での即破棄 ── user 指示 2026-07-27)の pin。
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
@@ -139,5 +139,51 @@ describe('attachment view (P4a)', () => {
     await tick();
     expect(disposed).toBe(1); // 借りた瞬間に返す
     expect(q('[data-pkc-field="attachment-media"]')).toBeNull(); // stale DOM 注入なし
+  });
+});
+
+/**
+ * P8 段⑬ review L-3: 🔴 **添付の説明にも図が書ける**。
+ *
+ * 本文(`renderView`)は `hydrateMermaid` を呼んでいたが、添付の説明だけ
+ * 呼んでいなかった ── 同じ markdown なのに、置き場所で描けたり描けなかったりする。
+ * 器(`data-pkc-mermaid-src`)は出るので**空の枠が残る**だけで、例外も出ない。
+ *
+ * ⚠ 観測点は「図が描けたか」ではなく「**面倒を見始めたか**」── 実際の焼き上げは
+ * mermaid の読み込みが要る(`tests/adapter/mermaid-hydrate.test.ts` と同じ判断)。
+ */
+describe('添付の説明に書いた図(P8 段⑬)', () => {
+  it('🔴 本文と同じように図の面倒を見る', async () => {
+    const observed: Element[] = [];
+    class FakeIO {
+      constructor(_cb: unknown) {
+        void _cb;
+      }
+      observe(el: Element): void {
+        observed.push(el);
+      }
+      unobserve(): void {}
+      disconnect(): void {}
+    }
+    vi.stubGlobal('IntersectionObserver', FakeIO);
+    try {
+      // 説明は frontmatter の**後ろ**に書く markdown(本文と同じ書き方)
+      const body =
+        attachmentBody({ name: 'p.png', mime: 'image/png', size: 3, assetKey: 'ast-1' }) +
+        'この図の通り。\n\n```mermaid\ngraph TD\n  A-->B\n```\n';
+      const lender: AssetLender = {
+        lend: async () => ({ url: 'blob:fake-1', dispose: () => {} }),
+        getBlob: async () => null,
+      };
+      const { d, q } = setup({ a1: body, a2: '# text' }, lender);
+      d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+      await tick(20);
+
+      const host = q('[data-pkc-field="detail-body"] [data-pkc-mermaid-src]');
+      expect(host, '添付の説明に図の器が出ていない').not.toBeNull();
+      expect(observed, '器は出たのに、誰も焼きに来ない(空の枠が残る)').toContain(host);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
