@@ -111,7 +111,7 @@ install した user は「オフラインで使える」「md を開ける」と
 | ① | ✅ **product ビルドから `.map` を外す** + size の tripwire を Pages 用に読み替え | 1 行に近く、以降の全計測の前提が変わる |
 | ② | ✅ **素の md 受理器**(`readPlainMarkdown`)+ 取込導線 | ③ の前提。単体で価値がある(md を drag&drop できる) |
 | ③ | ✅ **`launchQueue` の受け口** ── 宣言と実体を一致させる | ② が無いと書けない |
-| ④ | **SW の precache**(生成 + navigation network-first + 旧 cache 掃除)+ オフライン smoke | 独立 |
+| ④ | ✅ **SW の precache**(生成 + navigation network-first + 旧 cache 掃除)+ オフライン smoke | 独立 |
 | ⑤ | **更新通知**(新しい版があります) | ④ の上 |
 | ⑥ | **マニュアル + 移行ガイド**(PKC2 → PKC3) | 実装が固まってから書く |
 | ⑦ | **v3.0.0 release**(SBOM 添付は既存、provenance attestation を足す)→ product URL 稼働 | 最後 |
@@ -356,6 +356,69 @@ parity は 3 者で縛った ── manifest の `accept` / `MARKDOWN_EXTENSIONS
 2 巡目は「`phase` を見ずに解決する」が生き残った ── 編集中の**打鍵ひとつ**で
 取込が走って draft を壊す変異で、「編集を終えたら流れる」だけを見る test では
 救われていた(状態変化が 1 回しか起きない fixture だった)。
+
+### 段④ 実装記録(2026-08-03 着地)
+
+`src/adapter/platform/sw/sw-source.ts`(SW の中身を作る純関数)+ `build/sw-plugin.ts`
+(生成物の一覧を集めて `sw.js` を出す Vite plugin)。手書きの `public/sw.js` は削除。
+
+🔑 **規則の写しを 2 つ持たない**。SW は別の実行文脈なのでアプリの module を import
+できないが、かといって手書きの一覧は**必ず腐る**(hash 付き名はビルドのたびに変わる)。
+文字列を返す純関数にして、**test は生成した文字列を実際に評価する**(偽の worker
+global の上で `install` / `activate` / `fetch` を発火させ、どの Response が返るかを見る)
+── 文字列一致で見ると「それらしい形」に救われる。
+
+#### 🔴 単体は全部緑なのに、実ブラウザだけ白紙になった
+
+オフライン smoke を書いたら**落ちた**。原因は `Vary`:
+
+- precache は `addAll` で入るので request に **`Origin` が無い**
+- 実際の module script は `crossorigin` 付きで **`Origin` を送る**
+- 応答が `Vary: Origin` を持つと(`vite preview` が実際に付ける)照合が外れる
+
+→ `caches.match(req, { ignoreVary: true })`。**stub にも `Vary` の意味論を入れて**
+unit で pin した(入れないと、実機でしか壊れない形を test で作れない)。
+
+⚠ この形は「オフラインで entry が読めるところまで見る」smoke が無ければ
+**発見できなかった** ── 「SW が登録された」で止めていたら緑のまま出荷していた。
+
+#### そのほか踏んだもの
+
+- **テンプレートの中でバッククォートを書かない**。生成ソースはテンプレートリテラル
+  なので、コメント 1 個のバッククォートが**文字列を閉じ**、config の読込ごと落ちる
+- **`sw.js` の一覧が生成物と一致するか**を `check-dist.mjs` が突合する
+  (doc §3 の「手書きに退化したら落ちる」)。⚠ 生成器が空を吐いても**それ自体は
+  誰も気づかない** ── plugin の一覧を空にする変異は unit を全部素通りし、
+  この突合だけが捕まえた
+- **stderr 0 行の規律**で 1 件 ── Vite の native config loader が拡張子なし import に
+  警告を出していた。隠さず `allowImportingTsExtensions` で原因を消した
+
+変異試験 19 件・生存 0(SW 13 / 検品 5 / plugin 1)。
+
+#### レビュー指摘の反映(H-1 / H-2 / M-1〜M-3)
+
+| # | 何が壊れていたか | どう直したか |
+|---|---|---|
+| H-1 | **CacheStorage は origin 単位で、scope 単位ではない**。`/`(product)と `/dev/` は同じ origin にあるので、前置きだけで「自分以外」を消すと**別 scope の precache まで消える** ── `/` を 1 回開いただけで `/dev/` がオフラインで開かなくなる | cache 名を `pkc3:<scope>:<build>` にして**欄で比較**。⚠ `/` は `/dev/` の接頭辞なので `startsWith` では分けられない。実ブラウザで実証: ① `/dev/` 起動後 `{"pkc3:%2Fdev%2F:…":8}` ② `/` も起動後は両方在る ③ オフラインで `/dev/` が `ready` |
+| H-2 | オフライン smoke が**オフラインを作れていなかった**。`context.setOffline(true)` は**ページ由来の要求しか止めない** ── SW 自身の `fetch()` は素通りするので、precache から `.wasm` を外す変異が**緑のまま通った** | `context.route('**/*', (r) => r.abort('internetdisconnected'))`。同じ変異が**落ちる**ことを確認 |
+| M-1 | build id が `GITHUB_SHA` だった ── product のバイト列が 1 バイトも変わらなくても main への push のたびに `sw.js` が変わり、**全 user が 1.6MB を再取得して再 precache**(北極星「速く、安く」に直接反する) | **配る物の一覧から**作る(`buildIdFor`)。precache 一覧は hash 付き名を含むので「一覧が同じ = 配る物が同じ」。実証: `GITHUB_SHA` を変えた 2 回のビルドで `sw.js` の md5 が一致 |
+| M-2 | その `buildIdFor` を誰も pin していない | `vite.config.ts` から export し `tests/build-config.test.ts` が性質(順序非依存 / 一覧が変われば変わる / 環境変数に依らない)を pin |
+| M-3 | `public/` の静的 file が precache から漏れる | plugin が `configResolved` で `publicDir` を捕まえ、再帰列挙して一覧に足す。`public/robots.txt` を置いて突合まで通ることを確認 |
+
+#### 🔴 2 ラウンド目の変異試験で見つけた「stub が実装より緩い」
+
+`caches.match(req, { cacheName })` を、fake の `caches` が**無視して全 cache を舐めて**
+いた。本物は **その cache だけ**を見て、無ければ `undefined` を返す ── stub が緩い分だけ
+「自分の cache 以外は覗かない」test は `cacheName` の有無を**一切見分けられず**、
+空振りしていた。本物の意味論に合わせたら、`MATCH` から `cacheName` を外す変異が落ちる。
+
+もう 1 件、**前置き検査が別の検査に救われて**いた。他人の cache を表す fixture が
+`someone-else`(欄が足りず長さ検査に救われる)と `other:%2F:old`(scope 欄がずれて
+救われる)しか無く、**前置き検査を丸ごと外しても両方 pass した**。前置きは 5 文字なので、
+撃ち抜けるのは「**同じ長さの別前置き + 自分と同形の後ろ**」だけ ── `pkc2:%2F:old` を
+足した(同 origin の兄弟 product という、実際に在りうる形でもある)。
+
+2 ラウンド目の変異試験 16 件・生存 0(SW 純関数 4 / 生成 SW 7 / precache 規則 2 / build 設定 3)。
 
 ---
 

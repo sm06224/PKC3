@@ -28,6 +28,7 @@ describe('リポジトリ衛生', () => {
       ...textFiles('tests'),
       ...textFiles('docs'),
       ...textFiles('scripts'), // CI の検品 script も同じ規律で縛る(P7 段①)
+      ...textFiles('build'), // ビルド script も同じ規律で縛る(P7 段④)
       'CLAUDE.md',
       'README.md',
     ]) {

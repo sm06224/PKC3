@@ -64,7 +64,15 @@ function healthy(kind: 'product' | 'dev' = 'product'): Input {
   const text = new Map<string, string>([
     ['index.html', INDEX_HTML],
     ['manifest.webmanifest', JSON.stringify({ icons: [{ src: 'icon.svg' }] })],
-    ['sw.js', 'self.addEventListener("fetch", () => {});'],
+    [
+      'sw.js',
+      // ⚠ 実物と同じ形(検品はここを読む)。**生成物と一致していること**が規則
+      `const PRECACHE = ${JSON.stringify(
+        ['index.html', 'manifest.webmanifest', 'icon.svg', ENTRY, WORKER, WASM, CSS].map(
+          (p) => `./${p}`,
+        ),
+      )};\nself.addEventListener("fetch", () => {});`,
+    ],
     // 参照の連鎖は実物と同じ構文で(entry → worker → wasm)。
     // ⚠ 散文に **hash らしき名前**を混ぜてある ── 形で拾う実装だと誤検知して
     // release を偽の理由で止める(2 巡目 M-2 で実証した実在の名前)
@@ -103,7 +111,11 @@ describe('生成物の検品 — 健全なとき', () => {
     // ⚠ ここが鳴ると release / Pages deploy が**偽の理由で止まる**。
     // 実物の bundle には `sqlite3-vfs-opfs.js` がコメント中に既にある
     const i = healthy();
-    i.text.set('sw.js', '// counterpart of the API defined in sqlite3-vfs-opfs.js and friends');
+    // ⚠ precache 一覧は残したまま散文だけ足す(別の規則に鳴らせない)
+    i.text.set(
+      'sw.js',
+      `${i.text.get('sw.js')!}\n// counterpart of the API defined in sqlite3-vfs-opfs.js and friends`,
+    );
     expect(run(i)).toEqual([]);
   });
 });
@@ -219,6 +231,42 @@ describe('🔴 空振りしないこと ── 規則ごとに固有の壊し方
     );
     // ⚠ 孤立検出でも鳴るので、**参照突合が鳴っていること**を名指しで見る
     expect(run(i).join('\n')).toContain('assets/gone-GGGGGGGG.js  ← assets/extra-FFFFFFFF.mjs');
+  });
+});
+
+describe('🔴 SW の precache 一覧は生成物と一致する(手書きに退化させない)', () => {
+  it('一覧が空なら鳴る(生成器が壊れても誰も気づかない、を作らない)', () => {
+    const i = healthy();
+    i.text.set('sw.js', 'const PRECACHE = [];');
+    expect(run(i).join('\n')).toContain('precache 一覧が空');
+  });
+
+  it('一覧が無ければ鳴る', () => {
+    const i = healthy();
+    i.text.set('sw.js', 'self.addEventListener("fetch", () => {});');
+    expect(run(i).join('\n')).toContain('precache 一覧が無い');
+  });
+
+  it('🔴 生成物が増えたのに一覧に載っていなければ鳴る(オフラインで欠ける)', () => {
+    const i = healthy();
+    i.files.push({ path: 'assets/added-EEEEEEEE.js', bytes: 100 });
+    i.text.set(
+      'assets/added-EEEEEEEE.js',
+      'export const a=1;',
+    );
+    // 参照もしておく(孤立検出ではなく **precache 突合**が鳴ることを見る)
+    i.text.set(ENTRY, `${i.text.get(ENTRY)!}new Worker(new URL(\`added-EEEEEEEE.js\`,import.meta.url));`);
+    expect(run(i).join('\n')).toContain('precache に載っていない');
+  });
+
+  it('🔴 一覧が実在しないものを指していれば鳴る', () => {
+    const i = healthy();
+    i.text.set('sw.js', 'const PRECACHE = ["./index.html","./消えた-FFFFFFFF.js"];');
+    expect(run(i).join('\n')).toContain('実在しないものを指している');
+  });
+
+  it('SW 自身は一覧に載せない(載っていなくても鳴らない)', () => {
+    expect(run(healthy())).toEqual([]);
   });
 });
 

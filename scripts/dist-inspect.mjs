@@ -102,7 +102,7 @@ export function inspectDist({ kind, capKb, floorKb, files, text }) {
   }
   if (!paths.has('sw.js')) {
     // entry が `register('./sw.js')` する ── 文字列参照なので構文走査には出ない
-    errors.push('dist に sw.js が無い ── PWA の登録先が消えている');
+    errors.push('dist に sw.js が無い ── PWA の登録先が消えている(オフラインで動かない)');
   }
   if (!shipped.some((f) => f.path.endsWith('.wasm'))) {
     errors.push('dist に sqlite の .wasm が無い ── storage が起動しない');
@@ -159,7 +159,40 @@ export function inspectDist({ kind, capKb, floorKb, files, text }) {
     );
   }
 
-  // ── ③ manifest が指す先まで見る(PWA は install 時にここを読む)
+  // ── ③ SW の precache 一覧が**生成物と一致するか**(P7 段④、設計 doc §3)
+  // 🔴 手書きの一覧は必ず腐る(hash 付き名はビルドのたびに変わる)ので生成している。
+  // ⚠ 生成器が空を吐いても**それ自体は誰も気づかない** ── ここで突き合わせる
+  const swText = text.get('sw.js');
+  if (swText !== undefined) {
+    // ⚠ `[^\]]*` だと名前に `]` を含む生成物で**マッチしなくなり**、
+    // 「生成器が壊れている」という**嘘の診断**を出す(review L-6)。行末まで取る
+    const m = /const PRECACHE = (\[.*\]);/.exec(swText);
+    if (!m) {
+      errors.push('sw.js に precache 一覧が無い ── 生成器が壊れている');
+    } else {
+      let listed = [];
+      try {
+        listed = JSON.parse(m[1]);
+      } catch (e) {
+        errors.push(`sw.js の precache 一覧が読めない: ${e.message}`);
+      }
+      const want = shipped.map((f) => f.path).filter((p) => p !== 'sw.js');
+      const have = new Set(listed.map((u) => u.replace(/^\.\//, '')));
+      const missing = want.filter((p) => !have.has(p));
+      const extra = [...have].filter((p) => !want.includes(p));
+      if (listed.length === 0) {
+        errors.push('sw.js の precache 一覧が空 ── オフラインで何も出ない');
+      }
+      if (missing.length > 0) {
+        errors.push(`precache に載っていない生成物がある:\n${missing.map((p) => `      ${p}`).join('\n')}`);
+      }
+      if (extra.length > 0) {
+        errors.push(`precache が実在しないものを指している:\n${extra.map((p) => `      ${p}`).join('\n')}`);
+      }
+    }
+  }
+
+  // ── ④ manifest が指す先まで見る(PWA は install 時にここを読む)
   const manifestText = text.get('manifest.webmanifest');
   if (manifestText !== undefined) {
     let manifest = null;
@@ -177,7 +210,7 @@ export function inspectDist({ kind, capKb, floorKb, files, text }) {
     }
   }
 
-  // ── ④ 配る量。**上限と下限の両方**を見る。
+  // ── ⑤ 配る量。**上限と下限の両方**を見る。
   // 🔑 cap は両方の kind で見る。配る量は kind でほぼ変わらない(実測 1610.9 /
   // 1611.1 KB)ので、PR gate の dev ビルド 1 回で効く = product ビルドを
   // PR gate に足さない(CI を長くしない・user 指示 2026-07-30)。
@@ -204,7 +237,7 @@ export function inspectDist({ kind, capKb, floorKb, files, text }) {
     );
   }
 
-  // ── ⑤ map の有無。⚠ **inline も map である**。
+  // ── ⑥ map の有無。⚠ **inline も map である**。
   // `--sourcemap inline` は `.map` を 1 件も出さないので、件数だけを見ると
   // 4.3MB の base64 map を出荷しながら「map 0 件」と報告する(1 巡目 M-2 で実証)。
   if (kind === 'product') {

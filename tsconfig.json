@@ -6,6 +6,10 @@
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noEmit": true,
+    // Vite の native config loader は config からの import に拡張子を要求する
+    // (無いと毎回 stderr に警告が出る ── 規律は「全スイートの stderr 0 行」)。
+    // `noEmit` なので `.ts` 拡張子つき import を許して構わない
+    "allowImportingTsExtensions": true,
     "skipLibCheck": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
