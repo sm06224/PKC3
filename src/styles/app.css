@@ -176,6 +176,52 @@ textarea:focus-visible {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
+/* ── 役割メニュー(topbar の `<details>`)──────────────
+ * ⚠ **本文の上に浮かせる**。inline に開くと topbar の高さが変わり、
+ * 下のペインが押し下げられて「開くたびに画面が跳ねる」。 */
+[data-pkc-menu] {
+  position: relative;
+}
+[data-pkc-field='menu-label'] {
+  list-style: none;
+  cursor: pointer;
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  user-select: none;
+}
+/* ⚠ WebKit は `list-style: none` だけでは三角が消えない */
+[data-pkc-field='menu-label']::-webkit-details-marker {
+  display: none;
+}
+[data-pkc-field='menu-label']::after {
+  content: ' ▾';
+  color: var(--muted);
+}
+[data-pkc-menu][open] > [data-pkc-field='menu-label'] {
+  border-color: var(--accent-dim);
+  color: var(--accent);
+}
+[data-pkc-menu-items] {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + var(--s1));
+  left: 0;
+  min-width: max-content;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  padding: var(--s2);
+  background: var(--surface);
+  border: 1px solid var(--accent-dim);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 60%);
+}
+[data-pkc-menu-items] button {
+  text-align: left;
+}
+
 /* いま居るビューを塗る(`markView` が属性を付け外しする) */
 [data-pkc-region='topbar'] [data-pkc-active] {
   background: var(--accent-dim);

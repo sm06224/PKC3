@@ -2,6 +2,8 @@
  * app の枠(P3 設計メモ §2)。初回に 1 度だけ構築する ── 以後どの region も
  * この枠を作り直さない。機能セレクタは data-pkc-* のみ(PKC2 規約)。
  */
+import { installMenuDismiss } from './menu';
+
 export interface ShellRegions {
   topbar: HTMLElement;
   sidebar: HTMLElement;
@@ -59,40 +61,61 @@ export function buildShell(root: HTMLElement): ShellRegions {
     btn.textContent = label;
     topbar.append(btn);
   }
-  // 🧹 未参照 asset の掃除(P4b)── **明示 purge のみ**(自動 GC はしない)。
-  // status footer は textContent 上書き運用なのでボタンを置けない → topbar 端
-  const purge = document.createElement('button');
-  purge.type = 'button';
-  purge.setAttribute('data-pkc-action', 'purge-orphan-assets');
-  purge.textContent = '添付の整理';
-  topbar.append(purge);
-  // 📤 アーカイブ書出し(P6d)── バックアップ正本。これさえあれば全部戻る
-  const exp = document.createElement('button');
-  exp.type = 'button';
-  exp.setAttribute('data-pkc-action', 'export-archive');
-  exp.textContent = 'バックアップ';
-  topbar.append(exp);
-  // 📄 可搬 HTML(P6d 段③)── 渡す・見せるための形。**可逆ではない**
-  const expHtml = document.createElement('button');
-  expHtml.type = 'button';
-  expHtml.setAttribute('data-pkc-action', 'export-html');
-  expHtml.textContent = '閲覧用 HTML';
-  topbar.append(expHtml);
-  // 📝 md ZIP(P6d 段④)── PKC3 を捨てても読める形。**片道**
-  const expMd = document.createElement('button');
-  expMd.type = 'button';
-  expMd.setAttribute('data-pkc-action', 'export-markdown');
-  expMd.textContent = 'Markdown';
-  topbar.append(expMd);
-  // 📥 取込(P6b: PKC2 の書出し / P7 段②: 素の Markdown): file picker は常設
-  // hidden input(添付と同じ流儀 ── user-gesture 要件と smoke の setInputFiles の
-  // 両方に効く)
-  const imp = document.createElement('button');
-  imp.type = 'button';
-  imp.setAttribute('data-pkc-action', 'import-file');
-  imp.textContent = '取込';
-  imp.title = 'PKC2 の書出し(HTML / ZIP)と素の Markdown を取り込みます';
-  topbar.append(imp);
+  /**
+   * 🔑 **役割ごとのサブメニュー**(user 指示 2026-08-03「メニューは役割ごとに
+   * サブメニュー化してください」)。以前は 9 個のボタンがベタ並びで、
+   * 「見る」「入れる」「出す」「整える」が同じ重さに見えていた。
+   *
+   * ⚠ **ビューは畳まない** ── 表示の切替は常時使う主軸で、押すたびに開くのは邪魔。
+   * 畳むのは「たまに使う・押すと何かが起きる」ものだけである。
+   *
+   * ⚠ 実体は `<details>` + `<summary>`(素の HTML)。JS で開閉状態を持たない。
+   * 開閉の**閉じ方**(外側クリック / Escape / 項目を押したら閉じる)と**排他**は
+   * `installMenuDismiss` が一手に担う。
+   * ⚠ かつて `name` 属性(ブラウザ native の排他)も付けていたが、**dismiss 側と
+   * 重複していて外しても振る舞いが変わらなかった**(変異試験で生存)── 消した。
+   * ⚠ **項目の文言は変えない** ── `tests/docs-parity.test.ts` がマニュアルと
+   * 突合しているので、畳んでも user が読む語は同じである。
+   */
+  const menu = (label: string): HTMLElement => {
+    const box = document.createElement('details');
+    box.setAttribute('data-pkc-menu', label);
+    const head = document.createElement('summary');
+    head.setAttribute('data-pkc-field', 'menu-label');
+    head.textContent = label;
+    const items = document.createElement('div');
+    items.setAttribute('data-pkc-menu-items', '');
+    box.append(head, items);
+    topbar.append(box);
+    return items;
+  };
+  const item = (into: HTMLElement, action: string, label: string, title?: string): void => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.setAttribute('data-pkc-action', action);
+    btn.textContent = label;
+    if (title) btn.title = title;
+    into.append(btn);
+  };
+
+  // 📥 入れる(P6b: PKC2 の書出し / P7 段②: 素の Markdown)
+  item(
+    menu('取り込む'),
+    'import-file',
+    '取込',
+    'PKC2 の書出し(HTML / ZIP)と素の Markdown を取り込みます',
+  );
+  // 📤 出す ── バックアップだけが可逆。並び順で「正本」を先頭に置く
+  const outMenu = menu('書き出す');
+  item(outMenu, 'export-archive', 'バックアップ');
+  item(outMenu, 'export-html', '閲覧用 HTML');
+  item(outMenu, 'export-markdown', 'Markdown');
+  // 🧹 整える ── **明示 purge のみ**(自動 GC はしない)。⚠ 不可逆なので、
+  // メニューの内側に置いて「押すまでに一手」を挟む
+  item(menu('整理'), 'purge-orphan-assets', '添付の整理');
+  // ⚠ file picker は常設 hidden input(添付と同じ流儀 ── user-gesture 要件と
+  // smoke の setInputFiles の両方に効く)。**メニューの外**に置く ── メニューを
+  // 閉じると中の input は描画木から外れ、smoke の setInputFiles が届かない
   const impInput = document.createElement('input');
   impInput.type = 'file';
   // 判別は中身(magic)でやるので accept は誤選択を減らすためだけの補助。
@@ -157,5 +180,8 @@ export function buildShell(root: HTMLElement): ShellRegions {
 
   shell.append(topbar, sidebar, detail, update, notices, status);
   root.append(shell);
+  // 役割メニューの閉じ方(外側クリック / Escape / 項目のクリック)。
+  // ⚠ 枠は 1 度しか作らないので、ここで 1 度張れば足りる
+  installMenuDismiss(shell);
   return { topbar, sidebar, detail, status, notices, update };
 }

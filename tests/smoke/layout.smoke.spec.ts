@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal } from './helpers';
+import { gotoApp, clickReal, clickMenuItem } from './helpers';
 
 /**
  * P7b 段⑨: **枠が組めている**(設計 doc §1-4)。
@@ -104,4 +104,70 @@ test('🔴 狭い画面では 1 カラムへ折る(横に潰れない)', async (
   expect(sidebar.y + sidebar.height).toBeLessThanOrEqual(detail.y + 1);
   // 本文が画面幅いっぱいを使う
   expect(detail.width).toBeGreaterThan(400);
+});
+
+/**
+ * P7b 段⑨b: **役割メニュー**(user 指示 2026-08-03)。
+ *
+ * ⚠ 開閉は `<details>` の既定に任せているので、ここが見るのは
+ * 「**閉じ方**」と「**畳んでも押せる**」ことである ── 素の `<details>` は
+ * 外側を押しても Escape でも閉じず、開きっぱなしのパネルが本文を覆う。
+ */
+test('🔴 役割メニュー ── 開く / 押せる / 閉じる', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await gotoApp(page);
+
+  const outMenu = page.locator('details[data-pkc-menu="書き出す"]');
+  const outItems = outMenu.locator('[data-pkc-menu-items]');
+  const impMenu = page.locator('details[data-pkc-menu="取り込む"]');
+
+  // ① 既定では**中身が見えない**(畳まれている)
+  await expect(outItems).toBeHidden();
+  // ⚠ ビューは畳まない(常時使う主軸)
+  await expect(page.locator('[data-pkc-action="set-view"]').first()).toBeVisible();
+
+  // ② 開くと中身が出る
+  await clickReal(page, 'details[data-pkc-menu="書き出す"] > summary');
+  await expect(outItems).toBeVisible();
+  await expect(outMenu.locator('[data-pkc-action="export-archive"]')).toBeVisible();
+
+  // ③ 🔴 **本文を押し下げない**(inline に開くと画面が跳ねる)
+  const detailBefore = (await page.locator('[data-pkc-region="detail"]').boundingBox())!;
+  await clickReal(page, 'details[data-pkc-menu="整理"] > summary');
+  const detailAfter = (await page.locator('[data-pkc-region="detail"]').boundingBox())!;
+  expect(detailAfter.y, 'メニューを開いたら本文が下がった').toBe(detailBefore.y);
+
+  // ④ 🔴 **排他** ── 別のメニューを開くと前のは閉じる
+  await expect(outItems).toBeHidden();
+
+  // ⑤ 🔴 **外側を押すと閉じる**(素の details は閉じない)
+  await expect(page.locator('details[data-pkc-menu="整理"] [data-pkc-menu-items]')).toBeVisible();
+  await page.mouse.click(900, 600);
+  await expect(
+    page.locator('details[data-pkc-menu="整理"] [data-pkc-menu-items]'),
+  ).toBeHidden();
+
+  // ⑥ 🔴 **Escape で閉じる**
+  await clickReal(page, 'details[data-pkc-menu="書き出す"] > summary');
+  await expect(outItems).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(outItems).toBeHidden();
+
+  // ⑦ 🔴 **項目を押したら閉じる** ── 開いたままだと、押した結果(注意の面など)を
+  //    メニューが覆って「押したのに何も起きていない」ように見える
+  await clickMenuItem(page, '[data-pkc-action="import-file"]');
+  await expect(impMenu.locator('[data-pkc-menu-items]')).toBeHidden();
+
+  // ⑧ 🔴 押した項目が**実際に働く**。⚠ 「閉じた」だけを見ていると、
+  //    `pointerdown` で閉じて **`click` が届かない**実装が素通りする
+  //    (メニューは畳まれるのに何も起きない ── 変異試験で実際に生き残った)。
+  //    観測点は「確認ダイアログが出たか」= ハンドラに届いた証拠
+  let asked: string | null = null;
+  page.once('dialog', (d) => {
+    asked = d.message();
+    void d.dismiss();
+  });
+  await clickMenuItem(page, '[data-pkc-action="purge-orphan-assets"]');
+  await expect.poll(() => asked, { timeout: 5_000 }).not.toBeNull();
+  expect(asked!).toContain('添付');
 });

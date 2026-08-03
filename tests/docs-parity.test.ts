@@ -112,6 +112,24 @@ describe('マニュアルと実装の突合', () => {
     expect(MANUAL).toContain('ドラッグ&ドロップは受けません');
   });
 
+  it('🔴 役割メニューの見出しが pin と一致し、マニュアルにも在る', () => {
+    // user 指示 2026-08-03「メニューは役割ごとにサブメニュー化してください」。
+    // ⚠ 見出しは**マニュアルの導線そのもの**(「取り込む → 取込」と書いてある)
+    const root = document.createElement('div');
+    buildShell(root);
+    const menus = [...root.querySelectorAll('[data-pkc-menu]')].map(
+      (el) => el.getAttribute('data-pkc-menu') ?? '',
+    );
+    expect(menus).toEqual(['取り込む', '書き出す', '整理']);
+    for (const label of menus) {
+      expect(MANUAL, `マニュアルに「${label}」メニューが無い`).toContain(`**${label}**`);
+    }
+    // ⚠ **ビューは畳まない**(常時使う主軸)── メニューに入れたら落とす
+    for (const el of root.querySelectorAll('[data-pkc-action="set-view"]')) {
+      expect(el.closest('[data-pkc-menu]'), 'ビューがメニューに入っている').toBeNull();
+    }
+  });
+
   it('🔴 詳細画面のボタン文言が pin と一致し、マニュアルにも在る', () => {
     // ⚠ `buildShell` だけを見ていたので、`detail.ts` の文言は**1 つも縛られて
     // いなかった**(round-2 review M-7)── マニュアルは実際に 2 件間違えていた
