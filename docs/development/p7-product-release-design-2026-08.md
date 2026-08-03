@@ -649,6 +649,30 @@ Pages 経路で成立していない。round-2 では doc を直すだけにし�
 純関数しか見ない)── `dist/` を見て「✓ ok」と言いながら別物を配れるので、
 `tests/check-dist-cli.test.ts` を足して CLI の I/O を直接見る。
 
+#### 🔴 `release: published` は**そもそも発火しない**(round-3 review M-1)
+
+GitHub Actions は **既定の `GITHUB_TOKEN` が起こしたイベントで新しい run を開始しない**。
+`release.yml` は `GH_TOKEN: ${{ github.token }}` で release を作るので、`pages.yml` の
+`release: types: [published]` は**この経路では一度も走らない** ── 気づかないと
+「**tag を打ったのに `/` が placeholder のまま、次の main push まで製品が出ない**」になる。
+段⑧ 途中で入れた「draft で作ってから公開する」修正も、**走らない経路のための修正**だった。
+
+→ `release.yml` の最後で `gh workflow run pages.yml --ref main` を叩く(`actions: write` が要る)。
+⚠ draft → 公開の順序は**人が手で release を公開する経路**では効き続けるので残す。
+
+#### 🔴 `gh` の失敗が「release が無い」に化けて、site root を消していた(round-3 review H-2)
+
+`[ -n "$TAG" ] && gh … | grep -q …` は構文としては正しく `A && (B|C)` に parse されるが、
+pipefail が無いので **`gh` の失敗が `grep` の 1 に化ける** ── API 障害でも
+「安定 release がまだ無い」として placeholder 分岐へ落ちていた。
+⚠ その分岐は `_site/index.html` **しか**書かないので、`sw.js` / `manifest.webmanifest` /
+`icon.svg` が site root から**消える**。navigation は network-first なので SW を持つ
+既存 user にも placeholder が届き、`/sw.js` の 404 は**登録解除の合図**として扱われる
+(オフライン能力ごと落ちる)。
+
+→ **placeholder を配ってよいのは「安定 tag が 1 つも無いとき」だけ**。
+tag が在るのに配れないなら **job を落として前回の deploy を残す**。
+
 #### 塞がずに残すもの(bounded だと確かめたうえで)
 
 | # | 何 | なぜ残すか |

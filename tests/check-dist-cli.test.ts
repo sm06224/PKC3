@@ -56,9 +56,15 @@ describe('検品 CLI', () => {
     expect(r.out).toContain('検品対象が無い');
   });
 
-  it('既定は dist/(引数なしでも動く)', () => {
-    // ⚠ `npm run build` 済みが前提。build されていなければ「無い」と言う
-    const r = run(['dev']);
-    expect(r.out).toMatch(/ファイル \d+ 件|検品対象が無い/);
+  it('🔴 既定は dist/(**引数ありと同じ結果**になる)', () => {
+    // 🔴 かつては `/ファイル \d+ 件|検品対象が無い/` で見ていたが、**どちらの結末も
+    // 受ける**ので既定を `node_modules/.bin` に変えても全緑だった(round-3 review L-1)。
+    // ⚠ しかも CI は `npm test` を `npm run build` より**前**に走らせるので、
+    // この test は常に「無い」側を通っていた ── 状態に依らず弁別する形にする:
+    // **引数なし** と **引数 `dist`** の結果が一致すること
+    const bare = run(['dev']);
+    const explicit = run(['dev', 'dist']);
+    expect(bare.code).toBe(explicit.code);
+    expect(bare.out).toBe(explicit.out);
   });
 });

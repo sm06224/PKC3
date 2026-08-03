@@ -83,11 +83,19 @@ describe('workflow の shell', () => {
   it('🔴 `A && B || C` を書かない(同順位・左結合で「失敗したとき」も飛ぶ)', () => {
     // 実証済みの事故: `[ -f X ] && node X || true` は検品の**失敗まで飛ばす**。
     // ⚠ 「無いときだけ飛ばしたい」なら `if …; then …; fi` と書く
+    // ⚠ **論理行で見る**(round-3 review L-2)。行単位だと `\\` の行継続で
+    // またいだ形が素通りする ── 守ろうとしている当の `pages.yml` が継続を使うので、
+    // 同じ file の中に抜け道が開いていた(実証: 継続を使った `&& … || true` が全緑)
     const offenders: string[] = [];
     for (const b of blocks) {
-      for (const [n, line] of b.code.split('\n').entries()) {
-        const code = line.replace(/#.*$/, ''); // コメントの中の説明文で誤検知しない
-        if (/&&[^|]*\|\|/.test(code)) offenders.push(`${b.file}:${n + 1}: ${line.trim()}`);
+      // コメント行を落としてから継続を畳む(説明文の中の記号で誤検知しない)
+      const logical = b.code
+        .split('\n')
+        .filter((l) => !/^\s*#/.test(l))
+        .join('\n')
+        .replace(/\\\n/g, ' ');
+      for (const [n, line] of logical.split('\n').entries()) {
+        if (/&&[^|]*\|\|/.test(line)) offenders.push(`${b.file}:~${n + 1}: ${line.trim()}`);
       }
     }
     expect(offenders).toEqual([]);

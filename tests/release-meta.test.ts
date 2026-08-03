@@ -189,6 +189,38 @@ describe('🔴 release workflow が版と provenance を担保する', () => {
     expect(wf.indexOf('gh release create')).toBeLessThan(publish);
   });
 
+  it('🔴 release の後に Pages を**明示的に起こす**(published は飛ばない)', () => {
+    // round-3 review M-1: GitHub Actions は**既定の `GITHUB_TOKEN` が起こした
+    // イベントで新しい run を開始しない** ── `pages.yml` の
+    // `release: types: [published]` は、この workflow が作った release では
+    // **一度も走らない**。気づかないと「tag を打ったのに `/` が placeholder のまま」
+    expect(wf, 'Pages を起こしていない').toContain('gh workflow run pages.yml');
+    // ⚠ 権限が無いと dispatch は 403 で落ちる
+    expect(wf).toContain('actions: write');
+    // ⚠ 公開より**後**に起こす(先に起こすと資産がまだ無い)
+    expect(wf.indexOf('--draft=false')).toBeLessThan(wf.indexOf('gh workflow run'));
+    // dispatch を受ける口が pages 側にあること
+    const pages = stripComments(readFileSync('.github/workflows/pages.yml', 'utf-8'));
+    expect(pages, 'pages.yml が workflow_dispatch を受けない').toContain('workflow_dispatch');
+  });
+
+  it('🔴 安定 tag が在るのに product を配れないなら**落とす**(静かに placeholder にしない)', () => {
+    // round-3 review H-2: `gh` の失敗が「release が無い」に化けて placeholder へ
+    // 落ちると、`_site` の root から `sw.js` / `manifest` / `icon` が**消える** ──
+    // navigation は network-first なので既存 user にも placeholder が届き、
+    // `/sw.js` の 404 は**登録解除の合図**として扱われる(オフライン能力ごと落ちる)
+    const pages = stripComments(readFileSync('.github/workflows/pages.yml', 'utf-8'));
+    // placeholder は「tag が無い」枝でしか使わない
+    const placeholderAt = pages.indexOf('pages-placeholder.html');
+    const emptyTagAt = pages.indexOf('if [ -z "$TAG" ]');
+    expect(emptyTagAt, 'tag 不在の枝が無い').toBeGreaterThan(-1);
+    expect(emptyTagAt).toBeLessThan(placeholderAt);
+    // 照会の失敗と資産の不在で **exit 1** する
+    expect((pages.match(/exit 1/g) ?? []).length).toBeGreaterThanOrEqual(2);
+    // ⚠ 1 本の条件に混ぜ戻していないこと(pipefail が無いと失敗が 1 に化ける)
+    expect(pages).not.toMatch(/\[ -n "\$TAG" \][^\n]*&&[^\n]*gh release view/);
+  });
+
   it('product の検品を通してから release する', () => {
     // 段① の最終関門(map 入りを配らない)を外さない
     expect(wf).toContain('check-dist.mjs product');
