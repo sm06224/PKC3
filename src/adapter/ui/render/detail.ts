@@ -17,6 +17,7 @@ import {
 } from '@features/markdown/markdown-render';
 import { parseFrontmatter, extractVars } from '@features/markdown/frontmatter';
 import { hydrateMermaid } from './mermaid-hydrate';
+import { iconButton } from './icons';
 import {
   extractDocumentGlobals,
   extractHeadingNumberConfig,
@@ -127,10 +128,7 @@ export class DetailRenderer {
     if (state.phase === 'ready') {
       const bar = document.createElement('div');
       bar.setAttribute('data-pkc-field', 'detail-toolbar');
-      const edit = document.createElement('button');
-      edit.type = 'button';
-      edit.setAttribute('data-pkc-action', 'start-edit');
-      edit.textContent = '編集';
+      const edit = iconButton('start-edit', '編集');
       // 🔑 **ここには「編集」だけ**(P8)。書き出す / 履歴 / 削除は右の情報ペインが
       // 持つ ── 同じボタンを 2 か所に出すと、押す場所が定まらないうえ、
       // 「本文の上」は**本文に対する操作**の場所であって entry に対する場所ではない。
@@ -211,14 +209,8 @@ export class DetailRenderer {
 
     const bar = document.createElement('div');
     bar.setAttribute('data-pkc-field', 'detail-toolbar');
-    const commit = document.createElement('button');
-    commit.type = 'button';
-    commit.setAttribute('data-pkc-action', 'commit-edit');
-    commit.textContent = '保存';
-    const cancel = document.createElement('button');
-    cancel.type = 'button';
-    cancel.setAttribute('data-pkc-action', 'cancel-edit');
-    cancel.textContent = 'キャンセル';
+    const commit = iconButton('commit-edit', '保存');
+    const cancel = iconButton('cancel-edit', 'キャンセル');
     bar.append(commit, cancel);
     this.region.append(bar);
 

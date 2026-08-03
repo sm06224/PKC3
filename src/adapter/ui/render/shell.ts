@@ -10,7 +10,7 @@
  * 🔑 **3 列**(一覧 / 本文 / 付随情報)。編集に入っても列は動かない。
  */
 import { SEALED_ARCHETYPES, SEALED_VIEWS } from '@features/sealed';
-import { THEMES } from './theme';
+import { iconButton } from './icons';
 
 export interface ShellRegions {
   /** 最上部の帯。彩度のある色を置くのはここだけ。 */
@@ -47,6 +47,9 @@ const VIEW_BUTTONS: readonly { view: string; label: string }[] = [
   { view: 'kanban', label: 'かんばん' },
   { view: 'calendar', label: 'カレンダー' },
   { view: 'launcher', label: 'アプリ' },
+  // ⚠ **めったに来ない場所**(user 指示「テーマは設定系の画面にしまって / 普段から
+  // 必要ではない」)。それでも導線は畳まない ── 押す口はここに 1 つ置く
+  { view: 'settings', label: '設定' },
 ] as const;
 
 /**
@@ -105,21 +108,9 @@ export function buildShell(root: HTMLElement): ShellRegions {
   brandName.textContent = 'PKC3';
   const brandContext = document.createElement('span');
   brandContext.setAttribute('data-pkc-field', 'brand-context');
-  const spacer = document.createElement('span');
-  spacer.setAttribute('data-pkc-field', 'brand-spacer');
-  // 🎨 配色 ── **選ぶもの**なので `<select>`(9 つをボタンで並べると帯が埋まる)
-  const theme = document.createElement('select');
-  theme.setAttribute('data-pkc-action', 'set-theme');
-  theme.setAttribute('data-pkc-field', 'theme-select');
-  theme.setAttribute('aria-label', '配色');
-  theme.title = '配色を選びます';
-  for (const t of THEMES) {
-    const opt = document.createElement('option');
-    opt.value = t.id;
-    opt.textContent = t.label;
-    theme.append(opt);
-  }
-  brand.append(brandName, brandContext, spacer, theme);
+  // ⚠ **薄く保つ**(user 指示 2026-08-03「最上のヘッドラインはもっと薄くてもいい、
+  // 邪魔」)── 名前と現在地だけ。押すものはここに置かない
+  brand.append(brandName, brandContext);
 
   // ── 操作の帯 ────────────────────────────────────
   const cmdbar = document.createElement('div');
@@ -139,11 +130,8 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const views = group();
   for (const { view, label } of VIEW_BUTTONS) {
     if (SEALED_VIEWS.includes(view)) continue; // 封印中(features/sealed.ts)
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.setAttribute('data-pkc-action', 'set-view');
+    const btn = iconButton('set-view', label, `set-view:${view}`);
     btn.setAttribute('data-pkc-view', view);
-    btn.textContent = label;
     views.append(btn);
   }
 
@@ -151,10 +139,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
     sep();
     const host = group();
     for (const { action, label, title } of g.items) {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.setAttribute('data-pkc-action', action);
-      btn.textContent = label;
+      const btn = iconButton(action, label);
       if (title) btn.title = title;
       host.append(btn);
     }
@@ -206,15 +191,9 @@ export function buildShell(root: HTMLElement): ShellRegions {
     opt.textContent = label;
     kind.append(opt);
   }
-  const create = document.createElement('button');
-  create.type = 'button';
-  create.setAttribute('data-pkc-action', 'create-entry');
-  create.textContent = '新規';
+  const create = iconButton('create-entry', '新規');
   create.title = '選んだ種類で新しく作ります';
-  const attach = document.createElement('button');
-  attach.type = 'button';
-  attach.setAttribute('data-pkc-action', 'attach-file');
-  attach.textContent = '添付';
+  const attach = iconButton('attach-file', '添付');
   attach.title = 'ファイルを取り込んで添付にします';
   createBar.append(kind, create, attach);
 

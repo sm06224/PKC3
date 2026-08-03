@@ -44,9 +44,11 @@ const root = ((): HTMLElement => {
 
 /** shell が実際に描いたボタンの文言(`data-pkc-action` で引く)。 */
 function buttonLabels(action: string): string[] {
+  // ⚠ 図案(絵文字)は別の span に入っている ── **文字だけ**を読む
+  // (`textContent` だと図案が混ざり、マニュアルとの突合が壊れる)
   return [...root.querySelectorAll(`[data-pkc-action="${action}"]`)]
     .filter((b) => b.tagName === 'BUTTON')
-    .map((b) => b.textContent ?? '');
+    .map((b) => b.querySelector('[data-pkc-field="label"]')?.textContent ?? b.textContent ?? '');
 }
 
 /**
@@ -59,7 +61,7 @@ function buttonLabels(action: string): string[] {
 const EXPECTED_LABELS = {
   // ⚠ 種類は `<select>` で選ぶので、ボタンは 1 つ(P8)
   'create-entry': ['新規'],
-  'set-view': ['ノート', 'フォルダ', 'アプリ'],
+  'set-view': ['ノート', 'フォルダ', 'アプリ', '設定'],
   'export-archive': ['バックアップ'],
   'export-html': ['閲覧用 HTML'],
   'export-markdown': ['Markdown'],
@@ -187,21 +189,19 @@ describe('マニュアルと実装の突合', () => {
     // いなかった**(round-2 review M-7)── マニュアルは実際に 2 件間違えていた。
     // 🔑 P8 で**置き場所が変わった** ── 本文の上には「編集」だけを残し、
     // entry に対する操作(書き出す / 履歴 / 削除)は右の情報ペインへ移した
+    // ⚠ 図案つきボタンは `iconButton(action, label)` で作る ── 文言はその第 2 引数
     const detail = readFileSync('src/adapter/ui/render/detail.ts', 'utf-8');
-    for (const label of ['編集', '保存', 'キャンセル', '復元']) {
-      expect(detail, `本文まわりから「${label}」が消えた`).toContain(
-        `textContent = '${label}'`,
-      );
+    for (const label of ['編集', '保存', 'キャンセル']) {
+      expect(detail, `本文まわりから「${label}」が消えた`).toContain(`, '${label}')`);
     }
+    expect(detail, '復元が消えた').toContain("textContent = '復元'");
     const inspector = readFileSync('src/adapter/ui/render/inspector.ts', 'utf-8');
     for (const label of ['書き出す', '履歴', '削除']) {
       expect(inspector, `情報ペインから「${label}」が消えた`).toContain(`'${label}'`);
     }
     // ⚠ **2 か所に同じボタンを出さない**(押す場所が定まらなくなる)
     for (const label of ['削除', '履歴']) {
-      expect(detail, `「${label}」が本文の上にも残っている`).not.toContain(
-        `textContent = '${label}'`,
-      );
+      expect(detail, `「${label}」が本文の上にも残っている`).not.toContain(`, '${label}')`);
     }
     for (const label of ['編集', '保存', 'キャンセル', '履歴', '書き出す']) {
       expect(MANUAL, `マニュアルに「${label}」が無い`).toContain(`**${label}**`);

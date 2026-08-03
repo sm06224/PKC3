@@ -65,7 +65,11 @@ body {
     'notices notices notices'
     'status  status  status';
   height: 100%;
-  gap: 0;
+  /* 🔑 **境界線は共有する**(user 指示 2026-08-03「境界線は全て共有して、
+   * マージンとギャップは基本いらない」)。1px の隙間に地の色を透かせて
+   * **1 本の線**にする ── 各面に border を持たせると隣り合わせで 2px になる。 */
+  gap: 1px;
+  background: var(--border);
 }
 
 [data-pkc-region='brand'] {
@@ -94,17 +98,44 @@ body {
 }
 
 /* ── 部品 ─────────────────────────────────────────── */
+/* 🔑 **図案を入れても大きさが変わらない**(user 指示 2026-08-03
+ * 「絵文字を使うとボタンの高さが合わないから、UI デザインとして
+ * ボタンサイズ揃えはしてください」)。
+ * ⚠ 絵文字は書体ごとに文字送りも行送りも違う ── だから
+ *   ① 高さを `--row-h` に**固定**(中身で伸びない)
+ *   ② `inline-flex` + `line-height: 1` で行送りの影響を切る
+ *   ③ 図案は**固定幅の枠**に入れる(下の `[data-pkc-icon]`) */
 button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
   background: var(--surface);
   color: var(--fg);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 0 var(--s3);
   height: var(--row-h);
+  min-height: var(--row-h);
+  max-height: var(--row-h);
   font: inherit;
-  line-height: calc(var(--row-h) - 2px);
+  line-height: 1;
   cursor: pointer;
   white-space: nowrap;
+  vertical-align: middle;
+}
+/* 図案の枠 ── **幅を固定**する。絵文字ごとの字幅で並びがずれない */
+[data-pkc-icon] {
+  flex: none;
+  width: 1.15em;
+  text-align: center;
+  line-height: 1;
+  font-size: 1.05em;
+  /* ⚠ 絵文字は書体で行送りが伸びる ── 枠の高さも固定して押し出させない */
+  height: 1.15em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 button:hover {
   background: var(--surface-2);
@@ -143,19 +174,21 @@ select:focus-visible {
 
 /* ── 最上部の帯 ────────────────────────────────────
  * 🔑 **彩度のある色を置くのはここだけ**。アプリの現在地を 1 行で示す。 */
+/* ⚠ **薄く**(user 指示 2026-08-03「最上のヘッドラインはもっと薄くてもいい、邪魔」)。
+ * 高さを 32 → 20px、文字を 13 → 11px にして、押すものは置かない。 */
 [data-pkc-region='brand'] {
   display: flex;
   align-items: center;
   gap: var(--s3);
-  height: 32px;
+  height: 20px;
   padding: 0 var(--s3);
   background: var(--accent);
   color: var(--accent-fg);
-  font-weight: 600;
+  font-size: 11px;
   letter-spacing: 0.02em;
 }
 [data-pkc-field='brand-name'] {
-  font-size: 13px;
+  font-weight: 600;
 }
 [data-pkc-field='brand-context'] {
   font-weight: 400;
@@ -186,7 +219,6 @@ select:focus-visible {
   gap: var(--s2);
   padding: var(--s2) var(--s3);
   background: var(--surface);
-  border-bottom: 1px solid var(--border);
   overflow-x: auto;
 }
 [data-pkc-field='cmd-sep'] {
@@ -223,19 +255,25 @@ select:focus-visible {
   flex-direction: column;
   min-height: 0;
   background: var(--surface);
-  border-right: 1px solid var(--border);
 }
 [data-pkc-region='find-bar'],
 [data-pkc-region='create-bar'] {
   display: flex;
-  gap: var(--s2);
-  align-items: center;
-  padding: var(--s2);
-  padding-bottom: 0;
+  gap: 1px;
+  align-items: stretch;
+  padding: 0;
+  background: var(--border);
 }
+[data-pkc-region='find-bar'],
 [data-pkc-region='create-bar'] {
-  padding-bottom: var(--s2);
-  border-bottom: 1px solid var(--border);
+  /* 下端に**共有の 1 本線**(地の色を 1px 透かせる) */
+  padding-bottom: 1px;
+}
+[data-pkc-region='find-bar'] input,
+[data-pkc-region='create-bar'] select,
+[data-pkc-region='create-bar'] button {
+  border: none;
+  border-radius: 0;
 }
 [data-pkc-field='entry-filter'] {
   flex: 1;
@@ -245,16 +283,14 @@ select:focus-visible {
   flex: 1;
   min-width: 0;
 }
+/* ⚠ **余白もギャップも置かない**(user 指示)。行は共有の 1 本線で区切る */
 [data-pkc-region='entry-list'] {
   list-style: none;
   margin: 0;
-  padding: var(--s2);
+  padding: 0;
   overflow: auto;
   flex: 1;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
 }
 /* ⚠ **フル幅の横線を引かない**(区切りは背景と余白でつける)。
  * 以前は全行に画面いっぱいの罫線があり、線だけが目立って中身が散っていた。 */
@@ -264,9 +300,10 @@ select:focus-visible {
   gap: var(--s2);
   min-height: var(--row-h);
   padding: 0 var(--s2);
-  border-radius: var(--radius);
   cursor: pointer;
   border-left: 2px solid transparent;
+  /* 行どうしは**1 本の線**を共有する(下端だけ引く) */
+  border-bottom: 1px solid var(--border);
 }
 [data-pkc-region='entry-list'] [data-pkc-entry]:hover {
   background: var(--surface-2);
@@ -275,6 +312,10 @@ select:focus-visible {
   background: var(--accent-dim) !important;
   color: var(--accent-dim-fg);
   border-left-color: var(--accent) !important;
+}
+/* 種別チップは図案なので、文字サイズを揃えて枠を固定する */
+[data-pkc-chip] {
+  font-size: 12px;
 }
 [data-pkc-entry] [data-pkc-field='title'] {
   overflow: hidden;
@@ -287,38 +328,16 @@ select:focus-visible {
 /* 種別のチップ ── **色が分類を担う**(裸の文字を本文の前に置かない)。
  * ⚠ renderer が `data-pkc-chip` を持つ要素を作る。CSS の `content` では出さない
  * (`::before` を行に当てると表のセル構造が壊れる ── 実測で踏んだ)。 */
+/* ⚠ **下地を敷かない** ── 図案そのものが分類を示すので、色の箱は情報を増やさず
+ * 「地は無彩色」に反する。枠だけ固定して、行の高さを図案で崩さない */
 [data-pkc-chip] {
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 18px;
+  width: 16px;
   height: 16px;
-  padding: 0 3px;
-  border-radius: 2px;
-  font-size: 10px;
   line-height: 1;
-  font-weight: 600;
-  color: #fff;
-  background: var(--muted);
-}
-[data-pkc-chip='text'] {
-  background: #4a6fa5;
-}
-[data-pkc-chip='textlog'] {
-  background: #6b5b95;
-}
-[data-pkc-chip='spreadsheet'] {
-  background: #2f7d5c;
-}
-[data-pkc-chip='folder'] {
-  background: #8a6d3b;
-}
-[data-pkc-chip='attachment'] {
-  background: #6e7781;
-}
-[data-pkc-chip='todo'] {
-  background: #a05252;
 }
 
 /* ── 中央(本文)────────────────────────────────── */
@@ -327,8 +346,8 @@ select:focus-visible {
   flex-direction: column;
   overflow: auto;
   min-height: 0;
-  padding: var(--s3);
-  background: var(--bg);
+  padding: 0;
+  background: var(--surface);
 }
 [data-pkc-region='detail'] > [data-pkc-view-pane] {
   flex: 1;
@@ -338,9 +357,7 @@ select:focus-visible {
   display: flex;
   flex-direction: column;
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: var(--s4);
+  padding: var(--s3);
 }
 [data-pkc-field='detail-title'] {
   margin: 0 0 var(--s3);
@@ -378,7 +395,9 @@ select:focus-visible {
 [data-pkc-region='editor-split'] {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: var(--s3);
+  /* 共有の 1 本線で分ける(ギャップは置かない) */
+  gap: 1px;
+  background: var(--border);
   flex: 1;
   min-height: 0;
 }
@@ -386,9 +405,11 @@ select:focus-visible {
   overflow: auto;
   min-height: 0;
   padding: var(--s3);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  background: var(--surface);
+}
+[data-pkc-region='editor-split'] [data-pkc-field='editor-body'] {
+  border: none;
+  border-radius: 0;
 }
 
 /* ⚠ **残りの高さを埋める**。以前は固定高で、下に 280px の死に領域があった */
@@ -410,7 +431,6 @@ select:focus-visible {
   min-height: 0;
   overflow: auto;
   background: var(--surface);
-  border-left: 1px solid var(--border);
 }
 [data-pkc-field='pane-title'] {
   display: flex;
@@ -736,7 +756,6 @@ select:focus-visible {
 [data-pkc-region='notices'] {
   padding: var(--s3);
   background: var(--surface-2);
-  border-top: 1px solid var(--border);
 }
 [data-pkc-field='notices-title'] {
   font-weight: 600;
@@ -753,7 +772,6 @@ select:focus-visible {
   padding: var(--s2) var(--s3);
   background: var(--accent-dim);
   color: var(--accent-dim-fg);
-  border-top: 1px solid var(--accent);
 }
 [data-pkc-field='update-text'] {
   flex: 1;
@@ -762,10 +780,9 @@ select:focus-visible {
   display: flex;
   align-items: center;
   gap: var(--s3);
-  height: 22px;
+  height: 20px;
   padding: 0 var(--s3);
   background: var(--surface-2);
-  border-top: 1px solid var(--border);
   color: var(--muted);
   font-size: 11px;
 }
@@ -825,4 +842,28 @@ select:focus-visible {
   [data-pkc-region='editor-preview'] {
     display: none;
   }
+}
+
+/* ── 設定の画面 ─────────────────────────────────── */
+[data-pkc-region='settings-body'] {
+  padding: var(--s4);
+}
+[data-pkc-region='settings-body'] dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--s3) var(--s4);
+  align-items: start;
+}
+[data-pkc-region='settings-body'] dt {
+  color: var(--muted);
+  white-space: nowrap;
+}
+[data-pkc-region='settings-body'] dd {
+  margin: 0;
+}
+[data-pkc-field='settings-note'] {
+  margin: var(--s2) 0 0;
+  color: var(--muted);
+  font-size: 11px;
 }

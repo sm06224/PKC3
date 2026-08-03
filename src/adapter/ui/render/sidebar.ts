@@ -11,6 +11,7 @@
 import type { EntryMeta } from '@core/model/entry-meta';
 import type { AppState } from '@adapter/state/app-state';
 import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
+import { ARCHETYPE_ICONS } from './icons';
 
 export class SidebarRenderer {
   private readonly list: HTMLElement;
@@ -202,26 +203,10 @@ export function archetypeLabel(archetype: string): string {
 }
 
 /**
- * チップに入れる 1〜2 文字。⚠ **チップの中でだけ**使う ── 地の文の前に
- * 裸で置くと「文 会議メモ」のような日本語に無い書き方になる(P8 で全廃した形)。
+ * チップに入れる図案(user 指示 2026-08-03「アイコンや絵文字を使ってください」)。
+ * ⚠ **チップの中でだけ**使う ── 地の文の前に裸で置くと
+ * 「文 会議メモ」のような日本語に無い書き方になる(P8 で全廃した形)。
  */
 function chipLabel(archetype: string): string {
-  switch (archetype) {
-    case 'text':
-      return 'ノ';
-    case 'textlog':
-      return 'ロ';
-    case 'spreadsheet':
-      return '表';
-    case 'folder':
-      return 'F';
-    case 'attachment':
-      return '添';
-    case 'todo':
-      return 'T';
-    case 'form':
-      return 'フ';
-    default:
-      return '・';
-  }
+  return ARCHETYPE_ICONS[archetype] ?? '・';
 }

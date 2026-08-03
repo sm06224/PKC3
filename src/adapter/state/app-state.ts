@@ -15,7 +15,7 @@ import type { LauncherTile } from '@features/launcher/tiles';
 import { visibleOrder } from '@features/filter/title-filter';
 
 export type AppPhase = 'initializing' | 'ready' | 'editing' | 'error';
-export type ViewMode = 'detail' | 'calendar' | 'kanban' | 'filer' | 'launcher';
+export type ViewMode = 'detail' | 'calendar' | 'kanban' | 'filer' | 'launcher' | 'settings';
 
 /**
  * 選択中 entry の body 作業域。3 つの内容は意味が異なる(review E の解消形):

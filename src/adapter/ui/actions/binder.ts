@@ -29,6 +29,7 @@ const VIEW_MODES: ReadonlySet<string> = new Set([
   'kanban',
   'filer',
   'launcher',
+  'settings',
 ]);
 
 /** 既定 title の種別ラベル(連番は同 archetype の現在数 + 1)。 */

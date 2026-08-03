@@ -13,12 +13,17 @@ import { KanbanRenderer } from './kanban';
 import { CalendarRenderer } from './calendar';
 import { FilerRenderer } from './filer';
 import { LauncherRenderer } from './launcher';
+import { SettingsRenderer } from './settings';
 
-type PaneView = 'detail' | 'kanban' | 'calendar' | 'filer' | 'launcher';
+type PaneView = 'detail' | 'kanban' | 'calendar' | 'filer' | 'launcher' | 'settings';
 
 /** ⚠ かつて launcher は detail へ fallback していた(P7b 段⑩ で実体を持った)。 */
 function toPane(view: ViewMode): PaneView {
-  return view === 'kanban' || view === 'calendar' || view === 'filer' || view === 'launcher'
+  return view === 'kanban' ||
+    view === 'calendar' ||
+    view === 'filer' ||
+    view === 'launcher' ||
+    view === 'settings'
     ? view
     : 'detail';
 }
@@ -30,6 +35,7 @@ export class CenterRouter {
   private readonly calendar: CalendarRenderer;
   private readonly filer: FilerRenderer;
   private readonly launcher: LauncherRenderer;
+  private readonly settings: SettingsRenderer;
   private lastPane: PaneView = 'detail';
 
   constructor(region: HTMLElement, now?: () => Date, assets: AssetLender | null = null) {
@@ -46,12 +52,14 @@ export class CenterRouter {
       calendar: pane('calendar'),
       filer: pane('filer'),
       launcher: pane('launcher'),
+      settings: pane('settings'),
     };
     this.detail = new DetailRenderer(this.panes.detail, assets);
     this.kanban = new KanbanRenderer(this.panes.kanban);
     this.calendar = new CalendarRenderer(this.panes.calendar, now);
     this.filer = new FilerRenderer(this.panes.filer);
     this.launcher = new LauncherRenderer(this.panes.launcher);
+    this.settings = new SettingsRenderer(this.panes.settings);
   }
 
   render(state: AppState): void {
@@ -65,6 +73,7 @@ export class CenterRouter {
     else if (view === 'kanban') this.kanban.render(state);
     else if (view === 'filer') this.filer.render(state);
     else if (view === 'launcher') this.launcher.render(state);
+    else if (view === 'settings') this.settings.render(state);
     else this.calendar.render(state);
   }
 }

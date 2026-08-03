@@ -264,6 +264,8 @@ test('🔴 種別はチップで出る(地の文に裸の記号を混ぜない)'
 test('🔴 配色を選ぶと実際に色が変わる(全テーマ)', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await gotoApp(page);
+  // ⚠ 配色は**設定の画面**にある(user 指示 2026-08-03「普段から必要ではない」)
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
   const select = page.locator('[data-pkc-field="theme-select"]');
   const ids = await select.evaluate((el) =>
     [...(el as HTMLSelectElement).options].map((o) => o.value),
@@ -288,5 +290,50 @@ test('🔴 配色を選ぶと実際に色が変わる(全テーマ)', async ({ p
   await page.reload();
   await expect(page.locator('[data-pkc-slot="root"][data-pkc-boot="ready"]')).toBeAttached();
   await expect(page.locator('html[data-pkc-theme="nord"]')).toBeAttached();
-  await expect(select).toHaveValue('nord');
+  // 設定を開き直すと、覚えている配色が選ばれている
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await expect(page.locator('[data-pkc-field="theme-select"]')).toHaveValue('nord');
+});
+
+/**
+ * P8 段④: 図案を入れても**ボタンの大きさが変わらない**。
+ *
+ * > user 指示 2026-08-03「**絵文字を使うとボタンの高さが合わないから、
+ * > UI デザインとしてボタンサイズ揃えはしてください**」
+ *
+ * ⚠ 「絵文字が出ている」で止めない ── 出ていても**高さがばらつく**のが指摘の中身。
+ */
+test('🔴 図案つきボタンの高さが揃っている', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await gotoApp(page);
+  const sizes = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-pkc-region="cmdbar"] button')].map((b) => ({
+      h: Math.round(b.getBoundingClientRect().height),
+      icon: (b.querySelector('[data-pkc-icon]')?.textContent ?? '').length > 0,
+    })),
+  );
+  expect(sizes.length).toBeGreaterThan(5);
+  // ① 図案が**実際に入っている**(空振り防止 ── 図案なしなら高さは当然揃う)
+  expect(sizes.every((s) => s.icon), '図案の入っていないボタンがある').toBe(true);
+  // ② 高さが**全部同じ**
+  expect(new Set(sizes.map((s) => s.h)).size, `高さがばらついている: ${JSON.stringify(sizes.map((s) => s.h))}`).toBe(1);
+});
+
+/**
+ * P8 段④: **境界線は共有し、余白は置かない**(user 指示 2026-08-03)。
+ * ⚠ 面ごとに border を持たせると、隣り合わせで **2px の線**になる。
+ */
+test('🔴 面の境界が 1 本になっている(2 重線を作らない)', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await gotoApp(page);
+  const gap = await page.evaluate(() => {
+    const s = document.querySelector('[data-pkc-region="sidebar"]')!.getBoundingClientRect();
+    const d = document.querySelector('[data-pkc-region="detail"]')!.getBoundingClientRect();
+    const cs = getComputedStyle(document.querySelector('[data-pkc-region="sidebar"]')!);
+    return { between: Math.round(d.left - s.right), border: cs.borderRightWidth };
+  });
+  // 面と面の間は **1px ちょうど**(共有の線)
+  expect(gap.between, `面の間が ${gap.between}px`).toBe(1);
+  // 面そのものは border を持たない(持つと 1px + 1px = 2px になる)
+  expect(gap.border, 'サイドバーが自前の境界線を持っている').toBe('0px');
 });

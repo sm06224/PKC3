@@ -14,6 +14,7 @@
 import type { AppState } from '@adapter/state/app-state';
 import type { EntryMeta } from '@core/model/entry-meta';
 import { archetypeLabel } from './sidebar';
+import { iconButton } from './icons';
 
 /** SQLite の UTC 文字列を「日付だけ」に落とす。⚠ 生の値を user に見せない。 */
 function shortDate(value: string | null): string {
@@ -68,11 +69,8 @@ export class InspectorRenderer {
     const actions = document.createElement('div');
     actions.setAttribute('data-pkc-field', 'inspector-actions');
     const btn = (action: string, label: string, title: string): void => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.setAttribute('data-pkc-action', action);
+      const b = iconButton(action, label);
       b.setAttribute('data-pkc-entry', meta.lid);
-      b.textContent = label;
       b.title = title;
       actions.append(b);
     };
