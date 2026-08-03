@@ -73,5 +73,12 @@ jobs:
           case "$GITHUB_REF_NAME" in
             *-rc*|*-beta*|*-alpha*) PRERELEASE="--prerelease" ;;
           esac
+          # 🔴 **draft で作ってから公開する**(P7 段⑧)。`gh release create` は
+          # **公開してから資産を上げる**ので、`release: published` を待っている
+          # `pages.yml` が **zip が届く前に走りうる** ── その場合 asset が見つからず
+          # placeholder を配って終わり、次に main へ push するまで `/` が空のままになる。
+          # draft のうちに上げ切り、`--draft=false` で公開すれば published は
+          # **資産が揃ってから**しか飛ばない(競合そのものを消す)。
           gh release create "$GITHUB_REF_NAME" pkc3-sbom.cdx.json pkc3-dist.zip \
-            --title "$GITHUB_REF_NAME" --generate-notes $PRERELEASE
+            --title "$GITHUB_REF_NAME" --generate-notes --draft $PRERELEASE
+          gh release edit "$GITHUB_REF_NAME" --draft=false
