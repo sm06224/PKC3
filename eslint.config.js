@@ -2,7 +2,8 @@ import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'node_modules/**'] },
+  // ⚠ `zz*` / `tmp-review-*` は使い捨ての計測 probe(`.gitignore` と同じ綴り)
+  { ignores: ['dist/**', 'node_modules/**', 'tests/**/zz*', 'tests/**/tmp-review-*'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

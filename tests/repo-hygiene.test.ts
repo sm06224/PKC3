@@ -9,10 +9,19 @@ import { describe, expect, it } from 'vitest';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-/** 追跡対象のテキスト file を集める(生成物・依存は見ない)。 */
+/**
+ * 追跡対象のテキスト file を集める(生成物・依存は見ない)。
+ *
+ * ⚠ **追跡されない使い捨て(`zz` 始まり)は見ない** ── `.gitignore` が
+ * それを無視すると決めているのに、この検査だけが拾っていた。
+ * 計測用の probe(乱数 fixture を持つ)を置いた瞬間に**無関係な赤**が出て、
+ * 「衛生の赤」が日常になると本物の赤が埋もれる。⚠ 無視の綴りは 1 か所に寄せる
+ * ことができない(`.gitignore` は機械可読でない)ので、**同じ綴り**を使う
+ */
 function textFiles(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
     if (name === 'node_modules' || name === 'dist' || name.startsWith('.')) continue;
+    if (name.startsWith('zz') || name.startsWith('tmp-review-')) continue;
     const full = join(dir, name);
     if (statSync(full).isDirectory()) textFiles(full, out);
     else if (/\.(ts|tsx|js|mjs|json|md|css|html|yml|yaml)$/.test(name)) out.push(full);
