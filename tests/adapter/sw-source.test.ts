@@ -69,6 +69,10 @@ class FakeCache {
   ): Promise<string | undefined> {
     return Promise.resolve(this.lookup(req, opts));
   }
+  /** ⚠ 本物の `Cache.keys()`(件数を数える検査に要る)。 */
+  keys(): Promise<string[]> {
+    return Promise.resolve([...this.store.keys()]);
+  }
 }
 
 interface Harness {
@@ -454,6 +458,51 @@ describe('activate ── 古い cache を消す', () => {
     expect(h.claimed()).toBe(true);
   });
 
+  /**
+   * 🔴 install と activate は互いを知らない ── deploy が交代と重なると、
+   * 掃除が**進行中の install の cache を消す**(逆向きもある)。実証された
+   * 結末は「**precache ゼロの build が active**」で、オフラインが恒久的に死ぬ。
+   * 無兆候で、install は二度と走らないので自己修復もしない(round-2 review M-1)。
+   */
+  describe('🔴 自分の precache が欠けていたら入れ直す(round-2 review M-1)', () => {
+    it('cache ごと消えていても、activate で揃う', async () => {
+      // レースの結末: 自分の cache が存在しないまま activate する
+      const h = runSw(SOURCE);
+      await h.fire('activate');
+      expect([...(h.caches.get('pkc3:%2F:b1')?.store.keys() ?? [])]).toEqual([
+        './index.html',
+        './manifest.webmanifest',
+        './assets/index-AAAAAAAA.js',
+      ]);
+    });
+
+    it('半端に消えていても揃う(件数で見る)', async () => {
+      const partial = new FakeCache();
+      partial.store.set('./index.html', { body: 'cached:./index.html', varyOrigin: null });
+      const h = runSw(SOURCE, (c) => c.set('pkc3:%2F:b1', partial));
+      await h.fire('activate');
+      expect((await h.caches.get('pkc3:%2F:b1')!.keys()).length).toBe(3);
+    });
+
+    it('揃っていれば取り直さない(毎回 1.6MB を再取得しない)', async () => {
+      const h = runSw(SOURCE);
+      await h.fire('install');
+      const before = h.caches.get('pkc3:%2F:b1')!;
+      before.store.set('./index.html', { body: 'MARK', varyOrigin: null });
+      await h.fire('activate');
+      // ⚠ 中身が上書きされていない = addAll を呼び直していない
+      expect(before.store.get('./index.html')?.body).toBe('MARK');
+    });
+
+    it('🔴 取り直しに失敗しても activate は止めない(オフラインで交代した等)', async () => {
+      // ⚠ ここで reject すると **SW が activate できない**という、もっと分からない
+      // 壊れ方になる(白紙にも 503 にもならず、旧版のまま何も起きない)
+      const h = runSw(swSource({ buildId: 'b1', precache: ['./missing.js'] }));
+      await expect(h.fire('activate')).resolves.toBeUndefined();
+      expect(h.claimed()).toBe(true);
+    });
+  });
+
   it('🔴 activate で「自分が使用中」の印を置く(次の install が見る)', async () => {
     // ⚠ これが無いと installing 側は「どれが使用中か」を知りようがなく、
     // **積み上がりを止められない**(review H-1)
@@ -471,6 +520,7 @@ describe('activate ── 古い cache を消す', () => {
     expect([...h.caches.keys()].sort()).toEqual([
       'pkc3-active:%2F:b1',
       'pkc3-active:%2Fdev%2F:devactive',
+      'pkc3:%2F:b1', // ⚠ 欠けていれば activate が入れ直す(round-2 review M-1)
     ]);
   });
 
@@ -487,7 +537,7 @@ describe('activate ── 古い cache を消す', () => {
     await h.fire('activate');
     expect([...h.caches.keys()].sort()).toEqual([
       'pkc3-active:%2F:b1', // 自分が使用中である印(review H-1)
-      'pkc3:%2F:b1',
+      'pkc3:%2F:b1', // ⚠ 欠けていれば activate が入れ直す(round-2 review M-1)
       'pkc3:%2Fdev%2F:b1',
       'pkc3:%2Fdev%2F:old',
     ]);
@@ -518,6 +568,7 @@ describe('activate ── 古い cache を消す', () => {
     expect([...h.caches.keys()].sort()).toEqual([
       'pkc2:%2F:old',
       'pkc3-active:%2F:b1', // 自分が使用中である印(review H-1)
+      'pkc3:%2F:b1', // ⚠ 欠けていれば activate が入れ直す(round-2 review M-1)
       'someone-else',
     ]);
   });

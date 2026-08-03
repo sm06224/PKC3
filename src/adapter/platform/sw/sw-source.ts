@@ -215,8 +215,26 @@ self.addEventListener('activate', (event) => {
       /*
        * 🔑 '自分が active' の印を置く。次に installing する worker がこれを見て、
        * 使用中の cache を消さずに残骸だけを掃除する(review H-1)。
+       * ⚠ claim より前に置く ── 逆順だと 'claim 済みなのに印が無い' 窓ができる。
        */
       .then(() => caches.open(ACTIVE_MARK))
+      /*
+       * 🔴 自分の precache が欠けていたら**入れ直す**(round-2 review M-1)。
+       * install と activate は互いを知らないので、deploy が交代と重なると
+       * 掃除が進行中の install の cache を消す(逆向きもある)── 実証済みの
+       * 結末は 'precache ゼロの build が active' で、オフラインが恒久的に死ぬ。
+       * しかも無兆候で、install は二度と走らないので自己修復しない。
+       * ⚠ ここで直せば、どちらの向きのレースも activate が畳む。
+       * ⚠ 失敗しても activate は止めない(オフラインで交代した等)── 止めると
+       * 'SW が activate できない' というもっと分からない壊れ方になる。
+       */
+      .then(() => caches.open(CACHE))
+      .then((c) =>
+        c
+          .keys()
+          .then((entries) => (entries.length === PRECACHE.length ? undefined : c.addAll(PRECACHE)))
+          .catch(() => {}),
+      )
       .then(() => self.clients.claim()),
   );
 });

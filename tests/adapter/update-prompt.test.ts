@@ -249,6 +249,22 @@ describe('更新の適用 — 押したときだけ、押したタブだけ', ()
     expect(h.reloads()).toBe(0);
   });
 
+  it('🔴 別タブが先に交代を済ませていたら、押したら**素直に読み直す**', async () => {
+    // round-2 review M-2: `waiting` が null になる理由は「まだ来ていない」だけでは
+    // ない ── 「**もう交代が終わった**」でもなる。別タブが先に押すと claim で
+    // このタブも新 SW に取られ、それでも requested=false なので再読込しない
+    // (設計どおり)。その後**出たままの案内を押す**と頼む相手が居ない。
+    // ⚠ postMessage だけして待つと controllerchange はもう来ず、
+    // 「切り替えています…」のまま固まって押し直す導線も無い
+    const { h, worker } = await offered();
+    h.container.controllerChanged(); // 別タブが交代させた
+    expect(h.reloads()).toBe(0); // ⚠ このタブは巻き込まれない(設計どおり)
+    h.registration.waiting = null; // 交代が済んだので待機は居ない
+    h.offers[0]!();
+    expect(worker.messages).toEqual([]); // 頼む相手が居ないので送らない
+    expect(h.reloads()).toBe(1); // 固まらずに読み直す
+  });
+
   it('🔴 再読込は 1 回だけ(controllerchange は複数回来うる)', async () => {
     const { h } = await offered();
     h.offers[0]!();

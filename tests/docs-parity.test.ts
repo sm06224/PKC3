@@ -12,11 +12,23 @@
  * 「いま動くものだけを書く」と明記してある。
  */
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { buildShell } from '../src/adapter/ui/render/shell';
+import { showUpdateCard } from '../src/adapter/ui/render/update-card';
 import { RENDERABLE_FENCE_LANGS } from '../src/features/markdown/markdown-render';
 import { MARKDOWN_EXTENSIONS } from '../src/features/import/plain-markdown';
 import { REVISION_KEEP_LATEST } from '../src/adapter/platform/storage/store-port';
+
+/** src 配下の TS を全部集める(「無い」ことの主張を file 単位で逃さない)。 */
+function srcFiles(dir = 'src', out: string[] = []): string[] {
+  for (const name of readdirSync(dir)) {
+    const full = join(dir, name);
+    if (statSync(full).isDirectory()) srcFiles(full, out);
+    else if (name.endsWith('.ts')) out.push(full);
+  }
+  return out;
+}
 
 const MANUAL = readFileSync('docs/manual.md', 'utf-8');
 const MIGRATION = readFileSync('docs/migration-from-pkc2.md', 'utf-8');
@@ -89,21 +101,68 @@ describe('マニュアルと実装の突合', () => {
 
   it('🔴 ドラッグ&ドロップを受けないという記述が実態と合う', () => {
     // ⚠ これは「無い」ことの主張なので、**足した瞬間に嘘になる**。
-    // 実装したらこの test が落ちる ── そのとき doc を直す
-    const hasDrop = ['drop', 'dragover'].some((ev) =>
-      readFileSync('src/adapter/ui/actions/binder.ts', 'utf-8').includes(`'${ev}'`),
-    );
-    expect(hasDrop, 'drop を受けるようになった ── マニュアルの記述を直すこと').toBe(false);
+    // 実装したらこの test が落ちる ── そのとき doc を直す。
+    // ⚠ **src 全体**を見る(round-2 review L-4)── `binder.ts` だけを見ていると、
+    // 別 file(`main.ts` / 新規 `dnd.ts` 等)で受けたときに緑のまま嘘になる
+    const offenders = srcFiles().filter((f) => {
+      const text = readFileSync(f, 'utf-8');
+      return /addEventListener\(\s*['"](?:drop|dragover)['"]/.test(text);
+    });
+    expect(offenders, 'drop を受けるようになった ── マニュアルの記述を直すこと').toEqual([]);
     expect(MANUAL).toContain('ドラッグ&ドロップは受けません');
+  });
+
+  it('🔴 詳細画面のボタン文言が pin と一致し、マニュアルにも在る', () => {
+    // ⚠ `buildShell` だけを見ていたので、`detail.ts` の文言は**1 つも縛られて
+    // いなかった**(round-2 review M-7)── マニュアルは実際に 2 件間違えていた
+    // (「本文をクリックで編集」「このノートを書き出す」)
+    const detail = readFileSync('src/adapter/ui/render/detail.ts', 'utf-8');
+    const expected = ['編集', '削除', '履歴', '書き出す', '保存', 'キャンセル', '復元'];
+    for (const label of expected) {
+      expect(detail, `詳細画面から「${label}」が消えた`).toContain(`textContent = '${label}'`);
+    }
+    for (const label of ['編集', '保存', 'キャンセル', '履歴', '書き出す']) {
+      expect(MANUAL, `マニュアルに「${label}」が無い`).toContain(`**${label}**`);
+    }
+  });
+
+  it('🔴 更新の案内の文言が pin と一致し、マニュアルにも在る', () => {
+    // round-2 review L-1: 「再読込」→「今すぐ更新」に改名しても全緑だった ──
+    // 段⑥ の趣旨(腐ったら落ちる)がこの feature にだけ効いていなかった
+    const el = document.createElement('section');
+    showUpdateCard(el);
+    const labels = [...el.querySelectorAll('button')].map((b) => b.textContent ?? '');
+    expect(labels).toEqual(['再読込', 'あとで']);
+    for (const label of labels) {
+      expect(MANUAL, `マニュアルに「${label}」が無い`).toContain(`**${label}**`);
+    }
+  });
+
+  it('🔴 削除の確認文言がマニュアルと矛盾しない', () => {
+    // round-2 review M-8: 実装は「元に戻せません」、マニュアルは「戻せます」で
+    // **どちらか一方が嘘**だった(実装のほうが古く、user を怖がらせる側だった)
+    const binder = readFileSync('src/adapter/ui/actions/binder.ts', 'utf-8');
+    const msg = /を削除しますか\?\(([^)]+)\)/.exec(binder)?.[1];
+    expect(msg, '削除の確認文言が読めない').toBeTruthy();
+    expect(msg, 'マニュアルは「戻せます」と書いてある').not.toContain('元に戻せません');
+    expect(MANUAL).toContain('消したノートはここに入ります。**戻せます**');
   });
 });
 
 describe('移行ガイドと実装の突合', () => {
-  it('🔴 受理する PKC2 形式が一致する(読めると書いて読めない、を落とす)', () => {
+  it('🔴 受理する PKC2 形式の**件数**が一致する(読めると書いて読めない、を落とす)', () => {
+    // 🔴 かつて `MANIFEST_FORMAT` の 8 キーを数えていたが、それは **ZIP だけ**の
+    // 母集団で、doc は単一 HTML を含めて数えていた(round-2 review M-6)──
+    // `detectPkc2Format` が `'html'` を返さなくしても全緑だった。
+    // → **受理しうる形式そのもの**(`Pkc2Format`)を数える
     const src = readFileSync('src/features/import/detect-format.ts', 'utf-8');
-    const formats = [...src.matchAll(/'pkc2-([a-z-]+)':/g)].map((m) => m[1]!);
-    expect(formats.length).toBe(8); // ⚠ 件数も縛る(減ったのに 8 と書き続けない)
-    expect(MIGRATION).toContain('全 8 形式');
+    const union = /export type Pkc2Format =([\s\S]*?);/.exec(src)?.[1] ?? '';
+    const formats = [...union.matchAll(/\|\s*'([a-z-]+)'/g)]
+      .map((m) => m[1]!)
+      .filter((f) => f !== 'unknown'); // 「不明」は受理形式ではない
+    expect(formats).toContain('html'); // ⚠ ZIP だけの母集団に戻らないよう固定
+    expect(MIGRATION).toContain(`全 ${formats.length} 形式`);
+    expect(MANUAL).toContain(`全 ${formats.length} 形式`);
   });
 
   it('🔴 relation の kind が一致する', () => {

@@ -17,11 +17,16 @@ import { gotoApp, collectPageErrors, clickReal } from './helpers';
  */
 const SW_PATH = fileURLToPath(new URL('../../dist/sw.js', import.meta.url));
 
-test('🔴 新しい版が配られたら案内が出て、押すと入れ替わる', async ({ page }) => {
+test('🔴 新しい版が配られたら案内が出て、押すと入れ替わる', async ({ page, context }) => {
   const errors = collectPageErrors(page);
   const original = readFileSync(SW_PATH, 'utf-8');
   const buildId = /const BUILD = "([^"]+)"/.exec(original)?.[1];
   expect(buildId, 'sw.js に build id が無い(生成器が変わった)').toBeTruthy();
+  // ⚠ 下限は**出荷している一覧の件数**から取る(定数を書くと配る物が減っても気づかない)
+  const precacheCount = (JSON.parse(
+    /const PRECACHE = (\[.*?\]);/.exec(original)?.[1] ?? '[]',
+  ) as string[]).length;
+  expect(precacheCount, 'sw.js の precache 一覧が読めない').toBeGreaterThan(3);
 
   try {
     await gotoApp(page);
@@ -133,16 +138,36 @@ test('🔴 新しい版が配られたら案内が出て、押すと入れ替わ
     await expect(page.locator('[data-pkc-region="update"]')).toBeHidden();
     const active = await page.evaluate(async () => {
       const reg = await navigator.serviceWorker.getRegistration();
-      return { waiting: Boolean(reg?.waiting), cacheKeys: await caches.keys() };
+      const keys = await caches.keys();
+      const name = keys.find((k) => k.startsWith('pkc3:'));
+      const entries = name ? (await (await caches.open(name)).keys()).length : 0;
+      return { waiting: Boolean(reg?.waiting), keys, entries };
     });
     expect(active.waiting).toBe(false);
-    // 🔴 新 build の cache になっており、旧 build の cache は残っていない
-    expect(active.cacheKeys.some((k) => k.endsWith(':smoketest0000'))).toBe(true);
-    expect(active.cacheKeys.some((k) => k.endsWith(`:${buildId}`))).toBe(false);
+    // 🔴 **cache 名は丸ごと突き合わせる**(round-2 review H-1)。当初は
+    // `endsWith(':smoketest0000')` で見ていたが、H-1 の修正で増えた
+    // **印(`pkc3-active:…`)だけでその条件が満たされる** ── precache が
+    // 空でも緑になった(実証: 実エントリ 8 → 1 でも全 spec 緑)
+    expect(active.keys).toContain('pkc3:%2F:smoketest0000');
+    expect(active.keys).not.toContain(`pkc3:%2F:${buildId}`);
+    // 🔴 **下限も置く**(CLAUDE.md「tripwire は上限だけでなく下限も」)。
+    // 名前が在るだけでは「空の cache が在る」と区別できない
+    expect(active.entries, '更新後の precache が痩せている').toBe(precacheCount);
 
     // ④ **中身は消えていない**(更新はデータを飛ばさない)
     const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
     await expect(rows).toHaveCount(1);
+
+    // ⑤ 🔴 **更新後もオフラインで読める**。①〜④ は「cache が在る」までしか
+    // 見ておらず、**中身が使える**かは見ていない ── オフライン smoke は
+    // 初回 install 経路しか通らないので、更新経路はここでしか守られない
+    await context.route('**/*', (route) => route.abort('internetdisconnected'));
+    await page.reload({ waitUntil: 'commit' });
+    await expect(page.locator('[data-pkc-slot="root"][data-pkc-boot="ready"]')).toBeAttached({
+      timeout: 30_000,
+    });
+    await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(1);
+    await context.unroute('**/*');
   } finally {
     // ⚠ 生成物を書き換えたまま終えると、後続の spec と検品が別物を見る
     writeFileSync(SW_PATH, original);

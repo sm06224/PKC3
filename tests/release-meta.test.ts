@@ -41,6 +41,21 @@ describe('版の刻印', () => {
 describe('🔴 release workflow が版と provenance を担保する', () => {
   const wf = readFileSync('.github/workflows/release.yml', 'utf-8');
 
+  /** attest step の本文だけを切り出す(次の step の `- name:` まで)。 */
+  function attestStep(): string {
+    const at = wf.indexOf('actions/attest-build-provenance');
+    if (at < 0) return '';
+    const rest = wf.slice(at);
+    const end = rest.search(/\n\s{6}- (?:name|run|uses):/);
+    return end < 0 ? rest : rest.slice(0, end);
+  }
+
+  /** `gh release create` に渡している成果物(= user が受け取る物)。 */
+  function releasedArtifacts(): string[] {
+    const line = /gh release create "\$GITHUB_REF_NAME" (.*?) \\/.exec(wf)?.[1] ?? '';
+    return line.split(/\s+/).filter(Boolean);
+  }
+
   it('tag と package.json の突合を **build より前**に行う', () => {
     // ⚠ 後ろに置くと、食い違ったまま**ビルドして検品まで通ってしまう**
     // (落ちるのは最後の gh release create なので、時間と CI を捨てる)
@@ -59,12 +74,55 @@ describe('🔴 release workflow が版と provenance を担保する', () => {
   });
 
   it('🔴 attestation の対象が**配る物そのもの**である', () => {
-    // ⚠ 対象を書き忘れると attestation は「何も証明しない」形で通る
-    expect(wf).toContain('pkc3-dist.zip');
-    expect(wf).toContain('pkc3-sbom.cdx.json');
-    const attest = wf.indexOf('actions/attest-build-provenance');
-    const subject = wf.indexOf('subject-path', attest);
-    expect(subject).toBeGreaterThan(attest);
+    // ⚠ 対象を書き忘れると attestation は「何も証明しない」形で通る。
+    // 🔴 かつて `wf.toContain('pkc3-dist.zip')` で見ていたが、その語は
+    // `zip -r` / `npm sbom >` / `gh release create` の各行にも在るので、
+    // **`subject-path` を `README.md` に置換しても全緑**だった
+    // (round-2 review M-3)── CLAUDE.md「ガードは代替物で満たせない条件にする」。
+    // → **attest step の中だけ**を切り出して、その中で突き合わせる
+    const step = attestStep();
+    expect(step, 'attest step が見つからない').not.toBe('');
+    expect(step).toContain('subject-path');
+    for (const artifact of releasedArtifacts()) {
+      expect(step, `attest していない出荷物: ${artifact}`).toContain(artifact);
+    }
+  });
+
+  it('🔴 attest する物と release に添付する物が**同じ集合**である', () => {
+    // ⚠ 片方だけ増やす事故を止める(attest されない物を配る / 配らない物を attest する)
+    const step = attestStep();
+    const listed = [...step.matchAll(/^\s{10,}(\S+)$/gm)].map((m) => m[1]!);
+    expect([...listed].sort()).toEqual([...releasedArtifacts()].sort());
+  });
+
+  it('🔴 Pages の `/` は prerelease を配らない(同じ綴りで揃える)', () => {
+    // round-2 review M-5: git の既定 `v:refname` は prerelease を**上位に**並べる
+    // ── `v3.0.0` と `v3.0.0-rc1` が在ると `head -1` は **rc のほう**(実証済み)。
+    // 段⑦ で release.yml が prerelease を正式に扱えるようにしたので、この経路は
+    // **今回新たに到達可能**になった。RC を打った瞬間 `/` が RC に差し替わる
+    const pages = readFileSync('.github/workflows/pages.yml', 'utf-8');
+    const tagLine = /TAG=\$\(git tag[^\n]*/.exec(pages)?.[0] ?? '';
+    expect(tagLine, 'product tag の解決行が無い').not.toBe('');
+    // ⚠ 綴りは release.yml の prerelease 判定と**同じ集合**であること
+    const kinds = [...(/case "\$GITHUB_REF_NAME" in\s*\n\s*([^)]+)\)/.exec(wf)?.[1] ?? '')
+      .matchAll(/-([a-z]+)\*/g)].map((m) => m[1]!);
+    expect(kinds.length, 'release.yml の prerelease 判定が読めない').toBeGreaterThan(0);
+    for (const kind of kinds) {
+      expect(tagLine, `pages.yml が ${kind} を除外していない`).toContain(kind);
+    }
+  });
+
+  it('🔴 release は **CI と同じ gate** を自分で走らせる', () => {
+    // round-2 review L-3: `ci.yml` の trigger は main への push と PR だけで、
+    // **tag push では走らない** ── ここで走らせないと、CI を通っていない commit に
+    // tag を打てば `APP_VERSION` 不一致のまま出荷できる。
+    // ⚠ 「CI を長くしない」は **PR gate** の話であり、release は稀なので載せてよい
+    const build = wf.indexOf('VITE_PKC_KIND=product npm run build');
+    for (const gate of ['npm run typecheck', 'npm run lint', 'npm test']) {
+      const at = wf.indexOf(`run: ${gate}`);
+      expect(at, `release が ${gate} を走らせない`).toBeGreaterThan(-1);
+      expect(at, `${gate} が build より後ろにある`).toBeLessThan(build);
+    }
   });
 
   it('product の検品を通してから release する', () => {

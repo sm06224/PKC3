@@ -34,6 +34,13 @@ jobs:
             exit 1
           fi
       - run: npm ci
+      # 🔴 **tag push では `ci.yml` が走らない**(trigger は main への push と PR だけ)
+      # ── ここで走らせないと、CI を通っていない commit に tag を打てば
+      # `APP_VERSION` 不一致のまま出荷できる(round-2 review L-3)。
+      # ⚠ 「CI を長くしない」は **PR gate** の話であり、release は稀なので載せてよい
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
       - run: VITE_PKC_KIND=product npm run build
       # 出荷物に map が混ざっていないか(P7 段①)。ここが release の最終関門
       - name: dist の検品(product に map が無いこと)
@@ -42,7 +49,12 @@ jobs:
         run: npm sbom --sbom-format=cyclonedx --omit=dev > pkc3-sbom.cdx.json
       - name: Archive dist
         run: (cd dist && zip -r ../pkc3-dist.zip .)
-      # 🔴 **配る物そのもの**に attestation を付ける(P7 段⑦)。
+      # 🔴 **release に添付する物そのもの**に attestation を付ける(P7 段⑦)。
+      # ⚠ **Pages の `/` に出るのはこれではない**(round-2 review M-4)── `pages.yml` が
+      # 同じ tag から**別 job・別 worktree で独立にビルドした** `_site/` を配る。
+      # 同じ入力から作られるが別の成果物なので、attestation が担保するのは
+      # 「release zip の出所」であって「Pages で配っている物の出所」ではない。
+      # 検証したい人は release zip を落として `gh attestation verify` する。
       # ⚠ 対象を書き忘れても step は通る ── 「何も証明しない attestation」になるので、
       # `tests/release-meta.test.ts` が subject-path の存在まで pin している。
       # 検証: gh attestation verify pkc3-dist.zip --repo <owner>/<repo>

@@ -108,7 +108,24 @@ export async function watchForUpdate(
       requested = true;
       // 🔴 **押された時点の `waiting` を読み直す**。掴んだ worker は
       // その後 redundant になっているかもしれない(上記)
-      const target = registration.waiting ?? worker;
+      const target = registration.waiting;
+      if (!target) {
+        /*
+         * 🔴 `waiting` が null になる理由は「まだ来ていない」だけではない ──
+         * 「**もう交代が終わった**」でもなる(round-2 review M-2)。
+         * 別タブが先に押すと `clients.claim()` でこのタブも新 SW に取られ、
+         * それでも `requested === false` なので再読込しない(設計どおり)。
+         * その後**このタブの user が出たままの案内を押す**と、頼む相手が居ない。
+         * ⚠ そこで postMessage だけして待つと `controllerchange` はもう来ず、
+         * 「切り替えています…」のまま**固まって押し直す導線も無い**。
+         * 頼む相手が居ない = すでに新しい版が active なので、素直に読み直す。
+         */
+        if (!reloaded) {
+          reloaded = true;
+          reload();
+        }
+        return;
+      }
       target.postMessage({ type: 'SKIP_WAITING' });
     });
   };

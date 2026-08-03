@@ -449,11 +449,15 @@ function bootstrap(): void {
   const root = document.querySelector<HTMLElement>('[data-pkc-slot="root"]');
   if (!root) return;
 
-  // 🔑 **登録は boot を待たない**(P7 段⑤)。boot が失敗しても、次回この人が
-  // オフラインで開けるかどうかは登録が済んでいるかで決まる。
-  // ⚠ 見張り(更新の案内)は shell ができてから attach する ── その間に
-  // `updatefound` が済んでいても、attach 時に現況を見るので取り零さない
-  const registered =
+  /**
+   * SW の登録。⚠ **boot と競わせない**(P7 段⑤ round-2 review L-6)。
+   *
+   * 当初は boot の前に呼んでいたが、`register` は precache(実測 1.6MB)の
+   * 取得を始めるので、**初回訪問では boot の wasm / worker chunk と帯域を奪い合う**。
+   * 段⑤ の目的は「boot が失敗しても次回オフラインで開ける」だったので、
+   * **成功側と失敗側の両方から呼ぶ**ことで、競合させずに同じ性質を保つ。
+   */
+  const registerSw = (): Promise<ServiceWorkerRegistration | null> =>
     import.meta.env.PROD && 'serviceWorker' in navigator
       ? navigator.serviceWorker.register('./sw.js').catch(() => null)
       : Promise.resolve(null);
@@ -476,7 +480,7 @@ function bootstrap(): void {
       // cache を消すので、user が押したときだけ・押したタブだけを再読込する
       void watchForUpdate(
         navigator.serviceWorker as unknown as UpdateContainer,
-        registered,
+        registerSw(),
         (apply) => app.presentUpdate(apply),
         () => location.reload(),
       );
@@ -491,6 +495,9 @@ function bootstrap(): void {
       root.setAttribute('data-pkc-boot', 'error');
       const message = e instanceof Error ? e.message : String(e);
       root.textContent = `起動に失敗しました: ${message}`;
+      // ⚠ boot が失敗しても登録はする ── 次回この人がオフラインで開けるかは
+      // 登録が済んでいるかで決まる(段⑤ の意図。競合を避けて失敗側にも置いた)
+      void registerSw();
     });
 
 }
