@@ -9,6 +9,7 @@
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import { extractMeta } from '@features/flavor';
 import { withTodoStatus } from '@features/flavor/todo-flavor';
+import { buildTiles, type TileSource } from '@features/launcher/tiles';
 import type { Dispatcher } from './dispatcher';
 
 /**
@@ -18,10 +19,13 @@ import type { Dispatcher } from './dispatcher';
  * 届く(review K の解消)。effect 層は実行時に state を参照しない
  * (時間差窓 C-1 の解消 ── 発火時に確定した行をそのまま書く)。
  */
-import { buildTiles, type TileSource } from '@features/launcher/tiles';
-
 export interface StorePort {
   getBody(lid: string): Promise<string | null>;
+  /**
+   * 指定した lid の本文を **1 往復で** 取る(P7b review L-7)。
+   * ⚠ 無い lid は結果に出ない ── 呼び側は「読めたものだけ」を受け取る。
+   */
+  getBodies(lids: string[]): Promise<Array<{ lid: string; body: string }>>;
   /**
    * 本文を **まとめて** 取る(P6d ── 書出し用)。
    * `getBody` を N 回呼ぶと 5000 entry の書出しが 5000 往復になる。
@@ -176,16 +180,18 @@ export function connectStoreEffects(
           if (disposed) return;
           try {
             // ⚠ **attachment だけ**を読む ── 全 entry の body を読むと、
-            // ランチャーを開くたびに全文を舐めることになる
-            const lids: Array<{ lid: string; title: string }> = [];
-            for (const meta of dispatcher.getState().entryMetas.values()) {
-              if (meta.archetype === 'attachment') lids.push({ lid: meta.lid, title: meta.title });
-            }
+            // ランチャーを開くたびに全文を舐めることになる。
+            // 🔑 **どれを読むかは event が持って来る**(review L-6)── この層は
+            // 実行時に state を見ない、という file 冒頭の宣言に合わせた。
+            // 🔑 **1 往復で読む**(review L-7)── `getBody` を添付の件数ぶん
+            // 呼ぶと、その回数だけ単一 queue の store が塞がる
+            const titles = new Map(ev.entries.map((e) => [e.lid, e.title]));
+            const rows = await store.getBodies(ev.entries.map((e) => e.lid));
+            if (disposed) return;
             const sources: TileSource[] = [];
-            for (const { lid, title } of lids) {
-              const body = await store.getBody(lid);
-              if (disposed) return;
-              if (body !== null) sources.push({ lid, title, body });
+            for (const row of rows) {
+              const title = titles.get(row.lid);
+              if (title !== undefined) sources.push({ lid: row.lid, title, body: row.body });
             }
             dispatcher.dispatch({
               type: 'LAUNCHER_TILES_LOADED',

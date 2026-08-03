@@ -524,6 +524,20 @@ const handlers: Handlers = {
     );
     return rows.length > 0 ? (rows[0]?.body as string) : null;
   },
+  getBodies: (req) => {
+    // ⚠ postMessage を 1 回にするのが目的 ── SQL は 1 件ずつでよい
+    // (worker の中の N 回は往復ではない)。無い lid は結果に出さない
+    const database = need();
+    const out: Array<{ lid: string; body: string }> = [];
+    for (const lid of req.lids) {
+      const rows = database.selectObjects(
+        'SELECT body FROM entries WHERE cid = ? AND lid = ?',
+        [req.cid, lid],
+      );
+      if (rows.length > 0) out.push({ lid, body: rows[0]?.body as string });
+    }
+    return out;
+  },
   listBodies: (req) => {
     // 🔴 **カーソルは ORDER BY と同じ複合キー**。`entry_order > ?` だけだと
     // 境界の順序値を共有する行が全部飛ぶ(entry_order に UNIQUE は無い)。

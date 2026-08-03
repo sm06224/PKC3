@@ -61,8 +61,6 @@ export interface BinderServices {
   openTile?(lid: string): void;
   /** 配色を切り替える(P7b 段⑨c)。⚠ user の好みで、flag でも container でもない。 */
   setTheme?(theme: string): void;
-  /** 一覧の絞り込み(P7b 段⑨c)。⚠ 検索導線はこれまで 1 つも無かった。 */
-  filterEntries?(query: string): void;
   /** 新しい版に交代する(P7 段⑤)。⚠ 交代を頼むだけ ── 再読込は交代後。 */
   applyUpdate?(): void;
   /** 更新の案内を見送る(次に開いたときに再び出る)。 */

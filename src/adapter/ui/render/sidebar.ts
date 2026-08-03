@@ -10,9 +10,21 @@
  */
 import type { EntryMeta } from '@core/model/entry-meta';
 import type { AppState } from '@adapter/state/app-state';
+import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
 
 export class SidebarRenderer {
   private readonly list: HTMLElement;
+  /**
+   * lid → 行ノード。**絞り込みで外した行もここに残す**(review M-4)。
+   *
+   * 🔴 初版は絞り込みで外れた行を `rows` から削除していたので、絞り込みを
+   * 緩める / 消すたびに `createRow` で作り直していた。15,000 件で実測すると
+   * 打鍵ごとに 0.2〜0.75 秒メインスレッドが止まる ── CLAUDE.md が PKC2 の
+   * 体感悪化の主因として名指しした「5000 行のサイドバーを作り直す」と同型である。
+   * ⚠ `wanted` から外れた行は **DOM からは外す**(`hidden` で残さない ──
+   * 行数を数える test や「見えている中で n 番目」が静かにずれる)。
+   * ⚠ 一覧から**消えた** entry はここからも消す(でないと際限なく溜まる)。
+   */
   private readonly rows = new Map<string, HTMLLIElement>();
   /** 行ごとの描画済み meta 参照 ── 1 件の meta 変更で 15k 行を patch 歩行しない
    *  (patch は querySelector を伴うので、参照一致で丸ごと skip する)。 */
@@ -23,12 +35,18 @@ export class SidebarRenderer {
   /** ⚠ 絞り込みも**指紋の一部** ── 入れないと、絞っても行が減らない。 */
   private lastFilter: string | null = null;
 
+  /** 絞り込み欄。⚠ **state が正** ── 欄の値は state に合わせて書き戻す。 */
+  private readonly filterInput: HTMLInputElement | null;
+
   constructor(sidebarRegion: HTMLElement) {
     const list = sidebarRegion.querySelector<HTMLElement>(
       '[data-pkc-region="entry-list"]',
     );
     if (!list) throw new Error('sidebar shell missing entry-list region');
     this.list = list;
+    this.filterInput = sidebarRegion.querySelector<HTMLInputElement>(
+      '[data-pkc-field="entry-filter"]',
+    );
   }
 
   render(state: AppState): void {
@@ -40,6 +58,12 @@ export class SidebarRenderer {
       state.filterQuery !== this.lastFilter;
     const selectionChanged = state.selectedLid !== this.lastSelected;
     if (!listChanged && !selectionChanged) return; // 指紋一致 ── DOM に触れない
+
+    // 🔑 欄の値を state に合わせる(review M-2)。新規作成が絞り込みを解除する
+    // ので、**欄だけ文字が残る**と「効いていないのに書いてある」嘘になる。
+    // ⚠ 打鍵中は `value === filterQuery` なので書き戻しは起きない(caret を壊さない)
+    if (this.filterInput && this.filterInput.value !== state.filterQuery)
+      this.filterInput.value = state.filterQuery;
 
     if (listChanged) this.reconcileRows(state);
     if (listChanged || selectionChanged) this.patchSelection(state.selectedLid);
@@ -64,19 +88,24 @@ export class SidebarRenderer {
      * 消していて、**先に取った `cursor` が消えたノードを指す**ため以降の
      * 挿入位置が壊れた(絞り込んでも行が減らない ── smoke で実際に踏んだ)。
      */
-    const q = state.filterQuery.trim().toLowerCase();
+    const q = normalizeQuery(state.filterQuery);
     const visible: string[] = [];
     const wanted = new Set<string>();
+    // 一覧に**存在する** lid(絞り込み前)── 行キャッシュの掃除はこちらで判定する
+    const alive = new Set<string>();
     for (const lid of state.order) {
       const meta = state.entryMetas.get(lid);
       if (!meta) continue;
-      if (q !== '' && !meta.title.toLowerCase().includes(q)) continue;
+      alive.add(lid);
+      if (!matchesTitle(meta.title, q)) continue;
       wanted.add(lid);
       visible.push(lid);
     }
     for (const [lid, row] of this.rows) {
-      if (!wanted.has(lid)) {
-        row.remove();
+      // 絞り込みで外れただけの行は **DOM から外すが、ノードは取っておく**
+      // (次の打鍵で戻ってくる ── 作り直しが M-4 の停止の正体だった)
+      if (!wanted.has(lid)) row.remove();
+      if (!alive.has(lid)) {
         this.rows.delete(lid);
         this.rowMeta.delete(lid);
       }

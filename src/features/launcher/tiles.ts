@@ -47,6 +47,20 @@ export function isLaunchableUrl(url: string): boolean {
   return /^https?:\/\/\S+$/i.test(url.trim());
 }
 
+/**
+ * アプリとして開けるのは **HTML だけ**。
+ *
+ * 🔑 起動は「隔離した外殻の `srcdoc` に中身を入れる」形になった
+ * (`app-shell.ts` ── 添付を同じ origin で走らせない)。この器に PDF や画像の
+ * bytes を入れても**文字化けが出るだけ**なので、押しても何も起きないタイルを
+ * 出さないという上の判断(`isLaunchableUrl`)と**同じ向き**で落とす。
+ * ⚠ mime 未設定は HTML 扱い(PKC2 の古い書出しは mime を持たないことがある)。
+ * ⚠ ここで落ちても添付そのものは消えない ── 一覧から普通に開ける。
+ */
+export function isAppMime(mime: string | undefined): boolean {
+  return mime === undefined || /^\s*(?:text\/html|application\/xhtml\+xml)\s*(?:;|$)/i.test(mime);
+}
+
 function str(v: unknown): string | undefined {
   return typeof v === 'string' && v !== '' ? v : undefined;
 }
@@ -77,7 +91,11 @@ export function tileFrom(src: TileSource): LauncherTile | null {
   const assetKey = str(fm['attachment.asset_key']);
   // ⚠ bytes を指していない「アプリ」は起動しようがない
   if (assetKey === undefined) return null;
-  return { ...base, kind: 'app', assetKey, mime: str(fm['attachment.mime']) };
+  const mime = str(fm['attachment.mime']);
+  // ⚠ HTML 以外は器(`srcdoc`)に入れても文字化けにしかならない ──
+  // 「押しても何も起きないタイルを出さない」と同じ向きで落とす
+  if (!isAppMime(mime)) return null;
+  return { ...base, kind: 'app', assetKey, mime };
 }
 
 /**

@@ -12,6 +12,7 @@ import { extractMeta, seedBodyFor } from '@features/flavor';
 import { withTodoStatus } from '@features/flavor/todo-flavor';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import type { LauncherTile } from '@features/launcher/tiles';
+import { visibleOrder } from '@features/filter/title-filter';
 
 export type AppPhase = 'initializing' | 'ready' | 'editing' | 'error';
 export type ViewMode = 'detail' | 'calendar' | 'kanban' | 'filer' | 'launcher';
@@ -191,7 +192,11 @@ export type Dispatchable = UserAction | SystemCommand;
  */
 export type DomainEvent =
   | { type: 'REQUEST_BODY'; lid: string }
-  | { type: 'REQUEST_LAUNCHER_TILES' }
+  /** ⚠ **どれを読むかを載せる** ── effect 層は実行時に state を見ない(review L-6)。 */
+  | {
+      type: 'REQUEST_LAUNCHER_TILES';
+      entries: Array<{ lid: string; title: string }>;
+    }
   | {
       type: 'PERSIST_ENTRY';
       entry: EntryUpsert;
@@ -343,8 +348,15 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
         // ⚠ 元データ(`registered_as_app` 等)は attachment の frontmatter で
         // **常駐していない** ── boot で全部読むと、ランチャーを一度も開かない
         // user にも全添付の body 読込を負わせることになる。
-        // ⚠ **毎回要求する** ── 添付を足した直後に開いても古い一覧を見せない
-        events: action.mode === 'launcher' ? [{ type: 'REQUEST_LAUNCHER_TILES' }] : [],
+        // ⚠ **毎回要求する**。ただし前回のタイルは**消さない** ── 2 回目以降は
+        // 前回の並びを出したまま読み直し、届いたら差し替える(review L-5 で
+        // 「古い一覧を見せない」と書いてあったのは嘘だったので、実装ではなく
+        // 記述を直した ── ランチャーを開くたびに「読み込んでいます…」を
+        // 挟むほうが体感として悪い。読み直しは store 1 往復で終わる)
+        events:
+          action.mode === 'launcher'
+            ? [{ type: 'REQUEST_LAUNCHER_TILES', entries: attachmentEntries(state) }]
+            : [],
       };
     case 'LAUNCHER_TILES_LOADED':
       return { state: { ...state, launcherTiles: action.tiles }, events: [] };
@@ -636,6 +648,12 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
           entryMetas: new Map(state.entryMetas).set(action.lid, meta),
           order: [...state.order, action.lid],
           selectedLid: action.lid,
+          // 🔴 **絞り込みを解除する**(review M-2)。既定題名は絞り込み語に一致
+          // しないので、絞り込み中に作ると **一生一覧に出ない** entry ができていた
+          // (実証: 保存しても出ず、「効かなかった」と思って Esc を押すと
+          // 新規未編集 cancel の掃除で entry ごと消える)。
+          // ⚠ 欄の文字も消える ── 書き戻しは sidebar が持つ
+          filterQuery: '',
           freshLid: wantsEdit ? action.lid : null, // 非編集作成は fresh 掃除の対象外
           error: null,
           openBody: {
@@ -874,6 +892,22 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
  * 選択遷移は PKC2 nextSelectedAfterRemove と同じ「同 index → 末尾 fallback → null」。
  * 新しい選択には REQUEST_BODY を発行する(openBody は破棄済みのため)。
  */
+/**
+ * ランチャーが読むべき entry(= 添付だけ)を **並び順で** 取る。
+ *
+ * ⚠ **添付だけ**。全 entry の body を読むと、ランチャーを開くたびに全文を
+ * 舐めることになる(5,000 件のノートを持つ user には致命的)。
+ * ⚠ 選ぶのは reducer 側 ── effect 層は実行時に state を見ない(review L-6)。
+ */
+function attachmentEntries(state: AppState): Array<{ lid: string; title: string }> {
+  const out: Array<{ lid: string; title: string }> = [];
+  for (const lid of state.order) {
+    const meta = state.entryMetas.get(lid);
+    if (meta?.archetype === 'attachment') out.push({ lid, title: meta.title });
+  }
+  return out;
+}
+
 function removeEntryFromState(
   state: AppState,
   lid: string,
@@ -881,7 +915,6 @@ function removeEntryFromState(
 ): ReduceResult {
   const entryMetas = new Map(state.entryMetas);
   entryMetas.delete(lid);
-  const idx = state.order.indexOf(lid);
   const order = state.order.filter((l) => l !== lid);
   // 常駐 relations も追従(worker は同 tx で掃除済み ── メモリだけ残すと
   // relations を描く view が「削除したのにリンクが残る」になる)
@@ -892,7 +925,19 @@ function removeEntryFromState(
   let selectedLid = state.selectedLid;
   const events = [...extraEvents];
   if (state.selectedLid === lid) {
-    selectedLid = order[Math.min(idx, order.length - 1)] ?? null;
+    // 🔴 後継は「**見えている中**」から選ぶ(review M-1)。初版は絞り込み前の
+    // `state.order` から取っていたので、絞り込み中に削除を続けると
+    // **一覧に出ていない entry** が次々に選ばれて消えていった(実証済み)。
+    // ⚠ 規則は `visibleOrder` に 1 本化 ── 一覧と後継が別々の答えを出さない
+    const before = visibleOrder(
+      state.order,
+      (l) => state.entryMetas.get(l)?.title,
+      state.filterQuery,
+    );
+    const vIdx = before.indexOf(lid);
+    const after = before.filter((l) => l !== lid);
+    // ⚠ 絞り込みで残りが居なくなったら **null**(見えないものを選ばない)
+    selectedLid = vIdx < 0 ? null : (after[Math.min(vIdx, after.length - 1)] ?? null);
     if (selectedLid) events.push({ type: 'REQUEST_BODY', lid: selectedLid });
   }
   return {

@@ -29,9 +29,18 @@
   --accent: #33ff66;
   --accent-dim: #1a7a33;
   --accent-fg: #050a03;
+  /* ⚠ **`--accent-dim` の上に載る文字**。`--accent-fg`(= `--accent` の上)を
+   * 流用すると、ライトで白 on 淡緑 = 1.80:1 になって読めない(review M-9 実測)。
+   * 「accent の上」と「accent-dim の上」は別の役割である */
+  --accent-dim-fg: #eaffee;
   --border: #1e2a16;
   --danger: #ff4444;
   --warn: #ffaa22;
+  /* 影(メニューの浮き)。⚠ トークン外の色を本文に直書きしないため(review L-8) */
+  --shadow: 0 4px 12px rgb(0 0 0 / 35%);
+  /* sandbox iframe の下地。⚠ **配色に追従させない** ── 中の HTML は
+   * 白地を前提に書かれている(取り込んだ他人の文書)ので、暗くすると読めなくなる */
+  --sandbox-bg: #ffffff;
 
   --radius: 2px;
   --s1: 0.125rem;
@@ -60,11 +69,15 @@
   --fg: #1b2416;
   --muted: #5c6b50;
   --accent: #197a37;
-  --accent-dim: #96ceA6;
+  --accent-dim: #96cea6;
   --accent-fg: #ffffff;
+  /* 淡い緑の上は**濃い文字**(白だと 1.80:1 ── review M-9) */
+  --accent-dim-fg: #123318;
   --border: #c9d3bd;
   --danger: #b3261e;
   --warn: #8a5300;
+  --shadow: 0 4px 12px rgb(0 0 0 / 18%);
+  --sandbox-bg: #ffffff;
 
   color-scheme: light;
 }
@@ -245,7 +258,7 @@ textarea:focus-visible {
   background: var(--surface);
   border: 1px solid var(--accent-dim);
   border-radius: var(--radius);
-  box-shadow: 0 4px 12px rgb(0 0 0 / 35%);
+  box-shadow: var(--shadow);
 }
 [data-pkc-menu-items] button {
   text-align: left;
@@ -254,7 +267,8 @@ textarea:focus-visible {
 /* いま居るビューを塗る(`markView` が属性を付け外しする) */
 [data-pkc-region='topbar'] [data-pkc-active] {
   background: var(--accent-dim);
-  color: var(--accent-fg);
+  /* ⚠ `--accent-fg` ではない ── ライトで白 on 淡緑 = 1.80:1 だった(review M-9) */
+  color: var(--accent-dim-fg);
   border-color: var(--accent);
 }
 
@@ -321,27 +335,29 @@ textarea:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* archetype の印(記号 1 文字ぶんだけ。密度優先で語は出さない) */
-[data-pkc-archetype]::before {
+/* archetype の印(記号 1 文字ぶんだけ。密度優先で語は出さない)。
+ * ⚠ **一覧の行にだけ**出す(review L-2)── スコープが無かったので、同じ属性を
+ * 持つ「新規」メニューのボタンにも出て「文 +ノート」と表示されていた */
+:is([data-pkc-region='entry-list'], [data-pkc-region='filer-table']) [data-pkc-archetype]::before {
   color: var(--muted);
   font-size: 0.8em;
 }
-[data-pkc-archetype='text']::before {
+:is([data-pkc-region='entry-list'], [data-pkc-region='filer-table']) [data-pkc-archetype='text']::before {
   content: '文 ';
 }
-[data-pkc-archetype='todo']::before {
+:is([data-pkc-region='entry-list'], [data-pkc-region='filer-table']) [data-pkc-archetype='todo']::before {
   content: '了 ';
 }
-[data-pkc-archetype='textlog']::before {
+:is([data-pkc-region='entry-list'], [data-pkc-region='filer-table']) [data-pkc-archetype='textlog']::before {
   content: '録 ';
 }
-[data-pkc-archetype='spreadsheet']::before {
+:is([data-pkc-region='entry-list'], [data-pkc-region='filer-table']) [data-pkc-archetype='spreadsheet']::before {
   content: '表 ';
 }
-[data-pkc-archetype='folder']::before {
+:is([data-pkc-region='entry-list'], [data-pkc-region='filer-table']) [data-pkc-archetype='folder']::before {
   content: '箱 ';
 }
-[data-pkc-archetype='attachment']::before {
+:is([data-pkc-region='entry-list'], [data-pkc-region='filer-table']) [data-pkc-archetype='attachment']::before {
   content: '添 ';
 }
 
@@ -358,8 +374,7 @@ textarea:focus-visible {
   border-bottom: 1px solid var(--border);
   padding-bottom: var(--s2);
 }
-[data-pkc-field='detail-toolbar'],
-[data-pkc-field='editor-toolbar'] {
+[data-pkc-field='detail-toolbar'] {
   display: flex;
   flex-wrap: wrap;
   gap: var(--s2);
@@ -512,7 +527,7 @@ textarea:focus-visible {
   width: 100%;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: #fff;
+  background: var(--sandbox-bg);
 }
 .pkc-md-rendered .footnotes {
   margin-top: var(--s5);

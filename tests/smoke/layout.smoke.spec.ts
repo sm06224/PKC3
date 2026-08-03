@@ -213,6 +213,79 @@ test('🔴 一覧を絞り込める(探す導線)', async ({ page }) => {
 });
 
 /**
+ * P7b review M-4: 絞り込みの**戻り**で行を作り直さない。
+ *
+ * 🔴 15,000 件で実測すると、絞り込みを消すたびに 0.2〜0.75 秒メインスレッドが
+ * 止まっていた ── 外した行を捨てて `createRow` からやり直していたためで、
+ * CLAUDE.md が PKC2 の体感悪化の主因として名指しした
+ * 「5000 行のサイドバーを作り直す」と同型である。
+ * ⚠ 「速くなった」は結果に出ないので、**同じノードが戻ってくるか**で見る
+ * (作り直す実装ではここが落ちる)。
+ */
+test('🔴 絞り込みを戻したとき、行は作り直されない', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await gotoApp(page);
+  for (const name of ['りんご', 'みかん']) {
+    await clickMenuItem(page, '[data-pkc-action="create-entry"][data-pkc-archetype="text"]');
+    await page.locator('[data-pkc-field="editor-title"]').fill(name);
+    await clickReal(page, '[data-pkc-action="commit-edit"]');
+  }
+  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  await expect(rows).toHaveCount(2);
+
+  // 印を付ける ── 同じ DOM ノードが戻れば印も残る
+  await page.evaluate(() => {
+    for (const el of document.querySelectorAll(
+      '[data-pkc-region="entry-list"] [data-pkc-entry]',
+    ))
+      (el as HTMLElement).dataset.probe = 'kept';
+  });
+  const box = page.locator('[data-pkc-field="entry-filter"]');
+  await box.fill('りんご');
+  await expect(rows).toHaveCount(1);
+  await box.fill('');
+  await expect(rows).toHaveCount(2);
+  const kept = await page.evaluate(
+    () =>
+      document.querySelectorAll(
+        '[data-pkc-region="entry-list"] [data-pkc-entry][data-probe="kept"]',
+      ).length,
+  );
+  expect(kept).toBe(2);
+});
+
+/**
+ * P7b review L-2: archetype の印は**一覧の行にだけ**出す。
+ * ⚠ スコープが無かったので、同じ属性を持つ「新規」メニューのボタンにも出て
+ * 「文 +ノート」と表示されていた(実測)。
+ */
+test('🔴 archetype の印がメニューのボタンに漏れない', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await gotoApp(page);
+  await clickMenuItem(page, '[data-pkc-action="create-entry"][data-pkc-archetype="text"]');
+  await page.locator('[data-pkc-field="editor-title"]').fill('印の確認');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  const markOf = (sel: string): Promise<string> =>
+    page.evaluate((s) => {
+      const el = document.querySelector(s);
+      if (!el) return 'MISSING';
+      return getComputedStyle(el, '::before').content;
+    }, sel);
+
+  // メニューのボタンには出ない
+  await clickReal(page, '[data-pkc-menu="新規"] > [data-pkc-field="menu-label"]');
+  const onButton = await markOf(
+    '[data-pkc-menu-items] [data-pkc-action="create-entry"][data-pkc-archetype="text"]',
+  );
+  expect(onButton === 'none' || onButton === '""' || onButton === 'normal').toBe(true);
+
+  // ⚠ 空振り防止 ── 一覧の行には**出ている**(規則ごと消して通す、を落とす)
+  const onRow = await markOf('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  expect(onRow).toContain('文');
+});
+
+/**
  * P7b 段⑨c: 配色(user 指示 2026-08-03「最初はライトとダークのみに」)。
  * ⚠ 「属性が付いた」で止めない ── **実際に色が変わる**ところまで見る。
  */

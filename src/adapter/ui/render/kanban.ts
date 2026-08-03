@@ -11,6 +11,7 @@ import {
   KANBAN_COLUMNS,
   type KanbanStatus,
 } from '@features/kanban/kanban-data';
+import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
 
 export class KanbanRenderer {
   private readonly region: HTMLElement;
@@ -21,6 +22,8 @@ export class KanbanRenderer {
   private lastMetas: ReadonlyMap<string, EntryMeta> | null = null;
   private lastOrder: readonly string[] | null = null;
   private lastSelected: string | null = null;
+  /** ⚠ 絞り込みも指紋の一部(review M-3 ── 絞っても盤面が変わらないのは嘘)。 */
+  private lastFilter: string | null = null;
 
   constructor(region: HTMLElement) {
     this.region = region;
@@ -30,15 +33,20 @@ export class KanbanRenderer {
     if (
       state.entryMetas === this.lastMetas &&
       state.order === this.lastOrder &&
+      state.filterQuery === this.lastFilter &&
       state.selectedLid === this.lastSelected
     )
       return;
 
     const columns = this.ensureColumns();
+    // 🔑 絞り込みは**全部の面**に同じ規則で効かせる(review M-3)。初版は
+    // サイドバーとランチャーだけが効いており、「りんご」と書かれた欄の隣で
+    // 盤面が全件を出していた ── 画面が嘘をつく
+    const q = normalizeQuery(state.filterQuery);
     const ordered: EntryMeta[] = [];
     for (const lid of state.order) {
       const m = state.entryMetas.get(lid);
-      if (m) ordered.push(m);
+      if (m && matchesTitle(m.title, q)) ordered.push(m);
     }
     const grouped = groupTodosByStatus(ordered);
 
@@ -89,6 +97,7 @@ export class KanbanRenderer {
 
     this.lastMetas = state.entryMetas;
     this.lastOrder = state.order;
+    this.lastFilter = state.filterQuery;
     this.lastSelected = state.selectedLid;
   }
 

@@ -113,8 +113,78 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
     clickReal(page, '[data-pkc-tile-kind="app"]'),
   ]);
   await appTab.waitForLoadState('domcontentloaded');
-  // ⚠ 「タブが開いた」で止めない ── **中身**が届いているかを見る
-  await expect(appTab.locator('p')).toHaveText('1+1=2');
+
+  // ⑤-1 🔴 **アプリと同じ origin で走らせない**(review H-1)。
+  // 修正前の実測: {"origin":"http://localhost:45732","ls":2,"idb":"pkc3-assets","opfs":".pkc3"}
+  // ── 取り込んだ HTML から localStorage に書け、IndexedDB(添付の実体)と
+  // OPFS(SQLite 本体)と Cache Storage(SW の precache)が見えていた。
+  // Cache Storage が見えるのがとくに重く、偽の応答を書けば**再読込をまたいで
+  // 生き残る改竄**になる。ここは「タブが開いた」ではなく**到達範囲**を測る。
+  // ⚠ **順番が本体** ── 中身の確認を先に置くと、外殻を丸ごと外す変異が
+  // 「中身が見えない」で落ちて、隔離の観測点に一度も到達しない(実際にそうなった)
+  await expect
+    .poll(() => appTab.frames().length, {
+      message: '添付が最上位で開かれている(隔離した外殻を通っていない)',
+    })
+    .toBeGreaterThan(1);
+  const sandboxed = appTab.frames().find((f) => f !== appTab.mainFrame())!;
+  const reach = await sandboxed.evaluate(async () => {
+    // ⚠ `location.origin` は**使えない** ── Chromium は `about:srcdoc` に対して
+    // 隔離の有無に関わらず 'null' を返す(実測で空振りを踏んだ)。
+    // 判別できるのは `self.origin` と **親 DOM に手が届くか**である
+    const out: Record<string, string> = { selfOrigin: String(self.origin) };
+    try {
+      out.parentDom = String(parent.document.location.href).slice(0, 5);
+    } catch {
+      out.parentDom = 'blocked';
+    }
+    try {
+      localStorage.setItem('pkc3-probe', '1');
+      out.ls = 'OPEN';
+    } catch {
+      out.ls = 'blocked';
+    }
+    try {
+      const req = indexedDB.open('pkc3-assets');
+      await new Promise<void>((res, rej) => {
+        req.onsuccess = () => res();
+        req.onerror = () => rej(req.error);
+      });
+      out.idb = 'OPEN';
+    } catch {
+      out.idb = 'blocked';
+    }
+    try {
+      await navigator.storage.getDirectory();
+      out.opfs = 'OPEN';
+    } catch {
+      out.opfs = 'blocked';
+    }
+    try {
+      await caches.keys();
+      out.caches = 'OPEN';
+    } catch {
+      out.caches = 'blocked';
+    }
+    return out;
+  });
+  // ⚠ **origin が opaque であること**を独立に見る ── 個々の storage API が
+  // 将来別の理由で失敗しても、隔離が外れたことに気づけるようにする。
+  // ⚠ 当初 `location.origin` を見ていたが、Chromium は `about:srcdoc` に対して
+  // **隔離の有無に関わらず 'null'** を返すので**空振りだった**(実測)
+  expect(reach.selfOrigin).toBe('null');
+  expect(reach).toMatchObject({
+    parentDom: 'blocked',
+    ls: 'blocked',
+    idb: 'blocked',
+    opfs: 'blocked',
+    caches: 'blocked',
+  });
+
+  // ⑤-2 ⚠ 隔離した先で**中身がちゃんと出ている**(隔離できても白紙では意味がない)
+  await expect(
+    appTab.frameLocator('[data-pkc-field="launcher-app"]').locator('p'),
+  ).toHaveText('1+1=2');
   await appTab.close();
 
   // ⑥ サイドバーの絞り込みがここでも効く(探し方を 2 通り覚えさせない)

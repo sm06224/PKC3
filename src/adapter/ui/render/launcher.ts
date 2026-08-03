@@ -13,6 +13,7 @@
  */
 import type { AppState } from '@adapter/state/app-state';
 import type { LauncherTile } from '@features/launcher/tiles';
+import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
 
 export class LauncherRenderer {
   private lastTiles: LauncherTile[] | null | undefined = undefined;
@@ -34,11 +35,10 @@ export class LauncherRenderer {
       return;
     }
 
-    // ⚠ サイドバーと**同じ絞り込み**を効かせる(探し方を 2 通り覚えさせない)
-    const q = state.filterQuery.trim().toLowerCase();
-    const tiles = state.launcherTiles.filter(
-      (t) => q === '' || t.title.toLowerCase().includes(q),
-    );
+    // ⚠ サイドバーと**同じ絞り込み**を効かせる(探し方を 2 通り覚えさせない)。
+    // 規則は `title-filter.ts` の 1 本 ── 面ごとに書くと必ずずれる(review M-1/M-3)
+    const q = normalizeQuery(state.filterQuery);
+    const tiles = state.launcherTiles.filter((t) => matchesTitle(t.title, q));
 
     if (tiles.length === 0) {
       const empty = document.createElement('p');

@@ -19,7 +19,8 @@ import { runExplicitPurge } from '@adapter/platform/storage/asset-gc';
 import { buildShell } from '@adapter/ui/render/shell';
 import { showNotices, clearNotices } from '@adapter/ui/render/notices';
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
-import { applyTheme, initialTheme, type Theme } from '@adapter/ui/render/theme';
+import { applyTheme, chooseTheme, initialTheme, type Theme } from '@adapter/ui/render/theme';
+import { launchTile } from '@adapter/ui/launch-tile';
 import { watchForUpdate, type UpdateContainer } from '@adapter/platform/sw/update-prompt';
 import { reloadOnPrebootSwap, type PrebootTarget } from '@adapter/platform/sw/preboot-swap';
 import { SidebarRenderer } from '@adapter/ui/render/sidebar';
@@ -44,6 +45,29 @@ const DB_NAME = 'pkc3';
 const DEFAULT_CID = 'default';
 /** container の題名(書出しのファイル名にも使う ── 1 箇所で決める)。 */
 const CONTAINER_TITLE = 'PKC3';
+
+/**
+ * 開いたタブが閉じるまで待つ(ランチャーの blob の寿命終端)。
+ *
+ * ⚠ **`closed` は poll でしか分からない** ── 別 window の close は event で
+ * 飛んでこない。2 秒間隔にしているのは「起動中ずっと回る」ものだからで、
+ * user がタブを閉じた 2 秒後には revoke される。
+ * ⚠ こちらのページが消えるときも解く ── 起動したまま本体を閉じた場合、
+ * blob はどのみち道連れになるので、interval を残さない。
+ */
+function waitForWindowClose(win: Window): Promise<void> {
+  return new Promise((resolve) => {
+    const done = (): void => {
+      clearInterval(timer);
+      window.removeEventListener('pagehide', done);
+      resolve();
+    };
+    const timer = setInterval(() => {
+      if (win.closed) done();
+    }, 2000);
+    window.addEventListener('pagehide', done);
+  });
+}
 
 export interface AppHandle {
   dispatcher: Dispatcher;
@@ -365,46 +389,27 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *
      * ⚠ **新しいタブで開く**。同じタブに載せると、開いた先から戻れない
      * (PKC3 は SPA なので履歴が噛み合わない)。
-     * ⚠ `noopener` を付ける ── 開いた先から `window.opener` 経由で
-     * こちらを触られない(URL タイルは外部サイトである)。
-     * ⚠ blob は**開いた後に捨てる**。即 revoke すると新しいタブが読む前に消える
-     * ── 「ライフサイクル終端での即破棄」(user 指示 2026-07-27)の範囲内で、
-     * 読み終わるだけの猶予を置く
+     * 中身の作法(隔離 / opener / 寿命)は `launch-tile.ts` が持つ ──
+     * ここは**この環境の道具を渡すだけ**
      */
     openTile: (lid) => {
       const tile = dispatcher.getState().launcherTiles?.find((t) => t.lid === lid);
       if (!tile) return;
-      if (tile.kind === 'url' && tile.url) {
-        window.open(tile.url, '_blank', 'noopener,noreferrer');
-        return;
-      }
-      if (!tile.assetKey) return;
-      void (async () => {
-        try {
-          const lent = await blobs.lendObjectUrl(DEFAULT_CID, tile.assetKey!);
-          if (!lent) {
-            dispatcher.dispatch({
-              type: 'OP_FAILED',
-              error: `「${tile.title}」の中身が見つかりません(添付が整理された可能性)`,
-            });
-            return;
-          }
-          window.open(lent.url, '_blank', 'noopener,noreferrer');
-          // 新しいタブが読み込むまでの猶予(添付の download と同じ流儀)
-          setTimeout(lent.dispose, 1000);
-        } catch (e) {
-          dispatcher.dispatch({
-            type: 'OP_FAILED',
-            error: `「${tile.title}」を開けませんでした: ${String(e)}`,
-          });
-        }
-      })();
+      launchTile(tile, {
+        readBlob: (assetKey) => blobs.get(DEFAULT_CID, assetKey),
+        open: (url, features) => window.open(url, '_blank', features),
+        createUrl: (blob) => URL.createObjectURL(blob),
+        revokeUrl: (url) => URL.revokeObjectURL(url),
+        whenClosed: waitForWindowClose,
+        fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
+      });
     },
     // 🎨 配色(P7b 段⑨c、user 指示「最初はライトとダークのみに」)。
     // ⚠ 属性は **`<html>`** に付ける ── `:root` の変数を上書きするため
+    // ⚠ **ここだけが保存する** ── 起動時の適用は保存しない(review M-7)
     setTheme: (theme) => {
       if (theme === 'light' || theme === 'dark')
-        applyTheme(document.documentElement, theme as Theme);
+        chooseTheme(document.documentElement, theme as Theme);
     },
     // 🔄 新しい版へ交代する(P7 段⑤)。⚠ 頼むだけ ── 再読込は交代が済んでから
     applyUpdate: () => updatePrompt.apply(),

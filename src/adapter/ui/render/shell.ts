@@ -157,6 +157,8 @@ export function buildShell(root: HTMLElement): ShellRegions {
   filter.setAttribute('data-pkc-field', 'entry-filter');
   filter.placeholder = '絞り込み';
   filter.title = '題名で絞り込みます(Esc で消す)';
+  // ⚠ `placeholder` は名前ではない ── 値を入れると読み上げから消える(review L-8)
+  filter.setAttribute('aria-label', '題名で絞り込む');
   createBar.append(filter);
 
   const newMenu = document.createElement('details');

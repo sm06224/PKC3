@@ -58,8 +58,22 @@ export function otherTheme(theme: Theme): Theme {
  * 適用する。⚠ **属性 1 つで切り替える** ── CSS 側は
  * `:root[data-pkc-theme='light']` を上書きに使う(class にすると minify や
  * 別 renderer の書き換えで静かに外れる、というこのリポジトリの規約に従う)。
+ *
+ * 🔴 **保存しない**(P7b review M-7)。初版は適用のたびに書いていたので、
+ * 起動時の `applyTheme(…, initialTheme())` が **OS の設定をそのまま保存**し、
+ * 「一度も選んでいないのに初回起動時の OS 設定で固定される」状態になっていた
+ * (実測: OS=dark で初回起動 → `stored:'dark'` → OS を light に戻しても dark のまま)。
+ * 保存は **user が選んだとき**だけ ── `chooseTheme` が持つ。
  */
 export function applyTheme(target: HTMLElement, theme: Theme): void {
   target.setAttribute('data-pkc-theme', theme);
+}
+
+/**
+ * user が選んだ ── 適用して**保存する**。
+ * ⚠ 起動時にはこれを呼ばない(呼ぶと M-7 が再発する)。
+ */
+export function chooseTheme(target: HTMLElement, theme: Theme): void {
+  applyTheme(target, theme);
   write(theme);
 }

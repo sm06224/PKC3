@@ -10,6 +10,17 @@ export type StorageRequest =
   | { op: 'listEntryMetas'; cid: string }
   | { op: 'getBody'; cid: string; lid: string }
   /**
+   * 指定した lid の本文だけを **1 往復で** 取る(P7b review L-7)。
+   *
+   * ⚠ `listBodies` とは用途が違う ── あちらは「全件を順に、バイト数で割って」で、
+   * こちらは「**この数件だけ**」。ランチャーは添付の frontmatter しか要らないのに
+   * `getBody` を添付の件数ぶん呼んでいて、単一 queue の store が
+   * その回数ぶん待たされていた(本文読込・保存が後ろに並ぶ)。
+   * ⚠ **無い lid は結果に出ない**(呼び側は「読めたものだけ」を受け取る)。
+   * ⚠ 呼び側が上限を持つ ── ここは渡された分をそのまま返す
+   */
+  | { op: 'getBodies'; cid: string; lids: string[] }
+  /**
    * 本文を **まとめて** 取る(P6d ── 書出し用)。
    *
    * ⚠ `getBody` を N 回呼ぶと 5000 entry の書出しが 5000 往復になる。
@@ -259,6 +270,8 @@ export interface ResultMap {
   openContainer: null;
   listEntryMetas: EntryMetaRow[];
   getBody: string | null;
+  /** 読めたものだけ(要求順)。⚠ 無い lid は**黙って落ちる**。 */
+  getBodies: Array<{ lid: string; body: string }>;
   /**
    * `done` = これ以上ない。`rows` は `entry_order, lid` 順(並びの正本)。
    * `next` = 続きのカーソル(呼び出し側はこれをそのまま渡す ── 自分で組まない)。
