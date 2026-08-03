@@ -57,17 +57,26 @@ test('🔴 新しい版が配られたら案内が出て、押すと入れ替わ
     await expect(card).toBeVisible({ timeout: 20_000 });
     await expect(card.locator('[data-pkc-field="update-text"]')).toHaveText(/新しい版/);
 
-    // ② 押すと交代して**再読込まで進む**(押しただけで止まらない)
+    // ② 押すと交代して**再読込まで進む**(押しただけで止まらない)。
+    // 🔴 観測点は「**この document が入れ替わったか**」。当初は
+    // 「controller があって boot が ready」で待っていたが、**押す前の
+    // ページが既にその条件を満たしている** ── 待ちが即座に通り、その後の
+    // `evaluate` が再読込に巻き込まれて `Execution context was destroyed` で
+    // 落ちた(CI で実際に踏んだ)。⚠ ローカルで緑だったのは時間の綾で、
+    // **再読込が起きたことは一度も確かめていなかった**
+    await page.evaluate(() => {
+      (window as unknown as Record<string, unknown>).__beforeReload = true;
+    });
     await clickReal(page, '[data-pkc-action="apply-update"]');
     await page.waitForFunction(
       () =>
-        Boolean(navigator.serviceWorker?.controller) &&
-        document
-          .querySelector('[data-pkc-slot="root"]')
-          ?.getAttribute('data-pkc-boot') === 'ready',
+        !(window as unknown as Record<string, unknown>).__beforeReload &&
+        document.querySelector('[data-pkc-slot="root"]')?.getAttribute('data-pkc-boot') ===
+          'ready',
       null,
       { timeout: 20_000 },
     );
+    await page.waitForLoadState();
 
     // ③ 新しい版が制御しており、案内はもう出ていない
     await expect(page.locator('[data-pkc-region="update"]')).toBeHidden();
