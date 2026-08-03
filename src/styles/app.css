@@ -407,6 +407,28 @@ select:focus-visible {
   font-size: 15px;
   font-weight: 600;
 }
+/* ── 図(P8 段③⑦)────────────────────────────────
+ * 🔑 画面に置くのは PNG 1 枚。**保存の導線は図の中**に置く(押した所から
+ * `closest` で原文に届く)。⚠ 消さない ── 「同じものが常に同じ場所にある」。
+ * 普段は控えめ、hover / focus で立つ。 */
+[data-pkc-mermaid-src] {
+  position: relative;
+}
+[data-pkc-field='diagram-save'] {
+  position: absolute;
+  top: var(--s2);
+  right: var(--s2);
+  font-size: 11.5px;
+  padding: 0 var(--s2);
+  opacity: 0.35;
+  /* ⚠ 図の上に浮くので**地を必ず塗る**(透過だと図の線と重なって読めない) */
+  background: var(--surface);
+}
+[data-pkc-mermaid-src]:hover [data-pkc-field='diagram-save'],
+[data-pkc-field='diagram-save']:focus-visible {
+  opacity: 1;
+}
+
 /* ── 書式パネル(P8 段⑥)──────────────────────────
  * 🔑 **編集欄のすぐ上**に、共有の 1 本線で貼り付ける(段④ の規約:境界線は共有、
  * ギャップは置かない)。14 個入るので狭いときは折り返す ── 畳まない

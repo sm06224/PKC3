@@ -21,6 +21,35 @@ interface Pending {
   source: string;
 }
 
+/**
+ * 図を保存する導線(P8 段⑦)。
+ *
+ * > user 指示 2026-08-03「**mermaid 図のエクスポートをさせるとき以外は PNG ラスタを
+ * > キャッシュして…**」── つまり**書き出しの導線が在る**前提の指示だったが、
+ * > `renderToSvg()` は書かれたまま**呼び出し元が 0 件**だった(死んだコード)。
+ *
+ * ⚠ 器の中に置く ── 原文(`data-pkc-mermaid-src`)は器が持っているので、
+ * binder は `closest` 1 回で「どの図か」に届く(押した所に原文を焼き込まない:
+ * 大きい図の原文を属性で二重に持つことになる)。
+ * ⚠ 図案だけのボタンにしない(段④ の規約)。地は無彩色・普段は控えめで、
+ * hover / focus で立つ ── 「同じものが常に同じ場所にある」ので消しはしない。
+ */
+function saveButton(): HTMLButtonElement {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.setAttribute('data-pkc-action', 'export-diagram');
+  btn.setAttribute('data-pkc-field', 'diagram-save');
+  const icon = document.createElement('span');
+  icon.setAttribute('data-pkc-icon', '');
+  icon.setAttribute('aria-hidden', 'true');
+  icon.textContent = '⬇';
+  const label = document.createElement('span');
+  label.setAttribute('data-pkc-field', 'label');
+  label.textContent = '図を保存';
+  btn.append(icon, label);
+  return btn;
+}
+
 function themeOf(): string {
   return document.documentElement.getAttribute('data-pkc-theme') ?? 'light';
 }
@@ -69,7 +98,7 @@ export function hydrateMermaid(root: ParentNode): () => void {
       img.style.width = '100%';
       img.style.height = 'auto';
       p.host.textContent = '';
-      p.host.append(img);
+      p.host.append(img, saveButton());
       p.host.setAttribute('data-pkc-mermaid-state', 'ready');
     } catch (e) {
       // ⚠ 失敗しても**原文は残す**(器の中の `<pre>` を消すのは成功したときだけ)

@@ -35,6 +35,19 @@ function srcFiles(dir = 'src', out: string[] = []): string[] {
   return out;
 }
 
+/**
+ * コメント行を落とす。⚠ **「在る」ことを主張する検査**でだけ使う ──
+ * 注釈が検査を満たしてしまうと、実装を消しても緑になる(P8 段⑦ で実際に踏んだ)。
+ * ⚠ 逆に「**無い**」ことを主張する検査(drag&drop)には掛けない ── そちらは
+ * 広く拾うほうが安全側(コメントで誤検知して落ちるのは、見逃すよりずっとよい)。
+ */
+function codeOnly(src: string): string {
+  return src
+    .split('\n')
+    .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+    .join('\n');
+}
+
 const MANUAL = readFileSync('docs/manual.md', 'utf-8');
 const MIGRATION = readFileSync('docs/migration-from-pkc2.md', 'utf-8');
 
@@ -227,6 +240,26 @@ describe('マニュアルと実装の突合', () => {
     for (const label of labels) {
       expect(MANUAL, `マニュアルに書式「${label}」の説明が無い`).toContain(`**${label}**`);
     }
+  });
+
+  it('🔴 図の書き出しが**生きている**(死んだコードに戻らない)', () => {
+    // 🔴 `renderToSvg()` は書かれたまま**呼び出し元が 0 件**だった(P8 段⑦ で発覚)。
+    // user 指示 2026-08-03 は「エクスポート**させるとき以外は** PNG」── つまり
+    // 書き出しの導線が在る前提だったのに、無かった。⚠ 「関数が在るか」ではなく
+    // **呼ばれているか**を見る(在るだけなら前も在った)
+    // 🔴 **コメントを外してから探す**。素の grep は 1 巡目で
+    // `mermaid-hydrate.ts` の説明文(「`renderToSvg()` は呼び出し元が 0 件だった」)
+    // に救われ、**呼び出しを消しても緑**だった ── 救い手が自分の注釈だった。
+    // 「それらしい文字列が在るか」ではなく「**コードとして呼ばれているか**」で書く
+    const callers = srcFiles().filter((f) => {
+      if (f.endsWith('mermaid-raster.ts')) return false; // 定義元は呼び出し元ではない
+      return /\brenderToSvg\s*\(/.test(codeOnly(readFileSync(f, 'utf-8')));
+    });
+    expect(callers, '図をベクタで書き出す呼び出し元が無い').not.toEqual([]);
+    // 導線の文言もマニュアルと突き合わせる
+    const hydrate = readFileSync('src/adapter/ui/render/mermaid-hydrate.ts', 'utf-8');
+    expect(hydrate, '保存の導線が消えた').toContain("'図を保存'");
+    expect(MANUAL, 'マニュアルに「図を保存」が無い').toContain('**図を保存**');
   });
 
   it('🔴 「追記できる種類」がマニュアルと一致する', () => {

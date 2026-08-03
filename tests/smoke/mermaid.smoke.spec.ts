@@ -56,3 +56,66 @@ test('🔴 図は PNG の img で置かれ、SVG を DOM に残さない', async
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * P8 段⑦: **図を保存する**。
+ *
+ * 🔴 段③ の指示は「エクスポート**させるとき以外は** PNG」── つまり書き出しの導線が
+ * 在る前提だったが、`renderToSvg()` は書かれたまま**呼び出し元が 0 件**だった。
+ *
+ * ⚠ 観測点を「ダウンロードが起きた」で止めない ── **中身がベクタか**まで見る。
+ * PNG を落とす実装でもダウンロードは起きる(指示に反しているのに緑になる)。
+ */
+test('🔴 図を保存すると、画面の PNG ではなくベクタが落ちる', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('図のノート');
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill('```mermaid\ngraph TD\n  A["始め"]-->B["終わり"]\n```\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  const host = page.locator('[data-pkc-field="detail-body"] [data-pkc-mermaid-src]');
+  await expect(host).toHaveAttribute('data-pkc-mermaid-state', 'ready', { timeout: 30000 });
+
+  // ① 導線が**図の上に見えている**(hover しないと存在すら分からない、を落とす)。
+  // 🔴 `toBeVisible()` **だけでは空振りする** ── playwright は bounding box と
+  // `visibility` を見るが **opacity は見ない**ので、`opacity: 0` にする変異が
+  // 生き残った(実測)。⚠ ポインタを外してから測る(直前の click が hover を
+  // 残していると、hover 前提の実装でも通ってしまう ── 救い手が変わるだけ)
+  const save = host.locator('[data-pkc-field="diagram-save"]');
+  await page.mouse.move(0, 0);
+  await expect(save).toBeVisible();
+  const shown = await save.evaluate((el) => ({
+    opacity: Number(getComputedStyle(el).opacity),
+    bg: getComputedStyle(el).backgroundColor,
+  }));
+  expect(shown.opacity, 'hover しないと見えない導線になっている').toBeGreaterThan(0.2);
+  // ⚠ 図の上に浮くので**地が透けてはいけない**(図の線と重なって文字が読めない)
+  expect(shown.bg, '導線の地が透けている').not.toMatch(/,\s*0\)$/);
+
+  // ② 🔴 押すと落ちてくる
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    clickReal(page, '[data-pkc-field="diagram-save"]'),
+  ]);
+
+  // ③ 🔴 **中身がベクタである**。⚠ ファイル名は観測点にしない ── この headless
+  // Chromium は**非 ASCII の `<a download>` 名を丸ごと捨てて `"download"` にする**。
+  // 名前は「図1」を含むので必ず捨てられる ── 名前の規則は unit
+  // (`tests/adapter/export-diagram.test.ts`)が見ている
+  const stream = await download.createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const c of stream) chunks.push(c as Buffer);
+  const text = Buffer.concat(chunks).toString('utf-8');
+  expect(text.slice(0, 200), 'SVG ではない(PNG を落としている可能性)').toContain('<svg');
+  // ④ 🔴 **その図**が落ちている(空の svg 枠でも `<svg` は通る)
+  expect(text, '図の中身が入っていない').toContain('始め');
+  expect(text, '図の中身が入っていない').toContain('終わり');
+
+  // ⑤ 画面のほうは PNG のまま(書き出しのために SVG へ差し替わっていない)
+  expect(await page.evaluate(() => document.querySelectorAll('svg').length)).toBe(0);
+
+  expect(errors).toEqual([]);
+});

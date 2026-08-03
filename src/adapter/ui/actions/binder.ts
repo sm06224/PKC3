@@ -76,6 +76,12 @@ export interface BinderServices {
   /** このノートだけをアーカイブとして書き出す(P6f)。 */
   exportEntry?(lid: string): void;
   /**
+   * 図 1 枚をベクタ(`.svg`)で書き出す(P8 段⑦)。
+   * ⚠ 画面に置くのは PNG、書き出すのは SVG(user 指示 2026-08-03)。
+   * @param index 同じ本文の中で**何枚目か**(0 始まり ── 名前は 1 始まりにする)
+   */
+  exportDiagram?(source: string, index: number): void;
+  /**
    * 添付 gate(書出し / 取込 / 整理)が実行中か。
    * ⚠ **破壊的操作を止めるために要る**(P6f review M-2)── 「書き出す」と「削除」を
    * 隣に並べた以上、走査中に消せてしまうと **user は書き出したつもりでファイルが
@@ -301,6 +307,19 @@ const ACTIONS: Record<string, ActionHandler> = {
       .closest('[data-pkc-region="shell"]')
       ?.querySelector<HTMLInputElement>('[data-pkc-field="attach-input"]')
       ?.click();
+  },
+  /**
+   * 図を保存する(P8 段⑦)。⚠ 画面は PNG だが、**書き出すのはベクタ**
+   * (user 指示 2026-08-03「SVG は書き出しのときだけ」)。
+   * ⚠ 「何枚目か」は**描いた側の並び**から数える ── 器に番号を焼き込むと、
+   * 図を 1 個消したときに番号が飛ぶ
+   */
+  'export-diagram': (_dispatcher, target, services, root) => {
+    const host = target.closest<HTMLElement>('[data-pkc-mermaid-src]');
+    const source = host?.getAttribute('data-pkc-mermaid-src');
+    if (!host || !source) return;
+    const all = [...root.querySelectorAll('[data-pkc-mermaid-src]')];
+    services.exportDiagram?.(source, Math.max(0, all.indexOf(host)));
   },
   'download-asset': (dispatcher, target, services) => {
     const key = target.getAttribute('data-pkc-asset-key');

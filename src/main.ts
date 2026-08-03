@@ -41,6 +41,9 @@ import {
 } from '@adapter/ui/actions/export-archive';
 import { createAssetGate } from '@adapter/ui/actions/asset-gate';
 import { generateAssetKey } from '@adapter/platform/storage/asset-key';
+import { downloadBlob, downloadUrl } from '@adapter/platform/download';
+import { diagramFileName } from '@features/export/file-name';
+import { renderToSvg } from '@adapter/ui/render/mermaid-raster';
 
 const DB_NAME = 'pkc3';
 const DEFAULT_CID = 'default';
@@ -247,17 +250,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           getRevisionChain: (entryLid) =>
             client.request({ op: 'exportRevisionChain', cid: DEFAULT_CID, entryLid }),
         },
-        download: (name, blob) => {
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = name;
-          document.body.append(a);
-          a.click();
-          a.remove();
-          // click 直後の revoke は DL を中断しうる ── 1 秒で寿命終端(添付 DL と同じ)
-          setTimeout(() => URL.revokeObjectURL(url), 1000);
-        },
+        download: downloadBlob,
         notify: (message) => showStatus(`${statusBase} — ${message}`),
         // ⚠ **注意の中身**を出す導線(review M1 で一度落ちた)。無いと user が
         // 見るのは「⚠ 注意 1 件」だけで、**どの添付が欠けたか**が消える ──
@@ -389,14 +382,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           });
           return;
         }
-        const a = document.createElement('a');
-        a.href = lent.url;
-        a.download = name;
-        document.body.append(a);
-        a.click();
-        a.remove();
-        // click 直後の revoke は DL を中断しうる ── 1 秒で寿命終端
-        setTimeout(lent.dispose, 1000);
+        downloadUrl(name, lent.url, lent.dispose);
       } catch (e) {
         // IDB 障害等を unhandled rejection にしない(可視で終える)
         dispatcher.dispatch({
@@ -460,6 +446,32 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     exportHtml: () => void runExport('html'),
     exportMarkdown: () => void runExport('markdown'),
     exportEntry: (lid) => void runExport({ entryLid: lid }),
+    /**
+     * 🔑 図 1 枚をベクタで書き出す(P8 段⑦)。
+     * ⚠ **asset gate の外**でよい ── store も添付も触らず、原文から焼き直すだけ。
+     * ⚠ 画面の PNG キャッシュは使わない(user 指示: 書き出しはベクタ)。
+     */
+    exportDiagram: (source, index) => {
+      const lid = dispatcher.getState().selectedLid;
+      const title = (lid ? dispatcher.getState().entryMetas.get(lid)?.title : '') || '図';
+      void (async () => {
+        try {
+          const svg = await renderToSvg(source);
+          // ⚠ mermaid は `<?xml?>` を付けない ── 素の `<svg>` でも image/svg+xml で
+          // ブラウザは開ける。ここで宣言を足すと二重宣言の壊れた形になりうる
+          downloadBlob(
+            diagramFileName(title, index),
+            new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }),
+          );
+        } catch (e) {
+          // 黙って何も起きないのが一番悪い ── 失敗も可視で終える
+          dispatcher.dispatch({
+            type: 'OP_FAILED',
+            error: `図を書き出せませんでした: ${String(e).slice(0, 120)}`,
+          });
+        }
+      })();
+    },
     // 破壊的操作(削除)を止めるための観測点(P6f review M-2)
     busy: () => withAssetGate.busy,
     purgeOrphanAssets: () =>
