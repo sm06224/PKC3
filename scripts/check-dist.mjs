@@ -14,11 +14,18 @@
  * 「product の配信量だけを捨てる。調査手段は失わない」)。
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inspectDist } from './dist-inspect.mjs';
 
-const DIST = fileURLToPath(new URL('../dist', import.meta.url));
+/**
+ * 検品する directory。既定は `dist/`。
+ * ⚠ 第 2 引数で差し替えられる ── Pages は **release の成果物を展開したもの**を
+ * 配るので(P7 段⑧)、`dist/` 以外を検品する必要がある。
+ */
+const DIST = process.argv[3]
+  ? resolve(process.argv[3])
+  : fileURLToPath(new URL('../dist', import.meta.url));
 
 /**
  * 配る量の tripwire。KB。
@@ -54,7 +61,7 @@ function walk(dir) {
 
 const kind = process.argv[2];
 if (kind !== 'product' && kind !== 'dev') {
-  console.error('usage: node scripts/check-dist.mjs <product|dev>');
+  console.error('usage: node scripts/check-dist.mjs <product|dev> [dir]');
   process.exit(2);
 }
 
@@ -65,9 +72,9 @@ try {
   // ⚠ 原因を握り潰さない。壊れた symlink 1 本でも `statSync` は throw するので、
   // 一律「dist が無い」と言うと CI ログを読む人を確実に迷わせる
   if (e?.code === 'ENOENT' && e.path === DIST) {
-    console.error(`✗ dist/ が無い(先に build する): ${DIST}`);
+    console.error(`✗ 検品対象が無い(先に build する): ${DIST}`);
   } else {
-    console.error(`✗ dist/ を走査できない: ${e?.message ?? e}`);
+    console.error(`✗ 検品対象を走査できない: ${e?.message ?? e}`);
   }
   process.exit(1);
 }

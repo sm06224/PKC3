@@ -123,6 +123,7 @@ chunk を取りに行く経路で取り零す(Pages は deploy でツリーご�
 | ⑤ | ✅ **更新通知**(新しい版があります) | ④ の上 |
 | ⑥ | ✅ **マニュアル + 移行ガイド**(PKC2 → PKC3) | 実装が固まってから書く |
 | ⑦ | 🟡 **v3.0.0 release**(SBOM 添付は既存、provenance attestation を足す)→ product URL 稼働 | 最後。**仕込みは完了・tag は user の go 待ち** |
+| ⑧ | ✅ **レビューで「範囲外」として残した露出を塞ぐ** | ⑤〜⑦ の積み残し |
 
 ⚠ ⑥ は「実装が固まってから」。先に書くと**嘘のマニュアル**になる。
 
@@ -608,6 +609,81 @@ provenance を作りかける)。
 assert してから流し直したら、落ちた。
 
 変異試験 9 件・生存 0(版 3 / attestation 4 / 順序 2)。
+
+### 段⑧ 実装記録(2026-08-03 着地)
+
+段⑤〜⑦ のレビューで「その段の範囲を越える」として**記録だけして残した**ものを塞ぐ。
+⚠ 記録しただけで放置すると、次に読む人には「検討済み = 問題なし」に見える。
+
+#### 🔴 boot 前に交代されたタブが起動不能になる(段⑤ round-1 M-4)
+
+1. タブ B が lease 待ち(「別のタブで開いています…」)で止まる ── **storage worker は未生成**
+2. タブ A が「再読込」 → 新 SW が activate → 旧 build の cache 削除 + `clients.claim()`
+3. B は「押していないタブは再読込しない」(段⑤ の設計)ので留まる。見張りは
+   `startApp` 解決後にしか張られないので**案内も出ない**
+4. A が閉じて B が lease を取る → **旧 build の hash 付き URL** で worker 生成 →
+   新 cache に無い → network → Pages はツリーごと差し替わっていて 404 → **起動不能**
+
+→ `src/adapter/platform/sw/preboot-swap.ts`。**boot が終わっていないタブは、交代に
+気づいたら黙って読み直す**。⚠ 安全なのは「まだ何も持っていない」から ── 下書きも
+選択も無い。boot 済みのタブを勝手に読み直すのは段⑤ が禁じたこと。
+⚠ **初回インストールと区別する** ── 初回の SW も `claim()` するので
+`controllerchange` は来る。**登録時点で制御されていたか**で分ける
+(区別しないと**初めて開いた人のページが必ず 1 回リロードする**)。
+
+#### 🔴 Pages が配る物に provenance が付いていなかった(段⑦ round-2 M-4)
+
+`release.yml` が attest するのは同 job でビルドした `pkc3-dist.zip` だが、product URL に
+出るのは `pages.yml` が**同じ tag を別 job で独立にビルドし直した** `_site/` だった ──
+同じ入力でも**別の成果物**なので、「配る物そのものに attestation を付ける」は
+Pages 経路で成立していない。round-2 では doc を直すだけにしたが、それは**説明を
+実態に合わせただけ**で、user が触る物は検証できないままだった。
+
+→ `pages.yml` が **release の zip を落として展開し、そのまま配る**。
+**user が触る物 = attest した物**になり、副産物として product の再ビルド
+(`npm ci` + build)が丸ごと消える。⚠ 配る直前にもう一度検品する
+(`check-dist.mjs product _site`)── 展開の取り違え(空 / 別物)はここでしか捕まらない。
+そのために検品 CLI が**検品先を引数で受ける**ようになった。
+
+⚠ **引数を無視する変異が全緑で生き残った**(`tests/dist-inspect.test.ts` は
+純関数しか見ない)── `dist/` を見て「✓ ok」と言いながら別物を配れるので、
+`tests/check-dist-cli.test.ts` を足して CLI の I/O を直接見る。
+
+#### 🔴 `release: published` は**そもそも発火しない**(round-3 review M-1)
+
+GitHub Actions は **既定の `GITHUB_TOKEN` が起こしたイベントで新しい run を開始しない**。
+`release.yml` は `GH_TOKEN: ${{ github.token }}` で release を作るので、`pages.yml` の
+`release: types: [published]` は**この経路では一度も走らない** ── 気づかないと
+「**tag を打ったのに `/` が placeholder のまま、次の main push まで製品が出ない**」になる。
+段⑧ 途中で入れた「draft で作ってから公開する」修正も、**走らない経路のための修正**だった。
+
+→ `release.yml` の最後で `gh workflow run pages.yml --ref main` を叩く(`actions: write` が要る)。
+⚠ draft → 公開の順序は**人が手で release を公開する経路**では効き続けるので残す。
+
+#### 🔴 `gh` の失敗が「release が無い」に化けて、site root を消していた(round-3 review H-2)
+
+`[ -n "$TAG" ] && gh … | grep -q …` は構文としては正しく `A && (B|C)` に parse されるが、
+pipefail が無いので **`gh` の失敗が `grep` の 1 に化ける** ── API 障害でも
+「安定 release がまだ無い」として placeholder 分岐へ落ちていた。
+⚠ その分岐は `_site/index.html` **しか**書かないので、`sw.js` / `manifest.webmanifest` /
+`icon.svg` が site root から**消える**。navigation は network-first なので SW を持つ
+既存 user にも placeholder が届き、`/sw.js` の 404 は**登録解除の合図**として扱われる
+(オフライン能力ごと落ちる)。
+
+→ **placeholder を配ってよいのは「安定 tag が 1 つも無いとき」だけ**。
+tag が在るのに配れないなら **job を落として前回の deploy を残す**。
+
+#### 塞がずに残すもの(bounded だと確かめたうえで)
+
+| # | 何 | なぜ残すか |
+|---|---|---|
+| L-2 | 移行期間中は積み上がりが止まらない(印を書くのは marker 対応 build の activate だけ) | 全タブを閉じれば waiting が activate するので、実務上 1 セッションで収束する |
+| L-7 | 廃止した scope の cache が回収されない(`/dev/` を畳んでも `pkc3:%2Fdev%2F:*` が残る) | scope をまたぐ削除は H-1 で**禁じた**もの。scope の廃止は手作業なので、そのとき手で消す |
+| L-8 | ダイアログ抑止中は編集中に更新を適用できない(`confirm` が `false` を返す) | 編集を抜ければ復帰する。「聞かずに捨てる」より安全側 |
+
+変異試験 12 件・生存 0(preboot 5 / 配線 3 / Pages 3 / 検品 CLI 1)。
+⚠ うち 1 件は**変異が発火していなかった**(変数名だけ変える形にしたので、
+呼び出しが残って原文検査が素通り)── 撃ち抜ける形に置き換えた。
 
 ---
 

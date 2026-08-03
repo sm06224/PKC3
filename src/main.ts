@@ -17,6 +17,7 @@ import { buildShell } from '@adapter/ui/render/shell';
 import { showNotices, clearNotices } from '@adapter/ui/render/notices';
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
 import { watchForUpdate, type UpdateContainer } from '@adapter/platform/sw/update-prompt';
+import { reloadOnPrebootSwap, type PrebootTarget } from '@adapter/platform/sw/preboot-swap';
 import { SidebarRenderer } from '@adapter/ui/render/sidebar';
 import { CenterRouter } from '@adapter/ui/render/center';
 import { formatSize } from '@adapter/ui/render/detail';
@@ -462,6 +463,20 @@ function bootstrap(): void {
       ? navigator.serviceWorker.register('./sw.js').catch(() => null)
       : Promise.resolve(null);
 
+  /**
+   * 🔴 **boot が終わる前に別タブが交代させたら、このタブは黙って読み直す**
+   * (P7 段⑧、段⑤ round-1 review M-4 で「塞いでいない」と記録した窓)。
+   * lease 待ちのタブは storage worker をまだ作っておらず、そのまま進むと
+   * **旧 build の hash 付き URL** を取りに行って 404 で起動不能になる。
+   * ⚠ `startApp` より前に張る ── 待っている窓こそが対象である
+   */
+  const preboot =
+    'serviceWorker' in navigator
+      ? reloadOnPrebootSwap(navigator.serviceWorker as unknown as PrebootTarget, () =>
+          location.reload(),
+        )
+      : null;
+
   void startApp(root)
     .then((app) => {
       // 🔴 受け口は**アプリが受け取れるようになってから**張る(P7 段③)。
@@ -476,6 +491,7 @@ function bootstrap(): void {
       // boot 完了の正本契約(P3-8): smoke / probe は DOM 属性で待つ。
       // PKC2 の教訓 ── 「#root 存在待ち」は HTML load 段階で通過して flake 化する
       root.setAttribute('data-pkc-boot', 'ready');
+      preboot?.booted(); // 以後は勝手に読み直さない(下書きを巻き込まない)
       // 🔄 更新の案内(P7 段⑤)。⚠ 自動では交代させない ── 交代は旧 build の
       // cache を消すので、user が押したときだけ・押したタブだけを再読込する
       void watchForUpdate(
@@ -493,6 +509,9 @@ function bootstrap(): void {
       // boot 失敗を白画面にしない(review A-1)。とくに「未来ビルドの DB を
       // 明示 reject」(schema-migration-policy)はユーザーに見えなければ意味がない
       root.setAttribute('data-pkc-boot', 'error');
+      // ⚠ 失敗しても「boot は終わった」── 勝手な読み直しで理由が消えると、
+      // user は何が起きたか分からないまま同じ画面を見続ける
+      preboot?.booted();
       const message = e instanceof Error ? e.message : String(e);
       root.textContent = `起動に失敗しました: ${message}`;
       // ⚠ boot が失敗しても登録はする ── 次回この人がオフラインで開けるかは

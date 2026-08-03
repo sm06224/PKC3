@@ -9,6 +9,8 @@ permissions:
   # 🔴 provenance attestation に要る 2 つ。どちらか欠けると attest step が落ちる
   id-token: write
   attestations: write
+  # 🔴 Pages を**明示的に起こす**のに要る(下記 round-3 review M-1)
+  actions: write
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -49,12 +51,13 @@ jobs:
         run: npm sbom --sbom-format=cyclonedx --omit=dev > pkc3-sbom.cdx.json
       - name: Archive dist
         run: (cd dist && zip -r ../pkc3-dist.zip .)
-      # 🔴 **release に添付する物そのもの**に attestation を付ける(P7 段⑦)。
-      # ⚠ **Pages の `/` に出るのはこれではない**(round-2 review M-4)── `pages.yml` が
-      # 同じ tag から**別 job・別 worktree で独立にビルドした** `_site/` を配る。
-      # 同じ入力から作られるが別の成果物なので、attestation が担保するのは
-      # 「release zip の出所」であって「Pages で配っている物の出所」ではない。
-      # 検証したい人は release zip を落として `gh attestation verify` する。
+      # 🔴 **配る物そのもの**に attestation を付ける(P7 段⑦ / 段⑧)。
+      # ⚠ round-2 review M-4 の時点では嘘だった ── `pages.yml` が同じ tag を
+      # **別 job で独立にビルドし直して**配っていたので、attestation が担保するのは
+      # 「release zip の出所」だけで、user が触る物の出所ではなかった。
+      # 段⑧ で `pages.yml` が**この zip を展開してそのまま配る**ようにしたので、
+      # いまは **user が触る物 = attest した物**である
+      # (`tests/release-meta.test.ts` が pages.yml 側の経路も pin している)。
       # ⚠ 対象を書き忘れても step は通る ── 「何も証明しない attestation」になるので、
       # `tests/release-meta.test.ts` が subject-path の存在まで pin している。
       # 検証: gh attestation verify pkc3-dist.zip --repo <owner>/<repo>
@@ -72,5 +75,26 @@ jobs:
           case "$GITHUB_REF_NAME" in
             *-rc*|*-beta*|*-alpha*) PRERELEASE="--prerelease" ;;
           esac
+          # 🔴 **draft で作ってから公開する**(P7 段⑧)。`gh release create` は
+          # **公開してから資産を上げる**ので、`release: published` を待っている
+          # `pages.yml` が **zip が届く前に走りうる** ── その場合 asset が見つからず
+          # placeholder を配って終わり、次に main へ push するまで `/` が空のままになる。
+          # draft のうちに上げ切り、`--draft=false` で公開すれば published は
+          # **資産が揃ってから**しか飛ばない(競合そのものを消す)。
           gh release create "$GITHUB_REF_NAME" pkc3-sbom.cdx.json pkc3-dist.zip \
-            --title "$GITHUB_REF_NAME" --generate-notes $PRERELEASE
+            --title "$GITHUB_REF_NAME" --generate-notes --draft $PRERELEASE
+          gh release edit "$GITHUB_REF_NAME" --draft=false
+      # 🔴 **Pages を自分で起こす**(round-3 review M-1)。
+      # GitHub Actions は **既定の `GITHUB_TOKEN` が起こしたイベントで新しい run を
+      # 開始しない**ので、`pages.yml` の `release: types: [published]` は
+      # **この workflow が作った release では一度も走らない**。
+      # 気づかないと「tag を打ったのに `/` が placeholder のまま、次の main push まで
+      # 製品が出ない」になる ── 明示 dispatch で経路を成立させる。
+      # ⚠ `--ref main` にするのは、`pages.yml` が `/dev/` を main HEAD から焼き、
+      # product は git tag から解決するため(tag を ref にすると dev が tag になる)。
+      # ⚠ 上の draft → 公開の順序は**手で release を公開する経路**では効き続ける
+      # (人が起こしたイベントなら `published` は飛ぶ)ので残す
+      - name: Pages を起こす
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --ref main

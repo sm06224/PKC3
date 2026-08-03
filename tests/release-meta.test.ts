@@ -38,8 +38,20 @@ describe('版の刻印', () => {
   });
 });
 
+/**
+ * 🔴 **コメントを落としてから突合する**。workflow の説明コメントには
+ * `--draft=false` や `pkc3-dist.zip` といった**当の文字列がそのまま書いてある**ので、
+ * 素の本文に `toContain` を当てると **説明文に救われる** ── 実際に、
+ * 「draft にせず公開する」「draft のまま公開しない」の変異が**2 件とも生き残った**
+ * (CLAUDE.md「ガードは代替物で満たせない条件にする」)。
+ */
+function stripComments(yaml: string): string {
+  return yaml.replace(/^\s*#.*$/gm, '');
+}
+
 describe('🔴 release workflow が版と provenance を担保する', () => {
-  const wf = readFileSync('.github/workflows/release.yml', 'utf-8');
+  const wfRaw = readFileSync('.github/workflows/release.yml', 'utf-8');
+  const wf = stripComments(wfRaw);
 
   /** attest step の本文だけを切り出す(次の step の `- name:` まで)。 */
   function attestStep(): string {
@@ -48,6 +60,22 @@ describe('🔴 release workflow が版と provenance を担保する', () => {
     const rest = wf.slice(at);
     const end = rest.search(/\n\s{6}- (?:name|run|uses):/);
     return end < 0 ? rest : rest.slice(0, end);
+  }
+
+  /**
+   * `gh release create` の**文だけ**を切り出す(行継続の `\\` を畳む)。
+   * ⚠ 全文に当てると **次の行の `--draft=false` に救われる** ── 「create に
+   * `--draft` が無い」変異が、コメントを落としてもなお生き残った。
+   */
+  function createCommand(): string {
+    const at = wf.indexOf('gh release create');
+    if (at < 0) return '';
+    let out = '';
+    for (const line of wf.slice(at).split('\n')) {
+      out += line.trimEnd().replace(/\\$/, ' ');
+      if (!line.trimEnd().endsWith('\\')) break;
+    }
+    return out;
   }
 
   /** `gh release create` に渡している成果物(= user が受け取る物)。 */
@@ -100,7 +128,7 @@ describe('🔴 release workflow が版と provenance を担保する', () => {
     // ── `v3.0.0` と `v3.0.0-rc1` が在ると `head -1` は **rc のほう**(実証済み)。
     // 段⑦ で release.yml が prerelease を正式に扱えるようにしたので、この経路は
     // **今回新たに到達可能**になった。RC を打った瞬間 `/` が RC に差し替わる
-    const pages = readFileSync('.github/workflows/pages.yml', 'utf-8');
+    const pages = stripComments(readFileSync('.github/workflows/pages.yml', 'utf-8'));
     const tagLine = /TAG=\$\(git tag[^\n]*/.exec(pages)?.[0] ?? '';
     expect(tagLine, 'product tag の解決行が無い').not.toBe('');
     // ⚠ 綴りは release.yml の prerelease 判定と**同じ集合**であること
@@ -123,6 +151,74 @@ describe('🔴 release workflow が版と provenance を担保する', () => {
       expect(at, `release が ${gate} を走らせない`).toBeGreaterThan(-1);
       expect(at, `${gate} が build より後ろにある`).toBeLessThan(build);
     }
+  });
+
+  it('🔴 Pages は **attest した成果物そのもの**を配る(再ビルドしない)', () => {
+    // round-2 review M-4: 以前は同じ tag を別 job で**もう一度ビルド**していたので、
+    // Pages に出る物と attestation を付けた物が**別の成果物**だった ──
+    // 「配る物そのものに provenance を付ける」が Pages 経路で成立していなかった。
+    // 段⑧ で release の zip を展開してそのまま配る形にした
+    const pages = stripComments(readFileSync('.github/workflows/pages.yml', 'utf-8'));
+    const [artifact] = releasedArtifacts().filter((a) => a.endsWith('.zip'));
+    expect(artifact, 'release が zip を添付していない').toBeTruthy();
+    expect(pages, `pages が ${artifact} を落としていない`).toContain(artifact);
+    expect(pages).toContain('gh release download');
+    // ⚠ **再ビルドに戻していない**こと(戻すと attest が意味を失う)
+    expect(pages).not.toContain('git worktree add');
+    expect(pages, 'product を再ビルドしている').not.toContain('VITE_PKC_KIND=product npm run build');
+    // ⚠ 配る直前の検品も外さない(展開の取り違えはここでしか捕まらない)
+    expect(pages).toMatch(/check-dist\.mjs product \S+/);
+    // 🔴 **`_site` を product として検品しない**。この時点の `_site` には既に
+    // `dev/`(map 込み)が入っているので、**dev の map を product の出荷物として
+    // 数えて必ず落ちる**(実測: ファイル 21 件 / map 3 件 / cap 854.8 KB 超過)。
+    // product だけを単独で検品してから合流させる
+    expect(pages, '_site をそのまま product として検品している').not.toContain(
+      'check-dist.mjs product _site',
+    );
+    expect(pages, 'product を _site へ直に展開している').not.toMatch(/unzip[^\n]*-d _site/);
+  });
+
+  it('🔴 資産を上げ切ってから公開する(Pages が空振りしない)', () => {
+    // `gh release create` は**公開してから資産を上げる**ので、
+    // `release: published` を待つ `pages.yml` が **zip が届く前に走りうる** ──
+    // asset が見つからず placeholder を配って終わり、次の main push まで
+    // `/` が空のままになる。draft のうちに上げ切ってから公開すれば競合が消える
+    expect(createCommand(), 'draft で作っていない').toMatch(/--draft(?!=)/);
+    const publish = wf.indexOf('--draft=false');
+    expect(publish, 'draft を公開していない(release が draft のまま残る)').toBeGreaterThan(-1);
+    expect(wf.indexOf('gh release create')).toBeLessThan(publish);
+  });
+
+  it('🔴 release の後に Pages を**明示的に起こす**(published は飛ばない)', () => {
+    // round-3 review M-1: GitHub Actions は**既定の `GITHUB_TOKEN` が起こした
+    // イベントで新しい run を開始しない** ── `pages.yml` の
+    // `release: types: [published]` は、この workflow が作った release では
+    // **一度も走らない**。気づかないと「tag を打ったのに `/` が placeholder のまま」
+    expect(wf, 'Pages を起こしていない').toContain('gh workflow run pages.yml');
+    // ⚠ 権限が無いと dispatch は 403 で落ちる
+    expect(wf).toContain('actions: write');
+    // ⚠ 公開より**後**に起こす(先に起こすと資産がまだ無い)
+    expect(wf.indexOf('--draft=false')).toBeLessThan(wf.indexOf('gh workflow run'));
+    // dispatch を受ける口が pages 側にあること
+    const pages = stripComments(readFileSync('.github/workflows/pages.yml', 'utf-8'));
+    expect(pages, 'pages.yml が workflow_dispatch を受けない').toContain('workflow_dispatch');
+  });
+
+  it('🔴 安定 tag が在るのに product を配れないなら**落とす**(静かに placeholder にしない)', () => {
+    // round-3 review H-2: `gh` の失敗が「release が無い」に化けて placeholder へ
+    // 落ちると、`_site` の root から `sw.js` / `manifest` / `icon` が**消える** ──
+    // navigation は network-first なので既存 user にも placeholder が届き、
+    // `/sw.js` の 404 は**登録解除の合図**として扱われる(オフライン能力ごと落ちる)
+    const pages = stripComments(readFileSync('.github/workflows/pages.yml', 'utf-8'));
+    // placeholder は「tag が無い」枝でしか使わない
+    const placeholderAt = pages.indexOf('pages-placeholder.html');
+    const emptyTagAt = pages.indexOf('if [ -z "$TAG" ]');
+    expect(emptyTagAt, 'tag 不在の枝が無い').toBeGreaterThan(-1);
+    expect(emptyTagAt).toBeLessThan(placeholderAt);
+    // 照会の失敗と資産の不在で **exit 1** する
+    expect((pages.match(/exit 1/g) ?? []).length).toBeGreaterThanOrEqual(2);
+    // ⚠ 1 本の条件に混ぜ戻していないこと(pipefail が無いと失敗が 1 に化ける)
+    expect(pages).not.toMatch(/\[ -n "\$TAG" \][^\n]*&&[^\n]*gh release view/);
   });
 
   it('product の検品を通してから release する', () => {

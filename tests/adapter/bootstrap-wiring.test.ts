@@ -69,6 +69,22 @@ describe('bootstrap の配線', () => {
     orderedIn(bootstrapBody(), '.then((app)', 'armLaunchQueue(');
   });
 
+  it('🔴 boot 前の交代の見張りは **`startApp` より前**に張る(段⑧)', () => {
+    // lease 待ちで止まっている窓こそが対象なので、boot の解決を待っては意味がない
+    orderedIn(bootstrapBody(), 'reloadOnPrebootSwap(', 'startApp(root)');
+  });
+
+  it('🔴 boot が終わったら**成功側・失敗側の両方**で見張りを畳む(段⑧)', () => {
+    // ⚠ 失敗側で畳まないと、更新のたびに **error 画面が勝手に読み直されて**
+    // 理由が消える ── user は何が起きたか分からないまま同じ画面を見続ける
+    const body = bootstrapBody();
+    expect([...body.matchAll(/preboot\?\.booted\(\)/g)].length).toBe(2);
+    const thenAt = body.indexOf('.then((app)');
+    const catchAt = body.indexOf('.catch((e: unknown)');
+    expect(body.slice(thenAt, catchAt)).toContain('preboot?.booted()');
+    expect(body.slice(catchAt)).toContain('preboot?.booted()');
+  });
+
   it('boot 失敗を白画面にしない(理由を出す)', () => {
     expect(bootstrapBody()).toContain("'data-pkc-boot', 'error'");
     expect(bootstrapBody()).toContain('起動に失敗しました');

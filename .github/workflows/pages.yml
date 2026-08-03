@@ -39,33 +39,63 @@ jobs:
           node scripts/check-dist.mjs dev
           mkdir -p _site/dev
           cp -r dist/. _site/dev/
-      - name: Build product (latest release tag; placeholder until first release)
+      - name: Deploy product (release の成果物そのもの / 初回 release まで placeholder)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          # 🔴 prerelease を **product として配らない**(P7 段⑦ round-2 review M-5)。
-          # git の既定 `v:refname` は prerelease を**上位に**並べるので、
-          # `v3.0.0` と `v3.0.0-rc1` が在ると head -1 は **rc のほう**になる(実証済み)。
-          # 段⑦ で `release.yml` が `-rc` / `-beta` / `-alpha` を `--prerelease` として
-          # 正式に扱えるようにしたので、この経路は**今回新たに到達可能**になった。
-          # ⚠ 除外の綴りは `release.yml` の prerelease 判定と揃える
-          # (`tests/release-meta.test.ts` が 2 つの一致を pin している)
+          # 🔴 **release に添付した zip をそのまま配る**(P7 段⑧ round-2 review M-4)。
+          # 以前は同じ tag を worktree で**もう一度ビルド**していたが、それだと
+          # Pages に出る物と `release.yml` が attestation を付けた物が**別の成果物**に
+          # なり、「配る物そのものに provenance を付ける」が Pages 経路で成立しない。
+          # 展開してそのまま配れば、**user が触る物 = 検証できる物**になる。
+          # ⚠ 副産物として product の再ビルド(npm ci + build)が丸ごと消える。
+          #
+          # 🔴 prerelease を product として配らない(round-2 review M-5)。git の既定
+          # `v:refname` は prerelease を**上位に**並べるので、`v3.0.0` と `v3.0.0-rc1`
+          # が在ると head -1 は **rc のほう**になる(実証済み)。⚠ 除外の綴りは
+          # `release.yml` の判定と揃える(`tests/release-meta.test.ts` が一致を pin)
           TAG=$(git tag -l 'v*' --sort=-v:refname | grep -Ev -- '-(rc|beta|alpha)' | head -1)
-          if [ -n "$TAG" ]; then
-            git worktree add ../product "$TAG"
-            # ⚠ 検品は worktree の中で走らせる(script は自分の位置から dist を見る)。
-            # 古い tag には script が無いので、無いときだけ飛ばす。
-            # 🔴 `[ -f X ] && node X || true` と書いてはいけない ── `&&` と `||` は
-            # 同順位・左結合なので `(([ -f X ] && node X) || true)` になり、
-            # **検品の失敗まで飛ばして** map 入りの dist をそのまま deploy する
-            # (レビュー H-1 で実証:検品が ✗ を出しても step は exit 0 だった)
-            (
-              cd ../product
-              npm ci
-              VITE_PKC_KIND=product npm run build
-              if [ -f scripts/check-dist.mjs ]; then node scripts/check-dist.mjs product; fi
-            )
-            cp -r ../product/dist/. _site/
-          else
+
+          # 🔴 **placeholder を配ってよいのは「安定 tag が 1 つも無いとき」だけ**
+          # (round-3 review H-2)。かつては `[ -n "$TAG" ] && gh … | grep -q …` の
+          # 1 本の条件で分けていたが、pipefail が無いので **`gh` の失敗が `grep` の 1 に
+          # 化け**、API 障害でも「release が無い」として placeholder へ落ちていた。
+          # ⚠ その else 分岐は `_site/index.html` **しか**書かないので、
+          # `sw.js` / `manifest.webmanifest` / `icon.svg` が site root から**消える** ──
+          # navigation は network-first なので SW を持つ既存 user にも placeholder が
+          # 届き、`/sw.js` が 404 になって**登録解除の合図**として扱われる
+          # (オフライン能力ごと落ちる)。**静かに落とすくらいなら job を落として
+          # 前回の deploy を残す**。
+          if [ -z "$TAG" ]; then
+            echo "安定 release がまだ無いので placeholder を配る"
             cp .github/pages-placeholder.html _site/index.html
+          else
+            # ⚠ 照会の失敗と「資産が無い」を**別々に**取る(パイプで混ぜない)
+            if ! ASSETS=$(gh release view "$TAG" --json assets --jq '.assets[].name'); then
+              echo "::error::$TAG の release を照会できない(まだ作成中 / API 障害)。前回の deploy を残すため落とす"
+              exit 1
+            fi
+            if ! printf '%s\n' "$ASSETS" | grep -qx 'pkc3-dist.zip'; then
+              echo "::error::$TAG の release に pkc3-dist.zip が無い"
+              exit 1
+            fi
+            mkdir -p /tmp/product
+            gh release download "$TAG" --pattern pkc3-dist.zip --dir /tmp/product
+            # 🔴 **`_site` へ直に展開しない**。この時点の `_site` には既に `dev/`
+            # (map 込みの dev ビルド)が入っているので、`_site` を product として
+            # 検品すると **dev の map を product の出荷物として数えて必ず落ちる**
+            # (実測: ファイル 21 件 / map 3 件 / cap を 854.8 KB 超過)。
+            # **product だけを単独で検品してから**合流させる
+            unzip -q /tmp/product/pkc3-dist.zip -d /tmp/product/site
+            # ⚠ 配る直前にもう一度検品する ── release 時に通っていても、
+            # 展開の取り違え(空 / 別物)はここでしか捕まらない。
+            # ⚠⚠ これは **main HEAD の規則**で**過去の成果物**を検査している
+            # (round-3 review M-2)── `SHIPPED_FLOOR_KB` を上げる等の「製品が
+            # 育てば当然起きる変更」で、無傷の release に対して job が赤になり
+            # `/dev/` の更新まで止まる。定数を動かすときはここを思い出すこと
+            node scripts/check-dist.mjs product /tmp/product/site
+            cp -r /tmp/product/site/. _site/
           fi
       - uses: actions/configure-pages@v6
         with:
