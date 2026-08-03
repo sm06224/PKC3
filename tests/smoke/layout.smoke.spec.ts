@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors } from './helpers';
 
 /**
  * P7b 段⑨: **枠が組めている**(設計 doc §1-4)。
@@ -336,4 +336,77 @@ test('🔴 面の境界が 1 本になっている(2 重線を作らない)', as
   expect(gap.between, `面の間が ${gap.between}px`).toBe(1);
   // 面そのものは border を持たない(持つと 1px + 1px = 2px になる)
   expect(gap.border, 'サイドバーが自前の境界線を持っている').toBe('0px');
+});
+
+/**
+ * P8 段⑫: 🔴 **一覧のスクロールも殺さない**。
+ *
+ * > user 指示 2026-08-03「**サイドバーも同じ、スクロールが発生するすべての画面が
+ * > 対象だよ**」
+ *
+ * 🔴 直す前に測った実測(`✗` が飛んでいたもの):
+ * ```
+ * 一覧: 追記で再描画      ✓ 保つ      ← 行を再利用しているので元から平気
+ * 一覧: 絞り込み → 戻す   ✗ 飛ぶ (250 → 0)
+ * フォルダ: 絞り込み      ✗ 飛ぶ (250 → 0)
+ * ```
+ * 絞り込むと中身が縮んで `scrollTop` が 0 に丸められ、戻しても 0 のままだった。
+ *
+ * ⚠ 面の中を playwright でクリックしない ── `scrollIntoViewIfNeeded` が走って
+ * **計器が自分でスクロールを潰す**(この罠で 1 度誤診した)。操作は面の外から。
+ */
+test('🔴 一覧のスクロール: 絞り込みを戻しても、タブを往復しても位置が残る', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 700 });
+  await gotoApp(page);
+
+  // 一覧が溢れるだけ作る
+  for (let i = 0; i < 24; i++) {
+    await createEntry(page, 'text');
+    await page.locator('[data-pkc-field="editor-title"]').fill(`ノート ${i}`);
+    await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  }
+
+  const host = page.locator('[data-pkc-region="browse-host"]');
+  // ⚠ フォルダの面も同じ器の中に居る(隠れているだけ)── 行は一覧に絞って数える
+  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  const shape = await host.evaluate((el) => ({ sh: el.scrollHeight, ch: el.clientHeight }));
+  expect(shape.sh, '一覧が溢れていない(観測の前提が崩れている)').toBeGreaterThan(shape.ch + 50);
+
+  await host.evaluate((el) => (el.scrollTop = 200));
+  const parked = await host.evaluate((el) => el.scrollTop);
+  expect(parked).toBeGreaterThan(100);
+
+  // ① 🔴 絞り込んで戻す(入力欄は面の外なので、計器はスクロールしない)
+  await page.locator('[data-pkc-field="entry-filter"]').fill('ノート 1');
+  await expect(rows.first()).toBeVisible();
+  await page.locator('[data-pkc-field="entry-filter"]').fill('');
+  await expect(rows).toHaveCount(24);
+  expect(
+    Math.abs((await host.evaluate((el) => el.scrollTop)) - parked),
+    '絞り込みを戻したら先頭へ飛んだ',
+  ).toBeLessThan(30);
+
+  // ② 🔴 タブを往復する(3 つの面が**同じ器**を使い回している)
+  await clickReal(page, '[data-pkc-browse="filer"]');
+  // ⚠ **フォルダ側を別の位置にしてから**戻る ── 同じ位置のままだと、
+  //    面ごとに覚えていない実装(器の位置を持ち回すだけ)でも通ってしまう
+  //    (変異試験で実際に素通りした)
+  await host.evaluate((el) => (el.scrollTop = 0));
+  await clickReal(page, '[data-pkc-browse="list"]');
+  await expect(rows).toHaveCount(24);
+  expect(
+    Math.abs((await host.evaluate((el) => el.scrollTop)) - parked),
+    'タブを往復したら位置が混ざった(面ごとに覚えていない)',
+  ).toBeLessThan(30);
+
+  // ③ ⚠ **絞り込んだ結果は先頭から**(探しているのだから、そこは動いて正しい)
+  await page.locator('[data-pkc-field="entry-filter"]').fill('ノート 2');
+  await expect(rows.first()).toBeVisible();
+  expect(
+    await host.evaluate((el) => el.scrollTop),
+    '絞り込んだ結果を途中から見せている',
+  ).toBeLessThan(30);
+
+  expect(errors).toEqual([]);
 });

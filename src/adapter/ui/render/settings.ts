@@ -13,6 +13,7 @@
 import type { AppState } from '@adapter/state/app-state';
 import { THEMES } from './theme';
 import { appJobMonitor, type JobMonitor } from '@adapter/platform/job-monitor';
+import { ScrollMemory } from './scroll-memory';
 
 /** 画面の書き換えを間引く間隔。⚠ **可視化がジャンクの原因になっては本末転倒**。 */
 const REFRESH_MS = 400;
@@ -23,6 +24,8 @@ export class SettingsRenderer {
   private logBody: HTMLElement | null = null;
   private unsubscribe: (() => void) | null = null;
   private pending = false;
+  /** ログは 400ms ごとに描き直す ── 読んでいる位置を殺さない(P8 段⑫)。 */
+  private logScroll: ScrollMemory | null = null;
 
   constructor(
     private readonly region: HTMLElement,
@@ -116,6 +119,7 @@ export class SettingsRenderer {
     wrap.append(lh);
     this.logBody = document.createElement('ol');
     this.logBody.setAttribute('data-pkc-field', 'job-log');
+    this.logScroll = new ScrollMemory(this.logBody);
     wrap.append(this.logBody);
 
     // ⚠ 通知は来るたびに描かない(**間引く**)── 可視化が重さの原因になる
@@ -167,6 +171,8 @@ export class SettingsRenderer {
       this.jobsBody.append(tr);
     }
 
+    // ⚠ **書き換える前に**退避 → 入れ終わってから戻す(順番が本体)
+    this.logScroll?.park();
     this.logBody.textContent = '';
     for (const e of this.monitor.recent(50)) {
       const li = document.createElement('li');
@@ -180,6 +186,7 @@ export class SettingsRenderer {
       li.textContent = parts.join(' ');
       this.logBody.append(li);
     }
+    this.logScroll?.use('log');
   }
 
   /** 面を畳むときに購読を切る(残すと設定を開くたびに増える)。 */

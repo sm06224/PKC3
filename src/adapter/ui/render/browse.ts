@@ -22,6 +22,7 @@
  */
 import type { AppState } from '@adapter/state/app-state';
 import { SidebarRenderer } from './sidebar';
+import { ScrollMemory } from './scroll-memory';
 import { FilerRenderer } from './filer';
 import { LauncherRenderer } from './launcher';
 
@@ -39,6 +40,12 @@ export class BrowseRouter {
   private readonly list: SidebarRenderer;
   private readonly filer: FilerRenderer;
   private readonly launcher: LauncherRenderer;
+  /**
+   * 🔑 **面ごとに位置を覚える**(P8 段⑫。user 指示「サイドバーも同じ、
+   * スクロールが発生するすべての画面が対象だよ」)。3 つの面が**同じ器**を
+   * 使い回しているので、覚えないとタブを行き来しただけで位置が混ざる。
+   */
+  private readonly scroll: ScrollMemory;
   private last: BrowseMode = 'list';
 
   constructor(sidebar: HTMLElement, host: HTMLElement) {
@@ -56,12 +63,19 @@ export class BrowseRouter {
       filer: pane('filer'),
       launcher: pane('launcher'),
     };
+    this.scroll = new ScrollMemory(host);
     this.list = new SidebarRenderer(sidebar);
     this.filer = new FilerRenderer(this.panes.filer);
     this.launcher = new LauncherRenderer(this.panes.launcher);
   }
 
   render(state: AppState, mode: BrowseMode): void {
+    // 🔑 面 = 探し方 × 「絞り込み中かどうか」。⚠ 絞り込んだ結果は先頭からが正しく、
+    //    戻したときに元の位置へ帰るのが欲しい振る舞い
+    const key = `${mode}|${state.filterQuery === '' ? '' : 'q'}`;
+    // ① 🔴 **中身を書き換える前に**退避する ── 描いた後だと、縮んで 0 に
+    //    丸められた値を保存してしまう(実測でそう外した)
+    this.scroll.park();
     if (mode !== this.last) {
       this.panes[this.last].hidden = true;
       this.panes[mode].hidden = false;
@@ -71,5 +85,10 @@ export class BrowseRouter {
     if (mode === 'list') this.list.render(state);
     else if (mode === 'filer') this.filer.render(state);
     else this.launcher.render(state);
+    // 🔑 **中身を入れ終わってから**位置を合わせる(空の器に書いても丸められる)。
+    // ⚠ 面 = 探し方 × 「絞り込み中かどうか」── 絞り込んだ結果は先頭からが正しく、
+    //    戻したときに元の位置へ帰るのが欲しい振る舞い
+    // ② 🔴 **中身を入れ終わってから**戻す(空の器に書いても丸められる)
+    this.scroll.use(key);
   }
 }

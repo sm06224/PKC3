@@ -12,6 +12,7 @@
  * 次の段。この段では**素性を見せて、操作を隣に戻す**ところまで。
  */
 import type { AppState } from '@adapter/state/app-state';
+import { ScrollMemory } from './scroll-memory';
 import type { EntryMeta } from '@core/model/entry-meta';
 import { archetypeLabel } from './sidebar';
 import { iconButton } from './icons';
@@ -26,13 +27,19 @@ function shortDate(value: string | null): string {
 export class InspectorRenderer {
   private lastMeta: EntryMeta | undefined | null = undefined;
   private lastPhase: string | null = null;
+  /** 同じノートに戻ったら同じ位置へ(P8 段⑫。溢れるのは題名が長いときだけ)。 */
+  private readonly scroll: ScrollMemory;
 
-  constructor(private readonly region: HTMLElement) {}
+  constructor(private readonly region: HTMLElement) {
+    this.scroll = new ScrollMemory(region);
+  }
 
   render(state: AppState): void {
     const meta = state.selectedLid ? state.entryMetas.get(state.selectedLid) : undefined;
     // 断面指紋 ── meta の参照と phase が同じなら DOM に触れない
     if (meta === this.lastMeta && state.phase === this.lastPhase) return;
+    // ⚠ **書き換える前に**退避(後だと縮んで丸められた値を保存する)
+    this.scroll.park();
     this.lastMeta = meta;
     this.lastPhase = state.phase;
     this.region.textContent = '';
@@ -43,6 +50,7 @@ export class InspectorRenderer {
     this.region.append(head);
 
     if (!meta) {
+      this.scroll.use('');
       const empty = document.createElement('p');
       empty.setAttribute('data-pkc-field', 'inspector-empty');
       empty.textContent = '左の一覧から選ぶと、ここに情報が出ます。';
@@ -78,5 +86,7 @@ export class InspectorRenderer {
     btn('show-history', '履歴', '過去の版を一覧します');
     btn('delete-entry', '削除', 'ゴミ箱へ移します(フォルダ画面から戻せます)');
     this.region.append(actions);
+    // ⚠ **中身を入れ終わってから**戻す(空の器に書いても丸められる)
+    this.scroll.use(meta.lid);
   }
 }
