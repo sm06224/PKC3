@@ -50,3 +50,48 @@ test('🔴 編集しながらプレビューが追いつく', async ({ page }) =
   await expect(page.locator('[data-pkc-field="detail-body"]')).not.toContainText('title: x');
   expect(errors).toEqual([]);
 });
+
+/**
+ * P8 段⑨: **描いているのはワーカーである**。
+ *
+ * > user 指示 2026-08-03(不可侵)「基本的に重い処理はワーカーにしてください /
+ * > ワーカーはしばらくつかわれないなら、キルと解放し…」
+ *
+ * 🔴 unit は偽 worker で機構を見ている。**本物が本当に読み込まれて使われたか**は
+ * 実ブラウザでしか分からない ── ここを置かないと、`Worker` が使えない環境判定に
+ * 落ちて**ずっと同期で描いていても全部緑**になる(そういう負け方を実際にする)。
+ */
+test('🔴 プレビューはワーカーが描いている(同期に落ちていない)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+
+  // ① 編集に入る**前**はワーカーを起こしていない(遅延起動)
+  const before = await page.evaluate(() =>
+    performance.getEntriesByType('resource').filter((e) => e.name.includes('markdown-worker'))
+      .length,
+  );
+  expect(before, '使う前からワーカーを起こしている').toBe(0);
+
+  await createEntry(page, 'text');
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await ta.fill('# 見出し\n\n本文です\n');
+  const preview = page.locator('[data-pkc-region="editor-preview"]');
+  await expect(preview.locator('h1')).toHaveText('見出し');
+
+  // ② 🔴 **本物のワーカーが読み込まれた**
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () =>
+            performance
+              .getEntriesByType('resource')
+              .filter((e) => e.name.includes('markdown-worker')).length,
+        ),
+      { message: 'markdown worker が読み込まれていない(同期経路に落ちている)' },
+    )
+    .toBeGreaterThan(0);
+
+  expect(errors).toEqual([]);
+});

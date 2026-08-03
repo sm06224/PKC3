@@ -19,6 +19,7 @@ import { parseFrontmatter, extractVars } from '@features/markdown/frontmatter';
 import { hydrateMermaid } from './mermaid-hydrate';
 import { iconButton } from './icons';
 import { buildFormatBar } from './format-bar';
+import { MarkdownClient } from '@adapter/platform/render/markdown-client';
 import {
   extractDocumentGlobals,
   extractHeadingNumberConfig,
@@ -53,9 +54,17 @@ export class DetailRenderer {
   /** 非同期 hydrate の stale 防止(選択が移ったら結果を捨てて即 dispose)。 */
   private hydrateToken = 0;
 
-  constructor(region: HTMLElement, assets: AssetLender | null = null) {
+  /** markdown を描く口(既定は自前。⚠ **要るまで worker は作らない**)。 */
+  private readonly markdown: MarkdownClient;
+
+  constructor(
+    region: HTMLElement,
+    assets: AssetLender | null = null,
+    markdown: MarkdownClient = new MarkdownClient(),
+  ) {
     this.region = region;
     this.assets = assets;
+    this.markdown = markdown;
   }
 
   /** 編集プレビューの予約を捨てる(編集を抜けるとき)。 */
@@ -242,27 +251,44 @@ export class DetailRenderer {
     split.append(ta, preview);
     this.region.append(split);
 
+    /**
+     * 🔑 **描くのはワーカー**(P8 段⑨。user 指示 2026-08-03「基本的に重い処理は
+     * ワーカーにしてください」)── markdown の tokenize / render は 1 打鍵ごとに
+     * 走る、いちばん定常に効く仕事である。`follower` が
+     * 「飛ばすのは 1 件、その間の変更は最後の 1 つに畳む」を持つ。
+     * ⚠ HTML の parse(`innerHTML`)はメインに残る ── そこは DOM なので動かせない。
+     */
+    const follow = this.markdown.follower(
+      (html) => {
+        // ⚠ 外された後に描かない(編集を抜けた瞬間の結果で無駄な仕事をしない)
+        if (!preview.isConnected) return;
+        this.disposeMermaid?.();
+        preview.innerHTML = html;
+        // ⚠ プレビューでも図を出す ── 出さないと「保存するまで図が見えない」
+        this.disposeMermaid = hydrateMermaid(preview);
+      },
+      (e) => {
+        // 🔴 **白紙にしない**。理由を出して原文だけは読めるようにする
+        if (!preview.isConnected) return;
+        preview.textContent = `プレビューを描けませんでした: ${String(e).slice(0, 120)}`;
+      },
+    );
     let frame = 0;
     const paint = (): void => {
       frame = 0;
-      // ⚠ 外された後に描かない(編集を抜けた瞬間の 1 フレームで無駄な仕事をしない)
       if (!preview.isConnected) return;
-      this.disposeMermaid?.();
-      preview.innerHTML = renderMarkdown(parseFrontmatter(ta.value).body, {
-        sourceLineAnchors: false,
-      });
-      // ⚠ プレビューでも図を出す ── 出さないと「保存するまで図が見えない」
-      this.disposeMermaid = hydrateMermaid(preview);
+      follow.push(parseFrontmatter(ta.value).body, { sourceLineAnchors: false });
     };
     paint();
     ta.addEventListener('input', () => {
-      if (frame !== 0) return; // 既に次フレームで描く予定
+      if (frame !== 0) return; // 既に次フレームで投げる予定
       frame = requestAnimationFrame(paint);
     });
     // ⚠ 編集を抜けるときに予約を捨てる(detached なノードへ描かない)
     this.cancelPreview = () => {
       if (frame !== 0) cancelAnimationFrame(frame);
       frame = 0;
+      follow.dispose();
     };
     ta.focus();
   }
