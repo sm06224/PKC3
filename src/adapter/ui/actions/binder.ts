@@ -15,7 +15,7 @@
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import type { ViewMode } from '@adapter/state/app-state';
 import { archetypeLabel } from '@adapter/ui/render/sidebar';
-import { applyFormat, appendAt, type FormatOp } from '@features/markdown/text-ops';
+import { applyFormat, type FormatOp } from '@features/markdown/text-ops';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
 import { handleCopyMdBlock } from './copy-md-block';
 
@@ -248,21 +248,45 @@ const ACTIONS: Record<string, ActionHandler> = {
     writeBack(ta, applyFormat({ text: ta.value, start: ta.selectionStart, end: ta.selectionEnd }, op));
   },
   /**
-   * 追記(P8 段⑥)。**閲覧中に押しても効く** ── ログの既定の使い方は
-   * 「開く → 末尾に足す → 書く」なので、先に「編集」を押させない。
-   * ⚠ `START_EDIT` は同期 dispatch で detail を描き直す ── **押したボタンは
-   * その時点で外れている**ので、textarea は `root` から引き直す。
+   * 🔑 **追記**(P8 段⑧)。編集画面を開かず、打った内容をそのまま末尾へ足す。
+   *
+   * 🔴 段⑥ の「編集に入って末尾へ飛ぶ」は**作り直した**(user 指示 2026-08-03
+   * 「追記型は今すぐ実装して、今のままだと、なんの意味もない」)── 5000 行の
+   * ログでも毎回全文を textarea に載せる形は、追記型の意味を成していなかった。
+   *
+   * ⚠ 日時見出しは**ここで作る**(reducer は純粋のまま ── `Date` を呼ばない)。
+   * ⚠ 欄は**空にしない** ── 通ったときだけ描画側が空にする(失敗で打鍵が消えない)。
    */
-  'append-section': (dispatcher, _target, _services, root) => {
-    const before = dispatcher.getState();
-    const lid = before.openBody?.lid ?? null;
-    const archetype = lid ? before.entryMetas.get(lid)?.archetype : undefined;
+  'append-entry': (dispatcher, _target, _services, root) => {
+    const s = dispatcher.getState();
+    const lid = s.selectedLid;
+    const archetype = lid ? s.entryMetas.get(lid)?.archetype : undefined;
     if (!lid || !isAppendable(archetype)) return;
-    if (before.phase === 'ready') dispatcher.dispatch({ type: 'START_EDIT' });
-    if (dispatcher.getState().phase !== 'editing') return;
-    const ta = editorBody(root);
-    if (!ta) return;
-    writeBack(ta, appendAt(ta.value, appendHeadingFor(archetype!, new Date())), true);
+    const input = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="append-input"]');
+    const text = input?.value ?? '';
+    // ⚠ **空判定をここに持たない**(P8 段⑧ の変異試験で判明)── reducer が
+    // 同じ判定を持っており、3 か所(binder / reducer / `appendBlock`)が互いに
+    // 救い合って**どれ 1 つ消しても test が緑**だった。判定は下 2 つに寄せる:
+    // reducer =「ロックも取らずに断る」、`appendBlock` =「本文を変えない」
+    dispatcher.dispatch({
+      type: 'APPEND_TO_ENTRY',
+      lid,
+      text,
+      heading: appendHeadingFor(archetype!, new Date()),
+    });
+  },
+  /**
+   * 🔴 **強制解放**(user 指示 2026-08-03「競合ロックと強制解放も念頭に」)。
+   * 返ってこない書込で**永久に追記できなくなる**のを防ぐ最後の出口。
+   * ⚠ 押した人が結果を分かっていること ── 確認を出す(確認の無い環境は通す)。
+   */
+  'force-release': (dispatcher) => {
+    const ok =
+      window.confirm?.(
+        '追記の書き込みを強制的に打ち切ります。書き込みが実際には進んでいた場合、' +
+          'この画面の表示が実際の中身より古くなることがあります(開き直すと直ります)。よろしいですか?',
+      ) ?? true;
+    if (ok) dispatcher.dispatch({ type: 'FORCE_RELEASE_LOCK', discardDraft: false });
   },
   /** 左の列の**探し方**を切り替える(P8 段⑤)。⚠ 中央のビューとは別の軸。 */
   'set-browse': (_dispatcher, target, services) => {
@@ -486,10 +510,20 @@ export function bindActions(
       ke.target instanceof HTMLElement
         ? ke.target.getAttribute('data-pkc-field')
         : null;
-    if (field !== 'editor-body' && field !== 'editor-title') return;
     // 🔴 IME ガード(PKC2 repo 慣行)── 変換中の Esc は「変換の取り消し」で
-    // あって編集キャンセルではない。ガードが無いと draft 丸ごと破棄になる
+    // あって編集キャンセルではない。ガードが無いと draft 丸ごと破棄になる。
+    // ⚠ **追記欄より先に置く** ── 変換確定の Enter で送ってしまうと、
+    // 日本語で書く人は「打ち終わる前に飛ぶ」を毎回踏む
     if (ke.isComposing) return;
+    // 追記欄: Ctrl/Cmd+Enter で送る(欄の中だけ ── 画面全体の近道にしない)
+    if (field === 'append-input') {
+      if (ke.key === 'Enter' && (ke.ctrlKey || ke.metaKey) && !ke.altKey) {
+        ke.preventDefault();
+        ACTIONS['append-entry']!(dispatcher, ke.target as HTMLElement, services, root);
+      }
+      return;
+    }
+    if (field !== 'editor-body' && field !== 'editor-title') return;
     // PKC2 慣例: Ctrl/Cmd+S = 保存(ブラウザの保存ダイアログも抑止)、
     // Esc = キャンセル。Ctrl/Cmd+Enter も保存の別名として受ける
     // (PKC2 の章フォーカス編集が両対応だった)。altKey は除外(AltGr = Ctrl+Alt 誤発火)

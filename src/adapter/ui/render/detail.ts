@@ -19,7 +19,6 @@ import { parseFrontmatter, extractVars } from '@features/markdown/frontmatter';
 import { hydrateMermaid } from './mermaid-hydrate';
 import { iconButton } from './icons';
 import { buildFormatBar } from './format-bar';
-import { isAppendable } from '@features/flavor/append-spec';
 import {
   extractDocumentGlobals,
   extractHeadingNumberConfig,
@@ -137,11 +136,10 @@ export class DetailRenderer {
       // ⚠ data-pkc-entry は「entry を表す要素」(行 / カード)専用の意味論 ──
       // ボタンには付けない(binder は selectedLid に fallback する)
       bar.append(edit);
-      // 🔑 **追記**(P8 段⑥)。これは本文に対する操作なのでここに置く ──
-      // ログは「開く → 末尾に日時の節を足す → 書く」が既定の使い方であり、
-      // そこへ毎回スクロールさせるのは道具として成立していない
-      if (isAppendable(state.entryMetas.get(state.selectedLid)?.archetype))
-        bar.append(iconButton('append-section', '追記'));
+      // 🔑 **追記はここに無い**(P8 段⑧)。段⑥ では「編集に入って末尾へ飛ぶ」
+      // ボタンをここに置いたが、5000 行のログでも毎回全文を textarea に載せる
+      // 形で、追記型の意味を成していなかった(user 指摘 2026-08-03)──
+      // 追記は編集画面を通らない**別の器**(`append-box.ts`)が持つ
       this.region.append(bar);
       if (state.revisionPanel && state.revisionPanel.lid === state.selectedLid) {
         this.region.append(renderHistoryPanel(state.revisionPanel.items));
@@ -219,9 +217,6 @@ export class DetailRenderer {
     const commit = iconButton('commit-edit', '保存');
     const cancel = iconButton('cancel-edit', 'キャンセル');
     bar.append(commit, cancel);
-    // ⚠ 編集中にも出す ── ログは「保存せずに 2 件目を足す」が普通にある
-    if (isAppendable(state.entryMetas.get(open.lid)?.archetype))
-      bar.append(iconButton('append-section', '追記'));
     this.region.append(bar);
     // 🔑 **書式パネル**(P8 段⑥)。編集欄のすぐ上 ── 押す物と効く先を離さない
     this.region.append(buildFormatBar());

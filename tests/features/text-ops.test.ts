@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyFormat,
   appendAt,
+  appendBlock,
   FORMAT_OPS,
   TABLE_BLOCK,
   CODE_BLOCK,
@@ -151,6 +152,20 @@ describe('追記', () => {
     const log1 = appendAt('本文', '## A');
     const log2 = appendAt(log1.text, '## B');
     expect(log2.text).toBe('本文\n\n## A\n\n## B\n\n');
+  });
+
+  it('🔴 一塊で追記する(見出し + 中身が 1 回で閉じる)', () => {
+    expect(appendBlock('前の記録', '## A', '今日のできごと')).toBe(
+      '前の記録\n\n## A\n\n今日のできごと\n',
+    );
+    expect(appendBlock('本文', null, 'あとがき')).toBe('本文\n\nあとがき\n');
+  });
+
+  it('🔴 空の追記は本文を変えない(日時見出しだけの空節を積まない)', () => {
+    // ⚠ ここは effect の失敗判定(`newBody === body`)の土台でもある ──
+    // 変えてしまうと「空を追記したのに成功した」ことになる
+    expect(appendBlock('本文', '## A', '')).toBe('本文');
+    expect(appendBlock('本文', '## A', '   \n\t ')).toBe('本文');
   });
 
   it('空の本文でも先頭に余白を作らない', () => {

@@ -214,6 +214,22 @@ export function appendAt(text: string, heading: string | null): TextSelection {
   return { text: next, start: next.length, end: next.length };
 }
 
+/**
+ * 末尾に**一塊を追記する**(P8 段⑧)。
+ *
+ * > user 指示 2026-08-03「**追記型は今すぐ実装して、今のままだと、なんの意味もない**」
+ *
+ * 🔑 `appendAt` が「場所を作る」だけなのに対し、こちらは**中身まで足して閉じる**
+ * ── 追記欄は編集画面を開かないので、本文が完成した形で返る必要がある。
+ * ⚠ **空の追記は作らない**(base をそのまま返す)── 押し間違いで日時見出しだけの
+ * 空節が積もると、ログが読めなくなる。
+ */
+export function appendBlock(base: string, heading: string | null, text: string): string {
+  const body = text.replace(/\s+$/, '');
+  if (body === '') return base;
+  return `${appendAt(base, heading).text}${body}\n`;
+}
+
 /** 書式パネルが持つ操作。⚠ ここに足す = ボタンが増える(表が正本)。 */
 export type FormatOp =
   | LinePrefix

@@ -92,7 +92,53 @@ export interface AppState {
    * ランチャーを開いたときに要求して還流させる(履歴一覧と同じ流儀)。
    */
   launcherTiles: LauncherTile[] | null;
+  /**
+   * 🔴 **本文を書き換える経路のロック**(P8 段⑧。user 指示 2026-08-03
+   * 「**編集競合は競合ロックと強制解放も念頭にしてください**」)。
+   *
+   * 追記は編集画面を通らず**直に disk へ書く**。だから編集の draft と 2 本の
+   * 経路が同じ本文を握る ── ロックが無いと、こう消える:
+   *
+   * ```
+   * 追記を押す → 書込が飛ぶ(まだ ack 前)→ すかさず「編集」を押す
+   *   → editor は**古い body** を掴む → 追記が disk に着く
+   *   → 保存 → 古い body が上書き → **追記が黙って消える**
+   * ```
+   *
+   * ⚠ 窓は数十 ms しかないが、PKC2 はこの桁の窓で実際にデータを失っている。
+   *
+   * 🔑 **ここに持つのは「書込が飛んでいる」だけ**。「編集中」は `phase` が既に
+   * 表しているので、**2 つ目の真実を作らない**(2 か所に持つと必ずずれる ──
+   * `phase` を 'ready' へ戻す経路は 7 か所あり、その全部で外し忘れが起きうる)。
+   * 両方をまとめて見たいときは `bodyLockOf(state)` を使う。
+   */
+  writeLock: { lid: string } | null;
+  /**
+   * ロックの世代。**強制解放のたびに増える**(P8 段⑧)。
+   * ⚠ これが無いと強制解放は**危険な操作になる** ── 解放したあとに古い書込の
+   * ack が着いて、user が見ている本文を巻き戻す。世代の合わない ack は捨てる。
+   */
+  lockGen: number;
   error: string | null;
+}
+
+/** 誰が本文を握っているか。⚠ **lid つき**(別のノートは巻き添えにしない)。 */
+export interface BodyLock {
+  lid: string;
+  /** `editing` = 編集中の draft がある / `writing` = 追記の書込が飛んでいる。 */
+  holder: 'editing' | 'writing';
+}
+
+/**
+ * いま本文を握っているのは誰か(**導出** ── state に 2 つ目の真実を作らない)。
+ * ⚠ 書込のほうを先に見る:書込中に編集へ入ることはできないので、両方立つことは
+ * 無いが、順序を決めておかないと将来の変更で曖昧になる。
+ */
+export function bodyLockOf(state: AppState): BodyLock | null {
+  if (state.writeLock) return { lid: state.writeLock.lid, holder: 'writing' };
+  if (state.phase === 'editing' && state.openBody)
+    return { lid: state.openBody.lid, holder: 'editing' };
+  return null;
 }
 
 export const initialState: AppState = {
@@ -111,6 +157,8 @@ export const initialState: AppState = {
   showArchived: false,
   revisionPanel: null,
   trashPanel: null,
+  writeLock: null,
+  lockGen: 0,
   error: null,
 };
 
@@ -124,6 +172,18 @@ export type UserAction =
   | { type: 'COMMIT_EDIT' }
   | { type: 'CANCEL_EDIT' }
   | { type: 'TOGGLE_TODO_STATUS'; lid: string }
+  /**
+   * 🔑 **追記**(P8 段⑧)。編集画面を開かずに末尾へ足す。
+   * ⚠ `heading` は binder が作って渡す(reducer は純粋のまま ── `Date` を呼ばない)。
+   * ノートは `null`(見出しを勝手に足さない)。
+   */
+  | { type: 'APPEND_TO_ENTRY'; lid: string; text: string; heading: string | null }
+  /**
+   * 🔴 **ロックの強制解放**(user 指示 2026-08-03)。応答が返らない書込 /
+   * 抱えたままの draft で**永久に追記できなくなる**のを防ぐ最後の出口。
+   * ⚠ `discardDraft` = 編集中の draft も捨てる(編集が握っているときの解放)。
+   */
+  | { type: 'FORCE_RELEASE_LOCK'; discardDraft: boolean }
   | { type: 'SET_CALENDAR_MONTH'; year: number; month: number }
   | { type: 'TOGGLE_SHOW_ARCHIVED' }
   | { type: 'RETRY_PERSIST' }
@@ -180,7 +240,27 @@ export type SystemCommand =
       meta: EntryMeta;
       body: string;
     }
-  | { type: 'TRASH_PURGED'; purged: number };
+  | { type: 'TRASH_PURGED'; purged: number }
+  | {
+      /**
+       * 追記が disk に着いた(P8 段⑧)。⚠ **`gen` を必ず見る** ── 強制解放を
+       * 挟んだあとの遅れた ack を採ると、user が見ている本文を巻き戻す。
+       */
+      type: 'ENTRY_APPENDED';
+      lid: string;
+      gen: number;
+      body: string;
+      status: string | null;
+      date: string | null;
+      archived: boolean;
+    }
+  | {
+      /** 追記が失敗した。⚠ **ロックは必ず解く**(失敗で握ったままにしない)。 */
+      type: 'APPEND_FAILED';
+      lid: string;
+      gen: number;
+      error: string;
+    };
 
 export type Dispatchable = UserAction | SystemCommand;
 
@@ -210,6 +290,21 @@ export type DomainEvent =
       title: string;
       entryOrder: number;
       nextStatus: 'open' | 'done';
+    }
+  | {
+      /**
+       * 追記要求(P8 段⑧)。⚠ **本文は載せない** ── effect が disk から読み直して
+       * その末尾に足す。載せると「画面が持っている古い本文」を基底にしてしまい、
+       * 別経路の書込(toggle / 復元)を巻き戻す。meta snapshot は発火時捕獲(C-1)。
+       */
+      type: 'REQUEST_APPEND';
+      lid: string;
+      gen: number;
+      title: string;
+      archetype: string;
+      entryOrder: number;
+      heading: string | null;
+      text: string;
     }
   | { type: 'REQUEST_DELETE'; lid: string }
   | {
@@ -366,10 +461,16 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       if (state.phase !== 'ready') return { state, events: [] };
       if (!state.openBody || state.openBody.lid !== state.selectedLid)
         return { state, events: [] };
-      return {
-        state: { ...state, phase: 'editing', revisionPanel: null },
-        events: [],
-      };
+      // 🔴 **追記の書込が飛んでいる間は編集に入れない**(P8 段⑧)。
+      // 入れてしまうと editor が古い body を掴み、着弾した追記を保存で上書きする
+      // ── これが「追記が黙って消える」の実体。
+      // ⚠ ここは**backstop** ── 無言の拒否にならないよう、描画側は書込中
+      // 「編集」を出さずにロックの帯(理由 + 強制解放)を出す(`detail.ts`)
+      if (state.writeLock && state.writeLock.lid === state.openBody.lid)
+        return { state, events: [] };
+      // ⚠ 編集がロックを握ることは**書かない** ── `phase === 'editing'` が既に
+      // それを表している(`bodyLockOf`)。ここで別の field に写すと 2 つ目の真実
+      return { state: { ...state, phase: 'editing', revisionPanel: null }, events: [] };
     }
     case 'UPDATE_OPEN_BODY': {
       if (state.phase !== 'editing' || !state.openBody) return { state, events: [] };
@@ -499,6 +600,103 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
         },
         events: [],
       };
+    }
+    /**
+     * 🔑 **追記**(P8 段⑧)。編集画面を開かず、末尾に足して**直に disk へ書く**。
+     *
+     * ⚠ **ready 限定 + ロック**。編集中(= draft がある)に裏で書くと、保存で
+     * 上書きされて追記が消える。書込中の二重要求も断る(直列 queue には載るが、
+     * 2 通目の基底が 1 通目の結果になるかは queue 実装に依存させない)。
+     * ⚠ **本文を event に載せない** ── effect が disk から読み直す。画面が持つ
+     * 本文を基底にすると、別経路(toggle / 復元)の書込を巻き戻す。
+     */
+    case 'APPEND_TO_ENTRY': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      if (state.writeLock) return { state, events: [] };
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] };
+      if (action.text.trim() === '') return { state, events: [] }; // 空の追記は作らない
+      return {
+        state: { ...state, writeLock: { lid: action.lid }, revisionPanel: null },
+        events: [
+          {
+            type: 'REQUEST_APPEND',
+            lid: meta.lid,
+            gen: state.lockGen,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            heading: action.heading,
+            text: action.text,
+          },
+        ],
+      };
+    }
+    /**
+     * 🔴 **強制解放**(user 指示 2026-08-03)。
+     * ⚠ **世代を上げる**のが本体 ── 解放しただけだと、飛んでいる書込の ack が
+     * 後から着いて user が見ている本文を巻き戻す。世代が変われば古い ack は捨てる。
+     */
+    case 'FORCE_RELEASE_LOCK': {
+      const draft = action.discardDraft && state.phase === 'editing' && state.openBody;
+      return {
+        state: {
+          ...state,
+          writeLock: null,
+          lockGen: state.lockGen + 1,
+          ...(draft
+            ? {
+                phase: 'ready' as const,
+                // draft を捨てる = disk で確認できている内容へ戻す
+                openBody: {
+                  lid: state.openBody!.lid,
+                  body: state.openBody!.persisted,
+                  baseline: state.openBody!.persisted,
+                  persisted: state.openBody!.persisted,
+                  diskAhead: false,
+                },
+              }
+            : {}),
+        },
+        events: [],
+      };
+    }
+    /** 追記が disk に着いた。⚠ **世代の合わない ack は捨てる**(強制解放の後着)。 */
+    case 'ENTRY_APPENDED': {
+      if (action.gen !== state.lockGen) return { state, events: [] };
+      const meta = state.entryMetas.get(action.lid);
+      // 再 boot 済み(entry が消えた)でも**ロックは必ず解く**
+      if (!meta) return { state: { ...state, writeLock: null }, events: [] };
+      const entryMetas = new Map(state.entryMetas).set(action.lid, {
+        ...meta,
+        status: action.status,
+        date: action.date,
+        archived: action.archived,
+      });
+      // ⚠ 追記は ready 限定なので、openBody は丸ごと差し替えて安全
+      // (editing 中は APPEND_TO_ENTRY 自体が通らない)
+      const openBody =
+        state.openBody?.lid === action.lid
+          ? {
+              lid: action.lid,
+              body: action.body,
+              baseline: action.body,
+              persisted: action.body,
+              diskAhead: false,
+            }
+          : state.openBody;
+      return {
+        state: { ...state, entryMetas, openBody, writeLock: null },
+        events: [],
+      };
+    }
+    case 'APPEND_FAILED': {
+      // ⚠ 世代が違っても**ロックは解く** ── 「古い ack だから無視」で握ったままに
+      // すると、user は永久に追記できず、しかも理由が分からない。
+      // 巻き戻しの危険があるのは**本文を採る**ときだけで、解放は常に安全
+      if (action.gen !== state.lockGen) return { state, events: [] };
+      // 失敗は非致命。理由は effect が OP_FAILED で別に出す(phase は落とさない)
+      return { state: { ...state, writeLock: null, error: action.error }, events: [] };
     }
     case 'TOGGLE_TODO_STATUS': {
       // ready 限定(editing 中の裏書換を作らない)。todo 以外・未知 lid は no-op

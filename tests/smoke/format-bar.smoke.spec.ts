@@ -57,31 +57,71 @@ test('🔴 書式パネルが押せて、寸法が揃っていて、プレビュ
   expect(errors).toEqual([]);
 });
 
-test('🔴 ログは閲覧中に「追記」を押すと日時の節が足される', async ({ page }) => {
+/**
+ * P8 段⑧: **追記型が実際に追記型として動く**。
+ *
+ * > user 指示 2026-08-03「**追記型は今すぐ実装して、今のままだと、なんの意味もない**」
+ *
+ * ⚠ 観測点は「本文が増えた」ではなく「**編集画面を開かずに**増えた」── 段⑥ の
+ * 実装(編集に入って末尾へ飛ぶ)でも本文は増えるので、そこで止めると作り直しの
+ * 意味が test に写らない。
+ */
+test('🔴 打って押すと、編集画面を開かずに末尾へ足される', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
   await createEntry(page, 'textlog');
-
-  // 一度書いて保存し、**閲覧の状態**に戻す(ここが追記の出発点)
   await page.locator('[data-pkc-field="editor-body"]').fill('前の記録');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
-  await expect(page.locator('[data-pkc-action="start-edit"]')).toBeVisible();
 
-  // 🔴 閲覧中に押す ── 編集に入って、末尾に日時の節が足される
-  await clickReal(page, '[data-pkc-action="append-section"]');
-  const ta = page.locator('[data-pkc-field="editor-body"]');
-  await expect(ta).toBeVisible();
-  const value = await ta.inputValue();
-  expect(value.split('\n')[0]).toBe('前の記録');
-  expect(value).toMatch(/\n## \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\n\n$/);
+  const box = page.locator('[data-pkc-field="append-input"]');
+  await expect(box).toBeVisible();
+  await box.fill('1 件目');
+  await clickReal(page, '[data-pkc-action="append-entry"]');
 
-  // ⚠ **カーソルが末尾にある**(そのまま打ち始められる)── ここが合っていないと
-  // 「押したのに書けない」になる
-  expect(await ta.evaluate((el) => (el as HTMLTextAreaElement).selectionStart)).toBe(value.length);
-  await page.keyboard.type('今日のできごと');
+  // ① 🔴 **編集画面が開いていない**(ここが段⑥ との違いの本体)
+  await expect(page.locator('[data-pkc-field="editor-body"]')).toHaveCount(0);
+  // ② 本文に日時の節ごと入った
+  const body = page.locator('[data-pkc-field="detail-body"]');
+  await expect(body).toContainText('1 件目');
+  await expect(body.locator('h2')).toHaveText(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  // ③ 欄が空になり、続けて打てる
+  await expect(box).toHaveValue('');
+
+  // ④ 2 件目(節が 2 つになる ── 上書きしていない)
+  await box.fill('2 件目');
+  await page.keyboard.press('Control+Enter');
+  await expect(body).toContainText('2 件目');
+  await expect(body).toContainText('1 件目');
+  await expect(body.locator('h2')).toHaveCount(2);
+
+  // ⑤ 🔴 **再読込しても残っている**(disk に着いている)
+  await page.reload();
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15000 });
+  await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]');
+  await expect(page.locator('[data-pkc-field="detail-body"]')).toContainText('2 件目');
+
+  expect(errors).toEqual([]);
+});
+
+test('🔴 編集中は追記できず、理由と出口が画面に出る(競合ロック)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await createEntry(page, 'textlog');
+  await page.locator('[data-pkc-field="editor-body"]').fill('元');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
-  await expect(page.locator('[data-pkc-field="detail-body"]')).toContainText('今日のできごと');
+
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  // 欄ではなくロックの帯が出る ── **押せないだけ**にしない
+  await expect(page.locator('[data-pkc-field="append-form"]')).toBeHidden();
+  await expect(page.locator('[data-pkc-field="append-lock-reason"]')).toContainText('編集中');
+  // ⚠ 失わない出口が在る(帯の中の「保存して解放」)
+  const resolve = page.locator('[data-pkc-field="append-lock"] [data-pkc-action="commit-edit"]');
+  await expect(resolve).toBeVisible();
+  await clickReal(page, '[data-pkc-field="append-lock"] [data-pkc-action="commit-edit"]');
+  // 解けて追記できる
+  await expect(page.locator('[data-pkc-field="append-input"]')).toBeVisible();
 
   expect(errors).toEqual([]);
 });

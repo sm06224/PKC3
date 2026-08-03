@@ -19,7 +19,11 @@ export interface ShellRegions {
   /** 左の列の中身(探し方で切り替わる)。 */
   browseHost: HTMLElement;
   sidebar: HTMLElement;
+  /** 中央の列そのもの(本文 + 追記欄)。grid の 1 マスはこちら。 */
+  center: HTMLElement;
   detail: HTMLElement;
+  /** 追記欄(P8 段⑧)。⚠ **本文とは別の器** ── 本文の再描画で打鍵が消えない。 */
+  append: HTMLElement;
   /** 右の付随情報。選んでいるものの素性と、それに対する操作。 */
   inspector: HTMLElement;
   status: HTMLElement;
@@ -209,8 +213,17 @@ export function buildShell(root: HTMLElement): ShellRegions {
   browseHost.append(list);
   sidebar.append(tabs, findBar, createBar, browseHost, collectionBar);
 
-  const detail = document.createElement('main');
+  // ── 中央(いま開いているもの)────────────────────────
+  // 🔑 本文と**追記欄は別の器**にする(P8 段⑧)。本文は書き換わるたびに作り直すので、
+  // 同じ器に入れると**打ちかけの追記が消え、focus も飛ぶ**(追記のたびに起きる)。
+  const center = document.createElement('main');
+  center.setAttribute('data-pkc-region', 'center');
+  const detail = document.createElement('div');
   detail.setAttribute('data-pkc-region', 'detail');
+  const append = document.createElement('div');
+  append.setAttribute('data-pkc-region', 'append');
+  append.hidden = true;
+  center.append(detail, append);
 
   // ── 右(付随情報)────────────────────────────────
   const inspector = document.createElement('aside');
@@ -229,7 +242,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   update.setAttribute('data-pkc-region', 'update');
   update.hidden = true;
 
-  shell.append(brand, sidebar, detail, inspector, update, notices, status);
+  shell.append(brand, sidebar, center, inspector, update, notices, status);
   root.append(shell);
-  return { brand, browseHost, sidebar, detail, inspector, status, notices, update };
+  return { brand, browseHost, sidebar, center, detail, append, inspector, status, notices, update };
 }

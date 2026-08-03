@@ -26,6 +26,7 @@ import { reloadOnPrebootSwap, type PrebootTarget } from '@adapter/platform/sw/pr
 import { InspectorRenderer } from '@adapter/ui/render/inspector';
 import { BrowseRouter, type BrowseMode } from '@adapter/ui/render/browse';
 import { CenterRouter } from '@adapter/ui/render/center';
+import { AppendBoxRenderer } from '@adapter/ui/render/append-box';
 import { formatSize } from '@adapter/ui/render/detail';
 import { bindActions, generateLid, type BinderServices } from '@adapter/ui/actions/binder';
 import { armLaunchQueue, type LaunchTarget } from '@adapter/platform/launch-queue';
@@ -183,9 +184,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     }
   };
   markBrowse('list');
+  // 🔑 追記欄は**本文とは別の器**(P8 段⑧)── 本文は追記のたびに書き換わって
+  // 再描画されるので、同じ器に入れると打ちかけの文字も focus も消える
+  const appendBox = new AppendBoxRenderer(regions.append);
   dispatcher.onState((state) => {
     browse.render(state, browseMode);
     center.render(state);
+    appendBox.render(state);
     inspector.render(state);
     markView(state.viewMode);
   });

@@ -210,8 +210,19 @@ describe('マニュアルと実装の突合', () => {
     // entry に対する操作(書き出す / 履歴 / 削除)は右の情報ペインへ移した
     // ⚠ 図案つきボタンは `iconButton(action, label)` で作る ── 文言はその第 2 引数
     const detail = readFileSync('src/adapter/ui/render/detail.ts', 'utf-8');
-    for (const label of ['編集', '保存', 'キャンセル', '追記']) {
+    for (const label of ['編集', '保存', 'キャンセル']) {
       expect(detail, `本文まわりから「${label}」が消えた`).toContain(`, '${label}')`);
+    }
+    // 🔴 **追記は本文の上に無い**(P8 段⑧)── 段⑥ ではここに置いたが、
+    // 「編集に入って末尾へ飛ぶ」形は追記型の意味を成していなかった。
+    // 追記は編集画面を通らない別の器が持つ(`append-box.ts`)
+    expect(detail, '追記が本文の上に戻っている').not.toContain(", '追記')");
+    const box = readFileSync('src/adapter/ui/render/append-box.ts', 'utf-8');
+    expect(box, '追記の導線が消えた').toContain("'追記'");
+    // ⚠ ロックの出口も pin する ── 無くなると「永久に追記できない」が作れる
+    for (const label of ['保存して解放', '編集を破棄', '強制解放']) {
+      expect(box, `ロックの出口「${label}」が消えた`).toContain(`'${label}'`);
+      expect(MANUAL, `マニュアルに「${label}」が無い`).toContain(`**${label}**`);
     }
     expect(detail, '復元が消えた').toContain("textContent = '復元'");
     const inspector = readFileSync('src/adapter/ui/render/inspector.ts', 'utf-8');
@@ -267,7 +278,7 @@ describe('マニュアルと実装の突合', () => {
     // 🔴 ここは**もともと doc が先に嘘をついていた**箇所である ── マニュアルも
     // `textlog-flavor.ts` も「追記型」と書きながら、その UI は存在しなかった
     expect([...APPENDABLE_ARCHETYPES].sort()).toEqual(['text', 'textlog']);
-    expect(MANUAL).toContain('**ノート** と **ログ** には **追記** があります');
+    expect(MANUAL).toContain('**ノート** と **ログ** には、本文の下に **追記欄** が出ます');
   });
 
   it('🔴 更新の案内の文言が pin と一致し、マニュアルにも在る', () => {
