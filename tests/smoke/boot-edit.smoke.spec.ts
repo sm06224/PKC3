@@ -49,14 +49,16 @@ test('boot → ノート作成 → 編集 → 保存が画面に反映される'
     page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]'),
   ).toHaveCount(0);
 
-  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="filer"]');
+  await clickReal(page, '[data-pkc-browse="filer"]');
   await clickReal(page, '[data-pkc-action="show-trash"]');
   const trash = page.locator('[data-pkc-region="filer-trash"]');
   await expect(trash.locator('li')).toHaveCount(1);
   await clickReal(page, '[data-pkc-action="restore-trash"]');
+  // ⚠ 一覧は**別のタブ**にある(P8 段⑤)── 戻ってから数える
+  await clickReal(page, '[data-pkc-browse="list"]');
   await expect(
     page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]'),
-  ).toHaveCount(1); // 復元で sidebar に戻る
+  ).toHaveCount(1); // 復元で一覧に戻る
   await expect(trash.locator('li')).toHaveCount(0);
 
   expect(errors).toEqual([]);

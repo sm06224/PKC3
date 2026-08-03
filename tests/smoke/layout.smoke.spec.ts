@@ -97,7 +97,7 @@ test('🔴 枠が組めている(3 列 / 重なりなし)', async ({ page }) => 
 
   // ⑧ ファイラの表が**列ズレしていない**(単漢字マークの ::before が匿名セルを
   //    作って全ヘッダを 1 列ずらしていた ── 実測で見つけた本物のバグ)
-  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="filer"]');
+  await clickReal(page, '[data-pkc-browse="filer"]');
   const cells = await page
     .locator('[data-pkc-region="filer-table"] tbody tr')
     .first()
@@ -307,12 +307,12 @@ test('🔴 図案つきボタンの高さが揃っている', async ({ page }) =
   await page.setViewportSize({ width: 1280, height: 800 });
   await gotoApp(page);
   const sizes = await page.evaluate(() =>
-    [...document.querySelectorAll('[data-pkc-region="cmdbar"] button')].map((b) => ({
+    [...document.querySelectorAll('[data-pkc-region="collection-bar"] button')].map((b) => ({
       h: Math.round(b.getBoundingClientRect().height),
       icon: (b.querySelector('[data-pkc-icon]')?.textContent ?? '').length > 0,
     })),
   );
-  expect(sizes.length).toBeGreaterThan(5);
+  expect(sizes.length).toBeGreaterThanOrEqual(5);
   // ① 図案が**実際に入っている**(空振り防止 ── 図案なしなら高さは当然揃う)
   expect(sizes.every((s) => s.icon), '図案の入っていないボタンがある').toBe(true);
   // ② 高さが**全部同じ**

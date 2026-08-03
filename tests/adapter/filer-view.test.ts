@@ -1,6 +1,6 @@
 /** @vitest-environment happy-dom */
 /**
- * filer view(P3-7b)の end-to-end: binder(実クリック)→ CenterRouter →
+ * フォルダの探し方(P3-7b / P8 段⑤)の end-to-end: binder(実クリック)→ BrowseRouter →
  * breadcrumb / explorer table。read-only ビュー(relation 作成 UI なし)。
  */
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -8,7 +8,7 @@ import type { EntryMeta, Relation } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
-import { CenterRouter } from '../../src/adapter/ui/render/center';
+import { BrowseRouter } from '../../src/adapter/ui/render/browse';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { stubRevisionOps } from '../helpers/revision-stub';
 
@@ -48,9 +48,18 @@ function setup(metas: EntryMeta[], relations: Relation[]) {
   document.body.append(root);
   const d = new Dispatcher();
   const regions = buildShell(root);
-  const center = new CenterRouter(regions.detail);
-  d.onState((s) => center.render(s));
-  bindActions(root, d);
+  // 🔑 フォルダは**左の列**の探し方(P8 段⑤)── 中央のビューではない
+  const browse = new BrowseRouter(regions.sidebar, regions.browseHost);
+  // 🔑 探し方の切替は **service** が受ける(state ではなく画面側の都合 ── P8 段⑤)。
+  // ⚠ ここを dispatch に置き換えると、タブを押しても切り替わらない実装が緑になる
+  let mode: 'list' | 'filer' | 'launcher' = 'list';
+  d.onState((s) => browse.render(s, mode));
+  bindActions(root, d, {
+    setBrowse: (m) => {
+      mode = m as typeof mode;
+      browse.render(d.getState(), mode);
+    },
+  });
   connectStoreEffects(d, {
     ...stubRevisionOps(),
     getBody: async () => '',
@@ -58,7 +67,8 @@ function setup(metas: EntryMeta[], relations: Relation[]) {
     deleteEntry: async () => {},
   });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas, relations });
-  const pane = root.querySelector<HTMLElement>('[data-pkc-view-pane="filer"]')!;
+  // ⚠ 器は**左の列**へ移った(P8 段⑤)
+  const pane = root.querySelector<HTMLElement>('[data-pkc-browse-pane="filer"]')!;
   const q = <T extends HTMLElement>(sel: string) => pane.querySelector<T>(sel);
   const rows = () =>
     [...pane.querySelectorAll('tbody [data-pkc-entry]')].map((r) =>
@@ -79,7 +89,7 @@ describe('filer view (P3-7b)', () => {
 
   it('root scope → folder click で潜り、breadcrumb で戻れる', async () => {
     const { root, d, q, rows } = setup(METAS, RELS);
-    root.querySelector<HTMLElement>('[data-pkc-view="filer"]')!.click();
+    root.querySelector<HTMLElement>('[data-pkc-browse="filer"]')!.click();
     expect(rows()).toEqual(['f1']); // root は親なしのみ
 
     q<HTMLElement>('tbody [data-pkc-entry="f1"]')!.click(); // folder 選択 = scope 移動
@@ -107,7 +117,7 @@ describe('filer view (P3-7b)', () => {
 
   it('同一 scope 内の選択変更は属性 patch のみ(table を作り直さない ── review #2)', async () => {
     const { root, q, pane } = setup(METAS, RELS);
-    root.querySelector<HTMLElement>('[data-pkc-view="filer"]')!.click();
+    root.querySelector<HTMLElement>('[data-pkc-browse="filer"]')!.click();
     q<HTMLElement>('tbody [data-pkc-entry="f1"]')!.click(); // scope f1
     await tick();
     const rowA = q<HTMLElement>('tbody [data-pkc-entry="a"]')!;
@@ -121,7 +131,7 @@ describe('filer view (P3-7b)', () => {
 
   it('非 folder を選択すると最近傍祖先 folder の scope で選択印が付く', async () => {
     const { root, d, q, rows } = setup(METAS, RELS);
-    root.querySelector<HTMLElement>('[data-pkc-view="filer"]')!.click();
+    root.querySelector<HTMLElement>('[data-pkc-browse="filer"]')!.click();
     q<HTMLElement>('tbody [data-pkc-entry="f1"]')!.click();
     await tick();
     q<HTMLElement>('tbody [data-pkc-entry="a"]')!.click(); // 非 folder
@@ -135,7 +145,7 @@ describe('filer view (P3-7b)', () => {
 
   it('relations の無い container では全 entry が root に平置き', () => {
     const { root, rows } = setup([meta('x', 2), meta('y', 1)], []);
-    root.querySelector<HTMLElement>('[data-pkc-view="filer"]')!.click();
+    root.querySelector<HTMLElement>('[data-pkc-browse="filer"]')!.click();
     expect(rows()).toEqual(['y', 'x']); // entryOrder 順
   });
 });

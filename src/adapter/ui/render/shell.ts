@@ -11,12 +11,13 @@
  */
 import { SEALED_ARCHETYPES, SEALED_VIEWS } from '@features/sealed';
 import { iconButton } from './icons';
+import { BROWSE_TABS } from './browse';
 
 export interface ShellRegions {
   /** 最上部の帯。彩度のある色を置くのはここだけ。 */
   brand: HTMLElement;
-  /** 操作の帯(ビュー切替 + コマンド)。 */
-  cmdbar: HTMLElement;
+  /** 左の列の中身(探し方で切り替わる)。 */
+  browseHost: HTMLElement;
   sidebar: HTMLElement;
   detail: HTMLElement;
   /** 右の付随情報。選んでいるものの素性と、それに対する操作。 */
@@ -39,16 +40,13 @@ export interface ShellRegions {
 }
 
 /**
- * 面の切替。⚠ 封印中のものは**ここに出さない**(`features/sealed.ts` が正本)。
+ * 🔴 **上の帯には「面の切替」を置かない**(P8 段⑤、user 指摘
+ * 「上のメニューと左ペインのメニューにかぶりがある / 分けもなくて、扱いにくい」)。
+ *
+ * フォルダとアプリは「見る場所」ではなく**探し方**なので、左の列のタブへ移した
+ * (`browse.ts`)。上に残るのは**アプリ全体**に対する 1 つだけ ── 設定である。
  */
 const VIEW_BUTTONS: readonly { view: string; label: string }[] = [
-  { view: 'detail', label: 'ノート' },
-  { view: 'filer', label: 'フォルダ' },
-  { view: 'kanban', label: 'かんばん' },
-  { view: 'calendar', label: 'カレンダー' },
-  { view: 'launcher', label: 'アプリ' },
-  // ⚠ **めったに来ない場所**(user 指示「テーマは設定系の画面にしまって / 普段から
-  // 必要ではない」)。それでも導線は畳まない ── 押す口はここに 1 つ置く
   { view: 'settings', label: '設定' },
 ] as const;
 
@@ -64,34 +62,27 @@ const CREATE_BUTTONS: readonly { archetype: string; label: string }[] = [
   { archetype: 'todo', label: 'Todo' },
 ] as const;
 
-/** 押せるコマンド。**役割ごとに区切って全部並べる**(畳まない)。 */
-const COMMAND_GROUPS: readonly {
-  readonly items: readonly { action: string; label: string; title?: string }[];
-}[] = [
+/**
+ * **ノート全体**に対する操作 ── だから**左の列**が持つ(P8 段⑤ の規則)。
+ * ⚠ 上の帯には置かない(置いたのが「かぶり」の正体だった)。
+ */
+const COLLECTION_COMMANDS: readonly { action: string; label: string; title: string }[] = [
   {
-    items: [
-      {
-        action: 'import-file',
-        label: '取り込む',
-        title: 'PKC2 の書き出し(HTML / ZIP)と Markdown を取り込みます',
-      },
-    ],
+    action: 'import-file',
+    label: '取り込む',
+    title: 'PKC2 の書き出し(HTML / ZIP)と Markdown を取り込みます',
+  },
+  { action: 'export-archive', label: 'バックアップ', title: '元に戻せる形で保存します' },
+  { action: 'export-html', label: '閲覧用 HTML', title: '読むだけの 1 枚にまとめます' },
+  {
+    action: 'export-markdown',
+    label: 'Markdown',
+    title: 'Markdown ファイルとして保存します',
   },
   {
-    items: [
-      { action: 'export-archive', label: 'バックアップ', title: '元に戻せる形で保存します' },
-      { action: 'export-html', label: '閲覧用 HTML', title: '読むだけの 1 枚にまとめます' },
-      { action: 'export-markdown', label: 'Markdown', title: 'Markdown ファイルとして保存します' },
-    ],
-  },
-  {
-    items: [
-      {
-        action: 'purge-orphan-assets',
-        label: '使っていない添付を消す',
-        title: 'どのノートからも参照されていない添付を削除します(元に戻せません)',
-      },
-    ],
+    action: 'purge-orphan-assets',
+    label: '使っていない添付を消す',
+    title: 'どのノートからも参照されていない添付を削除します(元に戻せません)',
   },
 ] as const;
 
@@ -110,58 +101,45 @@ export function buildShell(root: HTMLElement): ShellRegions {
   brandContext.setAttribute('data-pkc-field', 'brand-context');
   // ⚠ **薄く保つ**(user 指示 2026-08-03「最上のヘッドラインはもっと薄くてもいい、
   // 邪魔」)── 名前と現在地だけ。押すものはここに置かない
-  brand.append(brandName, brandContext);
+  const spacer = document.createElement('span');
+  spacer.setAttribute('data-pkc-field', 'brand-spacer');
+  brand.append(brandName, brandContext, spacer);
 
-  // ── 操作の帯 ────────────────────────────────────
-  const cmdbar = document.createElement('div');
-  cmdbar.setAttribute('data-pkc-region', 'cmdbar');
-  const group = (): HTMLElement => {
-    const g = document.createElement('div');
-    g.setAttribute('data-pkc-field', 'cmd-group');
-    cmdbar.append(g);
-    return g;
-  };
-  const sep = (): void => {
-    const s = document.createElement('span');
-    s.setAttribute('data-pkc-field', 'cmd-sep');
-    cmdbar.append(s);
-  };
-
-  const views = group();
+  // ⚠ 上の帯に置くのは**アプリ全体**のものだけ(いまは設定 1 つ)
   for (const { view, label } of VIEW_BUTTONS) {
-    if (SEALED_VIEWS.includes(view)) continue; // 封印中(features/sealed.ts)
+    if (SEALED_VIEWS.includes(view)) continue;
     const btn = iconButton('set-view', label, `set-view:${view}`);
     btn.setAttribute('data-pkc-view', view);
-    views.append(btn);
+    brand.append(btn);
   }
-
-  for (const g of COMMAND_GROUPS) {
-    sep();
-    const host = group();
-    for (const { action, label, title } of g.items) {
-      const btn = iconButton(action, label);
-      if (title) btn.title = title;
-      host.append(btn);
-    }
-  }
-
-  // ⚠ file picker は常設 hidden input(user-gesture 要件と smoke の setInputFiles の
-  // 両方に効く)。⚠ **表示される要素の外**に置かない ── 隠れると setInputFiles が届かない
-  const impInput = document.createElement('input');
-  impInput.type = 'file';
-  // 判別は中身(magic)でやるので accept は誤選択を減らす補助。
-  // ⚠ ここに .zip が無いと、**受理器が動いてもファイルを選べない**
-  impInput.accept = '.html,.htm,.zip,.md,.markdown,text/html,application/zip,text/markdown';
-  impInput.multiple = true;
-  impInput.hidden = true;
-  impInput.setAttribute('data-pkc-field', 'import-input');
-  cmdbar.append(impInput);
 
   // ── サイドバー(一覧)────────────────────────────
   const sidebar = document.createElement('nav');
   sidebar.setAttribute('data-pkc-region', 'sidebar');
+  /**
+   * 🔑 **探し方のタブ**(P8 段⑤)。フォルダもアプリも「探し方」なので、
+   * 中央のビューではなくここに置く ── 中央は常に「開いているノート」。
+   */
+  const tabs = document.createElement('div');
+  tabs.setAttribute('data-pkc-region', 'browse-tabs');
+  for (const { mode, label, icon } of BROWSE_TABS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.setAttribute('data-pkc-action', 'set-browse');
+    btn.setAttribute('data-pkc-browse', mode);
+    const ic = document.createElement('span');
+    ic.setAttribute('data-pkc-icon', '');
+    ic.setAttribute('aria-hidden', 'true');
+    ic.textContent = icon;
+    const tx = document.createElement('span');
+    tx.setAttribute('data-pkc-field', 'label');
+    tx.textContent = label;
+    btn.append(ic, tx);
+    tabs.append(btn);
+  }
+
   // 🔑 **探す**が先、**作る**が後(増えたときに要るのは探すほう)。
-  // ⚠ 1 行に詰めると絞り込み欄が潰れて「絞り」しか読めなくなる ── 2 段にする
+  // ⚠ 1 行に詰めると絞り込み欄が潰れて「絞り」しか読めなくなる ── 段を分ける
   const findBar = document.createElement('div');
   findBar.setAttribute('data-pkc-region', 'find-bar');
   const createBar = document.createElement('div');
@@ -204,9 +182,32 @@ export function buildShell(root: HTMLElement): ShellRegions {
   attachInput.setAttribute('data-pkc-field', 'attach-input');
   createBar.append(attachInput);
 
+  /** ノート全体に対する操作(取り込む / 書き出す / 片づける)。 */
+  const collectionBar = document.createElement('div');
+  collectionBar.setAttribute('data-pkc-region', 'collection-bar');
+  for (const { action, label, title } of COLLECTION_COMMANDS) {
+    const btn = iconButton(action, label);
+    btn.title = title;
+    collectionBar.append(btn);
+  }
+  // ⚠ file picker は常設 hidden input(user-gesture 要件と smoke の setInputFiles の
+  // 両方に効く)。⚠ **押すボタンと同じ場所**に置く
+  const impInput = document.createElement('input');
+  impInput.type = 'file';
+  // 判別は中身(magic)でやるので accept は誤選択を減らす補助。
+  // ⚠ ここに .zip が無いと、**受理器が動いてもファイルを選べない**
+  impInput.accept = '.html,.htm,.zip,.md,.markdown,text/html,application/zip,text/markdown';
+  impInput.multiple = true;
+  impInput.hidden = true;
+  impInput.setAttribute('data-pkc-field', 'import-input');
+  collectionBar.append(impInput);
+
   const list = document.createElement('ul');
   list.setAttribute('data-pkc-region', 'entry-list');
-  sidebar.append(findBar, createBar, list);
+  const browseHost = document.createElement('div');
+  browseHost.setAttribute('data-pkc-region', 'browse-host');
+  browseHost.append(list);
+  sidebar.append(tabs, findBar, createBar, browseHost, collectionBar);
 
   const detail = document.createElement('main');
   detail.setAttribute('data-pkc-region', 'detail');
@@ -228,7 +229,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   update.setAttribute('data-pkc-region', 'update');
   update.hidden = true;
 
-  shell.append(brand, cmdbar, sidebar, detail, inspector, update, notices, status);
+  shell.append(brand, sidebar, detail, inspector, update, notices, status);
   root.append(shell);
-  return { brand, cmdbar, sidebar, detail, inspector, status, notices, update };
+  return { brand, browseHost, sidebar, detail, inspector, status, notices, update };
 }

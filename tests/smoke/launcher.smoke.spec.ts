@@ -81,7 +81,7 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(4);
 
   // ランチャーへ
-  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="launcher"]');
+  await clickReal(page, '[data-pkc-browse="launcher"]');
   const tiles = page.locator('[data-pkc-region="launcher-grid"] [data-pkc-tile]');
   // ① 🔴 **素の添付は出ない**(4 件のうちタイルは 3 件)
   await expect(tiles).toHaveCount(3);

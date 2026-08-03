@@ -56,10 +56,9 @@ body {
   display: grid;
   grid-template-columns: minmax(200px, 18vw) minmax(0, 1fr) minmax(220px, 20vw);
   /* ⚠ notices と update は**別の行**。同じ area に載せると、両方出たとき重なる */
-  grid-template-rows: auto auto 1fr auto auto auto;
+  grid-template-rows: auto 1fr auto auto auto;
   grid-template-areas:
     'brand   brand   brand'
-    'cmdbar  cmdbar  cmdbar'
     'sidebar detail  inspector'
     'update  update  update'
     'notices notices notices'
@@ -74,9 +73,6 @@ body {
 
 [data-pkc-region='brand'] {
   grid-area: brand;
-}
-[data-pkc-region='cmdbar'] {
-  grid-area: cmdbar;
 }
 [data-pkc-region='sidebar'] {
   grid-area: sidebar;
@@ -210,43 +206,68 @@ select:focus-visible {
   border-color: color-mix(in srgb, var(--accent) 55%, #000);
 }
 
-/* ── 操作の帯 ──────────────────────────────────────
- * ⚠ **畳まない**。以前は `取り込む▾ 書き出す▾ 整理▾ 表示▾` と畳んでいたが、
- * 「隠さない」に反していた。役割ごとに区切って**全部見せる**。 */
-[data-pkc-region='cmdbar'] {
+/* ── 左の列: 探し方のタブ ───────────────────────────
+ * 🔑 **その列が扱うものの操作は、その列が持つ**(P8 段⑤)── 上の帯と左で
+ * 同じものが出ていた「かぶり」の解消。フォルダもアプリも「探し方」なのでここ。 */
+[data-pkc-region='browse-tabs'] {
   display: flex;
-  align-items: center;
-  gap: var(--s2);
-  padding: var(--s2) var(--s3);
-  background: var(--surface);
-  overflow-x: auto;
-}
-[data-pkc-field='cmd-sep'] {
-  width: 1px;
-  height: 18px;
+  gap: 1px;
   background: var(--border);
-  margin: 0 var(--s2);
-  flex: none;
+  padding-bottom: 1px;
 }
-[data-pkc-field='cmd-group'] {
-  display: flex;
-  gap: var(--s2);
-  flex: none;
+[data-pkc-region='browse-tabs'] button {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  border-radius: 0;
+  justify-content: center;
 }
-/* いま居るビュー ── 塗るのではなく**下線**で示す(業務画面のタブの作法) */
-[data-pkc-region='cmdbar'] [data-pkc-action='set-view'] {
-  background: transparent;
-  border-color: transparent;
-}
-[data-pkc-region='cmdbar'] [data-pkc-action='set-view']:hover {
-  background: var(--surface-2);
-}
-[data-pkc-region='cmdbar'] [data-pkc-active] {
+[data-pkc-region='browse-tabs'] [data-pkc-active] {
   background: var(--accent-dim);
   color: var(--accent-dim-fg);
-  border-color: var(--accent-dim);
   box-shadow: inset 0 -2px 0 var(--accent);
   font-weight: 600;
+}
+/* 左の列の下端: **ノート全体**に対する操作 */
+[data-pkc-region='collection-bar'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px;
+  padding-top: 1px;
+  background: var(--border);
+  flex: none;
+}
+[data-pkc-region='collection-bar'] button {
+  flex: 1 1 auto;
+  border: none;
+  border-radius: 0;
+  justify-content: flex-start;
+  font-size: 12px;
+}
+[data-pkc-region='browse-host'] {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+[data-pkc-browse-pane] {
+  min-height: 0;
+  padding: var(--s2);
+}
+/* 上の帯の設定ボタン ── 薄い帯に収まる高さ */
+[data-pkc-region='brand'] button {
+  height: 16px;
+  min-height: 16px;
+  max-height: 16px;
+  padding: 0 var(--s2);
+  font-size: 11px;
+  background: transparent;
+  color: var(--accent-fg);
+  border-color: color-mix(in srgb, var(--accent-fg) 35%, transparent);
+}
+[data-pkc-region='brand'] button[data-pkc-active] {
+  background: color-mix(in srgb, var(--accent-fg) 18%, transparent);
 }
 
 /* ── サイドバー(一覧)────────────────────────────── */
@@ -288,8 +309,6 @@ select:focus-visible {
   list-style: none;
   margin: 0;
   padding: 0;
-  overflow: auto;
-  flex: 1;
   min-height: 0;
 }
 /* ⚠ **フル幅の横線を引かない**(区切りは背景と余白でつける)。
@@ -670,18 +689,19 @@ select:focus-visible {
   margin-top: 0;
 }
 [data-pkc-region='launcher-grid'] {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: var(--s3);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
 [data-pkc-region='launcher-grid'] [data-pkc-tile] {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: var(--s1);
+  gap: 0;
   height: auto;
-  min-height: 46px;
-  padding: var(--s3);
+  min-height: var(--row-h);
+  max-height: none;
+  padding: var(--s2);
   text-align: left;
 }
 [data-pkc-region='launcher-grid'] [data-pkc-field='title'] {
@@ -714,10 +734,16 @@ select:focus-visible {
 }
 [data-pkc-region='filer-table'] th,
 [data-pkc-region='filer-table'] td {
-  border: 1px solid var(--border);
-  padding: var(--s1) var(--s3);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: var(--s1) var(--s2);
   height: var(--row-h);
   text-align: left;
+}
+/* ⚠ 狭い列に入るので、種別と更新日は畳む(名前が読めるほうが大事) */
+[data-pkc-region='filer-table'] th:not(:first-child),
+[data-pkc-region='filer-table'] td:not(:first-child) {
+  display: none;
 }
 [data-pkc-region='filer-table'] th {
   background: var(--surface-2);
@@ -804,7 +830,6 @@ select:focus-visible {
     grid-template-columns: minmax(180px, 22vw) minmax(0, 1fr);
     grid-template-areas:
       'brand   brand'
-      'cmdbar  cmdbar'
       'sidebar detail'
       'update  update'
       'notices notices'
@@ -821,13 +846,12 @@ select:focus-visible {
     grid-template-columns: 1fr;
     grid-template-areas:
       'brand'
-      'cmdbar'
       'sidebar'
       'detail'
       'update'
       'notices'
       'status';
-    grid-template-rows: auto auto auto 1fr auto auto auto;
+    grid-template-rows: auto auto 1fr auto auto auto;
   }
   [data-pkc-region='sidebar'] {
     max-height: 30vh;

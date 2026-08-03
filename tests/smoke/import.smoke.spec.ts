@@ -492,7 +492,7 @@ test('folder-export 取込 → filer で階層が実際にたどれる', async (
   // folder 5 件 + 本体 2 件
   await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(7);
 
-  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="filer"]');
+  await clickReal(page, '[data-pkc-browse="filer"]');
   const rows = page.locator('[data-pkc-region="filer-table"] tbody tr');
 
   // 🔑 最上位は **root + 循環から救出された 1 件**(階層が効いていれば 7 件並ばない)。
@@ -511,7 +511,8 @@ test('folder-export 取込 → filer で階層が実際にたどれる', async (
   const subLid = await page
     .locator('[data-pkc-region="filer-table"] tbody tr[data-pkc-archetype="folder"]')
     .getAttribute('data-pkc-entry');
-  await clickReal(page, `[data-pkc-entry="${subLid}"]`);
+  // ⚠ 一覧タブにも同じ lid の行が居る(隠れている)── **表の中**を押す
+  await clickReal(page, `[data-pkc-region="filer-table"] [data-pkc-entry="${subLid}"]`);
   await expect(rows.locator('[data-pkc-field="title"]')).toHaveText(['📁 空フォルダ', '議事録']);
 
   expect(errors).toEqual([]);

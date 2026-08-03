@@ -23,8 +23,8 @@ import { applyTheme, chooseTheme, initialTheme, isTheme } from '@adapter/ui/rend
 import { launchTile } from '@adapter/ui/launch-tile';
 import { watchForUpdate, type UpdateContainer } from '@adapter/platform/sw/update-prompt';
 import { reloadOnPrebootSwap, type PrebootTarget } from '@adapter/platform/sw/preboot-swap';
-import { SidebarRenderer } from '@adapter/ui/render/sidebar';
 import { InspectorRenderer } from '@adapter/ui/render/inspector';
+import { BrowseRouter, type BrowseMode } from '@adapter/ui/render/browse';
 import { CenterRouter } from '@adapter/ui/render/center';
 import { formatSize } from '@adapter/ui/render/detail';
 import { bindActions, generateLid, type BinderServices } from '@adapter/ui/actions/binder';
@@ -149,19 +149,21 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     '[data-pkc-field="theme-select"]',
   );
   if (themeSelect) themeSelect.value = bootTheme;
-  const sidebar = new SidebarRenderer(regions.sidebar);
+  // 🔑 左の列は**探し方**で切り替わる(P8 段⑤)。中央は常に「開いているノート」
+  const browse = new BrowseRouter(regions.sidebar, regions.browseHost);
   const inspector = new InspectorRenderer(regions.inspector);
+  let browseMode: BrowseMode = 'list';
   // assets: bytes は IDB Blob(sqlite には meta のみ)。表示は lend/dispose 規律
   const blobs = new AssetBlobStore();
   const center = new CenterRouter(regions.detail, undefined, {
     lend: (key) => blobs.lendObjectUrl(DEFAULT_CID, key),
     getBlob: (key) => blobs.get(DEFAULT_CID, key),
   });
-  // topbar の active 印(変わったときだけ属性を触る)
+  // いま居る場所の印(変わったときだけ属性を触る)
   let markedView: string | null = null;
   const markView = (view: string) => {
     if (view === markedView) return;
-    for (const btn of regions.cmdbar.querySelectorAll('[data-pkc-view]')) {
+    for (const btn of regions.brand.querySelectorAll('[data-pkc-view]')) {
       if (btn.getAttribute('data-pkc-view') === view)
         btn.setAttribute('data-pkc-active', '');
       else btn.removeAttribute('data-pkc-active');
@@ -169,8 +171,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     markedView = view;
   };
   markView('detail');
+  // 探し方のタブ(左の列)。⚠ **中央のビューとは別の軸**なので印も別に持つ
+  const markBrowse = (mode: BrowseMode) => {
+    for (const btn of regions.sidebar.querySelectorAll('[data-pkc-browse]')) {
+      if (btn.getAttribute('data-pkc-browse') === mode)
+        btn.setAttribute('data-pkc-active', '');
+      else btn.removeAttribute('data-pkc-active');
+    }
+  };
+  markBrowse('list');
   dispatcher.onState((state) => {
-    sidebar.render(state);
+    browse.render(state, browseMode);
     center.render(state);
     inspector.render(state);
     markView(state.viewMode);
@@ -426,6 +437,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // 別の一覧を書くと、テーマを足しても**黙って効かない**(実際に踏んだ)
     setTheme: (theme) => {
       if (isTheme(theme)) chooseTheme(document.documentElement, theme);
+    },
+    // 🔑 探し方の切替(P8 段⑤)。⚠ **state には持たせない** ── これは
+    // 「どう探すか」という画面側の都合で、container のデータではない
+    setBrowse: (mode) => {
+      if (mode !== 'list' && mode !== 'filer' && mode !== 'launcher') return;
+      browseMode = mode;
+      markBrowse(mode);
+      browse.render(dispatcher.getState(), mode);
+      // ⚠ アプリの一覧は開いたときに読む(常駐していない)
+      if (mode === 'launcher') dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'launcher' });
+      else if (dispatcher.getState().viewMode !== 'detail')
+        dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
     },
     // 🔄 新しい版へ交代する(P7 段⑤)。⚠ 頼むだけ ── 再読込は交代が済んでから
     applyUpdate: () => updatePrompt.apply(),

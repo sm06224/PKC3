@@ -61,7 +61,10 @@ function buttonLabels(action: string): string[] {
 const EXPECTED_LABELS = {
   // ⚠ 種類は `<select>` で選ぶので、ボタンは 1 つ(P8)
   'create-entry': ['新規'],
-  'set-view': ['ノート', 'フォルダ', 'アプリ', '設定'],
+  // ⚠ 上の帯に残るのは**アプリ全体**のものだけ(P8 段⑤)
+  'set-view': ['設定'],
+  // 探し方は**左の列**が持つ
+  'set-browse': ['一覧', 'フォルダ', 'アプリ'],
   'export-archive': ['バックアップ'],
   'export-html': ['閲覧用 HTML'],
   'export-markdown': ['Markdown'],

@@ -11,21 +11,17 @@ import type { AppState, ViewMode } from '@adapter/state/app-state';
 import { DetailRenderer, type AssetLender } from './detail';
 import { KanbanRenderer } from './kanban';
 import { CalendarRenderer } from './calendar';
-import { FilerRenderer } from './filer';
-import { LauncherRenderer } from './launcher';
 import { SettingsRenderer } from './settings';
 
-type PaneView = 'detail' | 'kanban' | 'calendar' | 'filer' | 'launcher' | 'settings';
+type PaneView = 'detail' | 'kanban' | 'calendar' | 'settings';
 
-/** ⚠ かつて launcher は detail へ fallback していた(P7b 段⑩ で実体を持った)。 */
+/**
+ * 🔑 中央は**常に「開いているノート」**(P8 段⑤)。
+ * ⚠ フォルダとアプリは「探し方」なので**左の列**へ移した(`browse.ts`)──
+ * 中央のビューではなくなったので、ここでは detail へ落ちる。
+ */
 function toPane(view: ViewMode): PaneView {
-  return view === 'kanban' ||
-    view === 'calendar' ||
-    view === 'filer' ||
-    view === 'launcher' ||
-    view === 'settings'
-    ? view
-    : 'detail';
+  return view === 'kanban' || view === 'calendar' || view === 'settings' ? view : 'detail';
 }
 
 export class CenterRouter {
@@ -33,8 +29,6 @@ export class CenterRouter {
   private readonly detail: DetailRenderer;
   private readonly kanban: KanbanRenderer;
   private readonly calendar: CalendarRenderer;
-  private readonly filer: FilerRenderer;
-  private readonly launcher: LauncherRenderer;
   private readonly settings: SettingsRenderer;
   private lastPane: PaneView = 'detail';
 
@@ -50,15 +44,11 @@ export class CenterRouter {
       detail: pane('detail'),
       kanban: pane('kanban'),
       calendar: pane('calendar'),
-      filer: pane('filer'),
-      launcher: pane('launcher'),
       settings: pane('settings'),
     };
     this.detail = new DetailRenderer(this.panes.detail, assets);
     this.kanban = new KanbanRenderer(this.panes.kanban);
     this.calendar = new CalendarRenderer(this.panes.calendar, now);
-    this.filer = new FilerRenderer(this.panes.filer);
-    this.launcher = new LauncherRenderer(this.panes.launcher);
     this.settings = new SettingsRenderer(this.panes.settings);
   }
 
@@ -71,8 +61,6 @@ export class CenterRouter {
     }
     if (view === 'detail') this.detail.render(state);
     else if (view === 'kanban') this.kanban.render(state);
-    else if (view === 'filer') this.filer.render(state);
-    else if (view === 'launcher') this.launcher.render(state);
     else if (view === 'settings') this.settings.render(state);
     else this.calendar.render(state);
   }

@@ -56,6 +56,8 @@ export interface BinderServices {
   openTile?(lid: string): void;
   /** 配色を切り替える(P7b 段⑨c)。⚠ user の好みで、flag でも container でもない。 */
   setTheme?(theme: string): void;
+  /** 左の列の探し方(一覧 / フォルダ / アプリ)。⚠ 中央のビューとは別の軸(P8 段⑤)。 */
+  setBrowse?(mode: string): void;
   /** 新しい版に交代する(P7 段⑤)。⚠ 交代を頼むだけ ── 再読込は交代後。 */
   applyUpdate?(): void;
   /** 更新の案内を見送る(次に開いたときに再び出る)。 */
@@ -191,6 +193,11 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'DELETE_ENTRY', lid });
   },
   'copy-md-block': (_dispatcher, target) => handleCopyMdBlock(target),
+  /** 左の列の**探し方**を切り替える(P8 段⑤)。⚠ 中央のビューとは別の軸。 */
+  'set-browse': (_dispatcher, target, services) => {
+    const mode = target.closest('[data-pkc-browse]')?.getAttribute('data-pkc-browse');
+    if (mode) services.setBrowse?.(mode);
+  },
   'set-view': (dispatcher, target) => {
     const view = target.getAttribute('data-pkc-view') ?? '';
     if (VIEW_MODES.has(view))
