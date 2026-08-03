@@ -49,12 +49,13 @@ jobs:
         run: npm sbom --sbom-format=cyclonedx --omit=dev > pkc3-sbom.cdx.json
       - name: Archive dist
         run: (cd dist && zip -r ../pkc3-dist.zip .)
-      # 🔴 **release に添付する物そのもの**に attestation を付ける(P7 段⑦)。
-      # ⚠ **Pages の `/` に出るのはこれではない**(round-2 review M-4)── `pages.yml` が
-      # 同じ tag から**別 job・別 worktree で独立にビルドした** `_site/` を配る。
-      # 同じ入力から作られるが別の成果物なので、attestation が担保するのは
-      # 「release zip の出所」であって「Pages で配っている物の出所」ではない。
-      # 検証したい人は release zip を落として `gh attestation verify` する。
+      # 🔴 **配る物そのもの**に attestation を付ける(P7 段⑦ / 段⑧)。
+      # ⚠ round-2 review M-4 の時点では嘘だった ── `pages.yml` が同じ tag を
+      # **別 job で独立にビルドし直して**配っていたので、attestation が担保するのは
+      # 「release zip の出所」だけで、user が触る物の出所ではなかった。
+      # 段⑧ で `pages.yml` が**この zip を展開してそのまま配る**ようにしたので、
+      # いまは **user が触る物 = attest した物**である
+      # (`tests/release-meta.test.ts` が pages.yml 側の経路も pin している)。
       # ⚠ 対象を書き忘れても step は通る ── 「何も証明しない attestation」になるので、
       # `tests/release-meta.test.ts` が subject-path の存在まで pin している。
       # 検証: gh attestation verify pkc3-dist.zip --repo <owner>/<repo>

@@ -125,6 +125,23 @@ describe('🔴 release workflow が版と provenance を担保する', () => {
     }
   });
 
+  it('🔴 Pages は **attest した成果物そのもの**を配る(再ビルドしない)', () => {
+    // round-2 review M-4: 以前は同じ tag を別 job で**もう一度ビルド**していたので、
+    // Pages に出る物と attestation を付けた物が**別の成果物**だった ──
+    // 「配る物そのものに provenance を付ける」が Pages 経路で成立していなかった。
+    // 段⑧ で release の zip を展開してそのまま配る形にした
+    const pages = readFileSync('.github/workflows/pages.yml', 'utf-8');
+    const [artifact] = releasedArtifacts().filter((a) => a.endsWith('.zip'));
+    expect(artifact, 'release が zip を添付していない').toBeTruthy();
+    expect(pages, `pages が ${artifact} を落としていない`).toContain(artifact);
+    expect(pages).toContain('gh release download');
+    // ⚠ **再ビルドに戻していない**こと(戻すと attest が意味を失う)
+    expect(pages).not.toContain('git worktree add');
+    expect(pages, 'product を再ビルドしている').not.toContain('VITE_PKC_KIND=product npm run build');
+    // ⚠ 配る直前の検品も外さない(展開の取り違えはここでしか捕まらない)
+    expect(pages).toContain('check-dist.mjs product _site');
+  });
+
   it('product の検品を通してから release する', () => {
     // 段① の最終関門(map 入りを配らない)を外さない
     expect(wf).toContain('check-dist.mjs product');
