@@ -1,0 +1,108 @@
+/**
+ * P7 段⑤: **更新の届き方を user に見せる**(設計 doc §2-3)。
+ *
+ * 🔴 なぜ自動で交代させないか。`install` で `skipWaiting()` を呼ぶと、user が
+ * 何もしていないのに新 SW が `activate` し、**旧 build の cache を消す**。
+ * 開いたままの旧タブが後から旧 hash の chunk を取りに行く経路
+ * (boot 中の storage worker 作り直し ── `main.ts` の `initStorage` は
+ * memory fallback を受け入れず worker ごと作り直す)で取り零す。
+ * Pages は deploy でツリーごと差し替わるので、消えた cache の先に**実体も無い**。
+ *
+ * → 交代は **user が押したときだけ**。押した**そのタブだけ**を再読込する。
+ *
+ * ⚠ 残る露出: `clients.claim()` で他タブも新 SW に取られる。ただしその状態で
+ * 旧 hash を取りに行って失敗する形は、**SW が無い素の静的 deploy と同じ**である
+ * (Pages 側に旧ファイルが無いので、cache の有無に関わらず 404)。SW は
+ * 「押したタブの precache を守る」側であって、露出を増やしてはいない。
+ *
+ * 🔑 **登録と見張りを分ける**。登録はアプリの boot を待たずに走らせ(boot が
+ * 失敗しても次回オフラインで開ける)、見張りは shell ができてから attach する
+ * ── その間に `updatefound` が済んでいても、attach 時に `waiting` / `installing`
+ * を**その場で見る**ので取り零さない。
+ *
+ * 🔑 **注入で受ける**。`navigator.serviceWorker` をそのまま触ると node の unit で
+ * 触れないし、stub を置いても**本物より緩く**なりがち ── 形を本物に合わせた
+ * 最小の interface だけを要求する。
+ */
+
+/** 待機中の worker(押されたら合図を送る先)。 */
+export interface UpdateWorker {
+  postMessage(message: { type: 'SKIP_WAITING' }): void;
+}
+
+/** インストール中の worker(`installed` まで見届ける)。 */
+export interface InstallingWorker extends UpdateWorker {
+  readonly state: string;
+  addEventListener(type: 'statechange', listener: () => void): void;
+}
+
+/** `navigator.serviceWorker.register()` の結果。 */
+export interface UpdateRegistration {
+  readonly waiting: UpdateWorker | null;
+  readonly installing: InstallingWorker | null;
+  addEventListener(type: 'updatefound', listener: () => void): void;
+}
+
+/** `navigator.serviceWorker`。 */
+export interface UpdateContainer {
+  readonly controller: unknown;
+  addEventListener(type: 'controllerchange', listener: () => void): void;
+}
+
+/**
+ * 新しい版に気づいたら `present` を呼ぶ。user が押したら交代を頼み、
+ * 交代できた時点で `reload` する。
+ *
+ * @param registered 登録の結果(不成立なら `null`。呼ぶ側で `catch` 済み)
+ * @param present 「新しい版があります」を見せる。押されたら渡された関数を呼ぶ
+ * @param reload  再読込(交代が済んでから 1 回だけ呼ばれる)
+ */
+export async function watchForUpdate(
+  container: UpdateContainer,
+  registered: Promise<UpdateRegistration | null>,
+  present: (apply: () => void) => void,
+  reload: () => void,
+): Promise<void> {
+  const registration = await registered;
+  if (!registration) return; // SW が成立しない環境(file:// の可搬 HTML など)
+
+  // ⚠ 押したのが**このタブ**のときだけ再読込する。`clients.claim()` は
+  // 全タブに `controllerchange` を投げるので、無条件に再読込すると
+  // **別タブで編集中の下書きを巻き込んで消す**
+  let requested = false;
+  let reloaded = false;
+  container.addEventListener('controllerchange', () => {
+    if (!requested || reloaded) return;
+    reloaded = true;
+    reload();
+  });
+
+  // ⚠ 一度見せたら二度は見せない(`updatefound` は再検査のたびに来る)
+  let offered = false;
+  const offer = (worker: UpdateWorker): void => {
+    if (offered) return;
+    offered = true;
+    present(() => {
+      requested = true;
+      worker.postMessage({ type: 'SKIP_WAITING' });
+    });
+  };
+
+  const watchInstalling = (worker: InstallingWorker): void => {
+    const check = (): void => {
+      // 🔴 `controller` を見るのが肝。**初回インストール**でも `installed` は
+      // 通るので、これが無いと「初めて開いた人」に更新の案内が出る
+      if (worker.state === 'installed' && container.controller) offer(worker);
+    };
+    worker.addEventListener('statechange', check);
+    check(); // attach 前に既に `installed` まで進んでいることがある
+  };
+
+  // 既に待機している(前回見送った / 別タブが取ってきた / attach 前に済んだ)
+  if (registration.waiting && container.controller) offer(registration.waiting);
+  if (registration.installing) watchInstalling(registration.installing);
+
+  registration.addEventListener('updatefound', () => {
+    if (registration.installing) watchInstalling(registration.installing);
+  });
+}

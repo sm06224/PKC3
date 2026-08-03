@@ -15,6 +15,8 @@ import { AssetBlobStore } from '@adapter/platform/storage/asset-blob-store';
 import { runExplicitPurge } from '@adapter/platform/storage/asset-gc';
 import { buildShell } from '@adapter/ui/render/shell';
 import { showNotices, clearNotices } from '@adapter/ui/render/notices';
+import { createUpdatePrompt } from '@adapter/ui/render/update-card';
+import { watchForUpdate, type UpdateContainer } from '@adapter/platform/sw/update-prompt';
 import { SidebarRenderer } from '@adapter/ui/render/sidebar';
 import { CenterRouter } from '@adapter/ui/render/center';
 import { formatSize } from '@adapter/ui/render/detail';
@@ -46,6 +48,11 @@ export interface AppHandle {
    * ⚠ **断らない**版 ── 詳細は実装のコメント
    */
   importLaunchFiles(files: File[]): Promise<void>;
+  /**
+   * 「新しい版があります」を見せる(P7 段⑤)。押されたら `apply` を呼ぶ。
+   * ⚠ 交代を頼むだけ ── 再読込は交代が済んでから(`watchForUpdate` の側)。
+   */
+  presentUpdate(apply: () => void): void;
 }
 
 /**
@@ -284,6 +291,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const runImport = (files: File[]): Promise<void> =>
     importFiles(dispatcher, importDeps, files).then(() => {});
 
+  /** 更新の案内(P7 段⑤)。面と「押されたら何をするか」は render 側が持つ。 */
+  const updatePrompt = createUpdatePrompt(regions.update);
+
   const services: BinderServices = {
     attachFiles: (files) =>
       void withAssetGate(() =>
@@ -337,6 +347,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // 整理との同時実行は attach と同じ危険。⚠ 振り分けは import-file.ts が持つ
     importFiles: (files) => void withAssetGate(() => runImport(files)),
     dismissNotices: () => clearNotices(regions.notices),
+    // 🔄 新しい版へ交代する(P7 段⑤)。⚠ 頼むだけ ── 再読込は交代が済んでから
+    applyUpdate: () => updatePrompt.apply(),
+    // ⚠ 見送っても待機中の worker は残るので、次に開いたときに再び出る
+    dismissUpdate: () => updatePrompt.dismiss(),
     // 📤 バックアップ書出し(P6d)。⚠ **asset gate の内側** ── 書出し中に添付が
     // 掃除されると「meta はあるが bytes が無い」を掴んで欠けたアーカイブができる
     exportArchive: () => void runExport('archive'),
@@ -421,12 +435,23 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       );
       await withAssetGate.queued(() => runImport(files));
     },
+    presentUpdate: (apply) => updatePrompt.present(apply),
   };
 }
 
 function bootstrap(): void {
   const root = document.querySelector<HTMLElement>('[data-pkc-slot="root"]');
   if (!root) return;
+
+  // 🔑 **登録は boot を待たない**(P7 段⑤)。boot が失敗しても、次回この人が
+  // オフラインで開けるかどうかは登録が済んでいるかで決まる。
+  // ⚠ 見張り(更新の案内)は shell ができてから attach する ── その間に
+  // `updatefound` が済んでいても、attach 時に現況を見るので取り零さない
+  const registered =
+    import.meta.env.PROD && 'serviceWorker' in navigator
+      ? navigator.serviceWorker.register('./sw.js').catch(() => null)
+      : Promise.resolve(null);
+
   void startApp(root)
     .then((app) => {
       // 🔴 受け口は**アプリが受け取れるようになってから**張る(P7 段③)。
@@ -441,6 +466,14 @@ function bootstrap(): void {
       // boot 完了の正本契約(P3-8): smoke / probe は DOM 属性で待つ。
       // PKC2 の教訓 ── 「#root 存在待ち」は HTML load 段階で通過して flake 化する
       root.setAttribute('data-pkc-boot', 'ready');
+      // 🔄 更新の案内(P7 段⑤)。⚠ 自動では交代させない ── 交代は旧 build の
+      // cache を消すので、user が押したときだけ・押したタブだけを再読込する
+      void watchForUpdate(
+        navigator.serviceWorker as unknown as UpdateContainer,
+        registered,
+        (apply) => app.presentUpdate(apply),
+        () => location.reload(),
+      );
       if (import.meta.env.DEV) {
         // probe / 手元検証用の導線(DEV のみ)
         (window as unknown as Record<string, unknown>).__APP__ = app;
@@ -454,10 +487,6 @@ function bootstrap(): void {
       root.textContent = `起動に失敗しました: ${message}`;
     });
 
-  if (import.meta.env.PROD && 'serviceWorker' in navigator) {
-    // SW 不成立(file:// の可搬 HTML 等)でもアプリは動く
-    navigator.serviceWorker.register('./sw.js').catch(() => {});
-  }
 }
 
 bootstrap();

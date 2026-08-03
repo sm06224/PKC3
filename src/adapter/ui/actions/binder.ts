@@ -54,6 +54,10 @@ export interface BinderServices {
   purgeOrphanAssets?(): void;
   /** 注意の面を閉じる(P6c review H-2)。 */
   dismissNotices?(): void;
+  /** 新しい版に交代する(P7 段⑤)。⚠ 交代を頼むだけ ── 再読込は交代後。 */
+  applyUpdate?(): void;
+  /** 更新の案内を見送る(次に開いたときに再び出る)。 */
+  dismissUpdate?(): void;
   /** アーカイブ書出し(P6d)。 */
   exportArchive?(): void;
   /** 可搬 HTML の書出し(P6d 段③)。 */
@@ -219,6 +223,12 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'dismiss-notices': (_dispatcher, _target, services) => {
     services.dismissNotices?.();
+  },
+  'apply-update': (_dispatcher, _target, services) => {
+    services.applyUpdate?.();
+  },
+  'dismiss-update': (_dispatcher, _target, services) => {
+    services.dismissUpdate?.();
   },
   'export-archive': (_dispatcher, _target, services) => {
     services.exportArchive?.();

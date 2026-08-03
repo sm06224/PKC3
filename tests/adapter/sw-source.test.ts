@@ -29,12 +29,19 @@ import {
 class FakeCache {
   /** key → { body, varyOrigin }(precache 由来は varyOrigin なし)。 */
   readonly store = new Map<string, { body: string; varyOrigin: string | null }>();
+  /**
+   * ⚠ 本物の `addAll` は **all-or-nothing**(1 件でも落ちれば 1 件も入らない)。
+   * ここを「落ちるまで入れる」と書くと、**半端な cache が残る**形を test で
+   * 作れてしまい、実装の半端さを stub が肩代わりする。
+   */
   addAll(urls: string[]): Promise<void> {
+    const staged = new Map<string, { body: string; varyOrigin: string | null }>();
     for (const u of urls) {
       if (u.includes('missing')) return Promise.reject(new Error(`404: ${u}`));
       // addAll は Origin を送らない ── 応答は Vary: Origin つき(= 素の cache)
-      this.store.set(u, { body: `cached:${u}`, varyOrigin: null });
+      staged.set(u, { body: `cached:${u}`, varyOrigin: null });
     }
+    for (const [k, v] of staged) this.store.set(k, v);
     return Promise.resolve();
   }
   put(req: { url: string; origin?: string }, res: unknown): Promise<void> {
@@ -67,6 +74,8 @@ class FakeCache {
 interface Harness {
   caches: Map<string, FakeCache>;
   fire(type: 'install' | 'activate'): Promise<void>;
+  /** アプリからの合図(P7 段⑤)。⚠ `waitUntil` は無い ── 素の message event。 */
+  message(data: unknown): void;
   /** fetch を発火し、SW が返した body(または `null` = 素通し)を返す。 */
   fetch(
     url: string,
@@ -179,6 +188,9 @@ function runSw(
       waits.length = 0;
       listeners.get(type)?.({ waitUntil: (p: Promise<unknown>) => void waits.push(p) });
       await Promise.all(waits);
+    },
+    message(data) {
+      listeners.get('message')?.({ data });
     },
     async fetch(url, opts: {
       mode?: string;
@@ -294,7 +306,33 @@ describe('install ── 一覧を丸ごと入れる', () => {
       './manifest.webmanifest',
       './assets/index-AAAAAAAA.js',
     ]);
+  });
+
+  it('🔴 install では交代しない(P7 段⑤ ── 勝手に旧 cache を消さない)', async () => {
+    // ⚠ ここで `skipWaiting()` を呼ぶと、user が何もしていないのに `activate` が
+    // 走り、**旧 build の cache を消す**。開いたままの旧タブが後から旧 hash の
+    // chunk を取りに行く経路(boot 中の storage worker 作り直し)で取り零す
+    const h = runSw(SOURCE);
+    await h.fire('install');
+    expect(h.skipped()).toBe(false);
+  });
+
+  it('🔴 アプリが頼んだときだけ交代する', async () => {
+    const h = runSw(SOURCE);
+    await h.fire('install');
+    h.message({ type: 'SKIP_WAITING' });
     expect(h.skipped()).toBe(true);
+  });
+
+  it('知らない合図では交代しない(他所からの postMessage で剥がされない)', async () => {
+    // ⚠ SW の message は**同 origin の誰でも**送れる。型を見ずに交代すると、
+    // 埋め込んだ iframe や別アプリの postMessage で更新が発火する
+    const h = runSw(SOURCE);
+    await h.fire('install');
+    h.message({ type: 'なにか' });
+    h.message('SKIP_WAITING'); // 文字列(data.type が無い)
+    h.message(null);
+    expect(h.skipped()).toBe(false);
   });
 
   it('🔴 1 件でも入らなければ install ごと失敗する', async () => {
@@ -302,7 +340,9 @@ describe('install ── 一覧を丸ごと入れる', () => {
     // いちばん分からない壊れ方をする
     const h = runSw(swSource({ buildId: 'b1', precache: ['./ok.js', './missing.js'] }));
     await expect(h.fire('install')).rejects.toThrow('404');
-    expect(h.skipped()).toBe(false);
+    // ⚠ 落ちた側だけでなく**取れていた側も残っていない**(addAll は all-or-nothing)。
+    // ここを見ないと「1 件目は入った半端な cache」を許す実装でも通る
+    expect([...(h.caches.get('pkc3:%2F:b1')?.store.keys() ?? [])]).toEqual([]);
   });
 });
 

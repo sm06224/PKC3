@@ -15,6 +15,13 @@ export interface ShellRegions {
    * 件数が内側 bundle 数に比例するから ── 出口が 1 行のままでは設計が空振りする。
    */
   notices: HTMLElement;
+  /**
+   * 「新しい版があります」の面(P7 段⑤)。
+   *
+   * ⚠ notices とは**別の面**。notices は取込・書出しのたびに中身が作り替わるので、
+   * そこへ載せると user が押す前に**次の取込で黙って消える**。
+   */
+  update: HTMLElement;
 }
 
 const VIEW_BUTTONS: readonly { view: string; label: string }[] = [
@@ -143,7 +150,12 @@ export function buildShell(root: HTMLElement): ShellRegions {
   notices.setAttribute('data-pkc-region', 'notices');
   notices.hidden = true;
 
-  shell.append(topbar, sidebar, detail, notices, status);
+  // 既定は空(= 新しい版に気づくまで何も出さない)
+  const update = document.createElement('section');
+  update.setAttribute('data-pkc-region', 'update');
+  update.hidden = true;
+
+  shell.append(topbar, sidebar, detail, update, notices, status);
   root.append(shell);
-  return { topbar, sidebar, detail, status, notices };
+  return { topbar, sidebar, detail, status, notices, update };
 }

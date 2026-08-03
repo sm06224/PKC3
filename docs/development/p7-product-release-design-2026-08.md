@@ -87,6 +87,14 @@ install した user は「オフラインで使える」「md を開ける」と
 ⚠ **黙って次回起動で切り替える**のは避ける ── 「直したはずのバグが直っていない」
 という報告の原因になり、こちらからは再現できない。
 
+🔴 **黙って*今すぐ*切り替えるのはもっと悪い**(段⑤ で判明)。`install` で
+`skipWaiting()` を呼ぶと、user が何もしていないのに `activate` が走って
+**旧 build の cache がその場で消える** ── 開いたままの旧タブが後から旧 hash の
+chunk を取りに行く経路で取り零す(Pages は deploy でツリーごと差し替わるので、
+消えた cache の先に実体も無い)。交代は **user が押したときだけ**。
+そして **押したタブだけ**を再読込する(`clients.claim()` は全タブに
+`controllerchange` を投げるので、無条件に再読込すると別タブの下書きを巻き込む)。
+
 ---
 
 ## 3. 検証(何をどう確かめるか)
@@ -112,7 +120,7 @@ install した user は「オフラインで使える」「md を開ける」と
 | ② | ✅ **素の md 受理器**(`readPlainMarkdown`)+ 取込導線 | ③ の前提。単体で価値がある(md を drag&drop できる) |
 | ③ | ✅ **`launchQueue` の受け口** ── 宣言と実体を一致させる | ② が無いと書けない |
 | ④ | ✅ **SW の precache**(生成 + navigation network-first + 旧 cache 掃除)+ オフライン smoke | 独立 |
-| ⑤ | **更新通知**(新しい版があります) | ④ の上 |
+| ⑤ | ✅ **更新通知**(新しい版があります) | ④ の上 |
 | ⑥ | **マニュアル + 移行ガイド**(PKC2 → PKC3) | 実装が固まってから書く |
 | ⑦ | **v3.0.0 release**(SBOM 添付は既存、provenance attestation を足す)→ product URL 稼働 | 最後 |
 
@@ -419,6 +427,53 @@ unit で pin した(入れないと、実機でしか壊れない形を test で
 足した(同 origin の兄弟 product という、実際に在りうる形でもある)。
 
 2 ラウンド目の変異試験 16 件・生存 0(SW 純関数 4 / 生成 SW 7 / precache 規則 2 / build 設定 3)。
+
+### 段⑤ 実装記録(2026-08-03 着地)
+
+`src/adapter/platform/sw/update-prompt.ts`(いつ案内を出すか)+
+`src/adapter/ui/render/update-card.ts`(面と、押されたときの動き)+
+SW 側の `message` 受け口。
+
+#### 🔴 自動で交代させない ── 交代は**旧 build の cache を消す**
+
+段④ の SW は `install` で `skipWaiting()` を呼んでいた。これだと user が何も
+していないのに新 SW が `activate` し、**その場で旧 build の cache が消える**。
+開いたままの旧タブが後から旧 hash の chunk を取りに行く経路
+(`main.ts` の `initStorage` は memory fallback を受け入れず **worker ごと作り直す**
+── `new Worker(new URL('./storage-worker.ts', import.meta.url))` が走る)で取り零す。
+Pages は deploy でツリーごと差し替わるので、**消えた cache の先に実体も無い**。
+
+→ `install` では交代しない。アプリが `SKIP_WAITING` を送ったときだけ交代する。
+
+⚠ **残る露出は正直に書く**: `clients.claim()` で他タブも新 SW に取られる。ただし
+その状態で旧 hash を取りに行って失敗する形は **SW が無い素の静的 deploy と同じ**
+(Pages 側に旧ファイルが無いので cache の有無に関わらず 404)── SW は
+「押したタブの precache を守る」側であって、露出を増やしてはいない。
+
+#### 押したタブだけを再読込する
+
+`clients.claim()` は **全タブに** `controllerchange` を投げる。無条件に再読込すると
+**別タブで編集中の下書きを巻き込んで消す** ── 「このタブが頼んだか」を持って分ける。
+再読込は 1 回だけ(`controllerchange` は複数回来うる)。
+
+#### 配線は実物でしか確かめられない
+
+unit は「アプリ側の判断」と「SW 側の応答」を別々に見ているだけで、**その 2 つが
+つながっているか**は誰も見ていない(P7 段③ review H-1 と同じ穴)。
+`tests/smoke/update.smoke.spec.ts` が **実際に別 build の `sw.js` を配る** ──
+`dist/sw.js` の build id を書き換えて reload し、案内が出る → 押す → 交代 → 再読込 →
+**新 build の cache になり旧 build の cache が消えている** → **ノートは残っている**
+まで見る(5.4s)。⚠ 生成物を書き換えるので `finally` で必ず戻す。
+
+#### 🔴 変異試験で「smoke から観測できない政策」が露見した
+
+「押したら案内が消える」を `main.ts` に直書きしていたら、**変異が生き残った** ──
+押した後は再読込が走るので、消えていなくても次のページには無い。
+`createUpdatePrompt` として取り出し、unit で pin した。
+**取り出す判断の根拠が「テストできるようになるから」だったのは、これが初めて**である。
+
+変異試験 14 件・生存 0(SW 2 / 案内の判断 6 / 面と動き 4 / 配線 2)。
+うち 5 件は smoke でしか落ちない(配線)、6 件は unit でしか落ちない(観測不能)。
 
 ---
 

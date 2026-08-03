@@ -104,7 +104,21 @@ const MATCH = { cacheName: CACHE, ignoreVary: true };
 self.addEventListener('install', (event) => {
   // ⚠ 1 件でも失敗したら install を失敗させる(半端な cache でオフラインに
   // 入ると「開くのに中身が無い」という、いちばん分からない壊れ方をする)
-  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(PRECACHE)).then(() => self.skipWaiting()));
+  /*
+   * 🔴 ここで skipWaiting を呼ばない(段⑤)。呼ぶと user が何もしていないのに
+   * 交代が起き、activate が旧 build の cache を消す ── 開いている旧タブが
+   * 後から旧 hash の chunk を取りに行く経路(boot 中の storage worker 作り直し)で
+   * 取り零す。交代は user が押したときだけ(下の message)。
+   */
+  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(PRECACHE)));
+});
+
+/*
+ * 交代の合図。⚠ アプリ側が待機中の worker を見つけて user に見せ、
+ * 押されたときだけ送る(src/adapter/platform/sw/update-prompt.ts)。
+ */
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') void self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
