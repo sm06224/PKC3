@@ -9,11 +9,11 @@
  * ⚠ 例外を握り潰さない ── 1 件の添付が壊れていても取込は続けたいので、
  * 呼び側が「この 1 件だけ落ちた」と分かる形で返す。
  */
-import { processAsset, type AssetJob } from './asset-codec';
+import { processAsset, hashAsset, isHashJob, type AssetJob, type AssetHashJob } from './asset-codec';
 
 interface Incoming {
   id: number;
-  payload: AssetJob;
+  payload: AssetJob | AssetHashJob;
 }
 
 const ctx = self as unknown as {
@@ -23,6 +23,19 @@ const ctx = self as unknown as {
 
 ctx.onmessage = (ev: MessageEvent<Incoming>): void => {
   const { id, payload } = ev.data;
+  // 🔑 ハッシュだけの依頼は**返す bytes が無い**(P8 段㉓)── transfer もしない。
+  //    Blob は参照で来ているので、materialize するのはこの中だけである
+  if (isHashJob(payload)) {
+    void hashAsset(payload).then(
+      (result) => {
+        ctx.postMessage({ id, ok: true, result });
+      },
+      (e: unknown) => {
+        ctx.postMessage({ id, ok: false, error: String(e) });
+      },
+    );
+    return;
+  }
   void processAsset(payload).then(
     (result) => {
       ctx.postMessage({ id, ok: true, result }, [result.bytes]);

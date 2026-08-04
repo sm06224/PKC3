@@ -27,8 +27,14 @@
  * 添付処理が動き出す。純粋部はここ、配線は `asset-worker.ts`。
  */
 
-/** これ以上はハッシュを取らない(`asset-key.ts` の閾値と同じ ── 意味も同じ)。 */
-export const WORKER_HASH_MAX_BYTES = 64 * 1024 * 1024;
+/**
+ * これ以上はハッシュを取らない。
+ * 🔴 **`asset-key.ts` の値をそのまま使う**(P8 段㉓)── かつては同じ数字を
+ * ここに別途書いており、「同じ ── 意味も同じ」とコメントで言うだけで、
+ * 両者を結ぶものが何も無かった。片方を動かせば黙って乖離する。
+ */
+export { HASH_MAX_BYTES as WORKER_HASH_MAX_BYTES } from '@adapter/platform/storage/asset-key';
+import { HASH_MAX_BYTES } from '@adapter/platform/storage/asset-key';
 
 export interface AssetJob {
   /** 生バイト(gzip されているかは `gzipped` が言う)。**transfer で渡す**。 */
@@ -88,7 +94,7 @@ export async function processAsset(job: AssetJob): Promise<AssetResult> {
       ).arrayBuffer()
     : job.bytes;
   // ⚠ 閾値超はハッシュを取らない(全量を heap に載せない ── asset-key.ts と同じ判断)
-  if (raw.byteLength > (job.hashMaxBytes ?? WORKER_HASH_MAX_BYTES))
+  if (raw.byteLength > (job.hashMaxBytes ?? HASH_MAX_BYTES))
     return { bytes: raw, hash: null };
   const digest = await crypto.subtle.digest('SHA-256', raw);
   const hash = Array.from(new Uint8Array(digest))
@@ -97,3 +103,53 @@ export async function processAsset(job: AssetJob): Promise<AssetResult> {
   return { bytes: raw, hash };
 }
 
+
+/**
+ * **Blob をそのまま渡してハッシュだけ取る**依頼(P8 段㉓)。
+ *
+ * 🔴 これが無かったので、添付を貼る経路は `identifyAsset` を**メインで**呼んでいた。
+ * 🔴 **実測**(心拍 4ms の最大欠測。同じビルドで `?pkc-asset-inline` の有無だけを
+ * 変えた A/B を交互に 2 ペア。32MB の添付 1 件):
+ * ```
+ *   ワーカー   最大欠測 10 / 14 ms
+ *   メイン     最大欠測 500 / 726 ms   ← 明確に体感できる固まり
+ * ```
+ * user から実機で「添付とかでメインスレッドブロックするのは気になるね」と報告があった。
+ *
+ * ⚠ **どの呼び出しが止めているかは主張しない**。遊んでいるページで
+ * `blob.arrayBuffer()` と `crypto.subtle.digest` を単体で測ると**どちらも
+ * 最大欠測 0〜8ms** で、止まらない ── 止まるのは**添付の実経路**(同じ 32MB を
+ * IDB へ書く処理と重なる状況)だけである。分かっているのは
+ * 「**この一式をワーカーへ出すとメインが止まらなくなる**」という向きだけ。
+ *
+ * 🔑 **Blob は構造化複製で参照として渡る** ── postMessage に載せても bytes は
+ * コピーされない。materialize するのは**ワーカーの中**で、しかもワーカーは
+ * アイドルで kill されるので**常駐が返る**(user 指示 2026-08-03 の 3 規律)。
+ * ⚠ だから transfer は要らない(というより Blob は transferable ではない)。
+ */
+export interface AssetHashJob {
+  blob: Blob;
+  /** ⚠ test の観測点(64MB の fixture は作れない ── `AssetJob` と同じ理由)。 */
+  hashMaxBytes?: number;
+}
+
+export interface HashResult {
+  /** SHA-256 の hex。閾値超は `null`(その 1 件は dedupe されない)。 */
+  hash: string | null;
+}
+
+/** ハッシュだけ取る(worker の受け口が使う形)。⚠ **worker の外からも呼べる**。 */
+export async function hashAsset(job: AssetHashJob): Promise<HashResult> {
+  if (job.blob.size > (job.hashMaxBytes ?? HASH_MAX_BYTES)) return { hash: null };
+  const digest = await crypto.subtle.digest('SHA-256', await job.blob.arrayBuffer());
+  return {
+    hash: Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join(''),
+  };
+}
+
+/** 依頼の見分け。⚠ 判定は**ここ 1 か所**(worker と client の 2 か所に書かない)。 */
+export function isHashJob(job: AssetJob | AssetHashJob): job is AssetHashJob {
+  return 'blob' in job;
+}

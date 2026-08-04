@@ -29,11 +29,17 @@ import {
   decodeAsset,
   processAsset,
   transferableBuffer,
+  hashAsset,
+  isHashJob,
   WORKER_HASH_MAX_BYTES,
 } from '../../src/adapter/platform/asset/asset-codec';
 import { AssetClient } from '../../src/adapter/platform/asset/asset-client';
 import { JobMonitor } from '../../src/adapter/platform/job-monitor';
-import { assetKeyFromHash, HASH_MAX_BYTES } from '../../src/adapter/platform/storage/asset-key';
+import {
+  assetKeyFromHash,
+  identifyAsset,
+  HASH_MAX_BYTES,
+} from '../../src/adapter/platform/storage/asset-key';
 
 /**
  * ⚠ **query を付けて読み直す**(module cache を外す)。`self` を差してから
@@ -255,6 +261,84 @@ describe('worker の配線(node で実物を読む)', () => {
       expect(posted).toHaveLength(1);
       expect(posted[0]).toMatchObject({ id: 1, ok: false });
       expect(String((posted[0] as { error: string }).error)).not.toBe('');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+/**
+ * P8 段㉓: 🔴 **添付を貼る経路のハッシュもワーカーへ**。
+ *
+ * 🔴 段⑮ は「取込」だけをワーカーへ出し、**添付を貼る経路は素のまま**だった。
+ * 実測(心拍 4ms の最大欠測。同じビルドで `?pkc-asset-inline` の有無だけを変えた
+ * A/B を交互に 2 ペア、32MB の添付 1 件):
+ * ```
+ *   ワーカー   10 / 14 ms
+ *   メイン     500 / 726 ms   ← 明確に体感できる固まり
+ * ```
+ * user から実機で「添付とかでメインスレッドブロックするのは気になるね」と報告。
+ *
+ * ⚠ **どの呼び出しが止めているかは主張しない**。遊んでいるページで
+ * `blob.arrayBuffer()` と `crypto.subtle.digest` を単体で測るとどちらも
+ * 最大欠測 0〜8ms で止まらない ── 止まるのは添付の実経路(同じ 32MB を IDB へ
+ * 書く処理と重なる状況)だけである。
+ *
+ * 🔑 **Blob は構造化複製で参照として渡る**ので、postMessage に載せても bytes は
+ * コピーされない ── materialize するのはワーカーの中だけで、そのワーカーは
+ * アイドルで kill されるから常駐も返る。
+ */
+describe('Blob のハッシュ(添付を貼る経路)', () => {
+  it('🔴 ワーカー経路と素の経路が**同じ hash** を出す', async () => {
+    const raw = bytes('添付の中身');
+    const blob = new Blob([raw as unknown as BlobPart]);
+    const out = await hashAsset({ blob });
+    expect(out.hash, 'ワーカー用の関数が別の答えを出している').toBe(await sha256Hex(raw));
+    // 🔑 key の作り方も 1 本(`assetKeyFromHash`)── 直す前は `identifyAsset` が
+    //    `${PREFIX}${hash}` を書き直しており、1 本に寄せた規則に写しがあった
+    expect(assetKeyFromHash(out.hash).key).toBe((await identifyAsset(blob)).key);
+  });
+
+  it('🔴 閾値を超えたらハッシュを取らない(全量を載せない)', async () => {
+    const blob = new Blob([bytes('12345') as unknown as BlobPart]);
+    expect((await hashAsset({ blob, hashMaxBytes: 4 })).hash, '閾値を無視している').toBeNull();
+    expect((await hashAsset({ blob, hashMaxBytes: 5 })).hash).not.toBeNull();
+  });
+
+  it('⚠ 閾値の既定が `asset-key.ts` と同じ値(2 か所に数字を書かない)', () => {
+    expect(WORKER_HASH_MAX_BYTES).toBe(HASH_MAX_BYTES);
+  });
+
+  it('🔴 依頼の見分けが効く(展開の依頼と取り違えない)', () => {
+    expect(isHashJob({ blob: new Blob([]) })).toBe(true);
+    expect(isHashJob({ bytes: new ArrayBuffer(4), gzipped: false })).toBe(false);
+  });
+
+  /**
+   * 🔴 **worker の配線がハッシュ依頼を受ける**。
+   * ⚠ 返す bytes が無いので **transfer を渡さない** ── 渡すと
+   *   `DataCloneError`(null は transferable ではない)で落ちる。
+   */
+  it('🔴 worker がハッシュ依頼に答える(bytes を返さない / transfer もしない)', async () => {
+    const posted: Array<{ msg: unknown; transfer?: Transferable[] }> = [];
+    const fake = {
+      onmessage: null as ((ev: { data: unknown }) => void) | null,
+      postMessage: (msg: unknown, transfer?: Transferable[]) => posted.push({ msg, transfer }),
+    };
+    vi.stubGlobal('self', fake);
+    try {
+      await import(`${WORKER}?worker-hash`);
+      const raw = bytes('ハッシュだけ');
+      fake.onmessage!({
+        data: { id: 9, payload: { blob: new Blob([raw as unknown as BlobPart]) } },
+      });
+      await new Promise((r) => setTimeout(r, 20));
+      expect(posted, 'ハッシュ依頼に答えていない').toHaveLength(1);
+      const { msg, transfer } = posted[0]!;
+      const m = msg as { id: number; ok: boolean; result: { hash: string | null } };
+      expect(m).toMatchObject({ id: 9, ok: true });
+      expect(m.result.hash).toBe(await sha256Hex(raw));
+      expect(transfer, 'transfer を渡している(返す bytes は無い)').toBeUndefined();
     } finally {
       vi.unstubAllGlobals();
     }

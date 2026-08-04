@@ -16,7 +16,7 @@
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { attachmentBody } from '@features/flavor/attachment-flavor';
-import { identifyAsset } from '@adapter/platform/storage/asset-key';
+import { identifyAsset, assetKeyFromHash } from '@adapter/platform/storage/asset-key';
 import { generateLid } from './binder';
 
 export interface AttachDeps {
@@ -32,6 +32,18 @@ export interface AttachDeps {
   >;
   /** quota preflight(無い環境では省略可)。 */
   estimate?(): Promise<{ usage?: number; quota?: number }>;
+  /**
+   * 🔴 **ハッシュを取る口**(P8 段㉓)。アプリからは**必ずワーカーを渡す**。
+   *
+   * 省略すると `identifyAsset` にそのまま落ちる = ハッシュがメインで走る。
+   * 同じビルドの A/B(32MB の添付)で、メインの最大欠測が
+   * **10/14ms(ワーカー)対 500/726ms(メイン)**。
+   * user から実機で「添付とかでメインスレッドブロックするのは気になるね」と報告。
+   *
+   * ⚠ `identifyAsset` を直接 import しているとここで差し替えられない ──
+   *   だから attach 側は**この口だけ**を見る。
+   */
+  hashBlob?(blob: Blob): Promise<string | null>;
 }
 
 
@@ -109,7 +121,12 @@ export async function attachFiles(
       // (表示は entry frontmatter 側 mime を使うので正しい ── assets.mime を
       // 信じる消費者を作らない)。asset 削除は参照カウント前提になる
       // (PKC3 の GC は body 走査ベースなので元から正しい)
-      const { key: assetKey, hash } = await identifyAsset(file);
+      // 🔑 ハッシュは**ワーカーで取る**(段㉓)。口が無い環境だけその場で回す
+      //    ── 返る key は同じ関数(`assetKeyFromHash`)から出るので、
+      //    「ワーカーは速さの話であって、正しさの話ではない」が保たれる
+      const { key: assetKey, hash } = deps.hashBlob
+        ? assetKeyFromHash(await deps.hashBlob(file))
+        : await identifyAsset(file);
       if (!known.has(assetKey)) {
         await deps.putBlob(assetKey, file);
         await deps.putMeta({ key: assetKey, mime, size: file.size, hash });

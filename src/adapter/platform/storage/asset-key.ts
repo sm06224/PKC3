@@ -84,9 +84,10 @@ export function assetKeyFromHash(hash: string | null): AssetIdentity {
  * 「**64MB までは常に全量を載せる**」という意味でもある。
  */
 export async function identifyAsset(blob: Blob): Promise<AssetIdentity> {
-  if (blob.size > HASH_MAX_BYTES) return { key: generateAssetKey(), hash: null };
-  const hash = await sha256Hex(blob);
-  return { key: `${PREFIX}${hash}`, hash };
+  // ⚠ key の作り方は `assetKeyFromHash` の 1 本(P8 段㉓)── ここで
+  //    `${PREFIX}${hash}` を書き直すと、1 本に寄せたはずの規則に 2 つ目の写しができる
+  if (blob.size > HASH_MAX_BYTES) return assetKeyFromHash(null);
+  return assetKeyFromHash(await sha256Hex(blob));
 }
 
 /** content key かどうか(採番 key と見分ける ── 診断・test 用)。 */

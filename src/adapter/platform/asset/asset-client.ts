@@ -25,6 +25,9 @@ import {
   transferableBuffer,
   type AssetJob,
   type AssetResult,
+  hashAsset,
+  type AssetHashJob,
+  type HashResult,
 } from './asset-codec';
 
 /** アイドルで畳むまで。⚠ 取込は連続して来るので、短すぎると作り直しで損をする。 */
@@ -73,6 +76,25 @@ export class AssetClient {
     const job: AssetJob = { bytes: transferableBuffer(view), gzipped };
     if (!this.lease) return processAsset(job);
     return this.lease.run<AssetResult>(job, [job.bytes]);
+  }
+
+  /**
+   * **Blob のハッシュだけ**取る(P8 段㉓)。
+   *
+   * 🔴 添付を貼る経路のための口。ここが無かったので `identifyAsset` をメインで
+   * 呼んでいた ── 同じビルドの A/B で、32MB の添付でメインの最大欠測が
+   * **10/14ms(ワーカー)対 500/726ms(メイン)**(user 実機報告と一致)。
+   * ⚠ どの呼び出しが止めているかは主張しない(単体では両方とも止まらない)。
+   * ⚠ **Blob は参照で渡る**(構造化複製で bytes はコピーされない)ので、
+   *   transfer は要らない。materialize されるのはワーカーの中だけ。
+   */
+  hash(blob: Blob, hashMaxBytes?: number): Promise<HashResult> {
+    const job: AssetHashJob = {
+      blob,
+      ...(hashMaxBytes !== undefined ? { hashMaxBytes } : {}),
+    };
+    if (!this.lease) return hashAsset(job);
+    return this.lease.run<HashResult>(job);
   }
 
   /** 面を畳むときに(取込が終わったら畳む ── 常駐させない)。 */
