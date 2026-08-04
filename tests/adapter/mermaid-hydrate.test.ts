@@ -10,25 +10,32 @@
  * mermaid の読み込みが要るので、ここでは配線だけを見る。
  */
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { hydrateMermaid } from '../../src/adapter/ui/render/mermaid-hydrate';
+import { hydrateMermaid, type MermaidScope } from '../../src/adapter/ui/render/mermaid-hydrate';
 import { renderToPng } from '../../src/adapter/ui/render/mermaid-raster';
 
-// 🔑 焼く所は差す ── ここで見たいのは**いつ焼き直すか**であって、絵ではない
-vi.mock('../../src/adapter/ui/render/mermaid-raster', () => ({
-  renderToPng: vi.fn(async () => ({
-    png: new Blob(['png'], { type: 'image/png' }),
-    cssWidth: 320,
-  })),
-  readPalette: () => ({
-    bg: '#fff',
-    alt: '#eee',
-    fg: '#000',
-    line: '#666',
-    border: '#ccc',
-    accent: '#080',
-    dark: false,
-  }),
-}));
+// 🔑 焼く所は差す ── ここで見たいのは**いつ焼き直すか**であって、絵ではない。
+// ⚠ `cacheKey` は**本物を通す**(段㉘)── 焼き直しの要否は鍵の一致で決めるので、
+//    ここを偽物にすると「鍵が同じなら焼かない」という当の振る舞いを test 側が
+//    決めてしまう(stub が実装より正しいとバグが隠れる、という規律)。
+vi.mock('../../src/adapter/ui/render/mermaid-raster', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../../src/adapter/ui/render/mermaid-raster')>();
+  return {
+    cacheKey: real.cacheKey,
+    renderToPng: vi.fn(async () => ({
+      png: new Blob(['png'], { type: 'image/png' }),
+      cssWidth: 320,
+    })),
+    readPalette: () => ({
+      bg: '#fff',
+      alt: '#eee',
+      fg: '#000',
+      line: '#666',
+      border: '#ccc',
+      accent: '#080',
+      dark: false,
+    }),
+  };
+});
 
 const observed: Element[] = [];
 let disconnected = 0;
@@ -48,13 +55,61 @@ class FakeIO {
   }
 }
 
+/** 器の親を観る `ResizeObserver`(段㉘)。「幅が変わった」を起こす手を持つ。 */
+const roObserved: Element[] = [];
+let roDisconnected = 0;
+let fireResize: (() => void) | null = null;
+class FakeRO {
+  constructor(cb: () => void) {
+    fireResize = cb;
+  }
+  observe(el: Element): void {
+    roObserved.push(el);
+  }
+  disconnect(): void {
+    roDisconnected += 1;
+  }
+}
+
+/** dpr の問い(段㉘)。外れたことを起こす手を持つ。 */
+let fireDpr: (() => void) | null = null;
+let mqRemoved = 0;
+function installMatchMedia(): void {
+  vi.stubGlobal('matchMedia', (q: string) => ({
+    media: q,
+    matches: true,
+    addEventListener: (_t: string, cb: () => void) => {
+      fireDpr = cb;
+    },
+    removeEventListener: () => {
+      mqRemoved += 1;
+    },
+  }));
+}
+
+/** 器の親の見かけの幅を決める(happy-dom は実レイアウトを持たない)。 */
+function setPaneWidth(host: Element, px: number): void {
+  Object.defineProperty(host.parentElement!, 'clientWidth', {
+    value: px,
+    configurable: true,
+  });
+}
+
 beforeEach(() => {
   observed.length = 0;
   disconnected = 0;
   fire = null;
+  roObserved.length = 0;
+  roDisconnected = 0;
+  fireResize = null;
+  fireDpr = null;
+  mqRemoved = 0;
   vi.mocked(renderToPng).mockClear();
   document.documentElement.setAttribute('data-pkc-theme', 'light');
   vi.stubGlobal('IntersectionObserver', FakeIO);
+  vi.stubGlobal('ResizeObserver', FakeRO);
+  vi.stubGlobal('devicePixelRatio', 1);
+  installMatchMedia();
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -421,5 +476,192 @@ describe('塊の畳み方と焼き直しの世代(P8 段⑰)', () => {
     await settle();
     expect(vi.mocked(renderToPng), '画面に無い器を焼いた').toHaveBeenCalledTimes(0);
     scope.dispose();
+  });
+});
+
+/**
+ * P8 段㉘: 🔴 **幅と dpr が変わったら焼き直す**。
+ *
+ * 🔴 段⑬ は配色について「鍵はあるが焼き直しを起こす者がいない」を直したが、
+ * **同じ穴が幅と dpr に残っていた**。実測(preview ビルドを実ブラウザで):
+ *
+ * | | 器の幅 | PNG 実寸 | dpr |
+ * |---|---|---|---|
+ * | 初期 | 685px | 688 × 28 | 1 |
+ * | 幅を広げた | 974px | **688 × 28**(そのまま) | 1 |
+ * | dpr を 3 に | 974px | **688 × 28**(そのまま) | 3 |
+ * | 塊を作り直した | 974px | 2928 × 122 | 3 |
+ *
+ * ── ズームすると**周りの文字だけ鮮明になって図はぼける**。ペイン幅を広げても
+ * 図は小さいまま。塊を作り直せば直るので、**鍵は正しく、引き金だけが無かった**。
+ *
+ * ⚠ 観測点は「焼く関数が呼び直されたか」+「**新しい条件で呼んだか**」。
+ * 呼び直しただけで前の幅を渡す実装では意味がない。
+ */
+describe('幅と dpr を変えたときの焼き直し(P8 段㉘)', () => {
+  beforeEach(() => {
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => 'blob:x');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  async function settle(): Promise<void> {
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    await new Promise((r) => setTimeout(r, 200)); // 間引き(150ms)を越える
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+  }
+
+  /** 器 1 つを焼いた状態まで進める。 */
+  async function painted(width: number): Promise<{ b: HTMLElement; scope: MermaidScope }> {
+    const b = block('graph TD\n A-->B');
+    document.body.append(b);
+    const host = b.querySelector('[data-pkc-mermaid-src]')!;
+    setPaneWidth(host, width);
+    const scope = hydrateMermaid(b);
+    fire!([observed[0]!]);
+    await settle();
+    return { b, scope };
+  }
+
+  it('⚠ 器の**親**を観る(器そのものではない ── 焼く度に鳴る輪になる)', async () => {
+    const { b, scope } = await painted(700);
+    const host = b.querySelector('[data-pkc-mermaid-src]')!;
+    expect(roObserved, '幅を観ていない').toHaveLength(1);
+    expect(roObserved[0], '器そのものを観ている(焼く → 器が広がる → また焼く)').toBe(
+      host.parentElement,
+    );
+    scope.dispose();
+    b.remove();
+  });
+
+  it('🔴 ペインが広がったら、**新しい幅で**焼き直す', async () => {
+    const { b, scope } = await painted(700);
+    expect(vi.mocked(renderToPng)).toHaveBeenCalledTimes(1);
+    const before = vi.mocked(renderToPng).mock.calls[0]![0].width;
+
+    setPaneWidth(b.querySelector('[data-pkc-mermaid-src]')!, 1200);
+    fireResize!();
+    await settle();
+
+    expect(vi.mocked(renderToPng), '幅が変わっても焼き直していない').toHaveBeenCalledTimes(2);
+    const after = vi.mocked(renderToPng).mock.calls[1]![0].width;
+    // ⚠ **広い幅で**焼いている(呼び直しただけで前の幅を渡すと意味がない)
+    expect(after, `幅が更新されていない(${before} → ${after})`).toBeGreaterThan(before);
+    scope.dispose();
+    b.remove();
+  });
+
+  it('🔴 dpr が変わったら、**新しい dpr で**焼き直す', async () => {
+    const { b, scope } = await painted(700);
+    expect(vi.mocked(renderToPng).mock.calls[0]![0].dpr).toBe(1);
+
+    vi.stubGlobal('devicePixelRatio', 3);
+    fireDpr!();
+    await settle();
+
+    expect(vi.mocked(renderToPng), 'dpr が変わっても焼き直していない').toHaveBeenCalledTimes(2);
+    expect(vi.mocked(renderToPng).mock.calls[1]![0].dpr, 'dpr が更新されていない').toBe(3);
+    scope.dispose();
+    b.remove();
+  });
+
+  /**
+   * 🔴 **何も変わっていない通知では焼かない**。`ResizeObserver` は高さの変化でも
+   * 鳴る(焼いた `<img>` を入れた瞬間にも鳴る)ので、鳴るたびに焼くと
+   * **焼く → 鳴る → 焼く**の輪になり、メインスレッドを掴んだまま離さない。
+   */
+  it('🔴 幅も dpr も変わっていない通知では焼き直さない(輪を作らない)', async () => {
+    const { b, scope } = await painted(700);
+    expect(vi.mocked(renderToPng)).toHaveBeenCalledTimes(1);
+
+    fireResize!();
+    await settle();
+    fireResize!();
+    await settle();
+
+    expect(vi.mocked(renderToPng), '変わっていないのに焼き直した').toHaveBeenCalledTimes(1);
+    scope.dispose();
+    b.remove();
+  });
+
+  /**
+   * ⚠ 幅は 16px 刻みに丸めてある ── ドラッグ中の 1px ずつの変化で焼かない。
+   * これが効いていないと、ペインを掴んで動かしている間ずっと焼き続ける。
+   */
+  it('🔴 わずかな幅の変化では焼き直さない(丸めが効いている)', async () => {
+    const { b, scope } = await painted(704);
+    setPaneWidth(b.querySelector('[data-pkc-mermaid-src]')!, 707);
+    fireResize!();
+    await settle();
+    expect(vi.mocked(renderToPng), '1px の変化で焼き直した').toHaveBeenCalledTimes(1);
+    scope.dispose();
+    b.remove();
+  });
+
+  it('🔴 畳んだら引き金も畳む(外した面のために観測を残さない)', async () => {
+    const { b, scope } = await painted(700);
+    scope.dispose();
+    expect(roDisconnected, '幅の観測器が残っている').toBe(1);
+    expect(mqRemoved, 'dpr の問いが残っている').toBeGreaterThan(0);
+
+    // 畳んだ後に鳴っても焼かない
+    setPaneWidth(b.querySelector('[data-pkc-mermaid-src]')!, 1400);
+    fireResize!();
+    await settle();
+    expect(vi.mocked(renderToPng), '畳んだ後に焼いた').toHaveBeenCalledTimes(1);
+    b.remove();
+  });
+});
+
+/**
+ * P8 段㉘: 🔴 **掴んで動かしている間は焼かない**(間引き)。
+ *
+ * `ResizeObserver` はペインをドラッグしている間フレームごとに鳴る。焼くのは
+ * メインスレッドなので、鳴るたびに焼くと**掴んでいる間ずっと詰まる**
+ * (しかも途中の幅で焼いた絵は、離した瞬間に全部捨てられる)。
+ *
+ * ⚠ 観測点は「間引きの秒数」ではなく「**途中の幅で焼かなかったか**」──
+ * 秒数を見る test は実装を写しただけで、何も守らない。
+ */
+describe('幅を掴んで動かしている間の間引き(P8 段㉘)', () => {
+  beforeEach(() => {
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => 'blob:x');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('🔴 ドラッグ中の途中の幅では焼かず、**落ち着いた幅で 1 回だけ**焼く', async () => {
+    const b = block('graph TD\n A-->B');
+    document.body.append(b);
+    const host = b.querySelector('[data-pkc-mermaid-src]')!;
+    setPaneWidth(host, 700);
+    const scope = hydrateMermaid(b);
+    fire!([observed[0]!]);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(vi.mocked(renderToPng)).toHaveBeenCalledTimes(1);
+
+    // 掴んで動かす(フレームごとに幅が変わって鳴る)
+    for (const w of [900, 1100, 1300]) {
+      setPaneWidth(host, w);
+      fireResize!();
+      await new Promise((r) => setTimeout(r, 15)); // 1 フレームぶん(間引きより短い)
+    }
+    // 離した後、落ち着くのを待つ
+    await new Promise((r) => setTimeout(r, 250));
+
+    expect(
+      vi.mocked(renderToPng),
+      '途中の幅でも焼いている(掴んでいる間ずっと焼き続ける)',
+    ).toHaveBeenCalledTimes(2);
+    // ⚠ **最後の幅**で焼けている(途中で止まっていない)
+    const last = vi.mocked(renderToPng).mock.calls[1]![0].width;
+    expect(last, `落ち着いた幅で焼いていない(${last})`).toBeGreaterThan(1200);
+
+    scope.dispose();
+    b.remove();
   });
 });
