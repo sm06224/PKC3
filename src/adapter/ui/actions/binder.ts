@@ -321,8 +321,15 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'set-view': (dispatcher, target) => {
     const view = target.getAttribute('data-pkc-view') ?? '';
-    if (VIEW_MODES.has(view))
-      dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: view as ViewMode });
+    if (!VIEW_MODES.has(view)) return;
+    // 🔴 **もう一度押したら戻る**(P8 段⑲)。直す前の 設定 は行きっぱなしで、
+    //    閉じる導線がどこにも無かった ── 抜けられるのは左のタブを押すか
+    //    新規作成だけで、user から見ると「画面から出られない」
+    const cur = dispatcher.getState().viewMode;
+    dispatcher.dispatch({
+      type: 'SET_VIEW_MODE',
+      mode: (cur === view ? 'detail' : view) as ViewMode,
+    });
   },
   'toggle-todo': (dispatcher, target) => {
     // data-pkc-entry は「entry を表す要素」専用 ── ボタンからは closest で引く

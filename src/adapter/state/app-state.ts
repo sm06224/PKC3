@@ -437,14 +437,22 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       if (!state.entryMetas.has(action.lid)) return { state, events: [] };
       // 同一 lid でも openBody が確立していなければ再要求する
       // (読み失敗後の再クリックが自然な retry になる ── review C)
+      // 🔴 **設定を開いたまま一覧を押したら、中央をノートへ戻す**(P8 段⑲)。
+      //    直す前は右の情報ペインだけ切り替わり、中央は設定のまま・追記欄も
+      //    消えたままで、ノートが開かない理由が画面のどこにも無かった
+      //    (マニュアル「中央は常にいま開いているノート」の当の破れ)
+      const leaveSettings = state.viewMode === 'settings';
       if (state.selectedLid === action.lid && state.openBody?.lid === action.lid)
-        return { state, events: [] };
+        return leaveSettings
+          ? { state: { ...state, viewMode: 'detail' }, events: [] }
+          : { state, events: [] };
       // 選択が変わったら旧 openBody は破棄(速やかな破棄の原則)し、新 body を要求。
       // 通知エラー(読み失敗等)は新しい試行でクリア(エラーは state 駆動 ──
       // 表示寿命が「次の操作まで」で終わらない、P3-5 review #3 の解消)
       return {
         state: {
           ...state,
+          ...(leaveSettings ? { viewMode: 'detail' as const } : {}),
           selectedLid: action.lid,
           openBody: null,
           error: null,

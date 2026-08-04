@@ -653,3 +653,41 @@ test.describe('高精細画面', () => {
     expect(errors).toEqual([]);
   });
 });
+
+/**
+ * P8 段⑲: 🔴 **設定から出られる**。
+ *
+ * 直す前の 設定 は行きっぱなしだった ── 閉じるボタンが無く、`SELECT_ENTRY` は
+ * `viewMode` を戻さないので、一覧のノートを押しても**右の情報ペインだけ**
+ * 切り替わって中央は設定のまま(追記欄も消えたまま)。ノートが開かない理由が
+ * 画面のどこにも無い。マニュアル「中央は常にいま開いているノート」の当の破れ。
+ */
+test('🔴 設定を開いても、ノートを押せば戻る / もう一度押しても戻る', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 800 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('設定から戻る');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+  const settings = page.locator('[data-pkc-view-pane="settings"]');
+  const detail = page.locator('[data-pkc-view-pane="detail"]');
+
+  // ① 一覧のノートを押すと戻る
+  await clickReal(page, '[data-pkc-view="settings"]');
+  await expect(settings, '設定が開かない').toBeVisible();
+  await clickReal(page, '[data-pkc-region="sidebar"] [data-pkc-action="select-entry"]');
+  await expect(detail, 'ノートを押しても中央が設定のまま').toBeVisible();
+  await expect(settings).toBeHidden();
+  // 追記欄も戻る(中央が本文の面に戻った証拠)
+  await expect(page.locator('[data-pkc-field="append-input"]')).toBeVisible();
+
+  // ② もう一度 設定 を押しても戻る(閉じる導線)
+  await clickReal(page, '[data-pkc-view="settings"]');
+  await expect(settings).toBeVisible();
+  await clickReal(page, '[data-pkc-view="settings"]');
+  await expect(detail, '設定をもう一度押しても閉じない').toBeVisible();
+  await expect(settings).toBeHidden();
+
+  expect(errors).toEqual([]);
+});
