@@ -72,6 +72,10 @@ const PAIRS: readonly { fg: string; bg: string; min: number; what: string }[] = 
   { fg: '--danger', bg: '--surface', min: 4, what: '危険な操作' },
   { fg: '--accent', bg: '--surface', min: 3, what: 'リンク・強調' },
   { fg: '--border', bg: '--surface', min: 1.2, what: '枠(見えること)' },
+  // コードの色は `pre`(= `--surface-2`)の上に載る。**本文と同じ 4.5:1** を課す
+  // ── 「色が付いていれば読める」ではない(solarized の公式 green は 2.6:1)
+  { fg: '--code-key', bg: '--surface-2', min: 4.5, what: 'コードの予約語' },
+  { fg: '--code-lit', bg: '--surface-2', min: 4.5, what: 'コードの値' },
 ];
 
 describe('配色トークン', () => {

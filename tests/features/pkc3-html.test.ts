@@ -14,6 +14,7 @@ import {
   HTML_FORMAT,
 } from '../../src/features/export/pkc3-html';
 import type { ArchiveSource } from '../../src/features/export/pkc3-archive';
+import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 
 const enc = new TextEncoder();
 
@@ -69,9 +70,24 @@ function source(f: Fake): ArchiveSource {
 
 const NOW = '2026-08-02T00:00:00.000Z';
 
+/**
+ * 描かれた HTML の**見える文字**を取り出す(P8 段⑲)。
+ *
+ * 🔑 本文は書出し側で描いた HTML として入るので、原文と 1 文字一致はしない
+ * (見出しの `#` は消え、typographer が引用符を丸める)。ここが見たいのは
+ * 「**書いた中身が読める形で届いているか**」なので、見える文字で突き合わせる。
+ */
+function textOf(html: string): string {
+  const el = document.createElement('div');
+  el.innerHTML = html;
+  return (el.textContent ?? '')
+    .replace(/[\u201c\u201d]/g, '"')
+    .replace(/[\u2018\u2019]/g, "'");
+}
+
 /** 生成された HTML から `#pkc-data` の JSON を取り出す(閲覧側と同じ読み方)。 */
 async function dataOf(blob: Blob): Promise<Record<string, never> & {
-  entries: Array<{ lid: string; title: string; body: string }>;
+  entries: Array<{ lid: string; title: string; html: string; refs?: string[]; attach?: string[] }>;
   assets: Array<{ key: string; mime: string; size: number }>;
   assetData: Record<string, string>;
   title: string;
@@ -95,10 +111,15 @@ describe('可搬 HTML', () => {
     const out = await writePortableHtml(src, NOW);
     const d = await dataOf(out.blob);
     expect(d.format).toBe(HTML_FORMAT);
-    expect(d.entries.map((e) => [e.title, e.body])).toEqual([
-      ['議事録', '# 議事録\n本文\n'],
-      ['メモ', 'ふつうの本文'],
-    ]);
+    // 🔑 本文は**描かれて**入る(P8 段⑲)── かつては素の markdown 文字列を
+    //    そのまま渡し、閲覧側が `<pre>` で出していた(見出しが `#` のまま)
+    expect(d.entries.map((e) => e.title)).toEqual(['議事録', 'メモ']);
+    expect(d.entries[0]!.html, '見出しが描かれていない').toContain('<h1');
+    expect(textOf(d.entries[0]!.html)).toContain('議事録');
+    expect(textOf(d.entries[0]!.html)).toContain('本文');
+    expect(textOf(d.entries[1]!.html)).toContain('ふつうの本文');
+    // ⚠ 原文をそのまま積んでいない(積むと配る量が倍になり、描く意味も無い)
+    expect(JSON.stringify(d.entries[0]), '原文がそのまま入っている').not.toContain('# 議事録');
   });
 
   /**
@@ -125,7 +146,13 @@ describe('可搬 HTML', () => {
     // data script の中身に**生の `<` が 1 個も無い**= トークナイザは何の状態にも入れない
     expect(await dataScript(out.blob)).not.toContain('<');
     const d = await dataOf(out.blob);
-    expect(d.entries[0]!.body).toBe(body); // 中身は完全に保たれる
+    // 中身は**読める形で**保たれる。⚠ 1 文字一致では見られない ── markdown は
+    // バッククォートを消し、typographer が `--` を en dash に丸める(どちらも正しい)。
+    // ここで見たいのは「**生の `<` が 1 個も飲み込まれていない**」ことなので、
+    // 危険な字そのものを数える(飲み込まれていたら本文が静かに欠ける)
+    const angles = (t: string): number => (t.match(/</g) ?? []).length;
+    expect(angles(body), 'この事例に `<` が無い(危険な字を測っていない)').toBeGreaterThan(0);
+    expect(angles(textOf(d.entries[0]!.html)), '`<` が飲み込まれている').toBe(angles(body));
   });
 
   it('🔴 題名だけでも壊れない(1 個の script に全 entry を詰めているので合成する)', async () => {
@@ -197,7 +224,7 @@ describe('可搬 HTML', () => {
     const entries = Array.from({ length: 12 }, (_, i) => ({ lid: `n${i}`, body: `本文 ${i}` }));
     const out = await writePortableHtml(source({ entries, batch: 2 }), NOW);
     const d = await dataOf(out.blob);
-    expect(d.entries.map((e) => e.body)).toEqual(entries.map((e) => e.body));
+    expect(d.entries.map((e) => textOf(e.html).trim())).toEqual(entries.map((e) => e.body));
   });
 
   it('🔴 entry 0 件なら断る', async () => {
@@ -247,7 +274,8 @@ describe('可搬 HTML', () => {
     const html = await out.blob.text();
     expect(html).toContain('<meta charset="utf-8">');
     const d = await dataOf(out.blob);
-    expect(d.entries[0]).toMatchObject({ title: '打ち合わせ', body: '本文です 🎉' });
+    expect(d.entries[0]!.title).toBe('打ち合わせ');
+    expect(textOf(d.entries[0]!.html).trim()).toBe('本文です 🎉');
   });
 
   it('閲覧 UI が入っている(データだけの HTML を出さない)', async () => {
@@ -448,6 +476,62 @@ describe('可搬 HTML — 本文の外にある添付参照', () => {
 });
 
 /**
+ * P8 段⑲: 本文を描く仕事は**差し替えられる**(= アプリはワーカーへ逃がせる)。
+ *
+ * > user 指示 2026-08-03(不可侵)「基本的に重い処理はワーカーにしてください」
+ *
+ * ⚠ 「引数がある」だけでは足りない ── **渡したものが実際に使われる**ことと、
+ * 渡さなかったときも**同じ描画**になることの両方を見る。
+ */
+describe('本文を描く仕事の逃がし方', () => {
+  it('🔴 渡した描画器が**実際に使われる**(件数ぶん呼ばれる)', async () => {
+    const seen: string[] = [];
+    const out = await writePortableHtml(
+      source({
+        entries: [
+          { lid: 'n1', body: '# あ\n' },
+          { lid: 'n2', body: '# い\n' },
+        ],
+      }),
+      NOW,
+      (text) => {
+        seen.push(text);
+        return Promise.resolve('<p data-from-worker>置き換え</p>');
+      },
+    );
+    expect(seen, '渡した描画器が呼ばれていない').toEqual(['# あ\n', '# い\n']);
+    const d = await dataOf(out.blob);
+    expect(d.entries[0]!.html, '渡した描画器の結果が使われていない').toContain('data-from-worker');
+  });
+
+  it('⚠ frontmatter は描画器に渡さない(メタは本文ではない)', async () => {
+    const seen: string[] = [];
+    await writePortableHtml(
+      source({ entries: [{ lid: 'a1', body: '---\nattachment.name: x.png\n---\n本文\n' }] }),
+      NOW,
+      (text) => {
+        seen.push(text);
+        return Promise.resolve('');
+      },
+    );
+    expect(seen[0], 'frontmatter を本文として描いている').toBe('本文\n');
+  });
+
+  it('⚠ 渡さなくても同じ HTML になる(ワーカーは速さの話で、正しさの話ではない)', async () => {
+    const body = '## 見出し\n\n- あ\n';
+    const a = await dataOf((await writePortableHtml(source({ entries: [{ lid: 'n1', body }] }), NOW)).blob);
+    const b = await dataOf(
+      (
+        await writePortableHtml(source({ entries: [{ lid: 'n1', body }] }), NOW, (t) =>
+          Promise.resolve(renderMarkdown(t)),
+        )
+      ).blob,
+    );
+    expect(a.entries[0]!.html).toBe(b.entries[0]!.html);
+  });
+});
+
+/**
  * 閲覧側(インライン JS)を**そのまま実行**して確かめる。
  * ⚠ 「script 文字列に createObjectURL が含まれる」型の assert では、
  * 実際に描けるかは何も分からない ── 動かして DOM を見る。
@@ -534,6 +618,57 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
     expect(document.querySelectorAll('#body img')).toHaveLength(1);
   });
 
+  /**
+   * P8 段⑲: 🔴 **書いたとおりの形で読める**。
+   *
+   * 直す前は本文を丸ごと `<pre>` に入れていたので、見出しも表も箇条書きも
+   * **記号のまま**だった ── 「単体で開いて読める」と案内している当のファイルが
+   * 一番読みにくい、という状態。⚠ 観測点は「HTML に h2 の字が在るか」ではなく
+   * **組み上がった DOM の要素**である。
+   */
+  it('🔴 見出し・箇条書き・表・コードが**構造として**出る', async () => {
+    await run(
+      (
+        await writePortableHtml(
+          source({
+            entries: [
+              {
+                lid: 'n1',
+                body: '## 見出し\n\n- あ\n- い\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n```js\nconst x = 1;\n```\n',
+              },
+            ],
+          }),
+          NOW,
+        )
+      ).blob,
+    );
+    const box = document.getElementById('body')!;
+    expect(box.querySelector('h2'), '見出しが出ていない').not.toBeNull();
+    expect(box.querySelectorAll('li'), '箇条書きが出ていない').toHaveLength(2);
+    expect(box.querySelectorAll('table td'), '表が出ていない').toHaveLength(2);
+    expect(box.querySelector('pre code'), 'コードが出ていない').not.toBeNull();
+    // 記号がそのまま残っていない(= `<pre>` に流し込んだ形に戻っていない)
+    expect(box.textContent, 'markdown の記号がそのまま出ている').not.toContain('## 見出し');
+  });
+
+  /**
+   * ⚠ 図は**原文のまま**見せる(閲覧側に mermaid を積まない)。器が空のまま
+   * 残ると「何も無い」ように見えるので、原文が読めることを見る。
+   */
+  it('🔴 図は原文が読める形で出る(空の器を残さない)', async () => {
+    await run(
+      (
+        await writePortableHtml(
+          source({ entries: [{ lid: 'n1', body: '```mermaid\ngraph TD\n  A-->B\n```\n' }] }),
+          NOW,
+        )
+      ).blob,
+    );
+    const box = document.getElementById('body')!;
+    expect(box.textContent, '図の原文が読めない').toContain('graph TD');
+    expect(box.querySelector('[data-pkc-mermaid-src] pre'), '図の器が空のまま').not.toBeNull();
+  });
+
   it('一覧から選ぶと本文が入れ替わる(選択状態も動く)', async () => {
     await run(
       (
@@ -550,10 +685,10 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
     );
     const btns = document.querySelectorAll<HTMLButtonElement>('#list button');
     expect(btns).toHaveLength(2);
-    expect(document.getElementById('body')!.textContent).toBe('AAA');
+    expect(document.getElementById('body')!.textContent!.trim()).toBe('AAA');
     btns[1]!.click();
     expect(document.getElementById('title')!.textContent).toBe('二つ目');
-    expect(document.getElementById('body')!.textContent).toBe('BBB');
+    expect(document.getElementById('body')!.textContent!.trim()).toBe('BBB');
     expect(btns[1]!.getAttribute('aria-current')).toBe('true');
     expect(btns[0]!.getAttribute('aria-current')).toBe('false');
   });

@@ -315,7 +315,11 @@ export async function importPkc2File(
     const head = new Uint8Array(await file.slice(0, 4096).arrayBuffer());
     const isZip = sniffMagic(head) === 'zip';
     if (!isZip && detectPkc2Format(head, null, file.name) !== 'html') {
-      return fail(`取り込めない形式です(${file.name})── PKC2 の HTML か .pkc2.zip を選んでください`);
+      // ⚠ **受理するものを全部言う**(P8 段⑲)── かつては存在しない拡張子
+      //    `.pkc2.zip` を名乗り、実際に受理している PKC3 のバックアップに触れていなかった
+      return fail(
+        `取り込めない形式です(${file.name})── PKC2 の書出し(HTML / ZIP)か PKC3 のバックアップ(.pkc3.zip)、または .md を選んでください`,
+      );
     }
 
     deps.notify?.('取込中…(ファイルを読んでいます)');

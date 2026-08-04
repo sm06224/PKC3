@@ -23,6 +23,7 @@ import { applyTheme, chooseTheme, initialTheme, isTheme } from '@adapter/ui/rend
 import { launchTile } from '@adapter/ui/launch-tile';
 import { readAppStorage } from '@adapter/platform/app-storage';
 import { copyPlainText } from '@adapter/platform/clipboard';
+import { MarkdownClient } from '@adapter/platform/render/markdown-client';
 import { AssetClient } from '@adapter/platform/asset/asset-client';
 import { watchForUpdate, type UpdateContainer } from '@adapter/platform/sw/update-prompt';
 import { reloadOnPrebootSwap, type PrebootTarget } from '@adapter/platform/sw/preboot-swap';
@@ -162,10 +163,21 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   let browseMode: BrowseMode = 'list';
   // assets: bytes は IDB Blob(sqlite には meta のみ)。表示は lend/dispose 規律
   const blobs = new AssetBlobStore();
-  const center = new CenterRouter(regions.detail, undefined, {
-    lend: (key) => blobs.lendObjectUrl(DEFAULT_CID, key),
-    getBlob: (key) => blobs.get(DEFAULT_CID, key),
-  });
+  /**
+   * markdown を描く口。⚠ **アプリ全体で 1 個**(P8 段⑲)── 面や書出しが
+   * それぞれ作ると worker lease がその数だけ立ち、常駐が増える。
+   * ⚠ 作っただけでは worker は起きない(`WorkerLease` は遅延起動)。
+   */
+  const markdown = new MarkdownClient();
+  const center = new CenterRouter(
+    regions.detail,
+    undefined,
+    {
+      lend: (key) => blobs.lendObjectUrl(DEFAULT_CID, key),
+      getBlob: (key) => blobs.get(DEFAULT_CID, key),
+    },
+    markdown,
+  );
   // いま居る場所の印(変わったときだけ属性を触る)
   let markedView: string | null = null;
   const markView = (view: string) => {
@@ -264,6 +276,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         // 見るのは「⚠ 注意 1 件」だけで、**どの添付が欠けたか**が消える ──
         // バックアップで一番知りたい情報がそこにある
         report: (notes) => showNotices(regions.notices, '書出し時の注意', notes),
+        // 🔑 閲覧用 HTML の本文描画は**ワーカーへ**(P8 段⑲)。渡さないと
+        //    件数ぶんメインスレッドで描くことになる
+        renderBody: (text) => markdown.render(text),
       };
       // 1 ノートだけの書出しも**同じ実行部・同じ形式**を通る(P6f)──
       // 別経路にすると「1 件書出しだけ壊れている」が起きる

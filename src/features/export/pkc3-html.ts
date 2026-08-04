@@ -30,6 +30,7 @@
  * 読み手は素の `JSON.parse` でよい。
  */
 import { parseFrontmatter, type FrontmatterValue } from '../markdown/frontmatter';
+import { renderMarkdown } from '../markdown/markdown-render';
 import type { ArchiveSource } from './pkc3-archive';
 
 export const HTML_FORMAT = 'pkc3-portable';
@@ -123,8 +124,33 @@ nav button:hover{background:#8882}
 nav button[aria-current=true]{background:#8883;font-weight:600}
 main{overflow:auto;padding:24px 32px}
 main h2{margin:0 0 16px}
-pre{white-space:pre-wrap;word-break:break-word;font:inherit;margin:0}
 img{max-width:100%;height:auto;display:block;margin:8px 0}
+/* 描いた本文(P8 段⑲)。⚠ **配色トークンは持ち込まない** ── ここは
+   単体で開くファイルで、地の色は閲覧環境の light/dark に従う。
+   #8884 のような半透明の無彩色なら、どちらでも読める */
+#body{max-width:46em}
+#body>*:first-child{margin-top:0}
+#body h1,#body h2,#body h3,#body h4{line-height:1.3;margin:1.4em 0 .5em}
+#body h1{font-size:1.5em}#body h2{font-size:1.3em}#body h3{font-size:1.1em}
+#body p,#body ul,#body ol,#body blockquote,#body table{margin:0 0 1em}
+#body ul,#body ol{padding-left:1.5em}
+#body li{margin:.2em 0}
+#body code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.92em;
+  background:#8882;border-radius:3px;padding:0 3px}
+#body pre{white-space:pre-wrap;word-break:break-word;margin:0 0 1em;padding:10px 12px;
+  background:#8881;border:1px solid #8883;border-radius:6px;overflow-x:auto}
+#body pre code{background:0;padding:0}
+#body blockquote{padding-left:1em;border-left:3px solid #8884;opacity:.85}
+#body table{border-collapse:collapse}
+#body th,#body td{border:1px solid #8884;padding:4px 8px;text-align:left}
+#body th{background:#8881}
+#body hr{border:0;border-top:1px solid #8884;margin:1.5em 0}
+#body a{color:inherit}
+/* 図は原文のまま(閲覧側に mermaid を積まない)*/
+#body pre.d{font-size:.9em;opacity:.85}
+#body [data-pkc-asset-missing]{opacity:.75;outline:1px dashed #8886}
+/* 一覧の行(表)は溢れさせない */
+#body>*{max-width:100%}
 a.f{display:inline-block;margin:8px 0;padding:6px 10px;border:1px solid #8884;border-radius:6px;
   color:inherit;text-decoration:none}
 #fail{display:block;margin:24px;font:15px/1.7 system-ui,sans-serif;white-space:pre-wrap}
@@ -177,20 +203,39 @@ try{
     release();
     document.getElementById('title').textContent=e.title;
     var box=document.getElementById('body');box.textContent='';
-    // 本文は**素のまま**出す(markdown を解釈しない ── 読めるだけに留める)。
-    // ただし添付参照だけは中身として見せる。frontmatter は本文ではなくメタなので
-    // 書出し側が数えた文字数ぶん読み飛ばす(判定を閲覧側に持たせるとずれる)
-    var seen={},parts=e.body.slice(e.fm||0).split(/asset:([A-Za-z0-9_.-]+)/);
-    for(var i=0;i<parts.length;i++){
-      var t=parts[i];
-      if(i%2===1){
-        if(has(t)){seen[t]=1;box.appendChild(view(t,e.title));continue;}
-        t='asset:'+t; // 中身の無い参照は**参照のまま**見せる(黙って key だけ出さない)
+    // 🔑 本文は**書出し側で描いた HTML**(P8 段⑲)。かつてここは本文を素のまま
+    // pre で出しており、見出しも表も箇条書きも**記号のまま**だった ──
+    // 「単体で開いて読める」と案内している当のファイルが一番読みにくかった。
+    // ⚠ 描くのは**アプリと同じ関数**(閲覧側に parser を持たせない ── 二重実装は必ずずれる)
+    var seen={};
+    box.innerHTML=e.html||'';
+    // 描いた HTML の中の添付参照(画像 / リンクの markdown)に実体を差す。
+    // ⚠ 参照の**走査**は書出し側の 1 本に寄せてある ── ここは差すだけ
+    Array.prototype.forEach.call(box.querySelectorAll('[data-pkc-asset-key]'),function(el){
+      var k=el.getAttribute('data-pkc-asset-key');
+      // 🔴 中身の無い参照は**参照のまま見せる**(黙って消さない)。img の alt は
+      //    textContent に出ないので、そのまま置くと「何も無かった」ように見える
+      if(!has(k)){
+        var miss=document.createElement('code');miss.className='m';
+        miss.setAttribute('data-pkc-asset-missing','');
+        miss.textContent='asset:'+k+'(添付が入っていません)';
+        if(el.parentNode)el.parentNode.replaceChild(miss,el);
+        return;
       }
-      if(t!==''){var p=document.createElement('pre');p.textContent=t;box.appendChild(p);}
-    }
-    // 本文の外(frontmatter)から参照している添付 ── 添付 entry はこちらだけを持つ
-    (e.attach||[]).forEach(function(key){
+      seen[k]=1;
+      if(el.tagName==='IMG'){el.src=urlFor(k);if(!el.alt)el.alt=names[k]||k;return}
+      el.href=urlFor(k);el.download=names[k]||k;
+    });
+    // 図は**原文のまま**見せる(閲覧側に mermaid を積まない ── 読めれば足りる)
+    Array.prototype.forEach.call(box.querySelectorAll('[data-pkc-mermaid-src]'),function(el){
+      var s=el.getAttribute('data-pkc-mermaid-src')||'';
+      el.textContent='';var p=document.createElement('pre');p.className='d';
+      p.textContent=s;el.appendChild(p);
+    });
+    // 本文の外(frontmatter)から参照している添付 ── 添付 entry はこちらだけを持つ。
+    // ⚠ 本文に書かれていて**描画に現れなかった**参照(裸の asset:key など)も
+    //    ここで拾う ── 黙って消さない
+    (e.attach||[]).concat(e.refs||[]).forEach(function(key){
       if(has(key)&&!seen[key]){seen[key]=1;box.appendChild(view(key,e.title));}
     });
     if(cur)cur.setAttribute('aria-current','false');
@@ -214,6 +259,16 @@ try{
 export async function writePortableHtml(
   src: ArchiveSource,
   exportedAt: string,
+  /**
+   * 本文 1 件を HTML にする。
+   *
+   * 🔴 **差し替えられるようにしてある**(P8 段⑲)。既定はその場で描く
+   * 同期版だが、アプリからは**markdown ワーカー**を渡す ── 5000 件の書出しで
+   * 本文を全部その場で描くと、メインスレッドが長時間止まる
+   * (user 指示 2026-08-03「基本的に重い処理はワーカーにしてください」)。
+   * ⚠ 返る HTML は**同じ関数**から出る(ワーカーは速さの話であって正しさの話ではない)。
+   */
+  render: (text: string) => string | Promise<string> = (text) => renderMarkdown(text),
 ): Promise<HtmlResult> {
   const warnings: string[] = [];
   const metas = await src.listEntryMetas();
@@ -254,17 +309,24 @@ export async function writePortableHtml(
         used.add(ref.key);
         if (ref.name !== '' && !nameOf.has(ref.key)) nameOf.set(ref.key, ref.name);
       }
+      // 本文が参照している添付。⚠ 走査は**この 1 本だけ**(閲覧側は差すだけ)
+      const inBody: string[] = [];
       ASSET_REF_RE.lastIndex = 0;
       for (let mm = ASSET_REF_RE.exec(r.body); mm; mm = ASSET_REF_RE.exec(r.body)) {
         used.add(mm[1]!);
+        if (!inBody.includes(mm[1]!)) inBody.push(mm[1]!);
       }
+      // 🔑 本文は**ここで描く**(閲覧側に parser を積まない)。frontmatter は
+      //    本文ではなくメタなので、書出し側が数えた文字数ぶん読み飛ばす
+      //    ── 判定を閲覧側に持たせると本物の parser と二重実装になってずれる
+      const html = await render(r.body.slice(skip));
       const e = {
         lid: m.lid,
         title: m.title,
         archetype: m.archetype,
-        body: r.body,
-        ...(skip > 0 ? { fm: skip } : {}),
+        html,
         ...(refs.length > 0 ? { attach: refs.map((x) => x.key) } : {}),
+        ...(inBody.length > 0 ? { refs: inBody } : {}),
       };
       chunk += entryCount === 0 ? j(e) : `,${j(e)}`;
       entryCount++;

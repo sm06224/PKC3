@@ -12,6 +12,7 @@ import { DetailRenderer, type AssetLender } from './detail';
 import { KanbanRenderer } from './kanban';
 import { CalendarRenderer } from './calendar';
 import { SettingsRenderer } from './settings';
+import type { MarkdownClient } from '@adapter/platform/render/markdown-client';
 
 type PaneView = 'detail' | 'kanban' | 'calendar' | 'settings';
 
@@ -32,7 +33,14 @@ export class CenterRouter {
   private readonly settings: SettingsRenderer;
   private lastPane: PaneView = 'detail';
 
-  constructor(region: HTMLElement, now?: () => Date, assets: AssetLender | null = null) {
+  constructor(
+    region: HTMLElement,
+    now?: () => Date,
+    assets: AssetLender | null = null,
+    /** markdown を描く口。⚠ **アプリでは 1 個を共有する**(P8 段⑲)──
+     *  面ごとに作ると worker lease がその数だけ立ち、常駐が増える。 */
+    markdown?: MarkdownClient,
+  ) {
     const pane = (view: PaneView): HTMLElement => {
       const el = document.createElement('div');
       el.setAttribute('data-pkc-view-pane', view);
@@ -46,7 +54,7 @@ export class CenterRouter {
       calendar: pane('calendar'),
       settings: pane('settings'),
     };
-    this.detail = new DetailRenderer(this.panes.detail, assets);
+    this.detail = new DetailRenderer(this.panes.detail, assets, markdown);
     this.kanban = new KanbanRenderer(this.panes.kanban);
     this.calendar = new CalendarRenderer(this.panes.calendar, now);
     this.settings = new SettingsRenderer(this.panes.settings);

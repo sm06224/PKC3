@@ -25,6 +25,9 @@ import {
   resolveFilerScope,
 } from '@features/relation/tree';
 import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
+// 🔑 種別の呼び名は **1 本**(P8 段⑲)── かつてここだけ独自表を持ち、
+//    同じノートがフォルダ画面では「シート」、他の全画面では「表」と出ていた
+import { archetypeLabel } from './sidebar';
 
 /** SQLite の UTC 文字列を「日付だけ」に落とす(見出しが「日」なので)。 */
 function shortDate(value: string | null): string {
@@ -33,15 +36,6 @@ function shortDate(value: string | null): string {
   return m ? `${m[1]}/${m[2]}/${m[3]}` : value;
 }
 
-const ARCHETYPE_LABELS: Record<string, string> = {
-  text: 'ノート',
-  todo: 'Todo',
-  textlog: 'ログ',
-  spreadsheet: 'シート',
-  folder: 'フォルダ',
-  attachment: '添付',
-  form: 'フォーム',
-};
 
 export class FilerRenderer {
   private readonly region: HTMLElement;
@@ -150,7 +144,7 @@ export class FilerRenderer {
       name.setAttribute('data-pkc-field', 'title');
       name.textContent = (m.archetype === 'folder' ? '📁 ' : '') + m.title;
       const kind = document.createElement('td');
-      kind.textContent = ARCHETYPE_LABELS[m.archetype] ?? m.archetype;
+      kind.textContent = archetypeLabel(m.archetype);
       const updated = document.createElement('td');
       // ⚠ 生の SQLite UTC 文字列(`2026-08-03 13:11:39`)を出さない。
       // 見出しが「更新日」なのに時刻まで出ていた ── 日付だけに落とす
@@ -210,7 +204,7 @@ export class FilerRenderer {
         li.setAttribute('data-pkc-trash-entry', t.entryLid);
         const text = document.createElement('span');
         text.textContent = `${t.title ?? '(無題)'}(${
-          ARCHETYPE_LABELS[t.archetype ?? ''] ?? t.archetype ?? '?'
+          archetypeLabel(t.archetype ?? '')
         } / ${t.createdAt ?? ''})`;
         const restore = document.createElement('button');
         restore.type = 'button';

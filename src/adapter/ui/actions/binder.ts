@@ -113,14 +113,11 @@ function defaultTitle(dispatcher: Dispatcher, archetype: string): string {
  * entry ごと消えて入力が失われる非対称の解消(P3-7a review 中)。
  * 非 fresh の cancel は破棄の意味論どおり title input も捨てる。
  */
-function cancelFromEditor(dispatcher: Dispatcher, from: HTMLElement): void {
+function cancelFromEditor(dispatcher: Dispatcher, root: HTMLElement): void {
   const s = dispatcher.getState();
   const lid = s.openBody?.lid;
   if (lid && s.freshLid === lid) {
-    const scope = from.closest<HTMLElement>('[data-pkc-region="detail"]');
-    const input = scope?.querySelector<HTMLInputElement>(
-      '[data-pkc-field="editor-title"]',
-    );
+    const input = editorTitle(root);
     const current = s.entryMetas.get(lid)?.title ?? '';
     if (input && input.value.trim() !== '' && input.value.trim() !== current) {
       // RENAME が fresh を解除する ── 直後の CANCEL は entry を残す
@@ -130,16 +127,29 @@ function cancelFromEditor(dispatcher: Dispatcher, from: HTMLElement): void {
   dispatcher.dispatch({ type: 'CANCEL_EDIT' });
 }
 
+/**
+ * いま画面に出ている題名欄。
+ *
+ * 🔴 **root から引く**(P8 段⑲。押したボタンから `closest` で辿らない)。
+ * 直す前は `from.closest('[data-pkc-region="detail"]')` だったが、
+ * 追記欄(`append` region)の **保存して解放 / 編集を破棄** は detail の
+ * **兄弟**なので `closest` が null を返し、題名欄が 1 度も見つからなかった
+ * ── その出口から保存すると**題名の変更が丸ごと捨てられて**いた。
+ * 同じ「保存」なのに押す場所で結果が違う、という壊れ方である。
+ * ⚠ 入口は 1 つに寄せる(`editorBody` と同じ引き方)。
+ */
+function editorTitle(root: HTMLElement): HTMLInputElement | null {
+  return root.querySelector<HTMLInputElement>(
+    '[data-pkc-region="detail"] [data-pkc-field="editor-title"]',
+  );
+}
+
 /** editor 表示中なら title input の現在値で RENAME を先行 dispatch する
  *  (楽観 meta 更新 → 直後の COMMIT_EDIT が新 title で行を組む。
  *  input が見つからなければ何もしない = 既存 title 維持 ── PKC2 の
- *  「title が消える」bug の防波堤と同じ向き)。
- *  query は detail region にスコープする(document 全域は他 root を拾いうる)。 */
-function renameFromEditorInput(dispatcher: Dispatcher, from: HTMLElement): void {
-  const scope = from.closest<HTMLElement>('[data-pkc-region="detail"]');
-  const input = scope?.querySelector<HTMLInputElement>(
-    '[data-pkc-field="editor-title"]',
-  );
+ *  「title が消える」bug の防波堤と同じ向き)。 */
+function renameFromEditorInput(dispatcher: Dispatcher, root: HTMLElement): void {
+  const input = editorTitle(root);
   const lid = dispatcher.getState().openBody?.lid;
   if (input && lid)
     dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title: input.value });
@@ -184,11 +194,13 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (lid) dispatcher.dispatch({ type: 'SELECT_ENTRY', lid });
   },
   'start-edit': (dispatcher) => dispatcher.dispatch({ type: 'START_EDIT' }),
-  'commit-edit': (dispatcher, target) => {
-    renameFromEditorInput(dispatcher, target);
+  // ⚠ 第 4 引数の **root** を使う(target ではない)── 追記欄の出口は detail の
+  //    兄弟なので、押したボタンから題名欄へは辿れない(P8 段⑲)
+  'commit-edit': (dispatcher, _target, _services, root) => {
+    renameFromEditorInput(dispatcher, root);
     dispatcher.dispatch({ type: 'COMMIT_EDIT' });
   },
-  'cancel-edit': (dispatcher, target) => cancelFromEditor(dispatcher, target),
+  'cancel-edit': (dispatcher, _target, _services, root) => cancelFromEditor(dispatcher, root),
   'create-entry': (dispatcher, target) => {
     // 🔑 種類は**隣の `<select>`**から取る(P8 ── ボタンを種類ぶん並べない)。
     // ⚠ 旧来どおりボタン自身が `data-pkc-archetype` を持つ形も受ける
@@ -218,6 +230,17 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({
         type: 'OP_FAILED',
         error: '書き出し / 取込が実行中です。完了してから削除してください',
+      });
+      return;
+    }
+    // 🔴 **無言で断らない**(P8 段⑲)。`DELETE_ENTRY` は `phase !== 'ready'` で
+    //    何も返さないので、直す前は**確認ダイアログまで出してから黙って捨てて**いた
+    //    ── user は消したつもりで画面を離れる。detail.ts が確立した
+    //    「無言の操作拒否を作らない」に揃える。⚠ confirm より**前**に断る
+    if (dispatcher.getState().phase !== 'ready') {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '編集を終了してから削除してください',
       });
       return;
     }
@@ -454,7 +477,18 @@ const ACTIONS: Record<string, ActionHandler> = {
       ?.click();
   },
   // ── P5b: 履歴 / ゴミ箱 ──
-  'show-history': (dispatcher) => dispatcher.dispatch({ type: 'SHOW_HISTORY' }),
+  'show-history': (dispatcher) => {
+    // 🔴 **無言で断らない**(P8 段⑲)── `SHOW_HISTORY` は `phase !== 'ready'` で
+    //    何も返さず、押しても panel も理由も出なかった
+    if (dispatcher.getState().phase !== 'ready') {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '編集を終了してから履歴を開いてください',
+      });
+      return;
+    }
+    dispatcher.dispatch({ type: 'SHOW_HISTORY' });
+  },
   'hide-history': (dispatcher) => dispatcher.dispatch({ type: 'HIDE_HISTORY' }),
   'restore-revision': (dispatcher, target) => {
     // 前進変異(復元前に現状が履歴に積まれる)なので confirm は要らない ──
@@ -603,7 +637,7 @@ export function bindActions(
         (ke.key === 'Enter' && (ke.ctrlKey || ke.metaKey)))
     ) {
       ke.preventDefault();
-      renameFromEditorInput(dispatcher, ke.target as HTMLElement);
+      renameFromEditorInput(dispatcher, root);
       dispatcher.dispatch({ type: 'COMMIT_EDIT' });
     } else if (
       // 🔑 **キーボードは近道**(業務画面の作法 ── user 指示 2026-08-03)。
@@ -624,7 +658,7 @@ export function bindActions(
       );
     } else if (ke.key === 'Escape') {
       ke.preventDefault();
-      cancelFromEditor(dispatcher, ke.target as HTMLElement);
+      cancelFromEditor(dispatcher, root);
     }
   };
   root.addEventListener('click', onClick);

@@ -53,7 +53,17 @@ export class DetailRenderer {
   /** この render pass が貸し出した ObjectURL の dispose 群。**表示の寿命の
    *  終わり(次の render / 選択遷移)で必ず全部呼ぶ**(生成物のライフサイクル
    *  終端での即破棄 ── user 指示 2026-07-27 不可侵)。 */
-  private readonly lends: Array<() => void> = [];
+  /**
+   * 借りている ObjectURL(と返し方)。
+   *
+   * 🔴 **どの要素のために借りたか**を一緒に持つ(P8 段⑲)。持っていないと
+   * 「画面から消えた要素ぶんだけ返す」ができず、**同じノートを開いたまま**
+   * 本文が差し替わるたびに溜まる ── 実測: 履歴復元を 5 回で
+   * **lend 6 回 / dispose 0 回、画面の `<img>` は 1 枚**。
+   * 骨組みを使い回す(段⑪)以上、`disposeLends()` は選択が動いたときしか
+   * 走らないので、差分描画の側にも返す道が要る(図の `pruneScopes` と同じ形)。
+   */
+  private readonly lends: Array<{ dispose: () => void; els: Element[] }> = [];
   /** 非同期 hydrate の stale 防止(選択が移ったら結果を捨てて即 dispose)。 */
   private hydrateToken = 0;
 
@@ -111,13 +121,27 @@ export class DetailRenderer {
   private disposeMermaid: (() => void) | null = null;
 
   private disposeLends(): void {
-    for (const d of this.lends.splice(0)) d();
+    for (const l of this.lends.splice(0)) l.dispose();
     this.hydrateToken += 1;
     this.cancelPreview?.();
     this.cancelPreview = null;
     this.disposeMermaid?.();
     this.disposeMermaid = null;
     for (const sc of this.mermaidScopes.splice(0)) sc.dispose();
+  }
+
+  /**
+   * 画面から消えた要素のぶんだけ返す(図の `pruneScopes` と同じ形)。
+   * ⚠ **1 つでも生きていれば残す** ── 同じ key を複数の塊が参照しているとき、
+   * 片方が消えただけで返すと生きている `<img>` の src が死ぬ。
+   */
+  private pruneLends(): void {
+    for (let i = this.lends.length - 1; i >= 0; i--) {
+      const l = this.lends[i]!;
+      if (l.els.some((e) => e.isConnected)) continue;
+      l.dispose();
+      this.lends.splice(i, 1);
+    }
   }
 
   /** 骨組みを捨てる(次の描画で組み直す)。 */
@@ -263,6 +287,10 @@ export class DetailRenderer {
         this.mermaidScopes.push(hydrateMermaid(applied.inserted));
         pruneScopes(this.mermaidScopes);
       }
+      // 🔴 **差し替えで画面から消えた `<img>` のぶんを返す**(P8 段⑲)。
+      //    ⚠ `inserted.length > 0` の中に入れてはいけない ── 塊が**消えるだけ**
+      //    (差し替えではなく削除)のときは inserted が空で、そこが一番溜まる
+      this.pruneLends();
       this.restoreScroll();
     } else {
       // 方言判定 false は plain text 扱い(PKC2 と同じゲート)
@@ -552,7 +580,7 @@ export class DetailRenderer {
             for (const img of imgs) img.setAttribute('data-pkc-asset-missing', '');
             return;
           }
-          this.lends.push(lent.dispose);
+          this.lends.push({ dispose: lent.dispose, els: imgs });
           for (const img of imgs) img.src = lent.url;
         } catch {
           if (token === this.hydrateToken)
@@ -611,7 +639,9 @@ export class DetailRenderer {
         return;
       }
       if (!lent) return missing();
-      this.lends.push(lent.dispose);
+      // 添付の preview は器ごと作り直す(`disposeLends()` が先に走る)ので、
+      // 器そのものを持たせておけば「器が外れたら返す」で同じ規則に乗る
+      this.lends.push({ dispose: lent.dispose, els: [host] });
       if (kind === 'img') {
         const img = document.createElement('img');
         img.setAttribute('data-pkc-field', 'attachment-media');

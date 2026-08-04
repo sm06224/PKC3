@@ -747,8 +747,22 @@ test('🔴 可搬 HTML: 書き出したファイルが**単体で開いて読め
   // 🔴 本文の `<!--` + `<script` を**素通りで**読めている = トークナイザが
   // 壊れていない。退避が足りないとページごと真っ白になり、ここへ到達しない
   await expect(viewer.locator('#body')).toContainText('本文');
-  await expect(viewer.locator('#body')).toContainText('<script src="x">');
+  // ⚠ 1 文字一致では見ない ── 本文は markdown として描かれるので、typographer が
+  //    `"x"` を丸引用符に変える(それは正しい)。危険なのは **`<` が飲み込まれる**ほうで、
+  //    こちらは 1 個でも欠けたら本文が静かに消えている
+  await expect(viewer.locator('#body')).toContainText('<script src=');
+  expect(
+    await viewer.locator('#body').evaluate((el) => (el.textContent ?? '').split('<').length - 1),
+    '`<` が飲み込まれている(本文が静かに欠けている)',
+  ).toBe(2);
   await expect(viewer.locator('script')).toHaveCount(2); // データ用 + 閲覧 UI
+
+  // 🔴 **描かれている**(P8 段⑲)── かつては本文を丸ごと `<pre>` に入れていたので、
+  //    見出しも箇条書きも記号のままだった
+  expect(
+    await viewer.locator('#body p, #body h1, #body h2, #body ul, #body ol').count(),
+    '本文が markdown として描かれていない',
+  ).toBeGreaterThan(0);
 
   // 添付を持つ entry へ切り替えると、base64 から復元した画像が**実際に描画**される
   await items.nth(1).click();

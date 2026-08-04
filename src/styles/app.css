@@ -712,6 +712,46 @@ select:focus-visible {
   border: none;
   padding: 0;
 }
+/*
+ * コードの色分け。
+ *
+ * 🔴 **出しているのに CSS が無かった**(P8 段⑲)。`features/markdown/code-highlight.ts`
+ * は 15 種の `pkc-tok-*` を吐いていたが、当てる規則がどこにも無く
+ * (コメントは PKC2 の `styles/base.css` を指していた ── PKC3 に無い file)、
+ * **全部が地の色のまま**だった = 出力しているだけの死んだ markup。
+ *
+ * 🔑 **色は 3 つに絞る**(user 指示「地は無彩色、色は情報にだけ使う」)。
+ * 編集機ではなく**読むための技術メモ**なので、区別したいのは 3 つで足りる:
+ *   ① 地の文でないもの(注釈・記号)= `--muted`
+ *   ② 構造を決める語(予約語・タグ・型)= `--code-key`
+ *   ③ 値そのもの(文字列・数・正規表現)= `--code-lit`
+ * ⚠ 15 種を 15 色にしない ── 色が増えるほど「どれが情報か」が消える。
+ * ⚠ 色の実体は `tokens.css` にしか書かない(テーマで分岐しない)。
+ */
+.pkc-md-rendered pre code .pkc-tok-comment,
+.pkc-md-rendered pre code .pkc-tok-punct,
+.pkc-md-rendered pre code .pkc-tok-meta,
+.pkc-md-rendered pre code .pkc-tok-hunk {
+  color: var(--muted);
+}
+.pkc-md-rendered pre code .pkc-tok-keyword,
+.pkc-md-rendered pre code .pkc-tok-tag,
+.pkc-md-rendered pre code .pkc-tok-type,
+.pkc-md-rendered pre code .pkc-tok-builtin,
+.pkc-md-rendered pre code .pkc-tok-variable {
+  color: var(--code-key);
+}
+.pkc-md-rendered pre code .pkc-tok-string,
+.pkc-md-rendered pre code .pkc-tok-number,
+.pkc-md-rendered pre code .pkc-tok-regex,
+.pkc-md-rendered pre code .pkc-tok-attr,
+.pkc-md-rendered pre code .pkc-tok-ins {
+  color: var(--code-lit);
+}
+/* 差分の削除行だけは**危険の色**を借りる(diff で唯一「向き」を持つ情報) */
+.pkc-md-rendered pre code .pkc-tok-del {
+  color: var(--danger);
+}
 .pkc-md-rendered blockquote {
   margin: var(--s3) 0;
   padding-left: var(--s4);

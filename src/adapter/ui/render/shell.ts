@@ -74,7 +74,7 @@ const COLLECTION_COMMANDS: readonly { action: string; label: string; title: stri
   {
     action: 'import-file',
     label: '取り込む',
-    title: 'PKC2 の書き出し(HTML / ZIP)と Markdown を取り込みます',
+    title: 'PKC2 の書き出し(HTML / ZIP)/ PKC3 のバックアップ(.pkc3.zip)/ Markdown を取り込みます',
   },
   { action: 'export-archive', label: 'バックアップ', title: '元に戻せる形で保存します' },
   { action: 'export-html', label: '閲覧用 HTML', title: '読むだけの 1 枚にまとめます' },

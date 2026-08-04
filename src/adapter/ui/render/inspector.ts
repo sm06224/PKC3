@@ -76,10 +76,25 @@ export class InspectorRenderer {
     // ⚠ **操作は対象の隣**(P8)。共通ツールバーに集約しない
     const actions = document.createElement('div');
     actions.setAttribute('data-pkc-field', 'inspector-actions');
+    /**
+     * 🔴 **編集中は押せなくする**(P8 段⑲)。
+     *
+     * 直す前は 3 つとも押せる見た目のまま出ていたが、実際には
+     * `DELETE_ENTRY` / `SHOW_HISTORY` が `phase !== 'ready'` で**黙って何もしない**
+     * ── 押しても画面が 1 ドットも変わらず、user には「壊れている」としか見えない。
+     * ⚠ **消さずに、押せなくする**(業務画面の作法「同じものが常に同じ場所にある」)。
+     * ⚠ 理由を `title` に書く ── 押せない理由が分からないほうが困る。
+     */
+    const editing = state.phase !== 'ready';
     const btn = (action: string, label: string, title: string): void => {
       const b = iconButton(action, label);
       b.setAttribute('data-pkc-entry', meta.lid);
-      b.title = title;
+      if (editing) {
+        b.disabled = true;
+        b.title = `${title}(編集中は使えません ── 確定するか取り消してください)`;
+      } else {
+        b.title = title;
+      }
       actions.append(b);
     };
     // ⚠ 文言は**実際に落ちるもの**に合わせる(P8 段⑱)── ここは可逆な

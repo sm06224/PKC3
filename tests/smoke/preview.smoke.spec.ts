@@ -202,3 +202,86 @@ test('🔴 打ってもスクロールが飛ばず、触っていない図が消
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * P8 段⑲: 🔴 **編集中に図の生成物が積もらない**。
+ *
+ * > user 指示 2026-07-27(不可侵)「ゼロコピー、生成とライフサイクル後の
+ * > 速やかな破棄を徹底してください」
+ *
+ * 🔴 段⑰ が置いた修理の本体は `detail.ts` の `pruneScopes(scopes)`(静穏 tick
+ * ごとに、器が外れた塊を畳む)だが、それを守る test は
+ * `scope.prune()` を**直接**呼ぶ unit だけで、**呼び出し側は 1 行も通っていなかった**
+ * ── 呼び出しを消しても unit 1393 件 + smoke 47 件が全部緑になる。
+ * 積もると、画面に無い PNG の ObjectURL と観測器が編集を抜けるまで生き続ける。
+ *
+ * ⚠ 観測点は「同じ要素か」ではなく **createObjectURL - revokeObjectURL の残高**。
+ * ⚠ グローバルを丸ごと差し替えない ── **静的メソッド 2 つだけ**を包む
+ *   (`URL` をコンストラクタでなくすと happy-dom / Chromium の別経路が壊れる。
+ *    2026-07-26 に PKC2 で実際に踏んだ罠)。
+ */
+test('🔴 図を打ち替えても、生成した URL が積もらない', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.addInitScript(() => {
+    const w = window as unknown as { __urls?: { made: number; freed: number } };
+    w.__urls = { made: 0, freed: 0 };
+    const make = URL.createObjectURL.bind(URL);
+    const free = URL.revokeObjectURL.bind(URL);
+    URL.createObjectURL = (b: Blob | MediaSource): string => {
+      w.__urls!.made += 1;
+      return make(b);
+    };
+    URL.revokeObjectURL = (u: string): void => {
+      w.__urls!.freed += 1;
+      free(u);
+    };
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  const preview = page.locator('[data-pkc-region="editor-preview"]');
+  const ROUNDS = 4;
+  for (let i = 0; i < ROUNDS; i++) {
+    await ta.evaluate((el, n) => {
+      const t = el as HTMLTextAreaElement;
+      t.value = '```mermaid\ngraph TD\n  A["始め ' + n + '"]-->B["終わり"]\n```\n';
+      t.dispatchEvent(new Event('input', { bubbles: true }));
+    }, i);
+    // 🔴 **この回の原文が実際に反映される**まで待つ ── 待たないと 4 回の打鍵が
+    //    静穏の畳み込みで 1 回に潰れ、「焼き直しが起きていない = 積もらない」で
+    //    自明に通ってしまう(1 巡目で実際に踏んだ)
+    await expect(preview.locator('[data-pkc-mermaid-src]')).toHaveAttribute(
+      'data-pkc-mermaid-src',
+      new RegExp(`始め ${i}`),
+      { timeout: 30000 },
+    );
+    await expect(preview.locator('[data-pkc-mermaid-src]')).toHaveAttribute(
+      'data-pkc-mermaid-state',
+      'ready',
+      { timeout: 30000 },
+    );
+    // 焼けた PNG が実際に貼られるまで待つ(貼る時点で URL を作る)
+    await expect(preview.locator('[data-pkc-field="mermaid-image"]')).toHaveAttribute(
+      'src',
+      /^blob:/,
+      { timeout: 30000 },
+    );
+  }
+
+  const u = await page.evaluate(
+    () => (window as unknown as { __urls: { made: number; freed: number } }).__urls,
+  );
+  // ① 🔴 **測る次元が非ゼロ**(空振り防止)── 焼き直しが起きていなければ
+  //    「積もっていない」は自明に通る
+  expect(u.made, `図が焼き直されていない(made=${u.made})`).toBeGreaterThanOrEqual(ROUNDS);
+  // ② 残高が**回数で増えない**。いま画面に出ている 1 枚ぶんに収まる
+  //    (直す前は ROUNDS 回ぶんが丸ごと残った)
+  expect(
+    u.made - u.freed,
+    `生成した URL が積もっている(作 ${u.made} / 解放 ${u.freed})`,
+  ).toBeLessThanOrEqual(2);
+
+  expect(errors).toEqual([]);
+});

@@ -203,3 +203,165 @@ test('🔴 配色を変えると図も焼き直り、暗い配色では図も暗
 
   expect(errors).toEqual([]);
 });
+
+/** 器(875px)より**確実に大きい**図。⚠ 節点を横に並べて実寸を稼ぐ。 */
+const WIDE_DIAGRAM =
+  '```mermaid\ngraph LR\n' +
+  Array.from(
+    { length: 12 },
+    (_, i) => `  N${i}["とても長い節点の名前 ${i}"]-->N${i + 1}["つぎの節点 ${i + 1}"]`,
+  ).join('\n') +
+  '\n```\n';
+
+/**
+ * P8 段⑲: 🔴 **器より大きい図が潰れない**。
+ *
+ * 🔴 直す前、図を使う spec は**全部が 2 節点の `graph TD A-->B`**(実寸 82px)で、
+ * 器(875px)より小さかった ── つまり「**器より大きい図**」は全 fixture で
+ * ゼロ件の次元 = 測っていない次元だった(CLAUDE.md の規律)。
+ * 実測: 焼き幅の元を「親」から「器」へ戻すと **880px の図が 256px** で焼かれ、
+ * ラベルが読めなくなるが、**unit 1393 件 + smoke 47 件が全部緑**のままだった。
+ */
+test('🔴 器より大きい図は、器の幅いっぱいまで使って焼かれる', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('大きい図');
+  await page.locator('[data-pkc-field="editor-body"]').fill(WIDE_DIAGRAM);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+  const host = page.locator('[data-pkc-field="detail-body"] [data-pkc-mermaid-src]');
+  await expect(host).toHaveAttribute('data-pkc-mermaid-state', 'ready', { timeout: 30000 });
+  const m = await host.evaluate((h) => {
+    const img = h.querySelector('img')!;
+    return {
+      placed: img.clientWidth,
+      natural: img.naturalWidth,
+      box: h.parentElement!.clientWidth,
+      dpr: devicePixelRatio,
+    };
+  });
+
+  // ① 🔴 **fixture が前提を満たす**(空振り防止)── 図が器より小さいと
+  //    以下の assert は「小さいまま置いた」実装でも自明に通る
+  expect(m.box, '器が狭すぎて観測にならない').toBeGreaterThan(600);
+  expect(
+    m.natural / m.dpr,
+    `図が器より小さい(${Math.round(m.natural / m.dpr)} / 器 ${m.box})── この次元を測れていない`,
+  ).toBeGreaterThanOrEqual(m.box * 0.9);
+
+  // ② 器の幅いっぱいまで使う(縮めて焼いていない)
+  expect(m.placed, `大きい図が縮んで置かれた(${m.placed} / 器 ${m.box})`).toBeGreaterThanOrEqual(
+    m.box * 0.9,
+  );
+  // ③ 焼いた画素も器ぶんある(置き幅だけ合わせて中身が粗い、を落とす)
+  expect(
+    m.natural,
+    `焼いた画素が足りない(${m.natural} / 要 ${Math.round(m.box * m.dpr * 0.9)})`,
+  ).toBeGreaterThanOrEqual(m.box * m.dpr * 0.9);
+
+  expect(errors).toEqual([]);
+});
+
+/**
+ * P8 段⑲: 🔴 **キャッシュの上限が実際に効く**。
+ *
+ * 🔴 段⑰ が置いた 32MB の上限は、**判定の純関数(`planEviction`)だけ**が
+ * test に守られていて、それを**起動する 1 行**(`void evictDiagramCache()`)は
+ * 1 度も実行されていなかった ── 消しても全部緑になる。上限が効かないと、
+ * 編集プレビューで図を打つたびに「途中の原文」が別鍵で焼かれて永久に残り、
+ * 同一 origin を食い潰す。巻き添えは添付(`pkc3-assets`)と OPFS の sqlite、
+ * つまり **user のデータ本体**である。
+ *
+ * ⚠ 上限だけでなく**下限**も見る ── 全部消す実装も「上限を守った」ことになる。
+ */
+test('🔴 図キャッシュが上限を超えると、古いものから落ちる(全部は消さない)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await gotoApp(page);
+
+  // 上限(32MB)を超えるまで**直に**詰める。⚠ 鍵は実装と同じ形でなくてよい
+  //    ── 追い出しは `getAll` した行の `at` / `size` だけを見る
+  const CAP = 32 * 1024 * 1024;
+  const seeded = await page.evaluate(async (cap) => {
+    const db = await new Promise<IDBDatabase>((res, rej) => {
+      const r = indexedDB.open('pkc3-diagram-cache', 1);
+      r.onupgradeneeded = () => {
+        if (!r.result.objectStoreNames.contains('png')) r.result.createObjectStore('png');
+      };
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+    const each = 5 * 1024 * 1024;
+    const n = Math.ceil((cap * 1.3) / each);
+    for (let i = 0; i < n; i++) {
+      const png = new Blob([new Uint8Array(each)], { type: 'image/png' });
+      await new Promise<void>((res, rej) => {
+        const t = db.transaction('png', 'readwrite');
+        // `at` は古い順(i が小さいほど古い)
+        const q = t.objectStore('png').put({ png, at: 1000 + i, size: each }, `seed-${i}`);
+        q.onsuccess = () => res();
+        q.onerror = () => rej(q.error);
+      });
+    }
+    db.close();
+    return { count: n, bytes: n * each };
+  }, CAP);
+
+  // 🔴 **前提が満たされている**(空振り防止)── 上限を超えていなければ
+  //    「1 件も落ちない」が正しい振る舞いになってしまう
+  expect(seeded.bytes, '詰めた量が上限を超えていない').toBeGreaterThan(CAP);
+
+  // 図を 1 枚焼く = 追い出しの起動点を通る
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-body"]').fill('```mermaid\ngraph TD\n  A-->B\n```\n');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await expect(
+    page.locator('[data-pkc-field="detail-body"] [data-pkc-mermaid-src]'),
+  ).toHaveAttribute('data-pkc-mermaid-state', 'ready', { timeout: 30000 });
+
+  const after = await expect
+    .poll(
+      async () =>
+        page.evaluate(async () => {
+          const db = await new Promise<IDBDatabase>((res, rej) => {
+            const r = indexedDB.open('pkc3-diagram-cache', 1);
+            r.onsuccess = () => res(r.result);
+            r.onerror = () => rej(r.error);
+          });
+          const rows = await new Promise<{ size?: number }[]>((res, rej) => {
+            const q = db.transaction('png', 'readonly').objectStore('png').getAll();
+            q.onsuccess = () => res(q.result as { size?: number }[]);
+            q.onerror = () => rej(q.error);
+          });
+          db.close();
+          return rows.reduce((n, r) => n + (r.size ?? 0), 0);
+        }),
+      { timeout: 20000, message: '追い出しが走っていない(上限が効いていない)' },
+    )
+    .toBeLessThanOrEqual(CAP)
+    .then(() =>
+      page.evaluate(async () => {
+        const db = await new Promise<IDBDatabase>((res, rej) => {
+          const r = indexedDB.open('pkc3-diagram-cache', 1);
+          r.onsuccess = () => res(r.result);
+          r.onerror = () => rej(r.error);
+        });
+        const keys = await new Promise<IDBValidKey[]>((res, rej) => {
+          const q = db.transaction('png', 'readonly').objectStore('png').getAllKeys();
+          q.onsuccess = () => res(q.result);
+          q.onerror = () => rej(q.error);
+        });
+        db.close();
+        return keys.length;
+      }),
+    );
+
+  // ⚠ **下限** ── 全部消す実装も「上限を守った」ことになる。いま焼いた 1 枚は残る
+  expect(after, 'キャッシュを空にしている(毎回焼き直しになる)').toBeGreaterThan(0);
+
+  expect(errors).toEqual([]);
+});

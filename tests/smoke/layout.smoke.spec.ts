@@ -567,6 +567,56 @@ test('🔴 小さい図は小さいまま置かれる(器いっぱいに広げ�
 });
 
 /**
+ * P8 段⑲: 🔴 **押しても何も起きないボタンを出さない**。
+ *
+ * 直す前は編集中も「書き出す / 履歴 / 削除」が押せる見た目のまま出ていたが、
+ * `DELETE_ENTRY` / `SHOW_HISTORY` は `phase !== 'ready'` で**黙って何もしない**
+ * ── 押しても画面が 1 ドットも変わらず、user には壊れているとしか見えない。
+ * ⚠ **消さずに、押せなくする**(業務画面「同じものが常に同じ場所にある」)。
+ */
+test('🔴 編集中は「書き出す / 履歴 / 削除」が押せない(見た目だけ生きていない)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 800 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('編集中の面');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+  const ACTIONS = ['export-entry', 'show-history', 'delete-entry'];
+  // ① 確定済みなら押せる(空振り防止 ── 常時 disabled でも通る形にしない)
+  for (const a of ACTIONS) {
+    await expect(
+      page.locator(`[data-pkc-region="inspector"] [data-pkc-action="${a}"]`),
+      `${a} が確定後も押せない`,
+    ).toBeEnabled();
+  }
+
+  // ② 編集に入ると押せなくなる。⚠ **消えない**(場所は動かさない)
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="start-edit"]');
+  await expect(page.locator('[data-pkc-field="editor-body"]')).toBeVisible();
+  for (const a of ACTIONS) {
+    const el = page.locator(`[data-pkc-region="inspector"] [data-pkc-action="${a}"]`);
+    await expect(el, `編集中に ${a} が消えた(場所が動いている)`).toBeVisible();
+    await expect(el, `編集中に ${a} が押せてしまう(押しても何も起きない)`).toBeDisabled();
+    // 理由が読める(押せない理由が分からないほうが困る)
+    await expect(el).toHaveAttribute('title', /編集中は使えません/);
+  }
+
+  // ③ 取り消すと戻る
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="cancel-edit"]');
+  for (const a of ACTIONS) {
+    await expect(
+      page.locator(`[data-pkc-region="inspector"] [data-pkc-action="${a}"]`),
+      `編集をやめても ${a} が押せないまま`,
+    ).toBeEnabled();
+  }
+
+  expect(errors).toEqual([]);
+});
+
+/**
  * P8 段⑱: 🔴 **高精細画面でも図の大きさは変わらない**。
  *
  * ⚠ dpr=1 だけで測ると、**dpr の次元を一度も測っていない**ことになる

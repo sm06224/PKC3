@@ -163,6 +163,32 @@ describe('🔴 ジョブのバッファ(起動待ちに来たものを落とさ�
     worker().respondAll();
     await p;
   });
+
+  /**
+   * 🔴 **worker が生きている状態の transfer**(P8 段⑲)。
+   *
+   * `run()` には経路が 2 本ある ── worker が居なければ buffer に積んで `flush()`
+   * が送り、居れば**その場で** `postMessage` する。上の test が通るのは
+   * **1 件目(buffer 経路)だけ**で、直接ディスパッチ経路は無検査だった。
+   * 実運用(`asset-client.ts` の `run(job, [job.bytes])`)は 2 件目以降ぜんぶ
+   * こちらを通るので、ここが落ちると**添付 20 件のうち 19 件が丸ごとコピー**になる
+   * ── user 指示 2026-07-27「ゼロコピー」の当の違反で、画面には何も出ない。
+   */
+  it('🔴 worker が生きているときも transfer を渡す(2 件目以降が copy に落ちない)', async () => {
+    const { lease, worker } = makeLease();
+    const first = lease.run('a');
+    worker().respondAll();
+    await first;
+    expect(lease.alive, 'worker が生きていない(この経路を測れていない)').toBe(true);
+
+    const buf = new ArrayBuffer(8);
+    const p = lease.run('b', [buf]);
+    // ⚠ **溜めていない**ことも見る(溜まっていたら 1 件目と同じ経路になる)
+    expect(worker().seen.map((m) => m.payload), '直接ディスパッチしていない').toEqual(['a', 'b']);
+    expect(worker().transfers[1], '2 件目の transfer が落ちている').toEqual([buf]);
+    worker().respondAll();
+    await p;
+  });
 });
 
 describe('🔴 アイドルで kill と解放', () => {
