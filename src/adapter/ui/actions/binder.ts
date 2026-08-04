@@ -82,6 +82,8 @@ export interface BinderServices {
    */
   /** ⚠ **Promise を返す** ── 押した側が「終わった」を知らないと待ちを出せない。 */
   exportDiagram?(source: string, index: number): void | Promise<void>;
+  /** 文字列をクリップボードへ(P8 段⑱)。⚠ 失敗も可視で終える。 */
+  copyText?(text: string): void;
   /**
    * 添付 gate(書出し / 取込 / 整理)が実行中か。
    * ⚠ **破壊的操作を止めるために要る**(P6f review M-2)── 「書き出す」と「削除」を
@@ -384,6 +386,19 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = dispatcher.getState().selectedLid;
     if (lid && target instanceof HTMLInputElement)
       dispatcher.dispatch({ type: 'SET_APP_TILE', lid, icon: target.value.trim() });
+  },
+  /**
+   * 添付の参照(`asset:<key>`)をコピーする(P8 段⑱)。
+   * ⚠ 本文に貼れる形そのものを渡す ── key だけ渡すと user が書式を覚える必要がある
+   */
+  'copy-asset-ref': (_dispatcher, target, services) => {
+    // ⚠ 渡すのは**貼れる 1 行**(`![名前](asset:key)`)── 裸の `asset:key` を
+    //    渡していた頃は、貼っても markdown としてはただの文字列だった(段⑱)。
+    //    組み立ては描画側(`asset-ref-format.ts` 経由)。ここでは組み立て直さない
+    const ref = target
+      .closest<HTMLElement>('[data-pkc-asset-ref]')
+      ?.getAttribute('data-pkc-asset-ref');
+    if (ref) services.copyText?.(ref);
   },
   'download-asset': (dispatcher, target, services) => {
     const key = target.getAttribute('data-pkc-asset-key');

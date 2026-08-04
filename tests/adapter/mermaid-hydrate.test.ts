@@ -15,7 +15,10 @@ import { renderToPng } from '../../src/adapter/ui/render/mermaid-raster';
 
 // 🔑 焼く所は差す ── ここで見たいのは**いつ焼き直すか**であって、絵ではない
 vi.mock('../../src/adapter/ui/render/mermaid-raster', () => ({
-  renderToPng: vi.fn(async () => new Blob(['png'], { type: 'image/png' })),
+  renderToPng: vi.fn(async () => ({
+    png: new Blob(['png'], { type: 'image/png' }),
+    cssWidth: 320,
+  })),
   readPalette: () => ({
     bg: '#fff',
     alt: '#eee',
@@ -362,9 +365,9 @@ describe('塊の畳み方と焼き直しの世代(P8 段⑰)', () => {
     expect(vi.mocked(renderToPng)).toHaveBeenCalledTimes(1);
 
     // 焼くのを止めたまま配色を 2 回変える
-    const held: Array<(v: Blob) => void> = [];
+    const held: Array<(v: { png: Blob; cssWidth: number }) => void> = [];
     vi.mocked(renderToPng).mockImplementationOnce(
-      () => new Promise<Blob>((res) => held.push(res)),
+      () => new Promise((res) => held.push(res)),
     );
     document.documentElement.setAttribute('data-pkc-theme', 'dark');
     await settle();
@@ -372,7 +375,7 @@ describe('塊の畳み方と焼き直しの世代(P8 段⑰)', () => {
     document.documentElement.setAttribute('data-pkc-theme', 'nord');
     await settle();
     // 止めていた 1 枚目(dark)を今ごろ返す ── **載ってはいけない**
-    held[0]?.(new Blob(['png']));
+    held[0]?.({ png: new Blob(['png']), cssWidth: 320 });
     await settle();
     expect(
       created.length - madeBefore,
@@ -387,9 +390,9 @@ describe('塊の畳み方と焼き直しの世代(P8 段⑰)', () => {
     //    古い配色のまま残る ── 対象は**焼き始めた器**
     const b = block('graph TD\n A-->B');
     document.body.append(b);
-    const held: Array<(v: Blob) => void> = [];
+    const held: Array<(v: { png: Blob; cssWidth: number }) => void> = [];
     vi.mocked(renderToPng).mockImplementationOnce(
-      () => new Promise<Blob>((res) => held.push(res)),
+      () => new Promise((res) => held.push(res)),
     );
     const scope = hydrateMermaid(b);
     fire!([observed[0]!]);
@@ -404,7 +407,7 @@ describe('塊の畳み方と焼き直しの世代(P8 段⑰)', () => {
       '焼いている最中の器が古い配色のまま置き去りになる',
     ).toHaveBeenCalledTimes(2);
     expect(vi.mocked(renderToPng).mock.calls[1]![0].theme).toBe('dark');
-    held[0]?.(new Blob(['png']));
+    held[0]?.({ png: new Blob(['png']), cssWidth: 320 });
     await settle();
     scope.dispose();
     b.remove();

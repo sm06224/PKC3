@@ -49,7 +49,11 @@ function codeOnly(src: string): string {
 }
 
 const MANUAL = readFileSync('docs/manual.md', 'utf-8');
-const MIGRATION = readFileSync('docs/migration-from-pkc2.md', 'utf-8');
+
+const SHELL = readFileSync('src/adapter/ui/render/shell.ts', 'utf-8');
+const DETAIL = readFileSync('src/adapter/ui/render/detail.ts', 'utf-8');
+const BINDER = readFileSync('src/adapter/ui/actions/binder.ts', 'utf-8');
+const INSPECTOR = readFileSync('src/adapter/ui/render/inspector.ts', 'utf-8');const MIGRATION = readFileSync('docs/migration-from-pkc2.md', 'utf-8');
 
 /** shell を 1 度だけ組んで、以後はこれを見る。 */
 const root = ((): HTMLElement => {
@@ -300,7 +304,7 @@ describe('マニュアルと実装の突合', () => {
     const msg = /を削除しますか\?\(([^)]+)\)/.exec(binder)?.[1];
     expect(msg, '削除の確認文言が読めない').toBeTruthy();
     expect(msg, 'マニュアルは「戻せます」と書いてある').not.toContain('元に戻せません');
-    expect(MANUAL).toContain('消したノートはここに入ります。**戻せます**');
+    expect(MANUAL).toContain('消したノートはここに入り、**戻せます**');
   });
 });
 
@@ -335,5 +339,52 @@ describe('移行ガイドと実装の突合', () => {
     // user 裁定 2026-07-30。⚠ ここが曖昧だと user は PKC2 を消す
     expect(MIGRATION).toContain('片道');
     expect(MIGRATION).toContain('pkc3-archive');
+  });
+});
+
+/**
+ * P8 段⑱: 🔴 **導線の置き場所が腐らないようにする**(レビュー H)。
+ *
+ * 🔴 実際に腐っていた:段⑤ で「上の帯」から左の列へ移したのに、マニュアルは
+ * 「上の帯のボタン」「上の帯の **取り込む**」「**整理** メニュー」「**新規** メニュー →
+ * **+添付**」と書いたままだった ── どれも**画面に存在しない**。
+ * 「メニュー」は `<details>` を外した段①で消えた語なので、機械的に止められる。
+ */
+describe('導線の置き場所(P8 段⑱)', () => {
+  it('🔴 マニュアルが「メニュー」を名乗らない(畳む UI は段① で外した)', () => {
+    // ⚠ 代替物で満たせない条件にする ── 「メニュー」という語そのものを禁じる
+    const lines = MANUAL.split('\n').filter((l) => l.includes('メニュー'));
+    expect(lines, `存在しない「メニュー」を案内している:\n${lines.join('\n')}`).toEqual([]);
+  });
+
+  it('🔴 マニュアルが「上の帯」に書き出し・取込を置いていない', () => {
+    for (const word of ['上の帯の **取り込む**', '上の帯のボタン', '上部の **整理**']) {
+      expect(MANUAL, `${word} は画面に存在しない`).not.toContain(word);
+    }
+  });
+
+  it('🔴 全体の操作は**左の列**にある(実装と突き合わせる)', () => {
+    // shell.ts が持つラベルが、そのままマニュアル §5 / §7 に出ていること
+    for (const label of ['取り込む', 'バックアップ', '閲覧用 HTML', '使っていない添付を消す']) {
+      expect(SHELL, `${label} が実装から消えた`).toContain(`'${label}'`);
+      expect(MANUAL, `${label} がマニュアルに無い`).toContain(label);
+    }
+  });
+
+  it('🔴 添付の参照を本文へ入れる導線が**実在する**(書ける形式なのに書けない、を作らない)', () => {
+    // マニュアル §3 が「参照をコピー」を案内している以上、実装に無ければ嘘になる
+    expect(MANUAL).toContain('参照をコピー');
+    // ⚠ **文字列が在るか**では当てられない ── `data-pkc-field` にも同じ語が
+    //    出るので、action を消しても満たされる(変異試験で実際に生き残った)。
+    //    受け口(binder)と押した結果(smoke)の両端で見る
+    expect(BINDER, 'copy-asset-ref を受ける口が無い').toContain("'copy-asset-ref':");
+    // 組み立ては描画側(`asset-ref-format.ts`)── binder は**渡すだけ**にしてある
+    expect(DETAIL, '貼れる形を作る経路が無い').toContain('formatAssetRef(');
+  });
+
+  it('🔴 1 件書き出しの説明が、実際に落ちる形式と合っている', () => {
+    // 実装は可逆アーカイブ(.pkc3.zip)── かつて tooltip は「Markdown で保存します」だった
+    expect(INSPECTOR).toContain('.pkc3.zip');
+    expect(INSPECTOR, 'Markdown と嘘を書いている').not.toContain('Markdown で保存します');
   });
 });

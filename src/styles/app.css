@@ -153,7 +153,10 @@ button:focus-visible {
   outline-offset: 1px;
 }
 
-input,
+/* ⚠ **checkbox / radio を除く**(P8 段⑱。レビュー)── 一括で高さを当てると
+ * チェックボックスが 13×26 に潰れ、タスク行だけ行高が 35px になっていた。
+ * checkbox 側に個別指定を新設しない(指定が 2 か所に増えると片方だけ直る) */
+input:not([type='checkbox']):not([type='radio']),
 textarea,
 select {
   background: var(--surface);
@@ -523,13 +526,23 @@ select:focus-visible {
  * 🔑 画面に置くのは PNG 1 枚。**保存の導線は図の中**に置く(押した所から
  * `closest` で原文に届く)。⚠ 消さない ── 「同じものが常に同じ場所にある」。
  * 普段は控えめ、hover / focus で立つ。 */
+/* 🔴 **器を図の大きさに合わせる**(P8 段⑱)。器を幅いっぱいのままにすると、
+ * 図を自然な大きさで置くようにした結果、**保存の導線だけが右端に取り残される**
+ * (図から 700px 離れて浮いていた ── 実測)。器を中身に合わせれば、
+ * 「押す物と効く先を離さない」が保てる。 */
 [data-pkc-mermaid-src] {
   position: relative;
+  display: table;
+  max-width: 100%;
+  /* ⚠ **導線の場所を確保する** ── 図に重ねると、小さい図では中身が隠れる
+   * (実測: 82px の図に「図を保存」が丸ごと被った)。上に 1 行ぶん空ける */
+  min-width: 7rem;
+  padding-top: 22px;
 }
 [data-pkc-field='diagram-save'] {
   position: absolute;
-  top: var(--s2);
-  right: var(--s2);
+  top: 0;
+  right: 0;
   font-size: 11.5px;
   padding: 0 var(--s2);
   opacity: 0.35;
@@ -947,8 +960,17 @@ select:focus-visible {
 }
 [data-pkc-region='filer-table'] {
   width: 100%;
+  /* 🔴 **列幅を固定する**(P8 段⑱)── 一覧は同じ題名を … で畳むのに、
+   * フォルダはペインからはみ出して横スクロールになっていた。省略の規則は
+   * 一覧と同じ 1 本に寄せる(「一覧が省略するものはフォルダでも省略される」) */
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 12px;
+}
+[data-pkc-region='filer-table'] td:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 [data-pkc-region='filer-table'] th,
 [data-pkc-region='filer-table'] td {
@@ -1042,19 +1064,32 @@ select:focus-visible {
  * `[data-pkc-region='inspector'] { display: flex }` に勝たれ、
  * 480px 幅で 3 列のまま本文が **213px** に潰れていた(実測)。 */
 
-/* 中くらいの画面では付随情報を畳む(本文の幅を優先する) */
+/* 中くらいの画面では付随情報を**下へ回す**(本文の幅を優先する)
+ * 🔴 **消さない**(P8 段⑱。レビュー H)。かつて `display:none` にしていたが、
+ * 付随情報は「書き出す / 履歴 / 削除」を持っている面なので、畳むと
+ * **その 3 つに到達する導線が画面から消える**(キーボードでも届かない)。
+ * 幅が足りないなら**場所を変える**のであって、操作を無くしてよい理由にはならない。 */
 @media (max-width: 1100px) {
   [data-pkc-region='shell'] {
     grid-template-columns: minmax(180px, 22vw) minmax(0, 1fr);
     grid-template-areas:
-      'brand   brand'
-      'sidebar detail'
-      'update  update'
-      'notices notices'
-      'status  status';
+      'brand     brand'
+      'sidebar   detail'
+      'inspector inspector'
+      'update    update'
+      'notices   notices'
+      'status    status';
   }
+  /* ⚠ 横に寝かせる ── 縦のままだと下に長い帯ができて本文が押し上げられる */
   [data-pkc-region='inspector'] {
-    display: none;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s2);
+    max-height: 30vh;
+    overflow-y: auto;
+    border-left: none;
+    border-top: 1px solid var(--border);
   }
 }
 
@@ -1066,10 +1101,11 @@ select:focus-visible {
       'brand'
       'sidebar'
       'detail'
+      'inspector'
       'update'
       'notices'
       'status';
-    grid-template-rows: auto auto 1fr auto auto auto;
+    grid-template-rows: auto auto 1fr auto auto auto auto;
   }
   [data-pkc-region='sidebar'] {
     max-height: 30vh;
@@ -1077,6 +1113,15 @@ select:focus-visible {
 }
 
 /* 中央が狭いときはプレビューを畳む(原文が読めなくなるほうが困る) */
+/* 🔴 狭いときは**図案を落として文字を残す**(P8 段⑱。レビュー)。
+ * 800px 幅で左タブのラベルが隣のタブへはみ出して重なっていた ── 絵文字を
+ * 削るのが「地は無彩色」の方針とも揃う(ラベルを縮める・省略記号を付ける、より先) */
+@media (max-width: 900px) {
+  [data-pkc-region='browse-tabs'] [data-pkc-icon] {
+    display: none;
+  }
+}
+
 @media (max-width: 900px) {
   [data-pkc-region='editor-split'] {
     grid-template-columns: minmax(0, 1fr);

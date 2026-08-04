@@ -36,6 +36,7 @@ import {
 import { ZipWriter } from './zip-writer';
 import type { ArchiveSource } from './pkc3-archive';
 import { scanLinks, rewriteLinkDests } from '@features/markdown/link-scan';
+import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
 
 export const MD_FORMAT = 'pkc3-markdown';
 export const MD_VERSION = 1;
@@ -174,12 +175,6 @@ function pkc3Meta(m: {
   if (m.created_at) meta['created_at'] = m.created_at;
   if (m.updated_at) meta['updated_at'] = m.updated_at;
   return meta;
-}
-
-/** markdown のリンクラベルに入れて安全な形にする(`]` 1 個でリンクが死ぬ)。 */
-function escapeLabel(s: string): string {
-  // ⚠ 改行が入ると markdown-it が段落を割ってリンクが死ぬ ── 1 行に潰す
-  return s.replace(/\s*\n\s*/g, ' ').replace(/[[\]\\]/g, '\\$&');
 }
 
 /**
@@ -354,8 +349,7 @@ export async function writeMarkdownZip(
       for (const ref of fmRefs) {
         const p = pathOf.get(ref.key)!;
         if (text.includes(p) || extra.some((l) => l.includes(p))) continue;
-        const isImage = (mimeOf.get(ref.key) ?? '')?.startsWith('image/') ?? false;
-        extra.push(`${isImage ? '!' : ''}[${escapeLabel(ref.label)}](${p})`);
+        extra.push(formatAssetRef(ref.label, p, isImageAssetMime(mimeOf.get(ref.key))));
       }
 
       // 🔴 本文は原文のまま。PKC3 のメタは**原文へ splice** する

@@ -126,7 +126,13 @@ const SHIM_SOURCE = `
         var next = bytesOf(target) - (had ? key.length + target[key].length : 0) + key.length + value.length;
         // ⚠ **同期に投げる**(本物の意味論)── 投げないと「上限で古いものを捨てる」
         //    型のアプリが永久に捨てず、静かに食い続ける
-        if (next > limit) throw quotaError();
+        if (next > limit) {
+          // ⚠ **投げる前に知らせる**(P8 段⑱)。同期に throw するのは本物の
+          //    意味論なので変えないが、アプリが握り潰すと画面に何も出ない
+          //    ── マニュアルは「画面の下に 1 行お知らせが出ます」と言っている
+          notify({ op: 'quota', key: key });
+          throw quotaError();
+        }
         var prevVal = had ? target[key] : null;
         target[key] = value;
         notify({ op: 'set', key: key, value: value, __prev: prevVal });

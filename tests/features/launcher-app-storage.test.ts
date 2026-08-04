@@ -238,14 +238,18 @@ describe('shim の意味論(実際に走らせる)', () => {
     expect(sent[1], '前の値まで外殻へ送っている(payload が倍になる)').not.toHaveProperty('__prev');
   });
 
-  it('⚠ 上限に当たった書込は**外殻へ送らない**(入っていないものを保存しない)', () => {
+  it('🔴 上限に当たった書込は**保存に行かない**が、**お知らせは出す**', () => {
     const { ls, sent } = runShim({}, 32);
     try {
       ls.setItem('a', 'x'.repeat(100));
     } catch {
-      /* 期待どおり */
+      /* 期待どおり(同期 throw は本物の意味論) */
     }
-    expect(sent).toEqual([]);
+    // ⚠ 入っていないものを保存しに行かない
+    expect(sent.filter((m) => m.op === 'set'), '上限超えの値を外殻へ送っている').toEqual([]);
+    // 🔴 ただし**画面には出す**(P8 段⑱)── アプリが例外を握り潰すと、
+    //    かつては何も起きないように見えた(マニュアルの記述と食い違っていた)
+    expect(sent.map((m) => m.op), 'お知らせの合図が出ていない').toContain('quota');
   });
 
   it('sessionStorage は**別物**で、外殻へ送らない(タブ単位)', () => {

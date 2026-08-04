@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { gzipSync } from 'node:zlib';
-import { gotoApp, clickReal, collectPageErrors } from './helpers';
+import { gotoApp, clickReal, collectPageErrors, createEntry } from './helpers';
 
 /**
  * P7b 段⑩: **取り込んだランチャーのタイルが見えて、押すと開く**。
@@ -264,9 +264,26 @@ test('🔴 登録 → タイル → SPA が動き、開き直しても続きが�
   });
   const register = page.locator('[data-pkc-field="app-register"]');
   await expect(register, 'アプリとして登録する導線が無い').toBeVisible({ timeout: 15000 });
+
+  // 🔴 **チェックボックスは小さな四角のまま**(P8 段⑱)。欄の高さ(`--row-h`)を
+  //    入力欄と一緒に当てると、チェックボックスまで 28px の帯に化けて行が崩れる。
+  //    ⚠ 空振り防止に**同じ行の入力欄**も測る ── 「入力欄には効いている」ことを
+  //    示さないと、高さの指定を丸ごと消しても通ってしまう
+  const boxSize = await register.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return { w: Math.round(r.width), h: Math.round(r.height) };
+  });
+  expect(boxSize.h, `チェックボックスが縦に伸びている(${boxSize.h}px)`).toBeLessThan(24);
+  expect(boxSize.w, `チェックボックスが横に伸びている(${boxSize.w}px)`).toBeLessThan(24);
+
   await register.check();
   // 登録すると設定欄が出る
   await expect(page.locator('[data-pkc-field="app-group"]')).toBeVisible();
+  // 入力欄のほうは行の高さに揃っている(上の「小さいまま」が空振りでない証拠)
+  const rowH = await page
+    .locator('[data-pkc-field="app-group"]')
+    .evaluate((el) => Math.round(el.getBoundingClientRect().height));
+  expect(rowH, `入力欄に行の高さが効いていない(${rowH}px)`).toBeGreaterThan(boxSize.h + 6);
   await page.locator('[data-pkc-field="app-group"]').fill('道具');
   await page.locator('[data-pkc-field="app-group"]').blur();
   await page.locator('[data-pkc-field="app-icon"]').fill('🧮');
@@ -468,6 +485,76 @@ test('🔴 行儀の悪いアプリが保管庫を占有できない(上限は�
       { timeout: 15000, message: 'ノートを消してもアプリのデータが残っている' },
     )
     .toBe(0);
+
+  expect(errors).toEqual([]);
+});
+
+/**
+ * P8 段⑱: 🔴 **添付の参照を本文へ入れられる**(レビュー H)。
+ *
+ * 🔴 マニュアル §3 は `asset:<key>` を「本文に書ける形式」として説明していたのに、
+ * **本文へ入れる経路も key を見る経路も無かった** ── 書ける形式なのに書けない、
+ * という状態だった。
+ *
+ * ⚠ 観測点は「ボタンが在るか」ではなく **押した結果**(クリップボードの中身)。
+ */
+test('🔴 添付の「参照をコピー」で、本文に貼れる形が手に入る', async ({ page, context }) => {
+  const errors = collectPageErrors(page);
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await gotoApp(page);
+
+  await clickReal(page, '[data-pkc-action="attach-file"]');
+  await page.locator('[data-pkc-field="attach-input"]').setInputFiles({
+    name: 'p.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+  });
+  const copy = page.locator('[data-pkc-field="copy-asset-ref"]');
+  await expect(copy, '参照をコピーする導線が無い').toBeVisible({ timeout: 15000 });
+  await copy.click();
+
+  // 🔴 押した結果が**手に入る**(黙って終わらない)
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('コピーしました', {
+    timeout: 10000,
+  });
+  const text = await page.evaluate(() => navigator.clipboard.readText());
+  // ⚠ **貼れる形**であること ── 裸の `asset:<key>` は markdown としてはただの
+  //    文字列で、貼っても何も出ない(直す前がそれだった)
+  expect(text, 'コピーされた文字列が本文に貼れる形になっていない').toMatch(
+    /^!\[[^\]]*\]\(asset:.+\)$/,
+  );
+
+  // ⚠ 貼ったら実際に添付として出る(形式が合っているか、の最終確認)
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-body"]').fill(`見て: ${text}\n`);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await expect(
+    page.locator('[data-pkc-field="detail-body"] img[data-pkc-asset-key]'),
+    '貼った参照が添付として出ない',
+  ).toHaveCount(1, { timeout: 15000 });
+
+  expect(errors).toEqual([]);
+});
+
+/**
+ * P8 段⑱: 🔴 **タブを変えても中央の面は変わらない**(レビュー M)。
+ * 直す前は「アプリ」タブに切り替えただけで `SET_VIEW_MODE 'launcher'` を撃って
+ * おり、**中央下の追記欄が消えて**いた(他の 2 タブでは残る)。探し方(左の列)と
+ * 見る場所(中央)は別の軸である。
+ */
+test('🔴 左のタブを変えても、中央の追記欄は消えない', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('追記できるノート');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+  const box = page.locator('[data-pkc-field="append-input"]');
+  await expect(box).toBeVisible();
+  for (const tab of ['filer', 'launcher', 'list']) {
+    await clickReal(page, `[data-pkc-browse="${tab}"]`);
+    await expect(box, `${tab} タブで追記欄が消えた`).toBeVisible();
+  }
 
   expect(errors).toEqual([]);
 });

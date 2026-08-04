@@ -257,6 +257,10 @@ export function buildLauncherAppShell(
     'var rk=String(d.key),old=localStorage.getItem(PREFIX+rk);' +
     'if(old!==null){localStorage.removeItem(PREFIX+rk);used-=rk.length+old.length;}' +
     'reply(d.seq,true);' +
+    '}else if(d.op==="quota"){' +
+    // ⚠ アプリ側の上限で止まったときも**画面に出す**(P8 段⑱)── shim が
+    //    同期に投げるので、アプリが握り潰すと何も起きないように見える
+    'note("このアプリの保存領域が一杯です(これ以上は保存されません)");' +
     '}else if(d.op==="clear"){var ks=[];for(var i=0;i<localStorage.length;i++){' +
     'var k=localStorage.key(i);if(k&&k.indexOf(PREFIX)===0)ks.push(k);}' +
     'for(var j=0;j<ks.length;j++)localStorage.removeItem(ks[j]);used=0;reply(d.seq,true);' +

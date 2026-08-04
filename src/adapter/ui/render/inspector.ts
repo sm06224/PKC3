@@ -82,7 +82,13 @@ export class InspectorRenderer {
       b.title = title;
       actions.append(b);
     };
-    btn('export-entry', '書き出す', 'このノートだけを Markdown で保存します');
+    // ⚠ 文言は**実際に落ちるもの**に合わせる(P8 段⑱)── ここは可逆な
+    //    アーカイブで、Markdown ではない(マニュアル §5 の表と同じ材料)
+    btn(
+      'export-entry',
+      '書き出す',
+      'このノートだけをバックアップ形式(.pkc3.zip)で保存します。取り込み直せます',
+    );
     btn('show-history', '履歴', '過去の版を一覧します');
     btn('delete-entry', '削除', 'ゴミ箱へ移します(フォルダ画面から戻せます)');
     this.region.append(actions);

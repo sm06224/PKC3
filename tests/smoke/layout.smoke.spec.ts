@@ -119,8 +119,58 @@ test('🔴 狭い画面では 1 カラムへ折る(横に潰れない)', async (
   expect(sidebar.y + sidebar.height).toBeLessThanOrEqual(detail.y + 1);
   // 本文が画面幅いっぱいを使う(480px 画面なので、余白を引いた分)
   expect(detail.width).toBeGreaterThan(440);
-  // ⚠ 情報ペインは**畳まれる**(狭い画面で 3 列にすると本文が読めない)
-  expect(await page.locator('[data-pkc-region="inspector"]').isVisible()).toBe(false);
+  // 🔴 情報ペインは**消さず、下へ回す**(P8 段⑱。レビュー H)。
+  //    かつては `display:none` にしていたので、その面が持つ
+  //    「書き出す / 履歴 / 削除」に到達する導線が画面から消えていた。
+  //    ⚠ 狭い画面で**横に 3 列にはしない**(本文が読めなくなる)ので、
+  //    「消えていない」かつ「本文の下」の両方を見る
+  const inspector = (await page.locator('[data-pkc-region="inspector"]').boundingBox())!;
+  expect(inspector, '情報ペインが消えている(操作に手が届かない)').not.toBeNull();
+  expect(inspector.y, '横に並べている(本文が潰れる)').toBeGreaterThanOrEqual(detail.y);
+});
+
+/**
+ * P8 段⑱: 🔴 **狭い列でも探し方のタブが重ならない**。
+ *
+ * 左の列は 900px を切ると 180px まで縮む。3 つのタブに図案と語を両方載せると
+ * 入りきらず、**互いに重なって語が読めなくなる**(段⑱ 以前の実際の姿)。
+ * ⚠ 「畳まない」(user 指示)ので**タブは 3 つとも出したまま**、図案だけ落とす。
+ */
+test('🔴 狭い列でも探し方のタブが重ならない(3 つとも出たまま)', async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 800 });
+  await gotoApp(page);
+  const m = await page.evaluate(() => {
+    const host = document.querySelector('[data-pkc-region="browse-tabs"]')!;
+    const tabs = [...host.querySelectorAll('[data-pkc-browse]')].map((b) => {
+      const r = b.getBoundingClientRect();
+      const label = b.querySelector('[data-pkc-field="label"]')!;
+      return {
+        right: Math.round(r.right),
+        // ⚠ タブは `flex: 1; min-width: 0` なので**箱は重ならない** ── 溢れるのは
+        //    中身のほう。だから見るのは箱の位置ではなく「**語が自分の箱に
+        //    収まっているか**」である(箱の重なりで書くと何も守らない)
+        labelRight: Math.round(label.getBoundingClientRect().right),
+        overflow: b.scrollWidth - b.clientWidth,
+        label: (label.textContent ?? '').trim(),
+      };
+    });
+    return { tabs, hostW: host.clientWidth, scrollW: host.scrollWidth };
+  });
+  // ① 3 つとも在る(畳んでいない)
+  expect(m.tabs.length, 'タブが減っている(畳んだ形に戻っている)').toBe(3);
+  expect(m.tabs.every((t) => t.label !== ''), '語が消えている(図案だけでは分からない)').toBe(true);
+  // ② 語が自分の箱から溢れて隣に被っていない
+  for (const t of m.tabs) {
+    expect(
+      t.labelRight,
+      `「${t.label}」が隣のタブに被っている(語の右端 ${t.labelRight} / 箱の右端 ${t.right})`,
+    ).toBeLessThanOrEqual(t.right);
+    expect(t.overflow, `「${t.label}」の中身が箱に入っていない(+${t.overflow}px)`).toBeLessThanOrEqual(0);
+  }
+  // ③ 列から溢れていない(溢れると 3 つ目が見えない)
+  expect(m.scrollW, `タブが列から溢れている(${m.scrollW} / 列 ${m.hostW})`).toBeLessThanOrEqual(
+    m.hostW + 1,
+  );
 });
 
 /**
@@ -409,4 +459,147 @@ test('🔴 一覧のスクロール: 絞り込みを戻しても、タブを往�
   ).toBeLessThan(30);
 
   expect(errors).toEqual([]);
+});
+
+/**
+ * P8 段⑱: 🔴 **幅が足りなくても操作は消さない**(レビュー H)。
+ *
+ * 🔴 直す前: 1100px 以下で付随情報を `display:none` にしていたので、
+ * その面が持つ **書き出す / 履歴 / 削除**に到達する導線が画面から消えていた
+ * (キーボードでも届かない)。幅が足りないなら**場所を変える**のであって、
+ * 操作を無くしてよい理由にはならない。
+ *
+ * ⚠ 観測点は「要素が在るか」ではなく「**押せるか**」── `display:none` の
+ * 要素は DOM に在るので、存在だけ見ると直す前でも緑になる。
+ */
+test('🔴 狭い画面でも「書き出す / 履歴 / 削除」に手が届く', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 800 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('狭い画面');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+  const ACTIONS = ['export-entry', 'show-history', 'delete-entry'];
+  for (const width of [1440, 1024, 900, 700]) {
+    await page.setViewportSize({ width, height: 800 });
+    await page.waitForTimeout(120);
+    for (const a of ACTIONS) {
+      const el = page.locator(`[data-pkc-action="${a}"]`).first();
+      await expect(el, `${width}px で ${a} が画面から消えた`).toBeVisible();
+      // ⚠ **押せる場所に居る**ことまで見る(0 幅・画面外だと押せない)
+      const box = await el.boundingBox();
+      expect(box, `${width}px で ${a} に大きさが無い`).not.toBeNull();
+      expect(box!.width, `${width}px で ${a} が潰れている`).toBeGreaterThan(8);
+      expect(box!.height).toBeGreaterThan(8);
+    }
+  }
+
+  expect(errors).toEqual([]);
+});
+
+/**
+ * P8 段⑱: 🔴 **図を器いっぱいに引き伸ばさない**(レビュー H)。
+ * 直す前は 2 節点の図が 875×1286px を占めていた。
+ */
+test('🔴 小さい図は小さいまま置かれる(器いっぱいに広げない)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('小さい図');
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill('```mermaid\ngraph TD\n  A-->B\n```\n');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+  const host = page.locator('[data-pkc-field="detail-body"] [data-pkc-mermaid-src]');
+  await expect(host).toHaveAttribute('data-pkc-mermaid-state', 'ready', { timeout: 30000 });
+  const size = await host.evaluate((h) => {
+    const img = h.querySelector('img')!;
+    // ⚠ **器は本文欄**(親)── `[data-pkc-mermaid-src]` 自身は `display: table` で
+    //    中身に合わせて縮むので、そこを測ると「図と同じ幅」しか返らず、
+    //    **どんな実装でも比が 1 未満にならない = 何も守らない**(実際に踏んだ)
+    const box = h.parentElement!;
+    return { w: img.clientWidth, hostW: box.clientWidth, natural: img.naturalWidth };
+  });
+  expect(size.hostW, '器が狭すぎて観測にならない').toBeGreaterThan(400);
+  // 🔴 2 節点の図が器の幅いっぱいを占めない
+  expect(size.w, `図が器いっぱいに広がっている(${size.w} / 器 ${size.hostW})`).toBeLessThan(
+    size.hostW * 0.9,
+  );
+  expect(size.w, '図が消えた').toBeGreaterThan(10);
+
+  // 🔴 **焼いた実寸で置く** ── 焼いた大きさと置く大きさがずれると、
+  //    ぼやける(引き伸ばし)か切れる。dpr=1 なので natural と一致するのが正
+  expect(size.w, `焼いた実寸で置いていない(置 ${size.w} / 焼 ${size.natural})`).toBe(size.natural);
+
+  // 🔴 **開き直しても小さいまま**(キャッシュから返す道も同じ大きさを覚えている)。
+  //    ⚠ 焼き直しに救われないよう、鍵が同じであること(同じ幅・同じテーマ)を保つ
+  const rows = await page.evaluate(
+    () =>
+      new Promise<number>((resolve) => {
+        const req = indexedDB.open('pkc3-diagram-cache', 1);
+        req.onsuccess = () => {
+          const c = req.result.transaction('png', 'readonly').objectStore('png').count();
+          c.onsuccess = () => resolve(c.result);
+          c.onerror = () => resolve(-1);
+        };
+        req.onerror = () => resolve(-1);
+      }),
+  );
+  expect(rows, 'キャッシュに 1 件も入っていない(開き直しの道を測れない)').toBeGreaterThan(0);
+
+  await page.reload();
+  // ⚠ 開き直すと選択は空 ── 同じノートを開き直す(幅もテーマも同じ = 同じ鍵)
+  await clickReal(page, '[data-pkc-region="sidebar"] [data-pkc-action="select-entry"]');
+  const host2 = page.locator('[data-pkc-field="detail-body"] [data-pkc-mermaid-src]');
+  await expect(host2).toHaveAttribute('data-pkc-mermaid-state', 'ready', { timeout: 30000 });
+  const again = await host2.evaluate((h) => {
+    const img = h.querySelector('img')!;
+    return { w: img.clientWidth, hostW: h.parentElement!.clientWidth };
+  });
+  expect(again.w, `開き直したら器いっぱいに広がった(${again.w} / 器 ${again.hostW})`).toBeLessThan(
+    again.hostW * 0.9,
+  );
+
+  expect(errors).toEqual([]);
+});
+
+/**
+ * P8 段⑱: 🔴 **高精細画面でも図の大きさは変わらない**。
+ *
+ * ⚠ dpr=1 だけで測ると、**dpr の次元を一度も測っていない**ことになる
+ * (CLAUDE.md「fixture のゼロ件の次元は測っていない次元」)。焼く倍率と置く
+ * 大きさを取り違えると、Retina でだけ図が 2 倍になる ── 実際に
+ * `img.style.width` を `100%` にする変異は dpr=1 では素通りした。
+ */
+test.describe('高精細画面', () => {
+  test.use({ deviceScaleFactor: 2 });
+
+  test('🔴 dpr=2 でも図は 2 倍にならない(焼くのは 2 倍、置くのは等倍)', async ({ page }) => {
+    const errors = collectPageErrors(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await gotoApp(page);
+    await createEntry(page, 'text');
+    await page.locator('[data-pkc-field="editor-title"]').fill('高精細の図');
+    await page
+      .locator('[data-pkc-field="editor-body"]')
+      .fill('```mermaid\ngraph TD\n  A-->B\n```\n');
+    await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+    const host = page.locator('[data-pkc-field="detail-body"] [data-pkc-mermaid-src]');
+    await expect(host).toHaveAttribute('data-pkc-mermaid-state', 'ready', { timeout: 30000 });
+    const m = await host.evaluate((h) => {
+      const img = h.querySelector('img')!;
+      return { dpr: devicePixelRatio, w: img.clientWidth, natural: img.naturalWidth };
+    });
+    expect(m.dpr, 'dpr が 2 になっていない(この次元を測れていない)').toBe(2);
+    // ① **2 倍で焼けている**(空振り防止 ── 等倍で焼いていたら以下は自明に通る)
+    expect(m.natural, `2 倍で焼いていない(焼 ${m.natural} / 置 ${m.w})`).toBe(m.w * 2);
+    // ② **置く大きさは等倍のまま**(dpr=1 のときと同じ 2 節点の図)
+    expect(m.w, `高精細画面で図が大きくなった(${m.w}px)`).toBeLessThan(200);
+
+    expect(errors).toEqual([]);
+  });
 });

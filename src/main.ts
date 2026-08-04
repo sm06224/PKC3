@@ -22,6 +22,7 @@ import { createUpdatePrompt } from '@adapter/ui/render/update-card';
 import { applyTheme, chooseTheme, initialTheme, isTheme } from '@adapter/ui/render/theme';
 import { launchTile } from '@adapter/ui/launch-tile';
 import { readAppStorage } from '@adapter/platform/app-storage';
+import { copyPlainText } from '@adapter/platform/clipboard';
 import { AssetClient } from '@adapter/platform/asset/asset-client';
 import { watchForUpdate, type UpdateContainer } from '@adapter/platform/sw/update-prompt';
 import { reloadOnPrebootSwap, type PrebootTarget } from '@adapter/platform/sw/preboot-swap';
@@ -416,6 +417,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     importFiles: (files) => void withAssetGate(() => runImport(files)),
     dismissNotices: () => clearNotices(regions.notices),
     /**
+     * 添付の参照をコピーする(P8 段⑱)。
+     * ⚠ **結果を出す** ── コピーは押しても画面が変わらない操作なので、
+     *    黙って終わると成功したのか分からない
+     */
+    copyText: (text) => {
+      void copyPlainText(text).then((ok) => {
+        showStatus(
+          `${statusBase} — ${ok ? '参照をコピーしました(本文に貼れます)' : 'コピーできませんでした'}`,
+        );
+      });
+    },
+    /**
      * 🚀 ランチャーのタイルを起動する(P7b 段⑩)。
      *
      * ⚠ **新しいタブで開く**。同じタブに載せると、開いた先から戻れない
@@ -458,9 +471,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       browseMode = mode;
       markBrowse(mode);
       browse.render(dispatcher.getState(), mode);
-      // ⚠ アプリの一覧は開いたときに読む(常駐していない)
-      if (mode === 'launcher') dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'launcher' });
-      else if (dispatcher.getState().viewMode !== 'detail')
+      // ⚠ アプリの一覧は開いたときに読む(常駐していない)。
+      // 🔴 **view を借りない**(P8 段⑱)── 中央の面を変える必要が無いのに
+      //    `SET_VIEW_MODE 'launcher'` を撃っていたので、タブを切り替えただけで
+      //    中央下の追記欄が消えていた(他の 2 タブでは残る)
+      if (mode === 'launcher') dispatcher.dispatch({ type: 'REFRESH_LAUNCHER_TILES' });
+      if (dispatcher.getState().viewMode !== 'detail')
         dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
     },
     // 🔄 新しい版へ交代する(P7 段⑤)。⚠ 頼むだけ ── 再読込は交代が済んでから

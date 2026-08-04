@@ -19,6 +19,7 @@ import {
   cacheKey,
   DIAGRAM_CACHE_MAX_BYTES,
   planEviction,
+  svgViewBox,
   type DiagramPalette,
 } from '../../src/adapter/ui/render/mermaid-raster';
 
@@ -86,5 +87,29 @@ describe('上限と追い出し', () => {
   it('⚠ 既定の上限が置かれている(無制限に戻していない)', () => {
     expect(DIAGRAM_CACHE_MAX_BYTES).toBeGreaterThan(0);
     expect(DIAGRAM_CACHE_MAX_BYTES).toBeLessThanOrEqual(64 * 1024 * 1024);
+  });
+});
+
+/**
+ * P8 段⑱: 図の**本来の大きさ**の読み方(`svgViewBox`)。
+ *
+ * 🔴 生まれた理由: `img.naturalWidth` は mermaid の SVG に対して
+ * **`min(300, max-width)`** を返す ── 300 は「大きさの分からない置換要素」への
+ * ブラウザ既定値である。実測で 2 節点の図は 82px(正しい)、24 節点の図も
+ * **300px**(頭打ち)になり、大きい図が 300px 幅で焼かれて潰れていた。
+ * ⚠ **この歪みは dpr にも幅にも現れない**ので、鍵の test では捕まらない。
+ */
+describe('図の本来の大きさ', () => {
+  it('🔴 viewBox から幅と高さを読む(自然幅を信じない)', () => {
+    expect(svgViewBox('<svg viewBox="0 0 880 412" width="100%">')).toEqual({ w: 880, h: 412 });
+    // 端の値・区切りが読点・単引用符・小数 ── mermaid が実際に出す形の揺れ
+    expect(svgViewBox("<svg viewBox='-4,-8, 120.5, 60.25'>")).toEqual({ w: 120.5, h: 60.25 });
+    expect(svgViewBox('<svg viewBox = "0 0 10 20" >')).toEqual({ w: 10, h: 20 });
+  });
+
+  it('⚠ 読めないときは null(器の幅に落として描き続ける)', () => {
+    expect(svgViewBox('<svg width="100%">')).toBeNull();
+    expect(svgViewBox('<svg viewBox="0 0 0 100">')).toBeNull();
+    expect(svgViewBox('<svg viewBox="0 0 nope 100">')).toBeNull();
   });
 });

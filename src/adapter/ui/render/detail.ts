@@ -28,6 +28,7 @@ import {
 } from '@features/markdown/document-globals';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { isAppMime } from '@features/launcher/tiles';
+import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
 import type { AppState, AppPhase } from '@adapter/state/app-state';
 
 /** 添付表示のための asset 面(main が AssetBlobStore を cid 束縛で注入)。 */
@@ -458,6 +459,25 @@ export class DetailRenderer {
       dl.setAttribute('data-pkc-asset-name', meta.name || 'download');
       dl.textContent = 'ダウンロード';
       info.append(dl);
+      // 🔴 **本文から参照するための導線**(P8 段⑱。レビュー H)。
+      //    マニュアル §3 は `asset:<key>` を「書ける形式」として説明しているのに、
+      //    **本文へ入れる経路も key を見る経路も無かった** ── 書けるのに書けない、
+      //    という状態だった。ここでコピーして貼れるようにする。
+      //    ⚠ 渡すのは**貼れる 1 行そのもの**(裸の `asset:<key>` ではない)──
+      //    裸の key は markdown としてはただの文字列で、貼っても何も出ない。
+      //    組み立ては `features/asset/asset-ref-format.ts` の 1 本(書出しと同規則)
+      const copy = document.createElement('button');
+      copy.type = 'button';
+      copy.setAttribute('data-pkc-action', 'copy-asset-ref');
+      copy.setAttribute('data-pkc-field', 'copy-asset-ref');
+      copy.setAttribute('data-pkc-asset-key', meta.assetKey);
+      copy.setAttribute(
+        'data-pkc-asset-ref',
+        formatAssetRef(meta.name || '', `asset:${meta.assetKey}`, isImageAssetMime(meta.mime)),
+      );
+      copy.title = '本文に貼ると、この添付がそこに出ます';
+      copy.textContent = '参照をコピー';
+      info.append(copy);
     }
     host.append(info);
 

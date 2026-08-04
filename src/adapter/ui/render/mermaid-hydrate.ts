@@ -85,9 +85,18 @@ function themeOf(): string {
   return document.documentElement.getAttribute('data-pkc-theme') ?? 'light';
 }
 
-/** 幅は 16px 刻みに丸める ── 端数で鍵が散ると毎回焼き直しになる。 */
+/**
+ * 焼くときの**使える幅**(CSS px)。幅は 16px 刻みに丸める
+ * ── 端数で鍵が散ると毎回焼き直しになる。
+ *
+ * 🔴 **器ではなく親を測る**(P8 段⑱ の変異試験で判明)。器
+ * (`[data-pkc-mermaid-src]`)は段⑱ で `display: table` にした ── 中身に合わせて
+ * 縮むので、**画像を入れる前の器の幅は `min-width` そのもの**(112px)である。
+ * そこを測ると、どんなに大きな図でも常に 160px で焼くことになり、
+ * 大きい図が潰れて読めなくなる。使える幅を知っているのは**親**の側。
+ */
 function widthOf(host: HTMLElement): number {
-  const w = host.clientWidth || host.parentElement?.clientWidth || 640;
+  const w = host.parentElement?.clientWidth || host.clientWidth || 640;
   return Math.max(160, Math.round(w / 16) * 16);
 }
 
@@ -154,7 +163,7 @@ export function hydrateMermaid(root: ParentNode | readonly ParentNode[]): Mermai
     started.add(p.host);
     const at = gen;
     try {
-      const png = await renderToPng({
+      const raster = await renderToPng({
         source: p.source,
         theme: themeOf(),
         palette: readPalette(),
@@ -165,14 +174,17 @@ export function hydrateMermaid(root: ParentNode | readonly ParentNode[]): Mermai
       // ⚠ 焼いている間に配色が変わった / 器が外れたなら**載せない**
       //    (載せると古い配色の絵が最後に勝つ)
       if (at !== gen || !p.host.isConnected) return;
-      const url = URL.createObjectURL(png);
+      const url = URL.createObjectURL(raster.png);
       const img = document.createElement('img');
       img.setAttribute('data-pkc-field', 'mermaid-image');
       img.alt = '図';
       img.decoding = 'async';
       img.src = url;
-      // ⚠ 焼いた実寸ではなく**器の幅**で出す(dpr 倍で焼いているので縮む = 鮮明)
-      img.style.width = '100%';
+      // ⚠ 焼いた実寸ではなく**CSS 幅**で出す(dpr 倍で焼いているので縮む = 鮮明)。
+      // 🔴 器いっぱいに引き伸ばさない(P8 段⑱)── 2 節点の図が 875×1286px を
+      //    占めていた。`cssWidth` は SVG の自然幅で頭打ちにした値
+      img.style.width = `${raster.cssWidth}px`;
+      img.style.maxWidth = '100%';
       img.style.height = 'auto';
       p.host.textContent = '';
       p.host.append(img, saveButton());

@@ -49,6 +49,8 @@ interface CacheRow {
   /** 最後に使った時刻。**古いものから落とす**ための材料。 */
   at: number;
   size: number;
+  /** 画面に置くときの幅(CSS px)。⚠ 無いときは器の幅に落ちる(旧形式)。 */
+  cssWidth?: number;
 }
 
 export interface RasterKey {
@@ -304,7 +306,52 @@ async function renderWith(id: string, source: string, p: DiagramPalette): Promis
  *
  * ⚠ `devicePixelRatio` 倍で焼く ── 等倍で焼くと Retina で必ずボケる。
  */
-export async function rasterize(svg: string, width: number, dpr: number): Promise<Blob> {
+export interface Raster {
+  png: Blob;
+  /**
+   * 画面に置くときの幅(CSS px)。
+   * 🔴 **器の幅とは限らない**(P8 段⑱。レビュー H)。かつては器の幅いっぱいに
+   * 引き伸ばしていたので、**2 節点の図が 875×1286px** を占めていた ──
+   * 図は「情報の量ぶんの大きさ」で置くのが業務画面の作法。
+   */
+  cssWidth: number;
+}
+
+/**
+ * SVG の**本来の大きさ**を `viewBox` から読む。
+ *
+ * 🔴 **`img.naturalWidth` を信じない**(P8 段⑱ の変異試験で判明)。mermaid は
+ * 既定で `width="100%" style="max-width: Npx"` を出すので、SVG を `Image` に
+ * 読ませたときの自然幅は **`min(300, N)`** になる ── 300 は「大きさの分からない
+ * 置換要素」に対するブラウザの既定値である。実測: 2 節点の図は 82px(max-width が
+ * 効いて正しい)だが、24 節点の図も **300px**(既定値に頭打ち)になり、
+ * **大きい図は 300px で焼いて引き伸ばす** = ぼやける、という壊れ方をしていた。
+ * `viewBox` は図の実寸で必ず入っているので、そこから読む。
+ */
+export function svgViewBox(svg: string): { w: number; h: number } | null {
+  const m = /viewBox\s*=\s*["']\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)\s*["']/.exec(svg);
+  if (!m) return null;
+  const w = Number(m[1]);
+  const h = Number(m[2]);
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return null;
+  return { w, h };
+}
+
+export async function rasterize(svg: string, width: number, dpr: number): Promise<Raster> {
+  // 🔴 **器より小さい図は引き伸ばさない**(P8 段⑱)。図の実寸で頭打ちにする
+  //    ── 器いっぱいに広げると、小さい図が画面を占領して密度が落ちる
+  const box = svgViewBox(svg);
+  const cssWidth = Math.max(1, Math.round(box ? Math.min(width, box.w) : width));
+  const ratio = box ? box.h / box.w : 0;
+  const w = Math.max(1, Math.round(cssWidth * dpr));
+  /**
+   * ⚠ **根の `<svg>` に実寸を書き戻す必要は無い**(実測。段⑱ で一度書いて消した)。
+   * 「読ませた自然幅 300px の絵を `drawImage` が引き伸ばすのでは」と考えて
+   * `width` / `height` / `max-width` を差し替える処理を入れたが、**出来上がる
+   * PNG は 1 バイトも変わらなかった**(800×400 に描いた 2 枚の ImageData が
+   * checksum まで一致)── Blink は SVG 画像を**描く大きさで焼き直す**。
+   * 効くのは「どれだけの大きさで描くか」だけなので、そこだけを決める。
+   */
   const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
   try {
     const img = new Image();
@@ -314,18 +361,21 @@ export async function rasterize(svg: string, width: number, dpr: number): Promis
       img.onerror = () => reject(new Error('図を画像にできません'));
       img.src = url;
     });
-    const ratio = img.naturalHeight / Math.max(1, img.naturalWidth);
-    const w = Math.max(1, Math.round(width * dpr));
-    const h = Math.max(1, Math.round(width * ratio * dpr));
+    // viewBox が無い図(想定外)だけ、読めた自然比に落ちる
+    const h = Math.max(
+      1,
+      Math.round(box ? cssWidth * ratio * dpr : (img.naturalHeight / Math.max(1, img.naturalWidth)) * cssWidth * dpr),
+    );
     const canvas = document.createElement('canvas');
     canvas.width = w;
     canvas.height = h;
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('図を描く場所が作れません');
     ctx.drawImage(img, 0, 0, w, h);
-    return await new Promise<Blob>((resolve, reject) => {
+    const png = await new Promise<Blob>((resolve, reject) => {
       canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('図を PNG にできません'))), 'image/png');
     });
+    return { png, cssWidth };
   } finally {
     // ⚠ **必ず捨てる**(焼き終わった時点が SVG の寿命の終わり)
     URL.revokeObjectURL(url);
@@ -336,7 +386,7 @@ export async function rasterize(svg: string, width: number, dpr: number): Promis
  * 図 1 枚を PNG にして返す(キャッシュがあればそれ)。
  * ⚠ 返るのは Blob ── ObjectURL を作って捨てるのは**表示する側**の責務。
  */
-export async function renderToPng(key: RasterKey): Promise<Blob> {
+export async function renderToPng(key: RasterKey): Promise<Raster> {
   const k = cacheKey(key);
   const hit = await tx<unknown>(await db(), 'readonly', (s) => s.get(k)).catch(() => null);
   if (hit !== null && typeof hit === 'object' && 'png' in hit) {
@@ -346,22 +396,30 @@ export async function renderToPng(key: RasterKey): Promise<Blob> {
     void tx(await db(), 'readwrite', (s) =>
       s.put({ ...row, at: Date.now() } satisfies CacheRow, k),
     ).catch(() => undefined);
-    return row.png;
+    return { png: row.png, cssWidth: row.cssWidth ?? key.width };
   }
   // ⚠ 旧形式(Blob をそのまま入れていた)も読める ── 互換は双方向で考える
-  if (hit instanceof Blob) return hit;
+  if (hit instanceof Blob) return { png: hit, cssWidth: key.width };
 
-  const png = await serialized(async () => {
+  const raster = await serialized(async () => {
     seq += 1;
     const svg = await renderWith(`pkc3-mmd-${seq}`, key.source, key.palette);
     return rasterize(svg, key.width, key.dpr);
   });
   // ⚠ 保存に失敗しても**描画は続ける**(キャッシュは速さの話で、正しさの話ではない)
   await tx(await db(), 'readwrite', (s) =>
-    s.put({ png, at: Date.now(), size: png.size } satisfies CacheRow, k),
+    s.put(
+      {
+        png: raster.png,
+        at: Date.now(),
+        size: raster.png.size,
+        cssWidth: raster.cssWidth,
+      } satisfies CacheRow,
+      k,
+    ),
   ).catch(() => undefined);
   void evictDiagramCache().catch(() => undefined);
-  return png;
+  return raster;
 }
 
 /** 追い出しが同時に何本も走らないようにする(走査は 1 本で足りる)。 */

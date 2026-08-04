@@ -182,6 +182,15 @@ export type UserAction =
   | { type: 'SET_ENTRY_FILTER'; query: string }
   | { type: 'LAUNCHER_TILES_LOADED'; tiles: LauncherTile[] }
   /**
+   * アプリの一覧を読み直す(P8 段⑱)。
+   *
+   * 🔴 かつては「アプリ」タブで `SET_VIEW_MODE 'launcher'` を撃っていたが、
+   * **中央の面を変える必要が無いのに view を借りていた**ので、タブを切り替えた
+   * だけで**中央下の追記欄が消えて**いた(他の 2 タブでは残る)。
+   * 探し方(左の列)と見る場所(中央)は別の軸である。
+   */
+  | { type: 'REFRESH_LAUNCHER_TILES' }
+  /**
    * タイル設定を書き戻した ack(P8 段⑭)。⚠ **開いている body も差し替える**。
    * ⚠ `body === null` は失敗(書けなかった)── **ロックは必ず解く**。
    */
@@ -502,6 +511,13 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
           action.mode === 'launcher'
             ? [{ type: 'REQUEST_LAUNCHER_TILES', entries: attachmentEntries(state) }]
             : [],
+      };
+    case 'REFRESH_LAUNCHER_TILES':
+      // ⚠ **毎回要求する**。ただし前回のタイルは消さない(古い並びを出したまま
+      //    読み直し、届いたら差し替える ── 「読み込んでいます…」を挟まない)
+      return {
+        state,
+        events: [{ type: 'REQUEST_LAUNCHER_TILES', entries: attachmentEntries(state) }],
       };
     case 'LAUNCHER_TILES_LOADED':
       return { state: { ...state, launcherTiles: action.tiles }, events: [] };
