@@ -469,21 +469,45 @@ test('🔴 行儀の悪いアプリが保管庫を占有できない(上限は�
   expect(after, '開き直したら上限を超えて積み増せた').toBeLessThan(used + 600_000);
   await tab2.close();
 
-  // 🔴 **ノートを消したらアプリのデータも消える**(P8 段⑰)。
-  //    直す前は `clearAppStorage` の呼び出し元が 1 件も無く、消しても
-  //    origin の localStorage に永久に残っていた
+  // 🔴 **削除は可逆なので、アプリのデータもまだ消えない**(P8 段⑳)。
+  //    段⑰ はここで消していたが、削除の確認文は「ゴミ箱から戻せます」と
+  //    言っている ── 戻したのにアプリの中身が 0 件では、**確認文が嘘**になる。
+  //    家計簿アプリに貯めた入力が、警告 1 行も無く消えていた。
+  const appKeys = (): Promise<number> =>
+    page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('pkc3.app.')).length);
+  expect(await appKeys(), 'アプリのデータが入っていない(この次元を測れていない)').toBeGreaterThan(0);
+
   page.once('dialog', (d) => void d.accept());
   await clickReal(page, '[data-pkc-browse="list"]');
   await page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first().click();
   await clickReal(page, '[data-pkc-action="delete-entry"]');
+  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(0);
+  expect(await appKeys(), '戻せる削除でアプリのデータまで消している').toBeGreaterThan(0);
+
+  // 🔴 **戻すと使える状態で戻る**(確認文「ゴミ箱から戻せます」が嘘でない)
+  await clickReal(page, '[data-pkc-browse="filer"]');
+  await clickReal(page, '[data-pkc-action="show-trash"]');
+  await clickReal(page, '[data-pkc-action="restore-trash"]');
+  // ⚠ 一覧は「一覧」タブにしか無い ── フォルダのまま数えると常に 0 件になる
+  await clickReal(page, '[data-pkc-browse="list"]');
+  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(1);
+  expect(await appKeys(), '戻したのにアプリのデータが無い').toBeGreaterThan(0);
+
+  // 🔴 **ゴミ箱を空にすると消える**(唯一の不可逆点)。
+  //    ここで消さないと、消したノートのデータが origin に永久に残る
+  await page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first().click();
+  page.once('dialog', (d) => void d.accept());
+  await clickReal(page, '[data-pkc-action="delete-entry"]');
+  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(0);
+  await clickReal(page, '[data-pkc-browse="filer"]');
+  await clickReal(page, '[data-pkc-action="show-trash"]');
+  page.once('dialog', (d) => void d.accept());
+  await clickReal(page, '[data-pkc-action="purge-trash"]');
   await expect
-    .poll(
-      () =>
-        page.evaluate(() =>
-          Object.keys(localStorage).filter((k) => k.startsWith('pkc3.app.')).length,
-        ),
-      { timeout: 15000, message: 'ノートを消してもアプリのデータが残っている' },
-    )
+    .poll(appKeys, {
+      timeout: 15000,
+      message: 'ゴミ箱を空にしてもアプリのデータが残っている',
+    })
     .toBe(0);
 
   expect(errors).toEqual([]);

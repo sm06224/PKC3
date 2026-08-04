@@ -365,3 +365,101 @@ test('🔴 図キャッシュが上限を超えると、古いものから落ち
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * P8 段⑳: 🔴 **描いた下に原文が丸ごと出ない**。
+ *
+ * 🔴 直す前は、焼いた PNG の**すぐ下に mermaid のソースが `<pre>` で全文**
+ * 並んでいた(csv も表と生 CSV が二重)。`markdown-render.ts` は隠す前提で
+ * `pkc-render-source` を吐いていたのに、**当てる CSS が 1 行も無かった**。
+ * ⚠ 観測点は「規則が在るか」ではなく **実際に見えているか**(`clientHeight`)。
+ */
+test('🔴 図と表は、描画の下に原文を出さない(切替で入れ替わる)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('二重に出ない');
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill('```mermaid\ngraph TD\n  A-->B\n```\n\n```csv\nりんご,120\nみかん,80\n```\n');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+  const body = page.locator('[data-pkc-field="detail-body"]');
+  await expect(body.locator('[data-pkc-mermaid-src]')).toHaveAttribute(
+    'data-pkc-mermaid-state',
+    'ready',
+    { timeout: 30000 },
+  );
+
+  const seen = await body.evaluate((el) => {
+    // ⚠ **「箱が在る」では見た目を測れない** ── 切替は 1x1 の透明な input で
+    //    置いてある(`display:none` にするとキーボードで到達できなくなるため)。
+    //    実際に目に入るか、で判定する
+    const vis = (n: Element): boolean => {
+      const cs = getComputedStyle(n);
+      return (n as HTMLElement).clientHeight > 2 && cs.opacity !== '0' && cs.visibility !== 'hidden';
+    };
+    return {
+      // 空振り防止: 原文の要素が**実在する**(消えていたら以下は自明に通る)
+      sources: el.querySelectorAll('.pkc-render-source').length,
+      visibleSources: [...el.querySelectorAll('.pkc-render-source')].filter(vis).length,
+      // 図は焼けたので、器の中の原文 `<pre>` も見えない
+      visibleMermaidSrc: [...el.querySelectorAll('.pkc-mermaid-source')].filter(vis).length,
+      // 描画のほうは見えている
+      visibleSlots: [...el.querySelectorAll('.pkc-render-slot')].filter(vis).length,
+      // 素のチェック欄や `‹/›` が地の文に浮いていない(切替は隠してある)
+      visibleToggleInputs: [...el.querySelectorAll('.pkc-render-toggle-input')].filter(vis).length,
+    };
+  });
+  expect(seen.sources, '原文の要素が出ていない(この次元を測れていない)').toBeGreaterThan(0);
+  expect(seen.visibleSources, '描画の下に原文が丸ごと出ている').toBe(0);
+  expect(seen.visibleMermaidSrc, '焼けた図の下に原文が出ている').toBe(0);
+  expect(seen.visibleSlots, '描画が出ていない').toBeGreaterThan(0);
+  expect(seen.visibleToggleInputs, '素のチェック欄が本文に浮いている').toBe(0);
+
+  // 🔴 切替を入れると**入れ替わる**(隠しただけで到達できない、を落とす)。
+  //    ⚠ 押すのは **label**(input は 1x1 の透明 + `pointer-events: none`)──
+  //      user が実際に触るのもこちらである
+  await body.locator('.pkc-render-toggle').first().click();
+  const after = await body.evaluate((el) => {
+    const vis = (n: Element): boolean => (n as HTMLElement).clientHeight > 2;
+    // 切替を持つ塊(csv 側)だけを見る ── 図の器には切替が無い
+    const block = el.querySelector('.pkc-md-block:has(> .pkc-render-toggle)')!;
+    return {
+      checked: block.querySelector<HTMLInputElement>(':scope > .pkc-render-toggle-input')!.checked,
+      src: [...block.querySelectorAll(':scope > .pkc-render-source')].filter(vis).length,
+      slot: [...block.querySelectorAll(':scope > .pkc-render-slot')].filter(vis).length,
+    };
+  });
+  expect(after.checked, '切替が効いていない').toBe(true);
+  expect(after.src, '切替てもソースが出ない(到達できない)').toBe(1);
+  expect(after.slot, '切替たのに描画が残っている').toBe(0);
+
+  expect(errors).toEqual([]);
+});
+
+/**
+ * P8 段⑳: 🔴 **チェック欄は押せない**(押しても保存されないため)。
+ *
+ * 直す前は `disabled` が無く、押すとその場でチェックが付くのに本文は 1 文字も
+ * 変わらなかった ── 移動 / 追記 / 再読込で全部外れる。「チェックしたのに消えた」。
+ */
+test('🔴 本文のチェック欄は押しても変わらない(嘘をつかない)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-body"]').fill('- [ ] やること\n- [x] 済み\n');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+  const boxes = page.locator('[data-pkc-field="detail-body"] .pkc-task-checkbox');
+  await expect(boxes, 'チェック欄が出ていない').toHaveCount(2);
+  // 原文の状態は反映されている(読むだけとしては正しい)
+  await expect(boxes.nth(0)).not.toBeChecked();
+  await expect(boxes.nth(1)).toBeChecked();
+  // 🔴 押せない = 押して外れる嘘が起きない
+  await expect(boxes.nth(0), 'チェック欄が押せてしまう(押しても保存されない)').toBeDisabled();
+  await expect(boxes.nth(1)).toBeDisabled();
+
+  expect(errors).toEqual([]);
+});

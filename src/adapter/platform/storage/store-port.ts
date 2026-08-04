@@ -59,20 +59,33 @@ export function createStorePort(client: StoreClient, cid: string): StorePort {
         keepLatest: REVISION_KEEP_LATEST,
       });
     },
+    /**
+     * ノートを消す。⚠ **アプリの保存領域はここでは消さない**(P8 段⑳)。
+     *
+     * 🔴 段⑯ はここで `clearAppStorage(lid)` を呼んでいたが、**削除は可逆**
+     * (ゴミ箱から戻せる)なのに保存領域だけ不可逆に消えていた ── 確認文が
+     * 「ゴミ箱から戻せます」と言っているのに、戻すとアプリの中身は 0 件。
+     * 家計簿アプリに数か月ぶん貯めた入力が、警告 1 行も無く消える。
+     * 後始末は**唯一の不可逆点**(ゴミ箱を空にする)へ移した。
+     */
     deleteEntry: async (lid) => {
       await client.request({ op: 'deleteEntry', cid, lid });
-      // 🔴 **アプリに貸した保存領域も畳む**(P8 段⑯。レビュー)。
-      //    かつて `clearAppStorage` は呼び出し元が 1 件も無く、ノートを消しても
-      //    そのアプリのデータが origin の localStorage に**永久に残って**いた
-      //    (「後始末がある」と読める死んだ export だった)。
-      //    ⚠ 消す順は entry が先 ── 逆にすると、削除が失敗したときに
-      //    「ノートは在るのにデータだけ消えた」になる
-      clearAppStorage(lid);
     },
     listRevisionMetas: (entryLid) =>
       client.request({ op: 'listRevisionMetas', cid, entryLid }),
     getRevision: (revId) => client.request({ op: 'getRevision', cid, id: revId }),
     listTrash: () => client.request({ op: 'listTrash', cid }),
-    purgeTrash: () => client.request({ op: 'purgeTrash', cid }),
+    /**
+     * ゴミ箱を空にする(**唯一の不可逆点**)。
+     * 🔴 ここでアプリの保存領域も畳む ── 戻せなくなるのはここだけなので、
+     * 後始末もここに揃える(削除の可逆性と同じ意味論になる)。
+     * ⚠ **消す前に lid を取る** ── 消した後では誰のデータだったか分からない。
+     */
+    purgeTrash: async () => {
+      const trash = await client.request({ op: 'listTrash', cid });
+      const res = await client.request({ op: 'purgeTrash', cid });
+      for (const lid of new Set(trash.map((r) => r.entry_lid))) clearAppStorage(lid);
+      return res;
+    },
   };
 }

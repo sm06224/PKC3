@@ -1435,7 +1435,13 @@ md.core.ruler.after('inline', 'pkc-task-list', function (state) {
     }
 
     const checkbox = new state.Token('html_inline', '', 0);
-    checkbox.content = `<input type="checkbox" class="pkc-task-checkbox" data-pkc-task-index="${taskIndex}"${checked ? ' checked' : ''}> `;
+    // 🔴 **押せない形で出す**(P8 段⑳)。直す前は `disabled` が無く、押すと
+    //    その場でチェックが付くのに**本文は 1 文字も変わらない** ── 別のノートへ
+    //    移って戻る / 追記する / 再読込すると全部外れる。user から見れば
+    //    「チェックしたのに消えた」= データを失った挙動である。
+    //    ⚠ 効かせる(本文を splice して保存する)のは新機能なので、
+    //      「読むだけ」に倒し切る ── 押せないものは押せない形にする
+    checkbox.content = `<input type="checkbox" class="pkc-task-checkbox" data-pkc-task-index="${taskIndex}" disabled${checked ? ' checked' : ''}> `;
     taskIndex++;
     children.unshift(checkbox);
     token.children = children as Token[];

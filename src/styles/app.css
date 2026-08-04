@@ -787,12 +787,273 @@ select:focus-visible {
   font-size: 0.92em;
   color: var(--muted);
 }
-.pkc-md-rendered .pkc-toc {
+
+/* ── PKC-Markdown の描画物(P8 段⑳)────────────────────────
+ * 🔴 **出しているのに CSS が 1 行も無かった**。markdown-render.ts が吐く
+ * `pkc-*` の class は 36 個あり、**35 個に規則が無かった**(残る 1 個も
+ * 名前が食い違っていて当たっていない)── PKC2 から renderer だけを流用して、
+ * 対応する stylesheet(PKC2 の `styles/base.css`)を持ってこなかったため。
+ *
+ * いちばん user に見えていたのは **描画の下に原文が丸ごと出る**ことで、
+ * 「図は描いたら焼く」で得たきれいな 1 枚が直下の生ソースで台無しになっていた。
+ *
+ * 🔑 **地は無彩色、色は情報にだけ**(user 指示 2026-08-03)。ここで色を使うのは
+ * 「注意」「未定義」「引用元」など**意味を持つもの**だけで、地・枠は無彩色に寄せる。
+ * ⚠ 色の実体は `tokens.css` にしか書かない。
+ */
+
+/* fence の描画 / 原文の切替。⚠ 既定(`-both`)は**描画だけ**を見せる */
+.pkc-md-rendered .pkc-md-block {
+  position: relative;
+}
+.pkc-md-rendered .pkc-render-source {
+  margin: 0;
+}
+/* ⚠ `display: none` にしない ── キーボードで到達できなくなる */
+.pkc-md-rendered .pkc-render-toggle-input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+.pkc-md-rendered .pkc-render-toggle {
+  position: absolute;
+  top: 2px;
+  right: 26px;
+  z-index: 1;
+  padding: 0 var(--s2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 18px;
+  cursor: pointer;
+  opacity: 0;
+}
+.pkc-md-rendered .pkc-md-copy-btn {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 1;
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+}
+/* ⚠ 触れる / focus したときだけ出す(高密度な面に常時 2 個並べない)。
+ *    focus-within を入れないとキーボードだけの user に見えない */
+.pkc-md-rendered .pkc-md-block:hover .pkc-render-toggle,
+.pkc-md-rendered .pkc-md-block:hover .pkc-md-copy-btn,
+.pkc-md-rendered .pkc-md-block:focus-within .pkc-render-toggle,
+.pkc-md-rendered .pkc-md-block:focus-within .pkc-md-copy-btn {
+  opacity: 1;
+}
+.pkc-md-rendered .pkc-render-toggle-input:focus-visible + .pkc-render-toggle {
+  opacity: 1;
+  outline: 2px solid var(--accent);
+}
+/* 🔴 **原文は既定で隠す**。向きは `copy-md-block.ts`(checked = ソース面)と
+ *    一致させる ── 逆にするとコピーが黙って別の面を拾う */
+.pkc-md-rendered .pkc-render-toggle-input:not(:checked) ~ .pkc-render-source,
+.pkc-md-rendered .pkc-render-toggle-input:checked ~ .pkc-render-slot {
+  display: none;
+}
+/* `-render` は切替そのものが無い(toggle を出さない)ので、原文を常に隠す */
+.pkc-md-rendered [data-pkc-render-mode='render'] > .pkc-render-source {
+  display: none;
+}
+
+/* 図。⚠ 焼けたら器の中身は `<img>` 1 枚に差し替わるので、`<pre>` は
+ *    **焼けなかったときの受け皿**として残す(隠すと原文まで読めなくなる) */
+.pkc-md-rendered .pkc-mermaid-source {
+  margin: 0;
+  font-size: 0.9em;
+}
+.pkc-md-rendered [data-pkc-mermaid-state='ready'] .pkc-mermaid-source {
+  display: none;
+}
+
+/* 取り込み待ちの器(まだ実体が入っていないことが分かる形にする) */
+.pkc-md-rendered .pkc-transclusion-placeholder,
+.pkc-md-rendered .pkc-card-placeholder {
+  padding: var(--s3);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* 目次。⚠ renderer が出すのは `pkc-toc-formal` / `pkc-toc-preview` で、
+ *    かつて書いてあった `.pkc-toc` は**誰も出していない**規則だった */
+.pkc-md-rendered .pkc-toc-formal,
+.pkc-md-rendered .pkc-toc-preview {
+  display: block;
   margin: var(--s3) 0;
   padding: var(--s3);
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+}
+.pkc-md-rendered .pkc-toc-label {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  margin-bottom: var(--s2);
+}
+.pkc-md-rendered .pkc-toc-list {
+  margin: 0;
+  padding-left: 1.2em;
+}
+.pkc-md-rendered .pkc-toc-item {
+  margin: 0;
+}
+.pkc-md-rendered .pkc-toc-link {
+  color: var(--accent);
+}
+
+/* 注記の塊(:::note / :::warning …)。⚠ 種別は `data-pkc-*` が持つので、
+ *    **色は種別にだけ**当てる(地はどれも無彩色) */
+.pkc-md-rendered .pkc-format-block {
+  margin: var(--s3) 0;
+  padding: var(--s3) var(--s4);
+  border-left: 3px solid var(--border);
+  background: var(--surface-2);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+.pkc-md-rendered .pkc-format-block > *:first-child {
+  margin-top: 0;
+}
+.pkc-md-rendered .pkc-format-block > *:last-child {
+  margin-bottom: 0;
+}
+.pkc-md-rendered .pkc-format-block.warning,
+.pkc-md-rendered .pkc-format-block.caution {
+  border-left-color: var(--warn);
+}
+.pkc-md-rendered .pkc-format-block.important,
+.pkc-md-rendered .pkc-format-block.highlight {
+  border-left-color: var(--accent);
+}
+.pkc-md-rendered .pkc-warning-hallucination-block {
+  margin: var(--s3) 0;
+  padding: var(--s3) var(--s4);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  color: var(--warn);
+}
+
+/* 畳める塊 */
+.pkc-md-rendered .pkc-details {
+  margin: var(--s3) 0;
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.pkc-md-rendered .pkc-details-summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+/* 領域(AI 向けの region 指定)── 地の文と混ざらない程度に退かせる */
+.pkc-md-rendered .pkc-region-frontmatter,
+.pkc-md-rendered .pkc-region-body {
+  display: block;
+  margin: var(--s3) 0;
+  padding-left: var(--s4);
+  border-left: 2px dotted var(--border);
+}
+
+/* 図表の見出しと参照 */
+.pkc-md-rendered .pkc-fig-caption {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+  margin-top: var(--s2);
+}
+.pkc-md-rendered .pkc-fig-ref {
+  color: var(--accent);
+}
+
+/* 引用の出典・献辞 */
+.pkc-md-rendered .pkc-quote-citation {
+  font-style: italic;
+}
+.pkc-md-rendered .pkc-attribution {
+  display: block;
+  margin-top: var(--s2);
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+/* 強調の細工 */
+.pkc-md-rendered .pkc-lead {
+  font-size: 1.1em;
+  color: var(--fg);
+}
+.pkc-md-rendered .pkc-em-dot {
+  font-style: normal;
+  text-emphasis: filled dot;
+  -webkit-text-emphasis: filled dot;
+}
+
+/* 余白・区切り */
+.pkc-md-rendered .pkc-blank-line {
+  height: calc(1.45em * var(--pkc-blank-count, 1));
+}
+.pkc-md-rendered .pkc-section-break {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: var(--s5) 0;
+}
+.pkc-md-rendered .pkc-section-break[data-pkc-role='cover'] {
+  border-top-width: 3px;
+}
+.pkc-md-rendered .pkc-tolerant-spacing {
+  /* 寛容記法で入った余白 ── 見た目は blank-line と同じでよい */
+  min-height: 1.45em;
+}
+.pkc-md-rendered .pkc-align-hint {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* 🔴 **未定義の変数は目立たせる** ── 地の文に紛れると、埋め忘れが出荷される */
+.pkc-md-rendered .pkc-variable-undefined {
+  padding: 0 2px;
+  border-bottom: 1px dashed var(--warn);
+  color: var(--warn);
+}
+
+/* 添付の参照。実体が入るまで / 入らなかったときが分かる形にする */
+.pkc-md-rendered .pkc-asset-ref {
+  max-width: 100%;
+  height: auto;
+}
+.pkc-md-rendered [data-pkc-asset-missing] {
+  outline: 1px dashed var(--warn);
+  color: var(--warn);
+  min-height: 1em;
+}
+
+/* 🔴 **チェック欄は押せない見た目にする**(P8 段⑳)。押しても本文は 1 文字も
+ *    変わらないので、押せる形で出すと「チェックしたのに消えた」になる
+ *    ── 実装は `markdown-render.ts` 側で `disabled` を付ける */
+.pkc-md-rendered .pkc-task-checkbox {
+  margin-right: var(--s2);
+  vertical-align: middle;
 }
 
 /* ── 添付 ───────────────────────────────────────── */

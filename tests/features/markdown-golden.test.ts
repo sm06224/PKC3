@@ -14,6 +14,13 @@ import { parseFrontmatter, extractVars } from '../../src/features/markdown/front
  * (manual ch12 全文 1,431 行 + fixture 3 種 + 方言の縁スニペット 20 種)。
  * 採取手順: tests/fixtures/markdown-goldens/harvest-from-pkc2.ts(手順は同ファイル冒頭)。
  * ⚠ markdown-it のバージョンを動かすと golden ごと再検証が必要(14.3.0 に固定中)。
+ *
+ * ⚠ **PKC2 と意図的に違えた点は golden 側を更新して記録する**(丸写し禁止 ──
+ * user 指示 2026-07-30「流用 + 総合的見直し」)。現時点の差分は 1 つ:
+ *   - タスクのチェック欄に `disabled` を付けた(P8 段⑳)。PKC2 は押せる形で
+ *     出していたが、**押しても本文が 1 文字も変わらない** ── 移動 / 追記 /
+ *     再読込で全部外れる「チェックしたのに消えた」だった。押せないものは
+ *     押せない形にする。
  */
 interface GoldenCase {
   name: string;
