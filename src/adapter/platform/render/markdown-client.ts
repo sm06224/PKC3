@@ -178,7 +178,11 @@ export class MarkdownClient {
     };
   }
 
-  /** 明示的に畳む。⚠ 待っている依頼は reject される(永久 hang を作らない)。 */
+  /**
+   * 明示的に畳む。⚠ 待っている依頼は reject される(永久 hang を作らない)。
+   * ⚠ **常駐を返すのはアイドル kill の仕事**(30 秒で terminate)── ここは
+   * test / 面の破棄用で、アプリの通常経路からは呼ばれない(P8 段㉔ で明記)。
+   */
   dispose(): void {
     this.lease?.dispose();
   }

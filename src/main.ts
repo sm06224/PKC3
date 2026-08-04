@@ -22,6 +22,7 @@ import { createUpdatePrompt } from '@adapter/ui/render/update-card';
 import { applyTheme, chooseTheme, initialTheme, isTheme } from '@adapter/ui/render/theme';
 import { launchTile } from '@adapter/ui/launch-tile';
 import { readAppStorage } from '@adapter/platform/app-storage';
+import { waitForWindowClose } from '@adapter/platform/window-close';
 import { copyPlainText } from '@adapter/platform/clipboard';
 import { MarkdownClient } from '@adapter/platform/render/markdown-client';
 import { AssetClient } from '@adapter/platform/asset/asset-client';
@@ -55,28 +56,6 @@ const DEFAULT_CID = 'default';
 /** container の題名(書出しのファイル名にも使う ── 1 箇所で決める)。 */
 const CONTAINER_TITLE = 'PKC3';
 
-/**
- * 開いたタブが閉じるまで待つ(ランチャーの blob の寿命終端)。
- *
- * ⚠ **`closed` は poll でしか分からない** ── 別 window の close は event で
- * 飛んでこない。2 秒間隔にしているのは「起動中ずっと回る」ものだからで、
- * user がタブを閉じた 2 秒後には revoke される。
- * ⚠ こちらのページが消えるときも解く ── 起動したまま本体を閉じた場合、
- * blob はどのみち道連れになるので、interval を残さない。
- */
-function waitForWindowClose(win: Window): Promise<void> {
-  return new Promise((resolve) => {
-    const done = (): void => {
-      clearInterval(timer);
-      window.removeEventListener('pagehide', done);
-      resolve();
-    };
-    const timer = setInterval(() => {
-      if (win.closed) done();
-    }, 2000);
-    window.addEventListener('pagehide', done);
-  });
-}
 
 export interface AppHandle {
   dispatcher: Dispatcher;

@@ -106,12 +106,18 @@ export function launchTile(tile: LauncherTile, deps: LaunchDeps): void {
         { type: 'text/html' },
       );
       const url = deps.createUrl(shell);
-      win.location.replace(url);
-      // 🔑 **寿命の終端で捨てる**(user 指示 2026-07-27)。初版は 1 秒後に
-      // revoke していたので、開いたアプリを再読込すると必ず死んでいた
-      // (実測: `net::ERR_FILE_NOT_FOUND`)。終端は「そのタブが閉じたとき」である
-      await deps.whenClosed(win);
-      deps.revokeUrl(url);
+      // 🔑 **作ったら必ず返す**(P8 段㉔)── `createUrl` の後に投げると、
+      //    直す前は `revokeUrl` を通らずに漏れていた。`finally` へ寄せて
+      //    「作る場所と返す場所」を 1 対にする(`download.ts` と同じ倒し方)
+      try {
+        win.location.replace(url);
+        // 🔑 **寿命の終端で捨てる**(user 指示 2026-07-27)。初版は 1 秒後に
+        // revoke していたので、開いたアプリを再読込すると必ず死んでいた
+        // (実測: `net::ERR_FILE_NOT_FOUND`)。終端は「そのタブが閉じたとき」である
+        await deps.whenClosed(win);
+      } finally {
+        deps.revokeUrl(url);
+      }
     } catch (e) {
       win.close();
       deps.fail(`「${tile.title}」を開けませんでした: ${String(e)}`);
