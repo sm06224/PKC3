@@ -347,3 +347,93 @@ test('🔴 登録 → タイル → SPA が動き、開き直しても続きが�
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * P8 段⑯: 🔴 **行儀の悪いアプリが origin の保管庫を占有できない**。
+ *
+ * 🔴 直す前の実測(レビュー H-2)。shim を**一切使わず** `parent.postMessage` を
+ * 直に投げるだけの HTML で:
+ * ```
+ * 外殻タブの localStorage 合計 5,239,731 文字 / 内訳 {"pkc3.app.<lid>": 5,239,154}
+ * → origin の枠(≒5,242,000 文字)の 99.94% を 1 アプリが占有。
+ *   以後 PKC3 本体は 3,015 文字で QuotaExceededError
+ * ```
+ * 上限が **shim(= untrusted 側)にしか無かった**のが原因。アプリは shim を
+ * 使わずに投げられるので、あれは安全性の根拠にならない。
+ *
+ * 直した後: 2,000,056 文字で頭打ち / PKC3 本体はまだ 2,048,000 文字書けた。
+ */
+test('🔴 行儀の悪いアプリが保管庫を占有できない(上限は信頼側が持つ)', async ({
+  page,
+  context,
+}) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  // shim を使わず外殻へ直に投げる(規約を守らないアプリ)
+  const HOSTILE =
+    `<!doctype html><html><head><meta charset="utf-8"></head><body><p>x</p>
+<script>
+  for (var i = 0; i < 20; i++) {
+    parent.postMessage(
+      { tag: 'pkc3.app.storage', op: 'set', key: 'k' + i, value: 'A'.repeat(500000) },
+      '*',
+    );
+  }
+  document.body.dataset.done = '1';
+</scr` + `ipt></body></html>`;
+
+  await clickReal(page, '[data-pkc-action="attach-file"]');
+  await page.locator('[data-pkc-field="attach-input"]').setInputFiles({
+    name: 'hostile.html',
+    mimeType: 'text/html',
+    buffer: Buffer.from(HOSTILE, 'utf-8'),
+  });
+  const register = page.locator('[data-pkc-field="app-register"]');
+  await expect(register).toBeVisible({ timeout: 15000 });
+  await register.check();
+
+  await clickReal(page, '[data-pkc-browse="launcher"]');
+  const tile = page.locator('[data-pkc-region="launcher-grid"] [data-pkc-tile]');
+  await expect(tile).toHaveCount(1, { timeout: 15000 });
+  const [tab] = await Promise.all([context.waitForEvent('page'), tile.click()]);
+  await tab.waitForLoadState('domcontentloaded');
+  // ⚠ `evaluate` で待たない ── 外殻は `location.replace` で遷移するので
+  //    「Execution context was destroyed」になる(実際に踏んだ)。locator は
+  //    遷移をまたいで retry してくれる
+  await expect(
+    tab.locator('[data-pkc-field="app-note"]'),
+    '上限に当たったことが外殻に出ていない',
+  ).toBeVisible({ timeout: 20000 });
+
+  const used = await tab.evaluate(() => {
+    let per = 0;
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)!;
+      if (k.startsWith('pkc3.app.')) per += k.length + (localStorage.getItem(k) ?? '').length;
+    }
+    return per;
+  });
+  // 🔴 上限(2MB)+ 1 件ぶんの余裕までで頭打ち(直す前は 5,239,154 文字だった)
+  expect(used, '1 アプリが上限を超えて占有した').toBeLessThan(2 * 1024 * 1024 + 600_000);
+  await tab.close();
+
+  // 🔴 **PKC3 本体がまだ書ける**(占有されると設定すら保存できなくなる)
+  const room = await page.evaluate(() => {
+    let wrote = 0;
+    try {
+      for (let i = 0; i < 1000; i++) {
+        localStorage.setItem('probe.' + i, 'x'.repeat(1024));
+        wrote += 1024;
+      }
+    } catch {
+      /* 上限 */
+    } finally {
+      for (let i = 0; i < 1000; i++) localStorage.removeItem('probe.' + i);
+    }
+    return wrote;
+  });
+  expect(room, 'アプリに占有されて PKC3 自身が書けない').toBeGreaterThan(512 * 1024);
+
+  expect(errors).toEqual([]);
+});

@@ -10,6 +10,7 @@ import type { StorePort } from '@adapter/state/store-effects';
 import type { EntryMetaRow } from './schema';
 import type { RelationRow } from './protocol';
 import type { StoreClient } from './store-client';
+import { clearAppStorage } from '@adapter/platform/app-storage';
 
 export function relationFromRow(row: RelationRow): Relation {
   return {
@@ -60,6 +61,13 @@ export function createStorePort(client: StoreClient, cid: string): StorePort {
     },
     deleteEntry: async (lid) => {
       await client.request({ op: 'deleteEntry', cid, lid });
+      // 🔴 **アプリに貸した保存領域も畳む**(P8 段⑯。レビュー)。
+      //    かつて `clearAppStorage` は呼び出し元が 1 件も無く、ノートを消しても
+      //    そのアプリのデータが origin の localStorage に**永久に残って**いた
+      //    (「後始末がある」と読める死んだ export だった)。
+      //    ⚠ 消す順は entry が先 ── 逆にすると、削除が失敗したときに
+      //    「ノートは在るのにデータだけ消えた」になる
+      clearAppStorage(lid);
     },
     listRevisionMetas: (entryLid) =>
       client.request({ op: 'listRevisionMetas', cid, entryLid }),

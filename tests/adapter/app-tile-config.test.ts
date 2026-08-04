@@ -144,8 +144,92 @@ describe('タイル設定を書く(P8 段⑭)', () => {
     await tick(20);
     h.d.dispatch({ type: 'START_EDIT' });
     h.d.dispatch({ type: 'UPDATE_OPEN_BODY', body: '打ちかけ' });
-    h.d.dispatch({ type: 'APP_TILE_SAVED', lid: 'a1', body: 'よそから来た' });
+    h.d.dispatch({ type: 'APP_TILE_SAVED', lid: 'a1', gen: 0, body: 'よそから来た' });
     expect(h.d.getState().openBody?.body).toBe('打ちかけ');
+    // 🔴 **draft は守るが、disk が進んだ印は残す**(P8 段⑯)── 印が無いと
+    //    無変更 commit / cancel で旧本文が disk を上書きして、書けた設定が消える
+    expect(h.d.getState().openBody?.persisted, 'disk の内容を追えていない').toBe('よそから来た');
+    expect(h.d.getState().openBody?.diskAhead, 'disk が進んだ印が無い').toBe(true);
+  });
+
+  /**
+   * 🔴 **disk を観測点にする**(P8 段⑯。レビュー H-1 が実測で再現させた欠陥)。
+   *
+   * 直す前の実測: 登録にチェック(SET_APP_TILE)→ ack が返る前に編集して保存
+   * → disk に着地した `registered_as_app: true` が旧本文の書き戻しで**消えた**。
+   * ⚠ 上の test は draft の保全しか見ておらず、**disk を見ていないので緑のまま**
+   * だった ── 下流(state)ではなく**最後に disk に何が残ったか**を見る。
+   */
+  it('🔴 設定を変えた直後に編集して保存しても、disk の設定が消えない', async () => {
+    const h = setup();
+    h.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    await tick(20);
+    h.d.dispatch({ type: 'SET_APP_TILE', lid: 'a1', registered: true });
+    // ⚠ **ack を待たずに**編集へ入ろうとする(これが本番で起きる窓)
+    h.d.dispatch({ type: 'START_EDIT' });
+    await tick(30);
+    // 書込中は編集に入れない(ロックが効いている)
+    expect(h.d.getState().phase, '書込中なのに編集へ入れてしまう').toBe('ready');
+    expect(h.bodies.a1).toContain('registered_as_app');
+
+    // ロックが解けてから編集 → 本文を足して保存
+    h.d.dispatch({ type: 'START_EDIT' });
+    expect(h.d.getState().phase).toBe('editing');
+    h.d.dispatch({
+      type: 'UPDATE_OPEN_BODY',
+      body: `${h.d.getState().openBody!.body}追記した説明\n`,
+    });
+    h.d.dispatch({ type: 'COMMIT_EDIT' });
+    await tick(30);
+    // 🔴 ここが本丸 ── 本文も設定も**両方**残っている
+    expect(h.bodies.a1, 'commit で登録が消えた').toContain('registered_as_app');
+    expect(h.bodies.a1).toContain('追記した説明');
+  });
+
+  it('🔴 続けて設定を変えても**落ちない**(登録 → グループ → 目印)', async () => {
+    // ⚠ 書込を `writeLock` で止めると 2 件目以降が**無言で拒否される**
+    //    (smoke が実際に落ちた)。タイルの書込どうしは disk を読み直すので安全
+    const h = setup();
+    h.d.dispatch({ type: 'SET_APP_TILE', lid: 'a1', registered: true });
+    h.d.dispatch({ type: 'SET_APP_TILE', lid: 'a1', group: '道具' });
+    h.d.dispatch({ type: 'SET_APP_TILE', lid: 'a1', icon: '🧮' });
+    await tick(40);
+    const t = h.d.getState().launcherTiles?.[0];
+    expect(t?.group, '2 件目が落ちた').toBe('道具');
+    expect(t?.icon, '3 件目が落ちた').toBe('🧮');
+    expect(h.d.getState().tileWrite, '数え上げが戻っていない').toBeNull();
+  });
+
+  it('🔴 タイル設定の書込中は編集に入れない(交錯で disk の設定が消える)', async () => {
+    const h = setup();
+    h.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    await tick(20);
+    h.d.dispatch({ type: 'SET_APP_TILE', lid: 'a1', registered: true });
+    h.d.dispatch({ type: 'START_EDIT' });
+    expect(h.d.getState().phase, '書込中なのに編集へ入れた').toBe('ready');
+    await tick(30);
+    h.d.dispatch({ type: 'START_EDIT' });
+    expect(h.d.getState().phase, '書込が終わっても編集へ入れない').toBe('editing');
+  });
+
+  it('⚠ 強制解放でタイル設定の書込も畳む(片方だけ残らない)', async () => {
+    const h = setup();
+    h.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    await tick(20);
+    h.d.dispatch({ type: 'SET_APP_TILE', lid: 'a1', registered: true });
+    expect(h.d.getState().tileWrite).not.toBeNull();
+    h.d.dispatch({ type: 'FORCE_RELEASE_LOCK', discardDraft: false });
+    expect(h.d.getState().tileWrite, '解放しても編集へ入れないまま').toBeNull();
+    await tick(30);
+  });
+
+  it('⚠ 書けなかったときも**ロックは解く**(二度と設定を変えられない、を作らない)', async () => {
+    const h = setup();
+    // 同じ値なので書込は起きない ── それでもロックは残ってはいけない
+    h.d.dispatch({ type: 'SET_APP_TILE', lid: 'a1', registered: false });
+    h.d.dispatch({ type: 'SET_APP_TILE', lid: 'a1', registered: true });
+    await tick(30);
+    expect(h.d.getState().tileWrite, '数え上げを握ったまま').toBeNull();
   });
 
   it('🔴 書込が飛んでいる間は受け付けない(読んで書き戻す操作なので片方が消える)', async () => {

@@ -114,6 +114,16 @@ export interface AppState {
    */
   writeLock: { lid: string } | null;
   /**
+   * タイル設定の書込が飛んでいる数(P8 段⑯)。
+   *
+   * 🔴 `writeLock` を借りると、**連続した設定変更が無言で落ちる**(登録 →
+   * グループ → 目印 を続けて触ると 2 件目以降が拒否される ── smoke が実際に
+   * 落ちた)。タイルの書込どうしは disk を読み直してから書き戻すので**互いに
+   * 安全**で、危ないのは**編集との交錯**だけ ── だから数えるだけにして、
+   * 止めるのは `START_EDIT` に限る。
+   */
+  tileWrite: { lid: string; n: number } | null;
+  /**
    * ロックの世代。**強制解放のたびに増える**(P8 段⑧)。
    * ⚠ これが無いと強制解放は**危険な操作になる** ── 解放したあとに古い書込の
    * ack が着いて、user が見ている本文を巻き戻す。世代の合わない ack は捨てる。
@@ -136,6 +146,9 @@ export interface BodyLock {
  */
 export function bodyLockOf(state: AppState): BodyLock | null {
   if (state.writeLock) return { lid: state.writeLock.lid, holder: 'writing' };
+  // ⚠ タイル設定の書込中も**書込中**として見せる(編集に入れないので、
+  //    理由が画面に出ないと「押しても何も起きない」になる)
+  if (state.tileWrite) return { lid: state.tileWrite.lid, holder: 'writing' };
   if (state.phase === 'editing' && state.openBody)
     return { lid: state.openBody.lid, holder: 'editing' };
   return null;
@@ -158,6 +171,7 @@ export const initialState: AppState = {
   revisionPanel: null,
   trashPanel: null,
   writeLock: null,
+  tileWrite: null,
   lockGen: 0,
   error: null,
 };
@@ -167,8 +181,11 @@ export type UserAction =
   | { type: 'SET_VIEW_MODE'; mode: ViewMode }
   | { type: 'SET_ENTRY_FILTER'; query: string }
   | { type: 'LAUNCHER_TILES_LOADED'; tiles: LauncherTile[] }
-  /** タイル設定を書き戻した ack(P8 段⑭)。⚠ **開いている body も差し替える**。 */
-  | { type: 'APP_TILE_SAVED'; lid: string; body: string }
+  /**
+   * タイル設定を書き戻した ack(P8 段⑭)。⚠ **開いている body も差し替える**。
+   * ⚠ `body === null` は失敗(書けなかった)── **ロックは必ず解く**。
+   */
+  | { type: 'APP_TILE_SAVED'; lid: string; gen: number; body: string | null }
   | { type: 'START_EDIT' }
   | { type: 'UPDATE_OPEN_BODY'; body: string }
   | { type: 'COMMIT_EDIT' }
@@ -296,6 +313,8 @@ export type DomainEvent =
   | {
       type: 'REQUEST_TILE_UPDATE';
       lid: string;
+      /** ⚠ 強制解放をまたいだ ack を捨てるための世代(追記と同じ)。 */
+      gen: number;
       updates: Record<string, string | boolean | undefined>;
       /** ⚠ 書き戻すのに要る素性。**effect 層は state を見ない**ので event が運ぶ。 */
       title: string;
@@ -487,22 +506,37 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
     case 'LAUNCHER_TILES_LOADED':
       return { state: { ...state, launcherTiles: action.tiles }, events: [] };
     case 'APP_TILE_SAVED': {
-      // 🔴 **開いている body も差し替える**(P8 段⑭)。`BODY_PERSISTED` は
-      //    `persisted` しか動かさないので、それだけだと**画面が古いまま**になる
-      //    ── 実際、登録にチェックを入れても設定欄が出てこなかった(実測)。
-      //    ⚠ 編集中は触らない(打っている最中の draft を上書きしない)
-      if (state.phase === 'editing') return { state, events: [] };
-      if (state.openBody?.lid !== action.lid) return { state, events: [] };
+      // 🔴 **世代が違う ack は本文に触らない**が、**ロックは必ず解く**
+      //    (追記と同じ ── 握ったままにすると user は二度と設定を変えられない)
+      const left = (state.tileWrite?.n ?? 1) - 1;
+      const released: AppState = {
+        ...state,
+        tileWrite: left > 0 && state.tileWrite ? { ...state.tileWrite, n: left } : null,
+      };
+      // ⚠ 世代が違う ack は本文に触らないが、**数は必ず減らす**
+      //    (減らさないと user は二度と設定を変えられず、しかも理由が分からない)
+      if (action.gen !== state.lockGen) return { state: released, events: [] };
+      // 失敗(書けなかった)── ロックだけ解いて本文は触らない
+      if (action.body === null) return { state: released, events: [] };
+      const ob = state.openBody;
+      if (ob?.lid !== action.lid) return { state: released, events: [] };
+      const body = action.body;
+      if (state.phase === 'editing') {
+        // 🔴 **draft は触らないが、disk が進んだ印は残す**(P8 段⑯。レビュー H-1)。
+        //    かつては丸ごと捨てていたので、無変更 commit / cancel で**旧本文が
+        //    disk を上書きし、書けたはずの設定が消えた**(実測で再現)。
+        //    `TODO_TOGGLED` の editing 窓と同型に揃える ── 変更ありの commit は
+        //    draft が勝ち(可視内容の last-write-wins)、無変更 commit / cancel は
+        //    disk を採る
+        return {
+          state: { ...released, openBody: { ...ob, persisted: body, diskAhead: true } },
+          events: [],
+        };
+      }
       return {
         state: {
-          ...state,
-          openBody: {
-            lid: action.lid,
-            body: action.body,
-            baseline: action.body,
-            persisted: action.body,
-            diskAhead: false,
-          },
+          ...released,
+          openBody: { lid: action.lid, body, baseline: body, persisted: body, diskAhead: false },
         },
         events: [],
       };
@@ -510,7 +544,10 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
     case 'SET_APP_TILE': {
       // ⚠ 書込が飛んでいる間は触らせない(追記と同じ規律)── 読んで書き戻す
       //    操作なので、途中に別の書込が挟まると片方が消える
+      // ⚠ 追記が飛んでいる間は触らない(あちらは本文を丸ごと書き戻す)
       if (state.phase !== 'ready' || state.writeLock) return { state, events: [] };
+      // ⚠ **別のノートのタイル書込中も断る**(1 本しか数えていないので)
+      if (state.tileWrite && state.tileWrite.lid !== action.lid) return { state, events: [] };
       if (!state.entryMetas.has(action.lid)) return { state, events: [] };
       const updates: Record<string, string | boolean | undefined> = {};
       // ⚠ **false は書かない**(PKC2 と同じ)── 既定値を明示的に持つと、
@@ -526,11 +563,19 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       if (Object.keys(updates).length === 0) return { state, events: [] };
       const meta = state.entryMetas.get(action.lid)!;
       return {
-        state,
+        // 🔴 **飛んでいる数を数える**(P8 段⑯。レビュー H-1/H-7)。これは
+        //    **読んで書き戻す**操作なので、往復の窓に編集が割り込むと片方が消える。
+        //    実測で再現: 登録にチェック → ack が返る前に編集して保存 → disk に
+        //    着地した `registered_as_app: true` が旧本文の書き戻しで**黙って消えた**。
+        //    ⚠ `writeLock` を借りると**連続した設定変更が無言で落ちる**(登録 →
+        //    グループ → 目印 を続けて触ると 2 件目以降が拒否される。smoke が実際に
+        //    落ちた)── タイルの書込どうしは disk を読み直すので互いに安全
+        state: { ...state, tileWrite: { lid: action.lid, n: (state.tileWrite?.n ?? 0) + 1 } },
         events: [
           {
             type: 'REQUEST_TILE_UPDATE',
             lid: action.lid,
+            gen: state.lockGen,
             updates,
             title: meta.title,
             archetype: meta.archetype,
@@ -551,6 +596,9 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       // ── これが「追記が黙って消える」の実体。
       // ⚠ ここは**backstop** ── 無言の拒否にならないよう、描画側は書込中
       // 「編集」を出さずにロックの帯(理由 + 強制解放)を出す(`detail.ts`)
+      // ⚠ タイル設定の書込中も編集に入れない(交錯すると disk の設定が消える)
+      if (state.tileWrite && state.tileWrite.lid === state.openBody.lid)
+        return { state, events: [] };
       if (state.writeLock && state.writeLock.lid === state.openBody.lid)
         return { state, events: [] };
       // ⚠ 編集がロックを握ることは**書かない** ── `phase === 'editing'` が既に
@@ -728,6 +776,8 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
         state: {
           ...state,
           writeLock: null,
+          // ⚠ タイル設定の書込も一緒に畳む(片方だけ残ると編集に入れないままになる)
+          tileWrite: null,
           lockGen: state.lockGen + 1,
           ...(draft
             ? {

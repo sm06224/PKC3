@@ -56,6 +56,7 @@
  * ⚠ **pure module**。browser API を使わない(文字列を組むだけ)。
  */
 import {
+  APP_STORAGE_LIMIT,
   APP_STORAGE_MESSAGE,
   buildStorageShim,
   inlineJson,
@@ -215,22 +216,52 @@ export function buildLauncherAppShell(
   const shellScript =
     '<script>(function(){' +
     `var PREFIX=${inlineJson(appStoragePrefix(opts.appId!))},TAG=${inlineJson(APP_STORAGE_MESSAGE)};` +
+    `var LIMIT=${String(APP_STORAGE_LIMIT)};` +
     'var frame=document.querySelector("iframe");' +
     'var noted=false;' +
     'function note(msg){if(noted)return;noted=true;' +
     'var p=document.createElement("p");p.setAttribute("data-pkc-field","app-note");' +
     'p.textContent=msg;document.body.appendChild(p);}' +
+    // 🔴 **使用量は外殻が数える**(P8 段⑯。レビュー H-2)。
+    //    かつて上限は shim(= untrusted 側)にしか無く、shim を使わず
+    //    `parent.postMessage` を直に投げるだけで **origin の localStorage を
+    //    丸ごと占有できた**(実測: 1 アプリで 5,239,731 文字 = 枠の 99.94%。
+    //    以後 PKC3 自身の設定書込も他アプリの保存も入らない)。
+    //    ⚠ 起動時に前置きを走査して初期値を作る ── 覚えているだけだと
+    //    タブを開き直したときに 0 から数え直して、また埋められる
+    'var used=0;' +
+    'function scan(){used=0;for(var i=0;i<localStorage.length;i++){' +
+    'var k=localStorage.key(i);if(k&&k.indexOf(PREFIX)===0){' +
+    'used+=(k.length-PREFIX.length)+(localStorage.getItem(k)||"").length;}}}' +
+    'scan();' +
+    // ⚠ **結果をアプリへ返す**(レビュー H-3)。返さないと、規約を守るアプリの
+    //    書込が無言で消える(実測: 例外 none・読み戻しも成功なのに、次回起動で
+    //    1 件も残っていなかった)
+    'function reply(seq,ok){if(seq===undefined||!frame||!frame.contentWindow)return;' +
+    'try{frame.contentWindow.postMessage({tag:TAG,op:"ack",seq:seq,ok:ok},"*");}catch(e){}}' +
     'window.addEventListener("message",function(e){' +
     // 🔴 唯一の判定。⚠ e.origin は使わない(両方向に嘘をつく)
     'if(!frame||e.source!==frame.contentWindow)return;' +
     'var d=e.data;if(!d||d.tag!==TAG)return;' +
     'try{' +
-    'if(d.op==="set")localStorage.setItem(PREFIX+d.key,d.value);' +
-    'else if(d.op==="remove")localStorage.removeItem(PREFIX+d.key);' +
-    'else if(d.op==="clear"){var ks=[];for(var i=0;i<localStorage.length;i++){' +
+    'if(d.op==="set"){' +
+    'var key=String(d.key),val=String(d.value);' +
+    'var prev=localStorage.getItem(PREFIX+key);' +
+    'var next=used-(prev===null?0:key.length+prev.length)+key.length+val.length;' +
+    // 🔴 **信頼側で断る**。shim の上限は「本物の意味論をアプリへ見せる」ためのもので、
+    //    安全性の根拠にはならない(アプリは shim を使わずに投げられる)
+    'if(next>LIMIT){note("このアプリの保存領域が一杯です(これ以上は保存されません)");' +
+    'reply(d.seq,false);return;}' +
+    'localStorage.setItem(PREFIX+key,val);used=next;reply(d.seq,true);' +
+    '}else if(d.op==="remove"){' +
+    'var rk=String(d.key),old=localStorage.getItem(PREFIX+rk);' +
+    'if(old!==null){localStorage.removeItem(PREFIX+rk);used-=rk.length+old.length;}' +
+    'reply(d.seq,true);' +
+    '}else if(d.op==="clear"){var ks=[];for(var i=0;i<localStorage.length;i++){' +
     'var k=localStorage.key(i);if(k&&k.indexOf(PREFIX)===0)ks.push(k);}' +
-    'for(var j=0;j<ks.length;j++)localStorage.removeItem(ks[j]);}' +
-    '}catch(err){note("このアプリの保存領域が一杯です(これ以上は保存されません)");}' +
+    'for(var j=0;j<ks.length;j++)localStorage.removeItem(ks[j]);used=0;reply(d.seq,true);' +
+    '}}catch(err){note("このアプリの保存領域が一杯です(これ以上は保存されません)");' +
+    'scan();reply(d.seq,false);}' +
     '});' +
     '})()</script>';
 

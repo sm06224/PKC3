@@ -72,6 +72,21 @@ describe('貸す保存領域', () => {
     expect('pkc3.theme'.startsWith(appStoragePrefix('e-1'))).toBe(false);
   });
 
+  it('🔴 lid に `.` が入っても分離が壊れない(PKC2 取込は lid を素通しする)', () => {
+    // 直す前: lid "a" の鍵 "b.c" と lid "a.b" の鍵 "c" が**どちらも**
+    // `pkc3.app.a.b.c` になり、別のアプリのデータを読み書きできた
+    const outer = appStoragePrefix('a');
+    const inner = appStoragePrefix('a.b');
+    expect(`${outer}b.c`).not.toBe(`${inner}c`);
+    // ⚠ 一方が他方の前置きになっていない(走査は前方一致で消す)
+    expect(inner.startsWith(outer), 'lid "a" の走査が lid "a.b" まで巻き込む').toBe(false);
+    // 他の区切り文字でも同じ
+    for (const lid of ['a/b', 'a b', 'a%2Eb', 'a.b.c']) {
+      expect(appStoragePrefix(lid)).not.toBe(appStoragePrefix('a'));
+      expect(appStoragePrefix(lid).startsWith(appStoragePrefix('a'))).toBe(false);
+    }
+  });
+
   it('🔴 shim は Proxy を使う(素のオブジェクトでは 15 項目中 15 不一致)', () => {
     const src = buildStorageShim({ seed: {} });
     // ドット読み・`in`・`delete`・`Object.keys`・`JSON.stringify` を成立させるのは
@@ -110,7 +125,7 @@ describe('貸す保存領域', () => {
   it('sessionStorage は**往復させない**(タブ単位なので保存の意味が無い)', () => {
     const src = buildStorageShim({ seed: {} });
     // local は send を渡し、session は何もしない関数を渡す
-    expect(src).toContain('build(seed, send)');
+    expect(src).toContain('build(seed, send, true)');
     expect(src).toContain("install('sessionStorage'");
   });
 });
@@ -129,14 +144,30 @@ describe('貸す保存領域', () => {
 function runShim(
   seed: Record<string, string>,
   limit = APP_STORAGE_LIMIT,
-): { ls: Storage; sent: Array<Record<string, string>> } {
+): {
+  ls: Storage;
+  ss: Storage;
+  sent: Array<Record<string, string>>;
+  /** 外殻からの返事(P8 段⑯)。`ok:false` で像を巻き戻す。 */
+  ack(seq: number, ok: boolean): void;
+} {
   const src = buildStorageShim({ seed, limit }).replace(/^<script>/, '').replace(/<\/script>$/, '');
-  const win: Record<string, unknown> = {};
+  const listeners: Array<(e: { data: unknown }) => void> = [];
+  const win: Record<string, unknown> = {
+    addEventListener: (_t: string, fn: (e: { data: unknown }) => void) => listeners.push(fn),
+  };
   const sent: Array<Record<string, string>> = [];
   new Function('window', 'parent', src)(win, {
     postMessage: (m: Record<string, string>) => sent.push(m),
   });
-  return { ls: win.localStorage as Storage, sent };
+  return {
+    ls: win.localStorage as Storage,
+    ss: win.sessionStorage as Storage,
+    sent,
+    ack: (seq, ok) => {
+      for (const fn of listeners) fn({ data: { tag: APP_STORAGE_MESSAGE, op: 'ack', seq, ok } });
+    },
+  };
 }
 
 describe('shim の意味論(実際に走らせる)', () => {
@@ -202,7 +233,9 @@ describe('shim の意味論(実際に走らせる)', () => {
     expect(sent.map((m) => m.op)).toEqual(['set', 'set', 'remove', 'clear']);
     expect(sent[0]).toMatchObject({ op: 'set', key: 'a', value: '1', tag: APP_STORAGE_MESSAGE });
     // ⚠ 全量を積んでいない(値は 1 件ぶんだけ)
-    expect(Object.keys(sent[1]!).sort()).toEqual(['key', 'op', 'tag', 'value']);
+    // ⚠ `seq` は**返事を結び付けるため**の 1 個だけ(値は積まない)
+    expect(Object.keys(sent[1]!).sort()).toEqual(['key', 'op', 'seq', 'tag', 'value']);
+    expect(sent[1], '前の値まで外殻へ送っている(payload が倍になる)').not.toHaveProperty('__prev');
   });
 
   it('⚠ 上限に当たった書込は**外殻へ送らない**(入っていないものを保存しない)', () => {
@@ -216,18 +249,57 @@ describe('shim の意味論(実際に走らせる)', () => {
   });
 
   it('sessionStorage は**別物**で、外殻へ送らない(タブ単位)', () => {
-    const src = buildStorageShim({ seed: { k: 'v' } })
-      .replace(/^<script>/, '')
-      .replace(/<\/script>$/, '');
-    const win: Record<string, unknown> = {};
-    const sent: unknown[] = [];
-      new Function('window', 'parent', src)(win, { postMessage: (m: unknown) => sent.push(m) });
-    const ss = win.sessionStorage as Storage;
+    const { ls, ss, sent } = runShim({ k: 'v' });
     // ⚠ seed を引き継がない(タブ単位なので前回の続きではない)
     expect(ss.getItem('k')).toBeNull();
     ss.setItem('s', '1');
     expect(ss.getItem('s')).toBe('1');
-    expect((win.localStorage as Storage).getItem('s'), 'local と session が同じ器').toBeNull();
+    expect(ls.getItem('s'), 'local と session が同じ器').toBeNull();
     expect(sent, 'session の書込を外殻へ送っている').toEqual([]);
+  });
+
+  /**
+   * 🔴 **外殻に入らなかった書込を「入った」と見せ続けない**(P8 段⑯。レビュー H-3)。
+   *
+   * 直す前の実測: 別のアプリが origin の枠を埋めていると、こちらの
+   * `setItem('mine', …)` は**例外 none・読み戻しも成功**なのに、
+   * 次回起動で 1 件も残っていなかった(外殻の書込が黙って落ちていた)。
+   */
+  it('🔴 外殻が断ったら像を巻き戻し、次の setItem で投げる', () => {
+    const { ls, sent, ack } = runShim({});
+    ls.setItem('a', '1');
+    ls.setItem('mine', 'B');
+    expect(ls.getItem('mine')).toBe('B');
+    const seq = Number(sent[1]!.seq);
+    expect(seq, '外殻が返事を返せる印(seq)が付いていない').toBeGreaterThan(0);
+
+    ack(seq, false); // 外殻が「入らなかった」と返す
+    // ⚠ **像から消える**(在ると見せ続けない)
+    expect(ls.getItem('mine'), '外殻に入っていないのに在ると見せている').toBeNull();
+    // ⚠ 次の書込で**同期に**投げる(アプリが気づける)
+    let name = '';
+    try {
+      ls.setItem('next', 'x');
+    } catch (e) {
+      name = (e as Error).name;
+    }
+    expect(name, '断られたことがアプリに伝わらない').toBe('QuotaExceededError');
+    // ⚠ 1 度知らせたら復帰する(永久に書けなくならない)
+    expect(() => ls.setItem('next', 'x')).not.toThrow();
+  });
+
+  it('⚠ 通った書込は巻き戻さない(ok の ack で像が壊れない)', () => {
+    const { ls, sent, ack } = runShim({});
+    ls.setItem('a', '1');
+    ack(Number(sent[0]!.seq), true);
+    expect(ls.getItem('a')).toBe('1');
+    expect(() => ls.setItem('b', '2')).not.toThrow();
+  });
+
+  it('⚠ 上書きを断られたら**前の値へ**戻る(消えたことにしない)', () => {
+    const { ls, sent, ack } = runShim({ a: '旧' });
+    ls.setItem('a', '新');
+    ack(Number(sent[0]!.seq), false);
+    expect(ls.getItem('a'), '断られた上書きで前の値まで失われた').toBe('旧');
   });
 });

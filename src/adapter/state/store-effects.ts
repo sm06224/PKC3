@@ -180,6 +180,12 @@ export function connectStoreEffects(
       case 'REQUEST_TILE_UPDATE':
         enqueue(async () => {
           if (disposed) return;
+          // ⚠ **どの出口でもロックを解く**(P8 段⑯)── 握ったままにすると
+          //    user は二度と設定を変えられず、しかも理由が分からない
+          const fail = (): void => {
+            if (!disposed)
+              dispatcher.dispatch({ type: 'APP_TILE_SAVED', lid: ev.lid, gen: ev.gen, body: null });
+          };
           try {
             // 🔴 **disk から読んで書き戻す**(P8 段⑭)。state の body を使わない ──
             //    添付は開いていないことのほうが多く、開いていても古いことがある
@@ -190,12 +196,12 @@ export function connectStoreEffects(
                 type: 'OP_FAILED',
                 error: 'アプリの設定を変えられません(ノートが見つかりません)',
               });
-              return;
+              return fail();
             }
             // ⚠ **原文 splice**で書き換える ── 全文を組み直すと、本文・他の key・
             //    空行が byte 単位で変わる(この repo の規律)
             const next = spliceFrontmatterKeys(body, ev.updates);
-            if (next === body) return; // 変わらないなら書かない
+            if (next === body) return fail(); // 変わらないなら書かない(ロックは解く)
             const ext = extractMeta(ev.archetype, next);
             await store.persistEntry({
               lid: ev.lid,
@@ -210,7 +216,7 @@ export function connectStoreEffects(
             if (disposed) return;
             // ⚠ 書いたら**その場で読み直す** ── 読み直さないと、押した結果が
             //    ランチャーに出るのが「次にタブを開き直したとき」になる
-            dispatcher.dispatch({ type: 'APP_TILE_SAVED', lid: ev.lid, body: next });
+            dispatcher.dispatch({ type: 'APP_TILE_SAVED', lid: ev.lid, gen: ev.gen, body: next });
             const titles = new Map(ev.entries.map((e) => [e.lid, e.title]));
             const rows = await store.getBodies(ev.entries.map((e) => e.lid));
             if (disposed) return;
@@ -226,6 +232,7 @@ export function connectStoreEffects(
                 type: 'OP_FAILED',
                 error: `アプリの設定を保存できませんでした: ${String(e)}`,
               });
+            fail();
           }
         });
         break;
