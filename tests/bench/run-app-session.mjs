@@ -268,8 +268,14 @@ async function main() {
   const rows = [];
   const seen = { diagram: 0, table: 0, attachments: 0, attachmentPreviews: 0 };
   const noteRows = '[data-pkc-region="entry-list"] [data-pkc-entry][data-pkc-archetype="text"]';
-  const steadyMark = await markStart();
+  // ⚠ **暖機を定常に混ぜない**。ここを loop の外で 1 度だけ立てると、初回の
+  //   ラスタ生成(暖機で捨てているはずの窓)が定常の詰まりに混ざる ── 実際に踏んだ:
+  //   混ざった版は最大の空きを 53ms と報告したが、暖機を外すと 28ms だった。
+  //   ⚠ ヒープ / DOM の中央値は `r >= WARMUP` で正しく捨てていたので、
+  //   **同じ計器の中で片方だけ規律が抜けていた**。
+  let steadyMark = await markStart();
   for (let r = 0; r < ROUNDS; r++) {
+    if (r === WARMUP) steadyMark = await markStart();
     const i = r % FIXTURE.notes;
     // 1 ラウンド = **添付を開く** → ノートを開く → 編集 → 打つ → 確定。
     // 🔴 添付を開く手を入れているのは、そこが `lendObjectUrl` の唯一の入口だから
