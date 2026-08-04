@@ -14,6 +14,7 @@
  * query 付き参照 / 単一引用符 / 絶対 path を**実際に持つ** ── 持たせないと、
  * それらを扱う枝を消しても誰も気づかない。
  */
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error -- 検品規則は素の .mjs(ビルド対象外の CI script 群)
 import { inspectDist } from '../scripts/dist-inspect.mjs';
@@ -397,5 +398,55 @@ describe('配る量の tripwire', () => {
     const out = inspect(healthy('dev')).lines.join('\n');
     expect(out).toContain('[dev] ファイル 9 件 / うち map 1 件');
     expect(out).toContain('map: 1367.2 KB');
+  });
+});
+
+/**
+ * P8 段㉒: 🔴 **床は kind ごとに持つ**。
+ *
+ * 🔴 実際に deploy を止めて分かった。`dev` は「いまの main を今ビルドした物」だが、
+ * `product` は**過去に release した成果物そのもの**を配る。今日の dev に合わせた床を
+ * 両方へ当てると、**古い release が必ず落ちる** ── `v3.0.0`(1648.7 KB)が
+ * 「下限を 1851.3 KB 下回る」で job ごと落ち、**dev の deploy まで巻き添えで
+ * 止まった**(dev のビルドと検品は通っていたのに、公開の step へ到達しなかった)。
+ *
+ * ⚠ この test が守るのは **2 つの床が別の値であること**ではなく、
+ * 「**product の床が、実際に配った release より低いこと**」である。
+ */
+describe('配る量の床(kind ごと)', () => {
+  /** `scripts/check-dist.mjs` が持つ実際の値を読む(test に別表を持たない)。 */
+  const SRC = readFileSync('scripts/check-dist.mjs', 'utf8');
+  const floors = (() => {
+    const m = /const SHIPPED_FLOOR_KB = \{([^}]+)\}/.exec(SRC);
+    if (!m) throw new Error('SHIPPED_FLOOR_KB が kind ごとの形になっていない');
+    const out: Record<string, number> = {};
+    for (const kv of m[1]!.split(',')) {
+      const [k, v] = kv.split(':').map((x) => x.trim());
+      if (k) out[k] = Number(v);
+    }
+    return out;
+  })();
+
+  it('🔴 dev と product の床が別々に定義されている', () => {
+    expect(floors['dev'], 'dev の床が無い').toBeGreaterThan(0);
+    expect(floors['product'], 'product の床が無い').toBeGreaterThan(0);
+  });
+
+  /**
+   * 🔴 **実際に配った release より低い**。
+   * ⚠ 数字は「v3.0.0 の実測 1648.7 KB」── これを下回らない床を置くと、
+   *   その release を配れなくなる(= まさに起きた事故)。
+   */
+  it('🔴 product の床が、既に release した成果物を弾かない', () => {
+    const SHIPPED_V300_KB = 1648.7;
+    expect(
+      floors['product'],
+      `product の床(${floors['product']} KB)が v3.0.0(${SHIPPED_V300_KB} KB)を弾く`,
+    ).toBeLessThan(SHIPPED_V300_KB);
+  });
+
+  it('⚠ それでも「空 / 途中で切れた」は弾く(床を 0 にしていない)', () => {
+    // 検出したいのは chunk の欠落・取り違え ── 数百 KB を下回る product はありえない
+    expect(floors['product'], 'product の床が緩すぎる').toBeGreaterThanOrEqual(500);
   });
 });

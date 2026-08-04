@@ -46,11 +46,23 @@ const SHIPPED_CAP_KB = 6000;
 /**
  * 配る量の下限。KB。⚠ **cap だけでは片側しか見ていない** ── entry chunk を
  * 0 バイトにしても「配る量が減った」だけで通っていた(レビュー 2 巡目 M-1)。
- * 取り違え・chunk 欠落は**縮む方向**にも起きる。実測 4963.5 KB に対する床。
+ * 取り違え・chunk 欠落は**縮む方向**にも起きる。
  * ⚠ mermaid の chunk 群(約 3.3 MB)が丸ごと消えると図が描けなくなるが、
  * **画面はソース表示に落ちるだけで壊れない**ので気づきにくい ── 床がその検出器。
+ *
+ * 🔴 **床は kind ごとに持つ**(P8 段㉒。実際に deploy を止めて分かった)。
+ * `dev` は**いまの main を今ビルドした物**なので、現在の実測(4963.5 KB)に
+ * 対する床でよい。`product` は**過去に release した成果物そのもの**を配るので、
+ * 今日の dev に合わせた床を当てると、**古い release が必ず落ちる** ──
+ * 実際 `v3.0.0`(1648.7 KB。この PR の前にビルドされたもの)が
+ * 「下限を 1851.3 KB 下回る」で job ごと落ち、**dev の deploy まで巻き添えで
+ * 止まった**(dev のビルドと検品は通っていたのに、公開の step へ到達しなかった)。
+ *
+ * ⚠ product 側の床は「**空 / 途中で切れた zip を弾く**」ことだけを狙う ──
+ * 版が上がるたびに追随させる性質のものではない(cap と同じで、規律ではなく
+ * 手違いの検出器である)。
  */
-const SHIPPED_FLOOR_KB = 3500;
+const SHIPPED_FLOOR_KB = { dev: 3500, product: 800 };
 
 /** 中身を読む対象(テキストの生成物だけ。wasm は読まない)。 */
 const TEXTUAL = /\.(?:js|mjs|cjs|css|html|webmanifest|json)$/;
@@ -97,7 +109,7 @@ for (const f of files) {
 const { lines, errors } = inspectDist({
   kind,
   capKb: SHIPPED_CAP_KB,
-  floorKb: SHIPPED_FLOOR_KB,
+  floorKb: SHIPPED_FLOOR_KB[kind],
   files,
   text,
 });
