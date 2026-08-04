@@ -403,6 +403,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             estimate: navigator.storage?.estimate
               ? () => navigator.storage.estimate()
               : undefined,
+            // 🔴 ハッシュは**ワーカーで**取る(P8 段㉓)。渡さないと
+            //    `blob.arrayBuffer()` が最大 64MB をメインの heap に載せる
+            //    ── 実測 32MB でメインが 241ms 止まっていた
+            hashBlob: async (blob) => (await assets.hash(blob)).hash,
           },
           files,
         ),
