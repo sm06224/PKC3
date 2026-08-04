@@ -188,6 +188,45 @@ function writeBack(
   ta.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+/**
+ * 🔴 **書出し / 取込の実行中は、本文を書き換えさせない**(P8 段㉑)。
+ *
+ * 直す前この判定は `delete-entry` **1 か所だけ**にあった。ところが書出しは
+ * 本文を 4MB ずつページングし(`await` を跨ぐ)、そのあとで履歴の鎖を引く ──
+ * バッチの隙間に保存が割り込むと、**同じノートの本文は旧版、鎖の頭は新 tip 基準**
+ * という噛み合わないアーカイブができる。取り込み直すと検査が発火して
+ * 「履歴が噛み合いません」だけが出て、そのノートの履歴が丸ごと落ちる
+ * (title / status は検査が無いので**黙って**旧値が入る)。
+ *
+ * 「削除は止めるのに保存は止めない」= 同じ危険に対して入口ごとに答えが違う、
+ * という状態だった。⚠ **規則は 1 本**にして、本文を書き換える入口すべてに掛ける。
+ */
+const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
+  'start-edit',
+  'commit-edit',
+  'append-entry',
+  'toggle-todo',
+  'toggle-app-tile',
+  'delete-entry',
+  'restore-revision',
+  'restore-trash',
+  'purge-trash',
+]);
+
+function refuseWhileBusy(
+  action: string,
+  dispatcher: Dispatcher,
+  services: BinderServices,
+): boolean {
+  if (!BODY_WRITE_ACTIONS.has(action) || services.busy?.() !== true) return false;
+  // ⚠ **可視に断る**(無言の操作拒否を作らない)
+  dispatcher.dispatch({
+    type: 'OP_FAILED',
+    error: '書き出し / 取込が実行中です。完了してから操作してください',
+  });
+  return true;
+}
+
 const ACTIONS: Record<string, ActionHandler> = {
   'select-entry': (dispatcher, target) => {
     const lid = target.getAttribute('data-pkc-entry');
@@ -222,17 +261,8 @@ const ACTIONS: Record<string, ActionHandler> = {
       title: defaultTitle(dispatcher, archetype),
     });
   },
-  'delete-entry': (dispatcher, target, services) => {
-    // 🔴 書出し / 取込の実行中は消させない(P6f review M-2)。隣に並んだ
-    // 「書き出す」を押した直後にここを押せると、走査の途中で entry が消え、
-    // **書き出したつもりでファイルが落ちていない**が成立する
-    if (services.busy?.()) {
-      dispatcher.dispatch({
-        type: 'OP_FAILED',
-        error: '書き出し / 取込が実行中です。完了してから削除してください',
-      });
-      return;
-    }
+  'delete-entry': (dispatcher, target) => {
+    // ⚠ 実行中(書出し / 取込)のガードは `refuseWhileBusy` が 1 本で持つ
     // 🔴 **無言で断らない**(P8 段⑲)。`DELETE_ENTRY` は `phase !== 'ready'` で
     //    何も返さないので、直す前は**確認ダイアログまで出してから黙って捨てて**いた
     //    ── user は消したつもりで画面を離れる。detail.ts が確立した
@@ -544,13 +574,24 @@ export function bindActions(
   dispatcher: Dispatcher,
   services: BinderServices = {},
 ): () => void {
+  /**
+   * action を 1 本の口から回す。⚠ **ここを通さない呼び方をしない** ──
+   * 実行中(書出し / 取込)のガードはここに 1 回だけ置く(P8 段㉑)。
+   * 入口ごとに書くと、必ずどれかが素通しになる(実際そうだった)。
+   */
+  const run = (action: string | null, el: HTMLElement): void => {
+    if (!action) return;
+    const handler = ACTIONS[action];
+    if (!handler) return;
+    if (refuseWhileBusy(action, dispatcher, services)) return;
+    handler(dispatcher, el, services, root);
+  };
   const onClick = (ev: Event) => {
     const el = (ev.target as HTMLElement | null)?.closest<HTMLElement>(
       '[data-pkc-action]',
     );
     if (!el || !root.contains(el)) return;
-    const handler = ACTIONS[el.getAttribute('data-pkc-action') ?? ''];
-    handler?.(dispatcher, el, services, root);
+    run(el.getAttribute('data-pkc-action'), el);
   };
   /**
    * ⚠ 書式パネルのボタンは **focus を奪わない**。奪うと押すたびに編集欄が
@@ -581,7 +622,7 @@ export function bindActions(
     // 「選んだ瞬間に効く」ものはここで拾う(P8)
     if (el instanceof HTMLSelectElement) {
       const action = el.getAttribute('data-pkc-action');
-      if (action) ACTIONS[action]?.(dispatcher, el, services, root);
+      run(action, el);
       return;
     }
     if (!(el instanceof HTMLInputElement)) return;
@@ -590,11 +631,11 @@ export function bindActions(
     //    書き戻すことになる(欄を離れた時・Enter を押した時が確定)
     const changeAction = el.getAttribute('data-pkc-action');
     if (changeAction !== null && changeAction.startsWith('set-app-')) {
-      ACTIONS[changeAction]?.(dispatcher, el, services, root);
+      run(changeAction, el);
       return;
     }
     if (changeAction === 'toggle-app-tile') {
-      ACTIONS[changeAction]?.(dispatcher, el, services, root);
+      run(changeAction, el);
       return;
     }
     const field = el.getAttribute('data-pkc-field');
@@ -627,7 +668,7 @@ export function bindActions(
     if (field === 'append-input') {
       if (ke.key === 'Enter' && (ke.ctrlKey || ke.metaKey) && !ke.altKey) {
         ke.preventDefault();
-        ACTIONS['append-entry']!(dispatcher, ke.target as HTMLElement, services, root);
+        run('append-entry', ke.target as HTMLElement);
       }
       return;
     }
@@ -644,6 +685,8 @@ export function bindActions(
         (ke.key === 'Enter' && (ke.ctrlKey || ke.metaKey)))
     ) {
       ke.preventDefault();
+      // ⚠ 近道キーも同じ規則に乗せる(ボタンだけ止めても意味が無い)
+      if (refuseWhileBusy('commit-edit', dispatcher, services)) return;
       renameFromEditorInput(dispatcher, root);
       dispatcher.dispatch({ type: 'COMMIT_EDIT' });
     } else if (

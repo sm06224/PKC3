@@ -31,6 +31,7 @@
  */
 import { parseFrontmatter, type FrontmatterValue } from '../markdown/frontmatter';
 import { renderMarkdown } from '../markdown/markdown-render';
+import { scanAssetRefsInto } from '@features/asset/asset-ref-scan';
 import type { ArchiveSource } from './pkc3-archive';
 
 export const HTML_FORMAT = 'pkc3-portable';
@@ -39,8 +40,7 @@ export const HTML_VERSION = 1;
 const B64_CHUNK = 3 * 64 * 1024;
 /** 1 バッチで取る本文の目安。 */
 const BODY_BATCH_BYTES = 4 * 1024 * 1024;
-/** 閲覧側と**同じ**書式で本文中の添付参照を拾う(食い違うと片方だけ見える)。 */
-const ASSET_REF_RE = /asset:([A-Za-z0-9_.-]+)/g;
+
 
 export interface HtmlResult {
   blob: Blob;
@@ -291,6 +291,10 @@ export async function writePortableHtml(
   // 添付が丸ごと入る。keep-set は本文走査のついでに作れるので追加コストはほぼ無い
   const used = new Set<string>();
   const nameOf = new Map<string, string>();
+  // ⚠ 候補の key を**先に**取る ── 包含の判定(`scanAssetRefsInto`)は
+  //    「この key が本文に現れるか」で決めるので、候補が要る
+  const allAssets = await src.listAssetMetas();
+  const assetKeys = allAssets.map((a) => a.key).filter((k) => k !== '');
 
   let entryCount = 0;
   let after: { entryOrder: number; lid: string } | undefined;
@@ -309,12 +313,18 @@ export async function writePortableHtml(
         used.add(ref.key);
         if (ref.name !== '' && !nameOf.has(ref.key)) nameOf.set(ref.key, ref.name);
       }
-      // 本文が参照している添付。⚠ 走査は**この 1 本だけ**(閲覧側は差すだけ)
+      // 🔴 本文が参照している添付。**判定は正本 1 本**(P8 段㉑)──
+      //    `features/asset/asset-ref-scan.ts`。直す前はここに自前の狭い正規表現が
+      //    あり、**unescape をしなかった**ので `asset:ast\-abc`(markdown の
+      //    escape 済み宛先。画面では正しく画像が出る)を取りこぼしていた ──
+      //    開くと「添付が入っていません」になる。誤差は false-keep 側だけに出す
       const inBody: string[] = [];
-      ASSET_REF_RE.lastIndex = 0;
-      for (let mm = ASSET_REF_RE.exec(r.body); mm; mm = ASSET_REF_RE.exec(r.body)) {
-        used.add(mm[1]!);
-        if (!inBody.includes(mm[1]!)) inBody.push(mm[1]!);
+      {
+        const remaining = new Set(assetKeys);
+        scanAssetRefsInto(r.body, remaining, (k) => {
+          used.add(k);
+          inBody.push(k);
+        });
       }
       // 🔑 本文は**ここで描く**(閲覧側に parser を積まない)。frontmatter は
       //    本文ではなくメタなので、書出し側が数えた文字数ぶん読み飛ばす
@@ -347,7 +357,6 @@ export async function writePortableHtml(
 
   if (entryCount === 0) throw new Error('書き出せる entry が 1 件もありません');
 
-  const allAssets = await src.listAssetMetas();
   const assetMetas = allAssets.filter((a) => used.has(a.key));
   const skipped = allAssets.length - assetMetas.length;
   if (skipped > 0) {

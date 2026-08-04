@@ -15,6 +15,7 @@
  * `tests/smoke/mermaid.smoke.spec.ts` が実ブラウザで見る。
  */
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import {
   cacheKey,
   DIAGRAM_CACHE_MAX_BYTES,
@@ -111,5 +112,39 @@ describe('図の本来の大きさ', () => {
     expect(svgViewBox('<svg width="100%">')).toBeNull();
     expect(svgViewBox('<svg viewBox="0 0 0 100">')).toBeNull();
     expect(svgViewBox('<svg viewBox="0 0 nope 100">')).toBeNull();
+  });
+});
+
+/**
+ * P8 段㉑: 鍵と中身を**対で**取る。
+ *
+ * 🔴 直す前は `getAll()` と `getAllKeys()` を**別のトランザクション**で取り、
+ * 添字で突き合わせていた。その 2 本の間には待たれていない書込が実在する
+ * (LRU タッチの `put` と、次の図の `put`)── 先に並ぶ鍵が 1 件挿入されれば
+ * 以降の添字が全部ずれて「いま見ている図」を消し、削除が挟まれば
+ * `delete(undefined)` の DataError が呼び側の `.catch()` に握り潰されて
+ * **追い出しが黙って止まる**(= 32MB の上限が無いのと同じ)。
+ *
+ * ⚠ **この壊れ方は競合なので、狙って再現する test が書けない**。だから
+ * 「起きないこと」ではなく「**起こしようがない形になっていること**」を見る ──
+ * カーソルなら 1 トランザクションの中で対のまま取れるので、突き合わせが要らない。
+ * (CLAUDE.md の「検品する側・test する側も変異試験の対象」に対する答えとして、
+ *  実際の追い出しの振る舞いは `tests/smoke/mermaid.smoke.spec.ts` が実 IDB で見る)
+ */
+describe('鍵と中身の取り方', () => {
+  const RAW = readFileSync('src/adapter/ui/render/mermaid-raster.ts', 'utf8');
+  /**
+   * ⚠ **コメントを外してから見る**。禁じたい語は「なぜ禁じたか」の説明にも
+   * 出てくるので、原文のまま `not.toContain` すると**自分の注意書きで落ちる**
+   * (2026-07 に PKC2 で踏んだ「不在の assert が自分のコメントに汚染される」型)。
+   */
+  const CODE = RAW.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+
+  it('🔴 添字で突き合わせない(カーソルで対のまま取る)', () => {
+    expect(CODE, 'カーソルを使っていない').toContain('openCursor()');
+    // 空振り防止 ── 追い出しの本体が在ること自体を先に確かめる
+    expect(CODE).toContain('export async function evictDiagramCache');
+    // 🔴 鍵だけを別に取る呼び出しが復活したら、それは添字突き合わせに戻ったということ
+    expect(CODE, '鍵を別に取っている(添字で突き合わせている)').not.toMatch(/getAll\w*Keys/);
   });
 });

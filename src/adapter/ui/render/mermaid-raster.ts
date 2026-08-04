@@ -426,6 +426,40 @@ export async function renderToPng(key: RasterKey): Promise<Raster> {
 let evicting = false;
 
 /**
+ * 鍵と中身を**対で**舐める(P8 段㉑)。
+ *
+ * 🔴 直す前は `getAll()` と `getAllKeys()` を**別々のトランザクション**で取り、
+ * 添字で突き合わせていた。この 2 本の間には待たれていない書込が実在する
+ * (LRU タッチの `put` と、次の図の `put`)── IDB は key 順で返すので、
+ * **先に並ぶ鍵が 1 件挿入されただけで以降の添字が全部ずれ**、
+ * 「いま見ている図」を古いと誤判定して消す。削除が挟まれば `keys[i]` が
+ * `undefined` になり、`delete(undefined)` の DataError が呼び側の
+ * `.catch(() => undefined)` に握り潰されて**追い出しが黙って止まる**
+ * ── そうなると 32MB の上限は無いのと同じである。
+ * ⚠ カーソルなら 1 トランザクションの中で対のまま取れる(突き合わせが要らない)。
+ */
+function listCacheEntries(
+  d: IDBDatabase,
+): Promise<Array<{ key: IDBValidKey; at: number; size: number }>> {
+  return new Promise((resolve, reject) => {
+    const out: Array<{ key: IDBValidKey; at: number; size: number }> = [];
+    const req = d.transaction(STORE, 'readonly').objectStore(STORE).openCursor();
+    req.onsuccess = () => {
+      const cur = req.result;
+      if (!cur) return resolve(out);
+      const row = cur.value as Partial<CacheRow>;
+      out.push({
+        key: cur.key,
+        at: typeof row.at === 'number' ? row.at : 0,
+        size: typeof row.size === 'number' ? row.size : (row.png?.size ?? 0),
+      });
+      cur.continue();
+    };
+    req.onerror = () => reject(req.error ?? new Error('図キャッシュを読めません'));
+  });
+}
+
+/**
  * **どれを落とすかを決める**(P8 段⑰)。
  *
  * 🔑 IDB を触らない**純関数**にする ── 判定をここへ寄せておけば、
@@ -461,16 +495,7 @@ export async function evictDiagramCache(
   evicting = true;
   try {
     const d = await db();
-    const rows = await tx<unknown[]>(d, 'readonly', (s) => s.getAll());
-    const keys = await tx<IDBValidKey[]>(d, 'readonly', (s) => s.getAllKeys());
-    const items = rows.map((r, i) => {
-      const row = r as Partial<CacheRow>;
-      return {
-        key: keys[i]!,
-        at: typeof row.at === 'number' ? row.at : 0,
-        size: typeof row.size === 'number' ? row.size : (row.png?.size ?? 0),
-      };
-    });
+    const items = await listCacheEntries(d);
     const drop = planEviction(items, maxBytes);
     for (const key of drop) await tx(d, 'readwrite', (s) => s.delete(key));
     return drop.length;

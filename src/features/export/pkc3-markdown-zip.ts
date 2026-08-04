@@ -37,6 +37,7 @@ import { ZipWriter } from './zip-writer';
 import type { ArchiveSource } from './pkc3-archive';
 import { scanLinks, rewriteLinkDests } from '@features/markdown/link-scan';
 import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
+import { scanAssetRefsInto } from '@features/asset/asset-ref-scan';
 
 export const MD_FORMAT = 'pkc3-markdown';
 export const MD_VERSION = 1;
@@ -45,9 +46,12 @@ const ASSET_DIR = 'assets/';
 /** 同じ注意を entry 数ぶん並べない(3000 件の `<li>` を作らせない)。 */
 const WARN_CAP = 10;
 /**
- * **包含**の判定に使う広い走査(段③ 可搬 HTML と同じ書式)。
- * ⚠ 書換の狭い規則と**取り違えない** ── 包含を狭くすると、アプリでは生きている
- * 参照を取りこぼして添付が消える(review H-1)。誤差は false-keep 側だけに出す。
+ * **書き換え後に残ってしまった参照**を数えるための走査。
+ * ⚠ **包含の判定には使わない**(P8 段㉑)── 包含は
+ * `features/asset/asset-ref-scan.ts` の正本 1 本に寄せてある。ここに置いた
+ * 狭い規則を包含にも流用していた結果、escape 済み参照(`asset:ast\-abc`)を
+ * 取りこぼし、**アプリでは見えている添付が書出しでは落ちて**いた。
+ * 「書き換えたのに残っている」を数えるぶんには狭くてよい(誤爆しない側)。
  */
 const ASSET_REF_RE = /asset:([A-Za-z0-9_.-]+)/g;
 
@@ -237,9 +241,6 @@ export async function writeMarkdownZip(
   const pathOf = new Map(
     assetMetas.map((a) => [a.key, ASSET_DIR + names.claim(a.key, extForMime(a.mime))]),
   );
-  /** 本文に現れうる添付 key(frontmatter の中に埋もれた参照も拾う)。 */
-  const KEYISH = /[A-Za-z0-9_.-]*ast-[A-Za-z0-9_.-]+/g;
-
   const w = new ZipWriter();
   const mdNames = new NameAllocator();
   const used = new Set<string>();
@@ -301,12 +302,17 @@ export async function writeMarkdownZip(
         used.add(key);
         return pathOf.get(key);
       };
-      ASSET_REF_RE.lastIndex = 0;
-      for (let mm = ASSET_REF_RE.exec(r.body); mm; mm = ASSET_REF_RE.exec(r.body)) mark(mm[1]!);
-      // frontmatter に埋もれた参照(`attachment.asset_key` / `extra` の JSON)。
-      // ⚠ **原文全体**に掛ける ── parse できなかった frontmatter の中にも参照は居る
-      KEYISH.lastIndex = 0;
-      for (let mm = KEYISH.exec(r.body); mm; mm = KEYISH.exec(r.body)) mark(mm[0]);
+      // 🔴 **包含の判定は正本 1 本**(P8 段㉑)── `features/asset/asset-ref-scan.ts`。
+      //    直す前はここに自前の狭い正規表現が 2 本あり、**unescape をしなかった**。
+      //    描画側(markdown-it)は宛先を unescape してから解決するので、
+      //    `![図](asset:ast\-abc)` は画面では生きているのに書出しでは落ちる ──
+      //    しかも注意欄には「どの本文からも参照されていない」と**事実と逆**が出た。
+      //    ⚠ 誤差の向きは false-keep 側(広く拾う)。書換(`rewriteAssetLinks`)は
+      //      今のとおり狭いまま ── 向きを混ぜるとデータ欠損の側へ反転する
+      {
+        const remaining = new Set([...pathOf.keys()]);
+        scanAssetRefsInto(r.body, remaining, mark);
+      }
 
       // 添付 entry のリンク行に使う参照(こちらは meta が読めた時だけ = best effort)
       const fmRefs: Array<{ key: string; label: string }> = [];
