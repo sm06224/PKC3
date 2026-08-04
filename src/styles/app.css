@@ -852,6 +852,16 @@ select:focus-visible {
 }
 /* ⚠ 触れる / focus したときだけ出す(高密度な面に常時 2 個並べない)。
  *    focus-within を入れないとキーボードだけの user に見えない */
+/* 🔴 **押した結果が見える**(P8 段㉒)。`copy-md-block.ts` は 700ms だけ
+ * `data-pkc-flash` を立てるのに、当てる規則が無く**見た目が一切変わらなかった**
+ * ── 渡ったのか拒否されたのか分からず、user は連打することになる。
+ * ⚠ 色は「渡った」という情報なので、地に色を置かない方針と矛盾しない */
+.pkc-md-rendered [data-pkc-flash] {
+  opacity: 1;
+  background: var(--accent-dim);
+  color: var(--accent-dim-fg);
+  border-color: var(--accent);
+}
 .pkc-md-rendered .pkc-md-block:hover .pkc-render-toggle,
 .pkc-md-rendered .pkc-md-block:hover .pkc-md-copy-btn,
 .pkc-md-rendered .pkc-md-block:focus-within .pkc-render-toggle,
@@ -1304,7 +1314,11 @@ select:focus-visible {
   padding-top: var(--s3);
   border-top: 1px solid var(--border);
 }
-[data-pkc-region='filer-trash'] ul {
+/* ⚠ **履歴も同じ形**(P8 段㉒)── 「一覧 + 復元」という同じ部品なのに、
+ * 履歴側だけ規則が無く**ブラウザ既定の黒丸つき箇条書き**が本文の上に出ていた。
+ * セレクタを共有する ── 2 本目を書くと片方だけ直る */
+[data-pkc-region='filer-trash'] ul,
+[data-pkc-field='history-panel'] ul {
   list-style: none;
   margin: var(--s2) 0 0;
   padding: 0;
@@ -1312,17 +1326,35 @@ select:focus-visible {
   flex-direction: column;
   gap: var(--s1);
 }
-[data-pkc-region='filer-trash'] li {
+[data-pkc-region='filer-trash'] li,
+[data-pkc-field='history-panel'] li {
   display: flex;
   align-items: center;
   gap: var(--s2);
   font-size: 12px;
 }
 
+/* 🔑 **長い題名を畳む規則は 1 か所にまとめる**(P8 段㉒)。
+ * 一覧・ランチャー・表・パンくず ── 面ごとに書くと、次に増えた面でまた抜ける
+ * (実際、段⑱ は表だけ直してパンくずを取りこぼした)。 */
+[data-pkc-region='filer-breadcrumb'] button {
+  min-width: 0;
+  max-width: 12em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-block;
+  line-height: var(--row-h);
+}
+
 /* ── お知らせ / 更新 / ステータス ───────────────────── */
 [data-pkc-region='notices'] {
   padding: var(--s3);
   background: var(--surface-2);
+  /* 🔴 **青天井に伸ばさない**(P8 段㉒)。shell の grid 行は `auto 1fr auto auto auto`
+   * なので、ここが伸びると本体の `1fr` を食う ── 200 件のバックアップを取り込み
+   * 直すと注意が 200 行出て、3 列が数十 px まで潰れ、閉じるまで作業できなかった */
+  max-height: 30vh;
+  overflow: auto;
 }
 [data-pkc-field='notices-title'] {
   font-weight: 600;

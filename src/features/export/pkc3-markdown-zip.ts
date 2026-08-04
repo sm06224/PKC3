@@ -37,14 +37,14 @@ import { ZipWriter } from './zip-writer';
 import type { ArchiveSource } from './pkc3-archive';
 import { scanLinks, rewriteLinkDests } from '@features/markdown/link-scan';
 import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
+import { createWarnCollector } from './warn-cap';
 import { scanAssetRefsInto } from '@features/asset/asset-ref-scan';
 
 export const MD_FORMAT = 'pkc3-markdown';
 export const MD_VERSION = 1;
 const BODY_BATCH_BYTES = 4 * 1024 * 1024;
 const ASSET_DIR = 'assets/';
-/** 同じ注意を entry 数ぶん並べない(3000 件の `<li>` を作らせない)。 */
-const WARN_CAP = 10;
+
 /**
  * **書き換え後に残ってしまった参照**を数えるための走査。
  * ⚠ **包含の判定には使わない**(P8 段㉑)── 包含は
@@ -219,13 +219,9 @@ export async function writeMarkdownZip(
    * ⚠ 畳んだ件数を言うとき、**内部の bucket 名を user に見せない**
    * (`overwrite-title` のような英字スラグが日本語 UI に出ていた ── review M-1)。
    */
-  const counted = new Map<string, { n: number; label: string }>();
-  const warnCapped = (bucket: string, label: string, message: string): void => {
-    const c = counted.get(bucket) ?? { n: 0, label };
-    c.n++;
-    counted.set(bucket, c);
-    if (c.n <= WARN_CAP) warnings.push(message);
-  };
+  // 🔑 規則は `warn-cap.ts` の 1 本(アーカイブ側と共有 ── P8 段㉒)
+  const warn = createWarnCollector(warnings);
+  const warnCapped = warn.add;
 
   const metas = await src.listEntryMetas();
   // ⚠ 断るなら読み出しの前に断る(捨てるためだけに store を舐めない)
@@ -416,9 +412,7 @@ export async function writeMarkdownZip(
     warnings.push(`履歴を持つノート ${revisionEntries} 件の履歴は落ちます`);
   }
   // 上限で畳んだぶんを最後に言う(黙って減らすと「全部出た」に見える)
-  for (const c of counted.values()) {
-    if (c.n > WARN_CAP) warnings.push(`${c.label}はほか ${c.n - WARN_CAP} 件あります`);
-  }
+  warn.finish();
 
   await w.add('manifest.json', [
     JSON.stringify(
