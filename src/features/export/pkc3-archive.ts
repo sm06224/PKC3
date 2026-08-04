@@ -22,6 +22,7 @@
  */
 import { ZipWriter, type ZipPart } from './zip-writer';
 import { readZipDirectory, readZipText, ZipReadError } from '../import/zip-reader';
+import { createWarnCollector } from './warn-cap';
 
 export const ARCHIVE_FORMAT = 'pkc3-archive';
 /**
@@ -168,6 +169,8 @@ const j = (v: unknown): string => JSON.stringify(v);
  */
 export async function writeArchive(src: ArchiveSource, exportedAt: string): Promise<ArchiveResult> {
   const warnings: string[] = [];
+  // 🔑 同種の注意は上限まで(規則は `warn-cap.ts` の 1 本 ── P8 段㉒)
+  const warn = createWarnCollector(warnings);
   const metas = await src.listEntryMetas();
   // ⚠ 断るなら**読み出しの前**に断る。末尾の判定だけだと、0 件でも本文・履歴を
   // 舐めて全添付を ZIP に書いてから投げる ── 捨てるためだけの仕事(review L2)
@@ -190,7 +193,7 @@ export async function writeArchive(src: ArchiveSource, exportedAt: string): Prom
       const m = metaOf.get(r.lid);
       if (!m) {
         // 本文はあるが meta が無い = 書出し中に消えた ── 黙って落とさない
-        warnings.push(`本文はあるが一覧に無い entry を飛ばしました: ${r.lid}`);
+        warn.add('orphan-body', '一覧に無い entry の注意', `本文はあるが一覧に無い entry を飛ばしました: ${r.lid}`);
         continue;
       }
       const e: ArchiveEntry = {
@@ -298,7 +301,7 @@ export async function writeArchive(src: ArchiveSource, exportedAt: string): Prom
     const blob = await src.getAssetBlob(a.key);
     if (!blob) {
       // 参照はあるが bytes が無い(GC の途中失敗など)── 参照は温存して言う
-      warnings.push(`添付の中身が見つかりませんでした: ${a.key}`);
+      warn.add('missing-asset', '中身の見つからない添付', `添付の中身が見つかりませんでした: ${a.key}`);
       continue;
     }
     await w.add(`${ASSET_PREFIX}${a.key}`, [blob]); // ⚠ Blob をそのまま(コピーしない)
@@ -310,6 +313,7 @@ export async function writeArchive(src: ArchiveSource, exportedAt: string): Prom
     throw new Error('書き出せる entry が 1 件もありません');
   }
 
+  warn.finish();
   return {
     blob: w.finish(),
     warnings,
@@ -337,6 +341,8 @@ export interface Pkc3Archive {
 export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
   const dir = await readZipDirectory(zip);
   const warnings: string[] = [];
+  // 🔑 同種の注意は上限まで(規則は `warn-cap.ts` の 1 本 ── P8 段㉒)
+  const warn = createWarnCollector(warnings);
 
   const only = (name: string): import('../import/zip-reader').ZipEntry => {
     const hits = dir.filter((e) => e.name === name);
@@ -389,7 +395,7 @@ export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
     if (e.isDirectory || !e.name.startsWith(ASSET_PREFIX)) continue;
     const key = e.name.slice(ASSET_PREFIX.length);
     if (key === '' || key.includes('/')) {
-      warnings.push(`assets/ の中の想定外のファイルを無視しました: ${e.name}`);
+      warn.add('stray-file', '想定外のファイル', `assets/ の中の想定外のファイルを無視しました: ${e.name}`);
       continue;
     }
     if (assetSources.has(key)) throw new ZipReadError(`asset key が重複しています: ${key}`);
@@ -412,7 +418,7 @@ export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
   // meta 数ではなく **bytes の数**で照合する
   for (const a of c.assets ?? []) {
     if (!assetSources.has(a.key)) {
-      warnings.push(`添付の中身がアーカイブに入っていません: ${a.key}`);
+      warn.add('absent-asset', 'アーカイブに入っていない添付', `添付の中身がアーカイブに入っていません: ${a.key}`);
     }
   }
 
@@ -422,6 +428,7 @@ export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
     version < 2 ? { ...r, kind: 'full' } : r,
   );
 
+  warn.finish();
   return {
     manifest,
     entries: c.entries,
@@ -481,6 +488,7 @@ export function restoreArchive(
   warnings: string[];
 } {
   const warnings = [...archive.warnings];
+  const warn = createWarnCollector(warnings);
   const taken = new Set(opts.existingLids);
   const lidMap = new Map<string, string>();
   // 🔴 **アーカイブ内の lid 重複を先に言う**(review H-3)── 後勝ちで lidMap が
@@ -490,7 +498,7 @@ export function restoreArchive(
   const seenLid = new Set<string>();
   for (const e of archive.entries) {
     if (seenLid.has(e.lid)) {
-      warnings.push(`アーカイブの中で lid が重複しています: ${e.lid}(別の entry として取り込みます)`);
+      warn.add('dup-lid', 'アーカイブ内で重複した lid', `アーカイブの中で lid が重複しています: ${e.lid}(別の entry として取り込みます)`);
     }
     seenLid.add(e.lid);
   }
@@ -499,7 +507,7 @@ export function restoreArchive(
     let lid = e.lid;
     if (lid === '' || taken.has(lid)) {
       const fresh = opts.genLid();
-      warnings.push(`lid が既存と衝突したので付け替えました: ${e.lid || '(空)'} → ${fresh}`);
+      warn.add('lid-clash', '付け替えた lid', `lid が既存と衝突したので付け替えました: ${e.lid || '(空)'} → ${fresh}`);
       lid = fresh;
     }
     taken.add(lid);
@@ -522,7 +530,7 @@ export function restoreArchive(
     const to = lidMap.get(r.toLid);
     if (!from || !to) {
       // 端点が居ない = アーカイブが壊れている ── 黙って落とさない
-      warnings.push(`端点の無い関連を除きました: ${r.id}`);
+      warn.add('dangling-relation', '端点の無い関連', `端点の無い関連を除きました: ${r.id}`);
       continue;
     }
     let id = r.id;
@@ -574,5 +582,6 @@ export function restoreArchive(
     mime: mimeOf.get(key) ?? 'application/octet-stream',
   }));
 
+  warn.finish();
   return { entries, relations, assets, revisionChains, warnings };
 }
