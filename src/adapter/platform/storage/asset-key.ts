@@ -57,9 +57,21 @@ export interface AssetIdentity {
 export async function identifyBytes(
   bytes: Uint8Array<ArrayBuffer>,
 ): Promise<AssetIdentity> {
-  if (bytes.byteLength > HASH_MAX_BYTES) return { key: generateAssetKey(), hash: null };
-  const hash = await hexDigest(bytes);
-  return { key: `${PREFIX}${hash}`, hash };
+  if (bytes.byteLength > HASH_MAX_BYTES) return assetKeyFromHash(null);
+  return assetKeyFromHash(await hexDigest(bytes));
+}
+
+/**
+ * **hash から key を決める規則**(P8 段⑮)。
+ *
+ * 🔴 ここを 1 本にする。ハッシュを取る場所がワーカーへ移ったので、
+ * 「hash → key」の規則が**メインとワーカーの 2 か所に生える**ところだった
+ * ── 同じ判定が 2 か所に生えたら規則を 1 つに寄せる、という repo の規律。
+ * ⚠ `hash === null`(閾値超でハッシュを取っていない)は**採番へ落とす**。
+ * その 1 件だけ dedupe されない、という意味も 1 か所に閉じる。
+ */
+export function assetKeyFromHash(hash: string | null): AssetIdentity {
+  return hash === null ? { key: generateAssetKey(), hash: null } : { key: `${PREFIX}${hash}`, hash };
 }
 
 /**

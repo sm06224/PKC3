@@ -22,6 +22,7 @@ import { createUpdatePrompt } from '@adapter/ui/render/update-card';
 import { applyTheme, chooseTheme, initialTheme, isTheme } from '@adapter/ui/render/theme';
 import { launchTile } from '@adapter/ui/launch-tile';
 import { readAppStorage } from '@adapter/platform/app-storage';
+import { AssetClient } from '@adapter/platform/asset/asset-client';
 import { watchForUpdate, type UpdateContainer } from '@adapter/platform/sw/update-prompt';
 import { reloadOnPrebootSwap, type PrebootTarget } from '@adapter/platform/sw/preboot-swap';
 import { InspectorRenderer } from '@adapter/ui/render/inspector';
@@ -269,6 +270,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       else await exportArchive(dispatcher, deps, kind);
     });
 
+  /**
+   * 添付を展開するワーカーの口(P8 段⑮)。
+   * ⚠ **1 つを使い回す** ── 取込のたびに作ると、アイドル kill の意味が消える。
+   */
+  const assets = new AssetClient();
   const importDeps: ImportDeps = {
       // ⚠ 生存 entry だけでは足りない ── ゴミ箱の lid(entries に居ないが
       // revisions を持つ)と衝突すると、その item がゴミ箱から消え、
@@ -289,6 +295,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       },
       genLid: generateLid,
       genAssetKey: generateAssetKey,
+      /**
+       * 🔑 添付の**展開とハッシュはワーカーへ**(P8 段⑮。不可侵指示
+       * 「基本的に重い処理はワーカーにしてください」)。
+       * ⚠ `WorkerLease` が遅延起動・バッファ・アイドル kill を持つので、
+       * ここは口を渡すだけ ── 取込を一度もしない user にワーカーは作られない。
+       */
+      processAsset: (view, gzipped) => assets.process(view, gzipped),
       genRelationId: () => `rel-${crypto.randomUUID()}`,
       bulkUpsertEntries: async (entries) => {
         await client.request({ op: 'bulkUpsertEntries', cid: DEFAULT_CID, entries });

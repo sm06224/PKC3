@@ -81,6 +81,20 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
   await clickReal(page, '[data-pkc-entry="a1"]'); // 衝突が無いので lid は保たれる
   await expectImageRendered(page, '[data-pkc-field="attachment-media"]');
 
+  // 🔴 P8 段⑮: 添付の**展開とハッシュはワーカーがやった**
+  //    (user 指示 2026-08-03 不可侵「基本的に重い処理はワーカーにしてください」)。
+  //    ⚠ 観測点は「画像が出た」ではない ── 同期経路に落ちても画像は出るので、
+  //    **どこで処理されたか**を見る。設定のジョブ表に `asset` の車線が立つ
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await expect(
+    page.locator('[data-pkc-lane="asset"]'),
+    '添付の展開がメインスレッドで走っている(ワーカーへ出ていない)',
+  ).toHaveCount(1);
+  // ⚠ 「車線が在る」で止めない ── **実際に処理した件数**まで見る
+  //    (spawn しただけで 1 件も流れていない実装が通ってしまう)
+  await expect(page.locator('[data-pkc-lane="asset"] td').nth(4)).not.toHaveText('0');
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+
   // ── 取り込んだ asset は「参照されている」と実 sqlite 走査で判定される ──
   // (旧 key のまま body に残っていたら、ここで未参照として現れる)
   const dialogMsg = new Promise<string>((resolve) => {
