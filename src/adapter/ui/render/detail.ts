@@ -285,11 +285,15 @@ export class DetailRenderer {
       if (applied.inserted.length > 0) {
         void this.hydrateAssetRefs(applied.inserted, this.hydrateToken);
         this.mermaidScopes.push(hydrateMermaid(applied.inserted));
-        pruneScopes(this.mermaidScopes);
       }
       // 🔴 **差し替えで画面から消えた `<img>` のぶんを返す**(P8 段⑲)。
       //    ⚠ `inserted.length > 0` の中に入れてはいけない ── 塊が**消えるだけ**
       //    (差し替えではなく削除)のときは inserted が空で、そこが一番溜まる
+      // 🔴 図の側も同じ(P8 段㉗)── 段⑲ で `pruneLends` をここへ出しておきながら、
+      //    **1 行上の `pruneScopes` は `if` の中に残していた**。図の塊を消すだけの
+      //    編集(図を削る)では inserted が空なので、その図の ObjectURL は
+      //    次に何かが挿入されるまで返らない。同じ穴を隣同士で片方だけ塞いでいた。
+      pruneScopes(this.mermaidScopes);
       this.pruneLends();
       this.restoreScroll();
     } else {
@@ -438,13 +442,13 @@ export class DetailRenderer {
         const applied = applyBlocks(preview, html, shown);
         shown = applied.view;
         // 🔑 **新しく入った所だけ**図を面倒みる(触っていない図はそのまま)
-        if (applied.inserted.length > 0) {
-          scopes.push(hydrateMermaid(applied.inserted));
-          // 🔴 **積もらせない**(P8 段⑰。レビュー H-5)── 静穏 tick ごとに塊が
-          //    増え、画面に無い PNG の URL と観測器が編集中ずっと生きていた
-          //    (実測: 5 tick で createObjectURL 5 / revokeObjectURL 0)
-          pruneScopes(scopes);
-        }
+        if (applied.inserted.length > 0) scopes.push(hydrateMermaid(applied.inserted));
+        // 🔴 **積もらせない**(P8 段⑰。レビュー H-5)── 静穏 tick ごとに塊が
+        //    増え、画面に無い PNG の URL と観測器が編集中ずっと生きていた
+        //    (実測: 5 tick で createObjectURL 5 / revokeObjectURL 0)
+        // ⚠ `inserted.length > 0` の**外**で呼ぶ(段㉗)── 図を削る編集では
+        //    inserted が空になり、消えた図の URL が返らないまま残る
+        pruneScopes(scopes);
       },
       (e) => {
         // 🔴 **白紙にしない**。理由を出して原文だけは読めるようにする

@@ -285,3 +285,81 @@ test('🔴 図を打ち替えても、生成した URL が積もらない', asyn
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * P8 段㉗: 🔴 **図を「消すだけ」の編集でも生成物が返る**。
+ *
+ * 🔴 段⑲ は `pruneLends()` を `if (applied.inserted.length > 0)` の**外**へ出し、
+ * 「塊が**消えるだけ**のときは inserted が空で、そこが一番溜まる」と
+ * コメントまで書いた。にもかかわらず、**1 行上の `pruneScopes` は `if` の中に
+ * 残っていた** ── 同じ穴を隣同士で片方だけ塞いでいた。
+ *
+ * 壊れ方: 図を書いてから**図だけ消す**(本文は残す)と、`inserted` は空なので
+ * `pruneScopes` が呼ばれず、消えた図の PNG の ObjectURL が編集を抜けるまで
+ * 返らない。図をいくつも書いては消す推敲で、そのぶんだけ積む。
+ *
+ * ⚠ 観測点は上の test と同じく **残高**(作った数 - 返した数)。
+ * ⚠ 上の test は毎回**別の図に差し替える**ので `inserted` が常に非ゼロ ──
+ *   この経路は 1 度も通っていなかった(だから穴が残っていた)。
+ */
+test('🔴 図を消すだけの編集でも、生成した URL が返る', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.addInitScript(() => {
+    const w = window as unknown as { __urls?: { made: number; freed: number } };
+    w.__urls = { made: 0, freed: 0 };
+    const make = URL.createObjectURL.bind(URL);
+    const free = URL.revokeObjectURL.bind(URL);
+    URL.createObjectURL = (b: Blob | MediaSource): string => {
+      w.__urls!.made += 1;
+      return make(b);
+    };
+    URL.revokeObjectURL = (u: string): void => {
+      w.__urls!.freed += 1;
+      free(u);
+    };
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  const preview = page.locator('[data-pkc-region="editor-preview"]');
+  const type = async (text: string): Promise<void> => {
+    await ta.evaluate((el, t) => {
+      const x = el as HTMLTextAreaElement;
+      x.value = t;
+      x.dispatchEvent(new Event('input', { bubbles: true }));
+    }, text);
+  };
+
+  // ① 図を書く → 焼けて `<img>` が貼られる(= ここで URL を 1 本作る)
+  await type('```mermaid\ngraph TD\n  A["始め"]-->B["終わり"]\n```\n\nあとがき\n');
+  await expect(preview.locator('[data-pkc-field="mermaid-image"]')).toHaveAttribute(
+    'src',
+    /^blob:/,
+    { timeout: 30000 },
+  );
+  const made = await page.evaluate(
+    () => (window as unknown as { __urls: { made: number; freed: number } }).__urls.made,
+  );
+  // 前提: 焼けている(ここが 0 なら以降は何も見ていない)
+  expect(made, '図が焼かれていない').toBeGreaterThan(0);
+
+  // ② 🔴 **図だけ消す**。本文は残すので、塊は「消えるだけ」になる
+  await type('あとがき\n');
+  await expect(preview.locator('[data-pkc-mermaid-src]')).toHaveCount(0, { timeout: 30000 });
+
+  // ③ 消えた図のぶんが**返っている**(直す前は返らなかった)
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => {
+          const u = (window as unknown as { __urls: { made: number; freed: number } }).__urls;
+          return u.made - u.freed;
+        }),
+      { timeout: 15000, message: '図を消したのに URL が返っていない' },
+    )
+    .toBe(0);
+
+  expect(errors).toEqual([]);
+});
