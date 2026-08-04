@@ -24,6 +24,25 @@ function openDb(): Promise<IDBDatabase> {
   });
 }
 
+/**
+ * 1 トランザクションを回す。
+ *
+ * 🔴 **書きは `oncomplete` まで待つ**(P8 段㉔)。IDB の request success は
+ * **commit の前**に起きるので、`onsuccess` で resolve すると
+ * 「書けた」と言った直後に tx が abort しうる ── quota で実際に起きる。
+ *
+ * 直す前の壊れ方: 空きが少ない状態で大きな `.pkc2.zip` を取り込むと、
+ * `putBlob` は次々 resolve して meta 行と entry 行が sqlite に確定し、
+ * IDB 側だけが commit 時に `QuotaExceededError` で abort する。取込は
+ * 「取込完了: N 件」と成功を名乗り、一覧には添付ノートが並ぶ。開くと
+ * 「asset が見つかりません」しか出ず、参照は生きているので整理でも回収されない
+ * ── **中身の無い添付ノートが恒久的に残る**。
+ * ⚠ 取込側は「bytes を先に、参照を後に」と書いている ── その順序が買うはずの
+ * 保証が、ここで成立していなかった。
+ *
+ * ⚠ 読みは `onsuccess` のままでよい(値はそこで確定していて、commit を待つと
+ * 1 往復ぶん遅くなるだけ)。
+ */
 function tx<T>(
   db: IDBDatabase,
   mode: IDBTransactionMode,
@@ -32,8 +51,21 @@ function tx<T>(
   return new Promise((resolve, reject) => {
     const t = db.transaction(STORE, mode);
     const req = run(t.objectStore(STORE));
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error ?? new Error('idb request failed'));
+    const fail = (e: unknown): void =>
+      reject(e instanceof Error ? e : new Error('idb request failed'));
+    if (mode === 'readonly') {
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => fail(req.error);
+      return;
+    }
+    // 書きは **commit を待つ**。⚠ `req.onsuccess` では早すぎる
+    let result: T;
+    req.onsuccess = () => {
+      result = req.result;
+    };
+    t.oncomplete = () => resolve(result);
+    t.onerror = () => fail(t.error);
+    t.onabort = () => fail(t.error ?? new Error('idb transaction aborted'));
   });
 }
 

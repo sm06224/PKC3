@@ -97,7 +97,15 @@ export class AssetClient {
     return this.lease.run<HashResult>(job);
   }
 
-  /** 面を畳むときに(取込が終わったら畳む ── 常駐させない)。 */
+  /**
+   * 明示的に畳む。
+   *
+   * ⚠ **常駐を返すのはアイドル kill の仕事**(`WorkerLease` が 15 秒で terminate)。
+   * ここは test / 面の破棄用の口であって、アプリの通常経路からは呼ばれない
+   * ── かつてコメントが「取込が終わったら畳む」と書いていたが、
+   * **呼び出し元は 0 件**だった(P8 段㉔ で実態に合わせた)。
+   * 生きているかは設定のジョブ表(`alive`)で見える。
+   */
   dispose(): void {
     this.lease?.dispose();
   }
