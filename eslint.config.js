@@ -24,6 +24,9 @@ export default tseslint.config(
         MessageEvent: 'readonly',
         URL: 'readonly',
         Response: 'readonly',
+        // ⚠ 計器(`tests/bench/*.mjs`)は page.evaluate の中で
+        //    ブラウザ側の API を使う ── そちらの global もここに要る
+        PerformanceObserver: 'readonly',
       },
     },
   },
