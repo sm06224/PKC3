@@ -207,4 +207,6 @@ LRU の「最後に使った時刻」を更新するのに行ごと `put` して
 
 ## 未測定(次にやるなら)
 
-- **タブを跨いだ常駐**(writer lease の待機側)
+- ~~**タブを跨いだ常駐**(writer lease の待機側)~~ → 段㉙ で測った
+  (`docs/development/p8-steady-state-measurement-2026-08.md` の結果 ③)。
+  待機側はヒープ 3.3 → 3.4MB / DOM 12 ノードで横ばい、昇格も実データで通る
