@@ -9,6 +9,8 @@
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import { extractMeta } from '@features/flavor';
 import { withTodoStatus } from '@features/flavor/todo-flavor';
+import { appendBlock } from '@features/markdown/text-ops';
+import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
 import { buildTiles, type TileSource } from '@features/launcher/tiles';
 import type { Dispatcher } from './dispatcher';
 
@@ -172,6 +174,65 @@ export function connectStoreEffects(
           } catch (e) {
             if (!disposed)
               dispatcher.dispatch({ type: 'OP_FAILED', error: String(e) });
+          }
+        });
+        break;
+      case 'REQUEST_TILE_UPDATE':
+        enqueue(async () => {
+          if (disposed) return;
+          // ⚠ **どの出口でもロックを解く**(P8 段⑯)── 握ったままにすると
+          //    user は二度と設定を変えられず、しかも理由が分からない
+          const fail = (): void => {
+            if (!disposed)
+              dispatcher.dispatch({ type: 'APP_TILE_SAVED', lid: ev.lid, gen: ev.gen, body: null });
+          };
+          try {
+            // 🔴 **disk から読んで書き戻す**(P8 段⑭)。state の body を使わない ──
+            //    添付は開いていないことのほうが多く、開いていても古いことがある
+            const body = await store.getBody(ev.lid);
+            if (disposed) return;
+            if (body === null) {
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: 'アプリの設定を変えられません(ノートが見つかりません)',
+              });
+              return fail();
+            }
+            // ⚠ **原文 splice**で書き換える ── 全文を組み直すと、本文・他の key・
+            //    空行が byte 単位で変わる(この repo の規律)
+            const next = spliceFrontmatterKeys(body, ev.updates);
+            if (next === body) return fail(); // 変わらないなら書かない(ロックは解く)
+            const ext = extractMeta(ev.archetype, next);
+            await store.persistEntry({
+              lid: ev.lid,
+              title: ev.title,
+              archetype: ev.archetype,
+              body: next,
+              entryOrder: ev.entryOrder,
+              status: ext.status,
+              date: ext.date,
+              archived: ext.archived,
+            });
+            if (disposed) return;
+            // ⚠ 書いたら**その場で読み直す** ── 読み直さないと、押した結果が
+            //    ランチャーに出るのが「次にタブを開き直したとき」になる
+            dispatcher.dispatch({ type: 'APP_TILE_SAVED', lid: ev.lid, gen: ev.gen, body: next });
+            const titles = new Map(ev.entries.map((e) => [e.lid, e.title]));
+            const rows = await store.getBodies(ev.entries.map((e) => e.lid));
+            if (disposed) return;
+            const sources: TileSource[] = [];
+            for (const row of rows) {
+              const title = titles.get(row.lid);
+              if (title !== undefined) sources.push({ lid: row.lid, title, body: row.body });
+            }
+            dispatcher.dispatch({ type: 'LAUNCHER_TILES_LOADED', tiles: buildTiles(sources) });
+          } catch (e) {
+            if (!disposed)
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: `アプリの設定を保存できませんでした: ${String(e)}`,
+              });
+            fail();
           }
         });
         break;
@@ -393,6 +454,54 @@ export function connectStoreEffects(
                 type: 'OP_FAILED',
                 error: `ゴミ箱を空にできませんでした: ${String(e)}`,
               });
+          }
+        });
+        break;
+      /**
+       * 🔑 **追記**(P8 段⑧)。read→rewrite→write を 1 op として直列 queue に載せる
+       * ── 同一 lid の先行 persist の後に読むことが保証される(基底の取り違え防止)。
+       *
+       * 🔴 **本文は event に載っていない**。ここで disk から読み直す ── 画面が持つ
+       * 本文を基底にすると、別経路の書込(toggle / 復元 / 別タブ)を巻き戻す。
+       * ⚠ **失敗しても必ず `APPEND_FAILED` を出す**(ロックを解く)。出さないと
+       * user は永久に追記できなくなり、理由も分からない。
+       */
+      case 'REQUEST_APPEND':
+        enqueue(async () => {
+          if (disposed) return;
+          const fail = (error: string): void => {
+            if (disposed) return;
+            dispatcher.dispatch({ type: 'APPEND_FAILED', lid: ev.lid, gen: ev.gen, error });
+          };
+          try {
+            const body = await store.getBody(ev.lid);
+            if (disposed) return;
+            if (body === null) return fail(`追記できません(ノートが見つかりません: ${ev.lid})`);
+            const newBody = appendBlock(body, ev.heading, ev.text);
+            if (newBody === body) return fail('追記する内容がありません');
+            const ext = extractMeta(ev.archetype, newBody);
+            await store.persistEntry({
+              lid: ev.lid,
+              title: ev.title,
+              archetype: ev.archetype,
+              body: newBody,
+              entryOrder: ev.entryOrder,
+              status: ext.status,
+              date: ext.date,
+              archived: ext.archived,
+            });
+            if (disposed) return;
+            dispatcher.dispatch({
+              type: 'ENTRY_APPENDED',
+              lid: ev.lid,
+              gen: ev.gen,
+              body: newBody,
+              status: ext.status,
+              date: ext.date,
+              archived: ext.archived,
+            });
+          } catch (e) {
+            fail(`追記を保存できませんでした: ${String(e)}`);
           }
         });
         break;

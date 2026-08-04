@@ -14,12 +14,18 @@
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import type { ViewMode } from '@adapter/state/app-state';
+import { archetypeLabel } from '@adapter/ui/render/sidebar';
+import { applyFormat, type FormatOp } from '@features/markdown/text-ops';
+import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
 import { handleCopyMdBlock } from './copy-md-block';
 
 type ActionHandler = (
   dispatcher: Dispatcher,
   target: HTMLElement,
   services: BinderServices,
+  /** 束ねた root。⚠ **押したボタンから辿れない**ときに使う ── 追記は
+   *  START_EDIT で detail を描き直すので、target は既に外れている */
+  root: HTMLElement,
 ) => void;
 
 const VIEW_MODES: ReadonlySet<string> = new Set([
@@ -28,16 +34,10 @@ const VIEW_MODES: ReadonlySet<string> = new Set([
   'kanban',
   'filer',
   'launcher',
+  'settings',
 ]);
 
 /** 既定 title の種別ラベル(連番は同 archetype の現在数 + 1)。 */
-const ARCHETYPE_LABELS: Record<string, string> = {
-  text: 'ノート',
-  todo: 'Todo',
-  textlog: 'ログ',
-  spreadsheet: 'シート',
-  folder: 'フォルダ',
-};
 
 /** lid: epoch(base36)+ セッション内単調 counter(PKC2 と同系の形式)。 */
 let lidCounter = 0;
@@ -61,6 +61,8 @@ export interface BinderServices {
   openTile?(lid: string): void;
   /** 配色を切り替える(P7b 段⑨c)。⚠ user の好みで、flag でも container でもない。 */
   setTheme?(theme: string): void;
+  /** 左の列の探し方(一覧 / フォルダ / アプリ)。⚠ 中央のビューとは別の軸(P8 段⑤)。 */
+  setBrowse?(mode: string): void;
   /** 新しい版に交代する(P7 段⑤)。⚠ 交代を頼むだけ ── 再読込は交代後。 */
   applyUpdate?(): void;
   /** 更新の案内を見送る(次に開いたときに再び出る)。 */
@@ -74,6 +76,15 @@ export interface BinderServices {
   /** このノートだけをアーカイブとして書き出す(P6f)。 */
   exportEntry?(lid: string): void;
   /**
+   * 図 1 枚をベクタ(`.svg`)で書き出す(P8 段⑦)。
+   * ⚠ 画面に置くのは PNG、書き出すのは SVG(user 指示 2026-08-03)。
+   * @param index 同じ本文の中で**何枚目か**(0 始まり ── 名前は 1 始まりにする)
+   */
+  /** ⚠ **Promise を返す** ── 押した側が「終わった」を知らないと待ちを出せない。 */
+  exportDiagram?(source: string, index: number): void | Promise<void>;
+  /** 文字列をクリップボードへ(P8 段⑱)。⚠ 失敗も可視で終える。 */
+  copyText?(text: string): void;
+  /**
    * 添付 gate(書出し / 取込 / 整理)が実行中か。
    * ⚠ **破壊的操作を止めるために要る**(P6f review M-2)── 「書き出す」と「削除」を
    * 隣に並べた以上、走査中に消せてしまうと **user は書き出したつもりでファイルが
@@ -86,7 +97,7 @@ export interface BinderServices {
 }
 
 function defaultTitle(dispatcher: Dispatcher, archetype: string): string {
-  const label = ARCHETYPE_LABELS[archetype] ?? archetype;
+  const label = archetypeLabel(archetype);
   let n = 0;
   for (const m of dispatcher.getState().entryMetas.values()) {
     if (m.archetype === archetype) n += 1;
@@ -102,14 +113,11 @@ function defaultTitle(dispatcher: Dispatcher, archetype: string): string {
  * entry ごと消えて入力が失われる非対称の解消(P3-7a review 中)。
  * 非 fresh の cancel は破棄の意味論どおり title input も捨てる。
  */
-function cancelFromEditor(dispatcher: Dispatcher, from: HTMLElement): void {
+function cancelFromEditor(dispatcher: Dispatcher, root: HTMLElement): void {
   const s = dispatcher.getState();
   const lid = s.openBody?.lid;
   if (lid && s.freshLid === lid) {
-    const scope = from.closest<HTMLElement>('[data-pkc-region="detail"]');
-    const input = scope?.querySelector<HTMLInputElement>(
-      '[data-pkc-field="editor-title"]',
-    );
+    const input = editorTitle(root);
     const current = s.entryMetas.get(lid)?.title ?? '';
     if (input && input.value.trim() !== '' && input.value.trim() !== current) {
       // RENAME が fresh を解除する ── 直後の CANCEL は entry を残す
@@ -119,19 +127,104 @@ function cancelFromEditor(dispatcher: Dispatcher, from: HTMLElement): void {
   dispatcher.dispatch({ type: 'CANCEL_EDIT' });
 }
 
+/**
+ * いま画面に出ている題名欄。
+ *
+ * 🔴 **root から引く**(P8 段⑲。押したボタンから `closest` で辿らない)。
+ * 直す前は `from.closest('[data-pkc-region="detail"]')` だったが、
+ * 追記欄(`append` region)の **保存して解放 / 編集を破棄** は detail の
+ * **兄弟**なので `closest` が null を返し、題名欄が 1 度も見つからなかった
+ * ── その出口から保存すると**題名の変更が丸ごと捨てられて**いた。
+ * 同じ「保存」なのに押す場所で結果が違う、という壊れ方である。
+ * ⚠ 入口は 1 つに寄せる(`editorBody` と同じ引き方)。
+ */
+function editorTitle(root: HTMLElement): HTMLInputElement | null {
+  return root.querySelector<HTMLInputElement>(
+    '[data-pkc-region="detail"] [data-pkc-field="editor-title"]',
+  );
+}
+
 /** editor 表示中なら title input の現在値で RENAME を先行 dispatch する
  *  (楽観 meta 更新 → 直後の COMMIT_EDIT が新 title で行を組む。
  *  input が見つからなければ何もしない = 既存 title 維持 ── PKC2 の
- *  「title が消える」bug の防波堤と同じ向き)。
- *  query は detail region にスコープする(document 全域は他 root を拾いうる)。 */
-function renameFromEditorInput(dispatcher: Dispatcher, from: HTMLElement): void {
-  const scope = from.closest<HTMLElement>('[data-pkc-region="detail"]');
-  const input = scope?.querySelector<HTMLInputElement>(
-    '[data-pkc-field="editor-title"]',
-  );
+ *  「title が消える」bug の防波堤と同じ向き)。 */
+function renameFromEditorInput(dispatcher: Dispatcher, root: HTMLElement): void {
+  const input = editorTitle(root);
   const lid = dispatcher.getState().openBody?.lid;
   if (input && lid)
     dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title: input.value });
+}
+
+/** いま画面に出ている編集欄(root にスコープする ── document 全域は他 root を拾う)。 */
+function editorBody(root: HTMLElement): HTMLTextAreaElement | null {
+  return root.querySelector<HTMLTextAreaElement>(
+    '[data-pkc-region="detail"] [data-pkc-field="editor-body"]',
+  );
+}
+
+/**
+ * 書き換えた本文を編集欄へ戻す。
+ *
+ * 🔴 **`input` を自分で撃つ**。ここで state へ直に `UPDATE_OPEN_BODY` を送ると、
+ * 経路が 2 本になる(binder の delegation と、この関数)── 片方を壊しても
+ * もう片方に救われて test が緑のまま通るので、**入口は 1 つに寄せる**。
+ * プレビューも textarea の `input` で駆動しているので、これ 1 発で state と
+ * 画面の両方が追いつく。
+ *
+ * ⚠ `value` の直代入はブラウザの取り消し履歴(Ctrl+Z)を捨てる。書式パネルは
+ * 「保存 / キャンセル」で丸ごと戻せるので、ここでは受け入れる ── 取り消しを
+ * 残すには `execCommand('insertText')` が要るが、経路が 2 本になる。
+ */
+function writeBack(
+  ta: HTMLTextAreaElement,
+  next: { text: string; start: number; end: number },
+  toBottom = false,
+): void {
+  ta.value = next.text;
+  ta.setSelectionRange(next.start, next.end);
+  ta.focus();
+  // 追記はカーソルが末尾 ── 見えていないと「押しても何も起きない」に見える
+  if (toBottom) ta.scrollTop = ta.scrollHeight;
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+/**
+ * 🔴 **書出し / 取込の実行中は、本文を書き換えさせない**(P8 段㉑)。
+ *
+ * 直す前この判定は `delete-entry` **1 か所だけ**にあった。ところが書出しは
+ * 本文を 4MB ずつページングし(`await` を跨ぐ)、そのあとで履歴の鎖を引く ──
+ * バッチの隙間に保存が割り込むと、**同じノートの本文は旧版、鎖の頭は新 tip 基準**
+ * という噛み合わないアーカイブができる。取り込み直すと検査が発火して
+ * 「履歴が噛み合いません」だけが出て、そのノートの履歴が丸ごと落ちる
+ * (title / status は検査が無いので**黙って**旧値が入る)。
+ *
+ * 「削除は止めるのに保存は止めない」= 同じ危険に対して入口ごとに答えが違う、
+ * という状態だった。⚠ **規則は 1 本**にして、本文を書き換える入口すべてに掛ける。
+ */
+const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
+  'start-edit',
+  'commit-edit',
+  'append-entry',
+  'toggle-todo',
+  'toggle-app-tile',
+  'delete-entry',
+  'restore-revision',
+  'restore-trash',
+  'purge-trash',
+]);
+
+function refuseWhileBusy(
+  action: string,
+  dispatcher: Dispatcher,
+  services: BinderServices,
+): boolean {
+  if (!BODY_WRITE_ACTIONS.has(action) || services.busy?.() !== true) return false;
+  // ⚠ **可視に断る**(無言の操作拒否を作らない)
+  dispatcher.dispatch({
+    type: 'OP_FAILED',
+    error: '書き出し / 取込が実行中です。完了してから操作してください',
+  });
+  return true;
 }
 
 const ACTIONS: Record<string, ActionHandler> = {
@@ -140,13 +233,23 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (lid) dispatcher.dispatch({ type: 'SELECT_ENTRY', lid });
   },
   'start-edit': (dispatcher) => dispatcher.dispatch({ type: 'START_EDIT' }),
-  'commit-edit': (dispatcher, target) => {
-    renameFromEditorInput(dispatcher, target);
+  // ⚠ 第 4 引数の **root** を使う(target ではない)── 追記欄の出口は detail の
+  //    兄弟なので、押したボタンから題名欄へは辿れない(P8 段⑲)
+  'commit-edit': (dispatcher, _target, _services, root) => {
+    renameFromEditorInput(dispatcher, root);
     dispatcher.dispatch({ type: 'COMMIT_EDIT' });
   },
-  'cancel-edit': (dispatcher, target) => cancelFromEditor(dispatcher, target),
+  'cancel-edit': (dispatcher, _target, _services, root) => cancelFromEditor(dispatcher, root),
   'create-entry': (dispatcher, target) => {
-    const archetype = target.getAttribute('data-pkc-archetype');
+    // 🔑 種類は**隣の `<select>`**から取る(P8 ── ボタンを種類ぶん並べない)。
+    // ⚠ 旧来どおりボタン自身が `data-pkc-archetype` を持つ形も受ける
+    // (かんばん等の面から直接作る導線が将来生えても壊れない)
+    const archetype =
+      target.getAttribute('data-pkc-archetype') ??
+      target
+        .closest('[data-pkc-region="create-bar"]')
+        ?.querySelector<HTMLSelectElement>('[data-pkc-field="create-kind"]')?.value ??
+      null;
     if (!archetype) return;
     // 非 detail view で作ると editor が出ない(PKC2 PR-Δ19 の罠)── 先に切替
     if (dispatcher.getState().viewMode !== 'detail')
@@ -158,14 +261,16 @@ const ACTIONS: Record<string, ActionHandler> = {
       title: defaultTitle(dispatcher, archetype),
     });
   },
-  'delete-entry': (dispatcher, target, services) => {
-    // 🔴 書出し / 取込の実行中は消させない(P6f review M-2)。隣に並んだ
-    // 「書き出す」を押した直後にここを押せると、走査の途中で entry が消え、
-    // **書き出したつもりでファイルが落ちていない**が成立する
-    if (services.busy?.()) {
+  'delete-entry': (dispatcher, target) => {
+    // ⚠ 実行中(書出し / 取込)のガードは `refuseWhileBusy` が 1 本で持つ
+    // 🔴 **無言で断らない**(P8 段⑲)。`DELETE_ENTRY` は `phase !== 'ready'` で
+    //    何も返さないので、直す前は**確認ダイアログまで出してから黙って捨てて**いた
+    //    ── user は消したつもりで画面を離れる。detail.ts が確立した
+    //    「無言の操作拒否を作らない」に揃える。⚠ confirm より**前**に断る
+    if (dispatcher.getState().phase !== 'ready') {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: '書き出し / 取込が実行中です。完了してから削除してください',
+        error: '編集を終了してから削除してください',
       });
       return;
     }
@@ -188,10 +293,73 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'DELETE_ENTRY', lid });
   },
   'copy-md-block': (_dispatcher, target) => handleCopyMdBlock(target),
+  /**
+   * 書式パネル(P8 段⑥)。⚠ **規則は `applyFormat` が持つ** ── ここは
+   * 「選択を読む → 渡す → 書き戻す」だけ。op ごとの知識をここに漏らさない。
+   */
+  'format-text': (_dispatcher, target, _services, root) => {
+    const op = target.getAttribute('data-pkc-format') as FormatOp | null;
+    const ta = editorBody(root);
+    if (!op || !ta) return;
+    writeBack(ta, applyFormat({ text: ta.value, start: ta.selectionStart, end: ta.selectionEnd }, op));
+  },
+  /**
+   * 🔑 **追記**(P8 段⑧)。編集画面を開かず、打った内容をそのまま末尾へ足す。
+   *
+   * 🔴 段⑥ の「編集に入って末尾へ飛ぶ」は**作り直した**(user 指示 2026-08-03
+   * 「追記型は今すぐ実装して、今のままだと、なんの意味もない」)── 5000 行の
+   * ログでも毎回全文を textarea に載せる形は、追記型の意味を成していなかった。
+   *
+   * ⚠ 日時見出しは**ここで作る**(reducer は純粋のまま ── `Date` を呼ばない)。
+   * ⚠ 欄は**空にしない** ── 通ったときだけ描画側が空にする(失敗で打鍵が消えない)。
+   */
+  'append-entry': (dispatcher, _target, _services, root) => {
+    const s = dispatcher.getState();
+    const lid = s.selectedLid;
+    const archetype = lid ? s.entryMetas.get(lid)?.archetype : undefined;
+    if (!lid || !isAppendable(archetype)) return;
+    const input = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="append-input"]');
+    const text = input?.value ?? '';
+    // ⚠ **空判定をここに持たない**(P8 段⑧ の変異試験で判明)── reducer が
+    // 同じ判定を持っており、3 か所(binder / reducer / `appendBlock`)が互いに
+    // 救い合って**どれ 1 つ消しても test が緑**だった。判定は下 2 つに寄せる:
+    // reducer =「ロックも取らずに断る」、`appendBlock` =「本文を変えない」
+    dispatcher.dispatch({
+      type: 'APPEND_TO_ENTRY',
+      lid,
+      text,
+      heading: appendHeadingFor(archetype!, new Date()),
+    });
+  },
+  /**
+   * 🔴 **強制解放**(user 指示 2026-08-03「競合ロックと強制解放も念頭に」)。
+   * 返ってこない書込で**永久に追記できなくなる**のを防ぐ最後の出口。
+   * ⚠ 押した人が結果を分かっていること ── 確認を出す(確認の無い環境は通す)。
+   */
+  'force-release': (dispatcher) => {
+    const ok =
+      window.confirm?.(
+        '追記の書き込みを強制的に打ち切ります。書き込みが実際には進んでいた場合、' +
+          'この画面の表示が実際の中身より古くなることがあります(開き直すと直ります)。よろしいですか?',
+      ) ?? true;
+    if (ok) dispatcher.dispatch({ type: 'FORCE_RELEASE_LOCK', discardDraft: false });
+  },
+  /** 左の列の**探し方**を切り替える(P8 段⑤)。⚠ 中央のビューとは別の軸。 */
+  'set-browse': (_dispatcher, target, services) => {
+    const mode = target.closest('[data-pkc-browse]')?.getAttribute('data-pkc-browse');
+    if (mode) services.setBrowse?.(mode);
+  },
   'set-view': (dispatcher, target) => {
     const view = target.getAttribute('data-pkc-view') ?? '';
-    if (VIEW_MODES.has(view))
-      dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: view as ViewMode });
+    if (!VIEW_MODES.has(view)) return;
+    // 🔴 **もう一度押したら戻る**(P8 段⑲)。直す前の 設定 は行きっぱなしで、
+    //    閉じる導線がどこにも無かった ── 抜けられるのは左のタブを押すか
+    //    新規作成だけで、user から見ると「画面から出られない」
+    const cur = dispatcher.getState().viewMode;
+    dispatcher.dispatch({
+      type: 'SET_VIEW_MODE',
+      mode: (cur === view ? 'detail' : view) as ViewMode,
+    });
   },
   'toggle-todo': (dispatcher, target) => {
     // data-pkc-entry は「entry を表す要素」専用 ── ボタンからは closest で引く
@@ -227,6 +395,71 @@ const ACTIONS: Record<string, ActionHandler> = {
       ?.querySelector<HTMLInputElement>('[data-pkc-field="attach-input"]')
       ?.click();
   },
+  /**
+   * 図を保存する(P8 段⑦)。⚠ 画面は PNG だが、**書き出すのはベクタ**
+   * (user 指示 2026-08-03「SVG は書き出しのときだけ」)。
+   * ⚠ 「何枚目か」は**描いた側の並び**から数える ── 器に番号を焼き込むと、
+   * 図を 1 個消したときに番号が飛ぶ
+   */
+  'export-diagram': (_dispatcher, target, services, root) => {
+    const host = target.closest<HTMLElement>('[data-pkc-mermaid-src]');
+    const source = host?.getAttribute('data-pkc-mermaid-src');
+    if (!host || !source) return;
+    const all = [...root.querySelectorAll('[data-pkc-mermaid-src]')];
+    const done = services.exportDiagram?.(source, Math.max(0, all.indexOf(host)));
+    // 🔴 **無言で待たせない**(P8 段⑬ review M-3)。ベクタは原文から焼き直すので、
+    //    mermaid 本体の読み込みを含めて秒が掛かる。何も起きないように見えると
+    //    user は連打する ── 押せなくして、そのボタン自身に状態を出す
+    const btn = target.closest<HTMLButtonElement>('[data-pkc-action="export-diagram"]');
+    if (!btn || !(done instanceof Promise)) return;
+    const label = btn.querySelector<HTMLElement>('[data-pkc-field="label"]');
+    const was = label?.textContent ?? '';
+    btn.disabled = true;
+    btn.setAttribute('data-pkc-busy', '');
+    if (label) label.textContent = '書き出し中…';
+    const reset = (): void => {
+      btn.disabled = false;
+      btn.removeAttribute('data-pkc-busy');
+      if (label) label.textContent = was;
+    };
+    // ⚠ **`finally` ではなく `then(reset, reset)`** ── `finally` は元の失敗を
+    //    そのまま流すので、service が reject すると**未処理の rejection**になる
+    //    (実際に test の stderr で出た。この repo は stderr 0 行を保つ規律)。
+    //    失敗の**報告**は service 側が持つ ── ここは見た目を戻すだけ
+    void done.then(reset, reset);
+  },
+  /**
+   * ランチャーのタイル設定(P8 段⑭)。
+   * ⚠ 対象は**いま選んでいるノート** ── この 3 つは添付の画面にしか出ない
+   */
+  'toggle-app-tile': (dispatcher, target) => {
+    const lid = dispatcher.getState().selectedLid;
+    if (lid && target instanceof HTMLInputElement)
+      dispatcher.dispatch({ type: 'SET_APP_TILE', lid, registered: target.checked });
+  },
+  'set-app-group': (dispatcher, target) => {
+    const lid = dispatcher.getState().selectedLid;
+    if (lid && target instanceof HTMLInputElement)
+      dispatcher.dispatch({ type: 'SET_APP_TILE', lid, group: target.value.trim() });
+  },
+  'set-app-icon': (dispatcher, target) => {
+    const lid = dispatcher.getState().selectedLid;
+    if (lid && target instanceof HTMLInputElement)
+      dispatcher.dispatch({ type: 'SET_APP_TILE', lid, icon: target.value.trim() });
+  },
+  /**
+   * 添付の参照(`asset:<key>`)をコピーする(P8 段⑱)。
+   * ⚠ 本文に貼れる形そのものを渡す ── key だけ渡すと user が書式を覚える必要がある
+   */
+  'copy-asset-ref': (_dispatcher, target, services) => {
+    // ⚠ 渡すのは**貼れる 1 行**(`![名前](asset:key)`)── 裸の `asset:key` を
+    //    渡していた頃は、貼っても markdown としてはただの文字列だった(段⑱)。
+    //    組み立ては描画側(`asset-ref-format.ts` 経由)。ここでは組み立て直さない
+    const ref = target
+      .closest<HTMLElement>('[data-pkc-asset-ref]')
+      ?.getAttribute('data-pkc-asset-ref');
+    if (ref) services.copyText?.(ref);
+  },
   'download-asset': (dispatcher, target, services) => {
     const key = target.getAttribute('data-pkc-asset-key');
     const name = target.getAttribute('data-pkc-asset-name') ?? 'download';
@@ -240,7 +473,11 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (lid) services.openTile?.(lid);
   },
   'set-theme': (_dispatcher, target, services) => {
-    const theme = target.getAttribute('data-pkc-theme-value');
+    // `<select>` なら選ばれた値、ボタンなら属性(どちらの形でも受ける)
+    const theme =
+      target instanceof HTMLSelectElement
+        ? target.value
+        : target.getAttribute('data-pkc-theme-value');
     if (theme) services.setTheme?.(theme);
   },
   'apply-update': (_dispatcher, _target, services) => {
@@ -277,7 +514,18 @@ const ACTIONS: Record<string, ActionHandler> = {
       ?.click();
   },
   // ── P5b: 履歴 / ゴミ箱 ──
-  'show-history': (dispatcher) => dispatcher.dispatch({ type: 'SHOW_HISTORY' }),
+  'show-history': (dispatcher) => {
+    // 🔴 **無言で断らない**(P8 段⑲)── `SHOW_HISTORY` は `phase !== 'ready'` で
+    //    何も返さず、押しても panel も理由も出なかった
+    if (dispatcher.getState().phase !== 'ready') {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '編集を終了してから履歴を開いてください',
+      });
+      return;
+    }
+    dispatcher.dispatch({ type: 'SHOW_HISTORY' });
+  },
   'hide-history': (dispatcher) => dispatcher.dispatch({ type: 'HIDE_HISTORY' }),
   'restore-revision': (dispatcher, target) => {
     // 前進変異(復元前に現状が履歴に積まれる)なので confirm は要らない ──
@@ -304,6 +552,16 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
 };
 
+/**
+ * 近道のキー。⚠ **書式パネルに在る操作だけ**を割り当てる ── ここにしか無い
+ * 操作を作ると「キーを知っている人にしかできないこと」が生まれる。
+ */
+const FORMAT_KEYS: Readonly<Record<string, FormatOp>> = {
+  b: 'bold',
+  i: 'italic',
+  k: 'link',
+};
+
 function isEditorBody(el: EventTarget | null): el is HTMLTextAreaElement {
   return (
     el instanceof HTMLTextAreaElement &&
@@ -316,13 +574,32 @@ export function bindActions(
   dispatcher: Dispatcher,
   services: BinderServices = {},
 ): () => void {
+  /**
+   * action を 1 本の口から回す。⚠ **ここを通さない呼び方をしない** ──
+   * 実行中(書出し / 取込)のガードはここに 1 回だけ置く(P8 段㉑)。
+   * 入口ごとに書くと、必ずどれかが素通しになる(実際そうだった)。
+   */
+  const run = (action: string | null, el: HTMLElement): void => {
+    if (!action) return;
+    const handler = ACTIONS[action];
+    if (!handler) return;
+    if (refuseWhileBusy(action, dispatcher, services)) return;
+    handler(dispatcher, el, services, root);
+  };
   const onClick = (ev: Event) => {
     const el = (ev.target as HTMLElement | null)?.closest<HTMLElement>(
       '[data-pkc-action]',
     );
     if (!el || !root.contains(el)) return;
-    const handler = ACTIONS[el.getAttribute('data-pkc-action') ?? ''];
-    handler?.(dispatcher, el, services);
+    run(el.getAttribute('data-pkc-action'), el);
+  };
+  /**
+   * ⚠ 書式パネルのボタンは **focus を奪わない**。奪うと押すたびに編集欄が
+   * focus を失って画面がちらつく(選択位置自体は残るので壊れはしない)。
+   */
+  const onMousedown = (ev: Event) => {
+    const el = (ev.target as HTMLElement | null)?.closest<HTMLElement>('[data-pkc-action]');
+    if (el?.getAttribute('data-pkc-action') === 'format-text') ev.preventDefault();
   };
   const onInput = (ev: Event) => {
     if (isEditorBody(ev.target)) {
@@ -341,7 +618,26 @@ export function bindActions(
   };
   const onChange = (ev: Event) => {
     const el = ev.target;
+    // 🔑 `<select>` は click ではなく change で決まる ── 配色のように
+    // 「選んだ瞬間に効く」ものはここで拾う(P8)
+    if (el instanceof HTMLSelectElement) {
+      const action = el.getAttribute('data-pkc-action');
+      run(action, el);
+      return;
+    }
     if (!(el instanceof HTMLInputElement)) return;
+    // 🔑 チェックボックス / テキスト欄も **change で確定**する(P8 段⑭)。
+    //    ⚠ `input` ごとに撃たない ── グループ名を 1 文字打つたびに disk へ
+    //    書き戻すことになる(欄を離れた時・Enter を押した時が確定)
+    const changeAction = el.getAttribute('data-pkc-action');
+    if (changeAction !== null && changeAction.startsWith('set-app-')) {
+      run(changeAction, el);
+      return;
+    }
+    if (changeAction === 'toggle-app-tile') {
+      run(changeAction, el);
+      return;
+    }
     const field = el.getAttribute('data-pkc-field');
     if (field === 'attach-input') {
       const files = el.files ? [...el.files] : [];
@@ -363,33 +659,66 @@ export function bindActions(
       ke.target instanceof HTMLElement
         ? ke.target.getAttribute('data-pkc-field')
         : null;
-    if (field !== 'editor-body' && field !== 'editor-title') return;
     // 🔴 IME ガード(PKC2 repo 慣行)── 変換中の Esc は「変換の取り消し」で
-    // あって編集キャンセルではない。ガードが無いと draft 丸ごと破棄になる
+    // あって編集キャンセルではない。ガードが無いと draft 丸ごと破棄になる。
+    // ⚠ **追記欄より先に置く** ── 変換確定の Enter で送ってしまうと、
+    // 日本語で書く人は「打ち終わる前に飛ぶ」を毎回踏む
     if (ke.isComposing) return;
+    // 追記欄: Ctrl/Cmd+Enter で送る(欄の中だけ ── 画面全体の近道にしない)
+    if (field === 'append-input') {
+      if (ke.key === 'Enter' && (ke.ctrlKey || ke.metaKey) && !ke.altKey) {
+        ke.preventDefault();
+        run('append-entry', ke.target as HTMLElement);
+      }
+      return;
+    }
+    if (field !== 'editor-body' && field !== 'editor-title') return;
     // PKC2 慣例: Ctrl/Cmd+S = 保存(ブラウザの保存ダイアログも抑止)、
     // Esc = キャンセル。Ctrl/Cmd+Enter も保存の別名として受ける
-    // (PKC2 の章フォーカス編集が両対応だった ── append 系の Ctrl+Enter は
-    // textlog UI 側の文脈で導入する)。altKey は除外(AltGr = Ctrl+Alt 誤発火)
+    // (PKC2 の章フォーカス編集が両対応だった)。altKey は除外(AltGr = Ctrl+Alt 誤発火)
+    // ⚠ 追記(P8 段⑥)は**編集欄そのものを書き換える**ので、PKC2 のように
+    // 「追記専用の textarea + Ctrl+Enter で確定」を別に持たない ── 別経路にすると
+    // 編集中の draft と競合し、追記した節が保存で黙って消える(PKC2 の実測)
     if (
       !ke.altKey &&
       (((ke.key === 's' || ke.key === 'S') && (ke.ctrlKey || ke.metaKey)) ||
         (ke.key === 'Enter' && (ke.ctrlKey || ke.metaKey)))
     ) {
       ke.preventDefault();
-      renameFromEditorInput(dispatcher, ke.target as HTMLElement);
+      // ⚠ 近道キーも同じ規則に乗せる(ボタンだけ止めても意味が無い)
+      if (refuseWhileBusy('commit-edit', dispatcher, services)) return;
+      renameFromEditorInput(dispatcher, root);
       dispatcher.dispatch({ type: 'COMMIT_EDIT' });
+    } else if (
+      // 🔑 **キーボードは近道**(業務画面の作法 ── user 指示 2026-08-03)。
+      // 本文だけ。題名に太字を入れても意味が無い。⚠ `isComposing` は上で弾き済み
+      field === 'editor-body' &&
+      !ke.altKey &&
+      (ke.ctrlKey || ke.metaKey) &&
+      FORMAT_KEYS[ke.key.toLowerCase()] !== undefined
+    ) {
+      ke.preventDefault();
+      const ta = ke.target as HTMLTextAreaElement;
+      writeBack(
+        ta,
+        applyFormat(
+          { text: ta.value, start: ta.selectionStart, end: ta.selectionEnd },
+          FORMAT_KEYS[ke.key.toLowerCase()]!,
+        ),
+      );
     } else if (ke.key === 'Escape') {
       ke.preventDefault();
-      cancelFromEditor(dispatcher, ke.target as HTMLElement);
+      cancelFromEditor(dispatcher, root);
     }
   };
   root.addEventListener('click', onClick);
+  root.addEventListener('mousedown', onMousedown);
   root.addEventListener('input', onInput);
   root.addEventListener('change', onChange);
   root.addEventListener('keydown', onKeydown);
   return () => {
     root.removeEventListener('click', onClick);
+    root.removeEventListener('mousedown', onMousedown);
     root.removeEventListener('input', onInput);
     root.removeEventListener('change', onChange);
     root.removeEventListener('keydown', onKeydown);

@@ -1,6 +1,9 @@
 /**
  * textlog フレーバー: 日時見出し節の規約(`## YYYY-MM-DD HH:mm:ss`)。
- * 追記 = 末尾への節 append(P3-5 で編集 UI が実装)。
+ * 追記 = 末尾への節 append(**P8 段⑥ で着地** ── `features/flavor/append-spec.ts` が
+ * 「何を足すか」、`adapter/ui/actions/binder.ts` の `append-section` が導線)。
+ * ⚠ ここは長らく「P3-5 で編集 UI が実装」と書いていたが、**その UI は存在しなかった**
+ * (マニュアルも同じ嘘を書いていた)。doc は書いた時ではなく次に読む時に正しくあること。
  *
  * 秒まで含めるのは PKC2 の textlog-readability-hardening の教訓
  * (高頻度ログの弁別に秒が要る)── 設計メモ §3 の `HH:mm` 表記はこの精度に更新。
@@ -36,8 +39,9 @@ export const textlogFlavor: FlavorSpec = {
     // 不能なので、PKC2 のログ単位 permalink の書換は **P6 import パイプライン内で
     // fromPkc2 より前**にしか置けない(ordering 制約 ── review #6)
     // ⚠ ログ text 中の `## <日時>` 形の行は実節見出しと識別不能(エスケープ
-    // しない)。P3-5 の節 parse(append 実装)は末尾追記のみで節を再解釈しない
-    // 設計にすること
+    // しない)。P8 段⑥ の追記は**末尾に足すだけ**で節を再解釈しない
+    // (`appendAt` は既存本文を読まない ── 見出しの形を後から変えられない代わりに、
+    //  本文が壊れる経路も無い。PKC2 は保存形が JSON で見出しは描画時生成だった)
     const log = parseTextlogBody(body);
     return log.entries
       .map((e) => {

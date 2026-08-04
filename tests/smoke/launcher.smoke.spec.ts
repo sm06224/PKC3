@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { gzipSync } from 'node:zlib';
-import { gotoApp, clickReal, clickMenuItem, collectPageErrors } from './helpers';
+import { gotoApp, clickReal, collectPageErrors, createEntry } from './helpers';
 
 /**
  * P7b 段⑩: **取り込んだランチャーのタイルが見えて、押すと開く**。
@@ -72,7 +72,7 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   const errors = collectPageErrors(page);
   await gotoApp(page);
 
-  await clickMenuItem(page, '[data-pkc-action="import-file"]');
+  await clickReal(page, '[data-pkc-action="import-file"]');
   await page.locator('[data-pkc-field="import-input"]').setInputFiles({
     name: 'container.html',
     mimeType: 'text/html',
@@ -81,7 +81,7 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(4);
 
   // ランチャーへ
-  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="launcher"]');
+  await clickReal(page, '[data-pkc-browse="launcher"]');
   const tiles = page.locator('[data-pkc-region="launcher-grid"] [data-pkc-tile]');
   // ① 🔴 **素の添付は出ない**(4 件のうちタイルは 3 件)
   await expect(tiles).toHaveCount(3);
@@ -90,10 +90,11 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   await expect(tiles.nth(0)).toContainText('電卓');
   await expect(tiles.nth(1)).toContainText('先のリンク');
   await expect(tiles.nth(2)).toContainText('後のリンク');
-  // グループ見出しも出る(既定群は「よく使う」)
+  // 🔴 見出しが出るのは**名前の付いた群だけ**(P8 段⑭)。既定群に「よく使う」と
+  //    名乗らせていたが、画面はその情報(頻度)を持っていない ── 名乗ったぶん嘘になる
   const groups = page.locator('[data-pkc-field="launcher-group"]');
-  await expect(groups.nth(0)).toHaveText('よく使う');
-  await expect(groups.nth(1)).toHaveText('ツール');
+  await expect(groups).toHaveCount(1);
+  await expect(groups.nth(0)).toHaveText('ツール');
 
   // ③ 外部へ飛ぶタイルは**行き先が見えている**(押す前に分かる)
   await expect(tiles.nth(1).locator('[data-pkc-field="tile-url"]')).not.toHaveText('');
@@ -138,11 +139,25 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
     } catch {
       out.parentDom = 'blocked';
     }
+    // 🔴 P8 段⑭ で `localStorage` は**開いた**(アプリに保存領域を貸すため)。
+    //    だから観測点を変える ── 「使えるか」ではなく「**PKC3 の中身が見えるか**」。
+    //    ⚠ ここを `ls: 'blocked'` のままにすると、shim が本物を素通しする実装に
+    //    なっても「使えている」で緑になる(逆に、貸すのをやめても緑になる)
     try {
-      localStorage.setItem('pkc3-probe', '1');
-      out.ls = 'OPEN';
+      localStorage.setItem('probe', '1');
+      out.ls = localStorage.getItem('probe') === '1' ? 'OPEN' : 'broken';
     } catch {
       out.ls = 'blocked';
+    }
+    try {
+      // 🔴 **PKC3 自身の鍵が 1 つも見えないこと**。`pkc3.theme` は PKC3 が
+      //    実際に使っている鍵で、本物が漏れていれば必ずここに出る
+      const keys = Object.keys(localStorage);
+      out.lsKeys = keys.join(',');
+      out.lsLeak = keys.some((k) => k.startsWith('pkc3.')) ? 'LEAK' : 'none';
+      out.lsTheme = String(localStorage.getItem('pkc3.theme'));
+    } catch {
+      out.lsLeak = 'blocked';
     }
     try {
       const req = indexedDB.open('pkc3-assets');
@@ -175,11 +190,15 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   expect(reach.selfOrigin).toBe('null');
   expect(reach).toMatchObject({
     parentDom: 'blocked',
-    ls: 'blocked',
     idb: 'blocked',
     opfs: 'blocked',
     caches: 'blocked',
   });
+  // 🔴 P8 段⑭: 保存領域は**貸す**。ただし見えるのは**このアプリのぶんだけ**
+  expect(reach.ls, 'アプリが状態を保存できない(貸せていない)').toBe('OPEN');
+  expect(reach.lsLeak, 'PKC3 自身の鍵がアプリから見えている').toBe('none');
+  expect(reach.lsTheme, 'PKC3 の設定がアプリから読めている').toBe('null');
+  expect(reach.lsKeys, 'アプリの領域に他人のものが混ざっている').toBe('probe');
 
   // ⑤-2 ⚠ 隔離した先で**中身がちゃんと出ている**(隔離できても白紙では意味がない)
   await expect(
@@ -192,6 +211,374 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   await expect(tiles).toHaveCount(2);
   await page.locator('[data-pkc-field="entry-filter"]').fill('存在しない');
   await expect(page.locator('[data-pkc-field="launcher-empty"]')).toBeVisible();
+
+  expect(errors).toEqual([]);
+});
+
+/**
+ * P8 段⑭: 🔴 **PKC3 の中だけでタイルを作り、SPA が動いて、状態が残る**。
+ *
+ * > user 報告 2026-08-03
+ * > 「**ランチャーから起動した単一 html の SPA アプリが動かない**」
+ * > 「**ランチャーの設定導線が消えた**」
+ *
+ * 直す前の実測(実起動で回収):
+ * ```
+ * pageerror: SecurityError: Failed to read the 'sessionStorage' property from 'Window':
+ *            The document is sandboxed and lacks the 'allow-same-origin' flag.
+ * #app = 「読み込み中…」のまま / spaBoot 未設定
+ * ```
+ * `try/catch` の無いアプリは**保管庫を読む 1 行目で止まる**。加えて
+ * `document.baseURI` が blob:(opaque path)なので `new URL(相対, base)` も
+ * `TypeError` で落ちていた。そして PKC3 の中には**タイルを作る導線が無かった**。
+ *
+ * ⚠ 観測点を「タブが開いた」で止めない ── **アプリの中で JS が走り切ったか**
+ * (`spaBoot`)と、**開き直して続きが出るか**まで見る。
+ */
+test('🔴 登録 → タイル → SPA が動き、開き直しても続きが出る', async ({ page, context }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  // 保管庫と相対 URL と hash router を**全部**使う、try/catch の無い SPA
+  const SPA = `<!doctype html><html lang="ja"><head><meta charset="utf-8"></head>
+<body><div id="app">読み込み中…</div>
+<script>
+  var saved = JSON.parse(localStorage.getItem('notes') || '[]');
+  sessionStorage.setItem('v', '1');
+  var resolved = String(new URL('assets/app.js', document.baseURI));
+  history.pushState({ p: 1 }, '', location.href.split('#')[0] + '#/list');
+  saved.push('メモ' + (saved.length + 1));
+  localStorage.setItem('notes', JSON.stringify(saved));
+  document.getElementById('app').textContent = saved.join(',');
+  document.body.dataset.spaBoot = 'ok';
+  document.body.dataset.route = location.hash;
+  document.body.dataset.resolved = resolved;
+</scr` + `ipt></body></html>`;
+
+  // ① 🔴 **PKC3 の中で**添付して、登録する(PKC2 のデータを一切使わない)
+  await clickReal(page, '[data-pkc-action="attach-file"]');
+  await page.locator('[data-pkc-field="attach-input"]').setInputFiles({
+    name: 'memo.html',
+    mimeType: 'text/html',
+    buffer: Buffer.from(SPA, 'utf-8'),
+  });
+  const register = page.locator('[data-pkc-field="app-register"]');
+  await expect(register, 'アプリとして登録する導線が無い').toBeVisible({ timeout: 15000 });
+
+  // 🔴 **チェックボックスは小さな四角のまま**(P8 段⑱)。欄の高さ(`--row-h`)を
+  //    入力欄と一緒に当てると、チェックボックスまで 28px の帯に化けて行が崩れる。
+  //    ⚠ 空振り防止に**同じ行の入力欄**も測る ── 「入力欄には効いている」ことを
+  //    示さないと、高さの指定を丸ごと消しても通ってしまう
+  const boxSize = await register.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return { w: Math.round(r.width), h: Math.round(r.height) };
+  });
+  expect(boxSize.h, `チェックボックスが縦に伸びている(${boxSize.h}px)`).toBeLessThan(24);
+  expect(boxSize.w, `チェックボックスが横に伸びている(${boxSize.w}px)`).toBeLessThan(24);
+
+  await register.check();
+  // 登録すると設定欄が出る
+  await expect(page.locator('[data-pkc-field="app-group"]')).toBeVisible();
+  // 入力欄のほうは行の高さに揃っている(上の「小さいまま」が空振りでない証拠)
+  const rowH = await page
+    .locator('[data-pkc-field="app-group"]')
+    .evaluate((el) => Math.round(el.getBoundingClientRect().height));
+  expect(rowH, `入力欄に行の高さが効いていない(${rowH}px)`).toBeGreaterThan(boxSize.h + 6);
+  await page.locator('[data-pkc-field="app-group"]').fill('道具');
+  await page.locator('[data-pkc-field="app-group"]').blur();
+  await page.locator('[data-pkc-field="app-icon"]').fill('🧮');
+  await page.locator('[data-pkc-field="app-icon"]').blur();
+
+  // ② タイルが出る(グループ見出しと目印つき)
+  await clickReal(page, '[data-pkc-browse="launcher"]');
+  const tile = page.locator('[data-pkc-region="launcher-grid"] [data-pkc-tile]');
+  await expect(tile).toHaveCount(1, { timeout: 15000 });
+  await expect(page.locator('[data-pkc-field="launcher-group"]')).toHaveText('道具');
+  await expect(tile.locator('[data-pkc-field="tile-icon"]')).toHaveText('🧮');
+
+  // ③ 🔴 押すと**アプリが動く**
+  const open = async (): Promise<Record<string, string | null>> => {
+    const [tab] = await Promise.all([context.waitForEvent('page'), tile.click()]);
+    await tab.waitForLoadState('domcontentloaded');
+    const inner = tab.frameLocator('[data-pkc-field="launcher-app"]');
+    await expect(inner.locator('#app')).not.toHaveText('読み込み中…', { timeout: 20000 });
+    const f = tab.frames().find((x) => x !== tab.mainFrame())!;
+    const seen = await f.evaluate(() => ({
+      boot: document.body.dataset.spaBoot ?? null,
+      app: document.getElementById('app')?.textContent ?? null,
+      route: document.body.dataset.route ?? null,
+      resolved: document.body.dataset.resolved ?? null,
+      origin: String(self.origin),
+    }));
+    await tab.close();
+    return seen;
+  };
+
+  // 🔴 押した対象は**選択状態にもなる**(押しても本体側に何も残らない、を落とす)
+  await expect(
+    page.locator('[data-pkc-region="launcher-grid"] [data-pkc-tile][data-pkc-selected]'),
+    'タイルを押しても、いま何を触ったのか画面に残らない',
+  ).toHaveCount(1);
+  // 中央にその添付が出る(空のままにしない)
+  await expect(page.locator('[data-pkc-field="app-register"]')).toBeVisible();
+
+  const first = await open();
+  expect(first.boot, 'アプリが 1 行目で止まっている(保管庫が読めない)').toBe('ok');
+  expect(first.app).toBe('メモ1');
+  expect(first.route, 'hash router が効いていない').toBe('#/list');
+  // 🔴 相対 URL が**解決できる**(base が opaque path だと TypeError で死ぬ)
+  expect(first.resolved).toContain('/pkc3-app/assets/app.js');
+  // ⚠ 隔離は保ったまま(直したら穴が開いた、を防ぐ)
+  expect(first.origin, '隔離が外れている').toBe('null');
+
+  // ④ 🔴 **開き直すと続きが出る**(状態が保存できている ── これが user の要求)
+  const second = await open();
+  expect(second.app, 'アプリの保存が残っていない').toBe('メモ1,メモ2');
+
+  // ⑤ 🔴 **なりすましを受けない**。
+  //    実測で 3 方向(アプリが `allow-popups` で開いた popup からの `opener.parent` /
+  //    外殻に生えた別の sandboxed iframe / 外殻自身の `postMessage`)が**全部届き**、
+  //    `event.origin` は正規も攻撃も一律 `"null"`、外殻自身の攻撃だけは
+  //    **アプリ origin を名乗った** ── つまり origin は両方向に嘘をつく。
+  //    ここでは「外殻自身から撃つ」を再現する(source が iframe ではない一通)
+  const [attackTab] = await Promise.all([context.waitForEvent('page'), tile.click()]);
+  await attackTab.waitForLoadState('domcontentloaded');
+  await attackTab.frameLocator('[data-pkc-field="launcher-app"]').locator('#app').waitFor();
+  await attackTab.evaluate(() => {
+    window.postMessage({ tag: 'pkc3.app.storage', op: 'set', key: 'PWNED', value: '1' }, '*');
+  });
+  await attackTab.waitForTimeout(300);
+  const leaked = await attackTab.evaluate(() =>
+    Object.keys(localStorage).filter((k) => k.includes('PWNED')),
+  );
+  expect(leaked, '外殻が自分宛の偽メッセージを受けて書き込んだ').toEqual([]);
+  await attackTab.close();
+
+  // ⑥ 登録を外すとタイルは消える(片道にしない)
+  await clickReal(page, '[data-pkc-browse="list"]');
+  await page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first().click();
+  await page.locator('[data-pkc-field="app-register"]').uncheck();
+  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await expect(tile).toHaveCount(0, { timeout: 15000 });
+  await expect(page.locator('[data-pkc-field="launcher-empty"]')).toBeVisible();
+
+  expect(errors).toEqual([]);
+});
+
+/**
+ * P8 段⑯: 🔴 **行儀の悪いアプリが origin の保管庫を占有できない**。
+ *
+ * 🔴 直す前の実測(レビュー H-2)。shim を**一切使わず** `parent.postMessage` を
+ * 直に投げるだけの HTML で:
+ * ```
+ * 外殻タブの localStorage 合計 5,239,731 文字 / 内訳 {"pkc3.app.<lid>": 5,239,154}
+ * → origin の枠(≒5,242,000 文字)の 99.94% を 1 アプリが占有。
+ *   以後 PKC3 本体は 3,015 文字で QuotaExceededError
+ * ```
+ * 上限が **shim(= untrusted 側)にしか無かった**のが原因。アプリは shim を
+ * 使わずに投げられるので、あれは安全性の根拠にならない。
+ *
+ * 直した後: 2,000,056 文字で頭打ち / PKC3 本体はまだ 2,048,000 文字書けた。
+ */
+test('🔴 行儀の悪いアプリが保管庫を占有できない(上限は信頼側が持つ)', async ({
+  page,
+  context,
+}) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  // shim を使わず外殻へ直に投げる(規約を守らないアプリ)
+  const HOSTILE =
+    `<!doctype html><html><head><meta charset="utf-8"></head><body><p>x</p>
+<script>
+  for (var i = 0; i < 20; i++) {
+    parent.postMessage(
+      { tag: 'pkc3.app.storage', op: 'set', key: 'k' + i, value: 'A'.repeat(500000) },
+      '*',
+    );
+  }
+  document.body.dataset.done = '1';
+</scr` + `ipt></body></html>`;
+
+  await clickReal(page, '[data-pkc-action="attach-file"]');
+  await page.locator('[data-pkc-field="attach-input"]').setInputFiles({
+    name: 'hostile.html',
+    mimeType: 'text/html',
+    buffer: Buffer.from(HOSTILE, 'utf-8'),
+  });
+  const register = page.locator('[data-pkc-field="app-register"]');
+  await expect(register).toBeVisible({ timeout: 15000 });
+  await register.check();
+
+  await clickReal(page, '[data-pkc-browse="launcher"]');
+  const tile = page.locator('[data-pkc-region="launcher-grid"] [data-pkc-tile]');
+  await expect(tile).toHaveCount(1, { timeout: 15000 });
+  const [tab] = await Promise.all([context.waitForEvent('page'), tile.click()]);
+  await tab.waitForLoadState('domcontentloaded');
+  // ⚠ `evaluate` で待たない ── 外殻は `location.replace` で遷移するので
+  //    「Execution context was destroyed」になる(実際に踏んだ)。locator は
+  //    遷移をまたいで retry してくれる
+  await expect(
+    tab.locator('[data-pkc-field="app-note"]'),
+    '上限に当たったことが外殻に出ていない',
+  ).toBeVisible({ timeout: 20000 });
+
+  const used = await tab.evaluate(() => {
+    let per = 0;
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)!;
+      if (k.startsWith('pkc3.app.')) per += k.length + (localStorage.getItem(k) ?? '').length;
+    }
+    return per;
+  });
+  // 🔴 上限(2MB)+ 1 件ぶんの余裕までで頭打ち(直す前は 5,239,154 文字だった)
+  expect(used, '1 アプリが上限を超えて占有した').toBeLessThan(2 * 1024 * 1024 + 600_000);
+  await tab.close();
+
+  // 🔴 **PKC3 本体がまだ書ける**(占有されると設定すら保存できなくなる)
+  const room = await page.evaluate(() => {
+    let wrote = 0;
+    try {
+      for (let i = 0; i < 1000; i++) {
+        localStorage.setItem('probe.' + i, 'x'.repeat(1024));
+        wrote += 1024;
+      }
+    } catch {
+      /* 上限 */
+    } finally {
+      for (let i = 0; i < 1000; i++) localStorage.removeItem('probe.' + i);
+    }
+    return wrote;
+  });
+  expect(room, 'アプリに占有されて PKC3 自身が書けない').toBeGreaterThan(512 * 1024);
+
+  // 🔴 **開き直しても埋め直せない**(P8 段⑰)。外殻は起動のたびに前置きを走査して
+  //    使用量を作り直す ── 覚えているだけだと、タブを開くたびに 0 から数え直して
+  //    上限ぶんずつ積み増せる
+  const [tab2] = await Promise.all([context.waitForEvent('page'), tile.click()]);
+  await tab2.waitForLoadState('domcontentloaded');
+  await expect(tab2.locator('[data-pkc-field="app-note"]')).toBeVisible({ timeout: 20000 });
+  const after = await tab2.evaluate(() => {
+    let per = 0;
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)!;
+      if (k.startsWith('pkc3.app.')) per += k.length + (localStorage.getItem(k) ?? '').length;
+    }
+    return per;
+  });
+  expect(after, '開き直したら上限を超えて積み増せた').toBeLessThan(used + 600_000);
+  await tab2.close();
+
+  // 🔴 **削除は可逆なので、アプリのデータもまだ消えない**(P8 段⑳)。
+  //    段⑰ はここで消していたが、削除の確認文は「ゴミ箱から戻せます」と
+  //    言っている ── 戻したのにアプリの中身が 0 件では、**確認文が嘘**になる。
+  //    家計簿アプリに貯めた入力が、警告 1 行も無く消えていた。
+  const appKeys = (): Promise<number> =>
+    page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('pkc3.app.')).length);
+  expect(await appKeys(), 'アプリのデータが入っていない(この次元を測れていない)').toBeGreaterThan(0);
+
+  page.once('dialog', (d) => void d.accept());
+  await clickReal(page, '[data-pkc-browse="list"]');
+  await page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first().click();
+  await clickReal(page, '[data-pkc-action="delete-entry"]');
+  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(0);
+  expect(await appKeys(), '戻せる削除でアプリのデータまで消している').toBeGreaterThan(0);
+
+  // 🔴 **戻すと使える状態で戻る**(確認文「ゴミ箱から戻せます」が嘘でない)
+  await clickReal(page, '[data-pkc-browse="filer"]');
+  await clickReal(page, '[data-pkc-action="show-trash"]');
+  await clickReal(page, '[data-pkc-action="restore-trash"]');
+  // ⚠ 一覧は「一覧」タブにしか無い ── フォルダのまま数えると常に 0 件になる
+  await clickReal(page, '[data-pkc-browse="list"]');
+  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(1);
+  expect(await appKeys(), '戻したのにアプリのデータが無い').toBeGreaterThan(0);
+
+  // 🔴 **ゴミ箱を空にすると消える**(唯一の不可逆点)。
+  //    ここで消さないと、消したノートのデータが origin に永久に残る
+  await page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first().click();
+  page.once('dialog', (d) => void d.accept());
+  await clickReal(page, '[data-pkc-action="delete-entry"]');
+  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(0);
+  await clickReal(page, '[data-pkc-browse="filer"]');
+  await clickReal(page, '[data-pkc-action="show-trash"]');
+  page.once('dialog', (d) => void d.accept());
+  await clickReal(page, '[data-pkc-action="purge-trash"]');
+  await expect
+    .poll(appKeys, {
+      timeout: 15000,
+      message: 'ゴミ箱を空にしてもアプリのデータが残っている',
+    })
+    .toBe(0);
+
+  expect(errors).toEqual([]);
+});
+
+/**
+ * P8 段⑱: 🔴 **添付の参照を本文へ入れられる**(レビュー H)。
+ *
+ * 🔴 マニュアル §3 は `asset:<key>` を「本文に書ける形式」として説明していたのに、
+ * **本文へ入れる経路も key を見る経路も無かった** ── 書ける形式なのに書けない、
+ * という状態だった。
+ *
+ * ⚠ 観測点は「ボタンが在るか」ではなく **押した結果**(クリップボードの中身)。
+ */
+test('🔴 添付の「参照をコピー」で、本文に貼れる形が手に入る', async ({ page, context }) => {
+  const errors = collectPageErrors(page);
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await gotoApp(page);
+
+  await clickReal(page, '[data-pkc-action="attach-file"]');
+  await page.locator('[data-pkc-field="attach-input"]').setInputFiles({
+    name: 'p.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+  });
+  const copy = page.locator('[data-pkc-field="copy-asset-ref"]');
+  await expect(copy, '参照をコピーする導線が無い').toBeVisible({ timeout: 15000 });
+  await copy.click();
+
+  // 🔴 押した結果が**手に入る**(黙って終わらない)
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('コピーしました', {
+    timeout: 10000,
+  });
+  const text = await page.evaluate(() => navigator.clipboard.readText());
+  // ⚠ **貼れる形**であること ── 裸の `asset:<key>` は markdown としてはただの
+  //    文字列で、貼っても何も出ない(直す前がそれだった)
+  expect(text, 'コピーされた文字列が本文に貼れる形になっていない').toMatch(
+    /^!\[[^\]]*\]\(asset:.+\)$/,
+  );
+
+  // ⚠ 貼ったら実際に添付として出る(形式が合っているか、の最終確認)
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-body"]').fill(`見て: ${text}\n`);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await expect(
+    page.locator('[data-pkc-field="detail-body"] img[data-pkc-asset-key]'),
+    '貼った参照が添付として出ない',
+  ).toHaveCount(1, { timeout: 15000 });
+
+  expect(errors).toEqual([]);
+});
+
+/**
+ * P8 段⑱: 🔴 **タブを変えても中央の面は変わらない**(レビュー M)。
+ * 直す前は「アプリ」タブに切り替えただけで `SET_VIEW_MODE 'launcher'` を撃って
+ * おり、**中央下の追記欄が消えて**いた(他の 2 タブでは残る)。探し方(左の列)と
+ * 見る場所(中央)は別の軸である。
+ */
+test('🔴 左のタブを変えても、中央の追記欄は消えない', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('追記できるノート');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+  const box = page.locator('[data-pkc-field="append-input"]');
+  await expect(box).toBeVisible();
+  for (const tab of ['filer', 'launcher', 'list']) {
+    await clickReal(page, `[data-pkc-browse="${tab}"]`);
+    await expect(box, `${tab} タブで追記欄が消えた`).toBeVisible();
+  }
 
   expect(errors).toEqual([]);
 });

@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { gotoApp, collectPageErrors, clickReal, expectImageRendered, clickMenuItem } from './helpers';
+import { gotoApp, collectPageErrors, clickReal, expectImageRendered } from './helpers';
 
 // 1x1 PNG(67 bytes)
 const PNG_1X1 = Buffer.from(
@@ -69,7 +69,7 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
   // ⚠ **ボタンを実際に押す**経路を通す(review mutation M21): hidden input へ
   // 直接 setInputFiles すると、ボタン → picker の導線が壊れていても緑になる
   const chooser = page.waitForEvent('filechooser');
-  await clickMenuItem(page, '[data-pkc-action="import-file"]');
+  await clickReal(page, '[data-pkc-action="import-file"]');
   await (await chooser).setFiles(FILE());
 
   // 再読込(sqlite から引き直し)を経て 2 件が sidebar に現れる
@@ -81,6 +81,20 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
   await clickReal(page, '[data-pkc-entry="a1"]'); // 衝突が無いので lid は保たれる
   await expectImageRendered(page, '[data-pkc-field="attachment-media"]');
 
+  // 🔴 P8 段⑮: 添付の**展開とハッシュはワーカーがやった**
+  //    (user 指示 2026-08-03 不可侵「基本的に重い処理はワーカーにしてください」)。
+  //    ⚠ 観測点は「画像が出た」ではない ── 同期経路に落ちても画像は出るので、
+  //    **どこで処理されたか**を見る。設定のジョブ表に `asset` の車線が立つ
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await expect(
+    page.locator('[data-pkc-lane="asset"]'),
+    '添付の展開がメインスレッドで走っている(ワーカーへ出ていない)',
+  ).toHaveCount(1);
+  // ⚠ 「車線が在る」で止めない ── **実際に処理した件数**まで見る
+  //    (spawn しただけで 1 件も流れていない実装が通ってしまう)
+  await expect(page.locator('[data-pkc-lane="asset"] td').nth(4)).not.toHaveText('0');
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+
   // ── 取り込んだ asset は「参照されている」と実 sqlite 走査で判定される ──
   // (旧 key のまま body に残っていたら、ここで未参照として現れる)
   const dialogMsg = new Promise<string>((resolve) => {
@@ -89,7 +103,7 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
       void d.accept();
     });
   });
-  await clickMenuItem(page, '[data-pkc-action="purge-orphan-assets"]');
+  await clickReal(page, '[data-pkc-action="purge-orphan-assets"]');
   expect(await dialogMsg).toContain('未参照の添付データはありません');
 
   // ── 同じファイルをもう一度取り込む(review mutation M23 / M24 / H-2)──
@@ -492,7 +506,7 @@ test('folder-export 取込 → filer で階層が実際にたどれる', async (
   // folder 5 件 + 本体 2 件
   await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(7);
 
-  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="filer"]');
+  await clickReal(page, '[data-pkc-browse="filer"]');
   const rows = page.locator('[data-pkc-region="filer-table"] tbody tr');
 
   // 🔑 最上位は **root + 循環から救出された 1 件**(階層が効いていれば 7 件並ばない)。
@@ -511,7 +525,8 @@ test('folder-export 取込 → filer で階層が実際にたどれる', async (
   const subLid = await page
     .locator('[data-pkc-region="filer-table"] tbody tr[data-pkc-archetype="folder"]')
     .getAttribute('data-pkc-entry');
-  await clickReal(page, `[data-pkc-entry="${subLid}"]`);
+  // ⚠ 一覧タブにも同じ lid の行が居る(隠れている)── **表の中**を押す
+  await clickReal(page, `[data-pkc-region="filer-table"] [data-pkc-entry="${subLid}"]`);
   await expect(rows.locator('[data-pkc-field="title"]')).toHaveText(['📁 空フォルダ', '議事録']);
 
   expect(errors).toEqual([]);
@@ -555,7 +570,7 @@ test('🔴 P7 段②: 素の md を取り込む ── 宣言(file_handlers)と�
 
   // ⚠ **ボタンを実際に押す**経路を通す(hidden input へ直接入れると導線の断線を見逃す)
   const chooser = page.waitForEvent('filechooser');
-  await clickMenuItem(page, '[data-pkc-action="import-file"]');
+  await clickReal(page, '[data-pkc-action="import-file"]');
   // ⚠ MIME は **空**で渡す ── OS のピッカーは `.md` に MIME を付けないことが多い。
   // ここを text/markdown で埋めると「MIME で振り分ける」実装でも緑になる
   await (await chooser).setFiles([
@@ -600,7 +615,7 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
 
   // 📤 書き出す(実ブラウザの Blob → <a download> 経路を通す)
   const dl = page.waitForEvent('download');
-  await clickMenuItem(page, '[data-pkc-action="export-archive"]');
+  await clickReal(page, '[data-pkc-action="export-archive"]');
   const download = await dl;
   expect(download.suggestedFilename()).toMatch(/\.pkc3\.zip$/);
   const path = await download.path();
@@ -711,7 +726,7 @@ test('🔴 可搬 HTML: 書き出したファイルが**単体で開いて読め
   await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(2);
 
   const dl = page.waitForEvent('download');
-  await clickMenuItem(page, '[data-pkc-action="export-html"]');
+  await clickReal(page, '[data-pkc-action="export-html"]');
   const download = await dl;
   expect(download.suggestedFilename()).toMatch(/\.html$/);
   // ⚠ `download.path()` は**拡張子の無い**一時ファイルを指す ── `file://` で開くと
@@ -732,8 +747,22 @@ test('🔴 可搬 HTML: 書き出したファイルが**単体で開いて読め
   // 🔴 本文の `<!--` + `<script` を**素通りで**読めている = トークナイザが
   // 壊れていない。退避が足りないとページごと真っ白になり、ここへ到達しない
   await expect(viewer.locator('#body')).toContainText('本文');
-  await expect(viewer.locator('#body')).toContainText('<script src="x">');
+  // ⚠ 1 文字一致では見ない ── 本文は markdown として描かれるので、typographer が
+  //    `"x"` を丸引用符に変える(それは正しい)。危険なのは **`<` が飲み込まれる**ほうで、
+  //    こちらは 1 個でも欠けたら本文が静かに消えている
+  await expect(viewer.locator('#body')).toContainText('<script src=');
+  expect(
+    await viewer.locator('#body').evaluate((el) => (el.textContent ?? '').split('<').length - 1),
+    '`<` が飲み込まれている(本文が静かに欠けている)',
+  ).toBe(2);
   await expect(viewer.locator('script')).toHaveCount(2); // データ用 + 閲覧 UI
+
+  // 🔴 **描かれている**(P8 段⑲)── かつては本文を丸ごと `<pre>` に入れていたので、
+  //    見出しも箇条書きも記号のままだった
+  expect(
+    await viewer.locator('#body p, #body h1, #body h2, #body ul, #body ol').count(),
+    '本文が markdown として描かれていない',
+  ).toBeGreaterThan(0);
 
   // 添付を持つ entry へ切り替えると、base64 から復元した画像が**実際に描画**される
   await items.nth(1).click();
@@ -762,7 +791,7 @@ test('🔴 md ZIP: 落ちるものを言い、添付が**相対パス**で入る
   await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(2);
 
   const dl = page.waitForEvent('download');
-  await clickMenuItem(page, '[data-pkc-action="export-markdown"]');
+  await clickReal(page, '[data-pkc-action="export-markdown"]');
   const download = await dl;
   expect(download.suggestedFilename()).toMatch(/\.md\.zip$/);
 

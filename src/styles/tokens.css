@@ -1,0 +1,243 @@
+/*
+ * 配色トークン(P8)。**ここ以外に色を書かない**。
+ *
+ * 🔑 **地は無彩色、色は情報にだけ**(user 指示 2026-08-03「目指してたのは
+ * シンプルかつ高機能さ」)。彩度のある色を置いてよいのは 3 か所だけ:
+ *   ① 最上部の帯  ② いま選んでいるもの  ③ 種別を表すチップ
+ * それ以外(地・枠・本文)は無彩色に寄せる。
+ *
+ * ⚠ 初期の PKC3 は**端末風の緑を地に敷いて**いた。方針と逆なので、
+ * その見た目は `terminal` テーマの 1 つへ降ろした(消してはいない)。
+ *
+ * ⚠ **上書きするのはトークンだけ**。ここから下の規則(`app.css`)は 1 行も
+ * テーマで分岐しない ── 分岐を書いた瞬間に「片方でしか直っていない」が生まれる。
+ *
+ * 出典(色は公式定義から取る。目分量で作らない):
+ *   GitHub    … Primer Primitives(canvas/fg/border/accent の各既定)
+ *   Solarized … Ethan Schoonover, base03..base3 + accent 8 色
+ *   Dracula   … Dracula Theme 公式仕様(background/foreground/comment ほか)
+ *   Nord      … Nord 公式(nord0..nord15)
+ * ⚠ 読めるかどうかは目で確かめない ── `tests/adapter/theme-tokens.test.ts` が
+ * 全テーマ × 主要な前景/背景の組でコントラスト比を計算して落とす。
+ */
+
+:root,
+:root[data-pkc-theme='light'] {
+  --bg: #eef0f3;
+  --surface: #ffffff;
+  --surface-2: #f5f6f8;
+  --fg: #16191d;
+  --muted: #59616b;
+  --border: #cdd2d9;
+  --accent: #14663c;
+  --accent-fg: #ffffff;
+  --accent-dim: #dcebe2;
+  --accent-dim-fg: #0d3f26;
+  --danger: #a3231c;
+  --warn: #7a4a00;
+  /* コードの色(地は `--surface-2` = `pre` の背景)*/
+  --code-key: #1f4bb8;
+  --code-lit: #0a6b52;
+  --shadow: 0 2px 6px rgb(0 0 0 / 12%);
+  --sandbox-bg: #ffffff;
+  color-scheme: light;
+}
+
+:root[data-pkc-theme='dark'] {
+  --bg: #14171a;
+  --surface: #1c2024;
+  --surface-2: #23282d;
+  --fg: #e3e7eb;
+  --muted: #9aa4af;
+  --border: #333a41;
+  --accent: #2f8f5b;
+  --accent-fg: #04140b;
+  --accent-dim: #1e3a2a;
+  --accent-dim-fg: #cfeadb;
+  --danger: #f07167;
+  --warn: #e0a350;
+  /* コードの色(地は `--surface-2` = `pre` の背景)*/
+  --code-key: #8ab4f8;
+  --code-lit: #7fd1b0;
+  --shadow: 0 2px 6px rgb(0 0 0 / 45%);
+  --sandbox-bg: #ffffff;
+  color-scheme: dark;
+}
+
+/* GitHub(Primer)*/
+:root[data-pkc-theme='github'] {
+  --bg: #f6f8fa;
+  --surface: #ffffff;
+  --surface-2: #f6f8fa;
+  --fg: #1f2328;
+  --muted: #59636e;
+  --border: #d1d9e0;
+  --accent: #0969da;
+  --accent-fg: #ffffff;
+  --accent-dim: #ddf4ff;
+  --accent-dim-fg: #0a3069;
+  --danger: #cf222e;
+  --warn: #9a6700;
+  /* コードの色(地は `--surface-2` = `pre` の背景)。Primer の keyword / string */
+  --code-key: #cf222e;
+  --code-lit: #0a3069;
+  --shadow: 0 2px 6px rgb(31 35 40 / 12%);
+  --sandbox-bg: #ffffff;
+  color-scheme: light;
+}
+
+:root[data-pkc-theme='github-dark'] {
+  --bg: #0d1117;
+  --surface: #151b23;
+  --surface-2: #212830;
+  --fg: #d1d7e0;
+  --muted: #9198a1;
+  --border: #3d444d;
+  --accent: #4493f8;
+  --accent-fg: #0d1117;
+  --accent-dim: #143d79;
+  --accent-dim-fg: #d1e4ff;
+  --danger: #ff7b72;
+  --warn: #d29922;
+  /* コードの色(地は `--surface-2`)。Primer dark の keyword / string */
+  --code-key: #ff7b72;
+  --code-lit: #a5d6ff;
+  --shadow: 0 2px 6px rgb(1 4 9 / 60%);
+  --sandbox-bg: #ffffff;
+  color-scheme: dark;
+}
+
+/* Solarized(Ethan Schoonover)*/
+:root[data-pkc-theme='solarized'] {
+  --bg: #eee8d5; /* base2 */
+  --surface: #fdf6e3; /* base3 */
+  --surface-2: #eee8d5;
+  --fg: #073642; /* base02 ── base00 は本文向けで、UI には暗い側を使う */
+  --muted: #546a71; /* base01 をわずかに濃く ── base01 のままだと見出し帯で 4.39:1 */
+  --border: #d5cdb6;
+  --accent: #1a6b8f;
+  --accent-fg: #fdf6e3;
+  --accent-dim: #d7e6ee;
+  --accent-dim-fg: #08303f;
+  --danger: #b0261f;
+  --warn: #8a6600;
+  /* コードの色(地は `--surface-2`)。green/cyan を暗く ── 公式値は地に対して 2.6:1 */
+  --code-key: #5f6f00;
+  --code-lit: #186a63;
+  --shadow: 0 2px 6px rgb(7 54 66 / 14%);
+  --sandbox-bg: #ffffff;
+  color-scheme: light;
+}
+
+:root[data-pkc-theme='solarized-dark'] {
+  --bg: #002b36; /* base03 */
+  --surface: #073642; /* base02 */
+  --surface-2: #0b4453;
+  --fg: #dce4e4;
+  --muted: #9fadad; /* base1 をわずかに明るく ── base1 のままだと見出し帯で 3.99:1 */
+  --border: #1c5464;
+  --accent: #56a8d6;
+  --accent-fg: #002b36;
+  --accent-dim: #0e4c5e;
+  --accent-dim-fg: #d3e7f0;
+  --danger: #f0736c;
+  --warn: #d5a520;
+  /* コードの色(地は `--surface-2`)。green/cyan を明るく ── 公式値は 3.3:1 */
+  --code-key: #a5bc22;
+  --code-lit: #4fc4ba;
+  --shadow: 0 2px 6px rgb(0 20 26 / 55%);
+  --sandbox-bg: #ffffff;
+  color-scheme: dark;
+}
+
+/* Dracula(公式仕様)*/
+:root[data-pkc-theme='dracula'] {
+  --bg: #21222c;
+  --surface: #282a36; /* Background */
+  --surface-2: #343746;
+  --fg: #f8f8f2; /* Foreground */
+  --muted: #9aa4d0; /* Comment(#6272a4)は地に対して暗すぎるので明度を上げた */
+  --border: #44475a; /* Current Line */
+  --accent: #bd93f9; /* Purple */
+  --accent-fg: #21222c;
+  --accent-dim: #3b3355;
+  --accent-dim-fg: #e6dcff;
+  --danger: #ff5555; /* Red */
+  --warn: #ffb86c; /* Orange */
+  /* コードの色(地は `--surface-2`)。Dracula の Pink / Yellow */
+  --code-key: #ff79c6;
+  --code-lit: #f1fa8c;
+  --shadow: 0 2px 6px rgb(0 0 0 / 50%);
+  --sandbox-bg: #ffffff;
+  color-scheme: dark;
+}
+
+/* Nord(nord0..nord15)*/
+:root[data-pkc-theme='nord'] {
+  --bg: #2e3440; /* nord0 */
+  --surface: #3b4252; /* nord1 */
+  --surface-2: #434c5e; /* nord2 */
+  --fg: #eceff4; /* nord6 */
+  --muted: #b9c2d0; /* nord4 寄り(nord3 は地に対して暗すぎる) */
+  --border: #4c566a; /* nord3 */
+  --accent: #88c0d0; /* nord8 */
+  --accent-fg: #2e3440;
+  --accent-dim: #3f5666;
+  --accent-dim-fg: #e5f0f5;
+  --danger: #e5949d; /* nord11(#bf616a)は地に対して 2.4:1 なので明るく */
+  --warn: #ebcb8b; /* nord13 */
+  /* コードの色(地は `--surface-2`)。nord9 / nord14 を明るく ── 公式値は 3.2:1 */
+  --code-key: #9fc0dd;
+  --code-lit: #b5cfa0;
+  --shadow: 0 2px 6px rgb(0 0 0 / 45%);
+  --sandbox-bg: #ffffff;
+  color-scheme: dark;
+}
+
+/* 端末風(P7b までの既定。方針転換で「6 つのうちの 1 つ」へ降ろした)*/
+:root[data-pkc-theme='terminal'] {
+  --bg: #0d0f0a;
+  --surface: #111510;
+  --surface-2: #162010;
+  --fg: #c8d8b0;
+  --muted: #8ca877;
+  --border: #2b3a20;
+  --accent: #33ff66;
+  --accent-fg: #050a03;
+  --accent-dim: #1a7a33;
+  --accent-dim-fg: #eaffee;
+  --danger: #ff6b6b;
+  --warn: #ffaa22;
+  /* コードの色(地は `--surface-2` = `pre` の背景)*/
+  --code-key: #7fdc8f;
+  --code-lit: #d8c07a;
+  --shadow: 0 2px 6px rgb(0 0 0 / 55%);
+  --sandbox-bg: #ffffff;
+  color-scheme: dark;
+}
+
+/* 幾何とフォント ── **テーマで変えない**(配色ではないので) */
+:root {
+  --radius: 3px;
+  --s1: 0.125rem;
+  --s2: 0.25rem;
+  --s3: 0.5rem;
+  --s4: 0.75rem;
+  --s5: 1rem;
+  /* 行の高さ(業務画面の密度。文字 13px に対して詰める) */
+  --row-h: 26px;
+
+  /*
+   * 🔴 UI のフォント ── **等幅にしない**。
+   * 初期は 'BIZ UDGothic', 'Share Tech Mono', … という並びで、
+   * **日本語(丸ゴシック)とラテン(等幅テクノ書体)が混ざって**いた。
+   * これが「エセ日本語チックでキモい」の視覚的な正体である
+   * (ノートアプリの UI 本文を等幅にする例は無い)。
+   * OS の UI 書体に素直に従う。
+   */
+  --font:
+    system-ui, -apple-system, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN',
+    'Noto Sans JP', 'Yu Gothic UI', Meiryo, sans-serif;
+  /** 等幅は**コードと数値**だけに使う。 */
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Noto Sans Mono', monospace;
+}

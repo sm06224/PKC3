@@ -142,3 +142,128 @@ describe('asset ref hydrate (P4b)', () => {
     );
   });
 });
+
+/**
+ * P8 段⑲: 🔴 **同じノートのまま本文が差し替わっても、借りた URL が積もらない**。
+ *
+ * 🔴 段⑪ で骨組みを使い回すようにして以来、`disposeLends()` は
+ * **選択が別のノートへ移ったときにしか走らない**。本文の差分描画で
+ * `<img>` を含む塊が差し替わると、古い `<img>` は DOM から外れるのに
+ * 貸し出しは残り続けた ── 実測: 履歴復元を 5 回で **lend 6 / dispose 0**、
+ * 画面の `<img>` は 1 枚。長い編集・履歴の往復ほど常駐が増える
+ * (user 指示 2026-07-27「生成とライフサイクル後の速やかな破棄」の違反)。
+ *
+ * ⚠ 観測点は「画面の `<img>` が 1 枚か」ではない ── それは壊れた実装でも通る。
+ *   **借りた数と返した数の差**を見る。
+ */
+describe('借りた URL の寿命(同一ノートの差し替え)', () => {
+  it('🔴 本文が差し替わるたびに、画面から消えたぶんを返す', async () => {
+    let lends = 0;
+    let disposed = 0;
+    const lender: AssetLender = {
+      lend: async () => {
+        lends += 1;
+        return { url: `blob:k1#${lends}`, dispose: () => (disposed += 1) };
+      },
+      getBlob: async () => null,
+    };
+    const root = document.createElement('div');
+    document.body.append(root);
+    const d = new Dispatcher();
+    const regions = buildShell(root);
+    const detail = new DetailRenderer(regions.detail, lender);
+    d.onState((s) => detail.render(s));
+    connectStoreEffects(d, {
+      ...stubRevisionOps(),
+      getBody: async () => '一行目\n\n![画像](asset:k1)\n',
+      persistEntry: async () => {},
+      deleteEntry: async () => {},
+    });
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('e1')], relations: [] });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
+    await new Promise((r) => setTimeout(r, 20));
+
+    const ROUNDS = 5;
+    for (let i = 1; i <= ROUNDS; i++) {
+      d.dispatch({
+        type: 'ENTRY_RESTORED',
+        mode: 'revision',
+        meta: meta('e1'),
+        // 上に行が増えるので、画像を含む塊が作り直される
+        body: `一行目\n${Array.from({ length: i }, (_, n) => `追加${n}`).join('\n')}\n\n![画像](asset:k1)\n`,
+      });
+      await new Promise((r) => setTimeout(r, 20));
+    }
+
+    // ① 🔴 **測る次元が非ゼロ**(空振り防止)── 借り直しが起きていなければ
+    //    「積もらない」は自明に通る
+    expect(lends, `借り直しが起きていない(lend=${lends})`).toBeGreaterThan(ROUNDS);
+    // ② 画面に出ているのは 1 枚
+    expect(root.querySelectorAll('img[data-pkc-asset-key]')).toHaveLength(1);
+    // ③ 残高は 1 本(いま画面に出ているぶんだけ)
+    expect(lends - disposed, `借りた URL が積もっている(借 ${lends} / 返 ${disposed})`).toBe(1);
+  });
+
+  /**
+   * 🔴 **使っている URL は返さない**。
+   *
+   * ⚠ 上の test だけでは「返しすぎ」を捕まえられない ── 借りた直後に全部返す
+   * 実装でも残高は 1 に見える(最後の貸出は prune の**後**に積まれるため)。
+   * 同じ key を 2 つの塊が参照している状態で**片方だけ**差し替え、
+   * 画面に残っている `<img>` の URL が返されていないことを直接見る。
+   */
+  it('🔴 まだ画面に出ている `<img>` の URL を返してしまわない', async () => {
+    const freed = new Set<string>();
+    let n = 0;
+    const lender: AssetLender = {
+      lend: async () => {
+        n += 1;
+        const url = `blob:k1#${n}`;
+        return { url, dispose: () => freed.add(url) };
+      },
+      getBlob: async () => null,
+    };
+    const root = document.createElement('div');
+    document.body.append(root);
+    const d = new Dispatcher();
+    const regions = buildShell(root);
+    const detail = new DetailRenderer(regions.detail, lender);
+    d.onState((s) => detail.render(s));
+    // 同じ key を**2 つの塊**が参照する
+    // ⚠ 差し替えるのは**2 枚目の塊そのもの**(alt を変える)── 別の段落を
+    //    いじるだけだと 2 枚とも画面に残ってしまい、この次元を測れない
+    const body = (extra: string): string =>
+      `上の段落\n\n![画像](asset:k1)\n\n下の段落\n\n![同じ画像${extra}](asset:k1)\n`;
+    connectStoreEffects(d, {
+      ...stubRevisionOps(),
+      getBody: async () => body(''),
+      persistEntry: async () => {},
+      deleteEntry: async () => {},
+    });
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('e1')], relations: [] });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
+    await new Promise((r) => setTimeout(r, 20));
+    // 前提: 2 つの参照が **1 本**の貸出を共有している(段⑪ の規約)
+    expect(root.querySelectorAll('img[data-pkc-asset-key]'), '参照が 2 つ出ていない').toHaveLength(2);
+    expect(n, '同じ key を 2 回借りている').toBe(1);
+
+    // 上の段落だけ差し替える(下の `<img>` はそのまま残る)
+    d.dispatch({ type: 'ENTRY_RESTORED', mode: 'revision', meta: meta('e1'), body: body('(直した)') });
+    await new Promise((r) => setTimeout(r, 20));
+    // 本文を変えない再描画も 1 回通す(勝手に返していないか)
+    d.dispatch({ type: 'RENAME_ENTRY_TITLE', lid: 'e1', title: '題名を変えた' });
+    await new Promise((r) => setTimeout(r, 20));
+
+    const imgs = [...root.querySelectorAll<HTMLImageElement>('img[data-pkc-asset-key]')];
+    expect(imgs.length, '画面から参照が消えた').toBe(2);
+    // 前提: 片方だけが borrowed し直された(= 差し替えが起きている)
+    expect(n, '差し替えが起きていない(この次元を測れていない)').toBeGreaterThan(1);
+    for (const img of imgs) {
+      expect(
+        freed.has(img.getAttribute('src') ?? ''),
+        `画面に出ている URL を返してしまった(${img.getAttribute('src')})`,
+      ).toBe(false);
+    }
+  });
+});
+

@@ -43,15 +43,21 @@ interface Harness {
   revoked: string[];
   failures: string[];
   win: FakeWin;
+  /** `readSeed` に渡った appId(P8 段⑭ の観測点)。 */
+  seedFor: string[];
   closeWindow: () => void;
   deps: Parameters<typeof launchTile>[1];
 }
 
-function harness(body: string | null, opts: { blocked?: boolean } = {}): Harness {
+function harness(
+  body: string | null,
+  opts: { blocked?: boolean; seed?: Record<string, string> } = {},
+): Harness {
   const opened: Array<{ url: string; features: string }> = [];
   const created: string[] = [];
   const revoked: string[] = [];
   const failures: string[] = [];
+  const seedFor: string[] = [];
   const win = fakeWindow();
   let release: (() => void) | null = null;
   let seq = 0;
@@ -61,6 +67,7 @@ function harness(body: string | null, opts: { blocked?: boolean } = {}): Harness
     revoked,
     failures,
     win,
+    seedFor,
     closeWindow: () => {
       win.closed = true;
       release?.();
@@ -81,6 +88,11 @@ function harness(body: string | null, opts: { blocked?: boolean } = {}): Harness
         new Promise<void>((resolve) => {
           release = resolve;
         }),
+      origin: 'http://x.test',
+      readSeed: (appId) => {
+        seedFor.push(appId);
+        return opts.seed ?? {};
+      },
       fail: (m) => failures.push(m),
     },
   };

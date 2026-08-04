@@ -3,13 +3,13 @@
  * happy-dom の e2e が保証しない層(実座標のクリック・可視高さ・pageerror 0)を検品。
  */
 import { test, expect } from '@playwright/test';
-import { gotoApp, collectPageErrors, clickReal, clickMenuItem } from './helpers';
+import { gotoApp, collectPageErrors, clickReal, createEntry } from './helpers';
 
 test('boot → ノート作成 → 編集 → 保存が画面に反映される', async ({ page }) => {
   const errors = collectPageErrors(page);
   await gotoApp(page);
 
-  await clickMenuItem(page, '[data-pkc-action="create-entry"][data-pkc-archetype="text"]');
+  await createEntry(page, 'text');
   const ta = page.locator('[data-pkc-field="editor-body"]');
   await expect(ta).toBeVisible();
   await ta.click();
@@ -49,14 +49,20 @@ test('boot → ノート作成 → 編集 → 保存が画面に反映される'
     page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]'),
   ).toHaveCount(0);
 
-  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="filer"]');
+  await clickReal(page, '[data-pkc-browse="filer"]');
   await clickReal(page, '[data-pkc-action="show-trash"]');
   const trash = page.locator('[data-pkc-region="filer-trash"]');
   await expect(trash.locator('li')).toHaveCount(1);
   await clickReal(page, '[data-pkc-action="restore-trash"]');
+  // ⚠ 一覧は**別のタブ**にある(P8 段⑤)── 戻ってから数える
+  await clickReal(page, '[data-pkc-browse="list"]');
   await expect(
     page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]'),
-  ).toHaveCount(1); // 復元で sidebar に戻る
+  ).toHaveCount(1); // 復元で一覧に戻る
+  // ⚠ ゴミ箱は**フォルダのタブへ戻ってから**数える ── 隠れている面は描き直されない
+  // ので、一覧を出したまま数えると「前に描いた古い DOM」を見ることになる
+  // (3 回に 2 回落ちる flake の正体。user が見る形で観測する)
+  await clickReal(page, '[data-pkc-browse="filer"]');
   await expect(trash.locator('li')).toHaveCount(0);
 
   expect(errors).toEqual([]);

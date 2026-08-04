@@ -16,12 +16,19 @@ import {
   hasMarkdownSyntax,
 } from '@features/markdown/markdown-render';
 import { parseFrontmatter, extractVars } from '@features/markdown/frontmatter';
+import { hydrateMermaid, type MermaidScope } from './mermaid-hydrate';
+import { applyBlocks, EMPTY_VIEW, type BlockView } from './apply-blocks';
+import { iconButton } from './icons';
+import { buildFormatBar } from './format-bar';
+import { MarkdownClient } from '@adapter/platform/render/markdown-client';
 import {
   extractDocumentGlobals,
   extractHeadingNumberConfig,
   applyDocumentGlobals,
 } from '@features/markdown/document-globals';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
+import { isAppMime } from '@features/launcher/tiles';
+import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
 import type { AppState, AppPhase } from '@adapter/state/app-state';
 
 /** 添付表示のための asset 面(main が AssetBlobStore を cid 束縛で注入)。 */
@@ -46,18 +53,106 @@ export class DetailRenderer {
   /** この render pass が貸し出した ObjectURL の dispose 群。**表示の寿命の
    *  終わり(次の render / 選択遷移)で必ず全部呼ぶ**(生成物のライフサイクル
    *  終端での即破棄 ── user 指示 2026-07-27 不可侵)。 */
-  private readonly lends: Array<() => void> = [];
+  /**
+   * 借りている ObjectURL(と返し方)。
+   *
+   * 🔴 **どの要素のために借りたか**を一緒に持つ(P8 段⑲)。持っていないと
+   * 「画面から消えた要素ぶんだけ返す」ができず、**同じノートを開いたまま**
+   * 本文が差し替わるたびに溜まる ── 実測: 履歴復元を 5 回で
+   * **lend 6 回 / dispose 0 回、画面の `<img>` は 1 枚**。
+   * 骨組みを使い回す(段⑪)以上、`disposeLends()` は選択が動いたときしか
+   * 走らないので、差分描画の側にも返す道が要る(図の `pruneScopes` と同じ形)。
+   */
+  private readonly lends: Array<{ dispose: () => void; els: Element[] }> = [];
   /** 非同期 hydrate の stale 防止(選択が移ったら結果を捨てて即 dispose)。 */
   private hydrateToken = 0;
 
-  constructor(region: HTMLElement, assets: AssetLender | null = null) {
+  /**
+   * 🔴 **骨組みは使い回す**(P8 段⑪。user 指示 2026-08-03
+   * 「レンダリングした後にスクロールがトップに戻る no-op も塞いでね」)。
+   *
+   * かつて view の描画は毎回 `region.textContent = ''` から始めていた。本文が
+   * 変わるたび(追記 / 保存 / トグルの ack)に DOM が全部作り直され、
+   * **読んでいた位置が先頭へ飛んでいた** ── 長いログでは追記した先が見えなくなる。
+   * いまは題名・操作・本文の器を残し、**本文だけ差分で**当てる。
+   */
+  private skeletonLid: string | null = null;
+  private titleEl: HTMLElement | null = null;
+  private barSlot: HTMLElement | null = null;
+  private panelSlot: HTMLElement | null = null;
+  private bodyHost: HTMLElement | null = null;
+  /** 本文の出し方(markdown / 素のまま / 添付)。変わったら器ごと作り直す。 */
+  private bodyKind: 'md' | 'plain' | 'attachment' | 'loading' | null = null;
+  private bodyView: BlockView = EMPTY_VIEW;
+  /**
+   * 図の面倒を**塊ごと**に持つ(全体に掛け直すと生きている `<img>` を壊す)。
+   * ⚠ 新しい塊を作る前に `prune()` して、**器が全部外れた塊は畳む**
+   * (P8 段⑰。レビュー H-5 ── 積もると PNG の URL と観測器が残り続ける)。
+   */
+  private readonly mermaidScopes: MermaidScope[] = [];
+  /**
+   * 編集へ入る直前の scroll。⚠ 編集の面は別物なので骨組みごと作り直すが、
+   * **戻ってきたら元の位置へ戻す** ── 保存しただけで先頭へ飛ぶのも同じ no-op。
+   */
+  private parkedScroll: { lid: string; top: number } | null = null;
+  /**
+   * 骨組みを組み直した直後に戻したい位置。
+   * ⚠ **本文を入れてから**戻す ── 空の器に `scrollTop` を代入しても
+   * 「まだ scrollHeight が足りない」ので **0 に丸められる**(実際にそう外した)。
+   */
+  private pendingScroll: number | null = null;
+
+  /** markdown を描く口(既定は自前。⚠ **要るまで worker は作らない**)。 */
+  private readonly markdown: MarkdownClient;
+
+  constructor(
+    region: HTMLElement,
+    assets: AssetLender | null = null,
+    markdown: MarkdownClient = new MarkdownClient(),
+  ) {
     this.region = region;
     this.assets = assets;
+    this.markdown = markdown;
   }
 
+  /** 編集プレビューの予約を捨てる(編集を抜けるとき)。 */
+  private cancelPreview: (() => void) | null = null;
+  /** 図の後始末(ObjectURL の revoke と観測の解除)。 */
+  private disposeMermaid: (() => void) | null = null;
+
   private disposeLends(): void {
-    for (const d of this.lends.splice(0)) d();
+    for (const l of this.lends.splice(0)) l.dispose();
     this.hydrateToken += 1;
+    this.cancelPreview?.();
+    this.cancelPreview = null;
+    this.disposeMermaid?.();
+    this.disposeMermaid = null;
+    for (const sc of this.mermaidScopes.splice(0)) sc.dispose();
+  }
+
+  /**
+   * 画面から消えた要素のぶんだけ返す(図の `pruneScopes` と同じ形)。
+   * ⚠ **1 つでも生きていれば残す** ── 同じ key を複数の塊が参照しているとき、
+   * 片方が消えただけで返すと生きている `<img>` の src が死ぬ。
+   */
+  private pruneLends(): void {
+    for (let i = this.lends.length - 1; i >= 0; i--) {
+      const l = this.lends[i]!;
+      if (l.els.some((e) => e.isConnected)) continue;
+      l.dispose();
+      this.lends.splice(i, 1);
+    }
+  }
+
+  /** 骨組みを捨てる(次の描画で組み直す)。 */
+  private dropSkeleton(): void {
+    this.skeletonLid = null;
+    this.titleEl = null;
+    this.barSlot = null;
+    this.panelSlot = null;
+    this.bodyHost = null;
+    this.bodyKind = null;
+    this.bodyView = EMPTY_VIEW;
   }
 
   render(state: AppState): void {
@@ -96,58 +191,159 @@ export class DetailRenderer {
     this.lastPhase = state.phase;
     this.lastPanel = state.revisionPanel;
 
-    this.disposeLends(); // 前の表示が借りた URL はここで寿命終端
-    this.region.textContent = '';
-    if (!state.selectedLid) {
+    const lid = state.selectedLid;
+    if (!lid) {
+      this.disposeLends();
+      this.region.textContent = '';
+      this.dropSkeleton();
       this.mode = 'empty';
       return;
     }
-    this.region.append(this.title(state, state.selectedLid));
+
+    // 🔴 骨組みは**同じノートを見ている間は作り直さない**(scroll を殺さない)
+    const fresh = this.skeletonLid !== lid || !this.bodyHost?.isConnected;
+    if (fresh) {
+      this.disposeLends(); // 前の表示が借りた URL はここで寿命終端
+      this.region.textContent = '';
+      this.titleEl = document.createElement('h2');
+      this.titleEl.setAttribute('data-pkc-field', 'detail-title');
+      this.barSlot = document.createElement('div');
+      this.barSlot.setAttribute('data-pkc-field', 'detail-bar-slot');
+      this.panelSlot = document.createElement('div');
+      this.panelSlot.setAttribute('data-pkc-field', 'detail-panel-slot');
+      this.bodyHost = document.createElement('div');
+      this.bodyHost.setAttribute('data-pkc-field', 'detail-body-host');
+      this.region.append(this.titleEl, this.barSlot, this.panelSlot, this.bodyHost);
+      this.skeletonLid = lid;
+      this.bodyKind = null;
+      this.bodyView = EMPTY_VIEW;
+      // ⚠ 別のノートへ移ったときだけ先頭から(そこは飛んで正しい)。
+      //    編集から戻ったときは**元の位置へ**。実際に戻すのは本文を入れた後
+      this.pendingScroll = this.parkedScroll?.lid === lid ? this.parkedScroll.top : 0;
+      this.parkedScroll = null;
+    }
+    this.titleEl!.textContent = state.entryMetas.get(lid)?.title ?? '';
 
     if (body === null) {
-      const loading = document.createElement('p');
-      loading.setAttribute('data-pkc-field', 'detail-loading');
-      loading.textContent = '(loading…)';
-      this.region.append(loading);
+      this.barSlot!.textContent = '';
+      this.panelSlot!.textContent = '';
+      if (this.bodyKind !== 'loading') {
+        this.bodyKind = 'loading';
+        this.bodyView = EMPTY_VIEW;
+        this.bodyHost!.textContent = '';
+        const loading = document.createElement('p');
+        loading.setAttribute('data-pkc-field', 'detail-loading');
+        loading.textContent = '読み込んでいます…';
+        this.bodyHost!.append(loading);
+      }
       return;
     }
 
+    this.renderBar(state);
+    this.renderPanel(state, lid);
+
+    const fm = parseFrontmatter(body);
+    const meta = state.entryMetas.get(lid);
+    if (meta?.archetype === 'attachment') {
+      // 添付は器ごと作り直す(preview / blob の貸し借りが絡むので差分にしない)
+      // 🔴 **作り直す前に、借りていたものを返す**(P8 段⑰。レビュー H-4)。
+      //    骨組みを使い回すようになった段⑪ 以降、`fresh` でない再描画では
+      //    `disposeLends()` が走らないのに `textContent=''` で `<img>` だけ消えて
+      //    いた ── 実測: 同じノートのまま履歴の開閉を 3 往復すると
+      //    **lend 7 回 / dispose 0 回**、画面の `<img>` は 1 枚。
+      //    ⚠ `hydrateToken` も進むので、飛んでいる hydratePreview が stale と
+      //    判定されて detached な器へ描かなくなる(こちらも同じ穴だった)
+      this.disposeLends();
+      this.bodyKind = 'attachment';
+      this.bodyView = EMPTY_VIEW;
+      this.bodyHost!.textContent = '';
+      this.renderAttachment(body, fm.body);
+      this.restoreScroll();
+      return;
+    }
+    if (hasMarkdownSyntax(fm.body)) {
+      if (this.bodyKind !== 'md') {
+        this.bodyKind = 'md';
+        this.bodyView = EMPTY_VIEW;
+        this.bodyHost!.textContent = '';
+        this.bodyHost!.className = 'pkc-md-rendered';
+        this.bodyHost!.setAttribute('data-pkc-field', 'detail-body');
+      }
+      const html = renderMarkdown(fm.body, {
+        vars: extractVars(body),
+        sourceLineAnchors: true,
+        // heading-number は text レベル前処理(LineMap 不変)── 全文 body から抽出
+        headingNumber: extractHeadingNumberConfig(body),
+      });
+      // 🔑 **変わった塊だけ**当てる(P8 段⑩⑪)── scroll も図も生き残る
+      const applied = applyBlocks(this.bodyHost!, html, this.bodyView);
+      this.bodyView = applied.view;
+      // writing / direction / align / layout の属性契約(dir 込みで 1 箇所)
+      applyDocumentGlobals(this.bodyHost!, extractDocumentGlobals(body));
+      // ⚠ 面倒を見るのは**新しく入った所だけ**(全体に掛け直すと、生きている
+      //    `<img>` の ObjectURL を revoke してしまう)
+      if (applied.inserted.length > 0) {
+        void this.hydrateAssetRefs(applied.inserted, this.hydrateToken);
+        this.mermaidScopes.push(hydrateMermaid(applied.inserted));
+        pruneScopes(this.mermaidScopes);
+      }
+      // 🔴 **差し替えで画面から消えた `<img>` のぶんを返す**(P8 段⑲)。
+      //    ⚠ `inserted.length > 0` の中に入れてはいけない ── 塊が**消えるだけ**
+      //    (差し替えではなく削除)のときは inserted が空で、そこが一番溜まる
+      this.pruneLends();
+      this.restoreScroll();
+    } else {
+      // 方言判定 false は plain text 扱い(PKC2 と同じゲート)
+      if (this.bodyKind !== 'plain') {
+        this.bodyKind = 'plain';
+        this.bodyView = EMPTY_VIEW;
+        this.bodyHost!.textContent = '';
+        this.bodyHost!.className = '';
+        this.bodyHost!.removeAttribute('data-pkc-field');
+        const pre = document.createElement('pre');
+        pre.setAttribute('data-pkc-field', 'detail-body');
+        this.bodyHost!.append(pre);
+      }
+      // ⚠ `textContent` の代入は中身が同じなら DOM を作り直さない(scroll も動かない)
+      const pre = this.bodyHost!.firstElementChild as HTMLElement;
+      if (pre.textContent !== fm.body) pre.textContent = fm.body;
+      this.restoreScroll();
+    }
+  }
+
+  /**
+   * 実際にスクロールする器。
+   * ⚠ **`this.region` ではない** ── ここは `CenterRouter` が作った pane で、
+   * `overflow: auto` を持つのは 1 つ外の `[data-pkc-region="detail"]` である
+   * (pane の `scrollTop` を読み書きしても常に 0 で、位置戻しが黙って効かない ──
+   *  実際にそう外した)。
+   */
+  private get scroller(): HTMLElement {
+    return this.region.closest<HTMLElement>('[data-pkc-region="detail"]') ?? this.region;
+  }
+
+  /** 骨組みを組み直したときの位置戻し。⚠ **本文が入ってから**呼ぶ。 */
+  private restoreScroll(): void {
+    if (this.pendingScroll === null) return;
+    this.scroller.scrollTop = this.pendingScroll;
+    this.pendingScroll = null;
+  }
+
+  /** 本文の上の操作(小さいので毎回組み直す ── 出入りは phase が変わったときだけ)。 */
+  private renderBar(state: AppState): void {
+    const slot = this.barSlot!;
+    slot.textContent = '';
     // error phase では「編集」を出さない ── START_EDIT は ready 限定なので、
     // 出したまま無言 no-op にしない(review B-1 原則: 無言の操作拒否を作らない)
     if (state.phase === 'ready') {
       const bar = document.createElement('div');
       bar.setAttribute('data-pkc-field', 'detail-toolbar');
-      const edit = document.createElement('button');
-      edit.type = 'button';
-      edit.setAttribute('data-pkc-action', 'start-edit');
-      edit.textContent = '編集';
-      // ⚠ data-pkc-entry は「entry を表す要素」(行 / カード)専用の意味論 ──
-      // ボタンには付けない(binder は selectedLid に fallback する)
-      const del = document.createElement('button');
-      del.type = 'button';
-      del.setAttribute('data-pkc-action', 'delete-entry');
-      del.textContent = '削除';
-      const hist = document.createElement('button');
-      hist.type = 'button';
-      hist.setAttribute('data-pkc-action', 'show-history');
-      hist.textContent = '履歴';
-      // 📤 このノートだけを書き出す(P6f)。**削除の隣に置く** ── 消す前に
-      // 通る場所に無いと導線として働かない(user 指示 2026-08-02:
-      // 「そういうのは削除じゃなくてアーカイブエクスポートの導線を用意すればいい」)
-      const expOne = document.createElement('button');
-      expOne.type = 'button';
-      expOne.setAttribute('data-pkc-action', 'export-entry');
-      expOne.textContent = '書き出す';
-      bar.append(edit, expOne, del, hist);
-      this.region.append(bar);
-      if (state.revisionPanel && state.revisionPanel.lid === state.selectedLid) {
-        this.region.append(renderHistoryPanel(state.revisionPanel.items));
-      }
+      // 🔑 **ここには「編集」だけ**(P8)。書き出す / 履歴 / 削除は右の情報ペインが
+      // 持つ ── 同じボタンを 2 か所に出すと、押す場所が定まらない。
+      // 🔑 **追記もここに無い**(P8 段⑧)── 編集画面を通らない別の器が持つ
+      bar.append(iconButton('start-edit', '編集'));
+      slot.append(bar);
     } else if (
-      // ⚠ この条件は baseline / persisted / diskAhead に依存するが、view の
-      // skip 指紋は (lid, body, phase) のみ ── 「条件が変わる遷移は必ず phase か
-      // body も変わる」ことに依存している(P3-6b review #8 で全遷移を確認)。
-      // openBody の指紋次元を増やす変更をするときはここを再点検すること
       state.phase === 'error' &&
       state.openBody &&
       state.openBody.baseline !== state.openBody.persisted &&
@@ -162,35 +358,15 @@ export class DetailRenderer {
       retry.setAttribute('data-pkc-action', 'retry-persist');
       retry.textContent = '再保存';
       bar.append(retry);
-      this.region.append(bar);
+      slot.append(bar);
     }
+  }
 
-    const fm = parseFrontmatter(body);
-    const meta = state.selectedLid ? state.entryMetas.get(state.selectedLid) : null;
-    if (meta?.archetype === 'attachment') {
-      this.renderAttachment(body, fm.body);
-      return;
-    }
-    if (hasMarkdownSyntax(fm.body)) {
-      const rendered = document.createElement('div');
-      rendered.className = 'pkc-md-rendered';
-      rendered.setAttribute('data-pkc-field', 'detail-body');
-      rendered.innerHTML = renderMarkdown(fm.body, {
-        vars: extractVars(body),
-        sourceLineAnchors: true,
-        // heading-number は text レベル前処理(LineMap 不変)── 全文 body から抽出
-        headingNumber: extractHeadingNumberConfig(body),
-      });
-      // writing / direction / align / layout の属性契約(dir 込みで 1 箇所)
-      applyDocumentGlobals(rendered, extractDocumentGlobals(body));
-      this.region.append(rendered);
-      void this.hydrateAssetRefs(rendered, this.hydrateToken);
-    } else {
-      // 方言判定 false は plain text 扱い(PKC2 と同じゲート)
-      const pre = document.createElement('pre');
-      pre.setAttribute('data-pkc-field', 'detail-body');
-      pre.textContent = fm.body;
-      this.region.append(pre);
+  private renderPanel(state: AppState, lid: string): void {
+    const slot = this.panelSlot!;
+    slot.textContent = '';
+    if (state.phase === 'ready' && state.revisionPanel && state.revisionPanel.lid === lid) {
+      slot.append(renderHistoryPanel(state.revisionPanel.items));
     }
   }
 
@@ -200,8 +376,12 @@ export class DetailRenderer {
     this.lastSelected = open.lid;
     this.lastBody = null;
 
+    // ⚠ 編集へ入る前の位置を覚える ── 保存して戻ったときに先頭へ飛ばさない
+    if (this.skeletonLid !== null)
+      this.parkedScroll = { lid: this.skeletonLid, top: this.scroller.scrollTop };
     this.disposeLends();
     this.region.textContent = '';
+    this.dropSkeleton();
     // title は uncontrolled input(commit 時に binder が RENAME を先行 dispatch)
     const titleInput = document.createElement('input');
     titleInput.type = 'text';
@@ -211,26 +391,86 @@ export class DetailRenderer {
 
     const bar = document.createElement('div');
     bar.setAttribute('data-pkc-field', 'detail-toolbar');
-    const commit = document.createElement('button');
-    commit.type = 'button';
-    commit.setAttribute('data-pkc-action', 'commit-edit');
-    commit.textContent = '保存';
-    const cancel = document.createElement('button');
-    cancel.type = 'button';
-    cancel.setAttribute('data-pkc-action', 'cancel-edit');
-    cancel.textContent = 'キャンセル';
+    const commit = iconButton('commit-edit', '保存');
+    const cancel = iconButton('cancel-edit', 'キャンセル');
     bar.append(commit, cancel);
     this.region.append(bar);
+    // 🔑 **書式パネル**(P8 段⑥)。編集欄のすぐ上 ── 押す物と効く先を離さない
+    this.region.append(buildFormatBar());
 
+    /**
+     * 🔑 **書きながら見える**(P8 段②)。3 列にしたので、中央を 2 分割すれば
+     * プレビューは「新機能」ではなく**配置の片側**として入る。
+     *
+     * ⚠ 更新は state ではなく **textarea の `input`** で駆動する ── `render()` は
+     * 編集中の同一 entry では早期 return する(カーソルと IME を壊さないため)ので、
+     * state 経由では届かない。
+     * ⚠ 1 打鍵ごとに描かない。**rAF で 1 フレームに畳む** ── 連打すると
+     * markdown の描画が打鍵に追いつかず「もっさり」になる。
+     */
+    const split = document.createElement('div');
+    split.setAttribute('data-pkc-region', 'editor-split');
     const ta = document.createElement('textarea');
     ta.setAttribute('data-pkc-field', 'editor-body');
     ta.value = open.body;
-    this.region.append(ta);
+    const preview = document.createElement('div');
+    preview.setAttribute('data-pkc-region', 'editor-preview');
+    preview.className = 'pkc-md-rendered';
+    split.append(ta, preview);
+    this.region.append(split);
+
+    /**
+     * 🔑 **描くのはワーカー**(P8 段⑨。user 指示 2026-08-03「基本的に重い処理は
+     * ワーカーにしてください」)── markdown の tokenize / render は 1 打鍵ごとに
+     * 走る、いちばん定常に効く仕事である。`follower` が
+     * 「飛ばすのは 1 件、その間の変更は最後の 1 つに畳む」を持つ。
+     * ⚠ HTML の parse(`innerHTML`)はメインに残る ── そこは DOM なので動かせない。
+     */
+    let shown: BlockView = EMPTY_VIEW;
+    /** 図の面倒は**塊ごと**に持つ ── 全体に掛け直すと、生きている `<img>` の
+     *  ObjectURL を revoke してしまい、触っていない図が消える。
+     *  ⚠ 差し替えで外れた器を持つ塊は `prune()` で畳む(段⑰) */
+    const scopes: MermaidScope[] = [];
+    const follow = this.markdown.follower(
+      (html) => {
+        // ⚠ 外された後に描かない(編集を抜けた瞬間の結果で無駄な仕事をしない)
+        if (!preview.isConnected) return;
+        const applied = applyBlocks(preview, html, shown);
+        shown = applied.view;
+        // 🔑 **新しく入った所だけ**図を面倒みる(触っていない図はそのまま)
+        if (applied.inserted.length > 0) {
+          scopes.push(hydrateMermaid(applied.inserted));
+          // 🔴 **積もらせない**(P8 段⑰。レビュー H-5)── 静穏 tick ごとに塊が
+          //    増え、画面に無い PNG の URL と観測器が編集中ずっと生きていた
+          //    (実測: 5 tick で createObjectURL 5 / revokeObjectURL 0)
+          pruneScopes(scopes);
+        }
+      },
+      (e) => {
+        // 🔴 **白紙にしない**。理由を出して原文だけは読めるようにする
+        if (!preview.isConnected) return;
+        preview.textContent = `プレビューを描けませんでした: ${String(e).slice(0, 120)}`;
+      },
+    );
+    // 編集に入った直後は待たせない(**その場で 1 回**)
+    follow.push(parseFrontmatter(ta.value).body, { sourceLineAnchors: false });
+    follow.flush();
+    ta.addEventListener('input', () => {
+      // ⚠ rAF で畳まない ── 畳み込みは follower(静穏 + 上限)が持つ。
+      //    2 か所で畳むと、どちらが効いているか分からなくなる
+      follow.push(parseFrontmatter(ta.value).body, { sourceLineAnchors: false });
+    });
+    // ⚠ 編集を抜けるときに予約と図を畳む(detached なノードへ描かない)
+    this.cancelPreview = () => {
+      follow.dispose();
+      for (const sc of scopes.splice(0)) sc.dispose();
+    };
     ta.focus();
   }
 
   /** attachment フレーバーの view(P4a): メタ + preview + 説明 markdown。 */
   private renderAttachment(rawBody: string, description: string): void {
+    const host = this.bodyHost ?? this.region;
     const meta = readAttachmentMeta(rawBody);
     const info = document.createElement('div');
     info.setAttribute('data-pkc-field', 'attachment-info');
@@ -247,14 +487,39 @@ export class DetailRenderer {
       dl.setAttribute('data-pkc-asset-name', meta.name || 'download');
       dl.textContent = 'ダウンロード';
       info.append(dl);
+      // 🔴 **本文から参照するための導線**(P8 段⑱。レビュー H)。
+      //    マニュアル §3 は `asset:<key>` を「書ける形式」として説明しているのに、
+      //    **本文へ入れる経路も key を見る経路も無かった** ── 書けるのに書けない、
+      //    という状態だった。ここでコピーして貼れるようにする。
+      //    ⚠ 渡すのは**貼れる 1 行そのもの**(裸の `asset:<key>` ではない)──
+      //    裸の key は markdown としてはただの文字列で、貼っても何も出ない。
+      //    組み立ては `features/asset/asset-ref-format.ts` の 1 本(書出しと同規則)
+      const copy = document.createElement('button');
+      copy.type = 'button';
+      copy.setAttribute('data-pkc-action', 'copy-asset-ref');
+      copy.setAttribute('data-pkc-field', 'copy-asset-ref');
+      copy.setAttribute('data-pkc-asset-key', meta.assetKey);
+      copy.setAttribute(
+        'data-pkc-asset-ref',
+        formatAssetRef(meta.name || '', `asset:${meta.assetKey}`, isImageAssetMime(meta.mime)),
+      );
+      copy.title = '本文に貼ると、この添付がそこに出ます';
+      copy.textContent = '参照をコピー';
+      info.append(copy);
     }
-    this.region.append(info);
+    host.append(info);
 
-    const host = document.createElement('div');
-    host.setAttribute('data-pkc-field', 'attachment-preview');
-    this.region.append(host);
+    // 🔑 **アプリとして登録**(P8 段⑭)。
+    //    🔴 PKC3 の中からタイルを作る手段が**1 つも無かった** ── タイルの元データは
+    //    この添付の frontmatter に在るのに、書けるのは PKC2 の取込だけだった。
+    //    ⚠ 置き場所は「操作は対象の隣」── その添付の画面に置く
+    if (isAppMime(meta.mime)) host.append(appTileControls(rawBody));
+
+    const previewHost = document.createElement('div');
+    previewHost.setAttribute('data-pkc-field', 'attachment-preview');
+    host.append(previewHost);
     if (this.assets && meta.assetKey) {
-      void this.hydratePreview(host, meta.assetKey, meta.mime, this.hydrateToken);
+      void this.hydratePreview(previewHost, meta.assetKey, meta.mime, this.hydrateToken);
     }
 
     if (description.trim() !== '') {
@@ -262,8 +527,12 @@ export class DetailRenderer {
       desc.className = 'pkc-md-rendered';
       desc.setAttribute('data-pkc-field', 'detail-body');
       desc.innerHTML = renderMarkdown(description, { sourceLineAnchors: true });
-      this.region.append(desc);
+      host.append(desc);
       void this.hydrateAssetRefs(desc, this.hydrateToken);
+      // 🔴 添付の説明にも図が書ける(P8 段⑬ review L-3)。かつてここだけ
+      //    `hydrateMermaid` を呼んでおらず、**器が空のまま**残っていた ──
+      //    「本文なら描けるのに、添付の説明だと描けない」という一貫性の穴
+      this.mermaidScopes.push(hydrateMermaid(desc));
     }
   }
 
@@ -275,17 +544,28 @@ export class DetailRenderer {
    * - 選択が移っていたら(token 不一致)結果を捨てて即 dispose
    * - 見つからない key は `data-pkc-asset-missing` を立てる(alt が可視 fallback)
    */
-  private async hydrateAssetRefs(rootEl: HTMLElement, token: number): Promise<void> {
+  private async hydrateAssetRefs(
+    /** ⚠ **まとめて渡す**(P8 段⑪)── 1 根ずつ呼ぶと、同じ key を別の塊から
+     *  参照しているとき **2 回借りて ObjectURL が 2 本**になる(実際に退行した)。 */
+    rootEls: HTMLElement | readonly Element[],
+    token: number,
+  ): Promise<void> {
     if (!this.assets) return;
     const assets = this.assets;
+    const roots: readonly Element[] = Array.isArray(rootEls)
+      ? (rootEls as readonly Element[])
+      : [rootEls as Element];
     const byKey = new Map<string, HTMLImageElement[]>();
-    for (const img of rootEl.querySelectorAll<HTMLImageElement>(
-      'img[data-pkc-asset-key]',
-    )) {
+    const collect = (img: HTMLImageElement): void => {
       const key = img.getAttribute('data-pkc-asset-key') ?? '';
       const group = byKey.get(key);
       if (group) group.push(img);
       else byKey.set(key, [img]);
+    };
+    for (const r of roots) {
+      if (r instanceof HTMLImageElement && r.hasAttribute('data-pkc-asset-key')) collect(r);
+      for (const img of r.querySelectorAll<HTMLImageElement>('img[data-pkc-asset-key]'))
+        collect(img);
     }
     if (byKey.size === 0) return;
     await Promise.all(
@@ -300,7 +580,7 @@ export class DetailRenderer {
             for (const img of imgs) img.setAttribute('data-pkc-asset-missing', '');
             return;
           }
-          this.lends.push(lent.dispose);
+          this.lends.push({ dispose: lent.dispose, els: imgs });
           for (const img of imgs) img.src = lent.url;
         } catch {
           if (token === this.hydrateToken)
@@ -324,7 +604,7 @@ export class DetailRenderer {
     const missing = (): void => {
       const p = document.createElement('p');
       p.setAttribute('data-pkc-asset-missing', '');
-      p.textContent = '(asset が見つかりません)';
+      p.textContent = '添付の中身が見つかりません';
       host.append(p);
     };
     try {
@@ -359,7 +639,9 @@ export class DetailRenderer {
         return;
       }
       if (!lent) return missing();
-      this.lends.push(lent.dispose);
+      // 添付の preview は器ごと作り直す(`disposeLends()` が先に走る)ので、
+      // 器そのものを持たせておけば「器が外れたら返す」で同じ規則に乗る
+      this.lends.push({ dispose: lent.dispose, els: [host] });
       if (kind === 'img') {
         const img = document.createElement('img');
         img.setAttribute('data-pkc-field', 'attachment-media');
@@ -421,4 +703,70 @@ export function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+
+/**
+ * ランチャーのタイル設定(P8 段⑭)。
+ *
+ * 🔴 **PKC3 の中からタイルを作れなかった**のを塞ぐ。元データは添付の
+ * frontmatter(`registered_as_app` / `app_group` / `app_icon`)に在るのに、
+ * 書く導線が PKC2 の取込しか無かった ── PKC3 だけの user は、HTML を添付しても
+ * ランチャーに 1 枚も並べられない。
+ *
+ * ⚠ **汎用の frontmatter エディタは作らない**。ここに要るのは 3 つだけで、
+ * 汎用にすると「何を書いていいか分からない欄」になる。
+ */
+function appTileControls(rawBody: string): HTMLElement {
+  const fm = parseFrontmatter(rawBody).meta;
+  const box = document.createElement('div');
+  box.setAttribute('data-pkc-field', 'app-tile-controls');
+
+  const label = document.createElement('label');
+  const check = document.createElement('input');
+  check.type = 'checkbox';
+  check.setAttribute('data-pkc-action', 'toggle-app-tile');
+  check.setAttribute('data-pkc-field', 'app-register');
+  check.checked = fm['attachment.registered_as_app'] === true;
+  const text = document.createElement('span');
+  text.textContent = 'アプリとして登録';
+  label.append(check, text);
+  box.append(label);
+
+  // ⚠ 登録していないときは中の設定を出さない(押せない欄を並べない)
+  if (!check.checked) return box;
+
+  const field = (
+    name: string,
+    action: string,
+    placeholder: string,
+    value: unknown,
+    size: number,
+  ): void => {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.setAttribute('data-pkc-action', action);
+    input.setAttribute('data-pkc-field', name);
+    input.placeholder = placeholder;
+    input.size = size;
+    input.value = typeof value === 'string' ? value : '';
+    box.append(input);
+  };
+  // ⚠ グループ名は**並び順そのもの**(名前順に並ぶ)── placeholder でそう言う
+  field('app-group', 'set-app-group', 'グループ(名前順に並びます)', fm['attachment.app_group'], 16);
+  field('app-icon', 'set-app-icon', '目印', fm['attachment.app_icon'], 3);
+  return box;
+}
+
+/**
+ * 器が全部 DOM から外れた塊を畳む(P8 段⑰)。
+ * ⚠ **その場で配列を縮める** ── 畳んだ塊を残すと、次の tick でまた数えることになる。
+ */
+function pruneScopes(scopes: MermaidScope[]): void {
+  for (let i = scopes.length - 1; i >= 0; i--) {
+    if (scopes[i]!.prune() === 0) {
+      scopes[i]!.dispose();
+      scopes.splice(i, 1);
+    }
+  }
 }

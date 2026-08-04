@@ -26,6 +26,14 @@ export interface LauncherTile {
   order?: number | undefined;
   /** グループ名。未設定は空文字(= 既定グループ)。 */
   group: string;
+  /**
+   * 目印の 1 字(emoji)。
+   * 🔴 取込は `app_icon` を**欠損なく写していた**のに、出す側が無かった
+   * (P8 段⑭ で判明)── PKC2 で付けた目印が全部消えて見えていた。
+   * ⚠ 画像アイコン(`app_icon_asset_key`)はまだ出さない ── IDB Blob の
+   * 貸し借りが要るので、1 字の目印だけで識別価値が足りるうちは足さない。
+   */
+  icon?: string;
   /** 起動の仕方。⚠ `url` は外部サイト、`app` は同梱 HTML。 */
   kind: 'app' | 'url';
   /** `kind === 'url'` のときの飛び先。 */
@@ -81,7 +89,11 @@ export function tileFrom(src: TileSource): LauncherTile | null {
   const group = str(fm['attachment.app_group']) ?? '';
   const orderRaw = fm['attachment.app_order'];
   const order = typeof orderRaw === 'number' && Number.isFinite(orderRaw) ? orderRaw : undefined;
-  const base = { lid: src.lid, title: src.title, group, order };
+  // ⚠ 2 字までに切る ── 長い文字列を入れられると行の高さが崩れる。
+  //    `[...]` で切る(サロゲートペアを割らない ── 絵文字が壊れる)
+  const iconRaw = str(fm['attachment.app_icon']);
+  const icon = iconRaw === undefined ? undefined : [...iconRaw].slice(0, 2).join('');
+  const base = { lid: src.lid, title: src.title, group, order, icon };
 
   if (url !== undefined) {
     // ⚠ 開けない URL は**タイルにしない**(押しても何も起きないタイルを出さない)

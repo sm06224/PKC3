@@ -19,12 +19,18 @@ import { runExplicitPurge } from '@adapter/platform/storage/asset-gc';
 import { buildShell } from '@adapter/ui/render/shell';
 import { showNotices, clearNotices } from '@adapter/ui/render/notices';
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
-import { applyTheme, chooseTheme, initialTheme, type Theme } from '@adapter/ui/render/theme';
+import { applyTheme, chooseTheme, initialTheme, isTheme } from '@adapter/ui/render/theme';
 import { launchTile } from '@adapter/ui/launch-tile';
+import { readAppStorage } from '@adapter/platform/app-storage';
+import { copyPlainText } from '@adapter/platform/clipboard';
+import { MarkdownClient } from '@adapter/platform/render/markdown-client';
+import { AssetClient } from '@adapter/platform/asset/asset-client';
 import { watchForUpdate, type UpdateContainer } from '@adapter/platform/sw/update-prompt';
 import { reloadOnPrebootSwap, type PrebootTarget } from '@adapter/platform/sw/preboot-swap';
-import { SidebarRenderer } from '@adapter/ui/render/sidebar';
+import { InspectorRenderer } from '@adapter/ui/render/inspector';
+import { BrowseRouter, type BrowseMode } from '@adapter/ui/render/browse';
 import { CenterRouter } from '@adapter/ui/render/center';
+import { AppendBoxRenderer } from '@adapter/ui/render/append-box';
 import { formatSize } from '@adapter/ui/render/detail';
 import { bindActions, generateLid, type BinderServices } from '@adapter/ui/actions/binder';
 import { armLaunchQueue, type LaunchTarget } from '@adapter/platform/launch-queue';
@@ -40,6 +46,9 @@ import {
 } from '@adapter/ui/actions/export-archive';
 import { createAssetGate } from '@adapter/ui/actions/asset-gate';
 import { generateAssetKey } from '@adapter/platform/storage/asset-key';
+import { downloadBlob, downloadUrl } from '@adapter/platform/download';
+import { diagramFileName } from '@features/export/file-name';
+import { renderToSvg, readPalette } from '@adapter/ui/render/mermaid-raster';
 
 const DB_NAME = 'pkc3';
 const DEFAULT_CID = 'default';
@@ -139,20 +148,41 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
 
   const dispatcher = new Dispatcher();
   // 🎨 配色は**枠より先**に当てる ── 後だと一瞬だけ既定色で描かれて瞬く
-  applyTheme(document.documentElement, initialTheme());
+  const bootTheme = initialTheme();
+  applyTheme(document.documentElement, bootTheme);
   const regions = buildShell(root);
-  const sidebar = new SidebarRenderer(regions.sidebar);
+  // ⚠ 帯の選択欄を**いまの配色に合わせる** ── 合わせないと、保存済みの配色で
+  // 起動したのに欄は先頭(ライト)を指す = 画面が嘘をつく
+  const themeSelect = regions.brand.querySelector<HTMLSelectElement>(
+    '[data-pkc-field="theme-select"]',
+  );
+  if (themeSelect) themeSelect.value = bootTheme;
+  // 🔑 左の列は**探し方**で切り替わる(P8 段⑤)。中央は常に「開いているノート」
+  const browse = new BrowseRouter(regions.sidebar, regions.browseHost);
+  const inspector = new InspectorRenderer(regions.inspector);
+  let browseMode: BrowseMode = 'list';
   // assets: bytes は IDB Blob(sqlite には meta のみ)。表示は lend/dispose 規律
   const blobs = new AssetBlobStore();
-  const center = new CenterRouter(regions.detail, undefined, {
-    lend: (key) => blobs.lendObjectUrl(DEFAULT_CID, key),
-    getBlob: (key) => blobs.get(DEFAULT_CID, key),
-  });
-  // topbar の active 印(変わったときだけ属性を触る)
+  /**
+   * markdown を描く口。⚠ **アプリ全体で 1 個**(P8 段⑲)── 面や書出しが
+   * それぞれ作ると worker lease がその数だけ立ち、常駐が増える。
+   * ⚠ 作っただけでは worker は起きない(`WorkerLease` は遅延起動)。
+   */
+  const markdown = new MarkdownClient();
+  const center = new CenterRouter(
+    regions.detail,
+    undefined,
+    {
+      lend: (key) => blobs.lendObjectUrl(DEFAULT_CID, key),
+      getBlob: (key) => blobs.get(DEFAULT_CID, key),
+    },
+    markdown,
+  );
+  // いま居る場所の印(変わったときだけ属性を触る)
   let markedView: string | null = null;
   const markView = (view: string) => {
     if (view === markedView) return;
-    for (const btn of regions.topbar.querySelectorAll('[data-pkc-view]')) {
+    for (const btn of regions.brand.querySelectorAll('[data-pkc-view]')) {
       if (btn.getAttribute('data-pkc-view') === view)
         btn.setAttribute('data-pkc-active', '');
       else btn.removeAttribute('data-pkc-active');
@@ -160,15 +190,34 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     markedView = view;
   };
   markView('detail');
+  // 探し方のタブ(左の列)。⚠ **中央のビューとは別の軸**なので印も別に持つ
+  const markBrowse = (mode: BrowseMode) => {
+    for (const btn of regions.sidebar.querySelectorAll('[data-pkc-browse]')) {
+      if (btn.getAttribute('data-pkc-browse') === mode)
+        btn.setAttribute('data-pkc-active', '');
+      else btn.removeAttribute('data-pkc-active');
+    }
+  };
+  markBrowse('list');
+  // 🔑 追記欄は**本文とは別の器**(P8 段⑧)── 本文は追記のたびに書き換わって
+  // 再描画されるので、同じ器に入れると打ちかけの文字も focus も消える
+  const appendBox = new AppendBoxRenderer(regions.append);
   dispatcher.onState((state) => {
-    sidebar.render(state);
+    browse.render(state, browseMode);
     center.render(state);
+    appendBox.render(state);
+    inspector.render(state);
     markView(state.viewMode);
   });
   // status: provenance + エラーの可視化(review B-1 ── 無言の操作拒否を作らない)
+  // 🔑 常時見えるのは**版だけ**(P8)。`opfs-sahpool` のような開発者語は
+  // 出さない ── 出すと user は「何かのエラーか」と読む。
+  // ⚠ 捨てはしない ── 不具合報告のときに要るので `title`(ホバー)へ逃がす。
+  // ⚠ ただし **fallback(意図しない保存先)は見せる** ── これは user が
+  // 知るべき事実で、黙ると「編集が消える」の原因が見えなくなる
   const statusBase =
-    `${APP_ID} v${APP_VERSION} (${BUILD_KIND}) — ${init.vfs}` +
-    (init.fallbackReason ? ` ⚠ ${init.fallbackReason}` : '');
+    `${APP_ID} v${APP_VERSION}` + (init.fallbackReason ? ` ⚠ ${init.fallbackReason}` : '');
+  regions.status.title = `${APP_ID} v${APP_VERSION} (${BUILD_KIND}) — ${init.vfs}`;
   // textContent の setter は同一文字列でも子ノードを全置換する ── 打鍵ごとの
   // state 変化で無駄な DOM 変異を起こさないよう、変わったときだけ書く
   let statusShown = statusBase;
@@ -221,22 +270,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           getRevisionChain: (entryLid) =>
             client.request({ op: 'exportRevisionChain', cid: DEFAULT_CID, entryLid }),
         },
-        download: (name, blob) => {
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = name;
-          document.body.append(a);
-          a.click();
-          a.remove();
-          // click 直後の revoke は DL を中断しうる ── 1 秒で寿命終端(添付 DL と同じ)
-          setTimeout(() => URL.revokeObjectURL(url), 1000);
-        },
+        download: downloadBlob,
         notify: (message) => showStatus(`${statusBase} — ${message}`),
         // ⚠ **注意の中身**を出す導線(review M1 で一度落ちた)。無いと user が
         // 見るのは「⚠ 注意 1 件」だけで、**どの添付が欠けたか**が消える ──
         // バックアップで一番知りたい情報がそこにある
         report: (notes) => showNotices(regions.notices, '書出し時の注意', notes),
+        // 🔑 閲覧用 HTML の本文描画は**ワーカーへ**(P8 段⑲)。渡さないと
+        //    件数ぶんメインスレッドで描くことになる
+        renderBody: (text) => markdown.render(text),
       };
       // 1 ノートだけの書出しも**同じ実行部・同じ形式**を通る(P6f)──
       // 別経路にすると「1 件書出しだけ壊れている」が起きる
@@ -244,6 +286,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       else await exportArchive(dispatcher, deps, kind);
     });
 
+  /**
+   * 添付を展開するワーカーの口(P8 段⑮)。
+   * ⚠ **1 つを使い回す** ── 取込のたびに作ると、アイドル kill の意味が消える。
+   */
+  const assets = new AssetClient();
   const importDeps: ImportDeps = {
       // ⚠ 生存 entry だけでは足りない ── ゴミ箱の lid(entries に居ないが
       // revisions を持つ)と衝突すると、その item がゴミ箱から消え、
@@ -264,6 +311,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       },
       genLid: generateLid,
       genAssetKey: generateAssetKey,
+      /**
+       * 🔑 添付の**展開とハッシュはワーカーへ**(P8 段⑮。不可侵指示
+       * 「基本的に重い処理はワーカーにしてください」)。
+       * ⚠ `WorkerLease` が遅延起動・バッファ・アイドル kill を持つので、
+       * ここは口を渡すだけ ── 取込を一度もしない user にワーカーは作られない。
+       */
+      processAsset: (view, gzipped) => assets.process(view, gzipped),
       genRelationId: () => `rel-${crypto.randomUUID()}`,
       bulkUpsertEntries: async (entries) => {
         await client.request({ op: 'bulkUpsertEntries', cid: DEFAULT_CID, entries });
@@ -363,14 +417,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           });
           return;
         }
-        const a = document.createElement('a');
-        a.href = lent.url;
-        a.download = name;
-        document.body.append(a);
-        a.click();
-        a.remove();
-        // click 直後の revoke は DL を中断しうる ── 1 秒で寿命終端
-        setTimeout(lent.dispose, 1000);
+        downloadUrl(name, lent.url, lent.dispose);
       } catch (e) {
         // IDB 障害等を unhandled rejection にしない(可視で終える)
         dispatcher.dispatch({
@@ -384,6 +431,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // 整理との同時実行は attach と同じ危険。⚠ 振り分けは import-file.ts が持つ
     importFiles: (files) => void withAssetGate(() => runImport(files)),
     dismissNotices: () => clearNotices(regions.notices),
+    /**
+     * 添付の参照をコピーする(P8 段⑱)。
+     * ⚠ **結果を出す** ── コピーは押しても画面が変わらない操作なので、
+     *    黙って終わると成功したのか分からない
+     */
+    copyText: (text) => {
+      void copyPlainText(text).then((ok) => {
+        showStatus(
+          `${statusBase} — ${ok ? '参照をコピーしました(本文に貼れます)' : 'コピーできませんでした'}`,
+        );
+      });
+    },
     /**
      * 🚀 ランチャーのタイルを起動する(P7b 段⑩)。
      *
@@ -401,15 +460,39 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         createUrl: (blob) => URL.createObjectURL(blob),
         revokeUrl: (url) => URL.revokeObjectURL(url),
         whenClosed: waitForWindowClose,
+        // 🔑 このアプリが前回保存した中身(P8 段⑭)。**PKC3 と外殻は同じ origin**
+        //    なので、ここで読んだものがそのまま外殻の localStorage の中身になる
+        readSeed: readAppStorage,
+        origin: location.origin,
         fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
       });
+      // ⚠ 押した対象を**選択状態にもする**(P8 段⑭)── 起動しただけだと右の列が
+      //    空文のままで、いま何を触ったのかが画面に残らない。「押す = 起動」の
+      //    意味は変えず、選択は同時に立つ副作用として入れる
+      dispatcher.dispatch({ type: 'SELECT_ENTRY', lid });
     },
     // 🎨 配色(P7b 段⑨c、user 指示「最初はライトとダークのみに」)。
     // ⚠ 属性は **`<html>`** に付ける ── `:root` の変数を上書きするため
     // ⚠ **ここだけが保存する** ── 起動時の適用は保存しない(review M-7)
+    // ⚠ **一覧は 1 か所**(`THEMES`)。ここに `light | dark` のような
+    // 別の一覧を書くと、テーマを足しても**黙って効かない**(実際に踏んだ)
     setTheme: (theme) => {
-      if (theme === 'light' || theme === 'dark')
-        chooseTheme(document.documentElement, theme as Theme);
+      if (isTheme(theme)) chooseTheme(document.documentElement, theme);
+    },
+    // 🔑 探し方の切替(P8 段⑤)。⚠ **state には持たせない** ── これは
+    // 「どう探すか」という画面側の都合で、container のデータではない
+    setBrowse: (mode) => {
+      if (mode !== 'list' && mode !== 'filer' && mode !== 'launcher') return;
+      browseMode = mode;
+      markBrowse(mode);
+      browse.render(dispatcher.getState(), mode);
+      // ⚠ アプリの一覧は開いたときに読む(常駐していない)。
+      // 🔴 **view を借りない**(P8 段⑱)── 中央の面を変える必要が無いのに
+      //    `SET_VIEW_MODE 'launcher'` を撃っていたので、タブを切り替えただけで
+      //    中央下の追記欄が消えていた(他の 2 タブでは残る)
+      if (mode === 'launcher') dispatcher.dispatch({ type: 'REFRESH_LAUNCHER_TILES' });
+      if (dispatcher.getState().viewMode !== 'detail')
+        dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
     },
     // 🔄 新しい版へ交代する(P7 段⑤)。⚠ 頼むだけ ── 再読込は交代が済んでから
     applyUpdate: () => updatePrompt.apply(),
@@ -421,6 +504,35 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     exportHtml: () => void runExport('html'),
     exportMarkdown: () => void runExport('markdown'),
     exportEntry: (lid) => void runExport({ entryLid: lid }),
+    /**
+     * 🔑 図 1 枚をベクタで書き出す(P8 段⑦)。
+     * ⚠ **asset gate の外**でよい ── store も添付も触らず、原文から焼き直すだけ。
+     * ⚠ 画面の PNG キャッシュは使わない(user 指示: 書き出しはベクタ)。
+     */
+    exportDiagram: (source, index) => {
+      const lid = dispatcher.getState().selectedLid;
+      const title = (lid ? dispatcher.getState().entryMetas.get(lid)?.title : '') || '図';
+      // ⚠ **Promise を返す**(P8 段⑬ review M-3)── 押した側が待ちを出せるように。
+      //    投げない(失敗は OP_FAILED で可視化する)ので、呼び側は finally だけでよい
+      return (async () => {
+        try {
+          // ⚠ 画面と**同じ配色**で起こす(見えている図と落ちる物の色を違えない)
+          const svg = await renderToSvg(source, readPalette());
+          // ⚠ mermaid は `<?xml?>` を付けない ── 素の `<svg>` でも image/svg+xml で
+          // ブラウザは開ける。ここで宣言を足すと二重宣言の壊れた形になりうる
+          downloadBlob(
+            diagramFileName(title, index),
+            new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }),
+          );
+        } catch (e) {
+          // 黙って何も起きないのが一番悪い ── 失敗も可視で終える
+          dispatcher.dispatch({
+            type: 'OP_FAILED',
+            error: `図を書き出せませんでした: ${String(e).slice(0, 120)}`,
+          });
+        }
+      })();
+    },
     // 破壊的操作(削除)を止めるための観測点(P6f review M-2)
     busy: () => withAssetGate.busy,
     purgeOrphanAssets: () =>

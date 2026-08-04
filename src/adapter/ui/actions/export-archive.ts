@@ -13,6 +13,7 @@ import { writeArchive, type ArchiveSource } from '@features/export/pkc3-archive'
 import { writePortableHtml } from '@features/export/pkc3-html';
 import { writeMarkdownZip } from '@features/export/pkc3-markdown-zip';
 import { singleEntrySource } from '@features/export/single-entry-source';
+import { safeName } from '@features/export/file-name';
 
 export interface ExportDeps {
   source: ArchiveSource;
@@ -30,21 +31,16 @@ export interface ExportDeps {
    */
   report(notes: readonly string[]): void;
   now?(): Date;
+  /**
+   * 本文 1 件を HTML にする(閲覧用 HTML だけが使う。P8 段⑲)。
+   *
+   * ⚠ **省略できるようにしてある**が、アプリからは必ず**markdown ワーカー**を
+   * 渡す ── 省略するとその場で描くので、件数ぶんメインスレッドが止まる
+   * (user 指示 2026-08-03「基本的に重い処理はワーカーにしてください」)。
+   */
+  renderBody?(text: string): Promise<string>;
 }
 
-/** ファイル名に使えない文字を落とす(OS 差を避けて保守的に)。 */
-function safeName(title: string): string {
-  // ⚠ 制御文字は**正規表現に書かない**(no-control-regex。文字クラスに直接
-  // 埋めると読み手が範囲を誤りやすく、実際ファイル中に生バイトが入っていた)
-  const cleaned = [...title]
-    .map((ch) => (ch.codePointAt(0)! < 0x20 || ch === '\u007f' ? '-' : ch))
-    .join('');
-  const s = cleaned.replace(/[\\/:*?"<>| ]+/g, '-').replace(/^[-.\s]+|[-.\s]+$/g, '');
-  // ⚠ 空にしない ── 「.pkc3.zip」だけのファイル名は OS によっては隠しファイル
-  // ⚠ `slice` は**サロゲートペアを割る**(絵文字や一部の漢字が壊れる)──
-  // 制御文字処理でわざわざ [...] を使ったのに、最後で落とすと意味がない
-  return [...s].slice(0, 60).join('') || 'pkc3';
-}
 
 const stamp = (d: Date): string =>
   `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
@@ -124,7 +120,7 @@ export async function exportArchive(
     let name: string;
     let detail: string;
     if (kind === 'html') {
-      out = await writePortableHtml(deps.source, iso);
+      out = await writePortableHtml(deps.source, iso, deps.renderBody);
       name = `${base}.html`;
       // ⚠ **可逆ではない**ことをその場で言う(後から見分けられない形にしない ──
       // PKC2 は light / full の別を manifest にしか書いておらず user が困っていた)

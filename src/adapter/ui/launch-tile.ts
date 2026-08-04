@@ -13,7 +13,8 @@
  * - `kind: 'app'` … 取り込んだ HTML。**添付そのものは開かない** ──
  *   隔離した外殻(`features/launcher/app-shell.ts`)に載せて開く
  */
-import { buildLauncherAppShell } from '@features/launcher/app-shell';
+import { buildLauncherAppShell, launcherAppBase } from '@features/launcher/app-shell';
+import { decodeHtml } from '@features/launcher/html-charset';
 import type { LauncherTile } from '@features/launcher/tiles';
 
 /** 外部サイトを開くときの窓の指定。⚠ 文言そのものが user への約束である。 */
@@ -28,6 +29,16 @@ export interface LaunchDeps {
   revokeUrl: (url: string) => void;
   /** 開いた窓が閉じる(= 寿命の終端)まで待つ。 */
   whenClosed: (win: Window) => Promise<void>;
+  /**
+   * このアプリが前回保存した中身(P8 段⑭)。
+   *
+   * 🔑 **PKC3 と外殻は同じ origin** なので、ここで読んだものがそのまま外殻の
+   * `localStorage` の中身である。⚠ 同期に読む ── `window.open` を
+   * `await` の後ろに落とすと、Safari が transient activation を失って窓を開かない。
+   */
+  readSeed: (appId: string) => Readonly<Record<string, string>>;
+  /** `location.origin`。相対 URL の解決先を組むのに要る。 */
+  origin: string;
   /** 失敗を user に見せる。⚠ 無言で終えない。 */
   fail: (message: string) => void;
 }
@@ -58,6 +69,9 @@ export function launchTile(tile: LauncherTile, deps: LaunchDeps): void {
     deps.fail(`「${tile.title}」を開けませんでした(ブラウザがポップアップを塞いでいます)`);
     return;
   }
+  // 🔑 保存内容は**ここで**読む(同期・await より前)── 外殻に焼き込むので、
+  // アプリの 1 行目から同期に読める必要がある
+  const seed = deps.readSeed(tile.lid);
   // 開いた先から `window.opener` でこちらを触られないようにする。
   // ⚠ 外殻は自前の HTML なので同一 origin ── この代入は通る
   try {
@@ -76,9 +90,21 @@ export function launchTile(tile: LauncherTile, deps: LaunchDeps): void {
       }
       // ⚠ ここで初めて bytes を文字列にする ── 隔離のために `srcdoc` へ入れる
       // 以上、実体化は避けられない。**外殻を組んだら文字列は手放す**
-      const shell = new Blob([buildLauncherAppShell(tile.title, await blob.text())], {
-        type: 'text/html',
-      });
+      // 🔴 `blob.text()` は使わない(P8 段⑭)── **UTF-8 固定 decode** なので、
+      //    Shift_JIS で保存された HTML が不可逆に化ける(実測)。アプリ自身の
+      //    `<meta charset>` に従って読む
+      const html = decodeHtml(new Uint8Array(await blob.arrayBuffer()));
+      const shell = new Blob(
+        [
+          buildLauncherAppShell(tile.title, html, {
+            appId: tile.lid,
+            seed,
+            // ⚠ 階層 URL でないと `new URL(相対, base)` が落ちる(実測)
+            base: launcherAppBase(deps.origin),
+          }),
+        ],
+        { type: 'text/html' },
+      );
       const url = deps.createUrl(shell);
       win.location.replace(url);
       // 🔑 **寿命の終端で捨てる**(user 指示 2026-07-27)。初版は 1 秒後に

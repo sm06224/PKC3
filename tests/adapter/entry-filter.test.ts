@@ -16,7 +16,7 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { CenterRouter } from '../../src/adapter/ui/render/center';
-import { SidebarRenderer } from '../../src/adapter/ui/render/sidebar';
+import { BrowseRouter } from '../../src/adapter/ui/render/browse';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { stubRevisionOps } from '../helpers/revision-stub';
 
@@ -44,10 +44,15 @@ function setup(metas: EntryMeta[]) {
   document.body.append(root);
   const d = new Dispatcher();
   const regions = buildShell(root);
-  const sidebar = new SidebarRenderer(regions.sidebar);
+  const browse = new BrowseRouter(regions.sidebar, regions.browseHost);
   const center = new CenterRouter(regions.detail, () => new Date(2026, 7, 15));
+  let mode: 'list' | 'filer' | 'launcher' = 'list';
+  const setBrowse = (m: typeof mode): void => {
+    mode = m;
+    browse.render(d.getState(), mode);
+  };
   d.onState((s) => {
-    sidebar.render(s);
+    browse.render(s, mode);
     center.render(s);
   });
   bindActions(root, d);
@@ -71,7 +76,7 @@ function setup(metas: EntryMeta[]) {
     filterInput.value = value;
     filterInput.dispatchEvent(new Event('input', { bubbles: true }));
   };
-  return { root, d, rows, type, filterInput };
+  return { root, d, rows, type, filterInput, setBrowse };
 }
 
 const APPLES = [
@@ -129,8 +134,8 @@ describe('絞り込み(P7b review M-1/M-2/M-3)', () => {
   });
 
   it('🔴 ファイラも同じ規則で絞られる(欄の隣で全件を出さない)', () => {
-    const { d, root, type } = setup(APPLES);
-    d.dispatch({ type: 'SET_VIEW_MODE', mode: 'filer' });
+    const { root, type, setBrowse } = setup(APPLES);
+    setBrowse('filer');
     const filerRows = (): number =>
       root.querySelectorAll('[data-pkc-region="filer-table"] tbody [data-pkc-entry]').length;
     expect(filerRows()).toBe(3);

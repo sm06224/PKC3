@@ -15,6 +15,7 @@ import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import type { EncodedChainInput } from '@adapter/platform/storage/protocol';
 import { sniffMagic, detectPkc2Format } from '@features/import/detect-format';
 import { parsePkc2Html } from '@features/import/pkc2-html';
+import { decodeAsset } from '@adapter/platform/asset/asset-codec';
 import { readPkc2Package, peekZipFormat } from '@features/import/pkc2-package';
 import { readTextBundle, readTextlogBundle } from '@features/import/pkc2-bundle';
 import { readContainerBundle, isBatchFormat } from '@features/import/pkc2-container-bundle';
@@ -35,7 +36,7 @@ import {
   type RevisionChain,
 } from '@features/import/pkc2-convert';
 import {
-  identifyBytes,
+  assetKeyFromHash,
   generateAssetKey,
   HASH_MAX_BYTES,
 } from '@adapter/platform/storage/asset-key';
@@ -92,6 +93,20 @@ export interface ImportDeps {
     size: number;
     hash: string | null;
   }): Promise<void>;
+  /**
+   * 添付 1 件の**展開とハッシュ**(P8 段⑮)。
+   *
+   * 🔴 実測でここが取込の支配項だった(添付 20 件 × 200KB で **406ms** ──
+   * 内訳は gzip 展開 103ms / SHA-256 33ms / IDB 46ms / base64 4ms)。
+   * `main.ts` はワーカーを渡す(不可侵指示「重い処理はワーカーへ」)。
+   * ⚠ 渡した `bytes` は **transfer で切り離される**ので、呼び側は後で使わない。
+   * ⚠ 省略するとその場で同じ関数を回す ── ワーカーは速さの話であって
+   * 正しさの話ではない(test / 非対応環境で経路が分かれない)。
+   */
+  processAsset?(
+    view: Uint8Array<ArrayBuffer>,
+    gzipped: boolean,
+  ): Promise<{ bytes: ArrayBuffer; hash: string | null }>;
   /** 取込後の再読込(boot と同じ経路で state を作り直す)。 */
   reload(): Promise<void>;
   /** 進捗・完了の可視化(件数が多いと無反応に見えるため)。 */
@@ -126,20 +141,11 @@ function decodeBase64(base64: string): Uint8Array<ArrayBuffer> {
 }
 
 /**
- * base64 → bytes(gzip されていれば展開する)。1 件ずつ呼び、結果は保持しない。
- * **Blob ではなく bytes を返す** ── 呼び出し側が hash を取るので、Blob に
- * してから `arrayBuffer()` で読み直すとコピーが 1 部増える(review M-5)。
+ * ⚠ かつてここに `decodeAssetBytes`(base64 復号 + gzip 展開)が在った。
+ * P8 段⑮ で**展開は `asset-worker.ts` へ移した** ── 実測で gzip 展開 103ms +
+ * SHA-256 33ms が取込の long task の中身だったため(不可侵指示「重い処理は
+ * ワーカーへ」)。base64 の復号(実測 4ms)だけがここに残っている。
  */
-async function decodeAssetBytes(
-  base64: string,
-  gzipped: boolean,
-): Promise<Uint8Array<ArrayBuffer>> {
-  const raw = decodeBase64(base64);
-  if (!gzipped) return raw;
-  // DecompressionStream はブラウザ標準(依存を増やさない)
-  const stream = new Blob([raw]).stream().pipeThrough(new DecompressionStream('gzip'));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
-}
 
 /**
  * base64 を **取り出すと同時に手放す**。生成物の寿命をここで終端する規律を
@@ -309,7 +315,11 @@ export async function importPkc2File(
     const head = new Uint8Array(await file.slice(0, 4096).arrayBuffer());
     const isZip = sniffMagic(head) === 'zip';
     if (!isZip && detectPkc2Format(head, null, file.name) !== 'html') {
-      return fail(`取り込めない形式です(${file.name})── PKC2 の HTML か .pkc2.zip を選んでください`);
+      // ⚠ **受理するものを全部言う**(P8 段⑲)── かつては存在しない拡張子
+      //    `.pkc2.zip` を名乗り、実際に受理している PKC3 のバックアップに触れていなかった
+      return fail(
+        `取り込めない形式です(${file.name})── PKC2 の書出し(HTML / ZIP)か PKC3 のバックアップ(.pkc3.zip)、または .md を選んでください`,
+      );
     }
 
     deps.notify?.('取込中…(ファイルを読んでいます)');
@@ -426,6 +436,9 @@ export async function importPkc2File(
     // ⚠ 順序が規約: **bytes を先に、参照(entries)を後に**。逆順にすると
     // 「参照はあるが bytes が無い」entry が残る ── 逆向き(参照なし bytes)は
     // 明示 purge で回収できる。test は opLog で順序そのものを pin している
+    // ⚠ ワーカーが無い環境(test / 古い環境)では**同じ関数**をその場で回す
+    //    ── 出口を 2 本作らない(ワーカーは速さの話であって正しさの話ではない)
+    const runAsset = deps.processAsset ?? decodeAsset;
     const known = new Set(await deps.listStoredBlobKeys());
     // convert は純関数なので content key を決められない ── 暫定 key を配ってあり、
     // ここで本物へ写す(body の書換は下の remapAssetKeys)
@@ -494,16 +507,29 @@ export async function importPkc2File(
         //  legacy 添付だけが必ず復号に失敗して死んだ参照になる)
         // ⚠ 読むのは **`src.zip`**(外側の `file` ではない)── batch では内側 ZIP の
         // entry なので、外側から読むと別位置を読んで壊れる
-        let bytes: Uint8Array<ArrayBuffer>;
+        // 🔑 **重い所だけワーカーへ出す**(P8 段⑮)。base64 の復号は
+        //    `Uint8Array.fromBase64` で 4ms しか掛からない(実測)ので手元でやり、
+        //    **gzip 展開と SHA-256**(実測 103ms + 33ms)を外へ出す。
+        // ⚠ 渡した ArrayBuffer は transfer で**切り離される**ので、以後は
+        //    返ってきた `out.bytes` だけを使う
+        let raw: Uint8Array<ArrayBuffer>;
+        let deflated = false;
         if (src) {
           const got = await readWithFallback(src, zipAlternates?.get(a.oldKey!), (n) =>
             result.warnings.push(`添付が壊れていたので ${n} 個目の複製から復元しました: ${a.oldKey}`),
           );
-          bytes = await bytesOfSource(got.blob, got.src);
+          raw = await bytesOfSource(got.blob, got.src);
         } else {
-          bytes = await decodeAssetBytes(consumeBase64(a), gzipped && a.oldKey !== null);
+          raw = decodeBase64(consumeBase64(a));
+          // ⚠ gzip は **export 単位**の符号化 ── body 内蔵だった legacy data
+          //    (oldKey === null)には掛かっていない
+          deflated = gzipped && a.oldKey !== null;
         }
-        const { key, hash } = await identifyBytes(bytes);
+        // ⚠ 口が **view を受ける**ので、ここで ArrayBuffer を組み立てない
+        //    (部分参照をそのまま渡す事故が構造的に起きない)
+        const out = await runAsset(raw, deflated);
+        const bytes = new Uint8Array(out.bytes);
+        const { key, hash } = assetKeyFromHash(out.hash);
         keyMap.set(a.key, key); // ⚠ put を省いた時も**必ず**写す(review M-30)
         if (!known.has(key)) {
           await deps.putBlob(key, new Blob([bytes], { type: a.mime }));
