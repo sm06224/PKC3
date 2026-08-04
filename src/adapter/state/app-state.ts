@@ -167,6 +167,8 @@ export type UserAction =
   | { type: 'SET_VIEW_MODE'; mode: ViewMode }
   | { type: 'SET_ENTRY_FILTER'; query: string }
   | { type: 'LAUNCHER_TILES_LOADED'; tiles: LauncherTile[] }
+  /** タイル設定を書き戻した ack(P8 段⑭)。⚠ **開いている body も差し替える**。 */
+  | { type: 'APP_TILE_SAVED'; lid: string; body: string }
   | { type: 'START_EDIT' }
   | { type: 'UPDATE_OPEN_BODY'; body: string }
   | { type: 'COMMIT_EDIT' }
@@ -178,6 +180,24 @@ export type UserAction =
    * ノートは `null`(見出しを勝手に足さない)。
    */
   | { type: 'APPEND_TO_ENTRY'; lid: string; text: string; heading: string | null }
+  /**
+   * ランチャーのタイル設定(P8 段⑭)。
+   *
+   * 🔴 これは「新機能」ではなく**到達不能の解消**である ── タイルの元データは
+   * 添付の frontmatter に在るのに、**PKC3 の中から書く手段が 1 つも無かった**
+   * (PKC2 で登録したものを読むだけ)。PKC3 だけを使う user は、HTML を
+   * 添付してもタイルにできない。
+   *
+   * ⚠ `undefined` = **触らない**、`null` = **消す**(frontmatter の行ごと)。
+   * 3 値にしないと「グループを外す」が表せない。
+   */
+  | {
+      type: 'SET_APP_TILE';
+      lid: string;
+      registered?: boolean;
+      group?: string | null;
+      icon?: string | null;
+    }
   /**
    * 🔴 **ロックの強制解放**(user 指示 2026-08-03)。応答が返らない書込 /
    * 抱えたままの draft で**永久に追記できなくなる**のを防ぐ最後の出口。
@@ -273,6 +293,17 @@ export type Dispatchable = UserAction | SystemCommand;
 export type DomainEvent =
   | { type: 'REQUEST_BODY'; lid: string }
   /** ⚠ **どれを読むかを載せる** ── effect 層は実行時に state を見ない(review L-6)。 */
+  | {
+      type: 'REQUEST_TILE_UPDATE';
+      lid: string;
+      updates: Record<string, string | boolean | undefined>;
+      /** ⚠ 書き戻すのに要る素性。**effect 層は state を見ない**ので event が運ぶ。 */
+      title: string;
+      archetype: string;
+      entryOrder: number;
+      /** 書き換えた後にタイルを読み直すための材料(同上)。 */
+      entries: Array<{ lid: string; title: string }>;
+    }
   | {
       type: 'REQUEST_LAUNCHER_TILES';
       entries: Array<{ lid: string; title: string }>;
@@ -455,6 +486,60 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       };
     case 'LAUNCHER_TILES_LOADED':
       return { state: { ...state, launcherTiles: action.tiles }, events: [] };
+    case 'APP_TILE_SAVED': {
+      // 🔴 **開いている body も差し替える**(P8 段⑭)。`BODY_PERSISTED` は
+      //    `persisted` しか動かさないので、それだけだと**画面が古いまま**になる
+      //    ── 実際、登録にチェックを入れても設定欄が出てこなかった(実測)。
+      //    ⚠ 編集中は触らない(打っている最中の draft を上書きしない)
+      if (state.phase === 'editing') return { state, events: [] };
+      if (state.openBody?.lid !== action.lid) return { state, events: [] };
+      return {
+        state: {
+          ...state,
+          openBody: {
+            lid: action.lid,
+            body: action.body,
+            baseline: action.body,
+            persisted: action.body,
+            diskAhead: false,
+          },
+        },
+        events: [],
+      };
+    }
+    case 'SET_APP_TILE': {
+      // ⚠ 書込が飛んでいる間は触らせない(追記と同じ規律)── 読んで書き戻す
+      //    操作なので、途中に別の書込が挟まると片方が消える
+      if (state.phase !== 'ready' || state.writeLock) return { state, events: [] };
+      if (!state.entryMetas.has(action.lid)) return { state, events: [] };
+      const updates: Record<string, string | boolean | undefined> = {};
+      // ⚠ **false は書かない**(PKC2 と同じ)── 既定値を明示的に持つと、
+      //    frontmatter が「登録していない」行で埋まる
+      if (action.registered !== undefined)
+        updates['attachment.registered_as_app'] = action.registered ? true : undefined;
+      if (action.group !== undefined)
+        updates['attachment.app_group'] =
+          action.group === null || action.group === '' ? undefined : action.group;
+      if (action.icon !== undefined)
+        updates['attachment.app_icon'] =
+          action.icon === null || action.icon === '' ? undefined : action.icon;
+      if (Object.keys(updates).length === 0) return { state, events: [] };
+      const meta = state.entryMetas.get(action.lid)!;
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_TILE_UPDATE',
+            lid: action.lid,
+            updates,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            entries: attachmentEntries(state),
+          },
+        ],
+      };
+    }
     case 'START_EDIT': {
       // openBody が現選択の body を持っているときだけ編集に入れる
       // (= 未読 body の編集・保存が構造的に不可能)

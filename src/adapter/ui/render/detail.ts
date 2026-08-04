@@ -27,6 +27,7 @@ import {
   applyDocumentGlobals,
 } from '@features/markdown/document-globals';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
+import { isAppMime } from '@features/launcher/tiles';
 import type { AppState, AppPhase } from '@adapter/state/app-state';
 
 /** 添付表示のための asset 面(main が AssetBlobStore を cid 束縛で注入)。 */
@@ -441,6 +442,12 @@ export class DetailRenderer {
     }
     host.append(info);
 
+    // 🔑 **アプリとして登録**(P8 段⑭)。
+    //    🔴 PKC3 の中からタイルを作る手段が**1 つも無かった** ── タイルの元データは
+    //    この添付の frontmatter に在るのに、書けるのは PKC2 の取込だけだった。
+    //    ⚠ 置き場所は「操作は対象の隣」── その添付の画面に置く
+    if (isAppMime(meta.mime)) host.append(appTileControls(rawBody));
+
     const previewHost = document.createElement('div');
     previewHost.setAttribute('data-pkc-field', 'attachment-preview');
     host.append(previewHost);
@@ -627,4 +634,57 @@ export function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+
+/**
+ * ランチャーのタイル設定(P8 段⑭)。
+ *
+ * 🔴 **PKC3 の中からタイルを作れなかった**のを塞ぐ。元データは添付の
+ * frontmatter(`registered_as_app` / `app_group` / `app_icon`)に在るのに、
+ * 書く導線が PKC2 の取込しか無かった ── PKC3 だけの user は、HTML を添付しても
+ * ランチャーに 1 枚も並べられない。
+ *
+ * ⚠ **汎用の frontmatter エディタは作らない**。ここに要るのは 3 つだけで、
+ * 汎用にすると「何を書いていいか分からない欄」になる。
+ */
+function appTileControls(rawBody: string): HTMLElement {
+  const fm = parseFrontmatter(rawBody).meta;
+  const box = document.createElement('div');
+  box.setAttribute('data-pkc-field', 'app-tile-controls');
+
+  const label = document.createElement('label');
+  const check = document.createElement('input');
+  check.type = 'checkbox';
+  check.setAttribute('data-pkc-action', 'toggle-app-tile');
+  check.setAttribute('data-pkc-field', 'app-register');
+  check.checked = fm['attachment.registered_as_app'] === true;
+  const text = document.createElement('span');
+  text.textContent = 'アプリとして登録';
+  label.append(check, text);
+  box.append(label);
+
+  // ⚠ 登録していないときは中の設定を出さない(押せない欄を並べない)
+  if (!check.checked) return box;
+
+  const field = (
+    name: string,
+    action: string,
+    placeholder: string,
+    value: unknown,
+    size: number,
+  ): void => {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.setAttribute('data-pkc-action', action);
+    input.setAttribute('data-pkc-field', name);
+    input.placeholder = placeholder;
+    input.size = size;
+    input.value = typeof value === 'string' ? value : '';
+    box.append(input);
+  };
+  // ⚠ グループ名は**並び順そのもの**(名前順に並ぶ)── placeholder でそう言う
+  field('app-group', 'set-app-group', 'グループ(名前順に並びます)', fm['attachment.app_group'], 16);
+  field('app-icon', 'set-app-icon', '目印', fm['attachment.app_icon'], 3);
+  return box;
 }

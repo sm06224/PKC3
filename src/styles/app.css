@@ -834,8 +834,14 @@ select:focus-visible {
 }
 
 /* ── ランチャー ─────────────────────────────────── */
+/* 🔴 **一覧と同じ流儀に揃える**(P8 段⑭)。直す前の実測:
+ *   ・タイルの高さが 26px と 34px の 2 種類(URL だけ 2 行)= 律動が崩れる
+ *   ・**地と同じ色の枠が 36 本**、題名は全部太字 = 装飾は足りているのに階層が無い
+ *   ・題名が枠を最大 151px 突き抜け、サイドバーに横スクロールが生えていた
+ * 直し方は「足す」ではなく「一覧に寄せる」── 1 行・共有 1px 線・普通の太さ。 */
 [data-pkc-field='launcher-group'] {
-  margin: var(--s4) 0 var(--s2);
+  margin: var(--s4) 0 0;
+  padding: 0 var(--s2);
   font-size: 11px;
   font-weight: 600;
   color: var(--muted);
@@ -847,31 +853,87 @@ select:focus-visible {
 [data-pkc-region='launcher-grid'] {
   display: flex;
   flex-direction: column;
-  gap: 1px;
 }
+/* ⚠ button の既定装飾から降ろす ── 枠も角丸も地色も持たせない
+ * (押せることは hover / focus-visible とカーソルで足りている) */
 [data-pkc-region='launcher-grid'] [data-pkc-tile] {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0;
-  height: auto;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--s2);
+  height: var(--row-h);
   min-height: var(--row-h);
-  max-height: none;
-  padding: var(--s2);
+  max-height: var(--row-h);
+  padding: 0 var(--s2);
   text-align: left;
+  border: none;
+  border-radius: 0;
+  border-left: 2px solid transparent;
+  /* 行どうしは**1 本の線**を共有する(一覧と同じ) */
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  width: 100%;
 }
+[data-pkc-region='launcher-grid'] [data-pkc-tile]:hover {
+  background: var(--surface-2);
+}
+/* ⚠ リングは**内側**へ描く(1px の隙間を食って隣の行に載るのを避ける) */
+[data-pkc-region='launcher-grid'] [data-pkc-tile]:focus-visible {
+  outline-offset: -2px;
+}
+/* 目印。⚠ 無いときも**幅は取る**(有無で題名の左端がずれない) */
+[data-pkc-field='tile-icon'] {
+  flex: none;
+  width: 1.25em;
+  text-align: center;
+  color: var(--muted);
+}
+/* 🔴 題名は**畳む**。規則を 2 か所に生やさず、一覧と同じ形をここでも当てる */
 [data-pkc-region='launcher-grid'] [data-pkc-field='title'] {
-  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
 }
+/* 飛び先は**同じ行の右端**に控えめに(2 行にすると律動が崩れる) */
 [data-pkc-field='tile-url'] {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 11px;
   color: var(--muted);
 }
-[data-pkc-tile-kind='url'] [data-pkc-field='tile-url']::before {
-  content: '↗ ';
-}
-[data-pkc-field='launcher-loading'] {
+[data-pkc-field='launcher-loading'],
+[data-pkc-field='launcher-empty'] {
+  margin: var(--s2);
   color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* ── アプリとして登録(添付の画面)───────────────────── */
+[data-pkc-field='app-tile-controls'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex-wrap: wrap;
+  margin: var(--s2) 0;
+  padding: var(--s2);
+  border: 1px solid var(--border);
+}
+[data-pkc-field='app-tile-controls'] label {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  cursor: pointer;
+}
+[data-pkc-field='app-icon'] {
+  width: 4em;
 }
 
 /* ── ファイラ ───────────────────────────────────── */

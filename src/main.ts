@@ -21,6 +21,7 @@ import { showNotices, clearNotices } from '@adapter/ui/render/notices';
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
 import { applyTheme, chooseTheme, initialTheme, isTheme } from '@adapter/ui/render/theme';
 import { launchTile } from '@adapter/ui/launch-tile';
+import { readAppStorage } from '@adapter/platform/app-storage';
 import { watchForUpdate, type UpdateContainer } from '@adapter/platform/sw/update-prompt';
 import { reloadOnPrebootSwap, type PrebootTarget } from '@adapter/platform/sw/preboot-swap';
 import { InspectorRenderer } from '@adapter/ui/render/inspector';
@@ -418,8 +419,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         createUrl: (blob) => URL.createObjectURL(blob),
         revokeUrl: (url) => URL.revokeObjectURL(url),
         whenClosed: waitForWindowClose,
+        // 🔑 このアプリが前回保存した中身(P8 段⑭)。**PKC3 と外殻は同じ origin**
+        //    なので、ここで読んだものがそのまま外殻の localStorage の中身になる
+        readSeed: readAppStorage,
+        origin: location.origin,
         fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
       });
+      // ⚠ 押した対象を**選択状態にもする**(P8 段⑭)── 起動しただけだと右の列が
+      //    空文のままで、いま何を触ったのかが画面に残らない。「押す = 起動」の
+      //    意味は変えず、選択は同時に立つ副作用として入れる
+      dispatcher.dispatch({ type: 'SELECT_ENTRY', lid });
     },
     // 🎨 配色(P7b 段⑨c、user 指示「最初はライトとダークのみに」)。
     // ⚠ 属性は **`<html>`** に付ける ── `:root` の変数を上書きするため

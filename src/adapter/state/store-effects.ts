@@ -10,6 +10,7 @@ import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import { extractMeta } from '@features/flavor';
 import { withTodoStatus } from '@features/flavor/todo-flavor';
 import { appendBlock } from '@features/markdown/text-ops';
+import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
 import { buildTiles, type TileSource } from '@features/launcher/tiles';
 import type { Dispatcher } from './dispatcher';
 
@@ -173,6 +174,58 @@ export function connectStoreEffects(
           } catch (e) {
             if (!disposed)
               dispatcher.dispatch({ type: 'OP_FAILED', error: String(e) });
+          }
+        });
+        break;
+      case 'REQUEST_TILE_UPDATE':
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            // 🔴 **disk から読んで書き戻す**(P8 段⑭)。state の body を使わない ──
+            //    添付は開いていないことのほうが多く、開いていても古いことがある
+            const body = await store.getBody(ev.lid);
+            if (disposed) return;
+            if (body === null) {
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: 'アプリの設定を変えられません(ノートが見つかりません)',
+              });
+              return;
+            }
+            // ⚠ **原文 splice**で書き換える ── 全文を組み直すと、本文・他の key・
+            //    空行が byte 単位で変わる(この repo の規律)
+            const next = spliceFrontmatterKeys(body, ev.updates);
+            if (next === body) return; // 変わらないなら書かない
+            const ext = extractMeta(ev.archetype, next);
+            await store.persistEntry({
+              lid: ev.lid,
+              title: ev.title,
+              archetype: ev.archetype,
+              body: next,
+              entryOrder: ev.entryOrder,
+              status: ext.status,
+              date: ext.date,
+              archived: ext.archived,
+            });
+            if (disposed) return;
+            // ⚠ 書いたら**その場で読み直す** ── 読み直さないと、押した結果が
+            //    ランチャーに出るのが「次にタブを開き直したとき」になる
+            dispatcher.dispatch({ type: 'APP_TILE_SAVED', lid: ev.lid, body: next });
+            const titles = new Map(ev.entries.map((e) => [e.lid, e.title]));
+            const rows = await store.getBodies(ev.entries.map((e) => e.lid));
+            if (disposed) return;
+            const sources: TileSource[] = [];
+            for (const row of rows) {
+              const title = titles.get(row.lid);
+              if (title !== undefined) sources.push({ lid: row.lid, title, body: row.body });
+            }
+            dispatcher.dispatch({ type: 'LAUNCHER_TILES_LOADED', tiles: buildTiles(sources) });
+          } catch (e) {
+            if (!disposed)
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: `アプリの設定を保存できませんでした: ${String(e)}`,
+              });
           }
         });
         break;

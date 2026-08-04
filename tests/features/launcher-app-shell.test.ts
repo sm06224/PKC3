@@ -13,9 +13,25 @@ import { describe, expect, it } from 'vitest';
 import {
   buildLauncherAppShell,
   escapeForSrcdoc,
+  LAUNCHER_APP_ALLOW,
+  LAUNCHER_APP_PATH,
+  launcherAppBase,
   LAUNCHER_APP_SANDBOX,
 } from '../../src/features/launcher/app-shell';
 import { isAppMime, tileFrom } from '../../src/features/launcher/tiles';
+
+/**
+ * 🔴 **本番と同じ形で組む**(P8 段⑭)。
+ *
+ * 段⑭ で外殻に「保存領域を貸す」経路が入り、`appId` を渡した形と渡さない形で
+ * **出力が別物**になった(prelude と受け口の有無)。`launch-tile.ts` は常に
+ * `appId: tile.lid` を渡すので、**渡さない形で当てた assertion は空振り**である
+ * ── 実際、この file の隔離の pin は一度そうなった(「外殻は script を持たない」が
+ * `appId` 無しの呼び方に救われて緑のままだった)。以後ここを通す。
+ */
+const BASE = launcherAppBase('http://x.test');
+const shell = (html: string, title = '題'): string =>
+  buildLauncherAppShell(title, html, { appId: 'a1', base: BASE });
 
 describe('ランチャーの外殻', () => {
   it('🔴 `allow-same-origin` を**含まない**', () => {
@@ -28,7 +44,7 @@ describe('ランチャーの外殻', () => {
   });
 
   it('🔴 添付の HTML は **srcdoc の中に escape されて**入る(素の markup として出ない)', () => {
-    const html = buildLauncherAppShell('題', '<script>fetch("/steal")</scr' + 'ipt>');
+    const html = shell('<script>fetch("/steal")</scr' + 'ipt>');
     // ⚠ `toContain('sandbox="…"')` は**前方一致**なので、末尾に権限を足されても
     // 通ってしまう ── **生成物そのもの**に禁止語を当てる(定数の pin は上の it)。
     // 🔴 これは空振りだった(P7b review の再レビューで発覚)。定数を汚す変異は
@@ -36,14 +52,18 @@ describe('ランチャーの外殻', () => {
     expect(html).toContain(`sandbox="${LAUNCHER_APP_SANDBOX}"`);
     expect(html).not.toContain('allow-same-origin');
     expect(html).toContain('srcdoc="');
-    // ⚠ 外殻の DOM に**素の script が生えない**ことが主張(escape の抜けの検出)
-    expect(html).not.toContain('<script>');
+    // 🔴 **添付の中身が素の markup として出ない**。⚠ 段⑭ で外殻自身が script を
+    //    1 本持つようになったので「`<script>` が 1 つも無い」では当てられない ──
+    //    **添付の中身そのもの**を当てる(こちらは足しても薄まらない)
+    expect(html).not.toContain('fetch("/steal")');
     expect(html).toContain('&lt;script&gt;');
+    // ⚠ 素の `<script>` は**外殻のもの 1 本だけ**(添付由来が混ざったら増える)
+    expect(html.match(/<script>/g) ?? []).toHaveLength(1);
   });
 
   it('🔴 `"` が閉じても属性から抜けない', () => {
     // 抜けると `srcdoc="…"` の外に markup を置けてしまう = 外殻の中で実行される
-    const html = buildLauncherAppShell('題', '"><img src=x onerror=alert(1)>');
+    const html = shell('"><img src=x onerror=alert(1)>');
     expect(html).not.toContain('"><img');
     expect(html).toContain('&quot;&gt;&lt;img');
   });
@@ -54,14 +74,69 @@ describe('ランチャーの外殻', () => {
   });
 
   it('題名も escape する(題名は user データである)', () => {
-    const html = buildLauncherAppShell('<b>危</b>', 'x');
+    const html = shell('x', '<b>危</b>');
     expect(html).toContain('<title>&lt;b&gt;危&lt;/b&gt;</title>');
     expect(html).not.toContain('<title><b>');
   });
 
-  it('外殻自身は script を持たない(受け口を作らない)', () => {
-    // iframe から parent へ話しかけられても、聴く相手が居ない
-    expect(buildLauncherAppShell('題', '<p>a</p>')).not.toContain('addEventListener');
+  /**
+   * 🔴 P8 段⑭ で**受け口ができた**(保存を届けるため)。段⑩ の
+   * 「外殻は聴かない」という pin はここで役目を終える ── 代わりに
+   * **「聴くが、自分の iframe 以外は 1 件も受けない」**を pin する。
+   *
+   * 実測(3 方向の攻撃を実際に打った):
+   * ```
+   * {"origin":"null",                  "okSource":true,  "reason":"setItem", "keys":"legit"}
+   * {"origin":"http://localhost:45732","okSource":false, "reason":"attack3", "keys":"PWNED3"}
+   * {"origin":"null",                  "okSource":false, "reason":"attack2", "keys":"PWNED"}
+   * {"origin":"null",                  "okSource":false, "reason":"attack1", "keys":"PWNED1"}
+   * ```
+   * ── **3 通とも外殻まで届く**。そして `event.origin` は**両方向に嘘をつく**:
+   * 正規も攻撃 1・2 も一律 `"null"`、逆に外殻自身の攻撃(3)は**アプリ origin を
+   * 名乗る**。効いたのは `event.source` の同一性判定だけだった。
+   */
+  it('🔴 受け口は **source の同一性だけ**で判定する(origin は使わない)', () => {
+    const html = shell('<p>a</p>');
+    expect(html).toContain('addEventListener("message"');
+    // ⚠ **これが本体** ── 判定が `contentWindow` の同一性であること
+    expect(html).toContain('e.source!==frame.contentWindow');
+    // 🔴 `origin` を判定に混ぜた瞬間に穴が開く(自己なりすましが通る)
+    expect(html).not.toContain('e.origin');
+    expect(html).not.toContain('event.origin');
+  });
+
+  it('保存領域を貸さないときは受け口を作らない(要らない口を開けない)', () => {
+    const html = buildLauncherAppShell('題', '<p>a</p>');
+    expect(html).not.toContain('addEventListener');
+    expect(html).not.toContain('localStorage');
+  });
+
+  /**
+   * P8 段⑭: 隔離したまま SPA を動かすための 2 つ。どちらも origin を渡さない。
+   */
+  it('🔴 相対 URL の解決先は **階層 URL**(opaque path だと new URL が落ちる)', () => {
+    const html = shell('<!doctype html><html><body>x</body></html>');
+    expect(html).toContain(`&lt;base href=&quot;${BASE}&quot;&gt;`);
+    // 🔴 実測で 1 度外した ── `about:srcdoc` / blob: は opaque path なので
+    //    `new URL('assets/app.js', document.baseURI)` が TypeError で落ち、
+    //    SPA が**そこで死ぬ**。base はスキーム付きの階層 URL でなければならない
+    expect(BASE.startsWith('http://x.test/')).toBe(true);
+    expect(() => new URL('assets/app.js', BASE)).not.toThrow();
+    // 🔴 **origin の根にしない** ── 根にすると `assets/…` が PKC3 自身の資産に
+    //    解決して、アプリの中に PKC3 の JS が降ってくる
+    expect(BASE).not.toBe('http://x.test/');
+    expect(new URL('assets/app.js', BASE).pathname).toBe(`${LAUNCHER_APP_PATH}assets/app.js`);
+  });
+
+  it('base を渡さないときは `<base>` を焼かない(test / 旧経路)', () => {
+    expect(buildLauncherAppShell('題', 'x', { appId: 'a1' })).not.toContain('base href');
+  });
+
+  it('🔴 クリップボードは **書く側だけ**渡す', () => {
+    expect(LAUNCHER_APP_ALLOW).toContain('clipboard-write');
+    // ⚠ read を渡すと、user が他のアプリでコピーした内容を吸える
+    expect(LAUNCHER_APP_ALLOW).not.toContain('clipboard-read');
+    expect(shell('x')).toContain(`allow="${LAUNCHER_APP_ALLOW}"`);
   });
 });
 

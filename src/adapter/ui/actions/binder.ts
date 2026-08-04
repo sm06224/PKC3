@@ -366,6 +366,25 @@ const ACTIONS: Record<string, ActionHandler> = {
     //    失敗の**報告**は service 側が持つ ── ここは見た目を戻すだけ
     void done.then(reset, reset);
   },
+  /**
+   * ランチャーのタイル設定(P8 段⑭)。
+   * ⚠ 対象は**いま選んでいるノート** ── この 3 つは添付の画面にしか出ない
+   */
+  'toggle-app-tile': (dispatcher, target) => {
+    const lid = dispatcher.getState().selectedLid;
+    if (lid && target instanceof HTMLInputElement)
+      dispatcher.dispatch({ type: 'SET_APP_TILE', lid, registered: target.checked });
+  },
+  'set-app-group': (dispatcher, target) => {
+    const lid = dispatcher.getState().selectedLid;
+    if (lid && target instanceof HTMLInputElement)
+      dispatcher.dispatch({ type: 'SET_APP_TILE', lid, group: target.value.trim() });
+  },
+  'set-app-icon': (dispatcher, target) => {
+    const lid = dispatcher.getState().selectedLid;
+    if (lid && target instanceof HTMLInputElement)
+      dispatcher.dispatch({ type: 'SET_APP_TILE', lid, icon: target.value.trim() });
+  },
   'download-asset': (dispatcher, target, services) => {
     const key = target.getAttribute('data-pkc-asset-key');
     const name = target.getAttribute('data-pkc-asset-name') ?? 'download';
@@ -510,6 +529,18 @@ export function bindActions(
       return;
     }
     if (!(el instanceof HTMLInputElement)) return;
+    // 🔑 チェックボックス / テキスト欄も **change で確定**する(P8 段⑭)。
+    //    ⚠ `input` ごとに撃たない ── グループ名を 1 文字打つたびに disk へ
+    //    書き戻すことになる(欄を離れた時・Enter を押した時が確定)
+    const changeAction = el.getAttribute('data-pkc-action');
+    if (changeAction !== null && changeAction.startsWith('set-app-')) {
+      ACTIONS[changeAction]?.(dispatcher, el, services, root);
+      return;
+    }
+    if (changeAction === 'toggle-app-tile') {
+      ACTIONS[changeAction]?.(dispatcher, el, services, root);
+      return;
+    }
     const field = el.getAttribute('data-pkc-field');
     if (field === 'attach-input') {
       const files = el.files ? [...el.files] : [];

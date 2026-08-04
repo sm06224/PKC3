@@ -90,10 +90,11 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   await expect(tiles.nth(0)).toContainText('電卓');
   await expect(tiles.nth(1)).toContainText('先のリンク');
   await expect(tiles.nth(2)).toContainText('後のリンク');
-  // グループ見出しも出る(既定群は「よく使う」)
+  // 🔴 見出しが出るのは**名前の付いた群だけ**(P8 段⑭)。既定群に「よく使う」と
+  //    名乗らせていたが、画面はその情報(頻度)を持っていない ── 名乗ったぶん嘘になる
   const groups = page.locator('[data-pkc-field="launcher-group"]');
-  await expect(groups.nth(0)).toHaveText('よく使う');
-  await expect(groups.nth(1)).toHaveText('ツール');
+  await expect(groups).toHaveCount(1);
+  await expect(groups.nth(0)).toHaveText('ツール');
 
   // ③ 外部へ飛ぶタイルは**行き先が見えている**(押す前に分かる)
   await expect(tiles.nth(1).locator('[data-pkc-field="tile-url"]')).not.toHaveText('');
@@ -138,11 +139,25 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
     } catch {
       out.parentDom = 'blocked';
     }
+    // 🔴 P8 段⑭ で `localStorage` は**開いた**(アプリに保存領域を貸すため)。
+    //    だから観測点を変える ── 「使えるか」ではなく「**PKC3 の中身が見えるか**」。
+    //    ⚠ ここを `ls: 'blocked'` のままにすると、shim が本物を素通しする実装に
+    //    なっても「使えている」で緑になる(逆に、貸すのをやめても緑になる)
     try {
-      localStorage.setItem('pkc3-probe', '1');
-      out.ls = 'OPEN';
+      localStorage.setItem('probe', '1');
+      out.ls = localStorage.getItem('probe') === '1' ? 'OPEN' : 'broken';
     } catch {
       out.ls = 'blocked';
+    }
+    try {
+      // 🔴 **PKC3 自身の鍵が 1 つも見えないこと**。`pkc3.theme` は PKC3 が
+      //    実際に使っている鍵で、本物が漏れていれば必ずここに出る
+      const keys = Object.keys(localStorage);
+      out.lsKeys = keys.join(',');
+      out.lsLeak = keys.some((k) => k.startsWith('pkc3.')) ? 'LEAK' : 'none';
+      out.lsTheme = String(localStorage.getItem('pkc3.theme'));
+    } catch {
+      out.lsLeak = 'blocked';
     }
     try {
       const req = indexedDB.open('pkc3-assets');
@@ -175,11 +190,15 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   expect(reach.selfOrigin).toBe('null');
   expect(reach).toMatchObject({
     parentDom: 'blocked',
-    ls: 'blocked',
     idb: 'blocked',
     opfs: 'blocked',
     caches: 'blocked',
   });
+  // 🔴 P8 段⑭: 保存領域は**貸す**。ただし見えるのは**このアプリのぶんだけ**
+  expect(reach.ls, 'アプリが状態を保存できない(貸せていない)').toBe('OPEN');
+  expect(reach.lsLeak, 'PKC3 自身の鍵がアプリから見えている').toBe('none');
+  expect(reach.lsTheme, 'PKC3 の設定がアプリから読めている').toBe('null');
+  expect(reach.lsKeys, 'アプリの領域に他人のものが混ざっている').toBe('probe');
 
   // ⑤-2 ⚠ 隔離した先で**中身がちゃんと出ている**(隔離できても白紙では意味がない)
   await expect(
@@ -191,6 +210,139 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   await page.locator('[data-pkc-field="entry-filter"]').fill('リンク');
   await expect(tiles).toHaveCount(2);
   await page.locator('[data-pkc-field="entry-filter"]').fill('存在しない');
+  await expect(page.locator('[data-pkc-field="launcher-empty"]')).toBeVisible();
+
+  expect(errors).toEqual([]);
+});
+
+/**
+ * P8 段⑭: 🔴 **PKC3 の中だけでタイルを作り、SPA が動いて、状態が残る**。
+ *
+ * > user 報告 2026-08-03
+ * > 「**ランチャーから起動した単一 html の SPA アプリが動かない**」
+ * > 「**ランチャーの設定導線が消えた**」
+ *
+ * 直す前の実測(実起動で回収):
+ * ```
+ * pageerror: SecurityError: Failed to read the 'sessionStorage' property from 'Window':
+ *            The document is sandboxed and lacks the 'allow-same-origin' flag.
+ * #app = 「読み込み中…」のまま / spaBoot 未設定
+ * ```
+ * `try/catch` の無いアプリは**保管庫を読む 1 行目で止まる**。加えて
+ * `document.baseURI` が blob:(opaque path)なので `new URL(相対, base)` も
+ * `TypeError` で落ちていた。そして PKC3 の中には**タイルを作る導線が無かった**。
+ *
+ * ⚠ 観測点を「タブが開いた」で止めない ── **アプリの中で JS が走り切ったか**
+ * (`spaBoot`)と、**開き直して続きが出るか**まで見る。
+ */
+test('🔴 登録 → タイル → SPA が動き、開き直しても続きが出る', async ({ page, context }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  // 保管庫と相対 URL と hash router を**全部**使う、try/catch の無い SPA
+  const SPA = `<!doctype html><html lang="ja"><head><meta charset="utf-8"></head>
+<body><div id="app">読み込み中…</div>
+<script>
+  var saved = JSON.parse(localStorage.getItem('notes') || '[]');
+  sessionStorage.setItem('v', '1');
+  var resolved = String(new URL('assets/app.js', document.baseURI));
+  history.pushState({ p: 1 }, '', location.href.split('#')[0] + '#/list');
+  saved.push('メモ' + (saved.length + 1));
+  localStorage.setItem('notes', JSON.stringify(saved));
+  document.getElementById('app').textContent = saved.join(',');
+  document.body.dataset.spaBoot = 'ok';
+  document.body.dataset.route = location.hash;
+  document.body.dataset.resolved = resolved;
+</scr` + `ipt></body></html>`;
+
+  // ① 🔴 **PKC3 の中で**添付して、登録する(PKC2 のデータを一切使わない)
+  await clickReal(page, '[data-pkc-action="attach-file"]');
+  await page.locator('[data-pkc-field="attach-input"]').setInputFiles({
+    name: 'memo.html',
+    mimeType: 'text/html',
+    buffer: Buffer.from(SPA, 'utf-8'),
+  });
+  const register = page.locator('[data-pkc-field="app-register"]');
+  await expect(register, 'アプリとして登録する導線が無い').toBeVisible({ timeout: 15000 });
+  await register.check();
+  // 登録すると設定欄が出る
+  await expect(page.locator('[data-pkc-field="app-group"]')).toBeVisible();
+  await page.locator('[data-pkc-field="app-group"]').fill('道具');
+  await page.locator('[data-pkc-field="app-group"]').blur();
+  await page.locator('[data-pkc-field="app-icon"]').fill('🧮');
+  await page.locator('[data-pkc-field="app-icon"]').blur();
+
+  // ② タイルが出る(グループ見出しと目印つき)
+  await clickReal(page, '[data-pkc-browse="launcher"]');
+  const tile = page.locator('[data-pkc-region="launcher-grid"] [data-pkc-tile]');
+  await expect(tile).toHaveCount(1, { timeout: 15000 });
+  await expect(page.locator('[data-pkc-field="launcher-group"]')).toHaveText('道具');
+  await expect(tile.locator('[data-pkc-field="tile-icon"]')).toHaveText('🧮');
+
+  // ③ 🔴 押すと**アプリが動く**
+  const open = async (): Promise<Record<string, string | null>> => {
+    const [tab] = await Promise.all([context.waitForEvent('page'), tile.click()]);
+    await tab.waitForLoadState('domcontentloaded');
+    const inner = tab.frameLocator('[data-pkc-field="launcher-app"]');
+    await expect(inner.locator('#app')).not.toHaveText('読み込み中…', { timeout: 20000 });
+    const f = tab.frames().find((x) => x !== tab.mainFrame())!;
+    const seen = await f.evaluate(() => ({
+      boot: document.body.dataset.spaBoot ?? null,
+      app: document.getElementById('app')?.textContent ?? null,
+      route: document.body.dataset.route ?? null,
+      resolved: document.body.dataset.resolved ?? null,
+      origin: String(self.origin),
+    }));
+    await tab.close();
+    return seen;
+  };
+
+  // 🔴 押した対象は**選択状態にもなる**(押しても本体側に何も残らない、を落とす)
+  await expect(
+    page.locator('[data-pkc-region="launcher-grid"] [data-pkc-tile][data-pkc-selected]'),
+    'タイルを押しても、いま何を触ったのか画面に残らない',
+  ).toHaveCount(1);
+  // 中央にその添付が出る(空のままにしない)
+  await expect(page.locator('[data-pkc-field="app-register"]')).toBeVisible();
+
+  const first = await open();
+  expect(first.boot, 'アプリが 1 行目で止まっている(保管庫が読めない)').toBe('ok');
+  expect(first.app).toBe('メモ1');
+  expect(first.route, 'hash router が効いていない').toBe('#/list');
+  // 🔴 相対 URL が**解決できる**(base が opaque path だと TypeError で死ぬ)
+  expect(first.resolved).toContain('/pkc3-app/assets/app.js');
+  // ⚠ 隔離は保ったまま(直したら穴が開いた、を防ぐ)
+  expect(first.origin, '隔離が外れている').toBe('null');
+
+  // ④ 🔴 **開き直すと続きが出る**(状態が保存できている ── これが user の要求)
+  const second = await open();
+  expect(second.app, 'アプリの保存が残っていない').toBe('メモ1,メモ2');
+
+  // ⑤ 🔴 **なりすましを受けない**。
+  //    実測で 3 方向(アプリが `allow-popups` で開いた popup からの `opener.parent` /
+  //    外殻に生えた別の sandboxed iframe / 外殻自身の `postMessage`)が**全部届き**、
+  //    `event.origin` は正規も攻撃も一律 `"null"`、外殻自身の攻撃だけは
+  //    **アプリ origin を名乗った** ── つまり origin は両方向に嘘をつく。
+  //    ここでは「外殻自身から撃つ」を再現する(source が iframe ではない一通)
+  const [attackTab] = await Promise.all([context.waitForEvent('page'), tile.click()]);
+  await attackTab.waitForLoadState('domcontentloaded');
+  await attackTab.frameLocator('[data-pkc-field="launcher-app"]').locator('#app').waitFor();
+  await attackTab.evaluate(() => {
+    window.postMessage({ tag: 'pkc3.app.storage', op: 'set', key: 'PWNED', value: '1' }, '*');
+  });
+  await attackTab.waitForTimeout(300);
+  const leaked = await attackTab.evaluate(() =>
+    Object.keys(localStorage).filter((k) => k.includes('PWNED')),
+  );
+  expect(leaked, '外殻が自分宛の偽メッセージを受けて書き込んだ').toEqual([]);
+  await attackTab.close();
+
+  // ⑥ 登録を外すとタイルは消える(片道にしない)
+  await clickReal(page, '[data-pkc-browse="list"]');
+  await page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first().click();
+  await page.locator('[data-pkc-field="app-register"]').uncheck();
+  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await expect(tile).toHaveCount(0, { timeout: 15000 });
   await expect(page.locator('[data-pkc-field="launcher-empty"]')).toBeVisible();
 
   expect(errors).toEqual([]);
