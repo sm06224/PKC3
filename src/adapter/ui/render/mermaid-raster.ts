@@ -44,6 +44,20 @@ export const DIAGRAM_CACHE_MAX_BYTES = 32 * 1024 * 1024;
 /** 追い出しの単位(毎回 1 件ずつ消すと put のたびに走査する)。 */
 const EVICT_TO = 0.8;
 
+/**
+ * 「最後に使った時刻」を書き直す**間隔**(P8 段㉗)。
+ *
+ * 🔴 直す前は cache hit のたびに `put({...row, at: now})` していた ── IDB の
+ * `put` は行ごと書き直すので、**時刻 1 個のために PNG 全体を書き戻していた**。
+ * 実測(この repo の計器 `run-raster-cap.mjs`)で 1 枚の平均は **181KB**、
+ * 大きい図は **1MB 級**。図を 6 枚持つノートを開くたびに 1MB 前後の書込が走り、
+ * 「書込増幅を作らない」という storage 側の規律と正面から衝突する。
+ *
+ * ⚠ LRU の粒度はこの間隔ぶん粗くなるが、追い出しは **32MB に触れたとき**しか
+ * 走らない(実測: 平均的な図で 185 枚目)ので、5 分の粗さは順位に効かない。
+ */
+const TOUCH_INTERVAL_MS = 5 * 60 * 1000;
+
 interface CacheRow {
   png: Blob;
   /** 最後に使った時刻。**古いものから落とす**ための材料。 */
@@ -179,6 +193,18 @@ export function cacheKey(k: RasterKey): string {
   return [k.theme, k.width, k.dpr, k.source].join(SEP);
 }
 
+/**
+ * 「最後に使った時刻」を書き直すか(P8 段㉗)。
+ *
+ * 🔑 IDB を触らない**純関数**にする ── 判定をここへ寄せておけば単体で確かめられる。
+ * ⚠ 時刻が壊れている行(`at` が数値でない / 未来)は**書き直す側**に倒す
+ * ── 壊れたまま放置すると、その行が永久に「最近使った」ままで追い出されない。
+ */
+export function shouldTouch(at: unknown, now: number): boolean {
+  if (typeof at !== 'number' || !Number.isFinite(at)) return true;
+  return at > now || now - at >= TOUCH_INTERVAL_MS;
+}
+
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, 1);
@@ -203,10 +229,44 @@ function tx<T>(
   });
 }
 
+/**
+ * 図キャッシュの DB(P8 段㉗)。**開けなくても呼び側は壊れない**
+ * ── 面倒を見るのは下の `withCache()`。
+ *
+ * 🔴 直す前は呼び側が `tx(await db(), …).catch(…)`
+ * と書いていた ── `await db()` は**引数の位置**なので、後ろの `.catch()` は
+ * 掛かっていない。IDB を開けない環境(site data をブロック / DB 破損 /
+ * private mode の一部)では `renderToPng` ごと reject し、mermaid の描画を
+ * **一度も試さないまま**全部の図が原文のまま残った。
+ * この file は 1 か所で「キャッシュは速さの話で、正しさの話ではない」と
+ * 宣言していたのに、**読み側と open 側が正しさを道連れにしていた**。
+ *
+ * ⚠ **失敗を memo しない**(段㉗)── `dbPromise ??= openDb()` のままだと
+ * reject 済みの promise を保持し、一度失敗するとその session では二度と
+ * 開き直さない。open の失敗は恒久とは限らない(他タブの version change 待ち /
+ * 一時的な quota)ので、**失敗したら memo を捨てて次の機会に開き直す**。
+ */
 let dbPromise: Promise<IDBDatabase> | null = null;
 function db(): Promise<IDBDatabase> {
-  dbPromise ??= openDb();
+  dbPromise ??= openDb().catch((e: unknown) => {
+    dbPromise = null;
+    throw e;
+  });
   return dbPromise;
+}
+
+/**
+ * キャッシュを触る。**開けない / 失敗したら `fallback`** を返す。
+ *
+ * 🔑 呼び側を全部ここに通すのは、「`await db()` を `.catch()` の外に置く」
+ * という壊し方が**二度と書けない形**にするため(段㉗)。
+ */
+export async function withCache<T>(run: (d: IDBDatabase) => Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await run(await db());
+  } catch {
+    return fallback;
+  }
 }
 
 /** mermaid 本体は**必要になるまで読まない**(初期ロードに載せない)。 */
@@ -337,13 +397,92 @@ export function svgViewBox(svg: string): { w: number; h: number } | null {
   return { w, h };
 }
 
+/**
+ * 1 枚の canvas に許す**面積**と**辺の長さ**(P8 段㉗)。
+ *
+ * 🔴 直す前は clamp が 1 つも無く、`h = cssWidth × 縦横比 × dpr` がそのまま
+ * canvas の高さになっていた。実測(headless Chromium。詳細は
+ * `docs/development/p8-raster-cache-limits-2026-08.md`):
+ *
+ * | 図(縦に伸びる chain) | dpr | PNG 実寸 | canvas の裏バッファ | 画面での幅 |
+ * |---|---|---|---|---|
+ * | 120 節 | 3 | 369 × **35,402** px | **49.8 MB** | **123 px** |
+ * | 40 節 | 3 | 342 × 11,916 px | 15.5 MB | 114 px |
+ *
+ * ── **123px 幅で見せる図のために 50MB 確保していた**。`cssWidth` は
+ * `min(器幅, 図の実寸)` で頭打ちになるが、**縦横比は頭打ちにならない**ので
+ * 縦に伸びる図(`graph TD` の chain は実データで普通に出る)で発散する。
+ * これは「継続使用の常駐メモリ」を最優先せよという不可侵指示に真っ向から反する。
+ *
+ * ⚠ さらに面積上限を越えると `canvas.toBlob` が **null を渡す**(仕様)ので、
+ * その図はその端末で**永久に出ない**(鍵が同じなので再訪しても同じ経路)。
+ * iOS Safari の面積上限は約 16.7M px なので、**そこより下**に置く。
+ *
+ * 🔑 **面積を主、辺を従**にする(段㉗ の再測で決めた)。最初は辺を 8,192 に
+ * していたが、それだと **dpr 1 の縦長の図まで縮んだ**(123 × 11,801 の図が
+ * 倍率 0.69 → 表示幅より小さく焼いて拡大 = ぼける)。実際に効かせたいのは
+ * メモリで、それは**面積**で決まる ── 辺は「canvas がそもそも作れない」を
+ * 避けるためだけの帯にする。
+ *
+ * 4M px = 裏バッファ **16MB**。普通の図(640×400 を dpr 2)は 1.0M px なので
+ * まったく触らない ── 縮むのは病的に長い図だけである。
+ */
+export const MAX_RASTER_PX = 4 * 1024 * 1024;
+/**
+ * 辺の上限。⚠ Chromium の canvas は **65,535px** を越えると作れない ──
+ * そこに触れる手前で止める帯であって、画質を決める数字ではない。
+ */
+export const MAX_RASTER_DIM = 32768;
+
+/**
+ * 焼くときの**倍率**を決める(P8 段㉗)。
+ *
+ * 🔑 IDB も canvas も触らない**純関数**にする ── 判定をここへ寄せておけば、
+ * happy-dom でも単体で確かめられる(`rasterize` は canvas が要るので呼べない)。
+ *
+ * ⚠ 返り値は **1 を下回りうる** ── 巨大な図では等倍すら許さない。
+ * ぼけるのは困るが、**出ない / 50MB 確保するよりはよい**。
+ */
+export function rasterScale(cssWidth: number, cssHeight: number, dpr: number): number {
+  const w = Math.max(1, cssWidth);
+  const h = Math.max(1, cssHeight);
+  return Math.min(
+    Math.max(dpr, 0) || 1,
+    Math.sqrt(MAX_RASTER_PX / (w * h)),
+    MAX_RASTER_DIM / w,
+    MAX_RASTER_DIM / h,
+  );
+}
+
+/**
+ * 焼く**実寸**(P8 段㉗)。
+ *
+ * 🔑 「倍率」と「実寸」を別々に持たない ── `rasterize` 側で `round` して、
+ * test 側でも `round` して…と**同じ規則を 2 か所に生やす**と必ずずれる
+ * (この repo の規律:「規則を 1 つに寄せる」)。実際に踏んだ: 倍率だけを
+ * 寄せて実寸は呼び側で `Math.round` していたら、**両辺が切り上がって面積が
+ * 上限を 1,176px 超えた**(2120 × 1979 = 4,195,480 / 上限 4,194,304)。
+ *
+ * ⚠ **切り捨てる** ── 丸めると上限を越えうる。1px 足りない側に倒す。
+ */
+export function rasterSize(
+  cssWidth: number,
+  cssHeight: number,
+  dpr: number,
+): { w: number; h: number } {
+  const scale = rasterScale(cssWidth, cssHeight, dpr);
+  return {
+    w: Math.max(1, Math.floor(Math.max(1, cssWidth) * scale)),
+    h: Math.max(1, Math.floor(Math.max(1, cssHeight) * scale)),
+  };
+}
+
 export async function rasterize(svg: string, width: number, dpr: number): Promise<Raster> {
   // 🔴 **器より小さい図は引き伸ばさない**(P8 段⑱)。図の実寸で頭打ちにする
   //    ── 器いっぱいに広げると、小さい図が画面を占領して密度が落ちる
   const box = svgViewBox(svg);
   const cssWidth = Math.max(1, Math.round(box ? Math.min(width, box.w) : width));
   const ratio = box ? box.h / box.w : 0;
-  const w = Math.max(1, Math.round(cssWidth * dpr));
   /**
    * ⚠ **根の `<svg>` に実寸を書き戻す必要は無い**(実測。段⑱ で一度書いて消した)。
    * 「読ませた自然幅 300px の絵を `drawImage` が引き伸ばすのでは」と考えて
@@ -362,10 +501,12 @@ export async function rasterize(svg: string, width: number, dpr: number): Promis
       img.src = url;
     });
     // viewBox が無い図(想定外)だけ、読めた自然比に落ちる
-    const h = Math.max(
+    const cssHeight = Math.max(
       1,
-      Math.round(box ? cssWidth * ratio * dpr : (img.naturalHeight / Math.max(1, img.naturalWidth)) * cssWidth * dpr),
+      box ? cssWidth * ratio : (img.naturalHeight / Math.max(1, img.naturalWidth)) * cssWidth,
     );
+    // 🔴 **上限に収まるところまで落とす**(段㉗。上の実測表を参照)
+    const { w, h } = rasterSize(cssWidth, cssHeight, dpr);
     const canvas = document.createElement('canvas');
     canvas.width = w;
     canvas.height = h;
@@ -388,14 +529,19 @@ export async function rasterize(svg: string, width: number, dpr: number): Promis
  */
 export async function renderToPng(key: RasterKey): Promise<Raster> {
   const k = cacheKey(key);
-  const hit = await tx<unknown>(await db(), 'readonly', (s) => s.get(k)).catch(() => null);
+  const hit = await withCache<unknown>((d) => tx<unknown>(d, 'readonly', (s) => s.get(k)), null);
   if (hit !== null && typeof hit === 'object' && 'png' in hit) {
     const row = hit as CacheRow;
     // ⚠ 使ったことを記録する(追い出しの順が「最後に使った順」になる)。
-    //    失敗しても描画は続ける
-    void tx(await db(), 'readwrite', (s) =>
-      s.put({ ...row, at: Date.now() } satisfies CacheRow, k),
-    ).catch(() => undefined);
+    //    失敗しても描画は続ける。
+    // 🔴 ただし**毎回は書かない**(段㉗)── `put` は行ごと書き直すので、
+    //    時刻 1 個のために PNG 全体(平均 181KB)を書き戻すことになる
+    if (shouldTouch(row.at, Date.now())) {
+      void withCache(
+        (d) => tx(d, 'readwrite', (s) => s.put({ ...row, at: Date.now() } satisfies CacheRow, k)),
+        undefined,
+      );
+    }
     return { png: row.png, cssWidth: row.cssWidth ?? key.width };
   }
   // ⚠ 旧形式(Blob をそのまま入れていた)も読める ── 互換は双方向で考える
@@ -407,17 +553,21 @@ export async function renderToPng(key: RasterKey): Promise<Raster> {
     return rasterize(svg, key.width, key.dpr);
   });
   // ⚠ 保存に失敗しても**描画は続ける**(キャッシュは速さの話で、正しさの話ではない)
-  await tx(await db(), 'readwrite', (s) =>
-    s.put(
-      {
-        png: raster.png,
-        at: Date.now(),
-        size: raster.png.size,
-        cssWidth: raster.cssWidth,
-      } satisfies CacheRow,
-      k,
-    ),
-  ).catch(() => undefined);
+  await withCache(
+    (d) =>
+      tx(d, 'readwrite', (s) =>
+        s.put(
+          {
+            png: raster.png,
+            at: Date.now(),
+            size: raster.png.size,
+            cssWidth: raster.cssWidth,
+          } satisfies CacheRow,
+          k,
+        ),
+      ),
+    undefined,
+  );
   void evictDiagramCache().catch(() => undefined);
   return raster;
 }
@@ -494,11 +644,22 @@ export async function evictDiagramCache(
   if (evicting) return 0;
   evicting = true;
   try {
-    const d = await db();
-    const items = await listCacheEntries(d);
-    const drop = planEviction(items, maxBytes);
-    for (const key of drop) await tx(d, 'readwrite', (s) => s.delete(key));
-    return drop.length;
+    return await withCache(async (d) => {
+      const items = await listCacheEntries(d);
+      const drop = planEviction(items, maxBytes);
+      let done = 0;
+      for (const key of drop) {
+        // ⚠ 1 件の失敗で**残りを諦めない** ── 途中で throw すると、その回の
+        //   追い出しがまるごと止まる(呼び側の catch に握り潰されて静かに)
+        try {
+          await tx(d, 'readwrite', (s) => s.delete(key));
+          done += 1;
+        } catch {
+          /* この 1 件は次の機会に落ちる */
+        }
+      }
+      return done;
+    }, 0);
   } finally {
     evicting = false;
   }
@@ -518,5 +679,5 @@ export async function renderToSvg(source: string, palette: DiagramPalette): Prom
 
 /** キャッシュを空にする(図は原文から再生成できるので、いつ捨ててもよい)。 */
 export async function clearDiagramCache(): Promise<void> {
-  await tx(await db(), 'readwrite', (s) => s.clear());
+  await withCache((d) => tx(d, 'readwrite', (s) => s.clear()), undefined);
 }

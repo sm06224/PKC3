@@ -30,6 +30,7 @@ export default tseslint.config(
         DataTransfer: 'readonly',
         File: 'readonly',
         Event: 'readonly',
+        indexedDB: 'readonly',
       },
     },
   },
