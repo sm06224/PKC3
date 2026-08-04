@@ -187,7 +187,10 @@ select:focus-visible {
   display: flex;
   align-items: center;
   gap: var(--s3);
-  height: 20px;
+  /* ⚠ **薄く保つ**が、中の的が小さくなりすぎない高さ(P8 段㉕)。
+   * 20px のときボタンは 16px しかなく、**設定への唯一の入口**が
+   * 他のどのボタン(26px)よりも小さかった ── 押し損ねる。 */
+  height: 24px;
   padding: 0 var(--s3);
   background: var(--accent);
   color: var(--accent-fg);
@@ -206,15 +209,6 @@ select:focus-visible {
 }
 [data-pkc-field='brand-spacer'] {
   margin-left: auto;
-}
-[data-pkc-region='brand'] select {
-  width: auto;
-  height: 22px;
-  padding: 0 var(--s2);
-  font-size: 12px;
-  background: color-mix(in srgb, var(--accent) 78%, #000);
-  color: var(--accent-fg);
-  border-color: color-mix(in srgb, var(--accent) 55%, #000);
 }
 
 /* ── 左の列: 探し方のタブ ───────────────────────────
@@ -268,10 +262,10 @@ select:focus-visible {
 }
 /* 上の帯の設定ボタン ── 薄い帯に収まる高さ */
 [data-pkc-region='brand'] button {
-  height: 16px;
-  min-height: 16px;
-  max-height: 16px;
-  padding: 0 var(--s2);
+  height: 20px;
+  min-height: 20px;
+  max-height: 20px;
+  padding: 0 var(--s3);
   font-size: 11px;
   background: transparent;
   color: var(--accent-fg);

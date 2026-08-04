@@ -217,6 +217,26 @@ export function connectStoreEffects(
             // ⚠ 書いたら**その場で読み直す** ── 読み直さないと、押した結果が
             //    ランチャーに出るのが「次にタブを開き直したとき」になる
             dispatcher.dispatch({ type: 'APP_TILE_SAVED', lid: ev.lid, gen: ev.gen, body: next });
+          } catch (e) {
+            if (!disposed)
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: `アプリの設定を保存できませんでした: ${String(e)}`,
+              });
+            fail();
+            return;
+          }
+          // 🔴 **ack のあとの仕事は別の try**(P8 段㉕)。同じ try に入れていた
+          //    ときは、ここが落ちると catch の `fail()` が **2 回目の
+          //    `APP_TILE_SAVED`** を撃ち、受け側の計数(`tileWrite.n`)が
+          //    1 要求で 2 減っていた ── 連続で 2 つ設定を変えると、2 本目が
+          //    飛んでいるのに `tileWrite` が null になって編集へ入れてしまい、
+          //    保存で 2 本目の書き戻しの上に旧本文が乗って**設定が黙って消える**
+          //    (段⑯ が `tileWrite` を入れて塞いだ H-1 と同型)。
+          // ⚠ 読み直しの失敗は **OP_FAILED だけ**で終える(ロックには触らない)
+          try {
+            // ⚠ 書いたら**その場で読み直す** ── 読み直さないと、押した結果が
+            //    ランチャーに出るのが「次にタブを開き直したとき」になる
             const titles = new Map(ev.entries.map((e) => [e.lid, e.title]));
             const rows = await store.getBodies(ev.entries.map((e) => e.lid));
             if (disposed) return;
@@ -230,9 +250,8 @@ export function connectStoreEffects(
             if (!disposed)
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `アプリの設定を保存できませんでした: ${String(e)}`,
+                error: `アプリの一覧を読み直せませんでした: ${String(e)}`,
               });
-            fail();
           }
         });
         break;

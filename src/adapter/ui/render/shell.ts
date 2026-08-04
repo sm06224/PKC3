@@ -104,7 +104,9 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const brandContext = document.createElement('span');
   brandContext.setAttribute('data-pkc-field', 'brand-context');
   // ⚠ **薄く保つ**(user 指示 2026-08-03「最上のヘッドラインはもっと薄くてもいい、
-  // 邪魔」)── 名前と現在地だけ。押すものはここに置かない
+  // 邪魔」)── 出すのは名前と現在地、それに**アプリ全体**の操作(設定)だけ。
+  // ⚠ かつてここは「押すものはここに置かない」と書きながら直後に設定ボタンを
+  //    置いていた(P8 段㉕ で実態に合わせた)
   const spacer = document.createElement('span');
   spacer.setAttribute('data-pkc-field', 'brand-spacer');
   brand.append(brandName, brandContext, spacer);
