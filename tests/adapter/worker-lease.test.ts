@@ -13,6 +13,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { WorkerLease } from '../../src/adapter/platform/worker-lease';
+import { JobMonitor } from '../../src/adapter/platform/job-monitor';
 import { MarkdownClient } from '../../src/adapter/platform/render/markdown-client';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 
@@ -402,5 +403,56 @@ describe('使う側から見た振る舞い(MarkdownClient)', () => {
     follow.push('a');
     await new Promise((r) => setTimeout(r, 5));
     expect(onErr).toHaveBeenCalled();
+  });
+});
+
+/**
+ * P8 段⑰: 🔴 **落ちた依頼を可視化へ通す**(レビュー M)。
+ *
+ * 🔴 直す前は黙って reject していたので、worker が落ちたとき設定のジョブ表の
+ * 「待ち / 実行中」が**永久に減らないまま**残り、失敗の件数もどこにも出なかった
+ * ── 可視化が嘘をつくと、user も次に見る人も切り分けができない。
+ */
+describe('落ちたときの可視化(P8 段⑰)', () => {
+  it('🔴 worker が落ちたら、待っていた件数ぶん `fail` が記録される', async () => {
+    const monitor = new JobMonitor();
+    FakeWorker.live.clear();
+    const lease = new WorkerLease({
+      spawn: () => new FakeWorker() as unknown as Worker,
+      monitor,
+      name: 'x',
+      setTimer: () => 0,
+      clearTimer: () => undefined,
+    });
+    const a = lease.run({ n: 1 }).catch(() => 'ng');
+    const b = lease.run({ n: 2 }).catch(() => 'ng');
+    await Promise.resolve();
+    const w = [...FakeWorker.live][0]!;
+    w.onerror?.(new ErrorEvent('error', { message: '落ちた' }));
+    expect(await a).toBe('ng');
+    expect(await b).toBe('ng');
+
+    const lane = monitor.stats().find((l) => l.lane === 'x')!;
+    expect(lane.failed, '落ちた件数が可視化に出ていない').toBe(2);
+    // 🔴 ここが本丸 ── 表の「待ち / 実行中」が残り続けない
+    expect(lane.queued + lane.running, '落ちたのに待ち/実行中が残っている').toBe(0);
+    lease.dispose();
+  });
+
+  it('🔴 dispose でも同じ(畳んだのに実行中が残らない)', async () => {
+    const monitor = new JobMonitor();
+    const lease = new WorkerLease({
+      spawn: () => new FakeWorker() as unknown as Worker,
+      monitor,
+      name: 'y',
+      setTimer: () => 0,
+      clearTimer: () => undefined,
+    });
+    const p = lease.run({ n: 1 }).catch(() => 'ng');
+    await Promise.resolve();
+    lease.dispose();
+    expect(await p).toBe('ng');
+    const lane = monitor.stats().find((l) => l.lane === 'y')!;
+    expect(lane.queued + lane.running, '畳んだのに待ち/実行中が残っている').toBe(0);
   });
 });

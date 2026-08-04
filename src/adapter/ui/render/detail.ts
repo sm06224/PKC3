@@ -16,7 +16,7 @@ import {
   hasMarkdownSyntax,
 } from '@features/markdown/markdown-render';
 import { parseFrontmatter, extractVars } from '@features/markdown/frontmatter';
-import { hydrateMermaid } from './mermaid-hydrate';
+import { hydrateMermaid, type MermaidScope } from './mermaid-hydrate';
 import { applyBlocks, EMPTY_VIEW, type BlockView } from './apply-blocks';
 import { iconButton } from './icons';
 import { buildFormatBar } from './format-bar';
@@ -73,8 +73,12 @@ export class DetailRenderer {
   /** 本文の出し方(markdown / 素のまま / 添付)。変わったら器ごと作り直す。 */
   private bodyKind: 'md' | 'plain' | 'attachment' | 'loading' | null = null;
   private bodyView: BlockView = EMPTY_VIEW;
-  /** 図の後始末を**塊ごと**に持つ(全体に掛け直すと生きている `<img>` を壊す)。 */
-  private readonly mermaidDisposers: Array<() => void> = [];
+  /**
+   * 図の面倒を**塊ごと**に持つ(全体に掛け直すと生きている `<img>` を壊す)。
+   * ⚠ 新しい塊を作る前に `prune()` して、**器が全部外れた塊は畳む**
+   * (P8 段⑰。レビュー H-5 ── 積もると PNG の URL と観測器が残り続ける)。
+   */
+  private readonly mermaidScopes: MermaidScope[] = [];
   /**
    * 編集へ入る直前の scroll。⚠ 編集の面は別物なので骨組みごと作り直すが、
    * **戻ってきたら元の位置へ戻す** ── 保存しただけで先頭へ飛ぶのも同じ no-op。
@@ -112,7 +116,7 @@ export class DetailRenderer {
     this.cancelPreview = null;
     this.disposeMermaid?.();
     this.disposeMermaid = null;
-    for (const d of this.mermaidDisposers.splice(0)) d();
+    for (const sc of this.mermaidScopes.splice(0)) sc.dispose();
   }
 
   /** 骨組みを捨てる(次の描画で組み直す)。 */
@@ -217,6 +221,14 @@ export class DetailRenderer {
     const meta = state.entryMetas.get(lid);
     if (meta?.archetype === 'attachment') {
       // 添付は器ごと作り直す(preview / blob の貸し借りが絡むので差分にしない)
+      // 🔴 **作り直す前に、借りていたものを返す**(P8 段⑰。レビュー H-4)。
+      //    骨組みを使い回すようになった段⑪ 以降、`fresh` でない再描画では
+      //    `disposeLends()` が走らないのに `textContent=''` で `<img>` だけ消えて
+      //    いた ── 実測: 同じノートのまま履歴の開閉を 3 往復すると
+      //    **lend 7 回 / dispose 0 回**、画面の `<img>` は 1 枚。
+      //    ⚠ `hydrateToken` も進むので、飛んでいる hydratePreview が stale と
+      //    判定されて detached な器へ描かなくなる(こちらも同じ穴だった)
+      this.disposeLends();
       this.bodyKind = 'attachment';
       this.bodyView = EMPTY_VIEW;
       this.bodyHost!.textContent = '';
@@ -247,7 +259,8 @@ export class DetailRenderer {
       //    `<img>` の ObjectURL を revoke してしまう)
       if (applied.inserted.length > 0) {
         void this.hydrateAssetRefs(applied.inserted, this.hydrateToken);
-        this.mermaidDisposers.push(hydrateMermaid(applied.inserted));
+        this.mermaidScopes.push(hydrateMermaid(applied.inserted));
+        pruneScopes(this.mermaidScopes);
       }
       this.restoreScroll();
     } else {
@@ -385,9 +398,10 @@ export class DetailRenderer {
      * ⚠ HTML の parse(`innerHTML`)はメインに残る ── そこは DOM なので動かせない。
      */
     let shown: BlockView = EMPTY_VIEW;
-    /** 図の後始末は**塊ごと**に持つ ── 全体に掛け直すと、生きている `<img>` の
-     *  ObjectURL を revoke してしまい、触っていない図が消える */
-    const mermaidDisposers: Array<() => void> = [];
+    /** 図の面倒は**塊ごと**に持つ ── 全体に掛け直すと、生きている `<img>` の
+     *  ObjectURL を revoke してしまい、触っていない図が消える。
+     *  ⚠ 差し替えで外れた器を持つ塊は `prune()` で畳む(段⑰) */
+    const scopes: MermaidScope[] = [];
     const follow = this.markdown.follower(
       (html) => {
         // ⚠ 外された後に描かない(編集を抜けた瞬間の結果で無駄な仕事をしない)
@@ -395,8 +409,13 @@ export class DetailRenderer {
         const applied = applyBlocks(preview, html, shown);
         shown = applied.view;
         // 🔑 **新しく入った所だけ**図を面倒みる(触っていない図はそのまま)
-        if (applied.inserted.length > 0)
-          mermaidDisposers.push(hydrateMermaid(applied.inserted));
+        if (applied.inserted.length > 0) {
+          scopes.push(hydrateMermaid(applied.inserted));
+          // 🔴 **積もらせない**(P8 段⑰。レビュー H-5)── 静穏 tick ごとに塊が
+          //    増え、画面に無い PNG の URL と観測器が編集中ずっと生きていた
+          //    (実測: 5 tick で createObjectURL 5 / revokeObjectURL 0)
+          pruneScopes(scopes);
+        }
       },
       (e) => {
         // 🔴 **白紙にしない**。理由を出して原文だけは読めるようにする
@@ -415,7 +434,7 @@ export class DetailRenderer {
     // ⚠ 編集を抜けるときに予約と図を畳む(detached なノードへ描かない)
     this.cancelPreview = () => {
       follow.dispose();
-      for (const d of mermaidDisposers.splice(0)) d();
+      for (const sc of scopes.splice(0)) sc.dispose();
     };
     ta.focus();
   }
@@ -465,7 +484,7 @@ export class DetailRenderer {
       // 🔴 添付の説明にも図が書ける(P8 段⑬ review L-3)。かつてここだけ
       //    `hydrateMermaid` を呼んでおらず、**器が空のまま**残っていた ──
       //    「本文なら描けるのに、添付の説明だと描けない」という一貫性の穴
-      this.mermaidDisposers.push(hydrateMermaid(desc));
+      this.mermaidScopes.push(hydrateMermaid(desc));
     }
   }
 
@@ -687,4 +706,17 @@ function appTileControls(rawBody: string): HTMLElement {
   field('app-group', 'set-app-group', 'グループ(名前順に並びます)', fm['attachment.app_group'], 16);
   field('app-icon', 'set-app-icon', '目印', fm['attachment.app_icon'], 3);
   return box;
+}
+
+/**
+ * 器が全部 DOM から外れた塊を畳む(P8 段⑰)。
+ * ⚠ **その場で配列を縮める** ── 畳んだ塊を残すと、次の tick でまた数えることになる。
+ */
+function pruneScopes(scopes: MermaidScope[]): void {
+  for (let i = scopes.length - 1; i >= 0; i--) {
+    if (scopes[i]!.prune() === 0) {
+      scopes[i]!.dispose();
+      scopes.splice(i, 1);
+    }
+  }
 }

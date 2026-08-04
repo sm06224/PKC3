@@ -135,9 +135,19 @@ export class SettingsRenderer {
     return wrap;
   }
 
-  /** 表とログを描き直す。⚠ 設定画面が出ていないときは何もしない。 */
+  /**
+   * 表とログを描き直す。⚠ 設定画面が**表示されていない**ときは何もしない。
+   *
+   * 🔴 `isConnected` では足りない(P8 段⑰。レビュー)── 面の切替は
+   * `hidden` の付け外しだけで、DOM には**繋がったまま**である。つまり
+   * かつてのガードは常に真で、**設定を一度開いたら以後ずっと 400ms ごとに
+   * 隠れた面を作り直して**いた。
+   */
   private refresh(): void {
     if (!this.jobsBody || !this.logBody || !this.jobsBody.isConnected) return;
+    // ⚠ `offsetParent` は happy-dom で常に null なので使わない ── 面の切替が
+    //    実際に触っている `hidden` を見る(`CenterRouter` の pane に付く)
+    if (this.region.closest('[data-pkc-view-pane][hidden]') !== null) return;
     const lanes = this.monitor.stats();
     this.jobsBody.textContent = '';
     if (lanes.length === 0) {

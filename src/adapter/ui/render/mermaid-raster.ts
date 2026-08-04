@@ -28,6 +28,29 @@
 const DB_NAME = 'pkc3-diagram-cache';
 const STORE = 'png';
 
+/**
+ * キャッシュに置く上限(P8 段⑰。レビュー H-6)。
+ *
+ * 🔴 直す前は**上限も追い出しも無かった**。鍵は 図の原文 + テーマ + 幅 + dpr
+ * なので、編集プレビューで図を打つと**静穏 tick ごとに「途中の原文」が別鍵**に
+ * なり、そのすべてが永久に残る。テーマ 9 種・幅 16px 刻み・dpr でも分岐し、
+ * ノートを消しても対応する PNG は残っていた。同一 origin を食い潰すと
+ * 添付(`pkc3-assets`)と OPFS の sqlite まで道連れになる。
+ *
+ * ⚠ 件数ではなく**バイト数**で持つ ── 図 1 枚の大きさは桁で違う。
+ */
+export const DIAGRAM_CACHE_MAX_BYTES = 32 * 1024 * 1024;
+
+/** 追い出しの単位(毎回 1 件ずつ消すと put のたびに走査する)。 */
+const EVICT_TO = 0.8;
+
+interface CacheRow {
+  png: Blob;
+  /** 最後に使った時刻。**古いものから落とす**ための材料。 */
+  at: number;
+  size: number;
+}
+
 export interface RasterKey {
   /** 図の原文。 */
   source: string;
@@ -316,6 +339,16 @@ export async function rasterize(svg: string, width: number, dpr: number): Promis
 export async function renderToPng(key: RasterKey): Promise<Blob> {
   const k = cacheKey(key);
   const hit = await tx<unknown>(await db(), 'readonly', (s) => s.get(k)).catch(() => null);
+  if (hit !== null && typeof hit === 'object' && 'png' in hit) {
+    const row = hit as CacheRow;
+    // ⚠ 使ったことを記録する(追い出しの順が「最後に使った順」になる)。
+    //    失敗しても描画は続ける
+    void tx(await db(), 'readwrite', (s) =>
+      s.put({ ...row, at: Date.now() } satisfies CacheRow, k),
+    ).catch(() => undefined);
+    return row.png;
+  }
+  // ⚠ 旧形式(Blob をそのまま入れていた)も読める ── 互換は双方向で考える
   if (hit instanceof Blob) return hit;
 
   const png = await serialized(async () => {
@@ -324,8 +357,68 @@ export async function renderToPng(key: RasterKey): Promise<Blob> {
     return rasterize(svg, key.width, key.dpr);
   });
   // ⚠ 保存に失敗しても**描画は続ける**(キャッシュは速さの話で、正しさの話ではない)
-  await tx(await db(), 'readwrite', (s) => s.put(png, k)).catch(() => undefined);
+  await tx(await db(), 'readwrite', (s) =>
+    s.put({ png, at: Date.now(), size: png.size } satisfies CacheRow, k),
+  ).catch(() => undefined);
+  void evictDiagramCache().catch(() => undefined);
   return png;
+}
+
+/** 追い出しが同時に何本も走らないようにする(走査は 1 本で足りる)。 */
+let evicting = false;
+
+/**
+ * **どれを落とすかを決める**(P8 段⑰)。
+ *
+ * 🔑 IDB を触らない**純関数**にする ── 判定をここへ寄せておけば、
+ * happy-dom に `indexedDB` が無くても単体で確かめられる(依存も増やさない)。
+ * ⚠ 落とすのは「最後に使った時刻」の古い順 ── 作った順だと、よく使う図が
+ * 先に消えて毎回焼き直しになる。
+ */
+export function planEviction(
+  items: readonly { key: IDBValidKey; at: number; size: number }[],
+  maxBytes: number,
+): IDBValidKey[] {
+  let total = items.reduce((n, it) => n + it.size, 0);
+  if (total <= maxBytes) return [];
+  const target = maxBytes * EVICT_TO;
+  const drop: IDBValidKey[] = [];
+  for (const it of [...items].sort((a, b) => a.at - b.at)) {
+    if (total <= target) break;
+    drop.push(it.key);
+    total -= it.size;
+  }
+  return drop;
+}
+
+/**
+ * 上限を超えていたら**古いものから**落とす(P8 段⑰)。
+ * ⚠ 落とすのは「最後に使った時刻」の古い順 ── 作った順だと、よく使う図が
+ * 先に消えて毎回焼き直しになる。
+ */
+export async function evictDiagramCache(
+  maxBytes = DIAGRAM_CACHE_MAX_BYTES,
+): Promise<number> {
+  if (evicting) return 0;
+  evicting = true;
+  try {
+    const d = await db();
+    const rows = await tx<unknown[]>(d, 'readonly', (s) => s.getAll());
+    const keys = await tx<IDBValidKey[]>(d, 'readonly', (s) => s.getAllKeys());
+    const items = rows.map((r, i) => {
+      const row = r as Partial<CacheRow>;
+      return {
+        key: keys[i]!,
+        at: typeof row.at === 'number' ? row.at : 0,
+        size: typeof row.size === 'number' ? row.size : (row.png?.size ?? 0),
+      };
+    });
+    const drop = planEviction(items, maxBytes);
+    for (const key of drop) await tx(d, 'readwrite', (s) => s.delete(key));
+    return drop.length;
+  } finally {
+    evicting = false;
+  }
 }
 
 /**

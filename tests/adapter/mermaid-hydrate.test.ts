@@ -72,9 +72,9 @@ function block(src: string): HTMLElement {
 
 describe('図の hydrate', () => {
   it('1 つの根の中の器を観測する', () => {
-    const dispose = hydrateMermaid(block('graph TD\n A-->B'));
+    const scope = hydrateMermaid(block('graph TD\n A-->B'));
     expect(observed).toHaveLength(1);
-    dispose();
+    scope.dispose();
     expect(disconnected).toBe(1);
   });
 
@@ -82,10 +82,10 @@ describe('図の hydrate', () => {
     // ⚠ ここが本丸 ── 先頭の根しか見ない実装だと、差分で入った 2 個目以降の図が
     // **永久に描かれない**(白いままで、例外も出ない)
     const plain = document.createElement('p');
-    const dispose = hydrateMermaid([plain, block('a'), block('b')]);
+    const scope = hydrateMermaid([plain, block('a'), block('b')]);
     expect(observed, '2 個目以降の根にある図を拾っていない').toHaveLength(2);
     // ⚠ 観測器は**1 本**(根の数だけ作らない)
-    dispose();
+    scope.dispose();
     expect(disconnected).toBe(1);
   });
 
@@ -94,14 +94,14 @@ describe('図の hydrate', () => {
     host.setAttribute('data-pkc-mermaid-src', 'x');
     // ⚠ 畳む ── 畳み忘れると**配色の観測器がこの file に残り**、後続の test が
     //    「観測器が新しく作られない」を誤って観測する(実際に踏んだ)
-    hydrateMermaid([host])();
+    hydrateMermaid([host]).dispose();
     expect(observed).toHaveLength(1);
   });
 
   it('図が無ければ観測器を作らない(空の後始末が返る)', () => {
-    const dispose = hydrateMermaid([document.createElement('p')]);
+    const scope = hydrateMermaid([document.createElement('p')]);
     expect(observed).toHaveLength(0);
-    dispose();
+    scope.dispose();
     expect(disconnected, '器が無いのに観測器を作った').toBe(0);
   });
 });
@@ -144,7 +144,7 @@ describe('配色を変えたときの焼き直し(P8 段⑬)', () => {
   it('🔴 配色を変えると、**焼いた器だけ**焼き直る', async () => {
     const b = block('graph TD\n A-->B');
     document.body.append(b);
-    const dispose = hydrateMermaid(b);
+    const scope = hydrateMermaid(b);
     fire!([observed[0]!]);
     await settle();
     expect(vi.mocked(renderToPng)).toHaveBeenCalledTimes(1);
@@ -161,33 +161,33 @@ describe('配色を変えたときの焼き直し(P8 段⑬)', () => {
     // ⚠ 前の URL は返す(焼き直すたびに ObjectURL が積もらない)
     expect(revoked).toEqual([created[0]]);
 
-    dispose();
+    scope.dispose();
     b.remove();
   });
 
   it('🔴 まだ焼いていない器は、配色を変えても**先回りして焼かない**', async () => {
     const b = block('graph TD\n A-->B');
     document.body.append(b);
-    const dispose = hydrateMermaid(b);
+    const scope = hydrateMermaid(b);
     // `fire` を呼ばない = まだ見えていない
     await settle();
     expect(vi.mocked(renderToPng)).toHaveBeenCalledTimes(0);
     document.documentElement.setAttribute('data-pkc-theme', 'dark');
     await settle();
     expect(vi.mocked(renderToPng), '見えていない図を先回りで焼いた').toHaveBeenCalledTimes(0);
-    dispose();
+    scope.dispose();
     b.remove();
   });
 
   it('🔴 畳んだ後は焼き直さない(外した面のために働かない)', async () => {
     const b = block('graph TD\n A-->B');
     document.body.append(b);
-    const dispose = hydrateMermaid(b);
+    const scope = hydrateMermaid(b);
     fire!([observed[0]!]);
     await settle();
     expect(vi.mocked(renderToPng)).toHaveBeenCalledTimes(1);
 
-    dispose();
+    scope.dispose();
     document.documentElement.setAttribute('data-pkc-theme', 'dark');
     await settle();
     expect(vi.mocked(renderToPng), '畳んだ後も焼き直している').toHaveBeenCalledTimes(1);
@@ -199,14 +199,14 @@ describe('配色を変えたときの焼き直し(P8 段⑬)', () => {
   it('⚠ DOM から外れた器は焼き直さない(detached へ描かない)', async () => {
     const b = block('graph TD\n A-->B');
     document.body.append(b);
-    const dispose = hydrateMermaid(b);
+    const scope = hydrateMermaid(b);
     fire!([observed[0]!]);
     await settle();
     b.remove(); // 器ごと DOM から外れる(dispose はまだ)
     document.documentElement.setAttribute('data-pkc-theme', 'dark');
     await settle();
     expect(vi.mocked(renderToPng)).toHaveBeenCalledTimes(1);
-    dispose();
+    scope.dispose();
   });
 });
 
@@ -254,31 +254,169 @@ describe('配色の観測器の寿命(P8 段⑬)', () => {
   });
 
   it('⚠ 配色の属性だけを、`<html>` で見る(全 DOM を観測しない)', () => {
-    const dispose = hydrateMermaid(block('a'));
+    const scope = hydrateMermaid(block('a'));
     expect(made).toBe(1);
     expect(targets[0]!.el).toBe(document.documentElement);
     expect(targets[0]!.opts?.attributeFilter).toEqual(['data-pkc-theme']);
     expect(targets[0]!.opts?.attributes).toBe(true);
-    dispose();
+    scope.dispose();
   });
 
   it('🔴 全部畳んだら観測を止める(外した面のために回り続けない)', () => {
     const d1 = hydrateMermaid(block('a'));
     const d2 = hydrateMermaid(block('b'));
-    d1();
+    d1.dispose();
     expect(closed, 'まだ見ている塊があるのに観測を止めた').toBe(0);
-    d2();
+    d2.dispose();
     expect(closed, '誰も見ていないのに観測器が回り続けている').toBe(1);
   });
 
   it('🔴 何回 hydrate しても観測器は **1 つ**(塊の数だけ作らない)', () => {
     const ds = [block('a'), block('b'), block('c'), block('d')].map((b) => hydrateMermaid(b));
     expect(made, '塊の数だけ観測器を作っている').toBe(1);
-    for (const d of ds) d();
+    for (const d of ds) d.dispose();
     expect(closed).toBe(1);
     // ⚠ 畳んだ後にまた使えること(1 度きりの機構にしない)
     const again = hydrateMermaid(block('e'));
     expect(made).toBe(2);
-    again();
+    again.dispose();
+  });
+});
+
+/**
+ * P8 段⑰: 🔴 **塊を積もらせない / 古い配色を最後に勝たせない**(レビュー H-5 / H-8)。
+ *
+ * 🔴 直す前の実測:
+ * - 器を差し替えながら 5 回 `hydrateMermaid` を呼ぶ(= 編集プレビューの静穏 tick
+ *   5 回)と `createObjectURL` 5 回 / `revokeObjectURL` **0 回** ── 画面に無い
+ *   PNG の URL が 4 本、編集を抜けるまで生きたままだった
+ * - 配色を続けて変えると、**最後に解決した**古い配色の絵が残った(焼くのは非同期で、
+ *   後から始まった方が先に終わりうる)
+ */
+describe('塊の畳み方と焼き直しの世代(P8 段⑰)', () => {
+  const created: string[] = [];
+  const revoked: string[] = [];
+
+  beforeEach(() => {
+    created.length = 0;
+    revoked.length = 0;
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => {
+      const u = `blob:p${created.length}`;
+      created.push(u);
+      return u;
+    });
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation((u: string) => void revoked.push(u));
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  async function settle(): Promise<void> {
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    await new Promise((r) => setTimeout(r, 0));
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+  }
+
+  it('🔴 器が外れた塊は `prune()` で 0 になり、URL が返る', async () => {
+    const host = document.createElement('div');
+    host.className = 'wrap';
+    document.body.append(host);
+    const b = block('graph TD\n A-->B');
+    host.append(b);
+
+    const scope = hydrateMermaid(b);
+    fire!([observed[0]!]);
+    await settle();
+    expect(created).toHaveLength(1);
+    // まだ画面に居るので畳まない
+    expect(scope.prune(), '生きている器を畳んでしまった').toBe(1);
+    expect(revoked).toEqual([]);
+
+    // 差分反映が器ごと差し替えた(古い器は detached)
+    b.remove();
+    expect(scope.prune(), '外れた器が残っている').toBe(0);
+    expect(revoked, '外れた器の URL を返していない').toEqual([created[0]]);
+    scope.dispose();
+    host.remove();
+  });
+
+  it('⚠ `prune()` は二重に返さない(dispose と重ねても壊れない)', async () => {
+    const b = block('graph TD\n A-->B');
+    document.body.append(b);
+    const scope = hydrateMermaid(b);
+    fire!([observed[0]!]);
+    await settle();
+    b.remove();
+    scope.prune();
+    scope.prune();
+    scope.dispose();
+    expect(revoked, '同じ URL を 2 回返している').toEqual([created[0]]);
+  });
+
+  it('🔴 焼いている間に配色が変わったら、その結果は**載せない**', async () => {
+    const b = block('graph TD\n A-->B');
+    document.body.append(b);
+    const scope = hydrateMermaid(b);
+    fire!([observed[0]!]);
+    await settle();
+    expect(vi.mocked(renderToPng)).toHaveBeenCalledTimes(1);
+
+    // 焼くのを止めたまま配色を 2 回変える
+    const held: Array<(v: Blob) => void> = [];
+    vi.mocked(renderToPng).mockImplementationOnce(
+      () => new Promise<Blob>((res) => held.push(res)),
+    );
+    document.documentElement.setAttribute('data-pkc-theme', 'dark');
+    await settle();
+    const madeBefore = created.length;
+    document.documentElement.setAttribute('data-pkc-theme', 'nord');
+    await settle();
+    // 止めていた 1 枚目(dark)を今ごろ返す ── **載ってはいけない**
+    held[0]?.(new Blob(['png']));
+    await settle();
+    expect(
+      created.length - madeBefore,
+      '古い配色の結果が最後に勝って画面へ載った',
+    ).toBeLessThanOrEqual(1);
+    scope.dispose();
+    b.remove();
+  });
+
+  it('🔴 **焼いている最中**の器も、配色が変わったら焼き直す', async () => {
+    // ⚠ 焼き終わったもの(`urlOf`)だけを対象にすると、ちょうど焼いている 1 枚が
+    //    古い配色のまま残る ── 対象は**焼き始めた器**
+    const b = block('graph TD\n A-->B');
+    document.body.append(b);
+    const held: Array<(v: Blob) => void> = [];
+    vi.mocked(renderToPng).mockImplementationOnce(
+      () => new Promise<Blob>((res) => held.push(res)),
+    );
+    const scope = hydrateMermaid(b);
+    fire!([observed[0]!]);
+    await settle();
+    expect(vi.mocked(renderToPng)).toHaveBeenCalledTimes(1); // まだ返っていない
+
+    document.documentElement.setAttribute('data-pkc-theme', 'dark');
+    await settle();
+    // 🔴 ここが本丸 ── 完了していなくても焼き直しが走る
+    expect(
+      vi.mocked(renderToPng),
+      '焼いている最中の器が古い配色のまま置き去りになる',
+    ).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(renderToPng).mock.calls[1]![0].theme).toBe('dark');
+    held[0]?.(new Blob(['png']));
+    await settle();
+    scope.dispose();
+    b.remove();
+  });
+
+  it('⚠ DOM から外れた器は最初から焼かない(先読み列が差し替え済みを焼き続けない)', async () => {
+    const b = block('graph TD\n A-->B');
+    // ⚠ **append しない**(= 最初から detached)
+    const scope = hydrateMermaid(b);
+    fire!([observed[0]!]);
+    await settle();
+    expect(vi.mocked(renderToPng), '画面に無い器を焼いた').toHaveBeenCalledTimes(0);
+    scope.dispose();
   });
 });

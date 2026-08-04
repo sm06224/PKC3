@@ -94,10 +94,26 @@ function widthOf(host: HTMLElement): number {
 /**
  * `root` の中の mermaid の器を埋める。
  *
- * @returns 後始末(ObserverIdle の解除 + ObjectURL の revoke)。
- *   ⚠ **必ず呼ぶ** ── 呼ばないと焼いた PNG の URL が生き残る。
+ * @returns この塊の面倒を見る口。⚠ **必ず `dispose()` する** ── 呼ばないと
+ *   焼いた PNG の URL が生き残る。
+ *   ⚠ 差分反映で器が差し替わる面では、新しい塊を作る前に `prune()` を呼ぶ
+ *   ── 返り値が 0 なら、その塊はもう畳んでよい。
  */
-export function hydrateMermaid(root: ParentNode | readonly ParentNode[]): () => void {
+export interface MermaidScope {
+  /** 全部畳む(URL の revoke と観測の解除)。 */
+  dispose(): void;
+  /**
+   * DOM から外れた器のぶんだけ畳んで、**まだ画面に居る器の数**を返す。
+   *
+   * 🔴 これが無いと、編集プレビューのように**器を差し替えながら何度も呼ぶ**面で
+   * 塊が積もる(P8 段⑰。レビュー H-5)── 実測: 器を差し替えて 5 回呼ぶと
+   * `createObjectURL` 5 回 / `revokeObjectURL` 0 回で、画面に無い PNG の URL が
+   * 4 本生きたままだった。
+   */
+  prune(): number;
+}
+
+export function hydrateMermaid(root: ParentNode | readonly ParentNode[]): MermaidScope {
   // ⚠ **複数の根をまとめて受ける**(P8 段⑪)── 差分反映は「新しく入った要素」を
   // 何個も渡してくるので、1 個ずつ呼ぶと **要素の数だけ観測器ができる**
   // (121 個の IntersectionObserver、121 個の idle ループ)。
@@ -110,7 +126,7 @@ export function hydrateMermaid(root: ParentNode | readonly ParentNode[]): () => 
     if (r instanceof Element && r.matches('[data-pkc-mermaid-src]')) hosts.push(r as HTMLElement);
     hosts.push(...r.querySelectorAll<HTMLElement>('[data-pkc-mermaid-src]'));
   }
-  if (hosts.length === 0) return () => undefined;
+  if (hosts.length === 0) return { dispose: () => undefined, prune: () => 0 };
 
   /** 器 → いま貸している ObjectURL。**焼き直したら前のを返す**。 */
   const urlOf = new Map<HTMLElement, string>();
@@ -118,11 +134,25 @@ export function hydrateMermaid(root: ParentNode | readonly ParentNode[]): () => 
   let idle = 0;
   const queue: Pending[] = [];
   const done = new WeakSet<HTMLElement>();
+  /** 焼き**始めた**器(配色を変えたときの対象。`urlOf` は焼き終わったものだけ)。 */
+  const started = new Set<HTMLElement>();
+
+  /**
+   * 焼き直しの世代(P8 段⑰。レビュー H-8 / M)。
+   * 🔴 配色を続けて変えると、**最後に解決した**古い配色の絵が残る ── 焼くのは
+   * 非同期なので、後から始まった方が先に終わりうる。世代が古い結果は捨てる。
+   */
+  let gen = 0;
 
   const paint = async (p: Pending, force = false): Promise<void> => {
     if (disposed) return;
+    // ⚠ **画面から外れた器には描かない**(差し替え済みの器を先読み列が
+    //    焼き続けていた ── 配色経路 と規則を 1 つに寄せる)
+    if (!p.host.isConnected) return;
     if (!force && done.has(p.host)) return;
     done.add(p.host);
+    started.add(p.host);
+    const at = gen;
     try {
       const png = await renderToPng({
         source: p.source,
@@ -132,6 +162,9 @@ export function hydrateMermaid(root: ParentNode | readonly ParentNode[]): () => 
         dpr: window.devicePixelRatio || 1,
       });
       if (disposed) return;
+      // ⚠ 焼いている間に配色が変わった / 器が外れたなら**載せない**
+      //    (載せると古い配色の絵が最後に勝つ)
+      if (at !== gen || !p.host.isConnected) return;
       const url = URL.createObjectURL(png);
       const img = document.createElement('img');
       img.setAttribute('data-pkc-field', 'mermaid-image');
@@ -167,7 +200,10 @@ export function hydrateMermaid(root: ParentNode | readonly ParentNode[]): () => 
    */
   const unwatchTheme = watchTheme(() => {
     if (disposed) return;
-    for (const host of [...urlOf.keys()]) {
+    gen += 1; // ⚠ 飛んでいる焼きの結果を捨てる(古い配色を最後に勝たせない)
+    // ⚠ **焼き始めた器**を対象にする ── 焼き終わったもの(`urlOf`)だけだと、
+    //    ちょうど焼いている最中の 1 枚が古い配色のまま残る
+    for (const host of started) {
       if (!host.isConnected) continue;
       void paint({ host, source: host.getAttribute('data-pkc-mermaid-src') ?? '' }, true);
     }
@@ -206,13 +242,30 @@ export function hydrateMermaid(root: ParentNode | readonly ParentNode[]): () => 
   };
   if (ric) idle = ric(step, { timeout: 2000 });
 
-  return () => {
-    disposed = true;
-    io.disconnect();
-    unwatchTheme();
-    if (idle !== 0 && typeof cancelIdleCallback === 'function') cancelIdleCallback(idle);
-    // ⚠ **表示の寿命終端で捨てる**(生成物を残さない)
-    for (const u of urlOf.values()) URL.revokeObjectURL(u);
-    urlOf.clear();
+  return {
+    dispose: () => {
+      disposed = true;
+      io.disconnect();
+      unwatchTheme();
+      if (idle !== 0 && typeof cancelIdleCallback === 'function') cancelIdleCallback(idle);
+      // ⚠ **表示の寿命終端で捨てる**(生成物を残さない)
+      for (const u of urlOf.values()) URL.revokeObjectURL(u);
+      urlOf.clear();
+      started.clear();
+    },
+    prune: () => {
+      if (disposed) return 0;
+      // ⚠ 外れた器のぶんだけ返す(生きている `<img>` は壊さない)
+      for (const [host, url] of [...urlOf]) {
+        if (host.isConnected) continue;
+        URL.revokeObjectURL(url);
+        urlOf.delete(host);
+        started.delete(host);
+        io.unobserve(host);
+      }
+      let live = 0;
+      for (const h of hosts) if (h.isConnected) live += 1;
+      return live;
+    },
   };
 }

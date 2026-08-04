@@ -88,6 +88,47 @@ describe('attachment view (P4a)', () => {
     expect(disposed).toBe(1); // 表示の寿命の終わりで即 dispose
   });
 
+  /**
+   * P8 段⑰: 🔴 **同じノートを開いたままの再描画で借り直さない**(レビュー H-4)。
+   *
+   * 🔴 直す前の実測: 添付を選んだまま履歴の開閉を 3 往復すると
+   * **lend 7 回 / dispose 0 回**、画面の `<img>` は 1 枚。骨組みを使い回す
+   * ようになった段⑪ 以降、`fresh` でない再描画では `disposeLends()` が走らず、
+   * `textContent=''` で `<img>` だけ消えて貸出が積み上がっていた。
+   * ⚠ 既存 test は「**選択遷移で** dispose」しか見ておらず、同一 lid の
+   * 再描画を 1 件も見ていなかった。
+   */
+  it('🔴 同じノートのまま何度描き直しても、生きている貸出は 1 本だけ', async () => {
+    let lent = 0;
+    let disposed = 0;
+    const lender: AssetLender = {
+      lend: async () => {
+        lent += 1;
+        return { url: `blob:n${lent}`, dispose: () => disposed++ };
+      },
+      getBlob: async () => null,
+    };
+    const { d, q } = setup({ a1: imgBody, a2: '# text' }, lender);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    await tick(20);
+
+    // 履歴の開閉 = 同じノートのまま再描画(骨組みは作り直されない)
+    for (let i = 0; i < 3; i++) {
+      d.dispatch({ type: 'SHOW_HISTORY' });
+      await tick(20);
+      d.dispatch({ type: 'HIDE_HISTORY' });
+      await tick(20);
+    }
+    expect(q('[data-pkc-field="attachment-media"]'), '画像が消えた').not.toBeNull();
+    // 🔴 生きている貸出は**常に 1 本**(= 借りた数 - 返した数)
+    expect(lent - disposed, `貸出が積み上がっている(lend ${lent} / dispose ${disposed})`).toBe(1);
+
+    // 選択を移したら最後の 1 本も返る
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a2' });
+    await tick(20);
+    expect(lent - disposed).toBe(0);
+  });
+
   it('text preview は blob.text() を切り出して表示(URL を借りない)', async () => {
     const lender: AssetLender = {
       lend: async () => {

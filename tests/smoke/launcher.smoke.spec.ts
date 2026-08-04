@@ -435,5 +435,39 @@ test('🔴 行儀の悪いアプリが保管庫を占有できない(上限は�
   });
   expect(room, 'アプリに占有されて PKC3 自身が書けない').toBeGreaterThan(512 * 1024);
 
+  // 🔴 **開き直しても埋め直せない**(P8 段⑰)。外殻は起動のたびに前置きを走査して
+  //    使用量を作り直す ── 覚えているだけだと、タブを開くたびに 0 から数え直して
+  //    上限ぶんずつ積み増せる
+  const [tab2] = await Promise.all([context.waitForEvent('page'), tile.click()]);
+  await tab2.waitForLoadState('domcontentloaded');
+  await expect(tab2.locator('[data-pkc-field="app-note"]')).toBeVisible({ timeout: 20000 });
+  const after = await tab2.evaluate(() => {
+    let per = 0;
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)!;
+      if (k.startsWith('pkc3.app.')) per += k.length + (localStorage.getItem(k) ?? '').length;
+    }
+    return per;
+  });
+  expect(after, '開き直したら上限を超えて積み増せた').toBeLessThan(used + 600_000);
+  await tab2.close();
+
+  // 🔴 **ノートを消したらアプリのデータも消える**(P8 段⑰)。
+  //    直す前は `clearAppStorage` の呼び出し元が 1 件も無く、消しても
+  //    origin の localStorage に永久に残っていた
+  page.once('dialog', (d) => void d.accept());
+  await clickReal(page, '[data-pkc-browse="list"]');
+  await page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first().click();
+  await clickReal(page, '[data-pkc-action="delete-entry"]');
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() =>
+          Object.keys(localStorage).filter((k) => k.startsWith('pkc3.app.')).length,
+        ),
+      { timeout: 15000, message: 'ノートを消してもアプリのデータが残っている' },
+    )
+    .toBe(0);
+
   expect(errors).toEqual([]);
 });

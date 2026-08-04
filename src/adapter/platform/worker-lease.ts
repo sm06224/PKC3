@@ -248,13 +248,28 @@ export class WorkerLease {
     this.failAll(err);
   }
 
-  /** 待っている依頼を全部落とす(捨てるだけにしない ── 永久 hang の防止)。 */
+  /**
+   * 待っている依頼を全部落とす(捨てるだけにしない ── 永久 hang の防止)。
+   *
+   * 🔴 **1 件ずつ可視化へ通す**(P8 段⑰。レビュー)。かつては黙って reject して
+   * いたので、worker が落ちたとき設定のジョブ表の「待ち / 実行中」が**永久に
+   * 減らないまま**残り、しかも失敗の件数はどこにも出なかった ── 可視化が
+   * 嘘をつくと、user も次に見る人も切り分けができない。
+   */
   private failAll(err: Error): void {
+    const note = (id: number): void => this.note('fail', { id, note: err.message.slice(0, 60) });
     for (const job of this.buffer.splice(0)) {
-      this.pending.get(job.id)?.reject(err);
+      const p = this.pending.get(job.id);
+      if (p) {
+        note(job.id);
+        p.reject(err);
+      }
       this.pending.delete(job.id);
     }
-    for (const { reject } of this.pending.values()) reject(err);
+    for (const [id, { reject }] of this.pending) {
+      note(id);
+      reject(err);
+    }
     this.pending.clear();
   }
 }
