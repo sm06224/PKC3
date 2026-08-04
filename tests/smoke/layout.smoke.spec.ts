@@ -130,6 +130,38 @@ test('🔴 狭い画面では 1 カラムへ折る(横に潰れない)', async (
 });
 
 /**
+ * P8 段㉕: 🔴 **設定への入口が押せる大きさある**。
+ *
+ * 上の帯は user 指示で薄い(「最上のヘッドラインはもっと薄くてもいい、邪魔」)。
+ * ただし直す前は帯が 20px、中の設定ボタンが **16px** で、**設定への唯一の入口**が
+ * 他のどのボタン(26px)よりも小さかった ── 押し損ねる。
+ * ⚠ 薄さは保ったまま的だけ大きくする(帯 24px / ボタン 20px)。
+ */
+test('🔴 上の帯は薄いまま、設定ボタンは押せる大きさがある', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await gotoApp(page);
+  const m = await page.evaluate(() => {
+    const band = document.querySelector('[data-pkc-region="brand"]')!;
+    const btn = band.querySelector('[data-pkc-view="settings"]')!;
+    const r = btn.getBoundingClientRect();
+    return {
+      band: Math.round(band.getBoundingClientRect().height),
+      btn: Math.round(r.height),
+      btnW: Math.round(r.width),
+      // 🔴 死んだ規則の見張り ── 配色の選択欄は**設定の画面**に移した
+      selectsInBand: band.querySelectorAll('select').length,
+    };
+  });
+  // ① 的が小さすぎない
+  expect(m.btn, `設定ボタンが小さい(${m.btn}px)`).toBeGreaterThanOrEqual(20);
+  expect(m.btnW, `設定ボタンが細い(${m.btnW}px)`).toBeGreaterThanOrEqual(40);
+  // ② 帯は**薄いまま**(user 指示 ── 的を大きくする口実で太らせない)
+  expect(m.band, `上の帯が太い(${m.band}px)`).toBeLessThanOrEqual(28);
+  // ③ 帯に選択欄は無い(在るなら CSS も同期コードも生きているはずで、実態と食い違う)
+  expect(m.selectsInBand, '帯に選択欄が戻っている').toBe(0);
+});
+
+/**
  * P8 段⑱: 🔴 **狭い列でも探し方のタブが重ならない**。
  *
  * 左の列は 900px を切ると 180px まで縮む。3 つのタブに図案と語を両方載せると

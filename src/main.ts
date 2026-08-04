@@ -36,6 +36,7 @@ import { formatSize } from '@adapter/ui/render/detail';
 import { bindActions, generateLid, type BinderServices } from '@adapter/ui/actions/binder';
 import { armLaunchQueue, type LaunchTarget } from '@adapter/platform/launch-queue';
 import { whenPhaseReady } from '@adapter/state/wait-for-ready';
+import { reloadSnapshot } from '@adapter/state/reload-snapshot';
 import { attachFiles } from '@adapter/ui/actions/attach';
 import { importFiles } from '@adapter/ui/actions/import-file';
 import type { ImportDeps } from '@adapter/ui/actions/import-pkc2';
@@ -130,12 +131,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const bootTheme = initialTheme();
   applyTheme(document.documentElement, bootTheme);
   const regions = buildShell(root);
-  // ⚠ 帯の選択欄を**いまの配色に合わせる** ── 合わせないと、保存済みの配色で
-  // 起動したのに欄は先頭(ライト)を指す = 画面が嘘をつく
-  const themeSelect = regions.brand.querySelector<HTMLSelectElement>(
-    '[data-pkc-field="theme-select"]',
-  );
-  if (themeSelect) themeSelect.value = bootTheme;
+  // ⚠ 配色の選択欄は**設定の画面**に在る(段⑨c で移した)。合わせるのは
+  //    `SettingsRenderer.syncTheme()` の仕事 ── ここに 2 本目を置かない
+  //    (P8 段㉕:帯を探す死んだ同期が残っており、常に空振りしていた)
   // 🔑 左の列は**探し方**で切り替わる(P8 段⑤)。中央は常に「開いているノート」
   const browse = new BrowseRouter(regions.sidebar, regions.browseHost);
   const inspector = new InspectorRenderer(regions.inspector);
@@ -328,20 +326,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       putAssetMeta: async (m) => {
         await client.request({ op: 'putAssetMeta', cid: DEFAULT_CID, meta: m });
       },
-      reload: async () => {
-        const snap = await loadSnapshot();
-        // ⚠ 取込の門は開始時の 1 回だけ ── 長い await の間に user は編集を
-        // 始められる。SYS_BOOTED は openBody / selectedLid をリセットするので、
-        // そのまま流すと打ちかけの本文が無警告で消える(review H-4、実証済み)
-        if (dispatcher.getState().phase !== 'ready') {
-          dispatcher.dispatch({
-      type: 'OP_FAILED',
-      error: '取込は完了しました。編集を終了すると一覧に反映されます',
-          });
-          return;
-        }
-        dispatcher.dispatch({ type: 'SYS_BOOTED', cid: DEFAULT_CID, ...snap });
-      },
+      // 🔑 中身は `reload-snapshot.ts`(段㉕ で切り出し ── closure に居ると
+      //    誰も test できず、「案内は出すが実行しない」嘘が残っていた)
+      reload: () => reloadSnapshot(dispatcher, DEFAULT_CID, loadSnapshot),
       notify: (message) => showStatus(`${statusBase} — ${message}`),
       // 注意は**全件**を専用面へ(1 行の status では 1 件目しか届かない)
       report: (notes) => showNotices(regions.notices, '取込時の注意', notes),

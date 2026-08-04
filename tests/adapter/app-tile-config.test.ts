@@ -37,7 +37,11 @@ function meta(lid: string, title: string): EntryMeta {
 
 const BASE = '---\nattachment.name: a.html\nattachment.mime: text/html\nattachment.asset_key: k\n---\n説明\n';
 
-function setup(initial = BASE): {
+function setup(
+  initial = BASE,
+  /** ⚠ **ack のあとの読み直しだけ**を落とす(段㉕ の観測点)。 */
+  opts: { failGetBodies?: boolean } = {},
+): {
   d: Dispatcher;
   bodies: Record<string, string>;
   writes: number;
@@ -48,8 +52,10 @@ function setup(initial = BASE): {
   connectStoreEffects(d, {
     ...stubRevisionOps(),
     getBody: async (lid) => bodies[lid] ?? null,
-    getBodies: async (lids) =>
-      lids.filter((l) => bodies[l] !== undefined).map((l) => ({ lid: l, body: bodies[l]! })),
+    getBodies: async (lids) => {
+      if (opts.failGetBodies) throw new Error('worker が落ちた');
+      return lids.filter((l) => bodies[l] !== undefined).map((l) => ({ lid: l, body: bodies[l]! }));
+    },
     persistEntry: async (e) => {
       counter.writes += 1;
       bodies[e.lid] = e.body;
@@ -260,5 +266,44 @@ describe('タイル設定を書く(P8 段⑭)', () => {
     h.d.dispatch({ type: 'SET_APP_TILE', lid: 'nope', registered: true });
     await tick(20);
     expect(h.writes).toBe(0);
+  });
+});
+
+/**
+ * P8 段㉕: 🔴 **1 要求に ack は 1 回**。
+ *
+ * 🔴 直す前は「書けた」の ack を撃ったあと、同じ `try` の中で
+ * タイルの読み直し(`getBodies`)を続けていた。ここが落ちると catch の
+ * `fail()` が **2 回目の `APP_TILE_SAVED`** を撃ち、受け側の計数
+ * (`tileWrite.n`)が **1 要求で 2 減る**。
+ *
+ * 壊れ方: 「グループ」を変えて Tab、続けて「目印」を変えて Tab(n = 2)→
+ * 1 本目は成功するが読み直しが失敗する → n が 2→1→0 になり、
+ * **2 本目が飛んでいるのに `tileWrite` が null** になる。この隙に編集へ入れて
+ * しまい、保存すると 2 本目の書き戻しの上に旧本文が乗って
+ * **目印の設定が黙って消える** ── 段⑯ が `tileWrite` を入れて塞いだ H-1 と同型。
+ */
+describe('タイル設定の ack(段㉕)', () => {
+  it('🔴 読み直しが落ちても、書込ロックは 1 回しか解けない', async () => {
+    const h = setup(BASE, { failGetBodies: true });
+    // 2 本続けて要求する(n = 2 になる)
+    h.d.dispatch({ type: 'SET_APP_TILE', lid: 'a1', registered: true });
+    h.d.dispatch({ type: 'SET_APP_TILE', lid: 'a1', group: '道具' });
+    await tick(30);
+
+    // 前提: 2 本とも書けている(この次元が非ゼロ)
+    expect(h.writes, '2 本目が書けていない(測れていない)').toBe(2);
+    const fm = parseFrontmatter(h.bodies.a1!).meta;
+    expect(fm['attachment.registered_as_app']).toBe(true);
+    expect(fm['attachment.app_group'], '2 本目の設定が消えている').toBe('道具');
+  });
+
+  it('🔴 読み直しの失敗は**その旨**を出す(書込の失敗と混ぜない)', async () => {
+    const h = setup(BASE, { failGetBodies: true });
+    h.d.dispatch({ type: 'SET_APP_TILE', lid: 'a1', registered: true });
+    await tick(30);
+    expect(h.d.getState().error ?? '', '読み直しの失敗を書込の失敗として出している').toMatch(
+      /一覧を読み直せません/,
+    );
   });
 });
