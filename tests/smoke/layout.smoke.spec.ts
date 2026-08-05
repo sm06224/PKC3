@@ -809,3 +809,106 @@ test('🔴 一覧の行に更新日が出て、行の高さは増えていない
   expect(box!.height, `行が高くなっている(${box!.height}px)`).toBeLessThanOrEqual(30);
   expect(errors).toEqual([]);
 });
+
+/**
+ * P9 段③: **区画が約束を守る**。
+ *
+ * 🔴 直した 3 つ:
+ *  ① フォルダ面は「名前 / 種別 / 更新日」の見出しを出しておいて、
+ *     **後ろ 2 列を `display: none` で畳んでいた**(実測: 幅 0px)。
+ *     見出しが約束したものが 1 つも出ていない = 画面が嘘をついている状態で、
+ *     しかも種別が見えないので**一覧タブと同じ題名の並びに見えていた**(かぶりの実体)
+ *  ② 何も選んでいないときの中央が**完全な白紙**(1190x1000px)
+ *  ③ 設定が「配色 1 つ + ワーカーの計器」で地続き ── ほとんどが計器だった
+ */
+test('🔴 フォルダ面は行の頭に種別、右端に更新日を出す', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', 'フォルダ面で見る');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+  await clickReal(page, '[data-pkc-region="browse-tabs"] [data-pkc-browse="filer"]');
+  const row = page.locator('[data-pkc-region="filer-table"] tbody tr').first();
+  await expect(row).toBeVisible();
+
+  const m = await row.evaluate((tr) => {
+    const cells = [...tr.querySelectorAll('td')];
+    const w = (e: Element | undefined): number =>
+      e ? Math.round(e.getBoundingClientRect().width) : -1;
+    return {
+      cellWidths: cells.map((c) => w(c)),
+      chip: tr.querySelector('[data-pkc-chip] svg path') !== null,
+      last: cells[cells.length - 1]?.textContent ?? '',
+    };
+  });
+
+  // ① 列が**全部見えている**(0 幅の列が無い ── 畳んだ列を出しておく形を落とす)
+  expect(m.cellWidths.length, '列が足りない').toBe(2);
+  for (const w of m.cellWidths) expect(w, `幅 0 の列がある: ${JSON.stringify(m.cellWidths)}`).toBeGreaterThan(10);
+  // ② 種別が図案で分かる(一覧と同じ規則)
+  expect(m.chip, '行の頭に種別の図案が無い').toBe(true);
+  // ③ 更新日が**日付として読める**(要素が在るだけでは足りない)。
+  //    ⚠ 今年は MM/DD、他の年は YYYY/MM/DD ── 一覧の行と同じ規則
+  expect(m.last).toMatch(/^\d{2}\/\d{2}$|^\d{4}\/\d{2}\/\d{2}$/);
+  // ④ 切れていない(列幅が足りずに `2026/08/` になる形を落とす)
+  expect(m.last.endsWith('/'), `更新日が切れている: ${m.last}`).toBe(false);
+
+  expect(errors).toEqual([]);
+});
+
+test('🔴 何も選んでいない中央に案内が出る(白紙にしない)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await gotoApp(page);
+
+  const guide = page.locator('[data-pkc-field="detail-empty"]');
+  await expect(guide).toBeVisible();
+  // ⚠ 「何か出た」で止めない ── **次にどこを押すか**が書いてあること
+  await expect(guide).toContainText('新規');
+  await expect(guide).toContainText('取り込む');
+  const box = await guide.boundingBox();
+  expect(box!.height, '案内が高さを持っていない').toBeGreaterThan(10);
+
+  // ⚠ **ボタンを増やしていない**(同じものは 1 か所 ── 新規/取り込むは左の列)
+  expect(
+    await page.locator('[data-pkc-region="detail"] [data-pkc-action="create-entry"]').count(),
+    '中央に「新規」ボタンが増えている',
+  ).toBe(0);
+  expect(
+    await page.locator('[data-pkc-region="detail"] [data-pkc-action="import-file"]').count(),
+    '中央に「取り込む」ボタンが増えている',
+  ).toBe(0);
+
+  expect(errors).toEqual([]);
+});
+
+test('🔴 設定は user 向けと計器に分かれている', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await gotoApp(page);
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+
+  // ① user が変えるものの区画に、変えられる物が**実際に入っている**
+  const userArea = page.locator('[data-pkc-region="settings-user"]');
+  await expect(userArea).toBeVisible();
+  await expect(userArea.locator('[data-pkc-field="theme-select"]')).toBeVisible();
+
+  // ② 計器は**別の区画**で、そこに変えられる物が無い(読むだけ)
+  const jobs = page.locator('[data-pkc-region="jobs"]');
+  await expect(jobs).toBeVisible();
+  expect(
+    await jobs.locator('select, input, [data-pkc-action]').count(),
+    '計器の区画に操作するものが混ざっている',
+  ).toBe(0);
+  // ③ 順番は「変えるもの」が先(計器が画面の頭を占めない)
+  const y = await page.evaluate(() => {
+    const q = (s: string) => document.querySelector(s)?.getBoundingClientRect().y ?? -1;
+    return { user: q('[data-pkc-region="settings-user"]'), jobs: q('[data-pkc-region="jobs"]') };
+  });
+  expect(y.user, '区画が見つからない').toBeGreaterThan(0);
+  expect(y.jobs, '計器が user 向けより上に出ている').toBeGreaterThan(y.user);
+
+  expect(errors).toEqual([]);
+});

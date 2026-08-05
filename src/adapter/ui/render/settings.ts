@@ -49,6 +49,21 @@ export class SettingsRenderer {
     const body = document.createElement('div');
     body.setAttribute('data-pkc-region', 'settings-body');
 
+    /**
+     * 🔑 **user 向けの設定と、開発者向けの計器を分ける**(P9 段③)。
+     *
+     * 前は「配色 1 つ + ワーカーの表 + ジョブのログ」が地続きに並んでいて、
+     * 設定を開くと**画面のほとんどが計器**だった(実測: user が変えられるのは 1 つ)。
+     * ⚠ **畳まない**(user 指示「主要な導線を畳まない」)── 見出しで区切るだけにする。
+     * ⚠ 設定を**増やさない** ── いま `theme.ts` は localStorage の 1 鍵しか持たず、
+     *   「増やすなら設定機構を建ててから」と自分で書いてある。ここは区分けだけ。
+     */
+    const userSection = document.createElement('section');
+    userSection.setAttribute('data-pkc-region', 'settings-user');
+    const userHead = document.createElement('h3');
+    userHead.textContent = '表示';
+    userSection.append(userHead);
+
     const dl = document.createElement('dl');
     const dt = document.createElement('dt');
     dt.textContent = '配色';
@@ -70,7 +85,8 @@ export class SettingsRenderer {
       '最初は OS の設定に従います。一度選ぶと、この端末ではそちらを覚えています。';
     dd.append(note);
     dl.append(dt, dd);
-    body.append(dl);
+    userSection.append(dl);
+    body.append(userSection);
     body.append(this.buildJobs());
     this.region.append(body);
     this.syncTheme();
@@ -91,7 +107,9 @@ export class SettingsRenderer {
     wrap.setAttribute('data-pkc-region', 'jobs');
 
     const h = document.createElement('h3');
-    h.textContent = '処理(ワーカー)';
+    // ⚠ 見出しで「これは設定ではない」と分かるようにする(P9 段③)。
+    //    ここは**読むだけの計器**で、user が変える物は 1 つも無い
+    h.textContent = '処理(ワーカー)── 開発者向け';
     wrap.append(h);
 
     const note = document.createElement('p');

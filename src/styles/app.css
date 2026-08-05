@@ -665,6 +665,13 @@ select:focus-visible {
   font-size: 12.5px;
   resize: none;
 }
+/* 何も選んでいないときの案内(P9 段③)。⚠ 読み幅の上限に収める ── 案内文が
+ * 1000px 伸びると、それ自体が読みにくい */
+[data-pkc-field='detail-empty'] {
+  color: var(--muted);
+  padding: var(--s3);
+  max-width: var(--read-w);
+}
 [data-pkc-field='detail-loading'] {
   color: var(--muted);
 }
@@ -1366,10 +1373,19 @@ select:focus-visible {
   height: var(--row-h);
   text-align: left;
 }
-/* ⚠ 狭い列に入るので、種別と更新日は畳む(名前が読めるほうが大事) */
-[data-pkc-region='filer-table'] th:not(:first-child),
-[data-pkc-region='filer-table'] td:not(:first-child) {
-  display: none;
+/* 🔴 **更新日は出す**(P9 段③)。以前はここで `display: none` して畳んでいたので、
+ * 見出しが約束した 2 列が**どちらも幅 0px**だった(実測)。表を出しておいて
+ * 中身を隠すのは「画面が嘘をつく」形である ── 種別の列は持つのをやめ、
+ * 更新日は幅を決めて**必ず出す**(名前は … で畳む)。
+ * ⚠ 数字は等幅・桁揃え(一覧の行と同じ規則)。 */
+[data-pkc-region='filer-table'] th:last-child,
+[data-pkc-region='filer-table'] td:last-child {
+  width: 4.4em;
+  text-align: right;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 [data-pkc-region='filer-table'] th {
   background: var(--surface-2);

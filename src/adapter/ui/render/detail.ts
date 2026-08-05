@@ -197,6 +197,20 @@ export class DetailRenderer {
       this.region.textContent = '';
       this.dropSkeleton();
       this.mode = 'empty';
+      /**
+       * 🔑 **何も選んでいないときに案内を出す**(P9 段③)。
+       *
+       * 前はここが `textContent = ''` だけで、初回起動の中央が
+       * **1190×1000px の白紙**だった(実測)── 右の列だけが「左の一覧から選ぶと」と
+       * 言っていて、中央は何も言わない。初めて開いた人には**次にどこを押すか**が無い。
+       * ⚠ **ボタンを置かない** ── 新規 / 取り込む は左の列が持っている
+       *   (「同じものは 1 か所」の規則)。ここは**場所を教える文だけ**にする。
+       */
+      const guide = document.createElement('p');
+      guide.setAttribute('data-pkc-field', 'detail-empty');
+      guide.textContent =
+        '左の一覧から選ぶと、ここに本文が出ます。まだ何も無いときは、左上の「新規」で作るか、左下の「取り込む」で読み込みます。';
+      this.region.append(guide);
       return;
     }
 

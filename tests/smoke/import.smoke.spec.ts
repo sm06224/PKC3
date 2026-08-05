@@ -515,9 +515,11 @@ test('folder-export 取込 → filer で階層が実際にたどれる', async (
   //    題名そのものが figure を含んでいた ── 絞り込みも読み上げもそれを題名として扱う)。
   //    ここは**題名だけ**を見て、フォルダの印は下で別に見る
   await expect(rows.locator('[data-pkc-field="title"]')).toHaveText(['仕事', '循環2']);
-  // フォルダの行にだけ図案が入っている(種別が目で分かる)
+  // 種別は行の頭の図案が示す(P9 段③ で全種別に出すようにした)。
+  // ⚠ **フォルダの印**を名指しで数える ── 「図案が 2 つ」だと、この fixture が
+  //    たまたま 2 行ともフォルダなので、種別を取り違える変異が素通りする
   expect(
-    await rows.locator('[data-pkc-field="title"] [data-pkc-icon] svg').count(),
+    await rows.locator('[data-pkc-field="title"] [data-pkc-chip="folder"] svg').count(),
     'フォルダの印が消えている',
   ).toBe(2);
 
