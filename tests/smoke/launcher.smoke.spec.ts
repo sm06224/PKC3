@@ -658,3 +658,71 @@ test('🔴 IndexedDB を使うアプリは、素のままで動き、囲いの�
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * 🔴 **ページ内リンクでアプリが消えない**(2026-08-05、調査 doc 1-7)。
+ *
+ * 直す前は、`srcdoc` + `<base>` のせいで `<a href="#sec">` を押すと
+ * `…/pkc3-app/#sec` へ**本当に遷移**し、そこは SPA fallback で **PKC3 自身の
+ * index.html** ── 不透明オリジンでは起動できず真っ白になった。
+ * **JS を 1 行も使わないアプリでも起きる。**
+ *
+ * ⚠ 観測点は **frame の document URL**。「見えているか」だけを見ると、
+ * PKC3 の index.html が真っ白に描かれた状態と区別が付かない。
+ */
+test('🔴 囲いの中のアプリで、ページ内リンクを押してもアプリが消えない', async ({
+  page,
+  context,
+}) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  // ⚠ **script を 1 行も使わない**アプリにする ── この事故は素の HTML で起きる
+  const DOC_APP =
+    '<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>手引き</title>' +
+    '<style>body{margin:0;font:16px system-ui}#pad{height:3000px}</style></head><body>' +
+    '<h1 id="top">手引き</h1>' +
+    '<p><a href="#tail" id="jump">末尾へ</a></p>' +
+    '<div id="pad"></div>' +
+    '<h2 id="tail">末尾の節</h2>' +
+    '</body></html>';
+
+  await clickReal(page, '[data-pkc-action="attach-file"]');
+  await page.locator('[data-pkc-field="attach-input"]').setInputFiles({
+    name: 'guide.html',
+    mimeType: 'text/html',
+    buffer: Buffer.from(DOC_APP, 'utf-8'),
+  });
+  await expect(page.locator('[data-pkc-action="launch-asset"]')).toBeVisible({
+    timeout: 15000,
+  });
+
+  const appTab = context.waitForEvent('page');
+  await clickReal(page, '[data-pkc-action="launch-asset"]');
+  const tab = await appTab;
+  await tab.waitForLoadState('domcontentloaded');
+  const inner = tab.frameLocator('[data-pkc-field="launcher-app"]');
+  await expect(inner.locator('#jump')).toBeVisible({ timeout: 15000 });
+  const frame = tab.frames().find((f) => f !== tab.mainFrame())!;
+
+  // 前提: 囲いの中(不透明オリジン)で、文書は srcdoc である
+  expect(await frame.evaluate(() => String(self.origin))).toBe('null');
+  expect(await frame.evaluate(() => location.href)).toBe('about:srcdoc');
+
+  // ── 実際に押す(リンクは frame の中なので、frame 座標で実クリックする)
+  await inner.locator('#jump').click();
+
+  // ① 🔴 **アプリが生きている**(遷移していない)
+  expect(
+    await frame.evaluate(() => location.href),
+    'ページ内リンクで別の文書へ遷移した(アプリが消える経路)',
+  ).toBe('about:srcdoc');
+  await expect(inner.locator('h1#top'), 'アプリの中身が失われた').toHaveText('手引き');
+
+  // ② 🔴 **リンクが効いている**(遷移を止めただけの「死んだリンク」にしない)
+  const y = await frame.evaluate(() => window.scrollY);
+  expect(y, `末尾へ移動していない(scrollY=${y})`).toBeGreaterThan(100);
+
+  await tab.close();
+  expect(errors).toEqual([]);
+});

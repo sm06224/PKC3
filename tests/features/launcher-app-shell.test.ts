@@ -107,8 +107,18 @@ describe('ランチャーの外殻', () => {
 
   it('保存領域を貸さないときは受け口を作らない(要らない口を開けない)', () => {
     const html = buildLauncherAppShell('題', '<p>a</p>');
-    expect(html).not.toContain('addEventListener');
+    // 🔴 見るのは「**外殻が message を聴くか**」── そこが穴になる面である。
+    //    ⚠ かつては `addEventListener` の**語**を禁じていたが、それでは
+    //    「囲いの中(アプリ document)で click を聴く」ような、外殻に口を開けない
+    //    prelude まで一緒に禁じてしまう(2026-08-05 のページ内リンクの手当てが
+    //    まさにそれ)── 禁じる対象を**外殻の message 受け口**に絞る
+    expect(html).not.toContain('addEventListener("message"');
     expect(html).not.toContain('localStorage');
+    // ⚠ 語の禁止を緩めたので、**貸すときは本当に口が開く**ことも併せて見る
+    //    (緩めたことで検査が空振りになっていないかの担保)
+    expect(buildLauncherAppShell('題', '<p>a</p>', { appId: 'a1' })).toContain(
+      'addEventListener("message"',
+    );
   });
 
   /**
