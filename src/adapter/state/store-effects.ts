@@ -47,8 +47,17 @@ export interface StorePort {
    * 履歴を伸ばさず鎖の頭を張り替えるだけ ── toggle / rename はこちら。
    */
   persistEntry(entry: EntryUpsert, opts?: { checkpoint?: boolean }): Promise<EntryStamps>;
-  /** worker 側で relations の同 tx 掃除 + trash snapshot(P5a)。冪等。 */
+  /**
+   * trash snapshot を積んで entries から落とす(P5a)。冪等。
+   * ⚠ **relations は消さない**(2026-08-05)── 消すとゴミ箱から戻しても
+   * 居場所が戻らない。本当の処分は `purgeTrash`。
+   */
   deleteEntry(lid: string): Promise<void>;
+  /**
+   * 居場所を張り替える(フォルダ整理)。`parentLid: null` = ルートへ。
+   * ⚠ 1 op = 1 tx ── 「落として張る」を割らない。
+   */
+  setEntryParent(lid: string, parentLid: string | null, relationId: string): Promise<void>;
   listRevisionMetas(entryLid: string): Promise<
     Array<{
       id: string;
@@ -164,6 +173,22 @@ export function connectStoreEffects(
             // (非破壊側に倒れる)
             if (!disposed)
               dispatcher.dispatch({ type: 'OP_FAILED', error: String(e) });
+          }
+        });
+        break;
+      case 'REQUEST_SET_PARENT':
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            await store.setEntryParent(ev.lid, ev.parentLid, ev.relationId);
+          } catch (e) {
+            // ⚠ 画面は既に動かしている(楽観)── 失敗は**必ず言う**。
+            //    黙ると「移したつもりで disk は元のまま」になり、次の再読込で戻る
+            if (!disposed)
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: `居場所を変えられませんでした: ${String(e)}`,
+              });
           }
         });
         break;

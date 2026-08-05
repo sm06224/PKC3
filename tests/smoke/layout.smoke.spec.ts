@@ -1,5 +1,11 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors } from './helpers';
+import {
+  gotoApp,
+  clickReal,
+  createEntry,
+  collectPageErrors,
+  expectReachable,
+} from './helpers';
 
 /**
  * P7b 段⑨: **枠が組めている**(設計 doc §1-4)。
@@ -1111,6 +1117,91 @@ test('🔴 markdown の装飾が実際に効く(素の段落から動いてい�
   expect(m.mark!.bg, '==印== に地が付いていない').not.toBe(m.plain!.bg);
   // 🔴 注意書きも読み幅の上限に従う(箱だけ全幅に伸びない)
   expect(m.note!.w, '注意書きだけ全幅に伸びている').toBeLessThanOrEqual(m.plain!.w + 4);
+
+  expect(errors).toEqual([]);
+});
+
+/**
+ * 🔴 **フォルダ整理が実機で回る**(2026-08-05、user 報告
+ * 「フォルダ整理のための導線がない」)。
+ *
+ * ここは **unit では届かない 2 点**を見る:
+ *  ① 帯の `<select>` が**本当に押せる場所に在る**(happy-dom は見た目を持たない)
+ *  ② 入れた居場所が **実 sqlite に残る** ── 読み込み直しても中に居る
+ *     (楽観更新だけで動いて見える実装を落とす)
+ *
+ * ⚠ **題名で行を掴まない**(full run で実際に落ちた)。`editor-title` は
+ * **確定のときに DOM から読む**欄なので、打った後に editor が作り直されると
+ * 打鍵が失われる ── 単独実行では緑、全量実行では既定題名のままになった。
+ * 本文欄(`editor-body`)は 1 打鍵ごとに state へ写るので、**新規の掃除を避ける
+ * 変更は本文で行い、行は lid で掴む**。⚠ 何も変えずに確定すると、新規未編集の
+ * 掃除で entry ごと消える(それが「作ったのに無い」の正体になる)。
+ */
+test('🔴 フォルダに入れる → 読み込み直しても中に居る', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await gotoApp(page);
+  await clickReal(page, '[data-pkc-region="browse-tabs"] [data-pkc-browse="filer"]');
+
+  const rows = page.locator('[data-pkc-region="filer-table"] tbody tr');
+  const titles = rows.locator('[data-pkc-field="title"]');
+  const move = page.locator('[data-pkc-field="move-target"]');
+  /** 帯は**いつも選択を指している** ── 作った直後の lid はここから読める。 */
+  const selectedLid = async (): Promise<string> => {
+    const lid = await move.getAttribute('data-pkc-entry');
+    expect(lid, '帯が選んでいるものを指していない').toBeTruthy();
+    return lid!;
+  };
+  const make = async (archetype: string, body: string): Promise<string> => {
+    await createEntry(page, archetype);
+    await page.fill('[data-pkc-field="editor-body"]', body);
+    await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+    return selectedLid();
+  };
+  const lidsOf = () => rows.evaluateAll((trs) => trs.map((t) => t.getAttribute('data-pkc-entry')));
+
+  // ⚠ ノートを**先に**作る(フォルダを選んだ状態で作ると新規はその中へ入る ──
+  //    それは後半で別に確かめる)
+  const noteLid = await make('text', '# 移すノート\n');
+  const folderLid = await make('folder', '# 整理先フォルダ\n');
+
+  // フォルダを作った直後は scope がその中 = 空
+  await expect(page.locator('[data-pkc-field="filer-empty"]')).toBeVisible();
+  await clickReal(page, '[data-pkc-region="filer-breadcrumb"] [data-pkc-action="filer-root"]');
+  await expect(page.locator('[data-pkc-field="filer-move-empty"]')).toBeVisible();
+
+  // ── 選ぶ → 居場所を変える
+  await clickReal(page, `[data-pkc-region="filer-table"] [data-pkc-entry="${noteLid}"]`);
+  // ① 実際に届く(座標の最前面である)ことを確かめてから使う。
+  //    ⚠ `<select>` は**押さない** ── 実ブラウザでは一覧が開いて後続を邪魔する
+  await expectReachable(page, '[data-pkc-field="move-target"]');
+  // 帯は**選んだ行の題名**を名指しする(誰を動かすのかが読める)
+  const rowTitle = await titles
+    .nth((await lidsOf()).indexOf(noteLid))
+    .textContent();
+  await expect(page.locator('[data-pkc-field="move-caption"]')).toHaveText(
+    `\u300c${rowTitle}\u300d\u306e\u5c45\u5834\u6240`,
+  );
+  await move.selectOption(folderLid); // ⚠ 値 = lid で選ぶ(題名に依存しない)
+
+  // 画面は動かしたものに付いていく(入れた先の中が見える)
+  await expect(
+    page.locator('[data-pkc-region="filer-breadcrumb"] [data-pkc-entry]'),
+    '入れた先のフォルダが道に出ていない',
+  ).toHaveAttribute('data-pkc-entry', folderLid);
+  expect(await lidsOf()).toEqual([noteLid]);
+
+  // ── いま見ているフォルダの中に作る
+  await expect(page.locator('[data-pkc-field="filer-create-target"]')).toBeVisible();
+  const createdLid = await make('text', '# フォルダの中で作った\n');
+
+  // ── ② 読み込み直す(実 sqlite から読み戻る)
+  await gotoApp(page);
+  await clickReal(page, '[data-pkc-region="browse-tabs"] [data-pkc-browse="filer"]');
+  // ルートには**入れたノートが居ない**
+  expect(await lidsOf(), 'ルートに残っている').not.toContain(noteLid);
+  await clickReal(page, `[data-pkc-region="filer-table"] [data-pkc-entry="${folderLid}"]`);
+  expect(await lidsOf(), '読み込み直したら居場所が失われた').toEqual([noteLid, createdLid]);
 
   expect(errors).toEqual([]);
 });

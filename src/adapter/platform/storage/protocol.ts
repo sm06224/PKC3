@@ -59,6 +59,23 @@ export type StorageRequest =
   | { op: 'bulkUpsertRelations'; cid: string; relations: RelationUpsert[] }
   | {
       /**
+       * 🔴 **居場所を張り替える 1 op**(2026-08-05。フォルダ整理)。
+       *
+       * ⚠ 「外す」と「入れる」を 2 op に割らない ── 割ると、途中で落ちたときに
+       * **親無しの宙ぶらりん**が残る。1 tx で「その子の structural 辺を全部落として、
+       * 親が在れば 1 本張る」を行う。`parentLid: null` = ルートへ出す。
+       * ⚠ 循環(自分の子孫へ移す)の判定は**呼び側(reducer)**が持つ ──
+       * worker は木を知らない(metas を持たない)。
+       */
+      op: 'setEntryParent';
+      cid: string;
+      lid: string;
+      parentLid: string | null;
+      /** 張る辺の id(呼び側が採番 ── worker で乱数を作ると test が読めない)。 */
+      relationId: string;
+    }
+  | {
+      /**
        * 取込の履歴を**鎖として**積む(P5c の符号化 = tip は entries.body、
        * 履歴は逆向きパッチ)。全文で積む経路は持たない ── 持つと取込だけが
        * 設計から外れ、PKC2 と同じ「履歴が本文の N 倍」に戻る。
@@ -293,6 +310,7 @@ export interface ResultMap {
   deleteEntry: null;
   listRelations: RelationRow[];
   bulkUpsertRelations: null;
+  setEntryParent: null;
   importRevisionChains: ImportRevisionsResult;
   exportRevisionChain: EncodedRevisionRow[];
   restoreRevisionChains: ImportRevisionsResult;

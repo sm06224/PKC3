@@ -71,6 +71,7 @@ function shared() {
     getBody: async () => null,
     persistEntry: async () => stubStamps(),
     deleteEntry: async () => {},
+    setEntryParent: async () => {},
   });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
 

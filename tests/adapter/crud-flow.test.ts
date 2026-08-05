@@ -72,6 +72,7 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
       deleted.push(lid);
       delete store[lid];
     },
+    setEntryParent: async () => {},
   });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas, relations: [] });
   const q = <T extends HTMLElement>(sel: string) => root.querySelector<T>(sel);
@@ -148,6 +149,7 @@ describe('create (P3-7a)', () => {
         return stubStamps();
       },
       deleteEntry: async () => {},
+      setEntryParent: async () => {},
     });
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', 1)], relations: [] });
     createByUi(root, 'text');

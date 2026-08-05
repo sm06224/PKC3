@@ -18,6 +18,7 @@ import { archetypeLabel } from '@adapter/ui/render/sidebar';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
 import { applyFormat, type FormatOp } from '@features/markdown/text-ops';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
+import { resolveFilerScope } from '@features/relation/tree';
 import { handleCopyMdBlock } from './copy-md-block';
 
 type ActionHandler = (
@@ -222,6 +223,9 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'restore-revision',
   'restore-trash',
   'purge-trash',
+  // ⚠ 本文は書かないが **disk への書込**である(取込は relations を総入れ替えする
+  //    ので、走っている最中に居場所を変えると片方が消える)
+  'move-entry',
 ]);
 
 function refuseWhileBusy(
@@ -262,14 +266,29 @@ const ACTIONS: Record<string, ActionHandler> = {
         ?.querySelector<HTMLSelectElement>('[data-pkc-field="create-kind"]')?.value ??
       null;
     if (!archetype) return;
+    /**
+     * 🔴 **いま見ているフォルダの中に作る**(2026-08-05、user 報告
+     * 「フォルダ整理のための導線がない」の片翼)。直す前は、フォルダを開いて
+     * 「+ ノート」を押しても**ルートに落ちて**いた ── フォルダの中身は
+     * 「作ってから入れ直す」以外に増やしようが無かった。
+     *
+     * ⚠ 入れ先は**選択の純関数**(filer と同じ `resolveFilerScope`)── 「どの
+     * 探し方を開いているか」では変えない。左の列の状態で保存先が変わると、
+     * user からは同じ操作が場所によって違う結果を出すように見える。
+     * ⚠ `SET_VIEW_MODE` より**前**に読む(切替は選択を動かさないが、
+     * 読む順を先に固定しておく)。
+     */
+    const st = dispatcher.getState();
+    const parent = resolveFilerScope(st.selectedLid, st.entryMetas, st.relations);
     // 非 detail view で作ると editor が出ない(PKC2 PR-Δ19 の罠)── 先に切替
-    if (dispatcher.getState().viewMode !== 'detail')
-      dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
+    if (st.viewMode !== 'detail') dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
     dispatcher.dispatch({
       type: 'CREATE_ENTRY',
       archetype,
       lid: generateLid(),
       title: defaultTitle(dispatcher, archetype),
+      parentLid: parent?.lid ?? null,
+      relationId: generateLid(),
     });
   },
   'delete-entry': (dispatcher, target) => {
@@ -398,6 +417,22 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'TOGGLE_SHOW_ARCHIVED' }),
   'retry-persist': (dispatcher) => dispatcher.dispatch({ type: 'RETRY_PERSIST' }),
   'filer-root': (dispatcher) => dispatcher.dispatch({ type: 'DESELECT_ENTRY' }),
+  /**
+   * 🔴 **居場所を変える**(2026-08-05、user 報告「フォルダ整理のための導線がない」)。
+   * 空値 = ルートへ出す。⚠ 動かす当人は**帯自身**が持っている
+   * (`selectedLid` を読み直すと、選び直した直後に別のものを動かす)。
+   */
+  'move-entry': (dispatcher, target) => {
+    const lid = target.getAttribute('data-pkc-entry');
+    if (!lid) return;
+    const value = target instanceof HTMLSelectElement ? target.value : '';
+    dispatcher.dispatch({
+      type: 'SET_ENTRY_PARENT',
+      lid,
+      parentLid: value === '' ? null : value,
+      relationId: generateLid(),
+    });
+  },
   'attach-file': (_dispatcher, target) => {
     // 常設の hidden input を開く(動的生成にしない ── smoke の setInputFiles と
     // ブラウザの user-gesture 要件の両方に効く)

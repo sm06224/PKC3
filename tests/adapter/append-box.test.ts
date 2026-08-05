@@ -68,6 +68,7 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
     ...stubRevisionOps(),
     getBody: async (lid) => disk[lid] ?? null,
     deleteEntry: async () => {},
+    setEntryParent: async () => {},
     persistEntry: async (e) => {
       if (gate) {
         const held = gate;

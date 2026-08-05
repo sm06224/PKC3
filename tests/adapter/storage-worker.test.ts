@@ -789,6 +789,121 @@ describe('P6e ── 鎖を書き出して復元する', () => {
   });
 });
 
+describe('🔴 居場所の張り替え(2026-08-05。フォルダ整理)', () => {
+  const relsOf = async (toLid: string) =>
+    (await request({ op: 'listRelations', cid: 'c1' })).filter((r) => r.to_lid === toLid);
+
+  it('入れる → 別へ移す ── 辺は常に 1 本(2 か所に居ない)', async () => {
+    await write('p-fold', '# 入れ物 A\n');
+    await write('p-fold2', '# 入れ物 B\n');
+    await write('p-child', '# 中身\n');
+
+    await request({
+      op: 'setEntryParent',
+      cid: 'c1',
+      lid: 'p-child',
+      parentLid: 'p-fold',
+      relationId: 'pr-1',
+    });
+    let rows = await relsOf('p-child');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.from_lid).toBe('p-fold');
+    expect(rows[0]!.kind).toBe('structural');
+    // ⚠ 時刻は **DB が刻む**(主スレッドで作らない ── P9 段①)
+    expect(rows[0]!.created_at).toMatch(/^\d{4}-\d{2}-\d{2} /);
+
+    await request({
+      op: 'setEntryParent',
+      cid: 'c1',
+      lid: 'p-child',
+      parentLid: 'p-fold2',
+      relationId: 'pr-2',
+    });
+    rows = await relsOf('p-child');
+    expect(rows).toHaveLength(1); // 🔴 前の辺が残ると 2 つのフォルダに見える
+    expect(rows[0]!.from_lid).toBe('p-fold2');
+  });
+
+  it('ルートへ出す(parentLid = null)と辺が無くなる', async () => {
+    await request({
+      op: 'setEntryParent',
+      cid: 'c1',
+      lid: 'p-child',
+      parentLid: null,
+      relationId: 'pr-3',
+    });
+    expect(await relsOf('p-child')).toHaveLength(0);
+  });
+
+  it('🔴 structural 以外の辺は巻き添えにしない', async () => {
+    await request({
+      op: 'bulkUpsertRelations',
+      cid: 'c1',
+      relations: [
+        { id: 'pr-sem', fromLid: 'p-fold', toLid: 'p-child', kind: 'semantic' },
+      ],
+    });
+    await request({
+      op: 'setEntryParent',
+      cid: 'c1',
+      lid: 'p-child',
+      parentLid: 'p-fold',
+      relationId: 'pr-4',
+    });
+    const rows = await relsOf('p-child');
+    expect(rows.map((r) => r.kind).sort()).toEqual(['semantic', 'structural']);
+    // 出すときも意味リンクは残る
+    await request({
+      op: 'setEntryParent',
+      cid: 'c1',
+      lid: 'p-child',
+      parentLid: null,
+      relationId: 'pr-5',
+    });
+    expect((await relsOf('p-child')).map((r) => r.id)).toEqual(['pr-sem']);
+  });
+
+  it('🔴 削除しても辺は残る ── ゴミ箱から戻すと**居場所も戻る**', async () => {
+    // 直す前は deleteEntry が両側の辺を消していたので、戻すと必ず root へ出ていた
+    // (フォルダを消して戻すと中身が空になる、の裏返し)
+    await request({
+      op: 'setEntryParent',
+      cid: 'c1',
+      lid: 'p-child',
+      parentLid: 'p-fold',
+      relationId: 'pr-6',
+    });
+    await request({ op: 'deleteEntry', cid: 'c1', lid: 'p-child' });
+    expect(await relsOf('p-child')).toHaveLength(2); // structural + semantic
+
+    // 復元(= 行の挿し直し)で、そのまま p-fold の下に戻る
+    await write('p-child', '# 中身(復元)\n');
+    const rows = await relsOf('p-child');
+    expect(rows.find((r) => r.kind === 'structural')?.from_lid).toBe('p-fold');
+  });
+
+  it('🔴 purgeTrash が、本当に消えた lid の辺を掃除する', async () => {
+    // ⚠ deleteEntry が辺を残す以上、最終処分場はここ 1 か所しかない ──
+    //    掃除しないと、消した lid を指す辺が永久に溜まる
+    await write('p-gone', '# 消える\n');
+    await request({
+      op: 'setEntryParent',
+      cid: 'c1',
+      lid: 'p-gone',
+      parentLid: 'p-fold',
+      relationId: 'pr-gone',
+    });
+    await request({ op: 'deleteEntry', cid: 'c1', lid: 'p-gone' });
+    // ゴミ箱に居る間は**消さない**(まだ戻せる)
+    expect(await relsOf('p-gone')).toHaveLength(1);
+
+    await request({ op: 'purgeTrash', cid: 'c1' });
+    expect(await relsOf('p-gone')).toHaveLength(0);
+    // 生きている entry の辺は残る(掃除が広すぎない)
+    expect(await relsOf('p-child')).toHaveLength(2);
+  });
+});
+
 describe('🔴 未知の op を名指しで断る', () => {
   it('存在しない op は **op 名つき**のエラーになる', async () => {
     // ⚠ 無条件に呼ぶと `TypeError: handler is not a function` になるだけで、

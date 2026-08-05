@@ -63,6 +63,7 @@ function setup(
       return stubStamps();
     },
     deleteEntry: async () => {},
+    setEntryParent: async () => {},
   });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a1', 'メモ帳')], relations: [] });
   return {

@@ -8,6 +8,7 @@
  *   selectedLid が選択の単一情報源
  */
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
+import { resolveCanonicalParents } from '@features/relation/tree';
 import { extractMeta, seedBodyFor } from '@features/flavor';
 import { withTodoStatus } from '@features/flavor/todo-flavor';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
@@ -243,10 +244,20 @@ export type UserAction =
       title: string;
       body?: string;
       edit?: boolean;
+      /** 入れ先の folder(2026-08-05)。省略 / null = ルート。
+       *  ⚠ `relationId` も一緒に渡す ── 片方だけでは辺を作れない。 */
+      parentLid?: string | null;
+      relationId?: string;
     }
   | { type: 'DESELECT_ENTRY' }
   | { type: 'DELETE_ENTRY'; lid: string }
   | { type: 'RENAME_ENTRY_TITLE'; lid: string; title: string }
+  /**
+   * 🔴 **居場所を変える**(2026-08-05。フォルダ整理)。
+   * `parentLid: null` = ルートへ出す。⚠ 「外す」と「入れる」を 2 つに割らない ──
+   * 割ると途中で落ちたときに親無しが残る(PKC2 がその形だった)。
+   */
+  | { type: 'SET_ENTRY_PARENT'; lid: string; parentLid: string | null; relationId: string }
   | { type: 'SHOW_HISTORY' }
   | { type: 'HIDE_HISTORY' }
   | { type: 'RESTORE_REVISION'; revId: string }
@@ -345,6 +356,13 @@ export type DomainEvent =
   | {
       type: 'REQUEST_LAUNCHER_TILES';
       entries: Array<{ lid: string; title: string }>;
+    }
+  | {
+      /** 居場所の永続化。⚠ 判定(循環・folder か)は reduce で済んでいる。 */
+      type: 'REQUEST_SET_PARENT';
+      lid: string;
+      parentLid: string | null;
+      relationId: string;
     }
   | {
       type: 'PERSIST_ENTRY';
@@ -1034,12 +1052,42 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
         date: ext.date,
         archived: ext.archived,
       };
+      /**
+       * 🔴 **いま見ているフォルダの中に作る**(2026-08-05)。
+       * ⚠ 入れ先が folder でない / 実在しないなら**黙ってルートに作る** ──
+       *    ここで作成ごと断ると、user は「押しても何も起きない」を見る
+       *    (作れないより、意図と違う場所に見えているほうが直せる)。
+       * ⚠ 自己辺は作らない(作った当人が入れ先になることはあり得ないが、
+       *    lid 生成が壊れたときの防波堤)。
+       */
+      const parentMeta =
+        action.parentLid != null && action.parentLid !== action.lid && action.relationId
+          ? state.entryMetas.get(action.parentLid)
+          : undefined;
+      const parentLid =
+        parentMeta && parentMeta.archetype === 'folder' ? (action.parentLid as string) : null;
+      const relations =
+        parentLid === null
+          ? state.relations
+          : [
+              ...state.relations,
+              {
+                id: action.relationId as string,
+                fromLid: parentLid,
+                toLid: action.lid,
+                kind: 'structural' as const,
+                // ⚠ 時刻は worker が刻む(SET_ENTRY_PARENT と同じ約束)
+                createdAt: null,
+                updatedAt: null,
+              },
+            ];
       // 作成 = 即永続(PKC2 と同じ)。この初回 PERSIST が失敗した場合、editing 中の
       // 無変更 commit は skip するが、行は upsert なので次の変更 commit が自己修復する
       // (二重故障窓のみ残る ── SYS_ERROR が可視。P3-7a 設計判断)
       return {
         state: {
           ...state,
+          relations,
           phase: wantsEdit ? 'editing' : 'ready', // 既定は作成 → 即編集(PKC2 の遷移)
           entryMetas: new Map(state.entryMetas).set(action.lid, meta),
           order: [...state.order, action.lid],
@@ -1074,6 +1122,18 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
               archived: ext.archived,
             },
           },
+          // ⚠ **entry を書いた後**に辺を書く(行が無いところへ辺を張らない)。
+          //    effect は events の順に直列化するので、この並びがそのまま順序になる
+          ...(parentLid === null
+            ? []
+            : ([
+                {
+                  type: 'REQUEST_SET_PARENT',
+                  lid: action.lid,
+                  parentLid,
+                  relationId: action.relationId as string,
+                },
+              ] as DomainEvent[])),
         ],
       };
     }
@@ -1108,6 +1168,69 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
             title,
             archetype: meta.archetype,
             entryOrder: meta.entryOrder,
+          },
+        ],
+      };
+    }
+    case 'SET_ENTRY_PARENT': {
+      // 🔴 **フォルダ整理の唯一の入口**(2026-08-05、user 報告
+      // 「フォルダ整理のための導線がない」)。直す前は UI どころか
+      // action・reducer・effect のどこにも relation を編集する経路が無く、
+      // フォルダは作れるのに**永久に空**だった。
+      if (state.phase !== 'ready') return { state, events: [] };
+      const child = state.entryMetas.get(action.lid);
+      if (!child) return { state, events: [] };
+      const parentLid = action.parentLid;
+      if (parentLid !== null) {
+        const parent = state.entryMetas.get(parentLid);
+        // ⚠ 入れ先は**実在するフォルダ**でなければならない(木の規約 ──
+        //    `resolveCanonicalParents` は非 folder 親の辺を無視するので、
+        //    ここで通すと「移したのに動かない」黙りになる)
+        if (!parent || parent.archetype !== 'folder') return { state, events: [] };
+        if (parentLid === action.lid) return { state, events: [] }; // 自分の中へは入れない
+        // 🔴 **自分の子孫の中へは入れない**(輪ができて木でなくなる)。
+        //    ⚠ 判定はここでやる ── worker は metas を持たないので木を知らない
+        const parentOf = resolveCanonicalParents(state.entryMetas, state.relations);
+        for (let cur: string | undefined = parentLid; cur !== undefined; cur = parentOf.get(cur)) {
+          if (cur === action.lid) return { state, events: [] };
+        }
+      }
+      // 楽観更新 ── 画面(ファイラ)は state.relations から描くので、
+      // ここで直さないと「押したのに動かない」に見える
+      const kept = state.relations.filter(
+        (r) => !(r.kind === 'structural' && r.toLid === action.lid),
+      );
+      const relations =
+        parentLid === null
+          ? kept
+          : [
+              ...kept,
+              {
+                id: action.relationId,
+                fromLid: parentLid,
+                toLid: action.lid,
+                kind: 'structural' as const,
+                // ⚠ 時刻は **worker が刻む**(`datetime('now')`)。ここは楽観表示の
+                //    ための仮値で、次の再読込で本物に置き換わる
+                createdAt: null,
+                updatedAt: null,
+              },
+            ];
+      // ⚠ 何も変わらないなら書かない(同じ親へ落としても永続化が走らない)
+      if (
+        relations.length === state.relations.length &&
+        relations.every((r, i) => r === state.relations[i])
+      ) {
+        return { state, events: [] };
+      }
+      return {
+        state: { ...state, relations },
+        events: [
+          {
+            type: 'REQUEST_SET_PARENT',
+            lid: action.lid,
+            parentLid,
+            relationId: action.relationId,
           },
         ],
       };
