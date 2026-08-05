@@ -81,6 +81,16 @@ export interface AppState {
   /** ゴミ箱 panel(filer)。開いた時点のスナップショット + 明示更新。 */
   trashPanel: { items: readonly TrashItem[] } | null;
   /**
+   * 🔴 **OS から開いた元ファイルとの紐づけ**(lid → ファイル名。2026-08-05、
+   * user 報告「スポットの編集プレビュー導線も存在しない」)。
+   *
+   * ⚠ ここに置くのは**見せる材料(名前)だけ** ── `FileSystemFileHandle` 本体は
+   * 不透明で比較も複製もできないので、純粋な reducer に入れない
+   * (実体は `adapter/platform/launched-files.ts` が**このセッションだけ**持つ)。
+   * ⚠ 読み直しで消える(handle が死ぬので、名前だけ残すと**嘘の導線**になる)。
+   */
+  linkedFiles: ReadonlyMap<string, string>;
+  /**
    * 一覧の絞り込み(P7b 段⑨c、user 指示「導線を再考」)。
    * ⚠ **state に持つ**(renderer が DOM から読まない、という規約)── 入力欄の
    * 値を renderer が拾いに行くと、再描画のたびに「画面と state のどちらが正か」
@@ -171,6 +181,7 @@ export const initialState: AppState = {
   showArchived: false,
   revisionPanel: null,
   trashPanel: null,
+  linkedFiles: new Map(),
   writeLock: null,
   tileWrite: null,
   lockGen: 0,
@@ -298,6 +309,11 @@ export type SystemCommand =
   | { type: 'SYS_ERROR'; error: string }
   | { type: 'REVISION_LIST_LOADED'; lid: string; items: RevisionItem[] }
   | { type: 'TRASH_LIST_LOADED'; items: TrashItem[] }
+  /**
+   * 🔴 **OS から開いた md が entry になった**(2026-08-05)。handle 本体は
+   * platform 側が持ち、ここへ来るのは**見せる名前**だけ。
+   */
+  | { type: 'FILE_LINKED'; lid: string; name: string }
   | {
       /** 復元完了(履歴 / ゴミ箱共通)。meta は effect が抽出済みの行から組む。
        *  mode は着弾時の整合判定に使う: revision = entry が居るのが前提(削除
@@ -466,6 +482,10 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
           selectedLid: keepLid,
           openBody: null,
           freshLid: null,
+          // ⚠ 元ファイルの紐づけは**このセッションの持ち物**なので、同じ container の
+          //    再読込では保つ(取込のたびに消えると、開いた直後に書き戻せなくなる)。
+          //    ⚠ ただし**消えた lid は落とす** ── 居ない entry を指す導線を残さない
+          linkedFiles: keepLinks(state, action.cid, metas),
         },
         events: keepLid === null ? [] : [{ type: 'REQUEST_BODY', lid: keepLid }],
       };
@@ -1280,6 +1300,14 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       if (state.phase !== 'ready') return { state, events: [] };
       return { state, events: [{ type: 'REQUEST_TRASH_LIST' }] };
     }
+    case 'FILE_LINKED': {
+      // ⚠ **居ない entry には紐づけない**(取込が失敗した後に届いても導線を作らない)
+      if (!state.entryMetas.has(action.lid)) return { state, events: [] };
+      if (state.linkedFiles.get(action.lid) === action.name) return { state, events: [] };
+      const linkedFiles = new Map(state.linkedFiles);
+      linkedFiles.set(action.lid, action.name);
+      return { state: { ...state, linkedFiles }, events: [] };
+    }
     case 'HIDE_TRASH':
       return { state: { ...state, trashPanel: null }, events: [] };
     case 'TRASH_LIST_LOADED':
@@ -1485,9 +1513,42 @@ function removeEntryFromState(
       // 削除で履歴・ゴミ箱の断面は古くなる ── 畳んで開き直しに任せる(P5b)
       revisionPanel: null,
       trashPanel: null,
+      // ⚠ 元ファイルの紐づけも外す ── 消したノートに「書き戻す」を出したままだと、
+      //    戻せなくなった器を指す導線が残る(復元したら開き直しで紐づく)
+      linkedFiles: dropLink(state.linkedFiles, lid),
     },
     events,
   };
+}
+
+/**
+ * 再読込を跨いで残す紐づけ。別 container なら**全部捨てる**(lid の偶然衝突で
+ * 他人のノートに「書き戻す」を出さない ── 選択の持ち越しと同じ判断)。
+ */
+function keepLinks(
+  state: AppState,
+  cid: string,
+  metas: ReadonlyMap<string, EntryMeta>,
+): ReadonlyMap<string, string> {
+  if (state.cid !== cid) return state.linkedFiles.size === 0 ? state.linkedFiles : new Map();
+  let dropped = false;
+  const next = new Map<string, string>();
+  for (const [lid, name] of state.linkedFiles) {
+    if (metas.has(lid)) next.set(lid, name);
+    else dropped = true;
+  }
+  return dropped ? next : state.linkedFiles; // 変化が無いなら参照を保つ
+}
+
+/** 紐づけを 1 件外す(⚠ 持っていないなら**同じ参照**を返す ── 断面指紋を壊さない)。 */
+function dropLink(
+  links: ReadonlyMap<string, string>,
+  lid: string,
+): ReadonlyMap<string, string> {
+  if (!links.has(lid)) return links;
+  const next = new Map(links);
+  next.delete(lid);
+  return next;
 }
 
 /**

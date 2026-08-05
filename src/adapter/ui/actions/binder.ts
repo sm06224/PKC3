@@ -103,6 +103,12 @@ export interface BinderServices {
    * 1 個も落ちていない**状態になる。
    */
   busy?(): boolean;
+  /**
+   * 🔴 **開いた md を元ファイルへ書き戻す**(2026-08-05、user 報告
+   * 「スポットの編集プレビュー導線も存在しない」)。
+   * ⚠ 確認・許可・書込は実体側 ── binder は「押された」を伝えるだけ。
+   */
+  writeBackFile?(lid: string): void;
   /** PKC2 ファイルの取込(P6b)。判別・変換・書込は実体側の責務。 */
   /** 取込(PKC2 の書出し / 素の Markdown)。振り分けは import-file.ts が持つ。 */
   importFiles?(files: File[]): void;
@@ -226,6 +232,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   // ⚠ 本文は書かないが **disk への書込**である(取込は relations を総入れ替えする
   //    ので、走っている最中に居場所を変えると片方が消える)
   'move-entry',
+  // ⚠ user の**ファイル**を上書きする ── 取込・書出しの最中に走らせない
+  'write-back-file',
 ]);
 
 function refuseWhileBusy(
@@ -627,6 +635,12 @@ const ACTIONS: Record<string, ActionHandler> = {
     // 「復元の取り消し」も履歴から戻れる
     const revId = target.getAttribute('data-pkc-rev-id');
     if (revId) dispatcher.dispatch({ type: 'RESTORE_REVISION', revId });
+  },
+  'write-back-file': (dispatcher, target, services) => {
+    const lid =
+      target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ??
+      dispatcher.getState().selectedLid;
+    if (lid) services.writeBackFile?.(lid);
   },
   'show-trash': (dispatcher) => dispatcher.dispatch({ type: 'SHOW_TRASH' }),
   'hide-trash': (dispatcher) => dispatcher.dispatch({ type: 'HIDE_TRASH' }),

@@ -16,6 +16,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
   armLaunchQueue,
+  type LaunchedItem,
   type LaunchParamsLike,
   type LaunchTarget,
 } from '../../src/adapter/platform/launch-queue';
@@ -90,16 +91,32 @@ describe('受け口の基本', () => {
   it('ファイルが届いたら受け取り先へ渡す', async () => {
     const f = fakeTarget();
     const got: File[][] = [];
-    armLaunchQueue(f.target, (files) => void got.push(files));
+    armLaunchQueue(f.target, (items) => void got.push(items.map((i) => i.file)));
     f.fire({ files: [handleFor(md('a.md'))] });
     await settle();
     expect(got.flat().map((x) => x.name)).toEqual(['a.md']);
   });
 
+  it('🔴 **handle も一緒に渡す**(捨てると元ファイルへ戻せない)', async () => {
+    // 2026-08-05、user 報告「スポットの編集プレビュー導線も存在しない」。
+    // 直す前はここが `getFile()` の結果だけを渡していたので、取り込んだ後に
+    // 「元がどのファイルか」を誰も知らず、同じ md を開くたびにノートが増えた。
+    // ⚠ 観測点は「**渡された handle が、届いた当のもの**か」── 型が通るだけでは
+    //    別の handle を渡す実装でも緑になる
+    const f = fakeTarget();
+    const handles = [handleFor(md('a.md')), handleFor(md('b.md'))];
+    const got: { file: File; handle: unknown }[] = [];
+    armLaunchQueue(f.target, (items) => void got.push(...items));
+    f.fire({ files: handles });
+    await settle();
+    expect(got.map((g) => g.file.name)).toEqual(['a.md', 'b.md']);
+    expect(got.map((g) => g.handle), 'handle が届いていない / 取り違えている').toEqual(handles);
+  });
+
   it('複数ファイルはまとめて渡す(1 件ずつ entry になるのは import 側の仕事)', async () => {
     const f = fakeTarget();
     const got: File[][] = [];
-    armLaunchQueue(f.target, (files) => void got.push(files));
+    armLaunchQueue(f.target, (items) => void got.push(items.map((i) => i.file)));
     f.fire({ files: [handleFor(md('a.md')), handleFor(md('b.markdown'))] });
     await settle();
     expect(got).toHaveLength(1);
@@ -109,7 +126,7 @@ describe('受け口の基本', () => {
   it('2 通目の launch も届く(起動中に別の md を開く)', async () => {
     const f = fakeTarget();
     const got: File[][] = [];
-    armLaunchQueue(f.target, (files) => void got.push(files));
+    armLaunchQueue(f.target, (items) => void got.push(items.map((i) => i.file)));
     f.fire({ files: [handleFor(md('1.md'))] });
     await settle();
     f.fire({ files: [handleFor(md('2.md'))] });
@@ -138,7 +155,7 @@ describe('🔴 黙って落とさない', () => {
     // **そのあと正常な launch が流れる**ことまで見て、初めて生存が言える
     const f = fakeTarget();
     const got: File[][] = [];
-    armLaunchQueue(f.target, (files) => void got.push(files));
+    armLaunchQueue(f.target, (items) => void got.push(items.map((i) => i.file)));
     f.fire({});
     await settle();
     f.fire({ files: [handleFor(md('あと.md'))] });
@@ -150,7 +167,11 @@ describe('🔴 黙って落とさない', () => {
     const errors: string[] = [];
     const f = fakeTarget();
     const got: File[][] = [];
-    armLaunchQueue(f.target, (files) => void got.push(files), (m) => void errors.push(m));
+    armLaunchQueue(
+      f.target,
+      (items) => void got.push(items.map((i) => i.file)),
+      (m) => void errors.push(m),
+    );
     f.fire({
       files: [
         { kind: 'file', getFile: () => Promise.reject(new Error('権限がありません')) },
@@ -256,9 +277,9 @@ function wiredApp() {
   };
 
   // ⚠ main.ts の `importLaunchFiles` と**同じ形**(断らない)
-  const importLaunchFiles = async (files: File[]): Promise<void> => {
+  const importLaunchFiles = async (items: LaunchedItem[]): Promise<void> => {
     await whenPhaseReady(d);
-    await gate.queued(() => importFiles(d, deps, files).then(() => {}));
+    await gate.queued(() => importFiles(d, deps, items.map((i) => i.file)).then(() => {}));
   };
 
   return { d, gate, written, importLaunchFiles };

@@ -125,6 +125,12 @@ export interface ImportDeps {
    */
   focus?(lid: string): void;
   /**
+   * 取り込んだ lid を **files と同じ順**で返す(2026-08-05)。
+   * ⚠ `focus` と同じ理由で **md 経路だけ**が呼ぶ ── PKC2 の container 取込は
+   *    ファイルと entry が 1:1 でないので、順で結べない。
+   */
+  imported?(lids: readonly string[]): void;
+  /**
    * ハッシュを取る上限(既定 `HASH_MAX_BYTES` = 64MB)。
    *
    * ⚠ **test の観測点として在る**(review M-1)。この閾値は WebCrypto に

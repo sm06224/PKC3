@@ -24,12 +24,25 @@
  * 何を受けるか(拡張子)も、どう entry にするかも `import-file.ts` / `plain-markdown.ts`
  * の規則がすでに持っている。**受け口が独自の判定を持つと宣言と実体がまた 3 つに割れる**。
  */
+import type { LaunchedHandle } from './launched-files';
 
-/** `LaunchParams.files` の要素。⚠ 仕様上 **directory handle が来うる**。 */
-export interface LaunchHandleLike {
-  /** `'file'` / `'directory'`。実装によっては未定義。 */
-  kind?: string;
-  getFile?(): Promise<File>;
+/**
+ * `LaunchParams.files` の要素。⚠ 仕様上 **directory handle が来うる**。
+ *
+ * 🔑 型は `launched-files.ts` が正本(書き戻し・同一判定に必要な面まで含む)──
+ * ここで別に宣言すると、受け口が渡せる物と使う側が要る物が静かにずれる。
+ */
+export type LaunchHandleLike = LaunchedHandle;
+
+/**
+ * 受け取った 1 件。🔴 **handle を捨てない**(2026-08-05、user 報告
+ * 「スポットの編集プレビュー導線も存在しない」)── 直す前は `getFile()` の
+ * 結果だけを渡していたので、取り込んだ後に「元がどのファイルか」を誰も知らず、
+ * 同じ md を開くたびにノートが増え、元ファイルへ戻す道も無かった。
+ */
+export interface LaunchedItem {
+  file: File;
+  handle: LaunchHandleLike;
 }
 
 /** 実ブラウザの `LaunchParams`(必要な部分だけ)。 */
@@ -62,7 +75,7 @@ export interface LaunchIntake {
  */
 export function armLaunchQueue(
   target: LaunchTarget,
-  consume: (files: File[]) => void | Promise<void>,
+  consume: (items: LaunchedItem[]) => void | Promise<void>,
   onError: (message: string) => void = () => {},
 ): LaunchIntake {
   const queue = target.launchQueue;
@@ -74,7 +87,7 @@ export function armLaunchQueue(
         try {
           const handles = params.files;
           if (!handles) return; // 通常起動(ファイル無し)
-          const files: File[] = [];
+          const items: LaunchedItem[] = [];
           for (let i = 0; i < handles.length; i++) {
             const handle = handles[i]!;
             // ⚠ **フォルダが来うる**(仕様の `files` は `FileSystemHandle[]`)。
@@ -84,14 +97,14 @@ export function armLaunchQueue(
               continue;
             }
             try {
-              files.push(await handle.getFile());
+              items.push({ file: await handle.getFile(), handle });
             } catch (e) {
               // 1 件が読めなくても残りは開く。⚠ **黙って減らさない**
               onError(`ファイルを読めませんでした: ${e instanceof Error ? e.message : String(e)}`);
             }
           }
-          if (files.length === 0) return;
-          await consume(files);
+          if (items.length === 0) return;
+          await consume(items);
         } catch (e) {
           // ⚠ **unhandled rejection にしない**。ここで落ちると原因が
           // どこにも出ないまま「md を開いたのに何も起きない」になる
