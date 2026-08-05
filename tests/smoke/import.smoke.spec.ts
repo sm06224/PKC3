@@ -194,6 +194,15 @@ const NOTE_BODY = (marker: string): string =>
     '# ZIP',
     marker,
     'HTML のコメントは <!-- で始まり、<script src="x"> も書ける',
+    // ⚠ **描画 / 原文の切替を持つ fence を必ず 1 つ入れる**(F-1 で判明)。
+    //    無いと「原文が二重に出ていないか」を測る術が無く、可搬 HTML の
+    //    当該検査が丸ごと空振りする(fixture のゼロ件次元は測っていない次元)
+    '',
+    '```csv',
+    '列A,列B',
+    '1,2',
+    '```',
+    '',
     ...Array.from({ length: 40 }, (_, i) => `共通の行 ${i}: 変わらない内容がここに続く`),
   ].join('\n') + '\n';
 
@@ -784,9 +793,27 @@ test('🔴 可搬 HTML: 書き出したファイルが**単体で開いて読め
       (el as HTMLImageElement).complete && (el as HTMLImageElement).naturalWidth > 0))
     .toBe(true);
 
+  // ── 🔴 fence の「描画 / 原文」切替が閲覧側でも成立しているか。
+  //    閲覧用 HTML には CSS-only トグルの規則が 1 行も無く、**両方出て**いた
+  //    (表の下に原文、押しても効かないチェックボックス、紙では二重に刷る)。
+  //    ⚠ CSS の効きは happy-dom では測れない ── ここが唯一の観測点
+  await items.nth(0).click();
+  const fenceSrc = viewer.locator('#body .pkc-render-source');
+  expect(
+    await fenceSrc.count(),
+    'この fixture に描画/原文の fence が無い(切替を測っていない)',
+  ).toBeGreaterThan(0);
+  await expect(fenceSrc.first(), '描画の下に原文が出ている').toBeHidden();
+  await expect(viewer.locator('#body .pkc-render-slot').first()).toBeVisible();
+  // ⚠ **dead click にしない** ── 属性が変わるだけで見た目が変わらない状態を潰す
+  await viewer.locator('#body .pkc-render-toggle').first().click({ force: true });
+  await expect(fenceSrc.first(), '切替が効いていない(押しても原文が出ない)').toBeVisible();
+  await expect(viewer.locator('#body .pkc-render-slot').first()).toBeHidden();
+  await viewer.locator('#body .pkc-render-toggle').first().click({ force: true });
+  await expect(fenceSrc.first()).toBeHidden();
+
   // ── F-1: 折りたたみ目次と印刷。⚠ `@media print` が**実際に効く**かは
   //    happy-dom では測れない ── ここが唯一の観測点なので実ブラウザで見る
-  await items.nth(0).click();
   const headings = await viewer.locator('#body h1, #body h2, #body h3').count();
   expect(headings, 'この fixture に見出しが 1 個も無い(目次を測っていない)').toBeGreaterThan(0);
   await expect(viewer.locator('#toc li')).toHaveCount(headings);
@@ -811,6 +838,9 @@ test('🔴 可搬 HTML: 書き出したファイルが**単体で開いて読め
   expect(await styleOf('main', 'overflow'), 'main がスクロール箱のまま').toBe('visible');
   expect(await styleOf('nav', 'display'), '紙に一覧が出てしまう').toBe('none');
   expect(await styleOf('#ptoc', 'display'), '紙に目次が出ない').not.toBe('none');
+  // 🔴 紙に原文を二重に刷らない / 操作子を刷らない
+  expect(await styleOf('#body .pkc-render-source', 'display'), '紙に原文が二重に出る').toBe('none');
+  expect(await styleOf('#body .pkc-render-toggle', 'display'), '紙に操作子が刷られる').toBe('none');
   // 紙の目次は畳まれない(印刷の直前に open を立てる)
   await viewer.locator('#dtoc').evaluate((el) => {
     (el as HTMLDetailsElement).open = false;

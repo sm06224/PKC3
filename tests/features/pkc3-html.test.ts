@@ -15,6 +15,7 @@ import {
 } from '../../src/features/export/pkc3-html';
 import type { ArchiveSource } from '../../src/features/export/pkc3-archive';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
+import { readFileSync } from 'node:fs';
 
 const enc = new TextEncoder();
 
@@ -1093,5 +1094,79 @@ describe('可搬 HTML — 沈黙する操作子を残さない', () => {
     expect(document.querySelectorAll('#all [data-pkc-action]')).toHaveLength(0);
     expect(document.getElementById('all')!.textContent).not.toContain('⧉');
     expect(document.querySelectorAll('#all table')).toHaveLength(1);
+  });
+});
+
+/**
+ * 🔴 fence の「描画 / 原文」切替が閲覧側で成立しているか(F-1 で紙にも波及して判明)。
+ *
+ * 閲覧用 HTML は `.b` 前置きの独自 CSS しか持っておらず、CSS-only トグルの規則が
+ * **1 行も無かった** ── CSS-only の機構は「規則がある」が前提なので、規則の無い面に
+ * 置くと **両方出る**方向に倒れる。表の下に原文が丸ごと出て、押しても効かない
+ * チェックボックスが並び、**印刷すると二重に刷られる**。
+ *
+ * ⚠ ここは happy-dom では**効きを測れない**(CSS を評価しない)。
+ *   本当に隠れるかは `tests/smoke/import.smoke.spec.ts` が実 Chromium の
+ *   computed style で見る。ここでは「規則が在ること」と「向きが app.css と同じこと」を守る。
+ */
+describe('可搬 HTML — fence の描画 / 原文の切替', () => {
+  const styleOf = async (blob: Blob): Promise<string> => {
+    const html = await blob.text();
+    const i = html.indexOf('<style>');
+    return html.slice(i, html.indexOf('</style>', i));
+  };
+
+  // ⚠ **両方の形を入れる** ── 既定(`csv` = mode `both`)は切替つき、
+  //    `csv-render` は切替が無く原文を常に隠す形。片方だけだと、もう一方の
+  //    規則が消えても気づけない
+  const WITH_FENCE = source({
+    entries: [
+      { lid: 'n1', title: 'csv', body: '```csv\n列A,列B\n1,2\n```\n' },
+      { lid: 'n2', title: 'csv-render', body: '```csv-render\n列A,列B\n1,2\n```\n' },
+    ],
+  });
+
+  it('🔴 書き出しは実際に切替つきの fence を吐く(この検査が空振りしていない)', async () => {
+    const d = await dataOf((await writePortableHtml(WITH_FENCE, NOW)).blob);
+    // ⚠ ここが 0 件なら、下の CSS 検査は何も守っていない
+    expect(d.entries[0]!.html, '描画/原文の切替が出ていない').toContain('pkc-render-source');
+    expect(d.entries[0]!.html, '切替つきの形が出ていない').toContain('pkc-render-toggle-input');
+    expect(d.entries[0]!.html).toContain('pkc-render-slot');
+    // 切替の無い形(`-render`)も測っている ── こちらは原文を常に隠す規則が守る
+    expect(d.entries[1]!.html).toContain('data-pkc-render-mode="render"');
+    expect(d.entries[1]!.html, '切替の無い形にも原文が入っている前提').toContain(
+      'pkc-render-source',
+    );
+    expect(d.entries[1]!.html).not.toContain('pkc-render-toggle-input');
+  });
+
+  it('🔴 原文を既定で隠す規則が在り、向きが app.css と同じ(checked = 原文面)', async () => {
+    const css = await styleOf((await writePortableHtml(WITH_FENCE, NOW)).blob);
+    expect(css, '原文を隠す規則が無い(表の下に原文が出る)').toContain(
+      '.b .pkc-render-toggle-input:not(:checked) ~ .pkc-render-source',
+    );
+    expect(css, '描画を隠す規則が無い(切替が効かない)').toContain(
+      '.b .pkc-render-toggle-input:checked ~ .pkc-render-slot',
+    );
+    expect(css).toContain(".b [data-pkc-render-mode='render'] > .pkc-render-source");
+  });
+
+  it('🔴 向きがアプリと一致している(同じファイルで見えるものが食い違わない)', () => {
+    // ⚠ **アプリ側の正本と突き合わせる** ── 片方だけ直すと、アプリでは描画・
+    //    閲覧側では原文、という食い違いが静かに生まれる
+    const app = readFileSync('src/styles/app.css', 'utf-8');
+    const pairs: Array<[string, string]> = [
+      ['.pkc-md-rendered .pkc-render-toggle-input:not(:checked) ~ .pkc-render-source', 'not(:checked) ~ .pkc-render-source'],
+      ['.pkc-md-rendered .pkc-render-toggle-input:checked ~ .pkc-render-slot', ':checked ~ .pkc-render-slot'],
+    ];
+    for (const [appSel] of pairs) {
+      expect(app, `app.css の正本が変わった: ${appSel}`).toContain(appSel);
+    }
+  });
+
+  it('紙では切替の見た目を出さない(操作できない紙に操作子を刷らない)', async () => {
+    const css = await styleOf((await writePortableHtml(WITH_FENCE, NOW)).blob);
+    const print = css.slice(css.indexOf('@media print{'));
+    expect(print).toContain('.b .pkc-render-toggle{display:none}');
   });
 });

@@ -162,6 +162,29 @@ nav button.p{width:auto;font-size:12px;padding:4px 10px;margin:2px 8px 0;
 .b th{background:#8881}
 .b hr{border:0;border-top:1px solid #8884;margin:1.5em 0}
 .b a{color:inherit}
+/* 🔴 **fence の「描画 / 原文」切替**(F-1 で紙にも波及して判明)。
+   描画は .pkc-render-slot、原文は .pkc-render-source で、どちらを見せるかは
+   CSS-only トグル(.pkc-render-toggle-input)が決める ── **規則が無いと両方出る**。
+   閲覧用 HTML は .b 前置きの独自 CSS しか持っていなかったので、
+   表の下に原文が丸ごと出て、押しても効かないチェックボックスが並んでいた。
+   ⚠ 紙ではもっと悪い ── F-1 の「全体を印刷」が**表と原文を二重に刷る**。
+   ⚠ アプリ側(app.css:944-1023)と**同じ向き**にする ── checked = 原文面。
+      逆にすると、同じファイルなのにアプリと閲覧側で見えるものが食い違う */
+.b .pkc-md-block{position:relative}
+.b .pkc-render-source{margin:0}
+/* ⚠ display:none にしない ── キーボードで到達できなくなる */
+.b .pkc-render-toggle-input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
+.b .pkc-render-toggle{position:absolute;top:2px;right:2px;z-index:1;padding:0 6px;
+  border:1px solid #8884;border-radius:6px;background:#8881;color:inherit;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;
+  line-height:18px;cursor:pointer;opacity:0}
+.b .pkc-md-block:hover .pkc-render-toggle,
+.b .pkc-md-block:focus-within .pkc-render-toggle{opacity:1}
+.b .pkc-render-toggle-input:focus-visible + .pkc-render-toggle{opacity:1;outline:2px solid #888}
+.b .pkc-render-toggle-input:not(:checked) ~ .pkc-render-source,
+.b .pkc-render-toggle-input:checked ~ .pkc-render-slot{display:none}
+/* 切替そのものが無い形(-render)は原文を常に隠す */
+.b [data-pkc-render-mode='render'] > .pkc-render-source{display:none}
 /* 図は原文のまま(閲覧側に mermaid を積まない)*/
 .b pre.d{font-size:.9em;opacity:.85}
 .b [data-pkc-asset-missing]{opacity:.75;outline:1px dashed #8886}
@@ -195,6 +218,9 @@ a.f{display:inline-block;margin:8px 0;padding:6px 10px;border:1px solid #8884;bo
   .b h1,.b h2,.b h3,.b h4,main h2{break-after:avoid-page}
   .b pre,.b table,.b blockquote,.b img{break-inside:avoid}
   .b a{color:inherit;text-decoration:none}
+  /* 紙に操作子は要らない(切替の見た目だけ消す ── どちらの面を見せるかは
+     画面での選択をそのまま持ち込む) */
+  .b .pkc-render-toggle{display:none}
   /* 「全体を印刷」── main を隠して #all を出す */
   body[data-print="all"] main{display:none}
   body[data-print="all"] #all{display:block}
