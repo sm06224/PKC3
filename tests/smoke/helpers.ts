@@ -50,6 +50,37 @@ export async function createEntry(page: Page, archetype: string): Promise<void> 
  * 確認してから page.mouse.click。dead click / occlusion / zero-height を検出する。
  */
 export async function clickReal(page: Page, selector: string): Promise<void> {
+  /**
+   * 🔴 **再描画で node が差し替わるのは正常**(2026-08-05、CI で実際に落ちた)。
+   *
+   * 右の情報ペインは値が変わると作り直される(`inspector.ts` の指紋ガードは
+   * **値が変わったとき**に通す)。保存の直後は worker から時刻が遅れて届くので、
+   * その瞬間に押すと `scrollIntoViewIfNeeded` が
+   * `Element is not attached to the DOM` / `element is not stable` で落ちる ──
+   * 遅い機械(CI)ほど当たりやすい。実際に手元 3/3 緑・CI 赤になった。
+   *
+   * ⚠ **retry で誤魔化さない**。差し替わったら**やり直す**が、
+   *   「見えている位置に本当に在るか」の検証は**毎回**やる ──
+   *   dead click / occlusion の検出力は 1 ミリも下げない。
+   * ⚠ 回数を切る ── 永遠に作り直され続ける(= 本物の不具合)なら落ちるべき。
+   */
+  const ATTEMPTS = 3;
+  for (let i = 1; ; i += 1) {
+    try {
+      await clickRealOnce(page, selector);
+      return;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const replaced =
+        msg.includes('not attached to the DOM') || msg.includes('element is not stable');
+      if (!replaced || i >= ATTEMPTS) throw e;
+      // 差し替わった直後は次の描画がまだ来ていることがある ── 1 フレーム待つ
+      await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r(null))));
+    }
+  }
+}
+
+async function clickRealOnce(page: Page, selector: string): Promise<void> {
   const el = page.locator(selector).first();
   await expect(el).toBeVisible();
   await el.scrollIntoViewIfNeeded(); // fold 下の要素を「覆われている」と誤診しない
