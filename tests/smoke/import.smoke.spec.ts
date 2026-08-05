@@ -818,12 +818,58 @@ test('🔴 可搬 HTML: 書き出したファイルが**単体で開いて読め
   await viewer.evaluate(() => window.dispatchEvent(new Event('beforeprint')));
   expect(await viewer.locator('#dtoc').evaluate((el) => (el as HTMLDetailsElement).open)).toBe(true);
 
-  // 全体を印刷 ── ⚠ ボタンは nav の中にあり、紙では nav が消える(上で確認済み)。
-  //    **押すのは画面**、確かめるのは紙 ── user の実際の順序と同じ
+  // ── 全体を印刷。
+  // 🔴 **観測点は「印刷が始まる瞬間」**(`beforeprint`)であって、押した直後ではない。
+  //    `window.print()` の振る舞いは **Chromium のビルドで違う**(2026-08-05 実測):
+  //      `chrome`(手元の /opt/pw-browsers/chromium)  … `beforeprint` のみ発火
+  //      `headless_shell`(**CI の playwright 既定**)  … `beforeprint` + `afterprint` を同期発火
+  //    後者では**押して戻った時点で既に片付いている**(= 正しい動作)。
+  //    「押した直後に組み上がっている」を assert した版は、手元だけ通って CI で落ちた。
   await viewer.emulateMedia({ media: 'screen' });
   await expect(viewer.locator('#all')).toBeHidden(); // 画面には出ていない
-  await viewer.locator('#printall').click();
-  await expect(viewer.locator('#all section')).toHaveCount(3); // 目次 + 2 件
+  await viewer.evaluate(() => {
+    // ⚠ 閲覧側の listener は boot 時に付いているので、あとから足すこちらが後に走る
+    //    = buildAll() の結果を見ることになる
+    (window as unknown as { __snap?: unknown }).__snap = null;
+    window.addEventListener('beforeprint', () => {
+      (window as unknown as { __snap?: unknown }).__snap = {
+        sections: document.querySelectorAll('#all section').length,
+        dataPrint: document.body.getAttribute('data-print'),
+        imgs: document.querySelectorAll('#all img').length,
+      };
+    });
+  });
+  await viewer.locator('#printall').click(); // 本物のクリック
+  // ⚠ 印刷は**画像が載ってから**始まる(組んだ直後ではない)── poll で待つ
+  await expect
+    .poll(async () => viewer.evaluate(() => (window as unknown as { __snap?: unknown }).__snap !== null))
+    .toBe(true);
+  const snap = (await viewer.evaluate(
+    () => (window as unknown as { __snap?: unknown }).__snap,
+  )) as { sections: number; dataPrint: string | null; imgs: number } | null;
+  expect(snap, '印刷が始まらなかった(beforeprint が来ていない)').not.toBeNull();
+  // 🔴 空振り防止 ── この fixture には添付画像が在る。**画像が組まれている**ことを
+  //    確かめないと、「画像が載るまで待つ」の検査そのものが何も測っていない
+  expect(snap!.imgs, 'この fixture の全件に画像が 1 枚も無い').toBeGreaterThan(0);
+  expect(snap!.sections, '印刷が始まる時点で全件が組み上がっていない').toBe(3); // 目次 + 2 件
+  expect(snap!.dataPrint).toBe('all');
+
+  // CSS は「その状態のときにどう出るか」。⚠ 紙では nav が消えてボタンを押せないので、
+  //    状態は evaluate で作り直す(作るのは同じ buildAll ── ここで見たいのは CSS のほう)。
+  //    ⚠ `window.print` は**呼ばれたことを数えるだけ**に差し替える ── 上のビルド差を
+  //      持ち込まないため。呼ばれない実装に退化したらここで落ちる
+  await viewer.evaluate(() => {
+    const w = window as unknown as { __printed: number };
+    w.__printed = 0;
+    window.print = () => {
+      w.__printed += 1;
+    };
+    document.getElementById('printall')!.click();
+  });
+  await expect
+    .poll(async () => viewer.evaluate(() => (window as unknown as { __printed: number }).__printed))
+    .toBe(1);
+  await expect(viewer.locator('#all section')).toHaveCount(3);
   await expect(viewer.locator('#all'), '画面に紙用の全件が出てしまう').toBeHidden();
   await viewer.emulateMedia({ media: 'print' });
   expect(await styleOf('main', 'display'), '全体印刷で main が残っている').toBe('none');

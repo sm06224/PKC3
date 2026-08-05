@@ -188,6 +188,22 @@ P4 assets → P5 revisions → P6 import/export → P7 v3.0.0(Pages product + PW
     「変異後の文字列が在り、変異前の文字列が消えた」ことを確かめてから** test を回す。
     ⚠ これは §「当たらなかった変異と生き延びた変異を区別する」の**別の顔**である ──
     当たらない原因は shell のクォートだけではなく、**検査対象が生成物であること**もある
+- 🔴 **CI と手元で別のブラウザが動いている**(2026-08-05)。`tests/smoke` の config は
+  同梱の `/opt/pw-browsers/chromium`(= フル Chromium)を優先し、無ければ playwright 既定に
+  落ちる ── **CI は後者 = `chromium_headless_shell`**。この 2 つは実挙動が違う:
+  `window.print()` が chrome では `beforeprint` のみ、headless_shell では
+  **`beforeprint` + `afterprint` を同期発火**する。おかげで「押した直後に組み上がっている」を
+  見ていた smoke が**手元で緑・CI で赤**になった(しかも CI 側が正しい)。
+  規律: 実ブラウザ依存の挙動に触れる spec は **両方のバイナリで通してから push する**
+  (`PKC3_CHROMIUM=/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell`)。
+  ⚠ そして観測点を**環境差に強い側**へ寄せる ── この件では「押した直後」ではなく
+  **`beforeprint`(印刷が始まる瞬間)**が、どちらのビルドでも成立する唯一の点だった
+- 🔴 **環境差の調査が本物のバグを見つけることがある**(同 2026-08-05)。上の件を
+  headless_shell で追ったら、`Not allowed to load local resource: blob:null/…` が出た ──
+  **画像の読み込みが終わる前に印刷が完了し、`afterprint` の revoke が読み込み中の
+  blob URL を消していた**(= 紙から画像が落ちる実バグ)。chrome では `afterprint` が
+  来ないので**永久に露見しなかった**。「CI だけで落ちる」を環境のせいにして
+  test 側だけ緩めていたら、バグごと埋めていた
 - 🔴 **書き込み権のあるサブエージェントを、自分の作業ツリーで並行に走らせない**
   (2026-08-04)。レビュー用に投げたエージェントが**私の編集中の file を変異させ、
   戻さずに終わった**(`// MUT-A: revoke removed` が `rasterize` の

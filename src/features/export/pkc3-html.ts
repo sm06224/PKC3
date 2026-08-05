@@ -421,11 +421,32 @@ try{
   }
   function doPrint(){if(typeof window.print==='function')window.print()}
 
+  /**
+   * 🔴 **画像が載るまで印刷を待つ**。組んだ直後に print() を呼ぶと、
+   * 画像の読み込みが終わる前に印刷が完了し、afterprint の revoke が
+   * **読み込み中の blob URL を消す** ── 紙から画像が落ちる
+   * (headless_shell で Not allowed to load local resource: blob:null/… として実測)。
+   * ⚠ 上限を置く ── 画像が返らないときに**永久に印刷できない**ほうが困る。
+   */
+  function whenImagesReady(root,done){
+    var imgs=root.querySelectorAll('img'),left=0,fired=false;
+    function fin(){if(!fired&&left===0){fired=true;done()}}
+    function dec(){left--;fin()}
+    for(var i=0;i<imgs.length;i++){
+      if(imgs[i].complete)continue;
+      left++;
+      imgs[i].addEventListener('load',dec);
+      imgs[i].addEventListener('error',dec);
+    }
+    setTimeout(function(){if(!fired){fired=true;done()}},5000);
+    fin();
+  }
+
   var pb=document.getElementById('print'),pa=document.getElementById('printall');
   pb.hidden=false;pb.onclick=function(){dropAll();doPrint()};
   pa.hidden=false;
   pa.textContent='全体を印刷('+d.entries.length+' 件)';
-  pa.onclick=function(){buildAll();doPrint()};
+  pa.onclick=function(){buildAll();whenImagesReady(all,doPrint)};
 
   d.entries.forEach(function(e,i){
     var b=document.createElement('button');
