@@ -830,7 +830,13 @@ test('🔴 フォルダ面は行の頭に種別、右端に更新日を出す', 
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
 
   await clickReal(page, '[data-pkc-region="browse-tabs"] [data-pkc-browse="filer"]');
-  const row = page.locator('[data-pkc-region="filer-table"] tbody tr').first();
+  // ⚠ **「最初の行」で掴まない** ── この spec は文脈を共有するので、先行 test が
+  //    作った行が先頭に来る。その行は時刻の ack がまだ届いていないことがあり、
+  //    日付の assert が**たまに落ちる**(実際に full run で 1 度落ちた)。
+  //    いま作った行を**題名で**指す
+  const row = page.locator('[data-pkc-region="filer-table"] tbody tr', {
+    hasText: 'フォルダ面で見る',
+  });
   await expect(row).toBeVisible();
 
   const m = await row.evaluate((tr) => {

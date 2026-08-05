@@ -143,9 +143,25 @@ button {
   height: 100%;
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.75;
+  /* 🔑 **太さは CSS px で決める**(P10)。viewBox 24 に 1.75 だと、実寸が
+   * 設定 13.3px で 0.97px / チップ 16px で 1.17px と**場所によって細さが違って**いた。
+   * `non-scaling-stroke` は外側の座標系で解釈するので、どこでも同じ 1.4px になる。
+   * ⚠ 正直な限界: これは pixel snap ではない ── 16px で完全に切れる線が要るなら
+   *   viewBox 16 の別表を持つしかない(今は太さと単純化で読ませている) */
+  stroke-width: 1.4;
+  vector-effect: non-scaling-stroke;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+/* 🔑 **塗りは 1 色 + 不透明度**(P10)。色相を増やさないので「地は無彩色」に反しない ──
+ * 中空の細線だけだと 13〜16px で泥になる、という**見やすさ**の問題を面で解く。 */
+[data-pkc-icon] > svg path[data-pkc-fill='solid'] {
+  fill: currentColor;
+  stroke: none;
+}
+[data-pkc-icon] > svg path[data-pkc-fill='soft'] {
+  fill: currentColor;
+  fill-opacity: 0.2;
 }
 
 /* 図案の枠 ── **幅を固定**する。書体ごとの字幅で並びがずれない
@@ -395,6 +411,46 @@ select:focus-visible {
   white-space: nowrap;
 }
 
+/* 🔑 **意味を持つ色は使う**(P10、user 指示 2026-08-05「ルールを変え、みやすく
+ * 使いやすいのを心がけて」)。消える操作は**危険色**で先に分かるべき情報である。
+ * ⚠ ボタン全体を塗らない ── 図案だけ色を持たせ、地は無彩色のまま */
+[data-pkc-action='delete-entry'] [data-pkc-icon],
+[data-pkc-action='purge-orphan-assets'] [data-pkc-icon],
+[data-pkc-action='purge-trash'] [data-pkc-icon] {
+  color: var(--danger);
+}
+
+/* 🔑 **種別は色でも分かる**(P10)。「何のノートか」は情報なので色を使ってよい。
+ * ⚠ 色相は `--fg` と混ぜて作る ── そうすると 9 テーマぶんの token を持たずに、
+ *   どのテーマでも地に対して十分な濃さになる(暗い地では明るく寄る)。
+ * ⚠ 混ぜ比率は **fg 2〜3 割**。最初 5.5 割でやったら oklab の明度が 0.35 まで落ちて
+ *   **色相がほとんど見えなかった**(実測)── 「色を使った」と言えるだけの無味な状態
+ * ⚠ 形でも区別できることが前提(色だけに頼らない)── 図案は別々に描いてある */
+[data-pkc-chip='text'] {
+  color: color-mix(in oklab, var(--fg) 25%, #2f6fd0);
+}
+[data-pkc-chip='textlog'] {
+  color: color-mix(in oklab, var(--fg) 25%, #b06a1f);
+}
+[data-pkc-chip='spreadsheet'] {
+  color: color-mix(in oklab, var(--fg) 25%, #1f7a5a);
+}
+[data-pkc-chip='folder'] {
+  color: color-mix(in oklab, var(--fg) 20%, #c39312);
+}
+[data-pkc-chip='attachment'] {
+  color: color-mix(in oklab, var(--fg) 25%, #7a5ac2);
+}
+[data-pkc-chip='todo'],
+[data-pkc-chip='form'] {
+  color: color-mix(in oklab, var(--fg) 25%, #b03a5a);
+}
+/* ⚠ 選んでいる行では**行の色に戻す** ── 選択の色より種別の色が強いと、
+ *   どれを選んでいるか分からなくなる(選択は種別より上位の情報) */
+[data-pkc-selected] [data-pkc-chip] {
+  color: inherit;
+}
+
 /* 種別のチップ ── **色が分類を担う**(裸の文字を本文の前に置かない)。
  * ⚠ renderer が `data-pkc-chip` を持つ要素を作る。CSS の `content` では出さない
  * (`::before` を行に当てると表のセル構造が壊れる ── 実測で踏んだ)。 */
@@ -585,13 +641,16 @@ select:focus-visible {
   right: 0;
   font-size: 11.5px;
   padding: 0 var(--s2);
-  opacity: 0.35;
+  /* 🔴 **opacity で薄めない**(P10)。0.35 にしていた頃は、1px の線が 35% の
+   * 濃さになって**図案が事実上見えなかった**(枠も文字も一緒に薄まる)。
+   * 色で退がらせる ── `--muted` は全テーマでコントラスト 4.5:1 を pin 済み */
+  color: var(--muted);
   /* ⚠ 図の上に浮くので**地を必ず塗る**(透過だと図の線と重なって読めない) */
   background: var(--surface);
 }
 [data-pkc-mermaid-src]:hover [data-pkc-field='diagram-save'],
 [data-pkc-field='diagram-save']:focus-visible {
-  opacity: 1;
+  color: var(--fg);
 }
 
 /* ── 書式パネル(P8 段⑥)──────────────────────────

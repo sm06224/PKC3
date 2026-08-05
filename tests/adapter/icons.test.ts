@@ -51,19 +51,62 @@ describe('図案は単色の線画である', () => {
     }
   });
 
-  it('🔴 図案に色を書いていない(currentColor に任せる)', () => {
-    // ⚠ ここが方針の本体 ── 属性で色を持つと、テーマや選択中の行で追従しない
+  it('🔴 図案に色を書いていない(値ではなく意味の名前だけ持つ)', () => {
+    // 🔑 P10 で**塗りは使えるようにした**が、色の**値**は CSS が決める。
+    //    ここに色を書くと、テーマや選択中の行で追従しない
     for (const name of ALL_NAMES) {
       const svg = svgIcon(name);
       for (const el of [svg, ...svg.querySelectorAll('*')]) {
-        for (const attr of ['fill', 'stroke', 'color', 'style']) {
+        for (const attr of ['fill', 'stroke', 'color', 'style', 'fill-opacity']) {
           expect(
             el.getAttribute(attr),
-            `${name} が ${attr} を持っている(色は CSS の currentColor が決める)`,
+            `${name} が ${attr} を持っている(色は CSS が決める)`,
           ).toBeNull();
+        }
+        const marker = el.getAttribute('data-pkc-fill');
+        if (marker !== null) {
+          // ⚠ 意味の名前だけ(色名・色値が紛れ込んでいないこと)
+          expect(['solid', 'soft'], `${name} の塗りの名前が未知: ${marker}`).toContain(marker);
         }
       }
     }
+  });
+
+  it('🔴 塗りの名前が CSS で実際に描かれる(死んだ印を置かない)', () => {
+    const css = readFileSync('src/styles/app.css', 'utf-8');
+    const used = new Set<string>();
+    for (const name of ALL_NAMES)
+      for (const p of svgIcon(name).querySelectorAll('[data-pkc-fill]'))
+        used.add(p.getAttribute('data-pkc-fill') ?? '');
+    // ⚠ 使っている印が CSS に無ければ、その path は**何も塗られない**
+    //    (= 中空の細線に戻る。見やすさのための塗りが黙って無効化される)
+    expect(used.size, '塗りを使っている図案が 1 つも無い(前提が崩れている)').toBeGreaterThan(0);
+    for (const marker of used)
+      expect(css, `data-pkc-fill="${marker}" を描く規則が CSS に無い`).toContain(
+        `path[data-pkc-fill='${marker}']`,
+      );
+  });
+
+  it('🔴 線の太さを CSS px で決めている(場所によって細さが変わらない)', () => {
+    const css = readFileSync('src/styles/app.css', 'utf-8');
+    // viewBox 24 の中の値で決めると、13.3px の 設定 と 16px のチップで
+    // 0.97px / 1.17px と散る ── `non-scaling-stroke` が外側の座標系で揃える
+    expect(css, '`non-scaling-stroke` が無い(太さが場所で変わる)').toContain(
+      'vector-effect: non-scaling-stroke',
+    );
+  });
+
+  it('🔴 危険な操作と種別に色が付いている(意味を持つ色は使う)', () => {
+    const css = readFileSync('src/styles/app.css', 'utf-8');
+    // 消える操作は先に分かるべき情報である
+    expect(css).toMatch(/\[data-pkc-action='delete-entry'\][^{]*\{[^}]*--danger/s);
+    // 種別は「何のノートか」= 情報。⚠ 図案を持つ種別すべてに色がある
+    for (const archetype of Object.keys(ARCHETYPE_ICONS))
+      expect(css, `種別 ${archetype} のチップに色が無い`).toContain(
+        `[data-pkc-chip='${archetype}']`,
+      );
+    // ⚠ 選択中の行では行の色に戻す(選択は種別より上位の情報)
+    expect(css).toContain('[data-pkc-selected] [data-pkc-chip]');
   });
 
   it('🔴 読み上げに出さない(意味は隣の文字が持つ)', () => {
