@@ -3,6 +3,7 @@
  * attachment view(P4a)の表示と **lend/dispose 規律**(生成物のライフサイクル
  * 終端での即破棄 ── user 指示 2026-07-27)の pin。
  */
+import { stubStamps } from '../helpers/store-stamps';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -43,7 +44,7 @@ function setup(bodies: Record<string, string>, lender: AssetLender) {
   connectStoreEffects(d, {
     ...stubRevisionOps(),
     getBody: async (lid) => bodies[lid] ?? null,
-    persistEntry: async () => {},
+    persistEntry: async () => stubStamps(),
     deleteEntry: async () => {},
   });
   d.dispatch({

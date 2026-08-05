@@ -12,6 +12,7 @@
  * ⚠ 観測点を textarea の `value` だけにしない ── それだと「書き戻したが state に
  * 届いていない」実装が緑で通り、**保存すると書式が消える**。
  */
+import { stubStamps } from '../helpers/store-stamps';
 import { describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
@@ -56,6 +57,7 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
     deleteEntry: async () => {},
     persistEntry: async (e) => {
       persisted.push(e);
+      return stubStamps();
     },
   });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas, relations: [] });

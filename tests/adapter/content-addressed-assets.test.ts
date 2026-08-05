@@ -9,6 +9,7 @@
  * 「1 部しか書かれない」を**経路をまたいで**確かめる:
  * 取込 × 再取込 / 取込内の重複 / 取込 → 添付 / 添付 → 取込。
  */
+import { stubStamps } from '../helpers/store-stamps';
 import { describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import {
@@ -68,7 +69,7 @@ function shared() {
   connectStoreEffects(d, {
     ...stubRevisionOps(),
     getBody: async () => null,
-    persistEntry: async () => {},
+    persistEntry: async () => stubStamps(),
     deleteEntry: async () => {},
   });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });

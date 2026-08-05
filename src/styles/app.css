@@ -54,7 +54,10 @@ body {
  * 編集すると本文以外が全部消えていた(「1 画面で完結」の逆)。 */
 [data-pkc-region='shell'] {
   display: grid;
-  grid-template-columns: minmax(200px, 18vw) minmax(0, 1fr) minmax(220px, 20vw);
+  /* 🔑 右列は **詰める**(P9 段②)。20vw だと Full HD で 384px あり、そこに 4 行しか
+   * 載っていなかった(「要らない所が広い」)。15vw = 1920 で 288px / 1440 で 216px。
+   * ⚠ 下限 220px は残す ── 1100px 以下では 2 列に畳むので、そこまでの間の保険 */
+  grid-template-columns: minmax(200px, 18vw) minmax(0, 1fr) minmax(220px, 15vw);
   /* ⚠ notices と update は**別の行**。同じ area に載せると、両方出たとき重なる */
   grid-template-rows: auto 1fr auto auto auto;
   grid-template-areas:
@@ -242,8 +245,17 @@ select:focus-visible {
   background: var(--border);
   flex: none;
 }
-[data-pkc-region='collection-bar'] button {
+/* ⚠ 余りは**地の色**で埋める(上の書式パネルと同じ理由) */
+[data-pkc-region='collection-bar']::after {
+  content: '';
   flex: 1 1 auto;
+  background: var(--surface);
+}
+[data-pkc-region='collection-bar'] button {
+  /* ⚠ **伸ばさない**(P9 段②)。`flex: 1 1 auto` は行の余りを**均等に**配るので、
+   * 3 個の行と 2 個の行で 1 個あたりの取り分が変わり、同じボタンが行によって
+   * 98px / 136px と**別の幅**になっていた(実測)。伸ばさなければ自然な幅で揃う */
+  flex: 0 1 auto;
   border: none;
   border-radius: 0;
   justify-content: flex-start;
@@ -347,6 +359,16 @@ select:focus-visible {
   white-space: nowrap;
   flex: 1;
   min-width: 0;
+}
+/* 行の更新日(P9 段②)。⚠ **行の高さを増やさない** ── 題名の右端に細字で置く。
+ * 数字は等幅にして桁を揃える(業務画面の作法。ばらつくと走査できない)。 */
+[data-pkc-entry] [data-pkc-field='when'] {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* 種別のチップ ── **色が分類を担う**(裸の文字を本文の前に置かない)。
@@ -562,6 +584,15 @@ select:focus-visible {
   border-bottom: none;
   margin-bottom: 0;
 }
+/* ⚠ **余りを地の色で埋める**(P9 段②)。この帯は `gap: 1px` で区切り線を作るため
+ * 背景が**線の色**になっている ── ボタンが埋まらない残り(Full HD で 50.8%)が
+ * そのまま線色のベタ塗りになって「作りかけ」に見えていた。
+ * 伸びる空要素を 1 つ置いて、そこだけ地の色にする(DOM は増やさない) */
+[data-pkc-region='format-bar']::after {
+  content: '';
+  flex: 1 1 auto;
+  background: var(--surface);
+}
 [data-pkc-region='format-bar'] button {
   border: none;
   border-radius: 0;
@@ -592,6 +623,14 @@ select:focus-visible {
 [data-pkc-region='editor-split'] [data-pkc-field='editor-body'] {
   border: none;
   border-radius: 0;
+}
+
+/* ⚠ **編集欄の焦点の輪は細く**(P9 段②)。共通の `:focus-visible` は 2px の
+ * accent で、編集欄は開くと同時に `focus()` されるので**常時 2px の緑の枠**が
+ * 585x888px を囲っていた ── 「地は無彩色、色は情報にだけ」に対して面積が大きい。
+ * ⚠ 消さない(焦点の在処は情報である)。器の 1px 枠と重ならない太さにする */
+[data-pkc-region='editor-split'] [data-pkc-field='editor-body']:focus-visible {
+  outline-width: 1px;
 }
 
 /* ⚠ **残りの高さを埋める**。以前は固定高で、下に 280px の死に領域があった */
@@ -662,6 +701,24 @@ select:focus-visible {
 /* ── markdown ───────────────────────────────────── */
 .pkc-md-rendered {
   overflow-wrap: anywhere;
+}
+
+/* 🔑 **本文の読み幅に上限を置く**(P9 段②)。Full HD では 1 行が 1172px =
+ * 全角 90 文字まで伸びていて、読み返すのが辛かった。
+ *
+ * ⚠ **器(`detail-body` や pane)に掛けてはいけない** ── 図のラスタ幅は
+ * `mermaid-hydrate.ts` が **host の親の clientWidth** から決めるので、器を狭めると
+ * **全部の図が焼き直され、キャッシュ鍵も変わる**(調査で判明)。だから
+ * **本文ブロック(兄弟)にだけ**当てる。
+ * ⚠ 単位に `em` を使わない ── 見出しは `1.35em` などで拡大するので、
+ * `em` 指定だと見出しだけ上限が広がる(h1 で 1.35 倍)。
+ * ⚠ 表・図・コード・iframe・添付は**上限の対象外**(横に広いほど読める)。
+ *   ここは allow-list 方式にしてある ── 新しいブロックが増えたとき、
+ *   「上限が掛からない」側に倒れる(= 焼き直しも崩れも起きない安全な向き)。
+ *
+ * 42rem = 672px。本文 13px なので全角 **約 51 文字**(日本語の可読幅は 35〜50 文字)。 */
+[data-pkc-view-pane='detail'] [data-pkc-field='detail-body'] > :is(p, h1, h2, h3, h4, h5, h6, ul, ol, dl, blockquote, hr, .footnotes, .pkc-details, .pkc-format-block, .pkc-toc-formal, .pkc-toc-preview, .pkc-section-break, .pkc-blank-line, .pkc-region-frontmatter, .pkc-region-body) {
+  max-width: var(--read-w);
 }
 .pkc-md-rendered h1,
 .pkc-md-rendered h2,

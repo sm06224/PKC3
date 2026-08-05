@@ -3,6 +3,7 @@
  * フォルダの探し方(P3-7b / P8 段⑤)の end-to-end: binder(実クリック)→ BrowseRouter →
  * breadcrumb / explorer table。read-only ビュー(relation 作成 UI なし)。
  */
+import { stubStamps } from '../helpers/store-stamps';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta, Relation } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -63,7 +64,7 @@ function setup(metas: EntryMeta[], relations: Relation[]) {
   connectStoreEffects(d, {
     ...stubRevisionOps(),
     getBody: async () => '',
-    persistEntry: async () => {},
+    persistEntry: async () => stubStamps(),
     deleteEntry: async () => {},
   });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas, relations });

@@ -1,3 +1,4 @@
+import { stubStamps } from '../helpers/store-stamps';
 import { describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
@@ -462,6 +463,7 @@ describe('effect layer: serialized store I/O', () => {
       async deleteEntry() {},
       async persistEntry(entry) {
         log.push(`put:${entry.lid}:${entry.body}`);
+        return stubStamps();
       },
     };
   }
@@ -503,7 +505,9 @@ describe('effect layer: serialized store I/O', () => {
         return 'recovered';
       },
       async deleteEntry() {},
-      async persistEntry() {},
+      async persistEntry() {
+        return stubStamps();
+      },
     };
     const off = connectStoreEffects(d, store);
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', 1)], relations: [] });
@@ -532,6 +536,7 @@ describe('effect layer: serialized store I/O', () => {
       async persistEntry(e) {
         if (failNext) throw new Error('disk full');
         persisted.push(e.body);
+        return stubStamps();
       },
     };
     const off = connectStoreEffects(d, store);
@@ -606,6 +611,7 @@ describe('effect layer: serialized store I/O', () => {
       async deleteEntry() {},
       async persistEntry(entry) {
         persisted.push(entry);
+        return stubStamps();
       },
     });
     d.dispatch({
@@ -642,7 +648,9 @@ describe('effect layer: serialized store I/O', () => {
         return 'late';
       },
       async deleteEntry() {},
-      async persistEntry() {},
+      async persistEntry() {
+        return stubStamps();
+      },
     });
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', 1)], relations: [] });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });

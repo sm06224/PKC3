@@ -50,15 +50,16 @@ export function createStorePort(client: StoreClient, cid: string): StorePort {
     getBodies: (lids) => client.request({ op: 'getBodies', cid, lids }),
     listBodies: (after, maxBytes) =>
       client.request({ op: 'listBodies', cid, maxBytes, ...(after ? { after } : {}) }),
-    persistEntry: async (entry, opts) => {
-      await client.request({
+    // 🔑 **刻まれた時刻をそのまま返す**(P9 段①)。捨てると主スレッドは次の boot まで
+    // 作成・更新を知らず、情報列が終日「—」になる(実際にそうなっていた)
+    persistEntry: (entry, opts) =>
+      client.request({
         op: 'upsertEntry',
         cid,
         entry,
         checkpoint: opts?.checkpoint === true,
         keepLatest: REVISION_KEEP_LATEST,
-      });
-    },
+      }),
     /**
      * ノートを消す。⚠ **アプリの保存領域はここでは消さない**(P8 段⑳)。
      *

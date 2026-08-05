@@ -134,3 +134,15 @@ export interface EntryUpsert {
   date: string | null;
   archived: boolean;
 }
+
+/**
+ * 書込のときに **DB が刻んだ** 時刻(P9 段①)。
+ *
+ * 🔑 **主スレッドで作らない**。`datetime('now')` を打つのは worker の `UPSERT_SQL`
+ * だけなので、主スレッドが自分で now を作ると **DB に無い値を画面に出す**ことになる。
+ * ⚠ 形は sqlite の `datetime('now')`(`YYYY-MM-DD HH:MM:SS`、UTC)。
+ */
+export interface EntryStamps {
+  createdAt: string | null;
+  updatedAt: string | null;
+}

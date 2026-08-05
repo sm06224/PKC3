@@ -4,6 +4,7 @@
  * binder(実クリック)→ dispatcher → CenterRouter → fake store。
  * 「state mutation → consumer 観測点」まで通す(PKC2 Testing 規約)。
  */
+import { stubStamps } from '../helpers/store-stamps';
 import { describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
@@ -62,6 +63,7 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
     persistEntry: async (e) => {
       persisted.push(e);
       store[e.lid] = e.body;
+      return stubStamps();
     },
   });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas, relations: [] });
@@ -200,6 +202,7 @@ describe('kanban view (P3-6)', () => {
       persistEntry: async (e) => {
         if (failNext) throw new Error('flaky');
         persisted.push(e);
+        return stubStamps();
       },
     });
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('e1')], relations: [] });

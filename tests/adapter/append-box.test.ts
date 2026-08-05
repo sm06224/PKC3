@@ -13,6 +13,7 @@
  *  追記が着く → 保存 → **追記が黙って消える**」。
  * ⚠ この test の本丸はそこ ── 「追記できる」だけを見ると、消える経路は素通りする。
  */
+import { stubStamps } from '../helpers/store-stamps';
 import { describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
@@ -77,6 +78,7 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
       }
       persisted.push(e);
       disk[e.lid] = e.body;
+      return stubStamps();
     },
   });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas, relations: [] });

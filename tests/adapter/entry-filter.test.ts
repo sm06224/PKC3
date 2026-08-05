@@ -10,6 +10,7 @@
  *   絞り込み語に一致しないため)。Esc を押すと未編集 cancel の掃除で消える
  * - M-3: 「りんご」と書かれた欄の隣で、ファイラだけが全件を出していた
  */
+import { stubStamps } from '../helpers/store-stamps';
 import { describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -62,7 +63,7 @@ function setup(metas: EntryMeta[]) {
     ...stubRevisionOps(),
     getBody: async (lid) => bodies[lid] ?? null,
     deleteEntry: async () => {},
-    persistEntry: async () => {},
+    persistEntry: async () => stubStamps(),
   });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas, relations: [] });
   const rows = (): string[] =>

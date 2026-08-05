@@ -28,13 +28,10 @@ import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
 // 🔑 種別の呼び名は **1 本**(P8 段⑲)── かつてここだけ独自表を持ち、
 //    同じノートがフォルダ画面では「シート」、他の全画面では「表」と出ていた
 import { archetypeLabel } from './sidebar';
+// ⚠ 日付の切り方は `features/datetime/stored-date` が正本(情報列・一覧の行と共有)。
+//    ここに 3 つ目の parse を置いていたので寄せた(規則は 1 つ ── CLAUDE.md)
+import { formatStoredDate } from '@features/datetime/stored-date';
 
-/** SQLite の UTC 文字列を「日付だけ」に落とす(見出しが「日」なので)。 */
-function shortDate(value: string | null): string {
-  if (!value) return '';
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
-  return m ? `${m[1]}/${m[2]}/${m[3]}` : value;
-}
 
 
 export class FilerRenderer {
@@ -148,7 +145,7 @@ export class FilerRenderer {
       const updated = document.createElement('td');
       // ⚠ 生の SQLite UTC 文字列(`2026-08-03 13:11:39`)を出さない。
       // 見出しが「更新日」なのに時刻まで出ていた ── 日付だけに落とす
-      updated.textContent = shortDate(m.updatedAt);
+      updated.textContent = formatStoredDate(m.updatedAt, '');
       tr.append(name, kind, updated);
       tbody.append(tr);
       this.rows.set(m.lid, tr);

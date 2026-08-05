@@ -12,6 +12,7 @@ import type { EntryMeta } from '@core/model/entry-meta';
 import type { AppState } from '@adapter/state/app-state';
 import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
 import { ARCHETYPE_ICONS } from './icons';
+import { formatListDate, formatStoredDate } from '@features/datetime/stored-date';
 
 export class SidebarRenderer {
   private readonly list: HTMLElement;
@@ -151,14 +152,39 @@ export class SidebarRenderer {
     const title = document.createElement('span');
     title.setAttribute('data-pkc-field', 'title');
     title.textContent = meta.title;
-    row.append(chip, title);
+    /**
+     * 🔑 **行は走査できること**(P9 段②。業務画面の作法)。
+     *
+     * 題名だけの行は目で追えない ── 15 件でも「どれが最近か」が分からず、
+     * 500 件では一覧が機能しない。⚠ **行の高さは増やさない**(密度を落とさない)
+     * ので、題名の右端に細字で置く。
+     * ⚠ 出すのは**更新**(探すときに見るのはこちら)。無ければ作成で代替する。
+     */
+    const when = document.createElement('span');
+    when.setAttribute('data-pkc-field', 'when');
+    this.paintWhen(when, meta);
+    row.append(chip, title, when);
     row.setAttribute('data-pkc-archetype', meta.archetype);
     return row;
+  }
+
+  /** 更新(無ければ作成)を細字で。⚠ 生の値は `title` 属性に置く。 */
+  private paintWhen(el: HTMLElement, meta: EntryMeta): void {
+    const raw = meta.updatedAt ?? meta.createdAt;
+    el.textContent = formatListDate(raw, new Date().getFullYear());
+    // 年まで見たいときは hover で分かるようにする(行の幅は食わない)
+    const full = formatStoredDate(raw, '');
+    if (full) el.title = meta.updatedAt ? `更新 ${full}` : `作成 ${full}`;
+    else el.removeAttribute('title');
   }
 
   private patchRow(row: HTMLLIElement, meta: EntryMeta): void {
     const title = row.querySelector('[data-pkc-field="title"]');
     if (title && title.textContent !== meta.title) title.textContent = meta.title;
+    // ⚠ **更新側にも書く** ── ここを忘れると、保存で時刻が動いても行は古いまま
+    //    (作成側だけ直して「出た」と誤認する型の事故)
+    const when = row.querySelector<HTMLElement>('[data-pkc-field="when"]');
+    if (when) this.paintWhen(when, meta);
     if (row.getAttribute('data-pkc-archetype') !== meta.archetype) {
       row.setAttribute('data-pkc-archetype', meta.archetype);
       const chip = row.querySelector('[data-pkc-chip]');

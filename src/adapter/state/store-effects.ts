@@ -6,7 +6,7 @@
  * 直列化する。worker handler が将来 async 化しても、app 側から見た op 順序は
  * ここで保証される(「init 以外は同期」という暗黙 invariant に依存しない)。
  */
-import type { EntryUpsert } from '@adapter/platform/storage/schema';
+import type { EntryStamps, EntryUpsert } from '@adapter/platform/storage/schema';
 import { extractMeta } from '@features/flavor';
 import { withTodoStatus } from '@features/flavor/todo-flavor';
 import { appendBlock } from '@features/markdown/text-ops';
@@ -46,7 +46,7 @@ export interface StorePort {
    * `checkpoint: true` = 変更前の body を履歴に 1 件積む。既定(amend)は
    * 履歴を伸ばさず鎖の頭を張り替えるだけ ── toggle / rename はこちら。
    */
-  persistEntry(entry: EntryUpsert, opts?: { checkpoint?: boolean }): Promise<void>;
+  persistEntry(entry: EntryUpsert, opts?: { checkpoint?: boolean }): Promise<EntryStamps>;
   /** worker 側で relations の同 tx 掃除 + trash snapshot(P5a)。冪等。 */
   deleteEntry(lid: string): Promise<void>;
   listRevisionMetas(entryLid: string): Promise<
@@ -87,6 +87,25 @@ export function connectStoreEffects(
     queue = queue.then(op, op);
   };
 
+  /**
+   * 🔑 **書込が返した時刻を state へ流す**(P9 段①)。
+   *
+   * ⚠ `persistEntry` を呼ぶ**すべての経路**がこれを通ること ── 通し忘れた経路だけ
+   * 情報列が「—」に戻る(それが元のバグだった)。`tests/adapter/entry-timestamps.test.ts`
+   * が経路ごとに pin している。
+   * ⚠ 呼ぶのは **meta を差し替える action の後** ── `ENTRY_RESTORED` のように
+   * meta を丸ごと置き換える action が後に来ると、刻んだ時刻が消える
+   */
+  const stamp = (lid: string, s: EntryStamps): void => {
+    if (disposed) return;
+    dispatcher.dispatch({
+      type: 'ENTRY_STAMPED',
+      lid,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+    });
+  };
+
   const unsubscribe = dispatcher.onEvent((ev) => {
     switch (ev.type) {
       case 'REQUEST_BODY':
@@ -120,13 +139,16 @@ export function connectStoreEffects(
         enqueue(async () => {
           if (disposed) return;
           try {
-            await store.persistEntry(ev.entry, { checkpoint: ev.checkpoint === true });
+            const stamps = await store.persistEntry(ev.entry, {
+              checkpoint: ev.checkpoint === true,
+            });
             if (!disposed)
               dispatcher.dispatch({
                 type: 'BODY_PERSISTED',
                 lid: ev.entry.lid,
                 body: ev.entry.body,
               });
+            stamp(ev.entry.lid, stamps);
           } catch (e) {
             if (!disposed) dispatcher.dispatch({ type: 'SYS_ERROR', error: String(e) });
           }
@@ -161,7 +183,7 @@ export function connectStoreEffects(
               return;
             }
             const ext = extractMeta(ev.archetype, body);
-            await store.persistEntry({
+            const stamps = await store.persistEntry({
               lid: ev.lid,
               title: ev.title,
               archetype: ev.archetype,
@@ -171,6 +193,7 @@ export function connectStoreEffects(
               date: ext.date,
               archived: ext.archived,
             });
+            stamp(ev.lid, stamps);
           } catch (e) {
             if (!disposed)
               dispatcher.dispatch({ type: 'OP_FAILED', error: String(e) });
@@ -203,7 +226,7 @@ export function connectStoreEffects(
             const next = spliceFrontmatterKeys(body, ev.updates);
             if (next === body) return fail(); // 変わらないなら書かない(ロックは解く)
             const ext = extractMeta(ev.archetype, next);
-            await store.persistEntry({
+            const stamps = await store.persistEntry({
               lid: ev.lid,
               title: ev.title,
               archetype: ev.archetype,
@@ -217,6 +240,7 @@ export function connectStoreEffects(
             // ⚠ 書いたら**その場で読み直す** ── 読み直さないと、押した結果が
             //    ランチャーに出るのが「次にタブを開き直したとき」になる
             dispatcher.dispatch({ type: 'APP_TILE_SAVED', lid: ev.lid, gen: ev.gen, body: next });
+            stamp(ev.lid, stamps);
           } catch (e) {
             if (!disposed)
               dispatcher.dispatch({
@@ -343,7 +367,7 @@ export function connectStoreEffects(
             const ext = extractMeta(ev.archetype, rev.body);
             // 前進変異(P5 設計 §1): checkpoint で「現在の disk body」が履歴に
             // 積まれてから revision 内容が書かれる ── 復元の取り消しも履歴から戻れる
-            await store.persistEntry(
+            const stamps = await store.persistEntry(
               {
                 lid: ev.lid,
                 title,
@@ -373,6 +397,9 @@ export function connectStoreEffects(
                 },
                 body: rev.body,
               });
+            // ⚠ `ENTRY_RESTORED` は meta を丸ごと置き換える(createdAt: null)ので、
+            //    刻むのは**その後** ── 前に置くと消える
+            stamp(ev.lid, stamps);
           } catch (e) {
             if (!disposed)
               dispatcher.dispatch({
@@ -424,7 +451,7 @@ export function connectStoreEffects(
             const archetype = rev.archetype ?? 'text';
             const title = rev.title ?? '(無題)';
             const ext = extractMeta(archetype, rev.body);
-            await store.persistEntry({
+            const stamps = await store.persistEntry({
               lid: ev.entryLid,
               title,
               archetype,
@@ -451,6 +478,8 @@ export function connectStoreEffects(
                 },
                 body: rev.body,
               });
+            // ⚠ `ENTRY_RESTORED` の後(meta を置き換えるため)
+            stamp(ev.entryLid, stamps);
           } catch (e) {
             if (!disposed)
               dispatcher.dispatch({
@@ -499,7 +528,7 @@ export function connectStoreEffects(
             const newBody = appendBlock(body, ev.heading, ev.text);
             if (newBody === body) return fail('追記する内容がありません');
             const ext = extractMeta(ev.archetype, newBody);
-            await store.persistEntry({
+            const stamps = await store.persistEntry({
               lid: ev.lid,
               title: ev.title,
               archetype: ev.archetype,
@@ -519,6 +548,7 @@ export function connectStoreEffects(
               date: ext.date,
               archived: ext.archived,
             });
+            stamp(ev.lid, stamps);
           } catch (e) {
             fail(`追記を保存できませんでした: ${String(e)}`);
           }
@@ -543,7 +573,7 @@ export function connectStoreEffects(
             // 原文 splice(本文 byte 無傷)→ 唯一の抽出経路 → 行全体 upsert
             const newBody = withTodoStatus(body, ev.nextStatus);
             const ext = extractMeta('todo', newBody);
-            await store.persistEntry({
+            const stamps = await store.persistEntry({
               lid: ev.lid,
               title: ev.title,
               archetype: 'todo',
@@ -562,6 +592,7 @@ export function connectStoreEffects(
                 date: ext.date,
                 archived: ext.archived,
               });
+            stamp(ev.lid, stamps);
           } catch (e) {
             // toggle の失敗は非致命(local state は動いておらず、再クリックが
             // retry)── phase を落として app を止めない(P3-6b review #1)

@@ -723,3 +723,87 @@ test('🔴 設定を開いても、ノートを押せば戻る / もう一度押
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * P9 段②: **区画が仕事をしている**。
+ *
+ * 🔴 直したのは「要らない所が広く、要る所が空いている」状態である。実測(Full HD):
+ * 右列 384px に 4 行(うち 2 行は空欄)/ 一覧の行は題名だけ / 本文の 1 行が 1172px。
+ *
+ * ⚠ ここは**実ブラウザでしか見えない**(happy-dom は CSS の折り返しも
+ * `max-width` の実効値も計算しない ── 生成 ≠ 描画)。
+ */
+test('🔴 本文に読み幅の上限が効き、表と図は対象外である', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+
+  // 長い段落 + 表 + 図を 1 件に入れる(3 つの振る舞いを 1 回で見る)
+  const long = 'あ'.repeat(400);
+  const body = [
+    long,
+    '',
+    '| a | b |',
+    '| --- | --- |',
+    '| 1 | 2 |',
+    '',
+    '```mermaid',
+    'graph TD',
+    '  A["始め"] --> B["終わり"]',
+    '```',
+    '',
+  ].join('\n');
+  await page.fill('[data-pkc-field="editor-body"]', body);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-field="detail-body"]')).toBeVisible();
+
+  const m = await page.evaluate(() => {
+    const host = document.querySelector('[data-pkc-field="detail-body"]');
+    const p = host?.querySelector('p');
+    const table = host?.querySelector('table');
+    const w = (e: Element | null | undefined): number =>
+      e ? Math.round(e.getBoundingClientRect().width) : -1;
+    return { body: w(host), p: w(p), table: w(table) };
+  });
+
+  // ① 段落は器より**明確に狭い**(上限が効いている)
+  expect(m.body, '本文の器が細すぎる(前提が崩れている)').toBeGreaterThan(900);
+  expect(m.p, `段落が器と同じ幅(${m.p}px)── 上限が効いていない`).toBeLessThan(m.body - 200);
+  expect(m.p, '段落が狭すぎる(読める幅を割っている)').toBeGreaterThan(400);
+
+  // ② 表は上限の**対象外**(横に広いほど読める)。⚠ ここが無いと
+  //    「器ごと狭める」実装との区別がつかない ── 図の焼き直しを招く形である
+  expect(m.table, '表が読み幅の上限に巻き込まれている').toBeGreaterThan(-1);
+
+  // ③ 🔴 **図の焼き幅は器の幅から決まる**(`mermaid-hydrate` が親の clientWidth を読む)。
+  //    上限を器に掛けると全部の図が焼き直され、キャッシュ鍵も変わる ── そうなっていないこと
+  const parentWidth = await page.evaluate(() => {
+    const h = document.querySelector('[data-pkc-mermaid-src]');
+    return h?.parentElement?.clientWidth ?? -1;
+  });
+  expect(parentWidth, '図の親が読み幅まで狭められている(器に上限を掛けている)').toBeGreaterThan(
+    900,
+  );
+
+  expect(errors).toEqual([]);
+});
+
+test('🔴 一覧の行に更新日が出て、行の高さは増えていない', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', '日付の出る行');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+  const row = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first();
+  const when = row.locator('[data-pkc-field="when"]');
+  // ⚠ 「要素が在る」で止めない ── **日付として読める**ことまで見る
+  await expect(when).toHaveText(/^\d{2}\/\d{2}$|^\d{4}\/\d{2}\/\d{2}$/);
+  const box = await row.boundingBox();
+  expect(box, '行が画面に無い').not.toBeNull();
+  // 業務画面の密度を落とさない(--row-h は 26px)
+  expect(box!.height, `行が高くなっている(${box!.height}px)`).toBeLessThanOrEqual(30);
+  expect(errors).toEqual([]);
+});

@@ -2,6 +2,7 @@
  * 添付取込(P4a)の unit: File → Blob 直 put + meta 同時書き + entry 作成。
  * fake deps で put/list を記録し、dedupe / quota / mime fallback の縁を pin。
  */
+import { stubStamps } from '../helpers/store-stamps';
 import { describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
@@ -30,6 +31,7 @@ function harness(estimate?: AttachDeps['estimate']) {
     getBody: async () => null,
     persistEntry: async (e) => {
       persisted.push({ lid: e.lid, body: e.body });
+      return stubStamps();
     },
     deleteEntry: async () => {},
   });
