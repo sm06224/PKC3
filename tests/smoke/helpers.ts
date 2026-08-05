@@ -37,8 +37,12 @@ export function collectPageErrors(page: Page): string[] {
  * playwright が落ちるので、それ自体が「封印が効いている」の観測点になる。
  */
 export async function createEntry(page: Page, archetype: string): Promise<void> {
-  await page.locator('[data-pkc-field="create-kind"]').selectOption(archetype);
-  await clickReal(page, '[data-pkc-region="create-bar"] [data-pkc-action="create-entry"]');
+  // 🔴 **user と同じ手順**(P10 で分割ボタンへ)── ▼ を押して種類を選び、本体を押す。
+  // ⚠ `selectOption` だけでは足りない ── 本体のボタンが `data-pkc-archetype` を持ち、
+  //    binder はそちらを先に見るので、select だけ変えると別の種類が出来る
+  await clickReal(page, '[data-pkc-field="create-pick"]');
+  await clickReal(page, `[data-pkc-region="create-menu"] [data-pkc-archetype="${archetype}"]`);
+  await clickReal(page, '[data-pkc-field="create-run"]');
 }
 
 /**

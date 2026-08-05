@@ -128,6 +128,8 @@ const ICON_PATHS: Readonly<Record<string, readonly IconPath[]>> = {
   form: [{ d: 'M9.5 3h5v3h-5z', fill: 'solid' }, 'M6 5.5h12V21H6z', 'M9 13h6'],
   /** 起動 ── 再生の三角(外に飛ばすのではなく「動かす」)。 */
   play: [{ d: 'M8 5.5l11 6.5-11 6.5z', fill: 'solid' }],
+  /** 下向きの山(種類を選ぶ)。 */
+  'chevron-down': ['M6.5 9.5l5.5 5.5 5.5-5.5'],
   /** 種類が分からないもの。 */
   dot: [{ d: 'M9.5 12a2.5 2.5 0 105 0 2.5 2.5 0 00-5 0z', fill: 'solid' }],
 };
@@ -160,11 +162,22 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'delete-entry': 'trash',
   /** 図を保存(`mermaid-hydrate` が手組みしていた ⬇ をここへ寄せた)。 */
   'save-diagram': 'arrow-down',
+  /** 種類を選ぶ(分割ボタンの ▼)。 */
+  'create-menu': 'chevron-down',
   /** 起動(囲いの中)。 */
   'launch-asset': 'play',
   /** 素のまま起動(同一オリジン)── 地球で「外の決まりで動く」を示す。 */
   'launch-asset-raw': 'globe',
 };
+
+/**
+ * 🔑 **種別を iconKey として引ける形**(P10 の分割ボタン用)。
+ * `iconButton(action, label, 'archetype:text')` で種類の図案が出る ──
+ * 表を 2 つ持たずに `ARCHETYPE_ICONS` を使い回す。
+ */
+export function archetypeIconKey(archetype: string): string {
+  return `archetype:${archetype}`;
+}
 
 /** 種別 → 図案(一覧のチップ)。⚠ 未知の archetype は `dot`。 */
 export const ARCHETYPE_ICONS: Readonly<Record<string, IconName>> = {
@@ -236,7 +249,10 @@ export function iconButton(action: string, label: string, iconKey = action): HTM
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.setAttribute('data-pkc-action', action);
-  const name = ACTION_ICONS[iconKey];
+  // ⚠ `archetype:<種別>` は種別の表から引く(分割ボタンが使う)── 表を 2 つ持たない
+  const name = iconKey.startsWith('archetype:')
+    ? (ARCHETYPE_ICONS[iconKey.slice('archetype:'.length)] ?? 'dot')
+    : ACTION_ICONS[iconKey];
   // ⚠ 図案の無い action もある(追記 / 強制解放)── そこは器ごと出さない
   if (name !== undefined) btn.append(iconSpan(name));
   const text = document.createElement('span');

@@ -25,10 +25,27 @@ test('🔴 枠が組めている(3 列 / 重なりなし)', async ({ page }) => 
   // 右端が本文の左端を越えない = 重なっていない
   expect(sidebar!.x + sidebar!.width).toBeLessThanOrEqual(detail!.x + 1);
 
-  // ② status は**いちばん下**にあり、本文と重なっていない
-  const status = await page.locator('[data-pkc-region="status"]').boundingBox();
-  expect(status).not.toBeNull();
-  expect(status!.y).toBeGreaterThanOrEqual(detail!.y + detail!.height - 1);
+  // ② 🔴 **下の帯は言うことがあるときだけ出る**(P10、user 指示「上下の帯は不要」)。
+  //    直す前は 99% の時間「pkc3 v3.0.0」を出す常設の帯だった。
+  //    ⚠ 消してはいない ── **エラーの唯一の出口**なので、出たときは
+  //    「いちばん下にあって本文と重ならない」ことを見る
+  const statusRegion = page.locator('[data-pkc-region="status"]');
+  expect(await statusRegion.isVisible(), '言うことが無いのに下の帯が出ている').toBe(false);
+  // 出したときの位置を見る(場所の契約はここでしか確かめられない)
+  await statusRegion.evaluate((el) => {
+    (el as HTMLElement).hidden = false;
+    el.textContent = '検査用';
+  });
+  const status = await statusRegion.boundingBox();
+  expect(status, '出しても場所を持たない').not.toBeNull();
+  // ⚠ **本文を測り直す** ── 帯が出ると grid が組み替わって本文が縮むので、
+  //    出す前に測った箱と比べると必ずずれる(実際に落ちた)
+  const detailNow = await page.locator('[data-pkc-region="detail"]').boundingBox();
+  expect(status!.y).toBeGreaterThanOrEqual(detailNow!.y + detailNow!.height - 1);
+  await statusRegion.evaluate((el) => {
+    (el as HTMLElement).hidden = true;
+    el.textContent = '';
+  });
 
   // ③ 面(更新の案内 / 注意)は**既定で場所を取らない**
   //    ⚠ `hidden` が grid item に効かないと、空の箱が行を占めて本文が縮む
@@ -130,36 +147,45 @@ test('🔴 狭い画面では 1 カラムへ折る(横に潰れない)', async (
 });
 
 /**
- * P8 段㉕: 🔴 **設定への入口が押せる大きさある**。
+ * P10: 🔴 **設定への入口が左の列に在り、押せる大きさがある**。
  *
- * 上の帯は user 指示で薄い(「最上のヘッドラインはもっと薄くてもいい、邪魔」)。
- * ただし直す前は帯が 20px、中の設定ボタンが **16px** で、**設定への唯一の入口**が
- * 他のどのボタン(26px)よりも小さかった ── 押し損ねる。
- * ⚠ 薄さは保ったまま的だけ大きくする(帯 24px / ボタン 20px)。
+ * 🔴 上の帯は**撤去した**(user 指示 2026-08-05「UI の上下の帯は不要だと思う。
+ * 大して働いていない。設定への導線だけどこかに残す必要がある」)── 載っていたのは
+ * 「PKC3」の文字と設定ボタンだけで、現在地を出すはずの区画は**書き手が 1 つも
+ * 無かった**(ずっと空)。
+ *
+ * ⚠ だからここが見るのは 2 つ:**帯が無いこと**と、**設定へ行けること**。
+ * 片方だけだと「導線ごと消した」も「帯が残っている」も通ってしまう。
  */
-test('🔴 上の帯は薄いまま、設定ボタンは押せる大きさがある', async ({ page }) => {
+test('🔴 上の帯は無く、設定は左の列から押せる', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await gotoApp(page);
   const m = await page.evaluate(() => {
-    const band = document.querySelector('[data-pkc-region="brand"]')!;
-    const btn = band.querySelector('[data-pkc-view="settings"]')!;
-    const r = btn.getBoundingClientRect();
+    const btn = document.querySelector('[data-pkc-region="sidebar"] [data-pkc-view="settings"]');
+    const r = btn?.getBoundingClientRect();
+    const others = [
+      ...document.querySelectorAll('[data-pkc-region="collection-bar"] button'),
+    ].map((b) => Math.round(b.getBoundingClientRect().height));
     return {
-      band: Math.round(band.getBoundingClientRect().height),
-      btn: Math.round(r.height),
-      btnW: Math.round(r.width),
-      // 🔴 死んだ規則の見張り ── 配色の選択欄は**設定の画面**に移した
-      selectsInBand: band.querySelectorAll('select').length,
+      hasBrand: document.querySelector('[data-pkc-region="brand"]') !== null,
+      inSidebar: btn !== null,
+      h: r ? Math.round(r.height) : -1,
+      w: r ? Math.round(r.width) : -1,
+      heights: [...new Set(others)],
     };
   });
-  // ① 的が小さすぎない
-  expect(m.btn, `設定ボタンが小さい(${m.btn}px)`).toBeGreaterThanOrEqual(20);
-  expect(m.btnW, `設定ボタンが細い(${m.btnW}px)`).toBeGreaterThanOrEqual(40);
-  // ② 帯は**薄いまま**(user 指示 ── 的を大きくする口実で太らせない)
-  expect(m.band, `上の帯が太い(${m.band}px)`).toBeLessThanOrEqual(28);
-  // ③ 帯に選択欄は無い(在るなら CSS も同期コードも生きているはずで、実態と食い違う)
-  expect(m.selectsInBand, '帯に選択欄が戻っている').toBe(0);
+  // ① 帯が無い(撤去の pin ── 戻ってきたら落ちる)
+  expect(m.hasBrand, '上の帯が戻っている').toBe(false);
+  // ② 設定へ行ける(導線ごと消す変異を落とす)
+  expect(m.inSidebar, '設定への導線が左の列に無い').toBe(true);
+  // ③ 的が小さすぎない ── ⚠ 帯にいた頃の寸法(20px / 11px)を引きずると
+  //    1 つだけ小さいボタンになる(実際にそうなった)
+  expect(m.h, `設定ボタンが小さい(${m.h}px)`).toBeGreaterThanOrEqual(24);
+  expect(m.w, `設定ボタンが細い(${m.w}px)`).toBeGreaterThanOrEqual(40);
+  // ④ 隣と**同じ高さ**(揃っていない 1 個を作らない)
+  expect(m.heights, `高さがばらついている: ${JSON.stringify(m.heights)}`).toHaveLength(1);
 });
+
 
 /**
  * P8 段⑱: 🔴 **狭い列でも探し方のタブが重ならない**。
@@ -444,8 +470,11 @@ test('🔴 一覧のスクロール: 絞り込みを戻しても、タブを往�
   await page.setViewportSize({ width: 1440, height: 700 });
   await gotoApp(page);
 
-  // 一覧が溢れるだけ作る
-  for (let i = 0; i < 24; i++) {
+  // 一覧が溢れるだけ作る。
+  // ⚠ **件数を増やした**(P10)── 上下の帯を撤去して左の列が 46px 高くなったので、
+  //    24 件では溢れが 89px しか無く、`scrollTop = 200` が届かなくなった(実測)。
+  //    ⚠ 絶対値で park するのをやめ、**溢れ量に対する相対**で置く(下記)
+  for (let i = 0; i < 32; i++) {
     await createEntry(page, 'text');
     await page.locator('[data-pkc-field="editor-title"]').fill(`ノート ${i}`);
     await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
@@ -457,15 +486,21 @@ test('🔴 一覧のスクロール: 絞り込みを戻しても、タブを往�
   const shape = await host.evaluate((el) => ({ sh: el.scrollHeight, ch: el.clientHeight }));
   expect(shape.sh, '一覧が溢れていない(観測の前提が崩れている)').toBeGreaterThan(shape.ch + 50);
 
-  await host.evaluate((el) => (el.scrollTop = 200));
+  // 溢れの真ん中あたりへ置く(端だと「戻った」と「動いていない」が区別できない)
+  await host.evaluate((el) => (el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2)));
   const parked = await host.evaluate((el) => el.scrollTop);
-  expect(parked).toBeGreaterThan(100);
+  // ⚠ 端に張り付いていないこと(0 でも最下端でもない = 記憶する意味がある位置)
+  expect(parked, 'park した位置が先頭のまま(観測の前提が崩れている)').toBeGreaterThan(20);
+  expect(
+    await host.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop),
+    'park した位置が最下端(戻り先と区別できない)',
+  ).toBeGreaterThan(20);
 
   // ① 🔴 絞り込んで戻す(入力欄は面の外なので、計器はスクロールしない)
   await page.locator('[data-pkc-field="entry-filter"]').fill('ノート 1');
   await expect(rows.first()).toBeVisible();
   await page.locator('[data-pkc-field="entry-filter"]').fill('');
-  await expect(rows).toHaveCount(24);
+  await expect(rows).toHaveCount(32);
   expect(
     Math.abs((await host.evaluate((el) => el.scrollTop)) - parked),
     '絞り込みを戻したら先頭へ飛んだ',
@@ -478,7 +513,7 @@ test('🔴 一覧のスクロール: 絞り込みを戻しても、タブを往�
   //    (変異試験で実際に素通りした)
   await host.evaluate((el) => (el.scrollTop = 0));
   await clickReal(page, '[data-pkc-browse="list"]');
-  await expect(rows).toHaveCount(24);
+  await expect(rows).toHaveCount(32);
   expect(
     Math.abs((await host.evaluate((el) => el.scrollTop)) - parked),
     'タブを往復したら位置が混ざった(面ごとに覚えていない)',
@@ -872,7 +907,8 @@ test('🔴 何も選んでいない中央に案内が出る(白紙にしない)'
   const guide = page.locator('[data-pkc-field="detail-empty"]');
   await expect(guide).toBeVisible();
   // ⚠ 「何か出た」で止めない ── **次にどこを押すか**が書いてあること
-  await expect(guide).toContainText('新規');
+  // ⚠ **実際のボタンの文言**を指していること(P10 で「新規」→「+ ノート」)
+  await expect(guide).toContainText('+ ノート');
   await expect(guide).toContainText('取り込む');
   const box = await guide.boundingBox();
   expect(box!.height, '案内が高さを持っていない').toBeGreaterThan(10);
@@ -915,6 +951,55 @@ test('🔴 設定は user 向けと計器に分かれている', async ({ page }
   });
   expect(y.user, '区画が見つからない').toBeGreaterThan(0);
   expect(y.jobs, '計器が user 向けより上に出ている').toBeGreaterThan(y.user);
+
+  expect(errors).toEqual([]);
+});
+
+/**
+ * P10: 🔴 **新規は分割ボタン**(user 指示 2026-08-05
+ * 「プルダウン式の新規作成ボタンは使いにくいからマルチメニューに畳んでください。
+ *  ▼ を押下した際に種別を選択して、追加ボタンと ctrl+n の対象を更新、
+ *  +〇〇みたいにボタンを変更すればいい、これもアイコン欲しいよね」)。
+ *
+ * ⚠ 見るのは 3 つ。**どれか 1 つでは足りない**:
+ *  ① 選ぶと**ボタンの見た目**が変わる(user が「いま何ができるか」を読める)
+ *  ② 押すと**その種類**が出来る(見た目と結果が食い違わない)
+ *  ③ **Ctrl+N も同じ対象**になる(近道が別のものを作らない)
+ */
+test('🔴 新規の分割ボタン: 選ぶと文言・図案・Ctrl+N の対象が変わる', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await gotoApp(page);
+
+  const run = page.locator('[data-pkc-field="create-run"]');
+  const menu = page.locator('[data-pkc-region="create-menu"]');
+  // 起動直後は先頭の種類。⚠ 一覧は畳んである(選ぶまで場所を取らない)
+  await expect(run.locator('[data-pkc-field="label"]')).toHaveText('+ ノート');
+  expect(await menu.isVisible(), '一覧が最初から開いている').toBe(false);
+
+  // ① ▼ で開いて「表」を選ぶ → 文言と図案が変わり、一覧は畳まれる
+  const iconBefore = await run.locator('[data-pkc-icon] svg path').first().getAttribute('d');
+  await clickReal(page, '[data-pkc-field="create-pick"]');
+  expect(await menu.isVisible(), '▼ を押しても一覧が出ない').toBe(true);
+  await clickReal(page, '[data-pkc-region="create-menu"] [data-pkc-archetype="spreadsheet"]');
+  await expect(run.locator('[data-pkc-field="label"]')).toHaveText('+ 表');
+  expect(await menu.isVisible(), '選んだのに一覧が閉じない').toBe(false);
+  const iconAfter = await run.locator('[data-pkc-icon] svg path').first().getAttribute('d');
+  expect(iconAfter, '図案が種類に追従していない').not.toBe(iconBefore);
+
+  // ② 押すと**表**が出来る(文言と結果が食い違わない)
+  await clickReal(page, '[data-pkc-field="create-run"]');
+  await expect(page.locator('[data-pkc-field="editor-body"]')).toBeVisible();
+  await expect(page.locator('[data-pkc-field="editor-body"]')).toHaveValue(/csv-render/);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="cancel-edit"]');
+
+  // ③ 🔴 **Ctrl+N も同じ対象** ── 近道が別のものを作ったら、それは別の機能である
+  await page.keyboard.press('Control+n');
+  await expect(page.locator('[data-pkc-field="editor-body"]')).toBeVisible();
+  await expect(
+    page.locator('[data-pkc-field="editor-body"]'),
+    'Ctrl+N が選んだ種類を無視している',
+  ).toHaveValue(/csv-render/);
 
   expect(errors).toEqual([]);
 });

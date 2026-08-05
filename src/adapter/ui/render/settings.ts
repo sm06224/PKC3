@@ -11,6 +11,7 @@
  * 押す導線そのものは畳まない(操作の帯に「設定」を置く)。
  */
 import type { AppState } from '@adapter/state/app-state';
+import { APP_ID, APP_VERSION, BUILD_KIND } from '@runtime/release-meta';
 import { THEMES } from './theme';
 import { appJobMonitor, type JobMonitor } from '@adapter/platform/job-monitor';
 import { ScrollMemory } from './scroll-memory';
@@ -85,6 +86,21 @@ export class SettingsRenderer {
       '最初は OS の設定に従います。一度選ぶと、この端末ではそちらを覚えています。';
     dd.append(note);
     dl.append(dt, dd);
+
+    /**
+     * 🔑 **版はここ**(P10)。上下の帯を撤去したので、常設で出していた
+     * 「pkc3 v3.0.0」の行き先を作った ── 不具合を伝えるときに要る情報である。
+     * ⚠ 開発者語(`opfs-sahpool`)は出さない ── user は「エラーか」と読む。
+     *   ホバー(`title`)に残す作法は撤去前と同じ。
+     */
+    const vt = document.createElement('dt');
+    vt.textContent = 'この版';
+    const vd = document.createElement('dd');
+    vd.setAttribute('data-pkc-field', 'app-version');
+    vd.textContent = `${APP_ID} v${APP_VERSION}`;
+    vd.title = `${APP_ID} v${APP_VERSION} (${BUILD_KIND})`;
+    dl.append(vt, vd);
+
     userSection.append(dl);
     body.append(userSection);
     body.append(this.buildJobs());

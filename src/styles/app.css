@@ -59,9 +59,13 @@ body {
    * ⚠ 下限 220px は残す ── 1100px 以下では 2 列に畳むので、そこまでの間の保険 */
   grid-template-columns: minmax(200px, 18vw) minmax(0, 1fr) minmax(220px, 15vw);
   /* ⚠ notices と update は**別の行**。同じ area に載せると、両方出たとき重なる */
-  grid-template-rows: auto 1fr auto auto auto;
+  /* 🔴 **上の帯を撤去した**(P10、user 指示 2026-08-05)── 載っていたのは
+   * 「PKC3」の文字と設定ボタンだけで、現在地を出すはずの区画は書き手が 1 つも
+   * 無かった。設定は左の列の下へ移した。
+   * ⚠ 下の帯(status)は**残す** ── エラーの唯一の出口だから。ただし
+   * 既定は `hidden` なので、言うことが無いときは行の高さが 0 になる */
+  grid-template-rows: 1fr auto auto auto;
   grid-template-areas:
-    'brand   brand   brand'
     'sidebar detail  inspector'
     'update  update  update'
     'notices notices notices'
@@ -74,9 +78,7 @@ body {
   background: var(--border);
 }
 
-[data-pkc-region='brand'] {
-  grid-area: brand;
-}
+
 [data-pkc-region='sidebar'] {
   grid-area: sidebar;
 }
@@ -217,37 +219,9 @@ select:focus-visible {
   outline-offset: -1px;
 }
 
-/* ── 最上部の帯 ────────────────────────────────────
- * 🔑 **彩度のある色を置くのはここだけ**。アプリの現在地を 1 行で示す。 */
-/* ⚠ **薄く**(user 指示 2026-08-03「最上のヘッドラインはもっと薄くてもいい、邪魔」)。
- * 高さを 32 → 20px、文字を 13 → 11px にして、押すものは置かない。 */
-[data-pkc-region='brand'] {
-  display: flex;
-  align-items: center;
-  gap: var(--s3);
-  /* ⚠ **薄く保つ**が、中の的が小さくなりすぎない高さ(P8 段㉕)。
-   * 20px のときボタンは 16px しかなく、**設定への唯一の入口**が
-   * 他のどのボタン(26px)よりも小さかった ── 押し損ねる。 */
-  height: 24px;
-  padding: 0 var(--s3);
-  background: var(--accent);
-  color: var(--accent-fg);
-  font-size: 11px;
-  letter-spacing: 0.02em;
-}
-[data-pkc-field='brand-name'] {
-  font-weight: 600;
-}
-[data-pkc-field='brand-context'] {
-  font-weight: 400;
-  opacity: 0.85;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-[data-pkc-field='brand-spacer'] {
-  margin-left: auto;
-}
+
+
+
 
 /* ── 左の列: 探し方のタブ ───────────────────────────
  * 🔑 **その列が扱うものの操作は、その列が持つ**(P8 段⑤)── 上の帯と左で
@@ -308,18 +282,17 @@ select:focus-visible {
   padding: var(--s2);
 }
 /* 上の帯の設定ボタン ── 薄い帯に収まる高さ */
-[data-pkc-region='brand'] button {
-  height: 20px;
-  min-height: 20px;
-  max-height: 20px;
-  padding: 0 var(--s3);
-  font-size: 11px;
-  background: transparent;
-  color: var(--accent-fg);
-  border-color: color-mix(in srgb, var(--accent-fg) 35%, transparent);
+/* 🔑 **設定は左の列の下**(P10 で上の帯を撤去)。
+ * ⚠ 寸法は**隣のボタンと同じ**にする ── 帯にいた頃は薄い帯に合わせて 20px /
+ * 11px だったので、そのまま持ってくると 1 つだけ小さいボタンになる
+ * (「図案つきボタンの高さが揃っている」が実際に落ちた)。
+ * ⚠ 役割が違うので**区切り線**を引く(一覧の操作 ↔ アプリ全体の操作) */
+[data-pkc-field='app-settings'] {
+  border-top: 1px solid var(--border);
 }
-[data-pkc-region='brand'] button[data-pkc-active] {
-  background: color-mix(in srgb, var(--accent-fg) 18%, transparent);
+[data-pkc-field='app-settings'][data-pkc-active] {
+  background: var(--accent-dim);
+  color: var(--accent-dim-fg);
 }
 
 /* ── サイドバー(一覧)────────────────────────────── */
@@ -351,6 +324,33 @@ select:focus-visible {
 [data-pkc-field='entry-filter'] {
   flex: 1;
   min-width: 0;
+}
+/* 🔑 **分割ボタン**(P10、user 指示「▼ を押下した際に種別を選択して、
+ * 追加ボタンと ctrl+n の対象を更新、+〇〇みたいにボタンを変更すればいい」)。
+ * ⚠ 本体が幅を取り、▼ は必要な分だけ。⚠ 一覧は**下に出す**(押した物の下)。 */
+[data-pkc-field='create-run'] {
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-start;
+}
+[data-pkc-field='create-pick'] {
+  flex: none;
+  padding: 0 var(--s2);
+}
+/* 種類の一覧。⚠ 行を分けて全部見せる(畳んだ中でさらに畳まない) */
+[data-pkc-region='create-menu'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px;
+  background: var(--border);
+  border-top: 1px solid var(--border);
+}
+[data-pkc-region='create-menu'] button {
+  flex: 1 1 auto;
+  border: none;
+  border-radius: 0;
+  justify-content: flex-start;
+  font-size: 12px;
 }
 [data-pkc-field='create-kind'] {
   flex: 1;
@@ -757,9 +757,7 @@ select:focus-visible {
   letter-spacing: 0.04em;
   flex: none;
 }
-[data-pkc-field='pane-title'] > [data-pkc-field='brand-spacer'] {
-  margin-left: auto;
-}
+
 [data-pkc-region='inspector'] dl {
   margin: 0;
   padding: var(--s3);
@@ -1556,7 +1554,6 @@ select:focus-visible {
   [data-pkc-region='shell'] {
     grid-template-columns: minmax(180px, 22vw) minmax(0, 1fr);
     grid-template-areas:
-      'brand     brand'
       'sidebar   detail'
       'inspector inspector'
       'update    update'
@@ -1581,14 +1578,14 @@ select:focus-visible {
   [data-pkc-region='shell'] {
     grid-template-columns: 1fr;
     grid-template-areas:
-      'brand'
       'sidebar'
       'detail'
       'inspector'
       'update'
       'notices'
       'status';
-    grid-template-rows: auto auto 1fr auto auto auto auto;
+    /* ⚠ 6 区画(上の帯を撤去したので 1 つ減った)── 本文だけが伸びる */
+    grid-template-rows: auto 1fr auto auto auto auto;
   }
   [data-pkc-region='sidebar'] {
     max-height: 30vh;

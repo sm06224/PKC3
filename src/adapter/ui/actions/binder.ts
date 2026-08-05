@@ -15,6 +15,7 @@
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import type { ViewMode } from '@adapter/state/app-state';
 import { archetypeLabel } from '@adapter/ui/render/sidebar';
+import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
 import { applyFormat, type FormatOp } from '@features/markdown/text-ops';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
 import { handleCopyMdBlock } from './copy-md-block';
@@ -482,6 +483,46 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = target.closest('[data-pkc-tile]')?.getAttribute('data-pkc-tile');
     if (lid) services.openTile?.(lid);
   },
+  /**
+   * 🔑 **作る種類の一覧を開く / 閉じる**(P10 の分割ボタン)。
+   * ⚠ `<details>` を使わない ── この repo は「主要な導線を畳まない」を規律に持ち、
+   *   shell に `<details>` が 0 件であることを test で pin している。
+   */
+  'toggle-create-menu': (_dispatcher, target, _services, root) => {
+    const menu = root.querySelector<HTMLElement>('[data-pkc-region="create-menu"]');
+    if (!menu) return;
+    const open = menu.hidden;
+    menu.hidden = !open;
+    target.setAttribute('aria-expanded', open ? 'true' : 'false');
+  },
+  /**
+   * 🔑 **作る種類を選ぶ**(P10)。押した種類を「いま作るもの」にして、
+   * **本体のボタンの文言・図案**と **`Ctrl+N` の対象**を同時に切り替える。
+   * ⚠ 保持場所は `<select>` 1 か所 ── ボタンの属性と select が食い違うと、
+   *   押した種類と出来るものが別になる(いちばん困る形)。
+   */
+  'pick-create-kind': (_dispatcher, target, _services, root) => {
+    const archetype = target.getAttribute('data-pkc-archetype');
+    if (!archetype) return;
+    const select = root.querySelector<HTMLSelectElement>('[data-pkc-field="create-kind"]');
+    if (select) select.value = archetype;
+    const run = root.querySelector<HTMLElement>('[data-pkc-field="create-run"]');
+    if (run) {
+      run.setAttribute('data-pkc-archetype', archetype);
+      const label = run.querySelector('[data-pkc-field="label"]');
+      // ⚠ 文言は**選んだ項目の文言**をそのまま使う(表を 2 つ持たない)
+      const picked = target.querySelector('[data-pkc-field="label"]')?.textContent ?? archetype;
+      if (label) label.textContent = `+ ${picked}`;
+      const icon = run.querySelector('[data-pkc-icon]');
+      // ⚠ `textContent` で書かない(図案は要素)── `setIcon` で入れ替える
+      if (icon) setIcon(icon, ARCHETYPE_ICONS[archetype] ?? 'dot');
+    }
+    const menu = root.querySelector<HTMLElement>('[data-pkc-region="create-menu"]');
+    if (menu) menu.hidden = true;
+    root
+      .querySelector('[data-pkc-field="create-pick"]')
+      ?.setAttribute('aria-expanded', 'false');
+  },
   // ⚠ 対象は**いま選んでいる添付** ── 詳細画面のボタンなので lid は state が持つ
   'launch-asset': (dispatcher, _target, services) => {
     const lid = dispatcher.getState().selectedLid;
@@ -734,12 +775,40 @@ export function bindActions(
   root.addEventListener('mousedown', onMousedown);
   root.addEventListener('input', onInput);
   root.addEventListener('change', onChange);
+  /**
+   * 🔑 **画面全体の近道**(P10)。いまは `Ctrl/Cmd+N` = いま選んでいる種類で作る
+   * (user 指示「追加ボタンと ctrl+n の対象を更新」)。
+   *
+   * 🔴 **document で受ける** ── `root` に付けると、focus が root の外(`body` 等)に
+   * あるときに届かない。編集をやめた直後は focus が消えた要素から body へ落ちるので、
+   * **そこで効かない近道**になっていた(実測で落ちた)。
+   * ⚠ `root` が外れていたら何もしない ── test が root を作り直しても、
+   * 古い binder の handler が生き残って二重に作らないため。
+   * ⚠ 編集中の欄では受けない(打っている途中に別のノートへ飛ぶのは事故)。
+   * ⚠ `altKey` を除く(AltGr = Ctrl+Alt の誤発火)。
+   * ⚠ ブラウザの「新しいウィンドウ」を止める(`preventDefault`)。
+   */
+  const onShortcut = (ev: Event) => {
+    const ke = ev as KeyboardEvent;
+    if (ke.isComposing || !root.isConnected) return;
+    if (!(ke.key === 'n' || ke.key === 'N') || !(ke.ctrlKey || ke.metaKey) || ke.altKey) return;
+    const field =
+      ke.target instanceof HTMLElement ? ke.target.getAttribute('data-pkc-field') : null;
+    if (field === 'editor-body' || field === 'editor-title' || field === 'append-input') return;
+    const run = root.querySelector<HTMLElement>('[data-pkc-field="create-run"]');
+    if (!run) return;
+    ke.preventDefault();
+    run.click();
+  };
+  const doc = root.ownerDocument;
+  doc.addEventListener('keydown', onShortcut);
   root.addEventListener('keydown', onKeydown);
   return () => {
     root.removeEventListener('click', onClick);
     root.removeEventListener('mousedown', onMousedown);
     root.removeEventListener('input', onInput);
     root.removeEventListener('change', onChange);
+    doc.removeEventListener('keydown', onShortcut);
     root.removeEventListener('keydown', onKeydown);
   };
 }

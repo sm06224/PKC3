@@ -160,7 +160,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   let markedView: string | null = null;
   const markView = (view: string) => {
     if (view === markedView) return;
-    for (const btn of regions.brand.querySelectorAll('[data-pkc-view]')) {
+    // ⚠ 設定ボタンは**左の列**へ移った(P10 で上の帯を撤去)── 探す先も変える
+    for (const btn of regions.sidebar.querySelectorAll('[data-pkc-view]')) {
       if (btn.getAttribute('data-pkc-view') === view)
         btn.setAttribute('data-pkc-active', '');
       else btn.removeAttribute('data-pkc-active');
@@ -193,22 +194,52 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   // ⚠ 捨てはしない ── 不具合報告のときに要るので `title`(ホバー)へ逃がす。
   // ⚠ ただし **fallback(意図しない保存先)は見せる** ── これは user が
   // 知るべき事実で、黙ると「編集が消える」の原因が見えなくなる
-  const statusBase =
-    `${APP_ID} v${APP_VERSION}` + (init.fallbackReason ? ` ⚠ ${init.fallbackReason}` : '');
+  /**
+   * 🔴 **版を常設しない**(P10、user 指示「上下の帯は不要 / 大して働いていない」)。
+   * 直す前は 99% の時間ここが「pkc3 v3.0.0」だった ── それが「働いていない」の中身。
+   * 版は**設定の画面**へ移した(下の `showVersion`)。
+   * ⚠ ただし **fallback(意図しない保存先)は常に出す** ── これは user が知るべき
+   * 事実で、黙ると「編集が消える」の原因が見えなくなる。
+   */
+  const statusBase = init.fallbackReason ? `⚠ ${init.fallbackReason}` : '';
   regions.status.title = `${APP_ID} v${APP_VERSION} (${BUILD_KIND}) — ${init.vfs}`;
   // textContent の setter は同一文字列でも子ノードを全置換する ── 打鍵ごとの
   // state 変化で無駄な DOM 変異を起こさないよう、変わったときだけ書く
   let statusShown = statusBase;
   regions.status.textContent = statusBase;
-  const showStatus = (text: string) => {
+  // 🔑 **空なら場所を取らない**(notices / update と同じ作法)
+  regions.status.hidden = statusBase === '';
+  /**
+   * 🔴 **2 つの経路を分けて持つ**(P10)。以前は 1 つの `showStatus` を
+   * 「状態(エラー)」と「一時の知らせ(コピーした・取り込んだ)」が**共有**して
+   * いたので、**知らせの直後に無関係な状態変化が来ると黙って消えた**。
+   *
+   * P9 で書込ごとに時刻の ack(`ENTRY_STAMPED`)が飛ぶようになって顕在化した ──
+   * コピーの知らせが ack で上書きされ、smoke が落ちた(実測)。
+   * ⚠ 直し方は「順番を祈る」ではなく**優先順位を決める**こと:
+   * **エラー > 一時の知らせ > 常設(保存先の警告)**。
+   */
+  let errorLine = '';
+  let noticeLine = '';
+  const paint = () => {
+    const parts = [statusBase, noticeLine, errorLine].filter((t) => t !== '');
+    const text = parts.join(' — ');
     if (text === statusShown) return;
     statusShown = text;
     regions.status.textContent = text;
+    regions.status.hidden = text === '';
+  };
+  /** 一時の知らせ(コピーした / 取り込んだ)。⚠ 状態変化では消えない。 */
+  const showStatus = (text: string) => {
+    noticeLine = text;
+    paint();
   };
   // エラー表示は state 駆動のみ(P3-6b: BODY_LOAD_FAILED も state.error に
   // 統一 ── 表示寿命は「次の成功 / 選択まで」で、event の一瞬表示問題は消滅)
   dispatcher.onState((state) => {
-    showStatus(state.error ? `${statusBase} ⚠ エラー: ${state.error}` : statusBase);
+    // ⚠ **エラーの行だけ**を触る ── 一時の知らせを巻き添えにしない
+    errorLine = state.error ? `⚠ エラー: ${state.error}` : '';
+    paint();
   });
 
   // 🔒 attach / import と purge の排他 gate(review F1)。実体と pin は asset-gate.ts
@@ -249,7 +280,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             client.request({ op: 'exportRevisionChain', cid: DEFAULT_CID, entryLid }),
         },
         download: downloadBlob,
-        notify: (message) => showStatus(`${statusBase} — ${message}`),
+        notify: (message) => showStatus(message),
         // ⚠ **注意の中身**を出す導線(review M1 で一度落ちた)。無いと user が
         // 見るのは「⚠ 注意 1 件」だけで、**どの添付が欠けたか**が消える ──
         // バックアップで一番知りたい情報がそこにある
@@ -330,7 +361,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       // 🔑 中身は `reload-snapshot.ts`(段㉕ で切り出し ── closure に居ると
       //    誰も test できず、「案内は出すが実行しない」嘘が残っていた)
       reload: () => reloadSnapshot(dispatcher, DEFAULT_CID, loadSnapshot),
-      notify: (message) => showStatus(`${statusBase} — ${message}`),
+      notify: (message) => showStatus(message),
       // 注意は**全件**を専用面へ(1 行の status では 1 件目しか届かない)
       report: (notes) => showNotices(regions.notices, '取込時の注意', notes),
   };
@@ -417,9 +448,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      */
     copyText: (text) => {
       void copyPlainText(text).then((ok) => {
-        showStatus(
-          `${statusBase} — ${ok ? '参照をコピーしました(本文に貼れます)' : 'コピーできませんでした'}`,
-        );
+        showStatus(ok ? '参照をコピーしました(本文に貼れます)' : 'コピーできませんでした');
       });
     },
     /**
@@ -656,7 +685,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      */
     importLaunchFiles: async (files) => {
       await whenPhaseReady(dispatcher, () =>
-        showStatus(`${statusBase} — 編集を終えると、開いたファイルを取り込みます`),
+        showStatus('編集を終えると、開いたファイルを取り込みます'),
       );
       await withAssetGate.queued(() => runImport(files));
     },

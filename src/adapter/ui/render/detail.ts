@@ -208,8 +208,10 @@ export class DetailRenderer {
        */
       const guide = document.createElement('p');
       guide.setAttribute('data-pkc-field', 'detail-empty');
+      // ⚠ **実際のボタンの文言を指す** ── P10 で「新規」は「+ ノート」になった。
+      //    案内が画面と食い違うと、探しても見つからない
       guide.textContent =
-        '左の一覧から選ぶと、ここに本文が出ます。まだ何も無いときは、左上の「新規」で作るか、左下の「取り込む」で読み込みます。';
+        '左の一覧から選ぶと、ここに本文が出ます。まだ何も無いときは、左上の「+ ノート」で作るか、左下の「取り込む」で読み込みます。';
       this.region.append(guide);
       return;
     }
