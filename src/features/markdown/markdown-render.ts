@@ -1553,6 +1553,16 @@ export interface RenderMarkdownOptions {
    * 抽出して渡す。
    */
   readonly headingNumber?: { start: number } | null;
+  /**
+   * 🔴 **行の対応表をここへ集める**(2026-08-05。ライブエディタ S2)。
+   *
+   * 渡すと `SOURCE_LINE_TOKEN_TYPES` の token ぶんの `SourceRange` が
+   * **文書順で** push される。⚠ **HTML は変わらない**(= anchors OFF と byte 一致)──
+   * 行番号を焼くと、行数が変わる編集で全塊の HTML が変わって差分が全滅する。
+   * ⚠ 呼び側は空配列を渡す(この関数は push するだけで、消さない)。
+   * 使い方は `features/markdown/source-ranges.ts` の `renderMarkdownWithRanges`。
+   */
+  readonly collectRanges?: SourceRange[];
 }
 
 /**
@@ -1579,6 +1589,54 @@ const SOURCE_LINE_TOKEN_TYPES: ReadonlySet<string> = new Set([
   'hr',
   'html_block',
 ]);
+
+/**
+ * 🔴 **行の対応表(sidecar)の 1 件**(2026-08-05。ライブエディタ S2)。
+ *
+ * `data-pkc-source-line` と**同じ材料**から作るが、**HTML には焼かない**。
+ * ⚠ `level` は token の入れ子の深さ ── 0 = 最上位。表の行(`tr`)や
+ * 箇条書きの項目(`li`)は深いところに出るので、活性単位を行まで下げるのに使う
+ * (設計 §5.6 ④)。
+ */
+export interface SourceRange {
+  /** 原文(frontmatter を除いた本文)の開始行。0 始まり。 */
+  readonly start: number;
+  /** 同・終了行(含む)。 */
+  readonly end: number;
+  /** token の入れ子の深さ。0 = 最上位。 */
+  readonly level: number;
+  /** token の型(`paragraph_open` / `tr_open` / `list_item_open` / `fence` …)。 */
+  readonly type: string;
+}
+
+/**
+ * `tagSourceLines` の**双子**。属性を焼く代わりに配列へ集める。
+ *
+ * ⚠ **判定を 2 つに増やさない** ── 対象 token の集合(`SOURCE_LINE_TOKEN_TYPES`)と
+ * 行の逆引き(`lineMap`)は焼く側と**同じもの**を使う。ここが分岐すると
+ * 「画面に出ている刻印」と「対応表」が食い違い、caret が別の行へ入る。
+ */
+function collectSourceRanges(
+  tokens: Token[],
+  lineMap: number[] | undefined,
+  out: SourceRange[],
+): void {
+  for (const token of tokens) {
+    if (token.map && SOURCE_LINE_TOKEN_TYPES.has(token.type)) {
+      const outStart = token.map[0];
+      const outEndIncl = Math.max(outStart, token.map[1] - 1);
+      out.push({
+        start: lineMap ? (lineMap[outStart] ?? outStart) : outStart,
+        end: lineMap ? (lineMap[outEndIncl] ?? outEndIncl) : outEndIncl,
+        level: token.level,
+        type: token.type,
+      });
+    }
+    if (token.children && token.children.length > 0) {
+      collectSourceRanges(token.children, lineMap, out);
+    }
+  }
+}
 
 function tagSourceLines(tokens: Token[], lineMap?: number[]): void {
   for (const token of tokens) {
@@ -4214,7 +4272,19 @@ export function renderMarkdown(
   const indentMap = alignResult.indentMap;
   lineMap = alignResult.lineMap;
   let html: string;
-  if (!opts.sourceLineAnchors) {
+  /**
+   * 🔴 **行の対応表を「属性に焼かずに」受け取る**(2026-08-05。ライブエディタ S2。
+   * 設計 doc `live-editor-design-2026-08.md` §7-1)。
+   *
+   * 焼くと、行数が変わる編集で**全塊の HTML が変わる** ── `apply-blocks.ts` は
+   * 塊 HTML の完全一致で差分を取るので、行を 1 行足すだけで編集点から末尾まで
+   * 全部作り直しになる(閲覧ペインで現に起きている)。だから
+   * `collectRanges` を渡した場合も **HTML は anchors OFF と byte 一致**にする
+   * ── そうすれば `sourceLineAnchors` は据え置きで goldens が 1 byte も動かない。
+   */
+  const wantsTokens =
+    opts.sourceLineAnchors === true || opts.collectRanges !== undefined;
+  if (!wantsTokens) {
     if (alignMap.size === 0 && indentMap.size === 0) {
       html = md.render(stripped, env);
     } else {
@@ -4227,7 +4297,12 @@ export function renderMarkdown(
     // lineMap で stripped output index → 原文 input index へ逆引き。
     const tokens = md.parse(stripped, env);
     applyAlignAttrs(tokens, alignMap, indentMap);
-    tagSourceLines(tokens, lineMap);
+    // ⚠ **集めるのが先、焼くのが後**(順は結果に影響しないが、集める側が
+    //    焼いた属性に依存していないことを読んで分かる形にしておく)
+    if (opts.collectRanges !== undefined) {
+      collectSourceRanges(tokens, lineMap, opts.collectRanges);
+    }
+    if (opts.sourceLineAnchors === true) tagSourceLines(tokens, lineMap);
     html = md.renderer.render(tokens, md.options, env);
   }
   // PR-2V:`:::toc{depth=N}` sentinel → <nav class="pkc-toc-formal pkc-toc-preview">
