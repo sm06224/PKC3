@@ -17,7 +17,17 @@
  */
 import { WorkerLease } from '../worker-lease';
 import { appJobMonitor, type JobMonitor } from '../job-monitor';
-import { renderMarkdown, type RenderMarkdownOptions } from '@features/markdown/markdown-render';
+import {
+  renderMarkdown,
+  type RenderMarkdownOptions,
+  type SourceRange,
+} from '@features/markdown/markdown-render';
+
+/** `renderWithRanges` の返り。⚠ 行番号は **HTML に焼かれていない**。 */
+export interface RenderedWithRanges {
+  html: string;
+  ranges: readonly SourceRange[];
+}
 
 /** アイドルで畳むまで。⚠ 短いと連続操作のたびに作り直して**かえって重くなる**。 */
 export const MARKDOWN_WORKER_IDLE_MS = 30_000;
@@ -85,14 +95,29 @@ export class MarkdownClient {
   }
 
   /**
+   * 🔴 **描画と行の対応表を一緒に取る**(2026-08-05。ライブエディタ S5)。
+   *
+   * ⚠ ワーカーが無い環境でも**同じ関数**から出す(`render` と同じ位置づけ ──
+   * ワーカーは速さの話であって正しさの話ではない)。
+   */
+  renderWithRanges(text: string, opts: RenderMarkdownOptions = {}): Promise<RenderedWithRanges> {
+    if (!this.lease) {
+      const ranges: SourceRange[] = [];
+      const html = renderMarkdown(text, { ...opts, collectRanges: ranges });
+      return Promise.resolve({ html, ranges });
+    }
+    return this.lease.run<RenderedWithRanges>({ text, opts, withRanges: true });
+  }
+
+  /**
    * 打鍵に追従する口を作る。**1 つの表示面につき 1 つ**作る。
    *
    * 🔑 飛ばすのは 1 件だけ。飛んでいる間に来たものは最後の 1 つだけ残す。
    * @param onHtml 描けたら呼ぶ。⚠ **最新のものだけ**呼ぶ(古い結果は来ない)。
    * @param onError 落ちたら呼ぶ(呼び側が同期描画へ落とす)。
    */
-  follower(
-    onHtml: (html: string) => void,
+  follower<R = string>(
+    onHtml: (result: R) => void,
     onError?: (e: unknown) => void,
     timing: {
       quietMs?: number;
@@ -100,6 +125,13 @@ export class MarkdownClient {
       setTimer?: (fn: () => void, ms: number) => unknown;
       clearTimer?: (h: unknown) => void;
       now?: () => number;
+      /**
+       * 🔴 **行の対応表も一緒に受ける**(2026-08-05。ライブエディタ S5)。
+       * ⚠ 畳み込みの実装は**1 本のまま**にする ── ここを別関数に割ると
+       * 「どちらが効いているか分からない」(既に detail.ts が同じ理由で
+       * rAF の二重畳み込みを禁じている)。
+       */
+      withRanges?: boolean;
     } = {},
   ): { push(text: string, opts?: RenderMarkdownOptions): void; flush(): void; dispose(): void } {
     const quietMs = timing.quietMs ?? PREVIEW_QUIET_MS;
@@ -119,14 +151,17 @@ export class MarkdownClient {
       const job = queued;
       queued = null;
       inFlight = true;
-      this.render(job.text, job.opts)
+      (timing.withRanges === true
+        ? (this.renderWithRanges(job.text, job.opts) as Promise<unknown>)
+        : (this.render(job.text, job.opts) as Promise<unknown>)
+      )
         .then((html) => {
           inFlight = false;
           // ⚠ もっと新しいものが来ているなら、この結果は**載せない**
           //    (載せると打った文字が一瞬消えて見える)
           if (disposed) return;
           if (queued) return pump();
-          onHtml(html);
+          onHtml(html as R);
         })
         .catch((e) => {
           inFlight = false;

@@ -716,6 +716,64 @@ select:focus-visible {
   outline-width: 1px;
 }
 
+/* ── ライブエディタ(1 面。`?pkc-live=1`)─────────────────
+ * 🔴 画面は**常に描画済み文書**で、クリックした行だけが原文の入力欄になる
+ * (2026-08-05。設計 doc `live-editor-design-2026-08.md` S5)。
+ * ⚠ 見た目は**プレビュー面と同じ**にする ── 「編集モードに入ったら別の画面」
+ * ではなく「同じ紙の上で 1 行だけ生になる」のが狙いなので、器の作りを変えない
+ * (user 指示 2026-08-03「同じものが常に同じ場所にある」)。 */
+[data-pkc-region='editor-live'] {
+  overflow: auto;
+  min-height: 0;
+  padding: var(--s3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  flex: 1;
+}
+/* 行の器。⚠ **高さを固定しない**(中身に合わせて伸びる) */
+[data-pkc-row-slot] {
+  display: block;
+}
+/* 🔑 生の行は**等幅**にする ── そこだけ原文であることが字で分かる。
+ * ⚠ 枠は 1px の accent(焦点の輪は別に付くので二重にしない) */
+[data-pkc-field='row-source'] {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.7;
+  padding: 2px var(--s2);
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  background: var(--surface);
+  color: var(--fg);
+  resize: none;
+  overflow: hidden;
+}
+[data-pkc-field='row-source']:focus-visible {
+  outline-width: 1px;
+}
+/* 🔴 **開放終端の色変え**(user 提案 2026-08-05「行を色変え」)。
+ * ⚠ 「閉じ待ち」は**エラーではない**ので赤にしない ── 左端の帯だけで示す。
+ * ⚠ 行内(`**` など)とブロック(``` / :::)で意味が違う:ブロックは
+ * 閉じないと**下を飲む**ので、そちらだけ強く出す。 */
+[data-pkc-open-end] {
+  border-left: 3px solid var(--muted);
+  padding-left: var(--s2);
+}
+[data-pkc-open-end='fence'],
+[data-pkc-open-end='directive'] {
+  border-left-color: var(--warn);
+}
+/* お知らせの行(無言で断らない)。⚠ 常に同じ場所に在る = 出ても配置が動かない */
+[data-pkc-field='row-note'] {
+  min-height: 1.2em;
+  margin: var(--s1) 0 0;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
 /* ⚠ **残りの高さを埋める**。以前は固定高で、下に 280px の死に領域があった */
 [data-pkc-field='editor-body'] {
   width: 100%;

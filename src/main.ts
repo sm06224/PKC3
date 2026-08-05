@@ -166,6 +166,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       getBlob: (key) => blobs.get(DEFAULT_CID, key),
     },
     markdown,
+    /**
+     * 🔴 **ライブエディタの本文書込**(2026-08-05。S5)。renderer は dispatch
+     * しない(層規約)ので、`UPDATE_OPEN_BODY` はここで投げる。
+     * ⚠ **同期で投げる**── 保存ボタンは textarea の blur(= 確定)より後に
+     * 走るので、ここが同期なら state は既に新しい本文を持っている。
+     */
+    (body) => dispatcher.dispatch({ type: 'UPDATE_OPEN_BODY', body }),
   );
   // いま居る場所の印(変わったときだけ属性を触る)
   let markedView: string | null = null;

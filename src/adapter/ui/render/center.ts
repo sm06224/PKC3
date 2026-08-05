@@ -40,6 +40,11 @@ export class CenterRouter {
     /** markdown を描く口。⚠ **アプリでは 1 個を共有する**(P8 段⑲)──
      *  面ごとに作ると worker lease がその数だけ立ち、常駐が増える。 */
     markdown?: MarkdownClient,
+    /**
+     * 🔴 **本文が変わったことを外へ知らせる**(2026-08-05。ライブエディタ S5)。
+     * ⚠ renderer は dispatch しない(層規約)── 投げるのは `main.ts` の仕事。
+     */
+    onBodyChange?: (body: string) => void,
   ) {
     const pane = (view: PaneView): HTMLElement => {
       const el = document.createElement('div');
@@ -54,7 +59,7 @@ export class CenterRouter {
       calendar: pane('calendar'),
       settings: pane('settings'),
     };
-    this.detail = new DetailRenderer(this.panes.detail, assets, markdown);
+    this.detail = new DetailRenderer(this.panes.detail, assets, markdown, onBodyChange ?? null);
     this.kanban = new KanbanRenderer(this.panes.kanban);
     this.calendar = new CalendarRenderer(this.panes.calendar, now);
     this.settings = new SettingsRenderer(this.panes.settings);
