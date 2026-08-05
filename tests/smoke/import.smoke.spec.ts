@@ -606,6 +606,17 @@ test('🔴 P7 段②: 素の md を取り込む ── 宣言(file_handlers)と�
   await expect(rows).toHaveCount(2);
   await expect(rows.locator('[data-pkc-field="title"]')).toHaveText(['会議メモ', '正本']);
 
+  // 🔴 **取り込んだノートが画面に出る**(2026-08-05、user 報告
+  //    「開いたら何も起きずに終わる」)。直す前は一覧の末尾に足すだけで、
+  //    中央は「左の一覧から選ぶと…」のまま、反応は左下 12px の「取込完了」だけだった。
+  //    ⚠ 複数選んだら**最後の 1 件**を開く(user が最後に指した物)
+  await expect(
+    page.locator('[data-pkc-field="detail-body"]'),
+    '取り込んだのに本文が出ない',
+  ).toBeVisible();
+  await expect(page.locator('[data-pkc-field="detail-title"]')).toHaveText('正本');
+  await expect(rows.nth(1)).toHaveAttribute('data-pkc-selected', /.*/);
+
   // 🔴 **本文が原文のまま**入っている(frontmatter を再構築していない)。
   // editor を開いて textarea の値そのものを見る ── rendered だけ見ると
   // frontmatter は表示されないので、消えていても気づけない

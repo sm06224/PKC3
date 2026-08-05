@@ -420,8 +420,22 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       const order = [...action.metas]
         .sort((a, b) => a.entryOrder - b.entryOrder || a.lid.localeCompare(b.lid))
         .map((m) => m.lid);
-      // 再 boot(コンテナ切替・error 復帰)で旧選択・旧 openBody を持ち越さない
-      // (lid 偶然衝突による cross-container 上書きの防止 ── review F)
+      // 🔴 **同じ container への再読込なら選択を保つ**(2026-08-05、user 報告)。
+      //
+      // ここは元々「再 boot では旧選択・旧 openBody を持ち越さない」だった。
+      // 意図は **container 切替**での lid 偶然衝突の防止(review F)で、それは正しい。
+      // ただし取込は**同じ container の再読込**でもここを通る ── つまり
+      // **md を 1 件開いただけで、いま読んでいたノートが画面から消えて**
+      // 「左の一覧から選ぶと…」に戻っていた(実測)。
+      //
+      // ⚠ 保つ条件は 2 つとも要る:**cid が同じ**(別 container なら従来どおり捨てる)
+      //    かつ **その lid が新しい一覧に在る**(消えたノートを選んだままにしない)。
+      // ⚠ `openBody` は必ず捨てる ── 再読込で本文が変わっている可能性がある。
+      //    代わりに `REQUEST_BODY` を出して**取り直す**(選択の意味論は SELECT_ENTRY と同じ)
+      const keepLid =
+        state.cid === action.cid && state.selectedLid !== null && metas.has(state.selectedLid)
+          ? state.selectedLid
+          : null;
       return {
         state: {
           ...state,
@@ -431,11 +445,11 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
           entryMetas: metas,
           order,
           relations: action.relations,
-          selectedLid: null,
+          selectedLid: keepLid,
           openBody: null,
           freshLid: null,
         },
-        events: [],
+        events: keepLid === null ? [] : [{ type: 'REQUEST_BODY', lid: keepLid }],
       };
     }
     case 'SELECT_ENTRY': {

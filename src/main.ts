@@ -38,6 +38,7 @@ import { bindActions, generateLid, type BinderServices } from '@adapter/ui/actio
 import { armLaunchQueue, type LaunchTarget } from '@adapter/platform/launch-queue';
 import { whenPhaseReady } from '@adapter/state/wait-for-ready';
 import { reloadSnapshot } from '@adapter/state/reload-snapshot';
+import { selectWhenPresent } from '@adapter/state/select-when-present';
 import { attachFiles } from '@adapter/ui/actions/attach';
 import { importFiles } from '@adapter/ui/actions/import-file';
 import type { ImportDeps } from '@adapter/ui/actions/import-pkc2';
@@ -364,6 +365,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       notify: (message) => showStatus(message),
       // 注意は**全件**を専用面へ(1 行の status では 1 件目しか届かない)
       report: (notes) => showNotices(regions.notices, '取込時の注意', notes),
+      // 🔴 **取り込んだノートを開く**(2026-08-05、user 報告「開いたら何も起きずに終わる」)。
+      //    ⚠ `reload()` が早く返る場合があるので、素朴な dispatch では
+      //    reducer に弾かれて黙って終わる ── 「居たら選ぶ、まだなら待つ」は
+      //    `select-when-present.ts` に閉じてある
+      focus: (lid) => void selectWhenPresent(dispatcher, lid),
   };
 
   /**
