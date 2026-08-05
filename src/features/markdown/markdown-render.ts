@@ -545,6 +545,20 @@ md.renderer.rules.link_open = function (tokens, idx, options, env, self) {
       token.attrSet('target', '_blank');
       token.attrSet('rel', 'noopener noreferrer');
     }
+  } else if (href.startsWith('#')) {
+    // 🔴 **文書内アンカーは外部リンクではない**(2026-08-05、user 報告から判明)。
+    //
+    // 直す前は「`entry:` / `pkc:` / `asset:` 以外は全部外部」という前提で
+    // `target="_blank"` を立てており、`[見出しへ](#anchor)` を押すと
+    // **2 枚目のタブが開いて**、PKC3 の単一タブ保護
+    // (`docs/manual.md`「🔴 タブは 1 つだけ」/ writer lease)に突き当たっていた。
+    // 実測:クリックで pages 1 → 2 になり、2 枚目は
+    // 「別のタブで開いています。そのタブを閉じると、ここで続きが開きます…」で止まる。
+    //
+    // ⚠ `rel` も付けない ── 同一文書内の移動に noopener は意味を持たない。
+    // ⚠ 判定は `#` 始まりだけに**狭く**当てる。相対パス(`./` `../`)は
+    //    このアプリでは意味を持たない(単一 HTML / Pages 配信)ので、
+    //    外部扱いのままにしておく方が安全側である。
   } else {
     token.attrSet('target', '_blank');
     token.attrSet('rel', 'noopener noreferrer');
@@ -2009,30 +2023,33 @@ function processTocDirective(
         if (Number.isFinite(n) && n >= 1 && n <= 6) depth = n;
       }
     }
-    // closing `:::` を探索(content は無視、自動生成のみ)
-    let j = i + 1;
-    while (j < lines.length) {
-      if (/^[ \t]*:::[ \t]*$/.test(lines[j]!)) break;
-      j++;
-    }
-    if (j >= lines.length) {
-      // unclosed、open 行を literal で残して 1 行だけ消費
-      out.push(line);
-      lineMapOut.push(inputIdx);
-      i++;
-      continue;
-    }
-    // sentinel 行に置換(depth 込み)、content + closing は consume
+    // 🔴 **`:::toc` は 1 行で閉じる**(2026-08-05 に user 報告から判明)。
+    //
+    // 直す前は「次に現れる単独 `:::` まで」を探して**その間を全部 consume** していた。
+    // 目次に content は無い(見出しから自動生成する)ので中身を捨てるのは正しいが、
+    // **閉じ `:::` を書かない書き方**では「次の `:::`」が別のブロック
+    // (`:::note` の閉じなど)に当たり、**その間の本文が丸ごと画面から消える**。
+    // 閉じが 1 つも無ければ `:::toc` が literal 文字列として出る ──
+    // `docs/manual.md` は閉じ無しで案内しているので、**書いたとおりに書くと出ない**。
+    //
+    // ⚠ 直し方は「探索範囲を狭める」ではなく「**探索をやめる**」。
+    //    範囲を狭めた版は「どこまでなら飲んでよいか」という判定を新たに生み、
+    //    同じ事故が別の距離で再発する(CLAUDE.md「判定を増やさない」)。
+    //    後方互換として、**直後の行**が単独 `:::` のときだけ 2 行 consume する。
+    const closer = lines[i + 1];
+    const closesImmediately = closer !== undefined && /^[ \t]*:::[ \t]*$/.test(closer);
     const recordIdx = records.length;
     records.push({ depth });
     out.push(`${TOC_OPEN}${recordIdx}${TOC_SEP}${depth}${TOC_OPEN}`);
     lineMapOut.push(inputIdx);
-    // closing `:::` まで skip(空行で line count を維持)
-    for (let k = i + 1; k <= j; k++) {
+    if (closesImmediately) {
+      // 空行で line count を維持(source-line anchor が 1 行ずれない)
       out.push('');
-      lineMapOut.push(lineMapIn[k] ?? k);
+      lineMapOut.push(lineMapIn[i + 1] ?? i + 1);
+      i += 2;
+    } else {
+      i += 1;
     }
-    i = j + 1;
   }
   return { transformed: out.join('\n'), lineMap: lineMapOut, records };
 }

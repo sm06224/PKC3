@@ -25,6 +25,11 @@ export class SettingsRenderer {
   private logBody: HTMLElement | null = null;
   private unsubscribe: (() => void) | null = null;
   private pending = false;
+  /**
+   * まだ描いていない変化がある(2026-08-05)。
+   * 通知が来た時点で立ち、実際に描けたときだけ降りる。
+   */
+  private dirty = false;
   /** ログは 400ms ごとに描き直す ── 読んでいる位置を殺さない(P8 段⑫)。 */
   private logScroll: ScrollMemory | null = null;
 
@@ -37,6 +42,14 @@ export class SettingsRenderer {
     if (this.built) {
       // 配色は user 操作でしか変わらない ── 毎 state で組み直さない
       this.syncTheme();
+      // 🔴 **隠れている間に来た変化をここで拾う**(2026-08-05、user 報告)。
+      //    `refresh()` は面が hidden の間は捨てるので(下の説明)、再表示のときに
+      //    誰かが呼び直さないと**表とログは初回ビルドの姿で凍る**。仕事は必ず
+      //    detail 面で起きる = 設定が隠れている間に起きるので、user が自然にやる
+      //    順序(設定を覗く → ノートを書く → もう一度設定)では
+      //    「まだ動いていません」と 2px の空ログのまま**永久に固定**され、
+      //    2 件走った後も画面が嘘をつく。復旧手段はリロードだけだった。
+      if (this.dirty) this.refresh();
       return;
     }
     this.built = true;
@@ -159,6 +172,11 @@ export class SettingsRenderer {
     // ⚠ 通知は来るたびに描かない(**間引く**)── 可視化が重さの原因になる
     this.unsubscribe?.();
     this.unsubscribe = this.monitor.subscribe(() => {
+      // 🔴 **届いたことは即座に覚える**(2026-08-05)。`refresh()` の中で立てると、
+      //    400ms の間引きが走る前に user が戻ってきたときに取りこぼす ──
+      //    「まだ描いていない変化がある」は**通知の時点**の事実であって、
+      //    間引きの都合とは別物である
+      this.dirty = true;
       if (this.pending) return;
       this.pending = true;
       setTimeout(() => {
@@ -181,7 +199,10 @@ export class SettingsRenderer {
     if (!this.jobsBody || !this.logBody || !this.jobsBody.isConnected) return;
     // ⚠ `offsetParent` は happy-dom で常に null なので使わない ── 面の切替が
     //    実際に触っている `hidden` を見る(`CenterRouter` の pane に付く)
+    // ⚠ 隠れているなら描かない。`dirty` は**降ろさない** ── 再表示のときに
+    //    `render()` が拾って追いつく(降ろすと、それが凍結の正体になる)
     if (this.region.closest('[data-pkc-view-pane][hidden]') !== null) return;
+    this.dirty = false;
     const lanes = this.monitor.stats();
     this.jobsBody.textContent = '';
     if (lanes.length === 0) {
@@ -218,7 +239,17 @@ export class SettingsRenderer {
     // ⚠ **書き換える前に**退避 → 入れ終わってから戻す(順番が本体)
     this.logScroll?.park();
     this.logBody.textContent = '';
-    for (const e of this.monitor.recent(50)) {
+    const recent = this.monitor.recent(50);
+    // 🔴 0 件のときに何も入れないと、器は**上下の border だけの 2px の線**になる
+    //    (実測)── 「壊れている」と読まれる。表側には `jobs-empty` が在るのに
+    //    ログ側だけ無かった。空状態は**言葉で**出す(min-height を足すのではなく)
+    if (recent.length === 0) {
+      const li = document.createElement('li');
+      li.setAttribute('data-pkc-field', 'job-log-empty');
+      li.textContent = 'まだ記録がありません';
+      this.logBody.append(li);
+    }
+    for (const e of recent) {
       const li = document.createElement('li');
       li.setAttribute('data-pkc-phase', e.phase);
       const t = new Date(e.at);
