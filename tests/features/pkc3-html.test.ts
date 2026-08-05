@@ -317,42 +317,76 @@ describe('可搬 HTML — heap に載せない', () => {
     return seen[seen.length - 1]!; // 最後 = 出力 HTML そのもの
   }
 
+  /** 部品のうち**文字列で残っているぶん**の文字数。 */
+  const strCharsOf = (parts: BlobPart[]): number =>
+    parts.filter((p): p is string => typeof p === 'string').reduce((n, s) => n + s.length, 0);
+
+  /**
+   * 🔴 **固定の閾値で測らない**(2026-08-05 に踏んだ)。ここは元々
+   * `strChars < 8KB` だったが、その 8KB は「骨組み(doctype / JSON の括弧 /
+   * **閲覧 UI の全文**)」を含む値である ── F-1 で閲覧 UI に印刷と目次を足したら
+   * **中身の話は何も変わっていないのに落ちた**。
+   *
+   * 見たいのは「**払い出しが文字列で残らないか**」なので、
+   * **大きい払い出しと小さい払い出しの差**で見る(骨組みは相殺される)。
+   * ⚠ これは閾値の引き上げではなく**計器の作り直し**である ── 引き上げると、
+   * 次に骨組みが育ったときまた同じ判断を迫られ、いずれ本物の漏れを通す。
+   */
+  const strCharsDelta = (big: BlobPart[], small: BlobPart[]): number =>
+    strCharsOf(big) - strCharsOf(small);
+
   it('🔴 添付の base64 が文字列として常駐しない(Blob 化して手放す)', async () => {
-    // チャンク 4 個ぶん。base64 にすると約 1MB になる
-    const bytes = new Uint8Array(3 * 64 * 1024 * 4);
-    for (let i = 0; i < bytes.length; i++) bytes[i] = i & 0xff;
-    const parts = await partsOfResult(() =>
-      writePortableHtml(
-        source({
-          entries: [{ lid: 'n1', body: '![](asset:k1)' }],
-          assets: [{ key: 'k1', mime: 'image/png', bytes }],
-        }),
-        NOW,
-      ),
-    );
-    const strChars = parts
-      .filter((p): p is string => typeof p === 'string')
-      .reduce((n, s) => n + s.length, 0);
-    // 文字列で残ってよいのは骨組み(doctype / JSON の括弧 / 閲覧 UI)だけ。
-    // base64 が 1 個でも文字列で残っていれば 80KB 以上になる
-    expect(strChars).toBeLessThan(8 * 1024);
+    const run = (n: number) => {
+      const bytes = new Uint8Array(n);
+      for (let i = 0; i < bytes.length; i++) bytes[i] = i & 0xff;
+      return partsOfResult(() =>
+        writePortableHtml(
+          source({
+            entries: [{ lid: 'n1', body: '![](asset:k1)' }],
+            assets: [{ key: 'k1', mime: 'image/png', bytes }],
+          }),
+          NOW,
+        ),
+      );
+    };
+    // チャンク 4 個ぶん(base64 で約 1MB)/ 対照群はその 1/8。
+    // ⚠ **桁数を揃える**(どちらも 6 桁)── 添付 meta の `size` は文字列で入るので、
+    //    桁数が違うと差が 0 にならない(実際 786432 と 3 で 5 文字ずれた)。
+    //    桁を揃えれば「差 0」を厳密に主張できる
+    const big = await run(786_432);
+    const small = await run(100_002);
+    expect(String(786_432).length).toBe(String(100_002).length); // 桁を揃えた前提の pin
+    // ⚠ 差が 0 = 添付の大きさは**文字列に一切影響していない**
+    expect(strCharsDelta(big, small), 'base64 が文字列で残っている').toBe(0);
     // 添付の bytes は Blob の側に居る(= 出力自体は欠けていない)
-    const blobBytes = parts
-      .filter((p): p is Blob => p instanceof Blob)
-      .reduce((n, b) => n + b.size, 0);
-    expect(blobBytes).toBeGreaterThan(bytes.length); // base64 は 4/3 に膨らむ
+    const bytesOf = (parts: BlobPart[]) =>
+      parts.filter((p): p is Blob => p instanceof Blob).reduce((n, b) => n + b.size, 0);
+    expect(bytesOf(big)).toBeGreaterThan(786_432); // base64 は 4/3 に膨らむ
+    // ⚠ 空振り防止 ── Blob 側は確かに 60 万文字以上違う(差 0 が偶然でないことの担保)
+    expect(bytesOf(big) - bytesOf(small)).toBeGreaterThan(600_000);
   });
 
   it('🔴 本文もバッチごとに手放す(全本文が文字列で残らない)', async () => {
-    const entries = Array.from({ length: 40 }, (_, i) => ({
-      lid: `n${i}`,
-      body: 'あ'.repeat(2000),
-    }));
-    const parts = await partsOfResult(() => writePortableHtml(source({ entries, batch: 4 }), NOW));
-    const strChars = parts
-      .filter((p): p is string => typeof p === 'string')
-      .reduce((n, s) => n + s.length, 0);
-    expect(strChars).toBeLessThan(8 * 1024); // 本文だけで 80,000 文字ある
+    const run = (len: number) =>
+      partsOfResult(() =>
+        writePortableHtml(
+          source({
+            entries: Array.from({ length: 40 }, (_, i) => ({
+              lid: `n${i}`,
+              body: 'あ'.repeat(len),
+            })),
+            batch: 4,
+          }),
+          NOW,
+        ),
+      );
+    const big = await run(2000); // 本文だけで 80,000 文字
+    const small = await run(1);
+    expect(strCharsDelta(big, small), '本文が文字列で残っている').toBe(0);
+    // ⚠ 空振り防止 ── 本文は Blob の側で確かに増えている
+    const bytesOf = (parts: BlobPart[]) =>
+      parts.filter((p): p is Blob => p instanceof Blob).reduce((n, b) => n + b.size, 0);
+    expect(bytesOf(big)).toBeGreaterThan(bytesOf(small) + 100_000);
   });
 });
 
@@ -773,5 +807,291 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
     const fail = document.getElementById('fail');
     expect(fail?.textContent).toContain('このファイルを表示できませんでした');
     expect(fail?.textContent).toContain('ダウンロードが途中で終わっている');
+  });
+});
+
+/**
+ * F-1: **印刷できる・折りたたみ目次つき**の単一 HTML。
+ * user 要望 2026-08-05「印刷も可能な折りたたみ TOC 付単一 HTML のバンドル機能」。
+ *
+ * ⚠ 閲覧側を**実行して DOM を見る**(script 文字列の grep では何も分からない)。
+ * ⚠ `@media print` が実際に効くかは happy-dom では測れない ──
+ *   そこは `tests/smoke/portable-print.smoke.spec.ts` が実 Chromium の
+ *   `emulateMedia({media:'print'})` で見る。ここでは**組み立て**を見る。
+ */
+describe('可搬 HTML — 目次と印刷(F-1)', () => {
+  /** 生成 HTML から DOM を組み立て、インライン script を実行する。 */
+  async function open(blob: Blob): Promise<void> {
+    const html = await blob.text();
+    const dataJson = /<script id="pkc-data" type="application\/json">([\s\S]*?)<\/script>/.exec(
+      html,
+    )![1]!;
+    const viewer = /<script>\n([\s\S]*?)\n<\/script>$/.exec(html)![1]!;
+    const markup = /<\/script>([\s\S]*?)<script>/.exec(html.slice(html.indexOf('</script>')))![1]!;
+    document.body.innerHTML = markup;
+    document.body.removeAttribute('data-print');
+    const data = document.createElement('script');
+    data.id = 'pkc-data';
+    data.type = 'application/json';
+    data.textContent = dataJson;
+    document.body.appendChild(data);
+    new Function(viewer)();
+    await new Promise((r) => setTimeout(r, 0));
+  }
+
+  const DOC = source({
+    entries: [
+      {
+        lid: 'n1',
+        title: '設計',
+        body: '# 全体\n本文\n## 保存\nああ\n### 器\nいい\n#### 深い見出し\nうう\n',
+      },
+      { lid: 'n2', title: '同名', body: '# 全体\nこちらも「全体」という見出し\n' },
+      { lid: 'n3', title: '見出し無し', body: 'ただの本文\n' },
+    ],
+  });
+
+  it('折りたたみの器がある(ノート一覧・この文書の目次)', async () => {
+    await open((await writePortableHtml(DOC, NOW)).blob);
+    const ds = document.querySelectorAll('nav details');
+    expect(ds).toHaveLength(2);
+    // 既定は開いている(畳めることが要件で、畳んだ状態が既定ではない)
+    expect(Array.from(ds).every((d) => (d as HTMLDetailsElement).open)).toBe(true);
+    expect(document.querySelector('#dnotes summary')?.textContent).toBe('ノート');
+    expect(document.querySelector('#dtoc summary')?.textContent).toBe('この文書の目次');
+    // ノート一覧は畳める器の中に入った(以前は nav 直下)
+    expect(document.querySelector('#dnotes #list')).not.toBeNull();
+  });
+
+  it('🔴 目次は h1〜h3 を深さつきで並べる(h4 は入れない)', async () => {
+    await open((await writePortableHtml(DOC, NOW)).blob);
+    const items = Array.from(document.querySelectorAll('#toc li')).map((li) => [
+      li.getAttribute('data-l'),
+      li.textContent,
+    ]);
+    expect(items).toEqual([
+      ['1', '全体'],
+      ['2', '保存'],
+      ['3', '器'],
+    ]);
+    // ⚠ h4 を入れない理由は「飛べないから」── 描画側が id を振るのは h1〜h3
+    expect(document.querySelector('#body h4')?.id ?? '').toBe('');
+    expect(document.getElementById('tocempty')!.hidden).toBe(true);
+  });
+
+  it('目次の行を押すと、その見出しへ移る', async () => {
+    await open((await writePortableHtml(DOC, NOW)).blob);
+    const h = document.querySelector<HTMLElement>('#body h2')!;
+    const spy = vi.fn();
+    (h as unknown as { scrollIntoView: () => void }).scrollIntoView = spy;
+    document.querySelectorAll<HTMLButtonElement>('#toc li button')[1]!.click();
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('見出しが無いノートは「見出しがありません」と言う(空の器を残さない)', async () => {
+    await open((await writePortableHtml(DOC, NOW)).blob);
+    document.querySelectorAll<HTMLButtonElement>('#list button')[2]!.click();
+    expect(document.querySelectorAll('#toc li')).toHaveLength(0);
+    expect(document.getElementById('tocempty')!.hidden).toBe(false);
+  });
+
+  it('🔴 紙の目次は「実在する id」を指す(飛べないリンクを作らない)', async () => {
+    await open((await writePortableHtml(DOC, NOW)).blob);
+    const links = Array.from(document.querySelectorAll<HTMLAnchorElement>('#ptoc a'));
+    expect(links).toHaveLength(3);
+    for (const a of links) {
+      const id = a.getAttribute('href')!.slice(1);
+      expect(id, '空の href').not.toBe('');
+      expect(document.querySelector(`#body [id="${id}"]`), `${id} が本文に無い`).not.toBeNull();
+    }
+    // 画面の目次と紙の目次は**同じ見出し列**から作る(2 か所で別に拾わない)
+    expect(links.map((a) => a.textContent)).toEqual(
+      Array.from(document.querySelectorAll('#toc li button')).map((b) => b.textContent),
+    );
+  });
+
+  describe('全体を印刷', () => {
+    it('全件を 1 つの document に組む(目次の節 + ノートごとの節)', async () => {
+      await open((await writePortableHtml(DOC, NOW)).blob);
+      expect(document.getElementById('printall')!.textContent).toBe('全体を印刷(3 件)');
+      document.getElementById('printall')!.click();
+      const secs = document.querySelectorAll('#all section');
+      expect(secs).toHaveLength(4); // 目次 + 3 件
+      expect(document.body.getAttribute('data-print')).toBe('all');
+      // 本文の体裁は class で当てる(id を 2 個作らない)
+      expect(document.querySelectorAll('#all .b')).toHaveLength(3);
+      expect(document.querySelectorAll('#all [id="body"]'), 'id が重複している').toHaveLength(0);
+      expect(document.querySelector('#all section:nth-child(3) h2')?.textContent).toBe('同名');
+    });
+
+    it('🔴 別ノートの同名見出しが同じ id にならない(目次が全部 1 件目へ飛ぶのを防ぐ)', async () => {
+      await open((await writePortableHtml(DOC, NOW)).blob);
+      document.getElementById('printall')!.click();
+      const ids = Array.from(document.querySelectorAll('#all [id]')).map((el) => el.id);
+      expect(ids.length).toBeGreaterThan(4);
+      expect(new Set(ids).size, `id が重複: ${ids.join()}`).toBe(ids.length);
+      // ⚠ 「全体」という見出しは 2 件のノートに在る ── 書出し側の slug は同じになる
+      const zentai = Array.from(document.querySelectorAll('#all h1')).filter(
+        (h) => h.textContent === '全体',
+      );
+      expect(zentai).toHaveLength(2);
+      expect(zentai[0]!.id).not.toBe(zentai[1]!.id);
+    });
+
+    it('🔴 ノート名が 1 段目、その見出しは 1 段下げる(同じ段に並べない)', async () => {
+      await open((await writePortableHtml(DOC, NOW)).blob);
+      document.getElementById('printall')!.click();
+      const rows = Array.from(
+        document.querySelectorAll('#all section:first-child li'),
+      ).map((li) => [li.getAttribute('data-l'), li.className, li.textContent]);
+      // ノート名(class n・1 段目)→ その h1 は 2 段目、h2 は 3 段目、h3 は 4 段目
+      expect(rows).toEqual([
+        ['1', 'n', '設計'],
+        ['2', '', '全体'],
+        ['3', '', '保存'],
+        ['4', '', '器'],
+        ['1', 'n', '同名'],
+        ['2', '', '全体'],
+        ['1', 'n', '見出し無し'],
+      ]);
+      // ⚠ 体裁は #ptoc だけでなく **ol.x にも当てる**(実機で全体印刷の目次が
+      //    既定の連番つき青リンクのまま出た)
+      expect(document.querySelector('#all section:first-child ol')?.className).toBe('x');
+    });
+
+    it('🔴 目次のリンクは、その節の実在 id を指す', async () => {
+      await open((await writePortableHtml(DOC, NOW)).blob);
+      document.getElementById('printall')!.click();
+      const links = Array.from(document.querySelectorAll<HTMLAnchorElement>('#all section:first-child a'));
+      // ノート 3 件 + 見出し 4 件(1 件目に h1/h2/h3、2 件目に h1、3 件目は無し)
+      expect(links.length).toBe(7);
+      // ⚠ ノートの行は必ず全件ある(見出しの数に埋もれていない)
+      expect(
+        links.filter((a) => (a.getAttribute('href') ?? '').startsWith('#pe-')).length,
+      ).toBe(3);
+      for (const a of links) {
+        const id = a.getAttribute('href')!.slice(1);
+        expect(document.querySelector(`#all [id="${id}"]`), `${id} が無い`).not.toBeNull();
+      }
+    });
+
+    it('🔴 印刷が終わったら捨てる(組んだ DOM と object URL を残さない)', async () => {
+      const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+      try {
+        await open(
+          (
+            await writePortableHtml(
+              source({
+                entries: [
+                  { lid: 'a1', title: '図', body: '![](asset:ast-p)' },
+                  { lid: 'a2', title: '図 2', body: '![](asset:ast-p)' },
+                ],
+                assets: [{ key: 'ast-p', mime: 'image/png', bytes: enc.encode('PNGBYTES') }],
+              }),
+              NOW,
+            )
+          ).blob,
+        );
+        revoke.mockClear();
+        document.getElementById('printall')!.click();
+        expect(document.querySelectorAll('#all img').length).toBe(2);
+        expect(revoke, '組む前に画面のぶんを捨ててはいけない').not.toHaveBeenCalled();
+
+        window.dispatchEvent(new Event('afterprint'));
+        expect(document.getElementById('all')!.childNodes.length).toBe(0);
+        expect(document.body.hasAttribute('data-print')).toBe(false);
+        expect(revoke.mock.calls.length, '紙用の object URL を捨てていない').toBe(2);
+        // ⚠ 画面のぶんは**生きている**(寿命が混ざっていない)
+        expect(document.querySelector('#body img')?.getAttribute('src')).toMatch(/^blob:/);
+      } finally {
+        revoke.mockRestore();
+      }
+    });
+
+    it('読みに戻った時点でも捨てる(afterprint が来ない環境でも残さない)', async () => {
+      await open((await writePortableHtml(DOC, NOW)).blob);
+      document.getElementById('printall')!.click();
+      expect(document.querySelectorAll('#all section').length).toBe(4);
+      document.querySelectorAll<HTMLButtonElement>('#list button')[1]!.click();
+      expect(document.getElementById('all')!.childNodes.length).toBe(0);
+      expect(document.body.hasAttribute('data-print')).toBe(false);
+    });
+  });
+
+  it('🔴 紙では折りたたみを開き、印刷後に元へ戻す(畳んでいた状態を壊さない)', async () => {
+    await open((await writePortableHtml(DOC, NOW)).blob);
+    const dtoc = document.getElementById('dtoc') as HTMLDetailsElement;
+    const dnotes = document.getElementById('dnotes') as HTMLDetailsElement;
+    dtoc.open = false; // user が畳んだ状態
+    window.dispatchEvent(new Event('beforeprint'));
+    expect(dtoc.open, '紙で畳んだままになっている').toBe(true);
+    expect(dnotes.open).toBe(true);
+    window.dispatchEvent(new Event('afterprint'));
+    expect(dtoc.open, '畳んでいた状態に戻っていない').toBe(false);
+    expect(dnotes.open, '開いていたものを畳んでしまった').toBe(true);
+  });
+});
+
+/**
+ * 閲覧側は**押しても何も起きない操作子を残さない**。
+ *
+ * 🔴 描画はアプリと同じ関数なので、コード・表・図に付く「コピー」ボタン
+ * (`data-pkc-action="copy-md-block"`)がそのまま焼き込まれる。閲覧側に binder は
+ * 無いので**沈黙する飾り**になり、紙にも `⧉` が印字される(F-1 の実機確認で発見)。
+ */
+describe('可搬 HTML — 沈黙する操作子を残さない', () => {
+  async function openDoc(blob: Blob): Promise<void> {
+    const html = await blob.text();
+    const dataJson = /<script id="pkc-data" type="application\/json">([\s\S]*?)<\/script>/.exec(
+      html,
+    )![1]!;
+    const viewer = /<script>\n([\s\S]*?)\n<\/script>$/.exec(html)![1]!;
+    const markup = /<\/script>([\s\S]*?)<script>/.exec(html.slice(html.indexOf('</script>')))![1]!;
+    document.body.innerHTML = markup;
+    document.body.removeAttribute('data-print');
+    const data = document.createElement('script');
+    data.id = 'pkc-data';
+    data.type = 'application/json';
+    data.textContent = dataJson;
+    document.body.appendChild(data);
+    new Function(viewer)();
+    await new Promise((r) => setTimeout(r, 0));
+  }
+
+  const WITH_BLOCKS = source({
+    entries: [
+      {
+        lid: 'n1',
+        title: '表とコード',
+        body: '| a | b |\n|---|---|\n| 1 | 2 |\n\n```ts\nconst x = 1;\n```\n',
+      },
+    ],
+  });
+
+  it('🔴 コピーボタンは残らない(本文の中身は残る)', async () => {
+    const out = await writePortableHtml(WITH_BLOCKS, NOW);
+    // ⚠ 空振り防止 ── **書き出しデータには在る**(描画はアプリと同じ関数だから)。
+    //    ここが 0 件なら「消えている」ことは何も証明しない
+    const d = await dataOf(out.blob);
+    expect(
+      (d.entries[0]!.html.match(/copy-md-block/g) ?? []).length,
+      '描画データにコピーボタンが無い(この test は何も測っていない)',
+    ).toBe(2);
+
+    await openDoc(out.blob);
+    expect(document.querySelectorAll('#body [data-pkc-action]')).toHaveLength(0);
+    expect(document.getElementById('body')!.textContent).not.toContain('⧉');
+    // 中身は消えていない(ボタンだけ取る ── 表とコードは残る)
+    expect(document.querySelectorAll('#body table')).toHaveLength(1);
+    expect(document.querySelectorAll('#body pre')).toHaveLength(1);
+    expect(document.getElementById('body')!.textContent).toContain('const x = 1;');
+  });
+
+  it('🔴 全体印刷で組んだぶんにも残らない(紙に ⧉ を出さない)', async () => {
+    await openDoc((await writePortableHtml(WITH_BLOCKS, NOW)).blob);
+    document.getElementById('printall')!.click();
+    expect(document.querySelectorAll('#all [data-pkc-action]')).toHaveLength(0);
+    expect(document.getElementById('all')!.textContent).not.toContain('⧉');
+    expect(document.querySelectorAll('#all table')).toHaveLength(1);
   });
 });

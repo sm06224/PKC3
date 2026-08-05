@@ -784,6 +784,55 @@ test('🔴 可搬 HTML: 書き出したファイルが**単体で開いて読め
       (el as HTMLImageElement).complete && (el as HTMLImageElement).naturalWidth > 0))
     .toBe(true);
 
+  // ── F-1: 折りたたみ目次と印刷。⚠ `@media print` が**実際に効く**かは
+  //    happy-dom では測れない ── ここが唯一の観測点なので実ブラウザで見る
+  await items.nth(0).click();
+  const headings = await viewer.locator('#body h1, #body h2, #body h3').count();
+  expect(headings, 'この fixture に見出しが 1 個も無い(目次を測っていない)').toBeGreaterThan(0);
+  await expect(viewer.locator('#toc li')).toHaveCount(headings);
+  // 畳める(details であること自体が要件 ── JS を足さずに畳める)
+  expect(
+    await viewer.locator('#dtoc').evaluate((el) => el.tagName.toLowerCase()),
+  ).toBe('details');
+  // 目次の行を押すと本文の見出しへ移る(#body はスクロール箱の中)
+  const before = await viewer.locator('main').evaluate((el) => el.scrollTop);
+  await viewer.locator('#toc li').last().locator('button').click();
+  expect(
+    await viewer.locator('main').evaluate((el) => el.scrollTop),
+    '目次から移動していない',
+  ).not.toBe(before);
+
+  await viewer.emulateMedia({ media: 'print' });
+  const styleOf = async (sel: string, prop: string): Promise<string> =>
+    viewer.locator(sel).evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), prop);
+  // 🔴 **画面用の grid と 100vh をほどく**のが印刷の本題 ── ほどかないと
+  //    main がスクロール箱のままで、1 ページ目だけ出て残りが切れる
+  expect(await styleOf('body', 'display'), '印刷でも grid のまま').toBe('block');
+  expect(await styleOf('main', 'overflow'), 'main がスクロール箱のまま').toBe('visible');
+  expect(await styleOf('nav', 'display'), '紙に一覧が出てしまう').toBe('none');
+  expect(await styleOf('#ptoc', 'display'), '紙に目次が出ない').not.toBe('none');
+  // 紙の目次は畳まれない(印刷の直前に open を立てる)
+  await viewer.locator('#dtoc').evaluate((el) => {
+    (el as HTMLDetailsElement).open = false;
+  });
+  await viewer.evaluate(() => window.dispatchEvent(new Event('beforeprint')));
+  expect(await viewer.locator('#dtoc').evaluate((el) => (el as HTMLDetailsElement).open)).toBe(true);
+
+  // 全体を印刷 ── ⚠ ボタンは nav の中にあり、紙では nav が消える(上で確認済み)。
+  //    **押すのは画面**、確かめるのは紙 ── user の実際の順序と同じ
+  await viewer.emulateMedia({ media: 'screen' });
+  await expect(viewer.locator('#all')).toBeHidden(); // 画面には出ていない
+  await viewer.locator('#printall').click();
+  await expect(viewer.locator('#all section')).toHaveCount(3); // 目次 + 2 件
+  await expect(viewer.locator('#all'), '画面に紙用の全件が出てしまう').toBeHidden();
+  await viewer.emulateMedia({ media: 'print' });
+  expect(await styleOf('main', 'display'), '全体印刷で main が残っている').toBe('none');
+  expect(await styleOf('#all', 'display'), '全体が紙に出ない').toBe('block');
+  // 🔴 組んだものは**捨てる**(印刷後に常駐させない)
+  await viewer.evaluate(() => window.dispatchEvent(new Event('afterprint')));
+  await expect(viewer.locator('#all section')).toHaveCount(0);
+  await viewer.emulateMedia({ media: 'screen' });
+
   expect(viewerErrors).toEqual([]);
   expect(errors).toEqual([]);
   await rm(file, { force: true });
