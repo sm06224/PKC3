@@ -28,11 +28,15 @@ import { LauncherRenderer } from './launcher';
 
 export type BrowseMode = 'list' | 'filer' | 'launcher';
 
-/** タブ。⚠ 文言は「探し方」を表す(「詳細」のような場所の名前にしない)。 */
-export const BROWSE_TABS: readonly { mode: BrowseMode; label: string; icon: string }[] = [
-  { mode: 'list', label: '一覧', icon: '📄' },
-  { mode: 'filer', label: 'フォルダ', icon: '📁' },
-  { mode: 'launcher', label: 'アプリ', icon: '🚀' },
+/**
+ * タブ。⚠ 文言は「探し方」を表す(「詳細」のような場所の名前にしない)。
+ * ⚠ 図案は**ここに持たない** ── `icons.ts` の `BROWSE_ICONS` が正本
+ * (P9 段③。絵文字の表が 3 か所に散っていたのを 1 つに寄せた)。
+ */
+export const BROWSE_TABS: readonly { mode: BrowseMode; label: string }[] = [
+  { mode: 'list', label: '一覧' },
+  { mode: 'filer', label: 'フォルダ' },
+  { mode: 'launcher', label: 'アプリ' },
 ] as const;
 
 export class BrowseRouter {

@@ -2,7 +2,7 @@
  * storage worker ⇄ main thread の message 契約(設計 doc §4.4)。
  * メインスレッドは query/command を投げるだけで、sqlite は worker 内に閉じる。
  */
-import type { EntryMetaRow, EntryUpsert } from './schema';
+import type { EntryMetaRow, EntryStamps, EntryUpsert } from './schema';
 
 export type StorageRequest =
   | { op: 'init'; dbName: string; journalMode?: JournalMode }
@@ -281,7 +281,14 @@ export interface ResultMap {
     done: boolean;
     next?: { entryOrder: number; lid: string };
   };
-  upsertEntry: null;
+  /**
+   * 🔑 **DB が刻んだ時刻**(P9 段①)。`datetime('now')` を打つのは worker だけなので、
+   * 返さないと主スレッドは次の boot まで作成・更新を知らない。
+   * ⚠ **null 許容にしているのは行が消えていた場合だけ** ── 通常は必ず値が入る
+   * (`tests/adapter/entry-timestamps.test.ts` が「実際に届くこと」を pin している。
+   * optional にすると writer が代入を落としても tsc が黙り、全件で無効化される)
+   */
+  upsertEntry: EntryStamps;
   bulkUpsertEntries: null;
   deleteEntry: null;
   listRelations: RelationRow[];

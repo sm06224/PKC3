@@ -80,6 +80,22 @@ export const LAUNCHER_APP_SANDBOX =
   'allow-scripts allow-forms allow-modals allow-popups allow-downloads';
 
 /**
+ * 🔴 **素のまま(同一オリジン)で開くときの権限**(P10、user 指示 2026-08-05
+ * 「同一ドメインで動かしたい HTML アセットが javascript が動かなくて死ぬ」)。
+ *
+ * 診断: JavaScript は動いていた。死んでいたのは**不透明オリジン**のせいで、
+ * `indexedDB.open()` / `document.cookie` / `caches` / `navigator.storage` が
+ * **プロパティを読むだけで同期に throw** する ── `try/catch` を書いていない
+ * 普通のアプリは 1 行目で止まり、真っ白になる。
+ *
+ * ⚠ これを付けると **PKC3 の保存領域に手が届く**(localStorage 全体 /
+ * IndexedDB の添付 / OPFS の sqlite / `pkc3-writer` の lease)。
+ * だから **詳細画面の別の導線からしか入れない・確認する・許可を保存しない**。
+ * 設計は `docs/development/p10-launcher-same-origin-2026-08.md`。
+ */
+export const LAUNCHER_APP_SANDBOX_SAME_ORIGIN = `${LAUNCHER_APP_SANDBOX} allow-same-origin`;
+
+/**
  * permissions policy で明け渡すもの。
  *
  * ⚠ **`clipboard-read` は入れない**(実測で無応答になるうえ、user が他のアプリで
@@ -160,6 +176,14 @@ export interface AppShellOptions {
    * `new URL(相対, base)` が落ちる。**本番では必ず渡す**。
    */
   base?: string;
+  /**
+   * 🔴 **素のまま(同一オリジン)で開く**(P10)。既定は `false` = 囲いの中。
+   *
+   * ⚠ `true` にすると保管庫の shim を**入れない** ── 本物の `localStorage` が
+   * 生きているので差し替える必要がない(shim 自身も「本物が生きていれば何もしない」)。
+   * ⚠ そのぶん**名前空間も無い** ── アプリの保存は PKC3 の localStorage に直接入る。
+   */
+  sameOrigin?: boolean;
 }
 
 /**
@@ -183,7 +207,9 @@ export function buildLauncherAppShell(
   opts: AppShellOptions = {},
 ): string {
   const t = escapeAttr(title);
-  const lends = opts.appId !== undefined && opts.appId !== '';
+  const raw = opts.sameOrigin === true;
+  // ⚠ 素のままでは shim を入れない(本物が生きているので差し替え不要)
+  const lends = !raw && opts.appId !== undefined && opts.appId !== '';
   // 🔴 prelude は **`<!doctype>` の直後**(先頭に前置すると quirks mode に落ちる)
   const inner = lends
     ? insertPrelude(html, buildStorageShim({ seed: opts.seed ?? {} }))
@@ -201,7 +227,9 @@ export function buildLauncherAppShell(
     '</style></head><body>';
 
   const frame =
-    `<iframe sandbox="${LAUNCHER_APP_SANDBOX}" allow="${LAUNCHER_APP_ALLOW}"` +
+    // 🔑 どちらで開いたかを**観測できる形**にする(外から見て分かる = test で pin できる)
+    `<iframe data-pkc-launcher-mode="${raw ? 'same-origin' : 'sandboxed'}"` +
+    ` sandbox="${raw ? LAUNCHER_APP_SANDBOX_SAME_ORIGIN : LAUNCHER_APP_SANDBOX}" allow="${LAUNCHER_APP_ALLOW}"` +
     ` referrerpolicy="no-referrer" data-pkc-field="launcher-app" title="${t}"` +
     // ⚠ `<base>` は prelude と同じく**中に**焼く(外殻の base ではアプリに効かない)
     ` srcdoc="${escapeForSrcdoc(insertBase(inner, opts.base))}"></iframe>`;

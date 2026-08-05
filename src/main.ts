@@ -22,6 +22,7 @@ import { createUpdatePrompt } from '@adapter/ui/render/update-card';
 import { applyTheme, chooseTheme, initialTheme, isTheme } from '@adapter/ui/render/theme';
 import { launchTile } from '@adapter/ui/launch-tile';
 import { readAppStorage } from '@adapter/platform/app-storage';
+import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { waitForWindowClose } from '@adapter/platform/window-close';
 import { copyPlainText } from '@adapter/platform/clipboard';
 import { MarkdownClient } from '@adapter/platform/render/markdown-client';
@@ -159,7 +160,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   let markedView: string | null = null;
   const markView = (view: string) => {
     if (view === markedView) return;
-    for (const btn of regions.brand.querySelectorAll('[data-pkc-view]')) {
+    // ⚠ 設定ボタンは**左の列**へ移った(P10 で上の帯を撤去)── 探す先も変える
+    for (const btn of regions.sidebar.querySelectorAll('[data-pkc-view]')) {
       if (btn.getAttribute('data-pkc-view') === view)
         btn.setAttribute('data-pkc-active', '');
       else btn.removeAttribute('data-pkc-active');
@@ -192,22 +194,52 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   // ⚠ 捨てはしない ── 不具合報告のときに要るので `title`(ホバー)へ逃がす。
   // ⚠ ただし **fallback(意図しない保存先)は見せる** ── これは user が
   // 知るべき事実で、黙ると「編集が消える」の原因が見えなくなる
-  const statusBase =
-    `${APP_ID} v${APP_VERSION}` + (init.fallbackReason ? ` ⚠ ${init.fallbackReason}` : '');
+  /**
+   * 🔴 **版を常設しない**(P10、user 指示「上下の帯は不要 / 大して働いていない」)。
+   * 直す前は 99% の時間ここが「pkc3 v3.0.0」だった ── それが「働いていない」の中身。
+   * 版は**設定の画面**へ移した(下の `showVersion`)。
+   * ⚠ ただし **fallback(意図しない保存先)は常に出す** ── これは user が知るべき
+   * 事実で、黙ると「編集が消える」の原因が見えなくなる。
+   */
+  const statusBase = init.fallbackReason ? `⚠ ${init.fallbackReason}` : '';
   regions.status.title = `${APP_ID} v${APP_VERSION} (${BUILD_KIND}) — ${init.vfs}`;
   // textContent の setter は同一文字列でも子ノードを全置換する ── 打鍵ごとの
   // state 変化で無駄な DOM 変異を起こさないよう、変わったときだけ書く
   let statusShown = statusBase;
   regions.status.textContent = statusBase;
-  const showStatus = (text: string) => {
+  // 🔑 **空なら場所を取らない**(notices / update と同じ作法)
+  regions.status.hidden = statusBase === '';
+  /**
+   * 🔴 **2 つの経路を分けて持つ**(P10)。以前は 1 つの `showStatus` を
+   * 「状態(エラー)」と「一時の知らせ(コピーした・取り込んだ)」が**共有**して
+   * いたので、**知らせの直後に無関係な状態変化が来ると黙って消えた**。
+   *
+   * P9 で書込ごとに時刻の ack(`ENTRY_STAMPED`)が飛ぶようになって顕在化した ──
+   * コピーの知らせが ack で上書きされ、smoke が落ちた(実測)。
+   * ⚠ 直し方は「順番を祈る」ではなく**優先順位を決める**こと:
+   * **エラー > 一時の知らせ > 常設(保存先の警告)**。
+   */
+  let errorLine = '';
+  let noticeLine = '';
+  const paint = () => {
+    const parts = [statusBase, noticeLine, errorLine].filter((t) => t !== '');
+    const text = parts.join(' — ');
     if (text === statusShown) return;
     statusShown = text;
     regions.status.textContent = text;
+    regions.status.hidden = text === '';
+  };
+  /** 一時の知らせ(コピーした / 取り込んだ)。⚠ 状態変化では消えない。 */
+  const showStatus = (text: string) => {
+    noticeLine = text;
+    paint();
   };
   // エラー表示は state 駆動のみ(P3-6b: BODY_LOAD_FAILED も state.error に
   // 統一 ── 表示寿命は「次の成功 / 選択まで」で、event の一瞬表示問題は消滅)
   dispatcher.onState((state) => {
-    showStatus(state.error ? `${statusBase} ⚠ エラー: ${state.error}` : statusBase);
+    // ⚠ **エラーの行だけ**を触る ── 一時の知らせを巻き添えにしない
+    errorLine = state.error ? `⚠ エラー: ${state.error}` : '';
+    paint();
   });
 
   // 🔒 attach / import と purge の排他 gate(review F1)。実体と pin は asset-gate.ts
@@ -248,7 +280,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             client.request({ op: 'exportRevisionChain', cid: DEFAULT_CID, entryLid }),
         },
         download: downloadBlob,
-        notify: (message) => showStatus(`${statusBase} — ${message}`),
+        notify: (message) => showStatus(message),
         // ⚠ **注意の中身**を出す導線(review M1 で一度落ちた)。無いと user が
         // 見るのは「⚠ 注意 1 件」だけで、**どの添付が欠けたか**が消える ──
         // バックアップで一番知りたい情報がそこにある
@@ -329,7 +361,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       // 🔑 中身は `reload-snapshot.ts`(段㉕ で切り出し ── closure に居ると
       //    誰も test できず、「案内は出すが実行しない」嘘が残っていた)
       reload: () => reloadSnapshot(dispatcher, DEFAULT_CID, loadSnapshot),
-      notify: (message) => showStatus(`${statusBase} — ${message}`),
+      notify: (message) => showStatus(message),
       // 注意は**全件**を専用面へ(1 行の status では 1 件目しか届かない)
       report: (notes) => showNotices(regions.notices, '取込時の注意', notes),
   };
@@ -350,6 +382,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     confirmDiscard: () =>
       window.confirm?.('編集中の内容は保存されません。新しい版に切り替えますか?') ?? true,
   });
+
+  /**
+   * 🔴 **素のまま起動を許した添付**(P10)。**このセッションだけ**の記憶で、
+   * どこにも保存しない ── 素のままのアプリは localStorage / IndexedDB / OPFS に
+   * 手が届くので、**永続化した許可は自分で書ける**(前の設計 doc の指摘)。
+   * ⚠ この変数への参照経路はアプリ側に無い(`opener` は切り、`parent` は外殻で止まる)。
+   */
+  const sameOriginAllowed = new Set<string>();
 
   const services: BinderServices = {
     attachFiles: (files) =>
@@ -408,9 +448,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      */
     copyText: (text) => {
       void copyPlainText(text).then((ok) => {
-        showStatus(
-          `${statusBase} — ${ok ? '参照をコピーしました(本文に貼れます)' : 'コピーできませんでした'}`,
-        );
+        showStatus(ok ? '参照をコピーしました(本文に貼れます)' : 'コピーできませんでした');
       });
     },
     /**
@@ -421,6 +459,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * 中身の作法(隔離 / opener / 寿命)は `launch-tile.ts` が持つ ──
      * ここは**この環境の道具を渡すだけ**
      */
+    // 🔴 **素のままの許可はここにだけ在る**(P10)。保存しない ── アプリは
+    //    保存領域に手が届くので、永続化した許可は**自分で書ける**。
+    //    ⚠ このタブを閉じれば消える。⚠ アプリからこの変数への参照経路は無い
     openTile: (lid) => {
       const tile = dispatcher.getState().launcherTiles?.find((t) => t.lid === lid);
       if (!tile) return;
@@ -440,6 +481,73 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       //    空文のままで、いま何を触ったのかが画面に残らない。「押す = 起動」の
       //    意味は変えず、選択は同時に立つ副作用として入れる
       dispatcher.dispatch({ type: 'SELECT_ENTRY', lid });
+    },
+    /**
+     * 🔴 **詳細画面から添付を起動する**(P10、user 指示 2026-08-05)。
+     *
+     * ⚠ `openTile` と違って **登録の有無に依存しない** ── タイルの一覧を引かず、
+     * その添付の frontmatter から起動に要るものだけ組む(開けることと
+     * ランチャーに並べることは別の話)。
+     * ⚠ 素のまま(同一オリジン)は**確認してから**開く。許可は**保存しない** ──
+     * セッション中の記憶だけ持つ(素のままのアプリは localStorage /
+     * IndexedDB / OPFS に手が届くので、**自分の許可記録を自分で書ける**)。
+     * この記憶はこのクロージャの中にあり、アプリからの参照経路は無い
+     * (`opener` は切り、`parent` は外殻で止まる)。
+     * 設計: `docs/development/p10-launcher-same-origin-2026-08.md`
+     */
+    launchAsset: (lid, launchOpts) => {
+      const meta = dispatcher.getState().entryMetas.get(lid);
+      if (!meta) return;
+      void (async () => {
+        const body =
+          (await client.request({ op: 'getBody', cid: DEFAULT_CID, lid })) ?? null;
+        if (body === null) {
+          dispatcher.dispatch({
+            type: 'OP_FAILED',
+            error: '添付が見つかりません(整理された可能性)',
+          });
+          return;
+        }
+        const att = readAttachmentMeta(body);
+        if (att.assetKey === null || att.assetKey === '') {
+          dispatcher.dispatch({ type: 'OP_FAILED', error: 'この添付には実体がありません' });
+          return;
+        }
+        launchTile(
+          {
+            lid,
+            title: meta.title || att.name || '(無題)',
+            kind: 'app',
+            group: '',
+            assetKey: att.assetKey,
+            mime: att.mime,
+          },
+          {
+            readBlob: (assetKey) => blobs.get(DEFAULT_CID, assetKey),
+            open: (url, features) => window.open(url, '_blank', features),
+            createUrl: (blob) => URL.createObjectURL(blob),
+            revokeUrl: (url) => URL.revokeObjectURL(url),
+            whenClosed: waitForWindowClose,
+            readSeed: readAppStorage,
+            origin: location.origin,
+            fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
+            confirmSameOrigin: (title) => {
+              if (sameOriginAllowed.has(lid)) return true;
+              // ⚠ 何が起きるかを**具体**で書く(「安全でない」では判断できない)
+              const ok = window.confirm(
+                `「${title}」を PKC3 と同じ場所で開きます。\n\n` +
+                  'IndexedDB や cookie を使うアプリが動くようになりますが、' +
+                  'このアプリは PKC3 の保存内容(ノート・添付・設定)にも手が届きます。\n' +
+                  'このタブを閉じるまでは、もう一度は聞きません(次に開いたときは聞きます)。\n\n' +
+                  '開きますか?',
+              );
+              if (ok) sameOriginAllowed.add(lid);
+              return ok;
+            },
+          },
+          { sameOrigin: launchOpts.sameOrigin },
+        );
+      })();
     },
     // 🎨 配色(P7b 段⑨c、user 指示「最初はライトとダークのみに」)。
     // ⚠ 属性は **`<html>`** に付ける ── `:root` の変数を上書きするため
@@ -577,7 +685,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      */
     importLaunchFiles: async (files) => {
       await whenPhaseReady(dispatcher, () =>
-        showStatus(`${statusBase} — 編集を終えると、開いたファイルを取り込みます`),
+        showStatus('編集を終えると、開いたファイルを取り込みます'),
       );
       await withAssetGate.queued(() => runImport(files));
     },

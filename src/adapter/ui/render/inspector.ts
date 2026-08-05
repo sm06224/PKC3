@@ -16,13 +16,10 @@ import { ScrollMemory } from './scroll-memory';
 import type { EntryMeta } from '@core/model/entry-meta';
 import { archetypeLabel } from './sidebar';
 import { iconButton } from './icons';
+// ⚠ 日付の切り方は `features/datetime/stored-date` が正本(一覧の行と共有)。
+//    ここで独自に parse していた頃は、一覧に日付を出すときに規則が 2 つに増えた
+import { formatStoredDate } from '@features/datetime/stored-date';
 
-/** SQLite の UTC 文字列を「日付だけ」に落とす。⚠ 生の値を user に見せない。 */
-function shortDate(value: string | null): string {
-  if (!value) return '—';
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
-  return m ? `${m[1]}/${m[2]}/${m[3]}` : value;
-}
 
 export class InspectorRenderer {
   private lastMeta: EntryMeta | undefined | null = undefined;
@@ -69,8 +66,8 @@ export class InspectorRenderer {
     };
     row('題名', meta.title, 'inspector-title');
     row('種類', archetypeLabel(meta.archetype), 'inspector-kind');
-    row('作成', shortDate(meta.createdAt), 'inspector-created');
-    row('更新', shortDate(meta.updatedAt), 'inspector-updated');
+    row('作成', formatStoredDate(meta.createdAt), 'inspector-created');
+    row('更新', formatStoredDate(meta.updatedAt), 'inspector-updated');
     this.region.append(dl);
 
     // ⚠ **操作は対象の隣**(P8)。共通ツールバーに集約しない

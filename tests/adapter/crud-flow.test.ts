@@ -3,6 +3,7 @@
  * entry CRUD(P3-7a)の end-to-end: 作成 → seed 編集 → 保存 / fresh 掃除 /
  * 削除(確認)/ rename。binder → dispatcher → renderer → fake store を通す。
  */
+import { stubStamps } from '../helpers/store-stamps';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
@@ -65,6 +66,7 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
     persistEntry: async (e) => {
       persisted.push(e);
       store[e.lid] = e.body;
+      return stubStamps();
     },
     deleteEntry: async (lid) => {
       deleted.push(lid);
@@ -143,6 +145,7 @@ describe('create (P3-7a)', () => {
           failNext = false;
           throw new Error('first write fails');
         }
+        return stubStamps();
       },
       deleteEntry: async () => {},
     });

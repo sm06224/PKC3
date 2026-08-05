@@ -12,6 +12,7 @@ import {
   type KanbanStatus,
 } from '@features/kanban/kanban-data';
 import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
+import { setIcon, type IconName } from './icons';
 
 export class KanbanRenderer {
   private readonly region: HTMLElement;
@@ -129,6 +130,8 @@ export class KanbanRenderer {
     toggle.type = 'button';
     toggle.setAttribute('data-pkc-action', 'toggle-todo');
     toggle.setAttribute('aria-label', '状態を切り替え');
+    // ⚠ 図案の器として印を付ける(CSS の 1.15em 固定がここに当たる)
+    toggle.setAttribute('data-pkc-icon', '');
     const title = document.createElement('span');
     title.setAttribute('data-pkc-field', 'title');
     const date = document.createElement('span');
@@ -141,8 +144,12 @@ export class KanbanRenderer {
   private patchCard(card: HTMLElement, meta: EntryMeta): void {
     const done = meta.status === 'done';
     const toggle = card.querySelector<HTMLElement>('[data-pkc-action="toggle-todo"]');
-    if (toggle && toggle.textContent !== (done ? '☑' : '☐'))
-      toggle.textContent = done ? '☑' : '☐';
+    // ⚠ 図案は単色 SVG(P9 段③)。⚠ `textContent` で書かない ── 子ごと消える
+    const want: IconName = done ? 'check-box' : 'box';
+    if (toggle && toggle.getAttribute('data-pkc-icon-name') !== want) {
+      toggle.setAttribute('data-pkc-icon-name', want);
+      setIcon(toggle, want);
+    }
     const title = card.querySelector('[data-pkc-field="title"]');
     if (title && title.textContent !== meta.title) title.textContent = meta.title;
     const date = card.querySelector('[data-pkc-field="date"]');

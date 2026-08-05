@@ -6,6 +6,7 @@
  * - trash 復元の lid 衝突は可視ブロック
  * - purge-trash の confirm は fail closed
  */
+import { stubStamps } from '../helpers/store-stamps';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -59,6 +60,7 @@ function setup(bodies: Record<string, string>, port: Partial<StorePort> = {}) {
     persistEntry: async (e, opts) => {
       // checkpoint = 「変更前の disk body を履歴に刻む」意思(実記録は worker)
       log.push(`persist:${e.lid}:${e.body}${opts?.checkpoint ? ':cp' : ''}`);
+      return stubStamps();
     },
     deleteEntry: async () => {
       log.push('delete');

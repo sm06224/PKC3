@@ -54,11 +54,18 @@ body {
  * 編集すると本文以外が全部消えていた(「1 画面で完結」の逆)。 */
 [data-pkc-region='shell'] {
   display: grid;
-  grid-template-columns: minmax(200px, 18vw) minmax(0, 1fr) minmax(220px, 20vw);
+  /* 🔑 右列は **詰める**(P9 段②)。20vw だと Full HD で 384px あり、そこに 4 行しか
+   * 載っていなかった(「要らない所が広い」)。15vw = 1920 で 288px / 1440 で 216px。
+   * ⚠ 下限 220px は残す ── 1100px 以下では 2 列に畳むので、そこまでの間の保険 */
+  grid-template-columns: minmax(200px, 18vw) minmax(0, 1fr) minmax(220px, 15vw);
   /* ⚠ notices と update は**別の行**。同じ area に載せると、両方出たとき重なる */
-  grid-template-rows: auto 1fr auto auto auto;
+  /* 🔴 **上の帯を撤去した**(P10、user 指示 2026-08-05)── 載っていたのは
+   * 「PKC3」の文字と設定ボタンだけで、現在地を出すはずの区画は書き手が 1 つも
+   * 無かった。設定は左の列の下へ移した。
+   * ⚠ 下の帯(status)は**残す** ── エラーの唯一の出口だから。ただし
+   * 既定は `hidden` なので、言うことが無いときは行の高さが 0 になる */
+  grid-template-rows: 1fr auto auto auto;
   grid-template-areas:
-    'brand   brand   brand'
     'sidebar detail  inspector'
     'update  update  update'
     'notices notices notices'
@@ -71,9 +78,7 @@ body {
   background: var(--border);
 }
 
-[data-pkc-region='brand'] {
-  grid-area: brand;
-}
+
 [data-pkc-region='sidebar'] {
   grid-area: sidebar;
 }
@@ -128,7 +133,42 @@ button {
   white-space: nowrap;
   vertical-align: middle;
 }
-/* 図案の枠 ── **幅を固定**する。絵文字ごとの字幅で並びがずれない */
+/* 🔑 **図案は単色の線画**(P9 段③)。`currentColor` で描くので、選択中の行でも
+ * 9 テーマでも器の文字色に追従する ── ここに色を書かない。
+ * ⚠ **この規則は必須**。`<svg>` の既定は `fill: black; stroke: none` なので、
+ * 書かないと**暗いテーマで見えない黒い塊**になる。
+ * ⚠ 線の太さは絶対値ではなく `stroke-width`(viewBox 24 に対して 1.75)── 実寸
+ * 13px(図を保存のボタン)まで縮んでも消えない太さ。 */
+[data-pkc-icon] > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  /* 🔑 **太さは CSS px で決める**(P10)。viewBox 24 に 1.75 だと、実寸が
+   * 設定 13.3px で 0.97px / チップ 16px で 1.17px と**場所によって細さが違って**いた。
+   * `non-scaling-stroke` は外側の座標系で解釈するので、どこでも同じ 1.4px になる。
+   * ⚠ 正直な限界: これは pixel snap ではない ── 16px で完全に切れる線が要るなら
+   *   viewBox 16 の別表を持つしかない(今は太さと単純化で読ませている) */
+  stroke-width: 1.4;
+  vector-effect: non-scaling-stroke;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* 🔑 **塗りは 1 色 + 不透明度**(P10)。色相を増やさないので「地は無彩色」に反しない ──
+ * 中空の細線だけだと 13〜16px で泥になる、という**見やすさ**の問題を面で解く。 */
+[data-pkc-icon] > svg path[data-pkc-fill='solid'] {
+  fill: currentColor;
+  stroke: none;
+}
+[data-pkc-icon] > svg path[data-pkc-fill='soft'] {
+  fill: currentColor;
+  fill-opacity: 0.2;
+}
+
+/* 図案の枠 ── **幅を固定**する。書体ごとの字幅で並びがずれない
+ * (絵文字だった頃の症状。P9 段③ で原因ごと無くなったが、枠は残す ──
+ * 図案の大きさを CSS 側で決める契約は変えない) */
 [data-pkc-icon] {
   flex: none;
   width: 1.15em;
@@ -179,37 +219,9 @@ select:focus-visible {
   outline-offset: -1px;
 }
 
-/* ── 最上部の帯 ────────────────────────────────────
- * 🔑 **彩度のある色を置くのはここだけ**。アプリの現在地を 1 行で示す。 */
-/* ⚠ **薄く**(user 指示 2026-08-03「最上のヘッドラインはもっと薄くてもいい、邪魔」)。
- * 高さを 32 → 20px、文字を 13 → 11px にして、押すものは置かない。 */
-[data-pkc-region='brand'] {
-  display: flex;
-  align-items: center;
-  gap: var(--s3);
-  /* ⚠ **薄く保つ**が、中の的が小さくなりすぎない高さ(P8 段㉕)。
-   * 20px のときボタンは 16px しかなく、**設定への唯一の入口**が
-   * 他のどのボタン(26px)よりも小さかった ── 押し損ねる。 */
-  height: 24px;
-  padding: 0 var(--s3);
-  background: var(--accent);
-  color: var(--accent-fg);
-  font-size: 11px;
-  letter-spacing: 0.02em;
-}
-[data-pkc-field='brand-name'] {
-  font-weight: 600;
-}
-[data-pkc-field='brand-context'] {
-  font-weight: 400;
-  opacity: 0.85;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-[data-pkc-field='brand-spacer'] {
-  margin-left: auto;
-}
+
+
+
 
 /* ── 左の列: 探し方のタブ ───────────────────────────
  * 🔑 **その列が扱うものの操作は、その列が持つ**(P8 段⑤)── 上の帯と左で
@@ -242,8 +254,17 @@ select:focus-visible {
   background: var(--border);
   flex: none;
 }
-[data-pkc-region='collection-bar'] button {
+/* ⚠ 余りは**地の色**で埋める(上の書式パネルと同じ理由) */
+[data-pkc-region='collection-bar']::after {
+  content: '';
   flex: 1 1 auto;
+  background: var(--surface);
+}
+[data-pkc-region='collection-bar'] button {
+  /* ⚠ **伸ばさない**(P9 段②)。`flex: 1 1 auto` は行の余りを**均等に**配るので、
+   * 3 個の行と 2 個の行で 1 個あたりの取り分が変わり、同じボタンが行によって
+   * 98px / 136px と**別の幅**になっていた(実測)。伸ばさなければ自然な幅で揃う */
+  flex: 0 1 auto;
   border: none;
   border-radius: 0;
   justify-content: flex-start;
@@ -261,18 +282,17 @@ select:focus-visible {
   padding: var(--s2);
 }
 /* 上の帯の設定ボタン ── 薄い帯に収まる高さ */
-[data-pkc-region='brand'] button {
-  height: 20px;
-  min-height: 20px;
-  max-height: 20px;
-  padding: 0 var(--s3);
-  font-size: 11px;
-  background: transparent;
-  color: var(--accent-fg);
-  border-color: color-mix(in srgb, var(--accent-fg) 35%, transparent);
+/* 🔑 **設定は左の列の下**(P10 で上の帯を撤去)。
+ * ⚠ 寸法は**隣のボタンと同じ**にする ── 帯にいた頃は薄い帯に合わせて 20px /
+ * 11px だったので、そのまま持ってくると 1 つだけ小さいボタンになる
+ * (「図案つきボタンの高さが揃っている」が実際に落ちた)。
+ * ⚠ 役割が違うので**区切り線**を引く(一覧の操作 ↔ アプリ全体の操作) */
+[data-pkc-field='app-settings'] {
+  border-top: 1px solid var(--border);
 }
-[data-pkc-region='brand'] button[data-pkc-active] {
-  background: color-mix(in srgb, var(--accent-fg) 18%, transparent);
+[data-pkc-field='app-settings'][data-pkc-active] {
+  background: var(--accent-dim);
+  color: var(--accent-dim-fg);
 }
 
 /* ── サイドバー(一覧)────────────────────────────── */
@@ -304,6 +324,33 @@ select:focus-visible {
 [data-pkc-field='entry-filter'] {
   flex: 1;
   min-width: 0;
+}
+/* 🔑 **分割ボタン**(P10、user 指示「▼ を押下した際に種別を選択して、
+ * 追加ボタンと ctrl+n の対象を更新、+〇〇みたいにボタンを変更すればいい」)。
+ * ⚠ 本体が幅を取り、▼ は必要な分だけ。⚠ 一覧は**下に出す**(押した物の下)。 */
+[data-pkc-field='create-run'] {
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-start;
+}
+[data-pkc-field='create-pick'] {
+  flex: none;
+  padding: 0 var(--s2);
+}
+/* 種類の一覧。⚠ 行を分けて全部見せる(畳んだ中でさらに畳まない) */
+[data-pkc-region='create-menu'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px;
+  background: var(--border);
+  border-top: 1px solid var(--border);
+}
+[data-pkc-region='create-menu'] button {
+  flex: 1 1 auto;
+  border: none;
+  border-radius: 0;
+  justify-content: flex-start;
+  font-size: 12px;
 }
 [data-pkc-field='create-kind'] {
   flex: 1;
@@ -337,16 +384,71 @@ select:focus-visible {
   color: var(--accent-dim-fg);
   border-left-color: var(--accent) !important;
 }
-/* 種別チップは図案なので、文字サイズを揃えて枠を固定する */
-[data-pkc-chip] {
-  font-size: 12px;
-}
 [data-pkc-entry] [data-pkc-field='title'] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1;
   min-width: 0;
+}
+/* フォルダ面の題名セルの図案(P9 段③)。⚠ **文字との間を空ける** ── 以前は
+ * 題名の文字列にフォルダの絵文字と空白を連結していたので、図案を要素にした
+ * 時点で隙間が消えた(実機で詰まって見えた) */
+[data-pkc-region='filer-table'] [data-pkc-field='title'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+/* 行の更新日(P9 段②)。⚠ **行の高さを増やさない** ── 題名の右端に細字で置く。
+ * 数字は等幅にして桁を揃える(業務画面の作法。ばらつくと走査できない)。 */
+[data-pkc-entry] [data-pkc-field='when'] {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 🔑 **意味を持つ色は使う**(P10、user 指示 2026-08-05「ルールを変え、みやすく
+ * 使いやすいのを心がけて」)。消える操作は**危険色**で先に分かるべき情報である。
+ * ⚠ ボタン全体を塗らない ── 図案だけ色を持たせ、地は無彩色のまま */
+[data-pkc-action='delete-entry'] [data-pkc-icon],
+[data-pkc-action='purge-orphan-assets'] [data-pkc-icon],
+[data-pkc-action='purge-trash'] [data-pkc-icon] {
+  color: var(--danger);
+}
+
+/* 🔑 **種別は色でも分かる**(P10)。「何のノートか」は情報なので色を使ってよい。
+ * ⚠ 色相は `--fg` と混ぜて作る ── そうすると 9 テーマぶんの token を持たずに、
+ *   どのテーマでも地に対して十分な濃さになる(暗い地では明るく寄る)。
+ * ⚠ 混ぜ比率は **fg 2〜3 割**。最初 5.5 割でやったら oklab の明度が 0.35 まで落ちて
+ *   **色相がほとんど見えなかった**(実測)── 「色を使った」と言えるだけの無味な状態
+ * ⚠ 形でも区別できることが前提(色だけに頼らない)── 図案は別々に描いてある */
+[data-pkc-chip='text'] {
+  color: color-mix(in oklab, var(--fg) 25%, #2f6fd0);
+}
+[data-pkc-chip='textlog'] {
+  color: color-mix(in oklab, var(--fg) 25%, #b06a1f);
+}
+[data-pkc-chip='spreadsheet'] {
+  color: color-mix(in oklab, var(--fg) 25%, #1f7a5a);
+}
+[data-pkc-chip='folder'] {
+  color: color-mix(in oklab, var(--fg) 20%, #c39312);
+}
+[data-pkc-chip='attachment'] {
+  color: color-mix(in oklab, var(--fg) 25%, #7a5ac2);
+}
+[data-pkc-chip='todo'],
+[data-pkc-chip='form'] {
+  color: color-mix(in oklab, var(--fg) 25%, #b03a5a);
+}
+/* ⚠ 選んでいる行では**行の色に戻す** ── 選択の色より種別の色が強いと、
+ *   どれを選んでいるか分からなくなる(選択は種別より上位の情報) */
+[data-pkc-selected] [data-pkc-chip] {
+  color: inherit;
 }
 
 /* 種別のチップ ── **色が分類を担う**(裸の文字を本文の前に置かない)。
@@ -539,13 +641,16 @@ select:focus-visible {
   right: 0;
   font-size: 11.5px;
   padding: 0 var(--s2);
-  opacity: 0.35;
+  /* 🔴 **opacity で薄めない**(P10)。0.35 にしていた頃は、1px の線が 35% の
+   * 濃さになって**図案が事実上見えなかった**(枠も文字も一緒に薄まる)。
+   * 色で退がらせる ── `--muted` は全テーマでコントラスト 4.5:1 を pin 済み */
+  color: var(--muted);
   /* ⚠ 図の上に浮くので**地を必ず塗る**(透過だと図の線と重なって読めない) */
   background: var(--surface);
 }
 [data-pkc-mermaid-src]:hover [data-pkc-field='diagram-save'],
 [data-pkc-field='diagram-save']:focus-visible {
-  opacity: 1;
+  color: var(--fg);
 }
 
 /* ── 書式パネル(P8 段⑥)──────────────────────────
@@ -561,6 +666,15 @@ select:focus-visible {
   border: 1px solid var(--border);
   border-bottom: none;
   margin-bottom: 0;
+}
+/* ⚠ **余りを地の色で埋める**(P9 段②)。この帯は `gap: 1px` で区切り線を作るため
+ * 背景が**線の色**になっている ── ボタンが埋まらない残り(Full HD で 50.8%)が
+ * そのまま線色のベタ塗りになって「作りかけ」に見えていた。
+ * 伸びる空要素を 1 つ置いて、そこだけ地の色にする(DOM は増やさない) */
+[data-pkc-region='format-bar']::after {
+  content: '';
+  flex: 1 1 auto;
+  background: var(--surface);
 }
 [data-pkc-region='format-bar'] button {
   border: none;
@@ -594,6 +708,14 @@ select:focus-visible {
   border-radius: 0;
 }
 
+/* ⚠ **編集欄の焦点の輪は細く**(P9 段②)。共通の `:focus-visible` は 2px の
+ * accent で、編集欄は開くと同時に `focus()` されるので**常時 2px の緑の枠**が
+ * 585x888px を囲っていた ── 「地は無彩色、色は情報にだけ」に対して面積が大きい。
+ * ⚠ 消さない(焦点の在処は情報である)。器の 1px 枠と重ならない太さにする */
+[data-pkc-region='editor-split'] [data-pkc-field='editor-body']:focus-visible {
+  outline-width: 1px;
+}
+
 /* ⚠ **残りの高さを埋める**。以前は固定高で、下に 280px の死に領域があった */
 [data-pkc-field='editor-body'] {
   width: 100%;
@@ -601,6 +723,13 @@ select:focus-visible {
   font-family: var(--font-mono);
   font-size: 12.5px;
   resize: none;
+}
+/* 何も選んでいないときの案内(P9 段③)。⚠ 読み幅の上限に収める ── 案内文が
+ * 1000px 伸びると、それ自体が読みにくい */
+[data-pkc-field='detail-empty'] {
+  color: var(--muted);
+  padding: var(--s3);
+  max-width: var(--read-w);
 }
 [data-pkc-field='detail-loading'] {
   color: var(--muted);
@@ -628,9 +757,7 @@ select:focus-visible {
   letter-spacing: 0.04em;
   flex: none;
 }
-[data-pkc-field='pane-title'] > [data-pkc-field='brand-spacer'] {
-  margin-left: auto;
-}
+
 [data-pkc-region='inspector'] dl {
   margin: 0;
   padding: var(--s3);
@@ -662,6 +789,24 @@ select:focus-visible {
 /* ── markdown ───────────────────────────────────── */
 .pkc-md-rendered {
   overflow-wrap: anywhere;
+}
+
+/* 🔑 **本文の読み幅に上限を置く**(P9 段②)。Full HD では 1 行が 1172px =
+ * 全角 90 文字まで伸びていて、読み返すのが辛かった。
+ *
+ * ⚠ **器(`detail-body` や pane)に掛けてはいけない** ── 図のラスタ幅は
+ * `mermaid-hydrate.ts` が **host の親の clientWidth** から決めるので、器を狭めると
+ * **全部の図が焼き直され、キャッシュ鍵も変わる**(調査で判明)。だから
+ * **本文ブロック(兄弟)にだけ**当てる。
+ * ⚠ 単位に `em` を使わない ── 見出しは `1.35em` などで拡大するので、
+ * `em` 指定だと見出しだけ上限が広がる(h1 で 1.35 倍)。
+ * ⚠ 表・図・コード・iframe・添付は**上限の対象外**(横に広いほど読める)。
+ *   ここは allow-list 方式にしてある ── 新しいブロックが増えたとき、
+ *   「上限が掛からない」側に倒れる(= 焼き直しも崩れも起きない安全な向き)。
+ *
+ * 42rem = 672px。本文 13px なので全角 **約 51 文字**(日本語の可読幅は 35〜50 文字)。 */
+[data-pkc-view-pane='detail'] [data-pkc-field='detail-body'] > :is(p, h1, h2, h3, h4, h5, h6, ul, ol, dl, blockquote, hr, .footnotes, .pkc-details, .pkc-format-block, .pkc-toc-formal, .pkc-toc-preview, .pkc-section-break, .pkc-blank-line, .pkc-region-frontmatter, .pkc-region-body) {
+  max-width: var(--read-w);
 }
 .pkc-md-rendered h1,
 .pkc-md-rendered h2,
@@ -1285,10 +1430,19 @@ select:focus-visible {
   height: var(--row-h);
   text-align: left;
 }
-/* ⚠ 狭い列に入るので、種別と更新日は畳む(名前が読めるほうが大事) */
-[data-pkc-region='filer-table'] th:not(:first-child),
-[data-pkc-region='filer-table'] td:not(:first-child) {
-  display: none;
+/* 🔴 **更新日は出す**(P9 段③)。以前はここで `display: none` して畳んでいたので、
+ * 見出しが約束した 2 列が**どちらも幅 0px**だった(実測)。表を出しておいて
+ * 中身を隠すのは「画面が嘘をつく」形である ── 種別の列は持つのをやめ、
+ * 更新日は幅を決めて**必ず出す**(名前は … で畳む)。
+ * ⚠ 数字は等幅・桁揃え(一覧の行と同じ規則)。 */
+[data-pkc-region='filer-table'] th:last-child,
+[data-pkc-region='filer-table'] td:last-child {
+  width: 4.4em;
+  text-align: right;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 [data-pkc-region='filer-table'] th {
   background: var(--surface-2);
@@ -1400,7 +1554,6 @@ select:focus-visible {
   [data-pkc-region='shell'] {
     grid-template-columns: minmax(180px, 22vw) minmax(0, 1fr);
     grid-template-areas:
-      'brand     brand'
       'sidebar   detail'
       'inspector inspector'
       'update    update'
@@ -1425,14 +1578,14 @@ select:focus-visible {
   [data-pkc-region='shell'] {
     grid-template-columns: 1fr;
     grid-template-areas:
-      'brand'
       'sidebar'
       'detail'
       'inspector'
       'update'
       'notices'
       'status';
-    grid-template-rows: auto auto 1fr auto auto auto auto;
+    /* ⚠ 6 区画(上の帯を撤去したので 1 つ減った)── 本文だけが伸びる */
+    grid-template-rows: auto 1fr auto auto auto auto;
   }
   [data-pkc-region='sidebar'] {
     max-height: 30vh;

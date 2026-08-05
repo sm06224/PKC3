@@ -10,12 +10,10 @@
  * 🔑 **3 列**(一覧 / 本文 / 付随情報)。編集に入っても列は動かない。
  */
 import { SEALED_ARCHETYPES, SEALED_VIEWS } from '@features/sealed';
-import { iconButton } from './icons';
+import { BROWSE_ICONS, iconButton, iconSpan } from './icons';
 import { BROWSE_TABS } from './browse';
 
 export interface ShellRegions {
-  /** 最上部の帯。彩度のある色を置くのはここだけ。 */
-  brand: HTMLElement;
   /** 左の列の中身(探し方で切り替わる)。 */
   browseHost: HTMLElement;
   sidebar: HTMLElement;
@@ -44,11 +42,17 @@ export interface ShellRegions {
 }
 
 /**
- * 🔴 **上の帯には「面の切替」を置かない**(P8 段⑤、user 指摘
- * 「上のメニューと左ペインのメニューにかぶりがある / 分けもなくて、扱いにくい」)。
+ * 🔴 **上下の帯を撤去した**(P10、user 指示 2026-08-05
+ * 「UI の上下の帯は不要だと思う。大して働いていない。設定への導線だけどこかに
+ * 残す必要がある」)。
  *
- * フォルダとアプリは「見る場所」ではなく**探し方**なので、左の列のタブへ移した
- * (`browse.ts`)。上に残るのは**アプリ全体**に対する 1 つだけ ── 設定である。
+ * 上の帯に載っていたのは「PKC3」の文字と設定ボタンだけだった ──
+ * 現在地を出すはずの `brand-context` は**書き手が 1 つも無く**、ずっと空だった。
+ * 下の帯は 99% の時間「pkc3 v3.0.0」を出していた(版はホバーと設定へ移した)。
+ *
+ * 設定は**左の列の下**へ移した ── そこはもともと「アプリ / ノート全体に対する
+ * 操作」が並ぶ場所で、設定もその一員である。
+ * ⚠ 探し方のタブには**しない** ── タブは「どう探すか」の軸で、設定は探し方ではない。
  */
 const VIEW_BUTTONS: readonly { view: string; label: string }[] = [
   { view: 'settings', label: '設定' },
@@ -95,30 +99,6 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const shell = document.createElement('div');
   shell.setAttribute('data-pkc-region', 'shell');
 
-  // ── 最上部の帯 ──────────────────────────────────
-  const brand = document.createElement('header');
-  brand.setAttribute('data-pkc-region', 'brand');
-  const brandName = document.createElement('span');
-  brandName.setAttribute('data-pkc-field', 'brand-name');
-  brandName.textContent = 'PKC3';
-  const brandContext = document.createElement('span');
-  brandContext.setAttribute('data-pkc-field', 'brand-context');
-  // ⚠ **薄く保つ**(user 指示 2026-08-03「最上のヘッドラインはもっと薄くてもいい、
-  // 邪魔」)── 出すのは名前と現在地、それに**アプリ全体**の操作(設定)だけ。
-  // ⚠ かつてここは「押すものはここに置かない」と書きながら直後に設定ボタンを
-  //    置いていた(P8 段㉕ で実態に合わせた)
-  const spacer = document.createElement('span');
-  spacer.setAttribute('data-pkc-field', 'brand-spacer');
-  brand.append(brandName, brandContext, spacer);
-
-  // ⚠ 上の帯に置くのは**アプリ全体**のものだけ(いまは設定 1 つ)
-  for (const { view, label } of VIEW_BUTTONS) {
-    if (SEALED_VIEWS.includes(view)) continue;
-    const btn = iconButton('set-view', label, `set-view:${view}`);
-    btn.setAttribute('data-pkc-view', view);
-    brand.append(btn);
-  }
-
   // ── サイドバー(一覧)────────────────────────────
   const sidebar = document.createElement('nav');
   sidebar.setAttribute('data-pkc-region', 'sidebar');
@@ -128,15 +108,13 @@ export function buildShell(root: HTMLElement): ShellRegions {
    */
   const tabs = document.createElement('div');
   tabs.setAttribute('data-pkc-region', 'browse-tabs');
-  for (const { mode, label, icon } of BROWSE_TABS) {
+  for (const { mode, label } of BROWSE_TABS) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.setAttribute('data-pkc-action', 'set-browse');
     btn.setAttribute('data-pkc-browse', mode);
-    const ic = document.createElement('span');
-    ic.setAttribute('data-pkc-icon', '');
-    ic.setAttribute('aria-hidden', 'true');
-    ic.textContent = icon;
+    // ⚠ 図案は `icons.ts` から取る(手組みの絵文字表を持たない ── P9 段③)
+    const ic = iconSpan(BROWSE_ICONS[mode] ?? 'dot');
     const tx = document.createElement('span');
     tx.setAttribute('data-pkc-field', 'label');
     tx.textContent = label;
@@ -161,25 +139,74 @@ export function buildShell(root: HTMLElement): ShellRegions {
   findBar.append(filter);
 
   /**
-   * 🔑 **新規は「何を作るか」を選ばせる `<select>` + 作るボタン**。
-   * ボタンを 5 つ並べると幅を食い、畳むと隠れる ── 業務画面の作法では
-   * 「選ぶもの」は select、「起きるもの」はボタンである。
+   * 🔴 **分割ボタンにする**(P10、user 指示 2026-08-05
+   * 「プルダウン式の新規作成ボタンは使いにくいからマルチメニューに畳んでください。
+   *  ▼ を押下した際に種別を選択して、追加ボタンと ctrl+n の対象を更新、
+   *  +〇〇みたいにボタンを変更すればいい、これもアイコン欲しいよね」)。
+   *
+   * 形: **`+ ノート`(本体)+ `▼`(種類を選ぶ)**。選ぶと本体の文言と図案が
+   * その種類に変わり、`Ctrl+N` の対象も一緒に変わる。
+   *
+   * ⚠ `<select>` は**残す**(`hidden`)── いま作る種類の**保持場所**であり、
+   * `binder` も test helper もここを読む(1 か所に寄せる)。見せないだけ。
+   * ⚠ **`<details>` は使わない** ── この repo は「主要な導線を畳まない」を規律に
+   * 持ち、shell に `<details>` が 0 件であることを test で pin している。
+   * ボタン + `hidden` の一覧で組めば、その規律を破らずに user の要望を満たせる。
+   * ⚠ 封印中の種類は**一覧にも `<select>` にも出さない**(前と同じ)。
    */
   const kind = document.createElement('select');
   kind.setAttribute('data-pkc-field', 'create-kind');
   kind.setAttribute('aria-label', '作るものの種類');
-  for (const { archetype, label } of CREATE_BUTTONS) {
-    if (SEALED_ARCHETYPES.includes(archetype)) continue; // 封印中
+  // ⚠ 見せない ── 種類は分割ボタンで選ぶ。ここは「いま何を作るか」の置き場
+  kind.hidden = true;
+  const kinds = CREATE_BUTTONS.filter(({ archetype }) => !SEALED_ARCHETYPES.includes(archetype));
+  for (const { archetype, label } of kinds) {
     const opt = document.createElement('option');
     opt.value = archetype;
     opt.textContent = label;
     kind.append(opt);
   }
-  const create = iconButton('create-entry', '新規');
-  create.title = '選んだ種類で新しく作ります';
+
+  const first = kinds[0];
+  const create = iconButton(
+    'create-entry',
+    first ? `+ ${first.label}` : '新規',
+    // ⚠ 図案は**種類のもの**を出す(user「これもアイコン欲しいよね」)
+    first ? `archetype:${first.archetype}` : 'create-entry',
+  );
+  create.setAttribute('data-pkc-field', 'create-run');
+  create.title = 'この種類で新しく作ります(Ctrl+N)';
+  // ⚠ 種類は**ボタン自身**にも持たせる ── binder はこちらを先に見るので、
+  //    `<select>` を読めない状況でも取り違えない
+  if (first) create.setAttribute('data-pkc-archetype', first.archetype);
+
+  /**
+   * ▼(種類を選ぶ)。
+   * ⚠ **文字は入れない** ── 図案が山形そのものなので、`▼` の文字を足すと
+   * **同じものが 2 つ**並ぶ(実機で二重に見えた)。
+   * ⚠ この repo は「図案だけのボタンを作らない」を規律に持つが、ここは
+   * **分割ボタンの片翼**で、意味は隣の本体(`+ ノート`)が持っている ──
+   * 読み上げには `aria-label` で名前を渡す。
+   */
+  const pick = iconButton('toggle-create-menu', '', 'create-menu');
+  pick.setAttribute('data-pkc-field', 'create-pick');
+  pick.title = '作る種類を選びます';
+  pick.setAttribute('aria-label', '作る種類を選ぶ');
+  pick.setAttribute('aria-expanded', 'false');
+
+  // 種類の一覧。⚠ 既定は畳む(選ぶまで場所を取らない)
+  const menu = document.createElement('div');
+  menu.setAttribute('data-pkc-region', 'create-menu');
+  menu.hidden = true;
+  for (const { archetype, label } of kinds) {
+    const item = iconButton('pick-create-kind', label, `archetype:${archetype}`);
+    item.setAttribute('data-pkc-archetype', archetype);
+    menu.append(item);
+  }
+
   const attach = iconButton('attach-file', '添付');
   attach.title = 'ファイルを取り込んで添付にします';
-  createBar.append(kind, create, attach);
+  createBar.append(kind, create, pick, attach);
 
   const attachInput = document.createElement('input');
   attachInput.type = 'file';
@@ -196,6 +223,16 @@ export function buildShell(root: HTMLElement): ShellRegions {
     btn.title = title;
     collectionBar.append(btn);
   }
+  // 🔑 **設定はここ**(P10)。上の帯を撤去したので、アプリ全体の操作が並ぶ
+  // この場所へ移した。⚠ 一覧の操作と**区切って**置く(役割が違う)
+  for (const { view, label } of VIEW_BUTTONS) {
+    if (SEALED_VIEWS.includes(view)) continue;
+    const btn = iconButton('set-view', label, `set-view:${view}`);
+    btn.setAttribute('data-pkc-view', view);
+    btn.setAttribute('data-pkc-field', 'app-settings');
+    collectionBar.append(btn);
+  }
+
   // ⚠ file picker は常設 hidden input(user-gesture 要件と smoke の setInputFiles の
   // 両方に効く)。⚠ **押すボタンと同じ場所**に置く
   const impInput = document.createElement('input');
@@ -213,7 +250,8 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const browseHost = document.createElement('div');
   browseHost.setAttribute('data-pkc-region', 'browse-host');
   browseHost.append(list);
-  sidebar.append(tabs, findBar, createBar, browseHost, collectionBar);
+  // ⚠ 一覧は createBar の**外**(下)── 中に入れると 1 行に混ざって折り返す
+  sidebar.append(tabs, findBar, createBar, menu, browseHost, collectionBar);
 
   // ── 中央(いま開いているもの)────────────────────────
   // 🔑 本文と**追記欄は別の器**にする(P8 段⑧)。本文は書き換わるたびに作り直すので、
@@ -231,8 +269,16 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const inspector = document.createElement('aside');
   inspector.setAttribute('data-pkc-region', 'inspector');
 
+  /**
+   * 🔴 **何か言うことがあるときだけ出る帯**(P10)。以前は常設で、99% の時間
+   * 「pkc3 v3.0.0」を出していた ── それが「大して働いていない」の中身である。
+   * ⚠ 消してはいない ── **エラーの唯一の出口**であり、保存先が意図と違うときの
+   * 警告もここに出る(48 か所の `OP_FAILED` が state 経由でここへ来る)。
+   * 既定は `hidden` = 場所を取らない(notices / update と同じ作法)。
+   */
   const status = document.createElement('footer');
   status.setAttribute('data-pkc-region', 'status');
+  status.hidden = true;
 
   // 既定は空(= 何も出さない)。注意が出たときだけ中身が入る
   const notices = document.createElement('section');
@@ -244,7 +290,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   update.setAttribute('data-pkc-region', 'update');
   update.hidden = true;
 
-  shell.append(brand, sidebar, center, inspector, update, notices, status);
+  shell.append(sidebar, center, inspector, update, notices, status);
   root.append(shell);
-  return { brand, browseHost, sidebar, center, detail, append, inspector, status, notices, update };
+  return { browseHost, sidebar, center, detail, append, inspector, status, notices, update };
 }

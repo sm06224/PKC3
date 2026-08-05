@@ -28,13 +28,11 @@ import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
 // 🔑 種別の呼び名は **1 本**(P8 段⑲)── かつてここだけ独自表を持ち、
 //    同じノートがフォルダ画面では「シート」、他の全画面では「表」と出ていた
 import { archetypeLabel } from './sidebar';
+// ⚠ 日付の切り方は `features/datetime/stored-date` が正本(情報列・一覧の行と共有)。
+//    ここに 3 つ目の parse を置いていたので寄せた(規則は 1 つ ── CLAUDE.md)
+import { formatListDate, formatStoredDate } from '@features/datetime/stored-date';
+import { ARCHETYPE_ICONS, iconSpan } from './icons';
 
-/** SQLite の UTC 文字列を「日付だけ」に落とす(見出しが「日」なので)。 */
-function shortDate(value: string | null): string {
-  if (!value) return '';
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
-  return m ? `${m[1]}/${m[2]}/${m[3]}` : value;
-}
 
 
 export class FilerRenderer {
@@ -127,7 +125,12 @@ export class FilerRenderer {
     table.setAttribute('data-pkc-region', 'filer-table');
     const thead = document.createElement('thead');
     const hr = document.createElement('tr');
-    for (const h of ['名前', '種別', '更新日']) {
+    // 🔴 **種別の列は持たない**(P9 段③)。以前は 3 列作って `display: none` で
+    //    2 列を畳んでいた ── 見出しが約束した「種別 / 更新日」が**どちらも
+    //    画面に出ていなかった**(実測: 幅 0px)。しかも種別が見えないので、
+    //    このタブは「一覧」と同じ題名の並びに見えていた(かぶりの実体)。
+    //    種別は**行の頭の図案**が示し(一覧と同じ規則)、列は更新日だけ残す
+    for (const h of ['名前', '更新日']) {
       const th = document.createElement('th');
       th.textContent = h;
       hr.append(th);
@@ -142,14 +145,24 @@ export class FilerRenderer {
       if (m.lid === state.selectedLid) tr.setAttribute('data-pkc-selected', '');
       const name = document.createElement('td');
       name.setAttribute('data-pkc-field', 'title');
-      name.textContent = (m.archetype === 'folder' ? '📁 ' : '') + m.title;
-      const kind = document.createElement('td');
-      kind.textContent = archetypeLabel(m.archetype);
+      // ⚠ 図案は**題名の文字列に混ぜない**(P9 段③)。以前は '📁 ' を題名の頭に
+      //    連結していたので、題名の文字列そのものが figure を含んでいた
+      //    (絞り込み・突合・読み上げが全部それを題名として扱う)
+      // 🔑 **全部の種別に図案を出す**(一覧と同じ規則)── フォルダだけ出していた頃は
+      //    他の種別が無印で、種別の列も畳まれていたので**何のノートか分からなかった**
+      const chip = iconSpan(ARCHETYPE_ICONS[m.archetype] ?? 'dot');
+      chip.setAttribute('data-pkc-chip', m.archetype);
+      chip.title = archetypeLabel(m.archetype);
+      name.append(chip, document.createTextNode(m.title));
       const updated = document.createElement('td');
       // ⚠ 生の SQLite UTC 文字列(`2026-08-03 13:11:39`)を出さない。
-      // 見出しが「更新日」なのに時刻まで出ていた ── 日付だけに落とす
-      updated.textContent = shortDate(m.updatedAt);
-      tr.append(name, kind, updated);
+      // 🔑 **一覧の行と同じ形**(今年は MM/DD)にする(P9 段③)── `YYYY/MM/DD` だと
+      //    狭い列に収まらず `2026/08/` で切れていた(実測)。年まで見たいときは
+      //    hover の `title` に出す(一覧の行と同じ作法)
+      updated.textContent = formatListDate(m.updatedAt, new Date().getFullYear());
+      const full = formatStoredDate(m.updatedAt, '');
+      if (full) updated.title = `更新 ${full}`;
+      tr.append(name, updated);
       tbody.append(tr);
       this.rows.set(m.lid, tr);
     }

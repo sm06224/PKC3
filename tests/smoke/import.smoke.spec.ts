@@ -511,12 +511,22 @@ test('folder-export 取込 → filer で階層が実際にたどれる', async (
 
   // 🔑 最上位は **root + 循環から救出された 1 件**(階層が効いていれば 7 件並ばない)。
   // 🔴 循環が切れていないと循環上の 2 件は root にも配下にも出ず**完全に消える**
-  await expect(rows.locator('[data-pkc-field="title"]')).toHaveText(['📁 仕事', '📁 循環2']);
+  // ⚠ P9 段③ で **図案が題名の文字列から出た**(以前は '📁 仕事' と連結していたので、
+  //    題名そのものが figure を含んでいた ── 絞り込みも読み上げもそれを題名として扱う)。
+  //    ここは**題名だけ**を見て、フォルダの印は下で別に見る
+  await expect(rows.locator('[data-pkc-field="title"]')).toHaveText(['仕事', '循環2']);
+  // 種別は行の頭の図案が示す(P9 段③ で全種別に出すようにした)。
+  // ⚠ **フォルダの印**を名指しで数える ── 「図案が 2 つ」だと、この fixture が
+  //    たまたま 2 行ともフォルダなので、種別を取り違える変異が素通りする
+  expect(
+    await rows.locator('[data-pkc-field="title"] [data-pkc-chip="folder"] svg').count(),
+    'フォルダの印が消えている',
+  ).toBe(2);
 
   // root へ入る → 「2026」フォルダと「直下メモ」
   await clickReal(page, '[data-pkc-region="filer-table"] tbody tr:first-child');
   await expect(rows).toHaveCount(2);
-  await expect(rows.locator('[data-pkc-field="title"]')).toHaveText(['📁 2026', '直下メモ']);
+  await expect(rows.locator('[data-pkc-field="title"]')).toHaveText(['2026', '直下メモ']);
 
   // 「2026」へ入る → 空フォルダと議事録。
   // ⚠ lid は取込時に採番し直されるので **DOM から引く**(`:has-text` は
@@ -527,7 +537,7 @@ test('folder-export 取込 → filer で階層が実際にたどれる', async (
     .getAttribute('data-pkc-entry');
   // ⚠ 一覧タブにも同じ lid の行が居る(隠れている)── **表の中**を押す
   await clickReal(page, `[data-pkc-region="filer-table"] [data-pkc-entry="${subLid}"]`);
-  await expect(rows.locator('[data-pkc-field="title"]')).toHaveText(['📁 空フォルダ', '議事録']);
+  await expect(rows.locator('[data-pkc-field="title"]')).toHaveText(['空フォルダ', '議事録']);
 
   expect(errors).toEqual([]);
 });

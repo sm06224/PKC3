@@ -3,6 +3,7 @@
  * editor(P3-5)の end-to-end: binder → dispatcher → renderer → fake store。
  * state mutation → consumer 観測点(DOM / 副作用)まで通す(PKC2 Testing 規約)。
  */
+import { stubStamps } from '../helpers/store-stamps';
 import { describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
@@ -48,6 +49,7 @@ function setup(bodies: Record<string, string>) {
     deleteEntry: async () => {},
     persistEntry: async (e) => {
       persisted.push(e);
+      return stubStamps();
     },
   });
   d.dispatch({
@@ -168,6 +170,7 @@ describe('editor flow (P3-5)', () => {
       persistEntry: async (e) => {
         if (failNext) throw new Error('disk full');
         persisted.push(e.body);
+        return stubStamps();
       },
     });
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a')], relations: [] });

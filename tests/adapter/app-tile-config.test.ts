@@ -12,6 +12,7 @@
  * ⚠ 観測点は「action が dispatch された」で止めない ── **disk に何が書かれ、
  * ランチャーが読み直したか**まで見る(押しても次にタブを開くまで出ない、を落とす)。
  */
+import { stubStamps } from '../helpers/store-stamps';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -59,6 +60,7 @@ function setup(
     persistEntry: async (e) => {
       counter.writes += 1;
       bodies[e.lid] = e.body;
+      return stubStamps();
     },
     deleteEntry: async () => {},
   });

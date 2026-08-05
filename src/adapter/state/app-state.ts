@@ -260,6 +260,16 @@ export type SystemCommand =
   | { type: 'BODY_LOADED'; lid: string; body: string }
   | { type: 'BODY_LOAD_FAILED'; lid: string; error: string }
   | { type: 'BODY_PERSISTED'; lid: string; body: string }
+  /**
+   * 🔑 **DB が刻んだ時刻が届いた**(P9 段①)。書込のたびに worker が返す。
+   *
+   * ⚠ 主スレッドで時刻を作らないための専用の入口 ── これが無いと
+   * 作成・更新は**次の boot まで `null`** で、情報列が終日「—」になる(実際にそうだった)。
+   * ⚠ 書込経路は 6 つある(commit / 追記 / トグル / 復元 / ゴミ箱戻し / タイル設定)。
+   * 各経路の action へ相乗りさせず**1 つの action に寄せる** ── 相乗りだと
+   * 経路を足した人が時刻を落とし、そこだけ「—」に戻る
+   */
+  | { type: 'ENTRY_STAMPED'; lid: string; createdAt: string | null; updatedAt: string | null }
   | {
       type: 'TODO_TOGGLED';
       lid: string;
@@ -957,6 +967,21 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
         state: { ...state, openBody: { ...ob, persisted: action.body } },
         events: [],
       };
+    }
+    case 'ENTRY_STAMPED': {
+      const meta = state.entryMetas.get(action.lid);
+      // 消えた entry の ack は捨てる(削除と書込の競合)
+      if (!meta) return { state, events: [] };
+      if (meta.createdAt === action.createdAt && meta.updatedAt === action.updatedAt)
+        return { state, events: [] };
+      const entryMetas = new Map(state.entryMetas);
+      entryMetas.set(action.lid, {
+        ...meta,
+        // ⚠ 既にある createdAt を null で塗り潰さない(行が消えていた場合に null が来る)
+        createdAt: action.createdAt ?? meta.createdAt,
+        updatedAt: action.updatedAt ?? meta.updatedAt,
+      });
+      return { state: { ...state, entryMetas }, events: [] };
     }
     case 'DESELECT_ENTRY': {
       // filer の「ルート」導線(scope は selection の純関数なので、root 表示 =

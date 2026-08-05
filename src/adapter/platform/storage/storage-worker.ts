@@ -607,7 +607,17 @@ const handlers: Handlers = {
         }
       }
       database.exec({ sql: UPSERT_SQL, bind: bindUpsert(req.cid, req.entry) });
+      // 🔑 **刻んだ時刻を返す**(P9 段①)。`datetime('now')` を打つのはここだけなので、
+      // 返さないと主スレッドは**次の boot まで作成・更新の時刻を知らない**
+      // (実際に情報列が終日「—」になっていた)。⚠ 同 tx 内で読む ──
+      // COMMIT の後に読むと、別タブの書込が割り込んだ値を返しうる。
+      // ⚠ 主スレッド側で時刻を作らない(DB に無い値を画面に出すことになる)
+      const stamped = database.selectObjects(
+        'SELECT created_at, updated_at FROM entries WHERE cid = ? AND lid = ?',
+        [req.cid, req.entry.lid],
+      )[0] as { created_at: string | null; updated_at: string | null } | undefined;
       database.exec('COMMIT');
+      return { createdAt: stamped?.created_at ?? null, updatedAt: stamped?.updated_at ?? null };
     } catch (err) {
       try {
         database.exec('ROLLBACK');
@@ -616,7 +626,6 @@ const handlers: Handlers = {
       }
       throw err;
     }
-    return null;
   },
   bulkUpsertEntries: (req) => {
     // 1 tx に束ねる ── journal 増幅対策(計器 1 で実測した ~120 倍の主因が

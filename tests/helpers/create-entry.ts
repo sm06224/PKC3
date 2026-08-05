@@ -1,23 +1,26 @@
 /**
- * 新規作成の**実際の導線**を叩く(P8)。
+ * 新規作成の**実際の導線**を叩く(P8 → P10 で分割ボタンへ)。
  *
- * 種類はボタンではなく `<select>` で選ぶ形になったので、test も同じ手順を踏む
- * ── 「select に入れて、新規を押す」。⚠ ここを直接 dispatch に替えてしまうと、
- * **導線が壊れていても test が緑**になる。
+ * 🔴 **user と同じ手順を踏む**(P10)── `▼` を押して種類を選び、本体を押す。
+ * ⚠ `<select>` に値を入れて押すのは**もう正しくない** ── 本体のボタンが
+ * `data-pkc-archetype` を持ち、binder はそちらを**先に**見るので、
+ * select だけ変えると「選んだ種類と出来るものが別」になる(実際に踏んだ)。
+ * ⚠ ここを直接 dispatch に替えてしまうと、**導線が壊れていても test が緑**になる。
  *
- * ⚠ 封印中の種類(`features/sealed.ts`)は select に**出てこない**。
+ * ⚠ 封印中の種類(`features/sealed.ts`)は一覧に**出てこない**。
  * それを作る test は「導線ではなく dispatch で作る」と明示すること
  * (= 封印は導線を畳んだだけで、データは今も作れる、という事実を test が示す)。
  */
 export function createByUi(root: ParentNode, archetype: string): void {
-  const kind = root.querySelector<HTMLSelectElement>('[data-pkc-field="create-kind"]');
-  if (!kind) throw new Error('create-kind select がシェルに無い');
-  const has = [...kind.options].some((o) => o.value === archetype);
-  if (!has) throw new Error(`種類 ${archetype} は選べない(封印中では?)`);
-  kind.value = archetype;
-  const btn = root.querySelector<HTMLElement>(
-    '[data-pkc-region="create-bar"] [data-pkc-action="create-entry"]',
+  const pick = root.querySelector<HTMLElement>('[data-pkc-field="create-pick"]');
+  if (!pick) throw new Error('種類を選ぶ ▼ がシェルに無い');
+  pick.click();
+  const item = root.querySelector<HTMLElement>(
+    `[data-pkc-region="create-menu"] [data-pkc-archetype="${archetype}"]`,
   );
+  if (!item) throw new Error(`種類 ${archetype} は選べない(封印中では?)`);
+  item.click();
+  const btn = root.querySelector<HTMLElement>('[data-pkc-field="create-run"]');
   if (!btn) throw new Error('新規ボタンがシェルに無い');
   btn.click();
 }

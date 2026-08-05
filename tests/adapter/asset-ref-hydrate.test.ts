@@ -6,6 +6,7 @@
  * - 不在 key は data-pkc-asset-missing(黙って空にしない)
  * - 解決前に選択が移ったら結果を捨てて即 dispose(stale 注入なし)
  */
+import { stubStamps } from '../helpers/store-stamps';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -44,7 +45,7 @@ function setup(bodies: Record<string, string>, lender: AssetLender) {
   connectStoreEffects(d, {
     ...stubRevisionOps(),
     getBody: async (lid) => bodies[lid] ?? null,
-    persistEntry: async () => {},
+    persistEntry: async () => stubStamps(),
     deleteEntry: async () => {},
   });
   d.dispatch({
@@ -176,7 +177,7 @@ describe('借りた URL の寿命(同一ノートの差し替え)', () => {
     connectStoreEffects(d, {
       ...stubRevisionOps(),
       getBody: async () => '一行目\n\n![画像](asset:k1)\n',
-      persistEntry: async () => {},
+      persistEntry: async () => stubStamps(),
       deleteEntry: async () => {},
     });
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('e1')], relations: [] });
@@ -237,7 +238,7 @@ describe('借りた URL の寿命(同一ノートの差し替え)', () => {
     connectStoreEffects(d, {
       ...stubRevisionOps(),
       getBody: async () => body(''),
-      persistEntry: async () => {},
+      persistEntry: async () => stubStamps(),
       deleteEntry: async () => {},
     });
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('e1')], relations: [] });

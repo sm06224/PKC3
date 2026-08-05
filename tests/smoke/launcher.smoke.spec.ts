@@ -582,3 +582,79 @@ test('🔴 左のタブを変えても、中央の追記欄は消えない', asy
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * 🔴 **素のまま起動すると、囲いの中で死ぬアプリが動く**(P10、user 指示 2026-08-05
+ * 「同一ドメインで動かしたい HTML アセットが javascript が動かなくて死ぬ」)。
+ *
+ * 診断は「JS は動いていた」── 死んでいたのは**不透明オリジン**のせいで、
+ * `indexedDB.open()` が**同期に SecurityError** を投げ、`try/catch` の無い
+ * 普通のアプリは 1 行目で止まって真っ白になっていた。
+ *
+ * ⚠ ここが観測点である ── **同じアプリ**を 2 通りで開き、
+ * 「囲いの中では止まる / 素のままでは動く」の**両方**を見る。
+ * 片方だけでは「たまたま動いた」と区別できない。
+ */
+test('🔴 IndexedDB を使うアプリは、素のままで動き、囲いの中では止まる', async ({
+  page,
+  context,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await gotoApp(page);
+
+  // ⚠ `try/catch` を**書かない** ── これが user の言う「普通のアプリ」である。
+  //    1 行目で throw したら以後の行は動かない = 真っ白になる
+  const IDB_APP =
+    `<!doctype html><title>台帳</title><body><p id="app">読み込み中…</p><scr` +
+    `ipt>
+  var req = indexedDB.open('ledger', 1);
+  req.onupgradeneeded = function () { req.result.createObjectStore('rows'); };
+  req.onsuccess = function () {
+    document.getElementById('app').textContent = 'ok';
+    document.body.dataset.idb = 'ok';
+  };
+</scr` + `ipt></body></html>`;
+
+  await clickReal(page, '[data-pkc-action="attach-file"]');
+  await page.locator('[data-pkc-field="attach-input"]').setInputFiles({
+    name: 'ledger.html',
+    mimeType: 'text/html',
+    buffer: Buffer.from(IDB_APP, 'utf-8'),
+  });
+  // 🔴 **登録していない状態で**起動できること(登録はランチャーに並べる設定であって、
+  //    開けることとは別 ── そこを混ぜていたのが「詳細から起動できない」の一因)
+  const run = page.locator('[data-pkc-action="launch-asset"]');
+  await expect(run, '詳細画面に「起動」が無い').toBeVisible({ timeout: 15000 });
+
+  const readApp = async (win: import('@playwright/test').Page): Promise<unknown> => {
+    const frame = win.frameLocator('[data-pkc-field="launcher-app"]');
+    // ⚠ 待つのは **frame の中の文字**(タブが開いた瞬間はまだ空)
+    await expect(frame.locator('#app')).not.toHaveText('', { timeout: 15000 });
+    return frame.locator('#app').textContent();
+  };
+
+  // ① 囲いの中 ── **止まる**(1 行目の SecurityError)
+  const boxedTab = context.waitForEvent('page');
+  await clickReal(page, '[data-pkc-action="launch-asset"]');
+  const boxed = await boxedTab;
+  expect(await readApp(boxed), '囲いの中で IndexedDB が通ってしまった(隔離が外れている)').toBe(
+    '読み込み中…',
+  );
+  await boxed.close();
+
+  // ② 素のまま ── **動く**。⚠ 確認が出るので受ける(fail closed の逆側)
+  page.once('dialog', (d) => void d.accept());
+  const rawTab = context.waitForEvent('page');
+  await clickReal(page, '[data-pkc-action="launch-asset-raw"]');
+  const raw = await rawTab;
+  expect(await readApp(raw), '素のままなのに IndexedDB が動かない(直っていない)').toBe('ok');
+  // 器の印も見る(どちらで開いたかが外から分かる)
+  const mode = await raw
+    .locator('[data-pkc-field="launcher-app"]')
+    .getAttribute('data-pkc-launcher-mode');
+  expect(mode).toBe('same-origin');
+  await raw.close();
+
+  expect(errors).toEqual([]);
+});
