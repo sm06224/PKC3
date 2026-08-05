@@ -22,6 +22,7 @@ import { createUpdatePrompt } from '@adapter/ui/render/update-card';
 import { applyTheme, chooseTheme, initialTheme, isTheme } from '@adapter/ui/render/theme';
 import { launchTile } from '@adapter/ui/launch-tile';
 import { readAppStorage } from '@adapter/platform/app-storage';
+import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { waitForWindowClose } from '@adapter/platform/window-close';
 import { copyPlainText } from '@adapter/platform/clipboard';
 import { MarkdownClient } from '@adapter/platform/render/markdown-client';
@@ -351,6 +352,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       window.confirm?.('編集中の内容は保存されません。新しい版に切り替えますか?') ?? true,
   });
 
+  /**
+   * 🔴 **素のまま起動を許した添付**(P10)。**このセッションだけ**の記憶で、
+   * どこにも保存しない ── 素のままのアプリは localStorage / IndexedDB / OPFS に
+   * 手が届くので、**永続化した許可は自分で書ける**(前の設計 doc の指摘)。
+   * ⚠ この変数への参照経路はアプリ側に無い(`opener` は切り、`parent` は外殻で止まる)。
+   */
+  const sameOriginAllowed = new Set<string>();
+
   const services: BinderServices = {
     attachFiles: (files) =>
       void withAssetGate(() =>
@@ -421,6 +430,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * 中身の作法(隔離 / opener / 寿命)は `launch-tile.ts` が持つ ──
      * ここは**この環境の道具を渡すだけ**
      */
+    // 🔴 **素のままの許可はここにだけ在る**(P10)。保存しない ── アプリは
+    //    保存領域に手が届くので、永続化した許可は**自分で書ける**。
+    //    ⚠ このタブを閉じれば消える。⚠ アプリからこの変数への参照経路は無い
     openTile: (lid) => {
       const tile = dispatcher.getState().launcherTiles?.find((t) => t.lid === lid);
       if (!tile) return;
@@ -440,6 +452,73 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       //    空文のままで、いま何を触ったのかが画面に残らない。「押す = 起動」の
       //    意味は変えず、選択は同時に立つ副作用として入れる
       dispatcher.dispatch({ type: 'SELECT_ENTRY', lid });
+    },
+    /**
+     * 🔴 **詳細画面から添付を起動する**(P10、user 指示 2026-08-05)。
+     *
+     * ⚠ `openTile` と違って **登録の有無に依存しない** ── タイルの一覧を引かず、
+     * その添付の frontmatter から起動に要るものだけ組む(開けることと
+     * ランチャーに並べることは別の話)。
+     * ⚠ 素のまま(同一オリジン)は**確認してから**開く。許可は**保存しない** ──
+     * セッション中の記憶だけ持つ(素のままのアプリは localStorage /
+     * IndexedDB / OPFS に手が届くので、**自分の許可記録を自分で書ける**)。
+     * この記憶はこのクロージャの中にあり、アプリからの参照経路は無い
+     * (`opener` は切り、`parent` は外殻で止まる)。
+     * 設計: `docs/development/p10-launcher-same-origin-2026-08.md`
+     */
+    launchAsset: (lid, launchOpts) => {
+      const meta = dispatcher.getState().entryMetas.get(lid);
+      if (!meta) return;
+      void (async () => {
+        const body =
+          (await client.request({ op: 'getBody', cid: DEFAULT_CID, lid })) ?? null;
+        if (body === null) {
+          dispatcher.dispatch({
+            type: 'OP_FAILED',
+            error: '添付が見つかりません(整理された可能性)',
+          });
+          return;
+        }
+        const att = readAttachmentMeta(body);
+        if (att.assetKey === null || att.assetKey === '') {
+          dispatcher.dispatch({ type: 'OP_FAILED', error: 'この添付には実体がありません' });
+          return;
+        }
+        launchTile(
+          {
+            lid,
+            title: meta.title || att.name || '(無題)',
+            kind: 'app',
+            group: '',
+            assetKey: att.assetKey,
+            mime: att.mime,
+          },
+          {
+            readBlob: (assetKey) => blobs.get(DEFAULT_CID, assetKey),
+            open: (url, features) => window.open(url, '_blank', features),
+            createUrl: (blob) => URL.createObjectURL(blob),
+            revokeUrl: (url) => URL.revokeObjectURL(url),
+            whenClosed: waitForWindowClose,
+            readSeed: readAppStorage,
+            origin: location.origin,
+            fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
+            confirmSameOrigin: (title) => {
+              if (sameOriginAllowed.has(lid)) return true;
+              // ⚠ 何が起きるかを**具体**で書く(「安全でない」では判断できない)
+              const ok = window.confirm(
+                `「${title}」を PKC3 と同じ場所で開きます。\n\n` +
+                  'IndexedDB や cookie を使うアプリが動くようになりますが、' +
+                  'このアプリは PKC3 の保存内容(ノート・添付・設定)にも手が届きます。\n' +
+                  'このタブを閉じるまでは、もう一度は聞きません(次に開いたときは聞きます)。\n\n' +
+                  '開きますか?',
+              );
+              if (ok) sameOriginAllowed.add(lid);
+              return ok;
+            },
+          },
+          { sameOrigin: launchOpts.sameOrigin },
+        );
+      })();
     },
     // 🎨 配色(P7b 段⑨c、user 指示「最初はライトとダークのみに」)。
     // ⚠ 属性は **`<html>`** に付ける ── `:root` の変数を上書きするため

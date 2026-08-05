@@ -524,6 +524,33 @@ export class DetailRenderer {
       copy.title = '本文に貼ると、この添付がそこに出ます';
       copy.textContent = '参照をコピー';
       info.append(copy);
+      /**
+       * 🔴 **詳細画面から起動する**(P10、user 指示 2026-08-05
+       * 「HTML アセットの詳細画面から起動できない」)。
+       *
+       * 直す前は添付の詳細に起動の導線が**1 つも無かった**(ダウンロード /
+       * 参照をコピー / アプリとして登録 だけ)。`text/html` は preview も
+       * 「preview 無し」に落ちるので、**詳細から中身に触る方法が無かった**。
+       * ⚠ 「アプリとして登録」は**要らない** ── 登録はランチャーに並べる設定で、
+       *   開けることとは別である。
+       */
+      if (isAppMime(meta.mime)) {
+        const run = iconButton('launch-asset', '起動', 'launch-asset');
+        run.title = '囲いの中で開きます(PKC3 の中身には触れません)';
+        info.append(run);
+        /**
+         * 🔴 **素のまま(同一オリジン)で開く**(P10)。ここだけに置く ──
+         * タイルは一覧から 1 クリックで押せる場所なので、素のままの判断は
+         * **対象の素性が見えている画面**からだけ入れる。
+         * ⚠ 押すと確認が出る。許可は**保存しない**(素のままのアプリは
+         *   保存領域に手が届くので、自分の許可記録を自分で書ける)。
+         * 設計: `docs/development/p10-launcher-same-origin-2026-08.md`
+         */
+        const rawRun = iconButton('launch-asset-raw', '素のまま起動', 'launch-asset-raw');
+        rawRun.title =
+          'PKC3 と同じ場所で開きます。IndexedDB や cookie を使うアプリが動きますが、このアプリは PKC3 の中身にも手が届きます';
+        info.append(rawRun);
+      }
     }
     host.append(info);
 

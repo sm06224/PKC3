@@ -41,6 +41,21 @@ export interface LaunchDeps {
   origin: string;
   /** 失敗を user に見せる。⚠ 無言で終えない。 */
   fail: (message: string) => void;
+  /**
+   * 🔴 **素のまま(同一オリジン)で開く前の確認**(P10)。
+   *
+   * `false` を返したら**開かない**(fail closed)。呼び側がセッション中の
+   * 記憶を持つ ── ⚠ **保存はしない**(素のままのアプリは localStorage /
+   * IndexedDB / OPFS に手が届くので、**自分の許可記録を自分で書ける**)。
+   * ⚠ 囲いの中で開くときは**呼ばれない**。
+   */
+  confirmSameOrigin?: (title: string) => boolean;
+}
+
+/** 起動の仕方。既定は囲いの中。 */
+export interface LaunchOptions {
+  /** 🔴 素のまま(同一オリジン)= PKC3 の保存領域に届く。詳細画面の導線のみ。 */
+  sameOrigin?: boolean;
 }
 
 /**
@@ -50,7 +65,15 @@ export interface LaunchDeps {
  * Safari は `window.open` を通さない。Chromium は猶予に救われるが、
  * 「たまたま通っている」に頼らない。
  */
-export function launchTile(tile: LauncherTile, deps: LaunchDeps): void {
+export function launchTile(
+  tile: LauncherTile,
+  deps: LaunchDeps,
+  opts: LaunchOptions = {},
+): void {
+  const raw = opts.sameOrigin === true;
+  // 🔴 **開く前に聞く**(fail closed)。⚠ `window.open` より前に聞く ──
+  //    後にすると、断ったのに空のタブが残る
+  if (raw && deps.confirmSameOrigin !== undefined && !deps.confirmSameOrigin(tile.title)) return;
   if (tile.kind === 'url') {
     // ⚠ 外部サイトには **opener も referrer も渡さない**(マニュアルの約束)。
     // この指定だと戻り値は常に null なので、塞がれたかどうかは見分けられない
@@ -101,6 +124,7 @@ export function launchTile(tile: LauncherTile, deps: LaunchDeps): void {
             seed,
             // ⚠ 階層 URL でないと `new URL(相対, base)` が落ちる(実測)
             base: launcherAppBase(deps.origin),
+            sameOrigin: raw,
           }),
         ],
         { type: 'text/html' },

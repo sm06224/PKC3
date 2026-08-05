@@ -199,3 +199,95 @@ describe('タイルの起動', () => {
     expect(h.opened).toEqual([]);
   });
 });
+
+/**
+ * 🔴 **素のまま(同一オリジン)で開く**(P10、user 指示 2026-08-05
+ * 「同一ドメインで動かしたい HTML アセットが javascript が動かなくて死ぬ」)。
+ *
+ * 診断: JS は動いていた。死因は**不透明オリジン**で、`indexedDB.open()` /
+ * `document.cookie` / `caches` が**プロパティを読むだけで同期に throw** する ──
+ * `try/catch` の無い普通のアプリは 1 行目で止まって真っ白になる。
+ *
+ * ⚠ ここで見るのは「開いた」ではなく **判断の作法**である:
+ * 確認を通らなければ開かない / 素のままでは shim を入れない / 既定は今のまま。
+ */
+describe('素のまま起動(P10)', () => {
+  it('🔴 確認が false を返したら **窓すら開けない**(fail closed)', () => {
+    const h = harness('<p>x</p>');
+    const asked: string[] = [];
+    h.deps.confirmSameOrigin = (title) => {
+      asked.push(title);
+      return false;
+    };
+    launchTile(appTile, h.deps, { sameOrigin: true });
+    // ⚠ 聞いたことと、**開いていないこと**の両方を見る ── 断ったのに空のタブが
+    //    残る実装(window.open のあとで聞く形)を落とす
+    expect(asked).toEqual(['見積ツール']);
+    expect(h.opened).toEqual([]);
+    expect(h.created).toEqual([]);
+  });
+
+  it('🔴 囲いの中で開くときは **確認しない**', async () => {
+    const h = harness('<p>x</p>');
+    let asked = 0;
+    h.deps.confirmSameOrigin = () => {
+      asked += 1;
+      return true;
+    };
+    launchTile(appTile, h.deps);
+    await settle();
+    expect(asked, '囲いの中なのに確認している').toBe(0);
+    expect(h.opened).toHaveLength(1);
+  });
+
+  it('🔴 素のままの外殻には allow-same-origin が入り、囲いの中には入らない', async () => {
+    const shellFor = async (sameOrigin: boolean): Promise<string> => {
+      const h = harness('<p>x</p>');
+      const blobs: Blob[] = [];
+      h.deps.createUrl = (b) => {
+        blobs.push(b);
+        return 'blob:shell';
+      };
+      h.deps.confirmSameOrigin = () => true;
+      launchTile(appTile, h.deps, { sameOrigin });
+      await settle();
+      expect(blobs).toHaveLength(1);
+      return blobs[0]!.text();
+    };
+
+    const raw = await shellFor(true);
+    expect(raw, '素のままなのに同一オリジンになっていない').toContain('allow-same-origin');
+    expect(raw).toContain('data-pkc-launcher-mode="same-origin"');
+
+    const boxed = await shellFor(false);
+    // ⚠ **逆向きも見る** ── 既定が素のままに変わる退行を落とす
+    expect(boxed, '既定が同一オリジンになっている').not.toContain('allow-same-origin');
+    expect(boxed).toContain('data-pkc-launcher-mode="sandboxed"');
+    expect(boxed).toContain(LAUNCHER_APP_SANDBOX);
+  });
+
+  it('🔴 素のままでは保管庫の shim を入れない(本物が生きているから)', async () => {
+    const shellFor = async (sameOrigin: boolean): Promise<string> => {
+      const h = harness('<p>x</p>', { seed: { memo: 'あ' } });
+      const blobs: Blob[] = [];
+      h.deps.createUrl = (b) => {
+        blobs.push(b);
+        return 'blob:shell';
+      };
+      h.deps.confirmSameOrigin = () => true;
+      launchTile(appTile, h.deps, { sameOrigin });
+      await settle();
+      return blobs[0]!.text();
+    };
+    const raw = await shellFor(true);
+    const boxed = await shellFor(false);
+    // 囲いの中では貸す(= shim が入る)。⚠ この対照が無いと「shim が無い」だけでは
+    //    「shim の仕組みが壊れた」と区別できない
+    expect(boxed, '囲いの中で shim が入っていない(対照が崩れている)').toContain(
+      'localStorage',
+    );
+    expect(raw, '素のままなのに shim を入れている').not.toContain(
+      "Object.defineProperty(window, 'localStorage'",
+    );
+  });
+});

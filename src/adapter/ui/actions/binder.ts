@@ -59,6 +59,16 @@ export interface BinderServices {
    * ⚠ blob の貸し出し・`window.open` は実体側 ── binder は DOM を触らない。
    */
   openTile?(lid: string): void;
+  /**
+   * 🔴 **選んでいる添付を起動する**(P10、user 指示 2026-08-05
+   * 「HTML アセットの詳細画面から起動できない」)。
+   *
+   * ⚠ タイル(`openTile`)とは**別**である ── あちらは「アプリとして登録」した
+   * ものを lid で引くが、こちらは**登録の有無に依存しない**(開けることと
+   * 一覧に並べることは別の話)。
+   * ⚠ `sameOrigin` は詳細画面の別のボタンからのみ true になる。
+   */
+  launchAsset?(lid: string, opts: { sameOrigin: boolean }): void;
   /** 配色を切り替える(P7b 段⑨c)。⚠ user の好みで、flag でも container でもない。 */
   setTheme?(theme: string): void;
   /** 左の列の探し方(一覧 / フォルダ / アプリ)。⚠ 中央のビューとは別の軸(P8 段⑤)。 */
@@ -471,6 +481,15 @@ const ACTIONS: Record<string, ActionHandler> = {
   'open-tile': (_dispatcher, target, services) => {
     const lid = target.closest('[data-pkc-tile]')?.getAttribute('data-pkc-tile');
     if (lid) services.openTile?.(lid);
+  },
+  // ⚠ 対象は**いま選んでいる添付** ── 詳細画面のボタンなので lid は state が持つ
+  'launch-asset': (dispatcher, _target, services) => {
+    const lid = dispatcher.getState().selectedLid;
+    if (lid) services.launchAsset?.(lid, { sameOrigin: false });
+  },
+  'launch-asset-raw': (dispatcher, _target, services) => {
+    const lid = dispatcher.getState().selectedLid;
+    if (lid) services.launchAsset?.(lid, { sameOrigin: true });
   },
   'set-theme': (_dispatcher, target, services) => {
     // `<select>` なら選ばれた値、ボタンなら属性(どちらの形でも受ける)

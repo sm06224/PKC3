@@ -229,3 +229,53 @@ describe('添付の説明に書いた図(P8 段⑬)', () => {
     }
   });
 });
+
+/**
+ * 🔴 **詳細画面から起動できる**(P10、user 指示 2026-08-05
+ * 「HTML アセットの詳細画面から起動できない」)。
+ *
+ * 直す前は添付の詳細に起動の導線が**1 つも無かった**(ダウンロード / 参照をコピー /
+ * アプリとして登録 だけ)。`text/html` は preview も出ないので、
+ * **詳細から中身に触る方法が無かった**。
+ */
+describe('添付の詳細から起動する(P10)', () => {
+  const noLender: AssetLender = {
+    lend: async () => null,
+    getBlob: async () => null,
+  };
+  const htmlBody = attachmentBody({
+    name: '見積.html',
+    mime: 'text/html',
+    size: 120,
+    assetKey: 'ast-html',
+  });
+  const pdfBody = attachmentBody({
+    name: '見積.pdf',
+    mime: 'application/pdf',
+    size: 120,
+    assetKey: 'ast-pdf',
+  });
+
+  it('🔴 HTML の添付には「起動」と「素のまま起動」が出る', async () => {
+    const { d, q } = setup({ a1: htmlBody, a2: '# text' }, noLender);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    await tick(20);
+    const run = q('[data-pkc-action="launch-asset"]');
+    const raw = q('[data-pkc-action="launch-asset-raw"]');
+    expect(run, '「起動」が無い').not.toBeNull();
+    expect(raw, '「素のまま起動」が無い').not.toBeNull();
+    // ⚠ 文言だけでなく**何が起きるか**が読めること(素のままは危険側なので)
+    expect(run!.getAttribute('title')).toContain('囲いの中');
+    expect(raw!.getAttribute('title')).toContain('PKC3 の中身にも手が届きます');
+    // 図案が入っている(押せる物だと分かる)
+    expect(run!.querySelector('[data-pkc-icon] svg path')).not.toBeNull();
+  });
+
+  it('🔴 HTML でない添付には出さない', async () => {
+    const { d, q } = setup({ a1: pdfBody, a2: '# text' }, noLender);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    await tick(20);
+    expect(q('[data-pkc-action="launch-asset"]'), 'PDF に「起動」が出ている').toBeNull();
+    expect(q('[data-pkc-action="launch-asset-raw"]')).toBeNull();
+  });
+});

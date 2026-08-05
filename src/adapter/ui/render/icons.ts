@@ -160,6 +160,10 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'delete-entry': 'trash',
   /** 図を保存(`mermaid-hydrate` が手組みしていた ⬇ をここへ寄せた)。 */
   'save-diagram': 'arrow-down',
+  /** 起動(囲いの中)。 */
+  'launch-asset': 'play',
+  /** 素のまま起動(同一オリジン)── 地球で「外の決まりで動く」を示す。 */
+  'launch-asset-raw': 'globe',
 };
 
 /** 種別 → 図案(一覧のチップ)。⚠ 未知の archetype は `dot`。 */
