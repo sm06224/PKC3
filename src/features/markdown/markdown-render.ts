@@ -3388,6 +3388,13 @@ const ADMONITION_ALIASES: ReadonlySet<string> = new Set([
  * Set は空になったが、将来の deny list scenario(別 directive)用に
  * infrastructure は維持。
  */
+/**
+ * ⚠ **空集合 = この経路は起動しない**(2026-08-05 に確認)。
+ * かつて対象だった `:::toc` / `:::frontmatter` / `:::body` は、いずれも
+ * 正規の実装(`processTocDirective` / `processRegionBlocks`)へ移った。
+ * 下の `processHallucinatedDirectives` は**現状 no-op** である ──
+ * 「動いているつもり」で読まれないよう、ここに書いておく。
+ */
 const HALLUCINATION_BLOCK_DIRECTIVES: ReadonlySet<string> = new Set([]);
 
 const HALLUCINATION_BLOCK_SUGGESTION: Record<string, string> = {};
@@ -3905,7 +3912,15 @@ function postProcessBlankLineMarkers(html: string): string {
       const cappedAttr = capped
         ? ` data-pkc-blank-capped="${requested}→${count}" title="_${requested} 指定は上限 ${count} 行に cap されました(N≦${count} で再指定可能)"`
         : '';
-      return `<div class="pkc-blank-line" data-pkc-blank-count="${count}" aria-hidden="true"${cappedAttr}${attrs}></div>`;
+      // 🔴 **高さの元になる値は `style` で渡す**(2026-08-05)。CSS 側の規則は
+      //    `height: calc(1.45em * var(--pkc-blank-count, 1))` で、**この変数**を読む。
+      //    直す前はここが `data-pkc-blank-count` しか書いておらず、規則は在るのに
+      //    常に 1 行ぶんの高さだった(`_3` と `_1` が同じ)。
+      //    ⚠ 「CSS が 0 行」を数える検査では**絶対に見つからない**型の欠陥である
+      //    ── 規則も属性も在り、繋がっていないだけなので。
+      //    ⚠ 寛容 parse 側(`pkc-tolerant-spacing`)は最初から style を出していた
+      //    = **同じことを 2 か所でやって片方だけ正しい**状態だった
+      return `<div class="pkc-blank-line" style="--pkc-blank-count: ${count}" data-pkc-blank-count="${count}" aria-hidden="true"${cappedAttr}${attrs}></div>`;
     },
   );
 }

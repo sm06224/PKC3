@@ -1003,3 +1003,114 @@ test('🔴 新規の分割ボタン: 選ぶと文言・図案・Ctrl+N の対象
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * 🔴 **PKC-Markdown の装飾が「実際に効いている」か**(user 報告 2026-08-05
+ * 「レンダリングができていない」)。
+ *
+ * ⚠ ここが唯一の観測点である。生成 HTML は健全で、欠けていたのは CSS だった
+ * ── つまり **class や属性が出ているかを見る test では絶対に見つからない**。
+ * `tests/features/markdown-css-parity.test.ts` は「規則が在るか」までしか言えず、
+ * 「**素の値から動いたか**」は実ブラウザの computed style でしか測れない。
+ * ⚠ 対照は「何もしない」ではなく **同じ本文の中の素の段落**(= 装飾以外を揃えたもの)。
+ */
+test('🔴 markdown の装飾が実際に効く(素の段落から動いている)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+
+  const body = [
+    'ふつうの段落',
+    '',
+    ':::note',
+    '注意書き',
+    ':::',
+    '',
+    ':::danger',
+    '危険',
+    ':::',
+    '',
+    '- [ ] やること',
+    '',
+    '||中央寄せ',
+    '',
+    '__ 字下げ',
+    '',
+    '前',
+    '',
+    '_3',
+    '',
+    'これは ==印== です',
+    '',
+  ].join('\n');
+  await page.fill('[data-pkc-field="editor-body"]', body);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-field="detail-body"]')).toBeVisible();
+
+  const m = await page.evaluate(() => {
+    const host = document.querySelector('[data-pkc-field="detail-body"]')!;
+    const cs = (sel: string) => {
+      const el = host.querySelector(sel);
+      if (!el) return null;
+      const c = getComputedStyle(el);
+      return {
+        bg: c.backgroundColor,
+        borderLeft: c.borderLeftWidth,
+        borderColor: c.borderLeftColor,
+        align: c.textAlign,
+        indent: c.textIndent,
+        marker: c.listStyleType,
+        h: Math.round(el.getBoundingClientRect().height),
+        w: Math.round(el.getBoundingClientRect().width),
+      };
+    };
+    // 対照 = 装飾の付かない素の段落(同じ本文・同じ器の中)
+    const plainEl = [...host.querySelectorAll('p')].find(
+      (p) => p.textContent === 'ふつうの段落',
+    );
+    const plain = plainEl ? getComputedStyle(plainEl) : null;
+    return {
+      plain: plain
+        ? { bg: plain.backgroundColor, borderLeft: plain.borderLeftWidth, align: plain.textAlign,
+            indent: plain.textIndent,
+            w: Math.round(plainEl!.getBoundingClientRect().width),
+            h: Math.round(plainEl!.getBoundingClientRect().height) }
+        : null,
+      note: cs('.pkc-section-note'),
+      danger: cs('.pkc-section-danger'),
+      task: cs('li.pkc-task-item'),
+      center: cs('[data-pkc-align="center"]'),
+      indent: cs('p[data-pkc-indent="1"]'),
+      blank: cs('.pkc-blank-line'),
+      mark: cs('mark'),
+    };
+  });
+
+  expect(m.plain, '対照の素の段落が見つからない').not.toBeNull();
+  // 🔴 注意書き ── 地と左の罫が**素の段落から動いている**
+  expect(m.note, ':::note が描かれていない').not.toBeNull();
+  expect(m.note!.bg, ':::note に地が付いていない').not.toBe(m.plain!.bg);
+  expect(m.note!.borderLeft, ':::note に左の罫が無い').not.toBe(m.plain!.borderLeft);
+  // 🔴 種別ごとに**見分けが付く**(note と danger が同じ見た目なら意味が無い)
+  expect(m.danger!.bg, 'note と danger が同じ地').not.toBe(m.note!.bg);
+  expect(m.danger!.borderColor, 'note と danger が同じ罫の色').not.toBe(m.note!.borderColor);
+  // 🔴 タスク行 ── 丸ポチとチェック欄の二重を止めた
+  expect(m.task!.marker, 'タスク行に丸ポチが残っている').toBe('none');
+  // 🔴 行頭アライン / 字下げ
+  expect(m.center!.align, '中央寄せが効いていない').toBe('center');
+  expect(m.indent!.indent, '字下げが効いていない').not.toBe(m.plain!.indent);
+  // 🔴 空行 `_3` は **素の 1 行の 2 倍より高い**(規則は在るのに変数が届いて
+  //    いなかった型 ── 直す前は `_3` も `_1` も 1 行ぶんだった)。
+  //    ⚠ 対照は固定の px ではなく**同じ本文の素の段落の高さ**にする
+  expect(m.blank!.h, `_3 の高さが 1 行ぶんのまま(素の段落 ${m.plain!.h}px)`).toBeGreaterThan(
+    m.plain!.h * 2,
+  );
+  // 🔴 `==印==` は class を持たない `<mark>`(class を数える検査の外)
+  expect(m.mark, 'mark が出ていない').not.toBeNull();
+  expect(m.mark!.bg, '==印== に地が付いていない').not.toBe(m.plain!.bg);
+  // 🔴 注意書きも読み幅の上限に従う(箱だけ全幅に伸びない)
+  expect(m.note!.w, '注意書きだけ全幅に伸びている').toBeLessThanOrEqual(m.plain!.w + 4);
+
+  expect(errors).toEqual([]);
+});

@@ -805,7 +805,7 @@ select:focus-visible {
  *   「上限が掛からない」側に倒れる(= 焼き直しも崩れも起きない安全な向き)。
  *
  * 42rem = 672px。本文 13px なので全角 **約 51 文字**(日本語の可読幅は 35〜50 文字)。 */
-[data-pkc-view-pane='detail'] [data-pkc-field='detail-body'] > :is(p, h1, h2, h3, h4, h5, h6, ul, ol, dl, blockquote, hr, .footnotes, .pkc-details, .pkc-format-block, .pkc-toc-formal, .pkc-toc-preview, .pkc-section-break, .pkc-blank-line, .pkc-region-frontmatter, .pkc-region-body) {
+[data-pkc-view-pane='detail'] [data-pkc-field='detail-body'] > :is(p, h1, h2, h3, h4, h5, h6, ul, ol, dl, blockquote, hr, .footnotes, .pkc-details, .pkc-format-block, .pkc-toc-formal, .pkc-toc-preview, .pkc-section-break, .pkc-blank-line, .pkc-region-frontmatter, .pkc-region-body, .pkc-section-callout, .pkc-fig-equation) {
   max-width: var(--read-w);
 }
 .pkc-md-rendered h1,
@@ -1042,6 +1042,215 @@ select:focus-visible {
   font-size: 12px;
 }
 
+/* ══════════════════════════════════════════════════════════════════
+ * 🔴 **PKC-Markdown の装飾**(2026-08-05、user 報告「レンダリングができていない」)
+ *
+ * 生成 HTML は健全だった(PKC2 と 161 ケース A/B して 154 件 byte 一致)。
+ * 欠けていたのは**この節** ── 実際に吐く 24 個の class と 2 個の属性に
+ * 規則が 1 行も無く、注意書きも中央寄せも字下げもタスク行も**素のまま**出ていた。
+ *
+ * ⚠ **色はトークンに寄せる**。PKC2 は生の 16 進を並べていたが、PKC3 は配色が
+ * 複数あるので、地に対する混色(`color-mix`)で書く ── そうしないと暗い配色で
+ * 白地の箱が浮く。色相は種別チップ(上の `[data-pkc-chip]`)と同じ 6 色に揃える。
+ * ⚠ user 指示「**地は無彩色、色は情報にだけ**」── 地は `--bg` の混色で
+ * ほぼ無彩色、**意味を持つのは左の罫だけ**にする。
+ * ══════════════════════════════════════════════════════════════════ */
+
+/* ── 注意書き(`:::note` `:::warning` など 8 種 + `:::section{role=}`) */
+.pkc-md-rendered .pkc-section-callout {
+  margin: var(--s4) 0;
+  padding: var(--s3) var(--s4);
+  border-left: 3px solid var(--border);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background: var(--surface-2);
+}
+.pkc-md-rendered .pkc-section-callout > :first-child {
+  margin-top: 0;
+}
+.pkc-md-rendered .pkc-section-callout > :last-child {
+  margin-bottom: 0;
+}
+/* 種別ごとの色。⚠ **左の罫だけ**が色を持つ(地はほぼ無彩色に留める) */
+.pkc-md-rendered .pkc-section-note,
+.pkc-md-rendered .pkc-section-info {
+  border-left-color: color-mix(in oklab, var(--fg) 25%, #2f6fd0);
+  background: color-mix(in oklab, var(--surface-2) 92%, #2f6fd0);
+}
+.pkc-md-rendered .pkc-section-tip {
+  border-left-color: color-mix(in oklab, var(--fg) 25%, #1f7a5a);
+  background: color-mix(in oklab, var(--surface-2) 92%, #1f7a5a);
+}
+.pkc-md-rendered .pkc-section-important {
+  border-left-color: color-mix(in oklab, var(--fg) 25%, #7a5ac2);
+  background: color-mix(in oklab, var(--surface-2) 92%, #7a5ac2);
+}
+.pkc-md-rendered .pkc-section-warning,
+.pkc-md-rendered .pkc-section-caution {
+  border-left-color: color-mix(in oklab, var(--fg) 25%, #b06a1f);
+  background: color-mix(in oklab, var(--surface-2) 92%, #b06a1f);
+}
+.pkc-md-rendered .pkc-section-danger {
+  border-left-color: color-mix(in oklab, var(--fg) 20%, var(--danger));
+  background: color-mix(in oklab, var(--surface-2) 92%, var(--danger));
+}
+.pkc-md-rendered .pkc-section-summary {
+  border-left-color: var(--muted);
+}
+/* `:::section{role=body}` は**構造の印**で、注意書きではない ── 装飾しない */
+.pkc-md-rendered .pkc-section-body {
+  display: block;
+}
+
+/* ── タスク行。⚠ 直す前は**丸ポチとチェック欄が二重に**出ていた */
+.pkc-md-rendered li.pkc-task-item {
+  list-style: none;
+  margin-left: -1.2em;
+  padding-left: 1.5em;
+  position: relative;
+}
+.pkc-md-rendered li.pkc-task-item::marker {
+  content: '';
+}
+.pkc-md-rendered li.pkc-task-item > .pkc-task-checkbox,
+.pkc-md-rendered li.pkc-task-item > p:first-child > .pkc-task-checkbox:first-child {
+  position: absolute;
+  left: 0.15em;
+  top: 0.25em;
+  margin: 0;
+}
+/* ⚠ 済んだ行は薄くする。**打ち消し線は入れ子の子まで伝わらない**ようにする */
+.pkc-md-rendered li.pkc-task-item:has(> .pkc-task-checkbox:checked),
+.pkc-md-rendered
+  li.pkc-task-item:has(> p:first-child > .pkc-task-checkbox:checked)
+  > p:first-child {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.pkc-md-rendered li.pkc-task-item ul,
+.pkc-md-rendered li.pkc-task-item ol {
+  color: var(--fg);
+  text-decoration: none;
+}
+
+/* ── 行頭アライン(`||` 中央 / `|>` 右)と段落の字下げ(`__`) */
+.pkc-md-rendered [data-pkc-align='center'] {
+  text-align: center;
+}
+.pkc-md-rendered [data-pkc-align='end'],
+.pkc-md-rendered [data-pkc-align='right'] {
+  text-align: end;
+}
+.pkc-md-rendered [data-pkc-align='start'],
+.pkc-md-rendered [data-pkc-align='left'] {
+  text-align: start;
+}
+.pkc-md-rendered [data-pkc-align='justify'] {
+  text-align: justify;
+}
+.pkc-md-rendered p[data-pkc-indent='1'] {
+  text-indent: 1em;
+}
+/* `:::format{indent=N}` は箱ごと押す(段落の 1 字下げとは別物) */
+.pkc-md-rendered .pkc-format-block[data-pkc-indent='1'] {
+  padding-left: 1em;
+}
+.pkc-md-rendered .pkc-format-block[data-pkc-indent='2'] {
+  padding-left: 2em;
+}
+.pkc-md-rendered .pkc-format-block[data-pkc-indent='3'] {
+  padding-left: 3em;
+}
+.pkc-md-rendered .pkc-format-block[data-pkc-indent='4'] {
+  padding-left: 4em;
+}
+
+/* ── 強調の印(`==印==`)。地に色を敷く数少ない例外 ── **印そのものが情報**。
+ * ⚠ `==印==` が出すのは **class を持たない `<mark>`**、`:文字:…:` が出すのが
+ *    `.pkc-inline-mark` ── **両方**に当てないと片方だけ素のままになる
+ *    (class だけを数える検査では見つからない型。実ブラウザ計測で判明)。
+ * ⚠ `==[red]…==` は inline style で色を指定する ── そちらが勝つのは正しい */
+.pkc-md-rendered mark,
+.pkc-md-rendered .pkc-inline-mark {
+  padding: 0 0.2em;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--surface-2) 70%, #c39312);
+  color: inherit;
+}
+
+/* ── 振り仮名(`[[ruby:漢字|かんじ]]`)。⚠ ルビは**行の高さを押し広げる**ので、
+ * 読み側の行間が詰まっている本文では上に被る ── 小さくして被りを避ける */
+.pkc-md-rendered ruby > rt {
+  font-size: 0.55em;
+  color: var(--muted);
+}
+
+/* ── 図表ブロック(`:::figure` / `:::table` / `:::equation`) */
+.pkc-md-rendered .pkc-fig {
+  margin: var(--s4) 0;
+}
+.pkc-md-rendered .pkc-fig > figcaption {
+  margin-top: var(--s2);
+  color: var(--muted);
+  font-size: 12px;
+}
+/* 種別ごと。⚠ **見た目に差が要る**ものだけ書く ── 差の無い種別に空の規則を
+ *    置くと「規則が在る」検査を形だけ満たしてしまう */
+.pkc-md-rendered .pkc-fig-figure > figcaption,
+.pkc-md-rendered .pkc-fig-table > figcaption {
+  text-align: start;
+}
+.pkc-md-rendered .pkc-fig-table > table {
+  width: 100%;
+}
+.pkc-md-rendered .pkc-fig-equation {
+  text-align: center;
+}
+
+/* ── 添付へのリンク。⚠ `href` を持たない `<a>` なので、**リンクに見える形**を
+ *    こちらで作る(色だけでは押せる気配が出ない) */
+.pkc-md-rendered .pkc-asset-link {
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ── fence の描画物(csv の表 / html の器) */
+.pkc-md-rendered .pkc-md-rendered-csv {
+  width: 100%;
+}
+.pkc-md-rendered .pkc-html-render {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+/* ── 脚注。markdown-it-footnote が出す名前(`pkc-` が付かない) */
+.pkc-md-rendered .footnotes-sep {
+  margin: var(--s5) 0 var(--s3);
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+.pkc-md-rendered .footnotes-list {
+  margin: 0;
+  padding-left: var(--s5);
+  color: var(--muted);
+  font-size: 12px;
+}
+.pkc-md-rendered .footnote-item > p {
+  margin: 0.2em 0;
+}
+.pkc-md-rendered .footnote-ref > a,
+.pkc-md-rendered .footnote-backref {
+  text-decoration: none;
+}
+.pkc-md-rendered .footnote-ref > a {
+  padding: 0 0.15em;
+  font-size: 0.85em;
+  vertical-align: super;
+}
+
 /* 目次。⚠ renderer が出すのは `pkc-toc-formal` / `pkc-toc-preview` で、
  *    かつて書いてあった `.pkc-toc` は**誰も出していない**規則だった */
 .pkc-md-rendered .pkc-toc-formal,
@@ -1094,13 +1303,11 @@ select:focus-visible {
 .pkc-md-rendered .pkc-format-block.highlight {
   border-left-color: var(--accent);
 }
-.pkc-md-rendered .pkc-warning-hallucination-block {
-  margin: var(--s3) 0;
-  padding: var(--s3) var(--s4);
-  border: 1px solid var(--warn);
-  border-radius: var(--radius);
-  color: var(--warn);
-}
+/* ⚠ `.pkc-warning-hallucination-block` の規則はここに在ったが**削除した**
+ * (2026-08-05)── `HALLUCINATION_BLOCK_DIRECTIVES` が**空集合**で、この class を
+ * 出す経路が起動しえないため。`:::toc` / `:::frontmatter` / `:::body` は
+ * それぞれ正規の実装に移っている。「誰も出さない規則」は、直したつもりで
+ * 直っていないことの証拠になるので残さない(CLAUDE.md)。 */
 
 /* 畳める塊 */
 .pkc-md-rendered .pkc-details {
