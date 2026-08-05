@@ -10,7 +10,7 @@
  * 🔑 **3 列**(一覧 / 本文 / 付随情報)。編集に入っても列は動かない。
  */
 import { SEALED_ARCHETYPES, SEALED_VIEWS } from '@features/sealed';
-import { iconButton } from './icons';
+import { BROWSE_ICONS, iconButton, iconSpan } from './icons';
 import { BROWSE_TABS } from './browse';
 
 export interface ShellRegions {
@@ -128,15 +128,13 @@ export function buildShell(root: HTMLElement): ShellRegions {
    */
   const tabs = document.createElement('div');
   tabs.setAttribute('data-pkc-region', 'browse-tabs');
-  for (const { mode, label, icon } of BROWSE_TABS) {
+  for (const { mode, label } of BROWSE_TABS) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.setAttribute('data-pkc-action', 'set-browse');
     btn.setAttribute('data-pkc-browse', mode);
-    const ic = document.createElement('span');
-    ic.setAttribute('data-pkc-icon', '');
-    ic.setAttribute('aria-hidden', 'true');
-    ic.textContent = icon;
+    // ⚠ 図案は `icons.ts` から取る(手組みの絵文字表を持たない ── P9 段③)
+    const ic = iconSpan(BROWSE_ICONS[mode] ?? 'dot');
     const tx = document.createElement('span');
     tx.setAttribute('data-pkc-field', 'label');
     tx.textContent = label;

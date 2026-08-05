@@ -31,6 +31,7 @@ import { archetypeLabel } from './sidebar';
 // ⚠ 日付の切り方は `features/datetime/stored-date` が正本(情報列・一覧の行と共有)。
 //    ここに 3 つ目の parse を置いていたので寄せた(規則は 1 つ ── CLAUDE.md)
 import { formatStoredDate } from '@features/datetime/stored-date';
+import { iconSpan } from './icons';
 
 
 
@@ -139,7 +140,11 @@ export class FilerRenderer {
       if (m.lid === state.selectedLid) tr.setAttribute('data-pkc-selected', '');
       const name = document.createElement('td');
       name.setAttribute('data-pkc-field', 'title');
-      name.textContent = (m.archetype === 'folder' ? '📁 ' : '') + m.title;
+      // ⚠ 図案は**題名の文字列に混ぜない**(P9 段③)。以前は '📁 ' を題名の頭に
+      //    連結していたので、題名の文字列そのものが figure を含んでいた
+      //    (絞り込み・突合・読み上げが全部それを題名として扱う)
+      if (m.archetype === 'folder') name.append(iconSpan('folder'));
+      name.append(document.createTextNode(m.title));
       const kind = document.createElement('td');
       kind.textContent = archetypeLabel(m.archetype);
       const updated = document.createElement('td');

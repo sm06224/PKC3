@@ -131,7 +131,26 @@ button {
   white-space: nowrap;
   vertical-align: middle;
 }
-/* 図案の枠 ── **幅を固定**する。絵文字ごとの字幅で並びがずれない */
+/* 🔑 **図案は単色の線画**(P9 段③)。`currentColor` で描くので、選択中の行でも
+ * 9 テーマでも器の文字色に追従する ── ここに色を書かない。
+ * ⚠ **この規則は必須**。`<svg>` の既定は `fill: black; stroke: none` なので、
+ * 書かないと**暗いテーマで見えない黒い塊**になる。
+ * ⚠ 線の太さは絶対値ではなく `stroke-width`(viewBox 24 に対して 1.75)── 実寸
+ * 13px(図を保存のボタン)まで縮んでも消えない太さ。 */
+[data-pkc-icon] > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* 図案の枠 ── **幅を固定**する。書体ごとの字幅で並びがずれない
+ * (絵文字だった頃の症状。P9 段③ で原因ごと無くなったが、枠は残す ──
+ * 図案の大きさを CSS 側で決める契約は変えない) */
 [data-pkc-icon] {
   flex: none;
   width: 1.15em;
@@ -349,10 +368,6 @@ select:focus-visible {
   color: var(--accent-dim-fg);
   border-left-color: var(--accent) !important;
 }
-/* 種別チップは図案なので、文字サイズを揃えて枠を固定する */
-[data-pkc-chip] {
-  font-size: 12px;
-}
 [data-pkc-entry] [data-pkc-field='title'] {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -360,6 +375,15 @@ select:focus-visible {
   flex: 1;
   min-width: 0;
 }
+/* フォルダ面の題名セルの図案(P9 段③)。⚠ **文字との間を空ける** ── 以前は
+ * 題名の文字列にフォルダの絵文字と空白を連結していたので、図案を要素にした
+ * 時点で隙間が消えた(実機で詰まって見えた) */
+[data-pkc-region='filer-table'] [data-pkc-field='title'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
 /* 行の更新日(P9 段②)。⚠ **行の高さを増やさない** ── 題名の右端に細字で置く。
  * 数字は等幅にして桁を揃える(業務画面の作法。ばらつくと走査できない)。 */
 [data-pkc-entry] [data-pkc-field='when'] {

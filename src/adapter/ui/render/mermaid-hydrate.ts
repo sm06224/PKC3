@@ -14,6 +14,7 @@
  * - **ObjectURL は要素の寿命終端で revoke**(2026-07-27 の不可侵指示)
  */
 import { cacheKey, renderToPng, readPalette } from './mermaid-raster';
+import { ACTION_ICONS, iconSpan } from './icons';
 
 /** 1 つの器を埋めるのに要る情報。 */
 interface Pending {
@@ -70,10 +71,8 @@ function saveButton(): HTMLButtonElement {
   btn.type = 'button';
   btn.setAttribute('data-pkc-action', 'export-diagram');
   btn.setAttribute('data-pkc-field', 'diagram-save');
-  const icon = document.createElement('span');
-  icon.setAttribute('data-pkc-icon', '');
-  icon.setAttribute('aria-hidden', 'true');
-  icon.textContent = '⬇';
+  // ⚠ 図案は `icons.ts` から取る(手組みの絵文字を持たない ── P9 段③)
+  const icon = iconSpan(ACTION_ICONS['save-diagram'] ?? 'arrow-down');
   const label = document.createElement('span');
   label.setAttribute('data-pkc-field', 'label');
   label.textContent = '図を保存';

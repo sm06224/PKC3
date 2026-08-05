@@ -11,7 +11,7 @@
 import type { EntryMeta } from '@core/model/entry-meta';
 import type { AppState } from '@adapter/state/app-state';
 import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
-import { ARCHETYPE_ICONS } from './icons';
+import { ARCHETYPE_ICONS, iconSpan, setIcon, type IconName } from './icons';
 import { formatListDate, formatStoredDate } from '@features/datetime/stored-date';
 
 export class SidebarRenderer {
@@ -145,9 +145,8 @@ export class SidebarRenderer {
     // 「文 」「了 」のような単漢字を行の頭に生やしていたが、日本語として
     // 存在しない書き方であるうえ、`::before` が `<tr>` に当たると**匿名セルが
     // でき、ファイラの表が 1 列ずれて全ヘッダが嘘になっていた**(実測)。
-    const chip = document.createElement('span');
+    const chip = iconSpan(chipIcon(meta.archetype));
     chip.setAttribute('data-pkc-chip', meta.archetype);
-    chip.textContent = chipLabel(meta.archetype);
     chip.title = archetypeLabel(meta.archetype);
     const title = document.createElement('span');
     title.setAttribute('data-pkc-field', 'title');
@@ -190,7 +189,9 @@ export class SidebarRenderer {
       const chip = row.querySelector('[data-pkc-chip]');
       if (chip) {
         chip.setAttribute('data-pkc-chip', meta.archetype);
-        chip.textContent = chipLabel(meta.archetype);
+        // 🔴 **`textContent` で書かない** ── 中身が要素になったので、代入すると
+        //    SVG ごと消えてチップが空になる(`setIcon` は replaceChildren で入れ替える)
+        setIcon(chip, chipIcon(meta.archetype));
         (chip as HTMLElement).title = archetypeLabel(meta.archetype);
       }
     }
@@ -232,7 +233,8 @@ export function archetypeLabel(archetype: string): string {
  * チップに入れる図案(user 指示 2026-08-03「アイコンや絵文字を使ってください」)。
  * ⚠ **チップの中でだけ**使う ── 地の文の前に裸で置くと
  * 「文 会議メモ」のような日本語に無い書き方になる(P8 で全廃した形)。
+ * ⚠ 未知の種別は `dot`(空にしない ── 空だと行の頭が揃わない)。
  */
-function chipLabel(archetype: string): string {
-  return ARCHETYPE_ICONS[archetype] ?? '・';
+function chipIcon(archetype: string): IconName {
+  return ARCHETYPE_ICONS[archetype] ?? 'dot';
 }

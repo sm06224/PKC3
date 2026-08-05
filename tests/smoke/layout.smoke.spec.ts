@@ -391,7 +391,9 @@ test('🔴 図案つきボタンの高さが揃っている', async ({ page }) =
   const sizes = await page.evaluate(() =>
     [...document.querySelectorAll('[data-pkc-region="collection-bar"] button')].map((b) => ({
       h: Math.round(b.getBoundingClientRect().height),
-      icon: (b.querySelector('[data-pkc-icon]')?.textContent ?? '').length > 0,
+      // ⚠ 図案は **SVG** になった(P9 段③)── `textContent` は空なので、
+      //    「描かれている物が在る」を **svg の path 数**で見る(空振り防止の要)
+      icon: (b.querySelector('[data-pkc-icon] svg')?.querySelectorAll('path').length ?? 0) > 0,
     })),
   );
   expect(sizes.length).toBeGreaterThanOrEqual(5);

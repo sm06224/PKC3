@@ -146,9 +146,12 @@ describe('kanban view (P3-6)', () => {
     // 移動カード 1 枚の done 列への挿入だけ ── 後続 7 枚は動かない
     // (review #1: 修正前は移動元列の cursor 汚染で後続全カードが move した)
     expect(moves).toBe(1);
-    // 行粒度 patch の pin(review #3): 列移動後のトグル印が ☑ に変わっている
+    // 行粒度 patch の pin(review #3): 列移動後のトグル印が「済」の図案に変わっている
+    // ⚠ P9 段③ で図案が単色 SVG になった ── 見るのは `textContent` ではなく
+    //    **どの図案が入っているか**(`data-pkc-icon-name`)と、中身が空でないこと
     const toggleBtn = q('[data-pkc-entry="e0"] [data-pkc-action="toggle-todo"]')!;
-    expect(toggleBtn.textContent).toBe('☑');
+    expect(toggleBtn.getAttribute('data-pkc-icon-name')).toBe('check-box');
+    expect(toggleBtn.querySelector('svg path'), 'トグルの図案が空').not.toBeNull();
     // data-pkc-entry は entry 要素(カード)専用 ── ボタンには付かない(P3-7a 規約)
     expect(toggleBtn.hasAttribute('data-pkc-entry')).toBe(false);
   });
