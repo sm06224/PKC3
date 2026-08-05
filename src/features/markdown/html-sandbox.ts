@@ -47,15 +47,20 @@ export const HTML_SANDBOX_RESIZE_MSG_TYPE = 'pkc-html-render-resize';
 export function buildHtmlSandboxIframe(
   content: string,
   sourceLineAttrs: string = '',
-  /** 文書内の位置(token 添字)。同じ中身の fence を区別する。 */
-  position: number = 0,
+  /**
+   * **同じ中身の fence の中で何番目か**(0 始まり)。同じ中身を区別するために要る。
+   * ⚠ **token 添字を渡してはいけない**(2026-08-05)── 前に行を足すだけで id が
+   * 変わり、差分反映がこの塊を作り直して **iframe が読み直され中身が一度消える**。
+   * 数えるのは `markdown-render.ts` の `nextFenceOccurrence`。
+   */
+  occurrence: number = 0,
 ): string {
   // iframe ID:DOM 内 unique(postMessage で iframe を特定)。
   // 🔴 **中身から決める**(乱数にしない ── P8 段⑩ で判明)。かつて
   // `Math.random()` だったため、**同じ入力でも毎回ちがう HTML** になり、
   // 差分反映から見ると「毎回変わった」ことになって、この塊が毎回作り直されていた
   // (= iframe が毎回読み直され、中身が一度消える)。
-  const iframeId = `pkc-html-render-${stableKey(content, String(position))}`;
+  const iframeId = `pkc-html-render-${stableKey(content, String(occurrence))}`;
 
   // CSP:default-src は self + data:、image は asset URI 想定で *、script は
   // inline only(外部 src 禁止)、connect は none(fetch 禁止)、frame は none

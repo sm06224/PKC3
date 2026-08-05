@@ -205,18 +205,46 @@ function renderFenceSourceHtml(content: string, lang: RenderableFenceLang): stri
  * mode = render / both の「レンダリング面」を言語別に生成する。
  * csv 系は parse 失敗で null(caller がソース表示へ fall back)。
  */
+/**
+ * 🔴 **salt は「同じ中身の中での出現順」にする**(2026-08-05 に実測で判明)。
+ *
+ * かつてここは **token 添字**だった。すると図の**前**に段落を 1 つ足すだけで
+ * 添字がずれ、`id` が変わり、**図を含む塊の HTML が変わる** ── `apply-blocks.ts`
+ * から見ると「その塊は変わった」ことになるので作り直され、**生きている
+ * `<img>` が捨てられて絵が一度消える**(ObjectURL の作り直し + IDB の読み直し +
+ * decode)。実測: 図の前に段落 1 つを挿入すると、塊の差は
+ * **`pkc-rv-…` の値だけ**なのに `diffBlocks` の `middle` に図の塊が入る。
+ * ⚠ これは `sourceLineAnchors` を切っている**今日のプレビューでも起きている**。
+ *
+ * 出現順にすれば「同じ内容の fence を区別する」という当初の目的は保ったまま、
+ * **無関係な編集で id が動かなくなる**。
+ * ⚠ カウンタは `env`(render 1 回ぶん)に持つ ── `md` は module 内で共有なので、
+ * module スコープに置くと render を跨いで増え続け、id が毎回変わる(元の病気に戻る)。
+ */
+function nextFenceOccurrence(env: unknown, lang: string, content: string): number {
+  const bag = env as { fenceSeen?: Map<string, number> };
+  const seen = (bag.fenceSeen ??= new Map<string, number>());
+  const key = `${lang}\u0000${content}`;
+  const n = seen.get(key) ?? 0;
+  seen.set(key, n + 1);
+  return n;
+}
+
 function buildRenderableSlotHtml(
   fence: RenderableFence,
   content: string,
   inlineRender: (text: string) => string,
-  /** 文書内の位置(token 添字)── 決定的な id を作るために要る。 */
-  position: number,
+  /**
+   * **同じ (lang, 中身) の fence の中で何番目か**(0 始まり)── 決定的な id を
+   * 作るために要る。⚠ **token 添字ではない**(下の `nextFenceOccurrence` を見よ)。
+   */
+  occurrence: number,
 ): string | null {
   switch (fence.lang) {
     case 'html':
       // reform-2026-05 PR-2M:iframe sandbox 経由で HTML を直接 render。
       // sandbox="allow-scripts" のみ(allow-same-origin 無し)で cross-origin 隔離。
-      return buildHtmlSandboxIframe(content, '', position);
+      return buildHtmlSandboxIframe(content, '', occurrence);
     case 'mermaid': {
       // pgc-203 wave-α' polish #24:placeholder div のみ emit。実 SVG render は
       // adapter 層の `hydrateMermaidPlaceholders` が lazy import('mermaid') で
@@ -259,8 +287,11 @@ function buildRenderableBlockHtml(
   slotHtml: string,
   content: string,
   sourceLineAttrs: string,
-  /** 文書内の位置(token 添字)。⚠ **同じ中身の fence を区別する**ために要る。 */
-  position: number,
+  /**
+   * **同じ (lang, 中身) の fence の中で何番目か**(0 始まり)。
+   * ⚠ **同じ中身の fence を区別する**ために要るが、**token 添字にしてはいけない**。
+   */
+  occurrence: number,
 ): string {
   let toggleHtml = '';
   if (fence.mode === 'both') {
@@ -270,7 +301,7 @@ function buildRenderableBlockHtml(
     // 「毎回変わった」ことになり、**図が毎回作り直されて絵が一度消える**
     // (user 指摘「レンダリングで画面がガクガクする」の実体の 1 つ)。
     // ⚠ 同じ文書に同じ内容の fence が 2 つあっても衝突しないよう、位置も混ぜる。
-    const id = `pkc-rv-${toggleKey(fence.lang + '\u0000' + content, String(position))}`;
+    const id = `pkc-rv-${toggleKey(fence.lang + '\u0000' + content, String(occurrence))}`;
     toggleHtml =
       `<input type="checkbox" id="${id}" class="pkc-render-toggle-input" aria-label="ソース / レンダリング切替">` +
       `<label for="${id}" class="pkc-render-toggle" title="ソース / レンダリング切替">‹/›</label>`;
@@ -301,9 +332,19 @@ md.renderer.rules.fence = function (tokens, idx, options, env, self) {
     // Pass inline renderer so CSV cells can carry markdown inline markup
     // (`**bold**` / `==highlight==` / `:text:attrs:` L-6 simple-inline 等)。
     const inlineRender = (text: string): string => md.renderInline(text, env);
-    const slot = buildRenderableSlotHtml(fence, content, inlineRender, idx);
+    /**
+     * 1 度だけ数えて両方へ同じ値を渡す。
+     *
+     * ⚠ **2 回数えても壊れない**(変異試験で確認 ── `<input id>` と `<label for>` は
+     * どちらも `buildRenderableBlockHtml` の中で同じ引数から作るので対応は崩れず、
+     * 鍵に中身が入っているので衝突もしない)。1 度にするのは**数が「何番目か」の
+     * 意味を保つ**ためで、安全性の根拠ではない ── ここに「2 回数えると壊れる」と
+     * 書くのは嘘になる。
+     */
+    const occurrence = nextFenceOccurrence(env, fence.lang, content);
+    const slot = buildRenderableSlotHtml(fence, content, inlineRender, occurrence);
     if (slot !== null) {
-      return buildRenderableBlockHtml(fence, slot, content, sourceLineAttrs, idx);
+      return buildRenderableBlockHtml(fence, slot, content, sourceLineAttrs, occurrence);
     }
     // csv 系 parse 失敗:従来どおり user のソースを可視で残す。
     return wrapWithCopyButton(renderFenceSourceHtml(content, fence.lang), 'code', sourceLineAttrs);
