@@ -138,6 +138,48 @@ PKC3 は `html: false`(`markdown-render.ts:50`)を **PUA sentinel(U+E110〜U+E16
 
 ### C6. host 側の CSP と innerHTML の出所
 
+🔴 **実測して分かった:このままでは着手できない**(2026-08-06。候補 CSP を当てて全 smoke を回した)。
+
+**host に CSP を置くと、`srcdoc` の箱の中の script が全部止まる。**
+
+```
+Refused to execute inline script because it violates the following
+Content Security Policy directive: "script-src 'self' 'wasm-unsafe-eval'"
+```
+
+CSP は **`srcdoc` の子へ継承され、複数の policy は交差する(厳しい側が勝つ)**。
+箱は自前の meta CSP で `script-src 'unsafe-inline'` を許しているが、**親の
+`script-src 'self'` が箱の中でも効く**ので、箱の高さ通知 script も launcher の
+アプリも動かなくなる。実測: **候補 CSP を当てると smoke 83 → 77 passed / 6 failed**
+(`fence-render` 1 件 = 箱の高さが 0 のまま + `launcher` 5 件)。
+
+⚠ **逃げ道が無い** ── `frame-src` は継承を制御しない。継承は仕様であり opt-out できない。
+したがって選べるのは:
+
+| 案 | 何が起きるか |
+|---|---|
+| **(a) host の `script-src` に `'unsafe-inline'` を足す** | 箱は動くが、**CSP の主目的(混ざった script を止める)が消える** |
+| **(b) 箱を `srcdoc` で配るのをやめる**(実 URL / blob:) | 親の policy を継承しなくなる。**= §2 Q3 の「昇格」そのもの**(裁定待ち) |
+| **(c) host に CSP を置かない**(現状) | 今日の姿勢を保つ。CSP で買えるものは買えない |
+
+🔑 **C6 は Q3 と構造的に結合している** ── 「host に CSP を置く」は
+**箱の配り方を変えない限り成立しない**。これは本 doc の初版が持っていなかった情報である
+(§8 で `frame-ancestors` / `sandbox` / XFO の限界は挙げたが、**継承**は挙げていなかった)。
+
+⚠ **もう 1 つ、meta では買えないものが増えた**: **`Content-Security-Policy-Report-Only`
+は meta に無い**。つまり「まず報告だけ」ができないので、当てて壊れないかを**実測で
+確かめるしかない**(今回そうした)。
+
+🔑 **副産物の発見(裁定に効く)**: 継承が交差するということは、host に
+`img-src 'self' data: blob:` を置くと、**箱の `img-src *` が交差で閉じる** ──
+つまり **C2 の「取り込んだ箱から外へ IP が飛ぶ」穴が、goldens を 1 バイトも動かさずに
+塞げる**(index.html は golden ではない)。⚠ ただし**振る舞いの変化は C2 と同じ**
+(箱の中の遠隔画像が読めなくなる)なので、**付帯裁定の対象は「goldens が動くか」
+ではなく「その振る舞いを変えてよいか」**である ── ここは user 裁定を仰ぐ。
+
+以下は初版の記述(効能の見立ては変わらない):
+
+
 - `index.html` に CSP は **0 行** / `innerHTML` は src 内 11 箇所 / Trusted Types は 0 hit
 - ⚠ **効能を過大に書かない**: innerHTML に入るのは自前描画器の出力で、本文由来の生タグは
   `html: false` でゼロ。だから Trusted Types policy は「素通し関数」になり、
