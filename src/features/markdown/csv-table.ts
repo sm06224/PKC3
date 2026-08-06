@@ -2,7 +2,7 @@
  * CSV / TSV / PSV fenced block → HTML `<table>` renderer.
  *
  * USER_REQUEST_LEDGER S-16 (2026-04-14, B-1 promotion).
- * Spec: docs/development/markdown-extensions/markdown-csv-table-extension.md
+ * Spec: PKC2: docs/development/markdown-extensions/markdown-csv-table-extension.md
  *
  * Features layer — pure function, no browser APIs.
  *

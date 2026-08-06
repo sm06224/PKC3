@@ -88,7 +88,15 @@ function textOf(html: string): string {
 
 /** 生成された HTML から `#pkc-data` の JSON を取り出す(閲覧側と同じ読み方)。 */
 async function dataOf(blob: Blob): Promise<Record<string, never> & {
-  entries: Array<{ lid: string; title: string; html: string; refs?: string[]; attach?: string[] }>;
+  entries: Array<{
+    lid: string;
+    title: string;
+    html: string;
+    refs?: string[];
+    attach?: string[];
+    /** 文書属性(書字方向など)── user 報告 2-7 で載せるようにした */
+    attrs?: Record<string, string>;
+  }>;
   assets: Array<{ key: string; mime: string; size: number }>;
   assetData: Record<string, string>;
   title: string;
@@ -1168,5 +1176,74 @@ describe('可搬 HTML — fence の描画 / 原文の切替', () => {
     const css = await styleOf((await writePortableHtml(WITH_FENCE, NOW)).blob);
     const print = css.slice(css.indexOf('@media print{'));
     expect(print).toContain('.b .pkc-render-toggle{display:none}');
+  });
+});
+
+/**
+ * 🔴 **配る HTML と画面で同じものが見える**(2026-08-06。user 報告 2-5 / 2-7)。
+ *
+ * 直す前:
+ *  - `{{vars.x}}` が**生のまま**配られていた(描画器に `vars` を渡していなかった)
+ *  - `heading-number: true` の文書に**番号が付かなかった**
+ *  - 書字方向などの文書属性が**画面だけ**に当たっていた
+ *  - `html` fence の高さを受ける側が**居なかった** ── iframe は height:0 = 不可視
+ */
+describe('可搬 HTML — 画面と同じ材料で描く', () => {
+  it('🔴 `vars` を描画器に渡す(生の `{{vars.x}}` を配らない)', async () => {
+    const seen: Array<{ text: string; vars?: Record<string, string> }> = [];
+    const out = await writePortableHtml(
+      source({
+        entries: [{ lid: 'v1', body: '---\nvars.name: 佐藤\n---\nこんにちは {{vars.name}} さん\n' }],
+      }),
+      NOW,
+      (text, opts) => {
+        seen.push({ text, vars: opts?.vars });
+        return Promise.resolve(renderMarkdown(text, opts));
+      },
+    );
+    expect(seen[0]!.vars, 'vars を渡していない').toMatchObject({ name: '佐藤' });
+    const d = await dataOf(out.blob);
+    expect(d.entries[0]!.html, '生の {{vars.name}} が配られている').not.toContain('{{vars.name}}');
+    expect(d.entries[0]!.html).toContain('佐藤');
+  });
+
+  it('🔴 見出しの自動採番を描画器に渡す', async () => {
+    const seen: Array<{ start: number } | null | undefined> = [];
+    const out = await writePortableHtml(
+      source({ entries: [{ lid: 'h1', body: '---\nheading-number: true\n---\n## 節\n' }] }),
+      NOW,
+      (text, opts) => {
+        seen.push(opts?.headingNumber);
+        return Promise.resolve(renderMarkdown(text, opts));
+      },
+    );
+    expect(seen[0], '見出し番号の設定を渡していない').toEqual({ start: 1 });
+    const d = await dataOf(out.blob);
+    expect(d.entries[0]!.html, '番号が付いていない').toMatch(/0?\.?1/);
+  });
+
+  it('🔴 文書属性(書字方向)を entry に載せる', async () => {
+    const out = await writePortableHtml(
+      source({ entries: [{ lid: 'd1', body: '---\ndirection: rtl\n---\n本文\n' }] }),
+      NOW,
+    );
+    const d = await dataOf(out.blob);
+    expect(d.entries[0]!.attrs, '文書属性が載っていない').toMatchObject({ dir: 'rtl' });
+  });
+
+  it('属性の無い文書には `attrs` を付けない(空の field を配らない)', async () => {
+    const out = await writePortableHtml(source({ entries: [{ lid: 'p1', body: '本文\n' }] }), NOW);
+    const d = await dataOf(out.blob);
+    expect('attrs' in (d.entries[0] as object)).toBe(false);
+  });
+
+  it('🔴 閲覧側が `html` fence の高さを受ける(height:0 の不可視にしない)', async () => {
+    const out = await writePortableHtml(source({ entries: [{ lid: 'x1', body: '本文\n' }] }), NOW);
+    const text = await out.blob.text();
+    // 受け口が在る(無いと囲いの中の文書は高さ 0 のまま)
+    expect(text, '高さを受ける口が無い').toContain('pkc-html-render-resize');
+    expect(text).toContain('data-pkc-html-render-id');
+    // ⚠ 上限も画面側と同じ(暴走する中身に画面を占領させない)
+    expect(text).toContain('Math.min(5000');
   });
 });

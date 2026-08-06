@@ -37,8 +37,14 @@ export interface LaunchDeps {
    * `await` の後ろに落とすと、Safari が transient activation を失って窓を開かない。
    */
   readSeed: (appId: string) => Readonly<Record<string, string>>;
-  /** `location.origin`。相対 URL の解決先を組むのに要る。 */
-  origin: string;
+  /**
+   * **配信ディレクトリ**の URL(`document.baseURI`)。相対 URL の解決先を組む。
+   * ⚠ `location.origin` ではない(2026-08-06。user 報告 minor)── Vite は
+   * `base: './'` で相対配信なので、origin の根を仮定すると project Pages
+   * (`/PKC3/`)で**配信の外**を指す。しかも `<user>.github.io` は他の project と
+   * **共有する origin** なので「専用のパス」という前提が崩れる。
+   */
+  baseUrl: string;
   /** 失敗を user に見せる。⚠ 無言で終えない。 */
   fail: (message: string) => void;
   /**
@@ -75,9 +81,27 @@ export function launchTile(
   //    後にすると、断ったのに空のタブが残る
   if (raw && deps.confirmSameOrigin !== undefined && !deps.confirmSameOrigin(tile.title)) return;
   if (tile.kind === 'url') {
-    // ⚠ 外部サイトには **opener も referrer も渡さない**(マニュアルの約束)。
-    // この指定だと戻り値は常に null なので、塞がれたかどうかは見分けられない
-    // ── ブラウザ側の遮断表示に委ねる
+    /**
+     * ⚠ 外部サイトには **opener も referrer も渡さない**(マニュアルの約束)。
+     * この指定だと戻り値は常に null なので、**塞がれたかどうかは見分けられない**
+     * ── ブラウザ側の遮断表示に委ねる。
+     *
+     * 🔴 **測ってから諦めている**(2026-08-06。user 報告 minor
+     * 「ポップアップ遮断を検出できない設計」)。塞がれたことを見分けるには
+     * 「空の窓を開いて戻り値を見る → 遷移させる」形が要るが、実測すると
+     * **referrer が漏れる**(フル Chromium / 静的ページ 2 枚で計測):
+     *
+     * | 開き方 | `document.referrer` | `window.opener` | 塞がれたか分かるか |
+     * |---|---|---|---|
+     * | `noopener,noreferrer`(今の形) | **空** | null | ✗ |
+     * | 空の窓 → opener 切断 → 遷移 | **漏れる** | null | ✓ |
+     * | 同上 + `<meta name="referrer" content="no-referrer">` | **漏れる** | null | ✓ |
+     *
+     * meta を書いても効かない(遷移の referrer は開始側の方針で決まり、
+     * `document.write` した空文書の meta は間に合わない)。**約束のほうが重い**ので
+     * 検出は買わない ── アプリの起動側(下)は窓の handle が要るので検出できる、
+     * という非対称はここに由来する。
+     */
     if (tile.url !== undefined) deps.open(tile.url, EXTERNAL_WINDOW_FEATURES);
     return;
   }
@@ -123,7 +147,7 @@ export function launchTile(
             appId: tile.lid,
             seed,
             // ⚠ 階層 URL でないと `new URL(相対, base)` が落ちる(実測)
-            base: launcherAppBase(deps.origin),
+            base: launcherAppBase(deps.baseUrl),
             sameOrigin: raw,
           }),
         ],

@@ -12,6 +12,7 @@ import { withTodoStatus } from '@features/flavor/todo-flavor';
 import { appendBlock } from '@features/markdown/text-ops';
 import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
 import { buildTiles, type TileSource } from '@features/launcher/tiles';
+import type { Relation } from '@core/model/entry-meta';
 import type { Dispatcher } from './dispatcher';
 
 /**
@@ -58,6 +59,14 @@ export interface StorePort {
    * ⚠ 1 op = 1 tx ── 「落として張る」を割らない。
    */
   setEntryParent(lid: string, parentLid: string | null, relationId: string): Promise<void>;
+  /**
+   * 🔴 **関係を読む**(2026-08-06。ゴミ箱からの復元で居場所を戻すために要る)。
+   *
+   * `deleteEntry` は relations を消さない(戻せなくなるので)が、**常駐の
+   * `state.relations` からは落ちている** ── 復元のときに disk から読み直さないと
+   * 「戻したのにフォルダの外に出ている」になる(user 報告 2-9)。
+   */
+  listRelations(): Promise<Array<{ id: string; kind: string; from_lid: string; to_lid: string }>>;
   listRevisionMetas(entryLid: string): Promise<
     Array<{
       id: string;
@@ -224,6 +233,52 @@ export function connectStoreEffects(
               dispatcher.dispatch({ type: 'OP_FAILED', error: String(e) });
           }
         });
+        break;
+      case 'REQUEST_REORDER':
+        /**
+         * 🔴 **並べ替えを disk へ**(2026-08-06。user 報告 2-10)。
+         *
+         * ⚠ 形は `REQUEST_RENAME` と同じ read→write(本文は disk が正)。
+         * ⚠ **1 件ずつ enqueue する** ── 2 件を 1 つの async にまとめると、
+         *   片方が落ちたときにもう片方だけ disk へ通り、**並びが壊れた形**で残る
+         *   (交換なので片側だけでは順序が表現できない)。直列 queue なので
+         *   順番は保たれる。
+         */
+        for (const row of ev.entries) {
+          enqueue(async () => {
+            if (disposed) return;
+            try {
+              const body = await store.getBody(row.lid);
+              if (disposed) return;
+              if (body === null) {
+                dispatcher.dispatch({
+                  type: 'OP_FAILED',
+                  error: `並べ替え: entry が見つかりません(${row.lid})`,
+                });
+                return;
+              }
+              const ext = extractMeta(row.archetype, body);
+              const stamps = await store.persistEntry({
+                lid: row.lid,
+                title: row.title,
+                archetype: row.archetype,
+                body,
+                entryOrder: row.entryOrder,
+                status: ext.status,
+                date: ext.date,
+                archived: ext.archived,
+              });
+              stamp(row.lid, stamps);
+            } catch (e) {
+              // ⚠ 画面は既に動かしている(楽観)── 失敗は必ず言う
+              if (!disposed)
+                dispatcher.dispatch({
+                  type: 'OP_FAILED',
+                  error: `並べ替えを保存できませんでした: ${String(e)}`,
+                });
+            }
+          });
+        }
         break;
       case 'REQUEST_TILE_UPDATE':
         enqueue(async () => {
@@ -486,6 +541,33 @@ export function connectStoreEffects(
               date: ext.date,
               archived: ext.archived,
             });
+            /**
+             * 🔴 **居場所も一緒に戻す**(2026-08-06。user 報告 2-9)。
+             *
+             * `deleteEntry` は disk の relations を消さない(消すと戻せない)が、
+             * 常駐の `state.relations` からは落ちている ── ここで読み直さないと
+             * 「ゴミ箱から戻したのにフォルダの外に出ている」になる。
+             * ⚠ **その entry に触るものだけ**渡す(全件を撒くと、他で消された
+             *   関係が復活しうる)。
+             * ⚠ 読めなくても復元は続ける ── 居場所が戻らないより、entry が
+             *   戻らないほうが痛い。
+             */
+            let restored: Relation[] = [];
+            try {
+              const rows = await store.listRelations();
+              restored = rows
+                .filter((r) => r.from_lid === ev.entryLid || r.to_lid === ev.entryLid)
+                .map((r) => ({
+                  id: r.id,
+                  kind: r.kind,
+                  fromLid: r.from_lid,
+                  toLid: r.to_lid,
+                  createdAt: null,
+                  updatedAt: null,
+                }));
+            } catch {
+              /* 関係が読めなくても entry の復元は進める */
+            }
             if (!disposed)
               dispatcher.dispatch({
                 type: 'ENTRY_RESTORED',
@@ -502,6 +584,7 @@ export function connectStoreEffects(
                   archived: ext.archived,
                 },
                 body: rev.body,
+                relations: restored,
               });
             // ⚠ `ENTRY_RESTORED` の後(meta を置き換えるため)
             stamp(ev.entryLid, stamps);

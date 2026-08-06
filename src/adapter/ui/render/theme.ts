@@ -16,8 +16,10 @@
 
 /**
  * 選べる配色。⚠ **id は `tokens.css` の `[data-pkc-theme='…']` と 1 対 1**。
- * 片方だけ増やしても壊れないので、`tests/adapter/theme-contrast.test.ts` が
+ * 片方だけ増やしても壊れないので、`tests/adapter/theme-tokens.test.ts` が
  * 両方を突き合わせる(CSS に無い id を出さない / CSS にあるのに選べない、を落とす)。
+ * ⚠ かつてここは `theme-contrast.test.ts` を指していたが、その file は無い
+ *   (2026-08-06 に修正 ── 壊れた導線を置かない)。
  */
 export const THEMES = [
   { id: 'light', label: 'ライト', dark: false },

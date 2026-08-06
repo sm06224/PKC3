@@ -29,7 +29,12 @@ import { isAppMime, tileFrom } from '../../src/features/launcher/tiles';
  * ── 実際、この file の隔離の pin は一度そうなった(「外殻は script を持たない」が
  * `appId` 無しの呼び方に救われて緑のままだった)。以後ここを通す。
  */
-const BASE = launcherAppBase('http://x.test');
+/**
+ * ⚠ 渡すのは **配信ディレクトリ**(`document.baseURI` 相当)── 2026-08-06 に
+ * `location.origin` から変えた(user 報告 minor)。project Pages では配信が
+ * `/PKC3/` なので、origin の根を基点にすると**配信の外**を指す。
+ */
+const BASE = launcherAppBase('http://x.test/PKC3/');
 const shell = (html: string, title = '題'): string =>
   buildLauncherAppShell(title, html, { appId: 'a1', base: BASE });
 
@@ -135,7 +140,13 @@ describe('ランチャーの外殻', () => {
     // 🔴 **origin の根にしない** ── 根にすると `assets/…` が PKC3 自身の資産に
     //    解決して、アプリの中に PKC3 の JS が降ってくる
     expect(BASE).not.toBe('http://x.test/');
-    expect(new URL('assets/app.js', BASE).pathname).toBe(`${LAUNCHER_APP_PATH}assets/app.js`);
+    // 🔴 **配信ディレクトリの下**に居る(2026-08-06)── origin の根から数えると、
+    //    `<user>.github.io` のような**共有 origin** では他の project の
+    //    `/pkc3-app/` に当たりうる(「専用のパス」の前提が崩れる)
+    expect(BASE).toBe('http://x.test/PKC3/pkc3-app/');
+    expect(new URL('assets/app.js', BASE).pathname).toBe(
+      `/PKC3${LAUNCHER_APP_PATH}assets/app.js`,
+    );
   });
 
   it('base を渡さないときは `<base>` を焼かない(test / 旧経路)', () => {

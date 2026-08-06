@@ -177,15 +177,55 @@ describe('② 分割は全域で、重複しない', () => {
     expect(part.ok).toBe(true);
   });
 
-  it('🔴 入れ子の `:::` は今日の描画が壊れているので、開かない側に倒れる', () => {
-    // 実測(2026-08-05、本 stage とは無関係な既存バグ): `:::section` の中の
-    // `:::note` がリテラルの段落になり、外側の閉じ `:::` が `<p>:::</p>` として漏れる。
-    // ⚠ ここで守るのは「**壊れた分割の上で編集させない**」こと ── 描画と原文の
-    //    食い違いを検証が捕まえ、行の差し替えを開かない(今日の編集画面へ退避)
+  /**
+   * 🔴 **入れ子の `:::` は 2026-08-06 に直した**(`processSectionBlocks` が
+   * 入れ子を数えていなかった)。以前はここが「壊れているので開かない」test だった
+   * ── 直ったので **開ける**ことを守る側に反転させる。
+   */
+  it('🔴 入れ子の `:::` でも分割が組める(= 行の差し替えが開く)', () => {
     const nested = ':::section{role=warn}\n外\n:::note\n中\n:::\n:::\n';
-    expect(renderMarkdown(nested, {})).toContain('<p>:::</p>'); // 壊れている証拠
+    // 直った証拠: リテラルの `:::` が 1 つも漏れていない
+    expect(renderMarkdown(nested, { silentHallucinationWarnings: true })).not.toContain('<p>:::');
     const { part } = build(nested);
-    expect(part.ok, '壊れた入れ子で分割が通ってしまった(編集させてはいけない)').toBe(false);
+    expect(part.ok, `入れ子で分割が組めない(${part.reason ?? ''})`).toBe(true);
+    // 中身の行が持ち主を持つ(どの塊にも属さない行が無い)
+    expect(blockIndexForLine(part, 1), '`外` の行に持ち主が居ない').not.toBeNull();
+    expect(blockIndexForLine(part, 3), '`中` の行に持ち主が居ない').not.toBeNull();
+  });
+
+  /**
+   * 🔴 **id 無しの figure は 2026-08-06 に直した**(user 報告 minor
+   * 「`:::figure` が素のテキスト」)── 畳むようになったので**開ける**側へ反転。
+   */
+  it('🔴 id の無い figure でも分割が組める(描画と走査が一致した)', () => {
+    const body = ':::figure\n\n本文\n\n:::\n\nあと\n';
+    expect(
+      renderMarkdown(body, { silentHallucinationWarnings: true }),
+      '直った前提が崩れている(literal に戻った)',
+    ).not.toContain('<p>:::figure</p>');
+    const { part } = build(body);
+    expect(part.ok, `id 無しの figure で分割が組めない(${part.reason ?? ''})`).toBe(true);
+  });
+
+  /**
+   * 🔴 **開かない側に倒れる条件はまだ在る**(空振り防止のため実物で pin する)。
+   *
+   * `scanContainers` は `:::name` を**一律に**囲いと見なすが、renderer が畳むのは
+   * **知っている名前だけ** ── 知らない名前は literal のまま残るので、
+   * **走査だけが 1 塊に畳んで**食い違う。
+   * ⚠ 食い違ったら**開かない** ── 壊れた分割の上で行を差し替えるより安全側である。
+   * ⚠ ここを「走査側にも名前の表を持たせる」で直してはいけない ── 同じ判定が
+   *   2 か所に生え、片方だけ古くなる(CLAUDE.md「判定を増やさない」)。
+   */
+  it('🔴 描画が畳まない `:::`(知らない名前)では開かない側に倒れる', () => {
+    const body = ':::unknown-thing\n\n本文\n\n:::\n\nあと\n';
+    // 前提: renderer は畳んでいない(literal のまま出ている)
+    expect(renderMarkdown(body, { silentHallucinationWarnings: true })).toContain(
+      '<p>:::unknown-thing</p>',
+    );
+    const { part } = build(body);
+    expect(part.ok, '食い違ったまま分割が通ってしまった').toBe(false);
+    expect(part.reason).toBeTruthy();
   });
 
   it('🔴 分割が壊れていたら ok:false(開かせない)', () => {

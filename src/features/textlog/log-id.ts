@@ -2,7 +2,7 @@
  * ULID-based log entry ID generator.
  *
  * Implements the Slice 1 decision from
- * `docs/development/textlog-viewer-and-linkability-redesign.md`:
+ * `PKC2: docs/development/textlog-viewer-and-linkability-redesign.md`:
  *
  * - New log entries receive a 26-character Crockford Base32 ULID
  *   (48-bit millisecond timestamp + 80-bit randomness).

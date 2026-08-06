@@ -91,10 +91,10 @@ md.use(footnotePlugin);
 // https://learn.microsoft.com/office/client-developer/office-uri-schemes
 
 // `entry:` is PKC2's internal cross-entry link scheme (see
-// `docs/development/textlog-viewer-and-linkability-redesign.md` §6.5
+// `PKC2: docs/development/textlog-viewer-and-linkability-redesign.md` §6.5
 // and `src/features/entry-ref/entry-ref.ts`). `pkc:` is the external
 // shareable permalink scheme defined by
-// `docs/spec/pkc-link-unification-v0.md` §4. Both schemes are on the
+// `PKC2: docs/spec/pkc-link-unification-v0.md` §4. Both schemes are on the
 // safe allowlist so markdown-it emits the `<a>` at all; the link_open
 // rule below then tags them for the right in-app behaviour (internal
 // navigation for `entry:`, cross-container placeholder for `pkc:`).
@@ -329,9 +329,22 @@ md.renderer.rules.fence = function (tokens, idx, options, env, self) {
     if (fence.mode === 'norender') {
       return wrapWithCopyButton(renderFenceSourceHtml(content, fence.lang), 'code', sourceLineAttrs);
     }
-    // Pass inline renderer so CSV cells can carry markdown inline markup
-    // (`**bold**` / `==highlight==` / `:text:attrs:` L-6 simple-inline 等)。
-    const inlineRender = (text: string): string => md.renderInline(text, env);
+    /**
+     * セルの中の inline markup(`**bold**` / `==highlight==` / `:text:attrs:` 等)
+     * を描く口。
+     *
+     * 🔴 **文書の env を渡してはいけない**(2026-08-06。user 報告 2-1)。
+     * 直す前は `md.renderInline(text, env)` で**文書の env を共有**していた ──
+     * `markdown-it-footnote` の `footnote_tail` は core rule なので
+     * `renderInline` でも走り、**セルごとに文書の脚注セクションを丸ごと吐いた**。
+     * 実測: 4 セルの表で `<section class="footnotes">` が **5 個**、
+     * `id="fn1"` も **5 個** ── **DOM id が重複**して `[^a]` のジャンプ先が
+     * 表の中のセルになっていた。
+     * ⚠ セルが env から要るのは `currentContainerId` **だけ**(`pkc://` の
+     *   同 container 判定)。それだけを写した**使い捨ての env** を渡す。
+     */
+    const cellEnv = { currentContainerId: (env as { currentContainerId?: string } | undefined)?.currentContainerId ?? '' };
+    const inlineRender = (text: string): string => md.renderInline(text, { ...cellEnv });
     /**
      * 1 度だけ数えて両方へ同じ値を渡す。
      *
@@ -461,7 +474,7 @@ export function makeSourceLineAttrs(
  * — that primitive is reusable by future non-markdown-it renderers
  * (領域 10-3 IR, PKC-Message extension dispatch, etc.).
  *
- * See `docs/development/markdown-render-scope.md` §「拡張時の
+ * See `PKC2: docs/development/markdown-render-scope.md` §「拡張時の
  * source-line anchor 規約」for the full extension contract.
  */
 export function collectSourceLineAttrs(token: Token): string {
@@ -1331,7 +1344,7 @@ function postProcessVariableUndefined(html: string): string {
 // slug-collision scope — click handlers disambiguate cross-log-entry
 // id collisions by scoping the DOM lookup to the owning log row.
 //
-// See `docs/development/table-of-contents-right-pane.md`.
+// See `PKC2: docs/development/table-of-contents-right-pane.md`.
 
 md.renderer.rules.heading_open = function (tokens, idx, options, env, self) {
   const token = tokens[idx]!;
@@ -1348,7 +1361,7 @@ md.renderer.rules.heading_open = function (tokens, idx, options, env, self) {
   return self.renderToken(tokens, idx, options);
 };
 
-// ── Card presentation placeholder (Slice 2, docs/spec/card-embed-presentation-v0.md §5) ──
+// ── Card presentation placeholder (Slice 2, PKC2: docs/spec/card-embed-presentation-v0.md §5) ──
 //
 // Detect the `@[card](<target>)` (and `@[card:<variant>](<target>)`)
 // notation and emit a minify-safe placeholder span that a future
@@ -1774,14 +1787,28 @@ function processFigureBlocks(source: string, lineMapIn: number[]): {
     // id は Pandoc `#id` 形(open.attrs.id)or `id=...` kv 形(open.attrs.kvs.id)から取る
     const idFromHash = open.attrs.id;
     const idFromKv = typeof open.attrs.kvs.id === 'string' ? open.attrs.kvs.id : undefined;
-    const id = idFromHash ?? idFromKv;
-    if (!id || !/^[\w-]+$/.test(id)) {
-      // id 不正は figure として扱わない、literal として残す
+    const idAttr = idFromHash ?? idFromKv;
+    /**
+     * 🔴 **id の無い図表も図表として描く**(2026-08-06。user 報告 minor
+     * 「`:::figure` が素のテキスト」)。
+     *
+     * 直す前は id が無いと**その 3 行が literal 文字列**として出ていた
+     * (`:::figure` / `^^^ 説明` / `:::` がそのまま画面に並ぶ)。id は
+     * **`[@id]` で参照するときだけ**要るもので、番号付け・キャプション・
+     * `<figure>` の組み立てには要らない ── 参照しない図に id を強制するのは、
+     * 記法を覚えている人ほど踏む罠である。
+     *
+     * ⚠ **不正な id は今までどおり literal**(`:::figure{#あ い}` 等)──
+     * そこは打ち間違いの合図なので、黙って通すと直す機会を奪う。
+     * ⚠ id が無い図は registry に入れない(参照できないものを参照させない)。
+     */
+    if (idAttr !== undefined && !/^[\w-]+$/.test(idAttr)) {
       out.push(line);
       lineMapOut.push(inputIdx);
       i++;
       continue;
     }
+    const id = idAttr ?? '';
     counter[kind]++;
     const num = counter[kind];
     const content: string[] = [];
@@ -1833,7 +1860,9 @@ function processFigureBlocks(source: string, lineMapIn: number[]): {
     }
     const closeInputIdx = i < lines.length ? (lineMapIn[i] ?? i) : openInputIdx;
     if (i < lines.length) i++; // skip closing `:::`
-    registry.set(id, { kind, num, caption });
+    // ⚠ id が無い図は登録しない(`[@id]` の参照先にならない ── 空文字を鍵にすると
+    //    id 無しの図が 2 つあるだけで「同じものを指す」になる)
+    if (id !== '') registry.set(id, { kind, num, caption });
     // Sentinel emission(各 sentinel は own-line で出力 → markdown-it が <p>...</p> wrap)。
     // OPEN は figure 開き行に対応、CAPTION は ^^^ 行(なければ open 行 fallback)、
     // CLOSE は閉じる ::: 行に対応。content は元の各行に対応。
@@ -1891,7 +1920,7 @@ function processFigureRefs(source: string, registry: Map<string, FigEntry>): str
 // Pandoc-style attribute syntax で複数 embed を 1 つの引用 block に纏める形。
 // 学術 / 法律 / 報道で「同じ著者の複数文献を共通 attribution でまとめて引用」
 // 用途を想定。設計詳細は
-// `docs/development/notation-redesign-2026-05/03-link-embed-card.md` §3.5.2。
+// `PKC2: docs/development/notation-redesign-2026-05/03-link-embed-card.md` §3.5.2。
 //
 // 実装:figure と同じ sentinel pattern。U+E150 / U+E151 を sentinel に使用、
 // markdown-it `html: false` を回避。registry に attrs を保存、post-process で
@@ -2312,6 +2341,22 @@ function processSectionBlocks(source: string, lineMapIn: number[]): {
   const lineMapOut: number[] = [];
   let counter = 0;
   let fence: FenceState = { inFence: false, marker: '' };
+  /**
+   * 🔴 **開いている `:::` を数える**(2026-08-06 の bug fix)。
+   *
+   * 直す前は「開いたら**最初に出会った `:::` まで**を中身にする」平坦な走査だった。
+   * だから `:::section` の中に `:::note` を書くと:
+   *  ① 内側の開き行が**本文として素通り**して `<p>:::section{role=note}</p>` になり
+   *  ② 内側の閉じが**外側の閉じ**として使われ
+   *  ③ 外側の閉じが最上位に残って `<p>:::</p>` として漏れていた(実測)
+   *
+   * ⚠ 数えるのは **`section` に限らずすべての `:::name`** である ── `:::details` や
+   * `:::toc` も閉じ `:::` を消費するので、自分の種類だけ数えると他人の閉じを
+   * 自分の閉じとして食う(混在した入れ子で同じ壊れ方をする)。
+   * ⚠ 他人の開き / 閉じは**そのまま流す** ── 後段の `processDetailsBlocks` 等が
+   * 自分で処理する(ここで手を出すと担当が 2 か所になる)。
+   */
+  const stack: ({ kind: 'section'; id: number; inputIdx: number } | { kind: 'other' })[] = [];
   let i = 0;
   while (i < lines.length) {
     const line = lines[i]!;
@@ -2324,8 +2369,33 @@ function processSectionBlocks(source: string, lineMapIn: number[]): {
       i++;
       continue;
     }
+    // 閉じ ── いちばん内側の開きに対応させる
+    if (stack.length > 0 && isBlockDirectiveClose(line)) {
+      const top = stack.pop()!;
+      if (top.kind === 'section') {
+        out.push('');
+        lineMapOut.push(inputIdx);
+        out.push(
+          `${SECTION_SENTINEL_OPEN}${top.id}${SECTION_SENTINEL_SEP}CLOSE${SECTION_SENTINEL_OPEN}`,
+        );
+        lineMapOut.push(inputIdx);
+      } else {
+        out.push(line); // 他の directive の閉じ ── 後段へ渡す
+        lineMapOut.push(inputIdx);
+      }
+      i++;
+      continue;
+    }
     const open = parseBlockDirectiveOpen(line);
-    if (!open || open.name !== 'section') {
+    if (!open) {
+      out.push(line);
+      lineMapOut.push(inputIdx);
+      i++;
+      continue;
+    }
+    if (open.name !== 'section') {
+      // 他の directive ── 中身も閉じもそのまま流すが、**閉じは数える**
+      stack.push({ kind: 'other' });
       out.push(line);
       lineMapOut.push(inputIdx);
       i++;
@@ -2343,23 +2413,25 @@ function processSectionBlocks(source: string, lineMapIn: number[]): {
     counter++;
     const id = counter;
     registry.set(id, { role, attrs: open.attrs });
-    const openInputIdx = inputIdx;
-    i++;
+    stack.push({ kind: 'section', id, inputIdx });
     out.push(`${SECTION_SENTINEL_OPEN}${id}${SECTION_SENTINEL_SEP}OPEN${SECTION_SENTINEL_OPEN}`);
-    lineMapOut.push(openInputIdx);
+    lineMapOut.push(inputIdx);
     out.push('');
-    lineMapOut.push(openInputIdx);
-    while (i < lines.length && !isBlockDirectiveClose(lines[i]!)) {
-      out.push(lines[i]!);
-      lineMapOut.push(lineMapIn[i] ?? i);
-      i++;
-    }
-    const closeInputIdx = i < lines.length ? (lineMapIn[i] ?? i) : openInputIdx;
-    if (i < lines.length) i++;
+    lineMapOut.push(inputIdx);
+    i++;
+  }
+  /**
+   * ⚠ 閉じ忘れは**末尾で閉じる**(HTML を壊さない)。直す前の実装も
+   * 「閉じが無ければ末尾まで飲んで閉じる」だったので、そこは変えていない。
+   */
+  while (stack.length > 0) {
+    const top = stack.pop()!;
+    if (top.kind !== 'section') continue;
+    const last = lineMapIn[lines.length - 1] ?? top.inputIdx;
     out.push('');
-    lineMapOut.push(closeInputIdx);
-    out.push(`${SECTION_SENTINEL_OPEN}${id}${SECTION_SENTINEL_SEP}CLOSE${SECTION_SENTINEL_OPEN}`);
-    lineMapOut.push(closeInputIdx);
+    lineMapOut.push(last);
+    out.push(`${SECTION_SENTINEL_OPEN}${top.id}${SECTION_SENTINEL_SEP}CLOSE${SECTION_SENTINEL_OPEN}`);
+    lineMapOut.push(last);
   }
   return { transformed: out.join('\n'), registry, lineMap: lineMapOut };
 }
@@ -2825,8 +2897,13 @@ function postProcessFigureSentinels(html: string): string {
   // 各 sentinel 行は <p attrs> を持ちうる(sourceLineAnchors path)。attrs を
   // 保存して置換要素に転記、Split View block ↔ source line lookup を維持。
   html = html.replace(
-    new RegExp(`<p([^>]*)>${FIG_SENTINEL_OPEN}OPEN${FIG_SENTINEL_SEP}(figure|table|equation)${FIG_SENTINEL_SEP}([\\w-]+)${FIG_SENTINEL_SEP}(\\d+)${FIG_SENTINEL_OPEN}</p>`, 'g'),
-    (_match, attrs, kind, id, num) => `<figure id="${id}" class="pkc-fig pkc-fig-${kind}" data-pkc-fig-kind="${kind}" data-pkc-fig-num="${num}"${attrs}>`,
+    // ⚠ id の欄は**空でありうる**(2026-08-06 ── 参照しない図には id を要求しない)。
+    //    `[\w-]+` のままだと id 無しの図の sentinel が置換されず、PUA の文字が
+    //    そのまま画面に出る(sentinel 漏れ = 2026-05-08 に踏んだ形)
+    new RegExp(`<p([^>]*)>${FIG_SENTINEL_OPEN}OPEN${FIG_SENTINEL_SEP}(figure|table|equation)${FIG_SENTINEL_SEP}([\\w-]*)${FIG_SENTINEL_SEP}(\\d+)${FIG_SENTINEL_OPEN}</p>`, 'g'),
+    (_match, attrs, kind, id, num) =>
+      `<figure${id === '' ? '' : ` id="${id}"`} class="pkc-fig pkc-fig-${kind}"` +
+      ` data-pkc-fig-kind="${kind}" data-pkc-fig-num="${num}"${attrs}>`,
   );
   html = html.replace(
     new RegExp(`<p([^>]*)>${FIG_SENTINEL_OPEN}CAPTION${FIG_SENTINEL_SEP}(figure|table|equation)${FIG_SENTINEL_SEP}(\\d+)${FIG_SENTINEL_SEP}([^${FIG_SENTINEL_OPEN}]+)${FIG_SENTINEL_OPEN}</p>`, 'g'),
@@ -3024,10 +3101,22 @@ function preprocessAlignPrefix(source: string, lineMapIn: number[]): {
     if (m) {
       const sym = m[1]!;
       const rest = m[2] ?? '';
-      // reform-2026-05 PR-C:logical alignment へ移行。
-      //   `||`            → center(物理中央)
-      //   `|>` `<|` `|<` `>|`(全 4 形、typo 寛容化)→ end(logical、default flow の反対)
-      const align: AlignKind = sym === '||' ? 'center' : 'end';
+      /**
+       * reform-2026-05 PR-C:logical alignment へ移行。
+       *   `||`       → center(物理中央)
+       *   `|>` `>|`  → end(logical。default flow の反対 = LTR では右)
+       *   `<|` `|<`  → start(同じく logical = LTR では左)
+       *
+       * 🔴 **向きは記号のとおりに読む**(2026-08-06。user 報告 minor)。
+       * PKC2 は 4 形すべてを `end` に寄せていた(「typo 寛容化」)が、
+       * `<|` を書いて**右に寄る**のは記号と逆であり、しかもこの repo の
+       * 記法試験の corpus 自身が `<|` を「左」と註記していた ── 実装と
+       * 説明が食い違っていた。⚠ `start` は既定の流れと同じ向きなので
+       * 見た目は変わらないことが多いが、**属性は付く**(縦書き / RTL /
+       * 継承した中央寄せの中では効く)。
+       */
+      const align: AlignKind =
+        sym === '||' ? 'center' : sym === '<|' || sym === '|<' ? 'start' : 'end';
       // **重要**:prefix 行は前段落から切り離して新 paragraph にする。
       // 挿入する空行も同じ inputIdx を指す(sync layer の lookup は閉じた区間で
       // 動くので副作用なし)。
@@ -4192,8 +4281,9 @@ export function renderMarkdown(
   // 強制挿入して structural separation を取る。AST 経路(`parse.ts`)では
   // PR-W24 v3 で既に同等処理を入れていたが、center pane / Viewer / Split View
   // 経路にも対称に適用するため `colon-block-normalize.ts` から共有 utility
-  // を import。詳細 background は同 module + `docs/development/
-  // bug-section-blockquote-lazy-continuation-2026-05-18.md` 参照。
+  // を import。詳細 background は同 module のコメントを参照
+  // (⚠ かつてここは PKC2 の調査 doc を指していたが、その doc は PKC2 にも
+  //  残っていない ── 壊れた導線を置かない。事実は module 側に書いてある)。
   // **本 normalize は admonition alias rewrite(`:::note` → `:::section`)の
   // **後** に走らせる**:rewrite で新たに生まれた `:::` 行も対象にするため。
   // **本 normalize は processBlankLineMarkers / processFigureBlocks /

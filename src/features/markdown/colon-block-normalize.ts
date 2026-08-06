@@ -31,7 +31,7 @@
  *
  * **関連 doc**:
  * - `docs/development/bug-section-blockquote-lazy-continuation-2026-05-18.md`
- * - `docs/development/notation-redesign-2026-05/11-canonicalization-spec.md`
+ * - `PKC2: docs/development/notation-redesign-2026-05/11-canonicalization-spec.md`
  */
 
 /**

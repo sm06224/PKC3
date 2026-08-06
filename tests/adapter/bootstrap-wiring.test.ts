@@ -90,3 +90,52 @@ describe('bootstrap の配線', () => {
     expect(bootstrapBody()).toContain('起動に失敗しました');
   });
 });
+
+/**
+ * 🔴 **boot が失敗したときの後始末**(2026-08-06。user 報告 2-14)。
+ *
+ * ⚠ ここも原文の検査である ── `bootstrap()` は node から呼べない。だが
+ * 「誰も見ていない」で済ませると、**この 2 行を消す変異が全緑で通る**
+ * (実際、直す前は `release()` の呼び出しが src に **0 件**だった)。
+ */
+describe('boot 失敗の後始末', () => {
+  it('🔴 握った書込 lease を返す(他のタブを永久に待たせない)', () => {
+    const body = bootstrapBody();
+    const catchAt = body.indexOf('.catch((e: unknown)');
+    expect(catchAt).toBeGreaterThan(-1);
+    expect(
+      body.slice(catchAt),
+      'boot 失敗で lease を返していない ── このタブが開いている間、他のタブは' +
+        '「別のタブで開いています」から進めない',
+    ).toContain('bootLease?.release()');
+    // ⚠ 成功側では返さない(握り続けるのが正しい)
+    const thenAt = body.indexOf('.then((app)');
+    expect(body.slice(thenAt, catchAt)).not.toContain('release()');
+  });
+
+  it('🔴 `release()` の呼び出しが src に実在する(0 件に戻っていない)', () => {
+    // 直す前はここが 0 件だった ── 型が通るので tsc も lint も黙る
+    expect(
+      [...MAIN.matchAll(/bootLease\?\.release\(\)/g)].length,
+      'lease を返す呼び出しが消えている',
+    ).toBeGreaterThan(0);
+  });
+
+  it('🔴 OS から渡されたファイルが消えていないことを伝える', () => {
+    const body = bootstrapBody();
+    const catchAt = body.indexOf('.catch((e: unknown)');
+    const tail = body.slice(catchAt);
+    // 受け口は成功側にしか張らない(= 消えていない)ので、**そう言う**
+    expect(tail, 'ファイルの行方を伝えていない').toContain('launchQueue');
+    expect(tail).toContain('読み直すと開きます');
+  });
+
+  it('⚠ 受け口(launchQueue)は失敗側では張らない(consume すると本当に消える)', () => {
+    const body = bootstrapBody();
+    const catchAt = body.indexOf('.catch((e: unknown)');
+    expect(
+      body.slice(catchAt),
+      '失敗側で受け口を張っている ── consume した時点でファイルは戻らない',
+    ).not.toContain('armLaunchQueue(');
+  });
+});

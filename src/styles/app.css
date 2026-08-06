@@ -1490,6 +1490,13 @@ select:focus-visible {
 [data-pkc-asset-missing] {
   color: var(--danger);
 }
+/* 出せない種類の案内(2026-08-06。user 報告 minor)── 「無い」ではなく
+ * 「出せない + 次にどうするか」なので、危険色ではなく地の弱い色で置く */
+[data-pkc-field='attachment-no-preview'] {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0;
+}
 
 /* ── かんばん / カレンダー(封印中。解いたときに効く)──────── */
 [data-pkc-view-pane='kanban'] {
@@ -1755,6 +1762,18 @@ select:focus-visible {
 [data-pkc-field='move-target'] {
   flex: 1 1 auto;
   min-width: 0;
+}
+/* 🔴 **並べ替え**(2026-08-06。user 報告 2-10)。居場所の欄の**すぐ下**に
+ * 置く ── 「どのフォルダか」と「その中の何番目か」は同じ話である。
+ * ⚠ 端では `disabled`(押せないことが見た目に出る)。 */
+[data-pkc-field='order-nudge'] {
+  display: flex;
+  gap: var(--s2);
+  margin-top: var(--s1);
+}
+[data-pkc-field='order-nudge'] button[disabled] {
+  opacity: 0.45;
+  cursor: default;
 }
 [data-pkc-field='filer-move-empty'],
 [data-pkc-field='filer-create-target'] {

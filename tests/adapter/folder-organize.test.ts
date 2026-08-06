@@ -297,10 +297,14 @@ function setup(metas: EntryMeta[], relations: Relation[]) {
     },
   });
   const parentCalls: Array<{ lid: string; parentLid: string | null; relationId: string }> = [];
+  const persisted: Array<{ lid: string; entryOrder: number }> = [];
   connectStoreEffects(d, {
     ...stubRevisionOps(),
     getBody: async () => '',
-    persistEntry: async () => stubStamps(),
+    persistEntry: async (e) => {
+      persisted.push({ lid: e.lid, entryOrder: e.entryOrder });
+      return stubStamps();
+    },
     deleteEntry: async () => {},
     setEntryParent: async (lid, parentLid, relationId) => {
       parentCalls.push({ lid, parentLid, relationId });
@@ -321,7 +325,9 @@ function setup(metas: EntryMeta[], relations: Relation[]) {
     sel.value = value;
     sel.dispatchEvent(new Event('change', { bubbles: true }));
   };
-  return { root, d, pane, q, rows, moveSelect, moveTo, parentCalls };
+  const nudge = (dir: 'up' | 'down') =>
+    q<HTMLButtonElement>(`[data-pkc-action="move-order-${dir}"]`);
+  return { root, d, pane, q, rows, moveSelect, moveTo, parentCalls, persisted, nudge };
 }
 
 describe('フォルダ整理の導線(画面)', () => {
@@ -435,5 +441,197 @@ describe('フォルダ整理の導線(画面)', () => {
     root.querySelector<HTMLElement>('[data-pkc-field="create-run"]')!.click();
     await tick();
     expect(d.getState().relations).toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **並べ替え**(2026-08-06。user 報告 2-10「並べ替えの手段が無い」)。
+ *
+ * 直す前は `entryOrder` が**作成順に固定**で、action にも UI にも動かす道が
+ * 無かった(取り込んだ順のまま一生並ぶ)。
+ *
+ * ⚠ 観測点は「`entryOrder` が変わったか」ではなく **並びが入れ替わったか**
+ * (`order` と一覧の行)。値だけ見ると、同値のときに何も起きていないのを
+ * 「書き換えた」と読んでしまう。
+ */
+describe('並べ替え(reducer)', () => {
+  const METAS = [meta('a', 1), meta('b', 2), meta('c', 3)];
+
+  it('🔴 下へ ── 並びが入れ替わり、2 件ぶんの永続化を要求する', () => {
+    const s0 = READY(METAS, []);
+    expect(s0.order).toEqual(['a', 'b', 'c']);
+    const r = reduce(s0, { type: 'MOVE_ENTRY_ORDER', lid: 'a', direction: 'down' });
+    expect(r.state.order, '並びが動いていない').toEqual(['b', 'a', 'c']);
+    expect(r.events).toEqual([
+      {
+        type: 'REQUEST_REORDER',
+        entries: [
+          { lid: 'a', title: 't-a', archetype: 'text', entryOrder: 2 },
+          { lid: 'b', title: 't-b', archetype: 'text', entryOrder: 1 },
+        ],
+      },
+    ]);
+  });
+
+  it('上へも同じ(向きだけ違う)', () => {
+    const s0 = READY(METAS, []);
+    const r = reduce(s0, { type: 'MOVE_ENTRY_ORDER', lid: 'c', direction: 'up' });
+    expect(r.state.order).toEqual(['a', 'c', 'b']);
+  });
+
+  it('🔴 端では何も起きない(書込も出ない)', () => {
+    const s0 = READY(METAS, []);
+    for (const [lid, direction] of [
+      ['a', 'up'],
+      ['c', 'down'],
+    ] as const) {
+      const r = reduce(s0, { type: 'MOVE_ENTRY_ORDER', lid, direction });
+      expect(r.state, `${lid} を ${direction} で動かしてしまった`).toBe(s0);
+      expect(r.events).toEqual([]);
+    }
+  });
+
+  /**
+   * ⚠ **値を振り直さない**(交換する)。`entryOrder` は container 全体で 1 本の
+   * 数直線なので、兄弟を 0..n-1 で振り直すと**別のフォルダの entry と噛み合う**。
+   */
+  it('🔴 別のフォルダの並びに触らない(値は交換するだけ)', () => {
+    const metas = [
+      meta('f1', 1, 'folder'),
+      meta('x', 2),
+      meta('y', 3),
+      meta('f2', 4, 'folder'),
+      meta('p', 5),
+      meta('q', 6),
+    ];
+    const s0 = READY(metas, [
+      rel('r1', 'f1', 'x'),
+      rel('r2', 'f1', 'y'),
+      rel('r3', 'f2', 'p'),
+      rel('r4', 'f2', 'q'),
+    ]);
+    const r = reduce(s0, { type: 'MOVE_ENTRY_ORDER', lid: 'x', direction: 'down' });
+    expect(
+      getStructuralChildren('f1', r.state.entryMetas, r.state.relations).map((m) => m.lid),
+    ).toEqual(['y', 'x']);
+    // 別のフォルダ側は 1 件も動いていない(値も並びも)
+    expect(
+      getStructuralChildren('f2', r.state.entryMetas, r.state.relations).map((m) => m.lid),
+    ).toEqual(['p', 'q']);
+    for (const lid of ['f1', 'f2', 'p', 'q']) {
+      expect(r.state.entryMetas.get(lid)!.entryOrder, `${lid} の値が動いた`).toBe(
+        s0.entryMetas.get(lid)!.entryOrder,
+      );
+    }
+  });
+
+  it('🔴 隣は「同じ親の下の隣」(別のフォルダの entry を巻き込まない)', () => {
+    // 値の上では f1 の子 x(2)の次は f2(3)だが、兄弟ではない
+    const metas = [meta('f1', 1, 'folder'), meta('x', 2), meta('f2', 3, 'folder'), meta('y', 4)];
+    const s0 = READY(metas, [rel('r1', 'f1', 'x'), rel('r2', 'f1', 'y')]);
+    const r = reduce(s0, { type: 'MOVE_ENTRY_ORDER', lid: 'x', direction: 'down' });
+    // x の隣は y(同じ f1 の子)── f2 は動かない
+    expect(r.state.entryMetas.get('f2')!.entryOrder).toBe(3);
+    expect(
+      getStructuralChildren('f1', r.state.entryMetas, r.state.relations).map((m) => m.lid),
+    ).toEqual(['y', 'x']);
+  });
+
+  /**
+   * ⚠ **同値のとき**は交換しても何も起きない(並びは lid で決まっているから)。
+   * 取り込んだデータでは実際に同値が起きる ── ここを落とすと
+   * 「押しても動かない」黙りになる。
+   */
+  it('🔴 entryOrder が同値でも動く(交換では足りない場合)', () => {
+    const s0 = READY([meta('a', 5), meta('b', 5)], []);
+    expect(s0.order, '前提: 同値は lid 順').toEqual(['a', 'b']);
+    const r = reduce(s0, { type: 'MOVE_ENTRY_ORDER', lid: 'b', direction: 'up' });
+    expect(r.state.order, '同値だと押しても動かない').toEqual(['b', 'a']);
+    expect(r.events).toEqual([
+      {
+        type: 'REQUEST_REORDER',
+        entries: [{ lid: 'b', title: 't-b', archetype: 'text', entryOrder: 4 }],
+      },
+    ]);
+  });
+
+  it('編集中は動かさない(ready 限定)', () => {
+    const s0 = READY(METAS, []);
+    const r = reduce({ ...s0, phase: 'editing' as const }, {
+      type: 'MOVE_ENTRY_ORDER',
+      lid: 'a',
+      direction: 'down',
+    });
+    expect(r.events).toEqual([]);
+  });
+
+  /**
+   * 🔴 **並べ方の規則は 1 つ**(CLAUDE.md「同じ判定が 2 か所に生えたら parity test」)。
+   *
+   * 一覧は `state.order`(reducer が引く)、ファイラは `getRootEntries`(features)で
+   * 描く ── 2 か所が別の規則で並べると、「隣」がどちらの画面を指すのか決まらない。
+   * ⚠ 同値かつ **渡された順が lid 順と逆**でないと、この食い違いは現れない
+   *   (安定ソートが渡された順を保つので、偶然一致してしまう)。
+   */
+  it('🔴 一覧の並びとファイラの並びが一致する(同値・逆順で渡しても)', () => {
+    const s0 = READY([meta('b', 5), meta('a', 5)], []);
+    expect(getRootEntries(s0.entryMetas, s0.relations).map((m) => m.lid)).toEqual(s0.order);
+    expect(s0.order, '前提: 同値は lid 順に正規化される').toEqual(['a', 'b']);
+  });
+});
+
+describe('並べ替えの導線(画面)', () => {
+  const METAS = [meta('n1', 1), meta('n2', 2), meta('n3', 3)];
+
+  it('🔴 押すと一覧の並びが変わり、disk へ 2 件書く', async () => {
+    const { q, rows, nudge, persisted } = setup(METAS, []);
+    q<HTMLElement>('tbody [data-pkc-entry="n1"]')!.click();
+    await tick();
+    nudge('down')!.click();
+    await tick();
+    expect(rows(), '画面の並びが変わっていない').toEqual(['n2', 'n1', 'n3']);
+    // ⚠ **2 件**(交換なので片方だけ書くと disk の並びが壊れる)
+    expect(persisted.filter((p) => p.lid === 'n1' || p.lid === 'n2')).toEqual([
+      { lid: 'n1', entryOrder: 2 },
+      { lid: 'n2', entryOrder: 1 },
+    ]);
+  });
+
+  it('🔴 端では押せない(押して黙って断らない)', async () => {
+    const { q, nudge } = setup(METAS, []);
+    q<HTMLElement>('tbody [data-pkc-entry="n1"]')!.click();
+    await tick();
+    expect(nudge('up')!.disabled, '先頭なのに「上へ」が押せる').toBe(true);
+    expect(nudge('down')!.disabled).toBe(false);
+    q<HTMLElement>('tbody [data-pkc-entry="n3"]')!.click();
+    await tick();
+    expect(nudge('up')!.disabled).toBe(false);
+    expect(nudge('down')!.disabled, '末尾なのに「下へ」が押せる').toBe(true);
+  });
+
+  it('🔴 選び直すと並べ替えも追従する(別のノートが動かない)', async () => {
+    // ⚠ 同一 scope 内の選択変更は表を作り直さない速い経路 ── 帯の更新を
+    //    忘れると、押したときに**前に選んでいたもの**が動く
+    const { q, nudge, rows } = setup(METAS, []);
+    q<HTMLElement>('tbody [data-pkc-entry="n1"]')!.click();
+    await tick();
+    q<HTMLElement>('tbody [data-pkc-entry="n3"]')!.click();
+    await tick();
+    expect(nudge('up')!.getAttribute('data-pkc-entry')).toBe('n3');
+    nudge('up')!.click();
+    await tick();
+    expect(rows()).toEqual(['n1', 'n3', 'n2']);
+  });
+
+  it('フォルダの中でも並べ替えられる(root だけの機能にしない)', async () => {
+    const metas = [meta('f1', 1, 'folder'), meta('x', 2), meta('y', 3)];
+    const { q, rows, nudge } = setup(metas, [rel('r1', 'f1', 'x'), rel('r2', 'f1', 'y')]);
+    q<HTMLElement>('tbody [data-pkc-entry="f1"]')!.click(); // scope = f1
+    await tick();
+    q<HTMLElement>('tbody [data-pkc-entry="x"]')!.click();
+    await tick();
+    nudge('down')!.click();
+    await tick();
+    expect(rows()).toEqual(['y', 'x']);
   });
 });

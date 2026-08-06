@@ -30,7 +30,13 @@
  * 読み手は素の `JSON.parse` でよい。
  */
 import { parseFrontmatter, type FrontmatterValue } from '../markdown/frontmatter';
-import { renderMarkdown } from '../markdown/markdown-render';
+import { renderMarkdown, type RenderMarkdownOptions } from '../markdown/markdown-render';
+import { extractVars } from '../markdown/frontmatter';
+import {
+  extractDocumentGlobals,
+  extractHeadingNumberConfig,
+  globalsToDataAttrs,
+} from '../markdown/document-globals';
 import { scanAssetRefsInto } from '@features/asset/asset-ref-scan';
 import type { ArchiveSource } from './pkc3-archive';
 
@@ -287,6 +293,22 @@ try{
   // (CLAUDE.md「同じ判定が 2 か所に生えたら規則を 1 つに寄せる」)。
   // @param sink 作った object URL を積む配列(寿命の管理は呼び手が持つ)
   // @param idp  見出し id の接頭辞(全体印刷では entry ごとに変えて衝突を避ける)
+  /* 🔴 **html fence の高さを受ける**(2026-08-06。user 報告 2-5)。
+     ⚠ ここは VIEWER のテンプレート文字列の中 ── **バックティックを書けない**
+     (書いた瞬間にテンプレートが閉じて、意味不明な構文エラーになる。実際に踏んだ)。
+     囲いの中の文書は自分の高さを親へ postMessage するが、**配る HTML には
+     受ける側が居なかった** ── iframe は height:0 のまま = **完全に不可視**だった。
+     ⚠ 上限は画面側と同じ 5000px(暴走する中身に画面を占領させない)。
+     ⚠ 受け口は 1 回だけ張る(entry ごとに張ると listener が積む)。 */
+  window.addEventListener('message',function(ev){
+    var d=ev.data;
+    if(!d||typeof d!=='object')return;
+    if(d.type!=='pkc-html-render-resize')return;
+    if(typeof d.id!=='string'||typeof d.height!=='number')return;
+    var h=Math.max(0,Math.min(5000,d.height));
+    var f=document.querySelector('iframe[data-pkc-html-render-id="'+d.id.replace(/"/g,'')+'"]');
+    if(f)f.style.height=h+'px';
+  });
   function hydrate(box,e,sink,idp){
     // 🔑 本文は**書出し側で描いた HTML**(P8 段⑲)。かつてここは本文を素のまま
     // pre で出しており、見出しも表も箇条書きも**記号のまま**だった ──
@@ -294,6 +316,10 @@ try{
     // ⚠ 描くのは**アプリと同じ関数**(閲覧側に parser を持たせない ── 二重実装は必ずずれる)
     var seen={};
     box.innerHTML=e.html||'';
+    /* 🔴 文書属性(書字方向など)を当てる ── 画面の applyDocumentGlobals と同じ
+       見え方にする(user 報告 2-7)。書出し側が attrs に載せてある。
+       ⚠ ここは VIEWER のテンプレート文字列の中なのでバックティックを書かない */
+    if(e.attrs){for(var ak in e.attrs){if(Object.prototype.hasOwnProperty.call(e.attrs,ak))box.setAttribute(ak,e.attrs[ak])}}
     // 描いた HTML の中の添付参照(画像 / リンクの markdown)に実体を差す。
     // ⚠ 参照の**走査**は書出し側の 1 本に寄せてある ── ここは差すだけ
     Array.prototype.forEach.call(box.querySelectorAll('[data-pkc-asset-key]'),function(el){
@@ -501,7 +527,10 @@ export async function writePortableHtml(
    * (user 指示 2026-08-03「基本的に重い処理はワーカーにしてください」)。
    * ⚠ 返る HTML は**同じ関数**から出る(ワーカーは速さの話であって正しさの話ではない)。
    */
-  render: (text: string) => string | Promise<string> = (text) => renderMarkdown(text),
+  render: (
+    text: string,
+    opts?: RenderMarkdownOptions,
+  ) => string | Promise<string> = (text, opts) => renderMarkdown(text, opts),
 ): Promise<HtmlResult> {
   const warnings: string[] = [];
   const metas = await src.listEntryMetas();
@@ -562,12 +591,32 @@ export async function writePortableHtml(
       // 🔑 本文は**ここで描く**(閲覧側に parser を積まない)。frontmatter は
       //    本文ではなくメタなので、書出し側が数えた文字数ぶん読み飛ばす
       //    ── 判定を閲覧側に持たせると本物の parser と二重実装になってずれる
-      const html = await render(r.body.slice(skip));
+      /**
+       * 🔴 **詳細ペインと同じ材料を渡す**(2026-08-06。user 報告 2-7)。
+       *
+       * 直す前は `render(body)` だけで、**`vars` も見出し番号も渡していなかった**
+       * ── 配る HTML に `{{vars.x}}` が**生のまま載り**、`heading-number: true` の
+       * 文書は番号が付かなかった。⚠ どれも**全文 body**(frontmatter 込み)から
+       * 取る ── 読み飛ばした本文からでは frontmatter が見えない。
+       */
+      const globals = extractDocumentGlobals(r.body);
+      const html = await render(r.body.slice(skip), {
+        vars: extractVars(r.body),
+        headingNumber: extractHeadingNumberConfig(r.body),
+      });
+      /**
+       * 🔴 **書字方向などの文書属性も一緒に配る**(同 2-7)。画面では
+       * `applyDocumentGlobals` が DOM 属性として当てているので、配る側でも
+       * 同じ属性を entry に持たせて閲覧側で当てる(面ごとに違う見え方にしない)。
+       */
+      const attrs = globalsToDataAttrs(globals);
+      if (globals.direction) attrs['dir'] = globals.direction;
       const e = {
         lid: m.lid,
         title: m.title,
         archetype: m.archetype,
         html,
+        ...(Object.keys(attrs).length > 0 ? { attrs } : {}),
         ...(refs.length > 0 ? { attach: refs.map((x) => x.key) } : {}),
         ...(inBody.length > 0 ? { refs: inBody } : {}),
       };

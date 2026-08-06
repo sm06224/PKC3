@@ -1,7 +1,7 @@
 /**
  * Card presentation — pure parser / formatter for `@[card](<target>)`.
  *
- * Spec: docs/spec/card-embed-presentation-v0.md §5 / §5.3 / §5.4 / §8.
+ * Spec: PKC2: docs/spec/card-embed-presentation-v0.md §5 / §5.3 / §5.4 / §8.
  *
  * Slice 1 scope: **syntax-level** recognition only. No DOM, no
  * markdown-it renderer hook, no widget rendering. Given a raw string,
@@ -21,7 +21,7 @@
  * for card presentation. Spec §5.4 / §8 mark `asset:<key>` and
  * `pkc://<cid>/asset/<key>` as **❌ 非対応** for card — asset preview
  * cards are a **v0 future dialect** (see
- * `../../../docs/development/card-asset-target-coordination-audit.md`,
+ * `PKC2: docs/development/card-asset-target-coordination-audit.md`,
  * Option C). The parser therefore only accepts entry-flavoured targets:
  *
  *   entry:<lid>[#<fragment>]           — via parseEntryRef

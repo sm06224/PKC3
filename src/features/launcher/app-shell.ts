@@ -76,6 +76,7 @@ import {
   appStoragePrefix,
 } from './app-storage-shim';
 import { buildAnchorShim } from './app-anchor-shim';
+import { buildCapabilityShim } from './app-sandbox-shim';
 
 /**
  * 添付に許す権限。**`allow-same-origin` は絶対に入れない**
@@ -132,10 +133,32 @@ export const LAUNCHER_APP_ALLOW = 'clipboard-write';
  * ⚠ ここへ遷移されても危険は無い ── sandbox に `allow-top-navigation` が無いので
  * 動かせるのは iframe 自身だけで、その中は opaque origin のままである。
  */
-export const LAUNCHER_APP_PATH = '/pkc3-app/';
+/**
+ * ⚠ **配信ディレクトリからの相対**である(2026-08-06 に直した。user 報告 minor
+ * 「`/pkc3-app/` の基点が `base: './'` と噛み合わない」)。
+ *
+ * 直す前は `origin + '/pkc3-app/'` = **origin の根から**の絶対パスだった。
+ * PKC3 の Vite は `base: './'`(= `/` と `/dev/` の両方で同じビルドが動く相対配信)
+ * なので、そこだけ根を仮定していた ── project Pages
+ * (`https://<user>.github.io/PKC3/`)では **配信の外**を指し、しかも
+ * `<user>.github.io` は**他の project と共有する origin** なので
+ * 「何も置いていない専用のパス」という前提が成り立たない(別の project の
+ * `/pkc3-app/` に当たりうる)。
+ */
+export const LAUNCHER_APP_SEGMENT = 'pkc3-app/';
 
-export function launcherAppBase(origin: string): string {
-  return `${origin.replace(/\/+$/, '')}${LAUNCHER_APP_PATH}`;
+/** 互換のため残す表記(絶対パス形)。⚠ 基点の計算には使わない。 */
+export const LAUNCHER_APP_PATH = `/${LAUNCHER_APP_SEGMENT}`;
+
+/**
+ * 相対 URL の解決先を組む。
+ * @param from **配信ディレクトリ**の URL(`document.baseURI` 相当)。
+ *   ⚠ `location.origin` を渡してはいけない ── それが直す前の形である。
+ */
+export function launcherAppBase(from: string): string {
+  // ⚠ 階層 URL でなければ意味が無い(`about:srcdoc` / blob: は opaque path で
+  //    `new URL(相対, base)` が落ちる ── 実測で 1 度外した)
+  return new URL(LAUNCHER_APP_SEGMENT, from).href;
 }
 
 /**
@@ -229,9 +252,16 @@ export function buildLauncherAppShell(
   //    **本当に遷移し**、SPA fallback の PKC3 index.html が来て真っ白になる。
   //    保存領域を貸すかどうか・素のままかどうかとは無関係に起きる
   const withAnchors = insertPrelude(html, buildAnchorShim());
+  /**
+   * 🔴 **無い能力で 1 行目から死なせない**(2026-08-06。user 報告 2-15)。
+   * ⚠ **常に入れる** ── shim 自身が「本物が読めるなら何もしない」で抜けるので、
+   * 素のまま(同一オリジン)で開いたときは 1 つも差し替わらない。判定を
+   * 呼び側にも書くと、条件が 2 か所になる(片方だけ直る形を作らない)。
+   */
+  const withCaps = insertPrelude(withAnchors, buildCapabilityShim());
   const inner = lends
-    ? insertPrelude(withAnchors, buildStorageShim({ seed: opts.seed ?? {} }))
-    : withAnchors;
+    ? insertPrelude(withCaps, buildStorageShim({ seed: opts.seed ?? {} }))
+    : withCaps;
 
   const head =
     '<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8">' +

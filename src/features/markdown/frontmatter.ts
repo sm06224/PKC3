@@ -23,8 +23,8 @@
  *   - **warnings field**:silent fail を避けるため、cap overflow 等を
  *     `result.warnings` に貯める(spec §07.3 silent fail 禁止)。
  *
- * Spec: docs/development/filer-view-and-folder-display-profile-audit-2026-05.md §2.4
- *       docs/development/notation-redesign-2026-05/02-frontmatter-and-globals.md §2.5
+ * Spec: PKC2: docs/development/filer-view-and-folder-display-profile-audit-2026-05.md §2.4
+ *       PKC2: docs/development/notation-redesign-2026-05/02-frontmatter-and-globals.md §2.5
  */
 
 import { resolveCap } from '../notation/caps';

@@ -106,6 +106,23 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   ]);
   await urlTab.waitForLoadState('domcontentloaded');
   expect(urlTab.url()).toContain('tile=1');
+  /**
+   * 🔴 **opener も referrer も渡さない**(マニュアル §7-2 の約束)を**実物で**見る。
+   *
+   * ⚠ 直す前はこの約束が「`window.open` に渡す文字列」だけで pin されていた ──
+   * 文字列は合っているのに引数の位置が違う、という形の間違いを 1 つも捕まえない
+   * (`window.open(url, features)` は features を**窓の名前**として渡してしまう。
+   * 実際に計測用の probe でその間違いを書いて、静かに noopener が効かなかった)。
+   * ⚠ 行き先は同一オリジンなので `document.referrer` がそのまま観測できる。
+   */
+  const promise = await urlTab.evaluate(() => ({
+    referrer: document.referrer,
+    hasOpener: window.opener !== null,
+  }));
+  expect(promise, 'opener / referrer の約束が破れている').toEqual({
+    referrer: '',
+    hasOpener: false,
+  });
   await urlTab.close();
 
   // ⑤ 🔴 **アプリのタイルは中身が開く**(blob。添付の bytes に届いている)
@@ -181,6 +198,17 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
     } catch {
       out.caches = 'blocked';
     }
+    /**
+     * 🔴 **なぜ blocked なのかを分ける**(2026-08-06。user 報告 2-15)。
+     *
+     * 手当ての後は、上の 3 つは「投げた」ではなく「**無い**」で失敗する
+     * (prelude が `undefined` を返す getter に差し替えている)。⚠ 区別を
+     * 持たないと、隔離が外れて**本物が生きている**ときとの差が
+     * `blocked` / `OPEN` の 1 次元しか無くなり、手当てが効いているのか
+     * 隔離が効いているのかが読めない。
+     */
+    out.idbType = typeof indexedDB;
+    out.cachesType = typeof caches;
     return out;
   });
   // ⚠ **origin が opaque であること**を独立に見る ── 個々の storage API が
@@ -193,6 +221,10 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
     idb: 'blocked',
     opfs: 'blocked',
     caches: 'blocked',
+    // 🔴 失敗の**理由**まで見る(2026-08-06)── 手当ての後は「無い」で失敗する。
+    //    ⚠ ここが `'object'` に戻ったら、prelude が届いていないか隔離が外れている
+    idbType: 'undefined',
+    cachesType: 'undefined',
   });
   // 🔴 P8 段⑭: 保存領域は**貸す**。ただし見えるのは**このアプリのぶんだけ**
   expect(reach.ls, 'アプリが状態を保存できない(貸せていない)').toBe('OPEN');
@@ -201,9 +233,31 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   expect(reach.lsKeys, 'アプリの領域に他人のものが混ざっている').toBe('probe');
 
   // ⑤-2 ⚠ 隔離した先で**中身がちゃんと出ている**(隔離できても白紙では意味がない)
-  await expect(
-    appTab.frameLocator('[data-pkc-field="launcher-app"]').locator('p'),
-  ).toHaveText('1+1=2');
+  // ⚠ 添付自身の `<p>` に絞る ── 手当ての帯(`app-capability`)も `<p>` なので、
+  //    素の `locator('p')` は 2 件に当たる(実測で strict mode 違反になった)
+  const inApp = appTab.frameLocator('[data-pkc-field="launcher-app"]');
+  await expect(inApp.locator('p:not([data-pkc-field])')).toHaveText('1+1=2');
+
+  /**
+   * ⑤-3 🔴 **無い能力に触ったことが画面に出る**(2026-08-06。user 報告 2-15)。
+   *
+   * 上の probe が `indexedDB` / `navigator.storage` / `caches` を実際に触って
+   * いるので、手当てが効いていれば**この時点で帯が出ている**。
+   * ⚠ これは**実ブラウザでしか測れない** ── 不透明オリジンのプロパティ読みが
+   * 同期に投げるのは実装の挙動で、unit の再現(投げる getter を仕込む)は
+   * それを真似ているだけである。
+   * ⚠ 「1 行目で死んでいない」も同時に見えている ── 死んでいたら上の
+   *    `1+1=2` が出ない。
+   */
+  const capability = inApp.locator('[data-pkc-field="app-capability"]');
+  await expect(capability, '無い能力に触ったのに何も出ない(黙って無いことにした)').toContainText(
+    '囲いの中では使えません',
+  );
+  // ⚠ 触ったものの名前が出る(「何かが使えない」では直せない)
+  await expect(capability).toContainText('IndexedDB');
+  // 🔑 **押すと閉じる**(正常に動いているアプリを覆い続けない)
+  await capability.click();
+  await expect(capability).toHaveCount(0);
   await appTab.close();
 
   // ⑥ サイドバーの絞り込みがここでも効く(探し方を 2 通り覚えさせない)
@@ -641,6 +695,24 @@ test('🔴 IndexedDB を使うアプリは、素のままで動き、囲いの�
   expect(await readApp(boxed), '囲いの中で IndexedDB が通ってしまった(隔離が外れている)').toBe(
     '読み込み中…',
   );
+  /**
+   * 🔴 **止まるのは変わらないが、理由が出る**(2026-08-06。user 報告 2-15)。
+   *
+   * 直す前は「真っ白 + 理由なし」だった。いまは 2 つ出る:
+   *  ① 上の帯 ── **何が使えないのか**(IndexedDB)
+   *  ② 下の行 ── 例外そのもの(`app-anchor-shim` の `say()`)
+   * ⚠ ここは user 報告の本体である ── 「動かない」ことより
+   *   「**理由がどこにも出ない**」ことが報告の中身だった。
+   */
+  const boxedFrame = boxed.frameLocator('[data-pkc-field="launcher-app"]');
+  await expect(
+    boxedFrame.locator('[data-pkc-field="app-capability"]'),
+    '何が使えないのか画面に出ない',
+  ).toContainText('IndexedDB');
+  await expect(
+    boxedFrame.locator('[data-pkc-field="app-error"]'),
+    '止まった理由が画面に出ない(真っ白 + 理由なし)',
+  ).toContainText('エラー');
   await boxed.close();
 
   // ② 素のまま ── **動く**。⚠ 確認が出るので受ける(fail closed の逆側)

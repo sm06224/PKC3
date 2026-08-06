@@ -3,7 +3,7 @@
  *
  * Features layer — no browser APIs.
  *
- * Slice 3 of `docs/development/textlog-viewer-and-linkability-redesign.md`
+ * Slice 3 of `PKC2: docs/development/textlog-viewer-and-linkability-redesign.md`
  * replaces the old flat h1–h3 list with a **time-driven** TOC for
  * TEXTLOG:
  *

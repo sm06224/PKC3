@@ -10,6 +10,7 @@
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { writeArchive, type ArchiveSource } from '@features/export/pkc3-archive';
+import type { RenderMarkdownOptions } from '@features/markdown/markdown-render';
 import { writePortableHtml } from '@features/export/pkc3-html';
 import { writeMarkdownZip } from '@features/export/pkc3-markdown-zip';
 import { singleEntrySource } from '@features/export/single-entry-source';
@@ -38,7 +39,7 @@ export interface ExportDeps {
    * 渡す ── 省略するとその場で描くので、件数ぶんメインスレッドが止まる
    * (user 指示 2026-08-03「基本的に重い処理はワーカーにしてください」)。
    */
-  renderBody?(text: string): Promise<string>;
+  renderBody?(text: string, opts?: RenderMarkdownOptions): Promise<string>;
 }
 
 

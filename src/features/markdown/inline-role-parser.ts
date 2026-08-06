@@ -13,7 +13,7 @@
  * `:role:` だけ(後続 `[` も `{` も無し)は L-6 simple-inline `:text:attrs:` 等
  * との曖昧化を避けるため拒否(null 返却)、caller 側で fall-through する。
  *
- * 設計詳細は `docs/development/notation-redesign-2026-05/01-notation-catalog.md`
+ * 設計詳細は `PKC2: docs/development/notation-redesign-2026-05/01-notation-catalog.md`
  * §1.3 inline 修飾 を参照。
  */
 

@@ -128,8 +128,10 @@ const ICON_PATHS: Readonly<Record<string, readonly IconPath[]>> = {
   form: [{ d: 'M9.5 3h5v3h-5z', fill: 'solid' }, 'M6 5.5h12V21H6z', 'M9 13h6'],
   /** 起動 ── 再生の三角(外に飛ばすのではなく「動かす」)。 */
   play: [{ d: 'M8 5.5l11 6.5-11 6.5z', fill: 'solid' }],
-  /** 下向きの山(種類を選ぶ)。 */
+  /** 下向きの山(種類を選ぶ / 1 つ下へ)。 */
   'chevron-down': ['M6.5 9.5l5.5 5.5 5.5-5.5'],
+  /** 上向きの山(1 つ上へ)。 */
+  'chevron-up': ['M6.5 14.5l5.5-5.5 5.5 5.5'],
   /** 種類が分からないもの。 */
   dot: [{ d: 'M9.5 12a2.5 2.5 0 105 0 2.5 2.5 0 00-5 0z', fill: 'solid' }],
 };
@@ -170,6 +172,9 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'launch-asset-raw': 'globe',
   /** 元の md へ書き戻す(2026-08-05)。⚠ **外へ出す**向きなので書出しと同じ図案。 */
   'write-back-file': 'arrow-out',
+  /** 並べ替え(2026-08-06。user 報告 2-10)── 同じ親の下で隣と入れ替える。 */
+  'move-order-up': 'chevron-up',
+  'move-order-down': 'chevron-down',
 };
 
 /**

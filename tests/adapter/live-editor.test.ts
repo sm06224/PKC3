@@ -136,8 +136,9 @@ describe('ライブエディタ(1 面)の配線', () => {
 
   it('④ 分割が組めない本文では原文の編集欄へ退避し、理由を出す', async () => {
     setLive(true);
-    // 入れ子の `:::`(今日の描画が壊れている ── 設計 §7-9)
-    const r = rig([':::section', '', ':::section', '', '中身', '', ':::', '', ':::', ''].join('\n'));
+    // ⚠ **直った形を使い続けない** ── 入れ子の `:::` も id 無しの figure も直った。
+    //    いまの実物は「renderer が知らない名前」(走査器だけが囲いと見なす)
+    const r = rig([':::unknown-thing', '', '本文', '', ':::', '', 'あと', ''].join('\n'));
     await settle();
     const live = r.root.querySelector('[data-pkc-region="editor-live"]')!;
     expect(live.querySelector('[data-pkc-field="editor-body"]')).not.toBeNull();
@@ -148,7 +149,7 @@ describe('ライブエディタ(1 面)の配線', () => {
 
   it('④ 退避した原文欄の打鍵も外へ出る(退避先で保存が死んでいない)', async () => {
     setLive(true);
-    const r = rig([':::section', '', ':::section', '', '中身', '', ':::', '', ':::', ''].join('\n'));
+    const r = rig([':::unknown-thing', '', '本文', '', ':::', '', 'あと', ''].join('\n'));
     await settle();
     const ta = r.root.querySelector<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')!;
     ta.value = '普通の段落に直した。';

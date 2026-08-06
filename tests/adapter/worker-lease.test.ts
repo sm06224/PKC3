@@ -482,3 +482,61 @@ describe('落ちたときの可視化(P8 段⑰)', () => {
     expect(lane.queued + lane.running, '畳んだのに待ち/実行中が残っている').toBe(0);
   });
 });
+
+/**
+ * 🔴 **ログの量が役に立つ形で出る**(2026-08-06。user 報告 minor
+ * 「ログ 1 行の『0k 文字』が役に立たない」)。
+ *
+ * 直す前は常に `k 文字` 表記で、**1000 文字未満が全部 `0k 文字`** になっていた
+ * (打鍵の追従は短い本文でも走るので、ログの大半がこれだった)。さらに
+ * **結果が object の口**(`renderWithRanges` の `{ html, ranges }`)では
+ * 量が 1 度も出なかった。
+ */
+describe('ジョブログの量表記', () => {
+  const noteOf = (
+    monitor: JobMonitor,
+    phase: 'enqueue' | 'done',
+  ): string | undefined => monitor.recent(50).find((e) => e.phase === phase)?.note;
+
+  function rig() {
+    const monitor = new JobMonitor();
+    const lease = new WorkerLease({
+      spawn: () => new FakeWorker() as unknown as Worker,
+      monitor,
+      name: 'chars',
+      setTimer: () => 0,
+      clearTimer: () => undefined,
+    });
+    return { monitor, lease };
+  }
+
+  it('🔴 短い本文は実数で出る(`0k 文字` にならない)', async () => {
+    const { monitor, lease } = rig();
+    const p = lease.run({ text: 'あ'.repeat(120) });
+    await Promise.resolve();
+    expect(noteOf(monitor, 'enqueue'), '短い本文が 0k に丸められている').toBe('120 文字');
+    [...FakeWorker.live][0]!.respondAll(() => 'x');
+    await p;
+    lease.dispose();
+  });
+
+  it('千を超えたら k 表記(桁が増えても読める)', async () => {
+    const { monitor, lease } = rig();
+    const p = lease.run({ text: 'あ'.repeat(12_340) });
+    await Promise.resolve();
+    expect(noteOf(monitor, 'enqueue')).toBe('12.3k 文字');
+    [...FakeWorker.live][0]!.respondAll(() => 'x');
+    await p;
+    lease.dispose();
+  });
+
+  it('🔴 結果が object の口でも量が出る(ライブエディタの依頼)', async () => {
+    const { monitor, lease } = rig();
+    const p = lease.run({ text: 'あ'.repeat(10) });
+    await Promise.resolve();
+    [...FakeWorker.live][0]!.respondAll(() => ({ html: '<p>x</p>', ranges: [] }));
+    await p;
+    expect(noteOf(monitor, 'done'), 'object の結果は量が出ていない').toBe('8 文字');
+    lease.dispose();
+  });
+});

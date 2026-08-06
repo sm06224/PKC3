@@ -280,3 +280,65 @@ describe('添付の詳細から起動する(P10)', () => {
     expect(q('[data-pkc-action="launch-asset-raw"]')).toBeNull();
   });
 });
+
+/**
+ * 🔴 **出せない種類は「出せない」と言う**(2026-08-06。user 報告 minor
+ * 「preview を持たない添付は何も出ない」)。
+ *
+ * 直す前は器が**空のまま**残り、題名と操作だけが並んだ ── 中身が空なのか
+ * 出せないのかが区別できず、「壊れている」と読まれる形だった。
+ */
+describe('preview を持たない添付', () => {
+  const lender: AssetLender = {
+    lend: async () => ({ url: 'blob:x', dispose: () => {} }),
+    getBlob: async () => new Blob(['x']),
+  };
+  const zipBody = attachmentBody({
+    name: '一式.zip',
+    mime: 'application/zip',
+    size: 999,
+    assetKey: 'ast-zip',
+  });
+  /**
+   * ⚠ **`text/html` はここへ来ない** ── `text/` は文字の preview を持つので
+   * `<pre>` が出る。案内が出るのは「起動できるのに画面には出せない」形、
+   * つまり `application/xhtml+xml`(と mime 未設定)である。
+   */
+  const htmlBody = attachmentBody({
+    name: '道具.xhtml',
+    mime: 'application/xhtml+xml',
+    size: 120,
+    assetKey: 'ast-html2',
+  });
+  const imgBody = attachmentBody({
+    name: 'p.png',
+    mime: 'image/png',
+    size: 3,
+    assetKey: 'ast-img2',
+  });
+
+  it('🔴 案内が出る(黙って空にしない)', async () => {
+    const { d, q } = setup({ a1: zipBody, a2: '# text' }, lender);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    await tick(20);
+    const note = q('[data-pkc-field="attachment-no-preview"]');
+    expect(note, '出せない種類で何も出ていない').not.toBeNull();
+    // ⚠ 次にどうすればよいかが書いてある(「出せません」だけで終わらせない)
+    expect(note!.textContent).toContain('ダウンロード');
+  });
+
+  it('HTML は起動があるので、そちらを案内する(同じ文で済ませない)', async () => {
+    const { d, q } = setup({ a1: htmlBody, a2: '# text' }, lender);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    await tick(20);
+    expect(q('[data-pkc-field="attachment-no-preview"]')!.textContent).toContain('起動');
+  });
+
+  it('出せる種類には案内を出さない(邪魔をしない)', async () => {
+    const { d, q } = setup({ a1: imgBody, a2: '# text' }, lender);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    await tick(20);
+    expect(q('[data-pkc-field="attachment-media"]'), '画像が出ていない').not.toBeNull();
+    expect(q('[data-pkc-field="attachment-no-preview"]'), '出せているのに案内が出た').toBeNull();
+  });
+});

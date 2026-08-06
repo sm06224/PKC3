@@ -16,6 +16,7 @@ type RevisionOps = Pick<
   | 'purgeTrash'
   | 'listBodies'
   | 'getBodies'
+  | 'listRelations'
 >;
 
 export function stubRevisionOps(): RevisionOps {
@@ -28,5 +29,7 @@ export function stubRevisionOps(): RevisionOps {
     // ⚠ ランチャー(P7b)専用の読み ── 開かないテストには 1 件も返らないのが正しい。
     // **観測するテストは自前で上書きする**(既定に意味を持たせない)
     getBodies: async () => [],
+    // ⚠ 関係を観測するテストは自前で上書きする(既定は「1 件も無い」)
+    listRelations: async () => [],
   };
 }
