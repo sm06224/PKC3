@@ -150,6 +150,7 @@ describe('editor flow (P3-5)', () => {
     ta.value = '捨てる';
     ta.dispatchEvent(new Event('input', { bubbles: true }));
     q('[data-pkc-action="cancel-edit"]')!.click();
+    await tick(); // 読む面はワーカーで描く(2026-08-06。user 報告 2-8)
     expect(q('[data-pkc-field="detail-body"]')?.textContent).toContain('原文');
     expect(persisted).toHaveLength(0);
   });

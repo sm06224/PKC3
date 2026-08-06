@@ -317,7 +317,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         report: (notes) => showNotices(regions.notices, '書出し時の注意', notes),
         // 🔑 閲覧用 HTML の本文描画は**ワーカーへ**(P8 段⑲)。渡さないと
         //    件数ぶんメインスレッドで描くことになる
-        renderBody: (text) => markdown.render(text),
+        // ⚠ opts を素通しする(vars / 見出し番号 ── user 報告 2-7)
+        renderBody: (text, opts) => markdown.render(text, opts),
       };
       // 1 ノートだけの書出しも**同じ実行部・同じ形式**を通る(P6f)──
       // 別経路にすると「1 件書出しだけ壊れている」が起きる

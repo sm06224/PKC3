@@ -11,10 +11,7 @@
  * innerHTML への流し込みは markdown-render が `html: false`(生 HTML 不通過)で
  * 生成した出力に限る(PKC2 と同じ安全前提)。
  */
-import {
-  renderMarkdown,
-  hasMarkdownSyntax,
-} from '@features/markdown/markdown-render';
+import { renderMarkdown } from '@features/markdown/markdown-render';
 import { parseFrontmatter, extractVars } from '@features/markdown/frontmatter';
 import { hydrateMermaid, type MermaidScope } from './mermaid-hydrate';
 import { applyBlocks, EMPTY_VIEW, type BlockView } from './apply-blocks';
@@ -107,8 +104,12 @@ export class DetailRenderer {
   private barSlot: HTMLElement | null = null;
   private panelSlot: HTMLElement | null = null;
   private bodyHost: HTMLElement | null = null;
-  /** 本文の出し方(markdown / 素のまま / 添付)。変わったら器ごと作り直す。 */
-  private bodyKind: 'md' | 'plain' | 'attachment' | 'loading' | null = null;
+  /**
+   * 本文の出し方(markdown / 添付)。変わったら器ごと作り直す。
+   * ⚠ かつて `'plain'`(記法が無い本文を `<pre>` で出す)が在ったが、
+   *   **面ごとに見え方が違う**原因だったので落とした(2026-08-06。user 報告 2-6)。
+   */
+  private bodyKind: 'md' | 'attachment' | 'loading' | null = null;
   private bodyView: BlockView = EMPTY_VIEW;
   /**
    * 図の面倒を**塊ごと**に持つ(全体に掛け直すと生きている `<img>` を壊す)。
@@ -127,6 +128,11 @@ export class DetailRenderer {
    * 「まだ scrollHeight が足りない」ので **0 に丸められる**(実際にそう外した)。
    */
   private pendingScroll: number | null = null;
+  /**
+   * 読む面の描画の世代(2026-08-06。user 報告 2-8)。ワーカーへ逃がしたので
+   * **古い結果を載せない**ための弁別が要る(選択を素早く動かすと逆順で届く)。
+   */
+  private viewToken = 0;
 
   /** markdown を描く口(既定は自前。⚠ **要るまで worker は作らない**)。 */
   private readonly markdown: MarkdownClient;
@@ -311,7 +317,20 @@ export class DetailRenderer {
       this.restoreScroll();
       return;
     }
-    if (hasMarkdownSyntax(fm.body)) {
+    /**
+     * 🔴 **面ごとに違う見え方にしない**(2026-08-06。user 報告 2-6)。
+     *
+     * 直す前はここだけ `hasMarkdownSyntax` で門を作り、記法を 1 つも含まない本文を
+     * `<pre>` 等幅に落としていた ── **編集プレビューと書き出しは markdown で描く**
+     * ので、同じ本文が面によって別物に見えた(しかも `<pre>` は折り返さないので
+     * **横にはみ出す**)。PKC3 の founding は「**全 body = PKC-Markdown**」なので、
+     * 記法が無い本文も markdown として描くのが正しい。
+     * ⚠ 改行は失われない ── `markdown-it` を `breaks: true` で使っているので
+     *   1 個の改行が `<br>` になる(実測で確認)。
+     * ⚠ `hasMarkdownSyntax` 自体は残す(golden の契約 ── 判定を消したのではなく、
+     *   **描き方を分けるのに使わなくした**)。
+     */
+    {
       if (this.bodyKind !== 'md') {
         this.bodyKind = 'md';
         this.bodyView = EMPTY_VIEW;
@@ -319,49 +338,64 @@ export class DetailRenderer {
         this.bodyHost!.className = 'pkc-md-rendered';
         this.bodyHost!.setAttribute('data-pkc-field', 'detail-body');
       }
-      const html = renderMarkdown(fm.body, {
+      const opts = {
         vars: extractVars(body),
         sourceLineAnchors: true,
         // heading-number は text レベル前処理(LineMap 不変)── 全文 body から抽出
         headingNumber: extractHeadingNumberConfig(body),
-      });
-      // 🔑 **変わった塊だけ**当てる(P8 段⑩⑪)── scroll も図も生き残る
-      const applied = applyBlocks(this.bodyHost!, html, this.bodyView);
-      this.bodyView = applied.view;
-      // writing / direction / align / layout の属性契約(dir 込みで 1 箇所)
-      applyDocumentGlobals(this.bodyHost!, extractDocumentGlobals(body));
-      // ⚠ 面倒を見るのは**新しく入った所だけ**(全体に掛け直すと、生きている
-      //    `<img>` の ObjectURL を revoke してしまう)
-      if (applied.inserted.length > 0) {
-        void this.hydrateAssetRefs(applied.inserted, this.hydrateToken);
-        this.mermaidScopes.push(hydrateMermaid(applied.inserted));
-      }
-      // 🔴 **差し替えで画面から消えた `<img>` のぶんを返す**(P8 段⑲)。
-      //    ⚠ `inserted.length > 0` の中に入れてはいけない ── 塊が**消えるだけ**
-      //    (差し替えではなく削除)のときは inserted が空で、そこが一番溜まる
-      // 🔴 図の側も同じ(P8 段㉗)── 段⑲ で `pruneLends` をここへ出しておきながら、
-      //    **1 行上の `pruneScopes` は `if` の中に残していた**。図の塊を消すだけの
-      //    編集(図を削る)では inserted が空なので、その図の ObjectURL は
-      //    次に何かが挿入されるまで返らない。同じ穴を隣同士で片方だけ塞いでいた。
-      pruneScopes(this.mermaidScopes);
-      this.pruneLends();
-      this.restoreScroll();
-    } else {
-      // 方言判定 false は plain text 扱い(PKC2 と同じゲート)
-      if (this.bodyKind !== 'plain') {
-        this.bodyKind = 'plain';
-        this.bodyView = EMPTY_VIEW;
-        this.bodyHost!.textContent = '';
-        this.bodyHost!.className = '';
-        this.bodyHost!.removeAttribute('data-pkc-field');
-        const pre = document.createElement('pre');
-        pre.setAttribute('data-pkc-field', 'detail-body');
-        this.bodyHost!.append(pre);
-      }
-      // ⚠ `textContent` の代入は中身が同じなら DOM を作り直さない(scroll も動かない)
-      const pre = this.bodyHost!.firstElementChild as HTMLElement;
-      if (pre.textContent !== fm.body) pre.textContent = fm.body;
-      this.restoreScroll();
+      };
+      /**
+       * 🔴 **読む面もワーカーで描く**(2026-08-06。user 報告 2-8)。
+       *
+       * > user 指示 2026-08-03(不可侵)「基本的に重い処理はワーカーにしてください」
+       *
+       * 直す前はここが**メインスレッドで同期**に描いていた ── 300 節のノートで
+       * long task **181〜190ms**(実測)。編集プレビューだけワーカーに逃がしていて、
+       * **いちばん長く見ている面**が残っていた。
+       * ⚠ **最新だけ載せる**(選択が動いたら古い結果は捨てる)── `viewToken` で弁別。
+       * ⚠ 失敗したら**その場で描く**(ワーカーは速さの話であって正しさの話ではない)。
+       * ⚠ 前の本文は**消さない**まま待つ ── `applyBlocks` は結果が来てから当てるので、
+       *   選択の瞬間に白くならない。
+       */
+      const token = ++this.viewToken;
+      /**
+       * ⚠ 当てていいかの判定は **世代 + 器の同一性**の 2 つ。
+       * `isConnected` は使わない ── 器が document に繋がる前に描く経路
+       * (骨組みを組んでから親へ入れる / test)を黙って落とす。
+       */
+      const host = this.bodyHost!;
+      const paint = (html: string): void => {
+        if (token !== this.viewToken) return; // もっと新しい選択が来ている
+        // ⚠ `bodyKind` の側は**等価な変異**(器を捨てるときは `bodyHost` も null に
+        //    なるので、同一性の門だけで全部止まる)。読みやすさのために残している
+        //    ── test で殺せないことを承知の上(変異試験 R16)
+        if (this.bodyKind !== 'md' || this.bodyHost !== host) return; // 器が作り直された
+        // 🔑 **変わった塊だけ**当てる(P8 段⑩⑪)── scroll も図も生き残る
+        const applied = applyBlocks(host, html, this.bodyView);
+        this.bodyView = applied.view;
+        // writing / direction / align / layout の属性契約(dir 込みで 1 箇所)
+        applyDocumentGlobals(host, extractDocumentGlobals(body));
+        // ⚠ 面倒を見るのは**新しく入った所だけ**(全体に掛け直すと、生きている
+        //    `<img>` の ObjectURL を revoke してしまう)
+        if (applied.inserted.length > 0) {
+          void this.hydrateAssetRefs(applied.inserted, this.hydrateToken);
+          this.mermaidScopes.push(hydrateMermaid(applied.inserted));
+        }
+        // 🔴 **差し替えで画面から消えた `<img>` のぶんを返す**(P8 段⑲)。
+        //    ⚠ `inserted.length > 0` の中に入れてはいけない ── 塊が**消えるだけ**
+        //    (差し替えではなく削除)のときは inserted が空で、そこが一番溜まる
+        // 🔴 図の側も同じ(P8 段㉗)── 段⑲ で `pruneLends` をここへ出しておきながら、
+        //    **1 行上の `pruneScopes` は `if` の中に残していた**。図の塊を消すだけの
+        //    編集(図を削る)では inserted が空なので、その図の ObjectURL は
+        //    次に何かが挿入されるまで返らない。同じ穴を隣同士で片方だけ塞いでいた。
+        pruneScopes(this.mermaidScopes);
+        this.pruneLends();
+        this.restoreScroll();
+      };
+      void this.markdown
+        .render(fm.body, opts)
+        .then(paint)
+        .catch(() => paint(renderMarkdown(fm.body, opts)));
     }
   }
 

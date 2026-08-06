@@ -455,21 +455,43 @@ describe('ゴミ箱からの復元: 居場所と並びが戻る', () => {
     expect(d.getState().order[0]).toBe('folder');
   });
 
-  it('二重復元でも関係が 2 本にならない(同じ id は上書き)', () => {
+  const R1 = {
+    id: 'r1',
+    kind: 'structural',
+    fromLid: 'folder',
+    toLid: 'child',
+    createdAt: null,
+    updatedAt: null,
+  };
+
+  it('trash 復元の後着は破棄(幽霊 entry を作らない ── `exists` の門)', () => {
     const d = bootWithFolder();
-    const r = {
-      id: 'r1',
-      kind: 'structural',
-      fromLid: 'folder',
-      toLid: 'child',
-      createdAt: null,
-      updatedAt: null,
-    };
     d.dispatch({ type: 'DELETE_ENTRY', lid: 'child' });
-    d.dispatch({ type: 'ENTRY_RESTORED', mode: 'trash', meta: meta('child', { entryOrder: 2 }), body: '', relations: [r] });
-    // 2 度目は「既に居る」ので破棄されるが、関係が増えないことも見る
-    d.dispatch({ type: 'ENTRY_RESTORED', mode: 'trash', meta: meta('child', { entryOrder: 2 }), body: '', relations: [r] });
-    expect(d.getState().relations.filter((x) => x.id === 'r1')).toHaveLength(1);
+    d.dispatch({ type: 'ENTRY_RESTORED', mode: 'trash', meta: meta('child', { entryOrder: 2 }), body: '', relations: [R1] });
+    d.dispatch({ type: 'ENTRY_RESTORED', mode: 'trash', meta: meta('child', { entryOrder: 2 }), body: '', relations: [R1] });
+    expect(d.getState().order.filter((l) => l === 'child')).toHaveLength(1);
+  });
+
+  /**
+   * ⚠ **同じ id の合流は上書き**。
+   *
+   * かつてここは trash 復元を 2 回投げて「関係が 2 本にならない」を見ていたが、
+   * 2 度目は `exists` の門で**丸ごと破棄**されるので合流に一度も届いておらず、
+   * 合流を `[...current, ...incoming]` に壊しても**緑のまま**だった(変異試験 R11)。
+   * 関係を持つ復元は**既に居る entry にも来る**(action の型は mode を問わず
+   * `relations` を許す)ので、そちら = 履歴復元の形で当てる。
+   */
+  it('🔴 既に居る関係と同じ id が来ても 2 本にならない(合流は上書き)', () => {
+    const d = bootWithFolder();
+    expect(d.getState().relations.filter((x) => x.id === 'r1'), '前提が空(合流に届かない)').toHaveLength(1);
+    d.dispatch({
+      type: 'ENTRY_RESTORED',
+      mode: 'revision',
+      meta: meta('child', { entryOrder: 2 }),
+      body: '戻した本文',
+      relations: [R1],
+    });
+    expect(d.getState().relations.filter((x) => x.id === 'r1'), '同じ関係が 2 本になった').toHaveLength(1);
   });
 
   it('🔴 効果層が disk から関係を読み直して渡す(その entry のぶんだけ)', async () => {
