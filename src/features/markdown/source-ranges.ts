@@ -252,10 +252,12 @@ export function blockIndexForLine(part: BlockPartition, line: number): number | 
  * 原理的に無い** ── PKC2 が撤回した比例割り(誤差が両方向に出る近似)と違うのは
  * ここである。最悪でも「その行の先頭」に落ちる。
  *
- * 実測(9 例すべて正確): `**太字**` / `~~打消~~` / `==印==` / `` `コード` `` /
- * `[リンク](url)` / `![alt](asset:…)` / `A &amp; B` / `## **太字**の見出し`。
- * 外れる構文(`{{vars}}` の置換 / 脚注の参照 / 見出しの自動採番 / 描画された表・図)は
- * **必ず手前へ**丸まる。
+ * 実測(2026-08-05。`tests/bench/run-caret-generated.ts`):`**太字**` / `~~打消~~` /
+ * `==印==` / `` `コード` `` / `[リンク](url)` / `![alt](asset:…)` / `A &amp; B` /
+ * 脚注の参照 / `{{vars}}` は**すべて正確**。唯一外れたのが
+ * **自動採番の見出し**(`## 節の題名` → 描画 `0.1 節の題名`)で、**行頭に落ちていた**
+ * ── 見出しは短いので、実質クリックが効かないのと同じだった。下の「生成物の
+ * 先頭を飛ばす」でここも正確になる(誤差の向きは手前のまま)。
  *
  * @param source 原文の 1 行(または連続行)
  * @param visible その範囲の**描画テキスト**(`textContent`)
@@ -267,6 +269,42 @@ export function mapVisibleToSource(
   visibleOffset: number,
 ): { offset: number; exact: boolean } {
   const target = Math.max(0, Math.min(visibleOffset, visible.length));
+  const first = walkForward(source, visible, target);
+  // 1 文字でも対応が取れていれば、それが答え(手前向きの誤差)
+  if (first.exact || first.offset > 0 || target === 0) return first;
+  /**
+   * 🔴 **先頭に原文と対応しない文字が在る**(2026-08-05。S7)。
+   *
+   * `offset === 0 && !exact` は「**1 文字も一致しなかった**」を意味する ──
+   * つまり `visible[0]` は原文のどこにも無い = **描画側が生んだ文字**である
+   * (自動採番の見出しの `0.1 ` がこれ)。生成物なのだから飛ばして測り直す。
+   *
+   * ⚠ **前へ飛び越さない**のはここでも保たれる:飛ばすのは「一致が 1 つも
+   * 取れなかったとき」だけで、取れたあとは常に**最初の一致点**を使う。
+   * ⚠ 飛ばす長さに上限を置く ── 生成物の前置きは短い(番号 / 記号)。上限が
+   * 無いと、対応の取れない長い行で総当たりになる。
+   */
+  const limit = Math.min(GENERATED_PREFIX_MAX, target);
+  for (let skip = 1; skip <= limit; skip += 1) {
+    const r = walkForward(source, visible.slice(skip), target - skip);
+    /**
+     * ⚠ 受けるのは**対応が取れたときだけ**(`offset > 0`)。`exact` も見ると、
+     * 生成物の**中**を突いた場合(採番の `0.1` の途中)に「行頭・正確」と
+     * 答えてしまう ── 位置は行頭で正しいが、**正確だと名乗るのは嘘**である。
+     */
+    if (r.offset > 0) return r;
+  }
+  return first;
+}
+
+/** 飛ばしてよい生成物の前置きの上限(文字)。 */
+const GENERATED_PREFIX_MAX = 32;
+
+function walkForward(
+  source: string,
+  visible: string,
+  target: number,
+): { offset: number; exact: boolean } {
   let s = 0;
   let v = 0;
   let lastSynced = 0;

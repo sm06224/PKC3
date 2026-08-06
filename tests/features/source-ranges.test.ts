@@ -335,6 +335,157 @@ describe('④ 描画テキスト → 原文の位置(2 ポインタ)', () => {
     expect(r.offset).toBe(0);
   });
 
+  /**
+   * 🔴 **生成物の前置きを飛ばす**(S7。2026-08-05 の実測で見つけた唯一の破れ)。
+   *
+   * 自動採番の見出しは、描画テキストの**先頭**に原文に無い番号が入る。
+   * 直す前はここで 1 文字も一致せず、**クリックが常に行頭に落ちていた**
+   * (見出しは短いので、実質クリックが効かないのと同じ)。
+   */
+  it('🔴 自動採番の見出しでも、押した所に当たる', () => {
+    const src = '## 節の題名です';
+    const visible = '0.1 節の題名です'; // 実測の描画結果
+    // 「題」の直前を突く
+    const r = mapVisibleToSource(src, visible, visible.indexOf('題'));
+    expect(r.exact).toBe(true);
+    expect(src.slice(r.offset)).toBe('題名です');
+  });
+
+  it('生成物の**中**を突いたら「行頭・不正確」と答える(正確だと名乗らない)', () => {
+    const r = mapVisibleToSource('## 節の題名', '0.1 節の題名', 2); // `0.1` の途中
+    expect(r.offset).toBe(0);
+    expect(r.exact, '位置は行頭で正しいが、正確だと名乗るのは嘘である').toBe(false);
+  });
+
+  it('🔴 飛ばしても**前へ飛び越さない**(誤差の向きは手前のまま)', () => {
+    // 先頭に生成物、その後ろに置換(= 途中で対応が切れる)
+    const src = '## {{vars.name}} の節';
+    const visible = '0.1 佐藤 の節';
+    const r = mapVisibleToSource(src, visible, visible.indexOf('の節'));
+    /**
+     * 守るのは「**本当の位置より後ろを指さない**」── これが設計 §5.5 の不変条件。
+     * ⚠ 「置換の手前に落ちる」ではない(飛ばした先で偶然一致する所まで進むことは
+     *   在る ── `vars.name` の `.` に `0.1` の `.` が当たる)。それは手前向きの
+     *   誤差なので許される。
+     */
+    expect(r.exact).toBe(false);
+    expect(r.offset, '本当の位置より後ろを指した(前へ飛び越した)').toBeLessThanOrEqual(
+      src.indexOf('の節'),
+    );
+  });
+
+  /**
+   * 🔴 **一致が取れているときは飛ばさない**(2026-08-05 の変異試験で開いた穴)。
+   *
+   * 飛ばすのは**ふつう結果を変えない** ── 先頭 1 文字を markup 扱いにしても、
+   * 残りの並びが同じなら同じ所に着く。差が出るのは**同じ字が markup を跨いで
+   * 繰り返す**ときで、そこでは飛ばすと**手前へ大きく外す**。
+   */
+  it('🔴 同じ字が装飾を跨いで繰り返しても、後ろの方に当たる', () => {
+    const src = 'あ**あ**い'; // 描画は 'あ' 'あ' 'い'
+    const visible = 'あああ'.slice(0, 2) + 'い';
+    const r = mapVisibleToSource(src, visible, 2); // 'い' の直前
+    expect(r.exact).toBe(true);
+    expect(src.slice(0, r.offset), '手前の同じ字に当たってしまった').toBe('あ**あ');
+  });
+
+  it('飛ばす長さには上限が在る(対応の取れない長い行で総当たりにしない)', () => {
+    // ⚠ 上限を外せば**当たってしまう**形にする(外しても同じ結果だと、
+    //   上限が在ることを 1 件も検査していない ── 実際 1 巡目はそうだった)
+    const src = 'あい';
+    const visible = 'X'.repeat(40) + 'あい';
+    const r = mapVisibleToSource(src, visible, visible.indexOf('い'));
+    // 上限(32)を超える前置きは飛ばさない ── 行頭へ丸まる(安全側)
+    expect(r.offset).toBe(0);
+    expect(r.exact).toBe(false);
+    // 前提: 上限のすぐ下なら当たる(上限だけが効いていることの裏取り)
+    const short = 'X'.repeat(30) + 'あい';
+    expect(mapVisibleToSource(src, short, short.indexOf('い')).offset).toBe(1);
+  });
+
+  /**
+   * 🔴 **不変条件を総当たりで守る**(2026-08-05。S7 で「生成物を飛ばす」経路を
+   * 足したので、例だけでは足りない)。
+   *
+   * caret 設計の土台は「**本当の位置より後ろを指さない**」の 1 点である
+   * (設計 §5.5:PKC2 の比例割りを撤回した理由がこれ)。そこで
+   *  - 原文だけに在る文字(markup)
+   *  - 両方に在る文字(本文)
+   *  - 描画だけに在る文字(生成物 ── 採番・置換)
+   * を混ぜた組を機械で作り、**全部の位置で**不変条件を確かめる。
+   * ⚠ 生成物の文字は**本文と重なる字も使う**(重ならない字だけだと、
+   *   偶然の一致で飛び越す形が 1 度も現れない = 測っていない次元になる)。
+   */
+  it('🔴 総当たり: どんな組でも「本当の位置より後ろ」を指さない', () => {
+    let seed = 20260805; // ⚠ 固定(落ちた組を再現できるように)
+    const rnd = (n: number): number => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed % n;
+    };
+    const BODY = 'あいうえおabc';
+    const MARKUP = ['**', '`', '[', '](x)', '{{', '}}', '~~'];
+    /** 生成物 ── **本文と重なる字**も混ぜる(偶然一致を起こさせる) */
+    const GENERATED = ['0.1 ', '1 ', '※', 'あ', 'c', '† '];
+    let checked = 0;
+    let generatedCases = 0;
+    for (let round = 0; round < 400; round += 1) {
+      let source = '';
+      let visible = '';
+      /** visible の各位置 → 原文の本当の位置。 */
+      const truth: number[] = [];
+      let hasGenerated = false;
+      for (let seg = 0; seg < 6; seg += 1) {
+        const kind = rnd(3);
+        if (kind === 0) {
+          source += MARKUP[rnd(MARKUP.length)]!; // 原文だけ
+        } else if (kind === 1) {
+          const g = GENERATED[rnd(GENERATED.length)]!; // 描画だけ
+          for (const ch of g) {
+            truth.push(source.length);
+            visible += ch;
+          }
+          hasGenerated = true;
+        } else {
+          const n = 1 + rnd(4);
+          for (let i = 0; i < n; i += 1) {
+            const ch = BODY[rnd(BODY.length)]!;
+            truth.push(source.length);
+            source += ch;
+            visible += ch;
+          }
+        }
+      }
+      if (visible.length === 0) continue;
+      if (hasGenerated) generatedCases += 1;
+      for (let i = 0; i < visible.length; i += 1) {
+        const r = mapVisibleToSource(source, visible, i);
+        checked += 1;
+        expect(
+          r.offset,
+          `前へ飛び越した: source=${JSON.stringify(source)} visible=${JSON.stringify(
+            visible,
+          )} i=${i} → ${r.offset} > ${truth[i]}`,
+        ).toBeLessThanOrEqual(truth[i]!);
+        /**
+         * ⚠ `exact` は「**本当の位置そのもの**」ではない ── markup を挟む位置では
+         * 「markup の手前」も「後ろ」もどちらも正しい caret 位置なので、
+         * `offset === truth` を要求するのは**過剰**である(1 巡目でそう書いて落ちた)。
+         * 代わりに **生成物が無い組では必ず `exact`** を要求する ── そこが
+         * 崩れたら「装飾を跨ぐと当たらない」= 設計の土台が壊れている。
+         */
+        if (!hasGenerated) {
+          expect(
+            r.exact,
+            `生成物が無いのに外した: source=${JSON.stringify(source)} i=${i}`,
+          ).toBe(true);
+        }
+      }
+    }
+    // 🔑 測った次元が非ゼロであることを test 自身が言う(空振り防止)
+    expect(checked, '1 件も確かめていない').toBeGreaterThan(2000);
+    expect(generatedCases, '生成物が混ざった組が 1 件も無い').toBeGreaterThan(50);
+  });
+
   it('端の扱い: 0 は 0、範囲外は末尾で止まる', () => {
     expect(mapVisibleToSource('abc', 'abc', 0)).toEqual({ offset: 0, exact: true });
     expect(mapVisibleToSource('abc', 'abc', 99).offset).toBe(3);
