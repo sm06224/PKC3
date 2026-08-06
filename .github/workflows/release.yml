@@ -102,7 +102,7 @@ jobs:
       # `tests/release-meta.test.ts` が subject-path の存在まで pin している。
       # 検証: gh attestation verify pkc3-dist.zip --repo <owner>/<repo>
       - name: Provenance attestation
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             pkc3-dist.zip
