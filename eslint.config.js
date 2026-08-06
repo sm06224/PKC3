@@ -31,6 +31,7 @@ export default tseslint.config(
         File: 'readonly',
         Event: 'readonly',
         indexedDB: 'readonly',
+        Worker: 'readonly',
       },
     },
   },
