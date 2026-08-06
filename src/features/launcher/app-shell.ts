@@ -76,6 +76,7 @@ import {
   appStoragePrefix,
 } from './app-storage-shim';
 import { buildAnchorShim } from './app-anchor-shim';
+import { buildCapabilityShim } from './app-sandbox-shim';
 
 /**
  * 添付に許す権限。**`allow-same-origin` は絶対に入れない**
@@ -229,9 +230,16 @@ export function buildLauncherAppShell(
   //    **本当に遷移し**、SPA fallback の PKC3 index.html が来て真っ白になる。
   //    保存領域を貸すかどうか・素のままかどうかとは無関係に起きる
   const withAnchors = insertPrelude(html, buildAnchorShim());
+  /**
+   * 🔴 **無い能力で 1 行目から死なせない**(2026-08-06。user 報告 2-15)。
+   * ⚠ **常に入れる** ── shim 自身が「本物が読めるなら何もしない」で抜けるので、
+   * 素のまま(同一オリジン)で開いたときは 1 つも差し替わらない。判定を
+   * 呼び側にも書くと、条件が 2 か所になる(片方だけ直る形を作らない)。
+   */
+  const withCaps = insertPrelude(withAnchors, buildCapabilityShim());
   const inner = lends
-    ? insertPrelude(withAnchors, buildStorageShim({ seed: opts.seed ?? {} }))
-    : withAnchors;
+    ? insertPrelude(withCaps, buildStorageShim({ seed: opts.seed ?? {} }))
+    : withCaps;
 
   const head =
     '<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8">' +
