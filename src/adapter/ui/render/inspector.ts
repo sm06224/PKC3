@@ -10,10 +10,35 @@
  * 対する操作(書き出す・履歴・削除)はここが持つ。
  * ⚠ frontmatter を直に編集させる面(user 指示「基本は UI 導線ありき」)は
  * 次の段。この段では**素性を見せて、操作を隣に戻す**ところまで。
+ *
+ * ─────────────────────────────────────────────
+ * 🔴 **器を捨てない。値だけ差し替える**(2026-08-06)。
+ *
+ * 直す前はこの面が「断面指紋が変わったら `region.textContent = ''` して全部
+ * 作り直す」形だった。それで **user が押そうとしているボタンを捨てていた**:
+ *
+ * - 保存すると storage worker の ack が**遅れて**届き、`ENTRY_STAMPED` が
+ *   `entryMetas` の meta を**必ず新しい参照**で差し替える(`app-state.ts` の
+ *   `new Map(...).set(lid, {...meta, updatedAt})`)── 参照比較の指紋が外れる
+ * - その瞬間にこの面が丸ごと作り直され、`show-history` / `delete-entry` の
+ *   `<button>` は**別の node** になる
+ * - binder は委譲 + `closest` で拾い、**`root.contains(el)` を通らない target を
+ *   黙って捨てる** ── 保存直後に「履歴」を押すと**無言の dead click** になる
+ * - しかも出している時刻は**日付だけ**なので、同日中の保存では作り直した結果が
+ *   **byte 同一**。つまり「同じ絵を描き直すために、押される寸前のボタンを捨てて」いた
+ *
+ * ⚠ これは PKC2 の失敗と同型である ── 「編集のたびに一覧を全行作り直す」。
+ *   PKC3 は**一覧は直した**(`sidebar.ts` が lid キーで node を使い回す)のに、
+ *   P8 で後から生えたこの面が同じ罠を再発明していた。しかもこちらは**ボタンを
+ *   持つ面**なので、体感だけでなく**操作が落ちる**ぶん悪い。
+ *
+ * 🔑 **指紋を廃した**のも意図である ── 「指紋の次元を足し忘れて古い値を出す」
+ * バグ族を 2 回踏んでいる(`lastLink` 2026-08-05 / `lastRelations` 2026-08-06)。
+ * **毎回値を計算して、違うものだけ書く**なら、その族は原理的に発生しない。
+ * ⚠ 器を組み直すのは**形が変わるときだけ**(選択の有無 / 「書き戻す」の有無)。
  */
 import type { AppState } from '@adapter/state/app-state';
 import { ScrollMemory } from './scroll-memory';
-import type { EntryMeta } from '@core/model/entry-meta';
 import { archetypeLabel } from './sidebar';
 import { iconButton } from './icons';
 // ⚠ 日付の切り方は `features/datetime/stored-date` が正本(一覧の行と共有)。
@@ -22,20 +47,37 @@ import { formatStoredDate } from '@features/datetime/stored-date';
 // 居場所の解決は `features/relation/tree` が正本(ファイラの帯・パンくずと共有)
 import { getAncestorFolders } from '@features/relation/tree';
 
+/** 素性の行(`data-pkc-field` → 値を入れる `<dd>`)。 */
+type Rows = Map<string, HTMLElement>;
+/** 操作の行(`data-pkc-action` → その `<button>`)。 */
+type Buttons = Map<string, HTMLButtonElement>;
+
+/**
+ * 器の**形**。これが変わるときだけ組み直す。
+ * ⚠ 形に入れるのは「**要素が在るか無いか**」だけ ── 値は形ではない。
+ */
+type Shape = 'empty' | 'entry' | 'entry+link';
+
+/** 値が変わっていなければ DOM に触れない(触ると text node が差し替わる)。 */
+function setText(el: HTMLElement, value: string): void {
+  if (el.textContent !== value) el.textContent = value;
+}
+
+/** 属性も同じ ── 同じ値の再代入で mutation observer を起こさない。 */
+function setAttr(el: HTMLElement, name: string, value: string): void {
+  if (el.getAttribute(name) !== value) el.setAttribute(name, value);
+}
 
 export class InspectorRenderer {
-  private lastMeta: EntryMeta | undefined | null = undefined;
-  private lastPhase: string | null = null;
-  /** 元ファイルの紐づけも指紋の一部 ── 忘れると「書き戻す」が出ない(2026-08-05)。 */
-  private lastLink: string | null = null;
-  /**
-   * 居場所も指紋の一部(2026-08-06。user 報告 minor)── 忘れると、
-   * フォルダを移しても**前の居場所を出したまま**になる(meta は変わらないので
-   * 参照比較を素通りする)。
-   */
-  private lastRelations: AppState['relations'] | null = null;
+  /** 組み終わった器の先頭(`region` に繋がっているかで生存を判定する)。 */
+  private head: HTMLElement | null = null;
+  private shape: Shape | null = null;
+  private rows: Rows = new Map();
+  private buttons: Buttons = new Map();
   /** 同じノートに戻ったら同じ位置へ(P8 段⑫。溢れるのは題名が長いときだけ)。 */
   private readonly scroll: ScrollMemory;
+  /** いま出しているノート。⚠ **切り替わったときだけ**スクロールを触る。 */
+  private shownLid: string | null = null;
 
   constructor(private readonly region: HTMLElement) {
     this.scroll = new ScrollMemory(region);
@@ -43,75 +85,54 @@ export class InspectorRenderer {
 
   render(state: AppState): void {
     const meta = state.selectedLid ? state.entryMetas.get(state.selectedLid) : undefined;
-    // 🔴 紐づけは**取込の後**に届く(`FILE_LINKED`)── meta と phase だけを指紋に
-    //    すると、開いた直後は「書き戻す」が出ないままになる
+    // 🔴 紐づけは**取込の後**に届く(`FILE_LINKED`)── 出す/出さないが形を決める
     const link = (state.selectedLid && state.linkedFiles.get(state.selectedLid)) || null;
-    // 断面指紋 ── meta の参照と phase が同じなら DOM に触れない
-    if (
-      meta === this.lastMeta &&
-      state.phase === this.lastPhase &&
-      link === this.lastLink &&
-      state.relations === this.lastRelations
-    )
-      return;
-    // ⚠ **書き換える前に**退避(後だと縮んで丸められた値を保存する)
-    this.scroll.park();
-    this.lastMeta = meta;
-    this.lastPhase = state.phase;
-    this.lastLink = link;
-    this.lastRelations = state.relations;
-    this.region.textContent = '';
+    const shape: Shape = !meta ? 'empty' : link !== null ? 'entry+link' : 'entry';
+    const lid = meta?.lid ?? null;
 
-    const head = document.createElement('div');
-    head.setAttribute('data-pkc-field', 'pane-title');
-    head.textContent = '情報';
-    this.region.append(head);
+    /**
+     * ⚠ 生存判定に `isConnected` を使わない ── 器が document に繋がる前に描く経路
+     * (骨組みを組んでから親へ入れる / test)を黙って落とす。見るのは
+     * 「**自分が組んだ器が、いまも自分の region の子か**」だけ。
+     */
+    const alive = this.head !== null && this.head.parentElement === this.region;
+    if (!alive || this.shape !== shape) {
+      // 形が変わった(または器を失った)ときだけ組み直す
+      this.scroll.park();
+      this.build(shape);
+      this.shape = shape;
+    }
 
     if (!meta) {
-      this.scroll.use('');
-      const empty = document.createElement('p');
-      empty.setAttribute('data-pkc-field', 'inspector-empty');
-      empty.textContent = '左の一覧から選ぶと、ここに情報が出ます。';
-      this.region.append(empty);
+      this.shownLid = null;
       return;
     }
 
-    const dl = document.createElement('dl');
-    const row = (label: string, value: string, field?: string): void => {
-      const dt = document.createElement('dt');
-      dt.textContent = label;
-      const dd = document.createElement('dd');
-      dd.textContent = value;
-      if (field) dd.setAttribute('data-pkc-field', field);
-      dl.append(dt, dd);
-    };
-    row('題名', meta.title, 'inspector-title');
-    row('種類', archetypeLabel(meta.archetype), 'inspector-kind');
+    // ── ここから下は**値の差し替えだけ**(器は触らない)
+    const noteChanged = this.shownLid !== lid;
+    if (noteChanged) this.scroll.park();
+
+    this.setRow('inspector-title', meta.title);
+    this.setRow('inspector-kind', archetypeLabel(meta.archetype));
     /**
      * 🔴 **どこに居るかを出す**(2026-08-06。user 報告 minor「一覧タブから
      * 所属フォルダを知る手段が無い」)。
      *
      * 一覧は平置きなので、そのノートがどのフォルダに入っているかは
      * **フォルダタブへ移らないと分からなかった**(移ると探し直しになる)。
-     * ⚠ 出す場所は情報ペイン ── 「選んでいるものの素性」はここに集まる
-     *   (同じものが常に同じ場所にある)。
      * ⚠ 解決は `features/relation/tree` の 1 本(パンくず・移動の帯と同規則)。
      * ⚠ root 直下は空文字ではなく **「ルート」**と書く ── 空欄は「不明」に見える。
      */
     const chain = getAncestorFolders(meta.lid, state.entryMetas, state.relations)
       .reverse()
       .map((f) => f.title);
-    row('居場所', chain.length === 0 ? 'ルート' : chain.join(' / '), 'inspector-folder');
-    row('作成', formatStoredDate(meta.createdAt), 'inspector-created');
-    row('更新', formatStoredDate(meta.updatedAt), 'inspector-updated');
+    this.setRow('inspector-folder', chain.length === 0 ? 'ルート' : chain.join(' / '));
+    this.setRow('inspector-created', formatStoredDate(meta.createdAt));
+    this.setRow('inspector-updated', formatStoredDate(meta.updatedAt));
     // 🔴 **どのファイルから来たか**を出す(2026-08-05)── 出さないと、書き戻しが
-    //    「どこへ」書くのか分からない操作になる。⚠ この行の有無が導線の有無と一致する
-    if (link !== null) row('元ファイル', link, 'inspector-linked-file');
-    this.region.append(dl);
+    //    「どこへ」書くのか分からない操作になる。⚠ 行の有無は形(= build 側)
+    if (link !== null) this.setRow('inspector-linked-file', link);
 
-    // ⚠ **操作は対象の隣**(P8)。共通ツールバーに集約しない
-    const actions = document.createElement('div');
-    actions.setAttribute('data-pkc-field', 'inspector-actions');
     /**
      * 🔴 **編集中は押せなくする**(P8 段⑲)。
      *
@@ -122,35 +143,102 @@ export class InspectorRenderer {
      * ⚠ 理由を `title` に書く ── 押せない理由が分からないほうが困る。
      */
     const editing = state.phase !== 'ready';
-    const btn = (action: string, label: string, title: string): void => {
+    for (const [action, b] of this.buttons) {
+      const why = ACTION_TITLES[action] ?? '';
+      const title = action === 'write-back-file' ? whyWriteBack(link) : why;
+      /**
+       * 🔴 **居場所(`data-pkc-entry`)を必ず書き直す** ── ここを落とすと、
+       * 選択を切り替えたあとのボタンが**前のノートを指したまま**になる。
+       * 「削除」がそれをやると**別のノートを消す**(ファイラの帯で実際に踏んだ形)。
+       */
+      setAttr(b, 'data-pkc-entry', meta.lid);
+      if (b.disabled !== editing) b.disabled = editing;
+      const shown = editing ? `${title}(編集中は使えません ── 確定するか取り消してください)` : title;
+      if (b.title !== shown) b.title = shown;
+    }
+
+    // ⚠ **中身を入れ終わってから**戻す(空の器に書いても丸められる)。
+    //    ⚠ 同じノートを描き直しただけのときは**触らない** ── 触ると、
+    //      保存の ack が届いた瞬間にスクロールが戻る
+    if (noteChanged) {
+      this.shownLid = lid;
+      this.scroll.use(meta.lid);
+    }
+  }
+
+  /** 値を入れる。⚠ 器に無い field を書こうとしたら形の宣言が漏れている。 */
+  private setRow(field: string, value: string): void {
+    const dd = this.rows.get(field);
+    if (dd) setText(dd, value);
+  }
+
+  /** 器を組む(形が変わったときだけ呼ばれる)。 */
+  private build(shape: Shape): void {
+    this.region.textContent = '';
+    this.rows = new Map();
+    this.buttons = new Map();
+
+    const head = document.createElement('div');
+    head.setAttribute('data-pkc-field', 'pane-title');
+    head.textContent = '情報';
+    this.region.append(head);
+    this.head = head;
+
+    if (shape === 'empty') {
+      const empty = document.createElement('p');
+      empty.setAttribute('data-pkc-field', 'inspector-empty');
+      empty.textContent = '左の一覧から選ぶと、ここに情報が出ます。';
+      this.region.append(empty);
+      this.scroll.use('');
+      return;
+    }
+
+    const dl = document.createElement('dl');
+    const row = (label: string, field: string): void => {
+      const dt = document.createElement('dt');
+      dt.textContent = label;
+      const dd = document.createElement('dd');
+      dd.setAttribute('data-pkc-field', field);
+      dl.append(dt, dd);
+      this.rows.set(field, dd);
+    };
+    row('題名', 'inspector-title');
+    row('種類', 'inspector-kind');
+    row('居場所', 'inspector-folder');
+    row('作成', 'inspector-created');
+    row('更新', 'inspector-updated');
+    if (shape === 'entry+link') row('元ファイル', 'inspector-linked-file');
+    this.region.append(dl);
+
+    // ⚠ **操作は対象の隣**(P8)。共通ツールバーに集約しない
+    const actions = document.createElement('div');
+    actions.setAttribute('data-pkc-field', 'inspector-actions');
+    const btn = (action: string, label: string): void => {
       const b = iconButton(action, label);
-      b.setAttribute('data-pkc-entry', meta.lid);
-      if (editing) {
-        b.disabled = true;
-        b.title = `${title}(編集中は使えません ── 確定するか取り消してください)`;
-      } else {
-        b.title = title;
-      }
       actions.append(b);
+      this.buttons.set(action, b);
     };
     // ⚠ 文言は**実際に落ちるもの**に合わせる(P8 段⑱)── ここは可逆な
     //    アーカイブで、Markdown ではない(マニュアル §5 の表と同じ材料)
-    btn(
-      'export-entry',
-      '書き出す',
-      'このノートだけをバックアップ形式(.pkc3.zip)で保存します。取り込み直せます',
-    );
-    if (link !== null) {
-      btn(
-        'write-back-file',
-        '書き戻す',
-        `開いた元のファイル(${link})を、このノートの内容で上書きします`,
-      );
-    }
-    btn('show-history', '履歴', '過去の版を一覧します');
-    btn('delete-entry', '削除', 'ゴミ箱へ移します(フォルダ画面から戻せます)');
+    btn('export-entry', '書き出す');
+    if (shape === 'entry+link') btn('write-back-file', '書き戻す');
+    btn('show-history', '履歴');
+    btn('delete-entry', '削除');
     this.region.append(actions);
-    // ⚠ **中身を入れ終わってから**戻す(空の器に書いても丸められる)
-    this.scroll.use(meta.lid);
   }
+}
+
+/**
+ * 押せる操作の説明。⚠ **1 か所に持つ** ── 器を組む所と値を入れる所に別々に
+ * 書くと、片方だけ古くなる(この repo が何度も踏んでいる形)。
+ */
+const ACTION_TITLES: Record<string, string> = {
+  'export-entry': 'このノートだけをバックアップ形式(.pkc3.zip)で保存します。取り込み直せます',
+  'show-history': '過去の版を一覧します',
+  'delete-entry': 'ゴミ箱へ移します(フォルダ画面から戻せます)',
+};
+
+/** 「書き戻す」だけは行き先(ファイル名)を文言に含める。 */
+function whyWriteBack(link: string | null): string {
+  return `開いた元のファイル(${link ?? ''})を、このノートの内容で上書きします`;
 }

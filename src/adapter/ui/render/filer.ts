@@ -42,6 +42,13 @@ export class FilerRenderer {
   private readonly region: HTMLElement;
   private readonly rows = new Map<string, HTMLTableRowElement>();
   private lastMetas: ReadonlyMap<string, EntryMeta> | null = null;
+  /**
+   * 画面に出る材料の指紋(参照ではなく内容)。⚠ **この面が実際に描くものだけ**を
+   * 入れる ── 描かないものを入れると、また「変わっていないのに作り直す」に戻る。
+   * ⚠ 逆に**描くものを入れ忘れると古い値が残る** ── 行が出しているのは
+   *   `lid` / `title` / `archetype` / 更新日(`MM/DD` に丸めた形)である。
+   */
+  private lastSignature: string | null = null;
   private lastRelations: readonly Relation[] | null = null;
   private lastSelected: string | null = null;
   private lastScopeLid: string | null = null;
@@ -149,11 +156,43 @@ export class FilerRenderer {
     }
   }
 
+  /**
+   * 画面に出る材料だけを並べた指紋。⚠ **丸めた後の日付**を使う ── 生の
+   * `updatedAt` を入れると、同日の保存(秒だけ違う)で指紋が変わってしまい、
+   * 「見た目は同じなのに作り直す」が復活する(それが直したかった当のもの)。
+   */
+  private metaSignature(state: AppState): string {
+    const year = new Date().getFullYear();
+    // ⚠ 区切りは **NUL のエスケープ**(`\u0000`)── 題名には現れない文字なので
+    //    「題名の途中が次の項目に見える」取り違えが起きない。
+    //    🔴 生バイトで埋めない(`tests/repo-hygiene.test.ts` が機械的に止める)
+    const SEP = '\u0000';
+    const parts: string[] = [];
+    for (const m of state.entryMetas.values()) {
+      parts.push([m.lid, m.title, m.archetype, formatListDate(m.updatedAt, year)].join(SEP));
+    }
+    return parts.join(SEP);
+  }
+
   render(state: AppState): void {
+    /**
+     * 🔴 **参照が変わっただけで作り直さない**(2026-08-06)。
+     *
+     * `entryMetas` は保存 ack の `ENTRY_STAMPED` が**必ず新しい Map** で差し替える。
+     * 参照比較だけを指紋にすると、**画面に出る文字が 1 字も変わらないのに**この面を
+     * 丸ごと `textContent = ''` して組み直す ── そのとき「ゴミ箱」「移動」「上へ / 下へ」の
+     * `<button>` が別の node になり、押そうとしていた target が消える。
+     * binder は `root.contains(el)` を通らない target を黙って捨てるので、
+     * **無言の dead click** になる(情報ペインで実際に踏んだ形。同 file の
+     * `inspector.ts` の冒頭に経緯)。
+     * ⚠ この面が出す更新日は `MM/DD`(同日の保存では**同じ文字列**)なので、
+     *   「参照が変わった」の大半は**見た目の変化ゼロ**である。
+     * 🔑 だから指紋は**画面に出る材料そのもの**にする ── 参照ではなく内容。
+     */
     const listChanged =
-      state.entryMetas !== this.lastMetas ||
       state.relations !== this.lastRelations ||
-      state.filterQuery !== this.lastFilter;
+      state.filterQuery !== this.lastFilter ||
+      (state.entryMetas !== this.lastMetas && this.metaSignature(state) !== this.lastSignature);
     const selectionChanged = state.selectedLid !== this.lastSelected;
     const trashChanged = state.trashPanel !== this.lastTrash;
     if (!listChanged && !selectionChanged && !trashChanged) return;
@@ -178,6 +217,7 @@ export class FilerRenderer {
     }
 
     this.lastMetas = state.entryMetas;
+    this.lastSignature = this.metaSignature(state);
     this.lastRelations = state.relations;
     this.lastSelected = state.selectedLid;
     this.lastScopeLid = scopeLid;
