@@ -164,10 +164,46 @@ nav button.p{width:auto;font-size:12px;padding:4px 10px;margin:2px 8px 0;
 .b pre code{background:0;padding:0}
 .b blockquote{padding-left:1em;border-left:3px solid #8884;opacity:.85}
 .b table{border-collapse:collapse}
-.b th,.b td{border:1px solid #8884;padding:4px 8px;text-align:left}
+/* ⚠ セルは start(left ではない)── 文書が rtl なら右が行頭。アプリ側
+   (src/styles/app.css の .pkc-md-rendered td,th)と同じにする */
+.b th,.b td{border:1px solid #8884;padding:4px 8px;text-align:start}
 .b th{background:#8881}
 .b hr{border:0;border-top:1px solid #8884;margin:1.5em 0}
 .b a{color:inherit}
+/* 🔴 **寄せの規則をここにも置く**(2026-08-06)。⚠ 直す前は align の規則が
+   **1 行も無かった** ── 中央寄せ(|| 行頭)を書いた段落が、アプリでは中央なのに
+   **配った HTML では左のまま**だった(属性は載っているのに消費されていない)。
+   アプリ側は src/styles/app.css の同名の節。**片方だけ直さない**。
+   ⚠ この template literal の中に**バッククォートを書かない**(build が壊れる ──
+   この file で 4 度踏んだ)。
+   規約: PKC2 docs/development/notation-redesign-2026-05/02-frontmatter-and-globals.md */
+.b [data-pkc-align=center]{text-align:center}
+.b [data-pkc-align=end]{text-align:end}
+.b [data-pkc-align=start]{text-align:start}
+/* physical(formal 専用)は反転させない ── 物理強制なので logical と混ぜない */
+.b [data-pkc-align=right]{text-align:right}
+.b [data-pkc-align=left]{text-align:left}
+.b [data-pkc-align=justify]{text-align:justify}
+.b p[data-pkc-indent="1"]{text-indent:1em}
+/* 文書 globals(frontmatter の writing / direction / align)。
+   🔴 縦書きは direction を ltr に固定する(規約 §2.3.5「縦書き右起こしは text 内
+   direction は ltr」)── vertical-rl の inline 軸は垂直なので、rtl を残すと
+   本文が**下から上へ**流れる。右起こし / 左起こしの区別は dir 属性が持つ。
+   ⚠ |> は logical end のまま(align では入れ替えない)── 規約が 2 通りに書いている
+   ので裁定待ち。理由は app.css の同名の節に書いた。 */
+.b[data-pkc-writing=vertical]{writing-mode:vertical-rl;direction:ltr}
+.b[data-pkc-writing=vertical][dir=ltr]{writing-mode:vertical-lr}
+.b[data-pkc-doc-align=left]{text-align:left}
+.b[data-pkc-doc-align=right]{text-align:right}
+.b[data-pkc-doc-align=center]{text-align:center}
+/* 縦書き × top / bottom は inline 軸の両端なので text-align で効く */
+.b[data-pkc-writing=vertical][data-pkc-doc-align=top]{text-align:start}
+.b[data-pkc-writing=vertical][data-pkc-doc-align=bottom]{text-align:end}
+.b[data-pkc-writing=vertical] [data-pkc-align=top]{text-align:start}
+.b[data-pkc-writing=vertical] [data-pkc-align=bottom]{text-align:end}
+/* 図表キャプションも文書既定の寄せに従わせない(アプリ側 app.css と同じ) */
+.b .pkc-fig-figure > figcaption,.b .pkc-fig-table > figcaption{text-align:start}
+.b .pkc-fig-equation{text-align:center}
 /* 🔴 **fence の「描画 / 原文」切替**(F-1 で紙にも波及して判明)。
    描画は .pkc-render-slot、原文は .pkc-render-source で、どちらを見せるかは
    CSS-only トグル(.pkc-render-toggle-input)が決める ── **規則が無いと両方出る**。
@@ -318,7 +354,15 @@ try{
     box.innerHTML=e.html||'';
     /* 🔴 文書属性(書字方向など)を当てる ── 画面の applyDocumentGlobals と同じ
        見え方にする(user 報告 2-7)。書出し側が attrs に載せてある。
+       🔴 **先に全部消す**(2026-08-06)── box は使い回しなので、付けるだけだと
+       **前のノートの書字方向が残る**(align: right のノートを見た後に宣言の無い
+       ノートを開くと右寄せのまま / 縦書きのままになる)。画面側の
+       applyDocumentGlobals と同じ規律。⚠ この一覧は
+       src/features/markdown/document-globals.ts の DOCUMENT_GLOBAL_ATTRS と揃える
+       (pkc3-html.test.ts が突合する)。
        ⚠ ここは VIEWER のテンプレート文字列の中なのでバックティックを書かない */
+    var GA=['data-pkc-writing','data-pkc-direction','data-pkc-doc-align','data-pkc-layout','dir'];
+    for(var gi=0;gi<GA.length;gi++)box.removeAttribute(GA[gi]);
     if(e.attrs){for(var ak in e.attrs){if(Object.prototype.hasOwnProperty.call(e.attrs,ak))box.setAttribute(ak,e.attrs[ak])}}
     // 描いた HTML の中の添付参照(画像 / リンクの markdown)に実体を差す。
     // ⚠ 参照の**走査**は書出し側の 1 本に寄せてある ── ここは差すだけ

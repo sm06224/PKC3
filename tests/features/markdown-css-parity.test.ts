@@ -305,3 +305,130 @@ describe('読み幅の上限', () => {
     }
   });
 });
+
+/**
+ * 🔴 **寄せの規則は 2 つの面に在る**(2026-08-06)── アプリ本体(`app.css`)と
+ * **書き出した閲覧用 HTML**(`features/export/pkc3-html.ts` の inline style)。
+ *
+ * 直す前、書き出し側には align の規則が**1 行も無かった** ── `||中央` を書いた
+ * 段落が、アプリでは中央なのに**配った HTML では左のまま**だった(属性は載っている
+ * のに消費されていない)。⚠ CLAUDE.md「同じ判定が 2 か所に生えたら parity test を
+ * 置く」の対象そのものである。
+ *
+ * ⚠ ここは**存在の parity** を見る(値の解決は実ブラウザの
+ * `tests/smoke/document-globals.smoke.spec.ts` が computed 位置で見る)。
+ */
+describe('寄せの規則が 2 つの面に在る(書き出しだけ古くならない)', () => {
+  const VIEWER = readFileSync('src/features/export/pkc3-html.ts', 'utf8');
+
+  /**
+   * 面ごとの書き方の違い(引用符・空白・末尾のセミコロン)を無視して比べる正規化。
+   * ⚠ アプリ側は prettier が `;` を残し、書き出し側の inline CSS は詰めて書くので、
+   *   `;}` を `}` へ寄せないと**同じ規則が別物に見える**。
+   */
+  const norm = (s: string): string =>
+    s.replace(/['"]/g, '').replace(/\s+/g, '').replace(/;\}/g, '}');
+
+  it('🔴 段落の寄せ(logical / physical / center / justify)が両面に在る', () => {
+    for (const v of ['center', 'end', 'start', 'right', 'left', 'justify']) {
+      expect(norm(CSS), `アプリ側に ${v} が無い`).toContain(`[data-pkc-align=${v}]`);
+      expect(norm(VIEWER), `書き出し側に ${v} が無い`).toContain(`[data-pkc-align=${v}]`);
+    }
+  });
+
+  it('🔴 文書 globals(縦書き / 宣言した既定の寄せ)が両面に在る', () => {
+    for (const sel of [
+      '[data-pkc-writing=vertical]',
+      '[data-pkc-doc-align=left]',
+      '[data-pkc-doc-align=right]',
+      '[data-pkc-doc-align=center]',
+    ]) {
+      expect(norm(CSS), `アプリ側に ${sel} が無い`).toContain(sel);
+      expect(norm(VIEWER), `書き出し側に ${sel} が無い`).toContain(sel);
+    }
+  });
+
+  /**
+   * 🔴 **縦書きは `direction` を `ltr` に固定する**(規約 §2.3.5)。
+   * `vertical-rl` の inline 軸は垂直なので、`dir="rtl"` を残すと**本文が下から上へ**
+   * 流れる ── 日本語の伝統的な縦書き宣言(`writing: vertical` + `direction: rtl`)が
+   * まさにその組合せである。⚠ **両面**(配った HTML も `dir` を焼くので同じ穴)。
+   */
+  it('🔴 縦書きの `direction: ltr` 固定が両面に在る', () => {
+    expect(norm(CSS), 'アプリ側に縦書きの direction 固定が無い').toContain(
+      '[data-pkc-writing=vertical]{writing-mode:vertical-rl;direction:ltr}',
+    );
+    expect(norm(VIEWER), '書き出し側に縦書きの direction 固定が無い').toContain(
+      '[data-pkc-writing=vertical]{writing-mode:vertical-rl;direction:ltr}',
+    );
+  });
+
+  /**
+   * 🔴 **縦書き × `top` / `bottom` の受け皿**。`document-globals.ts` の
+   * `VERTICAL_ALIGNS` と `PHYSICAL_ALIGNS` は両方とも受理して属性まで出すのに、
+   * 消費する規則が両面ゼロ = 黙った no-op だった(「text-align では表現できない」
+   * という CSS の誤認が、そのコメントごと PKC2 から移植されていた)。
+   */
+  it('🔴 縦書き × top / bottom の規則が両面に在る(根も段落も)', () => {
+    for (const sel of [
+      '[data-pkc-writing=vertical][data-pkc-doc-align=top]',
+      '[data-pkc-writing=vertical][data-pkc-doc-align=bottom]',
+      '[data-pkc-writing=vertical][data-pkc-align=top]',
+      '[data-pkc-writing=vertical][data-pkc-align=bottom]',
+    ]) {
+      expect(norm(CSS), `アプリ側に ${sel} が無い`).toContain(sel);
+      expect(norm(VIEWER), `書き出し側に ${sel} が無い`).toContain(sel);
+    }
+  });
+
+  /**
+   * ⏸ **`|>` を `align` で入れ替える規則は置かない**(2026-08-06、裁定待ち)。
+   *
+   * 規約が 2 通りに書いている ── ① `02-frontmatter-and-globals.md` §2.3.6(draft)
+   * 「宣言した既定の流れの反対側」/ ② `11-canonicalization-spec.md` §53 +
+   * `markdown-dialect-for-ai-authors-v3.md`(唯一 canonical)+ v4 §6.2
+   * 「logical end(LTR で右、RTL で左)」。**② を実装している**。
+   * ⚠ この test は「① を勢いで足し直さない」ための門である ── 一度 ① を実装して
+   *   外した(理由は app.css の該当節)。① の裁定が出たらこの test を反転させる。
+   */
+  it('⏸ `align` による入れ替え規則は**両面に無い**(② を実装している)', () => {
+    for (const sel of [
+      '[data-pkc-doc-align=right]:not([dir=rtl])[data-pkc-align=end]',
+      '[data-pkc-doc-align=left][dir=rtl][data-pkc-align=end]',
+    ]) {
+      expect(norm(CSS), `アプリ側に ① の入れ替え規則が在る: ${sel}`).not.toContain(sel);
+      expect(norm(VIEWER), `書き出し側に ① の入れ替え規則が在る: ${sel}`).not.toContain(sel);
+    }
+  });
+
+  /**
+   * 🔴 表のセルと図表キャプションは**文書既定の寄せを継承しない**。
+   * ⚠ 直す前はアプリ側にセルの `text-align` が無く(= doc-align を継承)、
+   *   配る HTML 側だけが `text-align:left` を持っていた ── `align: right` の文書で
+   *   **アプリは右・配った HTML は左**。しかも `left` なので rtl でも左のままだった。
+   */
+  it('🔴 表のセル / 図表キャプションが両面で同じ向き(doc-align を継承しない)', () => {
+    expect(norm(CSS), 'アプリ側のセルに text-align:start が無い').toMatch(
+      /\.pkc-md-renderedtd,\.pkc-md-renderedth\{[^}]*text-align:start/,
+    );
+    expect(norm(VIEWER), '書き出し側のセルが start でない').toContain('text-align:start}');
+    expect(norm(VIEWER), '書き出し側のセルが left のまま').not.toContain(
+      'padding:4px8px;text-align:left}',
+    );
+    for (const sel of ['.pkc-fig-figure>figcaption', '.pkc-fig-table>figcaption']) {
+      expect(norm(CSS), `アプリ側に ${sel} が無い`).toContain(sel);
+      expect(norm(VIEWER), `書き出し側に ${sel} が無い`).toContain(sel);
+    }
+  });
+
+  it('⚠ physical(right / left)は logical と同居していない(物理強制が反転しない)', () => {
+    // ⚠ 直す前は `[data-pkc-align='end'], [data-pkc-align='right'] { text-align: end }`
+    //    と**同居**していて、`direction: rtl` で物理右が左へ寄った
+    expect(norm(CSS), 'physical と logical が同居している').toContain(
+      '[data-pkc-align=right]{text-align:right',
+    );
+    expect(norm(VIEWER), 'physical と logical が同居している').toContain(
+      '[data-pkc-align=right]{text-align:right}',
+    );
+  });
+});

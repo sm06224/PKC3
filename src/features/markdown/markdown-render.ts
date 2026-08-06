@@ -2623,7 +2623,21 @@ function postProcessFormatBlockSentinels(
         : null;
       const indentAttr = indent && indent > 0 ? ` data-pkc-indent="${indent}"` : '';
       const alignRaw = attrs.kvs.align;
-      const align = (alignRaw === 'left' || alignRaw === 'center' || alignRaw === 'right' || alignRaw === 'justify') ? alignRaw : null;
+      /**
+       * 🔴 **`:::paragraph` が受けるものは全部受ける**(2026-08-06)。直す前の
+       * allowlist は `left|center|right|justify` だけで、`start` / `end` /
+       * `top` / `bottom` を**黙って落としていた** ── 同じ `align` という語で
+       * 受理集合が 2 か所に別々に生えており、`:::format{align=end}` は
+       * `align=letterspacing` と同じ no-op だった。
+       * ⚠ 規則は 1 つに寄せる(CLAUDE.md)── ここは `FORMAL_ALIGNS` を引く。
+       *   `justify` は装飾箱だけの値(spec v4 §12 の `AstFormatBlock`)なので
+       *   別に足す。parity は `markdown-user-reports.test.ts` が pin する。
+       */
+      const align =
+        typeof alignRaw === 'string' &&
+        (FORMAL_ALIGNS.has(alignRaw as AlignKind) || alignRaw === 'justify')
+          ? alignRaw
+          : null;
       const alignAttr = align ? ` data-pkc-align="${align}"` : '';
       // Tier 0 vocabulary styles(ABC sorted、`style="..."` として emit)
       let styleAttr = '';
@@ -2978,6 +2992,17 @@ const PHYSICAL_ALIGNS: ReadonlySet<AlignKind> = new Set([
 const LOGICAL_ALIGNS: ReadonlySet<AlignKind> = new Set(['start', 'end'] as const);
 
 /**
+ * formal 形(`:::paragraph{align=…}` / `:::format{align=…}`)が受ける align の全部。
+ * 🔑 **受理集合は 1 つ**にする ── 直す前は `:::format` 側が
+ * `left|center|right|justify` の独自 allowlist を持っており、`start` / `end` /
+ * `top` / `bottom` を黙って落としていた(同じ語の受理集合が 2 か所)。
+ */
+const FORMAL_ALIGNS: ReadonlySet<AlignKind> = new Set([
+  ...PHYSICAL_ALIGNS,
+  ...LOGICAL_ALIGNS,
+] as const);
+
+/**
  * reform-2026-05 Phase 2 PR-2E:`:::paragraph{align=physical}` block directive。
  *
  *   :::paragraph{align=left}
@@ -3035,10 +3060,7 @@ function processParagraphAlignDirective(
     // ⚠ 物理(left/right/top/bottom/center)と logical(start/end)の**両方**を受ける
     //    ── formal は simple の canonical な言い換えなので、logical を書けないと
     //    「`|>` の正しい書き方」が存在しないことになる(2026-08-06)
-    if (
-      typeof alignRaw === 'string' &&
-      (PHYSICAL_ALIGNS.has(alignRaw as AlignKind) || LOGICAL_ALIGNS.has(alignRaw as AlignKind))
-    ) {
+    if (typeof alignRaw === 'string' && FORMAL_ALIGNS.has(alignRaw as AlignKind)) {
       align = alignRaw as AlignKind;
     }
     // open 行は consume
@@ -3691,12 +3713,24 @@ function processTolerantStandaloneAlign(
     const m = /^[ \t]*:align:\{\s*position\s*=\s*"?([a-z]+)"?\s*\}\s*$/.exec(line);
     if (m) {
       const rawPos = m[1]!;
+      /**
+       * 🔴 **物理を logical へ潰さない**(2026-08-06)。直す前は
+       * `left: 'start'` / `right: 'end'` と写していた ── `end` / `start` は
+       * `direction` / `writing-mode` で反転するので、`direction: rtl` の文書で
+       * **`position=left` と書いた段落が右へ行く**。
+       * 規約は「物理(left / right / top / bottom)= **強制的に物理方向**」
+       * (`PKC2: docs/spec/pkc-markdown-complete-spec-v4.md` §6.2)なので、
+       * 物理はそのまま物理へ写す。CSS 側は最初から両方持っている
+       * (`app.css` の `[data-pkc-align='left'|'right']` は `text-align` 直値)。
+       * ⚠ 同じ「潰し」を CSS から取り除いた(logical と physical の同居)のに、
+       *   parser 側に残っていた ── **判定を 2 か所に持つと片方だけ直る**。
+       */
       const alignKindMap: Record<string, AlignKind | undefined> = {
         start: 'start',
         end: 'end',
         center: 'center',
-        left: 'start',
-        right: 'end',
+        left: 'left',
+        right: 'right',
         top: 'top',
         bottom: 'bottom',
       };
@@ -4066,21 +4100,23 @@ function postProcessTolerantSentinels(html: string): string {
         case 'align': {
           // preprocess で position value 抽出済(content = "end" 等)
           const rawPos = content || 'start';
-          const cssAlignMap: Record<string, string> = {
-            start: 'left',
-            end: 'right',
-            center: 'center',
-            justify: 'justify',
-            left: 'left',
-            right: 'right',
-          };
-          const cssAlign = cssAlignMap[rawPos] ?? 'left';
+          /**
+           * 🔴 **ここでも物理へ潰さない**(2026-08-06。standalone 経路と同じ穴)。
+           * 直す前は `start → left` / `end → right` と写しており、chip の説明文が
+           * **「end → right」と読み手に教えていた** ── `direction: rtl` の文書では
+           * end は左である。`data-pkc-align-next` は書かれた token をそのまま持つ。
+           * ⚠ 未知の値は落とさず `start`(= 既定の寄せ)へ寄せる。
+           */
+          const ALIGN_NEXT: ReadonlySet<string> = new Set([
+            'start', 'end', 'center', 'justify', 'left', 'right', 'top', 'bottom',
+          ]);
+          const alignNext = ALIGN_NEXT.has(rawPos) ? rawPos : 'start';
           return (
             `<span class="pkc-align-hint" ` +
-            `data-pkc-align-next="${cssAlign}" ` +
+            `data-pkc-align-next="${alignNext}" ` +
             `data-pkc-warn-code="${pat.code}" data-pkc-warn-name="align" ` +
             `data-pkc-canonical="${canonical}" ` +
-            `title="align hint: ${rawPos}→${cssAlign} (寛容 parse)。${titleSuffix}">` +
+            `title="align hint: ${alignNext} (寛容 parse)。${titleSuffix}">` +
             `[align: ${rawPos}]</span>`
           );
         }

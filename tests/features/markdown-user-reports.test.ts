@@ -400,6 +400,75 @@ describe('行頭アライン: 矢印の向きは意味を持たない(記法の�
   });
 
   /**
+   * 🔴 **受理集合を 1 つに寄せた**(2026-08-06)。`:::format` の allowlist は
+   * `left|center|right|justify` だけで、`start` / `end` / `top` / `bottom` を
+   * **黙って落としていた** ── `:::format{align=end}` は `align=letterspacing` と
+   * 同じ no-op だった。CLAUDE.md「同じ判定が 2 か所に生えたら規則を 1 つに寄せ、
+   * **A が keep するものは B にも必ず入る** parity test を置く」の適用。
+   */
+  it('🔑 `:::paragraph` が受ける align は `:::format` も全部受ける(parity)', () => {
+    const kinds = ['center', 'end', 'start', 'left', 'right', 'top', 'bottom'];
+    for (const k of kinds) {
+      const para = renderMarkdown(`:::paragraph{align=${k}}\n本文\n:::\n`, {
+        silentHallucinationWarnings: true,
+      });
+      // fixture 自身のゼロ件防止 ── paragraph 側が受けていることを先に確かめる
+      expect(para, `:::paragraph{align=${k}} が受理されていない`).toContain(
+        `data-pkc-align="${k}"`,
+      );
+      const fmt = renderMarkdown(`:::format{align=${k}}\n本文\n:::\n`, {
+        silentHallucinationWarnings: true,
+      });
+      expect(fmt, `:::format が align=${k} を黙って落としている`).toContain(
+        `data-pkc-align="${k}"`,
+      );
+    }
+    // `justify` は装飾箱だけの値(段落側には無い)── 受けることを別に pin する
+    expect(
+      renderMarkdown(':::format{align=justify}\n本文\n:::\n', {
+        silentHallucinationWarnings: true,
+      }),
+    ).toContain('data-pkc-align="justify"');
+    // 語彙外は依然として落とす(何でも通す方向へ広げていない)
+    expect(
+      renderMarkdown(':::format{align=letterspacing}\n本文\n:::\n', {
+        silentHallucinationWarnings: true,
+      }),
+      '語彙外の値まで属性になっている',
+    ).not.toContain('data-pkc-align=');
+  });
+
+  /**
+   * 🔴 **物理を logical へ潰さない**(2026-08-06)。`:align:{position=left}` は
+   * 直す前 `start` に写されていた ── `start` は `direction` で反転するので、
+   * `direction: rtl` の文書で**「左」と書いた段落が右へ行く**。
+   * ⚠ CSS から「logical と physical の同居」を取り除いたのに、**同じ潰しが
+   *   parser 側に残っていた** ── 判定を 2 か所に持つと片方だけ直る。
+   */
+  it('🔴 `:align:{position=left|right}` は物理のまま(direction で反転しない)', () => {
+    const alignOfNext = (src: string): string | null => {
+      const html = renderMarkdown(src, { silentHallucinationWarnings: true });
+      return /data-pkc-align="([^"]+)"/.exec(html)?.[1] ?? null;
+    };
+    expect(alignOfNext(':align:{position=left}\n\n本文\n'), 'left が logical へ潰された').toBe(
+      'left',
+    );
+    expect(alignOfNext(':align:{position=right}\n\n本文\n'), 'right が logical へ潰された').toBe(
+      'right',
+    );
+    // logical を書いたときは logical のまま(物理へも潰さない)
+    expect(alignOfNext(':align:{position=end}\n\n本文\n')).toBe('end');
+    expect(alignOfNext(':align:{position=start}\n\n本文\n')).toBe('start');
+
+    // inline 経路(chip)も同じ ── 説明文が「end → right」と教えていた
+    const chip = renderMarkdown('本文 :align:{position=end} の続き\n', {
+      silentHallucinationWarnings: true,
+    });
+    expect(chip, 'chip が end を right と教えている').toContain('data-pkc-align-next="end"');
+    expect(chip, 'chip の説明文が物理へ潰している').not.toContain('end→right');
+  });
+
+  /**
    * 🔴 **formal 形は logical 値も受ける**(2026-08-06。曖昧記法の調査で見つけた欠陥)。
    *
    * 正本は formal を「simple の canonical な言い換え」と定めている

@@ -147,11 +147,32 @@ export function globalsToDataAttrs(globals: DocumentGlobals): Record<string, str
 }
 
 /**
+ * `applyDocumentGlobals` が触る属性の全部(**消す側の正本**)。
+ * ⚠ ここに足したら `globalsToDataAttrs` にも足す ── 逆も同じ。
+ * `tests/features/document-globals.test.ts` が「出せる key は全部消せる」を pin する。
+ */
+export const DOCUMENT_GLOBAL_ATTRS: readonly string[] = [
+  'data-pkc-writing',
+  'data-pkc-direction',
+  'data-pkc-doc-align',
+  'data-pkc-layout',
+  'dir',
+];
+
+/**
  * rendered root 要素へ globals を適用する(data-pkc-* + `dir` 属性を 1 箇所で)。
  * 別 document の surface(Viewer popup 等、P3-8)もこれを呼ぶこと ── 個別実装に
  * よる付け漏れを構造的に防ぐ。
+ *
+ * 🔴 **先に全部消してから当てる**(2026-08-06)。器は使い回されるので、
+ * 付けるだけだと**前のノートの書字方向が残る** ── `align: right` のノートを見た後に
+ * 宣言の無いノートを開くと、`data-pkc-doc-align="right"` / `dir="rtl"` /
+ * `data-pkc-writing="vertical"` が生き残り、**前の文書の見え方で次の文書が描かれる**。
+ * 直す前は `setAttribute` だけで、`removeAttribute` がどこにも無かった
+ * (読む面の器は `bodyKind === 'md'` の間ずっと同じ要素である)。
  */
 export function applyDocumentGlobals(el: HTMLElement, globals: DocumentGlobals): void {
+  for (const k of DOCUMENT_GLOBAL_ATTRS) el.removeAttribute(k);
   for (const [k, v] of Object.entries(globalsToDataAttrs(globals))) {
     el.setAttribute(k, v);
   }

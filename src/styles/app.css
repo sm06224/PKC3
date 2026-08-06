@@ -969,6 +969,12 @@ select:focus-visible {
 .pkc-md-rendered th {
   border: 1px solid var(--border);
   padding: var(--s2) var(--s3);
+  /* ⚠ **文書既定の寄せ(`data-pkc-doc-align`)を継承させない** ── 表のセルは構造。
+   * 直す前はここに `text-align` が無く、配る HTML 側だけが `left` を持っていたので、
+   * `align: right` の文書で**アプリは右・配った HTML は左**になっていた。
+   * `left` ではなく `start` にする(rtl では右が行頭)。
+   * ⚠ 表の列指定(`:---:`)は markdown-it が inline style で出すのでこちらに勝つ。 */
+  text-align: start;
 }
 .pkc-md-rendered th {
   background: var(--surface-2);
@@ -1204,16 +1210,108 @@ select:focus-visible {
 .pkc-md-rendered [data-pkc-align='center'] {
   text-align: center;
 }
-.pkc-md-rendered [data-pkc-align='end'],
-.pkc-md-rendered [data-pkc-align='right'] {
+/* 🔴 **logical と physical を混ぜない**(2026-08-06 に直した移植退行)。
+ * 直す前は `right` を `text-align: end`、`left` を `start` に**同居**させていた ──
+ * `end` は `direction` で反転するので、`direction: rtl` の文書では
+ * **physical の `right` が左に寄る**。規約は「physical(left / right / top / bottom)=
+ * **強制的に物理方向**、formal-only」(spec v4 §6.2)なので、混ぜると
+ * 「物理強制」という語が嘘になる。⚠ PKC2 の CSS は最初から分けてある
+ * (`PKC2: src/styles/base.css:2580-2584`)── 移植で潰れていた。 */
+.pkc-md-rendered [data-pkc-align='end'] {
   text-align: end;
 }
-.pkc-md-rendered [data-pkc-align='start'],
-.pkc-md-rendered [data-pkc-align='left'] {
+.pkc-md-rendered [data-pkc-align='start'] {
   text-align: start;
+}
+.pkc-md-rendered [data-pkc-align='right'] {
+  text-align: right;
+}
+.pkc-md-rendered [data-pkc-align='left'] {
+  text-align: left;
 }
 .pkc-md-rendered [data-pkc-align='justify'] {
   text-align: justify;
+}
+
+/* ── 文書 globals(frontmatter `writing` / `direction` / `align`)を消費する ──
+ *
+ * 🔴 **移植で丸ごと落ちていた**(2026-08-06)。`document-globals.ts` は
+ * `data-pkc-writing` / `data-pkc-doc-align` / `data-pkc-layout` を**出していた**が、
+ * **消費する規則が 1 行も無かった** ── つまり `writing: vertical` も `align: right` も
+ * 書いても何も起きなかった(`dir` だけが native 属性として効いていた)。
+ * PKC2 は最初から持っている(`PKC2: src/styles/base.css:2888-2903`)。
+ *
+ * > user 指示 2026-08-06:「**それは PKC-Markdown と PKC IR の規約だから、
+ * > PKC2 の実装が間違えているなら、直す必要がある**」
+ * ── 規約(`PKC2: docs/development/notation-redesign-2026-05/02-frontmatter-and-globals.md`)
+ * が正本。実装が規約に届いていなければ実装を直す。
+ *
+ * ⏸ **`|>` の意味は規約が 2 通りに書いている(user 裁定待ち)**。
+ *   ① `02-frontmatter-and-globals.md` §2.3.6(**draft**、2026-05-09):
+ *      「宣言した既定の流れの**反対側**」── `align: right` の文書では `|>` は**左**
+ *   ② `11-canonicalization-spec.md` §53(2026-05-10)/
+ *      `markdown-dialect-for-ai-authors-v3.md`(**唯一 canonical**、2026-05-12)/
+ *      `pkc-markdown-complete-spec-v4.md` §6.2(candidate、2026-05-25):
+ *      「logical end(**LTR で右、RTL で左**)」= CSS の `text-align: end` そのもの
+ *   **本 file は ② を実装している**(= `align` では入れ替えない)。理由:
+ *   ① は draft の設計議論で、後発の canonical / candidate 3 本が ② を採る /
+ *   ① だと `start`(= 宣言 align と同じ側)が**無印と同義になって語彙から消える**のに
+ *   規約は `start` を 4 doc で保持している / ① は `align: center` の「反対側」を
+ *   定めていない(② は全組合せで定まる)。
+ *   ⚠ ① を採る裁定が出たら、ここに「宣言 align が flow start と逆のときだけ
+ *   `end`/`start` を入れ替える」規則を足す(2026-08-06 に一度実装して外した)。 */
+/* 🔴 **縦書きでは文字の流れる向き(`direction`)を `ltr` に固定する**(規約 §2.3.5)。
+ *
+ * 規約が CSS mapping まで書いている数少ない箇所である:
+ *   `[writing=vertical][direction=rtl] { writing-mode: vertical-rl; direction: ltr; }`
+ *   ──「縦書き右起こしは text 内 direction は ltr」
+ *
+ * ⚠ **`direction` は縦書きでは「段の進む向き」であって「文字の流れる向き」ではない**。
+ *   `vertical-rl` の inline 軸は**垂直**なので、`direction: rtl` を残すと
+ *   inline 軸が **下→上**になる ── 日本語の伝統的な縦書き宣言
+ *   (`writing: vertical` + `direction: rtl`)で**本文が下から上へ流れる**。
+ *   直す前はここが無く、`dir="rtl"` 属性(`applyDocumentGlobals`)がそのまま効いていた。
+ * 🔑 右起こし / 左起こしの区別は **属性**(`dir`)が持つ ── CSS の `direction` は
+ *   固定してよい。 */
+.pkc-md-rendered[data-pkc-writing='vertical'] {
+  writing-mode: vertical-rl;
+  direction: ltr;
+}
+/* `direction: ltr` + 縦書き = 左起こし(蒙古文等) */
+.pkc-md-rendered[data-pkc-writing='vertical'][dir='ltr'] {
+  writing-mode: vertical-lr;
+}
+/* 横書き × 宣言された既定の寄せ(§2.3.3 の matrix。既定は logical start) */
+.pkc-md-rendered[data-pkc-doc-align='left'] {
+  text-align: left;
+}
+.pkc-md-rendered[data-pkc-doc-align='right'] {
+  text-align: right;
+}
+.pkc-md-rendered[data-pkc-doc-align='center'] {
+  text-align: center;
+}
+/* 🔴 **縦書き × `align: top|bottom` は text-align で表現できる**(2026-08-06 に訂正)。
+ * 直す前はここに「表現できない」というコメントだけが在り、規則が無かった ──
+ * `document-globals.ts` の `VERTICAL_ALIGNS` は `top`/`bottom`/`center` を
+ * **受理して属性まで出す**のに、消費する規則がゼロ = 黙った no-op だった。
+ * ⚠ 誤認の中身: `vertical-rl` / `vertical-lr` では **inline 軸が垂直**なので、
+ *   `top`/`bottom` は inline 軸の両端であり `text-align: start|end` がそのまま効く。
+ *   (証拠: `center` だけは同じ軸なのに既に効いていた ── 非対称が誤認の証)
+ * ⚠ 上の `direction: ltr` 固定が前提(でないと start が下になる)。 */
+.pkc-md-rendered[data-pkc-writing='vertical'][data-pkc-doc-align='top'] {
+  text-align: start;
+}
+.pkc-md-rendered[data-pkc-writing='vertical'][data-pkc-doc-align='bottom'] {
+  text-align: end;
+}
+/* 段落 physical の縦(`:::paragraph{align=top}`)。⚠ 縦書きに限る ── 横書きでの
+ * `top`/`bottom` は規約 §2.3.3 が不正組合せとしているので規則を当てない。 */
+.pkc-md-rendered[data-pkc-writing='vertical'] [data-pkc-align='top'] {
+  text-align: start;
+}
+.pkc-md-rendered[data-pkc-writing='vertical'] [data-pkc-align='bottom'] {
+  text-align: end;
 }
 .pkc-md-rendered p[data-pkc-indent='1'] {
   text-indent: 1em;
