@@ -341,9 +341,22 @@ try{
     if(!d||typeof d!=='object')return;
     if(d.type!=='pkc-html-render-resize')return;
     if(typeof d.id!=='string'||typeof d.height!=='number')return;
-    var h=Math.max(0,Math.min(5000,d.height));
-    var f=document.querySelector('iframe[data-pkc-html-render-id="'+d.id.replace(/"/g,'')+'"]');
-    if(f)f.style.height=h+'px';
+    /* 🔴 **宛先は「名乗った id」ではなく「実際の送り主」で決める**(2026-08-06)。
+       id は中身の hash なので**文書側から計算できる** ── 直す前は箱 A が箱 B の
+       id を名乗って **B の高さを 0px にできた**(= B の中身を隠せた)。
+       ⚠ ev.origin は条件に足さない ── sandbox の箱では "null" になり、
+       安全な箱と攻撃者の箱が同じ値になる(画面側 html-sandbox.ts の同名の節)。
+       ⚠ 名乗りと実体が食い違ったら**何もしない**(別の箱へ当てない)。 */
+    var fs=document.querySelectorAll('iframe[data-pkc-html-render-id]');
+    var f=null;
+    for(var fi=0;fi<fs.length;fi++){
+      if(fs[fi].contentWindow===ev.source){
+        f=fs[fi].getAttribute('data-pkc-html-render-id')===d.id?fs[fi]:null;
+        break;
+      }
+    }
+    if(!f)return;
+    f.style.height=Math.max(0,Math.min(5000,d.height))+'px';
   });
   function hydrate(box,e,sink,idp){
     // 🔑 本文は**書出し側で描いた HTML**(P8 段⑲)。かつてここは本文を素のまま

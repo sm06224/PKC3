@@ -1,10 +1,15 @@
 /**
- * reform-2026-05 Phase 2 PR-2M(2026-05-10):HTML sandbox iframe builder。
+ * HTML を「箱」(sandbox iframe)として描く。
  *
- * ` ```html-render` fence info string で発火、content を iframe sandbox 経由
- * で seamless 描画する。AI が「複雑 layout / SVG / interactive widget は HTML
- * 生成の方が優れる」と主張する分野(2026-05-10 user 報告:A4 2 段組レポート
- * style 含む)に対応する。
+ * ` ```html` fence で発火し、中身を iframe の `srcdoc` として隔離して描く。
+ * AI が吐く複雑 layout / SVG / interactive widget を受けるための面である。
+ *
+ * ⚠ **この file のヘッダは PKC2 の履歴のままだった**(2026-08-06 に是正)。
+ * 「reform-2026-05 Phase 2 PR-2M」という PKC2 の PR 番号を名乗り、
+ * `installHtmlSandboxResizer` の doc は「main.ts / **rendered-viewer.ts** の両方で
+ * wire する」と指示していたが、**PKC3 に `rendered-viewer.ts` は存在しない**
+ * (実配線は `src/main.ts` の 1 か所だけ)。user 指示「流用 + 総合的見直し。
+ * **丸写し禁止**」に照らして、PKC3 の根拠に書き換えた。
  *
  * セキュリティ設計(critical):
  *
@@ -13,8 +18,14 @@
  *    にアクセス不可、container body にも触れない。
  *
  * 2. **CSP meta**:srcdoc 内に `<meta http-equiv="Content-Security-Policy">` を
- *    自動注入。外部 fetch 禁止(`connect-src 'none'`)、外部 script src 禁止
- *    (`script-src 'unsafe-inline'` のみ)、`frame-src 'none'` で再帰 iframe 禁止。
+ *    自動注入。`connect-src 'none'` で fetch / XHR / WebSocket を止め、
+ *    外部 script src 禁止(`script-src 'unsafe-inline'` のみ)、
+ *    `frame-src 'none'` で再帰 iframe 禁止。
+ *    🔴 **「外部 fetch 禁止」は「外へ出られない」ではない**(2026-08-06 に是正)──
+ *    `img-src * data: blob:` を許しているので **`new Image().src` で任意の第三者へ
+ *    要求が飛ぶ**(= 「この user がこれを今読んだ」+ IP が漏れる)。直す前の
+ *    このコメントは img を見落としていた。締める判断は方向 doc §2 Q3 の付帯裁定待ち
+ *    (出力 HTML が変わり goldens が 1 度動くため)。
  *
  * 3. **referrerpolicy="no-referrer"**:iframe 内から外部 URL に飛ぶ時の referrer
  *    漏洩防止。
@@ -131,32 +142,71 @@ export function buildHtmlSandboxIframe(
 }
 
 /**
- * Parent-side resizer:postMessage で iframe height を受信、対応 iframe の
- * style.height を更新する。main.ts / rendered-viewer.ts の両方で wire する。
+ * 箱から届いた高さの申告を、**その箱にだけ**当てる。
+ *
+ * 🔴 **宛先は「名乗った id」ではなく「実際の送り主」で決める**(2026-08-06)。
+ *
+ * 直す前は `data.id` で `querySelector` していた。ところが id は中身の FNV-1a
+ * (`stableKey`)なので **文書側から計算できる** ── つまり箱 A が、同じ文書の
+ * 箱 B の id を名乗って **B の高さを 0px にできた**(= B の中身を隠せた)。
+ * 高さの cap(5000px)は「大きすぎ」だけを守っており、**なりすまし**は素通りだった。
+ *
+ * 🔑 正しい規律は**同じ repo に実測付きで在る**(`src/features/launcher/app-shell.ts`
+ * の「判定は `event.source === iframe.contentWindow` **だけ**にする /
+ * `event.origin` は使わない ── sandbox の箱では両方向に嘘をつく」)。
+ * ここはその規律の**移植**である。
+ *
+ * ⚠ **`event.origin` を条件に足さない**。`allow-same-origin` の無い箱の origin は
+ *   `"null"` で、これは「安全な箱」も「攻撃者の箱」も同じ値になる ── 判定に使うと
+ *   通してはいけないものを通し、通すべきものを落とす。
+ * ⚠ **`data.id` は照合にしか使わない**(名乗りと実体が食い違ったら捨てる)。
+ *   id を消さないのは、差分反映が箱を作り直さないための鍵として要るからである。
  *
  * @param targetWindow listener を登録する window(default: globalThis.window)
  * @returns teardown function(listener を unregister)
  */
-export function installHtmlSandboxResizer(
-  targetWindow: Window = window,
-): () => void {
+export function installHtmlSandboxResizer(targetWindow: Window = window): () => void {
   const handler = (event: MessageEvent) => {
     const data = event.data;
     if (!data || typeof data !== 'object') return;
     if (data.type !== HTML_SANDBOX_RESIZE_MSG_TYPE) return;
     if (typeof data.id !== 'string') return;
     if (typeof data.height !== 'number') return;
-    const height = Math.max(0, Math.min(HTML_SANDBOX_MAX_HEIGHT, data.height));
-    const iframe = targetWindow.document.querySelector<HTMLIFrameElement>(
-      `iframe[data-pkc-html-render-id="${CSS.escape(data.id)}"]`,
-    );
+    const iframe = resolveSandboxSender(targetWindow.document, event.source, data.id);
     if (!iframe) return;
-    iframe.style.height = `${height}px`;
+    iframe.style.height = `${clampSandboxHeight(data.height)}px`;
   };
   targetWindow.addEventListener('message', handler);
   return () => {
     targetWindow.removeEventListener('message', handler);
   };
+}
+
+/** 高さの丸め(cap は「大きすぎ」だけを守る ── なりすましは送り主の同一性で守る)。 */
+export function clampSandboxHeight(height: number): number {
+  if (!Number.isFinite(height)) return 0;
+  return Math.max(0, Math.min(HTML_SANDBOX_MAX_HEIGHT, height));
+}
+
+/**
+ * 送り主の window から、その箱の `<iframe>` を引く。
+ *
+ * 🔑 **規則はここ 1 つ**(画面と書き出し HTML の両方がこの意味論に従う)。
+ * ⚠ 名乗った id が実体と食い違ったら **null**(黙って別の箱へ当てない)。
+ */
+export function resolveSandboxSender(
+  doc: Document,
+  source: MessageEventSource | null,
+  claimedId: string,
+): HTMLIFrameElement | null {
+  if (source === null) return null;
+  const frames = doc.querySelectorAll<HTMLIFrameElement>('iframe[data-pkc-html-render-id]');
+  for (const f of frames) {
+    if (f.contentWindow !== source) continue;
+    // ⚠ 実体が見つかったうえで、名乗りと一致することも確かめる
+    return f.getAttribute('data-pkc-html-render-id') === claimedId ? f : null;
+  }
+  return null;
 }
 
 /**
