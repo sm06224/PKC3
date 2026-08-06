@@ -733,11 +733,12 @@ describe('RowSwap — 組めない本文', () => {
     document.body.append(host);
     const swap = new RowSwap(host, { commit: vi.fn() });
     /**
-     * ⚠ 入れ子の `:::` は 2026-08-06 に直った(= もう組める)ので、**別の実物**を使う。
-     * `:::figure` は id が必須で、無い形は renderer が literal のまま残す ──
-     * 走査器だけが囲いと見なすので食い違い、開かない側に倒れる。
+     * ⚠ **直った形を使い続けない**(2026-08-06 に 2 度取り替えた)。入れ子の `:::` も
+     * id 無しの `:::figure` も直ったので、いまの実物は「**renderer が知らない名前**」
+     * である ── 走査器は `:::name` を一律に囲いと見なすが、renderer は知っている
+     * 名前だけを畳むので食い違い、開かない側に倒れる。
      */
-    const body = [':::figure', '', '本文', '', ':::', '', 'あと', ''].join('\n');
+    const body = [':::unknown-thing', '', '本文', '', ':::', '', 'あと', ''].join('\n');
     const { html, ranges } = renderMarkdownWithRanges(body);
     const out = swap.update(body, html, ranges);
     expect(out.ok).toBe(false);

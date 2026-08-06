@@ -126,11 +126,14 @@ describe('PKC-Markdown golden parity vs PKC2 (25 cases)', () => {
    * ⚠ 理由なしで更新できると、後退を「PKC2 と違うから」で押し通せてしまう。
    * だから**分岐している件数と、その理由の実在**を pin する。
    */
-  it('🔴 PKC2 と分岐した case は理由つきで 2 件だけ', () => {
+  it('🔴 PKC2 と分岐した case は理由つきで 4 件だけ', () => {
     const diverged = goldens.cases.filter((c) => c.pkc3Diverges);
     expect(diverged.map((c) => c.name).sort()).toEqual([
       'full-pkc-fixture',
       'full-pkc-fixture-anchors',
+      // 2026-08-06: 行頭アライン `<|` / `|<` を end → start(記号のとおりに読む)
+      'reform-stress-sample',
+      'simple-notation-sample',
     ]);
     for (const c of diverged) {
       expect(c.pkc3Diverges!.since, `${c.name} に分岐した日付が無い`).toMatch(/^\d{4}-\d{2}-\d{2}$/);

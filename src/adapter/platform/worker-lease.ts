@@ -274,15 +274,38 @@ export class WorkerLease {
   }
 }
 
+/**
+ * 量の書き方は **1 本**(2026-08-06。user 報告 minor「ログ 1 行の『0k 文字』が
+ * 役に立たない」)。
+ *
+ * 直す前は常に `k 文字` で、**1000 文字未満が全部 `0k 文字`** になっていた
+ * (実測 ── 打鍵の追従は短い本文でも走るので、ログの大半がこれだった)。
+ * 千を超えてから `k` に切り替える ── **同じ規則を 2 か所に書かない**ので、
+ * 依頼側(`describe`)と結果側(`sizeOf`)の両方がここを通る。
+ */
+function chars(n: number): string {
+  return n < 1000 ? `${n} 文字` : `${Math.round(n / 100) / 10}k 文字`;
+}
+
 /** ログに出す短い手掛かり(payload の中身は出さない ── 本文が漏れる)。 */
 function describe(payload: unknown): string | undefined {
   if (payload && typeof payload === 'object' && 'text' in payload) {
     const t = (payload as { text?: unknown }).text;
-    if (typeof t === 'string') return `${Math.round(t.length / 100) / 10}k 文字`;
+    if (typeof t === 'string') return chars(t.length);
   }
   return undefined;
 }
 
+/**
+ * 結果の量。⚠ **object で返る口もある**(`renderWithRanges` の
+ * `{ html, ranges }`)── 文字列だけを見ていたので、ライブエディタの依頼は
+ * 結果の量が**永久に出なかった**(同 2026-08-06)。
+ */
 function sizeOf(result: unknown): string | undefined {
-  return typeof result === 'string' ? `${Math.round(result.length / 100) / 10}k 文字` : undefined;
+  if (typeof result === 'string') return chars(result.length);
+  if (result && typeof result === 'object' && 'html' in result) {
+    const html = (result as { html?: unknown }).html;
+    if (typeof html === 'string') return chars(html.length);
+  }
+  return undefined;
 }

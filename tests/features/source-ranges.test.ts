@@ -194,17 +194,35 @@ describe('② 分割は全域で、重複しない', () => {
   });
 
   /**
+   * 🔴 **id 無しの figure は 2026-08-06 に直した**(user 報告 minor
+   * 「`:::figure` が素のテキスト」)── 畳むようになったので**開ける**側へ反転。
+   */
+  it('🔴 id の無い figure でも分割が組める(描画と走査が一致した)', () => {
+    const body = ':::figure\n\n本文\n\n:::\n\nあと\n';
+    expect(
+      renderMarkdown(body, { silentHallucinationWarnings: true }),
+      '直った前提が崩れている(literal に戻った)',
+    ).not.toContain('<p>:::figure</p>');
+    const { part } = build(body);
+    expect(part.ok, `id 無しの figure で分割が組めない(${part.reason ?? ''})`).toBe(true);
+  });
+
+  /**
    * 🔴 **開かない側に倒れる条件はまだ在る**(空振り防止のため実物で pin する)。
    *
-   * `:::figure` は **id が必須**(`:::figure{#id}`)で、無い形は renderer が
-   * **意図的に literal のまま**残す。一方 `scanContainers` は `:::name` を
-   * 一律に囲いと見なすので、**走査だけが 1 塊に畳んで**食い違う。
+   * `scanContainers` は `:::name` を**一律に**囲いと見なすが、renderer が畳むのは
+   * **知っている名前だけ** ── 知らない名前は literal のまま残るので、
+   * **走査だけが 1 塊に畳んで**食い違う。
    * ⚠ 食い違ったら**開かない** ── 壊れた分割の上で行を差し替えるより安全側である。
+   * ⚠ ここを「走査側にも名前の表を持たせる」で直してはいけない ── 同じ判定が
+   *   2 か所に生え、片方だけ古くなる(CLAUDE.md「判定を増やさない」)。
    */
-  it('🔴 描画が畳まない `:::`(id 無しの figure)では開かない側に倒れる', () => {
-    const body = ':::figure\n\n本文\n\n:::\n\nあと\n';
+  it('🔴 描画が畳まない `:::`(知らない名前)では開かない側に倒れる', () => {
+    const body = ':::unknown-thing\n\n本文\n\n:::\n\nあと\n';
     // 前提: renderer は畳んでいない(literal のまま出ている)
-    expect(renderMarkdown(body, { silentHallucinationWarnings: true })).toContain('<p>:::figure</p>');
+    expect(renderMarkdown(body, { silentHallucinationWarnings: true })).toContain(
+      '<p>:::unknown-thing</p>',
+    );
     const { part } = build(body);
     expect(part.ok, '食い違ったまま分割が通ってしまった').toBe(false);
     expect(part.reason).toBeTruthy();

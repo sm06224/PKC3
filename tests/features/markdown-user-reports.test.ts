@@ -247,3 +247,98 @@ describe('csv/tsv のセルに文書の脚注が漏れない', () => {
     expect(td, 'セルが脚注セクションを吐いている').not.toContain('class="footnotes"');
   });
 });
+
+/**
+ * 🔴 **行頭アラインは記号のとおりに読む**(2026-08-06。user 報告 minor)。
+ *
+ * PKC2 は `|>` `<|` `|<` `>|` の 4 形すべてを **end(LTR では右)**に寄せていた
+ * (「typo 寛容化」)。だが `<|` を書いて右に寄るのは記号と逆であり、しかも
+ * この repo の記法試験の corpus 自身が `<|` を「左」と註記していた ──
+ * **実装と説明が食い違っていた**。
+ *
+ * ⚠ 観測点は**属性**(見た目ではない)── `start` は既定の流れと同じ向きなので、
+ * 横書き LTR では見た目が変わらない。効くのは縦書き / RTL / 継承した寄せの中で、
+ * そこは属性が付いていないと表現できない。
+ */
+describe('行頭アラインの向き(user 報告 minor)', () => {
+  const alignOf = (src: string): string | null => {
+    const html = renderMarkdown(src, { silentHallucinationWarnings: true });
+    return /data-pkc-align="([^"]+)"/.exec(html)?.[1] ?? null;
+  };
+
+  it('🔴 `<|` と `|<` は start(左)── 右に寄らない', () => {
+    expect(alignOf('<| 左に寄せたい\n'), '`<|` が右に寄っている').toBe('start');
+    expect(alignOf('|< 左に寄せたい\n'), '`|<` が右に寄っている').toBe('start');
+  });
+
+  it('`|>` と `>|` は end(右)のまま', () => {
+    expect(alignOf('|> 右に寄せたい\n')).toBe('end');
+    expect(alignOf('>| 右に寄せたい\n')).toBe('end');
+  });
+
+  it('`||` は center のまま', () => {
+    expect(alignOf('|| 中央\n')).toBe('center');
+  });
+});
+
+/**
+ * 🔴 **id の無い図表も図表として描く**(2026-08-06。user 報告 minor
+ * 「`:::figure` が素のテキスト」)。
+ *
+ * 直す前は id を書かないと 3 行が**そのまま画面に並んだ**
+ * (`:::figure` / `^^^ 説明` / `:::`)。id は `[@id]` で参照するときだけ要る。
+ */
+describe('id の無い図表(user 報告 minor)', () => {
+  it('🔴 `:::figure` だけでも `<figure>` になる(素のテキストで出ない)', () => {
+    const html = renderMarkdown(':::figure\n^^^ 説明\n:::\n', {
+      silentHallucinationWarnings: true,
+    });
+    expect(html, '記法が素のまま出ている').not.toContain('<p>:::figure</p>');
+    expect(html).toContain('<figure');
+    expect(html).toContain('図 1: 説明');
+    // ⚠ 空の id を書かない(`id=""` は妥当でないし、参照先にもならない)
+    expect(html, '空の id を吐いた').not.toContain('id=""');
+  });
+
+  it('番号は id の有無に関わらず通し番号(数え方が 2 通りにならない)', () => {
+    const html = renderMarkdown(
+      ':::figure\n^^^ 一枚目\n:::\n\n:::figure{#f2}\n^^^ 二枚目\n:::\n',
+      { silentHallucinationWarnings: true },
+    );
+    expect(html).toContain('図 1: 一枚目');
+    expect(html).toContain('図 2: 二枚目');
+  });
+
+  /**
+   * ⚠ **「不正な id」と「id を書いていない」を分ける**。
+   * `{id="あ"}` は **id を書いたのに使えない**形なので、今までどおり素のままで出す
+   * (打ち間違いの合図を黙って飲まない)。⚠ `{#あ い}` は属性の parser が
+   * id として拾わない = 「書いていない」に落ちるので、こちらの経路には来ない
+   * (実測。判定を 2 か所に持たないので、parser の寛容さがそのまま効く)。
+   */
+  it('🔴 使えない id を書いたときは今までどおり素のまま', () => {
+    const html = renderMarkdown(':::figure{id="あ"}\n^^^ 説明\n:::\n', {
+      silentHallucinationWarnings: true,
+    });
+    expect(html).toContain(':::figure');
+    expect(html).not.toContain('<figure');
+  });
+
+  it('🔴 id の無い図は参照先にならない(`[@…]` が別の図を指さない)', () => {
+    const html = renderMarkdown(
+      ':::figure\n^^^ 無名\n:::\n\n:::figure{#f2}\n^^^ 名前つき\n:::\n\n参照 [@f2] と [@] \n',
+      { silentHallucinationWarnings: true },
+    );
+    expect(html).toContain('>図 2</a>');
+    // `[@]`(空の id)は参照として解決しない
+    expect(html).toContain('[@]');
+  });
+
+  it('sentinel が漏れていない(PUA の文字が画面に出ない)', () => {
+    const html = renderMarkdown(':::figure\n^^^ 説明\n:::\n', {
+      silentHallucinationWarnings: true,
+    });
+    // ⚠ 2026-05-08 に実際に踏んだ形 ── 置換に当たらないと私用領域の文字が残る
+    expect(/[-]/.test(html), 'sentinel が HTML に残っている').toBe(false);
+  });
+});

@@ -19,6 +19,8 @@ import { iconButton } from './icons';
 // ⚠ 日付の切り方は `features/datetime/stored-date` が正本(一覧の行と共有)。
 //    ここで独自に parse していた頃は、一覧に日付を出すときに規則が 2 つに増えた
 import { formatStoredDate } from '@features/datetime/stored-date';
+// 居場所の解決は `features/relation/tree` が正本(ファイラの帯・パンくずと共有)
+import { getAncestorFolders } from '@features/relation/tree';
 
 
 export class InspectorRenderer {
@@ -26,6 +28,12 @@ export class InspectorRenderer {
   private lastPhase: string | null = null;
   /** 元ファイルの紐づけも指紋の一部 ── 忘れると「書き戻す」が出ない(2026-08-05)。 */
   private lastLink: string | null = null;
+  /**
+   * 居場所も指紋の一部(2026-08-06。user 報告 minor)── 忘れると、
+   * フォルダを移しても**前の居場所を出したまま**になる(meta は変わらないので
+   * 参照比較を素通りする)。
+   */
+  private lastRelations: AppState['relations'] | null = null;
   /** 同じノートに戻ったら同じ位置へ(P8 段⑫。溢れるのは題名が長いときだけ)。 */
   private readonly scroll: ScrollMemory;
 
@@ -39,12 +47,19 @@ export class InspectorRenderer {
     //    すると、開いた直後は「書き戻す」が出ないままになる
     const link = (state.selectedLid && state.linkedFiles.get(state.selectedLid)) || null;
     // 断面指紋 ── meta の参照と phase が同じなら DOM に触れない
-    if (meta === this.lastMeta && state.phase === this.lastPhase && link === this.lastLink) return;
+    if (
+      meta === this.lastMeta &&
+      state.phase === this.lastPhase &&
+      link === this.lastLink &&
+      state.relations === this.lastRelations
+    )
+      return;
     // ⚠ **書き換える前に**退避(後だと縮んで丸められた値を保存する)
     this.scroll.park();
     this.lastMeta = meta;
     this.lastPhase = state.phase;
     this.lastLink = link;
+    this.lastRelations = state.relations;
     this.region.textContent = '';
 
     const head = document.createElement('div');
@@ -72,6 +87,21 @@ export class InspectorRenderer {
     };
     row('題名', meta.title, 'inspector-title');
     row('種類', archetypeLabel(meta.archetype), 'inspector-kind');
+    /**
+     * 🔴 **どこに居るかを出す**(2026-08-06。user 報告 minor「一覧タブから
+     * 所属フォルダを知る手段が無い」)。
+     *
+     * 一覧は平置きなので、そのノートがどのフォルダに入っているかは
+     * **フォルダタブへ移らないと分からなかった**(移ると探し直しになる)。
+     * ⚠ 出す場所は情報ペイン ── 「選んでいるものの素性」はここに集まる
+     *   (同じものが常に同じ場所にある)。
+     * ⚠ 解決は `features/relation/tree` の 1 本(パンくず・移動の帯と同規則)。
+     * ⚠ root 直下は空文字ではなく **「ルート」**と書く ── 空欄は「不明」に見える。
+     */
+    const chain = getAncestorFolders(meta.lid, state.entryMetas, state.relations)
+      .reverse()
+      .map((f) => f.title);
+    row('居場所', chain.length === 0 ? 'ルート' : chain.join(' / '), 'inspector-folder');
     row('作成', formatStoredDate(meta.createdAt), 'inspector-created');
     row('更新', formatStoredDate(meta.updatedAt), 'inspector-updated');
     // 🔴 **どのファイルから来たか**を出す(2026-08-05)── 出さないと、書き戻しが

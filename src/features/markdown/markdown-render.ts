@@ -1787,14 +1787,28 @@ function processFigureBlocks(source: string, lineMapIn: number[]): {
     // id は Pandoc `#id` 形(open.attrs.id)or `id=...` kv 形(open.attrs.kvs.id)から取る
     const idFromHash = open.attrs.id;
     const idFromKv = typeof open.attrs.kvs.id === 'string' ? open.attrs.kvs.id : undefined;
-    const id = idFromHash ?? idFromKv;
-    if (!id || !/^[\w-]+$/.test(id)) {
-      // id 不正は figure として扱わない、literal として残す
+    const idAttr = idFromHash ?? idFromKv;
+    /**
+     * 🔴 **id の無い図表も図表として描く**(2026-08-06。user 報告 minor
+     * 「`:::figure` が素のテキスト」)。
+     *
+     * 直す前は id が無いと**その 3 行が literal 文字列**として出ていた
+     * (`:::figure` / `^^^ 説明` / `:::` がそのまま画面に並ぶ)。id は
+     * **`[@id]` で参照するときだけ**要るもので、番号付け・キャプション・
+     * `<figure>` の組み立てには要らない ── 参照しない図に id を強制するのは、
+     * 記法を覚えている人ほど踏む罠である。
+     *
+     * ⚠ **不正な id は今までどおり literal**(`:::figure{#あ い}` 等)──
+     * そこは打ち間違いの合図なので、黙って通すと直す機会を奪う。
+     * ⚠ id が無い図は registry に入れない(参照できないものを参照させない)。
+     */
+    if (idAttr !== undefined && !/^[\w-]+$/.test(idAttr)) {
       out.push(line);
       lineMapOut.push(inputIdx);
       i++;
       continue;
     }
+    const id = idAttr ?? '';
     counter[kind]++;
     const num = counter[kind];
     const content: string[] = [];
@@ -1846,7 +1860,9 @@ function processFigureBlocks(source: string, lineMapIn: number[]): {
     }
     const closeInputIdx = i < lines.length ? (lineMapIn[i] ?? i) : openInputIdx;
     if (i < lines.length) i++; // skip closing `:::`
-    registry.set(id, { kind, num, caption });
+    // ⚠ id が無い図は登録しない(`[@id]` の参照先にならない ── 空文字を鍵にすると
+    //    id 無しの図が 2 つあるだけで「同じものを指す」になる)
+    if (id !== '') registry.set(id, { kind, num, caption });
     // Sentinel emission(各 sentinel は own-line で出力 → markdown-it が <p>...</p> wrap)。
     // OPEN は figure 開き行に対応、CAPTION は ^^^ 行(なければ open 行 fallback)、
     // CLOSE は閉じる ::: 行に対応。content は元の各行に対応。
@@ -2881,8 +2897,13 @@ function postProcessFigureSentinels(html: string): string {
   // 各 sentinel 行は <p attrs> を持ちうる(sourceLineAnchors path)。attrs を
   // 保存して置換要素に転記、Split View block ↔ source line lookup を維持。
   html = html.replace(
-    new RegExp(`<p([^>]*)>${FIG_SENTINEL_OPEN}OPEN${FIG_SENTINEL_SEP}(figure|table|equation)${FIG_SENTINEL_SEP}([\\w-]+)${FIG_SENTINEL_SEP}(\\d+)${FIG_SENTINEL_OPEN}</p>`, 'g'),
-    (_match, attrs, kind, id, num) => `<figure id="${id}" class="pkc-fig pkc-fig-${kind}" data-pkc-fig-kind="${kind}" data-pkc-fig-num="${num}"${attrs}>`,
+    // ⚠ id の欄は**空でありうる**(2026-08-06 ── 参照しない図には id を要求しない)。
+    //    `[\w-]+` のままだと id 無しの図の sentinel が置換されず、PUA の文字が
+    //    そのまま画面に出る(sentinel 漏れ = 2026-05-08 に踏んだ形)
+    new RegExp(`<p([^>]*)>${FIG_SENTINEL_OPEN}OPEN${FIG_SENTINEL_SEP}(figure|table|equation)${FIG_SENTINEL_SEP}([\\w-]*)${FIG_SENTINEL_SEP}(\\d+)${FIG_SENTINEL_OPEN}</p>`, 'g'),
+    (_match, attrs, kind, id, num) =>
+      `<figure${id === '' ? '' : ` id="${id}"`} class="pkc-fig pkc-fig-${kind}"` +
+      ` data-pkc-fig-kind="${kind}" data-pkc-fig-num="${num}"${attrs}>`,
   );
   html = html.replace(
     new RegExp(`<p([^>]*)>${FIG_SENTINEL_OPEN}CAPTION${FIG_SENTINEL_SEP}(figure|table|equation)${FIG_SENTINEL_SEP}(\\d+)${FIG_SENTINEL_SEP}([^${FIG_SENTINEL_OPEN}]+)${FIG_SENTINEL_OPEN}</p>`, 'g'),
@@ -3080,10 +3101,22 @@ function preprocessAlignPrefix(source: string, lineMapIn: number[]): {
     if (m) {
       const sym = m[1]!;
       const rest = m[2] ?? '';
-      // reform-2026-05 PR-C:logical alignment へ移行。
-      //   `||`            → center(物理中央)
-      //   `|>` `<|` `|<` `>|`(全 4 形、typo 寛容化)→ end(logical、default flow の反対)
-      const align: AlignKind = sym === '||' ? 'center' : 'end';
+      /**
+       * reform-2026-05 PR-C:logical alignment へ移行。
+       *   `||`       → center(物理中央)
+       *   `|>` `>|`  → end(logical。default flow の反対 = LTR では右)
+       *   `<|` `|<`  → start(同じく logical = LTR では左)
+       *
+       * 🔴 **向きは記号のとおりに読む**(2026-08-06。user 報告 minor)。
+       * PKC2 は 4 形すべてを `end` に寄せていた(「typo 寛容化」)が、
+       * `<|` を書いて**右に寄る**のは記号と逆であり、しかもこの repo の
+       * 記法試験の corpus 自身が `<|` を「左」と註記していた ── 実装と
+       * 説明が食い違っていた。⚠ `start` は既定の流れと同じ向きなので
+       * 見た目は変わらないことが多いが、**属性は付く**(縦書き / RTL /
+       * 継承した中央寄せの中では効く)。
+       */
+      const align: AlignKind =
+        sym === '||' ? 'center' : sym === '<|' || sym === '|<' ? 'start' : 'end';
       // **重要**:prefix 行は前段落から切り離して新 paragraph にする。
       // 挿入する空行も同じ inputIdx を指す(sync layer の lookup は閉じた区間で
       // 動くので副作用なし)。

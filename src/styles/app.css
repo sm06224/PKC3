@@ -1490,6 +1490,13 @@ select:focus-visible {
 [data-pkc-asset-missing] {
   color: var(--danger);
 }
+/* 出せない種類の案内(2026-08-06。user 報告 minor)── 「無い」ではなく
+ * 「出せない + 次にどうするか」なので、危険色ではなく地の弱い色で置く */
+[data-pkc-field='attachment-no-preview'] {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0;
+}
 
 /* ── かんばん / カレンダー(封印中。解いたときに効く)──────── */
 [data-pkc-view-pane='kanban'] {

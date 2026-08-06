@@ -906,7 +906,25 @@ export class DetailRenderer {
             : mime === 'application/pdf'
               ? 'pdf'
               : null;
-      if (!kind) return; // preview 無し(ダウンロードのみ)
+      if (!kind) {
+        /**
+         * 🔴 **出せないことを言う**(2026-08-06。user 報告 minor
+         * 「preview を持たない添付は何も出ない」)。
+         *
+         * 直す前はここが黙って `return` で、器が**空のまま**残っていた ──
+         * 画面には題名と操作だけが並び、**中身が空なのか出せないのかが
+         * 区別できなかった**(「壊れている」と読まれる)。
+         * ⚠ 次にどうすればよいかを書く ── この種類は上の**ダウンロード**で開く。
+         * ⚠ `isAppMime`(HTML)はここへ来る ── そちらは**起動**があるので言い方を分ける。
+         */
+        const p = document.createElement('p');
+        p.setAttribute('data-pkc-field', 'attachment-no-preview');
+        p.textContent = isAppMime(mime)
+          ? 'この種類は画面に出せません。上の「起動」で開けます(ダウンロードしても開けます)'
+          : 'この種類は画面に出せません。上の「ダウンロード」で保存して開いてください';
+        host.append(p);
+        return;
+      }
       const lent = await assets.lend(assetKey);
       if (token !== this.hydrateToken) {
         lent?.dispose(); // stale ── 借りた瞬間に返す
