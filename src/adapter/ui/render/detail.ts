@@ -20,6 +20,14 @@ import { hydrateMermaid, type MermaidScope } from './mermaid-hydrate';
 import { applyBlocks, EMPTY_VIEW, type BlockView } from './apply-blocks';
 import { RowSwap } from './row-swap';
 import type { RenderedWithRanges } from '@adapter/platform/render/markdown-client';
+import {
+  EMPTY_JOURNAL,
+  record,
+  redo,
+  spliceLines,
+  stepFor,
+  undo,
+} from '@features/markdown/edit-journal';
 import { iconButton } from './icons';
 import { buildFormatBar } from './format-bar';
 import { MarkdownClient } from '@adapter/platform/render/markdown-client';
@@ -551,27 +559,59 @@ export class DetailRenderer {
 
     let body = initialBody;
     const scopes: MermaidScope[] = [];
+    /** 塊を跨ぐ取り消しの履歴(S8)。⚠ 行の配列なので 1 件は小さい。 */
+    let journal = EMPTY_JOURNAL;
+
+    /** 本文を差し替えて描き直す(外へも知らせる)。⚠ **出口は 1 つ**にする。 */
+    const setBody = (next: string): void => {
+      body = next;
+      this.onBodyChange?.(next);
+      follow.push(body, { sourceLineAnchors: false });
+      follow.flush(); // 🔑 確定は**待たせない**(打鍵では 1 回も描かない代わり)
+    };
 
     const swap = new RowSwap(pane, {
       commit: (startLine, endLine, text) => {
-        // ⚠ **継ぎ足しは 1 か所**(規則を 2 つ書かない)
-        const lines = body.split('\n');
-        const next = [
-          ...lines.slice(0, startLine),
-          ...text.split('\n'),
-          ...lines.slice(endLine + 1),
-        ].join('\n');
+        // ⚠ 継ぎ足しの規則は `edit-journal.ts` の 1 か所(取り消しと同じ規則を使う)
+        journal = record(journal, stepFor(body, startLine, endLine, text));
         // ⚠ 「変わったか」は `RowSwap` が持っている(開いた時の原文と比べる)──
         //    ここに 2 本目の判定を置かない
-        body = next;
-        this.onBodyChange?.(next);
-        follow.push(body, { sourceLineAnchors: false });
-        follow.flush(); // 🔑 確定は**待たせない**(打鍵では 1 回も描かない代わり)
+        setBody(spliceLines(body, startLine, endLine, text));
       },
       notify: (message) => {
         note.textContent = message;
       },
     });
+
+    /**
+     * 🔴 **塊を跨ぐ Ctrl+Z / Ctrl+Shift+Z(Ctrl+Y)**(S8。設計 §9 論点 C の
+     * 「既定 ON の条件」)。
+     *
+     * ⚠ **行の中では奪わない** ── 入力欄が焦点を持っている間はブラウザ自前の
+     * 取り消し(打鍵 1 つずつ)が正しい。境目は「入力欄に居るかどうか」1 つだけ。
+     * ⚠ 焦点が本文の外(`<body>`)に在る状態で来るので、`document` で聴く。
+     *   面を畳むときに必ず外す(`cancelPreview`)。
+     * ⚠ 戻せないときは**無言で無視しない**(押したのに何も起きない理由を出す)。
+     */
+    const onKey = (ev: KeyboardEvent): void => {
+      if (!pane.isConnected) return;
+      const t = ev.target;
+      if (t instanceof HTMLElement && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT')) return;
+      if (!(ev.ctrlKey || ev.metaKey)) return;
+      const key = ev.key.toLowerCase();
+      const forward = key === 'y' || (key === 'z' && ev.shiftKey);
+      if (key !== 'z' && key !== 'y') return;
+      ev.preventDefault();
+      const moved = forward ? redo(journal, body) : undo(journal, body);
+      if (moved === null) {
+        note.textContent = forward ? 'やり直せる編集はありません' : '取り消せる編集はありません';
+        return;
+      }
+      journal = moved.journal;
+      setBody(moved.text);
+      note.textContent = forward ? '1 つやり直しました' : '1 つ取り消しました';
+    };
+    document.addEventListener('keydown', onKey);
 
     /** 分割が組めない本文で編集させないための退避(1 回だけ作る)。 */
     let fellBack = false;
@@ -584,6 +624,7 @@ export class DetailRenderer {
       ta.setAttribute('data-pkc-field', 'editor-body');
       ta.value = body;
       ta.addEventListener('input', () => {
+        // ⚠ 退避先では**描き直さない**(原文をそのまま編集している面なので)
         body = ta.value;
         this.onBodyChange?.(body);
       });
@@ -616,6 +657,7 @@ export class DetailRenderer {
     follow.flush();
 
     this.cancelPreview = () => {
+      document.removeEventListener('keydown', onKey);
       follow.dispose();
       swap.dispose();
       for (const sc of scopes.splice(0)) sc.dispose();

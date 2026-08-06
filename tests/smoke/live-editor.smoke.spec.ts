@@ -233,7 +233,7 @@ test('🔴 表の 1 行だけを差し替えられる(表ごとにならない)'
   expect(errors).toEqual([]);
 });
 
-test('🔴 閉じていない ``` は色が変わり、確定すると理由が出る(user 提案)', async ({ page }) => {
+test('🔴 行頭で ``` を打ち切ると閉じが入る + それが Ctrl+Z で戻る(S5c)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoLive(page);
@@ -244,7 +244,43 @@ test('🔴 閉じていない ``` は色が変わり、確定すると理由が�
   const row = live.locator('[data-pkc-field="row-source"]');
   await expect(row).toBeFocused();
   await row.fill('');
-  await page.keyboard.type('```js');
+
+  // ① 🔴 3 打鍵で**閉じが次の行に**入る(開放終端をそもそも作らせない)
+  await page.keyboard.type('```');
+  await expect(row).toHaveValue('```\n```');
+  // caret は言語を打てる位置 = 開き記号の直後
+  expect(await row.evaluate((el) => (el as HTMLTextAreaElement).selectionStart)).toBe(3);
+  await page.keyboard.type('js');
+  await expect(row).toHaveValue('```js\n```');
+  // 閉じ待ちの印は付かない
+  await expect(live.locator('[data-pkc-row-slot]')).not.toHaveAttribute('data-pkc-open-end', 'fence');
+
+  /**
+   * ② 🔴 **補った閉じが Ctrl+Z で戻る**。実機でしか分からない ──
+   * `execCommand('insertText')` で挿さないと**取り消せない飾り**になる
+   * (`value` 直代入は undo スタックに載らない)。
+   */
+  await page.keyboard.press('Control+z'); // 'js' を戻す
+  await page.keyboard.press('Control+z'); // 補った '`\n```' を戻す
+  const afterUndo = await row.inputValue();
+  expect(afterUndo, `補完が undo に載っていない(いま "${afterUndo}")`).not.toBe('```js\n```');
+  expect(afterUndo.length, '取り消しで縮んでいない').toBeLessThan('```js\n```'.length);
+  expect(errors).toEqual([]);
+});
+
+test('🔴 閉じていない ``` は色が変わり、確定すると理由が出る(user 提案)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoLive(page);
+  await openLive(page, '# 題\n\nもとの段落。\n');
+
+  const live = page.locator('[data-pkc-region="editor-live"]');
+  await clickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
+  const row = live.locator('[data-pkc-field="row-source"]');
+  await expect(row).toBeFocused();
+  // ⚠ **貼り付け相当**(`fill`)で入れる ── 打鍵だと auto pair が閉じてしまうので、
+  //    「閉じていない状態」は貼り付け・取り込み経由でしか作れない
+  await row.fill('```js');
 
   // ① 開放終端の印が付く(色が変わる = 左端の帯が出る)
   const slot = live.locator('[data-pkc-row-slot]');
@@ -253,15 +289,75 @@ test('🔴 閉じていない ``` は色が変わり、確定すると理由が�
   expect(border, '色変えの帯が出ていない(CSS が届いていない)').not.toBe('0px');
 
   // ② 閉じたら印が消える
-  await page.keyboard.press('Enter');
-  await page.keyboard.type('const a = 1;');
-  await page.keyboard.press('Enter');
-  await page.keyboard.type('```');
+  await row.fill('```js\nconst a = 1;\n```');
   await expect(slot).not.toHaveAttribute('data-pkc-open-end', 'fence');
 
   // ③ 閉じないまま確定したら、確定はするが理由が出る
   await row.fill('```js');
   await page.keyboard.press('Tab');
   await expect(page.locator('[data-pkc-field="row-note"]')).toContainText('閉じていない');
+  expect(errors).toEqual([]);
+});
+
+test('🔴 塊を跨ぐ Ctrl+Z が実機で効く(行の中は OS の取り消しに任せる)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoLive(page);
+  await openLive(page, '# 題\n\n最初の段落。\n\n次の段落。\n');
+
+  const live = page.locator('[data-pkc-region="editor-live"]');
+  const row = live.locator('[data-pkc-field="row-source"]');
+
+  // ① 1 か所目を書き換えて確定
+  await clickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
+  await row.fill('1 回目。');
+  await page.keyboard.press('Tab');
+  await expect(live).toContainText('1 回目。');
+
+  // ② 2 か所目を書き換えて確定(= 塊を跨いだ)
+  await clickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(2)');
+  await row.fill('2 回目。');
+  await page.keyboard.press('Tab');
+  await expect(live).toContainText('2 回目。');
+  await expect(row).toHaveCount(0);
+
+  /**
+   * 🔴 **行の外で Ctrl+Z**。実機でしか確かめられないのは「焦点がどこに在るか」
+   * ── 確定で入力欄が消えた後、焦点は `<body>` に戻っている(その状態で
+   * 履歴の取り消しが効く、というのがこの段の契約)。
+   */
+  await page.keyboard.press('Control+z');
+  await expect(live).toContainText('次の段落。');
+  await expect(live).toContainText('1 回目。');
+  await page.keyboard.press('Control+z');
+  await expect(live).toContainText('最初の段落。');
+  await expect(page.locator('[data-pkc-field="row-note"]')).toContainText('取り消しました');
+
+  // ③ 保存して閲覧に戻っても、取り消した後の本文になっている(画面だけの嘘ではない)
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  const shown = page.locator('[data-pkc-field="detail-body"]');
+  await expect(shown).toContainText('最初の段落。');
+  await expect(shown).not.toContainText('1 回目。');
+  expect(errors).toEqual([]);
+});
+
+test('🔴 行の中の Ctrl+Z は打鍵単位で戻る(履歴の取り消しが割り込まない)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoLive(page);
+  await openLive(page, '# 題\n\nもとの段落。\n');
+
+  const live = page.locator('[data-pkc-region="editor-live"]');
+  await clickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
+  const row = live.locator('[data-pkc-field="row-source"]');
+  await expect(row).toBeFocused();
+  await row.fill('');
+  await page.keyboard.type('あいうえお');
+  await expect(row).toHaveValue('あいうえお');
+
+  // 🔴 入力欄の中なので、ブラウザ自前の取り消しが働く(= 入力欄が消えたりしない)
+  await page.keyboard.press('Control+z');
+  await expect(row, '行の中の Ctrl+Z で入力欄が閉じた(履歴の取り消しが奪っている)').toHaveCount(1);
+  await expect(row).not.toHaveValue('あいうえお');
   expect(errors).toEqual([]);
 });

@@ -523,6 +523,38 @@ describe('RowSwap — 開放終端 と auto pair', () => {
     expect(slot.getAttribute('data-pkc-open-end')).toBe('inline');
   });
 
+  it('🔴 auto pair: 行頭で ``` を打ち切ると閉じが次の行に入り、開放終端が消える', () => {
+    const r = rig();
+    click(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
+    const slot = r.host.querySelector('[data-pkc-row-slot]')!;
+    // 行頭に 2 つ在る状態(1・2 つ目は補わないのでブラウザが打った形)
+    ta.value = '``';
+    ta.setSelectionRange(2, 2);
+    ta.dispatchEvent(new Event('input'));
+    // 前提: この時点では閉じ待ちに見えていない(偶数個なので行内の対として釣り合う)
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: '`', bubbles: true, cancelable: true }));
+    expect(ta.value).toBe('```\n```');
+    expect(ta.selectionStart, 'caret が言語を打てる位置に無い').toBe(3);
+    expect(Number(ta.rows), '高さが中身に追いついていない').toBe(2);
+    // 🔴 閉じが入ったので開放終端の印は付かない(そもそも作らせないのが趣旨)
+    expect(slot.hasAttribute('data-pkc-open-end')).toBe(false);
+    // 確定しても「閉じていない」とは言われない
+    ta.blur();
+    expect(r.notes.join('/')).not.toContain('閉じていない');
+  });
+
+  it('🔴 auto pair が無ければ ``` は閉じ待ちになる(上の test が空振りでない証拠)', () => {
+    const r = rig();
+    click(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
+    const slot = r.host.querySelector('[data-pkc-row-slot]')!;
+    // 補完を通さずに `` ``` `` だけを置く(= 昔の挙動)
+    ta.value = '```';
+    ta.dispatchEvent(new Event('input'));
+    expect(slot.getAttribute('data-pkc-open-end')).toBe('fence');
+  });
+
   it('auto pair: 対の記号を打つと閉じが入り、caret は中に置かれる', () => {
     const r = rig();
     click(findByText(r.host, 'p', '最初の段落。'));

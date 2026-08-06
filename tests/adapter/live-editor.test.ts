@@ -13,7 +13,7 @@
  * ④ **分割が組めない本文では原文の編集欄へ退避**する ── 壊れた分割の上で
  *    行を差し替えると本文が壊れる
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
 import { buildShell } from '../../src/adapter/ui/render/shell';
@@ -163,16 +163,101 @@ describe('ライブエディタ(1 面)の配線', () => {
     expect(r.root.querySelector('[data-pkc-field="row-note"]')).not.toBeNull();
   });
 
+  it('🔴 塊を跨ぐ Ctrl+Z で 1 つ前の確定が戻る(S8。既定 ON の条件)', async () => {
+    setLive(true);
+    const r = rig(DOC);
+    await settle();
+    const live = r.root.querySelector('[data-pkc-region="editor-live"]')!;
+    const open = (text: string): HTMLTextAreaElement => {
+      const p = [...live.querySelectorAll('p')].find((e) => e.textContent === text)!;
+      p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+      return live.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')!;
+    };
+    // 2 か所を順に書き換える(= 塊を跨ぐ)
+    const a = open('最初の段落。');
+    a.value = '1 回目。';
+    a.blur();
+    await settle();
+    const b = open('次の段落。');
+    b.value = '2 回目。';
+    b.blur();
+    await settle();
+    expect(r.bodies.at(-1)).toBe(['# 題', '', '1 回目。', '', '2 回目。'].join('\n'));
+
+    // 🔴 行の外で Ctrl+Z ── 直前の確定だけが戻る
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }));
+    await settle();
+    expect(r.bodies.at(-1)).toBe(['# 題', '', '1 回目。', '', '次の段落。'].join('\n'));
+    // もう 1 回で最初の確定も戻る
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }));
+    await settle();
+    expect(r.bodies.at(-1)).toBe(DOC);
+    expect(live.textContent).toContain('最初の段落。');
+
+    // やり直し(Ctrl+Shift+Z)
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Z', ctrlKey: true, shiftKey: true, bubbles: true }),
+    );
+    await settle();
+    expect(r.bodies.at(-1)).toBe(['# 題', '', '1 回目。', '', '次の段落。'].join('\n'));
+  });
+
+  it('🔴 行の中の Ctrl+Z は奪わない(打鍵単位の取り消しは OS のもの)', async () => {
+    setLive(true);
+    const r = rig(DOC);
+    await settle();
+    const live = r.root.querySelector('[data-pkc-region="editor-live"]')!;
+    const p = [...live.querySelectorAll('p')].find((e) => e.textContent === '最初の段落。')!;
+    p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    const ta = live.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')!;
+    ta.value = '打ちかけ';
+    const ev = new KeyboardEvent('keydown', {
+      key: 'z',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    ta.dispatchEvent(ev);
+    // 🔴 既定を止めていない = ブラウザ自前の取り消しが働く
+    expect(ev.defaultPrevented, '行の中の Ctrl+Z を奪っている').toBe(false);
+    // 確定もしていない(履歴の取り消しが割り込んでいない)
+    expect(r.bodies).toEqual([]);
+    expect(ta.value).toBe('打ちかけ');
+  });
+
+  it('戻せる編集が無いときは理由を出す(押しても何も起きない、にしない)', async () => {
+    setLive(true);
+    const r = rig(DOC);
+    await settle();
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }));
+    expect(r.root.querySelector('[data-pkc-field="row-note"]')!.textContent).toContain(
+      '取り消せる編集はありません',
+    );
+    expect(r.bodies).toEqual([]);
+  });
+
   it('編集を抜けたら聴くのをやめる(外れた面が反応し続けない)', async () => {
     setLive(true);
     const r = rig(DOC);
     await settle();
     const live = r.root.querySelector<HTMLElement>('[data-pkc-region="editor-live"]')!;
     const p = [...live.querySelectorAll('p')].find((e) => e.textContent === '最初の段落。')!;
+    /**
+     * ⚠ **取り消しの listener は `document` に張ってある**(焦点が本文の外に在る
+     * 状態で来るので)。面を畳んだら外さないと、編集に入るたびに 1 つ積む。
+     * `pane.isConnected` のガードが在るので**振る舞いでは見えない** ── 資源の話
+     * なので、外したこと自体を観測点にする。
+     */
+    const off = vi.spyOn(document, 'removeEventListener');
     // 表示を閉じる(選択解除)── `cancelPreview` が `RowSwap.dispose()` を呼ぶ
     r.detail.render(
       reduce(initialState, { type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] }).state,
     );
+    expect(
+      off.mock.calls.some(([type]) => type === 'keydown'),
+      '取り消しの listener を外していない(編集に入るたびに積む)',
+    ).toBe(true);
+    off.mockRestore();
     expect(r.root.querySelector('[data-pkc-region="editor-live"]')).toBeNull();
     // 🔴 外れた面の中をクリックしても、入力欄は生えない(listener が残っていない)
     p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));

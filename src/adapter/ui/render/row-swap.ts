@@ -39,6 +39,7 @@ import {
   type SourceRange,
 } from '@features/markdown/source-ranges';
 import { findOpenEnds, scanContainers } from '@features/markdown/source-blocks';
+import { autoPairFor } from '@features/markdown/text-ops';
 
 /** 活性塊の代わりに置く定数。⚠ **中身が固定**なので差分の対象から自然に外れる。 */
 const SLOT_HTML = '<div data-pkc-row-slot="1"></div>';
@@ -397,7 +398,7 @@ export class RowSwap {
     this.wire(ta);
     ta.focus();
     ta.setSelectionRange(o.caret, o.caret);
-    this.markActiveOpenEnds();
+    this.syncActiveBox();
     return true;
   }
 
@@ -498,10 +499,7 @@ export class RowSwap {
      * **属性だけ**(高さと色)なので、封印中に呼ばれても composition は壊れない。
      */
     ta.addEventListener('input', () => {
-      const a = this.active;
-      if (!a) return;
-      a.textarea.rows = Math.max(1, a.textarea.value.split('\n').length);
-      this.markActiveOpenEnds();
+      this.syncActiveBox();
     });
     ta.addEventListener('keydown', (ev) => {
       const ke = ev as KeyboardEvent;
@@ -547,9 +545,11 @@ export class RowSwap {
    * ⚠ 描画は 1 回も起こさない ── 見ているのは**活性 textarea の中身だけ**で、
    * 付けるのも SLOT の属性 1 個である(封印中に呼ばれても安全)。
    */
-  private markActiveOpenEnds(): void {
+  private syncActiveBox(): void {
     const a = this.active;
     if (!a) return;
+    // 高さは中身に合わせる(属性だけ ── 封印中に呼ばれても composition は壊れない)
+    a.textarea.rows = Math.max(1, a.textarea.value.split('\n').length);
     const open = findOpenEnds(a.textarea.value);
     const block = open.find((o) => o.kind !== 'inline') ?? open[0];
     if (block === undefined) a.slot.removeAttribute('data-pkc-open-end');
@@ -559,32 +559,25 @@ export class RowSwap {
   /**
    * 🔴 **auto pair**(S5c。user 提案「開放終端をそもそも作りにくくする機構」)。
    *
-   * ⚠ **変換中は撃たない** ── ただし判定は**呼び側の `ke.isComposing` 1 か所**
+   * ⚠ **規則は持たない** ── 何を補うかは `features/markdown/text-ops.ts` の
+   * `autoPairFor`(pure)が決める。ここは「挿して caret を置く」だけ
+   * (規則を DOM 側に 2 本目書かない ── 設計 §5.6 ②)。
+   * ⚠ **変換中は撃たない**。判定は**呼び側の `ke.isComposing` 1 か所**
    * (2026-08-05 の変異試験:ここに `a.composing` を重ねると、片方を壊しても
    * 誰も気づかない状態になっていた。実測が支えているのは `ke.isComposing`)。
    * ⚠ 挿入は `execCommand('insertText')` ── **undo に載る**
    * (`value` 直代入は Ctrl+Z で戻せない)。
-   * ⚠ 選択があるときは**囲む**、無いときは対を入れて中に caret を置く。
    */
   private autoPair(ke: KeyboardEvent): void {
     const a = this.active;
     if (!a) return;
     const ta = a.textarea;
-    const pair = AUTO_PAIRS[ke.key];
-    if (pair === undefined) return;
-    const s = ta.selectionStart;
-    const e = ta.selectionEnd;
+    const pair = autoPairFor({ text: ta.value, start: ta.selectionStart, end: ta.selectionEnd }, ke.key);
+    if (pair === null) return;
     ke.preventDefault();
-    if (s !== e) {
-      // 囲む
-      const inner = ta.value.slice(s, e);
-      insertText(ta, ke.key + inner + pair);
-      ta.setSelectionRange(s + 1, s + 1 + inner.length);
-      return;
-    }
-    insertText(ta, ke.key + pair);
-    ta.setSelectionRange(s + 1, s + 1);
-    this.markActiveOpenEnds();
+    insertText(ta, pair.insert);
+    ta.setSelectionRange(pair.start, pair.end);
+    this.syncActiveBox();
   }
 
   /** 確定して閉じる。⚠ 変換中は確定しない(`pendingCommit` に回す)。 */
@@ -672,19 +665,6 @@ function shrinkTrailingBlank(body: string, start: number, end: number): number {
   while (e > start && (lines[e] ?? '').trim() === '') e -= 1;
   return e;
 }
-
-/** `key` → 閉じ記号。⚠ **行内の対**と**引用符・括弧**まで(ブロックは行の頭で扱う)。 */
-const AUTO_PAIRS: Readonly<Record<string, string>> = {
-  '`': '`',
-  '[': ']',
-  '(': ')',
-  '{': '}',
-  '「': '」',
-  '『': '』',
-  '（': '）',
-  '【': '】',
-  '"': '"',
-};
 
 /** undo に載る形で挿す。⚠ `value` 直代入は取り消せない飾りになる。 */
 function insertText(ta: HTMLTextAreaElement, text: string): void {
