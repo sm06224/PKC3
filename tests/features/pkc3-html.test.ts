@@ -15,6 +15,7 @@ import {
 } from '../../src/features/export/pkc3-html';
 import type { ArchiveSource } from '../../src/features/export/pkc3-archive';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
+import { DOCUMENT_GLOBAL_ATTRS } from '../../src/features/markdown/document-globals';
 import { readFileSync } from 'node:fs';
 
 const enc = new TextEncoder();
@@ -1235,6 +1236,30 @@ describe('可搬 HTML — 画面と同じ材料で描く', () => {
     const out = await writePortableHtml(source({ entries: [{ lid: 'p1', body: '本文\n' }] }), NOW);
     const d = await dataOf(out.blob);
     expect('attrs' in (d.entries[0] as object)).toBe(false);
+  });
+
+  /**
+   * 🔴 **閲覧側が前のノートの書字方向を消す**(2026-08-06)。本文の器(`#body`)は
+   * 使い回しなので、`setAttribute` だけだと `align: right` / `writing: vertical` /
+   * `dir="rtl"` のノートを見た後、宣言の無いノートが**前の文書の見え方で描かれる**。
+   * 直す前は `removeAttribute` が `data-print` の 1 か所にしか無かった。
+   * ⚠ 一覧は画面側 `DOCUMENT_GLOBAL_ATTRS` と揃える(片面だけ足す事故を止める)。
+   */
+  it('🔴 閲覧側が文書属性を当てる前に消す(前のノートの書字方向が残らない)', async () => {
+    const out = await writePortableHtml(source({ entries: [{ lid: 'q1', body: '本文\n' }] }), NOW);
+    const text = await out.blob.text();
+    for (const k of DOCUMENT_GLOBAL_ATTRS) {
+      expect(text, `閲覧側が ${k} を消していない`).toContain(k);
+    }
+    const clear = text.indexOf('removeAttribute(GA[');
+    expect(clear, '当てる前に消す処理が無い').toBeGreaterThan(-1);
+    /**
+     * ⚠ **順序が本体**である ── 消すのが後だと、当てた値まで消えて
+     * **全部の宣言が無効になる**(しかも「消す処理は在る」ので grep では通る)。
+     */
+    const apply = text.indexOf('box.setAttribute(ak,e.attrs[ak])');
+    expect(apply, '属性を当てる処理が見つからない').toBeGreaterThan(-1);
+    expect(clear, '消すのが当てるより後になっている(宣言が全部無効になる)').toBeLessThan(apply);
   });
 
   it('🔴 閲覧側が `html` fence の高さを受ける(height:0 の不可視にしない)', async () => {

@@ -5,6 +5,7 @@ import {
   extractHeadingNumberConfig,
   globalsToDataAttrs,
   applyDocumentGlobals,
+  DOCUMENT_GLOBAL_ATTRS,
 } from '../../src/features/markdown/document-globals';
 
 const body = (fm: string) => `---\n${fm}\n---\n本文`;
@@ -55,6 +56,43 @@ describe('applyDocumentGlobals', () => {
     expect(el.getAttribute('dir')).toBe('rtl'); // dir は helper の責務(付け漏れ防止)
     // globalsToDataAttrs 単体は dir を含まない(HTML attr は apply 側)
     expect(globalsToDataAttrs(g)['dir']).toBeUndefined();
+  });
+
+  /**
+   * 🔴 **前のノートの書字方向が残らない**(2026-08-06)。読む面の器は
+   * `bodyKind === 'md'` の間ずっと同じ要素を使い回すので、付けるだけだと
+   * `align: right` のノートを見た後に宣言の無いノートを開いても右寄せのままになる
+   * (縦書き・`dir` も同じ)。直す前は `removeAttribute` がどこにも無かった。
+   */
+  it('🔴 当てる前に全部消す(器を使い回しても前の文書の宣言が残らない)', () => {
+    const el = document.createElement('div');
+    applyDocumentGlobals(
+      el,
+      extractDocumentGlobals(body('writing: vertical\ndirection: rtl\nalign: bottom\nlayout: a4-2col')),
+    );
+    expect(el.getAttribute('data-pkc-doc-align')).toBe('bottom');
+    // 宣言の無いノートへ切り替える
+    applyDocumentGlobals(el, extractDocumentGlobals('宣言の無い本文'));
+    for (const k of DOCUMENT_GLOBAL_ATTRS) {
+      expect(el.hasAttribute(k), `${k} が残っている(前の文書の見え方で描かれる)`).toBe(false);
+    }
+  });
+
+  /**
+   * ⚠ **出せる key は全部消せること**。`globalsToDataAttrs` に key を足して
+   * `DOCUMENT_GLOBAL_ATTRS` に足し忘れると、その 1 つだけが残り続ける
+   * (しかも「消す処理は在る」ので目で見て気づけない)。
+   */
+  it('⚠ 出せる属性の全部が消す一覧に入っている(片方だけ足す事故を止める)', () => {
+    const all = globalsToDataAttrs(
+      extractDocumentGlobals(
+        body('writing: vertical\ndirection: rtl\nalign: bottom\nlayout: a4-2col'),
+      ),
+    );
+    // fixture 自身が「全 key 網羅」であることを assert(ゼロ件の次元を作らない)
+    expect(Object.keys(all).length).toBeGreaterThanOrEqual(4);
+    for (const k of Object.keys(all)) expect(DOCUMENT_GLOBAL_ATTRS).toContain(k);
+    expect(DOCUMENT_GLOBAL_ATTRS).toContain('dir');
   });
 });
 

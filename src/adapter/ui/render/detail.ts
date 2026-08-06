@@ -538,6 +538,16 @@ export class DetailRenderer {
         if (!preview.isConnected) return;
         const applied = applyBlocks(preview, html, shown);
         shown = applied.view;
+        /**
+         * 🔴 **プレビューにも文書 globals を当てる**(2026-08-06)。
+         * 直す前は `applyDocumentGlobals` の呼び出しが読む面の 1 か所だけで、
+         * ここと live editor には `dir` も `data-pkc-doc-align` も付かなかった ──
+         * `align: right` / `writing: vertical` / `direction: rtl` を書いた文書で
+         * **編集中と保存後の見え方が食い違う**(書いている最中は効いていない)。
+         * ⚠ 材料は **`ta.value`(frontmatter 込み)** ── 描くのに渡しているのは
+         *   frontmatter を剥がした側なので、そちらからでは globals が見えない。
+         */
+        applyDocumentGlobals(preview, extractDocumentGlobals(ta.value));
         // 🔑 **新しく入った所だけ**図を面倒みる(触っていない図はそのまま)
         if (applied.inserted.length > 0) scopes.push(hydrateMermaid(applied.inserted));
         // 🔴 **積もらせない**(P8 段⑰。レビュー H-5)── 静穏 tick ごとに塊が
@@ -696,6 +706,9 @@ export class DetailRenderer {
         // ObjectURL を revoke しない)
         if (r.inserted.length > 0) scopes.push(hydrateMermaid(r.inserted));
         pruneScopes(scopes);
+        // 文書 globals(書字方向・既定の寄せ)── 読む面と同じ見え方にする。
+        // ⚠ この面は本文をそのまま(frontmatter 込みで)描くので `body` から取る
+        applyDocumentGlobals(pane, extractDocumentGlobals(body));
       },
       (e) => {
         if (!pane.isConnected) return;
