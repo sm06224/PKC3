@@ -22,10 +22,12 @@
  *    外部 script src 禁止(`script-src 'unsafe-inline'` のみ)、
  *    `frame-src 'none'` で再帰 iframe 禁止。
  *    🔴 **「外部 fetch 禁止」は「外へ出られない」ではない**(2026-08-06 に是正)──
- *    `img-src * data: blob:` を許しているので **`new Image().src` で任意の第三者へ
- *    要求が飛ぶ**(= 「この user がこれを今読んだ」+ IP が漏れる)。直す前の
- *    このコメントは img を見落としていた。締める判断は方向 doc §2 Q3 の付帯裁定待ち
- *    (出力 HTML が変わり goldens が 1 度動くため)。
+ *    かつて `img-src * data: blob:` を無条件で許していたので **`new Image().src` で
+ *    任意の第三者へ要求が飛んだ**(= 「この user がこれを今読んだ」+ IP が漏れる)。
+ *    直す前のこのコメントは img を見落としていた。
+ *    ✅ **既定で塞ぐようにした**(2026-08-06、user 裁定)── `img-src` は
+ *    `allowExternalImages` で決まり、既定は `data: blob:` のみ。設定と同意の
+ *    意味論は `features/markdown/external-images.ts` に 1 か所で置いてある。
  *
  * 3. **referrerpolicy="no-referrer"**:iframe 内から外部 URL に飛ぶ時の referrer
  *    漏洩防止。
@@ -40,6 +42,11 @@
  *   parent は document.querySelector(`[data-pkc-html-render-id="<id>"]`) で
  *   iframe を見つけて style.height = min(height, 5000) + 'px' を set。
  */
+
+import {
+  HTML_SANDBOX_BLOCKED_MSG_TYPE,
+  imgSrcDirective,
+} from './external-images';
 
 /** iframe 高さ cap(無限スクロール abuse 防止)。 */
 export const HTML_SANDBOX_MAX_HEIGHT = 5000;
@@ -65,6 +72,13 @@ export function buildHtmlSandboxIframe(
    * 数えるのは `markdown-render.ts` の `nextFenceOccurrence`。
    */
   occurrence: number = 0,
+  /**
+   * 外部の画像を読み込ませてよいか(2026-08-06、user 裁定)。
+   * ⚠ **既定は false**(塞ぐ側)── 呼び側が渡し忘れたときに漏れるのは、
+   * 画面に何も出ないので**永久に露見しない**種類の欠陥である。逆側の
+   * 渡し忘れ(塞がる)は user に見える。
+   */
+  allowExternalImages: boolean = false,
 ): string {
   // iframe ID:DOM 内 unique(postMessage で iframe を特定)。
   // 🔴 **中身から決める**(乱数にしない ── P8 段⑩ で判明)。かつて
@@ -73,12 +87,13 @@ export function buildHtmlSandboxIframe(
   // (= iframe が毎回読み直され、中身が一度消える)。
   const iframeId = `pkc-html-render-${stableKey(content, String(occurrence))}`;
 
-  // CSP:default-src は self + data:、image は asset URI 想定で *、script は
-  // inline only(外部 src 禁止)、connect は none(fetch 禁止)、frame は none
-  // (再帰 iframe 禁止)。
+  // CSP:default-src は self + data:、script は inline only(外部 src 禁止)、
+  // connect は none(fetch 禁止)、frame は none(再帰 iframe 禁止)。
+  // 🔴 **`img-src` だけが可変**(2026-08-06)── ここが唯一「外へ出られる」穴で、
+  //    開けるかどうかは user の設定と同意で決まる(`external-images.ts`)。
   const cspContent =
     "default-src 'self' data: blob:; " +
-    "img-src * data: blob:; " +
+    `img-src ${imgSrcDirective(allowExternalImages)}; ` +
     "style-src 'self' 'unsafe-inline'; " +
     "script-src 'unsafe-inline'; " +
     "connect-src 'none'; " +
@@ -102,6 +117,18 @@ export function buildHtmlSandboxIframe(
     '}' +
     "window.addEventListener('load',post);" +
     'setTimeout(post,100);setTimeout(post,500);' +
+    // 🔴 **止めた画像の件数を親へ申告する**(2026-08-06)。
+    //    箱の中身は script なので「外部画像を出すか」は描く前には判らない ──
+    //    実際に CSP が止めた瞬間だけが確かな材料である。これが無いと
+    //    「常に確認」で箱の画像を**同意する手段が無い**(帯が出ない)。
+    //    ⚠ 件数だけ送る(止められた URL は本文の秘密を含む)。
+    //    ⚠ 1 枚ごとに送らない ── 100 枚の箱で 100 通飛ぶ。まとめて 1 通。
+    'var blocked=0,timer=0;' +
+    "document.addEventListener('securitypolicyviolation',function(ev){" +
+    "if(ev.effectiveDirective!=='img-src'&&ev.violatedDirective!=='img-src')return;" +
+    'blocked++;if(timer)return;timer=setTimeout(function(){timer=0;' +
+    "try{window.parent.postMessage({type:'" + HTML_SANDBOX_BLOCKED_MSG_TYPE +
+    "',id:id,blocked:blocked},'*');}catch(e){}},50);});" +
     '})();</script>';
 
   // 完全 HTML doc(content を body に入れる)。`<!DOCTYPE>` は付けず simple HTML
@@ -175,6 +202,37 @@ export function installHtmlSandboxResizer(targetWindow: Window = window): () => 
     const iframe = resolveSandboxSender(targetWindow.document, event.source, data.id);
     if (!iframe) return;
     iframe.style.height = `${clampSandboxHeight(data.height)}px`;
+  };
+  targetWindow.addEventListener('message', handler);
+  return () => {
+    targetWindow.removeEventListener('message', handler);
+  };
+}
+
+/**
+ * 箱が「外部画像を CSP で止めた」と申告してきたのを受ける(2026-08-06)。
+ *
+ * ⚠ **宛先の決め方は resize と同じ**(`resolveSandboxSender`)── 名乗った id では
+ * なく**実際の送り主**で引く。ここを緩めると、箱 A が箱 B の名を騙って
+ * 「B で画像が止まった」と言えてしまい、user は**在りもしない画像**の同意を
+ * 求められる(そして同意すると A の画像が読める)。
+ *
+ * @param onBlocked 止まった箱と件数。⚠ 同じ箱から**何度も来る**(件数は累計)
+ * @returns teardown function
+ */
+export function installHtmlSandboxBlockedReporter(
+  onBlocked: (iframe: HTMLIFrameElement, blocked: number) => void,
+  targetWindow: Window = window,
+): () => void {
+  const handler = (event: MessageEvent) => {
+    const data = event.data;
+    if (!data || typeof data !== 'object') return;
+    if (data.type !== HTML_SANDBOX_BLOCKED_MSG_TYPE) return;
+    if (typeof data.id !== 'string') return;
+    if (typeof data.blocked !== 'number' || !(data.blocked > 0)) return;
+    const iframe = resolveSandboxSender(targetWindow.document, event.source, data.id);
+    if (!iframe) return;
+    onBlocked(iframe, data.blocked);
   };
   targetWindow.addEventListener('message', handler);
   return () => {

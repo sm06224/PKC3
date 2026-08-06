@@ -7,11 +7,14 @@
  * (bytes は adapter の hydrator が lend/dispose で差す)。
  */
 import { describe, expect, it } from 'vitest';
-import { renderMarkdown } from '../../src/features/markdown/markdown-render';
+import {
+  renderMarkdown,
+  type RenderMarkdownOptions,
+} from '../../src/features/markdown/markdown-render';
 
-function renderToDom(md: string): HTMLElement {
+function renderToDom(md: string, opts?: RenderMarkdownOptions): HTMLElement {
   const host = document.createElement('div');
-  host.innerHTML = renderMarkdown(md);
+  host.innerHTML = renderMarkdown(md, opts);
   return host;
 }
 
@@ -67,13 +70,35 @@ describe('asset: refs in markdown (P4b)', () => {
       for (const n of el.getAttributeNames()) expect(n.startsWith('on')).toBe(false);
   });
 
-  it('通常の外部 link / image は従来どおり(退行なし)', () => {
-    const host = renderToDom('[e](https://example.com) ![i](https://example.com/i.png)');
+  it('通常の外部 link は従来どおり(退行なし)', () => {
+    const host = renderToDom('[e](https://example.com)');
     const a = host.querySelector('a:not(.pkc-asset-link)')!;
     expect(a.getAttribute('href')).toBe('https://example.com');
     expect(a.getAttribute('target')).toBe('_blank');
+  });
+
+  /**
+   * 🔴 **外部の画像は既定で読み込まない**(2026-08-06、user 裁定)。
+   *
+   * ⚠ かつてここは「`src` がそのまま載る」を「退行なし」として pin していた ──
+   * つまり**漏れることを test が守っていた**。裁定でその向きが変わったので、
+   * 両側(既定 = 塞ぐ / 許可 = 載る)を pin し直す。
+   */
+  it('外部の画像は既定で src を持たない(URL は属性に退避する)', () => {
+    const host = renderToDom('![i](https://example.com/i.png)');
+    const img = host.querySelector('img:not(.pkc-asset-ref)')!;
+    expect(img.hasAttribute('src')).toBe(false);
+    expect(img.getAttribute('data-pkc-external-src')).toBe('https://example.com/i.png');
+    expect(img.classList.contains('pkc-external-img')).toBe(true);
+    // ⚠ 器は残る(消すと「書いたのに何も無い」になる)
+    expect(img.getAttribute('alt')).toBe('i');
+    expect(img.getAttribute('loading')).toBe('lazy');
+  });
+
+  it('許可すると src が載る(同じ入力で向きだけ変わる)', () => {
+    const host = renderToDom('![i](https://example.com/i.png)', { allowExternalImages: true });
     const img = host.querySelector('img:not(.pkc-asset-ref)')!;
     expect(img.getAttribute('src')).toBe('https://example.com/i.png');
-    expect(img.getAttribute('loading')).toBe('lazy');
+    expect(img.hasAttribute('data-pkc-external-src')).toBe(false);
   });
 });

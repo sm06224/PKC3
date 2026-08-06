@@ -13,6 +13,8 @@
 import type { AppState } from '@adapter/state/app-state';
 import { APP_ID, APP_VERSION, BUILD_KIND } from '@runtime/release-meta';
 import { THEMES } from './theme';
+import { EXTERNAL_IMAGE_MODES } from '@features/markdown/external-images';
+import { appExternalImages, ExternalImagePolicy } from './external-images';
 import { appJobMonitor, type JobMonitor } from '@adapter/platform/job-monitor';
 import { ScrollMemory } from './scroll-memory';
 
@@ -36,12 +38,15 @@ export class SettingsRenderer {
   constructor(
     private readonly region: HTMLElement,
     private readonly monitor: JobMonitor = appJobMonitor,
+    /** 外部画像の設定(2026-08-06)。⚠ test は自分で `new` して渡す。 */
+    private readonly externalImages: ExternalImagePolicy = appExternalImages,
   ) {}
 
   render(state: AppState): void {
     if (this.built) {
       // 配色は user 操作でしか変わらない ── 毎 state で組み直さない
       this.syncTheme();
+      this.syncExternalImages();
       // 🔴 **隠れている間に来た変化をここで拾う**(2026-08-05、user 報告)。
       //    `refresh()` は面が hidden の間は捨てるので(下の説明)、再表示のときに
       //    誰かが呼び直さないと**表とログは初回ビルドの姿で凍る**。仕事は必ず
@@ -69,8 +74,9 @@ export class SettingsRenderer {
      * 前は「配色 1 つ + ワーカーの表 + ジョブのログ」が地続きに並んでいて、
      * 設定を開くと**画面のほとんどが計器**だった(実測: user が変えられるのは 1 つ)。
      * ⚠ **畳まない**(user 指示「主要な導線を畳まない」)── 見出しで区切るだけにする。
-     * ⚠ 設定を**増やさない** ── いま `theme.ts` は localStorage の 1 鍵しか持たず、
-     *   「増やすなら設定機構を建ててから」と自分で書いてある。ここは区分けだけ。
+     * ⚠ 設定は**節ごとに分ける**(2026-08-06 に「外部の画像」が入って 2 つになった)。
+     *   ここ「表示」は**見た目の好み**だけ ── 外へ何が伝わるかの判断は別の節に置く
+     *   (同じ場所に混ぜると、配色を選ぶ気分で押される)。
      */
     const userSection = document.createElement('section');
     userSection.setAttribute('data-pkc-region', 'settings-user');
@@ -116,11 +122,56 @@ export class SettingsRenderer {
 
     userSection.append(dl);
     body.append(userSection);
+    body.append(this.buildExternalImages());
     body.append(this.buildJobs());
     this.region.append(body);
     this.syncTheme();
+    this.syncExternalImages();
     this.refresh();
     void state;
+  }
+
+  /**
+   * 🔑 **外部の画像**(2026-08-06、user 裁定「設定で常にオン / 常に確認 /
+   * 常にオフをとりましょう」)。
+   *
+   * ⚠ **「表示」には入れない** ── これは見た目の好みではなく、**外へ何が伝わるか**の
+   *   判断である。同じ場所に混ぜると、配色を選ぶ気分で押される。
+   * ⚠ 何が起きるのかを書く ── 「外部画像を許可」だけでは判断できない。
+   */
+  private buildExternalImages(): HTMLElement {
+    const wrap = document.createElement('section');
+    wrap.setAttribute('data-pkc-region', 'settings-external-images');
+    const h = document.createElement('h3');
+    h.textContent = '外部の画像';
+    wrap.append(h);
+
+    const dl = document.createElement('dl');
+    const dt = document.createElement('dt');
+    dt.textContent = '読み込む';
+    const dd = document.createElement('dd');
+    const select = document.createElement('select');
+    select.setAttribute('data-pkc-action', 'set-external-images');
+    select.setAttribute('data-pkc-field', 'external-images-select');
+    select.setAttribute('aria-label', '外部の画像を読み込む');
+    for (const m of EXTERNAL_IMAGE_MODES) {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = m.label;
+      select.append(opt);
+    }
+    dd.append(select);
+    const note = document.createElement('p');
+    note.setAttribute('data-pkc-field', 'settings-note');
+    note.textContent =
+      '本文に書かれた外部の画像(https:// で始まるもの)と、HTML ブロックの中の画像です。' +
+      '読み込むと、相手のサーバーに「この端末がいまこれを開いた」ことが伝わります。' +
+      '「常に確認」ではノートごとに聞き、答えはタブを閉じるまで覚えます。' +
+      '書き出した HTML に画像が入るのは「常にオン」のときだけです。';
+    dd.append(note);
+    dl.append(dt, dd);
+    wrap.append(dl);
+    return wrap;
   }
 
   /**
@@ -276,6 +327,19 @@ export class SettingsRenderer {
    * の 2 つで足りている。**呼ばれないのに purpose を主張するメソッド**は、
    * 次に読む人に「畳めば止まる」と誤解させるので消した。
    */
+
+  /**
+   * ⚠ 画面の値を**いまの設定に合わせる**(2026-08-06)。合わせないと、
+   * 設定を変えた後に別の面へ行って戻ってきたとき、選択肢が**古い値のまま**見える
+   * ── そして user は「変えたのに戻っている」と読む(`syncTheme` と同じ理由)。
+   */
+  private syncExternalImages(): void {
+    const select = this.region.querySelector<HTMLSelectElement>(
+      '[data-pkc-field="external-images-select"]',
+    );
+    const cur = this.externalImages.getMode();
+    if (select && select.value !== cur) select.value = cur;
+  }
 
   /** ⚠ 画面の値を**いまの配色に合わせる**(合わせないと画面が嘘をつく)。 */
   private syncTheme(): void {

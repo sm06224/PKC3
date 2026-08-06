@@ -74,6 +74,17 @@ export interface BinderServices {
   launchAsset?(lid: string, opts: { sameOrigin: boolean }): void;
   /** 配色を切り替える(P7b 段⑨c)。⚠ user の好みで、flag でも container でもない。 */
   setTheme?(theme: string): void;
+  /**
+   * 外部の画像を読み込むかの設定(2026-08-06、user 裁定)。
+   * ⚠ 「常にオン / 常に確認 / 常にオフ」の 3 択。⚠ flag ではない(正規設定)。
+   */
+  setExternalImages?(mode: string): void;
+  /**
+   * いま開いているノートについて答えた(「常に確認」の帯の 2 つのボタン)。
+   * ⚠ **ノート単位**で、覚えるのはタブを閉じるまで。⚠ 設定は変えない ──
+   *   1 件の判断で全ノートの既定を動かさない。
+   */
+  answerExternalImages?(allow: boolean): void;
   /** 左の列の探し方(一覧 / フォルダ / アプリ)。⚠ 中央のビューとは別の軸(P8 段⑤)。 */
   setBrowse?(mode: string): void;
   /** 新しい版に交代する(P7 段⑤)。⚠ 交代を頼むだけ ── 再読込は交代後。 */
@@ -620,6 +631,20 @@ const ACTIONS: Record<string, ActionHandler> = {
         ? target.value
         : target.getAttribute('data-pkc-theme-value');
     if (theme) services.setTheme?.(theme);
+  },
+  'set-external-images': (_dispatcher, target, services) => {
+    // ⚠ `set-theme` と同じ受け方(`<select>` でもボタンでも通す)
+    const mode =
+      target instanceof HTMLSelectElement
+        ? target.value
+        : target.getAttribute('data-pkc-external-images-value');
+    if (mode) services.setExternalImages?.(mode);
+  },
+  'allow-external-images': (_dispatcher, _target, services) => {
+    services.answerExternalImages?.(true);
+  },
+  'deny-external-images': (_dispatcher, _target, services) => {
+    services.answerExternalImages?.(false);
   },
   'apply-update': (_dispatcher, _target, services) => {
     services.applyUpdate?.();

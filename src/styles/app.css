@@ -1570,6 +1570,25 @@ select:focus-visible {
   min-height: 1em;
 }
 
+/* 🔴 **読み込んでいない外部画像は「在る」と見える形で置く**(2026-08-06、user 裁定)。
+ *
+ * `src` を外した `<img>` は**寸法 0**で、何も無いのと区別が付かない ── 本文に
+ * 画像を書いた人が「消えた」と読む。だから器の寸法と枠をここで与える。
+ * ⚠ 掛かり先は **`:not([src])`** ── 同意が出て `src` が入った瞬間に、この見た目は
+ *   自動で外れる(2 つ目の class を付け外しする必要が無い)。
+ * ⚠ 同じ規則が**書出し HTML の VIEWER にも要る**(`pkc3-html.ts` の inline style)。
+ *   片面だけ直すと、書き出した文書で画像が消えて見える。 */
+.pkc-md-rendered .pkc-external-img:not([src]) {
+  display: inline-block;
+  min-width: 8rem;
+  min-height: 3rem;
+  max-width: 100%;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  vertical-align: middle;
+}
+
 /* 🔴 **チェック欄は押せない見た目にする**(P8 段⑳)。押しても本文は 1 文字も
  *    変わらないので、押せる形で出すと「チェックしたのに消えた」になる
  *    ── 実装は `markdown-render.ts` 側で `disabled` を付ける */

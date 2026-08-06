@@ -13,13 +13,17 @@ import {
 } from '@adapter/platform/storage/store-port';
 import { acquireWriterLease } from '@adapter/platform/storage/writer-lease';
 import type { InitResult } from '@adapter/platform/storage/protocol';
-import { installHtmlSandboxResizer } from '@features/markdown/html-sandbox';
+import {
+  installHtmlSandboxBlockedReporter,
+  installHtmlSandboxResizer,
+} from '@features/markdown/html-sandbox';
 import { AssetBlobStore } from '@adapter/platform/storage/asset-blob-store';
 import { runExplicitPurge } from '@adapter/platform/storage/asset-gc';
 import { buildShell } from '@adapter/ui/render/shell';
 import { showNotices, clearNotices } from '@adapter/ui/render/notices';
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
 import { applyTheme, chooseTheme, initialTheme, isTheme } from '@adapter/ui/render/theme';
+import { appExternalImages } from '@adapter/ui/render/external-images';
 import { launchTile } from '@adapter/ui/launch-tile';
 import { readAppStorage } from '@adapter/platform/app-storage';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
@@ -336,6 +340,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         //    件数ぶんメインスレッドで描くことになる
         // ⚠ opts を素通しする(vars / 見出し番号 ── user 報告 2-7)
         renderBody: (text, opts) => markdown.render(text, opts),
+        /**
+         * 🔴 **書き出す HTML に外部画像を焼くのは「常にオン」のときだけ**
+         * (2026-08-06、user 裁定)。⚠ ノートごとの同意(`allows(lid)`)は
+         * **使わない** ── 書き出した HTML は**別の人が開く文書**であり、
+         * 開いた人は追跡に同意していない。URL は属性に残るので情報は失われない。
+         */
+        allowExternalImages: appExternalImages.getMode() === 'always',
       };
       // 1 ノートだけの書出しも**同じ実行部・同じ形式**を通る(P6f)──
       // 別経路にすると「1 件書出しだけ壊れている」が起きる
@@ -681,6 +692,28 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     setTheme: (theme) => {
       if (isTheme(theme)) chooseTheme(document.documentElement, theme);
     },
+    /**
+     * 🖼 外部の画像(2026-08-06、user 裁定「常にオン / 常に確認 / 常にオフ」)。
+     * ⚠ 変えたら**いま開いているノートを描き直す** ── 描き直さないと、
+     *   「常にオフ」にしても見ているノートの画像は出たままで、設定が嘘になる。
+     * ⚠ state は動かないので dispatcher の通知は来ない ── ここで直接描く
+     *   (`setBrowse` と同じ作法)。
+     */
+    setExternalImages: (mode) => {
+      if (!appExternalImages.setMode(mode)) return;
+      center.invalidateDetail();
+      center.render(dispatcher.getState());
+    },
+    /** 帯の「このノートで読み込む」「読み込まない」。⚠ 設定は変えない。 */
+    answerExternalImages: (allow) => {
+      const lid = dispatcher.getState().selectedLid;
+      if (!lid) return;
+      if (!appExternalImages.answer(lid, allow ? 'allow' : 'deny')) return;
+      // ⚠ 箱の申告は数え直す(許可すれば止まらなくなる / 拒否なら帯は消える)
+      appExternalImages.forgetBlockedBoxes(lid);
+      center.invalidateDetail();
+      center.render(dispatcher.getState());
+    },
     // 🔑 探し方の切替(P8 段⑤)。⚠ **state には持たせない** ── これは
     // 「どう探すか」という画面側の都合で、container のデータではない
     setBrowse: (mode) => {
@@ -787,6 +820,19 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   // ⚠ 別 document の surface(Viewer popup 等、P3-8)には効かない ── その
   // document ごとに再結線が要る(PKC2 で entry-window が高さ 0 のままだった教訓)
   installHtmlSandboxResizer();
+  /**
+   * 🔴 **箱が「外部画像を止めた」と言ってきたら帯を出す**(2026-08-06)。
+   *
+   * 箱の中身は script なので、外部画像を出すかは**描く前には判らない** ──
+   * 実際に CSP が止めた瞬間だけが確かな材料である。これが無いと「常に確認」で
+   * 箱の画像を**同意する手段が無い**(聞く材料が無いので帯が出ない)。
+   * ⚠ どのノートの箱かは **いま選んでいるノート**で決める ── 箱は選択中の
+   *   ノートの本文にしか居ない(別ノートの箱は DOM に無い)。
+   */
+  installHtmlSandboxBlockedReporter((_iframe, blocked) => {
+    const lid = dispatcher.getState().selectedLid;
+    if (lid) center.noteBlockedBox(lid, blocked);
+  });
   connectStoreEffects(dispatcher, createStorePort(client, DEFAULT_CID));
 
   dispatcher.dispatch({

@@ -40,6 +40,12 @@ export interface ExportDeps {
    * (user 指示 2026-08-03「基本的に重い処理はワーカーにしてください」)。
    */
   renderBody?(text: string, opts?: RenderMarkdownOptions): Promise<string>;
+  /**
+   * 書き出す HTML に外部画像を焼くか(2026-08-06、user 裁定)。
+   * ⚠ **設定が「常にオン」のときだけ true** ── 判断は `main.ts` が持つ。
+   *   ノートごとの同意は持ち込まない(書き出した HTML は別の人が開く)。
+   */
+  allowExternalImages?: boolean;
 }
 
 
@@ -121,7 +127,7 @@ export async function exportArchive(
     let name: string;
     let detail: string;
     if (kind === 'html') {
-      out = await writePortableHtml(deps.source, iso, deps.renderBody);
+      out = await writePortableHtml(deps.source, iso, deps.renderBody, deps.allowExternalImages === true);
       name = `${base}.html`;
       // ⚠ **可逆ではない**ことをその場で言う(後から見分けられない形にしない ──
       // PKC2 は light / full の別を manifest にしか書いておらず user が困っていた)

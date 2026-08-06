@@ -26,6 +26,13 @@ import { parseFrontmatter, extractVars } from '../../src/features/markdown/front
  *      CSS の規則は `height: calc(1.45em * var(--pkc-blank-count, 1))` で**この変数**を
  *      読むのに、出力側は属性しか書いておらず、**`_3` と `_1` が同じ高さ**だった。
  *      PKC2 も同じ形なので、これは PKC2 のバグをそのまま引いていた箇所である。
+ *   3. **外部の画像を既定で読み込まない**(2026-08-06、user 裁定)。本文の `img` は
+ *      `src` を `data-pkc-external-src` へ退避し、` ```html` の箱の CSP は
+ *      `img-src` を `data: blob:` に絞る。PKC2 は無条件に読み込んでいた ──
+ *      ノートを開いた瞬間に「この端末がいまこれを開いた」が第三者へ飛ぶ形である。
+ *      動いた golden は `snippet-figure-ref`(本文の画像)と `snippet-html-fence`(箱)。
+ *      ⚠ `reform-stress-sample` の `pkc://asset/…` は**動かない** ── PKC 自身の
+ *        scheme は要求を飛ばさないので「外」ではない(嘘の確認を出さないため)。
  *
  * 🔴 **golden は「PKC2 と同じ」を守る道具であって、「正しい」を守る道具ではない。**
  * PKC2 のバグはそのまま期待値になる ── 実際、csv fence のセルに脚注が漏れる件
@@ -133,11 +140,13 @@ describe('PKC-Markdown golden parity vs PKC2 (25 cases)', () => {
    * 🔑 この test が守っているのは件数ではなく「**理由なしに golden を採り直せない**」こと ──
    * 実際、私は理由を書いて採り直したが、その理由が誤りだった。件数だけでは止められない。
    */
-  it('🔴 PKC2 と分岐した case は理由つきで 2 件だけ', () => {
+  it('🔴 PKC2 と分岐した case は理由つきで 4 件だけ', () => {
     const diverged = goldens.cases.filter((c) => c.pkc3Diverges);
     expect(diverged.map((c) => c.name).sort()).toEqual([
       'full-pkc-fixture',
       'full-pkc-fixture-anchors',
+      'snippet-figure-ref',
+      'snippet-html-fence',
     ]);
     for (const c of diverged) {
       expect(c.pkc3Diverges!.since, `${c.name} に分岐した日付が無い`).toMatch(/^\d{4}-\d{2}-\d{2}$/);
