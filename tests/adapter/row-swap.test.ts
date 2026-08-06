@@ -732,8 +732,12 @@ describe('RowSwap — 組めない本文', () => {
     const host = document.createElement('div');
     document.body.append(host);
     const swap = new RowSwap(host, { commit: vi.fn() });
-    // 入れ子の `:::`(今日の描画が壊れている ── 設計 §7-9)
-    const body = [':::section', '', ':::note', '', '中身', '', ':::', '', ':::', ''].join('\n');
+    /**
+     * ⚠ 入れ子の `:::` は 2026-08-06 に直った(= もう組める)ので、**別の実物**を使う。
+     * `:::figure` は id が必須で、無い形は renderer が literal のまま残す ──
+     * 走査器だけが囲いと見なすので食い違い、開かない側に倒れる。
+     */
+    const body = [':::figure', '', '本文', '', ':::', '', 'あと', ''].join('\n');
     const { html, ranges } = renderMarkdownWithRanges(body);
     const out = swap.update(body, html, ranges);
     expect(out.ok).toBe(false);

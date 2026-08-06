@@ -2312,6 +2312,22 @@ function processSectionBlocks(source: string, lineMapIn: number[]): {
   const lineMapOut: number[] = [];
   let counter = 0;
   let fence: FenceState = { inFence: false, marker: '' };
+  /**
+   * 🔴 **開いている `:::` を数える**(2026-08-06 の bug fix)。
+   *
+   * 直す前は「開いたら**最初に出会った `:::` まで**を中身にする」平坦な走査だった。
+   * だから `:::section` の中に `:::note` を書くと:
+   *  ① 内側の開き行が**本文として素通り**して `<p>:::section{role=note}</p>` になり
+   *  ② 内側の閉じが**外側の閉じ**として使われ
+   *  ③ 外側の閉じが最上位に残って `<p>:::</p>` として漏れていた(実測)
+   *
+   * ⚠ 数えるのは **`section` に限らずすべての `:::name`** である ── `:::details` や
+   * `:::toc` も閉じ `:::` を消費するので、自分の種類だけ数えると他人の閉じを
+   * 自分の閉じとして食う(混在した入れ子で同じ壊れ方をする)。
+   * ⚠ 他人の開き / 閉じは**そのまま流す** ── 後段の `processDetailsBlocks` 等が
+   * 自分で処理する(ここで手を出すと担当が 2 か所になる)。
+   */
+  const stack: ({ kind: 'section'; id: number; inputIdx: number } | { kind: 'other' })[] = [];
   let i = 0;
   while (i < lines.length) {
     const line = lines[i]!;
@@ -2324,8 +2340,33 @@ function processSectionBlocks(source: string, lineMapIn: number[]): {
       i++;
       continue;
     }
+    // 閉じ ── いちばん内側の開きに対応させる
+    if (stack.length > 0 && isBlockDirectiveClose(line)) {
+      const top = stack.pop()!;
+      if (top.kind === 'section') {
+        out.push('');
+        lineMapOut.push(inputIdx);
+        out.push(
+          `${SECTION_SENTINEL_OPEN}${top.id}${SECTION_SENTINEL_SEP}CLOSE${SECTION_SENTINEL_OPEN}`,
+        );
+        lineMapOut.push(inputIdx);
+      } else {
+        out.push(line); // 他の directive の閉じ ── 後段へ渡す
+        lineMapOut.push(inputIdx);
+      }
+      i++;
+      continue;
+    }
     const open = parseBlockDirectiveOpen(line);
-    if (!open || open.name !== 'section') {
+    if (!open) {
+      out.push(line);
+      lineMapOut.push(inputIdx);
+      i++;
+      continue;
+    }
+    if (open.name !== 'section') {
+      // 他の directive ── 中身も閉じもそのまま流すが、**閉じは数える**
+      stack.push({ kind: 'other' });
       out.push(line);
       lineMapOut.push(inputIdx);
       i++;
@@ -2343,23 +2384,25 @@ function processSectionBlocks(source: string, lineMapIn: number[]): {
     counter++;
     const id = counter;
     registry.set(id, { role, attrs: open.attrs });
-    const openInputIdx = inputIdx;
-    i++;
+    stack.push({ kind: 'section', id, inputIdx });
     out.push(`${SECTION_SENTINEL_OPEN}${id}${SECTION_SENTINEL_SEP}OPEN${SECTION_SENTINEL_OPEN}`);
-    lineMapOut.push(openInputIdx);
+    lineMapOut.push(inputIdx);
     out.push('');
-    lineMapOut.push(openInputIdx);
-    while (i < lines.length && !isBlockDirectiveClose(lines[i]!)) {
-      out.push(lines[i]!);
-      lineMapOut.push(lineMapIn[i] ?? i);
-      i++;
-    }
-    const closeInputIdx = i < lines.length ? (lineMapIn[i] ?? i) : openInputIdx;
-    if (i < lines.length) i++;
+    lineMapOut.push(inputIdx);
+    i++;
+  }
+  /**
+   * ⚠ 閉じ忘れは**末尾で閉じる**(HTML を壊さない)。直す前の実装も
+   * 「閉じが無ければ末尾まで飲んで閉じる」だったので、そこは変えていない。
+   */
+  while (stack.length > 0) {
+    const top = stack.pop()!;
+    if (top.kind !== 'section') continue;
+    const last = lineMapIn[lines.length - 1] ?? top.inputIdx;
     out.push('');
-    lineMapOut.push(closeInputIdx);
-    out.push(`${SECTION_SENTINEL_OPEN}${id}${SECTION_SENTINEL_SEP}CLOSE${SECTION_SENTINEL_OPEN}`);
-    lineMapOut.push(closeInputIdx);
+    lineMapOut.push(last);
+    out.push(`${SECTION_SENTINEL_OPEN}${top.id}${SECTION_SENTINEL_SEP}CLOSE${SECTION_SENTINEL_OPEN}`);
+    lineMapOut.push(last);
   }
   return { transformed: out.join('\n'), registry, lineMap: lineMapOut };
 }

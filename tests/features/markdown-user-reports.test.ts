@@ -91,3 +91,106 @@ describe('文書内アンカーは別タブを開かない', () => {
     expect(renderMarkdown('[a](asset:k1)')).toContain('download-asset');
   });
 });
+
+/**
+ * 🔴 **入れ子の `:::` が壊れていた**(2026-08-06 に直した既存バグ)。
+ *
+ * `processSectionBlocks` は「開いたら**最初に出会った `:::` まで**を中身にする」
+ * 平坦な走査だった。だから `:::section` の中に `:::note` を書くと:
+ *  ① 内側の開き行が**本文として素通り**して `<p>:::section{role=note}</p>` になり
+ *  ② 内側の閉じが**外側の閉じ**として使われ
+ *  ③ 外側の閉じが最上位に残って `<p>:::</p>` として漏れていた
+ *
+ * ⚠ `:::toc` の件(上)と**同じ形の欠陥**である ── 「1 個ぶんしか数えない走査」。
+ * ⚠ ライブエディタでは、この食い違いのせいで**行の差し替えが開けなかった**
+ * (分割の検証が落ちて今日の編集画面へ退避していた)。
+ */
+describe('入れ子の `:::` が壊れない', () => {
+  it('🔴 `:::section` の中の `:::note` が入れ子の `<section>` になる', () => {
+    const html = renderMarkdown(':::section\n\n:::note\n\n中身\n\n:::\n\n:::\n', {
+      silentHallucinationWarnings: true,
+    });
+    // 内側が literal の段落になっていない(直す前はここが `<p>:::section{role=note}</p>`)
+    expect(html).not.toContain('<p>:::');
+    expect(html).not.toContain(':::section{role=note}');
+    // 外側の閉じが漏れていない(直す前はここが `<p>:::</p>`)
+    expect(html).not.toMatch(/<p>:::<\/p>/);
+    // 入れ子になっている ── 外側 generic の中に内側 note
+    const outer = html.indexOf('pkc-section-generic');
+    const inner = html.indexOf('pkc-section-note');
+    expect(outer, '外側の section が無い').toBeGreaterThanOrEqual(0);
+    expect(inner, '内側の section が無い').toBeGreaterThan(outer);
+    expect(textOf(html)).toContain('中身');
+  });
+
+  it('🔴 入れ子の後ろに書いた本文が飲まれない', () => {
+    const html = renderMarkdown(':::section\n\n:::note\n\n中\n\n:::\n\n:::\n\nあとがき\n', {
+      silentHallucinationWarnings: true,
+    });
+    // `あとがき` が section の**外**に在る(飲まれていない)
+    const close = html.lastIndexOf('</section>');
+    expect(close).toBeGreaterThan(0);
+    expect(html.slice(close), 'あとがき が section の中に飲まれた').toContain('あとがき');
+  });
+
+  it('3 段の入れ子も段数どおりに組む', () => {
+    const html = renderMarkdown(
+      ':::section\n\n:::section\n\n:::section\n\n芯\n\n:::\n\n:::\n\n:::\n\n後\n',
+      { silentHallucinationWarnings: true },
+    );
+    expect((html.match(/<section /g) ?? []).length).toBe(3);
+    expect((html.match(/<\/section>/g) ?? []).length).toBe(3);
+    expect(html).not.toContain('<p>:::');
+  });
+
+  /**
+   * 🔴 **閉じの取り違えは「タグの入れ子の順序」で見る**(2026-08-06 の変異試験で
+   * 分かった)。1 巡目は `<details` が在るか / `あと` が外に在るかだけを見ていて、
+   * **2 件の変異が生き延びた** ── 閉じを取り違えると後段の `processDetailsBlocks` が
+   * **section の閉じごと `<details>` の中に巻き込む**ので、下流の見た目
+   * (`<details>` が在る・`あと` が外に在る)は**どちらも成立してしまう**。
+   * ⚠ CLAUDE.md「下流の結果だけを見る test は、別経路が救って変異を見逃す」の実例。
+   */
+  it('🔴 他の種類の `:::` を跨いでも、閉じを取り違えない', () => {
+    const html = renderMarkdown(
+      ':::section\n\n:::details{summary=あ}\n\n中\n\n:::\n\n:::\n\nあと\n',
+      { silentHallucinationWarnings: true },
+    );
+    expect(html).toContain('<details');
+    expect(html).not.toContain('<p>:::');
+    // 🔴 **開いた順の逆で閉じる** ── section の閉じが details の中に入っていない
+    const sOpen = html.indexOf('<section ');
+    const dOpen = html.indexOf('<details');
+    const dClose = html.indexOf('</details>');
+    const sClose = html.indexOf('</section>');
+    expect(sOpen, 'section が無い').toBeGreaterThanOrEqual(0);
+    expect(dOpen, 'details が section より前に在る').toBeGreaterThan(sOpen);
+    expect(dClose, 'details が閉じていない').toBeGreaterThan(dOpen);
+    expect(sClose, 'section の閉じが details の中に巻き込まれた').toBeGreaterThan(dClose);
+    const close = html.lastIndexOf('</section>');
+    expect(html.slice(close), 'あと が section の中に飲まれた').toContain('あと');
+  });
+
+  it('閉じ忘れは末尾で閉じる(HTML を壊さない)', () => {
+    const html = renderMarkdown(':::section\n\n中身\n', { silentHallucinationWarnings: true });
+    expect((html.match(/<section /g) ?? []).length).toBe(1);
+    expect((html.match(/<\/section>/g) ?? []).length).toBe(1);
+  });
+
+  it('開いていないところの `:::` はそのまま文字として出る(挙動を変えていない)', () => {
+    const html = renderMarkdown('本文\n\n:::\n\nあと\n', { silentHallucinationWarnings: true });
+    expect(html).toContain('<p>:::</p>');
+    expect(html).not.toContain('<section');
+  });
+
+  it('fence の中の `:::` は数えない', () => {
+    const html = renderMarkdown(':::section\n\n```\n:::\n```\n\n:::\n\nあと\n', {
+      silentHallucinationWarnings: true,
+    });
+    expect((html.match(/<section /g) ?? []).length).toBe(1);
+    // コードの中身として `:::` が残っている
+    expect(html).toMatch(/<code[^>]*>[\s\S]*:::/);
+    const close = html.lastIndexOf('</section>');
+    expect(html.slice(close)).toContain('あと');
+  });
+});
