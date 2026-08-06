@@ -12,6 +12,7 @@ import { withTodoStatus } from '@features/flavor/todo-flavor';
 import { appendBlock } from '@features/markdown/text-ops';
 import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
 import { buildTiles, type TileSource } from '@features/launcher/tiles';
+import type { Relation } from '@core/model/entry-meta';
 import type { Dispatcher } from './dispatcher';
 
 /**
@@ -58,6 +59,14 @@ export interface StorePort {
    * ⚠ 1 op = 1 tx ── 「落として張る」を割らない。
    */
   setEntryParent(lid: string, parentLid: string | null, relationId: string): Promise<void>;
+  /**
+   * 🔴 **関係を読む**(2026-08-06。ゴミ箱からの復元で居場所を戻すために要る)。
+   *
+   * `deleteEntry` は relations を消さない(戻せなくなるので)が、**常駐の
+   * `state.relations` からは落ちている** ── 復元のときに disk から読み直さないと
+   * 「戻したのにフォルダの外に出ている」になる(user 報告 2-9)。
+   */
+  listRelations(): Promise<Array<{ id: string; kind: string; from_lid: string; to_lid: string }>>;
   listRevisionMetas(entryLid: string): Promise<
     Array<{
       id: string;
@@ -486,6 +495,33 @@ export function connectStoreEffects(
               date: ext.date,
               archived: ext.archived,
             });
+            /**
+             * 🔴 **居場所も一緒に戻す**(2026-08-06。user 報告 2-9)。
+             *
+             * `deleteEntry` は disk の relations を消さない(消すと戻せない)が、
+             * 常駐の `state.relations` からは落ちている ── ここで読み直さないと
+             * 「ゴミ箱から戻したのにフォルダの外に出ている」になる。
+             * ⚠ **その entry に触るものだけ**渡す(全件を撒くと、他で消された
+             *   関係が復活しうる)。
+             * ⚠ 読めなくても復元は続ける ── 居場所が戻らないより、entry が
+             *   戻らないほうが痛い。
+             */
+            let restored: Relation[] = [];
+            try {
+              const rows = await store.listRelations();
+              restored = rows
+                .filter((r) => r.from_lid === ev.entryLid || r.to_lid === ev.entryLid)
+                .map((r) => ({
+                  id: r.id,
+                  kind: r.kind,
+                  fromLid: r.from_lid,
+                  toLid: r.to_lid,
+                  createdAt: null,
+                  updatedAt: null,
+                }));
+            } catch {
+              /* 関係が読めなくても entry の復元は進める */
+            }
             if (!disposed)
               dispatcher.dispatch({
                 type: 'ENTRY_RESTORED',
@@ -502,6 +538,7 @@ export function connectStoreEffects(
                   archived: ext.archived,
                 },
                 body: rev.body,
+                relations: restored,
               });
             // ⚠ `ENTRY_RESTORED` の後(meta を置き換えるため)
             stamp(ev.entryLid, stamps);

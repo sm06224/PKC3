@@ -194,3 +194,56 @@ describe('入れ子の `:::` が壊れない', () => {
     expect(html.slice(close)).toContain('あと');
   });
 });
+
+/**
+ * 🔴 **csv/tsv の各セルに文書の脚注が漏れる**(2026-08-06 に直した。user 報告 2-1)。
+ *
+ * 直す前は `md.renderInline(text, env)` で**文書の env をセルへ共有**していた。
+ * `markdown-it-footnote` の `footnote_tail` は core rule なので `renderInline` でも
+ * 走り、**セルごとに文書の脚注セクションを丸ごと吐いていた**。
+ *
+ * 実測(4 セルの表): `<section class="footnotes">` が **5 個** / `id="fn1"` も **5 個**。
+ * ⚠ 害は 2 つ:**DOM id の重複**で `[^a]` のジャンプ先が表の中のセルになる /
+ *   文書側の脚注が**中身を失って空**になる(セルが先に食う)。
+ * ⚠ この振る舞いは **golden が PKC2 のバグごと固定**していた(2 件を理由つきで更新)。
+ */
+describe('csv/tsv のセルに文書の脚注が漏れない', () => {
+  const src = '本文[^a]\n\n```csv\nあ,い\n1,2\n```\n\n[^a]: 注の中身\n';
+
+  it('🔴 脚注セクションは文書に 1 個だけ', () => {
+    const html = renderMarkdown(src, { silentHallucinationWarnings: true });
+    expect((html.match(/class="footnotes"/g) ?? []).length, 'セルへ漏れている').toBe(1);
+    expect((html.match(/class="footnotes-sep"/g) ?? []).length).toBe(1);
+  });
+
+  it('🔴 DOM id が重複しない(`[^a]` のジャンプ先が表の中にならない)', () => {
+    const html = renderMarkdown(src, { silentHallucinationWarnings: true });
+    expect((html.match(/id="fn1"/g) ?? []).length, 'id が重複している').toBe(1);
+    expect((html.match(/id="fnref1"/g) ?? []).length).toBe(1);
+  });
+
+  it('🔴 文書側の脚注が中身を持つ(セルに食われていない)', () => {
+    const html = renderMarkdown(src, { silentHallucinationWarnings: true });
+    const at = html.indexOf('id="fn1"');
+    expect(at).toBeGreaterThan(0);
+    expect(html.slice(at, at + 200), '脚注の本文が空になっている').toContain('注の中身');
+  });
+
+  it('セルの中の inline markup は今までどおり描く(env を切っても機能が落ちていない)', () => {
+    const html = renderMarkdown('```csv\n**太字**,`コード`\nあ,い\n```\n', {
+      silentHallucinationWarnings: true,
+    });
+    expect(html).toContain('<strong>太字</strong>');
+    expect(html).toContain('<code>コード</code>');
+  });
+
+  it('セルは表の外の脚注参照も literal にしない(参照そのものは描ける)', () => {
+    // ⚠ セルの中の `[^a]` は**定義がセル側の env に無い**ので literal で出る ──
+    //    それが正しい(セルは独立した断片であって、文書の脚注表を持たない)
+    const html = renderMarkdown('```csv\nあ[^a],い\n1,2\n```\n\n[^a]: 注\n', {
+      silentHallucinationWarnings: true,
+    });
+    const td = html.slice(html.indexOf('<td'), html.indexOf('</td>') + 5);
+    expect(td, 'セルが脚注セクションを吐いている').not.toContain('class="footnotes"');
+  });
+});

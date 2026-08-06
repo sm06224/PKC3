@@ -115,9 +115,21 @@ async function initStorage(promoted: boolean): Promise<{
   return { client, init };
 }
 
+/**
+ * 🔴 **boot が握った書込 lease**(2026-08-06。user 報告 2-14)。
+ *
+ * boot が失敗しても lease は握られたままだった(`release()` の呼び出しが
+ * src に **0 件**)。そのタブを閉じるまで、**他のタブは
+ * 「別のタブで開いています」から永久に進めない**(実測)。
+ * ⚠ タブを閉じれば browser が返すので、漏れるのは**失敗したまま開き続ける**場合だけ
+ * ── だがそれは「起動に失敗しました」の画面を見ている user そのものである。
+ */
+let bootLease: { release(): void } | null = null;
+
 /** boot(設計メモ §1): lease → worker init → メタ一覧(body 非読込)→ SYS_BOOTED。 */
 export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const lease = acquireWriterLease();
+  bootLease = lease;
   const promoted = !(await lease.immediate);
   if (promoted) {
     root.textContent = '別のタブで開いています。そのタブを閉じると、ここで続きが開きます…';
@@ -873,8 +885,26 @@ function bootstrap(): void {
       // ⚠ 失敗しても「boot は終わった」── 勝手な読み直しで理由が消えると、
       // user は何が起きたか分からないまま同じ画面を見続ける
       preboot?.booted();
+      /**
+       * 🔴 **握った書込 lease を返す**(user 報告 2-14)。返さないと、この失敗した
+       * タブが開いている間ずっと**他のタブが待たされる**。
+       */
+      bootLease?.release();
+      bootLease = null;
       const message = e instanceof Error ? e.message : String(e);
-      root.textContent = `起動に失敗しました: ${message}`;
+      /**
+       * 🔴 **OS から渡されたファイルを黙って消さない**(同 2-14)。
+       *
+       * 受け口(`armLaunchQueue`)は成功側にしか張っていない ── これは**正しい**
+       * (張ると LaunchParams が consume され、取りこぼしの責任が browser から
+       * アプリへ移る。失敗側で consume したらファイルは本当に消える)。
+       * ⚠ だから**消えていないことを伝える** ── 直して読み直せば渡ってくる。
+       */
+      const handoff =
+        'launchQueue' in window
+          ? '\n(ファイルから開いた場合、そのファイルはまだ渡されていません。原因を直して読み直すと開きます)'
+          : '';
+      root.textContent = `起動に失敗しました: ${message}${handoff}`;
       // ⚠ boot が失敗しても登録はする ── 次回この人がオフラインで開けるかは
       // 登録が済んでいるかで決まる(段⑤ の意図。競合を避けて失敗側にも置いた)
       void registerSw();

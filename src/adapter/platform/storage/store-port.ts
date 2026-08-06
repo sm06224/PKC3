@@ -75,6 +75,7 @@ export function createStorePort(client: StoreClient, cid: string): StorePort {
     setEntryParent: async (lid, parentLid, relationId) => {
       await client.request({ op: 'setEntryParent', cid, lid, parentLid, relationId });
     },
+    listRelations: () => client.request({ op: 'listRelations', cid }),
     listRevisionMetas: (entryLid) =>
       client.request({ op: 'listRevisionMetas', cid, entryLid }),
     getRevision: (revId) => client.request({ op: 'getRevision', cid, id: revId }),

@@ -361,3 +361,144 @@ describe('🔴 ゴミ箱一覧の後着(P8 段⑪ hotfix)', () => {
     expect(state.trashPanel?.items.map((t) => t.entryLid), '戻したものが生き返った').toEqual(['y']);
   });
 });
+
+/**
+ * 🔴 **ゴミ箱から戻したら、居場所と並びも戻る**(2026-08-06。user 報告 2-9)。
+ *
+ * 直す前は 2 つとも失われていた:
+ *  ① **親リンク**(フォルダ)── `deleteEntry` は disk の relations を消さないのに、
+ *    復元が読み直していなかったので **常駐から永久に消えた**(= フォルダの外に出る)
+ *  ② **位置** ── `[...order, lid]` で **末尾に飛んだ**
+ *
+ * ⚠ 観測点は「entry が戻ったか」ではない ── 戻るのは直す前もそうだった。
+ *   **どこに戻ったか**(親リンクと並びの位置)を見る。
+ */
+describe('ゴミ箱からの復元: 居場所と並びが戻る', () => {
+  const rel = (id: string, from: string, to: string) => ({
+    id,
+    kind: 'structural',
+    from_lid: from,
+    to_lid: to,
+  });
+
+  function bootWithFolder(port: Partial<StorePort> = {}) {
+    const d = new Dispatcher();
+    connectStoreEffects(d, {
+      ...stubRevisionOps(),
+      getBody: async () => '',
+      persistEntry: async () => stubStamps(),
+      deleteEntry: async () => {},
+      setEntryParent: async () => {},
+      ...port,
+    });
+    // 並び: a(1) / 消える child(2) / z(3)。child は folder の中に居る
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [
+        meta('folder', { entryOrder: 0, archetype: 'folder' }),
+        meta('a', { entryOrder: 1 }),
+        meta('child', { entryOrder: 2 }),
+        meta('z', { entryOrder: 3 }),
+      ],
+      relations: [
+        { id: 'r1', kind: 'structural', fromLid: 'folder', toLid: 'child', createdAt: null, updatedAt: null },
+      ],
+    });
+    return d;
+  }
+
+  it('🔴 親リンクが戻る(フォルダの外に出ない)', async () => {
+    const d = bootWithFolder({ listRelations: async () => [rel('r1', 'folder', 'child')] });
+    d.dispatch({ type: 'DELETE_ENTRY', lid: 'child' });
+    // 前提: 常駐からは落ちている(ここが非ゼロでないと、次の assert は自明に通る)
+    expect(d.getState().relations.some((r) => r.toLid === 'child')).toBe(false);
+    d.dispatch({
+      type: 'ENTRY_RESTORED',
+      mode: 'trash',
+      meta: meta('child', { entryOrder: 2 }),
+      body: '',
+      relations: [
+        { id: 'r1', kind: 'structural', fromLid: 'folder', toLid: 'child', createdAt: null, updatedAt: null },
+      ],
+    });
+    const s = d.getState();
+    expect(
+      s.relations.find((r) => r.toLid === 'child')?.fromLid,
+      'フォルダの外に出た(親リンクが戻っていない)',
+    ).toBe('folder');
+    await tick();
+  });
+
+  it('🔴 並びの位置が戻る(末尾に飛ばない)', () => {
+    const d = bootWithFolder();
+    d.dispatch({ type: 'DELETE_ENTRY', lid: 'child' });
+    expect(d.getState().order).toEqual(['folder', 'a', 'z']);
+    d.dispatch({
+      type: 'ENTRY_RESTORED',
+      mode: 'trash',
+      meta: meta('child', { entryOrder: 2 }),
+      body: '',
+    });
+    expect(d.getState().order, '末尾に飛んだ').toEqual(['folder', 'a', 'child', 'z']);
+  });
+
+  it('先頭に戻るものも先頭へ入る(挿入位置が末尾固定になっていない)', () => {
+    const d = bootWithFolder();
+    d.dispatch({ type: 'DELETE_ENTRY', lid: 'folder' });
+    d.dispatch({
+      type: 'ENTRY_RESTORED',
+      mode: 'trash',
+      meta: meta('folder', { entryOrder: 0, archetype: 'folder' }),
+      body: '',
+    });
+    expect(d.getState().order[0]).toBe('folder');
+  });
+
+  it('二重復元でも関係が 2 本にならない(同じ id は上書き)', () => {
+    const d = bootWithFolder();
+    const r = {
+      id: 'r1',
+      kind: 'structural',
+      fromLid: 'folder',
+      toLid: 'child',
+      createdAt: null,
+      updatedAt: null,
+    };
+    d.dispatch({ type: 'DELETE_ENTRY', lid: 'child' });
+    d.dispatch({ type: 'ENTRY_RESTORED', mode: 'trash', meta: meta('child', { entryOrder: 2 }), body: '', relations: [r] });
+    // 2 度目は「既に居る」ので破棄されるが、関係が増えないことも見る
+    d.dispatch({ type: 'ENTRY_RESTORED', mode: 'trash', meta: meta('child', { entryOrder: 2 }), body: '', relations: [r] });
+    expect(d.getState().relations.filter((x) => x.id === 'r1')).toHaveLength(1);
+  });
+
+  it('🔴 効果層が disk から関係を読み直して渡す(その entry のぶんだけ)', async () => {
+    const seen: string[] = [];
+    const d = bootWithFolder({
+      listRelations: async () => {
+        seen.push('read');
+        return [rel('r1', 'folder', 'child'), rel('rX', 'a', 'z')];
+      },
+      getRevision: async () => ({
+        id: 'r-t',
+        entry_lid: 'child',
+        rev_order: 1,
+        created_at: null,
+        title: 'child',
+        archetype: 'text',
+        body: '本文',
+      }),
+      listTrash: async () => [
+        { id: 'r-t', entry_lid: 'child', created_at: null, title: 'child', archetype: 'text' },
+      ],
+    });
+    d.dispatch({ type: 'DELETE_ENTRY', lid: 'child' });
+    d.dispatch({ type: 'RESTORE_TRASH', entryLid: 'child', revId: 'r-t' });
+    await tick(30);
+    expect(seen, 'disk の関係を読み直していない').toEqual(['read']);
+    const s = d.getState();
+    expect(s.relations.find((r) => r.toLid === 'child')?.fromLid).toBe('folder');
+    // ⚠ **その entry に触らない関係は撒かない**(他で消された関係が復活しないこと)
+    expect(s.relations.some((r) => r.id === 'rX'), '無関係な関係まで復活させた').toBe(false);
+  });
+});

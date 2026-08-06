@@ -329,9 +329,22 @@ md.renderer.rules.fence = function (tokens, idx, options, env, self) {
     if (fence.mode === 'norender') {
       return wrapWithCopyButton(renderFenceSourceHtml(content, fence.lang), 'code', sourceLineAttrs);
     }
-    // Pass inline renderer so CSV cells can carry markdown inline markup
-    // (`**bold**` / `==highlight==` / `:text:attrs:` L-6 simple-inline 等)。
-    const inlineRender = (text: string): string => md.renderInline(text, env);
+    /**
+     * セルの中の inline markup(`**bold**` / `==highlight==` / `:text:attrs:` 等)
+     * を描く口。
+     *
+     * 🔴 **文書の env を渡してはいけない**(2026-08-06。user 報告 2-1)。
+     * 直す前は `md.renderInline(text, env)` で**文書の env を共有**していた ──
+     * `markdown-it-footnote` の `footnote_tail` は core rule なので
+     * `renderInline` でも走り、**セルごとに文書の脚注セクションを丸ごと吐いた**。
+     * 実測: 4 セルの表で `<section class="footnotes">` が **5 個**、
+     * `id="fn1"` も **5 個** ── **DOM id が重複**して `[^a]` のジャンプ先が
+     * 表の中のセルになっていた。
+     * ⚠ セルが env から要るのは `currentContainerId` **だけ**(`pkc://` の
+     *   同 container 判定)。それだけを写した**使い捨ての env** を渡す。
+     */
+    const cellEnv = { currentContainerId: (env as { currentContainerId?: string } | undefined)?.currentContainerId ?? '' };
+    const inlineRender = (text: string): string => md.renderInline(text, { ...cellEnv });
     /**
      * 1 度だけ数えて両方へ同じ値を渡す。
      *

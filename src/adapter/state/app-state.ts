@@ -322,6 +322,14 @@ export type SystemCommand =
       mode: 'revision' | 'trash';
       meta: EntryMeta;
       body: string;
+      /**
+       * 🔴 **その entry に触る関係**(2026-08-06。user 報告 2-9)。ゴミ箱からの復元で
+       * **居場所(フォルダ)を戻す**のに要る ── `deleteEntry` は disk の relations を
+       * 消さないが、常駐の `state.relations` からは落ちているので、
+       * ここで戻さないと「戻したのにフォルダの外に出ている」になる。
+       * ⚠ 履歴復元(`mode: 'revision'`)では entry が消えていないので不要(省略可)。
+       */
+      relations?: readonly Relation[];
     }
   | { type: 'TRASH_PURGED'; purged: number }
   | {
@@ -1388,9 +1396,22 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       // 履歴復元(既存 meta 置換)と trash 復元(再出現)の合流点。復元先を
       // 選択して結果を見せる。openBody は disk 確定値で確立(persisted = body)
       const entryMetas = new Map(state.entryMetas).set(action.meta.lid, action.meta);
+      /**
+       * 🔴 **元の位置へ戻す**(2026-08-06。user 報告 2-9)。
+       *
+       * 直す前は `[...state.order, lid]` = **末尾に飛んでいた**。並びの規則は
+       * boot と同じ「`entryOrder` 昇順・同値は lid」なので、**その規則で挿す**
+       * ── 別の規則を書かない(復元だけ並びが違う、を作らない)。
+       */
       const order = state.order.includes(action.meta.lid)
         ? state.order
-        : [...state.order, action.meta.lid];
+        : insertByOrder(state.order, action.meta.lid, entryMetas);
+      /**
+       * 🔴 **居場所を戻す**(同上)。disk の relations は消えていないので、
+       * 効果層が読み直したものを常駐へ合流させる。
+       * ⚠ **同じ id は上書き**(二重復元で関係が 2 本にならない)。
+       */
+      const relations = mergeRelations(state.relations, action.relations ?? []);
       const trashPanel = state.trashPanel
         ? {
             items: state.trashPanel.items.filter(
@@ -1403,6 +1424,7 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
           ...state,
           entryMetas,
           order,
+          relations,
           trashPanel,
           revisionPanel: null,
           selectedLid: action.meta.lid,
@@ -1468,6 +1490,37 @@ function attachmentEntries(state: AppState): Array<{ lid: string; title: string 
   return out;
 }
 
+/**
+ * `entryOrder` 昇順(同値は lid)の位置へ挿す ── **boot の並びと同じ規則**。
+ * ⚠ 規則を 2 つ書かない(復元だけ並びが違う、を作らない)。
+ */
+function insertByOrder(
+  order: readonly string[],
+  lid: string,
+  metas: ReadonlyMap<string, EntryMeta>,
+): string[] {
+  const key = (l: string): [number, string] => [metas.get(l)?.entryOrder ?? 0, l];
+  const [ko, kl] = key(lid);
+  const out = [...order];
+  const at = out.findIndex((l) => {
+    const [o, x] = key(l);
+    return o > ko || (o === ko && x > kl);
+  });
+  out.splice(at < 0 ? out.length : at, 0, lid);
+  return out;
+}
+
+/** 同じ id は後着で上書きして合流(二重復元で関係が 2 本にならない)。 */
+function mergeRelations(
+  current: readonly Relation[],
+  incoming: readonly Relation[],
+): readonly Relation[] {
+  if (incoming.length === 0) return current;
+  const byId = new Map(current.map((r) => [r.id, r]));
+  for (const r of incoming) byId.set(r.id, r);
+  return [...byId.values()];
+}
+
 function removeEntryFromState(
   state: AppState,
   lid: string,
@@ -1476,8 +1529,13 @@ function removeEntryFromState(
   const entryMetas = new Map(state.entryMetas);
   entryMetas.delete(lid);
   const order = state.order.filter((l) => l !== lid);
-  // 常駐 relations も追従(worker は同 tx で掃除済み ── メモリだけ残すと
-  // relations を描く view が「削除したのにリンクが残る」になる)
+  /**
+   * 常駐 relations も追従(メモリだけ残すと、relations を描く view が
+   * 「削除したのにリンクが残る」になる)。
+   * ⚠ **disk からは消していない**(2026-08-05 に `deleteEntry` から外した ──
+   * 消すとゴミ箱から戻しても居場所が戻らない)。本当の処分は `purgeTrash`。
+   * だから復元では `ENTRY_RESTORED` が disk から読み直して合流させる。
+   */
   const touches = state.relations.some((r) => r.fromLid === lid || r.toLid === lid);
   const relations = touches
     ? state.relations.filter((r) => r.fromLid !== lid && r.toLid !== lid)

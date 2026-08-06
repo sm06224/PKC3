@@ -42,6 +42,16 @@ interface GoldenCase {
   };
   html: string;
   hasSyntax: boolean;
+  /**
+   * 🔴 **PKC2 と意図的に分岐した case**(2026-08-06)。
+   *
+   * golden は PKC2 の出力から採取したものなので、**PKC2 のバグごと固定**される
+   * (この 2 件がそうだった)。バグを直すと golden が落ちるが、そこで
+   * 「golden を採り直す」と PKC2 のバグが戻ってくる ── PKC2 は read-only なので
+   * **PKC3 側の正しい出力で更新し、理由を残す**のが唯一の道である。
+   * ⚠ `why` の無い分岐を作らせない(下の test が件数と理由を pin する)。
+   */
+  pkc3Diverges?: { since: string; why: string };
 }
 
 /**
@@ -107,6 +117,26 @@ describe('PKC-Markdown golden parity vs PKC2 (25 cases)', () => {
       expect(hasMarkdownSyntax(fm.body)).toBe(c.hasSyntax);
     });
   }
+
+  /**
+   * 🔴 **「golden を採り直して緑にする」を塞ぐ**(2026-08-06)。
+   *
+   * golden が落ちたとき、正しい対応は 2 つに 1 つ ── ①実装の後退なら実装を直す
+   * ②PKC2 のバグを直したのなら **理由を書いて** golden を更新する。
+   * ⚠ 理由なしで更新できると、後退を「PKC2 と違うから」で押し通せてしまう。
+   * だから**分岐している件数と、その理由の実在**を pin する。
+   */
+  it('🔴 PKC2 と分岐した case は理由つきで 2 件だけ', () => {
+    const diverged = goldens.cases.filter((c) => c.pkc3Diverges);
+    expect(diverged.map((c) => c.name).sort()).toEqual([
+      'full-pkc-fixture',
+      'full-pkc-fixture-anchors',
+    ]);
+    for (const c of diverged) {
+      expect(c.pkc3Diverges!.since, `${c.name} に分岐した日付が無い`).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(c.pkc3Diverges!.why.length, `${c.name} に理由が無い`).toBeGreaterThan(40);
+    }
+  });
 
   it('renderMarkdownInline parity', () => {
     expect(renderMarkdownInline(goldens.inlineGolden.input)).toBe(
