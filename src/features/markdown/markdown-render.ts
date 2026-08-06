@@ -4285,11 +4285,48 @@ function preprocessHeadingNumbers(text: string, start: number): string {
   return out.join('\n');
 }
 
+/**
+ * この描画器が sentinel に使う私用領域の範囲。
+ *
+ * ⚠ **範囲で書く**(26 個を列挙しない)── 列挙すると sentinel を 1 つ足したときに
+ *   ここへの追加を忘れ、その 1 個だけが素通りする(しかも**静かに**)。
+ * ⚠ 実際に使っているのは U+E120〜U+E171 だが、**U+E110 から**取る ── 冒頭の
+ *   コメントが「U+E110〜」と宣言しており、将来そこから使い始めても穴が空かない。
+ */
+const SENTINEL_RANGE = /[\u{E110}-\u{E17F}]/gu;
+
+/** 本文由来の sentinel を無効化する(文字数は変えない ── LineMap と列を動かさない)。 */
+export function neutralizeSentinels(text: string): string {
+  // ⚠ `test` を使わない(`g` 付き正規表現は lastIndex を持ち回るので副作用になる)
+  return text.replace(SENTINEL_RANGE, '\uFFFD');
+}
+
 export function renderMarkdown(
   text: string,
   opts: RenderMarkdownOptions = {},
 ): string {
   if (!text) return '';
+  /**
+   * 🔴 **本文由来の sentinel をここで無効化する**(2026-08-06。方向 doc §1 C5)。
+   *
+   * この描画器は `html: false`(生 HTML を通さない)を **PUA(U+E110〜U+E171)の
+   * sentinel で意図的に迂回**している。ところが**入力側で本文の PUA を落として
+   * いる場所が 1 か所も無く、test も 0 件**だった。実測(2026-08-06)で判ったこと:
+   *
+   * - 26 個の sentinel は**全部そのまま出力に漏れる**(不可視の私用領域文字として残る)
+   * - タグは生えない(`:::section` の並びを真似ても block にはならない)── ここは健全
+   * - 🔴 **`:::format` の並びを真似ると、その行が丸ごと消える**
+   *   (`SENT0SEPOPENSENT` と書くと出力から**その段落が黙って消滅**した)
+   *
+   * つまり XSS ではなく **「書いた行が描画から静かに消える」** 実害である。
+   * ⚠ **入口 1 か所で潰す**(各 sentinel の使用箇所で個別に防ぐと 26 通りの穴になる)。
+   * ⚠ 落とすのではなく **U+FFFD(replacement character)へ写す** ── 消すと
+   *   「打ったのに無くなった」になり、原文と描画の対応(LineMap)も 1 文字ずれる。
+   *   置き換えなら**文字数が変わらない**ので LineMap も列も動かない。
+   * ⚠ goldens 25 件に PUA は **0 文字**なので、この正規化で出力は 1 バイトも動かない
+   *   (実地確認)。
+   */
+  text = neutralizeSentinels(text);
   // PKC3: IR migration scaffolding(markdown.use_ir)は持ち込まない ──
   // flag 予算(最大 15)と凍結方針(正本 doc §10)。legacy pipeline 一本。
   // PR-2V:original text を保存(`:::toc` block の処理で heading extraction に使う)
