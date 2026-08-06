@@ -20,6 +20,7 @@ import { applyFormat, type FormatOp } from '@features/markdown/text-ops';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
 import { resolveFilerScope } from '@features/relation/tree';
 import { handleCopyMdBlock } from './copy-md-block';
+import { askConfirm, SUPPRESSED_MESSAGE } from '@adapter/platform/ask-confirm';
 
 type ActionHandler = (
   dispatcher: Dispatcher,
@@ -236,6 +237,23 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'write-back-file',
 ]);
 
+/**
+ * 🔴 **確認が出ていないことを黙らせない**(2026-08-06。user 報告 minor)。
+ *
+ * ⚠ 抑止は**解除できない**(仕様)。ここがするのは理由を出すことだけ ──
+ * 判定と文言は `platform/ask-confirm.ts` の 1 か所に置く(規則を 2 つ書かない)。
+ * @param whenAbsent confirm が**無い**環境での既定(呼び側の倒し方を持ち込む)
+ */
+function confirmOrExplain(
+  dispatcher: Dispatcher,
+  message: string,
+  whenAbsent: boolean,
+): boolean {
+  const r = askConfirm(message, { whenAbsent });
+  if (r.suppressed) dispatcher.dispatch({ type: 'OP_FAILED', error: SUPPRESSED_MESSAGE });
+  return r.ok;
+}
+
 function refuseWhileBusy(
   action: string,
   dispatcher: Dispatcher,
@@ -337,7 +355,9 @@ const ACTIONS: Record<string, ActionHandler> = {
     // ── **必要以上に怖がらせる側の嘘**を出荷していた。
     // ⚠ 「戻せる」ことは `docs/manual.md` §6 にも書いてある(そちらが正しかった)
     // confirm の無い環境(headless test)は自動化として通す
-    if (!(window.confirm?.(`「${title}」を削除しますか?(ゴミ箱から戻せます)`) ?? true))
+    // 🔴 **抑止されていたら理由を出す**(2026-08-06。user 報告 minor)── 黙って
+    //    false が返るので、そのままだとボタンが恒久的に無反応に見える
+    if (!confirmOrExplain(dispatcher, `「${title}」を削除しますか?(ゴミ箱から戻せます)`, true))
       return;
     dispatcher.dispatch({ type: 'DELETE_ENTRY', lid });
   },
@@ -386,11 +406,12 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 押した人が結果を分かっていること ── 確認を出す(確認の無い環境は通す)。
    */
   'force-release': (dispatcher) => {
-    const ok =
-      window.confirm?.(
-        '追記の書き込みを強制的に打ち切ります。書き込みが実際には進んでいた場合、' +
-          'この画面の表示が実際の中身より古くなることがあります(開き直すと直ります)。よろしいですか?',
-      ) ?? true;
+    const ok = confirmOrExplain(
+      dispatcher,
+      '追記の書き込みを強制的に打ち切ります。書き込みが実際には進んでいた場合、' +
+        'この画面の表示が実際の中身より古くなることがあります(開き直すと直ります)。よろしいですか?',
+      true,
+    );
     if (ok) dispatcher.dispatch({ type: 'FORCE_RELEASE_LOCK', discardDraft: false });
   },
   /** 左の列の**探し方**を切り替える(P8 段⑤)。⚠ 中央のビューとは別の軸。 */
@@ -670,10 +691,11 @@ const ACTIONS: Record<string, ActionHandler> = {
   'purge-trash': (dispatcher) => {
     // 一括・不可逆(revision の物理削除)なので fail closed(purge-orphan-assets
     // と同じ倒し方 ── 単発 delete-entry の ?? true とは桁が違う)
-    const ok =
-      window.confirm?.(
-        'ゴミ箱を空にします(削除済み entry の履歴も消え、元に戻せません)。よろしいですか?',
-      ) ?? false;
+    const ok = confirmOrExplain(
+      dispatcher,
+      'ゴミ箱を空にします(削除済み entry の履歴も消え、元に戻せません)。よろしいですか?',
+      false,
+    );
     if (ok) dispatcher.dispatch({ type: 'PURGE_TRASH' });
   },
 };

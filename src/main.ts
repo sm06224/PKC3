@@ -63,6 +63,7 @@ import { generateAssetKey } from '@adapter/platform/storage/asset-key';
 import { downloadBlob, downloadUrl } from '@adapter/platform/download';
 import { diagramFileName } from '@features/export/file-name';
 import { renderToSvg, readPalette } from '@adapter/ui/render/mermaid-raster';
+import { askConfirm, SUPPRESSED_MESSAGE } from '@adapter/platform/ask-confirm';
 
 const DB_NAME = 'pkc3';
 const DEFAULT_CID = 'default';
@@ -151,6 +152,22 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const { metas, relations } = await loadSnapshot();
 
   const dispatcher = new Dispatcher();
+  /**
+   * 🔴 **確認が出ていないことを黙らせない**(2026-08-06。user 報告 minor
+   * 「確認ダイアログが抑止されるとボタンが恒久的に無反応」)。
+   *
+   * Chromium で user が「これ以上ダイアログを表示させない」を選ぶと、以後の
+   * `confirm` は**何も出さずに即 false**。確認つきの操作は全部「取り消し」に
+   * なるので、押しても 1 ドットも変わらないボタンになる(タブを閉じるまで戻らない)。
+   * ⚠ 抑止は解除できない ── ここがするのは**理由を出す**ことだけ。
+   * ⚠ 判定と文言は `platform/ask-confirm.ts` の 1 か所(規則を 2 つ書かない)。
+   * @param whenAbsent confirm が**無い**環境での既定(呼び側の倒し方を持ち込む)
+   */
+  const ask = (message: string, whenAbsent: boolean): boolean => {
+    const r = askConfirm(message, { whenAbsent });
+    if (r.suppressed) dispatcher.dispatch({ type: 'OP_FAILED', error: SUPPRESSED_MESSAGE });
+    return r.ok;
+  };
   // 🎨 配色は**枠より先**に当てる ── 後だと一瞬だけ既定色で描かれて瞬く
   const bootTheme = initialTheme();
   applyTheme(document.documentElement, bootTheme);
@@ -444,8 +461,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // ⚠ 再読込は open editor の下書きを捨てる(本文は AppState にしか無い)。
     // 破壊的操作は confirm を出す、というこのリポジトリの倒し方に揃える(review M-2)
     isEditing: () => dispatcher.getState().phase === 'editing',
-    confirmDiscard: () =>
-      window.confirm?.('編集中の内容は保存されません。新しい版に切り替えますか?') ?? true,
+    confirmDiscard: () => ask('編集中の内容は保存されません。新しい版に切り替えますか?', true),
   });
 
   /**
@@ -526,11 +542,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         fail('元のファイルとの紐づけがありません(この md をもう一度開いてください)');
         return;
       }
-      const ok =
-        window.confirm?.(
-          `「${name}」を、いまのノートの内容で上書きします。\n\n` +
-            'ファイルの元の内容は失われます(取り消せません)。よろしいですか?',
-        ) ?? false;
+      const ok = ask(
+        `「${name}」を、いまのノートの内容で上書きします。\n\n` +
+          'ファイルの元の内容は失われます(取り消せません)。よろしいですか?',
+        false,
+      );
       if (!ok) return;
       void (async () => {
         const body = (await client.request({ op: 'getBody', cid: DEFAULT_CID, lid })) ?? null;
@@ -581,7 +597,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         // 🔑 このアプリが前回保存した中身(P8 段⑭)。**PKC3 と外殻は同じ origin**
         //    なので、ここで読んだものがそのまま外殻の localStorage の中身になる
         readSeed: readAppStorage,
-        origin: location.origin,
+        baseUrl: document.baseURI,
         fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
       });
       // ⚠ 押した対象を**選択状態にもする**(P8 段⑭)── 起動しただけだと右の列が
@@ -636,17 +652,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             revokeUrl: (url) => URL.revokeObjectURL(url),
             whenClosed: waitForWindowClose,
             readSeed: readAppStorage,
-            origin: location.origin,
+            baseUrl: document.baseURI,
             fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
             confirmSameOrigin: (title) => {
               if (sameOriginAllowed.has(lid)) return true;
               // ⚠ 何が起きるかを**具体**で書く(「安全でない」では判断できない)
-              const ok = window.confirm(
+              const ok = ask(
                 `「${title}」を PKC3 と同じ場所で開きます。\n\n` +
                   'IndexedDB や cookie を使うアプリが動くようになりますが、' +
                   'このアプリは PKC3 の保存内容(ノート・添付・設定)にも手が届きます。\n' +
                   'このタブを閉じるまでは、もう一度は聞きません(次に開いたときは聞きます)。\n\n' +
                   '開きますか?',
+                false,
               );
               if (ok) sameOriginAllowed.add(lid);
               return ok;
@@ -752,7 +769,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             isReady: () => dispatcher.getState().phase === 'ready',
             // 一括削除なので fail closed(confirm が無い環境では実行しない ──
             // 単発の delete-entry が ?? true なのとは桁が違う)
-            confirm: (msg) => window.confirm?.(msg) ?? false,
+            confirm: (msg) => ask(msg, false),
             alert: (msg) => window.alert?.(msg),
             formatSize,
           });

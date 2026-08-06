@@ -88,7 +88,7 @@ function harness(
         new Promise<void>((resolve) => {
           release = resolve;
         }),
-      origin: 'http://x.test',
+      baseUrl: 'http://x.test/',
       readSeed: (appId) => {
         seedFor.push(appId);
         return opts.seed ?? {};

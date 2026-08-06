@@ -106,6 +106,23 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   ]);
   await urlTab.waitForLoadState('domcontentloaded');
   expect(urlTab.url()).toContain('tile=1');
+  /**
+   * 🔴 **opener も referrer も渡さない**(マニュアル §7-2 の約束)を**実物で**見る。
+   *
+   * ⚠ 直す前はこの約束が「`window.open` に渡す文字列」だけで pin されていた ──
+   * 文字列は合っているのに引数の位置が違う、という形の間違いを 1 つも捕まえない
+   * (`window.open(url, features)` は features を**窓の名前**として渡してしまう。
+   * 実際に計測用の probe でその間違いを書いて、静かに noopener が効かなかった)。
+   * ⚠ 行き先は同一オリジンなので `document.referrer` がそのまま観測できる。
+   */
+  const promise = await urlTab.evaluate(() => ({
+    referrer: document.referrer,
+    hasOpener: window.opener !== null,
+  }));
+  expect(promise, 'opener / referrer の約束が破れている').toEqual({
+    referrer: '',
+    hasOpener: false,
+  });
   await urlTab.close();
 
   // ⑤ 🔴 **アプリのタイルは中身が開く**(blob。添付の bytes に届いている)
