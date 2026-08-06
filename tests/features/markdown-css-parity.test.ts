@@ -50,7 +50,13 @@ const CORPUS: ReadonlyArray<readonly [string, string]> = [
   ['ルビと圏点', '[[ruby:漢字|かんじ]] と [[em:重要]] と ^^強^^\n'],
   ['上下付き', ':sup:[2] と :sub:[3]\n'],
   ['簡易インライン', ':文字:bold,red,lg:\n'],
-  ['行頭アライン', '||中央\n\n|>右\n\n<|左\n'],
+  // ⚠ **`<|` は「左」ではない**(2026-08-06 に註記を直した)。記法の正本
+  //    (`PKC2: docs/development/notation-redesign-2026-05/01-notation-catalog.md` §1.4.2)は
+  //    `|>` `<|` `|<` `>|` の**全 4 形を logical end** と定めており、「左」の行頭マーカーは
+  //    §1.4.1 で**廃止**されている(左は frontmatter の direction か formal 形の仕事)。
+  //    🔴 この誤った註記を根拠に実装を `start` へ変えてしまい、user の指摘で revert した ──
+  //    **corpus の註記は実装より弱い出典**である(catalog が正本)。
+  ['行頭アライン', '||中央\n\n|>end\n\n<|end(typo 寛容)\n'],
   ['字下げと空行', '__ 段落の字下げ\n\n_\n\n_3\n'],
   ['callout(8 種)',
     [':::note\n注意\n:::', ':::tip\nヒント\n:::', ':::warning\n警告\n:::', ':::danger\n危険\n:::',
@@ -138,7 +144,7 @@ const NO_STYLE_NEEDED: Readonly<Record<string, string>> = {
  * 動作の鍵でしかないものまで CSS を要求すると、無意味な規則が増える。
  */
 const ATTRS_NEEDING_CSS: readonly string[] = [
-  'data-pkc-align', // 行頭アライン(中央 / 右 / 左)
+  'data-pkc-align', // 行頭アライン(center / end)+ formal の physical(left / right …)
   'data-pkc-indent', // 段落の字下げ
   'data-pkc-render-mode', // 切替の無い fence では原文を常に隠す
   // ⚠ `data-pkc-blank-count` はここに入れない ── 高さは **style 変数**

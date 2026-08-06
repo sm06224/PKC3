@@ -126,14 +126,18 @@ describe('PKC-Markdown golden parity vs PKC2 (25 cases)', () => {
    * ⚠ 理由なしで更新できると、後退を「PKC2 と違うから」で押し通せてしまう。
    * だから**分岐している件数と、その理由の実在**を pin する。
    */
-  it('🔴 PKC2 と分岐した case は理由つきで 4 件だけ', () => {
+  /**
+   * ⚠ **2026-08-06 に一度 4 件へ増やして、2 件へ戻した**。増やした理由(行頭アライン
+   * `<|` を start にする)が**記法の正本と食い違っていた**ためで、user の指摘で revert した
+   * (経緯は `docs/development/user-reports-2026-08-05.md` §3-1 m-2)。
+   * 🔑 この test が守っているのは件数ではなく「**理由なしに golden を採り直せない**」こと ──
+   * 実際、私は理由を書いて採り直したが、その理由が誤りだった。件数だけでは止められない。
+   */
+  it('🔴 PKC2 と分岐した case は理由つきで 2 件だけ', () => {
     const diverged = goldens.cases.filter((c) => c.pkc3Diverges);
     expect(diverged.map((c) => c.name).sort()).toEqual([
       'full-pkc-fixture',
       'full-pkc-fixture-anchors',
-      // 2026-08-06: 行頭アライン `<|` / `|<` を end → start(記号のとおりに読む)
-      'reform-stress-sample',
-      'simple-notation-sample',
     ]);
     for (const c of diverged) {
       expect(c.pkc3Diverges!.since, `${c.name} に分岐した日付が無い`).toMatch(/^\d{4}-\d{2}-\d{2}$/);

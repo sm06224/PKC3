@@ -3103,20 +3103,38 @@ function preprocessAlignPrefix(source: string, lineMapIn: number[]): {
       const rest = m[2] ?? '';
       /**
        * reform-2026-05 PR-C:logical alignment へ移行。
-       *   `||`       → center(物理中央)
-       *   `|>` `>|`  → end(logical。default flow の反対 = LTR では右)
-       *   `<|` `|<`  → start(同じく logical = LTR では左)
+       *   `||`                    → center(対称形。typo 少なく別形なし)
+       *   `|>` `<|` `|<` `>|`     → **全 4 形が logical end**(typo 寛容)
        *
-       * 🔴 **向きは記号のとおりに読む**(2026-08-06。user 報告 minor)。
-       * PKC2 は 4 形すべてを `end` に寄せていた(「typo 寛容化」)が、
-       * `<|` を書いて**右に寄る**のは記号と逆であり、しかもこの repo の
-       * 記法試験の corpus 自身が `<|` を「左」と註記していた ── 実装と
-       * 説明が食い違っていた。⚠ `start` は既定の流れと同じ向きなので
-       * 見た目は変わらないことが多いが、**属性は付く**(縦書き / RTL /
-       * 継承した中央寄せの中では効く)。
+       * 🔴 **矢印の向きは意味を持たない**(記法の正本)。
+       * `PKC2: docs/development/notation-redesign-2026-05/01-notation-catalog.md` §1.4.2:
+       *
+       * > `|>` `<|` `|<` `>|` … 全 4 形が同じ "logical end" として正規化
+       * >                        (典型 typo パターン受理)
+       *
+       * そして同 doc §1.4.1(廃止記法)が、**なぜ「左」の行頭マーカーが無いか**を
+       * 明言している:
+       *
+       * > `<|text` align prefix(simple)| ❌ 廃止 |
+       * > **default flow は frontmatter で declare**、
+       * > 明示的左寄せ強制は formal `:::paragraph{align=left}`
+       *
+       * つまり「どちら側が既定の流れか」は**文書全体の direction**
+       * (frontmatter `direction: ltr|rtl` / `writing:` = global direction の switch。
+       *  `features/markdown/document-globals.ts` が `dir` / `data-pkc-direction` に写す)が
+       * 決めるのであって、**行頭マーカーが物理方向を主張してはいけない**。
+       * simple 形が持つのは「中央」と「流れの反対側(end)」の 2 つだけである。
+       *
+       * ⚠ **2026-08-06 に一度これを `start` へ変えて、user に誤りを指摘されて戻した**
+       * (経緯は同日の調査 doc §3-1 m-2)。誤った根拠は 2 つとも「実装より弱い出典」
+       * だった ── ① 調査 doc の minor 一覧が「`<|` が右寄せ」を欠陥として挙げていた
+       * ② `tests/features/markdown-css-parity.test.ts` の corpus が `<|` に「左」と
+       * 註記していた(こちらも直した)。⚠ spec v4 §1.3 は typo 形を `center` と書いており
+       * **§6.2 の `end` と食い違っている**が、reform-2026-05 の catalog(上記)が後の
+       * 正本で、PKC2 の実装もそちらに一致している。
+       * 🔑 教訓: **記法の意味は「記号の見た目」ではなく catalog(正本)で決まる**。
        */
-      const align: AlignKind =
-        sym === '||' ? 'center' : sym === '<|' || sym === '|<' ? 'start' : 'end';
+      const align: AlignKind = sym === '||' ? 'center' : 'end';
       // **重要**:prefix 行は前段落から切り離して新 paragraph にする。
       // 挿入する空行も同じ inputIdx を指す(sync layer の lookup は閉じた区間で
       // 動くので副作用なし)。

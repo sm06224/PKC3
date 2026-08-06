@@ -8,6 +8,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import { renderMarkdown } from '@features/markdown/markdown-render';
+// 🔑 **global direction の switch** は frontmatter 側の機構(行頭マーカーとは別系統)
+import { extractDocumentGlobals } from '@features/markdown/document-globals';
 
 /** 見える文字だけ取り出す(タグの形ではなく**中身が届いたか**を見る)。 */
 function textOf(html: string): string {
@@ -249,35 +251,96 @@ describe('csv/tsv のセルに文書の脚注が漏れない', () => {
 });
 
 /**
- * 🔴 **行頭アラインは記号のとおりに読む**(2026-08-06。user 報告 minor)。
+ * 🔴 **行頭アラインの矢印の向きは意味を持たない**(記法の正本)。
  *
- * PKC2 は `|>` `<|` `|<` `>|` の 4 形すべてを **end(LTR では右)**に寄せていた
- * (「typo 寛容化」)。だが `<|` を書いて右に寄るのは記号と逆であり、しかも
- * この repo の記法試験の corpus 自身が `<|` を「左」と註記していた ──
- * **実装と説明が食い違っていた**。
+ * `PKC2: docs/development/notation-redesign-2026-05/01-notation-catalog.md` §1.4.2 が
+ * 「`|>` `<|` `|<` `>|` … **全 4 形が同じ "logical end"** として正規化(典型 typo
+ * パターン受理)」と定め、§1.4.1 が **`<|text` align prefix を ❌ 廃止**として
+ * 「**default flow は frontmatter で declare**、明示的左寄せ強制は formal
+ * `:::paragraph{align=left}`」と書いている。
  *
- * ⚠ 観測点は**属性**(見た目ではない)── `start` は既定の流れと同じ向きなので、
- * 横書き LTR では見た目が変わらない。効くのは縦書き / RTL / 継承した寄せの中で、
- * そこは属性が付いていないと表現できない。
+ * つまり ── **どちら側が既定の流れかは文書全体の direction が決める**
+ * (frontmatter `direction:` / `writing:` = global direction の switch)。
+ * 行頭マーカーは物理方向を主張してはならず、持てるのは
+ * 「中央」と「流れの反対側(end)」の 2 つだけである。
+ *
+ * ⚠ **この test は一度この規則を逆に pin していた**(2026-08-06。`<|` を start に
+ * 変えた誤り。user の指摘で revert)。誤りの根拠は 2 つとも「実装より弱い出典」で、
+ * 調査 doc の minor 一覧と、`markdown-css-parity.test.ts` の corpus の註記だった。
+ * 🔑 だからこの test は **4 形が同じ値になること**を明示的に見る ── 「向きを
+ * 読みたくなる」誤りが**もう一度入らないように**するのが目的である。
  */
-describe('行頭アラインの向き(user 報告 minor)', () => {
+describe('行頭アライン: 矢印の向きは意味を持たない(記法の正本)', () => {
   const alignOf = (src: string): string | null => {
     const html = renderMarkdown(src, { silentHallucinationWarnings: true });
     return /data-pkc-align="([^"]+)"/.exec(html)?.[1] ?? null;
   };
 
-  it('🔴 `<|` と `|<` は start(左)── 右に寄らない', () => {
-    expect(alignOf('<| 左に寄せたい\n'), '`<|` が右に寄っている').toBe('start');
-    expect(alignOf('|< 左に寄せたい\n'), '`|<` が右に寄っている').toBe('start');
+  it('🔴 `|>` `<|` `|<` `>|` は**全 4 形が end**(typo 寛容 ── 向きで分けない)', () => {
+    const got = ['|>', '<|', '|<', '>|'].map((sym) => [sym, alignOf(`${sym} 本文\n`)]);
+    expect(Object.fromEntries(got), '矢印の向きを意味として読んでいる').toEqual({
+      '|>': 'end',
+      '<|': 'end',
+      '|<': 'end',
+      '>|': 'end',
+    });
   });
 
-  it('`|>` と `>|` は end(右)のまま', () => {
-    expect(alignOf('|> 右に寄せたい\n')).toBe('end');
-    expect(alignOf('>| 右に寄せたい\n')).toBe('end');
-  });
-
-  it('`||` は center のまま', () => {
+  it('`||` だけが center(対称形なので typo 形を持たない)', () => {
     expect(alignOf('|| 中央\n')).toBe('center');
+  });
+
+  /**
+   * 🔴 **「左」の行頭マーカーは存在しない**(廃止済み)。
+   * ⚠ ここは**無いことを pin する** test である ── 誰かが「`<|` は左だろう」と
+   * 直感で足すのを止めるために置く。左に寄せたいときの正しい道は 2 つ:
+   * ① 文書の `direction` を宣言する(既定の流れを変える)
+   * ② formal の `:::paragraph{align=left}`(物理左の強制)
+   */
+  it('🔴 simple 形に start / left は 1 つも無い(左は direction か formal の仕事)', () => {
+    for (const sym of ['||', '|>', '<|', '|<', '>|']) {
+      const a = alignOf(`${sym} 本文\n`);
+      expect(a, `${sym} が物理/論理の「左」を主張している`).not.toBe('start');
+      expect(a, `${sym} が物理左を主張している`).not.toBe('left');
+    }
+  });
+
+  it('🔑 左寄せは formal 形で書ける(廃止した simple の移行先が生きている)', () => {
+    const html = renderMarkdown(':::paragraph{align=left}\n左に寄せる\n:::\n', {
+      silentHallucinationWarnings: true,
+    });
+    expect(html, 'formal の物理左が効いていない').toContain('data-pkc-align="left"');
+  });
+
+  /**
+   * ⚠ **もう 1 本の formal 経路**(`:::format{…}` = catalog #25b の block format wrapper)。
+   * 🔴 この test は**変異試験で見つけた穴**である ── `:::format` の align は
+   * `:::paragraph` とは**別の allowlist** を通っていて、そこから `left` を落としても
+   * 全 test が緑のままだった(2026-08-06。B3)。同じ「align」の判定が 2 か所に在るので、
+   * 片方だけ守っていると片方だけ静かに死ぬ(CLAUDE.md「判定が 2 か所に生えたら両方 pin」)。
+   */
+  it('🔴 `:::format{align=…}` も同じ語彙で効く(2 本目の経路を無防備にしない)', () => {
+    const left = renderMarkdown(':::format{align=left}\n本文\n:::\n', {
+      silentHallucinationWarnings: true,
+    });
+    expect(left, ':::format の align=left が無視された').toContain('data-pkc-align="left"');
+    expect(left).toContain('pkc-format-block');
+    const center = renderMarkdown(':::format{align=center}\n本文\n:::\n', {
+      silentHallucinationWarnings: true,
+    });
+    expect(center).toContain('data-pkc-align="center"');
+  });
+
+  /**
+   * 🔑 **既定の流れは frontmatter が決める**(global direction の switch)。
+   * ⚠ この 2 つが同じ文書で共存できることを見る ── `end` の物理的な着地点は
+   * ここで反転する(だから行頭マーカーが物理方向を持ってはいけない)。
+   */
+  it('🔴 文書の direction は frontmatter で切り替わる(行頭マーカーとは別系統)', () => {
+    const globals = extractDocumentGlobals('---\ndirection: rtl\n---\n\n|> 本文\n');
+    expect(globals.direction, 'global direction の switch が効いていない').toBe('rtl');
+    // ⚠ マーカー側は direction に関わらず end のまま(logical なので反転は CSS の仕事)
+    expect(alignOf('---\ndirection: rtl\n---\n\n|> 本文\n')).toBe('end');
   });
 });
 

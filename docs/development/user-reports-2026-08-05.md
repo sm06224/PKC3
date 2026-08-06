@@ -181,7 +181,7 @@ PKC3 の index.html を受け取る** ── エラーではなく「成功し�
 | # | 内容 | 始末 |
 |---|---|---|
 | m-1 | `:::toc` の記法とマニュアルの不一致 | ✅ **既に直っていた**(2026-08-05。1 行で閉じる形へ) |
-| m-2 | `<|` が右寄せ | ✅ 直した。`<|` `|<` → start。golden 2 件を理由つきで採り直し |
+| m-2 | `<|` が右寄せ | ❌ **誤報。直したものを戻した**(下の §3-2) |
 | m-3 | ログ 0 件時に 2px の線だけ | ✅ **既に直っていた**(`job-log-empty`) |
 | m-4 | `dispose()` に呼び出し元が無い | ✅ **消した**(`SettingsRenderer`)。中央の面は `hidden` の付け外しだけで畳まれないので「畳む瞬間」が無い ── 呼ばれないのに purpose を主張するメソッドは誤解を招く |
 | m-5 | 存在しない pin をコメントが指す | ✅ 1 件直した(`theme-contrast.test.ts` → `theme-tokens.test.ts`)。⚠ `SEALED_TEST_NOTES` の `kanban.smoke.spec.ts` は**消えていることを test が pin している**ので誤検出(直さない) |
@@ -193,6 +193,46 @@ PKC3 の index.html を受け取る** ── エラーではなく「成功し�
 | m-11 | preview を持たない添付は何も出ない | ✅ 「出せません + 次にどうするか」を出す(HTML 系は起動を案内) |
 | m-12 | `:::figure` が素のテキスト | ✅ 直した(id は `[@id]` で参照するときだけ要る)。🔑 副産物: **ライブエディタがこの本文でも開く** |
 | m-13 | ログ 1 行の「0k 文字」 | ✅ 千未満は実数。⚠ 結果が object の口(ライブエディタ)は量が 1 度も出ていなかったので、そちらも直した |
+
+### 3-2. 🔴 m-2 は誤報だった ── 私が直して、user に指摘されて戻した(2026-08-06)
+
+> user:「**その記法は global direction の switch のはずなので、あなたの解釈は
+> 間違えている可能性が非常に高い**」
+
+**user が正しい。** 記法の正本は
+`PKC2: docs/development/notation-redesign-2026-05/01-notation-catalog.md`:
+
+| 出典 | 記述 |
+|---|---|
+| §1.4.2 typo 寛容化 | 「`\|>` `<\|` `\|<` `>\|` … **全 4 形が同じ "logical end" として正規化**(典型 typo パターン受理)」 / 「`\|\|` … center、対称形なので typo 少なく追加なし」 |
+| §1.4.1 廃止記法 | 「`<\|text` align prefix(simple)… ❌ **廃止** … **default flow は frontmatter で declare**、明示的左寄せ強制は formal `:::paragraph{align=left}`」 |
+| §1(catalog #5) | 「paragraph + align logical … `\|\|本文`(center)/ `\|>本文`(end、**+typo 3 形**)… 🔄 simple は **logical 2 種に縮小**」 |
+
+つまり **矢印の向きは意味を持たない**。simple 形が持つのは「中央」と
+「**流れの反対側**(end)」の 2 つだけで、**どちら側が既定の流れかは文書全体の
+direction が決める** ── それが user の言う **global direction の switch**
+(frontmatter `direction: ltr|rtl` / `writing:`。§02-frontmatter-and-globals §2.3.4)である。
+行頭マーカーが「左」を主張すると、**global direction の仕事を奪って二重化する**。
+
+#### なぜ間違えたか(出典の重み付けを誤った)
+
+1. **調査 doc の minor 一覧**(本 doc §3)が「`<|` が右寄せ」を欠陥として挙げていた ──
+   調査そのものが記号の見た目で判断していた
+2. `tests/features/markdown-css-parity.test.ts` の corpus が `<|` に **「左」と註記**していた
+3. spec v4 は**自分で矛盾している**(§1.3 は typo 形を `center`、§6.2 は `end`)。
+   私は §6.2 を見て「実装は end、説明は左」と読んだが、**どちらも「start」とは言っていない**
+
+⚠ **実装(PKC2)は最初から正しかった。** 直すべきだったのは①②の記述の方である。
+
+#### 始末
+
+- 実装を `end` へ revert(`markdown-render.ts`。正本の引用をコメントに埋めた)
+- golden 2 件を**元に戻した**(PKC2 と byte 一致に復帰 ── `pkc3Diverges` は 2 件へ)
+- test を**逆向きに書き直した**:「4 形が同じ値になる」「simple に start / left は 1 つも無い」
+  「左は formal 形 / global direction の仕事」を pin(直感で再発しないように**無いことを pin**)
+- ①② の誤った註記を修正
+- 🔑 教訓: **記法の意味は「記号の見た目」ではなく catalog(正本)で決まる**。
+  調査 doc の所見も corpus の註記も**実装より弱い出典**である
 
 ---
 
