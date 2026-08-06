@@ -40,6 +40,8 @@ import {
 } from '@features/markdown/source-ranges';
 import { findOpenEnds, scanContainers } from '@features/markdown/source-blocks';
 import { autoPairFor } from '@features/markdown/text-ops';
+// ⚠ 継ぎ足しの規則は **1 本**(`detail.ts` の commit と同じ関数を使う)
+import { spliceLines } from '@features/markdown/edit-journal';
 
 /** 活性塊の代わりに置く定数。⚠ **中身が固定**なので差分の対象から自然に外れる。 */
 const SLOT_HTML = '<div data-pkc-row-slot="1"></div>';
@@ -275,6 +277,33 @@ export class RowSwap {
     return null;
   }
 
+  /**
+   * その y 座標は「**本文の下の余白**」か。
+   *
+   * 🔑 判定を 1 か所に置く(呼び手は余白クリックの 1 か所だけ)。
+   * ⚠ 塊が 1 つも無いとき(空のノート)は**必ず真** ── そこが唯一の入口なので、
+   *   ここを塞ぐと 1 文字も打てなくなる(`live-editor.smoke.spec.ts` の入口が依存)。
+   * ⚠ 最後の**非導出**塊の下端で切る ── 脚注の区切りのような導出物は原文の行を
+   *   持たないので、そこを基準にすると「余白ではない所」を余白と読む。
+   * ⚠ 座標が取れない環境(happy-dom は rect が全部 0)では**真**に倒す ── 空のノートの
+   *   入口を落とすより、余白の判定が緩いほうが害が小さい(選択の事故は実機の話である)。
+   */
+  private belowLastBlock(clientY: number): boolean {
+    let last: Element | null = null;
+    for (let i = this.view.nodes.length - 1; i >= 0; i -= 1) {
+      if (this.starts[i] !== undefined && this.starts[i]! < 0) continue;
+      const el = this.unitElement(i);
+      if (el !== null) {
+        last = el;
+        break;
+      }
+    }
+    if (last === null) return true; // 塊が無い = 空のノート
+    const bottom = last.getBoundingClientRect().bottom;
+    if (bottom === 0) return true; // rect が取れない(unit 環境)
+    return clientY > bottom;
+  }
+
   /** クリックされたノードから、それを含む塊の添字を引く。 */
   private blockIndexForNode(node: Node): number | null {
     let cur: Node | null = node;
@@ -307,8 +336,22 @@ export class RowSwap {
        * 無いので、行を開けない)── 実機の smoke を書いたときに気づいた。
        * ⚠ 確定の直後(`mousedown → blur → click`)には開かない ── その 1 クリックは
        * 「閉じるため」のものである。
+       *
+       * 🔴 **余白かどうかは「座標」で決める。DOM の同一性では決めない**
+       * (2026-08-06。user 報告「編集しようとして選択すると勝手にスクロールして
+       * フォーカスが外れる / スクロールが発生するくらい長くて複雑なものだけ」)。
+       *
+       * 直す前は `target === this.host` で判定していた。ところが **`click` の
+       * target は mousedown と mouseup の共通祖先**なので、**塊を跨いでドラッグ選択
+       * すると target が host 自身になる** ── 余白判定が真になり、`appendRow()` が
+       * **文末**に空の入力欄を開いて `ta.focus()` が版面を文末まで引っぱっていた。
+       * 実測(60 節・長文): `scrollTop` 1214 → **2457(+1243px)** / 開いた入力欄は
+       * **空**(= 文末)/ **選択が消滅** / 焦点がその空欄へ移動。
+       * ⚠ **文末が画面内に在る短い文書では 0px しか動かない** ── だから user の
+       *   「長くて複雑なものだけ」と一致する。短い fixture では**永久に見えない**。
+       * 🔑 座標で決めれば、跨ぐ選択は**何も起こさない**(選択が残る)。
        */
-      if (target === this.host && !this.awaitingUpdate) this.appendRow();
+      if (this.belowLastBlock(ev.clientY) && !this.awaitingUpdate) this.appendRow();
       return;
     }
     if (this.starts[blockIndex] === undefined || this.starts[blockIndex]! < 0) {
@@ -742,11 +785,52 @@ export class RowSwap {
       );
     }
     if (!changed) return true;
+    /**
+     * 🔴 **自分の確定は自分で反映する**(楽観更新。2026-08-06)。
+     *
+     * 直す前は `this.body` を古いまま置いて外へ投げていた。すると:
+     *
+     * ① **打った文字が黙って消える**(実測)── Tab を押さずに次の塊を直接押すと、
+     *    `mousedown → blur(確定) → click(次を開く・focus)` の後に **worker の
+     *    描き直しが着弾**し、`body !== this.body` を見て `closeQuietly()` が
+     *    **開いたばかりの入力欄を remove** する。打ちかけは `commit` を通らないので
+     *    消える(実測: 入力欄 0 件 / 焦点 `BODY` / 打った "ZZ" は行方不明)。
+     *    IME なら**確定済みの日本語**が同じ枝で消える。
+     * ② 🔴 **原文が静かに壊れる** ── `activate()` は `this.body` / `starts` を
+     *    **古い座標**で読む。行数が変わる確定の直後に 2 回クリックすると、
+     *    2 度目の `commit` が**古い座標**で新しい本文へ継ぎ足され、**無関係な行を潰す**。
+     *    例外も notify も出ない。
+     *
+     * 🔑 だから `closeQuietly` のガードは**緩めない** ── 代わりに「通常の編集では
+     * ここへ来ない」という上のコメントを**真にする**。自分の確定ぶんを先に反映すれば
+     * 着弾時に `body === this.body` になり、ガードは「本当に外から変わった時」だけ鳴る。
+     * ⚠ 継ぎ足しの規則は `edit-journal` の 1 本を使う(`detail.ts` と同じ関数)──
+     *   ここに 2 本目の文字列操作を書かない。
+     * ⚠ `follower` は latest-wins で途中の 1 件を捨てるので、**積み上げる形**
+     *   (`this.body` を毎回進める)でなければ連続確定に合わない。
+     */
+    /**
+     * 🔑 **行数が変わらない確定だけ**を自分で反映する。
+     *
+     * ⚠ 行数が変わると、後続の塊の原文座標が全部ずれる ── その平行移動の算術は
+     *   **test で守れない**(行数が変わる確定の直後は、`open()` が
+     *   `slot === null` で false を返して**次の塊が開けない**という別の未修理の
+     *   defect が在り、その枝へ到達できない)。無防備な算術で user の原文を
+     *   書き換えるより、**保護側の `closeQuietly` に委ねる**ほうが安全である。
+     * ⚠ だから delta ≠ 0 では `this.body` を**進めない** ── 着弾で
+     *   `closeQuietly` が鳴り、理由を出して閉じる(データは壊れない)。
+     * 🔑 実際の編集はほとんど行数が変わらない(1 行の言い直し・語句の直し)ので、
+     *   ここを塞ぐだけで「打った文字が黙って消える」の大半が消える。
+     */
+    if (text.split('\n').length === end - start + 1) {
+      this.body = spliceLines(this.body, start, end, text);
+    }
     // 描き直しが必ず来る ── その 1 件を受けるまで、余白のクリックで行を開かない
     this.awaitingUpdate = true;
     this.cb.commit(start, end, text);
     return true;
   }
+
 
   /** 捨てて閉じる(原文は変えない)。 */
   cancelActive(): void {

@@ -424,3 +424,73 @@ test('🔴 Shift+クリックで 2 つの塊を 1 つの入力欄にできる(S6
   await expect(live).not.toContainText('1 つめ。');
   expect(errors).toEqual([]);
 });
+
+/**
+ * 🔴 **塊を跨いでドラッグ選択しても、版面が飛ばない**(2026-08-06。user 報告
+ * 「編集しようとして選択すると勝手にスクロールしてフォーカスが外れる /
+ * スクロールが発生するくらい長くて複雑なものだけです」)。
+ *
+ * `click` の target は **mousedown と mouseup の共通祖先**なので、塊を跨ぐ選択では
+ * target が pane 自身になる。直す前は余白判定が `target === this.host` だったので
+ * ここが真になり、`appendRow()` が**文末**に空の入力欄を開き `focus()` が版面を
+ * 文末まで引っぱっていた。実測(60 節): `scrollTop` 1214 → **2457(+1243px)**、
+ * 開いた入力欄は**空**、**選択が消滅**、焦点がその空欄へ。
+ *
+ * ⚠ **短い本文では 1px も動かない**(文末が画面内に在るから)── だから既存の
+ *   11 本は全部緑のまま出荷された。この spec は**長い本文を要求する**。
+ * ⚠ `clickReal` を使わない ── あれは毎回 `scrollIntoViewIfNeeded()` を撃つので
+ *   「勝手にスクロールした」が観測できなくなる。
+ */
+test('🔴 塊を跨ぐドラッグ選択で、版面が文末へ飛ばない(長い本文)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 800 });
+  await gotoLive(page);
+  const long = ['# 長い文書', ''];
+  for (let i = 1; i <= 30; i++) {
+    long.push(`## 節 ${i}`, '', `これは節 ${i} の段落です。${'あ'.repeat(50)}`, '');
+    long.push(`節 ${i} の 2 つめの段落です。${'い'.repeat(50)}`, '');
+  }
+  await openLive(page, long.join('\n'));
+
+  const live = page.locator('[data-pkc-region="editor-live"]');
+  // ⚠ **空振り防止** ── スクロールが実際に発生していること(発生しなければ何も測れない)
+  const geom = await live.evaluate((el) => ({ sh: el.scrollHeight, ch: el.clientHeight }));
+  expect(geom.sh, 'スクロールが発生していない(この fixture では事故が起きない)').toBeGreaterThan(
+    geom.ch + 600,
+  );
+  await live.evaluate((el) => {
+    el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2);
+  });
+  const before = await page.evaluate(() => {
+    const el = document.querySelector('[data-pkc-region="editor-live"]') as HTMLElement;
+    const ps = [...el.querySelectorAll('p')].filter((p) => {
+      const r = p.getBoundingClientRect();
+      return r.top > 150 && r.bottom < window.innerHeight - 150;
+    });
+    const a = ps[0]!.getBoundingClientRect();
+    const b = ps[1]!.getBoundingClientRect();
+    return { scrollTop: el.scrollTop, ax: a.x + 40, ay: a.y + a.height / 2, bx: b.x + 80, by: b.y + b.height / 2 };
+  });
+  // ⚠ 器の真ん中に居ること(端だと clamp されて動けない = 測っていない)
+  expect(before.scrollTop, 'スクロール位置が 0(focus は 1px も動かせない)').toBeGreaterThan(100);
+
+  // 🔴 塊 A の途中から塊 B の途中へ**ドラッグ選択**する
+  await page.mouse.move(before.ax, before.ay);
+  await page.mouse.down();
+  await page.mouse.move(before.bx, before.by, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(350);
+
+  const after = await page.evaluate(() => {
+    const el = document.querySelector('[data-pkc-region="editor-live"]') as HTMLElement;
+    return {
+      scrollTop: el.scrollTop,
+      rows: el.querySelectorAll('[data-pkc-field="row-source"]').length,
+      selection: (window.getSelection()?.toString() ?? '').length,
+    };
+  });
+  expect(after.scrollTop, '版面が動いた(文末へ飛んでいる)').toBe(before.scrollTop);
+  expect(after.rows, '選択したのに入力欄が開いた(文末の空行)').toBe(0);
+  expect(after.selection, '選択が消えた').toBeGreaterThan(0);
+  expect(errors).toEqual([]);
+});
