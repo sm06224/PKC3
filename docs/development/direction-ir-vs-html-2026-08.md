@@ -54,8 +54,30 @@ export 3 種(pkc3-html / pkc3-archive / pkc3-markdown-zip)も表に載ってい�
 中央値と p95** を今日の数字として 1 枚出す(現ハーネスは `sleep(600)` で待つだけで
 **latency を 1 度も記録していない**)。
 ⚠ この段は**判定しない**。「今日の表が出た」が着地。
-⚠ frame 単位の heap を CDP で取れるかは**未検証**。取れなければ「箱の常駐は測れない」と
-書いて出す ── 測れないまま「横ばい」を美点として読むのが、この repo が繰り返し踏んだ罠。
+
+#### 🔴 実測して確定した「取れるもの / 取れないもの」(2026-08-06。箱 8 個で probe)
+
+| 観測点 | 可否 | 実測 |
+|---|---|---|
+| **箱ごとの DOM ノード数** | ✅ 取れる | playwright が 9 frame(main + 箱 8)を見て、**8 箱すべてで `evaluate` 成功** |
+| **箱ごとの heap** | ❌ **取れない** | 8 箱が**全部同じ値**(`4231814`)を返す。`performance.memory` は**プロセス単位 + 量子化**なので**箱ごとに帰属できない** |
+| `measureUserAgentSpecificMemory` | ❌ 使えない | `crossOriginIsolated: false` を実測で確認(OPFS SAHPool を選んだ設計の帰結) |
+| **CDP `Performance.getMetrics`** | ✅ 取れる | `Documents: 22` / `Frames: 34` / `Nodes: 1421` / `JSHeapUsedSize: 5054360` |
+| **生きている箱の数** | ✅ 取れる | CDP の target 一覧に `iframe:about:srcdoc` × 8(SW と asset worker 2 本も見える) |
+
+🔑 **heap より良い指標が見つかった** ── **`Documents` / `Frames` の件数**である。
+「箱が DOM から外れたのに回収されていない」状態はここに残るので、**C3(箱の寿命)が
+本当に効いたかを直接測れる**。heap の帰属より、この方が知りたいことに近い。
+
+🔴 **そして最初の異常**: **箱 8 個で `Frames: 34`**(期待は main + 8 = 9)。
+`Documents: 22` も多い。**既に回収されていない frame / document が積んでいる可能性**がある
+── ただしこれは 1 回の probe で、`Frames` が累積カウンタなのか現存数なのかを
+**まだ確かめていない**。C0 の harness を組むときに最初に確定させる。
+
+⚠ したがって C0 の表は「**箱の常駐メモリ**」ではなく「**生きている箱の数 / Documents /
+Frames / Nodes / srcdoc 総 bytes / 打鍵→反映**」で作る。**heap は箱に帰属できないことを
+表に明記する** ── 測れないまま「横ばい」を美点として読むのが、この repo が繰り返し
+踏んだ罠である。
 
 ### C1. 箱の受け口を 1 本にする + `event.source` 判定(丸写しの是正)
 
