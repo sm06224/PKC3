@@ -31,6 +31,11 @@ import { makeSlugCounter, extractHeadingsFromMarkdown } from './markdown-toc';
 import { highlightCode, isHighlightable } from './code-highlight';
 import { renderCsvFence } from './csv-table';
 import { buildHtmlSandboxIframe } from './html-sandbox';
+import {
+  EXTERNAL_IMAGE_ATTR,
+  EXTERNAL_IMAGE_CLASS,
+  isExternalImageSrc,
+} from './external-images';
 import { parsePortablePkcReference } from '../link/permalink';
 import {
   inferQ8ValueOnlyKey,
@@ -239,12 +244,14 @@ function buildRenderableSlotHtml(
    * 作るために要る。⚠ **token 添字ではない**(下の `nextFenceOccurrence` を見よ)。
    */
   occurrence: number,
+  /** 箱の CSP の `img-src` を開けるか。⚠ **既定は塞ぐ側**(`external-images.ts`)。 */
+  allowExternalImages: boolean,
 ): string | null {
   switch (fence.lang) {
     case 'html':
       // reform-2026-05 PR-2M:iframe sandbox 経由で HTML を直接 render。
       // sandbox="allow-scripts" のみ(allow-same-origin 無し)で cross-origin 隔離。
-      return buildHtmlSandboxIframe(content, '', occurrence);
+      return buildHtmlSandboxIframe(content, '', occurrence, allowExternalImages);
     case 'mermaid': {
       // pgc-203 wave-α' polish #24:placeholder div のみ emit。実 SVG render は
       // adapter 層の `hydrateMermaidPlaceholders` が lazy import('mermaid') で
@@ -343,7 +350,16 @@ md.renderer.rules.fence = function (tokens, idx, options, env, self) {
      * ⚠ セルが env から要るのは `currentContainerId` **だけ**(`pkc://` の
      *   同 container 判定)。それだけを写した**使い捨ての env** を渡す。
      */
-    const cellEnv = { currentContainerId: (env as { currentContainerId?: string } | undefined)?.currentContainerId ?? '' };
+    /**
+     * ⚠ **外部画像の許可も写す**(2026-08-06)── 写さないと、表のセルの中の
+     * 画像だけが**設定と逆に振る舞う**(「常にオン」でもセルの画像は出ない)。
+     * env を丸ごと渡さない理由(脚注)は上のとおりなので、**要る 2 つだけ**写す。
+     */
+    const cellEnv = {
+      currentContainerId: (env as { currentContainerId?: string } | undefined)?.currentContainerId ?? '',
+      allowExternalImages:
+        (env as { allowExternalImages?: boolean } | undefined)?.allowExternalImages === true,
+    };
     const inlineRender = (text: string): string => md.renderInline(text, { ...cellEnv });
     /**
      * 1 度だけ数えて両方へ同じ値を渡す。
@@ -355,7 +371,13 @@ md.renderer.rules.fence = function (tokens, idx, options, env, self) {
      * 書くのは嘘になる。
      */
     const occurrence = nextFenceOccurrence(env, fence.lang, content);
-    const slot = buildRenderableSlotHtml(fence, content, inlineRender, occurrence);
+    const slot = buildRenderableSlotHtml(
+      fence,
+      content,
+      inlineRender,
+      occurrence,
+      (env as { allowExternalImages?: boolean } | undefined)?.allowExternalImages === true,
+    );
     if (slot !== null) {
       return buildRenderableBlockHtml(fence, slot, content, sourceLineAttrs, occurrence);
     }
@@ -690,6 +712,25 @@ md.renderer.rules.image = function (tokens, idx, options, env, self) {
   // 後回しにし、RAM を削る。明示指定があれば尊重。
   if (token.attrGet('loading') === null) token.attrSet('loading', 'lazy');
   if (token.attrGet('decoding') === null) token.attrSet('decoding', 'async');
+  /**
+   * 🔴 **外部の画像は既定で読み込まない**(2026-08-06、user 裁定)。
+   *
+   * `![](https://例/x.png)` は開いた瞬間に相手へ「この端末がいまこれを開いた」を
+   * 伝える(追跡用の画像)。⚠ **`src` を消して `data-pkc-external-src` に退避する**
+   * だけにする ── 消してしまうと同意が出ても復元できず、`src` を残すと
+   * `loading="lazy"` でも**画面に入った瞬間に飛ぶ**(遅延は「飛ばない」ではない)。
+   * ⚠ 器は残す ── 見えない場所で消すと「画像を書いたのに何も無い」になる。
+   *   見た目は `.pkc-external-img:not([src])`(`app.css` と書出し HTML の両面)。
+   * 意味論の正本は `features/markdown/external-images.ts`。
+   */
+  const allowExternal = (env as { allowExternalImages?: boolean } | undefined)
+    ?.allowExternalImages === true;
+  if (!allowExternal && isExternalImageSrc(src)) {
+    const srcAttrIdx = token.attrIndex('src');
+    if (srcAttrIdx >= 0) token.attrs!.splice(srcAttrIdx, 1);
+    token.attrSet(EXTERNAL_IMAGE_ATTR, src);
+    token.attrJoin('class', EXTERNAL_IMAGE_CLASS);
+  }
   return defaultImage(tokens, idx, options, env, self);
 };
 
@@ -1576,6 +1617,18 @@ export interface RenderMarkdownOptions {
    * 使い方は `features/markdown/source-ranges.ts` の `renderMarkdownWithRanges`。
    */
   readonly collectRanges?: SourceRange[];
+  /**
+   * 🔴 **外部の画像を読み込ませるか**(2026-08-06、user 裁定。既定 = false)。
+   *
+   * 効くのは **2 か所だけ**で、どちらも同じ値で動く:
+   * ① 本文の `![](https://…)` に `src` を付けるか ② ` ```html` の箱の CSP の
+   * `img-src` を開けるか。⚠ **片方だけ開けてはいけない** ── 設定が嘘になる。
+   *
+   * ⚠ **既定を true にしない**。渡し忘れで漏れると画面に何も出ないので
+   * 永久に露見しない。逆(塞がる)は user に見えるので直る。
+   * 意味論の正本は `features/markdown/external-images.ts`。
+   */
+  readonly allowExternalImages?: boolean;
 }
 
 /**
@@ -4486,6 +4539,8 @@ export function renderMarkdown(
   lineMap = paraAlignResult.lineMap;
   const env = {
     currentContainerId: opts.currentContainerId ?? '',
+    // ⚠ 既定は**塞ぐ側**(`external-images.ts` の向きに従う)
+    allowExternalImages: opts.allowExternalImages === true,
   };
   // L-5 align prefix + L-9 indent prefix を pre-process で strip(挿入あり)。
   const alignResult = preprocessAlignPrefix(text, lineMap);

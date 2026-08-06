@@ -27,6 +27,12 @@ import {
 } from '@features/markdown/edit-journal';
 import { iconButton } from './icons';
 import { buildFormatBar } from './format-bar';
+import {
+  appExternalImages,
+  buildExternalImageBar,
+  ExternalImagePolicy,
+} from './external-images';
+import { EXTERNAL_IMAGE_ATTR } from '@features/markdown/external-images';
 import { MarkdownClient } from '@adapter/platform/render/markdown-client';
 import {
   extractDocumentGlobals,
@@ -103,6 +109,8 @@ export class DetailRenderer {
   private titleEl: HTMLElement | null = null;
   private barSlot: HTMLElement | null = null;
   private panelSlot: HTMLElement | null = null;
+  /** 外部画像の確認の帯(2026-08-06)。⚠ 本文の器の**外**。 */
+  private noticeSlot: HTMLElement | null = null;
   private bodyHost: HTMLElement | null = null;
   /**
    * 本文の出し方(markdown / 添付)。変わったら器ごと作り直す。
@@ -149,10 +157,26 @@ export class DetailRenderer {
      * ⚠ 原文の**継ぎ足しはこちらが 1 か所で**やる(規則を 2 つ書かない)。
      */
     private readonly onBodyChange: ((body: string) => void) | null = null,
+    /**
+     * 外部画像の設定と、このノートの同意(2026-08-06、user 裁定)。
+     * ⚠ 既定はアプリ共有の 1 個 ── test は自分で `new` して渡す。
+     */
+    private readonly externalImages: ExternalImagePolicy = appExternalImages,
   ) {
     this.region = region;
     this.assets = assets;
     this.markdown = markdown;
+  }
+
+  /**
+   * 外部画像の答えが変わった ── **次の `render()` で必ず描き直す**。
+   *
+   * 🔴 指紋(`lastBody` 等)は state しか見ていないので、state が動かない
+   * 同意の変化では**早期 return で何も起きない**。だから指紋を 1 つ崩す。
+   * ⚠ 骨組みは残す(`skeletonLid` を触らない)── スクロール位置と図が生き残る。
+   */
+  invalidate(): void {
+    this.lastBody = null;
   }
 
   /** 編集プレビューの予約を捨てる(編集を抜けるとき)。 */
@@ -190,6 +214,7 @@ export class DetailRenderer {
     this.titleEl = null;
     this.barSlot = null;
     this.panelSlot = null;
+    this.noticeSlot = null;
     this.bodyHost = null;
     this.bodyKind = null;
     this.bodyView = EMPTY_VIEW;
@@ -267,9 +292,19 @@ export class DetailRenderer {
       this.barSlot.setAttribute('data-pkc-field', 'detail-bar-slot');
       this.panelSlot = document.createElement('div');
       this.panelSlot.setAttribute('data-pkc-field', 'detail-panel-slot');
+      // ⚠ 確認の帯は**本文の器の外**に置く ── 中に入れると `applyBlocks` の
+      //    差分が「知らない子」として消す(そして次の描画で戻るので点滅する)
+      this.noticeSlot = document.createElement('div');
+      this.noticeSlot.setAttribute('data-pkc-field', 'detail-notice-slot');
       this.bodyHost = document.createElement('div');
       this.bodyHost.setAttribute('data-pkc-field', 'detail-body-host');
-      this.region.append(this.titleEl, this.barSlot, this.panelSlot, this.bodyHost);
+      this.region.append(
+        this.titleEl,
+        this.barSlot,
+        this.panelSlot,
+        this.noticeSlot,
+        this.bodyHost,
+      );
       this.skeletonLid = lid;
       this.bodyKind = null;
       this.bodyView = EMPTY_VIEW;
@@ -313,7 +348,7 @@ export class DetailRenderer {
       this.bodyKind = 'attachment';
       this.bodyView = EMPTY_VIEW;
       this.bodyHost!.textContent = '';
-      this.renderAttachment(body, fm.body);
+      this.renderAttachment(body, fm.body, lid);
       this.restoreScroll();
       return;
     }
@@ -343,6 +378,12 @@ export class DetailRenderer {
         sourceLineAnchors: true,
         // heading-number は text レベル前処理(LineMap 不変)── 全文 body から抽出
         headingNumber: extractHeadingNumberConfig(body),
+        /**
+         * 外部画像(2026-08-06、user 裁定)。⚠ **ノートごと**に決まる ──
+         * 「常に確認」で押した同意はこのノートにだけ効く。
+         * ⚠ 本文の画像と箱の CSP は**同じ値**で動く(片方だけ開けない)。
+         */
+        allowExternalImages: this.externalImages.allows(lid),
       };
       /**
        * 🔴 **読む面もワーカーで描く**(2026-08-06。user 報告 2-8)。
@@ -390,6 +431,8 @@ export class DetailRenderer {
         //    次に何かが挿入されるまで返らない。同じ穴を隣同士で片方だけ塞いでいた。
         pruneScopes(this.mermaidScopes);
         this.pruneLends();
+        // ⚠ 帯は**本文が入ってから**組む(数えるものが DOM に無いと 0 件になる)
+        this.renderExternalImageBar(lid, host);
         this.restoreScroll();
       };
       void this.markdown
@@ -450,6 +493,37 @@ export class DetailRenderer {
     }
   }
 
+  /**
+   * 外部画像の確認の帯(2026-08-06、user 裁定)。
+   *
+   * 出す条件は **「設定が『常に確認』」+「このノートはまだ答えていない」+
+   * 「実際に止まっているものが 1 件以上」** の 3 つ。
+   * ⚠ 3 つ目が要る ── 外部画像を 1 枚も持たないノートで帯を出すと、
+   *   ほぼ全部のノートで出ることになり、user は中身を読まずに押すようになる。
+   * ⚠ 本文の画像は DOM から数える(描いた結果が正)。箱の中は静的に読めないので
+   *   **箱からの申告**を使う(`noteBlockedBox`)。
+   */
+  private renderExternalImageBar(lid: string, host: HTMLElement): void {
+    const slot = this.noticeSlot;
+    if (!slot) return;
+    slot.textContent = '';
+    if (!this.externalImages.unanswered(lid)) return;
+    const images = host.querySelectorAll(`[${EXTERNAL_IMAGE_ATTR}]`).length;
+    const boxes = this.externalImages.blockedBoxCount(lid);
+    if (images === 0 && boxes === 0) return;
+    slot.append(buildExternalImageBar(images, boxes));
+  }
+
+  /**
+   * 箱が「画像を止めた」と申告してきた ── 帯を出し直す。
+   * ⚠ **描き直さない**(帯だけ組む)── 箱を作り直すと中身が一度消える。
+   */
+  noteBlockedBox(lid: string, blocked: number): void {
+    if (!this.externalImages.noteBlockedBox(lid, blocked)) return;
+    if (this.mode !== 'view' || this.skeletonLid !== lid || !this.bodyHost) return;
+    this.renderExternalImageBar(lid, this.bodyHost);
+  }
+
   private renderPanel(state: AppState, lid: string): void {
     const slot = this.panelSlot!;
     slot.textContent = '';
@@ -505,8 +579,18 @@ export class DetailRenderer {
      * ⚠ 既定 OFF は user 裁定(設計 §9 論点 C ── 塊を跨ぐ Ctrl+Z が入るまで開けない)。
      * ⚠ URL だけの口(`?pkc-md-inline` と同型)── flag 枠(最大 15)を食わない。
      */
+    /**
+     * プレビューに渡す既定(2026-08-06)。
+     * ⚠ **外部画像の許可は読む面と同じ値**(`allows(lid)`)── 編集中だけ
+     *   開いたり閉じたりすると、書いている最中と保存後で見え方が食い違う。
+     * ⚠ このノートの分だけ。編集セッション中は変わらない(設定変更は同意を捨てる)。
+     */
+    const previewOpts = {
+      sourceLineAnchors: false,
+      allowExternalImages: this.externalImages.allows(open.lid),
+    };
     if (liveEditorEnabled()) {
-      this.renderLiveEditor(open.body);
+      this.renderLiveEditor(open.body, previewOpts);
       return;
     }
     const split = document.createElement('div');
@@ -564,12 +648,12 @@ export class DetailRenderer {
       },
     );
     // 編集に入った直後は待たせない(**その場で 1 回**)
-    follow.push(parseFrontmatter(ta.value).body, { sourceLineAnchors: false });
+    follow.push(parseFrontmatter(ta.value).body, previewOpts);
     follow.flush();
     ta.addEventListener('input', () => {
       // ⚠ rAF で畳まない ── 畳み込みは follower(静穏 + 上限)が持つ。
       //    2 か所で畳むと、どちらが効いているか分からなくなる
-      follow.push(parseFrontmatter(ta.value).body, { sourceLineAnchors: false });
+      follow.push(parseFrontmatter(ta.value).body, previewOpts);
     });
     // ⚠ 編集を抜けるときに予約と図を畳む(detached なノードへ描かない)
     this.cancelPreview = () => {
@@ -591,7 +675,11 @@ export class DetailRenderer {
    * ⚠ 原文の正本は `AppState.openBody.body`。ここが持つのは「窓」で、
    * 継ぎ足した本文は `onBodyChange` で外へ返す(dispatch はしない ── 層規約)。
    */
-  private renderLiveEditor(initialBody: string): void {
+  private renderLiveEditor(
+    initialBody: string,
+    /** ⚠ 読む面と同じ値を渡す(`renderEditor` が 1 か所で決める)。 */
+    previewOpts: { sourceLineAnchors: boolean; allowExternalImages: boolean },
+  ): void {
     const pane = document.createElement('div');
     pane.setAttribute('data-pkc-region', 'editor-live');
     pane.className = 'pkc-md-rendered';
@@ -610,7 +698,7 @@ export class DetailRenderer {
     const setBody = (next: string): void => {
       body = next;
       this.onBodyChange?.(next);
-      follow.push(body, { sourceLineAnchors: false });
+      follow.push(body, previewOpts);
       follow.flush(); // 🔑 確定は**待たせない**(打鍵では 1 回も描かない代わり)
     };
 
@@ -717,7 +805,7 @@ export class DetailRenderer {
       { withRanges: true },
     );
 
-    follow.push(body, { sourceLineAnchors: false });
+    follow.push(body, previewOpts);
     follow.flush();
 
     this.cancelPreview = () => {
@@ -729,7 +817,12 @@ export class DetailRenderer {
   }
 
   /** attachment フレーバーの view(P4a): メタ + preview + 説明 markdown。 */
-  private renderAttachment(rawBody: string, description: string): void {
+  private renderAttachment(
+    rawBody: string,
+    description: string,
+    /** ⚠ **説明文も本文** ── 外部画像の扱いを本文と揃えるのに要る(2026-08-06)。 */
+    lid: string,
+  ): void {
     const host = this.bodyHost ?? this.region;
     const meta = readAttachmentMeta(rawBody);
     const info = document.createElement('div');
@@ -813,7 +906,12 @@ export class DetailRenderer {
       const desc = document.createElement('div');
       desc.className = 'pkc-md-rendered';
       desc.setAttribute('data-pkc-field', 'detail-body');
-      desc.innerHTML = renderMarkdown(description, { sourceLineAnchors: true });
+      desc.innerHTML = renderMarkdown(description, {
+        sourceLineAnchors: true,
+        // ⚠ 添付の説明も本文と同じ扱い ── ここだけ素通りすると、説明に書いた
+        //    追跡画像が設定を無視して飛ぶ(面ごとに違う扱いにしない)
+        allowExternalImages: this.externalImages.allows(lid),
+      });
       host.append(desc);
       void this.hydrateAssetRefs(desc, this.hydrateToken);
       // 🔴 添付の説明にも図が書ける(P8 段⑬ review L-3)。かつてここだけ

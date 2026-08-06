@@ -1262,6 +1262,62 @@ describe('可搬 HTML — 画面と同じ材料で描く', () => {
     expect(clear, '消すのが当てるより後になっている(宣言が全部無効になる)').toBeLessThan(apply);
   });
 
+  /**
+   * 🔴 **書き出す HTML に外部画像を焼くのは「常にオン」のときだけ**
+   * (2026-08-06、user 裁定)。
+   *
+   * ⚠ 書き出した HTML は**別の人が開く文書**である。開いた人は追跡に同意して
+   *   いないので、既定では焼かない ── URL は属性に残るので情報は失われない。
+   * ⚠ 閲覧側の script が**自分で `src` を入れない**ことも見る。入れたら、この
+   *   判断が閲覧の瞬間に無かったことになる(そして test は「属性が在る」で通る)。
+   */
+  describe('外部の画像', () => {
+    const BODY = '![絵](https://example.com/x.png)\n\n```html\n<b>箱</b>\n```\n';
+
+    it('既定では焼かない(URL は属性に残り、箱の CSP も閉じる)', async () => {
+      const out = await writePortableHtml(source({ entries: [{ lid: 'e1', body: BODY }] }), NOW);
+      const d = await dataOf(out.blob);
+      const html = d.entries[0]!.html;
+      // ⚠ 文字列で `src="https://…"` を探すと `data-pkc-external-src="…"` に
+      //    **部分一致して常に真**になる ── DOM で属性そのものを見る
+      const el = document.createElement('div');
+      el.innerHTML = html;
+      const img = el.querySelector('img')!;
+      expect(img, 'そもそも画像が出ていない').not.toBeNull();
+      expect(img.getAttribute('data-pkc-external-src')).toBe('https://example.com/x.png');
+      expect(img.hasAttribute('src')).toBe(false);
+      expect(html, '箱が出ていない').toContain('data-pkc-html-render-id');
+      expect(html).toContain('img-src data: blob:');
+    });
+
+    it('「常にオン」なら焼く(本文と箱が揃って開く)', async () => {
+      const out = await writePortableHtml(
+        source({ entries: [{ lid: 'e1', body: BODY }] }),
+        NOW,
+        undefined,
+        true,
+      );
+      const d = await dataOf(out.blob);
+      const html = d.entries[0]!.html;
+      const el = document.createElement('div');
+      el.innerHTML = html;
+      const img = el.querySelector('img')!;
+      expect(img.getAttribute('src')).toBe('https://example.com/x.png');
+      expect(img.hasAttribute('data-pkc-external-src')).toBe(false);
+      expect(html).toContain('img-src * data: blob:');
+    });
+
+    it('閲覧側は退避した URL を `src` へ戻さない(見た目だけ与える)', async () => {
+      const out = await writePortableHtml(source({ entries: [{ lid: 'e1', body: BODY }] }), NOW);
+      const text = await out.blob.text();
+      // 器の見た目は在る(無いと寸法 0 で「消えた」に見える)
+      expect(text, '読み込んでいない画像の見た目が無い').toContain('.pkc-external-img:not([src])');
+      // ⚠ 復元する処理は**無い**
+      expect(text).not.toContain('data-pkc-external-src]');
+      expect(text).not.toContain("getAttribute('data-pkc-external-src')");
+    });
+  });
+
   it('🔴 閲覧側が `html` fence の高さを受ける(height:0 の不可視にしない)', async () => {
     const out = await writePortableHtml(source({ entries: [{ lid: 'x1', body: '本文\n' }] }), NOW);
     const text = await out.blob.text();

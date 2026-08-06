@@ -77,4 +77,18 @@ export class CenterRouter {
     else if (view === 'settings') this.settings.render(state);
     else this.calendar.render(state);
   }
+
+  /**
+   * 外部画像の答え / 設定が変わった ── 次の `render()` で本文を描き直す
+   * (2026-08-06)。⚠ 呼ぶだけでは描かれない ── 呼び側が `render(state)` を続ける
+   * (state は動いていないので dispatcher の通知は来ない)。
+   */
+  invalidateDetail(): void {
+    this.detail.invalidate();
+  }
+
+  /** 箱が「画像を CSP で止めた」と申告してきた ── 帯だけ出し直す。 */
+  noteBlockedBox(lid: string, blocked: number): void {
+    this.detail.noteBlockedBox(lid, blocked);
+  }
 }

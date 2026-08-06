@@ -230,6 +230,11 @@ nav button.p{width:auto;font-size:12px;padding:4px 10px;margin:2px 8px 0;
 /* 図は原文のまま(閲覧側に mermaid を積まない)*/
 .b pre.d{font-size:.9em;opacity:.85}
 .b [data-pkc-asset-missing]{opacity:.75;outline:1px dashed #8886}
+/* 読み込んでいない外部画像(2026-08-06)。⚠ 画面側 app.css の
+   .pkc-external-img:not([src]) の対面 ── 片面だけだと寸法 0 で「消えた」に見える。
+   ⚠ 下の hydrate が src を入れると、この見た目は自動で外れる */
+.b .pkc-external-img:not([src]){display:inline-block;min-width:8rem;min-height:3rem;
+  max-width:100%;border:1px dashed #8886;border-radius:6px;vertical-align:middle}
 /* 一覧の行(表)は溢れさせない */
 .b>*{max-width:100%}
 a.f{display:inline-block;margin:8px 0;padding:6px 10px;border:1px solid #8884;border-radius:6px;
@@ -588,6 +593,18 @@ export async function writePortableHtml(
     text: string,
     opts?: RenderMarkdownOptions,
   ) => string | Promise<string> = (text, opts) => renderMarkdown(text, opts),
+  /**
+   * 🔴 **書き出す HTML に外部画像を焼くか**(2026-08-06、user 裁定)。
+   *
+   * 規則は 1 つ ── **設定が「常にオン」のときだけ焼く**。
+   * ⚠ ノートごとの同意(「常に確認」で押した分)は**持ち込まない**。書き出した
+   *   HTML は**別の人が開く文書**であり、開いた人は追跡に同意していない。
+   *   焼かなければ URL は `data-pkc-external-src` に残るので情報は失われない。
+   * ⚠ 閲覧側の script は**自分で `src` を入れない** ── 入れたら、この判断が
+   *   閲覧の瞬間に無かったことになる(見た目だけ `.pkc-external-img:not([src])`
+   *   で「読み込んでいない画像」として置く)。
+   */
+  allowExternalImages: boolean = false,
 ): Promise<HtmlResult> {
   const warnings: string[] = [];
   const metas = await src.listEntryMetas();
@@ -660,6 +677,7 @@ export async function writePortableHtml(
       const html = await render(r.body.slice(skip), {
         vars: extractVars(r.body),
         headingNumber: extractHeadingNumberConfig(r.body),
+        allowExternalImages,
       });
       /**
        * 🔴 **書字方向などの文書属性も一緒に配る**(同 2-7)。画面では
