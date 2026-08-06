@@ -61,7 +61,9 @@ export function getStructuralChildren(
     const m = metas.get(child);
     if (m) out.push(m);
   }
-  return out.sort((a, b) => a.entryOrder - b.entryOrder);
+  // ⚠ 同値の tie は **lid** で決める(boot / 一覧と同じ規則 ── 揃えないと
+  //   並べ替えの「隣」がファイラの見た目と食い違う)
+  return out.sort(byOrder);
 }
 
 /** 正準親を持たない entry(= root 直下、entryOrder 順)。 */
@@ -74,7 +76,7 @@ export function getRootEntries(
   for (const m of metas.values()) {
     if (!parentOf.has(m.lid)) out.push(m);
   }
-  return out.sort((a, b) => a.entryOrder - b.entryOrder);
+  return out.sort(byOrder);
 }
 
 /**
@@ -197,4 +199,70 @@ export function listMoveTargets(
     return false;
   };
   return listFolderPaths(metas, relations).filter((f) => !isSelfOrUnder(f.lid));
+}
+
+/** 並びの規則は **1 つ**(boot / 復元の挿入 / 一覧と同じ)── entryOrder 昇順、同値は lid。 */
+function byOrder(a: EntryMeta, b: EntryMeta): number {
+  return a.entryOrder - b.entryOrder || a.lid.localeCompare(b.lid);
+}
+
+/** 同じ親の下に居るもの(自分を含む)を並び順で返す。root 直下は親 = null。 */
+export function listSiblings(
+  lid: string,
+  metas: ReadonlyMap<string, EntryMeta>,
+  relations: readonly Relation[],
+): EntryMeta[] {
+  if (!metas.has(lid)) return [];
+  const parentOf = resolveCanonicalParents(metas, relations);
+  const parent = parentOf.get(lid) ?? null;
+  const out: EntryMeta[] = [];
+  for (const m of metas.values()) {
+    if ((parentOf.get(m.lid) ?? null) === parent) out.push(m);
+  }
+  return out.sort(byOrder);
+}
+
+/** 並べ替えで書き換える `entryOrder`(空 = 動かせない)。 */
+export interface OrderMove {
+  lid: string;
+  entryOrder: number;
+}
+
+/**
+ * 🔴 **並べ替え**(2026-08-06。user 報告 2-10)。直す前は `entryOrder` が
+ * **作成順に固定**で、並べ替えの手段が action・reducer・UI のどこにも無かった。
+ *
+ * 形は「**隣と入れ替える**」1 手だけにする(任意位置への drag は持ち込まない ──
+ * プライム・ディレクティブ「新機能を盛り込みすぎない」)。
+ *
+ * ⚠ 動かすのは**同じ親の下**だけ。別の親へ動かすのは居場所の変更(`SET_ENTRY_PARENT`)
+ *   であって並べ替えではない ── 1 つの操作に 2 つの意味を持たせない。
+ * ⚠ **値は交換する**(付け直さない)。同じ多重集合のまま入れ替えるので、
+ *   **他のフォルダの並びに一切触らない** ── `entryOrder` は container 全体で 1 本の
+ *   数直線なので、兄弟を 0..n-1 で振り直すと**別のフォルダの entry と噛み合う**。
+ * ⚠ 値が**同値**のときは交換しても何も起きない(並びは lid で決まっているから)。
+ *   そこだけ隣の外側へ 1 つずらす ── 第三者と同値になることはあるが、その場合も
+ *   lid の tie-break で決まるので**並びは決定的**である。
+ */
+export function reorderSibling(
+  lid: string,
+  direction: 'up' | 'down',
+  metas: ReadonlyMap<string, EntryMeta>,
+  relations: readonly Relation[],
+): OrderMove[] {
+  const siblings = listSiblings(lid, metas, relations);
+  const at = siblings.findIndex((m) => m.lid === lid);
+  if (at < 0) return [];
+  const other = siblings[at + (direction === 'up' ? -1 : 1)];
+  const me = siblings[at]!;
+  if (!other) return []; // 端 ── 動かせない
+  if (me.entryOrder !== other.entryOrder) {
+    return [
+      { lid: me.lid, entryOrder: other.entryOrder },
+      { lid: other.lid, entryOrder: me.entryOrder },
+    ];
+  }
+  return [
+    { lid: me.lid, entryOrder: other.entryOrder + (direction === 'up' ? -1 : 1) },
+  ];
 }

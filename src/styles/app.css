@@ -1756,6 +1756,18 @@ select:focus-visible {
   flex: 1 1 auto;
   min-width: 0;
 }
+/* 🔴 **並べ替え**(2026-08-06。user 報告 2-10)。居場所の欄の**すぐ下**に
+ * 置く ── 「どのフォルダか」と「その中の何番目か」は同じ話である。
+ * ⚠ 端では `disabled`(押せないことが見た目に出る)。 */
+[data-pkc-field='order-nudge'] {
+  display: flex;
+  gap: var(--s2);
+  margin-top: var(--s1);
+}
+[data-pkc-field='order-nudge'] button[disabled] {
+  opacity: 0.45;
+  cursor: default;
+}
 [data-pkc-field='filer-move-empty'],
 [data-pkc-field='filer-create-target'] {
   color: var(--muted);

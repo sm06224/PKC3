@@ -8,7 +8,7 @@
  *   selectedLid が選択の単一情報源
  */
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
-import { resolveCanonicalParents } from '@features/relation/tree';
+import { resolveCanonicalParents, reorderSibling } from '@features/relation/tree';
 import { extractMeta, seedBodyFor } from '@features/flavor';
 import { withTodoStatus } from '@features/flavor/todo-flavor';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
@@ -269,6 +269,8 @@ export type UserAction =
    * 割ると途中で落ちたときに親無しが残る(PKC2 がその形だった)。
    */
   | { type: 'SET_ENTRY_PARENT'; lid: string; parentLid: string | null; relationId: string }
+  /** 同じ親の下で隣と入れ替える(2026-08-06。user 報告 2-10)。 */
+  | { type: 'MOVE_ENTRY_ORDER'; lid: string; direction: 'up' | 'down' }
   | { type: 'SHOW_HISTORY' }
   | { type: 'HIDE_HISTORY' }
   | { type: 'RESTORE_REVISION'; revId: string }
@@ -426,6 +428,15 @@ export type DomainEvent =
       title: string;
       archetype: string;
       entryOrder: number;
+    }
+  | {
+      /**
+       * 並べ替えの永続化(2026-08-06。user 報告 2-10)。⚠ **本文は載せない** ──
+       * `REQUEST_RENAME` と同じで effect が disk から読み直す(画面の古い本文を
+       * 基底にすると別経路の書込を巻き戻す)。動かすのは常に **2 件以下**。
+       */
+      type: 'REQUEST_REORDER';
+      entries: Array<{ lid: string; title: string; archetype: string; entryOrder: number }>;
     }
   | { type: 'REQUEST_REVISION_LIST'; lid: string }
   | {
@@ -1261,6 +1272,45 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
             relationId: action.relationId,
           },
         ],
+      };
+    }
+    case 'MOVE_ENTRY_ORDER': {
+      /**
+       * 🔴 **並べ替え**(2026-08-06。user 報告 2-10「並べ替えの手段が無い」)。
+       *
+       * ⚠ 規則は `reorderSibling` が 1 本で持つ(features 層)── reducer に
+       *   2 つ目の並べ方を書かない。ここがやるのは
+       *   「metas の値を書き換えて、`order` を**同じ規則で**引き直す」だけ。
+       */
+      if (state.phase !== 'ready') return { state, events: [] };
+      const moves = reorderSibling(
+        action.lid,
+        action.direction,
+        state.entryMetas,
+        state.relations,
+      );
+      if (moves.length === 0) return { state, events: [] }; // 端 ── 黙って何もしない
+      const entryMetas = new Map(state.entryMetas);
+      const rows: Array<{ lid: string; title: string; archetype: string; entryOrder: number }> = [];
+      for (const mv of moves) {
+        const m = entryMetas.get(mv.lid);
+        if (!m) continue;
+        entryMetas.set(mv.lid, { ...m, entryOrder: mv.entryOrder });
+        rows.push({
+          lid: mv.lid,
+          title: m.title,
+          archetype: m.archetype,
+          entryOrder: mv.entryOrder,
+        });
+      }
+      if (rows.length === 0) return { state, events: [] };
+      // ⚠ 並びの規則は boot と同じ 1 本(entryOrder 昇順・同値は lid)
+      const order = [...entryMetas.values()]
+        .sort((a, b) => a.entryOrder - b.entryOrder || a.lid.localeCompare(b.lid))
+        .map((m) => m.lid);
+      return {
+        state: { ...state, entryMetas, order },
+        events: [{ type: 'REQUEST_REORDER', entries: rows }],
       };
     }
     case 'SHOW_HISTORY': {

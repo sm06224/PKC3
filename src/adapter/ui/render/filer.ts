@@ -25,6 +25,7 @@ import {
   resolveCanonicalParents,
   resolveFilerScope,
   listMoveTargets,
+  listSiblings,
 } from '@features/relation/tree';
 import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
 // 🔑 種別の呼び名は **1 本**(P8 段⑲)── かつてここだけ独自表を持ち、
@@ -33,7 +34,7 @@ import { archetypeLabel } from './sidebar';
 // ⚠ 日付の切り方は `features/datetime/stored-date` が正本(情報列・一覧の行と共有)。
 //    ここに 3 つ目の parse を置いていたので寄せた(規則は 1 つ ── CLAUDE.md)
 import { formatListDate, formatStoredDate } from '@features/datetime/stored-date';
-import { ARCHETYPE_ICONS, iconSpan } from './icons';
+import { ARCHETYPE_ICONS, iconButton, iconSpan } from './icons';
 
 
 
@@ -110,6 +111,32 @@ export class FilerRenderer {
       sel.value = resolveCanonicalParents(state.entryMetas, state.relations).get(moving.lid) ?? '';
       label.append(cap, sel);
       host.append(label);
+
+      /**
+       * 🔴 **並べ替え**(2026-08-06。user 報告 2-10「並べ替えの手段が無い」)。
+       *
+       * ⚠ **居場所の帯と同じ場所**に置く(行ごとに生やさない ── 平置き 15k 件で
+       *   30k 個のボタンになるし、フォルダ自身は選ぶと一覧から消えるので
+       *   行のボタンでは動かせない。帯に置いた理由と同じ)。
+       * ⚠ 端では**押せなくする**(押して黙って断られるのは「無言の操作拒否」)。
+       */
+      const siblings = listSiblings(moving.lid, state.entryMetas, state.relations);
+      const at = siblings.findIndex((m) => m.lid === moving.lid);
+      const nudge = document.createElement('div');
+      nudge.setAttribute('data-pkc-field', 'order-nudge');
+      for (const [dir, text] of [
+        ['up', '上へ'],
+        ['down', '下へ'],
+      ] as const) {
+        // 図案は `ACTION_ICONS['move-order-…']` が持つ(表は 1 つ)
+        const b = iconButton(`move-order-${dir}`, text);
+        b.setAttribute('data-pkc-entry', moving.lid);
+        b.disabled = at < 0 || (dir === 'up' ? at === 0 : at === siblings.length - 1);
+        // ⚠ なぜ押せないかを言う(端に居ることは見た目から分からない)
+        if (b.disabled) b.title = dir === 'up' ? 'すでに先頭です' : 'すでに末尾です';
+        nudge.append(b);
+      }
+      host.append(nudge);
     }
 
     if (scope) {

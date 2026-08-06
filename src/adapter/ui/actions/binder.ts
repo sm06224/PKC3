@@ -250,6 +250,17 @@ function refuseWhileBusy(
   return true;
 }
 
+/** 並べ替えの 2 つの向きで同じことをする(規則を 2 か所に書かない)。 */
+function moveOrder(
+  dispatcher: Dispatcher,
+  target: HTMLElement,
+  direction: 'up' | 'down',
+): void {
+  const lid = target.getAttribute('data-pkc-entry');
+  if (!lid) return;
+  dispatcher.dispatch({ type: 'MOVE_ENTRY_ORDER', lid, direction });
+}
+
 const ACTIONS: Record<string, ActionHandler> = {
   'select-entry': (dispatcher, target) => {
     const lid = target.getAttribute('data-pkc-entry');
@@ -441,6 +452,12 @@ const ACTIONS: Record<string, ActionHandler> = {
       relationId: generateLid(),
     });
   },
+  /**
+   * 🔴 **並べ替え**(2026-08-06。user 報告 2-10)。⚠ 動かす当人は帯が持つ
+   * (`move-entry` と同じ理由 ── 押した瞬間に選択が変わっていても取り違えない)。
+   */
+  'move-order-up': (dispatcher, target) => moveOrder(dispatcher, target, 'up'),
+  'move-order-down': (dispatcher, target) => moveOrder(dispatcher, target, 'down'),
   'attach-file': (_dispatcher, target) => {
     // 常設の hidden input を開く(動的生成にしない ── smoke の setInputFiles と
     // ブラウザの user-gesture 要件の両方に効く)
