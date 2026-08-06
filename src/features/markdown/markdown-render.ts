@@ -2959,6 +2959,25 @@ const PHYSICAL_ALIGNS: ReadonlySet<AlignKind> = new Set([
 ] as const);
 
 /**
+ * 🔴 **formal 形は logical 値も受ける**(2026-08-06。曖昧記法の調査で判明)。
+ *
+ * 記法の正本は formal を「simple の canonical な言い換え」と定めている ──
+ * `PKC2: docs/spec/pkc-markdown-complete-spec-v4.md` #33
+ * 「`:::paragraph{align=center|end|start} T :::`」/
+ * `PKC2: docs/development/notation-redesign-2026-05/11-canonicalization-spec.md` §53
+ * 「`|> 本文`(typo 4 形)→ `:::paragraph{align=end} 本文 :::`」。
+ *
+ * ⚠ にもかかわらず、判定は**物理値だけ**の allowlist を通っていたので、
+ * `align=end` / `align=start` は `align=letterspacing` と同じ**黙った no-op**
+ * だった(実測: left / right / center は効き、end / start / justify は適用なし)。
+ * つまり「行頭マーカーの canonical な書き方」が**存在しないことになっていた**。
+ * ⚠ CSS 側は最初から対応していた(`app.css` の `[data-pkc-align='end'|'start'|'justify']`)
+ * ── 落ちていたのは受理側 1 か所だけである。
+ * 🔑 物理と logical を**別の集合**で持つ:混ぜると「物理 align」という語が嘘になる。
+ */
+const LOGICAL_ALIGNS: ReadonlySet<AlignKind> = new Set(['start', 'end'] as const);
+
+/**
  * reform-2026-05 Phase 2 PR-2E:`:::paragraph{align=physical}` block directive。
  *
  *   :::paragraph{align=left}
@@ -3013,7 +3032,13 @@ function processParagraphAlignDirective(
     }
     const alignRaw = open.attrs.kvs.align;
     let align: AlignKind | null = null;
-    if (typeof alignRaw === 'string' && PHYSICAL_ALIGNS.has(alignRaw as AlignKind)) {
+    // ⚠ 物理(left/right/top/bottom/center)と logical(start/end)の**両方**を受ける
+    //    ── formal は simple の canonical な言い換えなので、logical を書けないと
+    //    「`|>` の正しい書き方」が存在しないことになる(2026-08-06)
+    if (
+      typeof alignRaw === 'string' &&
+      (PHYSICAL_ALIGNS.has(alignRaw as AlignKind) || LOGICAL_ALIGNS.has(alignRaw as AlignKind))
+    ) {
       align = alignRaw as AlignKind;
     }
     // open 行は consume
@@ -3206,7 +3231,7 @@ function applyAlignAttrs(
 ): void {
   if (alignMap.size === 0 && indentMap.size === 0) return;
   for (const tok of tokens) {
-    // align(L-5 行頭 prefix `||` / `|>` / `<|`)は段落 + 見出し両方に
+    // align(L-5 行頭 prefix `||` = center / `|>` `<|` `|<` `>|` = end)は段落 + 見出し両方に
     // 適用する(`||## 見出し` 等)。indent(L-9 字下げ `__`)は段落専用
     // ── 見出しの 1 字下げは意味を成さないため除外する。
     if ((tok.type === 'paragraph_open' || tok.type === 'heading_open') && tok.map) {
@@ -3552,6 +3577,15 @@ interface TolerantInlinePattern {
   canonical: string;
 }
 
+/**
+ * 🔑 **行頭 align の canonical を教える文言は 1 本**(2026-08-06)。
+ * `:align:{position=X}` の 2 経路(表 / standalone)と、そこから流れる 3 面
+ * (console.info / `data-pkc-canonical` / hover `title`)が同じ文を使う。
+ */
+export const ALIGN_CANONICAL_HINT =
+  '行頭 prefix `||`(center)/ `|>`(end。`<|` `|<` `>|` も同じ logical end)。' +
+  '左寄せは frontmatter の `direction` 宣言か formal `:::paragraph{align=left}`';
+
 const TOLERANT_INLINE_PATTERNS: ReadonlyArray<TolerantInlinePattern> = [
   {
     re: /:lead:\[([\s\S]*?)\]/g,
@@ -3572,7 +3606,22 @@ const TOLERANT_INLINE_PATTERNS: ReadonlyArray<TolerantInlinePattern> = [
     name: 'align',
     code: 'PKC2007',
     interpretedAs: 'next-paragraph alignment hint',
-    canonical: '行頭 prefix `||`(center)/ `|>`(end)/ `<|`(start)または `:::paragraph{align=…}`',
+    /**
+     * 🔴 **`<|`(start)と書いてはいけない**(2026-08-06 に直した。user 指摘)。
+     *
+     * 記法の正本(`PKC2: docs/development/notation-redesign-2026-05/01-notation-catalog.md`
+     * §1.4.2)は「`|>` `<|` `|<` `>|` … **全 4 形が同じ "logical end"**」、§1.4.1 は
+     * 「`<|text` align prefix … ❌ **廃止**。default flow は frontmatter で declare」。
+     * つまり**行頭マーカーに「左」は無い**。
+     *
+     * ⚠ この 1 文字列は **user に見える 3 面**へ同時に流れる ──
+     * ① `console.info` の hint ② レンダ HTML の `data-pkc-canonical` 属性
+     * (**書き出した HTML に焼かれる**)③ hover の `title`。
+     * 誤ると**アプリが誤った記法を教える**(実際に出荷していた)。
+     * ⚠ PKC2 側の同じ 2 か所(`markdown-render.ts:3285` / `:3365`)も誤っているが、
+     *   PKC2 は read-only 参照専用なので直せない ── **引き写さないこと**。
+     */
+    canonical: ALIGN_CANONICAL_HINT,
   },
   {
     re: /:quote:\{([\s\S]*?)\}/g,
@@ -3659,7 +3708,10 @@ function processTolerantStandaloneAlign(
             `[PKC2007] tolerant alias :align: accepted (line-based, applied to next paragraph). ` +
             `detected=":align:{position=${rawPos}}" ` +
             `interpretedAs="next-paragraph alignment (${align})" ` +
-            `canonical="行頭 prefix \`|>\`(end)/ \`||\`(center)/ \`<|\`(start)"`,
+            // ⚠ **文言を 2 か所に書かない**(2026-08-06)── ここは表の canonical を
+            //    参照する。直す前は同じ誤り(`<|`(start))が独立に埋まっていて、
+            //    表を直しても**こちらだけ残った**
+            `canonical="${ALIGN_CANONICAL_HINT}"`,
           );
         }
         out.push('');

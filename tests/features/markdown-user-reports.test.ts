@@ -6,8 +6,8 @@
  * 既存の検査(golden / css-parity / docs-parity)はどれもこの振る舞いを見ていない ──
  * CLAUDE.md「通っている test は、何も保証していないかもしれない」の実例である。
  */
-import { describe, expect, it } from 'vitest';
-import { renderMarkdown } from '@features/markdown/markdown-render';
+import { describe, expect, it, vi } from 'vitest';
+import { ALIGN_CANONICAL_HINT, renderMarkdown } from '@features/markdown/markdown-render';
 // 🔑 **global direction の switch** は frontmatter 側の機構(行頭マーカーとは別系統)
 import { extractDocumentGlobals } from '@features/markdown/document-globals';
 
@@ -319,6 +319,74 @@ describe('行頭アライン: 矢印の向きは意味を持たない(記法の�
    * 全 test が緑のままだった(2026-08-06。B3)。同じ「align」の判定が 2 か所に在るので、
    * 片方だけ守っていると片方だけ静かに死ぬ(CLAUDE.md「判定が 2 か所に生えたら両方 pin」)。
    */
+  /**
+   * 🔴 **曖昧記法の要点は「受理して、正しい形を教える」**(user 2026-08-06
+   * 「いわゆる曖昧記法です」)。その「教える文言」が誤っていた ──
+   * `:align:{position=X}` を書いた人に `<|`(start)を canonical として配っていた。
+   *
+   * ⚠ この文言は **user に見える 3 面**へ流れる: ① `console.info` ②
+   * レンダ HTML の `data-pkc-canonical` 属性(**書き出した HTML に焼かれる**)
+   * ③ hover の `title`。しかも**誰も pin していなかった**ので dist まで出荷された
+   * (`markdown-golden.test.ts` は `console.info` を mock で潰している)。
+   * 🔑 だからここは**文言そのもの**を見る ── 実装が正しくても、教える文が
+   * 誤っていれば user と AI は誤った記法を学ぶ。
+   */
+  describe('曖昧記法の canonical hint(教える文言)', () => {
+    it('🔴 hint が「左」「start」を名乗らない(廃止済みの意味を再教育しない)', () => {
+      expect(ALIGN_CANONICAL_HINT, 'hint が start を canonical として教えている').not.toContain(
+        'start',
+      );
+      expect(ALIGN_CANONICAL_HINT, 'hint が「左」の行頭マーカーを教えている').not.toMatch(
+        /`<\|`(\s*|\()?左|左寄せ.*`<\|`/,
+      );
+    });
+
+    it('🔑 hint が正本の 2 つ(center / end)と、左の正しい道を名乗る', () => {
+      expect(ALIGN_CANONICAL_HINT).toContain('center');
+      expect(ALIGN_CANONICAL_HINT).toContain('end');
+      // typo 3 形が同じ end であることまで書く(向きを読ませない)
+      for (const sym of ['<|', '|<', '>|']) expect(ALIGN_CANONICAL_HINT).toContain(sym);
+      // 左に寄せたい人の行き先(direction / formal)を書く
+      expect(ALIGN_CANONICAL_HINT).toContain('direction');
+      expect(ALIGN_CANONICAL_HINT).toContain('align=left');
+    });
+
+    /**
+     * ⚠ **経路が 2 本ある**(表 / standalone)。直す前は同じ誤りが独立に 2 か所
+     * 埋まっていて、表だけ直すと**もう片方が残った**。文言を 1 本に寄せたので、
+     * 「2 つの出口が同じ文を配る」ことを pin する。
+     */
+    it('🔴 2 つの出口が同じ文言を配る(片方だけ古くならない)', () => {
+      const infos: string[] = [];
+      const spy = vi.spyOn(console, 'info').mockImplementation((...a: unknown[]) => {
+        infos.push(a.map(String).join(' '));
+      });
+      try {
+        // ① inline 経路(段落の中に書いた `:align:{}`)
+        renderMarkdown('本文 :align:{position=center} の続き\n');
+        // ② standalone 経路(行そのものが `:align:{}`)
+        renderMarkdown(':align:{position=center}\n\n次の段落\n');
+      } finally {
+        spy.mockRestore();
+      }
+      const hints = infos.filter((l) => l.includes('PKC2007'));
+      expect(hints.length, '2 つの経路のどちらかが hint を出していない').toBeGreaterThanOrEqual(2);
+      for (const h of hints) {
+        expect(h, 'hint が start を教えている').not.toContain('(start)');
+        expect(h, 'hint が正本の文言を使っていない').toContain(ALIGN_CANONICAL_HINT);
+      }
+    });
+
+    it('🔴 書き出した HTML に焼かれる属性も同じ文言(export が誤りを配らない)', () => {
+      const html = renderMarkdown('本文 :align:{position=center} の続き\n', {
+        silentHallucinationWarnings: true,
+      });
+      expect(html, 'canonical 属性が出ていない').toContain('data-pkc-canonical=');
+      expect(html, '属性が start を教えている').not.toContain('(start)');
+      expect(html).toContain('logical end');
+    });
+  });
+
   it('🔴 `:::format{align=…}` も同じ語彙で効く(2 本目の経路を無防備にしない)', () => {
     const left = renderMarkdown(':::format{align=left}\n本文\n:::\n', {
       silentHallucinationWarnings: true,
@@ -329,6 +397,34 @@ describe('行頭アライン: 矢印の向きは意味を持たない(記法の�
       silentHallucinationWarnings: true,
     });
     expect(center).toContain('data-pkc-align="center"');
+  });
+
+  /**
+   * 🔴 **formal 形は logical 値も受ける**(2026-08-06。曖昧記法の調査で見つけた欠陥)。
+   *
+   * 正本は formal を「simple の canonical な言い換え」と定めている
+   * (spec v4 #33「`:::paragraph{align=center|end|start}`」/ canonicalization-spec §53
+   * 「`|> 本文` → `:::paragraph{align=end} 本文 :::`」)。にもかかわらず判定は
+   * **物理値だけ**の allowlist を通っていて、`align=end` / `align=start` は
+   * `align=letterspacing` と同じ**黙った no-op** だった ── つまり
+   * **「`|>` の正しい書き方」が存在しないことになっていた**。
+   * ⚠ CSS は最初から対応済み(落ちていたのは受理側 1 か所)。
+   */
+  it('🔴 `:::paragraph{align=end|start}` が効く(canonical な言い換えが no-op でない)', () => {
+    const alignOfFormal = (v: string): string | null => {
+      const html = renderMarkdown(`:::paragraph{align=${v}}\n本文\n:::\n`, {
+        silentHallucinationWarnings: true,
+      });
+      return /data-pkc-align="([^"]*)"/.exec(html)?.[1] ?? null;
+    };
+    expect(alignOfFormal('end'), 'logical end が黙って無視された').toBe('end');
+    expect(alignOfFormal('start'), 'logical start が黙って無視された').toBe('start');
+    // 物理値は今までどおり(logical を足した代償が出ていない)
+    expect(alignOfFormal('left')).toBe('left');
+    expect(alignOfFormal('right')).toBe('right');
+    expect(alignOfFormal('center')).toBe('center');
+    // ⚠ 出典に無い値は今までどおり受けない(受理を広げすぎていない)
+    expect(alignOfFormal('letterspacing'), '不正な値まで受けるようになった').toBeNull();
   });
 
   /**

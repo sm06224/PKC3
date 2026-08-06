@@ -1196,7 +1196,11 @@ select:focus-visible {
   text-decoration: none;
 }
 
-/* ── 行頭アライン(`||` 中央 / `|>` 右)と段落の字下げ(`__`) */
+/* ── 行頭アライン(`||` 中央 / `|>` `<|` `|<` `>|` は 4 形すべて logical end)と
+ * 段落の字下げ(`__`)。
+ * ⚠ **物理方向で説明しない**(2026-08-06 に「`|>` 右」から直した)── `end` は
+ *   CSS logical value なので `direction` / `writing-mode` で自動 flip する。
+ *   物理の left / right は formal(`:::paragraph{align=left}`)経由のみ。 */
 .pkc-md-rendered [data-pkc-align='center'] {
   text-align: center;
 }
