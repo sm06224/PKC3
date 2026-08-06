@@ -44,6 +44,12 @@ import { autoPairFor } from '@features/markdown/text-ops';
 /** 活性塊の代わりに置く定数。⚠ **中身が固定**なので差分の対象から自然に外れる。 */
 const SLOT_HTML = '<div data-pkc-row-slot="1"></div>';
 
+/**
+ * 入力欄の高さの上限(行)。⚠ 全文差し替え(`Ctrl+A`)で 5000 行の箱を作らない。
+ * 上限に当たったら箱の中で scroll する(= 今日の編集画面と同じ見え方)。
+ */
+const ROWS_CAP = 40;
+
 /** 入れ子の要素で、行ごとの刻印を持つもの(先に書いた方を優先して探す)。 */
 const SUB_UNITS: readonly { selector: string; type: string }[] = [
   { selector: 'tr', type: 'tr_open' },
@@ -71,6 +77,12 @@ export interface RowSwapUpdate {
 interface Active {
   /** 塊の添字(`view.blocks` の中)。⚠ 描き直しのたびに引き直す。 */
   blockIndex: number;
+  /**
+   * 差し替えている塊の数(S6 の範囲差し替え)。ふつうは 1、`Ctrl+A` では全部。
+   * ⚠ **本文が同一のときしか描き直しを受けない**(上のガード)ので、開いた時の
+   * 数がそのまま使える ── 塊数が変わる描き直しはここへ来ない。
+   */
+  blockCount: number;
   startLine: number;
   endLine: number;
   /** 開いた時の原文。⚠ **変わったかの判定はここ 1 か所**(呼び側で二重に見ない)。 */
@@ -107,18 +119,30 @@ export class RowSwap {
    */
   private awaitingUpdate = false;
   private readonly onClick: (ev: Event) => void;
+  private readonly onDown: (ev: Event) => void;
 
   constructor(
     private readonly host: HTMLElement,
     private readonly cb: RowSwapCallbacks,
   ) {
     this.onClick = (ev: Event) => this.handleClick(ev as MouseEvent);
+    this.onDown = (ev: Event) => this.handleDown(ev as MouseEvent);
     // ⚠ バブリング段で聴く(アプリ内のリンク・トグルの既定を先に奪わない)
     this.host.addEventListener('click', this.onClick, false);
+    /**
+     * 🔴 **範囲を広げるのは `mousedown` で受ける**(2026-08-05、実機の smoke で判明)。
+     *
+     * `click` まで待つと**間に合わない** ── `mousedown` の既定動作が入力欄の焦点を
+     * 外し、`blur` が確定を走らせて活性が消えるので、`click` の時点では
+     * 「広げる元」が居ない(実際に Shift+クリックが**ただの単独クリック**になっていた)。
+     * ⚠ happy-dom は dispatch で `blur` を飛ばさないので、**unit では緑のまま壊れる**。
+     */
+    this.host.addEventListener('mousedown', this.onDown, false);
   }
 
   dispose(): void {
     this.host.removeEventListener('click', this.onClick, false);
+    this.host.removeEventListener('mousedown', this.onDown, false);
     this.active?.textarea.remove();
     this.active = null;
   }
@@ -185,9 +209,11 @@ export class RowSwap {
      */
     const idx = this.blockIndexForLine(a.startLine) ?? a.blockIndex;
     a.blockIndex = idx;
-    a.originalHtml = blocks[idx] ?? a.originalHtml;
+    // ⚠ 範囲(S6)では**まとめて 1 つの文字列**で覚える ── 1 塊ぶんだけ覚えると
+    //    閉じたときに残りの塊が戻らない(本文が画面から消える)
+    a.originalHtml = blocks.slice(idx, idx + a.blockCount).join('') || a.originalHtml;
     const withSlot = [...blocks];
-    withSlot[idx] = SLOT_HTML;
+    withSlot.splice(idx, a.blockCount, SLOT_HTML);
     /**
      * 🔴 **pin で守って当てる**(S4)。
      *
@@ -262,9 +288,12 @@ export class RowSwap {
 
   private handleClick(ev: MouseEvent): void {
     if (ev.defaultPrevented || ev.button !== 0) return;
-    if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+    // ⚠ Shift だけは受ける(S6 の範囲選択)── 他の修飾キーはアプリの操作
+    if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
     const target = ev.target;
     if (!(target instanceof Node)) return;
+    // Shift は `mousedown` で処理済み(ここで二度やらない)
+    if (ev.shiftKey) return;
     // 既に活性なら、その中のクリックは素通り(textarea 自身の操作)
     if (this.active?.slot.contains(target) === true) return;
     // ⚠ リンク・トグル・コピーボタンは奪わない(押せるものは押せたまま)
@@ -288,6 +317,23 @@ export class RowSwap {
       return;
     }
     this.activate(blockIndex, target, ev.clientX, ev.clientY);
+  }
+
+  /**
+   * Shift+押下 = **範囲を広げる**(S6)。⚠ 既定を止めて焦点を入力欄に残す
+   * ── 止めないと `blur` が走って「広げる元」が消える。
+   */
+  private handleDown(ev: MouseEvent): void {
+    if (ev.button !== 0 || !ev.shiftKey) return;
+    if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    if (this.active === null) return; // 開いていないなら普通の範囲選択に任せる
+    const target = ev.target;
+    if (!(target instanceof Node)) return;
+    if (this.active.slot.contains(target)) return; // 入力欄の中の Shift は選択
+    const to = this.blockIndexForNode(target);
+    if (to === null) return;
+    ev.preventDefault();
+    this.extendTo(to);
   }
 
   /**
@@ -326,6 +372,7 @@ export class RowSwap {
     withSlot[blockIndex] = SLOT_HTML;
     return this.open({
       blockIndex,
+      blockCount: 1,
       startLine,
       endLine,
       source,
@@ -352,6 +399,7 @@ export class RowSwap {
     // 末尾に SLOT を 1 つ足す(戻すときは `originalHtml: ''` = 消える)
     return this.open({
       blockIndex: this.view.blocks.length,
+      blockCount: 1,
       startLine,
       endLine,
       source: '',
@@ -361,9 +409,86 @@ export class RowSwap {
     });
   }
 
+  /**
+   * 🔴 **全文を 1 つの入力欄にする**(S6。`Ctrl+A`)。
+   *
+   * これが入ると **今日の 2 列の編集画面が 1 面の縮退形になる** ── 「行ごとに
+   * 編集する画面」と「全文を編集する画面」が別物ではなく、同じ機構の両端になる
+   * (設計 §6 S6)。長い本文を丸ごと直したいときの逃げ道でもある。
+   *
+   * ⚠ 範囲は**本文の全部**(先頭の空行も含む)── 「全選択」の意味を曲げない。
+   */
+  activateAll(): boolean {
+    if (this.active !== null && !this.commitActive()) return false;
+    if (this.view.blocks.length === 0) return this.appendRow();
+    const lines = this.body.split('\n');
+    return this.openSpan(0, this.view.blocks.length - 1, 0, shrinkTrailingBlank(this.body, 0, lines.length - 1));
+  }
+
+  /**
+   * 🔴 **範囲差し替え**(S6。Shift+クリック)。クリックした塊まで広げる。
+   *
+   * ⚠ **打ち替えた後は広げない** ── 広げるには一度確定する必要があり、確定の
+   * 結果の描き直しは**非同期で届く**ので、その前に広げると古い行番号で範囲を
+   * 作ってしまう(S5 で `awaitingUpdate` を置いたのと同じ罠)。
+   * 打ち替えてあるときは確定だけして、理由を出す。
+   */
+  extendTo(blockIndex: number): boolean {
+    const a = this.active;
+    if (a === null) return false;
+    if (a.textarea.value !== a.source) {
+      this.commitActive();
+      this.cb.notify?.('確定しました ── もう一度 Shift+クリックで範囲を選べます');
+      return false;
+    }
+    const from = Math.min(a.blockIndex, blockIndex);
+    const to = Math.max(a.blockIndex + a.blockCount - 1, blockIndex);
+    // 打ち替えていないので、そのまま閉じて広げ直せる(本文は動いていない)
+    this.restoreActive();
+    return this.openSpan(from, to);
+  }
+
+  /**
+   * 塊 `[from, to]` を 1 つの入力欄にする。
+   * ⚠ 行の範囲は**範囲内の塊が持つ実際の行**から出す(導出物 = -1 は数えない)。
+   */
+  private openSpan(from: number, to: number, forceStart?: number, forceEnd?: number): boolean {
+    // ⚠ 空の範囲は開かない ── 通すと `blockCount: 0` の活性ができ、次の描き直しで
+    //    SLOT が 1 つずつ増える(2026-08-05 の変異試験で露見した抜け)
+    if (to < from) return false;
+    let startLine = forceStart ?? Number.POSITIVE_INFINITY;
+    let endLine = forceEnd ?? -1;
+    if (forceStart === undefined || forceEnd === undefined) {
+      for (let i = from; i <= to; i += 1) {
+        const s = this.starts[i];
+        const e = this.ends[i];
+        if (s === undefined || s < 0 || e === undefined) continue;
+        if (forceStart === undefined && s < startLine) startLine = s;
+        if (forceEnd === undefined && e > endLine) endLine = e;
+      }
+    }
+    if (!Number.isFinite(startLine) || endLine < startLine) return false;
+    const end = shrinkTrailingBlank(this.body, startLine, endLine);
+    const source = this.body.split('\n').slice(startLine, end + 1).join('\n');
+    const withSlot = [...this.view.blocks];
+    const replaced = withSlot.splice(from, to - from + 1, SLOT_HTML);
+    return this.open({
+      blockIndex: from,
+      blockCount: to - from + 1,
+      startLine,
+      endLine: end,
+      source,
+      // ⚠ 戻すときは**まとめて 1 つの文字列**で置く(`applyBlocks` が再分割する)
+      originalHtml: replaced.join(''),
+      withSlot,
+      caret: 0,
+    });
+  }
+
   /** 差し替え / 挿入の共通部分(入力欄を出して契約を張る)。 */
   private open(o: {
     blockIndex: number;
+    blockCount: number;
     startLine: number;
     endLine: number;
     source: string;
@@ -379,12 +504,11 @@ export class RowSwap {
     const ta = document.createElement('textarea');
     ta.setAttribute('data-pkc-field', 'row-source');
     ta.value = o.source;
-    // ⚠ 高さは中身に合わせる(1 行の編集で 10 行ぶんの箱が出ない)
-    ta.rows = Math.max(1, o.source.split('\n').length);
     slot.append(ta);
 
     this.active = {
       blockIndex: o.blockIndex,
+      blockCount: o.blockCount,
       startLine: o.startLine,
       endLine: o.endLine,
       source: o.source,
@@ -396,9 +520,11 @@ export class RowSwap {
       held: null,
     };
     this.wire(ta);
+    // ⚠ 高さは `syncActiveBox` が 1 か所で決める(上限つき ── S6 の全文差し替えで
+    //    5000 行の箱を作らない)。ここで別に代入しない
+    this.syncActiveBox();
     ta.focus();
     ta.setSelectionRange(o.caret, o.caret);
-    this.syncActiveBox();
     return true;
   }
 
@@ -548,8 +674,15 @@ export class RowSwap {
   private syncActiveBox(): void {
     const a = this.active;
     if (!a) return;
-    // 高さは中身に合わせる(属性だけ ── 封印中に呼ばれても composition は壊れない)
-    a.textarea.rows = Math.max(1, a.textarea.value.split('\n').length);
+    /**
+     * 高さは中身に合わせる(属性だけ ── 封印中に呼ばれても composition は壊れない)。
+     * ⚠ **上限を置く**(S6)── `Ctrl+A` の全文差し替えでは 5000 行の箱ができて
+     * しまい、面の scroll が二重になる。上限に当たったら箱の中で scroll させる。
+     */
+    const wanted = Math.max(1, a.textarea.value.split('\n').length);
+    a.textarea.rows = Math.min(wanted, ROWS_CAP);
+    if (wanted > ROWS_CAP) a.textarea.setAttribute('data-pkc-scroll', '1');
+    else a.textarea.removeAttribute('data-pkc-scroll');
     const open = findOpenEnds(a.textarea.value);
     const block = open.find((o) => o.kind !== 'inline') ?? open[0];
     if (block === undefined) a.slot.removeAttribute('data-pkc-open-end');

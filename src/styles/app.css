@@ -751,6 +751,12 @@ select:focus-visible {
   resize: none;
   overflow: hidden;
 }
+/* 🔑 上限の高さに当たった入力欄(S6 の全文差し替え)は**箱の中で**scroll する
+ * ── 面の scroll と二重にならない。それ以外は中身の高さぴったりで scroll しない */
+[data-pkc-field='row-source'][data-pkc-scroll] {
+  overflow: auto;
+  resize: vertical;
+}
 [data-pkc-field='row-source']:focus-visible {
   outline-width: 1px;
 }

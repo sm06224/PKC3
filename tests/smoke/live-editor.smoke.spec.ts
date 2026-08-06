@@ -361,3 +361,66 @@ test('🔴 行の中の Ctrl+Z は打鍵単位で戻る(履歴の取り消しが
   await expect(row).not.toHaveValue('あいうえお');
   expect(errors).toEqual([]);
 });
+
+test('🔴 Ctrl+A で全文が 1 つの入力欄になる(S6。今日の編集画面の縮退形)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoLive(page);
+  await openLive(page, '# 題\n\n最初の段落。\n\n次の段落。\n');
+
+  const live = page.locator('[data-pkc-region="editor-live"]');
+  await expect(live.locator('p')).toHaveCount(2);
+
+  // 🔴 行の外で Ctrl+A(確定の直後は焦点が body に戻っている)
+  await page.keyboard.press('Control+a');
+  const row = live.locator('[data-pkc-field="row-source"]');
+  await expect(row).toHaveValue('# 題\n\n最初の段落。\n\n次の段落。');
+  // 描画の塊は 1 つも残っていない(2 つの画面が同居しない)
+  await expect(live.locator('p')).toHaveCount(0);
+  await expect(live.locator('h1')).toHaveCount(0);
+
+  // 丸ごと書き換えて確定 ── 今日の編集画面と同じことができる
+  await row.fill('# 作り直した\n\n本文も入れ替えた。');
+  await page.keyboard.press('Tab');
+  await expect(live.locator('h1')).toHaveText('作り直した');
+  await expect(live).toContainText('本文も入れ替えた。');
+  await expect(live).not.toContainText('最初の段落。');
+
+  // 保存して閲覧に戻っても同じ
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-field="detail-body"]')).toContainText('本文も入れ替えた。');
+  expect(errors).toEqual([]);
+});
+
+test('🔴 Shift+クリックで 2 つの塊を 1 つの入力欄にできる(S6)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoLive(page);
+  await openLive(page, '# 題\n\n1 つめ。\n\n2 つめ。\n\n3 つめ。\n');
+
+  const live = page.locator('[data-pkc-region="editor-live"]');
+  await clickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
+  const row = live.locator('[data-pkc-field="row-source"]');
+  await expect(row).toHaveValue('1 つめ。');
+
+  /**
+   * Shift+クリックで 2 つめまで広げる。
+   * ⚠ **`mouse.click` は `modifiers` を受け取らない**(`locator.click` の option)
+   * ── 渡しても黙って無視され、ただの単独クリックになる。キーを自分で押す。
+   * ⚠ 塊が入力欄に化けているので `nth()` の番号がずれる ── **文字で探す**。
+   */
+  const target = live.getByText('2 つめ。', { exact: true });
+  const box = (await target.boundingBox())!;
+  await page.keyboard.down('Shift');
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await page.keyboard.up('Shift');
+  await expect(row).toHaveValue('1 つめ。\n\n2 つめ。');
+
+  // まとめて書き換えて確定 ── その範囲だけが変わる
+  await row.fill('まとめた。');
+  await page.keyboard.press('Tab');
+  await expect(live).toContainText('まとめた。');
+  await expect(live).toContainText('3 つめ。');
+  await expect(live).not.toContainText('1 つめ。');
+  expect(errors).toEqual([]);
+});

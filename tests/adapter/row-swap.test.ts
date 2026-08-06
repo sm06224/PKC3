@@ -103,6 +103,18 @@ function click(el: Element): void {
   el.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
 }
 
+/** Shift+押下(範囲を広げる実際の引き金)。⚠ `click` ではない。 */
+function shiftDown(el: Element): boolean {
+  const ev = new MouseEvent('mousedown', {
+    bubbles: true,
+    cancelable: true,
+    button: 0,
+    shiftKey: true,
+  });
+  el.dispatchEvent(ev);
+  return ev.defaultPrevented;
+}
+
 function box(host: HTMLElement): HTMLTextAreaElement | null {
   return host.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]');
 }
@@ -323,6 +335,139 @@ describe('RowSwap — 確定と取り消し', () => {
     click(findByText(r.host, 'p', '最後の段落。'));
     expect(r.commits).toEqual([{ start: 2, end: 2, text: 'ひとつめを書き換え' }]);
     expect(box(r.host)!.value).toBe('最後の段落。');
+  });
+});
+
+describe('RowSwap — 範囲差し替え(S6)', () => {
+  it('🔴 全文を 1 つの入力欄にできる(今日の編集画面が縮退形になる)', () => {
+    const r = rig();
+    expect(r.swap.activateAll()).toBe(true);
+    const ta = box(r.host)!;
+    // 🔴 本文が**丸ごと**入っている(先頭も末尾も落ちていない)
+    expect(ta.value).toBe(DOC);
+    expect(r.swap.activeRange).toEqual({ start: 0, end: 12 });
+    // 描画済みの塊は全部 SLOT に置き換わっている(2 つの画面が同居しない)
+    expect(r.host.querySelectorAll('p')).toHaveLength(0);
+    expect(r.host.querySelectorAll('table')).toHaveLength(0);
+    expect(r.host.querySelectorAll('[data-pkc-row-slot]')).toHaveLength(1);
+  });
+
+  it('🔴 全文を書き換えて確定すると、本文が丸ごと入れ替わる', () => {
+    const r = rig();
+    r.swap.activateAll();
+    const ta = box(r.host)!;
+    ta.value = '# 新しい題\n\n作り直した本文。';
+    ta.blur();
+    expect(r.body()).toBe('# 新しい題\n\n作り直した本文。');
+    expect(findByText(r.host, 'h1', '新しい題')).toBeTruthy();
+    expect(r.host.querySelector('[data-pkc-row-slot]')).toBeNull();
+  });
+
+  it('全文を開いて何も変えずに閉じたら、描画がそのまま戻る', () => {
+    const r = rig();
+    r.swap.activateAll();
+    box(r.host)!.blur();
+    expect(r.body()).toBe(DOC);
+    expect(r.commits).toEqual([]);
+    expect(r.host.querySelector('[data-pkc-row-slot]')).toBeNull();
+    // 🔴 全部の塊が戻っている(まとめて置いた HTML が再分割されている)
+    expect(findByText(r.host, 'h1', '題')).toBeTruthy();
+    expect(r.host.querySelectorAll('tbody tr')).toHaveLength(2);
+    expect(r.host.querySelectorAll('li')).toHaveLength(2);
+    expect(findByText(r.host, 'p', '最後の段落。')).toBeTruthy();
+  });
+
+  it('高さには上限を置く(5000 行の箱を作らない)', () => {
+    const long = Array.from({ length: 200 }, (_, i) => `段落 ${i}。`).join('\n\n');
+    const r = rig(long);
+    r.swap.activateAll();
+    const ta = box(r.host)!;
+    expect(ta.value.split('\n').length).toBeGreaterThan(100);
+    expect(Number(ta.rows), '中身の行数ぶんの箱を作っている').toBeLessThanOrEqual(40);
+    expect(ta.getAttribute('data-pkc-scroll'), '箱の中で scroll させていない').toBe('1');
+  });
+
+  it('Shift+クリックで範囲を広げる(2 つの塊が 1 つの入力欄になる)', () => {
+    const r = rig();
+    click(findByText(r.host, 'p', '最初の段落。'));
+    expect(r.swap.activeRange).toEqual({ start: 2, end: 2 });
+    // 表まで広げる
+    const tr = findByText(r.host, 'tr', '3');
+    // ⚠ **`mousedown`** で受ける(実機は `click` まで待つと blur が先に走って
+    //    「広げる元」が消える ── 2026-08-05 に smoke が拾った)
+    // 🔴 **既定を止めている**ことまで見る ── 止めないと直後の焦点移動で
+    //    blur → 確定が走り、開いた範囲がその場で閉じる(実機だけで起きる)
+    expect(shiftDown(tr), '既定を止めていない(焦点が外れて範囲が閉じる)').toBe(true);
+    expect(r.swap.activeRange).toEqual({ start: 2, end: 7 });
+    expect(box(r.host)!.value).toBe(DOC.split('\n').slice(2, 8).join('\n'));
+    // 広げた範囲を書き換えて確定 ── その範囲だけが変わる
+    box(r.host)!.value = 'まとめて 1 行に。';
+    box(r.host)!.blur();
+    expect(r.body()).toBe(['# 題', '', 'まとめて 1 行に。', '', '- 一つめ', '- 二つめ', '', '最後の段落。'].join('\n'));
+  });
+
+  it('🔴 打ち替えた後は広げない(古い行番号で範囲を作らない)', () => {
+    const r = rig(DOC, true);
+    click(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
+    ta.value = '打ち替えた。';
+    const tr = findByText(r.host, 'tr', '3');
+    shiftDown(tr);
+    // 確定はした / 範囲は広げていない / 理由が出ている
+    expect(r.commits).toEqual([{ start: 2, end: 2, text: '打ち替えた。' }]);
+    expect(r.swap.isActive).toBe(false);
+    expect(r.notes.join('/')).toContain('もう一度 Shift+クリック');
+    r.flush();
+    expect(findByText(r.host, 'p', '打ち替えた。')).toBeTruthy();
+  });
+
+  it('🔴 範囲を開いたまま描き直しを受けても、閉じれば全部戻る', () => {
+    const r = rig();
+    r.swap.activateAll();
+    const ta = box(r.host)!;
+    // 同じ本文の描き直しが届く(封印明け・外からの再描画)
+    r.render(DOC);
+    // 入力欄は生きていて、描画の塊は 1 つも復活していない
+    expect(box(r.host)).toBe(ta);
+    expect(r.host.querySelectorAll('p')).toHaveLength(0);
+    expect(r.host.querySelectorAll('[data-pkc-row-slot]')).toHaveLength(1);
+    // 閉じると**全部**戻る(1 塊ぶんしか覚えていないと、ここで本文が消える)
+    ta.blur();
+    expect(r.host.querySelector('[data-pkc-row-slot]')).toBeNull();
+    expect(findByText(r.host, 'h1', '題')).toBeTruthy();
+    expect(r.host.querySelectorAll('tbody tr')).toHaveLength(2);
+    expect(r.host.querySelectorAll('li')).toHaveLength(2);
+    expect(findByText(r.host, 'p', '最後の段落。')).toBeTruthy();
+  });
+
+  it('🔴 先頭に空行が在る本文でも、全文選択は本当に全部入る', () => {
+    // ⚠ 塊の持つ行から範囲を出すと、**先頭の空行が落ちる**(fixture の非ゼロ次元)
+    const body = ['', '', '# 題', '', '本文。', ''].join('\n');
+    const r = rig(body);
+    expect(r.swap.activateAll()).toBe(true);
+    expect(box(r.host)!.value).toBe(['', '', '# 題', '', '本文。'].join('\n'));
+    expect(r.swap.activeRange).toEqual({ start: 0, end: 4 });
+  });
+
+  it('🔴 範囲を後ろへ広げてから手前へ広げても、後ろ端が落ちない', () => {
+    const r = rig();
+    click(findByText(r.host, 'p', '最初の段落。'));
+    shiftDown(findByText(r.host, 'tr', '3')); // 2..7 へ広げた
+    expect(r.swap.activeRange).toEqual({ start: 2, end: 7 });
+    // 手前(見出し)へ広げる ── 後ろ端 7 は保たれるべき
+    shiftDown(findByText(r.host, 'h1', '題'));
+    expect(r.swap.activeRange, '広げた後ろ端が落ちた').toEqual({ start: 0, end: 7 });
+    expect(box(r.host)!.value).toBe(DOC.split('\n').slice(0, 8).join('\n'));
+  });
+
+  it('空の本文で全文を開くと、末尾に書き足す形になる(空の箱を出さない)', () => {
+    const r = rig('');
+    expect(r.swap.activateAll()).toBe(true);
+    const ta = box(r.host)!;
+    expect(ta.value).toBe('');
+    ta.value = '書き始めた。';
+    ta.blur();
+    expect(r.body()).toBe('書き始めた。');
   });
 });
 

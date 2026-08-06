@@ -236,6 +236,67 @@ describe('ライブエディタ(1 面)の配線', () => {
     expect(r.bodies).toEqual([]);
   });
 
+  it('🔴 Ctrl+A で全文が 1 つの入力欄になる(S6。今日の編集画面の縮退形)', async () => {
+    setLive(true);
+    const r = rig(DOC);
+    await settle();
+    const live = r.root.querySelector('[data-pkc-region="editor-live"]')!;
+    expect(live.querySelectorAll('p')).toHaveLength(2);
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true }),
+    );
+    const ta = live.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')!;
+    expect(ta.value).toBe(DOC);
+    expect(live.querySelectorAll('p')).toHaveLength(0);
+    // 書き換えて確定すると本文が丸ごと入れ替わる
+    ta.value = '# 作り直した';
+    ta.blur();
+    expect(r.bodies).toEqual(['# 作り直した']);
+    await settle();
+    expect(live.querySelector('h1')!.textContent).toBe('作り直した');
+  });
+
+  it('🔴 他の列で押した Ctrl+A / Ctrl+Z は奪わない(面の外の打鍵)', async () => {
+    setLive(true);
+    const r = rig(DOC);
+    await settle();
+    // 左の列のボタンに焦点が在る状態を作る
+    const outside = document.createElement('button');
+    document.body.append(outside);
+    for (const key of ['a', 'z']) {
+      const ev = new KeyboardEvent('keydown', {
+        key,
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      outside.dispatchEvent(ev);
+      expect(ev.defaultPrevented, `面の外の Ctrl+${key} を奪っている`).toBe(false);
+    }
+    expect(r.root.querySelector('[data-pkc-field="row-source"]')).toBeNull();
+    expect(r.root.querySelector('[data-pkc-field="row-note"]')!.textContent).toBe('');
+    outside.remove();
+  });
+
+  it('行の中の Ctrl+A は奪わない(その行を選ぶブラウザ既定のまま)', async () => {
+    setLive(true);
+    const r = rig(DOC);
+    await settle();
+    const live = r.root.querySelector('[data-pkc-region="editor-live"]')!;
+    const p = [...live.querySelectorAll('p')].find((e) => e.textContent === '最初の段落。')!;
+    p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    const ta = live.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')!;
+    const ev = new KeyboardEvent('keydown', {
+      key: 'a',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    ta.dispatchEvent(ev);
+    expect(ev.defaultPrevented, '行の中の Ctrl+A を奪っている').toBe(false);
+    expect(ta.value).toBe('最初の段落。'); // 全文に化けていない
+  });
+
   it('編集を抜けたら聴くのをやめる(外れた面が反応し続けない)', async () => {
     setLive(true);
     const r = rig(DOC);

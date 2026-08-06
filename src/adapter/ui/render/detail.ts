@@ -597,8 +597,25 @@ export class DetailRenderer {
       if (!pane.isConnected) return;
       const t = ev.target;
       if (t instanceof HTMLElement && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT')) return;
+      /**
+       * ⚠ **この面のための打鍵か**を確かめる。`document` で聴いているので、
+       * 左の列のボタンに焦点が在るときの `Ctrl+A` / `Ctrl+Z` まで奪ってしまう
+       * ── 確定の直後は焦点が `<body>` に戻っているので、そこと面の中だけを見る。
+       */
+      if (!(t === document.body || (t instanceof Node && pane.contains(t)))) return;
       if (!(ev.ctrlKey || ev.metaKey)) return;
       const key = ev.key.toLowerCase();
+      /**
+       * 🔴 **Ctrl+A で全文を 1 つの入力欄にする**(S6)── これで今日の 2 列の
+       * 編集画面が 1 面の**縮退形**になる(別物の画面を 2 つ持たない)。
+       * ⚠ 境目は取り消しと**同じ 1 判定**(入力欄に居るかどうか)── 行の中の
+       * Ctrl+A はその行を選ぶブラウザ既定のままにする。
+       */
+      if (key === 'a') {
+        ev.preventDefault();
+        if (!swap.activateAll()) note.textContent = 'この本文は全文編集に開けません';
+        return;
+      }
       const forward = key === 'y' || (key === 'z' && ev.shiftKey);
       if (key !== 'z' && key !== 'y') return;
       ev.preventDefault();
