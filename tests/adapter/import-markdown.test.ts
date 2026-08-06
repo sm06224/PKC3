@@ -31,6 +31,7 @@ function harness(opts: { failWrite?: boolean; orderBase?: number } = {}) {
   let reported: readonly string[] = [];
   let reloads = 0;
   let n = 0;
+  const importedLids: string[][] = [];
 
   const d = new Dispatcher();
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
@@ -85,6 +86,7 @@ function harness(opts: { failWrite?: boolean; orderBase?: number } = {}) {
     },
     notify: (m) => void notices.push(m),
     report: (notes) => void (reported = notes),
+    imported: (lids) => void importedLids.push([...lids]),
   };
 
   return {
@@ -95,8 +97,40 @@ function harness(opts: { failWrite?: boolean; orderBase?: number } = {}) {
     notices,
     reloads: () => reloads,
     reported: () => reported,
+    importedLids,
   };
 }
+
+describe('取り込んだ lid を files の順で返す(2026-08-05)', () => {
+  /**
+   * 🔴 **紐づけの土台**(user 報告「スポットの編集プレビュー導線も存在しない」)。
+   * `main.ts` は「**何番目のファイルが何になったか**」で handle を結ぶ ──
+   * ここが落ちると書き戻す導線が出ず、順が狂うと **別のファイルへ書く**。
+   */
+  it('🔴 1 件でも報告する(無いと書き戻す導線が永久に出ない)', async () => {
+    const h = harness();
+    await importMarkdownFiles(h.d, h.deps, [mdFile('# 一\n', 'a.md')]);
+    expect(h.importedLids).toEqual([[h.written[0]!.lid]]);
+  });
+
+  it('🔴 並びは files と同じ(逆になると別のファイルに紐づく)', async () => {
+    const h = harness();
+    await importMarkdownFiles(h.d, h.deps, [
+      mdFile('# 一\n', 'a.md'),
+      mdFile('# 二\n', 'b.md'),
+      mdFile('# 三\n', 'c.md'),
+    ]);
+    // 書いた順 = files の順(題名で裏を取る)
+    expect(h.written.map((e) => e.title)).toEqual(['一', '二', '三']);
+    expect(h.importedLids).toEqual([h.written.map((e) => e.lid)]);
+  });
+
+  it('書込が失敗したら報告しない(紐づけを作らない)', async () => {
+    const h = harness({ failWrite: true });
+    await importMarkdownFiles(h.d, h.deps, [mdFile('# 一\n', 'a.md')]);
+    expect(h.importedLids).toEqual([]);
+  });
+});
 
 describe('素の md を取り込む', () => {
   it('1 件が state に現れる(題名は先頭見出し)', async () => {

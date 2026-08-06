@@ -18,6 +18,16 @@ import {
 import { parseFrontmatter, extractVars } from '@features/markdown/frontmatter';
 import { hydrateMermaid, type MermaidScope } from './mermaid-hydrate';
 import { applyBlocks, EMPTY_VIEW, type BlockView } from './apply-blocks';
+import { RowSwap } from './row-swap';
+import type { RenderedWithRanges } from '@adapter/platform/render/markdown-client';
+import {
+  EMPTY_JOURNAL,
+  record,
+  redo,
+  spliceLines,
+  stepFor,
+  undo,
+} from '@features/markdown/edit-journal';
 import { iconButton } from './icons';
 import { buildFormatBar } from './format-bar';
 import { MarkdownClient } from '@adapter/platform/render/markdown-client';
@@ -38,6 +48,22 @@ export interface AssetLender {
 }
 
 type Mode = 'empty' | 'view' | 'editor';
+
+/**
+ * 🔴 **ライブエディタの口**(2026-08-05)。`?pkc-live=1` で 1 面に畳む。
+ *
+ * ⚠ **URL だけ**・保存しない・一覧に出さない(既存の `?pkc-md-inline` と同型)
+ * ── 計測用の逃がし口を正規 flag にすると、上限 15 と畳む条件の宣言義務を
+ * 計測器が食う(設計 §9 論点 F の裁定)。
+ * ⚠ 既定 OFF(設計 §9 論点 C ── 塊を跨ぐ Ctrl+Z が入るまで既定にしない)。
+ */
+export function liveEditorEnabled(): boolean {
+  try {
+    return new URLSearchParams(location.search).get('pkc-live') === '1';
+  } catch {
+    return false;
+  }
+}
 
 export class DetailRenderer {
   private readonly region: HTMLElement;
@@ -109,6 +135,14 @@ export class DetailRenderer {
     region: HTMLElement,
     assets: AssetLender | null = null,
     markdown: MarkdownClient = new MarkdownClient(),
+    /**
+     * 🔴 **本文が変わったことを外へ知らせる**(2026-08-05。ライブエディタ S5)。
+     *
+     * ⚠ renderer は dispatch しない(層規約)── 「変わった」を渡すだけで、
+     * `UPDATE_OPEN_BODY` を投げるのは配線側(`main.ts`)の仕事。
+     * ⚠ 原文の**継ぎ足しはこちらが 1 か所で**やる(規則を 2 つ書かない)。
+     */
+    private readonly onBodyChange: ((body: string) => void) | null = null,
   ) {
     this.region = region;
     this.assets = assets;
@@ -428,6 +462,19 @@ export class DetailRenderer {
      * ⚠ 1 打鍵ごとに描かない。**rAF で 1 フレームに畳む** ── 連打すると
      * markdown の描画が打鍵に追いつかず「もっさり」になる。
      */
+    /**
+     * 🔴 **ライブエディタ(行の入れ替え)**(2026-08-05。ライブエディタ S5。
+     * 設計 doc `live-editor-design-2026-08.md`)。
+     *
+     * 既定は今日の 2 列(原文 | プレビュー)。`?pkc-live=1` で**1 面**に畳む
+     * ── 画面は常に描画済み文書で、クリックした行だけが原文の入力欄になる。
+     * ⚠ 既定 OFF は user 裁定(設計 §9 論点 C ── 塊を跨ぐ Ctrl+Z が入るまで開けない)。
+     * ⚠ URL だけの口(`?pkc-md-inline` と同型)── flag 枠(最大 15)を食わない。
+     */
+    if (liveEditorEnabled()) {
+      this.renderLiveEditor(open.body);
+      return;
+    }
     const split = document.createElement('div');
     split.setAttribute('data-pkc-region', 'editor-split');
     const ta = document.createElement('textarea');
@@ -486,6 +533,152 @@ export class DetailRenderer {
       for (const sc of scopes.splice(0)) sc.dispose();
     };
     ta.focus();
+  }
+
+  /**
+   * 🔴 **1 面のライブエディタ**(S5)。
+   *
+   * - 画面は**常に描画済み文書**。クリックした所を含む最小の刻印要素だけが
+   *   原文の入力欄になる(`RowSwap`)
+   * - **打鍵ではレンダリングを 1 回も起こさない**。確定(その行から出た瞬間)に
+   *   1 回だけ描いて、その塊にパッチを当てる
+   * - 描くのは**ワーカー**(不可侵指示)。行の対応表も一緒に受ける
+   *
+   * ⚠ 原文の正本は `AppState.openBody.body`。ここが持つのは「窓」で、
+   * 継ぎ足した本文は `onBodyChange` で外へ返す(dispatch はしない ── 層規約)。
+   */
+  private renderLiveEditor(initialBody: string): void {
+    const pane = document.createElement('div');
+    pane.setAttribute('data-pkc-region', 'editor-live');
+    pane.className = 'pkc-md-rendered';
+    /** お知らせの行。⚠ **参照で持つ**(querySelector で探すと、退避で作り直した
+     *  ときに別のものを掴む ── 実際にそう外した)。 */
+    const note = document.createElement('p');
+    note.setAttribute('data-pkc-field', 'row-note');
+    this.region.append(pane, note);
+
+    let body = initialBody;
+    const scopes: MermaidScope[] = [];
+    /** 塊を跨ぐ取り消しの履歴(S8)。⚠ 行の配列なので 1 件は小さい。 */
+    let journal = EMPTY_JOURNAL;
+
+    /** 本文を差し替えて描き直す(外へも知らせる)。⚠ **出口は 1 つ**にする。 */
+    const setBody = (next: string): void => {
+      body = next;
+      this.onBodyChange?.(next);
+      follow.push(body, { sourceLineAnchors: false });
+      follow.flush(); // 🔑 確定は**待たせない**(打鍵では 1 回も描かない代わり)
+    };
+
+    const swap = new RowSwap(pane, {
+      commit: (startLine, endLine, text) => {
+        // ⚠ 継ぎ足しの規則は `edit-journal.ts` の 1 か所(取り消しと同じ規則を使う)
+        journal = record(journal, stepFor(body, startLine, endLine, text));
+        // ⚠ 「変わったか」は `RowSwap` が持っている(開いた時の原文と比べる)──
+        //    ここに 2 本目の判定を置かない
+        setBody(spliceLines(body, startLine, endLine, text));
+      },
+      notify: (message) => {
+        note.textContent = message;
+      },
+    });
+
+    /**
+     * 🔴 **塊を跨ぐ Ctrl+Z / Ctrl+Shift+Z(Ctrl+Y)**(S8。設計 §9 論点 C の
+     * 「既定 ON の条件」)。
+     *
+     * ⚠ **行の中では奪わない** ── 入力欄が焦点を持っている間はブラウザ自前の
+     * 取り消し(打鍵 1 つずつ)が正しい。境目は「入力欄に居るかどうか」1 つだけ。
+     * ⚠ 焦点が本文の外(`<body>`)に在る状態で来るので、`document` で聴く。
+     *   面を畳むときに必ず外す(`cancelPreview`)。
+     * ⚠ 戻せないときは**無言で無視しない**(押したのに何も起きない理由を出す)。
+     */
+    const onKey = (ev: KeyboardEvent): void => {
+      if (!pane.isConnected) return;
+      const t = ev.target;
+      if (t instanceof HTMLElement && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT')) return;
+      /**
+       * ⚠ **この面のための打鍵か**を確かめる。`document` で聴いているので、
+       * 左の列のボタンに焦点が在るときの `Ctrl+A` / `Ctrl+Z` まで奪ってしまう
+       * ── 確定の直後は焦点が `<body>` に戻っているので、そこと面の中だけを見る。
+       */
+      if (!(t === document.body || (t instanceof Node && pane.contains(t)))) return;
+      if (!(ev.ctrlKey || ev.metaKey)) return;
+      const key = ev.key.toLowerCase();
+      /**
+       * 🔴 **Ctrl+A で全文を 1 つの入力欄にする**(S6)── これで今日の 2 列の
+       * 編集画面が 1 面の**縮退形**になる(別物の画面を 2 つ持たない)。
+       * ⚠ 境目は取り消しと**同じ 1 判定**(入力欄に居るかどうか)── 行の中の
+       * Ctrl+A はその行を選ぶブラウザ既定のままにする。
+       */
+      if (key === 'a') {
+        ev.preventDefault();
+        if (!swap.activateAll()) note.textContent = 'この本文は全文編集に開けません';
+        return;
+      }
+      const forward = key === 'y' || (key === 'z' && ev.shiftKey);
+      if (key !== 'z' && key !== 'y') return;
+      ev.preventDefault();
+      const moved = forward ? redo(journal, body) : undo(journal, body);
+      if (moved === null) {
+        note.textContent = forward ? 'やり直せる編集はありません' : '取り消せる編集はありません';
+        return;
+      }
+      journal = moved.journal;
+      setBody(moved.text);
+      note.textContent = forward ? '1 つやり直しました' : '1 つ取り消しました';
+    };
+    document.addEventListener('keydown', onKey);
+
+    /** 分割が組めない本文で編集させないための退避(1 回だけ作る)。 */
+    let fellBack = false;
+    const fallBack = (reason: string): void => {
+      if (fellBack) return;
+      fellBack = true;
+      swap.dispose();
+      pane.textContent = '';
+      const ta = document.createElement('textarea');
+      ta.setAttribute('data-pkc-field', 'editor-body');
+      ta.value = body;
+      ta.addEventListener('input', () => {
+        // ⚠ 退避先では**描き直さない**(原文をそのまま編集している面なので)
+        body = ta.value;
+        this.onBodyChange?.(body);
+      });
+      note.textContent = `この本文は行ごとに編集できません(${reason})── 原文で編集します`;
+      pane.append(ta);
+    };
+
+    const follow = this.markdown.follower<RenderedWithRanges>(
+      ({ html, ranges }) => {
+        if (!pane.isConnected || fellBack) return;
+        const r = swap.update(body, html, ranges);
+        if (!r.ok) {
+          // 🔴 **壊れた分割の上で編集させない**(設計 §7-9)── 今日の編集画面へ退避
+          fallBack(r.reason ?? '');
+          return;
+        }
+        // 図の面倒は**新しく入った所だけ**(既存の規律と同じ ── 生きた `<img>` の
+        // ObjectURL を revoke しない)
+        if (r.inserted.length > 0) scopes.push(hydrateMermaid(r.inserted));
+        pruneScopes(scopes);
+      },
+      (e) => {
+        if (!pane.isConnected) return;
+        note.textContent = `描けませんでした: ${String(e).slice(0, 120)}`;
+      },
+      { withRanges: true },
+    );
+
+    follow.push(body, { sourceLineAnchors: false });
+    follow.flush();
+
+    this.cancelPreview = () => {
+      document.removeEventListener('keydown', onKey);
+      follow.dispose();
+      swap.dispose();
+      for (const sc of scopes.splice(0)) sc.dispose();
+    };
   }
 
   /** attachment フレーバーの view(P4a): メタ + preview + 説明 markdown。 */

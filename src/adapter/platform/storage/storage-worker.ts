@@ -689,10 +689,18 @@ const handlers: Handlers = {
           });
         }
       }
-      database.exec({
-        sql: 'DELETE FROM relations WHERE cid = ? AND (from_lid = ? OR to_lid = ?)',
-        bind: [req.cid, req.lid, req.lid],
-      });
+      // 🔴 **relations は消さない**(2026-08-05、user 報告の調査で判明)。
+      //
+      // 直す前はここで `from_lid` / `to_lid` の両側を消していた。すると
+      // **ゴミ箱から戻しても居場所が戻らない** ── 子を消して復元すると root へ出て、
+      // フォルダを消して復元すると中身が空になる(実測)。ゴミ箱は「戻せる」ための
+      // 機構なのに、戻すと必ず階層から外れていた。
+      //
+      // ⚠ 残しても**木は壊れない**:`resolveCanonicalParents` は
+      //    「親が metas に実在する folder」でなければ辺を無視するので、
+      //    ゴミ箱の間は子が root に出る(= 従来どおりの見え方)。
+      //    戻せば親が metas に戻り、辺がそのまま効く。
+      // ⚠ 本当に消えるのは `purgeTrash`(そこで参照の切れた行を掃除する)。
       database.exec({
         sql: 'DELETE FROM entries WHERE cid = ? AND lid = ?',
         bind: [req.cid, req.lid],
@@ -728,6 +736,45 @@ const handlers: Handlers = {
                   kind = excluded.kind,
                   updated_at = excluded.updated_at`,
           bind: [req.cid, r.id, r.fromLid, r.toLid, r.kind],
+        });
+      }
+      database.exec('COMMIT');
+    } catch (err) {
+      try {
+        database.exec('ROLLBACK');
+      } catch {
+        /* rollback 失敗は元エラーを優先 */
+      }
+      throw err;
+    }
+    return null;
+  },
+  /**
+   * 🔴 **居場所を張り替える**(2026-08-05。フォルダ整理)。
+   *
+   * ⚠ 1 tx で「落として張る」── 2 op に割ると、途中で落ちたときに
+   * **親無しの宙ぶらりん**が残る。
+   * ⚠ 落とすのは **structural だけ**。意味リンクなど他の kind は居場所と無関係で、
+   *    まとめて消すと**別の情報が黙って失われる**。
+   */
+  setEntryParent: (req) => {
+    const database = need();
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      database.exec({
+        sql: `DELETE FROM relations WHERE cid = ? AND to_lid = ? AND kind = 'structural'`,
+        bind: [req.cid, req.lid],
+      });
+      if (req.parentLid !== null) {
+        database.exec({
+          sql: `INSERT INTO relations (cid, id, from_lid, to_lid, kind, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 'structural', datetime('now'), datetime('now'))
+                ON CONFLICT(cid, id) DO UPDATE SET
+                  from_lid = excluded.from_lid,
+                  to_lid = excluded.to_lid,
+                  kind = excluded.kind,
+                  updated_at = excluded.updated_at`,
+          bind: [req.cid, req.relationId, req.parentLid, req.lid],
         });
       }
       database.exec('COMMIT');
@@ -905,7 +952,29 @@ const handlers: Handlers = {
                AND entry_lid NOT IN (SELECT lid FROM entries WHERE cid = ?1)`,
       bind: [req.cid],
     });
-    return { purged: database.changes() };
+    const purged = database.changes();
+    /**
+     * 🔴 **ここが relations の最終処分場**(2026-08-05)。`deleteEntry` は
+     * 「ゴミ箱から戻したら居場所も戻る」ために辺を残すので、**本当に消えた lid の
+     * 辺**はここで掃除する。掃除しないと、消えた lid を指す辺が永久に溜まる。
+     *
+     * ⚠ 判定は「**entries に居ない**」の 1 つで足りる ── この op は
+     * **ゴミ箱を空にする**(= entries に居ない lid の revisions を全部落とす)op で
+     * あって、部分的な掃除ではない。だから「entries に居ない」= 「もう戻せない」。
+     * 🔑 最初は「entries にも revisions にも居ない」と 2 条件で書いていたが、
+     * revisions 側は**結果を変えない死んだ判定**だった(変異試験で露見 ──
+     * 落としても全 test が緑)。判定を増やさない(CLAUDE.md)。
+     * ⚠ 部分 purge を将来入れるなら、**ここも一緒に狭める**
+     * (「消した lid の辺だけ」にする)── でないと戻せる item の居場所を壊す。
+     */
+    database.exec({
+      sql: `DELETE FROM relations
+             WHERE cid = ?1
+               AND (from_lid NOT IN (SELECT lid FROM entries WHERE cid = ?1)
+                 OR to_lid NOT IN (SELECT lid FROM entries WHERE cid = ?1))`,
+      bind: [req.cid],
+    });
+    return { purged };
   },
   revisionCounts: (req) =>
     // snapshot 列を読まない ── revisions は常駐ゼロ、件数は index scan(§4.1)

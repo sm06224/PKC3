@@ -266,10 +266,15 @@ import 時に §3 のフレーバー変換(JSON body → PKC-Markdown)を実行�
 
 | 形式 | 内容 |
 |---|---|
-| **① 可搬単一 HTML**(主) | アプリ + **圧縮 sqlite image** + assets を埋め込み。開いた側は boot でストレージへクローンし DOM から除去(§4.6)。file:// 自立動作 |
+| **① 可搬単一 HTML**(主) | アプリ + **圧縮 sqlite image** + assets を埋め込み。開いた側は boot でストレージへクローンし DOM から除去(§4.6)。file:// 自立動作 ── 🔴 **未実装。かつ「ストレージへクローン」は実測により書き直しが要る**(下記) |
 | **② 圧縮アーカイブ `.pkc3.zip`**(バックアップ・交換の主形式) | manifest + **sqlite image(圧縮)** + assets/。「sqlite をそのまま吐き出しても良い。ただし可搬を想定して圧縮したアーカイブが望ましい」(user 裁定 2026-07-30)をこの形式で満たす |
 | **③ md + assets の ZIP** | 全 body が PKC-Markdown になった配当。人間可読・他ツール / AI 互換の交換形式 |
 
+- 🔴 **① は P6 で落ちていた**(在るのは「閲覧用 HTML」= 読むだけのビューアで、
+  アプリも sqlite image も入っていない)。⚠ **`file://` は opaque origin なので OPFS が
+  使えない**ことを実測した ── 「ストレージへクローン」の**クローン先が OPFS 前提だと
+  成立しない**(IDB は使えて永続する)。実測 2 点と設計は
+  `f2-portable-single-html-2026-08.md`(**user 裁定待ち**)。②③ は実装済み
 - 機械可読 JSON export は v3.0 では作らない(③ md ZIP が交換を担う。transport の
   JSON payload は別物で維持)。需要が出たら拡張点
 - **PKC2 → PKC3 は一方通行**(user 裁定 2026-07-30「PKC3 のエクスポートは、PKC2 に

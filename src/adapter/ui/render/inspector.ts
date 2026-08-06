@@ -24,6 +24,8 @@ import { formatStoredDate } from '@features/datetime/stored-date';
 export class InspectorRenderer {
   private lastMeta: EntryMeta | undefined | null = undefined;
   private lastPhase: string | null = null;
+  /** 元ファイルの紐づけも指紋の一部 ── 忘れると「書き戻す」が出ない(2026-08-05)。 */
+  private lastLink: string | null = null;
   /** 同じノートに戻ったら同じ位置へ(P8 段⑫。溢れるのは題名が長いときだけ)。 */
   private readonly scroll: ScrollMemory;
 
@@ -33,12 +35,16 @@ export class InspectorRenderer {
 
   render(state: AppState): void {
     const meta = state.selectedLid ? state.entryMetas.get(state.selectedLid) : undefined;
+    // 🔴 紐づけは**取込の後**に届く(`FILE_LINKED`)── meta と phase だけを指紋に
+    //    すると、開いた直後は「書き戻す」が出ないままになる
+    const link = (state.selectedLid && state.linkedFiles.get(state.selectedLid)) || null;
     // 断面指紋 ── meta の参照と phase が同じなら DOM に触れない
-    if (meta === this.lastMeta && state.phase === this.lastPhase) return;
+    if (meta === this.lastMeta && state.phase === this.lastPhase && link === this.lastLink) return;
     // ⚠ **書き換える前に**退避(後だと縮んで丸められた値を保存する)
     this.scroll.park();
     this.lastMeta = meta;
     this.lastPhase = state.phase;
+    this.lastLink = link;
     this.region.textContent = '';
 
     const head = document.createElement('div');
@@ -68,6 +74,9 @@ export class InspectorRenderer {
     row('種類', archetypeLabel(meta.archetype), 'inspector-kind');
     row('作成', formatStoredDate(meta.createdAt), 'inspector-created');
     row('更新', formatStoredDate(meta.updatedAt), 'inspector-updated');
+    // 🔴 **どのファイルから来たか**を出す(2026-08-05)── 出さないと、書き戻しが
+    //    「どこへ」書くのか分からない操作になる。⚠ この行の有無が導線の有無と一致する
+    if (link !== null) row('元ファイル', link, 'inspector-linked-file');
     this.region.append(dl);
 
     // ⚠ **操作は対象の隣**(P8)。共通ツールバーに集約しない
@@ -101,6 +110,13 @@ export class InspectorRenderer {
       '書き出す',
       'このノートだけをバックアップ形式(.pkc3.zip)で保存します。取り込み直せます',
     );
+    if (link !== null) {
+      btn(
+        'write-back-file',
+        '書き戻す',
+        `開いた元のファイル(${link})を、このノートの内容で上書きします`,
+      );
+    }
     btn('show-history', '履歴', '過去の版を一覧します');
     btn('delete-entry', '削除', 'ゴミ箱へ移します(フォルダ画面から戻せます)');
     this.region.append(actions);

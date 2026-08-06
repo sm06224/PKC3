@@ -60,6 +60,7 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
     ...stubRevisionOps(),
     getBody: async (lid) => store[lid] ?? null,
     deleteEntry: async () => {},
+    setEntryParent: async () => {},
     persistEntry: async (e) => {
       persisted.push(e);
       store[e.lid] = e.body;
@@ -202,6 +203,7 @@ describe('kanban view (P3-6)', () => {
     ...stubRevisionOps(),
       getBody: async () => '---\nstatus: open\n---\nx',
       deleteEntry: async () => {},
+    setEntryParent: async () => {},
       persistEntry: async (e) => {
         if (failNext) throw new Error('flaky');
         persisted.push(e);

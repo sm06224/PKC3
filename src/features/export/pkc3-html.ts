@@ -125,38 +125,119 @@ nav button[aria-current=true]{background:#8883;font-weight:600}
 main{overflow:auto;padding:24px 32px}
 main h2{margin:0 0 16px}
 img{max-width:100%;height:auto;display:block;margin:8px 0}
+/* ── 折りたたみ(F-1)。details の既定マーカーだけで畳める ── JS を足さない */
+nav details{margin:6px 0}
+nav summary{cursor:pointer;font-size:12px;opacity:.7;padding:3px 8px;border-radius:6px;
+  list-style-position:inside}
+nav summary:hover{background:#8882}
+nav ol{list-style:none;margin:0;padding:0}
+nav ol button{font-size:.94em;opacity:.88;padding:3px 8px}
+/* 見出しの深さぶんだけ下げる(番号は付けない ── 原文の見出しに番号があると二重になる) */
+nav ol li[data-l="2"] button{padding-left:22px}
+nav ol li[data-l="3"] button{padding-left:36px}
+nav p.e{font-size:12px;opacity:.6;margin:2px 10px}
+/* 印刷の 2 つは**ノートの行に見せない**(同じ見た目だと一覧の 1 件と読み違える) */
+nav button.p{width:auto;font-size:12px;padding:4px 10px;margin:2px 8px 0;
+  border:1px solid #8885;border-radius:6px}
+/* 印刷用の目次と「全体」の入れ物は**画面には出さない**(@media print で出す) */
+#ptoc,#all{display:none}
 /* 描いた本文(P8 段⑲)。⚠ **配色トークンは持ち込まない** ── ここは
    単体で開くファイルで、地の色は閲覧環境の light/dark に従う。
    #8884 のような半透明の無彩色なら、どちらでも読める */
-#body{max-width:46em}
-#body>*:first-child{margin-top:0}
-#body h1,#body h2,#body h3,#body h4{line-height:1.3;margin:1.4em 0 .5em}
-#body h1{font-size:1.5em}#body h2{font-size:1.3em}#body h3{font-size:1.1em}
-#body p,#body ul,#body ol,#body blockquote,#body table{margin:0 0 1em}
-#body ul,#body ol{padding-left:1.5em}
-#body li{margin:.2em 0}
-#body code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.92em;
+.b{max-width:46em}
+.b>*:first-child{margin-top:0}
+.b h1,.b h2,.b h3,.b h4{line-height:1.3;margin:1.4em 0 .5em}
+.b h1{font-size:1.5em}.b h2{font-size:1.3em}.b h3{font-size:1.1em}
+.b p,.b ul,.b ol,.b blockquote,.b table{margin:0 0 1em}
+.b ul,.b ol{padding-left:1.5em}
+.b li{margin:.2em 0}
+.b code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.92em;
   background:#8882;border-radius:3px;padding:0 3px}
-#body pre{white-space:pre-wrap;word-break:break-word;margin:0 0 1em;padding:10px 12px;
+.b pre{white-space:pre-wrap;word-break:break-word;margin:0 0 1em;padding:10px 12px;
   background:#8881;border:1px solid #8883;border-radius:6px;overflow-x:auto}
-#body pre code{background:0;padding:0}
-#body blockquote{padding-left:1em;border-left:3px solid #8884;opacity:.85}
-#body table{border-collapse:collapse}
-#body th,#body td{border:1px solid #8884;padding:4px 8px;text-align:left}
-#body th{background:#8881}
-#body hr{border:0;border-top:1px solid #8884;margin:1.5em 0}
-#body a{color:inherit}
+.b pre code{background:0;padding:0}
+.b blockquote{padding-left:1em;border-left:3px solid #8884;opacity:.85}
+.b table{border-collapse:collapse}
+.b th,.b td{border:1px solid #8884;padding:4px 8px;text-align:left}
+.b th{background:#8881}
+.b hr{border:0;border-top:1px solid #8884;margin:1.5em 0}
+.b a{color:inherit}
+/* 🔴 **fence の「描画 / 原文」切替**(F-1 で紙にも波及して判明)。
+   描画は .pkc-render-slot、原文は .pkc-render-source で、どちらを見せるかは
+   CSS-only トグル(.pkc-render-toggle-input)が決める ── **規則が無いと両方出る**。
+   閲覧用 HTML は .b 前置きの独自 CSS しか持っていなかったので、
+   表の下に原文が丸ごと出て、押しても効かないチェックボックスが並んでいた。
+   ⚠ 紙ではもっと悪い ── F-1 の「全体を印刷」が**表と原文を二重に刷る**。
+   ⚠ アプリ側(app.css:944-1023)と**同じ向き**にする ── checked = 原文面。
+      逆にすると、同じファイルなのにアプリと閲覧側で見えるものが食い違う */
+.b .pkc-md-block{position:relative}
+.b .pkc-render-source{margin:0}
+/* ⚠ display:none にしない ── キーボードで到達できなくなる */
+.b .pkc-render-toggle-input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
+.b .pkc-render-toggle{position:absolute;top:2px;right:2px;z-index:1;padding:0 6px;
+  border:1px solid #8884;border-radius:6px;background:#8881;color:inherit;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;
+  line-height:18px;cursor:pointer;opacity:0}
+.b .pkc-md-block:hover .pkc-render-toggle,
+.b .pkc-md-block:focus-within .pkc-render-toggle{opacity:1}
+.b .pkc-render-toggle-input:focus-visible + .pkc-render-toggle{opacity:1;outline:2px solid #888}
+.b .pkc-render-toggle-input:not(:checked) ~ .pkc-render-source,
+.b .pkc-render-toggle-input:checked ~ .pkc-render-slot{display:none}
+/* 切替そのものが無い形(-render)は原文を常に隠す */
+.b [data-pkc-render-mode='render'] > .pkc-render-source{display:none}
 /* 図は原文のまま(閲覧側に mermaid を積まない)*/
-#body pre.d{font-size:.9em;opacity:.85}
-#body [data-pkc-asset-missing]{opacity:.75;outline:1px dashed #8886}
+.b pre.d{font-size:.9em;opacity:.85}
+.b [data-pkc-asset-missing]{opacity:.75;outline:1px dashed #8886}
 /* 一覧の行(表)は溢れさせない */
-#body>*{max-width:100%}
+.b>*{max-width:100%}
 a.f{display:inline-block;margin:8px 0;padding:6px 10px;border:1px solid #8884;border-radius:6px;
   color:inherit;text-decoration:none}
 #fail{display:block;margin:24px;font:15px/1.7 system-ui,sans-serif;white-space:pre-wrap}
+
+/* ── 印刷(F-1)。⚠ 画面用の grid と 100vh をほどくのが本題 ── ほどかないと
+   1 ページ目だけ出て残りが切れる(main が overflow:auto のスクロール箱なので) */
+@media print{
+  body{display:block;height:auto;overflow:visible;font-size:10.5pt;line-height:1.6}
+  nav{display:none}
+  main{overflow:visible;padding:0}
+  main h2{font-size:1.5em}
+  .b{max-width:none}
+  /* 折りたたみは**紙では展開する**(印刷時に details を開くのは JS 側) */
+  #ptoc{display:block;margin:0 0 1.5em;padding:0 0 1em;border-bottom:1px solid #8884}
+  #ptoc h3{font-size:1.05em;margin:0 0 .4em}
+  /* ⚠ 紙の目次は 2 か所に出る(1 件の先頭 = #ptoc / 全体の先頭 = ol.x)──
+     体裁は**両方に当てる**。片方だけだと、全体印刷の目次が
+     既定の連番つき青リンクのまま出る(実機で踏んだ) */
+  #ptoc ol,ol.x{list-style:none;margin:0;padding:0}
+  #ptoc li[data-l="2"],ol.x li[data-l="2"]{padding-left:1.2em}
+  #ptoc li[data-l="3"],ol.x li[data-l="3"]{padding-left:2.4em}
+  ol.x li[data-l="4"]{padding-left:3.6em}
+  #ptoc li.n,ol.x li.n{margin-top:.5em;font-weight:600}
+  #ptoc a,ol.x a{color:inherit;text-decoration:none}
+  /* 見出しが行末で独りにならない・切ってはいけない箱を切らない */
+  .b h1,.b h2,.b h3,.b h4,main h2{break-after:avoid-page}
+  .b pre,.b table,.b blockquote,.b img{break-inside:avoid}
+  .b a{color:inherit;text-decoration:none}
+  /* 紙に操作子は要らない(切替の見た目だけ消す ── どちらの面を見せるかは
+     画面での選択をそのまま持ち込む) */
+  .b .pkc-render-toggle{display:none}
+  /* 「全体を印刷」── main を隠して #all を出す */
+  body[data-print="all"] main{display:none}
+  body[data-print="all"] #all{display:block}
+  #all section{break-before:page}
+  #all section:first-child{break-before:auto}
+  #all section h2{font-size:1.5em;margin:0 0 .6em}
+}
 </style>
-<nav><h1 id="t"></h1><div id="list"></div></nav>
-<main><h2 id="title"></h2><div id="body"></div></main>
+<nav>
+  <h1 id="t"></h1>
+  <button id="print" class="p" type="button" hidden>この文書を印刷</button>
+  <button id="printall" class="p" type="button" hidden>全体を印刷</button>
+  <details id="dnotes" open><summary>ノート</summary><div id="list"></div></details>
+  <details id="dtoc" open><summary>この文書の目次</summary><ol id="toc"></ol><p class="e" id="tocempty" hidden>見出しがありません</p></details>
+</nav>
+<main><div id="ptoc"></div><h2 id="title"></h2><div id="body" class="b"></div></main>
+<div id="all"></div>
 <noscript><p id="fail">このファイルは JavaScript で中身を表示します。有効にして開き直してください。</p></noscript>
 <script>
 (function(){
@@ -183,26 +264,30 @@ try{
   // メインスレッドが止まる)。作った object URL は表示を離れた時点で捨てる
   var live=[];
   function release(){for(var i=0;i<live.length;i++)URL.revokeObjectURL(live[i]);live=[]}
-  function urlFor(key){
+  // ⚠ **寿命の持ち主を引数で受ける**(F-1)。画面表示と「全体を印刷」は寿命が別
+  //    ── 画面は次のノートを開いた時点、紙は印刷が終わった時点で捨てる。
+  //    1 本の配列に混ぜると、印刷後の revoke が画面の画像を壊す(逆も同じ)
+  function urlFor(key,sink){
     var b=atob(d.assetData[key]),u=new Uint8Array(b.length);
     for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);
     var url=URL.createObjectURL(new Blob([u],{type:mimes[key]||'application/octet-stream'}));
-    live.push(url);return url;
+    sink.push(url);return url;
   }
   // 添付は画像なら見せる、それ以外は保存できる導線にする(開けないより落とせる方がよい)
-  function view(key,alt){
+  function view(key,alt,sink){
     var name=names[key]||alt||key;
     if((mimes[key]||'').indexOf('image/')===0){
-      var im=document.createElement('img');im.src=urlFor(key);im.alt=name;return im;
+      var im=document.createElement('img');im.src=urlFor(key,sink);im.alt=name;return im;
     }
-    var a=document.createElement('a');a.className='f';a.href=urlFor(key);
+    var a=document.createElement('a');a.className='f';a.href=urlFor(key,sink);
     a.download=name;a.textContent='⬇ '+name;return a;
   }
-  var list=document.getElementById('list'),cur=null;
-  function show(e,btn){
-    release();
-    document.getElementById('title').textContent=e.title;
-    var box=document.getElementById('body');box.textContent='';
+  // 🔑 **本文を DOM に据える処理は 1 本に寄せる**(F-1)。画面表示と「全体を印刷」で
+  // 同じ関数を使う ── 2 か所に書くと、添付の差し込みや欠落の見せ方がずれる
+  // (CLAUDE.md「同じ判定が 2 か所に生えたら規則を 1 つに寄せる」)。
+  // @param sink 作った object URL を積む配列(寿命の管理は呼び手が持つ)
+  // @param idp  見出し id の接頭辞(全体印刷では entry ごとに変えて衝突を避ける)
+  function hydrate(box,e,sink,idp){
     // 🔑 本文は**書出し側で描いた HTML**(P8 段⑲)。かつてここは本文を素のまま
     // pre で出しており、見出しも表も箇条書きも**記号のまま**だった ──
     // 「単体で開いて読める」と案内している当のファイルが一番読みにくかった。
@@ -223,8 +308,16 @@ try{
         return;
       }
       seen[k]=1;
-      if(el.tagName==='IMG'){el.src=urlFor(k);if(!el.alt)el.alt=names[k]||k;return}
-      el.href=urlFor(k);el.download=names[k]||k;
+      if(el.tagName==='IMG'){el.src=urlFor(k,sink);if(!el.alt)el.alt=names[k]||k;return}
+      el.href=urlFor(k,sink);el.download=names[k]||k;
+    });
+    // 🔴 **押しても何も起きない操作子は取り除く**(F-1)。描画はアプリと同じ関数なので、
+    //    コード・表・図の見出しに付く「コピー」ボタン(data-pkc-action="copy-md-block")が
+    //    そのまま焼き込まれる ── 閲覧側に binder は無いので**沈黙する飾り**であり、
+    //    紙にも印字される。⚠ 消す判定は**狭く当てる**(この action 名だけ)──
+    //    属性名だけで総なめにすると、将来 action を持つ本文要素まで消える
+    Array.prototype.forEach.call(box.querySelectorAll('[data-pkc-action="copy-md-block"]'),function(el){
+      if(el.parentNode)el.parentNode.removeChild(el);
     });
     // 図は**原文のまま**見せる(閲覧側に mermaid を積まない ── 読めれば足りる)
     Array.prototype.forEach.call(box.querySelectorAll('[data-pkc-mermaid-src]'),function(el){
@@ -236,11 +329,151 @@ try{
     // ⚠ 本文に書かれていて**描画に現れなかった**参照(裸の asset:key など)も
     //    ここで拾う ── 黙って消さない
     (e.attach||[]).concat(e.refs||[]).forEach(function(key){
-      if(has(key)&&!seen[key]){seen[key]=1;box.appendChild(view(key,e.title));}
+      if(has(key)&&!seen[key]){seen[key]=1;box.appendChild(view(key,e.title,sink));}
     });
+    // 🔴 見出し id は **entry ごとに namespace を切る**(F-1)。書出し側の描画は
+    //    entry ごとに独立した slug counter を回すので、別ノートの同名見出しは
+    //    **同じ id** になる。画面は 1 件ずつなので衝突しないが、全体印刷は
+    //    全件を同じ document に置く ── 目次のリンクが最初の 1 件へ全部飛ぶ
+    return headings(box,idp);
+  }
+
+  /**
+   * 見出しを拾って [{el,text,level}] を返す。id が無いものには振る。
+   * ⚠ h1〜h3 だけ(書出し側の描画が id を振るのも h1〜h3。h4 以降を混ぜると
+   *    「目次にあるのに飛べない」行が出る)。
+   */
+  function headings(box,idp){
+    var out=[];
+    Array.prototype.forEach.call(box.querySelectorAll('h1,h2,h3'),function(h,i){
+      var text=(h.textContent||'').trim();
+      if(!text)return;
+      // 全体印刷では必ず振り直す(書出し側の id が entry 間で衝突している)
+      if(idp||!h.id)h.id=(idp||'h')+'-'+i;
+      out.push({el:h,text:text,level:+h.tagName.slice(1)});
+    });
+    return out;
+  }
+
+  var list=document.getElementById('list'),cur=null;
+  var toc=document.getElementById('toc'),tocEmpty=document.getElementById('tocempty');
+  var ptoc=document.getElementById('ptoc'),all=document.getElementById('all');
+
+  /**
+   * 目次を作る。link が真なら a[href="#id"](紙・PDF 向け)、偽なら button。
+   * off は深さの下駄 ── 全体印刷の目次は「ノート名」が 1 段目なので、
+   * その中の見出しは 1 段下げる(下げないと h1 がノート名と同じ段に並ぶ)。
+   */
+  function fillToc(ol,hs,link,off){
+    hs.forEach(function(h){
+      var li=document.createElement('li');
+      li.setAttribute('data-l',String(h.level+(off||0)));
+      var a;
+      if(link){a=document.createElement('a');a.href='#'+h.el.id}
+      else{
+        a=document.createElement('button');a.type='button';
+        a.onclick=function(){h.el.scrollIntoView()};
+      }
+      a.textContent=h.text;
+      li.appendChild(a);ol.appendChild(li);
+    });
+  }
+
+  function show(e,btn){
+    release();
+    dropAll();  // 紙用に組んだ全件は、読みに戻った時点で捨てる(ObjectURL も)
+    document.getElementById('title').textContent=e.title;
+    var box=document.getElementById('body');box.textContent='';
+    var hs=hydrate(box,e,live,'');
+    // 画面の目次(折りたたみ)と、紙の目次(常に展開)── 同じ見出し列から作る
+    toc.textContent='';fillToc(toc,hs,false);
+    tocEmpty.hidden=hs.length>0;
+    ptoc.textContent='';
+    if(hs.length>0){
+      var h3=document.createElement('h3');h3.textContent='目次';ptoc.appendChild(h3);
+      var ol=document.createElement('ol');fillToc(ol,hs,true);ptoc.appendChild(ol);
+    }
     if(cur)cur.setAttribute('aria-current','false');
     cur=btn;btn.setAttribute('aria-current','true');
   }
+
+  // ── 全体を印刷(F-1)。全件を 1 つの document に組んで印刷し、**終わったら捨てる**
+  var plive=[];
+  function dropAll(){
+    for(var i=0;i<plive.length;i++)URL.revokeObjectURL(plive[i]);
+    plive=[];all.textContent='';document.body.removeAttribute('data-print');
+  }
+  function buildAll(){
+    dropAll();
+    var index=document.createElement('section');
+    var h=document.createElement('h2');h.textContent=(d.title||'PKC3')+' 目次';
+    index.appendChild(h);
+    var ol=document.createElement('ol');ol.className='x';index.appendChild(ol);
+    all.appendChild(index);
+    d.entries.forEach(function(e,i){
+      var sec=document.createElement('section');
+      var t=document.createElement('h2');t.id='pe-'+i;t.textContent=e.title||'(無題)';
+      sec.appendChild(t);
+      // ⚠ 本文の CSS は **class .b** に付けてある ── 同じ id を 2 個作らないため
+      var box=document.createElement('div');box.className='b';
+      var hs=hydrate(box,e,plive,'pe'+i);
+      sec.appendChild(box);all.appendChild(sec);
+      // 目次: ノート名 + その見出し
+      var li=document.createElement('li');li.className='n';li.setAttribute('data-l','1');
+      var a=document.createElement('a');a.href='#pe-'+i;a.textContent=e.title||'(無題)';
+      li.appendChild(a);ol.appendChild(li);
+      fillToc(ol,hs,true,1);
+    });
+    document.body.setAttribute('data-print','all');
+    return all.querySelectorAll('section').length;
+  }
+
+  // ⚠ **紙では折りたたみを展開する**。CSS では details をこじ開けられないので
+  //    印刷の直前に open を立て、終わったら**元に戻す**(畳んでいた人の状態を壊さない)
+  var reclose=[];
+  function onBefore(){
+    reclose=[];
+    Array.prototype.forEach.call(document.querySelectorAll('details'),function(x){
+      if(!x.open){x.open=true;reclose.push(x)}
+    });
+  }
+  function onAfter(){
+    for(var i=0;i<reclose.length;i++)reclose[i].open=false;
+    reclose=[];dropAll();
+  }
+  if(window.addEventListener){
+    window.addEventListener('beforeprint',onBefore);
+    window.addEventListener('afterprint',onAfter);
+  }
+  function doPrint(){if(typeof window.print==='function')window.print()}
+
+  /**
+   * 🔴 **画像が載るまで印刷を待つ**。組んだ直後に print() を呼ぶと、
+   * 画像の読み込みが終わる前に印刷が完了し、afterprint の revoke が
+   * **読み込み中の blob URL を消す** ── 紙から画像が落ちる
+   * (headless_shell で Not allowed to load local resource: blob:null/… として実測)。
+   * ⚠ 上限を置く ── 画像が返らないときに**永久に印刷できない**ほうが困る。
+   */
+  function whenImagesReady(root,done){
+    var imgs=root.querySelectorAll('img'),left=0,fired=false;
+    function fin(){if(!fired&&left===0){fired=true;done()}}
+    function dec(){left--;fin()}
+    for(var i=0;i<imgs.length;i++){
+      if(imgs[i].complete)continue;
+      left++;
+      imgs[i].addEventListener('load',dec);
+      imgs[i].addEventListener('error',dec);
+    }
+    setTimeout(function(){if(!fired){fired=true;done()}},5000);
+    fin();
+  }
+
+  var pb=document.getElementById('print'),pa=document.getElementById('printall');
+  pb.hidden=false;pb.onclick=function(){dropAll();doPrint()};
+  pa.hidden=false;
+  pa.textContent='全体を印刷('+d.entries.length+' 件)';
+  pa.onclick=function(){buildAll();whenImagesReady(all,doPrint)};
+
   d.entries.forEach(function(e,i){
     var b=document.createElement('button');
     b.textContent=e.title||'(無題)';

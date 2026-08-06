@@ -34,6 +34,7 @@ function harness(estimate?: AttachDeps['estimate']) {
       return stubStamps();
     },
     deleteEntry: async () => {},
+    setEntryParent: async () => {},
   });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
   return { d, deps, putBlobs, metas, persisted };

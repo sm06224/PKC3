@@ -287,3 +287,82 @@ export function applyFormat(sel: TextSelection, op: FormatOp): TextSelection {
       return sel;
   }
 }
+
+// ── auto pair(2026-08-05。ライブエディタ S5c。user 提案 §5.6 ②)─────────────
+//
+// > user 提案「**auto pair は開放終端をそもそも作りにくくする機構であり、入力補助な**」
+//
+// 🔑 **規則はここ 1 か所**(pure)。`row-swap.ts` は結果を挿すだけ ── DOM 側に
+// 2 本目の規則を書かない(本 module の冒頭の方針と同じ)。
+// ⚠ **返すのは「挿す文字列」**であって新しい本文ではない ── 呼び側が
+// `execCommand('insertText')` で挿せる形にしておく(そうしないと **Ctrl+Z で戻せない**)。
+
+/** 行内で対になる記号 → 閉じ。 */
+const INLINE_PAIRS: Readonly<Record<string, string>> = {
+  '`': '`',
+  '[': ']',
+  '(': ')',
+  '{': '}',
+  '「': '」',
+  '『': '』',
+  '（': '）',
+  '【': '】',
+  '"': '"',
+};
+
+/**
+ * 🔴 **行頭に 3 つ並べるとブロックになる記号** → その閉じ。
+ *
+ * ここが auto pair の本題である ── 行内の対(`**` など)が閉じていなくても
+ * 描画は原文どおりに見えるだけだが、**ブロックは閉じないと後続を飲み込む**。
+ */
+const BLOCK_MARKERS: Readonly<Record<string, string>> = {
+  '`': '```',
+  ':': ':::',
+};
+
+export interface AutoPair {
+  /** いまの選択範囲を置き換えて挿す文字列。 */
+  insert: string;
+  /** 挿した後の選択(caret)。 */
+  start: number;
+  end: number;
+}
+
+/**
+ * その打鍵で補うものを返す。補わないなら `null`(= ブラウザにそのまま打たせる)。
+ *
+ * ⚠ **行頭では行内の対を作らない** ── `` ``` `` を組み立てている途中に
+ * `` ` `` を対にすると `` `````` `` になって、狙いと逆に壊れる。
+ * ⚠ ブロックの閉じは**次の行**に置く(markdown の閉じ記号は行頭でなければ効かない)。
+ * ⚠ 変換中に呼ばないのは**呼び側の責任**(`ke.isComposing` を 1 か所で見る)。
+ */
+export function autoPairFor(sel: TextSelection, key: string): AutoPair | null {
+  const { text, start, end } = sel;
+  const lineStart = text.lastIndexOf('\n', start - 1) + 1;
+  const prefix = text.slice(lineStart, start);
+  const nl = text.indexOf('\n', end);
+  const rest = text.slice(end, nl === -1 ? text.length : nl);
+  const block = BLOCK_MARKERS[key];
+  // 行頭からその記号だけが並んでいて、後ろに何も無い = ブロック記号を組んでいる
+  if (
+    block !== undefined &&
+    start === end &&
+    rest.trim() === '' &&
+    prefix === key.repeat(prefix.length)
+  ) {
+    // 3 つ目で閉じを次の行に置く。caret は**開き記号の直後**(言語 / 名前を打つ所)
+    if (prefix.length === 2) {
+      return { insert: key + '\n' + block, start: start + 1, end: start + 1 };
+    }
+    return null;
+  }
+  const close = INLINE_PAIRS[key];
+  if (close === undefined) return null;
+  // 選択があるときは**囲む**(選んだ文字を消さない)
+  if (start !== end) {
+    const inner = text.slice(start, end);
+    return { insert: key + inner + close, start: start + 1, end: start + 1 + inner.length };
+  }
+  return { insert: key + close, start: start + 1, end: start + 1 };
+}

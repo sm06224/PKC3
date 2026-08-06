@@ -205,18 +205,46 @@ function renderFenceSourceHtml(content: string, lang: RenderableFenceLang): stri
  * mode = render / both の「レンダリング面」を言語別に生成する。
  * csv 系は parse 失敗で null(caller がソース表示へ fall back)。
  */
+/**
+ * 🔴 **salt は「同じ中身の中での出現順」にする**(2026-08-05 に実測で判明)。
+ *
+ * かつてここは **token 添字**だった。すると図の**前**に段落を 1 つ足すだけで
+ * 添字がずれ、`id` が変わり、**図を含む塊の HTML が変わる** ── `apply-blocks.ts`
+ * から見ると「その塊は変わった」ことになるので作り直され、**生きている
+ * `<img>` が捨てられて絵が一度消える**(ObjectURL の作り直し + IDB の読み直し +
+ * decode)。実測: 図の前に段落 1 つを挿入すると、塊の差は
+ * **`pkc-rv-…` の値だけ**なのに `diffBlocks` の `middle` に図の塊が入る。
+ * ⚠ これは `sourceLineAnchors` を切っている**今日のプレビューでも起きている**。
+ *
+ * 出現順にすれば「同じ内容の fence を区別する」という当初の目的は保ったまま、
+ * **無関係な編集で id が動かなくなる**。
+ * ⚠ カウンタは `env`(render 1 回ぶん)に持つ ── `md` は module 内で共有なので、
+ * module スコープに置くと render を跨いで増え続け、id が毎回変わる(元の病気に戻る)。
+ */
+function nextFenceOccurrence(env: unknown, lang: string, content: string): number {
+  const bag = env as { fenceSeen?: Map<string, number> };
+  const seen = (bag.fenceSeen ??= new Map<string, number>());
+  const key = `${lang}\u0000${content}`;
+  const n = seen.get(key) ?? 0;
+  seen.set(key, n + 1);
+  return n;
+}
+
 function buildRenderableSlotHtml(
   fence: RenderableFence,
   content: string,
   inlineRender: (text: string) => string,
-  /** 文書内の位置(token 添字)── 決定的な id を作るために要る。 */
-  position: number,
+  /**
+   * **同じ (lang, 中身) の fence の中で何番目か**(0 始まり)── 決定的な id を
+   * 作るために要る。⚠ **token 添字ではない**(下の `nextFenceOccurrence` を見よ)。
+   */
+  occurrence: number,
 ): string | null {
   switch (fence.lang) {
     case 'html':
       // reform-2026-05 PR-2M:iframe sandbox 経由で HTML を直接 render。
       // sandbox="allow-scripts" のみ(allow-same-origin 無し)で cross-origin 隔離。
-      return buildHtmlSandboxIframe(content, '', position);
+      return buildHtmlSandboxIframe(content, '', occurrence);
     case 'mermaid': {
       // pgc-203 wave-α' polish #24:placeholder div のみ emit。実 SVG render は
       // adapter 層の `hydrateMermaidPlaceholders` が lazy import('mermaid') で
@@ -259,8 +287,11 @@ function buildRenderableBlockHtml(
   slotHtml: string,
   content: string,
   sourceLineAttrs: string,
-  /** 文書内の位置(token 添字)。⚠ **同じ中身の fence を区別する**ために要る。 */
-  position: number,
+  /**
+   * **同じ (lang, 中身) の fence の中で何番目か**(0 始まり)。
+   * ⚠ **同じ中身の fence を区別する**ために要るが、**token 添字にしてはいけない**。
+   */
+  occurrence: number,
 ): string {
   let toggleHtml = '';
   if (fence.mode === 'both') {
@@ -270,7 +301,7 @@ function buildRenderableBlockHtml(
     // 「毎回変わった」ことになり、**図が毎回作り直されて絵が一度消える**
     // (user 指摘「レンダリングで画面がガクガクする」の実体の 1 つ)。
     // ⚠ 同じ文書に同じ内容の fence が 2 つあっても衝突しないよう、位置も混ぜる。
-    const id = `pkc-rv-${toggleKey(fence.lang + '\u0000' + content, String(position))}`;
+    const id = `pkc-rv-${toggleKey(fence.lang + '\u0000' + content, String(occurrence))}`;
     toggleHtml =
       `<input type="checkbox" id="${id}" class="pkc-render-toggle-input" aria-label="ソース / レンダリング切替">` +
       `<label for="${id}" class="pkc-render-toggle" title="ソース / レンダリング切替">‹/›</label>`;
@@ -301,9 +332,19 @@ md.renderer.rules.fence = function (tokens, idx, options, env, self) {
     // Pass inline renderer so CSV cells can carry markdown inline markup
     // (`**bold**` / `==highlight==` / `:text:attrs:` L-6 simple-inline 等)。
     const inlineRender = (text: string): string => md.renderInline(text, env);
-    const slot = buildRenderableSlotHtml(fence, content, inlineRender, idx);
+    /**
+     * 1 度だけ数えて両方へ同じ値を渡す。
+     *
+     * ⚠ **2 回数えても壊れない**(変異試験で確認 ── `<input id>` と `<label for>` は
+     * どちらも `buildRenderableBlockHtml` の中で同じ引数から作るので対応は崩れず、
+     * 鍵に中身が入っているので衝突もしない)。1 度にするのは**数が「何番目か」の
+     * 意味を保つ**ためで、安全性の根拠ではない ── ここに「2 回数えると壊れる」と
+     * 書くのは嘘になる。
+     */
+    const occurrence = nextFenceOccurrence(env, fence.lang, content);
+    const slot = buildRenderableSlotHtml(fence, content, inlineRender, occurrence);
     if (slot !== null) {
-      return buildRenderableBlockHtml(fence, slot, content, sourceLineAttrs, idx);
+      return buildRenderableBlockHtml(fence, slot, content, sourceLineAttrs, occurrence);
     }
     // csv 系 parse 失敗:従来どおり user のソースを可視で残す。
     return wrapWithCopyButton(renderFenceSourceHtml(content, fence.lang), 'code', sourceLineAttrs);
@@ -545,6 +586,20 @@ md.renderer.rules.link_open = function (tokens, idx, options, env, self) {
       token.attrSet('target', '_blank');
       token.attrSet('rel', 'noopener noreferrer');
     }
+  } else if (href.startsWith('#')) {
+    // 🔴 **文書内アンカーは外部リンクではない**(2026-08-05、user 報告から判明)。
+    //
+    // 直す前は「`entry:` / `pkc:` / `asset:` 以外は全部外部」という前提で
+    // `target="_blank"` を立てており、`[見出しへ](#anchor)` を押すと
+    // **2 枚目のタブが開いて**、PKC3 の単一タブ保護
+    // (`docs/manual.md`「🔴 タブは 1 つだけ」/ writer lease)に突き当たっていた。
+    // 実測:クリックで pages 1 → 2 になり、2 枚目は
+    // 「別のタブで開いています。そのタブを閉じると、ここで続きが開きます…」で止まる。
+    //
+    // ⚠ `rel` も付けない ── 同一文書内の移動に noopener は意味を持たない。
+    // ⚠ 判定は `#` 始まりだけに**狭く**当てる。相対パス(`./` `../`)は
+    //    このアプリでは意味を持たない(単一 HTML / Pages 配信)ので、
+    //    外部扱いのままにしておく方が安全側である。
   } else {
     token.attrSet('target', '_blank');
     token.attrSet('rel', 'noopener noreferrer');
@@ -1498,6 +1553,16 @@ export interface RenderMarkdownOptions {
    * 抽出して渡す。
    */
   readonly headingNumber?: { start: number } | null;
+  /**
+   * 🔴 **行の対応表をここへ集める**(2026-08-05。ライブエディタ S2)。
+   *
+   * 渡すと `SOURCE_LINE_TOKEN_TYPES` の token ぶんの `SourceRange` が
+   * **文書順で** push される。⚠ **HTML は変わらない**(= anchors OFF と byte 一致)──
+   * 行番号を焼くと、行数が変わる編集で全塊の HTML が変わって差分が全滅する。
+   * ⚠ 呼び側は空配列を渡す(この関数は push するだけで、消さない)。
+   * 使い方は `features/markdown/source-ranges.ts` の `renderMarkdownWithRanges`。
+   */
+  readonly collectRanges?: SourceRange[];
 }
 
 /**
@@ -1524,6 +1589,54 @@ const SOURCE_LINE_TOKEN_TYPES: ReadonlySet<string> = new Set([
   'hr',
   'html_block',
 ]);
+
+/**
+ * 🔴 **行の対応表(sidecar)の 1 件**(2026-08-05。ライブエディタ S2)。
+ *
+ * `data-pkc-source-line` と**同じ材料**から作るが、**HTML には焼かない**。
+ * ⚠ `level` は token の入れ子の深さ ── 0 = 最上位。表の行(`tr`)や
+ * 箇条書きの項目(`li`)は深いところに出るので、活性単位を行まで下げるのに使う
+ * (設計 §5.6 ④)。
+ */
+export interface SourceRange {
+  /** 原文(frontmatter を除いた本文)の開始行。0 始まり。 */
+  readonly start: number;
+  /** 同・終了行(含む)。 */
+  readonly end: number;
+  /** token の入れ子の深さ。0 = 最上位。 */
+  readonly level: number;
+  /** token の型(`paragraph_open` / `tr_open` / `list_item_open` / `fence` …)。 */
+  readonly type: string;
+}
+
+/**
+ * `tagSourceLines` の**双子**。属性を焼く代わりに配列へ集める。
+ *
+ * ⚠ **判定を 2 つに増やさない** ── 対象 token の集合(`SOURCE_LINE_TOKEN_TYPES`)と
+ * 行の逆引き(`lineMap`)は焼く側と**同じもの**を使う。ここが分岐すると
+ * 「画面に出ている刻印」と「対応表」が食い違い、caret が別の行へ入る。
+ */
+function collectSourceRanges(
+  tokens: Token[],
+  lineMap: number[] | undefined,
+  out: SourceRange[],
+): void {
+  for (const token of tokens) {
+    if (token.map && SOURCE_LINE_TOKEN_TYPES.has(token.type)) {
+      const outStart = token.map[0];
+      const outEndIncl = Math.max(outStart, token.map[1] - 1);
+      out.push({
+        start: lineMap ? (lineMap[outStart] ?? outStart) : outStart,
+        end: lineMap ? (lineMap[outEndIncl] ?? outEndIncl) : outEndIncl,
+        level: token.level,
+        type: token.type,
+      });
+    }
+    if (token.children && token.children.length > 0) {
+      collectSourceRanges(token.children, lineMap, out);
+    }
+  }
+}
 
 function tagSourceLines(tokens: Token[], lineMap?: number[]): void {
   for (const token of tokens) {
@@ -2009,30 +2122,33 @@ function processTocDirective(
         if (Number.isFinite(n) && n >= 1 && n <= 6) depth = n;
       }
     }
-    // closing `:::` を探索(content は無視、自動生成のみ)
-    let j = i + 1;
-    while (j < lines.length) {
-      if (/^[ \t]*:::[ \t]*$/.test(lines[j]!)) break;
-      j++;
-    }
-    if (j >= lines.length) {
-      // unclosed、open 行を literal で残して 1 行だけ消費
-      out.push(line);
-      lineMapOut.push(inputIdx);
-      i++;
-      continue;
-    }
-    // sentinel 行に置換(depth 込み)、content + closing は consume
+    // 🔴 **`:::toc` は 1 行で閉じる**(2026-08-05 に user 報告から判明)。
+    //
+    // 直す前は「次に現れる単独 `:::` まで」を探して**その間を全部 consume** していた。
+    // 目次に content は無い(見出しから自動生成する)ので中身を捨てるのは正しいが、
+    // **閉じ `:::` を書かない書き方**では「次の `:::`」が別のブロック
+    // (`:::note` の閉じなど)に当たり、**その間の本文が丸ごと画面から消える**。
+    // 閉じが 1 つも無ければ `:::toc` が literal 文字列として出る ──
+    // `docs/manual.md` は閉じ無しで案内しているので、**書いたとおりに書くと出ない**。
+    //
+    // ⚠ 直し方は「探索範囲を狭める」ではなく「**探索をやめる**」。
+    //    範囲を狭めた版は「どこまでなら飲んでよいか」という判定を新たに生み、
+    //    同じ事故が別の距離で再発する(CLAUDE.md「判定を増やさない」)。
+    //    後方互換として、**直後の行**が単独 `:::` のときだけ 2 行 consume する。
+    const closer = lines[i + 1];
+    const closesImmediately = closer !== undefined && /^[ \t]*:::[ \t]*$/.test(closer);
     const recordIdx = records.length;
     records.push({ depth });
     out.push(`${TOC_OPEN}${recordIdx}${TOC_SEP}${depth}${TOC_OPEN}`);
     lineMapOut.push(inputIdx);
-    // closing `:::` まで skip(空行で line count を維持)
-    for (let k = i + 1; k <= j; k++) {
+    if (closesImmediately) {
+      // 空行で line count を維持(source-line anchor が 1 行ずれない)
       out.push('');
-      lineMapOut.push(lineMapIn[k] ?? k);
+      lineMapOut.push(lineMapIn[i + 1] ?? i + 1);
+      i += 2;
+    } else {
+      i += 1;
     }
-    i = j + 1;
   }
   return { transformed: out.join('\n'), lineMap: lineMapOut, records };
 }
@@ -3371,6 +3487,13 @@ const ADMONITION_ALIASES: ReadonlySet<string> = new Set([
  * Set は空になったが、将来の deny list scenario(別 directive)用に
  * infrastructure は維持。
  */
+/**
+ * ⚠ **空集合 = この経路は起動しない**(2026-08-05 に確認)。
+ * かつて対象だった `:::toc` / `:::frontmatter` / `:::body` は、いずれも
+ * 正規の実装(`processTocDirective` / `processRegionBlocks`)へ移った。
+ * 下の `processHallucinatedDirectives` は**現状 no-op** である ──
+ * 「動いているつもり」で読まれないよう、ここに書いておく。
+ */
 const HALLUCINATION_BLOCK_DIRECTIVES: ReadonlySet<string> = new Set([]);
 
 const HALLUCINATION_BLOCK_SUGGESTION: Record<string, string> = {};
@@ -3888,7 +4011,15 @@ function postProcessBlankLineMarkers(html: string): string {
       const cappedAttr = capped
         ? ` data-pkc-blank-capped="${requested}→${count}" title="_${requested} 指定は上限 ${count} 行に cap されました(N≦${count} で再指定可能)"`
         : '';
-      return `<div class="pkc-blank-line" data-pkc-blank-count="${count}" aria-hidden="true"${cappedAttr}${attrs}></div>`;
+      // 🔴 **高さの元になる値は `style` で渡す**(2026-08-05)。CSS 側の規則は
+      //    `height: calc(1.45em * var(--pkc-blank-count, 1))` で、**この変数**を読む。
+      //    直す前はここが `data-pkc-blank-count` しか書いておらず、規則は在るのに
+      //    常に 1 行ぶんの高さだった(`_3` と `_1` が同じ)。
+      //    ⚠ 「CSS が 0 行」を数える検査では**絶対に見つからない**型の欠陥である
+      //    ── 規則も属性も在り、繋がっていないだけなので。
+      //    ⚠ 寛容 parse 側(`pkc-tolerant-spacing`)は最初から style を出していた
+      //    = **同じことを 2 か所でやって片方だけ正しい**状態だった
+      return `<div class="pkc-blank-line" style="--pkc-blank-count: ${count}" data-pkc-blank-count="${count}" aria-hidden="true"${cappedAttr}${attrs}></div>`;
     },
   );
 }
@@ -4141,7 +4272,19 @@ export function renderMarkdown(
   const indentMap = alignResult.indentMap;
   lineMap = alignResult.lineMap;
   let html: string;
-  if (!opts.sourceLineAnchors) {
+  /**
+   * 🔴 **行の対応表を「属性に焼かずに」受け取る**(2026-08-05。ライブエディタ S2。
+   * 設計 doc `live-editor-design-2026-08.md` §7-1)。
+   *
+   * 焼くと、行数が変わる編集で**全塊の HTML が変わる** ── `apply-blocks.ts` は
+   * 塊 HTML の完全一致で差分を取るので、行を 1 行足すだけで編集点から末尾まで
+   * 全部作り直しになる(閲覧ペインで現に起きている)。だから
+   * `collectRanges` を渡した場合も **HTML は anchors OFF と byte 一致**にする
+   * ── そうすれば `sourceLineAnchors` は据え置きで goldens が 1 byte も動かない。
+   */
+  const wantsTokens =
+    opts.sourceLineAnchors === true || opts.collectRanges !== undefined;
+  if (!wantsTokens) {
     if (alignMap.size === 0 && indentMap.size === 0) {
       html = md.render(stripped, env);
     } else {
@@ -4154,7 +4297,12 @@ export function renderMarkdown(
     // lineMap で stripped output index → 原文 input index へ逆引き。
     const tokens = md.parse(stripped, env);
     applyAlignAttrs(tokens, alignMap, indentMap);
-    tagSourceLines(tokens, lineMap);
+    // ⚠ **集めるのが先、焼くのが後**(順は結果に影響しないが、集める側が
+    //    焼いた属性に依存していないことを読んで分かる形にしておく)
+    if (opts.collectRanges !== undefined) {
+      collectSourceRanges(tokens, lineMap, opts.collectRanges);
+    }
+    if (opts.sourceLineAnchors === true) tagSourceLines(tokens, lineMap);
     html = md.renderer.render(tokens, md.options, env);
   }
   // PR-2V:`:::toc{depth=N}` sentinel → <nav class="pkc-toc-formal pkc-toc-preview">

@@ -66,6 +66,7 @@ function setup(metas: EntryMeta[], relations: Relation[]) {
     getBody: async () => '',
     persistEntry: async () => stubStamps(),
     deleteEntry: async () => {},
+    setEntryParent: async () => {},
   });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas, relations });
   // ⚠ 器は**左の列**へ移った(P8 段⑤)

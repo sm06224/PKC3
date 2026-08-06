@@ -35,9 +35,20 @@ import { CenterRouter } from '@adapter/ui/render/center';
 import { AppendBoxRenderer } from '@adapter/ui/render/append-box';
 import { formatSize } from '@adapter/ui/render/detail';
 import { bindActions, generateLid, type BinderServices } from '@adapter/ui/actions/binder';
-import { armLaunchQueue, type LaunchTarget } from '@adapter/platform/launch-queue';
+import {
+  armLaunchQueue,
+  type LaunchTarget,
+  type LaunchedItem,
+} from '@adapter/platform/launch-queue';
+import {
+  LaunchedFiles,
+  splitAlreadyOpen,
+  writeBackFile,
+  type LaunchedHandle,
+} from '@adapter/platform/launched-files';
 import { whenPhaseReady } from '@adapter/state/wait-for-ready';
 import { reloadSnapshot } from '@adapter/state/reload-snapshot';
+import { selectWhenPresent } from '@adapter/state/select-when-present';
 import { attachFiles } from '@adapter/ui/actions/attach';
 import { importFiles } from '@adapter/ui/actions/import-file';
 import type { ImportDeps } from '@adapter/ui/actions/import-pkc2';
@@ -66,7 +77,7 @@ export interface AppHandle {
    * OS の `launchQueue` から来たファイルを取り込む(P7 段③)。
    * ⚠ **断らない**版 ── 詳細は実装のコメント
    */
-  importLaunchFiles(files: File[]): Promise<void>;
+  importLaunchFiles(items: LaunchedItem[]): Promise<void>;
   /**
    * 「新しい版があります」を見せる(P7 段⑤)。押されたら `apply` を呼ぶ。
    * ⚠ 交代を頼むだけ ── 再読込は交代が済んでから(`watchForUpdate` の側)。
@@ -155,6 +166,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       getBlob: (key) => blobs.get(DEFAULT_CID, key),
     },
     markdown,
+    /**
+     * 🔴 **ライブエディタの本文書込**(2026-08-05。S5)。renderer は dispatch
+     * しない(層規約)ので、`UPDATE_OPEN_BODY` はここで投げる。
+     * ⚠ **同期で投げる**── 保存ボタンは textarea の blur(= 確定)より後に
+     * 走るので、ここが同期なら state は既に新しい本文を持っている。
+     */
+    (body) => dispatcher.dispatch({ type: 'UPDATE_OPEN_BODY', body }),
   );
   // いま居る場所の印(変わったときだけ属性を触る)
   let markedView: string | null = null;
@@ -364,15 +382,49 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       notify: (message) => showStatus(message),
       // 注意は**全件**を専用面へ(1 行の status では 1 件目しか届かない)
       report: (notes) => showNotices(regions.notices, '取込時の注意', notes),
+      // 🔴 **取り込んだノートを開く**(2026-08-05、user 報告「開いたら何も起きずに終わる」)。
+      //    ⚠ `reload()` が早く返る場合があるので、素朴な dispatch では
+      //    reducer に弾かれて黙って終わる ── 「居たら選ぶ、まだなら待つ」は
+      //    `select-when-present.ts` に閉じてある
+      focus: (lid) => void selectWhenPresent(dispatcher, lid),
   };
+
+  /**
+   * 🔴 **OS から開いた md の元ファイル**(2026-08-05、user 報告
+   * 「スポットの編集プレビュー導線も存在しない」)。⚠ **このセッションだけ**の記憶。
+   * 実体と理由は `launched-files.ts`(state には名前だけ渡す)。
+   */
+  const launched = new LaunchedFiles();
 
   /**
    * 取込の本体。⚠ **gate の外**に置く ── 断る版(user のクリック)と
    * 待つ版(OS の launch。断ると選び直せない)の**両方**が同じ処理を呼ぶ。
    * 2 本に分けると片方だけ直す事故が必ず起きる(P7 段③ review H2)
    */
-  const runImport = (files: File[]): Promise<void> =>
-    importFiles(dispatcher, importDeps, files).then(() => {});
+  const runImport = (
+    files: File[],
+    handles?: readonly LaunchedHandle[],
+  ): Promise<void> =>
+    importFiles(
+      dispatcher,
+      handles === undefined
+        ? importDeps
+        : {
+            ...importDeps,
+            // ⚠ **順番で結ぶ**(名前で結ばない)── 同名の別ファイルを同時に開くと
+            //    名前では取り違える。`importMarkdownFiles` は files の順で lid を返す
+            imported: (lids) => {
+              lids.forEach((lid, i) => {
+                const handle = handles[i];
+                const file = files[i];
+                if (!handle || !file) return;
+                launched.remember(lid, handle, file.name);
+                dispatcher.dispatch({ type: 'FILE_LINKED', lid, name: file.name });
+              });
+            },
+          },
+      files,
+    ).then(() => {});
 
   /** 更新の案内(P7 段⑤)。面と「押されたら何をするか」は render 側が持つ。 */
   const updatePrompt = createUpdatePrompt(regions.update, {
@@ -435,6 +487,48 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           error: `ダウンロードに失敗しました(${name}): ${String(e)}`,
         });
       }
+    },
+    /**
+     * 🔴 **元の md へ書き戻す**(2026-08-05、user 報告
+     * 「マークダウンファイルに紐付けれるけど、取り込みもスポットの編集プレビュー導線も
+     * 存在しない」)。開いた md を直して、**そのファイルへ返す**までが「その場編集」。
+     *
+     * ⚠ 書くのは **disk の本文**(draft ではない)── 編集中は断る。
+     *   下書きを user のファイルへ流し込むと、確定していないものが外へ出る。
+     * ⚠ 本文は取込時に**原文のまま**入っている(`import-markdown.ts` の規律)ので、
+     *   frontmatter を含めて往復する。ここで組み立て直さない。
+     * ⚠ 確認を出す ── **user のファイルを上書きする**(取り消せない)操作である。
+     */
+    writeBackFile: (lid) => {
+      const state = dispatcher.getState();
+      const fail = (error: string): void => dispatcher.dispatch({ type: 'OP_FAILED', error });
+      if (state.phase !== 'ready') {
+        fail('編集を終了してから書き戻してください');
+        return;
+      }
+      const name = state.linkedFiles.get(lid);
+      const handle = launched.handleOf(lid);
+      if (name === undefined || handle === null) {
+        // 読み直すと handle は死ぬ ── そのときは「もう一度開いてください」が正しい
+        fail('元のファイルとの紐づけがありません(この md をもう一度開いてください)');
+        return;
+      }
+      const ok =
+        window.confirm?.(
+          `「${name}」を、いまのノートの内容で上書きします。\n\n` +
+            'ファイルの元の内容は失われます(取り消せません)。よろしいですか?',
+        ) ?? false;
+      if (!ok) return;
+      void (async () => {
+        const body = (await client.request({ op: 'getBody', cid: DEFAULT_CID, lid })) ?? null;
+        if (body === null) {
+          fail('本文が見つかりません(整理された可能性)');
+          return;
+        }
+        const result = await writeBackFile(handle, body);
+        if (result.ok) showStatus(`書き戻しました: ${name}`);
+        else fail(`${name}: ${result.reason}`);
+      })();
     },
     // 📥 取込(P6b: PKC2 の書出し / P7 段②: 素の Markdown)。asset gate の内側 ──
     // 取込は putBlob → entry 書込の間に「bytes はあるが参照が無い」窓を持つので、
@@ -683,11 +777,31 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * ready になるまで待ち、gate は順番待ちする版を使う。
      * ⚠ 取込の**本体は binder と同じ** `runImport`(2 経路にしない)
      */
-    importLaunchFiles: async (files) => {
+    importLaunchFiles: async (items) => {
       await whenPhaseReady(dispatcher, () =>
         showStatus('編集を終えると、開いたファイルを取り込みます'),
       );
-      await withAssetGate.queued(() => runImport(files));
+      // 🔴 **同じファイルを 2 回開いても増やさない**(2026-08-05)。
+      //    判定の中身は `launched-files.ts`(ここに書くと test が写しを見るだけになる)
+      const { fresh, reopened } = await splitAlreadyOpen(items, launched, (lid) =>
+        dispatcher.getState().entryMetas.has(lid),
+      );
+      for (const lid of reopened) selectWhenPresent(dispatcher, lid);
+      if (fresh.length === 0) {
+        // ⚠ **黙って終えない** ── 「開いたのに何も起きない」に見える
+        showStatus(
+          reopened.length > 0
+            ? 'すでに開いているノートを表示しました'
+            : '開けるファイルがありませんでした',
+        );
+        return;
+      }
+      await withAssetGate.queued(() =>
+        runImport(
+          fresh.map((i) => i.file),
+          fresh.map((i) => i.handle),
+        ),
+      );
     },
     presentUpdate: (apply) => updatePrompt.present(apply),
   };

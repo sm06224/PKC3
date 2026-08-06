@@ -47,6 +47,7 @@ function setup(bodies: Record<string, string>) {
     ...stubRevisionOps(),
     getBody: async (lid) => bodies[lid] ?? null,
     deleteEntry: async () => {},
+    setEntryParent: async () => {},
     persistEntry: async (e) => {
       persisted.push(e);
       return stubStamps();
@@ -167,6 +168,7 @@ describe('editor flow (P3-5)', () => {
     ...stubRevisionOps(),
       getBody: async () => '# A',
       deleteEntry: async () => {},
+    setEntryParent: async () => {},
       persistEntry: async (e) => {
         if (failNext) throw new Error('disk full');
         persisted.push(e.body);

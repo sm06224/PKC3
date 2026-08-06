@@ -63,6 +63,7 @@ function setup(metas: EntryMeta[]) {
     ...stubRevisionOps(),
     getBody: async (lid) => bodies[lid] ?? null,
     deleteEntry: async () => {},
+    setEntryParent: async () => {},
     persistEntry: async () => stubStamps(),
   });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas, relations: [] });

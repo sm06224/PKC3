@@ -11,6 +11,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyFormat,
+  autoPairFor,
   appendAt,
   appendBlock,
   FORMAT_OPS,
@@ -185,5 +186,78 @@ describe('パネルの表', () => {
   it('未知の op は本文を変えない(型を抜けてきても壊さない)', () => {
     const before = { text: 'あ', start: 0, end: 1 };
     expect(applyFormat(before, 'nope' as FormatOp).text).toBe('あ');
+  });
+});
+
+/**
+ * 🔴 **auto pair**(2026-08-05。ライブエディタ S5c。user 提案 §5.6 ②)。
+ *
+ * > user 提案「**auto pair は開放終端をそもそも作りにくくする機構であり、入力補助な**」
+ *
+ * ここで守るのは 3 つ:
+ * ① **行内の対**は閉じが入り、caret が中に来る(選択があれば囲む = 文字を消さない)
+ * ② 🔴 **行頭のブロック記号**(``` / :::)は閉じが**次の行**に入る
+ *    ── 行内の対と同じ扱いにすると `` `````` `` になって狙いと逆に壊れる
+ * ③ **補わないときは `null`**(= ブラウザにそのまま打たせる)── ここで
+ *    「空文字を挿す」を返すと、`execCommand` 経由になって undo の粒度が変わる
+ */
+describe('autoPairFor(auto pair の規則)', () => {
+  const at = (text: string, start: number, end = start) => ({ text, start, end });
+
+  it('① 行内の対は閉じが入り、caret は中に来る', () => {
+    const r = autoPairFor(at('あ', 1), '「');
+    expect(r).toEqual({ insert: '「」', start: 2, end: 2 });
+  });
+
+  it('① 選択があるときは囲む(選んだ文字が消えない)', () => {
+    const r = autoPairFor(at('あここい', 1, 3), '「');
+    expect(r).toEqual({ insert: '「ここ」', start: 2, end: 4 });
+  });
+
+  it('② 🔴 行頭の 3 つ目のバッククォートで、閉じが**次の行**に入る', () => {
+    // 行頭に `` が在る状態で 3 つ目を打つ
+    const r = autoPairFor(at('``', 2), '`');
+    expect(r).toEqual({ insert: '`\n```', start: 3, end: 3 });
+    // caret は開き記号の直後 = 言語を打てる位置
+    const after = '``' + r!.insert;
+    expect(after).toBe('```\n```');
+    expect(after.slice(0, r!.start)).toBe('```');
+  });
+
+  it('② 🔴 行頭の 1 つ目・2 つ目は対にしない(``` を組む途中を邪魔しない)', () => {
+    expect(autoPairFor(at('', 0), '`')).toBeNull();
+    expect(autoPairFor(at('`', 1), '`')).toBeNull();
+    // ⚠ 対にしてしまうと `` ` `` × 3 で `` `````` `` になる(狙いと逆)
+  });
+
+  it('② `:::` も同じ(閉じが次の行・caret は名前を打つ位置)', () => {
+    const r = autoPairFor(at('::', 2), ':');
+    expect(r).toEqual({ insert: ':\n:::', start: 3, end: 3 });
+    expect('::' + r!.insert).toBe(':::\n:::');
+  });
+
+  it('② 4 つ目以降は閉じを足さない(閉じが二重に増えない)', () => {
+    expect(autoPairFor(at('```', 3), '`')).toBeNull();
+  });
+
+  it('② 行頭でも、後ろに文字が在るならブロックとして扱わない', () => {
+    // `` |あ` のような途中 ── ここでブロックの閉じを入れると本文を割る
+    const r = autoPairFor(at('``あ', 2), '`');
+    expect(r).toEqual({ insert: '``', start: 3, end: 3 });
+  });
+
+  it('② 行の途中のバッククォートは行内の対(行頭判定が緩んでいない)', () => {
+    const r = autoPairFor(at('あ``', 3), '`');
+    expect(r).toEqual({ insert: '``', start: 4, end: 4 });
+  });
+
+  it('② 2 行目の行頭でも効く(行の切り出しが先頭固定になっていない)', () => {
+    const r = autoPairFor(at('あ\n``', 4), '`');
+    expect(r).toEqual({ insert: '`\n```', start: 5, end: 5 });
+  });
+
+  it('③ 対でない打鍵は null(ブラウザにそのまま打たせる)', () => {
+    expect(autoPairFor(at('あ', 1), 'x')).toBeNull();
+    expect(autoPairFor(at('あ', 1), 'Enter')).toBeNull();
   });
 });

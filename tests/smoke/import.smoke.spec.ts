@@ -194,6 +194,15 @@ const NOTE_BODY = (marker: string): string =>
     '# ZIP',
     marker,
     'HTML のコメントは <!-- で始まり、<script src="x"> も書ける',
+    // ⚠ **描画 / 原文の切替を持つ fence を必ず 1 つ入れる**(F-1 で判明)。
+    //    無いと「原文が二重に出ていないか」を測る術が無く、可搬 HTML の
+    //    当該検査が丸ごと空振りする(fixture のゼロ件次元は測っていない次元)
+    '',
+    '```csv',
+    '列A,列B',
+    '1,2',
+    '```',
+    '',
     ...Array.from({ length: 40 }, (_, i) => `共通の行 ${i}: 変わらない内容がここに続く`),
   ].join('\n') + '\n';
 
@@ -597,6 +606,17 @@ test('🔴 P7 段②: 素の md を取り込む ── 宣言(file_handlers)と�
   await expect(rows).toHaveCount(2);
   await expect(rows.locator('[data-pkc-field="title"]')).toHaveText(['会議メモ', '正本']);
 
+  // 🔴 **取り込んだノートが画面に出る**(2026-08-05、user 報告
+  //    「開いたら何も起きずに終わる」)。直す前は一覧の末尾に足すだけで、
+  //    中央は「左の一覧から選ぶと…」のまま、反応は左下 12px の「取込完了」だけだった。
+  //    ⚠ 複数選んだら**最後の 1 件**を開く(user が最後に指した物)
+  await expect(
+    page.locator('[data-pkc-field="detail-body"]'),
+    '取り込んだのに本文が出ない',
+  ).toBeVisible();
+  await expect(page.locator('[data-pkc-field="detail-title"]')).toHaveText('正本');
+  await expect(rows.nth(1)).toHaveAttribute('data-pkc-selected', /.*/);
+
   // 🔴 **本文が原文のまま**入っている(frontmatter を再構築していない)。
   // editor を開いて textarea の値そのものを見る ── rendered だけ見ると
   // frontmatter は表示されないので、消えていても気づけない
@@ -783,6 +803,122 @@ test('🔴 可搬 HTML: 書き出したファイルが**単体で開いて読め
     .poll(async () => viewer.locator('#body img').evaluate((el) =>
       (el as HTMLImageElement).complete && (el as HTMLImageElement).naturalWidth > 0))
     .toBe(true);
+
+  // ── 🔴 fence の「描画 / 原文」切替が閲覧側でも成立しているか。
+  //    閲覧用 HTML には CSS-only トグルの規則が 1 行も無く、**両方出て**いた
+  //    (表の下に原文、押しても効かないチェックボックス、紙では二重に刷る)。
+  //    ⚠ CSS の効きは happy-dom では測れない ── ここが唯一の観測点
+  await items.nth(0).click();
+  const fenceSrc = viewer.locator('#body .pkc-render-source');
+  expect(
+    await fenceSrc.count(),
+    'この fixture に描画/原文の fence が無い(切替を測っていない)',
+  ).toBeGreaterThan(0);
+  await expect(fenceSrc.first(), '描画の下に原文が出ている').toBeHidden();
+  await expect(viewer.locator('#body .pkc-render-slot').first()).toBeVisible();
+  // ⚠ **dead click にしない** ── 属性が変わるだけで見た目が変わらない状態を潰す
+  await viewer.locator('#body .pkc-render-toggle').first().click({ force: true });
+  await expect(fenceSrc.first(), '切替が効いていない(押しても原文が出ない)').toBeVisible();
+  await expect(viewer.locator('#body .pkc-render-slot').first()).toBeHidden();
+  await viewer.locator('#body .pkc-render-toggle').first().click({ force: true });
+  await expect(fenceSrc.first()).toBeHidden();
+
+  // ── F-1: 折りたたみ目次と印刷。⚠ `@media print` が**実際に効く**かは
+  //    happy-dom では測れない ── ここが唯一の観測点なので実ブラウザで見る
+  const headings = await viewer.locator('#body h1, #body h2, #body h3').count();
+  expect(headings, 'この fixture に見出しが 1 個も無い(目次を測っていない)').toBeGreaterThan(0);
+  await expect(viewer.locator('#toc li')).toHaveCount(headings);
+  // 畳める(details であること自体が要件 ── JS を足さずに畳める)
+  expect(
+    await viewer.locator('#dtoc').evaluate((el) => el.tagName.toLowerCase()),
+  ).toBe('details');
+  // 目次の行を押すと本文の見出しへ移る(#body はスクロール箱の中)
+  const before = await viewer.locator('main').evaluate((el) => el.scrollTop);
+  await viewer.locator('#toc li').last().locator('button').click();
+  expect(
+    await viewer.locator('main').evaluate((el) => el.scrollTop),
+    '目次から移動していない',
+  ).not.toBe(before);
+
+  await viewer.emulateMedia({ media: 'print' });
+  const styleOf = async (sel: string, prop: string): Promise<string> =>
+    viewer.locator(sel).evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), prop);
+  // 🔴 **画面用の grid と 100vh をほどく**のが印刷の本題 ── ほどかないと
+  //    main がスクロール箱のままで、1 ページ目だけ出て残りが切れる
+  expect(await styleOf('body', 'display'), '印刷でも grid のまま').toBe('block');
+  expect(await styleOf('main', 'overflow'), 'main がスクロール箱のまま').toBe('visible');
+  expect(await styleOf('nav', 'display'), '紙に一覧が出てしまう').toBe('none');
+  expect(await styleOf('#ptoc', 'display'), '紙に目次が出ない').not.toBe('none');
+  // 🔴 紙に原文を二重に刷らない / 操作子を刷らない
+  expect(await styleOf('#body .pkc-render-source', 'display'), '紙に原文が二重に出る').toBe('none');
+  expect(await styleOf('#body .pkc-render-toggle', 'display'), '紙に操作子が刷られる').toBe('none');
+  // 紙の目次は畳まれない(印刷の直前に open を立てる)
+  await viewer.locator('#dtoc').evaluate((el) => {
+    (el as HTMLDetailsElement).open = false;
+  });
+  await viewer.evaluate(() => window.dispatchEvent(new Event('beforeprint')));
+  expect(await viewer.locator('#dtoc').evaluate((el) => (el as HTMLDetailsElement).open)).toBe(true);
+
+  // ── 全体を印刷。
+  // 🔴 **観測点は「印刷が始まる瞬間」**(`beforeprint`)であって、押した直後ではない。
+  //    `window.print()` の振る舞いは **Chromium のビルドで違う**(2026-08-05 実測):
+  //      `chrome`(手元の /opt/pw-browsers/chromium)  … `beforeprint` のみ発火
+  //      `headless_shell`(**CI の playwright 既定**)  … `beforeprint` + `afterprint` を同期発火
+  //    後者では**押して戻った時点で既に片付いている**(= 正しい動作)。
+  //    「押した直後に組み上がっている」を assert した版は、手元だけ通って CI で落ちた。
+  await viewer.emulateMedia({ media: 'screen' });
+  await expect(viewer.locator('#all')).toBeHidden(); // 画面には出ていない
+  await viewer.evaluate(() => {
+    // ⚠ 閲覧側の listener は boot 時に付いているので、あとから足すこちらが後に走る
+    //    = buildAll() の結果を見ることになる
+    (window as unknown as { __snap?: unknown }).__snap = null;
+    window.addEventListener('beforeprint', () => {
+      (window as unknown as { __snap?: unknown }).__snap = {
+        sections: document.querySelectorAll('#all section').length,
+        dataPrint: document.body.getAttribute('data-print'),
+        imgs: document.querySelectorAll('#all img').length,
+      };
+    });
+  });
+  await viewer.locator('#printall').click(); // 本物のクリック
+  // ⚠ 印刷は**画像が載ってから**始まる(組んだ直後ではない)── poll で待つ
+  await expect
+    .poll(async () => viewer.evaluate(() => (window as unknown as { __snap?: unknown }).__snap !== null))
+    .toBe(true);
+  const snap = (await viewer.evaluate(
+    () => (window as unknown as { __snap?: unknown }).__snap,
+  )) as { sections: number; dataPrint: string | null; imgs: number } | null;
+  expect(snap, '印刷が始まらなかった(beforeprint が来ていない)').not.toBeNull();
+  // 🔴 空振り防止 ── この fixture には添付画像が在る。**画像が組まれている**ことを
+  //    確かめないと、「画像が載るまで待つ」の検査そのものが何も測っていない
+  expect(snap!.imgs, 'この fixture の全件に画像が 1 枚も無い').toBeGreaterThan(0);
+  expect(snap!.sections, '印刷が始まる時点で全件が組み上がっていない').toBe(3); // 目次 + 2 件
+  expect(snap!.dataPrint).toBe('all');
+
+  // CSS は「その状態のときにどう出るか」。⚠ 紙では nav が消えてボタンを押せないので、
+  //    状態は evaluate で作り直す(作るのは同じ buildAll ── ここで見たいのは CSS のほう)。
+  //    ⚠ `window.print` は**呼ばれたことを数えるだけ**に差し替える ── 上のビルド差を
+  //      持ち込まないため。呼ばれない実装に退化したらここで落ちる
+  await viewer.evaluate(() => {
+    const w = window as unknown as { __printed: number };
+    w.__printed = 0;
+    window.print = () => {
+      w.__printed += 1;
+    };
+    document.getElementById('printall')!.click();
+  });
+  await expect
+    .poll(async () => viewer.evaluate(() => (window as unknown as { __printed: number }).__printed))
+    .toBe(1);
+  await expect(viewer.locator('#all section')).toHaveCount(3);
+  await expect(viewer.locator('#all'), '画面に紙用の全件が出てしまう').toBeHidden();
+  await viewer.emulateMedia({ media: 'print' });
+  expect(await styleOf('main', 'display'), '全体印刷で main が残っている').toBe('none');
+  expect(await styleOf('#all', 'display'), '全体が紙に出ない').toBe('block');
+  // 🔴 組んだものは**捨てる**(印刷後に常駐させない)
+  await viewer.evaluate(() => window.dispatchEvent(new Event('afterprint')));
+  await expect(viewer.locator('#all section')).toHaveCount(0);
+  await viewer.emulateMedia({ media: 'screen' });
 
   expect(viewerErrors).toEqual([]);
   expect(errors).toEqual([]);

@@ -65,6 +65,7 @@ function setup(bodies: Record<string, string>, port: Partial<StorePort> = {}) {
     deleteEntry: async () => {
       log.push('delete');
     },
+    setEntryParent: async () => {},
     ...port,
   });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('e1')], relations: [] });

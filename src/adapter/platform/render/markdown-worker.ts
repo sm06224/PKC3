@@ -14,11 +14,21 @@
  * ⚠ 例外を握り潰さない ── 落ちたら `ok:false` で返す(呼び側が同期描画へ
  * 落とせるように。**黙って白紙**にしない)。
  */
-import { renderMarkdown, type RenderMarkdownOptions } from '@features/markdown/markdown-render';
+import {
+  renderMarkdown,
+  type RenderMarkdownOptions,
+  type SourceRange,
+} from '@features/markdown/markdown-render';
 
 export interface MarkdownJob {
   text: string;
   opts: RenderMarkdownOptions;
+  /**
+   * 🔴 **行の対応表も返す**(2026-08-05。ライブエディタ S5)。
+   * ⚠ `opts.collectRanges` を**そのまま渡せない** ── 配列を渡して mutate させる
+   * 形なので、構造化複製を跨いだら結果が戻らない。ここで受けて結果に載せる。
+   */
+  withRanges?: boolean;
 }
 
 interface Incoming {
@@ -34,6 +44,12 @@ const ctx = self as unknown as {
 ctx.onmessage = (ev: MessageEvent<Incoming>): void => {
   const { id, payload } = ev.data;
   try {
+    if (payload.withRanges === true) {
+      const ranges: SourceRange[] = [];
+      const html = renderMarkdown(payload.text, { ...payload.opts, collectRanges: ranges });
+      ctx.postMessage({ id, ok: true, result: { html, ranges } });
+      return;
+    }
     ctx.postMessage({ id, ok: true, result: renderMarkdown(payload.text, payload.opts) });
   } catch (e) {
     ctx.postMessage({ id, ok: false, error: String(e) });

@@ -118,6 +118,19 @@ export interface ImportDeps {
    */
   report?(notes: readonly string[]): void;
   /**
+   * 🔴 **取り込んだノートを画面に出す**(2026-08-05、user 報告
+   * 「開いたら何も起きずに終わる」)。md 経路(`import-markdown.ts`)が使う。
+   * ⚠ PKC2 の container 取込では**呼ばない** ── 何十件も入るので、
+   *    どれを開くのが正しいか決められない。1 ファイル = 1 entry の md だけ。
+   */
+  focus?(lid: string): void;
+  /**
+   * 取り込んだ lid を **files と同じ順**で返す(2026-08-05)。
+   * ⚠ `focus` と同じ理由で **md 経路だけ**が呼ぶ ── PKC2 の container 取込は
+   *    ファイルと entry が 1:1 でないので、順で結べない。
+   */
+  imported?(lids: readonly string[]): void;
+  /**
    * ハッシュを取る上限(既定 `HASH_MAX_BYTES` = 64MB)。
    *
    * ⚠ **test の観測点として在る**(review M-1)。この閾値は WebCrypto に

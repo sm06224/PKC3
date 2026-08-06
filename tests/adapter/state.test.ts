@@ -461,6 +461,7 @@ describe('effect layer: serialized store I/O', () => {
         return bodies[lid] ?? null;
       },
       async deleteEntry() {},
+      async setEntryParent() {},
       async persistEntry(entry) {
         log.push(`put:${entry.lid}:${entry.body}`);
         return stubStamps();
@@ -505,6 +506,7 @@ describe('effect layer: serialized store I/O', () => {
         return 'recovered';
       },
       async deleteEntry() {},
+      async setEntryParent() {},
       async persistEntry() {
         return stubStamps();
       },
@@ -533,6 +535,7 @@ describe('effect layer: serialized store I/O', () => {
         return '# A';
       },
       async deleteEntry() {},
+      async setEntryParent() {},
       async persistEntry(e) {
         if (failNext) throw new Error('disk full');
         persisted.push(e.body);
@@ -569,6 +572,7 @@ describe('effect layer: serialized store I/O', () => {
         return '# A';
       },
       async deleteEntry() {},
+      async setEntryParent() {},
       async persistEntry() {
         throw new Error('disk full');
       },
@@ -609,6 +613,7 @@ describe('effect layer: serialized store I/O', () => {
         return '---\nstatus: open\n---\n芝刈り';
       },
       async deleteEntry() {},
+      async setEntryParent() {},
       async persistEntry(entry) {
         persisted.push(entry);
         return stubStamps();
@@ -648,6 +653,7 @@ describe('effect layer: serialized store I/O', () => {
         return 'late';
       },
       async deleteEntry() {},
+      async setEntryParent() {},
       async persistEntry() {
         return stubStamps();
       },

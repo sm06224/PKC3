@@ -46,32 +46,91 @@ export async function createEntry(page: Page, archetype: string): Promise<void> 
 }
 
 /**
- * 実クリック: 中心座標の最前面要素が target(またはその子孫 / 祖先)であることを
+ * 🔴 **再描画で node が差し替わるのは正常**(2026-08-05、CI と full run で実際に落ちた)。
+ *
+ * 情報ペインもファイラのパンくずも、値が変わると作り直される。保存の直後は worker から
+ * 時刻が遅れて届くので、その瞬間に触ると `scrollIntoViewIfNeeded` が
+ * `Element is not attached to the DOM` / `element is not stable` で落ち、
+ * `boundingBox()` は **`toBeVisible()` を通った直後でも null** を返す
+ * (= その間に外れた ── 面積 0 の要素はそもそも `toBeVisible()` で落ちる)。
+ * 遅い機械ほど当たりやすい(手元 3/3 緑・CI 赤 / 単独緑・全量赤 を両方踏んだ)。
+ */
+function isRerenderRace(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e);
+  return (
+    msg.includes('not attached to the DOM') ||
+    msg.includes('element is not stable') ||
+    msg.includes('boundingBox が無い')
+  );
+}
+
+/**
+ * ⚠ **retry で誤魔化さない**。差し替わったら**やり直す**が、「見えている位置に
+ * 本当に在るか」の検証は**毎回**やる ── dead click / occlusion の検出力は
+ * 1 ミリも下げない。⚠ 回数を切る ── 永遠に作り直され続ける(= 本物の不具合)なら
+ * 落ちるべき。
+ */
+async function withRerenderRetry<T>(page: Page, run: () => Promise<T>): Promise<T> {
+  const ATTEMPTS = 3;
+  for (let i = 1; ; i += 1) {
+    try {
+      return await run();
+    } catch (e) {
+      if (!isRerenderRace(e) || i >= ATTEMPTS) throw e;
+      // 差し替わった直後は次の描画がまだ来ていることがある ── 1 フレーム待つ
+      await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r(null))));
+    }
+  }
+}
+
+/**
+ * 実クリック: 中心座標の最前面要素が target(またはその子孫)であることを
  * 確認してから page.mouse.click。dead click / occlusion / zero-height を検出する。
  */
 export async function clickReal(page: Page, selector: string): Promise<void> {
+  await withRerenderRetry(page, async () => {
+    const { x, y } = await reachableOnce(page, selector);
+    await page.mouse.click(x, y);
+  });
+}
+
+/**
+ * 「その座標で実際に見えていて、最前面である」ことだけを確かめる(押さない)。
+ *
+ * 🔑 `<select>` のように**押すと OS の一覧が開いてしまう**部品は、これで届くことを
+ * 確かめてから `selectOption` で操作する ── 検出力(dead click / occlusion)は
+ * `clickReal` と**同じ規則**を使う。⚠ 規則を 2 本書くと、片方だけ緩んで気づかない。
+ *
+ * @returns 中心座標
+ */
+export async function expectReachable(
+  page: Page,
+  selector: string,
+): Promise<{ x: number; y: number }> {
+  return withRerenderRetry(page, () => reachableOnce(page, selector));
+}
+
+async function reachableOnce(page: Page, selector: string): Promise<{ x: number; y: number }> {
   const el = page.locator(selector).first();
   await expect(el).toBeVisible();
   await el.scrollIntoViewIfNeeded(); // fold 下の要素を「覆われている」と誤診しない
   const box = await el.boundingBox();
   expect(box, `${selector} に boundingBox が無い(画面に出ていない)`).not.toBeNull();
-  const cx = box!.x + box!.width / 2;
-  const cy = box!.y + box!.height / 2;
+  const x = box!.x + box!.width / 2;
+  const y = box!.y + box!.height / 2;
   // 判定は「target 自身か、その子孫がヒット」のみ。祖先ヒットを許すと
   // pointer-events:none 等の dead click が素通りする(binder は ev.target から
   // closest するため、祖先ヒットでは target のハンドラに届かない ── review #2)
   const hit = await page.evaluate(
-    ({ x, y, sel }) => {
-      const at = document.elementFromPoint(x, y);
+    ({ px, py, sel }) => {
+      const at = document.elementFromPoint(px, py);
       const target = document.querySelector(sel);
       return !!(at && target && (at === target || target.contains(at)));
     },
-    { x: cx, y: cy, sel: selector },
+    { px: x, py: y, sel: selector },
   );
-  expect(hit, `${selector} の中心 (${cx},${cy}) が別要素に覆われている / 届かない`).toBe(
-    true,
-  );
-  await page.mouse.click(cx, cy);
+  expect(hit, `${selector} の中心 (${x},${y}) が別要素に覆われている / 届かない`).toBe(true);
+  return { x, y };
 }
 
 /**

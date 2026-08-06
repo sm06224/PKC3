@@ -8,6 +8,7 @@
  *   selectedLid が選択の単一情報源
  */
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
+import { resolveCanonicalParents } from '@features/relation/tree';
 import { extractMeta, seedBodyFor } from '@features/flavor';
 import { withTodoStatus } from '@features/flavor/todo-flavor';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
@@ -79,6 +80,16 @@ export interface AppState {
   revisionPanel: { lid: string; items: readonly RevisionItem[] } | null;
   /** ゴミ箱 panel(filer)。開いた時点のスナップショット + 明示更新。 */
   trashPanel: { items: readonly TrashItem[] } | null;
+  /**
+   * 🔴 **OS から開いた元ファイルとの紐づけ**(lid → ファイル名。2026-08-05、
+   * user 報告「スポットの編集プレビュー導線も存在しない」)。
+   *
+   * ⚠ ここに置くのは**見せる材料(名前)だけ** ── `FileSystemFileHandle` 本体は
+   * 不透明で比較も複製もできないので、純粋な reducer に入れない
+   * (実体は `adapter/platform/launched-files.ts` が**このセッションだけ**持つ)。
+   * ⚠ 読み直しで消える(handle が死ぬので、名前だけ残すと**嘘の導線**になる)。
+   */
+  linkedFiles: ReadonlyMap<string, string>;
   /**
    * 一覧の絞り込み(P7b 段⑨c、user 指示「導線を再考」)。
    * ⚠ **state に持つ**(renderer が DOM から読まない、という規約)── 入力欄の
@@ -170,6 +181,7 @@ export const initialState: AppState = {
   showArchived: false,
   revisionPanel: null,
   trashPanel: null,
+  linkedFiles: new Map(),
   writeLock: null,
   tileWrite: null,
   lockGen: 0,
@@ -243,10 +255,20 @@ export type UserAction =
       title: string;
       body?: string;
       edit?: boolean;
+      /** 入れ先の folder(2026-08-05)。省略 / null = ルート。
+       *  ⚠ `relationId` も一緒に渡す ── 片方だけでは辺を作れない。 */
+      parentLid?: string | null;
+      relationId?: string;
     }
   | { type: 'DESELECT_ENTRY' }
   | { type: 'DELETE_ENTRY'; lid: string }
   | { type: 'RENAME_ENTRY_TITLE'; lid: string; title: string }
+  /**
+   * 🔴 **居場所を変える**(2026-08-05。フォルダ整理)。
+   * `parentLid: null` = ルートへ出す。⚠ 「外す」と「入れる」を 2 つに割らない ──
+   * 割ると途中で落ちたときに親無しが残る(PKC2 がその形だった)。
+   */
+  | { type: 'SET_ENTRY_PARENT'; lid: string; parentLid: string | null; relationId: string }
   | { type: 'SHOW_HISTORY' }
   | { type: 'HIDE_HISTORY' }
   | { type: 'RESTORE_REVISION'; revId: string }
@@ -287,6 +309,11 @@ export type SystemCommand =
   | { type: 'SYS_ERROR'; error: string }
   | { type: 'REVISION_LIST_LOADED'; lid: string; items: RevisionItem[] }
   | { type: 'TRASH_LIST_LOADED'; items: TrashItem[] }
+  /**
+   * 🔴 **OS から開いた md が entry になった**(2026-08-05)。handle 本体は
+   * platform 側が持ち、ここへ来るのは**見せる名前**だけ。
+   */
+  | { type: 'FILE_LINKED'; lid: string; name: string }
   | {
       /** 復元完了(履歴 / ゴミ箱共通)。meta は effect が抽出済みの行から組む。
        *  mode は着弾時の整合判定に使う: revision = entry が居るのが前提(削除
@@ -345,6 +372,13 @@ export type DomainEvent =
   | {
       type: 'REQUEST_LAUNCHER_TILES';
       entries: Array<{ lid: string; title: string }>;
+    }
+  | {
+      /** 居場所の永続化。⚠ 判定(循環・folder か)は reduce で済んでいる。 */
+      type: 'REQUEST_SET_PARENT';
+      lid: string;
+      parentLid: string | null;
+      relationId: string;
     }
   | {
       type: 'PERSIST_ENTRY';
@@ -420,8 +454,22 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       const order = [...action.metas]
         .sort((a, b) => a.entryOrder - b.entryOrder || a.lid.localeCompare(b.lid))
         .map((m) => m.lid);
-      // 再 boot(コンテナ切替・error 復帰)で旧選択・旧 openBody を持ち越さない
-      // (lid 偶然衝突による cross-container 上書きの防止 ── review F)
+      // 🔴 **同じ container への再読込なら選択を保つ**(2026-08-05、user 報告)。
+      //
+      // ここは元々「再 boot では旧選択・旧 openBody を持ち越さない」だった。
+      // 意図は **container 切替**での lid 偶然衝突の防止(review F)で、それは正しい。
+      // ただし取込は**同じ container の再読込**でもここを通る ── つまり
+      // **md を 1 件開いただけで、いま読んでいたノートが画面から消えて**
+      // 「左の一覧から選ぶと…」に戻っていた(実測)。
+      //
+      // ⚠ 保つ条件は 2 つとも要る:**cid が同じ**(別 container なら従来どおり捨てる)
+      //    かつ **その lid が新しい一覧に在る**(消えたノートを選んだままにしない)。
+      // ⚠ `openBody` は必ず捨てる ── 再読込で本文が変わっている可能性がある。
+      //    代わりに `REQUEST_BODY` を出して**取り直す**(選択の意味論は SELECT_ENTRY と同じ)
+      const keepLid =
+        state.cid === action.cid && state.selectedLid !== null && metas.has(state.selectedLid)
+          ? state.selectedLid
+          : null;
       return {
         state: {
           ...state,
@@ -431,11 +479,15 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
           entryMetas: metas,
           order,
           relations: action.relations,
-          selectedLid: null,
+          selectedLid: keepLid,
           openBody: null,
           freshLid: null,
+          // ⚠ 元ファイルの紐づけは**このセッションの持ち物**なので、同じ container の
+          //    再読込では保つ(取込のたびに消えると、開いた直後に書き戻せなくなる)。
+          //    ⚠ ただし**消えた lid は落とす** ── 居ない entry を指す導線を残さない
+          linkedFiles: keepLinks(state, action.cid, metas),
         },
-        events: [],
+        events: keepLid === null ? [] : [{ type: 'REQUEST_BODY', lid: keepLid }],
       };
     }
     case 'SELECT_ENTRY': {
@@ -1020,12 +1072,42 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
         date: ext.date,
         archived: ext.archived,
       };
+      /**
+       * 🔴 **いま見ているフォルダの中に作る**(2026-08-05)。
+       * ⚠ 入れ先が folder でない / 実在しないなら**黙ってルートに作る** ──
+       *    ここで作成ごと断ると、user は「押しても何も起きない」を見る
+       *    (作れないより、意図と違う場所に見えているほうが直せる)。
+       * ⚠ 自己辺は作らない(作った当人が入れ先になることはあり得ないが、
+       *    lid 生成が壊れたときの防波堤)。
+       */
+      const parentMeta =
+        action.parentLid != null && action.parentLid !== action.lid && action.relationId
+          ? state.entryMetas.get(action.parentLid)
+          : undefined;
+      const parentLid =
+        parentMeta && parentMeta.archetype === 'folder' ? (action.parentLid as string) : null;
+      const relations =
+        parentLid === null
+          ? state.relations
+          : [
+              ...state.relations,
+              {
+                id: action.relationId as string,
+                fromLid: parentLid,
+                toLid: action.lid,
+                kind: 'structural' as const,
+                // ⚠ 時刻は worker が刻む(SET_ENTRY_PARENT と同じ約束)
+                createdAt: null,
+                updatedAt: null,
+              },
+            ];
       // 作成 = 即永続(PKC2 と同じ)。この初回 PERSIST が失敗した場合、editing 中の
       // 無変更 commit は skip するが、行は upsert なので次の変更 commit が自己修復する
       // (二重故障窓のみ残る ── SYS_ERROR が可視。P3-7a 設計判断)
       return {
         state: {
           ...state,
+          relations,
           phase: wantsEdit ? 'editing' : 'ready', // 既定は作成 → 即編集(PKC2 の遷移)
           entryMetas: new Map(state.entryMetas).set(action.lid, meta),
           order: [...state.order, action.lid],
@@ -1060,6 +1142,18 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
               archived: ext.archived,
             },
           },
+          // ⚠ **entry を書いた後**に辺を書く(行が無いところへ辺を張らない)。
+          //    effect は events の順に直列化するので、この並びがそのまま順序になる
+          ...(parentLid === null
+            ? []
+            : ([
+                {
+                  type: 'REQUEST_SET_PARENT',
+                  lid: action.lid,
+                  parentLid,
+                  relationId: action.relationId as string,
+                },
+              ] as DomainEvent[])),
         ],
       };
     }
@@ -1094,6 +1188,69 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
             title,
             archetype: meta.archetype,
             entryOrder: meta.entryOrder,
+          },
+        ],
+      };
+    }
+    case 'SET_ENTRY_PARENT': {
+      // 🔴 **フォルダ整理の唯一の入口**(2026-08-05、user 報告
+      // 「フォルダ整理のための導線がない」)。直す前は UI どころか
+      // action・reducer・effect のどこにも relation を編集する経路が無く、
+      // フォルダは作れるのに**永久に空**だった。
+      if (state.phase !== 'ready') return { state, events: [] };
+      const child = state.entryMetas.get(action.lid);
+      if (!child) return { state, events: [] };
+      const parentLid = action.parentLid;
+      if (parentLid !== null) {
+        const parent = state.entryMetas.get(parentLid);
+        // ⚠ 入れ先は**実在するフォルダ**でなければならない(木の規約 ──
+        //    `resolveCanonicalParents` は非 folder 親の辺を無視するので、
+        //    ここで通すと「移したのに動かない」黙りになる)
+        if (!parent || parent.archetype !== 'folder') return { state, events: [] };
+        if (parentLid === action.lid) return { state, events: [] }; // 自分の中へは入れない
+        // 🔴 **自分の子孫の中へは入れない**(輪ができて木でなくなる)。
+        //    ⚠ 判定はここでやる ── worker は metas を持たないので木を知らない
+        const parentOf = resolveCanonicalParents(state.entryMetas, state.relations);
+        for (let cur: string | undefined = parentLid; cur !== undefined; cur = parentOf.get(cur)) {
+          if (cur === action.lid) return { state, events: [] };
+        }
+      }
+      // 楽観更新 ── 画面(ファイラ)は state.relations から描くので、
+      // ここで直さないと「押したのに動かない」に見える
+      const kept = state.relations.filter(
+        (r) => !(r.kind === 'structural' && r.toLid === action.lid),
+      );
+      const relations =
+        parentLid === null
+          ? kept
+          : [
+              ...kept,
+              {
+                id: action.relationId,
+                fromLid: parentLid,
+                toLid: action.lid,
+                kind: 'structural' as const,
+                // ⚠ 時刻は **worker が刻む**(`datetime('now')`)。ここは楽観表示の
+                //    ための仮値で、次の再読込で本物に置き換わる
+                createdAt: null,
+                updatedAt: null,
+              },
+            ];
+      // ⚠ 何も変わらないなら書かない(同じ親へ落としても永続化が走らない)
+      if (
+        relations.length === state.relations.length &&
+        relations.every((r, i) => r === state.relations[i])
+      ) {
+        return { state, events: [] };
+      }
+      return {
+        state: { ...state, relations },
+        events: [
+          {
+            type: 'REQUEST_SET_PARENT',
+            lid: action.lid,
+            parentLid,
+            relationId: action.relationId,
           },
         ],
       };
@@ -1142,6 +1299,14 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
     case 'SHOW_TRASH': {
       if (state.phase !== 'ready') return { state, events: [] };
       return { state, events: [{ type: 'REQUEST_TRASH_LIST' }] };
+    }
+    case 'FILE_LINKED': {
+      // ⚠ **居ない entry には紐づけない**(取込が失敗した後に届いても導線を作らない)
+      if (!state.entryMetas.has(action.lid)) return { state, events: [] };
+      if (state.linkedFiles.get(action.lid) === action.name) return { state, events: [] };
+      const linkedFiles = new Map(state.linkedFiles);
+      linkedFiles.set(action.lid, action.name);
+      return { state: { ...state, linkedFiles }, events: [] };
     }
     case 'HIDE_TRASH':
       return { state: { ...state, trashPanel: null }, events: [] };
@@ -1348,9 +1513,42 @@ function removeEntryFromState(
       // 削除で履歴・ゴミ箱の断面は古くなる ── 畳んで開き直しに任せる(P5b)
       revisionPanel: null,
       trashPanel: null,
+      // ⚠ 元ファイルの紐づけも外す ── 消したノートに「書き戻す」を出したままだと、
+      //    戻せなくなった器を指す導線が残る(復元したら開き直しで紐づく)
+      linkedFiles: dropLink(state.linkedFiles, lid),
     },
     events,
   };
+}
+
+/**
+ * 再読込を跨いで残す紐づけ。別 container なら**全部捨てる**(lid の偶然衝突で
+ * 他人のノートに「書き戻す」を出さない ── 選択の持ち越しと同じ判断)。
+ */
+function keepLinks(
+  state: AppState,
+  cid: string,
+  metas: ReadonlyMap<string, EntryMeta>,
+): ReadonlyMap<string, string> {
+  if (state.cid !== cid) return state.linkedFiles.size === 0 ? state.linkedFiles : new Map();
+  let dropped = false;
+  const next = new Map<string, string>();
+  for (const [lid, name] of state.linkedFiles) {
+    if (metas.has(lid)) next.set(lid, name);
+    else dropped = true;
+  }
+  return dropped ? next : state.linkedFiles; // 変化が無いなら参照を保つ
+}
+
+/** 紐づけを 1 件外す(⚠ 持っていないなら**同じ参照**を返す ── 断面指紋を壊さない)。 */
+function dropLink(
+  links: ReadonlyMap<string, string>,
+  lid: string,
+): ReadonlyMap<string, string> {
+  if (!links.has(lid)) return links;
+  const next = new Map(links);
+  next.delete(lid);
+  return next;
 }
 
 /**

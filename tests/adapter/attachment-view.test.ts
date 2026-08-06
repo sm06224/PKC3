@@ -46,6 +46,7 @@ function setup(bodies: Record<string, string>, lender: AssetLender) {
     getBody: async (lid) => bodies[lid] ?? null,
     persistEntry: async () => stubStamps(),
     deleteEntry: async () => {},
+    setEntryParent: async () => {},
   });
   d.dispatch({
     type: 'SYS_BOOTED',

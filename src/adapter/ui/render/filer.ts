@@ -22,7 +22,9 @@ import {
   getStructuralChildren,
   getRootEntries,
   getAncestorFolders,
+  resolveCanonicalParents,
   resolveFilerScope,
+  listMoveTargets,
 } from '@features/relation/tree';
 import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
 // 🔑 種別の呼び名は **1 本**(P8 段⑲)── かつてここだけ独自表を持ち、
@@ -46,9 +48,78 @@ export class FilerRenderer {
   private lastFilter: string | null = null;
   /** ゴミ箱 panel の断面(参照比較 ── P5b で指紋に加わった次元)。 */
   private lastTrash: AppState['trashPanel'] = null;
+  /** 居場所を変える帯の器(中身は選択が変わるたびに差し替える)。 */
+  private moveBar: HTMLElement | null = null;
 
   constructor(region: HTMLElement) {
     this.region = region;
+  }
+
+  /**
+   * 🔴 **フォルダ整理の導線**(2026-08-05、user 報告
+   * 「フォルダ整理のための導線がない」)。直す前は、フォルダは**作れるのに
+   * 中身を入れる手段が画面のどこにも無く**、永久に空だった。
+   *
+   * 形は **1 本の帯**にする(行ごとにボタンを生やさない):
+   *   - 行ごとに置くと、平置き 15k 件の root で 15k 個の `<select>` を作ることになる
+   *   - フォルダ自身を選ぶと scope がその中へ移る(= 行が一覧から消える)ので、
+   *     行に付けた操作では**フォルダ自身を動かせない**
+   * 「いま選んでいるものの居場所」を**いつも同じ場所**に出す
+   * (user 指示 2026-08-03「同じものが常に同じ場所にある」)。
+   */
+  private renderMoveBar(state: AppState, scope: EntryMeta | null): void {
+    const host = this.moveBar;
+    if (!host) return;
+    host.textContent = '';
+
+    const moving = state.selectedLid ? (state.entryMetas.get(state.selectedLid) ?? null) : null;
+    if (!moving) {
+      const hint = document.createElement('p');
+      hint.setAttribute('data-pkc-field', 'filer-move-empty');
+      // ⚠ 「操作が無い」ではなく「**何をすれば出るか**」を書く
+      hint.textContent = '動かしたいものを選ぶと、ここで居場所を変えられます';
+      host.append(hint);
+    } else {
+      const label = document.createElement('label');
+      const cap = document.createElement('span');
+      cap.setAttribute('data-pkc-field', 'move-caption');
+      cap.textContent = `「${moving.title}」の居場所`;
+      const sel = document.createElement('select');
+      sel.setAttribute('data-pkc-field', 'move-target');
+      // 🔑 選んだ瞬間に効く(binder の change 経路)── 「選ぶ」と「押す」に
+      //    割らない。割ると選んだだけで満足して押し忘れる
+      sel.setAttribute('data-pkc-action', 'move-entry');
+      // ⚠ **動かす当人の lid は帯自身が持つ** ── `selectedLid` を binder 側で
+      //    読み直すと、押した瞬間に選択が変わっていた場合に別のものが動く
+      sel.setAttribute('data-pkc-entry', moving.lid);
+      sel.title = 'このノートを入れるフォルダを選びます';
+      const root = document.createElement('option');
+      root.value = '';
+      root.textContent = 'ルート(いちばん上)';
+      sel.append(root);
+      for (const f of listMoveTargets(moving.lid, state.entryMetas, state.relations)) {
+        const opt = document.createElement('option');
+        opt.value = f.lid;
+        // ⚠ 字下げは**見た目だけ**。同名フォルダの取り違えは hover の道が防ぐ
+        opt.textContent = `${'　'.repeat(f.depth)}${f.title}`;
+        opt.title = f.path;
+        sel.append(opt);
+      }
+      // ⚠ いまの親を選んでおく(「どこに居るか」が読める)。候補に無い親
+      //    (取り込んだデータに輪がある等)なら空 = ルート表示に落ちる
+      sel.value = resolveCanonicalParents(state.entryMetas, state.relations).get(moving.lid) ?? '';
+      label.append(cap, sel);
+      host.append(label);
+    }
+
+    if (scope) {
+      // 🔑 **作る先を先に見せる**(押してから探させない)── 新規作成は
+      //    「いま見ているフォルダ」に入る(binder `create-entry`)
+      const where = document.createElement('p');
+      where.setAttribute('data-pkc-field', 'filer-create-target');
+      where.textContent = `新しく作るものは「${scope.title}」に入ります`;
+      host.append(where);
+    }
   }
 
   render(state: AppState): void {
@@ -72,6 +143,10 @@ export class FilerRenderer {
         this.rows.get(state.selectedLid)?.setAttribute('data-pkc-selected', '');
       }
       this.lastSelected = state.selectedLid;
+      // 🔴 **居場所の帯は選択に追従する**(2026-08-05)。ここを忘れると、
+      //    行を選び直しても帯は**前に選んでいたものを指したまま**になり、
+      //    「移動」を押すと**別のノートが動く**(見えない取り違え)
+      this.renderMoveBar(state, scope);
       return;
     }
 
@@ -120,6 +195,10 @@ export class FilerRenderer {
       }
     }
     this.region.append(crumb);
+    this.moveBar = document.createElement('div');
+    this.moveBar.setAttribute('data-pkc-region', 'filer-move');
+    this.region.append(this.moveBar);
+    this.renderMoveBar(state, scope);
 
     const table = document.createElement('table');
     table.setAttribute('data-pkc-region', 'filer-table');

@@ -19,6 +19,18 @@ const PORT = Number(process.env.PKC3_SMOKE_PORT ?? 45732);
 
 // 同梱 Chromium(コンテナ / self-host)を優先、無ければ playwright 管理の
 // ブラウザ(CI は install 済みが前提)
+//
+// 🔴 **CI と手元で別のバイナリが動く**(2026-08-05 に実際に踏んだ)。
+// 同梱は `chromium-1194/chrome-linux/chrome`(フル Chromium)だが、
+// CI は playwright 既定 = **`chromium_headless_shell`**。この 2 つは
+// `window.print()` の振る舞いが違い(chrome は `beforeprint` のみ /
+// headless_shell は `beforeprint` + `afterprint` を同期発火)、
+// **手元で緑・CI で赤**になった。CI を手元で再現するには:
+//
+//   PKC3_CHROMIUM=/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell \
+//     npx playwright test --config tests/smoke/playwright.config.ts
+//
+// ⚠ 実ブラウザ依存の挙動に触れる spec を足したら、**両方**で通してから push する。
 const bundled = process.env.PKC3_CHROMIUM ?? '/opt/pw-browsers/chromium';
 const executablePath = existsSync(bundled) ? bundled : undefined;
 

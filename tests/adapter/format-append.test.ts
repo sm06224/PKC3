@@ -55,6 +55,7 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
     ...stubRevisionOps(),
     getBody: async (lid) => bodies[lid] ?? null,
     deleteEntry: async () => {},
+    setEntryParent: async () => {},
     persistEntry: async (e) => {
       persisted.push(e);
       return stubStamps();

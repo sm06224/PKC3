@@ -28,6 +28,25 @@ export interface MarkdownImportDeps {
   notify?(message: string): void;
   /** **注意の全件**を渡す(1 行の status には埋もれる)。 */
   report?(notes: readonly string[]): void;
+  /**
+   * 🔴 **取り込んだノートを画面に出す**(2026-08-05、user 報告
+   * 「開いたら何も起きずに終わる」)。
+   *
+   * 直す前はここが無く、`reload()` して件数を出すだけだった ── 新しい entry は
+   * 一覧の**末尾**に足されるので、蔵書が数十件あると**画面の外**に居る。
+   * user から見ると「開いたのに何も起きない」で、唯一の反応が
+   * 左下 12px の「取込完了: 1 件」だった(実測)。
+   */
+  focus?(lid: string): void;
+  /**
+   * 🔴 **どのファイルがどの lid になったか**(2026-08-05、user 報告
+   * 「スポットの編集プレビュー導線も存在しない」)。⚠ 順序は **`files` と同じ**。
+   *
+   * 受け口(`launchQueue`)は `FileSystemFileHandle` を持っているが、取込の規則は
+   * それを知る必要が無い ── だから handle を通さず「**何番目が何になったか**」
+   * だけを返す。紐づけは呼び出し側(`main.ts`)が持つ。
+   */
+  imported?(lids: readonly string[]): void;
 }
 
 /**
@@ -88,6 +107,11 @@ export async function importMarkdownFiles(
   }
 
   await deps.reload();
+  // ⚠ **最後の 1 件**を開く。複数選んだときに 1 件目を開くと、user が最後に
+  //    指した物と食い違う(picker の並びと OS の launch の並びは同じ)
+  const last = rows[rows.length - 1];
+  if (last) deps.focus?.(last.lid);
+  deps.imported?.(rows.map((r) => r.lid));
   deps.report?.(notes);
   deps.notify?.(
     notes.length > 0

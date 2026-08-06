@@ -116,3 +116,85 @@ export function resolveFilerScope(
   if (selected.archetype === 'folder') return selected;
   return getAncestorFolders(selectedLid, metas, relations)[0] ?? null;
 }
+
+/** 移動先の候補 1 件(`depth` は字下げ表示用、`path` は取り違え防止の全体像)。 */
+export interface FolderPath {
+  lid: string;
+  title: string;
+  /** ルートからの深さ(0 = ルート直下)。 */
+  depth: number;
+  /** `仕事 / 資料` のような道。⚠ **同名フォルダの取り違え**はこれで防ぐ。 */
+  path: string;
+}
+
+/**
+ * すべての folder を「ルートからの道」つきで、**画面に並ぶ順**(深さ優先・
+ * 各段は entryOrder 順)で列挙する。
+ *
+ * ⚠ **輪の中に居る folder も必ず出す**。木から辿れないからと落とすと、
+ * その folder は移動先に選べず、中身を出すことも入れることもできない
+ * ── 壊れたデータを**直せない**状態に固定してしまう。
+ */
+export function listFolderPaths(
+  metas: ReadonlyMap<string, EntryMeta>,
+  relations: readonly Relation[],
+): FolderPath[] {
+  const parentOf = resolveCanonicalParents(metas, relations);
+  const folders: EntryMeta[] = [];
+  for (const m of metas.values()) if (m.archetype === 'folder') folders.push(m);
+
+  const byParent = new Map<string | null, EntryMeta[]>();
+  for (const f of folders) {
+    // ⚠ 親の正しさの判定は `resolveCanonicalParents` に一本化されている
+    //    (非 folder 親 / 不在親は既に落ちている)── ここで二重に判定しない
+    const key = parentOf.get(f.lid) ?? null;
+    const arr = byParent.get(key);
+    if (arr) arr.push(f);
+    else byParent.set(key, [f]);
+  }
+  for (const arr of byParent.values()) arr.sort((a, b) => a.entryOrder - b.entryOrder);
+
+  const out: FolderPath[] = [];
+  const seen = new Set<string>();
+  const walk = (parent: string | null, depth: number, prefix: string): void => {
+    for (const f of byParent.get(parent) ?? []) {
+      if (seen.has(f.lid)) continue; // 輪の防御(自己辺は resolveCanonicalParents が落とす)
+      seen.add(f.lid);
+      const path = prefix === '' ? f.title : `${prefix} / ${f.title}`;
+      out.push({ lid: f.lid, title: f.title, depth, path });
+      walk(f.lid, depth + 1, path);
+    }
+  };
+  walk(null, 0, '');
+  for (const f of folders) {
+    if (!seen.has(f.lid)) out.push({ lid: f.lid, title: f.title, depth: 0, path: f.title });
+  }
+  return out;
+}
+
+/**
+ * `lid` の移動先になれる folder の一覧。
+ *
+ * ⚠ **自分自身と、自分の子孫を除く** ── 入れると輪ができて木でなくなり、
+ * その枝がまるごとどの画面からも見えなくなる(reducer 側にも同じ判定があるが、
+ * こちらは「そもそも選ばせない」ための一覧 ── 押してから黙って断られるのは
+ * 「無言の操作拒否」になる)。
+ */
+export function listMoveTargets(
+  lid: string,
+  metas: ReadonlyMap<string, EntryMeta>,
+  relations: readonly Relation[],
+): FolderPath[] {
+  const parentOf = resolveCanonicalParents(metas, relations);
+  const isSelfOrUnder = (candidate: string): boolean => {
+    const seen = new Set<string>();
+    let cur: string | undefined = candidate;
+    while (cur !== undefined && !seen.has(cur)) {
+      if (cur === lid) return true;
+      seen.add(cur);
+      cur = parentOf.get(cur);
+    }
+    return false;
+  };
+  return listFolderPaths(metas, relations).filter((f) => !isSelfOrUnder(f.lid));
+}

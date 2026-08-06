@@ -168,6 +168,8 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'launch-asset': 'play',
   /** 素のまま起動(同一オリジン)── 地球で「外の決まりで動く」を示す。 */
   'launch-asset-raw': 'globe',
+  /** 元の md へ書き戻す(2026-08-05)。⚠ **外へ出す**向きなので書出しと同じ図案。 */
+  'write-back-file': 'arrow-out',
 };
 
 /**

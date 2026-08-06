@@ -41,10 +41,22 @@
  * | ② 相対 URL が全滅 | `baseURI` が `blob:…`(opaque path)で `new URL(rel, base)` が `TypeError` | `<base>` を焼く |
  * | ③ クリップボードが無反応 | permissions policy(origin とは無関係) | `allow="clipboard-write"` |
  *
- * ⚠ **①は「router が死ぬ」ではない**。`history.pushState` は carve-out で、
- * **解決後の URL が document URL と fragment 以外で一致すれば通る**。
- * `<base>` があれば hash router(React Router 6 / vue-router 4)は無改造で動く
- * ── 逆に `<base>` が無いと HashRouter でも「押しても画面が変わらない」。
+ * 🔴 **④ ページ内リンクでアプリが消える**(2026-08-05 に発覚。調査 doc 1-7)。
+ * `<base>` を焼いた副作用で、`<a href="#sec">` が `…/pkc3-app/#sec` に解決され、
+ * document URL(`about:srcdoc`)と別文書なので**本当に遷移する** ── 行き先は
+ * SPA fallback の PKC3 index.html で、不透明オリジンでは起動できず真っ白になる。
+ * **JS を 1 行も使わないアプリでも起きる。** 手当ては `app-anchor-shim.ts`
+ * (ページ内リンクだけを prelude で捌く)。
+ *
+ * ⚠ **かつてここに「`<base>` があれば hash router は無改造で動く」と書いていたが、
+ * これは誤りである**(2026-08-05 訂正)。`history.pushState` の carve-out は
+ * 「解決後の URL が document URL と fragment 以外で一致する」ことを要求するが、
+ * `<base>` を焼くと相対 URL は **base**(`…/pkc3-app/`)へ解決されるので
+ * document URL(`about:srcdoc`)と一致せず **SecurityError** になる ──
+ * つまり **pushState を使う hash router は動かない**。当時の smoke は
+ * 「絶対 URL を渡す書き方」しか踏んでおらず、その 1 通りだけが通るので
+ * 空振りしていた。⚠ ここを直すには `srcdoc` をやめて**実 URL で配る**必要があり、
+ * それは調査 doc §8-1 の裁定事項(未着手)である。
  * ⚠ path モードの router は動かないが、これは **`allow-same-origin` を足しても
  * 同じ**(document URL が `about:srcdoc` である以上 path は持てない)── 隔離の
  * 代償ではないので、オプトインでは買えない。
@@ -63,6 +75,7 @@ import {
   insertPrelude,
   appStoragePrefix,
 } from './app-storage-shim';
+import { buildAnchorShim } from './app-anchor-shim';
 
 /**
  * 添付に許す権限。**`allow-same-origin` は絶対に入れない**
@@ -211,9 +224,14 @@ export function buildLauncherAppShell(
   // ⚠ 素のままでは shim を入れない(本物が生きているので差し替え不要)
   const lends = !raw && opts.appId !== undefined && opts.appId !== '';
   // 🔴 prelude は **`<!doctype>` の直後**(先頭に前置すると quirks mode に落ちる)
+  // 🔴 **ページ内リンクの手当ては常に入れる**(2026-08-05、調査 doc 1-7)──
+  //    `<a href="#sec">` を押すと base で `…/pkc3-app/#sec` に解決されて
+  //    **本当に遷移し**、SPA fallback の PKC3 index.html が来て真っ白になる。
+  //    保存領域を貸すかどうか・素のままかどうかとは無関係に起きる
+  const withAnchors = insertPrelude(html, buildAnchorShim());
   const inner = lends
-    ? insertPrelude(html, buildStorageShim({ seed: opts.seed ?? {} }))
-    : html;
+    ? insertPrelude(withAnchors, buildStorageShim({ seed: opts.seed ?? {} }))
+    : withAnchors;
 
   const head =
     '<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8">' +

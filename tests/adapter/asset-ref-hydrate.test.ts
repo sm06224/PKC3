@@ -47,6 +47,7 @@ function setup(bodies: Record<string, string>, lender: AssetLender) {
     getBody: async (lid) => bodies[lid] ?? null,
     persistEntry: async () => stubStamps(),
     deleteEntry: async () => {},
+    setEntryParent: async () => {},
   });
   d.dispatch({
     type: 'SYS_BOOTED',
@@ -179,6 +180,7 @@ describe('借りた URL の寿命(同一ノートの差し替え)', () => {
       getBody: async () => '一行目\n\n![画像](asset:k1)\n',
       persistEntry: async () => stubStamps(),
       deleteEntry: async () => {},
+    setEntryParent: async () => {},
     });
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('e1')], relations: [] });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
@@ -240,6 +242,7 @@ describe('借りた URL の寿命(同一ノートの差し替え)', () => {
       getBody: async () => body(''),
       persistEntry: async () => stubStamps(),
       deleteEntry: async () => {},
+    setEntryParent: async () => {},
     });
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('e1')], relations: [] });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
