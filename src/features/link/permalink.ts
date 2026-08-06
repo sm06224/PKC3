@@ -1,7 +1,7 @@
 /**
  * PKC Link — pure helpers for the 3 reference forms.
  *
- * Spec: docs/spec/pkc-link-unification-v0.md (post-correction).
+ * Spec: PKC2: docs/spec/pkc-link-unification-v0.md (post-correction).
  *
  * The link layer separates **3 reference forms** (spec §3):
  *

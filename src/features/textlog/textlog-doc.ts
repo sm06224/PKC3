@@ -4,7 +4,7 @@
  * This module is the source of truth for every TEXTLOG surface:
  * live viewer, rendered viewer, print, HTML download, and
  * transclusion all derive from `buildTextlogDoc()` (see
- * `docs/development/textlog-viewer-and-linkability-redesign.md`).
+ * `PKC2: docs/development/textlog-viewer-and-linkability-redesign.md`).
  *
  * Slice 1 scope:
  * - Types only (no DOM).

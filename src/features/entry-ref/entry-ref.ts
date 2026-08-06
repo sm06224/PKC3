@@ -1,7 +1,7 @@
 /**
  * `entry:` scheme parser / formatter.
  *
- * See `docs/development/textlog-viewer-and-linkability-redesign.md`
+ * See `PKC2: docs/development/textlog-viewer-and-linkability-redesign.md`
  * §4.5 and §6.5 for the full grammar. Short form:
  *
  *   entry:<lid>

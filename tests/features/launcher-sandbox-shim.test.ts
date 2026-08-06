@@ -86,6 +86,20 @@ describe('無い能力の shim(実行)', () => {
     expect(line()?.textContent).toContain('Cache API');
   });
 
+  /**
+   * ⚠ これは「落ちた」ではなく**お知らせ**である ── 能力を見て代替へ落ちる
+   * アプリ(localforage 型)は正常に動いているのに、帯がその画面を覆い続ける。
+   */
+  it('🔴 押すと閉じる(正常に動いているアプリを覆い続けない)', () => {
+    sandbox(window, 'indexedDB');
+    runShim();
+    void (window as { indexedDB?: unknown }).indexedDB;
+    const el = line()!;
+    expect(el.textContent).toContain('押すと閉じます');
+    el.dispatchEvent(new Event('click', { bubbles: true }));
+    expect(line(), '押しても閉じない').toBeNull();
+  });
+
   it('同じものを 2 回触っても名前が重複しない', () => {
     sandbox(window, 'indexedDB');
     runShim();
@@ -121,14 +135,43 @@ describe('無い能力の shim(実行)', () => {
    * ⚠ **読めるものは触らない**。素のまま(同一オリジン)で開いたときに
    * 差し替えると、**本物の IndexedDB を奪う**ことになる。
    */
-  it('🔴 本物が読める環境では 1 つも差し替えない', () => {
-    const real = { open: () => 'real' };
+  it('🔴 本物が使える環境では 1 つも差し替えない', () => {
+    // ⚠ stub は**本物の意味論を真似る** ── `deleteDatabase` を持たない偽物を
+    //    置くと probe が TypeError で落ち、「使えない」と誤判定される
+    const real = { open: () => 'real', deleteDatabase: () => 'deleted' };
     Object.defineProperty(window, 'indexedDB', { configurable: true, value: real });
     touched.push([window, 'indexedDB']);
     runShim();
     expect((window as { indexedDB?: unknown }).indexedDB, '本物を奪った').toBe(real);
     void (window as { indexedDB?: unknown }).indexedDB;
-    expect(line(), '読めているのに 1 行出した').toBeNull();
+    expect(line(), '使えているのに 1 行出した').toBeNull();
+  });
+
+  /**
+   * 🔴 **読めるのに使えない**ものがある(2026-08-06 の実測)。
+   *
+   * 不透明オリジンの `indexedDB` は**プロパティ読みでは投げない**ので、
+   * `if (window.indexedDB)` は**真**になる ── そのまま `.open()` を呼んで
+   * **1 行目で死ぬ**。読みだけ守る手当てでは、この形が丸ごと素通りする。
+   */
+  it('🔴 読めるのに使えないものは「無い」にする(触ってみて判定する)', () => {
+    const unusable = {
+      open() {
+        throw new Error('SecurityError: access denied');
+      },
+      deleteDatabase() {
+        throw new Error('SecurityError: access denied');
+      },
+    };
+    Object.defineProperty(window, 'indexedDB', { configurable: true, value: unusable });
+    touched.push([window, 'indexedDB']);
+    expect(() => (window as { indexedDB?: unknown }).indexedDB, '前提: 読みは通る').not.toThrow();
+    runShim();
+    expect(
+      (window as { indexedDB?: unknown }).indexedDB,
+      '読めるから素通りした(能力を見るアプリは真と読んで .open で死ぬ)',
+    ).toBeUndefined();
+    expect(line()?.textContent).toContain('IndexedDB');
   });
 
   it('アプリの変数を汚さない(即時関数で閉じる)', () => {

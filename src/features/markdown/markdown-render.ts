@@ -91,10 +91,10 @@ md.use(footnotePlugin);
 // https://learn.microsoft.com/office/client-developer/office-uri-schemes
 
 // `entry:` is PKC2's internal cross-entry link scheme (see
-// `docs/development/textlog-viewer-and-linkability-redesign.md` §6.5
+// `PKC2: docs/development/textlog-viewer-and-linkability-redesign.md` §6.5
 // and `src/features/entry-ref/entry-ref.ts`). `pkc:` is the external
 // shareable permalink scheme defined by
-// `docs/spec/pkc-link-unification-v0.md` §4. Both schemes are on the
+// `PKC2: docs/spec/pkc-link-unification-v0.md` §4. Both schemes are on the
 // safe allowlist so markdown-it emits the `<a>` at all; the link_open
 // rule below then tags them for the right in-app behaviour (internal
 // navigation for `entry:`, cross-container placeholder for `pkc:`).
@@ -474,7 +474,7 @@ export function makeSourceLineAttrs(
  * — that primitive is reusable by future non-markdown-it renderers
  * (領域 10-3 IR, PKC-Message extension dispatch, etc.).
  *
- * See `docs/development/markdown-render-scope.md` §「拡張時の
+ * See `PKC2: docs/development/markdown-render-scope.md` §「拡張時の
  * source-line anchor 規約」for the full extension contract.
  */
 export function collectSourceLineAttrs(token: Token): string {
@@ -1344,7 +1344,7 @@ function postProcessVariableUndefined(html: string): string {
 // slug-collision scope — click handlers disambiguate cross-log-entry
 // id collisions by scoping the DOM lookup to the owning log row.
 //
-// See `docs/development/table-of-contents-right-pane.md`.
+// See `PKC2: docs/development/table-of-contents-right-pane.md`.
 
 md.renderer.rules.heading_open = function (tokens, idx, options, env, self) {
   const token = tokens[idx]!;
@@ -1361,7 +1361,7 @@ md.renderer.rules.heading_open = function (tokens, idx, options, env, self) {
   return self.renderToken(tokens, idx, options);
 };
 
-// ── Card presentation placeholder (Slice 2, docs/spec/card-embed-presentation-v0.md §5) ──
+// ── Card presentation placeholder (Slice 2, PKC2: docs/spec/card-embed-presentation-v0.md §5) ──
 //
 // Detect the `@[card](<target>)` (and `@[card:<variant>](<target>)`)
 // notation and emit a minify-safe placeholder span that a future
@@ -1904,7 +1904,7 @@ function processFigureRefs(source: string, registry: Map<string, FigEntry>): str
 // Pandoc-style attribute syntax で複数 embed を 1 つの引用 block に纏める形。
 // 学術 / 法律 / 報道で「同じ著者の複数文献を共通 attribution でまとめて引用」
 // 用途を想定。設計詳細は
-// `docs/development/notation-redesign-2026-05/03-link-embed-card.md` §3.5.2。
+// `PKC2: docs/development/notation-redesign-2026-05/03-link-embed-card.md` §3.5.2。
 //
 // 実装:figure と同じ sentinel pattern。U+E150 / U+E151 を sentinel に使用、
 // markdown-it `html: false` を回避。registry に attrs を保存、post-process で
@@ -4248,8 +4248,9 @@ export function renderMarkdown(
   // 強制挿入して structural separation を取る。AST 経路(`parse.ts`)では
   // PR-W24 v3 で既に同等処理を入れていたが、center pane / Viewer / Split View
   // 経路にも対称に適用するため `colon-block-normalize.ts` から共有 utility
-  // を import。詳細 background は同 module + `docs/development/
-  // bug-section-blockquote-lazy-continuation-2026-05-18.md` 参照。
+  // を import。詳細 background は同 module のコメントを参照
+  // (⚠ かつてここは PKC2 の調査 doc を指していたが、その doc は PKC2 にも
+  //  残っていない ── 壊れた導線を置かない。事実は module 側に書いてある)。
   // **本 normalize は admonition alias rewrite(`:::note` → `:::section`)の
   // **後** に走らせる**:rewrite で新たに生まれた `:::` 行も対象にするため。
   // **本 normalize は processBlankLineMarkers / processFigureBlocks /

@@ -100,7 +100,7 @@ export function deleteLogEntry(body: TextlogBody, entryId: string): TextlogBody 
  * the app's date formatting conventions.
  *
  * Seconds are included so high-frequency log entries are visually
- * distinguishable (see `docs/development/textlog-readability-hardening.md`).
+ * distinguishable (see `PKC2: docs/development/textlog-readability-hardening.md`).
  *
  * **Scope**: this formatter is for **UI display only**. Export / copy
  * paths (CSV `timestamp_display`, Copy Reference labels) emit the raw

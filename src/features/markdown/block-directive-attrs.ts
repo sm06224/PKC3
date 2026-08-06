@@ -15,7 +15,7 @@
  *   - `#id`                ── id 指定(slug-safe な英字 / 数字 / `-` / `_`)
  *   - `.class`             ── class 指定(同上)
  *
- * 設計詳細は `docs/development/notation-redesign-2026-05/01-notation-catalog.md`
+ * 設計詳細は `PKC2: docs/development/notation-redesign-2026-05/01-notation-catalog.md`
  * §1.2.4 / §1.2.5 + §1.3.2 を参照。
  */
 

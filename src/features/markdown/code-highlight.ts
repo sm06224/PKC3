@@ -4,7 +4,7 @@
  *
  * Features layer — pure function, no browser APIs.
  *
- * Design goals (see docs/development/markdown-code-block-highlighting.md):
+ * Design goals (see PKC2: docs/development/markdown-code-block-highlighting.md):
  *   - Single-HTML product: no external CDN, no runtime loader.
  *   - Small bundle: ~8KB uncompressed for the 9 supported languages
  *     is cheaper than the ~100KB a subsetted highlight.js would cost.

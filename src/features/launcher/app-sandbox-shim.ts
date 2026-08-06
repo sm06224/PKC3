@@ -1,14 +1,39 @@
 /**
  * 🔴 **囲いの中で「無い能力」を、投げずに・黙らずに見せる**(2026-08-06。user 報告 2-15)。
  *
- * 調査で測ったもの ── 不透明オリジン(allow-same-origin 無し)では
- * `indexedDB` / `document.cookie` / `caches` / `navigator.storage` /
- * `navigator.serviceWorker` が **プロパティを読むだけで同期に `SecurityError`**
- * を投げる。`try/catch` を書いていない普通のアプリは **1 行目で止まる**。
- *
  * `localStorage` は既に差し替えてある(`app-storage-shim.ts` が**本当に貸している**)。
  * 例外が出たあとの 1 行も既にある(`app-anchor-shim.ts` の `say()`)。
- * 残っていたのは**その手前** ── 上の 5 つで、投げること自体を止める手当てである。
+ * 残っていたのは**その手前** ── 投げること自体を止める手当てである。
+ *
+ * ## 🔴 実測(2026-08-06。フル Chromium / 親は `http://localhost` = secure context)
+ *
+ * 調査 doc は「5 つとも**プロパティ読みで**投げる」と書いていたが、**測ったら違った**
+ * ── 読みで投げるものと、**読めるのに使えない**ものが混在している:
+ *
+ * | | 読む | 使う |
+ * |---|---|---|
+ * | `indexedDB` | ok | `.open()` / `.deleteDatabase()` が **SecurityError** |
+ * | `caches` | **SecurityError** | ─ |
+ * | `navigator.serviceWorker` | **SecurityError** | ─ |
+ * | `document.cookie` | **SecurityError**(読み・書き両方) | ─ |
+ * | `navigator.storage` | ok | `getDirectory()` は ok(**promise が reject**) |
+ * | `localStorage` | **SecurityError** | ─(別 module が貸している) |
+ *
+ * ⚠ 対照群(同一オリジンの親そのもの)は **12 項目すべて ok** ── 上の throw は
+ *   隔離に由来する。⚠ 最初の計測は親を `about:blank` にしてしまい、
+ *   `caches` が「非セキュアコンテキストなので単に無い」に化けて**読みが ok に
+ *   見えた** ── 環境の性質を実装の挙動と読み違えないこと。
+ *
+ * この表から手当ての形が決まる:
+ * - **読みで投げるもの**(`caches` / `serviceWorker` / `cookie`)→ getter を差し替える
+ * - **読めるのに使えないもの**(`indexedDB`)→ **使ってみて**判定する。
+ *   ⚠ 能力を見るアプリ(`if (window.indexedDB)`)は**真と読んでしまう**ので、
+ *   読みだけ守っても `.open()` で 1 行目から死ぬ。probe は `deleteDatabase` に
+ *   する ── 存在しない名前への削除は同一オリジンでは**副作用の無い成功**で、
+ *   囲いの中では投げる(= 判別できる。上の実測がそれを示している)
+ * - **reject で返るもの**(`navigator.storage`)→ 触らない。promise は catch できる
+ *   ので「1 行目で死ぬ」形ではない(表に残すのは、将来 throw に変わったら
+ *   同じ道で拾えるようにするため)
  *
  * ## 方針
  * 1. **実装はしない**(IndexedDB を真似ない ── 新機能を盛り込みすぎない)。
@@ -59,22 +84,25 @@ const SOURCE = `
       line.setAttribute('data-pkc-field', 'app-capability');
       // ⚠ 例外の行は下端なので、こちらは**上端**(重ねない)
       line.style.cssText = 'position:fixed;left:0;right:0;top:0;margin:0;padding:6px 10px;' +
-        'font:12px/1.5 system-ui,sans-serif;background:#3a3320;color:#f0e6c8;z-index:2147483646';
+        'font:12px/1.5 system-ui,sans-serif;background:#3a3320;color:#f0e6c8;z-index:2147483646;' +
+        'cursor:pointer';
+      // 🔑 **閉じられるようにする**。これは「落ちた」ではなく**お知らせ**である ──
+      //    能力を見て代替へ落ちるアプリ(よくある形)は正常に動いているのに、
+      //    帯がその画面を覆い続ける。⚠ 押す先はアプリの UI ではなくこの帯だけ
+      line.title = '押すと閉じます';
+      line.addEventListener('click', function () {
+        if (line && line.parentNode) line.parentNode.removeChild(line);
+      });
       host.appendChild(line);
     }
     var names = [];
     for (var i = 0; i < touched.length; i++) names.push(labels[touched[i]] || touched[i]);
     // ⚠ **1 枚を書き換える**(足すたびに行を増やさない ── 画面が埋まる)
     line.textContent =
-      'このアプリは ' + names.join(' / ') + ' を使おうとしましたが、囲いの中では使えません';
+      'このアプリは ' + names.join(' / ') + ' を使おうとしましたが、囲いの中では使えません' +
+      '(押すと閉じます)';
   }
-  // ⚠ **読めるものは触らない**(素のまま = 同一オリジンで開いた場合)。
-  //    投げるときだけ差し替える(app-storage-shim.ts と同じ判定の形)。
-  function absent(host, name) {
-    try {
-      void host[name];
-      return; // 読めた ── 本物が生きている
-    } catch (e) { /* ここへ来るのが囲いの中 */ }
+  function hide(host, name) {
     try {
       Object.defineProperty(host, name, {
         configurable: true,
@@ -86,7 +114,29 @@ const SOURCE = `
       });
     } catch (e) { /* 差し替えられなくても、アプリは壊さない */ }
   }
-  absent(window, 'indexedDB');
+  // ⚠ **使えるものは触らない**(素のまま = 同一オリジンで開いた場合)。
+  //    ⚠ 判定は 2 段 ── 読めない / 読めるが使えない。実測の表(上の TSDoc)より、
+  //    IndexedDB は**読めるのに使えない**ので、読みだけ見ると素通りする。
+  function absent(host, name, use) {
+    var value;
+    try {
+      value = host[name];
+    } catch (e) {
+      hide(host, name); // 読みで投げる(caches / serviceWorker)
+      return;
+    }
+    if (!use || value === undefined || value === null) return;
+    try {
+      use(value);
+    } catch (e2) {
+      hide(host, name); // 読めるが使えない(indexedDB)
+    }
+  }
+  absent(window, 'indexedDB', function (idb) {
+    // ⚠ **副作用の無い probe を選ぶ** ── 存在しない名前への削除は同一オリジンでは
+    //    ただ成功する(DB を作らない)。open は作ってしまうので使わない
+    idb.deleteDatabase('pkc3-capability-probe');
+  });
   absent(window, 'caches');
   absent(navigator, 'storage');
   absent(navigator, 'serviceWorker');

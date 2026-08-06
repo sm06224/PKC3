@@ -21,7 +21,7 @@
  *   - Power user:本 file を fork 編集 + rebuild、HARD 値も書き換え可能
  *     (self-build territory、security guarantee は spec 固定値で保証されたもの)
  *
- * 設計詳細は `docs/development/notation-redesign-2026-05/07-security-stance.md` §7.2 参照。
+ * 設計詳細は `PKC2: docs/development/notation-redesign-2026-05/07-security-stance.md` §7.2 参照。
  *
  * features 層に置かない理由:cap は cross-feature(frontmatter / markdown / embed /
  * renderers 全部に適用)+ runtime resolvable(Flags / frontmatter から override)+
