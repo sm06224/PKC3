@@ -117,12 +117,31 @@ export function buildHtmlSandboxIframe(
     '}' +
     "window.addEventListener('load',post);" +
     'setTimeout(post,100);setTimeout(post,500);' +
-    // 🔴 **止めた画像の件数を親へ申告する**(2026-08-06)。
-    //    箱の中身は script なので「外部画像を出すか」は描く前には判らない ──
-    //    実際に CSP が止めた瞬間だけが確かな材料である。これが無いと
-    //    「常に確認」で箱の画像を**同意する手段が無い**(帯が出ない)。
-    //    ⚠ 件数だけ送る(止められた URL は本文の秘密を含む)。
-    //    ⚠ 1 枚ごとに送らない ── 100 枚の箱で 100 通飛ぶ。まとめて 1 通。
+    '})();</script>';
+
+  /**
+   * 🔴 **止めた画像の件数を親へ申告する**(2026-08-06)。
+   *
+   * 箱の中身は script なので「外部画像を出すか」は描く前には判らない ── 実際に
+   * CSP が止めた瞬間だけが確かな材料である。これが無いと「常に確認」で箱の画像を
+   * **同意する手段が無い**(帯が出ない)。
+   * ⚠ 件数だけ送る(止められた URL は本文の秘密を含む)。
+   * ⚠ 1 枚ごとに送らない ── 100 枚の箱で 100 通飛ぶ。まとめて 1 通。
+   *
+   * 🔴 **見張りは `<head>` に置く ── user の中身より前に登録しなければならない**
+   * (2026-08-07。CI が 3 回に 1 回赤くなって判明)。かつては下の resize script と
+   * 一緒に **body の末尾**、つまり `content` の**後ろ**に置いていた。
+   * `<script>new Image().src='https://…'</script>` のように**解析中に**画像を
+   * 要求する中身では、違反がこの listener の登録より**先**に起きうる ──
+   * 起きる順は実装依存なので、**同じ入力で出たり出なかったりする**。
+   * 実測: `chromium_headless_shell` で 3 回に 1 回、帯が出なかった。
+   * ⚠ これは test の flake ではなく**製品の穴**である ── 帯が出なければ、
+   *   その箱の画像は**二度と同意できない**。
+   * ⚠ CSP の `<meta>` より**後**に置く(前に置くと方針が効く前に script が走る)。
+   */
+  const violationScript =
+    '<script>(function(){' +
+    'var id=' + JSON.stringify(iframeId) + ';' +
     'var blocked=0,timer=0;' +
     "document.addEventListener('securitypolicyviolation',function(ev){" +
     "if(ev.effectiveDirective!=='img-src'&&ev.violatedDirective!=='img-src')return;" +
@@ -139,6 +158,8 @@ export function buildHtmlSandboxIframe(
     '<meta name="viewport" content="width=device-width, initial-scale=1">' +
     '<meta http-equiv="Content-Security-Policy" content="' +
     cspContent.replace(/"/g, '&quot;') + '">' +
+    // ⚠ **content より前**(上の violationScript の注記を読むこと)
+    violationScript +
     '<style>' +
     'body{margin:0;padding:0.5rem;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;line-height:1.5;color:#222;}' +
     '*{box-sizing:border-box;}' +
