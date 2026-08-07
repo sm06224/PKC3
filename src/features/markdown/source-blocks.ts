@@ -23,6 +23,11 @@
  * ✅ **id 無しの `:::figure` も 2026-08-06 に直した**(user 報告 minor)── 以前は
  * ここに挙げていた食い違いの実例だったが、いまは畳むので**開く**。
  *
+ * ✅ **Tier 1(`:::.hl` / `::: {.hl}` / `::: bareCls`)も 2026-08-07 に直した** ──
+ * `:::` の直後が英字でないので走査器が**見落としていた**のに renderer は畳むので、
+ * 釣り合いが崩れて全文の入力欄へ落ちていた(catalog の simple 列の記法である)。
+ * 名前の表ではなく**形**を足したので、下の規則(表を持ち込まない)は保っている。
+ *
  * ⚠ **それでも食い違う形は残っている**:renderer が畳むのは**知っている名前だけ**
  * なので、`:::unknown-thing` のような名前 / `{id="あ"}` のように使えない id を
  * 書いた figure は literal のまま残る。
@@ -51,7 +56,29 @@ const SELF_CONTAINED_DIRECTIVES: ReadonlySet<string> = new Set(['toc']);
 
 const FENCE_OPEN = /^(\s*)(`{3,}|~{3,})(.*)$/;
 const DIRECTIVE_OPEN = /^:::([A-Za-z][\w-]*)/;
+/**
+ * 🔴 **名前を持たない開き**(Tier 1。class chain と pandoc の fenced div)。
+ *
+ * `:::.hl` / `:::.a.b#id` / `:::{.hl}` / `::: {#id .a}` / `::: bareCls` ──
+ * `:::` の直後が英字でないので上の `DIRECTIVE_OPEN` に**一致しない**。
+ * ところが **renderer はこの 7 形すべてを 1 塊に畳む**(2026-08-07 実測)ので、
+ * 走査器が見落とすと「塊 1 個に対して範囲が余った」で釣り合いが崩れ、
+ * ライブエディタが**全文の入力欄へ落ちる**(記法は catalog の simple 列である)。
+ *
+ * ⚠ **ここでも名前の表は持たない**(このヘッダの規則)── 見るのは **形だけ**。
+ *   「renderer が畳む名前の集合」を持ち込むと判定が 2 か所になる。
+ * ⚠ 閉じ(`:::` だけの行)には一致しない ── どの枝も中身を必ず 1 文字以上要求する。
+ */
+const DIRECTIVE_OPEN_TIER1 = /^:::(?:\s*\{[^}]*\}|\s*\.[\w.#-]+|\s+[A-Za-z][\w-]*)\s*$/;
 const DIRECTIVE_CLOSE = /^:::\s*$/;
+
+/** `:::` の開きか(名前つき / Tier 1 のどちらでも)。名前が無い形は `''` を返す。 */
+function directiveOpenName(line: string): string | null {
+  const named = DIRECTIVE_OPEN.exec(line);
+  if (named) return named[1]!;
+  if (DIRECTIVE_OPEN_TIER1.test(line)) return line.slice(3).trim();
+  return null;
+}
 
 /**
  * 最上位の囲いを文書順に返す。**入れ子は外側だけ**を返す
@@ -83,9 +110,8 @@ export function scanContainers(text: string): ContainerSpan[] {
       i = end + 1;
       continue;
     }
-    const dir = DIRECTIVE_OPEN.exec(line);
-    if (dir) {
-      const name = dir[1]!;
+    const name = directiveOpenName(line);
+    if (name !== null) {
       if (SELF_CONTAINED_DIRECTIVES.has(name)) {
         // 中を飲まない ── 自分の行(と、あれば直後の閉じ)だけ
         const closer = lines[i + 1];
@@ -107,8 +133,9 @@ export function scanContainers(text: string): ContainerSpan[] {
             break;
           }
         } else {
-          const inner = DIRECTIVE_OPEN.exec(l);
-          if (inner && SELF_CONTAINED_DIRECTIVES.has(inner[1]!)) {
+          // ⚠ 入れ子の数えも**同じ判定**を使う(Tier 1 の入れ子で深さを取りこぼさない)
+          const inner = directiveOpenName(l);
+          if (inner !== null && SELF_CONTAINED_DIRECTIVES.has(inner)) {
             /**
              * 🔴 **中を飲まない directive の「閉じ」は、その directive のもの**
              * (2026-08-05 実測)。`:::section` の中に `:::toc` / `:::` が在ると、
@@ -118,7 +145,7 @@ export function scanContainers(text: string): ContainerSpan[] {
              */
             const after = lines[j + 1];
             if (after !== undefined && DIRECTIVE_CLOSE.test(after)) j += 1;
-          } else if (inner) {
+          } else if (inner !== null) {
             depth += 1;
           }
         }
