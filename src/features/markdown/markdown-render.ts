@@ -1360,11 +1360,25 @@ function findMatchingClose(lines: readonly string[], from: number): number | nul
 function scanContainerDirective<T>(
   source: string,
   lineMapIn: number[],
+  /**
+   * 🔴 **本文にこれが 1 度も出てこないなら、段ごと素通りする**(2026-08-07)。
+   *
+   * ⚠ **素通りは「出力を 1 バイトも変えない」ことが条件**である。この走査は
+   * 自分の開きが 1 つも無ければ**全行をそのまま流す**だけなので、素通りと
+   * 完全に同じ結果になる(lineMap も入力のまま)。
+   * ⚠ 目印は**広い側**に取る ── 狭すぎると、その記法が黙って効かなくなる。
+   *   例: 装飾箱は `:::format` / Tier 0(`:::red`)/ Tier 1(`:::.hl`)の 3 形が
+   *   あるので、目印は共通の `:::` にする。
+   */
+  marker: string,
   sentinelOpen: string,
   sentinelSep: string,
   /** 自分が畳む開きなら registry へ入れる値を、そうでなければ null を返す。 */
   match: (line: string) => T | null,
 ): { transformed: string; registry: Map<number, T>; lineMap: number[] } {
+  if (!source.includes(marker)) {
+    return { transformed: source, registry: new Map(), lineMap: lineMapIn };
+  }
   const registry = new Map<number, T>();
   const lines = source.split('\n');
   const out: string[] = [];
@@ -1539,6 +1553,12 @@ const VAR_SEP = '\u{E141}';
 
 function expandVarsInText(source: string, vars: Record<string, string>): string {
   if (!source) return source;
+  /**
+   * 🔴 **本文に目印が無いなら段ごと素通りする**(2026-08-07)。出力は 1 バイトも
+   * 変わらない ── この段は目印が 1 つも無ければ全行をそのまま流すだけである。
+   * ⚠ 目印は**広い側**に取る(狭すぎるとその記法が黙って効かなくなる)。
+   */
+  if (!source.includes('{{')) return source;
   const lines = source.split('\n');
   let fence: FenceState = { inFence: false, marker: '' };
   return lines.map((line) => {
@@ -2006,6 +2026,12 @@ function processFigureBlocks(source: string, lineMapIn: number[]): {
   registry: Map<string, FigEntry>;
   lineMap: number[];
 } {
+  /**
+   * 🔴 **本文に目印が無いなら段ごと素通りする**(2026-08-07)。出力は 1 バイトも
+   * 変わらない ── この段は目印が 1 つも無ければ全行をそのまま流すだけである。
+   * ⚠ 目印は**広い側**に取る(狭すぎるとその記法が黙って効かなくなる)。
+   */
+  if (!source.includes(':::')) return { transformed: source, registry: new Map(), lineMap: lineMapIn };
   const registry = new Map<string, FigEntry>();
   const lines = source.split('\n');
   const out: string[] = [];
@@ -2225,6 +2251,12 @@ function processIfBlocks(source: string, lineMapIn: number[], targetFormat: stri
   transformed: string;
   lineMap: number[];
 } {
+  /**
+   * 🔴 **本文に目印が無いなら段ごと素通りする**(2026-08-07)。出力は 1 バイトも
+   * 変わらない ── この段は目印が 1 つも無ければ全行をそのまま流すだけである。
+   * ⚠ 目印は**広い側**に取る(狭すぎるとその記法が黙って効かなくなる)。
+   */
+  if (!source.includes(':::if')) return { transformed: source, lineMap: lineMapIn };
   const lines = source.split('\n');
   const out: string[] = [];
   const lineMapOut: number[] = [];
@@ -2391,6 +2423,12 @@ function processTocDirective(
   source: string,
   lineMapIn: number[],
 ): { transformed: string; lineMap: number[]; records: TocDirectiveRecord[] } {
+  /**
+   * 🔴 **本文に目印が無いなら段ごと素通りする**(2026-08-07)。出力は 1 バイトも
+   * 変わらない ── この段は目印が 1 つも無ければ全行をそのまま流すだけである。
+   * ⚠ 目印は**広い側**に取る(狭すぎるとその記法が黙って効かなくなる)。
+   */
+  if (!source.includes(':::toc')) return { transformed: source, lineMap: lineMapIn, records: [] };
   const lines = source.split('\n');
   const out: string[] = [];
   const lineMapOut: number[] = [];
@@ -2562,6 +2600,7 @@ function processRegionBlocks(source: string, lineMapIn: number[]): {
   return scanContainerDirective<RegionEntry>(
     source,
     lineMapIn,
+    ':::',
     REGION_SENTINEL_OPEN,
     REGION_SENTINEL_SEP,
     (line) => {
@@ -2628,6 +2667,7 @@ function processSectionBlocks(source: string, lineMapIn: number[]): {
   return scanContainerDirective<SectionEntry>(
     source,
     lineMapIn,
+    ':::section',
     SECTION_SENTINEL_OPEN,
     SECTION_SENTINEL_SEP,
     (line) => {
@@ -2738,6 +2778,7 @@ function processFormatBlocks(source: string, lineMapIn: number[]): {
   return scanContainerDirective<FormatBlockEntry>(
     source,
     lineMapIn,
+    ':::',
     FORMAT_SENTINEL_OPEN,
     FORMAT_SENTINEL_SEP,
     (line) => {
@@ -2870,6 +2911,7 @@ function processDetailsBlocks(source: string, lineMapIn: number[]): {
   return scanContainerDirective<DetailsEntry>(
     source,
     lineMapIn,
+    ':::details',
     DETAILS_SENTINEL_OPEN,
     DETAILS_SENTINEL_SEP,
     (line) => {
@@ -2921,6 +2963,7 @@ function processQuoteBlocks(source: string, lineMapIn: number[]): {
   return scanContainerDirective<QuoteEntry>(
     source,
     lineMapIn,
+    ':::quote',
     QUOTE_SENTINEL_OPEN,
     QUOTE_SENTINEL_SEP,
     (line) => {
@@ -3122,6 +3165,12 @@ function processParagraphAlignDirective(
   alignMap: Map<number, AlignKind>;
   lineMap: number[];
 } {
+  /**
+   * 🔴 **本文に目印が無いなら段ごと素通りする**(2026-08-07)。出力は 1 バイトも
+   * 変わらない ── この段は目印が 1 つも無ければ全行をそのまま流すだけである。
+   * ⚠ 目印は**広い側**に取る(狭すぎるとその記法が黙って効かなくなる)。
+   */
+  if (!source.includes(':::paragraph')) return { transformed: source, alignMap: new Map(), lineMap: lineMapIn };
   const lines = source.split('\n');
   const alignMap = new Map<number, AlignKind>();
   const out: string[] = [];
@@ -3384,6 +3433,17 @@ function stripComments(source: string, lineMapIn?: number[]): {
   transformed: string;
   lineMap: number[];
 } {
+  /**
+   * 🔴 **本文に目印が無いなら段ごと素通りする**(2026-08-07)。出力は 1 バイトも
+   * 変わらない ── この段は目印が 1 つも無ければ全行をそのまま流すだけである。
+   * ⚠ 目印は**広い側**に取る(狭すぎるとその記法が黙って効かなくなる)。
+   */
+  if (!source.includes('%%') && !source.includes(':::comment')) {
+    return {
+      transformed: source,
+      lineMap: lineMapIn ?? Array.from({ length: source.split('\n').length }, (_, i) => i),
+    };
+  }
   const lines = source.split('\n');
   const inMap = lineMapIn ?? Array.from({ length: lines.length }, (_, i) => i);
   const outLines: string[] = [];
@@ -3560,6 +3620,12 @@ const SECTION_SEP = '\u{E121}';
  * `:::break{...}` 行を simple 形に変換し、処理は既存 `+++` / `---` パイプに委譲。
  */
 function processBreakDirective(source: string): string {
+  /**
+   * 🔴 **本文に目印が無いなら段ごと素通りする**(2026-08-07)。出力は 1 バイトも
+   * 変わらない ── この段は目印が 1 つも無ければ全行をそのまま流すだけである。
+   * ⚠ 目印は**広い側**に取る(狭すぎるとその記法が黙って効かなくなる)。
+   */
+  if (!source.includes(':::break')) return source;
   let fence: FenceState = { inFence: false, marker: '' };
   return source.split('\n').map((line) => {
     const t = fenceTransition(line, fence);
@@ -3579,6 +3645,12 @@ function processBreakDirective(source: string): string {
 }
 
 function processSectionBreaks(source: string): string {
+  /**
+   * 🔴 **本文に目印が無いなら段ごと素通りする**(2026-08-07)。出力は 1 バイトも
+   * 変わらない ── この段は目印が 1 つも無ければ全行をそのまま流すだけである。
+   * ⚠ 目印は**広い側**に取る(狭すぎるとその記法が黙って効かなくなる)。
+   */
+  if (!source.includes('+++')) return source;
   // fenced code block 内では `+++` を marker と認識しない(2026-05-08 hotfix)。
   let fence: FenceState = { inFence: false, marker: '' };
   return source.split('\n').map((line) => {
@@ -3838,6 +3910,15 @@ function processTolerantStandaloneAlign(
   lineMapIn: number[],
   silentWarnings = false,
 ): { transformed: string; alignMap: Map<number, AlignKind>; lineMap: number[] } {
+  /**
+   * 🔴 **本文に目印が無いなら段ごと素通りする**(2026-08-07)。出力は 1 バイトも
+   * 変わらない ── この段は目印が 1 つも無ければ全行をそのまま流すだけである。
+   * ⚠ 目印は**広い側**に取る(狭すぎるとその記法が黙って効かなくなる)。
+   */
+  if (!source.includes(':align:')) {
+    void silentWarnings;
+    return { transformed: source, alignMap: new Map(), lineMap: lineMapIn };
+  }
   const alignMap = new Map<number, AlignKind>();
   const lines = source.split('\n');
   const out: string[] = [];
@@ -3999,6 +4080,15 @@ function processAdmonitionAliases(
   lineMapIn: number[],
   silentWarnings = false,
 ): { transformed: string; lineMap: number[] } {
+  /**
+   * 🔴 **本文に目印が無いなら段ごと素通りする**(2026-08-07)。出力は 1 バイトも
+   * 変わらない ── この段は目印が 1 つも無ければ全行をそのまま流すだけである。
+   * ⚠ 目印は**広い側**に取る(狭すぎるとその記法が黙って効かなくなる)。
+   */
+  if (!source.includes(':::')) {
+    void silentWarnings;
+    return { transformed: source, lineMap: lineMapIn };
+  }
   const lines = source.split('\n');
   const out: string[] = [];
   const lineMapOut: number[] = [];
@@ -4286,6 +4376,13 @@ function processBlankLineMarkers(source: string, lineMapIn: number[]): {
   transformed: string;
   lineMap: number[];
 } {
+  /**
+   * 🔴 **本文に目印が無いなら段ごと素通りする**(2026-08-07)。出力は 1 バイトも
+   * 変わらない ── この段は目印が 1 つも無ければ全行をそのまま流すだけである。
+   * ⚠ 目印は**広い側**に取る(狭すぎるとその記法が黙って効かなくなる)。
+   */
+  // ⚠ 目印は `_` 1 文字 ── 語中の `_` でも素通りしないだけで、誤りにはならない
+  if (!source.includes('_')) return { transformed: source, lineMap: lineMapIn };
   const lines = source.split('\n');
   const out: string[] = [];
   const lineMapOut: number[] = [];
