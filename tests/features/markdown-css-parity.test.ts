@@ -23,6 +23,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { renderMarkdown } from '@features/markdown/markdown-render';
+import { extractBodyCss } from '../../build/body-css';
 
 /**
  * ⚠ **コメントを剥いでから走査する**。剥がないと、コメントに書いた
@@ -30,6 +31,27 @@ import { renderMarkdown } from '@features/markdown/markdown-render';
  * 「規則が在る」「誰も出さない規則が在る」の両方を偽で満たす(実際に踏んだ)。
  */
 const CSS = readFileSync('src/styles/app.css', 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+
+/**
+ * 🔴 **配る HTML に実際に載る `<style>` の中身**を組み立てる(2026-08-07)。
+ *
+ * ソースの `${BODY_CSS}` を、抜き出し器の実出力で置き換える ── build がやることを
+ * ここで再現する。⚠ **抜き出し器を呼ぶ**のが要点で、「焼いた分が在るはず」と
+ * 決め打ちしない(焼き込みが死んだら、この関数の戻り値からも消える)。
+ */
+function shippedStyle(): string {
+  const src = readFileSync('src/features/export/pkc3-html.ts', 'utf8');
+  const m = /<style>([\s\S]*?)<\/style>/.exec(src);
+  if (!m) throw new Error('書き出しの <style> が見つからない');
+  const baked = extractBodyCss(CSS_RAW, TOKENS_RAW).css;
+  if (!m[1]!.includes('${BODY_CSS}')) {
+    throw new Error('書き出しの <style> に ${BODY_CSS} が無い(焼き込みの配線が変わった)');
+  }
+  return m[1]!.replace('${BODY_CSS}', baked);
+}
+
+const CSS_RAW = readFileSync('src/styles/app.css', 'utf8');
+const TOKENS_RAW = readFileSync('src/styles/tokens.css', 'utf8');
 
 /**
  * 代表入力。**方言を網羅する**ことがこの検査の効き目そのものなので、
@@ -322,7 +344,21 @@ describe('読み幅の上限', () => {
  * `tests/smoke/document-globals.smoke.spec.ts` が computed 位置で見る)。
  */
 describe('寄せの規則が 2 つの面に在る(書き出しだけ古くならない)', () => {
-  const VIEWER = readFileSync('src/features/export/pkc3-html.ts', 'utf8');
+  /**
+   * 🔴 **見るのは「配る `<style>` の中身」であって、ソースではない**(2026-08-07)。
+   *
+   * 直す前はここが `readFileSync('…/pkc3-html.ts')` で**ソース文字列**を読んでいた。
+   * 本文の規則は build 時に焼かれる(`${BODY_CSS}` は展開前の placeholder)ので、
+   * **焼いた 116 本は 1 バイトも入っていなかった** ── この test が「書き出し側」と
+   * 呼んで見ていたのは `.b` の複製だけである。
+   *
+   * 実害: **焼き込みが丸ごと死んでも、この test は緑のまま**だった
+   * (CLAUDE.md「検品する側・test する側も変異試験の対象にする」)。
+   *
+   * ⚠ **コメントを剥ぐ**。上の `CSS` は 2026-08-05 に剥ぐようにしたのに、
+   *   こちらは剥いでいなかった ── 説明文が規則として拾われる同じ罠の反対側。
+   */
+  const VIEWER = shippedStyle().replace(/\/\*[\s\S]*?\*\//g, '');
 
   /**
    * 面ごとの書き方の違い(引用符・空白・末尾のセミコロン)を無視して比べる正規化。

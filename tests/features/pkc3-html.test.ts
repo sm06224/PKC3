@@ -1156,13 +1156,20 @@ describe('可搬 HTML — fence の描画 / 原文の切替', () => {
 
   it('🔴 原文を既定で隠す規則が在り、向きが app.css と同じ(checked = 原文面)', async () => {
     const css = await styleOf((await writePortableHtml(WITH_FENCE, NOW)).blob);
+    /**
+     * ⚠ **前置きは `.pkc-md-rendered`**(2026-08-07)。かつては `.b` 前置きの複製が
+     * この規則を持っていたが、焼いた側と**同じプロパティの重複**だったので
+     * 掃除で消した(実測で 171,255 点すべて一致 ── 1 度も効いていなかった)。
+     * 🔑 見るべきは**配る `<style>` に規則が在るか**であって、どちらの前置きかではない。
+     */
     expect(css, '原文を隠す規則が無い(表の下に原文が出る)').toContain(
-      '.b .pkc-render-toggle-input:not(:checked) ~ .pkc-render-source',
+      '.pkc-md-rendered .pkc-render-toggle-input:not(:checked) ~ .pkc-render-source',
     );
     expect(css, '描画を隠す規則が無い(切替が効かない)').toContain(
-      '.b .pkc-render-toggle-input:checked ~ .pkc-render-slot',
+      '.pkc-md-rendered .pkc-render-toggle-input:checked ~ .pkc-render-slot',
     );
-    expect(css).toContain(".b [data-pkc-render-mode='render'] > .pkc-render-source");
+    // ⚠ 焼いた側は結合子の前後を詰める(抜き出し器の正規化)── 字面をそのまま書く
+    expect(css).toContain(".pkc-md-rendered [data-pkc-render-mode='render']>.pkc-render-source");
   });
 
   it('🔴 向きがアプリと一致している(同じファイルで見えるものが食い違わない)', () => {
@@ -1443,10 +1450,12 @@ describe('可搬 HTML — 本文の CSS を app.css から焼く', () => {
     const at = css.indexOf(baked);
     expect(at, '焼いた CSS がそのままの字面で載っていない').toBeGreaterThan(0);
     // 焼いた分より前に `.b` の規則が並んでいる(空振り防止)
+    // ⚠ 2026-08-07 の掃除で重複 38 本を消したので下限を 20 → 10 へ。
+    //   守っているのは「`.b` の節がそもそも在る」ことで、本数ではない
     expect(
       [...css.slice(0, at).matchAll(/\.b[ .[>{,:~+]/g)].length,
       '.b の規則が見つからない(この検査は空振り)',
-    ).toBeGreaterThan(20);
+    ).toBeGreaterThan(10);
     /**
      * ⚠ 焼いた分の**後ろ**に置いてよいのは「**この面に対応物が無い**」ものだけ。
      * ここが増え始めたら、正本がまた 2 本に戻っている。
