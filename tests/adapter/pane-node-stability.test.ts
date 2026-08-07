@@ -32,6 +32,7 @@ import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { AppState } from '../../src/adapter/state/app-state';
 import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
 import { FilerRenderer } from '../../src/adapter/ui/render/filer';
+import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 
 const META = (over: Partial<EntryMeta> = {}): EntryMeta => ({
   lid: 'e1',
@@ -219,5 +220,137 @@ describe('ファイラ: 見た目が変わらない ack で作り直さない', 
     expect(region.querySelector('[data-pkc-region="filer-table"] tbody')!.textContent).toContain(
       '改名した',
     );
+  });
+});
+
+/**
+ * 🔴 **本文の面(`detail.ts`)も同じ罠を持っていた**(2026-08-07)。
+ *
+ * ⚠ 2026-08-06 に直したのは情報ペインとファイラの 2 面だけで、**この test も
+ * その 2 面しか import していなかった** ── `DetailRenderer` は誰も守っていない
+ * まま「押される寸前のボタンを捨てる」実装が残っていた
+ * (CLAUDE.md「片側を直したら対称の反対側を必ず疑う」)。
+ *
+ * 直す前の実害:
+ * - `renderBar` / `renderPanel` が**無条件に** `slot.textContent = ''` していた。
+ *   保存の ack(`REVISION_LIST_LOADED` / `ENTRY_RESTORED`)は worker の往復のあとに
+ *   非同期で届き、そのたび「編集」と「この版に戻す」が別の node になる
+ * - ノートを選んだ直後は本文が届くまで「編集」が**DOM に存在しない**窓が空いていた
+ */
+describe('本文の面: 再描画で操作の node が差し替わらない', () => {
+  const bodyState = (over: Partial<AppState> = {}): AppState =>
+    stateOf([META()], {
+      openBody: { lid: 'e1', body: '本文', baseline: '本文', persisted: '本文', diskAhead: false },
+      revisionPanel: null,
+      ...over,
+    } as Partial<AppState>);
+
+  it('🔴 無関係な再描画が来ても「編集」は**同じ node**', () => {
+    const d = new DetailRenderer(region);
+    let s = bodyState();
+    d.render(s);
+    const edit = region.querySelector('[data-pkc-action="start-edit"]');
+    expect(edit, '「編集」が出ていない(fixture が空振り)').not.toBeNull();
+
+    // 履歴が届いた(本文は 1 バイトも変わっていない)── 直す前はここで作り直していた
+    s = { ...s, revisionPanel: { lid: 'e1', items: [] } } as AppState;
+    d.render(s);
+
+    expect(
+      region.querySelector('[data-pkc-action="start-edit"]'),
+      '「編集」が差し替わった(押される寸前に消える = 無言の dead click)',
+    ).toBe(edit);
+  });
+
+  it('🔴 本文を読み込んでいる間も「編集」の器が在る(押せない理由つき)', () => {
+    const d = new DetailRenderer(region);
+    // 本文がまだ届いていない(SELECT_ENTRY の直後)
+    let s = bodyState({ openBody: null } as Partial<AppState>);
+    d.render(s);
+    const edit = region.querySelector<HTMLButtonElement>('[data-pkc-action="start-edit"]');
+    expect(edit, '読み込み中に「編集」が DOM から消えている').not.toBeNull();
+    // ⚠ 無言の操作拒否を作らない ── 押せないなら理由を出す
+    expect(edit!.disabled, '押せてしまう(本文がまだ無いのに)').toBe(true);
+    expect(edit!.title, '押せない理由が書かれていない').not.toBe('');
+
+    // 本文が届いた ── **同じ node のまま**押せるようになる
+    s = bodyState();
+    d.render(s);
+    const after = region.querySelector<HTMLButtonElement>('[data-pkc-action="start-edit"]');
+    expect(after, '本文が届いたら node が差し替わった').toBe(edit);
+    expect(after!.disabled, '本文が届いたのに押せないまま').toBe(false);
+  });
+
+  it('🔴 履歴を開いている最中の再描画で「この版に戻す」が差し替わらない', () => {
+    const d = new DetailRenderer(region);
+    const panel = {
+      lid: 'e1',
+      items: [{ id: 'r1', revOrder: 1, createdAt: '2026-08-06 01:02:03', title: 'v1' }],
+    };
+    let s = bodyState({ revisionPanel: panel } as Partial<AppState>);
+    d.render(s);
+    const restore = region.querySelector('[data-pkc-action="restore-revision"]');
+    expect(restore, '「この版に戻す」が出ていない(fixture が空振り)').not.toBeNull();
+
+    /**
+     * ⚠ **指紋を通り抜ける変化を起こす**(2026-08-07 の変異試験で判明)。
+     * `render()` は (selectedLid, body, phase, revisionPanel) が同じなら**何もせず返る**
+     * ので、`entryMetas` だけ動かしても `renderPanel` に**到達しない** ──
+     * それでは「毎回作り直す」変異が生き延びる(実際に生き延びた)。
+     * 本文が変わる = 履歴を開いたまま追記した、という実際に起きる形にする。
+     */
+    s = bodyState({
+      openBody: {
+        lid: 'e1',
+        body: '本文を足した',
+        baseline: '本文を足した',
+        persisted: '本文を足した',
+        diskAhead: false,
+      },
+      revisionPanel: panel,
+    } as Partial<AppState>);
+    d.render(s);
+
+    expect(
+      region.querySelector('[data-pkc-action="restore-revision"]'),
+      '履歴のボタンが差し替わった',
+    ).toBe(restore);
+  });
+
+  it('⚠ 履歴の中身が変われば作り直す(止めすぎていない)', () => {
+    const d = new DetailRenderer(region);
+    let s = bodyState({ revisionPanel: { lid: 'e1', items: [] } } as Partial<AppState>);
+    d.render(s);
+    s = {
+      ...s,
+      revisionPanel: {
+        lid: 'e1',
+        items: [{ id: 'r9', revOrder: 2, createdAt: '2026-08-07 00:00:00', title: 'v2' }],
+      },
+    } as AppState;
+    d.render(s);
+    expect(
+      region.querySelector('[data-pkc-action="restore-revision"]'),
+      '履歴が届いたのにボタンが出ていない(止めすぎ)',
+    ).not.toBeNull();
+  });
+
+  it('⚠ 別のノートへ移ったら器ごと作り直す(古い node を patch し続けない)', () => {
+    const d = new DetailRenderer(region);
+    let s = bodyState();
+    d.render(s);
+    const edit = region.querySelector('[data-pkc-action="start-edit"]');
+
+    s = stateOf([META(), META({ lid: 'e2', title: '別' })], {
+      selectedLid: 'e2',
+      openBody: { lid: 'e2', body: 'B', baseline: 'B', persisted: 'B', diskAhead: false },
+      revisionPanel: null,
+    } as Partial<AppState>);
+    d.render(s);
+
+    const after = region.querySelector('[data-pkc-action="start-edit"]');
+    expect(after, '別のノートで「編集」が消えた').not.toBeNull();
+    expect(after, '骨組みを作り直したのに古い node を指したまま').not.toBe(edit);
+    expect(region.querySelector('[data-pkc-field="detail-title"]')!.textContent).toBe('別');
   });
 });

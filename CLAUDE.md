@@ -221,7 +221,15 @@ P4 assets → P5 revisions → P6 import/export → P7 v3.0.0(Pages product + PW
     当たらない原因は shell のクォートだけではなく、**検査対象が生成物であること**もある
 - 🔴 **CI と手元で別のブラウザが動いている**(2026-08-05)。`tests/smoke` の config は
   同梱の `/opt/pw-browsers/chromium`(= フル Chromium)を優先し、無ければ playwright 既定に
-  落ちる ── **CI は後者 = `chromium_headless_shell`**。この 2 つは実挙動が違う:
+  落ちる ── **PR gate は後者 = `chromium_headless_shell`**。この 2 つは実挙動が違う:
+  - ⚠ **2026-08-07 追記: この記述は nightly では破れていた。** nightly が probe 用の
+    `PKC3_CHROMIUM` を **`$GITHUB_ENV` へ**書いており、以降の全 step ── smoke を含む ──
+    に効いていたため、**nightly の smoke だけフル chromium** で走っていた。
+    「両方で通してから push」の規律が、**CI 側で静かに裏切られていた**ことになる。
+    いまは probe の step にだけ `env:` で渡し、**nightly が smoke を 2 つのブラウザ
+    両方で回す**(突き合わせる場所は nightly しか無い)。
+    🔑 **`$GITHUB_ENV` は「以降の全 step」に効く** ── 1 つの step のために書いた値が、
+    無関係な step の**検査対象を変える**。step 単位で効かせたいなら `env:` を使う
   `window.print()` が chrome では `beforeprint` のみ、headless_shell では
   **`beforeprint` + `afterprint` を同期発火**する。おかげで「押した直後に組み上がっている」を
   見ていた smoke が**手元で緑・CI で赤**になった(しかも CI 側が正しい)。
