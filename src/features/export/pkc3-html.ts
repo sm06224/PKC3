@@ -29,6 +29,7 @@
  * → `<` を**すべて** `<` へ退避する。JSON の文字列としては同値なので、
  * 読み手は素の `JSON.parse` でよい。
  */
+import BODY_CSS from 'virtual:pkc-body-css';
 import { parseFrontmatter, type FrontmatterValue } from '../markdown/frontmatter';
 import { renderMarkdown, type RenderMarkdownOptions } from '../markdown/markdown-render';
 import { extractVars } from '../markdown/frontmatter';
@@ -284,6 +285,22 @@ a.f{display:inline-block;margin:8px 0;padding:6px 10px;border:1px solid #8884;bo
   #all section:first-child{break-before:auto}
   #all section h2{font-size:1.5em;margin:0 0 .6em}
 }
+/* ── 🔴 **本文の見た目の正本は app.css**(2026-08-07)。ここから下は
+   src/styles/app.css の .pkc-md-rendered 前置きの規則を build 時に抜いて焼いたもの
+   (build/body-css.ts + build/body-css-plugin.ts)。器は class .b、本文の規則は
+   class .pkc-md-rendered ── **両方**を本文の箱に付けてある。
+
+   ⚠ **上の .b 前置きより後に置く**。詳細度は同じ(0,1,1)なので後に来た側が勝つ =
+     app.css が正本になる。順を入れ替えると .b の古い値が勝ち、この節が無意味になる。
+   ⚠ 直す前、書き出した HTML には .pkc-* の規則が **10 個**しか無かった(app.css は 71 個)。
+     実ブラウザの 21 の観測点のうち **17 が違って**いた ── :::note / :::danger は枠も地も
+     無く本文の段落と見分けが付かず、タスク行は丸ポチとチェック欄が二重に出て、
+     圏点が付かず、_3(空行 3 つ)の高さが 0 だった。
+   ⚠ **トークンも一緒に焼く**(先頭の :root 群)── 規則だけ写すと var() が
+     computed-value time で無効になり、**先行する規則へ fall back しない**ので
+     「いま効いているものまで消える」= 何もしないより悪くなる(実測)。
+   ⚠ **値を静的に解決しない** ── light で潰すと暗い環境で白箱に白文字になる。 */
+${BODY_CSS}
 </style>
 <nav>
   <h1 id="t"></h1>
@@ -292,7 +309,7 @@ a.f{display:inline-block;margin:8px 0;padding:6px 10px;border:1px solid #8884;bo
   <details id="dnotes" open><summary>ノート</summary><div id="list"></div></details>
   <details id="dtoc" open><summary>この文書の目次</summary><ol id="toc"></ol><p class="e" id="tocempty" hidden>見出しがありません</p></details>
 </nav>
-<main><div id="ptoc"></div><h2 id="title"></h2><div id="body" class="b"></div></main>
+<main><div id="ptoc"></div><h2 id="title"></h2><div id="body" class="b pkc-md-rendered"></div></main>
 <div id="all"></div>
 <noscript><p id="fail">このファイルは JavaScript で中身を表示します。有効にして開き直してください。</p></noscript>
 <script>
@@ -511,8 +528,11 @@ try{
       var sec=document.createElement('section');
       var t=document.createElement('h2');t.id='pe-'+i;t.textContent=e.title||'(無題)';
       sec.appendChild(t);
-      // ⚠ 本文の CSS は **class .b** に付けてある ── 同じ id を 2 個作らないため
-      var box=document.createElement('div');box.className='b';
+      // ⚠ 本文の CSS は **class .b** に付けてある ── 同じ id を 2 個作らないため。
+      // 🔴 **pkc-md-rendered も要る**(2026-08-07)── app.css から焼いた本文の規則は
+      //    そちらに付いている。**器は 2 か所ある**(#body と、ここ「全体を印刷」)ので
+      //    片方だけに足すと、全体印刷の紙だけ素の見た目で出る(誰も見ていない経路)
+      var box=document.createElement('div');box.className='b pkc-md-rendered';
       var hs=hydrate(box,e,plive,'pe'+i);
       sec.appendChild(box);all.appendChild(sec);
       // 目次: ノート名 + その見出し

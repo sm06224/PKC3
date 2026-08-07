@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import { swPlugin } from './build/sw-plugin.ts';
+import { bodyCssPlugin } from './build/body-css-plugin.ts';
 
 /**
  * cache 名に入れる build id。
@@ -19,7 +20,10 @@ export const buildIdFor = (precache: readonly string[]): string =>
 // base './' — Pages の / と /dev/ の両方で同一ビルドが動く相対パス配信
 export default defineConfig({
   base: './',
-  plugins: [swPlugin(buildIdFor)],
+  // ⚠ bodyCssPlugin は `apply` を付けない ── dev / build / **vitest** の 3 つで
+  //    同じものを配る必要がある(test だけ virtual module が解決できないと、
+  //    書き出し HTML の検査が丸ごと動かない)
+  plugins: [swPlugin(buildIdFor), bodyCssPlugin()],
   // @sqlite.org/sqlite-wasm は pre-bundle すると worker/wasm 解決が壊れる(公式指示)
   optimizeDeps: { exclude: ['@sqlite.org/sqlite-wasm'] },
   resolve: {

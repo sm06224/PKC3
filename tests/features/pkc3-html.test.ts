@@ -1328,3 +1328,140 @@ describe('可搬 HTML — 画面と同じ材料で描く', () => {
     expect(text).toContain('Math.min(5000');
   });
 });
+
+/**
+ * 🔴 **本文の見た目の正本は app.css**(2026-08-07)。
+ *
+ * 直す前、書き出した HTML の `.pkc-*` の規則は **10 個**しか無かった(`app.css` は 71 個)。
+ * 実ブラウザの 21 の観測点のうち **17 が違って**いた ── `:::note` / `:::danger` は枠も
+ * 地も無く本文の段落と見分けが付かず、タスク行は丸ポチとチェック欄が二重に出て、
+ * 圏点が付かず、`_3`(空行 3 つ)の高さが 0 だった。
+ *
+ * ⚠ ここは**生成した blob** を見る(ソースの字面ではない)── 焼き込みは build 時の
+ * virtual module 経由なので、ソースを grep しても「入ったか」は分からない。
+ * ⚠ 値が実際に効くかは実ブラウザ(`tests/smoke/export-body-css.smoke.spec.ts`)が
+ *   computed style で見る。ここは**載っているか**と**勝ち手の順**を見る。
+ */
+describe('可搬 HTML — 本文の CSS を app.css から焼く', () => {
+  const DOC = source({
+    entries: [
+      { lid: 'b1', title: '記法', body: ':::note\n注意\n:::\n\n- [ ] やること\n\n前\n\n_3\n\n後\n' },
+      { lid: 'b2', title: 'もう 1 件', body: '# 見出し\n本文\n' },
+    ],
+  });
+
+  /** `<style>` の中身だけを取り出す(規則の**並び**を見るため)。 */
+  async function styleOf(): Promise<string> {
+    const html = await (await writePortableHtml(DOC, NOW)).blob.text();
+    const m = /<style>([\s\S]*?)<\/style>/.exec(html);
+    expect(m, '<style> が無い').not.toBeNull();
+    return m![1]!;
+  }
+
+  it('🔴 app.css の本文の規則が焼かれている(代表が代替物で満たせない形で)', async () => {
+    const css = await styleOf();
+    // ⚠ 「`.pkc-` が N 個」では守れない ── 前から 10 個は在った。**中身**で見る
+    for (const [sel, decl] of [
+      ['.pkc-md-rendered .pkc-section-callout', 'border-left'],
+      ['.pkc-md-rendered .pkc-section-danger', 'color-mix'],
+      ['.pkc-md-rendered li.pkc-task-item', 'list-style:none'],
+      ['.pkc-md-rendered .pkc-blank-line', 'var(--pkc-blank-count,1)'],
+      ['.pkc-md-rendered .pkc-em-dot', 'text-emphasis'],
+      ['.pkc-md-rendered .pkc-toc-formal', 'background'],
+    ] as const) {
+      const at = css.indexOf(sel);
+      expect(at, `${sel} の規則が焼かれていない`).toBeGreaterThan(0);
+      expect(css.slice(at, css.indexOf('}', at)), `${sel} に ${decl} が無い`).toContain(decl);
+    }
+  });
+
+  /**
+   * 🔴 **トークンも一緒に焼く**。規則だけ写すと `var()` が computed-value time で無効に
+   * なり、**先行する規則へ fall back しない** ── `.b` 側の余白や罫線まで消えて、
+   * **何もしないより悪くなる**(実測)。
+   */
+  it('🔴 トークンが 3 層(配色・幾何・暗い環境)そろって焼かれている', async () => {
+    const css = await styleOf();
+    for (const name of ['--fg:', '--border:', '--surface-2:', '--accent:']) {
+      expect(css, `配色 ${name} が無い`).toContain(name);
+    }
+    for (const name of ['--s5:', '--radius:', '--font-mono:']) {
+      expect(css, `幾何 ${name} が無い(宣言ごと無効になる)`).toContain(name);
+    }
+    // ⚠ 静的に light で潰していない ── 暗い環境で白箱に白文字になる(実測)
+    expect(css, '暗い環境の層が無い').toContain('@media (prefers-color-scheme:dark){:root{');
+  });
+
+  /**
+   * 🔴 **未定義の `var()` が 1 つも無い**。`<style>` 全体で見る ── 焼いた規則が
+   * 参照するトークンは、同じ `<style>` の中で定義されていなければならない。
+   */
+  it('🔴 焼いた規則が参照するトークンが全部同じ style の中で定義されている', async () => {
+    const css = await styleOf();
+    const defined = new Set([...css.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]!));
+    expect(defined.size, 'トークンが 1 つも定義されていない(この検査は空振り)').toBeGreaterThan(
+      15,
+    );
+    const used = [...css.matchAll(/var\(\s*(--[\w-]+)\s*([,)])/g)]
+      // 既定値つき(`var(--x, 1)`)は未定義でも壊れない
+      .filter((m) => m[2] === ')')
+      .map((m) => m[1]!);
+    expect(used.length, 'var() を 1 つも使っていない(この検査は空振り)').toBeGreaterThan(20);
+    const missing = [...new Set(used.filter((v) => !defined.has(v)))].sort();
+    expect(missing, `未定義の var(宣言ごと無効になる): ${missing.join(', ')}`).toEqual([]);
+  });
+
+  /**
+   * 🔴 **並びが勝ち手を決める**。`.b h1` と `.pkc-md-rendered h1` は詳細度が同じ
+   * (0,1,1)なので、**後に来た側が勝つ**。焼いた分を手前に置くと `.b` の古い値が
+   * 勝ち、この仕掛けは丸ごと無意味になる ── しかも「規則は載っている」ので
+   * 存在を数える検査は全部通る。
+   */
+  it('🔴 焼いた規則が `.b` の規則より後に在る(app.css が正本になる)', async () => {
+    const css = await styleOf();
+    const b = css.indexOf('.b h1,');
+    const baked = css.indexOf('.pkc-md-rendered h1,');
+    expect(b, '.b の見出しの規則が無い(この検査は空振り)').toBeGreaterThan(0);
+    expect(baked, '焼いた見出しの規則が無い(この検査は空振り)').toBeGreaterThan(0);
+    expect(baked, '焼いた規則が .b より手前に在る(.b の古い値が勝つ)').toBeGreaterThan(b);
+  });
+
+  /**
+   * 🔴 **本文の器は 2 か所ある**(CLAUDE.md「同じ値を複数の描画経路へ渡すものは
+   * 経路ごとに pin する」)── 1 件表示の `#body` と、「全体を印刷」が組む箱。
+   * 片方だけに class を足すと、**紙だけ素の見た目**で出る(誰も見ていない経路)。
+   */
+  it('🔴 1 件表示の器に pkc-md-rendered が付いている', async () => {
+    const html = await (await writePortableHtml(DOC, NOW)).blob.text();
+    document.body.innerHTML = /<main>[\s\S]*?<\/main>/.exec(html)![0]!;
+    const box = document.getElementById('body')!;
+    expect([...box.classList].sort(), '器の class が足りない').toEqual(['b', 'pkc-md-rendered']);
+  });
+
+  it('🔴 「全体を印刷」が組む器にも pkc-md-rendered が付いている', async () => {
+    const html = await (await writePortableHtml(DOC, NOW)).blob.text();
+    const dataJson = /<script id="pkc-data" type="application\/json">([\s\S]*?)<\/script>/.exec(
+      html,
+    )![1]!;
+    const viewer = /<script>\n([\s\S]*?)\n<\/script>$/.exec(html)![1]!;
+    document.body.innerHTML = /<\/script>([\s\S]*?)<script>/.exec(
+      html.slice(html.indexOf('</script>')),
+    )![1]!;
+    const data = document.createElement('script');
+    data.id = 'pkc-data';
+    data.type = 'application/json';
+    data.textContent = dataJson;
+    document.body.appendChild(data);
+    new Function(viewer)();
+    await new Promise((r) => setTimeout(r, 0));
+    document.getElementById('printall')!.click();
+    const boxes = [...document.querySelectorAll('#all > section > div')];
+    expect(boxes.length, '全体印刷の本文の箱が無い(この検査は空振り)').toBe(2);
+    for (const box of boxes) {
+      expect([...box.classList].sort(), '紙の本文の器の class が足りない').toEqual([
+        'b',
+        'pkc-md-rendered',
+      ]);
+    }
+  });
+});
