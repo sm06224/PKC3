@@ -113,9 +113,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   手動 dispatch に逃がす。**gate を足すときは「これは PR で走る必要があるか」を毎回問う**
 - **品質はサブエージェント・スキルで守る**: 実装 PR は着地前に code review(サブエージェント)を
   回す(`.claude/agents/pkc3-reviewer.md` / `/review`)。性能の主張は**測ってから言う**
-  (本 file 冒頭の計測規律。⚠ `perf-measurement` スキルは PKC3 に**まだ無い** ──
-  作るまでは規律の正本は本 file である)。視覚を持つ変更は smoke
-  (`.claude/skills/smoke-testing/`)
+  (規律の正本は本 file 冒頭の計測規律。**手順**は `.claude/skills/perf-measurement/SKILL.md`
+  / `/measure`)。視覚を持つ変更は smoke(`.claude/skills/smoke-testing/`)
 - **視覚テスト**: PKC2 の視覚テスト資産(playwright-visual / visual-parity / shinsatsu)を
   **遅くなりすぎないように改修して**使う。UI 実装が始まる P3 で導入 ──
   PR gate には最小 smoke(数 spec・秒オーダー)のみ、全量は nightly
@@ -202,6 +201,19 @@ P4 assets → P5 revisions → P6 import/export → P7 v3.0.0(Pages product + PW
 - 🔴 **制御文字をソースに生バイトで埋めない**(``'\u007f'`` と書く)。
   「正規表現に書かない」と注意書きしている当の file で 3 度踏んだので、
   `npm test` の `tests/repo-hygiene.test.ts` が機械的に止める
+- 🔴 **`SURVIVED` の半分は「弱い」ではなく「通っていない」**(2026-08-07)。
+  変異は当たったのに、**test がその行を 1 度も実行していない**ことがある ──
+  実例: 履歴パネルのガードを消す変異が生き延びたが、原因は assert ではなく
+  `render()` が**指紋(selectedLid / body / phase / revisionPanel)が同じなら何もせず返る**
+  ことで、test は `entryMetas` だけ動かしていたため**その関数に入っていなかった**。
+  規律: 生き延びたら **assert を足す前に「通っているか」を疑う** ──
+  壊す代わりに `throw` を置いて、落ちなければ**誰も通っていない**。
+  手順は `.claude/skills/mutation-testing/SKILL.md`
+- 🔴 **表に載っている件数は「誰かが数えた分」でしかない**(2026-08-07)。ライブエディタの
+  釣り合いは `ok:false` が **4 件**と記録されていたが、外 14 形 × 内 8 形を**全数**
+  当たると **48 / 112 通り**壊れていた ── 数えていなかったから記録も無かった。
+  規律: 「既知の欠陥は N 件」を出発点にしない。**組み合わせが有限なら全部当てる**
+  (当てた表がそのまま回帰 test になる)
 - 🔴 **「当たらなかった変異」と「生き延びた変異」を区別する**(2026-08-04、1 セッションで
   2 度踏んだ)。変異が**適用されていない**とき、結果は「生存」と見分けがつかない ──
   **空振りを合格と読む**。実例:(1) shell の引用で python が SyntaxError になり変異が
@@ -294,13 +306,14 @@ P4 assets → P5 revisions → P6 import/export → P7 v3.0.0(Pages product + PW
 |---|---|
 | `subagent-scale/` | **大量に投げて突き合わせる**(上の方針の実体)/ 隔離 / 検算 |
 | `mutation-testing/` | 変異試験の手順 + **動くハーネスの雛形** |
+| `perf-measurement/` | **測って示す**(対照群 / 差分ハーネス / 被覆と感度 / 主張の範囲) |
 | `smoke-testing/` | 実ブラウザ検証(2 つのブラウザ / 観測点の置き方) |
 | `source-editing/` | 編集の作法(生バイト / template literal / 整形ツール) |
 | `pr-landing/` | PR を作って着地させる(1 主題 / 止めて裁定を仰ぐ条件) |
 | `session-handoff/` | 引き継ぎ **PR** の作り方(最初の仕事の有無は必須) |
 | `knowledge-reflection/` | **教訓を資産へ分割して残す**(`.claude更新`) |
 
-コマンド(導線): `/fanout` `/review` `/mutate` `/handoff` `/claude-update`
+コマンド(導線): `/fanout` `/review` `/mutate` `/measure` `/handoff` `/claude-update`
 
 - 🔴 **`.claude/skills/` を指す記述は、指す先が実在するときだけ書く**。
   2026-08-04 の引き継ぎ doc が 3 か所で存在しない `.claude/` を指し、
@@ -313,12 +326,19 @@ P4 assets → P5 revisions → P6 import/export → P7 v3.0.0(Pages product + PW
 - 🚫 PKC2(`sm06224/PKC2`)の `.claude/` は **read-only 参照のみ**。丸写しにしない
   (user 指示「流用 + 総合的見直し」)
 
-### この 2 日で足した原則(手順は上のスキルに在る)
+### 2026-08-04〜07 に足した原則(手順は上のスキルに在る)
 
 - 🔴 **片側を直したら、対称の反対側を必ず疑う**(2026-08-07)。検品を「出力の文字列を
   見る」形に直したのに、**トークンだけ直して規則は需要側の数を見たまま**だった ──
   組み立てを消すと検品が合格し、**規則 0 本の CSS が出荷される**(実測)。
   🔑 **1 巡目の修正は、2 巡目の対象である**
+  - ⚠ **同じ日に 3 回踏んだ。**(1) 情報ペインとファイラの「器を捨てない」を直したのに
+    **本文の面が同型のまま残り**、回帰 test も**その 2 面しか import していなかった** ──
+    保存直後の「編集」が無言の dead click になっていた (2) `:::` の空行正規化は
+    在るのに**改頁(`+++`)側に無く**、素直に書くと改頁が消えて `auto` の字が出ていた
+    (3) parity test は `app.css` 側だけコメントを剥いでいて、**書き出し側は剥いでいなかった**。
+    🔑 **「A を直した」と書いた瞬間に「B はどうか」を grep する**。
+    とくに **test の import 一覧**は、直し忘れた面が一目で分かる場所である
 - 🔴 **裁定を受け取ったら、その場で起票するか資産に書く。** 会話に流すと消える ──
   GO 済みの件を起票せず、**裁定済みを user に聞き直す**事故になった(#91)
 - 🔴 **user に見える仕様を、レビュー応答の commit の中で勝手に決めない。**
@@ -327,9 +347,13 @@ P4 assets → P5 revisions → P6 import/export → P7 v3.0.0(Pages product + PW
 - 🔴 **編集ツールが制御文字を生バイトで書くことがある。** escape を書いたつもりでも
   入る(1 セッションで 3 回)── 書き換えたら**バイト走査する**
   (`source-editing/`)。⚠ 制御文字を避けられるなら私用領域(``)を使う
-- ⚠ **flake に見えるものが製品の穴だったことがある**(2026-08-07、`external-images`)。
-  **test を緩める前にアプリ側を疑う**。直したら**確定的に鳴る unit** を足す ──
-  ただし「字面の位置」で pin すると、位置を保って挙動を壊す変異が生き延びる
+- ⚠ **flake に見えるものが製品の穴だったことがある**(2026-08-07、`external-images` /
+  `boot-edit` の **2 件**)。**test を緩める前にアプリ側を疑う**。直したら
+  **確定的に鳴る unit** を足す ── ただし「字面の位置」で pin すると、位置を保って
+  挙動を壊す変異が生き延びる。
+  🔑 `boot-edit` の `Element is not attached to the DOM` は**再現しなくても**
+  正体があった ── 「1 回通ったから直った」ではなく、**要素が作り直される経路**を
+  コードで名指しできるまで追う(retry で消せる症状は、原因の側に門を置く)
 - ⚠ **実体を作ってから導線を書く。** 逆順は壊れたポインタになる(#69 で 1 度失敗)
 
 > ⚠ **この節は 2026-08-07 まで「⏸ user の裁定待ち」と書いていたが、嘘だった。**
