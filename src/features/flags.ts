@@ -1,0 +1,121 @@
+/**
+ * 🔴 **フラグの登記所**(P11。user 指示 2026-08-07)。
+ *
+ * > 「**設定はユーザーに開放されたもの、フラグは開発者とパワーユーザーに開放された
+ * > もので予算は 15 個まで、それ以上は設定値で正式リリースさせる**」
+ *
+ * ## 設定(settings)との違い ── ここが本題
+ *
+ * | | 設定(settings) | フラグ(flags) |
+ * |---|---|---|
+ * | 誰のもの | **user** | **開発者・パワーユーザー** |
+ * | 約束 | 正式仕様。**消さない** | **いつか畳む**(`foldWhen` に条件を書く) |
+ * | 数 | 必要なだけ | 🔴 **15 個まで** |
+ * | 置き場 | `settings.ts`(配色 / 外部の画像 …) | ここ |
+ *
+ * 🔑 **「15 個を超えたら設定へ昇格させる」が予算の意味**である。昇格とは
+ * 「flag を消して settings に項目を足す」ことで、**コードの移動でしか表現できない** ──
+ * だから `promoteTo` のような field は持たせない。代わりに **`foldWhen` を必須**にして、
+ * 「**いつ畳むか書けないものは flag にできない**」を機構で強制する。
+ *
+ * ## CI が見張っていること(`tests/flag-budget.test.ts`)
+ *
+ * この file が在るより**先に** test が書かれている(パスを名指しで予約済み):
+ *
+ * - 宣言の総数が **15 以下**
+ * - 各宣言が **`foldWhen: '…'`(非空)** を持つ
+ * - **この file 以外が `flags` 表を DML で触っていない**
+ * - `CLAUDE.md` の「flags は最大 N 個」と定数が一致
+ *
+ * ⚠ **綴りを変えない。** `defineFlag('name', { … foldWhen: '…' })` の形は
+ * test の正規表現と噛み合っている(`tests/flag-budget.test.ts:61,66`)。
+ *
+ * ## ⚠ この module は **pure**(browser API を使わない)
+ *
+ * 層規約(`features` は純関数)に従い、**値の出どころは呼び手が渡す**。
+ * 保存(localStorage)と URL の読み取りは `adapter/platform/flag-store.ts` の仕事。
+ * ⚠ ここに `localStorage` を書くと層を破るうえ、test / worker から使えなくなる。
+ */
+
+/** flag の宣言。⚠ `foldWhen` は**必須**(畳む条件を書けないものは flag にしない)。 */
+export interface FlagSpec {
+  /** 既定値。⚠ **既定は必ず「今の挙動」**にする(入れた瞬間に何も変わらない)。 */
+  readonly default: boolean;
+  /**
+   * 🔴 **いつ畳むか**。散文で書く(例: 「ライブエディタが既定 ON になったら」)。
+   * ⚠ これが書けないものは flag ではなく設定である。CI が非空を要求する。
+   */
+  readonly foldWhen: string;
+  /** 画面に出す 1 行の説明(パワーユーザーが読む)。 */
+  readonly summary: string;
+}
+
+export interface Flag extends FlagSpec {
+  readonly name: string;
+}
+
+const REGISTRY = new Map<string, Flag>();
+
+/**
+ * flag を宣言する。⚠ **module 読み込み時に 1 度だけ**呼ぶ(下の宣言群)。
+ * ⚠ 同じ名前を 2 度宣言したら**その場で落とす** ── 後勝ちで静かに上書きすると、
+ *   どちらが効いているか誰にも分からなくなる。
+ */
+export function defineFlag(name: string, spec: FlagSpec): Flag {
+  if (REGISTRY.has(name)) throw new Error(`flag が二重に宣言されている: ${name}`);
+  const flag: Flag = { name, ...spec };
+  REGISTRY.set(name, flag);
+  return flag;
+}
+
+/** 宣言されている flag を宣言順に返す(画面が一覧に使う)。 */
+export function registeredFlags(): readonly Flag[] {
+  return [...REGISTRY.values()];
+}
+
+export function findFlag(name: string): Flag | null {
+  return REGISTRY.get(name) ?? null;
+}
+
+/**
+ * 🔴 **いま効いている値を解く**(pure)。
+ *
+ * 優先順位は **URL > 保存値 > 既定**。
+ * ⚠ URL を最優先にするのは、**保存値が壊れていても素の状態へ戻せる**ようにするため
+ * (パワーユーザーが自分で抜け出せない状態を作らない)。
+ * ⚠ 知らない名前は**黙って捨てる** ── 退役した flag の保存値が残っていても、
+ *   一覧にも解決結果にも出さない。
+ */
+export function resolveFlags(
+  stored: Readonly<Record<string, boolean>>,
+  fromUrl: Readonly<Record<string, boolean>> = {},
+): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  for (const f of REGISTRY.values()) {
+    out[f.name] = fromUrl[f.name] ?? stored[f.name] ?? f.default;
+  }
+  return out;
+}
+
+/**
+ * 保存すべき値だけを残す(既定と同じものは**書かない**)。
+ * ⚠ 既定値まで書くと、**あとで既定を変えたときに古い user だけ取り残される**。
+ */
+export function prunedForStorage(
+  values: Readonly<Record<string, boolean>>,
+): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  for (const f of REGISTRY.values()) {
+    const v = values[f.name];
+    if (v !== undefined && v !== f.default) out[f.name] = v;
+  }
+  return out;
+}
+
+// ── 宣言 ────────────────────────────────────────────────
+//
+// ⚠ **予算 15。** 足す前に「これは設定ではないか」を問う ──
+//   user が使うものは設定、開発者が試すものが flag である。
+// ⚠ **既定は必ず「今の挙動」**にする。
+//
+// いまは 0 個。最初の 1 個を足すときは、この注記の下に並べる。
