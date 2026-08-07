@@ -27,7 +27,7 @@ import type Token from 'markdown-it/lib/token.mjs';
 // PR-W18:HTML footnote plugin(`[^id]` → `<sup class="footnote-ref">`)。
 // CJS package だが exports map で `.mjs` を提供しているため ESM import OK。
 import footnotePlugin from 'markdown-it-footnote';
-import { makeSlugCounter, extractHeadingsFromMarkdown } from './markdown-toc';
+import { makeSlugCounter } from './markdown-toc';
 import { highlightCode, isHighlightable } from './code-highlight';
 import { renderCsvFence } from './csv-table';
 import { buildHtmlSandboxIframe } from './html-sandbox';
@@ -2243,6 +2243,53 @@ function processTocDirective(
  * `tocHtmlByIdx` は同 render call 内の record idx → 実 HTML(`<nav>...`)map。
  * 順序保証のため processTocDirective の records と対応。
  */
+/**
+ * 出来上がった HTML から目次の nav を組む(`:::toc{depth=N}` 1 件につき 1 本)。
+ *
+ * 🔑 **読み手はここ 1 本**。本文の見出しに実際に付いた `id` をそのまま `href` に
+ * 使うので、**「押しても飛ばない」が構造上つくれない**(原文をもう一度読む経路が
+ * 無い)。書き出す HTML の目次(`features/export/pkc3-html.ts` の `headings()`)と
+ * 同じ規則である。
+ *
+ * ⚠ **`id` を持たない見出しは載せない** ── 飛べない項目を目次に出さない
+ *   (`heading_open` は本文が空の見出しに id を付けない)。
+ * ⚠ **文字を再 escape しない** ── 拾うのは既に escape 済みの HTML である。
+ *   もう一度掛けると `&amp;` が `&amp;amp;` になって画面に出る。
+ * ⚠ **タグだけ落とす** ── 見出しの中の `<code>` や `<em>` は目次では素の字にする
+ *   (`<a>` の中に入れ子のリンクや block を持ち込まない)。
+ */
+function buildTocNavsFromHtml(
+  html: string,
+  records: readonly { depth: number }[],
+): string[] {
+  if (records.length === 0) return [];
+  const heads: { level: number; id: string; label: string }[] = [];
+  const re = /<h([123])([^>]*)>([\s\S]*?)<\/h\1>/g;
+  for (let m = re.exec(html); m !== null; m = re.exec(html)) {
+    const id = /\bid="([^"]*)"/.exec(m[2] ?? '')?.[1];
+    if (id === undefined || id === '') continue;
+    const label = (m[3] ?? '').replace(/<[^>]*>/g, '');
+    heads.push({ level: Number(m[1]), id, label });
+  }
+  return records.map((rec) => {
+    const items = heads
+      .filter((h) => h.level <= rec.depth)
+      .map(
+        (h) =>
+          `<li class="pkc-toc-item" data-pkc-toc-kind="heading" data-pkc-toc-level="${h.level}">` +
+          `<a class="pkc-toc-link" href="#${h.id}">${h.label}</a>` +
+          `</li>`,
+      )
+      .join('');
+    return (
+      `<nav class="pkc-toc-formal pkc-toc-preview" data-pkc-region="toc-formal" data-pkc-toc-depth="${rec.depth}">` +
+      `<span class="pkc-toc-label">Contents</span>` +
+      `<ul class="pkc-toc-list">${items}</ul>` +
+      `</nav>`
+    );
+  });
+}
+
 function postProcessTocSentinels(html: string, tocHtmlByIdx: readonly string[]): string {
   return html.replace(
     new RegExp(`<p[^>]*>${TOC_OPEN}(\\d+)${TOC_SEP}\\d+${TOC_OPEN}</p>`, 'g'),
@@ -4382,8 +4429,13 @@ export function renderMarkdown(
   text = neutralizeSentinels(text);
   // PKC3: IR migration scaffolding(markdown.use_ir)は持ち込まない ──
   // flag 予算(最大 15)と凍結方針(正本 doc §10)。legacy pipeline 一本。
-  // PR-2V:original text を保存(`:::toc` block の処理で heading extraction に使う)
-  const originalText = text;
+  /**
+   * ⚠ かつてここに `const originalText = text;` が在った(2026-08-07 に撤去)。
+   * 目次が**前処理前の原文**を読み直すための保管で、それが「読み手が 2 つある」
+   * という不具合の本体だった。目次を出来上がった HTML から組むようにして
+   * 読む人がいなくなったので消した ── **原文をもう一度読む道を残さない**ことが、
+   * 同じ食い違いを作らないための構造上の保証である。
+   */
   // 入力 line 数を覚えておき、initial lineMap = identity。preprocess 各 step
   // が line を挿入 / 消費する度に lineMap を更新、最終 lineMap[outputIdx] は
   // user の textarea source(原文)の line index を返す。Split View の
@@ -4414,39 +4466,35 @@ export function renderMarkdown(
   const ifResult = processIfBlocks(text, lineMap, 'html');
   text = ifResult.transformed;
   lineMap = ifResult.lineMap;
-  // PR-2V:`:::toc{depth=N}` block を sentinel 化、TOC HTML は post-process で展開。
-  // heading 抽出は originalText から(extractHeadingsFromMarkdown が独自に
-  // frontmatter strip + vars 展開 + :::if mismatch strip を実施)。
+  /**
+   * PR-2V:`:::toc{depth=N}` block を sentinel 化、TOC HTML は post-process で展開。
+   *
+   * 🔴 **見出しの読み手を 1 本にした**(2026-08-07)。ここで
+   * `extractHeadingsFromMarkdown(originalText)` を呼んで nav を組んでいたのを
+   * やめ、**出来上がった HTML の `<h1-3 id=…>` から組む**ようにした
+   * (`buildTocNavsFromHtml`。post 段の最後で当てる)。
+   *
+   * 直す前は読み手が 2 つあった ── 本文の id は markdown-it の token(前処理を
+   * 全部通った文字列)から、目次は**原文の行の正規表現**から作られていた。
+   * 目次側が通っていた前処理は 23 段中 3 段だけで、しかもその 3 段も別実装。
+   * 実測で **13 類**の食い違いが出ていた(user 報告の 4 件を含む):
+   *   - 採番を付けると本文の id は `1-第一` / 目次の href は `#第一` = **飛ばない**
+   *   - `%%隠す%%` は本文からは消えるのに**目次には出る**(slug も不一致)
+   *   - `%%%` ブロック / `:::comment` の中の見出しが**目次に出る**(幽霊)
+   *   - `||## 中央見出し` / `__ 字下げ` の見出しが**目次から落ちる**
+   *   - setext(`===`)/ リスト内 / 引用内の見出しが目次から落ちる
+   *   - fence の判定が別実装(``` を ~~~ で閉じたことにする)ので中身が漏れる
+   *   - `{{vars.x}}` の出所が違い、目次だけ生の `{{vars.x}}` が出る
+   *   - `:::if` の受理方言が違い、消したはずの中身が目次に残る
+   *   - 図参照 `[@f1]` が本文では「図 1」に展開されるのに目次では生
+   *   - 上のどれか 1 件で同名見出しの衝突連番(`-1` / `-2`)が全部ずれる
+   * ⚠ **採るべき形は既に製品の中で動いていた** ── 書き出す HTML の目次
+   *   (`features/export/pkc3-html.ts` の `headings()`)は DOM の h1-h3 と実 id から
+   *   作っており、13 類のどれも踏んでいない。そちらへ寄せた。
+   */
   const tocResult = processTocDirective(text, lineMap);
   text = tocResult.transformed;
   lineMap = tocResult.lineMap;
-  // sentinel idx → 実 HTML map を構築(各 :::toc{depth=N} につき 1 件)
-  const tocHtmlByIdx: string[] = tocResult.records.length === 0
-    ? []
-    : (() => {
-        const allHeadings = extractHeadingsFromMarkdown(originalText);
-        return tocResult.records.map((rec) => {
-          const filtered = allHeadings.filter((h) => h.level <= rec.depth);
-          if (filtered.length === 0) {
-            return `<nav class="pkc-toc-formal pkc-toc-preview" data-pkc-region="toc-formal" data-pkc-toc-depth="${rec.depth}"><span class="pkc-toc-label">Contents</span><ul class="pkc-toc-list"></ul></nav>`;
-          }
-          const esc = (s: string) =>
-            s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-          const items = filtered
-            .map((h) =>
-              `<li class="pkc-toc-item" data-pkc-toc-kind="heading" data-pkc-toc-level="${h.level}">` +
-              `<a class="pkc-toc-link" href="#${esc(h.slug)}">${esc(h.text)}</a>` +
-              `</li>`,
-            )
-            .join('');
-          return (
-            `<nav class="pkc-toc-formal pkc-toc-preview" data-pkc-region="toc-formal" data-pkc-toc-depth="${rec.depth}">` +
-            `<span class="pkc-toc-label">Contents</span>` +
-            `<ul class="pkc-toc-list">${items}</ul>` +
-            `</nav>`
-          );
-        });
-      })();
   // reform-2026-05 Phase 2 PR-2O:standalone :align:{position=X} は次段落の
   // alignMap に register、行は strip(PR-2L hint chip より格上げ、actual align)。
   const tolerantAlignResult = processTolerantStandaloneAlign(
@@ -4593,8 +4641,6 @@ export function renderMarkdown(
     if (opts.sourceLineAnchors === true) tagSourceLines(tokens, lineMap);
     html = md.renderer.render(tokens, md.options, env);
   }
-  // PR-2V:`:::toc{depth=N}` sentinel → <nav class="pkc-toc-formal pkc-toc-preview">
-  html = postProcessTocSentinels(html, tocHtmlByIdx);
   // L-7:figure/table/equation sentinel → <figure>
   html = postProcessFigureSentinels(html);
   // reform-2026-05 PR-D:`:::quote{author=...}` sentinel → <blockquote class="pkc-quote-citation">
@@ -4615,6 +4661,15 @@ export function renderMarkdown(
   html = postProcessTolerantSentinels(html);
   // PR-2K:hallucination block sentinel → <div class="pkc-warning-hallucination-block">
   html = postProcessHallucinatedDirectives(html);
+  /**
+   * 🔴 **目次は post 段のいちばん最後**(2026-08-07)。
+   *
+   * 見出しの文字を**出来上がった HTML から**採るので、ほかの sentinel が全部
+   * 実体に変わった後でなければならない。1 段でも手前に置くと、目次の項目に
+   * **私用領域の sentinel 文字(U+E110〜U+E17F)がそのまま載る**(不可視なので
+   * 画面では気づけない)。`tests/features/toc-heading-parity.test.ts` がそこを pin する。
+   */
+  html = postProcessTocSentinels(html, buildTocNavsFromHtml(html, tocResult.records));
   return html;
 }
 
