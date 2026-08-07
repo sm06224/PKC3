@@ -261,6 +261,15 @@ a.f{display:inline-block;margin:8px 0;padding:6px 10px;border:1px solid #8884;bo
   ol.x li[data-l="4"]{padding-left:3.6em}
   #ptoc li.n,ol.x li.n{margin-top:.5em;font-weight:600}
   #ptoc a,ol.x a{color:inherit;text-decoration:none}
+  /* 🔴 **+++ は改頁である**(2026-08-07。出典: PKC2 catalog #14 section break /
+     page break)。直す前は**配る HTML でも改頁が起きていなかった**(break-after が
+     auto)。しかも hr.pkc-section-break と素の hr は**見た目まで同じ**だった ──
+     ここに .pkc-section-break の規則が 1 行も無かったので。
+     ⚠ 出し分けは DOM でもう成立している(kind=rule は class 無しの hr)。
+     ⚠ display:none にしてはいけない ── 箱が消えると改頁も消えるのに、計算後の
+       break-after は page のまま残る(緑のまま壊れる。画面側 app.css の同名の節と同じ)。
+     ⚠ #all(全体印刷)の中の本文も .b 配下なのでここで一緒に効く */
+  .b .pkc-section-break{break-after:page;border:0;margin:0}
   /* 見出しが行末で独りにならない・切ってはいけない箱を切らない */
   .b h1,.b h2,.b h3,.b h4,main h2{break-after:avoid-page}
   .b pre,.b table,.b blockquote,.b img{break-inside:avoid}
