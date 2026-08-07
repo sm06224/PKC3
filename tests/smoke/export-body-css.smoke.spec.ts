@@ -68,6 +68,13 @@ const POINTS: readonly Point[] = [
   { name: '表のセル罫の色', sel: 'td', prop: 'border-top-color', bare: 'rgb(0, 0, 0)' },
   // 空行 ── 直す前は高さ 0(`_3` を書いても何も空かない)
   { name: '空行 3 つの高さ(字の大きさ比)', sel: '.pkc-blank-line', prop: 'height', bare: '0.00', em: true },
+  /**
+   * 本文のリンク。焼いた `.pkc-md-rendered a{color:var(--accent)}` が効く。
+   * ⚠ この観測点は**紙の側でも見る**(下の `onPaper`)── 書き出し側の
+   *   `@media print{.b a{color:inherit}}` を取り下げた判断は、これまで無検査だった
+   *   (レビュー 2 巡目の指摘)。紙で黒へ戻す変異が、これで鳴る。
+   */
+  { name: '本文のリンク色', sel: 'a[href^="https"]', prop: 'color', bare: 'rgb(0, 0, 238)' },
 ];
 
 /**
@@ -122,6 +129,8 @@ async function measure(page: Page, host: string, viaPrint = false): Promise<Reco
 
 const BODY = [
   '# 見出し',
+  '',
+  '[外](https://example.com/x)',
   '',
   ':::note',
   '注意',
@@ -230,6 +239,10 @@ test('🔴 配った HTML の本文が、アプリと同じ見た目で出る', 
     // ⚠ 添付のボタンは本文に無いので、同じ形の要素を器に置いて**継承だけ**を見る
     const f = document.createElement('a');
     f.className = 'f';
+    // ⚠ **href を持たせる** ── 本物は blob URL を持つ。href が無いと UA の
+    //    a:-webkit-any-link{color:-webkit-link} を一度も踏まず、肝心の
+    //    「UA スタイルとの勝負」が再現されない(CLAUDE.md「stub は本物の意味論を真似る」)
+    f.href = 'blob:probe';
     f.textContent = '添付';
     host.appendChild(f);
     const color = getComputedStyle(f).color;

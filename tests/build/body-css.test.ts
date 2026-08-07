@@ -211,9 +211,25 @@ describe('app.css との突合(片方だけ古くならない)', () => {
    *   素通りする。**app.css を数え直して突合する**。
    */
   it('🔴 抜けている本文の規則が 1 本も無い', () => {
-    const want = parseRules(APP).filter((r) => isBodyRule(r.selector));
-    expect(want.length, 'app.css に本文の規則が無い(この検査は空振り)').toBeGreaterThan(100);
-    expect(OUT.ruleCount, '抜き出しが app.css より少ない').toBe(want.length);
+    /**
+     * 🔴 **右辺を独立に数える**(2026-08-07、レビュー 2 巡目で直した)。
+     * 直す前は `parseRules(APP).filter(isBodyRule).length` と比べていたが、
+     * `OUT.ruleCount` の定義が**まったく同じ式**なので `x === x` の
+     * **トートロジー**だった ── `parseRules` / `isBodyRule` を変えると両辺が
+     * 一緒に動く。docstring は「app.css を数え直して突合する」と主張していたのに、
+     * その主張が成立していなかった。
+     *
+     * だから**別の数え方**で突合する:`.pkc-md-rendered` という字面の出現数。
+     * 抜いた規則は**セレクタも宣言もそのまま**焼かれるので、両者は一致するはず。
+     * ⚠ 1 本落ちれば必ず減る(どの本文規則もこの字面を最低 1 回持つ)。
+     */
+    const occurrences = (css: string): number =>
+      (css.replace(/\/\*[\s\S]*?\*\//g, '').match(/\.pkc-md-rendered/g) ?? []).length;
+    const inApp = occurrences(APP);
+    expect(inApp, 'app.css に本文の規則が無い(この検査は空振り)').toBeGreaterThan(100);
+    expect(occurrences(OUT.css), '焼いた CSS で本文のセレクタが減っている').toBe(inApp);
+    // ⚠ 規則の**本数**も見る(字面の数だけでは、1 本を 2 本へ割る変異が通る)
+    expect(OUT.ruleCount, '抜いた本数が減っている').toBeGreaterThanOrEqual(100);
   });
 
   /**
@@ -291,6 +307,48 @@ describe('合成した CSS で境界を検める(本物では素通りする形)
   });
 
   /**
+   * 🔴 **引用符の中は字面であって構文ではない**(2026-08-07、レビュー 2 巡目)。
+   * `;` で `head` を畳む分岐を足したとき、**属性セレクタの中の `;` でも畳んで**
+   * しまい、規則が丸ごと壊れていた(実測: セレクタが `b"]` になる)── 直した先で
+   * 開けた穴である。
+   */
+  it('🔴 属性値の中の `;` `{` `}` で規則を切らない', () => {
+    const rules = parseRules(
+      '.pkc-md-rendered [data-x="a;b"]{color:red}\n' +
+        ".pkc-md-rendered [data-y='c{d'] p{color:blue}\n" +
+        '.pkc-md-rendered q::after{content:"}"}\n' +
+        '.pkc-md-rendered p{color:green}\n',
+    );
+    expect(rules.map((r) => r.selector)).toEqual([
+      '.pkc-md-rendered [data-x="a;b"]',
+      ".pkc-md-rendered [data-y='c{d'] p",
+      '.pkc-md-rendered q::after',
+      '.pkc-md-rendered p',
+    ]);
+    expect(rules[2]!.body, '宣言が引用符の中の } で切れている').toBe('content:"}"');
+  });
+
+  /**
+   * 🔴 **引用符の中を詰めない**。`content: '注: '` は詰めると**別の文字列**になり、
+   * `[title="a, b"]` は詰めると**一致しなくなる**(どちらも実測)。
+   */
+  it('🔴 minify が文字列と属性値を書き換えない', () => {
+    const out = extractBodyCss(
+      ".pkc-md-rendered p::after{content:'注: '}\n" +
+        '.pkc-md-rendered q::before{content:", "}\n' +
+        '.pkc-md-rendered [title="a, b"]{color:red}\n' +
+        '.pkc-md-rendered i::after{content:"a   b"}\n',
+      TOKENS,
+    );
+    expect(out.css, '文字列の末尾の空白が消えた').toContain("content:'注: '");
+    expect(out.css, '文字列の中のカンマの後ろが詰まった').toContain('content:", "');
+    expect(out.css, '属性値が詰まってセレクタが一致しなくなった').toContain('[title="a, b"]');
+    expect(out.css, '文字列の中の連続空白が潰れた').toContain('content:"a   b"');
+    // ⚠ 引用符の外は従来どおり詰まる(退避が効きすぎていないこと)
+    expect(out.css).toContain('.pkc-md-rendered p::after{');
+  });
+
+  /**
    * 🔴 **トークンの推移閉包**。`tokens.css` は今日 `var(` を 1 個も持たないので、
    * 閉包を消しても本物では出力が byte 一致する ── **合成でしか検められない**。
    */
@@ -354,8 +412,33 @@ describe('焼いた文字列の検品', () => {
     expect(auditBodyCss({ ...base, css }).join('\n')).toContain('暗い環境のトークンの層');
   });
 
-  it('🔴 規則の本数が事故の桁で減った出力を止める', () => {
-    expect(auditBodyCss({ ...ok(), ruleCount: 3 }).join('\n')).toContain('本しか抜けていません');
+  /**
+   * 🔴 **規則も「焼いた文字列」から数える**(2026-08-07、レビュー 2 巡目)。
+   * 直す前は `out.ruleCount`(需要側の数)を見ていたので、**規則を 1 本も出さない
+   * 671 バイトの CSS が合格していた**(実測)── トークンについて直した欠陥の鏡像。
+   */
+  it('🔴 規則が 1 本も焼かれていない出力を止める(需要の数では通してしまう)', () => {
+    const base = ok();
+    // 規則の部分だけ削る = 組み立てのループを消したのと同じ形。ruleCount は 116 のまま
+    const css = base.css.slice(0, base.css.indexOf('.pkc-md-rendered'));
+    const bad = auditBodyCss({ ...base, css }).join('\n');
+    expect(bad, '規則 0 本の出力を通した').toContain('本文の規則が 0 本');
+    expect(bad, '抜いた数との食い違いを言っていない').toContain('抜いた 116 本のうち 0 本');
+  });
+
+  it('🔴 印刷の層が落ちた出力を止める(紙で改頁が起きなくなる)', () => {
+    const base = ok();
+    const css = base.css.slice(0, base.css.indexOf('@media print{'));
+    expect(auditBodyCss({ ...base, css }).join('\n')).toContain('印刷の層');
+  });
+
+  it('🔴 器の規則が混ざって膨らんだ出力を止める(tripwire は両側)', () => {
+    const base = ok();
+    const extra = Array.from(
+      { length: 200 },
+      (_, i) => `.pkc-md-rendered .x${i}{color:red}`,
+    ).join('');
+    expect(auditBodyCss({ ...base, css: base.css + extra }).join('\n')).toContain('上限');
   });
 
   /**

@@ -17,6 +17,11 @@ import type { ArchiveSource } from '../../src/features/export/pkc3-archive';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { DOCUMENT_GLOBAL_ATTRS } from '../../src/features/markdown/document-globals';
 import { readFileSync } from 'node:fs';
+import { extractBodyCss } from '../../build/body-css';
+
+/** 焼いた CSS の正本(書き出し側と同じものを作って突合する)。 */
+const APP_CSS = readFileSync('src/styles/app.css', 'utf8');
+const TOKENS_CSS = readFileSync('src/styles/tokens.css', 'utf8');
 
 const enc = new TextEncoder();
 
@@ -1420,27 +1425,59 @@ describe('可搬 HTML — 本文の CSS を app.css から焼く', () => {
   it('🔴 焼いた規則が `.b` の規則より後に在る(app.css が正本になる)', async () => {
     const css = await styleOf();
     /**
-     * ⚠ **「特定の 1 本より後ろ」では守れない**(2026-08-07 のレビューで直した)。
-     * 最初は `.b h1,` と比べていたが、それは `.b` 群のかなり手前の 1 本なので、
-     * 焼いた分を `.b` 群の**途中**(例: `.b a` の直後)へ移す変異が**生き延びる** ──
-     * そこから下の 20 数本(寄せ・切替・欠落表示・外部画像の器)が焼いた分に
-     * 勝ち直すのに、存在を数える検査も 9 観測点の smoke も全部通ってしまう。
-     * だから **`.b` 規則を全部数え上げて、焼いた分の前後に分ける**。
+     * 🔴 **「`.b` で始まる規則だけ」「行頭のものだけ」では守れない**
+     * (2026-08-07、レビュー 2 巡目で直した)。
+     *
+     * 直す前は `/^\.b[ .[>{,:][^{]*\{/gm` で数えていた。実測で**5 つの変異が全部緑**:
+     * 2 字下げ(`@media print` の中は元からこの書き方)/ 同一行の 2 本目 / `.b~*` /
+     * **`#body{…}`**(id 詳細度で焼いた分に全勝)/ タブ区切り。とくに 1 番目は
+     * 「a8c4144 が `@media print` から削除したばかりの `color:inherit` を、
+     * 勝つ位置に置き直す編集」そのものである。
+     *
+     * 🔑 **主張している不変条件を、そのまま検査する** ── 「焼いた分の後ろには、
+     * 許した 2 本以外の規則が 1 つも無い」。だから **`.b` に限らず全セレクタ**を
+     * 数え上げる。焼いた CSS の位置は**抜き出し器を呼んで突合**する
+     * (`indexOf` の目印より確実で、「一字一句そのまま載っている」も同時に pin できる)。
      */
-    const baked = css.indexOf('.pkc-md-rendered h1,');
-    expect(baked, '焼いた見出しの規則が無い(この検査は空振り)').toBeGreaterThan(0);
-    const bRules = [...css.matchAll(/^\.b[ .[>{,:][^{]*\{/gm)];
-    const before = bRules.filter((m) => m.index < baked);
-    const after = bRules.filter((m) => m.index > baked);
-    expect(before.length, '.b の規則が見つからない(この検査は空振り)').toBeGreaterThan(20);
+    const baked = extractBodyCss(APP_CSS, TOKENS_CSS).css;
+    const at = css.indexOf(baked);
+    expect(at, '焼いた CSS がそのままの字面で載っていない').toBeGreaterThan(0);
+    // 焼いた分より前に `.b` の規則が並んでいる(空振り防止)
+    expect(
+      [...css.slice(0, at).matchAll(/\.b[ .[>{,:~+]/g)].length,
+      '.b の規則が見つからない(この検査は空振り)',
+    ).toBeGreaterThan(20);
     /**
      * ⚠ 焼いた分の**後ろ**に置いてよいのは「**この面に対応物が無い**」ものだけ。
      * ここが増え始めたら、正本がまた 2 本に戻っている。
      */
+    const tail = css.slice(at + baked.length).replace(/\/\*[\s\S]*?\*\//g, '');
+    const sels = [...tail.matchAll(/(?:^|\})\s*([^{}]+?)\s*\{/g)].map((m) => m[1]!.trim());
     expect(
-      after.map((m) => m[0]).sort(),
-      '焼いた分の後ろに .b の規則が増えている(app.css が正本でなくなる)',
-    ).toEqual(['.b .pkc-render-toggle{', '.b a.f{']);
+      sels.sort(),
+      '焼いた分の後ろに規則が増えている(そこだけ app.css に勝ってしまう)',
+    ).toEqual(['.b .pkc-render-toggle', '.b a.f']);
+    // ⚠ `@media` で包んで後ろに置く抜け道も塞ぐ(prelude は上の走査に出ない)
+    expect(tail, '焼いた分の後ろに @media を置いている').not.toContain('@media');
+  });
+
+  /**
+   * 🔴 **添付のボタンの class 名が、CSS の側と揃っている**(2026-08-07、レビュー 2 巡目)。
+   *
+   * smoke の `a.f` の観測は**自前で `class='f'` の要素を作って**継承を見る ── 本物の
+   * 経路(`view()` が作るダウンロードボタン)を 1 度も通らないので、
+   * `a.className='f'` を `'dl'` に変える 1 行で**本物だけが緑の下線リンクに戻る**のに
+   * smoke は緑のままになる。だから**生成した blob の中で 2 つが噛み合っていること**を
+   * ここで pin する(CLAUDE.md「同じ判定が 2 か所に生えたら parity test を置く」)。
+   */
+  it('🔴 添付のボタンを作る側と、その体裁を書く側で class 名が一致している', async () => {
+    const html = await (await writePortableHtml(DOC, NOW)).blob.text();
+    const made = /(?:^|[^\w])a\.className='([^']+)'/.exec(html)?.[1];
+    expect(made, '添付のボタンを作る箇所が見つからない(この検査は空振り)').toBeTruthy();
+    const css = /<style>([\s\S]*?)<\/style>/.exec(html)![1]!;
+    expect(css, `a.${made} の体裁が CSS に無い(名前がずれた)`).toContain(`a.${made}{`);
+    // ⚠ 焼いた本文のリンク色に食われないための 1 本 ── これが要点
+    expect(css, '添付のボタンの色を戻す規則が無い').toContain(`.b a.${made}{color:inherit}`);
   });
 
   /**

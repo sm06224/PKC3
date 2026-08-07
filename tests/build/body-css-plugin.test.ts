@@ -13,7 +13,7 @@
  *   `configResolved` の配線を同時に通せるので、mock より検出力が高い。
  */
 import { describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BODY_CSS_ID, bodyCssPlugin } from '../../build/body-css-plugin';
@@ -101,16 +101,19 @@ describe('本文 CSS の virtual module を配る plugin', () => {
     // まず既定の root で通ることを見る(下の throw が「常に落ちるだけ」でない担保)
     expect(ld.call(ctx, id), '既定の root で中身が返らない').toBeTruthy();
 
-    cfg.call(ctx, { root: brokenRoot() });
+    const dir = brokenRoot();
+    cfg.call(ctx, { root: dir });
     let msg = '';
     try {
       ld.call(ctx, id);
     } catch (e) {
       msg = e instanceof Error ? e.message : String(e);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
     expect(msg, '壊れた入力で build が止まらない').toContain('焼き込みが壊れています');
     // ⚠ 理由まで出す(「どこか壊れた」では次の人が直せない)
-    expect(msg, '規則が 0 本であることを言っていない').toContain('本しか抜けていません');
+    expect(msg, '規則が 0 本であることを言っていない').toContain('本文の規則が 0 本');
     expect(msg, 'トークンが焼かれていないことを言っていない').toContain('焼いたトークンが');
   });
 });

@@ -103,8 +103,28 @@ export function parseRules(css: string): Rule[] {
   const at: string[] = [];
   let i = 0;
   let head = '';
+  /**
+   * 🔴 **引用符の中は字面であって構文ではない**(2026-08-07、レビュー 2 巡目)。
+   * `{` `}` `;` を無条件に区切りとして扱うと、`[data-x="a;b"]` のような
+   * 属性セレクタで**規則が丸ごと壊れる**(実測: セレクタが `b"]` になり、
+   * `isBodyRule` を通らなくなって静かに落ちた)。⚠ これは下の `;` の分岐を
+   * 足したときに**新しく開いた穴**である ── 直した先で開けたので記録する。
+   */
+  let quote = '';
   while (i < src.length) {
     const ch = src[i]!;
+    if (quote !== '') {
+      if (ch === quote) quote = '';
+      head += ch;
+      i += 1;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      head += ch;
+      i += 1;
+      continue;
+    }
     if (ch === '{') {
       const h = head.trim();
       head = '';
@@ -114,11 +134,21 @@ export function parseRules(css: string): Rule[] {
         at.push(h);
         continue;
       }
-      // 宣言ブロック ── 対応する `}` まで読む(中に `{` は来ない)
-      const end = src.indexOf('}', i);
-      const body = src.slice(i, end < 0 ? src.length : end);
-      out.push({ at: [...at], selector: h, body: body.trim() });
-      i = end < 0 ? src.length : end + 1;
+      // 宣言ブロック ── 閉じ `}` まで読む。⚠ ここも**引用符を跨がない**
+      // (`content: '}'` で規則が切れる)
+      let end = i;
+      let q = '';
+      for (; end < src.length; end += 1) {
+        const c = src[end]!;
+        if (q !== '') {
+          if (c === q) q = '';
+          continue;
+        }
+        if (c === '"' || c === "'") q = c;
+        else if (c === '}') break;
+      }
+      out.push({ at: [...at], selector: h, body: src.slice(i, end).trim() });
+      i = end < src.length ? end + 1 : src.length;
       continue;
     }
     if (ch === '}') {
@@ -326,6 +356,8 @@ export function extractBodyCss(appCss: string, tokensCss: string): BodyCss {
  */
 export const MIN_RULES = 80;
 export const MIN_VARS = 12;
+/** 上限。⚠ **tripwire は両側に置く**(CLAUDE.md)── 器の規則が混ざり始めたら鳴る。 */
+export const MAX_RULES = 250;
 
 /**
  * 🔴 **焼いた文字列そのものを検める**(2026-08-07、レビュー指摘で作った)。
@@ -368,11 +400,32 @@ export function auditBodyCss(out: BodyCss): string[] {
   if (!css.includes('@media (prefers-color-scheme:dark){:root{')) {
     bad.push('暗い環境のトークンの層が(prefers-color-scheme で包まれた形で)ありません');
   }
-  if (out.ruleCount < MIN_RULES) {
+  /**
+   * 🔴 **規則も「焼いた文字列」から数え直す**(2026-08-07、レビュー 2 巡目)。
+   *
+   * ⚠ 直す前はここが `out.ruleCount`(= `kept.length`)を見ていた ── **需要側の数**である。
+   *   `extractBodyCss` の規則を組み立てるループを消すと、`ruleCount = 116` /
+   *   `missing = []` / トークン 19 個 / dark 層あり のまま **audit が合格し、
+   *   本文の規則が 1 本も入っていない 671 バイトの CSS が出荷される**(実測)。
+   *   これは 1 巡目でトークンについて直した欠陥の**鏡像**だった。
+   * 🔑 `ruleCount` との**突合**も置く ── 抜いたのに焼かれなかった分を直接検出できる。
+   */
+  const emitted = parseRules(css).filter((r) => isBodyRule(r.selector)).length;
+  if (emitted !== out.ruleCount) {
+    bad.push(`抜いた ${out.ruleCount} 本のうち ${emitted} 本しか焼かれていません`);
+  }
+  if (emitted < MIN_RULES) {
     bad.push(
-      `本文の規則が ${out.ruleCount} 本しか抜けていません(下限 ${MIN_RULES})` +
+      `焼いた CSS に本文の規則が ${emitted} 本しかありません(下限 ${MIN_RULES})` +
         ` ── app.css の本文の規則が .pkc-md-rendered 起点でなくなった可能性があります`,
     );
+  }
+  if (emitted > MAX_RULES) {
+    bad.push(`焼いた CSS の本文の規則が ${emitted} 本あります(上限 ${MAX_RULES}。器が混ざった?)`);
+  }
+  // ⚠ 印刷の層も落ちうる ── 落ちると紙で改頁が起きず、見出しが行末で独りになる
+  if (!css.includes('@media print{')) {
+    bad.push('印刷の層(@media print)が焼かれていません');
   }
   /**
    * ⚠ **`<style>` を早期終了させる字面を通さない**。この CSS は書き出し HTML の
@@ -386,8 +439,23 @@ export function auditBodyCss(out: BodyCss): string[] {
 
 /** 空白を詰める(見た目の整形は要らない ── 配る HTML に埋め込む文字列である)。 */
 function minify(css: string): string {
-  return (
-    css
+  /**
+   * 🔴 **引用符の中は詰めない**(2026-08-07、レビュー 2 巡目)。
+   * `content: '注: '` は詰めると**別の文字列**になり、`[title="a, b"]` は詰めると
+   * **一致しなくなる**(どちらも実測)。今日の `app.css` は `content: ''` が
+   * 3 本だけなので実害は無いが、`content: '※ '` を書くのは `:is()` を素の子孫で
+   * 書くのと同じくらい自然な次の一手である ── 同じ論法で守る。
+   * ⚠ 目印は**私用領域の文字**にする(`\uE000`)── 制御文字は eslint の
+   *   `no-control-regex` に当たり、そもそも CLAUDE.md が生バイトを禁じている。
+   *   CSS の字面には決して現れない符号位置なので、衝突しない。
+   */
+  const literals: string[] = [];
+  const masked = css.replace(/'[^'\n]*'|"[^"\n]*"/g, (m) => {
+    literals.push(m);
+    return `\uE000${literals.length - 1}\uE000`;
+  });
+  const packed = (
+    masked
       // ⚠ **先に改行ごと 1 個の空白へ潰す**。改行を残すと、prettier が折り返した
       //   セレクタ(`.pkc-md-rendered\n  li.pkc-task-item…`)の中に改行が残る ──
       //   CSS としては空白なので動くが、読めない字面が配る HTML に載る
@@ -406,4 +474,6 @@ function minify(css: string): string {
       .replace(/;}/g, '}')
       .trim()
   );
+  // 退避した字面を戻す。⚠ 目印は制御文字なので、CSS の字面と衝突しない
+  return packed.replace(/\uE000(\d+)\uE000/g, (_, n: string) => literals[Number(n)]!);
 }

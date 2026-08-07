@@ -334,10 +334,48 @@ describe('箱の中の違反の見張り', () => {
     );
   });
 
+  /**
+   * 🔴 **位置ではなく「同期に登録されるか」を見る**(2026-08-07、レビュー 2 巡目)。
+   *
+   * 上の 2 本は字面の位置しか見ていないので、次の 1 行で**バグが完全に復活したまま
+   * 緑**になる ── script は head の同じ位置に在り、`indexOf` も content より小さい:
+   *
+   * ```diff
+   * -    "document.addEventListener('securitypolicyviolation',function(ev){" +
+   * +    "window.addEventListener('DOMContentLoaded',function(){" +
+   * +    "document.addEventListener('securitypolicyviolation',function(ev){" +
+   * ```
+   *
+   * だから**実際に走らせて**、`document.addEventListener` が**その場で**
+   * 呼ばれることを見る(`setTimeout(…,0)` で包む変異も同じく落ちる)。
+   */
+  it('🔴 見張りは同期に登録される(解析中の違反を取り逃さない)', () => {
+    const doc = srcdocOf('<b>x</b>');
+    // head の script = srcdoc の**最初の** script(resize は body 末尾)
+    const script = /<script>([\s\S]*?)<\/script>/.exec(doc)?.[1];
+    expect(script, 'head に script が無い(この検査は空振り)').toBeTruthy();
+    expect(script, '違反の見張りではない script を掴んでいる').toContain(
+      'securitypolicyviolation',
+    );
+    const registered: string[] = [];
+    const fakeDoc = { addEventListener: (type: string) => registered.push(type) };
+    const fakeWin = { addEventListener: (type: string) => registered.push(`window:${type}`) };
+    new Function('document', 'window', 'setTimeout', script!)(fakeDoc, fakeWin, () => 0);
+    expect(
+      registered,
+      '見張りが同期に登録されていない(DOMContentLoaded / setTimeout で遅らせている)',
+    ).toEqual(['securitypolicyviolation']);
+  });
+
   it('件数はまとめて 1 通だけ送る(100 枚の箱で 100 通飛ばさない)', () => {
     const doc = srcdocOf('<b>x</b>');
     // ⚠ 送信は 1 か所きり ── 増えたら「1 枚ごとに送る」へ戻っている
     expect(doc.split('pkc-html-blocked-images').length - 1).toBe(1);
     expect(doc, 'まとめる仕掛け(timer)が無い').toContain('timer=setTimeout');
+    // ⚠ **早期 return が無いと 1 枚ごとに timer を張る** ── 上の 2 つだけでは
+    //    `if(timer)return;` を消す変異が生き延びる(レビュー 2 巡目の指摘)
+    expect(doc, 'まとめる早期 return が無い(1 枚ごとに送ってしまう)').toContain(
+      'if(timer)return',
+    );
   });
 });

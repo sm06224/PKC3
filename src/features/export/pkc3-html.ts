@@ -183,7 +183,7 @@ nav button.p{width:auto;font-size:12px;padding:4px 10px;margin:2px 8px 0;
    **配った HTML では左のまま**だった(属性は載っているのに消費されていない)。
    アプリ側は src/styles/app.css の同名の節。**片方だけ直さない**。
    ⚠ この template literal の中に**バッククォートを書かない**(build が壊れる ──
-   この file で 4 度踏んだ)。
+   この file で 5 度踏んだ。数え上げは :160 の注記と揃える)。
    規約: PKC2 docs/development/notation-redesign-2026-05/02-frontmatter-and-globals.md */
 .b [data-pkc-align=center]{text-align:center}
 .b [data-pkc-align=end]{text-align:end}
