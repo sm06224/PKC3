@@ -63,12 +63,18 @@
         await store.request({ op: 'deleteEntry', cid: 'c1', lid: 'e1' });
         steps.countsAfterDelete = await store.request({ op: 'counts', cid: 'c1' });
         steps.relationsAfterDelete = await store.request({ op: 'listRelations', cid: 'c1' });
-        // e1 に触れる r1 / r2 は同 tx で消え、r3 だけ残る。revisions は P5 から
-        // 消さない: 既存 v1 + 削除時の trash snapshot = 2 件
+        // 🔴 **relations は deleteEntry では消えない**(実装は 2026-08-05 の #73 で
+        //    そう変わった)。消すと**ゴミ箱から戻しても居場所が戻らない** ── 子を
+        //    消して復元すると root へ出て、フォルダを消して復元すると中身が空になる。
+        //    残しても木は壊れない(親が metas に居ない辺は無視されるので、ゴミ箱の
+        //    間は子が root に出る)。最終処分は下の purgeTrash。
+        //    ⚠ **この検定は 2026-08-06 まで旧い意味論のままで nightly を赤くしていた** ──
+        //      実装が変わったのに検定が追いつかず、2 晩「本物のエラー」がそこに紛れた。
+        // revisions は P5 から消さない: 既存 v1 + 削除時の trash snapshot = 2 件
         steps.orphanCleanOk =
           steps.relations.length === 3 &&
-          steps.relationsAfterDelete.length === 1 &&
-          steps.relationsAfterDelete[0].id === 'r3' &&
+          steps.relationsAfterDelete.length === 3 &&
+          steps.relationsAfterDelete.map((r) => r.id).join(',') === 'r1,r2,r3' &&
           steps.countsAfterDelete.revisions === 2;
         // P5: trash = 「entries に居ない entry_lid の最新 revision」ビュー
         steps.trash = await store.request({ op: 'listTrash', cid: 'c1' });
@@ -183,11 +189,19 @@
         steps.trashAfterPurge = await store.request({ op: 'listTrash', cid: 'c1' });
         steps.liveRevsAfterPurge =
           (await store.request({ op: 'listRevisionMetas', cid: 'c1', entryLid: 'e2' })).length;
+        // 🔴 **relations の最終処分場はここ**(deleteEntry ではない)。
+        //    参照の切れた r1 / r2 がここで消え、生きている r3 だけ残る。
+        //    ⚠ 上の `orphanCleanOk`(消えないこと)と**対**にして初めて意味論が
+        //      閉じる ── 片側だけ検定すると「どこでも消えない」実装でも通る。
+        steps.relationsAfterPurge = await store.request({ op: 'listRelations', cid: 'c1' });
         steps.trashPurgeOk =
           steps.purgeTrash.purged === 2 && // e1 の v1 + 削除時 snapshot
           steps.countsFinal.revisions ===
             steps.countsBeforePurge.revisions - steps.purgeTrash.purged &&
           steps.trashAfterPurge.length === 0 &&
+          steps.countsBeforePurge.relations === 3 && // 掃除の前は 3 本残っている
+          steps.relationsAfterPurge.length === 1 &&
+          steps.relationsAfterPurge[0].id === 'r3' &&
           steps.liveRevsAfterPurge === 3; // 生存 entry の履歴は残る
         await store.request({ op: 'deleteAssetMeta', cid: 'c1', key: 'ast-orphan' });
         steps.assetMetasAfter = await store.request({ op: 'listAssetMetas', cid: 'c1' });
