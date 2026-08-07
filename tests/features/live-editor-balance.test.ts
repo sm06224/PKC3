@@ -110,16 +110,25 @@ const CASES: readonly Case[] = [
   { name: 'Tier 1 の入れ子(:::.outer > :::.inner)', body: ':::.outer\n:::.inner\n中身\n:::\n:::\n', ok: true },
   { name: ':::quote > :::note', body: ':::quote{author=x}\n:::note\n中身\n:::\n:::\n', ok: true },
 
+  // ── 畳まれない名前(2026-08-07 に直した)────────────────────
+  //    ⚠ 直す前は走査器が `:::name` を**一律に**囲いと見ていたので、renderer が
+  //      畳まない名前では塊の数が合わず**全文の入力欄へ落ちて**いた。
+  //    🔑 走査器と renderer が `directive-open.ts` の**同じ判定**を引くようにして直した。
+  //      当時のヘッダが書いていた「表を持ち込むな(判定が 2 か所になる)」という懸念は
+  //      正しかったので、**表ではなく判定そのものを共有**している。
+  { name: ':::foo(畳まれない名前)', body: ':::foo\n中身\n:::\n', ok: true },
+  { name: ':::unknown-thing', body: ':::unknown-thing\n中身\n:::\n', ok: true },
+
   // ── まだ釣り合っていない形(理由つきで記録する)──────────────
   {
-    name: ':::foo(未知名)',
-    body: ':::foo\n中身\n:::\n',
+    name: ':::figure に使えない id',
+    body: ':::figure{id="あ い"}\n中身\n:::\n',
     ok: false,
     whyNotOk:
-      'renderer は知らない名前を畳まず 3 塊の literal にするが、走査器は :::name を一律に囲いと見る。' +
-      'renderer 側は 2026-08-07 に判定を 1 か所へ寄せた(classifyDirectiveOpen)が、' +
-      '走査器がそれを引くには Tier 0 の語彙照合ごと共有する必要があり、' +
-      'source-blocks.ts のヘッダが「表を持ち込まない」と明記した判断を覆すことになる ── 裁定待ち。',
+      'renderer は id が不正な figure を畳まず 3 塊の literal にする(打ち間違いの合図なので黙って通さない)。' +
+      '走査器は**形**だけを見るので囲いと読む ── 属性の妥当性まで共有するには、' +
+      'figure / table / equation の id 検証を directive-open.ts へ降ろす必要がある。' +
+      '⚠ 開かない側に倒れるので害は「今日の編集画面へ退避する」だけで、壊れた分割の上で編集させるより安全である。',
   },
 ];
 
@@ -145,9 +154,10 @@ describe('ライブエディタの釣り合い(行ごとの編集が開くか)',
       expect((c.whyNotOk ?? '').length, `${c.name}: 理由が短すぎる`).toBeGreaterThan(40);
     }
     const open = CASES.filter((c) => c.ok).length;
-    // ⚠ 2026-08-07 に入れ子を直して 28 → 32 件。減ったら**退行**である(増えるのは歓迎)
-    expect(open, '行ごとの編集が開く形が減っている(退行)').toBeGreaterThanOrEqual(32);
-    // ⚠ 残るのは `:::foo`(未知名)の 1 件だけ。増やすには理由が要る(上の assert)
+    // ⚠ 2026-08-07: 入れ子で 28 → 32、畳まれない名前で 32 → 34。
+    //    減ったら**退行**である(増えるのは歓迎)
+    expect(open, '行ごとの編集が開く形が減っている(退行)').toBeGreaterThanOrEqual(34);
+    // ⚠ 残るのは「名前は知っているが属性が不正」な 1 件だけ。増やすには理由が要る
     expect(CASES.filter((c) => !c.ok).length, '釣り合わない形が増えている').toBeLessThanOrEqual(1);
   });
 
