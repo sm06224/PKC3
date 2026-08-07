@@ -1,0 +1,200 @@
+/** @vitest-environment happy-dom */
+/**
+ * ライブエディタの**釣り合い**(2026-08-07)。
+ *
+ * 原文の囲いの走査(`scanContainers`)と、描画の最上位の塊(`splitTopLevelBlocks`)の
+ * 数が合わないと `buildBlockPartition` が `ok: false` を返し、行ごとの編集が
+ * **全文の入力欄へ落ちる**。
+ *
+ * 🔴 **これは fallback なので、壊れても test は落ちない。**
+ * だから今日の真理値を**表として固定する**ことにした ── 治ったものが赤に戻るのも、
+ * まだ治っていないものが黙って増えるのも、両方この 1 本で見える。
+ *
+ * ⚠ **除外リストにしない**。「差があったら skip」と書いた瞬間、この検査は no-op に
+ *   なる(CLAUDE.md「ガードは代替物で満たせない条件にする」)。代わりに:
+ *   ① `ok` の値を**全件**書き出して突合する
+ *   ② `ok: false` の項目には **理由を必須**にする(書けない食い違いを増やせない)
+ *   ③ **`true` の件数に下限**を置く(全部 false にして表を書き換える逃げ道を塞ぐ)
+ */
+import { describe, expect, it } from 'vitest';
+import { scanContainers } from '../../src/features/markdown/source-blocks';
+import { splitTopLevelBlocks } from '../../src/features/markdown/html-blocks';
+import {
+  renderMarkdownWithRanges,
+  buildBlockPartition,
+} from '../../src/features/markdown/source-ranges';
+
+function balance(body: string): { spans: number; blocks: number; ok: boolean } {
+  const { html, ranges } = renderMarkdownWithRanges(body, { sourceLineAnchors: false });
+  const blocks = splitTopLevelBlocks(html);
+  const containers = scanContainers(body);
+  const part = buildBlockPartition(blocks, ranges, body.split('\n').length, containers);
+  return { spans: containers.length, blocks: blocks.length, ok: part.ok };
+}
+
+interface Case {
+  readonly name: string;
+  readonly body: string;
+  /** 行ごとの編集が開くか。 */
+  readonly ok: boolean;
+  /**
+   * ⚠ `ok: false` のときは**必須**。なぜ今日まだ釣り合っていないかを書く
+   * (書けない食い違いを黙って表に足せないようにする)。
+   */
+  readonly whyNotOk?: string;
+}
+
+const CASES: readonly Case[] = [
+  // ── 名前つきの囲い(renderer も走査器も 1 塊)──────────────
+  { name: ':::note', body: ':::note\n中身\n:::\n', ok: true },
+  { name: ':::section', body: ':::section{role=body}\n中身\n:::\n', ok: true },
+  { name: ':::callout', body: ':::callout{type=tip}\n中身\n:::\n', ok: true },
+  {
+    name: ':::admonition',
+    body: ':::admonition{type=warning title=題}\n中身\n:::\n',
+    ok: true,
+  },
+  { name: ':::if', body: ':::if{format=html}\n中身\n:::\n', ok: true },
+  { name: ':::details', body: ':::details{summary=x}\n中身\n:::\n', ok: true },
+  { name: ':::frontmatter', body: ':::frontmatter\n中身\n:::\n', ok: true },
+  { name: ':::body', body: ':::body\n中身\n:::\n', ok: true },
+  { name: ':::quote', body: ':::quote{author=x}\n中身\n:::\n', ok: true },
+  { name: ':::figure', body: ':::figure{#f1}\n中身\n^^^ 題\n:::\n', ok: true },
+  { name: ':::paragraph', body: ':::paragraph{align=center}\n中身\n:::\n', ok: true },
+  { name: ':::note の入れ子', body: ':::note\n:::note\n中身\n:::\n:::\n', ok: true },
+  { name: ':::toc(中を飲まない)', body: ':::toc\n\n# 見出し\n', ok: true },
+
+  // ── Tier 0(語彙)── `:::` の直後が英字なので走査器も見えている ────
+  { name: ':::code (Tier 0)', body: ':::code\n中身\n:::\n', ok: true },
+  { name: ':::red,bg-yellow (Tier 0)', body: ':::red,bg-yellow\n中身\n:::\n', ok: true },
+  { name: ':::red 1.2em (Tier 0)', body: ':::red 1.2em\n中身\n:::\n', ok: true },
+
+  // ── Tier 1(名前を持たない開き)── 2026-08-07 に直した ────────
+  //    ⚠ 直す前は走査器が見落として(spans=0)全文の入力欄へ落ちていた
+  { name: ':::.hl (Tier 1)', body: ':::.hl\n中身\n:::\n', ok: true },
+  { name: ':::.a.b (Tier 1)', body: ':::.a.b\n中身\n:::\n', ok: true },
+  { name: ':::.a#id (Tier 1)', body: ':::.a#id\n中身\n:::\n', ok: true },
+  { name: ':::{.hl} (Tier 1)', body: ':::{.hl}\n中身\n:::\n', ok: true },
+  { name: '::: {.hl} (Tier 1 pandoc)', body: '::: {.hl}\n中身\n:::\n', ok: true },
+  { name: ':::{#id .a} (Tier 1)', body: ':::{#id .a}\n中身\n:::\n', ok: true },
+  { name: '::: bareCls (Tier 1 pandoc)', body: '::: bareCls\n中身\n:::\n', ok: true },
+  { name: ':::.hl + 末尾空白', body: ':::.hl   \n中身\n:::\n', ok: true },
+  /**
+   * 🔴 **末尾に余りが付いた Tier 1 は「開き」ではない**(2026-08-07 実測)。
+   * renderer は畳まず 2 塊の literal にする ── 走査器も見てはいけない。
+   * ⚠ ここが無いと、開きの正規表現から `$` の錨を外す変異が**生き延びる**
+   *   (実際に生き延びた)。錨を外すと走査器だけが 1 囲いと見て**退行**する。
+   */
+  { name: '::: bareCls + 余り(畳まない)', body: '::: bareCls あまり\n中身\n:::\n', ok: true },
+  { name: ':::.hl + 余り(畳まない)', body: ':::.hl あまり\n中身\n:::\n', ok: true },
+  { name: ':::{.hl} + 余り(畳まない)', body: ':::{.hl} あまり\n中身\n:::\n', ok: true },
+
+  // ── 走査器が見ない形(renderer も畳まない = 揃っている)────────
+  {
+    name: ':::_private(走査器も renderer も畳まない)',
+    body: ':::_private\n中身\n:::\n',
+    ok: true,
+  },
+
+  // ── まだ釣り合っていない形(理由つきで記録する)──────────────
+  {
+    name: ':::quote > :::section',
+    body: ':::quote{author=x}\n:::section{role=body}\n中身\n:::\n:::\n',
+    ok: false,
+    whyNotOk:
+      '外側の :::quote の後処理が中の :::section を包まないので、renderer が最上位の塊を 2 個出す。' +
+      '走査器は 1 囲いなので釣り合わない。直すのは renderer の入れ子(走査器では直せない)。',
+  },
+  {
+    name: ':::format > :::details',
+    body: ':::format{.a}\n:::details{summary=x}\n中身\n:::\n:::\n',
+    ok: false,
+    whyNotOk:
+      '同上 ── :::format の後処理が中の :::details を包まないので renderer が最上位の塊を 2 個出す。' +
+      '走査器は 1 囲いなので釣り合わない。',
+  },
+  {
+    // ⚠ 2026-08-07: 開くと想定して書いたが**実測で外れた**。Tier 1 でも入れ子は
+    //    上の 3 件と同じ型で、走査器ではなく renderer 側の問題である
+    name: 'Tier 1 の入れ子(:::.outer > :::.inner)',
+    body: ':::.outer\n:::.inner\n中身\n:::\n:::\n',
+    ok: false,
+    whyNotOk:
+      '上の入れ子 3 件と同じ型 ── Tier 1 の後処理が中の Tier 1 を包まないので renderer が塊を 2 個出す。' +
+      '走査器は Tier 1 の開きを見るようになった(2026-08-07)ので 1 囲いだが、renderer 側が揃っていない。',
+  },
+  {
+    name: ':::quote > :::note',
+    body: ':::quote{author=x}\n:::note\n中身\n:::\n:::\n',
+    ok: false,
+    whyNotOk: '同上。⚠ この形は今日 HTML が交差しているので、入れ子の直し方で出力が動く。',
+  },
+  {
+    name: ':::foo(未知名)',
+    body: ':::foo\n中身\n:::\n',
+    ok: false,
+    whyNotOk:
+      'renderer は知らない名前を畳まず 3 塊の literal にするが、走査器は :::name を一律に囲いと見る。' +
+      '直すには「renderer が畳む名前の集合」が要り、source-blocks.ts のヘッダが' +
+      '「表を持ち込まない(判定が 2 か所になる)」と明記した判断を覆すことになる ── 裁定待ち。',
+  },
+];
+
+describe('ライブエディタの釣り合い(行ごとの編集が開くか)', () => {
+  for (const c of CASES) {
+    it(`${c.ok ? '開く' : '開かない'}: ${c.name}`, () => {
+      const r = balance(c.body);
+      expect(r.ok, `${c.name}: spans=${r.spans} blocks=${r.blocks}`).toBe(c.ok);
+      // ⚠ **空振り防止**: 塊が 1 個も無い(= 何も描いていない)本文で通さない
+      expect(r.blocks, `${c.name}: 塊が 0 個(何も検めていない)`).toBeGreaterThan(0);
+    });
+  }
+
+  /**
+   * 🔴 **表そのものを守る**。件数と理由の 2 つ。
+   * ⚠ これが無いと「釣り合わなくなったら表の `ok` を false に書き換える」で
+   *   いくらでも緑にできる ── 表は安全網ではなく**申告**になる。
+   */
+  it('🔴 釣り合っていない形には理由が要る / 開く形の件数に下限がある', () => {
+    for (const c of CASES) {
+      if (c.ok) continue;
+      expect(c.whyNotOk, `${c.name}: 釣り合わない理由が書かれていない`).toBeTruthy();
+      expect((c.whyNotOk ?? '').length, `${c.name}: 理由が短すぎる`).toBeGreaterThan(40);
+    }
+    const open = CASES.filter((c) => c.ok).length;
+    // ⚠ 2026-08-07 時点で 28 件。減ったら**退行**である(増えるのは歓迎)
+    expect(open, '行ごとの編集が開く形が減っている(退行)').toBeGreaterThanOrEqual(28);
+    expect(CASES.filter((c) => !c.ok).length, '釣り合わない形が増えている').toBeLessThanOrEqual(5);
+  });
+
+  /**
+   * 🔴 **Tier 1 は「走査器が見ている」ことを直接見る**(2026-08-07)。
+   *
+   * 上の表は `ok` という**下流の結果**を見ている ── 別の理由で ok になっても通る。
+   * 壊れる当の振る舞い(走査器が Tier 1 の開きを囲いと見なすか)を直接 pin する。
+   */
+  it('🔴 走査器は Tier 1 の開きを囲いと見なす(閉じの行は見なさない)', () => {
+    const opens = [
+      ':::.hl',
+      ':::.a.b#id',
+      ':::{.hl}',
+      '::: {.hl}',
+      '::: bareCls',
+      ':::{#id .a}',
+    ];
+    for (const o of opens) {
+      const spans = scanContainers(`${o}\n中身\n:::\n`);
+      expect(spans.length, `${o} を囲いと見ていない`).toBe(1);
+      expect(spans[0]!.start, `${o} の開始行が違う`).toBe(0);
+      expect(spans[0]!.end, `${o} が閉じまで飲んでいない`).toBe(2);
+      expect(spans[0]!.open, `${o} を「閉じていない」と誤判定している`).toBe(false);
+    }
+    // ⚠ 閉じの行そのものを開きと読まない(読むと 1 文書が延々と囲いになる)
+    expect(scanContainers(':::\n本文\n').length, '閉じの行を開きと読んでいる').toBe(0);
+    expect(scanContainers('::: \n本文\n').length, '空白だけの閉じを開きと読んでいる').toBe(0);
+    // ⚠ 末尾に余りが付いた形は renderer が畳まない ── 走査器も見てはいけない
+    for (const j of ['::: bareCls あまり', ':::.hl あまり', ':::{.hl} あまり']) {
+      expect(scanContainers(`${j}\n中身\n:::\n`).length, `${j} を囲いと読んでいる`).toBe(0);
+    }
+  });
+});
