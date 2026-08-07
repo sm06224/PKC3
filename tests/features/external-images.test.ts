@@ -286,3 +286,96 @@ describe('parity: 本文の画像と箱の CSP', () => {
     });
   }
 });
+
+/**
+ * 🔴 **止めた画像の見張りは、user の中身より前に登録されていなければならない**
+ * (2026-08-07。CI が 3 回に 1 回赤くなって判明)。
+ *
+ * かつて `securitypolicyviolation` の listener は resize script と一緒に
+ * **body の末尾**、つまり user の中身の**後ろ**に置かれていた。
+ * `<script>new Image().src='https://…'</script>` のように**解析中に**画像を
+ * 要求する中身では、違反が listener の登録より**先**に起きうる ── 起きる順は
+ * 実装依存なので、**同じ入力で出たり出なかったりする**
+ * (`chromium_headless_shell` で 3 回に 1 回、帯が出なかった)。
+ *
+ * ⚠ **これは test の flake ではなく製品の穴**である。帯が出なければ、その箱の画像は
+ *   「常に確認」の設定下で**二度と同意できない**。
+ * ⚠ 順序は smoke でも見えるが、smoke は**確率的にしか**落ちない ── だから
+ *   ここで**字面の順序**を直接 pin する(CLAUDE.md「壊れる当の振る舞いを直接見る」)。
+ */
+describe('箱の中の違反の見張り', () => {
+  const srcdocOf = (content: string): string => {
+    const host = document.createElement('div');
+    host.innerHTML = buildHtmlSandboxIframe(content);
+    return host.querySelector('iframe')!.getAttribute('srcdoc') ?? '';
+  };
+
+  it('🔴 見張りの登録が user の中身より前に在る', () => {
+    const marker = '<em data-probe="1">中身</em>';
+    const doc = srcdocOf(marker);
+    const listener = doc.indexOf('securitypolicyviolation');
+    // ⚠ `getAttribute('srcdoc')` は実体参照が解けた**素の HTML** を返す
+    const content = doc.indexOf('<em data-probe="1">');
+    expect(listener, '見張りが箱に入っていない(この検査は空振り)').toBeGreaterThan(0);
+    expect(content, 'user の中身が箱に入っていない(この検査は空振り)').toBeGreaterThan(0);
+    expect(listener, '見張りが user の中身より後ろに在る(解析中の違反を取り逃す)').toBeLessThan(
+      content,
+    );
+  });
+
+  /**
+   * ⚠ **CSP の宣言より後**でなければならない ── 前に置くと、方針が効く前に
+   * script が走る(その script 自身が `script-src` の対象になる)。
+   */
+  it('🔴 見張りは CSP の宣言より後ろに在る', () => {
+    const doc = srcdocOf('<b>x</b>');
+    expect(doc.indexOf('securitypolicyviolation')).toBeGreaterThan(
+      doc.indexOf('Content-Security-Policy'),
+    );
+  });
+
+  /**
+   * 🔴 **位置ではなく「同期に登録されるか」を見る**(2026-08-07、レビュー 2 巡目)。
+   *
+   * 上の 2 本は字面の位置しか見ていないので、次の 1 行で**バグが完全に復活したまま
+   * 緑**になる ── script は head の同じ位置に在り、`indexOf` も content より小さい:
+   *
+   * ```diff
+   * -    "document.addEventListener('securitypolicyviolation',function(ev){" +
+   * +    "window.addEventListener('DOMContentLoaded',function(){" +
+   * +    "document.addEventListener('securitypolicyviolation',function(ev){" +
+   * ```
+   *
+   * だから**実際に走らせて**、`document.addEventListener` が**その場で**
+   * 呼ばれることを見る(`setTimeout(…,0)` で包む変異も同じく落ちる)。
+   */
+  it('🔴 見張りは同期に登録される(解析中の違反を取り逃さない)', () => {
+    const doc = srcdocOf('<b>x</b>');
+    // head の script = srcdoc の**最初の** script(resize は body 末尾)
+    const script = /<script>([\s\S]*?)<\/script>/.exec(doc)?.[1];
+    expect(script, 'head に script が無い(この検査は空振り)').toBeTruthy();
+    expect(script, '違反の見張りではない script を掴んでいる').toContain(
+      'securitypolicyviolation',
+    );
+    const registered: string[] = [];
+    const fakeDoc = { addEventListener: (type: string) => registered.push(type) };
+    const fakeWin = { addEventListener: (type: string) => registered.push(`window:${type}`) };
+    new Function('document', 'window', 'setTimeout', script!)(fakeDoc, fakeWin, () => 0);
+    expect(
+      registered,
+      '見張りが同期に登録されていない(DOMContentLoaded / setTimeout で遅らせている)',
+    ).toEqual(['securitypolicyviolation']);
+  });
+
+  it('件数はまとめて 1 通だけ送る(100 枚の箱で 100 通飛ばさない)', () => {
+    const doc = srcdocOf('<b>x</b>');
+    // ⚠ 送信は 1 か所きり ── 増えたら「1 枚ごとに送る」へ戻っている
+    expect(doc.split('pkc-html-blocked-images').length - 1).toBe(1);
+    expect(doc, 'まとめる仕掛け(timer)が無い').toContain('timer=setTimeout');
+    // ⚠ **早期 return が無いと 1 枚ごとに timer を張る** ── 上の 2 つだけでは
+    //    `if(timer)return;` を消す変異が生き延びる(レビュー 2 巡目の指摘)
+    expect(doc, 'まとめる早期 return が無い(1 枚ごとに送ってしまう)').toContain(
+      'if(timer)return',
+    );
+  });
+});

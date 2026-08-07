@@ -29,6 +29,7 @@
  * → `<` を**すべて** `<` へ退避する。JSON の文字列としては同値なので、
  * 読み手は素の `JSON.parse` でよい。
  */
+import BODY_CSS from 'virtual:pkc-body-css';
 import { parseFrontmatter, type FrontmatterValue } from '../markdown/frontmatter';
 import { renderMarkdown, type RenderMarkdownOptions } from '../markdown/markdown-render';
 import { extractVars } from '../markdown/frontmatter';
@@ -147,9 +148,16 @@ nav button.p{width:auto;font-size:12px;padding:4px 10px;margin:2px 8px 0;
   border:1px solid #8885;border-radius:6px}
 /* 印刷用の目次と「全体」の入れ物は**画面には出さない**(@media print で出す) */
 #ptoc,#all{display:none}
-/* 描いた本文(P8 段⑲)。⚠ **配色トークンは持ち込まない** ── ここは
-   単体で開くファイルで、地の色は閲覧環境の light/dark に従う。
-   #8884 のような半透明の無彩色なら、どちらでも読める */
+/* 描いた本文(P8 段⑲)。ここから下の .b 前置きは**この面だけの素の体裁**で、
+   本文の記法の見た目は style の末尾に焼いた app.css が正本である(2026-08-07)。
+   ⚠ かつてここには「**配色トークンは持ち込まない**」と書いてあったが、
+     2026-08-07 に light / dark の配色トークンを焼き込んだので**もう本当ではない**。
+     #8884 のような半透明の無彩色が残っているのは、焼いた規則が触らない
+     プロパティの受け皿(= 下敷き)としてであって、方針としてではない。
+   ⚠ ここの規則は焼いた分より**手前**にあるので、同じ詳細度なら**負ける**。
+     「上書きしたい」を書く場所ではない ── 書くなら焼いた分の後ろ(style の末尾)。
+   ⚠ この template literal の中に**バッククォートを書かない**(build が壊れる ──
+     この file で 5 度目。今日 1 度踏んだ)。 */
 .b{max-width:46em}
 .b>*:first-child{margin-top:0}
 .b h1,.b h2,.b h3,.b h4{line-height:1.3;margin:1.4em 0 .5em}
@@ -175,7 +183,7 @@ nav button.p{width:auto;font-size:12px;padding:4px 10px;margin:2px 8px 0;
    **配った HTML では左のまま**だった(属性は載っているのに消費されていない)。
    アプリ側は src/styles/app.css の同名の節。**片方だけ直さない**。
    ⚠ この template literal の中に**バッククォートを書かない**(build が壊れる ──
-   この file で 4 度踏んだ)。
+   この file で 5 度踏んだ。数え上げは :160 の注記と揃える)。
    規約: PKC2 docs/development/notation-redesign-2026-05/02-frontmatter-and-globals.md */
 .b [data-pkc-align=center]{text-align:center}
 .b [data-pkc-align=end]{text-align:end}
@@ -273,7 +281,20 @@ a.f{display:inline-block;margin:8px 0;padding:6px 10px;border:1px solid #8884;bo
   /* 見出しが行末で独りにならない・切ってはいけない箱を切らない */
   .b h1,.b h2,.b h3,.b h4,main h2{break-after:avoid-page}
   .b pre,.b table,.b blockquote,.b img{break-inside:avoid}
-  .b a{color:inherit;text-decoration:none}
+  /* 🔴 **紙のリンクは濃緑のまま。正本を 1 本にする**(user 裁定 2026-08-07)。
+     選択肢を出して user が選んだ ── 「A: このまま(アプリも紙も濃緑。正本が 1 本に
+     なる)」。⚠ **裁定済みなので、ここを黒へ戻す変更は user の明示裁定なしに入れない。**
+
+     経緯: ここには color:inherit があったが、焼いた app.css の
+     .pkc-md-rendered a{color:var(--accent)} と詳細度が同じ(0,1,1)で後に来るため
+     **必ず負ける** ── 実測でも紙は rgb(20,102,60) だった。効いていない宣言を
+     「効いているように見える形」で残さないので、判断ごと取り下げてある。
+     ⚠ 紙で黒へ戻す変異は、export-body-css の smoke の観測点
+       「本文のリンク色」が鳴らす(紙の側でも見ている)。
+     ⚠ 仮に将来 user が黒へ倒すなら、**app.css 側で決めて両面に効かせる** ──
+       この面だけ足すと正本が 2 本に戻る。
+     下線を消すのはここの仕事(焼いた側は text-decoration を触らない)。 */
+  .b a{text-decoration:none}
   /* 紙に操作子は要らない(切替の見た目だけ消す ── どちらの面を見せるかは
      画面での選択をそのまま持ち込む) */
   .b .pkc-render-toggle{display:none}
@@ -284,6 +305,34 @@ a.f{display:inline-block;margin:8px 0;padding:6px 10px;border:1px solid #8884;bo
   #all section:first-child{break-before:auto}
   #all section h2{font-size:1.5em;margin:0 0 .6em}
 }
+/* ── 🔴 **本文の見た目の正本は app.css**(2026-08-07)。ここから下は
+   src/styles/app.css の .pkc-md-rendered 前置きの規則を build 時に抜いて焼いたもの
+   (build/body-css.ts + build/body-css-plugin.ts)。器は class .b、本文の規則は
+   class .pkc-md-rendered ── **両方**を本文の箱に付けてある。
+
+   ⚠ **上の .b 前置きより後に置く**。詳細度は同じ(0,1,1)なので後に来た側が勝つ =
+     app.css が正本になる。順を入れ替えると .b の古い値が勝ち、この節が無意味になる。
+   ⚠ 直す前、書き出した HTML には .pkc-* の規則が **10 個**しか無かった(app.css は 71 個)。
+     実ブラウザの 21 の観測点のうち **17 が違って**いた ── :::note / :::danger は枠も地も
+     無く本文の段落と見分けが付かず、タスク行は丸ポチとチェック欄が二重に出て、
+     圏点が付かず、_3(空行 3 つ)の高さが 0 だった。
+   ⚠ **トークンも一緒に焼く**(先頭の :root 群)── 規則だけ写すと var() が
+     computed-value time で無効になり、**先行する規則へ fall back しない**ので
+     「いま効いているものまで消える」= 何もしないより悪くなる(実測)。
+   ⚠ **値を静的に解決しない** ── light で潰すと暗い環境で白箱に白文字になる。 */
+${BODY_CSS}
+/* ── 焼いた分より**後**に置くもの ── 書き出し側の DOM が アプリと違う 2 点だけ。
+   ⚠ ここは「app.css を上書きしたい」ではなく「**この面には対応する要素が無い**」
+     という理由に限る。見た目の好みで足し始めると、正本が 2 本に戻る。 */
+/* ① 添付のボタンは**本文のリンクではない**(閲覧側だけが作る操作子)。
+   ⚠ 焼いた .pkc-md-rendered a{color:var(--accent)} と a.f は詳細度が同じ(0,1,1)
+     なので後が勝ち、**ダウンロードボタンの字が緑になっていた**(実測)。
+     アプリに対応物が無いので、これは parity ではなく退行である。 */
+.b a.f{color:inherit}
+/* ② 切替ボタンは右端に寄せる。app.css は隣のコピーボタン(right:2px)を避けて
+   right:26px にしているが、**閲覧側はコピーボタンを DOM から外す**
+   (押しても何も起きない飾りなので)── 26px のままだと 24px の空きが残る(実測)。 */
+.b .pkc-render-toggle{right:2px}
 </style>
 <nav>
   <h1 id="t"></h1>
@@ -292,7 +341,7 @@ a.f{display:inline-block;margin:8px 0;padding:6px 10px;border:1px solid #8884;bo
   <details id="dnotes" open><summary>ノート</summary><div id="list"></div></details>
   <details id="dtoc" open><summary>この文書の目次</summary><ol id="toc"></ol><p class="e" id="tocempty" hidden>見出しがありません</p></details>
 </nav>
-<main><div id="ptoc"></div><h2 id="title"></h2><div id="body" class="b"></div></main>
+<main><div id="ptoc"></div><h2 id="title"></h2><div id="body" class="b pkc-md-rendered"></div></main>
 <div id="all"></div>
 <noscript><p id="fail">このファイルは JavaScript で中身を表示します。有効にして開き直してください。</p></noscript>
 <script>
@@ -511,8 +560,11 @@ try{
       var sec=document.createElement('section');
       var t=document.createElement('h2');t.id='pe-'+i;t.textContent=e.title||'(無題)';
       sec.appendChild(t);
-      // ⚠ 本文の CSS は **class .b** に付けてある ── 同じ id を 2 個作らないため
-      var box=document.createElement('div');box.className='b';
+      // ⚠ 本文の CSS は **class .b** に付けてある ── 同じ id を 2 個作らないため。
+      // 🔴 **pkc-md-rendered も要る**(2026-08-07)── app.css から焼いた本文の規則は
+      //    そちらに付いている。**器は 2 か所ある**(#body と、ここ「全体を印刷」)ので
+      //    片方だけに足すと、全体印刷の紙だけ素の見た目で出る(誰も見ていない経路)
+      var box=document.createElement('div');box.className='b pkc-md-rendered';
       var hs=hydrate(box,e,plive,'pe'+i);
       sec.appendChild(box);all.appendChild(sec);
       // 目次: ノート名 + その見出し
