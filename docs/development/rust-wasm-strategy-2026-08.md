@@ -609,7 +609,7 @@ decode が支配するのは 5 段以下だけで、段数が増えると §2.1 
 - `docs/development/p2-storage-core-log-2026-07.md`(SAHPool / journal の実測 ── §5-9 の「捨てられない資産」)
 - 現行コード: `src/features/revision/line-patch.ts` / `src/adapter/platform/storage/content-hash.ts` / `src/adapter/platform/storage/storage-worker.ts` / `src/features/markdown/markdown-render.ts`
 - 計測ハーネス(scratchpad、揮発): `bench/`(profile・attribution)/ `rswasm/` / `wasm-spike/`(crate 560 行 + harness 8 本、71 アサーション全 pass・22 ケース byte 一致)/ `wasm-ci/`(`guard/wasm-lock.mjs` はそのまま `scripts/` に置ける完成品)/ `rustwasm/`
-- PKC2(read-only 参照): 計測規律 `.claude/skills/perf-measurement/SKILL.md`、`docs/development/storage-default-layout-decision-2026-07-26.md`
+- PKC2(read-only 参照): 計測規律 `PKC2:.claude/skills/perf-measurement/SKILL.md`(⚠ PKC3 には無い)、`docs/development/storage-default-layout-decision-2026-07-26.md`
 
 ---
 
