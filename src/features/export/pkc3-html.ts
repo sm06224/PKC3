@@ -148,102 +148,49 @@ nav button.p{width:auto;font-size:12px;padding:4px 10px;margin:2px 8px 0;
   border:1px solid #8885;border-radius:6px}
 /* 印刷用の目次と「全体」の入れ物は**画面には出さない**(@media print で出す) */
 #ptoc,#all{display:none}
-/* 描いた本文(P8 段⑲)。ここから下の .b 前置きは**この面だけの素の体裁**で、
-   本文の記法の見た目は style の末尾に焼いた app.css が正本である(2026-08-07)。
-   ⚠ かつてここには「**配色トークンは持ち込まない**」と書いてあったが、
-     2026-08-07 に light / dark の配色トークンを焼き込んだので**もう本当ではない**。
-     #8884 のような半透明の無彩色が残っているのは、焼いた規則が触らない
-     プロパティの受け皿(= 下敷き)としてであって、方針としてではない。
+/* ── 閲覧 HTML だけの素の体裁(2026-08-07 に掃除した)────────────────
+   本文の記法の見た目は、style の末尾に焼いた app.css が**正本**である。
+
+   🔴 **ここに残っているのは「焼いた側に対応物が無いもの」だけ**。
+   2026-08-07 に実測(書き出した HTML を実ブラウザで開き、#body 配下の
+   **全要素 × 全 computed プロパティ**を画面 light / 画面 dark / 紙の 3 通りで
+   突き合わせ)して、**焼いた側と重複していた 38 本を削除・5 本を絞り込んだ**。
+   削除の前後で **158,475 点すべて一致**、当たり先が 0 件の規則も 0 件
+   (「fixture のゼロ件の次元は測っていない次元」)。
+
    ⚠ ここの規則は焼いた分より**手前**にあるので、同じ詳細度なら**負ける**。
      「上書きしたい」を書く場所ではない ── 書くなら焼いた分の後ろ(style の末尾)。
+     ⇒ **足す前に「焼いた側が同じプロパティを宣言していないか」を確かめる。**
+     宣言していれば、ここに書いた行は**最初から 1 度も効かない**。
+   ⚠ #8884 のような半透明の無彩色は、焼いた規則が触らないプロパティの
+     受け皿(下敷き)である。配色の方針ではない。
    ⚠ この template literal の中に**バッククォートを書かない**(build が壊れる ──
-     この file で 5 度目。今日 1 度踏んだ)。 */
+     この file で 5 度目)。 */
+/* 🔑 読み幅。⚠ **app.css の読み幅は焼かれていない** ── あちらの規則は
+   [data-pkc-view-pane=detail] 起点で .pkc-md-rendered 前置きではないので、
+   抜き出しの判定(build/body-css.ts の isBodyRule)から外れる。だから
+   **この 1 行が配った HTML の読み幅の唯一の持ち主**である。消すと本文が全幅に伸びる。
+   ⚠ アプリは 42rem を**各ブロックに**、こちらは 46em を**器に**掛けており、
+     機構も値も揃っていない(裁定待ち。詳細は docs の掃除メモ)。 */
 .b{max-width:46em}
 .b>*:first-child{margin-top:0}
-.b h1,.b h2,.b h3,.b h4{line-height:1.3;margin:1.4em 0 .5em}
-.b h1{font-size:1.5em}.b h2{font-size:1.3em}.b h3{font-size:1.1em}
-.b p,.b ul,.b ol,.b blockquote,.b table{margin:0 0 1em}
-.b ul,.b ol{padding-left:1.5em}
+/* ⚠ 段落 / 箇条書きの margin は **app.css が書いていない**(UA 既定に任せている)。
+   焼いた側に対応物が無いので、消すと配った HTML だけ行間が変わる。 */
+.b p,.b ul,.b ol{margin:0 0 1em}
 .b li{margin:.2em 0}
-.b code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.92em;
-  background:#8882;border-radius:3px;padding:0 3px}
-.b pre{white-space:pre-wrap;word-break:break-word;margin:0 0 1em;padding:10px 12px;
-  background:#8881;border:1px solid #8883;border-radius:6px;overflow-x:auto}
-.b pre code{background:0;padding:0}
-.b blockquote{padding-left:1em;border-left:3px solid #8884;opacity:.85}
-.b table{border-collapse:collapse}
-/* ⚠ セルは start(left ではない)── 文書が rtl なら右が行頭。アプリ側
-   (src/styles/app.css の .pkc-md-rendered td,th)と同じにする */
-.b th,.b td{border:1px solid #8884;padding:4px 8px;text-align:start}
-.b th{background:#8881}
-.b hr{border:0;border-top:1px solid #8884;margin:1.5em 0}
-.b a{color:inherit}
-/* 🔴 **寄せの規則をここにも置く**(2026-08-06)。⚠ 直す前は align の規則が
-   **1 行も無かった** ── 中央寄せ(|| 行頭)を書いた段落が、アプリでは中央なのに
-   **配った HTML では左のまま**だった(属性は載っているのに消費されていない)。
-   アプリ側は src/styles/app.css の同名の節。**片方だけ直さない**。
-   ⚠ この template literal の中に**バッククォートを書かない**(build が壊れる ──
-   この file で 5 度踏んだ。数え上げは :160 の注記と揃える)。
-   規約: PKC2 docs/development/notation-redesign-2026-05/02-frontmatter-and-globals.md */
-.b [data-pkc-align=center]{text-align:center}
-.b [data-pkc-align=end]{text-align:end}
-.b [data-pkc-align=start]{text-align:start}
-/* physical(formal 専用)は反転させない ── 物理強制なので logical と混ぜない */
-.b [data-pkc-align=right]{text-align:right}
-.b [data-pkc-align=left]{text-align:left}
-.b [data-pkc-align=justify]{text-align:justify}
-.b p[data-pkc-indent="1"]{text-indent:1em}
-/* 文書 globals(frontmatter の writing / direction / align)。
-   🔴 縦書きは direction を ltr に固定する(規約 §2.3.5「縦書き右起こしは text 内
-   direction は ltr」)── vertical-rl の inline 軸は垂直なので、rtl を残すと
-   本文が**下から上へ**流れる。右起こし / 左起こしの区別は dir 属性が持つ。
-   ⚠ |> は logical end のまま(align では入れ替えない)── 規約が 2 通りに書いている
-   ので裁定待ち。理由は app.css の同名の節に書いた。 */
-.b[data-pkc-writing=vertical]{writing-mode:vertical-rl;direction:ltr}
-.b[data-pkc-writing=vertical][dir=ltr]{writing-mode:vertical-lr}
-.b[data-pkc-doc-align=left]{text-align:left}
-.b[data-pkc-doc-align=right]{text-align:right}
-.b[data-pkc-doc-align=center]{text-align:center}
-/* 縦書き × top / bottom は inline 軸の両端なので text-align で効く */
-.b[data-pkc-writing=vertical][data-pkc-doc-align=top]{text-align:start}
-.b[data-pkc-writing=vertical][data-pkc-doc-align=bottom]{text-align:end}
-.b[data-pkc-writing=vertical] [data-pkc-align=top]{text-align:start}
-.b[data-pkc-writing=vertical] [data-pkc-align=bottom]{text-align:end}
-/* 図表キャプションも文書既定の寄せに従わせない(アプリ側 app.css と同じ) */
-.b .pkc-fig-figure > figcaption,.b .pkc-fig-table > figcaption{text-align:start}
-.b .pkc-fig-equation{text-align:center}
-/* 🔴 **fence の「描画 / 原文」切替**(F-1 で紙にも波及して判明)。
-   描画は .pkc-render-slot、原文は .pkc-render-source で、どちらを見せるかは
-   CSS-only トグル(.pkc-render-toggle-input)が決める ── **規則が無いと両方出る**。
-   閲覧用 HTML は .b 前置きの独自 CSS しか持っていなかったので、
-   表の下に原文が丸ごと出て、押しても効かないチェックボックスが並んでいた。
-   ⚠ 紙ではもっと悪い ── F-1 の「全体を印刷」が**表と原文を二重に刷る**。
-   ⚠ アプリ側(app.css:944-1023)と**同じ向き**にする ── checked = 原文面。
-      逆にすると、同じファイルなのにアプリと閲覧側で見えるものが食い違う */
-.b .pkc-md-block{position:relative}
-.b .pkc-render-source{margin:0}
-/* ⚠ display:none にしない ── キーボードで到達できなくなる */
-.b .pkc-render-toggle-input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
-.b .pkc-render-toggle{position:absolute;top:2px;right:2px;z-index:1;padding:0 6px;
-  border:1px solid #8884;border-radius:6px;background:#8881;color:inherit;
-  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;
-  line-height:18px;cursor:pointer;opacity:0}
-.b .pkc-md-block:hover .pkc-render-toggle,
-.b .pkc-md-block:focus-within .pkc-render-toggle{opacity:1}
-.b .pkc-render-toggle-input:focus-visible + .pkc-render-toggle{opacity:1;outline:2px solid #888}
-.b .pkc-render-toggle-input:not(:checked) ~ .pkc-render-source,
-.b .pkc-render-toggle-input:checked ~ .pkc-render-slot{display:none}
-/* 切替そのものが無い形(-render)は原文を常に隠す */
-.b [data-pkc-render-mode='render'] > .pkc-render-source{display:none}
-/* 図は原文のまま(閲覧側に mermaid を積まない)*/
+/* ⚠ 折り返しは**紙で要る** ── 焼いた側は overflow-x:auto だけで、紙では
+   overflow が効かないので、これを消すと印刷でコードの長い行が切れる。 */
+.b pre{white-space:pre-wrap;word-break:break-word;margin:0 0 1em}
+/* ⚠ 焼いた側は色(--muted)だけ ── 濃さはこちらの持ち物。 */
+.b blockquote{opacity:.85}
+/* ⚠ 焼いた側は border 系だけ ── 余白はこちらの持ち物。 */
+.b hr{margin:1.5em 0}
+/* 図の原文(閲覧側に mermaid を積まないので、原文のまま出す)。
+   ⚠ pre.d は**閲覧側だけが作る要素** ── アプリに対応物が無い。 */
 .b pre.d{font-size:.9em;opacity:.85}
-.b [data-pkc-asset-missing]{opacity:.75;outline:1px dashed #8886}
-/* 読み込んでいない外部画像(2026-08-06)。⚠ 画面側 app.css の
-   .pkc-external-img:not([src]) の対面 ── 片面だけだと寸法 0 で「消えた」に見える。
-   ⚠ 下の hydrate が src を入れると、この見た目は自動で外れる */
-.b .pkc-external-img:not([src]){display:inline-block;min-width:8rem;min-height:3rem;
-  max-width:100%;border:1px dashed #8886;border-radius:6px;vertical-align:middle}
-/* 一覧の行(表)は溢れさせない */
+/* ⚠ 焼いた側は outline / color / min-height だけ ── 薄さはこちらの持ち物。 */
+.b [data-pkc-asset-missing]{opacity:.75}
+/* 一覧の行(表)は器から溢れさせない。⚠ 焼いた側に対応物なし。 */
 .b>*{max-width:100%}
 a.f{display:inline-block;margin:8px 0;padding:6px 10px;border:1px solid #8884;border-radius:6px;
   color:inherit;text-decoration:none}
@@ -277,10 +224,8 @@ a.f{display:inline-block;margin:8px 0;padding:6px 10px;border:1px solid #8884;bo
      ⚠ display:none にしてはいけない ── 箱が消えると改頁も消えるのに、計算後の
        break-after は page のまま残る(緑のまま壊れる。画面側 app.css の同名の節と同じ)。
      ⚠ #all(全体印刷)の中の本文も .b 配下なのでここで一緒に効く */
-  .b .pkc-section-break{break-after:page;border:0;margin:0}
   /* 見出しが行末で独りにならない・切ってはいけない箱を切らない */
-  .b h1,.b h2,.b h3,.b h4,main h2{break-after:avoid-page}
-  .b pre,.b table,.b blockquote,.b img{break-inside:avoid}
+  main h2{break-after:avoid-page}
   /* 🔴 **紙のリンクは濃緑のまま。正本を 1 本にする**(user 裁定 2026-08-07)。
      選択肢を出して user が選んだ ── 「A: このまま(アプリも紙も濃緑。正本が 1 本に
      なる)」。⚠ **裁定済みなので、ここを黒へ戻す変更は user の明示裁定なしに入れない。**

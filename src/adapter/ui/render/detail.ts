@@ -52,6 +52,9 @@ export interface AssetLender {
 
 type Mode = 'empty' | 'view' | 'editor';
 
+/** 本文の上の操作の**形**。形が変わるときだけ器を組み直す(`renderBar`)。 */
+type BarShape = 'edit' | 'retry' | 'none';
+
 /**
  * 🔴 **ライブエディタの口**(2026-08-05)。`?pkc-live=1` で 1 面に畳む。
  *
@@ -108,7 +111,16 @@ export class DetailRenderer {
   private skeletonLid: string | null = null;
   private titleEl: HTMLElement | null = null;
   private barSlot: HTMLElement | null = null;
+  /**
+   * 操作の器の**形**(2026-08-07)。形が同じなら node を使い回す ──
+   * 詳細は `renderBar` の注記。⚠ 骨組みを作り直したら `null` へ戻す
+   * (古い node を指したまま「形は同じ」と判断すると、外れた node を patch する)。
+   */
+  private barShape: BarShape | null = null;
+  private barButton: HTMLButtonElement | null = null;
   private panelSlot: HTMLElement | null = null;
+  /** いま出している履歴パネル(参照で比べる ── 同じなら触らない)。 */
+  private shownPanel: AppState['revisionPanel'] = null;
   /** 外部画像の確認の帯(2026-08-06)。⚠ 本文の器の**外**。 */
   private noticeSlot: HTMLElement | null = null;
   private bodyHost: HTMLElement | null = null;
@@ -218,6 +230,18 @@ export class DetailRenderer {
     this.bodyHost = null;
     this.bodyKind = null;
     this.bodyView = EMPTY_VIEW;
+    this.dropBarState();
+  }
+
+  /**
+   * ⚠ **器を作り直したら「いま出している形」も忘れる**(2026-08-07)。
+   * 忘れないと、外れた古い node を「形は同じ」と見て patch し続ける ──
+   * 画面には何も出ないのに test は通る、いちばん質の悪い形になる。
+   */
+  private dropBarState(): void {
+    this.barShape = null;
+    this.barButton = null;
+    this.shownPanel = null;
   }
 
   render(state: AppState): void {
@@ -286,6 +310,7 @@ export class DetailRenderer {
     if (fresh) {
       this.disposeLends(); // 前の表示が借りた URL はここで寿命終端
       this.region.textContent = '';
+      this.dropBarState(); // ⚠ slot ごと作り直すので、いま出している形も忘れる
       this.titleEl = document.createElement('h2');
       this.titleEl.setAttribute('data-pkc-field', 'detail-title');
       this.barSlot = document.createElement('div');
@@ -316,8 +341,14 @@ export class DetailRenderer {
     this.titleEl!.textContent = state.entryMetas.get(lid)?.title ?? '';
 
     if (body === null) {
-      this.barSlot!.textContent = '';
-      this.panelSlot!.textContent = '';
+      /**
+       * 🔴 **器は残す**(2026-08-07)。ここで空にしていたので、ノートを選んだ直後
+       * ── 本文が worker から届くまでのあいだ ── 「編集」が**DOM に存在しない**
+       * 窓が空いていた。押しても binder が黙って捨てるので、user から見ると
+       * 「クリックが効かない」。いまは器を残して押せない状態にする。
+       */
+      this.renderBar(state, false);
+      this.renderPanel(state, lid);
       if (this.bodyKind !== 'loading') {
         this.bodyKind = 'loading';
         this.bodyView = EMPTY_VIEW;
@@ -330,7 +361,7 @@ export class DetailRenderer {
       return;
     }
 
-    this.renderBar(state);
+    this.renderBar(state, true);
     this.renderPanel(state, lid);
 
     const fm = parseFrontmatter(body);
@@ -460,36 +491,72 @@ export class DetailRenderer {
     this.pendingScroll = null;
   }
 
-  /** 本文の上の操作(小さいので毎回組み直す ── 出入りは phase が変わったときだけ)。 */
-  private renderBar(state: AppState): void {
+  /**
+   * 本文の上の操作。
+   *
+   * 🔴 **器を捨てない。値だけ差し替える**(2026-08-07)。
+   *
+   * 直す前はここが毎回 `slot.textContent = ''` から組み直していた ──
+   * `inspector.ts` が 2026-08-06 に直したのと**同じ罠の、対称の反対側**である
+   * (CLAUDE.md「片側を直したら対称の反対側を必ず疑う」)。実害:
+   *
+   * - 保存すると storage worker の ack が遅れて届き、`REVISION_LIST_LOADED` /
+   *   `ENTRY_RESTORED` が非同期に `renderView` を呼ぶ
+   * - その瞬間「編集」が**別の node** になる。描いている絵は 1 ドットも変わらない
+   *   (`iconButton('start-edit','編集')` は定数)
+   * - binder は `root.contains(el)` を通らない target を黙って捨てるので、
+   *   保存直後に押すと **無言の dead click**
+   *
+   * ⚠ **本文待ちのあいだも器を残す**。かつては `body === null` の枝で
+   * `barSlot.textContent=''` していたので、ノートを選んだ直後は「編集」が
+   * **DOM に存在しない**窓が空いていた(遅い機械 / 大きい本文ほど広い)。
+   * いまは器を残して `disabled` にする ── **無言の操作拒否を作らない**ので、
+   * 押せない理由は `title` に書く。
+   *
+   * 🔑 器を組み直すのは**形が変わるときだけ**(編集 / 再保存 / 無し の 3 形)。
+   */
+  private renderBar(state: AppState, bodyReady: boolean): void {
     const slot = this.barSlot!;
-    slot.textContent = '';
     // error phase では「編集」を出さない ── START_EDIT は ready 限定なので、
     // 出したまま無言 no-op にしない(review B-1 原則: 無言の操作拒否を作らない)
-    if (state.phase === 'ready') {
-      const bar = document.createElement('div');
-      bar.setAttribute('data-pkc-field', 'detail-toolbar');
-      // 🔑 **ここには「編集」だけ**(P8)。書き出す / 履歴 / 削除は右の情報ペインが
-      // 持つ ── 同じボタンを 2 か所に出すと、押す場所が定まらない。
-      // 🔑 **追記もここに無い**(P8 段⑧)── 編集画面を通らない別の器が持つ
-      bar.append(iconButton('start-edit', '編集'));
-      slot.append(bar);
-    } else if (
-      state.phase === 'error' &&
-      state.openBody &&
-      state.openBody.baseline !== state.openBody.persisted &&
-      !state.openBody.diskAhead
-    ) {
-      // 保存失敗からの復帰導線: baseline ≠ persisted =「disk に未達の commit が
-      // ある」証拠(P3-5 の分離の回収点)。黙って死なせず再送を提示する
-      const bar = document.createElement('div');
-      bar.setAttribute('data-pkc-field', 'detail-toolbar');
-      const retry = document.createElement('button');
-      retry.type = 'button';
-      retry.setAttribute('data-pkc-action', 'retry-persist');
-      retry.textContent = '再保存';
-      bar.append(retry);
-      slot.append(bar);
+    const shape: BarShape =
+      state.phase === 'ready'
+        ? 'edit'
+        : state.phase === 'error' &&
+            state.openBody &&
+            state.openBody.baseline !== state.openBody.persisted &&
+            !state.openBody.diskAhead
+          ? 'retry'
+          : 'none';
+    if (shape !== this.barShape) {
+      this.barShape = shape;
+      this.barButton = null;
+      slot.textContent = '';
+      if (shape !== 'none') {
+        const bar = document.createElement('div');
+        bar.setAttribute('data-pkc-field', 'detail-toolbar');
+        if (shape === 'edit') {
+          // 🔑 **ここには「編集」だけ**(P8)。書き出す / 履歴 / 削除は右の情報ペインが
+          // 持つ ── 同じボタンを 2 か所に出すと、押す場所が定まらない。
+          // 🔑 **追記もここに無い**(P8 段⑧)── 編集画面を通らない別の器が持つ
+          this.barButton = iconButton('start-edit', '編集');
+        } else {
+          // 保存失敗からの復帰導線: baseline ≠ persisted =「disk に未達の commit が
+          // ある」証拠(P3-5 の分離の回収点)。黙って死なせず再送を提示する
+          const retry = document.createElement('button');
+          retry.type = 'button';
+          retry.setAttribute('data-pkc-action', 'retry-persist');
+          retry.textContent = '再保存';
+          this.barButton = retry;
+        }
+        bar.append(this.barButton);
+        slot.append(bar);
+      }
+    }
+    // ⚠ 形が同じなら node は使い回し、**状態だけ**当てる
+    if (this.barShape === 'edit' && this.barButton) {
+      this.barButton.disabled = !bodyReady;
+      this.barButton.title = bodyReady ? '' : '本文を読み込んでいます…';
     }
   }
 
@@ -524,12 +591,26 @@ export class DetailRenderer {
     this.renderExternalImageBar(lid, this.bodyHost);
   }
 
+  /**
+   * 履歴のパネル。
+   *
+   * 🔴 **中身が同じなら触らない**(2026-08-07)。直す前は `renderView` が走るたび
+   * 無条件に `slot.textContent = ''` していたので、**履歴を開いている最中に
+   * 無関係な再描画が 1 回でも入ると「この版に戻す」が全部別の node になっていた**
+   * ── そこは user がまさに押そうとしている場所である。
+   * ⚠ `revisionPanel` は state が差し替わっても**参照が同じなら中身も同じ**
+   * (`app-state.ts` は作り直すときだけ新しい object を置く)。
+   */
   private renderPanel(state: AppState, lid: string): void {
     const slot = this.panelSlot!;
+    const shown =
+      state.phase === 'ready' && state.revisionPanel && state.revisionPanel.lid === lid
+        ? state.revisionPanel
+        : null;
+    if (shown === this.shownPanel) return;
+    this.shownPanel = shown;
     slot.textContent = '';
-    if (state.phase === 'ready' && state.revisionPanel && state.revisionPanel.lid === lid) {
-      slot.append(renderHistoryPanel(state.revisionPanel.items));
-    }
+    if (shown) slot.append(renderHistoryPanel(shown.items));
   }
 
   private renderEditor(state: AppState): void {

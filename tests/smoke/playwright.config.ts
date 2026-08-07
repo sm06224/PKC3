@@ -22,7 +22,11 @@ const PORT = Number(process.env.PKC3_SMOKE_PORT ?? 45732);
 //
 // 🔴 **CI と手元で別のバイナリが動く**(2026-08-05 に実際に踏んだ)。
 // 同梱は `chromium-1194/chrome-linux/chrome`(フル Chromium)だが、
-// CI は playwright 既定 = **`chromium_headless_shell`**。この 2 つは
+// **PR gate は playwright 既定 = `chromium_headless_shell`**。
+// ⚠ **nightly は 2 つとも回す**(2026-08-07)── 突き合わせる場所は nightly しか無い。
+//    かつて nightly は probe 用の `PKC3_CHROMIUM` を `$GITHUB_ENV` へ書いており、
+//    **smoke まで巻き添えでフル chromium** になっていた(片方しか検査していない
+//    のに「両方で通している」つもりになる、いちばん質の悪い形)。この 2 つは
 // `window.print()` の振る舞いが違い(chrome は `beforeprint` のみ /
 // headless_shell は `beforeprint` + `afterprint` を同期発火)、
 // **手元で緑・CI で赤**になった。CI を手元で再現するには:

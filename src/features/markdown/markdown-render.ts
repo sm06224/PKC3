@@ -1242,6 +1242,220 @@ function parseTier0FormatOpen(line: string): { styles: Record<string, string> } 
   return { styles };
 }
 
+/**
+ * 🔴 **`:::` の開きを 1 か所で見分ける**(2026-08-07)。
+ *
+ * ## なぜ要るか
+ *
+ * 各 directive の前処理は「中身を飲む」ときに閉じ `:::` を探すが、直す前は
+ * **最初に出会った `:::` で止めていた**。だから中に別の `:::` を書くと、
+ * **内側の閉じを自分の閉じとして食い**、外側の閉じが最上位へ漏れる。
+ * 実測(2026-08-07、外×内の 112 通り)で **48 通りが壊れていた** ──
+ * 交差した HTML(`</blockquote>` が `</section>` より先)になるか、
+ * 内側が literal のまま残るかのどちらかで、どちらも
+ * **ライブエディタの釣り合いが崩れて行ごとの編集が開かなくなる**。
+ *
+ * ## 数える対象は「閉じを消費する開き」だけ
+ *
+ * ⚠ **`parseBlockDirectiveOpen` で代用してはいけない。** あれは `:::foo` のような
+ * **どの処理も畳まない名前**にも一致するので、数えると「閉じないものの閉じ」を
+ * 待って `:::` を 1 つ余計に食う。⚠ 逆に Tier 0(`:::red`)/ Tier 1(`:::.hl`)は
+ * `processFormatBlocks` が畳む**のに**、名前の正規表現に一致しないので
+ * 数え落とされていた(これが 48 通りのうち 20 通りの原因)。
+ *
+ * ⚠ **`:::break` は数えない** ── `+++` へ書き換わる 1 行の記法で、閉じを持たない。
+ * ⚠ **`:::toc` は `'self-contained'`** ── 中を飲まないが、**直後に `:::` があれば
+ *   それは toc のもの**。呼び手は「次の行が閉じなら 2 行まとめて飛ばす」を守る
+ *   (`source-blocks.ts` の走査器と同じ規則)。
+ *
+ * 🔑 **判定はここ 1 か所**(CLAUDE.md「判定を増やさない」)。名前を足すときは
+ * `tests/features/markdown-nesting.test.ts` の全数表も一緒に増える。
+ */
+type DirectiveOpenKind = 'container' | 'self-contained';
+
+/**
+ * 閉じ `:::` を消費する directive の名前。
+ * ⚠ **alias(`:::note` 等)も入れる** ── `processIfBlocks` は
+ * `processAdmonitionAliases` より**前**に走るので、書き換え前の名前で出会う。
+ */
+const CONTAINER_DIRECTIVE_NAMES: ReadonlySet<string> = new Set([
+  'comment', 'if', 'section', 'quote', 'details', 'figure', 'table', 'equation',
+  'format', 'frontmatter', 'body', 'paragraph', 'callout', 'admonition',
+  // admonition の短名(`ADMONITION_ALIASES` と同じ 8 個。あちらは書き換えの表、
+  // ここは「閉じを消費するか」の表なので、役割が違うため別に持つ)
+  'note', 'warning', 'tip', 'info', 'caution', 'important', 'danger', 'summary',
+]);
+
+function classifyDirectiveOpen(line: string): DirectiveOpenKind | null {
+  const named = parseBlockDirectiveOpen(line);
+  if (named) {
+    if (named.name === 'toc') return 'self-contained';
+    if (CONTAINER_DIRECTIVE_NAMES.has(named.name)) return 'container';
+    /**
+     * ⚠ **名前の形に一致しても、まだ終わりではない**(2026-08-07 に実測で踏んだ)。
+     * Tier 0 の語彙は `:::red` / `:::code` のように**名前と同じ形**なので、
+     * ここで `null` を返すと `processFormatBlocks` が畳む当のものを数え落とす。
+     * 「畳まれない名前」(`:::foo`)と区別できるのは**語彙の照合だけ**である。
+     */
+    return parseTier0FormatOpen(line) ? 'container' : null;
+  }
+  // 名前の形に一致しない開き ── Tier 0(空白区切り)/ Tier 1(class chain)は畳まれる
+  if (parseTier0FormatOpen(line)) return 'container';
+  if (parseTier1FormatOpen(line)) return 'container';
+  return null;
+}
+
+/**
+ * 🔴 **開きの次の行から、対応する閉じ `:::` の行番号を返す**(無ければ null)。
+ *
+ * 入れ子の深さを数えるので、中に別の `:::` が在っても取り違えない。
+ * ⚠ **fence の中は数えない** ── コードブロックに書いた `:::` は記法ではない。
+ * ⚠ 閉じが無いときは `null` を返す(呼び手は従来どおり「末尾まで飲む」)。
+ */
+function findMatchingClose(lines: readonly string[], from: number): number | null {
+  let depth = 0;
+  let fence: FenceState = { inFence: false, marker: '' };
+  for (let i = from; i < lines.length; i += 1) {
+    const line = lines[i]!;
+    const t = fenceTransition(line, fence);
+    fence = t.state;
+    if (fence.inFence || t.isBoundary) continue;
+    if (isBlockDirectiveClose(line)) {
+      if (depth === 0) return i;
+      depth -= 1;
+      continue;
+    }
+    const kind = classifyDirectiveOpen(line);
+    if (kind === 'container') {
+      depth += 1;
+    } else if (kind === 'self-contained') {
+      // ⚠ 中を飲まないので深さは動かさないが、**直後の `:::` はこの directive のもの**
+      const next = lines[i + 1];
+      if (next !== undefined && isBlockDirectiveClose(next)) i += 1;
+    }
+  }
+  return null;
+}
+
+/**
+ * 🔴 **`:::` の囲いを畳む走査を 1 本に寄せた**(2026-08-07)。
+ *
+ * `quote` / `details` / `format` / `frontmatter`・`body` / `section` の 5 つは、
+ * 「開きを見つける条件」以外**完全に同じ処理**だった。にもかかわらず
+ * `section` だけが 2026-08-06 に入れ子対応を受け、**残り 4 つは平坦なまま**
+ * 取り残されていた ── 同じ形が 5 か所に散っていると、直しが 1 か所にしか届かない。
+ *
+ * ## 何を守る走査か
+ *
+ * ① **開いている `:::` を数える**(自分の種類に限らない)── 他人の閉じを
+ *    自分の閉じとして食わない。他人の開き / 閉じは**そのまま流す**ので、
+ *    後段の処理が自分で対にできる
+ * ② **同じ種類の入れ子も畳む** ── `:::.outer` の中の `:::.inner` は
+ *    同じ処理が担当するので、飛ばして読むと内側が literal のまま残る
+ * ③ **閉じ忘れは末尾で閉じる**(HTML を壊さない)
+ *
+ * ⚠ 数える対象は `classifyDirectiveOpen` が 1 か所で決める ──
+ *   `:::foo` のような**畳まれない名前**を数えると `:::` を 1 つ余計に食う。
+ */
+function scanContainerDirective<T>(
+  source: string,
+  lineMapIn: number[],
+  /**
+   * 🔴 **本文にこれが 1 度も出てこないなら、段ごと素通りする**(2026-08-07)。
+   *
+   * ⚠ **素通りは「出力を 1 バイトも変えない」ことが条件**である。この走査は
+   * 自分の開きが 1 つも無ければ**全行をそのまま流す**だけなので、素通りと
+   * 完全に同じ結果になる(lineMap も入力のまま)。
+   * ⚠ 目印は**広い側**に取る ── 狭すぎると、その記法が黙って効かなくなる。
+   *   例: 装飾箱は `:::format` / Tier 0(`:::red`)/ Tier 1(`:::.hl`)の 3 形が
+   *   あるので、目印は共通の `:::` にする。
+   */
+  marker: string,
+  sentinelOpen: string,
+  sentinelSep: string,
+  /** 自分が畳む開きなら registry へ入れる値を、そうでなければ null を返す。 */
+  match: (line: string) => T | null,
+): { transformed: string; registry: Map<number, T>; lineMap: number[] } {
+  if (!source.includes(marker)) {
+    return { transformed: source, registry: new Map(), lineMap: lineMapIn };
+  }
+  const registry = new Map<number, T>();
+  const lines = source.split('\n');
+  const out: string[] = [];
+  const lineMapOut: number[] = [];
+  const emit = (s: string, idx: number): void => {
+    out.push(s);
+    lineMapOut.push(idx);
+  };
+  let counter = 0;
+  let fence: FenceState = { inFence: false, marker: '' };
+  const stack: ({ mine: true; id: number; inputIdx: number } | { mine: false })[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i]!;
+    const inputIdx = lineMapIn[i] ?? i;
+    const t = fenceTransition(line, fence);
+    fence = t.state;
+    if (fence.inFence || t.isBoundary) {
+      emit(line, inputIdx);
+      i += 1;
+      continue;
+    }
+    // 閉じ ── いちばん内側の開きに対応させる
+    if (stack.length > 0 && isBlockDirectiveClose(line)) {
+      const top = stack.pop()!;
+      if (top.mine) {
+        emit('', inputIdx);
+        emit(`${sentinelOpen}${top.id}${sentinelSep}CLOSE${sentinelOpen}`, inputIdx);
+      } else {
+        emit(line, inputIdx); // 他の directive の閉じ ── 後段へ渡す
+      }
+      i += 1;
+      continue;
+    }
+    const kind = classifyDirectiveOpen(line);
+    if (kind === null) {
+      emit(line, inputIdx);
+      i += 1;
+      continue;
+    }
+    if (kind === 'self-contained') {
+      // 中を飲まない ── 直後の `:::` が在ればそれはこの directive のもの
+      emit(line, inputIdx);
+      i += 1;
+      const next = lines[i];
+      if (next !== undefined && isBlockDirectiveClose(next)) {
+        emit(next, lineMapIn[i] ?? i);
+        i += 1;
+      }
+      continue;
+    }
+    const mine = match(line);
+    if (mine === null) {
+      // 他の directive ── 中身も閉じもそのまま流すが、**閉じは数える**
+      stack.push({ mine: false });
+      emit(line, inputIdx);
+      i += 1;
+      continue;
+    }
+    counter += 1;
+    registry.set(counter, mine);
+    stack.push({ mine: true, id: counter, inputIdx });
+    emit(`${sentinelOpen}${counter}${sentinelSep}OPEN${sentinelOpen}`, inputIdx);
+    emit('', inputIdx);
+    i += 1;
+  }
+  // ⚠ 閉じ忘れは**末尾で閉じる**(HTML を壊さない)
+  while (stack.length > 0) {
+    const top = stack.pop()!;
+    if (!top.mine) continue;
+    const last = lineMapIn[lines.length - 1] ?? top.inputIdx;
+    emit('', last);
+    emit(`${sentinelOpen}${top.id}${sentinelSep}CLOSE${sentinelOpen}`, last);
+  }
+  return { transformed: out.join('\n'), registry, lineMap: lineMapOut };
+}
+
 md.inline.ruler.after('emphasis', 'pkc_simple_inline', function simpleInlineRule(state, silent) {
   if (silent) return false;
   const src = state.src;
@@ -1339,6 +1553,12 @@ const VAR_SEP = '\u{E141}';
 
 function expandVarsInText(source: string, vars: Record<string, string>): string {
   if (!source) return source;
+  /**
+   * 🔴 **本文に目印が無いなら段ごと素通りする**(2026-08-07)。出力は 1 バイトも
+   * 変わらない ── この段は目印が 1 つも無ければ全行をそのまま流すだけである。
+   * ⚠ 目印は**広い側**に取る(狭すぎるとその記法が黙って効かなくなる)。
+   */
+  if (!source.includes('{{')) return source;
   const lines = source.split('\n');
   let fence: FenceState = { inFence: false, marker: '' };
   return lines.map((line) => {
@@ -1806,6 +2026,12 @@ function processFigureBlocks(source: string, lineMapIn: number[]): {
   registry: Map<string, FigEntry>;
   lineMap: number[];
 } {
+  /**
+   * 🔴 **本文に目印が無いなら段ごと素通りする**(2026-08-07)。出力は 1 バイトも
+   * 変わらない ── この段は目印が 1 つも無ければ全行をそのまま流すだけである。
+   * ⚠ 目印は**広い側**に取る(狭すぎるとその記法が黙って効かなくなる)。
+   */
+  if (!source.includes(':::')) return { transformed: source, registry: new Map(), lineMap: lineMapIn };
   const registry = new Map<string, FigEntry>();
   const lines = source.split('\n');
   const out: string[] = [];
@@ -1870,7 +2096,16 @@ function processFigureBlocks(source: string, lineMapIn: number[]): {
     let captionInputIdx = inputIdx;
     const openInputIdx = inputIdx;
     i++;
-    while (i < lines.length && lines[i]!.trim() !== ':::') {
+    /**
+     * ⚠ **入れ子を数えて閉じを探す**(2026-08-07)。直す前は「最初に出会った `:::`」で
+     * 止めていたので、`:::figure` の中に `:::note` を 1 つ書くだけで**内側の閉じで
+     * 図が終わり**、外側の閉じが `<p>:::</p>` として漏れていた(実測 8 形すべて)。
+     * ⚠ 中の directive は `content` へそのまま入れて後段へ渡す ── figure はこの
+     * 前処理の中で**いちばん早く**走るので、中身は後段が自分で畳む。
+     */
+    const figCloseIdx = findMatchingClose(lines, i);
+    const figBodyEnd = figCloseIdx ?? lines.length;
+    while (i < figBodyEnd) {
       const innerInputIdx = lineMapIn[i] ?? i;
       const cm = /^\^\^\^\s*(.*)$/.exec(lines[i]!);
       // reform-2026-05 Phase 2 PR-2C(2026-05-10):`:caption:[…]` formal marker
@@ -1892,7 +2127,7 @@ function processFigureBlocks(source: string, lineMapIn: number[]): {
         // multi-line caption: 後続行から `]` 行(or `]{attrs}`)を探す
         const captionLines: string[] = [];
         i++;
-        while (i < lines.length && !/^\]\s*(?:\{[^}]*\})?\s*$/.test(lines[i]!) && lines[i]!.trim() !== ':::') {
+        while (i < figBodyEnd && !/^\]\s*(?:\{[^}]*\})?\s*$/.test(lines[i]!)) {
           captionLines.push(lines[i]!);
           i++;
         }
@@ -1911,8 +2146,9 @@ function processFigureBlocks(source: string, lineMapIn: number[]): {
       }
       i++;
     }
-    const closeInputIdx = i < lines.length ? (lineMapIn[i] ?? i) : openInputIdx;
-    if (i < lines.length) i++; // skip closing `:::`
+    const closeInputIdx =
+      figCloseIdx !== null ? (lineMapIn[figCloseIdx] ?? figCloseIdx) : openInputIdx;
+    if (figCloseIdx !== null) i = figCloseIdx + 1; // skip closing `:::`
     // ⚠ id が無い図は登録しない(`[@id]` の参照先にならない ── 空文字を鍵にすると
     //    id 無しの図が 2 つあるだけで「同じものを指す」になる)
     if (id !== '') registry.set(id, { kind, num, caption });
@@ -2015,6 +2251,12 @@ function processIfBlocks(source: string, lineMapIn: number[], targetFormat: stri
   transformed: string;
   lineMap: number[];
 } {
+  /**
+   * 🔴 **本文に目印が無いなら段ごと素通りする**(2026-08-07)。出力は 1 バイトも
+   * 変わらない ── この段は目印が 1 つも無ければ全行をそのまま流すだけである。
+   * ⚠ 目印は**広い側**に取る(狭すぎるとその記法が黙って効かなくなる)。
+   */
+  if (!source.includes(':::if')) return { transformed: source, lineMap: lineMapIn };
   const lines = source.split('\n');
   const out: string[] = [];
   const lineMapOut: number[] = [];
@@ -2088,7 +2330,15 @@ function processIfBlocks(source: string, lineMapIn: number[], targetFormat: stri
         i++;
         continue;
       }
-      if (parseBlockDirectiveOpen(inner)) {
+      /**
+       * ⚠ **数えるのは `classifyDirectiveOpen` が決める**(2026-08-07)。直す前は
+       * `parseBlockDirectiveOpen` で数えていたので **Tier 0 / Tier 1 を数え落とし**、
+       * `:::if{format=docx}` の中に `:::.hl` を書くと**捨てるはずの中身が漏れて
+       * 画面に出ていた**(実測)。逆に `:::foo` のような畳まれない名前は数えて
+       * しまい、`:::` を 1 つ余計に食っていた。
+       */
+      const innerKind = classifyDirectiveOpen(inner);
+      if (innerKind === 'container') {
         depth++;
       }
       if (match) {
@@ -2098,6 +2348,15 @@ function processIfBlocks(source: string, lineMapIn: number[], targetFormat: stri
       }
       lineMapOut.push(innerInputIdx);
       i++;
+      if (innerKind === 'self-contained') {
+        // 中を飲まない ── 直後の `:::` が在ればそれはこの directive のもの
+        const after = lines[i];
+        if (after !== undefined && isBlockDirectiveClose(after)) {
+          out.push(match ? after : '');
+          lineMapOut.push(lineMapIn[i] ?? i);
+          i++;
+        }
+      }
     }
     // depth > 0 のまま EOF 到達 → 閉じ ::: 無し(parser tolerance、content は出力済)
   }
@@ -2164,6 +2423,12 @@ function processTocDirective(
   source: string,
   lineMapIn: number[],
 ): { transformed: string; lineMap: number[]; records: TocDirectiveRecord[] } {
+  /**
+   * 🔴 **本文に目印が無いなら段ごと素通りする**(2026-08-07)。出力は 1 バイトも
+   * 変わらない ── この段は目印が 1 つも無ければ全行をそのまま流すだけである。
+   * ⚠ 目印は**広い側**に取る(狭すぎるとその記法が黙って効かなくなる)。
+   */
+  if (!source.includes(':::toc')) return { transformed: source, lineMap: lineMapIn, records: [] };
   const lines = source.split('\n');
   const out: string[] = [];
   const lineMapOut: number[] = [];
@@ -2332,54 +2597,18 @@ function processRegionBlocks(source: string, lineMapIn: number[]): {
   registry: Map<number, RegionEntry>;
   lineMap: number[];
 } {
-  const registry = new Map<number, RegionEntry>();
-  const lines = source.split('\n');
-  const out: string[] = [];
-  const lineMapOut: number[] = [];
-  let counter = 0;
-  let fence: FenceState = { inFence: false, marker: '' };
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i]!;
-    const inputIdx = lineMapIn[i] ?? i;
-    const t = fenceTransition(line, fence);
-    fence = t.state;
-    if (fence.inFence || t.isBoundary) {
-      out.push(line);
-      lineMapOut.push(inputIdx);
-      i++;
-      continue;
-    }
-    const open = parseBlockDirectiveOpen(line);
-    if (!open || !REGION_DIRECTIVE_NAMES.has(open.name)) {
-      out.push(line);
-      lineMapOut.push(inputIdx);
-      i++;
-      continue;
-    }
-    const kind = open.name as 'frontmatter' | 'body';
-    counter++;
-    const id = counter;
-    registry.set(id, { kind, attrs: open.attrs });
-    const openInputIdx = inputIdx;
-    i++;
-    out.push(`${REGION_SENTINEL_OPEN}${id}${REGION_SENTINEL_SEP}OPEN${REGION_SENTINEL_OPEN}`);
-    lineMapOut.push(openInputIdx);
-    out.push('');
-    lineMapOut.push(openInputIdx);
-    while (i < lines.length && !isBlockDirectiveClose(lines[i]!)) {
-      out.push(lines[i]!);
-      lineMapOut.push(lineMapIn[i] ?? i);
-      i++;
-    }
-    const closeInputIdx = i < lines.length ? (lineMapIn[i] ?? i) : openInputIdx;
-    if (i < lines.length) i++;
-    out.push('');
-    lineMapOut.push(closeInputIdx);
-    out.push(`${REGION_SENTINEL_OPEN}${id}${REGION_SENTINEL_SEP}CLOSE${REGION_SENTINEL_OPEN}`);
-    lineMapOut.push(closeInputIdx);
-  }
-  return { transformed: out.join('\n'), registry, lineMap: lineMapOut };
+  return scanContainerDirective<RegionEntry>(
+    source,
+    lineMapIn,
+    ':::',
+    REGION_SENTINEL_OPEN,
+    REGION_SENTINEL_SEP,
+    (line) => {
+      const open = parseBlockDirectiveOpen(line);
+      if (!open || !REGION_DIRECTIVE_NAMES.has(open.name)) return null;
+      return { kind: open.name as 'frontmatter' | 'body', attrs: open.attrs };
+    },
+  );
 }
 
 function postProcessRegionSentinels(
@@ -2435,105 +2664,27 @@ function processSectionBlocks(source: string, lineMapIn: number[]): {
   registry: Map<number, SectionEntry>;
   lineMap: number[];
 } {
-  const registry = new Map<number, SectionEntry>();
-  const lines = source.split('\n');
-  const out: string[] = [];
-  const lineMapOut: number[] = [];
-  let counter = 0;
-  let fence: FenceState = { inFence: false, marker: '' };
-  /**
-   * 🔴 **開いている `:::` を数える**(2026-08-06 の bug fix)。
-   *
-   * 直す前は「開いたら**最初に出会った `:::` まで**を中身にする」平坦な走査だった。
-   * だから `:::section` の中に `:::note` を書くと:
-   *  ① 内側の開き行が**本文として素通り**して `<p>:::section{role=note}</p>` になり
-   *  ② 内側の閉じが**外側の閉じ**として使われ
-   *  ③ 外側の閉じが最上位に残って `<p>:::</p>` として漏れていた(実測)
-   *
-   * ⚠ 数えるのは **`section` に限らずすべての `:::name`** である ── `:::details` や
-   * `:::toc` も閉じ `:::` を消費するので、自分の種類だけ数えると他人の閉じを
-   * 自分の閉じとして食う(混在した入れ子で同じ壊れ方をする)。
-   * ⚠ 他人の開き / 閉じは**そのまま流す** ── 後段の `processDetailsBlocks` 等が
-   * 自分で処理する(ここで手を出すと担当が 2 か所になる)。
-   */
-  const stack: ({ kind: 'section'; id: number; inputIdx: number } | { kind: 'other' })[] = [];
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i]!;
-    const inputIdx = lineMapIn[i] ?? i;
-    const t = fenceTransition(line, fence);
-    fence = t.state;
-    if (fence.inFence || t.isBoundary) {
-      out.push(line);
-      lineMapOut.push(inputIdx);
-      i++;
-      continue;
-    }
-    // 閉じ ── いちばん内側の開きに対応させる
-    if (stack.length > 0 && isBlockDirectiveClose(line)) {
-      const top = stack.pop()!;
-      if (top.kind === 'section') {
-        out.push('');
-        lineMapOut.push(inputIdx);
-        out.push(
-          `${SECTION_SENTINEL_OPEN}${top.id}${SECTION_SENTINEL_SEP}CLOSE${SECTION_SENTINEL_OPEN}`,
-        );
-        lineMapOut.push(inputIdx);
-      } else {
-        out.push(line); // 他の directive の閉じ ── 後段へ渡す
-        lineMapOut.push(inputIdx);
+  return scanContainerDirective<SectionEntry>(
+    source,
+    lineMapIn,
+    ':::section',
+    SECTION_SENTINEL_OPEN,
+    SECTION_SENTINEL_SEP,
+    (line) => {
+      const open = parseBlockDirectiveOpen(line);
+      if (!open || open.name !== 'section') return null;
+      // Q8 value-only 寛容パース(v4 §16):`:::section{intro}` → role=intro
+      let role = typeof open.attrs.kvs.role === 'string' ? open.attrs.kvs.role : 'generic';
+      if (role === 'generic') {
+        const innerMatch = /\{([^}]*)\}/.exec(line);
+        if (innerMatch) {
+          const inferred = inferQ8ValueOnlyKey('section', innerMatch[1]!);
+          if (inferred && inferred.key === 'role') role = inferred.value;
+        }
       }
-      i++;
-      continue;
-    }
-    const open = parseBlockDirectiveOpen(line);
-    if (!open) {
-      out.push(line);
-      lineMapOut.push(inputIdx);
-      i++;
-      continue;
-    }
-    if (open.name !== 'section') {
-      // 他の directive ── 中身も閉じもそのまま流すが、**閉じは数える**
-      stack.push({ kind: 'other' });
-      out.push(line);
-      lineMapOut.push(inputIdx);
-      i++;
-      continue;
-    }
-    // Q8 value-only 寛容パース(v4 §16):`:::section{intro}` → role=intro
-    let role = typeof open.attrs.kvs.role === 'string' ? open.attrs.kvs.role : 'generic';
-    if (role === 'generic') {
-      const innerMatch = /\{([^}]*)\}/.exec(line);
-      if (innerMatch) {
-        const inferred = inferQ8ValueOnlyKey('section', innerMatch[1]!);
-        if (inferred && inferred.key === 'role') role = inferred.value;
-      }
-    }
-    counter++;
-    const id = counter;
-    registry.set(id, { role, attrs: open.attrs });
-    stack.push({ kind: 'section', id, inputIdx });
-    out.push(`${SECTION_SENTINEL_OPEN}${id}${SECTION_SENTINEL_SEP}OPEN${SECTION_SENTINEL_OPEN}`);
-    lineMapOut.push(inputIdx);
-    out.push('');
-    lineMapOut.push(inputIdx);
-    i++;
-  }
-  /**
-   * ⚠ 閉じ忘れは**末尾で閉じる**(HTML を壊さない)。直す前の実装も
-   * 「閉じが無ければ末尾まで飲んで閉じる」だったので、そこは変えていない。
-   */
-  while (stack.length > 0) {
-    const top = stack.pop()!;
-    if (top.kind !== 'section') continue;
-    const last = lineMapIn[lines.length - 1] ?? top.inputIdx;
-    out.push('');
-    lineMapOut.push(last);
-    out.push(`${SECTION_SENTINEL_OPEN}${top.id}${SECTION_SENTINEL_SEP}CLOSE${SECTION_SENTINEL_OPEN}`);
-    lineMapOut.push(last);
-  }
-  return { transformed: out.join('\n'), registry, lineMap: lineMapOut };
+      return { role, attrs: open.attrs };
+    },
+  );
 }
 
 function postProcessSectionSentinels(
@@ -2624,76 +2775,31 @@ function processFormatBlocks(source: string, lineMapIn: number[]): {
   registry: Map<number, FormatBlockEntry>;
   lineMap: number[];
 } {
-  const registry = new Map<number, FormatBlockEntry>();
-  const lines = source.split('\n');
-  const out: string[] = [];
-  const lineMapOut: number[] = [];
-  let counter = 0;
-  let fence: FenceState = { inFence: false, marker: '' };
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i]!;
-    const inputIdx = lineMapIn[i] ?? i;
-    const t = fenceTransition(line, fence);
-    fence = t.state;
-    if (fence.inFence || t.isBoundary) {
-      out.push(line);
-      lineMapOut.push(inputIdx);
-      i++;
-      continue;
-    }
-    // v4 §12 stack PR 4-6:formal `:::format{...}` + Tier 1 class chain
-    // `:::.cls.cls(#id)?` + Tier 0 vocabulary `:::red,bg-yellow,1.2em` を 3 形 accept。
-    //
-    // 優先順序(Q3 vocabulary priority、user direction 2026-05-25):
-    //   1. formal `:::format{...}`(明示)
-    //   2. Tier 0 vocabulary(全 token が valid vocab、inline と完全対称)
-    //   3. Tier 1 class chain(`.cls` / brace / bare class)
-    let openAttrs: _BlockDirectiveAttrs | null = null;
-    let openStyles: Record<string, string> | undefined;
-    const formal = parseBlockDirectiveOpen(line);
-    if (formal && formal.name === 'format') {
-      openAttrs = formal.attrs;
-    } else {
+  return scanContainerDirective<FormatBlockEntry>(
+    source,
+    lineMapIn,
+    ':::',
+    FORMAT_SENTINEL_OPEN,
+    FORMAT_SENTINEL_SEP,
+    (line) => {
+      // v4 §12 stack PR 4-6:formal `:::format{...}` + Tier 1 class chain
+      // `:::.cls.cls(#id)?` + Tier 0 vocabulary `:::red,bg-yellow,1.2em` を 3 形 accept。
+      //
+      // 優先順序(Q3 vocabulary priority、user direction 2026-05-25):
+      //   1. formal `:::format{...}`(明示)
+      //   2. Tier 0 vocabulary(全 token が valid vocab、inline と完全対称)
+      //   3. Tier 1 class chain(`.cls` / brace / bare class)
+      const formal = parseBlockDirectiveOpen(line);
+      if (formal && formal.name === 'format') return { attrs: formal.attrs };
       const tier0 = parseTier0FormatOpen(line);
       if (tier0) {
-        openAttrs = { id: undefined, classes: [], kvs: {} };
-        openStyles = tier0.styles;
-      } else {
-        const tier1 = parseTier1FormatOpen(line);
-        if (tier1) openAttrs = tier1;
+        return { attrs: { id: undefined, classes: [], kvs: {} }, styles: tier0.styles };
       }
-    }
-    if (!openAttrs) {
-      out.push(line);
-      lineMapOut.push(inputIdx);
-      i++;
-      continue;
-    }
-    counter++;
-    const id = counter;
-    const entry: FormatBlockEntry = { attrs: openAttrs };
-    if (openStyles) entry.styles = openStyles;
-    registry.set(id, entry);
-    const openInputIdx = inputIdx;
-    i++;
-    out.push(`${FORMAT_SENTINEL_OPEN}${id}${FORMAT_SENTINEL_SEP}OPEN${FORMAT_SENTINEL_OPEN}`);
-    lineMapOut.push(openInputIdx);
-    out.push('');
-    lineMapOut.push(openInputIdx);
-    while (i < lines.length && !isBlockDirectiveClose(lines[i]!)) {
-      out.push(lines[i]!);
-      lineMapOut.push(lineMapIn[i] ?? i);
-      i++;
-    }
-    const closeInputIdx = i < lines.length ? (lineMapIn[i] ?? i) : openInputIdx;
-    if (i < lines.length) i++;
-    out.push('');
-    lineMapOut.push(closeInputIdx);
-    out.push(`${FORMAT_SENTINEL_OPEN}${id}${FORMAT_SENTINEL_SEP}CLOSE${FORMAT_SENTINEL_OPEN}`);
-    lineMapOut.push(closeInputIdx);
-  }
-  return { transformed: out.join('\n'), registry, lineMap: lineMapOut };
+      const tier1 = parseTier1FormatOpen(line);
+      if (tier1) return { attrs: tier1 };
+      return null;
+    },
+  );
 }
 
 function postProcessFormatBlockSentinels(
@@ -2802,58 +2908,21 @@ function processDetailsBlocks(source: string, lineMapIn: number[]): {
   registry: Map<number, DetailsEntry>;
   lineMap: number[];
 } {
-  const registry = new Map<number, DetailsEntry>();
-  const lines = source.split('\n');
-  const out: string[] = [];
-  const lineMapOut: number[] = [];
-  let counter = 0;
-  let fence: FenceState = { inFence: false, marker: '' };
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i]!;
-    const inputIdx = lineMapIn[i] ?? i;
-    const t = fenceTransition(line, fence);
-    fence = t.state;
-    if (fence.inFence || t.isBoundary) {
-      out.push(line);
-      lineMapOut.push(inputIdx);
-      i++;
-      continue;
-    }
-    const open = parseBlockDirectiveOpen(line);
-    if (!open || open.name !== 'details') {
-      out.push(line);
-      lineMapOut.push(inputIdx);
-      i++;
-      continue;
-    }
-    const rawSummary = open.attrs.kvs.summary;
-    const summary = typeof rawSummary === 'string' && rawSummary.length > 0
-      ? rawSummary
-      : '詳細';
-    const openDefault = open.attrs.kvs.open === true;
-    counter++;
-    const id = counter;
-    registry.set(id, { summary, open: openDefault });
-    const openInputIdx = inputIdx;
-    i++;
-    out.push(`${DETAILS_SENTINEL_OPEN}${id}${DETAILS_SENTINEL_SEP}OPEN${DETAILS_SENTINEL_OPEN}`);
-    lineMapOut.push(openInputIdx);
-    out.push('');
-    lineMapOut.push(openInputIdx);
-    while (i < lines.length && !isBlockDirectiveClose(lines[i]!)) {
-      out.push(lines[i]!);
-      lineMapOut.push(lineMapIn[i] ?? i);
-      i++;
-    }
-    const closeInputIdx = i < lines.length ? (lineMapIn[i] ?? i) : openInputIdx;
-    if (i < lines.length) i++;
-    out.push('');
-    lineMapOut.push(closeInputIdx);
-    out.push(`${DETAILS_SENTINEL_OPEN}${id}${DETAILS_SENTINEL_SEP}CLOSE${DETAILS_SENTINEL_OPEN}`);
-    lineMapOut.push(closeInputIdx);
-  }
-  return { transformed: out.join('\n'), registry, lineMap: lineMapOut };
+  return scanContainerDirective<DetailsEntry>(
+    source,
+    lineMapIn,
+    ':::details',
+    DETAILS_SENTINEL_OPEN,
+    DETAILS_SENTINEL_SEP,
+    (line) => {
+      const open = parseBlockDirectiveOpen(line);
+      if (!open || open.name !== 'details') return null;
+      const rawSummary = open.attrs.kvs.summary;
+      const summary =
+        typeof rawSummary === 'string' && rawSummary.length > 0 ? rawSummary : '詳細';
+      return { summary, open: open.attrs.kvs.open === true };
+    },
+  );
 }
 
 function postProcessDetailsSentinels(
@@ -2891,67 +2960,32 @@ function processQuoteBlocks(source: string, lineMapIn: number[]): {
   registry: Map<number, QuoteEntry>;
   lineMap: number[];
 } {
-  const registry = new Map<number, QuoteEntry>();
-  const lines = source.split('\n');
-  const out: string[] = [];
-  const lineMapOut: number[] = [];
-  let counter = 0;
-  let fence: FenceState = { inFence: false, marker: '' };
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i]!;
-    const inputIdx = lineMapIn[i] ?? i;
-    const t = fenceTransition(line, fence);
-    fence = t.state;
-    if (fence.inFence || t.isBoundary) {
-      out.push(line);
-      lineMapOut.push(inputIdx);
-      i++;
-      continue;
-    }
-    const open = parseBlockDirectiveOpen(line);
-    if (!open || open.name !== 'quote') {
-      out.push(line);
-      lineMapOut.push(inputIdx);
-      i++;
-      continue;
-    }
-    // Q8 value-only 寛容パース(v4 §16):`:::quote{"夏目漱石"}` → author=夏目漱石
-    let attrsForQuote = open.attrs;
-    if (typeof attrsForQuote.kvs.author !== 'string') {
-      const innerMatch = /\{([^}]*)\}/.exec(line);
-      if (innerMatch) {
-        const inferred = inferQ8ValueOnlyKey('quote', innerMatch[1]!);
-        if (inferred && inferred.key === 'author') {
-          attrsForQuote = {
-            ...attrsForQuote,
-            kvs: { ...attrsForQuote.kvs, author: inferred.value },
-          };
+  return scanContainerDirective<QuoteEntry>(
+    source,
+    lineMapIn,
+    ':::quote',
+    QUOTE_SENTINEL_OPEN,
+    QUOTE_SENTINEL_SEP,
+    (line) => {
+      const open = parseBlockDirectiveOpen(line);
+      if (!open || open.name !== 'quote') return null;
+      // Q8 value-only 寛容パース(v4 §16):`:::quote{"夏目漱石"}` → author=夏目漱石
+      let attrsForQuote = open.attrs;
+      if (typeof attrsForQuote.kvs.author !== 'string') {
+        const innerMatch = /\{([^}]*)\}/.exec(line);
+        if (innerMatch) {
+          const inferred = inferQ8ValueOnlyKey('quote', innerMatch[1]!);
+          if (inferred && inferred.key === 'author') {
+            attrsForQuote = {
+              ...attrsForQuote,
+              kvs: { ...attrsForQuote.kvs, author: inferred.value },
+            };
+          }
         }
       }
-    }
-    counter++;
-    const id = counter;
-    registry.set(id, { attrs: attrsForQuote });
-    const openInputIdx = inputIdx;
-    i++;
-    out.push(`${QUOTE_SENTINEL_OPEN}${id}${QUOTE_SENTINEL_SEP}OPEN${QUOTE_SENTINEL_OPEN}`);
-    lineMapOut.push(openInputIdx);
-    out.push('');
-    lineMapOut.push(openInputIdx);
-    while (i < lines.length && !isBlockDirectiveClose(lines[i]!)) {
-      out.push(lines[i]!);
-      lineMapOut.push(lineMapIn[i] ?? i);
-      i++;
-    }
-    const closeInputIdx = i < lines.length ? (lineMapIn[i] ?? i) : openInputIdx;
-    if (i < lines.length) i++;  // skip closing :::
-    out.push('');
-    lineMapOut.push(closeInputIdx);
-    out.push(`${QUOTE_SENTINEL_OPEN}${id}${QUOTE_SENTINEL_SEP}CLOSE${QUOTE_SENTINEL_OPEN}`);
-    lineMapOut.push(closeInputIdx);
-  }
-  return { transformed: out.join('\n'), registry, lineMap: lineMapOut };
+      return { attrs: attrsForQuote };
+    },
+  );
 }
 
 /** HTML attribute value に安全に埋め込む(`"` `<` `>` `&` を escape)。 */
@@ -3131,6 +3165,12 @@ function processParagraphAlignDirective(
   alignMap: Map<number, AlignKind>;
   lineMap: number[];
 } {
+  /**
+   * 🔴 **本文に目印が無いなら段ごと素通りする**(2026-08-07)。出力は 1 バイトも
+   * 変わらない ── この段は目印が 1 つも無ければ全行をそのまま流すだけである。
+   * ⚠ 目印は**広い側**に取る(狭すぎるとその記法が黙って効かなくなる)。
+   */
+  if (!source.includes(':::paragraph')) return { transformed: source, alignMap: new Map(), lineMap: lineMapIn };
   const lines = source.split('\n');
   const alignMap = new Map<number, AlignKind>();
   const out: string[] = [];
@@ -3393,6 +3433,17 @@ function stripComments(source: string, lineMapIn?: number[]): {
   transformed: string;
   lineMap: number[];
 } {
+  /**
+   * 🔴 **本文に目印が無いなら段ごと素通りする**(2026-08-07)。出力は 1 バイトも
+   * 変わらない ── この段は目印が 1 つも無ければ全行をそのまま流すだけである。
+   * ⚠ 目印は**広い側**に取る(狭すぎるとその記法が黙って効かなくなる)。
+   */
+  if (!source.includes('%%') && !source.includes(':::comment')) {
+    return {
+      transformed: source,
+      lineMap: lineMapIn ?? Array.from({ length: source.split('\n').length }, (_, i) => i),
+    };
+  }
   const lines = source.split('\n');
   const inMap = lineMapIn ?? Array.from({ length: lines.length }, (_, i) => i);
   const outLines: string[] = [];
@@ -3569,6 +3620,12 @@ const SECTION_SEP = '\u{E121}';
  * `:::break{...}` 行を simple 形に変換し、処理は既存 `+++` / `---` パイプに委譲。
  */
 function processBreakDirective(source: string): string {
+  /**
+   * 🔴 **本文に目印が無いなら段ごと素通りする**(2026-08-07)。出力は 1 バイトも
+   * 変わらない ── この段は目印が 1 つも無ければ全行をそのまま流すだけである。
+   * ⚠ 目印は**広い側**に取る(狭すぎるとその記法が黙って効かなくなる)。
+   */
+  if (!source.includes(':::break')) return source;
   let fence: FenceState = { inFence: false, marker: '' };
   return source.split('\n').map((line) => {
     const t = fenceTransition(line, fence);
@@ -3588,6 +3645,12 @@ function processBreakDirective(source: string): string {
 }
 
 function processSectionBreaks(source: string): string {
+  /**
+   * 🔴 **本文に目印が無いなら段ごと素通りする**(2026-08-07)。出力は 1 バイトも
+   * 変わらない ── この段は目印が 1 つも無ければ全行をそのまま流すだけである。
+   * ⚠ 目印は**広い側**に取る(狭すぎるとその記法が黙って効かなくなる)。
+   */
+  if (!source.includes('+++')) return source;
   // fenced code block 内では `+++` を marker と認識しない(2026-05-08 hotfix)。
   let fence: FenceState = { inFence: false, marker: '' };
   return source.split('\n').map((line) => {
@@ -3607,6 +3670,60 @@ function processSectionBreaks(source: string): string {
     }
     return `${SECTION_OPEN}${role}${SECTION_SEP}`;
   }).join('\n');
+}
+
+/**
+ * 🔴 **改頁の sentinel を段落から切り離す**(2026-08-07。実バグの修正)。
+ *
+ * `postProcessSectionBreaks` は sentinel が**単独の `<p>` に入っている**ことを
+ * 前提に `<p …>SENT</p>` を `<hr>` へ置き換える。ところが前後に空行が無いと
+ * markdown-it が隣の行と 1 つの段落に束ねてしまい、置換が当たらない ──
+ * PUA は画面に出ないので、**role の文字列(既定は `auto`)だけが本文に残り、
+ * 改頁は起きない**。
+ *
+ * ```
+ * 前            →  <p>前<br>          ← 改頁が消え、`auto` という字が出る
+ * +++              auto<br>
+ * 後               後</p>
+ * ```
+ *
+ * ⚠ **囲いの中だけの問題ではない**(2026-08-07 の実測)── 最上位でも、箇条書きの
+ *   中でも、空行を書かなければ同じように壊れていた。user が `+++` を素直に
+ *   書いた形(前後に空行を入れない)が、まさに壊れる形である。
+ * ⚠ `:::` 側は `ensureBlankAroundColonBlocksWithLineMap` が同じことをしている ──
+ *   **こちらだけ抜けていた**(CLAUDE.md「片側を直したら対称の反対側を疑う」)。
+ */
+const SECTION_BREAK_LINE_RE = new RegExp(`^${SECTION_OPEN}\\w[\\w-]*${SECTION_SEP}$`);
+
+function ensureBlankAroundSectionBreaks(
+  source: string,
+  lineMapIn: number[],
+): { transformed: string; lineMap: number[] } {
+  const inLines = source.split('\n');
+  const out: string[] = [];
+  const map: number[] = [];
+  for (let i = 0; i < inLines.length; i += 1) {
+    const line = inLines[i]!;
+    const inputIdx = lineMapIn[i] ?? i;
+    if (!SECTION_BREAK_LINE_RE.test(line)) {
+      out.push(line);
+      map.push(inputIdx);
+      continue;
+    }
+    const prev = out[out.length - 1];
+    if (prev !== undefined && prev.trim() !== '') {
+      out.push('');
+      map.push(inputIdx);
+    }
+    out.push(line);
+    map.push(inputIdx);
+    const next = inLines[i + 1];
+    if (next !== undefined && next.trim() !== '') {
+      out.push('');
+      map.push(inputIdx);
+    }
+  }
+  return { transformed: out.join('\n'), lineMap: map };
 }
 
 function postProcessSectionBreaks(html: string): string {
@@ -3793,6 +3910,15 @@ function processTolerantStandaloneAlign(
   lineMapIn: number[],
   silentWarnings = false,
 ): { transformed: string; alignMap: Map<number, AlignKind>; lineMap: number[] } {
+  /**
+   * 🔴 **本文に目印が無いなら段ごと素通りする**(2026-08-07)。出力は 1 バイトも
+   * 変わらない ── この段は目印が 1 つも無ければ全行をそのまま流すだけである。
+   * ⚠ 目印は**広い側**に取る(狭すぎるとその記法が黙って効かなくなる)。
+   */
+  if (!source.includes(':align:')) {
+    void silentWarnings;
+    return { transformed: source, alignMap: new Map(), lineMap: lineMapIn };
+  }
   const alignMap = new Map<number, AlignKind>();
   const lines = source.split('\n');
   const out: string[] = [];
@@ -3954,6 +4080,15 @@ function processAdmonitionAliases(
   lineMapIn: number[],
   silentWarnings = false,
 ): { transformed: string; lineMap: number[] } {
+  /**
+   * 🔴 **本文に目印が無いなら段ごと素通りする**(2026-08-07)。出力は 1 バイトも
+   * 変わらない ── この段は目印が 1 つも無ければ全行をそのまま流すだけである。
+   * ⚠ 目印は**広い側**に取る(狭すぎるとその記法が黙って効かなくなる)。
+   */
+  if (!source.includes(':::')) {
+    void silentWarnings;
+    return { transformed: source, lineMap: lineMapIn };
+  }
   const lines = source.split('\n');
   const out: string[] = [];
   const lineMapOut: number[] = [];
@@ -4241,6 +4376,13 @@ function processBlankLineMarkers(source: string, lineMapIn: number[]): {
   transformed: string;
   lineMap: number[];
 } {
+  /**
+   * 🔴 **本文に目印が無いなら段ごと素通りする**(2026-08-07)。出力は 1 バイトも
+   * 変わらない ── この段は目印が 1 つも無ければ全行をそのまま流すだけである。
+   * ⚠ 目印は**広い側**に取る(狭すぎるとその記法が黙って効かなくなる)。
+   */
+  // ⚠ 目印は `_` 1 文字 ── 語中の `_` でも素通りしないだけで、誤りにはならない
+  if (!source.includes('_')) return { transformed: source, lineMap: lineMapIn };
   const lines = source.split('\n');
   const out: string[] = [];
   const lineMapOut: number[] = [];
@@ -4536,6 +4678,10 @@ export function renderMarkdown(
   const colonNormResult = ensureBlankAroundColonBlocksWithLineMap(text, lineMap);
   text = colonNormResult.transformed;
   lineMap = colonNormResult.lineMap;
+  // 🔴 改頁(`+++` / `:::break`)の sentinel も**段落から切り離す**(2026-08-07)
+  const breakNormResult = ensureBlankAroundSectionBreaks(text, lineMap);
+  text = breakNormResult.transformed;
+  lineMap = breakNormResult.lineMap;
   // PR-2K:less-critical block 3 件(:::toc / :::frontmatter / :::body)を
   // sentinel wrap + console.warn(PKC1010)。寛容 parse はせず literal 残し。
   const hallResult = processHallucinatedDirectives(text, lineMap, opts.silentHallucinationWarnings);

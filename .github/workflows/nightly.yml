@@ -20,11 +20,29 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npx playwright install chromium --with-deps
+      # 🔴 **probe 用の path を `$GITHUB_ENV` へ書かない**(2026-08-07)。
+      #
+      # 直す前はここで `PKC3_CHROMIUM` を `$GITHUB_ENV` へ書いていた ── これは
+      # **以降の全 step に効く**ので、`tests/smoke/playwright.config.ts` も同じ変数を
+      # 読み、**nightly の smoke だけフル chromium で走っていた**(PR gate は
+      # 未設定なので playwright 既定 = `chromium_headless_shell`)。
+      # つまり CLAUDE.md が「CI は headless_shell」と書いている前提が、nightly では
+      # 静かに破れていた ── `window.print()` / CSP / `<a download>` のように
+      # **2 つのビルドで実挙動が違う**ことが分かっている箇所が、lane ごとに別物を
+      # 検査していたことになる。
+      # ⚠ probe(`tests/probe/run-*.mjs`)は GitHub runner に `/opt/pw-browsers` が
+      #   無いので path を要る。だから **probe の step にだけ** `env:` で渡す。
       - name: Resolve chromium path for probes
-        run: echo "PKC3_CHROMIUM=$(node -e "const {chromium}=require('@playwright/test'); console.log(chromium.executablePath())")" >> "$GITHUB_ENV"
-      # 現状は PR gate と同一 3 spec。nightly 専用の重い spec(mermaid 実 render
-      # 等の長待ち系)はここに追加していく ── PR gate には足さない
-      - name: Visual smoke
+        id: pw
+        run: echo "path=$(node -e "const {chromium}=require('@playwright/test'); console.log(chromium.executablePath())")" >> "$GITHUB_OUTPUT"
+      # 🔴 **smoke は 2 つのブラウザ両方で回す**(CLAUDE.md「実ブラウザ依存の spec は
+      # 両方で通してから push する」)。PR gate は速さのため headless_shell 片方だけ
+      # なので、**両方を突き合わせる場所は nightly しかない**。
+      - name: Visual smoke (headless_shell ── PR gate と同じ)
+        run: npm run test:smoke
+      - name: Visual smoke (フル chromium ── 実挙動が違う箇所を突き合わせる)
+        env:
+          PKC3_CHROMIUM: ${{ steps.pw.outputs.path }}
         run: npm run test:smoke
       # 🔴 product bundle は **PR gate が一度もビルドしない別成果物**である
       # (`BUILD_KIND` が焼き込まれるので entry chunk の中身も content hash も
@@ -61,14 +79,24 @@ jobs:
           # 起動失敗をここで fail-fast(loop は timeout しても exit 0 のため)
           curl -sf http://localhost:45731/ > /dev/null
       - name: Probe — store (sqlite ops / orphan cascade)
+        env:
+          PKC3_CHROMIUM: ${{ steps.pw.outputs.path }}
         run: node tests/probe/run-sahpool-probe.mjs http://localhost:45731/tests/probe/store-probe.html
       - name: Probe — sahpool (VFS / journal)
+        env:
+          PKC3_CHROMIUM: ${{ steps.pw.outputs.path }}
         run: node tests/probe/run-sahpool-probe.mjs http://localhost:45731/tests/probe/sahpool-probe.html
       - name: Probe — sidebar (15k 行の DOM 同一性)
+        env:
+          PKC3_CHROMIUM: ${{ steps.pw.outputs.path }}
         run: node tests/probe/run-sidebar-probe.mjs
       - name: Probe — editor (打鍵 / 対照群)
+        env:
+          PKC3_CHROMIUM: ${{ steps.pw.outputs.path }}
         run: node tests/probe/run-editor-probe.mjs
       - name: Probe — kanban (トグル往復 / move 数)
+        env:
+          PKC3_CHROMIUM: ${{ steps.pw.outputs.path }}
         run: node tests/probe/run-kanban-probe.mjs
       # lease-probe(多重タブの writer 昇格)は SAH 解放待ちが最も flake しやすい
       # ため nightly には入れない ── リース周りを触る PR で手動実行する運用
