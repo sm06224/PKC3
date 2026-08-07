@@ -66,7 +66,10 @@ grep -hoE '(PKC2:)?\.claude/[A-Za-z0-9./_-]*' <file> | grep -v '^PKC2:' \
    引き継ぎ doc に罠を書き溜めるのではなく、**資産に入れてからポインタを書く**
 2. **状態を実測する** ── `git log --oneline -5` / open PR / CI の結論 / 未 push の有無
 3. **doc を書く**(`docs/development/session-handoff-YYYY-MM-DD.md`)。
-   ⚠ 新 doc は**同 commit で INDEX に登録**(`check:doc-orphans` が在れば CI が鳴る)
+   ⚠ **PKC3 には `docs/development/INDEX.md` も `check:doc-orphans` も無い**
+   (2026-08-07 に確認)── PKC2 の「新 doc は同 commit で INDEX 登録」は**ここでは
+   適用されない**。代わりに**引き継ぎ PR 本文から doc を必ずリンクする**
+   (孤児 doc を作らないのが目的で、手段は INDEX ではない)
 4. **裁定待ちを Issue に起票する** ── 🔑 **会話に流すと消える**。
    2026-08-07 に、GO が出ていた案件を起票しなかったせいで**裁定済みの件を
    user に聞き直す事故**になった(#91)
