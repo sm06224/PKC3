@@ -2081,3 +2081,90 @@ select:focus-visible {
   color: var(--muted);
   font-size: 11px;
 }
+
+/* ── 印刷(2026-08-07)────────────────────────────────
+ *
+ * 🔴 **直す前は画面から印刷すると 1 頁しか出なかった**(実測)。本文の器
+ * (`[data-pkc-region='detail']`)が `overflow: auto` の**唯一のスクロール箱**で、
+ * 高さ 650px の窓に 6271px の中身が入っていた ── 紙に出るのはその窓の分だけで、
+ * **残り約 90% が黙って落ちていた**。左の一覧と右の付随情報も紙に出ていた。
+ * `app.css` に `@media print` は **0 件**だった(印刷用 CSS は書き出し側にしか無かった)。
+ *
+ * ⚠ **この節は file のいちばん最後に置く**。`@media` は詳細度を上げないので、
+ * 同じ詳細度の規則が後ろに在ると負ける。しかも**印刷時の版面幅は紙の幅**
+ * (A4 縦 = 794px)なので、`max-width: 1100px` と `max-width: 900px` の上書きが
+ * **実際に発火する**(実測)。
+ *
+ * 🔑 **ただしこれは予防である** ── 2026-08-07 時点の狭幅ブロックは、下で触っている
+ * `display` / `overflow` を**どちらも設定していない**(触るのは `grid-template-*` と
+ * flex の並びだけ)。だから「この節を手前へ移す」変異は**今日は等価**で、
+ * 変異試験で殺せない(実測。承知のうえで残している)。将来どれかの狭幅ブロックが
+ * 同じ宣言を持った瞬間に順序が効き始めるので、**末尾から動かさない**。
+ * ⚠ 紙の向きでも変わる ── A4 横(1123px)では狭幅の上書きが発火しない。
+ */
+@media print {
+  /* ① 器をほどく ── grid と 100% とスクロール箱。ここが本題である */
+  [data-pkc-slot='root'],
+  [data-pkc-region='shell'] {
+    display: block;
+    height: auto;
+    gap: 0;
+    background: none;
+  }
+  [data-pkc-region='center'],
+  [data-pkc-region='detail'],
+  [data-pkc-region='detail'] > [data-pkc-view-pane] {
+    display: block;
+    overflow: visible;
+    height: auto;
+    max-height: none;
+    background: none;
+  }
+  /* ② 紙に要らない面と操作子を落とす。
+   *    ⚠ 一覧と付随情報は**紙では消してよい** ── 画面で畳むのを禁じている
+   *    (操作の導線が消えるから)のは画面の話で、紙に押せるものは無い */
+  [data-pkc-region='sidebar'],
+  [data-pkc-region='inspector'],
+  [data-pkc-region='append'],
+  [data-pkc-region='status'],
+  [data-pkc-region='notices'],
+  [data-pkc-region='update'],
+  [data-pkc-field='detail-bar-slot'],
+  [data-pkc-field='detail-notice-slot'],
+  .pkc-md-copy-btn,
+  .pkc-render-toggle {
+    display: none;
+  }
+  /* ③ 切ってはいけない箱を切らない / 見出しを行末に独り残さない
+   *    (書き出し側 `features/export/pkc3-html.ts` の同名の節と揃える) */
+  .pkc-md-rendered h1,
+  .pkc-md-rendered h2,
+  .pkc-md-rendered h3,
+  .pkc-md-rendered h4 {
+    break-after: avoid-page;
+  }
+  .pkc-md-rendered pre,
+  .pkc-md-rendered table,
+  .pkc-md-rendered blockquote,
+  .pkc-md-rendered img {
+    break-inside: avoid;
+  }
+  /**
+   * ④ 🔴 **`+++` は改頁である**(出典: PKC2 catalog #14「section break / page break」)。
+   *
+   * 直す前は画面・配る HTML の**どちらの面でも改頁が起きていなかった**
+   * (`break-after` が両面 `auto`)。⚠ 出し分けは **DOM でもう成立している** ──
+   * `kind=rule`(`---`)は class の無い素の `<hr>` へ、`kind=page`(既定)と `+++` は
+   * `hr.pkc-section-break` へ落ちる。だから CSS だけで足りる(renderer は触らない)。
+   *
+   * ⚠ **`display: none` にしてはいけない**(実測。緑のまま壊れる罠)──
+   *   箱が消えると**改頁も消える**のに、計算後の `break-after` は `page` のまま
+   *   残る。`break-after` だけを見る test はそれを素通りする。だから
+   *   線だけ消して(`border: 0`)**箱は残す**。
+   */
+  .pkc-md-rendered .pkc-section-break {
+    break-after: page;
+    border: 0;
+    margin: 0;
+  }
+}
