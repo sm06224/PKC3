@@ -43,6 +43,8 @@ import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { isAppMime } from '@features/launcher/tiles';
 import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
 import type { AppState, AppPhase } from '@adapter/state/app-state';
+import { appFlags } from '@adapter/platform/flag-store';
+import { FLAG_LIVE_EDITOR } from '@features/flags';
 
 /** 添付表示のための asset 面(main が AssetBlobStore を cid 束縛で注入)。 */
 export interface AssetLender {
@@ -56,19 +58,18 @@ type Mode = 'empty' | 'view' | 'editor';
 type BarShape = 'edit' | 'retry' | 'none';
 
 /**
- * 🔴 **ライブエディタの口**(2026-08-05)。`?pkc-live=1` で 1 面に畳む。
+ * 🔴 **ライブエディタの口**。1 面に畳む(2026-08-05)。
  *
- * ⚠ **URL だけ**・保存しない・一覧に出さない(既存の `?pkc-md-inline` と同型)
- * ── 計測用の逃がし口を正規 flag にすると、上限 15 と畳む条件の宣言義務を
- * 計測器が食う(設計 §9 論点 F の裁定)。
+ * ⚠ **2026-08-07 に flag へ昇格した**(user 指示。不可侵)。かつてここは
+ * 「URL だけ・保存しない・一覧に出さない」で、理由を「計測用の逃がし口を正規 flag に
+ * すると上限 15 と宣言義務を計測器が食う」としていた ── **それが抜け穴だった**。
+ * user 指示「**URL クエリパラメータ切り替えはフラグ扱いである / クエリパラメータを
+ * 抜け穴にしてはいけない**」により、いまは `editor.live` として宣言され、
+ * 予算に数えられ、フラグ画面に出る。
  * ⚠ 既定 OFF(設計 §9 論点 C ── 塊を跨ぐ Ctrl+Z が入るまで既定にしない)。
  */
 export function liveEditorEnabled(): boolean {
-  try {
-    return new URLSearchParams(location.search).get('pkc-live') === '1';
-  } catch {
-    return false;
-  }
+  return appFlags.isOn(FLAG_LIVE_EDITOR.name);
 }
 
 export class DetailRenderer {

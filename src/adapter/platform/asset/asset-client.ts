@@ -29,6 +29,8 @@ import {
   type AssetHashJob,
   type HashResult,
 } from './asset-codec';
+import { appFlags } from '../flag-store';
+import { FLAG_ASSET_INLINE } from '@features/flags';
 
 /** アイドルで畳むまで。⚠ 取込は連続して来るので、短すぎると作り直しで損をする。 */
 export const ASSET_WORKER_IDLE_MS = 15_000;
@@ -118,10 +120,7 @@ export class AssetClient {
  */
 function defaultSpawn(): (() => Worker) | null {
   if (typeof Worker !== 'function') return null;
-  if (
-    typeof location !== 'undefined' &&
-    new URLSearchParams(location.search).has('pkc-asset-inline')
-  )
-    return null;
+  // 🔴 **flag で決める**(P11)。⚠ 直に `location.search` を読まない(抜け穴の禁止)
+  if (appFlags.isOn(FLAG_ASSET_INLINE.name)) return null;
   return () => new Worker(new URL('./asset-worker.ts', import.meta.url), { type: 'module' });
 }

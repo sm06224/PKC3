@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
 import { extractMeta } from '../../src/features/flavor';
-import { initialState, reduce } from '../../src/adapter/state/app-state';
+import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects, type StorePort } from '../../src/adapter/state/store-effects';
 import { stubRevisionOps } from '../helpers/revision-stub';
@@ -683,7 +683,7 @@ describe('ノートでない面から、一覧を押したら中央が戻る', (
   // ⚠ **面を足したらここにも足す** ── 足さないと、その面だけ取りこぼす
   for (const view of ['settings', 'flags'] as const) {
     it(`🔴 ${view} を開いたまま別のノートを押すと detail へ戻る`, () => {
-      let s = { ...booted(), viewMode: view };
+      let s: AppState = { ...booted(), viewMode: view };
       s = reduce(s, { type: 'SELECT_ENTRY', lid: 'a' }).state;
       expect(s.viewMode, `${view} のまま取り残された`).toBe('detail');
       expect(s.selectedLid).toBe('a');
@@ -691,7 +691,7 @@ describe('ノートでない面から、一覧を押したら中央が戻る', (
 
     it(`🔴 ${view} を開いたまま「いま開いているノート」を押しても戻る`, () => {
       // ⚠ 同じ lid を押す枝は**別の return** を通る ── 片方だけ直すと取りこぼす
-      let s = { ...loadedA(), viewMode: view };
+      let s: AppState = { ...loadedA(), viewMode: view };
       s = reduce(s, { type: 'SELECT_ENTRY', lid: 'a' }).state;
       expect(s.viewMode, `${view} のまま取り残された(同一 lid の枝)`).toBe('detail');
     });
@@ -699,7 +699,7 @@ describe('ノートでない面から、一覧を押したら中央が戻る', (
 
   it('⚠ ノートを映している面(detail)では viewMode を触らない', () => {
     // 空振り防止 ── 何でも detail に戻す実装でも上は通ってしまう
-    let s = { ...booted(), viewMode: 'kanban' as const };
+    let s: AppState = { ...booted(), viewMode: 'kanban' };
     s = reduce(s, { type: 'SELECT_ENTRY', lid: 'a' }).state;
     expect(s.viewMode, 'kanban を勝手に畳んだ').toBe('kanban');
   });

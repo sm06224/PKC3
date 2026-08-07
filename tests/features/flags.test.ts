@@ -15,6 +15,8 @@
  * (`flag-budget.test.ts:95` が読むのは `src` だけ)。
  */
 import { describe, expect, it, beforeEach } from 'vitest';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   defineFlag,
   findFlag,
@@ -197,5 +199,100 @@ describe('保存(FlagStore)', () => {
     expect(new FlagStore('').isOn(ON.name)).toBe(true);
     localStorage.setItem('pkc3.flags', '[]');
     expect(new FlagStore('').isOn(ON.name)).toBe(true);
+  });
+});
+
+/**
+ * 🔴 **クエリパラメータを抜け穴にしない**(user 指示 2026-08-07。不可侵)。
+ *
+ * > 「**URL クエリパラメータ切り替えはフラグ扱いである / クエリパラメータを
+ * > 抜け穴にしてはいけない / 本来は PKC 内部のパーマネントリンクやディープリンク
+ * > 以外にクエリパラメータを使用してはいけない**」
+ *
+ * ## なぜ機械で見張るのか
+ *
+ * 直す前、`?pkc-md-inline` / `?pkc-asset-inline` / `?pkc-live` の 3 つが
+ * **宣言の外**に居た。理由は「計測用だから 15 枠を食わせない」と書かれていたが、
+ * **それが抜け穴そのもの**だった ── 予算にも画面にも出てこない切替が 3 つあり、
+ * user からは存在すら見えなかった。
+ *
+ * 🔑 **散文の規律は腐る。** だから「クエリパラメータを読んでよい場所」を
+ * **全数で数え上げて**、許した 2 つ以外はここで落とす。
+ */
+describe('🔴 クエリパラメータの抜け穴を作らない', () => {
+  /**
+   * 読んでよい場所。⚠ **理由を書けないものは足さない** ──
+   * ここが「例外を足せば通る」抜け道になると、この検査は何も守らなくなる。
+   */
+  const ALLOWED: Readonly<Record<string, string>> = {
+    'src/adapter/platform/flag-store.ts': 'flag の解決(ここが唯一の入口)',
+    'src/features/link/permalink.ts': 'パーマリンク / ディープリンク(user 指示の唯一の用途)',
+  };
+
+  it('🔴 クエリパラメータを読むのは flag の解決とパーマリンクだけ', () => {
+    const offenders: string[] = [];
+    const walk = (dir: string): void => {
+      for (const name of readdirSync(dir)) {
+        const full = join(dir, name);
+        if (statSync(full).isDirectory()) {
+          walk(full);
+          continue;
+        }
+        if (!name.endsWith('.ts')) continue;
+        const text = readFileSync(full, 'utf-8');
+        // ⚠ **コメントを落としてから**見る ── 注記に書いた綴りで誤検知しない
+        const code = text
+          .split('\n')
+          .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+          .join('\n');
+        if (!/location\.search|URLSearchParams|searchParams/.test(code)) continue;
+        if (ALLOWED[full] === undefined) offenders.push(full);
+      }
+    };
+    walk('src');
+    expect(
+      offenders,
+      'クエリパラメータを直に読んでいる ── 切替なら flag として宣言すること' +
+        '(user 指示 2026-08-07「クエリパラメータを抜け穴にしてはいけない」)',
+    ).toEqual([]);
+  });
+
+  /**
+   * ⚠ **空振り防止**: 許可した 2 つが**実際に読んでいる**ことを確かめる。
+   * 読まなくなったら許可の意味が消えているので、表から外す合図になる。
+   */
+  it('⚠ 許可した場所は実際にクエリパラメータを読んでいる(死んだ許可を残さない)', () => {
+    for (const [file, why] of Object.entries(ALLOWED)) {
+      const text = readFileSync(file, 'utf-8');
+      expect(
+        /location\.search|URLSearchParams|searchParams/.test(text),
+        `${file} はもうクエリパラメータを読んでいない(${why} ── 表から外す)`,
+      ).toBe(true);
+    }
+  });
+
+  /**
+   * 🔴 **かつて抜け穴だった 3 つが、いま宣言されている**。
+   * ⚠ 名前だけでなく **`foldWhen` を持つこと**まで見る(宣言の作法を満たすか)。
+   */
+  it('🔴 かつて URL だけだった切替が、すべて flag として宣言されている', () => {
+    for (const name of ['render.markdownInline', 'asset.inline', 'editor.live']) {
+      const f = findFlag(name);
+      expect(f, `${name} が宣言されていない(抜け穴に戻った)`).not.toBeNull();
+      expect(f!.foldWhen.length, `${name} に畳む条件が無い`).toBeGreaterThan(0);
+    }
+  });
+
+  /**
+   * ⚠ **古い綴りを復活させない。** `?pkc-live=1` 等を直に読む実装へ戻ると、
+   * 上の全数検査は通るのに(flag-store 経由に見えて)実は抜け穴、という形はないが、
+   * 綴りが `src` に残っていたら読み手が混乱する。
+   */
+  it('⚠ 旧い URL の綴りが実装に残っていない', () => {
+    const code = readFileSync('src/adapter/ui/render/detail.ts', 'utf-8')
+      .split('\n')
+      .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+      .join('\n');
+    expect(code, '旧い綴りが実装に残っている').not.toContain("'pkc-live'");
   });
 });

@@ -55,6 +55,15 @@ export interface FlagSpec {
   readonly foldWhen: string;
   /** 画面に出す 1 行の説明(パワーユーザーが読む)。 */
   readonly summary: string;
+  /**
+   * 🔴 **起動前に効いている必要がある**(user 指示 2026-08-07)。
+   *
+   * ワーカーを作るかどうかのように、**boot の途中で 1 度だけ読まれる**ものは、
+   * 切り替えても今の画面には効かない。この印が付いた flag は、フラグ画面が
+   * **パラメータ付きで再起動**させる ── user に URL を手で打たせない。
+   * ⚠ 「URL でしか変えられない」を残すと、それが**抜け穴**になる。
+   */
+  readonly needsRestart?: boolean;
 }
 
 export interface Flag extends FlagSpec {
@@ -123,6 +132,39 @@ export function prunedForStorage(
 //
 // ⚠ **予算 15。** 足す前に「これは設定ではないか」を問う ──
 //   user が使うものは設定、開発者が試すものが flag である。
-// ⚠ **既定は必ず「今の挙動」**にする。
+// ⚠ **既定は必ず「今の挙動」**にする(入れた瞬間に何も変わらない)。
 //
-// いまは 0 個。最初の 1 個を足すときは、この注記の下に並べる。
+// 🔴 **URL の切替は全部ここに在る**(user 指示 2026-08-07。不可侵)──
+//    「クエリパラメータを抜け穴にしてはいけない」。かつて
+//    `?pkc-md-inline` / `?pkc-asset-inline` / `?pkc-live` は
+//    「計測用だから枠を食わない」として宣言の外に居たが、**それが抜け穴だった**。
+
+/**
+ * 本文の描画をワーカーに出さず、その場でやる。
+ * ⚠ **起動時に 1 度だけ読まれる**(ワーカーを作るかどうか)ので再起動が要る。
+ */
+export const FLAG_MD_INLINE = defineFlag('render.markdownInline', {
+  default: false,
+  foldWhen: 'ワーカー経路が計測の必要なく十分に速いと確認できたら',
+  summary: '本文の描画をワーカーに出さず、その場で行う(計測・切り分け用)',
+  needsRestart: true,
+});
+
+/** 添付の処理を同期経路にする。⚠ 同上、起動時に 1 度だけ読まれる。 */
+export const FLAG_ASSET_INLINE = defineFlag('asset.inline', {
+  default: false,
+  foldWhen: 'ワーカー経路が計測の必要なく十分に速いと確認できたら',
+  summary: '添付の処理をワーカーに出さず、その場で行う(計測・切り分け用)',
+  needsRestart: true,
+});
+
+/**
+ * ライブエディタ(原文とプレビューを 1 面に畳む)。
+ * ⚠ 既定 OFF ── 塊を跨ぐ取り消しが揃うまで既定にしない(設計 §9 論点 C)。
+ * ⚠ 描画のたびに読まれるので**再起動は要らない**。
+ */
+export const FLAG_LIVE_EDITOR = defineFlag('editor.live', {
+  default: false,
+  foldWhen: '塊を跨ぐ取り消しが揃い、既定 ON にできたら',
+  summary: '編集を 1 面に畳む(原文とプレビューを分けない)',
+});

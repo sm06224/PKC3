@@ -122,3 +122,75 @@ describe('フラグの面', () => {
     expect(region.querySelectorAll('details')).toHaveLength(0);
   });
 });
+
+/**
+ * 🔴 **起動前に要る flag は、パラメータ付きで読み込み直す**
+ * (user 指示 2026-08-07「フラグ画面から再起動した際にパラメータありで再起動する」)。
+ *
+ * ⚠ 保存だけして黙っていると、user には「押したのに何も起きない」に見える ──
+ * しかも次の起動で急に挙動が変わる。**その場で読み込み直す**のが約束である。
+ */
+const BOOT = defineFlag('test.pane.boot', {
+  default: false,
+  foldWhen: 'この test が消えるとき',
+  summary: '起動時に決まる見本',
+  needsRestart: true,
+});
+
+describe('起動前に要るフラグ', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('⚠ 「読み込み直します」と先に伝える', () => {
+    new FlagsRenderer(region, new FlagStore('')).render();
+    const notes = [...region.querySelectorAll('[data-pkc-field="flag-restart"]')].map(
+      (e) => e.textContent ?? '',
+    );
+    expect(notes.some((t) => t.includes('読み込み直します')), '再起動の予告が無い').toBe(true);
+  });
+
+  it('🔴 切り替えると、パラメータ付きの URL で読み込み直す', () => {
+    const seen: string[] = [];
+    const r = new FlagsRenderer(
+      region,
+      new FlagStore(''),
+      (url) => seen.push(url),
+      () => 'https://example.com/app/',
+    );
+    r.render();
+    r.setFlag(BOOT.name, true);
+    expect(seen, '読み込み直していない').toHaveLength(1);
+    expect(seen[0], 'パラメータが載っていない').toContain(`pkc-flag=${BOOT.name}`);
+  });
+
+  /**
+   * ⚠ **起動後に効くものは読み込み直さない** ── 無用な再読込は、書きかけを
+   * 失う恐れがあるうえ「なぜ今?」が分からない。
+   */
+  it('⚠ 起動後に効くフラグでは読み込み直さない', () => {
+    const seen: string[] = [];
+    const r = new FlagsRenderer(region, new FlagStore(''), (url) => seen.push(url), () => 'https://e/');
+    r.render();
+    r.setFlag(A.name, true); // needsRestart なし
+    expect(seen, '要らない再読込をした').toHaveLength(0);
+  });
+
+  /**
+   * 🔴 **他のクエリを消さない**(パーマリンクで開いている最中でも見失わない)。
+   */
+  it('🔴 再起動の URL が、他のクエリを保つ', () => {
+    const store = new FlagStore('');
+    store.set(BOOT.name, true);
+    const url = store.restartUrl('https://example.com/app/?e=abc#h');
+    expect(url, 'パーマリンクのクエリが消えた').toContain('e=abc');
+    expect(url, 'flag が載っていない').toContain(`pkc-flag=${BOOT.name}`);
+  });
+
+  it('⚠ 既定へ戻したら、URL からも消える', () => {
+    const store = new FlagStore('');
+    store.set(BOOT.name, true);
+    store.set(BOOT.name, false);
+    expect(store.restartUrl('https://example.com/app/')).not.toContain('pkc-flag');
+  });
+});

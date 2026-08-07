@@ -7,7 +7,7 @@
  *
  * ① **既定は今日の 2 列**(user 裁定 = 設計 §9 論点 C:塊を跨ぐ Ctrl+Z が
  *    入るまで既定にしない)── 既定が入れ替わると全 user に影響する
- * ② `?pkc-live=1` で**1 面**になる(2 列の原文欄は出ない)
+ * ② `?pkc-flag=editor.live` で**1 面**になる(2 列の原文欄は出ない)
  * ③ 🔴 **確定した本文が外へ出る**(`onBodyChange`)── ここが落ちると
  *    **画面は変わるのに保存されない**(いちばん静かな壊れ方)
  * ④ **分割が組めない本文では原文の編集欄へ退避**する ── 壊れた分割の上で
@@ -48,7 +48,9 @@ function editing(body: string): AppState {
  * 丸ごと差し替えない(CLAUDE.md「必要な静的メソッドだけ」)。
  */
 function setLive(on: boolean): void {
-  history.replaceState(null, '', on ? '/?pkc-live=1' : '/');
+  // ⚠ 2026-08-07: `?pkc-live=1` は flag へ昇格した(user 指示「クエリパラメータを
+  //    抜け穴にしてはいけない」)── 綴りは `?pkc-flag=editor.live` になった
+  history.replaceState(null, '', on ? '/?pkc-flag=editor.live' : '/');
 }
 afterEach(() => setLive(false));
 
@@ -91,7 +93,7 @@ describe('ライブエディタ(1 面)の配線', () => {
     expect(r.root.querySelector('[data-pkc-field="editor-body"]')).not.toBeNull();
   });
 
-  it('② `?pkc-live=1` で 1 面になり、2 列の原文欄は出ない', async () => {
+  it('② `?pkc-flag=editor.live` で 1 面になり、2 列の原文欄は出ない', async () => {
     setLive(true);
     const r = rig(DOC);
     await settle();

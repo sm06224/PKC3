@@ -86,12 +86,30 @@ export function flagsFromUrl(search: string): Record<string, boolean> {
  * ⚠ **URL 由来は保存に混ぜない** ── 混ぜると URL を外しても残る。
  */
 export class FlagStore {
-  private readonly fromUrl: Record<string, boolean>;
+  /**
+   * ⚠ **URL は読むたびに見る**(固定の文字列を渡されたときを除く)。
+   *
+   * 直す前は constructor で 1 度だけ読んでいたが、`appFlags` は module の読み込み時に
+   * 作られるので、**その後に URL が変わっても効かなかった**(実際に test が落ちた)。
+   * URL の上書きは「いま効いている値」の一部なので、解決のたびに見るのが正しい。
+   * ⚠ 同じ文字列なら**解析結果を使い回す**(描画のたびに呼ばれる)。
+   */
+  private readonly readSearch: () => string;
+  private urlCache: { search: string; parsed: Record<string, boolean> } | null = null;
   private stored: Record<string, boolean>;
 
-  constructor(search = typeof location === 'object' ? location.search : '') {
-    this.fromUrl = flagsFromUrl(search);
+  constructor(search?: string) {
+    this.readSearch =
+      search !== undefined ? () => search : () => (typeof location === 'object' ? location.search : '');
     this.stored = readStored();
+  }
+
+  private get fromUrl(): Record<string, boolean> {
+    const search = this.readSearch();
+    if (this.urlCache?.search !== search) {
+      this.urlCache = { search, parsed: flagsFromUrl(search) };
+    }
+    return this.urlCache.parsed;
   }
 
   /** いま効いている値(URL > 保存 > 既定)。 */
@@ -117,6 +135,26 @@ export class FlagStore {
     write({ ...this.stored });
   }
 
+  /**
+   * 🔴 **起動前に要る flag のために、パラメータ付きの URL を組む**
+   * (user 指示 2026-08-07「フラグ画面から再起動した際にパラメータありで再起動する」)。
+   *
+   * ⚠ **user に URL を手で打たせない。** 打たせると、それが抜け穴に戻る。
+   * ⚠ 既定と同じものは載せない(URL が無用に長くならない)。
+   * ⚠ **他のクエリは保つ** ── パーマリンクで開いている最中に再起動しても、
+   *   見ていたものを見失わない。
+   */
+  restartUrl(href: string): string {
+    const url = new URL(href);
+    url.searchParams.delete(URL_PARAM);
+    const pruned = prunedForStorage(this.values());
+    const tokens = registeredFlags()
+      .filter((f) => f.needsRestart === true && pruned[f.name] !== undefined)
+      .map((f) => (pruned[f.name] === true ? f.name : `${f.name}:off`));
+    if (tokens.length > 0) url.searchParams.set(URL_PARAM, tokens.join(','));
+    return url.toString();
+  }
+
   /** すべて既定へ戻す(パワーユーザーの避難口)。 */
   reset(): void {
     this.stored = {};
@@ -131,3 +169,13 @@ export class FlagStore {
 
 /** 宣言されている flag(画面が一覧に使う。登記所の再輸出)。 */
 export { registeredFlags };
+
+/**
+ * 🔴 **アプリ共有の 1 個**(P11)。
+ *
+ * ⚠ **flag を読む側は必ずこれを引く** ── `location.search` を直に読むと、
+ * それが「クエリパラメータの抜け穴」になる(user 指示 2026-08-07。不可侵)。
+ * `tests/features/flags.test.ts` の全数検査が、読んでよい場所を 2 つに限っている
+ * (flag の解決 と パーマリンク / ディープリンク)。
+ */
+export const appFlags = new FlagStore();

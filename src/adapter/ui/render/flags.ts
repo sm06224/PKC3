@@ -20,7 +20,7 @@
  * 本文の面で実際に踏んだ)。
  */
 import { FlagStore, registeredFlags } from '@adapter/platform/flag-store';
-import { FLAG_BUDGET } from '@features/flags';
+import { FLAG_BUDGET, findFlag } from '@features/flags';
 
 export class FlagsRenderer {
   private built = false;
@@ -31,6 +31,11 @@ export class FlagsRenderer {
     private readonly region: HTMLElement,
     /** ⚠ test は自分で `new` して渡す(URL を差し替えるため)。 */
     private readonly store: FlagStore = new FlagStore(),
+    /** ⚠ 再読込は注入する ── test で実際に遷移させない。 */
+    private readonly reload: (url: string) => void = (url) => {
+      location.replace(url);
+    },
+    private readonly href: () => string = () => location.href,
   ) {}
 
   /**
@@ -111,12 +116,25 @@ export class FlagsRenderer {
       dd.setAttribute('data-pkc-field', 'flag-detail');
       const what = document.createElement('div');
       what.textContent = f.summary;
+      dd.append(what);
+      /**
+       * 🔴 **起動前に要るものは、そう書く**(user 指示 2026-08-07)。
+       * ⚠ 書かないと「押したのに何も変わらない」に見える ── 実際には
+       *   次の起動から効くので、**再起動が要ることを先に伝える**。
+       */
+      if (f.needsRestart === true) {
+        const r = document.createElement('div');
+        r.className = 'settings-note';
+        r.setAttribute('data-pkc-field', 'flag-restart');
+        r.textContent = '切り替えると読み込み直します(起動時に決まるため)';
+        dd.append(r);
+      }
       /** ⚠ **畳む条件を画面に出す** ── 「いつ消えるか」を隠さないのが flag の約束。 */
       const fold = document.createElement('div');
       fold.className = 'settings-note';
       fold.setAttribute('data-pkc-field', 'flag-fold');
       fold.textContent = `畳む条件: ${f.foldWhen}`;
-      dd.append(what, fold);
+      dd.append(fold);
       dl.append(dt, dd);
     }
     return dl;
@@ -157,14 +175,31 @@ export class FlagsRenderer {
     }
   }
 
-  /** 切り替える(binder から呼ばれる)。 */
+  /**
+   * 切り替える(binder から呼ばれる)。
+   *
+   * 🔴 **起動前に要る flag は、パラメータ付きで読み込み直す**
+   * (user 指示 2026-08-07)。⚠ 保存だけして黙っていると、user には
+   * 「押したのに何も起きない」に見える ── しかも次の起動で急に挙動が変わる。
+   */
   setFlag(name: string, on: boolean): void {
     this.store.set(name, on);
     this.sync();
+    if (findFlag(name)?.needsRestart === true) this.restart();
+  }
+
+  /** ⚠ test は差し替えられるよう、再読込は 1 か所に閉じる。 */
+  private restart(): void {
+    this.reload(this.store.restartUrl(this.href()));
   }
 
   resetFlags(): void {
+    const hadRestart = registeredFlags().some(
+      (f) => f.needsRestart === true && this.store.values()[f.name] !== f.default,
+    );
     this.store.reset();
     this.sync();
+    // ⚠ 起動前に要るものが既定へ戻ったなら、そこも読み込み直す
+    if (hadRestart) this.restart();
   }
 }
