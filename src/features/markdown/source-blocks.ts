@@ -26,19 +26,29 @@
  * ✅ **Tier 1(`:::.hl` / `::: {.hl}` / `::: bareCls`)も 2026-08-07 に直した** ──
  * `:::` の直後が英字でないので走査器が**見落としていた**のに renderer は畳むので、
  * 釣り合いが崩れて全文の入力欄へ落ちていた(catalog の simple 列の記法である)。
- * 名前の表ではなく**形**を足したので、下の規則(表を持ち込まない)は保っている。
  *
- * ⚠ **それでも食い違う形は残っている**:renderer が畳むのは**知っている名前だけ**
- * なので、`:::unknown-thing` のような名前 / `{id="あ"}` のように使えない id を
- * 書いた figure は literal のまま残る。
- * ここは `:::name` を一律に囲いと見なすので、そういう本文では走査だけが 1 塊に
- * 畳んで `buildBlockPartition` の検証が落ち、行の差し替えを**開かない**
- * (= 今日の編集画面へ退避する)。壊れた分割の上で編集させるより安全側である。
- * 🔑 ここに directive ごとの表を持ち込まない ── 「renderer が何を畳むか」の判定が
- * 2 か所になり、片方だけ古くなる(CLAUDE.md「判定を増やさない」)。
+ * ✅ **畳まれない名前(`:::foo`)も 2026-08-07 に直した。**
  *
- * ⚠ **pure module**。browser API を使わない。
+ * かつてここは「`:::name` を一律に囲いと見なす」形で、**renderer が畳まない名前**でも
+ * 1 塊に畳んでいた。すると塊の数が合わず `buildBlockPartition` が落ち、
+ * 行の差し替えを**開かない**(= 全文の入力欄へ退避する)。
+ * 当時のこのヘッダは「ここに directive ごとの表を持ち込まない ── 判定が 2 か所に
+ * なる」と書いており、**その懸念自体は正しかった**。
+ *
+ * 🔑 だから**表を持ち込むのではなく、判定そのものを共有した** ──
+ * `directive-open.ts` の `classifyDirectiveOpen` を renderer とここが**同じに**引く。
+ * 表は 1 つしか無いので「片方だけ古くなる」は起こらない。一致は
+ * `tests/features/directive-open-parity.test.ts` が機械で守る。
+ *
+ * ⚠ **それでも食い違う形は残っている**:`{id="あ"}` のように**使えない id** を書いた
+ * figure は renderer が literal のまま残すが、ここは形だけを見るので囲いと読む。
+ * そういう本文では行の差し替えを開かない(壊れた分割の上で編集させるより安全側)。
+ *
+ * ⚠ **pure module**。browser API を使わない ── だから `markdown-render.ts` ではなく
+ * `directive-open.ts`(markdown-it を持たない)から引いている。
  */
+
+import { classifyDirectiveOpen } from './directive-open';
 
 /** 囲いの範囲(行は 0 始まり・両端含む)。 */
 export interface ContainerSpan {
@@ -51,33 +61,33 @@ export interface ContainerSpan {
   readonly name: string;
 }
 
-/** `:::x` のうち**中を飲まない**もの(実測。閉じ有無どちらでも 1 塊)。 */
-const SELF_CONTAINED_DIRECTIVES: ReadonlySet<string> = new Set(['toc']);
-
 const FENCE_OPEN = /^(\s*)(`{3,}|~{3,})(.*)$/;
 const DIRECTIVE_OPEN = /^:::([A-Za-z][\w-]*)/;
-/**
- * 🔴 **名前を持たない開き**(Tier 1。class chain と pandoc の fenced div)。
- *
- * `:::.hl` / `:::.a.b#id` / `:::{.hl}` / `::: {#id .a}` / `::: bareCls` ──
- * `:::` の直後が英字でないので上の `DIRECTIVE_OPEN` に**一致しない**。
- * ところが **renderer はこの 7 形すべてを 1 塊に畳む**(2026-08-07 実測)ので、
- * 走査器が見落とすと「塊 1 個に対して範囲が余った」で釣り合いが崩れ、
- * ライブエディタが**全文の入力欄へ落ちる**(記法は catalog の simple 列である)。
- *
- * ⚠ **ここでも名前の表は持たない**(このヘッダの規則)── 見るのは **形だけ**。
- *   「renderer が畳む名前の集合」を持ち込むと判定が 2 か所になる。
- * ⚠ 閉じ(`:::` だけの行)には一致しない ── どの枝も中身を必ず 1 文字以上要求する。
- */
-const DIRECTIVE_OPEN_TIER1 = /^:::(?:\s*\{[^}]*\}|\s*\.[\w.#-]+|\s+[A-Za-z][\w-]*)\s*$/;
 const DIRECTIVE_CLOSE = /^:::\s*$/;
 
-/** `:::` の開きか(名前つき / Tier 1 のどちらでも)。名前が無い形は `''` を返す。 */
+/**
+ * 🔴 **開きかどうかは `directive-open.ts` が決める**(2026-08-07)。
+ *
+ * 直す前はここが `:::name` を**一律に囲いと見なして**いた。ところが renderer が
+ * 畳むのは**知っている名前 + Tier 0(語彙)+ Tier 1(class 連結)**だけなので、
+ * `:::foo` のような**畳まれない名前**では走査器だけが 1 塊に畳み、釣り合いが崩れて
+ * **行ごとの編集が全文の入力欄へ落ちて**いた(= user の動線が落ちる)。
+ *
+ * ⚠ かつてこのヘッダは「**表を持ち込まない**(判定が 2 か所になる)」と書いていた。
+ * その懸念は正しい ── だから**表を持ち込むのではなく、判定そのものを共有**した。
+ * 表は `directive-open.ts` に 1 つだけ在り、renderer もここも同じものを引く。
+ * 両者が一致していることは `tests/features/directive-open-parity.test.ts` が守る。
+ */
 function directiveOpenName(line: string): string | null {
+  const kind = classifyDirectiveOpen(line);
+  if (kind === null) return null;
   const named = DIRECTIVE_OPEN.exec(line);
-  if (named) return named[1]!;
-  if (DIRECTIVE_OPEN_TIER1.test(line)) return line.slice(3).trim();
-  return null;
+  return named ? named[1]! : line.slice(3).trim();
+}
+
+/** その開きが**中を飲まない**か(`:::toc`。閉じ有無どちらでも 1 塊)。 */
+function isSelfContained(line: string): boolean {
+  return classifyDirectiveOpen(line) === 'self-contained';
 }
 
 /**
@@ -112,7 +122,7 @@ export function scanContainers(text: string): ContainerSpan[] {
     }
     const name = directiveOpenName(line);
     if (name !== null) {
-      if (SELF_CONTAINED_DIRECTIVES.has(name)) {
+      if (isSelfContained(line)) {
         // 中を飲まない ── 自分の行(と、あれば直後の閉じ)だけ
         const closer = lines[i + 1];
         const end = closer !== undefined && DIRECTIVE_CLOSE.test(closer) ? i + 1 : i;
@@ -135,7 +145,7 @@ export function scanContainers(text: string): ContainerSpan[] {
         } else {
           // ⚠ 入れ子の数えも**同じ判定**を使う(Tier 1 の入れ子で深さを取りこぼさない)
           const inner = directiveOpenName(l);
-          if (inner !== null && SELF_CONTAINED_DIRECTIVES.has(inner)) {
+          if (inner !== null && isSelfContained(l)) {
             /**
              * 🔴 **中を飲まない directive の「閉じ」は、その directive のもの**
              * (2026-08-05 実測)。`:::section` の中に `:::toc` / `:::` が在ると、

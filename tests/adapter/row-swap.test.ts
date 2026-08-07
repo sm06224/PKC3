@@ -738,7 +738,10 @@ describe('RowSwap — 組めない本文', () => {
      * である ── 走査器は `:::name` を一律に囲いと見なすが、renderer は知っている
      * 名前だけを畳むので食い違い、開かない側に倒れる。
      */
-    const body = [':::unknown-thing', '', '本文', '', ':::', '', 'あと', ''].join('\n');
+    // ⚠ **2026-08-07 に fixture を替えた。** 走査器が `directive-open.ts` の判定を
+    //    引くようになり、知らない名前(`:::unknown-thing`)は**開くようになった**。
+    //    いま組めないのは「名前は知っているが属性が不正で畳めない」形である
+    const body = [':::figure{id="あ い"}', '', '本文', '', ':::', '', 'あと', ''].join('\n');
     const { html, ranges } = renderMarkdownWithRanges(body);
     const out = swap.update(body, html, ranges);
     expect(out.ok).toBe(false);
