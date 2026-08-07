@@ -37,6 +37,13 @@
  * ⚠ ここに `localStorage` を書くと層を破るうえ、test / worker から使えなくなる。
  */
 
+/**
+ * 🔴 **予算**(user 指示 2026-07-30「flags は最大 15 個」)。
+ * ⚠ `tests/flag-budget.test.ts` が **CLAUDE.md の記述と一致するか**を見張っている ──
+ *   ここだけ変えても落ちる(散文と定数のどちらが正本か分からなくなるのを防ぐ)。
+ */
+export const FLAG_BUDGET = 15;
+
 /** flag の宣言。⚠ `foldWhen` は**必須**(畳む条件を書けないものは flag にしない)。 */
 export interface FlagSpec {
   /** 既定値。⚠ **既定は必ず「今の挙動」**にする(入れた瞬間に何も変わらない)。 */

@@ -665,3 +665,42 @@ describe('effect layer: serialized store I/O', () => {
     expect(d.getState().openBody).toBeNull();
   });
 });
+
+/**
+ * 🔴 **ノートを映していない面を開いたまま一覧を押したら、中央をノートへ戻す**
+ * (P8 段⑲ で直したバグ。P11 で面が増えたので一般化した)。
+ *
+ * 直す前は右の情報ペインだけ切り替わり、中央は設定のまま・追記欄も消えたままで、
+ * **ノートが開かない理由が画面のどこにも無かった**(マニュアル「中央は常にいま
+ * 開いているノート」の当の破れ)。
+ *
+ * ⚠ **この挙動には test が 1 件も無かった**(2026-08-07 に確認)。判定が
+ * `viewMode === 'settings'` の**直書き**だったので、面を足すたびに取りこぼす ──
+ * P11 で `isAsidePane` の集合へ寄せたうえで、ここで pin する
+ * (CLAUDE.md「片側を直したら対称の反対側を疑う」)。
+ */
+describe('ノートでない面から、一覧を押したら中央が戻る', () => {
+  // ⚠ **面を足したらここにも足す** ── 足さないと、その面だけ取りこぼす
+  for (const view of ['settings', 'flags'] as const) {
+    it(`🔴 ${view} を開いたまま別のノートを押すと detail へ戻る`, () => {
+      let s = { ...booted(), viewMode: view };
+      s = reduce(s, { type: 'SELECT_ENTRY', lid: 'a' }).state;
+      expect(s.viewMode, `${view} のまま取り残された`).toBe('detail');
+      expect(s.selectedLid).toBe('a');
+    });
+
+    it(`🔴 ${view} を開いたまま「いま開いているノート」を押しても戻る`, () => {
+      // ⚠ 同じ lid を押す枝は**別の return** を通る ── 片方だけ直すと取りこぼす
+      let s = { ...loadedA(), viewMode: view };
+      s = reduce(s, { type: 'SELECT_ENTRY', lid: 'a' }).state;
+      expect(s.viewMode, `${view} のまま取り残された(同一 lid の枝)`).toBe('detail');
+    });
+  }
+
+  it('⚠ ノートを映している面(detail)では viewMode を触らない', () => {
+    // 空振り防止 ── 何でも detail に戻す実装でも上は通ってしまう
+    let s = { ...booted(), viewMode: 'kanban' as const };
+    s = reduce(s, { type: 'SELECT_ENTRY', lid: 'a' }).state;
+    expect(s.viewMode, 'kanban を勝手に畳んだ').toBe('kanban');
+  });
+});

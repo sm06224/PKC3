@@ -2059,9 +2059,13 @@ select:focus-visible {
 }
 
 /* ── 設定の画面 ─────────────────────────────────── */
-[data-pkc-region='settings-body'] {
+/* ⚠ フラグの面(P11)も**同じ体裁**にする ── 場所が違うだけで、
+   読み方は同じであってほしい(業務画面の作法「同じものは同じ形」)。 */
+[data-pkc-region='settings-body'],
+[data-pkc-region='flags-body'] {
   padding: var(--s4);
 }
+[data-pkc-region='flags-body'] dl,
 [data-pkc-region='settings-body'] dl {
   margin: 0;
   display: grid;
@@ -2069,10 +2073,12 @@ select:focus-visible {
   gap: var(--s3) var(--s4);
   align-items: start;
 }
+[data-pkc-region='flags-body'] dt,
 [data-pkc-region='settings-body'] dt {
   color: var(--muted);
   white-space: nowrap;
 }
+[data-pkc-region='flags-body'] dd,
 [data-pkc-region='settings-body'] dd {
   margin: 0;
 }
@@ -2080,6 +2086,16 @@ select:focus-visible {
   margin: var(--s2) 0 0;
   color: var(--muted);
   font-size: 11px;
+}
+
+/* フラグの面(P11)。⚠ **色は情報にだけ**(user 指示 2026-08-03) ──
+   既定と違う行だけ印を付ける。地は無彩色のまま。 */
+[data-pkc-field='flag-fold'] {
+  margin: var(--s1) 0 0;
+}
+[data-pkc-field='flag-list'] input:disabled + * ,
+[data-pkc-field='flag-list'] input:disabled {
+  opacity: 0.55;
 }
 
 /* ── 印刷(2026-08-07)────────────────────────────────

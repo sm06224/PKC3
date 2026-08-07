@@ -12,9 +12,10 @@ import { DetailRenderer, type AssetLender } from './detail';
 import { KanbanRenderer } from './kanban';
 import { CalendarRenderer } from './calendar';
 import { SettingsRenderer } from './settings';
+import { FlagsRenderer } from './flags';
 import type { MarkdownClient } from '@adapter/platform/render/markdown-client';
 
-type PaneView = 'detail' | 'kanban' | 'calendar' | 'settings';
+type PaneView = 'detail' | 'kanban' | 'calendar' | 'settings' | 'flags';
 
 /**
  * 🔑 中央は**常に「開いているノート」**(P8 段⑤)。
@@ -22,7 +23,9 @@ type PaneView = 'detail' | 'kanban' | 'calendar' | 'settings';
  * 中央のビューではなくなったので、ここでは detail へ落ちる。
  */
 function toPane(view: ViewMode): PaneView {
-  return view === 'kanban' || view === 'calendar' || view === 'settings' ? view : 'detail';
+  return view === 'kanban' || view === 'calendar' || view === 'settings' || view === 'flags'
+    ? view
+    : 'detail';
 }
 
 export class CenterRouter {
@@ -31,6 +34,7 @@ export class CenterRouter {
   private readonly kanban: KanbanRenderer;
   private readonly calendar: CalendarRenderer;
   private readonly settings: SettingsRenderer;
+  private readonly flags: FlagsRenderer;
   private lastPane: PaneView = 'detail';
 
   constructor(
@@ -58,11 +62,13 @@ export class CenterRouter {
       kanban: pane('kanban'),
       calendar: pane('calendar'),
       settings: pane('settings'),
+      flags: pane('flags'),
     };
     this.detail = new DetailRenderer(this.panes.detail, assets, markdown, onBodyChange ?? null);
     this.kanban = new KanbanRenderer(this.panes.kanban);
     this.calendar = new CalendarRenderer(this.panes.calendar, now);
     this.settings = new SettingsRenderer(this.panes.settings);
+    this.flags = new FlagsRenderer(this.panes.flags);
   }
 
   render(state: AppState): void {
@@ -75,6 +81,7 @@ export class CenterRouter {
     if (view === 'detail') this.detail.render(state);
     else if (view === 'kanban') this.kanban.render(state);
     else if (view === 'settings') this.settings.render(state);
+    else if (view === 'flags') this.flags.render();
     else this.calendar.render(state);
   }
 
@@ -83,6 +90,19 @@ export class CenterRouter {
    * (2026-08-06)。⚠ 呼ぶだけでは描かれない ── 呼び側が `render(state)` を続ける
    * (state は動いていないので dispatcher の通知は来ない)。
    */
+  /**
+   * フラグの切替(P11)。⚠ **renderer は dispatch しない**(層規約)ので、
+   * 呼ぶのは配線側(`main.ts`)。state は動かないため通知も来ない ──
+   * 面の中身は `FlagsRenderer` が自分で映し直す。
+   */
+  setFlag(name: string, on: boolean): void {
+    this.flags.setFlag(name, on);
+  }
+
+  resetFlags(): void {
+    this.flags.resetFlags();
+  }
+
   invalidateDetail(): void {
     this.detail.invalidate();
   }

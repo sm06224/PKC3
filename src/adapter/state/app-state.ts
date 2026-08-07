@@ -16,7 +16,28 @@ import type { LauncherTile } from '@features/launcher/tiles';
 import { visibleOrder } from '@features/filter/title-filter';
 
 export type AppPhase = 'initializing' | 'ready' | 'editing' | 'error';
-export type ViewMode = 'detail' | 'calendar' | 'kanban' | 'filer' | 'launcher' | 'settings';
+export type ViewMode =
+  | 'detail'
+  | 'calendar'
+  | 'kanban'
+  | 'filer'
+  | 'launcher'
+  | 'settings'
+  | 'flags';
+
+/**
+ * 🔴 **ノートを映していない中央の面**(P11)。一覧のノートを押したら中央を
+ * ノートへ戻す ── その判定をここ 1 か所に置く。
+ *
+ * ⚠ 直す前は `viewMode === 'settings'` の**直書き**だった。面を足すたびに
+ * 取りこぼすので(P8 段⑲ で直した「開かない理由が画面のどこにも無い」の再演)、
+ * **集合にして 1 か所へ寄せた**(CLAUDE.md「判定を増やさない」)。
+ */
+const ASIDE_PANES: ReadonlySet<ViewMode> = new Set<ViewMode>(['settings', 'flags']);
+
+export function isAsidePane(view: ViewMode): boolean {
+  return ASIDE_PANES.has(view);
+}
 
 /**
  * 選択中 entry の body 作業域。3 つの内容は意味が異なる(review E の解消形):
@@ -522,7 +543,7 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       //    直す前は右の情報ペインだけ切り替わり、中央は設定のまま・追記欄も
       //    消えたままで、ノートが開かない理由が画面のどこにも無かった
       //    (マニュアル「中央は常にいま開いているノート」の当の破れ)
-      const leaveSettings = state.viewMode === 'settings';
+      const leaveSettings = isAsidePane(state.viewMode);
       if (state.selectedLid === action.lid && state.openBody?.lid === action.lid)
         return leaveSettings
           ? { state: { ...state, viewMode: 'detail' }, events: [] }

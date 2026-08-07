@@ -704,6 +704,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       center.invalidateDetail();
       center.render(dispatcher.getState());
     },
+    /**
+     * 🚩 フラグ(P11。user 指示 2026-08-07)。⚠ **設定ではない** ──
+     * 開発者・パワーユーザー向けで、`foldWhen` の条件が来たら畳まれる。
+     * ⚠ 保存は localStorage(裁定 Q6)。state には持たせない。
+     */
+    setFlag: (name, on) => {
+      center.setFlag(name, on);
+    },
+    resetFlags: () => {
+      center.resetFlags();
+    },
     /** 帯の「このノートで読み込む」「読み込まない」。⚠ 設定は変えない。 */
     answerExternalImages: (allow) => {
       const lid = dispatcher.getState().selectedLid;

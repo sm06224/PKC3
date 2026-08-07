@@ -56,6 +56,8 @@ export interface ShellRegions {
  */
 const VIEW_BUTTONS: readonly { view: string; label: string }[] = [
   { view: 'settings', label: '設定' },
+  // ⚠ 開発者・パワーユーザー向け(P11)。設定とは**別の面**にする(裁定 Q3)
+  { view: 'flags', label: 'フラグ' },
 ] as const;
 
 /**

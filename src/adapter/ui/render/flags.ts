@@ -1,0 +1,170 @@
+/**
+ * フラグの面(P11。user 指示 2026-08-07)。
+ *
+ * > 「**設定画面から、設定とフラグは別々で見えるようにしてよ!**
+ * > **設定はユーザーに開放されたもの、フラグは開発者とパワーユーザーに開放された
+ * > もので予算は 15 個まで、それ以上は設定値で正式リリースさせる**」
+ *
+ * 🔑 **設定とは別の面**にする(裁定 Q3)。同じ画面の節にすると、user が
+ * 配色を選ぶ気分で開発用の切替を押してしまう ── 「開放先が違うものは、
+ * 場所を分ける」。設定画面が「表示 / 外部の画像」と「計器」を見出しで
+ * 分けた判断(P9 段③)の、1 段強い版である。
+ *
+ * ⚠ **かぶせる窓にはしない。** この repo にモーダルは 1 件も無く、面はすべて
+ * 「同じ場所に出る」作法(`settings.ts:7-11`)。ここもそれに従う。
+ * ⚠ **畳まない**(`<details>` を使わない)── user 指示「主要な導線を畳まない」で、
+ * `tests/docs-parity.test.ts` が機械的に落とす。
+ *
+ * ⚠ 器は**1 度だけ組む**(`settings.ts` と同じ)。面の切替は `hidden` の
+ * 付け外しなので、器を捨てると押される寸前のボタンが消える(2026-08-07 に
+ * 本文の面で実際に踏んだ)。
+ */
+import { FlagStore, registeredFlags } from '@adapter/platform/flag-store';
+import { FLAG_BUDGET } from '@features/flags';
+
+export class FlagsRenderer {
+  private built = false;
+  private readonly rows = new Map<string, HTMLInputElement>();
+  private summary: HTMLElement | null = null;
+
+  constructor(
+    private readonly region: HTMLElement,
+    /** ⚠ test は自分で `new` して渡す(URL を差し替えるため)。 */
+    private readonly store: FlagStore = new FlagStore(),
+  ) {}
+
+  /**
+   * ⚠ **state を受け取らない。** フラグは container のデータではなく、
+   * その端末の切替である(保存は localStorage)── state を引数に取ると
+   * 「state に入っている」と誤読される。面の切替は `center.ts` が hidden でやる。
+   */
+  render(): void {
+    if (this.built) {
+      this.sync();
+      return;
+    }
+    this.built = true;
+    this.region.textContent = '';
+
+    const head = document.createElement('div');
+    head.setAttribute('data-pkc-field', 'pane-title');
+    head.textContent = 'フラグ';
+    this.region.append(head);
+
+    const body = document.createElement('div');
+    body.setAttribute('data-pkc-region', 'flags-body');
+
+    const note = document.createElement('p');
+    note.className = 'settings-note';
+    note.setAttribute('data-pkc-field', 'flags-note');
+    /**
+     * 🔑 **ここが「設定と何が違うか」を user に伝える唯一の場所**である。
+     * ⚠ 「開発者向け」とだけ書くと、パワーユーザーが自分は対象外だと思う ──
+     *   user 指示は「開発者**と**パワーユーザーに開放」。
+     */
+    note.textContent =
+      'ここは開発中の切替です。設定と違って、いつか畳まれます(畳む条件を各行に書いています)。' +
+      'うまく動かなくなったら「すべて既定へ戻す」を押してください。';
+    body.append(note);
+
+    const sum = document.createElement('p');
+    sum.className = 'settings-note';
+    sum.setAttribute('data-pkc-field', 'flags-summary');
+    this.summary = sum;
+    body.append(sum);
+
+    const flags = registeredFlags();
+    if (flags.length === 0) {
+      /**
+       * ⚠ **空でも器は出す。** 「まだ 1 つも無い」ことは情報である ──
+       * 面ごと消すと、user は「フラグ機能が壊れている」と読む。
+       */
+      const empty = document.createElement('p');
+      empty.setAttribute('data-pkc-field', 'flags-empty');
+      empty.className = 'settings-note';
+      empty.textContent = 'いま切り替えられるものはありません。';
+      body.append(empty);
+    } else {
+      body.append(this.buildList(flags));
+      body.append(this.buildReset());
+    }
+
+    this.region.append(body);
+    this.sync();
+  }
+
+  private buildList(flags: readonly ReturnType<typeof registeredFlags>[number][]): HTMLElement {
+    const dl = document.createElement('dl');
+    dl.setAttribute('data-pkc-field', 'flag-list');
+    for (const f of flags) {
+      const dt = document.createElement('dt');
+      const label = document.createElement('label');
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.setAttribute('data-pkc-action', 'set-flag');
+      input.setAttribute('data-pkc-flag', f.name);
+      this.rows.set(f.name, input);
+      label.append(input, document.createTextNode(` ${f.name}`));
+      dt.append(label);
+
+      const dd = document.createElement('dd');
+      dd.setAttribute('data-pkc-field', 'flag-detail');
+      const what = document.createElement('div');
+      what.textContent = f.summary;
+      /** ⚠ **畳む条件を画面に出す** ── 「いつ消えるか」を隠さないのが flag の約束。 */
+      const fold = document.createElement('div');
+      fold.className = 'settings-note';
+      fold.setAttribute('data-pkc-field', 'flag-fold');
+      fold.textContent = `畳む条件: ${f.foldWhen}`;
+      dd.append(what, fold);
+      dl.append(dt, dd);
+    }
+    return dl;
+  }
+
+  private buildReset(): HTMLElement {
+    const p = document.createElement('p');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.setAttribute('data-pkc-action', 'reset-flags');
+    btn.textContent = 'すべて既定へ戻す';
+    p.append(btn);
+    return p;
+  }
+
+  /**
+   * 値を映す。⚠ **器は組み直さない**ので、ここで映さないと古い値が見える
+   * (CLAUDE.md「設定画面の値の同期 ── 器は 1 度しか組まないので、映さないと古い値が見える」)。
+   */
+  private sync(): void {
+    const values = this.store.values();
+    for (const [name, input] of this.rows) {
+      input.checked = values[name] ?? false;
+      /**
+       * 🔴 **URL で上書き中は触らせない。** 触れると「押したのに変わらない」に
+       * なる ── 無言の操作拒否を作らないので、理由を `title` に出す。
+       */
+      const url = this.store.isFromUrl(name);
+      input.disabled = url;
+      input.title = url ? 'いまは URL(?pkc-flag)で上書きされています' : '';
+    }
+    if (this.summary) {
+      const n = registeredFlags().length;
+      const changed = this.store.changedCount();
+      this.summary.textContent =
+        `${n} / ${FLAG_BUDGET} 枠を使用中` +
+        (changed > 0 ? ` ── うち ${changed} 個が既定と違います` : '');
+    }
+  }
+
+  /** 切り替える(binder から呼ばれる)。 */
+  setFlag(name: string, on: boolean): void {
+    this.store.set(name, on);
+    this.sync();
+  }
+
+  resetFlags(): void {
+    this.store.reset();
+    this.sync();
+  }
+}

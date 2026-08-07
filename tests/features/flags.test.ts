@@ -167,6 +167,25 @@ describe('保存(FlagStore)', () => {
     expect(new FlagStore('').isOn(OFF.name)).toBe(false);
   });
 
+  /**
+   * 🔴 **URL 由来を「別の flag を保存する」ついでに焼き付けない**(2026-08-07 の
+   * 変異試験で判明)。
+   *
+   * ⚠ 上の test は `set()` を**一度も通っていない**ので、
+   *   「保存の中身に URL 由来を混ぜる」変異が**生き延びた**。
+   *   保存が起きる経路で確かめないと、この不変条件は誰も守っていない
+   *   (CLAUDE.md「SURVIVED の半分は『弱い』ではなく『通っていない』」)。
+   */
+  it('🔴 URL 上書き中に別の flag を保存しても、URL 由来は焼き付かない', () => {
+    const s = new FlagStore(`?pkc-flag=${OFF.name}`); // OFF を URL で ON にしている
+    s.set(ON.name, false); // 別の flag を保存する
+    const raw = JSON.parse(localStorage.getItem('pkc3.flags') ?? '{}') as Record<string, unknown>;
+    expect(raw[ON.name], '保存したい方が入っていない').toBe(false);
+    expect(raw[OFF.name], 'URL 由来が保存に焼き付いた(URL を外しても残る)').toBeUndefined();
+    // URL を外した起動では既定に戻っている
+    expect(new FlagStore('').isOn(OFF.name)).toBe(false);
+  });
+
   it('⚠ URL で上書き中かどうかを見分けられる(画面が「一時的」と出すため)', () => {
     const s = new FlagStore(`?pkc-flag=${OFF.name}`);
     expect(s.isFromUrl(OFF.name)).toBe(true);

@@ -38,6 +38,7 @@ const VIEW_MODES: ReadonlySet<string> = new Set([
   'filer',
   'launcher',
   'settings',
+  'flags',
 ]);
 
 /** 既定 title の種別ラベル(連番は同 archetype の現在数 + 1)。 */
@@ -79,6 +80,12 @@ export interface BinderServices {
    * ⚠ 「常にオン / 常に確認 / 常にオフ」の 3 択。⚠ flag ではない(正規設定)。
    */
   setExternalImages?(mode: string): void;
+  /**
+   * フラグの切替(P11。user 指示 2026-08-07)。
+   * ⚠ **設定ではない** ── 開発者・パワーユーザー向けで、いつか畳まれる。
+   */
+  setFlag?(name: string, on: boolean): void;
+  resetFlags?(): void;
   /**
    * いま開いているノートについて答えた(「常に確認」の帯の 2 つのボタン)。
    * ⚠ **ノート単位**で、覚えるのはタブを閉じるまで。⚠ 設定は変えない ──
@@ -639,6 +646,14 @@ const ACTIONS: Record<string, ActionHandler> = {
         ? target.value
         : target.getAttribute('data-pkc-external-images-value');
     if (mode) services.setExternalImages?.(mode);
+  },
+  'set-flag': (_dispatcher, target, services) => {
+    // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
+    const name = target.getAttribute('data-pkc-flag');
+    if (name && target instanceof HTMLInputElement) services.setFlag?.(name, target.checked);
+  },
+  'reset-flags': (_dispatcher, _target, services) => {
+    services.resetFlags?.();
   },
   'allow-external-images': (_dispatcher, _target, services) => {
     services.answerExternalImages?.(true);
