@@ -145,6 +145,12 @@ const BODY = [
   '',
   '後',
   '',
+  // ⚠ 切替(描画 / 原文)を出すために fence を 1 つ置く ── 下の「切替の位置」で使う
+  '```csv',
+  '列A,列B',
+  '1,2',
+  '```',
+  '',
   ':::toc{depth=2}',
   '',
 ].join('\n');
@@ -199,6 +205,50 @@ test('🔴 配った HTML の本文が、アプリと同じ見た目で出る', 
    */
   const printed = await measure(viewer, '#all section:nth-child(2) > div', true);
   expect(printed, '「全体を印刷」の本文だけ素の見た目で出る').toEqual(app);
+
+  /**
+   * 🔴 **紙でも同じ**(2026-08-07 のレビュー指摘で足した)。
+   *
+   * ⚠ 直す前、この spec は `@media print` を**一度も評価していなかった** ── 画面で
+   * 揃っていても、`@media print` の `.b` 規則は焼いた分より**手前**に在るので、
+   * 紙でだけ食い違う余地が残る。⚠ 紙の版面は紙の幅(A4 縦)で見る
+   * (`print.smoke.spec.ts` の罠②・罠③ と同じ)。
+   */
+  await viewer.setViewportSize({ width: 794, height: 1123 });
+  await viewer.emulateMedia({ media: 'print', colorScheme: 'light' });
+  const onPaper = await measure(viewer, '#body');
+  expect(onPaper, '紙にすると本文の見た目が変わる').toEqual(app);
+  await viewer.emulateMedia({ media: 'screen', colorScheme: 'light' });
+
+  /**
+   * 🔴 **書き出し側にしかない 2 つ**(アプリに対応物が無いので parity 表に入れない)。
+   * どちらも「焼いたら app.css が勝ってしまった」型の退行で、**実測で見つけた**。
+   */
+  const own = await viewer.evaluate(() => {
+    const host = document.querySelector('#body')!;
+    const tg = host.querySelector('.pkc-render-toggle');
+    // ⚠ 添付のボタンは本文に無いので、同じ形の要素を器に置いて**継承だけ**を見る
+    const f = document.createElement('a');
+    f.className = 'f';
+    f.textContent = '添付';
+    host.appendChild(f);
+    const color = getComputedStyle(f).color;
+    const bodyColor = getComputedStyle(host).color;
+    f.remove();
+    return {
+      attachBtnColor: color,
+      bodyColor,
+      toggleRight: tg ? getComputedStyle(tg).right : '(切替が無い)',
+      copyBtn: host.querySelector('.pkc-md-copy-btn') ? 'ある' : 'ない',
+    };
+  });
+  // ① 添付のダウンロードボタンは**本文のリンクではない** ── 緑にしない
+  expect(own.attachBtnColor, '添付のボタンが本文のリンク色に食われている').toBe(own.bodyColor);
+  // ② 切替は右端 ── 閲覧側はコピーボタンを外すので app.css の 26px は空きになる
+  expect(own.copyBtn, 'コピーボタンが残っている(前提が変わった ── 下の 2px を見直す)').toBe(
+    'ない',
+  );
+  expect(own.toggleRight, '切替の右に 24px の空きが残っている').toBe('2px');
 
   await viewer.close();
   expect(errors, errors.join('\n')).toEqual([]);

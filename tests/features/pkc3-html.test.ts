@@ -1419,11 +1419,28 @@ describe('可搬 HTML — 本文の CSS を app.css から焼く', () => {
    */
   it('🔴 焼いた規則が `.b` の規則より後に在る(app.css が正本になる)', async () => {
     const css = await styleOf();
-    const b = css.indexOf('.b h1,');
+    /**
+     * ⚠ **「特定の 1 本より後ろ」では守れない**(2026-08-07 のレビューで直した)。
+     * 最初は `.b h1,` と比べていたが、それは `.b` 群のかなり手前の 1 本なので、
+     * 焼いた分を `.b` 群の**途中**(例: `.b a` の直後)へ移す変異が**生き延びる** ──
+     * そこから下の 20 数本(寄せ・切替・欠落表示・外部画像の器)が焼いた分に
+     * 勝ち直すのに、存在を数える検査も 9 観測点の smoke も全部通ってしまう。
+     * だから **`.b` 規則を全部数え上げて、焼いた分の前後に分ける**。
+     */
     const baked = css.indexOf('.pkc-md-rendered h1,');
-    expect(b, '.b の見出しの規則が無い(この検査は空振り)').toBeGreaterThan(0);
     expect(baked, '焼いた見出しの規則が無い(この検査は空振り)').toBeGreaterThan(0);
-    expect(baked, '焼いた規則が .b より手前に在る(.b の古い値が勝つ)').toBeGreaterThan(b);
+    const bRules = [...css.matchAll(/^\.b[ .[>{,:][^{]*\{/gm)];
+    const before = bRules.filter((m) => m.index < baked);
+    const after = bRules.filter((m) => m.index > baked);
+    expect(before.length, '.b の規則が見つからない(この検査は空振り)').toBeGreaterThan(20);
+    /**
+     * ⚠ 焼いた分の**後ろ**に置いてよいのは「**この面に対応物が無い**」ものだけ。
+     * ここが増え始めたら、正本がまた 2 本に戻っている。
+     */
+    expect(
+      after.map((m) => m[0]).sort(),
+      '焼いた分の後ろに .b の規則が増えている(app.css が正本でなくなる)',
+    ).toEqual(['.b .pkc-render-toggle{', '.b a.f{']);
   });
 
   /**

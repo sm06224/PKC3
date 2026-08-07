@@ -14,7 +14,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { extractBodyCss, isBodyRule, parseRules } from '../../build/body-css';
+import { auditBodyCss, extractBodyCss, isBodyRule, parseRules } from '../../build/body-css';
 
 const APP = readFileSync('src/styles/app.css', 'utf8');
 const TOKENS = readFileSync('src/styles/tokens.css', 'utf8');
@@ -79,10 +79,23 @@ describe('本文の CSS を抜く', () => {
     expect(OUT.css, '既定(light)の :root が無い').toMatch(/^:root\{--/);
     const dark = OUT.css.indexOf('@media (prefers-color-scheme:dark){:root{');
     expect(dark, '暗い環境の層が無い').toBeGreaterThan(0);
-    // ⚠ 同じ名前が両方の層に在ること = 上書きが成立していること
     const darkBlock = OUT.css.slice(dark, OUT.css.indexOf('}}', dark));
-    for (const name of ['--fg', '--surface-2', '--border']) {
+    const lightBlock = OUT.css.slice(0, dark);
+    /**
+     * 🔴 **名前ではなく値で見る**(2026-08-07 のレビューで直した)。
+     * `find('dark')` を `find('light')` に取り違える変異は、名前だけ見る検査を
+     * **素通りする** ── 暗い環境の閲覧者に明るい配色が当たり、`color-scheme` が
+     * 地を黒くしたところへ `#16191d` の字が乗って**読めなくなる**(この file の
+     * 冒頭が「実測」として挙げている、まさにその状態)。
+     */
+    const valueOf = (block: string, name: string): string | undefined =>
+      new RegExp(`${name}:([^;}]+)`).exec(block)?.[1];
+    for (const name of ['--fg', '--surface-2', '--border', '--accent']) {
       expect(darkBlock, `${name} が暗い環境で上書きされていない`).toContain(`${name}:`);
+      const l = valueOf(lightBlock, name);
+      const d = valueOf(darkBlock, name);
+      expect(l, `${name} の明るい側の値が読めない(この検査は空振り)`).toBeTruthy();
+      expect(d, `${name} が暗い環境で light と同じ値(取り違えている)`).not.toBe(l);
     }
     // ⚠ **色以外を dark に混ぜない** ── 幾何をテーマ層から拾い始めた印
     expect(darkBlock, '幾何が暗い環境の層に混ざっている').not.toContain('--s5:');
@@ -152,7 +165,15 @@ describe('本文の規則かどうかの判定', () => {
     ['.pkc-md-rendered h1,h2', false],
     ['h1,.pkc-md-rendered h1', false],
     ["[data-pkc-field='detail-body'] > :is(p,.pkc-md-rendered)", false],
-    ['.pkc-md-rendered-csv', true],
+    /**
+     * ⚠ **前方一致だけでは足りない**(2026-08-07 のレビューで直した)。
+     * `.pkc-md-rendered-csv` は「同じ字で始まる別の class」で、器を起点にしていない
+     * ── トップレベルに書かれたら**焼いてはいけない**。
+     * (器の中に出る `.pkc-md-rendered .pkc-md-rendered-csv` は下の行のとおり通る)
+     */
+    ['.pkc-md-rendered-csv', false],
+    ['.pkc-md-rendered .pkc-md-rendered-csv', true],
+    ['.pkc-md-renderedx p', false],
     ['body', false],
     ['', false],
   ];
@@ -168,6 +189,18 @@ describe('本文の規則かどうかの判定', () => {
    */
   it(':is(…) の中のカンマでは節に割らない', () => {
     expect(isBodyRule('.pkc-md-rendered :is(p, table, blockquote)')).toBe(true);
+  });
+
+  /**
+   * ⚠ **角括弧の中のカンマでも割らない**。丸括弧だけ数える実装でも `:is(…)` の
+   * 1 件は通ってしまうので、**属性値の中のカンマ**で直接見る
+   * (深さを丸括弧だけにする変異が、これが無いと生き延びる)。
+   */
+  it('属性値の中のカンマでは節に割らない', () => {
+    expect(isBodyRule('.pkc-md-rendered [title="a,b"]')).toBe(true);
+    expect(isBodyRule(".pkc-md-rendered [data-x='a,b'] p")).toBe(true);
+    // ⚠ 割ってしまう実装では 2 節に見え、後ろの節が起点を持たないので false になる
+    expect(isBodyRule('.pkc-md-rendered [title="a,b"],.pkc-md-rendered q')).toBe(true);
   });
 });
 
@@ -203,5 +236,137 @@ describe('app.css との突合(片方だけ古くならない)', () => {
     expect(light.size, '配色の層が空(この検査は空振り)').toBeGreaterThan(8);
     const both = [...geo].filter((n) => light.has(n)).sort();
     expect(both, `2 つの層で重なっている: ${both.join(', ')}`).toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **合成した CSS で「今日は起きないこと」を検める**(2026-08-07 のレビュー指摘)。
+ *
+ * ⚠ 本物の `app.css` / `tokens.css` だけで検めていると、**今日の入力に無い形**を
+ * 壊す変異が全部生き延びる ── 実際、下の 4 つはどれも「本物では素通りするが、
+ * 明日 CSS を 1 行足した人が静かに壊す」型だった。
+ */
+describe('合成した CSS で境界を検める(本物では素通りする形)', () => {
+  /**
+   * 🔴 **block を持たない at-statement**(`@import x;` / `@layer a;`)。
+   * ⚠ 直す前は `head` が `{` `}` でしか畳まれず、`@import` が次の `{` まで
+   *   残って「`@` 始まり」と判定され、**直後の規則が丸ごと捨てられて**いた。
+   *   `app.css:22` の `@import './tokens.css';` の直後は `*{box-sizing}`(器の
+   *   規則)なので今日の出力は正しいが、位置が動けば本文の規則が消える。
+   */
+  it('🔴 @import の直後の規則を落とさない', () => {
+    const rules = parseRules(
+      "@import './tokens.css';\n.pkc-md-rendered p{color:red}\n.pkc-md-rendered q{color:blue}\n",
+    );
+    expect(rules.map((r) => r.selector)).toEqual(['.pkc-md-rendered p', '.pkc-md-rendered q']);
+    // ⚠ セレクタに at-statement が混ざっていない(混ざると規則ごと当たらなくなる)
+    expect(rules[0]!.selector, 'セレクタが at-statement で汚れている').not.toContain('@');
+  });
+
+  it('@layer 宣言の直後も同じ(将来の書き方)', () => {
+    const rules = parseRules('@layer base, app;\n.pkc-md-rendered p{color:red}\n');
+    expect(rules.map((r) => r.selector)).toEqual(['.pkc-md-rendered p']);
+  });
+
+  /**
+   * 🔴 **`:` の前の空白を消さない**。消すと子孫結合子が消えて
+   * **複合セレクタという別物**になる(器の中の p → 器そのもの)。
+   */
+  it('🔴 空白 + 擬似クラスを複合セレクタへ潰さない', () => {
+    const out = extractBodyCss(
+      '.pkc-md-rendered :is(p, ul){margin:0}\n' +
+        '.pkc-md-rendered ::selection{background:red}\n' +
+        '.pkc-md-rendered > :first-child{margin-top:0}\n' +
+        '.pkc-md-rendered p{margin: var(--s5) 0 var(--s2)}\n',
+      TOKENS,
+    );
+    expect(out.css, '器の中の p/ul が器そのものへ化けている').toContain(
+      '.pkc-md-rendered :is(p,ul){margin:0}',
+    );
+    expect(out.css, '擬似要素が器そのものに付いた').toContain('.pkc-md-rendered ::selection{');
+    // ⚠ `>` は詰めてよい(結合子が明示されているので意味が変わらない)
+    expect(out.css).toContain('.pkc-md-rendered>:first-child{');
+    // ⚠ 値の中の空白は残す / 宣言の `:` の後ろは詰める
+    expect(out.css).toContain('margin:var(--s5) 0 var(--s2)');
+  });
+
+  /**
+   * 🔴 **トークンの推移閉包**。`tokens.css` は今日 `var(` を 1 個も持たないので、
+   * 閉包を消しても本物では出力が byte 一致する ── **合成でしか検められない**。
+   */
+  it('🔴 トークンが別のトークンを参照していたら、その参照先も焼く', () => {
+    const tokens =
+      ":root, :root[data-pkc-theme='light']{--a:#111;--b:color-mix(in oklab, var(--a) 50%, #fff)}\n" +
+      ":root[data-pkc-theme='dark']{--a:#eee;--b:#333}\n" +
+      ':root{--geo:2px}\n';
+    const out = extractBodyCss('.pkc-md-rendered p{color:var(--b);padding:var(--geo)}\n', tokens);
+    expect([...out.vars].sort(), '参照先の --a が抜けている(宣言ごと無効になる)').toEqual([
+      '--a',
+      '--b',
+      '--geo',
+    ]);
+    expect(out.css, '--a の定義が焼かれていない').toContain('--a:#111');
+    expect(auditBodyCss(out).filter((m) => m.includes('定義の無い var'))).toEqual([]);
+  });
+
+  /**
+   * 🔴 **dark にしか無いトークンは「欠落」である**。明るい環境で `var()` が
+   * 未定義になり、宣言ごと無効になる ── コメントはそう書いてあるのに無検査だった。
+   */
+  it('🔴 暗い側にしか定義が無いトークンを欠落として数える', () => {
+    const tokens =
+      ":root, :root[data-pkc-theme='light']{--a:#111}\n" +
+      ":root[data-pkc-theme='dark']{--a:#eee;--only-dark:#f00}\n";
+    const out = extractBodyCss('.pkc-md-rendered p{color:var(--only-dark)}\n', tokens);
+    expect(out.missing, '暗い側にしか無い変数を見逃している').toEqual(['--only-dark']);
+    expect(auditBodyCss(out).join('\n')).toContain('--only-dark');
+  });
+});
+
+/**
+ * 🔴 **焼いた文字列そのものを検める検査**(`auditBodyCss`)。
+ *
+ * ⚠ 直す前の tripwire は `missing` / `ruleCount` / `vars` の 3 つで、**どれも
+ *   出力を見ていなかった** ── トークンを push する 3 行を落とすと 3 つとも緑のまま
+ *   「トークンが 1 個も焼かれていない HTML」が出荷される。**この describe が
+ *   その門である**(plugin の hook は Vite を起こさないと走らないので、判定は
+ *   純関数側に置いてここから叩く)。
+ */
+describe('焼いた文字列の検品', () => {
+  const ok = (): Parameters<typeof auditBodyCss>[0] => extractBodyCss(APP, TOKENS);
+
+  it('本物の入力は合格する(この検査が常に鳴っていない)', () => {
+    expect(auditBodyCss(ok())).toEqual([]);
+  });
+
+  it('🔴 トークンが 1 個も焼かれていない出力を止める', () => {
+    const base = ok();
+    // トークンの :root 群だけ落とす(規則はそのまま)= 実装の 3 行を消したのと同じ形
+    const css = base.css.slice(base.css.indexOf('.pkc-md-rendered'));
+    const bad = auditBodyCss({ ...base, css });
+    expect(bad.join('\n'), '定義の無い var を見逃した').toContain('定義の無い var');
+    expect(bad.join('\n'), '焼いたトークンの個数を見ていない').toContain('焼いたトークンが');
+  });
+
+  it('🔴 暗い環境の層が包まれていない出力を止める', () => {
+    const base = ok();
+    const css = base.css.replace('@media (prefers-color-scheme:dark){:root{', ':root{');
+    expect(auditBodyCss({ ...base, css }).join('\n')).toContain('暗い環境のトークンの層');
+  });
+
+  it('🔴 規則の本数が事故の桁で減った出力を止める', () => {
+    expect(auditBodyCss({ ...ok(), ruleCount: 3 }).join('\n')).toContain('本しか抜けていません');
+  });
+
+  /**
+   * 🔴 **`</` を通さない**。この CSS は書き出し HTML の `<style>` へ**素で**埋まる ──
+   * `content: '</style>'` と書かれた日に style が早期終了し、CSS の残りが
+   * **本文として画面に出る**。⚠ この file(pkc3-html.ts)は本文の `<` を全部退避する
+   * 規律を掲げているのに、外から来た 12KB だけが素通りしていた。
+   */
+  it('🔴 style を早期終了させる字面を通さない', () => {
+    const base = ok();
+    const css = `${base.css}.pkc-md-rendered p::after{content:'</style><b>x'}`;
+    expect(auditBodyCss({ ...base, css }).join('\n')).toContain('style が早期終了');
   });
 });

@@ -148,9 +148,16 @@ nav button.p{width:auto;font-size:12px;padding:4px 10px;margin:2px 8px 0;
   border:1px solid #8885;border-radius:6px}
 /* 印刷用の目次と「全体」の入れ物は**画面には出さない**(@media print で出す) */
 #ptoc,#all{display:none}
-/* 描いた本文(P8 段⑲)。⚠ **配色トークンは持ち込まない** ── ここは
-   単体で開くファイルで、地の色は閲覧環境の light/dark に従う。
-   #8884 のような半透明の無彩色なら、どちらでも読める */
+/* 描いた本文(P8 段⑲)。ここから下の .b 前置きは**この面だけの素の体裁**で、
+   本文の記法の見た目は style の末尾に焼いた app.css が正本である(2026-08-07)。
+   ⚠ かつてここには「**配色トークンは持ち込まない**」と書いてあったが、
+     2026-08-07 に light / dark の配色トークンを焼き込んだので**もう本当ではない**。
+     #8884 のような半透明の無彩色が残っているのは、焼いた規則が触らない
+     プロパティの受け皿(= 下敷き)としてであって、方針としてではない。
+   ⚠ ここの規則は焼いた分より**手前**にあるので、同じ詳細度なら**負ける**。
+     「上書きしたい」を書く場所ではない ── 書くなら焼いた分の後ろ(style の末尾)。
+   ⚠ この template literal の中に**バッククォートを書かない**(build が壊れる ──
+     この file で 5 度目。今日 1 度踏んだ)。 */
 .b{max-width:46em}
 .b>*:first-child{margin-top:0}
 .b h1,.b h2,.b h3,.b h4{line-height:1.3;margin:1.4em 0 .5em}
@@ -274,7 +281,15 @@ a.f{display:inline-block;margin:8px 0;padding:6px 10px;border:1px solid #8884;bo
   /* 見出しが行末で独りにならない・切ってはいけない箱を切らない */
   .b h1,.b h2,.b h3,.b h4,main h2{break-after:avoid-page}
   .b pre,.b table,.b blockquote,.b img{break-inside:avoid}
-  .b a{color:inherit;text-decoration:none}
+  /* ⚠ **「紙ではリンクを黒に落とす」という判断を取り下げた**(2026-08-07)。
+     ここには color:inherit があったが、焼いた app.css の
+     .pkc-md-rendered a{color:var(--accent)} と詳細度が同じ(0,1,1)で後に来るため
+     **必ず負ける** ── 実測でも紙は rgb(20,102,60) だった。
+     ⚠ アプリが紙に刷るときも同じ緑なので、これは**面が揃った**ということである。
+       判断ごと消したのは、効いていない宣言を「効いているように見える形」で
+       残さないため。紙だけ黒に戻したいなら、app.css 側で決めて両面に効かせる。
+     下線を消すのはここの仕事(焼いた側は text-decoration を触らない)。 */
+  .b a{text-decoration:none}
   /* 紙に操作子は要らない(切替の見た目だけ消す ── どちらの面を見せるかは
      画面での選択をそのまま持ち込む) */
   .b .pkc-render-toggle{display:none}
@@ -301,6 +316,18 @@ a.f{display:inline-block;margin:8px 0;padding:6px 10px;border:1px solid #8884;bo
      「いま効いているものまで消える」= 何もしないより悪くなる(実測)。
    ⚠ **値を静的に解決しない** ── light で潰すと暗い環境で白箱に白文字になる。 */
 ${BODY_CSS}
+/* ── 焼いた分より**後**に置くもの ── 書き出し側の DOM が アプリと違う 2 点だけ。
+   ⚠ ここは「app.css を上書きしたい」ではなく「**この面には対応する要素が無い**」
+     という理由に限る。見た目の好みで足し始めると、正本が 2 本に戻る。 */
+/* ① 添付のボタンは**本文のリンクではない**(閲覧側だけが作る操作子)。
+   ⚠ 焼いた .pkc-md-rendered a{color:var(--accent)} と a.f は詳細度が同じ(0,1,1)
+     なので後が勝ち、**ダウンロードボタンの字が緑になっていた**(実測)。
+     アプリに対応物が無いので、これは parity ではなく退行である。 */
+.b a.f{color:inherit}
+/* ② 切替ボタンは右端に寄せる。app.css は隣のコピーボタン(right:2px)を避けて
+   right:26px にしているが、**閲覧側はコピーボタンを DOM から外す**
+   (押しても何も起きない飾りなので)── 26px のままだと 24px の空きが残る(実測)。 */
+.b .pkc-render-toggle{right:2px}
 </style>
 <nav>
   <h1 id="t"></h1>

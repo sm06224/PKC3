@@ -19,7 +19,7 @@
  * `.pkc-*` は **71 個すべてが本文の記法が出す class** で、器は
  * `[data-pkc-region=…]` / `[data-pkc-field=…]` 属性で書かれており `.pkc-*` を
  * 1 つも使っていない。分かれ目は class 名ではなく**規則の階層**にある ──
- * 全 294 規則が「`.pkc-md-rendered` 前置きの 113 本」と「それ以外 181 本」に
+ * 全 301 規則が「`.pkc-md-rendered` を起点にする 116 本」と「それ以外 185 本」に
  * 機械的に割れる(境界例は読み幅の 1 本だけ。それは器の規則なので落ちて正しい)。
  * ⚠ **第 2 の判定を足さない**(CLAUDE.md「判定を増やさない」)── 「書き出しに
  *   要る規則か」を選び始めると、そこが古くなる。書き出し面で死んでいる 4 本
@@ -127,17 +127,47 @@ export function parseRules(css: string): Rule[] {
       i += 1;
       continue;
     }
+    /**
+     * 🔴 **block を持たない at-statement で `head` を畳む**(`@import x;` / `@layer a;`)。
+     *
+     * ⚠ 直す前は `{` と `}` でしか畳んでいなかったので、`app.css:22` の
+     * `@import './tokens.css';` が次の `{` まで `head` に残り、
+     * `"@import './tokens.css';\n\n*"` が `@` 始まりと判定されて **at-rule の文脈へ積まれ、
+     * 直後の `* { box-sizing: border-box }` が丸ごと捨てられていた**(合成入力で再現:
+     * `@import 'x';` + 本文規則 2 本 → 1 本目が消える)。
+     * 今日は捨てられるのが器の規則なので**出力は正しい**が、`@import` の位置が動くか
+     * `@layer` が足された日に、**本文の規則 1 本が黙って焼かれなくなる**。
+     */
+    if (ch === ';') {
+      head = '';
+      i += 1;
+      continue;
+    }
     head += ch;
     i += 1;
   }
   return out;
 }
 
-/** その規則は本文の規則か(**全 comma 節**が `.pkc-md-rendered` で始まる)。 */
+/**
+ * その節は本文の器を起点にしているか。
+ *
+ * ⚠ **前方一致だけでは足りない** ── `.pkc-md-rendered-csv` のような
+ * 「同じ字で始まる別の class」を通してしまう。起点として使われている証拠は
+ * **直後が境界**であること(`.pkc-md-rendered` そのもの / 空白 / `.` / `#` /
+ * `[` / `:` / `>` / `+` / `~`)。
+ */
+function startsAtBody(part: string): boolean {
+  if (!part.startsWith(BODY_SCOPE)) return false;
+  const rest = part.slice(BODY_SCOPE.length);
+  return rest === '' || /^[\s.#[:>+~]/.test(rest);
+}
+
+/** その規則は本文の規則か(**全 comma 節**が `.pkc-md-rendered` を起点にしている)。 */
 export function isBodyRule(selector: string): boolean {
   const parts = splitSelectors(selector);
   if (parts.length === 0) return false;
-  return parts.every((p) => p.startsWith(BODY_SCOPE));
+  return parts.every(startsAtBody);
 }
 
 /** `var(--x)` を数え上げる。 */
@@ -199,9 +229,15 @@ function readTokens(tokensCss: string): Tokens {
 }
 
 /**
- * 変数の**推移閉包**を取る ── トークンの値が別のトークンを参照していることがある
- * (`color-mix(… var(--accent) …)`)。1 段しか見ないと、その参照先だけ抜けて
- * また「宣言ごと無効」になる。
+ * 変数の**推移閉包**を取る ── トークンの値が別のトークンを参照していたら、その
+ * 参照先も焼かないと「宣言ごと無効」がトークン側で起きる。
+ *
+ * ⚠ **2026-08-07 時点の `tokens.css` は `var(` を 1 個も持たない**(実測 0 件)ので、
+ *   ここは今日 1 個も足さない ── つまり**この関数を消しても出力は byte 一致する**。
+ *   残しているのは `--accent-dim: color-mix(… var(--accent) …)` のような書き方を
+ *   `tokens.css` に入れた日に静かに壊れるのを防ぐため。⚠ だから
+ *   `tests/build/body-css.test.ts` は**合成した tokens** で閉包を直接検める
+ *   (本物の tokens では素通りするので、それだけでは無検査になる)。
  */
 function closeOver(want: Set<string>, t: Tokens): void {
   for (let grew = true; grew; ) {
@@ -283,6 +319,71 @@ export function extractBodyCss(appCss: string, tokensCss: string): BodyCss {
   };
 }
 
+/**
+ * 下限。2026-08-07 時点で 116 本 / 19 個。
+ * ⚠ **実測値ぴったりにしない** ── 規則を 1 本消すだけで build が落ちると、まともな
+ *   整理ができない。事故の桁(半分に減る / 空になる)を止める値にする。
+ */
+export const MIN_RULES = 80;
+export const MIN_VARS = 12;
+
+/**
+ * 🔴 **焼いた文字列そのものを検める**(2026-08-07、レビュー指摘で作った)。
+ *
+ * ⚠ 直す前の検査は `missing` / `ruleCount` / `vars` の 3 つで、**どれも
+ *   「`:root{…}` が実際に出力に在るか」を見ていなかった** ── `extractBodyCss` の
+ *   トークンを push する 3 行を落とすと、`missing = []` / `ruleCount = 116` /
+ *   `vars = 19` のまま**全部緑で build が成功し、トークンが 1 個も焼かれない HTML が
+ *   出荷される**。それは本 file が「何もしないより悪くなる」と呼んでいる状態そのもの。
+ * ⚠ `vars` は**需要**(規則が要求した個数)であって供給ではない。だからここでは
+ *   **出力の中の定義の数**を数える。
+ *
+ * @returns 見つかった問題(空なら合格)。build を止めるのは呼び手の仕事。
+ */
+export function auditBodyCss(out: BodyCss): string[] {
+  const bad: string[] = [];
+  const css = out.css;
+  if (out.missing.length > 0) {
+    bad.push(
+      `本文の CSS が参照するトークンの定義が tokens.css に見つかりません: ${out.missing.join(', ')}` +
+        ` ── :root(幾何)/ [data-pkc-theme='light'](配色)を確かめてください`,
+    );
+  }
+  // 🔴 未定義の `var()` は宣言ごと無効になり、**先行する規則へ fall back しない**
+  const defined = new Set([...css.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]!));
+  const undef = [
+    ...new Set(
+      [...css.matchAll(/var\(\s*(--[\w-]+)\s*\)/g)] // 既定値つきは壊れないので数えない
+        .map((m) => m[1]!)
+        .filter((v) => !defined.has(v)),
+    ),
+  ].sort();
+  if (undef.length > 0) {
+    bad.push(`焼いた CSS が定義の無い var を参照しています(宣言ごと無効): ${undef.join(', ')}`);
+  }
+  if (defined.size < MIN_VARS) {
+    bad.push(`焼いたトークンが ${defined.size} 個しかありません(下限 ${MIN_VARS})`);
+  }
+  // ⚠ 暗い環境の層は**包まれた形**で在ること(素で出すと light を常時上書きする)
+  if (!css.includes('@media (prefers-color-scheme:dark){:root{')) {
+    bad.push('暗い環境のトークンの層が(prefers-color-scheme で包まれた形で)ありません');
+  }
+  if (out.ruleCount < MIN_RULES) {
+    bad.push(
+      `本文の規則が ${out.ruleCount} 本しか抜けていません(下限 ${MIN_RULES})` +
+        ` ── app.css の本文の規則が .pkc-md-rendered 起点でなくなった可能性があります`,
+    );
+  }
+  /**
+   * ⚠ **`<style>` を早期終了させる字面を通さない**。この CSS は書き出し HTML の
+   * `<style>` へ**素で**埋まる ── `pkc3-html.ts` は本文の `<` を全部退避する規律を
+   * 掲げているのに、ここだけ外から来た 12KB が素通りしていた。`content: '</style>'`
+   * と書かれた日に、CSS の残りが**本文として画面に出る**。
+   */
+  if (/<\//.test(css)) bad.push('焼いた CSS に `</` が含まれています(style が早期終了する)');
+  return bad;
+}
+
 /** 空白を詰める(見た目の整形は要らない ── 配る HTML に埋め込む文字列である)。 */
 function minify(css: string): string {
   return (
@@ -293,7 +394,15 @@ function minify(css: string): string {
       .replace(/\s+/g, ' ')
       // ⚠ 空白を消してよいのは**区切り記号の周り**だけ。値の中の空白
       //   (`margin:var(--s5) 0 var(--s2)` / `calc(1.45em * …)`)は意味を持つ
-      .replace(/\s*([{}:;,>])\s*/g, '$1')
+      .replace(/\s*([{};,>])\s*/g, '$1')
+      // 🔴 **`:` は「後ろの空白」だけ詰める**。前の空白まで消すと、子孫結合子が
+      //   消えて**複合セレクタという別物**になる ── `.pkc-md-rendered :is(p,ul)`
+      //   (器の中の p/ul)が `.pkc-md-rendered:is(p,ul)`(器自身)へ化ける。
+      //   ⚠ 今日の 116 本に「空白 + 擬似」の形は無い(`> :first-child` は `>` が
+      //     先に詰まるので無害)が、`:is()` を素の子孫で書くのは自然な次の一手であり、
+      //     そのとき**規則が静かに別物になる**。`margin: var(--s5)` /
+      //     `(prefers-color-scheme: dark)` はここで従来どおり詰まる
+      .replace(/:\s+/g, ':')
       .replace(/;}/g, '}')
       .trim()
   );
