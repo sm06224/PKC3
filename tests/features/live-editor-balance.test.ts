@@ -96,47 +96,30 @@ const CASES: readonly Case[] = [
     ok: true,
   },
 
+  // ── 入れ子(2026-08-07 に直した)────────────────────────────
+  //    ⚠ 直す前はここに並ぶ 4 件が全部 `ok: false` だった。原因は**走査器ではなく
+  //      renderer** で、`quote` / `format` / `details` / `figure` / region の走査が
+  //      「開いたら**最初に出会った `:::`**まで」の平坦な形のままだったこと ──
+  //      内側の閉じを自分の閉じとして食い、HTML が交差していた
+  //      (`</blockquote>` が `</section>` より先に出る)。
+  //    🔑 実測すると壊れていたのは表の 4 件ではなく **外×内 112 通りのうち 48 通り**
+  //      だった。全数は `tests/features/markdown-nesting.test.ts` が持つ ──
+  //      **ここは「ライブエディタが開くか」だけを見る**。
+  { name: ':::quote > :::section', body: ':::quote{author=x}\n:::section{role=body}\n中身\n:::\n:::\n', ok: true },
+  { name: ':::format > :::details', body: ':::format{.a}\n:::details{summary=x}\n中身\n:::\n:::\n', ok: true },
+  { name: 'Tier 1 の入れ子(:::.outer > :::.inner)', body: ':::.outer\n:::.inner\n中身\n:::\n:::\n', ok: true },
+  { name: ':::quote > :::note', body: ':::quote{author=x}\n:::note\n中身\n:::\n:::\n', ok: true },
+
   // ── まだ釣り合っていない形(理由つきで記録する)──────────────
-  {
-    name: ':::quote > :::section',
-    body: ':::quote{author=x}\n:::section{role=body}\n中身\n:::\n:::\n',
-    ok: false,
-    whyNotOk:
-      '外側の :::quote の後処理が中の :::section を包まないので、renderer が最上位の塊を 2 個出す。' +
-      '走査器は 1 囲いなので釣り合わない。直すのは renderer の入れ子(走査器では直せない)。',
-  },
-  {
-    name: ':::format > :::details',
-    body: ':::format{.a}\n:::details{summary=x}\n中身\n:::\n:::\n',
-    ok: false,
-    whyNotOk:
-      '同上 ── :::format の後処理が中の :::details を包まないので renderer が最上位の塊を 2 個出す。' +
-      '走査器は 1 囲いなので釣り合わない。',
-  },
-  {
-    // ⚠ 2026-08-07: 開くと想定して書いたが**実測で外れた**。Tier 1 でも入れ子は
-    //    上の 3 件と同じ型で、走査器ではなく renderer 側の問題である
-    name: 'Tier 1 の入れ子(:::.outer > :::.inner)',
-    body: ':::.outer\n:::.inner\n中身\n:::\n:::\n',
-    ok: false,
-    whyNotOk:
-      '上の入れ子 3 件と同じ型 ── Tier 1 の後処理が中の Tier 1 を包まないので renderer が塊を 2 個出す。' +
-      '走査器は Tier 1 の開きを見るようになった(2026-08-07)ので 1 囲いだが、renderer 側が揃っていない。',
-  },
-  {
-    name: ':::quote > :::note',
-    body: ':::quote{author=x}\n:::note\n中身\n:::\n:::\n',
-    ok: false,
-    whyNotOk: '同上。⚠ この形は今日 HTML が交差しているので、入れ子の直し方で出力が動く。',
-  },
   {
     name: ':::foo(未知名)',
     body: ':::foo\n中身\n:::\n',
     ok: false,
     whyNotOk:
       'renderer は知らない名前を畳まず 3 塊の literal にするが、走査器は :::name を一律に囲いと見る。' +
-      '直すには「renderer が畳む名前の集合」が要り、source-blocks.ts のヘッダが' +
-      '「表を持ち込まない(判定が 2 か所になる)」と明記した判断を覆すことになる ── 裁定待ち。',
+      'renderer 側は 2026-08-07 に判定を 1 か所へ寄せた(classifyDirectiveOpen)が、' +
+      '走査器がそれを引くには Tier 0 の語彙照合ごと共有する必要があり、' +
+      'source-blocks.ts のヘッダが「表を持ち込まない」と明記した判断を覆すことになる ── 裁定待ち。',
   },
 ];
 
@@ -162,9 +145,10 @@ describe('ライブエディタの釣り合い(行ごとの編集が開くか)',
       expect((c.whyNotOk ?? '').length, `${c.name}: 理由が短すぎる`).toBeGreaterThan(40);
     }
     const open = CASES.filter((c) => c.ok).length;
-    // ⚠ 2026-08-07 時点で 28 件。減ったら**退行**である(増えるのは歓迎)
-    expect(open, '行ごとの編集が開く形が減っている(退行)').toBeGreaterThanOrEqual(28);
-    expect(CASES.filter((c) => !c.ok).length, '釣り合わない形が増えている').toBeLessThanOrEqual(5);
+    // ⚠ 2026-08-07 に入れ子を直して 28 → 32 件。減ったら**退行**である(増えるのは歓迎)
+    expect(open, '行ごとの編集が開く形が減っている(退行)').toBeGreaterThanOrEqual(32);
+    // ⚠ 残るのは `:::foo`(未知名)の 1 件だけ。増やすには理由が要る(上の assert)
+    expect(CASES.filter((c) => !c.ok).length, '釣り合わない形が増えている').toBeLessThanOrEqual(1);
   });
 
   /**
