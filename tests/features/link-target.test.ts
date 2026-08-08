@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { parseLinkTarget } from '../../src/features/entry-ref/link-target';
+import { renderMarkdown } from '@features/markdown/markdown-render';
 
 /**
  * `entry:` の文法の全数(`parseEntryRef` の 7 kind + 縁)。
@@ -77,8 +78,10 @@ describe('リンクの解決(pkc:// の携帯参照)', () => {
 
   /**
    * 🔴 **別のコンテナは「開けない」と分かる形で返す**(無言で捨てない)。
-   * ⚠ 自分の cid を渡されていないときは**外と見なさない** ── いまアプリは
-   *   cid を描画へ渡していないので、既定で断ると全部断ってしまう。
+   * ⚠ 自分の cid を渡されていないときは**外と見なさない**(既定で断ると
+   *   全部断ってしまう)。⚠ **受け手側(binder)はまだ cid を渡していない** ──
+   *   描画側は Issue #100 段① で受け取ったので、`navigate-entry-ref` に焼かれる
+   *   `pkc://` は必ず同一コンテナである(外が来るのは card 経由だけ)。
    */
   it('🔴 自分の cid を渡したときだけ、別コンテナを外と見なす', () => {
     const own = parseLinkTarget('pkc://c1/entry/e9', 'c1');
@@ -88,5 +91,41 @@ describe('リンクの解決(pkc:// の携帯参照)', () => {
     // cid を渡していない = 見分けられないので、外とは言わない
     const unknown = parseLinkTarget('pkc://other/entry/e9');
     expect(unknown.kind === 'entry' && unknown.foreign).toBe(false);
+  });
+});
+
+/**
+ * 🔴 **添付の携帯参照は、受け手ができるまで焼かない**(2026-08-08、Issue #100 段①)。
+ *
+ * 段①で `currentContainerId` が届くようになったので、条件だけ見れば
+ * `pkc://<自分>/asset/<key>` は `navigate-asset-ref` で焼ける。⚠ **だが受け手が無い**
+ * (② key→lid の逆引きが未着手)ため、焼くと `<a href>` の既定を止める配線に当たり
+ * **押しても黙る** ── #98 で 4 面ぶん潰した無言の dead click を新設してしまう。
+ * だから同一コンテナ枝を `kind === 'entry'` に限り、添付は札のままにした。
+ *
+ * ⚠ この test が守るのは「**退行させていないこと**」である。段②で受け手ができたら
+ *   焼いてよい ── そのときここを書き換える(`KNOWN_DEAD` は既に空なので、
+ *   受け手の無い action を足せば `repo-hygiene` が落ちる = 二重の門になっている)。
+ */
+describe('添付の携帯参照は焼かない(段②までの取り決め)', () => {
+  const render = (src: string): string =>
+    renderMarkdown(src, { currentContainerId: 'c-mine', silentHallucinationWarnings: true });
+
+  it('🔴 自分あての asset は押せるリンクにならず、札のまま出る', () => {
+    const html = render('[添付](pkc://c-mine/asset/ast-1)\n');
+    expect(html, '受け手の無い action を焼いている(押すと黙る)').not.toContain(
+      'navigate-asset-ref',
+    );
+    expect(html, '札にもなっていない(参照先が読めない)').toContain(
+      'pkc-portable-reference-placeholder',
+    );
+    expect(html, '札に target が載っていない').toContain('data-pkc-portable-target="ast-1"');
+  });
+
+  it('🔑 対照群: 自分あての entry は押せるリンクになる(段①の本体)', () => {
+    const html = render('[ノート](pkc://c-mine/entry/b)\n');
+    expect(html, '段① が効いていない(この test 全体が空振りする)').toContain(
+      'navigate-entry-ref',
+    );
   });
 });

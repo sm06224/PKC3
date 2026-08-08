@@ -82,6 +82,24 @@ export function liveEditorEnabled(): boolean {
  */
 const ALREADY_WHOLE_NOTE = 'すでに原文全体を編集しています';
 
+/**
+ * 🔴 **いま開いているコンテナの id を、描画へ渡す**(2026-08-08。Issue #100 段①)。
+ *
+ * markdown は `pkc://<cid>/entry/<lid>` を **`cid` が自分と一致したときだけ**
+ * `navigate-entry-ref` に焼く。渡していなかったので既定 `''` で必ず不一致になり、
+ * #97 で戻した受け手が**1 度も呼ばれなかった**(押しても無言 ── 押せない
+ * placeholder badge に見えるだけ)。
+ *
+ * ⚠ **未 boot(`null`)は空文字**へ落とす ── 「分からないなら外と見なす」が
+ *   安全側(`markdown-render.ts` の枝と同じ判断)。ここで `'default'` のような
+ *   既定値を作らない(嘘の一致を生む)。
+ * 🔑 **1 か所で決める** ── 面ごとに `state.cid ?? ''` を書くと、片方だけ
+ *   書き換える変異が「もう片方は正しい」ので気づかれにくい。
+ */
+function selfContainerId(state: AppState): string {
+  return state.cid ?? '';
+}
+
 export class DetailRenderer {
   private readonly region: HTMLElement;
   private readonly assets: AssetLender | null;
@@ -420,7 +438,7 @@ export class DetailRenderer {
       this.bodyKind = 'attachment';
       this.bodyView = EMPTY_VIEW;
       this.bodyHost!.textContent = '';
-      this.renderAttachment(body, fm.body, lid);
+      this.renderAttachment(body, fm.body, lid, selfContainerId(state));
       this.restoreScroll();
       return;
     }
@@ -444,6 +462,10 @@ export class DetailRenderer {
         this.bodyHost!.textContent = '';
         this.bodyHost!.className = 'pkc-md-rendered';
         this.bodyHost!.setAttribute('data-pkc-field', 'detail-body');
+        // 🔑 散文の読み幅を受ける印(2026-08-08 の紙面フォーマット)。
+        //    ⚠ 器の名前(field / region)とは別に名乗る ── 同じ印を編集の 2 面と
+        //    書き出しの器も付けており、**4 面 + 書き出しが同じ幅で見える**根拠がこれ
+        this.bodyHost!.setAttribute('data-pkc-prose', '');
       }
       const opts = {
         vars: extractVars(body),
@@ -456,6 +478,15 @@ export class DetailRenderer {
          * ⚠ 本文の画像と箱の CSP は**同じ値**で動く(片方だけ開けない)。
          */
         allowExternalImages: this.externalImages.allows(lid),
+        /**
+         * 🔴 **いま開いているコンテナの id**(2026-08-08。Issue #100 段①)。
+         * これが無いと `pkc://<自分>/entry/<lid>` が**必ず**「別の PKC」の枝
+         * (押せない placeholder)へ落ちる ── 受け手(`navigate-entry-ref`)は
+         * #97 で戻っているのに、**焼かれないので 1 度も呼ばれなかった**。
+         * ⚠ 指紋には足さない ── コンテナが変わる `SYS_BOOTED` は
+         *   `selectedLid` / `openBody` を捨てるので、指紋は必ず一緒に動く。
+         */
+        currentContainerId: selfContainerId(state),
       };
       /**
        * 🔴 **読む面もワーカーで描く**(2026-08-06。user 報告 2-8)。
@@ -753,6 +784,12 @@ export class DetailRenderer {
     const previewOpts = {
       sourceLineAnchors: false,
       allowExternalImages: this.externalImages.allows(open.lid),
+      /**
+       * 🔴 **コンテナ id も読む面と同じ値**(Issue #100 段①)。渡さないと
+       * 書いている最中だけ `pkc://<自分>/…` が押せない placeholder に見える ──
+       * 保存した瞬間にリンクへ化ける(面ごとに違う見え方にしない)。
+       */
+      currentContainerId: selfContainerId(state),
     };
     if (liveEditorEnabled()) {
       this.renderLiveEditor(open.body, previewOpts);
@@ -766,6 +803,10 @@ export class DetailRenderer {
     const preview = document.createElement('div');
     preview.setAttribute('data-pkc-region', 'editor-preview');
     preview.className = 'pkc-md-rendered';
+    // 🔑 読む面と**同じ読み幅**にする(2026-08-08 の紙面フォーマット)。
+    //    ⚠ 印が無いと、同じ文書が「読む面は 42rem・書いている間は全幅」になり、
+    //    書いている最中と保存後で行の折り返しが変わる
+    preview.setAttribute('data-pkc-prose', '');
     split.append(ta, preview);
     this.region.append(split);
 
@@ -843,11 +884,20 @@ export class DetailRenderer {
   private renderLiveEditor(
     initialBody: string,
     /** ⚠ 読む面と同じ値を渡す(`renderEditor` が 1 か所で決める)。 */
-    previewOpts: { sourceLineAnchors: boolean; allowExternalImages: boolean },
+    previewOpts: {
+      sourceLineAnchors: boolean;
+      allowExternalImages: boolean;
+      currentContainerId: string;
+    },
   ): void {
     const pane = document.createElement('div');
     pane.setAttribute('data-pkc-region', 'editor-live');
     pane.className = 'pkc-md-rendered';
+    // 🔑 読む面と**同じ読み幅**(2026-08-08 の紙面フォーマット)。
+    // ⚠ 生になった行(`[data-pkc-row-slot]`)は**一律には入らない** ── 置き換えた
+    //    塊が散文だったときだけ `row-swap.ts` が印を付ける(表・コード・図を押した
+    //    編集欄まで散文の幅に縮めないため)。
+    pane.setAttribute('data-pkc-prose', '');
     /** お知らせの行。⚠ **参照で持つ**(querySelector で探すと、退避で作り直した
      *  ときに別のものを掴む ── 実際にそう外した)。 */
     const note = document.createElement('p');
@@ -1038,6 +1088,9 @@ export class DetailRenderer {
     description: string,
     /** ⚠ **説明文も本文** ── 外部画像の扱いを本文と揃えるのに要る(2026-08-06)。 */
     lid: string,
+    /** ⚠ 同じ理由でコンテナ id も要る(Issue #100 段①)── 説明に書いた
+     *  `pkc://<自分>/entry/<lid>` が、ここだけ押せないと一貫性が崩れる。 */
+    currentContainerId: string,
   ): void {
     const host = this.bodyHost ?? this.region;
     const meta = readAttachmentMeta(rawBody);
@@ -1122,11 +1175,15 @@ export class DetailRenderer {
       const desc = document.createElement('div');
       desc.className = 'pkc-md-rendered';
       desc.setAttribute('data-pkc-field', 'detail-body');
+      // 🔑 添付の説明も本文と同じ読み幅(2026-08-08)。⚠ ここは**別に描く経路**
+      //    なので、読む面に印を付けただけでは届かない(CLAUDE.md「経路ごとに pin」)
+      desc.setAttribute('data-pkc-prose', '');
       desc.innerHTML = renderMarkdown(description, {
         sourceLineAnchors: true,
         // ⚠ 添付の説明も本文と同じ扱い ── ここだけ素通りすると、説明に書いた
         //    追跡画像が設定を無視して飛ぶ(面ごとに違う扱いにしない)
         allowExternalImages: this.externalImages.allows(lid),
+        currentContainerId,
       });
       host.append(desc);
       void this.hydrateAssetRefs(desc, this.hydrateToken);

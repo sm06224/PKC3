@@ -27,6 +27,13 @@ import { versionText } from '@adapter/ui/render/help';
 import { appNoticeStore } from '@adapter/platform/notice-store';
 import { NOTICES } from '@features/notice/notice-log';
 import { applyTheme, chooseTheme, initialTheme, isTheme } from '@adapter/ui/render/theme';
+import {
+  applyPageFormat,
+  choosePageFormat,
+  currentPageFormat,
+  initialPageFormat,
+} from '@adapter/ui/render/page-format';
+import { isPageFormat } from '@features/page-format';
 import { appExternalImages } from '@adapter/ui/render/external-images';
 import { launchTile } from '@adapter/ui/launch-tile';
 import { readAppStorage } from '@adapter/platform/app-storage';
@@ -185,6 +192,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   // 🎨 配色は**枠より先**に当てる ── 後だと一瞬だけ既定色で描かれて瞬く
   const bootTheme = initialTheme();
   applyTheme(document.documentElement, bootTheme);
+  // 📄 紙面も**枠より先**(同じ理由 ── 後だと 42rem で 1 度組んでから広がる)。
+  // ⚠ ここでは**保存しない**(`applyPageFormat` は当てるだけ)── 保存するのは
+  //    user が選んだときだけ(`theme.ts` の M-7 と同じ)
+  applyPageFormat(document.documentElement, initialPageFormat());
   const regions = buildShell(root);
   // ⚠ 配色の選択欄は**設定の画面**に在る(段⑨c で移した)。合わせるのは
   //    `SettingsRenderer.syncTheme()` の仕事 ── ここに 2 本目を置かない
@@ -362,6 +373,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
          * 開いた人は追跡に同意していない。URL は属性に残るので情報は失われない。
          */
         allowExternalImages: appExternalImages.getMode() === 'always',
+        /**
+         * 📄 **書き出した瞬間の紙面を焼く**(2026-08-08、user 裁定)。
+         * ⚠ いま**画面に当たっている**値を渡す(保存を読み直さない)── 保存が
+         *   使えない環境では画面と保存が食い違い、配った HTML だけ別の幅になる。
+         */
+        pageFormat: currentPageFormat(document.documentElement),
       };
       // 1 ノートだけの書出しも**同じ実行部・同じ形式**を通る(P6f)──
       // 別経路にすると「1 件書出しだけ壊れている」が起きる
@@ -715,6 +732,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // 別の一覧を書くと、テーマを足しても**黙って効かない**(実際に踏んだ)
     setTheme: (theme) => {
       if (isTheme(theme)) chooseTheme(document.documentElement, theme);
+    },
+    /**
+     * 📄 紙面(2026-08-08、user 裁定)。⚠ **一覧は 1 か所**(`PAGE_FORMATS`)。
+     * 🔑 **描き直さない** ── 変わるのは `--read-w` の値だけで HTML は 1 文字も
+     *   変わらないので、ブラウザが reflow する。描き直すと**図が焼き直される**
+     *   (図のラスタは器の幅から決まり、その器は動いていない)。
+     *   ⚠ ここは `setExternalImages` と**わざと違う** ── あちらは描いた HTML
+     *   そのものが変わるので描き直しが要る。
+     */
+    setPageFormat: (format) => {
+      if (isPageFormat(format)) choosePageFormat(document.documentElement, format);
     },
     /**
      * 🖼 外部の画像(2026-08-06、user 裁定「常にオン / 常に確認 / 常にオフ」)。

@@ -40,7 +40,7 @@ const BAKED = extractBodyCss(
  */
 const ALLOWED: Readonly<Record<string, string>> = {
   // ⚠ `.b`(読み幅)は 2026-08-08 の裁定で消えた ── app.css の規則が
-  //    .pkc-md-rendered[data-pkc-field='detail-body'] 起点になり、焼き込みで届く。
+  //    .pkc-md-rendered[data-pkc-prose] 起点になり、焼き込みで届く。
   //    ここへ書き戻すと正本が 2 本になる(下の「読み幅は焼いた側が持つ」が鳴る)。
   '.b>*:first-child': '器の直下の先頭。焼いた側に対応物なし',
   '.b p,.b ul,.b ol': '段落 / 箇条書きの margin を app.css は書いていない(UA 既定)',
@@ -132,7 +132,7 @@ describe('書き出しの `.b` 規則(焼いた側と重複させない)', () =>
 
   /**
    * 🔴 **読み幅は焼いた側が持つ**(user 裁定 2026-08-08 で統一)。
-   * app.css の読み幅の規則を `.pkc-md-rendered[data-pkc-field='detail-body']` 起点に
+   * app.css の読み幅の規則を `.pkc-md-rendered[data-pkc-prose]` 起点に
    * 書き換えた日から、読み幅は焼き込みで届く(46em/器 → 42rem/各ブロック)。
    * ⚠ `.b` に max-width を書き戻すと正本が 2 本になる ── 画面(46em 等)も
    *   紙(none でほどく)も両方この 1 本で止める。

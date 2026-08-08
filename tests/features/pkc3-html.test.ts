@@ -1499,9 +1499,12 @@ describe('可搬 HTML — 本文の CSS を app.css から焼く', () => {
     document.body.innerHTML = /<main>[\s\S]*?<\/main>/.exec(html)![0]!;
     const box = document.getElementById('body')!;
     expect([...box.classList].sort(), '器の class が足りない').toEqual(['b', 'pkc-md-rendered']);
-    // 🔴 読み幅(2026-08-08 の統一)は data-pkc-field='detail-body' 起点で焼かれてくる
-    //    ── 属性が落ちると、この面だけ本文が全幅に伸びる
-    expect(box.getAttribute('data-pkc-field'), '読み幅の当たり先が無い').toBe('detail-body');
+    // 🔴 読み幅(2026-08-08 の統一)は **data-pkc-prose 起点**で焼かれてくる
+    //    ── 印が落ちると、この面だけ本文が全幅に伸びる。
+    // ⚠ 2 巡目レビューで直した: ここは長く `data-pkc-field='detail-body'` を
+    //    「読み幅の当たり先」として pin していたが、いまその属性は**誰も読まない**
+    //    (`body-css` は field の規則を 1 本も焼かない)── 嘘の理由で固定していた。
+    expect(box.hasAttribute('data-pkc-prose'), '読み幅の当たり先が無い').toBe(true);
   });
 
   it('🔴 「全体を印刷」が組む器にも pkc-md-rendered が付いている', async () => {
@@ -1528,10 +1531,9 @@ describe('可搬 HTML — 本文の CSS を app.css から焼く', () => {
         'b',
         'pkc-md-rendered',
       ]);
-      // 🔴 読み幅の当たり先(2026-08-08)── ここに無いと全体印刷だけ全幅で出る
-      expect(box.getAttribute('data-pkc-field'), '紙の器に読み幅が当たらない').toBe(
-        'detail-body',
-      );
+      // 🔴 読み幅の当たり先(2026-08-08)── ここに無いと全体印刷だけ全幅で出る。
+      // ⚠ 印は `data-pkc-prose`(2 巡目レビューで訂正。field ではない)
+      expect(box.hasAttribute('data-pkc-prose'), '紙の器に読み幅が当たらない').toBe(true);
     }
   });
 });
