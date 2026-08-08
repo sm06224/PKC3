@@ -317,7 +317,10 @@ describe('空行マーカーの高さ', () => {
  * (横に広いほど読めるので、そこは既定が正しい)。
  */
 describe('読み幅の上限', () => {
-  const RULE = /\[data-pkc-field='detail-body'\] > :is\(([^)]*)\)/;
+  // ⚠ 起点は 2026-08-08(紙面フォーマット段 1)に `[data-pkc-prose]` へ移した ──
+  //    読む面・添付の説明・分割プレビュー・ライブエディタ・書き出しが**同じ印**で
+  //    名乗る(器の名前 field / region では 4 面を 1 本にまとめられなかった)
+  const RULE = /\[data-pkc-prose\] > :is\(([^)]*)\)/;
   it('🔴 注意書きが対象に入っている', () => {
     const m = RULE.exec(CSS);
     expect(m, '読み幅の規則が見つからない').not.toBeNull();
@@ -366,6 +369,9 @@ describe('読み幅の上限', () => {
       '.pkc-region-body',
       '.pkc-section-callout',
       '.pkc-fig-equation',
+      // ⚠ ライブエディタで生になった行(2026-08-08)。落とすと、押した行だけ
+      //    全幅へ跳ねる ── 「同じ紙の上で 1 行だけ生になる」作りが崩れる
+      '[data-pkc-row-slot]',
     ]);
   });
 });

@@ -110,16 +110,17 @@ describe('本文の CSS を抜く', () => {
       expect(OUT.css, `器の規則が混ざっている: ${key}`).not.toContain(key);
     }
     /**
-     * ⚠ `data-pkc-field` は**読み幅の 1 か所だけ**通す(2026-08-08 の統一)。
-     * 読み幅の規則は `.pkc-md-rendered[data-pkc-field='detail-body']` 起点で、
-     * 属性は**要素の絞り込み**である(器を起点にした規則ではない)。
-     * それ以外の field は器の印なので 1 件も通さない ── 等値で pin する
-     * (器の field が混ざっても、読み幅が落ちても、どちらでも落ちる)。
+     * ⚠ `data-pkc-field` は **1 件も通さない**(2026-08-08 の紙面フォーマット段 1)。
+     * かつては読み幅の 1 本だけが `[data-pkc-field='detail-body']` 起点だったので
+     * 例外にしていたが、いまは読み幅も**器の名前を使わない**印
+     * (`[data-pkc-prose]` ── 散文を載せる器が自分で名乗る)へ移してある。
+     * ⚠ **読み幅が落ちたことはここでは検出できない**(空でも通る)── その仕事は
+     *   下の「読み幅の規則と --read-w の定義が焼かれている」が持つ。
      */
     const fields = [...OUT.css.matchAll(/data-pkc-field='([^']*)'/g)].map((m) => m[1]);
-    expect(fields, '読み幅以外の field の規則が混ざった(または読み幅が落ちた)').toEqual([
-      'detail-body',
-    ]);
+    expect(fields, '器の field の規則が混ざった').toEqual([]);
+    // ⚠ 逆に、散文の印は**在らねばならない**(器の印を消して読み幅ごと落とす変異を止める)
+    expect(OUT.css, '散文の印(data-pkc-prose)が焼かれていない').toContain('data-pkc-prose');
     // ⚠ 逆に、本文が使う data 属性は**在らねばならない**(選り過ぎの検出)
     for (const key of ['data-pkc-align', 'data-pkc-indent', 'data-pkc-render-mode']) {
       expect(OUT.css, `本文の属性の規則が落ちている: ${key}`).toContain(key);
@@ -135,8 +136,8 @@ describe('本文の CSS を抜く', () => {
    *   規則が在るのに幅が消える。
    * 🔴 **宣言の字面だけを見ない**(2026-08-08 のレビューで実証)。
    *   `toContain('max-width:var(--read-w)')` だけだと、起点を子孫結合子へ変える
-   *   1 文字の変異(`.pkc-md-rendered[data-pkc-field=…]` → `.pkc-md-rendered [data-pkc-field=…]`)
-   *   が **unit 全緑のまま通る** ── `detail-body` を持つ 4 要素は自分自身が
+   *   1 文字の変異(`.pkc-md-rendered[data-pkc-prose]` → `.pkc-md-rendered [data-pkc-prose]`)
+   *   が **unit 全緑のまま通る** ── 散文の印を持つ器は自分自身が
    *   `.pkc-md-rendered` なので、複合が子孫になると**どこにも当たらない**
    *   (4 面すべてで読み幅が消えるのに誰も鳴らない)。だから**規則そのもの**を見る:
    *   ① 起点の形 ② `@media` に包まれていないこと(包むと画面で効かない)。
@@ -152,7 +153,7 @@ describe('本文の CSS を抜く', () => {
     expect(
       rw[0]!.selector,
       '読み幅の起点が器の子孫になっている(どの要素にも当たらない)',
-    ).toMatch(/^\.pkc-md-rendered\[data-pkc-field='detail-body'\]>/);
+    ).toMatch(/^\.pkc-md-rendered\[data-pkc-prose\]>/);
     /**
      * 🔴 **値も見る**(2026-08-08 の 2 巡目レビュー)。上の 3 つは「規則が在るか」
      * しか見ていないので、`--read-w: 420rem` の 1 文字変異が**全 test 緑のまま通る**

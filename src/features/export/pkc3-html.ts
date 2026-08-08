@@ -39,6 +39,11 @@ import {
   globalsToDataAttrs,
 } from '../markdown/document-globals';
 import { scanAssetRefsInto } from '@features/asset/asset-ref-scan';
+import {
+  DEFAULT_PAGE_FORMAT,
+  pageFormatCss,
+  type PageFormat,
+} from '@features/page-format';
 import type { ArchiveSource } from './pkc3-archive';
 
 export const HTML_FORMAT = 'pkc3-portable';
@@ -118,8 +123,14 @@ async function* base64Chunks(blob: Blob): AsyncGenerator<string> {
   }
 }
 
-/** 閲覧 UI(依存ゼロ・インライン)。**読めるだけ**に留める(P7 の Pages product が本番)。 */
-const VIEWER = `
+/**
+ * 閲覧 UI(依存ゼロ・インライン)。**読めるだけ**に留める(P7 の Pages product が本番)。
+ *
+ * ⚠ **紙面フォーマットを受ける**(2026-08-08)ので関数である ── 書き出した瞬間の
+ * 設定を焼く。器(`<body>`)に印を 1 つ付け、値の差し替えは style の末尾で行う。
+ */
+function viewer(pageFormat: PageFormat): string {
+  return `
 <style>
 :root{color-scheme:light dark}
 body{margin:0;font:15px/1.7 system-ui,sans-serif;display:grid;grid-template-columns:280px 1fr;height:100vh}
@@ -250,6 +261,18 @@ a.f{display:inline-block;margin:8px 0;padding:6px 10px;border:1px solid #8884;bo
   #all section:first-child{break-before:auto}
   #all section h2{font-size:1.5em;margin:0 0 .6em}
 }
+/* 🔴 **紙面フォーマット**(2026-08-08。user 裁定)── 書き出した瞬間の設定を焼く。
+   ⚠ ここは VIEWER のテンプレート文字列の中 ── **バッククォートを書かない**
+     (この file で 6 度目。書いた瞬間に文字列が閉じて build ごと壊れる)。
+   ⚠ 当たる先は**器の body 要素**(data-pkc-page-format を下に付けてある)で、
+     焼いたトークンの :root{--read-w:42rem} とは**別の要素**である ──
+     カスタムプロパティの継承で本文へ届くので、**順序も詳細度も争わない**。
+     だから焼いた分より**前**に置ける ── 後ろは「この面に対応物が無いもの」
+     だけの場所なので、そこを侵さない(pkc3-html.test の等値 pin)。
+   ⚠ 値の正本は features/page-format.ts の表 1 枚(アプリの tokens.css と同じ値)。
+   ⚠ 紙系(A4 / A3)のときだけ @page が出る ── 画面用(フル HD / 4:3)は
+     受け手の既定紙に任せる。 */
+${pageFormatCss(pageFormat)}
 /* ── 🔴 **本文の見た目の正本は app.css**(2026-08-07)。ここから下は
    src/styles/app.css の .pkc-md-rendered 前置きの規則を build 時に抜いて焼いたもの
    (build/body-css.ts + build/body-css-plugin.ts)。器は class .b、本文の規則は
@@ -279,6 +302,7 @@ ${BODY_CSS}
    (押しても何も起きない飾りなので)── 26px のままだと 24px の空きが残る(実測)。 */
 .b .pkc-render-toggle{right:2px}
 </style>
+<body data-pkc-page-format="${pageFormat}">
 <nav>
   <h1 id="t"></h1>
   <button id="print" class="p" type="button" hidden>この文書を印刷</button>
@@ -286,7 +310,7 @@ ${BODY_CSS}
   <details id="dnotes" open><summary>ノート</summary><div id="list"></div></details>
   <details id="dtoc" open><summary>この文書の目次</summary><ol id="toc"></ol><p class="e" id="tocempty" hidden>見出しがありません</p></details>
 </nav>
-<main><div id="ptoc"></div><h2 id="title"></h2><div id="body" class="b pkc-md-rendered" data-pkc-field="detail-body"></div></main>
+<main><div id="ptoc"></div><h2 id="title"></h2><div id="body" class="b pkc-md-rendered" data-pkc-field="detail-body" data-pkc-prose></div></main>
 <div id="all"></div>
 <noscript><p id="fail">このファイルは JavaScript で中身を表示します。有効にして開き直してください。</p></noscript>
 <script>
@@ -509,11 +533,12 @@ try{
       // 🔴 **pkc-md-rendered も要る**(2026-08-07)── app.css から焼いた本文の規則は
       //    そちらに付いている。**器は 2 か所ある**(#body と、ここ「全体を印刷」)ので
       //    片方だけに足すと、全体印刷の紙だけ素の見た目で出る(誰も見ていない経路)
-      // 🔴 **data-pkc-field も要る**(2026-08-08)── 読み幅の規則は
-      //    .pkc-md-rendered[data-pkc-field='detail-body'] 起点で焼かれてくる。
+      // 🔴 **data-pkc-prose も要る**(2026-08-08)── 読み幅の規則は
+      //    .pkc-md-rendered[data-pkc-prose] 起点で焼かれてくる。
       //    落とすと全体印刷の本文だけ全幅に伸びる(同じ「片方だけ」の罠)
       var box=document.createElement('div');box.className='b pkc-md-rendered';
       box.setAttribute('data-pkc-field','detail-body');
+      box.setAttribute('data-pkc-prose','');
       var hs=hydrate(box,e,plive,'pe'+i);
       sec.appendChild(box);all.appendChild(sec);
       // 目次: ノート名 + その見出し
@@ -582,6 +607,7 @@ try{
 }catch(err){fail(err&&err.message?err.message:String(err))}
 })();
 </script>`;
+}
 
 /**
  * 可搬 HTML を書く。
@@ -615,6 +641,15 @@ export async function writePortableHtml(
    *   で「読み込んでいない画像」として置く)。
    */
   allowExternalImages: boolean = false,
+  /**
+   * 🔴 **紙面フォーマット**(2026-08-08、user 裁定)。**書き出した瞬間の設定**を焼く。
+   *
+   * ⚠ 渡さないと既定(A4 縦)── 呼び手が忘れても「配った HTML が全幅に伸びる」
+   *   ではなく「いままでと同じ 42rem」に倒れる(安全な向き)。
+   * ⚠ この値は**読み手の設定を書き換えない** ── 配った HTML の中だけの話である
+   *   (`localStorage` にも container にも触らない)。
+   */
+  pageFormat: PageFormat = DEFAULT_PAGE_FORMAT,
 ): Promise<HtmlResult> {
   const warnings: string[] = [];
   const metas = await src.listEntryMetas();
@@ -758,7 +793,7 @@ export async function writePortableHtml(
     assetCount++;
   }
   parts.push('}}');
-  parts.push('</script>', VIEWER);
+  parts.push('</script>', viewer(pageFormat));
 
   return {
     blob: new Blob(parts, { type: 'text/html;charset=utf-8' }),

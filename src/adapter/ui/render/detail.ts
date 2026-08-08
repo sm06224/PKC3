@@ -462,6 +462,10 @@ export class DetailRenderer {
         this.bodyHost!.textContent = '';
         this.bodyHost!.className = 'pkc-md-rendered';
         this.bodyHost!.setAttribute('data-pkc-field', 'detail-body');
+        // 🔑 散文の読み幅を受ける印(2026-08-08 の紙面フォーマット)。
+        //    ⚠ 器の名前(field / region)とは別に名乗る ── 同じ印を編集の 2 面と
+        //    書き出しの器も付けており、**4 面 + 書き出しが同じ幅で見える**根拠がこれ
+        this.bodyHost!.setAttribute('data-pkc-prose', '');
       }
       const opts = {
         vars: extractVars(body),
@@ -799,6 +803,10 @@ export class DetailRenderer {
     const preview = document.createElement('div');
     preview.setAttribute('data-pkc-region', 'editor-preview');
     preview.className = 'pkc-md-rendered';
+    // 🔑 読む面と**同じ読み幅**にする(2026-08-08 の紙面フォーマット)。
+    //    ⚠ 印が無いと、同じ文書が「読む面は 42rem・書いている間は全幅」になり、
+    //    書いている最中と保存後で行の折り返しが変わる
+    preview.setAttribute('data-pkc-prose', '');
     split.append(ta, preview);
     this.region.append(split);
 
@@ -885,6 +893,9 @@ export class DetailRenderer {
     const pane = document.createElement('div');
     pane.setAttribute('data-pkc-region', 'editor-live');
     pane.className = 'pkc-md-rendered';
+    // 🔑 読む面と**同じ読み幅**(2026-08-08 の紙面フォーマット)。生になった行
+    //    (`[data-pkc-row-slot]`)も同じ幅に入る ── 押した行だけ跳ねさせない
+    pane.setAttribute('data-pkc-prose', '');
     /** お知らせの行。⚠ **参照で持つ**(querySelector で探すと、退避で作り直した
      *  ときに別のものを掴む ── 実際にそう外した)。 */
     const note = document.createElement('p');
@@ -1162,6 +1173,9 @@ export class DetailRenderer {
       const desc = document.createElement('div');
       desc.className = 'pkc-md-rendered';
       desc.setAttribute('data-pkc-field', 'detail-body');
+      // 🔑 添付の説明も本文と同じ読み幅(2026-08-08)。⚠ ここは**別に描く経路**
+      //    なので、読む面に印を付けただけでは届かない(CLAUDE.md「経路ごとに pin」)
+      desc.setAttribute('data-pkc-prose', '');
       desc.innerHTML = renderMarkdown(description, {
         sourceLineAnchors: true,
         // ⚠ 添付の説明も本文と同じ扱い ── ここだけ素通りすると、説明に書いた

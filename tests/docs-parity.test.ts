@@ -20,6 +20,7 @@ import { RENDERABLE_FENCE_LANGS } from '../src/features/markdown/markdown-render
 import { MARKDOWN_EXTENSIONS } from '../src/features/import/plain-markdown';
 import { REVISION_KEEP_LATEST } from '../src/adapter/platform/storage/store-port';
 import { THEMES } from '../src/adapter/ui/render/theme';
+import { PAGE_FORMATS } from '../src/features/page-format';
 import { SEALED_ARCHETYPES, SEALED_VIEWS } from '../src/features/sealed';
 import { buildFormatBar } from '../src/adapter/ui/render/format-bar';
 import { FORMAT_OPS } from '../src/features/markdown/text-ops';
@@ -162,6 +163,29 @@ describe('マニュアルと実装の突合', () => {
     );
     const offered = THEMES.map((t) => t.id);
     expect([...offered].sort()).toEqual([...inCss].sort());
+  });
+
+  /**
+   * 🔴 **紙面の選択肢と読み幅が、マニュアルと一致する**(2026-08-08)。
+   *
+   * ⚠ 変異試験で**名前の書き換えが 1 巡目に生き延びた** ── 設定画面の選択肢は
+   * `PAGE_FORMATS` から作るので、表を書き換えると画面もマニュアル**以外**は
+   * 一緒に動いてしまい、どの検査も鳴らない。user が読むのはマニュアルなので、
+   * **画面の名前とマニュアルの名前が食い違う**のが実害である。
+   * ⚠ 数字(読み幅)も pin する ── 「数字は真っ先に腐る」(履歴の保持件数と同じ)。
+   */
+  it('🔴 紙面の選択肢と読み幅がマニュアルと一致する', () => {
+    expect(PAGE_FORMATS.length, '紙面が 1 つも無い(この検査は空振り)').toBeGreaterThan(4);
+    for (const f of PAGE_FORMATS) {
+      expect(MANUAL, `マニュアルに紙面「${f.label}」が無い`).toContain(`**${f.label}**`);
+      if (f.readWidth.endsWith('rem')) {
+        expect(MANUAL, `マニュアルに ${f.label} の読み幅 ${f.readWidth} が無い`).toContain(
+          f.readWidth,
+        );
+      }
+    }
+    // ⚠ cap を外す形式は**そう書いてある**こと(数字が無いので言葉で確かめる)
+    expect(MANUAL, 'マニュアルに「上限なし」の説明が無い').toContain('**上限なし**');
   });
 
   it('🔴 描画できる fence 言語が一致する', () => {
