@@ -23,6 +23,16 @@
 6. ライセンス(商用・再配布)
 7. メンテの活発さ
 
+## 0.1 user 指示(2026-08-08 追加。出典タグ付き = 不可侵)
+
+> **見た目と編集性能が ms office に近ければ近いほど良い。日本語は絶対なのでよろしく**
+
+評価軸に**筆頭 2 本**が加わった(§0 の 7 軸より上位):
+
+- **A. 日本語が実用水準か** ── 豆腐(□)にならない / 行組版が崩れない / **日本語で入力できる**。
+  ⚠ どれか 1 つでも欠ければ**その候補は落ちる**(「絶対」は妥協点を持たない)
+- **B. MS Office への近さ** ── 見た目(UI と組版結果)と編集の応答
+
 ## 1. 候補の総括(2026-08-08 調査。詳細な出典は §6)
 
 | 候補 | pptx 忠実度 | WMF/EMF | 編集+往復 | ライセンス | 備考 |
@@ -50,7 +60,29 @@
 - sandbox iframe(html fence)や blob: URL との相互作用も検証対象
 - この検証は smoke(実ブラウザ 2 種)で行える
 
-## 3. 推薦
+## 2.1 🔴 COOP/COEP の実機検証(2026-08-08。私の実測)
+
+§2 の「そのままでは本命候補が動かない」に対する検証。**両方とも成立した**。
+
+| 確かめたこと | 結果 |
+|---|---|
+| isolation 下で PKC3 が動くか | **smoke 100 件中 98 件が緑**(dist を COOP/COEP つきで配って全量) |
+| ⚠ 空振り防止: 本当に isolation が効いていたか | メイン・**blob: worker の両方**で `crossOriginIsolated: true` / SAB 確保 / `Atomics` 動作を確認 |
+| GitHub Pages でヘッダを付けられるか | **SW 注入で成立**(初回は非 isolated → SW が制御を握って再読込 → `crossOriginIsolated: true`) |
+| 外部画像(同意制)が生きるか | 生存(COEP は `credentialless`) |
+
+**代償が 1 つ**: SAB が使えるようになると **sqlite が別の OPFS 経路(asyncer VFS)を試して失敗し、
+`console.error` を出す**(落ちた 2 件はこれ 1 原因。データと機能は無事)。起動のたびに
+余計な取得と worker 生成が走るので、**isolation を入れるなら先に塞ぐ**。
+
+⚠ **`credentialless` は Chromium 系のみ。** Safari / Firefox では `require-corp` になり、
+そちらは **CORP を持たない外部画像が全滅**する。isolation を採るなら対応ブラウザの線引きが要る。
+
+## 3. 推薦 ── 🔴 **2026-08-08 に覆した。§3.1 を読むこと**
+
+> ⚠ 以下は**日本語要件を知る前**の推薦である。記録として残すが、**採用しない**。
+> 覆した理由と現在の推薦は §3.1。
+
 
 **ZetaOffice(LibreOffice WASM + zetajs)を self-host で本命とする。
 ただし「選定の完了」= 次の 2 点の実機検証を先に通すこと。**
@@ -80,6 +112,56 @@
 
 段構え: **P① 閲覧(view-only)を先に着地 → P② 編集**。編集は往復保全の受入試験
 (開いて保存しただけのファイルが壊れない)を必須 gate とする。
+
+## 3.1 🔴 推薦(2026-08-08 に差し替え)── **OnlyOffice client-side**。ただし裁定 2 件が要る
+
+**ZetaOffice / LibreOffice WASM は日本語要件で落ちる。** 一次ソースで確認した:
+
+| 事実 | 一次ソース |
+|---|---|
+| LOWA は **Qt 5.15.2**(allotropia fork)を使う | `static/README.wasm.md`「We're using Qt 5.15.2 with Emscripten 4.0.10」+ `distro-configs/LibreOfficeWASM32.conf` の `--enable-qt5` |
+| その wasm プラグインに **`qwasminputcontext.cpp` が無い**(SOURCES 全 16 件を確認) | `allotropia/qtbase@5.15.2+wasm` `src/plugins/platforms/wasm/wasm.pro` |
+| wasm の IME 対応は **Qt6 で入った** | `qt/qtbase@6.8` に `qwasminputcontext.cpp`(`compositionStart/Update/End`)が在る |
+| 同梱フォント 27 種に **CJK がゼロ** | `zeta-24-2` の `external/more_fonts/Module_more_fonts.mk`(実際に全数を読んだ) |
+| 置換表の MS 明朝 / MS ゴシックの**置換先が同梱に 1 つも無い**。游ゴシックは表に載っていない | `officecfg/registry/data/org/openoffice/VCL.xcu` |
+
+⚠ つまり**素の LOWA では日本語が打てない**。VCL 側は `inputMethodEvent` を実装しているが、
+プラットフォームプラグインが投げないので**呼ばれない**。回避するには canvas に透明な入力要素を
+重ね、合成中プレビュー・確定・キー操作の UNO 化・undo 粒度・選択との整合を**全部自作**する
+── PKC3 のライブエディタで最も苦労した領域を、**カーソル座標を UNO 経由でしか取れない**
+より不利な条件でもう一度やることになる。加えて軸 B(MS Office への近さ)でも、見た目は
+**LibreOffice そのもの**で MS Office 風ではない。**2 つの筆頭軸の両方で負ける。**
+
+**OnlyOffice client-side(x2t wasm + sdkjs)を推す。**
+
+| 軸 | 根拠(一次ソース) |
+|---|---|
+| 豆腐にならない | `ONLYOFFICE/core-fonts` に **takao-gothic**(TakaoGothic / TakaoPGothic / TakaoExGothic)。glyph 単位の fallback 機構(`common/libfont/character.js` の `IsUseNoSquaresMode` / `__fonts_ranges`)を持つ |
+| **日本語で打てる** | `sdkjs/common/text_input2.js` が `["input","compositionstart","compositionupdate","compositionend"]` を listen し、**キャレット位置へ入力要素を移動**(候補窓が正しい位置に出る)。`Begin_CompositeInput` / `Replace_CompositeText` / `Set_CursorPosInCompositeText` を持つ |
+| MS Office への近さ | OOXML ネイティブ設計。UI はリボン風。DOCX の font slot(ascii/hAnsi/**eastAsia**/cs)を実装 |
+| 配る量 | x2t.wasm 9.7MB / sdk-all.js 9.9MB / fonts.wasm 3.6MB ── LOWA の約 250MB に対し **1.5 桁小さい**(⚠ 判断理由にはしない。事実として記録) |
+
+**⚠ 欠けているもの(user の裁定が要る)**:
+
+1. 🔴 **縦書きが未対応**(`DocumentServer#3738` open)/ 🔴 **ルビが出ない、しかも
+   ベース文字ごと消える**(`#1152` open・confirmed-bug・2021 年から)。
+   **縦書きかルビを扱う文書があるなら、OnlyOffice も落ちる。**
+2. 🔴 **AGPL-3.0**。PKC3 は `package.json` が `"private": true` で LICENSE を持たない。
+   組み込むと**組込先のソース公開義務**が生じうる ── これは技術ではなく**事業の判断**である。
+
+そのほか判明した弱点(裁定には要らないが記録):**明朝が 1 本も無い**(ゴシックに落ちる)/
+禁則テーブルに**小書き仮名・長音符「ー」・中黒が無い**(MS Word の日本語標準禁則より弱い。
+行頭に「っ」「ー」が来うる)/ shaping の言語タグが `"en"` 固定 / 和文と欧文の別フォント指定が
+UI から出せない(`#3497` open)/ 共同編集 × IME に現役の confirmed-bug(`#3720`。
+PKC3 は共同編集をしないので該当しない見込み)。
+
+**覆る条件**: ①縦書き・ルビが要件に入る ②AGPL を受け入れない ── どちらかなら
+**フルエンジンは両方落ちる**。その場合は「閲覧は軽量レーン(§4)+ 編集は OS の Office へ
+渡す(`ms-word:` は既に allowlist に在る)」へ方針転換する。
+
+**未検証のまま残る最大の穴**: OnlyOffice client-side で **ＭＳ 明朝 / 游ゴシック指定の実 docx を
+開き、MS Word と行数・改ページを突き合わせた実測が世の中に無い**。採用が決まったら
+**最初にやるのはこれ**(user の実ファイルでの受入試験)。
 
 ## 4. 軽量閲覧レーン(本命の保険 / 併走候補)
 
