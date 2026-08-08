@@ -59,4 +59,53 @@ describe('リポジトリ衛生', () => {
     // ⚠ 期待は**空配列**。file 名まで出す(「どこか」では直せない)
     expect(offenders).toEqual([]);
   });
+
+  /**
+   * 🔴 **`data-pkc-action` を書いたのに受け手が無い = 無言の dead click**
+   * (2026-08-08、P11 で 3 つ足したときに機械化した)。
+   *
+   * binder は `ACTIONS[action]` が無ければ**黙って return する** ── 押しても
+   * 何も起きず、エラーも出ない。この repo が繰り返し踏んできた形
+   * (2026-08-07「保存直後の編集が無言の dead click になっていた」)なので、
+   * 人の注意力ではなく機械で止める。
+   *
+   * ⚠ 逆向き(受け手は在るが誰も書かない)は**見ない** ── 面を作る前に受け手を
+   *   置く順序(「実体を作ってから導線を書く」)を禁じてしまう。
+   */
+  it('🔴 画面に書いた data-pkc-action に、受け手が全部いる', () => {
+    const binder = readFileSync('src/adapter/ui/actions/binder.ts', 'utf-8');
+    /**
+     * ⚠ **`ACTIONS` の表だけを見る**(file 全体を `includes` で見ない)── 説明文や
+     *   `BODY_WRITE_ACTIONS` の一覧に名前が在るだけで満たされてしまう
+     *   (CLAUDE.md「ガードは代替物で満たせない条件にする」)。
+     */
+    const table = binder.slice(binder.indexOf('const ACTIONS: Record<string, ActionHandler> = {'));
+    const handlers = new Set([...table.matchAll(/^\s{2}'([a-z0-9-]+)':/gm)].map((m) => m[1]!));
+    expect(handlers.size, '受け手の表を読めていない(空振り)').toBeGreaterThan(20);
+
+    const written = new Set<string>();
+    for (const f of textFiles('src')) {
+      const text = readFileSync(f, 'utf-8');
+      // ⚠ **属性を実際に付けている所**を拾う(散文の中の語を拾わない)
+      for (const m of text.matchAll(/'data-pkc-action',\s*'([a-z0-9-]+)'/g)) written.add(m[1]!);
+      for (const m of text.matchAll(/data-pkc-action="([a-z0-9-]+)"/g)) written.add(m[1]!);
+    }
+    expect(written.size, '画面側を読めていない(空振り)').toBeGreaterThan(20);
+
+    /**
+     * 🔴 **見つかった実害**(2026-08-08、この検査を書いた初回)。
+     *
+     * markdown が `[題名](entry:<lid>)` / `pkc://…/asset/<key>` / `@card:` に
+     * `data-pkc-action` を焼いているのに、**PKC3 の binder に受け手が無い** ──
+     * つまり本文のリンクを押しても**無言で何も起きない**。焼く側のコメントは
+     * PKC2 の `action-binder` を指しており、記法だけ移植して受け手を置き忘れた形。
+     *
+     * ⚠ **等値で pin する**(「既知は無視」の可変リストにしない)── 直したら
+     *   ここから消さないと落ちるし、新しい dead click が増えても落ちる。
+     * 🔑 この 3 件は P11 とは**別の主題**なので、別の変更で戻す(#起票済み)。
+     */
+    const KNOWN_DEAD = ['navigate-asset-ref', 'navigate-card-ref', 'navigate-entry-ref'];
+    const dead = [...written].filter((a) => !handlers.has(a)).sort();
+    expect(dead, `受け手のいない action がある(押しても無言で何も起きない)`).toEqual(KNOWN_DEAD);
+  });
 });

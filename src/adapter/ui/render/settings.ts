@@ -15,6 +15,7 @@ import { THEMES } from './theme';
 import { EXTERNAL_IMAGE_MODES } from '@features/markdown/external-images';
 import { appExternalImages, ExternalImagePolicy } from './external-images';
 import { appJobMonitor, type JobMonitor } from '@adapter/platform/job-monitor';
+import { appNoticeStore, type NoticeStore } from '@adapter/platform/notice-store';
 import { ScrollMemory } from './scroll-memory';
 
 /** 画面の書き換えを間引く間隔。⚠ **可視化がジャンクの原因になっては本末転倒**。 */
@@ -39,6 +40,12 @@ export class SettingsRenderer {
     private readonly monitor: JobMonitor = appJobMonitor,
     /** 外部画像の設定(2026-08-06)。⚠ test は自分で `new` して渡す。 */
     private readonly externalImages: ExternalImagePolicy = appExternalImages,
+    /**
+     * お知らせを出すか(P11 段⑤)。⚠ **戻し道はここ 1 か所**である ──
+     * 帯の「今後は出さない」を押した user が復帰できる唯一の場所なので、
+     * `tests/adapter/announce.test.ts` がこの往復を守る。
+     */
+    private readonly notices: NoticeStore = appNoticeStore,
   ) {}
 
   render(state: AppState): void {
@@ -46,6 +53,7 @@ export class SettingsRenderer {
       // 配色は user 操作でしか変わらない ── 毎 state で組み直さない
       this.syncTheme();
       this.syncExternalImages();
+      this.syncNotices();
       // 🔴 **隠れている間に来た変化をここで拾う**(2026-08-05、user 報告)。
       //    `refresh()` は面が hidden の間は捨てるので(下の説明)、再表示のときに
       //    誰かが呼び直さないと**表とログは初回ビルドの姿で凍る**。仕事は必ず
@@ -106,6 +114,29 @@ export class SettingsRenderer {
     dl.append(dt, dd);
 
     /**
+     * 📣 **お知らせを出すか**(P11 段⑤)。
+     *
+     * 🔑 **ここが「今後は出さない」の戻し道である。** 帯にしか導線が無いと、
+     * 一度消した user は二度と戻せない ── 「戻せない導線は作らない」。
+     * ⚠ **flag ではない**(正規設定)。開放先は user で、畳む予定も無い。
+     */
+    const nt = document.createElement('dt');
+    nt.textContent = 'お知らせ';
+    const nd = document.createElement('dd');
+    const nlabel = document.createElement('label');
+    const ncheck = document.createElement('input');
+    ncheck.type = 'checkbox';
+    ncheck.setAttribute('data-pkc-action', 'set-notices-enabled');
+    ncheck.setAttribute('data-pkc-field', 'notices-enabled');
+    nlabel.append(ncheck, document.createTextNode(' 起動したときに新しいお知らせを出す'));
+    nd.append(nlabel);
+    const nnote = document.createElement('p');
+    nnote.setAttribute('data-pkc-field', 'settings-note');
+    nnote.textContent = '出さなくても、過去のお知らせはヘルプからいつでも読めます。';
+    nd.append(nnote);
+    dl.append(nt, nd);
+
+    /**
      * 🔴 **版はヘルプへ移した**(P11)。
      *
      * P10 では上下の帯の撤去先としてここに置いたが、設定は「**あなたが選ぶもの**」の
@@ -122,6 +153,7 @@ export class SettingsRenderer {
     this.region.append(body);
     this.syncTheme();
     this.syncExternalImages();
+    this.syncNotices();
     this.refresh();
     void state;
   }
@@ -334,6 +366,16 @@ export class SettingsRenderer {
     );
     const cur = this.externalImages.getMode();
     if (select && select.value !== cur) select.value = cur;
+  }
+
+  /**
+   * ⚠ 画面の値を**いまのお知らせ設定に合わせる**(P11)。
+   * 🔴 帯の「今後は出さない」は**この画面を開かずに**設定を変える ── 映さないと、
+   * 次に設定を開いたとき「出す」のまま見える(CLAUDE.md「設定画面の値の同期」)。
+   */
+  private syncNotices(): void {
+    const box = this.region.querySelector<HTMLInputElement>('[data-pkc-field="notices-enabled"]');
+    if (box) box.checked = this.notices.enabled();
   }
 
   /** ⚠ 画面の値を**いまの配色に合わせる**(合わせないと画面が嘘をつく)。 */

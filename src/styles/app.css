@@ -64,12 +64,14 @@ body {
    * 無かった。設定は左の列の下へ移した。
    * ⚠ 下の帯(status)は**残す** ── エラーの唯一の出口だから。ただし
    * 既定は `hidden` なので、言うことが無いときは行の高さが 0 になる */
-  grid-template-rows: 1fr auto auto auto;
+  /* ⚠ お知らせ(P11)も**自分の行**。相乗りさせない理由は `shell.ts` に書いた */
+  grid-template-rows: 1fr auto auto auto auto;
   grid-template-areas:
-    'sidebar detail  inspector'
-    'update  update  update'
-    'notices notices notices'
-    'status  status  status';
+    'sidebar  detail   inspector'
+    'announce announce announce'
+    'update   update   update'
+    'notices  notices  notices'
+    'status   status   status';
   height: 100%;
   /* 🔑 **境界線は共有する**(user 指示 2026-08-03「境界線は全て共有して、
    * マージンとギャップは基本いらない」)。1px の隙間に地の色を透かせて
@@ -95,6 +97,9 @@ body {
 }
 [data-pkc-region='inspector'] {
   grid-area: inspector;
+}
+[data-pkc-region='announce'] {
+  grid-area: announce;
 }
 [data-pkc-region='update'] {
   grid-area: update;
@@ -1970,6 +1975,33 @@ select:focus-visible {
 [data-pkc-field='update-text'] {
   flex: 1;
 }
+/* ── 起動したときのお知らせ(P11)────────────────────
+ * ⚠ **update と同じ色にしない** ── 隣り合う行なので、同じ地だと 1 枚の帯に見える。
+ *   こちらは面の色(`surface-2`)で、色は使わない(「色は情報にだけ」)。
+ * ⚠ 長いお知らせで画面を占領させない ── notices と同じく高さを切って中で流す。 */
+[data-pkc-region='announce'] {
+  padding: var(--s3);
+  background: var(--surface-2);
+  max-height: 30vh;
+  overflow: auto;
+}
+[data-pkc-field='announce-title'] {
+  font-weight: 600;
+  margin-bottom: var(--s2);
+}
+[data-pkc-region='announce'] h3 {
+  margin: var(--s3) 0 var(--s1);
+  font-size: 13px;
+}
+[data-pkc-region='announce'] ul {
+  margin: 0;
+  padding-left: 1.2em;
+}
+[data-pkc-field='announce-where'] {
+  margin: var(--s3) 0 var(--s2);
+  color: var(--muted);
+  font-size: 11px;
+}
 [data-pkc-region='status'] {
   display: flex;
   align-items: center;
@@ -2003,6 +2035,7 @@ select:focus-visible {
     grid-template-areas:
       'sidebar   detail'
       'inspector inspector'
+      'announce  announce'
       'update    update'
       'notices   notices'
       'status    status';
@@ -2028,11 +2061,12 @@ select:focus-visible {
       'sidebar'
       'detail'
       'inspector'
+      'announce'
       'update'
       'notices'
       'status';
-    /* ⚠ 6 区画(上の帯を撤去したので 1 つ減った)── 本文だけが伸びる */
-    grid-template-rows: auto 1fr auto auto auto auto;
+    /* ⚠ 7 区画(P11 でお知らせが 1 つ増えた)── 本文だけが伸びる */
+    grid-template-rows: auto 1fr auto auto auto auto auto;
   }
   [data-pkc-region='sidebar'] {
     max-height: 30vh;
@@ -2172,6 +2206,8 @@ select:focus-visible {
   [data-pkc-region='status'],
   [data-pkc-region='notices'],
   [data-pkc-region='update'],
+  /* ⚠ お知らせも紙には要らない(P11)── 押せるものが無いのは他と同じ */
+  [data-pkc-region='announce'],
   [data-pkc-field='detail-bar-slot'],
   [data-pkc-field='detail-notice-slot'],
   .pkc-md-copy-btn,

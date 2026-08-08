@@ -22,6 +22,9 @@ import { runExplicitPurge } from '@adapter/platform/storage/asset-gc';
 import { buildShell } from '@adapter/ui/render/shell';
 import { showNotices, clearNotices } from '@adapter/ui/render/notices';
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
+import { createAnnounce } from '@adapter/ui/render/announce';
+import { appNoticeStore } from '@adapter/platform/notice-store';
+import { NOTICES } from '@features/notice/notice-log';
 import { applyTheme, chooseTheme, initialTheme, isTheme } from '@adapter/ui/render/theme';
 import { appExternalImages } from '@adapter/ui/render/external-images';
 import { launchTile } from '@adapter/ui/launch-tile';
@@ -88,6 +91,12 @@ export interface AppHandle {
    * ⚠ 交代を頼むだけ ── 再読込は交代が済んでから(`watchForUpdate` の側)。
    */
   presentUpdate(apply: () => void): void;
+  /**
+   * 起動したときのお知らせを見せる(P11 段⑤)。
+   * ⚠ **boot が落ち着いてから**呼ぶ ── 何も映っていない画面に帯だけ立てない。
+   * ⚠ 未読が 0 件・恒久オフなら**何も出さない**(判定は面の側)。
+   */
+  presentAnnounce(): void;
 }
 
 /**
@@ -467,6 +476,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       files,
     ).then(() => {});
 
+  /**
+   * 📣 起動したときのお知らせ(P11 段⑤。user 指示 2026-08-07
+   * 「PKC3 にも PKC2 のようにお知らせポップアップをつけてください」)。
+   *
+   * ⚠ **自分の行**に出す(`shell.ts` に理由)。⚠ 出すのは boot が落ち着いてから
+   *   ── 起動直後に出すと、まだ何も映っていない画面に帯だけが立つ。
+   */
+  const announce = createAnnounce(regions.announce, appNoticeStore, NOTICES);
+
   /** 更新の案内(P7 段⑤)。面と「押されたら何をするか」は render 側が持つ。 */
   const updatePrompt = createUpdatePrompt(regions.update, {
     // ⚠ 再読込は open editor の下書きを捨てる(本文は AppState にしか無い)。
@@ -740,6 +758,29 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       if (dispatcher.getState().viewMode !== 'detail')
         dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
     },
+    /**
+     * 📣 起動したときのお知らせ(P11 段⑤)。
+     * ⚠ `dismiss` は**読んだことにする**(次から出ない)、`mute` は**今後出さない**。
+     *   ⚠ mute は設定の「表示」から戻せる ── 戻せない導線は作らない。
+     */
+    dismissAnnounce: () => announce.dismiss(),
+    /**
+     * 設定の「起動したときに新しいお知らせを出す」。
+     * ⚠ **戻した瞬間に出し直さない** ── 戻した user が見たいのは設定画面である。
+     *   次の起動から出る(未読は既読になっていないので消えていない)。
+     */
+    setNoticesEnabled: (on) => {
+      appNoticeStore.setEnabled(on);
+      // ⚠ **既読にしない**(`dismiss` ではなく `hide`)── 設定を切っただけの
+      //   user は読んでいないので、戻したときに出直す
+      if (!on) announce.hide();
+    },
+    muteAnnounce: () => {
+      announce.mute();
+      // ⚠ 設定を開いていたら、その場で映し直す(器は 1 度しか組まないので
+      //    映さないと古い値が見える ── CLAUDE.md「設定画面の値の同期」)
+      center.render(dispatcher.getState());
+    },
     // 🔄 新しい版へ交代する(P7 段⑤)。⚠ 頼むだけ ── 再読込は交代が済んでから
     applyUpdate: () => updatePrompt.apply(),
     // ⚠ 見送っても待機中の worker は残るので、次に開いたときに再び出る
@@ -891,6 +932,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       );
     },
     presentUpdate: (apply) => updatePrompt.present(apply),
+    presentAnnounce: () => announce.present(),
   };
 }
 
@@ -940,6 +982,12 @@ function bootstrap(): void {
       // PKC2 の教訓 ── 「#root 存在待ち」は HTML load 段階で通過して flake 化する
       root.setAttribute('data-pkc-boot', 'ready');
       preboot?.booted(); // 以後は勝手に読み直さない(下書きを巻き込まない)
+      /**
+       * 📣 お知らせ(P11 段⑤)。⚠ **boot 完了の刻印より後**に出す ──
+       * 先に出すと、まだ何も映っていない画面に帯だけが立つ。
+       * ⚠ `watchForUpdate` より前でよい(別の行なので重ならない)。
+       */
+      app.presentAnnounce();
       // 🔄 更新の案内(P7 段⑤)。⚠ 自動では交代させない ── 交代は旧 build の
       // cache を消すので、user が押したときだけ・押したタブだけを再読込する
       void watchForUpdate(
