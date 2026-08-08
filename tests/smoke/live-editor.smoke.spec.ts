@@ -501,3 +501,52 @@ test('🔴 塊を跨ぐドラッグ選択で、版面が文末へ飛ばない(�
   expect(after.selection, '選択が消えた').toBeGreaterThan(0);
   expect(errors).toEqual([]);
 });
+
+/**
+ * 🔴 **カーソルキーで隣の塊へ**(2026-08-08。user 裁定「カーソルキーで下に行く」)。
+ *
+ * unit(happy-dom)では届かない層: 実ブラウザの textarea は ↓ の**既定動作**で
+ * caret を動かす ── `preventDefault` の掛け漏れ・掛けすぎは実機でしか見えない
+ * (行の途中の ↓ を奪うと、複数行の入力欄の中を移動できなくなる)。
+ */
+test('🔴 最終行の ↓ で次の塊が開き、行の途中の ↓ は箱の中の移動のまま', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoLive(page);
+  await openLive(page, '# 題\n\n最初の段落です。\n\n次の段落です。\n');
+
+  const live = page.locator('[data-pkc-region="editor-live"]');
+  await clickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
+  const row = live.locator('[data-pkc-field="row-source"]');
+  await expect(row).toHaveValue('最初の段落です。');
+
+  // 1 行の値 = どこに居ても最終行 ── ↓ で確定し、次の塊が開く(caret 先頭)
+  await page.keyboard.press('End');
+  await page.keyboard.press('ArrowDown');
+  await expect(row, '次の塊が開いていない').toHaveValue('次の段落です。');
+  expect(
+    await row.evaluate((el) => (el as HTMLTextAreaElement).selectionStart),
+    'caret が先頭に無い',
+  ).toBe(0);
+
+  // ↑ で前の塊に戻る(caret 末尾)
+  await page.keyboard.press('ArrowUp');
+  await expect(row).toHaveValue('最初の段落です。');
+  expect(
+    await row.evaluate((el) => (el as HTMLTextAreaElement).selectionStart),
+    'caret が末尾に無い',
+  ).toBe('最初の段落です。'.length);
+
+  // 複数行にして行の途中に caret ── ↓ は**箱の中の移動**のまま(奪っていない)
+  await row.fill('1 行目です。\n2 行目です。');
+  await row.evaluate((el) => {
+    (el as HTMLTextAreaElement).setSelectionRange(0, 0);
+  });
+  await page.keyboard.press('ArrowDown');
+  await expect(row, '行の途中の ↓ で確定してしまった(箱の中を移動できない)').toHaveValue(
+    '1 行目です。\n2 行目です。',
+  );
+  const caret = await row.evaluate((el) => (el as HTMLTextAreaElement).selectionStart);
+  expect(caret, '↓ の既定動作(次の行へ)が死んでいる').toBeGreaterThan(0);
+  expect(errors).toEqual([]);
+});

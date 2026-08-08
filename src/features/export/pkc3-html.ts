@@ -166,13 +166,12 @@ nav button.p{width:auto;font-size:12px;padding:4px 10px;margin:2px 8px 0;
      受け皿(下敷き)である。配色の方針ではない。
    ⚠ この template literal の中に**バッククォートを書かない**(build が壊れる ──
      この file で 5 度目)。 */
-/* 🔑 読み幅。⚠ **app.css の読み幅は焼かれていない** ── あちらの規則は
-   [data-pkc-view-pane=detail] 起点で .pkc-md-rendered 前置きではないので、
-   抜き出しの判定(build/body-css.ts の isBodyRule)から外れる。だから
-   **この 1 行が配った HTML の読み幅の唯一の持ち主**である。消すと本文が全幅に伸びる。
-   ⚠ アプリは 42rem を**各ブロックに**、こちらは 46em を**器に**掛けており、
-     機構も値も揃っていない(裁定待ち。詳細は docs の掃除メモ)。 */
-.b{max-width:46em}
+/* 🔑 読み幅はここに無い ── **app.css の規則が焼き込みで届く**(user 裁定 2026-08-08 で
+   統一。46em/器 → 42rem/各ブロック + 表・図・コードは対象外)。あちらの規則は
+   .pkc-md-rendered[data-pkc-field='detail-body'] 起点なので、抜き出しの判定
+   (build/body-css.ts の isBodyRule)を通る。だから器(#body と「全体を印刷」の箱)には
+   **class 2 つに加えて data-pkc-field='detail-body' も**付けてある ──
+   属性を落とすと、その面だけ本文が全幅に伸びる。 */
 .b>*:first-child{margin-top:0}
 /* ⚠ 段落 / 箇条書きの margin は **app.css が書いていない**(UA 既定に任せている)。
    焼いた側に対応物が無いので、消すと配った HTML だけ行間が変わる。 */
@@ -203,7 +202,8 @@ a.f{display:inline-block;margin:8px 0;padding:6px 10px;border:1px solid #8884;bo
   nav{display:none}
   main{overflow:visible;padding:0}
   main h2{font-size:1.5em}
-  .b{max-width:none}
+  /* ⚠ 読み幅を紙でほどく規則(かつての .b の none)は置かない(2026-08-08)──
+     器の cap が消えた今は死文で、紙もアプリの印刷と同じ 42rem/ブロックが裁定の向き。 */
   /* 折りたたみは**紙では展開する**(印刷時に details を開くのは JS 側) */
   #ptoc{display:block;margin:0 0 1.5em;padding:0 0 1em;border-bottom:1px solid #8884}
   #ptoc h3{font-size:1.05em;margin:0 0 .4em}
@@ -286,7 +286,7 @@ ${BODY_CSS}
   <details id="dnotes" open><summary>ノート</summary><div id="list"></div></details>
   <details id="dtoc" open><summary>この文書の目次</summary><ol id="toc"></ol><p class="e" id="tocempty" hidden>見出しがありません</p></details>
 </nav>
-<main><div id="ptoc"></div><h2 id="title"></h2><div id="body" class="b pkc-md-rendered"></div></main>
+<main><div id="ptoc"></div><h2 id="title"></h2><div id="body" class="b pkc-md-rendered" data-pkc-field="detail-body"></div></main>
 <div id="all"></div>
 <noscript><p id="fail">このファイルは JavaScript で中身を表示します。有効にして開き直してください。</p></noscript>
 <script>
@@ -509,7 +509,11 @@ try{
       // 🔴 **pkc-md-rendered も要る**(2026-08-07)── app.css から焼いた本文の規則は
       //    そちらに付いている。**器は 2 か所ある**(#body と、ここ「全体を印刷」)ので
       //    片方だけに足すと、全体印刷の紙だけ素の見た目で出る(誰も見ていない経路)
+      // 🔴 **data-pkc-field も要る**(2026-08-08)── 読み幅の規則は
+      //    .pkc-md-rendered[data-pkc-field='detail-body'] 起点で焼かれてくる。
+      //    落とすと全体印刷の本文だけ全幅に伸びる(同じ「片方だけ」の罠)
       var box=document.createElement('div');box.className='b pkc-md-rendered';
+      box.setAttribute('data-pkc-field','detail-body');
       var hs=hydrate(box,e,plive,'pe'+i);
       sec.appendChild(box);all.appendChild(sec);
       // 目次: ノート名 + その見出し

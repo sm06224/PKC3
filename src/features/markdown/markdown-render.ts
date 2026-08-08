@@ -2901,28 +2901,51 @@ function postProcessFigureSentinels(html: string): string {
  * L-5 (2026-05-07、wave-10-2 Phase 1)+ reform-2026-05 PR-C(typo 寛容化):
  * 行頭 align prefix。
  *
- * **reform 後の semantics**(本 PR で変更):
+ * **semantics**(user 裁定 2026-08-08、Issue #103 で確定):
  *
  *   - `||`                          → center(物理中央、書字方向 不変)
- *   - `|>` `<|` `|<` `>|`(全 4 形)→ **end**(logical、default flow の反対側)
- *                                       LTR + horizontal なら右、RTL なら左、
- *                                       vertical なら下。
+ *   - `|>` `<|` `|<` `>|`(全 4 形)→ **opposite**(グローバルの寄せの**反対側**)。
+ *     裁定「**|> も<|も|<も意味は同じ、グローバルの文字の寄せを反対にする**」──
+ *     宣言 align が無ければ flow の終端(LTR + horizontal なら右、RTL なら左、
+ *     vertical なら下)。宣言 align が flow start と逆の文書では flow start 側
+ *     (app.css の入れ替え規則が見え方を反転する ── この関数は関与しない)。
  *
- * **breaking change**:reform 前は `<|text` が "left explicit" だったが、
- * 本 PR で end(LTR では右)に変わる。default flow の反対側を表す論理的
- * 概念に統一、物理強制が必要な場合は formal `:::paragraph{align=left}` 等
- * を使う。Postel's law(受信寛容)で typo の 4 形を全部受理。
+ * **breaking change**(reform-2026-05):reform 前は `<|text` が "left explicit"
+ * だったが、end に変わった。物理強制が必要な場合は formal
+ * `:::paragraph{align=left}` 等を使う。Postel's law(受信寛容)で typo の
+ * 4 形を全部受理。
  *
  * Algorithm:
  *  1. pre-process で line ごとに prefix 検出、strip + 行番号 → align map を記録
  *  2. md.parse 後、token を walk して paragraph_open の map[0] が map に
  *     あれば `data-pkc-align` 属性を付与
  *  3. CSS が `[data-pkc-align="..."]` を読んで text-align を適用
- *     (`end` / `start` は CSS logical value、`direction: rtl` で自動 flip)
+ *     (`end` / `start` は CSS logical value、`direction: rtl` で自動 flip。
+ *      🔴 **反転が当たるのは `opposite` だけ**(= 象形的な形が出す専用値)。
+ *      説明的な形の `end` / `start` には 1 本も当たらない ── 越境の理由は
+ *      下の `AlignKind` の註記に書いてある。**ここに書き戻さないこと。**)
  */
 // reform-2026-05 Phase 2 PR-2E:`:::paragraph{align=top|bottom}` の vertical
 // writing-mode 用 align も追加(物理 align、formal-only)。
-type AlignKind = 'center' | 'end' | 'start' | 'right' | 'left' | 'top' | 'bottom';
+/**
+ * 🔴 **`opposite` は象形的な形(行頭 prefix)だけが出す値**(user 指摘 2026-08-08)。
+ *
+ * 象形的な形 `|>` `<|` `|<` `>|` は**矢印の絵**であり、向きを描き間違えても意図が
+ * 通るので 4 形が同義になる(= typo を意味に通せる)。その意味は裁定により
+ * 「**グローバルの文字の寄せを反対にする**」であって、logical end ではない。
+ *
+ * ⚠ 説明的な形(`:::paragraph{align=end|start}`)は**値を言葉で書いている**ので
+ * `align=strat` を意味に通すことはできない ── 寛容さが成立しない形である。
+ * したがって `end` は logical end、`start` は logical start のままで、**反転しない**。
+ *
+ * 🔴 **この 2 つの形の境界は契約であり、越えてはならない**(user 指摘 2026-08-08:
+ * 「説明的な形式に対して象形的な形式の考え方を持ち込み…思想的な破壊的変更」)。
+ * ⚠ 直す前は両方が `data-pkc-align="end"` を出しており、CSS の入れ替えが
+ *   **説明的な形にも当たっていた**。属性を潰したまま意味だけ分けようとしたのが誤り。
+ * ⚠ したがって `FORMAL_ALIGNS` に `opposite` を入れてはならない ──
+ *   説明的な形からは**書けない値**である(書けたら境界が消える)。
+ */
+type AlignKind = 'center' | 'opposite' | 'end' | 'start' | 'right' | 'left' | 'top' | 'bottom';
 
 const PHYSICAL_ALIGNS: ReadonlySet<AlignKind> = new Set([
   'left', 'right', 'top', 'bottom', 'center',
@@ -2931,11 +2954,13 @@ const PHYSICAL_ALIGNS: ReadonlySet<AlignKind> = new Set([
 /**
  * 🔴 **formal 形は logical 値も受ける**(2026-08-06。曖昧記法の調査で判明)。
  *
- * 記法の正本は formal を「simple の canonical な言い換え」と定めている ──
+ * 記法の正本は formal に logical 値(`start` / `end`)を認めている ──
  * `PKC2: docs/spec/pkc-markdown-complete-spec-v4.md` #33
- * 「`:::paragraph{align=center|end|start} T :::`」/
- * `PKC2: docs/development/notation-redesign-2026-05/11-canonicalization-spec.md` §53
- * 「`|> 本文`(typo 4 形)→ `:::paragraph{align=end} 本文 :::`」。
+ * 「`:::paragraph{align=center|end|start} T :::`」。
+ * ⚠ **旧 canonicalization(`|> 本文` → `:::paragraph{align=end}`)は、裁定
+ * 2026-08-08 で `|>` の意味が「グローバルの寄せの反対側」に変わった時点で
+ * 成り立たなくなった** ── 2 つは別物であり、`|>` は `opposite` を出す。
+ * この言い換えを根拠に「`end` も反転する」と考えないこと(user 指摘: 思想的な破壊的変更)。
  *
  * ⚠ にもかかわらず、判定は**物理値だけ**の allowlist を通っていたので、
  * `align=end` / `align=start` は `align=letterspacing` と同じ**黙った no-op**
@@ -3020,8 +3045,9 @@ function processParagraphAlignDirective(
     const alignRaw = open.attrs.kvs.align;
     let align: AlignKind | null = null;
     // ⚠ 物理(left/right/top/bottom/center)と logical(start/end)の**両方**を受ける
-    //    ── formal は simple の canonical な言い換えなので、logical を書けないと
-    //    「`|>` の正しい書き方」が存在しないことになる(2026-08-06)
+    //    ── 規約が formal に logical 値を認めているため(2026-08-06)。
+    // ⚠ ここは **`opposite` を受けない**(象形的な形の専用値)── 受けると、
+    //    寛容さを持たない説明的な形に CSS の入れ替えが当たる(境界の踏み越え)
     if (typeof alignRaw === 'string' && FORMAL_ALIGNS.has(alignRaw as AlignKind)) {
       align = alignRaw as AlignKind;
     }
@@ -3060,7 +3086,7 @@ function preprocessAlignPrefix(source: string, lineMapIn: number[]): {
   const lineMapOut: number[] = [];
   let currentAlign: AlignKind | null = null;
   // Detect prefix at line start. reform-2026-05 PR-C で 4 形の typo 寛容化:
-  // `||` (center) + `|>` / `<|` / `|<` / `>|` (全 4 形 end) followed by optional space.
+  // `||` (center) + `|>` / `<|` / `|<` / `>|` (全 4 形 opposite) followed by optional space.
   // 行頭の空白系文字種は無視(2026-05-08 user 統一方針:行頭系シンプル記法は
   // leading whitespace を全部 strip)。`   |>` / `\t|<` 等もマーカーとして拾う。
   const prefixRe = /^\s*(\|\||\|>|<\||\|<|>\|)(?:\s)?(.*)$/;
@@ -3113,37 +3139,33 @@ function preprocessAlignPrefix(source: string, lineMapIn: number[]): {
       /**
        * reform-2026-05 PR-C:logical alignment へ移行。
        *   `||`                    → center(対称形。typo 少なく別形なし)
-       *   `|>` `<|` `|<` `>|`     → **全 4 形が logical end**(typo 寛容)
+       *   `|>` `<|` `|<` `>|`     → **全 4 形が opposite**(typo 寛容)
        *
-       * 🔴 **矢印の向きは意味を持たない**(記法の正本)。
-       * `PKC2: docs/development/notation-redesign-2026-05/01-notation-catalog.md` §1.4.2:
+       * 🔴 **矢印の向きは意味を持たない**(user 裁定 2026-08-08、Issue #103):
        *
-       * > `|>` `<|` `|<` `>|` … 全 4 形が同じ "logical end" として正規化
-       * >                        (典型 typo パターン受理)
+       * > **|> も<|も|<も意味は同じ、グローバルの文字の寄せを反対にする**(寛容なパーサー)
        *
-       * そして同 doc §1.4.1(廃止記法)が、**なぜ「左」の行頭マーカーが無いか**を
-       * 明言している:
+       * 「反対」の基準は**文書全体の宣言**(frontmatter の `direction` / `align`。
+       * `features/markdown/document-globals.ts` が `dir` / `data-pkc-doc-align` に写す)
+       * であって、**行頭マーカーが物理方向を主張してはいけない**(「左」の行頭マーカーは
+       * catalog §1.4.1 で廃止済み ── 左寄せ強制は formal `:::paragraph{align=left}`)。
+       * simple 形が持つのは「中央」と「グローバルの寄せの反対側」の 2 つだけである。
        *
-       * > `<|text` align prefix(simple)| ❌ 廃止 |
-       * > **default flow は frontmatter で declare**、
-       * > 明示的左寄せ強制は formal `:::paragraph{align=left}`
-       *
-       * つまり「どちら側が既定の流れか」は**文書全体の direction**
-       * (frontmatter `direction: ltr|rtl` / `writing:` = global direction の switch。
-       *  `features/markdown/document-globals.ts` が `dir` / `data-pkc-direction` に写す)が
-       * 決めるのであって、**行頭マーカーが物理方向を主張してはいけない**。
-       * simple 形が持つのは「中央」と「流れの反対側(end)」の 2 つだけである。
+       * 🔴 **ここで出す値は `opposite`** ── 説明的な形(`:::paragraph{align=end}`)と
+       * **別の値**でなければならない(user 指摘 2026-08-08)。同じ値にすると、
+       * CSS の入れ替えが**寛容さを持たない説明的な形にまで漏れる**。
+       * ⚠ かつてここは `end` を出しており、「renderer / goldens が 1 バイトも動かない」
+       * ことを利点として掲げていた ── それは 2 つの形を潰していたことの裏返しだった。
+       * 反転そのものは **app.css の入れ替え規則**(CSS)の仕事で、renderer は値を出すだけ
+       * (規約の 2 通り ── ① draft §2.3.6「宣言した既定の流れの反対側」/
+       *  ② canonical 3 本「logical end 固定」── は裁定で ① に決着した)。
        *
        * ⚠ **2026-08-06 に一度これを `start` へ変えて、user に誤りを指摘されて戻した**
-       * (経緯は同日の調査 doc §3-1 m-2)。誤った根拠は 2 つとも「実装より弱い出典」
-       * だった ── ① 調査 doc の minor 一覧が「`<|` が右寄せ」を欠陥として挙げていた
-       * ② `tests/features/markdown-css-parity.test.ts` の corpus が `<|` に「左」と
-       * 註記していた(こちらも直した)。⚠ spec v4 §1.3 は typo 形を `center` と書いており
-       * **§6.2 の `end` と食い違っている**が、reform-2026-05 の catalog(上記)が後の
-       * 正本で、PKC2 の実装もそちらに一致している。
-       * 🔑 教訓: **記法の意味は「記号の見た目」ではなく catalog(正本)で決まる**。
+       * (経緯は同日の調査 doc §3-1 m-2)── 「向き」を記号ごとに意味として読む変更は
+       * 裁定後も誤りである(4 形は同値。catalog §1.4.2 と裁定引用の両方が言っている)。
+       * 🔑 教訓: **記法の意味は「記号の見た目」ではなく正本(catalog / 裁定)で決まる**。
        */
-      const align: AlignKind = sym === '||' ? 'center' : 'end';
+      const align: AlignKind = sym === '||' ? 'center' : 'opposite';
       // **重要**:prefix 行は前段落から切り離して新 paragraph にする。
       // 挿入する空行も同じ inputIdx を指す(sync layer の lookup は閉じた区間で
       // 動くので副作用なし)。
@@ -3215,7 +3237,7 @@ function applyAlignAttrs(
 ): void {
   if (alignMap.size === 0 && indentMap.size === 0) return;
   for (const tok of tokens) {
-    // align(L-5 行頭 prefix `||` = center / `|>` `<|` `|<` `>|` = end)は段落 + 見出し両方に
+    // align(L-5 行頭 prefix `||` = center / `|>` `<|` `|<` `>|` = opposite)は段落 + 見出し両方に
     // 適用する(`||## 見出し` 等)。indent(L-9 字下げ `__`)は段落専用
     // ── 見出しの 1 字下げは意味を成さないため除外する。
     if ((tok.type === 'paragraph_open' || tok.type === 'heading_open') && tok.map) {
@@ -3643,9 +3665,16 @@ interface TolerantInlinePattern {
  * `:align:{position=X}` の 2 経路(表 / standalone)と、そこから流れる 3 面
  * (console.info / `data-pkc-canonical` / hover `title`)が同じ文を使う。
  */
+/**
+ * ⚠ **`|>` の canonical な言い換えとして `:::paragraph{align=end}` を案内しない**
+ * (user 指摘 2026-08-08)。裁定で `|>` の意味が「グローバルの寄せを反対にする」に
+ * 変わった時点で、logical end を表す `align=end` とは**別のもの**になった ──
+ * 案内すると、寛容さを持たない説明的な形へ象形的な形の意味を持ち込ませてしまう。
+ */
 export const ALIGN_CANONICAL_HINT =
-  '行頭 prefix `||`(center)/ `|>`(end。`<|` `|<` `>|` も同じ logical end)。' +
-  '左寄せは frontmatter の `direction` 宣言か formal `:::paragraph{align=left}`';
+  '行頭 prefix `||`(center)/ `|>`(グローバルの寄せの反対側。`<|` `|<` `>|` も同じ)。' +
+  '文書の流れを変えるなら frontmatter の `direction` / `align` 宣言、' +
+  '位置を言葉で指定するなら formal `:::paragraph{align=left}`(right / center も可)';
 
 const TOLERANT_INLINE_PATTERNS: ReadonlyArray<TolerantInlinePattern> = [
   {
@@ -3670,10 +3699,12 @@ const TOLERANT_INLINE_PATTERNS: ReadonlyArray<TolerantInlinePattern> = [
     /**
      * 🔴 **`<|`(start)と書いてはいけない**(2026-08-06 に直した。user 指摘)。
      *
-     * 記法の正本(`PKC2: docs/development/notation-redesign-2026-05/01-notation-catalog.md`
-     * §1.4.2)は「`|>` `<|` `|<` `>|` … **全 4 形が同じ "logical end"**」、§1.4.1 は
+     * catalog(`PKC2: docs/development/notation-redesign-2026-05/01-notation-catalog.md`
+     * §1.4.2)は「`|>` `<|` `|<` `>|` … **全 4 形が同じ**」、§1.4.1 は
      * 「`<|text` align prefix … ❌ **廃止**。default flow は frontmatter で declare」。
-     * つまり**行頭マーカーに「左」は無い**。
+     * つまり**行頭マーカーに「左」は無い**。意味は user 裁定 2026-08-08(Issue #103)で
+     * 「**グローバルの文字の寄せを反対にする**」に確定(属性は opposite、
+     * 反転は app.css の入れ替え規則)。
      *
      * ⚠ この 1 文字列は **user に見える 3 面**へ同時に流れる ──
      * ① `console.info` の hint ② レンダ HTML の `data-pkc-canonical` 属性
@@ -3773,16 +3804,15 @@ function processTolerantStandaloneAlign(
        * ⚠ 同じ「潰し」を CSS から取り除いた(logical と physical の同居)のに、
        *   parser 側に残っていた ── **判定を 2 か所に持つと片方だけ直る**。
        */
-      const alignKindMap: Record<string, AlignKind | undefined> = {
-        start: 'start',
-        end: 'end',
-        center: 'center',
-        left: 'left',
-        right: 'right',
-        top: 'top',
-        bottom: 'bottom',
-      };
-      const align = alignKindMap[rawPos];
+      /**
+       * 🔴 **受理集合は `FORMAL_ALIGNS` 1 つに寄せる**(2026-08-08 の 4 巡目レビュー)。
+       * 直す前はここに 7 値の literal map が独立して在り、**3 か所目の受理集合**に
+       * なっていた ── `opposite` を 1 語足す変異が、`:::paragraph` / `:::format` を
+       * 塞いだ pin をすり抜けて通った(`:align:{position=opposite}` が書けてしまう)。
+       * ⚠ すぐ上の註記自身が「**判定を 2 か所に持つと片方だけ直る**」と書いている。
+       * 🔑 値の集合は同一(物理 5 + logical 2 = 7)なので**出力は 1 バイトも変わらない**。
+       */
+      const align = FORMAL_ALIGNS.has(rawPos as AlignKind) ? (rawPos as AlignKind) : undefined;
       if (align) {
         pendingAlign = align;
         if (!silentWarnings && typeof console !== 'undefined' && console.info) {

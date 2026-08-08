@@ -106,13 +106,67 @@ describe('本文の CSS を抜く', () => {
    * アプリの器の規則が混ざると**見た目を壊す**(直す目的と逆になる)。
    */
   it('🔴 器の規則(region / field)が 1 本も混ざっていない', () => {
-    for (const key of ['data-pkc-region', 'data-pkc-field', 'data-pkc-view']) {
+    for (const key of ['data-pkc-region', 'data-pkc-view']) {
       expect(OUT.css, `器の規則が混ざっている: ${key}`).not.toContain(key);
     }
+    /**
+     * ⚠ `data-pkc-field` は**読み幅の 1 か所だけ**通す(2026-08-08 の統一)。
+     * 読み幅の規則は `.pkc-md-rendered[data-pkc-field='detail-body']` 起点で、
+     * 属性は**要素の絞り込み**である(器を起点にした規則ではない)。
+     * それ以外の field は器の印なので 1 件も通さない ── 等値で pin する
+     * (器の field が混ざっても、読み幅が落ちても、どちらでも落ちる)。
+     */
+    const fields = [...OUT.css.matchAll(/data-pkc-field='([^']*)'/g)].map((m) => m[1]);
+    expect(fields, '読み幅以外の field の規則が混ざった(または読み幅が落ちた)').toEqual([
+      'detail-body',
+    ]);
     // ⚠ 逆に、本文が使う data 属性は**在らねばならない**(選り過ぎの検出)
     for (const key of ['data-pkc-align', 'data-pkc-indent', 'data-pkc-render-mode']) {
       expect(OUT.css, `本文の属性の規則が落ちている: ${key}`).toContain(key);
     }
+  });
+
+  /**
+   * 🔴 **読み幅が焼かれている**(user 裁定 2026-08-08: アプリと書き出しで統一。
+   * 46em/器 → 42rem/各ブロック)。書き出し側の `.b{max-width}` は消えたので、
+   * **ここが落ちる = 配った HTML の本文が全幅に伸びる**。
+   * ⚠ 規則と token 定義の**両方**を見る ── 規則だけだと `--read-w` の定義が
+   *   落ちた日に宣言ごと無効になり(未定義の var は fall back しない)、
+   *   規則が在るのに幅が消える。
+   * 🔴 **宣言の字面だけを見ない**(2026-08-08 のレビューで実証)。
+   *   `toContain('max-width:var(--read-w)')` だけだと、起点を子孫結合子へ変える
+   *   1 文字の変異(`.pkc-md-rendered[data-pkc-field=…]` → `.pkc-md-rendered [data-pkc-field=…]`)
+   *   が **unit 全緑のまま通る** ── `detail-body` を持つ 4 要素は自分自身が
+   *   `.pkc-md-rendered` なので、複合が子孫になると**どこにも当たらない**
+   *   (4 面すべてで読み幅が消えるのに誰も鳴らない)。だから**規則そのもの**を見る:
+   *   ① 起点の形 ② `@media` に包まれていないこと(包むと画面で効かない)。
+   */
+  it('🔴 読み幅の規則と --read-w の定義が焼かれている(下限 tripwire)', () => {
+    expect(OUT.css, '読み幅の規則が焼かれていない').toContain('max-width:var(--read-w)');
+    expect(OUT.vars, '--read-w が要求されていない').toContain('--read-w');
+    expect(OUT.css, '--read-w の定義が無い(宣言ごと無効になる)').toContain('--read-w:');
+
+    const rw = parseRules(OUT.css).filter((r) => r.body.includes('max-width:var(--read-w)'));
+    expect(rw.length, '読み幅の規則が焼いた CSS の中に規則として立っていない').toBe(1);
+    expect(rw[0]!.at, '読み幅が @media の中に入っている(画面で効かない)').toEqual([]);
+    expect(
+      rw[0]!.selector,
+      '読み幅の起点が器の子孫になっている(どの要素にも当たらない)',
+    ).toMatch(/^\.pkc-md-rendered\[data-pkc-field='detail-body'\]>/);
+    /**
+     * 🔴 **値も見る**(2026-08-08 の 2 巡目レビュー)。上の 3 つは「規則が在るか」
+     * しか見ていないので、`--read-w: 420rem` の 1 文字変異が**全 test 緑のまま通る**
+     * ── 上限が上限として働かなくなり、Full HD で 1 行 90 文字という「直したかった
+     * 状態」へそのまま戻るのに誰も鳴らない。⚠ **縮む向き**(`1rem`)も同じく素通り
+     * するので、上下**両側**を持つ(CLAUDE.md「tripwire は上限だけでなく下限も」)。
+     * 幅は好みで動かす値なので**幅を持たせた範囲**にする(30〜59rem)── 42rem に
+     * 貼り付けると、読みやすさの調整のたびにここが割れる。
+     */
+    const w = /--read-w:\s*([0-9.]+)rem/.exec(OUT.css);
+    expect(w, '--read-w が rem で定義されていない').not.toBeNull();
+    const rem = Number(w![1]);
+    expect(rem, `読み幅の上限が上限として働かない値(${rem}rem)`).toBeGreaterThanOrEqual(30);
+    expect(rem, `読み幅の上限が狭すぎる値(${rem}rem)`).toBeLessThan(60);
   });
 
   /**
@@ -419,11 +473,18 @@ describe('焼いた文字列の検品', () => {
    */
   it('🔴 規則が 1 本も焼かれていない出力を止める(需要の数では通してしまう)', () => {
     const base = ok();
-    // 規則の部分だけ削る = 組み立てのループを消したのと同じ形。ruleCount は 116 のまま
+    // 規則の部分だけ削る = 組み立てのループを消したのと同じ形。ruleCount は需要側の数のまま
     const css = base.css.slice(0, base.css.indexOf('.pkc-md-rendered'));
     const bad = auditBodyCss({ ...base, css }).join('\n');
     expect(bad, '規則 0 本の出力を通した').toContain('本文の規則が 0 本');
-    expect(bad, '抜いた数との食い違いを言っていない').toContain('抜いた 116 本のうち 0 本');
+    // ⚠ 実数を字面で pin しない(本文規則を 1 本足すたびに割れる ── 2026-08-08 の
+    //    入れ替え規則 6 本で実際に割れた)。ここの主張は「**需要側の数との食い違いを
+    //    数字入りで言うこと**」── 数の取り違え(抜いた側と焼いた側の swap)は
+    //    `抜いた 0 本のうち…` になってこの contains が落ちる
+    expect(bad, '抜いた数との食い違いを言っていない').toContain(
+      `抜いた ${base.ruleCount} 本のうち 0 本`,
+    );
+    expect(base.ruleCount, '需要側の数がゼロでは上の検査が空振りする').toBeGreaterThan(0);
   });
 
   it('🔴 印刷の層が落ちた出力を止める(紙で改頁が起きなくなる)', () => {

@@ -162,6 +162,36 @@ describe('ライブエディタ(1 面)の配線', () => {
     expect(r.bodies).toEqual(['普通の段落に直した。']);
   });
 
+  /**
+   * 🔴 **ライブ面にも文書 globals が届く**(3 巡目レビューで穴が判明)。
+   * `data-pkc-doc-align` を消費する面は 4 つ(読む面 / プレビュー / **ライブ** / 書き出し)
+   * だが、**ライブだけ誰も見ていなかった** ── 渡し忘れの変異が全 test 緑で通る。
+   * ⚠ しかもここは今回の入れ替え(`opposite` の反転)が**成立する前提**である ──
+   *   届かなければ、`align: right` の文書をライブ編集している間だけ `|>` が
+   *   読む面と逆に出る(CLAUDE.md「同じ値を複数の描画経路へ渡すものは経路ごとに pin」)。
+   */
+  it('🔴 ライブ面にも文書 globals(寄せ・書字方向)が届く', async () => {
+    setLive(true);
+    const r = rig(['---', 'align: right', 'direction: rtl', '---', '', '普通の段落', ''].join('\n'));
+    await settle();
+    const pane = r.root.querySelector<HTMLElement>('[data-pkc-region="editor-live"]')!;
+    expect(pane.getAttribute('data-pkc-doc-align'), '宣言した寄せがライブ面に届いていない').toBe(
+      'right',
+    );
+    expect(pane.getAttribute('dir'), '書字方向がライブ面に届いていない').toBe('rtl');
+    /**
+     * 🔴 **class も見る**(4 巡目レビュー R2)。入れ替え規則は
+     * `.pkc-md-rendered[data-pkc-doc-align=…] [data-pkc-align=…]` で、
+     * **class と属性が揃って初めて当たる**。属性だけ見ていると
+     * `pane.className = ''` の変異が生き延び、ライブ編集中は本文の CSS が
+     * **丸ごと当たらない**(見出し・表・コード・寄せの全部)のに緑のままだった。
+     */
+    expect(
+      pane.classList.contains('pkc-md-rendered'),
+      'ライブ面が markdown の CSS の外に居る(属性だけ届いても寄らない)',
+    ).toBe(true);
+  });
+
   it('お知らせの行は常に同じ場所に在る(出ても配置が動かない)', async () => {
     setLive(true);
     const r = rig(DOC);
@@ -301,6 +331,119 @@ describe('ライブエディタ(1 面)の配線', () => {
     ta.dispatchEvent(ev);
     expect(ev.defaultPrevented, '行の中の Ctrl+A を奪っている').toBe(false);
     expect(ta.value).toBe('最初の段落。'); // 全文に化けていない
+  });
+
+  it('🔴 「全文を編集」ボタンで全文が 1 つの入力欄になる(Ctrl+A の可視の導線)', async () => {
+    setLive(true);
+    const r = rig(DOC);
+    await settle();
+    const btn = r.root.querySelector<HTMLButtonElement>('[data-pkc-field="edit-all"]');
+    expect(btn, 'ボタンが無い(キーを知らない人に届かない)').not.toBeNull();
+    expect(btn!.disabled).toBe(false);
+    expect(btn!.textContent).toBe('全文を編集');
+    btn!.click();
+    const ta = r.root.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')!;
+    expect(ta.value).toBe(DOC);
+    // 書き換えて確定すると本文が丸ごと入れ替わる(Ctrl+A と同じ口)
+    ta.value = '# 作り直した';
+    ta.blur();
+    expect(r.bodies).toEqual(['# 作り直した']);
+  });
+
+  it('退避(行ごとに編集できない本文)では「全文を編集」は押せず、理由が読める', async () => {
+    setLive(true);
+    const r = rig([':::figure{id="あ い"}', '', '本文', '', ':::', '', 'あと', ''].join('\n'));
+    await settle();
+    const btn = r.root.querySelector<HTMLButtonElement>('[data-pkc-field="edit-all"]')!;
+    expect(btn.disabled, 'すでに原文全体の編集なのに押せる').toBe(true);
+    expect(btn.title).toContain('すでに原文全体');
+  });
+
+  /**
+   * 🔴 **同じことをする双子(Ctrl+A)も塞ぐ**(2026-08-08 の 2 巡目レビュー)。
+   * ボタンだけ `disabled` にして、**同じ `activateAll()` を撃つ打鍵**は素通りだった。
+   * `swap.dispose()` は listener と active を落とすだけで `view` / `body` を残すので
+   * `activateAll()` は**まだ呼べてしまい**、退避用の入力欄が入っている面を上書きする。
+   * ⚠ 断り文は**ボタンに書いたものと同じ言葉**であること ── 押した場所が違っても
+   *   理由が同じなら同じ言い方にする(言い換えると user は別のものを探す)。
+   */
+  it('🔴 退避後は Ctrl+A も塞がれ、ボタンと同じ言葉で断る(双子を残さない)', async () => {
+    setLive(true);
+    const r = rig([':::figure{id="あ い"}', '', '本文', '', ':::', '', 'あと', ''].join('\n'));
+    await settle();
+    const pane = r.root.querySelector<HTMLElement>('[data-pkc-region="editor-live"]')!;
+    const before = pane.querySelector('[data-pkc-field="editor-body"]')!.textContent;
+
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true }),
+    );
+
+    const note = r.root.querySelector<HTMLElement>('[data-pkc-field="row-note"]')!;
+    expect(note.textContent, 'ボタンと違う言い方で断っている').toContain('すでに原文全体');
+    // ⚠ 面が上書きされていないこと ── 断り文だけ出して中身を壊していないか
+    expect(
+      pane.querySelector('[data-pkc-field="editor-body"]')?.textContent,
+      '退避用の入力欄が上書きされた',
+    ).toBe(before);
+    expect(
+      pane.querySelector('[data-pkc-field="row-source"]'),
+      '退避中なのに行の入力欄が開いた',
+    ).toBeNull();
+    // 🔑 **ボタンと同じ言葉**であること自体を pin する(片方だけ言い回しを変える
+    //    変異を止める ── substring 2 本では「同じ言葉」を守っていない)
+    const editAll = r.root.querySelector<HTMLButtonElement>('[data-pkc-field="edit-all"]')!;
+    expect(note.textContent, 'ボタンと断り文が別の言い回しになっている').toBe(editAll.title);
+  });
+
+  /**
+   * 🔴 **退避後は Ctrl+Z / Ctrl+Y も塞ぐ**(3 巡目レビュー。**4 件目の双子**)。
+   * ⚠ Ctrl+A より実害が大きい ── 退避先は follower が描き直さない面なので、
+   *   journal を当てると **`body`(保存される値)だけが動いて画面が追随しない**。
+   *   そのまま保存すると **user が見ていない本文が保存される**。
+   */
+  it('🔴 退避後は Ctrl+Z も塞がれ、本文(保存される値)が動かない', async () => {
+    setLive(true);
+    /**
+     * ⚠ **fixture は「行編集を 1 回確定してから退避する」形でなければならない**
+     * (4 巡目レビュー R4)。最初から分割できない本文を渡すと **journal がゼロ件**で、
+     * ガードを外しても `undo` が null を返すだけ ── 下の ②③ が**ガードの有無に
+     * 関わらず通る**(実際、`journal 非空のときだけガードを外す`変異が素通りした)。
+     * 「fixture のゼロ件の次元は測っていない次元」そのものだった。
+     */
+    const r = rig(['普通の段落。', '', '二つめの段落。'].join('\n'));
+    await settle();
+    const live = r.root.querySelector<HTMLElement>('[data-pkc-region="editor-live"]')!;
+    const p0 = [...live.querySelectorAll('p')].find((e) => e.textContent === '普通の段落。')!;
+    p0.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    const row = live.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')!;
+    // 確定すると journal に 1 件入り、その本文は分割できないので退避へ落ちる
+    row.value = [':::figure{id="あ い"}', '', '中身', '', ':::'].join('\n');
+    row.blur();
+    await settle();
+
+    const pane = r.root.querySelector<HTMLElement>('[data-pkc-region="editor-live"]')!;
+    const ta = pane.querySelector<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')!;
+    expect(ta, '前提: 退避していない(fixture が効いていない)').not.toBeNull();
+    // 🔑 **非ゼロ次元を test 自身に assert させる** ── 確定が 1 回起きた = journal が非空
+    expect(r.bodies.length, '前提: 確定が起きていない(journal がゼロ件で空振りする)')
+      .toBeGreaterThan(0);
+    const shown = ta.value;
+    const bodiesBefore = r.bodies.length;
+
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }),
+    );
+
+    const note = r.root.querySelector<HTMLElement>('[data-pkc-field="row-note"]')!;
+    const editAllBtn = r.root.querySelector<HTMLButtonElement>('[data-pkc-field="edit-all"]')!;
+    expect(note.textContent, '退避中の Ctrl+Z を断っていない').toContain('すでに原文全体');
+    // 3 か所目も等値で ── 押した場所が違っても理由が同じなら言い方も同じ
+    expect(note.textContent, 'ボタンと別の言い回しになっている').toBe(editAllBtn.title);
+    expect(ta.value, '画面の入力欄が動いた').toBe(shown);
+    expect(
+      r.bodies.length,
+      '画面が追随しないまま本文(保存される値)だけが動いた',
+    ).toBe(bodiesBefore);
   });
 
   it('編集を抜けたら聴くのをやめる(外れた面が反応し続けない)', async () => {

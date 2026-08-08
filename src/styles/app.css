@@ -885,10 +885,17 @@ select:focus-visible {
 /* 🔑 **本文の読み幅に上限を置く**(P9 段②)。Full HD では 1 行が 1172px =
  * 全角 90 文字まで伸びていて、読み返すのが辛かった。
  *
+ * 🔑 起点は `.pkc-md-rendered[data-pkc-field='detail-body']`(user 裁定 2026-08-08 で
+ *   書き出し HTML と統一)── `.pkc-md-rendered` 起点なので build/body-css.ts の
+ *   焼き込み(isBodyRule)を通り、**この 1 本が配った HTML の読み幅も持つ**(正本 1 本。
+ *   書き出し側の器にも data-pkc-field='detail-body' を付けてある)。
+ *   ⚠ `detail-body` の絞り込みは残す ── 素の `.pkc-md-rendered` に広げると、
+ *   Split View のプレビューやヘルプのマニュアル面にまで上限が掛かる。
  * ⚠ **器(`detail-body` や pane)に掛けてはいけない** ── 図のラスタ幅は
  * `mermaid-hydrate.ts` が **host の親の clientWidth** から決めるので、器を狭めると
  * **全部の図が焼き直され、キャッシュ鍵も変わる**(調査で判明)。だから
- * **本文ブロック(兄弟)にだけ**当てる。
+ * **本文ブロック(兄弟)にだけ**当てる(この selector の器の側は「絞り込み」であって
+ * 器に max-width を置いているのではない)。
  * ⚠ 単位に `em` を使わない ── 見出しは `1.35em` などで拡大するので、
  * `em` 指定だと見出しだけ上限が広がる(h1 で 1.35 倍)。
  * ⚠ 表・図・コード・iframe・添付は**上限の対象外**(横に広いほど読める)。
@@ -896,7 +903,7 @@ select:focus-visible {
  *   「上限が掛からない」側に倒れる(= 焼き直しも崩れも起きない安全な向き)。
  *
  * 42rem = 672px。本文 13px なので全角 **約 51 文字**(日本語の可読幅は 35〜50 文字)。 */
-[data-pkc-view-pane='detail'] [data-pkc-field='detail-body'] > :is(p, h1, h2, h3, h4, h5, h6, ul, ol, dl, blockquote, hr, .footnotes, .pkc-details, .pkc-format-block, .pkc-toc-formal, .pkc-toc-preview, .pkc-section-break, .pkc-blank-line, .pkc-region-frontmatter, .pkc-region-body, .pkc-section-callout, .pkc-fig-equation) {
+.pkc-md-rendered[data-pkc-field='detail-body'] > :is(p, h1, h2, h3, h4, h5, h6, ul, ol, dl, blockquote, hr, .footnotes, .pkc-details, .pkc-format-block, .pkc-toc-formal, .pkc-toc-preview, .pkc-section-break, .pkc-blank-line, .pkc-region-frontmatter, .pkc-region-body, .pkc-section-callout, .pkc-fig-equation) {
   max-width: var(--read-w);
 }
 .pkc-md-rendered h1,
@@ -1098,6 +1105,13 @@ select:focus-visible {
   color: var(--accent-dim-fg);
   border-color: var(--accent);
 }
+/* 🔴 読む面のコピー(2026-08-08)も同じ合図で光る ── 合図の形を 2 つ作らない。
+ * こちらは常時可視のボタンなので opacity は触らない(色だけが「渡った」の情報) */
+[data-pkc-field='detail-toolbar'] [data-pkc-flash] {
+  background: var(--accent-dim);
+  color: var(--accent-dim-fg);
+  border-color: var(--accent);
+}
 .pkc-md-rendered .pkc-md-block:hover .pkc-render-toggle,
 .pkc-md-rendered .pkc-md-block:hover .pkc-md-copy-btn,
 .pkc-md-rendered .pkc-md-block:focus-within .pkc-render-toggle,
@@ -1229,7 +1243,8 @@ select:focus-visible {
   text-decoration: none;
 }
 
-/* ── 行頭アライン(`||` 中央 / `|>` `<|` `|<` `>|` は 4 形すべて logical end)と
+/* ── 行頭アライン(`||` 中央 / `|>` `<|` `|<` `>|` は 4 形すべて同値 ── 属性は `opposite`。
+ * 意味は「グローバルの文字の寄せの反対側」、user 裁定 2026-08-08。下の裁定註記を参照)と
  * 段落の字下げ(`__`)。
  * ⚠ **物理方向で説明しない**(2026-08-06 に「`|>` 右」から直した)── `end` は
  *   CSS logical value なので `direction` / `writing-mode` で自動 flip する。
@@ -1244,6 +1259,14 @@ select:focus-visible {
  * **強制的に物理方向**、formal-only」(spec v4 §6.2)なので、混ぜると
  * 「物理強制」という語が嘘になる。⚠ PKC2 の CSS は最初から分けてある
  * (`PKC2: src/styles/base.css:2580-2584`)── 移植で潰れていた。 */
+/* 🔴 **象形的な形の既定**(`|>` `<|` `|<` `>|`)。グローバルの寄せの**反対側**
+ * ── 宣言が無い / 宣言が流れの起点側のときは、反対 = 流れの終わり側になる。
+ * 逆側の宣言があるときだけ下の入れ替え規則が上書きする。
+ * ⚠ **説明的な形の `end` と同じ規則にまとめない** ── 値が同じに見えるのは
+ *   「宣言が無いとき」だけで、意味は別物である(境界を潰さない)。 */
+.pkc-md-rendered [data-pkc-align='opposite'] {
+  text-align: end;
+}
 .pkc-md-rendered [data-pkc-align='end'] {
   text-align: end;
 }
@@ -1273,20 +1296,28 @@ select:focus-visible {
  * ── 規約(`PKC2: docs/development/notation-redesign-2026-05/02-frontmatter-and-globals.md`)
  * が正本。実装が規約に届いていなければ実装を直す。
  *
- * ⏸ **`|>` の意味は規約が 2 通りに書いている(user 裁定待ち)**。
+ * 🔴 **`|>` の意味は裁定済み**(user 裁定 2026-08-08、Issue #103):
+ *   「**|> も<|も|<も意味は同じ、グローバルの文字の寄せを反対にする**」(寛容なパーサー)。
+ *   規約は 2 通りに書いていた:
  *   ① `02-frontmatter-and-globals.md` §2.3.6(**draft**、2026-05-09):
  *      「宣言した既定の流れの**反対側**」── `align: right` の文書では `|>` は**左**
  *   ② `11-canonicalization-spec.md` §53(2026-05-10)/
  *      `markdown-dialect-for-ai-authors-v3.md`(**唯一 canonical**、2026-05-12)/
  *      `pkc-markdown-complete-spec-v4.md` §6.2(candidate、2026-05-25):
  *      「logical end(**LTR で右、RTL で左**)」= CSS の `text-align: end` そのもの
- *   **本 file は ② を実装している**(= `align` では入れ替えない)。理由:
- *   ① は draft の設計議論で、後発の canonical / candidate 3 本が ② を採る /
- *   ① だと `start`(= 宣言 align と同じ側)が**無印と同義になって語彙から消える**のに
- *   規約は `start` を 4 doc で保持している / ① は `align: center` の「反対側」を
- *   定めていない(② は全組合せで定まる)。
- *   ⚠ ① を採る裁定が出たら、ここに「宣言 align が flow start と逆のときだけ
- *   `end`/`start` を入れ替える」規則を足す(2026-08-06 に一度実装して外した)。 */
+ *   **PKC2 実装(と 2026-08-08 までの本 file)は ② = logical end 固定**だったが、
+ *   **裁定は ① = draft 規約 §2.3.6 側を正とした**。
+ *   実装の形: 象形的な形は**専用の属性値** `data-pkc-align="opposite"` を出す
+ *   (説明的な形からは書けない値)── 「宣言 align が flow start と逆の文書」でだけ、
+ *   下の**入れ替え規則**が `opposite` の見え方を反転する。
+ *   ⚠ 一度は `end` を共用して「goldens が 1 バイトも動かない」ことを利点として
+ *   掲げたが、それは**説明的な形にも反転が漏れる**実装の裏返しだった(user 指摘)。
+ *   属性を分けたので PKC2 との byte 一致は 3 golden で崩れ、分岐台帳に登記してある。
+ *   🔴 `align: center` の文書では**寄らない**(user 指摘「文書のセンター寄せに
+ *   反対もクソもないだろうが」)── 中央に反対側は無いので `inherit`(何も変えない)。
+ *   ⚠ 「反対が無いから流れの終わり側へ」と落とすのは、裁定が否定した旧実装
+ *   (logical end 固定)を 1 ケースだけ戻す行為である。規則は一文で言えること:
+ *   **「反対側へ寄る。反対側が無ければ寄らない」**。 */
 /* 🔴 **縦書きでは文字の流れる向き(`direction`)を `ltr` に固定する**(規約 §2.3.5)。
  *
  * 規約が CSS mapping まで書いている数少ない箇所である:
@@ -1331,6 +1362,47 @@ select:focus-visible {
 }
 .pkc-md-rendered[data-pkc-writing='vertical'][data-pkc-doc-align='bottom'] {
   text-align: end;
+}
+/* 🔴 **入れ替え規則**(user 裁定 2026-08-08、Issue #103。上の裁定註記を参照)。
+ * 「宣言 align が flow start と逆の文書」では、`|>`(= `data-pkc-align="opposite"`)は
+ * グローバルの寄せの**反対側** = flow start 側へ寄る。属性は動かさず、見え方だけ
+ * ここで入れ替える。
+ * 🔴 **説明的な形(`align=end` / `align=start`)は入れ替えない**
+ *   (user 指摘 2026-08-08。⚠ **越境の理由をここに書き戻さないこと**)。
+ *   ⚠ かつてここには「`|>` の canonical な言い換えは `align=end` だから `end` も
+ *   一緒に反転する」と書いてあった ── それが user の言う**思想的な破壊的変更**である。
+ *   象形的な形(矢印の絵)は向きを描き間違えても意図が通るので 4 形が同義になるが、
+ *   言葉で書く説明的な形は `align=strat` を通せない = **寛容さが成立しない別の契約**。
+ *   🔑 だから属性の値ごと分けてある ── 入れ替えが当たるのは `opposite` だけで、
+ *   `end` / `start` は素の logical 値である。**規則を `end` へ広げてはならない。**
+ * ⚠ 横書きの flow start は `dir` が決める(無印 / ltr = 左、rtl = 右)──
+ *   `align: right` は ltr でだけ「逆」、`align: left` は rtl でだけ「逆」。
+ * ⚠ 縦書きは上の `direction: ltr` 固定により flow start が常に**上** ──
+ *   「逆」になり得るのは `align: bottom` だけ(`data-pkc-doc-align='bottom'` は
+ *   縦書きでしか出ない ── document-globals.ts が横書きでは不正組合せとして落とす)。
+ * 🔴 **`align: center` の文書では何も起きない**(user 指摘 2026-08-08:
+ *   「文書のセンター寄せに反対もクソもないだろうが」)。中央に反対側は無いので、
+ *   反転のしようがない = **寄せは変わらない**。
+ *   ⚠ ここで「反対が無いから流れの終わり側へ」と落としてはいけない ── それは
+ *   裁定が否定した旧実装(logical end 固定)を、裁定が沈黙している 1 ケースだけに
+ *   こっそり戻す行為である。規則は一文で言えなければならない:
+ *   **「グローバルの寄せの反対側へ寄る。反対側が無ければ寄らない」**。
+ *   ⚠ 値は `inherit`(= 何も変えない)。`center` と書くと「中央へ寄せ直す」ことに
+ *   なり、入れ子の中で親が別の寄せを持つときに嘘になる。
+ * ⚠ 詳細度は (0,3,0)〜(0,4,0)(中央の 1 本だけ `:not()` / `[dir]` を持たないので
+ *   (0,3,0))── いずれも基底の `.pkc-md-rendered [data-pkc-align=…]`(0,2,0)に
+ *   file 内の位置と無関係に勝つ。競合する同詳細度の規則は無い。 */
+.pkc-md-rendered[data-pkc-doc-align='center'] [data-pkc-align='opposite'] {
+  text-align: inherit;
+}
+.pkc-md-rendered[data-pkc-doc-align='right']:not([dir='rtl']) [data-pkc-align='opposite'] {
+  text-align: start;
+}
+.pkc-md-rendered[data-pkc-doc-align='left'][dir='rtl'] [data-pkc-align='opposite'] {
+  text-align: start;
+}
+.pkc-md-rendered[data-pkc-writing='vertical'][data-pkc-doc-align='bottom'] [data-pkc-align='opposite'] {
+  text-align: start;
 }
 /* 段落 physical の縦(`:::paragraph{align=top}`)。⚠ 縦書きに限る ── 横書きでの
  * `top`/`bottom` は規約 §2.3.3 が不正組合せとしているので規則を当てない。 */

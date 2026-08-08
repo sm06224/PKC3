@@ -19,9 +19,14 @@ import { gotoApp, clickReal, createEntry, collectPageErrors } from './helpers';
  *   **`|>` = logical end(LTR で右、RTL で左)**、physical(`left`/`right`)は
  *   **強制的に物理方向**で formal 専用
  *
- * ⏸ **`|>` の意味は規約が 2 通りに書いている(user 裁定待ち)** ── ① §2.3.6(draft)
- * 「宣言した `align` の反対側」/ ② 上記 canonical 3 本「flow の end」。
- * **本 spec は ② を検査する**(理由は `src/styles/app.css` の該当節)。
+ * 🔴 **`|>` の意味は裁定済み**(user 裁定 2026-08-08、Issue #103)──
+ * 「**|> も<|も|<も意味は同じ、グローバルの文字の寄せを反対にする**」。規約の 2 通り
+ * (① §2.3.6 draft「宣言した `align` の反対側」/ ② 上記 canonical 3 本「flow の end」)は
+ * **① に決着**。⚠ **象形的な形は専用の値 `opposite` を出す**(2026-08-08 の user 指摘で
+ * `end` から改めた)── 説明的な形 `:::paragraph{align=end}` と同じ値にすると、
+ * typo を意味に通せない説明的な形にまで反転が漏れるためである(契約の境界)。
+ * 「宣言 align が flow start と逆の文書」でだけ app.css の入れ替え規則が見え方を反転し、
+ * **中央の文書では寄らない**(反対側が無いので)── 本 spec の ② / ③-a2 段が実ブラウザで見る。
  *
  * PKC3 に何が無かったか(移植で落ちていた):
  * ① `data-pkc-doc-align` / `data-pkc-writing` を**消費する CSS が 1 行も無かった**
@@ -83,12 +88,12 @@ async function alignsOf(
   );
 }
 
-test('🔴 `|>` は logical end(流れの終端)に寄る ── 物理強制は反転しない', async ({ page }) => {
+test('🔴 `|>` はグローバルの寄せの反対側に寄る ── 物理強制は反転しない', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1280, height: 900 });
   await gotoApp(page);
 
-  // ① 既定(align 宣言なし・LTR)── 流れの終端は右
+  // ① 既定(align 宣言なし・LTR)── グローバルの寄せは flow start(左)なので反対 = 右
   await writeNote(page, '既定', '普通の段落\n\n|> 終端\n\n|| 中央\n');
   {
     const a = await alignsOf(page);
@@ -100,14 +105,17 @@ test('🔴 `|>` は logical end(流れの終端)に寄る ── 物理強制は
   /**
    * ② 🔴 **宣言した既定の寄せが効く**(直す前は `data-pkc-doc-align` を読む CSS が
    * 1 行も無く、`align: right` は 100% 見た目 no-op だった)。
-   * ⏸ このとき `|>`(end)は **② の読みでは右のまま**(= 無印と同じ側)。
-   *   ① の読みなら左になる ── 裁定が出るまでは ② を pin する。
+   * 🔴 このとき `|>`(opposite)は**左**(user 裁定 2026-08-08、Issue #103
+   * 「グローバルの文字の寄せを反対にする」)── 宣言 align(右)の反対側。
+   * ⚠ 2026-08-08 まではここを「右のまま(logical end 固定)」と pin していた ──
+   *   裁定で反転した。app.css の入れ替え規則が実際に効いているかを見る観測点は
+   *   ここ(実ブラウザの版面)だけである(unit は CSS を解決しない)。
    */
   await writeNote(page, '既定を右に宣言', '---\nalign: right\n---\n\n普通の段落\n\n|> 終端\n');
   {
     const a = await alignsOf(page);
     expect(a[0], '宣言した既定の寄せ(右)が効いていない').toBe('right');
-    expect(a[1], '`|>` が logical end(右)でない').toBe('right');
+    expect(a[1], '`|>` が宣言 align の反対側(左)に寄っていない').toBe('left');
   }
 
   // ③ RTL の既定 ── §2.3.4 で align の既定が right になるので `|>` は左
@@ -116,6 +124,41 @@ test('🔴 `|>` は logical end(流れの終端)に寄る ── 物理強制は
     const a = await alignsOf(page);
     expect(a[0], 'RTL で無印が右(行頭)に寄っていない').toBe('right');
     expect(a[1], 'RTL で `|>` が左になっていない').toBe('left');
+  }
+
+  /**
+   * ③-a2 🔴 **中央の文書では寄らない**(user 指摘 2026-08-08:
+   * 「文書のセンター寄せに反対もクソもないだろうが」)。
+   * ⚠ 直す前は「反対が無いから流れの終わり側(右)」に落としていた ── それは
+   *   裁定が否定した旧実装への逆戻りだった。中央に反対側は無いので**寄らない**。
+   * ⚠ この段が無いと、`|>` を右へ落とす変異が実ブラウザで誰にも見られない。
+   */
+  await writeNote(page, '中央寄せ', '---\nalign: center\n---\n\n普通の段落\n\n|> 終端\n');
+  {
+    const a = await alignsOf(page);
+    expect(a[0], '宣言した中央寄せが効いていない').toBe('center');
+    expect(a[1], '中央の文書で `|>` が寄ってしまった(反対側は無い = 寄らないが正)').toBe(
+      'center',
+    );
+  }
+
+  /**
+   * ③-b 🔴 **RTL × `align: left`** ── 入れ替えのもう一方の組(2026-08-08 のレビューで
+   * 「実ブラウザで 1 度も評価されていない」と分かった 5 本のうちの 1 本)。
+   * ⚠ **`align: left` を宣言する検査はここが唯一**である ── 無いと、基底の
+   *   `[data-pkc-doc-align=left]` 規則を消しても誰も鳴らない(実際に変異で確認した)。
+   * 流れの起点(RTL なので右)と逆の宣言なので、無印は**左**、`|>` はその反対の**右**。
+   *   ⚠ ここが両方 right に見えたら入れ替えが二重に効いている(辻褄の合わない画面)。
+   */
+  await writeNote(
+    page,
+    '右から左で左寄せ',
+    '---\ndirection: rtl\nalign: left\n---\n\n普通の段落\n\n|> 終端\n',
+  );
+  {
+    const a = await alignsOf(page);
+    expect(a[0], 'RTL で宣言した align: left が効いていない(宣言が no-op)').toBe('left');
+    expect(a[1], 'RTL + align: left で `|>` が反対側(右)に寄っていない').toBe('right');
   }
 
   /**
@@ -282,11 +325,14 @@ test('🔴 縦書きは上から下へ流れる(`direction: rtl` で下から上
   await writeNote(
     page,
     '縦書きで下寄せ',
-    `---\nwriting: vertical\ndirection: rtl\nalign: bottom\n---\n\n${LONG_LINE}\n\n短い段落\n`,
+    `---\nwriting: vertical\ndirection: rtl\nalign: bottom\n---\n\n${LONG_LINE}\n\n短い段落\n\n|> 終端\n`,
   );
   {
     const a = await alignsOf(page, 'y');
     expect(a[1], '`align: bottom` が効いていない(属性だけ出して終わっている)').toBe('bottom');
+    // 🔴 縦書きの入れ替え(2026-08-08 のレビューで runtime 0 と分かった 2 本)。
+    //    宣言が「下」= 流れの終わり側なので、`|>` はその反対の**上**。
+    expect(a[2], '縦書き + align: bottom で `|>` が反対側(上)に寄っていない').toBe('top');
     // 向きは変わらない(寄せと流れは別物)
     expect(await flowOf(page), '寄せを変えたら流れまで変わった').toBe('top-down');
   }

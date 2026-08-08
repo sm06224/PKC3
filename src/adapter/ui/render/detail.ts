@@ -27,6 +27,7 @@ import {
 } from '@features/markdown/edit-journal';
 import { iconButton } from './icons';
 import { buildFormatBar } from './format-bar';
+import { hasSourceSelection } from '../actions/copy-source';
 import {
   appExternalImages,
   buildExternalImageBar,
@@ -71,6 +72,15 @@ type BarShape = 'edit' | 'retry' | 'none';
 export function liveEditorEnabled(): boolean {
   return appFlags.isOn(FLAG_LIVE_EDITOR.name);
 }
+
+/**
+ * 🔴 **同じ理由は同じ言葉で断る**(4 巡目レビュー R3)。3 か所(Ctrl+A / Ctrl+Z /
+ * ボタンの title)が同じ文言を持っており、等値 pin は 2 か所しか突き合わせていなかった
+ * ── 3 か所目だけ言い回しを変える変異が生き延びる。**実体を 1 つにして構造で守る。**
+ * ⚠ 押した場所が違っても理由が同じなら言い方も同じにする(言い換えると user は
+ *   別のものを探す)。
+ */
+const ALREADY_WHOLE_NOTE = 'すでに原文全体を編集しています';
 
 export class DetailRenderer {
   private readonly region: HTMLElement;
@@ -133,6 +143,15 @@ export class DetailRenderer {
    */
   private barShape: BarShape | null = null;
   private barButton: HTMLButtonElement | null = null;
+  /**
+   * 読む面のコピー(2026-08-08。user 裁定「markdown のテキストとしてのコピーと
+   * HTML 書式ありのコピーの両方」)。⚠ 器と同じ寿命 ── `dropBarState` で忘れる。
+   */
+  private barCopy: {
+    md: HTMLButtonElement;
+    rich: HTMLButtonElement;
+    sel: HTMLButtonElement;
+  } | null = null;
   private panelSlot: HTMLElement | null = null;
   /** いま出している履歴パネル(参照で比べる ── 同じなら触らない)。 */
   private shownPanel: AppState['revisionPanel'] = null;
@@ -193,6 +212,12 @@ export class DetailRenderer {
     this.region = region;
     this.assets = assets;
     this.markdown = markdown;
+    /**
+     * 選択範囲コピーの活性は selection で決まる(state に無い)。
+     * ⚠ renderer はアプリと同寿命なので外さない ── handler は器が外れていれば
+     * 何もしない(test が renderer を作り捨てても積み害は無い)。
+     */
+    region.ownerDocument.addEventListener('selectionchange', () => this.syncCopySelection());
   }
 
   /**
@@ -256,6 +281,7 @@ export class DetailRenderer {
   private dropBarState(): void {
     this.barShape = null;
     this.barButton = null;
+    this.barCopy = null;
     this.shownPanel = null;
   }
 
@@ -551,10 +577,28 @@ export class DetailRenderer {
         const bar = document.createElement('div');
         bar.setAttribute('data-pkc-field', 'detail-toolbar');
         if (shape === 'edit') {
-          // 🔑 **ここには「編集」だけ**(P8)。書き出す / 履歴 / 削除は右の情報ペインが
-          // 持つ ── 同じボタンを 2 か所に出すと、押す場所が定まらない。
+          // 🔑 **ここには「編集」とコピーだけ**(P8 / 2026-08-08)。書き出す / 履歴 /
+          // 削除は右の情報ペインが持つ ── 同じボタンを 2 か所に出すと、押す場所が
+          // 定まらない(コピーはここ**だけ**に在る)。
           // 🔑 **追記もここに無い**(P8 段⑧)── 編集画面を通らない別の器が持つ
           this.barButton = iconButton('start-edit', '編集');
+          /**
+           * 🔴 **コピーの 2 系統 + 選択範囲**(2026-08-08。user 裁定「markdown の
+           * テキストとしてのコピーと HTML 書式ありのコピーの両方」)。
+           * 受け手は binder(`copy-note-md` / `copy-note-rich` / `copy-selection-md`)。
+           * ⚠ 選択範囲は**選択があるときだけ活性**── 選択は state に無い
+           * (DOM の selection)ので、`selectionchange` が `syncCopySelection` で
+           * 同期する(render の指紋は選択では動かない)。
+           */
+          const md = iconButton('copy-note-md', 'Markdown をコピー');
+          md.title = '本文の原文(Markdown)をそのままコピーします';
+          const rich = iconButton('copy-note-rich', '書式付きでコピー');
+          rich.title = '見た目(HTML 書式)ごとコピーします。Word などに貼れます';
+          const sel = iconButton('copy-selection-md', '選択範囲をコピー');
+          sel.title = '本文の中を選択すると押せます(選択した範囲を Markdown の原文でコピー)';
+          sel.disabled = true;
+          this.barCopy = { md, rich, sel };
+          bar.append(this.barButton, md, rich, sel);
         } else {
           // 保存失敗からの復帰導線: baseline ≠ persisted =「disk に未達の commit が
           // ある」証拠(P3-5 の分離の回収点)。黙って死なせず再送を提示する
@@ -563,8 +607,8 @@ export class DetailRenderer {
           retry.setAttribute('data-pkc-action', 'retry-persist');
           retry.textContent = '再保存';
           this.barButton = retry;
+          bar.append(this.barButton);
         }
-        bar.append(this.barButton);
         slot.append(bar);
       }
     }
@@ -573,6 +617,28 @@ export class DetailRenderer {
       this.barButton.disabled = !bodyReady;
       this.barButton.title = bodyReady ? '' : '本文を読み込んでいます…';
     }
+    if (this.barShape === 'edit' && this.barCopy) {
+      this.barCopy.md.disabled = !bodyReady;
+      this.barCopy.rich.disabled = !bodyReady;
+      this.syncCopySelection();
+    }
+  }
+
+  /**
+   * 選択範囲コピーの活性(2026-08-08)。選択は state に無いので、
+   * `selectionchange`(constructor で document に 1 本)とバーの描き直しの
+   * 両方からここへ来る。⚠ **判定は `hasSourceSelection` の 1 本** ──
+   * binder 側の `selectedMarkdown` と同じ端点の規則を使う(規則を 2 つ書かない)。
+   */
+  private syncCopySelection(): void {
+    const btn = this.barCopy?.sel;
+    if (!btn || !btn.isConnected) return;
+    const usable =
+      this.mode === 'view' &&
+      this.lastBody !== null &&
+      this.bodyHost !== null &&
+      hasSourceSelection(this.bodyHost);
+    btn.disabled = !usable;
   }
 
   /**
@@ -786,7 +852,22 @@ export class DetailRenderer {
      *  ときに別のものを掴む ── 実際にそう外した)。 */
     const note = document.createElement('p');
     note.setAttribute('data-pkc-field', 'row-note');
-    this.region.append(pane, note);
+    /**
+     * 🔴 **全文編集の可視の導線**(2026-08-08。user 裁定「一旦全てプレーン
+     * テキストにして編集」)。機構は S6 の `Ctrl+A` と**同じ口**(`activateAll`)──
+     * キーを知らない人にもマウスだけで届くようにする(業務画面の作法)。
+     * ⚠ binder を通さず直接配線する ── この面の中の口(`RowSwap`)を呼ぶだけで、
+     * dispatch する action が無い。
+     */
+    const tools = document.createElement('div');
+    tools.setAttribute('data-pkc-field', 'live-tools');
+    const editAll = document.createElement('button');
+    editAll.type = 'button';
+    editAll.setAttribute('data-pkc-field', 'edit-all');
+    editAll.textContent = '全文を編集';
+    editAll.title = '本文全体を 1 つの入力欄で編集します(Ctrl+A と同じ)';
+    tools.append(editAll);
+    this.region.append(tools, pane, note);
 
     let body = initialBody;
     const scopes: MermaidScope[] = [];
@@ -813,6 +894,9 @@ export class DetailRenderer {
         note.textContent = message;
       },
     });
+    editAll.addEventListener('click', () => {
+      if (!swap.activateAll()) note.textContent = 'この本文は全文編集に開けません';
+    });
 
     /**
      * 🔴 **塊を跨ぐ Ctrl+Z / Ctrl+Shift+Z(Ctrl+Y)**(S8。設計 §9 論点 C の
@@ -824,6 +908,11 @@ export class DetailRenderer {
      *   面を畳むときに必ず外す(`cancelPreview`)。
      * ⚠ 戻せないときは**無言で無視しない**(押したのに何も起きない理由を出す)。
      */
+    /**
+     * 分割が組めない本文で編集させないための退避(1 回だけ作る)。
+     * ⚠ 宣言が `onKey` より前に在るのは、`Ctrl+A` の側でも見るため(下記)。
+     */
+    let fellBack = false;
     const onKey = (ev: KeyboardEvent): void => {
       if (!pane.isConnected) return;
       const t = ev.target;
@@ -844,12 +933,39 @@ export class DetailRenderer {
        */
       if (key === 'a') {
         ev.preventDefault();
+        /**
+         * ⚠ **退避したら Ctrl+A も塞ぐ**(2026-08-08 の 2 巡目レビュー)。
+         * ボタン(`editAll.disabled`)だけ塞いで**同じことをする双子**を塞いで
+         * いなかった ── `swap.dispose()` は listener と active を落とすだけで
+         * `view` / `body` を残すので `activateAll()` は**まだ呼べてしまい**、
+         * 退避用の入力欄が入っている pane を上書きする。
+         * 🔑 断り文は**ボタンに書いたものと同じ言葉**にする(押した場所が違っても
+         * 同じ理由なら同じ言い方 ── 言い換えると user は別のものを探す)。
+         */
+        if (fellBack) {
+          note.textContent = ALREADY_WHOLE_NOTE;
+          return;
+        }
         if (!swap.activateAll()) note.textContent = 'この本文は全文編集に開けません';
         return;
       }
       const forward = key === 'y' || (key === 'z' && ev.shiftKey);
       if (key !== 'z' && key !== 'y') return;
       ev.preventDefault();
+      /**
+       * 🔴 **退避したら取り消しも塞ぐ**(2026-08-08 の 3 巡目レビュー。**4 件目の双子**)。
+       * ⚠ ここは Ctrl+A より**実害が大きい** ── 退避先は原文をそのまま編集する面で、
+       *   follower が `fellBack` で描き直さない。そこで journal を当てると
+       *   **`body`(= 保存される値)だけが動いて、画面の入力欄は前のまま**になる。
+       *   そのまま保存すると **user が見ていない本文が保存される**(1 文字打てば
+       *   `body = ta.value` で戻るが、打たずに保存すると気づけない)。
+       * 🔑 退避先の取り消しは**ブラウザ自前**(textarea の履歴)に任せる ── 面が
+       *   1 つの入力欄なので、それで筋が通る。
+       */
+      if (fellBack) {
+        note.textContent = ALREADY_WHOLE_NOTE;
+        return;
+      }
       const moved = forward ? redo(journal, body) : undo(journal, body);
       if (moved === null) {
         note.textContent = forward ? 'やり直せる編集はありません' : '取り消せる編集はありません';
@@ -861,8 +977,6 @@ export class DetailRenderer {
     };
     document.addEventListener('keydown', onKey);
 
-    /** 分割が組めない本文で編集させないための退避(1 回だけ作る)。 */
-    let fellBack = false;
     const fallBack = (reason: string): void => {
       if (fellBack) return;
       fellBack = true;
@@ -878,6 +992,9 @@ export class DetailRenderer {
       });
       note.textContent = `この本文は行ごとに編集できません(${reason})── 原文で編集します`;
       pane.append(ta);
+      // 退避先は**すでに原文全体**の編集 ── 押せない理由ごと可視にする
+      editAll.disabled = true;
+      editAll.title = ALREADY_WHOLE_NOTE;
     };
 
     const follow = this.markdown.follower<RenderedWithRanges>(

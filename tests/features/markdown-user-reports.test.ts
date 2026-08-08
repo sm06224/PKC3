@@ -251,24 +251,27 @@ describe('csv/tsv のセルに文書の脚注が漏れない', () => {
 });
 
 /**
- * 🔴 **行頭アラインの矢印の向きは意味を持たない**(記法の正本)。
+ * 🔴 **行頭アラインの矢印の向きは意味を持たない**(user 裁定 2026-08-08、Issue #103):
  *
- * `PKC2: docs/development/notation-redesign-2026-05/01-notation-catalog.md` §1.4.2 が
- * 「`|>` `<|` `|<` `>|` … **全 4 形が同じ "logical end"** として正規化(典型 typo
- * パターン受理)」と定め、§1.4.1 が **`<|text` align prefix を ❌ 廃止**として
- * 「**default flow は frontmatter で declare**、明示的左寄せ強制は formal
- * `:::paragraph{align=left}`」と書いている。
+ * > 「**|> も<|も|<も意味は同じ、グローバルの文字の寄せを反対にする**」(寛容なパーサー)
  *
- * つまり ── **どちら側が既定の流れかは文書全体の direction が決める**
- * (frontmatter `direction:` / `writing:` = global direction の switch)。
- * 行頭マーカーは物理方向を主張してはならず、持てるのは
- * 「中央」と「流れの反対側(end)」の 2 つだけである。
+ * 4 形が同値であることは catalog
+ * (`PKC2: docs/development/notation-redesign-2026-05/01-notation-catalog.md` §1.4.2)から
+ * 一貫している。**意味**のほうは規約が 2 通りに書いていて(① draft §2.3.6「宣言した
+ * 既定の流れの反対側」/ ② canonical 3 本「logical end 固定」)、裁定は **①** を正とした
+ * ── それまでの実装(②)は裁定と逆だった。
+ *
+ * 🔴 **裁定後の属性は `opposite`**(user 指摘 2026-08-08 で `end` から改めた)──
+ * 説明的な形 `:::paragraph{align=end}` と**同じ値にしてはいけない**。潰すと、
+ * 寛容さを持たない説明的な形にまで CSS の反転が漏れる(契約の境界)。
+ * 反転そのものは app.css の入れ替え規則(CSS)の仕事で、renderer は値を出すだけ。
+ * CSS 側の pin は `tests/features/align-swap-css.test.ts` と `markdown-css-parity.test.ts`。
  *
  * ⚠ **この test は一度この規則を逆に pin していた**(2026-08-06。`<|` を start に
- * 変えた誤り。user の指摘で revert)。誤りの根拠は 2 つとも「実装より弱い出典」で、
- * 調査 doc の minor 一覧と、`markdown-css-parity.test.ts` の corpus の註記だった。
+ * 変えた誤り。user の指摘で revert)。
  * 🔑 だからこの test は **4 形が同じ値になること**を明示的に見る ── 「向きを
- * 読みたくなる」誤りが**もう一度入らないように**するのが目的である。
+ * 記号ごとに読みたくなる」誤りが**もう一度入らないように**するのが目的である
+ * (裁定引用そのものが「4 形は同じ」と言っている)。
  */
 describe('行頭アライン: 矢印の向きは意味を持たない(記法の正本)', () => {
   const alignOf = (src: string): string | null => {
@@ -276,14 +279,77 @@ describe('行頭アライン: 矢印の向きは意味を持たない(記法の�
     return /data-pkc-align="([^"]+)"/.exec(html)?.[1] ?? null;
   };
 
-  it('🔴 `|>` `<|` `|<` `>|` は**全 4 形が end**(typo 寛容 ── 向きで分けない)', () => {
+  /**
+   * 🔴 **4 形は同義で、値は `opposite`**(user 指摘 2026-08-08 で `end` から改めた)。
+   * 象形的な形(矢印の絵)は向きを描き間違えても意図が通るので 4 形が同義になる。
+   * その意味は「**グローバルの寄せを反対にする**」であって logical end ではない ──
+   * ⚠ 説明的な形 `:::paragraph{align=end}` と**同じ値を出してはいけない**。
+   *   潰すと、CSS の入れ替えが説明的な形にも当たる(境界の踏み越え)。
+   */
+  it('🔴 `|>` `<|` `|<` `>|` は**全 4 形が opposite**(typo 寛容 ── 向きで分けない)', () => {
     const got = ['|>', '<|', '|<', '>|'].map((sym) => [sym, alignOf(`${sym} 本文\n`)]);
     expect(Object.fromEntries(got), '矢印の向きを意味として読んでいる').toEqual({
-      '|>': 'end',
-      '<|': 'end',
-      '|<': 'end',
-      '>|': 'end',
+      '|>': 'opposite',
+      '<|': 'opposite',
+      '|<': 'opposite',
+      '>|': 'opposite',
     });
+  });
+
+  /**
+   * 🔴 **象形的な形と説明的な形は別の値を出す**(境界の pin)。
+   * これが同値になった瞬間、CSS の入れ替えが説明的な形へ漏れる。
+   */
+  it('🔴 `|>` と `:::paragraph{align=end}` は別の値(契約の境界)', () => {
+    const formal = (v: string): string | null => {
+      const html = renderMarkdown(`:::paragraph{align=${v}}\n本文\n:::\n`, {
+        silentHallucinationWarnings: true,
+      });
+      return /data-pkc-align="([^"]*)"/.exec(html)?.[1] ?? null;
+    };
+    expect(alignOf('|> 本文\n'), '象形的な形が説明的な形と同じ値を出している').toBe('opposite');
+    expect(formal('end'), '説明的な形が象形的な形に引きずられた').toBe('end');
+    expect(formal('start'), '説明的な形の start が動いた').toBe('start');
+    /**
+     * 🔴 **説明的な形から `opposite` を書けてはいけない**(3 巡目レビュー)。
+     * 直す前は「`FORMAL_ALIGNS` に入れてはならない」と**散文で宣言しているだけ**で、
+     * 止める assert が無かった ── `LOGICAL_ALIGNS` に 1 語足す変異(`'opposite'`)は
+     * `AlignKind` の一員なので **tsc も lint も黙り**、全 test 緑のまま
+     * `:::paragraph{align=opposite}` が書けるようになる(= 今回の修理が丸ごと無効)。
+     * ⚠ **`:::format` 側も対で見る** ── 受理集合を共有しているので、片方だけ pin すると
+     *   `|| alignRaw === 'justify'` の隣に足す変異が生き延びる。
+     */
+    expect(formal('opposite'), '説明的な形から opposite が書けてしまう(境界が消えた)').toBeNull();
+    const fmt = (v: string): string | null => {
+      const html = renderMarkdown(`:::format{align=${v}}\n本文\n:::\n`, {
+        silentHallucinationWarnings: true,
+      });
+      return /data-pkc-align="([^"]*)"/.exec(html)?.[1] ?? null;
+    };
+    expect(fmt('opposite'), ':::format から opposite が書けてしまう').toBeNull();
+    // 空振り防止 ── format 経路そのものが死んでいたら、上の null は何も守らない
+    expect(fmt('center'), ':::format の align が丸ごと効いていない').toBe('center');
+  });
+
+  /**
+   * 🔴 **見出しにも効く**(3 巡目レビューで穴が判明)。実装は
+   * `paragraph_open || heading_open` の両方に属性を付けるが(`markdown-render.ts:3239`)、
+   * **見出し側を誰も見ていなかった** ── `heading_open` を落とす変異が全 test 緑で通る
+   * (goldens 25 件に寄せ付きの見出しは 0 件、smoke の観測点は `p` のみ)。
+   * ⚠ 段落だけ pin して「この記法は守られている」と読むのが、この型の見落としである。
+   */
+  it('🔴 見出しにも寄せが効く(段落だけ pin して満足しない)', () => {
+    const h = (src: string): string | null => {
+      const html = renderMarkdown(src, { silentHallucinationWarnings: true });
+      return /<h[1-6][^>]*data-pkc-align="([^"]+)"/.exec(html)?.[1] ?? null;
+    };
+    expect(h('||## 中央の見出し\n'), '見出しの中央寄せが落ちている').toBe('center');
+    expect(h('|># 反対側の見出し\n'), '見出しの寄せが落ちている').toBe('opposite');
+    // 空振り防止 ── 見出しがそもそも出ていないなら上は何も守らない
+    expect(
+      /<h2[^>]*>/.test(renderMarkdown('||## 中央の見出し\n', { silentHallucinationWarnings: true })),
+      '見出しが生成されていない(この検査が空振りしている)',
+    ).toBe(true);
   });
 
   it('`||` だけが center(対称形なので typo 形を持たない)', () => {
@@ -293,9 +359,10 @@ describe('行頭アライン: 矢印の向きは意味を持たない(記法の�
   /**
    * 🔴 **「左」の行頭マーカーは存在しない**(廃止済み)。
    * ⚠ ここは**無いことを pin する** test である ── 誰かが「`<|` は左だろう」と
-   * 直感で足すのを止めるために置く。左に寄せたいときの正しい道は 2 つ:
+   * 直感で足すのを止めるために置く。左に寄せたいときの正しい道は 3 つ:
    * ① 文書の `direction` を宣言する(既定の流れを変える)
-   * ② formal の `:::paragraph{align=left}`(物理左の強制)
+   * ② 文書の `align: right` を宣言する(`|>` が反対側 = 左へ寄る。裁定 2026-08-08)
+   * ③ formal の `:::paragraph{align=left}`(物理左の強制)
    */
   it('🔴 simple 形に start / left は 1 つも無い(左は direction か formal の仕事)', () => {
     for (const sym of ['||', '|>', '<|', '|<', '>|']) {
@@ -341,10 +408,20 @@ describe('行頭アライン: 矢印の向きは意味を持たない(記法の�
       );
     });
 
-    it('🔑 hint が正本の 2 つ(center / end)と、左の正しい道を名乗る', () => {
+    /**
+     * ⚠ **hint に `end` / `start` を名乗らせない**(2026-08-08 に改めた)。
+     * 裁定で `|>` の意味が「グローバルの寄せの反対側」になった以上、logical end を
+     * 表す `end` を canonical として教えると、**寛容さを持たない説明的な形へ
+     * 象形的な形の意味を持ち込ませる**ことになる(user 指摘: 思想的な破壊的変更)。
+     */
+    it('🔑 hint が center と「反対側」を名乗り、位置指定の正しい道を書く', () => {
       expect(ALIGN_CANONICAL_HINT).toContain('center');
-      expect(ALIGN_CANONICAL_HINT).toContain('end');
-      // typo 3 形が同じ end であることまで書く(向きを読ませない)
+      // ⚠ 部分一致で `end` を禁じると `recommend` / `extended` で無関係に落ちる ──
+      //    主張は「`align=end` を canonical として教えない」なので、その形で見る
+      expect(ALIGN_CANONICAL_HINT, '旧意味(logical end)を canonical として教えている')
+        .not.toContain('align=end');
+      expect(ALIGN_CANONICAL_HINT, '反対側という意味を教えていない').toContain('反対側');
+      // typo 3 形が同じ意味であることまで書く(向きを読ませない)
       for (const sym of ['<|', '|<', '>|']) expect(ALIGN_CANONICAL_HINT).toContain(sym);
       // 左に寄せたい人の行き先(direction / formal)を書く
       expect(ALIGN_CANONICAL_HINT).toContain('direction');
@@ -383,7 +460,9 @@ describe('行頭アライン: 矢印の向きは意味を持たない(記法の�
       });
       expect(html, 'canonical 属性が出ていない').toContain('data-pkc-canonical=');
       expect(html, '属性が start を教えている').not.toContain('(start)');
-      expect(html).toContain('logical end');
+      // ⚠ 裁定 2026-08-08 の意味(「反対にする」)ごと焼かれること ── 属性の値だけ
+      //    正しくても、教える文が古い(logical end 固定)ままなら user と AI は誤って学ぶ
+      expect(html).toContain('グローバルの寄せの反対側');
     });
   });
 
@@ -459,6 +538,17 @@ describe('行頭アライン: 矢印の向きは意味を持たない(記法の�
     // logical を書いたときは logical のまま(物理へも潰さない)
     expect(alignOfNext(':align:{position=end}\n\n本文\n')).toBe('end');
     expect(alignOfNext(':align:{position=start}\n\n本文\n')).toBe('start');
+    /**
+     * 🔴 **ここも説明的な形である**(4 巡目レビュー R5)。`:align:{position=…}` は
+     * 値を**言葉で書く**形なので、象形的な形の専用値 `opposite` を受けてはいけない。
+     * ⚠ 受理集合は `FORMAL_ALIGNS` へ寄せたが、**「隣に足す」変異はそれだけでは
+     *   止まらない**(`|| rawPos === 'opposite'` を書けば通る ── 実際に生き延びた)。
+     *   構造(1 か所に寄せる)と assert の**両方**が要る。
+     */
+    expect(
+      alignOfNext(':align:{position=opposite}\n\n本文\n'),
+      '説明的な形(寛容記法)から opposite が書けてしまう(境界が消えた)',
+    ).toBeNull();
 
     // inline 経路(chip)も同じ ── 説明文が「end → right」と教えていた
     const chip = renderMarkdown('本文 :align:{position=end} の続き\n', {
@@ -497,15 +587,22 @@ describe('行頭アライン: 矢印の向きは意味を持たない(記法の�
   });
 
   /**
-   * 🔑 **既定の流れは frontmatter が決める**(global direction の switch)。
+   * 🔑 **どちら側が「グローバルの寄せ」かは frontmatter が決める**(`direction` /
+   * `align` の宣言)。
    * ⚠ この 2 つが同じ文書で共存できることを見る ── `end` の物理的な着地点は
    * ここで反転する(だから行頭マーカーが物理方向を持ってはいけない)。
+   * ⚠ 裁定 2026-08-08(Issue #103)の後、属性は **`opposite`** ── 反転は CSS
+   * (app.css の入れ替え規則)の仕事で、renderer が宣言を読んで属性を変えたら
+   * goldens が動く(= 方式が壊れている)。ここはそれを止める pin である。
    */
-  it('🔴 文書の direction は frontmatter で切り替わる(行頭マーカーとは別系統)', () => {
+  it('🔴 文書の direction / align は frontmatter で切り替わる(行頭マーカーとは別系統)', () => {
     const globals = extractDocumentGlobals('---\ndirection: rtl\n---\n\n|> 本文\n');
     expect(globals.direction, 'global direction の switch が効いていない').toBe('rtl');
-    // ⚠ マーカー側は direction に関わらず end のまま(logical なので反転は CSS の仕事)
-    expect(alignOf('---\ndirection: rtl\n---\n\n|> 本文\n')).toBe('end');
+    // ⚠ マーカー側は direction に関わらず opposite のまま(反転は CSS の仕事)
+    expect(alignOf('---\ndirection: rtl\n---\n\n|> 本文\n')).toBe('opposite');
+    // ⚠ `align` 宣言でも同じ ── 属性は opposite のまま(見え方の反転は入れ替え規則)。
+    //    renderer に「宣言を読んで start へ書き換える」実装が生えたらここが落ちる
+    expect(alignOf('---\nalign: right\n---\n\n|> 本文\n')).toBe('opposite');
   });
 });
 

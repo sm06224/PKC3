@@ -16,7 +16,11 @@ import { parseFrontmatter, extractVars } from '../../src/features/markdown/front
  * ⚠ markdown-it のバージョンを動かすと golden ごと再検証が必要(14.3.0 に固定中)。
  *
  * ⚠ **PKC2 と意図的に違えた点は golden 側を更新して記録する**(丸写し禁止 ──
- * user 指示 2026-07-30「流用 + 総合的見直し」)。現時点の差分は 2 つ:
+ * user 指示 2026-07-30「流用 + 総合的見直し」)。
+ * ⚠ **この散文は数を書かない**(2026-08-08 に直した)── 「差分は 2 つ」と書いて
+ *   3 項目を並べており、しかも 4 種類目が増えても更新されなかった。
+ *   🔑 **機械可読な台帳は下の `pkc3Diverges` 検査**(件数と理由の実在をそこが守る)。
+ *   ここは「なぜ違えたか」を人が読むための control であり、**足したら必ず 1 項目書く**:
  *
  *   1. タスクのチェック欄に `disabled` を付けた(P8 段⑳)。PKC2 は押せる形で
  *      出していたが、**押しても本文が 1 文字も変わらない** ── 移動 / 追記 /
@@ -33,12 +37,21 @@ import { parseFrontmatter, extractVars } from '../../src/features/markdown/front
  *      動いた golden は `snippet-figure-ref`(本文の画像)と `snippet-html-fence`(箱)。
  *      ⚠ `reform-stress-sample` の `pkc://asset/…` は**動かない** ── PKC 自身の
  *        scheme は要求を飛ばさないので「外」ではない(嘘の確認を出さないため)。
+ *   4. **行頭アラインの属性値を `end` → `opposite` にした**(2026-08-08、user 指摘)。
+ *      裁定で `|>` の意味が「グローバルの寄せを反対にする」になった以上、logical end を
+ *      表す `end` と同じ値にしておけない ── 説明的な形 `:::paragraph{align=end}` と
+ *      値が同じだと、**寛容さ(typo を意味に通す性質)を持たない説明的な形にまで
+ *      反転が漏れる**。PKC2 は旧意味(logical end 固定)のままなので分岐する。
+ *      動いた golden は `reform-stress-sample` / `simple-notation-sample` /
+ *      `snippet-align-indent` の 3 件(差は属性値だけ)。
  *
  * 🔴 **golden は「PKC2 と同じ」を守る道具であって、「正しい」を守る道具ではない。**
- * PKC2 のバグはそのまま期待値になる ── 実際、csv fence のセルに脚注が漏れる件
- * (`docs/development/user-reports-2026-08-05.md` §2-1)は**漏れた HTML が golden**に
- * なっており、直すとここが落ちる。落ちたら「壊した」ではなく
+ * PKC2 のバグはそのまま期待値になる ── 落ちたら「壊した」ではなく
  * **「PKC2 と違えた」**を疑い、上の一覧に足してから golden を更新すること。
+ * ⚠ 実例(**既に解決済み** ── 現在形で読まないこと): csv fence のセルに脚注が漏れる件
+ * (`docs/development/user-reports-2026-08-05.md` §2-1)は**漏れた HTML が golden**に
+ * なっていたが、2026-08-06 に直して golden も更新し、`full-pkc-fixture` の
+ * `pkc3Diverges.why` に記録してある。
  */
 interface GoldenCase {
   name: string;
@@ -140,13 +153,23 @@ describe('PKC-Markdown golden parity vs PKC2 (25 cases)', () => {
    * 🔑 この test が守っているのは件数ではなく「**理由なしに golden を採り直せない**」こと ──
    * 実際、私は理由を書いて採り直したが、その理由が誤りだった。件数だけでは止められない。
    */
-  it('🔴 PKC2 と分岐した case は理由つきで 4 件だけ', () => {
+  it('🔴 PKC2 と分岐した case は理由つきで 9 件だけ', () => {
     const diverged = goldens.cases.filter((c) => c.pkc3Diverges);
     expect(diverged.map((c) => c.name).sort()).toEqual([
       'full-pkc-fixture',
       'full-pkc-fixture-anchors',
+      // 🔴 2026-08-08: 行頭アラインの象形的な形が `end` → `opposite`(user 裁定 +
+      //    user 指摘)。PKC2 は旧意味(logical end 固定)のままなので分岐する。
+      //    ⚠ **この分岐は隠してはいけない** ── 直前まで CSS だけで反転させて
+      //    byte 一致を保っていたが、それは「説明的な形にも反転が漏れる」実装の
+      //    裏返しだった。属性を分けたことで、分岐が台帳に見えるようになった。
+      'reform-stress-sample',
+      'simple-notation-sample',
+      'snippet-align-indent',
+      'snippet-break-and-blank',
       'snippet-figure-ref',
       'snippet-html-fence',
+      'snippet-task-and-footnote',
     ]);
     for (const c of diverged) {
       expect(c.pkc3Diverges!.since, `${c.name} に分岐した日付が無い`).toMatch(/^\d{4}-\d{2}-\d{2}$/);

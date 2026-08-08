@@ -81,6 +81,8 @@ const CORPUS: ReadonlyArray<readonly [string, string]> = [
   //    §1.4.1 で**廃止**されている(左は frontmatter の direction か formal 形の仕事)。
   //    🔴 この誤った註記を根拠に実装を `start` へ変えてしまい、user の指摘で revert した ──
   //    **corpus の註記は実装より弱い出典**である(catalog が正本)。
+  //    ⚠ 裁定 2026-08-08(Issue #103)で意味は「グローバルの寄せの反対側」に確定 ──
+  //    属性は 4 形とも opposite(説明的な形の end とは別値。入れ替えは CSS)。
   ['行頭アライン', '||中央\n\n|>end\n\n<|end(typo 寛容)\n'],
   ['字下げと空行', '__ 段落の字下げ\n\n_\n\n_3\n'],
   ['callout(8 種)',
@@ -329,6 +331,43 @@ describe('読み幅の上限', () => {
       expect(items, `${s} に読み幅の上限が掛かっている`).not.toContain(s);
     }
   });
+
+  /**
+   * 🔴 **allow-list は等値で pin する**(2026-08-08 のレビューで実証)。
+   * 上の 2 件は 23 項目のうち `.pkc-section-callout` の存在と 4 つの不在しか見ておらず、
+   * 残る 18 項目は**どれを落としても全 test 緑**だった(`.pkc-details` を落とす変異で確認)。
+   * 落ちた項目は「上限が掛からない側」に倒れるので、その箱だけ全幅に伸びて
+   * 周りの段落と揃わない ── 2026-08-05 に実ブラウザで気づいた欠陥の**再発**である。
+   * ⚠ 足すときも消すときもここが割れる(`KNOWN_DEAD` と同じ「忘れられない形」)。
+   */
+  it('🔴 対象の全量が動いていない(1 項目落ちても気づかない、を止める)', () => {
+    const items = RULE.exec(CSS)![1]!.split(',').map((x) => x.trim());
+    expect(items).toEqual([
+      'p',
+      'h1',
+      'h2',
+      'h3',
+      'h4',
+      'h5',
+      'h6',
+      'ul',
+      'ol',
+      'dl',
+      'blockquote',
+      'hr',
+      '.footnotes',
+      '.pkc-details',
+      '.pkc-format-block',
+      '.pkc-toc-formal',
+      '.pkc-toc-preview',
+      '.pkc-section-break',
+      '.pkc-blank-line',
+      '.pkc-region-frontmatter',
+      '.pkc-region-body',
+      '.pkc-section-callout',
+      '.pkc-fig-equation',
+    ]);
+  });
 });
 
 /**
@@ -369,7 +408,7 @@ describe('寄せの規則が 2 つの面に在る(書き出しだけ古くなら
     s.replace(/['"]/g, '').replace(/\s+/g, '').replace(/;\}/g, '}');
 
   it('🔴 段落の寄せ(logical / physical / center / justify)が両面に在る', () => {
-    for (const v of ['center', 'end', 'start', 'right', 'left', 'justify']) {
+    for (const v of ['center', 'opposite', 'end', 'start', 'right', 'left', 'justify']) {
       expect(norm(CSS), `アプリ側に ${v} が無い`).toContain(`[data-pkc-align=${v}]`);
       expect(norm(VIEWER), `書き出し側に ${v} が無い`).toContain(`[data-pkc-align=${v}]`);
     }
@@ -421,22 +460,34 @@ describe('寄せの規則が 2 つの面に在る(書き出しだけ古くなら
   });
 
   /**
-   * ⏸ **`|>` を `align` で入れ替える規則は置かない**(2026-08-06、裁定待ち)。
+   * 🔴 **`align` による入れ替え規則が両面に在る**(user 裁定 2026-08-08、Issue #103
+   * 「**|> も<|も|<も意味は同じ、グローバルの文字の寄せを反対にする**」)。
    *
-   * 規約が 2 通りに書いている ── ① `02-frontmatter-and-globals.md` §2.3.6(draft)
-   * 「宣言した既定の流れの反対側」/ ② `11-canonicalization-spec.md` §53 +
-   * `markdown-dialect-for-ai-authors-v3.md`(唯一 canonical)+ v4 §6.2
-   * 「logical end(LTR で右、RTL で左)」。**② を実装している**。
-   * ⚠ この test は「① を勢いで足し直さない」ための門である ── 一度 ① を実装して
-   *   外した(理由は app.css の該当節)。① の裁定が出たらこの test を反転させる。
+   * 規約が 2 通りに書いていた件(① draft §2.3.6「宣言した既定の流れの反対側」/
+   * ② canonical 3 本「logical end 固定」)は、裁定で **① を正**とした ──
+   * それまでの実装(②)は裁定と逆。象形的な形は専用値 `data-pkc-align="opposite"` を
+   * 出し(説明的な形 `align=end|start` とは**別の値** ── 潰すと寛容さを持たない
+   * 説明的な形にまで反転が漏れる)、「宣言 align が flow start と逆の文書」でだけ
+   * `opposite` の見え方を入れ替える。中央の文書では寄らない(`inherit`)。
+   * ⚠ この test は 2026-08-06〜08 の間、「① を勢いで足し直さない門」として
+   *   規則が**無い**ことを pin していた ── 裁定が出たので反転した。
+   * ⚠ `norm` は空白を全部落とすので、下の字面は**子孫結合子の空白が消えた形**である
+   *   (実セレクタは `…:not([dir='rtl']) [data-pkc-align='opposite']` の子孫)。
+   * ⚠ center の無変換を含む網羅は `tests/features/align-swap-css.test.ts` が
+   *   **等値**で見る ── ここは両面 parity(app.css と焼き込みの両方に在ること)。
    */
-  it('⏸ `align` による入れ替え規則は**両面に無い**(② を実装している)', () => {
-    for (const sel of [
-      '[data-pkc-doc-align=right]:not([dir=rtl])[data-pkc-align=end]',
-      '[data-pkc-doc-align=left][dir=rtl][data-pkc-align=end]',
+  it('🔴 `align` による入れ替え規則が**両面に在る**(user 裁定 2026-08-08)', () => {
+    for (const rule of [
+      // 横書き: 宣言 align が flow start と逆(ltr で right / rtl で left)
+      '.pkc-md-rendered[data-pkc-doc-align=right]:not([dir=rtl])[data-pkc-align=opposite]{text-align:start}',
+      '.pkc-md-rendered[data-pkc-doc-align=left][dir=rtl][data-pkc-align=opposite]{text-align:start}',
+      // 縦書き: flow start は常に上(direction: ltr 固定)── 逆は bottom だけ
+      '.pkc-md-rendered[data-pkc-writing=vertical][data-pkc-doc-align=bottom][data-pkc-align=opposite]{text-align:start}',
+      // 中央には反対側が無い ── 寄らない
+      '.pkc-md-rendered[data-pkc-doc-align=center][data-pkc-align=opposite]{text-align:inherit}',
     ]) {
-      expect(norm(CSS), `アプリ側に ① の入れ替え規則が在る: ${sel}`).not.toContain(sel);
-      expect(norm(VIEWER), `書き出し側に ① の入れ替え規則が在る: ${sel}`).not.toContain(sel);
+      expect(norm(CSS), `アプリ側に入れ替え規則が無い: ${rule}`).toContain(rule);
+      expect(norm(VIEWER), `書き出し側に入れ替え規則が無い: ${rule}`).toContain(rule);
     }
   });
 
