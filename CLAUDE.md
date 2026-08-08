@@ -321,6 +321,7 @@ P4 assets → P5 revisions → P6 import/export → P7 v3.0.0(Pages product + PW
 | `perf-measurement/` | **測って示す**(対照群 / 差分ハーネス / 被覆と感度 / 主張の範囲) |
 | `smoke-testing/` | 実ブラウザ検証(2 つのブラウザ / 観測点の置き方) |
 | `source-editing/` | 編集の作法(生バイト / template literal / 整形ツール) |
+| `notice-writing/` | **お知らせを書く**(登記表の場所 / 上限 / 書いてはいけないこと) |
 | `pr-landing/` | PR を作って着地させる(1 主題 / 止めて裁定を仰ぐ条件) |
 | `session-handoff/` | 引き継ぎ **PR** の作り方(最初の仕事の有無は必須) |
 | `knowledge-reflection/` | **教訓を資産へ分割して残す**(`.claude更新`) |

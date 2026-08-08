@@ -24,7 +24,14 @@ import {
   type ViewMode,
 } from '../../src/adapter/state/app-state';
 import { APP_VERSION } from '../../src/runtime/release-meta';
-import { NOTICES, NOTICE_SHOW_MAX } from '../../src/features/notice/notice-log';
+import {
+  NOTICES,
+  NOTICE_ITEMS_MAX,
+  NOTICE_ITEM_CHARS_MAX,
+  NOTICE_ITEM_CHARS_MIN,
+  NOTICE_KEEP_MAX,
+  NOTICE_SHOW_MAX,
+} from '../../src/features/notice/notice-log';
 
 let region: HTMLElement;
 beforeEach(() => {
@@ -164,6 +171,49 @@ describe('お知らせの登記表', () => {
     const ids = NOTICES.map((n) => n.id);
     for (const id of ids) expect(id, `id の形が違う: ${id}`).toMatch(/^\d{4}-\d{2}-\d{2}-[a-z0-9-]+$/);
     expect(new Set(ids).size, 'id が重複している').toBe(ids.length);
+  });
+
+  /**
+   * 🔴 **宣言した上限を、実際に読む。**
+   *
+   * ⚠ PKC2 は `date` field を宣言して**一度も読まなかった** ── この登記表で
+   * 同じことをやりかけた。上限を定数で持っただけでは、**誰も止めない**。
+   * だから定数を**この test が読む**(`.claude/skills/notice-writing/` の表と同じ値)。
+   */
+  it('🔴 項目数・字数が上限の中に収まっている', () => {
+    for (const n of NOTICES) {
+      expect(n.items.length, `${n.id}: 項目が多い`).toBeLessThanOrEqual(NOTICE_ITEMS_MAX);
+      expect(n.items.length, `${n.id}: 項目が 0 件`).toBeGreaterThan(0);
+      expect(n.title.length, `${n.id}: 題名が空`).toBeGreaterThan(0);
+      for (const line of n.items) {
+        expect(line.length, `${n.id}: 長すぎる項目「${line}」`).toBeLessThanOrEqual(
+          NOTICE_ITEM_CHARS_MAX,
+        );
+        // ⚠ 下限も置く ── 空の行が user の画面に出るのを止める
+        expect(line.length, `${n.id}: 短すぎる項目「${line}」`).toBeGreaterThanOrEqual(
+          NOTICE_ITEM_CHARS_MIN,
+        );
+      }
+    }
+  });
+
+  /**
+   * ⚠ **掲示した約束は取り消せない**(PKC2 は掲示済みの挙動が後の既定変更を縛った)。
+   * 「これから〜します」ではなく「〜できるようになりました」だけを書く。
+   */
+  it('⚠ これからの約束を書いていない', () => {
+    for (const n of NOTICES) {
+      for (const line of n.items) {
+        expect(line, `未来の約束が書かれている: ${line}`).not.toMatch(
+          /(予定です|する予定|していきます|対応します|近日)/,
+        );
+      }
+    }
+  });
+
+  /** ⚠ 登記表に残す件数の上限(読まれない物を配り続けない)。 */
+  it('⚠ 登記表が上限を超えていない', () => {
+    expect(NOTICES.length).toBeLessThanOrEqual(NOTICE_KEEP_MAX);
   });
 });
 
