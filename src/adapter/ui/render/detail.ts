@@ -73,6 +73,15 @@ export function liveEditorEnabled(): boolean {
   return appFlags.isOn(FLAG_LIVE_EDITOR.name);
 }
 
+/**
+ * 🔴 **同じ理由は同じ言葉で断る**(4 巡目レビュー R3)。3 か所(Ctrl+A / Ctrl+Z /
+ * ボタンの title)が同じ文言を持っており、等値 pin は 2 か所しか突き合わせていなかった
+ * ── 3 か所目だけ言い回しを変える変異が生き延びる。**実体を 1 つにして構造で守る。**
+ * ⚠ 押した場所が違っても理由が同じなら言い方も同じにする(言い換えると user は
+ *   別のものを探す)。
+ */
+const ALREADY_WHOLE_NOTE = 'すでに原文全体を編集しています';
+
 export class DetailRenderer {
   private readonly region: HTMLElement;
   private readonly assets: AssetLender | null;
@@ -934,7 +943,7 @@ export class DetailRenderer {
          * 同じ理由なら同じ言い方 ── 言い換えると user は別のものを探す)。
          */
         if (fellBack) {
-          note.textContent = 'すでに原文全体を編集しています';
+          note.textContent = ALREADY_WHOLE_NOTE;
           return;
         }
         if (!swap.activateAll()) note.textContent = 'この本文は全文編集に開けません';
@@ -954,7 +963,7 @@ export class DetailRenderer {
        *   1 つの入力欄なので、それで筋が通る。
        */
       if (fellBack) {
-        note.textContent = 'すでに原文全体を編集しています';
+        note.textContent = ALREADY_WHOLE_NOTE;
         return;
       }
       const moved = forward ? redo(journal, body) : undo(journal, body);
@@ -985,7 +994,7 @@ export class DetailRenderer {
       pane.append(ta);
       // 退避先は**すでに原文全体**の編集 ── 押せない理由ごと可視にする
       editAll.disabled = true;
-      editAll.title = 'すでに原文全体を編集しています';
+      editAll.title = ALREADY_WHOLE_NOTE;
     };
 
     const follow = this.markdown.follower<RenderedWithRanges>(

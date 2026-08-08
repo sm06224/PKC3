@@ -113,7 +113,11 @@
       "input": "- [ ] 未了\n- [x] 済み[^a]\n\n[^a]: 脚注本文\n",
       "options": {},
       "html": "<ul>\n<li class=\"pkc-task-item\"><input type=\"checkbox\" class=\"pkc-task-checkbox\" data-pkc-task-index=\"0\" disabled> 未了</li>\n<li class=\"pkc-task-item\"><input type=\"checkbox\" class=\"pkc-task-checkbox\" data-pkc-task-index=\"1\" disabled checked> 済み<sup class=\"footnote-ref\"><a href=\"#fn1\" id=\"fnref1\">[1]</a></sup></li>\n</ul>\n<hr class=\"footnotes-sep\">\n<section class=\"footnotes\">\n<ol class=\"footnotes-list\">\n<li id=\"fn1\" class=\"footnote-item\"><p>脚注本文 <a href=\"#fnref1\" class=\"footnote-backref\">↩︎</a></p>\n</li>\n</ol>\n</section>\n",
-      "hasSyntax": true
+      "hasSyntax": true,
+      "pkc3Diverges": {
+        "since": "2026-08-08",
+        "why": "タスクのチェック欄に `disabled` を足した(P8 段⑳)。PKC2 は押せる形で出していたが、**押しても本文が 1 文字も変わらない** ── 移動 / 追記 / 再読込で全部外れる「チェックしたのに消えた」だった。押せないものは押せない形にする。⚠ PKC2 のコメント(markdown-render.ts:1343)は「disabled checkbox」と書いているが、実装(:1377)は出していない ── コメントの側が嘘だった。"
+      }
     },
     {
       "name": "snippet-csv-fence",
@@ -145,7 +149,11 @@
       "input": "前\n\n+++\n\n_3\n\n後\n",
       "options": {},
       "html": "<p>前</p>\n<hr class=\"pkc-section-break\" data-pkc-role=\"auto\">\n<div class=\"pkc-blank-line\" style=\"--pkc-blank-count: 3\" data-pkc-blank-count=\"3\" aria-hidden=\"true\"></div>\n<p>後</p>\n",
-      "hasSyntax": true
+      "hasSyntax": true,
+      "pkc3Diverges": {
+        "since": "2026-08-08",
+        "why": "空行マーカー(`_N`)に `style=\"--pkc-blank-count: N\"` を足した(2026-08-05)。CSS の規則は `height: calc(1.45em * var(--pkc-blank-count, 1))` で**この変数**を読むのに、PKC2 の `_N` 経路(markdown-render.ts:3824)は data 属性しか書いておらず、**`_3` と `_1` が同じ高さ**だった。⚠ PKC2 でも寛容記法 `:spacing:` 経路(:3710)は style を出しており、同じ file の中で 2 経路が食い違っていた。"
+      }
     },
     {
       "name": "snippet-section-callout",

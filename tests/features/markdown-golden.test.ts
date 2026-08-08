@@ -46,10 +46,12 @@ import { parseFrontmatter, extractVars } from '../../src/features/markdown/front
  *      `snippet-align-indent` の 3 件(差は属性値だけ)。
  *
  * 🔴 **golden は「PKC2 と同じ」を守る道具であって、「正しい」を守る道具ではない。**
- * PKC2 のバグはそのまま期待値になる ── 実際、csv fence のセルに脚注が漏れる件
- * (`docs/development/user-reports-2026-08-05.md` §2-1)は**漏れた HTML が golden**に
- * なっており、直すとここが落ちる。落ちたら「壊した」ではなく
+ * PKC2 のバグはそのまま期待値になる ── 落ちたら「壊した」ではなく
  * **「PKC2 と違えた」**を疑い、上の一覧に足してから golden を更新すること。
+ * ⚠ 実例(**既に解決済み** ── 現在形で読まないこと): csv fence のセルに脚注が漏れる件
+ * (`docs/development/user-reports-2026-08-05.md` §2-1)は**漏れた HTML が golden**に
+ * なっていたが、2026-08-06 に直して golden も更新し、`full-pkc-fixture` の
+ * `pkc3Diverges.why` に記録してある。
  */
 interface GoldenCase {
   name: string;
@@ -151,7 +153,7 @@ describe('PKC-Markdown golden parity vs PKC2 (25 cases)', () => {
    * 🔑 この test が守っているのは件数ではなく「**理由なしに golden を採り直せない**」こと ──
    * 実際、私は理由を書いて採り直したが、その理由が誤りだった。件数だけでは止められない。
    */
-  it('🔴 PKC2 と分岐した case は理由つきで 7 件だけ', () => {
+  it('🔴 PKC2 と分岐した case は理由つきで 9 件だけ', () => {
     const diverged = goldens.cases.filter((c) => c.pkc3Diverges);
     expect(diverged.map((c) => c.name).sort()).toEqual([
       'full-pkc-fixture',
@@ -164,8 +166,10 @@ describe('PKC-Markdown golden parity vs PKC2 (25 cases)', () => {
       'reform-stress-sample',
       'simple-notation-sample',
       'snippet-align-indent',
+      'snippet-break-and-blank',
       'snippet-figure-ref',
       'snippet-html-fence',
+      'snippet-task-and-footnote',
     ]);
     for (const c of diverged) {
       expect(c.pkc3Diverges!.since, `${c.name} に分岐した日付が無い`).toMatch(/^\d{4}-\d{2}-\d{2}$/);

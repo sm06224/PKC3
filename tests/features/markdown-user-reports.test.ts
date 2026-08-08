@@ -538,6 +538,17 @@ describe('行頭アライン: 矢印の向きは意味を持たない(記法の�
     // logical を書いたときは logical のまま(物理へも潰さない)
     expect(alignOfNext(':align:{position=end}\n\n本文\n')).toBe('end');
     expect(alignOfNext(':align:{position=start}\n\n本文\n')).toBe('start');
+    /**
+     * 🔴 **ここも説明的な形である**(4 巡目レビュー R5)。`:align:{position=…}` は
+     * 値を**言葉で書く**形なので、象形的な形の専用値 `opposite` を受けてはいけない。
+     * ⚠ 受理集合は `FORMAL_ALIGNS` へ寄せたが、**「隣に足す」変異はそれだけでは
+     *   止まらない**(`|| rawPos === 'opposite'` を書けば通る ── 実際に生き延びた)。
+     *   構造(1 か所に寄せる)と assert の**両方**が要る。
+     */
+    expect(
+      alignOfNext(':align:{position=opposite}\n\n本文\n'),
+      '説明的な形(寛容記法)から opposite が書けてしまう(境界が消えた)',
+    ).toBeNull();
 
     // inline 経路(chip)も同じ ── 説明文が「end → right」と教えていた
     const chip = renderMarkdown('本文 :align:{position=end} の続き\n', {
@@ -580,7 +591,7 @@ describe('行頭アライン: 矢印の向きは意味を持たない(記法の�
    * `align` の宣言)。
    * ⚠ この 2 つが同じ文書で共存できることを見る ── `end` の物理的な着地点は
    * ここで反転する(だから行頭マーカーが物理方向を持ってはいけない)。
-   * ⚠ 裁定 2026-08-08(Issue #103)の後も**属性は end のまま** ── 反転は CSS
+   * ⚠ 裁定 2026-08-08(Issue #103)の後、属性は **`opposite`** ── 反転は CSS
    * (app.css の入れ替え規則)の仕事で、renderer が宣言を読んで属性を変えたら
    * goldens が動く(= 方式が壊れている)。ここはそれを止める pin である。
    */

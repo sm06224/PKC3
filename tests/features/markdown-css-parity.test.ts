@@ -82,7 +82,7 @@ const CORPUS: ReadonlyArray<readonly [string, string]> = [
   //    🔴 この誤った註記を根拠に実装を `start` へ変えてしまい、user の指摘で revert した ──
   //    **corpus の註記は実装より弱い出典**である(catalog が正本)。
   //    ⚠ 裁定 2026-08-08(Issue #103)で意味は「グローバルの寄せの反対側」に確定 ──
-  //    属性は 4 形とも end のまま(入れ替えは CSS。下の入れ替え規則 test を参照)。
+  //    属性は 4 形とも opposite(説明的な形の end とは別値。入れ替えは CSS)。
   ['行頭アライン', '||中央\n\n|>end\n\n<|end(typo 寛容)\n'],
   ['字下げと空行', '__ 段落の字下げ\n\n_\n\n_3\n'],
   ['callout(8 種)',

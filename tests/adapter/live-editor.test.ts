@@ -179,6 +179,17 @@ describe('ライブエディタ(1 面)の配線', () => {
       'right',
     );
     expect(pane.getAttribute('dir'), '書字方向がライブ面に届いていない').toBe('rtl');
+    /**
+     * 🔴 **class も見る**(4 巡目レビュー R2)。入れ替え規則は
+     * `.pkc-md-rendered[data-pkc-doc-align=…] [data-pkc-align=…]` で、
+     * **class と属性が揃って初めて当たる**。属性だけ見ていると
+     * `pane.className = ''` の変異が生き延び、ライブ編集中は本文の CSS が
+     * **丸ごと当たらない**(見出し・表・コード・寄せの全部)のに緑のままだった。
+     */
+    expect(
+      pane.classList.contains('pkc-md-rendered'),
+      'ライブ面が markdown の CSS の外に居る(属性だけ届いても寄らない)',
+    ).toBe(true);
   });
 
   it('お知らせの行は常に同じ場所に在る(出ても配置が動かない)', async () => {
@@ -392,10 +403,30 @@ describe('ライブエディタ(1 面)の配線', () => {
    */
   it('🔴 退避後は Ctrl+Z も塞がれ、本文(保存される値)が動かない', async () => {
     setLive(true);
-    const r = rig([':::figure{id="あ い"}', '', '本文', '', ':::', '', 'あと', ''].join('\n'));
+    /**
+     * ⚠ **fixture は「行編集を 1 回確定してから退避する」形でなければならない**
+     * (4 巡目レビュー R4)。最初から分割できない本文を渡すと **journal がゼロ件**で、
+     * ガードを外しても `undo` が null を返すだけ ── 下の ②③ が**ガードの有無に
+     * 関わらず通る**(実際、`journal 非空のときだけガードを外す`変異が素通りした)。
+     * 「fixture のゼロ件の次元は測っていない次元」そのものだった。
+     */
+    const r = rig(['普通の段落。', '', '二つめの段落。'].join('\n'));
     await settle();
+    const live = r.root.querySelector<HTMLElement>('[data-pkc-region="editor-live"]')!;
+    const p0 = [...live.querySelectorAll('p')].find((e) => e.textContent === '普通の段落。')!;
+    p0.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    const row = live.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')!;
+    // 確定すると journal に 1 件入り、その本文は分割できないので退避へ落ちる
+    row.value = [':::figure{id="あ い"}', '', '中身', '', ':::'].join('\n');
+    row.blur();
+    await settle();
+
     const pane = r.root.querySelector<HTMLElement>('[data-pkc-region="editor-live"]')!;
     const ta = pane.querySelector<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')!;
+    expect(ta, '前提: 退避していない(fixture が効いていない)').not.toBeNull();
+    // 🔑 **非ゼロ次元を test 自身に assert させる** ── 確定が 1 回起きた = journal が非空
+    expect(r.bodies.length, '前提: 確定が起きていない(journal がゼロ件で空振りする)')
+      .toBeGreaterThan(0);
     const shown = ta.value;
     const bodiesBefore = r.bodies.length;
 
@@ -404,7 +435,10 @@ describe('ライブエディタ(1 面)の配線', () => {
     );
 
     const note = r.root.querySelector<HTMLElement>('[data-pkc-field="row-note"]')!;
+    const editAllBtn = r.root.querySelector<HTMLButtonElement>('[data-pkc-field="edit-all"]')!;
     expect(note.textContent, '退避中の Ctrl+Z を断っていない').toContain('すでに原文全体');
+    // 3 か所目も等値で ── 押した場所が違っても理由が同じなら言い方も同じ
+    expect(note.textContent, 'ボタンと別の言い回しになっている').toBe(editAllBtn.title);
     expect(ta.value, '画面の入力欄が動いた').toBe(shown);
     expect(
       r.bodies.length,
