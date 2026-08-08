@@ -6,7 +6,8 @@
  *
  * - **設定とは別の面**であること(裁定 Q3)── 同じ画面の節に戻ったら落ちる
  * - **畳む条件が画面に出る**こと ── flag の約束は「いつ消えるか隠さない」
- * - **URL で上書き中は触らせない**(押しても変わらない = 無言の操作拒否を作らない)
+ * - **URL で上書き中でも押せる**(user 指摘 2026-08-08「フラグ適用順と再起動を
+ *   促す順序があるんだから、本質的にロック不要」)── 押したら保存して読み込み直す
  * - 🔴 **器を捨てない** ── この repo が 3 度踏んだ罠(情報ペイン / ファイラ /
  *   本文の面)。押される寸前のボタンが別 node になると binder が黙って捨てる
  */
@@ -80,17 +81,41 @@ describe('フラグの面', () => {
   });
 
   /**
-   * 🔴 **URL で上書き中は触らせない。**
-   * ⚠ 触れてしまうと「押したのに変わらない」= 無言の操作拒否になる。
-   *   押せない理由は `title` に出す。
+   * 🔴 **URL で上書き中でもロックしない。**
+   * ⚠ 上書き中であることは `title` で**知らせる**が、それは
+   *   「押せない理由」ではなく「いま何が優先されているか」の説明である。
    */
-  it('🔴 URL で上書き中の flag は押せず、理由が出る', () => {
+  it('🔴 URL で上書き中でも押せる(ロックしない)', () => {
+    /**
+     * user 指摘 2026-08-08:「フラグ適用順と再起動を促す順序があるんだから、
+     * 本質的にロック不要」── 上書き中でも保存し、効かせるために読み込み直す。
+     * ⚠ ロックすると、アプリが自分で付けた URL を理由に操作を断る袋小路になる。
+     */
     const r = new FlagsRenderer(region, new FlagStore(`?pkc-flag=${A.name}`));
     r.render();
     const box = region.querySelector<HTMLInputElement>(`[data-pkc-flag="${A.name}"]`)!;
     expect(box.checked, 'URL の値が映っていない').toBe(true);
-    expect(box.disabled, 'URL 上書き中なのに押せる').toBe(true);
-    expect(box.title, '押せない理由が書かれていない').not.toBe('');
+    expect(box.disabled, 'ロックしている(不要なはず)').toBe(false);
+    expect(box.title, '上書き中であることを知らせていない').not.toBe('');
+  });
+
+  /**
+   * 🔴 **上書き中に切り替えたら、効かせるために読み込み直す。**
+   * ⚠ 保存だけして黙っていると「押したのに変わらない」= 無言の操作拒否。
+   */
+  it('🔴 URL で上書き中に切り替えると、保存値で読み込み直す', () => {
+    const seen: string[] = [];
+    const r = new FlagsRenderer(
+      region,
+      new FlagStore(`?pkc-flag=${A.name}`),
+      (u) => seen.push(u),
+      () => `https://e/app/?pkc-flag=${A.name}`,
+    );
+    r.render();
+    r.setFlag(A.name, false); // 手で打たれた ON を、保存で OFF にする
+    expect(seen, '読み込み直していない(押しても効かない)').toHaveLength(1);
+    // ⚠ 再起動の URL は保存値から組み直す ── 手で打った指定はここで落ちる
+    expect(seen[0], '手で打った指定が残っている').not.toContain('pkc-flag');
   });
 
   /**
@@ -258,13 +283,13 @@ describe('🔴 起動前フラグの往復(袋小路を作らない)', () => {
    * ⚠ **手で打った上書きは、今までどおり断る**(止めすぎていない)。
    * 保存値と食い違う URL = 外からの一時上書きである。
    */
-  it('⚠ 手で打った上書き(保存値と食い違う)は今までどおり押せない', () => {
+  it('⚠ 手で打った上書きは「上書き中」と分かる(ただしロックはしない)', () => {
     const s = new FlagStore(`?pkc-flag=${BOOT.name}`); // 保存は空 = 既定 false と食い違う
     expect(s.isFromUrl(BOOT.name), '手の上書きを見逃している').toBe(true);
     const r = new FlagsRenderer(region, s, () => {}, () => 'https://e/');
     r.render();
-    expect(
-      region.querySelector<HTMLInputElement>(`[data-pkc-flag="${BOOT.name}"]`)!.disabled,
-    ).toBe(true);
+    const box = region.querySelector<HTMLInputElement>(`[data-pkc-flag="${BOOT.name}"]`)!;
+    expect(box.disabled, 'ロックしている(不要なはず)').toBe(false);
+    expect(box.title, '上書き中であることを知らせていない').not.toBe('');
   });
 });

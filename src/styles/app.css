@@ -2059,9 +2059,10 @@ select:focus-visible {
 }
 
 /* ── 設定の画面 ─────────────────────────────────── */
-/* ⚠ フラグの面(P11)も**同じ体裁**にする ── 場所が違うだけで、
+/* ⚠ フラグ / ヘルプの面(P11)も**同じ体裁**にする ── 場所が違うだけで、
    読み方は同じであってほしい(業務画面の作法「同じものは同じ形」)。 */
 [data-pkc-region='settings-body'],
+[data-pkc-region='help-body'],
 [data-pkc-region='flags-body'] {
   padding: var(--s4);
 }
@@ -2093,9 +2094,35 @@ select:focus-visible {
 [data-pkc-field='flag-fold'] {
   margin: var(--s1) 0 0;
 }
-[data-pkc-field='flag-list'] input:disabled + * ,
-[data-pkc-field='flag-list'] input:disabled {
-  opacity: 0.55;
+/* ⚠ **`input:disabled` の規則は消した**(2026-08-08)── ロックを撤去した
+   (user 指摘「フラグ適用順と再起動を促す順序があるんだから、本質的にロック不要」)
+   ので、当たる要素が 1 つも無い**死んだ規則**になっていた。 */
+
+/* ── ヘルプの面(P11)──────────────────────────────
+ *
+ * ⚠ **読み物**なので、設定・フラグより 1 段広い版面を許す ── ただし
+ * 「同じものは同じ場所」を崩さないよう、器の padding は共有している(上)。
+ * ⚠ マニュアルは本文と**同じ体裁**で出す(`.pkc-md-rendered` を付けてある)。
+ */
+[data-pkc-region='help-notices'] section {
+  margin: 0 0 var(--s4);
+}
+[data-pkc-region='help-notices'] h4 {
+  margin: 0 0 var(--s2);
+  font-size: 13px;
+}
+[data-pkc-region='help-notices'] ul {
+  margin: 0;
+  padding-left: var(--s5);
+}
+/* 🔴 **マニュアルは縦に長い** ── 器ごとスクロールさせると面の頭
+   (版・お知らせ)まで流れるので、ここだけを箱にする。 */
+[data-pkc-region='help-manual'] {
+  max-height: 60vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--s4);
 }
 
 /* ── 印刷(2026-08-07)────────────────────────────────

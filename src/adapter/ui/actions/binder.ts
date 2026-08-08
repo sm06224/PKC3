@@ -39,6 +39,7 @@ const VIEW_MODES: ReadonlySet<string> = new Set([
   'launcher',
   'settings',
   'flags',
+  'help',
 ]);
 
 /** 既定 title の種別ラベル(連番は同 archetype の現在数 + 1)。 */

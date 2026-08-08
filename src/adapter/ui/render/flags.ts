@@ -162,9 +162,19 @@ export class FlagsRenderer {
        * 🔴 **URL で上書き中は触らせない。** 触れると「押したのに変わらない」に
        * なる ── 無言の操作拒否を作らないので、理由を `title` に出す。
        */
+      /**
+       * 🔴 **ロックしない**(user 指摘 2026-08-08)。
+       *
+       * > 「**フラグ適用順と再起動を促す順序があるんだから、本質的にロック不要**」
+       *
+       * 適用順(URL > 保存 > 既定)と再起動の仕組みが在る以上、URL で上書き中でも
+       * **保存して、効かせるために読み込み直せばよい**。押せなくする理由が無い。
+       * ⚠ 直す前は `disabled` にしていたので、起動前フラグを ON にすると
+       *   **アプリが自分で付けた URL を理由に、二度と OFF にできない**袋小路になっていた。
+       * ⚠ 上書き中であることは**知らせる**(押せない理由ではなく、状態の説明)。
+       */
       const url = this.store.isFromUrl(name);
-      input.disabled = url;
-      input.title = url ? 'いまは URL(?pkc-flag)で上書きされています' : '';
+      input.title = url ? 'いまは URL の指定が優先されています(切り替えると読み込み直します)' : '';
     }
     if (this.summary) {
       const n = registeredFlags().length;
@@ -183,9 +193,17 @@ export class FlagsRenderer {
    * 「押したのに何も起きない」に見える ── しかも次の起動で急に挙動が変わる。
    */
   setFlag(name: string, on: boolean): void {
+    const overridden = this.store.isFromUrl(name);
     this.store.set(name, on);
     this.sync();
-    if (findFlag(name)?.needsRestart === true) this.restart();
+    /**
+     * 🔴 **切り替えが「いま効かない」ときだけ読み込み直す。**
+     * ① 起動前に読まれる flag ② URL が優先されていて保存値が隠れている flag。
+     * ⚠ ②を落とすと「押したのに変わらない」= 無言の操作拒否になる ──
+     *   ロックの代わりに**効かせる**のがこの設計の要点(user 指摘 2026-08-08)。
+     * ⚠ 再起動の URL は**保存値から**組み直されるので、手で打った指定はそこで落ちる。
+     */
+    if (findFlag(name)?.needsRestart === true || overridden) this.restart();
   }
 
   /** ⚠ test は差し替えられるよう、再読込は 1 か所に閉じる。 */

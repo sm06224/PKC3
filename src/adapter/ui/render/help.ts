@@ -1,0 +1,154 @@
+/**
+ * ヘルプの面(P11 段④。user 指示 2026-08-07)。
+ *
+ * > 「**お知らせ掲載内容は過去のお知らせとして、最大 10 件を最新のリリース、
+ * > 開発版の PKC3 のヘルプ画面から参照できるようにしてください /
+ * > ヘルプ画面にはマニュアル導線も含めてください**」
+ *
+ * ## 作りは「設定 / フラグ」と同型
+ *
+ * ⚠ **かぶせる窓にしない。** この repo にモーダルは 1 件も無い ── 面はすべて
+ * 「同じものが常に同じ場所にある」作法(`settings.ts:7-11`)。ここもそれに従う。
+ * ⚠ 器は **1 度だけ組む**。面の切替は `hidden` の付け外しなので、器を捨てると
+ * 押される寸前のボタンが消える(2026-08-07 に本文の面で実際に踏んだ)。
+ *
+ * ## マニュアルは**同梱**する(裁定 Q4)
+ *
+ * `docs/manual.md` を `?raw` で焼き込む。⚠ 外部リンクにすると
+ * **オフラインで読めない**(マニュアル自身が「オフラインで使う」と書いている)し、
+ * アプリ初の外向きリンクにもなる。同梱なら**版とマニュアルが必ず一致**し、
+ * SW の precache に自動で載る(entry chunk の一部になるため)。
+ *
+ * ⚠ **重い処理はワーカーへ**(user 指示 2026-08-03 不可侵)── マニュアル全文の
+ * 描画は共有の `MarkdownClient` に出す。1 度描いたら以後は描き直さない。
+ *
+ * ## 🔴 マニュアル側に文書内アンカーを持たせない
+ *
+ * 本文の見出しは `id=<slug>` を焼く。面は `hidden` で**同一 document に常駐**するので、
+ * `#slug` は**先に作られた本文面の見出し**に当たる。マニュアルに `[…](#…)` や
+ * `:::toc` を書くと、そこから壊れる ── `tests/adapter/help-pane.test.ts` が
+ * 「マニュアルに文書内アンカーが 0 件」を機械で守る。
+ */
+import { APP_ID, APP_VERSION, BUILD_KIND } from '@runtime/release-meta';
+import { NOTICES, noticeDate, recentNotices } from '@features/notice/notice-log';
+import manualText from '../../../../docs/manual.md?raw';
+
+/** 焼き込んだマニュアルの原文(test から掴めるよう named export)。 */
+export const MANUAL_TEXT: string = manualText;
+
+/** 版の表示。⚠ **1 か所で組む** ── 手組みの template を面ごとに増やさない。 */
+export function versionText(): string {
+  const kind = BUILD_KIND === 'product' ? '' : BUILD_KIND === 'stage' ? '(検証版)' : '(開発版)';
+  return `${APP_ID} v${APP_VERSION}${kind}`;
+}
+
+/** markdown を描く口(worker 経路。⚠ 失敗したら素の原文を出す)。 */
+export interface HelpMarkdownPort {
+  render(text: string): Promise<string>;
+}
+
+export class HelpRenderer {
+  private built = false;
+  private manualHost: HTMLElement | null = null;
+  private manualDrawn = false;
+
+  constructor(
+    private readonly region: HTMLElement,
+    /** ⚠ アプリ全体で 1 個の `MarkdownClient` を渡す(面ごとに作らない)。 */
+    private readonly markdown: HelpMarkdownPort | null = null,
+  ) {}
+
+  render(): void {
+    if (this.built) return;
+    this.built = true;
+    this.region.textContent = '';
+
+    const head = document.createElement('div');
+    head.setAttribute('data-pkc-field', 'pane-title');
+    head.textContent = 'ヘルプ';
+    this.region.append(head);
+
+    const body = document.createElement('div');
+    body.setAttribute('data-pkc-region', 'help-body');
+    this.region.append(body);
+
+    // ── ① この版 ────────────────────────────────────────
+    /**
+     * 🔴 **設定から移してきた**(P11)。設定は「あなたが選ぶもの」の場所で、
+     * 版は選べない ── 困ったときに見る場所がここである。
+     * ⚠ **2 か所に出さない**(`settings.ts` から消した)── 同じ値を 2 経路で
+     *   描くと、片方だけ直して食い違う。`docs-parity` が両方を見る。
+     * ⚠ 版の種別(検証版 / 開発版)は**文字で出す** ── 設定は hover の `title`
+     *   にしか入れておらず、タッチ端末・キーボードだけの user には届かなかった。
+     */
+    const ver = document.createElement('p');
+    ver.setAttribute('data-pkc-field', 'help-version');
+    ver.textContent = versionText();
+    body.append(ver);
+
+    // ── ② 過去のお知らせ ────────────────────────────────
+    const nh = document.createElement('h3');
+    nh.textContent = 'これまでのお知らせ';
+    body.append(nh);
+
+    const list = document.createElement('div');
+    list.setAttribute('data-pkc-region', 'help-notices');
+    // ⚠ **件数を切るのは `recentNotices` だけ**(面ごとに slice を書かない)
+    for (const n of recentNotices(NOTICES)) {
+      const item = document.createElement('section');
+      /**
+       * ⚠ **`data-pkc-notice` は使わない** ── 取込の注意(`notices.ts`)が
+       * 既にその名前で、同じ document に居る。名前がかぶると、片方を数える
+       * 検査がもう片方まで拾う(CLAUDE.md「id らしく見える名前は id として扱われる」)。
+       */
+      item.setAttribute('data-pkc-help-notice', n.id);
+      const t = document.createElement('h4');
+      t.setAttribute('data-pkc-field', 'notice-title');
+      // ⚠ 日付は id から引く(field を二重に持たない)
+      t.textContent = `${noticeDate(n.id)} ${n.title}`;
+      const ul = document.createElement('ul');
+      for (const line of n.items) {
+        const li = document.createElement('li');
+        // ⚠ **素のテキスト**として出す(記法は書かない決まり。test が守る)
+        li.textContent = line;
+        ul.append(li);
+      }
+      item.append(t, ul);
+      list.append(item);
+    }
+    body.append(list);
+
+    // ── ③ マニュアル ────────────────────────────────────
+    const mh = document.createElement('h3');
+    mh.textContent = 'マニュアル';
+    body.append(mh);
+
+    this.manualHost = document.createElement('div');
+    this.manualHost.setAttribute('data-pkc-region', 'help-manual');
+    this.manualHost.className = 'pkc-md-rendered';
+    // ⚠ 描く前も**器は置く**(後から差し込むので、器が無いと入れ先が消える)
+    this.manualHost.textContent = 'マニュアルを読み込んでいます…';
+    body.append(this.manualHost);
+
+    void this.drawManual();
+  }
+
+  /**
+   * マニュアルを 1 度だけ描く。
+   * ⚠ ワーカーが使えないときは**素の原文**を出す ── 白紙にしない。
+   */
+  private async drawManual(): Promise<void> {
+    if (this.manualDrawn || !this.manualHost) return;
+    this.manualDrawn = true;
+    const host = this.manualHost;
+    if (!this.markdown) {
+      host.textContent = MANUAL_TEXT;
+      return;
+    }
+    try {
+      host.innerHTML = await this.markdown.render(MANUAL_TEXT);
+    } catch {
+      host.textContent = MANUAL_TEXT;
+    }
+  }
+}

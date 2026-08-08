@@ -90,7 +90,7 @@ const EXPECTED_LABELS = {
   'pick-create-kind': ['ノート', 'ログ', '表', 'フォルダ'],
   // ⚠ **アプリ全体**のものだけ(P8 段⑤。P10 で上の帯は撤去され、左の列の下へ)
   //    フラグは P11 で追加 ── 設定(user 開放)とは**別の面**にする(user 裁定 2026-08-07)
-  'set-view': ['設定', 'フラグ'],
+  'set-view': ['設定', 'フラグ', 'ヘルプ'],
   // 探し方は**左の列**が持つ
   'set-browse': ['一覧', 'フォルダ', 'アプリ'],
   'export-archive': ['バックアップ'],
@@ -368,11 +368,19 @@ describe('マニュアルと実装の突合', () => {
     }
   });
 
-  it('🔴 版の在り処がマニュアルと一致する', () => {
+  /**
+   * 🔴 **版は 1 か所にだけ在る**(P11 で設定 → ヘルプへ移した)。
+   * ⚠ 「ヘルプに在る」だけを見ると、**設定にも残ったまま**の二重表示を見逃す ──
+   *   マニュアルは 1 か所しか案内しないので、片方が黙って古くなる。
+   *   だから**在ることと、もう片方に無いこと**の両方を見る。
+   */
+  it('🔴 版の在り処がマニュアルと一致し、2 か所に出ていない', () => {
+    const help = readFileSync('src/adapter/ui/render/help.ts', 'utf-8');
+    expect(help, 'ヘルプ画面が版を出していない').toContain('help-version');
     const settings = readFileSync('src/adapter/ui/render/settings.ts', 'utf-8');
-    expect(settings, '設定画面が版を出していない').toContain('app-version');
+    expect(settings, '設定画面にも版が残っている(二重表示)').not.toContain('APP_VERSION');
     expect(MANUAL, 'マニュアルが版の在り処を案内していない').toMatch(
-      /\*\*バージョン\*\*は\s*\*\*設定\*\*/,
+      /\*\*バージョン\*\*は\s*\*\*ヘルプ\*\*/,
     );
   });
 

@@ -1,0 +1,101 @@
+/**
+ * 🔴 **お知らせの登記表**(P11 段⑤。user 指示 2026-08-07)。
+ *
+ * > 「**PKC3 にも PKC2 のようにお知らせポップアップをつけてください /
+ * > お知らせ掲載内容は過去のお知らせとして、最大 10 件を…ヘルプ画面から
+ * > 参照できるようにしてください**」
+ *
+ * ## PKC2 の失敗を繰り返さない(実測で確かめた 9 件のうち、ここに効く分)
+ *
+ * | PKC2 で起きたこと | ここでの対処 |
+ * |---|---|
+ * | 6 件あるのに**先頭 1 件しか読まれず**、残りを毎ビルド配っていた | **過去の一覧**を持ち、`recentNotices` が読む。読まれない entry を作らない |
+ * | `date` field を宣言して**一度も読まなかった** | **field を持たない**。日付は id から引く(`noticeDate`)── 二重表現にしない |
+ * | `textContent` で描くのに本文が `**強調**` で書かれ、**アスタリスクが見えていた** | **素のテキストと決める**。記法を書いたら test が落とす |
+ * | 1 entry 22 項目・1 項目 200 字超の壁ができた | **上限を数で持つ**(件数・項目数・字数)。散文の規律にしない |
+ * | 表示上限が複数箇所に散る | **切るのは `recentNotices` 1 か所だけ** |
+ *
+ * ⚠ **pure module**。browser API を使わない(既読は adapter 側が持つ)。
+ */
+
+/** お知らせ 1 件。⚠ **日付の field を持たない**(id が持っている)。 */
+export interface Notice {
+  /**
+   * `YYYY-MM-DD-slug`。⚠ **既読の鍵**であり、**並び順の鍵**でもある。
+   * 日付が前置きなので、文字列の降順がそのまま新しい順になる。
+   */
+  readonly id: string;
+  readonly title: string;
+  /** 本文。⚠ **素のテキスト**(markdown 記法を書かない ── 描画は textContent)。 */
+  readonly items: readonly string[];
+}
+
+/**
+ * 🔴 **ヘルプ画面に出す件数**(user 裁定 2026-08-07 Q1)。
+ * ⚠ **切るのはここ 1 か所**。面ごとに `slice` を書くと、帯とヘルプで件数が食い違う。
+ */
+export const NOTICE_SHOW_MAX = 10;
+
+/**
+ * 🔴 **登記表に残す件数の上限**(裁定 Q1)。
+ * ⚠ 表示上限の 2 倍。「原本は残す」と「読まれない物を配り続けない」の折り合いで、
+ *   これを超えたら**古い方から落とす**(PKC2 は落とす仕組みが無く 24KB を死蔵した)。
+ */
+export const NOTICE_KEEP_MAX = 20;
+
+/** 1 entry の項目数の上限(PKC2 は 22 項目の壁ができた)。 */
+export const NOTICE_ITEMS_MAX = 6;
+/** 1 項目の字数(下限も置く ── 空の行が user に出るのを止める)。 */
+export const NOTICE_ITEM_CHARS_MAX = 120;
+export const NOTICE_ITEM_CHARS_MIN = 4;
+
+/**
+ * 🔴 **新しい順に並べて、上限まで切る**。
+ * ⚠ **ここだけが切る**(上の `NOTICE_SHOW_MAX` の注記)。
+ */
+export function recentNotices(
+  all: readonly Notice[],
+  limit = NOTICE_SHOW_MAX,
+): readonly Notice[] {
+  return [...all].sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0)).slice(0, limit);
+}
+
+/**
+ * まだ見ていないものを新しい順に返す。
+ * ⚠ 既読は **id の集合**で渡す ── 「最後に閉じた 1 件」と比べると、
+ *   旧ビルドへ戻ったときに**既読が巻き戻る**(PKC2 の F5)。
+ */
+export function unreadNotices(
+  all: readonly Notice[],
+  seen: readonly string[],
+): readonly Notice[] {
+  const seenSet = new Set(seen);
+  return recentNotices(all).filter((n) => !seenSet.has(n.id));
+}
+
+/** id の先頭から日付を取り出す(`YYYY-MM-DD-slug` → `YYYY-MM-DD`)。 */
+export function noticeDate(id: string): string {
+  return /^(\d{4}-\d{2}-\d{2})/.exec(id)?.[1] ?? '';
+}
+
+/**
+ * ── 登記表 ──────────────────────────────────────────────
+ *
+ * 🔴 **新しいものを先頭に足す。** 書式は `.claude/skills/notice-writing/SKILL.md`。
+ *
+ * ⚠ **書いた約束は取り消せない**(PKC2 は掲示済みの挙動が後の既定変更を縛った)。
+ *   「これから〜します」ではなく「〜できるようになりました」だけを書く。
+ * ⚠ **記法を書かない**(`**` / `` ` `` / `[]()`)── 素のテキストとして出る。
+ * ⚠ **事実だけ書く。** 起きていないことを書くと、user は同じ画面で嘘に気づく。
+ */
+export const NOTICES: readonly Notice[] = [
+  {
+    id: '2026-08-08-flags-and-help',
+    title: 'フラグ画面とヘルプ画面ができました',
+    items: [
+      '開発中の切り替えは、これまで URL に直接打ち込む必要がありました。左の列の「フラグ」から切り替えられます。',
+      '設定とは別の画面です。設定はあなたのもの、フラグはいつか畳まれるものです。',
+      '左の列の「ヘルプ」から、マニュアルと過去のお知らせが読めます。オフラインでも読めます。',
+    ],
+  },
+];

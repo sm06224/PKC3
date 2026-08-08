@@ -13,9 +13,19 @@ import { KanbanRenderer } from './kanban';
 import { CalendarRenderer } from './calendar';
 import { SettingsRenderer } from './settings';
 import { FlagsRenderer } from './flags';
+import { HelpRenderer } from './help';
 import type { MarkdownClient } from '@adapter/platform/render/markdown-client';
 
-type PaneView = 'detail' | 'kanban' | 'calendar' | 'settings' | 'flags';
+type PaneView = 'detail' | 'kanban' | 'calendar' | 'settings' | 'flags' | 'help';
+
+/**
+ * 🔴 **ノートを映さない面**(P11)。ここに足し忘れると、その面は
+ * `toPane` が `detail` へ落として**開いても本文が出る**(= 押しても何も起きない)。
+ * ⚠ `app-state.ts` の `ASIDE_PANES` とは**別の表** ── あちらは「一覧を押したら
+ * 中央をノートへ戻すか」、こちらは「中央に自分の器を持つか」。
+ * 両方に足す必要があり、`tests/adapter/help-pane.test.ts` が食い違いを落とす。
+ */
+const ASIDE: ReadonlySet<ViewMode> = new Set<ViewMode>(['settings', 'flags', 'help']);
 
 /**
  * 🔑 中央は**常に「開いているノート」**(P8 段⑤)。
@@ -23,9 +33,8 @@ type PaneView = 'detail' | 'kanban' | 'calendar' | 'settings' | 'flags';
  * 中央のビューではなくなったので、ここでは detail へ落ちる。
  */
 function toPane(view: ViewMode): PaneView {
-  return view === 'kanban' || view === 'calendar' || view === 'settings' || view === 'flags'
-    ? view
-    : 'detail';
+  if (view === 'kanban' || view === 'calendar') return view;
+  return ASIDE.has(view) ? (view as PaneView) : 'detail';
 }
 
 export class CenterRouter {
@@ -35,6 +44,7 @@ export class CenterRouter {
   private readonly calendar: CalendarRenderer;
   private readonly settings: SettingsRenderer;
   private readonly flags: FlagsRenderer;
+  private readonly help: HelpRenderer;
   private lastPane: PaneView = 'detail';
 
   constructor(
@@ -63,12 +73,18 @@ export class CenterRouter {
       calendar: pane('calendar'),
       settings: pane('settings'),
       flags: pane('flags'),
+      help: pane('help'),
     };
     this.detail = new DetailRenderer(this.panes.detail, assets, markdown, onBodyChange ?? null);
     this.kanban = new KanbanRenderer(this.panes.kanban);
     this.calendar = new CalendarRenderer(this.panes.calendar, now);
     this.settings = new SettingsRenderer(this.panes.settings);
     this.flags = new FlagsRenderer(this.panes.flags);
+    /**
+     * ⚠ **同じ `markdown` を渡す**(面ごとに作らない)── worker lease が
+     * その数だけ立ち、常駐が増える(P8 段⑲ と同じ判断)。
+     */
+    this.help = new HelpRenderer(this.panes.help, markdown ?? null);
   }
 
   render(state: AppState): void {
@@ -82,6 +98,7 @@ export class CenterRouter {
     else if (view === 'kanban') this.kanban.render(state);
     else if (view === 'settings') this.settings.render(state);
     else if (view === 'flags') this.flags.render();
+    else if (view === 'help') this.help.render();
     else this.calendar.render(state);
   }
 

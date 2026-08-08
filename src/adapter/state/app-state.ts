@@ -23,7 +23,8 @@ export type ViewMode =
   | 'filer'
   | 'launcher'
   | 'settings'
-  | 'flags';
+  | 'flags'
+  | 'help';
 
 /**
  * 🔴 **ノートを映していない中央の面**(P11)。一覧のノートを押したら中央を
@@ -33,7 +34,7 @@ export type ViewMode =
  * 取りこぼすので(P8 段⑲ で直した「開かない理由が画面のどこにも無い」の再演)、
  * **集合にして 1 か所へ寄せた**(CLAUDE.md「判定を増やさない」)。
  */
-const ASIDE_PANES: ReadonlySet<ViewMode> = new Set<ViewMode>(['settings', 'flags']);
+const ASIDE_PANES: ReadonlySet<ViewMode> = new Set<ViewMode>(['settings', 'flags', 'help']);
 
 export function isAsidePane(view: ViewMode): boolean {
   return ASIDE_PANES.has(view);
