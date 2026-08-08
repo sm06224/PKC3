@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, collectPageErrors } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors } from './helpers';
 
 /**
  * 🔴 **ヘルプの面とお知らせの帯**(P11 段④⑤。user 指示 2026-08-07)。
@@ -11,9 +11,10 @@ import { gotoApp, clickReal, collectPageErrors } from './helpers';
  *
  * - **押せる**こと(帯のボタンが実際に最前面に居て、クリックが届く)
  * - **マニュアルが本当に描かれる**こと(worker 経路 ── unit は口を差し替えている)
- * - 🔴 **面が同じ document に常駐しても、マニュアルの見出しが本文の見出しと
- *   id でぶつからない**こと ── これは `hidden` の面が生きている実ブラウザに
- *   しか無い性質である
+ * - 🔴 **マニュアルの見出しが、本文の `#リンク` を横取りしない**こと ──
+ *   面は `hidden` で同一 document に常駐するので **id はぶつかりうる**
+ *   (ぶつからないことは要求できない ── user が同じ見出しを書けば必ず起きる)。
+ *   守るのは「`#slug` が本文の面に当たる」ほうである
  */
 test('🔴 ヘルプの面が開き、マニュアルが描かれる', async ({ page }) => {
   const errors = collectPageErrors(page);
@@ -41,20 +42,55 @@ test('🔴 ヘルプの面が開き、マニュアルが描かれる', async ({ 
     timeout: 10_000,
   });
 
-  /**
-   * ④ 🔴 **id がぶつかっていない。** 面は `hidden` で同一 document に常駐するので、
-   * マニュアルの見出しが本文と同じ `id` を焼くと `#slug` が別の面へ当たる。
-   * ⚠ **document 全体**で数える(面の中だけ見ても、ぶつかりは観測できない)。
-   */
-  const dupes = await page.evaluate(() => {
-    const seen = new Map<string, number>();
-    for (const el of document.querySelectorAll('[id]')) {
-      const id = el.id;
-      seen.set(id, (seen.get(id) ?? 0) + 1);
-    }
-    return [...seen].filter(([, n]) => n > 1).map(([id]) => id);
+  expect(errors).toEqual([]);
+});
+
+/**
+ * 🔴 **マニュアルの見出しが、本文の `#リンク` を横取りしない**(2026-08-08 に
+ * 書き直した)。
+ *
+ * 面は `hidden` で**同一 document に常駐**するので、マニュアルの見出しが焼く
+ * `id` は本文の見出しと**必ずぶつかりうる**(実測: 本文に `## 4. 画面のならび`
+ * と書くと、`4-画面のならび` が detail と help の 2 面に出る)。
+ *
+ * ⚠ **1 巡目の検査は「重複が 0 件」を要求していたが、主張そのものが間違っていた** ──
+ * user が同じ見出しを書けば必ず重複するので、守れない条件である。しかも
+ * **ノートを 1 件も作っていなかった**ので、重複しうる材料がゼロ = 空振りでもあった
+ * (CLAUDE.md「fixture のゼロ件の次元は測っていない次元」)。
+ *
+ * 🔑 **実害の形で書く**: 重複してよい。守るべきは
+ *  ① `#slug` が**本文の面**に当たること(document 順で detail が先に在る)
+ *  ② マニュアル側が**文書内アンカーを 1 つも持たない**こと(unit が pin 済み)
+ * ── この 2 つが成り立つ限り、user の `#リンク` は自分の本文へ着く。
+ */
+test('🔴 マニュアルを開いても、本文の #リンクは本文へ着く', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await gotoApp(page);
+
+  // ⚠ **マニュアルと同じ見出し**を本文に書く(ぶつかる材料を作る)
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-body"]').fill('## 4. 画面のならび\n\n本文。\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  // マニュアルを描かせる(ここで初めて help 側の id が生える)
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="help"]');
+  await expect(
+    page.locator('[data-pkc-region="help-manual"] h2', { hasText: '画面のならび' }),
+  ).toBeVisible({ timeout: 10_000 });
+
+  const r = await page.evaluate(() => {
+    const paneOf = (el: Element | null): string | null =>
+      el?.closest('[data-pkc-view-pane]')?.getAttribute('data-pkc-view-pane') ?? null;
+    const id = '4-画面のならび';
+    const all = [...document.querySelectorAll(`[id="${CSS.escape(id)}"]`)];
+    return { count: all.length, winner: paneOf(document.getElementById(id)) };
   });
-  expect(dupes, 'id が重複している(面をまたいで #リンクが誤爆する)').toEqual([]);
+
+  // ⚠ 前提: **本当にぶつかっている**(ぶつかっていなければ何も見ていない)
+  expect(r.count, '同じ id が 2 面に出ていない(fixture の空振り)').toBeGreaterThan(1);
+  // 🔴 それでも `#slug` は**本文の面**に当たる
+  expect(r.winner, 'マニュアルの見出しが本文の #リンクを横取りした').toBe('detail');
 
   expect(errors).toEqual([]);
 });

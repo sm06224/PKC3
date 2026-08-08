@@ -103,11 +103,6 @@ export class CenterRouter {
   }
 
   /**
-   * 外部画像の答え / 設定が変わった ── 次の `render()` で本文を描き直す
-   * (2026-08-06)。⚠ 呼ぶだけでは描かれない ── 呼び側が `render(state)` を続ける
-   * (state は動いていないので dispatcher の通知は来ない)。
-   */
-  /**
    * フラグの切替(P11)。⚠ **renderer は dispatch しない**(層規約)ので、
    * 呼ぶのは配線側(`main.ts`)。state は動かないため通知も来ない ──
    * 面の中身は `FlagsRenderer` が自分で映し直す。
@@ -120,6 +115,14 @@ export class CenterRouter {
     this.flags.resetFlags();
   }
 
+  /**
+   * 外部画像の答え / 設定が変わった ── 次の `render()` で本文を描き直す
+   * (2026-08-06)。⚠ 呼ぶだけでは描かれない ── 呼び側が `render(state)` を続ける
+   * (state は動いていないので dispatcher の通知は来ない)。
+   *
+   * ⚠ この注記は P11 で `setFlag` の doc が間に挿し込まれ、**別のメソッドの
+   *   説明に見える位置**へ流れていた(2026-08-08 に戻した)。
+   */
   invalidateDetail(): void {
     this.detail.invalidate();
   }

@@ -237,6 +237,25 @@ describe('絵文字を UI に置かない', () => {
     expect(offenders, '絵文字が UI に戻っている ── icons.ts の図案を使う').toEqual([]);
   });
 
+  /**
+   * 🔴 **隣に並ぶ図案は、輪郭で見分けられる**(2026-08-08、レビュー指摘で追加)。
+   *
+   * `icons.ts` は「設定の『つまみ』と**形が似ないもの**にした ── 隣に並ぶので、
+   * 輪郭で区別が付く必要がある」と主張しているが、**それを守る test が無かった**
+   * ── `set-view:flags` を `settings` に書き換えても 1 件も落ちなかった。
+   *
+   * ⚠ **全体の distinctness では見ない** ── 表には既に意図的な重複が在る
+   * (`globe` / `arrow-out` 等は別の意味で同じ図案を使う)。⚠ ここが見るのは
+   * **同時に画面へ並ぶもの**、つまり左の列の下に 3 つ並ぶ `set-view:*` だけである。
+   */
+  it('🔴 左の列に並ぶ図案が、互いに違う', () => {
+    const keys = Object.keys(ACTION_ICONS).filter((k) => k.startsWith('set-view:'));
+    // ⚠ 空振り防止 ── 面が増減したらここも動く(3 つとは書かない)
+    expect(keys.length, '左の列の図案を拾えていない(空振り)').toBeGreaterThanOrEqual(3);
+    const used = keys.map((k) => ACTION_ICONS[k]);
+    expect(new Set(used).size, `隣り合う図案が同じ: ${used.join(' / ')}`).toBe(used.length);
+  });
+
   it('🔴 この検査が空振りしていない(合成した違反を捕まえる)', () => {
     // ⚠ 検査する側も変異試験の対象(CLAUDE.md)
     const emoji = /[\u{1F000}-\u{1FAFF}]/u;
