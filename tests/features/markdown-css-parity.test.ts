@@ -467,7 +467,7 @@ describe('寄せの規則が 2 つの面に在る(書き出しだけ古くなら
    * ② canonical 3 本「logical end 固定」)は、裁定で **① を正**とした ──
    * それまでの実装(②)は裁定と逆。実装は CSS だけ: `data-pkc-align="end"` 属性は
    * 動かさず(goldens 不変)、「宣言 align が flow start と逆の文書」でだけ
-   * `end` / `start` の見え方を入れ替える。
+   * **`end` だけ**の見え方を入れ替える(`start` は裁定の射程外 ── 2026-08-08 に取り消し)。
    * ⚠ この test は 2026-08-06〜08 の間、「① を勢いで足し直さない門」として
    *   規則が**無い**ことを pin していた ── 裁定が出たので反転した。
    * ⚠ `norm` は空白を全部落とすので、下の字面は**子孫結合子の空白が消えた形**である
@@ -478,13 +478,10 @@ describe('寄せの規則が 2 つの面に在る(書き出しだけ古くなら
   it('🔴 `align` による入れ替え規則が**両面に在る**(user 裁定 2026-08-08)', () => {
     for (const rule of [
       // 横書き: 宣言 align が flow start と逆(ltr で right / rtl で left)
-      '.pkc-md-rendered[data-pkc-doc-align=right]:not([dir=rtl])[data-pkc-align=end]{text-align:start}',
-      '.pkc-md-rendered[data-pkc-doc-align=right]:not([dir=rtl])[data-pkc-align=start]{text-align:end}',
-      '.pkc-md-rendered[data-pkc-doc-align=left][dir=rtl][data-pkc-align=end]{text-align:start}',
-      '.pkc-md-rendered[data-pkc-doc-align=left][dir=rtl][data-pkc-align=start]{text-align:end}',
+      '.pkc-md-rendered[data-pkc-doc-align=right]:not([dir=rtl])[data-pkc-align=opposite]{text-align:start}',
+      '.pkc-md-rendered[data-pkc-doc-align=left][dir=rtl][data-pkc-align=opposite]{text-align:start}',
       // 縦書き: flow start は常に上(direction: ltr 固定)── 逆は bottom だけ
-      '.pkc-md-rendered[data-pkc-writing=vertical][data-pkc-doc-align=bottom][data-pkc-align=end]{text-align:start}',
-      '.pkc-md-rendered[data-pkc-writing=vertical][data-pkc-doc-align=bottom][data-pkc-align=start]{text-align:end}',
+      '.pkc-md-rendered[data-pkc-writing=vertical][data-pkc-doc-align=bottom][data-pkc-align=opposite]{text-align:start}',
     ]) {
       expect(norm(CSS), `アプリ側に入れ替え規則が無い: ${rule}`).toContain(rule);
       expect(norm(VIEWER), `書き出し側に入れ替え規則が無い: ${rule}`).toContain(rule);

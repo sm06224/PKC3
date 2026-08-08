@@ -5,14 +5,14 @@
  *
  * 実装は renderer に触れない ── `data-pkc-align="end"` 属性はそのまま
  * (goldens 不変)で、app.css の入れ替え規則が「宣言 align が flow start と
- * 逆の文書」のときだけ `end` / `start` の見え方を反転する。つまり**この意味論の
+ * 逆の文書」のときだけ `end` の見え方を反転する。つまり**この意味論の
  * 実体は CSS の字面**であり、ここで等値 pin する(renderer 側の「属性は end の
  * まま」は `markdown-user-reports.test.ts`、両面 parity は
  * `markdown-css-parity.test.ts` が持つ)。
  *
- * ⚠ **存在だけでなく「全量」を等値で見る** ── 6 本のどれかが消えても、7 本目
- *   (例: center の入れ替え)が生えても落ちる。「center は入れ替えない
- *   (反対が定義できない)」という実装判断も、この等値がそのまま守る。
+ * ⚠ **存在だけでなく「全量」を等値で見る** ── 3 本のどれかが消えても、4 本目
+ *   (例: center や start の入れ替え)が生えても落ちる。「center は入れ替えない
+ *   (反対が定義できない)」「start は裁定の射程外」も、この等値がそのまま守る。
  * ⚠ 走査は `build/body-css.ts` の parser を使う ── 焼き込み(書き出し HTML)が
  *   規則を拾うのと**同じ読み方**で app.css を読む(判定を増やさない)。
  */
@@ -40,24 +40,40 @@ describe('行頭アラインの入れ替え規則(user 裁定 2026-08-08)', () =
     }
   }
 
-  it('🔴 入れ替え規則は 6 本ちょうどで、値まで正しい(等値)', () => {
+  it('🔴 入れ替え規則は 3 本ちょうどで、値まで正しい(等値)', () => {
     expect(Object.fromEntries(swaps)).toEqual({
       // 横書き ltr(dir 無印 / ltr)で align: right ── 宣言 align が flow start と逆
-      '.pkc-md-rendered[data-pkc-doc-align=right]:not([dir=rtl]) [data-pkc-align=end]':
+      '.pkc-md-rendered[data-pkc-doc-align=right]:not([dir=rtl]) [data-pkc-align=opposite]':
         'text-align:start',
-      '.pkc-md-rendered[data-pkc-doc-align=right]:not([dir=rtl]) [data-pkc-align=start]':
-        'text-align:end',
       // 横書き rtl で align: left(rtl の flow start は右)
-      '.pkc-md-rendered[data-pkc-doc-align=left][dir=rtl] [data-pkc-align=end]':
+      '.pkc-md-rendered[data-pkc-doc-align=left][dir=rtl] [data-pkc-align=opposite]':
         'text-align:start',
-      '.pkc-md-rendered[data-pkc-doc-align=left][dir=rtl] [data-pkc-align=start]':
-        'text-align:end',
       // 縦書きで align: bottom(縦書きは direction: ltr 固定 = flow start は常に上)
-      '.pkc-md-rendered[data-pkc-writing=vertical][data-pkc-doc-align=bottom] [data-pkc-align=end]':
+      '.pkc-md-rendered[data-pkc-writing=vertical][data-pkc-doc-align=bottom] [data-pkc-align=opposite]':
         'text-align:start',
-      '.pkc-md-rendered[data-pkc-writing=vertical][data-pkc-doc-align=bottom] [data-pkc-align=start]':
-        'text-align:end',
     });
+  });
+
+  /**
+   * 🔴 **`start` は入れ替えない**(2026-08-08 に取り消し。裁定の射程外だった)。
+   * 裁定は**行頭記法** `|>` `<|` `|<` についてのもので、その canonical な言い換えが
+   * `:::paragraph{align=end}`(`PKC2: 11-canonicalization-spec.md` §53)── だから
+   * `end` は同じ記法として反転する。**`start` に対応する行頭記法は存在しない**
+   * (§1.4.1 で廃止)ので、裁定は `start` に触れていない。
+   * ⚠ 一度は「対で反転」と実装した ── **属性の値で CSS を当てた実装の都合**が
+   *   意味論に漏れたもので、副作用を仕様に昇格させていた。ここで固定して戻さない。
+   */
+  it('🔴 説明的な形(end / start)を入れ替える規則は 1 本も無い ── 境界を越えない', () => {
+    for (const sel of swaps.keys()) {
+      expect(sel, '説明的な形 start を入れ替える規則が戻ってきた').not.toContain(
+        '[data-pkc-align=start]',
+      );
+      expect(sel, '説明的な形 end を入れ替える規則が戻ってきた(境界の踏み越え)').not.toContain(
+        '[data-pkc-align=end]',
+      );
+    }
+    // 空振り防止 ── 入れ替え規則そのものが消えていたら、この検査は何も守らない
+    expect(swaps.size, '入れ替え規則が 1 本も無い(この検査が空振りしている)').toBe(3);
   });
 
   it('⚠ center の入れ替えは無い(「center の反対側」は定義できない ── end は end のまま)', () => {
@@ -79,12 +95,14 @@ describe('行頭アラインの入れ替え規則(user 裁定 2026-08-08)', () =
     for (const r of parseRules(CSS)) {
       if (r.at.length > 0) continue;
       const sel = normSel(r.selector);
-      if (sel === '.pkc-md-rendered [data-pkc-align=end]'
+      if (sel === '.pkc-md-rendered [data-pkc-align=opposite]'
+        || sel === '.pkc-md-rendered [data-pkc-align=end]'
         || sel === '.pkc-md-rendered [data-pkc-align=start]') {
         base.set(sel, normBody(r.body));
       }
     }
     expect(Object.fromEntries(base)).toEqual({
+      '.pkc-md-rendered [data-pkc-align=opposite]': 'text-align:end',
       '.pkc-md-rendered [data-pkc-align=end]': 'text-align:end',
       '.pkc-md-rendered [data-pkc-align=start]': 'text-align:start',
     });
@@ -123,7 +141,7 @@ describe('行頭アラインの入れ替え規則(user 裁定 2026-08-08)', () =
   });
 
   /**
-   * 🔴 **書き出し側でも同じ 11 本が立っている**(2026-08-08 の 2 巡目レビュー)。
+   * 🔴 **書き出し側でも同じ 8 本が立っている**(2026-08-08 の 2 巡目レビュー)。
    * ⚠ 上の 2 件は app.css だけを見ており、**焼き込み側は片肺**だった ──
    *   `markdown-css-parity` の VIEWER 側は `toContain('[data-pkc-doc-align=left]')`
    *   のままなので、入れ替え規則の字面で満たされて基底の欠落を見逃す。
@@ -146,7 +164,7 @@ describe('行頭アラインの入れ替え規則(user 裁定 2026-08-08)', () =
       if (sel.includes('[data-pkc-doc-align=')) want.set(sel, normBody(r.body));
     }
     // 空振り防止 ── 集められていないなら、この比較は何も守っていない
-    expect(want.size, 'app.css 側で doc-align の規則を 1 本も拾えていない').toBe(11);
+    expect(want.size, 'app.css 側で doc-align の規則を 1 本も拾えていない').toBe(8);
     expect(Object.fromEntries(got)).toEqual(Object.fromEntries(want));
   });
 });

@@ -140,11 +140,19 @@ describe('PKC-Markdown golden parity vs PKC2 (25 cases)', () => {
    * 🔑 この test が守っているのは件数ではなく「**理由なしに golden を採り直せない**」こと ──
    * 実際、私は理由を書いて採り直したが、その理由が誤りだった。件数だけでは止められない。
    */
-  it('🔴 PKC2 と分岐した case は理由つきで 4 件だけ', () => {
+  it('🔴 PKC2 と分岐した case は理由つきで 7 件だけ', () => {
     const diverged = goldens.cases.filter((c) => c.pkc3Diverges);
     expect(diverged.map((c) => c.name).sort()).toEqual([
       'full-pkc-fixture',
       'full-pkc-fixture-anchors',
+      // 🔴 2026-08-08: 行頭アラインの象形的な形が `end` → `opposite`(user 裁定 +
+      //    user 指摘)。PKC2 は旧意味(logical end 固定)のままなので分岐する。
+      //    ⚠ **この分岐は隠してはいけない** ── 直前まで CSS だけで反転させて
+      //    byte 一致を保っていたが、それは「説明的な形にも反転が漏れる」実装の
+      //    裏返しだった。属性を分けたことで、分岐が台帳に見えるようになった。
+      'reform-stress-sample',
+      'simple-notation-sample',
+      'snippet-align-indent',
       'snippet-figure-ref',
       'snippet-html-fence',
     ]);

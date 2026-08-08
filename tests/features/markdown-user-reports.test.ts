@@ -278,14 +278,37 @@ describe('行頭アライン: 矢印の向きは意味を持たない(記法の�
     return /data-pkc-align="([^"]+)"/.exec(html)?.[1] ?? null;
   };
 
-  it('🔴 `|>` `<|` `|<` `>|` は**全 4 形が end**(typo 寛容 ── 向きで分けない)', () => {
+  /**
+   * 🔴 **4 形は同義で、値は `opposite`**(user 指摘 2026-08-08 で `end` から改めた)。
+   * 象形的な形(矢印の絵)は向きを描き間違えても意図が通るので 4 形が同義になる。
+   * その意味は「**グローバルの寄せを反対にする**」であって logical end ではない ──
+   * ⚠ 説明的な形 `:::paragraph{align=end}` と**同じ値を出してはいけない**。
+   *   潰すと、CSS の入れ替えが説明的な形にも当たる(境界の踏み越え)。
+   */
+  it('🔴 `|>` `<|` `|<` `>|` は**全 4 形が opposite**(typo 寛容 ── 向きで分けない)', () => {
     const got = ['|>', '<|', '|<', '>|'].map((sym) => [sym, alignOf(`${sym} 本文\n`)]);
     expect(Object.fromEntries(got), '矢印の向きを意味として読んでいる').toEqual({
-      '|>': 'end',
-      '<|': 'end',
-      '|<': 'end',
-      '>|': 'end',
+      '|>': 'opposite',
+      '<|': 'opposite',
+      '|<': 'opposite',
+      '>|': 'opposite',
     });
+  });
+
+  /**
+   * 🔴 **象形的な形と説明的な形は別の値を出す**(境界の pin)。
+   * これが同値になった瞬間、CSS の入れ替えが説明的な形へ漏れる。
+   */
+  it('🔴 `|>` と `:::paragraph{align=end}` は別の値(契約の境界)', () => {
+    const formal = (v: string): string | null => {
+      const html = renderMarkdown(`:::paragraph{align=${v}}\n本文\n:::\n`, {
+        silentHallucinationWarnings: true,
+      });
+      return /data-pkc-align="([^"]*)"/.exec(html)?.[1] ?? null;
+    };
+    expect(alignOf('|> 本文\n'), '象形的な形が説明的な形と同じ値を出している').toBe('opposite');
+    expect(formal('end'), '説明的な形が象形的な形に引きずられた').toBe('end');
+    expect(formal('start'), '説明的な形の start が動いた').toBe('start');
   });
 
   it('`||` だけが center(対称形なので typo 形を持たない)', () => {
@@ -344,10 +367,18 @@ describe('行頭アライン: 矢印の向きは意味を持たない(記法の�
       );
     });
 
-    it('🔑 hint が正本の 2 つ(center / end)と、左の正しい道を名乗る', () => {
+    /**
+     * ⚠ **hint に `end` / `start` を名乗らせない**(2026-08-08 に改めた)。
+     * 裁定で `|>` の意味が「グローバルの寄せの反対側」になった以上、logical end を
+     * 表す `end` を canonical として教えると、**寛容さを持たない説明的な形へ
+     * 象形的な形の意味を持ち込ませる**ことになる(user 指摘: 思想的な破壊的変更)。
+     */
+    it('🔑 hint が center と「反対側」を名乗り、位置指定の正しい道を書く', () => {
       expect(ALIGN_CANONICAL_HINT).toContain('center');
-      expect(ALIGN_CANONICAL_HINT).toContain('end');
-      // typo 3 形が同じ end であることまで書く(向きを読ませない)
+      expect(ALIGN_CANONICAL_HINT, '旧意味(logical end)を canonical として教えている')
+        .not.toContain('end');
+      expect(ALIGN_CANONICAL_HINT, '反対側という意味を教えていない').toContain('反対側');
+      // typo 3 形が同じ意味であることまで書く(向きを読ませない)
       for (const sym of ['<|', '|<', '>|']) expect(ALIGN_CANONICAL_HINT).toContain(sym);
       // 左に寄せたい人の行き先(direction / formal)を書く
       expect(ALIGN_CANONICAL_HINT).toContain('direction');
@@ -514,10 +545,10 @@ describe('行頭アライン: 矢印の向きは意味を持たない(記法の�
     const globals = extractDocumentGlobals('---\ndirection: rtl\n---\n\n|> 本文\n');
     expect(globals.direction, 'global direction の switch が効いていない').toBe('rtl');
     // ⚠ マーカー側は direction に関わらず end のまま(logical なので反転は CSS の仕事)
-    expect(alignOf('---\ndirection: rtl\n---\n\n|> 本文\n')).toBe('end');
+    expect(alignOf('---\ndirection: rtl\n---\n\n|> 本文\n')).toBe('opposite');
     // ⚠ `align` 宣言でも同じ ── 属性は end のまま(見え方の反転は入れ替え規則)。
     //    renderer に「宣言を読んで start へ書き換える」実装が生えたらここが落ちる
-    expect(alignOf('---\nalign: right\n---\n\n|> 本文\n')).toBe('end');
+    expect(alignOf('---\nalign: right\n---\n\n|> 本文\n')).toBe('opposite');
   });
 });
 

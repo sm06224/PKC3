@@ -2922,11 +2922,32 @@ function postProcessFigureSentinels(html: string): string {
  *  3. CSS が `[data-pkc-align="..."]` を読んで text-align を適用
  *     (`end` / `start` は CSS logical value、`direction: rtl` で自動 flip。
  *      宣言 align が flow start と逆の文書では app.css の入れ替え規則が
- *      end / start の見え方を反転する ── user 裁定 2026-08-08)
+ *      **`end` だけ**の見え方を反転する ── user 裁定 2026-08-08。
+ *      ⚠ `start` は反転しない: 裁定は行頭記法 `|>` `<|` `|<` と、その canonical な
+ *      言い換えである `align=end` についてのもので、`start` に対応する行頭記法は
+ *      存在しない = 射程外である)
  */
 // reform-2026-05 Phase 2 PR-2E:`:::paragraph{align=top|bottom}` の vertical
 // writing-mode 用 align も追加(物理 align、formal-only)。
-type AlignKind = 'center' | 'end' | 'start' | 'right' | 'left' | 'top' | 'bottom';
+/**
+ * 🔴 **`opposite` は象形的な形(行頭 prefix)だけが出す値**(user 指摘 2026-08-08)。
+ *
+ * 象形的な形 `|>` `<|` `|<` `>|` は**矢印の絵**であり、向きを描き間違えても意図が
+ * 通るので 4 形が同義になる(= typo を意味に通せる)。その意味は裁定により
+ * 「**グローバルの文字の寄せを反対にする**」であって、logical end ではない。
+ *
+ * ⚠ 説明的な形(`:::paragraph{align=end|start}`)は**値を言葉で書いている**ので
+ * `align=strat` を意味に通すことはできない ── 寛容さが成立しない形である。
+ * したがって `end` は logical end、`start` は logical start のままで、**反転しない**。
+ *
+ * 🔴 **この 2 つの形の境界は契約であり、越えてはならない**(user 指摘 2026-08-08:
+ * 「説明的な形式に対して象形的な形式の考え方を持ち込み…思想的な破壊的変更」)。
+ * ⚠ 直す前は両方が `data-pkc-align="end"` を出しており、CSS の入れ替えが
+ *   **説明的な形にも当たっていた**。属性を潰したまま意味だけ分けようとしたのが誤り。
+ * ⚠ したがって `FORMAL_ALIGNS` に `opposite` を入れてはならない ──
+ *   説明的な形からは**書けない値**である(書けたら境界が消える)。
+ */
+type AlignKind = 'center' | 'opposite' | 'end' | 'start' | 'right' | 'left' | 'top' | 'bottom';
 
 const PHYSICAL_ALIGNS: ReadonlySet<AlignKind> = new Set([
   'left', 'right', 'top', 'bottom', 'center',
@@ -3140,7 +3161,7 @@ function preprocessAlignPrefix(source: string, lineMapIn: number[]): {
        * 裁定後も誤りである(4 形は同値。catalog §1.4.2 と裁定引用の両方が言っている)。
        * 🔑 教訓: **記法の意味は「記号の見た目」ではなく正本(catalog / 裁定)で決まる**。
        */
-      const align: AlignKind = sym === '||' ? 'center' : 'end';
+      const align: AlignKind = sym === '||' ? 'center' : 'opposite';
       // **重要**:prefix 行は前段落から切り離して新 paragraph にする。
       // 挿入する空行も同じ inputIdx を指す(sync layer の lookup は閉じた区間で
       // 動くので副作用なし)。
@@ -3640,9 +3661,16 @@ interface TolerantInlinePattern {
  * `:align:{position=X}` の 2 経路(表 / standalone)と、そこから流れる 3 面
  * (console.info / `data-pkc-canonical` / hover `title`)が同じ文を使う。
  */
+/**
+ * ⚠ **`|>` の canonical な言い換えとして `:::paragraph{align=end}` を案内しない**
+ * (user 指摘 2026-08-08)。裁定で `|>` の意味が「グローバルの寄せを反対にする」に
+ * 変わった時点で、logical end を表す `align=end` とは**別のもの**になった ──
+ * 案内すると、寛容さを持たない説明的な形へ象形的な形の意味を持ち込ませてしまう。
+ */
 export const ALIGN_CANONICAL_HINT =
-  '行頭 prefix `||`(center)/ `|>`(end = グローバルの寄せの反対側。`<|` `|<` `>|` も同じ)。' +
-  '左寄せは frontmatter の `direction` / `align` 宣言か formal `:::paragraph{align=left}`';
+  '行頭 prefix `||`(center)/ `|>`(グローバルの寄せの反対側。`<|` `|<` `>|` も同じ)。' +
+  '文書の流れを変えるなら frontmatter の `direction` / `align` 宣言、' +
+  '位置を言葉で指定するなら formal `:::paragraph{align=left}`(right / center も可)';
 
 const TOLERANT_INLINE_PATTERNS: ReadonlyArray<TolerantInlinePattern> = [
   {

@@ -1259,6 +1259,14 @@ select:focus-visible {
  * **強制的に物理方向**、formal-only」(spec v4 §6.2)なので、混ぜると
  * 「物理強制」という語が嘘になる。⚠ PKC2 の CSS は最初から分けてある
  * (`PKC2: src/styles/base.css:2580-2584`)── 移植で潰れていた。 */
+/* 🔴 **象形的な形の既定**(`|>` `<|` `|<` `>|`)。グローバルの寄せの**反対側**
+ * ── 宣言が無い / 宣言が流れの起点側のときは、反対 = 流れの終わり側になる。
+ * 逆側の宣言があるときだけ下の入れ替え規則が上書きする。
+ * ⚠ **説明的な形の `end` と同じ規則にまとめない** ── 値が同じに見えるのは
+ *   「宣言が無いとき」だけで、意味は別物である(境界を潰さない)。 */
+.pkc-md-rendered [data-pkc-align='opposite'] {
+  text-align: end;
+}
 .pkc-md-rendered [data-pkc-align='end'] {
   text-align: end;
 }
@@ -1353,7 +1361,16 @@ select:focus-visible {
 /* 🔴 **入れ替え規則**(user 裁定 2026-08-08、Issue #103。上の裁定註記を参照)。
  * 「宣言 align が flow start と逆の文書」では、`|>`(= `data-pkc-align="end"`)は
  * グローバルの寄せの**反対側** = flow start 側へ寄る。属性は動かさず、見え方だけ
- * ここで入れ替える(`start` も対で反転 ── 「宣言 align と同じ側」を指し続ける)。
+ * ここで入れ替える。
+ * 🔴 **`start` は入れ替えない**(2026-08-08 に取り消した。裁定の射程外だった)。
+ *   裁定が対象にしたのは**行頭記法** `|>` `<|` `|<` であり、その canonical な
+ *   言い換えが `:::paragraph{align=end}` である(`PKC2: 11-canonicalization-spec.md` §53
+ *   「`|> 本文`(typo 4 形)→ `:::paragraph{align=end} 本文 :::`」)── だから
+ *   `end` は同じ記法として一緒に反転する。一方 **`start` に対応する行頭記法は
+ *   存在しない**(§1.4.1 で廃止済み)ので、裁定は `start` に一言も触れていない。
+ *   ⚠ 一度は「対で反転」と書いて実装したが、それは**属性の値で CSS を当てた実装の
+ *   都合**が意味論に漏れたものだった(`end` と `start` が同じ仕組みに乗るため)。
+ *   実装の副作用を仕様に昇格させない ── `start` は logical start のままにする。
  * ⚠ 横書きの flow start は `dir` が決める(無印 / ltr = 左、rtl = 右)──
  *   `align: right` は ltr でだけ「逆」、`align: left` は rtl でだけ「逆」。
  * ⚠ 縦書きは上の `direction: ltr` 固定により flow start が常に**上** ──
@@ -1362,23 +1379,14 @@ select:focus-visible {
  * ⚠ `align: center` の規則は**意図して無い**(「center の反対側」が定義できない)。
  * ⚠ 詳細度は (0,4,0) ── 基底の `.pkc-md-rendered [data-pkc-align=…]`(0,2,0)に
  *   file 内の位置と無関係に勝つ。 */
-.pkc-md-rendered[data-pkc-doc-align='right']:not([dir='rtl']) [data-pkc-align='end'] {
+.pkc-md-rendered[data-pkc-doc-align='right']:not([dir='rtl']) [data-pkc-align='opposite'] {
   text-align: start;
 }
-.pkc-md-rendered[data-pkc-doc-align='right']:not([dir='rtl']) [data-pkc-align='start'] {
-  text-align: end;
-}
-.pkc-md-rendered[data-pkc-doc-align='left'][dir='rtl'] [data-pkc-align='end'] {
+.pkc-md-rendered[data-pkc-doc-align='left'][dir='rtl'] [data-pkc-align='opposite'] {
   text-align: start;
 }
-.pkc-md-rendered[data-pkc-doc-align='left'][dir='rtl'] [data-pkc-align='start'] {
-  text-align: end;
-}
-.pkc-md-rendered[data-pkc-writing='vertical'][data-pkc-doc-align='bottom'] [data-pkc-align='end'] {
+.pkc-md-rendered[data-pkc-writing='vertical'][data-pkc-doc-align='bottom'] [data-pkc-align='opposite'] {
   text-align: start;
-}
-.pkc-md-rendered[data-pkc-writing='vertical'][data-pkc-doc-align='bottom'] [data-pkc-align='start'] {
-  text-align: end;
 }
 /* 段落 physical の縦(`:::paragraph{align=top}`)。⚠ 縦書きに限る ── 横書きでの
  * `top`/`bottom` は規約 §2.3.3 が不正組合せとしているので規則を当てない。 */
