@@ -88,8 +88,9 @@ const EXPECTED_LABELS = {
    * 混ざったら落ちる(封印の pin と二重に効く)。
    */
   'pick-create-kind': ['ノート', 'ログ', '表', 'フォルダ'],
-  // ⚠ 上の帯に残るのは**アプリ全体**のものだけ(P8 段⑤)
-  'set-view': ['設定'],
+  // ⚠ **アプリ全体**のものだけ(P8 段⑤。P10 で上の帯は撤去され、左の列の下へ)
+  //    フラグは P11 で追加 ── 設定(user 開放)とは**別の面**にする(user 裁定 2026-08-07)
+  'set-view': ['設定', 'フラグ', 'ヘルプ'],
   // 探し方は**左の列**が持つ
   'set-browse': ['一覧', 'フォルダ', 'アプリ'],
   'export-archive': ['バックアップ'],
@@ -304,6 +305,100 @@ describe('マニュアルと実装の突合', () => {
     }
   });
 
+  /**
+   * 🔴 **マニュアルが「もう無い場所」を案内していないか**(2026-08-07)。
+   *
+   * 直す前、マニュアルは 2 か所で**実装より古い案内**をしていた:
+   * ① 「**いちばん上の帯**の設定から開きます」── 上の帯は P10 で撤去済みで、
+   *    設定ボタンは**左の列**に在る(`shell.ts:44-59`)
+   * ② 「画面下の status に常に出ているのは**バージョン**だけ…マウスを載せると出ます」
+   *    ── status は通常 **hidden**(`main.ts:262`)で、版は設定画面へ移動済み
+   *
+   * ⚠ どちらも既存の pin(下の 3 語句)の網に掛からず、**素通りしていた**。
+   * 🔑 ヘルプ画面からマニュアルを見せる(P11)と、**この嘘が user に直接届く**。
+   *   だから「もう存在しない場所の名前」を機械的に禁じる。
+   */
+  it('🔴 マニュアルが撤去済みの場所を案内していない', () => {
+    const shell = readFileSync('src/adapter/ui/render/shell.ts', 'utf-8');
+    // 前提(空振り防止): 上の帯は実装から本当に消えている
+    expect(shell, '上の帯が復活した ── 下の禁止は前提を失っている').not.toContain(
+      "createElement('header')",
+    );
+    // ⚠ **見出しも見る**(2026-08-08)。本文だけ直して**見出しを直し忘れて**いた ──
+    //    「## 4. 上部のならび」が残っており、同じ腐りの対称の反対側だった
+    for (const gone of ['いちばん上の帯', '上部の帯', '上の帯', '上部のならび']) {
+      expect(MANUAL, `マニュアルが撤去済みの「${gone}」を案内している`).not.toContain(gone);
+    }
+    /**
+     * ⚠ status は「知らせることがあるときだけ」出る面である。
+     * 「常に出ている」と書くと、user は無い物を探す。
+     */
+    expect(MANUAL, 'status が常に出ていると書いてある').not.toContain('status に常に出ている');
+  });
+
+  /**
+   * 🔴 **版がどこに出ているか、マニュアルと実装が一致する**(2026-08-07)。
+   * ⚠ 版の在り処は 2 度動いている(status → 設定画面)。動くたびに案内が腐るので pin する。
+   */
+  /**
+   * 🔴 **マニュアルは user が読むもの**(2026-08-08。同梱するので 1 行目から目に入る)。
+   * ⚠ 書き手向けの指示・手書きの日付を置かない ── 前者は読み手に意味が無く、
+   *   後者は**必ず腐る**(実際に「最終更新 2026-08-03」の後 3 回改訂されていた)。
+   */
+  it('🔴 マニュアルに書き手向けの前置きと手書きの日付が無い', () => {
+    const head = MANUAL.slice(0, 400);
+    expect(head, '書き手向けの指示が残っている').not.toContain('この doc は');
+    expect(head, '手書きの日付が残っている(必ず腐る)').not.toMatch(/最終更新/);
+  });
+
+  /**
+   * 🔴 **左の列のボタンとマニュアルの表が一致する**(2026-08-08)。
+   * ⚠ 「フラグ」を足したとき §4-3 は書いたのに**要約の表を直し忘れて**いた。
+   */
+  it('🔴 左の列の導線が、マニュアルの表に全部載っている', () => {
+    /**
+     * ⚠ **実際に描かれたボタンを見る**(ソースの `label:` を正規表現で拾わない)。
+     * 拾うと封印済みの語(`Todo` 等)まで当たって、**マニュアルに無い物を要求する**
+     * ── 1 巡目で実際に踏んだ。観測点は「shell が何を描いたか」である。
+     */
+    const labels = buttonLabels('set-view');
+    expect(labels.length, '導線を 1 つも拾えていない').toBeGreaterThanOrEqual(2);
+    for (const label of labels) {
+      expect(MANUAL, `マニュアルの表に「${label}」が無い`).toContain(`**${label}**`);
+    }
+  });
+
+  /**
+   * 🔴 **版は 1 か所にだけ在る**(P11 で設定 → ヘルプへ移した)。
+   * ⚠ 「ヘルプに在る」だけを見ると、**設定にも残ったまま**の二重表示を見逃す ──
+   *   マニュアルは 1 か所しか案内しないので、片方が黙って古くなる。
+   *   だから**在ることと、もう片方に無いこと**の両方を見る。
+   */
+  it('🔴 版の在り処がマニュアルと一致し、組み立ては 1 か所だけ', () => {
+    const help = readFileSync('src/adapter/ui/render/help.ts', 'utf-8');
+    expect(help, 'ヘルプ画面が版を出していない').toContain('help-version');
+    /**
+     * 🔴 **file 名指しにしない**(2026-08-08、レビュー指摘)。
+     * ⚠ 直す前は `settings.ts` に `APP_VERSION` が無いことしか見ていなかったので、
+     *   **他のどの面に版を生やしても素通り**した ── 題名は「2 か所に出ていない」
+     *   なのに、守っていたのは「settings.ts に出ていない」だけだった
+     *   (CLAUDE.md「それらしい 1 file を見る型の guard」)。
+     * 🔑 いまは**面の file を全数走査**して、組み立てを持つ file が `help.ts`
+     *   ただ 1 つであることを**等値**で pin する。
+     */
+    const dir = 'src/adapter/ui/render';
+    const owners = readdirSync(dir)
+      .filter((f) => f.endsWith('.ts'))
+      .filter((f) => readFileSync(join(dir, f), 'utf-8').includes('APP_VERSION'))
+      .sort();
+    expect(owners, '版を組み立てる file が 1 つではない(綴りが分かれると必ず食い違う)').toEqual([
+      'help.ts',
+    ]);
+    expect(MANUAL, 'マニュアルが版の在り処を案内していない').toMatch(
+      /\*\*バージョン\*\*は\s*\*\*ヘルプ\*\*/,
+    );
+  });
+
   it('🔴 削除の確認文言がマニュアルと矛盾しない', () => {
     // round-2 review M-8: 実装は「元に戻せません」、マニュアルは「戻せます」で
     // **どちらか一方が嘘**だった(実装のほうが古く、user を怖がらせる側だった)
@@ -393,5 +488,38 @@ describe('導線の置き場所(P8 段⑱)', () => {
     // 実装は可逆アーカイブ(.pkc3.zip)── かつて tooltip は「Markdown で保存します」だった
     expect(INSPECTOR).toContain('.pkc3.zip');
     expect(INSPECTOR, 'Markdown と嘘を書いている').not.toContain('Markdown で保存します');
+  });
+});
+
+/**
+ * 🔴 **書いたクラス名に、当たる規則が在る**(2026-08-08、レビュー指摘で追加)。
+ *
+ * ⚠ フラグ画面の説明文 5 か所が `class="settings-note"` で書かれていたのに、
+ * `app.css` の規則は **`[data-pkc-field='settings-note']`** だけだった ──
+ * `.settings-note` という規則はリポジトリに 1 本も無く、**フラグ画面の説明が
+ * 全部無スタイル**(本文と同じ字の大きさ・同じ色)で出ていた。設定画面と
+ * 並べたときに見た目が揃わない。
+ *
+ * 🔑 **綴りが 2 通りあること自体は悪くない**(属性は 1 要素 1 個なので、
+ * `data-pkc-field` を別の用途で使う要素はクラスで書くしかない)。悪いのは
+ * **片方に規則が無いこと**である。だから「クラスを書いたら規則が在る」を見る。
+ * ⚠ `data-pkc-*` セレクタの規約(機能的な選択は属性で)には触れない ──
+ *   ここが見るのは**見た目のクラス**だけである。
+ */
+describe('クラス名と CSS 規則の突合', () => {
+  it('🔴 render 層が書いたクラス名に、当たる規則が在る', () => {
+    const dir = 'src/adapter/ui/render';
+    const used = new Set<string>();
+    for (const f of readdirSync(dir).filter((n) => n.endsWith('.ts'))) {
+      const text = readFileSync(join(dir, f), 'utf-8');
+      for (const m of text.matchAll(/className = '([a-z0-9 -]+)'/g)) {
+        for (const cls of (m[1] ?? '').split(' ').filter(Boolean)) used.add(cls);
+      }
+    }
+    // ⚠ 空振り防止 ── 1 つも拾えていないなら、この検査は何も見ていない
+    expect(used.size, 'クラス名を 1 つも拾えていない(空振り)').toBeGreaterThan(0);
+    const css = readFileSync('src/styles/app.css', 'utf-8');
+    const missing = [...used].filter((c) => !new RegExp(`\\.${c}[\\s,{:]`).test(css)).sort();
+    expect(missing, '当たる規則が無いクラスを書いている(無スタイルで出る)').toEqual([]);
   });
 });

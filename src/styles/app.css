@@ -64,12 +64,14 @@ body {
    * 無かった。設定は左の列の下へ移した。
    * ⚠ 下の帯(status)は**残す** ── エラーの唯一の出口だから。ただし
    * 既定は `hidden` なので、言うことが無いときは行の高さが 0 になる */
-  grid-template-rows: 1fr auto auto auto;
+  /* ⚠ お知らせ(P11)も**自分の行**。相乗りさせない理由は `shell.ts` に書いた */
+  grid-template-rows: 1fr auto auto auto auto;
   grid-template-areas:
-    'sidebar detail  inspector'
-    'update  update  update'
-    'notices notices notices'
-    'status  status  status';
+    'sidebar  detail   inspector'
+    'announce announce announce'
+    'update   update   update'
+    'notices  notices  notices'
+    'status   status   status';
   height: 100%;
   /* 🔑 **境界線は共有する**(user 指示 2026-08-03「境界線は全て共有して、
    * マージンとギャップは基本いらない」)。1px の隙間に地の色を透かせて
@@ -95,6 +97,9 @@ body {
 }
 [data-pkc-region='inspector'] {
   grid-area: inspector;
+}
+[data-pkc-region='announce'] {
+  grid-area: announce;
 }
 [data-pkc-region='update'] {
   grid-area: update;
@@ -515,6 +520,28 @@ select:focus-visible {
   flex: 1;
   min-height: 0;
 }
+/**
+ * 🔴 **本文の面は「中身の高さ」まで伸ばす**(2026-08-08)。
+ *
+ * `flex: 1`(= `1 1 0%`)だと面の**箱**はスクロール箱の高さ止まりで、中身は
+ * その外へはみ出して描かれる。`position: sticky` は**自分の親の箱の中でしか
+ * 貼り付かない**ので、⚠ **箱の高さを越えて下へ送ると、貼り付いた帯が外れて
+ * 画面から消える** ── 長いノートで少し送っただけで「編集 / 履歴 / 削除」が
+ * 消えていた(P8 段⑪ で貼り付けにした目的そのものが、そこで失われていた)。
+ *
+ * ⚠ **P11 のお知らせの帯が炙り出した。** 帯のぶんスクロール箱が 196px 低くなり、
+ * それまで 829px で守られていた既存の smoke(700px まで送る)が初めて落ちた ──
+ * **元から壊れていて、閾値が下がって見えるようになっただけ**である。
+ * ⚠ 本文の面だけに当てる ── かんばんは横に並べる面で、伸ばす意味が無い。
+ *
+ * 🔴 **さらに「読む面」だけに当てる。** 編集の面は逆に**箱の高さで止める**必要が
+ * ある ── プレビューが `overflow: auto` で**自分で送る**作りなので、伸ばすと
+ * 送れなくなる(実際にそう壊した)。⚠ 2 つは逆向きの要求なので、面を見分けずに
+ * 片方へ寄せると必ずもう片方が壊れる。見分けは `detail.ts` が DOM に書く。
+ */
+[data-pkc-region='detail'] > [data-pkc-view-pane='detail'][data-pkc-detail-mode='view'] {
+  flex: 1 0 auto;
+}
 [data-pkc-view-pane='detail'] {
   display: flex;
   flex-direction: column;
@@ -716,7 +743,7 @@ select:focus-visible {
   outline-width: 1px;
 }
 
-/* ── ライブエディタ(1 面。`?pkc-live=1`)─────────────────
+/* ── ライブエディタ(1 面。flag `editor.live`)────────────
  * 🔴 画面は**常に描画済み文書**で、クリックした行だけが原文の入力欄になる
  * (2026-08-05。設計 doc `live-editor-design-2026-08.md` S5)。
  * ⚠ 見た目は**プレビュー面と同じ**にする ── 「編集モードに入ったら別の画面」
@@ -1970,6 +1997,33 @@ select:focus-visible {
 [data-pkc-field='update-text'] {
   flex: 1;
 }
+/* ── 起動したときのお知らせ(P11)────────────────────
+ * ⚠ **update と同じ色にしない** ── 隣り合う行なので、同じ地だと 1 枚の帯に見える。
+ *   こちらは面の色(`surface-2`)で、色は使わない(「色は情報にだけ」)。
+ * ⚠ 長いお知らせで画面を占領させない ── notices と同じく高さを切って中で流す。 */
+[data-pkc-region='announce'] {
+  padding: var(--s3);
+  background: var(--surface-2);
+  max-height: 30vh;
+  overflow: auto;
+}
+[data-pkc-field='announce-title'] {
+  font-weight: 600;
+  margin-bottom: var(--s2);
+}
+[data-pkc-region='announce'] h3 {
+  margin: var(--s3) 0 var(--s1);
+  font-size: 13px;
+}
+[data-pkc-region='announce'] ul {
+  margin: 0;
+  padding-left: 1.2em;
+}
+[data-pkc-field='announce-where'] {
+  margin: var(--s3) 0 var(--s2);
+  color: var(--muted);
+  font-size: 11px;
+}
 [data-pkc-region='status'] {
   display: flex;
   align-items: center;
@@ -2003,6 +2057,7 @@ select:focus-visible {
     grid-template-areas:
       'sidebar   detail'
       'inspector inspector'
+      'announce  announce'
       'update    update'
       'notices   notices'
       'status    status';
@@ -2028,11 +2083,12 @@ select:focus-visible {
       'sidebar'
       'detail'
       'inspector'
+      'announce'
       'update'
       'notices'
       'status';
-    /* ⚠ 6 区画(上の帯を撤去したので 1 つ減った)── 本文だけが伸びる */
-    grid-template-rows: auto 1fr auto auto auto auto;
+    /* ⚠ 7 区画(P11 でお知らせが 1 つ増えた)── 本文だけが伸びる */
+    grid-template-rows: auto 1fr auto auto auto auto auto;
   }
   [data-pkc-region='sidebar'] {
     max-height: 30vh;
@@ -2059,9 +2115,14 @@ select:focus-visible {
 }
 
 /* ── 設定の画面 ─────────────────────────────────── */
-[data-pkc-region='settings-body'] {
+/* ⚠ フラグ / ヘルプの面(P11)も**同じ体裁**にする ── 場所が違うだけで、
+   読み方は同じであってほしい(業務画面の作法「同じものは同じ形」)。 */
+[data-pkc-region='settings-body'],
+[data-pkc-region='help-body'],
+[data-pkc-region='flags-body'] {
   padding: var(--s4);
 }
+[data-pkc-region='flags-body'] dl,
 [data-pkc-region='settings-body'] dl {
   margin: 0;
   display: grid;
@@ -2069,17 +2130,62 @@ select:focus-visible {
   gap: var(--s3) var(--s4);
   align-items: start;
 }
+[data-pkc-region='flags-body'] dt,
 [data-pkc-region='settings-body'] dt {
   color: var(--muted);
   white-space: nowrap;
 }
+[data-pkc-region='flags-body'] dd,
 [data-pkc-region='settings-body'] dd {
   margin: 0;
 }
-[data-pkc-field='settings-note'] {
+/* 🔴 **綴りが 2 通りある**(2026-08-08、レビュー指摘)。設定は
+   `data-pkc-field='settings-note'`、フラグは `class="settings-note"` で書いていた ──
+   `.settings-note` の規則が 1 本も無かったので、⚠ **フラグ画面の説明文が 5 か所とも
+   無スタイル**(本文と同じ字の大きさ・同じ色)で出ていた。設定と並べたときに
+   見た目が揃わない。⚠ 属性は 1 要素 1 個なので、綴りを片方へ寄せるのではなく
+   **CSS の側で両方受ける**(1 行で済み、既存の pin も動かない)。 */
+[data-pkc-field='settings-note'],
+.settings-note {
   margin: var(--s2) 0 0;
   color: var(--muted);
   font-size: 11px;
+}
+
+/* フラグの面(P11)。⚠ **色は情報にだけ**(user 指示 2026-08-03) ──
+   既定と違う行だけ印を付ける。地は無彩色のまま。 */
+[data-pkc-field='flag-fold'] {
+  margin: var(--s1) 0 0;
+}
+/* ⚠ **`input:disabled` の規則は消した**(2026-08-08)── ロックを撤去した
+   (user 指摘「フラグ適用順と再起動を促す順序があるんだから、本質的にロック不要」)
+   ので、当たる要素が 1 つも無い**死んだ規則**になっていた。 */
+
+/* ── ヘルプの面(P11)──────────────────────────────
+ *
+ * ⚠ **読み物**なので、設定・フラグより 1 段広い版面を許す ── ただし
+ * 「同じものは同じ場所」を崩さないよう、器の padding は共有している(上)。
+ * ⚠ マニュアルは本文と**同じ体裁**で出す(`.pkc-md-rendered` を付けてある)。
+ */
+[data-pkc-region='help-notices'] section {
+  margin: 0 0 var(--s4);
+}
+[data-pkc-region='help-notices'] h4 {
+  margin: 0 0 var(--s2);
+  font-size: 13px;
+}
+[data-pkc-region='help-notices'] ul {
+  margin: 0;
+  padding-left: var(--s5);
+}
+/* 🔴 **マニュアルは縦に長い** ── 器ごとスクロールさせると面の頭
+   (版・お知らせ)まで流れるので、ここだけを箱にする。 */
+[data-pkc-region='help-manual'] {
+  max-height: 60vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--s4);
 }
 
 /* ── 印刷(2026-08-07)────────────────────────────────
@@ -2129,6 +2235,8 @@ select:focus-visible {
   [data-pkc-region='status'],
   [data-pkc-region='notices'],
   [data-pkc-region='update'],
+  /* ⚠ お知らせも紙には要らない(P11)── 押せるものが無いのは他と同じ */
+  [data-pkc-region='announce'],
   [data-pkc-field='detail-bar-slot'],
   [data-pkc-field='detail-notice-slot'],
   .pkc-md-copy-btn,

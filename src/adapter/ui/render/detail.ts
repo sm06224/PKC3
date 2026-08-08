@@ -43,6 +43,8 @@ import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { isAppMime } from '@features/launcher/tiles';
 import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
 import type { AppState, AppPhase } from '@adapter/state/app-state';
+import { appFlags } from '@adapter/platform/flag-store';
+import { FLAG_LIVE_EDITOR } from '@features/flags';
 
 /** 添付表示のための asset 面(main が AssetBlobStore を cid 束縛で注入)。 */
 export interface AssetLender {
@@ -56,25 +58,38 @@ type Mode = 'empty' | 'view' | 'editor';
 type BarShape = 'edit' | 'retry' | 'none';
 
 /**
- * 🔴 **ライブエディタの口**(2026-08-05)。`?pkc-live=1` で 1 面に畳む。
+ * 🔴 **ライブエディタの口**。1 面に畳む(2026-08-05)。
  *
- * ⚠ **URL だけ**・保存しない・一覧に出さない(既存の `?pkc-md-inline` と同型)
- * ── 計測用の逃がし口を正規 flag にすると、上限 15 と畳む条件の宣言義務を
- * 計測器が食う(設計 §9 論点 F の裁定)。
+ * ⚠ **2026-08-07 に flag へ昇格した**(user 指示。不可侵)。かつてここは
+ * 「URL だけ・保存しない・一覧に出さない」で、理由を「計測用の逃がし口を正規 flag に
+ * すると上限 15 と宣言義務を計測器が食う」としていた ── **それが抜け穴だった**。
+ * user 指示「**URL クエリパラメータ切り替えはフラグ扱いである / クエリパラメータを
+ * 抜け穴にしてはいけない**」により、いまは `editor.live` として宣言され、
+ * 予算に数えられ、フラグ画面に出る。
  * ⚠ 既定 OFF(設計 §9 論点 C ── 塊を跨ぐ Ctrl+Z が入るまで既定にしない)。
  */
 export function liveEditorEnabled(): boolean {
-  try {
-    return new URLSearchParams(location.search).get('pkc-live') === '1';
-  } catch {
-    return false;
-  }
+  return appFlags.isOn(FLAG_LIVE_EDITOR.name);
 }
 
 export class DetailRenderer {
   private readonly region: HTMLElement;
   private readonly assets: AssetLender | null;
-  private mode: Mode = 'empty';
+  private _mode: Mode = 'empty';
+  /**
+   * 🔴 **いまの面を DOM にも書く**(2026-08-08)。CSS が読む ──
+   * 読む面は「中身の高さまで伸ばす」(貼り付いた操作の帯が外れないように)、
+   * 編集の面は「スクロール箱の高さで止める」(プレビューが自分で送れるように)。
+   * ⚠ 2 つは**逆向きの要求**なので、面を見分けずに片方へ寄せると必ずもう片方が
+   *   壊れる(実際、伸ばす側だけ当ててプレビューが送れなくなった)。
+   */
+  private get mode(): Mode {
+    return this._mode;
+  }
+  private set mode(m: Mode) {
+    this._mode = m;
+    this.region.setAttribute('data-pkc-detail-mode', m);
+  }
   private lastSelected: string | null = null;
   /** view で最後に描いた body(null = openBody 不在の loading 表示)。 */
   private lastBody: string | null = null;
@@ -655,10 +670,13 @@ export class DetailRenderer {
      * 🔴 **ライブエディタ(行の入れ替え)**(2026-08-05。ライブエディタ S5。
      * 設計 doc `live-editor-design-2026-08.md`)。
      *
-     * 既定は今日の 2 列(原文 | プレビュー)。`?pkc-live=1` で**1 面**に畳む
+     * 既定は今日の 2 列(原文 | プレビュー)。flag `editor.live` で**1 面**に畳む
      * ── 画面は常に描画済み文書で、クリックした行だけが原文の入力欄になる。
      * ⚠ 既定 OFF は user 裁定(設計 §9 論点 C ── 塊を跨ぐ Ctrl+Z が入るまで開けない)。
-     * ⚠ URL だけの口(`?pkc-md-inline` と同型)── flag 枠(最大 15)を食わない。
+     * 🔴 **flag である**(2026-08-07 に `?pkc-live=1` から昇格。user 指示
+     *   「URL クエリパラメータ切り替えはフラグ扱いである / クエリパラメータを
+     *   抜け穴にしてはいけない」)── 15 枠に数え、`foldWhen` を宣言し、
+     *   フラグ画面に出る。⚠ 「計測用だから枠を食わない」は禁じ手である。
      */
     /**
      * プレビューに渡す既定(2026-08-06)。

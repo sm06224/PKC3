@@ -22,6 +22,8 @@ import {
   type RenderMarkdownOptions,
   type SourceRange,
 } from '@features/markdown/markdown-render';
+import { appFlags } from '../flag-store';
+import { FLAG_MD_INLINE } from '@features/flags';
 
 /** `renderWithRanges` の返り。⚠ 行番号は **HTML に焼かれていない**。 */
 export interface RenderedWithRanges {
@@ -233,10 +235,9 @@ function defaultSpawn(): (() => Worker) | null {
   // 計測用の逃がし口(URL のみ・保存しない)。⚠ **新しい経路を作っていない** ──
   // ワーカーが無い環境と**同じ**同期経路へ落とすだけなので、対照群が
   // 「同じビルドの、測りたい違いだけが違うもの」になる
-  if (
-    typeof location !== 'undefined' &&
-    new URLSearchParams(location.search).has('pkc-md-inline')
-  )
-    return null;
+  // 🔴 **flag で決める**(P11。user 指示 2026-08-07「クエリパラメータを抜け穴に
+  //    してはいけない」)。⚠ かつてここは `location.search` を直に読んでいた ──
+  //    宣言の外に居る切替は、予算にも画面にも出てこない抜け穴だった
+  if (appFlags.isOn(FLAG_MD_INLINE.name)) return null;
   return () => new Worker(new URL('./markdown-worker.ts', import.meta.url), { type: 'module' });
 }

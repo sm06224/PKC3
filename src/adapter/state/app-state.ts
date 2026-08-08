@@ -16,7 +16,29 @@ import type { LauncherTile } from '@features/launcher/tiles';
 import { visibleOrder } from '@features/filter/title-filter';
 
 export type AppPhase = 'initializing' | 'ready' | 'editing' | 'error';
-export type ViewMode = 'detail' | 'calendar' | 'kanban' | 'filer' | 'launcher' | 'settings';
+export type ViewMode =
+  | 'detail'
+  | 'calendar'
+  | 'kanban'
+  | 'filer'
+  | 'launcher'
+  | 'settings'
+  | 'flags'
+  | 'help';
+
+/**
+ * 🔴 **ノートを映していない中央の面**(P11)。一覧のノートを押したら中央を
+ * ノートへ戻す ── その判定をここ 1 か所に置く。
+ *
+ * ⚠ 直す前は `viewMode === 'settings'` の**直書き**だった。面を足すたびに
+ * 取りこぼすので(P8 段⑲ で直した「開かない理由が画面のどこにも無い」の再演)、
+ * **集合にして 1 か所へ寄せた**(CLAUDE.md「判定を増やさない」)。
+ */
+const ASIDE_PANES: ReadonlySet<ViewMode> = new Set<ViewMode>(['settings', 'flags', 'help']);
+
+export function isAsidePane(view: ViewMode): boolean {
+  return ASIDE_PANES.has(view);
+}
 
 /**
  * 選択中 entry の body 作業域。3 つの内容は意味が異なる(review E の解消形):
@@ -522,7 +544,7 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       //    直す前は右の情報ペインだけ切り替わり、中央は設定のまま・追記欄も
       //    消えたままで、ノートが開かない理由が画面のどこにも無かった
       //    (マニュアル「中央は常にいま開いているノート」の当の破れ)
-      const leaveSettings = state.viewMode === 'settings';
+      const leaveSettings = isAsidePane(state.viewMode);
       if (state.selectedLid === action.lid && state.openBody?.lid === action.lid)
         return leaveSettings
           ? { state: { ...state, viewMode: 'detail' }, events: [] }
@@ -579,7 +601,24 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       return { state: { ...state, filterQuery: action.query }, events: [] };
     case 'SET_VIEW_MODE':
       // selection は消さない(PKC2 規約)。panel は view に従属するので畳む
-      if (state.phase === 'editing') return { state, events: [] };
+      /**
+       * 🔴 **編集中でも「ノートを映さない面」は開ける**(user 裁定 2026-08-08。
+       * P11 の Q5「開けないまま」を**覆した**)。
+       *
+       * 覆した理由は意見ではなく、**調べたら止めている理由が無かった**から:
+       *  ① 面は `hidden` の付け外しで**生きたまま常駐**する(`center.ts` の `pane()`
+       *     は 1 度だけ作り、`render` は非 active な面を描かない)
+       *  ② 戻ったとき本文の面は**組み直されない**(`detail.ts` の `render` が
+       *     「編集中かつ同じ lid」で早期 return する)
+       *  → **textarea も native の取り消し履歴も壊れない**。
+       *
+       * 🔑 一方で止めるコストは実在した ── **「書きながらマニュアルを読む」は
+       * ヘルプの主目的**であり、P11 で無言の dead click が 1 個 → 3 個に増えていた。
+       *
+       * ⚠ **一覧のノートを押す(`SELECT_ENTRY`)は開けない**。あちらは「下書きを
+       *   守る」理由が実在する ── ただし無言で断らないのが正しい(別主題)。
+       */
+      if (state.phase === 'editing' && !isAsidePane(action.mode)) return { state, events: [] };
       return {
         state: {
           ...state,

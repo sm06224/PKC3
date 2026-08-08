@@ -71,6 +71,20 @@ const ICON_PATHS: Readonly<Record<string, readonly IconPath[]>> = {
     { d: 'M12.8 8.5a2.3 2.3 0 104.6 0 2.3 2.3 0 00-4.6 0z', fill: 'solid' },
     { d: 'M6.6 15.5a2.3 2.3 0 104.6 0 2.3 2.3 0 00-4.6 0z', fill: 'solid' },
   ],
+  /**
+   * フラグ ── 旗(P11)。⚠ 竿は 1 本、布は塗る(中空だと 16px で泥になる)。
+   * 設定の「つまみ」と**形が似ないもの**にした ── 隣に並ぶので、輪郭で区別が付く必要がある。
+   */
+  flag: ['M6 3.5v17', { d: 'M7.5 4.5h11l-2.6 3.8 2.6 3.8h-11z', fill: 'solid' }],
+  /**
+   * ヘルプ ── 丸の中の「?」(P11)。⚠ 本のかたちは 13px で綴じ目と本文線が
+   * 融けるので採らない。点は**塗る**(中空だと泥になる)。
+   */
+  help: [
+    'M12 3.5a8.5 8.5 0 100 17 8.5 8.5 0 000-17z',
+    'M9.4 9.4a2.7 2.7 0 115.2 1c0 1.8-2.6 2.1-2.6 3.9',
+    { d: 'M10.6 17.4a1.4 1.4 0 102.8 0 1.4 1.4 0 00-2.8 0z', fill: 'solid' },
+  ],
   /** 取り込む ── 受け皿へ下向き。 */
   'arrow-in': ['M12 3.5v9', { d: 'M7.5 11l4.5 5 4.5-5z', fill: 'solid' }, 'M4 18v2.5h16V18'],
   /** 書き出す ── 受け皿から上向き。 */
@@ -149,6 +163,8 @@ export type IconName = keyof typeof ICON_PATHS;
  */
 export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'set-view:settings': 'settings',
+  'set-view:flags': 'flag',
+  'set-view:help': 'help',
   'import-file': 'arrow-in',
   'export-archive': 'archive',
   'export-html': 'globe',

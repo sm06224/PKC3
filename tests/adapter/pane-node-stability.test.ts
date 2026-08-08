@@ -33,6 +33,7 @@ import type { AppState } from '../../src/adapter/state/app-state';
 import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
 import { FilerRenderer } from '../../src/adapter/ui/render/filer';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
+import { CenterRouter } from '../../src/adapter/ui/render/center';
 
 const META = (over: Partial<EntryMeta> = {}): EntryMeta => ({
   lid: 'e1',
@@ -352,5 +353,93 @@ describe('本文の面: 再描画で操作の node が差し替わらない', ()
     expect(after, '別のノートで「編集」が消えた').not.toBeNull();
     expect(after, '骨組みを作り直したのに古い node を指したまま').not.toBe(edit);
     expect(region.querySelector('[data-pkc-field="detail-title"]')!.textContent).toBe('別');
+  });
+});
+
+/**
+ * 🔴 **いまの面を DOM に書く**(2026-08-08、レビュー指摘で追加)。
+ *
+ * `app.css` が `[data-pkc-detail-mode='view']` を読んで、**読む面だけ**を
+ * 中身の高さまで伸ばす(貼り付いた操作の帯が外れないように)。編集の面は逆に
+ * 箱の高さで止める(プレビューが `overflow: auto` で自分で送る)── **2 つは
+ * 逆向きの要求**なので、面を見分けずに片方へ寄せると必ずもう片方が壊れる。
+ *
+ * ⚠ **この属性は unit で 1 件も pin されていなかった。** 守りは smoke だけで、
+ * `tests/smoke` は `dist/` を配信するため、**次に誰かがここへ変異を当てると
+ * `npm run build` を挟まない限り全部 SURVIVED に見える**(真相は NOT-APPLIED)。
+ * CLAUDE.md「smoke に変異を当てるには build が要る」の予防線として unit を置く。
+ */
+describe('🔴 本文の面: いまの面を DOM に書く(CSS が読む)', () => {
+  const bodyState = (over: Partial<AppState> = {}): AppState =>
+    stateOf([META()], {
+      openBody: { lid: 'e1', body: '本文', baseline: '本文', persisted: '本文', diskAhead: false },
+      revisionPanel: null,
+      ...over,
+    } as Partial<AppState>);
+
+  it('🔴 empty / view / editor が、そのまま属性に出る', () => {
+    const d = new DetailRenderer(region);
+    // ① 何も選んでいない
+    d.render(stateOf([], { selectedLid: null, openBody: null } as Partial<AppState>));
+    expect(region.getAttribute('data-pkc-detail-mode'), '選んでいない面が出ていない').toBe('empty');
+    // ② 読む面
+    d.render(bodyState());
+    expect(region.getAttribute('data-pkc-detail-mode'), '読む面が出ていない').toBe('view');
+    // ③ 編集の面
+    d.render(bodyState({ phase: 'editing' } as Partial<AppState>));
+    expect(region.getAttribute('data-pkc-detail-mode'), '編集の面が出ていない').toBe('editor');
+    // 🔑 **戻れること**も見る(片道だと「編集に入ったら二度と伸びない」が通る)
+    d.render(bodyState());
+    expect(region.getAttribute('data-pkc-detail-mode'), '読む面へ戻っていない').toBe('view');
+  });
+});
+
+/**
+ * 🔴 **編集中に「ノートを映さない面」を開いて戻っても、編集が壊れない**
+ * (user 裁定 2026-08-08。P11 の Q5「編集中は開けないまま」を覆した根拠そのもの)。
+ *
+ * 覆した理由は意見ではなく、**この往復が安全だと確かめられた**からである:
+ *  ① 面は `hidden` の付け外しで**生きたまま常駐**する(`CenterRouter` は
+ *     非 active な面の `render` を呼ばない)
+ *  ② 戻ったとき `DetailRenderer.render` が「編集中かつ同じ lid」で早期 return する
+ *  → **textarea も、そこに打った文字も、native の取り消し履歴も残る**
+ *
+ * ⚠ **この test が根拠を持っている。** 落ちたら裁定の前提が崩れているので、
+ *   「編集中は開けない」へ戻すか、別の守り方を考えること ── test を緩めない。
+ */
+describe('🔴 編集中に面を往復しても、編集が壊れない', () => {
+  it('🔴 ヘルプを開いて戻っても、打ちかけの本文と node が残る', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const router = new CenterRouter(host);
+    const editing = stateOf([META()], {
+      phase: 'editing',
+      openBody: { lid: 'e1', body: '打ちかけ', baseline: '', persisted: '', diskAhead: false },
+    } as Partial<AppState>);
+
+    router.render(editing);
+    const ta = host.querySelector<HTMLTextAreaElement>('[data-pkc-field="editor-body"]');
+    expect(ta, '編集欄が出ていない(fixture の空振り)').not.toBeNull();
+    // ⚠ **DOM にしか無い状態**を作る ── state に戻さない値がこの往復で消えないか
+    ta!.value = '打ちかけ + まだ state に戻していない分';
+
+    // ヘルプへ寄り道する
+    router.render({ ...editing, viewMode: 'help' } as AppState);
+    expect(
+      host.querySelector('[data-pkc-view-pane="detail"]')?.hasAttribute('hidden'),
+      '本文の面が隠れていない(面の切替が効いていない)',
+    ).toBe(true);
+    expect(
+      host.querySelector<HTMLElement>('[data-pkc-view-pane="help"]')?.hidden,
+      'ヘルプが出ていない',
+    ).toBe(false);
+
+    // 戻る
+    router.render(editing);
+    const after = host.querySelector<HTMLTextAreaElement>('[data-pkc-field="editor-body"]');
+    expect(after, '編集欄が消えた').not.toBeNull();
+    // 🔑 **同じ node** = native の取り消し履歴も caret も生きている
+    expect(after, '編集欄が作り直された(取り消し履歴が消える)').toBe(ta);
+    expect(after!.value, '打ちかけが消えた').toBe('打ちかけ + まだ state に戻していない分');
   });
 });

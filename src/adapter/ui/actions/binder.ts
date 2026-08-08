@@ -38,6 +38,8 @@ const VIEW_MODES: ReadonlySet<string> = new Set([
   'filer',
   'launcher',
   'settings',
+  'flags',
+  'help',
 ]);
 
 /** 既定 title の種別ラベル(連番は同 archetype の現在数 + 1)。 */
@@ -80,6 +82,12 @@ export interface BinderServices {
    */
   setExternalImages?(mode: string): void;
   /**
+   * フラグの切替(P11。user 指示 2026-08-07)。
+   * ⚠ **設定ではない** ── 開発者・パワーユーザー向けで、いつか畳まれる。
+   */
+  setFlag?(name: string, on: boolean): void;
+  resetFlags?(): void;
+  /**
    * いま開いているノートについて答えた(「常に確認」の帯の 2 つのボタン)。
    * ⚠ **ノート単位**で、覚えるのはタブを閉じるまで。⚠ 設定は変えない ──
    *   1 件の判断で全ノートの既定を動かさない。
@@ -89,6 +97,18 @@ export interface BinderServices {
   setBrowse?(mode: string): void;
   /** 新しい版に交代する(P7 段⑤)。⚠ 交代を頼むだけ ── 再読込は交代後。 */
   applyUpdate?(): void;
+  /**
+   * 起動したときのお知らせ(P11 段⑤)。
+   * ⚠ `dismiss` は**読んだことにする**(次から出ない)。`mute` は**今後出さない**
+   *   ── 設定から戻せる(戻せない導線は作らない)。
+   */
+  dismissAnnounce?(): void;
+  muteAnnounce?(): void;
+  /**
+   * お知らせを出すかの設定(P11 段⑤)。⚠ **flag ではない**(正規設定)──
+   * 開放先は user で、畳む予定も無い。⚠ 帯の「今後は出さない」の**戻し道**である。
+   */
+  setNoticesEnabled?(on: boolean): void;
   /** 更新の案内を見送る(次に開いたときに再び出る)。 */
   dismissUpdate?(): void;
   /** アーカイブ書出し(P6d)。 */
@@ -640,6 +660,14 @@ const ACTIONS: Record<string, ActionHandler> = {
         : target.getAttribute('data-pkc-external-images-value');
     if (mode) services.setExternalImages?.(mode);
   },
+  'set-flag': (_dispatcher, target, services) => {
+    // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
+    const name = target.getAttribute('data-pkc-flag');
+    if (name && target instanceof HTMLInputElement) services.setFlag?.(name, target.checked);
+  },
+  'reset-flags': (_dispatcher, _target, services) => {
+    services.resetFlags?.();
+  },
   'allow-external-images': (_dispatcher, _target, services) => {
     services.answerExternalImages?.(true);
   },
@@ -651,6 +679,16 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'dismiss-update': (_dispatcher, _target, services) => {
     services.dismissUpdate?.();
+  },
+  'set-notices-enabled': (_dispatcher, target, services) => {
+    // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
+    if (target instanceof HTMLInputElement) services.setNoticesEnabled?.(target.checked);
+  },
+  'dismiss-announce': (_dispatcher, _target, services) => {
+    services.dismissAnnounce?.();
+  },
+  'mute-announce': (_dispatcher, _target, services) => {
+    services.muteAnnounce?.();
   },
   'export-archive': (_dispatcher, _target, services) => {
     services.exportArchive?.();

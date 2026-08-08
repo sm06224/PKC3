@@ -1,7 +1,7 @@
 // 見た目(P7b 段⑨)。⚠ **ここから import する**のが唯一の入り口 ── index.html に
 // `<link>` を書くと Vite の hash 付き出力に乗らず、SW の precache 一覧からも外れる
 import './styles/app.css';
-import { APP_ID, APP_VERSION, BUILD_KIND } from '@runtime/release-meta';
+
 import { Dispatcher } from '@adapter/state/dispatcher';
 import { connectStoreEffects } from '@adapter/state/store-effects';
 import { StoreClient } from '@adapter/platform/storage/store-client';
@@ -22,6 +22,10 @@ import { runExplicitPurge } from '@adapter/platform/storage/asset-gc';
 import { buildShell } from '@adapter/ui/render/shell';
 import { showNotices, clearNotices } from '@adapter/ui/render/notices';
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
+import { createAnnounce, announceServices } from '@adapter/ui/render/announce';
+import { versionText } from '@adapter/ui/render/help';
+import { appNoticeStore } from '@adapter/platform/notice-store';
+import { NOTICES } from '@features/notice/notice-log';
 import { applyTheme, chooseTheme, initialTheme, isTheme } from '@adapter/ui/render/theme';
 import { appExternalImages } from '@adapter/ui/render/external-images';
 import { launchTile } from '@adapter/ui/launch-tile';
@@ -88,6 +92,12 @@ export interface AppHandle {
    * ⚠ 交代を頼むだけ ── 再読込は交代が済んでから(`watchForUpdate` の側)。
    */
   presentUpdate(apply: () => void): void;
+  /**
+   * 起動したときのお知らせを見せる(P11 段⑤)。
+   * ⚠ **boot が落ち着いてから**呼ぶ ── 何も映っていない画面に帯だけ立てない。
+   * ⚠ 未読が 0 件・恒久オフなら**何も出さない**(判定は面の側)。
+   */
+  presentAnnounce(): void;
 }
 
 /**
@@ -248,12 +258,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   /**
    * 🔴 **版を常設しない**(P10、user 指示「上下の帯は不要 / 大して働いていない」)。
    * 直す前は 99% の時間ここが「pkc3 v3.0.0」だった ── それが「働いていない」の中身。
-   * 版は**設定の画面**へ移した(下の `showVersion`)。
+   * 版は**ヘルプの画面**へ移した(P11。設定は「あなたが選ぶもの」の場所で、版は選べない)。
    * ⚠ ただし **fallback(意図しない保存先)は常に出す** ── これは user が知るべき
    * 事実で、黙ると「編集が消える」の原因が見えなくなる。
+   *
+   * 🔴 **版の組み立ては `versionText()` 1 本**(2026-08-08、レビュー指摘)。
+   * ⚠ 直す前はここが 2 か所目の手組みで、`(dev)` と「(開発版)」の**2 系統の綴り**が
+   *   同時に出ていた ── PKC2 が「版が 4 系統でバラバラ」になった芽そのもの。
+   *   `docs-parity` が `src/adapter/ui/render/` を全数走査して 1 か所を pin する。
    */
   const statusBase = init.fallbackReason ? `⚠ ${init.fallbackReason}` : '';
-  regions.status.title = `${APP_ID} v${APP_VERSION} (${BUILD_KIND}) — ${init.vfs}`;
+  regions.status.title = `${versionText()} — ${init.vfs}`;
   // textContent の setter は同一文字列でも子ノードを全置換する ── 打鍵ごとの
   // state 変化で無駄な DOM 変異を起こさないよう、変わったときだけ書く
   let statusShown = statusBase;
@@ -466,6 +481,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           },
       files,
     ).then(() => {});
+
+  /**
+   * 📣 起動したときのお知らせ(P11 段⑤。user 指示 2026-08-07
+   * 「PKC3 にも PKC2 のようにお知らせポップアップをつけてください」)。
+   *
+   * ⚠ **自分の行**に出す(`shell.ts` に理由)。⚠ 出すのは boot が落ち着いてから
+   *   ── 起動直後に出すと、まだ何も映っていない画面に帯だけが立つ。
+   */
+  const announce = createAnnounce(regions.announce, appNoticeStore, NOTICES);
 
   /** 更新の案内(P7 段⑤)。面と「押されたら何をするか」は render 側が持つ。 */
   const updatePrompt = createUpdatePrompt(regions.update, {
@@ -704,6 +728,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       center.invalidateDetail();
       center.render(dispatcher.getState());
     },
+    /**
+     * 🚩 フラグ(P11。user 指示 2026-08-07)。⚠ **設定ではない** ──
+     * 開発者・パワーユーザー向けで、`foldWhen` の条件が来たら畳まれる。
+     * ⚠ 保存は localStorage(裁定 Q6)。state には持たせない。
+     */
+    setFlag: (name, on) => {
+      center.setFlag(name, on);
+    },
+    resetFlags: () => {
+      center.resetFlags();
+    },
     /** 帯の「このノートで読み込む」「読み込まない」。⚠ 設定は変えない。 */
     answerExternalImages: (allow) => {
       const lid = dispatcher.getState().selectedLid;
@@ -729,6 +764,20 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       if (dispatcher.getState().viewMode !== 'detail')
         dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
     },
+    /**
+     * 📣 起動したときのお知らせ(P11 段⑤)。
+     *
+     * 🔴 **中身は `announce.ts` に取り出してある**(2026-08-08、変異試験の指摘)──
+     * この file は**どの test からも実行されていない**ので、ここへ直書きすると
+     * 「設定を切っただけの user を既読にする」型の取り違えが**全 test 緑のまま**
+     * 出荷される(実際に変異で確かめた)。
+     * ⚠ 映し直しだけは主語がここ(`center`)なので、注入して渡す。
+     */
+    ...announceServices(announce, appNoticeStore, () =>
+      // ⚠ 器は 1 度しか組まないので、映さないと古い値が見える
+      //    (CLAUDE.md「設定画面の値の同期」)
+      center.render(dispatcher.getState()),
+    ),
     // 🔄 新しい版へ交代する(P7 段⑤)。⚠ 頼むだけ ── 再読込は交代が済んでから
     applyUpdate: () => updatePrompt.apply(),
     // ⚠ 見送っても待機中の worker は残るので、次に開いたときに再び出る
@@ -880,6 +929,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       );
     },
     presentUpdate: (apply) => updatePrompt.present(apply),
+    presentAnnounce: () => announce.present(),
   };
 }
 
@@ -929,6 +979,12 @@ function bootstrap(): void {
       // PKC2 の教訓 ── 「#root 存在待ち」は HTML load 段階で通過して flake 化する
       root.setAttribute('data-pkc-boot', 'ready');
       preboot?.booted(); // 以後は勝手に読み直さない(下書きを巻き込まない)
+      /**
+       * 📣 お知らせ(P11 段⑤)。⚠ **boot 完了の刻印より後**に出す ──
+       * 先に出すと、まだ何も映っていない画面に帯だけが立つ。
+       * ⚠ `watchForUpdate` より前でよい(別の行なので重ならない)。
+       */
+      app.presentAnnounce();
       // 🔄 更新の案内(P7 段⑤)。⚠ 自動では交代させない ── 交代は旧 build の
       // cache を消すので、user が押したときだけ・押したタブだけを再読込する
       void watchForUpdate(

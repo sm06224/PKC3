@@ -20,3 +20,4 @@ tests/**/*.probe.test.ts
 
 # Rust ビルド中間物(出荷物 src/adapter/platform/wasm/*.wasm は commit する)
 rust/target/
+.claude/worktrees/

@@ -1,0 +1,376 @@
+/** @vitest-environment happy-dom */
+/**
+ * 🔴 **ヘルプの面**(P11 段④。user 指示 2026-08-07)。
+ *
+ * > 「**お知らせ掲載内容は過去のお知らせとして、最大 10 件を…ヘルプ画面から
+ * > 参照できるようにしてください / ヘルプ画面にはマニュアル導線も含めてください**」
+ *
+ * ## この test が守るもの
+ *
+ * - 版・お知らせ・マニュアルの **3 つが出る**(1 つ欠けても落ちる)
+ * - 🔴 **マニュアルに文書内アンカーが無い** ── 面は `hidden` で同一 document に
+ *   常駐するので、`#slug` は**先に作られた本文面の見出し**に当たる
+ * - 🔴 **器を捨てない**(この repo が 4 度踏んだ罠)
+ * - 🔴 **面の表が 2 つある**(`app-state.ts` の `ASIDE_PANES` と `center.ts` の
+ *   `ASIDE`)── 片方だけに足すと「押しても本文が出る」。両方を**振る舞いで**突合する
+ */
+import { describe, expect, it, beforeEach } from 'vitest';
+import { HelpRenderer, MANUAL_TEXT, versionText } from '../../src/adapter/ui/render/help';
+import { CenterRouter } from '../../src/adapter/ui/render/center';
+import {
+  initialState,
+  isAsidePane,
+  type AppState,
+  type ViewMode,
+} from '../../src/adapter/state/app-state';
+import { APP_VERSION } from '../../src/runtime/release-meta';
+import {
+  NOTICES,
+  NOTICE_ITEMS_MAX,
+  NOTICE_ITEM_CHARS_MAX,
+  NOTICE_ITEM_CHARS_MIN,
+  NOTICE_KEEP_MAX,
+  NOTICE_SHOW_MAX,
+} from '../../src/features/notice/notice-log';
+
+let region: HTMLElement;
+beforeEach(() => {
+  document.body.textContent = '';
+  region = document.createElement('div');
+  document.body.append(region);
+});
+
+describe('ヘルプの面', () => {
+  it('題名と、版・お知らせ・マニュアルの 3 つが出る', () => {
+    new HelpRenderer(region).render();
+    expect(region.querySelector('[data-pkc-field="pane-title"]')?.textContent).toBe('ヘルプ');
+    expect(
+      region.querySelector('[data-pkc-field="help-version"]')?.textContent,
+      '版が出ていない(不具合報告に要る)',
+    ).toContain(APP_VERSION);
+    /**
+     * 🔴 **面が種別の刻印を落としていない**(2026-08-08、レビュー指摘)。
+     * ⚠ `versionText` 単体の test は在ったが、**面が `versionText('product')` を
+     *   呼ぶ変異は生き延びた** ── `'pkc3 v3.0.0'` は「版番号を含む」も
+     *   `/^pkc3 v\d/` も満たすので、unit も smoke も緑のまま
+     *   **全ビルドから開発版の刻印が消える**。関数を試すだけでは面を守らない。
+     * ⚠ vitest は `BUILD_KIND === 'dev'`(`release-meta.ts`)。
+     */
+    expect(
+      region.querySelector('[data-pkc-field="help-version"]')?.textContent,
+      '面が種別の刻印を落としている(versionText を固定引数で呼んでいる)',
+    ).toContain('(開発版)');
+    expect(region.querySelector('[data-pkc-region="help-notices"]'), 'お知らせが無い').not.toBeNull();
+    expect(region.querySelector('[data-pkc-region="help-manual"]'), 'マニュアルが無い').not.toBeNull();
+  });
+
+  /**
+   * ⚠ 版の種別は**文字で出す**(設定は hover の `title` にしか入れておらず、
+   * タッチ端末・キーボードだけの user には届かなかった)。
+   */
+  /**
+   * ⚠ **種別を引数で試す**(2026-08-08、変異試験の指摘)。`BUILD_KIND` は build 時に
+   * 焼き込まれるので、既定引数のままでは**分岐を 1 つも動かせず**、刻印を落とす
+   * 変異が誰にも殺されなかった。
+   */
+  it('🔴 版に種別の刻印が出る(product だけ無印)', () => {
+    expect(versionText('product'), 'product に余計な刻印が付いた').toBe(`pkc3 v${APP_VERSION}`);
+    expect(versionText('stage'), '検証版の刻印が無い').toContain('(検証版)');
+    expect(versionText('dev'), '開発版の刻印が無い').toContain('(開発版)');
+  });
+
+  it('🔴 お知らせが新しい順に、上限まで出る', () => {
+    new HelpRenderer(region).render();
+    const ids = [...region.querySelectorAll('[data-pkc-help-notice]')].map(
+      (e) => e.getAttribute('data-pkc-help-notice') ?? '',
+    );
+    expect(ids.length, 'お知らせが 1 件も出ていない(fixture の空振り)').toBeGreaterThan(0);
+    expect(ids.length).toBeLessThanOrEqual(NOTICE_SHOW_MAX);
+    expect([...ids].sort().reverse(), '新しい順に並んでいない').toEqual(ids);
+    // 日付は id から引く(field を二重に持たない)
+    const first = region.querySelector('[data-pkc-field="notice-title"]')?.textContent ?? '';
+    expect(first, '日付が出ていない').toMatch(/^\d{4}-\d{2}-\d{2} /);
+  });
+
+  /**
+   * 🔴 **切るのは `recentNotices` だけ**(P11 の決まり)。
+   * ⚠ 1 巡目は登記表が **1 件**だったので、上限も並びも「測っていない次元」だった
+   *   ── 丸ごと出す変異が素通りした(変異試験で判明)。登記表を注入して試す。
+   */
+  it('🔴 登記表が上限より多くても、出るのは上限まで(新しい順)', () => {
+    const many = Array.from({ length: NOTICE_SHOW_MAX + 4 }, (_, i) => ({
+      id: `2026-02-${String(i + 1).padStart(2, '0')}-x`,
+      title: `t${i}`,
+      items: ['本文'],
+    }));
+    expect(many.length, 'fixture が上限を超えていない(空振り)').toBeGreaterThan(NOTICE_SHOW_MAX);
+    new HelpRenderer(region, null, many).render();
+    const ids = [...region.querySelectorAll('[data-pkc-help-notice]')].map(
+      (e) => e.getAttribute('data-pkc-help-notice') ?? '',
+    );
+    expect(ids, '上限まで切っていない').toHaveLength(NOTICE_SHOW_MAX);
+    expect(ids[0], '新しい順になっていない').toBe(`2026-02-${NOTICE_SHOW_MAX + 4}-x`);
+  });
+
+  /**
+   * 🔴 **素のテキストで出す**(ヘルプ側。帯とは**別の描画経路**である)。
+   * ⚠ CLAUDE.md「同じ値を複数の描画経路へ渡すものは、経路ごとに pin する」──
+   *   帯だけ見ていたので、ヘルプ側を `innerHTML` にする変異が素通りした。
+   */
+  it('🔴 お知らせが素のテキストで出る(HTML として描かない)', () => {
+    new HelpRenderer(region, null, [
+      { id: '2026-08-08-x', title: 't', items: ['<b>太字</b>と <img src="x"> を書いた'] },
+    ]).render();
+    const li = region.querySelector('[data-pkc-help-notice] li')!;
+    expect(li.children.length, 'HTML として描いている').toBe(0);
+    expect(li.textContent, '原文が消えている').toContain('<b>太字</b>');
+  });
+
+  /** ⚠ 見出しが無いと、版の行とお知らせが地続きに見える。 */
+  it('⚠ 「これまでのお知らせ」と「マニュアル」の見出しが出る', () => {
+    new HelpRenderer(region).render();
+    const heads = [...region.querySelectorAll('h3')].map((e) => e.textContent);
+    expect(heads, '見出しが足りない').toEqual(['これまでのお知らせ', 'マニュアル']);
+  });
+
+  /**
+   * ⚠ **取込の注意**(`notices.ts`)と名前がかぶらないこと。同じ document に
+   * 両方が居るので、かぶると片方を数える検査がもう片方を拾う。
+   */
+  it('⚠ 取込の注意と属性名がかぶらない', () => {
+    new HelpRenderer(region).render();
+    expect(region.querySelector('[data-pkc-notice]'), '取込の注意と同じ名前を使っている').toBeNull();
+  });
+
+  it('マニュアルを焼き込んでいる(外へ見に行かない)', () => {
+    expect(MANUAL_TEXT.length, 'マニュアルが空').toBeGreaterThan(1000);
+    expect(MANUAL_TEXT, 'マニュアル本体ではない').toContain('## 4. 画面のならび');
+  });
+
+  /**
+   * 🔴 **文書内アンカーを持たせない。**
+   *
+   * 面は `hidden` で同一 document に常駐する ── 本文の見出しは `id=<slug>` を
+   * 焼くので、マニュアルの `#slug` は**先に作られた本文面の見出し**に当たる。
+   * ⚠ `:::toc` も同じ理由で書けない(生成されるのは文書内リンクである)。
+   */
+  it('🔴 マニュアルに文書内アンカーが 1 件も無い', () => {
+    const anchors = [...MANUAL_TEXT.matchAll(/\]\(#[^)]*\)/g)].map((m) => m[0]);
+    expect(anchors, `文書内アンカーが在る: ${anchors.join(' ')}`).toEqual([]);
+    /**
+     * ⚠ **書いてあるのと使っているのは別**。マニュアルは §3 で `:::toc` という
+     * 記法を**説明している**(バッククォートの中)── それは描かれない。
+     * 落としたいのは**行頭の `:::toc`**(実際に目次が生成される形)である。
+     */
+    const tocLines = MANUAL_TEXT.split('\n').filter((l) => /^:::toc\b/.test(l));
+    expect(tocLines, ':::toc は文書内リンクを作る').toEqual([]);
+  });
+
+  /**
+   * 🔴 **器を捨てない**(情報ペイン / ファイラ / 本文の面で 3 度、
+   * 2026-08-07 に踏んだ)。押される寸前のボタンが別 node になると binder が捨てる。
+   */
+  it('🔴 描き直しても器が同じ node のまま', () => {
+    const r = new HelpRenderer(region);
+    r.render();
+    const before = region.querySelector('[data-pkc-region="help-manual"]');
+    r.render();
+    expect(region.querySelector('[data-pkc-region="help-manual"]'), '器を作り直した').toBe(before);
+  });
+
+  /** ⚠ ワーカーが無いときは**素の原文**を出す ── 白紙にしない。 */
+  it('⚠ markdown の口が無くても白紙にしない', () => {
+    new HelpRenderer(region).render();
+    const host = region.querySelector('[data-pkc-region="help-manual"]')!;
+    expect(host.textContent, '白紙になっている').toContain('画面のならび');
+  });
+
+  it('markdown の口が在れば、それで描く', async () => {
+    const seen: string[] = [];
+    new HelpRenderer(region, {
+      render: async (t) => {
+        seen.push(t);
+        return '<p data-probe="1">描いた</p>';
+      },
+    }).render();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(seen[0], 'マニュアル全文を渡していない').toBe(MANUAL_TEXT);
+    expect(region.querySelector('[data-probe="1"]'), '描いた結果が入っていない').not.toBeNull();
+  });
+
+  /** ⚠ 口が壊れていても白紙にしない(素の原文へ落ちる)。 */
+  it('⚠ markdown の口が投げても白紙にしない', async () => {
+    new HelpRenderer(region, {
+      render: () => Promise.reject(new Error('worker died')),
+    }).render();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    const host = region.querySelector('[data-pkc-region="help-manual"]')!;
+    expect(host.textContent, '白紙になっている').toContain('画面のならび');
+  });
+});
+
+/**
+ * 🔴 **お知らせの登記表の決まり**(書式は `.claude/skills/notice-writing/SKILL.md`)。
+ * ⚠ 散文の規律にしない ── PKC2 は 1 entry 22 項目・1 項目 200 字超の壁を作った。
+ */
+describe('お知らせの登記表', () => {
+  it('🔴 記法を書いていない(素のテキストとして出る)', () => {
+    for (const n of NOTICES) {
+      for (const line of n.items) {
+        expect(line, `記法が書かれている: ${line}`).not.toMatch(/\*\*|`|\]\(/);
+      }
+    }
+  });
+
+  it('🔴 id が `YYYY-MM-DD-slug` で、重複しない', () => {
+    const ids = NOTICES.map((n) => n.id);
+    for (const id of ids) expect(id, `id の形が違う: ${id}`).toMatch(/^\d{4}-\d{2}-\d{2}-[a-z0-9-]+$/);
+    expect(new Set(ids).size, 'id が重複している').toBe(ids.length);
+  });
+
+  /**
+   * 🔴 **宣言した上限を、実際に読む。**
+   *
+   * ⚠ PKC2 は `date` field を宣言して**一度も読まなかった** ── この登記表で
+   * 同じことをやりかけた。上限を定数で持っただけでは、**誰も止めない**。
+   * だから定数を**この test が読む**(`.claude/skills/notice-writing/` の表と同じ値)。
+   */
+  it('🔴 項目数・字数が上限の中に収まっている', () => {
+    for (const n of NOTICES) {
+      expect(n.items.length, `${n.id}: 項目が多い`).toBeLessThanOrEqual(NOTICE_ITEMS_MAX);
+      expect(n.items.length, `${n.id}: 項目が 0 件`).toBeGreaterThan(0);
+      expect(n.title.length, `${n.id}: 題名が空`).toBeGreaterThan(0);
+      for (const line of n.items) {
+        expect(line.length, `${n.id}: 長すぎる項目「${line}」`).toBeLessThanOrEqual(
+          NOTICE_ITEM_CHARS_MAX,
+        );
+        // ⚠ 下限も置く ── 空の行が user の画面に出るのを止める
+        expect(line.length, `${n.id}: 短すぎる項目「${line}」`).toBeGreaterThanOrEqual(
+          NOTICE_ITEM_CHARS_MIN,
+        );
+      }
+    }
+  });
+
+  /**
+   * ⚠ **掲示した約束は取り消せない**(PKC2 は掲示済みの挙動が後の既定変更を縛った)。
+   * 「これから〜します」ではなく「〜できるようになりました」だけを書く。
+   */
+  it('⚠ これからの約束を書いていない', () => {
+    for (const n of NOTICES) {
+      for (const line of n.items) {
+        expect(line, `未来の約束が書かれている: ${line}`).not.toMatch(
+          /(予定です|する予定|していきます|対応します|近日)/,
+        );
+      }
+    }
+  });
+
+  /**
+   * ⚠ 登記表に残す件数の上限(読まれない物を配り続けない)。
+   * ⚠ **自己言及にしない**(2026-08-08、変異試験の指摘)── 定数で fixture を作って
+   *   同じ定数で assert していたので、`20 → 200` にする変異が素通りした。
+   *   **宣言そのもの**を pin する(`.claude/skills/notice-writing/` の表と同じ値)。
+   */
+  it('⚠ 登記表が上限を超えておらず、上限の宣言も動いていない', () => {
+    expect(NOTICES.length).toBeLessThanOrEqual(NOTICE_KEEP_MAX);
+    expect(NOTICE_SHOW_MAX, '表示上限が変わった').toBe(10);
+    expect(NOTICE_KEEP_MAX, '保持上限が変わった').toBe(20);
+    expect(NOTICE_KEEP_MAX, '「表示の 2 倍」という宣言が崩れた').toBe(NOTICE_SHOW_MAX * 2);
+    expect(NOTICE_ITEMS_MAX, '項目数の上限が変わった').toBe(6);
+    expect(NOTICE_ITEM_CHARS_MAX, '字数の上限が変わった').toBe(120);
+    expect(NOTICE_ITEM_CHARS_MIN, '字数の下限が変わった').toBe(4);
+  });
+});
+
+/**
+ * 🔴 **面の表が 2 つある。**
+ *
+ * `app-state.ts` の `ASIDE_PANES`(「一覧を押したら中央をノートへ戻すか」)と
+ * `center.ts` の `ASIDE`(「中央に自分の器を持つか」)── 片方だけに足すと、
+ * その面は**開いても本文が出る**(押しても何も起きないように見える)。
+ * ⚠ ここは**振る舞いで**突合する(定数を export して見比べない ── export した
+ * 定数を見るだけの test は、`toPane` が別の判定を持っていても通る)。
+ */
+const ALL_VIEWS = [
+  'detail',
+  'calendar',
+  'kanban',
+  'filer',
+  'launcher',
+  'settings',
+  'flags',
+  'help',
+] as const satisfies readonly ViewMode[];
+
+/**
+ * ⚠ **型で全数を守る。** ここに足し忘れた ViewMode が在ると `never` に
+ * 代入できず `npm run typecheck` が落ちる ── 表の取りこぼしを人手に頼らない。
+ */
+const _exhaustive: Exclude<ViewMode, (typeof ALL_VIEWS)[number]> extends never ? true : never = true;
+void _exhaustive;
+
+/** ⚠ **本物の初期 state を使う**(手組みの偽物は、足りない field を静かに隠す)。 */
+function stateWith(viewMode: ViewMode): AppState {
+  return { ...initialState, viewMode };
+}
+
+describe('🔴 中央の面の表が 2 つある(食い違いを落とす)', () => {
+  it.each(ALL_VIEWS)('%s: 自分の器を持つ面と、ノートへ落ちる面が一致する', (view) => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const router = new CenterRouter(host);
+    router.render(stateWith(view));
+    const shown = [...host.querySelectorAll('[data-pkc-view-pane]')].filter(
+      (e) => !(e as HTMLElement).hidden,
+    );
+    expect(shown, '見えている面が 1 つではない').toHaveLength(1);
+    const name = shown[0]?.getAttribute('data-pkc-view-pane');
+    if (isAsidePane(view)) {
+      // 🔑 ノートを映さない面は、**自分の器**が出ていなければならない
+      expect(name, `${view} は自分の器を持っていない(center.ts の表に足し忘れ)`).toBe(view);
+      /**
+       * ⚠ **中身まで見る**(2026-08-08、変異試験の指摘)── 見えているかだけ見て
+       * いたので、render の分岐を消して**空の器**を出す変異が素通りした。
+       */
+      expect(
+        shown[0]!.querySelector('[data-pkc-field="pane-title"]'),
+        `${view} は器だけで中身が描かれていない`,
+      ).not.toBeNull();
+    } else {
+      /**
+       * 🔑 **逆向きも見る。** かんばん / カレンダーは自分の器、探し方
+       * (`filer` / `launcher`)は**本文へ落ちる**(探し方は左の列が持つ)。
+       * ⚠ ここを書かないと、`app-state.ts` の表にだけ足した面が素通りする。
+       */
+      const expected = view === 'kanban' || view === 'calendar' ? view : 'detail';
+      expect(name, `${view} の落ち先が違う(app-state.ts の表に足し忘れ)`).toBe(expected);
+    }
+  });
+
+  /**
+   * 🔴 **ヘルプは共有の markdown の口で描く**(面ごとに worker を立てない)。
+   * ⚠ 渡し忘れると素の原文表示に落ちるだけで**画面は成立して見える**ので、
+   *   1 巡目は誰も見ていなかった(変異試験で判明)。常駐メモリの規律でもある。
+   */
+  it('🔴 ヘルプが、アプリ共有の markdown の口を使う', async () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const seen: string[] = [];
+    const port = {
+      render: (t: string) => {
+        seen.push(t);
+        return Promise.resolve('<p data-probe="1"></p>');
+      },
+    };
+    const router = new CenterRouter(host, undefined, null, port as never);
+    router.render(stateWith('help'));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(seen, 'ヘルプが共有の口を使っていない(面ごとに worker を立てる形)').toHaveLength(1);
+    expect(host.querySelector('[data-probe="1"]'), '描いた結果が入っていない').not.toBeNull();
+  });
+});

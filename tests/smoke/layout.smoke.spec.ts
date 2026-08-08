@@ -63,18 +63,23 @@ test('🔴 枠が組めている(3 列 / 重なりなし)', async ({ page }) => 
   //    変異が生き残った**(実際に一度そう書いた)── 重なりは「両方出たとき」に
   //    しか観測できない。自然に両方出す(取込の注意 + 待機中の SW)のは高くつくので、
   //    ここでは**強制的に出して位置関係だけ**を見る
+  //    ⚠ **お知らせ(P11)も同じ表に足す** ── 帯を 1 つ足すたびに「重なっていない」
+  //    の検査対象を増やさないと、新しい帯だけが誰にも見られない
   await page.evaluate(() => {
-    for (const name of ['update', 'notices']) {
+    for (const name of ['announce', 'update', 'notices']) {
       const el = document.querySelector<HTMLElement>(`[data-pkc-region="${name}"]`);
       if (!el) continue;
       el.hidden = false;
       el.textContent = 'x';
     }
   });
+  const ann = (await page.locator('[data-pkc-region="announce"]').boundingBox())!;
   const upd = (await page.locator('[data-pkc-region="update"]').boundingBox())!;
   const noti = (await page.locator('[data-pkc-region="notices"]').boundingBox())!;
+  expect(ann.height).toBeGreaterThan(0);
   expect(upd.height).toBeGreaterThan(0);
   expect(noti.height).toBeGreaterThan(0);
+  expect(ann.y + ann.height, 'お知らせと更新の案内が重なっている').toBeLessThanOrEqual(upd.y + 1);
   expect(upd.y + upd.height, '更新の案内と注意の面が重なっている').toBeLessThanOrEqual(
     noti.y + 1,
   );
@@ -1203,5 +1208,51 @@ test('🔴 フォルダに入れる → 読み込み直しても中に居る', a
   await clickReal(page, `[data-pkc-region="filer-table"] [data-pkc-entry="${folderLid}"]`);
   expect(await lidsOf(), '読み込み直したら居場所が失われた').toEqual([noteLid, createdLid]);
 
+  expect(errors).toEqual([]);
+});
+
+/**
+ * 🔴 **長いノートを送っても「編集 / 履歴 / 削除」が消えない**(2026-08-08)。
+ *
+ * P8 段⑪ で操作の帯を `position: sticky` にしたのは「長いノートで編集を押すために
+ * 毎回先頭まで戻る」を無くすためだった。ところが**面の箱がスクロール箱の高さ
+ * 止まり**だったので、⚠ **その高さを越えて送ると貼り付きが外れて帯が消えていた**
+ * (sticky は自分の親の箱の中でしか貼り付かない)。
+ *
+ * ⚠ **既存の smoke は 700px しか送っておらず、素通りしていた** ── 当時の版面
+ * (829px)より浅かったからである。P11 のお知らせの帯でスクロール箱が 196px
+ * 低くなって初めて落ちた:**元から壊れていて、閾値が下がって見えただけ**。
+ * 🔑 だからここは**版面より深く**送る(浅い数字は「測っていない」に等しい)。
+ */
+test('🔴 長いノートを深く送っても、操作の帯が画面に残る', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await gotoApp(page);
+
+  const long = Array.from({ length: 120 }, (_, i) => `## 節 ${i}\n\n段落 ${i}。\n`).join('\n');
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-body"]').fill(long);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-field="detail-body"]')).toBeVisible();
+
+  const detail = page.locator('[data-pkc-region="detail"]');
+  const client = await detail.evaluate((el) => el.clientHeight);
+  const max = await detail.evaluate((el) => el.scrollHeight - el.clientHeight);
+  // ⚠ 前提: **版面より深く送れる**(送れないなら何も見ていない)
+  expect(max, '深く送れる本文になっていない(fixture の空振り)').toBeGreaterThan(client * 2);
+
+  for (const top of [client + 50, client * 2, max]) {
+    await detail.evaluate((el, v) => (el.scrollTop = v), top);
+    const box = await page.locator('[data-pkc-action="start-edit"]').boundingBox();
+    expect(box, `scrollTop=${top} で「編集」が消えた`).not.toBeNull();
+    /**
+     * 🔑 観測点は **`y >= 0`**(= 画面の上に隠れていない)。
+     * ⚠ 「要素が在る」で止めない ── 貼り付きが外れた形はまさに
+     *   「DOM には在るが上へ流れて見えない」である(実測 y = -109)。
+     */
+    expect(box!.y, `scrollTop=${top} で帯が上へ流れた(貼り付きが外れた)`).toBeGreaterThanOrEqual(
+      -1,
+    );
+  }
   expect(errors).toEqual([]);
 });

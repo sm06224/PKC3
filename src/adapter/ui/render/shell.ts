@@ -39,6 +39,14 @@ export interface ShellRegions {
    * そこへ載せると user が押す前に**次の取込で黙って消える**。
    */
   update: HTMLElement;
+  /**
+   * 🔴 **起動したときのお知らせ**(P11 段⑤)。
+   *
+   * ⚠ notices / update とは**別の行**。理由は上の 2 つと同じで、しかも両方効く ──
+   * notices は取込のたびに中身が作り替わるので**読む前に消え**、update と同じ行に
+   * すると**両方出たときに重なる**。
+   */
+  announce: HTMLElement;
 }
 
 /**
@@ -56,6 +64,13 @@ export interface ShellRegions {
  */
 const VIEW_BUTTONS: readonly { view: string; label: string }[] = [
   { view: 'settings', label: '設定' },
+  // ⚠ 開発者・パワーユーザー向け(P11)。設定とは**別の面**にする(裁定 Q3)
+  { view: 'flags', label: 'フラグ' },
+  /**
+   * ヘルプ(P11。user 指示 2026-08-07「ヘルプ画面にはマニュアル導線も含めて
+   * ください」)。⚠ **一番下**に置く ── 「困ったら最後に見る場所」の位置。
+   */
+  { view: 'help', label: 'ヘルプ' },
 ] as const;
 
 /**
@@ -290,7 +305,23 @@ export function buildShell(root: HTMLElement): ShellRegions {
   update.setAttribute('data-pkc-region', 'update');
   update.hidden = true;
 
-  shell.append(sidebar, center, inspector, update, notices, status);
+  // 既定は空(= 未読が無ければ行の高さは 0)
+  const announce = document.createElement('section');
+  announce.setAttribute('data-pkc-region', 'announce');
+  announce.hidden = true;
+
+  shell.append(sidebar, center, inspector, announce, update, notices, status);
   root.append(shell);
-  return { browseHost, sidebar, center, detail, append, inspector, status, notices, update };
+  return {
+    browseHost,
+    sidebar,
+    center,
+    detail,
+    append,
+    inspector,
+    status,
+    notices,
+    update,
+    announce,
+  };
 }
