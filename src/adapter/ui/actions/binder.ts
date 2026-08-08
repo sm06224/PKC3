@@ -19,6 +19,7 @@ import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
 import { applyFormat, type FormatOp } from '@features/markdown/text-ops';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
 import { resolveFilerScope } from '@features/relation/tree';
+import { parseLinkTarget } from '@features/entry-ref/link-target';
 import { handleCopyMdBlock } from './copy-md-block';
 import { askConfirm, SUPPRESSED_MESSAGE } from '@adapter/platform/ask-confirm';
 
@@ -310,7 +311,67 @@ function moveOrder(
   dispatcher.dispatch({ type: 'MOVE_ENTRY_ORDER', lid, direction });
 }
 
+/**
+ * 本文のリンク(`entry:` / `@card`)から別のノートを開く。
+ *
+ * 🔴 **規則は 1 本**(`link-target.ts`)。⚠ 断る 3 つはどれも**可視に**返す ──
+ * `SELECT_ENTRY` は編集中 / error / 未知 lid で**黙って何もしない**ので、
+ * 素直に撃つと「押しても無言」が残る(直そうとしている当のものになる)。
+ */
+function navigateToLink(dispatcher: Dispatcher, raw: string | null): void {
+  const t = parseLinkTarget(raw ?? '');
+  if (t.kind === 'invalid') {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: 'リンクの書き方が読めません' });
+    return;
+  }
+  if (t.foreign) {
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: 'このリンクは別の PKC のノートを指しています',
+    });
+    return;
+  }
+  const state = dispatcher.getState();
+  // ⚠ **編集中は移らない**(下書きを守る)。⚠ 面の切替とは別の判断である ──
+  //   あちらは面が常駐するので開けるようにした(user 裁定 2026-08-08)
+  if (state.phase === 'editing') {
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: '編集を終了してからリンク先を開いてください',
+    });
+    return;
+  }
+  if (!state.entryMetas.has(t.lid)) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: 'リンク先のノートが見つかりません' });
+    return;
+  }
+  dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: t.lid });
+}
+
 const ACTIONS: Record<string, ActionHandler> = {
+  /**
+   * 🔴 **本文のリンクで別のノートへ飛ぶ**(2026-08-08。user 裁定「任せます」)。
+   *
+   * markdown は `[題名](entry:<lid>)` と `@[card](entry:<lid>)` に
+   * `data-pkc-action` を焼いていたのに、**受け手が 1 つも無かった** ──
+   * 記法だけ移植して置き忘れた形で、押しても無言で何も起きなかった。
+   *
+   * ⚠ **無言で断らない**(`delete-entry` と同じ倒し方)。断る先は 3 つ:
+   *  ① 編集中(下書きを守る。⚠ 面の切替とは別 ── あちらは開けるようにした)
+   *  ② 解けないリンク(壊れた綴り)③ このアプリに無い / 別コンテナのノート
+   * ⚠ **fragment は見ない** ── 飛び先の要素を出す実装が `src` に無い 4 形が
+   *   あるので、いまは lid まで開く(`link-target.ts` に理由)。
+   */
+  'navigate-entry-ref': (dispatcher, target) => {
+    navigateToLink(dispatcher, target.getAttribute('data-pkc-entry-ref'));
+  },
+  /**
+   * `@[card](…)` の placeholder。⚠ **解決器は `entry:` と同じ 1 本**
+   * (target は `entry:` か `pkc://<cid>/entry/<lid>` のどちらか)。
+   */
+  'navigate-card-ref': (dispatcher, target) => {
+    navigateToLink(dispatcher, target.getAttribute('data-pkc-card-target'));
+  },
   'select-entry': (dispatcher, target) => {
     const lid = target.getAttribute('data-pkc-entry');
     if (lid) dispatcher.dispatch({ type: 'SELECT_ENTRY', lid });
@@ -802,6 +863,22 @@ export function bindActions(
       '[data-pkc-action]',
     );
     if (!el || !root.contains(el)) return;
+    /**
+     * 🔴 **アプリ内リンクは、ブラウザに遷移させない**(2026-08-08)。
+     *
+     * 本文の `[題名](entry:<lid>)` は `<a href="entry:…">` として出る
+     * (`markdown-render.ts`)。ここは `preventDefault` を呼んでいなかったので、
+     * ⚠ **押すとブラウザが未知スキームへの遷移を試みる**。`asset:` の枝だけは
+     * 焼く側で href を剥がして避けていた ── **対称の反対側が放置されていた**。
+     *
+     * 🔑 **href を剥がす側では直さない**。剥がすと `<a>` が**フォーカスできなく
+     * なり**、キーボードの動線が落ちる(= 記法を減らすのと同じ向き)。
+     * ⚠ **`<a href>` に限る** ── checkbox(`set-flag` / `set-notices-enabled`)で
+     *   呼ぶと**チェック状態が巻き戻る**。`data-pkc-action` を持つ `<a href>` は
+     *   アプリ内リンクしか無い(`download-asset` は href を剥がしてある /
+     *   目次・脚注は action を持たない)。
+     */
+    if (el instanceof HTMLAnchorElement && el.hasAttribute('href')) ev.preventDefault();
     run(el.getAttribute('data-pkc-action'), el);
   };
   /**
@@ -875,6 +952,28 @@ export function bindActions(
     // ⚠ **追記欄より先に置く** ── 変換確定の Enter で送ってしまうと、
     // 日本語で書く人は「打ち終わる前に飛ぶ」を毎回踏む
     if (ke.isComposing) return;
+    /**
+     * 🔴 **`role="link"` のものは Enter / Space で押せる**(2026-08-08)。
+     *
+     * `@card` の placeholder は `<span role="link" tabindex="0">` で出る
+     * (`markdown-render.ts`)── PKC3 で `tabindex="0"` を持つ要素は**これだけ**で、
+     * ⚠ 直す前はこの下の `data-pkc-field` の門で**必ず抜けていた**ので、
+     * **フォーカスできるのに Enter が効かない**要素が 1 種類だけ存在していた
+     * (user 指示「マウスだけで完結し、キーボードは近道」の破れ)。
+     *
+     * ⚠ **`data-pkc-field` の門より前**に置く(placeholder は field を持たない)。
+     * ⚠ `<button>` / `<a>` はブラウザ既定で Enter → click に乗るので**対象外** ──
+     *   二重に撃たないよう `[tabindex]` を持つものだけ拾う。
+     */
+    if (ke.key === 'Enter' || ke.key === ' ') {
+      const el = ke.target instanceof HTMLElement ? ke.target : null;
+      if (el?.hasAttribute('tabindex') && el.hasAttribute('data-pkc-action')) {
+        // ⚠ Space は既定でページを送る ── 押した先が動くほうが正しい
+        ke.preventDefault();
+        run(el.getAttribute('data-pkc-action'), el);
+        return;
+      }
+    }
     // 追記欄: Ctrl/Cmd+Enter で送る(欄の中だけ ── 画面全体の近道にしない)
     if (field === 'append-input') {
       if (ke.key === 'Enter' && (ke.ctrlKey || ke.metaKey) && !ke.altKey) {
