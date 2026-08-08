@@ -10,7 +10,7 @@
  * まま」は `markdown-user-reports.test.ts`、両面 parity は
  * `markdown-css-parity.test.ts` が持つ)。
  *
- * ⚠ **存在だけでなく「全量」を等値で見る** ── 3 本のどれかが消えても、4 本目
+ * ⚠ **存在だけでなく「全量」を等値で見る** ── 4 本のどれかが消えても、5 本目
  *   (例: center や start の入れ替え)が生えても落ちる。「center は入れ替えない
  *   (反対が定義できない)」「start は裁定の射程外」も、この等値がそのまま守る。
  * ⚠ 走査は `build/body-css.ts` の parser を使う ── 焼き込み(書き出し HTML)が
@@ -40,7 +40,7 @@ describe('行頭アラインの入れ替え規則(user 裁定 2026-08-08)', () =
     }
   }
 
-  it('🔴 入れ替え規則は 3 本ちょうどで、値まで正しい(等値)', () => {
+  it('🔴 入れ替え規則は 4 本ちょうどで、値まで正しい(等値)', () => {
     expect(Object.fromEntries(swaps)).toEqual({
       // 横書き ltr(dir 無印 / ltr)で align: right ── 宣言 align が flow start と逆
       '.pkc-md-rendered[data-pkc-doc-align=right]:not([dir=rtl]) [data-pkc-align=opposite]':
@@ -51,6 +51,8 @@ describe('行頭アラインの入れ替え規則(user 裁定 2026-08-08)', () =
       // 縦書きで align: bottom(縦書きは direction: ltr 固定 = flow start は常に上)
       '.pkc-md-rendered[data-pkc-writing=vertical][data-pkc-doc-align=bottom] [data-pkc-align=opposite]':
         'text-align:start',
+      // 中央には反対側が無い ── 寄らない(= 何も変えない)
+      '.pkc-md-rendered[data-pkc-doc-align=center] [data-pkc-align=opposite]': 'text-align:inherit',
     });
   });
 
@@ -73,15 +75,26 @@ describe('行頭アラインの入れ替え規則(user 裁定 2026-08-08)', () =
       );
     }
     // 空振り防止 ── 入れ替え規則そのものが消えていたら、この検査は何も守らない
-    expect(swaps.size, '入れ替え規則が 1 本も無い(この検査が空振りしている)').toBe(3);
+    expect(swaps.size, '入れ替え規則が 1 本も無い(この検査が空振りしている)').toBe(4);
   });
 
-  it('⚠ center の入れ替えは無い(「center の反対側」は定義できない ── end は end のまま)', () => {
-    for (const sel of swaps.keys()) {
-      expect(sel, 'center を入れ替える規則が生えた(裁定の外の拡張)').not.toContain(
-        '[data-pkc-doc-align=center]',
-      );
-    }
+  /**
+   * 🔴 **中央の文書では寄らない**(user 指摘 2026-08-08:
+   * 「文書のセンター寄せに反対もクソもないだろうが」)。
+   * ⚠ 「反対が無いから流れの終わり側へ落とす」は**裁定が否定した旧実装への逆戻り**
+   *   であり、規則を一文で言えなくする(「反対側へ。ただし中央のときだけ終わり側へ」)。
+   *   だから値は `inherit` = **何も変えない**でなければならない。
+   * ⚠ `center` と書くのも駄目 ── 入れ子で親が別の寄せを持つとき「中央へ寄せ直す」に
+   *   なってしまう(「変わらない」とは違う)。
+   */
+  it('🔴 中央の文書では寄らない(値は inherit ── 終わり側へ落とさない)', () => {
+    const center = [...swaps.entries()].filter(([sel]) =>
+      sel.includes('[data-pkc-doc-align=center]'),
+    );
+    expect(center.length, '中央の文書で `|>` の行き先を決める規則が無い').toBe(1);
+    expect(center[0]![1], '中央なのに寄せ直している(inherit = 何も変えない、が正)').toBe(
+      'text-align:inherit',
+    );
   });
 
   /**
@@ -141,7 +154,7 @@ describe('行頭アラインの入れ替え規則(user 裁定 2026-08-08)', () =
   });
 
   /**
-   * 🔴 **書き出し側でも同じ 8 本が立っている**(2026-08-08 の 2 巡目レビュー)。
+   * 🔴 **書き出し側でも同じ 9 本が立っている**(2026-08-08 の 2 巡目レビュー)。
    * ⚠ 上の 2 件は app.css だけを見ており、**焼き込み側は片肺**だった ──
    *   `markdown-css-parity` の VIEWER 側は `toContain('[data-pkc-doc-align=left]')`
    *   のままなので、入れ替え規則の字面で満たされて基底の欠落を見逃す。
@@ -164,7 +177,7 @@ describe('行頭アラインの入れ替え規則(user 裁定 2026-08-08)', () =
       if (sel.includes('[data-pkc-doc-align=')) want.set(sel, normBody(r.body));
     }
     // 空振り防止 ── 集められていないなら、この比較は何も守っていない
-    expect(want.size, 'app.css 側で doc-align の規則を 1 本も拾えていない').toBe(8);
+    expect(want.size, 'app.css 側で doc-align の規則を 1 本も拾えていない').toBe(9);
     expect(Object.fromEntries(got)).toEqual(Object.fromEntries(want));
   });
 });

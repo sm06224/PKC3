@@ -482,6 +482,8 @@ describe('寄せの規則が 2 つの面に在る(書き出しだけ古くなら
       '.pkc-md-rendered[data-pkc-doc-align=left][dir=rtl][data-pkc-align=opposite]{text-align:start}',
       // 縦書き: flow start は常に上(direction: ltr 固定)── 逆は bottom だけ
       '.pkc-md-rendered[data-pkc-writing=vertical][data-pkc-doc-align=bottom][data-pkc-align=opposite]{text-align:start}',
+      // 中央には反対側が無い ── 寄らない
+      '.pkc-md-rendered[data-pkc-doc-align=center][data-pkc-align=opposite]{text-align:inherit}',
     ]) {
       expect(norm(CSS), `アプリ側に入れ替え規則が無い: ${rule}`).toContain(rule);
       expect(norm(VIEWER), `書き出し側に入れ替え規則が無い: ${rule}`).toContain(rule);

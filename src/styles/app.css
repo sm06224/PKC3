@@ -1376,9 +1376,20 @@ select:focus-visible {
  * ⚠ 縦書きは上の `direction: ltr` 固定により flow start が常に**上** ──
  *   「逆」になり得るのは `align: bottom` だけ(`data-pkc-doc-align='bottom'` は
  *   縦書きでしか出ない ── document-globals.ts が横書きでは不正組合せとして落とす)。
- * ⚠ `align: center` の規則は**意図して無い**(「center の反対側」が定義できない)。
+ * 🔴 **`align: center` の文書では何も起きない**(user 指摘 2026-08-08:
+ *   「文書のセンター寄せに反対もクソもないだろうが」)。中央に反対側は無いので、
+ *   反転のしようがない = **寄せは変わらない**。
+ *   ⚠ ここで「反対が無いから流れの終わり側へ」と落としてはいけない ── それは
+ *   裁定が否定した旧実装(logical end 固定)を、裁定が沈黙している 1 ケースだけに
+ *   こっそり戻す行為である。規則は一文で言えなければならない:
+ *   **「グローバルの寄せの反対側へ寄る。反対側が無ければ寄らない」**。
+ *   ⚠ 値は `inherit`(= 何も変えない)。`center` と書くと「中央へ寄せ直す」ことに
+ *   なり、入れ子の中で親が別の寄せを持つときに嘘になる。
  * ⚠ 詳細度は (0,4,0) ── 基底の `.pkc-md-rendered [data-pkc-align=…]`(0,2,0)に
  *   file 内の位置と無関係に勝つ。 */
+.pkc-md-rendered[data-pkc-doc-align='center'] [data-pkc-align='opposite'] {
+  text-align: inherit;
+}
 .pkc-md-rendered[data-pkc-doc-align='right']:not([dir='rtl']) [data-pkc-align='opposite'] {
   text-align: start;
 }
