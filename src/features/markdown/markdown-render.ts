@@ -2904,7 +2904,7 @@ function postProcessFigureSentinels(html: string): string {
  * **semantics**(user 裁定 2026-08-08、Issue #103 で確定):
  *
  *   - `||`                          → center(物理中央、書字方向 不変)
- *   - `|>` `<|` `|<` `>|`(全 4 形)→ **end**(グローバルの寄せの**反対側**)。
+ *   - `|>` `<|` `|<` `>|`(全 4 形)→ **opposite**(グローバルの寄せの**反対側**)。
  *     裁定「**|> も<|も|<も意味は同じ、グローバルの文字の寄せを反対にする**」──
  *     宣言 align が無ければ flow の終端(LTR + horizontal なら右、RTL なら左、
  *     vertical なら下)。宣言 align が flow start と逆の文書では flow start 側
@@ -3085,7 +3085,7 @@ function preprocessAlignPrefix(source: string, lineMapIn: number[]): {
   const lineMapOut: number[] = [];
   let currentAlign: AlignKind | null = null;
   // Detect prefix at line start. reform-2026-05 PR-C で 4 形の typo 寛容化:
-  // `||` (center) + `|>` / `<|` / `|<` / `>|` (全 4 形 end) followed by optional space.
+  // `||` (center) + `|>` / `<|` / `|<` / `>|` (全 4 形 opposite) followed by optional space.
   // 行頭の空白系文字種は無視(2026-05-08 user 統一方針:行頭系シンプル記法は
   // leading whitespace を全部 strip)。`   |>` / `\t|<` 等もマーカーとして拾う。
   const prefixRe = /^\s*(\|\||\|>|<\||\|<|>\|)(?:\s)?(.*)$/;
@@ -3138,7 +3138,7 @@ function preprocessAlignPrefix(source: string, lineMapIn: number[]): {
       /**
        * reform-2026-05 PR-C:logical alignment へ移行。
        *   `||`                    → center(対称形。typo 少なく別形なし)
-       *   `|>` `<|` `|<` `>|`     → **全 4 形が end**(typo 寛容)
+       *   `|>` `<|` `|<` `>|`     → **全 4 形が opposite**(typo 寛容)
        *
        * 🔴 **矢印の向きは意味を持たない**(user 裁定 2026-08-08、Issue #103):
        *
@@ -3148,11 +3148,14 @@ function preprocessAlignPrefix(source: string, lineMapIn: number[]): {
        * `features/markdown/document-globals.ts` が `dir` / `data-pkc-doc-align` に写す)
        * であって、**行頭マーカーが物理方向を主張してはいけない**(「左」の行頭マーカーは
        * catalog §1.4.1 で廃止済み ── 左寄せ強制は formal `:::paragraph{align=left}`)。
-       * simple 形が持つのは「中央」と「グローバルの寄せの反対側(end)」の 2 つだけである。
+       * simple 形が持つのは「中央」と「グローバルの寄せの反対側」の 2 つだけである。
        *
-       * ⚠ **ここで出す値は裁定の前後で変わらず `end` である** ── 「宣言 align が
-       * flow start と逆の文書」での反転は **app.css の入れ替え規則**(CSS)の仕事で、
-       * renderer / goldens は 1 バイトも動いていない
+       * 🔴 **ここで出す値は `opposite`** ── 説明的な形(`:::paragraph{align=end}`)と
+       * **別の値**でなければならない(user 指摘 2026-08-08)。同じ値にすると、
+       * CSS の入れ替えが**寛容さを持たない説明的な形にまで漏れる**。
+       * ⚠ かつてここは `end` を出しており、「renderer / goldens が 1 バイトも動かない」
+       * ことを利点として掲げていた ── それは 2 つの形を潰していたことの裏返しだった。
+       * 反転そのものは **app.css の入れ替え規則**(CSS)の仕事で、renderer は値を出すだけ
        * (規約の 2 通り ── ① draft §2.3.6「宣言した既定の流れの反対側」/
        *  ② canonical 3 本「logical end 固定」── は裁定で ① に決着した)。
        *
@@ -3699,7 +3702,7 @@ const TOLERANT_INLINE_PATTERNS: ReadonlyArray<TolerantInlinePattern> = [
      * §1.4.2)は「`|>` `<|` `|<` `>|` … **全 4 形が同じ**」、§1.4.1 は
      * 「`<|text` align prefix … ❌ **廃止**。default flow は frontmatter で declare」。
      * つまり**行頭マーカーに「左」は無い**。意味は user 裁定 2026-08-08(Issue #103)で
-     * 「**グローバルの文字の寄せを反対にする**」に確定(属性は end のまま、
+     * 「**グローバルの文字の寄せを反対にする**」に確定(属性は opposite、
      * 反転は app.css の入れ替え規則)。
      *
      * ⚠ この 1 文字列は **user に見える 3 面**へ同時に流れる ──

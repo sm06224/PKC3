@@ -408,7 +408,7 @@ describe('寄せの規則が 2 つの面に在る(書き出しだけ古くなら
     s.replace(/['"]/g, '').replace(/\s+/g, '').replace(/;\}/g, '}');
 
   it('🔴 段落の寄せ(logical / physical / center / justify)が両面に在る', () => {
-    for (const v of ['center', 'end', 'start', 'right', 'left', 'justify']) {
+    for (const v of ['center', 'opposite', 'end', 'start', 'right', 'left', 'justify']) {
       expect(norm(CSS), `アプリ側に ${v} が無い`).toContain(`[data-pkc-align=${v}]`);
       expect(norm(VIEWER), `書き出し側に ${v} が無い`).toContain(`[data-pkc-align=${v}]`);
     }
@@ -465,13 +465,14 @@ describe('寄せの規則が 2 つの面に在る(書き出しだけ古くなら
    *
    * 規約が 2 通りに書いていた件(① draft §2.3.6「宣言した既定の流れの反対側」/
    * ② canonical 3 本「logical end 固定」)は、裁定で **① を正**とした ──
-   * それまでの実装(②)は裁定と逆。実装は CSS だけ: `data-pkc-align="end"` 属性は
-   * 動かさず(goldens 不変)、「宣言 align が flow start と逆の文書」でだけ
-   * **`end` だけ**の見え方を入れ替える(`start` は裁定の射程外 ── 2026-08-08 に取り消し)。
+   * それまでの実装(②)は裁定と逆。象形的な形は専用値 `data-pkc-align="opposite"` を
+   * 出し(説明的な形 `align=end|start` とは**別の値** ── 潰すと寛容さを持たない
+   * 説明的な形にまで反転が漏れる)、「宣言 align が flow start と逆の文書」でだけ
+   * `opposite` の見え方を入れ替える。中央の文書では寄らない(`inherit`)。
    * ⚠ この test は 2026-08-06〜08 の間、「① を勢いで足し直さない門」として
    *   規則が**無い**ことを pin していた ── 裁定が出たので反転した。
    * ⚠ `norm` は空白を全部落とすので、下の字面は**子孫結合子の空白が消えた形**である
-   *   (実セレクタは `…:not([dir='rtl']) [data-pkc-align='end']` の子孫)。
+   *   (実セレクタは `…:not([dir='rtl']) [data-pkc-align='opposite']` の子孫)。
    * ⚠ center の無変換を含む網羅は `tests/features/align-swap-css.test.ts` が
    *   **等値**で見る ── ここは両面 parity(app.css と焼き込みの両方に在ること)。
    */

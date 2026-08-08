@@ -943,6 +943,20 @@ export class DetailRenderer {
       const forward = key === 'y' || (key === 'z' && ev.shiftKey);
       if (key !== 'z' && key !== 'y') return;
       ev.preventDefault();
+      /**
+       * 🔴 **退避したら取り消しも塞ぐ**(2026-08-08 の 3 巡目レビュー。**4 件目の双子**)。
+       * ⚠ ここは Ctrl+A より**実害が大きい** ── 退避先は原文をそのまま編集する面で、
+       *   follower が `fellBack` で描き直さない。そこで journal を当てると
+       *   **`body`(= 保存される値)だけが動いて、画面の入力欄は前のまま**になる。
+       *   そのまま保存すると **user が見ていない本文が保存される**(1 文字打てば
+       *   `body = ta.value` で戻るが、打たずに保存すると気づけない)。
+       * 🔑 退避先の取り消しは**ブラウザ自前**(textarea の履歴)に任せる ── 面が
+       *   1 つの入力欄なので、それで筋が通る。
+       */
+      if (fellBack) {
+        note.textContent = 'すでに原文全体を編集しています';
+        return;
+      }
       const moved = forward ? redo(journal, body) : undo(journal, body);
       if (moved === null) {
         note.textContent = forward ? 'やり直せる編集はありません' : '取り消せる編集はありません';

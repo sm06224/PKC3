@@ -162,6 +162,25 @@ describe('ライブエディタ(1 面)の配線', () => {
     expect(r.bodies).toEqual(['普通の段落に直した。']);
   });
 
+  /**
+   * 🔴 **ライブ面にも文書 globals が届く**(3 巡目レビューで穴が判明)。
+   * `data-pkc-doc-align` を消費する面は 4 つ(読む面 / プレビュー / **ライブ** / 書き出し)
+   * だが、**ライブだけ誰も見ていなかった** ── 渡し忘れの変異が全 test 緑で通る。
+   * ⚠ しかもここは今回の入れ替え(`opposite` の反転)が**成立する前提**である ──
+   *   届かなければ、`align: right` の文書をライブ編集している間だけ `|>` が
+   *   読む面と逆に出る(CLAUDE.md「同じ値を複数の描画経路へ渡すものは経路ごとに pin」)。
+   */
+  it('🔴 ライブ面にも文書 globals(寄せ・書字方向)が届く', async () => {
+    setLive(true);
+    const r = rig(['---', 'align: right', 'direction: rtl', '---', '', '普通の段落', ''].join('\n'));
+    await settle();
+    const pane = r.root.querySelector<HTMLElement>('[data-pkc-region="editor-live"]')!;
+    expect(pane.getAttribute('data-pkc-doc-align'), '宣言した寄せがライブ面に届いていない').toBe(
+      'right',
+    );
+    expect(pane.getAttribute('dir'), '書字方向がライブ面に届いていない').toBe('rtl');
+  });
+
   it('お知らせの行は常に同じ場所に在る(出ても配置が動かない)', async () => {
     setLive(true);
     const r = rig(DOC);
@@ -359,6 +378,38 @@ describe('ライブエディタ(1 面)の配線', () => {
       pane.querySelector('[data-pkc-field="row-source"]'),
       '退避中なのに行の入力欄が開いた',
     ).toBeNull();
+    // 🔑 **ボタンと同じ言葉**であること自体を pin する(片方だけ言い回しを変える
+    //    変異を止める ── substring 2 本では「同じ言葉」を守っていない)
+    const editAll = r.root.querySelector<HTMLButtonElement>('[data-pkc-field="edit-all"]')!;
+    expect(note.textContent, 'ボタンと断り文が別の言い回しになっている').toBe(editAll.title);
+  });
+
+  /**
+   * 🔴 **退避後は Ctrl+Z / Ctrl+Y も塞ぐ**(3 巡目レビュー。**4 件目の双子**)。
+   * ⚠ Ctrl+A より実害が大きい ── 退避先は follower が描き直さない面なので、
+   *   journal を当てると **`body`(保存される値)だけが動いて画面が追随しない**。
+   *   そのまま保存すると **user が見ていない本文が保存される**。
+   */
+  it('🔴 退避後は Ctrl+Z も塞がれ、本文(保存される値)が動かない', async () => {
+    setLive(true);
+    const r = rig([':::figure{id="あ い"}', '', '本文', '', ':::', '', 'あと', ''].join('\n'));
+    await settle();
+    const pane = r.root.querySelector<HTMLElement>('[data-pkc-region="editor-live"]')!;
+    const ta = pane.querySelector<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')!;
+    const shown = ta.value;
+    const bodiesBefore = r.bodies.length;
+
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }),
+    );
+
+    const note = r.root.querySelector<HTMLElement>('[data-pkc-field="row-note"]')!;
+    expect(note.textContent, '退避中の Ctrl+Z を断っていない').toContain('すでに原文全体');
+    expect(ta.value, '画面の入力欄が動いた').toBe(shown);
+    expect(
+      r.bodies.length,
+      '画面が追随しないまま本文(保存される値)だけが動いた',
+    ).toBe(bodiesBefore);
   });
 
   it('編集を抜けたら聴くのをやめる(外れた面が反応し続けない)', async () => {

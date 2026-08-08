@@ -16,7 +16,11 @@ import { parseFrontmatter, extractVars } from '../../src/features/markdown/front
  * ⚠ markdown-it のバージョンを動かすと golden ごと再検証が必要(14.3.0 に固定中)。
  *
  * ⚠ **PKC2 と意図的に違えた点は golden 側を更新して記録する**(丸写し禁止 ──
- * user 指示 2026-07-30「流用 + 総合的見直し」)。現時点の差分は 2 つ:
+ * user 指示 2026-07-30「流用 + 総合的見直し」)。
+ * ⚠ **この散文は数を書かない**(2026-08-08 に直した)── 「差分は 2 つ」と書いて
+ *   3 項目を並べており、しかも 4 種類目が増えても更新されなかった。
+ *   🔑 **機械可読な台帳は下の `pkc3Diverges` 検査**(件数と理由の実在をそこが守る)。
+ *   ここは「なぜ違えたか」を人が読むための control であり、**足したら必ず 1 項目書く**:
  *
  *   1. タスクのチェック欄に `disabled` を付けた(P8 段⑳)。PKC2 は押せる形で
  *      出していたが、**押しても本文が 1 文字も変わらない** ── 移動 / 追記 /
@@ -33,6 +37,13 @@ import { parseFrontmatter, extractVars } from '../../src/features/markdown/front
  *      動いた golden は `snippet-figure-ref`(本文の画像)と `snippet-html-fence`(箱)。
  *      ⚠ `reform-stress-sample` の `pkc://asset/…` は**動かない** ── PKC 自身の
  *        scheme は要求を飛ばさないので「外」ではない(嘘の確認を出さないため)。
+ *   4. **行頭アラインの属性値を `end` → `opposite` にした**(2026-08-08、user 指摘)。
+ *      裁定で `|>` の意味が「グローバルの寄せを反対にする」になった以上、logical end を
+ *      表す `end` と同じ値にしておけない ── 説明的な形 `:::paragraph{align=end}` と
+ *      値が同じだと、**寛容さ(typo を意味に通す性質)を持たない説明的な形にまで
+ *      反転が漏れる**。PKC2 は旧意味(logical end 固定)のままなので分岐する。
+ *      動いた golden は `reform-stress-sample` / `simple-notation-sample` /
+ *      `snippet-align-indent` の 3 件(差は属性値だけ)。
  *
  * 🔴 **golden は「PKC2 と同じ」を守る道具であって、「正しい」を守る道具ではない。**
  * PKC2 のバグはそのまま期待値になる ── 実際、csv fence のセルに脚注が漏れる件
