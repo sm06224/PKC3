@@ -97,3 +97,42 @@ test('🔴 @card の札にフォーカスが乗り、Enter で開く', async ({ 
   await expect(page.locator('[data-pkc-field="detail-body"]')).toContainText('カードで着いた本文');
   expect(errors).toEqual([]);
 });
+
+/**
+ * 🔴 **編集中に一覧の行を押しても、無言では断らない**(2026-08-08)。
+ *
+ * ⚠ 直す前は reducer が `SELECT_ENTRY` を**黙って捨てて**いた ── 押しても
+ * 1 ドットも動かず、理由もどこにも出ない。user から見ると「クリックが効かない」。
+ * 🔑 **実機で見る意味**: 理由の出口(画面下の帯)は既定で `hidden` なので、
+ * 「出た」を実際の可視性で確かめられるのはここだけである。
+ */
+test('🔴 編集中に一覧の行を押すと、理由が画面に出る', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await gotoApp(page);
+
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-body"]').fill('1 件目\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-body"]').fill('2 件目\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  // 編集に入る
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  const status = page.locator('[data-pkc-region="status"]');
+  expect(await status.isVisible(), '編集に入った時点で既に理由が出ている').toBe(false);
+
+  // ⚠ **clickReal は使わない** ── 断られる操作なので「押した結果」を待たない
+  await page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').last().click();
+
+  // 🔴 理由が**見える**
+  await expect(status, '無言で断った(押しても何も起きない)').toBeVisible();
+  await expect(status).toContainText('編集');
+  // ⚠ 押した場所に合った呼び名(行を押したのに「リンク先」と言わない)
+  await expect(status).not.toContainText('リンク先');
+  // ⚠ 編集は続いている(勝手に移っていない)
+  await expect(page.locator('[data-pkc-field="editor-body"]')).toBeVisible();
+
+  expect(errors).toEqual([]);
+});
