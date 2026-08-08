@@ -133,11 +133,26 @@ describe('本文の CSS を抜く', () => {
    * ⚠ 規則と token 定義の**両方**を見る ── 規則だけだと `--read-w` の定義が
    *   落ちた日に宣言ごと無効になり(未定義の var は fall back しない)、
    *   規則が在るのに幅が消える。
+   * 🔴 **宣言の字面だけを見ない**(2026-08-08 のレビューで実証)。
+   *   `toContain('max-width:var(--read-w)')` だけだと、起点を子孫結合子へ変える
+   *   1 文字の変異(`.pkc-md-rendered[data-pkc-field=…]` → `.pkc-md-rendered [data-pkc-field=…]`)
+   *   が **unit 全緑のまま通る** ── `detail-body` を持つ 4 要素は自分自身が
+   *   `.pkc-md-rendered` なので、複合が子孫になると**どこにも当たらない**
+   *   (4 面すべてで読み幅が消えるのに誰も鳴らない)。だから**規則そのもの**を見る:
+   *   ① 起点の形 ② `@media` に包まれていないこと(包むと画面で効かない)。
    */
   it('🔴 読み幅の規則と --read-w の定義が焼かれている(下限 tripwire)', () => {
     expect(OUT.css, '読み幅の規則が焼かれていない').toContain('max-width:var(--read-w)');
     expect(OUT.vars, '--read-w が要求されていない').toContain('--read-w');
     expect(OUT.css, '--read-w の定義が無い(宣言ごと無効になる)').toContain('--read-w:');
+
+    const rw = parseRules(OUT.css).filter((r) => r.body.includes('max-width:var(--read-w)'));
+    expect(rw.length, '読み幅の規則が焼いた CSS の中に規則として立っていない').toBe(1);
+    expect(rw[0]!.at, '読み幅が @media の中に入っている(画面で効かない)').toEqual([]);
+    expect(
+      rw[0]!.selector,
+      '読み幅の起点が器の子孫になっている(どの要素にも当たらない)',
+    ).toMatch(/^\.pkc-md-rendered\[data-pkc-field='detail-body'\]>/);
   });
 
   /**

@@ -89,4 +89,36 @@ describe('行頭アラインの入れ替え規則(user 裁定 2026-08-08)', () =
       '.pkc-md-rendered [data-pkc-align=start]': 'text-align:start',
     });
   });
+
+  /**
+   * 🔴 **文書全体の寄せ(doc-align)の基底規則も等値で pin する**
+   * (2026-08-08 のレビューで実証。**1 巡目の修正が 2 巡目の対象**の実例)。
+   *
+   * `markdown-css-parity` は `[data-pkc-doc-align=left]` などの**字面が在るか**を
+   * `toContain` で見ていた。ところが本 file が足した入れ替え規則は正規化後に
+   * `…[data-pkc-doc-align=left][data-pkc-align=end]` という字面を持つので、
+   * **入れ替え規則自身がその存在検査を満たしてしまう** ── 基底規則を消しても通る。
+   *
+   * とくに `left` は救い手がゼロだった(`align: left` を宣言する test が unit にも
+   * smoke にも 1 件も無い)。消すと `direction: rtl` + `align: left` の文書で
+   * 宣言が 100% no-op に戻り、**無印と `|>` が両方右**という辻褄の合わない画面になる。
+   */
+  it('🔴 文書全体の寄せの基底規則が全量そろっている(入れ替え規則が存在検査を満たす穴)', () => {
+    const base = new Map<string, string>();
+    for (const r of parseRules(CSS)) {
+      if (r.at.length > 0) continue;
+      const sel = normSel(r.selector);
+      // doc-align を持ち、段落側の align を**持たない**もの = 基底
+      if (sel.includes('[data-pkc-doc-align=') && !sel.includes('[data-pkc-align=')) {
+        base.set(sel, normBody(r.body));
+      }
+    }
+    expect(Object.fromEntries(base)).toEqual({
+      '.pkc-md-rendered[data-pkc-doc-align=left]': 'text-align:left',
+      '.pkc-md-rendered[data-pkc-doc-align=right]': 'text-align:right',
+      '.pkc-md-rendered[data-pkc-doc-align=center]': 'text-align:center',
+      '.pkc-md-rendered[data-pkc-writing=vertical][data-pkc-doc-align=top]': 'text-align:start',
+      '.pkc-md-rendered[data-pkc-writing=vertical][data-pkc-doc-align=bottom]': 'text-align:end',
+    });
+  });
 });

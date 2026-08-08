@@ -124,6 +124,25 @@ test('🔴 `|>` はグローバルの寄せの反対側に寄る ── 物理�
   }
 
   /**
+   * ③-b 🔴 **RTL × `align: left`** ── 入れ替えのもう一方の組(2026-08-08 のレビューで
+   * 「実ブラウザで 1 度も評価されていない」と分かった 5 本のうちの 1 本)。
+   * ⚠ **`align: left` を宣言する検査はここが唯一**である ── 無いと、基底の
+   *   `[data-pkc-doc-align=left]` 規則を消しても誰も鳴らない(実際に変異で確認した)。
+   * 流れの起点(RTL なので右)と逆の宣言なので、無印は**左**、`|>` はその反対の**右**。
+   *   ⚠ ここが両方 right に見えたら入れ替えが二重に効いている(辻褄の合わない画面)。
+   */
+  await writeNote(
+    page,
+    '右から左で左寄せ',
+    '---\ndirection: rtl\nalign: left\n---\n\n普通の段落\n\n|> 終端\n',
+  );
+  {
+    const a = await alignsOf(page);
+    expect(a[0], 'RTL で宣言した align: left が効いていない(宣言が no-op)').toBe('left');
+    expect(a[1], 'RTL + align: left で `|>` が反対側(右)に寄っていない').toBe('right');
+  }
+
+  /**
    * ④ 🔴 **physical は反転しない**(formal 専用の「物理強制」)。
    * 直す前は `right` を `text-align: end` に同居させていたので、RTL の文書で
    * **物理右が左へ寄っていた**。
@@ -287,11 +306,14 @@ test('🔴 縦書きは上から下へ流れる(`direction: rtl` で下から上
   await writeNote(
     page,
     '縦書きで下寄せ',
-    `---\nwriting: vertical\ndirection: rtl\nalign: bottom\n---\n\n${LONG_LINE}\n\n短い段落\n`,
+    `---\nwriting: vertical\ndirection: rtl\nalign: bottom\n---\n\n${LONG_LINE}\n\n短い段落\n\n|> 終端\n`,
   );
   {
     const a = await alignsOf(page, 'y');
     expect(a[1], '`align: bottom` が効いていない(属性だけ出して終わっている)').toBe('bottom');
+    // 🔴 縦書きの入れ替え(2026-08-08 のレビューで runtime 0 と分かった 2 本)。
+    //    宣言が「下」= 流れの終わり側なので、`|>` はその反対の**上**。
+    expect(a[2], '縦書き + align: bottom で `|>` が反対側(上)に寄っていない').toBe('top');
     // 向きは変わらない(寄せと流れは別物)
     expect(await flowOf(page), '寄せを変えたら流れまで変わった').toBe('top-down');
   }

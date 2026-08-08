@@ -331,6 +331,43 @@ describe('読み幅の上限', () => {
       expect(items, `${s} に読み幅の上限が掛かっている`).not.toContain(s);
     }
   });
+
+  /**
+   * 🔴 **allow-list は等値で pin する**(2026-08-08 のレビューで実証)。
+   * 上の 2 件は 23 項目のうち `.pkc-section-callout` の存在と 4 つの不在しか見ておらず、
+   * 残る 18 項目は**どれを落としても全 test 緑**だった(`.pkc-details` を落とす変異で確認)。
+   * 落ちた項目は「上限が掛からない側」に倒れるので、その箱だけ全幅に伸びて
+   * 周りの段落と揃わない ── 2026-08-05 に実ブラウザで気づいた欠陥の**再発**である。
+   * ⚠ 足すときも消すときもここが割れる(`KNOWN_DEAD` と同じ「忘れられない形」)。
+   */
+  it('🔴 対象の全量が動いていない(1 項目落ちても気づかない、を止める)', () => {
+    const items = RULE.exec(CSS)![1]!.split(',').map((x) => x.trim());
+    expect(items).toEqual([
+      'p',
+      'h1',
+      'h2',
+      'h3',
+      'h4',
+      'h5',
+      'h6',
+      'ul',
+      'ol',
+      'dl',
+      'blockquote',
+      'hr',
+      '.footnotes',
+      '.pkc-details',
+      '.pkc-format-block',
+      '.pkc-toc-formal',
+      '.pkc-toc-preview',
+      '.pkc-section-break',
+      '.pkc-blank-line',
+      '.pkc-region-frontmatter',
+      '.pkc-region-body',
+      '.pkc-section-callout',
+      '.pkc-fig-equation',
+    ]);
+  });
 });
 
 /**
