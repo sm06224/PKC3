@@ -41,7 +41,18 @@ export function isTheme(v: string): v is Theme {
   return IDS.includes(v);
 }
 
-/** ⚠ 1 キーだけ。増やすなら設定機構を建ててからにする。 */
+/**
+ * ⚠ **端末ごとの保存は `pkc3.*` を 1 鍵ずつ**(2026-08-08 に書き換えた)。
+ *
+ * ここには長く「1 キーだけ。増やすなら設定機構を建ててからにする」と書いてあったが、
+ * P11 で**設定機構は建った** ── いまは 5 鍵ある(`pkc3.theme` /
+ * `pkc3.external-images` / `pkc3.flags` / `pkc3.notices.seen` / `pkc3.notices.off`)。
+ *
+ * 🔑 増やすときは `flag-store.ts` / `notice-store.ts` と**同じ作法**で:
+ * ① 壊れていても**既定へ落ちる**(読めない値で起動不能にしない)
+ * ② **export に混ぜない**(書き出した HTML を渡した相手の設定を書き換えない)
+ * ③ **user が戻せる**(消す導線か、既定へ戻す導線を必ず置く)
+ */
 const KEY = 'pkc3.theme';
 
 function readStored(): Theme | null {
