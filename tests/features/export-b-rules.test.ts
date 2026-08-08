@@ -39,7 +39,9 @@ const BAKED = extractBodyCss(
  * ⚠ 足すときは理由も書く。理由が書けないなら、それは焼いた側の仕事である。
  */
 const ALLOWED: Readonly<Record<string, string>> = {
-  '.b': '読み幅。app.css の読み幅は .pkc-md-rendered 前置きでないので焼かれない',
+  // ⚠ `.b`(読み幅)は 2026-08-08 の裁定で消えた ── app.css の規則が
+  //    .pkc-md-rendered[data-pkc-field='detail-body'] 起点になり、焼き込みで届く。
+  //    ここへ書き戻すと正本が 2 本になる(下の「読み幅は焼いた側が持つ」が鳴る)。
   '.b>*:first-child': '器の直下の先頭。焼いた側に対応物なし',
   '.b p,.b ul,.b ol': '段落 / 箇条書きの margin を app.css は書いていない(UA 既定)',
   '.b li': '同上',
@@ -55,7 +57,8 @@ const ALLOWED: Readonly<Record<string, string>> = {
 
 /** 印刷(`@media print`)で在ってよいもの。 */
 const ALLOWED_PRINT: Readonly<Record<string, string>> = {
-  '.b': '紙では読み幅をほどく(画面の max-width の対)',
+  // ⚠ `.b`(読み幅をほどく none)も 2026-08-08 に消えた ── 器の cap が無い今は死文で、
+  //    紙もアプリの印刷と同じ 42rem/ブロックにする(意図した統一)。
   '.b a': '紙のリンクの下線を消す。焼いた側は text-decoration を触らない',
   '.b .pkc-render-toggle': '紙に操作子は要らない。焼いた print 層に toggle 規則なし',
 };
@@ -86,7 +89,7 @@ describe('書き出しの `.b` 規則(焼いた側と重複させない)', () =>
     // ⚠ 空振り防止 ── 1 本も拾えていないなら、この検査は何も見ていない
     expect(screen.length, '`.b` の規則を 1 本も拾えていない(選択子の集め方が壊れた)')
       .toBeGreaterThanOrEqual(10);
-    expect(print.length, '紙の `.b` 規則を 1 本も拾えていない').toBeGreaterThanOrEqual(3);
+    expect(print.length, '紙の `.b` 規則を 1 本も拾えていない').toBeGreaterThanOrEqual(2);
     for (const sel of screen) {
       expect(ALLOWED[sel], `表に無い .b 規則が足された: ${sel}(理由を書いて表に足す)`).toBeTruthy();
     }
@@ -128,14 +131,18 @@ describe('書き出しの `.b` 規則(焼いた側と重複させない)', () =>
   });
 
   /**
-   * ⚠ **読み幅だけは焼かれない**ことを明示的に pin する。
-   * ここが焼かれるようになったら `.b{max-width}` は重複になるので、
-   * この test が落ちて掃除の機会を作る。
+   * 🔴 **読み幅は焼いた側が持つ**(user 裁定 2026-08-08 で統一)。
+   * app.css の読み幅の規則を `.pkc-md-rendered[data-pkc-field='detail-body']` 起点に
+   * 書き換えた日から、読み幅は焼き込みで届く(46em/器 → 42rem/各ブロック)。
+   * ⚠ `.b` に max-width を書き戻すと正本が 2 本になる ── 画面(46em 等)も
+   *   紙(none でほどく)も両方この 1 本で止める。
    */
-  it('⚠ 読み幅は焼かれていない(だから `.b` が持っている)', () => {
-    expect(BAKED, '読み幅が焼かれるようになった ── .b{max-width} が重複になった').not.toContain(
-      'var(--read-w)',
+  it('🔴 読み幅は焼いた側が持つ(`.b` に書き戻さない)', () => {
+    expect(BAKED, '読み幅が焼かれていない(配った HTML の本文が全幅に伸びる)').toContain(
+      'max-width:var(--read-w)',
     );
-    expect(VIEWER, '書き出し側が読み幅を持っていない').toContain('.b{max-width:46em}');
+    expect(VIEWER, '`.b` の読み幅が復活した(焼いた側と重複する)').not.toContain(
+      '.b{max-width',
+    );
   });
 });

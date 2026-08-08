@@ -885,10 +885,17 @@ select:focus-visible {
 /* 🔑 **本文の読み幅に上限を置く**(P9 段②)。Full HD では 1 行が 1172px =
  * 全角 90 文字まで伸びていて、読み返すのが辛かった。
  *
+ * 🔑 起点は `.pkc-md-rendered[data-pkc-field='detail-body']`(user 裁定 2026-08-08 で
+ *   書き出し HTML と統一)── `.pkc-md-rendered` 起点なので build/body-css.ts の
+ *   焼き込み(isBodyRule)を通り、**この 1 本が配った HTML の読み幅も持つ**(正本 1 本。
+ *   書き出し側の器にも data-pkc-field='detail-body' を付けてある)。
+ *   ⚠ `detail-body` の絞り込みは残す ── 素の `.pkc-md-rendered` に広げると、
+ *   Split View のプレビューやヘルプのマニュアル面にまで上限が掛かる。
  * ⚠ **器(`detail-body` や pane)に掛けてはいけない** ── 図のラスタ幅は
  * `mermaid-hydrate.ts` が **host の親の clientWidth** から決めるので、器を狭めると
  * **全部の図が焼き直され、キャッシュ鍵も変わる**(調査で判明)。だから
- * **本文ブロック(兄弟)にだけ**当てる。
+ * **本文ブロック(兄弟)にだけ**当てる(この selector の器の側は「絞り込み」であって
+ * 器に max-width を置いているのではない)。
  * ⚠ 単位に `em` を使わない ── 見出しは `1.35em` などで拡大するので、
  * `em` 指定だと見出しだけ上限が広がる(h1 で 1.35 倍)。
  * ⚠ 表・図・コード・iframe・添付は**上限の対象外**(横に広いほど読める)。
@@ -896,7 +903,7 @@ select:focus-visible {
  *   「上限が掛からない」側に倒れる(= 焼き直しも崩れも起きない安全な向き)。
  *
  * 42rem = 672px。本文 13px なので全角 **約 51 文字**(日本語の可読幅は 35〜50 文字)。 */
-[data-pkc-view-pane='detail'] [data-pkc-field='detail-body'] > :is(p, h1, h2, h3, h4, h5, h6, ul, ol, dl, blockquote, hr, .footnotes, .pkc-details, .pkc-format-block, .pkc-toc-formal, .pkc-toc-preview, .pkc-section-break, .pkc-blank-line, .pkc-region-frontmatter, .pkc-region-body, .pkc-section-callout, .pkc-fig-equation) {
+.pkc-md-rendered[data-pkc-field='detail-body'] > :is(p, h1, h2, h3, h4, h5, h6, ul, ol, dl, blockquote, hr, .footnotes, .pkc-details, .pkc-format-block, .pkc-toc-formal, .pkc-toc-preview, .pkc-section-break, .pkc-blank-line, .pkc-region-frontmatter, .pkc-region-body, .pkc-section-callout, .pkc-fig-equation) {
   max-width: var(--read-w);
 }
 .pkc-md-rendered h1,

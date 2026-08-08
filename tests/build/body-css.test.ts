@@ -106,13 +106,38 @@ describe('本文の CSS を抜く', () => {
    * アプリの器の規則が混ざると**見た目を壊す**(直す目的と逆になる)。
    */
   it('🔴 器の規則(region / field)が 1 本も混ざっていない', () => {
-    for (const key of ['data-pkc-region', 'data-pkc-field', 'data-pkc-view']) {
+    for (const key of ['data-pkc-region', 'data-pkc-view']) {
       expect(OUT.css, `器の規則が混ざっている: ${key}`).not.toContain(key);
     }
+    /**
+     * ⚠ `data-pkc-field` は**読み幅の 1 か所だけ**通す(2026-08-08 の統一)。
+     * 読み幅の規則は `.pkc-md-rendered[data-pkc-field='detail-body']` 起点で、
+     * 属性は**要素の絞り込み**である(器を起点にした規則ではない)。
+     * それ以外の field は器の印なので 1 件も通さない ── 等値で pin する
+     * (器の field が混ざっても、読み幅が落ちても、どちらでも落ちる)。
+     */
+    const fields = [...OUT.css.matchAll(/data-pkc-field='([^']*)'/g)].map((m) => m[1]);
+    expect(fields, '読み幅以外の field の規則が混ざった(または読み幅が落ちた)').toEqual([
+      'detail-body',
+    ]);
     // ⚠ 逆に、本文が使う data 属性は**在らねばならない**(選り過ぎの検出)
     for (const key of ['data-pkc-align', 'data-pkc-indent', 'data-pkc-render-mode']) {
       expect(OUT.css, `本文の属性の規則が落ちている: ${key}`).toContain(key);
     }
+  });
+
+  /**
+   * 🔴 **読み幅が焼かれている**(user 裁定 2026-08-08: アプリと書き出しで統一。
+   * 46em/器 → 42rem/各ブロック)。書き出し側の `.b{max-width}` は消えたので、
+   * **ここが落ちる = 配った HTML の本文が全幅に伸びる**。
+   * ⚠ 規則と token 定義の**両方**を見る ── 規則だけだと `--read-w` の定義が
+   *   落ちた日に宣言ごと無効になり(未定義の var は fall back しない)、
+   *   規則が在るのに幅が消える。
+   */
+  it('🔴 読み幅の規則と --read-w の定義が焼かれている(下限 tripwire)', () => {
+    expect(OUT.css, '読み幅の規則が焼かれていない').toContain('max-width:var(--read-w)');
+    expect(OUT.vars, '--read-w が要求されていない').toContain('--read-w');
+    expect(OUT.css, '--read-w の定義が無い(宣言ごと無効になる)').toContain('--read-w:');
   });
 
   /**
@@ -419,11 +444,14 @@ describe('焼いた文字列の検品', () => {
    */
   it('🔴 規則が 1 本も焼かれていない出力を止める(需要の数では通してしまう)', () => {
     const base = ok();
-    // 規則の部分だけ削る = 組み立てのループを消したのと同じ形。ruleCount は 116 のまま
+    // 規則の部分だけ削る = 組み立てのループを消したのと同じ形。ruleCount は抜いた数のまま
     const css = base.css.slice(0, base.css.indexOf('.pkc-md-rendered'));
     const bad = auditBodyCss({ ...base, css }).join('\n');
     expect(bad, '規則 0 本の出力を通した').toContain('本文の規則が 0 本');
-    expect(bad, '抜いた数との食い違いを言っていない').toContain('抜いた 116 本のうち 0 本');
+    // ⚠ 実測数を直書きしない ── 規則を 1 本足すたびにここが割れる。突合の**形**を見る
+    expect(bad, '抜いた数との食い違いを言っていない').toContain(
+      `抜いた ${base.ruleCount} 本のうち 0 本`,
+    );
   });
 
   it('🔴 印刷の層が落ちた出力を止める(紙で改頁が起きなくなる)', () => {

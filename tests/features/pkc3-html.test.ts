@@ -1499,6 +1499,9 @@ describe('可搬 HTML — 本文の CSS を app.css から焼く', () => {
     document.body.innerHTML = /<main>[\s\S]*?<\/main>/.exec(html)![0]!;
     const box = document.getElementById('body')!;
     expect([...box.classList].sort(), '器の class が足りない').toEqual(['b', 'pkc-md-rendered']);
+    // 🔴 読み幅(2026-08-08 の統一)は data-pkc-field='detail-body' 起点で焼かれてくる
+    //    ── 属性が落ちると、この面だけ本文が全幅に伸びる
+    expect(box.getAttribute('data-pkc-field'), '読み幅の当たり先が無い').toBe('detail-body');
   });
 
   it('🔴 「全体を印刷」が組む器にも pkc-md-rendered が付いている', async () => {
@@ -1525,6 +1528,10 @@ describe('可搬 HTML — 本文の CSS を app.css から焼く', () => {
         'b',
         'pkc-md-rendered',
       ]);
+      // 🔴 読み幅の当たり先(2026-08-08)── ここに無いと全体印刷だけ全幅で出る
+      expect(box.getAttribute('data-pkc-field'), '紙の器に読み幅が当たらない').toBe(
+        'detail-body',
+      );
     }
   });
 });
