@@ -231,6 +231,8 @@
    * ⚠ **`em` にしない** ── 見出しは 1.35em まで拡大するので、`em` だと
    * 見出しだけ上限が広がる。⚠ 掛ける先は**本文ブロック**で、器ではない
    * (器を狭めると図のラスタが焼き直される ── `app.css` の当該規則の注記)。
+   * ⚠ **既定値はここ**(= A4 縦)。フォーマットごとの差し替えは下の
+   *   `:root[data-pkc-page-format='…']` で行う ── ここの値は動かさない。
    */
   --read-w: 42rem;
 
@@ -247,4 +249,43 @@
     'Noto Sans JP', 'Yu Gothic UI', Meiryo, sans-serif;
   /** 等幅は**コードと数値**だけに使う。 */
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Noto Sans Mono', monospace;
+}
+
+/**
+ * 🔴 **紙面フォーマット**(2026-08-08。user 裁定「読み幅は A4 と A3、フル HD と
+ * 4:3 の縦横を選べるようにし、デフォは A4 縦」)。
+ *
+ * 🔑 差し替えるのは**散文の読み幅だけ**。器の幅は動かさない ── 表・図・コードは
+ * どの形式でも全幅を使うし、器を狭めると**全部の図が焼き直される**
+ * (`app.css` の読み幅の規則の注記 / 設計 doc `page-format-design-2026-08.md` §2)。
+ * ⚠ **値の正本は `src/features/page-format.ts` の `PAGE_FORMATS`** ──
+ *   `tests/features/page-format.test.ts` がこの CSS と表を突き合わせる
+ *   (片方だけ足すと「選べるのに効かない」「効くのに選べない」が起きる)。
+ * ⚠ `fullhd` だけ `none`(上限なし)── これが「画面での閲覧に適した形式」の本体。
+ * ⚠ 印刷の紙(`@page { size: … }`)はここに書けない(セレクタで絞れない)──
+ *   `adapter/ui/render/page-format.ts` が選んだ 1 つだけを `<style>` に載せる。
+ */
+:root[data-pkc-page-format='a4-portrait'] {
+  --read-w: 42rem;
+}
+:root[data-pkc-page-format='a4-landscape'] {
+  --read-w: 62rem;
+}
+:root[data-pkc-page-format='a3-portrait'] {
+  --read-w: 62rem;
+}
+:root[data-pkc-page-format='a3-landscape'] {
+  --read-w: 91rem;
+}
+:root[data-pkc-page-format='fullhd'] {
+  --read-w: none;
+}
+:root[data-pkc-page-format='fullhd-portrait'] {
+  --read-w: 64rem;
+}
+:root[data-pkc-page-format='43'] {
+  --read-w: 60rem;
+}
+:root[data-pkc-page-format='43-portrait'] {
+  --read-w: 45rem;
 }

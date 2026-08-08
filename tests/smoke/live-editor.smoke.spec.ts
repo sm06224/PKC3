@@ -474,10 +474,42 @@ test('🔴 塊を跨ぐドラッグ選択で、版面が文末へ飛ばない(�
       const r = p.getBoundingClientRect();
       return r.top > 150 && r.bottom < window.innerHeight - 150;
     });
-    const a = ps[0]!.getBoundingClientRect();
-    const b = ps[1]!.getBoundingClientRect();
-    return { scrollTop: el.scrollTop, ax: a.x + 40, ay: a.y + a.height / 2, bx: b.x + 80, by: b.y + b.height / 2 };
+    /**
+     * 🔴 **狙うのは「箱の真ん中」ではなく「1 行目の真ん中」**(2026-08-08)。
+     *
+     * 箱の高さの半分は、**折り返した段落では行と行の境目**に当たる ── そこから
+     * 押し下げると chromium は選択を 1 文字も作らない。⚠ これは**アプリの不具合では
+     * ない**:PKC を一切通さない素の HTML(段落 2 つ・`max-width:672px`)で
+     * 対照群を取ったところ**同じ 0 文字**で、`y` を **1px** ずらすと 73 文字選べた。
+     * つまり `height/2` は「段落が 1 行である」を暗黙に前提した座標であり、
+     * 読み幅(紙面フォーマット)が入って 2 行になった瞬間に**アプリと無関係に**落ちる。
+     * 🔑 **行の矩形から取れば折返し数に依らない**(`Range.getClientRects()[0]`)。
+     */
+    const firstLine = (p: HTMLElement): DOMRect => {
+      const r = document.createRange();
+      r.selectNodeContents(p);
+      return r.getClientRects()[0] ?? p.getBoundingClientRect();
+    };
+    const a = firstLine(ps[0]!);
+    const b = firstLine(ps[1]!);
+    const ax = a.x + 40;
+    const ay = a.y + a.height / 2;
+    const bx = b.x + 80;
+    const by = b.y + b.height / 2;
+    return {
+      scrollTop: el.scrollTop,
+      ax,
+      ay,
+      bx,
+      by,
+      // ⚠ **空振り防止** ── 2 つの点が**狙った別々の塊**に当たっていること
+      //   (外れていれば「跨ぐドラッグ」が 1 度も起きず、事故も起きない)
+      onTarget:
+        document.elementFromPoint(ax, ay)?.closest('p') === ps[0] &&
+        document.elementFromPoint(bx, by)?.closest('p') === ps[1],
+    };
   });
+  expect(before.onTarget, '狙った点が段落に当たっていない(塊を跨いでいない)').toBe(true);
   // ⚠ 器の真ん中に居ること(端だと clamp されて動けない = 測っていない)
   expect(before.scrollTop, 'スクロール位置が 0(focus は 1px も動かせない)').toBeGreaterThan(100);
 
@@ -548,5 +580,64 @@ test('🔴 最終行の ↓ で次の塊が開き、行の途中の ↓ は箱�
   );
   const caret = await row.evaluate((el) => (el as HTMLTextAreaElement).selectionStart);
   expect(caret, '↓ の既定動作(次の行へ)が死んでいる').toBeGreaterThan(0);
+  expect(errors).toEqual([]);
+});
+
+/**
+ * 🔴 **生になった行の幅は、置き換えた塊の幅に揃う**(2026-08-08。紙面フォーマット
+ * #102 段 1 のレビューで空いた穴)。
+ *
+ * 読み幅は**散文だけ**に掛かる allow-list なので、スロット(`[data-pkc-row-slot]`)を
+ * 一律に散文の幅へ入れると**表・コードを押した瞬間に編集欄が縮む**。実測(1600px):
+ * 表は 1036px で描かれているのに編集欄が 672px になり、106 字の原文が 2 行に
+ * 折り返していた。逆に一律で外すと、段落を押した行だけ全幅へ跳ねる。
+ *
+ * ⚠ **unit では届かない。** 判定は `getComputedStyle(el).maxWidth`(= CSS の
+ *   allow-list の結果)を読むので、CSS を持たない happy-dom では常に「上限なし」に
+ *   なる ── ここが唯一の門である。
+ */
+test('🔴 表・コードの行を押しても編集欄が縮まない(段落は散文の幅のまま)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await gotoLive(page);
+  const WIDE =
+    '| ' + Array.from({ length: 7 }, (_, i) => `第 ${i + 1} 列の見出しがここ`).join(' | ') + ' |';
+  // ⚠ `openLive` は描画の完了を `h1` で待つ ── 見出しの無い本文では止まる
+  await openLive(
+    page,
+    `# 題\n\nふつうの段落です。\n\n${WIDE}\n${'|---'.repeat(7)}|\n${WIDE}\n\n\`\`\`\nconst x = 1;\n\`\`\`\n`,
+  );
+
+  const live = page.locator('[data-pkc-region="editor-live"]');
+  const w = async (sel: string): Promise<number> =>
+    Math.round((await live.locator(sel).first().boundingBox())!.width);
+  const box = async (): Promise<number> => w('[data-pkc-field="row-source"]');
+
+  const proseW = await w('p');
+  const tableW = await w('table');
+  const codeW = await w('pre');
+  // ⚠ **空振り防止** ── 散文と表で幅が違うこと(同じなら以下は何も判定していない)
+  expect(tableW, '表が散文より広くない(この窓では違いが出ない)').toBeGreaterThan(proseW + 100);
+
+  // 表を押す → 編集欄は表の幅(縮まない)
+  await live.locator('table td, table th').first().click();
+  await expect(live.locator('[data-pkc-field="row-source"]')).toBeVisible();
+  expect(await box(), '表の編集欄が散文の幅へ縮んだ').toBeGreaterThan(proseW + 100);
+
+  // コード fence も同じ
+  await page.keyboard.press('Escape');
+  await live.locator('pre').first().click();
+  await expect(live.locator('[data-pkc-field="row-source"]')).toBeVisible();
+  expect(await box(), 'コードの編集欄が散文の幅へ縮んだ').toBeGreaterThan(proseW + 100);
+  expect(codeW, 'コードが散文より広くない').toBeGreaterThan(proseW + 100);
+
+  // 段落は散文の幅のまま(= 押した行だけ全幅へ跳ねない)
+  await page.keyboard.press('Escape');
+  await live.locator('p').first().click();
+  await expect(live.locator('[data-pkc-field="row-source"]')).toBeVisible();
+  expect(await box(), '段落の編集欄が全幅へ跳ねた').toBeLessThan(proseW + 20);
+
   expect(errors).toEqual([]);
 });

@@ -571,7 +571,23 @@ md.renderer.rules.link_open = function (tokens, idx, options, env, self) {
     const rawEnv = (env ?? {}) as { currentContainerId?: unknown };
     const currentContainerId =
       typeof rawEnv.currentContainerId === 'string' ? rawEnv.currentContainerId : '';
-    if (parsed && currentContainerId && parsed.containerId === currentContainerId) {
+    /**
+     * 🔴 **添付の携帯参照は、まだ同一コンテナ枝へ入れない**(2026-08-08)。
+     * 段①(cid を描画へ渡す)で条件が通るようになったが、`navigate-asset-ref` の
+     * **受け手はまだ無い**(key → lid の逆引きが段②。Issue #100)。入れてしまうと
+     * `<a href>` の既定を `preventDefault` する #97 の配線に当たり、
+     * **押しても黙る**(= #98 で 4 面ぶん潰したばかりの無言の dead click)になる。
+     * ⚠ いまの札(`pkc-portable-reference-placeholder`)は container / target を
+     *   title に出すので、**黙る link より情報が多い**。退行させない。
+     * 🔑 段②で受け手が入ったらこの `kind === 'entry'` を外す
+     *   ── `tests/repo-hygiene.test.ts` の `KNOWN_DEAD` が等値 pin なので忘れられない。
+     */
+    const sameContainerEntry =
+      parsed !== null &&
+      parsed.kind === 'entry' &&
+      currentContainerId !== '' &&
+      parsed.containerId === currentContainerId;
+    if (sameContainerEntry) {
       // Same-container Portable Reference fallback rendering
       // (spec/pkc-link-unification-v0.md §5.5). Paste conversion
       // normally demotes `pkc://<self>/...` to `entry:<lid>`
@@ -595,15 +611,9 @@ md.renderer.rules.link_open = function (tokens, idx, options, env, self) {
       //   pkc://<self>/entry/<lid>           → entry:<lid>
       //   pkc://<self>/entry/<lid>#log/xyz   → entry:<lid>#log/xyz
       //   pkc://<self>/asset/<key>           → owner attachment entry
-      if (parsed.kind === 'entry') {
-        const frag = parsed.fragment ?? '';
-        token.attrSet('data-pkc-action', 'navigate-entry-ref');
-        token.attrSet('data-pkc-entry-ref', `entry:${parsed.targetId}${frag}`);
-      } else {
-        // kind === 'asset'
-        token.attrSet('data-pkc-action', 'navigate-asset-ref');
-        token.attrSet('data-pkc-asset-key', parsed.targetId);
-      }
+      const frag = parsed!.fragment ?? '';
+      token.attrSet('data-pkc-action', 'navigate-entry-ref');
+      token.attrSet('data-pkc-entry-ref', `entry:${parsed!.targetId}${frag}`);
       token.attrSet('rel', 'noopener noreferrer');
     } else if (parsed) {
       // Cross-container (or currentContainerId is unknown — treat

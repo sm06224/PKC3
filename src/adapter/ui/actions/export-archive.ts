@@ -12,6 +12,7 @@ import type { Dispatcher } from '@adapter/state/dispatcher';
 import { writeArchive, type ArchiveSource } from '@features/export/pkc3-archive';
 import type { RenderMarkdownOptions } from '@features/markdown/markdown-render';
 import { writePortableHtml } from '@features/export/pkc3-html';
+import { DEFAULT_PAGE_FORMAT, type PageFormat } from '@features/page-format';
 import { writeMarkdownZip } from '@features/export/pkc3-markdown-zip';
 import { singleEntrySource } from '@features/export/single-entry-source';
 import { safeName } from '@features/export/file-name';
@@ -46,6 +47,12 @@ export interface ExportDeps {
    *   ノートごとの同意は持ち込まない(書き出した HTML は別の人が開く)。
    */
   allowExternalImages?: boolean;
+  /**
+   * 紙面フォーマット(2026-08-08、user 裁定)。**書き出した瞬間の設定**を焼く。
+   * ⚠ 省略すると既定(A4 縦)── いままでと同じ見え方に倒れる。
+   * ⚠ 判断は `main.ts` が持つ(いま画面に当たっている値をそのまま渡す)。
+   */
+  pageFormat?: PageFormat;
 }
 
 
@@ -127,7 +134,13 @@ export async function exportArchive(
     let name: string;
     let detail: string;
     if (kind === 'html') {
-      out = await writePortableHtml(deps.source, iso, deps.renderBody, deps.allowExternalImages === true);
+      out = await writePortableHtml(
+        deps.source,
+        iso,
+        deps.renderBody,
+        deps.allowExternalImages === true,
+        deps.pageFormat ?? DEFAULT_PAGE_FORMAT,
+      );
       name = `${base}.html`;
       // ⚠ **可逆ではない**ことをその場で言う(後から見分けられない形にしない ──
       // PKC2 は light / full の別を manifest にしか書いておらず user が困っていた)

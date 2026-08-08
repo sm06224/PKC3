@@ -57,6 +57,64 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
 });
 
 /**
+ * 🔴 **携帯参照(`pkc://`)が、実機の cid で焼き分けられる**(2026-08-08。Issue #100 段①)。
+ *
+ * ## unit では届かないもの
+ *
+ * unit は cid を**自分で作って渡す**ので、「アプリが実際に何を渡しているか」は
+ * 1 度も通らない。ここで見るのは:
+ *
+ * - 🔴 **本物の boot が渡す cid**(`main.ts` の `DEFAULT_CID`)が描画まで届くこと
+ * - 🔴 **本物のワーカー**を通しても焼き分けが同じであること(unit の同期経路と違う)
+ * - **対照群** ── 同じ本文の別コンテナあては placeholder のままであること
+ *   (これが無いと「全部リンクにする」実装でも通る)
+ */
+test('🔴 pkc:// の自分あては押せて、別コンテナあては押せない', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await gotoApp(page);
+
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('携帯参照の先');
+  await page.locator('[data-pkc-field="editor-body"]').fill('携帯参照で着いた本文。\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  const targetLid = await page
+    .locator('[data-pkc-region="entry-list"] [data-pkc-entry]')
+    .first()
+    .getAttribute('data-pkc-entry');
+  expect(targetLid, 'リンク先の lid を採れていない(fixture の空振り)').toBeTruthy();
+
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('携帯参照の元');
+  /**
+   * ⚠ `default` は **`main.ts` の `DEFAULT_CID`**(このアプリが boot で渡す値)。
+   * ここを手で書いているのは、**アプリ側の値が変わったら鳴らす**ためである。
+   */
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill(
+      `[こちらへ](pkc://default/entry/${targetLid ?? ''})\n\n` +
+        `[よそへ](pkc://not-mine/entry/${targetLid ?? ''})\n`,
+    );
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  const body = '[data-pkc-field="detail-body"]';
+  const link = page.locator(`${body} [data-pkc-action="navigate-entry-ref"]`);
+  await expect(link, '自分あての pkc:// が焼かれていない(cid が届いていない)').toHaveCount(1);
+  await expect(
+    page.locator(`${body} .pkc-portable-reference-placeholder`),
+    '別コンテナあてまでリンクにしている',
+  ).toHaveCount(1);
+
+  const urlBefore = page.url();
+  await clickReal(page, `${body} [data-pkc-action="navigate-entry-ref"]`);
+  await expect(page.locator(body)).toContainText('携帯参照で着いた本文');
+  expect(page.url(), 'ブラウザが未知スキームへ遷移した').toBe(urlBefore);
+
+  expect(errors).toEqual([]);
+});
+
+/**
  * 🔴 **`@card` はキーボードでも押せる**(user 指示「マウスだけで完結し、
  * キーボードは近道」)。⚠ 直す前は**フォーカスできるのに Enter が効かない**
  * 要素が 1 種類だけ存在していた。

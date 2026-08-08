@@ -48,9 +48,16 @@ export function versionText(kind: string = BUILD_KIND): string {
   return `${APP_ID} v${APP_VERSION}${suffix}`;
 }
 
-/** markdown を描く口(worker 経路。⚠ 失敗したら素の原文を出す)。 */
+/**
+ * markdown を描く口(worker 経路。⚠ 失敗したら素の原文を出す)。
+ *
+ * ⚠ **描画の材料も受ける**(2026-08-08。Issue #100 段①)── マニュアルもこの
+ * コンテナの中で読まれる文書なので、`pkc://<自分>/…` の扱いは本文と揃える。
+ * 揃えないと、同じ 1 行が**面によって別物に見える**(片方はリンク、片方は
+ * 「別の PKC」の badge)。
+ */
 export interface HelpMarkdownPort {
-  render(text: string): Promise<string>;
+  render(text: string, opts?: { currentContainerId?: string }): Promise<string>;
 }
 
 export class HelpRenderer {
@@ -69,7 +76,12 @@ export class HelpRenderer {
     private readonly notices: readonly Notice[] = NOTICES,
   ) {}
 
-  render(): void {
+  /**
+   * @param currentContainerId いま開いているコンテナ(Issue #100 段①)。
+   *   ⚠ 器は 1 度しか組まないので、**描くときの値**がそのまま焼かれる ──
+   *   コンテナを切り替える経路が入ったら、ここも作り直しの対象になる。
+   */
+  render(currentContainerId = ''): void {
     if (this.built) return;
     this.built = true;
     this.region.textContent = '';
@@ -141,7 +153,7 @@ export class HelpRenderer {
     this.manualHost.textContent = 'マニュアルを読み込んでいます…';
     body.append(this.manualHost);
 
-    void this.drawManual();
+    void this.drawManual(currentContainerId);
   }
 
   /**
@@ -153,7 +165,7 @@ export class HelpRenderer {
    * 置いていたガードは**誰も通らない死んだ防御**で、消しても test は 1 件も
    * 落ちなかった(「在るのに効かない」は次に読む人を惑わせる)。
    */
-  private async drawManual(): Promise<void> {
+  private async drawManual(currentContainerId: string): Promise<void> {
     if (!this.manualHost) return;
     const host = this.manualHost;
     if (!this.markdown) {
@@ -161,7 +173,7 @@ export class HelpRenderer {
       return;
     }
     try {
-      host.innerHTML = await this.markdown.render(MANUAL_TEXT);
+      host.innerHTML = await this.markdown.render(MANUAL_TEXT, { currentContainerId });
     } catch {
       host.textContent = MANUAL_TEXT;
     }

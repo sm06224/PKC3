@@ -85,6 +85,11 @@ export interface BinderServices {
    */
   setExternalImages?(mode: string): void;
   /**
+   * 紙面(2026-08-08、user 裁定「A4 と A3、フル HD と 4:3 の縦横」)。
+   * ⚠ **flag ではない**(正規設定)── 散文の読み幅と、印刷の紙が決まる。
+   */
+  setPageFormat?(format: string): void;
+  /**
    * フラグの切替(P11。user 指示 2026-08-07)。
    * ⚠ **設定ではない** ── 開発者・パワーユーザー向けで、いつか畳まれる。
    */
@@ -814,6 +819,14 @@ const ACTIONS: Record<string, ActionHandler> = {
         ? target.value
         : target.getAttribute('data-pkc-external-images-value');
     if (mode) services.setExternalImages?.(mode);
+  },
+  'set-page-format': (_dispatcher, target, services) => {
+    // ⚠ `set-theme` と同じ受け方(`<select>` でもボタンでも通す)
+    const format =
+      target instanceof HTMLSelectElement
+        ? target.value
+        : target.getAttribute('data-pkc-page-format-value');
+    if (format) services.setPageFormat?.(format);
   },
   'set-flag': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)

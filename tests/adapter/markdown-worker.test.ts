@@ -58,6 +58,25 @@ describe('markdown worker', () => {
     expect(without.result).toBe(renderMarkdown(text, { sourceLineAnchors: false }));
   });
 
+  /**
+   * 🔴 **コンテナ id も落とさない**(2026-08-08。Issue #100 段①)。
+   *
+   * 読む面と編集プレビューは**ワーカー経由**で描くので、ここが素通しでないと
+   * 「同期経路では押せるのに、ワーカーが立っていると押せない」という
+   * **環境で挙動が割れる**形になる ── しかも速い環境ほど壊れて見える。
+   * ⚠ postMessage の構造化複製を実際に通す(型の上で通ることは根拠にならない)。
+   */
+  it('🔴 opts の cid を落とさない(pkc:// の焼き分けが worker でも同じ)', () => {
+    const text = '[題](pkc://c1/entry/e2)\n';
+    const mine = send(1, text, { currentContainerId: 'c1' }) as { result: string };
+    const other = send(2, text, { currentContainerId: 'c-other' }) as { result: string };
+    // ⚠ **違いが出ること**を先に確かめる ── 同じなら opts を見ていない実装でも通る
+    expect(mine.result).not.toBe(other.result);
+    expect(mine.result).toContain('data-pkc-action="navigate-entry-ref"');
+    expect(other.result).toContain('pkc-portable-reference-placeholder');
+    expect(mine.result).toBe(renderMarkdown(text, { currentContainerId: 'c1' }));
+  });
+
   it('🔴 落ちても応答を返す(呼び側が永久に待たない)', () => {
     // 循環参照の opts を渡して内部で投げさせる ── どう投げるかではなく
     // **必ず何か返る**ことが観測点

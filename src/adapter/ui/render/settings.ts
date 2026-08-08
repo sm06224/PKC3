@@ -12,6 +12,8 @@
  */
 import type { AppState } from '@adapter/state/app-state';
 import { THEMES } from './theme';
+import { PAGE_FORMATS } from '@features/page-format';
+import { currentPageFormat } from './page-format';
 import { EXTERNAL_IMAGE_MODES } from '@features/markdown/external-images';
 import { appExternalImages, ExternalImagePolicy } from './external-images';
 import { appJobMonitor, type JobMonitor } from '@adapter/platform/job-monitor';
@@ -52,6 +54,7 @@ export class SettingsRenderer {
     if (this.built) {
       // 配色は user 操作でしか変わらない ── 毎 state で組み直さない
       this.syncTheme();
+      this.syncPageFormat();
       this.syncExternalImages();
       this.syncNotices();
       // 🔴 **隠れている間に来た変化をここで拾う**(2026-08-05、user 報告)。
@@ -114,6 +117,39 @@ export class SettingsRenderer {
     dl.append(dt, dd);
 
     /**
+     * 📄 **紙面**(2026-08-08、user 裁定「読み幅は A4 と A3、フル HD と 4:3 の
+     * 縦横を選べるようにし、デフォは A4 縦」)。
+     *
+     * ⚠ **flag ではない**(正規設定)── 恒久の user 設定で、畳む予定が無い。
+     * ⚠ ここ「表示」に置く ── **見た目の好み**であって、外へ何が伝わるかの
+     *   判断(外部の画像)とは別の節である。
+     */
+    const pt = document.createElement('dt');
+    pt.textContent = '紙面';
+    const pd = document.createElement('dd');
+    const pselect = document.createElement('select');
+    pselect.setAttribute('data-pkc-action', 'set-page-format');
+    pselect.setAttribute('data-pkc-field', 'page-format-select');
+    pselect.setAttribute('aria-label', '紙面');
+    for (const f of PAGE_FORMATS) {
+      const opt = document.createElement('option');
+      opt.value = f.id;
+      opt.textContent = f.label;
+      pselect.append(opt);
+    }
+    pd.append(pselect);
+    const pnote = document.createElement('p');
+    pnote.setAttribute('data-pkc-field', 'settings-note');
+    // ⚠ **何が変わるのか**を書く ── 「紙面」だけでは、画面の話か紙の話か分からない
+    pnote.textContent =
+      '本文の読み幅と、印刷したときの紙の大きさが決まります。既定は A4 縦です。' +
+      'フル HD を選ぶと読み幅の上限が外れ、画面の幅いっぱいまで広がります。' +
+      '表・図・コードはどの紙面でも幅いっぱいのままです。' +
+      '書き出した HTML には、書き出したときの紙面が焼かれます。';
+    pd.append(pnote);
+    dl.append(pt, pd);
+
+    /**
      * 📣 **お知らせを出すか**(P11 段⑤)。
      *
      * 🔑 **ここが「今後は出さない」の戻し道である。** 帯にしか導線が無いと、
@@ -152,6 +188,7 @@ export class SettingsRenderer {
     body.append(this.buildJobs());
     this.region.append(body);
     this.syncTheme();
+    this.syncPageFormat();
     this.syncExternalImages();
     this.syncNotices();
     this.refresh();
@@ -376,6 +413,22 @@ export class SettingsRenderer {
   private syncNotices(): void {
     const box = this.region.querySelector<HTMLInputElement>('[data-pkc-field="notices-enabled"]');
     if (box) box.checked = this.notices.enabled();
+  }
+
+  /**
+   * ⚠ 画面の値を**いまの紙面に合わせる**(2026-08-08)。
+   * 🔴 **器は 1 度しか組まない**ので、映さないと**古い値が見える** ──
+   * 起動時に保存から復元した値も、ここが呼ばれなければ選択欄は A4 縦のまま
+   * (「設定したのに戻っている」と読まれる)。⚠ だから
+   * `render()` の**組み立て直後と、組み済みの分岐の両方**から呼ぶ。
+   */
+  private syncPageFormat(): void {
+    const select = this.region.querySelector<HTMLSelectElement>(
+      '[data-pkc-field="page-format-select"]',
+    );
+    // ⚠ 正本は DOM(`applyPageFormat` が当てた属性)── 保存を読み直さない
+    const cur = currentPageFormat(document.documentElement);
+    if (select && select.value !== cur) select.value = cur;
   }
 
   /** ⚠ 画面の値を**いまの配色に合わせる**(合わせないと画面が嘘をつく)。 */

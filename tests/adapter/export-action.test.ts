@@ -120,6 +120,27 @@ describe('書出しの実行部 — 形式ごとの出口', () => {
     expect(h.files[0]!.name).toBe('わたしのノート-20260802.html');
   });
 
+  /**
+   * 🔴 **選んだ紙面が書き出しへ届く**(2026-08-08 のレビューで空いていた穴)。
+   *
+   * 上流(`main.ts` が `pageFormat:` を積む)と下流(`writePortableHtml` が焼く)は
+   * どちらも pin されていたが、**中間の受け渡し 1 行**を誰も見ていなかった ──
+   * `deps.pageFormat ?? DEFAULT_PAGE_FORMAT` を `DEFAULT_PAGE_FORMAT` に潰す変異が
+   * unit 2509 件・smoke 99 件すべて緑で通る。
+   * 実害: user が「フル HD」で書いた HTML を配ると、**配った側だけ 42rem に戻る**
+   * (書いた本人は自分の画面で確認しないので気づかない)。
+   * ⚠ 観測点は **`91rem`**(A3 横にしか無い値)── 既定へ潰す変異を
+   *   **代替物で満たせない**(「それらしい値が在る」で通らない)。
+   */
+  it('🔴 選んだ紙面が書き出した HTML へ届く(既定に潰されない)', async () => {
+    const { dispatcher } = fakeDispatcher();
+    const d = deps({ pageFormat: 'a3-landscape' });
+    await exportArchive(dispatcher, d, 'html');
+    const html = await d.files[0]!.blob.text();
+    expect(html, '選んだ紙面の読み幅が焼かれていない').toContain('{--read-w:91rem}');
+    expect(html, '選んだ紙面の紙が焼かれていない').toContain('@page{size:A3 landscape}');
+  });
+
   it('🔴 閲覧用は「取り込み直せない」と**その場で**言う', async () => {
     // 後から見分けられない形にしない(PKC2 は light / full を manifest にしか
     // 書いておらず、user がどちらを持っているのか分からなくなっていた)
