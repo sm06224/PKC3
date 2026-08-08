@@ -157,20 +157,30 @@ describe('紙面フォーマット(設定画面と配線)', () => {
     expect(select?.value).toBe('43-portrait');
   });
 
+  /**
+   * ⚠ **合成した `<select>` を押さない**(2026-08-08 のレビューで直した)。
+   * 自分で作った要素に自分で `data-pkc-action` を付けて押すと、**本物の設定画面が
+   * その action を付け忘れても緑**になる ── `settings.ts` の
+   * `setAttribute('data-pkc-action', …)` を消す変異が unit 全緑で通り、
+   * 「紙面」が無言の dead control になった(いまは smoke だけが殺す。
+   *  その smoke が nightly へ移った日に唯一の門が消える)。
+   * 🔑 **`SettingsRenderer` が組んだ本物の選択欄**を binder の下に置いて押す。
+   */
   it('🔴 選択欄 → binder → 実体 が繋がっている(押して無言にならない)', () => {
     const root = document.createElement('div');
     document.body.append(root);
     const setPageFormat = vi.fn();
     const dispatcher = { getState: () => initialState, dispatch: () => {} };
     bindActions(root, dispatcher as never, { setPageFormat });
-    const select = document.createElement('select');
-    select.setAttribute('data-pkc-action', 'set-page-format');
-    const opt = document.createElement('option');
-    opt.value = 'a4-landscape';
-    select.append(opt);
-    root.append(select);
-    select.value = 'a4-landscape';
-    select.dispatchEvent(new Event('change', { bubbles: true }));
+    // 本物の設定画面を binder の配下に組む(合成しない)
+    const settings = new SettingsRenderer(root, new JobMonitor());
+    settings.render(initialState);
+    const select = root.querySelector<HTMLSelectElement>(
+      '[data-pkc-field="page-format-select"]',
+    );
+    expect(select, '設定画面に紙面の選択欄が無い').not.toBeNull();
+    select!.value = 'a4-landscape';
+    select!.dispatchEvent(new Event('change', { bubbles: true }));
     expect(setPageFormat).toHaveBeenCalledWith('a4-landscape');
   });
 });

@@ -45,8 +45,9 @@ export function isTheme(v: string): v is Theme {
  * ⚠ **端末ごとの保存は `pkc3.*` を 1 鍵ずつ**(2026-08-08 に書き換えた)。
  *
  * ここには長く「1 キーだけ。増やすなら設定機構を建ててからにする」と書いてあったが、
- * P11 で**設定機構は建った** ── いまは 5 鍵ある(`pkc3.theme` /
- * `pkc3.external-images` / `pkc3.flags` / `pkc3.notices.seen` / `pkc3.notices.off`)。
+ * P11 で**設定機構は建った** ── いまは 6 鍵ある(`pkc3.theme` /
+ * `pkc3.external-images` / `pkc3.flags` / `pkc3.notices.seen` / `pkc3.notices.off` /
+ * `pkc3.page-format`)。
  *
  * 🔑 増やすときは `flag-store.ts` / `notice-store.ts` と**同じ作法**で:
  * ① 壊れていても**既定へ落ちる**(読めない値で起動不能にしない)

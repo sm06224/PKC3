@@ -178,11 +178,13 @@ nav button.p{width:auto;font-size:12px;padding:4px 10px;margin:2px 8px 0;
    ⚠ この template literal の中に**バッククォートを書かない**(build が壊れる ──
      この file で 5 度目)。 */
 /* 🔑 読み幅はここに無い ── **app.css の規則が焼き込みで届く**(user 裁定 2026-08-08 で
-   統一。46em/器 → 42rem/各ブロック + 表・図・コードは対象外)。あちらの規則は
-   .pkc-md-rendered[data-pkc-field='detail-body'] 起点なので、抜き出しの判定
-   (build/body-css.ts の isBodyRule)を通る。だから器(#body と「全体を印刷」の箱)には
-   **class 2 つに加えて data-pkc-field='detail-body' も**付けてある ──
-   属性を落とすと、その面だけ本文が全幅に伸びる。 */
+ * 統一。46em/器 → 42rem/各ブロック + 表・図・コードは対象外)。あちらの規則は
+ * .pkc-md-rendered[data-pkc-prose] 起点なので、抜き出しの判定
+ * (build/body-css.ts の isBodyRule)を通る。だから器(#body と「全体を印刷」の箱)には
+ * **class 2 つに加えて散文の印も**付けてある ── 落とすとその面だけ全幅に伸びる。
+ * ⚠ ここは注記なので、印の綴り data-pkc-prose を**行頭が * の行に置く** ──
+ * 器の数と印の数を突き合わせる検査(page-format-surfaces)は注記を剥いで数えるので、
+ * 剥がれない行に綴りを書くと**器を増やしていないのに数が合わなくなる**。 */
 .b>*:first-child{margin-top:0}
 /* ⚠ 段落 / 箇条書きの margin は **app.css が書いていない**(UA 既定に任せている)。
    焼いた側に対応物が無いので、消すと配った HTML だけ行間が変わる。 */

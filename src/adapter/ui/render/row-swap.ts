@@ -47,6 +47,13 @@ import { spliceLines } from '@features/markdown/edit-journal';
 const SLOT_HTML = '<div data-pkc-row-slot="1"></div>';
 
 /**
+ * スロットに**読み幅の上限を掛ける**印(`app.css` と 1 対 1)。
+ * ⚠ SLOT_HTML には焼き込まない ── 付けるかどうかは置き換える塊で決まる
+ * (`proseSpan`)。定数側に入れると表・コードの編集欄まで散文の幅になる。
+ */
+const PROSE_ROW_ATTR = 'data-pkc-row-prose';
+
+/**
  * 入力欄の高さの上限(行)。⚠ 全文差し替え(`Ctrl+A`)で 5000 行の箱を作らない。
  * 上限に当たったら箱の中で scroll する(= 今日の編集画面と同じ見え方)。
  */
@@ -102,6 +109,9 @@ interface Active {
    *  末尾に足した行では `''`(戻すときは消す)。 */
   originalHtml: string;
   slot: HTMLElement;
+  /** 置き換えた塊が**読み幅の上限を持っていたか**(`proseSpan`)。描き直しで
+   *  スロットが作り直されたときに付け直す。 */
+  prose: boolean;
   textarea: HTMLTextAreaElement;
   /** 変換中(封印中)か。⚠ **boolean 1 個**(深さを数えない ── 設計 §5 契約 1)。 */
   composing: boolean;
@@ -258,6 +268,9 @@ export class RowSwap {
     const slot = this.host.querySelector<HTMLElement>('[data-pkc-row-slot]');
     if (slot !== null && slot !== a.slot) {
       a.slot = slot;
+      // ⚠ 幅の印も**付け直す** ── 作り直したスロットは素の `<div>` なので、
+      //   忘れると描き直しのたびに表の編集欄が散文の幅へ縮む
+      if (a.prose) slot.setAttribute(PROSE_ROW_ATTR, '');
       slot.append(a.textarea);
     }
     this.markOpenEnds();
@@ -493,6 +506,7 @@ export class RowSwap {
       originalHtml: this.view.blocks[blockIndex] ?? '',
       withSlot,
       caret,
+      prose: this.proseSpan(blockIndex, blockIndex),
     });
   }
 
@@ -525,6 +539,9 @@ export class RowSwap {
       originalHtml: '',
       withSlot: [...this.view.blocks, SLOT_HTML],
       caret: 0,
+      // ⚠ 末尾に足す行は**置き換えた塊が無い** ── 上限は掛けない側へ倒す
+      //   (何を書くか分からないので、狭めない方が安全)
+      prose: false,
     });
   }
 
@@ -615,7 +632,38 @@ export class RowSwap {
       originalHtml: replaced.join(''),
       withSlot,
       caret: 0,
+      prose: this.proseSpan(from, to),
     });
+  }
+
+  /**
+   * 🔴 **スロットの幅は「置き換えた塊が持っていた上限」に揃える**(2026-08-08)。
+   *
+   * 読み幅(紙面フォーマット)は**散文だけ**に掛かる allow-list である。
+   * スロットを一律に散文の幅にすると、**表を押した瞬間に編集欄が縮む**
+   * ── 実測(1600px の窓): 表 1036px → 編集欄 **672px**、`| 第 1 列 | …` の
+   * 106 字が 2 行に折り返した。逆に一律で外すと、段落を押した行だけ全幅へ跳ねる。
+   *
+   * 🔑 **CSS の allow-list を JS に写さない** ── 置き換える要素の**計算値**を読み、
+   *    「上限が在ったか」だけを引き継ぐ(判定の正本は `app.css` の 1 か所のまま。
+   *    フル HD では散文も `none` なので、そのまま全部外れるのも正しい)。
+   * ⚠ 範囲(S6 の `Ctrl+A` / Shift+クリック)は**1 つでも全幅の塊が居れば外す**
+   *    ── allow-list が「掛からない側へ倒れる」のと同じ安全な向き。
+   * ⚠ **測るのは差し替える前**(`applyBlocks` を通した後の要素は DOM の外)。
+   * ⚠ 「上限なし」の綴りは**環境で違う** ── 実ブラウザは `'none'`、happy-dom は
+   *    **空文字**を返す。両方を「上限なし」として扱う(片方だけ見ると、unit で
+   *    全部が『上限あり』になって検査が嘘をつく)。
+   */
+  private proseSpan(from: number, to: number): boolean {
+    let seen = false;
+    for (let i = from; i <= to; i += 1) {
+      const el = this.view.nodes[i]?.find((n): n is Element => n instanceof Element);
+      if (el === undefined) continue;
+      seen = true;
+      const mw = getComputedStyle(el).maxWidth;
+      if (mw === 'none' || mw === '') return false;
+    }
+    return seen;
   }
 
   /** 差し替え / 挿入の共通部分(入力欄を出して契約を張る)。 */
@@ -628,6 +676,8 @@ export class RowSwap {
     originalHtml: string;
     withSlot: readonly string[];
     caret: number;
+    /** 置き換えた塊に読み幅の上限が在ったか(`proseSpan`)。 */
+    prose: boolean;
   }): boolean {
     // 実際に開けたなら予約は用済み(古い予約が後から焦点を奪わないように)
     this.pendingOpen = null;
@@ -635,6 +685,7 @@ export class RowSwap {
     this.view = r.view;
     const slot = this.host.querySelector<HTMLElement>('[data-pkc-row-slot]');
     if (slot === null) return false;
+    if (o.prose) slot.setAttribute(PROSE_ROW_ATTR, '');
 
     const ta = document.createElement('textarea');
     ta.setAttribute('data-pkc-field', 'row-source');
@@ -649,6 +700,7 @@ export class RowSwap {
       source: o.source,
       originalHtml: o.originalHtml,
       slot,
+      prose: o.prose,
       textarea: ta,
       composing: false,
       pendingCommit: false,

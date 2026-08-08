@@ -179,7 +179,18 @@ describe('マニュアルと実装の突合', () => {
     for (const f of PAGE_FORMATS) {
       expect(MANUAL, `マニュアルに紙面「${f.label}」が無い`).toContain(`**${f.label}**`);
       if (f.readWidth.endsWith('rem')) {
-        expect(MANUAL, `マニュアルに ${f.label} の読み幅 ${f.readWidth} が無い`).toContain(
+        /**
+         * ⚠ **行を特定して見る**(2026-08-08 のレビューで判明)。`toContain` で
+         * 文書全体を見ると、**別の行が満たしてしまう** ── `62rem` は A4 横と
+         * A3 縦の 2 行にあるので、A3 縦の値を 42rem に書き換える変異が
+         * A4 横の行に救われて生き延びた。「マニュアルだけが嘘になる」型は、
+         * この検査の存在理由そのものである。
+         */
+        const row = MANUAL.split('\n').find(
+          (l) => l.startsWith('|') && l.includes(`**${f.label}**`),
+        );
+        expect(row, `マニュアルに紙面「${f.label}」の行が無い`).toBeDefined();
+        expect(row!, `マニュアルの ${f.label} の読み幅が ${f.readWidth} でない`).toContain(
           f.readWidth,
         );
       }

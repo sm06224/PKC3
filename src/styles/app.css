@@ -815,12 +815,15 @@ select:focus-visible {
   font-size: 12.5px;
   resize: none;
 }
-/* 何も選んでいないときの案内(P9 段③)。⚠ 読み幅の上限に収める ── 案内文が
- * 1000px 伸びると、それ自体が読みにくい */
+/* 何も選んでいないときの案内(P9 段③)。⚠ 上限に収める ── 案内文が
+ * 1000px 伸びると、それ自体が読みにくい。
+ * ⚠ **紙面フォーマットに連動させない**(`var(--read-w)` を使わない。2026-08-08)──
+ *   これはアプリの案内であって user の文書ではないので、「フル HD = 上限なし」を
+ *   選んだ user にも短い文が画面幅いっぱいに伸びるべきではない。 */
 [data-pkc-field='detail-empty'] {
   color: var(--muted);
   padding: var(--s3);
-  max-width: var(--read-w);
+  max-width: 42rem;
 }
 [data-pkc-field='detail-loading'] {
   color: var(--muted);
@@ -910,13 +913,22 @@ select:focus-visible {
  * ⚠ 表・図・コード・iframe・添付は**上限の対象外**(横に広いほど読める)。
  *   ここは allow-list 方式にしてある ── 新しいブロックが増えたとき、
  *   「上限が掛からない」側に倒れる(= 焼き直しも崩れも起きない安全な向き)。
- * ⚠ `[data-pkc-row-slot]`(ライブエディタで生になった行)も同じ幅にする ──
- *   外すと、行を押した瞬間に**その行だけ全幅へ跳ねる**(同じ紙の上で 1 行だけ
- *   生になる、という作りが崩れる)。
  *
  * 既定(A4 縦)は 42rem = 672px。本文 13px なので全角 **約 51 文字**
  * (日本語の可読幅は 35〜50 文字)。 */
-.pkc-md-rendered[data-pkc-prose] > :is(p, h1, h2, h3, h4, h5, h6, ul, ol, dl, blockquote, hr, .footnotes, .pkc-details, .pkc-format-block, .pkc-toc-formal, .pkc-toc-preview, .pkc-section-break, .pkc-blank-line, .pkc-region-frontmatter, .pkc-region-body, .pkc-section-callout, .pkc-fig-equation, [data-pkc-row-slot]) {
+.pkc-md-rendered[data-pkc-prose] > :is(p, h1, h2, h3, h4, h5, h6, ul, ol, dl, blockquote, hr, .footnotes, .pkc-details, .pkc-format-block, .pkc-toc-formal, .pkc-toc-preview, .pkc-section-break, .pkc-blank-line, .pkc-region-frontmatter, .pkc-region-body, .pkc-section-callout, .pkc-fig-equation) {
+  max-width: var(--read-w);
+}
+/**
+ * 🔴 **ライブエディタで生になった行**(`[data-pkc-row-slot]`)。
+ *
+ * ⚠ **一律には掛けない。** スロットは押した塊を丸ごと置き換えるので、表・コード
+ * fence を押したときも同じ器になる ── 一律に散文の幅へ入れると、**表の編集欄が
+ * 縮んで原文が折り返す**(実測: 表 1036px に対し編集欄 672px、106 字の行が 2 行に)。
+ * 逆に一律で外すと、段落を押した行だけ全幅へ跳ねる。
+ * 🔑 だから **`row-swap.ts` が「置き換えた塊に上限が在ったか」を見て印を付ける**
+ * (`proseSpan`)── allow-list の判定は上の 1 本のままで、こちらは結果を引き継ぐ。 */
+.pkc-md-rendered[data-pkc-prose] > [data-pkc-row-slot][data-pkc-row-prose] {
   max-width: var(--read-w);
 }
 .pkc-md-rendered h1,

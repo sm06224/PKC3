@@ -23,7 +23,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { renderMarkdown } from '@features/markdown/markdown-render';
-import { extractBodyCss } from '../../build/body-css';
+import { extractBodyCss, parseRules } from '../../build/body-css';
 
 /**
  * ⚠ **コメントを剥いでから走査する**。剥がないと、コメントに書いた
@@ -369,10 +369,29 @@ describe('読み幅の上限', () => {
       '.pkc-region-body',
       '.pkc-section-callout',
       '.pkc-fig-equation',
-      // ⚠ ライブエディタで生になった行(2026-08-08)。落とすと、押した行だけ
-      //    全幅へ跳ねる ── 「同じ紙の上で 1 行だけ生になる」作りが崩れる
-      '[data-pkc-row-slot]',
     ]);
+  });
+
+  /**
+   * 🔴 **ライブエディタの生の行は allow-list に入れない**(2026-08-08 のレビューで
+   * 直した)。スロットは押した塊を丸ごと置き換えるので、`:is(…)` に入れると
+   * **表・コードを押した瞬間に編集欄が散文の幅へ縮む**(実測: 表 1036px に対し
+   * 編集欄 672px、106 字の行が 2 行に折り返した)。
+   * 🔑 別の 1 本にして、`row-swap.ts` が「置き換えた塊に上限が在ったか」で
+   *    印(`data-pkc-row-prose`)を付ける ── 判定の正本は上の allow-list のまま。
+   */
+  it('🔴 生の行は別の規則で、印が付いたときだけ掛かる', () => {
+    const items = RULE.exec(CSS)![1]!.split(',').map((x) => x.trim());
+    expect(items, '生の行が allow-list に混ざっている(表の編集欄が縮む)').not.toContain(
+      '[data-pkc-row-slot]',
+    );
+    const rows = parseRules(CSS).filter((r) => r.selector.includes('data-pkc-row-slot'));
+    const capped = rows.filter((r) => /max-width:\s*var\(--read-w\)/.test(r.body));
+    expect(capped.length, '生の行の読み幅の規則が 1 本でない').toBe(1);
+    expect(
+      capped[0]!.selector,
+      '印が無くても掛かる(表・コードの編集欄まで縮む)',
+    ).toContain('[data-pkc-row-prose]');
   });
 });
 

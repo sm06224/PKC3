@@ -147,11 +147,20 @@ describe('本文の CSS を抜く', () => {
     expect(OUT.vars, '--read-w が要求されていない').toContain('--read-w');
     expect(OUT.css, '--read-w の定義が無い(宣言ごと無効になる)').toContain('--read-w:');
 
+    /**
+     * ⚠ 焼かれる読み幅の規則は **2 本**:① 本文ブロックの allow-list
+     * ② ライブエディタで生になった行(2026-08-08 に ① から切り出した)。
+     * ②は書き出した HTML では働かない(ライブエディタが無い)が、抜き出しの判定
+     * (`isBodyRule`)は起点の形だけを見るので**素直に付いてくる** ── ここで
+     * 「1 本のはず」に貼ると、切り出しのたびに割れる。**①を名指しで**見る。
+     */
     const rw = parseRules(OUT.css).filter((r) => r.body.includes('max-width:var(--read-w)'));
-    expect(rw.length, '読み幅の規則が焼いた CSS の中に規則として立っていない').toBe(1);
-    expect(rw[0]!.at, '読み幅が @media の中に入っている(画面で効かない)').toEqual([]);
+    expect(rw.length, '読み幅の規則が焼いた CSS の中に規則として立っていない').toBe(2);
+    const block = rw.find((r) => r.selector.includes(':is('));
+    expect(block, '本文ブロックの allow-list が焼かれていない').toBeDefined();
+    expect(block!.at, '読み幅が @media の中に入っている(画面で効かない)').toEqual([]);
     expect(
-      rw[0]!.selector,
+      block!.selector,
       '読み幅の起点が器の子孫になっている(どの要素にも当たらない)',
     ).toMatch(/^\.pkc-md-rendered\[data-pkc-prose\]>/);
     /**

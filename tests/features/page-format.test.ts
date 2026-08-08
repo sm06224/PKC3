@@ -68,10 +68,15 @@ describe('紙面フォーマットの表', () => {
     expect(DEFAULT_PAGE_FORMAT).toBe('a4-portrait');
     // ⚠ ここが動くと**既存 user の見え方が変わる**(裁定は「既定は A4 縦」)
     expect(cssReadWidth('a4-portrait')).toBe('42rem');
-    // 素の `:root` の既定値も同じであること ── 属性が付く前の一瞬もこの幅
-    expect(/:root\s*\{[\s\S]*?--read-w:\s*42rem/.test(TOKENS), '既定値が 42rem でない').toBe(
-      true,
-    );
+    /**
+     * 素の `:root` の既定値も同じであること ── 属性が付く前の一瞬もこの幅。
+     * ⚠ **`}` を跨がせない**(2026-08-08 のレビュー)。`[\s\S]*?` は lazy でも
+     * 閉じ括弧を越えるので、`:root[data-pkc-page-format='a4-portrait']` の側で
+     * 満たされ、**素の `:root` を 45rem に変えても緑**だった。
+     */
+    const bare = /:root\s*\{([^}]*)\}/.exec(TOKENS);
+    expect(bare, 'tokens.css に素の :root ブロックが無い').not.toBeNull();
+    expect(bare![1], '素の :root の既定値が 42rem でない').toMatch(/--read-w:\s*42rem/);
   });
 
   it('🔴 表と tokens.css が 1 対 1(片方だけ足す / 直すを落とす)', () => {
