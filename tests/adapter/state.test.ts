@@ -116,6 +116,15 @@ describe('reducer: lean aggregate', () => {
     expect(reduce(s, { type: 'SET_VIEW_MODE', mode: 'kanban' }).state.viewMode).toBe(
       'detail',
     );
+    /**
+     * 🔴 **ただし「ノートを映さない面」は編集中でも開ける**(user 裁定 2026-08-08。
+     * P11 の Q5 を覆した)。⚠ ここを塞ぐと「書きながらマニュアルを読む」が
+     * できない ── ヘルプの主目的である。
+     */
+    expect(
+      reduce(s, { type: 'SET_VIEW_MODE', mode: 'help' }).state.viewMode,
+      '編集中にヘルプを開けない(無言の dead click)',
+    ).toBe('help');
     // editing 外での UPDATE_OPEN_BODY は無効
     const ready = loadedA();
     expect(
@@ -681,7 +690,7 @@ describe('effect layer: serialized store I/O', () => {
  */
 describe('ノートでない面から、一覧を押したら中央が戻る', () => {
   // ⚠ **面を足したらここにも足す** ── 足さないと、その面だけ取りこぼす
-  for (const view of ['settings', 'flags'] as const) {
+  for (const view of ['settings', 'flags', 'help'] as const) {
     it(`🔴 ${view} を開いたまま別のノートを押すと detail へ戻る`, () => {
       let s: AppState = { ...booted(), viewMode: view };
       s = reduce(s, { type: 'SELECT_ENTRY', lid: 'a' }).state;

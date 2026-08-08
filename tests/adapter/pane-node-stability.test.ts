@@ -33,6 +33,7 @@ import type { AppState } from '../../src/adapter/state/app-state';
 import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
 import { FilerRenderer } from '../../src/adapter/ui/render/filer';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
+import { CenterRouter } from '../../src/adapter/ui/render/center';
 
 const META = (over: Partial<EntryMeta> = {}): EntryMeta => ({
   lid: 'e1',
@@ -390,5 +391,55 @@ describe('🔴 本文の面: いまの面を DOM に書く(CSS が読む)', () =
     // 🔑 **戻れること**も見る(片道だと「編集に入ったら二度と伸びない」が通る)
     d.render(bodyState());
     expect(region.getAttribute('data-pkc-detail-mode'), '読む面へ戻っていない').toBe('view');
+  });
+});
+
+/**
+ * 🔴 **編集中に「ノートを映さない面」を開いて戻っても、編集が壊れない**
+ * (user 裁定 2026-08-08。P11 の Q5「編集中は開けないまま」を覆した根拠そのもの)。
+ *
+ * 覆した理由は意見ではなく、**この往復が安全だと確かめられた**からである:
+ *  ① 面は `hidden` の付け外しで**生きたまま常駐**する(`CenterRouter` は
+ *     非 active な面の `render` を呼ばない)
+ *  ② 戻ったとき `DetailRenderer.render` が「編集中かつ同じ lid」で早期 return する
+ *  → **textarea も、そこに打った文字も、native の取り消し履歴も残る**
+ *
+ * ⚠ **この test が根拠を持っている。** 落ちたら裁定の前提が崩れているので、
+ *   「編集中は開けない」へ戻すか、別の守り方を考えること ── test を緩めない。
+ */
+describe('🔴 編集中に面を往復しても、編集が壊れない', () => {
+  it('🔴 ヘルプを開いて戻っても、打ちかけの本文と node が残る', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const router = new CenterRouter(host);
+    const editing = stateOf([META()], {
+      phase: 'editing',
+      openBody: { lid: 'e1', body: '打ちかけ', baseline: '', persisted: '', diskAhead: false },
+    } as Partial<AppState>);
+
+    router.render(editing);
+    const ta = host.querySelector<HTMLTextAreaElement>('[data-pkc-field="editor-body"]');
+    expect(ta, '編集欄が出ていない(fixture の空振り)').not.toBeNull();
+    // ⚠ **DOM にしか無い状態**を作る ── state に戻さない値がこの往復で消えないか
+    ta!.value = '打ちかけ + まだ state に戻していない分';
+
+    // ヘルプへ寄り道する
+    router.render({ ...editing, viewMode: 'help' } as AppState);
+    expect(
+      host.querySelector('[data-pkc-view-pane="detail"]')?.hasAttribute('hidden'),
+      '本文の面が隠れていない(面の切替が効いていない)',
+    ).toBe(true);
+    expect(
+      host.querySelector<HTMLElement>('[data-pkc-view-pane="help"]')?.hidden,
+      'ヘルプが出ていない',
+    ).toBe(false);
+
+    // 戻る
+    router.render(editing);
+    const after = host.querySelector<HTMLTextAreaElement>('[data-pkc-field="editor-body"]');
+    expect(after, '編集欄が消えた').not.toBeNull();
+    // 🔑 **同じ node** = native の取り消し履歴も caret も生きている
+    expect(after, '編集欄が作り直された(取り消し履歴が消える)').toBe(ta);
+    expect(after!.value, '打ちかけが消えた').toBe('打ちかけ + まだ state に戻していない分');
   });
 });

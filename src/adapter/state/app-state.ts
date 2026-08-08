@@ -601,7 +601,24 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       return { state: { ...state, filterQuery: action.query }, events: [] };
     case 'SET_VIEW_MODE':
       // selection は消さない(PKC2 規約)。panel は view に従属するので畳む
-      if (state.phase === 'editing') return { state, events: [] };
+      /**
+       * 🔴 **編集中でも「ノートを映さない面」は開ける**(user 裁定 2026-08-08。
+       * P11 の Q5「開けないまま」を**覆した**)。
+       *
+       * 覆した理由は意見ではなく、**調べたら止めている理由が無かった**から:
+       *  ① 面は `hidden` の付け外しで**生きたまま常駐**する(`center.ts` の `pane()`
+       *     は 1 度だけ作り、`render` は非 active な面を描かない)
+       *  ② 戻ったとき本文の面は**組み直されない**(`detail.ts` の `render` が
+       *     「編集中かつ同じ lid」で早期 return する)
+       *  → **textarea も native の取り消し履歴も壊れない**。
+       *
+       * 🔑 一方で止めるコストは実在した ── **「書きながらマニュアルを読む」は
+       * ヘルプの主目的**であり、P11 で無言の dead click が 1 個 → 3 個に増えていた。
+       *
+       * ⚠ **一覧のノートを押す(`SELECT_ENTRY`)は開けない**。あちらは「下書きを
+       *   守る」理由が実在する ── ただし無言で断らないのが正しい(別主題)。
+       */
+      if (state.phase === 'editing' && !isAsidePane(action.mode)) return { state, events: [] };
       return {
         state: {
           ...state,
