@@ -251,24 +251,26 @@ describe('csv/tsv のセルに文書の脚注が漏れない', () => {
 });
 
 /**
- * 🔴 **行頭アラインの矢印の向きは意味を持たない**(記法の正本)。
+ * 🔴 **行頭アラインの矢印の向きは意味を持たない**(user 裁定 2026-08-08、Issue #103):
  *
- * `PKC2: docs/development/notation-redesign-2026-05/01-notation-catalog.md` §1.4.2 が
- * 「`|>` `<|` `|<` `>|` … **全 4 形が同じ "logical end"** として正規化(典型 typo
- * パターン受理)」と定め、§1.4.1 が **`<|text` align prefix を ❌ 廃止**として
- * 「**default flow は frontmatter で declare**、明示的左寄せ強制は formal
- * `:::paragraph{align=left}`」と書いている。
+ * > 「**|> も<|も|<も意味は同じ、グローバルの文字の寄せを反対にする**」(寛容なパーサー)
  *
- * つまり ── **どちら側が既定の流れかは文書全体の direction が決める**
- * (frontmatter `direction:` / `writing:` = global direction の switch)。
- * 行頭マーカーは物理方向を主張してはならず、持てるのは
- * 「中央」と「流れの反対側(end)」の 2 つだけである。
+ * 4 形が同値であることは catalog
+ * (`PKC2: docs/development/notation-redesign-2026-05/01-notation-catalog.md` §1.4.2)から
+ * 一貫している。**意味**のほうは規約が 2 通りに書いていて(① draft §2.3.6「宣言した
+ * 既定の流れの反対側」/ ② canonical 3 本「logical end 固定」)、裁定は **①** を正とした
+ * ── それまでの実装(②)は裁定と逆だった。
+ *
+ * ⚠ **裁定後も属性は `end` のまま**である(この test の assert が生きている理由)。
+ * 「宣言 align が flow start と逆の文書」での反転は app.css の入れ替え規則(CSS)の
+ * 仕事で、renderer は動いていない(goldens 不変)。CSS 側の pin は
+ * `tests/features/align-swap-css.test.ts` と `markdown-css-parity.test.ts`。
  *
  * ⚠ **この test は一度この規則を逆に pin していた**(2026-08-06。`<|` を start に
- * 変えた誤り。user の指摘で revert)。誤りの根拠は 2 つとも「実装より弱い出典」で、
- * 調査 doc の minor 一覧と、`markdown-css-parity.test.ts` の corpus の註記だった。
+ * 変えた誤り。user の指摘で revert)。
  * 🔑 だからこの test は **4 形が同じ値になること**を明示的に見る ── 「向きを
- * 読みたくなる」誤りが**もう一度入らないように**するのが目的である。
+ * 記号ごとに読みたくなる」誤りが**もう一度入らないように**するのが目的である
+ * (裁定引用そのものが「4 形は同じ」と言っている)。
  */
 describe('行頭アライン: 矢印の向きは意味を持たない(記法の正本)', () => {
   const alignOf = (src: string): string | null => {
@@ -293,9 +295,10 @@ describe('行頭アライン: 矢印の向きは意味を持たない(記法の�
   /**
    * 🔴 **「左」の行頭マーカーは存在しない**(廃止済み)。
    * ⚠ ここは**無いことを pin する** test である ── 誰かが「`<|` は左だろう」と
-   * 直感で足すのを止めるために置く。左に寄せたいときの正しい道は 2 つ:
+   * 直感で足すのを止めるために置く。左に寄せたいときの正しい道は 3 つ:
    * ① 文書の `direction` を宣言する(既定の流れを変える)
-   * ② formal の `:::paragraph{align=left}`(物理左の強制)
+   * ② 文書の `align: right` を宣言する(`|>` が反対側 = 左へ寄る。裁定 2026-08-08)
+   * ③ formal の `:::paragraph{align=left}`(物理左の強制)
    */
   it('🔴 simple 形に start / left は 1 つも無い(左は direction か formal の仕事)', () => {
     for (const sym of ['||', '|>', '<|', '|<', '>|']) {
@@ -383,7 +386,9 @@ describe('行頭アライン: 矢印の向きは意味を持たない(記法の�
       });
       expect(html, 'canonical 属性が出ていない').toContain('data-pkc-canonical=');
       expect(html, '属性が start を教えている').not.toContain('(start)');
-      expect(html).toContain('logical end');
+      // ⚠ 裁定 2026-08-08 の意味(「反対にする」)ごと焼かれること ── 属性の値だけ
+      //    正しくても、教える文が古い(logical end 固定)ままなら user と AI は誤って学ぶ
+      expect(html).toContain('グローバルの寄せの反対側');
     });
   });
 
@@ -497,15 +502,22 @@ describe('行頭アライン: 矢印の向きは意味を持たない(記法の�
   });
 
   /**
-   * 🔑 **既定の流れは frontmatter が決める**(global direction の switch)。
+   * 🔑 **どちら側が「グローバルの寄せ」かは frontmatter が決める**(`direction` /
+   * `align` の宣言)。
    * ⚠ この 2 つが同じ文書で共存できることを見る ── `end` の物理的な着地点は
    * ここで反転する(だから行頭マーカーが物理方向を持ってはいけない)。
+   * ⚠ 裁定 2026-08-08(Issue #103)の後も**属性は end のまま** ── 反転は CSS
+   * (app.css の入れ替え規則)の仕事で、renderer が宣言を読んで属性を変えたら
+   * goldens が動く(= 方式が壊れている)。ここはそれを止める pin である。
    */
-  it('🔴 文書の direction は frontmatter で切り替わる(行頭マーカーとは別系統)', () => {
+  it('🔴 文書の direction / align は frontmatter で切り替わる(行頭マーカーとは別系統)', () => {
     const globals = extractDocumentGlobals('---\ndirection: rtl\n---\n\n|> 本文\n');
     expect(globals.direction, 'global direction の switch が効いていない').toBe('rtl');
     // ⚠ マーカー側は direction に関わらず end のまま(logical なので反転は CSS の仕事)
     expect(alignOf('---\ndirection: rtl\n---\n\n|> 本文\n')).toBe('end');
+    // ⚠ `align` 宣言でも同じ ── 属性は end のまま(見え方の反転は入れ替え規則)。
+    //    renderer に「宣言を読んで start へ書き換える」実装が生えたらここが落ちる
+    expect(alignOf('---\nalign: right\n---\n\n|> 本文\n')).toBe('end');
   });
 });
 

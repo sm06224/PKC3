@@ -1236,7 +1236,8 @@ select:focus-visible {
   text-decoration: none;
 }
 
-/* ── 行頭アライン(`||` 中央 / `|>` `<|` `|<` `>|` は 4 形すべて logical end)と
+/* ── 行頭アライン(`||` 中央 / `|>` `<|` `|<` `>|` は 4 形すべて同値 ── 属性は `end`。
+ * 意味は「グローバルの文字の寄せの反対側」、user 裁定 2026-08-08。下の裁定註記を参照)と
  * 段落の字下げ(`__`)。
  * ⚠ **物理方向で説明しない**(2026-08-06 に「`|>` 右」から直した)── `end` は
  *   CSS logical value なので `direction` / `writing-mode` で自動 flip する。
@@ -1280,20 +1281,23 @@ select:focus-visible {
  * ── 規約(`PKC2: docs/development/notation-redesign-2026-05/02-frontmatter-and-globals.md`)
  * が正本。実装が規約に届いていなければ実装を直す。
  *
- * ⏸ **`|>` の意味は規約が 2 通りに書いている(user 裁定待ち)**。
+ * 🔴 **`|>` の意味は裁定済み**(user 裁定 2026-08-08、Issue #103):
+ *   「**|> も<|も|<も意味は同じ、グローバルの文字の寄せを反対にする**」(寛容なパーサー)。
+ *   規約は 2 通りに書いていた:
  *   ① `02-frontmatter-and-globals.md` §2.3.6(**draft**、2026-05-09):
  *      「宣言した既定の流れの**反対側**」── `align: right` の文書では `|>` は**左**
  *   ② `11-canonicalization-spec.md` §53(2026-05-10)/
  *      `markdown-dialect-for-ai-authors-v3.md`(**唯一 canonical**、2026-05-12)/
  *      `pkc-markdown-complete-spec-v4.md` §6.2(candidate、2026-05-25):
  *      「logical end(**LTR で右、RTL で左**)」= CSS の `text-align: end` そのもの
- *   **本 file は ② を実装している**(= `align` では入れ替えない)。理由:
- *   ① は draft の設計議論で、後発の canonical / candidate 3 本が ② を採る /
- *   ① だと `start`(= 宣言 align と同じ側)が**無印と同義になって語彙から消える**のに
- *   規約は `start` を 4 doc で保持している / ① は `align: center` の「反対側」を
- *   定めていない(② は全組合せで定まる)。
- *   ⚠ ① を採る裁定が出たら、ここに「宣言 align が flow start と逆のときだけ
- *   `end`/`start` を入れ替える」規則を足す(2026-08-06 に一度実装して外した)。 */
+ *   **PKC2 実装(と 2026-08-08 までの本 file)は ② = logical end 固定**だったが、
+ *   **裁定は ① = draft 規約 §2.3.6 側を正とした**。
+ *   実装の形: `data-pkc-align="end"` 属性は**変えない**(renderer / goldens は
+ *   1 バイトも動かない)── 「宣言 align が flow start と逆の文書」のときだけ、
+ *   下の**入れ替え規則**が `end` / `start` の見え方を反転する。
+ *   ⚠ `align: center` は**入れ替えない**(「center の反対側」が定義できないため
+ *   `end` は end のまま)── これは裁定引用の外の実装判断である。覆す裁定が
+ *   出たら、この註記と入れ替え規則を直す。 */
 /* 🔴 **縦書きでは文字の流れる向き(`direction`)を `ltr` に固定する**(規約 §2.3.5)。
  *
  * 規約が CSS mapping まで書いている数少ない箇所である:
@@ -1337,6 +1341,36 @@ select:focus-visible {
   text-align: start;
 }
 .pkc-md-rendered[data-pkc-writing='vertical'][data-pkc-doc-align='bottom'] {
+  text-align: end;
+}
+/* 🔴 **入れ替え規則**(user 裁定 2026-08-08、Issue #103。上の裁定註記を参照)。
+ * 「宣言 align が flow start と逆の文書」では、`|>`(= `data-pkc-align="end"`)は
+ * グローバルの寄せの**反対側** = flow start 側へ寄る。属性は動かさず、見え方だけ
+ * ここで入れ替える(`start` も対で反転 ── 「宣言 align と同じ側」を指し続ける)。
+ * ⚠ 横書きの flow start は `dir` が決める(無印 / ltr = 左、rtl = 右)──
+ *   `align: right` は ltr でだけ「逆」、`align: left` は rtl でだけ「逆」。
+ * ⚠ 縦書きは上の `direction: ltr` 固定により flow start が常に**上** ──
+ *   「逆」になり得るのは `align: bottom` だけ(`data-pkc-doc-align='bottom'` は
+ *   縦書きでしか出ない ── document-globals.ts が横書きでは不正組合せとして落とす)。
+ * ⚠ `align: center` の規則は**意図して無い**(「center の反対側」が定義できない)。
+ * ⚠ 詳細度は (0,4,0) ── 基底の `.pkc-md-rendered [data-pkc-align=…]`(0,2,0)に
+ *   file 内の位置と無関係に勝つ。 */
+.pkc-md-rendered[data-pkc-doc-align='right']:not([dir='rtl']) [data-pkc-align='end'] {
+  text-align: start;
+}
+.pkc-md-rendered[data-pkc-doc-align='right']:not([dir='rtl']) [data-pkc-align='start'] {
+  text-align: end;
+}
+.pkc-md-rendered[data-pkc-doc-align='left'][dir='rtl'] [data-pkc-align='end'] {
+  text-align: start;
+}
+.pkc-md-rendered[data-pkc-doc-align='left'][dir='rtl'] [data-pkc-align='start'] {
+  text-align: end;
+}
+.pkc-md-rendered[data-pkc-writing='vertical'][data-pkc-doc-align='bottom'] [data-pkc-align='end'] {
+  text-align: start;
+}
+.pkc-md-rendered[data-pkc-writing='vertical'][data-pkc-doc-align='bottom'] [data-pkc-align='start'] {
   text-align: end;
 }
 /* 段落 physical の縦(`:::paragraph{align=top}`)。⚠ 縦書きに限る ── 横書きでの

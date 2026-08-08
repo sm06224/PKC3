@@ -19,9 +19,11 @@ import { gotoApp, clickReal, createEntry, collectPageErrors } from './helpers';
  *   **`|>` = logical end(LTR で右、RTL で左)**、physical(`left`/`right`)は
  *   **強制的に物理方向**で formal 専用
  *
- * ⏸ **`|>` の意味は規約が 2 通りに書いている(user 裁定待ち)** ── ① §2.3.6(draft)
- * 「宣言した `align` の反対側」/ ② 上記 canonical 3 本「flow の end」。
- * **本 spec は ② を検査する**(理由は `src/styles/app.css` の該当節)。
+ * 🔴 **`|>` の意味は裁定済み**(user 裁定 2026-08-08、Issue #103)──
+ * 「**|> も<|も|<も意味は同じ、グローバルの文字の寄せを反対にする**」。規約の 2 通り
+ * (① §2.3.6 draft「宣言した `align` の反対側」/ ② 上記 canonical 3 本「flow の end」)は
+ * **① に決着**。属性は `end` のまま、「宣言 align が flow start と逆の文書」でだけ
+ * app.css の入れ替え規則が見え方を反転する ── **本 spec の ② 段がそれを実ブラウザで見る**。
  *
  * PKC3 に何が無かったか(移植で落ちていた):
  * ① `data-pkc-doc-align` / `data-pkc-writing` を**消費する CSS が 1 行も無かった**
@@ -83,12 +85,12 @@ async function alignsOf(
   );
 }
 
-test('🔴 `|>` は logical end(流れの終端)に寄る ── 物理強制は反転しない', async ({ page }) => {
+test('🔴 `|>` はグローバルの寄せの反対側に寄る ── 物理強制は反転しない', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1280, height: 900 });
   await gotoApp(page);
 
-  // ① 既定(align 宣言なし・LTR)── 流れの終端は右
+  // ① 既定(align 宣言なし・LTR)── グローバルの寄せは flow start(左)なので反対 = 右
   await writeNote(page, '既定', '普通の段落\n\n|> 終端\n\n|| 中央\n');
   {
     const a = await alignsOf(page);
@@ -100,14 +102,17 @@ test('🔴 `|>` は logical end(流れの終端)に寄る ── 物理強制は
   /**
    * ② 🔴 **宣言した既定の寄せが効く**(直す前は `data-pkc-doc-align` を読む CSS が
    * 1 行も無く、`align: right` は 100% 見た目 no-op だった)。
-   * ⏸ このとき `|>`(end)は **② の読みでは右のまま**(= 無印と同じ側)。
-   *   ① の読みなら左になる ── 裁定が出るまでは ② を pin する。
+   * 🔴 このとき `|>`(end)は**左**(user 裁定 2026-08-08、Issue #103
+   * 「グローバルの文字の寄せを反対にする」)── 宣言 align(右)の反対側。
+   * ⚠ 2026-08-08 まではここを「右のまま(logical end 固定)」と pin していた ──
+   *   裁定で反転した。app.css の入れ替え規則が実際に効いているかを見る観測点は
+   *   ここ(実ブラウザの版面)だけである(unit は CSS を解決しない)。
    */
   await writeNote(page, '既定を右に宣言', '---\nalign: right\n---\n\n普通の段落\n\n|> 終端\n');
   {
     const a = await alignsOf(page);
     expect(a[0], '宣言した既定の寄せ(右)が効いていない').toBe('right');
-    expect(a[1], '`|>` が logical end(右)でない').toBe('right');
+    expect(a[1], '`|>` が宣言 align の反対側(左)に寄っていない').toBe('left');
   }
 
   // ③ RTL の既定 ── §2.3.4 で align の既定が right になるので `|>` は左
