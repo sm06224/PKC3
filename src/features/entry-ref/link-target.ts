@@ -12,16 +12,17 @@
  * |---|---|---|
  * | `[題名](entry:<lid>[#frag])` | `navigate-entry-ref` | **条件なしで焼かれる** |
  * | `@[card](entry:<lid>)` / `@[card](pkc://<cid>/entry/<lid>)` | `navigate-card-ref` | **条件なしで焼かれる** |
- * | `[x](pkc://<cid>/asset/<key>)` | `navigate-asset-ref` | **1 度も焼かれない**(下記) |
+ * | `[x](pkc://<cid>/asset/<key>)` | `navigate-asset-ref` | 焼かれる。**受け手が無い**(下記) |
  *
  * ## ⚠ `navigate-asset-ref` はここでは扱わない
  *
- * 焼く条件が `currentContainerId` を要求するのに、**`src/adapter/` からも
- * `main.ts` からも 1 件も渡していない**(既定 `''`)ので、必ず別の枝
- * (`pkc-portable-reference-placeholder`、action 無し)へ落ちる。しかも PKC3 に
- * `pkc://` を**生成する経路が無い**。受け手だけ書いても**呼ばれない**ので、
- * cid の配線と key→lid の逆引きが要る**別主題**として `repo-hygiene` の
- * `KNOWN_DEAD` に残してある。
+ * 焼く条件(`currentContainerId`)は **Issue #100 段① で配線した**ので、
+ * `pkc://<自分>/asset/<key>` は `navigate-asset-ref` として焼かれるように
+ * なった。残っているのは**受け手**である ── asset の key から
+ * 「その添付を持つ entry」を引く逆引き(段②)が要るので、`repo-hygiene` の
+ * `KNOWN_DEAD` に**別主題**として残してある。
+ * ⚠ 逆引きに `scanAssetRefs` を流用しない ── あちらは false-keep 側(広く拾う)
+ *   に倒した判定で、ここは**誤爆しない側**(狭く当てる)が要る。
  *
  * ## 🔑 規則を 1 つに寄せる
  *
@@ -70,8 +71,12 @@ export function parseLinkTarget(raw: string, selfContainerId = ''): LinkTarget {
       kind: 'entry',
       lid: p.targetId,
       fragment: p.fragment ?? '',
-      // ⚠ 自分のコンテナ id を渡されていないときは**外と見なさない** ──
-      //   いまアプリは cid を描画へ渡していないので、既定で断ると全部断る
+      // ⚠ 自分のコンテナ id を渡されていないときは**外と見なさない**
+      //   (既定で断ると全部断ることになる)。
+      // 🔑 描画側は Issue #100 段① で cid を受け取ったので、
+      //   `navigate-entry-ref` に焼かれる `pkc://` は**必ず同一コンテナ**である。
+      //   ここへ外の id が来る道は `@[card](pkc://<外>/entry/<lid>)` だけ ──
+      //   card は cid を見ずに焼くため(**受け手側の cid 配線は未了**)。
       foreign: selfContainerId !== '' && p.containerId !== selfContainerId,
     };
   }

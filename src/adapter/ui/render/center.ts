@@ -98,7 +98,10 @@ export class CenterRouter {
     else if (view === 'kanban') this.kanban.render(state);
     else if (view === 'settings') this.settings.render(state);
     else if (view === 'flags') this.flags.render();
-    else if (view === 'help') this.help.render();
+    // ⚠ ヘルプにも**コンテナ id を渡す**(Issue #100 段①)── マニュアルも
+    //    この面と同じ document に描かれる文書なので、`pkc://` の扱いを本文と
+    //    揃える(渡し忘れると、この面だけ「別の PKC」に見える)
+    else if (view === 'help') this.help.render(state.cid ?? '');
     else this.calendar.render(state);
   }
 

@@ -113,17 +113,23 @@ describe('リポジトリ衛生', () => {
      *
      * ✅ **`navigate-entry-ref` と `navigate-card-ref` は戻した**(2026-08-08)。
      *
-     * ⚠ **`navigate-asset-ref` だけ残る。理由は「まだ直していない」ではない** ──
-     * この action は**1 度も焼かれない**。焼く条件が `currentContainerId` を
-     * 要求するのに、`src/adapter/` からも `main.ts` からも 1 件も渡していないので
-     * (既定 `''`)、必ず別の枝(action 無しの placeholder)へ落ちる。しかも
-     * PKC3 に `pkc://` を**生成する経路が無い**。⚠ **受け手だけ書いても
-     * 呼ばれない**ので、① cid の配線 ② key→lid の逆引き が要る**別主題**である。
+     * 🔴 **`navigate-asset-ref` は「焼かない」ことで解いた**(2026-08-08、Issue #100 段①)。
+     *
+     * 段①で cid が届くようになり、条件だけ見れば `pkc://<自分>/asset/<key>` は
+     * この action で焼ける。⚠ **だが受け手は無い**(② key→lid の逆引きが未着手)ので、
+     * 焼くと `<a href>` の既定を止める #97 の配線に当たり、**押しても黙る** ──
+     * #98 で 4 面ぶん潰したばかりの**無言の dead click を新設する**ことになる。
+     * 🔑 だから `markdown-render.ts` の同一コンテナ枝を **`kind === 'entry'` に限った**。
+     *   添付の携帯参照は今までどおり札(`pkc-portable-reference-placeholder`)で出る ──
+     *   container / target が title に読めるので、**黙るリンクより情報が多い**。
+     * ⚠ **これは「直した」ではなく「退行させなかった」である。** 段②(逆引きの口)が
+     *   入ったら枝を戻し、この配列に戻す必要は無い(受け手ができるので dead でなくなる)。
+     * ⚠ 逆引きに `scanAssetRefs` を流用しない(判定の向きが逆 ── 別ノートへ飛ぶ)。
      *
      * ⚠ **等値で pin する**(「既知は無視」の可変リストにしない)── 直したら
      *   ここから消さないと落ちるし、新しい dead click が増えても落ちる。
      */
-    const KNOWN_DEAD = ['navigate-asset-ref'];
+    const KNOWN_DEAD: string[] = [];
     const dead = [...written].filter((a) => !handlers.has(a)).sort();
     expect(dead, `受け手のいない action がある(押しても無言で何も起きない)`).toEqual(KNOWN_DEAD);
   });
