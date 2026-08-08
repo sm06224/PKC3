@@ -331,21 +331,42 @@ function navigateToLink(dispatcher: Dispatcher, raw: string | null): void {
     });
     return;
   }
+  if (!selectEntryOrExplain(dispatcher, t.lid, 'リンク先')) return;
+}
+
+/**
+ * 🔴 **ノートを開く。開けないときは理由を出す**(2026-08-08)。
+ *
+ * ⚠ `SELECT_ENTRY` は reducer が **編集中 / error / 未知 lid で黙って捨てる**
+ * (`app-state.ts`)。素直に撃つと**押しても無言**になる ── この repo が
+ * 繰り返し踏んできた形である。
+ *
+ * 🔑 **規則を 1 か所に寄せる**(CLAUDE.md「同じ判定が 2 か所に生えたら…」)──
+ * 本文のリンク(`navigate-*`)も一覧の行(`select-entry`)も、
+ * 「ノートを開きたい」という同じ意図であり、断る条件も同じである。
+ *
+ * ⚠ **開けるようにはしない。** 面の切替(設定 / フラグ / ヘルプ)は面が常駐する
+ * ので開けるようにしたが(user 裁定 2026-08-08)、**別のノートへ移るのは下書きを
+ * 捨てることになる** ── ここは止めるのが正しく、無言なのが間違いだった。
+ *
+ * @param what 断り文に入れる呼び名(「リンク先」/「ノート」)
+ * @returns 開いたら true
+ */
+function selectEntryOrExplain(dispatcher: Dispatcher, lid: string, what: string): boolean {
   const state = dispatcher.getState();
-  // ⚠ **編集中は移らない**(下書きを守る)。⚠ 面の切替とは別の判断である ──
-  //   あちらは面が常駐するので開けるようにした(user 裁定 2026-08-08)
   if (state.phase === 'editing') {
     dispatcher.dispatch({
       type: 'OP_FAILED',
-      error: '編集を終了してからリンク先を開いてください',
+      error: `編集を終了してから${what}を開いてください`,
     });
-    return;
+    return false;
   }
-  if (!state.entryMetas.has(t.lid)) {
-    dispatcher.dispatch({ type: 'OP_FAILED', error: 'リンク先のノートが見つかりません' });
-    return;
+  if (!state.entryMetas.has(lid)) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: `${what}のノートが見つかりません` });
+    return false;
   }
-  dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: t.lid });
+  dispatcher.dispatch({ type: 'SELECT_ENTRY', lid });
+  return true;
 }
 
 const ACTIONS: Record<string, ActionHandler> = {
@@ -372,9 +393,17 @@ const ACTIONS: Record<string, ActionHandler> = {
   'navigate-card-ref': (dispatcher, target) => {
     navigateToLink(dispatcher, target.getAttribute('data-pkc-card-target'));
   },
+  /**
+   * 一覧 / フォルダ / かんばん / カレンダーの行。
+   *
+   * 🔴 **編集中は無言で捨てられていた**(2026-08-08 に直した)。reducer が
+   * `phase === 'editing'` で何もせず返すので、**押しても 1 ドットも動かず、
+   * 理由もどこにも出ない** ── user から見ると「クリックが効かない」。
+   * ⚠ 行は 4 つの面が出しているので、**受け手 1 か所で直すと 4 面とも直る**。
+   */
   'select-entry': (dispatcher, target) => {
     const lid = target.getAttribute('data-pkc-entry');
-    if (lid) dispatcher.dispatch({ type: 'SELECT_ENTRY', lid });
+    if (lid) selectEntryOrExplain(dispatcher, lid, 'ノート');
   },
   'start-edit': (dispatcher) => dispatcher.dispatch({ type: 'START_EDIT' }),
   // ⚠ 第 4 引数の **root** を使う(target ではない)── 追記欄の出口は detail の

@@ -172,6 +172,8 @@ describe('🔴 断るときは理由を出す', () => {
     entryLink('entry:b').click();
     expect(dispatcher.getState().selectedLid, '編集中に移ってしまった').toBe('a');
     expect(lastError(), '無言で断った').toContain('編集');
+    // ⚠ **押した場所に合った呼び名**(本文のリンクなので「リンク先」)
+    expect(lastError(), '本文のリンクなのに「リンク先」と言っていない').toContain('リンク先');
   });
 
   /**
@@ -190,6 +192,57 @@ describe('🔴 断るときは理由を出す', () => {
     stop = bindActions(root, dispatcher);
     entryLink('entry:zzz').click();
     expect(lastError(), '理由が「見つかりません」で上書きされた').toContain('編集');
+  });
+});
+
+/**
+ * 🔴 **一覧の行も、無言で断らない**(2026-08-08)。
+ *
+ * ⚠ 編集中に一覧・フォルダ・かんばん・カレンダーの行を押すと、reducer が
+ * `SELECT_ENTRY` を**黙って捨てて**いた ── 押しても 1 ドットも動かず、理由も
+ * どこにも出ない。user から見ると「クリックが効かない」。
+ *
+ * 🔑 **開けるようにはしない。** 面の切替(設定 / フラグ / ヘルプ)は面が常駐する
+ * ので開けるようにしたが、**別のノートへ移るのは下書きを捨てること**である ──
+ * 止めるのは正しく、無言なのが間違いだった。
+ */
+describe('🔴 一覧のノートを押したとき', () => {
+  /** 4 面が同じ action を出すので、受け手 1 か所で 4 面とも直る。 */
+  function row(lid: string): HTMLElement {
+    const el = document.createElement('div');
+    el.setAttribute('data-pkc-action', 'select-entry');
+    el.setAttribute('data-pkc-entry', lid);
+    root.append(el);
+    return el;
+  }
+
+  it('ふだんは開く', () => {
+    const { dispatcher } = makeDispatcher();
+    stop = bindActions(root, dispatcher);
+    row('b').click();
+    expect(dispatcher.getState().selectedLid).toBe('b');
+  });
+
+  it('🔴 編集中は移らず、理由が出る(無言で捨てない)', () => {
+    const { dispatcher, lastError } = makeDispatcher({ phase: 'editing' } as Partial<AppState>);
+    stop = bindActions(root, dispatcher);
+    row('b').click();
+    expect(dispatcher.getState().selectedLid, '編集中に移ってしまった').toBe('a');
+    expect(lastError(), '無言で捨てた(押しても何も起きない)').toContain('編集');
+    /**
+     * ⚠ **押した場所に合った呼び名で言う**(2026-08-08、変異試験で判明)。
+     * 行を押したのに「リンク先を開いてください」と出ると、user は**別のもの**を
+     * 探す。⚠ 「編集」を含むかだけ見ていたので、呼び名を取り違える変異が
+     * 生き延びた ── 文言は**押した場所と対**で pin する。
+     */
+    expect(lastError(), '一覧の行なのに「リンク先」と言っている').not.toContain('リンク先');
+  });
+
+  it('🔴 消えたノートの行を押しても、理由が出る', () => {
+    const { dispatcher, lastError } = makeDispatcher();
+    stop = bindActions(root, dispatcher);
+    row('zzz').click();
+    expect(lastError(), '無言で捨てた').toContain('見つかりません');
   });
 });
 
