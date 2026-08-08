@@ -90,6 +90,16 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-08-body-links',
+    title: '本文のリンクが押せるようになりました',
+    items: [
+      '本文に書いた entry: のリンクを押すと、そのノートが開きます。これまでは押しても何も起きませんでした。',
+      'PKC2 から取り込んだ本文のリンクも開きます。見出しまで指している場合も、そのノートまでは開きます。',
+      'カード参照(@card)はキーボードでも押せます。Tab で移動して Enter か Space です。',
+      '開けないときは、理由が画面の下に出ます。編集中は移れません(保存するか取り消してください)。',
+    ],
+  },
+  {
     id: '2026-08-08-flags-and-help',
     title: 'フラグ画面とヘルプ画面ができました',
     items: [

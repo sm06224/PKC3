@@ -107,15 +107,23 @@ describe('リポジトリ衛生', () => {
      * 🔴 **見つかった実害**(2026-08-08、この検査を書いた初回)。
      *
      * markdown が `[題名](entry:<lid>)` / `pkc://…/asset/<key>` / `@card:` に
-     * `data-pkc-action` を焼いているのに、**PKC3 の binder に受け手が無い** ──
+     * `data-pkc-action` を焼いているのに、**PKC3 の binder に受け手が無かった** ──
      * つまり本文のリンクを押しても**無言で何も起きない**。焼く側のコメントは
      * PKC2 の `action-binder` を指しており、記法だけ移植して受け手を置き忘れた形。
      *
+     * ✅ **`navigate-entry-ref` と `navigate-card-ref` は戻した**(2026-08-08)。
+     *
+     * ⚠ **`navigate-asset-ref` だけ残る。理由は「まだ直していない」ではない** ──
+     * この action は**1 度も焼かれない**。焼く条件が `currentContainerId` を
+     * 要求するのに、`src/adapter/` からも `main.ts` からも 1 件も渡していないので
+     * (既定 `''`)、必ず別の枝(action 無しの placeholder)へ落ちる。しかも
+     * PKC3 に `pkc://` を**生成する経路が無い**。⚠ **受け手だけ書いても
+     * 呼ばれない**ので、① cid の配線 ② key→lid の逆引き が要る**別主題**である。
+     *
      * ⚠ **等値で pin する**(「既知は無視」の可変リストにしない)── 直したら
      *   ここから消さないと落ちるし、新しい dead click が増えても落ちる。
-     * 🔑 この 3 件は P11 とは**別の主題**なので、別の変更で戻す(#起票済み)。
      */
-    const KNOWN_DEAD = ['navigate-asset-ref', 'navigate-card-ref', 'navigate-entry-ref'];
+    const KNOWN_DEAD = ['navigate-asset-ref'];
     const dead = [...written].filter((a) => !handlers.has(a)).sort();
     expect(dead, `受け手のいない action がある(押しても無言で何も起きない)`).toEqual(KNOWN_DEAD);
   });
