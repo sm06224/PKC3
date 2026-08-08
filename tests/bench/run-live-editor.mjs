@@ -12,7 +12,7 @@
  *
  * ## 対照群(PKC2 から継承した規律)
  * 🔑 「何もしない」ではなく **測りたい違いだけが違うもの**にする ──
- * **同じビルド・同じ本文・同じ打鍵**で、`?pkc-live=1` の有無だけを変える。
+ * **同じビルド・同じ本文・同じ打鍵**で、`?pkc-flag=editor.live` の有無だけを変える。
  *  - `--arm=live`  : 1 面(行を開いて打つ → Tab で確定)
  *  - `--arm=split` : 今日の 2 列(原文欄に同じ位置・同じ文字を打つ)
  * ⚠ 打つ**位置**も合わせる(2 列側は `setSelectionRange` で同じ文字位置へ置く)。
@@ -133,7 +133,8 @@ try {
   await page.waitForSelector('[data-pkc-field="detail-body"]');
 
   // ── ② 腕ごとに読み直して編集へ入る(**同じビルド**・flag だけ違う)
-  await page.goto(`http://localhost:${PORT}/${ARM === 'live' ? '?pkc-live=1' : ''}`);
+  // ⚠ 綴りは `?pkc-flag=editor.live`(2026-08-07 に flag へ昇格)
+  await page.goto(`http://localhost:${PORT}/${ARM === 'live' ? '?pkc-flag=editor.live' : ''}`);
   await page.waitForSelector('[data-pkc-boot="ready"]', { timeout: 20_000 });
   // 読み直すと選択は空 ── 一覧から選ぶ(user と同じ手順)
   await page.click('[data-pkc-region="entry-list"] [data-pkc-entry]');

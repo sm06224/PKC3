@@ -15,11 +15,18 @@ import { clickReal, createEntry, collectPageErrors } from './helpers';
  *     dispatch しても、確定の `input` が `isComposing === true` で来ることや
  *     `compositionend` の後に `input` が来ないことは**再現できない**
  *
- * ⚠ 既定 OFF なので `?pkc-live=1` で開く(URL のみの逃がし口)。
+ * ⚠ 既定 OFF なので **flag で開く**。
+ *
+ * 🔴 **綴りは `?pkc-flag=editor.live`**(2026-08-07 に `?pkc-live=1` から昇格)。
+ * user 指示「URL クエリパラメータ切り替えはフラグ扱いである / クエリパラメータを
+ * 抜け穴にしてはいけない」── **クエリを読んでよいのは flag の解決と
+ * パーマリンクだけ**で、`tests/features/flags.test.ts` の全数検査が旧い綴りを落とす。
+ * ⚠ この spec は昇格の commit で**直し忘れて 12 件落ちた**(unit は緑だった) ──
+ *   smoke は `dist/` を配信するので、source の綴りを変えても unit には届かない。
  */
 
 async function gotoLive(page: Page): Promise<void> {
-  await page.goto('/?pkc-live=1');
+  await page.goto('/?pkc-flag=editor.live');
   await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
 }
 

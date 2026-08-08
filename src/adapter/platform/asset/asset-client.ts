@@ -115,8 +115,10 @@ export class AssetClient {
 
 /**
  * 既定の作り方。⚠ **ワーカーが無い環境では `null`** を返して同期経路へ落とす。
- * 計測用の逃がし口(`?pkc-asset-inline`)も markdown と同じ形にしておく ──
+ * 同期経路へ落とす口(flag `asset.inline`)も markdown と同じ形にしておく ──
  * 対照群が「同じビルドの、測りたい違いだけが違うもの」になる。
+ * ⚠ **flag である**(2026-08-07 に `?pkc-asset-inline` から昇格)── 「計測用だから
+ *   枠を食わない」は禁じ手(user 指示 2026-08-07)。
  */
 function defaultSpawn(): (() => Worker) | null {
   if (typeof Worker !== 'function') return null;

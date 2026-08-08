@@ -295,4 +295,37 @@ describe('🔴 クエリパラメータの抜け穴を作らない', () => {
       .join('\n');
     expect(code, '旧い綴りが実装に残っている').not.toContain("'pkc-live'");
   });
+
+  /**
+   * 🔴 **昇格の道連れを、機械で見つける**(2026-08-08 に実際に踏んだ)。
+   *
+   * `?pkc-live=1` を flag へ昇格させた commit は **unit 全緑**で着地したが、
+   * `tests/smoke/live-editor.smoke.spec.ts` が旧い綴りで開いたままで、
+   * **smoke が 12 件落ちた**。smoke は `dist/` を配信するので、source の綴りを
+   * 変えても unit には**一切届かない**(CLAUDE.md「smoke に変異を当てるには
+   * build が要る」の別の顔 ── 検査対象が生成物である)。
+   *
+   * ⚠ **flag を開く側**(smoke / bench)は `src` の外に居るので、上の検査は
+   *   1 つも見ていなかった。⚠ **コメントは剥ぐ** ── 経緯を書いた行で落とさない。
+   */
+  it('🔴 flag を開く側(smoke / bench)も、旧い綴りで開いていない', () => {
+    const files = [
+      ...readdirSync('tests/smoke').map((f) => `tests/smoke/${f}`),
+      ...readdirSync('tests/bench').map((f) => `tests/bench/${f}`),
+    ].filter((f) => /\.(ts|mjs)$/.test(f));
+    expect(files.length, '開く側を読めていない(空振り)').toBeGreaterThan(5);
+    const offenders: string[] = [];
+    for (const f of files) {
+      const text = readFileSync(f, 'utf-8')
+        .split('\n')
+        .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+        .join('\n');
+      // ⚠ **URL に書いている所**を見る(散文の中の語ではなく、`?…=` の形)
+      for (const m of text.matchAll(/[?&](pkc-[a-z-]+)=/g)) {
+        const param = m[1]!;
+        if (param !== 'pkc-flag') offenders.push(`${f}: ?${param}=`);
+      }
+    }
+    expect(offenders, 'flag ではないクエリで開いている(昇格の道連れ)').toEqual([]);
+  });
 });
