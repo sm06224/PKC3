@@ -48,6 +48,18 @@ describe('ヘルプの面', () => {
       region.querySelector('[data-pkc-field="help-version"]')?.textContent,
       '版が出ていない(不具合報告に要る)',
     ).toContain(APP_VERSION);
+    /**
+     * 🔴 **面が種別の刻印を落としていない**(2026-08-08、レビュー指摘)。
+     * ⚠ `versionText` 単体の test は在ったが、**面が `versionText('product')` を
+     *   呼ぶ変異は生き延びた** ── `'pkc3 v3.0.0'` は「版番号を含む」も
+     *   `/^pkc3 v\d/` も満たすので、unit も smoke も緑のまま
+     *   **全ビルドから開発版の刻印が消える**。関数を試すだけでは面を守らない。
+     * ⚠ vitest は `BUILD_KIND === 'dev'`(`release-meta.ts`)。
+     */
+    expect(
+      region.querySelector('[data-pkc-field="help-version"]')?.textContent,
+      '面が種別の刻印を落としている(versionText を固定引数で呼んでいる)',
+    ).toContain('(開発版)');
     expect(region.querySelector('[data-pkc-region="help-notices"]'), 'お知らせが無い').not.toBeNull();
     expect(region.querySelector('[data-pkc-region="help-manual"]'), 'マニュアルが無い').not.toBeNull();
   });

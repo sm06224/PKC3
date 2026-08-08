@@ -354,3 +354,41 @@ describe('本文の面: 再描画で操作の node が差し替わらない', ()
     expect(region.querySelector('[data-pkc-field="detail-title"]')!.textContent).toBe('別');
   });
 });
+
+/**
+ * 🔴 **いまの面を DOM に書く**(2026-08-08、レビュー指摘で追加)。
+ *
+ * `app.css` が `[data-pkc-detail-mode='view']` を読んで、**読む面だけ**を
+ * 中身の高さまで伸ばす(貼り付いた操作の帯が外れないように)。編集の面は逆に
+ * 箱の高さで止める(プレビューが `overflow: auto` で自分で送る)── **2 つは
+ * 逆向きの要求**なので、面を見分けずに片方へ寄せると必ずもう片方が壊れる。
+ *
+ * ⚠ **この属性は unit で 1 件も pin されていなかった。** 守りは smoke だけで、
+ * `tests/smoke` は `dist/` を配信するため、**次に誰かがここへ変異を当てると
+ * `npm run build` を挟まない限り全部 SURVIVED に見える**(真相は NOT-APPLIED)。
+ * CLAUDE.md「smoke に変異を当てるには build が要る」の予防線として unit を置く。
+ */
+describe('🔴 本文の面: いまの面を DOM に書く(CSS が読む)', () => {
+  const bodyState = (over: Partial<AppState> = {}): AppState =>
+    stateOf([META()], {
+      openBody: { lid: 'e1', body: '本文', baseline: '本文', persisted: '本文', diskAhead: false },
+      revisionPanel: null,
+      ...over,
+    } as Partial<AppState>);
+
+  it('🔴 empty / view / editor が、そのまま属性に出る', () => {
+    const d = new DetailRenderer(region);
+    // ① 何も選んでいない
+    d.render(stateOf([], { selectedLid: null, openBody: null } as Partial<AppState>));
+    expect(region.getAttribute('data-pkc-detail-mode'), '選んでいない面が出ていない').toBe('empty');
+    // ② 読む面
+    d.render(bodyState());
+    expect(region.getAttribute('data-pkc-detail-mode'), '読む面が出ていない').toBe('view');
+    // ③ 編集の面
+    d.render(bodyState({ phase: 'editing' } as Partial<AppState>));
+    expect(region.getAttribute('data-pkc-detail-mode'), '編集の面が出ていない').toBe('editor');
+    // 🔑 **戻れること**も見る(片道だと「編集に入ったら二度と伸びない」が通る)
+    d.render(bodyState());
+    expect(region.getAttribute('data-pkc-detail-mode'), '読む面へ戻っていない').toBe('view');
+  });
+});

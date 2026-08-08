@@ -19,7 +19,7 @@
  * 付け外しなので、器を捨てると押される寸前のボタンが消える(2026-08-07 に
  * 本文の面で実際に踏んだ)。
  */
-import { FlagStore, registeredFlags } from '@adapter/platform/flag-store';
+import { appFlags, FlagStore, registeredFlags } from '@adapter/platform/flag-store';
 import { FLAG_BUDGET, findFlag } from '@features/flags';
 
 export class FlagsRenderer {
@@ -29,8 +29,20 @@ export class FlagsRenderer {
 
   constructor(
     private readonly region: HTMLElement,
-    /** ⚠ test は自分で `new` して渡す(URL を差し替えるため)。 */
-    private readonly store: FlagStore = new FlagStore(),
+    /**
+     * 🔴 **既定は `appFlags`(アプリ共有の 1 個)**(2026-08-08、レビュー指摘)。
+     *
+     * ⚠ 直す前は `new FlagStore()` を作っていたので、**押しても効かなかった**。
+     * 保存(localStorage)は書かれ、画面のチェックも動くのに、アプリが読む
+     * `appFlags.stored` は constructor で 1 度読んだきりなので**古いまま** ──
+     * `editor.live` は `needsRestart` を持たないため再読込にも救われず、
+     * 「押したのに何も変わらない」= 無言の操作拒否が実際に出荷されるところだった。
+     * 🔑 お知らせ側には同型の pin があった(`announce.test.ts` の「設定の既定の
+     *   store が、アプリ共有の 1 個である」)── **フラグ側に書かなかったので、
+     *   フラグ側だけ壊れていた**。CLAUDE.md「片側を直したら対称の反対側を疑う」。
+     * ⚠ test は自分で `new` して渡す(URL を差し替えるため)。
+     */
+    private readonly store: FlagStore = appFlags,
     /** ⚠ 再読込は注入する ── test で実際に遷移させない。 */
     private readonly reload: (url: string) => void = (url) => {
       location.replace(url);

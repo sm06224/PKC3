@@ -168,8 +168,14 @@ export function announceServices(
       /**
        * ⚠ **既読にしない**(`dismiss` ではなく `hide`)── 設定を切っただけの
        * user は読んでいないので、戻したときに出直す。
+       *
+       * 🔴 **戻す側もその場で効かせる**(2026-08-08、レビュー指摘)。
+       * ⚠ 直す前は `if (!on)` だけで、**切る側は即座に効き、戻す側は次の起動まで
+       *   効かなかった** ── 片側だけ実装した対称の反対側である。
+       *   未読が無ければ `present()` は何も出さないので、余計な帯は立たない。
        */
-      if (!on) announce.hide();
+      if (on) announce.present();
+      else announce.hide();
     },
   };
 }

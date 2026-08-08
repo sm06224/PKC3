@@ -374,11 +374,26 @@ describe('マニュアルと実装の突合', () => {
    *   マニュアルは 1 か所しか案内しないので、片方が黙って古くなる。
    *   だから**在ることと、もう片方に無いこと**の両方を見る。
    */
-  it('🔴 版の在り処がマニュアルと一致し、2 か所に出ていない', () => {
+  it('🔴 版の在り処がマニュアルと一致し、組み立ては 1 か所だけ', () => {
     const help = readFileSync('src/adapter/ui/render/help.ts', 'utf-8');
     expect(help, 'ヘルプ画面が版を出していない').toContain('help-version');
-    const settings = readFileSync('src/adapter/ui/render/settings.ts', 'utf-8');
-    expect(settings, '設定画面にも版が残っている(二重表示)').not.toContain('APP_VERSION');
+    /**
+     * 🔴 **file 名指しにしない**(2026-08-08、レビュー指摘)。
+     * ⚠ 直す前は `settings.ts` に `APP_VERSION` が無いことしか見ていなかったので、
+     *   **他のどの面に版を生やしても素通り**した ── 題名は「2 か所に出ていない」
+     *   なのに、守っていたのは「settings.ts に出ていない」だけだった
+     *   (CLAUDE.md「それらしい 1 file を見る型の guard」)。
+     * 🔑 いまは**面の file を全数走査**して、組み立てを持つ file が `help.ts`
+     *   ただ 1 つであることを**等値**で pin する。
+     */
+    const dir = 'src/adapter/ui/render';
+    const owners = readdirSync(dir)
+      .filter((f) => f.endsWith('.ts'))
+      .filter((f) => readFileSync(join(dir, f), 'utf-8').includes('APP_VERSION'))
+      .sort();
+    expect(owners, '版を組み立てる file が 1 つではない(綴りが分かれると必ず食い違う)').toEqual([
+      'help.ts',
+    ]);
     expect(MANUAL, 'マニュアルが版の在り処を案内していない').toMatch(
       /\*\*バージョン\*\*は\s*\*\*ヘルプ\*\*/,
     );
@@ -473,5 +488,38 @@ describe('導線の置き場所(P8 段⑱)', () => {
     // 実装は可逆アーカイブ(.pkc3.zip)── かつて tooltip は「Markdown で保存します」だった
     expect(INSPECTOR).toContain('.pkc3.zip');
     expect(INSPECTOR, 'Markdown と嘘を書いている').not.toContain('Markdown で保存します');
+  });
+});
+
+/**
+ * 🔴 **書いたクラス名に、当たる規則が在る**(2026-08-08、レビュー指摘で追加)。
+ *
+ * ⚠ フラグ画面の説明文 5 か所が `class="settings-note"` で書かれていたのに、
+ * `app.css` の規則は **`[data-pkc-field='settings-note']`** だけだった ──
+ * `.settings-note` という規則はリポジトリに 1 本も無く、**フラグ画面の説明が
+ * 全部無スタイル**(本文と同じ字の大きさ・同じ色)で出ていた。設定画面と
+ * 並べたときに見た目が揃わない。
+ *
+ * 🔑 **綴りが 2 通りあること自体は悪くない**(属性は 1 要素 1 個なので、
+ * `data-pkc-field` を別の用途で使う要素はクラスで書くしかない)。悪いのは
+ * **片方に規則が無いこと**である。だから「クラスを書いたら規則が在る」を見る。
+ * ⚠ `data-pkc-*` セレクタの規約(機能的な選択は属性で)には触れない ──
+ *   ここが見るのは**見た目のクラス**だけである。
+ */
+describe('クラス名と CSS 規則の突合', () => {
+  it('🔴 render 層が書いたクラス名に、当たる規則が在る', () => {
+    const dir = 'src/adapter/ui/render';
+    const used = new Set<string>();
+    for (const f of readdirSync(dir).filter((n) => n.endsWith('.ts'))) {
+      const text = readFileSync(join(dir, f), 'utf-8');
+      for (const m of text.matchAll(/className = '([a-z0-9 -]+)'/g)) {
+        for (const cls of (m[1] ?? '').split(' ').filter(Boolean)) used.add(cls);
+      }
+    }
+    // ⚠ 空振り防止 ── 1 つも拾えていないなら、この検査は何も見ていない
+    expect(used.size, 'クラス名を 1 つも拾えていない(空振り)').toBeGreaterThan(0);
+    const css = readFileSync('src/styles/app.css', 'utf-8');
+    const missing = [...used].filter((c) => !new RegExp(`\\.${c}[\\s,{:]`).test(css)).sort();
+    expect(missing, '当たる規則が無いクラスを書いている(無スタイルで出る)').toEqual([]);
   });
 });

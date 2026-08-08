@@ -2139,7 +2139,14 @@ select:focus-visible {
 [data-pkc-region='settings-body'] dd {
   margin: 0;
 }
-[data-pkc-field='settings-note'] {
+/* 🔴 **綴りが 2 通りある**(2026-08-08、レビュー指摘)。設定は
+   `data-pkc-field='settings-note'`、フラグは `class="settings-note"` で書いていた ──
+   `.settings-note` の規則が 1 本も無かったので、⚠ **フラグ画面の説明文が 5 か所とも
+   無スタイル**(本文と同じ字の大きさ・同じ色)で出ていた。設定と並べたときに
+   見た目が揃わない。⚠ 属性は 1 要素 1 個なので、綴りを片方へ寄せるのではなく
+   **CSS の側で両方受ける**(1 行で済み、既存の pin も動かない)。 */
+[data-pkc-field='settings-note'],
+.settings-note {
   margin: var(--s2) 0 0;
   color: var(--muted);
   font-size: 11px;

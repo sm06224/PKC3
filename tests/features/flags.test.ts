@@ -227,7 +227,16 @@ describe('🔴 クエリパラメータの抜け穴を作らない', () => {
   const ALLOWED: Readonly<Record<string, string>> = {
     'src/adapter/platform/flag-store.ts': 'flag の解決(ここが唯一の入口)',
     'src/features/link/permalink.ts': 'パーマリンク / ディープリンク(user 指示の唯一の用途)',
+    // ⚠ 読むのではなく**組み立てる**側(再起動 URL)。`location.href` を触るので
+    //   検出語に掛かるが、値の解決はしていない
+    'src/adapter/ui/render/flags.ts': '再起動 URL の組み立て(フラグ画面から)',
   };
+
+  /**
+   * クエリを読む書き方の**全数**。⚠ 語を足すときは「読んでいるのに掛からない形」を
+   * 1 つでも残さないこと ── 残った形がそのまま抜け穴になる。
+   */
+  const QUERY_READ = /location\.search|location\.href|location\.hash|URLSearchParams|searchParams/;
 
   it('🔴 クエリパラメータを読むのは flag の解決とパーマリンクだけ', () => {
     const offenders: string[] = [];
@@ -245,7 +254,13 @@ describe('🔴 クエリパラメータの抜け穴を作らない', () => {
           .split('\n')
           .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
           .join('\n');
-        if (!/location\.search|URLSearchParams|searchParams/.test(code)) continue;
+        /**
+         * 🔴 **綴りの層で塞ぎ切る**(2026-08-08、レビュー指摘)。
+         * ⚠ 直す前は `location.search` / `URLSearchParams` / `searchParams` の 3 語
+         *   しか見ておらず、**`location.href.split('?')[1]` で読む形が素通り**した
+         *   ── user 指示の当の抜け穴が、全数検査を通ったまま戻せる状態だった。
+         */
+        if (!QUERY_READ.test(code)) continue;
         if (ALLOWED[full] === undefined) offenders.push(full);
       }
     };
@@ -265,7 +280,7 @@ describe('🔴 クエリパラメータの抜け穴を作らない', () => {
     for (const [file, why] of Object.entries(ALLOWED)) {
       const text = readFileSync(file, 'utf-8');
       expect(
-        /location\.search|URLSearchParams|searchParams/.test(text),
+        QUERY_READ.test(text),
         `${file} はもうクエリパラメータを読んでいない(${why} ── 表から外す)`,
       ).toBe(true);
     }
@@ -321,7 +336,13 @@ describe('🔴 クエリパラメータの抜け穴を作らない', () => {
         .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
         .join('\n');
       // ⚠ **URL に書いている所**を見る(散文の中の語ではなく、`?…=` の形)
-      for (const m of text.matchAll(/[?&](pkc-[a-z-]+)=/g)) {
+      /**
+       * ⚠ **`=` を必須にしない**(2026-08-08、レビュー指摘)。昇格前の 3 つのうち
+       * **2 つは値を取らない綴り**(`?pkc-asset-inline` を `has()` で判定)だった ──
+       * `=` を要求すると、その 2 形を 1 件も拾わない。**この検査が防ごうとした事故
+       * そのものの形**が素通りしていた。
+       */
+      for (const m of text.matchAll(/[?&](pkc-[a-z-]+)(?:[=&'"`\s)]|$)/g)) {
         const param = m[1]!;
         if (param !== 'pkc-flag') offenders.push(`${f}: ?${param}=`);
       }

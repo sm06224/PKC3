@@ -252,6 +252,31 @@ describe('🔴 お知らせの配線(main.ts から取り出した分)', () => {
     expect(region.hidden, '切ったのに帯が出たまま').toBe(true);
   });
 
+  /**
+   * 🔴 **戻す側もその場で効く**(2026-08-08、レビュー指摘)。
+   * ⚠ 直す前は `if (!on)` だけで、**切る側は即座に効き、戻す側は次の起動まで
+   *   効かなかった**。test も `false` しか呼んでいなかったので誰も気づかない。
+   */
+  it('🔴 設定から戻すと、その場で帯が出直す', () => {
+    const store = new NoticeStore(memory());
+    store.setEnabled(false);
+    const a = createAnnounce(region, store, NOTES);
+    const s = announceServices(a, store);
+    s.setNoticesEnabled(true);
+    expect(store.enabled(), '設定を保存していない').toBe(true);
+    expect(region.hidden, '戻したのに帯が出ない(次の起動まで効かない)').toBe(false);
+  });
+
+  /** ⚠ 未読が無ければ、戻しても空の枠は立たない。 */
+  it('⚠ 戻しても、未読が無ければ何も出ない', () => {
+    const store = new NoticeStore(memory());
+    store.markSeen(NOTES.map((n) => n.id));
+    store.setEnabled(false);
+    const a = createAnnounce(region, store, NOTES);
+    announceServices(a, store).setNoticesEnabled(true);
+    expect(region.hidden, '読んだものが出直した').toBe(true);
+  });
+
   it('🔴 閉じるは既読にする(hide にすり替わっていない)', () => {
     const store = new NoticeStore(memory());
     const a = createAnnounce(region, store, NOTES);

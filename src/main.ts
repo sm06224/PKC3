@@ -1,7 +1,7 @@
 // 見た目(P7b 段⑨)。⚠ **ここから import する**のが唯一の入り口 ── index.html に
 // `<link>` を書くと Vite の hash 付き出力に乗らず、SW の precache 一覧からも外れる
 import './styles/app.css';
-import { APP_ID, APP_VERSION, BUILD_KIND } from '@runtime/release-meta';
+
 import { Dispatcher } from '@adapter/state/dispatcher';
 import { connectStoreEffects } from '@adapter/state/store-effects';
 import { StoreClient } from '@adapter/platform/storage/store-client';
@@ -23,6 +23,7 @@ import { buildShell } from '@adapter/ui/render/shell';
 import { showNotices, clearNotices } from '@adapter/ui/render/notices';
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
 import { createAnnounce, announceServices } from '@adapter/ui/render/announce';
+import { versionText } from '@adapter/ui/render/help';
 import { appNoticeStore } from '@adapter/platform/notice-store';
 import { NOTICES } from '@features/notice/notice-log';
 import { applyTheme, chooseTheme, initialTheme, isTheme } from '@adapter/ui/render/theme';
@@ -257,12 +258,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   /**
    * 🔴 **版を常設しない**(P10、user 指示「上下の帯は不要 / 大して働いていない」)。
    * 直す前は 99% の時間ここが「pkc3 v3.0.0」だった ── それが「働いていない」の中身。
-   * 版は**設定の画面**へ移した(下の `showVersion`)。
+   * 版は**ヘルプの画面**へ移した(P11。設定は「あなたが選ぶもの」の場所で、版は選べない)。
    * ⚠ ただし **fallback(意図しない保存先)は常に出す** ── これは user が知るべき
    * 事実で、黙ると「編集が消える」の原因が見えなくなる。
+   *
+   * 🔴 **版の組み立ては `versionText()` 1 本**(2026-08-08、レビュー指摘)。
+   * ⚠ 直す前はここが 2 か所目の手組みで、`(dev)` と「(開発版)」の**2 系統の綴り**が
+   *   同時に出ていた ── PKC2 が「版が 4 系統でバラバラ」になった芽そのもの。
+   *   `docs-parity` が `src/adapter/ui/render/` を全数走査して 1 か所を pin する。
    */
   const statusBase = init.fallbackReason ? `⚠ ${init.fallbackReason}` : '';
-  regions.status.title = `${APP_ID} v${APP_VERSION} (${BUILD_KIND}) — ${init.vfs}`;
+  regions.status.title = `${versionText()} — ${init.vfs}`;
   // textContent の setter は同一文字列でも子ノードを全置換する ── 打鍵ごとの
   // state 変化で無駄な DOM 変異を起こさないよう、変わったときだけ書く
   let statusShown = statusBase;

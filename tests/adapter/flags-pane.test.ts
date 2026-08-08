@@ -13,7 +13,7 @@
  */
 import { describe, expect, it, beforeEach } from 'vitest';
 import { FlagsRenderer } from '../../src/adapter/ui/render/flags';
-import { FlagStore } from '../../src/adapter/platform/flag-store';
+import { appFlags, FlagStore } from '../../src/adapter/platform/flag-store';
 import { defineFlag, FLAG_BUDGET } from '../../src/features/flags';
 
 // ⚠ この test 専用の宣言(`src` の予算には数えられない)
@@ -291,5 +291,52 @@ describe('🔴 起動前フラグの往復(袋小路を作らない)', () => {
     const box = region.querySelector<HTMLInputElement>(`[data-pkc-flag="${BOOT.name}"]`)!;
     expect(box.disabled, 'ロックしている(不要なはず)').toBe(false);
     expect(box.title, '上書き中であることを知らせていない').not.toBe('');
+  });
+});
+
+/**
+ * 🔴 **既定の store がアプリ共有の 1 個である**(2026-08-08、レビュー指摘で追加)。
+ *
+ * ⚠ **この test が無かったので、フラグ画面は実際に壊れていた。** 面が自前の
+ * `new FlagStore()` を持っていたため、切り替えると **localStorage には書かれ、
+ * 画面のチェックも動くのに、アプリが読む `appFlags` には届かなかった** ──
+ * `editor.live` は `needsRestart` を持たないので再読込にも救われず、
+ * 「押したのに何も変わらない」が出荷されるところだった。
+ *
+ * 🔑 お知らせ側には同型の pin が在った(`announce.test.ts` の「設定の既定の store が
+ * アプリ共有の 1 個である」)── **フラグ側に書かなかったから、フラグ側だけ壊れた**。
+ * CLAUDE.md「片側を直したら、対称の反対側を必ず疑う」。
+ * ⚠ **既定引数の経路を通す**(store を手渡しすると、この欠陥は永久に見えない)。
+ */
+describe('🔴 フラグ画面とアプリが同じ store を見る', () => {
+  it('🔴 切り替えると、アプリが読む appFlags に効く', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    // ⚠ store を渡さない = 実アプリと同じ経路
+    const r = new FlagsRenderer(host, undefined, () => {}, () => 'https://e/');
+    r.render();
+    try {
+      r.setFlag(A.name, true);
+      expect(appFlags.isOn(A.name), '押しても効かない(面が別の store を持っている)').toBe(true);
+      r.setFlag(A.name, false);
+      expect(appFlags.isOn(A.name), '戻しても効かない').toBe(false);
+    } finally {
+      appFlags.reset();
+    }
+  });
+
+  it('🔴 「すべて既定へ戻す」も、アプリが読む側に効く', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const r = new FlagsRenderer(host, undefined, () => {}, () => 'https://e/');
+    r.render();
+    try {
+      r.setFlag(A.name, true);
+      expect(appFlags.isOn(A.name)).toBe(true);
+      r.resetFlags();
+      expect(appFlags.isOn(A.name), '既定へ戻していない').toBe(false);
+    } finally {
+      appFlags.reset();
+    }
   });
 });
