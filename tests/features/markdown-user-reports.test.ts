@@ -331,6 +331,27 @@ describe('行頭アライン: 矢印の向きは意味を持たない(記法の�
     expect(fmt('center'), ':::format の align が丸ごと効いていない').toBe('center');
   });
 
+  /**
+   * 🔴 **見出しにも効く**(3 巡目レビューで穴が判明)。実装は
+   * `paragraph_open || heading_open` の両方に属性を付けるが(`markdown-render.ts:3239`)、
+   * **見出し側を誰も見ていなかった** ── `heading_open` を落とす変異が全 test 緑で通る
+   * (goldens 25 件に寄せ付きの見出しは 0 件、smoke の観測点は `p` のみ)。
+   * ⚠ 段落だけ pin して「この記法は守られている」と読むのが、この型の見落としである。
+   */
+  it('🔴 見出しにも寄せが効く(段落だけ pin して満足しない)', () => {
+    const h = (src: string): string | null => {
+      const html = renderMarkdown(src, { silentHallucinationWarnings: true });
+      return /<h[1-6][^>]*data-pkc-align="([^"]+)"/.exec(html)?.[1] ?? null;
+    };
+    expect(h('||## 中央の見出し\n'), '見出しの中央寄せが落ちている').toBe('center');
+    expect(h('|># 反対側の見出し\n'), '見出しの寄せが落ちている').toBe('opposite');
+    // 空振り防止 ── 見出しがそもそも出ていないなら上は何も守らない
+    expect(
+      /<h2[^>]*>/.test(renderMarkdown('||## 中央の見出し\n', { silentHallucinationWarnings: true })),
+      '見出しが生成されていない(この検査が空振りしている)',
+    ).toBe(true);
+  });
+
   it('`||` だけが center(対称形なので typo 形を持たない)', () => {
     expect(alignOf('|| 中央\n')).toBe('center');
   });
