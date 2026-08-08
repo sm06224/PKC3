@@ -269,7 +269,8 @@ export class RowSwap {
     if (slot !== null && slot !== a.slot) {
       a.slot = slot;
       // ⚠ 幅の印も**付け直す** ── 作り直したスロットは素の `<div>` なので、
-      //   忘れると描き直しのたびに表の編集欄が散文の幅へ縮む
+      //   忘れると描き直しのたびに**段落を押した行だけ全幅へ跳ねる**
+      //   (表は元から付かないので、失敗の向きはこちら)
       if (a.prose) slot.setAttribute(PROSE_ROW_ATTR, '');
       slot.append(a.textarea);
     }
@@ -539,9 +540,20 @@ export class RowSwap {
       originalHtml: '',
       withSlot: [...this.view.blocks, SLOT_HTML],
       caret: 0,
-      // ⚠ 末尾に足す行は**置き換えた塊が無い** ── 上限は掛けない側へ倒す
-      //   (何を書くか分からないので、狭めない方が安全)
-      prose: false,
+      /**
+       * 🔴 **末尾に足す行は「直前の塊」に揃える**(2026-08-08 の 2 巡目レビュー)。
+       *
+       * 置き換える塊が無いので、一度は「掛けない側へ倒す」と書いたが、それだと
+       * **余白を押して書き始めた瞬間だけ全幅**になり、確定した途端に段落として
+       * 42rem へ組み直される ── 打っている間と確定後で折り返しが変わる。
+       * 余白クリックと最終行の ↓ は**散文の続きを書く一番普通の導線**なので、
+       * 直前の塊に合わせるのが「同じ紙の上で 1 行だけ生になる」と釣り合う。
+       * ⚠ 空のノート(塊 0 件)は散文として開く ── 最初に書くのはほぼ散文である。
+       */
+      prose:
+        this.view.blocks.length === 0
+          ? true
+          : this.proseSpan(this.view.blocks.length - 1, this.view.blocks.length - 1),
     });
   }
 
@@ -644,15 +656,18 @@ export class RowSwap {
    * ── 実測(1600px の窓): 表 1036px → 編集欄 **672px**、`| 第 1 列 | …` の
    * 106 字が 2 行に折り返した。逆に一律で外すと、段落を押した行だけ全幅へ跳ねる。
    *
-   * 🔑 **CSS の allow-list を JS に写さない** ── 置き換える要素の**計算値**を読み、
-   *    「上限が在ったか」だけを引き継ぐ(判定の正本は `app.css` の 1 か所のまま。
-   *    フル HD では散文も `none` なので、そのまま全部外れるのも正しい)。
+   * 🔑 **CSS の allow-list を JS に写さない** ── allow-list の規則が自分で立てる印
+   *    (`--pkc-prose-block: 1`)を読む。判定の正本は `app.css` の 1 か所のまま。
+   * 🔴 **`max-width` の有無で代用してはいけない**(2026-08-08 の 2 巡目レビューで
+   *    実証)── 読み幅と無関係な `max-width` が在る(`[data-pkc-mermaid-src]` の
+   *    `100%`)ので、「上限が在るか」で見ると**図を押した編集欄まで散文の幅に縮む**。
+   *    表とコードでだけ直って図で残る、という取りこぼしを実際にやった。
+   *    ⚠ **代替物で満たせる条件をガードにしない**(CLAUDE.md の反復する型)。
    * ⚠ 範囲(S6 の `Ctrl+A` / Shift+クリック)は**1 つでも全幅の塊が居れば外す**
    *    ── allow-list が「掛からない側へ倒れる」のと同じ安全な向き。
    * ⚠ **測るのは差し替える前**(`applyBlocks` を通した後の要素は DOM の外)。
-   * ⚠ 「上限なし」の綴りは**環境で違う** ── 実ブラウザは `'none'`、happy-dom は
-   *    **空文字**を返す。両方を「上限なし」として扱う(片方だけ見ると、unit で
-   *    全部が『上限あり』になって検査が嘘をつく)。
+   * ⚠ 印は**塊の要素そのもの**でだけ見る ── カスタムプロパティは下へ継承するので、
+   *    子孫で読むと散文の中の表まで「散文」になる。
    */
   private proseSpan(from: number, to: number): boolean {
     let seen = false;
@@ -660,9 +675,16 @@ export class RowSwap {
       const el = this.view.nodes[i]?.find((n): n is Element => n instanceof Element);
       if (el === undefined) continue;
       seen = true;
-      const mw = getComputedStyle(el).maxWidth;
-      if (mw === 'none' || mw === '') return false;
+      if (getComputedStyle(el).getPropertyValue('--pkc-prose-block').trim() !== '1') return false;
     }
+    /**
+     * ⚠ **`seen === false`(要素を 1 つも持たない塊)には、どの test も到達しない**
+     * ── 2026-08-08 に `throw` を置いて確かめた(全 2519 件で 1 度も発火せず)。
+     * 塊は必ず要素から始まる HTML を parse して作るので、実際には起きない。
+     * だから `return true` へ書き換える変異は**構造上殺せない**。
+     * 🔑 それでも `seen` を残すのは、起きたときに**掛けない側へ倒れる**ため
+     *   (allow-list と同じ安全な向き)。**守られていない枝だと自覚して使う**。
+     */
     return seen;
   }
 

@@ -893,8 +893,10 @@ export class DetailRenderer {
     const pane = document.createElement('div');
     pane.setAttribute('data-pkc-region', 'editor-live');
     pane.className = 'pkc-md-rendered';
-    // 🔑 読む面と**同じ読み幅**(2026-08-08 の紙面フォーマット)。生になった行
-    //    (`[data-pkc-row-slot]`)も同じ幅に入る ── 押した行だけ跳ねさせない
+    // 🔑 読む面と**同じ読み幅**(2026-08-08 の紙面フォーマット)。
+    // ⚠ 生になった行(`[data-pkc-row-slot]`)は**一律には入らない** ── 置き換えた
+    //    塊が散文だったときだけ `row-swap.ts` が印を付ける(表・コード・図を押した
+    //    編集欄まで散文の幅に縮めないため)。
     pane.setAttribute('data-pkc-prose', '');
     /** お知らせの行。⚠ **参照で持つ**(querySelector で探すと、退避で作り直した
      *  ときに別のものを掴む ── 実際にそう外した)。 */

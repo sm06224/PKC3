@@ -27,7 +27,12 @@ import { attachmentBody } from '../../src/features/flavor/attachment-flavor';
 import { parseRules } from '../../build/body-css';
 
 /** `max-width: var(--read-w)` を持つ**本文の**規則の選択子(app.css の実物)。 */
-const READ_WIDTH_RULES = ((): { block: string; row: string } => {
+const READ_WIDTH_RULES = ((): {
+  block: string;
+  blockBody: string;
+  row: string;
+  rowBody: string;
+} => {
   const css = readFileSync('src/styles/app.css', 'utf8');
   const hits = parseRules(css).filter(
     (r) => r.selector.startsWith('.pkc-md-rendered') && /max-width:\s*var\(--read-w\)/.test(r.body),
@@ -43,7 +48,12 @@ const READ_WIDTH_RULES = ((): { block: string; row: string } => {
   const row = hits.find((r) => r.selector.includes('data-pkc-row-slot'));
   if (block === undefined) throw new Error('本文ブロックの allow-list が見つからない');
   if (row === undefined) throw new Error('生の行の読み幅の規則が見つからない');
-  return { block: block.selector, row: row.selector };
+  return {
+    block: block.selector,
+    blockBody: block.body,
+    row: row.selector,
+    rowBody: row.body,
+  };
 })();
 
 /** 本文ブロック(散文)の読み幅の選択子。 */
@@ -57,12 +67,19 @@ const ROW_WIDTH_SELECTOR = READ_WIDTH_RULES.row;
  * **CSS が無いと全部『上限なし』**になり、生の行の検査が丸ごと空振りする。
  * ⚠ `--read-w` の定義も要る ── 未定義の `var()` は宣言ごと無効になる。
  */
-function installReadWidthCss(): void {
+function installReadWidthCss(extra = ''): void {
   const style = document.createElement('style');
+  /**
+   * ⚠ **宣言も app.css の実物を使う**(2026-08-08 の 3 巡目)。手で
+   * `--pkc-prose-block:1` と書いていたので、**app.css からその宣言を落とす変異が
+   * 生き延びた**(注入が自前で満たしてしまう)── 選択子だけ実物から抜いても、
+   * 中身を写せば「test の中だけが正しい」状態は残る。
+   */
   style.textContent =
     `:root{--read-w:42rem}` +
-    `${READ_WIDTH_SELECTOR}{max-width:var(--read-w)}` +
-    `${ROW_WIDTH_SELECTOR}{max-width:var(--read-w)}`;
+    `${READ_WIDTH_SELECTOR}{${READ_WIDTH_RULES.blockBody}}` +
+    `${ROW_WIDTH_SELECTOR}{${READ_WIDTH_RULES.rowBody}}` +
+    extra;
   document.head.append(style);
 }
 
@@ -221,6 +238,146 @@ describe('読み幅が効く面(アプリ 4 面)', () => {
    * ⚠ **ヘルプは対象外**(設計 doc の表)── アプリの文書であって user の文書では
    * ない。ここが当たり始めたら、印を配る先を広げすぎている。
    */
+  it('🔴 図(mermaid)の行を押しても、生の器は散文の幅へ縮まない', async () => {
+    setLive(true);
+    const { root, detail } = mount();
+    detail.render(editing('```mermaid\ngraph TD; A[要件] --> B[設計]\n```\n'));
+    await settle();
+    const live = root.querySelector<HTMLElement>('[data-pkc-region="editor-live"]');
+    const fig = live!.querySelector<HTMLElement>('[data-pkc-mermaid-src]');
+    expect(fig, '図の器が描かれていない(この検査は空振り)').not.toBeNull();
+
+    fig!.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    const slot = live!.querySelector<HTMLElement>('[data-pkc-row-slot]');
+    expect(slot, '図を押しても生の器が出ていない(この検査は空振り)').not.toBeNull();
+    // ⚠ 空振り防止 ── **図の原文が開いた**こと(別の塊が開いたのでは意味がない)
+    expect(
+      slot!.querySelector('textarea')!.value,
+      '開いたのが図の原文ではない(この検査は空振り)',
+    ).toContain('mermaid');
+    expect(slot!.matches(ROW_WIDTH_SELECTOR), '図の編集欄が散文の幅へ縮む').toBe(false);
+  });
+
+  /**
+   * 🔴 **読み幅と無関係な `max-width` を「散文」と読み違えない**(2026-08-08 の 3 巡目)。
+   *
+   * `proseSpan` は当初「computed の `max-width` が `none` / 空 でないか」で判定して
+   * いた。これは**代替物で満たせるガード**である ── 読み幅と無関係な `max-width` を
+   * 持つ塊が 1 つでも現れた瞬間、その編集欄が散文の幅へ縮む。
+   * ⚠ **いま実際に壊れている塊は無い**(トップレベルの非散文ブロックはすべて
+   *   `.pkc-md-block` に包まれ、その器に `max-width` は無い)。だからこれは
+   *   「観測された欠陥の修正」ではなく**予防**であり、その予防が効いていることを
+   *   ここで直接見る ── 器に無関係な上限を 1 本足して、それでも縮まないこと。
+   * 🔑 `--pkc-prose-block` は allow-list の規則が自分で立てる印なので、
+   *   ほかのどの規則でも満たせない。
+   */
+  it('🔴 器に無関係な max-width が付いても、編集欄は縮まない', async () => {
+    setLive(true);
+    // ⚠ 表の器(`.pkc-md-block`)へ、読み幅とは無関係な上限を足す
+    installReadWidthCss('.pkc-md-rendered .pkc-md-block{max-width:100%}');
+    const { root, detail } = mount();
+    detail.render(editing('| あ | い |\n|---|---|\n| 1 | 2 |\n'));
+    await settle();
+    const live = root.querySelector<HTMLElement>('[data-pkc-region="editor-live"]');
+    const block = live!.querySelector<HTMLElement>('.pkc-md-block');
+    // ⚠ 空振り防止 ── 足した上限が**判定が読む当の要素**に効いていること
+    expect(
+      getComputedStyle(block!).maxWidth,
+      '無関係な上限が器に効いていない(この検査は空振り)',
+    ).toBe('100%');
+
+    block!.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    const slot = live!.querySelector<HTMLElement>('[data-pkc-row-slot]');
+    expect(slot, '押しても生の器が出ていない(この検査は空振り)').not.toBeNull();
+    expect(
+      slot!.matches(ROW_WIDTH_SELECTOR),
+      '無関係な max-width を「散文」と読み違えている',
+    ).toBe(false);
+  });
+
+  /**
+   * 🔴 **範囲(S6)は 1 つでも全幅の塊が居れば外す**(2026-08-08 の 2 巡目レビュー)。
+   *
+   * `proseSpan` のループを先頭だけに縮める変異が**生き延びていた** ── 観測点が
+   * 単一塊のクリック 2 件しか無かったため。実害: 見出しで始まり表を含む文書で
+   * 「全文を編集」を押すと、先頭が散文なので**全文の入力欄が 42rem に縮み**、
+   * 表の原文行が折り返す。
+   */
+  it('🔴 全文を編集 ── 表が混ざっていれば散文の幅にしない', async () => {
+    setLive(true);
+    const { root, detail } = mount();
+    detail.render(editing('# 題\n\n段落。\n\n| あ | い |\n|---|---|\n| 1 | 2 |\n'));
+    await settle();
+    const live = root.querySelector<HTMLElement>('[data-pkc-region="editor-live"]');
+    // ⚠ 空振り防止 ── 散文と表が**両方**在ること(片方だけなら範囲を見ていない)
+    expect(live!.querySelector('h1'), '見出しが無い(この検査は空振り)').not.toBeNull();
+    expect(live!.querySelector('table'), '表が無い(この検査は空振り)').not.toBeNull();
+
+    // ⚠ 「全文を編集」の帯は**器の外**(`region.append(tools, pane, note)`)── 面の
+    //    中を探すと null になる(2026-08-08 に踏んだ)
+    root.querySelector<HTMLElement>('[data-pkc-field="edit-all"]')!.click();
+    const slot = live!.querySelector<HTMLElement>('[data-pkc-row-slot]');
+    expect(slot, '全文編集の器が出ていない(この検査は空振り)').not.toBeNull();
+    expect(slot!.matches(ROW_WIDTH_SELECTOR), '表を含む全文が散文の幅へ縮む').toBe(false);
+  });
+
+  it('🔴 全文を編集 ── 散文だけなら散文の幅のまま', async () => {
+    setLive(true);
+    const { root, detail } = mount();
+    detail.render(editing('# 題\n\n段落。\n\nもう 1 つ。\n'));
+    await settle();
+    const live = root.querySelector<HTMLElement>('[data-pkc-region="editor-live"]');
+    // ⚠ 「全文を編集」の帯は**器の外**(`region.append(tools, pane, note)`)── 面の
+    //    中を探すと null になる(2026-08-08 に踏んだ)
+    root.querySelector<HTMLElement>('[data-pkc-field="edit-all"]')!.click();
+    const slot = live!.querySelector<HTMLElement>('[data-pkc-row-slot]');
+    expect(slot, '全文編集の器が出ていない(この検査は空振り)').not.toBeNull();
+    expect(slot!.matches(ROW_WIDTH_SELECTOR), '散文だけの全文が全幅へ跳ねる').toBe(true);
+  });
+
+  /**
+   * 🔴 **末尾に書き足す行は直前の塊に揃える**(2026-08-08 の 2 巡目レビュー)。
+   *
+   * 余白を押して書き始める・最終行で ↓ を押す、は**散文の続きを書く一番普通の
+   * 導線**である。ここだけ全幅で開くと、打っている間と確定後で折り返しが変わる。
+   * ⚠ 前は `prose: false` 固定で、**test が無いまま無言で変わっていた**。
+   */
+  it('🔴 余白を押して書き足す行は、直前の塊に揃う', async () => {
+    setLive(true);
+    const { root, detail } = mount();
+    detail.render(editing('# 題\n\n段落。\n'));
+    await settle();
+    const live = root.querySelector<HTMLElement>('[data-pkc-region="editor-live"]');
+    // 本文の下の余白を押す(座標で決まるので、器の下端より下を指す)
+    const box = live!.getBoundingClientRect();
+    live!.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, button: 0, clientY: box.bottom + 200 }),
+    );
+    const slot = live!.querySelector<HTMLElement>('[data-pkc-row-slot]');
+    expect(slot, '余白を押しても行が開かない(この検査は空振り)').not.toBeNull();
+    expect(slot!.matches(ROW_WIDTH_SELECTOR), '書き足す行だけ全幅で開く').toBe(true);
+  });
+
+  /**
+   * ⚠ **逆側**(2026-08-08 の 3 巡目)── 直前が表なら、書き足す行も全幅で開く。
+   * 上の 1 本だけだと「常に散文にする」変異が**生き延びる**(実測)。
+   */
+  it('🔴 直前が表なら、書き足す行も全幅で開く', async () => {
+    setLive(true);
+    const { root, detail } = mount();
+    detail.render(editing('段落。\n\n| あ | い |\n|---|---|\n| 1 | 2 |\n'));
+    await settle();
+    const live = root.querySelector<HTMLElement>('[data-pkc-region="editor-live"]');
+    expect(live!.querySelector('table'), '表が無い(この検査は空振り)').not.toBeNull();
+    const box = live!.getBoundingClientRect();
+    live!.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, button: 0, clientY: box.bottom + 200 }),
+    );
+    const slot = live!.querySelector<HTMLElement>('[data-pkc-row-slot]');
+    expect(slot, '余白を押しても行が開かない(この検査は空振り)').not.toBeNull();
+    expect(slot!.matches(ROW_WIDTH_SELECTOR), '表の直後なのに散文の幅で開く').toBe(false);
+  });
+
   /**
    * ✗ **アプリの案内は紙面に連動しない**(2026-08-08 のレビュー)。
    *
@@ -240,9 +397,16 @@ describe('読み幅が効く面(アプリ 4 面)', () => {
       rules[0]!.body,
       '案内が紙面に連動している(フル HD で画面幅いっぱいに伸びる)',
     ).not.toMatch(/var\(--read-w\)/);
-    expect(rules[0]!.body, '案内に上限が無い(1000px 伸びて読みにくい)').toMatch(
-      /max-width:\s*[0-9]/,
-    );
+    /**
+     * ⚠ **上下両側で見る**(2026-08-08 の 2 巡目レビュー)── 「数字が在るか」だけだと
+     * `420rem` への変異が通り、規則の注記が言っている「1000px 伸びると読みにくい」を
+     * 守れない。⚠ 幅は好みで動かす値なので、貼らずに**範囲**で持つ。
+     */
+    const w = /max-width:\s*([0-9.]+)rem/.exec(rules[0]!.body);
+    expect(w, '案内に上限が無い(1000px 伸びて読みにくい)').not.toBeNull();
+    const rem = Number(w![1]);
+    expect(rem, `案内の上限が上限として働かない値(${rem}rem)`).toBeLessThan(60);
+    expect(rem, `案内の上限が狭すぎる値(${rem}rem)`).toBeGreaterThanOrEqual(30);
   });
 
   it('✗ ヘルプのマニュアル面には掛からない', () => {

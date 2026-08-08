@@ -917,6 +917,16 @@ select:focus-visible {
  * 既定(A4 縦)は 42rem = 672px。本文 13px なので全角 **約 51 文字**
  * (日本語の可読幅は 35〜50 文字)。 */
 .pkc-md-rendered[data-pkc-prose] > :is(p, h1, h2, h3, h4, h5, h6, ul, ol, dl, blockquote, hr, .footnotes, .pkc-details, .pkc-format-block, .pkc-toc-formal, .pkc-toc-preview, .pkc-section-break, .pkc-blank-line, .pkc-region-frontmatter, .pkc-region-body, .pkc-section-callout, .pkc-fig-equation) {
+  /**
+   * 🔑 **この allow-list に入っている、という印**(`row-swap.ts` の `proseSpan` が読む)。
+   * ⚠ **`max-width` の有無で代用してはいけない**(2026-08-08 の 2 巡目レビューで実証)──
+   *   読み幅と無関係な `max-width` が在る(`[data-pkc-mermaid-src]` の `100%`)ので、
+   *   「上限が在るか」で見ると**図を押した編集欄まで散文の幅に縮む**。
+   *   これは「代替物で満たせるガード」であり、CLAUDE.md が繰り返し踏んでいる型である。
+   * 🔑 副産物: この印は `--read-w: none`(フル HD)でも 1 のままなので、
+   *   「上限なし」の綴りが環境で違う(実ブラウザ `none` / happy-dom 空文字)問題も消える。
+   */
+  --pkc-prose-block: 1;
   max-width: var(--read-w);
 }
 /**
