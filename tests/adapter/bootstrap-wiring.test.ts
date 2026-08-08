@@ -130,6 +130,27 @@ describe('boot 失敗の後始末', () => {
     expect(tail).toContain('読み直すと開きます');
   });
 
+  /**
+   * 🔴 **起動したときのお知らせを、boot の成功側で出す**(P11 段⑤)。
+   *
+   * ⚠ この file は原文しか見ていないが、それでも置く ── `presentAnnounce()` を
+   * 呼ばなくしても、`main.ts` は**どの test からも実行されない**ので全 test が
+   * 緑だった(2026-08-08 の変異試験で確認)。
+   * ⚠ **boot 完了の刻印より後**であることも見る ── 先に出すと、まだ何も映って
+   *   いない画面に帯だけが立つ。
+   */
+  it('🔴 お知らせを、boot 完了の刻印の後に出す', () => {
+    const body = bootstrapBody();
+    const ready = body.indexOf("root.setAttribute('data-pkc-boot', 'ready')");
+    const present = body.indexOf('app.presentAnnounce()');
+    expect(present, 'お知らせを出していない(起動しても永久に出ない)').toBeGreaterThan(-1);
+    expect(ready, 'boot 完了の刻印が無い').toBeGreaterThan(-1);
+    expect(present, '刻印より先に出している(空の画面に帯だけが立つ)').toBeGreaterThan(ready);
+    // ⚠ 失敗側では出さない(起動できていないのにお知らせを出さない)
+    const catchAt = body.indexOf('.catch((e: unknown)');
+    expect(body.slice(catchAt), '失敗側でお知らせを出している').not.toContain('presentAnnounce');
+  });
+
   it('⚠ 受け口(launchQueue)は失敗側では張らない(consume すると本当に消える)', () => {
     const body = bootstrapBody();
     const catchAt = body.indexOf('.catch((e: unknown)');

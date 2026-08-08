@@ -30,16 +30,22 @@
  * 「マニュアルに文書内アンカーが 0 件」を機械で守る。
  */
 import { APP_ID, APP_VERSION, BUILD_KIND } from '@runtime/release-meta';
-import { NOTICES, noticeDate, recentNotices } from '@features/notice/notice-log';
+import { NOTICES, noticeDate, recentNotices, type Notice } from '@features/notice/notice-log';
 import manualText from '../../../../docs/manual.md?raw';
 
 /** 焼き込んだマニュアルの原文(test から掴めるよう named export)。 */
 export const MANUAL_TEXT: string = manualText;
 
-/** 版の表示。⚠ **1 か所で組む** ── 手組みの template を面ごとに増やさない。 */
-export function versionText(): string {
-  const kind = BUILD_KIND === 'product' ? '' : BUILD_KIND === 'stage' ? '(検証版)' : '(開発版)';
-  return `${APP_ID} v${APP_VERSION}${kind}`;
+/**
+ * 版の表示。⚠ **1 か所で組む** ── 手組みの template を面ごとに増やさない。
+ *
+ * ⚠ 種別を**引数で受ける**(2026-08-08、変異試験の指摘)。`BUILD_KIND` は build 時に
+ * 焼き込まれるので、既定引数のままだと **test から分岐を 1 つも動かせない** ──
+ * 「開発版 / 検証版の刻印を落とす」変異が誰にも殺されなかった。
+ */
+export function versionText(kind: string = BUILD_KIND): string {
+  const suffix = kind === 'product' ? '' : kind === 'stage' ? '(検証版)' : '(開発版)';
+  return `${APP_ID} v${APP_VERSION}${suffix}`;
 }
 
 /** markdown を描く口(worker 経路。⚠ 失敗したら素の原文を出す)。 */
@@ -50,12 +56,17 @@ export interface HelpMarkdownPort {
 export class HelpRenderer {
   private built = false;
   private manualHost: HTMLElement | null = null;
-  private manualDrawn = false;
 
   constructor(
     private readonly region: HTMLElement,
     /** ⚠ アプリ全体で 1 個の `MarkdownClient` を渡す(面ごとに作らない)。 */
     private readonly markdown: HelpMarkdownPort | null = null,
+    /**
+     * 登記表。⚠ **注入できるようにする**(2026-08-08、変異試験の指摘)──
+     * `NOTICES` が 1 件しか無いので、**上限も並びも「測っていない次元」**だった
+     * (`recentNotices` を通さず丸ごと出す変異が素通りした)。
+     */
+    private readonly notices: readonly Notice[] = NOTICES,
   ) {}
 
   render(): void {
@@ -94,7 +105,7 @@ export class HelpRenderer {
     const list = document.createElement('div');
     list.setAttribute('data-pkc-region', 'help-notices');
     // ⚠ **件数を切るのは `recentNotices` だけ**(面ごとに slice を書かない)
-    for (const n of recentNotices(NOTICES)) {
+    for (const n of recentNotices(this.notices)) {
       const item = document.createElement('section');
       /**
        * ⚠ **`data-pkc-notice` は使わない** ── 取込の注意(`notices.ts`)が
@@ -134,12 +145,16 @@ export class HelpRenderer {
   }
 
   /**
-   * マニュアルを 1 度だけ描く。
+   * マニュアルを描く。
    * ⚠ ワーカーが使えないときは**素の原文**を出す ── 白紙にしない。
+   *
+   * ⚠ **二重描画のガードは置かない**(2026-08-08、変異試験の指摘)。`render()` の
+   * `built` ガードが先に効くので、ここは構造上 1 度しか呼ばれない ──
+   * 置いていたガードは**誰も通らない死んだ防御**で、消しても test は 1 件も
+   * 落ちなかった(「在るのに効かない」は次に読む人を惑わせる)。
    */
   private async drawManual(): Promise<void> {
-    if (this.manualDrawn || !this.manualHost) return;
-    this.manualDrawn = true;
+    if (!this.manualHost) return;
     const host = this.manualHost;
     if (!this.markdown) {
       host.textContent = MANUAL_TEXT;

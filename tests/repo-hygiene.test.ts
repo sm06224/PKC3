@@ -83,14 +83,25 @@ describe('リポジトリ衛生', () => {
     const handlers = new Set([...table.matchAll(/^\s{2}'([a-z0-9-]+)':/gm)].map((m) => m[1]!));
     expect(handlers.size, '受け手の表を読めていない(空振り)').toBeGreaterThan(20);
 
-    const written = new Set<string>();
+    /**
+     * ⚠ **書き方は 2 通りある**(`setAttribute` と HTML 属性)。
+     * 🔴 **形ごとに guard を持つ**(2026-08-08、変異試験の指摘)── 合算の
+     * 「20 件以上」だけだと、**HTML 属性形の正規表現が壊れても気づかない**
+     * (合算は `setAttribute` 形だけで満たされる)。実際、その変異は
+     * `KNOWN_DEAD` の等値 pin に**たまたま**救われていただけで、3 件を直した
+     * 瞬間に守り手を失うところだった。
+     */
+    const bySetAttr = new Set<string>();
+    const byHtmlAttr = new Set<string>();
     for (const f of textFiles('src')) {
       const text = readFileSync(f, 'utf-8');
       // ⚠ **属性を実際に付けている所**を拾う(散文の中の語を拾わない)
-      for (const m of text.matchAll(/'data-pkc-action',\s*'([a-z0-9-]+)'/g)) written.add(m[1]!);
-      for (const m of text.matchAll(/data-pkc-action="([a-z0-9-]+)"/g)) written.add(m[1]!);
+      for (const m of text.matchAll(/'data-pkc-action',\s*'([a-z0-9-]+)'/g)) bySetAttr.add(m[1]!);
+      for (const m of text.matchAll(/data-pkc-action="([a-z0-9-]+)"/g)) byHtmlAttr.add(m[1]!);
     }
-    expect(written.size, '画面側を読めていない(空振り)').toBeGreaterThan(20);
+    expect(bySetAttr.size, 'setAttribute 形を読めていない(空振り)').toBeGreaterThan(20);
+    expect(byHtmlAttr.size, 'HTML 属性形を読めていない(空振り)').toBeGreaterThan(0);
+    const written = new Set([...bySetAttr, ...byHtmlAttr]);
 
     /**
      * 🔴 **見つかった実害**(2026-08-08、この検査を書いた初回)。

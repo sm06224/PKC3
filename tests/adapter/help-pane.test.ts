@@ -56,10 +56,15 @@ describe('ヘルプの面', () => {
    * ⚠ 版の種別は**文字で出す**(設定は hover の `title` にしか入れておらず、
    * タッチ端末・キーボードだけの user には届かなかった)。
    */
-  it('⚠ product 以外の版は、開発版だと文字で分かる', () => {
-    // BUILD_KIND は build 時に焼かれる ── test では組み立て規則そのものを見る
-    expect(versionText()).toContain(APP_VERSION);
-    expect(versionText().startsWith('pkc3 v'), '版の組み立てが変わった').toBe(true);
+  /**
+   * ⚠ **種別を引数で試す**(2026-08-08、変異試験の指摘)。`BUILD_KIND` は build 時に
+   * 焼き込まれるので、既定引数のままでは**分岐を 1 つも動かせず**、刻印を落とす
+   * 変異が誰にも殺されなかった。
+   */
+  it('🔴 版に種別の刻印が出る(product だけ無印)', () => {
+    expect(versionText('product'), 'product に余計な刻印が付いた').toBe(`pkc3 v${APP_VERSION}`);
+    expect(versionText('stage'), '検証版の刻印が無い').toContain('(検証版)');
+    expect(versionText('dev'), '開発版の刻印が無い').toContain('(開発版)');
   });
 
   it('🔴 お知らせが新しい順に、上限まで出る', () => {
@@ -73,6 +78,47 @@ describe('ヘルプの面', () => {
     // 日付は id から引く(field を二重に持たない)
     const first = region.querySelector('[data-pkc-field="notice-title"]')?.textContent ?? '';
     expect(first, '日付が出ていない').toMatch(/^\d{4}-\d{2}-\d{2} /);
+  });
+
+  /**
+   * 🔴 **切るのは `recentNotices` だけ**(P11 の決まり)。
+   * ⚠ 1 巡目は登記表が **1 件**だったので、上限も並びも「測っていない次元」だった
+   *   ── 丸ごと出す変異が素通りした(変異試験で判明)。登記表を注入して試す。
+   */
+  it('🔴 登記表が上限より多くても、出るのは上限まで(新しい順)', () => {
+    const many = Array.from({ length: NOTICE_SHOW_MAX + 4 }, (_, i) => ({
+      id: `2026-02-${String(i + 1).padStart(2, '0')}-x`,
+      title: `t${i}`,
+      items: ['本文'],
+    }));
+    expect(many.length, 'fixture が上限を超えていない(空振り)').toBeGreaterThan(NOTICE_SHOW_MAX);
+    new HelpRenderer(region, null, many).render();
+    const ids = [...region.querySelectorAll('[data-pkc-help-notice]')].map(
+      (e) => e.getAttribute('data-pkc-help-notice') ?? '',
+    );
+    expect(ids, '上限まで切っていない').toHaveLength(NOTICE_SHOW_MAX);
+    expect(ids[0], '新しい順になっていない').toBe(`2026-02-${NOTICE_SHOW_MAX + 4}-x`);
+  });
+
+  /**
+   * 🔴 **素のテキストで出す**(ヘルプ側。帯とは**別の描画経路**である)。
+   * ⚠ CLAUDE.md「同じ値を複数の描画経路へ渡すものは、経路ごとに pin する」──
+   *   帯だけ見ていたので、ヘルプ側を `innerHTML` にする変異が素通りした。
+   */
+  it('🔴 お知らせが素のテキストで出る(HTML として描かない)', () => {
+    new HelpRenderer(region, null, [
+      { id: '2026-08-08-x', title: 't', items: ['<b>太字</b>と <img src="x"> を書いた'] },
+    ]).render();
+    const li = region.querySelector('[data-pkc-help-notice] li')!;
+    expect(li.children.length, 'HTML として描いている').toBe(0);
+    expect(li.textContent, '原文が消えている').toContain('<b>太字</b>');
+  });
+
+  /** ⚠ 見出しが無いと、版の行とお知らせが地続きに見える。 */
+  it('⚠ 「これまでのお知らせ」と「マニュアル」の見出しが出る', () => {
+    new HelpRenderer(region).render();
+    const heads = [...region.querySelectorAll('h3')].map((e) => e.textContent);
+    expect(heads, '見出しが足りない').toEqual(['これまでのお知らせ', 'マニュアル']);
   });
 
   /**
@@ -211,9 +257,20 @@ describe('お知らせの登記表', () => {
     }
   });
 
-  /** ⚠ 登記表に残す件数の上限(読まれない物を配り続けない)。 */
-  it('⚠ 登記表が上限を超えていない', () => {
+  /**
+   * ⚠ 登記表に残す件数の上限(読まれない物を配り続けない)。
+   * ⚠ **自己言及にしない**(2026-08-08、変異試験の指摘)── 定数で fixture を作って
+   *   同じ定数で assert していたので、`20 → 200` にする変異が素通りした。
+   *   **宣言そのもの**を pin する(`.claude/skills/notice-writing/` の表と同じ値)。
+   */
+  it('⚠ 登記表が上限を超えておらず、上限の宣言も動いていない', () => {
     expect(NOTICES.length).toBeLessThanOrEqual(NOTICE_KEEP_MAX);
+    expect(NOTICE_SHOW_MAX, '表示上限が変わった').toBe(10);
+    expect(NOTICE_KEEP_MAX, '保持上限が変わった').toBe(20);
+    expect(NOTICE_KEEP_MAX, '「表示の 2 倍」という宣言が崩れた').toBe(NOTICE_SHOW_MAX * 2);
+    expect(NOTICE_ITEMS_MAX, '項目数の上限が変わった').toBe(6);
+    expect(NOTICE_ITEM_CHARS_MAX, '字数の上限が変わった').toBe(120);
+    expect(NOTICE_ITEM_CHARS_MIN, '字数の下限が変わった').toBe(4);
   });
 });
 
@@ -263,6 +320,14 @@ describe('🔴 中央の面の表が 2 つある(食い違いを落とす)', () 
     if (isAsidePane(view)) {
       // 🔑 ノートを映さない面は、**自分の器**が出ていなければならない
       expect(name, `${view} は自分の器を持っていない(center.ts の表に足し忘れ)`).toBe(view);
+      /**
+       * ⚠ **中身まで見る**(2026-08-08、変異試験の指摘)── 見えているかだけ見て
+       * いたので、render の分岐を消して**空の器**を出す変異が素通りした。
+       */
+      expect(
+        shown[0]!.querySelector('[data-pkc-field="pane-title"]'),
+        `${view} は器だけで中身が描かれていない`,
+      ).not.toBeNull();
     } else {
       /**
        * 🔑 **逆向きも見る。** かんばん / カレンダーは自分の器、探し方
@@ -272,5 +337,28 @@ describe('🔴 中央の面の表が 2 つある(食い違いを落とす)', () 
       const expected = view === 'kanban' || view === 'calendar' ? view : 'detail';
       expect(name, `${view} の落ち先が違う(app-state.ts の表に足し忘れ)`).toBe(expected);
     }
+  });
+
+  /**
+   * 🔴 **ヘルプは共有の markdown の口で描く**(面ごとに worker を立てない)。
+   * ⚠ 渡し忘れると素の原文表示に落ちるだけで**画面は成立して見える**ので、
+   *   1 巡目は誰も見ていなかった(変異試験で判明)。常駐メモリの規律でもある。
+   */
+  it('🔴 ヘルプが、アプリ共有の markdown の口を使う', async () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const seen: string[] = [];
+    const port = {
+      render: (t: string) => {
+        seen.push(t);
+        return Promise.resolve('<p data-probe="1"></p>');
+      },
+    };
+    const router = new CenterRouter(host, undefined, null, port as never);
+    router.render(stateWith('help'));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(seen, 'ヘルプが共有の口を使っていない(面ごとに worker を立てる形)').toHaveLength(1);
+    expect(host.querySelector('[data-probe="1"]'), '描いた結果が入っていない').not.toBeNull();
   });
 });

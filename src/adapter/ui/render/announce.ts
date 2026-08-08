@@ -130,3 +130,46 @@ export function createAnnounce(
     },
   };
 }
+
+/**
+ * 🔴 **お知らせの配線を `main.ts` から取り出す**(2026-08-08、変異試験の指摘)。
+ *
+ * ⚠ `main.ts` は**どの test からも実行されていない**(読んでいるのは原文だけ)。
+ * 配線をそこへ直書きしていたので、変異試験で次のどれをやっても**全 2358 tests が
+ * 緑**だった:
+ *  - 設定を切ったときに `hide` ではなく `dismiss` を呼ぶ(= **読んでいない物を
+ *    既読にする**。この段の設計の要そのもの)
+ *  - 設定の切替を保存しない
+ *  - `dismissAnnounce` を `hide` にすり替える(閉じても既読にならない)
+ *
+ * 🔑 **取り出せば test できる**(`update-card.ts` が同じ理由で取り出されている)。
+ */
+export interface AnnounceServices {
+  dismissAnnounce(): void;
+  muteAnnounce(): void;
+  setNoticesEnabled(on: boolean): void;
+}
+
+export function announceServices(
+  announce: Announce,
+  store: NoticeStore,
+  /** 設定画面などを映し直す。⚠ 帯から切ると**画面の外で設定が変わる**ので要る。 */
+  onChanged: () => void = () => {},
+): AnnounceServices {
+  return {
+    // ⚠ 閉じたのは**読んだから** ── 既読にする
+    dismissAnnounce: () => announce.dismiss(),
+    muteAnnounce: () => {
+      announce.mute();
+      onChanged();
+    },
+    setNoticesEnabled: (on) => {
+      store.setEnabled(on);
+      /**
+       * ⚠ **既読にしない**(`dismiss` ではなく `hide`)── 設定を切っただけの
+       * user は読んでいないので、戻したときに出直す。
+       */
+      if (!on) announce.hide();
+    },
+  };
+}

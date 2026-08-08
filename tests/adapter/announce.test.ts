@@ -13,12 +13,18 @@
  *   映さないと古い値が見える(CLAUDE.md「設定画面の値の同期」)
  */
 import { describe, expect, it, beforeEach } from 'vitest';
-import { createAnnounce } from '../../src/adapter/ui/render/announce';
+import { createAnnounce, announceServices } from '../../src/adapter/ui/render/announce';
 import { SettingsRenderer } from '../../src/adapter/ui/render/settings';
-import { NoticeStore, type NoticeStorage } from '../../src/adapter/platform/notice-store';
+import {
+  NoticeStore,
+  appNoticeStore,
+  type NoticeStorage,
+} from '../../src/adapter/platform/notice-store';
 import { buildShell } from '../../src/adapter/ui/render/shell';
+import { bindActions } from '../../src/adapter/ui/actions/binder';
+import type { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { initialState } from '../../src/adapter/state/app-state';
-import type { Notice } from '../../src/features/notice/notice-log';
+import { NOTICE_SHOW_MAX, type Notice } from '../../src/features/notice/notice-log';
 
 function memory(): NoticeStorage {
   const data: Record<string, string> = {};
@@ -120,13 +126,150 @@ describe('お知らせの帯', () => {
     expect(store.seenIds(), '読んでいないのに既読にした').toEqual([]);
   });
 
-  it('⚠ 記法を書かない決まりどおり、素のテキストで出る', () => {
+  /**
+   * 🔴 **素のテキストとして描く**(`textContent`)。
+   *
+   * ⚠ 1 巡目はここを「`**強調**` が `<strong>` にならない」で見ていた ──
+   * **`innerHTML` で描いても markdown は HTML にならない**ので、
+   * `innerHTML` へ替える変異が素通りした(変異試験で判明)。
+   * 🔑 だから fixture は **HTML そのもの**にする ── 描き方の違いが出る唯一の形である。
+   */
+  it('🔴 素のテキストで出る(HTML として描かない)', () => {
     createAnnounce(region, new NoticeStore(memory()), [
-      { id: '2026-08-08-x', title: 't', items: ['**強調**にはしない'] },
+      { id: '2026-08-08-x', title: 't', items: ['<b>太字</b>と <img src="x"> を書いた'] },
     ]).present();
     const li = region.querySelector('[data-pkc-announce] li')!;
-    // ⚠ textContent で描くので、記法を書くとアスタリスクが見える(PKC2 の失敗)
-    expect(li.innerHTML, 'HTML として描いている').not.toContain('<strong>');
+    expect(li.children.length, 'HTML として描いている').toBe(0);
+    expect(li.textContent, '原文が消えている').toContain('<b>太字</b>');
+  });
+
+  /** ⚠ **導線が画面に在る**(API を直接呼ぶ test は、ボタンが消えても通る)。 */
+  it('🔴 閉じる導線と、戻せる導線が画面に在る', () => {
+    createAnnounce(region, new NoticeStore(memory()), NOTES).present();
+    expect(region.querySelector('[data-pkc-action="dismiss-announce"]'), '閉じる導線が無い')
+      .not.toBeNull();
+    expect(region.querySelector('[data-pkc-action="mute-announce"]'), '戻せる導線が無い')
+      .not.toBeNull();
+    // ⚠ **戻し道をその場に書く**(押した後に探させない)
+    const mute = region.querySelector('[data-pkc-action="mute-announce"]')!;
+    expect(mute.getAttribute('title') ?? '', '戻せることが書かれていない').toContain('設定');
+  });
+
+  /** ⚠ 件数を出す(「何件あるか」に気づく手掛かり)。 */
+  it('⚠ 2 件以上なら件数が出る', () => {
+    createAnnounce(region, new NoticeStore(memory()), NOTES).present();
+    expect(region.querySelector('[data-pkc-field="announce-title"]')?.textContent).toContain(
+      '2 件',
+    );
+  });
+
+  /**
+   * 🔴 **出した分だけを既読にする。**
+   * ⚠ 1 巡目の fixture は `all === shown` にしかならず、`shown` を `all` に
+   *   すり替える変異が素通りした ── **上限を超える登記表**が未測定の次元だった。
+   */
+  it('🔴 表示上限を超えていても、出した分だけ既読にする', () => {
+    const many = Array.from({ length: NOTICE_SHOW_MAX + 3 }, (_, i) => ({
+      id: `2026-01-${String(i + 1).padStart(2, '0')}-x`,
+      title: `t${i}`,
+      items: ['本文'],
+    }));
+    expect(many.length, 'fixture が上限を超えていない(空振り)').toBeGreaterThan(NOTICE_SHOW_MAX);
+    const store = new NoticeStore(memory());
+    const a = createAnnounce(region, store, many);
+    a.present();
+    a.dismiss();
+    expect(store.seenIds(), '出していない分まで既読にした').toHaveLength(NOTICE_SHOW_MAX);
+  });
+
+  /** ⚠ 出していないなら、閉じても既読にならない(恒久オフ中の `dismiss`)。 */
+  it('⚠ 出していないお知らせは、閉じても既読にならない', () => {
+    const store = new NoticeStore(memory());
+    store.setEnabled(false);
+    const a = createAnnounce(region, store, NOTES);
+    a.present(); // 恒久オフなので何も出ない
+    a.dismiss();
+    expect(store.seenIds(), '見ていないのに既読になった').toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **押した先が繋がっている**(2026-08-08、変異試験の指摘)。
+ *
+ * ⚠ binder の 3 ハンドラは**1 度も実行されていなかった** ── 中身を空にしても、
+ * 値を反転して渡しても、全 test が緑だった。`repo-hygiene` は「表に名前が在るか」
+ * しか見ないので、**名前を消す変異は殺せるが、中身を空にする変異は殺せない**。
+ */
+describe('🔴 帯と設定のボタンが、受け手まで届く', () => {
+  it('閉じる / 今後は出さない / 設定の切替が、それぞれの受け手を呼ぶ', () => {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const band = document.createElement('section');
+    root.append(band);
+    createAnnounce(band, new NoticeStore(memory()), NOTES).present();
+    const settingsHost = document.createElement('div');
+    root.append(settingsHost);
+    new SettingsRenderer(settingsHost, undefined, undefined, new NoticeStore(memory())).render(
+      initialState,
+    );
+
+    const calls: string[] = [];
+    const stop = bindActions(root, {} as unknown as Dispatcher, {
+      dismissAnnounce: () => calls.push('dismiss'),
+      muteAnnounce: () => calls.push('mute'),
+      setNoticesEnabled: (on) => calls.push(`set:${String(on)}`),
+    });
+
+    root.querySelector<HTMLElement>('[data-pkc-action="dismiss-announce"]')!.click();
+    root.querySelector<HTMLElement>('[data-pkc-action="mute-announce"]')!.click();
+    const box = root.querySelector<HTMLInputElement>('[data-pkc-field="notices-enabled"]')!;
+    // ⚠ **押した後の値**を渡すこと(反転して渡す変異をここで殺す)
+    box.checked = false;
+    box.click(); // click は checked を反転させる → true
+    expect(calls, '受け手が呼ばれていない / 値が反転している').toEqual([
+      'dismiss',
+      'mute',
+      'set:true',
+    ]);
+    stop();
+  });
+});
+
+/**
+ * 🔴 **配線そのもの**(`main.ts` はどの test からも実行されない)。
+ * ⚠ ここが無いと「設定を切っただけの user を既読にする」型の取り違えが
+ *   **全 test 緑のまま**出荷される(変異試験で実際に確かめた)。
+ */
+describe('🔴 お知らせの配線(main.ts から取り出した分)', () => {
+  it('🔴 設定から切っても既読にしない / 保存する', () => {
+    const store = new NoticeStore(memory());
+    const a = createAnnounce(region, store, NOTES);
+    a.present();
+    const s = announceServices(a, store);
+    s.setNoticesEnabled(false);
+    expect(store.enabled(), '設定を保存していない').toBe(false);
+    expect(store.seenIds(), '読んでいないのに既読にした').toEqual([]);
+    expect(region.hidden, '切ったのに帯が出たまま').toBe(true);
+  });
+
+  it('🔴 閉じるは既読にする(hide にすり替わっていない)', () => {
+    const store = new NoticeStore(memory());
+    const a = createAnnounce(region, store, NOTES);
+    a.present();
+    announceServices(a, store).dismissAnnounce();
+    expect(store.seenIds(), '閉じても既読にならない').toHaveLength(2);
+  });
+
+  it('🔴 「今後は出さない」の後に、画面を映し直す', () => {
+    const store = new NoticeStore(memory());
+    const a = createAnnounce(region, store, NOTES);
+    a.present();
+    let redrawn = 0;
+    announceServices(a, store, () => {
+      redrawn += 1;
+    }).muteAnnounce();
+    expect(store.enabled(), '恒久オフになっていない').toBe(false);
+    expect(redrawn, '設定画面を映し直していない(古い値が見えたままになる)').toBe(1);
   });
 });
 
@@ -145,6 +288,14 @@ describe('🔴 帯の置き場', () => {
     expect(regions.announce).not.toBe(regions.update);
     expect(regions.announce.getAttribute('data-pkc-region')).toBe('announce');
     expect(regions.announce.hidden, '既定で場所を取っている').toBe(true);
+    /**
+     * ⚠ **画面に入っている**ことまで見る(2026-08-08、変異試験の指摘)──
+     * 属性だけ見ていたので、`shell.append` から外す変異が素通りした
+     * (器は返るが、どこにも表示されない)。
+     */
+    expect(regions.announce.parentElement, '帯が shell に入っていない').toBe(
+      root.querySelector('[data-pkc-region="shell"]'),
+    );
   });
 
   /**
@@ -156,11 +307,18 @@ describe('🔴 帯の置き場', () => {
       fs.readFileSync('src/styles/app.css', 'utf-8'),
     );
     expect(css, 'announce の区画が無い').toMatch(/\[data-pkc-region='announce'\]\s*\{[^}]*grid-area:\s*announce/);
-    // 3 つの帯が別の行に居る(いちばん広い版面の表で見る)
-    const areas = /grid-template-areas:\s*([^;]+);/.exec(css)?.[1] ?? '';
-    for (const name of ['announce', 'update', 'notices']) {
-      const rows = areas.split('\n').filter((l) => l.includes(name));
-      expect(rows, `${name} の行が 1 つではない`).toHaveLength(1);
+    /**
+     * 🔴 **版面は 3 つある**(広い / 1100px 以下 / 720px 以下)。
+     * ⚠ 1 巡目は `exec` で**最初の 1 つしか読んでおらず**、狭い 2 つの版面から
+     *   帯の行を消す変異が素通りした(変異試験で判明)。
+     */
+    const layouts = [...css.matchAll(/grid-template-areas:\s*([^;]+);/g)].map((m) => m[1] ?? '');
+    expect(layouts, '版面を全部読めていない(空振り)').toHaveLength(3);
+    for (const areas of layouts) {
+      for (const name of ['announce', 'update', 'notices']) {
+        const rows = areas.split('\n').filter((l) => l.includes(name));
+        expect(rows, `${name} の行が 1 つではない版面がある`).toHaveLength(1);
+      }
     }
   });
 });
@@ -174,6 +332,28 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
     const box = host.querySelector<HTMLInputElement>('[data-pkc-field="notices-enabled"]');
     expect(box, '戻し道が無い(押した user が復帰できない)').not.toBeNull();
     expect(box!.checked, '既定は出す').toBe(true);
+    // ⚠ ヘルプから読めることをその場に書く(「消えた」と思わせない)
+    expect(host.textContent, 'ヘルプから読めることが書かれていない').toContain('ヘルプ');
+  });
+
+  /**
+   * 🔴 **既定の store は帯と同じ 1 個**(2026-08-08、変異試験の指摘)。
+   * ⚠ test が store を**手で渡していた**ので、既定引数を別物にする変異が
+   *   素通りした ── 実アプリが通るのは既定引数の側である。
+   */
+  it('🔴 設定の既定の store が、アプリ共有の 1 個である', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    appNoticeStore.setEnabled(false);
+    try {
+      new SettingsRenderer(host).render(initialState); // 既定引数の経路
+      expect(
+        host.querySelector<HTMLInputElement>('[data-pkc-field="notices-enabled"]')!.checked,
+        '設定が帯と別の store を見ている',
+      ).toBe(false);
+    } finally {
+      appNoticeStore.setEnabled(true);
+    }
   });
 
   /**

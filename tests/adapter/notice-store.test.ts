@@ -71,9 +71,26 @@ describe('既読の集合', () => {
     ).toContain('2026-08-01-new');
   });
 
-  it('壊れた保存でも落ちない(全部未読に戻るだけ)', () => {
-    const s = new NoticeStore(fakeStorage({ 'pkc3.notices.seen': '{壊れ' }));
-    expect(s.seenIds()).toEqual([]);
+  /**
+   * 壊れた保存でも落ちない(全部未読に戻るだけ)。
+   *
+   * ⚠ 1 巡目は**構文的に壊れた JSON** しか渡しておらず、`readSeen` の**型検査**を
+   * 外す変異が素通りした(変異試験で判明)── 「壊れている」には
+   * **構文が壊れている**と**形が違う**の 2 通りある。両方を渡す。
+   */
+  it.each([
+    ['構文が壊れている', '{壊れ'],
+    ['配列ではない(オブジェクト)', '{"a":1}'],
+    ['配列ではない(数値)', '42'],
+    ['null', 'null'],
+  ])('壊れた保存でも落ちない: %s', (_label, raw) => {
+    expect(new NoticeStore(fakeStorage({ 'pkc3.notices.seen': raw })).seenIds()).toEqual([]);
+  });
+
+  /** ⚠ 中身に別の型が混ざっていたら、**文字列だけ**拾う(全部捨てない)。 */
+  it('⚠ 配列の中に別の型が混ざっていても、文字列だけ拾う', () => {
+    const s = new NoticeStore(fakeStorage({ 'pkc3.notices.seen': '[1,"2026-01-01-a",null]' }));
+    expect(s.seenIds()).toEqual(['2026-01-01-a']);
   });
 
   /** ⚠ **無用な書込をしない** ── 同じものを 2 度見ても 1 度しか書かない。 */

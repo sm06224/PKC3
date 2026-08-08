@@ -22,7 +22,7 @@ import { runExplicitPurge } from '@adapter/platform/storage/asset-gc';
 import { buildShell } from '@adapter/ui/render/shell';
 import { showNotices, clearNotices } from '@adapter/ui/render/notices';
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
-import { createAnnounce } from '@adapter/ui/render/announce';
+import { createAnnounce, announceServices } from '@adapter/ui/render/announce';
 import { appNoticeStore } from '@adapter/platform/notice-store';
 import { NOTICES } from '@features/notice/notice-log';
 import { applyTheme, chooseTheme, initialTheme, isTheme } from '@adapter/ui/render/theme';
@@ -760,27 +760,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     },
     /**
      * 📣 起動したときのお知らせ(P11 段⑤)。
-     * ⚠ `dismiss` は**読んだことにする**(次から出ない)、`mute` は**今後出さない**。
-     *   ⚠ mute は設定の「表示」から戻せる ── 戻せない導線は作らない。
+     *
+     * 🔴 **中身は `announce.ts` に取り出してある**(2026-08-08、変異試験の指摘)──
+     * この file は**どの test からも実行されていない**ので、ここへ直書きすると
+     * 「設定を切っただけの user を既読にする」型の取り違えが**全 test 緑のまま**
+     * 出荷される(実際に変異で確かめた)。
+     * ⚠ 映し直しだけは主語がここ(`center`)なので、注入して渡す。
      */
-    dismissAnnounce: () => announce.dismiss(),
-    /**
-     * 設定の「起動したときに新しいお知らせを出す」。
-     * ⚠ **戻した瞬間に出し直さない** ── 戻した user が見たいのは設定画面である。
-     *   次の起動から出る(未読は既読になっていないので消えていない)。
-     */
-    setNoticesEnabled: (on) => {
-      appNoticeStore.setEnabled(on);
-      // ⚠ **既読にしない**(`dismiss` ではなく `hide`)── 設定を切っただけの
-      //   user は読んでいないので、戻したときに出直す
-      if (!on) announce.hide();
-    },
-    muteAnnounce: () => {
-      announce.mute();
-      // ⚠ 設定を開いていたら、その場で映し直す(器は 1 度しか組まないので
-      //    映さないと古い値が見える ── CLAUDE.md「設定画面の値の同期」)
-      center.render(dispatcher.getState());
-    },
+    ...announceServices(announce, appNoticeStore, () =>
+      // ⚠ 器は 1 度しか組まないので、映さないと古い値が見える
+      //    (CLAUDE.md「設定画面の値の同期」)
+      center.render(dispatcher.getState()),
+    ),
     // 🔄 新しい版へ交代する(P7 段⑤)。⚠ 頼むだけ ── 再読込は交代が済んでから
     applyUpdate: () => updatePrompt.apply(),
     // ⚠ 見送っても待機中の worker は残るので、次に開いたときに再び出る
