@@ -194,3 +194,77 @@ describe('起動前に要るフラグ', () => {
     expect(store.restartUrl('https://example.com/app/')).not.toContain('pkc-flag');
   });
 });
+
+/**
+ * 🔴 **一度 ON にしたら二度と OFF にできない、を作らない**(2026-08-08 に実際に踏んだ)。
+ *
+ * 起動前に要る flag を ON にすると、**アプリ自身が** `?pkc-flag=…` を付けて
+ * 読み込み直す。ところが画面は「URL に載っている = 手で上書きされている」と読んで
+ * その行を `disabled` にしていた ── **アプリが自分の付けた URL を理由に操作を断る**。
+ * 「すべて既定へ戻す」も URL が残るので効かず、**完全な袋小路**だった。
+ *
+ * 🔑 食い違っているときだけが「外から手で上書きされた」である。
+ */
+describe('🔴 起動前フラグの往復(袋小路を作らない)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('🔴 ON にして再起動しても、その行はまだ押せる(OFF に戻せる)', () => {
+    const s1 = new FlagStore('');
+    s1.set(BOOT.name, true);
+    const search = new URL(s1.restartUrl('https://e/app/')).search;
+    // アプリ自身が付けた URL で起動し直した状態
+    const s2 = new FlagStore(search);
+    expect(s2.isOn(BOOT.name), '再起動後に効いていない').toBe(true);
+    expect(
+      s2.isFromUrl(BOOT.name),
+      'アプリが自分の付けた URL を「手の上書き」と読んでいる(袋小路)',
+    ).toBe(false);
+
+    const r = new FlagsRenderer(region, s2, () => {}, () => 'https://e/app/' + search);
+    r.render();
+    expect(
+      region.querySelector<HTMLInputElement>(`[data-pkc-flag="${BOOT.name}"]`)!.disabled,
+      '再起動後に押せない(OFF に戻せない)',
+    ).toBe(false);
+  });
+
+  it('🔴 OFF に戻すと、URL からもパラメータが消える', () => {
+    const s1 = new FlagStore('');
+    s1.set(BOOT.name, true);
+    const search = new URL(s1.restartUrl('https://e/app/')).search;
+    const s2 = new FlagStore(search);
+    s2.set(BOOT.name, false);
+    expect(s2.restartUrl('https://e/app/' + search), 'URL に残り続けている').not.toContain(
+      'pkc-flag',
+    );
+  });
+
+  it('🔴 「すべて既定へ戻す」で、URL のパラメータごと消えて読み込み直す', () => {
+    const s1 = new FlagStore('');
+    s1.set(BOOT.name, true);
+    const search = new URL(s1.restartUrl('https://e/app/')).search;
+    const s2 = new FlagStore(search);
+    const seen: string[] = [];
+    const r = new FlagsRenderer(region, s2, (u) => seen.push(u), () => 'https://e/app/' + search);
+    r.render();
+    r.resetFlags();
+    expect(seen, '読み込み直していない(URL が残る)').toHaveLength(1);
+    expect(seen[0], 'URL にパラメータが残っている').not.toContain('pkc-flag');
+  });
+
+  /**
+   * ⚠ **手で打った上書きは、今までどおり断る**(止めすぎていない)。
+   * 保存値と食い違う URL = 外からの一時上書きである。
+   */
+  it('⚠ 手で打った上書き(保存値と食い違う)は今までどおり押せない', () => {
+    const s = new FlagStore(`?pkc-flag=${BOOT.name}`); // 保存は空 = 既定 false と食い違う
+    expect(s.isFromUrl(BOOT.name), '手の上書きを見逃している').toBe(true);
+    const r = new FlagsRenderer(region, s, () => {}, () => 'https://e/');
+    r.render();
+    expect(
+      region.querySelector<HTMLInputElement>(`[data-pkc-flag="${BOOT.name}"]`)!.disabled,
+    ).toBe(true);
+  });
+});

@@ -197,9 +197,11 @@ export class FlagsRenderer {
     const hadRestart = registeredFlags().some(
       (f) => f.needsRestart === true && this.store.values()[f.name] !== f.default,
     );
+    // ⚠ **URL に残った flag も落とす** ── 落とさないと「既定へ戻す」を押しても
+    //   URL が生き続け、戻らない(2026-08-08 に踏んだ袋小路の片割れ)
+    const hadUrl = this.store.hasUrlFlags();
     this.store.reset();
     this.sync();
-    // ⚠ 起動前に要るものが既定へ戻ったなら、そこも読み込み直す
-    if (hadRestart) this.restart();
+    if (hadRestart || hadUrl) this.restart();
   }
 }

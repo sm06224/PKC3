@@ -121,9 +121,28 @@ export class FlagStore {
     return this.values()[name] ?? false;
   }
 
-  /** その flag が **URL で上書きされている**か(画面が「一時的」と出すため)。 */
+  /**
+   * 🔴 **URL が保存値と食い違っているか**(= 手で打たれた一時上書き)。
+   *
+   * ⚠ **「URL に載っているか」で判定してはいけない**(2026-08-08 に実際に踏んだ)。
+   * 起動前に要る flag を ON にすると、**アプリ自身が** `?pkc-flag=…` を付けて
+   * 読み込み直す。それを「上書き」と読むと、次の画面で
+   * **アプリが自分の付けた URL を理由に操作を断る** ── 一度 ON にしたら
+   * 二度と OFF にできない袋小路になっていた(「すべて既定へ戻す」も URL が
+   * 残るので効かない)。
+   * 🔑 食い違っているときだけが「外から手で上書きされた」である。
+   */
   isFromUrl(name: string): boolean {
-    return this.fromUrl[name] !== undefined;
+    const url = this.fromUrl[name];
+    if (url === undefined) return false;
+    const flag = registeredFlags().find((f) => f.name === name);
+    const saved = this.stored[name] ?? flag?.default ?? false;
+    return url !== saved;
+  }
+
+  /** URL に flag のパラメータが載っているか(再起動で消すべきかの判断)。 */
+  hasUrlFlags(): boolean {
+    return Object.keys(this.fromUrl).length > 0;
   }
 
   /**
@@ -147,12 +166,20 @@ export class FlagStore {
   restartUrl(href: string): string {
     const url = new URL(href);
     url.searchParams.delete(URL_PARAM);
-    const pruned = prunedForStorage(this.values());
+    // 🔴 **保存値から組む**(`values()` から組まない)。
+    // ⚠ `values()` は URL 由来を含むので、それを載せ直すと**自分が付けた URL が
+    //   永久に生き残る** ── 既定へ戻しても消えない(2026-08-08 に踏んだ)。
+    const pruned = prunedForStorage({ ...this.resolvedFromStored() });
     const tokens = registeredFlags()
       .filter((f) => f.needsRestart === true && pruned[f.name] !== undefined)
       .map((f) => (pruned[f.name] === true ? f.name : `${f.name}:off`));
     if (tokens.length > 0) url.searchParams.set(URL_PARAM, tokens.join(','));
     return url.toString();
+  }
+
+  /** 保存値だけで解いた値(URL を混ぜない)。再起動の URL を組むのに使う。 */
+  private resolvedFromStored(): Record<string, boolean> {
+    return resolveFlags(this.stored);
   }
 
   /** すべて既定へ戻す(パワーユーザーの避難口)。 */
