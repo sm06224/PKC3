@@ -863,20 +863,54 @@ describe('RowSwap — カーソルキーで隣の塊へ(2026-08-08 user 裁定)'
     expect(box(r.host), '消えたはずの予約が開き直した').toBeNull();
   });
 
-  it('予約より後に**別の開く操作が通ったら**、予約は破棄される(奪い合いにしない)', () => {
+  it('予約より後に**別の開く操作が通ったら**、予約は上書きされる(奪い合いにしない)', () => {
     const r = rig(DOC, true);
     click(findByText(r.host, 'p', '最初の段落。'));
     box(r.host)!.value = '1 行目。\n2 行目を足した。';
     box(r.host)!.dispatchEvent(new Event('blur'));
     click(findByText(r.host, 'p', '最後の段落。')); // 予約になる
-    // その後に Ctrl+A(activateAll は予約を経由せず開く)── これが user の最新の意思
+    // その後に Ctrl+A ── これが user の最新の意思なので、こちらが勝つ
     expect(r.swap.activateAll()).toBe(true);
-    expect(box(r.host)).not.toBeNull();
+    /**
+     * ⚠ **窓の中では開かない**(2026-08-08 の 2 巡目レビューで直した)。
+     * 直す前はここで古い原文の全文入力欄が開いており、そこで確定すると
+     * **打ち替えが消えて末尾行が複製された**(下の回帰 test が現物を見る)。
+     */
+    expect(box(r.host), '古い座標のまま全文入力欄が開いている').toBeNull();
     r.flush();
-    // 着弾は古い座標の全文入力欄を理由付きで閉じる。⚠ ここで**予約が生きていると
-    // 「最後の段落。」が勝手に開く** ── 捨てられていることを箱の不在で見る
-    expect(box(r.host), '破棄されたはずの予約が開き直した').toBeNull();
-    expect(r.notes.join('/')).toContain('外から本文が変わった');
+    // 着弾後、**新しい原文**で全文が開く。⚠ 先に積まれていた「最後の段落。」の
+    // 予約は上書きされている(1 つの箱しか開かないことで見る)
+    const all = box(r.host)!;
+    expect(all.value, '古い原文で開いている(打ち替えが消えている)').toContain('2 行目を足した。');
+    expect(all.value, '全文になっていない').toContain('最後の段落。');
+    expect(r.notes.join('/'), '嘘の理由が出ている').not.toContain('外から本文が変わった');
+  });
+
+  /**
+   * 🔴 **回帰: 窓の中の `activateAll` で本文が壊れないこと**(2026-08-08)。
+   * 直す前の実測: `A\n\nB\n\nC` の `A` を `A1\nA2` に打ち替えて確定した直後に
+   * `activateAll()` を撃つと、入力欄に**打つ前の姿**が出る。そこで 1 文字足して
+   * 確定すると `A\n\nB\n\nCX\nC` ── **打ち替えが消え、末尾行が複製された**。無言。
+   * ⚠ 既存の pin は「理由付きで閉じられること」しか見ておらず、**破壊の側は
+   *   誰も守っていなかった**(だから緑のまま出荷されかけた)。
+   */
+  it('🔴 行数が変わる確定の直後に全文を開いて確定しても、本文が壊れない', () => {
+    const r = rig('A\n\nB\n\nC', true);
+    click(findByText(r.host, 'p', 'A'));
+    box(r.host)!.value = 'A1\nA2';
+    box(r.host)!.dispatchEvent(new Event('blur'));
+    expect(r.body(), '前提: 確定が本文に届いている').toBe('A1\nA2\n\nB\n\nC');
+
+    r.swap.activateAll(); // 窓の中 ── 予約になるだけで開かない
+    expect(box(r.host), '窓の中で古い原文の入力欄が開いた').toBeNull();
+
+    r.flush(); // 着弾 → 予約が果たされて**新しい原文**で開く
+    const all = box(r.host)!;
+    expect(all.value, '古い原文で開いている').toBe('A1\nA2\n\nB\n\nC');
+
+    all.value = `${all.value}X`;
+    all.dispatchEvent(new Event('blur'));
+    expect(r.body(), '打ち替えが消えた / 行が複製された').toBe('A1\nA2\n\nB\n\nCX');
   });
 });
 
@@ -1019,15 +1053,18 @@ describe('確定 → 着弾の窓(非同期の描き直し)', () => {
    * ⚠ **保護が鳴る枝も pin する** ── 行数が変わった直後に別の塊を開いていた場合、
    * 着弾は入力欄を閉じる。**そのとき理由を出す**(無言の操作拒否を作らない)。
    */
-  it('⚠ 行数が変わった後に開いていた入力欄は、理由を出して閉じられる', () => {
-    const r = rig(DOC, true);
+  it('⚠ 開いている最中に外から本文が変わったら、理由を出して閉じられる', () => {
+    const r = rig(DOC);
     click(findByText(r.host, 'p', '最初の段落'));
-    box(r.host)!.value = '1 行目。\n2 行目を足した。';
-    commitByBlur(r);
-    // 着弾前に何かを開けた場合(実機では開けない経路が在るが、機構としては同じ)
-    r.swap.activateAll();
-    expect(box(r.host)).not.toBeNull();
-    r.flush();
+    expect(box(r.host), '前提: 入力欄が開いている').not.toBeNull();
+    /**
+     * 外から本文が差し替わる(取り込み / 別タブ)。⚠ **この test は 2026-08-08 に
+     * 書き換えた** ── 以前は `activateAll()` を「窓の中で箱を開ける道具」として
+     * 使っていたが、その窓では予約になって開かなくなった(データ破壊の口を塞いだ)。
+     * 🔑 守りの**本来の場面**は「外から変わった」であり、そちらで pin し直した
+     * ── 道具が無くなったからといって、守り自体を無検査にしない。
+     */
+    r.render('まるごと別の本文。\n\n二つめの段落。');
     expect(box(r.host), '閉じられていない(座標がずれた状態で編集が続く)').toBeNull();
     expect(r.notes.join('/'), '無言で閉じた').toContain('外から本文が変わった');
   });

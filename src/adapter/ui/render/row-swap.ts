@@ -82,7 +82,8 @@ export interface RowSwapUpdate {
  */
 type PendingOpen =
   | { kind: 'line'; line: number; caret: 'start' | 'end' }
-  | { kind: 'append' };
+  | { kind: 'append' }
+  | { kind: 'all' };
 
 interface Active {
   /** 塊の添字(`view.blocks` の中)。⚠ 描き直しのたびに引き直す。 */
@@ -416,6 +417,10 @@ export class RowSwap {
       this.appendRow();
       return;
     }
+    if (p.kind === 'all') {
+      this.activateAll();
+      return;
+    }
     const idx = this.blockIndexForLine(p.line);
     // 予約した行の持ち主が消えた(確定で塊が合体した等)── それ以上は追わない
     if (idx !== null) this.activateLine(idx, p.caret);
@@ -534,6 +539,20 @@ export class RowSwap {
    */
   activateAll(): boolean {
     if (this.active !== null && !this.commitActive()) return false;
+    /**
+     * 🔴 座標が古い窓では**開かずに予約する**(`activate` / `appendRow` と同じ)。
+     * ⚠ 2026-08-08 の 2 巡目レビューで見つけた **データ破壊**の口である ──
+     * ここだけ守りが無く、`openSpan` が**進んでいない古い `this.body`** を読んでいた。
+     * 実測(再現 test): `A\n\nB\n\nC` の `A` を `A1\nA2` に打ち替えて確定した直後に
+     * これを撃つと、入力欄には**打つ前の姿**が出る。そこで 1 文字足して確定すると
+     * `cb.commit(0, 4, …)` が新しい本文へ**古い行番号で**当たり、
+     * `A\n\nB\n\nCX\nC` ── **打ち替えが消え、末尾行が複製される**。無言で起きる。
+     * ⚠ 「片側を直したら対称の反対側を疑う」── 3 つの入口のうち 2 つだけ直っていた。
+     */
+    if (this.staleAfter !== null) {
+      this.pendingOpen = { kind: 'all' };
+      return true;
+    }
     if (this.view.blocks.length === 0) return this.appendRow();
     const lines = this.body.split('\n');
     return this.openSpan(0, this.view.blocks.length - 1, 0, shrinkTrailingBlank(this.body, 0, lines.length - 1));

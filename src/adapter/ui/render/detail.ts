@@ -899,6 +899,11 @@ export class DetailRenderer {
      *   面を畳むときに必ず外す(`cancelPreview`)。
      * ⚠ 戻せないときは**無言で無視しない**(押したのに何も起きない理由を出す)。
      */
+    /**
+     * 分割が組めない本文で編集させないための退避(1 回だけ作る)。
+     * ⚠ 宣言が `onKey` より前に在るのは、`Ctrl+A` の側でも見るため(下記)。
+     */
+    let fellBack = false;
     const onKey = (ev: KeyboardEvent): void => {
       if (!pane.isConnected) return;
       const t = ev.target;
@@ -919,6 +924,19 @@ export class DetailRenderer {
        */
       if (key === 'a') {
         ev.preventDefault();
+        /**
+         * ⚠ **退避したら Ctrl+A も塞ぐ**(2026-08-08 の 2 巡目レビュー)。
+         * ボタン(`editAll.disabled`)だけ塞いで**同じことをする双子**を塞いで
+         * いなかった ── `swap.dispose()` は listener と active を落とすだけで
+         * `view` / `body` を残すので `activateAll()` は**まだ呼べてしまい**、
+         * 退避用の入力欄が入っている pane を上書きする。
+         * 🔑 断り文は**ボタンに書いたものと同じ言葉**にする(押した場所が違っても
+         * 同じ理由なら同じ言い方 ── 言い換えると user は別のものを探す)。
+         */
+        if (fellBack) {
+          note.textContent = 'すでに原文全体を編集しています';
+          return;
+        }
         if (!swap.activateAll()) note.textContent = 'この本文は全文編集に開けません';
         return;
       }
@@ -936,8 +954,6 @@ export class DetailRenderer {
     };
     document.addEventListener('keydown', onKey);
 
-    /** 分割が組めない本文で編集させないための退避(1 回だけ作る)。 */
-    let fellBack = false;
     const fallBack = (reason: string): void => {
       if (fellBack) return;
       fellBack = true;

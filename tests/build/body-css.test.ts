@@ -153,6 +153,20 @@ describe('本文の CSS を抜く', () => {
       rw[0]!.selector,
       '読み幅の起点が器の子孫になっている(どの要素にも当たらない)',
     ).toMatch(/^\.pkc-md-rendered\[data-pkc-field='detail-body'\]>/);
+    /**
+     * 🔴 **値も見る**(2026-08-08 の 2 巡目レビュー)。上の 3 つは「規則が在るか」
+     * しか見ていないので、`--read-w: 420rem` の 1 文字変異が**全 test 緑のまま通る**
+     * ── 上限が上限として働かなくなり、Full HD で 1 行 90 文字という「直したかった
+     * 状態」へそのまま戻るのに誰も鳴らない。⚠ **縮む向き**(`1rem`)も同じく素通り
+     * するので、上下**両側**を持つ(CLAUDE.md「tripwire は上限だけでなく下限も」)。
+     * 幅は好みで動かす値なので**幅を持たせた範囲**にする(30〜59rem)── 42rem に
+     * 貼り付けると、読みやすさの調整のたびにここが割れる。
+     */
+    const w = /--read-w:\s*([0-9.]+)rem/.exec(OUT.css);
+    expect(w, '--read-w が rem で定義されていない').not.toBeNull();
+    const rem = Number(w![1]);
+    expect(rem, `読み幅の上限が上限として働かない値(${rem}rem)`).toBeGreaterThanOrEqual(30);
+    expect(rem, `読み幅の上限が狭すぎる値(${rem}rem)`).toBeLessThan(60);
   });
 
   /**

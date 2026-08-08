@@ -18,7 +18,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { parseRules } from '../../build/body-css';
+import { extractBodyCss, parseRules } from '../../build/body-css';
 
 const CSS = readFileSync('src/styles/app.css', 'utf8');
 
@@ -120,5 +120,33 @@ describe('行頭アラインの入れ替え規則(user 裁定 2026-08-08)', () =
       '.pkc-md-rendered[data-pkc-writing=vertical][data-pkc-doc-align=top]': 'text-align:start',
       '.pkc-md-rendered[data-pkc-writing=vertical][data-pkc-doc-align=bottom]': 'text-align:end',
     });
+  });
+
+  /**
+   * 🔴 **書き出し側でも同じ 11 本が立っている**(2026-08-08 の 2 巡目レビュー)。
+   * ⚠ 上の 2 件は app.css だけを見ており、**焼き込み側は片肺**だった ──
+   *   `markdown-css-parity` の VIEWER 側は `toContain('[data-pkc-doc-align=left]')`
+   *   のままなので、入れ替え規則の字面で満たされて基底の欠落を見逃す。
+   *   「片側を直したら対称の反対側を疑う」の、まさにその反対側である。
+   * 🔑 焼き込みは app.css を素通しする設計なので、**両者が一致すること**を見れば
+   *   「配った HTML でだけ寄せが違う」型の欠陥が 1 本の assert で止まる。
+   */
+  it('🔴 焼き込み(書き出し HTML)側にも同じ規則が同じ値で在る(片肺にしない)', () => {
+    const baked = extractBodyCss(CSS, readFileSync('src/styles/tokens.css', 'utf8')).css;
+    const got = new Map<string, string>();
+    for (const r of parseRules(baked)) {
+      if (r.at.length > 0) continue;
+      const sel = normSel(r.selector);
+      if (sel.includes('[data-pkc-doc-align=')) got.set(sel, normBody(r.body));
+    }
+    const want = new Map<string, string>();
+    for (const r of parseRules(CSS)) {
+      if (r.at.length > 0) continue;
+      const sel = normSel(r.selector);
+      if (sel.includes('[data-pkc-doc-align=')) want.set(sel, normBody(r.body));
+    }
+    // 空振り防止 ── 集められていないなら、この比較は何も守っていない
+    expect(want.size, 'app.css 側で doc-align の規則を 1 本も拾えていない').toBe(11);
+    expect(Object.fromEntries(got)).toEqual(Object.fromEntries(want));
   });
 });

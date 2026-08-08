@@ -329,6 +329,38 @@ describe('ライブエディタ(1 面)の配線', () => {
     expect(btn.title).toContain('すでに原文全体');
   });
 
+  /**
+   * 🔴 **同じことをする双子(Ctrl+A)も塞ぐ**(2026-08-08 の 2 巡目レビュー)。
+   * ボタンだけ `disabled` にして、**同じ `activateAll()` を撃つ打鍵**は素通りだった。
+   * `swap.dispose()` は listener と active を落とすだけで `view` / `body` を残すので
+   * `activateAll()` は**まだ呼べてしまい**、退避用の入力欄が入っている面を上書きする。
+   * ⚠ 断り文は**ボタンに書いたものと同じ言葉**であること ── 押した場所が違っても
+   *   理由が同じなら同じ言い方にする(言い換えると user は別のものを探す)。
+   */
+  it('🔴 退避後は Ctrl+A も塞がれ、ボタンと同じ言葉で断る(双子を残さない)', async () => {
+    setLive(true);
+    const r = rig([':::figure{id="あ い"}', '', '本文', '', ':::', '', 'あと', ''].join('\n'));
+    await settle();
+    const pane = r.root.querySelector<HTMLElement>('[data-pkc-region="editor-live"]')!;
+    const before = pane.querySelector('[data-pkc-field="editor-body"]')!.textContent;
+
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true }),
+    );
+
+    const note = r.root.querySelector<HTMLElement>('[data-pkc-field="row-note"]')!;
+    expect(note.textContent, 'ボタンと違う言い方で断っている').toContain('すでに原文全体');
+    // ⚠ 面が上書きされていないこと ── 断り文だけ出して中身を壊していないか
+    expect(
+      pane.querySelector('[data-pkc-field="editor-body"]')?.textContent,
+      '退避用の入力欄が上書きされた',
+    ).toBe(before);
+    expect(
+      pane.querySelector('[data-pkc-field="row-source"]'),
+      '退避中なのに行の入力欄が開いた',
+    ).toBeNull();
+  });
+
   it('編集を抜けたら聴くのをやめる(外れた面が反応し続けない)', async () => {
     setLive(true);
     const r = rig(DOC);
