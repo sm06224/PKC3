@@ -727,6 +727,194 @@ describe('RowSwap — 開放終端 と auto pair', () => {
 
 });
 
+describe('RowSwap — カーソルキーで隣の塊へ(2026-08-08 user 裁定)', () => {
+  const arrow = (
+    ta: HTMLTextAreaElement,
+    key: 'ArrowDown' | 'ArrowUp',
+    init: KeyboardEventInit = {},
+  ): KeyboardEvent => {
+    const ev = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
+    ta.dispatchEvent(ev);
+    return ev;
+  };
+
+  it('🔴 最終行の ↓ で確定し、次の塊が開く(caret は先頭)', () => {
+    const r = rig();
+    click(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
+    ta.value = '書き換えた。'; // 行数は変わらない
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+    const ev = arrow(ta, 'ArrowDown');
+    expect(ev.defaultPrevented, '既定を止めていない(画面がスクロールする)').toBe(true);
+    // 確定は 1 回・次の塊(表)が開いている
+    expect(r.commits).toEqual([{ start: 2, end: 2, text: '書き換えた。' }]);
+    const next = box(r.host)!;
+    expect(next.value).toBe(DOC.split('\n').slice(4, 8).join('\n'));
+    expect(r.swap.activeRange).toEqual({ start: 4, end: 7 });
+    expect(next.selectionStart, 'caret が先頭に無い').toBe(0);
+  });
+
+  it('🔴 先頭行の ↑ で前の塊が開く(caret は末尾)', () => {
+    const r = rig();
+    click(findByText(r.host, 'p', '最後の段落。'));
+    const ta = box(r.host)!;
+    ta.setSelectionRange(0, 0);
+    const ev = arrow(ta, 'ArrowUp');
+    expect(ev.defaultPrevented).toBe(true);
+    const prev = box(r.host)!;
+    expect(prev.value).toBe('- 一つめ\n- 二つめ');
+    expect(r.swap.activeRange).toEqual({ start: 9, end: 10 });
+    expect(prev.selectionStart, 'caret が末尾に無い').toBe(prev.value.length);
+    expect(r.commits).toEqual([]); // 変えていないので確定は出ない
+  });
+
+  it('行の途中 / 選択中 / Shift 付きの ↑↓ は奪わない(textarea の中の移動のまま)', () => {
+    const r = rig();
+    expect(r.swap.activateAll()).toBe(true);
+    const ta = box(r.host)!;
+    // 行の途中(2 行目の頭)── ↓ は最終行ではないので素通り
+    ta.setSelectionRange(DOC.indexOf('最初の段落。'), DOC.indexOf('最初の段落。'));
+    expect(arrow(ta, 'ArrowDown').defaultPrevented).toBe(false);
+    expect(box(r.host)).toBe(ta);
+    // 最終行でも、選択が広がっていたら奪わない
+    ta.setSelectionRange(DOC.length - 3, DOC.length);
+    expect(arrow(ta, 'ArrowDown').defaultPrevented).toBe(false);
+    // 最終行・collapsed でも Shift(選択の拡張)は奪わない
+    ta.setSelectionRange(DOC.length, DOC.length);
+    expect(arrow(ta, 'ArrowDown', { shiftKey: true }).defaultPrevented).toBe(false);
+    expect(box(r.host)).toBe(ta);
+    expect(r.commits).toEqual([]);
+  });
+
+  it('末尾の塊の ↓ は末尾に書き足す(余白クリックと同じ意味論)', () => {
+    const r = rig();
+    click(findByText(r.host, 'p', '最後の段落。'));
+    const ta = box(r.host)!;
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+    expect(arrow(ta, 'ArrowDown').defaultPrevented).toBe(true);
+    const appended = box(r.host)!;
+    expect(appended.value).toBe('');
+    expect(r.swap.activeRange).toEqual({ start: 13, end: 12 }); // 挿入の空区間
+    // 空の書き足し行でもう一度 ↓ ── 増殖しない(何も起きない)
+    expect(arrow(appended, 'ArrowDown').defaultPrevented).toBe(false);
+    expect(box(r.host)).toBe(appended);
+  });
+
+  it('導出物(脚注の区切り)は飛ばして、その先の塊を開く', () => {
+    const r = rig(['本文[^a]', '', 'おわり', '', '[^a]: 注', ''].join('\n'));
+    click(findByText(r.host, 'p', 'おわり'));
+    const ta = box(r.host)!;
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+    expect(arrow(ta, 'ArrowDown').defaultPrevented).toBe(true);
+    // 区切りの <hr>(原文の行が無い)は飛ばし、定義行を持つ脚注の塊が開く
+    expect(box(r.host)!.value).toBe('[^a]: 注');
+    expect(r.swap.activeRange).toEqual({ start: 4, end: 4 });
+  });
+
+  it('🔴 行数が変わる確定でも ↓ で移れる(予約 → 着弾後に・正しい行で開く)', () => {
+    const r = rig(DOC, true);
+    click(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
+    ta.value = '1 行目。\n2 行目を足した。'; // +1 行
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+    expect(arrow(ta, 'ArrowDown').defaultPrevented).toBe(true);
+    // 座標が古い窓では開かない(古い行番号で開くと閉じ際の確定が他の行を潰す)
+    expect(box(r.host)).toBeNull();
+    r.flush();
+    // 着弾後に、+1 ずれた**正しい行**で次の塊(表)が開いている
+    const next = box(r.host)!;
+    expect(next.value).toBe(['| a | b |', '|---|---|', '| 1 | 2 |', '| 3 | 4 |'].join('\n'));
+    expect(r.swap.activeRange).toEqual({ start: 5, end: 8 });
+    expect(next.selectionStart).toBe(0);
+    // 嘘の理由(「外から本文が変わった」)は出ていない
+    expect(r.notes.join('/')).not.toContain('外から本文が変わった');
+    expect(r.body().split('\n').slice(2, 4)).toEqual(['1 行目。', '2 行目を足した。']);
+  });
+
+  it('🔴 行数が変わる確定の直後のクリックが dead click にならない(既知欠陥の修理)', () => {
+    const r = rig(DOC, true);
+    click(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
+    ta.value = '1 行目。\n2 行目を足した。'; // +1 行
+    ta.dispatchEvent(new Event('blur'));
+    // 着弾前に別の塊をクリック ── 直す前は古い座標のまま開き、着弾の
+    // `closeQuietly` に「外から本文が変わった」という嘘の理由で閉じられていた
+    click(findByText(r.host, 'p', '最後の段落。'));
+    expect(box(r.host), '古い座標のまま開いている').toBeNull();
+    r.flush();
+    const opened = box(r.host)!;
+    expect(opened.value).toBe('最後の段落。');
+    expect(r.swap.activeRange).toEqual({ start: 13, end: 13 }); // +1 ずれた正しい行
+    expect(r.notes.join('/')).not.toContain('外から本文が変わった');
+  });
+
+  it('予約は「次に実際に開いた操作」で消える(古い予約が後から焦点を奪わない)', () => {
+    const r = rig(DOC, true);
+    click(findByText(r.host, 'p', '最初の段落。'));
+    box(r.host)!.value = '1 行目。\n2 行目を足した。';
+    box(r.host)!.dispatchEvent(new Event('blur'));
+    click(findByText(r.host, 'p', '最後の段落。')); // 予約になる
+    r.flush(); // 予約が果たされて「最後の段落。」が開く
+    const opened = box(r.host)!;
+    expect(opened.value).toBe('最後の段落。');
+    // 変えずに閉じて、もう一度描き直しが来ても、二度と勝手に開かない
+    opened.dispatchEvent(new Event('blur'));
+    r.render(r.body());
+    expect(box(r.host), '消えたはずの予約が開き直した').toBeNull();
+  });
+
+  it('予約より後に**別の開く操作が通ったら**、予約は破棄される(奪い合いにしない)', () => {
+    const r = rig(DOC, true);
+    click(findByText(r.host, 'p', '最初の段落。'));
+    box(r.host)!.value = '1 行目。\n2 行目を足した。';
+    box(r.host)!.dispatchEvent(new Event('blur'));
+    click(findByText(r.host, 'p', '最後の段落。')); // 予約になる
+    // その後に Ctrl+A(activateAll は予約を経由せず開く)── これが user の最新の意思
+    expect(r.swap.activateAll()).toBe(true);
+    expect(box(r.host)).not.toBeNull();
+    r.flush();
+    // 着弾は古い座標の全文入力欄を理由付きで閉じる。⚠ ここで**予約が生きていると
+    // 「最後の段落。」が勝手に開く** ── 捨てられていることを箱の不在で見る
+    expect(box(r.host), '破棄されたはずの予約が開き直した').toBeNull();
+    expect(r.notes.join('/')).toContain('外から本文が変わった');
+  });
+});
+
+describe('RowSwap — Ctrl+S(2026-08-08)', () => {
+  it('🔴 Ctrl+S は行を確定し、ブラウザの保存ダイアログを止める', () => {
+    const r = rig();
+    click(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
+    ta.value = '保存した。';
+    const ev = new KeyboardEvent('keydown', {
+      key: 's',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    ta.dispatchEvent(ev);
+    expect(ev.defaultPrevented, 'ブラウザの保存ダイアログが開く').toBe(true);
+    expect(r.commits).toEqual([{ start: 2, end: 2, text: '保存した。' }]);
+    expect(box(r.host)).toBeNull(); // 確定 = 行は閉じる(Tab と同じ)
+  });
+
+  it('Cmd+S(mac)でも同じ', () => {
+    const r = rig();
+    click(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
+    ta.value = 'かえた';
+    const ev = new KeyboardEvent('keydown', {
+      key: 's',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    ta.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
+    expect(r.commits).toHaveLength(1);
+  });
+});
+
 describe('RowSwap — 組めない本文', () => {
   it('分割が組めなければ `ok: false` を返して差し替えを開かない', () => {
     const host = document.createElement('div');

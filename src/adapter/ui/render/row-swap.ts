@@ -76,6 +76,14 @@ export interface RowSwapUpdate {
   inserted: Element[];
 }
 
+/**
+ * 描き直しの着弾後に開く予約(2026-08-08)。行数が変わる確定の直後は
+ * `body` / `starts` / `ends` が古い座標なので、そのまま開かずにここへ積む。
+ */
+type PendingOpen =
+  | { kind: 'line'; line: number; caret: 'start' | 'end' }
+  | { kind: 'append' };
+
 interface Active {
   /** 塊の添字(`view.blocks` の中)。⚠ 描き直しのたびに引き直す。 */
   blockIndex: number;
@@ -120,6 +128,19 @@ export class RowSwap {
    * ⚠ 時間で判定しない ── 「変わったから描き直しが来る」ことが確実な場合だけ立てる。
    */
   private awaitingUpdate = false;
+  /**
+   * 🔴 **行数が変わる確定の直後**(2026-08-08)。確定が行数を `delta` 動かしたのに、
+   * `this.body` / `starts` / `ends` は描き直しが着弾するまで**古い座標**のまま
+   * (行数が変わらない確定だけを楽観反映する ── `commitActive` の注記)。
+   * この窓で開く操作は、古い座標のまま開くと**閉じ際の確定が無関係な行を潰す**
+   * (S3 型のデータ破壊。着弾が先なら `closeQuietly` が守るが、確定が先なら守れない)
+   * ので、行番号を新座標へ写像して `pendingOpen` に**予約**し、着弾後に開く。
+   * ⚠ `update()` の「外から本文が変わったら閉じる」ガードは**緩めない** ──
+   * これは「ガードに当たる状況を内側から作らない」側の修理である。
+   */
+  private staleAfter: { end: number; delta: number } | null = null;
+  /** 予約(上記)。**開く操作が 1 つでも通ったら捨てる**(`open()` が消す)。 */
+  private pendingOpen: PendingOpen | null = null;
   private readonly onClick: (ev: Event) => void;
   private readonly onDown: (ev: Event) => void;
 
@@ -174,6 +195,8 @@ export class RowSwap {
       return { ok: true, inserted: [] };
     }
     this.awaitingUpdate = false;
+    // 描き直しが届いた = 座標は組み直される ── 古い座標の窓はここで閉じる
+    this.staleAfter = null;
     const blocks = splitTopLevelBlocks(html);
     const part = buildBlockPartition(blocks, ranges, body.split('\n').length, scanContainers(body));
     if (!part.ok) {
@@ -200,6 +223,8 @@ export class RowSwap {
       const r = applyBlocks(this.host, html, this.view, []);
       this.view = r.view;
       this.markOpenEnds();
+      // 🔴 予約(行数が変わる確定の直後の開き直し)は、分割を組み直した後に果たす
+      this.openPending();
       return { ok: true, inserted: r.inserted };
     }
     /**
@@ -380,13 +405,56 @@ export class RowSwap {
   }
 
   /**
-   * 活性化。**最小の刻印要素**(表の行 / 箇条書きの項目 / それ以外は塊)を狙う。
+   * 予約を果たす(描き直しの着弾後)。⚠ **先に読んでから消す** ── 中で呼ぶ
+   * `activateLine` / `appendRow` は `open()` 経由でもう一度消しに来る(無害)。
    */
-  activate(blockIndex: number, target: Node, clientX = 0, clientY = 0): boolean {
+  private openPending(): void {
+    const p = this.pendingOpen;
+    if (p === null) return;
+    this.pendingOpen = null;
+    if (p.kind === 'append') {
+      this.appendRow();
+      return;
+    }
+    const idx = this.blockIndexForLine(p.line);
+    // 予約した行の持ち主が消えた(確定で塊が合体した等)── それ以上は追わない
+    if (idx !== null) this.activateLine(idx, p.caret);
+  }
+
+  /** 添字の塊を、caret を端に置いて開く(矢印キーと予約の共通口)。 */
+  private activateLine(blockIndex: number, caretAt: 'start' | 'end'): boolean {
+    return this.activate(blockIndex, this.unitElement(blockIndex) ?? this.host, 0, 0, caretAt);
+  }
+
+  /**
+   * 活性化。**最小の刻印要素**(表の行 / 箇条書きの項目 / それ以外は塊)を狙う。
+   * @param caretAt 座標の無い開き方(矢印キー / 予約)の caret。`'end'` だけが
+   *   意味を持つ ── `'start'` は座標なしの `caretOffset` と同じ 0 に落ちる。
+   */
+  activate(
+    blockIndex: number,
+    target: Node,
+    clientX = 0,
+    clientY = 0,
+    caretAt?: 'start' | 'end',
+  ): boolean {
     if (this.active !== null && !this.commitActive()) return false;
     const blockStart = this.starts[blockIndex];
     const blockEnd = this.ends[blockIndex];
     if (blockStart === undefined || blockEnd === undefined || blockStart < 0) return false;
+    if (this.staleAfter !== null) {
+      /**
+       * 🔴 座標が古い窓(行数が変わる確定の直後)── **開かずに予約する**。
+       * 直す前は古い座標のまま開いていた: 着弾が先なら `closeQuietly` が閉じて
+       * 「外から本文が変わった」という**嘘の理由**が出るだけだが、確定が先なら
+       * **古い行番号の splice が無関係な行を潰す**。編集の後ろの塊は `delta` だけ
+       * ずれている(前の塊はずれない)ので、写像してから積む。
+       */
+      const line =
+        blockStart + (blockStart > this.staleAfter.end ? this.staleAfter.delta : 0);
+      this.pendingOpen = { kind: 'line', line, caret: caretAt ?? 'start' };
+      return true;
+    }
 
     const sub = this.resolveSubUnit(blockIndex, blockStart, blockEnd, target);
     const startLine = sub?.start ?? blockStart;
@@ -404,12 +472,10 @@ export class RowSwap {
      * 🔑 **列は差し替える前に測る**(2026-08-05 に外した)── `applyBlocks` を
      * 通した後の要素は DOM から外れていて、座標から caret が引けない。
      */
-    const caret = this.caretOffset(
-      sub?.element ?? this.unitElement(blockIndex),
-      source,
-      clientX,
-      clientY,
-    );
+    const caret =
+      caretAt === 'end'
+        ? source.length
+        : this.caretOffset(sub?.element ?? this.unitElement(blockIndex), source, clientX, clientY);
 
     const withSlot = [...this.view.blocks];
     withSlot[blockIndex] = SLOT_HTML;
@@ -435,6 +501,11 @@ export class RowSwap {
    */
   appendRow(): boolean {
     if (this.active !== null && !this.commitActive()) return false;
+    if (this.staleAfter !== null) {
+      // 🔴 座標が古い窓 ── 古い body で末尾を数えない(着弾後に開く。`activate` と同じ)
+      this.pendingOpen = { kind: 'append' };
+      return true;
+    }
     const lines = this.body.split('\n');
     const blank = this.body.trim() === '';
     const startLine = blank ? 0 : lines.length;
@@ -539,6 +610,8 @@ export class RowSwap {
     withSlot: readonly string[];
     caret: number;
   }): boolean {
+    // 実際に開けたなら予約は用済み(古い予約が後から焦点を奪わないように)
+    this.pendingOpen = null;
     const r = applyBlocks(this.host, o.withSlot.join(''), this.view, [o.blockIndex]);
     this.view = r.view;
     const slot = this.host.querySelector<HTMLElement>('[data-pkc-row-slot]');
@@ -684,6 +757,22 @@ export class RowSwap {
         this.commitActive();
         return;
       }
+      /**
+       * 🔴 **Ctrl/Cmd+S = 確定**(2026-08-08)。ここで受けないと**ブラウザの
+       * 保存ダイアログが開く** ── binder の門は `editor-body` / `editor-title`
+       * だけを見るので、行の入力欄には届かない。
+       * ⚠ 意味は「行の確定」(Tab と同じ)── 編集の面は続く。`COMMIT_EDIT` は
+       * 撃たない(それは編集の面ごと閉じる別の操作である)。
+       */
+      if ((ke.key === 's' || ke.key === 'S') && (ke.ctrlKey || ke.metaKey) && !ke.altKey) {
+        ev.preventDefault();
+        this.commitActive();
+        return;
+      }
+      if (ke.key === 'ArrowDown' || ke.key === 'ArrowUp') {
+        this.arrowMove(ke);
+        return;
+      }
       this.autoPair(ke);
     });
     /**
@@ -730,6 +819,54 @@ export class RowSwap {
     const block = open.find((o) => o.kind !== 'inline') ?? open[0];
     if (block === undefined) a.slot.removeAttribute('data-pkc-open-end');
     else a.slot.setAttribute('data-pkc-open-end', block.kind);
+  }
+
+  /**
+   * 🔴 **カーソルキーで隣の塊へ**(2026-08-08。user 裁定「カーソルキーで下に行く」)。
+   *
+   * **端の行に居るときだけ**働く ── 行の途中の ↑↓ は textarea の中のカーソル
+   * 移動のまま(奪わない)。選択中・修飾キー付きも奪わない(Shift+↓ は選択の拡張)。
+   * 確定してから隣の**編集できる塊**(導出物 = `starts < 0` は飛ばす)を開く:
+   * ↓ は次の塊の先頭へ、↑ は前の塊の末尾へ。末尾の塊で ↓ は末尾に書き足す
+   * (余白クリックと同じ意味論 = `appendRow`)。
+   * ⚠ 行数が変わる確定の座標ずれは `activate` / `appendRow` の予約が持つ ──
+   * ここに 2 本目の座標計算を書かない。
+   */
+  private arrowMove(ke: KeyboardEvent): void {
+    const a = this.active;
+    if (a === null) return;
+    if (ke.shiftKey || ke.ctrlKey || ke.metaKey || ke.altKey) return;
+    const ta = a.textarea;
+    if (ta.selectionStart !== ta.selectionEnd) return;
+    const down = ke.key === 'ArrowDown';
+    if (down) {
+      if (ta.value.includes('\n', ta.selectionEnd)) return; // 最終行に居ない
+    } else if (ta.value.slice(0, ta.selectionStart).includes('\n')) {
+      return; // 先頭行に居ない
+    }
+    let next: number | null = null;
+    if (down) {
+      for (let i = a.blockIndex + a.blockCount; i < this.starts.length; i += 1) {
+        if (this.starts[i]! >= 0) {
+          next = i;
+          break;
+        }
+      }
+    } else {
+      for (let i = Math.min(a.blockIndex, this.starts.length) - 1; i >= 0; i -= 1) {
+        if (this.starts[i]! >= 0) {
+          next = i;
+          break;
+        }
+      }
+    }
+    // 先頭より上には行けない ── 既定(その行の先頭へ動くだけ)に任せる
+    if (!down && next === null) return;
+    // 何も打っていない書き足し行(範囲が空)で ↓ ── 開き直しても同じ行なので何もしない
+    if (down && next === null && a.endLine < a.startLine && ta.value === a.source) return;
+    ke.preventDefault();
+    if (next === null) this.appendRow();
+    else this.activateLine(next, down ? 'start' : 'end');
   }
 
   /**
@@ -812,18 +949,21 @@ export class RowSwap {
     /**
      * 🔑 **行数が変わらない確定だけ**を自分で反映する。
      *
-     * ⚠ 行数が変わると、後続の塊の原文座標が全部ずれる ── その平行移動の算術は
-     *   **test で守れない**(行数が変わる確定の直後は、`open()` が
-     *   `slot === null` で false を返して**次の塊が開けない**という別の未修理の
-     *   defect が在り、その枝へ到達できない)。無防備な算術で user の原文を
-     *   書き換えるより、**保護側の `closeQuietly` に委ねる**ほうが安全である。
-     * ⚠ だから delta ≠ 0 では `this.body` を**進めない** ── 着弾で
-     *   `closeQuietly` が鳴り、理由を出して閉じる(データは壊れない)。
-     * 🔑 実際の編集はほとんど行数が変わらない(1 行の言い直し・語句の直し)ので、
-     *   ここを塞ぐだけで「打った文字が黙って消える」の大半が消える。
+     * ⚠ 行数が変わると、後続の塊の原文座標が全部ずれる ── その窓の間の
+     *   開く操作は `staleAfter` が予約に写像する(2026-08-08。かつてここに
+     *   在った「open() が slot === null で false を返して次の塊が開けない」の
+     *   記録は不正確だった ── 実際は**古い座標のまま開いて**、着弾の
+     *   `closeQuietly` に嘘の理由(「外から本文が変わった」)で閉じられていた。
+     *   着弾より先に確定されると古い行番号の splice が無関係な行を潰す)。
+     * ⚠ delta ≠ 0 では `this.body` を**進めない** ── 平行移動の算術で user の
+     *   原文を書き換えるより、着弾の組み直しに任せるほうが安全である。
+     * 🔑 実際の編集はほとんど行数が変わらない(1 行の言い直し・語句の直し)。
      */
     if (text.split('\n').length === end - start + 1) {
       this.body = spliceLines(this.body, start, end, text);
+    } else {
+      // 🔴 古い座標の窓が開いた ── 着弾(`update()`)まで、開く操作は予約になる
+      this.staleAfter = { end, delta: text.split('\n').length - (end - start + 1) };
     }
     // 描き直しが必ず来る ── その 1 件を受けるまで、余白のクリックで行を開かない
     this.awaitingUpdate = true;

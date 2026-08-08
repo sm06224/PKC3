@@ -13,7 +13,7 @@
  * 届いていない」実装が緑で通り、**保存すると書式が消える**。
  */
 import { stubStamps } from '../helpers/store-stamps';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -47,7 +47,10 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
   document.body.append(root);
   const d = new Dispatcher();
   const regions = buildShell(root);
-  const detail = new DetailRenderer(regions.detail);
+  // ⚠ onBodyChange は main.ts と同じ配線(live の確定を state へ写す)
+  const detail = new DetailRenderer(regions.detail, null, undefined, (body) =>
+    d.dispatch({ type: 'UPDATE_OPEN_BODY', body }),
+  );
   d.onState((s) => detail.render(s));
   bindActions(root, d);
   const persisted: EntryUpsert[] = [];
@@ -161,5 +164,85 @@ describe('書式パネル(P8 段⑥)', () => {
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
     await tick();
     expect(q('[data-pkc-region="format-bar"]')).toBeNull();
+  });
+});
+
+/**
+ * 🔴 **live の 1 面でも書式が効く**(2026-08-08)。直す前は書式パネルも
+ * Ctrl+B/I/K も `editor-body` を探して**無言 no-op** だった(flag `editor.live`
+ * の面には `row-source` しか無い)。
+ */
+describe('書式パネル ── live の 1 面(2026-08-08)', () => {
+  const setLive = (on: boolean): void => {
+    history.replaceState(null, '', on ? '/?pkc-flag=editor.live' : '/');
+  };
+  afterEach(() => setLive(false));
+
+  /** 編集に入り、段落の行を開いて row-source を返す。 */
+  async function openRow(
+    q: <T extends HTMLElement>(s: string) => T | null,
+    root: HTMLElement,
+    text: string,
+  ): Promise<HTMLTextAreaElement> {
+    q<HTMLElement>('[data-pkc-action="start-edit"]')!.click();
+    await tick(30); // 描画は follower(microtask)── 1 拍待つ
+    const live = root.querySelector('[data-pkc-region="editor-live"]')!;
+    const p = [...live.querySelectorAll('p')].find((e) => e.textContent === text)!;
+    p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    return root.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')!;
+  }
+
+  it('🔴 書式パネルが活性の行(row-source)に効き、確定で state まで届く', async () => {
+    setLive(true);
+    const { d, q, root } = setup([meta('a')], { a: '強調したい' });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    const ta = await openRow(q, root, '強調したい');
+    ta.setSelectionRange(0, 2);
+    q<HTMLElement>('[data-pkc-format="bold"]')!.click();
+    expect(ta.value, '書式が行の入力欄に届いていない(無言 no-op)').toBe('**強調**したい');
+    expect([ta.selectionStart, ta.selectionEnd]).toEqual([2, 4]);
+    // 確定すると本文(state)に入る ── ここが切れていると保存で書式が消える
+    ta.blur();
+    expect(d.getState().openBody?.body).toBe('**強調**したい');
+  });
+
+  it('🔴 Ctrl+B も row-source に効く(近道キーの無言 no-op を塞ぐ)', async () => {
+    setLive(true);
+    const { d, q, root } = setup([meta('a')], { a: '強調したい' });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    const ta = await openRow(q, root, '強調したい');
+    ta.setSelectionRange(0, 2);
+    const ev = new KeyboardEvent('keydown', {
+      key: 'b',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    ta.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
+    expect(ta.value).toBe('**強調**したい');
+  });
+
+  it('🔴 row-source の Ctrl+S は行の確定で、編集の面は閉じない(COMMIT_EDIT に化けない)', async () => {
+    setLive(true);
+    const { d, q, root, persisted } = setup([meta('a')], { a: 'もとの文。' });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    const ta = await openRow(q, root, 'もとの文。');
+    ta.value = '直した文。';
+    const ev = new KeyboardEvent('keydown', {
+      key: 's',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    ta.dispatchEvent(ev);
+    expect(ev.defaultPrevented, 'ブラウザの保存ダイアログが開く').toBe(true);
+    // 行は確定して state に入るが、**編集の面は続いている**
+    expect(d.getState().openBody?.body).toBe('直した文。');
+    expect(d.getState().phase).toBe('editing');
+    expect(persisted, 'COMMIT_EDIT に化けて保存まで走った').toHaveLength(0);
   });
 });

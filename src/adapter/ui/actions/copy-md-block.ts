@@ -69,6 +69,24 @@ export function extractMdBlockPlainText(inner: HTMLElement): string {
 /** 連打時に先行 timer が後発 flash を早期に消さないための timer 台帳。 */
 const flashTimers = new WeakMap<HTMLElement, ReturnType<typeof setTimeout>>();
 
+/**
+ * 押した結果を短く光らせる(コピー系のボタン共通の合図)。
+ * 2026-08-08 に読む面のコピー(`copy-source.ts`)と共用にした ── 合図の形を
+ * 2 つ作ると、user は「光る方だけ成功」と読む。
+ */
+export function flashCopied(target: HTMLElement): void {
+  target.setAttribute('data-pkc-flash', 'true');
+  const prev = flashTimers.get(target);
+  if (prev !== undefined) clearTimeout(prev);
+  flashTimers.set(
+    target,
+    setTimeout(() => {
+      target.removeAttribute('data-pkc-flash');
+      flashTimers.delete(target);
+    }, 700),
+  );
+}
+
 /** click handler 本体(binder の ACTIONS から呼ばれる)。 */
 export function handleCopyMdBlock(target: HTMLElement): void {
   const block = target.closest<HTMLElement>('.pkc-md-block');
@@ -78,17 +96,6 @@ export function handleCopyMdBlock(target: HTMLElement): void {
   const source = stripTableChromeForCopy(inner);
   const plain = extractMdBlockPlainText(source);
   void copyMarkdownAndHtml(plain, source.outerHTML).then((ok) => {
-    if (ok) {
-      target.setAttribute('data-pkc-flash', 'true');
-      const prev = flashTimers.get(target);
-      if (prev !== undefined) clearTimeout(prev);
-      flashTimers.set(
-        target,
-        setTimeout(() => {
-          target.removeAttribute('data-pkc-flash');
-          flashTimers.delete(target);
-        }, 700),
-      );
-    }
+    if (ok) flashCopied(target);
   });
 }

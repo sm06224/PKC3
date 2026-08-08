@@ -303,6 +303,32 @@ describe('ライブエディタ(1 面)の配線', () => {
     expect(ta.value).toBe('最初の段落。'); // 全文に化けていない
   });
 
+  it('🔴 「全文を編集」ボタンで全文が 1 つの入力欄になる(Ctrl+A の可視の導線)', async () => {
+    setLive(true);
+    const r = rig(DOC);
+    await settle();
+    const btn = r.root.querySelector<HTMLButtonElement>('[data-pkc-field="edit-all"]');
+    expect(btn, 'ボタンが無い(キーを知らない人に届かない)').not.toBeNull();
+    expect(btn!.disabled).toBe(false);
+    expect(btn!.textContent).toBe('全文を編集');
+    btn!.click();
+    const ta = r.root.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')!;
+    expect(ta.value).toBe(DOC);
+    // 書き換えて確定すると本文が丸ごと入れ替わる(Ctrl+A と同じ口)
+    ta.value = '# 作り直した';
+    ta.blur();
+    expect(r.bodies).toEqual(['# 作り直した']);
+  });
+
+  it('退避(行ごとに編集できない本文)では「全文を編集」は押せず、理由が読める', async () => {
+    setLive(true);
+    const r = rig([':::figure{id="あ い"}', '', '本文', '', ':::', '', 'あと', ''].join('\n'));
+    await settle();
+    const btn = r.root.querySelector<HTMLButtonElement>('[data-pkc-field="edit-all"]')!;
+    expect(btn.disabled, 'すでに原文全体の編集なのに押せる').toBe(true);
+    expect(btn.title).toContain('すでに原文全体');
+  });
+
   it('編集を抜けたら聴くのをやめる(外れた面が反応し続けない)', async () => {
     setLive(true);
     const r = rig(DOC);

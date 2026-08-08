@@ -21,6 +21,8 @@ import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
 import { resolveFilerScope } from '@features/relation/tree';
 import { parseLinkTarget } from '@features/entry-ref/link-target';
 import { handleCopyMdBlock } from './copy-md-block';
+import { finishCopy, selectedMarkdown } from './copy-source';
+import { copyMarkdownAndHtml, copyPlainText } from '@adapter/platform/clipboard';
 import { askConfirm, SUPPRESSED_MESSAGE } from '@adapter/platform/ask-confirm';
 
 type ActionHandler = (
@@ -210,6 +212,30 @@ function renameFromEditorInput(dispatcher: Dispatcher, root: HTMLElement): void 
 function editorBody(root: HTMLElement): HTMLTextAreaElement | null {
   return root.querySelector<HTMLTextAreaElement>(
     '[data-pkc-region="detail"] [data-pkc-field="editor-body"]',
+  );
+}
+
+/**
+ * 🔴 **書式の効く先**(2026-08-08)。2 列なら `editor-body`、live の 1 面なら
+ * **活性の行の入力欄**(`row-source`)── 直す前は live 面で書式パネルと
+ * Ctrl+B/I/K が `editor-body` を探して**無言 no-op** だった(押しても何も
+ * 起きず、理由もどこにも出ない)。
+ * ⚠ 2 つは同時には存在しない(live ↔ 2 列は排他。live の退避は `editor-body`)。
+ * ⚠ `writeBack` の `value` 直代入は行の中の Ctrl+Z を捨てる ── 行は Escape で
+ * 丸ごと戻せるので、2 列の editor と同じ理由で受け入れる。
+ */
+function formatTarget(root: HTMLElement): HTMLTextAreaElement | null {
+  return (
+    root.querySelector<HTMLTextAreaElement>(
+      '[data-pkc-region="detail"] [data-pkc-field="row-source"]',
+    ) ?? editorBody(root)
+  );
+}
+
+/** 読む面の描画済み本文(コピーの書式付き / 選択範囲が読む)。 */
+function viewBodyHost(root: HTMLElement): HTMLElement | null {
+  return root.querySelector<HTMLElement>(
+    '[data-pkc-region="detail"] [data-pkc-field="detail-body"]',
   );
 }
 
@@ -484,12 +510,51 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'copy-md-block': (_dispatcher, target) => handleCopyMdBlock(target),
   /**
+   * 🔴 **読む面のコピー**(2026-08-08。user 裁定「markdown のテキストとしての
+   * コピーと HTML 書式ありのコピーの両方」)。押しても画面が変わらない操作なので、
+   * 渡ったらボタンが光り(`copy-md-block` と同じ合図)、渡らなければ理由が出る。
+   * ⚠ 本文待ちの間は renderer 側が disabled にしている ── ここの早期 return は
+   * その裏書き(押せない物は押せない)であって、無言の断りの口ではない。
+   */
+  'copy-note-md': (dispatcher, target) => {
+    const body = dispatcher.getState().openBody?.body;
+    if (body === undefined) return;
+    finishCopy(dispatcher, target, copyPlainText(body));
+  },
+  'copy-note-rich': (dispatcher, target, _services, root) => {
+    const body = dispatcher.getState().openBody?.body;
+    const host = viewBodyHost(root);
+    if (body === undefined || host === null) return;
+    // plain 側は原文(markdown)── 貼り付け先が editor なら原文、rich なら描画
+    finishCopy(dispatcher, target, copyMarkdownAndHtml(body, host.innerHTML));
+  },
+  /**
+   * 選択範囲を Markdown の原文でコピーする。逆引きの規則は `copy-source.ts` の
+   * 1 本(活性の判定と同じ端点の規則)。
+   * ⚠ 解決できない選択は**理由を出す**(活性が selectionchange と競り合って
+   * 押せてしまう瞬間があるので、ここでも無言にしない)。
+   */
+  'copy-selection-md': (dispatcher, target, _services, root) => {
+    const body = dispatcher.getState().openBody?.body;
+    const host = viewBodyHost(root);
+    const text = body !== undefined && host !== null ? selectedMarkdown(host, body) : null;
+    if (text === null) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '本文の中を選択してからコピーしてください',
+      });
+      return;
+    }
+    finishCopy(dispatcher, target, copyPlainText(text));
+  },
+  /**
    * 書式パネル(P8 段⑥)。⚠ **規則は `applyFormat` が持つ** ── ここは
    * 「選択を読む → 渡す → 書き戻す」だけ。op ごとの知識をここに漏らさない。
    */
   'format-text': (_dispatcher, target, _services, root) => {
     const op = target.getAttribute('data-pkc-format') as FormatOp | null;
-    const ta = editorBody(root);
+    // ⚠ live の 1 面では活性の行(`row-source`)に効く(`formatTarget` の注記)
+    const ta = formatTarget(root);
     if (!op || !ta) return;
     writeBack(ta, applyFormat({ text: ta.value, start: ta.selectionStart, end: ta.selectionEnd }, op));
   },
@@ -1009,6 +1074,30 @@ export function bindActions(
         ke.preventDefault();
         run('append-entry', ke.target as HTMLElement);
       }
+      return;
+    }
+    /**
+     * 🔴 **live 面の行の入力欄にも書式の近道(Ctrl+B/I/K)を効かせる**(2026-08-08)。
+     * 直す前は下の門(editor-body / editor-title)で弾かれて**無言 no-op** だった。
+     * ⚠ ここで受けるのは FORMAT_KEYS **だけ** ── Ctrl+S / Esc は行の側
+     * (`row-swap.ts`)が「行の確定 / 行の取り消し」として持つ。ここで
+     * `COMMIT_EDIT` / `CANCEL_EDIT` を撃つと**編集の面ごと閉じてしまう**(別の操作)。
+     */
+    if (
+      field === 'row-source' &&
+      !ke.altKey &&
+      (ke.ctrlKey || ke.metaKey) &&
+      FORMAT_KEYS[ke.key.toLowerCase()] !== undefined
+    ) {
+      ke.preventDefault();
+      const ta = ke.target as HTMLTextAreaElement;
+      writeBack(
+        ta,
+        applyFormat(
+          { text: ta.value, start: ta.selectionStart, end: ta.selectionEnd },
+          FORMAT_KEYS[ke.key.toLowerCase()]!,
+        ),
+      );
       return;
     }
     if (field !== 'editor-body' && field !== 'editor-title') return;

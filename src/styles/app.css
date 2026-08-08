@@ -1105,6 +1105,13 @@ select:focus-visible {
   color: var(--accent-dim-fg);
   border-color: var(--accent);
 }
+/* 🔴 読む面のコピー(2026-08-08)も同じ合図で光る ── 合図の形を 2 つ作らない。
+ * こちらは常時可視のボタンなので opacity は触らない(色だけが「渡った」の情報) */
+[data-pkc-field='detail-toolbar'] [data-pkc-flash] {
+  background: var(--accent-dim);
+  color: var(--accent-dim-fg);
+  border-color: var(--accent);
+}
 .pkc-md-rendered .pkc-md-block:hover .pkc-render-toggle,
 .pkc-md-rendered .pkc-md-block:hover .pkc-md-copy-btn,
 .pkc-md-rendered .pkc-md-block:focus-within .pkc-render-toggle,
