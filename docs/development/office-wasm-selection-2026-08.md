@@ -377,6 +377,56 @@ wasm は `--with-fonts` が既定 ON なので、これで `ooo_fonts` 経由で
 4. ⚠ 上流(TDF の Jonathan Clark / Michael Weghorn ら)と衝突しないよう、着手前に gerrit を
    見る ── **本セッションからは `gerrit.libreoffice.org` に到達できない**
 
+## 3.6 🔴 実際に建てた記録(2026-08-09)── Qt6 側は**通った**。詰まりはネットワーク
+
+**やったこと**(この開発コンテナ。4 コア / 15GB RAM / 空き 28GB):
+
+| 段 | 結果 |
+|---|---|
+| emsdk **4.0.10** 導入 | ✅ `emcc 4.0.10` |
+| qtbase **6.11** 取得 | ✅ 実物のツリーに `qwasminputcontext.cpp` / `.h` が在ることを確認 |
+| Qt6 **host** ビルド | ✅ `moc` / `Qt6CoreTools` / `Qt6GuiTools` / `Qt6WidgetsTools` |
+| Qt **6.11.3** **wasm** ビルド(`-feature-thread`) | ✅ `libqwasm.a` + `wasm_shell.html` |
+| LibreOffice `configure` が Qt6 を受理 | ✅ `ENABLE_QT6=TRUE` / `ENABLE_QT5=` / `VCL_PLUGIN_INFO= qt6` |
+| `make` | ❌ **外部 tarball を取れない** |
+
+🔑 **「distro-config も CI も無い experimental な経路」が生きていることを、外から確認した。**
+
+### 詰まった場所 ── コードではなく egress ポリシー
+
+```
+https://dev-www.libreoffice.org/src/libabw-0.1.4.tar.xz
+Proxy tunneling failed: Forbidden
+```
+LibreOffice は外部依存 tarball 約 100 件をこのホストから取る。**このコンテナからは到達不可**
+(実測: `curl` が 000、プロキシは CONNECT に 403)。ディスクでも CPU でもメモリでもない。
+→ **ビルドは CI へ出す**。手順は `.github/workflows/office-wasm-build.yml`(`workflow_dispatch` のみ。
+⚠ PR gate には載せない)。
+
+### 手順に必ず要る 3 行(実際に踏んだ罠)
+
+1. 🔴 **`moc` / `rcc` / `uic` は host の道具**で cross build の install に入らない。
+   LibreOffice の configure は `$QT6DIR/libexec` と `$QT6DIR/bin` しか見ない
+   (`configure.ac:14354-14357`)ので、**host から繋がないと落ちる**
+2. **host を `-no-gui` で建ててはいけない** ── wasm 側の Gui/Widgets が host の
+   `Qt6GuiTools` / `Qt6WidgetsTools` を参照する
+3. **`-xcb` を強制しない** ── xcb の dev が無いと feature condition 違反で configure が落ちる。
+   host は道具を配るだけなので画面は要らない
+   (ほかに Perl の `Archive::Zip`、`flex` / `gperf` / `nasm` / `xsltproc` が不足していた)
+
+### 机上の予測が実測で裏付けられた / 覆された点
+
+- ✅ **emsdk の版ズレは関門ではない** ── Qt 6.11 推奨 4.0.7 に対し 4.0.10 で configure が通り、
+  出たのは `WARNING: Using Emscripten version 4.0.10 with this Qt` **1 行だけ**
+- ❌ **「この箱の制約はディスクと RAM」という見立ては外れた** ── 実際に止めたのは**ネットワーク**。
+  ディスクは 23GB 残っていた
+
+### 残る最大の未知
+
+**リンク時のメモリ**(公式が最大 64GB)。GitHub の標準 runner は 16GB なので、
+落ちたら ① README の回避策(`-s WASM_BIGINT=1` / `ASSERTIONS=1` / `-g3` で WASM の
+書き直しを避ける)② larger runner、の順。**ここはまだ 1 度も走らせていない。**
+
 ## 4. 軽量閲覧レーン(本命の保険 / 併走候補)
 
 docx = docx-preview、xlsx = SheetJS(+UI が要るなら Univer)、pptx = pptx-viewer-core、
