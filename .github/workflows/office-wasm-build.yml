@@ -121,6 +121,38 @@ jobs:
       - name: LibreOffice を取る
         run: git clone --depth 1 https://github.com/LibreOffice/core.git ~/lo-core
 
+      # 🔴 **上流 Qt6 経路の取りこぼしを当てる**(2026-08-09、run 31307638176 で判明)。
+      #
+      # 症状: 2h40m かけて全部コンパイルしたあと、**最後の soffice.js のリンクで**
+      #   `wasm-ld: undefined symbol: FT_Outline_Transform`(ほか FT_* 多数、
+      #   すべて `libcairo-lo.a(cairo-ft-font.c.o)` 由来)で落ちる。
+      #
+      # 原因: `vcl/Library_vcl.mk` が fontconfig/freetype を静的リンクするのは
+      #   **`WNT-TRUE` のときだけ**。Emscripten では Qt が持ち込む前提になっており、
+      #   Qt5 のリンク行には `-lQt5FontDatabaseSupport` が在るが、
+      #   **Qt6 のリンク行(configure.ac:14313)にはフォント系が 1 つも無い**。
+      #
+      # 🔑 直し方は 2 つあるが、**LO 自身の freetype を使う**ほうを採る ──
+      #   cairo は meson ビルド時に **LO の freetype instdir** を指して構成される
+      #   (`external/cairo/ExternalProject_cairo.mk`)ので、Qt 同梱の別版を混ぜると
+      #   同じ symbol が 2 つになる。⚠ この判断が誤りなら、次は
+      #   `-lQt6BundledFreetype` を QT6_LIBS に足す側を試す。
+      - name: 上流 Qt6 経路の取りこぼしを当てる
+        run: |
+          set -eux
+          cd ~/lo-core
+          python3 - <<'PY'
+          p = 'vcl/Library_vcl.mk'
+          s = open(p, encoding='utf-8').read()
+          a = '$(if $(filter WNT-TRUE,$(OS)-$(USE_HEADLESS_CODE)), \\'
+          # ⚠ **当たったことを確かめる**(空振りを合格と読まない)
+          assert s.count(a) == 1, f'anchor count={s.count(a)}'
+          b = '$(if $(filter WNT-TRUE EMSCRIPTEN-TRUE,$(OS)-$(USE_HEADLESS_CODE)), \\'
+          open(p, 'w', encoding='utf-8').write(s.replace(a, b, 1))
+          print('patched')
+          PY
+          grep -q 'EMSCRIPTEN-TRUE' vcl/Library_vcl.mk
+
       # ⚠ 上流の `LibreOfficeWASM32.conf` は `--enable-qt5` を含む。そこへ `--enable-qt6` を
       #    足すだけだと VCL プラグインが 2 個になり、`configure.ac:12691` の
       #    「動的読込が無効なら GUI 付きはプラグイン 1 個」で落ちる。**自前の config を持つ。**
