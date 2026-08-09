@@ -195,6 +195,52 @@ jobs:
       #   `wasm-ld: undefined symbol: FT_Outline_Transform`(ほか FT_* 多数、
       #   すべて `libcairo-lo.a(cairo-ft-font.c.o)` 由来)で落ちる。
       #
+      # 原因: `vclplug_qt6` は headless のとき **cairo を externals に取る**が、
+      #   **cairo が要求する freetype を取っていない**。Qt5 のリンク行には
+      #   `-lQt5FontDatabaseSupport` が在って Qt 側の freetype で解決されるが、
+      #   **Qt6 のリンク行(configure.ac:14313)にはフォント系が 1 つも無い**。
+      #
+      # 🔑 **LO 自身の freetype を使う** ── cairo は meson ビルド時に LO の
+      #   freetype instdir を指して構成される(`external/cairo/ExternalProject_cairo.mk`)
+      #   ので、Qt 同梱の別版を混ぜない。`FREETYPE_LIBS` は
+      #   `-L…/freetype/instdir/lib -lfreetype` で**中身が入っていることを確認済み**。
+      #
+      # ⚠ **`use_static_libraries` で足してはいけない**(最初そう書いて誤りだった)──
+      #   `StaticLibrary_freetype` が建つのは `COM=MSC` のときだけで、Emscripten では
+      #   **ExternalProject**。だから上流の `vcl/Library_vcl.mk` の条件が `WNT-TRUE`
+      #   なのは理由がある。正しい口は **externals**(`RepositoryExternal.mk` の
+      #   `gb_LinkTarget__use_freetype` が `FREETYPE_LIBS` を足す)で、
+      #   `solenv/gbuild/static.mk` が**実行ファイルに externals を当て直す**ので届く。
+      - name: 上流 Qt6 経路の取りこぼしを当てる
+        run: |
+          set -eux
+          cd ~/lo-core
+          python3 - <<'PY'
+          p = 'vcl/Library_vclplug_qt6.mk'
+          s = open(p, encoding='utf-8').read()
+          a = "    $(if $(filter TRUE,$(ENABLE_CAIRO_CANVAS) $(USE_HEADLESS_CODE)),cairo) \\"
+          # ⚠ **当たったことを確かめる**(空振りを合格と読まない)
+          assert s.count(a) == 1, f'anchor count={s.count(a)}'
+          b = "    $(if $(filter TRUE,$(ENABLE_CAIRO_CANVAS) $(USE_HEADLESS_CODE)),cairo freetype) \\"
+          open(p, 'w', encoding='utf-8').write(s.replace(a, b, 1))
+          print('patched')
+          PY
+          grep -q 'cairo freetype' vcl/Library_vclplug_qt6.mk
+
+      # ⚠ 復元は **clone のあと** ── `git clone` は空でないディレクトリを嫌う
+      - name: 外部 tarball を復元
+        id: c_tar
+        uses: actions/cache/restore@v4
+        with:
+          path: /home/runner/lo-core/external/tarballs
+          key: lo-tarballs-v1
+
+      # 🔴 **上流 Qt6 経路の取りこぼしを当てる**(2026-08-09、run 31307638176 で判明)。
+      #
+      # 症状: 2h40m かけて全部コンパイルしたあと、**最後の soffice.js のリンクで**
+      #   `wasm-ld: undefined symbol: FT_Outline_Transform`(ほか FT_* 多数、
+      #   すべて `libcairo-lo.a(cairo-ft-font.c.o)` 由来)で落ちる。
+      #
       # 原因: `vcl/Library_vcl.mk` が fontconfig/freetype を静的リンクするのは
       #   **`WNT-TRUE` のときだけ**。Emscripten では Qt が持ち込む前提になっており、
       #   Qt5 のリンク行には `-lQt5FontDatabaseSupport` が在るが、
