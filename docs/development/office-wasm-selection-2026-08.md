@@ -354,10 +354,37 @@ LO は Qt を CMake 経由で consume しないので、Qt 側の版一致 `FATA
 `Module_more_fonts.mk` / `Repository.mk` の `gb_Helper_optional(MORE_FONTS, ...)`。
 wasm は `--with-fonts` が既定 ON なので、これで `ooo_fonts` 経由で `soffice.data` に入る。
 
-⚠ **`soffice.data` は eager preload** ── Noto Sans CJK JP のフル OTF は 1 ウェイト約 16MB。
-**サブセット必須**(可変フォント or 常用漢字サブセット)。
-⚠ フォント置換表(`VCL.xcu`)の ＭＳ 明朝 / ＭＳ ゴシックの置換先も同梱に無いので、
-`fc_local.conf` に別名を足すか置換表を触る必要がある(§3.1 の表を参照)。
+⚠ **`soffice.data` は eager preload**(= 常駐)。配る量は問わない(不可侵指示)が、
+**常駐メモリは問う**ので、ここだけはサイズが判断材料になる。
+
+#### 🔴 実地調査(2026-08-09、LibreOffice core を実物で確認)── 穴は **4 つ**あった
+
+「フォントを 1 つ足す」では済まない。**数えたら 4 つ**で、どれも独立に効く:
+
+| # | 穴 | 実測 |
+|---|---|---|
+| 1 | **同梱フォントに CJK が 1 つも無い** | `external/more_fonts/*.mk` を CJK / han / jp で grep → **0 件** |
+| 2 | **`VCL.xcu` の置換先が全部「同梱に無いフォント」** | `msgothic` → `mspgothic;hiraginokakugothicpronw3;…;ipagothic;gothic;arialunicodems;lucidaunicode`<br>`msmincho` → `ipamincho;hiraginominchopronw3;…;heiseimin;arialunicodems;lucidaunicode`<br>⚠ **Noto は 1 つも鎖に入っていない** |
+| 3 | 🔴 **游ゴシック / 游明朝(`yugothic` / `yumincho`)は登録すら無い** | `VCL.xcu` に node が**存在しない**。⚠ これは **Office 2016 以降の日本語既定書体**であり、実際の `.docx` / `.pptx` が最も多く指定してくる名前である |
+| 4 | **fontconfig の別名に和文が 0 件** | `external/more_fonts/fc_local.snippet` / `postprocess/fontconfig/fc_local.snippet` は Arial→Liberation / Calibri→Carlito / Cambria→Caladea など**ラテンのみ**。gothic / mincho / CJK は **grep 0 件** |
+
+🔑 **user が挙げた「ppt の表示レイアウトが崩れる」に直結する。** 字が出るかどうか(#1)と、
+**指定された書体に何が当たるか**(#2〜#4)は別問題で、後者を放置すると
+「文字は出るが行長・行数が原文と違う」= レイアウト崩れになる。
+
+⚠ **「同梱フォントを足したから日本語 OK」と言わない。** 主張してよいのは
+**実ファイルを開いて、指定書体に何が当たったかを見たあと**である
+(検証の規律「下流の結果だけを見る test は別経路に救われる」と同型)。
+
+#### 選定の論点(**未裁定** ── 実測を添えて user に出す)
+
+- **どの和文フォントを焼くか**: 日本語のみ(Noto Sans JP 系)/ 汎 CJK(Noto Sans CJK JP)。
+  ⚠ 「日本語は絶対」(user 指示 2026-08-09)は満たされるが、**中文・韓文を落とすかどうか**は
+  user の動線の話なので勝手に決めない(不可侵「記法を減らすことは動線を減らすこと」と同じ向き)
+- **明朝を入れるか**(`ＭＳ 明朝` 指定文書のため)── ゴシックだけだと #2 の鎖が
+  明朝に当たらず、見出しと本文の対比が消える
+- **置換表を触るか、fontconfig の別名で寄せるか** ── #2/#3 は `VCL.xcu`、#4 は
+  `fc_local.snippet`。⚠ **両方に同じ判定を書かない**(規律「判定を増やさない。1 か所へ寄せる」)
 
 ### 3.5.4 「動く」証拠
 
