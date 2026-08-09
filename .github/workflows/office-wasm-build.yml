@@ -32,6 +32,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 350
+    # 🔴 **step ごとに別シェル**なので、configure step で export しても `make` へ届かない。
+    #    `make` は config_host.mk が古いと **autogen を再実行する**ので、そこで QT6DIR が
+    #    無いと「Qmake not found」で落ちる(2026-08-09 に実際に踏んだ)。job 単位で渡す。
+    #    ⚠ `~` は YAML の env では展開されない。絶対パスで書く
+    env:
+      QT6DIR: /home/runner/qt-wasm/install
+      LC_ALL: C.UTF-8
     steps:
       # runner は / の空きが 14GB 前後しかない。LibreOffice には全く足りないので先に空ける
       - name: ディスクを空ける
@@ -129,22 +136,33 @@ jobs:
           --disable-scripting
           --with-package-format=emscripten
           CONF
-          export LC_ALL=C.UTF-8
           . ~/emsdk/emsdk_env.sh
-          export QT6DIR=~/qt-wasm/install
           ./autogen.sh --with-distro=PKC3WASM-Qt6
           # 空振り防止 ── 本当に qt6 単独で構成されたか
           grep -q '^export ENABLE_QT6=TRUE' config_host.mk
           grep -q '^export ENABLE_QT5=$' config_host.mk
           grep -q '^export VCL_PLUGIN_INFO= qt6$' config_host.mk
 
+      # 🔴 **`| tail` を噛ませない**(2026-08-09 に踏んだ)。bash のパイプの終了コードは
+      #    最後のコマンドのものなので、`make | tail` は **make が落ちても step が緑**になる。
+      #    CLAUDE.md の「検品が ✗ を出したのに job は green」と同じ型。
+      #    `pipefail` を立てたうえで、そもそもパイプしない。
       - name: make
         run: |
-          set -eux
+          set -euxo pipefail
           cd ~/lo-core
-          export LC_ALL=C.UTF-8
           . ~/emsdk/emsdk_env.sh
-          /usr/bin/time -v make -j"$(nproc)" 2>&1 | tail -400
+          # `-v` の最大常駐(Maximum resident set size)がリンクのメモリ実測値になる
+          /usr/bin/time -v make -j"$(nproc)"
+
+      # ⚠ **生成物が在ることを step として主張する** ── 無ければここで赤にする
+      #    (artifact の `if-no-files-found: warn` は黙って通してしまう)
+      - name: 生成物が在ることを確かめる
+        run: |
+          set -eux
+          test -f ~/lo-core/instdir/program/soffice.wasm
+          test -f ~/lo-core/instdir/program/soffice.js
+          ls -la ~/lo-core/instdir/program/soffice.*
 
       - name: 生成物
         if: always()
@@ -163,4 +181,4 @@ jobs:
             ~/lo-core/instdir/program/soffice.js
             ~/lo-core/instdir/program/soffice.data
             ~/lo-core/config.log
-          if-no-files-found: warn
+          if-no-files-found: error
