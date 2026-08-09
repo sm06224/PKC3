@@ -277,40 +277,24 @@ fixture にして、軽量レーン(pptx-viewer-core + emf-converter)に通し�
 - **閲覧を先に出す**(編集は後)
 - **自前ビルドしてよい**(「可能なら」= 実現性は測って判断する)
 
-### 3.4.1 🔑 閲覧だけなら **Qt を積む理由が無い**
+### 3.4.1 ⚠ **一度読み違えた**(2026-08-09)── ページ画像に焼く案は user が却下
 
-§3.1 で LibreOffice を落とした理由は **Qt 5.15.2 に IME の入口が無い**ことだった。
-だが **IME が要るのは編集だけ**である。閲覧しかしないなら Qt(と 250MB の Qt 資産、
-COOP/COEP、SharedArrayBuffer)を**丸ごと外せる**可能性がある ── LibreOffice は
-GUI 無しの VCL backend(headless / svp)で**ビットマップに描ける**からである。
-⚠ **wasm ビルドで headless backend が成立するか**は本 doc 時点で未確認(調査中)。
-ここが成立するかどうかが、この方針の成否そのもの。
+私は「閲覧だけなら Qt を外し、ページを PNG に焼いて出す」と提案した。**user 却下**:
 
-### 3.4.2 出し方は「描いたら焼く」に乗せる(新しい器を作らない)
+> **その導線はダメです / PDF を閲覧したいわけじゃない**
 
-**実測(2026-08-09、私が計測)**:
+🔑 **ページを画像に焼いた時点で、それは PDF ビューアと同じもの**である ── 文字が選べず、
+検索できず、**編集へ繋がらない**。「図は描いたら焼く」は**図**の規律であって、
+**文書に適用してはいけない**(図は絵だが、文書は文字である)。
+⚠ 閲覧のためだけに Qt を外すと、**編集へ繋がる道ごと捨てる**ことになる。
 
-| | フル chromium | `chromium_headless_shell`(CI の既定) |
-|---|---|---|
-| `navigator.pdfViewerEnabled` | **true** | **false** |
-| PDF プラグイン | 5 件 | **0 件** |
+### 3.4.2 出すもの ── **本物の LibreOffice の面**を、まず閲覧モードで
 
-PKC3 の添付プレビューは PDF を `<object type="application/pdf">` で出しており
-(`detail.ts`)、**実 user では動くが CI では描けない**。
-⚠ **いまの PDF 添付プレビューは、実ブラウザ検証を 1 度も受けていない**(受け口が無いので
-smoke を書いても意味を成さない)── 既存の穴として記録する。
-
-🔑 だから **Office の閲覧を PDF に頼らせない**。**mermaid と同じ経路**に乗せる:
-
-- 画面に置くのは **ページごとの PNG `<img>`**(合成だけで済み、スクロールが GPU に乗る)
-- bytes は **IDB Blob**(heap に載せない)、ObjectURL は**表示の寿命終端で revoke**
-- キャッシュ鍵に **原文(ファイルの hash)+ 幅 + devicePixelRatio** を含める
-- 変換は**計算のワーカー** → `worker-lease.ts`(遅延起動 / ジョブのバッファ / アイドル kill)
-- **ベクタ(PDF)は書き出し・印刷のときだけ** ── 「SVG は書き出しのときだけ」と同じ分け方
-
-これは user 指示 2026-08-03(不可侵)の 3 本 ──「図は描いたら焼く」「重い処理はワーカーへ・
-使い捨てに」「ゼロコピーと寿命終端での破棄」── に**そのまま乗る**。新しい表示器も
-新しい規律も要らない。⚠ 「Office 用の別モードを作らない」(§5)とも整合。
+- **Qt6 で建てる**: Qt5 では日本語が打てない。編集を後から乗せるなら最初から Qt6 で建てる
+  = user 指示の「**先取り**」
+- **閲覧を先に出す**: 閲覧なら IME が要らないので、**ビルドさえ通れば出せる**
+- **自前ビルドの見返り**: 配布されている LOWA は Qt5 で、**CJK フォントも入っていない**。
+  自分で焼けば**両方とも建てた時点で解決する**
 
 ### 3.4.3 自前ビルドの実現性(この箱の実測)
 
@@ -324,6 +308,74 @@ LibreOffice の wasm ビルドは数十 GB 規模なので、**この箱で完�
 現実的な線は **CI(大きめの runner)で焼いて生成物だけ持ち込む**形。
 ⚠ ただし PR gate は「速い lane に限定」(プロセス指示)なので、**engine のビルドは
 PR gate に載せない** ── nightly / 手動 dispatch / 別リポジトリの release artifact にする。
+
+## 3.5 🔴 Qt6 + WASM の自前ビルド ── 手順と関門(2026-08-09)
+
+**結論: 道は既に上流に通っている。ゼロから作るのではなく、experimental な経路を叩き起こす。**
+
+### 3.5.1 一次ソースで確認した事実(私が実物を読んだ)
+
+| 事実 | 場所 |
+|---|---|
+| **Qt6 × Emscripten の分岐が upstream master に在る** | `configure.ac:14293-14297`(`libqwasm.a` / `wasm_shell.html` を探して無ければ `AC_MSG_ERROR`)、`:14313`(`-lQt6BundledPcre2 -lQt6BundledZLIB -lqwasm -sGL_ENABLE_GET_PROC_ADDRESS`) |
+| **呼び方の制約** | `configure.ac:12691` ── `DISABLE_DYNLOADING=TRUE`(wasm は常にそう)かつ GUI 付きなら **VCL プラグインはちょうど 1 個**。`--enable-qt6` を足すだけでは `R="qt5 qt6"` で落ちる |
+| 🔴 **リンクに最大 64GB RAM** | `static/README.wasm.md:87`「This way the LO WASM possibly needs 64GB RAM」。同じ場所に回避策(`-s WASM_BIGINT=1` / `ASSERTIONS=1` / `-g3` で WASM の書き直しを避ける)も書いてある |
+| **Qt6 wasm は IME を持つ** | `qtbase@6.5/6.8/6.10/6.11` に `qwasminputcontext.cpp` が在る(5.15 は **404**) |
+| CJK フォントは **1 つも無い** | `external/more_fonts/Module_more_fonts.mk`(全 27 種を確認) |
+
+**正しい configure の呼び方**:
+```
+--with-distro=LibreOfficeWASM32 --disable-qt5 --enable-qt6
+(QT6DIR は wasm 版 Qt6 の prefix)
+```
+
+### 3.5.2 関門(重い順)
+
+1. 🔴 **リンク時のメモリ** ── 公式が最大 64GB と言っている。**この箱は 15GB**、GitHub の
+   標準 runner も 16GB。→ **大きい runner か自前マシンが要る**。README の回避策を
+   先に試す価値はある
+2. **Qt6 は host build が追加で要る**(Qt5 には無かった要件)── 「同じ版の Qt をホスト用に
+   1 回、wasm 用にもう 1 回」。ビルド時間が単純に増える
+3. **distro-config も CI も無い** ── 上流が壊れても誰も気づかない経路。**自分で config を
+   持ち、自分で CI を張る**必要がある(⚠ PR gate には載せない ── プロセス指示)
+4. **取りこぼしを自分で直す** ── `EMSCRIPTEN_INTEL_GCC.mk` の `gb_EMSCRIPTEN_QTDEFS` が
+   `ifeq ($(ENABLE_QT5),TRUE)` になっており **Qt6 に適用されない**
+5. **thread build → COOP/COEP 必須** ── LO 側が `-pthread -s USE_PTHREADS=1` を要求する
+   (`EMSCRIPTEN_INTEL_GCC.mk`)ので Qt も `-feature-thread`。→ §2.1 で**成立を実機確認済み**
+
+⚠ **emsdk の食い違いは関門ではない**: LOWA は 4.0.10、Qt 6.10/6.11 の推奨は 4.0.7 で
+**同じ major.minor**。しかも Qt 公式が「ソースからビルドするなら表の値は*最低*版」と明記。
+LO は Qt を CMake 経由で consume しないので、Qt 側の版一致 `FATAL_ERROR` も発火しない。
+
+### 3.5.3 CJK フォントを焼き込む(自前ビルドの本当の見返り)
+
+`external/more_fonts` に CJK は無いので、**5 か所**を足す(`fonts_noto_sans` が雛形):
+`download.lst` / `UnpackedTarball_noto_cjk_jp.mk`(新規)/ `ExternalPackage_noto_cjk_jp.mk`(新規)/
+`Module_more_fonts.mk` / `Repository.mk` の `gb_Helper_optional(MORE_FONTS, ...)`。
+wasm は `--with-fonts` が既定 ON なので、これで `ooo_fonts` 経由で `soffice.data` に入る。
+
+⚠ **`soffice.data` は eager preload** ── Noto Sans CJK JP のフル OTF は 1 ウェイト約 16MB。
+**サブセット必須**(可変フォント or 常用漢字サブセット)。
+⚠ フォント置換表(`VCL.xcu`)の ＭＳ 明朝 / ＭＳ ゴシックの置換先も同梱に無いので、
+`fc_local.conf` に別名を足すか置換表を触る必要がある(§3.1 の表を参照)。
+
+### 3.5.4 「動く」証拠
+
+`QTBUG-136687`「Wasm LibreOffice no longer gets keyboard input events」── **Qt6 dev に対して
+ビルドされた LibreOffice wasm** の不具合報告で、再現手順が「スタートセンターで Writer を
+クリックして x を打つ」。Qt 6.9.1 / 6.10.0 で Fixed。
+⚠ 二次情報(`bugreports.qt.io` は egress ブロックで原文未読)。**この 1 点は自分の目で
+確認できていない**。
+
+### 3.5.5 次の一手
+
+1. **この箱で toolchain だけ先に通す** ── emsdk 4.0.10 + Qt 6.11 の host build と wasm build。
+   Qt だけなら LO より桁違いに軽いので、ここで**半分の不確実性が消える**
+2. **LibreOffice のリンクは大きいマシンへ** ── 64GB の壁。README の回避策を当てて
+   どこまで下がるかを測ってから機材を決める
+3. **CJK フォントのサブセットを先に作る**(ビルドと独立に進む)
+4. ⚠ 上流(TDF の Jonathan Clark / Michael Weghorn ら)と衝突しないよう、着手前に gerrit を
+   見る ── **本セッションからは `gerrit.libreoffice.org` に到達できない**
 
 ## 4. 軽量閲覧レーン(本命の保険 / 併走候補)
 
