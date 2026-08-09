@@ -48,6 +48,10 @@ jobs:
       CCACHE_MAXSIZE: 5G
       CCACHE_COMPRESS: '1'
     steps:
+      # ⚠ この workflow は外部リポジトリしか触らないので checkout が無かったが、
+      #    パッチを**実ファイル**に出した以上、PKC3 側も取る必要がある
+      - uses: actions/checkout@v4
+
       # runner は / の空きが 14GB 前後しかない。LibreOffice には全く足りないので先に空ける
       - name: ディスクを空ける
         run: |
@@ -180,6 +184,23 @@ jobs:
 
       - name: LibreOffice を取る
         run: git clone --depth 1 https://github.com/LibreOffice/core.git ~/lo-core
+
+      # ⚠ 復元は **clone のあと** ── `git clone` は空でないディレクトリを嫌う
+      - name: 外部 tarball を復元
+        id: c_tar
+        uses: actions/cache/restore@v4
+        with:
+          path: /home/runner/lo-core/external/tarballs
+          key: lo-tarballs-v1
+
+      # 🔴 **上流 Qt6 経路の取りこぼしを当てる**(#88、2026-08-09)。
+      # 理由と根拠は build/office-wasm/patch-qt6-freetype.py の docstring に書いてある。
+      # ⚠ **入れ子のヒアドキュメントをここに書かない** ── 2026-08-09 に GitHub 側が
+      #    workflow を解析できなくなり(job 0 件で即 failure、run 名が workflow 名では
+      #    なく**ファイルパス**になる)、ローカルの YAML 検査は全部通るのに動かなかった。
+      #    パッチは**実ファイル**に出して呼ぶ ── レビューもできる。
+      - name: 上流 Qt6 経路の取りこぼしを当てる
+        run: python3 "$GITHUB_WORKSPACE/build/office-wasm/patch-qt6-freetype.py" ~/lo-core
 
       # ⚠ 復元は **clone のあと** ── `git clone` は空でないディレクトリを嫌う
       - name: 外部 tarball を復元
