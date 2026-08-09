@@ -199,6 +199,76 @@ PKC3 は共同編集をしないので該当しない見込み)。
 
 **⚠ 1 と 2 は user にしか答えられない。** 1 は「その文書を書くか」、2 は事業判断である。
 
+## 3.3 🔴 将来性・実績・組版の実装状況(2026-08-09)── **推薦を再度差し替える**
+
+> user「onlyoffice 自体は縦書き対応を今後開発していくんじゃないの? / 未来があるというか
+> libre より活発だし、eu での導入実績があると思ってるけど、どうなのか?」
+
+**この問いが正しかった。調べた結果、§3.1 の推薦(A. OnlyOffice)を取り下げる。**
+ただし**見立てとは逆向き**に動いた。
+
+### (1) 縦書き・ルビが実装される見込み: **低**
+
+| 事実 | 一次ソース |
+|---|---|
+| **ルビは未実装**。`CRuby::fromXML` が**空実装**、2 つ目の overload は `ReadTillEnd` で丸ごと読み飛ばし、`toXML` は `<w:ruby/>` を返す。`rubyBase`(親文字)はどこにもパースされない | `ONLYOFFICE/core` `OOXML/DocxFormat/Logic/RunContent.cpp`(**私が直接確認**) |
+| 縦書きも未実装。列挙定数 `textdirection_TBRLV` が在るだけで、`textDirection` が内部形式へ渡るのは**表セルだけ** | `sdkjs/word/Editor/Styles.js` / `core` の BinaryWriter |
+| 公式 ROADMAP(8.0〜10.0)に vertical / CJK 組版の記載が**ゼロ**。一方 **RTL には 9.x〜10.0 で継続投資**している | `ONLYOFFICE/DocumentServer/ROADMAP.md` |
+| 正本 issue #1546(縦書き)は **4 年 8 か月 open**、assignee / milestone / PR なし。#1152(ルビ)は `confirmed-bug` のまま **5 年 7 か月** |  GitHub |
+| CJK 系で 3 年以上 open が **5 件**(うち 4 件は開発元が `confirmed-bug` 認定済み) | GitHub |
+| CJK 要望の実装実績: #487(CJK 行間)は報告から修正まで **86 か月** | GitHub |
+
+🔑 **「活発だからいずれ実装される」は成立しない** ── 同じ開発元が RTL には投資して CJK 組版には
+一項目も割いていない。これは手が回っていないのではなく**優先順位の選択**である。
+
+### (2) ブラウザ内で動かすこと自体を、開発元が断っている
+
+- x2t の WebAssembly 化提案(`DocumentServer#731`、CryptPad が動く実証つきで 2019 起票)は
+  **開発元の返信なしで "closed as not planned"**。公式 ROADMAP にも WebAssembly の記載なし
+- したがって client-side 構成は**第三者 fork**(cryptpad / xwiki-labs)に乗ることになる
+
+### (3) その開発元は、いま fork と係争中
+
+2026-03、EU ベンダー 12 社(Nextcloud / IONOS / Proton / Open-Xchange / XWiki ほか)が
+ONLYOFFICE を fork して **Euro-Office** を発表。ONLYOFFICE は AGPL 違反を主張し、
+**8 年続いた Nextcloud との提携を停止**(FSF / Software Freedom Conservancy は fork 側の解釈を支持)。
+⚠ **AGPL のコードを組み込む判断が、権利者が現に fork 相手と争っている状況で行われる**ことになる。
+
+### (4) EU 実績は逆だった
+
+- 独の主権ワークプレイス **openDesk のオフィス部品は Collabora = LibreOffice 系**(ONLYOFFICE ではない)
+- 第三者・政府ソースで裏が取れた規模: LibreOffice 系 = シュレスヴィヒ＝ホルシュタイン州
+  **約 30,000 台** / デンマーク デジタル省 / openDesk。ONLYOFFICE = **リヨン市 4,000〜8,000 席**(実在の確かな実績)。他は自社の事例紹介
+- 開発の量: LibreOffice/core は直近 24 か月で **21,088 commits / 著者 430 名**(昨日もコミット)、
+  ONLYOFFICE は sdkjs 7,530 + core 3,817 / 著者 40・23 名(**公開ブランチの先端は 2 つとも 2026-05-26 で停止**
+  ── リリース単位でまとめて公開する運用と見られるが、**現在の中身が見えない**)
+
+### (5) 逆に、LibreOffice が部分的に生き返った
+
+- §3.1 で「日本語が打てない」と判定した原因は **Qt 5.15.2 に IME の入口が無い**ことだった。
+  **Qt 6.8 の wasm には合成処理が実装されている**(`compositionStart/Update/End` / preedit。**私が直接確認**)
+- TDF が 2026-05-27 に **Qt6 + WebAssembly のブラウザ版**を公式戦略として発表(二次情報。
+  一次の TDF blog は egress ブロックで未読)
+- ⚠ **まだ届いていない**: `distro-configs/LibreOfficeWASM32.conf` は本日時点の master でも
+  **`--enable-qt5`**(**私が直接確認**)。発表どおりプロトタイプ段階
+
+### 🔴 差し替え後の推薦
+
+**A(OnlyOffice を組み込む)は採らない。** 理由を 1 行で:
+**土台を開発元が否定していて(#731 not planned)、その開発元が fork 相手と係争中で、
+かつ日本語組版(縦書き・ルビ)は実装の痕跡が一次情報のどこにも無い。**
+
+**B(LibreOffice)は「待つ」。** 唯一の致命傷(IME)は **Qt のバージョン問題**であり、
+公式の進む先がそのまま解決になる。ライセンスも MPL で軽い。ただし**今日は使えない**。
+
+**⚠ C(閲覧だけ自前)も無条件には推せない。** user の過去の失敗そのもの
+(「ppt の表示レイアウトが崩れる / WMF が表示できない」)が、まさに軽量レーンの弱点である。
+**採否を決める前に実ファイルで受入試験をする** ── これが次の一手。
+
+**次の一手(裁定不要・すぐできる)**: user が過去に崩れた **実物の ppt/pptx と WMF 貼付文書**を
+fixture にして、軽量レーン(pptx-viewer-core + emf-converter)に通し、**崩れるかどうかを見る**。
+⚠ WMF が 1 つも入っていない fixture で「表示できた」と言わない(ゼロ件の次元は測っていない次元)。
+
 ## 4. 軽量閲覧レーン(本命の保険 / 併走候補)
 
 docx = docx-preview、xlsx = SheetJS(+UI が要るなら Univer)、pptx = pptx-viewer-core、
