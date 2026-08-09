@@ -1,0 +1,166 @@
+# 🔴 LibreOffice を **Qt6 + WebAssembly** で焼く(#88。user 指示 2026-08-09
+# 「qt6 のブラウザ版を先取りする方針で閲覧優先で実装 / 可能なら独自ビルドしてしまえ」)。
+#
+# ⚠ **PR gate には絶対に載せない**(プロセス指示「CI を長くしない」)。`workflow_dispatch` のみ。
+#
+# 🔑 **なぜ CI で焼くのか**: 開発コンテナからは `dev-www.libreoffice.org` へ到達できず
+# (egress ポリシー、2026-08-09 実測: CONNECT が 403)、LibreOffice が要求する外部
+# tarball 約 100 件を取得できない。**コンテナ側の詰まりはそこだけ**で、その手前 ──
+# emsdk / Qt6 host / Qt6 wasm / LibreOffice の configure ── は**全部通っている**。
+#
+# ⚠ **この workflow はまだ通し切っていない**(コンテナではコンパイル段に到達できないため)。
+#   手前の各段は手で通した実績があるが、`make` 以降は**未検証**である。
+#
+# 🔴 **残る最大の未知はリンク時のメモリ**。`static/README.wasm.md` が
+#   「This way the LO WASM possibly needs 64GB RAM」と書いている。GitHub の標準 runner は
+#   16GB なので、落ちたら (a) 同 README の回避策(`-s WASM_BIGINT=1` / `ASSERTIONS=1` /
+#   `-g3` で WASM の書き直しを避ける)を当てる (b) larger runner へ移す、の順で試す。
+name: office-wasm-build
+
+on:
+  workflow_dispatch:
+    inputs:
+      qt_ref:
+        description: 'qtbase の ref(Qt6 wasm は IME を持つ ── 5.15 には無い)'
+        default: '6.11'
+      emsdk:
+        description: 'emsdk の版(LibreOffice の README.wasm.md が指定する版に合わせる)'
+        default: '4.0.10'
+
+# ⚠ 既定の 6 時間で足りない可能性が高い。足りなければ段を分けて artifact で繋ぐ
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      # runner は / の空きが 14GB 前後しかない。LibreOffice には全く足りないので先に空ける
+      - name: ディスクを空ける
+        run: |
+          set -eux
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost /usr/lib/jvm "$AGENT_TOOLSDIRECTORY" || true
+          sudo apt-get clean
+          df -h /
+
+      - name: ビルド道具
+        run: |
+          set -eux
+          sudo apt-get update -qq
+          # ⚠ この 6 つは開発コンテナで実際に不足していた(2026-08-09)
+          sudo apt-get install -y -qq \
+            flex gperf nasm xsltproc ccache libarchive-zip-perl \
+            autoconf automake bison zip unzip pkg-config build-essential
+
+      - name: emsdk
+        run: |
+          set -eux
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git ~/emsdk
+          cd ~/emsdk
+          ./emsdk install "${{ inputs.emsdk }}"
+          ./emsdk activate "${{ inputs.emsdk }}"
+          . ./emsdk_env.sh
+          emcc --version | head -1
+
+      - name: qtbase を取る
+        run: git clone --depth 1 --branch "${{ inputs.qt_ref }}" https://github.com/qt/qtbase.git ~/qtbase
+
+      # 🔑 Qt6 は **host build が別に要る**(Qt5 には無かった要件)。
+      # ⚠ `-no-gui` で建ててはいけない ── wasm 側で Gui/Widgets を建てるとき、host の
+      #    `Qt6GuiTools` / `Qt6WidgetsTools` を参照するので、host にも同じモジュールが要る。
+      # ⚠ `-xcb` を強制しない ── xcb の dev が揃っていないと condition 違反で落ちる。
+      #    host は道具とモジュールを配るだけで、画面を出す必要は無い。
+      - name: Qt6 host ビルド
+        run: |
+          set -eux
+          mkdir -p ~/qt-host && cd ~/qt-host
+          ~/qtbase/configure -prefix ~/qt-host/install -release \
+            -nomake examples -nomake tests -no-dbus -no-icu -no-opengl
+          cmake --build . --parallel "$(nproc)"
+          cmake --install .
+          ls ~/qt-host/install/libexec/moc
+
+      # ⚠ `-feature-thread` は必須 ── LibreOffice 側が `-pthread -s USE_PTHREADS=1` を
+      #    要求する(`solenv/gbuild/platform/EMSCRIPTEN_INTEL_GCC.mk`)。
+      #    その結果 **COOP/COEP と SharedArrayBuffer が要る**(PKC3 では SW 注入で成立
+      #    することを実機確認済み ── 選定 doc §2.1)。
+      # ⚠ emsdk の版ズレは**警告止まり**(Qt 6.10/6.11 推奨 4.0.7 / こちら 4.0.10)。実測済み。
+      - name: Qt6 wasm ビルド
+        run: |
+          set -eux
+          . ~/emsdk/emsdk_env.sh
+          mkdir -p ~/qt-wasm && cd ~/qt-wasm
+          ~/qtbase/configure -qt-host-path ~/qt-host/install -platform wasm-emscripten \
+            -prefix ~/qt-wasm/install -release -nomake examples -nomake tests \
+            -feature-thread -no-dbus -no-icu
+          cmake --build . --parallel "$(nproc)"
+          cmake --install .
+          # LibreOffice の configure.ac:14296 が探す 2 つの実体
+          test -f ~/qt-wasm/install/plugins/platforms/libqwasm.a
+          test -f ~/qt-wasm/install/plugins/platforms/wasm_shell.html
+
+      # 🔴 **moc / rcc / uic は host の道具**なので cross build の install には入らない。
+      #    LibreOffice の configure は `$QT6DIR/libexec` と `$QT6DIR/bin` しか見ないので、
+      #    ここで繋がないと「Qt Meta Object Compiler not found」で落ちる(実際に踏んだ)。
+      - name: host の道具を wasm install から見えるようにする
+        run: |
+          set -eux
+          mkdir -p ~/qt-wasm/install/libexec
+          for t in moc rcc uic qlalr cmake_automoc_parser; do
+            [ -f ~/qt-host/install/libexec/$t ] && ln -sf ~/qt-host/install/libexec/$t ~/qt-wasm/install/libexec/$t
+          done
+          ~/qt-wasm/install/libexec/moc -v
+
+      - name: LibreOffice を取る
+        run: git clone --depth 1 https://github.com/LibreOffice/core.git ~/lo-core
+
+      # ⚠ 上流の `LibreOfficeWASM32.conf` は `--enable-qt5` を含む。そこへ `--enable-qt6` を
+      #    足すだけだと VCL プラグインが 2 個になり、`configure.ac:12691` の
+      #    「動的読込が無効なら GUI 付きはプラグイン 1 個」で落ちる。**自前の config を持つ。**
+      - name: configure(Qt6)
+        run: |
+          set -eux
+          cd ~/lo-core
+          cat > distro-configs/PKC3WASM-Qt6.conf <<'CONF'
+          --host=wasm32-local-emscripten
+          --disable-qt5
+          --enable-qt6
+          --disable-gen
+          --disable-scripting
+          --with-package-format=emscripten
+          CONF
+          export LC_ALL=C.UTF-8
+          . ~/emsdk/emsdk_env.sh
+          export QT6DIR=~/qt-wasm/install
+          ./autogen.sh --with-distro=PKC3WASM-Qt6
+          # 空振り防止 ── 本当に qt6 単独で構成されたか
+          grep -q '^export ENABLE_QT6=TRUE' config_host.mk
+          grep -q '^export ENABLE_QT5=$' config_host.mk
+          grep -q '^export VCL_PLUGIN_INFO= qt6$' config_host.mk
+
+      - name: make
+        run: |
+          set -eux
+          cd ~/lo-core
+          export LC_ALL=C.UTF-8
+          . ~/emsdk/emsdk_env.sh
+          /usr/bin/time -v make -j"$(nproc)" 2>&1 | tail -400
+
+      - name: 生成物
+        if: always()
+        run: |
+          set -eux
+          cd ~/lo-core
+          ls -la instdir/program/*.wasm instdir/program/*.js instdir/program/*.data 2>/dev/null || true
+          df -h /
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lo-wasm-qt6
+          path: |
+            ~/lo-core/instdir/program/soffice.wasm
+            ~/lo-core/instdir/program/soffice.js
+            ~/lo-core/instdir/program/soffice.data
+            ~/lo-core/config.log
+          if-no-files-found: warn
