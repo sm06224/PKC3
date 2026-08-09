@@ -39,6 +39,14 @@ jobs:
     env:
       QT6DIR: /home/runner/qt-wasm/install
       LC_ALL: C.UTF-8
+      # 🔑 **ccache は既に効いている**(run 31307638176 のログに
+      #    `/usr/bin/ccache .../em++` が出ている)が、**残していなかった**ので
+      #    毎回ゼロから 2h40m 掛かっていた。置き場を固定して cache に載せる。
+      #    ⚠ GitHub の cache は **repo 全体で 10GB** が上限(超えると古い順に消える)
+      #    ので、Qt(約 1.5GB)と同居できる大きさに抑える
+      CCACHE_DIR: /home/runner/.ccache
+      CCACHE_MAXSIZE: 5G
+      CCACHE_COMPRESS: '1'
     steps:
       # runner は / の空きが 14GB 前後しかない。LibreOffice には全く足りないので先に空ける
       - name: ディスクを空ける
@@ -59,7 +67,40 @@ jobs:
             flex gperf nasm xsltproc ccache libarchive-zip-perl \
             autoconf automake bison zip unzip pkg-config build-essential
 
+      # ── ここから途中成果物の再利用 ────────────────────────────────
+      # ⚠ **`cache` ではなく `cache/restore` + `cache/save` を使う** ── 素の `cache`
+      #    は job が失敗すると保存しないことがある。**いま欲しいのは「失敗した回の
+      #    途中成果物」**(リンクを何度も試す局面)なので、保存を `if: always()` で
+      #    明示的に回す。
+      - name: emsdk を復元
+        id: c_emsdk
+        uses: actions/cache/restore@v4
+        with:
+          path: /home/runner/emsdk
+          key: emsdk-${{ inputs.emsdk }}-v1
+
+      - name: Qt6(host / wasm)を復元
+        id: c_qt
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            /home/runner/qt-host/install
+            /home/runner/qt-wasm/install
+          key: qt-${{ inputs.qt_ref }}-emsdk-${{ inputs.emsdk }}-v1
+
+      - name: ccache を復元
+        id: c_ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: /home/runner/.ccache
+          # ⚠ 完全一致は狙わない ── 前回の続きから始められればよいので
+          #    `restore-keys` で**直近のもの**を拾う
+          key: ccache-lo-qt6-${{ github.sha }}
+          restore-keys: |
+            ccache-lo-qt6-
+
       - name: emsdk
+        if: steps.c_emsdk.outputs.cache-hit != 'true'
         run: |
           set -eux
           git clone --depth 1 https://github.com/emscripten-core/emsdk.git ~/emsdk
@@ -70,6 +111,7 @@ jobs:
           emcc --version | head -1
 
       - name: qtbase を取る
+        if: steps.c_qt.outputs.cache-hit != 'true'
         run: git clone --depth 1 --branch "${{ inputs.qt_ref }}" https://github.com/qt/qtbase.git ~/qtbase
 
       # 🔑 Qt6 は **host build が別に要る**(Qt5 には無かった要件)。
@@ -78,6 +120,7 @@ jobs:
       # ⚠ `-xcb` を強制しない ── xcb の dev が揃っていないと condition 違反で落ちる。
       #    host は道具とモジュールを配るだけで、画面を出す必要は無い。
       - name: Qt6 host ビルド
+        if: steps.c_qt.outputs.cache-hit != 'true'
         run: |
           set -eux
           mkdir -p ~/qt-host && cd ~/qt-host
@@ -93,6 +136,7 @@ jobs:
       #    することを実機確認済み ── 選定 doc §2.1)。
       # ⚠ emsdk の版ズレは**警告止まり**(Qt 6.10/6.11 推奨 4.0.7 / こちら 4.0.10)。実測済み。
       - name: Qt6 wasm ビルド
+        if: steps.c_qt.outputs.cache-hit != 'true'
         run: |
           set -eux
           . ~/emsdk/emsdk_env.sh
@@ -105,6 +149,22 @@ jobs:
           # LibreOffice の configure.ac:14296 が探す 2 つの実体
           test -f ~/qt-wasm/install/plugins/platforms/libqwasm.a
           test -f ~/qt-wasm/install/plugins/platforms/wasm_shell.html
+
+      - name: Qt6 を保存
+        if: always() && steps.c_qt.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            /home/runner/qt-host/install
+            /home/runner/qt-wasm/install
+          key: qt-${{ inputs.qt_ref }}-emsdk-${{ inputs.emsdk }}-v1
+
+      - name: emsdk を保存
+        if: always() && steps.c_emsdk.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /home/runner/emsdk
+          key: emsdk-${{ inputs.emsdk }}-v1
 
       # 🔴 **moc / rcc / uic は host の道具**なので cross build の install には入らない。
       #    LibreOffice の configure は `$QT6DIR/libexec` と `$QT6DIR/bin` しか見ないので、
@@ -120,6 +180,14 @@ jobs:
 
       - name: LibreOffice を取る
         run: git clone --depth 1 https://github.com/LibreOffice/core.git ~/lo-core
+
+      # ⚠ 復元は **clone のあと** ── `git clone` は空でないディレクトリを嫌う
+      - name: 外部 tarball を復元
+        id: c_tar
+        uses: actions/cache/restore@v4
+        with:
+          path: /home/runner/lo-core/external/tarballs
+          key: lo-tarballs-v1
 
       # 🔴 **上流 Qt6 経路の取りこぼしを当てる**(2026-08-09、run 31307638176 で判明)。
       #
@@ -184,8 +252,15 @@ jobs:
           set -euxo pipefail
           cd ~/lo-core
           . ~/emsdk/emsdk_env.sh
+          ccache -z   # 統計をゼロに(この run 分だけを測る)
           # `-v` の最大常駐(Maximum resident set size)がリンクのメモリ実測値になる
           /usr/bin/time -v make -j"$(nproc)"
+
+      # 📏 **効いたかを数で出す**(印象で語らない)。hit 率が低いままなら
+      #    cache が実は当たっていないということ
+      - name: ccache の効き
+        if: always()
+        run: ccache -s
 
       # ⚠ **生成物が在ることを step として主張する** ── 無ければここで赤にする
       #    (artifact の `if-no-files-found: warn` は黙って通してしまう)
@@ -203,6 +278,21 @@ jobs:
           cd ~/lo-core
           ls -la instdir/program/*.wasm instdir/program/*.js instdir/program/*.data 2>/dev/null || true
           df -h /
+
+      # 🔴 **失敗しても保存する** ── 次の試行を数分にするための本体
+      - name: ccache を保存
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: /home/runner/.ccache
+          key: ccache-lo-qt6-${{ github.sha }}
+
+      - name: 外部 tarball を保存
+        if: always() && steps.c_tar.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /home/runner/lo-core/external/tarballs
+          key: lo-tarballs-v1
 
       - uses: actions/upload-artifact@v4
         if: always()
