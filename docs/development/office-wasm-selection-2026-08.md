@@ -269,6 +269,62 @@ ONLYOFFICE を fork して **Euro-Office** を発表。ONLYOFFICE は AGPL 違�
 fixture にして、軽量レーン(pptx-viewer-core + emf-converter)に通し、**崩れるかどうかを見る**。
 ⚠ WMF が 1 つも入っていない fixture で「表示できた」と言わない(ゼロ件の次元は測っていない次元)。
 
+## 3.4 🔴 裁定(user 指示 2026-08-09。出典タグ付き = 不可侵)と、そこから決まる形
+
+> **qt6 のブラウザ版を先取りする方針で閲覧優先で実装 / 可能なら独自ビルドしてしまえ**
+
+- 採るのは **B(LibreOffice)**。ただし TDF の到着を待たず**先取り**する
+- **閲覧を先に出す**(編集は後)
+- **自前ビルドしてよい**(「可能なら」= 実現性は測って判断する)
+
+### 3.4.1 🔑 閲覧だけなら **Qt を積む理由が無い**
+
+§3.1 で LibreOffice を落とした理由は **Qt 5.15.2 に IME の入口が無い**ことだった。
+だが **IME が要るのは編集だけ**である。閲覧しかしないなら Qt(と 250MB の Qt 資産、
+COOP/COEP、SharedArrayBuffer)を**丸ごと外せる**可能性がある ── LibreOffice は
+GUI 無しの VCL backend(headless / svp)で**ビットマップに描ける**からである。
+⚠ **wasm ビルドで headless backend が成立するか**は本 doc 時点で未確認(調査中)。
+ここが成立するかどうかが、この方針の成否そのもの。
+
+### 3.4.2 出し方は「描いたら焼く」に乗せる(新しい器を作らない)
+
+**実測(2026-08-09、私が計測)**:
+
+| | フル chromium | `chromium_headless_shell`(CI の既定) |
+|---|---|---|
+| `navigator.pdfViewerEnabled` | **true** | **false** |
+| PDF プラグイン | 5 件 | **0 件** |
+
+PKC3 の添付プレビューは PDF を `<object type="application/pdf">` で出しており
+(`detail.ts`)、**実 user では動くが CI では描けない**。
+⚠ **いまの PDF 添付プレビューは、実ブラウザ検証を 1 度も受けていない**(受け口が無いので
+smoke を書いても意味を成さない)── 既存の穴として記録する。
+
+🔑 だから **Office の閲覧を PDF に頼らせない**。**mermaid と同じ経路**に乗せる:
+
+- 画面に置くのは **ページごとの PNG `<img>`**(合成だけで済み、スクロールが GPU に乗る)
+- bytes は **IDB Blob**(heap に載せない)、ObjectURL は**表示の寿命終端で revoke**
+- キャッシュ鍵に **原文(ファイルの hash)+ 幅 + devicePixelRatio** を含める
+- 変換は**計算のワーカー** → `worker-lease.ts`(遅延起動 / ジョブのバッファ / アイドル kill)
+- **ベクタ(PDF)は書き出し・印刷のときだけ** ── 「SVG は書き出しのときだけ」と同じ分け方
+
+これは user 指示 2026-08-03(不可侵)の 3 本 ──「図は描いたら焼く」「重い処理はワーカーへ・
+使い捨てに」「ゼロコピーと寿命終端での破棄」── に**そのまま乗る**。新しい表示器も
+新しい規律も要らない。⚠ 「Office 用の別モードを作らない」(§5)とも整合。
+
+### 3.4.3 自前ビルドの実現性(この箱の実測)
+
+| | 実測値 |
+|---|---|
+| 空きディスク | **28 GB**(書込 149 MB/s) |
+| CPU / メモリ | **4 コア** / 15 GB |
+| emscripten | **未導入**(emsdk の取得から) |
+
+LibreOffice の wasm ビルドは数十 GB 規模なので、**この箱で完結させるのは苦しい**。
+現実的な線は **CI(大きめの runner)で焼いて生成物だけ持ち込む**形。
+⚠ ただし PR gate は「速い lane に限定」(プロセス指示)なので、**engine のビルドは
+PR gate に載せない** ── nightly / 手動 dispatch / 別リポジトリの release artifact にする。
+
 ## 4. 軽量閲覧レーン(本命の保険 / 併走候補)
 
 docx = docx-preview、xlsx = SheetJS(+UI が要るなら Univer)、pptx = pptx-viewer-core、
