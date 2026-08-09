@@ -421,11 +421,62 @@ LibreOffice は外部依存 tarball 約 100 件をこのホストから取る。
 - ❌ **「この箱の制約はディスクと RAM」という見立ては外れた** ── 実際に止めたのは**ネットワーク**。
   ディスクは 23GB 残っていた
 
-### 残る最大の未知
+### 残る最大の未知 → **解けた**(run 31307638176)
 
-**リンク時のメモリ**(公式が最大 64GB)。GitHub の標準 runner は 16GB なので、
-落ちたら ① README の回避策(`-s WASM_BIGINT=1` / `ASSERTIONS=1` / `-g3` で WASM の
-書き直しを避ける)② larger runner、の順。**ここはまだ 1 度も走らせていない。**
+**リンク時のメモリ**(公式 README が「possibly needs 64GB RAM」)は**杞憂だった**。
+標準 runner(16GB)で `make` が完走し、`/usr/bin/time -v` の **peak RSS は 4.95 GB**。
+`soffice.data` 87.6MB も生成された。落ちたのは**最後の `soffice.js` のリンクだけ**である。
+
+## 3.7 🔴 Qt6 経路の欠落と、それを **2h40m 待たずに** 検証する方法(2026-08-09)
+
+### 症状と原因
+
+`wasm-ld: undefined symbol: FT_Outline_Transform`(ほか `FT_*` 多数、すべて
+`libcairo-lo.a(cairo-ft-font.c.o)` 由来)。
+
+`RepositoryExternal.mk` を読むと `gb_LinkTarget__use_cairo` は **`freetype_headers`
+しか取っていない**(ヘッダのみ・libs 無し)。Qt5 のリンク行には
+`-lQt5FontDatabaseSupport` が在って Qt 側の freetype で解決されるが、
+**Qt6 のリンク行(`configure.ac:14313`)にはフォント系が 1 つも無い**。
+上流の Qt6 × Emscripten はまだ誰も最後まで通していない、という状況証拠でもある。
+
+直し: `vcl/Library_vclplug_qt6.mk` の `use_externals` に **`freetype`** を並べる
+(`build/office-wasm/patch-qt6-freetype.py`)。`gb_LinkTarget__use_freetype` は
+`SYSTEM_FREETYPE` 分岐の**外**で定義されているので Emscripten でも有効で、
+`FREETYPE_LIBS` をリンク行へ足す。
+
+⚠ **最初は `use_static_libraries` で足そうとして誤った。** `StaticLibrary_freetype` が
+建つのは `COM=MSC` のときだけ(`external/freetype/Module_freetype.mk`)で、Emscripten では
+ExternalProject である。上流の `vcl/Library_vcl.mk` の条件が `WNT-TRUE` なのには理由がある。
+
+### 🔑 **`gb_DEBUG_STATIC=1` で、ビルドせずにリンク構成を検める**
+
+user 指示「無策で頭から回すの違くない?」への答え。**1 語変えて 3 時間回す**のではなく、
+gbuild に**実行ファイルへ集まる externals を印字させる**:
+
+```bash
+make gb_DEBUG_STATIC=1 -n Executable_soffice_bin > /tmp/dbgstatic.log 2>&1
+grep -o "expand_executable externals for Executable/soffice.js: .*" /tmp/dbgstatic.log
+```
+
+`solenv/gbuild/static.mk` の `gb_LinkTarget__expand_executable` が
+**transitive に集めた externals を実行ファイルへ当て直す**ので、この 1 行が
+「リンク行に何が載るか」の答えになる。`make` は tarball が無くて途中で止まるが、
+**印字は parse 時に出る**ので止まってよい ── 所要 **4 分**。
+
+実測(2026-08-09):
+
+| | soffice.js の externals 末尾 |
+|---|---|
+| パッチ **有** | `… wpd wpg xmlsec **freetype** qt6` |
+| パッチ **無**(対照群) | `… wpd wpg xmlsec qt6` |
+
+⚠ **対照群を取ること** ── `freetype_headers` は cairo 経由で元から在るので、
+「freetype という字がある」だけでは効果を主張できない。外して消えることまで見る。
+
+⚠ **この検証が示すのは「`FREETYPE_LIBS` がリンク行に載る」ところまで**である。
+リンクが通ることまでは示していない(`FT_*` 以外の未定義が残っている可能性は消えない)。
+主張の範囲を超えて読まない。
 
 ## 4. 軽量閲覧レーン(本命の保険 / 併走候補)
 
