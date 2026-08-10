@@ -964,6 +964,90 @@ bash build/office-wasm/fetch-and-run.sh --serve
 書いた瞬間に文字列が閉じて** parse error になった(`source-editing` に記録のある型)。
 👉 template literal の中には、コメントであってもバッククォートを書かない。
 
+## 3.15 📦 静的ホスティングで配る ── 圧縮・セルフホスト・GitHub Pages(2026-08-10)
+
+user 提案:「圧縮効かせてね / セルフホストスクリプトも各種 / coi-serviceworker で単独で
+達成できない? / **github pages で限界を越える方法見つけたぞ!** Release 資産(1 file 2GB まで)を
+Pages の JS から fetch させる」── 4 点とも**実測で決着させた**。
+
+### 判定(実ブラウザ)
+
+| 機構 | 判定 | 実測 |
+|---|---|---|
+| ① `coi-serviceworker` でヘッダ無しホストを分離する | ✅ **成立する** | ヘッダを 1 つも返さないサーバで `crossOriginIsolated === true` / `SharedArrayBuffer` あり |
+| ② gzip を解きながら compile する | ✅ **成立する** | 50.6MB の `.gz` から **4,041ms** で 288 exports。148MB を JS heap に載せない |
+| ③ **Release 資産を JS から fetch** | 🚫 **成立しない** | `TypeError: Failed to fetch` |
+| ④ ③ の応答に ACAO を足したら | ✅ 成功 | = 原因は**サイズではなく CORS** |
+
+### 🚫 Release 裏技が塞がっている理由(サイズではない)
+
+- GitHub の release download は **`Access-Control-Allow-Origin` を 1 つも返さない**
+  (`Origin` / `Sec-Fetch-*` を付けても変わらない)
+- `OPTIONS` は **405** ── preflight できない
+- 同じヘッダ形(`content-disposition: attachment` / `application/octet-stream` / ACAO 無し)を
+  別 origin で再現して実ブラウザに掛けると `TypeError: Failed to fetch`。
+  **ACAO を足した場合のみ成功**する
+- ⚠ **`coi-serviceworker` はこれを救わない。** あれが解くのは **COOP/COEP** であって
+  **CORS** ではない ── service worker からの `fetch` も同じ CORS 規則に従い、
+  `no-cors` で取れる opaque 応答は**本文を読めない**
+
+### 🔑 代わりに圧縮で解いた ── 100MB の壁が消える
+
+| file | 生 | gzip -9 | 比 |
+|---|---|---|---|
+| `soffice.wasm` | 148.9MB | **50.6MB** | 2.94x |
+| `soffice.data` | 83.6MB | **26.4MB** | 3.17x |
+| 一式合計(js / metadata / BIZ UD 3 本 込み) | 約 247MB | **約 93MB** | ─ |
+
+**どちらも 100MB/file を切る**ので、**同一 origin に置ける = CORS 問題そのものが消える**。
+Pages の site 上限 1GB に対しても十分小さい。
+組み立ては `build/office-wasm/make-pages-bundle.mjs`、頁は `build/office-wasm/pages/index.html`。
+
+```bash
+bash build/office-wasm/fetch-and-run.sh --keep
+node build/office-wasm/make-pages-bundle.mjs /tmp/lo-wasm dist-office-pages
+```
+
+⚠ **git に入れるかは別の判断**。この script は一式を作るだけで commit しない ──
+CI で組んで Pages へ deploy すれば**履歴を汚さずに済む**。
+
+### 実証(GitHub Pages と同じ条件 = ヘッダを 1 つも返さないサーバ)
+
+`.docx` を picker から選んで **5.3 / 5.9 / 7.2 秒**(3 回連続で成功)。
+
+### 🔴 途中で見つけた**製品の穴** ── coi-serviceworker の初回取りこぼし
+
+最初は `isolated` が **true / false に割れた**。flake として片付けず追ったら実体があった:
+
+- `coi-serviceworker` は `register()` が**解決した直後**に 1 回だけ `location.reload()` する
+- `register()` の解決は **activate / claim の完了を待たない**
+- リロードが先に走るとそのページは SW に制御されず、しかも
+  `sessionStorage` の印で**二度と再試行しない** ── **初回訪問が永久に壊れる**
+
+🔑 直し: `navigator.serviceWorker.ready`(= active な SW が居る)を待ってから、
+**こちらで 1 回だけ**リロードして拾い直す(印で無限ループを防ぐ)。
+⚠ あわせて「起動できません」の警告を 4 秒 → 20 秒へ。**間に合っていた回まで
+失敗と表示していた。**
+🔑 CLAUDE.md「flake に見えるものが製品の穴だったことがある」の 3 例目。
+
+### セルフホスト(各種)
+
+`build/office-wasm/selfhost/` に nginx / Caddy / Apache / Docker / Python / Node。
+🔴 **どれでも外してはいけない 2 点**:
+
+1. COOP/COEP を付ける(付けられるなら `coi-serviceworker` に頼らないほうが確実)
+2. ⚠ **`.gz` に `Content-Encoding: gzip` を付けない** ── この一式は JS 側が
+   `DecompressionStream` で解くので、付けると**二重解凍で壊れる**
+   (nginx の `gzip_static` は明示的に `off`)。
+   頁側も保険として `content-encoding` を見て自前の解凍を飛ばす
+
+### 未確認のまま残すもの
+
+- **GitHub Pages が `.gz` に `Content-Encoding` を付けるか**は実 deploy でしか分からない
+  (どちらでも動く形にはしてある)
+- **実際に Pages へ載せるかは未決** ── この repo の Pages は P7 の
+  「Pages product」(PKC3 本体)を出す場所なので、**上書きになる**。user 裁定が要る
+
 ## 4. 軽量閲覧レーン(本命の保険 / 併走候補)
 
 docx = docx-preview、xlsx = SheetJS(+UI が要るなら Univer)、pptx = pptx-viewer-core、

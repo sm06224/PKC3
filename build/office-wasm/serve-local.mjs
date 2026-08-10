@@ -194,9 +194,24 @@ const server = createServer((req, res) => {
   // ディレクトリ外へ出られないようにする
   const target = resolve(join(DIR, path));
   if (!target.startsWith(DIR)) { res.writeHead(403, head); res.end(); return; }
+  const type = MIME[extname(path)] ?? 'application/octet-stream';
+  // 🔑 **圧縮を効かせる。** 同じ名前の `.gz` が在って client が gzip を受け付けるなら、
+  //    それをそのまま `Content-Encoding: gzip` で返す(解凍はブラウザがやる)。
+  //    ⚠ 実測: soffice.wasm 148.9MB → 50.6MB(2.94x)/ soffice.data 83.6MB → 26.4MB(3.17x)。
+  //    ⚠ `Vary: Accept-Encoding` を必ず付ける ── 付けないと途中の cache が
+  //      gzip 版を非対応 client へ配る。
+  const acceptsGzip = /\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''));
+  const gz = `${target}.gz`;
+  if (acceptsGzip && existsSync(gz)) {
+    readFile(gz).then((buf) => {
+      res.writeHead(200, { ...head, 'Content-Type': type, 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' });
+      res.end(buf);
+    }).catch(() => { res.writeHead(500, head); res.end(); });
+    return;
+  }
   readFile(target)
     .then((buf) => {
-      res.writeHead(200, { ...head, 'Content-Type': MIME[extname(path)] ?? 'application/octet-stream' });
+      res.writeHead(200, { ...head, 'Content-Type': type, Vary: 'Accept-Encoding' });
       res.end(buf);
     })
     .catch(() => { res.writeHead(path === '/favicon.ico' ? 204 : 404, head); res.end(); });

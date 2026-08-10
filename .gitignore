@@ -21,3 +21,6 @@ tests/**/*.probe.test.ts
 # Rust ビルド中間物(出荷物 src/adapter/platform/wasm/*.wasm は commit する)
 rust/target/
 .claude/worktrees/
+
+# office wasm の配布一式(make-pages-bundle.mjs の出力。約 93MB、生成物なので追わない)
+dist-office-pages/
