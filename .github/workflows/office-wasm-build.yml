@@ -409,6 +409,28 @@ jobs:
             exit 1
           fi
 
+      # 📏 **JSPI が本当に効いているかを、生成物で見る**(2026-08-10)。
+      #    ⚠ `-sJSPI_EXPORTS` は **1 つも当たらなくても警告が出ない**(silent failure)。
+      #    リンクが通っても JSPI が不活性なら、実行時に無言で hang しうる。
+      #    ⚠ いまは**判定せず報告だけ**する ── 生成物を 1 度も見ていない段階で
+      #    gate を書くと、「正しく建っても落ちる検査」を作る(今日 1 度やった)。
+      #    実物を見てから、次の run で等値 pin へ格上げする。
+      - name: JSPI が生成物に効いているか(報告のみ)
+        if: always()
+        run: |
+          set -euo pipefail
+          js=~/lo-core/instdir/program/soffice.js
+          if [ ! -f "$js" ]; then echo '(soffice.js 無し)'; exit 0; fi
+          sym=$(grep -o '_ZN10emscripten[A-Za-z0-9_]*' \
+            ~/lo-core/solenv/gbuild/platform/EMSCRIPTEN_INTEL_GCC.mk | head -1)
+          echo "LO が JSPI_EXPORTS で名指しする記号: ${sym:0:60}..."
+          echo -n '  soffice.js に在るか: '
+          if grep -q -- "$sym" "$js"; then echo 'あり'; else echo 'なし'; fi
+          for marker in JSPI Asyncify asyncify WebAssembly.Suspending emscripten_check_mailbox; do
+            echo -n "  '$marker' の出現数: "
+            grep -c -- "$marker" "$js" || true
+          done
+
       # 🔑 **実行に要る file 一式は上流の list に従う**(自分で並べない)。
       #    `instsetoo_native/CustomTarget_emscripten-install.mk` が
       #    workdir/installation/LibreOffice/emscripten へ必要物を集める ──
