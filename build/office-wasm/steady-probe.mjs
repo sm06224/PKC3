@@ -210,7 +210,7 @@ function browserRssKb(tag) {
 async function pixelDiffRatio(page, a, b) {
   return page.evaluate(async ([ba, bb]) => {
     const toBmp = async (arr) =>
-      globalThis.createImageBitmap(new Blob([new Uint8Array(arr)], { type: 'image/png' }));
+      globalThis.createImageBitmap(new globalThis.Blob([new Uint8Array(arr)], { type: 'image/png' }));
     const [ia, ib] = await Promise.all([toBmp(ba), toBmp(bb)]);
     if (ia.width !== ib.width || ia.height !== ib.height) return 1;
     const px = (bmp) => {
