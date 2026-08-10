@@ -351,7 +351,26 @@ jobs:
           . ~/emsdk/emsdk_env.sh
           ccache -z   # 統計をゼロに(この run 分だけを測る)
           # `-v` の最大常駐(Maximum resident set size)がリンクのメモリ実測値になる
-          /usr/bin/time -v make -j"$(nproc)"
+          # ⚠ **`tee` は早期終了しない**ので SIGPIPE の罠は無い。`pipefail` を立てて
+          #    あるので make の失敗はそのまま pipeline の失敗になる(`| tail` とは違う)。
+          #    控えを残すのは、**API 経由のログが 16KB で切れてエラー行に届かない**ため。
+          /usr/bin/time -v make -j"$(nproc)" 2>&1 | tee /tmp/make.log
+
+      # 🔴 **エラー行だけを別 step に出す**(2026-08-10)。
+      #    GitHub API のログ取得は末尾しか返さず、`make` の出力に埋もれて
+      #    **肝心の `wasm-ld: error:` に毎回届かなかった**。原因を読むために毎回
+      #    走らせ直すのは高い(15 分)。⚠ `| head` は使わない(SIGPIPE)── `grep -m`。
+      - name: make のエラー行だけ取り出す
+        if: failure()
+        run: |
+          set -euo pipefail
+          echo '=== wasm-ld / コンパイルの error 行(先頭 60 件)==='
+          grep -m 60 -nE 'wasm-ld: error|error:|^make.*\*\*\*' /tmp/make.log || true
+          echo '=== undefined symbol の要約(重複を畳む)==='
+          grep -oE 'undefined symbol: [A-Za-z0-9_]+' /tmp/make.log > /tmp/undef.txt || true
+          sort -u /tmp/undef.txt > /tmp/undef-uniq.txt || true
+          wc -l < /tmp/undef-uniq.txt
+          head -40 < /tmp/undef-uniq.txt
 
       # 📏 **効いたかを数で出す**(印象で語らない)。hit 率が低いままなら
       #    cache が実は当たっていないということ
