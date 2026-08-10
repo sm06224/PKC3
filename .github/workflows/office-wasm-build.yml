@@ -157,6 +157,7 @@ jobs:
           printf '[%s]\n' "${QTARGS[@]}"
           test "${#QTARGS[@]}" -ge 8
           printf '%s\n' "${QTARGS[@]}" | grep -qx -- -feature-wasm-exceptions
+          printf '%s\n' "${QTARGS[@]}" | grep -qx -- -feature-wasm-jspi
           ~/qtbase/configure -qt-host-path ~/qt-host/install -platform wasm-emscripten \
             -prefix ~/qt-wasm/install -release "${QTARGS[@]}"
           cmake --build . --parallel "$(nproc)"
@@ -170,6 +171,8 @@ jobs:
           #    現れない(**正しく建っても落ちる検査**だった)。実物に在る印はこれ:
           #    無効なら `-1`、有効なら `1`(手元の install で `-1` を実見して確認)
           grep -qx '#define QT_FEATURE_wasm_exceptions 1' \
+            ~/qt-wasm/install/include/QtCore/qconfig.h
+          grep -qx '#define QT_FEATURE_wasm_jspi 1' \
             ~/qt-wasm/install/include/QtCore/qconfig.h
 
       - name: Qt6 を保存
@@ -236,6 +239,17 @@ jobs:
       # ⚠ 上流の `LibreOfficeWASM32.conf` は `--enable-qt5` を含む。そこへ `--enable-qt6` を
       #    足すだけだと VCL プラグインが 2 個になり、`configure.ac:12691` の
       #    「動的読込が無効なら GUI 付きはプラグイン 1 個」で落ちる。**自前の config を持つ。**
+      #
+      # 🔴 **JSPI + 非 PROXY_TO_PTHREAD が「Qt6 のモード」である**(2026-08-10 に判明)。
+      #    それまで既定(JSPI off / PROXY_TO_PTHREAD on = **Qt5 用の組み合わせ**)で
+      #    建てていたため、Qt6 のコードを**書かれていないモードで走らせていた**。
+      #    症状: `main()` は動くが `qwasmclipboard.cpp:168` の
+      #    `val::global("window")["chrome"]` で落ちる ── **worker に `window` は無い**。
+      #    根拠: LO 側の Qt6 対応は
+      #    `ENABLE_QT6 && HAVE_EMSCRIPTEN_JSPI && !HAVE_EMSCRIPTEN_PROXY_TO_PTHREAD`
+      #    という条件で書かれており(`QtInstance.cxx` に 7 箇所ほか計 8 file)、
+      #    このモード専用の並行機構 `comphelper/emscriptenthreading` まで在る。
+      #    ⚠ **個別のバグを 1 つずつ潰す前に、組み合わせが正しいかを疑うこと。**
       - name: configure(Qt6)
         run: |
           set -eux
@@ -247,6 +261,8 @@ jobs:
           --disable-gen
           --disable-scripting
           --with-package-format=emscripten
+          --enable-emscripten-jspi
+          --disable-emscripten-proxy-to-pthread
           CONF
           . ~/emsdk/emsdk_env.sh
           ./autogen.sh --with-distro=PKC3WASM-Qt6
@@ -254,6 +270,10 @@ jobs:
           grep -q '^export ENABLE_QT6=TRUE' config_host.mk
           grep -q '^export ENABLE_QT5=$' config_host.mk
           grep -q '^export VCL_PLUGIN_INFO= qt6$' config_host.mk
+          # 🔴 **Qt6 のモードが立っていることを確かめる**(下のコメント参照)。
+          #    ⚠ 既定のままだと Qt5 用の組み合わせで建ち、走らせるまで気づけない
+          grep -q '^export ENABLE_EMSCRIPTEN_JSPI=TRUE' config_host.mk
+          grep -q '^export ENABLE_EMSCRIPTEN_PROXY_TO_PTHREAD=$' config_host.mk
 
       # 🔴 **`| tail` を噛ませない**(2026-08-09 に踏んだ)。bash のパイプの終了コードは
       #    最後のコマンドのものなので、`make | tail` は **make が落ちても step が緑**になる。

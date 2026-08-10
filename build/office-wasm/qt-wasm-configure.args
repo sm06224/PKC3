@@ -28,6 +28,18 @@
 #    🔑 有効にすると Qt 側も `-fwasm-exceptions` + `-s SUPPORT_LONGJMP=wasm` を付ける
 #    (`qtbase/cmake/QtWasmHelpers.cmake:29-42`)── **LO と完全に一致する**。
 #
-#    ⚠ `-feature-wasm-jspi` は**足さない**。LO 側の JSPI は既定 off
-#    (`ENABLE_EMSCRIPTEN_JSPI=` を今回の config_host.mk で確認)。
 -feature-wasm-exceptions
+
+# 🔴 **必須**(2026-08-10、run 31352402814 の実測で判明。前は「足さない」と書いていた)。
+#    LibreOffice の Qt6 対応は **JSPI + 非 PROXY_TO_PTHREAD** のときだけ有効になる
+#    (`ENABLE_QT6 && HAVE_EMSCRIPTEN_JSPI && !HAVE_EMSCRIPTEN_PROXY_TO_PTHREAD` が
+#    `QtInstance.cxx` に 7 箇所ほか計 8 file、専用機構 `comphelper/emscriptenthreading` つき)。
+#    workflow 側で `--enable-emscripten-jspi --disable-emscripten-proxy-to-pthread` を
+#    渡すので、**Qt も JSPI で建てる**。
+#
+#    🔑 LO の LDFLAGS は `-sJSPI_EXPORTS=…qstdweb::EventListener…` と
+#    **Qt のシンボルを名指ししている** ── LO の JSPI モードは Qt と組む前提である。
+#
+#    ⚠ `wasm-jspi` は `wasm-exceptions` を前提とする(`configure.cmake:1030-1035`)。
+#    上の行を消すとこちらも落ちる。
+-feature-wasm-jspi
