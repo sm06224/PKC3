@@ -106,16 +106,27 @@ jobs:
             /home/runner/qt-wasm/install
           key: qt-${{ inputs.qt_ref }}-emsdk-${{ inputs.emsdk }}-${{ hashFiles('build/office-wasm/qt-wasm-configure.args') }}
 
+      # 🔴 **ccache の鍵にも Qt の同一性を入れる**(2026-08-10、実測で判明)。
+      #    ⚠ **Qt キャッシュの鍵だけ直して、こちらを直していなかった。**
+      #    症状: Qt を 6.11 → 6.9 に替えたのに `make` が
+      #    `undefined symbol: QObject::doSetProperty(char const*, QVariant const&, QVariant*)`
+      #    で落ちる。この**参照版のシグネチャは 6.11 にしか無い**(6.9 はポインタ版のみ。
+      #    qobject.h を両方読んで確認)── つまり `QtBuilder.o` が
+      #    **6.11 のヘッダでコンパイルされた古い ccache** から出ていた。
+      #    原因: LO は **depend mode の ccache**(`config_host.mk` の `CCACHE_DEPEND_MODE=1`
+      #    → `gbuild.mk:382` が `CCACHE_DEPEND=1`)で、**同じパスで中身だけ変わった
+      #    ヘッダ**を取りこぼす。`$QT6DIR` は版が変わってもパスが同じである。
+      #    🔑 **鍵で名前空間を分ける**(Qt キャッシュに対して既にやったのと同じ手)。
       - name: ccache を復元
         id: c_ccache
         uses: actions/cache/restore@v4
         with:
           path: /home/runner/.ccache
           # ⚠ 完全一致は狙わない ── 前回の続きから始められればよいので
-          #    `restore-keys` で**直近のもの**を拾う
-          key: ccache-lo-qt6-${{ github.sha }}
+          #    `restore-keys` で**同じ Qt の**直近のものを拾う
+          key: ccache-lo-qt6-${{ inputs.qt_ref }}-${{ hashFiles('build/office-wasm/qt-wasm-configure.args') }}-${{ github.sha }}
           restore-keys: |
-            ccache-lo-qt6-
+            ccache-lo-qt6-${{ inputs.qt_ref }}-${{ hashFiles('build/office-wasm/qt-wasm-configure.args') }}-
 
       - name: emsdk
         if: steps.c_emsdk.outputs.cache-hit != 'true'
@@ -445,7 +456,8 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: /home/runner/.ccache
-          key: ccache-lo-qt6-${{ github.sha }}
+          # ⚠ 復元側と**同じ形**でなければ、次の run が拾えない
+          key: ccache-lo-qt6-${{ inputs.qt_ref }}-${{ hashFiles('build/office-wasm/qt-wasm-configure.args') }}-${{ github.sha }}
 
       - name: 外部 tarball を保存
         if: always() && steps.c_tar.outputs.cache-hit != 'true'

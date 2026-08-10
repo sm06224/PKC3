@@ -103,6 +103,44 @@ describe('workflow の step', () => {
     expect(dupes).toEqual([]);
   });
 
+  it('🔴 ccache の鍵は Qt の同一性を含む(同じパスで中身が変わる罠)', () => {
+    // 🔴 2026-08-10 に実測で踏んだ。Qt を 6.11 → 6.9 に替えたのに、`make` が
+    // `undefined symbol: QObject::doSetProperty(char const*, QVariant const&, QVariant*)`
+    // で落ちた。**この参照版のシグネチャは 6.11 にしか無い**(6.9 はポインタ版のみ)──
+    // つまり **6.11 のヘッダでコンパイルされた古い object が ccache から出ていた**。
+    //
+    // 原因: LibreOffice は **depend mode の ccache** を使い、`$QT6DIR` は版が変わっても
+    // **パスが同じ**なので、中身だけ変わったヘッダを取りこぼす。
+    //
+    // ⚠ **Qt キャッシュの鍵は直したのに、ccache の鍵を直していなかった**
+    // (「1 巡目の修正は 2 巡目の対象である」を自分で踏んだ)。注意書きでは 2 度目を
+    // 止められないので、機械で止める。
+    const keys: { file: string; line: number; key: string }[] = [];
+    for (const file of FILES) {
+      const lines = readFileSync(join(DIR, file), 'utf-8').split('\n');
+      for (const [n, line] of lines.entries()) {
+        const m = /^\s*(?:key|restore-keys):\s*(\S.*)$/.exec(line);
+        if (m) keys.push({ file, line: n + 1, key: m[1]! });
+        // `restore-keys: |` のブロック本体も拾う
+        if (/^\s*restore-keys:\s*\|\s*$/.test(line)) {
+          for (let i = n + 1; i < lines.length; i += 1) {
+            const body = lines[i]!;
+            if (body.trim() === '' || !/^\s{10,}\S/.test(body)) break;
+            keys.push({ file, line: i + 1, key: body.trim() });
+          }
+        }
+      }
+    }
+    // 空振り防止 ── ccache の鍵が実際に在ること
+    const ccacheKeys = keys.filter((k) => /ccache/.test(k.key));
+    expect(ccacheKeys.length).toBeGreaterThan(0);
+
+    const offenders = ccacheKeys
+      .filter((k) => !/inputs\.qt_ref/.test(k.key))
+      .map((k) => `${k.file}:${k.line}: ${k.key}`);
+    expect(offenders).toEqual([]);
+  });
+
   it('🔴 同一 job 内に同じ step 名が 2 つ無い(貼り付けの取り違えを見つける)', () => {
     // id 重複だけを見ると、**id を持たない step の複製**が素通りする
     // (実際の事故では `- name: 上流 Qt6 経路の取りこぼしを当てる` も 3 つあった)。
