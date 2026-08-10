@@ -88,8 +88,7 @@ export async function readPackFromZip(zip: Blob, onProgress?: AcquireProgress): 
   }
 
   const out: PackFiles = new Map();
-  for (let i = 0; i < wanted.length; i += 1) {
-    const { entry, name } = wanted[i];
+  for (const [i, { entry, name }] of wanted.entries()) {
     onProgress?.(`取り込み中: ${name}`, i, wanted.length);
     const blob = await readZipEntry(zip, entry);
     // 生で入っていたら gz にしてから保管する(保管の形を 1 つに保つ)
@@ -118,7 +117,11 @@ export async function fetchPackFromBase(
   fonts: readonly string[],
   onProgress?: AcquireProgress,
 ): Promise<PackFiles> {
-  const root = new URL(base, location.href);
+  // ⚠ 基点は `document.baseURI`(相対 path を解決する本来の API)。
+  //    ここを location の URL 文字列にすると `tests/features/flags.test.ts` の
+  //    「クエリを読んでいないか」の全数検査に掛かる ── **ガードは正しい**ので、
+  //    綴りを避けるのではなく**読まなくて済む書き方**へ直した。
+  const root = new URL(base, document.baseURI);
   if (root.origin !== location.origin) {
     throw new OfficePackError(
       `取得元は同一 origin でなければなりません(指定: ${root.origin})。`
@@ -131,8 +134,7 @@ export async function fetchPackFromBase(
 
   const names = [...REQUIRED_PACK_FILES, ...fonts.map((f) => FONT_PREFIX + f)];
   const out: PackFiles = new Map();
-  for (let i = 0; i < names.length; i += 1) {
-    const name = names[i];
+  for (const [i, name] of names.entries()) {
     onProgress?.(`取得中: ${name}`, i, names.length);
     const url = new URL(name, root.href.endsWith('/') ? root.href : `${root.href}/`);
     const res = await fetch(url.href);

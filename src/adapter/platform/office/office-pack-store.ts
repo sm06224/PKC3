@@ -162,8 +162,7 @@ export class OfficePackStore {
     const names = [...files.keys()].sort();
     const metaFiles: OfficePackFileMeta[] = [];
     let totalBytes = 0;
-    for (let i = 0; i < names.length; i += 1) {
-      const name = names[i];
+    for (const [i, name] of names.entries()) {
       const blob = files.get(name);
       if (!blob) throw new OfficePackError(`内部矛盾: ${name} の Blob がありません`);
       opts.onProgress?.(i, names.length, name);
