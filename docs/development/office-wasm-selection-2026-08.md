@@ -505,6 +505,82 @@ grep -o "expand_executable externals for Executable/soffice.js: .*" /tmp/dbgstat
 リンクが通ることまでは示していない(`FT_*` 以外の未定義が残っている可能性は消えない)。
 主張の範囲を超えて読まない。
 
+→ **実際、残っていた。** 次の §3.8。
+
+## 3.8 🔴 2 つ目の欠落 ── 例外モデルの食い違い(2026-08-09)
+
+FreeType を直した run(31334536443)で `FT_*` は **1 件も出なくなり**、`make` は
+2h40m52s → **3h04m41s** と 24 分先へ進んだ。そこで出た次のエラー:
+
+```
+wasm-ld: error: libQt6Core.a(qglobal.cpp.o): undefined symbol: __resumeException
+```
+
+**例外処理 ABI の食い違い**である。両側を実物で読んだ:
+
+| | 例外モデル | 出典 |
+|---|---|---|
+| Qt(既定) | **JS 例外**(`-fexceptions`) | `qtbase/configure.cmake:1022-1026` ── `wasm-exceptions` は **`AUTODETECT OFF`** |
+| LibreOffice | **native Wasm 例外** | `gb_EMSCRIPTEN_EXCEPT = -fwasm-exceptions -s SUPPORT_LONGJMP=wasm`(`EMSCRIPTEN_INTEL_GCC.mk:44`) |
+
+`__resumeException` は **JS 例外ランタイム側の実体**なので、混ぜると解決されない。
+直し: Qt の wasm 側を **`-feature-wasm-exceptions`** で建てる ── 有効にすると Qt も
+`-fwasm-exceptions` + `-s SUPPORT_LONGJMP=wasm` を付ける(`QtWasmHelpers.cmake:29-42`)ので、
+**LO と完全に一致する**。
+
+⚠ **同型の食い違いを他にも探して、無いことを確かめた**(3 時間かけてから 3 つ目に気づくのを避ける):
+
+- **pthread**: LO は `-pthread -s USE_PTHREADS=1`、Qt は `-feature-thread` で `-pthread` → **一致**
+- **JSPI**: LO 側は既定 off(この run の `config_host.mk` で `ENABLE_EMSCRIPTEN_JSPI=` を実見)
+  → Qt に `-feature-wasm-jspi` は**足さない**
+
+### 🔴 キャッシュ鍵は**構成フラグから導出する**
+
+⚠ 鍵を `qt-…-v1` と固定していると、構成を変えても**古い Qt が復元されて同じエラーが
+再現する** ── 「直したのに直らない」に見え、原因を別の場所に探しに行く。
+手で `-v2` に上げる運用は忘れるので、フラグを file
+(`build/office-wasm/qt-wasm-configure.args`)へ出し、`hashFiles(...)` で鍵に織り込んだ。
+
+### 書きながら潰した 2 つの罠(どちらも「緑のまま間違う」型)
+
+1. **検査の当て先が間違っていた。** `QT_WASM_EXCEPTIONS` は install のどこにも現れず、
+   **正しく建っても落ちる検査**だった。手元の install を実見して
+   `#define QT_FEATURE_wasm_exceptions -1` を見つけ、そこへ当て直した(有効なら `1`)
+2. **行で分割すると `-nomake examples` が空白込みの 1 引数になる。**
+   引数境界を `printf '[%s]\n'` で印字して確認し、語分割へ直した
+
+## 3.9 ✅ **通った**(run 31344100469、2026-08-10)
+
+**LibreOffice for WebAssembly を Qt6 で建てることに成功した。** job 全体 success。
+
+| 生成物 | サイズ |
+|---|---|
+| `soffice.wasm` | **156,496,181 B**(149 MiB) |
+| `soffice.data` | 87,661,735 B(83.6 MiB) |
+| `soffice.js` | 836,819 B |
+| `qtloader.js` | 12,135 B |
+| `bindings_uno.js` | 739,337 B |
+| artifact zip 合計 | 81,304,362 B(77.5 MiB) |
+
+### ビルド時間 ── 「毎回 3 時間」は 1 回で終わった
+
+| run | Qt | LO `make` | job 合計 |
+|---|---|---|---|
+| 31334536443(全部冷間) | 26m05s | **3h04m41s** | ~3h35m |
+| 31344100469(Qt は再構成で建て直し / ccache・tarball 温間) | 18m35s | **16m02s** | **37m30s** |
+
+ccache: 1 回目 hit **2.88%**(13,197 miss)→ 2 回目は `make` が 16 分。
+外部 tarball 525MB もキャッシュ済みで、約 100 件のダウンロードが消えた。
+**Qt を再構成しなければ、次は 20 分程度**の見込み。
+
+### ⚠ ここまでで**言えないこと**
+
+- **1 度もブラウザで動かしていない。** 「建った」は「動く」ではない
+- `TOTAL_MEMORY=1GB`(`EMSCRIPTEN_INTEL_GCC.mk:18`)+ `soffice.data` 83.6MiB の
+  eager preload ── **常駐メモリは実測が要る**(不可侵指示「効くのは定常」)。
+  配る量(245MB)は判断理由にしないが、**常駐は判断理由になる**
+- 日本語はまだ**豆腐**のはず(§3.5.3 の穴 4 つは未着手)
+
 ## 4. 軽量閲覧レーン(本命の保険 / 併走候補)
 
 docx = docx-preview、xlsx = SheetJS(+UI が要るなら Univer)、pptx = pptx-viewer-core、
