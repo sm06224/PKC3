@@ -549,7 +549,7 @@ wasm-ld: error: libQt6Core.a(qglobal.cpp.o): undefined symbol: __resumeException
 2. **行で分割すると `-nomake examples` が空白込みの 1 引数になる。**
    引数境界を `printf '[%s]\n'` で印字して確認し、語分割へ直した
 
-## 3.9 ✅ **通った**(run 31344100469、2026-08-10)
+## 3.9 ⚠ **リンクは通った**(run 31344100469、2026-08-10)── ただし**動かなかった**(§3.10)
 
 **LibreOffice for WebAssembly を Qt6 で建てることに成功した。** job 全体 success。
 
@@ -580,6 +580,102 @@ ccache: 1 回目 hit **2.88%**(13,197 miss)→ 2 回目は `make` が 16 分。
   eager preload ── **常駐メモリは実測が要る**(不可侵指示「効くのは定常」)。
   配る量(245MB)は判断理由にしないが、**常駐は判断理由になる**
 - 日本語はまだ**豆腐**のはず(§3.5.3 の穴 4 つは未着手)
+
+→ **実際、動かなかった。** 次の §3.10。
+
+## 3.10 🔴 「建った」と「動く」の間に 3 つあった(2026-08-10)
+
+§3.9 で「通った」と書いた版は、**ブラウザで 1 度も UI が出なかった**。
+以下は、そこから実測で辿った 3 段である。
+
+### ⚠ まず、私の成功判定が間違っていた(run 31350624048)
+
+probe は `ok:true` を返したが、中身は:
+
+    "wasm": { "hasModule": false, "canvases": 0 }
+    "consoleErrors": ["pthread_create: could not find canvas with ID \"#qtcanvas\" ..."]
+
+判定を「`#screen` が `block`」= Qt の `onLoaded` に置いていたため、
+**画面が空でも成功**になっていた。🔑 主張したいのは「LibreOffice の面が出た」
+なので、**大きさを持つ canvas が `#screen` の中に在ること**へ書き直した
+(`onLoaded` は途中経過として別欄に残す ── 消すとどこまで進んだか分からない)。
+3 題材で検品し、**「onLoaded だけ出て canvas 0」が落ちる**ことを確かめた。
+
+### (3) `#qtcanvas` ── Qt5 の canvas id を Qt6 に渡していた
+
+`desktop/Executable_soffice_bin.mk:70` が `PROXY_TO_PTHREAD` + GUI のとき
+`-sOFFSCREENCANVASES_TO_PTHREAD=#qtcanvas` を渡す。⚠ **上流の条件は Qt5/Qt6 を
+区別していない**。Qt6 は `#screen` の中へ動的に canvas を作るので、この id は無い
+(qtbase を `qtcanvas` / `OFFSCREENCANVAS` / `PROXY_TO_PTHREAD` で grep して全部 0 件)。
+
+🔴 **警告ではない。** emscripten `libpthread.js:730` は canvas が無いと
+`error = EINVAL; break;` として **`pthread_create` を失敗させる**。
+`-sPROXY_TO_PTHREAD=1` では**その pthread が `main()` 本体**なので、
+**LibreOffice の main が 1 度も走らない**。
+
+### (4) 🔑 そもそも**組み合わせが違った** ── Qt6 のモードは JSPI + 非 PROXY
+
+(3) を直すと `main()` は走り、次はこれで落ちた:
+
+    TypeError: Cannot read properties of undefined (reading 'chrome')
+      ← qtbase qwasmclipboard.cpp:168  val::global("window")["chrome"]
+
+**worker に `window` は無い。** ここで「4 つ目の個別バグ」と数えかけたが、
+LO 側を読むと Qt6 対応は**ひとつのモードとして**書かれていた:
+
+    ENABLE_QT6 && HAVE_EMSCRIPTEN_JSPI && !HAVE_EMSCRIPTEN_PROXY_TO_PTHREAD
+
+`QtInstance.cxx` に 7 箇所、`.hxx` 2、`QtTimer.cxx`、`scheduler.cxx` 2 ── 計 8 file。
+**このモード専用の並行機構** `comphelper/emscriptenthreading` まで在る。
+私は既定(JSPI off / PROXY_TO_PTHREAD on = **Qt5 用の組み合わせ**)で建てていた。
+
+🔑 **個別のバグを 1 つずつ潰す前に、組み合わせが正しいかを疑う。**
+(3) の `#qtcanvas` は、正しいモードなら**そもそも出ないフラグ**だった。
+
+### (5) Qt の版 ── LO の JSPI export は **6.9 にしか無い**
+
+JSPI モードで建てると、リンクで:
+
+    wasm-ld: symbol exported via --export not found: …qstdweb::EventListener…
+
+LO はこの Qt シンボルを 2 か所で名指しする
+(`desktop/CustomTarget_soffice_bin-emscripten-exports.mk:25` /
+`EMSCRIPTEN_INTEL_GCC.mk:36`)。生むのは Qt **6.9** の `qstdweb.cpp:754-758`:
+
+```cpp
+emscripten::class_<EventListener>("QtEventListener")
+    .constructor<uintptr_t>()
+    .function("handleEvent", &EventListener::handleEvent);
+```
+
+4 ブランチを実際に fetch して数えた:
+
+| Qt | `qstdweb.cpp` の EventListener | embind 登録 |
+|---|---|---|
+| **6.9** | **7** | **3** |
+| 6.10 / 6.11 / 6.12 | 0 | 0 |
+
+6.10 で `QWasmSuspendResumeControl` へ置き換えられて消えている。
+⚠ 版だけ替えて別の壁に当たらないよう、6.9 に `-feature-wasm-exceptions` /
+`-feature-wasm-jspi` が在ることも `configure.cmake:1009/1017` で先に確認した。
+
+### この期間に置いた「早く鳴る門」3 つ
+
+どれも**リンクまで 16 分待たずに**落とすためのもの:
+
+1. **Qt の構成が生成物に反映されているか** ── `qconfig.h` の
+   `#define QT_FEATURE_wasm_{exceptions,jspi} 1`。⚠ 最初 `QT_WASM_EXCEPTIONS` を
+   見ようとしたが install のどこにも無く、**正しく建っても落ちる検査**だった
+2. **LO のモードが立っているか** ── `config_host.mk` の
+   `ENABLE_EMSCRIPTEN_JSPI=TRUE` / `ENABLE_EMSCRIPTEN_PROXY_TO_PTHREAD=`(空)
+3. **LO が要求する Qt シンボルが在るか** ── `llvm-nm` で `libQt6Core.a` を見る。
+   ⚠ **Qt ビルド step の中ではなく独立の step**に置いた(cache から復元した古い Qt にも
+   効かせる)。⚠ シンボル名は**直書きせず LO 側から抽出**して突き合わせる。
+   ⚠ 正の対照(`nm` の出力が 1000 行超)を先に主張し、空 archive に「無い」と言わせない
+
+⚠ **`make -n` で `OFFSCREENCANVAS` の消滅を見る検査は空振りだった**(対照群も 0 件)──
+tarball の段で止まってリンク行に到達しないため。生成された `soffice.js` を
+見る形へ直した。**検査を書いたら対照群を取る。**
 
 ## 4. 軽量閲覧レーン(本命の保険 / 併走候補)
 
