@@ -50,6 +50,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 350
+    # 🔑 成果物を **prerelease** として出すために要る(下の「手元で回せるようにする」)
+    permissions:
+      contents: write
     # 🔴 **step ごとに別シェル**なので、configure step で export しても `make` へ届かない。
     #    `make` は config_host.mk が古いと **autogen を再実行する**ので、そこで QT6DIR が
     #    無いと「Qmake not found」で落ちる(2026-08-09 に実際に踏んだ)。job 単位で渡す。
@@ -427,6 +430,39 @@ jobs:
                    qt_soffice.html qtloader.js; do
             test -f "workdir/installation/LibreOffice/emscripten/$f"
           done
+
+      # 🔴 **手元で回せるようにする**(user 指示 2026-08-10
+      #    「ビルド通ってるんだから、あなたの環境に落として試せばいいんじゃない?」)。
+      #    ⚠ **artifact は API 経由でしか落とせず、この箱からは api.github.com が 403**。
+      #    一方 **in-scope repo の github.com は 200** なので、**prerelease の資産**
+      #    なら手元へ届く(実測: /releases が 200)。
+      #    🔑 これは検証用の抜け道ではなく、**`wasm-pack-store` の配布経路そのもの**
+      #    (巨大 wasm を release に置き、初回だけ取得してローカルへ保存する設計)。
+      #    ⚠ tag は**使い回す** ── run ごとに 80MB を積み上げない。
+      #    ⚠ probe が失敗しても出す(`if: always()`)── **落ちた回の成果物こそ要る**。
+      - name: 手元で回せるように prerelease へ出す
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          d=~/lo-core/workdir/installation/LibreOffice/emscripten
+          if [ ! -d "$d" ]; then echo '(実行一式が無い ── publish しない)'; exit 0; fi
+          cd "$d"
+          zip -q -r /tmp/lo-wasm-qt6.zip .
+          ls -la /tmp/lo-wasm-qt6.zip
+          tag=lo-wasm-dev
+          # 既存を消してから作り直す(tag を使い回して容量を積まない)
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+          fi
+          gh release create "$tag" /tmp/lo-wasm-qt6.zip \
+            --repo "$GITHUB_REPOSITORY" \
+            --prerelease \
+            --title 'LibreOffice wasm (Qt6) 開発ビルド ── 検証用' \
+            --notes "自動生成。run ${GITHUB_RUN_ID} / commit ${GITHUB_SHA}。
+            ⚠ 製品ではない。#88 の検証のために置いている。tag は使い回すので中身は入れ替わる。"
+          echo "落とし先: https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/lo-wasm-qt6.zip"
 
       # 🔴 **「建った」は「動く」ではない。** 実ブラウザで起動させ、
       #    不可侵指示「効くのは定常」に従って**常駐メモリ**を測る。
