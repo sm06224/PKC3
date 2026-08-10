@@ -21,8 +21,19 @@ on:
   workflow_dispatch:
     inputs:
       qt_ref:
-        description: 'qtbase の ref(Qt6 wasm は IME を持つ ── 5.15 には無い)'
-        default: '6.11'
+        # 🔴 **6.9 でなければならない**(2026-08-10、run 31353996894 の実測で確定)。
+        #    LO は `-sJSPI_EXPORTS` と `EXPORTED_FUNCTIONS` で **Qt の embind シンボル**
+        #    `…MethodInvoker…qstdweb::EventListener…invoke…` を名指しする
+        #    (`desktop/CustomTarget_soffice_bin-emscripten-exports.mk:25` /
+        #    `EMSCRIPTEN_INTEL_GCC.mk:36`)。このシンボルを生む
+        #    `class_<EventListener>("QtEventListener").function("handleEvent", …)` は
+        #    **Qt 6.9 の `qstdweb.cpp:754-758` にしか無い** ── 6.10 で
+        #    `QWasmSuspendResumeControl` へ置き換えられて消えた(6.9/6.10/6.11/6.12 を
+        #    実際に fetch して数えた: 6.9 のみ 7 箇所、他は 0)。
+        #    6.11 で建てると `wasm-ld: symbol exported via --export not found` で落ちる。
+        #    ⚠ **上げるときは、まずこのシンボルが在るかを確かめること。**
+        description: 'qtbase の ref(⚠ LO の JSPI export が要求するため 6.9 固定)'
+        default: '6.9'
       emsdk:
         description: 'emsdk の版(LibreOffice の README.wasm.md が指定する版に合わせる)'
         default: '4.0.10'
@@ -235,6 +246,31 @@ jobs:
           done
           echo "applied $n patches"
           test "$n" -ge 2
+
+      # 🔴 **Qt と LO の「握手」を、リンクの 16 分前に確かめる**(2026-08-10)。
+      #    LO は Qt の embind シンボルを名指しで export する。無いと
+      #    `wasm-ld: symbol exported via --export not found` で**最後に**落ちる。
+      #    ⚠ **cache から復元した Qt にも効かせたい**ので、Qt ビルド step の中ではなく
+      #    独立の step に置く(古い Qt が戻ったときこそ鳴ってほしい)。
+      #    ⚠ 名前を**ここに直書きしない** ── LO 側の定義から取り出し、
+      #    2 か所が食い違わないようにする(判定は 1 か所へ寄せる)。
+      - name: LO が要求する Qt シンボルが在ることを確かめる
+        run: |
+          set -euxo pipefail
+          sym=$(grep -o '_ZN10emscripten[A-Za-z0-9_]*' \
+            ~/lo-core/solenv/gbuild/platform/EMSCRIPTEN_INTEL_GCC.mk | head -1)
+          # 空振り防止 ── LO 側から名前が取れていること
+          test -n "$sym"
+          echo "LO が要求するシンボル: $sym"
+          nm=~/emsdk/upstream/bin/llvm-nm
+          # 正の対照 ── 本物の archive を読めていること(記号が大量に出る)
+          test "$("$nm" ~/qt-wasm/install/lib/libQt6Core.a | wc -l)" -gt 1000
+          if ! "$nm" ~/qt-wasm/install/lib/libQt6Core.a | grep -q -- "$sym"; then
+            echo "ERROR: この Qt に $sym が無い" >&2
+            echo '  → qstdweb::EventListener の embind 登録は **Qt 6.9 にしか無い**' >&2
+            echo '  → qt_ref を 6.9 にするか、LO 側の export を外す' >&2
+            exit 1
+          fi
 
       # ⚠ 上流の `LibreOfficeWASM32.conf` は `--enable-qt5` を含む。そこへ `--enable-qt6` を
       #    足すだけだと VCL プラグインが 2 個になり、`configure.ac:12691` の
