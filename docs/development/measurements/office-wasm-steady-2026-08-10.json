@@ -1,0 +1,365 @@
+{
+  "base": "http://127.0.0.1:44021",
+  "armMs": 300000,
+  "fonts": [
+    "BIZUDGothic-Regular.ttf",
+    "BIZUDMincho-Regular.ttf",
+    "BIZUDPGothic-Regular.ttf"
+  ],
+  "arms": [
+    {
+      "arm": "idle",
+      "samples": [
+        {
+          "atMs": 15029,
+          "rssKb": 1592320,
+          "strokes": 0,
+          "longTasks": 0,
+          "longTaskMs": 0
+        },
+        {
+          "atMs": 30055,
+          "rssKb": 1592576,
+          "strokes": 0,
+          "longTasks": 0,
+          "longTaskMs": 0
+        },
+        {
+          "atMs": 45083,
+          "rssKb": 1588180,
+          "strokes": 0,
+          "longTasks": 0,
+          "longTaskMs": 0
+        },
+        {
+          "atMs": 60114,
+          "rssKb": 1588392,
+          "strokes": 0,
+          "longTasks": 0,
+          "longTaskMs": 0
+        },
+        {
+          "atMs": 75143,
+          "rssKb": 1588912,
+          "strokes": 0,
+          "longTasks": 0,
+          "longTaskMs": 0
+        },
+        {
+          "atMs": 90173,
+          "rssKb": 1588668,
+          "strokes": 0,
+          "longTasks": 0,
+          "longTaskMs": 0
+        },
+        {
+          "atMs": 105236,
+          "rssKb": 1589968,
+          "strokes": 0,
+          "longTasks": 0,
+          "longTaskMs": 0
+        },
+        {
+          "atMs": 120272,
+          "rssKb": 1589432,
+          "strokes": 0,
+          "longTasks": 0,
+          "longTaskMs": 0
+        },
+        {
+          "atMs": 135303,
+          "rssKb": 1596504,
+          "strokes": 0,
+          "longTasks": 0,
+          "longTaskMs": 0
+        },
+        {
+          "atMs": 150333,
+          "rssKb": 1595904,
+          "strokes": 0,
+          "longTasks": 0,
+          "longTaskMs": 0
+        },
+        {
+          "atMs": 165362,
+          "rssKb": 1595892,
+          "strokes": 0,
+          "longTasks": 0,
+          "longTaskMs": 0
+        },
+        {
+          "atMs": 180409,
+          "rssKb": 1596136,
+          "strokes": 0,
+          "longTasks": 0,
+          "longTaskMs": 0
+        },
+        {
+          "atMs": 195453,
+          "rssKb": 1596032,
+          "strokes": 0,
+          "longTasks": 0,
+          "longTaskMs": 0
+        },
+        {
+          "atMs": 210488,
+          "rssKb": 1596276,
+          "strokes": 0,
+          "longTasks": 0,
+          "longTaskMs": 0
+        },
+        {
+          "atMs": 225519,
+          "rssKb": 1596616,
+          "strokes": 0,
+          "longTasks": 0,
+          "longTaskMs": 0
+        },
+        {
+          "atMs": 240554,
+          "rssKb": 1596620,
+          "strokes": 0,
+          "longTasks": 0,
+          "longTaskMs": 0
+        },
+        {
+          "atMs": 255585,
+          "rssKb": 1596648,
+          "strokes": 0,
+          "longTasks": 0,
+          "longTaskMs": 0
+        },
+        {
+          "atMs": 270619,
+          "rssKb": 1596676,
+          "strokes": 0,
+          "longTasks": 0,
+          "longTaskMs": 0
+        },
+        {
+          "atMs": 285653,
+          "rssKb": 1597424,
+          "strokes": 0,
+          "longTasks": 0,
+          "longTaskMs": 0
+        },
+        {
+          "atMs": 300683,
+          "rssKb": 1597440,
+          "strokes": 0,
+          "longTasks": 0,
+          "longTaskMs": 0
+        }
+      ],
+      "consoleErrors": [
+        "Blocking on the main thread is very dangerous, see https://emscripten.org/docs/porting/pthreads.html#blocking-on-the-main-browser-thread",
+        "warning: unsupported syscall: __syscall_mprotect\n"
+      ],
+      "baselineRssKb": 819956,
+      "painted": true,
+      "fontsInjected": 3,
+      "afterOpenRssKb": 1625780,
+      "strokes": 0,
+      "endRssKb": 1597440,
+      "pixelDiffRatio": 0.001,
+      "screenChanged": true,
+      "input": {
+        "keyEventsOver16ms": 0,
+        "keyP50Ms": null,
+        "keyP95Ms": null,
+        "keyMaxMs": null,
+        "longTasks": 0,
+        "longTaskTotalMs": 0,
+        "longTaskP95Ms": null,
+        "longTaskMaxMs": null
+      },
+      "bootWindow": {
+        "longTasks": 11,
+        "longTaskTotalMs": 3531
+      }
+    },
+    {
+      "arm": "edit",
+      "samples": [
+        {
+          "atMs": 15211,
+          "rssKb": 1604500,
+          "strokes": 25,
+          "longTasks": 4,
+          "longTaskMs": 230
+        },
+        {
+          "atMs": 30392,
+          "rssKb": 1606136,
+          "strokes": 53,
+          "longTasks": 4,
+          "longTaskMs": 230
+        },
+        {
+          "atMs": 45357,
+          "rssKb": 1602124,
+          "strokes": 81,
+          "longTasks": 4,
+          "longTaskMs": 230
+        },
+        {
+          "atMs": 60222,
+          "rssKb": 1602136,
+          "strokes": 108,
+          "longTasks": 4,
+          "longTaskMs": 230
+        },
+        {
+          "atMs": 75348,
+          "rssKb": 1603252,
+          "strokes": 136,
+          "longTasks": 4,
+          "longTaskMs": 230
+        },
+        {
+          "atMs": 90374,
+          "rssKb": 1604604,
+          "strokes": 164,
+          "longTasks": 4,
+          "longTaskMs": 230
+        },
+        {
+          "atMs": 105063,
+          "rssKb": 1605724,
+          "strokes": 191,
+          "longTasks": 4,
+          "longTaskMs": 230
+        },
+        {
+          "atMs": 120236,
+          "rssKb": 1607192,
+          "strokes": 219,
+          "longTasks": 4,
+          "longTaskMs": 230
+        },
+        {
+          "atMs": 135353,
+          "rssKb": 1607988,
+          "strokes": 247,
+          "longTasks": 4,
+          "longTaskMs": 230
+        },
+        {
+          "atMs": 150512,
+          "rssKb": 1608244,
+          "strokes": 275,
+          "longTasks": 4,
+          "longTaskMs": 230
+        },
+        {
+          "atMs": 165419,
+          "rssKb": 1609072,
+          "strokes": 302,
+          "longTasks": 4,
+          "longTaskMs": 230
+        },
+        {
+          "atMs": 180418,
+          "rssKb": 1615472,
+          "strokes": 330,
+          "longTasks": 4,
+          "longTaskMs": 230
+        },
+        {
+          "atMs": 195492,
+          "rssKb": 1615760,
+          "strokes": 358,
+          "longTasks": 4,
+          "longTaskMs": 230
+        },
+        {
+          "atMs": 210208,
+          "rssKb": 1616728,
+          "strokes": 385,
+          "longTasks": 4,
+          "longTaskMs": 230
+        },
+        {
+          "atMs": 225202,
+          "rssKb": 1618372,
+          "strokes": 413,
+          "longTasks": 4,
+          "longTaskMs": 230
+        },
+        {
+          "atMs": 240159,
+          "rssKb": 1617712,
+          "strokes": 441,
+          "longTasks": 4,
+          "longTaskMs": 230
+        },
+        {
+          "atMs": 255307,
+          "rssKb": 1617644,
+          "strokes": 469,
+          "longTasks": 4,
+          "longTaskMs": 230
+        },
+        {
+          "atMs": 270479,
+          "rssKb": 1618152,
+          "strokes": 497,
+          "longTasks": 4,
+          "longTaskMs": 230
+        },
+        {
+          "atMs": 285513,
+          "rssKb": 1618964,
+          "strokes": 525,
+          "longTasks": 4,
+          "longTaskMs": 230
+        },
+        {
+          "atMs": 300331,
+          "rssKb": 1618500,
+          "strokes": 552,
+          "longTasks": 5,
+          "longTaskMs": 282
+        }
+      ],
+      "consoleErrors": [
+        "Blocking on the main thread is very dangerous, see https://emscripten.org/docs/porting/pthreads.html#blocking-on-the-main-browser-thread",
+        "warning: unsupported syscall: __syscall_mprotect\n"
+      ],
+      "baselineRssKb": 823588,
+      "painted": true,
+      "fontsInjected": 3,
+      "afterOpenRssKb": 1631036,
+      "strokes": 552,
+      "endRssKb": 1618500,
+      "pixelDiffRatio": 0.178,
+      "saved": {
+        "bytes": 98647,
+        "ascii": 138
+      },
+      "screenChanged": true,
+      "input": {
+        "keyEventsOver16ms": 1314,
+        "keyP50Ms": 16,
+        "keyP95Ms": 24,
+        "keyMaxMs": 48,
+        "longTasks": 6,
+        "longTaskTotalMs": 635,
+        "longTaskP95Ms": 353,
+        "longTaskMaxMs": 353
+      },
+      "bootWindow": {
+        "longTasks": 11,
+        "longTaskTotalMs": 3662
+      }
+    }
+  ],
+  "summary": {
+    "idleOpenMb": 786.9,
+    "idleEndMb": 759.3,
+    "editOpenMb": 788.5,
+    "editEndMb": 776.3,
+    "editCostMb": 17
+  },
+  "ok": true
+}
