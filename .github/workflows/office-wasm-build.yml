@@ -272,6 +272,46 @@ jobs:
           test -f ~/lo-core/instdir/program/soffice.js
           ls -la ~/lo-core/instdir/program/soffice.*
 
+      # 🔑 **実行に要る file 一式は上流の list に従う**(自分で並べない)。
+      #    `instsetoo_native/CustomTarget_emscripten-install.mk` が
+      #    workdir/installation/LibreOffice/emscripten へ必要物を集める ──
+      #    ⚠ `soffice.data.js.metadata` / `qt_soffice.html` / `qtloader.js` /
+      #    `qtlogo.svg` が要ることは、この list を読むまで気づかなかった。
+      #    手で並べていたら**起動できない一式**を配るところだった。
+      - name: 実行一式を集める(上流の install list)
+        run: |
+          set -euxo pipefail
+          cd ~/lo-core
+          . ~/emsdk/emsdk_env.sh
+          make instsetoo_native
+          ls -la workdir/installation/LibreOffice/emscripten/
+          # ⚠ 起動に不可欠な 4 つを名指しで主張する(在ることを step として言う)
+          for f in soffice.js soffice.wasm soffice.data soffice.data.js.metadata \
+                   qt_soffice.html qtloader.js; do
+            test -f "workdir/installation/LibreOffice/emscripten/$f"
+          done
+
+      # 🔴 **「建った」は「動く」ではない。** 実ブラウザで起動させ、
+      #    不可侵指示「効くのは定常」に従って**常駐メモリ**を測る。
+      #    ⚠ 対照群は同じサーバ・同じ COOP/COEP・同じブラウザの空ページ。
+      #    ⚠ 観測点は Qt の `onLoaded`(#screen が block / #qtspinner が none)で、
+      #    失敗側(Application exit / timeout)も同じ待ちで拾う ── 沈黙を成功と読まない。
+      #    ハーネスは手元で**成功側・失敗側の両方が鳴ること**を確認済み。
+      - name: ブラウザで起動して常駐を測る
+        env:
+          # CI に /opt/pw-browsers は無いので probe は自動的に channel 側へ落ちる。
+          # 既定(未指定)だと **headless_shell** = 手元と別のバイナリになるため、
+          # **フル chromium** を名指しする(どちらで測ったかは JSON にも残る)
+          PKC3_CHROMIUM_CHANNEL: chromium
+        run: |
+          set -euxo pipefail
+          cd "$GITHUB_WORKSPACE"
+          npm ci
+          npx playwright install --with-deps chromium
+          node build/office-wasm/boot-probe.mjs \
+            ~/lo-core/workdir/installation/LibreOffice/emscripten \
+            ~/lo-core/boot-probe.json
+
       - name: 生成物
         if: always()
         run: |
@@ -299,9 +339,11 @@ jobs:
         if: always()
         with:
           name: lo-wasm-qt6
+          # ⚠ **配るのは「上流の install list が集めた一式」**。手で並べた 3 つでは
+          #    `soffice.data.js.metadata` / `qt_soffice.html` / `qtloader.js` が欠け、
+          #    **落としても起動できない**(2026-08-10 に気づいた)。
           path: |
-            ~/lo-core/instdir/program/soffice.wasm
-            ~/lo-core/instdir/program/soffice.js
-            ~/lo-core/instdir/program/soffice.data
+            ~/lo-core/workdir/installation/LibreOffice/emscripten
+            ~/lo-core/boot-probe.json
             ~/lo-core/config.log
           if-no-files-found: error
