@@ -83,6 +83,9 @@ jobs:
           path: /home/runner/emsdk
           key: emsdk-${{ inputs.emsdk }}-v1
 
+      # 🔴 **構成フラグを鍵に含める**(2026-08-09)。含めないと、構成を変えたのに
+      #    **古い Qt が復元されて同じリンクエラーが再現する**(= 直したのに直らない)。
+      #    ⚠ 手で `-v2` に上げる運用は忘れるので、**file の内容から導出**させる。
       - name: Qt6(host / wasm)を復元
         id: c_qt
         uses: actions/cache/restore@v4
@@ -90,7 +93,7 @@ jobs:
           path: |
             /home/runner/qt-host/install
             /home/runner/qt-wasm/install
-          key: qt-${{ inputs.qt_ref }}-emsdk-${{ inputs.emsdk }}-v1
+          key: qt-${{ inputs.qt_ref }}-emsdk-${{ inputs.emsdk }}-${{ hashFiles('build/office-wasm/qt-wasm-configure.args') }}
 
       - name: ccache を復元
         id: c_ccache
@@ -134,10 +137,9 @@ jobs:
           cmake --install .
           ls ~/qt-host/install/libexec/moc
 
-      # ⚠ `-feature-thread` は必須 ── LibreOffice 側が `-pthread -s USE_PTHREADS=1` を
-      #    要求する(`solenv/gbuild/platform/EMSCRIPTEN_INTEL_GCC.mk`)。
-      #    その結果 **COOP/COEP と SharedArrayBuffer が要る**(PKC3 では SW 注入で成立
-      #    することを実機確認済み ── 選定 doc §2.1)。
+      # 🔑 構成フラグは **build/office-wasm/qt-wasm-configure.args** に在る(理由もそこ)。
+      #    ここに直書きしないのは、**キャッシュ鍵をその file から導出している**ため ──
+      #    フラグと鍵が 1 か所で連動し、「構成を変えたのに古い Qt が戻る」事故が起きない。
       # ⚠ emsdk の版ズレは**警告止まり**(Qt 6.10/6.11 推奨 4.0.7 / こちら 4.0.10)。実測済み。
       - name: Qt6 wasm ビルド
         if: steps.c_qt.outputs.cache-hit != 'true'
@@ -145,14 +147,30 @@ jobs:
           set -eux
           . ~/emsdk/emsdk_env.sh
           mkdir -p ~/qt-wasm && cd ~/qt-wasm
+          # コメントを落として**語で**分割する。
+          # ⚠ 行で分割してはいけない ── `-nomake examples` が**空白込みの 1 引数**になり、
+          #    configure が受け取れない(手元で引数境界を印字して確認した)
+          # shellcheck disable=SC2207
+          QTARGS=( $(sed -e 's/#.*//' "$GITHUB_WORKSPACE/build/office-wasm/qt-wasm-configure.args") )
+          # ⚠ **当たったことを確かめる**(空振りを合格と読まない)── 読めていないのに
+          #    「既定で建った」を成功と読むと、また 3 時間かけて同じエラーに戻る
+          printf '[%s]\n' "${QTARGS[@]}"
+          test "${#QTARGS[@]}" -ge 8
+          printf '%s\n' "${QTARGS[@]}" | grep -qx -- -feature-wasm-exceptions
           ~/qtbase/configure -qt-host-path ~/qt-host/install -platform wasm-emscripten \
-            -prefix ~/qt-wasm/install -release -nomake examples -nomake tests \
-            -feature-thread -no-dbus -no-icu
+            -prefix ~/qt-wasm/install -release "${QTARGS[@]}"
           cmake --build . --parallel "$(nproc)"
           cmake --install .
           # LibreOffice の configure.ac:14296 が探す 2 つの実体
           test -f ~/qt-wasm/install/plugins/platforms/libqwasm.a
           test -f ~/qt-wasm/install/plugins/platforms/wasm_shell.html
+          # 🔴 **例外モデルが LO と一致したことを、建った実物で確かめる。**
+          #    ⚠ 「configure に渡した」ではなく「**生成物がそう建っている**」を見る。
+          #    ⚠ 当て先を 1 度間違えた ── `QT_WASM_EXCEPTIONS` は install のどこにも
+          #    現れない(**正しく建っても落ちる検査**だった)。実物に在る印はこれ:
+          #    無効なら `-1`、有効なら `1`(手元の install で `-1` を実見して確認)
+          grep -qx '#define QT_FEATURE_wasm_exceptions 1' \
+            ~/qt-wasm/install/include/QtCore/qconfig.h
 
       - name: Qt6 を保存
         if: always() && steps.c_qt.outputs.cache-hit != 'true'
@@ -161,7 +179,7 @@ jobs:
           path: |
             /home/runner/qt-host/install
             /home/runner/qt-wasm/install
-          key: qt-${{ inputs.qt_ref }}-emsdk-${{ inputs.emsdk }}-v1
+          key: qt-${{ inputs.qt_ref }}-emsdk-${{ inputs.emsdk }}-${{ hashFiles('build/office-wasm/qt-wasm-configure.args') }}
 
       - name: emsdk を保存
         if: always() && steps.c_emsdk.outputs.cache-hit != 'true'
