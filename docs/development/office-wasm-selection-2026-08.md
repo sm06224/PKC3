@@ -702,6 +702,102 @@ emscripten::class_<EventListener>("QtEventListener")
 tarball の段で止まってリンク行に到達しないため。生成された `soffice.js` を
 見る形へ直した。**検査を書いたら対照群を取る。**
 
+## 3.11 ✅ **動いた ── 日本語も出た**(2026-08-10)
+
+独自ビルドした LibreOffice(Qt6 / JSPI)が**実ブラウザで起動し、Writer で日本語文書を
+組んだ**。§3.9〜§3.10 で「建ったが動かない」と書いた状態は解消している。
+
+![LibreOffice Start Center が wasm で起動している](images/office-wasm-start-center.png)
+
+### 🔴 まず訂正 ── 「動かない」は**私の観測点の誤り**だった
+
+§3.10 で判定を `onLoaded` から「`#screen` の中に大きさを持つ canvas が在ること」へ
+直した。向きは正しかったが、**書き方が間違っていた**:
+
+```
+#screen > #qt-shadow-container ─⟨shadowRoot⟩→ .qt-screen
+  → #qt-window-1 → .qt-window > canvas.qt-window-canvas   (1165x744)
+```
+
+Qt 6 の面は **shadow root の中**に在る。`querySelectorAll` は shadow 境界を越えないので、
+`#screen.querySelectorAll('canvas')` は**動いていても永遠に 0 枚**を返す。私はその 0 を
+信じて、在りもしないデッドロックを何時間も追った ── mailbox / JSPI / スレッドの CPU 時間まで
+計装したが、**同じ run が撮っていた screenshot には Start Center が完全に描かれていた**。
+
+🔑 **数える前に、まず見る。** 視覚を持つものを「数えた値」だけで判定するときは、
+**同じ run で screenshot を撮り、必ず 1 度は目で見る**。
+🔑 CLAUDE.md「検査の『主張そのもの』が間違っていることがある」の 2 例目。1 例目は
+「守れない条件」、今回は「**そもそも到達できない探索経路**」── どちらも*緑に見える / 赤に見える*
+だけで、**主張とは無関係**だった。
+🔑 対策として probe に**対照群**を入れた:境界を越えない `shallow` の枚数を併記し、
+`canvases > 0 && shallow === 0` が正常であることを結果 JSON に残す
+(`build/office-wasm/boot-probe.mjs`)。
+
+### 実測(手元 `/opt/pw-browsers/chromium`、COOP/COEP、persistent profile)
+
+| 項目 | 値 |
+|---|---|
+| 起動 → 面が出るまで | **3.98 秒** |
+| 常駐 RSS(対照群 = 同条件の空ページとの差) | **+636.6 MB**(822.7MB → 1474.5MB) |
+| `measureUserAgentSpecificMemory()` | 2.28 GB |
+| canvas | 1 枚 1165x744(`shallow` は 0 = 想定どおり) |
+| 起動後の console error | 2 件のみ(`Blocking on the main thread` 警告 / `__syscall_mprotect` 未対応警告) |
+
+⚠ この 636.6MB は **Start Center を出しただけの値**。不可侵指示「効くのは定常」に照らすと、
+**編集セッションを続けたときの推移**をまだ測っていない ── boot 窓だけで定常を語らない。
+
+### 日本語 ── 同梱フォントには **CJK が 1 つも無い**
+
+`soffice.data`(83.6MB)に入っているフォントは **128 file / 51.2MiB**。内訳はヘブライ
+(CLM 一式)・アラビア(Amiri / Noto Naskh / Scheherazade)・アルメニア・グルジア・ラオ・
+リス……と揃っているのに、**CJK は 0 件**(`Noto Sans CJK` / `Source Han` / IPA いずれも無し)。
+結果、日本語は**全部豆腐**になる:
+
+![CJK フォント未注入 ── 日本語が全部豆腐](images/office-wasm-ja-tofu.png)
+
+### 🔑 実行時に MEMFS へ流し込めば、そのまま解決する(実証済み)
+
+`FS.writeFile('/instdir/share/fonts/truetype/…', bytes)` で **起動後・`main()` 前**に
+書き込めば、fontconfig がそのまま拾う。BIZ UDGothic / UDPGothic / UDMincho の 3 本
+(計 15.2MB、`raw.githubusercontent.com/google/fonts/main/ofl/…` の TTF)を入れた結果:
+
+![BIZ UD 注入後 ── 日本語が正しく表示される](images/office-wasm-ja-bizud.png)
+
+ゴシックと明朝が**別のフォントとして効いている**(下段にウロコがある):
+
+![上: BIZ UDGothic / 下: BIZ UDMincho](images/office-wasm-ja-gothic-vs-mincho.png)
+
+⚠ **拡大して見るまで「明朝が効いていない」と誤読した。** 14pt の screenshot を等倍で
+眺めた印象で判断していた ── ここでも「まず見る」の**見方**が足りなかった。
+主張するなら**主張が成り立つ倍率で見る**。
+
+### 手順として確定した 3 点(実装時にそのまま使う)
+
+1. 🔑 **`preRun` を使わない。`noInitialRun: true` にして `main()` を自分で呼ぶ。**
+   `qtloader.js` は `config.preRun` に自分の `qtPreRun` を **push** し、
+   `noInitialRun` を尊重して `instance.callMain(originalArguments)` を飛ばす
+   (`qtloader.js:104-106, 180-182, 234-236`)。したがって
+   `await qtLoad({noInitialRun:true, …})` → `inst.FS.writeFile(…)` → `inst.callMain([path])`
+   の順で、**runtime が完全に立ち上がったあとに FS を触れる**。
+   ⚠ `preRun` 経路は ENOENT で落ちた(`/instdir` の見え方がその時点では違う)。
+2. ⚠ **`qt.environment`(= `LANG` 等)は使えない。** このビルドは `ENV` を export して
+   いないので `qtloader` が
+   `ENV must be exported if environment variables are passed` で**起動前に例外**を投げる。
+   ロケールを環境変数で渡す設計にしてはいけない ── 実際、文書側に
+   `style:language-asian="ja" style:country-asian="JP"` を書くだけでステータスバーは
+   `Chinese (simplified)` → `Japanese` になった。**既定ロケールは registry 側で解く**
+   (`VCL.xcu` 差し替えと同じ工程)。
+3. ⚠ 入力文書も同じ経路で渡す(`FS.writeFile('/work/x.fodt')` → `callMain(['/work/x.fodt'])`)。
+   引数無しだと Start Center が出る ── これは**壊れているのではなく、正しい挙動**である。
+
+### 次にやること(この節の未了)
+
+- **定常の計測**:編集セッションを続けたときの RSS 推移と long task(boot 窓で語らない)
+- **フォントの配り方**:15.2MB を `wasm-pack-store`(§5)に載せる。CJK は
+  「同梱しない巨大資産」の 2 例目になる
+- **既定ロケール / 既定 CJK フォント**:`VCL.xcu` + `fc_local.conf` の差し替え(#88 の裁定済み項目)
+- **縦書き・ルビ・禁則**の確認(「日本語は絶対」── 表示できたことと、組版が正しいことは別)
+
 ## 4. 軽量閲覧レーン(本命の保険 / 併走候補)
 
 docx = docx-preview、xlsx = SheetJS(+UI が要るなら Univer)、pptx = pptx-viewer-core、

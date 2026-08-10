@@ -23,6 +23,20 @@
  * **`#screen` の中に大きさを持つ canvas が在ること**にする ── `onLoaded` は
  * *途中経過*として別欄に残す(消すと、どこまで進んだか分からなくなる)。
  *
+ * 🔴 **その次に、判定の「探し方」で 1 日溶かした**(2026-08-10)。上の直しは
+ * 向きは正しかったのに `#screen.querySelectorAll('canvas')` と書いたので、
+ * **常に 0 枚**を返し続けた ── Qt 6 の面は **shadow root の中**に在る:
+ *   `#screen > #qt-shadow-container` →⟨shadowRoot⟩→ `.qt-screen`
+ *     → `#qt-window-1` → `.qt-window > canvas.qt-window-canvas`
+ * `querySelectorAll` は shadow 境界を越えないので、**動いている LibreOffice を
+ * 「起動しない」と報告し**、私は在りもしないデッドロックを何時間も追った
+ * (screenshot には Start Center が完全に描かれていた)。
+ * 🔑 CLAUDE.md「検査の『主張そのもの』が間違っていることがある」の実例。
+ * **観測点を直したら、その観測点自身にも対照群を当てる** ── ここでは
+ * 「shallow(境界を越えない探索)は 0 枚」を**併記**して、次に読む人が
+ * 同じ罠に落ちないようにする。⚠ screenshot を先に見ていれば 5 分で済んだ:
+ * **数える前に、まず見る。**
+ *
  * ⚠ `HEAPU8.byteLength` は「予約した量」であって「常駐」ではない
  * (LO は `-sTOTAL_MEMORY=1GB`)。**両方**出して、混同しないように別欄にする。
  *
@@ -55,6 +69,23 @@ const MIME = {
   '.metadata': 'application/json',
   '.data': 'application/octet-stream',
 };
+
+/**
+ * ページ内へ流し込む「**shadow root を越えて canvas を数える**」関数の原文。
+ * ⚠ `page.evaluate` はクロージャを持ち込めないので、文字列で渡して各所で使い回す ──
+ *    数え方が 2 通りに分かれると、片方だけ直して**また 0 枚を信じる**ことになる。
+ */
+const DEEP_CANVAS_FN = `(root) => {
+  const out = [];
+  const walk = (node) => {
+    for (const el of node.querySelectorAll('*')) {
+      if (el.tagName === 'CANVAS') out.push(el);
+      if (el.shadowRoot) walk(el.shadowRoot);
+    }
+  };
+  if (root) walk(root);
+  return out;
+}`;
 
 /** COOP/COEP を必ず付ける ── SharedArrayBuffer(= LO の -pthread)に要る。 */
 function serve() {
@@ -189,10 +220,17 @@ async function main() {
     const samples = [];
     sampler = setInterval(() => {
       page
-        .evaluate(() => ({
-          canvases: document.querySelectorAll('#screen canvas').length,
-          status: (document.querySelector('#qtstatus')?.textContent ?? '').slice(0, 60),
-        }))
+        .evaluate((fnSrc) => {
+          const deep = eval(fnSrc);
+          return {
+            canvases: deep(document.querySelector('#screen')).length,
+            // ⚠ 対照群: 境界を越えない数え方。**0 のままなのが正常** ──
+            //    ここが canvases と同じ値になったら、Qt が shadow root を
+            //    やめたということなので、上の deep 探索を疑ってよい
+            shallow: document.querySelectorAll('#screen canvas').length,
+            status: (document.querySelector('#qtstatus')?.textContent ?? '').slice(0, 60),
+          };
+        }, DEEP_CANVAS_FN)
         .then((v) => {
           samples.push({ atMs: Date.now() - t0, console: consoleAll.length, ...v });
         })
@@ -203,7 +241,7 @@ async function main() {
     //    「起動した」「終了した」「例外が出た」の 3 つを同じ待ちで拾う。
     const outcome = await page
       .waitForFunction(
-        () => {
+        (fnSrc) => {
           const spinner = document.querySelector('#qtspinner');
           const screen = document.querySelector('#screen');
           const status = document.querySelector('#qtstatus');
@@ -213,14 +251,16 @@ async function main() {
           if (css(screen).display === 'block' && css(spinner).display === 'none') {
             globalThis.__pkc3OnLoadedAt ??= Date.now();
           }
-          // 🔑 主張は「LibreOffice の面が出た」── 大きさを持つ canvas を要求する
-          for (const c of screen.querySelectorAll('canvas')) {
-            if (c.width > 0 && c.height > 0) return 'painted';
+          // 🔑 主張は「LibreOffice の面が出た」── **shadow root を越えて**
+          //    大きさを持つ canvas を要求する(境界を越えないと永遠に 0 枚)
+          for (const c of eval(fnSrc)(screen)) {
+            const box = c.getBoundingClientRect();
+            if (c.width > 0 && c.height > 0 && box.width > 0 && box.height > 0) return 'painted';
           }
           if ((status?.textContent ?? '').includes('Application exit')) return 'exited';
           return false;
         },
-        undefined,
+        DEEP_CANVAS_FN,
         { timeout: BOOT_TIMEOUT_MS, polling: 500 },
       )
       .then((h) => h.jsonValue())
@@ -242,15 +282,19 @@ async function main() {
         ((result.afterBoot.rssKb - result.baseline.rssKb) / 1024) * 10,
       ) / 10;
 
-      result.wasm = await page.evaluate(() => {
+      result.wasm = await page.evaluate((fnSrc) => {
         const m = globalThis.Module;
+        const cs = eval(fnSrc)(document.querySelector('#screen'));
         return {
           // ⚠ これは「予約した量」── 常駐ではない(-sTOTAL_MEMORY=1GB)
           heapReservedBytes: m?.HEAPU8?.byteLength ?? null,
           hasModule: Boolean(m),
-          canvases: document.querySelectorAll('#screen canvas').length,
+          canvases: cs.length,
+          canvasSizes: cs.map((c) => `${c.width}x${c.height}`),
+          // ⚠ 対照群(上の sampler と同じ理由)。**0 が正常**
+          shallowCanvases: document.querySelectorAll('#screen canvas').length,
         };
-      });
+      }, DEEP_CANVAS_FN);
 
       result.uaMemory = await page
         .evaluate(async () => {
