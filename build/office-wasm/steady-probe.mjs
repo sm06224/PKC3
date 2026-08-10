@@ -40,6 +40,7 @@
  *   node steady-probe.mjs <配信ディレクトリ> [出力 JSON] [--fonts <TTF のディレクトリ>]
  *   PKC3_STEADY_MS=300000 で 1 arm あたりの時間を変える(既定 5 分)
  */
+import { Buffer } from 'node:buffer';
 import { createServer } from 'node:http';
 import { readFile, writeFile } from 'node:fs/promises';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -62,7 +63,30 @@ const MIME = {
   '.data': 'application/octet-stream',
 };
 
-/** 日本語を含む最小の flat ODF。⚠ CJK が 0 文字だと「日本語での定常」を測っていない。 */
+/**
+ * 🔴 **日本語の「入力」は測れない**(2026-08-10 に判明)。Playwright の
+ * `keyboard.type()` も `keyboard.insertText()` も **非 ASCII が Qt に届かない** ──
+ * 5 分回した本文が `Steady` だけ・言語欄が English (USA) になっていた。
+ * 保存側は健全である(`bytes 38287 / ascii 82 / cjk 0` で切り分け済み)。
+ * ⚠ 空振り検査①②(画面が変わった / key イベントが在る)は **ASCII だけでも通る**ので、
+ *   「日本語で測った」と誤って言えてしまう。だから③(保存物に日本語が在る)を足した。
+ *
+ * 🔑 そこで、測る日本語の次元を**入力から組版へ**振り替える ── #88 の裁定は
+ * 「**閲覧優先**で実装」なので、効くのは打鍵ではなく**日本語 20 ページを送ったときの
+ * 組版・整形・描画**である。fixture を長い日本語本文にして、スクロールで回す。
+ * ⚠ 日本語入力の応答は**未検証のまま残る**(Qt の IME 経路が要る)。測っていない次元を
+ *   「軽かった」と言わないこと。
+ */
+const JA_PARA = [
+  '定常計測用の本文です。編集セッションを継続したときの常駐メモリと操作の応答を測ります。',
+  '吾輩は猫である。名前はまだ無い。どこで生れたか頓と見当がつかぬ。',
+  '春はあけぼの。やうやう白くなりゆく山際、少し明かりて、紫だちたる雲の細くたなびきたる。',
+  '東京都渋谷区・株式会社・令和七年八月十日。半角ｶﾅ ／ 全角ＡＢＣ ／ 記号 ①②③ ㈱ ℡。',
+  '禁則処理の確認、句読点は行頭に来ない。括弧「かぎ」『二重』(丸) も同様である。',
+];
+/** 日本語主体の flat ODF。⚠ CJK が 0 文字だと「日本語での定常」を測っていない。 */
+const DOC_BODY = Array.from({ length: 400 }, (_, i) =>
+  `  <text:p text:style-name="P">${i + 1}. ${JA_PARA[i % JA_PARA.length]}</text:p>`).join('\n');
 const DOC = `<?xml version="1.0" encoding="UTF-8"?>
 <office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
  xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
@@ -76,8 +100,7 @@ const DOC = `<?xml version="1.0" encoding="UTF-8"?>
   </style:style>
  </office:automatic-styles>
  <office:body><office:text>
-  <text:p text:style-name="P">定常計測用の文書です。編集セッションを続けたときの常駐メモリと応答を測ります。</text:p>
-  <text:p text:style-name="P">The quick brown fox jumps over the lazy dog.</text:p>
+${DOC_BODY}
  </office:text></office:body>
 </office:document>`;
 
@@ -179,6 +202,31 @@ function browserRssKb(tag) {
   return { rssKb: total, procs };
 }
 
+/**
+ * 2 枚の PNG の**異なる画素の割合**。screenshot の bytes 比較では
+ * 「キャレットが点滅しただけ」と「版面が丸ごと入れ替わった」を区別できない。
+ * ⚠ 復号は page 側でやる(この箱に画像ライブラリが無い)。
+ */
+async function pixelDiffRatio(page, a, b) {
+  return page.evaluate(async ([ba, bb]) => {
+    const toBmp = async (arr) =>
+      globalThis.createImageBitmap(new Blob([new Uint8Array(arr)], { type: 'image/png' }));
+    const [ia, ib] = await Promise.all([toBmp(ba), toBmp(bb)]);
+    if (ia.width !== ib.width || ia.height !== ib.height) return 1;
+    const px = (bmp) => {
+      const c = new globalThis.OffscreenCanvas(bmp.width, bmp.height);
+      const g = c.getContext('2d');
+      g.drawImage(bmp, 0, 0);
+      return g.getImageData(0, 0, bmp.width, bmp.height).data;
+    };
+    const pa = px(ia);
+    const pb = px(ib);
+    let diff = 0;
+    for (let i = 0; i < pa.length; i += 4) if (pa[i] !== pb[i] || pa[i + 1] !== pb[i + 1] || pa[i + 2] !== pb[i + 2]) diff += 1;
+    return Math.round((diff / (pa.length / 4)) * 1000) / 1000;
+  }, [Array.from(a), Array.from(b)]).catch(() => null);
+}
+
 const pct = (xs, p) => (xs.length ? xs.slice().sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor((xs.length * p) / 100))] : null);
 
 /**
@@ -186,7 +234,7 @@ const pct = (xs, p) => (xs.length ? xs.slice().sort((a, b) => a - b)[Math.min(xs
  * ⚠ 2 つの arm は「打鍵するかどうか」以外を**完全に同じ**にする ── 起動も、
  *   文書も、待ち時間も、標本の刻みも同じ。
  */
-async function runArm({ base, edit, fontFiles }) {
+async function runArm({ base, edit }) {
   const tag = `/tmp/pkc3-steady-${edit ? 'edit' : 'idle'}-${process.pid}`;
   const bundled = process.env.PKC3_CHROMIUM ?? '/opt/pw-browsers/chromium';
   const browser = await chromium.launchPersistentContext(tag, {
@@ -235,12 +283,15 @@ async function runArm({ base, edit, fontFiles }) {
   let nextSample = SAMPLE_MS;
   while (Date.now() - t0 < ARM_MS) {
     if (edit) {
-      // 日本語と ASCII を混ぜて打つ。⚠ CJK が 0 文字だと「日本語での定常」を測っていない
-      await page.keyboard.type('日本語の定常計測 steady ');
+      // 日本語 400 段落を送り続ける = 組版・整形・描画を回し続ける(閲覧優先の定常)
+      await page.keyboard.press('PageDown');
+      await page.mouse.wheel(0, 600);
       strokes += 1;
-      await page.keyboard.press('Enter');
-      if (strokes % 5 === 0) await page.mouse.wheel(0, 400);
-      if (strokes % 11 === 0) await page.keyboard.press('Control+z');
+      // 打鍵も混ぜる ── 編集の代金も同じ arm で拾う。⚠ ASCII しか届かないので
+      //    「日本語入力の応答」は**この数字に含まれていない**
+      if (strokes % 4 === 0) await page.keyboard.type('steady ');
+      // 端まで行ったら先頭へ戻す(同じ版面を舐め続けないよう、往復させる)
+      if (strokes % 40 === 0) await page.keyboard.press('Control+Home');
     }
     await page.waitForTimeout(edit ? 500 : 1000);
     // ⚠ 剰余で刻むと、1 周の長さが変わる arm(打鍵あり)で標本数がずれる ──
@@ -259,6 +310,30 @@ async function runArm({ base, edit, fontFiles }) {
   arm.strokes = strokes;
   arm.endRssKb = browserRssKb(tag).rssKb;
   const shotAfter = await page.screenshot();
+
+  // 🔴 空振り対策 ③ ── **版面が本当に動いたか**を画素で確かめる。
+  //    ⚠ ①(bytes が変わった)はキャレットの点滅でも通る。②(key イベント)は
+  //      「押した」ことしか言わない ── **dead click でも通る**。
+  //    ⚠ 以前ここは「保存物に日本語が在るか」だったが、fixture 自身が日本語 400 段落に
+  //      なった時点で**fixture が検査を満たしてしまう**(救い手が変わっただけ)。
+  //      主張が「送って組み直させた」に変わったので、検査も版面の変化に変える。
+  arm.pixelDiffRatio = await pixelDiffRatio(page, shotBefore, shotAfter);
+  // 打鍵側は ASCII の目印で見る(日本語は届かないので CJK では見られない)
+  if (edit) {
+    await page.keyboard.press('Control+s');
+    await page.waitForTimeout(5000);
+    // ⚠ **「届かなかった」と「保存されなかった」を混ぜない。** 目印が 0 件のとき、
+    //    file が育っていなければ原因は保存側であって入力側ではない。
+    arm.saved = await page.evaluate(() => {
+      try {
+        const bytes = globalThis.__lo.FS.readFile('/work/steady.fodt');
+        // ⚠ ここは page 内で走るが lint は node として読む ── `globalThis.` を付けて
+        //    `no-undef` を避ける(この file の他の browser API も同じ書き方)
+        const text = new globalThis.TextDecoder().decode(bytes);
+        return { bytes: bytes.length, ascii: (text.match(/steady/gi) ?? []).length };
+      } catch (e) { return { err: String(e).slice(0, 60) }; }
+    }).catch((e) => ({ err: String(e).slice(0, 60) }));
+  }
   // 🔴 空振り対策 ①: 画面が変わったか(bytes 比較)
   arm.screenChanged = Buffer.compare(shotBefore, shotAfter) !== 0;
   // 🔴 空振り対策 ②: Event Timing が打鍵を観測したか
@@ -295,7 +370,7 @@ async function main() {
   // ⚠ `.map(basename)` は index を第 2 引数(suffix)に渡してしまう
   const result = { base, armMs: ARM_MS, fonts: fontFiles.map((f) => basename(f)), arms: [] };
   try {
-    for (const edit of [false, true]) result.arms.push(await runArm({ base, edit, fontFiles }));
+    for (const edit of [false, true]) result.arms.push(await runArm({ base, edit }));
   } finally {
     server.close();
   }
@@ -317,12 +392,18 @@ async function main() {
   // 🔴 空振りなら**成功として出さない** ── idle を 2 回測って「編集は軽い」と言わないため
   // ⚠ ① screenChanged は idle でも true になる(キャレットの点滅)。だから②が要る。
   //    ② keyEvents は idle では 0 でなければならない ── **対照群が汚れていないこと**も検める
-  const vacuous = ed && (!ed.screenChanged || (ed.input?.keyEventsOver16ms ?? 0) === 0);
+  //    ③ 版面が実際に動いたこと(画素の 10% 以上)── ①②は dead click でも通る
+  //    ④ ASCII の打鍵が保存物に届いたこと
+  const vacuous = ed && (!ed.screenChanged
+    || (ed.input?.keyEventsOver16ms ?? 0) === 0
+    || !(typeof ed.pixelDiffRatio === 'number' && ed.pixelDiffRatio >= 0.1)
+    || !((ed.saved?.ascii ?? 0) > 0));
   const idleDirty = (idle?.input?.keyEventsOver16ms ?? 0) !== 0;
   result.ok = Boolean(idle?.painted === true && ed?.painted === true && !vacuous && !idleDirty);
   if (vacuous) {
-    result.notApplied = `打鍵が届いていない(screenChanged=${ed.screenChanged}, `
-      + `keyEventsOver16ms=${ed.input?.keyEventsOver16ms}) ── この結果は「編集の定常」を測っていない`;
+    result.notApplied = `操作が届いていない(screenChanged=${ed.screenChanged}, `
+      + `keyEventsOver16ms=${ed.input?.keyEventsOver16ms}, pixelDiff=${ed.pixelDiffRatio}, `
+      + `savedAscii=${ed.saved?.ascii}) ── この結果は「操作中の定常」を測っていない`;
   }
   if (idleDirty) result.controlDirty = '対照群(idle)で入力イベントが観測された ── 対照群が汚れている';
 
