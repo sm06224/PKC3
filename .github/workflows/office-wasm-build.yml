@@ -256,21 +256,50 @@ jobs:
       #    2 か所が食い違わないようにする(判定は 1 か所へ寄せる)。
       - name: LO が要求する Qt シンボルが在ることを確かめる
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           sym=$(grep -o '_ZN10emscripten[A-Za-z0-9_]*' \
             ~/lo-core/solenv/gbuild/platform/EMSCRIPTEN_INTEL_GCC.mk | head -1)
           # 空振り防止 ── LO 側から名前が取れていること
           test -n "$sym"
           echo "LO が要求するシンボル: $sym"
+
           nm=~/emsdk/upstream/bin/llvm-nm
-          # 正の対照 ── 本物の archive を読めていること(記号が大量に出る)
-          test "$("$nm" ~/qt-wasm/install/lib/libQt6Core.a | wc -l)" -gt 1000
-          if ! "$nm" ~/qt-wasm/install/lib/libQt6Core.a | grep -q -- "$sym"; then
-            echo "ERROR: この Qt に $sym が無い" >&2
-            echo '  → qstdweb::EventListener の embind 登録は **Qt 6.9 にしか無い**' >&2
-            echo '  → qt_ref を 6.9 にするか、LO 側の export を外す' >&2
+          # ⚠ 道具が無いのを「シンボルが無い」と読み違えない
+          test -x "$nm" || { echo "ERROR: $nm が無い" >&2; exit 1; }
+
+          # ⚠ **archive を file 名指しで探さない**(1 度 libQt6Core.a 決め打ちで書いた)。
+          #    LO は $QT6DIR/lib の archive 群を丸ごとリンクするので、全部見る。
+          #
+          # 🔴 **`nm | grep -q` と書いてはいけない**(2026-08-10 に実測で判明)。
+          #    `grep -q` は最初の一致で打ち切るので **nm が SIGPIPE で死に、
+          #    `pipefail` がそれを拾って pipeline が失敗する** ── 記号が
+          #    **在るときほど失敗する**(実測: 在る記号で exit=74 / pipefail 無しなら 0)。
+          #    この形の gate は「常に無い」と言い続ける。**一度ファイルへ落としてから見る。**
+          total=0
+          found=''
+          for a in ~/qt-wasm/install/lib/*.a; do
+            "$nm" "$a" > /tmp/nm-out.txt 2>/dev/null || true
+            total=$((total + $(wc -l < /tmp/nm-out.txt)))
+            if grep -q -- "$sym" /tmp/nm-out.txt; then
+              found="$a"
+              break
+            fi
+          done
+          # 正の対照 ── 本物の archive 群を読めていること(空 archive に「無い」と言わない)
+          echo "走査した記号の総数: $total"
+          test "$total" -gt 1000
+
+          if [ -z "$found" ]; then
+            echo "ERROR: $QT6DIR/lib のどの archive にも $sym が無い" >&2
+            echo '--- 診断: qstdweb 由来の記号がどれだけ在るか ---' >&2
+            "$nm" ~/qt-wasm/install/lib/libQt6Core.a > /tmp/nm-core.txt 2>/dev/null || true
+            grep -c 'qstdweb' /tmp/nm-core.txt >&2 || true
+            grep 'EventListener' /tmp/nm-core.txt >&2 | head -5 || true
+            echo '  → qstdweb::EventListener の embind 登録は Qt 6.9 の' >&2
+            echo '    qstdweb.cpp:754-758 にしか無い(6.10 で削除)' >&2
             exit 1
           fi
+          echo "見つかった: $found"
 
       # ⚠ 上流の `LibreOfficeWASM32.conf` は `--enable-qt5` を含む。そこへ `--enable-qt6` を
       #    足すだけだと VCL プラグインが 2 個になり、`configure.ac:12691` の

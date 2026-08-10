@@ -80,6 +80,35 @@ describe('workflow の shell', () => {
     expect(broken).toEqual([]);
   });
 
+  it('🔴 `pipefail` の下で外部コマンドを `grep -q` へ流さない(SIGPIPE で偽陰性)', () => {
+    // 🔴 2026-08-10 に実測で踏んだ。`nm big.a | grep -q SYM` は、grep が最初の一致で
+    // 打ち切るため **nm が SIGPIPE で死に、`pipefail` がそれを拾って pipeline が失敗する**。
+    // つまり **記号が在るときほど失敗する** ── 実測で「在る記号」に対し exit=74
+    // (pipefail 無しなら 0)。`if ! … | grep -q …` は**常に「無い」側**へ分岐していた。
+    //
+    // ⚠ `printf` / `echo` は shell 組込みで出力も小さく、pipe バッファに収まって
+    // 書き終えるので該当しない。**危ないのは「大きな出力を出す外部コマンド」**である。
+    // 🔑 直し方: 一度ファイルへ落としてから `grep -q file` と書く。
+    const offenders: string[] = [];
+    for (const b of blocks) {
+      const logical = b.code
+        .split('\n')
+        .filter((l) => !/^\s*#/.test(l))
+        .join('\n')
+        .replace(/\\\n/g, ' ');
+      if (!/set\s+-[a-z]*o?\s*.*pipefail|set\s+-o\s+pipefail/.test(logical)) continue;
+      for (const [n, line] of logical.split('\n').entries()) {
+        // 判定に使う grep(-q / -m)だけを見る。表示用の `| head` は対象外
+        const m = /^(.*?)\|\s*grep\s+(?:-\w*\s+)*-\w*[qm]/.exec(line);
+        if (!m) continue;
+        const producer = m[1]!.trim().replace(/^.*?[;&|(]\s*/, '');
+        if (/^(printf|echo)\b/.test(producer)) continue;
+        offenders.push(`${b.file}:~${n + 1}: ${line.trim()}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
   it('🔴 `A && B || C` を書かない(同順位・左結合で「失敗したとき」も飛ぶ)', () => {
     // 実証済みの事故: `[ -f X ] && node X || true` は検品の**失敗まで飛ばす**。
     // ⚠ 「無いときだけ飛ばしたい」なら `if …; then …; fi` と書く
