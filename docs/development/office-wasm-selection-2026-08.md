@@ -659,6 +659,31 @@ emscripten::class_<EventListener>("QtEventListener")
 ⚠ 版だけ替えて別の壁に当たらないよう、6.9 に `-feature-wasm-exceptions` /
 `-feature-wasm-jspi` が在ることも `configure.cmake:1009/1017` で先に確認した。
 
+#### 🔑 **6.9 は上下から挟まれて一意に決まる**(2026-08-10 追記)
+
+当初は上限 1 点だけで「6.9」と判断していたが、**下限も付いた**:
+
+| 境界 | 根拠 |
+|---|---|
+| 上限 **≤ 6.9** | `qstdweb::EventListener` の embind 登録が **6.10 で削除**(上表) |
+| 下限 **≥ 6.9** | `-feature-wasm-jspi` が **Qt 6.9 で新設** ── `qt_feature("wasm-jspi"` は **6.8 に 0 件 / 6.9 に 1 件**(両ブランチを fetch して実測)。LO の Qt6 モードは JSPI を要求するので 6.8 以下では建てられない |
+
+⚠ **6.9 以外に選択肢が無い。** そして 6.10 で上限が切れている以上、
+**この経路は Qt 側の追従が止まった行き止まり**でもある(LO master に
+`QWasmSuspendResumeControl` へ追従する commit は見つかっていない)。
+採用の是非を判断するときは、この事実を材料に入れること。
+
+#### 上流の先行事例(⚠ 二次情報 ── 私は原文を読めていない)
+
+並列調査が拾った範囲では、LO の当該 commit(2025-02)自身が
+「Qt dev を `-feature-wasm-jspi` で建て、emsdk 4.0.3 / Chrome 132 で動いた」と
+書いているという。**この 1 点は裏取りできていない**(GitHub の HTML 経由の要約)。
+ただし、少なくとも**誰かが一度は通した経路である**ことの傍証にはなる。
+
+⚠ 併せて、上流自身が wasm ビルドを
+**"still experimental and known to occasionally hang and crash"** と書いている。
+「建った」「起動した」のあとに**安定性**という別の関門が残る。
+
 ### この期間に置いた「早く鳴る門」3 つ
 
 どれも**リンクまで 16 分待たずに**落とすためのもの:

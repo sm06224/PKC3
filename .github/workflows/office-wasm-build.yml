@@ -31,7 +31,14 @@ on:
         #    `QWasmSuspendResumeControl` へ置き換えられて消えた(6.9/6.10/6.11/6.12 を
         #    実際に fetch して数えた: 6.9 のみ 7 箇所、他は 0)。
         #    6.11 で建てると `wasm-ld: symbol exported via --export not found` で落ちる。
-        #    ⚠ **上げるときは、まずこのシンボルが在るかを確かめること。**
+        #
+        # 🔑 **6.9 は上下から挟まれて一意に決まる**(2026-08-10、下限を追加で確認):
+        #    上限 ≤ 6.9 ── `qstdweb::EventListener` の embind 登録が 6.10 で消えた(上記)
+        #    下限 ≥ 6.9 ── `-feature-wasm-jspi` が **Qt 6.9 で新設**された
+        #      (`configure.cmake` の `qt_feature("wasm-jspi"` は 6.8 に **0 件**、6.9 に 1 件。
+        #       両ブランチを fetch して実測)。LO の Qt6 モードは JSPI を要求するので、
+        #       6.8 以下では**そもそも建てられない**。
+        #    ⚠ つまり **6.9 以外に選択肢が無い**。上げ下げする前にこの 2 つを確かめること。
         description: 'qtbase の ref(⚠ LO の JSPI export が要求するため 6.9 固定)'
         default: '6.9'
       emsdk:
