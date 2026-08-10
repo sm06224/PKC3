@@ -356,21 +356,6 @@ jobs:
           #    控えを残すのは、**API 経由のログが 16KB で切れてエラー行に届かない**ため。
           /usr/bin/time -v make -j"$(nproc)" 2>&1 | tee /tmp/make.log
 
-      # 🔴 **エラー行だけを別 step に出す**(2026-08-10)。
-      #    GitHub API のログ取得は末尾しか返さず、`make` の出力に埋もれて
-      #    **肝心の `wasm-ld: error:` に毎回届かなかった**。原因を読むために毎回
-      #    走らせ直すのは高い(15 分)。⚠ `| head` は使わない(SIGPIPE)── `grep -m`。
-      - name: make のエラー行だけ取り出す
-        if: failure()
-        run: |
-          set -euo pipefail
-          echo '=== wasm-ld / コンパイルの error 行(先頭 60 件)==='
-          grep -m 60 -nE 'wasm-ld: error|error:|^make.*\*\*\*' /tmp/make.log || true
-          echo '=== undefined symbol の要約(重複を畳む)==='
-          grep -oE 'undefined symbol: [A-Za-z0-9_]+' /tmp/make.log > /tmp/undef.txt || true
-          sort -u /tmp/undef.txt > /tmp/undef-uniq.txt || true
-          wc -l < /tmp/undef-uniq.txt
-          head -40 < /tmp/undef-uniq.txt
 
       # 📏 **効いたかを数で出す**(印象で語らない)。hit 率が低いままなら
       #    cache が実は当たっていないということ
@@ -481,3 +466,24 @@ jobs:
             ~/lo-core/boot-probe.json
             ~/lo-core/config.log
           if-no-files-found: error
+
+      # 🔴 **エラー行は「ジョブの最後」に出す**(2026-08-10)。
+      #    GitHub API のログ取得は**末尾しか返さない**(実測 16KB 前後)ので、
+      #    make の直後に置くと大量の出力に埋もれて**読めない**。
+      #    ⚠ 1 度そこで失敗した ── 置き場所そのものが観測点である。
+      #    ⚠ `| head` は使わない(SIGPIPE)── `grep -m` と `head < file`。
+      - name: make のエラー行(最後に出す)
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ ! -f /tmp/make.log ]; then
+            echo '(make.log 無し ── make まで到達していない)'
+            exit 0
+          fi
+          echo '=== error 行(先頭 40 件)==='
+          grep -m 40 -nE 'wasm-ld: error|error:|^make.*\*\*\*' /tmp/make.log || echo '(該当なし)'
+          echo '=== undefined symbol(重複を畳んだ先頭 30 件)==='
+          grep -oE 'undefined symbol: [A-Za-z0-9_:]+' /tmp/make.log > /tmp/undef.txt || true
+          sort -u /tmp/undef.txt > /tmp/undef-uniq.txt || true
+          echo "件数: $(wc -l < /tmp/undef-uniq.txt)"
+          head -30 < /tmp/undef-uniq.txt
