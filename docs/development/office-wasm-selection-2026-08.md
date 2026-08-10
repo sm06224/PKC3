@@ -914,6 +914,56 @@ user 指示「**日本語は絶対**」に照らすと、そこを見ないま�
 - ステータスバーの言語欄が面によって `English (USA)` / `Japanese` と割れるのは、
   **カーソル位置の文字種**を映しているためで、文書の言語設定とは別
 
+## 3.14 🖐 **手元で触る**(2026-08-10)
+
+user「もう動く? dev で触れる? 見たほうが早いわ」への答え。
+
+### ⚠ まず: **`npm run dev` では触れない**
+
+この段階では `src/` に 1 行も入っていないので、PKC3 本体からは繋がっていない。
+動くのは**焼いた成果物単体**である。
+
+### ⚠ そして: **GitHub Pages にも置けない**(理由は 2 つある)
+
+1. `soffice.wasm` が **156MB** で、GitHub の **100MB/file** 制限を超える ── git に入らない
+2. Pages は **COOP/COEP ヘッダを付けられない** ── SharedArrayBuffer が使えず、
+   LO の `-pthread` が動かない(service worker で被せる手はあるが、1 が残る)
+
+したがって「**手元で serve する**」が唯一の触り方である。
+
+```bash
+git fetch origin claude/pkc3-pr-101-n05trv
+git checkout claude/pkc3-pr-101-n05trv
+bash build/office-wasm/fetch-and-run.sh --serve
+# → http://127.0.0.1:8088/ を開く
+```
+
+`fetch-and-run.sh` は prerelease(`lo-wasm-dev`、245MB)と **BIZ UD 3 本(15.2MB)**を
+落として `serve-local.mjs` を起動する。2 回目以降は取り直さない(`--force` で再取得)。
+
+- 手元の Office ファイル(.docx / .xlsx / .pptx / .odt …)を**選ぶかドロップすると開く**
+- 何も選ばなければ Start Center が出る
+- 🔑 日本語フォントは**起動時に FS へ流し込む** ── web フォント(CSS)では届かない。
+  LO は fontconfig で自分の `/instdir/share/fonts/truetype` を見るからである
+
+### 実際に通した(自分で触ってから渡した)
+
+日本語入りの `.docx` を picker から選び、**2.4〜3.4 秒**で版面が出た:
+
+![.docx を開いたところ](images/office-wasm-docx-open.png)
+
+⚠ **観測された未解決の事象を 1 件残す**: 最初の 1 回だけ
+`RuntimeError: null function or function signature mismatch` が page error に出た
+(**版面は完走**しており、5 段落すべて正しく描かれていた)。その後 3 回は再現していない。
+**間欠**である。原因未特定なので「出ない」と書かない ── 組み込みへ進むなら、
+ここは追う対象である。
+
+### 踏んだ罠(1 件、既知の型)
+
+`serve-local.mjs` の HTML は template literal なので、**コメントにバッククォートを
+書いた瞬間に文字列が閉じて** parse error になった(`source-editing` に記録のある型)。
+👉 template literal の中には、コメントであってもバッククォートを書かない。
+
 ## 4. 軽量閲覧レーン(本命の保険 / 併走候補)
 
 docx = docx-preview、xlsx = SheetJS(+UI が要るなら Univer)、pptx = pptx-viewer-core、
