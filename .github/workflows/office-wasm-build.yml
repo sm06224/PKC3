@@ -409,28 +409,6 @@ jobs:
             exit 1
           fi
 
-      # 📏 **JSPI が本当に効いているかを、生成物で見る**(2026-08-10)。
-      #    ⚠ `-sJSPI_EXPORTS` は **1 つも当たらなくても警告が出ない**(silent failure)。
-      #    リンクが通っても JSPI が不活性なら、実行時に無言で hang しうる。
-      #    ⚠ いまは**判定せず報告だけ**する ── 生成物を 1 度も見ていない段階で
-      #    gate を書くと、「正しく建っても落ちる検査」を作る(今日 1 度やった)。
-      #    実物を見てから、次の run で等値 pin へ格上げする。
-      - name: JSPI が生成物に効いているか(報告のみ)
-        if: always()
-        run: |
-          set -euo pipefail
-          js=~/lo-core/instdir/program/soffice.js
-          if [ ! -f "$js" ]; then echo '(soffice.js 無し)'; exit 0; fi
-          sym=$(grep -o '_ZN10emscripten[A-Za-z0-9_]*' \
-            ~/lo-core/solenv/gbuild/platform/EMSCRIPTEN_INTEL_GCC.mk | head -1)
-          echo "LO が JSPI_EXPORTS で名指しする記号: ${sym:0:60}..."
-          echo -n '  soffice.js に在るか: '
-          if grep -q -- "$sym" "$js"; then echo 'あり'; else echo 'なし'; fi
-          for marker in JSPI Asyncify asyncify WebAssembly.Suspending emscripten_check_mailbox; do
-            echo -n "  '$marker' の出現数: "
-            grep -c -- "$marker" "$js" || true
-          done
-
       # 🔑 **実行に要る file 一式は上流の list に従う**(自分で並べない)。
       #    `instsetoo_native/CustomTarget_emscripten-install.mk` が
       #    workdir/installation/LibreOffice/emscripten へ必要物を集める ──
@@ -513,32 +491,48 @@ jobs:
       #    make の直後に置くと大量の出力に埋もれて**読めない**。
       #    ⚠ 1 度そこで失敗した ── 置き場所そのものが観測点である。
       #    ⚠ `| head` は使わない(SIGPIPE)── `grep -m` と `head < file`。
-      # 🔴 **probe の結果も「最後」に出す**(2026-08-10)。
-      #    ⚠ make のエラー用に最後の step を作ったのに、**probe には作っていなかった**
-      #    ── 同じ理由(API のログは末尾しか返さない)で、起動結果が中間に埋もれて
-      #    読めず、まる 1 回転を無駄にした。**片側を直したら対称の反対側を疑う。**
-      - name: 起動 probe の結果(最後に出す)
+      # 🔴 **診断は「ジョブの最後」に 1 か所へまとめる**(2026-08-10)。
+      #    ⚠ **同じ置き場所の失敗を 3 回やった** ── make のエラー / probe の結果 /
+      #    JSPI の報告。どれも中間に置いたので、API のログ取得(末尾のみ、実測 16KB 前後)
+      #    では読めず、そのたびに 1 回転を捨てた。注意書きでは 3 度目を止められなかったので、
+      #    **出口を 1 つに統合する**(次に診断を足す人も、ここに足すしかない形にする)。
+      #    ⚠ `| head` は使わない(SIGPIPE)── `grep -m` と `head < file`。
+      - name: 診断まとめ(最後に出す)
         if: always()
         run: |
           set -euo pipefail
+
+          echo '########## 1. 起動 probe ##########'
           if [ -f ~/lo-core/boot-probe.json ]; then
             cat ~/lo-core/boot-probe.json
           else
             echo '(boot-probe.json 無し ── probe まで到達していない)'
           fi
 
-      - name: make のエラー行(最後に出す)
-        if: always()
-        run: |
-          set -euo pipefail
-          if [ ! -f /tmp/make.log ]; then
-            echo '(make.log 無し ── make まで到達していない)'
-            exit 0
+          echo '########## 2. JSPI が生成物に効いているか ##########'
+          js=~/lo-core/instdir/program/soffice.js
+          if [ -f "$js" ]; then
+            sym=$(grep -o '_ZN10emscripten[A-Za-z0-9_]*' \
+              ~/lo-core/solenv/gbuild/platform/EMSCRIPTEN_INTEL_GCC.mk | head -1)
+            echo "LO が JSPI_EXPORTS で名指しする記号: ${sym:0:60}..."
+            echo -n '  soffice.js に在るか: '
+            if grep -q -- "$sym" "$js"; then echo 'あり'; else echo 'なし'; fi
+            for marker in JSPI Asyncify asyncify WebAssembly.Suspending emscripten_check_mailbox; do
+              echo -n "  '$marker' の出現数: "
+              grep -c -- "$marker" "$js" || true
+            done
+          else
+            echo '(soffice.js 無し)'
           fi
-          echo '=== error 行(先頭 40 件)==='
-          grep -m 40 -nE 'wasm-ld: error|error:|^make.*\*\*\*' /tmp/make.log || echo '(該当なし)'
-          echo '=== undefined symbol(重複を畳んだ先頭 30 件)==='
-          grep -oE 'undefined symbol: [A-Za-z0-9_:]+' /tmp/make.log > /tmp/undef.txt || true
-          sort -u /tmp/undef.txt > /tmp/undef-uniq.txt || true
-          echo "件数: $(wc -l < /tmp/undef-uniq.txt)"
-          head -30 < /tmp/undef-uniq.txt
+
+          echo '########## 3. make のエラー ##########'
+          if [ -f /tmp/make.log ]; then
+            grep -m 20 -nE 'wasm-ld: error|error:|^make.*\*\*\*' /tmp/make.log || echo '(該当なし)'
+            grep -oE 'undefined symbol: [A-Za-z0-9_:]+' /tmp/make.log > /tmp/undef.txt || true
+            sort -u /tmp/undef.txt > /tmp/undef-uniq.txt || true
+            echo "undefined symbol 件数: $(wc -l < /tmp/undef-uniq.txt)"
+            head -20 < /tmp/undef-uniq.txt
+          else
+            echo '(make.log 無し)'
+          fi
+

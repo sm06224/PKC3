@@ -41,8 +41,8 @@ const OUT = process.argv[3] ?? '';
 // ⚠ 300 秒では足りなかった(run 31350624048 は timeout 時点で `onLoaded` までしか
 //    進んでおらず、**その先を見られなかった**)。待ちが足りずに「動かない」と
 //    結論するのは、環境の性質をアプリの不具合と読み違えるのと同じ型なので、
-//    ビルド 1 回転(16 分〜3 時間)より probe の 7 分のほうがはるかに安い。
-const BOOT_TIMEOUT_MS = Number(process.env.PKC3_BOOT_TIMEOUT_MS ?? 420_000);
+//    ビルド 1 回転(16 分〜3 時間)より probe の 15 分のほうがはるかに安い。
+const BOOT_TIMEOUT_MS = Number(process.env.PKC3_BOOT_TIMEOUT_MS ?? 900_000);
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -157,6 +157,7 @@ async function main() {
   });
 
   let page;
+  let sampler;
   try {
     page = await browser.newPage();
     page.on('console', (m) => {
@@ -179,6 +180,24 @@ async function main() {
     const t0 = Date.now();
     await page.goto(`${base}/qt_soffice.html`, { waitUntil: 'commit' });
     result.isolated = await page.evaluate(() => globalThis.crossOriginIsolated === true);
+
+    // 🔴 **「遅い」と「死んでいる」を区別する**(2026-08-10)。
+    //    LO はスレッドを立てたあと**無音のまま timeout** した。沈黙だけでは
+    //    「初期化が重い」のか「詰まった」のか分からない ── 定期的に標本を取り、
+    //    **最後に動きがあった時刻**が分かるようにする。
+    //    ⚠ これが無いと、待ち時間を延ばすたびに 25 分を捨てて同じ疑問に戻る。
+    const samples = [];
+    sampler = setInterval(() => {
+      page
+        .evaluate(() => ({
+          canvases: document.querySelectorAll('#screen canvas').length,
+          status: (document.querySelector('#qtstatus')?.textContent ?? '').slice(0, 60),
+        }))
+        .then((v) => {
+          samples.push({ atMs: Date.now() - t0, console: consoleAll.length, ...v });
+        })
+        .catch(() => {});
+    }, 15_000);
 
     // ⚠ 成功だけでなく**失敗側も**待つ。沈黙を成功と読まないため、
     //    「起動した」「終了した」「例外が出た」の 3 つを同じ待ちで拾う。
@@ -209,6 +228,7 @@ async function main() {
 
     result.outcome = outcome;
     result.bootMs = Date.now() - t0;
+    result.samples = samples;
 
     result.onLoadedFired = await page
       .evaluate(() => globalThis.__pkc3OnLoadedAt !== undefined)
@@ -243,6 +263,7 @@ async function main() {
       result.ok = true;
     }
   } finally {
+    if (sampler !== undefined) clearInterval(sampler);
     // ⚠ **失敗したときこそ残す** ── 成功時だけ撮ると、原因を追う材料が無い
     await page?.screenshot({ path: join(ROOT, 'boot.png'), fullPage: false }).catch(() => {});
     result.console = consoleAll.slice(-120);
