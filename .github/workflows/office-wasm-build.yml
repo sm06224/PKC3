@@ -220,7 +220,18 @@ jobs:
       #    **3 組貼り付いていて `id: c_tar` が重複**していたこと。
       #    再発は tests/workflow-steps.test.ts が止める。
       - name: 上流 Qt6 経路の取りこぼしを当てる
-        run: python3 "$GITHUB_WORKSPACE/build/office-wasm/patch-qt6-freetype.py" ~/lo-core
+        run: |
+          set -euxo pipefail
+          # ⚠ **file 名指しで書かない** ── パッチを 1 本足したときに、ここへ書き足すのを
+          #    忘れると黙って当たらない。全部拾い、**拾った本数を主張する**
+          #    (glob が壊れて 0 本になったら落ちる)。
+          n=0
+          for p in "$GITHUB_WORKSPACE"/build/office-wasm/patch-*.py; do
+            python3 "$p" ~/lo-core
+            n=$((n + 1))
+          done
+          echo "applied $n patches"
+          test "$n" -ge 2
 
       # ⚠ 上流の `LibreOfficeWASM32.conf` は `--enable-qt5` を含む。そこへ `--enable-qt6` を
       #    足すだけだと VCL プラグインが 2 個になり、`configure.ac:12691` の
@@ -271,6 +282,25 @@ jobs:
           test -f ~/lo-core/instdir/program/soffice.wasm
           test -f ~/lo-core/instdir/program/soffice.js
           ls -la ~/lo-core/instdir/program/soffice.*
+
+      # 🔴 **リンクフラグが効いたことを「生成物」で確かめる**(2026-08-10)。
+      #    ⚠ `make -n` では検証できない ── tarball の段で止まってリンク行に到達せず、
+      #    **パッチの有無どちらでも 0 件**になる(対照群を取って空振りだと分かった)。
+      #    ⚠ `qtcanvas` が残っていると `pthread_create` が EINVAL で失敗し、
+      #    `-sPROXY_TO_PTHREAD=1` では**それが main() 本体**なので LO が起動しない
+      #    (emscripten `libpthread.js:730` が `error = EINVAL; break;`)。
+      - name: qtcanvas が焼き込まれていないことを確かめる
+        run: |
+          set -euxo pipefail
+          cd ~/lo-core
+          # 正の対照 ── この grep が**本物の soffice.js**を見ていることを先に示す
+          # (空の file を相手に「無い」と言わないため)
+          grep -q 'soffice_entry' instdir/program/soffice.js
+          if grep -q 'qtcanvas' instdir/program/soffice.js; then
+            echo 'ERROR: soffice.js に qtcanvas が残っている' >&2
+            echo '  → pthread_create が EINVAL で失敗し、main() が走らない' >&2
+            exit 1
+          fi
 
       # 🔑 **実行に要る file 一式は上流の list に従う**(自分で並べない)。
       #    `instsetoo_native/CustomTarget_emscripten-install.mk` が

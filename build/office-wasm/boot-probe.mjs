@@ -15,6 +15,14 @@
  * 失敗側も塞ぐ ── catch は `console.error`、終了は `#qtstatus` に "Application exit"。
  * **沈黙を成功と読まない。**
  *
+ * 🔴 **`onLoaded` を「UI が出た」と読んではいけない**(2026-08-10、run 31350624048 で
+ * 実際に誤読した)。`onLoaded` は発火して `#screen` が `block` になったのに、
+ * **canvas は 0 枚**・`window.Module` は未設定で、画面には何も無かった。
+ * それでも probe は `ok:true` を返し、私は「起動した」と報告してしまった。
+ * 🔑 主張したいのは「**LibreOffice の面が出た**」なので、判定は
+ * **`#screen` の中に大きさを持つ canvas が在ること**にする ── `onLoaded` は
+ * *途中経過*として別欄に残す(消すと、どこまで進んだか分からなくなる)。
+ *
  * ⚠ `HEAPU8.byteLength` は「予約した量」であって「常駐」ではない
  * (LO は `-sTOTAL_MEMORY=1GB`)。**両方**出して、混同しないように別欄にする。
  *
@@ -133,6 +141,7 @@ async function main() {
     base,
     browser: executablePath ?? (channel ? `channel:${channel}` : 'playwright default'),
   };
+  const consoleAll = [];
   const consoleErrors = [];
   const pageErrors = [];
 
@@ -143,10 +152,15 @@ async function main() {
     ...(executablePath ? {} : channel ? { channel } : {}),
   });
 
+  let page;
   try {
-    const page = await browser.newPage();
+    page = await browser.newPage();
     page.on('console', (m) => {
-      if (m.type() === 'error') consoleErrors.push(m.text().slice(0, 400));
+      const line = `[${m.type()}] ${m.text()}`.slice(0, 400);
+      // ⚠ **error だけ拾うと、どこで止まったか分からない。** LO / Qt は進行を
+      //    log で出すので全部残す(上限つき)。error は別欄にも積む。
+      consoleAll.push(line);
+      if (m.type() === 'error') consoleErrors.push(line);
     });
     page.on('pageerror', (e) => pageErrors.push(String(e).slice(0, 400)));
 
@@ -172,8 +186,14 @@ async function main() {
           const status = document.querySelector('#qtstatus');
           if (!spinner || !screen) return 'no-shell';
           const css = globalThis.getComputedStyle;
-          const shown = css(screen).display === 'block' && css(spinner).display === 'none';
-          if (shown) return 'loaded';
+          // ⚠ onLoaded は**途中経過**。記録はするが、これを成功と読まない
+          if (css(screen).display === 'block' && css(spinner).display === 'none') {
+            globalThis.__pkc3OnLoadedAt ??= Date.now();
+          }
+          // 🔑 主張は「LibreOffice の面が出た」── 大きさを持つ canvas を要求する
+          for (const c of screen.querySelectorAll('canvas')) {
+            if (c.width > 0 && c.height > 0) return 'painted';
+          }
           if ((status?.textContent ?? '').includes('Application exit')) return 'exited';
           return false;
         },
@@ -186,7 +206,11 @@ async function main() {
     result.outcome = outcome;
     result.bootMs = Date.now() - t0;
 
-    if (outcome === 'loaded') {
+    result.onLoadedFired = await page
+      .evaluate(() => globalThis.__pkc3OnLoadedAt !== undefined)
+      .catch(() => null);
+
+    if (outcome === 'painted') {
       // 起動直後は伸びるので、落ち着かせてから常駐を測る
       await page.waitForTimeout(5000);
       result.afterBoot = browserRssKb(tag);
@@ -213,10 +237,12 @@ async function main() {
         .catch((e) => ({ error: String(e).slice(0, 200) }));
 
       result.ok = true;
-      await page.screenshot({ path: join(ROOT, 'boot.png') }).catch(() => {});
     }
   } finally {
-    result.consoleErrors = consoleErrors.slice(0, 20);
+    // ⚠ **失敗したときこそ残す** ── 成功時だけ撮ると、原因を追う材料が無い
+    await page?.screenshot({ path: join(ROOT, 'boot.png'), fullPage: false }).catch(() => {});
+    result.console = consoleAll.slice(-120);
+    result.consoleErrors = consoleErrors.slice(0, 40);
     result.pageErrors = pageErrors.slice(0, 20);
     await browser.close().catch(() => {});
     server.close();
