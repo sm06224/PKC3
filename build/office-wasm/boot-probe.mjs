@@ -38,7 +38,11 @@ const ROOT = resolve(process.argv[2] ?? '.');
 const OUT = process.argv[3] ?? '';
 // ⚠ ハーネス自身の自己検品(起動しない題材を渡して**失敗として鳴る**か見る)を
 //    現実的な時間で回せるように外へ出す。既定は wasm 149MB のコンパイルを見込んだ値。
-const BOOT_TIMEOUT_MS = Number(process.env.PKC3_BOOT_TIMEOUT_MS ?? 300_000);
+// ⚠ 300 秒では足りなかった(run 31350624048 は timeout 時点で `onLoaded` までしか
+//    進んでおらず、**その先を見られなかった**)。待ちが足りずに「動かない」と
+//    結論するのは、環境の性質をアプリの不具合と読み違えるのと同じ型なので、
+//    ビルド 1 回転(16 分〜3 時間)より probe の 7 分のほうがはるかに安い。
+const BOOT_TIMEOUT_MS = Number(process.env.PKC3_BOOT_TIMEOUT_MS ?? 420_000);
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
