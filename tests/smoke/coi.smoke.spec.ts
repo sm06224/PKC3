@@ -151,6 +151,46 @@ test('🔴 オフラインで cache から出した文書でも分離が外れ�
   }
 });
 
+/**
+ * #115: 起動を壊す SW が active でも、**自分で新しい版へ乗り換えて回復する**。
+ *
+ * 🔴 これは 2026-08-11 に実際に作ってしまった**自己永続化する障害**の回帰である:
+ * 起動を壊す SW が active になると、直した版を配っても waiting のままで、
+ * 交代を促す案内は起動しないと出ない ── 誰も回復できない。
+ *
+ * ⚠ user は「タブを全部閉じて開き直す」で抜けられる(**再読込では抜けられない**)が、
+ * それを知っている前提にはできない。
+ */
+test('🔴 起動を壊す SW が active でも、次の版で自動回復する', async ({ page }, testInfo) => {
+  const base = plainBase(testInfo);
+
+  // ① 壊れた SW(worker に COEP を被せない = #112 の穴)を配る
+  expect(await (await page.request.get(`${base}/__control/stale-sw/on`)).text()).toBe('stale');
+  try {
+    await page.goto(`${base}/index.html`);
+    // ⚠ ここは **error になるのが正**。`booted()` は使えない
+    await page.waitForSelector('[data-pkc-boot="error"]', { timeout: 40_000 });
+    expect(
+      await page.evaluate(() => window.crossOriginIsolated),
+      '分離していない = この fixture が穴を再現できていない',
+    ).toBe(true);
+  } finally {
+    // ② 直った版を配る(= deploy が届いた状態)
+    expect(await (await page.request.get(`${base}/__control/stale-sw/off`)).text()).toBe('real');
+  }
+
+  // ③ 🔑 **user は読み直すだけ。** そこから先は勝手に回復してほしい
+  await page.reload();
+  await page.waitForFunction(
+    () => document.querySelector('[data-pkc-boot]')?.getAttribute('data-pkc-boot') === 'ready',
+    undefined,
+    { timeout: 40_000 },
+  );
+  expect(await page.evaluate(() => window.crossOriginIsolated)).toBe(true);
+  // 印が在る = 1 度だけ乗り換えた(輪になっていない)
+  expect(await page.evaluate(() => sessionStorage.getItem('pkc3:boot-recovery-tried'))).toBe('1');
+});
+
 test('🔴 読み直しの輪を作らない(印が残り、二度と読み直さない)', async ({ page }, testInfo) => {
   await page.goto(`${plainBase(testInfo)}/index.html`);
   await booted(page);
