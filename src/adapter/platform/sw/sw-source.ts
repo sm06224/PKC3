@@ -153,6 +153,8 @@ const HASHED = ${HASHED_ASSET.toString()};
  * crossOriginIsolated はここでしか作れない。綴りの正本は coi-headers.ts。
  */
 const COI = ${JSON.stringify(COI_HEADER_ENTRIES)};
+/* worker script の要求。COEP の下では、これ自身にも COEP が要る。 */
+const WORKER_DESTS = ['worker', 'sharedworker'];
 
 /*
  * 応答に分離のヘッダを被せて作り直す。
@@ -305,13 +307,36 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return; // 外部は素通し
 
+  /*
+   * 🔴 分離のヘッダが要るのは 2 種である(2026-08-11 に実測で確かめた)。
+   *
+   *  - navigation … 文書そのもの。crossOriginIsolated はここで決まる
+   *  - worker script … COEP の下では **worker 自身の応答にも COEP が要る**。
+   *    無いと net::ERR_BLOCKED_BY_RESPONSE で worker が読めず、
+   *    PKC3 は storage worker が起動できずに **起動ごと失敗する**
+   *    (実際に踏んだ: 'storage worker error: load failed')
+   *
+   * ⚠ 最初は navigation だけに付けて「部分資源は効かないから付けない」と
+   *    書いていた。効かないのは画像や css の話で、**worker は別物**だった。
+   * ⚠ それ以外には付けない ── 同一 origin の部分資源は COEP の下でも素で通り、
+   *    付けても効果がないうえ、応答ごとの作り直しが定常コストになる。
+   */
+  const needsCoi = req.mode === 'navigate' || WORKER_DESTS.indexOf(req.destination) !== -1;
+  const seal = (p) => (needsCoi ? p.then(withCoi) : p);
+
   // 🔴 navigation は **network-first**。cache-first にすると新しい版が永久に届かない
   if (req.mode === 'navigate') {
     event.respondWith(
-      // 注: 相対 URL は **SW script の URL 基準**で解決される(/dev/ の SW なら
-      // /dev/index.html)。precache に入れた綴りと揃えておく
-      fetch(req)
-        .catch(() =>
+      /*
+       * 🔴 分離のヘッダは**どの出口を通っても**要る(#111)。オフラインで
+       * cache から出した文書だけ分離が外れると、Office は '入っているのに
+       * 動かない' という、いちばん分からない壊れ方をする。
+       * ⚠ だから 4 つの出口を包んでから seal を 1 回だけ通す。
+       */
+      seal(
+        // 注: 相対 URL は **SW script の URL 基準**で解決される(/dev/ の SW なら
+        // /dev/index.html)。precache に入れた綴りと揃えておく
+        fetch(req).catch(() =>
           caches
             .match(req, MATCH)
             .then((hit) => hit || caches.match('./index.html', MATCH))
@@ -325,26 +350,22 @@ self.addEventListener('fetch', (event) => {
                   { status: 503, headers: { 'content-type': 'text/html; charset=utf-8' } },
                 ),
             ),
-        )
-        /*
-         * 🔴 分離のヘッダは**どの出口を通っても**要る(#111)。オフラインで
-         * cache から出した文書だけ分離が外れると、Office は '入っているのに
-         * 動かない' という、いちばん分からない壊れ方をする。
-         */
-        .then(withCoi),
+        ),
+      ),
     );
     return;
   }
 
   // hash 付きは cache-first(名前が変われば別 URL なので陳腐化しない)
+  // ⚠ worker script はここを通る ── seal を忘れると起動ごと落ちる
   if (HASHED.test(url.pathname)) {
-    event.respondWith(caches.match(req, MATCH).then((hit) => hit || fetch(req)));
+    event.respondWith(seal(caches.match(req, MATCH).then((hit) => hit || fetch(req))));
     return;
   }
 
   // それ以外(manifest / icon など)は network-first で cache に落とす
   event.respondWith(
-    fetch(req)
+    seal(fetch(req)
       .then((res) => {
         // 注: 200 だけを入れる。206(Partial)は Cache.put が TypeError を投げ、
         // quota 超過も同じく reject する ── SW の unhandled rejection にしない
@@ -357,7 +378,7 @@ self.addEventListener('fetch', (event) => {
         }
         return res;
       })
-      .catch(() => caches.match(req, MATCH).then((hit) => hit || Promise.reject(new Error('offline')))),
+      .catch(() => caches.match(req, MATCH).then((hit) => hit || Promise.reject(new Error('offline'))))),
   );
 });
 `;

@@ -113,6 +113,8 @@ interface Harness {
       mode?: string;
       method?: string;
       network?: 'ok' | 'fail' | 'error' | 'partial' | 'nobody';
+      /** `worker` / `sharedworker` は COEP の被せが要る(#111)。 */
+      destination?: string;
       /** ⚠ 実要求は Origin を送る。precache 側は送らない ── Vary の食い違い */
       origin?: string | undefined;
     },
@@ -124,6 +126,8 @@ interface Harness {
       mode?: string;
       method?: string;
       network?: 'ok' | 'fail' | 'error' | 'partial' | 'nobody';
+      /** `worker` / `sharedworker` は COEP の被せが要る(#111)。 */
+      destination?: string;
       origin?: string | undefined;
     },
   ): Promise<Response | null>;
@@ -245,6 +249,8 @@ function runSw(
       mode?: string;
       method?: string;
       network?: 'ok' | 'fail' | 'error' | 'partial' | 'nobody';
+      /** `worker` / `sharedworker` は COEP の被せが要る(#111)。 */
+      destination?: string;
       origin?: string | undefined;
     } = {}) {
       netMode = opts.network ?? 'ok';
@@ -254,6 +260,9 @@ function runSw(
           url,
           mode: opts.mode ?? 'no-cors',
           method: opts.method ?? 'GET',
+          // ⚠ **worker script かどうかはここで決まる**(#111)。COEP の下では
+          //    worker の応答にも COEP が要る ── 落とすと起動ごと死ぬ
+          destination: opts.destination ?? '',
           // ⚠ 実ブラウザの module script は `crossorigin` 付きで **Origin を送る**
           origin: opts.origin ?? 'https://pkc3.example',
         },
@@ -270,6 +279,7 @@ function runSw(
           url,
           mode: opts.mode ?? 'no-cors',
           method: opts.method ?? 'GET',
+          destination: opts.destination ?? '',
           origin: opts.origin ?? 'https://pkc3.example',
         },
         respondWith: (p: unknown) => void (responded = p),
@@ -804,16 +814,38 @@ describe('fetch ── 分離(COOP/COEP)を被せる', () => {
   });
 
   /**
-   * ⚠ **部分資源には付けない。** `crossOriginIsolated` は最上位文書の性質なので
-   * 効果はゼロ、一方で何百件もの資源ごとに Response を作り直す定常コストになる
-   * (user 指示「効くのは定常」)。
+   * 🔴 **worker script にも要る**(2026-08-11 に user が踏んだ)。
+   *
+   * COEP の下では **worker 自身の応答にも COEP が要る**。無いと
+   * `net::ERR_BLOCKED_BY_RESPONSE` で worker が読めず、PKC3 は storage worker が
+   * 起動できずに**アプリごと起動失敗**する(「storage worker error: load failed」)。
+   *
+   * ⚠ 私は最初 navigation だけに付け、「部分資源は効かないから付けない」と書いた。
+   * 効かないのは画像や css の話で、**worker は別物**だった ── しかも
+   * 「分離したか」だけを見ていたので、smoke 3 件が緑のまま出荷しかけた。
    */
   it.each([
-    ['hash 付き生成物', 'https://pkc3.example/assets/index-AAAAAAAA.js'],
-    ['hash 無しの資源', 'https://pkc3.example/manifest.webmanifest'],
-  ])('%s には付けない(効かない所で作り直さない)', async (_name, url) => {
+    ['専用 worker', 'worker'],
+    ['共有 worker', 'sharedworker'],
+  ])('🔴 %s の script にも COOP/COEP が付く(付けないと起動ごと死ぬ)', async (_name, dest) => {
     const h = await seeded();
-    const res = await h.fetchRes(url);
+    // ⚠ worker は hash 付き = cache-first の枝を通る。**枝ごとに要る**
+    expectIsolating(
+      await h.fetchRes('https://pkc3.example/assets/index-AAAAAAAA.js', { destination: dest }),
+    );
+  });
+
+  /**
+   * ⚠ **それ以外の部分資源には付けない。** 同一 origin の資源は COEP の下でも
+   * 素で通るので効果はゼロ、一方で何百件もの資源ごとに Response を作り直す
+   * 定常コストになる(user 指示「効くのは定常」)。
+   */
+  it.each([
+    ['hash 付き生成物(script)', 'https://pkc3.example/assets/index-AAAAAAAA.js', 'script'],
+    ['hash 無しの資源', 'https://pkc3.example/manifest.webmanifest', ''],
+  ])('%s には付けない(効かない所で作り直さない)', async (_name, url, dest) => {
+    const h = await seeded();
+    const res = await h.fetchRes(url, { destination: dest });
     expect(res?.headers.get('Cross-Origin-Opener-Policy')).toBeNull();
   });
 });
