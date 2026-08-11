@@ -107,6 +107,37 @@ PKC3 本体(窓 A)            Office(窓 B = office/host.html)
   └ postMessage で往復          × 閉じる = 780MB が還る
 ```
 
+### 🔴 実測で分かった: **`noopener` でないと還らない**(2026-08-11)
+
+O2 の受入条件「閉じたら 780MB が還るか」を測ったら、**素直に開いた窓は還らなかった**。
+
+| 開き方 | 増えた | 閉じた後に残った | **回収** |
+|---|---|---|---|
+| `open(url, 'pkc3-office')`(opener あり) | 608.9MB | 482.7MB | **21%** |
+| `open(url, '_blank', 'noopener')` | 743.9MB | **5.8MB** | **99%** |
+
+⚠ 待ちを 8 秒 → 25 秒に延ばしても 21% のまま ── **遅延解放ではない**。
+原因は **同一 origin の窓が同じ browsing context group に入り、同じ renderer process を
+共有する**こと。realm は捨てられても、process の heap は OS へ返らない。
+🔑 `noopener` を付けると**新しい context group**になり、別 process に置かれるので
+**閉じた瞬間に丸ごと還る**。
+
+### ⚠ `noopener` の代償と、その埋め方
+
+`noopener` にすると `window.open` は **null を返し**、子からは `window.opener` が
+見えない。つまり**握り(handle)も postMessage の相手も失う**。埋め方:
+
+| 失うもの | 代わり |
+|---|---|
+| 文書の受け渡し | **BroadcastChannel**(同一 origin なら context group を跨いで届く) |
+| 保存の書き戻し(R4/R5) | 同上 |
+| 「もう開いているか」の判定 | 窓からの**生存通知**(BroadcastChannel の heartbeat) |
+| 親から `close()` | 親が**閉じてくれと頼み**、窓が自分で閉じる |
+| 親から `focus()` | ⚠ **できないことがある**(背面タブの self-focus はブラウザ判断)。
+  できなければ「すでに開いています」と伝えるに留める ── **黙って何も起きない**をやらない |
+
+🔑 交換して得るものが **回収 21% → 99%** なので、迷う余地は無い。
+
 ### ⚠ 別窓ゆえに確かめる必要があること
 
 - **`window.open` は user の操作から呼ぶ**(でないとポップアップ遮断に遭う)

@@ -1,0 +1,33 @@
+{
+  "base": "http://127.0.0.1:35515",
+  "settleMs": 8000,
+  "mode": "noopener",
+  "isolated": true,
+  "beforeKb": 865436,
+  "painted": true,
+  "openKb": 1634136,
+  "stillOpenKb": 1625824,
+  "afterKb": 872220,
+  "events": [
+    "alive",
+    "alive",
+    "alive",
+    "painted",
+    "alive",
+    "alive",
+    "alive",
+    "alive",
+    "alive",
+    "alive",
+    "alive",
+    "alive",
+    "alive",
+    "alive",
+    "alive"
+  ],
+  "openedMb": 750.7,
+  "driftMb": -8.1,
+  "remainingMb": 6.6,
+  "reclaimedPct": 99,
+  "ok": true
+}
