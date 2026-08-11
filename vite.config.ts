@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import { swPlugin } from './build/sw-plugin.ts';
 import { bodyCssPlugin } from './build/body-css-plugin.ts';
+import { COI_HEADERS as SHARED_COI_HEADERS } from './src/adapter/platform/sw/coi-headers.ts';
 
 /**
  * cache 名に入れる build id。
@@ -19,13 +20,17 @@ export const buildIdFor = (precache: readonly string[]): string =>
 
 /**
  * cross-origin isolation のヘッダ。dev / preview の両方に同じものを配る。
- * ⚠ 本番(静的ホスティング)は**サーバ側で同じ 2 つを返す**か、
- *   返せないホスト(GitHub Pages 等)では service worker で被せる必要がある。
+ *
+ * 🔴 **本番(GitHub Pages)はヘッダを返せないので、service worker が被せる**
+ * (`src/adapter/platform/sw/sw-source.ts`)。ここは 2026-08-11 まで
+ * 「返せないホストでは SW で被せる必要がある」と**書いてあるだけ**で、
+ * その分が無かった ── 手元(preview)だけ分離が成立し、**本番だけが
+ * 構造的に動かない**状態を smoke ごと素通りさせた(#111)。
+ *
+ * ⚠ したがって綴りは**共有の定数から取る**。ここに直書きすると、dev と本番で
+ * 静かにずれる ── この repo は同じ形(一覧が 2 か所)で 1 度壊している。
  */
-const COI_HEADERS = {
-  'Cross-Origin-Opener-Policy': 'same-origin',
-  'Cross-Origin-Embedder-Policy': 'credentialless',
-} as const;
+const COI_HEADERS: Record<string, string> = { ...SHARED_COI_HEADERS };
 
 // base './' — Pages の / と /dev/ の両方で同一ビルドが動く相対パス配信
 export default defineConfig({
@@ -37,25 +42,15 @@ export default defineConfig({
   // 🔴 **crossOriginIsolated を成立させる**(#88 O2 の前提)。
   //
   // Office(LibreOffice wasm)は `-pthread` = SharedArrayBuffer を要求し、
-  // それには COOP/COEP が要る。⚠ **`crossOriginIsolated` は最上位文書の性質**なので、
-  // 「iframe だけ分離する」ことはできない ── 本体に付けるしかない。
-  //
-  // 🔑 **`credentialless` を選ぶ**(2026-08-10 実測):
-  //
-  //   | COEP            | isolated | SharedArrayBuffer | 外部画像(CORP 無し) |
-  //   |-----------------|----------|-------------------|----------------------|
-  //   | (なし)          | false    | ✕                 | OK                   |
-  //   | require-corp    | true     | ✓                 | **BLOCKED**          |
-  //   | credentialless  | **true** | **✓**             | **OK**               |
-  //
-  // ⚠ `require-corp` にすると **CORP を返さない外部画像が全部消える** ──
-  // 「外部画像の同意」機能がそのまま死ぬ。`credentialless` は資格情報を落として
-  // no-cors 取得を許すので、両立する。
-  // ⚠ ただし `credentialless` に対応しないブラウザでは分離が成立しない
-  //   ── その環境は **Office 以外は全部動く**(README の対応表)。
+  // それには COOP/COEP が要る。⚠ **なぜ `credentialless` なのか**(外部画像との
+  // 両立を実測して選んだ表)は `src/adapter/platform/sw/coi-headers.ts` に在る
+  // ── ここには写さない。
   //
   // ⚠ **dev / preview の両方に要る**。preview は smoke(`tests/smoke`)が使うので、
   //   片方だけだと「手元で通って CI で落ちる」型の食い違いを自分で作ることになる。
+  // ⚠ そして **preview で通ることは本番の保証にならない**(#111 で踏んだ)──
+  //   本番は SW が被せるので、その経路は `tests/smoke/coi.smoke.spec.ts` が
+  //   **ヘッダを返さない server** を別に立てて見ている。
   server: { headers: COI_HEADERS },
   preview: { headers: COI_HEADERS },
   // @sqlite.org/sqlite-wasm は pre-bundle すると worker/wasm 解決が壊れる(公式指示)

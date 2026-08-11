@@ -18,6 +18,19 @@ import {
 } from '../../src/adapter/platform/sw/sw-source';
 
 /**
+ * 応答の本体を取り出す。
+ *
+ * 🔴 **stub は本物の意味論を真似る**(CLAUDE.md)。#111 で SW が
+ * `new Response(...)` を作るようになったので、cache も harness も
+ * **本物の Response を受けられなければならない** ── ここを `String(res)` の
+ * ままにすると、保存されるのは `[object Response]` という嘘になる。
+ */
+function bodyOf(res: unknown): Promise<string> {
+  if (res && typeof (res as Response).text === 'function') return (res as Response).text();
+  return Promise.resolve(String(res));
+}
+
+/**
  * 偽の Cache API。⚠ **本物の意味論を真似る**(CLAUDE.md)── とくに **Vary**。
  *
  * 🔴 ここを省くと、実ブラウザだけで壊れる形を作れない。実際に踏んだ:
@@ -45,11 +58,12 @@ class FakeCache {
     return Promise.resolve();
   }
   put(req: { url: string; origin?: string }, res: unknown): Promise<void> {
-    this.store.set(new URL(req.url).pathname.replace(/^\//, './'), {
-      body: String(res),
-      varyOrigin: req.origin ?? null,
+    return bodyOf(res).then((body) => {
+      this.store.set(new URL(req.url).pathname.replace(/^\//, './'), {
+        body,
+        varyOrigin: req.origin ?? null,
+      });
     });
-    return Promise.resolve();
   }
   lookup(
     req: { url: string; origin?: string } | string,
@@ -63,11 +77,23 @@ class FakeCache {
     if (!opts?.ignoreVary && hit.varyOrigin !== reqOrigin) return undefined;
     return hit.body;
   }
+  /**
+   * ⚠ **本物は `Response` を返す**(文字列ではない)。#111 で SW が cache の
+   * 応答にもヘッダを被せるようになったので、ここが素の文字列だと
+   * 「cache から出した文書だけ分離が外れる」形を test で作れない。
+   */
+  hit(
+    req: { url: string; origin?: string } | string,
+    opts?: { ignoreVary?: boolean },
+  ): Response | undefined {
+    const body = this.lookup(req, opts);
+    return body === undefined ? undefined : new Response(body, { status: 200 });
+  }
   match(
     req: { url: string; origin?: string } | string,
     opts?: { ignoreVary?: boolean },
-  ): Promise<string | undefined> {
-    return Promise.resolve(this.lookup(req, opts));
+  ): Promise<Response | undefined> {
+    return Promise.resolve(this.hit(req, opts));
   }
   /** ⚠ 本物の `Cache.keys()`(件数を数える検査に要る)。 */
   keys(): Promise<string[]> {
@@ -86,11 +112,21 @@ interface Harness {
     opts?: {
       mode?: string;
       method?: string;
-      network?: 'ok' | 'fail' | 'error' | 'partial';
+      network?: 'ok' | 'fail' | 'error' | 'partial' | 'nobody';
       /** ⚠ 実要求は Origin を送る。precache 側は送らない ── Vary の食い違い */
       origin?: string | undefined;
     },
   ): Promise<string | null>;
+  /** 応答そのもの(**ヘッダを見る**ための口。#111)。 */
+  fetchRes(
+    url: string,
+    opts?: {
+      mode?: string;
+      method?: string;
+      network?: 'ok' | 'fail' | 'error' | 'partial' | 'nobody';
+      origin?: string | undefined;
+    },
+  ): Promise<Response | null>;
   claimed: () => boolean;
   skipped: () => boolean;
 }
@@ -105,7 +141,7 @@ function runSw(
   const listeners = new Map<string, (ev: unknown) => void>();
   let claimed = false;
   let skipped = false;
-  let netMode: 'ok' | 'fail' | 'error' | 'partial' = 'ok';
+  let netMode: 'ok' | 'fail' | 'error' | 'partial' | 'nobody' = 'ok';
 
   const caches = {
     open: (name: string) => {
@@ -129,10 +165,10 @@ function runSw(
     ) => {
       if (opts?.cacheName !== undefined) {
         const named = cacheMap.get(opts.cacheName);
-        return Promise.resolve(named ? named.lookup(req, opts) : undefined);
+        return Promise.resolve(named ? named.hit(req, opts) : undefined);
       }
       for (const c of cacheMap.values()) {
-        const hit = c.lookup(req, opts);
+        const hit = c.hit(req, opts);
         if (hit !== undefined) return Promise.resolve(hit);
       }
       return Promise.resolve(undefined);
@@ -156,32 +192,37 @@ function runSw(
     },
   };
 
+  /**
+   * 偽の網。⚠ **本物の `Response` を返す**(#111)── SW が応答を作り直すように
+   * なったので、`headers` / `body` / `clone()` の在る物でないと**その経路を
+   * 1 度も通らない**(通らなければ、ヘッダを落とす変異も生き延びる)。
+   *
+   * ⚠ **status を持たせる**。`ok` だけだと 206(Partial)を素通しする実装でも
+   * 通ってしまう ── `Cache.put` は 206 で TypeError を投げる(review L-4)。
+   */
   const fetchImpl = (req: { url: string }): Promise<unknown> => {
     if (netMode === 'fail') return Promise.reject(new Error('offline'));
-    // ⚠ **status を持たせる**。`ok` だけだと 206(Partial)を素通しする実装でも
-    // 通ってしまう ── `Cache.put` は 206 で TypeError を投げる(review L-4)
-    if (netMode === 'error') {
-      return Promise.resolve({ ok: false, status: 503, clone: () => 'net-err' });
-    }
+    if (netMode === 'error') return Promise.resolve(new Response('net-err', { status: 503 }));
     if (netMode === 'partial') {
-      return Promise.resolve({ ok: true, status: 206, clone: () => `net:${req.url}` });
+      return Promise.resolve(new Response(`net:${req.url}`, { status: 206 }));
     }
-    return Promise.resolve({
-      ok: true,
-      status: 200,
-      clone: () => `net:${req.url}`,
-      toString: () => `net:${req.url}`,
-    });
+    // ⚠ **本体を持てない status**。ここに本体を渡すと本物の Response は投げる
+    if (netMode === 'nobody') return Promise.resolve(new Response(null, { status: 204 }));
+    return Promise.resolve(new Response(`net:${req.url}`, { status: 200 }));
   };
 
-  // ⚠ `new Function` で**実物の文字列**を走らせる(写しを作らない)
-  const run = new Function('self', 'caches', 'fetch', 'URL', source) as (
+  // ⚠ `new Function` で**実物の文字列**を走らせる(写しを作らない)。
+  //    `Response` / `Headers` は node の本物を渡す ── 偽物を作ると、
+  //    「本体を持てない status に本体を渡すと投げる」等の意味論が消える
+  const run = new Function('self', 'caches', 'fetch', 'URL', 'Response', 'Headers', source) as (
     s: unknown,
     c: unknown,
     f: unknown,
     u: unknown,
+    r: unknown,
+    h: unknown,
   ) => void;
-  run(self, caches, fetchImpl, URL);
+  run(self, caches, fetchImpl, URL, Response, Headers);
 
   const waits: Array<Promise<unknown>> = [];
   return {
@@ -203,7 +244,7 @@ function runSw(
     async fetch(url, opts: {
       mode?: string;
       method?: string;
-      network?: 'ok' | 'fail' | 'error' | 'partial';
+      network?: 'ok' | 'fail' | 'error' | 'partial' | 'nobody';
       origin?: string | undefined;
     } = {}) {
       netMode = opts.network ?? 'ok';
@@ -219,7 +260,22 @@ function runSw(
         respondWith: (p: unknown) => void (responded = p),
       });
       if (responded === null) return null; // 素通し(respondWith を呼んでいない)
-      return String(await responded);
+      return bodyOf(await responded);
+    },
+    async fetchRes(url, opts = {}) {
+      netMode = opts.network ?? 'ok';
+      let responded: unknown = null;
+      listeners.get('fetch')?.({
+        request: {
+          url,
+          mode: opts.mode ?? 'no-cors',
+          method: opts.method ?? 'GET',
+          origin: opts.origin ?? 'https://pkc3.example',
+        },
+        respondWith: (p: unknown) => void (responded = p),
+      });
+      if (responded === null) return null;
+      return (await responded) as Response;
     },
   };
 }
@@ -671,5 +727,93 @@ describe('fetch ── 経路ごとの戦略', () => {
     const h = await seeded();
     expect(await h.fetch('https://pkc3.example/x', { method: 'POST' })).toBe(null);
     expect(await h.fetch('https://other.example/x.js')).toBe(null);
+  });
+});
+
+/**
+ * #111: 分離のヘッダ。
+ *
+ * 🔴 **これが無かったせいで、本番だけ Office が動かなかった。** GitHub Pages は
+ * ヘッダを返せないので、`crossOriginIsolated` はここでしか作れない。
+ *
+ * ⚠ **出口ごとに当てる**(CLAUDE.md「同じ値を複数の経路へ渡すものは経路ごとに
+ * pin する」)。navigation の出口は 4 つあり、代表 1 本の test は残り 3 本を
+ * 1 度も通らない ── オフラインで cache から出した文書だけ分離が外れる、
+ * という「入っているのに動かない」形をそこで作る。
+ */
+describe('fetch ── 分離(COOP/COEP)を被せる', () => {
+  const seeded = async (): Promise<Harness> => {
+    const h = runSw(SOURCE);
+    await h.fire('install');
+    return h;
+  };
+
+  /** ⚠ 期待値は**共有の定数から**取らない ── 値そのものを書いて pin する。 */
+  const expectIsolating = (res: Response | null): void => {
+    expect(res).not.toBeNull();
+    expect(res?.headers.get('Cross-Origin-Opener-Policy')).toBe('same-origin');
+    expect(res?.headers.get('Cross-Origin-Embedder-Policy')).toBe('credentialless');
+  };
+
+  it.each([
+    ['網から返した文書', 'https://pkc3.example/index.html', 'ok'],
+    ['オフラインで cache から返した文書', 'https://pkc3.example/index.html', 'fail'],
+    ['オフラインで index.html へ退避した文書', 'https://pkc3.example/なにか', 'fail'],
+  ] as const)('🔴 %s に COOP/COEP が付く', async (_name, url, network) => {
+    const h = await seeded();
+    expectIsolating(await h.fetchRes(url, { mode: 'navigate', network }));
+  });
+
+  it('🔴 cache にも無いオフラインの断り文にも付く(分離だけ外れた画面を作らない)', async () => {
+    // ⚠ ここが抜けると、読み直した先が 503 のときだけ分離が外れる ──
+    //    user から見ると「たまに動かない」になり、原因が名指しできない
+    const h = runSw(SOURCE); // ⚠ install しない = cache が空
+    const res = await h.fetchRes('https://pkc3.example/index.html', {
+      mode: 'navigate',
+      network: 'fail',
+    });
+    expect(res?.status).toBe(503);
+    expectIsolating(res);
+  });
+
+  it('本体はそのまま(作り直しで中身を落としていない)', async () => {
+    const h = await seeded();
+    expect(await h.fetch('https://pkc3.example/index.html', { mode: 'navigate' })).toBe(
+      'net:https://pkc3.example/index.html',
+    );
+  });
+
+  it('🔴 本体を持てない status(204)は作り直さない ── 投げると白紙になる', async () => {
+    // ⚠ `new Response(body, { status: 204 })` は **TypeError を投げる**。
+    //    respondWith が reject すると user に見えるのは白紙で、理由も出ない
+    const h = await seeded();
+    const res = await h.fetchRes('https://pkc3.example/x.html', {
+      mode: 'navigate',
+      network: 'nobody',
+    });
+    expect(res?.status).toBe(204);
+  });
+
+  it('status を保つ(503 を 200 に見せない)', async () => {
+    const h = runSw(SOURCE);
+    const res = await h.fetchRes('https://pkc3.example/x.html', {
+      mode: 'navigate',
+      network: 'fail',
+    });
+    expect(res?.status).toBe(503);
+  });
+
+  /**
+   * ⚠ **部分資源には付けない。** `crossOriginIsolated` は最上位文書の性質なので
+   * 効果はゼロ、一方で何百件もの資源ごとに Response を作り直す定常コストになる
+   * (user 指示「効くのは定常」)。
+   */
+  it.each([
+    ['hash 付き生成物', 'https://pkc3.example/assets/index-AAAAAAAA.js'],
+    ['hash 無しの資源', 'https://pkc3.example/manifest.webmanifest'],
+  ])('%s には付けない(効かない所で作り直さない)', async (_name, url) => {
+    const h = await seeded();
+    const res = await h.fetchRes(url);
+    expect(res?.headers.get('Cross-Origin-Opener-Policy')).toBeNull();
   });
 });

@@ -17,6 +17,16 @@ const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 
 const PORT = Number(process.env.PKC3_SMOKE_PORT ?? 45732);
 
+/**
+ * 🔴 **ヘッダを何も足さない server**(#111)。GitHub Pages と同じ条件を立てる。
+ *
+ * `vite preview` は COOP/COEP を**自分で返す**ので、その上で
+ * `crossOriginIsolated` を見ても **SW が働いた証拠にならない** ──
+ * 本番だけ分離が成立しない、という穴を 1 度そのまま出荷した。
+ * ⚠ `coi.smoke.spec.ts` だけがこちらを使う。
+ */
+const PLAIN_PORT = Number(process.env.PKC3_PLAIN_PORT ?? PORT + 1);
+
 // 同梱 Chromium(コンテナ / self-host)を優先、無ければ playwright 管理の
 // ブラウザ(CI は install 済みが前提)
 //
@@ -50,14 +60,27 @@ export default defineConfig({
     baseURL: `http://localhost:${PORT}`,
     ...(executablePath ? { launchOptions: { executablePath } } : {}),
   },
-  webServer: {
-    // 実際に配布するビルド(dist)を検品する ── dev server ではなく preview。
-    // cwd 既定は config のディレクトリなので repo root を明示(vite project 解決)
-    command: `npx vite preview --port ${PORT} --strictPort`,
-    cwd: repoRoot,
-    url: `http://localhost:${PORT}`,
-    // CI では必ず自前で立てる(残留 server が別 dist を検品する事故の防止)
-    reuseExistingServer: !process.env.CI,
-    timeout: 30_000,
-  },
+  // 🔑 spec から使う口(`coi.smoke.spec.ts` だけが plain を見る)
+  metadata: { plainBaseURL: `http://localhost:${PLAIN_PORT}` },
+  webServer: [
+    {
+      // 実際に配布するビルド(dist)を検品する ── dev server ではなく preview。
+      // cwd 既定は config のディレクトリなので repo root を明示(vite project 解決)
+      command: `npx vite preview --port ${PORT} --strictPort`,
+      cwd: repoRoot,
+      url: `http://localhost:${PORT}`,
+      // CI では必ず自前で立てる(残留 server が別 dist を検品する事故の防止)
+      reuseExistingServer: !process.env.CI,
+      timeout: 30_000,
+    },
+    {
+      // ⚠ 同じ `dist` を、**ヘッダを足さずに**配る(本番と同じ条件)
+      command: `node tests/smoke/plain-server.mjs`,
+      cwd: repoRoot,
+      url: `http://localhost:${PLAIN_PORT}/index.html`,
+      env: { PKC3_PLAIN_PORT: String(PLAIN_PORT) },
+      reuseExistingServer: !process.env.CI,
+      timeout: 30_000,
+    },
+  ],
 });

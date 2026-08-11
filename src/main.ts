@@ -53,6 +53,7 @@ import { MarkdownClient } from '@adapter/platform/render/markdown-client';
 import { AssetClient } from '@adapter/platform/asset/asset-client';
 import { watchForUpdate, type UpdateContainer } from '@adapter/platform/sw/update-prompt';
 import { reloadOnPrebootSwap, type PrebootTarget } from '@adapter/platform/sw/preboot-swap';
+import { applyIsolationReload } from '@adapter/platform/sw/coi-reload';
 import { InspectorRenderer } from '@adapter/ui/render/inspector';
 import { BrowseRouter, type BrowseMode } from '@adapter/ui/render/browse';
 import { CenterRouter } from '@adapter/ui/render/center';
@@ -1106,12 +1107,33 @@ function bootstrap(): void {
       app.presentAnnounce();
       // 🔄 更新の案内(P7 段⑤)。⚠ 自動では交代させない ── 交代は旧 build の
       // cache を消すので、user が押したときだけ・押したタブだけを再読込する
+      const registered = registerSw();
       void watchForUpdate(
         navigator.serviceWorker as unknown as UpdateContainer,
-        registerSw(),
+        registered,
         (apply) => app.presentUpdate(apply),
         () => location.reload(),
       );
+      /**
+       * 🔴 **初回訪問だけ 1 回読み直して分離を成立させる**(#111)。
+       *
+       * 本番(GitHub Pages)の COOP/COEP は SW が被せるが、**SW は自分を登録した
+       * 文書を制御していない** ── その 1 回だけ分離しない。判断(いつ読み直すか /
+       * どこで諦めるか)は `coi-reload.ts` に在る。ここは配線だけ。
+       *
+       * ⚠ **成功側にしか置かない。** boot が失敗した画面を読み直すと、user が
+       * 読むべき理由が消える(失敗側は登録だけして終わる)。
+       */
+      void applyIsolationReload({
+        registration: registered,
+        ready:
+          'serviceWorker' in navigator
+            ? (navigator.serviceWorker.ready as unknown as Promise<{ active: unknown }>)
+            : null,
+        globals: globalThis,
+        session: typeof sessionStorage === 'undefined' ? null : sessionStorage,
+        reload: () => location.reload(),
+      });
       if (import.meta.env.DEV) {
         // probe / 手元検証用の導線(DEV のみ)
         (window as unknown as Record<string, unknown>).__APP__ = app;
