@@ -19,6 +19,7 @@ import { appExternalImages, ExternalImagePolicy } from './external-images';
 import { appJobMonitor, type JobMonitor } from '@adapter/platform/job-monitor';
 import { appNoticeStore, type NoticeStore } from '@adapter/platform/notice-store';
 import { ScrollMemory } from './scroll-memory';
+import { buildOfficePackPanel, type OfficePackPanel } from './office-pack-panel';
 
 /** 画面の書き換えを間引く間隔。⚠ **可視化がジャンクの原因になっては本末転倒**。 */
 const REFRESH_MS = 400;
@@ -36,6 +37,8 @@ export class SettingsRenderer {
   private dirty = false;
   /** ログは 400ms ごとに描き直す ── 読んでいる位置を殺さない(P8 段⑫)。 */
   private logScroll: ScrollMemory | null = null;
+  /** Office 一式の節(#88 / O6-a)。⚠ 器と同じ寿命 ── 自分で変化を購読する。 */
+  private officePack: OfficePackPanel | null = null;
 
   constructor(
     private readonly region: HTMLElement,
@@ -185,6 +188,13 @@ export class SettingsRenderer {
     userSection.append(dl);
     body.append(userSection);
     body.append(this.buildExternalImages());
+    /**
+     * 🔴 **Office 一式**(#88 / O6-a)。⚠ 「表示」の節に混ぜない ── 見た目の
+     * 好みではなく、**この端末に 77MB を置くかどうか**という別の判断である。
+     * ⚠ 器は 1 度だけ組む。状態の変化は panel 自身が購読して字だけ差し替える。
+     */
+    this.officePack = buildOfficePackPanel();
+    body.append(this.officePack.root);
     body.append(this.buildJobs());
     this.region.append(body);
     this.syncTheme();

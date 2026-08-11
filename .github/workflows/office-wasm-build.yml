@@ -21,8 +21,26 @@ on:
   workflow_dispatch:
     inputs:
       qt_ref:
-        description: 'qtbase の ref(Qt6 wasm は IME を持つ ── 5.15 には無い)'
-        default: '6.11'
+        # 🔴 **6.9 でなければならない**(2026-08-10、run 31353996894 の実測で確定)。
+        #    LO は `-sJSPI_EXPORTS` と `EXPORTED_FUNCTIONS` で **Qt の embind シンボル**
+        #    `…MethodInvoker…qstdweb::EventListener…invoke…` を名指しする
+        #    (`desktop/CustomTarget_soffice_bin-emscripten-exports.mk:25` /
+        #    `EMSCRIPTEN_INTEL_GCC.mk:36`)。このシンボルを生む
+        #    `class_<EventListener>("QtEventListener").function("handleEvent", …)` は
+        #    **Qt 6.9 の `qstdweb.cpp:754-758` にしか無い** ── 6.10 で
+        #    `QWasmSuspendResumeControl` へ置き換えられて消えた(6.9/6.10/6.11/6.12 を
+        #    実際に fetch して数えた: 6.9 のみ 7 箇所、他は 0)。
+        #    6.11 で建てると `wasm-ld: symbol exported via --export not found` で落ちる。
+        #
+        # 🔑 **6.9 は上下から挟まれて一意に決まる**(2026-08-10、下限を追加で確認):
+        #    上限 ≤ 6.9 ── `qstdweb::EventListener` の embind 登録が 6.10 で消えた(上記)
+        #    下限 ≥ 6.9 ── `-feature-wasm-jspi` が **Qt 6.9 で新設**された
+        #      (`configure.cmake` の `qt_feature("wasm-jspi"` は 6.8 に **0 件**、6.9 に 1 件。
+        #       両ブランチを fetch して実測)。LO の Qt6 モードは JSPI を要求するので、
+        #       6.8 以下では**そもそも建てられない**。
+        #    ⚠ つまり **6.9 以外に選択肢が無い**。上げ下げする前にこの 2 つを確かめること。
+        description: 'qtbase の ref(⚠ LO の JSPI export が要求するため 6.9 固定)'
+        default: '6.9'
       emsdk:
         description: 'emsdk の版(LibreOffice の README.wasm.md が指定する版に合わせる)'
         default: '4.0.10'
@@ -32,7 +50,29 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 350
+    # 🔑 成果物を **prerelease** として出すために要る(下の「手元で回せるようにする」)
+    permissions:
+      contents: write
+    # 🔴 **step ごとに別シェル**なので、configure step で export しても `make` へ届かない。
+    #    `make` は config_host.mk が古いと **autogen を再実行する**ので、そこで QT6DIR が
+    #    無いと「Qmake not found」で落ちる(2026-08-09 に実際に踏んだ)。job 単位で渡す。
+    #    ⚠ `~` は YAML の env では展開されない。絶対パスで書く
+    env:
+      QT6DIR: /home/runner/qt-wasm/install
+      LC_ALL: C.UTF-8
+      # 🔑 **ccache は既に効いている**(run 31307638176 のログに
+      #    `/usr/bin/ccache .../em++` が出ている)が、**残していなかった**ので
+      #    毎回ゼロから 2h40m 掛かっていた。置き場を固定して cache に載せる。
+      #    ⚠ GitHub の cache は **repo 全体で 10GB** が上限(超えると古い順に消える)
+      #    ので、Qt(約 1.5GB)と同居できる大きさに抑える
+      CCACHE_DIR: /home/runner/.ccache
+      CCACHE_MAXSIZE: 5G
+      CCACHE_COMPRESS: '1'
     steps:
+      # ⚠ この workflow は外部リポジトリしか触らないので checkout が無かったが、
+      #    パッチを**実ファイル**に出した以上、PKC3 側も取る必要がある
+      - uses: actions/checkout@v4
+
       # runner は / の空きが 14GB 前後しかない。LibreOffice には全く足りないので先に空ける
       - name: ディスクを空ける
         run: |
@@ -52,7 +92,54 @@ jobs:
             flex gperf nasm xsltproc ccache libarchive-zip-perl \
             autoconf automake bison zip unzip pkg-config build-essential
 
+      # ── ここから途中成果物の再利用 ────────────────────────────────
+      # ⚠ **`cache` ではなく `cache/restore` + `cache/save` を使う** ── 素の `cache`
+      #    は job が失敗すると保存しないことがある。**いま欲しいのは「失敗した回の
+      #    途中成果物」**(リンクを何度も試す局面)なので、保存を `if: always()` で
+      #    明示的に回す。
+      - name: emsdk を復元
+        id: c_emsdk
+        uses: actions/cache/restore@v4
+        with:
+          path: /home/runner/emsdk
+          key: emsdk-${{ inputs.emsdk }}-v1
+
+      # 🔴 **構成フラグを鍵に含める**(2026-08-09)。含めないと、構成を変えたのに
+      #    **古い Qt が復元されて同じリンクエラーが再現する**(= 直したのに直らない)。
+      #    ⚠ 手で `-v2` に上げる運用は忘れるので、**file の内容から導出**させる。
+      - name: Qt6(host / wasm)を復元
+        id: c_qt
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            /home/runner/qt-host/install
+            /home/runner/qt-wasm/install
+          key: qt-${{ inputs.qt_ref }}-emsdk-${{ inputs.emsdk }}-${{ hashFiles('build/office-wasm/qt-wasm-configure.args') }}
+
+      # 🔴 **ccache の鍵にも Qt の同一性を入れる**(2026-08-10、実測で判明)。
+      #    ⚠ **Qt キャッシュの鍵だけ直して、こちらを直していなかった。**
+      #    症状: Qt を 6.11 → 6.9 に替えたのに `make` が
+      #    `undefined symbol: QObject::doSetProperty(char const*, QVariant const&, QVariant*)`
+      #    で落ちる。この**参照版のシグネチャは 6.11 にしか無い**(6.9 はポインタ版のみ。
+      #    qobject.h を両方読んで確認)── つまり `QtBuilder.o` が
+      #    **6.11 のヘッダでコンパイルされた古い ccache** から出ていた。
+      #    原因: LO は **depend mode の ccache**(`config_host.mk` の `CCACHE_DEPEND_MODE=1`
+      #    → `gbuild.mk:382` が `CCACHE_DEPEND=1`)で、**同じパスで中身だけ変わった
+      #    ヘッダ**を取りこぼす。`$QT6DIR` は版が変わってもパスが同じである。
+      #    🔑 **鍵で名前空間を分ける**(Qt キャッシュに対して既にやったのと同じ手)。
+      - name: ccache を復元
+        id: c_ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: /home/runner/.ccache
+          # ⚠ 完全一致は狙わない ── 前回の続きから始められればよいので
+          #    `restore-keys` で**同じ Qt の**直近のものを拾う
+          key: ccache-lo-qt6-${{ inputs.qt_ref }}-${{ hashFiles('build/office-wasm/qt-wasm-configure.args') }}-${{ github.sha }}
+          restore-keys: |
+            ccache-lo-qt6-${{ inputs.qt_ref }}-${{ hashFiles('build/office-wasm/qt-wasm-configure.args') }}-
+
       - name: emsdk
+        if: steps.c_emsdk.outputs.cache-hit != 'true'
         run: |
           set -eux
           git clone --depth 1 https://github.com/emscripten-core/emsdk.git ~/emsdk
@@ -63,6 +150,7 @@ jobs:
           emcc --version | head -1
 
       - name: qtbase を取る
+        if: steps.c_qt.outputs.cache-hit != 'true'
         run: git clone --depth 1 --branch "${{ inputs.qt_ref }}" https://github.com/qt/qtbase.git ~/qtbase
 
       # 🔑 Qt6 は **host build が別に要る**(Qt5 には無かった要件)。
@@ -71,6 +159,7 @@ jobs:
       # ⚠ `-xcb` を強制しない ── xcb の dev が揃っていないと condition 違反で落ちる。
       #    host は道具とモジュールを配るだけで、画面を出す必要は無い。
       - name: Qt6 host ビルド
+        if: steps.c_qt.outputs.cache-hit != 'true'
         run: |
           set -eux
           mkdir -p ~/qt-host && cd ~/qt-host
@@ -80,24 +169,59 @@ jobs:
           cmake --install .
           ls ~/qt-host/install/libexec/moc
 
-      # ⚠ `-feature-thread` は必須 ── LibreOffice 側が `-pthread -s USE_PTHREADS=1` を
-      #    要求する(`solenv/gbuild/platform/EMSCRIPTEN_INTEL_GCC.mk`)。
-      #    その結果 **COOP/COEP と SharedArrayBuffer が要る**(PKC3 では SW 注入で成立
-      #    することを実機確認済み ── 選定 doc §2.1)。
+      # 🔑 構成フラグは **build/office-wasm/qt-wasm-configure.args** に在る(理由もそこ)。
+      #    ここに直書きしないのは、**キャッシュ鍵をその file から導出している**ため ──
+      #    フラグと鍵が 1 か所で連動し、「構成を変えたのに古い Qt が戻る」事故が起きない。
       # ⚠ emsdk の版ズレは**警告止まり**(Qt 6.10/6.11 推奨 4.0.7 / こちら 4.0.10)。実測済み。
       - name: Qt6 wasm ビルド
+        if: steps.c_qt.outputs.cache-hit != 'true'
         run: |
           set -eux
           . ~/emsdk/emsdk_env.sh
           mkdir -p ~/qt-wasm && cd ~/qt-wasm
+          # コメントを落として**語で**分割する。
+          # ⚠ 行で分割してはいけない ── `-nomake examples` が**空白込みの 1 引数**になり、
+          #    configure が受け取れない(手元で引数境界を印字して確認した)
+          # shellcheck disable=SC2207
+          QTARGS=( $(sed -e 's/#.*//' "$GITHUB_WORKSPACE/build/office-wasm/qt-wasm-configure.args") )
+          # ⚠ **当たったことを確かめる**(空振りを合格と読まない)── 読めていないのに
+          #    「既定で建った」を成功と読むと、また 3 時間かけて同じエラーに戻る
+          printf '[%s]\n' "${QTARGS[@]}"
+          test "${#QTARGS[@]}" -ge 8
+          printf '%s\n' "${QTARGS[@]}" | grep -qx -- -feature-wasm-exceptions
+          printf '%s\n' "${QTARGS[@]}" | grep -qx -- -feature-wasm-jspi
           ~/qtbase/configure -qt-host-path ~/qt-host/install -platform wasm-emscripten \
-            -prefix ~/qt-wasm/install -release -nomake examples -nomake tests \
-            -feature-thread -no-dbus -no-icu
+            -prefix ~/qt-wasm/install -release "${QTARGS[@]}"
           cmake --build . --parallel "$(nproc)"
           cmake --install .
           # LibreOffice の configure.ac:14296 が探す 2 つの実体
           test -f ~/qt-wasm/install/plugins/platforms/libqwasm.a
           test -f ~/qt-wasm/install/plugins/platforms/wasm_shell.html
+          # 🔴 **例外モデルが LO と一致したことを、建った実物で確かめる。**
+          #    ⚠ 「configure に渡した」ではなく「**生成物がそう建っている**」を見る。
+          #    ⚠ 当て先を 1 度間違えた ── `QT_WASM_EXCEPTIONS` は install のどこにも
+          #    現れない(**正しく建っても落ちる検査**だった)。実物に在る印はこれ:
+          #    無効なら `-1`、有効なら `1`(手元の install で `-1` を実見して確認)
+          grep -qx '#define QT_FEATURE_wasm_exceptions 1' \
+            ~/qt-wasm/install/include/QtCore/qconfig.h
+          grep -qx '#define QT_FEATURE_wasm_jspi 1' \
+            ~/qt-wasm/install/include/QtCore/qconfig.h
+
+      - name: Qt6 を保存
+        if: always() && steps.c_qt.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            /home/runner/qt-host/install
+            /home/runner/qt-wasm/install
+          key: qt-${{ inputs.qt_ref }}-emsdk-${{ inputs.emsdk }}-${{ hashFiles('build/office-wasm/qt-wasm-configure.args') }}
+
+      - name: emsdk を保存
+        if: always() && steps.c_emsdk.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /home/runner/emsdk
+          key: emsdk-${{ inputs.emsdk }}-v1
 
       # 🔴 **moc / rcc / uic は host の道具**なので cross build の install には入らない。
       #    LibreOffice の configure は `$QT6DIR/libexec` と `$QT6DIR/bin` しか見ないので、
@@ -114,9 +238,104 @@ jobs:
       - name: LibreOffice を取る
         run: git clone --depth 1 https://github.com/LibreOffice/core.git ~/lo-core
 
+      # ⚠ 復元は **clone のあと** ── `git clone` は空でないディレクトリを嫌う
+      - name: 外部 tarball を復元
+        id: c_tar
+        uses: actions/cache/restore@v4
+        with:
+          path: /home/runner/lo-core/external/tarballs
+          key: lo-tarballs-v1
+
+      # 🔴 **上流 Qt6 経路の取りこぼしを当てる**(#88、2026-08-09)。
+      # 理由と根拠は build/office-wasm/patch-qt6-freetype.py の docstring に書いてある。
+      # ⚠ パッチを**実ファイル**に出しているのは、手元の LibreOffice checkout に当てて
+      #    動作を確かめられるからである(当たる / 2 回目は already patched で素通り)。
+      #    ⚠ 一度「入れ子ヒアドキュメントが原因で GitHub が解析できない」と**推測して**
+      #    ここを書き換えたが、**外れ**だった ── 真因はこの step と復元 step が
+      #    **3 組貼り付いていて `id: c_tar` が重複**していたこと。
+      #    再発は tests/workflow-steps.test.ts が止める。
+      - name: 上流 Qt6 経路の取りこぼしを当てる
+        run: |
+          set -euxo pipefail
+          # ⚠ **file 名指しで書かない** ── パッチを 1 本足したときに、ここへ書き足すのを
+          #    忘れると黙って当たらない。全部拾い、**拾った本数を主張する**
+          #    (glob が壊れて 0 本になったら落ちる)。
+          n=0
+          for p in "$GITHUB_WORKSPACE"/build/office-wasm/patch-*.py; do
+            python3 "$p" ~/lo-core
+            n=$((n + 1))
+          done
+          echo "applied $n patches"
+          test "$n" -ge 2
+
+      # 🔴 **Qt と LO の「握手」を、リンクの 16 分前に確かめる**(2026-08-10)。
+      #    LO は Qt の embind シンボルを名指しで export する。無いと
+      #    `wasm-ld: symbol exported via --export not found` で**最後に**落ちる。
+      #    ⚠ **cache から復元した Qt にも効かせたい**ので、Qt ビルド step の中ではなく
+      #    独立の step に置く(古い Qt が戻ったときこそ鳴ってほしい)。
+      #    ⚠ 名前を**ここに直書きしない** ── LO 側の定義から取り出し、
+      #    2 か所が食い違わないようにする(判定は 1 か所へ寄せる)。
+      - name: LO が要求する Qt シンボルが在ることを確かめる
+        run: |
+          set -euo pipefail
+          sym=$(grep -o '_ZN10emscripten[A-Za-z0-9_]*' \
+            ~/lo-core/solenv/gbuild/platform/EMSCRIPTEN_INTEL_GCC.mk | head -1)
+          # 空振り防止 ── LO 側から名前が取れていること
+          test -n "$sym"
+          echo "LO が要求するシンボル: $sym"
+
+          nm=~/emsdk/upstream/bin/llvm-nm
+          # ⚠ 道具が無いのを「シンボルが無い」と読み違えない
+          test -x "$nm" || { echo "ERROR: $nm が無い" >&2; exit 1; }
+
+          # ⚠ **archive を file 名指しで探さない**(1 度 libQt6Core.a 決め打ちで書いた)。
+          #    LO は $QT6DIR/lib の archive 群を丸ごとリンクするので、全部見る。
+          #
+          # 🔴 **`nm | grep -q` と書いてはいけない**(2026-08-10 に実測で判明)。
+          #    `grep -q` は最初の一致で打ち切るので **nm が SIGPIPE で死に、
+          #    `pipefail` がそれを拾って pipeline が失敗する** ── 記号が
+          #    **在るときほど失敗する**(実測: 在る記号で exit=74 / pipefail 無しなら 0)。
+          #    この形の gate は「常に無い」と言い続ける。**一度ファイルへ落としてから見る。**
+          total=0
+          found=''
+          for a in ~/qt-wasm/install/lib/*.a; do
+            "$nm" "$a" > /tmp/nm-out.txt 2>/dev/null || true
+            total=$((total + $(wc -l < /tmp/nm-out.txt)))
+            if grep -q -- "$sym" /tmp/nm-out.txt; then
+              found="$a"
+              break
+            fi
+          done
+          # 正の対照 ── 本物の archive 群を読めていること(空 archive に「無い」と言わない)
+          echo "走査した記号の総数: $total"
+          test "$total" -gt 1000
+
+          if [ -z "$found" ]; then
+            echo "ERROR: $QT6DIR/lib のどの archive にも $sym が無い" >&2
+            echo '--- 診断: qstdweb 由来の記号がどれだけ在るか ---' >&2
+            "$nm" ~/qt-wasm/install/lib/libQt6Core.a > /tmp/nm-core.txt 2>/dev/null || true
+            grep -c 'qstdweb' /tmp/nm-core.txt >&2 || true
+            grep 'EventListener' /tmp/nm-core.txt >&2 | head -5 || true
+            echo '  → qstdweb::EventListener の embind 登録は Qt 6.9 の' >&2
+            echo '    qstdweb.cpp:754-758 にしか無い(6.10 で削除)' >&2
+            exit 1
+          fi
+          echo "見つかった: $found"
+
       # ⚠ 上流の `LibreOfficeWASM32.conf` は `--enable-qt5` を含む。そこへ `--enable-qt6` を
       #    足すだけだと VCL プラグインが 2 個になり、`configure.ac:12691` の
       #    「動的読込が無効なら GUI 付きはプラグイン 1 個」で落ちる。**自前の config を持つ。**
+      #
+      # 🔴 **JSPI + 非 PROXY_TO_PTHREAD が「Qt6 のモード」である**(2026-08-10 に判明)。
+      #    それまで既定(JSPI off / PROXY_TO_PTHREAD on = **Qt5 用の組み合わせ**)で
+      #    建てていたため、Qt6 のコードを**書かれていないモードで走らせていた**。
+      #    症状: `main()` は動くが `qwasmclipboard.cpp:168` の
+      #    `val::global("window")["chrome"]` で落ちる ── **worker に `window` は無い**。
+      #    根拠: LO 側の Qt6 対応は
+      #    `ENABLE_QT6 && HAVE_EMSCRIPTEN_JSPI && !HAVE_EMSCRIPTEN_PROXY_TO_PTHREAD`
+      #    という条件で書かれており(`QtInstance.cxx` に 7 箇所ほか計 8 file)、
+      #    このモード専用の並行機構 `comphelper/emscriptenthreading` まで在る。
+      #    ⚠ **個別のバグを 1 つずつ潰す前に、組み合わせが正しいかを疑うこと。**
       - name: configure(Qt6)
         run: |
           set -eux
@@ -128,23 +347,137 @@ jobs:
           --disable-gen
           --disable-scripting
           --with-package-format=emscripten
+          --enable-emscripten-jspi
+          --disable-emscripten-proxy-to-pthread
           CONF
-          export LC_ALL=C.UTF-8
           . ~/emsdk/emsdk_env.sh
-          export QT6DIR=~/qt-wasm/install
           ./autogen.sh --with-distro=PKC3WASM-Qt6
           # 空振り防止 ── 本当に qt6 単独で構成されたか
           grep -q '^export ENABLE_QT6=TRUE' config_host.mk
           grep -q '^export ENABLE_QT5=$' config_host.mk
           grep -q '^export VCL_PLUGIN_INFO= qt6$' config_host.mk
+          # 🔴 **Qt6 のモードが立っていることを確かめる**(下のコメント参照)。
+          #    ⚠ 既定のままだと Qt5 用の組み合わせで建ち、走らせるまで気づけない
+          grep -q '^export ENABLE_EMSCRIPTEN_JSPI=TRUE' config_host.mk
+          grep -q '^export ENABLE_EMSCRIPTEN_PROXY_TO_PTHREAD=$' config_host.mk
 
+      # 🔴 **`| tail` を噛ませない**(2026-08-09 に踏んだ)。bash のパイプの終了コードは
+      #    最後のコマンドのものなので、`make | tail` は **make が落ちても step が緑**になる。
+      #    CLAUDE.md の「検品が ✗ を出したのに job は green」と同じ型。
+      #    `pipefail` を立てたうえで、そもそもパイプしない。
       - name: make
         run: |
-          set -eux
+          set -euxo pipefail
           cd ~/lo-core
-          export LC_ALL=C.UTF-8
           . ~/emsdk/emsdk_env.sh
-          /usr/bin/time -v make -j"$(nproc)" 2>&1 | tail -400
+          ccache -z   # 統計をゼロに(この run 分だけを測る)
+          # `-v` の最大常駐(Maximum resident set size)がリンクのメモリ実測値になる
+          # ⚠ **`tee` は早期終了しない**ので SIGPIPE の罠は無い。`pipefail` を立てて
+          #    あるので make の失敗はそのまま pipeline の失敗になる(`| tail` とは違う)。
+          #    控えを残すのは、**API 経由のログが 16KB で切れてエラー行に届かない**ため。
+          /usr/bin/time -v make -j"$(nproc)" 2>&1 | tee /tmp/make.log
+
+
+      # 📏 **効いたかを数で出す**(印象で語らない)。hit 率が低いままなら
+      #    cache が実は当たっていないということ
+      - name: ccache の効き
+        if: always()
+        run: ccache -s
+
+      # ⚠ **生成物が在ることを step として主張する** ── 無ければここで赤にする
+      #    (artifact の `if-no-files-found: warn` は黙って通してしまう)
+      - name: 生成物が在ることを確かめる
+        run: |
+          set -eux
+          test -f ~/lo-core/instdir/program/soffice.wasm
+          test -f ~/lo-core/instdir/program/soffice.js
+          ls -la ~/lo-core/instdir/program/soffice.*
+
+      # 🔴 **リンクフラグが効いたことを「生成物」で確かめる**(2026-08-10)。
+      #    ⚠ `make -n` では検証できない ── tarball の段で止まってリンク行に到達せず、
+      #    **パッチの有無どちらでも 0 件**になる(対照群を取って空振りだと分かった)。
+      #    ⚠ `qtcanvas` が残っていると `pthread_create` が EINVAL で失敗し、
+      #    `-sPROXY_TO_PTHREAD=1` では**それが main() 本体**なので LO が起動しない
+      #    (emscripten `libpthread.js:730` が `error = EINVAL; break;`)。
+      - name: qtcanvas が焼き込まれていないことを確かめる
+        run: |
+          set -euxo pipefail
+          cd ~/lo-core
+          # 正の対照 ── この grep が**本物の soffice.js**を見ていることを先に示す
+          # (空の file を相手に「無い」と言わないため)
+          grep -q 'soffice_entry' instdir/program/soffice.js
+          if grep -q 'qtcanvas' instdir/program/soffice.js; then
+            echo 'ERROR: soffice.js に qtcanvas が残っている' >&2
+            echo '  → pthread_create が EINVAL で失敗し、main() が走らない' >&2
+            exit 1
+          fi
+
+      # 🔑 **実行に要る file 一式は上流の list に従う**(自分で並べない)。
+      #    `instsetoo_native/CustomTarget_emscripten-install.mk` が
+      #    workdir/installation/LibreOffice/emscripten へ必要物を集める ──
+      #    ⚠ `soffice.data.js.metadata` / `qt_soffice.html` / `qtloader.js` /
+      #    `qtlogo.svg` が要ることは、この list を読むまで気づかなかった。
+      #    手で並べていたら**起動できない一式**を配るところだった。
+      - name: 実行一式を集める(上流の install list)
+        run: |
+          set -euxo pipefail
+          cd ~/lo-core
+          . ~/emsdk/emsdk_env.sh
+          make instsetoo_native
+          ls -la workdir/installation/LibreOffice/emscripten/
+          # ⚠ 起動に不可欠な 4 つを名指しで主張する(在ることを step として言う)
+          for f in soffice.js soffice.wasm soffice.data soffice.data.js.metadata \
+                   qt_soffice.html qtloader.js; do
+            test -f "workdir/installation/LibreOffice/emscripten/$f"
+          done
+
+      # 🔴 **手元で回せるようにする**(user 指示 2026-08-10
+      #    「ビルド通ってるんだから、あなたの環境に落として試せばいいんじゃない?」)。
+      #    ⚠ **artifact は API 経由でしか落とせず、この箱からは api.github.com が 403**。
+      #    一方 **in-scope repo の github.com は 200** なので、**prerelease の資産**
+      #    なら手元へ届く(実測: /releases が 200)。
+      #    🔑 これは検証用の抜け道ではなく、**`wasm-pack-store` の配布経路そのもの**
+      #    (巨大 wasm を release に置き、初回だけ取得してローカルへ保存する設計)。
+      #    ⚠ tag は**使い回す** ── run ごとに 80MB を積み上げない。
+      #    ⚠ probe が失敗しても出す(`if: always()`)── **落ちた回の成果物こそ要る**。
+      - name: 手元で回せるように prerelease へ出す
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          d=~/lo-core/workdir/installation/LibreOffice/emscripten
+          if [ ! -d "$d" ]; then echo '(実行一式が無い ── publish しない)'; exit 0; fi
+          cd "$d"
+          zip -q -r /tmp/lo-wasm-qt6.zip .
+          ls -la /tmp/lo-wasm-qt6.zip
+          tag=lo-wasm-dev
+          # 既存を消してから作り直す(tag を使い回して容量を積まない)
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+          fi
+          gh release create "$tag" /tmp/lo-wasm-qt6.zip \
+            --repo "$GITHUB_REPOSITORY" \
+            --prerelease \
+            --title 'LibreOffice wasm (Qt6) 開発ビルド ── 検証用' \
+            --notes "自動生成。run ${GITHUB_RUN_ID} / commit ${GITHUB_SHA}。
+            ⚠ 製品ではない。#88 の検証のために置いている。tag は使い回すので中身は入れ替わる。"
+          echo "落とし先: https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/lo-wasm-qt6.zip"
+
+      # 🔴 **起動 probe は CI に置かない**(user 指示 2026-08-10)。
+      #    「CI にスモークテストが入っているのはなぜ? あなたがテストすればいいのでは?
+      #      遅いランナーでやる意味がわからない」
+      #
+      #    ⚠ 置いていた理由は「**artifact を手元へ落とせなかったから**」だけで、
+      #    その理由は上の prerelease publish で**消えた**。理屈が残っていない。
+      #
+      #    🔑 もう 1 つ、置いてはいけない理由がある ── **1 つの job が 2 つのことを
+      #    主張していた**。直前の run は「ビルドは完璧(undefined symbol 0 件)なのに
+      #    job は赤」だった。**赤緑が「ビルドが通ったか」を意味しなくなる。**
+      #    この job の主張は「**成果物ができた**」の 1 つに絞る。
+      #
+      #    起動の検証は手元で:  bash build/office-wasm/fetch-and-run.sh
+      #    (CI の 1 回転 25 分に対し、手元は秒。フラグ・待ち・観測点を詰められる)
 
       - name: 生成物
         if: always()
@@ -154,13 +487,78 @@ jobs:
           ls -la instdir/program/*.wasm instdir/program/*.js instdir/program/*.data 2>/dev/null || true
           df -h /
 
+      # 🔴 **失敗しても保存する** ── 次の試行を数分にするための本体
+      - name: ccache を保存
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: /home/runner/.ccache
+          # ⚠ 復元側と**同じ形**でなければ、次の run が拾えない
+          key: ccache-lo-qt6-${{ inputs.qt_ref }}-${{ hashFiles('build/office-wasm/qt-wasm-configure.args') }}-${{ github.sha }}
+
+      - name: 外部 tarball を保存
+        if: always() && steps.c_tar.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /home/runner/lo-core/external/tarballs
+          key: lo-tarballs-v1
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: lo-wasm-qt6
+          # ⚠ **配るのは「上流の install list が集めた一式」**。手で並べた 3 つでは
+          #    `soffice.data.js.metadata` / `qt_soffice.html` / `qtloader.js` が欠け、
+          #    **落としても起動できない**(2026-08-10 に気づいた)。
           path: |
-            ~/lo-core/instdir/program/soffice.wasm
-            ~/lo-core/instdir/program/soffice.js
-            ~/lo-core/instdir/program/soffice.data
+            ~/lo-core/workdir/installation/LibreOffice/emscripten
             ~/lo-core/config.log
-          if-no-files-found: warn
+          if-no-files-found: error
+
+      # 🔴 **エラー行は「ジョブの最後」に出す**(2026-08-10)。
+      #    GitHub API のログ取得は**末尾しか返さない**(実測 16KB 前後)ので、
+      #    make の直後に置くと大量の出力に埋もれて**読めない**。
+      #    ⚠ 1 度そこで失敗した ── 置き場所そのものが観測点である。
+      #    ⚠ `| head` は使わない(SIGPIPE)── `grep -m` と `head < file`。
+      # 🔴 **診断は「ジョブの最後」に 1 か所へまとめる**(2026-08-10)。
+      #    ⚠ **同じ置き場所の失敗を 3 回やった** ── make のエラー / probe の結果 /
+      #    JSPI の報告。どれも中間に置いたので、API のログ取得(末尾のみ、実測 16KB 前後)
+      #    では読めず、そのたびに 1 回転を捨てた。注意書きでは 3 度目を止められなかったので、
+      #    **出口を 1 つに統合する**(次に診断を足す人も、ここに足すしかない形にする)。
+      #    ⚠ `| head` は使わない(SIGPIPE)── `grep -m` と `head < file`。
+      - name: 診断まとめ(最後に出す)
+        if: always()
+        run: |
+          set -euo pipefail
+
+          echo '########## 1. 起動の検証は手元で ##########'
+          echo '  bash build/office-wasm/fetch-and-run.sh'
+          echo '  (CI では回さない ── この job の主張は「成果物ができた」の 1 つだけ)'
+
+          echo '########## 2. JSPI が生成物に効いているか ##########'
+          js=~/lo-core/instdir/program/soffice.js
+          if [ -f "$js" ]; then
+            sym=$(grep -o '_ZN10emscripten[A-Za-z0-9_]*' \
+              ~/lo-core/solenv/gbuild/platform/EMSCRIPTEN_INTEL_GCC.mk | head -1)
+            echo "LO が JSPI_EXPORTS で名指しする記号: ${sym:0:60}..."
+            echo -n '  soffice.js に在るか: '
+            if grep -q -- "$sym" "$js"; then echo 'あり'; else echo 'なし'; fi
+            for marker in JSPI Asyncify asyncify WebAssembly.Suspending emscripten_check_mailbox; do
+              echo -n "  '$marker' の出現数: "
+              grep -c -- "$marker" "$js" || true
+            done
+          else
+            echo '(soffice.js 無し)'
+          fi
+
+          echo '########## 3. make のエラー ##########'
+          if [ -f /tmp/make.log ]; then
+            grep -m 20 -nE 'wasm-ld: error|error:|^make.*\*\*\*' /tmp/make.log || echo '(該当なし)'
+            grep -oE 'undefined symbol: [A-Za-z0-9_:]+' /tmp/make.log > /tmp/undef.txt || true
+            sort -u /tmp/undef.txt > /tmp/undef-uniq.txt || true
+            echo "undefined symbol 件数: $(wc -l < /tmp/undef-uniq.txt)"
+            head -20 < /tmp/undef-uniq.txt
+          else
+            echo '(make.log 無し)'
+          fi
+

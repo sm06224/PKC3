@@ -354,10 +354,37 @@ LO は Qt を CMake 経由で consume しないので、Qt 側の版一致 `FATA
 `Module_more_fonts.mk` / `Repository.mk` の `gb_Helper_optional(MORE_FONTS, ...)`。
 wasm は `--with-fonts` が既定 ON なので、これで `ooo_fonts` 経由で `soffice.data` に入る。
 
-⚠ **`soffice.data` は eager preload** ── Noto Sans CJK JP のフル OTF は 1 ウェイト約 16MB。
-**サブセット必須**(可変フォント or 常用漢字サブセット)。
-⚠ フォント置換表(`VCL.xcu`)の ＭＳ 明朝 / ＭＳ ゴシックの置換先も同梱に無いので、
-`fc_local.conf` に別名を足すか置換表を触る必要がある(§3.1 の表を参照)。
+⚠ **`soffice.data` は eager preload**(= 常駐)。配る量は問わない(不可侵指示)が、
+**常駐メモリは問う**ので、ここだけはサイズが判断材料になる。
+
+#### 🔴 実地調査(2026-08-09、LibreOffice core を実物で確認)── 穴は **4 つ**あった
+
+「フォントを 1 つ足す」では済まない。**数えたら 4 つ**で、どれも独立に効く:
+
+| # | 穴 | 実測 |
+|---|---|---|
+| 1 | **同梱フォントに CJK が 1 つも無い** | `external/more_fonts/*.mk` を CJK / han / jp で grep → **0 件** |
+| 2 | **`VCL.xcu` の置換先が全部「同梱に無いフォント」** | `msgothic` → `mspgothic;hiraginokakugothicpronw3;…;ipagothic;gothic;arialunicodems;lucidaunicode`<br>`msmincho` → `ipamincho;hiraginominchopronw3;…;heiseimin;arialunicodems;lucidaunicode`<br>⚠ **Noto は 1 つも鎖に入っていない** |
+| 3 | 🔴 **游ゴシック / 游明朝(`yugothic` / `yumincho`)は登録すら無い** | `VCL.xcu` に node が**存在しない**。⚠ これは **Office 2016 以降の日本語既定書体**であり、実際の `.docx` / `.pptx` が最も多く指定してくる名前である |
+| 4 | **fontconfig の別名に和文が 0 件** | `external/more_fonts/fc_local.snippet` / `postprocess/fontconfig/fc_local.snippet` は Arial→Liberation / Calibri→Carlito / Cambria→Caladea など**ラテンのみ**。gothic / mincho / CJK は **grep 0 件** |
+
+🔑 **user が挙げた「ppt の表示レイアウトが崩れる」に直結する。** 字が出るかどうか(#1)と、
+**指定された書体に何が当たるか**(#2〜#4)は別問題で、後者を放置すると
+「文字は出るが行長・行数が原文と違う」= レイアウト崩れになる。
+
+⚠ **「同梱フォントを足したから日本語 OK」と言わない。** 主張してよいのは
+**実ファイルを開いて、指定書体に何が当たったかを見たあと**である
+(検証の規律「下流の結果だけを見る test は別経路に救われる」と同型)。
+
+#### 選定の論点(**未裁定** ── 実測を添えて user に出す)
+
+- **どの和文フォントを焼くか**: 日本語のみ(Noto Sans JP 系)/ 汎 CJK(Noto Sans CJK JP)。
+  ⚠ 「日本語は絶対」(user 指示 2026-08-09)は満たされるが、**中文・韓文を落とすかどうか**は
+  user の動線の話なので勝手に決めない(不可侵「記法を減らすことは動線を減らすこと」と同じ向き)
+- **明朝を入れるか**(`ＭＳ 明朝` 指定文書のため)── ゴシックだけだと #2 の鎖が
+  明朝に当たらず、見出しと本文の対比が消える
+- **置換表を触るか、fontconfig の別名で寄せるか** ── #2/#3 は `VCL.xcu`、#4 は
+  `fc_local.snippet`。⚠ **両方に同じ判定を書かない**(規律「判定を増やさない。1 か所へ寄せる」)
 
 ### 3.5.4 「動く」証拠
 
@@ -421,11 +448,605 @@ LibreOffice は外部依存 tarball 約 100 件をこのホストから取る。
 - ❌ **「この箱の制約はディスクと RAM」という見立ては外れた** ── 実際に止めたのは**ネットワーク**。
   ディスクは 23GB 残っていた
 
-### 残る最大の未知
+### 残る最大の未知 → **解けた**(run 31307638176)
 
-**リンク時のメモリ**(公式が最大 64GB)。GitHub の標準 runner は 16GB なので、
-落ちたら ① README の回避策(`-s WASM_BIGINT=1` / `ASSERTIONS=1` / `-g3` で WASM の
-書き直しを避ける)② larger runner、の順。**ここはまだ 1 度も走らせていない。**
+**リンク時のメモリ**(公式 README が「possibly needs 64GB RAM」)は**杞憂だった**。
+標準 runner(16GB)で `make` が完走し、`/usr/bin/time -v` の **peak RSS は 4.95 GB**。
+`soffice.data` 87.6MB も生成された。落ちたのは**最後の `soffice.js` のリンクだけ**である。
+
+## 3.7 🔴 Qt6 経路の欠落と、それを **2h40m 待たずに** 検証する方法(2026-08-09)
+
+### 症状と原因
+
+`wasm-ld: undefined symbol: FT_Outline_Transform`(ほか `FT_*` 多数、すべて
+`libcairo-lo.a(cairo-ft-font.c.o)` 由来)。
+
+`RepositoryExternal.mk` を読むと `gb_LinkTarget__use_cairo` は **`freetype_headers`
+しか取っていない**(ヘッダのみ・libs 無し)。Qt5 のリンク行には
+`-lQt5FontDatabaseSupport` が在って Qt 側の freetype で解決されるが、
+**Qt6 のリンク行(`configure.ac:14313`)にはフォント系が 1 つも無い**。
+上流の Qt6 × Emscripten はまだ誰も最後まで通していない、という状況証拠でもある。
+
+直し: `vcl/Library_vclplug_qt6.mk` の `use_externals` に **`freetype`** を並べる
+(`build/office-wasm/patch-qt6-freetype.py`)。`gb_LinkTarget__use_freetype` は
+`SYSTEM_FREETYPE` 分岐の**外**で定義されているので Emscripten でも有効で、
+`FREETYPE_LIBS` をリンク行へ足す。
+
+⚠ **最初は `use_static_libraries` で足そうとして誤った。** `StaticLibrary_freetype` が
+建つのは `COM=MSC` のときだけ(`external/freetype/Module_freetype.mk`)で、Emscripten では
+ExternalProject である。上流の `vcl/Library_vcl.mk` の条件が `WNT-TRUE` なのには理由がある。
+
+### 🔑 **`gb_DEBUG_STATIC=1` で、ビルドせずにリンク構成を検める**
+
+user 指示「無策で頭から回すの違くない?」への答え。**1 語変えて 3 時間回す**のではなく、
+gbuild に**実行ファイルへ集まる externals を印字させる**:
+
+```bash
+make gb_DEBUG_STATIC=1 -n Executable_soffice_bin > /tmp/dbgstatic.log 2>&1
+grep -o "expand_executable externals for Executable/soffice.js: .*" /tmp/dbgstatic.log
+```
+
+`solenv/gbuild/static.mk` の `gb_LinkTarget__expand_executable` が
+**transitive に集めた externals を実行ファイルへ当て直す**ので、この 1 行が
+「リンク行に何が載るか」の答えになる。`make` は tarball が無くて途中で止まるが、
+**印字は parse 時に出る**ので止まってよい ── 所要 **4 分**。
+
+実測(2026-08-09):
+
+| | soffice.js の externals 末尾 |
+|---|---|
+| パッチ **有** | `… wpd wpg xmlsec **freetype** qt6` |
+| パッチ **無**(対照群) | `… wpd wpg xmlsec qt6` |
+
+⚠ **対照群を取ること** ── `freetype_headers` は cairo 経由で元から在るので、
+「freetype という字がある」だけでは効果を主張できない。外して消えることまで見る。
+
+⚠ **この検証が示すのは「`FREETYPE_LIBS` がリンク行に載る」ところまで**である。
+リンクが通ることまでは示していない(`FT_*` 以外の未定義が残っている可能性は消えない)。
+主張の範囲を超えて読まない。
+
+→ **実際、残っていた。** 次の §3.8。
+
+## 3.8 🔴 2 つ目の欠落 ── 例外モデルの食い違い(2026-08-09)
+
+FreeType を直した run(31334536443)で `FT_*` は **1 件も出なくなり**、`make` は
+2h40m52s → **3h04m41s** と 24 分先へ進んだ。そこで出た次のエラー:
+
+```
+wasm-ld: error: libQt6Core.a(qglobal.cpp.o): undefined symbol: __resumeException
+```
+
+**例外処理 ABI の食い違い**である。両側を実物で読んだ:
+
+| | 例外モデル | 出典 |
+|---|---|---|
+| Qt(既定) | **JS 例外**(`-fexceptions`) | `qtbase/configure.cmake:1022-1026` ── `wasm-exceptions` は **`AUTODETECT OFF`** |
+| LibreOffice | **native Wasm 例外** | `gb_EMSCRIPTEN_EXCEPT = -fwasm-exceptions -s SUPPORT_LONGJMP=wasm`(`EMSCRIPTEN_INTEL_GCC.mk:44`) |
+
+`__resumeException` は **JS 例外ランタイム側の実体**なので、混ぜると解決されない。
+直し: Qt の wasm 側を **`-feature-wasm-exceptions`** で建てる ── 有効にすると Qt も
+`-fwasm-exceptions` + `-s SUPPORT_LONGJMP=wasm` を付ける(`QtWasmHelpers.cmake:29-42`)ので、
+**LO と完全に一致する**。
+
+⚠ **同型の食い違いを他にも探して、無いことを確かめた**(3 時間かけてから 3 つ目に気づくのを避ける):
+
+- **pthread**: LO は `-pthread -s USE_PTHREADS=1`、Qt は `-feature-thread` で `-pthread` → **一致**
+- **JSPI**: LO 側は既定 off(この run の `config_host.mk` で `ENABLE_EMSCRIPTEN_JSPI=` を実見)
+  → Qt に `-feature-wasm-jspi` は**足さない**
+
+### 🔴 キャッシュ鍵は**構成フラグから導出する**
+
+⚠ 鍵を `qt-…-v1` と固定していると、構成を変えても**古い Qt が復元されて同じエラーが
+再現する** ── 「直したのに直らない」に見え、原因を別の場所に探しに行く。
+手で `-v2` に上げる運用は忘れるので、フラグを file
+(`build/office-wasm/qt-wasm-configure.args`)へ出し、`hashFiles(...)` で鍵に織り込んだ。
+
+### 書きながら潰した 2 つの罠(どちらも「緑のまま間違う」型)
+
+1. **検査の当て先が間違っていた。** `QT_WASM_EXCEPTIONS` は install のどこにも現れず、
+   **正しく建っても落ちる検査**だった。手元の install を実見して
+   `#define QT_FEATURE_wasm_exceptions -1` を見つけ、そこへ当て直した(有効なら `1`)
+2. **行で分割すると `-nomake examples` が空白込みの 1 引数になる。**
+   引数境界を `printf '[%s]\n'` で印字して確認し、語分割へ直した
+
+## 3.9 ⚠ **リンクは通った**(run 31344100469、2026-08-10)── ただし**動かなかった**(§3.10)
+
+**LibreOffice for WebAssembly を Qt6 で建てることに成功した。** job 全体 success。
+
+| 生成物 | サイズ |
+|---|---|
+| `soffice.wasm` | **156,496,181 B**(149 MiB) |
+| `soffice.data` | 87,661,735 B(83.6 MiB) |
+| `soffice.js` | 836,819 B |
+| `qtloader.js` | 12,135 B |
+| `bindings_uno.js` | 739,337 B |
+| artifact zip 合計 | 81,304,362 B(77.5 MiB) |
+
+### ビルド時間 ── 「毎回 3 時間」は 1 回で終わった
+
+| run | Qt | LO `make` | job 合計 |
+|---|---|---|---|
+| 31334536443(全部冷間) | 26m05s | **3h04m41s** | ~3h35m |
+| 31344100469(Qt は再構成で建て直し / ccache・tarball 温間) | 18m35s | **16m02s** | **37m30s** |
+
+ccache: 1 回目 hit **2.88%**(13,197 miss)→ 2 回目は `make` が 16 分。
+外部 tarball 525MB もキャッシュ済みで、約 100 件のダウンロードが消えた。
+**Qt を再構成しなければ、次は 20 分程度**の見込み。
+
+### ⚠ ここまでで**言えないこと**
+
+- **1 度もブラウザで動かしていない。** 「建った」は「動く」ではない
+- `TOTAL_MEMORY=1GB`(`EMSCRIPTEN_INTEL_GCC.mk:18`)+ `soffice.data` 83.6MiB の
+  eager preload ── **常駐メモリは実測が要る**(不可侵指示「効くのは定常」)。
+  配る量(245MB)は判断理由にしないが、**常駐は判断理由になる**
+- 日本語はまだ**豆腐**のはず(§3.5.3 の穴 4 つは未着手)
+
+→ **実際、動かなかった。** 次の §3.10。
+
+## 3.10 🔴 「建った」と「動く」の間に 3 つあった(2026-08-10)
+
+§3.9 で「通った」と書いた版は、**ブラウザで 1 度も UI が出なかった**。
+以下は、そこから実測で辿った 3 段である。
+
+### ⚠ まず、私の成功判定が間違っていた(run 31350624048)
+
+probe は `ok:true` を返したが、中身は:
+
+    "wasm": { "hasModule": false, "canvases": 0 }
+    "consoleErrors": ["pthread_create: could not find canvas with ID \"#qtcanvas\" ..."]
+
+判定を「`#screen` が `block`」= Qt の `onLoaded` に置いていたため、
+**画面が空でも成功**になっていた。🔑 主張したいのは「LibreOffice の面が出た」
+なので、**大きさを持つ canvas が `#screen` の中に在ること**へ書き直した
+(`onLoaded` は途中経過として別欄に残す ── 消すとどこまで進んだか分からない)。
+3 題材で検品し、**「onLoaded だけ出て canvas 0」が落ちる**ことを確かめた。
+
+### (3) `#qtcanvas` ── Qt5 の canvas id を Qt6 に渡していた
+
+`desktop/Executable_soffice_bin.mk:70` が `PROXY_TO_PTHREAD` + GUI のとき
+`-sOFFSCREENCANVASES_TO_PTHREAD=#qtcanvas` を渡す。⚠ **上流の条件は Qt5/Qt6 を
+区別していない**。Qt6 は `#screen` の中へ動的に canvas を作るので、この id は無い
+(qtbase を `qtcanvas` / `OFFSCREENCANVAS` / `PROXY_TO_PTHREAD` で grep して全部 0 件)。
+
+🔴 **警告ではない。** emscripten `libpthread.js:730` は canvas が無いと
+`error = EINVAL; break;` として **`pthread_create` を失敗させる**。
+`-sPROXY_TO_PTHREAD=1` では**その pthread が `main()` 本体**なので、
+**LibreOffice の main が 1 度も走らない**。
+
+### (4) 🔑 そもそも**組み合わせが違った** ── Qt6 のモードは JSPI + 非 PROXY
+
+(3) を直すと `main()` は走り、次はこれで落ちた:
+
+    TypeError: Cannot read properties of undefined (reading 'chrome')
+      ← qtbase qwasmclipboard.cpp:168  val::global("window")["chrome"]
+
+**worker に `window` は無い。** ここで「4 つ目の個別バグ」と数えかけたが、
+LO 側を読むと Qt6 対応は**ひとつのモードとして**書かれていた:
+
+    ENABLE_QT6 && HAVE_EMSCRIPTEN_JSPI && !HAVE_EMSCRIPTEN_PROXY_TO_PTHREAD
+
+`QtInstance.cxx` に 7 箇所、`.hxx` 2、`QtTimer.cxx`、`scheduler.cxx` 2 ── 計 8 file。
+**このモード専用の並行機構** `comphelper/emscriptenthreading` まで在る。
+私は既定(JSPI off / PROXY_TO_PTHREAD on = **Qt5 用の組み合わせ**)で建てていた。
+
+🔑 **個別のバグを 1 つずつ潰す前に、組み合わせが正しいかを疑う。**
+(3) の `#qtcanvas` は、正しいモードなら**そもそも出ないフラグ**だった。
+
+### (5) Qt の版 ── LO の JSPI export は **6.9 にしか無い**
+
+JSPI モードで建てると、リンクで:
+
+    wasm-ld: symbol exported via --export not found: …qstdweb::EventListener…
+
+LO はこの Qt シンボルを 2 か所で名指しする
+(`desktop/CustomTarget_soffice_bin-emscripten-exports.mk:25` /
+`EMSCRIPTEN_INTEL_GCC.mk:36`)。生むのは Qt **6.9** の `qstdweb.cpp:754-758`:
+
+```cpp
+emscripten::class_<EventListener>("QtEventListener")
+    .constructor<uintptr_t>()
+    .function("handleEvent", &EventListener::handleEvent);
+```
+
+4 ブランチを実際に fetch して数えた:
+
+| Qt | `qstdweb.cpp` の EventListener | embind 登録 |
+|---|---|---|
+| **6.9** | **7** | **3** |
+| 6.10 / 6.11 / 6.12 | 0 | 0 |
+
+6.10 で `QWasmSuspendResumeControl` へ置き換えられて消えている。
+⚠ 版だけ替えて別の壁に当たらないよう、6.9 に `-feature-wasm-exceptions` /
+`-feature-wasm-jspi` が在ることも `configure.cmake:1009/1017` で先に確認した。
+
+#### 🔑 **6.9 は上下から挟まれて一意に決まる**(2026-08-10 追記)
+
+当初は上限 1 点だけで「6.9」と判断していたが、**下限も付いた**:
+
+| 境界 | 根拠 |
+|---|---|
+| 上限 **≤ 6.9** | `qstdweb::EventListener` の embind 登録が **6.10 で削除**(上表) |
+| 下限 **≥ 6.9** | `-feature-wasm-jspi` が **Qt 6.9 で新設** ── `qt_feature("wasm-jspi"` は **6.8 に 0 件 / 6.9 に 1 件**(両ブランチを fetch して実測)。LO の Qt6 モードは JSPI を要求するので 6.8 以下では建てられない |
+
+⚠ **6.9 以外に選択肢が無い。** そして 6.10 で上限が切れている以上、
+**この経路は Qt 側の追従が止まった行き止まり**でもある(LO master に
+`QWasmSuspendResumeControl` へ追従する commit は見つかっていない)。
+採用の是非を判断するときは、この事実を材料に入れること。
+
+#### 上流の先行事例(⚠ 二次情報 ── 私は原文を読めていない)
+
+並列調査が拾った範囲では、LO の当該 commit(2025-02)自身が
+「Qt dev を `-feature-wasm-jspi` で建て、emsdk 4.0.3 / Chrome 132 で動いた」と
+書いているという。**この 1 点は裏取りできていない**(GitHub の HTML 経由の要約)。
+ただし、少なくとも**誰かが一度は通した経路である**ことの傍証にはなる。
+
+⚠ 併せて、上流自身が wasm ビルドを
+**"still experimental and known to occasionally hang and crash"** と書いている。
+「建った」「起動した」のあとに**安定性**という別の関門が残る。
+
+### この期間に置いた「早く鳴る門」3 つ
+
+どれも**リンクまで 16 分待たずに**落とすためのもの:
+
+1. **Qt の構成が生成物に反映されているか** ── `qconfig.h` の
+   `#define QT_FEATURE_wasm_{exceptions,jspi} 1`。⚠ 最初 `QT_WASM_EXCEPTIONS` を
+   見ようとしたが install のどこにも無く、**正しく建っても落ちる検査**だった
+2. **LO のモードが立っているか** ── `config_host.mk` の
+   `ENABLE_EMSCRIPTEN_JSPI=TRUE` / `ENABLE_EMSCRIPTEN_PROXY_TO_PTHREAD=`(空)
+3. **LO が要求する Qt シンボルが在るか** ── `llvm-nm` で `libQt6Core.a` を見る。
+   ⚠ **Qt ビルド step の中ではなく独立の step**に置いた(cache から復元した古い Qt にも
+   効かせる)。⚠ シンボル名は**直書きせず LO 側から抽出**して突き合わせる。
+   ⚠ 正の対照(`nm` の出力が 1000 行超)を先に主張し、空 archive に「無い」と言わせない
+
+⚠ **`make -n` で `OFFSCREENCANVAS` の消滅を見る検査は空振りだった**(対照群も 0 件)──
+tarball の段で止まってリンク行に到達しないため。生成された `soffice.js` を
+見る形へ直した。**検査を書いたら対照群を取る。**
+
+## 3.11 ✅ **動いた ── 日本語も出た**(2026-08-10)
+
+独自ビルドした LibreOffice(Qt6 / JSPI)が**実ブラウザで起動し、Writer で日本語文書を
+組んだ**。§3.9〜§3.10 で「建ったが動かない」と書いた状態は解消している。
+
+![LibreOffice Start Center が wasm で起動している](images/office-wasm-start-center.png)
+
+### 🔴 まず訂正 ── 「動かない」は**私の観測点の誤り**だった
+
+§3.10 で判定を `onLoaded` から「`#screen` の中に大きさを持つ canvas が在ること」へ
+直した。向きは正しかったが、**書き方が間違っていた**:
+
+```
+#screen > #qt-shadow-container ─⟨shadowRoot⟩→ .qt-screen
+  → #qt-window-1 → .qt-window > canvas.qt-window-canvas   (1165x744)
+```
+
+Qt 6 の面は **shadow root の中**に在る。`querySelectorAll` は shadow 境界を越えないので、
+`#screen.querySelectorAll('canvas')` は**動いていても永遠に 0 枚**を返す。私はその 0 を
+信じて、在りもしないデッドロックを何時間も追った ── mailbox / JSPI / スレッドの CPU 時間まで
+計装したが、**同じ run が撮っていた screenshot には Start Center が完全に描かれていた**。
+
+🔑 **数える前に、まず見る。** 視覚を持つものを「数えた値」だけで判定するときは、
+**同じ run で screenshot を撮り、必ず 1 度は目で見る**。
+🔑 CLAUDE.md「検査の『主張そのもの』が間違っていることがある」の 2 例目。1 例目は
+「守れない条件」、今回は「**そもそも到達できない探索経路**」── どちらも*緑に見える / 赤に見える*
+だけで、**主張とは無関係**だった。
+🔑 対策として probe に**対照群**を入れた:境界を越えない `shallow` の枚数を併記し、
+`canvases > 0 && shallow === 0` が正常であることを結果 JSON に残す
+(`build/office-wasm/boot-probe.mjs`)。
+
+### 実測(手元 `/opt/pw-browsers/chromium`、COOP/COEP、persistent profile)
+
+| 項目 | 値 |
+|---|---|
+| 起動 → 面が出るまで | **3.98 秒** |
+| 常駐 RSS(対照群 = 同条件の空ページとの差) | **+636.6 MB**(822.7MB → 1474.5MB) |
+| `measureUserAgentSpecificMemory()` | 2.28 GB |
+| canvas | 1 枚 1165x744(`shallow` は 0 = 想定どおり) |
+| 起動後の console error | 2 件のみ(`Blocking on the main thread` 警告 / `__syscall_mprotect` 未対応警告) |
+
+⚠ この 636.6MB は **Start Center を出しただけの値**。不可侵指示「効くのは定常」に照らすと、
+**編集セッションを続けたときの推移**をまだ測っていない ── boot 窓だけで定常を語らない。
+
+### 日本語 ── 同梱フォントには **CJK が 1 つも無い**
+
+`soffice.data`(83.6MB)に入っているフォントは **128 file / 51.2MiB**。内訳はヘブライ
+(CLM 一式)・アラビア(Amiri / Noto Naskh / Scheherazade)・アルメニア・グルジア・ラオ・
+リス……と揃っているのに、**CJK は 0 件**(`Noto Sans CJK` / `Source Han` / IPA いずれも無し)。
+結果、日本語は**全部豆腐**になる:
+
+![CJK フォント未注入 ── 日本語が全部豆腐](images/office-wasm-ja-tofu.png)
+
+### 🔑 実行時に MEMFS へ流し込めば、そのまま解決する(実証済み)
+
+`FS.writeFile('/instdir/share/fonts/truetype/…', bytes)` で **起動後・`main()` 前**に
+書き込めば、fontconfig がそのまま拾う。BIZ UDGothic / UDPGothic / UDMincho の 3 本
+(計 15.2MB、`raw.githubusercontent.com/google/fonts/main/ofl/…` の TTF)を入れた結果:
+
+![BIZ UD 注入後 ── 日本語が正しく表示される](images/office-wasm-ja-bizud.png)
+
+ゴシックと明朝が**別のフォントとして効いている**(下段にウロコがある):
+
+![上: BIZ UDGothic / 下: BIZ UDMincho](images/office-wasm-ja-gothic-vs-mincho.png)
+
+⚠ **拡大して見るまで「明朝が効いていない」と誤読した。** 14pt の screenshot を等倍で
+眺めた印象で判断していた ── ここでも「まず見る」の**見方**が足りなかった。
+主張するなら**主張が成り立つ倍率で見る**。
+
+### 手順として確定した 3 点(実装時にそのまま使う)
+
+1. 🔑 **`preRun` を使わない。`noInitialRun: true` にして `main()` を自分で呼ぶ。**
+   `qtloader.js` は `config.preRun` に自分の `qtPreRun` を **push** し、
+   `noInitialRun` を尊重して `instance.callMain(originalArguments)` を飛ばす
+   (`qtloader.js:104-106, 180-182, 234-236`)。したがって
+   `await qtLoad({noInitialRun:true, …})` → `inst.FS.writeFile(…)` → `inst.callMain([path])`
+   の順で、**runtime が完全に立ち上がったあとに FS を触れる**。
+   ⚠ `preRun` 経路は ENOENT で落ちた(`/instdir` の見え方がその時点では違う)。
+2. ⚠ **`qt.environment`(= `LANG` 等)は使えない。** このビルドは `ENV` を export して
+   いないので `qtloader` が
+   `ENV must be exported if environment variables are passed` で**起動前に例外**を投げる。
+   ロケールを環境変数で渡す設計にしてはいけない ── 実際、文書側に
+   `style:language-asian="ja" style:country-asian="JP"` を書くだけでステータスバーは
+   `Chinese (simplified)` → `Japanese` になった。**既定ロケールは registry 側で解く**
+   (`VCL.xcu` 差し替えと同じ工程)。
+3. ⚠ 入力文書も同じ経路で渡す(`FS.writeFile('/work/x.fodt')` → `callMain(['/work/x.fodt'])`)。
+   引数無しだと Start Center が出る ── これは**壊れているのではなく、正しい挙動**である。
+
+## 3.12 ✅ 定常を測った ── **リークなし / もっさりなし / 常駐 780MB**(2026-08-10)
+
+§3.11 の +636.6MB は **Start Center を出しただけ**の値で、不可侵指示
+「**boot 直後とか測ってない?意味ないからね、ソレ**」に照らすと定常を 1 文字も語って
+いなかった。`build/office-wasm/steady-probe.mjs` を書いて埋めた。
+
+### 主張と対照群
+
+**主張は 1 つ** ── 「操作を続けたときに、常駐メモリと応答がどう推移するか」。
+⚠ 対照群は*空ページ*ではなく「**同じ LibreOffice を同じ時間だけ開いて放置したもの**」
+(`idle`)である ── これと `edit` の差だけが「操作の代金」。
+題材は日本語 400 段落(**12 ページ / 18,432 文字**)。`edit` は PageDown + wheel +
+`Ctrl+Home` の往復を 5 分、`idle` は同じ 5 分を放置。
+
+### 結果(1 arm 5 分、手元 chromium、COOP/COEP)
+
+| | idle(対照群) | edit(送り + 打鍵) |
+|---|---|---|
+| 常駐 RSS 開始 → 5 分後 | 1555 → **1560 MB**(+5) | 1567 → **1581 MB**(+14) |
+| 空ページからの増分(5 分後) | +759.3 MB | +776.3 MB |
+| **操作の代金**(edit − idle) | ─ | **+17.0 MB** |
+| long task(定常窓) | **0 件** | 6 件 / 計 635ms / 最大 **353ms** |
+| 入力の応答(16ms 以上のうち p95 / 最大) | ─ | **24ms** / 48ms |
+| 版面が動いた画素 | 0.1%(点滅のみ) | **17.8%** |
+
+生の結果は `docs/development/measurements/office-wasm-steady-2026-08-10.json`
+(標本 20 点 × 2 arm、boot 窓と定常窓を分けて記録)。送っている最中の版面:
+
+![日本語 12 ページを送っているところ](images/office-wasm-steady-scroll.png)
+
+- **リークは無い** ── 5 分の連続操作で +14MB、増加は頭打ち
+- **もっさりしていない** ── 放置中の long task は 0 件。送り続けても 5 分で 6 件・最大 353ms
+- **常駐は約 780MB** ── ここだけが論点
+
+⚠ boot 窓の long task(3.5〜3.7 秒 = wasm のコンパイル)は `startTime` で切り分けて
+別欄に出してある。**混ぜない。ただし捨てない。**
+
+### 🔴 測れなかった次元(「軽かった」と言ってはいけないところ)
+
+**日本語の「入力」は未検証。** Playwright の `keyboard.type()` も
+`keyboard.insertText()` も **非 ASCII が Qt に届かない**。5 分回した本文が `Steady`
+だけ・言語欄が `English (USA)` だった。保存物で切り分け済み ──
+`bytes 38287 / ascii 82 / **cjk 0**` なので、**保存側は健全で入力側だけが届いていない**
+(Qt の IME 経路が要る)。したがって上表の応答は
+**「送り + ASCII 打鍵」の数字**であって、日本語 IME の応答ではない。
+🔑 #88 の裁定は「**閲覧優先**」なので、測る日本語の次元を**入力から組版へ**振り替えた
+── 日本語 12 ページの送り・整形・描画は上表に入っている。
+
+### 🔴 この計測で踏んだ 2 つ(どちらも「緑のまま間違う」型)
+
+1. **書いた注意を、検査にしていなかった。** fixture の CJK について
+   「0 文字だと日本語での定常を測っていない」と**コメントに書きながら**検査を置かず、
+   空振り検査①(画面が変わった)②(key イベントが在る)が **ASCII だけで通った**。
+   5 分の計測を 1 本、丸ごと無駄にした。⚠ **注意書きは検査にして初めて効く。**
+2. **検査③が fixture 自身に満たされた。** 「保存物に日本語が在るか」は、fixture を
+   日本語 400 段落にした瞬間に**fixture が満たしてしまう**(CLAUDE.md「救い手が
+   変わっただけ」の 3 例目)。主張が「送って組み直させた」に変わったので、検査も
+   **版面が実際に動いたか**(画素の 10% 以上)へ作り直した。
+   対照群で効きを確認: idle **0.1%** vs edit **17.8%**。
+   ⚠ bytes 比較(①)はキャレットの点滅でも通る。key イベント(②)は dead click でも通る。
+   **「押した」ではなく「変わった」を見る。**
+
+⚠ さらに process の失敗が 1 件: `npm run lint … && … &` と書いて**チェーン全体を
+background へ送り**、lint の出力を見ないまま「通った」と報告した(実際は落ちていた)。
+`&` は直前のコマンドではなく**リスト全体**に効く。CI を 2 回赤くした直接の原因。
+🔑 **検査を回したら、出力を目で見るまで「通った」と言わない。**
+
+### 次にやること(この節の未了)
+
+- **フォントの配り方**:15.2MB を `wasm-pack-store`(§5)に載せる。CJK は
+  「同梱しない巨大資産」の 2 例目になる
+- **既定ロケール / 既定 CJK フォント**:`VCL.xcu` + `fc_local.conf` の差し替え(#88 の裁定済み項目)
+- **日本語 IME の応答**:Qt の入力経路に非 ASCII を届ける手立て(CDP の
+  `Input.imeSetComposition` 等)を用意してから測る
+- **780MB を他の面と同時に立てられるか**:これが組み込み判断の分水嶺
+
+## 3.13 ✅ 日本語**組版**も効いている(2026-08-10)
+
+§3.11 で証明したのは「**豆腐にならない**」ことだけで、組版の正否は 1 つも見ていなかった。
+user 指示「**日本語は絶対**」に照らすと、そこを見ないまま「日本語は出ました」と
+言い続けるのは主張の水増しである。`build/office-wasm/ja-typography-probe.mjs` で
+**面ごとに違う組版指定**を当てて確かめた。
+
+### 🔴 判定は目で見る ── ここで自動判定をでっち上げない
+
+組版の正しさは canvas の中に在り、DOM からは 1 文字も読めない。それらしい自動判定を
+作れば「**通っても何も保証しない検査**」になる。この probe が機械で保証するのは 2 つだけ:
+① 版面が描かれたこと(shadow root を越えた canvas)
+② **面ごとに絵が違う**こと(全部同じなら、組版指定が 1 つも効いておらず
+   「同じ既定の版面を 3 回撮った」だけ ── `identicalPairs` で検める)。
+正しさそのものは screenshot を人が見る。**probe の役割は「見るに足る材料を揃える」こと。**
+
+### 縦書き
+
+![縦書き](images/office-wasm-ja-typo-tate.png)
+
+行が**右から左へ**進み、句読点・かぎ括弧が**縦組み用の位置に回って**いる。
+`style:writing-mode="tb-rl"` を page-layout に置くだけで通った。
+
+### 禁則
+
+![横書き + 禁則](images/office-wasm-ja-typo-yoko-kinsoku.png)
+
+行頭に `。、」』)` が **1 つも来ていない**。`…や(丸` / `括弧)が…` のように、
+開き括弧を行末に残さず、閉じ括弧を行頭に送らない形で折り返している。
+
+### ルビ・圏点・約物
+
+![ルビ + 圏点](images/office-wasm-ja-typo-ruby-kenten.png)
+
+- **ルビ**: 吾輩(わがはい)・猫(ねこ)。**熟語ルビ**(東京特許許可局)も base 全体に配分
+- **圏点**: `style:text-emphasize="dot above"` が傍点として出る
+- **約物**: ①②③ ㈱ ℡ ／ 〜 … ‥ 〈〉《》【】〔〕、半角ｶﾅ、全角ＡＢＣ１２３、混植すべて描画
+
+### ⚠ **まだ見ていない**もの(「日本語組版は完璧」と言わないこと)
+
+- **縦中横**(縦組み中の半角数字の横並び)── 指定していないので上の縦書きでは
+  `2026` が縦に 1 字ずつ並んでいる。これは*不具合ではなく未指定*だが、**未検証**である
+- **割注 / ぶら下げ / 文字組み(約物半角)/ 行頭字下げの自動化**
+- **明朝とゴシックの出し分け**は §3.11 で拡大して確認済みだが、**この 3 面では等倍でしか
+  見ていない**ので、ここを根拠に語らない(等倍の目視で 1 度誤読している)
+- ステータスバーの言語欄が面によって `English (USA)` / `Japanese` と割れるのは、
+  **カーソル位置の文字種**を映しているためで、文書の言語設定とは別
+
+## 3.14 🖐 **手元で触る**(2026-08-10)
+
+user「もう動く? dev で触れる? 見たほうが早いわ」への答え。
+
+### ⚠ まず: **`npm run dev` では触れない**
+
+この段階では `src/` に 1 行も入っていないので、PKC3 本体からは繋がっていない。
+動くのは**焼いた成果物単体**である。
+
+### ⚠ そして: **GitHub Pages にも置けない**(理由は 2 つある)
+
+1. `soffice.wasm` が **156MB** で、GitHub の **100MB/file** 制限を超える ── git に入らない
+2. Pages は **COOP/COEP ヘッダを付けられない** ── SharedArrayBuffer が使えず、
+   LO の `-pthread` が動かない(service worker で被せる手はあるが、1 が残る)
+
+したがって「**手元で serve する**」が唯一の触り方である。
+
+```bash
+git fetch origin claude/pkc3-pr-101-n05trv
+git checkout claude/pkc3-pr-101-n05trv
+bash build/office-wasm/fetch-and-run.sh --serve
+# → http://127.0.0.1:8088/ を開く
+```
+
+`fetch-and-run.sh` は prerelease(`lo-wasm-dev`、245MB)と **BIZ UD 3 本(15.2MB)**を
+落として `serve-local.mjs` を起動する。2 回目以降は取り直さない(`--force` で再取得)。
+
+- 手元の Office ファイル(.docx / .xlsx / .pptx / .odt …)を**選ぶかドロップすると開く**
+- 何も選ばなければ Start Center が出る
+- 🔑 日本語フォントは**起動時に FS へ流し込む** ── web フォント(CSS)では届かない。
+  LO は fontconfig で自分の `/instdir/share/fonts/truetype` を見るからである
+
+### 実際に通した(自分で触ってから渡した)
+
+日本語入りの `.docx` を picker から選び、**2.4〜3.4 秒**で版面が出た:
+
+![.docx を開いたところ](images/office-wasm-docx-open.png)
+
+⚠ **観測された未解決の事象を 1 件残す**: 最初の 1 回だけ
+`RuntimeError: null function or function signature mismatch` が page error に出た
+(**版面は完走**しており、5 段落すべて正しく描かれていた)。その後 3 回は再現していない。
+**間欠**である。原因未特定なので「出ない」と書かない ── 組み込みへ進むなら、
+ここは追う対象である。
+
+### 踏んだ罠(1 件、既知の型)
+
+`serve-local.mjs` の HTML は template literal なので、**コメントにバッククォートを
+書いた瞬間に文字列が閉じて** parse error になった(`source-editing` に記録のある型)。
+👉 template literal の中には、コメントであってもバッククォートを書かない。
+
+## 3.15 📦 静的ホスティングで配る ── 圧縮・セルフホスト・GitHub Pages(2026-08-10)
+
+user 提案:「圧縮効かせてね / セルフホストスクリプトも各種 / coi-serviceworker で単独で
+達成できない? / **github pages で限界を越える方法見つけたぞ!** Release 資産(1 file 2GB まで)を
+Pages の JS から fetch させる」── 4 点とも**実測で決着させた**。
+
+### 判定(実ブラウザ)
+
+| 機構 | 判定 | 実測 |
+|---|---|---|
+| ① `coi-serviceworker` でヘッダ無しホストを分離する | ✅ **成立する** | ヘッダを 1 つも返さないサーバで `crossOriginIsolated === true` / `SharedArrayBuffer` あり |
+| ② gzip を解きながら compile する | ✅ **成立する** | 50.6MB の `.gz` から **4,041ms** で 288 exports。148MB を JS heap に載せない |
+| ③ **Release 資産を JS から fetch** | 🚫 **成立しない** | `TypeError: Failed to fetch` |
+| ④ ③ の応答に ACAO を足したら | ✅ 成功 | = 原因は**サイズではなく CORS** |
+
+### 🚫 Release 裏技が塞がっている理由(サイズではない)
+
+- GitHub の release download は **`Access-Control-Allow-Origin` を 1 つも返さない**
+  (`Origin` / `Sec-Fetch-*` を付けても変わらない)
+- `OPTIONS` は **405** ── preflight できない
+- 同じヘッダ形(`content-disposition: attachment` / `application/octet-stream` / ACAO 無し)を
+  別 origin で再現して実ブラウザに掛けると `TypeError: Failed to fetch`。
+  **ACAO を足した場合のみ成功**する
+- ⚠ **`coi-serviceworker` はこれを救わない。** あれが解くのは **COOP/COEP** であって
+  **CORS** ではない ── service worker からの `fetch` も同じ CORS 規則に従い、
+  `no-cors` で取れる opaque 応答は**本文を読めない**
+
+### 🔑 代わりに圧縮で解いた ── 100MB の壁が消える
+
+| file | 生 | gzip -9 | 比 |
+|---|---|---|---|
+| `soffice.wasm` | 148.9MB | **50.6MB** | 2.94x |
+| `soffice.data` | 83.6MB | **26.4MB** | 3.17x |
+| 一式合計(js / metadata / BIZ UD 3 本 込み) | 約 247MB | **約 93MB** | ─ |
+
+**どちらも 100MB/file を切る**ので、**同一 origin に置ける = CORS 問題そのものが消える**。
+Pages の site 上限 1GB に対しても十分小さい。
+組み立ては `build/office-wasm/make-pages-bundle.mjs`、頁は `build/office-wasm/pages/index.html`。
+
+```bash
+bash build/office-wasm/fetch-and-run.sh --keep
+node build/office-wasm/make-pages-bundle.mjs /tmp/lo-wasm dist-office-pages
+```
+
+⚠ **git に入れるかは別の判断**。この script は一式を作るだけで commit しない ──
+CI で組んで Pages へ deploy すれば**履歴を汚さずに済む**。
+
+### 実証(GitHub Pages と同じ条件 = ヘッダを 1 つも返さないサーバ)
+
+`.docx` を picker から選んで **5.3 / 5.9 / 7.2 秒**(3 回連続で成功)。
+
+### 🔴 途中で見つけた**製品の穴** ── coi-serviceworker の初回取りこぼし
+
+最初は `isolated` が **true / false に割れた**。flake として片付けず追ったら実体があった:
+
+- `coi-serviceworker` は `register()` が**解決した直後**に 1 回だけ `location.reload()` する
+- `register()` の解決は **activate / claim の完了を待たない**
+- リロードが先に走るとそのページは SW に制御されず、しかも
+  `sessionStorage` の印で**二度と再試行しない** ── **初回訪問が永久に壊れる**
+
+🔑 直し: `navigator.serviceWorker.ready`(= active な SW が居る)を待ってから、
+**こちらで 1 回だけ**リロードして拾い直す(印で無限ループを防ぐ)。
+⚠ あわせて「起動できません」の警告を 4 秒 → 20 秒へ。**間に合っていた回まで
+失敗と表示していた。**
+🔑 CLAUDE.md「flake に見えるものが製品の穴だったことがある」の 3 例目。
+
+### セルフホスト(各種)
+
+`build/office-wasm/selfhost/` に nginx / Caddy / Apache / Docker / Python / Node。
+🔴 **どれでも外してはいけない 2 点**:
+
+1. COOP/COEP を付ける(付けられるなら `coi-serviceworker` に頼らないほうが確実)
+2. ⚠ **`.gz` に `Content-Encoding: gzip` を付けない** ── この一式は JS 側が
+   `DecompressionStream` で解くので、付けると**二重解凍で壊れる**
+   (nginx の `gzip_static` は明示的に `off`)。
+   頁側も保険として `content-encoding` を見て自前の解凍を飛ばす
+
+### 未確認のまま残すもの
+
+- **GitHub Pages が `.gz` に `Content-Encoding` を付けるか**は実 deploy でしか分からない
+  (どちらでも動く形にはしてある)
+- **実際に Pages へ載せるかは未決** ── この repo の Pages は P7 の
+  「Pages product」(PKC3 本体)を出す場所なので、**上書きになる**。user 裁定が要る
 
 ## 4. 軽量閲覧レーン(本命の保険 / 併走候補)
 

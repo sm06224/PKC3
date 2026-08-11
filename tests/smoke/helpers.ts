@@ -14,11 +14,44 @@ export async function gotoApp(page: Page): Promise<void> {
   });
 }
 
+/**
+ * 🔴 **既知の常在ノイズ(名指しの等値リスト)。**
+ *
+ * cross-origin isolation(`COOP` + `COEP: credentialless`)を入れた 2026-08-10 から
+ * 出るようになった 2 行。**PKC3 が使う VFS は `opfs-sahpool` だけ**なのに、
+ * sqlite-wasm は **SharedArrayBuffer が在ると**別系統の「OPFS asyncer」VFS
+ * (`opfs` / `opfs-wl`)も自動で登録しに行き、この環境では失敗して console.error を出す。
+ * ⚠ **機能は壊れていない**(SAHPool で動く)。増えたのはノイズだけである。
+ *
+ * ## 握り潰しではなく「名指し」にした理由と、試して駄目だった道
+ *
+ * sqlite-wasm は worker の URL に `<vfs 名>-disable` が在れば登録を飛ばす
+ * (`urlParams.has(vfsName + "-disable")`)。そこで worker URL に query を付けようとしたが:
+ * - `new Worker(new URL('./storage-worker.ts?…', import.meta.url))` → **Vite が query を落とす**
+ * - 関数へ切り出す → **Vite が worker を bundle しなくなり、アプリが起動しない**
+ * - `?worker&url` + 変数渡し → query は残ったが、**SW の cache 照合が query 付き URL と
+ *   合わず、オフラインで storage ごと死んだ**(entry 0 件)
+ * 🔑 3 つ目で「直しに行くほうが壊れる」と分かったので、**発生源は上流に残し、
+ * こちらは等値で名指しする**。⚠ 等値なので、**文言が 1 文字でも変われば落ちる** ──
+ * 「いつの間にか別のエラーが混ざる」ことは防げている。
+ * 🔑 消せる条件: sqlite-wasm 側で不要 VFS を登録しない手段が API として入るか、
+ * Vite が worker URL の query を保つようになったとき。
+ */
+const KNOWN_CONSOLE_NOISE: readonly string[] = [
+  'console.error: opfs: Error initializing OPFS asyncer: Event',
+  'console.error: opfs-wl: Error initializing OPFS asyncer: Event',
+];
+
 export function collectPageErrors(page: Page): string[] {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
   page.on('console', (msg) => {
-    if (msg.type() === 'error') errors.push(`console.error: ${msg.text()}`);
+    if (msg.type() !== 'error') return;
+    const line = `console.error: ${msg.text()}`;
+    // ⚠ **等値**で外す(部分一致にしない)── 部分一致にすると、同じ前置きを持つ
+    //    別のエラーまで黙って消える
+    if (KNOWN_CONSOLE_NOISE.includes(line)) return;
+    errors.push(line);
   });
   return errors;
 }

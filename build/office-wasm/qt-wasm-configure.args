@@ -1,0 +1,45 @@
+# Qt6 を **wasm 向け**に建てるときの構成フラグ(#88)。1 行 1 フラグ。`#` はコメント。
+#
+# 🔴 **この file は Qt キャッシュの鍵に入っている**(workflow の `hashFiles(…)`)。
+#    ここを 1 文字でも変えると鍵が変わり、Qt が建て直される。
+#    ⚠ **これが無いと事故る** ── 構成を変えたのに鍵が同じだと、**古い Qt が復元されて
+#    同じリンクエラーが再現し**、「直したのに直らない」に見える(2026-08-09 に
+#    `-feature-wasm-exceptions` を足すとき、危うくそのまま踏むところだった)。
+#    鍵を手で `-v2` に上げる運用は忘れるので、**file の内容から導出**させている。
+
+-nomake examples
+-nomake tests
+-no-dbus
+-no-icu
+
+# ⚠ **必須**。LibreOffice 側が `-pthread -s USE_PTHREADS=1` を要求する
+#    (`solenv/gbuild/platform/EMSCRIPTEN_INTEL_GCC.mk:14`)。混ざると link できない。
+#    その結果 COOP/COEP と SharedArrayBuffer が要る(PKC3 では SW 注入で成立を実機確認済み)。
+-feature-thread
+
+# 🔴 **必須**(2026-08-09、run 31334536443 の実測で判明)。
+#    これが無いと `wasm-ld: undefined symbol: __resumeException`(libQt6Core.a)で落ちる。
+#
+#    Qt の `wasm-exceptions` は **AUTODETECT OFF**(`qtbase/configure.cmake:1022-1026`)なので、
+#    既定では **JS 例外**(`-fexceptions`)で建つ。一方 LibreOffice は
+#    **native Wasm 例外**(`gb_EMSCRIPTEN_EXCEPT = -fwasm-exceptions -s SUPPORT_LONGJMP=wasm`)。
+#    `__resumeException` は JS 例外ランタイム側の実体なので、混ぜると解決されない。
+#
+#    🔑 有効にすると Qt 側も `-fwasm-exceptions` + `-s SUPPORT_LONGJMP=wasm` を付ける
+#    (`qtbase/cmake/QtWasmHelpers.cmake:29-42`)── **LO と完全に一致する**。
+#
+-feature-wasm-exceptions
+
+# 🔴 **必須**(2026-08-10、run 31352402814 の実測で判明。前は「足さない」と書いていた)。
+#    LibreOffice の Qt6 対応は **JSPI + 非 PROXY_TO_PTHREAD** のときだけ有効になる
+#    (`ENABLE_QT6 && HAVE_EMSCRIPTEN_JSPI && !HAVE_EMSCRIPTEN_PROXY_TO_PTHREAD` が
+#    `QtInstance.cxx` に 7 箇所ほか計 8 file、専用機構 `comphelper/emscriptenthreading` つき)。
+#    workflow 側で `--enable-emscripten-jspi --disable-emscripten-proxy-to-pthread` を
+#    渡すので、**Qt も JSPI で建てる**。
+#
+#    🔑 LO の LDFLAGS は `-sJSPI_EXPORTS=…qstdweb::EventListener…` と
+#    **Qt のシンボルを名指ししている** ── LO の JSPI モードは Qt と組む前提である。
+#
+#    ⚠ `wasm-jspi` は `wasm-exceptions` を前提とする(`configure.cmake:1030-1035`)。
+#    上の行を消すとこちらも落ちる。
+-feature-wasm-jspi

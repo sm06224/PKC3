@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LibreOffice wasm — PKC3 #88</title>
+<!-- ⚠ favicon を要求させない。静的ホストでは 404 が常在ノイズになり、
+     本物のエラーがそこに紛れる(CLAUDE.md「stderr は 0 行を保つ」と同じ向き)。 -->
+<link rel="icon" href="data:,">
+<!--
+  静的ホスティング(GitHub Pages 等)向けの入口。
+  ⚠ 3 つの制約を同時に解いている:
+   ① **COOP/COEP を付けられないホストでも動く** ── coi-serviceworker が
+      service worker で応答にヘッダを被せ、crossOriginIsolated を成立させる
+      (実測: ヘッダ 0 のサーバで crossOriginIsolated=true / SharedArrayBuffer あり)
+   ② **100MB/file の壁を越える** ── soffice.wasm は 148MB で git に入らないが、
+      gzip -9 で **49MB** になる。DecompressionStream で解きながら compile する
+      (実測: 4,041ms で 288 exports。148MB を JS heap に載せない)
+   ③ **CORS** ── 資産は同一 origin に置く。GitHub の Release 資産は
+      **Access-Control-Allow-Origin を返さない**ので JS から fetch できない
+      (実測: 別 origin で同じヘッダ形を再現すると TypeError: Failed to fetch。
+       ACAO を付けた場合のみ成功)。「Release を CDN 代わりにする」は成立しない
+-->
+<style>
+  :root { color-scheme: light dark; --fg:#111; --bg:#fff; --muted:#666; --line:#d6d6d6; --accent:#2d6cdf; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg:#e8e8e8; --bg:#141414; --muted:#9a9a9a; --line:#333; }
+  }
+  html,body { margin:0; padding:0; height:100%; overflow:hidden; background:var(--bg); color:var(--fg);
+    font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans JP", sans-serif; }
+  #bar { position:fixed; inset:0 0 auto 0; height:40px; display:flex; gap:12px; align-items:center;
+    padding:0 12px; border-bottom:1px solid var(--line); font-size:13px; background:var(--bg); z-index:10; }
+  #bar b { font-weight:600 } .sp { flex:1 }
+  #status { color:var(--muted); font-variant-numeric: tabular-nums }
+  #screen { position:fixed; inset:40px 0 0 0 }
+  #intro { position:fixed; inset:40px 0 0 0; display:grid; place-content:center; text-align:center;
+    gap:16px; padding:24px; max-width:640px; margin:0 auto }
+  #intro p { margin:0; line-height:1.8; color:var(--muted) }
+  #intro p.lead { color:var(--fg); font-size:15px }
+  button, label.btn { background:var(--accent); color:#fff; border:0; border-radius:6px;
+    padding:9px 16px; font-size:13px; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--accent) }
+  label.btn input { display:none }
+  #warn { display:none; border:1px solid #c66; border-radius:6px; padding:12px; color:#c66; font-size:13px }
+</style>
+</head>
+<body>
+<div id="bar"><b>LibreOffice wasm</b><span>Qt6 / JSPI</span><span class="sp"></span><span id="status">準備中…</span></div>
+
+<div id="intro">
+  <p class="lead"><b>手元の Office ファイルを開いて試せます。</b><br>
+    .docx / .xlsx / .pptx / .odt / .ods / .odp / .doc / .xls / .ppt など</p>
+  <div>
+    <label class="btn">ファイルを選ぶ<input id="pick" type="file"></label>
+    <button id="blank" class="ghost">何も開かずに起動</button>
+  </div>
+  <p>ファイルは<b>この端末の中だけ</b>で処理されます(どこにも送信しません)。<br>
+    初回は約 <b id="dl">75</b> MB を取得し、展開とコンパイルに十数秒かかります。</p>
+  <div id="warn"></div>
+</div>
+
+<div id="screen" hidden></div>
+
+<!-- ① まず COOP/COEP を成立させる。SW 登録後に 1 回だけ自動リロードされる -->
+<script src="coi-serviceworker.js"></script>
+<script src="soffice.js"></script>
+<script src="qtloader.js"></script>
+<script>
+(function () {
+  var FONTS = window.PKC3_FONTS || [];
+  var statusEl = document.getElementById('status');
+  var warnEl = document.getElementById('warn');
+  function setStatus(s) { statusEl.textContent = s; }
+  function warn(html) { warnEl.style.display = 'block'; warnEl.innerHTML = html; }
+
+  if (!window.crossOriginIsolated) {
+    // 🔴 **coi-serviceworker には初回訪問の取りこぼしがある。**(2026-08-10 に実測)
+    //    あれは `register()` が解決した直後に 1 回だけ location.reload() し、
+    //    `sessionStorage` の印で**二度と再試行しない**。register の解決は
+    //    **activate/claim の完了を待たない**ので、リロードが先に走ると
+    //    そのページは SW に制御されず ── **初回訪問が永久に壊れる**
+    //    (実測: 同じ条件で isolated が true / false に割れた)。
+    //    🔑 `serviceWorker.ready`(= active な SW が居る)を待ってから、
+    //       **こちらで 1 回だけ**リロードして拾い直す。印で無限ループを防ぐ。
+    setStatus('分離を準備中…');
+    var RETRY_KEY = 'pkc3CoiRetried';
+    if (navigator.serviceWorker) {
+      navigator.serviceWorker.ready.then(function () {
+        if (window.crossOriginIsolated) return;
+        try {
+          if (sessionStorage.getItem(RETRY_KEY)) return;
+          sessionStorage.setItem(RETRY_KEY, '1');
+        } catch (e) { return; }
+        location.reload();
+      });
+    }
+    // ⚠ 警告は**遅らせる**。4 秒で出していたら、間に合っていた回まで
+    //    「起動できません」と誤って表示していた
+    setTimeout(function () {
+      if (!window.crossOriginIsolated) {
+        warn('この環境では <b>crossOriginIsolated</b> を成立させられませんでした。'
+          + 'SharedArrayBuffer が使えないため起動できません。<br>'
+          + 'Service Worker が無効・プライベートウィンドウ・http (localhost 以外) の場合に起きます。'
+          + '<br>ページを再読み込みすると直ることがあります。');
+        setStatus('起動できません');
+      }
+    }, 20000);
+  } else {
+    try { sessionStorage.removeItem('pkc3CoiRetried'); } catch (e) { /* 無視 */ }
+    setStatus('待機中');
+  }
+
+  var started = false;
+
+  // gzip を**解きながら**流す。全部を JS heap に載せない。
+  function gunzipStream(url, onProgress) {
+    return fetch(url).then(function (r) {
+      if (!r.ok) throw new Error(url + ' -> ' + r.status);
+      var total = Number(r.headers.get('content-length') || 0);
+      var seen = 0;
+      var counted = new TransformStream({
+        transform: function (chunk, ctl) {
+          seen += chunk.byteLength;
+          if (onProgress) onProgress(seen, total);
+          ctl.enqueue(chunk);
+        },
+      });
+      var body = r.body.pipeThrough(counted);
+      // ⚠ **二重解凍を避ける。** サーバが .gz に Content-Encoding: gzip を付けると
+      //    ブラウザが既に解いた本文を渡してくる ── そこへ DecompressionStream を
+      //    重ねると壊れる。ヘッダが在る場合は自前の解凍をしない。
+      //    (GitHub Pages が付けるかは未確認なので、どちらでも動く形にしておく)
+      var enc = (r.headers.get('content-encoding') || '').toLowerCase();
+      if (enc.indexOf('gzip') !== -1 || enc.indexOf('br') !== -1 || enc.indexOf('deflate') !== -1) return body;
+      return body.pipeThrough(new DecompressionStream('gzip'));
+    });
+  }
+
+  function boot(file) {
+    if (started) return;
+    if (!window.crossOriginIsolated) { warn('分離が成立していないため起動できません。'); return; }
+    started = true;
+    var intro = document.getElementById('intro');
+    if (intro) intro.remove();
+    var screen = document.getElementById('screen');
+    screen.hidden = false;
+    var t0 = Date.now();
+
+    var jobs = [];
+    // ② データパッケージ(83MB → 26MB)。同期フックなので先に材料を揃える
+    jobs.push(gunzipStream('soffice.data.gz', function (n, t) {
+      setStatus('データ取得 ' + (t ? Math.round((n / t) * 100) + '%' : Math.round(n / 1048576) + 'MB'));
+    }).then(function (s) { return new Response(s).arrayBuffer(); }));
+    // フォント(CJK が同梱されていないので、これが無いと日本語が豆腐になる)
+    jobs.push(Promise.all(FONTS.map(function (n) {
+      return fetch('fonts/' + n).then(function (r) { return r.arrayBuffer(); })
+        .then(function (b) { return [n, new Uint8Array(b)]; });
+    })));
+    jobs.push(file ? file.arrayBuffer().then(function (b) { return new Uint8Array(b); }) : Promise.resolve(null));
+
+    Promise.all(jobs).then(function (res) {
+      var dataBuf = res[0];
+      var fonts = res[1];
+      var docBytes = res[2];
+      setStatus('コンパイル中…');
+
+      return qtLoad({
+        noInitialRun: true,
+        // データパッケージを渡して、emscripten 側の取得を丸ごと省く
+        getPreloadedPackage: function () { return dataBuf; },
+        // ③ wasm は解凍ストリームから直接 compile する
+        instantiateWasm: function (imports, successCallback) {
+          gunzipStream('soffice.wasm.gz', function (n, t) {
+            setStatus('本体取得 ' + (t ? Math.round((n / t) * 100) + '%' : Math.round(n / 1048576) + 'MB'));
+          }).then(function (stream) {
+            return WebAssembly.instantiateStreaming(
+              new Response(stream, { headers: { 'Content-Type': 'application/wasm' } }), imports);
+          }).then(function (r) {
+            // ⚠ emscripten の約束は successCallback(instance, module) の順である
+            successCallback(r.instance, r.module);
+          }).catch(function (e) {
+            console.error(e);
+            warn('本体の読み込みに失敗しました: ' + String(e).slice(0, 160));
+            setStatus('失敗');
+          });
+          return {};
+        },
+        qt: {
+          onLoaded: function () { setStatus('LibreOffice を起動中…'); },
+          onExit: function (d) { setStatus('終了: ' + JSON.stringify(d)); },
+          entryFunction: window.soffice_entry,
+          containerElements: [screen],
+        },
+      }).then(function (inst) {
+        window.__lo = inst;
+        var FS = inst.FS;
+        for (var i = 0; i < fonts.length; i += 1) {
+          FS.writeFile('/instdir/share/fonts/truetype/' + fonts[i][0], fonts[i][1]);
+        }
+        var args = [];
+        if (docBytes) {
+          try { FS.mkdir('/work'); } catch (e) { /* 既に在る */ }
+          var path = '/work/' + file.name.replace(/[/\\]/g, '_');
+          FS.writeFile(path, docBytes);
+          args.push(path);
+        }
+        setStatus(docBytes ? '文書を開いています…' : '起動しています…');
+        // 版面が出たら確定させる。
+        // ⚠ Qt 6 の canvas は **shadow root の中**に在るので querySelectorAll では
+        //   永遠に 0 枚(#88 で 1 日溶かした罠)── 境界を越えて探す。
+        var deep = function (root) {
+          var out = [];
+          var walk = function (n) {
+            var els = n.querySelectorAll('*');
+            for (var j = 0; j < els.length; j += 1) {
+              if (els[j].tagName === 'CANVAS') out.push(els[j]);
+              if (els[j].shadowRoot) walk(els[j].shadowRoot);
+            }
+          };
+          if (root) walk(root);
+          return out;
+        };
+        var tick = setInterval(function () {
+          var cs = deep(screen);
+          for (var j = 0; j < cs.length; j += 1) {
+            if (cs[j].width > 0) {
+              clearInterval(tick);
+              setStatus((file ? '表示中: ' + file.name : '起動しました')
+                + '  (' + ((Date.now() - t0) / 1000).toFixed(1) + ' 秒)');
+              return;
+            }
+          }
+        }, 300);
+        inst.callMain(args);
+      });
+    }).catch(function (e) {
+      console.error(e);
+      warn('起動に失敗しました: ' + String((e && e.message) || e).slice(0, 200));
+      setStatus('失敗');
+    });
+  }
+
+  document.getElementById('pick').addEventListener('change', function (e) {
+    var f = e.target.files && e.target.files[0];
+    if (f) boot(f);
+  });
+  document.getElementById('blank').addEventListener('click', function () { boot(null); });
+  document.addEventListener('dragover', function (e) { e.preventDefault(); });
+  document.addEventListener('drop', function (e) {
+    e.preventDefault();
+    var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) boot(f);
+  });
+})();
+</script>
+</body>
+</html>

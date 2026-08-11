@@ -1,0 +1,17 @@
+{
+  "base": "http://127.0.0.1:38985",
+  "settleMs": 8000,
+  "mode": "noopener",
+  "isolated": true,
+  "beforeKb": 868324,
+  "painted": true,
+  "openKb": 1630096,
+  "stillOpenKb": 1628920,
+  "afterKb": 874268,
+  "events": [],
+  "openedMb": 743.9,
+  "driftMb": -1.1,
+  "remainingMb": 5.8,
+  "reclaimedPct": 99,
+  "ok": true
+}

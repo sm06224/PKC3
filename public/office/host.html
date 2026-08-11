@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Office — PKC3</title>
+<link rel="icon" href="data:,">
+<!--
+  Office(LibreOffice wasm)を動かす**別窓**(#88 / 統合設計 O2)。
+
+  🔴 user 裁定 2026-08-10「別タブでも構いません / 見やすければいいのだ /
+     同じ窓にこだわると、PKC の編集をしながら資料を読むとかできませんし」。
+
+  ## なぜ別窓なのか(要点だけ。詳細は設計 doc §3)
+  - LO は **worker へ出せない**(Qt6 の wasm plugin が DOM を直に触る)
+  - 常駐 **780MB**。開いている間だけの費用にするには、**realm ごと捨てられる境界**が要る
+  - iframe は同じ process を共有しうるので、LO が重い間は本体の描画も詰まる
+
+  ## この file は bundle しない
+  `public/` に置いた**素の HTML**である。理由は 2 つ:
+  - 一式(soffice.js / qtloader.js / wasm / data)は **IndexedDB から**読む。
+    ビルド時に解決するものが何も無い
+  - 窓の URL を固定したい(本体の hash 付き chunk 名に引きずられない)
+  ⚠ したがってここに書く JS は**素の DOM API だけ**で書く(TypeScript も import も無し)。
+-->
+<style>
+  :root { color-scheme: light dark; }
+  html,body { margin:0; padding:0; height:100%; overflow:hidden;
+    font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans JP", sans-serif; background:#fff; }
+  @media (prefers-color-scheme: dark) { html,body { background:#141414; color:#e8e8e8 } }
+  #bar { position:fixed; inset:0 0 auto 0; height:34px; display:flex; gap:10px; align-items:center;
+    padding:0 10px; font-size:12px; border-bottom:1px solid #8884; z-index:10 }
+  #bar b { font-weight:600 } .sp { flex:1 }
+  #status { opacity:.75; font-variant-numeric: tabular-nums }
+  #screen { position:fixed; inset:34px 0 0 0 }
+  #msg { position:fixed; inset:34px 0 0 0; display:grid; place-content:center; text-align:center;
+    padding:24px; gap:10px; opacity:.85; line-height:1.8 }
+</style>
+</head>
+<body>
+<div id="bar"><b>Office</b><span id="name"></span><span class="sp"></span><span id="status">準備中…</span></div>
+<div id="msg">読み込んでいます…</div>
+<div id="screen" hidden></div>
+<script>
+(function () {
+  'use strict';
+  var DB_NAME = 'pkc3-office-pack';
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var nameEl = document.getElementById('name');
+  function setStatus(s) { statusEl.textContent = s; }
+  function fail(s) { msgEl.textContent = s; setStatus('失敗'); }
+
+  // ── 本体との往復は **BroadcastChannel**(同一 origin の放送)──────────────
+  //
+  // 🔴 この窓は **noopener** で開かれる。理由は実測(2026-08-11):
+  //    opener 付きだと本体と**同じ renderer process**に入り、閉じても常駐が
+  //    **21% しか還らない**。noopener なら別 process になり **99% 還る**。
+  //    ⚠ 代償として `window.opener` が無い ── だから放送で話す。
+  var ch = new BroadcastChannel('pkc3-office');
+  function say(type, payload) {
+    try { ch.postMessage({ pkc3Office: type, payload: payload || {} }); } catch (e) { /* 閉じた */ }
+  }
+  // 生存通知。本体はこれを見て「もう開いている」を判断する(2 つ立てない)
+  var beat = setInterval(function () { say('alive'); }, 1500);
+  say('alive');
+
+  ch.onmessage = function (ev) {
+    var d = ev && ev.data;
+    if (!d || !d.pkc3Office) return;
+    if (d.pkc3Office === 'close-request') { window.close(); return; }
+    if (d.pkc3Office === 'focus-request') {
+      // ⚠ 背面タブの self-focus は**ブラウザ判断で無視されうる**。
+      //    黙って何も起きないことがあるのは仕様 ── 本体側もそう伝える
+      try { window.focus(); } catch (e) { /* 無視される */ }
+      return;
+    }
+    if (d.pkc3Office === 'reload-request') {
+      var q = d.payload && d.payload.name
+        ? '?name=' + encodeURIComponent(d.payload.name) + '&await-doc=1' : '?await-doc=1';
+      location.replace('host.html' + q);
+    }
+  };
+
+  function openDb() {
+    return new Promise(function (resolve, reject) {
+      var req = indexedDB.open(DB_NAME, 1);
+      // ⚠ ここで store を作らない ── 作ってしまうと「入っていない」を
+      //    「空の pack が入っている」と読み違える。作るのは本体側だけ。
+      req.onupgradeneeded = function () {
+        if (!req.result.objectStoreNames.contains('files')) req.result.createObjectStore('files');
+        if (!req.result.objectStoreNames.contains('meta')) req.result.createObjectStore('meta');
+      };
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { reject(req.error || new Error('idb open failed')); };
+    });
+  }
+  function idbGet(db, store, key) {
+    return new Promise(function (resolve, reject) {
+      var r = db.transaction(store, 'readonly').objectStore(store).get(key);
+      r.onsuccess = function () { resolve(r.result); };
+      r.onerror = function () { reject(r.error || new Error('idb get failed')); };
+    });
+  }
+
+  /** gz の Blob を、解きながら Response にする(148MB を heap に載せない)。 */
+  function gunzipResponse(blob, type) {
+    var stream = blob.stream().pipeThrough(new DecompressionStream('gzip'));
+    return new Response(stream, { headers: { 'Content-Type': type } });
+  }
+
+  /** ObjectURL は**必ず**返す dispose で revoke する(不可侵: 寿命終端で revoke)。 */
+  var urls = [];
+  function lend(blob) { var u = URL.createObjectURL(blob); urls.push(u); return u; }
+  window.addEventListener('pagehide', function () {
+    for (var i = 0; i < urls.length; i += 1) URL.revokeObjectURL(urls[i]);
+    urls.length = 0;
+  });
+
+  function loadScript(src) {
+    return new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = src;
+      s.onload = function () { resolve(); };
+      s.onerror = function () { reject(new Error('script load failed')); };
+      document.head.appendChild(s);
+    });
+  }
+
+  /** Qt 6 の canvas は **shadow root の中**に在る(#88 §3.11 で 1 日溶かした罠)。 */
+  function deepCanvases(root) {
+    var out = [];
+    (function walk(n) {
+      var els = n.querySelectorAll('*');
+      for (var i = 0; i < els.length; i += 1) {
+        if (els[i].tagName === 'CANVAS') out.push(els[i]);
+        if (els[i].shadowRoot) walk(els[i].shadowRoot);
+      }
+    })(root);
+    return out;
+  }
+
+  function missing() {
+    var lack = [];
+    if (!window.crossOriginIsolated) lack.push('cross-origin isolation');
+    if (typeof SharedArrayBuffer !== 'function') lack.push('SharedArrayBuffer');
+    if (typeof WebAssembly.Suspending !== 'function') lack.push('JSPI');
+    if (typeof DecompressionStream !== 'function') lack.push('DecompressionStream');
+    return lack;
+  }
+
+  async function main() {
+    var lack = missing();
+    if (lack.length) {
+      fail('この環境では Office を動かせません(足りないもの: ' + lack.join(' / ') + ')');
+      say('unsupported', { missing: lack });
+      return;
+    }
+    var db;
+    try { db = await openDb(); } catch (e) { fail('保管庫を開けません'); return; }
+    var meta = await idbGet(db, 'meta', 'pack');
+    if (!meta || !Array.isArray(meta.files)) {
+      fail('Office 一式がまだ入っていません(PKC3 の設定から入れてください)');
+      say('not-installed');
+      return;
+    }
+
+    setStatus('読み込み中…');
+    var need = ['soffice.js', 'qtloader.js', 'soffice.data.js.metadata',
+      'soffice.wasm.gz', 'soffice.data.gz'];
+    var blobs = {};
+    for (var i = 0; i < need.length; i += 1) {
+      blobs[need[i]] = await idbGet(db, 'files', need[i]);
+      if (!blobs[need[i]]) { fail('一式が壊れています: ' + need[i] + ' がありません'); return; }
+    }
+    var fontNames = meta.files.map(function (f) { return f.name; })
+      .filter(function (n) { return n.indexOf('fonts/') === 0; });
+    var fonts = [];
+    for (var j = 0; j < fontNames.length; j += 1) {
+      var fb = await idbGet(db, 'files', fontNames[j]);
+      if (fb) fonts.push([fontNames[j].slice('fonts/'.length), new Uint8Array(await fb.arrayBuffer())]);
+    }
+
+    // emscripten は `soffice.data.js.metadata` を **自分で fetch する**。
+    // ObjectURL では相対解決できないので、`locateFile` で差し替える。
+    var metaUrl = lend(blobs['soffice.data.js.metadata']);
+    setStatus('展開中…');
+    var dataBuf = await gunzipResponse(blobs['soffice.data.gz'], 'application/octet-stream')
+      .arrayBuffer();
+
+    await loadScript(lend(blobs['soffice.js']));
+    await loadScript(lend(blobs['qtloader.js']));
+    if (typeof window.qtLoad !== 'function' || typeof window.soffice_entry !== 'function') {
+      fail('一式を読み込めませんでした'); return;
+    }
+
+    var screen = document.getElementById('screen');
+    var params = new URLSearchParams(location.search);
+    var docName = params.get('name') || '';
+    if (docName) nameEl.textContent = docName;
+
+    // 親から文書のバイト列を貰う(無ければ Start Center)。
+    var docBytes = await new Promise(function (resolve) {
+      if (!params.has('await-doc')) { resolve(null); return; }
+      // ⚠ 待ちっぱなしにしない ── 来なければ Start Center で開く
+      var timer = setTimeout(function () { resolve(null); }, 15000);
+      var prev = ch.onmessage;
+      ch.onmessage = function (ev) {
+        var d = ev && ev.data;
+        if (d && d.pkc3Office === 'document') {
+          clearTimeout(timer);
+          ch.onmessage = prev;
+          resolve(new Uint8Array(d.payload.bytes));
+          return;
+        }
+        if (prev) prev(ev);
+      };
+      say('ready-for-document');
+    });
+
+    setStatus('起動中…');
+    msgEl.hidden = true;
+    screen.hidden = false;
+    var t0 = Date.now();
+    try {
+      var inst = window.__lo = await window.qtLoad({
+        noInitialRun: true,
+        locateFile: function (path) {
+          return path === 'soffice.data.js.metadata' ? metaUrl : path;
+        },
+        getPreloadedPackage: function () { return dataBuf; },
+        instantiateWasm: function (imports, ok) {
+          WebAssembly.instantiateStreaming(
+            gunzipResponse(blobs['soffice.wasm.gz'], 'application/wasm'), imports,
+          ).then(function (r) { ok(r.instance, r.module); }, function (e) {
+            console.error(e); fail('本体を読み込めません: ' + String(e).slice(0, 120));
+          });
+          return {};
+        },
+        qt: {
+          onLoaded: function () { setStatus('起動中…'); },
+          onExit: function (d) { setStatus('終了 ' + JSON.stringify(d)); },
+          entryFunction: window.soffice_entry,
+          containerElements: [screen],
+        },
+      });
+      var FS = inst.FS;
+      for (var k = 0; k < fonts.length; k += 1) {
+        FS.writeFile('/instdir/share/fonts/truetype/' + fonts[k][0], fonts[k][1]);
+      }
+      var args = [];
+      if (docBytes) {
+        try { FS.mkdir('/work'); } catch (e) { /* 既に在る */ }
+        var path = '/work/' + (docName || 'document').replace(/[/\\]/g, '_');
+        FS.writeFile(path, docBytes);
+        args.push(path);
+        window.__loDocPath = path;
+      }
+      // 版面が出たら確定させる。⚠ callMain は event loop に入ったまま戻らないことがある
+      var tick = setInterval(function () {
+        var cs = deepCanvases(screen);
+        for (var m = 0; m < cs.length; m += 1) {
+          if (cs[m].width > 0) {
+            clearInterval(tick);
+            setStatus('表示中 (' + ((Date.now() - t0) / 1000).toFixed(1) + ' 秒)');
+            say('painted', { ms: Date.now() - t0 });
+            return;
+          }
+        }
+      }, 300);
+      inst.callMain(args);
+    } catch (e) {
+      console.error(e);
+      fail('起動に失敗しました: ' + String((e && e.message) || e).slice(0, 160));
+    }
+  }
+
+  // 本体へ「閉じた」を知らせる ── 使い回し判定を本体が持てるように
+  window.addEventListener('pagehide', function () { clearInterval(beat); say('closed'); });
+  main();
+})();
+</script>
+</body>
+</html>
