@@ -111,14 +111,19 @@ export async function readPackFromZip(zip: Blob, onProgress?: AcquireProgress): 
 /**
  * 取得元を同一 origin に限って解く。**別 origin は導線ごと作らない。**
  *
+ * 🔴 **export してある理由は test のため**(2026-08-11)。既定を相対 path で
+ * 書いていたせいで、`/PKC3/dev/` から開いたときだけ 1 段深い場所を見て **404** を
+ * 踏んだ ── unit がここを 1 度も通っていなかった。深さの違う出発点を並べて
+ * 当てる test(`tests/adapter/office-pack-base.test.ts`)を置いてある。
+ *
  * ⚠ 基点は `document.baseURI`(相対 path を解決する本来の API)。ここを location の
  * URL 文字列にすると `tests/features/flags.test.ts` の「クエリを読んでいないか」の
  * 全数検査に掛かる ── **ガードは正しい**ので、綴りを避けるのではなく
  * **読まなくて済む書き方**へ直してある。
  */
-function resolveBase(base: string): URL {
-  const root = new URL(base, document.baseURI);
-  if (root.origin !== location.origin) {
+export function resolveBase(base: string, baseURI: string = document.baseURI): URL {
+  const root = new URL(base, baseURI);
+  if (root.origin !== new URL(baseURI).origin) {
     throw new OfficePackError(
       `取得元は同一 origin でなければなりません(指定: ${root.origin})。`
         + '別 origin は CORS で必ず失敗します ── 手元の zip を選ぶ導線を使ってください。',
