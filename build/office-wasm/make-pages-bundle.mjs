@@ -103,6 +103,29 @@ async function main() {
   if (!html.includes('PKC3_FONTS')) throw new Error('index.html への PKC3_FONTS 差し込みが当たらなかった');
   writeFileSync(join(OUT, 'index.html'), html);
 
+  /**
+   * 🔴 **一式の目録**(`pack.json`)。取りに来る側(PKC3 の設定画面)が読む。
+   *
+   * ⚠ これが無いと、**PKC3 側にフォント名を書き写す**ことになる ── 「一式とは何か」が
+   * 2 か所に分かれ、片方だけ直って壊れる(`office-pack.ts` 冒頭の教訓そのもの)。
+   * 🔑 **配る側が「何を配ったか」を宣言する**。取る側は目録どおりに取るだけにする。
+   * ⚠ `files` は**実際に出力した物**から作る(予定を書かない)。
+   */
+  writeFileSync(
+    join(OUT, 'pack.json'),
+    `${JSON.stringify(
+      {
+        version: process.env.PKC3_LO_TAG ?? 'unknown',
+        builtAt: new Date().toISOString(),
+        files: shipped.filter((f) => f !== 'coi-serviceworker.js'),
+        fonts: fonts.map((f) => `fonts/${f}`),
+        totalBytes: totalMb,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
   // Jekyll に食わせない(_ 始まりや不明な拡張子で事故らないように)
   writeFileSync(join(OUT, '.nojekyll'), '');
 

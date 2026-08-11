@@ -86,6 +86,17 @@ export interface BinderServices {
    * ⚠ 引数は押したボタンの属性から採る ── lid から本文を読み直す暇が無い。
    */
   openOffice?(target: { name: string; mime: string; assetKey: string }): void;
+  /**
+   * 🔴 **Office 一式(約 77MB)を入れる / 消す**(#88 / O6-a。user 裁定 2026-08-10
+   * 「実行したい人が手動で設定した際に追加ダウンロードと idb とか opfs に配備して」)。
+   *
+   * ⚠ **勝手に取りに行かない** ── 押した人にだけ取らせる。
+   * ⚠ `installOfficePackFromFile` は**配布元に届かない環境の唯一の道**なので、
+   *   保険ではなく一級の導線として扱う(user 裁定「ローカルとかを介して」)。
+   */
+  installOfficePack?(): void;
+  installOfficePackFromFile?(file: File): void;
+  removeOfficePack?(): void;
   /** 配色を切り替える(P7b 段⑨c)。⚠ user の好みで、flag でも container でもない。 */
   setTheme?(theme: string): void;
   /**
@@ -829,6 +840,23 @@ const ACTIONS: Record<string, ActionHandler> = {
       mime: target.getAttribute('data-pkc-asset-mime') ?? '',
     });
   },
+  /**
+   * Office 一式(#88 / O6-a)。⚠ どれも**実体が判断を持つ** ── ここは渡すだけ。
+   * ⚠ `choose-office-pack` は picker を開くだけ(`attach-file` と同じ作法で、
+   *   input は常設 hidden。動的生成にすると user gesture の要件を外す)。
+   */
+  'install-office-pack': (_dispatcher, _target, services) => {
+    services.installOfficePack?.();
+  },
+  'choose-office-pack': (_dispatcher, target) => {
+    target
+      .closest('[data-pkc-region="settings-office"]')
+      ?.querySelector<HTMLInputElement>('[data-pkc-field="office-pack-input"]')
+      ?.click();
+  },
+  'remove-office-pack': (_dispatcher, _target, services) => {
+    services.removeOfficePack?.();
+  },
   'set-theme': (_dispatcher, target, services) => {
     // `<select>` なら選ばれた値、ボタンなら属性(どちらの形でも受ける)
     const theme =
@@ -1070,6 +1098,12 @@ export function bindActions(
       const files = el.files ? [...el.files] : [];
       el.value = ''; // 同じファイルの再選択でも change が発火するように
       if (files.length > 0) services.importFiles?.(files);
+    } else if (field === 'office-pack-input') {
+      // ⚠ **1 件だけ**(一式は zip 1 本)。複数選ばれても先頭で決める ──
+      //    2 本目を黙って捨てるのではなく、そもそも 1 本しか意味を持たない
+      const file = el.files?.[0] ?? null;
+      el.value = ''; // 同じファイルの再選択でも change が発火するように
+      if (file) services.installOfficePackFromFile?.(file);
     }
   };
   const onKeydown = (ev: Event) => {

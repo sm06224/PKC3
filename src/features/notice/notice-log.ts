@@ -90,6 +90,18 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-11-office-view',
+    title: 'Word / Excel / PowerPoint の添付を読めるようになりました',
+    items: [
+      'Office の添付を開くと「Office で開く」が出ます。押すと別の窓に文書が組み上がります。',
+      '別の窓なので、PKC3 の編集を続けたまま資料を読めます。窓を閉じるとメモリは返ります。',
+      '縦書き・禁則・ルビ・圏点を含む日本語の組版がそのまま出ます。',
+      '使うには、設定の「Office 表示」から約 77MB のひとそろいを入れてください。一度入れれば次からは端末の中から起動します。',
+      '配布元に届かないときは、手元の zip を選んでも入れられます。',
+      'いまのところ Chrome や Edge などの Chromium 系でだけ動きます。動かない環境では、足りないものを名指しで出します。',
+    ],
+  },
+  {
     id: '2026-08-08-page-format',
     title: '本文の読み幅と印刷の紙を選べるようになりました',
     items: [

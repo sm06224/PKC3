@@ -14,7 +14,7 @@
  * `crossOriginIsolated` が本当に立つかは**実ブラウザでしか分からない**。
  */
 import { test, expect } from '@playwright/test';
-import { gotoApp, collectPageErrors } from './helpers';
+import { gotoApp, collectPageErrors, clickReal } from './helpers';
 
 /** 中身は問わない ── 入口は MIME と拡張子で決まる(開くのは別窓の仕事)。 */
 const FAKE_DOCX = Buffer.from('PK\u0003\u0004 not a real docx', 'utf-8');
@@ -83,6 +83,42 @@ test('🔴 Office の添付には入口が必ず出る(押しても無言のボ�
     page.locator('[data-pkc-office]'),
     '画像の添付に Office の入口が出ている',
   ).toHaveCount(0);
+
+  expect(errors).toEqual([]);
+});
+
+/**
+ * 🔴 **設定の面に、入れる導線が実在する**(#88 / O6-a)。
+ *
+ * ⚠ unit は器を単体で組んで見ているだけ ── **設定を開いたら本当に載っているか**は
+ * 実ブラウザでしか分からない(`settings.ts` が置き忘れても unit は通る形がある)。
+ * ⚠ **77MB を実際には取らない** ── ここが見るのは「導線が在って、押せる状態か」まで。
+ *   取得そのものは配布元に依存するので、smoke の主張にしない。
+ */
+test('🔴 設定に Office 一式の状態と、入れる 2 つの導線が出る', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+
+  const section = page.locator('[data-pkc-region="settings-office"]');
+  await expect(section, '設定に Office の節が無い').toBeVisible({ timeout: 15000 });
+  await expect(section.locator('[data-pkc-field="office-pack-status"]')).toHaveText(
+    '入っていません',
+  );
+  // 🔴 **導線は 2 つとも押せる** ── 配布元に届かない環境の唯一の道
+  //    (ファイルから)を、押せない形にしない
+  for (const field of ['office-pack-url', 'office-pack-file']) {
+    await expect(section.locator(`[data-pkc-field="${field}"]`)).toBeEnabled();
+  }
+  // ⚠ 入っていないのに「削除」が押せると、押しても何も起きないボタンになる
+  await expect(section.locator('[data-pkc-field="office-pack-remove"]')).toBeDisabled();
+  // ⚠ 何もしていないときに進捗を出さない
+  await expect(section.locator('[data-pkc-field="office-pack-progress"]')).toBeHidden();
+
+  // この環境で動くかを名指しで言う ── Chromium なら「動きます」
+  const cap = await section.locator('[data-pkc-field="office-pack-capability"]').textContent();
+  expect(cap ?? '', '環境の可否を 1 行も言っていない').not.toBe('');
+  test.info().annotations.push({ type: 'office-capability', description: String(cap) });
 
   expect(errors).toEqual([]);
 });

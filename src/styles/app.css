@@ -2260,6 +2260,23 @@ select:focus-visible {
    無スタイル**(本文と同じ字の大きさ・同じ色)で出ていた。設定と並べたときに
    見た目が揃わない。⚠ 属性は 1 要素 1 個なので、綴りを片方へ寄せるのではなく
    **CSS の側で両方受ける**(1 行で済み、既存の pin も動かない)。 */
+/* Office 一式の節(#88 / O6-a)── 状態 2 行 + 導線 + 進捗。
+   ⚠ **色は情報にだけ**(user 指示 2026-08-03)。地は無彩色のままで、
+   「入っています」を緑にしたりしない ── 状態は字で言う。 */
+[data-pkc-field='office-pack-status'],
+[data-pkc-field='office-pack-capability'],
+[data-pkc-field='office-pack-progress'] {
+  margin: var(--s2) 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+[data-pkc-field='office-pack-actions'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin-top: var(--s3);
+}
+
 [data-pkc-field='settings-note'],
 .settings-note {
   margin: var(--s2) 0 0;

@@ -25,6 +25,8 @@ import { SEALED_ARCHETYPES, SEALED_VIEWS } from '../src/features/sealed';
 import { buildFormatBar } from '../src/adapter/ui/render/format-bar';
 import { FORMAT_OPS } from '../src/features/markdown/text-ops';
 import { APPENDABLE_ARCHETYPES } from '../src/features/flavor/append-spec';
+import { buildOfficePackPanel } from '../src/adapter/ui/render/office-pack-panel';
+import { OfficePackState } from '../src/adapter/ui/render/office-entry-view';
 
 /** src 配下の TS を全部集める(「無い」ことの主張を file 単位で逃さない)。 */
 function srcFiles(dir = 'src', out: string[] = []): string[] {
@@ -326,6 +328,26 @@ describe('マニュアルと実装の突合', () => {
     // `textlog-flavor.ts` も「追記型」と書きながら、その UI は存在しなかった
     expect([...APPENDABLE_ARCHETYPES].sort()).toEqual(['text', 'textlog']);
     expect(MANUAL).toContain('**ノート** と **ログ** には、本文の下に **追記欄** が出ます');
+  });
+
+  /**
+   * 🔴 **Office 一式の導線が、マニュアルと 1 対 1**(#88 / O6-a)。
+   *
+   * ⚠ この節は**設定の面にしか無い**ので、`buildShell` を見る上の検査には
+   * 1 つも掛からない ── 改名しても全緑で通り、マニュアルだけが嘘になる。
+   * 🔑 **実際に描いたボタン**と突き合わせる(ソースの文字列を grep しない)。
+   */
+  it('🔴 Office 一式の導線が pin と一致し、マニュアルにも在る', () => {
+    const panel = buildOfficePackPanel(new OfficePackState());
+    const labels = [...panel.root.querySelectorAll('button')].map((b) => b.textContent ?? '');
+    // ⚠ **等値**で見る(包含だと足したものが素通りする)
+    expect(labels).toEqual(['取得して入れる', 'ファイルから入れる', '削除']);
+    for (const label of labels) {
+      expect(MANUAL, `マニュアルに「${label}」の説明が無い`).toContain(`**${label}**`);
+    }
+    panel.dispose();
+    // ⚠ **数字も pin する**(「数字は真っ先に腐る」)── 77MB は画面にも出る
+    expect(MANUAL, 'マニュアルに一式の大きさが無い').toContain('77MB');
   });
 
   it('🔴 更新の案内の文言が pin と一致し、マニュアルにも在る', () => {

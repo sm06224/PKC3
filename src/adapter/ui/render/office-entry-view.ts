@@ -23,6 +23,7 @@ import {
   readOfficeCapability,
   type OfficeCapability,
 } from '@features/office/office-entry';
+import type { OfficePackMeta } from '@adapter/platform/office/office-pack';
 import { iconButton } from './icons';
 
 /** 入口を決めるのに要る「いまの状態」。⚠ **同期で答えられる**ことが条件。 */
@@ -33,34 +34,65 @@ export interface OfficeAvailabilitySource {
 }
 
 /**
- * アプリ共有の 1 個。
+ * Office 一式について**画面が知っていること**を 1 か所に持つ(#88 / O3-c・O6-a)。
  *
  * ⚠ 配備の有無は **IDB を読まないと分からない = 非同期**だが、入口を描くのは
  * click ハンドラと同じ同期の世界である。だからここは**控え**を持ち、
- * 起動時と設置 / 削除の直後に `setInstalled()` で合わせる。
- * ⚠ 合わせ忘れると「入れたのに設置カードが出たまま」になる ── 更新する側は
- * 必ず `center.invalidateDetail()` → `render()` まで面倒を見ること。
+ * 起動時と設置 / 削除の直後に `setMeta()` で合わせる。
+ *
+ * 🔴 **見る面が 2 つある**(添付の入口 / 設定の面)ので、変化は**放送**する ──
+ * 片方だけ更新する配線を書くと、もう片方が古い値のまま残る
+ * (CLAUDE.md「同じ値を複数の描画経路へ渡すものは、経路ごとに pin する」)。
  */
-export class OfficeAvailability implements OfficeAvailabilitySource {
-  private installed = false;
+export class OfficePackState implements OfficeAvailabilitySource {
+  private meta: OfficePackMeta | null = null;
+  /** 設置中の 1 行(空 = 何もしていない)。 */
+  private progressText = '';
+  private readonly listeners = new Set<() => void>();
 
   isInstalled(): boolean {
-    return this.installed;
+    return this.meta !== null;
+  }
+
+  getMeta(): OfficePackMeta | null {
+    return this.meta;
   }
 
   /** @returns 値が変わったか(変わったときだけ描き直せばよい)。 */
-  setInstalled(on: boolean): boolean {
-    if (this.installed === on) return false;
-    this.installed = on;
+  setMeta(meta: OfficePackMeta | null): boolean {
+    // ⚠ 同じ「入っている」でも版が変われば設定の面の字が変わる ── 参照で見る
+    if (this.meta === meta) return false;
+    this.meta = meta;
+    this.emit();
     return true;
+  }
+
+  progress(): string {
+    return this.progressText;
+  }
+
+  setProgress(text: string): void {
+    if (this.progressText === text) return;
+    this.progressText = text;
+    this.emit();
+  }
+
+  /** @returns 解除する関数(短命な購読者は必ず呼ぶ)。 */
+  onChange(fn: () => void): () => void {
+    this.listeners.add(fn);
+    return () => { this.listeners.delete(fn); };
   }
 
   capability(): OfficeCapability {
     return readOfficeCapability(globalThis);
   }
+
+  private emit(): void {
+    for (const fn of this.listeners) fn();
+  }
 }
 
-export const appOfficeAvailability = new OfficeAvailability();
+export const appOfficePack = new OfficePackState();
 
 export interface OfficeAttachment {
   readonly name: string;
@@ -79,7 +111,7 @@ export interface OfficeAttachment {
  */
 export function buildOfficeEntry(
   att: OfficeAttachment,
-  avail: OfficeAvailabilitySource = appOfficeAvailability,
+  avail: OfficeAvailabilitySource = appOfficePack,
 ): HTMLElement | null {
   const entry = officeEntry({
     mime: att.mime,

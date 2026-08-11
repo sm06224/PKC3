@@ -22,7 +22,9 @@ import {
   FONT_PREFIX,
   GZIPPED_PACK_FILES,
   OfficePackError,
+  parsePackManifest,
   REQUIRED_PACK_FILES,
+  type PackManifest,
 } from './office-pack';
 
 export interface AcquireProgress {
@@ -107,6 +109,48 @@ export async function readPackFromZip(zip: Blob, onProgress?: AcquireProgress): 
 }
 
 /**
+ * 取得元を同一 origin に限って解く。**別 origin は導線ごと作らない。**
+ *
+ * ⚠ 基点は `document.baseURI`(相対 path を解決する本来の API)。ここを location の
+ * URL 文字列にすると `tests/features/flags.test.ts` の「クエリを読んでいないか」の
+ * 全数検査に掛かる ── **ガードは正しい**ので、綴りを避けるのではなく
+ * **読まなくて済む書き方**へ直してある。
+ */
+function resolveBase(base: string): URL {
+  const root = new URL(base, document.baseURI);
+  if (root.origin !== location.origin) {
+    throw new OfficePackError(
+      `取得元は同一 origin でなければなりません(指定: ${root.origin})。`
+        + '別 origin は CORS で必ず失敗します ── 手元の zip を選ぶ導線を使ってください。',
+    );
+  }
+  if (!root.href.endsWith('/')) return new URL(`${root.href}/`);
+  return root;
+}
+
+/**
+ * 取得元の**目録**(`pack.json`)を読む。
+ *
+ * 🔑 これが在るので、PKC3 側は**フォント名を 1 つも知らなくてよい** ──
+ * 「一式とは何か」を配る側と取る側の 2 か所に持たない(`office-pack.ts` 冒頭の教訓)。
+ */
+export async function fetchPackManifest(base: string): Promise<PackManifest> {
+  const url = new URL('pack.json', resolveBase(base));
+  let res: Response;
+  try {
+    res = await fetch(url.href);
+  } catch {
+    // ⚠ 原因を名指しする ── 「失敗しました」では user が次に何をすべきか分からない
+    throw new OfficePackError(`取得元に届きません: ${url.href}`);
+  }
+  if (!res.ok) {
+    throw new OfficePackError(`取得元に一式がありません(HTTP ${res.status}): ${url.href}`);
+  }
+  // ⚠ **JSON として読めた**を「目録だった」と読まない ── 形は `parsePackManifest` が見る
+  return parsePackManifest(await res.json().catch(() => null));
+}
+
+/**
  * 同一 origin のサブパスから一式を取る。
  *
  * ⚠ `base` は**同一 origin でなければならない**。別 origin を渡せるようにすると、
@@ -117,26 +161,19 @@ export async function fetchPackFromBase(
   fonts: readonly string[],
   onProgress?: AcquireProgress,
 ): Promise<PackFiles> {
-  // ⚠ 基点は `document.baseURI`(相対 path を解決する本来の API)。
-  //    ここを location の URL 文字列にすると `tests/features/flags.test.ts` の
-  //    「クエリを読んでいないか」の全数検査に掛かる ── **ガードは正しい**ので、
-  //    綴りを避けるのではなく**読まなくて済む書き方**へ直した。
-  const root = new URL(base, document.baseURI);
-  if (root.origin !== location.origin) {
-    throw new OfficePackError(
-      `取得元は同一 origin でなければなりません(指定: ${root.origin})。`
-        + '別 origin は CORS で必ず失敗します ── 手元の zip を選ぶ導線を使ってください。',
-    );
-  }
+  const root = resolveBase(base);
   if (fonts.length === 0) {
     throw new OfficePackError('日本語フォントが 1 つも指定されていません。');
   }
 
-  const names = [...REQUIRED_PACK_FILES, ...fonts.map((f) => FONT_PREFIX + f)];
+  // ⚠ 目録は `fonts/…` の形で来るが、呼び側が素の file 名を渡すこともある ──
+  //    **どちらでも同じ 1 つの綴りへ寄せる**(前置きを 2 度付けない)
+  const fontNames = fonts.map((f) => (f.startsWith(FONT_PREFIX) ? f : FONT_PREFIX + f));
+  const names = [...REQUIRED_PACK_FILES, ...fontNames];
   const out: PackFiles = new Map();
   for (const [i, name] of names.entries()) {
     onProgress?.(`取得中: ${name}`, i, names.length);
-    const url = new URL(name, root.href.endsWith('/') ? root.href : `${root.href}/`);
+    const url = new URL(name, root);
     const res = await fetch(url.href);
     // ⚠ **沈黙を成功と読まない。** 404 の HTML を掴んで「入った」と言わない
     if (!res.ok) throw new OfficePackError(`取得できません: ${name}(HTTP ${res.status})`);

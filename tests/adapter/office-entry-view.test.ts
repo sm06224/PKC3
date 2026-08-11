@@ -24,18 +24,27 @@ import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/binder';
 import { attachmentBody } from '../../src/features/flavor/attachment-flavor';
 import {
-  appOfficeAvailability,
+  appOfficePack,
   buildOfficeEntry,
-  OfficeAvailability,
+  OfficePackState,
   type OfficeAvailabilitySource,
 } from '../../src/adapter/ui/render/office-entry-view';
 import type { OfficeCapability } from '../../src/features/office/office-entry';
+import type { OfficePackMeta } from '../../src/adapter/platform/office/office-pack';
 
 const OK: OfficeCapability = {
   crossOriginIsolated: true,
   sharedArrayBuffer: true,
   jspi: true,
   decompressionStream: true,
+};
+
+const META: OfficePackMeta = {
+  version: 'lo-wasm-dev',
+  installedAt: Date.UTC(2026, 7, 11),
+  source: 'url',
+  totalBytes: 80 * 1024 * 1024,
+  files: [],
 };
 
 const DOCX = {
@@ -50,7 +59,7 @@ function avail(installed: boolean, cap: OfficeCapability = OK): OfficeAvailabili
 
 beforeEach(() => {
   document.body.textContent = '';
-  appOfficeAvailability.setInstalled(false);
+  appOfficePack.setMeta(null);
 });
 
 describe('buildOfficeEntry(O3-c)', () => {
@@ -100,18 +109,32 @@ describe('buildOfficeEntry(O3-c)', () => {
   });
 });
 
-describe('OfficeAvailability の控え', () => {
+describe('OfficePackState の控え', () => {
   it('🔴 変わったときだけ true を返す(描き直しの回数を増やさない)', () => {
-    const a = new OfficeAvailability();
+    const a = new OfficePackState();
     expect(a.isInstalled()).toBe(false);
-    expect(a.setInstalled(true), '変わった').toBe(true);
-    expect(a.setInstalled(true), '変わっていない').toBe(false);
+    expect(a.setMeta(META), '変わった').toBe(true);
+    expect(a.setMeta(META), '変わっていない').toBe(false);
     expect(a.isInstalled()).toBe(true);
-    expect(a.setInstalled(false)).toBe(true);
+    expect(a.setMeta(null)).toBe(true);
+  });
+
+  it('🔴 変化は放送する(見る面が 2 つあるので、片方だけ直せない)', () => {
+    const a = new OfficePackState();
+    let n = 0;
+    const off = a.onChange(() => { n += 1; });
+    a.setMeta(META);
+    a.setProgress('取得中');
+    expect(n, '配備と進捗の 2 回').toBe(2);
+    a.setProgress('取得中');
+    expect(n, '同じ値では鳴らさない').toBe(2);
+    off();
+    a.setMeta(null);
+    expect(n, '解除したら来ない').toBe(2);
   });
 
   it('能力は実機から読む(stub ではなく本物の読み手を通す)', () => {
-    const a = new OfficeAvailability();
+    const a = new OfficePackState();
     // happy-dom には JSPI も分離も無い ── **足りない**と答えるのが正しい
     expect(a.capability().jspi).toBe(false);
     expect(a.capability().crossOriginIsolated).toBe(false);
@@ -207,7 +230,7 @@ describe('main.ts の配線(原文 pin)', () => {
 
   it('🔴 一式の有無を控えへ写し、写したら描き直す', () => {
     // ⚠ 写すだけでは設置カードが残る(boot の 1 枚目は「入っていない」で描かれる)
-    const at = MAIN.indexOf('appOfficeAvailability.setInstalled(');
+    const at = MAIN.indexOf('appOfficePack.setMeta(');
     expect(at, '控えを更新していない').toBeGreaterThan(-1);
     const after = MAIN.slice(at, at + 400);
     expect(after, '控えを更新したのに描き直していない').toContain('invalidateDetail()');

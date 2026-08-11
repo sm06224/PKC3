@@ -34,6 +34,53 @@ export const GZIPPED_PACK_FILES: Readonly<Record<string, string>> = {
   'soffice.data.gz': 'soffice.data',
 };
 
+/**
+ * 🔴 **既定の取得元**(#88 / O6-a)。
+ *
+ * `sm06224.github.io/office-pack/` ── PKC3 本体(`/PKC3/`)と**同じ origin** なので
+ * CORS が起きない。⚠ 別 origin にしてはいけない(`fetchPackFromBase` が弾く)。
+ * ⚠ **相対で書く**(`document.baseURI` から解く)── ここに絶対 URL を書くと、
+ * fork した人・別の場所へ置いた人が**必ず 404 になる導線**を踏む。
+ */
+export const DEFAULT_PACK_BASE = '../office-pack/';
+
+/** 配る側が置く目録(`pack.json`)。⚠ **取る側はこれに従う**(名前を書き写さない)。 */
+export interface PackManifest {
+  readonly version: string;
+  readonly files: readonly string[];
+  /** `fonts/…ttf` の形。⚠ 1 本も無い目録は受け付けない(日本語が豆腐になる)。 */
+  readonly fonts: readonly string[];
+  readonly totalBytes: number;
+}
+
+/**
+ * 目録を検める。**壊れた目録を「読めた」と言わない。**
+ *
+ * ⚠ 404 の HTML を `res.json()` に食わせると throw するが、Pages は 404 に
+ * `index.html` を返す設定もありうる ── その場合 JSON として読めることがある。
+ * だから**形まで見る**(CLAUDE.md「沈黙を成功と読まない」)。
+ */
+export function parsePackManifest(v: unknown): PackManifest {
+  const m = (typeof v === 'object' && v !== null ? v : {}) as Partial<PackManifest>;
+  const fonts = Array.isArray(m.fonts) ? m.fonts.filter((f) => typeof f === 'string') : [];
+  const files = Array.isArray(m.files) ? m.files.filter((f) => typeof f === 'string') : [];
+  if (files.length === 0) {
+    throw new OfficePackError('取得元の目録(pack.json)が読めません ── 配布元が違う可能性があります。');
+  }
+  if (fonts.length < MIN_FONT_COUNT) {
+    throw new OfficePackError(
+      '取得元の目録に日本語フォントが 1 つもありません。'
+        + 'この一式では日本語が豆腐になるため受け付けません。',
+    );
+  }
+  return {
+    version: typeof m.version === 'string' && m.version !== '' ? m.version : 'unknown',
+    files,
+    fonts,
+    totalBytes: typeof m.totalBytes === 'number' ? m.totalBytes : 0,
+  };
+}
+
 export interface OfficePackFileMeta {
   /** pack 内の相対 path(`soffice.js` / `fonts/BIZUDGothic-Regular.ttf`)。 */
   readonly name: string;
