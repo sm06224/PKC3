@@ -1752,6 +1752,14 @@ select:focus-visible {
   font-size: 12px;
   margin: 0;
 }
+/* Office の入口の断り書き(#88 / O3-c)── 「使えない」「まだ入っていない」の
+ * 理由を出す面。⚠ ここも危険色にしない(壊れているのではなく、条件が揃って
+ * いないだけ)。⚠ 行に並ぶボタンとは別に、次の行へ落とす */
+[data-pkc-field='office-note'] {
+  color: var(--muted);
+  font-size: 12px;
+  margin: var(--s2) 0 0;
+}
 
 /* ── かんばん / カレンダー(封印中。解いたときに効く)──────── */
 [data-pkc-view-pane='kanban'] {

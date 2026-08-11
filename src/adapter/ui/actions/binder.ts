@@ -77,6 +77,15 @@ export interface BinderServices {
    * ⚠ `sameOrigin` は詳細画面の別のボタンからのみ true になる。
    */
   launchAsset?(lid: string, opts: { sameOrigin: boolean }): void;
+  /**
+   * 🔴 **添付を Office の別窓で開く**(#88 / O3-c。user 裁定 2026-08-10)。
+   *
+   * ⚠ `launchAsset` とは**別**である ── あちらは HTML アプリを囲いの中で走らせる。
+   * こちらは LibreOffice wasm の窓に文書を流し込む。
+   * ⚠ **同期で呼ぶ**(実体側が `window.open` を user gesture の中で撃つ)。
+   * ⚠ 引数は押したボタンの属性から採る ── lid から本文を読み直す暇が無い。
+   */
+  openOffice?(target: { name: string; mime: string; assetKey: string }): void;
   /** 配色を切り替える(P7b 段⑨c)。⚠ user の好みで、flag でも container でもない。 */
   setTheme?(theme: string): void;
   /**
@@ -803,6 +812,22 @@ const ACTIONS: Record<string, ActionHandler> = {
   'launch-asset-raw': (dispatcher, _target, services) => {
     const lid = dispatcher.getState().selectedLid;
     if (lid) services.launchAsset?.(lid, { sameOrigin: true });
+  },
+  /**
+   * 🔴 **Office の別窓で開く**(#88 / O3-c)。
+   *
+   * ⚠ **同期のうちに渡しきる。** 窓は user gesture の中でしか開けないので、
+   * ここで lid から本文を読み直す(= `await`)ことはできない ── 開くのに要る
+   * 3 つは**押したボタンの属性**に載っている(`office-entry-view.ts` が載せる)。
+   */
+  'open-office': (_dispatcher, target, services) => {
+    const assetKey = target.getAttribute('data-pkc-asset-key');
+    if (!assetKey) return;
+    services.openOffice?.({
+      assetKey,
+      name: target.getAttribute('data-pkc-asset-name') ?? '',
+      mime: target.getAttribute('data-pkc-asset-mime') ?? '',
+    });
   },
   'set-theme': (_dispatcher, target, services) => {
     // `<select>` なら選ばれた値、ボタンなら属性(どちらの形でも受ける)

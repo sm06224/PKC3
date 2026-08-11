@@ -36,6 +36,10 @@ import {
 import { isPageFormat } from '@features/page-format';
 import { appExternalImages } from '@adapter/ui/render/external-images';
 import { launchTile } from '@adapter/ui/launch-tile';
+import { appOfficeAvailability } from '@adapter/ui/render/office-entry-view';
+import { OfficeWindow } from '@adapter/platform/office/office-window';
+import { createOfficeOpener } from '@adapter/platform/office/office-open';
+import { OfficePackStore } from '@adapter/platform/office/office-pack-store';
 import { readAppStorage } from '@adapter/platform/app-storage';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { waitForWindowClose } from '@adapter/platform/window-close';
@@ -206,6 +210,23 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   let browseMode: BrowseMode = 'list';
   // assets: bytes は IDB Blob(sqlite には meta のみ)。表示は lend/dispose 規律
   const blobs = new AssetBlobStore();
+  /**
+   * 🔴 **Office(LibreOffice wasm)の別窓**(#88 / O3-c)。
+   *
+   * ⚠ ここは**道具を渡すだけ** ── 「開けるか / 開けないならなぜか」の判断は
+   * `office-open.ts` が持つ(`main.ts` は原文 pin の test しか無い面なので、
+   * 判断を置くと全 tests 緑のまま取り違える ── CLAUDE.md 2026-08-08)。
+   * ⚠ 窓も worker も**ここでは起きない**(`OfficeWindow` は放送の口を開くだけ)。
+   */
+  const officePack = new OfficePackStore();
+  const officeOpener = createOfficeOpener({
+    officeWindow: new OfficeWindow(),
+    isPackInstalled: () => appOfficeAvailability.isInstalled(),
+    readAsset: async (assetKey) => {
+      const blob = await blobs.get(DEFAULT_CID, assetKey);
+      return blob ? new Uint8Array(await blob.arrayBuffer()) : null;
+    },
+  });
   /**
    * markdown を描く口。⚠ **アプリ全体で 1 個**(P8 段⑲)── 面や書出しが
    * それぞれ作ると worker lease がその数だけ立ち、常駐が増える。
@@ -725,6 +746,19 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         );
       })();
     },
+    /**
+     * 🔴 **添付を Office の別窓で開く**(#88 / O3-c)。
+     *
+     * ⚠ **同期で撃つ**(`await` を挟むと user gesture が切れてポップアップ遮断)。
+     * ⚠ 開けなかったときは**必ず理由を出す** ── 押しても無言、を作らない。
+     * ⚠ 使い回したときも黙らない ── 別窓が背面に居ると `focus()` が効かない
+     *   ことがあり、「押したのに何も起きない」に見える(窓は既に開いている)。
+     */
+    openOffice: (target) => {
+      const r = officeOpener.open(target);
+      if (!r.ok) dispatcher.dispatch({ type: 'OP_FAILED', error: r.message });
+      else if (r.reused) showStatus('開いている Office の窓に表示します');
+    },
     // 🎨 配色(P7b 段⑨c、user 指示「最初はライトとダークのみに」)。
     // ⚠ 属性は **`<html>`** に付ける ── `:root` の変数を上書きするため
     // ⚠ **ここだけが保存する** ── 起動時の適用は保存しない(review M-7)
@@ -911,6 +945,23 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     if (lid) center.noteBlockedBox(lid, blocked);
   });
   connectStoreEffects(dispatcher, createStorePort(client, DEFAULT_CID));
+  /**
+   * 🔴 **一式が入っているかを 1 度だけ読み、控えに写す**(#88 / O3-c)。
+   *
+   * 入口を描くのは click と同じ**同期**の世界だが、IDB は非同期でしか読めない ──
+   * だから起動時に読んで `appOfficeAvailability` に控える。
+   * ⚠ **読めたら描き直す** ── boot 直後の 1 枚目は「まだ入っていない」で描かれて
+   *   いるので、写しただけでは設置カードが残る(設定を変えたときと同じ作法)。
+   * ⚠ 失敗しても黙って落とす ── Office を使わない user の起動を、ここで止めない。
+   */
+  void officePack
+    .isInstalled()
+    .then((on) => {
+      if (!appOfficeAvailability.setInstalled(on)) return;
+      center.invalidateDetail();
+      center.render(dispatcher.getState());
+    })
+    .catch(() => {});
 
   dispatcher.dispatch({
     type: 'SYS_BOOTED',

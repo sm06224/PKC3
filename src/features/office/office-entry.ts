@@ -113,7 +113,15 @@ export function officeEntry(input: OfficeEntryInput): OfficeEntry {
     return {
       kind: 'setup',
       label: 'Office 表示を使えるようにする',
-      reason: 'Office 表示にはひとそろい(約 77MB)が要ります。設定から入れてください。',
+      /**
+       * ⚠ **無い場所を案内しない**(2026-08-11、O3-c)。ここは以前
+       * 「設定から入れてください」と書いていたが、**設置の導線はまだ無い**
+       * (O6)── 案内した先に何も無いのは、黙って何も起きないのと同じ実害である
+       * (CLAUDE.md「実体を作ってから導線を書く」)。
+       * 🔑 O6 で設置の面ができたら、**ここを場所付きの文へ戻す**
+       * (`tests/features/office-entry.test.ts` が場所の名指しを見張っている)。
+       */
+      reason: 'Office 表示にはひとそろい(約 77MB)が要ります。まだ入っていません。',
     };
   }
   return { kind: 'open', label: 'Office で開く' };

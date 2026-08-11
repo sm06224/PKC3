@@ -92,6 +92,16 @@ describe('officeEntry', () => {
     });
     expect(e.kind).toBe('setup');
     expect(e.kind === 'setup' && e.reason).toContain('77MB');
+    /**
+     * 🔴 **無い場所を案内しない**(2026-08-11、O3-c)。設置の面は O6 でできる ──
+     * それまで「設定から」と書くと、user は**無い物を探す**
+     * (CLAUDE.md「マニュアルが撤去済みの場所を案内していない」と同じ型)。
+     * 🔑 O6 で面ができたら**この assert を裏返す**(場所を名指しする側へ)。
+     */
+    expect(
+      e.kind === 'setup' && e.reason,
+      'まだ無い設置の面を案内している',
+    ).not.toContain('設定');
   });
 
   it('🔴 使えない環境は「未配備」より先に見る(77MB を無駄に取らせない)', () => {

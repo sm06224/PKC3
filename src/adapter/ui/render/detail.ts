@@ -42,6 +42,7 @@ import {
 } from '@features/markdown/document-globals';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { isAppMime } from '@features/launcher/tiles';
+import { buildOfficeEntry } from './office-entry-view';
 import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
 import type { AppState, AppPhase } from '@adapter/state/app-state';
 import { appFlags } from '@adapter/platform/flag-store';
@@ -1155,6 +1156,18 @@ export class DetailRenderer {
           'PKC3 と同じ場所で開きます。IndexedDB や cookie を使うアプリが動きますが、このアプリは PKC3 の中身にも手が届きます';
         info.append(rawRun);
       }
+      /**
+       * 🔴 **Office の入口**(#88 / O3-c)。⚠ 出るのは「押せるボタン」か
+       * 「名指しの理由」のどちらかだけ ── どちらを出すかは
+       * `features/office/office-entry.ts` が決める(ここは置くだけ)。
+       * ⚠ Office の添付でなければ `null` が返る = 何も足さない。
+       */
+      const office = buildOfficeEntry({
+        name: meta.name,
+        mime: meta.mime,
+        assetKey: meta.assetKey,
+      });
+      if (office) info.append(office);
     }
     host.append(info);
 

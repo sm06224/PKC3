@@ -1,0 +1,88 @@
+/**
+ * smoke(#88 / O3-c): 添付の画面に出る **Office の入口**。
+ *
+ * 🔴 **主張は 1 つ** ── 「Office の添付には、押せるボタンか名指しの理由が**必ず**
+ * 出る。押しても何も起きないボタンは出ない」。
+ *
+ * ⚠ **どちらが出るかは環境で変わる**(JSPI と分離が揃っているか)。だから
+ * 「ボタンが出る」を assert すると、ブラウザの版で赤くなる test になる ──
+ * 観測点は**状態のどれかであること**と、**理由のときに押せる物が無いこと**にする。
+ * 🔑 CLAUDE.md「主張が違えば観測点も違う」/「実害の形へ書き直す」。
+ *
+ * ⚠ unit(`tests/adapter/office-entry-view.test.ts`)は happy-dom なので
+ * **能力が必ず足りない側**でしか通らない。分離が実際に効いているか、
+ * `crossOriginIsolated` が本当に立つかは**実ブラウザでしか分からない**。
+ */
+import { test, expect } from '@playwright/test';
+import { gotoApp, collectPageErrors } from './helpers';
+
+/** 中身は問わない ── 入口は MIME と拡張子で決まる(開くのは別窓の仕事)。 */
+const FAKE_DOCX = Buffer.from('PK\u0003\u0004 not a real docx', 'utf-8');
+const PNG_1X1 = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
+
+test('🔴 Office の添付には入口が必ず出る(押しても無言のボタンを出さない)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  /**
+   * 🔴 **分離が実際に効いていることを、配る物で確かめる**。
+   * `tests/features/coi-headers.test.ts` は `vite.config.ts` の**原文**しか
+   * 見ていない ── 書いてあるのに配られていない、を落とせるのはここだけである。
+   */
+  expect(
+    await page.evaluate(() => window.crossOriginIsolated),
+    'COOP/COEP が配られていない(Office の前提が崩れている)',
+  ).toBe(true);
+
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: '報告書.docx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    buffer: FAKE_DOCX,
+  });
+
+  const entry = page.locator('[data-pkc-office]');
+  await expect(entry, 'Office の添付なのに入口が 1 つも無い').toHaveCount(1, {
+    timeout: 15000,
+  });
+  const state = await entry.getAttribute('data-pkc-office-state');
+  expect(['open', 'setup', 'unsupported']).toContain(state);
+  // ⚠ 何が出たかは残す(版が変わって状態が動いたら、ログで気づける)
+  test.info().annotations.push({ type: 'office-entry-state', description: String(state) });
+
+  if (state === 'open') {
+    // 押せる側 ── 開くのに要る 3 つが載っていること(同期で読めないと窓が開かない)
+    await expect(entry).toHaveAttribute('data-pkc-asset-name', '報告書.docx');
+    expect(await entry.getAttribute('data-pkc-asset-key')).toBeTruthy();
+    expect(await entry.getAttribute('data-pkc-asset-mime')).toContain('wordprocessingml');
+  } else {
+    // 理由の側 ── 🔴 **押せる物を出さない**。ここが本 spec の中心である
+    expect(
+      await entry.evaluate(
+        (el) => el.hasAttribute('data-pkc-action') || el.querySelector('[data-pkc-action]') !== null,
+      ),
+      '理由を出しているのに押せる物がある(無言の dead click)',
+    ).toBe(false);
+    expect((await entry.textContent())?.trim(), '理由が空文').not.toBe('');
+  }
+
+  // ── Office でない添付には出ない(空振り防止の対照群)──
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: 'dot.png',
+    mimeType: 'image/png',
+    buffer: PNG_1X1,
+  });
+  await expect(page.locator('[data-pkc-field="attachment-media"]')).toBeVisible({
+    timeout: 15000,
+  });
+  await expect(
+    page.locator('[data-pkc-office]'),
+    '画像の添付に Office の入口が出ている',
+  ).toHaveCount(0);
+
+  expect(errors).toEqual([]);
+});
