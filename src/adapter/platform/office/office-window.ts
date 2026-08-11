@@ -57,6 +57,17 @@ export interface OpenOptions {
   readonly name?: string;
   /** 開いた直後に流し込む文書。無ければ Start Center が出る。 */
   readonly bytes?: Uint8Array;
+  /**
+   * 文書は**後から** `provideDocument()` で渡す、と宣言する。
+   *
+   * 🔴 これが無いと**窓を 2 つ開く**。添付の bytes は IDB から読むので非同期だが、
+   * `window.open` は user gesture の同期のうちに呼ばないと遮断される ──
+   * つまり「開くのが先、bytes が後」になる。そこで
+   * `open({ expectDocument: true })` → `provideDocument(...)` の 2 段にする。
+   * ⚠ `open()` を 2 回呼んで解決しようとすると、1 回目の時点では生存通知が
+   *   まだ届いていないので `isProbablyOpen()` が false になり、**2 つ目が開く**。
+   */
+  readonly expectDocument?: boolean;
 }
 
 export type OpenOutcome =
@@ -86,6 +97,8 @@ export class OfficeWindow {
   private readonly baseUrl: string;
   private lastAliveAt = 0;
   private pendingDoc: { name: string; bytes: Uint8Array } | null = null;
+  /** 窓が先に「ちょうだい」と言ってきたが、まだ bytes が無い状態。 */
+  private askedForDoc = false;
   private readonly listeners = new Set<(ev: OfficeWindowEvent) => void>();
 
   constructor(deps: OfficeWindowDeps = {}) {
@@ -123,11 +136,14 @@ export class OfficeWindow {
     this.pendingDoc = opts.bytes
       ? { name: opts.name ?? 'document', bytes: opts.bytes }
       : null;
+    // ⚠ 新しく開く / 読み直させるので、前の「ちょうだい」は無効にする
+    this.askedForDoc = false;
+    const wantsDoc = opts.bytes !== undefined || opts.expectDocument === true;
 
     if (this.isProbablyOpen()) {
       // ⚠ 2 つ立てると常駐が倍になる(1 窓 約 750MB 実測)。開かずに頼む
       this.ch.postMessage({ pkc3Office: 'focus-request', payload: {} });
-      if (this.pendingDoc) {
+      if (wantsDoc) {
         this.ch.postMessage({
           pkc3Office: 'reload-request',
           payload: { name: opts.name ?? '', awaitDoc: true },
@@ -138,6 +154,19 @@ export class OfficeWindow {
 
     this.openWindow(this.hostUrl(opts));
     return { kind: 'opened' };
+  }
+
+  /**
+   * 後から文書を渡す(`open({ expectDocument: true })` と対で使う)。
+   *
+   * ⚠ 窓が既に「ちょうだい」と言っていたら**その場で**送る。まだなら控えておき、
+   * 言ってきた時に送る ── どちらの順序でも落とさない。
+   */
+  provideDocument(name: string, bytes: Uint8Array): void {
+    // ⚠ 空を渡して Start Center を上書きしない
+    if (bytes.byteLength === 0) return;
+    this.pendingDoc = { name, bytes };
+    if (this.askedForDoc) this.sendDocument();
   }
 
   /** 閉じてくれと頼む。⚠ 握っていないので、こちらから強制はできない。 */
@@ -162,7 +191,7 @@ export class OfficeWindow {
     const q: string[] = [];
     if (opts.name) q.push(`name=${encodeURIComponent(opts.name)}`);
     // ⚠ 窓側は `await-doc` が在るときだけ文書を待つ。無いと無駄に待つ
-    if (opts.bytes) q.push('await-doc=1');
+    if (opts.bytes !== undefined || opts.expectDocument === true) q.push('await-doc=1');
     const base = new URL(OFFICE_HOST_PATH, this.baseUrl).href;
     return q.length > 0 ? `${base}?${q.join('&')}` : base;
   }
@@ -172,7 +201,12 @@ export class OfficeWindow {
     if (!ev) return;
     if (ev.type === 'alive') this.lastAliveAt = this.now();
     if (ev.type === 'closed') this.lastAliveAt = 0;
-    if (ev.type === 'ready-for-document') this.sendDocument();
+    if (ev.type === 'ready-for-document') {
+      // ⚠ **bytes がまだ無いこともある**(添付を IDB から読んでいる最中)。
+      //    その時は覚えておき、届いたら送る ── 取りこぼすと窓が 15 秒待って諦める
+      this.askedForDoc = true;
+      this.sendDocument();
+    }
     for (const fn of this.listeners) fn(ev);
   }
 
@@ -180,6 +214,7 @@ export class OfficeWindow {
     const doc = this.pendingDoc;
     if (!doc) return;
     this.pendingDoc = null;
+    this.askedForDoc = false;
     // ⚠ BroadcastChannel は **transfer できない**(structured clone のみ)ので、
     //    ここだけはコピーになる。大きい文書で効くなら IDB 経由の受け渡しへ替える。
     this.ch.postMessage({

@@ -194,6 +194,51 @@ describe('OfficeWindow', () => {
     expect(h.seen).toEqual([]);
   });
 
+  it('🔴 expectDocument だけでも await-doc を付ける(後渡しの宣言)', () => {
+    const h = harness();
+    h.ow.open({ name: 'a.docx', expectDocument: true });
+    expect(new URL(h.opened[0]!).searchParams.get('await-doc'), '窓に待つよう伝える').toBe('1');
+  });
+
+  it('🔴 後渡し: 窓が先に「ちょうだい」と言っても取りこぼさない', () => {
+    const h = harness();
+    h.ow.open({ name: 'a.docx', expectDocument: true });
+    // 窓が先に要求 ── この時点で bytes はまだ無い
+    h.ch.deliver('ready-for-document');
+    expect(h.ch.sent.filter((x) => x.type === 'document').length, 'まだ無いので送らない').toBe(0);
+    // 後から届いたら、その場で送る
+    h.ow.provideDocument('a.docx', new Uint8Array([4, 5]));
+    const docs = h.ch.sent.filter((x) => x.type === 'document');
+    expect(docs.length, '覚えていて送る').toBe(1);
+    expect(docs[0]!.payload.bytes).toEqual(new Uint8Array([4, 5]));
+  });
+
+  it('後渡し: bytes が先に届いても、要求が来たときに送る', () => {
+    const h = harness();
+    h.ow.open({ name: 'a.docx', expectDocument: true });
+    h.ow.provideDocument('a.docx', new Uint8Array([7]));
+    expect(h.ch.sent.filter((x) => x.type === 'document').length, '要求前は送らない').toBe(0);
+    h.ch.deliver('ready-for-document');
+    expect(h.ch.sent.filter((x) => x.type === 'document').length).toBe(1);
+  });
+
+  it('🔴 空の文書は渡さない(Start Center を空で上書きしない)', () => {
+    const h = harness();
+    h.ow.open({ name: 'a.docx', expectDocument: true });
+    h.ch.deliver('ready-for-document');
+    h.ow.provideDocument('a.docx', new Uint8Array(0));
+    expect(h.ch.sent.filter((x) => x.type === 'document')).toEqual([]);
+  });
+
+  it('開き直したら、前の「ちょうだい」は無効になる(古い bytes を送らない)', () => {
+    const h = harness();
+    h.ow.open({ name: 'a.docx', expectDocument: true });
+    h.ch.deliver('ready-for-document');
+    h.ow.open({ name: 'b.docx', expectDocument: true });   // 別の文書で開き直す
+    h.ow.provideDocument('b.docx', new Uint8Array([9]));
+    expect(h.ch.sent.filter((x) => x.type === 'document').length, 'まだ要求されていない').toBe(0);
+  });
+
   it('requestClose は頼むだけ(握っていないので強制しない)', () => {
     const h = harness();
     h.ow.requestClose();
