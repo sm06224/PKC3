@@ -54,6 +54,7 @@ import { AssetClient } from '@adapter/platform/asset/asset-client';
 import { watchForUpdate, type UpdateContainer } from '@adapter/platform/sw/update-prompt';
 import { reloadOnPrebootSwap, type PrebootTarget } from '@adapter/platform/sw/preboot-swap';
 import { applyIsolationReload } from '@adapter/platform/sw/coi-reload';
+import { applyBootRecovery } from '@adapter/platform/sw/boot-recovery';
 import { InspectorRenderer } from '@adapter/ui/render/inspector';
 import { BrowseRouter, type BrowseMode } from '@adapter/ui/render/browse';
 import { CenterRouter } from '@adapter/ui/render/center';
@@ -1168,7 +1169,29 @@ function bootstrap(): void {
       root.textContent = `起動に失敗しました: ${message}${handoff}`;
       // ⚠ boot が失敗しても登録はする ── 次回この人がオフラインで開けるかは
       // 登録が済んでいるかで決まる(段⑤ の意図。競合を避けて失敗側にも置いた)
-      void registerSw();
+      /**
+       * 🔴 **待機中の新しい版が在るなら、自分で乗り換える**(#115)。
+       *
+       * 起動を壊す SW が active になると、直した版を配っても **waiting のまま**で、
+       * 交代を促す案内は**起動しないと出ない** ── 詰みになる(2026-08-11 に実際に
+       * 作ってしまい、実測で再現した)。起動できていないタブには「開いたままの
+       * 作業を巻き込まない」という自動交代を避ける理由が**当てはまらない**。
+       *
+       * ⚠ 段取り(`SKIP_WAITING` → `controllerchange` → 読み直し)は
+       * `watchForUpdate` のものをそのまま使う ── 2 つ目を書かない。
+       * ここは「案内を見せずに即押すか」を `applyBootRecovery` に決めさせるだけ。
+       */
+      void watchForUpdate(
+        navigator.serviceWorker as unknown as UpdateContainer,
+        registerSw(),
+        (apply) =>
+          void applyBootRecovery({
+            bootFailed: true,
+            session: typeof sessionStorage === 'undefined' ? null : sessionStorage,
+            apply,
+          }),
+        () => location.reload(),
+      );
     });
 
 }

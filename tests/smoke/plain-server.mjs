@@ -14,12 +14,43 @@
  * 「本番に無い救い」で test が通ってしまう。
  */
 import { createServer } from 'node:http';
-import { createReadStream, statSync } from 'node:fs';
+import { createReadStream, readFileSync, statSync } from 'node:fs';
 import { join, normalize, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('../../dist', import.meta.url));
 const PORT = Number(process.env.PKC3_PLAIN_PORT ?? 45733);
+
+/**
+ * 🔴 **起動を壊す古い SW を配れるようにする**(#115)。
+ *
+ * 2026-08-11 に、起動を壊す SW を出荷して**自己永続化する障害**を作った ──
+ * 直した版を配っても旧 SW が active のままなので起動せず、交代を促す案内は
+ * 起動しないと出ない。回復の機構(`boot-recovery.ts`)を**実際に働かせて**
+ * 確かめるには、その「壊れた active」を作れなければならない。
+ *
+ * `/__control/stale-sw/on` で壊れた SW を、`/off` で本物を配る。
+ */
+let staleSw = false;
+
+/**
+ * 本物の `sw.js` から「worker にも COEP を被せる」だけを外した版を作る。
+ *
+ * ⚠ **当たったことを確かめる**(CLAUDE.md「当たらなかった変異と生き延びた変異を
+ * 区別する」)── 置換が空振りすると、この fixture は**ただの本物**になり、
+ * 回復の test が「壊れていないものから回復した」と嘘の合格を出す。
+ */
+function brokenSw() {
+  const real = readFileSync(join(ROOT, 'sw.js'), 'utf-8');
+  const from = "req.mode === 'navigate' || WORKER_DESTS.indexOf(req.destination) !== -1";
+  if (!real.includes(from)) {
+    throw new Error(`stale-sw fixture: 置換対象が sw.js に無い(実装が変わった): ${from}`);
+  }
+  // ⚠ BUILD も変える ── 同じ版だと本物が「新しい版」として install されない
+  return real
+    .replace(from, "req.mode === 'navigate'")
+    .replace(/const BUILD = "([^"]+)"/, 'const BUILD = "$1-stale"');
+}
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -41,6 +72,23 @@ createServer((req, res) => {
     /^(\.\.[/\\])+/,
     '',
   );
+
+  // 壊れた SW の on/off(#115 の回復を実際に働かせるための口)
+  if (rel === 'sw.js' || rel === '/sw.js') {
+    const body = staleSw ? brokenSw() : readFileSync(join(ROOT, 'sw.js'), 'utf-8');
+    res.writeHead(200, {
+      'content-type': 'text/javascript; charset=utf-8',
+      'cache-control': 'no-store',
+    });
+    res.end(body);
+    return;
+  }
+  if (rel.startsWith('__control/stale-sw/') || rel.startsWith('/__control/stale-sw/')) {
+    staleSw = rel.endsWith('/on');
+    res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
+    res.end(staleSw ? 'stale' : 'real');
+    return;
+  }
   let path = join(ROOT, rel);
   try {
     if (statSync(path).isDirectory()) path = join(path, 'index.html');
