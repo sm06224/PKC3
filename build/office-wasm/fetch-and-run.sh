@@ -71,6 +71,12 @@ if [ "${1:-}" = '--serve' ] || [ "${2:-}" = '--serve' ]; then
   exec node "$(dirname "$0")/serve-local.mjs" "$DIR"
 fi
 
+# --fetch-only は「取ってくるだけ」。**CI から使う口**である。
+# ⚠ user 指示「CI にスモークテストが入っているのはなぜ? 遅いランナーでやる意味が
+#    わからない」に従い、CI では probe を走らせない。
+# 🔑 「何を落とすか」を CI 側に書き写さないための口でもある ── 一覧はこの script が正本。
+case " $* " in *' --fetch-only '*) echo '=== 取得のみ(probe は走らせない)==='; exit 0 ;; esac
+
 echo '=== 起動 probe ==='
 # ⚠ 手元は /opt/pw-browsers/chromium(フル chromium)。CI は channel:chromium。
 #    **どちらで測ったかは probe が JSON に残す**
