@@ -37,12 +37,28 @@ export const GZIPPED_PACK_FILES: Readonly<Record<string, string>> = {
 /**
  * 🔴 **既定の取得元**(#88 / O6-a)。
  *
- * `sm06224.github.io/office-pack/` ── PKC3 本体(`/PKC3/`)と**同じ origin** なので
+ * `https://<user>.github.io/office-pack/` ── PKC3 本体と**同じ origin** なので
  * CORS が起きない。⚠ 別 origin にしてはいけない(`fetchPackFromBase` が弾く)。
- * ⚠ **相対で書く**(`document.baseURI` から解く)── ここに絶対 URL を書くと、
- * fork した人・別の場所へ置いた人が**必ず 404 になる導線**を踏む。
+ *
+ * ## 🔴 相対 path で書いてはいけない(2026-08-11 に実際に踏んだ)
+ *
+ * 最初は `'../office-pack/'` と書いていた ── 「本体は `/PKC3/` に在る」という
+ * **決めつけ**である。実際には配信が 2 つあり、深さが違う:
+ *
+ * | 開いている場所 | `'../office-pack/'` の解決先 | |
+ * |---|---|---|
+ * | `/PKC3/`(リリース) | `/office-pack/` | ✓ |
+ * | `/PKC3/dev/`(main の HEAD) | `/PKC3/office-pack/` | ✗ **404** |
+ *
+ * user が最初に試したのは `/dev/` だったので、**いきなり 404 を踏んだ**。
+ * 🔑 **深さに依存しない書き方**にする ── origin 直下の絶対 path なら、
+ * `/PKC3/` でも `/PKC3/dev/` でも同じ場所を指す。
+ *
+ * ⚠ 帰結: 配布物は **origin の直下**に置く必要がある(GitHub Pages の
+ * `<user>.github.io/office-pack/` はまさにその形)。別の置き方をする人は
+ * 「ファイルから入れる」を使う ── そちらは CORS の外なので必ず通る。
  */
-export const DEFAULT_PACK_BASE = '../office-pack/';
+export const DEFAULT_PACK_BASE = '/office-pack/';
 
 /** 配る側が置く目録(`pack.json`)。⚠ **取る側はこれに従う**(名前を書き写さない)。 */
 export interface PackManifest {

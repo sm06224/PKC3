@@ -9,7 +9,7 @@
  *
  * | 押すもの | 何をするか |
  * |---|---|
- * | **取得して入れる** | 同一 origin の配布元(`../office-pack/`)から取る |
+ * | **取得して入れる** | 同一 origin の配布元(`/office-pack/`)から取る |
  * | **ファイルから入れる** | 手元の zip を選ぶ。⚠ **CORS の外なので必ず通る** |
  *
  * ⚠ 後者は保険ではない ── user 裁定「うまくいかない場合は、ローカルとかを介して
@@ -124,7 +124,9 @@ export function buildOfficePackPanel(state: OfficePackState = appOfficePack): Of
   const row = document.createElement('div');
   row.setAttribute('data-pkc-field', 'office-pack-actions');
   const fromUrl = button('install-office-pack', '取得して入れる', 'office-pack-url');
-  fromUrl.title = '同じ場所に置いてある配布元から取ります';
+  // ⚠ 「同じ場所」と言わない ── 配布元は**このサイトの直下**であって、
+  //    いま開いている頁の隣ではない(2026-08-11 に相対 path で 404 を踏んだ跡)
+  fromUrl.title = 'このサイトに置いてある配布元から取ります';
   // ⚠ **input を先に作る**(ボタンが指す先が無い状態を一瞬も作らない)
   const input = document.createElement('input');
   input.type = 'file';
