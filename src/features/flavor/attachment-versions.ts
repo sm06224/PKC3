@@ -118,8 +118,18 @@ export function versionsValue(list: readonly AttachmentVersion[]): FrontmatterVa
 export interface EvictLimits {
   /** 1 添付あたりの自動履歴の世代。 */
   readonly keepGenerations?: number;
-  /** 台帳全体(この呼び出しに渡された全部)の合計バイト。 */
+  /** 台帳全体の合計バイト。⚠ `reservedBytes` を**含めた**上限である。 */
   readonly maxTotalBytes?: number;
+  /**
+   * 🔴 **ここに渡されていない添付が既に使っているバイト**(2026-08-11、変異試験で判明)。
+   *
+   * ⚠ これが無いと、容量の上限が**この呼び出しに渡した添付の中だけ**で閉じる ──
+   * ほかの添付が 150MB 持っていても気づかず、全体では上限を超える。
+   * 🔑 予約分は**数えるが落とさない** ── 保存した添付の履歴を削るのが「保存の副作用」
+   * として自然であり、無関係なノートの履歴を巻き添えで消すのは驚きが大きい。
+   * 収まらなければ `overBudget` で言う(黙って諦めない)。
+   */
+  readonly reservedBytes?: number;
 }
 
 export interface EvictResult<T> {
@@ -154,6 +164,8 @@ export function evictVersions<T extends AttachmentVersion>(
 ): Map<string, EvictResult<T>> {
   const keepGen = limits.keepGenerations ?? DEFAULT_KEEP_GENERATIONS;
   const maxBytes = limits.maxTotalBytes ?? DEFAULT_HISTORY_BYTES;
+  // ⚠ 予約分は落とせないが、上限の消費としては**先に効く**
+  const reserved = Math.max(0, limits.reservedBytes ?? 0);
 
   const kept = new Map<string, T[]>();
   const dropped = new Map<string, T[]>();
@@ -169,7 +181,7 @@ export function evictVersions<T extends AttachmentVersion>(
 
   // ② 容量。⚠ **pinned も数える**が、落とすのは `auto` だけ
   const total = (): number => {
-    let n = 0;
+    let n = reserved;
     for (const list of kept.values()) for (const v of list) n += v.bytes;
     return n;
   };

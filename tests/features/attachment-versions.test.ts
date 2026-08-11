@@ -154,6 +154,25 @@ describe('上限で落とす', () => {
     expect(out.overBudget, '超えたままだと言う').toBe(true);
   });
 
+  it('🔴 渡されていない添付が使っている分(予約)も数える', () => {
+    // ⚠ 予約が無ければ収まるのに、あると落ちる ── これが「上限が全体で効く」の中身
+    const list = [v(1, 'auto', 50 * MB)];
+    const noReserve = evictVersions(group(list), { maxTotalBytes: 120 * MB }).get('a1')!;
+    expect(noReserve.dropped.length, '予約が無ければ収まる').toBe(0);
+    const withReserved = evictVersions(group(list), {
+      maxTotalBytes: 120 * MB, reservedBytes: 100 * MB,
+    }).get('a1')!;
+    expect(withReserved.dropped.length, '予約を数えると落とす').toBe(1);
+  });
+
+  it('🔴 予約分は落とせない ── 収まらなければそう言う', () => {
+    const r = evictVersions(group([v(1, 'auto', 1 * MB)]), {
+      maxTotalBytes: 100 * MB, reservedBytes: 300 * MB,
+    }).get('a1')!;
+    expect(r.keep, '自分は空にできる').toEqual([]);
+    expect(r.overBudget, '予約だけで超えているので収まらない').toBe(true);
+  });
+
   it('上限に収まっていれば何も落とさない', () => {
     const list = [v(1), v(2)];
     const r = evictVersions(group(list)).get('a1')!;
