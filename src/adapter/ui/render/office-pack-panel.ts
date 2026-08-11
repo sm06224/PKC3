@@ -46,7 +46,17 @@ export function packStatusText(meta: OfficePackMeta | null): string {
 export function packCapabilityText(): string {
   const missing = missingCapabilities(readOfficeCapability(globalThis));
   if (missing.length === 0) return 'この環境では動きます';
-  return `この環境では動きません ── ${missing.join(' / ')}`;
+  /**
+   * 🔴 **足りないものを並べるだけで終わらない**(#111)。
+   *
+   * 「分離(cross-origin isolation)」と言われて次に何をすればいいか分かる user は
+   * 居ない ── 実際 2026-08-11 に、この文だけを見て「うーん??」で止まった。
+   * ⚠ そもそも**こちらの落ち度で出ていた**(本番に分離を作る仕掛けが無かった)。
+   * いまは初回に 1 回読み直して成立させるので、ここに残るのは
+   * **本当にブラウザが足りない場合**だけである。だから次の一歩を書く。
+   */
+  return `この環境では動きません ── ${missing.join(' / ')}。`
+    + 'Office 表示は Chrome / Edge などの新しい Chromium 系が要ります。';
 }
 
 /** 設置 / 削除の結果を受けた後、画面をどう合わせるか。 */

@@ -27,7 +27,35 @@
  * - **hash 付き生成物は cache-first**。名前が変われば別 URL なので陳腐化しない
  * - **cache 名に build id**。`activate` で**自分以外の PKC3 cache を消す**
  *   ⚠ 消さないと OPFS とは別にブラウザの cache が無限に積み上がる
+ * - 🔴 **navigation に COOP/COEP を被せる**(#111)。下記。
+ *
+ * ## 🔴 なぜ SW がヘッダを被せるのか(#111、2026-08-11)
+ *
+ * Office(LibreOffice wasm)は `-pthread` = SharedArrayBuffer を要求し、それには
+ * `crossOriginIsolated` が要る。`crossOriginIsolated` は **COOP/COEP のレスポンス
+ * ヘッダ**からしか生まれない ── ところが **GitHub Pages はヘッダを設定できない**。
+ *
+ * `vite.config.ts` は dev / preview にだけ同じヘッダを配っており、そこには
+ * 「返せないホストでは service worker で被せる必要がある」と書いてあったが、
+ * **その分を作らないまま Office を着地させた**。結果、手元(preview)では分離が
+ * 成立して smoke も緑、**本番だけが構造的に動かない**状態になった。
+ *
+ * 🔑 だから navigation の応答をここで作り直してヘッダを足す。⚠ **綴りは
+ * `coi-headers.ts` の 1 か所**から来る(dev / preview / 本番で食い違わせない)。
+ *
+ * ⚠ **navigation だけでよい。** `crossOriginIsolated` は最上位文書の性質であり、
+ * 部分資源は COEP `credentialless` の下では素のまま通る(同一 origin は常に可、
+ * 別 origin は資格情報を落として no-cors 取得)。全応答を包むと、何百件もの
+ * 資源要求ごとに Response を作り直すことになる ── 効果ゼロの定常コストである。
+ *
+ * ⚠ **初回訪問はここに届かない。** SW がまだ制御していないので、その 1 回だけは
+ * ヘッダが付かない = 分離しない。1 回だけ読み直す判断は `coi-reload.ts` に在る。
  */
+
+// ⚠ 拡張子を書く ── この file は `vite.config.ts` から(sw-plugin 経由で)
+//    読まれるので、native config loader が拡張子なしの import を警告する。
+//    tsconfig は `allowImportingTsExtensions` 済み(`noEmit` のため)。
+import { COI_HEADER_ENTRIES } from './coi-headers.ts';
 
 /** cache 名の前置き。⚠ これを手がかりに**古い cache を消す**ので変えない。 */
 export const CACHE_PREFIX = 'pkc3:';
@@ -120,6 +148,38 @@ const ACTIVE_PREFIX = ${JSON.stringify(ACTIVE_MARK_PREFIX)};
 const ACTIVE_MARK = ACTIVE_PREFIX + SCOPE + ':' + BUILD;
 const PRECACHE = ${list};
 const HASHED = ${HASHED_ASSET.toString()};
+/*
+ * 分離のヘッダ(#111)。GitHub Pages はヘッダを返せないので、本番の
+ * crossOriginIsolated はここでしか作れない。綴りの正本は coi-headers.ts。
+ */
+const COI = ${JSON.stringify(COI_HEADER_ENTRIES)};
+
+/*
+ * 応答に分離のヘッダを被せて作り直す。
+ * ⚠ navigation の出口は 4 つある(網 / cache / index への退避 / 503)。
+ *   4 か所に書くと 1 つ足し忘れる形なので、respondWith の直前で 1 回だけ通す。
+ */
+function withCoi(res) {
+  if (!res) return res;
+  /*
+   * opaque(no-cors)は status も headers も読めず、作り直すと本体ごと失う。
+   * どのみちその応答では分離は成立しないので、触らずに返す。
+   */
+  if (res.type === 'opaque' || res.type === 'opaqueredirect') return res;
+  const headers = new Headers(res.headers);
+  for (let i = 0; i < COI.length; i += 1) headers.set(COI[i][0], COI[i][1]);
+  /*
+   * 本体は res.body をそのまま渡す。204 / 205 / 304 のような '本体を持てない
+   * status' に本体を渡すと Response は投げるが、fetch が返す 204 の body は
+   * 必ず null なのでここは通る。⚠ 空文字などに置き換えないこと ── 投げると
+   * respondWith が reject し、user に見えるのは理由の無い白紙になる。
+   */
+  return new Response(res.body, {
+    status: res.status,
+    statusText: res.statusText,
+    headers: headers,
+  });
+}
 /*
  * 🔴 ignoreVary が要る。precache は addAll で入れるので request に Origin が無いが、
  * 実際の module script は crossorigin 付きで Origin を送る ── 応答が Vary: Origin を
@@ -250,21 +310,28 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       // 注: 相対 URL は **SW script の URL 基準**で解決される(/dev/ の SW なら
       // /dev/index.html)。precache に入れた綴りと揃えておく
-      fetch(req).catch(() =>
-        caches
-          .match(req, MATCH)
-          .then((hit) => hit || caches.match('./index.html', MATCH))
-          // 注: ここで undefined を返すと respondWith が ERR_FAILED になり、
-          // user には白紙しか出ない。理由を出す
-          .then(
-            (hit) =>
-              hit ||
-              new Response(
-                '<!doctype html><meta charset="utf-8"><p>オフラインです。まだこの版を保存していないので、一度オンラインで開き直してください。</p>',
-                { status: 503, headers: { 'content-type': 'text/html; charset=utf-8' } },
-              ),
-          ),
-      ),
+      fetch(req)
+        .catch(() =>
+          caches
+            .match(req, MATCH)
+            .then((hit) => hit || caches.match('./index.html', MATCH))
+            // 注: ここで undefined を返すと respondWith が ERR_FAILED になり、
+            // user には白紙しか出ない。理由を出す
+            .then(
+              (hit) =>
+                hit ||
+                new Response(
+                  '<!doctype html><meta charset="utf-8"><p>オフラインです。まだこの版を保存していないので、一度オンラインで開き直してください。</p>',
+                  { status: 503, headers: { 'content-type': 'text/html; charset=utf-8' } },
+                ),
+            ),
+        )
+        /*
+         * 🔴 分離のヘッダは**どの出口を通っても**要る(#111)。オフラインで
+         * cache から出した文書だけ分離が外れると、Office は '入っているのに
+         * 動かない' という、いちばん分からない壊れ方をする。
+         */
+        .then(withCoi),
     );
     return;
   }
