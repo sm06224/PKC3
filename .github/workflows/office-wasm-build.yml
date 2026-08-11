@@ -44,6 +44,11 @@ on:
       emsdk:
         description: 'emsdk の版(LibreOffice の README.wasm.md が指定する版に合わせる)'
         default: '4.0.10'
+      lo_ref:
+        # 🔴 既定は master。⚠ **建てるたびに別物**になるので、解決した SHA を
+        #    必ず出力し release notes にも書く ── 再現したいときはここへ渡す(#117)。
+        description: 'LibreOffice core の ref(空 = master。再現したいときは SHA を渡す)'
+        default: 'master'
 
 # ⚠ 既定の 6 時間で足りない可能性が高い。足りなければ段を分けて artifact で繋ぐ
 jobs:
@@ -235,8 +240,23 @@ jobs:
           done
           ~/qt-wasm/install/libexec/moc -v
 
+      # 🔴 **どの版を建てたのかを残す**(#117 で困った)。`--depth 1` の master は
+      #    **建てるたびに別物**なので、「直った / 壊れた」を比べられない。
+      #    ⚠ 既定は master のまま(上流の修正を取り込みたいので固定はしない)。
+      #    代わりに **解決した SHA を必ず出力し、成果物にも同梱する** ──
+      #    再現したいときは `lo_ref` にその SHA を渡せば同じ版が建つ。
       - name: LibreOffice を取る
-        run: git clone --depth 1 https://github.com/LibreOffice/core.git ~/lo-core
+        run: |
+          set -euxo pipefail
+          ref='${{ github.event.inputs.lo_ref }}'
+          ref="${ref:-master}"
+          git clone --depth 1 --branch "$ref" https://github.com/LibreOffice/core.git ~/lo-core \
+            || git clone https://github.com/LibreOffice/core.git ~/lo-core
+          cd ~/lo-core
+          if [ "$ref" != master ]; then git checkout -q "$ref"; fi
+          sha=$(git rev-parse HEAD)
+          echo "LO_SHA=$sha" >> "$GITHUB_ENV"
+          echo "建てる LibreOffice: $ref ($sha)"
 
       # ⚠ 復元は **clone のあと** ── `git clone` は空でないディレクトリを嫌う
       - name: 外部 tarball を復元
@@ -266,7 +286,9 @@ jobs:
             n=$((n + 1))
           done
           echo "applied $n patches"
-          test "$n" -ge 2
+          # ⚠ **下限は実数で置く**(「2 本以上」だと 1 本落としても気づけない)。
+          #    パッチを足したらここも直す ── 直さないと落ちるので忘れない
+          test "$n" -eq 3
 
       # 🔴 **Qt と LO の「握手」を、リンクの 16 分前に確かめる**(2026-08-10)。
       #    LO は Qt の embind シンボルを名指しで export する。無いと
