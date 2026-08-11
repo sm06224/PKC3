@@ -17,6 +17,16 @@ import { bodyCssPlugin } from './build/body-css-plugin.ts';
 export const buildIdFor = (precache: readonly string[]): string =>
   createHash('sha256').update(JSON.stringify([...precache].sort())).digest('hex').slice(0, 12);
 
+/**
+ * cross-origin isolation のヘッダ。dev / preview の両方に同じものを配る。
+ * ⚠ 本番(静的ホスティング)は**サーバ側で同じ 2 つを返す**か、
+ *   返せないホスト(GitHub Pages 等)では service worker で被せる必要がある。
+ */
+const COI_HEADERS = {
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Embedder-Policy': 'credentialless',
+} as const;
+
 // base './' — Pages の / と /dev/ の両方で同一ビルドが動く相対パス配信
 export default defineConfig({
   base: './',
@@ -24,6 +34,30 @@ export default defineConfig({
   //    同じものを配る必要がある(test だけ virtual module が解決できないと、
   //    書き出し HTML の検査が丸ごと動かない)
   plugins: [swPlugin(buildIdFor), bodyCssPlugin()],
+  // 🔴 **crossOriginIsolated を成立させる**(#88 O2 の前提)。
+  //
+  // Office(LibreOffice wasm)は `-pthread` = SharedArrayBuffer を要求し、
+  // それには COOP/COEP が要る。⚠ **`crossOriginIsolated` は最上位文書の性質**なので、
+  // 「iframe だけ分離する」ことはできない ── 本体に付けるしかない。
+  //
+  // 🔑 **`credentialless` を選ぶ**(2026-08-10 実測):
+  //
+  //   | COEP            | isolated | SharedArrayBuffer | 外部画像(CORP 無し) |
+  //   |-----------------|----------|-------------------|----------------------|
+  //   | (なし)          | false    | ✕                 | OK                   |
+  //   | require-corp    | true     | ✓                 | **BLOCKED**          |
+  //   | credentialless  | **true** | **✓**             | **OK**               |
+  //
+  // ⚠ `require-corp` にすると **CORP を返さない外部画像が全部消える** ──
+  // 「外部画像の同意」機能がそのまま死ぬ。`credentialless` は資格情報を落として
+  // no-cors 取得を許すので、両立する。
+  // ⚠ ただし `credentialless` に対応しないブラウザでは分離が成立しない
+  //   ── その環境は **Office 以外は全部動く**(README の対応表)。
+  //
+  // ⚠ **dev / preview の両方に要る**。preview は smoke(`tests/smoke`)が使うので、
+  //   片方だけだと「手元で通って CI で落ちる」型の食い違いを自分で作ることになる。
+  server: { headers: COI_HEADERS },
+  preview: { headers: COI_HEADERS },
   // @sqlite.org/sqlite-wasm は pre-bundle すると worker/wasm 解決が壊れる(公式指示)
   optimizeDeps: { exclude: ['@sqlite.org/sqlite-wasm'] },
   resolve: {
