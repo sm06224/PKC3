@@ -27,8 +27,29 @@ function plainBase(testInfo: { config: { metadata?: Record<string, unknown> } })
   return url;
 }
 
-const booted = (page: Page): Promise<unknown> =>
-  page.waitForSelector('[data-pkc-boot="ready"], [data-pkc-boot="error"]');
+/**
+ * 🔴 **`ready` だけを待つ。`error` を「起動した」と読まない**(2026-08-11 に踏んだ)。
+ *
+ * 初稿は `[data-pkc-boot="ready"], [data-pkc-boot="error"]` を待っていた。おかげで
+ * **分離した途端に storage worker が読めなくなり、起動が全部失敗していた**のに、
+ * この spec は 3 件とも緑だった ── 待っていたのは「起動が終わったこと」であって
+ * 「起動したこと」ではなかった。⚠ user には「起動に失敗しました」しか見えない
+ * 状態を、**分離の検査が合格印を押して**送り出したことになる。
+ *
+ * 🔑 `error` は**待たずに落とす** ── 出たらその場で理由ごと落ちるほうが速い。
+ */
+async function booted(page: Page): Promise<void> {
+  await page.waitForSelector('[data-pkc-boot="ready"], [data-pkc-boot="error"]', {
+    timeout: 40_000,
+  });
+  const state = await page.evaluate(
+    () => document.querySelector('[data-pkc-boot]')?.getAttribute('data-pkc-boot') ?? null,
+  );
+  if (state !== 'ready') {
+    const why = await page.evaluate(() => document.body.innerText.slice(0, 200));
+    throw new Error(`起動に失敗した(data-pkc-boot=${String(state)}): ${why}`);
+  }
+}
 
 /**
  * 分離した状態まで持っていく。
@@ -79,6 +100,38 @@ test('🔴 ヘッダを返さない配信でも、SW が分離を成立させる
   // ④ 🔑 分離の**実利**まで見る。ヘッダが付いただけで SharedArrayBuffer が
   //    使えないなら、Office にとっては何も変わっていない
   expect(await page.evaluate(() => typeof SharedArrayBuffer === 'function')).toBe(true);
+
+  /**
+   * ⑤ 🔴 **分離した状態で、アプリが本当に起動しているか。**
+   *
+   * ここが今回いちばん重い教訓である。COEP は **worker script 自身の応答にも
+   * COEP を要求する**ので、navigation にだけ被せた初稿では storage worker が
+   * `net::ERR_BLOCKED_BY_RESPONSE` で読めず、**分離した瞬間にアプリが起動
+   * しなくなっていた**(user 報告「起動に失敗しました: storage worker error」)。
+   * ⚠ 分離の成立だけを見ていると、この形は素通りする ── **動くこと**まで見る。
+   */
+  await booted(page);
+  expect(await page.locator('[data-pkc-boot="ready"]').count()).toBe(1);
+});
+
+test('🔴 分離した状態で worker が読める(COEP は worker script にも要る)', async ({
+  page,
+}, testInfo) => {
+  // ⚠ 「起動できた」だけだと、worker を使わない経路で救われうる。
+  //    **worker が実際に返事をした**ことまで見る
+  const blocked: string[] = [];
+  page.on('requestfailed', (r) => {
+    if (r.failure()?.errorText.includes('BLOCKED_BY_RESPONSE')) blocked.push(r.url());
+  });
+  await page.goto(`${plainBase(testInfo)}/index.html`);
+  await booted(page);
+  await reachIsolation(page);
+  await booted(page);
+
+  expect(blocked, 'COEP が何かを弾いている').toEqual([]);
+  // storage worker が生きている = ノートを 1 件作って一覧に出る
+  await page.locator('[data-pkc-action="create-entry"]').first().click();
+  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(1);
 });
 
 test('🔴 オフラインで cache から出した文書でも分離が外れない', async ({ page, context }, testInfo) => {
