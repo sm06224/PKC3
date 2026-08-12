@@ -302,7 +302,25 @@ async function seedFakePack(
         t.onerror = (): void => rej(t.error);
       });
 
-    await put('files', 'soffice.js', new Blob(['window.soffice_entry = function () {};']));
+    // ⚠ **worker としても走れる形**にする ── 下の test が、host が emscripten へ
+    //    渡したのと**同じ script**から実 Worker を起こして中を見る
+    const sofficeJs = [
+      "self.__selfUrl = (typeof document !== 'undefined' && document.currentScript)",
+      "  ? document.currentScript.src : self.location.href;",
+      'self.soffice_entry = function () {};',
+      "if (typeof window === 'undefined') {",
+      '  self.onmessage = function () {',
+      '    var made;',
+      '    try { made = !!new ClipboardItem({}); } catch (e) { made = String(e && e.message).slice(0, 60); }',
+      '    self.postMessage({',
+      "      clipboardItem: typeof ClipboardItem,",
+      "      clipboard: typeof (self.navigator && self.navigator.clipboard),",
+      '      made: made,',
+      '    });',
+      '  };',
+      '}',
+    ].join('\n');
+    await put('files', 'soffice.js', new Blob([sofficeJs]));
     await put('files', 'qtloader.js', new Blob([qtLoaderJs]));
     await put('files', 'soffice.data.js.metadata', new Blob(['{}']));
     await put('files', 'soffice.wasm.gz', await gz('not a wasm module'));
@@ -395,7 +413,7 @@ test('🔴 窓の大きさを、器の device px で仕込んでから起動す�
     return {
       xcu: w.__xcu ?? '',
       order: w.__order,
-      want: `0,0,${Math.round((Math.round(r.width) - 8) * k)},${Math.round((Math.round(r.height) - 30) * k)};`,
+      want: `${Math.round(4 * k)},0,${Math.round((Math.round(r.width) - 8) * k)},${Math.round((Math.round(r.height) - 30) * k)};`,
       naive: `0,0,${Math.round(r.width * k)},${Math.round(r.height * k)};`,
     };
   });
@@ -450,6 +468,61 @@ test('🔴 器が測れないときは、窓の大きさを頼まない(潰れ�
   } finally {
     await ctx.close();
   }
+});
+
+/**
+ * 🔴 **worker に `ClipboardItem` を生やしてから emscripten に渡す**(#124)。
+ *
+ * LO のコピーは pthread(Worker)の中で `val::global("ClipboardItem")` を掴んで
+ * `val::new_()` する。⚠ worker にそれは無く、`val::global` は例外ではなく
+ * `undefined` を返すので、生成コードの `new func(...)` が
+ * `TypeError: func is not a constructor` になり **その pthread が死ぬ** ──
+ * 版面は生きたまま保存とメニューだけが無反応になる。
+ *
+ * 🔑 **観測点は「worker の中」でなければ意味がない。** メインスレッドには
+ * `ClipboardItem` が在るので、こちらで `typeof` を見ても**必ず通ってしまう**。
+ * だから host が emscripten へ渡したのと**同じ script から実 Worker を起こす**。
+ */
+test('🔴 emscripten へ渡す script は、worker で ClipboardItem を持っている', async ({ page }) => {
+  await page.goto('/office/host.html');
+  await seedFakePack(page);
+  await page.reload();
+  await expect(page.locator('#status')).toContainText('表示中', { timeout: 15_000 });
+
+  const seen = await page.evaluate(async () => {
+    const url = (window as unknown as { __selfUrl?: string }).__selfUrl;
+    if (!url) throw new Error('__selfUrl が無い(fake の soffice.js が動いていない)');
+    // 空振り防止 ── **blob から読ませている**こと(素の path なら shim を通らない)
+    const isBlob = url.startsWith('blob:');
+    const w = new Worker(url);
+    const got = await new Promise<Record<string, unknown>>((res, rej) => {
+      const t = setTimeout(() => rej(new Error('worker が返事をしない')), 10_000);
+      w.onmessage = (e): void => {
+        clearTimeout(t);
+        res(e.data as Record<string, unknown>);
+      };
+      w.onerror = (e): void => {
+        clearTimeout(t);
+        rej(new Error(`worker error: ${e.message}`));
+      };
+      w.postMessage('ask');
+    });
+    w.terminate();
+    return {
+      isBlob,
+      clipboardItem: String(got.clipboardItem),
+      clipboard: String(got.clipboard),
+      made: got.made,
+    };
+  });
+
+  expect(seen.isBlob, 'blob から読ませていない(shim を通す経路になっていない)').toBe(true);
+  expect(seen.clipboardItem, 'worker に ClipboardItem が無い(コピーで pthread が死ぬ)').toBe(
+    'function',
+  );
+  // 🔑 **`new` できること**まで見る ── 名前が在るだけでは `val::new_()` は通らない
+  expect(seen.made, 'ClipboardItem を new できない').toBe(true);
+  expect(seen.clipboard, 'worker に navigator.clipboard が無い').toBe('object');
 });
 
 test('🔴 LO 側の異常終了(onExit crashed)が画面に出る', async ({ page }) => {
