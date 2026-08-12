@@ -45,13 +45,22 @@
   body { user-select:none; -webkit-user-select:none }
   #msg { user-select:text; -webkit-user-select:text }
   #msg .why { opacity:.7; font-size:12px; max-width:60ch; word-break:break-word }
-  #msg button { font:inherit; padding:6px 14px; border-radius:6px; border:1px solid #8886;
-    background:transparent; color:inherit; cursor:pointer }
+  #msg button, #warn button { font:inherit; padding:6px 14px; border-radius:6px;
+    border:1px solid #8886; background:transparent; color:inherit; cursor:pointer }
+  /* 「止まってはいないが、命令が通らない」ことを知らせる帯(#124)。
+     ⚠ 版面は触れるままにする ── 本文を読んで写せる状態は残す。
+     地は無彩色、注意の色は**この帯だけ**に使う(業務画面の方針)。 */
+  #warn { position:fixed; inset:34px 0 auto 0; z-index:15; display:flex; gap:12px;
+    align-items:center; justify-content:center; padding:6px 12px; font-size:13px;
+    background:#7a4b00; color:#fff }
+  #warn[hidden] { display:none }
+  #warn button { border-color:#fff8; color:#fff; padding:2px 10px }
 </style>
 </head>
 <body>
 <div id="bar"><b>Office</b><span id="name"></span><span class="sp"></span><span id="status">準備中…</span></div>
 <div id="msg">読み込んでいます…</div>
+<div id="warn" hidden></div>
 <div id="screen" hidden></div>
 <script>
 (function () {
@@ -136,17 +145,68 @@
     msgEl.hidden = false;
     say('crashed', { reason: String(reason).slice(0, 300) });
   }
+  /**
+   * 🔴 **「死んだ」より先に「効かなくなった」が来る**(検証レポート #3、2026-08-12)。
+   *
+   * LO のスレッドが 1 本落ちると、**版面は生きたまま命令だけが通らなくなる**:
+   *
+   * | 効かなくなる | 動き続ける |
+   * |---|---|
+   * | 保存 / 文字数 / 書式ダイアログ / 全選択 / 太字 | 文字入力 / キャレット / 選択 |
+   * | ── つまり **保存が黙って失敗する** | **メニューの展開**(項目のハイライトも正常) |
+   *
+   * ⚠ **メニューが開くので、user は壊れたことに気づけない。** 実測で 8 分待っても
+   * 回復しなかった。abort ではないので `died()` は出ない ── **別の状態**が要る。
+   *
+   * ## ⚠ 本文は `e.message` に**入っていない**
+   *
+   * emscripten の `worker.onerror` は `err(...)` で印字したあと **`throw e`** で
+   * ErrorEvent をそのまま投げ直す。すると window の error event は
+   * `message = "Uncaught #<ErrorEvent>"` になり、**中身は `e.error.message` 側**に入る。
+   * 片方だけ見ると 1 件も拾えない。
+   */
+  var degraded = false;
+  var warnEl = document.getElementById('warn');
+  function degrade(reason) {
+    if (dead || degraded) return;
+    degraded = true;
+    setStatus('不安定');
+    warnEl.textContent = '';
+    var what = document.createElement('span');
+    // ⚠ **保存できないことを先に言う。** user がいちばん失うのはそれである
+    what.textContent = 'Office が不安定になりました。保存やメニューの操作が効きません。';
+    var again = document.createElement('button');
+    again.textContent = '読み込み直す';
+    again.addEventListener('click', function () { location.reload(); });
+    warnEl.appendChild(what);
+    warnEl.appendChild(again);
+    warnEl.hidden = false;
+    say('degraded', { reason: String(reason).slice(0, 300) });
+  }
+
   // ⚠ **何でも停止扱いにしない。** 拡張機能や無関係な例外まで拾うと、
   //    動いている版面に「停止しました」を被せることになる。
   //    wasm 由来だけを見る(`Aborted(...)` / `RuntimeError` / `memory access out of bounds`)。
   var FATAL = /Aborted\(|RuntimeError|memory access out of bounds|unreachable|table index is out of bounds/;
+  // 🔴 スレッドが 1 本落ちた印。⚠ `func is not a constructor` は embind の
+  //    `val::new_()` が worker に無い global を掴んだ形(#124)
+  var DEGRADED = /func is not a constructor|sent an error!/;
+  /** ⚠ window の error は**外側と中身の 2 つ**を見る(上の注記)。 */
+  function errorText(e) {
+    var inner = e && e.error;
+    return String((e && e.message) || '') + ' | ' + String((inner && inner.message) || '');
+  }
   window.addEventListener('error', function (e) {
-    if (FATAL.test(String(e && e.message))) died(e.message);
+    var text = errorText(e);
+    // ⚠ 順番を守る ── abort のほうが重い。両方当たったら停止として扱う
+    if (FATAL.test(text)) { died(text); return; }
+    if (DEGRADED.test(text)) degrade(text);
   });
   window.addEventListener('unhandledrejection', function (e) {
     var r = e && e.reason;
     var text = String((r && r.message) || r);
-    if (FATAL.test(text)) died(text);
+    if (FATAL.test(text)) { died(text); return; }
+    if (DEGRADED.test(text)) degrade(text);
   });
 
   // ── Ctrl + 英字が本文に混入するのを止める(#117)────────────────────
@@ -165,14 +225,35 @@
   //
   // ⚠ **`altKey` は必ず除外する。** Windows の AltGr は `ctrl+alt` として届くので、
   //    ドイツ語配列の `@` などを潰してしまう。
-  // ⚠ **`c` / `x` / `v` に `preventDefault` しない。** keydown を止めると
-  //    `copy` / `paste` event が発火せず、クリップボードが死ぬ。
   // 🔑 逃げ道は残す ── `F5` は 1 文字キーではないので、ここを通らない(必ず再読込できる)。
+  //
+  // 🔴 **止めるキーは「除外リスト」ではなく「名指しの一覧」で持つ**(検証レポート #3)。
+  //
+  // 初稿は「クリップボード(`c`/`x`/`v`)以外は全部 `preventDefault`」と書いた。
+  // ⚠ それで **`Cmd+A`(全選択)を壊した** ── 直す前は動いていた機能である。
+  // 「余計なものまで止めていた」のが原因なので、**ブラウザが実際に横取りするキーだけ**に絞る。
+  // 🔑 `a` / `z` / `y` / `b` / `i` はブラウザが盗らないので、こちらが触る理由が無い。
+  var STOLEN = {
+    s: 1, // ページを保存
+    p: 1, // 印刷
+    o: 1, // ファイルを開く
+    f: 1, // ページ内検索
+    g: 1, // 次を検索
+    d: 1, // ブックマーク
+    h: 1, // 履歴
+    j: 1, // ダウンロード
+    u: 1, // ソースを表示
+    e: 1, // 検索
+    k: 1, // 検索
+    l: 1, // アドレスバー
+  };
+  // ⚠ `r`(再読込)は**入れない** ── LO が固まったときの逃げ道である。
+  // ⚠ `c` / `x` / `v` も**入れない** ── keydown を止めると `copy` / `paste` event が
+  //    発火せず、クリップボードが死ぬ。
   var MAC = (navigator.userAgentData && navigator.userAgentData.platform === 'macOS')
     || /Mac|iPhone|iPad/.test(navigator.platform || '');
   window.addEventListener('keydown', function (e) {
     if (e.altKey || !e.key || e.key.length !== 1) return;
-    var isClip = 'cxv'.indexOf(e.key.toLowerCase()) !== -1;
     if (MAC && e.ctrlKey && !e.metaKey) {
       // mac の Ctrl は LO に届いても何もしない。文字だけが残るので Qt にも渡さない
       e.preventDefault();
@@ -180,7 +261,7 @@
       return;
     }
     var cmd = MAC ? e.metaKey : (e.ctrlKey && !e.metaKey);
-    if (cmd && !isClip) e.preventDefault();
+    if (cmd && STOLEN[e.key.toLowerCase()] === 1) e.preventDefault();
   }, true);
 
   function openDb() {
@@ -294,6 +375,40 @@
    *
    * VCL は物理ピクセルで考えるので、**必ず `devicePixelRatio` を掛ける**。
    *
+   * ## 🔴 ここに書くのは **客域**であって、窓の外寸ではない
+   *
+   * ⚠ 初稿は器の寸法をそのまま渡した。客域は確かに器と同じになったが、Qt は
+   * その**外側に**枠と疑似タイトルバーを描くので、**窓全体が器からはみ出した**:
+   *
+   * ```
+   * 器            [0, 34, 1200, 765]
+   * 窓(装飾込み) [-5, 34, 1208, 795]   ← 幅 +8 / 高さ +30
+   * → 客域の下端 y=825、ビューポート下端 y=799
+   * → LibreOffice のステータスバーが 26px ぶん画面外に落ちる
+   * ```
+   *
+   * 🔑 **測ったものと、user が見るものが違っていた。** 客域だけ測って「ぴったり」と
+   * 報告し、はみ出しを見落とした ── 検証レポート #3 が実測で拾ってくれた。
+   *
+   * だから渡すのは **器 − 装飾**。最大化ボタンを押した窓の実測
+   * (客域 `[4, 60, 1192, 735]`)と一致する。
+   *
+   * ⚠ 装飾の寸法は Qt の CSS 由来なので、上流が変えればずれる。⚠ ずれても
+   * **小さくなる方向**(はみ出さない)なので、実害は「わずかな余白」で止まる。
+   *
+   * ### 実物で測った結果(器 1200x765 CSS)
+   *
+   * | | 窓の外寸 | 器と一致 |
+   * |---|---|---|
+   * | 仕込まない | `[324, 79, 551, 654]` ── 真ん中に小さく浮く | ✗ |
+   * | 器をそのまま渡す(初稿) | 高さ +30 / 幅 +8 はみ出す | ✗ |
+   * | **器 − 装飾(これ)** | `[-4, 34, 1200, 765]` | **✓** |
+   *
+   * ⚠ **例外が 1 つある。** LO には**客域の最小の高さ(約 744 device px)**が在り、
+   * それを下回る要求は切り上げられる。DPR 1 で器が 774 CSS px より低いときだけ
+   * 数 px はみ出す(実測: 器 765 → 窓 774 = 9px 超過。器 865 / 965 では**ぴったり**)。
+   * こちらでは詰められないので、そういう窓だとだけ知っておく。
+   *
    * ## 🔴 これで直らないもの(先に知っておく)
    *
    * **起動後にブラウザを縮めても窓は追従しない**(状態ビットを変えても同じ、実測)。
@@ -301,14 +416,19 @@
    * そうはならない ── **そこは LO / Qt 側の仕事**である。ここで直すのは
    * **開いた瞬間の大きさ**だけ。
    */
+  // Qt の窓装飾(CSS px)。⚠ 実測: `.title-bar` 22 + 枠 8 = 高さ 30 / 幅 8
+  var FRAME_W = 8;
+  var FRAME_H = 30;
   function seedWindowSize(FS) {
     try {
       var r = screenEl.getBoundingClientRect();
       // ⚠ 器が測れていないなら書かない(0x0 の窓を頼むほうが悪い)
       if (r.width < 1 || r.height < 1) return;
       var k = window.devicePixelRatio || 1;
-      var geom = '0,0,' + Math.round(r.width * k) + ',' + Math.round(r.height * k)
-        + ';4;0,0,0,0;';
+      // ⚠ 装飾を引く。⚠ 引きすぎて 0 以下にしない(極端に小さい窓で潰れる)
+      var w = Math.max(320, Math.round(r.width) - FRAME_W);
+      var h = Math.max(240, Math.round(r.height) - FRAME_H);
+      var geom = '0,0,' + Math.round(w * k) + ',' + Math.round(h * k) + ';4;0,0,0,0;';
       var mods = [
         'com.sun.star.frame.StartModule',
         'com.sun.star.text.TextDocument',

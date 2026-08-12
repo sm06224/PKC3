@@ -169,6 +169,39 @@ test('🔴 ブラウザに盗られるキーだけ止める(クリップボー�
  * どの割り当てにも当たらず**ただの文字**として入る。ところが LO のメニューは
  * `Ctrl+C` と表示するので user は Ctrl を押す ── だから **Qt にも渡さない**。
  */
+/**
+ * 🔴 **止めすぎない。** 初稿は「クリップボード以外は全部 preventDefault」と書いて
+ * **`Cmd+A`(全選択)を壊した** ── 直す前は動いていた機能である(実機で確認された)。
+ *
+ * 🔑 押さえるのは**ブラウザが実際に横取りするキーだけ**。`a` / `z` / `b` は
+ * ブラウザが盗らないので、こちらが触る理由が無い。
+ */
+test('🔴 ブラウザが盗らないキーには触らない(Cmd+A / Ctrl+A を殺さない)', async ({
+  browser,
+}) => {
+  for (const mac of [false, true]) {
+    const ctx = await browser.newContext();
+    if (mac) {
+      await ctx.addInitScript(() => {
+        Object.defineProperty(navigator, 'platform', { get: () => 'MacIntel' });
+      });
+    }
+    const page = await ctx.newPage();
+    try {
+      await ready(page);
+      const r = await probeKeys(page);
+      // ⚠ mac の修飾キーは Cmd、それ以外は Ctrl ── **その platform の「全選択」**を見る
+      const selectAll = mac ? r.metaA : r.ctrlA;
+      expect(selectAll.prevented, `全選択を握り潰している(mac=${String(mac)})`).toBe(false);
+      expect(selectAll.reached, `全選択が Qt に届いていない(mac=${String(mac)})`).toBe(true);
+      // 対照 ── 盗られるキーは今も止めている(緩めすぎていない)
+      expect(r.ctrlS.prevented || r.metaS.prevented, '盗られるキーまで通している').toBe(true);
+    } finally {
+      await ctx.close();
+    }
+  }
+});
+
 test('🔴 mac では Ctrl+英字 を Qt にも渡さない(文字だけが残るため)', async ({ browser }) => {
   const ctx = await browser.newContext();
   // ⚠ ページの script より**先に**効かせる(判定は読み込み時に 1 回だけ走る)
@@ -357,14 +390,19 @@ test('🔴 窓の大きさを、器の device px で仕込んでから起動す�
     const w = window as unknown as { __xcu?: string; __order: string[] };
     const r = (document.getElementById('screen') as HTMLElement).getBoundingClientRect();
     const k = window.devicePixelRatio || 1;
+    // ⚠ **客域 = 器 − 装飾**(Qt が枠 8px と疑似タイトルバー 22px を外側に描く)。
+    //    器をそのまま渡すと窓が下へ 30px はみ出し、LO のステータスバーが画面外へ落ちる
     return {
       xcu: w.__xcu ?? '',
       order: w.__order,
-      want: `0,0,${Math.round(r.width * k)},${Math.round(r.height * k)};`,
+      want: `0,0,${Math.round((Math.round(r.width) - 8) * k)},${Math.round((Math.round(r.height) - 30) * k)};`,
+      naive: `0,0,${Math.round(r.width * k)},${Math.round(r.height * k)};`,
     };
   });
   // ⚠ **書かれた値そのもの**を見る(「書いた」だけでは、CSS px のままでも通る)
-  expect(seen.xcu, `器の device px が入っていない(want ${seen.want})`).toContain(seen.want);
+  expect(seen.xcu, `器 − 装飾 の device px が入っていない(want ${seen.want})`).toContain(seen.want);
+  // 🔑 **器をそのまま渡していないこと**まで見る(装飾ぶんを引き忘れた形を殺す)
+  expect(seen.xcu, '器の寸法をそのまま渡している(窓が装飾ぶんはみ出す)').not.toContain(seen.naive);
   expect(seen.xcu).toContain('ooSetupFactoryWindowAttributes');
   // 起動を待つ Start Center も対象(文書を開かない道が抜けやすい)
   expect(seen.xcu).toContain('com.sun.star.frame.StartModule');
@@ -449,6 +487,96 @@ test('🔴 LO 側の異常終了(onExit crashed)が画面に出る', async ({ pa
     .toContain('crashed');
 });
 
+/**
+ * 🔴 **「死んだ」より先に「効かなくなった」が来る**(検証レポート #3)。
+ *
+ * LO のスレッドが 1 本落ちると、**版面は生きたまま保存とメニューだけが通らなくなる**。
+ * ⚠ メニューは開いて項目もハイライトされるので、**user は壊れたことに気づけない** ──
+ * そして保存が黙って失敗する。abort ではないので停止の面は出ない。
+ *
+ * ## ⚠ 本文は `e.message` に入っていない
+ *
+ * emscripten の `worker.onerror` は ErrorEvent を **`throw e` で投げ直す**ので、
+ * window の error は `message = "Uncaught #<ErrorEvent>"` になり、
+ * **中身は `e.error.message` 側**に入る。だからこの test の外側の message には
+ * 手がかりを 1 文字も入れていない ── 片方しか見ない実装は必ず落ちる。
+ */
+test('🔴 スレッドが落ちて命令が通らなくなったら、そう出す(停止とは別に)', async ({ page }) => {
+  await page.goto('/office/host.html');
+  await seedFakePack(page);
+  await page.reload();
+  await expect(page.locator('#status')).toContainText('表示中', { timeout: 15_000 });
+
+  const heard = await page.evaluate(() => {
+    const got: unknown[] = [];
+    (window as unknown as { __heard: unknown[] }).__heard = got;
+    new BroadcastChannel('pkc3-office').onmessage = (e): void => {
+      got.push(e.data);
+    };
+    // ⚠ 実機と同じ形 ── 外側は素の "Uncaught #<ErrorEvent>"、中身に本文
+    window.dispatchEvent(
+      new ErrorEvent('error', {
+        message: 'Uncaught #<ErrorEvent>',
+        error: new ErrorEvent('error', {
+          message: 'Uncaught TypeError: func is not a constructor',
+        }),
+      }),
+    );
+    return got;
+  });
+  void heard;
+
+  await expect(page.locator('#status')).toHaveText('不安定');
+  await expect(page.locator('#warn')).toBeVisible();
+  // 🔑 **失うものを先に言う。** 「不安定」だけでは user は保存を試み続ける
+  await expect(page.locator('#warn')).toContainText('保存');
+  await expect(page.locator('#warn button')).toHaveCount(1);
+
+  // 🔴 **停止とは別物**。版面は触れるまま(本文を読んで写せる状態を残す)
+  expect(
+    await page.evaluate(
+      () => getComputedStyle(document.getElementById('screen') as HTMLElement).pointerEvents,
+    ),
+    '版面を触れなくしている(停止と取り違えている)',
+  ).not.toBe('none');
+  await expect(page.locator('#msg')).toBeHidden();
+
+  await expect
+    .poll(async () =>
+      page.evaluate(() =>
+        (window as unknown as { __heard: { pkc3Office?: string }[] }).__heard.map(
+          (m) => m.pkc3Office,
+        ),
+      ),
+    )
+    .toContain('degraded');
+});
+
+/**
+ * ⚠ **abort のほうが重い。** 両方に当たる文言が来たら停止として扱う ──
+ * 逆にすると、死んでいる版面を「不安定」と言って触らせ続けることになる。
+ */
+test('🔴 停止と不安定を取り違えない', async ({ page }) => {
+  await page.goto('/office/host.html');
+  await seedFakePack(page);
+  await page.reload();
+  await expect(page.locator('#status')).toContainText('表示中', { timeout: 15_000 });
+
+  await page.evaluate(() =>
+    window.dispatchEvent(
+      new ErrorEvent('error', {
+        message: 'Uncaught #<ErrorEvent>',
+        error: new ErrorEvent('error', {
+          // ⚠ 両方の signature を含む
+          message: "Aborted('PThread' was not exported) — worker sent an error!",
+        }),
+      }),
+    ),
+  );
+  await expect(page.locator('#status')).toHaveText('停止');
+  await expect(page.locator('#warn')).toBeHidden();
+});
+
 test('🔴 本体を読み込めないときも、宙吊りにならず画面に出る', async ({ page }) => {
   await page.goto('/office/host.html');
   await seedFakePack(page, { breakWasm: true });
@@ -483,8 +611,11 @@ interface KeyProbe {
 
 async function probeKeys(page: import('@playwright/test').Page): Promise<{
   ctrlS: KeyProbe;
+  metaS: KeyProbe;
   ctrlC: KeyProbe;
   metaC: KeyProbe;
+  ctrlA: KeyProbe;
+  metaA: KeyProbe;
   altGr: KeyProbe;
   plain: KeyProbe;
 }> {
@@ -505,8 +636,11 @@ async function probeKeys(page: import('@playwright/test').Page): Promise<{
     };
     return {
       ctrlS: hit({ key: 's', ctrlKey: true }),
+      metaS: hit({ key: 's', metaKey: true }),
       ctrlC: hit({ key: 'c', ctrlKey: true }),
       metaC: hit({ key: 'c', metaKey: true }),
+      ctrlA: hit({ key: 'a', ctrlKey: true }),
+      metaA: hit({ key: 'a', metaKey: true }),
       altGr: hit({ key: '@', ctrlKey: true, altKey: true }),
       plain: hit({ key: 'a' }),
     };
