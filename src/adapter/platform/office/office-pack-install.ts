@@ -45,6 +45,35 @@ export interface PackInstallDeps {
   readonly base?: string;
   /** 進捗の 1 行。⚠ **必ず呼ぶ** ── 93MB の間、無反応にしない。 */
   readonly onProgress?: (text: string) => void;
+  /** 保存の永続化を頼む。⚠ test から差し替える(既定は下の `requestPersist`)。 */
+  readonly persist?: () => Promise<boolean>;
+}
+
+/**
+ * 🔴 **入れた 196MB が、容量逼迫で黙って消えるのを防ぐ**(#117、実測 2026-08-12)。
+ *
+ * ```json
+ * {"usageMB": 196, "quotaMB": 10436, "persisted": false}
+ * ```
+ *
+ * `navigator.storage.persist()` を一度も呼んでいなかったので、この一式は
+ * **evictable** のまま置かれていた。user から見ると「昨日まで動いてたのに
+ * 今日は動かない」になる ── しかも**原因を名指しできない**壊れ方である。
+ *
+ * ⚠ **頼む場所はここ**(設置の直前)。窓の側で呼んでも、既に入っている物にしか
+ * 効かない ── **書く前に**永続化しておけば、書いた分が最初から対象になる。
+ * ⚠ 拒否されることがある(engagement が足りない環境)。**拒否は失敗ではない** ──
+ * 入れるのは続け、その旨だけ伝える。
+ */
+async function requestPersist(): Promise<boolean> {
+  const store = typeof navigator === 'undefined' ? undefined : navigator.storage;
+  if (!store || typeof store.persist !== 'function') return false;
+  try {
+    if (typeof store.persisted === 'function' && (await store.persisted())) return true;
+    return await store.persist();
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -146,6 +175,8 @@ export class OfficePackInstaller {
     try {
       const { files, version, source } = await acquire(progress);
       progress('配備しています');
+      // ⚠ **書く前に**永続化を頼む(拒否されても入れるのは続ける)
+      const persisted = await (this.deps.persist ?? requestPersist)();
       const meta = await this.deps.store.install(files, {
         version,
         source,
@@ -155,7 +186,12 @@ export class OfficePackInstaller {
       return {
         ok: true,
         meta,
-        message: `Office 一式を配備しました(${sizeText(meta.totalBytes)})`,
+        // ⚠ **黙って消えうることを黙っていない。** 拒否されたことを伝えないと、
+        //    後日消えたときに user は原因を名指しできない
+        message: `Office 一式を配備しました(${sizeText(meta.totalBytes)})`
+          + (persisted
+            ? ''
+            : '。この端末では保存の永続化が許可されなかったため、容量が足りなくなると消えることがあります'),
       };
     } catch (e) {
       return { ok: false, message: toMessage(e, what) };

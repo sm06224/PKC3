@@ -41,12 +41,20 @@ function make(over: {
   fetchManifest?: (base: string) => Promise<PackManifest>;
   fetchFiles?: (base: string, fonts: readonly string[]) => Promise<Map<string, Blob>>;
   readZip?: (zip: Blob) => Promise<Map<string, Blob>>;
+  persist?: () => Promise<boolean>;
 } = {}) {
   const progress: string[] = [];
+  /** ⚠ **順番まで見る** ── 永続化は「書く前」でないと、書いた分が対象にならない。 */
+  const order: string[] = [];
   let stored: OfficePackMeta | null = null;
   const installer = new OfficePackInstaller({
+    persist: async () => {
+      order.push('persist');
+      return (await over.persist?.()) ?? true;
+    },
     store: {
       install: over.install ?? (async (_f: unknown, o: { version: string; source: 'url' | 'file' }) => {
+        order.push('install');
         stored = { ...META, version: o.version, source: o.source };
         return stored;
       }),
@@ -60,7 +68,7 @@ function make(over: {
       ?? (async () => new Map([['soffice.js', new Blob(['x'])]]))) as never,
     onProgress: (t) => progress.push(t),
   });
-  return { installer, progress, setStored: (m: OfficePackMeta | null) => { stored = m; } };
+  return { installer, progress, order, setStored: (m: OfficePackMeta | null) => { stored = m; } };
 }
 
 describe('OfficePackInstaller', () => {
@@ -71,6 +79,26 @@ describe('OfficePackInstaller', () => {
     expect(r.ok && r.meta?.version).toBe('lo-wasm-dev');
     expect(r.ok && r.meta?.source).toBe('url');
     expect(r.ok && r.message).toContain('配備しました');
+  });
+
+  /**
+   * 🔴 実測(2026-08-12): `{"usageMB":196,"quotaMB":10436,"persisted":false}` ──
+   * 一式 196MB が **evictable** のまま置かれていた。容量逼迫時に Chrome が
+   * 丸ごと捨てるので、user からは「昨日まで動いてたのに今日は動かない」に見える。
+   */
+  it('🔴 書く前に保存の永続化を頼む(順番が逆だと書いた分が対象にならない)', async () => {
+    const { installer, order } = make();
+    const r = await installer.installFromUrl();
+    expect(order, '永続化を頼む前に書いている').toEqual(['persist', 'install']);
+    // 許可されたときは、余計なことを言わない
+    expect(r.ok && r.message).not.toContain('消えることがあります');
+  });
+
+  it('🔴 永続化を断られたら、そのことを言う(黙って消えうる状態にしない)', async () => {
+    const { installer } = make({ persist: async () => false });
+    const r = await installer.installFromUrl();
+    expect(r.ok, '断られただけで設置ごと失敗にしない').toBe(true);
+    expect(r.ok && r.message).toContain('消えることがあります');
   });
 
   it('🔴 目録に従ってフォントを取る(PKC3 側に名前を書き写さない)', async () => {
