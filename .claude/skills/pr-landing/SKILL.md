@@ -85,23 +85,33 @@ git push --force-with-lease origin <branch>
 git stash pop
 ```
 
-### ⚠ **remote 側も同時に揃える**(作り直しは半分では終わらない)
+### ⚠ **remote 追跡 ref も掃除する** ── `--force-with-lease` は**効かない**
 
-`checkout -B` は**手元しか動かさない**。remote の branch は squash 前の commit を
-指したままなので:
+squash merge のあと、GitHub は **remote の branch を消す**。ところが手元の
+`origin/<branch>` は**消える前の commit を指したまま**残るので:
 
-- `git status -sb` が **`...origin/main` を追う**形になり、**上流の branch と食い違う**
-- 次の push で diverge する / stop hook が「未 push の commit がある」と鳴る
-- そのまま次の作業を積むと、また**前の PR の差分が混ざる**
-
-```bash
-git fetch origin main && git checkout -B <branch> origin/main
-git push --force-with-lease origin <branch>     # ← これも merge 手順の一部
+```
+$ git push --force-with-lease origin <branch>
+ ! [rejected]  (stale info)          ← lease が「まだ在る」と思っている相手が居ない
+$ git fetch origin <branch>
+ fatal: couldn't find remote ref     ← そもそも消えている
 ```
 
-🔑 branch が**既に merge 済みの履歴しか持っていない**ときの force push は安全である
-(session の運用指示にも明記されている)。⚠ 逆に**未 merge の commit が乗っている
-ときは force しない** ── rebase して残す。
+正しいのは **prune してから普通に push**(force ではない):
+
+```bash
+git fetch --prune origin
+git fetch origin main && git checkout -B <branch> origin/main
+git push -u origin <branch>          # ← 新規作成として通る
+```
+
+⚠ **force が要るのは「remote の branch が生きていて、squash 前の commit を
+指している」ときだけ**(= PR が open のまま作り直す場面)。そこでは
+`--force-with-lease`、ただし**未 merge の commit が乗っているなら force せず
+rebase して残す**。
+
+🔑 掃除を怠ると `git status -sb` が `...origin/main` を追う形になり、
+stop hook が「未 push の commit がある」と鳴く ── **鳴ったら、まず prune を疑う**。
 
 ⚠ **merge 済みの PR に新しい commit を積まない。**
 
