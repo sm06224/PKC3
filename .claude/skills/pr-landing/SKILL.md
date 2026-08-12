@@ -85,6 +85,24 @@ git push --force-with-lease origin <branch>
 git stash pop
 ```
 
+### ⚠ **remote 側も同時に揃える**(作り直しは半分では終わらない)
+
+`checkout -B` は**手元しか動かさない**。remote の branch は squash 前の commit を
+指したままなので:
+
+- `git status -sb` が **`...origin/main` を追う**形になり、**上流の branch と食い違う**
+- 次の push で diverge する / stop hook が「未 push の commit がある」と鳴る
+- そのまま次の作業を積むと、また**前の PR の差分が混ざる**
+
+```bash
+git fetch origin main && git checkout -B <branch> origin/main
+git push --force-with-lease origin <branch>     # ← これも merge 手順の一部
+```
+
+🔑 branch が**既に merge 済みの履歴しか持っていない**ときの force push は安全である
+(session の運用指示にも明記されている)。⚠ 逆に**未 merge の commit が乗っている
+ときは force しない** ── rebase して残す。
+
 ⚠ **merge 済みの PR に新しい commit を積まない。**
 
 ## 5. 🔴 止めて裁定を仰ぐ条件
