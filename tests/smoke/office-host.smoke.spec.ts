@@ -227,6 +227,7 @@ async function seedFakePack(
         c.width = 320; c.height = 200;
         cfg.qt.containerElements[0].appendChild(c);
         window.__written = [];
+        window.__order = [];
         // ⚠ **stub は本物の意味論を真似る**(CLAUDE.md)。MEMFS は親ディレクトリが
         //    無ければ ENOENT を投げる ── そこを緩めると「先に作る」を消す変異が素通りする
         var made = {};
@@ -235,14 +236,18 @@ async function seedFakePack(
           FS: {
             mkdirTree: function (p) { made[p] = true; },
             mkdir: function (p) { made[p] = true; },
-            writeFile: function (p) {
+            writeFile: function (p, data) {
               var dir = p.slice(0, p.lastIndexOf('/'));
               if (!made[dir]) throw new Error('ENOENT: no such directory, ' + dir);
               if (p.indexOf(bad) !== -1) throw new Error('ENOENT');
               window.__written.push(p);
+              if (p.indexOf('registrymodifications.xcu') !== -1) {
+                window.__xcu = String(data);
+                window.__order.push('xcu');
+              }
             },
           },
-          callMain: function (a) { window.__args = a; },
+          callMain: function (a) { window.__args = a; window.__order.push('callMain'); },
         };
       };
     `;
@@ -321,6 +326,92 @@ test('🔴 偽の一式で起動経路が通り、フォントが 1 本こけて
     ),
     '展開した package を抱えたまま(窓を閉じるまで 148MB 常駐する)',
   ).toBe(true);
+});
+
+/**
+ * 🔴 **LO の窓を器いっぱいで開かせる**(2026-08-12 に実物の LO で確かめた)。
+ *
+ * 既定では窓が器より小さく出る ── そして狭い窓は、項目の多いメニューを
+ * **多段カラムに折り返して画面全体を塗りつぶす**(「クリックしたら画面が壊れた」)。
+ *
+ * ⚠ **単位は device px**。実測で、同じ 1400x800 の器に CSS px を書くと
+ * DPR 2 では 700x624 の窓になった(半分)。`devicePixelRatio` を掛けて 2800x1600 を
+ * 書いて初めてぴったりになる。**ここを間違えると「直したのに小さい」になる。**
+ */
+test('🔴 窓の大きさを、器の device px で仕込んでから起動する', async ({ browser }) => {
+  /**
+   * ⚠ **DPR 2 で回す。** 既定(DPR 1)では device px と CSS px が同じ値になるので、
+   * **取り違えても通ってしまう** ── 実機(mac / DPR 2)で起きた欠陥が
+   * CI で 1 件も鳴らない、いちばん質の悪い形になる。
+   */
+  const ctx = await browser.newContext({ deviceScaleFactor: 2 });
+  const page = await ctx.newPage();
+  try {
+  expect(await page.evaluate(() => window.devicePixelRatio), 'DPR が 1 のまま = 取り違えを検出できない').toBe(2);
+  await page.goto('/office/host.html');
+  await seedFakePack(page);
+  await page.reload();
+  await expect(page.locator('#status')).toContainText('表示中', { timeout: 15_000 });
+
+  const seen = await page.evaluate(() => {
+    const w = window as unknown as { __xcu?: string; __order: string[] };
+    const r = (document.getElementById('screen') as HTMLElement).getBoundingClientRect();
+    const k = window.devicePixelRatio || 1;
+    return {
+      xcu: w.__xcu ?? '',
+      order: w.__order,
+      want: `0,0,${Math.round(r.width * k)},${Math.round(r.height * k)};`,
+    };
+  });
+  // ⚠ **書かれた値そのもの**を見る(「書いた」だけでは、CSS px のままでも通る)
+  expect(seen.xcu, `器の device px が入っていない(want ${seen.want})`).toContain(seen.want);
+  expect(seen.xcu).toContain('ooSetupFactoryWindowAttributes');
+  // 起動を待つ Start Center も対象(文書を開かない道が抜けやすい)
+  expect(seen.xcu).toContain('com.sun.star.frame.StartModule');
+  // 🔑 **順番**。`callMain` の後に書いても、設定はもう読まれている
+  expect(seen.order, '窓の大きさを起動より後に書いている').toEqual(['xcu', 'callMain']);
+  } finally {
+    await ctx.close();
+  }
+});
+
+/**
+ * ⚠ **器が測れないときは、大きさを頼まない。**
+ *
+ * 🔑 `0,0,0,0` を書くと LO は**潰れた窓**を開く ── 既定の小さい窓よりはるかに悪い。
+ * 「書かない」ほうが正しい場面が在る、という判断そのものを検査する。
+ */
+test('🔴 器が測れないときは、窓の大きさを頼まない(潰れた窓を作らない)', async ({ browser }) => {
+  const ctx = await browser.newContext();
+  const page = await ctx.newPage();
+  try {
+    // ⚠ ページの script より**先に**効かせる(器の大きさは起動中に読まれる)
+    await ctx.addInitScript(() => {
+      document.addEventListener('DOMContentLoaded', () => {
+        const st = document.createElement('style');
+        st.textContent = '#screen{position:static !important;width:0 !important;height:0 !important}';
+        document.head.appendChild(st);
+      });
+    });
+    await page.goto('/office/host.html');
+    await seedFakePack(page);
+    await page.reload();
+    await expect(page.locator('#status')).toContainText('表示中', { timeout: 15_000 });
+
+    // 空振り防止 ── 器が本当に 0 になっていること
+    expect(
+      await page.evaluate(
+        () => (document.getElementById('screen') as HTMLElement).getBoundingClientRect().width,
+      ),
+      'この test の前提(器が測れない)が成り立っていない',
+    ).toBeLessThan(1);
+    expect(
+      await page.evaluate(() => (window as unknown as { __xcu?: string }).__xcu),
+      '器が 0 なのに大きさを頼んでいる(潰れた窓になる)',
+    ).toBeUndefined();
+  } finally {
+    await ctx.close();
+  }
 });
 
 test('🔴 LO 側の異常終了(onExit crashed)が画面に出る', async ({ page }) => {

@@ -263,6 +263,83 @@
     return out;
   }
 
+  /**
+   * 🔴 **LO の窓を、器いっぱいで開かせる**(#117。2026-08-12 に実物で確かめた)。
+   *
+   * 既定では窓が器より小さく出る。⚠ これは見た目だけの話ではない ──
+   * 窓が狭いと**項目の多いメニューが多段カラムに折り返して画面全体を塗りつぶし**、
+   * user からは「クリックしたら画面が壊れた」に見える(調査レポート #2)。
+   * さらに縦が足りないと窓の下端が切れ、**スクロールもできない**。
+   *
+   * ## 何を書くのか
+   *
+   * LO は窓の状態を `registrymodifications.xcu` の
+   * `ooSetupFactoryWindowAttributes` に持つ。書式は
+   * `左,上,幅,高;状態;最大化時の矩形;`(状態は VCL の bitmask、4 = Maximized)。
+   *
+   * ⚠ **上流の既定は既に `,,,;4;`(= 最大化)である。** つまり
+   * 「最大化を頼んでいないから小さい」のではなく、**幾何が空だと Qt 側の既定の
+   * 大きさに落ちる**。だから**明示の幾何を書く**のがこの直しの本体で、
+   * 状態ビットを変えても何も起きない(1 / 4 / 24 を実測して同じだった)。
+   *
+   * ## ⚠ 単位は **device px**(CSS px ではない)
+   *
+   * 実測(同じ器 1400x800 CSS):
+   *
+   * | DPR | 書いた値 | 出た窓(CSS) |
+   * |---|---|---|
+   * | 2 | `1400,800`(CSS) | 700x624 ── **半分**になる |
+   * | 2 | `2800,1600`(device) | **1400x800** ぴったり |
+   * | 1 | `1400,800` | 1400x800 ぴったり |
+   *
+   * VCL は物理ピクセルで考えるので、**必ず `devicePixelRatio` を掛ける**。
+   *
+   * ## 🔴 これで直らないもの(先に知っておく)
+   *
+   * **起動後にブラウザを縮めても窓は追従しない**(状態ビットを変えても同じ、実測)。
+   * Qt の最大化ボタンを押した窓は追従するが、設定から「最大化」を頼んでも
+   * そうはならない ── **そこは LO / Qt 側の仕事**である。ここで直すのは
+   * **開いた瞬間の大きさ**だけ。
+   */
+  function seedWindowSize(FS) {
+    try {
+      var r = screenEl.getBoundingClientRect();
+      // ⚠ 器が測れていないなら書かない(0x0 の窓を頼むほうが悪い)
+      if (r.width < 1 || r.height < 1) return;
+      var k = window.devicePixelRatio || 1;
+      var geom = '0,0,' + Math.round(r.width * k) + ',' + Math.round(r.height * k)
+        + ';4;0,0,0,0;';
+      var mods = [
+        'com.sun.star.frame.StartModule',
+        'com.sun.star.text.TextDocument',
+        'com.sun.star.sheet.SpreadsheetDocument',
+        'com.sun.star.presentation.PresentationDocument',
+        'com.sun.star.drawing.DrawingDocument',
+        'com.sun.star.text.WebDocument',
+        'com.sun.star.text.GlobalDocument',
+        'com.sun.star.chart2.ChartDocument',
+        'com.sun.star.formula.FormulaProperties',
+      ];
+      var items = '';
+      for (var i = 0; i < mods.length; i += 1) {
+        items += '<item oor:path="/org.openoffice.Setup/Office/Factories/'
+          + 'org.openoffice.Setup:Factory[&apos;' + mods[i] + '&apos;]">'
+          + '<prop oor:name="ooSetupFactoryWindowAttributes" oor:op="fuse">'
+          + '<value>' + geom + '</value></prop></item>';
+      }
+      var xcu = '<?xml version="1.0" encoding="UTF-8"?>\n'
+        + '<oor:items xmlns:oor="http://openoffice.org/2001/registry"'
+        + ' xmlns:xs="http://www.w3.org/2001/XMLSchema"'
+        + ' xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">' + items + '</oor:items>';
+      // 保管先は `UserInstallation=$ORIGIN/..`(bootstraprc)= `/instdir/user`
+      FS.mkdirTree('/instdir/user');
+      FS.writeFile('/instdir/user/registrymodifications.xcu', xcu);
+    } catch (e) {
+      // ⚠ **大きさのために起動を落とさない。** 小さい窓のほうが、開かないよりましである
+      console.warn('窓の大きさを仕込めませんでした', e);
+    }
+  }
+
   function missing() {
     var lack = [];
     if (!window.crossOriginIsolated) lack.push('cross-origin isolation');
@@ -421,6 +498,7 @@
       if (badFonts) console.warn('入らなかったフォント: ' + badFonts + ' 本');
       // ⚠ 書き終わったら手放す(MEMFS が持っている ── こちらの配列は二重持ち)
       fonts.length = 0;
+      seedWindowSize(FS);
       var args = [];
       if (docBytes) {
         try { FS.mkdir('/work'); } catch (e) { /* 既に在る */ }
