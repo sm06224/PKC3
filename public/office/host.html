@@ -366,18 +366,84 @@
    * (置換の空振りという失敗の形を、そもそも作らない)。
    * ⚠ メインスレッドには `ClipboardItem` が在るので、この IIFE は**何もしない**。
    */
+  /**
+   * クリップボードの橋の名前。⚠ アプリの放送(`pkc3-office`)とは**別にする** ──
+   * 相手が違う(あちらは本体、こちらは worker)ので、混ぜると片方の取り違えが
+   * もう片方に波及する。
+   */
+  var CLIP_CHANNEL = 'pkc3-clipboard';
+
   var WORKER_SHIMS = "(function(){if(typeof ClipboardItem!=='undefined')return;"
+    + "var ch=new BroadcastChannel(" + JSON.stringify(CLIP_CHANNEL) + ");"
+    + "var seq=0;var waiting={};"
+    + "ch.onmessage=function(e){var d=e.data;if(!d||!d.reply||!waiting[d.id])return;"
+    + "var w=waiting[d.id];delete waiting[d.id];w();};"
     + "self.ClipboardItem=function ClipboardItem(items,opts){this.items=items||{};"
     + "this.presentationStyle=(opts&&opts.presentationStyle)||'unspecified';"
     + "this.types=Object.keys(this.items);};"
     + "self.ClipboardItem.prototype.getType=function(t){return Promise.resolve(this.items[t]);};"
+    // ⚠ **絶対に reject しない**(下の注記)。失敗しても resolve する
+    + "var send=function(parts){return new Promise(function(done){var id=++seq;"
+    + "waiting[id]=done;"
+    + "try{ch.postMessage({clip:'write',id:id,parts:parts})}catch(e){delete waiting[id];done();return}"
+    + "setTimeout(function(){if(waiting[id]){delete waiting[id];done()}},5000);});};"
+    + "var toParts=function(items){return Promise.all((items||[]).map(function(it){"
+    + "return Promise.all((it.types||[]).map(function(t){var v=it.items&&it.items[t];"
+    + "return (v&&v.arrayBuffer?v.arrayBuffer()"
+    + ":Promise.resolve(new TextEncoder().encode(String(v)).buffer))"
+    + ".then(function(buf){return {type:t,buf:buf}});}));}))"
+    + ".then(function(g){var f=[];g.forEach(function(a){a.forEach(function(x){f.push(x)})});return f});};"
     + "if(self.navigator&&!self.navigator.clipboard){"
     + "Object.defineProperty(self.navigator,'clipboard',{configurable:true,value:{"
-    + "write:function(){return Promise.resolve()},"
-    + "writeText:function(){return Promise.resolve()},"
+    + "write:function(items){return toParts(items).then(send,function(){})},"
+    + "writeText:function(s){return send([{type:'text/plain',"
+    + "buf:new TextEncoder().encode(String(s)).buffer}])},"
+    // ⚠ 読む側は LO が**一度も呼ばない**(実測)。呼ばれても落ちないようにだけしておく
     + "read:function(){return Promise.resolve([])},"
     + "readText:function(){return Promise.resolve('')}}});}"
     + "})();\n";
+
+  /**
+   * 🔴 **worker からのコピー要求を、こちらで本物のクリップボードへ書く**(#130)。
+   *
+   * ⚠ worker には `navigator.clipboard` が**存在しない**(`WorkerNavigator` に無い)。
+   * `document` も無いので `copy` event の経路も使えない ── **worker から system
+   * clipboard へ触る手段は 1 つも無い**。だから放送でこちらへ回す。
+   *
+   * ## 実測で分かった形(2026-08-13、実物の LO)
+   *
+   * | 操作 | LO が呼ぶもの |
+   * |---|---|
+   * | コピー / 切り取り | `new ClipboardItem({'text/plain': Blob})` → `clipboard.write([item])` |
+   * | **貼り付け** | 🔴 **何も呼ばない**(`read` も `readText` も 0 回、エラーも 0 件) |
+   *
+   * 🔑 つまり**この橋で直るのは「Office から外へコピー」だけ**である。
+   * 貼り付けは LO / Qt 側が別の経路(worker に無い `document`)を見ているので、
+   * ここでは直せない。⚠ 「クリップボードを直した」と言わないこと。
+   */
+  function serveClipboard() {
+    var ch = new BroadcastChannel(CLIP_CHANNEL);
+    ch.onmessage = function (ev) {
+      var d = ev && ev.data;
+      if (!d || d.reply || d.clip !== 'write' || !Array.isArray(d.parts)) return;
+      var payload = {};
+      for (var i = 0; i < d.parts.length; i += 1) {
+        payload[d.parts[i].type] = new Blob([d.parts[i].buf], { type: d.parts[i].type });
+      }
+      var done = function () { ch.postMessage({ reply: true, id: d.id }); };
+      // ⚠ **返事を必ず返す。** 返さないと worker 側が 5 秒待つ(操作が固まって見える)
+      try {
+        navigator.clipboard.write([new ClipboardItem(payload)]).then(done, function (e) {
+          console.warn('クリップボードへ書けませんでした', e);
+          done();
+        });
+      } catch (e) {
+        console.warn('クリップボードへ書けませんでした', e);
+        done();
+      }
+    };
+  }
+  serveClipboard();
 
   async function withWorkerShims(blob) {
     return new Blob([WORKER_SHIMS, await blob.text()], { type: 'text/javascript' });
