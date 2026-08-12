@@ -34,7 +34,19 @@
   #status { opacity:.75; font-variant-numeric: tabular-nums }
   #screen { position:fixed; inset:34px 0 0 0 }
   #msg { position:fixed; inset:34px 0 0 0; display:grid; place-content:center; text-align:center;
-    padding:24px; gap:10px; opacity:.85; line-height:1.8 }
+    padding:24px; gap:10px; opacity:.85; line-height:1.8; z-index:20 }
+  /* 🔴 **これが無いと `msgEl.hidden = true` が効かない。** id セレクタ(1,0,0)の
+     `display:grid` が UA の `[hidden]{display:none}`(0,1,0)に勝つので、
+     属性は付くのに**消えない** ── LO の窓の外側は透明なので、
+     「読み込んでいます…」が版面の脇に透けて出続けていた(実機で確認)。 */
+  #msg[hidden] { display:none }
+  /* 版面の上でドラッグすると、LO の選択ではなく**このページの文字**が選ばれる。
+     ⚠ ただし停止時の理由は写したいので、`#msg` の中だけは選べるままにする。 */
+  body { user-select:none; -webkit-user-select:none }
+  #msg { user-select:text; -webkit-user-select:text }
+  #msg .why { opacity:.7; font-size:12px; max-width:60ch; word-break:break-word }
+  #msg button { font:inherit; padding:6px 14px; border-radius:6px; border:1px solid #8886;
+    background:transparent; color:inherit; cursor:pointer }
 </style>
 </head>
 <body>
@@ -48,8 +60,16 @@
   var statusEl = document.getElementById('status');
   var msgEl = document.getElementById('msg');
   var nameEl = document.getElementById('name');
+  var screenEl = document.getElementById('screen');
   function setStatus(s) { statusEl.textContent = s; }
-  function fail(s) { msgEl.textContent = s; setStatus('失敗'); }
+  function fail(s) {
+    msgEl.textContent = s;
+    msgEl.hidden = false;
+    // ⚠ **版面を退ける。** `#screen` は `#msg` と同じ矩形なので、出したままだと
+    //    理由が読めない(起動を諦めた後に版面は要らない)
+    screenEl.hidden = true;
+    setStatus('失敗');
+  }
 
   // ── 本体との往復は **BroadcastChannel**(同一 origin の放送)──────────────
   //
@@ -82,11 +102,100 @@
     }
   };
 
+  // ── 異常終了を**見える形にする**(#117)──────────────────────────────
+  //
+  // 🔴 これが無いと、user には「固まった」としか分からない。実測(調査 2026-08-12):
+  //    LO が abort しても**最後に描かれたフレームがそのまま残り**、上部バーは
+  //    「表示中 (1.8 秒)」のまま。クリックもタイプも効かないのに**見た目は正常**。
+  //    ⚠ 「バグだらけ」という印象の相当部分がこれである。
+  //
+  // ⚠ 生存通知(`beat`)は**止めない** ── 止めると本体が「閉じた」と判断して
+  //    2 つ目の窓を開く(1 窓 約 750MB)。停止したことは `crashed` で別に言う。
+  var tick = null;
+  var dead = false;
+  function died(reason) {
+    if (dead) return;
+    dead = true;
+    if (tick) { clearInterval(tick); tick = null; }
+    // 死んでいることを**見せる**(生きている版面と区別が付かないのが問題だった)
+    screenEl.style.filter = 'grayscale(1) brightness(.45)';
+    screenEl.style.pointerEvents = 'none';
+    setStatus('停止');
+    msgEl.textContent = '';
+    var head = document.createElement('div');
+    head.textContent = 'Office が停止しました';
+    var why = document.createElement('div');
+    why.className = 'why';
+    why.textContent = String(reason).slice(0, 300);
+    var again = document.createElement('button');
+    again.textContent = '読み込み直す';
+    again.addEventListener('click', function () { location.reload(); });
+    msgEl.appendChild(head);
+    msgEl.appendChild(why);
+    msgEl.appendChild(again);
+    msgEl.hidden = false;
+    say('crashed', { reason: String(reason).slice(0, 300) });
+  }
+  // ⚠ **何でも停止扱いにしない。** 拡張機能や無関係な例外まで拾うと、
+  //    動いている版面に「停止しました」を被せることになる。
+  //    wasm 由来だけを見る(`Aborted(...)` / `RuntimeError` / `memory access out of bounds`)。
+  var FATAL = /Aborted\(|RuntimeError|memory access out of bounds|unreachable|table index is out of bounds/;
+  window.addEventListener('error', function (e) {
+    if (FATAL.test(String(e && e.message))) died(e.message);
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    var r = e && e.reason;
+    var text = String((r && r.message) || r);
+    if (FATAL.test(text)) died(text);
+  });
+
+  // ── Ctrl + 英字が本文に混入するのを止める(#117)────────────────────
+  //
+  // 🔴 実測: `Ctrl+S` を押すと本文に **`s`** が入る(`test` → `tests`)。
+  //    `Ctrl+A` で `a`、`Ctrl+Z` で `z`。**静かに文書が汚れる。**
+  //
+  // ⚠ 原因は 2 段ある。分けて扱わないと、直したつもりで動線を削る:
+  //    ① **ブラウザが横取りする** ── `Ctrl+S`(ページを保存)/ `Ctrl+P`(印刷)/
+  //       `Ctrl+O`(ファイルを開く)/ `Ctrl+F`(ページ内検索)。LO まで届かない。
+  //       → `preventDefault()` で止める。**Qt のハンドラは走る**ので LO は受け取る
+  //    ② **mac では Ctrl が LO の修飾キーではない** ── Qt は macOS で Cmd を
+  //       Control へ読み替えるので、`Ctrl+英字` は LO のどの割り当てにも当たらず
+  //       **ただの文字**として入る。ところが LO のメニューは `Ctrl+C` と表示するので
+  //       user は Ctrl を押す。→ mac でだけ **握り潰す**(失う動線が無い)
+  //
+  // ⚠ **`altKey` は必ず除外する。** Windows の AltGr は `ctrl+alt` として届くので、
+  //    ドイツ語配列の `@` などを潰してしまう。
+  // ⚠ **`c` / `x` / `v` に `preventDefault` しない。** keydown を止めると
+  //    `copy` / `paste` event が発火せず、クリップボードが死ぬ。
+  // 🔑 逃げ道は残す ── `F5` は 1 文字キーではないので、ここを通らない(必ず再読込できる)。
+  var MAC = (navigator.userAgentData && navigator.userAgentData.platform === 'macOS')
+    || /Mac|iPhone|iPad/.test(navigator.platform || '');
+  window.addEventListener('keydown', function (e) {
+    if (e.altKey || !e.key || e.key.length !== 1) return;
+    var isClip = 'cxv'.indexOf(e.key.toLowerCase()) !== -1;
+    if (MAC && e.ctrlKey && !e.metaKey) {
+      // mac の Ctrl は LO に届いても何もしない。文字だけが残るので Qt にも渡さない
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
+    var cmd = MAC ? e.metaKey : (e.ctrlKey && !e.metaKey);
+    if (cmd && !isClip) e.preventDefault();
+  }, true);
+
   function openDb() {
     return new Promise(function (resolve, reject) {
       var req = indexedDB.open(DB_NAME, 1);
-      // ⚠ ここで store を作らない ── 作ってしまうと「入っていない」を
-      //    「空の pack が入っている」と読み違える。作るのは本体側だけ。
+      // ⚠ **器だけ作る。中身は作らない。** 以前ここには「store を作らない」と
+      //    書いてあったが、実装は作っていた ── コメントと実装が食い違っていた。
+      //    どちらが正しいか: **作る**が正しい。open は version 1 を要求するので、
+      //    未インストールの環境では `onupgradeneeded` が必ず走る。ここで
+      //    store を作らずに抜けると、下の `transaction('meta')` が
+      //    `NotFoundError` で throw し、「入っていません」ではなく
+      //    **「保管庫を開けません」**という無関係な理由が出る(実装の都合が
+      //    user の画面に漏れる)。
+      // 🔑 「入っているか」の判定は **`meta.pack` の中身**で行う(下の
+      //    `Array.isArray(meta.files)`)ので、空の store が在っても誤読しない。
       req.onupgradeneeded = function () {
         if (!req.result.objectStoreNames.contains('files')) req.result.createObjectStore('files');
         if (!req.result.objectStoreNames.contains('meta')) req.result.createObjectStore('meta');
@@ -109,7 +218,21 @@
     return new Response(stream, { headers: { 'Content-Type': type } });
   }
 
-  /** ObjectURL は**必ず**返す dispose で revoke する(不可侵: 寿命終端で revoke)。 */
+  /**
+   * ObjectURL は**必ず**返す dispose で revoke する(不可侵: 寿命終端で revoke)。
+   *
+   * 🔴 ⚠ **`soffice.js` の URL を「読み込んだら revoke」してはいけない**
+   * (2026-08-12 に調査レポートの助言を検算して分かった)。emscripten は
+   * pthread を **その URL から**起こす:
+   *
+   *     pthreadMainJs = Module["mainScriptUrlOrBlob"]  // 未設定
+   *     pthreadMainJs = _scriptName                    // = document.currentScript.src = この blob
+   *     worker = new Worker(pthreadMainJs, …)
+   *
+   * つまり**寿命の終端は「読み込み終わった時」ではなく「窓を閉じる時」**である。
+   * 早く返すと、LO が後からスレッドを作った瞬間に落ちる ── しかも
+   * **プールを 16 に増やした**ので、作る回数はむしろ増える。
+   */
   var urls = [];
   function lend(blob) { var u = URL.createObjectURL(blob); urls.push(u); return u; }
   window.addEventListener('pagehide', function () {
@@ -153,6 +276,26 @@
     var lack = missing();
     if (lack.length) {
       fail('この環境では Office を動かせません(足りないもの: ' + lack.join(' / ') + ')');
+      /**
+       * 🔑 **分離が足りないだけなら、たいてい「もう一度」で直る。**
+       *
+       * COOP/COEP は Pages がヘッダを返せないので **service worker が被せている**。
+       * その SW がまだこの文書を制御していない初回訪問 / 更新直後は
+       * `crossOriginIsolated` が false になる ── **環境が悪いのではない**。
+       *
+       * ⚠ **勝手に読み直さない。** 自動 reload は「SW が永久に来ない環境」で輪になる。
+       *    ここは user が押す 1 手に留める(押せば必ず 1 回で済む)。
+       */
+      if (lack.every(function (x) { return /isolation|SharedArrayBuffer/.test(x); })) {
+        var hint = document.createElement('div');
+        hint.className = 'why';
+        hint.textContent = '準備が終わっていないだけかもしれません。読み直すと有効になることがあります。';
+        var retry = document.createElement('button');
+        retry.textContent = '読み込み直す';
+        retry.addEventListener('click', function () { location.reload(); });
+        msgEl.appendChild(hint);
+        msgEl.appendChild(retry);
+      }
       say('unsupported', { missing: lack });
       return;
     }
@@ -194,7 +337,6 @@
       fail('一式を読み込めませんでした'); return;
     }
 
-    var screen = document.getElementById('screen');
     var params = new URLSearchParams(location.search);
     var docName = params.get('name') || '';
     if (docName) nameEl.textContent = docName;
@@ -220,7 +362,7 @@
 
     setStatus('起動中…');
     msgEl.hidden = true;
-    screen.hidden = false;
+    screenEl.hidden = false;
     var t0 = Date.now();
     try {
       var inst = window.__lo = await window.qtLoad({
@@ -233,21 +375,52 @@
           WebAssembly.instantiateStreaming(
             gunzipResponse(blobs['soffice.wasm.gz'], 'application/wasm'), imports,
           ).then(function (r) { ok(r.instance, r.module); }, function (e) {
-            console.error(e); fail('本体を読み込めません: ' + String(e).slice(0, 120));
+            // ⚠ **ここから先へは進めない。** `ok()` を呼ばないので emscripten は
+            //    初期化待ちのまま宙吊りになり、`await qtLoad(...)` は解決も棄却も
+            //    しない ── **下の catch には入らない**。だから理由はここで出し切る。
+            console.error(e);
+            died('本体を読み込めません: ' + String((e && e.message) || e).slice(0, 160));
           });
           return {};
         },
         qt: {
           onLoaded: function () { setStatus('起動中…'); },
-          onExit: function (d) { setStatus('終了 ' + JSON.stringify(d)); },
+          // 🔴 **異常終了はここに来る**(実測: `{"text":"'HEAPU8' was not exported…",
+          //    "crashed":true}`)。以前は生 JSON を上部バーへ流すだけで、版面は
+          //    生きているように見えたままだった
+          onExit: function (d) {
+            if (d && d.crashed) { died((d && d.text) || 'crashed'); return; }
+            setStatus('終了しました');
+          },
           entryFunction: window.soffice_entry,
-          containerElements: [screen],
+          containerElements: [screenEl],
         },
       });
       var FS = inst.FS;
+      // 🔴 **展開に使った 148MB を返す**(不可侵: 生成物はライフサイクル終端で破棄)。
+      //    `getPreloadedPackage` は初期化中に 1 度だけ呼ばれ、中身は既に MEMFS へ
+      //    写されている ── ここから先は**閉じるまで誰も読まないのに持ち続ける**。
+      dataBuf = null;
+      /**
+       * フォントを入れる。⚠ **1 本のしくじりで起動ごと落とさない。**
+       *
+       * 以前は素の `FS.writeFile` を並べていたので、親ディレクトリが無いだけで
+       * throw し、外側の catch が「起動に失敗しました: …」という**原因の分からない
+       * 文言**にして終わっていた ── LO 自体は正常に立ち上がっているのに、である。
+       */
+      try { FS.mkdirTree('/instdir/share/fonts/truetype'); } catch (e) { /* 既に在る */ }
+      var badFonts = 0;
       for (var k = 0; k < fonts.length; k += 1) {
-        FS.writeFile('/instdir/share/fonts/truetype/' + fonts[k][0], fonts[k][1]);
+        try {
+          FS.writeFile('/instdir/share/fonts/truetype/' + fonts[k][0], fonts[k][1]);
+        } catch (e) {
+          badFonts += 1;
+          console.warn('font skipped: ' + fonts[k][0], e);
+        }
       }
+      if (badFonts) console.warn('入らなかったフォント: ' + badFonts + ' 本');
+      // ⚠ 書き終わったら手放す(MEMFS が持っている ── こちらの配列は二重持ち)
+      fonts.length = 0;
       var args = [];
       if (docBytes) {
         try { FS.mkdir('/work'); } catch (e) { /* 既に在る */ }
@@ -257,15 +430,28 @@
         window.__loDocPath = path;
       }
       // 版面が出たら確定させる。⚠ callMain は event loop に入ったまま戻らないことがある
-      var tick = setInterval(function () {
-        var cs = deepCanvases(screen);
+      //
+      // ⚠ **上限を置く。** 版面が出なければ `clearInterval` に到達せず、
+      //    300ms ごとの全走査(`querySelectorAll` を shadow root まで)が**永久に回る**。
+      // 🔑 上限に達しても `died()` にはしない ── **遅いだけかもしれない**。
+      //    分かっているのは「まだ出ていない」ことだけなので、そう言う。
+      var ticks = 0;
+      tick = setInterval(function () {
+        var cs = deepCanvases(screenEl);
         for (var m = 0; m < cs.length; m += 1) {
           if (cs[m].width > 0) {
             clearInterval(tick);
+            tick = null;
             setStatus('表示中 (' + ((Date.now() - t0) / 1000).toFixed(1) + ' 秒)');
             say('painted', { ms: Date.now() - t0 });
             return;
           }
+        }
+        ticks += 1;
+        if (ticks >= 120) {          // 300ms × 120 = 36 秒
+          clearInterval(tick);
+          tick = null;
+          setStatus('起動に時間がかかっています');
         }
       }, 300);
       inst.callMain(args);

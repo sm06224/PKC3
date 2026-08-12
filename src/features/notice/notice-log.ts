@@ -90,6 +90,18 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-12-office-window-fixes',
+    title: 'Office の窓の不具合を直しました',
+    items: [
+      'Office が異常終了したとき、止まったことと理由が画面に出るようになりました。これまでは最後の絵が残り、固まったように見えていました。',
+      '止まったときは、その画面の「読み込み直す」から開き直せます。',
+      'Ctrl+S や Ctrl+P がブラウザに取られなくなり、Office 側に届くようになりました。',
+      'Mac で Ctrl と英字を押すと本文にその文字が入ってしまう問題を直しました。',
+      '文書の脇に「読み込んでいます…」が残る問題と、文書の上をなぞるとページの文字が選ばれる問題を直しました。',
+      '準備が終わっていないだけのときは、そう伝えて読み直す案内を出します。',
+    ],
+  },
+  {
     id: '2026-08-11-office-view',
     title: 'Word / Excel / PowerPoint の添付を読めるようになりました',
     items: [
