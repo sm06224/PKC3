@@ -56,6 +56,8 @@ MK = "solenv/gbuild/platform/EMSCRIPTEN_INTEL_GCC.mk"
 # 上流の既定(錨)。⚠ 空白まで含めて一致させる ── ずれたら気づきたい
 ANCHOR_MEMORY = "gb_EMSCRIPTEN_LDFLAGS += -s TOTAL_MEMORY=1GB"
 ANCHOR_STACK = "gb_EMSCRIPTEN_LDFLAGS += -sSTACK_SIZE=131072 -sDEFAULT_PTHREAD_STACK_SIZE=65536"
+# 🔴 heap view の export。⚠ `HEAPU16` と `HEAPU32` は在るのに **`HEAPU8` だけ無い**
+ANCHOR_HEAPS = '"ClassHandle","HEAPU16","HEAPU32"'
 
 # 伸長つきへ。⚠ wasm32 の上限は 4GB なので MAXIMUM_MEMORY はそこで頭打ち
 REPLACE_MEMORY = (
@@ -70,6 +72,22 @@ REPLACE_STACK = (
     "gb_EMSCRIPTEN_LDFLAGS += -sSTACK_SIZE=4194304 -sDEFAULT_PTHREAD_STACK_SIZE=1048576"
 )
 
+# 🔴 **heap view を全部 export する**(#117、2026-08-12)。
+#
+# 出荷物を調べたら `Module["HEAPU16"]` と `Module["HEAPU32"]` は在るのに
+# **`Module["HEAPU8"]` が無い**。`ASSERTIONS=1` なので、触った瞬間に
+# `Aborted('HEAPU8' was not exported. add it to EXPORTED_RUNTIME_METHODS)` で死ぬ
+# ── 実機で観測済み。⚠ `host.html` も `qtloader.js` も `HEAPU8` を触っていない
+# (各 0 件)ので、**呼んでいるのは Qt / LO 側**。こちらのコードでは避けられない。
+#
+# ⚠ **HEAPU8 だけ足すのではなく、view を一式そろえる。** 1 往復のビルドが
+# 6 時間なので、「次は HEAPF32 が無かった」でもう 1 往復するのは高い。
+# view の export は**参照を 1 つ生やすだけ**でコストが無い ── 積んでおく。
+REPLACE_HEAPS = (
+    '"ClassHandle",'
+    '"HEAP8","HEAPU8","HEAP16","HEAPU16","HEAP32","HEAPU32","HEAPF32","HEAPF64"'
+)
+
 
 def main() -> int:
     if len(sys.argv) != 2:
@@ -78,7 +96,7 @@ def main() -> int:
     path = Path(sys.argv[1]) / MK
     text = path.read_text(encoding="utf-8")
 
-    for anchor in (ANCHOR_MEMORY, ANCHOR_STACK):
+    for anchor in (ANCHOR_MEMORY, ANCHOR_STACK, ANCHOR_HEAPS):
         hits = text.count(anchor)
         if hits != 1:
             print(
@@ -89,19 +107,28 @@ def main() -> int:
 
     text = text.replace(ANCHOR_MEMORY, REPLACE_MEMORY)
     text = text.replace(ANCHOR_STACK, REPLACE_STACK)
+    text = text.replace(ANCHOR_HEAPS, REPLACE_HEAPS)
 
     # ⚠ 置換が本当に効いたか(空振りを合格と読まない)
-    for must in ("ALLOW_MEMORY_GROWTH=1", "STACK_SIZE=4194304", "MAXIMUM_MEMORY=4GB"):
+    for must in (
+        "ALLOW_MEMORY_GROWTH=1",
+        "STACK_SIZE=4194304",
+        "MAXIMUM_MEMORY=4GB",
+        '"HEAPU8"',
+        '"HEAPF64"',
+    ):
         if must not in text:
             print(f"ERROR: 置換後に {must} が無い", file=sys.stderr)
             return 1
-    for gone in ("TOTAL_MEMORY=1GB", "STACK_SIZE=131072"):
+    # ⚠ 錨がそのまま残っていたら「置換したつもり」である。
+    #    heap の錨は **部分列**なので、`in` で消えたことまで確かめる
+    for gone in ("TOTAL_MEMORY=1GB", "STACK_SIZE=131072", ANCHOR_HEAPS):
         if gone in text:
             print(f"ERROR: 置換後も {gone} が残っている", file=sys.stderr)
             return 1
 
     path.write_text(text, encoding="utf-8")
-    print(f"patched: {MK}(メモリ伸長 + スタック 4MB/1MB)")
+    print(f"patched: {MK}(メモリ伸長 + スタック 4MB/1MB + heap view 一式)")
     return 0
 
 

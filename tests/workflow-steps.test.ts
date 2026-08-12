@@ -18,7 +18,7 @@
  * step を取りこぼしたら、その瞬間に数が合わなくなる。
  */
 import { describe, expect, it } from 'vitest';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const DIR = '.github/workflows';
@@ -169,5 +169,35 @@ describe('workflow の step', () => {
       }
     }
     expect(dupes).toEqual([]);
+  });
+});
+
+/**
+ * LibreOffice へ当てるパッチの**本数**が、workflow の主張と一致する(#117)。
+ *
+ * 🔴 workflow 側は `test "$n" -eq 3` と**実数で**書いてある(「2 本以上」だと
+ * 1 本落としても気づけないため)。⚠ ところが**その数を直し忘れる**と、
+ * 気づくのは **6 時間ビルドの中**である ── しかも「当たらなかった」ではなく
+ * 「本数が違う」で落ちるので、原因は分かるが**転回を 1 つ捨てる**。
+ * 🔑 ここで機械的に突き合わせれば、`npm test` の時点で分かる。
+ *
+ * ⚠ file 名指しで書かない ── `patch-*.py` を**数える**(CLAUDE.md
+ * 「guard を file 名指しで書かない」)。
+ */
+describe('office-wasm のパッチ', () => {
+  const YML = join(DIR, 'office-wasm-build.yml');
+  const PATCH_DIR = 'build/office-wasm';
+
+  it('🔴 workflow が主張する本数と、実在する patch-*.py の数が一致する', () => {
+    expect(existsSync(YML), `${YML} が無い`).toBe(true);
+    const files = readdirSync(PATCH_DIR).filter((f) => /^patch-.*\.py$/.test(f));
+    // 空振り防止 ── パッチが 1 本も無い状態で「一致した」と言わない
+    expect(files.length).toBeGreaterThan(0);
+
+    const m = /test "\$n" -eq (\d+)/.exec(readFileSync(YML, 'utf-8'));
+    expect(m, 'workflow に本数の主張が無い(検査が空振りしている)').not.toBeNull();
+    expect(Number(m![1]), `patch-*.py は ${files.join(', ')} の ${files.length} 本`).toBe(
+      files.length,
+    );
   });
 });
