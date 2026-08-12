@@ -309,7 +309,16 @@ async function seedFakePack(
       "  ? document.currentScript.src : self.location.href;",
       'self.soffice_entry = function () {};',
       "if (typeof window === 'undefined') {",
-      '  self.onmessage = function () {',
+      '  self.onmessage = function (ev) {',
+      '    if (ev.data && ev.data.copy) {',
+      '      // 🔑 LO と**同じ形**で呼ぶ(実測: text/plain の Blob 1 件)',
+      "      var item = new ClipboardItem({ 'text/plain': new Blob([ev.data.copy], { type: 'text/plain' }) });",
+      '      navigator.clipboard.write([item]).then(',
+      "        function () { self.postMessage({ wrote: 'resolved' }); },",
+      "        function (e) { self.postMessage({ wrote: 'rejected: ' + String(e && e.message) }); },",
+      '      );',
+      '      return;',
+      '    }',
       '    var made;',
       '    try { made = !!new ClipboardItem({}); } catch (e) { made = String(e && e.message).slice(0, 60); }',
       '    self.postMessage({',
@@ -523,6 +532,63 @@ test('🔴 emscripten へ渡す script は、worker で ClipboardItem を持っ�
   // 🔑 **`new` できること**まで見る ── 名前が在るだけでは `val::new_()` は通らない
   expect(seen.made, 'ClipboardItem を new できない').toBe(true);
   expect(seen.clipboard, 'worker に navigator.clipboard が無い').toBe('object');
+});
+
+/**
+ * 🔴 **worker のコピーを、こちらで本物のクリップボードへ書く**(#130)。
+ *
+ * ⚠ worker には `navigator.clipboard` が**存在しない**(`WorkerNavigator` に無い)。
+ * `document` も無いので `copy` event の経路も使えない ── **worker から system
+ * clipboard へ触る手段は 1 つも無い**。だから放送で host 側へ回す。
+ *
+ * 🔑 **観測点は「system clipboard に本当に載ったか」**。worker の Promise が
+ * 解決しただけでは足りない ── この shim は**失敗しても resolve する**ので、
+ * 解決だけ見ると**橋を外しても通ってしまう**。
+ */
+test('🔴 worker のコピーが system clipboard に載る', async ({ browser }) => {
+  const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
+  const page = await ctx.newPage();
+  try {
+    await page.goto('/office/host.html');
+    await seedFakePack(page);
+    await page.reload();
+    await expect(page.locator('#status')).toContainText('表示中', { timeout: 15_000 });
+
+    const text = `橋-${String(Date.now())}`;
+    const wrote = await page.evaluate(async (payload) => {
+      const url = (window as unknown as { __selfUrl?: string }).__selfUrl;
+      if (!url) throw new Error('__selfUrl が無い');
+      const w = new Worker(url);
+      const t0 = performance.now();
+      const got = await new Promise<string>((res, rej) => {
+        const t = setTimeout(() => rej(new Error('worker が返事をしない')), 15_000);
+        w.onmessage = (e): void => {
+          clearTimeout(t);
+          res(String((e.data as { wrote?: string }).wrote));
+        };
+        w.postMessage({ copy: payload });
+      });
+      w.terminate();
+      return { got, ms: performance.now() - t0 };
+    }, text);
+    expect(wrote.got, 'worker 側の write が解決していない').toBe('resolved');
+    /**
+     * 🔴 **返事が来ていることを、時間で見る。**
+     *
+     * shim は返事が来なくても 5 秒で諦めて resolve する(LO を hang させないため)。
+     * ⚠ つまり **返事を返さない実装でも「解決した」だけは通る** ── 実際、変異試験で
+     * そこだけ生き延びた。user から見ると**コピーのたびに 5 秒固まる**。
+     * 🔑 桁が 3 つ違う(数 ms 対 5000ms)ので、時間で見分けられる。
+     */
+    expect(wrote.ms, 'コピーの返事が返っていない(諦めの待ちで解決している)').toBeLessThan(1500);
+
+    // 🔴 **ここが本体**。橋を外すと、上は通るがここで落ちる
+    await expect
+      .poll(async () => page.evaluate(() => navigator.clipboard.readText()), { timeout: 10_000 })
+      .toBe(text);
+  } finally {
+    await ctx.close();
+  }
 });
 
 test('🔴 LO 側の異常終了(onExit crashed)が画面に出る', async ({ page }) => {

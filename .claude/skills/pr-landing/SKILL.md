@@ -60,10 +60,31 @@ PKC3_CHROMIUM=/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headles
 git fetch origin main && git checkout main && git pull origin main
 ```
 
-merge 後に PR を作り直す必要があるなら、**branch を main から作り直す**:
+### 🔴 merge したら、**次の作業に入る前に**必ず branch を作り直す
+
 ```bash
 git fetch origin main && git checkout -B <branch> origin/main
 ```
+
+⚠ **これを飛ばすと、branch に「squash 前の commit」が残る。** そこへ次の作業を
+積むと PR がこうなる:
+
+| 症状 | 何が起きているか |
+|---|---|
+| `mergeable_state: dirty` で **CI が 1 つも走らない** | GitHub が merge commit を計算できない。⚠ 「Actions の障害では」と誤診しやすい |
+| CI は走るが **PR の差分に前の PR の file が混ざる** | 内容が同じなので conflict にはならず、**気づけない**。squash の commit message も嘘になる |
+
+🔑 **同じ日に 3 回踏んだ**(2026-08-12)。branch が 1 本に固定されている運用では
+**merge と次の作業が必ず隣り合う**ので、`checkout -B` を merge 手順の**一部**として扱う。
+
+剥がし方(作業を捨てずに):
+```bash
+git stash push -u -m wip            # 未 commit の作業が在るなら
+git rebase --onto origin/main <残っている squash 前の commit>
+git push --force-with-lease origin <branch>
+git stash pop
+```
+
 ⚠ **merge 済みの PR に新しい commit を積まない。**
 
 ## 5. 🔴 止めて裁定を仰ぐ条件
