@@ -90,6 +90,16 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-12-office-window-size',
+    title: 'Office の窓が画面いっぱいで開くようになりました',
+    items: [
+      'Office の窓が、開いた瞬間から画面いっぱいで出ます。下端のステータスバーが切れなくなり、メニューも折り返しにくくなりました。',
+      'Office の中身が壊れて操作が効かなくなったとき、上部に帯を出してお知らせします。これまでは見た目が正常なままでした。',
+      '帯が出ている間は保存が効きません。帯の「読み込み直す」から開き直してください。',
+      'Mac で Cmd+A(全選択)が効かなくなっていた問題を直しました。',
+    ],
+  },
+  {
     id: '2026-08-12-office-window-fixes',
     title: 'Office の窓の不具合を直しました',
     items: [
