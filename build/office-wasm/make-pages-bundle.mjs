@@ -111,11 +111,38 @@ async function main() {
    * 🔑 **配る側が「何を配ったか」を宣言する**。取る側は目録どおりに取るだけにする。
    * ⚠ `files` は**実際に出力した物**から作る(予定を書かない)。
    */
+  /**
+   * 🔴 **版は「一式の中」から取る**(#125)。
+   *
+   * ⚠ 以前は `PKC3_LO_TAG` だけを見ていたが、2 つの理由で版にならなかった:
+   *  ① office-pack の workflow が env を**取得の step にしか渡していなかった** ──
+   *     組み立ては別シェルなので届かず、**常に `unknown`** だった
+   *     (CLAUDE.md「step ごとに別シェル」の再発)
+   *  ② 届いたとしても `lo-wasm-dev` は**使い回しのタグ**で、中身が入れ替わっても
+   *     名前が変わらない ── 「どのビルドか」を答えない
+   * 🔑 だから `office-wasm-build` が一式へ `build-info.json` を同梱し、**それを読む**。
+   * ⚠ 古い一式には無いので、env → `unknown` の順に落とす(落ちても組み立ては続ける)。
+   */
+  let build = null;
+  const infoPath = join(SRC, 'build-info.json');
+  if (existsSync(infoPath)) {
+    try {
+      build = JSON.parse(readFileSync(infoPath, 'utf-8'));
+    } catch (e) {
+      console.warn(`  ⚠ build-info.json を読めなかった: ${String(e)}`);
+    }
+  }
+  const version = (build && typeof build.version === 'string' && build.version)
+    || process.env.PKC3_LO_TAG || 'unknown';
+  console.log(`  版: ${version}${build ? '' : '  ⚠ build-info.json が無い(古い一式)'}`);
+
   writeFileSync(
     join(OUT, 'pack.json'),
     `${JSON.stringify(
       {
-        version: process.env.PKC3_LO_TAG ?? 'unknown',
+        version,
+        // ⚠ 版の**出どころ**も残す ── 「どの LO commit か」を後から辿れるようにする
+        build,
         builtAt: new Date().toISOString(),
         files: shipped.filter((f) => f !== 'coi-serviceworker.js'),
         fonts: fonts.map((f) => `fonts/${f}`),
