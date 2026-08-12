@@ -471,6 +471,24 @@ jobs:
           d=~/lo-core/workdir/installation/LibreOffice/emscripten
           if [ ! -d "$d" ]; then echo '(実行一式が無い ── publish しない)'; exit 0; fi
           cd "$d"
+          # 🔴 **どのビルドかを一式の中に残す**(#125)。tag は使い回すので、
+          #    tag では版にならない ── **中身が入れ替わっても名前が同じ**である。
+          #    ⚠ 版が無いせいで、検証のたびに「本当に新しい一式か」で 1 往復消えていた
+          #    (実際に `soffice.js` のバイト数差で見分ける羽目になった)。
+          # ⚠ `set -u` の下で `LO_SHA` を裸で使わない ── この step は `if: always()` なので
+          #    **clone が失敗した回にも走る**。そこで落ちると、いちばん欲しい
+          #    「落ちた回の成果物」が publish されない
+          sha="${LO_SHA:-unknown}"
+          printf '%s\n' "{
+            \"version\": \"lo-${sha:0:12}-run${GITHUB_RUN_ID}\",
+            \"lo_sha\": \"${sha}\",
+            \"qt_ref\": \"${{ github.event.inputs.qt_ref || '6.9' }}\",
+            \"emsdk\": \"${{ github.event.inputs.emsdk || '4.0.10' }}\",
+            \"run_id\": \"${GITHUB_RUN_ID}\",
+            \"pkc3_commit\": \"${GITHUB_SHA}\",
+            \"built_at\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
+          }" > build-info.json
+          cat build-info.json
           zip -q -r /tmp/lo-wasm-qt6.zip .
           ls -la /tmp/lo-wasm-qt6.zip
           tag=lo-wasm-dev
