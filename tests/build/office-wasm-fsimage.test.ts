@@ -1,0 +1,196 @@
+/** @vitest-environment node */
+/**
+ * 🔴 **wasm の一式に「コードが読む file」が入る**ことを縛る(#135)。
+ *
+ * `Ctrl+T` の自動書式の一覧が空だったのは、上流の詰め込み一覧が
+ * **上流自身の変更に追いついていない**からである ── LibreOffice は
+ * 表の自動書式を `autotbl.fmt` → `tablestyles.xml` へ移したのに、
+ * `static/CustomTarget_emscripten_fs_image.mk` は**古いほうを入れたまま**だった。
+ *
+ * ## ⚠ 観測点は「文字列が在るか」ではない
+ *
+ * この patch が壊れる形は 2 つあり、**どちらも「文字列は在る」まま**である:
+ *
+ * | 壊れ方 | 何が起きるか |
+ * |---|---|
+ * | 継続行の外に落ちる | make が `missing separator` で**止まる**(初稿がこれだった) |
+ * | 違うブロックに入る | make は通るが、**Writer を切ったときに Calc の file が消える**等 |
+ *
+ * 🔑 だから **make に実際に解析させ、変数の中身**を見る。
+ * ⚠ 併せて `ENABLE_WASM_STRIP_*` を立てた対照群を回す ──
+ * 「読む側のブロックに入れた」という主張は、**切ったときに消えて初めて**証明される。
+ */
+import { afterEach, describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+/** ⚠ shell の cwd に依らせない。 */
+const PATCHER = fileURLToPath(
+  new URL('../../build/office-wasm/patch-lo-fsimage.py', import.meta.url),
+);
+
+const MK = 'static/CustomTarget_emscripten_fs_image.mk';
+
+/**
+ * 上流の該当箇所を再現した極小の fixture。
+ *
+ * ⚠ **空行を落とさないこと** ── 一覧の最後の entry と `endif` の間の空行が、
+ * まさに初稿を壊した当のものである(そこで make の代入が終わる)。
+ * fixture からこれを消すと、**壊れた patch が緑で通る**。
+ */
+const UPSTREAM = [
+  'gb_emscripten_fs_image_files := \\',
+  '    $(INSTROOT)/$(LIBO_SHARE_FOLDER)/filter/vml-shape-types \\',
+  '',
+  'ifneq ($(ENABLE_WASM_STRIP_WRITER),TRUE)',
+  'gb_emscripten_fs_image_files += \\',
+  '    $(INSTROOT)/$(LIBO_SHARE_FOLDER)/config/soffice.cfg/modules/swriter/menubar/menubar.xml \\',
+  '',
+  'endif # !ENABLE_WASM_STRIP_WRITER',
+  '',
+  'ifneq ($(ENABLE_WASM_STRIP_CALC),TRUE)',
+  'gb_emscripten_fs_image_files += \\',
+  '    $(INSTROOT)/$(LIBO_SHARE_FOLDER)/config/soffice.cfg/modules/scalc/menubar/menubar.xml \\',
+  '',
+  'endif # !ENABLE_WASM_STRIP_CALC',
+  '',
+  'gb_emscripten_fs_image_files += \\',
+  '    $(INSTROOT)/$(LIBO_SHARE_FOLDER)/registry/main.xcd \\',
+  '',
+].join('\n');
+
+/** make に解析させるだけの受け皿。⚠ 変数の**中身**を出す。 */
+const HARNESS = [
+  'INSTROOT := /I',
+  'LIBO_SHARE_FOLDER := share',
+  `include ${MK}`,
+  'print:',
+  '\t@echo "FILES=$(gb_emscripten_fs_image_files)"',
+  '',
+].join('\n');
+
+const made: string[] = [];
+afterEach(() => {
+  for (const d of made.splice(0)) rmSync(d, { recursive: true, force: true });
+});
+
+interface Run {
+  readonly status: number;
+  readonly stderr: string;
+  readonly dir: string;
+}
+
+function runPatcher(dir: string): Run {
+  try {
+    execFileSync('python3', [PATCHER, dir], { encoding: 'utf-8', stdio: 'pipe' });
+    return { status: 0, stderr: '', dir };
+  } catch (e) {
+    const err = e as { status?: number; stderr?: Buffer | string };
+    return { status: err.status ?? -1, stderr: String(err.stderr ?? ''), dir };
+  }
+}
+
+/** fixture を撒くだけ(patch は当てない)。 */
+function seed(source = UPSTREAM): string {
+  const dir = mkdtempSync(join(tmpdir(), 'pkc3-fsimg-'));
+  made.push(dir);
+  mkdirSync(join(dir, 'static'), { recursive: true });
+  writeFileSync(join(dir, MK), source);
+  writeFileSync(join(dir, 'harness.mk'), HARNESS);
+  return dir;
+}
+
+function apply(source = UPSTREAM): Run {
+  return runPatcher(seed(source));
+}
+
+/**
+ * make に読ませて、変数に入った path を返す。
+ * ⚠ 解析に失敗したら**例外**にする(`missing separator` を「0 件」と読まない)。
+ */
+function fileList(dir: string, env: Record<string, string> = {}): string[] {
+  const out = execFileSync('make', ['-C', dir, '-f', 'harness.mk', 'print'], {
+    encoding: 'utf-8',
+    stdio: 'pipe',
+    env: { ...process.env, ...env },
+  });
+  const line = out.split('\n').find((l) => l.startsWith('FILES='));
+  if (line === undefined) throw new Error(`make の出力に FILES= が無い:\n${out}`);
+  return line.slice('FILES='.length).trim().split(/\s+/).filter(Boolean);
+}
+
+/** コードが読むのに一式へ入っていなかった 4 件(全数走査の結果)。 */
+const ADDED = {
+  'Writer 表の自動書式': '/I/share/svx/tablestyles.xml',
+  'Writer ラベル定義': '/I/share/labels/labels.xml',
+  'Calc 表スタイル': '/I/share/calc/tablestyles.xml',
+  'Calc 既定セルスタイル': '/I/share/calc/styles.xml',
+} as const;
+
+describe('wasm 一式の詰め込み一覧(#135)', () => {
+  it('🔴 make が解析でき、4 件が変数に入る(対照群では 0 件)', () => {
+    const before = apply();
+    // ⚠ 対照群 ── パッチ前に既に入っているなら、この test は何も測っていない
+    const control = fileList(seed());
+    for (const [why, p] of Object.entries(ADDED)) {
+      expect(control, `${why}: 対照群に既に在る = 何も測っていない`).not.toContain(p);
+    }
+
+    expect(before.status, before.stderr).toBe(0);
+    const after = fileList(before.dir);
+    for (const [why, p] of Object.entries(ADDED)) {
+      expect(after, `${why}(${p})が一覧に入っていない`).toContain(p);
+    }
+    // ⚠ 既存の entry を巻き添えにしていない(下限も置く)
+    expect(after).toContain('/I/share/filter/vml-shape-types');
+    expect(after.length).toBe(control.length + 4);
+  });
+
+  /**
+   * 🔴 **置いた場所の主張は、切ったときに消えて初めて証明される。**
+   * 「Writer が読むものは Writer のブロックに入れた」を、
+   * `ENABLE_WASM_STRIP_WRITER=TRUE` で実際に落として確かめる。
+   */
+  it('🔴 Writer を切ると Writer 用の 2 件だけ消える', () => {
+    const r = apply();
+    expect(r.status, r.stderr).toBe(0);
+    const stripped = fileList(r.dir, { ENABLE_WASM_STRIP_WRITER: 'TRUE' });
+    expect(stripped).not.toContain(ADDED['Writer 表の自動書式']);
+    expect(stripped).not.toContain(ADDED['Writer ラベル定義']);
+    expect(stripped).toContain(ADDED['Calc 表スタイル']);
+    expect(stripped).toContain(ADDED['Calc 既定セルスタイル']);
+  });
+
+  it('🔴 Calc を切ると Calc 用の 2 件だけ消える', () => {
+    const r = apply();
+    expect(r.status, r.stderr).toBe(0);
+    const stripped = fileList(r.dir, { ENABLE_WASM_STRIP_CALC: 'TRUE' });
+    expect(stripped).not.toContain(ADDED['Calc 表スタイル']);
+    expect(stripped).not.toContain(ADDED['Calc 既定セルスタイル']);
+    expect(stripped).toContain(ADDED['Writer 表の自動書式']);
+    expect(stripped).toContain(ADDED['Writer ラベル定義']);
+  });
+
+  /**
+   * ⚠ 上流が同じ file を入れたら**止まる** ── 二重に入れない。
+   * 🔑 止まったときは「patch が要らなくなった」合図なので、消す判断ができる。
+   */
+  it('⚠ 上流が既に入れていたら異常終了する', () => {
+    const r = apply();
+    expect(r.status, r.stderr).toBe(0);
+    const twice = runPatcher(r.dir);
+    expect(twice.status, '2 回目が通ってしまった(二重に入る)').not.toBe(0);
+    expect(twice.stderr).toContain('上流が既に入れている');
+  });
+
+  it('⚠ 錨が無ければ異常終了する(黙って素通りしない)', () => {
+    const r = apply(UPSTREAM.replace('endif # !ENABLE_WASM_STRIP_CALC', 'endif'));
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('錨が 0 件');
+    // ⚠ 落ちたときは書き換えていない
+    expect(readFileSync(join(r.dir, MK), 'utf-8')).not.toContain('tablestyles.xml');
+  });
+});
