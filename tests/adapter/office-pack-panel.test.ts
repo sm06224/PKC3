@@ -273,3 +273,54 @@ describe('設定の面に載っている', () => {
     expect(section!.closest('[data-pkc-region="settings-user"]')).toBeNull();
   });
 });
+
+/**
+ * 🔴 **配布元と版が違うことを、設定の面が出す**(user 裁定 2026-08-13)。
+ * ⚠ 器は 1 度しか組まないので、**映さないと古い値が残る**
+ *   (CLAUDE.md「同じ値を複数の描画経路へ渡すものは、経路ごとに pin する」)。
+ */
+describe('配布元との版ちがい', () => {
+  it('同じ版なら、行ごと隠れている(空の行を出さない)', () => {
+    const state = new OfficePackState();
+    state.setMeta({ ...META, version: 'lo-abc-run1' });
+    state.setAvailableVersion('lo-abc-run1');
+    const panel = buildOfficePackPanel(state);
+    const line = panel.root.querySelector('[data-pkc-field="office-pack-update"]');
+    expect((line as HTMLElement).hidden).toBe(true);
+    expect(line?.textContent).toBe('');
+    panel.dispose();
+  });
+
+  it('🔴 違えば出る ── 両方の版と次の一歩つき', () => {
+    const state = new OfficePackState();
+    state.setMeta({ ...META, version: 'unknown' });
+    state.setAvailableVersion('lo-abc-run1');
+    const panel = buildOfficePackPanel(state);
+    const line = panel.root.querySelector('[data-pkc-field="office-pack-update"]') as HTMLElement;
+    expect(line.hidden).toBe(false);
+    expect(line.textContent).toContain('unknown');
+    expect(line.textContent).toContain('lo-abc-run1');
+    expect(line.textContent).toContain('取得して入れる');
+    panel.dispose();
+  });
+
+  it('🔑 後から届いても映る(器を組み直さずに)', () => {
+    const state = new OfficePackState();
+    state.setMeta({ ...META, version: 'unknown' });
+    const panel = buildOfficePackPanel(state);
+    const line = panel.root.querySelector('[data-pkc-field="office-pack-update"]') as HTMLElement;
+    expect(line.hidden, 'まだ配布元を読んでいないのに出ている').toBe(true);
+    state.setAvailableVersion('lo-abc-run1');
+    expect(line.hidden, '放送を受けて映していない(古い値が残る)').toBe(false);
+    panel.dispose();
+  });
+
+  it('⚠ 入っていなければ出さない(「入っていません」は上の行が言っている)', () => {
+    const state = new OfficePackState();
+    state.setAvailableVersion('lo-abc-run1');
+    const panel = buildOfficePackPanel(state);
+    const line = panel.root.querySelector('[data-pkc-field="office-pack-update"]') as HTMLElement;
+    expect(line.hidden).toBe(true);
+    panel.dispose();
+  });
+});

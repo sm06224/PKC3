@@ -196,3 +196,31 @@ describe('#135 ハング検知の配線', () => {
     expect(MAIN.slice(at, MAIN.indexOf('});', at))).toContain('officeWindow');
   });
 });
+
+/**
+ * 🔴 **配布元と版が違うことを知らせる配線**(user 裁定 2026-08-13「通知のみで OK」)。
+ *
+ * ⚠ ここも原文の検査である ── 呼び出しごと消しても `main.ts` は
+ * **どの test からも実行されない**ので全 test が緑になる。
+ * ⚠ 弱い検査だと自覚して使う(判定も文言も `office-pack-update.ts` の unit が見る)。
+ */
+describe('配布元との版ちがいの配線', () => {
+  it('🔴 checkPackUpdate を、目録だけ読む口へつないで呼ぶ', () => {
+    const at = MAIN.indexOf('checkPackUpdate({');
+    expect(at, '呼んでいない(版が違っても永久に何も出ない)').toBeGreaterThan(-1);
+    const args = MAIN.slice(at, MAIN.indexOf('})', at));
+    expect(args, '手元の版を渡していない').toContain('installedVersion');
+    // 🔴 **一式(77MB)ではなく目録だけを読む口**を渡していること
+    expect(args, '目録だけを読む口を渡していない').toContain('readAvailableVersion');
+    expect(args, '一式を取りに行く口を渡している').not.toContain('installFromUrl');
+  });
+
+  it('🔴 結果を、設定の面と起動時の知らせの**両方**へ渡す', () => {
+    // ⚠ 片方だけだと「設定を開かないと分からない」か「開いても消えている」になる
+    const at = MAIN.indexOf('checkPackUpdate({');
+    const tail = MAIN.slice(at, at + 900);
+    expect(tail, '設定の面へ映していない').toContain('setAvailableVersion');
+    expect(tail, '起動時に知らせていない').toContain('packUpdateNotice');
+    expect(tail, '知らせの出口が status につながっていない').toContain('showStatus');
+  });
+});

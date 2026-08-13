@@ -22,6 +22,10 @@
  * この repo が 2026-08-07 に 3 面で踏んだ形なので、`sync()` で字だけ書き換える。
  */
 import type { OfficePackMeta } from '@adapter/platform/office/office-pack';
+import {
+  comparePackVersion,
+  packUpdateText,
+} from '@adapter/platform/office/office-pack-update';
 import { appOfficePack, type OfficePackState } from './office-entry-view';
 import { readOfficeCapability, missingCapabilities } from '@features/office/office-entry';
 
@@ -129,7 +133,14 @@ export function buildOfficePackPanel(state: OfficePackState = appOfficePack): Of
   status.setAttribute('data-pkc-field', 'office-pack-status');
   const capability = document.createElement('p');
   capability.setAttribute('data-pkc-field', 'office-pack-capability');
-  root.append(status, capability);
+  /**
+   * 🔴 **配布元と版が違うことを言う**(user 裁定 2026-08-13「通知のみで OK」)。
+   * ⚠ 空のときは**器ごと隠す**(空の行を user に出さない ── お知らせと同じ作法)。
+   */
+  const update = document.createElement('p');
+  update.setAttribute('data-pkc-field', 'office-pack-update');
+  update.hidden = true;
+  root.append(status, capability, update);
 
   const row = document.createElement('div');
   row.setAttribute('data-pkc-field', 'office-pack-actions');
@@ -162,6 +173,12 @@ export function buildOfficePackPanel(state: OfficePackState = appOfficePack): Of
     const meta = state.getMeta();
     status.textContent = packStatusText(meta);
     capability.textContent = packCapabilityText();
+    // ⚠ 判定は `office-pack-update.ts` に 1 つだけ。ここは字にするだけ
+    const text = packUpdateText(
+      comparePackVersion(meta?.version ?? null, state.getAvailableVersion()),
+    );
+    update.hidden = text === null;
+    update.textContent = text ?? '';
     const busy = state.progress() !== '';
     progress.hidden = !busy;
     progress.textContent = state.progress();
