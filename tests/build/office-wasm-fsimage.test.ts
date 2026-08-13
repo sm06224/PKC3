@@ -186,6 +186,43 @@ describe('wasm 一式の詰め込み一覧(#135)', () => {
     expect(twice.stderr).toContain('上流が既に入れている');
   });
 
+  /**
+   * 🔴 **一覧の外へ落ちたら止まる。**
+   *
+   * 変異試験で「置いた場所の後条件を外す」が生き延びたので足した ──
+   * 振る舞いの test(上の 2 件)は**正しく置けた形**しか通らないので、
+   * 後条件そのものは誰も見ていなかった。
+   *
+   * ⚠ ここで作るのは**上流が組み替えた**状況である:`endif` が対応する
+   * `ifneq` より**前**に在ると、錨の本数(1 件)は満たしたまま、
+   * 差し込み先がどのブロックにも属さなくなる。
+   * 🔑 30 分のビルドの中で静かに間違えるより、**ここで止まる**ほうがよい。
+   */
+  it('🔴 差し込み先がブロックの外なら異常終了する', () => {
+    const broken = [
+      'gb_emscripten_fs_image_files := \\',
+      '    $(INSTROOT)/$(LIBO_SHARE_FOLDER)/filter/vml-shape-types \\',
+      '',
+      'endif # !ENABLE_WASM_STRIP_WRITER',
+      '',
+      'ifneq ($(ENABLE_WASM_STRIP_WRITER),TRUE)',
+      'gb_emscripten_fs_image_files += \\',
+      '    $(INSTROOT)/$(LIBO_SHARE_FOLDER)/config/soffice.cfg/modules/swriter/x.xml \\',
+      '',
+      'ifneq ($(ENABLE_WASM_STRIP_CALC),TRUE)',
+      'gb_emscripten_fs_image_files += \\',
+      '    $(INSTROOT)/$(LIBO_SHARE_FOLDER)/config/soffice.cfg/modules/scalc/x.xml \\',
+      '',
+      'endif # !ENABLE_WASM_STRIP_CALC',
+      '',
+    ].join('\n');
+    const r = apply(broken);
+    expect(r.status, '一覧の外へ落ちたのに通ってしまった').not.toBe(0);
+    expect(r.stderr).toContain('ブロックの外に在る');
+    // ⚠ 落ちたときは書き換えていない
+    expect(readFileSync(join(r.dir, MK), 'utf-8')).not.toContain('svx/tablestyles.xml');
+  });
+
   it('⚠ 錨が無ければ異常終了する(黙って素通りしない)', () => {
     const r = apply(UPSTREAM.replace('endif # !ENABLE_WASM_STRIP_CALC', 'endif'));
     expect(r.status).not.toBe(0);

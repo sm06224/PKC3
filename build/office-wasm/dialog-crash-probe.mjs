@@ -195,6 +195,26 @@ const SUITES = {
     { id: 'spelling', at: [67, 13], why: '🔴 Spelling…(開いた瞬間に死ぬ)', control: false, wait: 20_000 },
     { id: 'escape', key: 'Escape', why: '開けたなら閉じてみる', control: false },
   ],
+  /**
+   * #135 ── `Ctrl+T`(表の挿入)。⚠ **#134 とは別の根**である
+   * (空の自動書式一覧を添字 `-1` で読む / `patch-lo-instable.py`)。
+   *
+   * 🔑 `Ctrl+T` を選ぶのは、**キーが LO まで届く**ことが分かっているからである
+   * (`F5` / `Ctrl+H` は届かない)。メニュー座標を踏まずに済む。
+   * ⚠ 症状は「落ちる」ではなく**タブごと固まる**ので、screenshot も JS も
+   *   通らなくなる ── 停止画面すら出ない。
+   */
+  table: [
+    ...OPEN_DOC,
+    {
+      id: 'insert-table',
+      key: 'Control+t',
+      why: '🔴 表の挿入 ── ここで固まる(直す前 2/2)',
+      control: false,
+      wait: 15_000,
+    },
+    { id: 'escape', key: 'Escape', why: '開けたなら閉じてみる', control: false },
+  ],
 };
 
 const SUITE = process.env.PKC3_PROBE_SUITE ?? 'dialog';
