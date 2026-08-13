@@ -262,4 +262,42 @@ describe('office-wasm のパッチ', () => {
     const loop = yml.slice(patchAt, patchAt + 400);
     expect(loop, 'qtbase 以外へ当てている').toContain('~/qtbase');
   });
+
+  /**
+   * 🔴 **頼んだモジュールと、確かめる grep の釣り合い**(#145)。
+   *
+   * 上流 `configure.ac` の `--with-wasm-module` 既定は **`'calc writer'`** で、
+   * 渡さないと Impress は**一式に 1 file も入らない**(実測: `simpress` 0 / `sdraw` 0)。
+   * ⚠ しかも**入らなかったことは静かである** ── user から見ると「開こうとしても
+   * 無反応」でしかなく、ビルドは緑のまま通る。
+   *
+   * だから configure の step は、頼んだモジュールごとに
+   * 「落とされていない」(`ENABLE_WASM_STRIP_… =` が空)を確かめている。
+   * 🔑 ここで縛るのは**その釣り合い**である ── モジュールを 1 つ足して
+   * grep を足し忘れると、**確かめないまま焼く**ことになる
+   * (CLAUDE.md「片側を直したら、対称の反対側を必ず疑う」)。
+   */
+  it('🔴 頼んだ wasm モジュールは、全部「落とされていない」ことを確かめている', () => {
+    const yml = readFileSync(YML, 'utf-8');
+    const m = /--with-wasm-module=([^\n]*)/.exec(yml);
+    expect(m, 'configure が --with-wasm-module を渡していない').not.toBeNull();
+    const modules = m![1]!.trim().split(/\s+/).filter(Boolean);
+    // 空振り防止 ── 1 つも読めていない形で「全部確かめた」と言わない
+    expect(modules.length, 'モジュールを 1 つも読めていない').toBeGreaterThan(0);
+
+    /** `configure.ac:4374-4389` の case が空にする変数。 */
+    const STRIP_VAR: Record<string, string> = {
+      calc: 'ENABLE_WASM_STRIP_CALC',
+      writer: 'ENABLE_WASM_STRIP_WRITER',
+      impress: 'ENABLE_WASM_STRIP_BASIC_DRAW_MATH_IMPRESS',
+    };
+    for (const mod of modules) {
+      const v = STRIP_VAR[mod];
+      expect(v, `知らないモジュール "${mod}"(configure.ac の case に無い)`).toBeDefined();
+      // ⚠ `=$` まで含めて見る ── 「変数名が在る」だけでは TRUE でも通ってしまう
+      expect(yml, `${mod} を頼んでいるのに、落とされていないことを確かめていない`).toContain(
+        `grep -q '^export ${v}=$' config_host.mk`,
+      );
+    }
+  });
 });

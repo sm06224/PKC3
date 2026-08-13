@@ -215,6 +215,42 @@ const SUITES = {
     },
     { id: 'escape', key: 'Escape', why: '開けたなら閉じてみる', control: false },
   ],
+  /**
+   * #145 ── Start Center から **Impress** を開く。
+   *
+   * ⚠ `OPEN_DOC` を**使わない**唯一の suite である ── 見たいのは
+   * 「Start Center の項目が生きているか」なので、先に Writer を開くと
+   * **Start Center が消えて**押せない。
+   *
+   * 🔴 **初稿は「Writer を開いて `Ctrl+W` で戻る」形にして間違えた**(2026-08-13)。
+   * `Ctrl+W` は Start Center へ**戻らず**、しかもメニューとツールバーが消えた
+   * **半壊の Writer** が残る。私のクリックは「Impress Presentation」ではなく
+   * **本文の上**に落ちており、拾った `null function or function signature mismatch` は
+   * **Impress とは無関係**だった(それ自体は別の実バグ ── #117 へ)。
+   * ⚠ `controlsLanded: true` に騙された ── あれは「画面が変わった」しか見ておらず、
+   * **「Start Center に戻った」を確かめていない**。
+   *
+   * 🔑 だから対照群は **Start Center の面から出ない一手**にする ──
+   * `Templates` は中央の面を差し替えるだけで、左の `Create:` 一覧はそのまま残る。
+   * これが届いていれば「座標が Start Center に当たっている」が言える。
+   * ⚠ 座標は 1280x720 の Start Center から採った。
+   */
+  impress: [
+    {
+      id: 'templates',
+      at: [100, 241],
+      why: '⚠ 対照群 ── Start Center の中で面が変わる(押せている証拠。面から出ない)',
+      control: true,
+      wait: 8_000,
+    },
+    {
+      id: 'new-impress',
+      at: [152, 435],
+      why: '🔴 Impress Presentation ── 直す前は無反応(2/2)',
+      control: false,
+      wait: 25_000,
+    },
+  ],
 };
 
 const SUITE = process.env.PKC3_PROBE_SUITE ?? 'dialog';

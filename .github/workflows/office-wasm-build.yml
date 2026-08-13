@@ -420,6 +420,7 @@ jobs:
           --with-package-format=emscripten
           --enable-emscripten-jspi
           --disable-emscripten-proxy-to-pthread
+          --with-wasm-module=calc writer impress
           CONF
           . ~/emsdk/emsdk_env.sh
           ./autogen.sh --with-distro=PKC3WASM-Qt6
@@ -427,6 +428,16 @@ jobs:
           grep -q '^export ENABLE_QT6=TRUE' config_host.mk
           grep -q '^export ENABLE_QT5=$' config_host.mk
           grep -q '^export VCL_PLUGIN_INFO= qt6$' config_host.mk
+          # 🔴 **Impress(と Draw / Math / Basic)が落とされていないことを確かめる**(#145)。
+          #    上流 configure.ac の `--with-wasm-module` 既定は **'calc writer'** なので、
+          #    渡さないと Impress は**一式に 1 file も入らない**(実測: simpress 0 / sdraw 0)。
+          #    ⚠ 値に空白が入るが、autogen.sh は**行をそのまま 1 引数**にし
+          #    `system(@args)` で渡すので保たれる(上流にも `--with-vendor=The Document
+          #    Foundation` の前例が在る)。⚠ それでも**渡ったかは自明でない**ので、
+          #    「空になったか」を config_host.mk で直接見る ── 落ちるべきときに落ちる形。
+          grep -q '^export ENABLE_WASM_STRIP_BASIC_DRAW_MATH_IMPRESS=$' config_host.mk
+          grep -q '^export ENABLE_WASM_STRIP_WRITER=$' config_host.mk
+          grep -q '^export ENABLE_WASM_STRIP_CALC=$' config_host.mk
           # 🔴 **Qt6 のモードが立っていることを確かめる**(下のコメント参照)。
           #    ⚠ 既定のままだと Qt5 用の組み合わせで建ち、走らせるまで気づけない
           grep -q '^export ENABLE_EMSCRIPTEN_JSPI=TRUE' config_host.mk
