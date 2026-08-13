@@ -114,6 +114,21 @@ export class OfficePackInstaller {
     return this.deps.store.readMeta().catch(() => null);
   }
 
+  /**
+   * 🔴 **配布元の版だけを読む**(#134 の配布、user 裁定 2026-08-13「通知のみで OK」)。
+   *
+   * ⚠ 取るのは**目録(`pack.json`)だけ**で数百バイト ── 一式(77MB)は
+   * 押した人にしか取らせない(裁定 2026-08-10「手動で設定した際に追加ダウンロード」)。
+   * ⚠ **失敗は黙って `null`** ── オフラインは正常な状態であり、起動のたびに
+   * 「届きません」と言うのは害である(押したときの失敗は別で、名指しで理由を出す)。
+   */
+  async readAvailableVersion(): Promise<string | null> {
+    const base = this.deps.base ?? DEFAULT_PACK_BASE;
+    return (this.deps.fetchManifest ?? fetchPackManifest)(base)
+      .then((m) => m.version)
+      .catch(() => null);
+  }
+
   /** 取得元(同一 origin)から入れる。 */
   async installFromUrl(): Promise<PackResult> {
     return this.run('取得', async (progress) => {

@@ -67,6 +67,23 @@ export class OfficePackState implements OfficeAvailabilitySource {
     return true;
   }
 
+  /**
+   * 配布元の版(まだ見ていない / 読めなかったときは null)。
+   * ⚠ **突き合わせの結果ではなく素の値**を持つ ── 判定は
+   *   `office-pack-update.ts` の 1 か所だけが行う(2 か所で書かない)。
+   */
+  private availableVersion: string | null = null;
+
+  getAvailableVersion(): string | null {
+    return this.availableVersion;
+  }
+
+  setAvailableVersion(v: string | null): void {
+    if (this.availableVersion === v) return;
+    this.availableVersion = v;
+    this.emit();
+  }
+
   progress(): string {
     return this.progressText;
   }

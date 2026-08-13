@@ -90,6 +90,17 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-13-office-dialog-crash',
+    title: 'Office でダイアログを閉じると止まる問題を直しました',
+    items: [
+      'Word Count や検索と置換の窓を閉じただけで Office が停止する問題を直しました。開いている文書は失われていました。',
+      '原因は Office 側ではなく、その土台(Qt)が窓を片づけるときに壊れていたことでした。',
+      '直っているのは新しいひとそろいのほうです。設定の「Office 表示」から入れ直してください。',
+      'ひとそろいが配布元と別の版のときは、起動したときと設定の画面でお知らせします。',
+      '入れ直すかどうかはあなたが決めます。勝手に取りに行くことはありません。',
+    ],
+  },
+  {
     id: '2026-08-13-office-hang-notice',
     title: 'Office の窓が固まったとき、お知らせするようになりました',
     items: [

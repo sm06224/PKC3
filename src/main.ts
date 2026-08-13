@@ -41,6 +41,10 @@ import { applyPackResult } from '@adapter/ui/render/office-pack-panel';
 import { OfficeWindow } from '@adapter/platform/office/office-window';
 import { createOfficeOpener } from '@adapter/platform/office/office-open';
 import { watchOfficeHang } from '@adapter/platform/office/office-hang-watch';
+import {
+  checkPackUpdate,
+  packUpdateNotice,
+} from '@adapter/platform/office/office-pack-update';
 import { OfficePackStore } from '@adapter/platform/office/office-pack-store';
 import {
   OfficePackInstaller,
@@ -1016,9 +1020,24 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   void officeInstaller
     .readMeta()
     .then((meta) => {
-      if (!appOfficePack.setMeta(meta)) return;
-      center.invalidateDetail();
-      center.render(dispatcher.getState());
+      if (appOfficePack.setMeta(meta)) {
+        center.invalidateDetail();
+        center.render(dispatcher.getState());
+      }
+      /**
+       * 🔴 **配布元と版が違えば知らせる**(user 裁定 2026-08-13「通知のみで OK」)。
+       * ⚠ ここは**渡すだけ** ── 取りに行くのは目録(数百バイト)だけで、
+       *   一式(77MB)は押した人にしか取らせない。判定も文言も
+       *   `office-pack-update.ts` が持つ(`main.ts` は原文 pin の test しか無い面)。
+       */
+      void checkPackUpdate({
+        installedVersion: () => appOfficePack.getMeta()?.version ?? null,
+        fetchAvailable: () => officeInstaller.readAvailableVersion(),
+      }).then((diff) => {
+        appOfficePack.setAvailableVersion(diff.kind === 'differs' ? diff.available : null);
+        const notice = packUpdateNotice(diff);
+        if (notice !== null) showStatus(notice);
+      });
     })
     .catch(() => {});
 
