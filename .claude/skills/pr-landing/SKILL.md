@@ -84,6 +84,30 @@ esac
 🔑 poll ループは **想定外の応答を必ず 1 行吐かせる**(`*) echo "想定外: $st" ;;`)。
 「成功の合図だけを grep する監視は、crash と hang に対して沈黙する」の同型である。
 
+### 🔴 merge の `502` は「失敗」ではない ── **PR の状態ではなく main を見る**
+
+`merge_pull_request` が `502 Server Error` を返すことがある(2026-08-13 に 2 回)。
+このとき **merge は server 側の job として受理済み**で、PR の record だけが遅れる:
+
+| 見たもの | そのとき本当は |
+|---|---|
+| `502 Server Error` | job が queue に入った(**失敗ではない**) |
+| `pull_request_read` → `state: open` / `merged: false` | ⚠ **record が追いついていないだけ** |
+| 3 回目の呼び出し → `405 Merge already in progress` | 1 回目が**まだ走っている** |
+
+🔴 **ここで「まだ merge されていない」と読んで撃ち直すと、squash commit が 2 つ並ぶ。**
+実際に `18075e1`(実体・12 file)と `34e1705`(**空**)が main に積まれた ──
+差分は正しいので **CI も diff も何も鳴らない**。⚠ main の履歴にしか残らない事故である。
+
+🔑 判定は **PR の record ではなく `origin/main` の commit** で採る:
+
+```bash
+git fetch origin main && git log --oneline -3 origin/main
+```
+
+⚠ `405 Merge already in progress` を見たら、**それは「待て」という意味**である
+(`pull_request_read` が `open` を返し続けても、である)。
+
 ### 🔴 merge したら、**次の作業に入る前に**必ず branch を作り直す
 
 ```bash
