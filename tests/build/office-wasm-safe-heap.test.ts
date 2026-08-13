@@ -39,8 +39,15 @@ const MK = 'solenv/gbuild/platform/EMSCRIPTEN_INTEL_GCC.mk';
 /**
  * 上流 `EMSCRIPTEN_INTEL_GCC.mk` の該当箇所を再現した極小の fixture。
  * ⚠ 錨は**空白まで含めて**上流と同じにする ── ずれたら patch script が落ちるのが正しい。
+ *
+ * 🔴 **上流の注記行を必ず入れておく**(2026-08-13、これが無くて CI で踏んだ)。
+ * `# avoid -s SAFE_HEAP=1 …` は上流 13 行目に**実在する**。初稿の fixture は
+ * この行を持っていなかったので、「頼んでいないのに SAFE_HEAP が在る」と
+ * 誤判定する検査が**緑のまま通り、普通の配布ビルドを全部止める**ところだった。
+ * ⚠ **fixture に無い次元は、測っていない次元である**(CLAUDE.md)。
  */
 const UPSTREAM = [
+  '# avoid -s SAFE_HEAP=1 - c.f. gh#8584 this breaks source maps',
   'gb_EMSCRIPTEN_LDFLAGS += -s TOTAL_MEMORY=1GB',
   'gb_EMSCRIPTEN_LDFLAGS += -sSTACK_SIZE=131072 -sDEFAULT_PTHREAD_STACK_SIZE=65536',
   'gb_EMSCRIPTEN_LDFLAGS += -sEXPORTED_RUNTIME_METHODS=\'["ClassHandle","HEAPU16","HEAPU32"]\'',
@@ -86,7 +93,12 @@ describe('🔴 SAFE_HEAP は頼んだときだけ入る', () => {
   it('頼まなければ入らない(= 配布物は素のまま)', () => {
     const r = patch({});
     expect(r.status, r.stderr).toBe(0);
-    expect(r.mk).not.toContain('SAFE_HEAP');
+    // ⚠ **file 全体で探さない** ── 上流に `# avoid -s SAFE_HEAP=1 …` の注記が在る。
+    //    見るのは**自分が書いた行**である(全文で見た初稿は配布ビルドを全部止めた)
+    const line = r.mk.split('\n').find((l) => l.includes('INITIAL_MEMORY=1GB'));
+    expect(line).not.toContain('SAFE_HEAP');
+    // 🔑 上流の注記は**残っている**こと(fixture がその次元を持つ証拠 = 空振り防止)
+    expect(r.mk, 'fixture が上流の注記行を失っている').toContain('avoid -s SAFE_HEAP=1');
     // ⚠ 空振り防止 ── 「何も置換していないから SAFE_HEAP も無い」で通らせない
     expect(r.mk).toContain('ALLOW_MEMORY_GROWTH=1');
     expect(r.mk).toContain('PTHREAD_POOL_SIZE=16');
@@ -96,7 +108,43 @@ describe('🔴 SAFE_HEAP は頼んだときだけ入る', () => {
   it('明示的な 0 でも入らない(空文字と 0 を取り違えない)', () => {
     const r = patch({ PKC3_SAFE_HEAP: '0' });
     expect(r.status, r.stderr).toBe(0);
-    expect(r.mk).not.toContain('SAFE_HEAP');
+    const line = r.mk.split('\n').find((l) => l.includes('INITIAL_MEMORY=1GB'));
+    expect(line).not.toContain('SAFE_HEAP');
+  });
+
+  /**
+   * 🔴 **これが CI で落ちた回の回帰 test である**(2026-08-13)。
+   * 上流の注記行を後条件が拾ってしまい、**頼んでいない回が異常終了**した ──
+   * つまり **`lo-wasm-dev`(配布)を焼くたびに落ちる**状態だった。
+   * ⚠ 「両方向を検めている」と書いた検査が、**片方向でしか走っていなかった**
+   * (調査ビルドは `=1` なので通ってしまう)。
+   */
+  it('🔴 上流の注記に釣られない ── 名前つきだけ頼んだ回が通る', () => {
+    const r = patch({ PKC3_SAFE_HEAP: '0', PKC3_PROFILING_FUNCS: '1' });
+    expect(r.status, r.stderr).toBe(0);
+    const line = r.mk.split('\n').find((l) => l.includes('INITIAL_MEMORY=1GB'));
+    expect(line).toContain('--profiling-funcs');
+    expect(line).not.toContain('SAFE_HEAP');
+  });
+
+  it('🔴 名前を残す指示も、頼んだときだけ入る(#134 の 2 本目)', () => {
+    // ⚠ SAFE_HEAP とは**別の軸**である ── 片方だけ頼めること自体を pin する
+    const off = patch({});
+    expect(off.mk).not.toContain('--profiling-funcs');
+    expect(off.status, off.stderr).toBe(0);
+    const on = patch({ PKC3_PROFILING_FUNCS: '1' });
+    expect(on.status, on.stderr).toBe(0);
+    const line = on.mk.split('\n').find((l) => l.includes('INITIAL_MEMORY=1GB'));
+    expect(line).toContain('--profiling-funcs');
+    expect(line, '頼んでいない SAFE_HEAP が混ざっている').not.toContain('SAFE_HEAP');
+  });
+
+  it('2 つ同時に頼める(調査は組み合わせで効く)', () => {
+    const r = patch({ PKC3_SAFE_HEAP: '1', PKC3_PROFILING_FUNCS: '1' });
+    expect(r.status, r.stderr).toBe(0);
+    const line = r.mk.split('\n').find((l) => l.includes('INITIAL_MEMORY=1GB'));
+    expect(line).toContain('-s SAFE_HEAP=1');
+    expect(line).toContain('--profiling-funcs');
   });
 
   it('PKC3_SAFE_HEAP=1 のときだけ、メモリの行に足される', () => {
@@ -152,13 +200,14 @@ describe('🔴 workflow が配布 tag を守る', () => {
     expect(safe).toMatch(/default:\s*false/);
   });
 
-  it('🔴 tag は safe_heap から導出される(2 つの tag が分岐の中に在る)', () => {
-    expect(wf).toContain('tag=lo-wasm-dev');
-    expect(wf).toContain('tag=lo-wasm-safeheap');
-    // 分岐の中に在ること ── 「両方の字が在る」だけでは、片方が死に行でも通る
-    const at = wf.indexOf('tag=lo-wasm-safeheap');
-    const before = wf.slice(Math.max(0, at - 400), at);
-    expect(before, 'safe_heap を見ずに tag を決めている').toContain('inputs.safe_heap');
+  it('🔴 接尾辞は入力から組まれる(字を直書きしない)', () => {
+    // ⚠ 「`-safeheap` の字が在る」だけでは、死に行でも通る ── **組み立ての行**を見る
+    const at = wf.indexOf('SAFE_SUFFIX="${SAFE_SUFFIX}-safeheap"');
+    expect(at, '接尾辞を safe_heap から組んでいない').toBeGreaterThan(-1);
+    expect(wf.slice(Math.max(0, at - 120), at)).toContain('inputs.safe_heap');
+    const at2 = wf.indexOf('SAFE_SUFFIX="${SAFE_SUFFIX}-names"');
+    expect(at2, '接尾辞を profiling_funcs から組んでいない').toBeGreaterThan(-1);
+    expect(wf.slice(Math.max(0, at2 - 120), at2)).toContain('inputs.profiling_funcs');
   });
 
   it('🔴 patch step が PKC3_SAFE_HEAP を同じ入力から導く', () => {
@@ -172,6 +221,33 @@ describe('🔴 workflow が配布 tag を守る', () => {
 
   it('調査ビルドは版の字面で見分けが付く', () => {
     expect(wf).toContain('-safeheap');
+    expect(wf).toContain('-names');
     expect(wf).toContain('${SAFE_SUFFIX}');
+  });
+
+  it('🔴 名前つきビルドも同じ入力から導かれ、tag を汚さない', () => {
+    const block = inputsBlock();
+    expect(block).toContain('profiling_funcs:');
+    const pf = block.slice(block.indexOf('profiling_funcs:'));
+    expect(pf).toMatch(/type:\s*boolean/);
+    expect(pf).toMatch(/default:\s*false/);
+    // patch step が同じ入力から導く
+    const at = wf.indexOf('export PKC3_PROFILING_FUNCS=1');
+    expect(at, 'PKC3_PROFILING_FUNCS を渡していない').toBeGreaterThan(-1);
+    expect(wf.slice(Math.max(0, at - 200), at)).toContain('inputs.profiling_funcs');
+    expect(wf).toContain('export PKC3_PROFILING_FUNCS=0');
+  });
+
+  /**
+   * 🔴 **tag と版を、同じ 1 つの接尾辞から導く。**
+   * ⚠ 2 か所で組み立てると「版は素なのに tag は調査用」がいつか起きる ──
+   *   そうなると、どの一式を見ているか**版で確かめられなくなる**。
+   */
+  it('🔴 tag は接尾辞から導く(素のときだけ配布 tag)', () => {
+    expect(wf).toContain('tag="lo-wasm${SAFE_SUFFIX}"');
+    expect(wf).toContain('tag=lo-wasm-dev');
+    const at = wf.indexOf('tag="lo-wasm${SAFE_SUFFIX}"');
+    // 接尾辞が空のときだけ配布 tag へ落ちる
+    expect(wf.slice(Math.max(0, at - 200), at)).toContain('-n "$SAFE_SUFFIX"');
   });
 });

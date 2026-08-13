@@ -90,6 +90,37 @@ CSP が止めた試行も `page.on('request')` に**上がる**(応答は 1 度�
 紙で効く規則を見るには `setViewportSize({width:794,height:1123})`(A4 縦)が要る ──
 その幅で**狭幅の上書きが発火する**ことも込みで見る。
 
+### ⑥ canvas しか無い相手(LO wasm)を触る
+
+`build/office-wasm/dialog-crash-probe.mjs` が実例。DOM が無いので観測点が乏しく、
+**素直に見えるやり方が 3 つとも外れた**(2026-08-13):
+
+| やったこと | なぜ外れたか |
+|---|---|
+| `.qt-window` の**枚数**を数える | LO は Start Center の窓を**そのまま Writer に作り替える**ので 1 のまま |
+| `.qt-window` の `textContent` | screen reader を入れていないと `Enable Screen Reader` から動かない |
+| 絵の hash を **1 枚ずつ**比べる | **点滅するカーソル**で毎回変わる ── 何もしないキーが「届いた」になる |
+
+使えたのは 3 つ:
+
+1. **絵の hash を集合で比べる** ── 間隔(700ms 程度)をあけて 4 枚撮り、
+   **集合ごと入れ替わったときだけ**「届いた」。点滅は 2 状態なので集合に収まる
+2. 🔴 **対照群を手順の先頭に置く** ── 「ただの文字を打つ」。これが届いていない回は
+   **以降の判定が全部無意味**(`controlsLanded` として結果に出す)
+3. ⚠ **まず screenshot を見る** ── 上の 1・2 に気づいたのは絵を見たからである
+
+⚠ **`el.focus()` では Qt に入力が入らない。** Qt は自前の focus 管理と IME 用の
+隠し入力を持つので、合成 focus では入力先が決まらない ── **`page.mouse.click` で
+実際に押す**。⚠ ただし**メニューを開いた直後に押し直さない**(メニューが閉じる)。
+
+⚠ **ダイアログのショートカットは届かないことがある** ── LO wasm では `Ctrl+N` と
+文字入力は通るのに `F5` / `Ctrl+H` は 1 枚も開かなかった。**メニューを座標でクリック**
+するしかない。座標は screenshot から採るので **viewport を固定する**。
+
+⚠ **wasm のスタックに名前が無いときは `--profiling-funcs`** で焼き直す
+(name section だけが載る。実行は遅くならない)。⚠ `-sSAFE_HEAP=1` は**別物**で、
+JS の heap view 越しの load/store しか見ない ── wasm 内部の参照は捕まえない。
+
 ## 書くときの約束
 
 - `tests/smoke/helpers.ts` を使う: `gotoApp` / `createEntry` / `clickReal` /

@@ -151,6 +151,29 @@ REPLACE_POOL = (
 SAFE_HEAP_FLAG = " -s SAFE_HEAP=1"
 
 
+# 🔴 **wasm に関数名を残す**(#134、2026-08-13)。
+#
+# 手元で #134 を再現できた(`dialog-crash-probe.mjs`)。⚠ ところが**得られたのは
+# 番号だけ**だった:
+#
+#     RuntimeError: memory access out of bounds
+#       at soffice.wasm:wasm-function[200443]:0x55510db
+#       at soffice.wasm:wasm-function[200450]:0x555192f
+#       …
+#
+# 出荷 wasm には **name section が無い**(在れば Chrome は名前で出す)ので、
+# **10 段のスタックが全部ただの整数**である ── どの LO 関数かは言えない。
+#
+# 🔑 `--profiling-funcs` は **name section だけ**を残す(DWARF は入れない)。
+# 実行は遅くならず、増えるのは配る量だけ ── user 指示「配る量は気にしない」。
+#
+# ⚠ **`SAFE_HEAP` とは目的が違う。** 同じ手順を SAFE_HEAP つきで踏んだら
+# `null function or function signature mismatch` になり、**segfault は 1 件も
+# 出なかった** ── この不具合は JS の heap view 経由ではないので SAFE_HEAP の
+# 網に掛からない。名前のほうが要る。
+PROFILING_FUNCS_FLAG = " --profiling-funcs"
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print("usage: patch-lo-memory.py <lo-core-dir>", file=sys.stderr)
@@ -170,6 +193,8 @@ def main() -> int:
     memory = REPLACE_MEMORY
     if os.environ.get("PKC3_SAFE_HEAP") == "1":
         memory += SAFE_HEAP_FLAG
+    if os.environ.get("PKC3_PROFILING_FUNCS") == "1":
+        memory += PROFILING_FUNCS_FLAG
     text = text.replace(ANCHOR_MEMORY, memory)
     text = text.replace(ANCHOR_STACK, REPLACE_STACK)
     text = text.replace(ANCHOR_HEAPS, REPLACE_HEAPS)
@@ -190,13 +215,35 @@ def main() -> int:
     # ⚠ 錨がそのまま残っていたら「置換したつもり」である。
     #    heap の錨は **部分列**なので、`in` で消えたことまで確かめる
     # ⚠ **頼んだときだけ入る**ことを両方向で確かめる(「静かに調査ビルドを配る」を防ぐ)
-    want_safe = os.environ.get("PKC3_SAFE_HEAP") == "1"
-    if want_safe != ("SAFE_HEAP=1" in text):
-        print(
-            f"ERROR: SAFE_HEAP の有無が要求と食い違う(要求={want_safe})",
-            file=sys.stderr,
-        )
+    # 🔴 **見るのは「自分が書いた行」だけ。全文で探さない**(2026-08-13、CI で踏んだ)。
+    #
+    # 初稿は `mark in text` で file 全体を見ていた。ところが上流には
+    #
+    #     # avoid -s SAFE_HEAP=1 - c.f. gh#8584 this breaks source maps
+    #
+    # という**コメントが在る**(`EMSCRIPTEN_INTEL_GCC.mk:13`)。つまり
+    # `"SAFE_HEAP=1" in text` は**何もしなくても常に真**で、頼まなかったときに
+    # 必ず食い違い扱いになる ── **普通の配布ビルドが全部止まる**ところだった。
+    #
+    # ⚠ **なぜ test が緑だったか**: fixture が該当の 6 行だけの合成物で、
+    # **この注記行を持っていなかった**。「fixture のゼロ件の次元は測っていない次元」
+    # (CLAUDE.md)そのもの ── いまは fixture に上流の注記行を入れてある。
+    #
+    # ⚠ そして**この不具合は片側でしか出ない**。`PKC3_SAFE_HEAP=1` の回は
+    # want も現物も真なので通る ── 初回の調査ビルドが通ったのはそのためで、
+    # 「両方向を検めている」という触れ込みの検査が**片方向でしか走っていなかった**。
+    mem_line = next((l for l in text.splitlines() if "INITIAL_MEMORY=1GB" in l), "")
+    if mem_line == "":
+        print("ERROR: 置換後のメモリ行が見つからない", file=sys.stderr)
         return 1
+    for env, mark in (
+        ("PKC3_SAFE_HEAP", "SAFE_HEAP=1"),
+        ("PKC3_PROFILING_FUNCS", "--profiling-funcs"),
+    ):
+        want = os.environ.get(env) == "1"
+        if want != (mark in mem_line):
+            print(f"ERROR: {mark} の有無が要求と食い違う(要求={want})", file=sys.stderr)
+            return 1
     for gone in ("TOTAL_MEMORY=1GB", "STACK_SIZE=131072", ANCHOR_HEAPS, "PTHREAD_POOL_SIZE=7"):
         if gone in text:
             print(f"ERROR: 置換後も {gone} が残っている", file=sys.stderr)
