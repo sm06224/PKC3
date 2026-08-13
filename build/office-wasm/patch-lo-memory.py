@@ -60,6 +60,7 @@ LO の `EMSCRIPTEN_INTEL_GCC.mk` は **`TOTAL_MEMORY=1GB` 固定**で、
 黙って素通り(= 効いていないのに緑)になるのを防ぐ。
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -135,6 +136,21 @@ REPLACE_POOL = (
 )
 
 
+# 🔴 **調査用の SAFE_HEAP**(#134、2026-08-13)。
+#
+# 検証で「**ダイアログを閉じると `memory access out of bounds` で停止**」が
+# **5/5** で再現した。⚠ この例外はメインスレッドで wasm が**直接トラップ**した
+# `RuntimeError` なので、`lineno` / `colno` を持たない ── #124 で使った
+# 「名前を出す仕掛け」は効かない(あれは embind の `val::global` 取りこぼしだった)。
+#
+# 🔑 `-sSAFE_HEAP=1` は**すべての load/store を検査**するので、範囲外に触った
+# **その瞬間**に止まり、どのアドレスかが出る。再現手順が 5/5 なので 1 回踏めば足りる。
+#
+# ⚠ **配布には使えない**(実行が数倍遅くなる)。だから workflow 側で
+# **tag を導出**にして、配布 tag へ出せない形にしてある。
+SAFE_HEAP_FLAG = " -s SAFE_HEAP=1"
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print("usage: patch-lo-memory.py <lo-core-dir>", file=sys.stderr)
@@ -151,7 +167,10 @@ def main() -> int:
             )
             return 1
 
-    text = text.replace(ANCHOR_MEMORY, REPLACE_MEMORY)
+    memory = REPLACE_MEMORY
+    if os.environ.get("PKC3_SAFE_HEAP") == "1":
+        memory += SAFE_HEAP_FLAG
+    text = text.replace(ANCHOR_MEMORY, memory)
     text = text.replace(ANCHOR_STACK, REPLACE_STACK)
     text = text.replace(ANCHOR_HEAPS, REPLACE_HEAPS)
     text = text.replace(ANCHOR_POOL, REPLACE_POOL)
@@ -170,6 +189,14 @@ def main() -> int:
             return 1
     # ⚠ 錨がそのまま残っていたら「置換したつもり」である。
     #    heap の錨は **部分列**なので、`in` で消えたことまで確かめる
+    # ⚠ **頼んだときだけ入る**ことを両方向で確かめる(「静かに調査ビルドを配る」を防ぐ)
+    want_safe = os.environ.get("PKC3_SAFE_HEAP") == "1"
+    if want_safe != ("SAFE_HEAP=1" in text):
+        print(
+            f"ERROR: SAFE_HEAP の有無が要求と食い違う(要求={want_safe})",
+            file=sys.stderr,
+        )
+        return 1
     for gone in ("TOTAL_MEMORY=1GB", "STACK_SIZE=131072", ANCHOR_HEAPS, "PTHREAD_POOL_SIZE=7"):
         if gone in text:
             print(f"ERROR: 置換後も {gone} が残っている", file=sys.stderr)
