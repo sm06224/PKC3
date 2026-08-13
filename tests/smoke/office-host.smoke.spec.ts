@@ -785,3 +785,77 @@ async function probeKeys(page: import('@playwright/test').Page): Promise<{
     };
   });
 }
+
+/**
+ * 🔴 **生存通知に「窓が表に居たか」が載っている**(#135)。
+ *
+ * 本体は「4 秒来なければ固まった」と判定するが、⚠ **背面タブの `setInterval` は
+ * 絞られる**(5 分ほどで 1 分に 1 回)ので、その物差しは**窓が表に居たときにしか
+ * 当てられない**。載っていなければ本体は保守側(70 秒)へ倒れ、
+ * **ハングに気づくのが 17 倍遅くなる** ── しかも誰も落ちない。
+ *
+ * ⚠ **`host.html` は bundle されない生 HTML** なので unit が 1 つも届かない。
+ * ここで実物を走らせて、**放送に実際に届いていること**を見る
+ * (CLAUDE.md「材料が実際に届いていることを pin する」)。
+ *
+ * 🔴 **表と裏の両方を見る。** 表だけ見ると、`{ visible: true }` を**べた書き**した
+ * 実装が素通りする ── 変異試験で実際に生き延びた(M12)。値が
+ * `document.visibilityState` から来ていることは、**裏で false になる**ことでしか
+ * 示せない。⚠ 裏は property の差し替えで作る(実際に背面へ回すと**タイマーごと
+ * 絞られて**、この test が測りたいものではなくなる)。
+ */
+async function firstBeats(
+  page: import('@playwright/test').Page,
+): Promise<{ pkc3Office?: string; payload?: { visible?: unknown } }[]> {
+  // ⚠ 一式は要らない ── 生存通知は起動経路より手前で始まる
+  return page.evaluate(
+    () =>
+      new Promise<{ pkc3Office?: string; payload?: { visible?: unknown } }[]>((resolve) => {
+        const got: { pkc3Office?: string; payload?: { visible?: unknown } }[] = [];
+        // ⚠ 同じ名前の**別 instance** なら自分のページの放送も届く
+        const ch = new BroadcastChannel('pkc3-office');
+        ch.onmessage = (e): void => {
+          const d = e.data as { pkc3Office?: string; payload?: { visible?: unknown } };
+          if (d.pkc3Office === 'alive') got.push(d);
+          // 2 発めまで見る ── 初回だけ手で送っている作りに救われないため
+          if (got.length >= 2) {
+            ch.close();
+            resolve(got);
+          }
+        };
+      }),
+    // 1.5 秒間隔なので 2 発で 3 秒強
+  );
+}
+
+test('🔴 生存通知が「窓が表に居たか」を運ぶ', async ({ page }) => {
+  await page.goto('/office/host.html');
+  const beats = await firstBeats(page);
+
+  expect(beats.length, '生存通知が 2 発来ていない').toBeGreaterThanOrEqual(2);
+  for (const b of beats) {
+    // 🔑 **型まで見る。** 欠けていると本体側で `=== true` が false に落ち、
+    //    黙って保守側の物差し(70 秒)へ倒れる
+    expect(typeof b.payload?.visible, '生存通知に visible が無い').toBe('boolean');
+  }
+  expect(beats[beats.length - 1]?.payload?.visible).toBe(true);
+});
+
+test('🔴 裏に居るときは、そう名乗る(値がべた書きでない)', async ({ page }) => {
+  // ⚠ **読み込みより前**に差し替える ── host は最初の 1 発をその場で撃つ
+  await page.addInitScript(() => {
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'hidden',
+    });
+  });
+  await page.goto('/office/host.html');
+  // 空振り防止 ── 差し替えが本当に効いているか(効いていなければこの test は無意味)
+  expect(await page.evaluate(() => document.visibilityState)).toBe('hidden');
+
+  const beats = await firstBeats(page);
+  expect(beats.length).toBeGreaterThanOrEqual(2);
+  for (const b of beats) {
+    expect(b.payload?.visible, '裏に居るのに「表」と名乗っている').toBe(false);
+  }
+});

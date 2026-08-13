@@ -40,6 +40,7 @@ import { appOfficePack } from '@adapter/ui/render/office-entry-view';
 import { applyPackResult } from '@adapter/ui/render/office-pack-panel';
 import { OfficeWindow } from '@adapter/platform/office/office-window';
 import { createOfficeOpener } from '@adapter/platform/office/office-open';
+import { watchOfficeHang } from '@adapter/platform/office/office-hang-watch';
 import { OfficePackStore } from '@adapter/platform/office/office-pack-store';
 import {
   OfficePackInstaller,
@@ -234,8 +235,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     store: officePack,
     onProgress: (text) => appOfficePack.setProgress(text),
   });
+  // ⚠ 変数に出すのは **`watchOfficeHang` にも同じ 1 個を渡す**ため(#135)。
+  //    2 個作っても放送は両方に届く(同名の別 instance には配られる)ので**動いてしまう** ──
+  //    だから壊れ方は静かである:BroadcastChannel が 1 本余計に開きっぱなしになり、
+  //    「窓が開いているか」の控えが 2 か所に分かれる。**同じ窓の状態は 1 か所で持つ**
+  const officeWindow = new OfficeWindow();
   const officeOpener = createOfficeOpener({
-    officeWindow: new OfficeWindow(),
+    officeWindow,
     isPackInstalled: () => appOfficePack.isInstalled(),
     readAsset: async (assetKey) => {
       const blob = await blobs.get(DEFAULT_CID, assetKey);
@@ -347,6 +353,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     noticeLine = text;
     paint();
   };
+  /**
+   * Office の窓が固まったことに気づく(#135)。⚠ ここは**渡すだけ** ──
+   * 物差しも文言も `office-hang-watch.ts` が持つ(`main.ts` は原文 pin の
+   * test しか無い面なので、判断を置くと全 tests 緑のまま取り違える)。
+   * ⚠ 常駐タイマーは立たない(`visibilitychange` の 1 点だけを見る)。
+   */
+  watchOfficeHang({
+    onEvent: (fn) => officeWindow.onEvent(fn),
+    doc: document,
+    notify: showStatus,
+  });
   /**
    * Office 一式の設置 / 削除の後始末(#88 / O6-a)。
    * ⚠ **判断は `applyPackResult` が持つ** ── ここは道具を渡すだけ。

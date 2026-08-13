@@ -60,6 +60,30 @@ PKC3_CHROMIUM=/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headles
 git fetch origin main && git checkout main && git pull origin main
 ```
 
+### ⚠ CI の結論は **MCP の github tool で見る**(curl で見ない)
+
+このセッションから **`https://api.github.com` への直 curl は塞がっている** ──
+`GH_TOKEN` は env に在るのに、返るのは
+`{"message": "GitHub access is not enabled for this session. …"}` である。
+`gh` CLI も無い。**`mcp__github__actions_list` / `pull_request_read` を使う。**
+
+🔴 **その curl を poll ループに入れて 6 分捨てた**(2026-08-13)。
+書いたのはこういう形:
+
+```bash
+st=$(curl … | python3 -c "…print(d.get('status'), d.get('conclusion'))")
+case "$st" in
+  "completed "*) echo "CI 完了"; exit 0 ;;
+  poll-error)    echo "poll-error" ;;      # ← ここに来ない
+esac
+```
+
+エラー JSON にも `status` キーが**無いだけで parse は通る**ので、
+`None None` が出て**どの case にも当たらず、黙って次の周回へ行く**。
+⚠ **「何も鳴らない」が「まだ走っている」と見分けられない。**
+🔑 poll ループは **想定外の応答を必ず 1 行吐かせる**(`*) echo "想定外: $st" ;;`)。
+「成功の合図だけを grep する監視は、crash と hang に対して沈黙する」の同型である。
+
 ### 🔴 merge したら、**次の作業に入る前に**必ず branch を作り直す
 
 ```bash
@@ -100,10 +124,19 @@ $ git fetch origin <branch>
 正しいのは **prune してから普通に push**(force ではない):
 
 ```bash
-git fetch --prune origin
+git fetch --prune origin             # ⚠ refspec を付けない(下記)
 git fetch origin main && git checkout -B <branch> origin/main
 git push -u origin <branch>          # ← 新規作成として通る
 ```
+
+🔴 **`--prune` に refspec を付けると、その ref しか掃除しない**(2026-08-13 に
+この節を書いた本人が踏んだ)。`git fetch --prune origin main` は
+**`origin/main` だけ**を対象にするので、消えた `origin/<branch>` は**残ったまま**。
+「もう prune した」と思って `--force-with-lease` を撃ち、また `(stale info)` を
+食らう ── 症状が同じなので**同じ罠だと気づけない**。
+🔑 prune するときは **`git fetch --prune origin`(refspec なし)**。
+確かめ方は `git ls-remote --exit-code --heads origin <branch>`
+(remote に在るか無いかを、手元の追跡 ref を経由せずに聞く)。
 
 ⚠ **force が要るのは「remote の branch が生きていて、squash 前の commit を
 指している」ときだけ**(= PR が open のまま作り直す場面)。そこでは

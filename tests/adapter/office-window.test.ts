@@ -148,6 +148,38 @@ describe('OfficeWindow', () => {
     expect(h.ow.isProbablyOpen(), '猶予を待たずに戻る').toBe(false);
   });
 
+  /**
+   * 🔴 **生存通知が「窓が表に居たか」を運ぶ**(#135)。
+   * ⚠ 落とすと `office-hang-watch` が**保守側の物差し(70 秒)へ黙って倒れる** ──
+   * ハングに気づくのが 17 倍遅くなるのに、誰も落ちない。
+   */
+  it('🔴 生存通知の visible を、そのまま購読者へ渡す', () => {
+    const h = harness();
+    h.ch.deliver('alive', { visible: true });
+    h.ch.deliver('alive', { visible: false });
+    expect(h.seen.filter((e) => e.type === 'alive')).toEqual([
+      { type: 'alive', visible: true },
+      { type: 'alive', visible: false },
+    ]);
+  });
+
+  it('⚠ 古い host は visible を送らない ── false(絞られている側)に倒す', () => {
+    // 🔑 未知を「表」と読むと、背面の窓を固まったと**誤検知**する
+    const h = harness();
+    h.ch.deliver('alive');
+    expect(h.seen).toContainEqual({ type: 'alive', visible: false });
+  });
+
+  /** 🔴 **停止は放送されている**のに、以前は本体が捨てていた(#135 で拾うようにした)。 */
+  it('🔴 窓の停止(crashed)を理由つきで受ける', () => {
+    const h = harness();
+    h.ch.deliver('crashed', { reason: 'memory access out of bounds' });
+    expect(h.seen).toContainEqual({
+      type: 'crashed',
+      reason: 'memory access out of bounds',
+    });
+  });
+
   it('🔴 文書は「準備できた」と言われてから渡す(二重送信しない)', () => {
     const h = harness();
     h.ow.open({ name: 'x.docx', bytes: new Uint8Array([9, 8, 7]) });

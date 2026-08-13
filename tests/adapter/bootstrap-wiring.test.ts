@@ -160,3 +160,39 @@ describe('boot 失敗の後始末', () => {
     ).not.toContain('armLaunchQueue(');
   });
 });
+
+/**
+ * 🔴 **Office の窓が固まったことに気づく配線**(#135)。
+ *
+ * ⚠ ここも原文の検査である。`watchOfficeHang(...)` の呼び出しごと消しても、
+ * `main.ts` は**どの test からも実行されない**ので全 test が緑になる ──
+ * 「どの test からも実行されない file に、判断を書かない」の裏側で、
+ * **判断を置かなくても「呼ぶのをやめる」変異は誰も殺さない**。
+ *
+ * ⚠ 弱い検査だと自覚して使う。物差しも文言も `office-hang-watch.ts` の unit が見る。
+ */
+describe('#135 ハング検知の配線', () => {
+  it('🔴 watchOfficeHang を、showStatus へつないで呼ぶ', () => {
+    const at = MAIN.indexOf('watchOfficeHang({');
+    expect(at, '呼んでいない(固まっても永久に何も出ない)').toBeGreaterThan(-1);
+    // 呼び出しの引数だけを見る(他所の一致に救われない)
+    const args = MAIN.slice(at, MAIN.indexOf('});', at));
+    expect(args, '放送を購読していない').toContain('officeWindow.onEvent');
+    expect(args, '出口が status につながっていない').toContain('notify: showStatus');
+    expect(args, 'visibilitychange を張る先を渡していない').toContain('doc: document');
+  });
+
+  it('🔴 OfficeWindow は 1 個だけ(窓の状態を 2 か所で持たない)', () => {
+    // ⚠ 2 個作っても**放送は両方に届く**ので動いてしまう ── 静かに壊れる型である。
+    //    余計な BroadcastChannel が開きっぱなしになり、使い回し判定の控えが分かれる
+    const made = [...MAIN.matchAll(/new OfficeWindow\(/g)].length;
+    expect(made, 'OfficeWindow を 2 個以上作っている').toBe(1);
+  });
+
+  it('⚠ 購読は opener が使うのと**同じ** instance に付ける', () => {
+    // 別の instance を渡すと、上の「1 個だけ」を満たしたまま配線だけ外せる
+    const at = MAIN.indexOf('createOfficeOpener({');
+    expect(at).toBeGreaterThan(-1);
+    expect(MAIN.slice(at, MAIN.indexOf('});', at))).toContain('officeWindow');
+  });
+});
