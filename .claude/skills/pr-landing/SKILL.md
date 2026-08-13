@@ -148,6 +148,31 @@ stop hook が「未 push の commit がある」と鳴く ── **鳴ったら�
 
 ⚠ **merge 済みの PR に新しい commit を積まない。**
 
+### ⚠ この箱は作り直される ── **push していないものは消える**
+
+2026-08-13 に**セッション中 2 回**、コンテナごと作り直された:
+**作業ツリーが古い commit へ巻き戻り**、`node_modules` も scratchpad の
+中身も消えていた(⚠ 直前に作った file だけが残る、という中途半端な消え方をする)。
+
+🔑 **区切りごとに push する。** 手元にしか無いものは、いつでも消えるものとして扱う。
+🔑 **使い捨てのスクリプトを scratchpad に置いたまま育てない** ── 動いたら
+**repo の中の道具へ畳む**(2026-08-13 に探検スクリプトを 1 本失った)。
+
+戻し方:
+
+```bash
+git fetch --prune origin
+git checkout -B <branch> origin/<branch>
+ls node_modules/.bin/vitest >/dev/null 2>&1 || npm ci
+```
+
+### ⚠ issue にコメントするつもりで**本文を上書きしない**
+
+`issue_write` の `method: "update"` に `body` を渡すと、**本文がまるごと置き換わる**。
+2026-08-13 に #134 の症状表を消した(復元済み)。
+🔑 コメントは **`add_issue_comment`**。`update` を使うのは題名を変えるときと、
+**本文そのものを書き直すと決めたとき**だけである。
+
 ## 5. 🔴 止めて裁定を仰ぐ条件
 
 次のいずれかなら **merge せず会話で** user 判断を仰ぐ:
