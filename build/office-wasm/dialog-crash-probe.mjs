@@ -82,7 +82,7 @@ import { chromium } from '@playwright/test';
 
 const ROOT = resolve(process.argv[2] ?? '.');
 const OUT = process.argv[3] ?? '';
-const SHOTS = join(ROOT, '__shots');
+const SHOTS = join(ROOT, `__shots-${process.env.PKC3_PROBE_SUITE ?? 'dialog'}`);
 /** ⚠ SAFE_HEAP 込みの起動。素で 1.8 秒でも、ここでは数分を見込む。 */
 const BOOT_TIMEOUT_MS = Number(process.env.PKC3_BOOT_TIMEOUT_MS ?? 900_000);
 /** 1 手ごとの落ち着き待ち。⚠ 短いと「キーが届いていない」を「落ちない」と読む。 */
@@ -166,14 +166,43 @@ function serve() {
  * ⚠ **`control` の手は「届いているか」を確かめるためだけに在る** ── これが
  *   届かない回は、以降の「落ちなかった」に意味が無い(空振りである)。
  */
-const STEPS = [
+const OPEN_DOC = [
   { id: 'new-doc', key: 'Control+n', why: 'Start Center → Writer の新規文書', control: true, wait: 12_000 },
   { id: 'type-text', type: 'hello world test', why: '⚠ 対照群 ── ただの文字。届いている証拠', control: true },
-  // ⚠ 座標は 1280x720 の screenshot から採った(VIEWPORT を変えるとずれる)
-  { id: 'tools-menu', at: [472, 37], why: 'Tools メニューを開く', control: false },
-  { id: 'word-count', at: [83, 121], why: 'Word Count…(モードレス)を開く', control: false },
-  { id: 'escape', key: 'Escape', why: '🔴 閉じる ── ここで落ちる(実測 1/1)', control: false },
 ];
+
+/**
+ * 踏む筋。⚠ 座標は 1280x720 の screenshot から採った({@link VIEWPORT})。
+ *
+ * ⚠ **1 回の走りは 1 つの主張**にする(「回すものの粒度」)。既定は #134 の再現で、
+ *   同根が疑われるものは `PKC3_PROBE_SUITE` で明示的に選ぶ。
+ */
+const SUITES = {
+  /** #134 本体 ── モードレスを閉じると落ちる。 */
+  dialog: [
+    ...OPEN_DOC,
+    { id: 'tools-menu', at: [472, 37], why: 'Tools メニューを開く', control: false },
+    { id: 'word-count', at: [83, 121], why: 'Word Count…(モードレス)を開く', control: false },
+    { id: 'escape', key: 'Escape', why: '🔴 閉じる ── ここで落ちる(実測 1/1)', control: false },
+  ],
+  /**
+   * #134 の「同じ根かもしれないもの」── `Tools → Spelling` は**開いた瞬間**に死ぬ
+   * (レポート #5、1/1)。⚠ 同根なら同じ直しで消えるはずなので、突き合わせる。
+   */
+  spelling: [
+    ...OPEN_DOC,
+    { id: 'tools-menu', at: [472, 37], why: 'Tools メニューを開く', control: false },
+    { id: 'spelling', at: [67, 13], why: '🔴 Spelling…(開いた瞬間に死ぬ)', control: false, wait: 20_000 },
+    { id: 'escape', key: 'Escape', why: '開けたなら閉じてみる', control: false },
+  ],
+};
+
+const SUITE = process.env.PKC3_PROBE_SUITE ?? 'dialog';
+const STEPS = SUITES[SUITE];
+if (!STEPS) {
+  console.error(`ERROR: 知らない suite: ${SUITE}(${Object.keys(SUITES).join(' / ')})`);
+  process.exit(2);
+}
 
 async function main() {
   const server = await serve();
@@ -189,6 +218,7 @@ async function main() {
   const result = {
     ok: false,
     base,
+    suite: SUITE,
     pack: ROOT,
     browser: executablePath ?? 'playwright default',
     steps: [],
