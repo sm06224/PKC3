@@ -99,6 +99,24 @@ describe('🔴 SAFE_HEAP は頼んだときだけ入る', () => {
     expect(r.mk).not.toContain('SAFE_HEAP');
   });
 
+  it('🔴 名前を残す指示も、頼んだときだけ入る(#134 の 2 本目)', () => {
+    // ⚠ SAFE_HEAP とは**別の軸**である ── 片方だけ頼めること自体を pin する
+    const off = patch({});
+    expect(off.mk).not.toContain('--profiling-funcs');
+    const on = patch({ PKC3_PROFILING_FUNCS: '1' });
+    expect(on.status, on.stderr).toBe(0);
+    expect(on.mk).toContain('--profiling-funcs');
+    expect(on.mk, '頼んでいない SAFE_HEAP が混ざっている').not.toContain('SAFE_HEAP');
+  });
+
+  it('2 つ同時に頼める(調査は組み合わせで効く)', () => {
+    const r = patch({ PKC3_SAFE_HEAP: '1', PKC3_PROFILING_FUNCS: '1' });
+    expect(r.status, r.stderr).toBe(0);
+    const line = r.mk.split('\n').find((l) => l.includes('INITIAL_MEMORY=1GB'));
+    expect(line).toContain('-s SAFE_HEAP=1');
+    expect(line).toContain('--profiling-funcs');
+  });
+
   it('PKC3_SAFE_HEAP=1 のときだけ、メモリの行に足される', () => {
     const r = patch({ PKC3_SAFE_HEAP: '1' });
     expect(r.status, r.stderr).toBe(0);
@@ -152,13 +170,14 @@ describe('🔴 workflow が配布 tag を守る', () => {
     expect(safe).toMatch(/default:\s*false/);
   });
 
-  it('🔴 tag は safe_heap から導出される(2 つの tag が分岐の中に在る)', () => {
-    expect(wf).toContain('tag=lo-wasm-dev');
-    expect(wf).toContain('tag=lo-wasm-safeheap');
-    // 分岐の中に在ること ── 「両方の字が在る」だけでは、片方が死に行でも通る
-    const at = wf.indexOf('tag=lo-wasm-safeheap');
-    const before = wf.slice(Math.max(0, at - 400), at);
-    expect(before, 'safe_heap を見ずに tag を決めている').toContain('inputs.safe_heap');
+  it('🔴 接尾辞は入力から組まれる(字を直書きしない)', () => {
+    // ⚠ 「`-safeheap` の字が在る」だけでは、死に行でも通る ── **組み立ての行**を見る
+    const at = wf.indexOf('SAFE_SUFFIX="${SAFE_SUFFIX}-safeheap"');
+    expect(at, '接尾辞を safe_heap から組んでいない').toBeGreaterThan(-1);
+    expect(wf.slice(Math.max(0, at - 120), at)).toContain('inputs.safe_heap');
+    const at2 = wf.indexOf('SAFE_SUFFIX="${SAFE_SUFFIX}-names"');
+    expect(at2, '接尾辞を profiling_funcs から組んでいない').toBeGreaterThan(-1);
+    expect(wf.slice(Math.max(0, at2 - 120), at2)).toContain('inputs.profiling_funcs');
   });
 
   it('🔴 patch step が PKC3_SAFE_HEAP を同じ入力から導く', () => {
@@ -172,6 +191,33 @@ describe('🔴 workflow が配布 tag を守る', () => {
 
   it('調査ビルドは版の字面で見分けが付く', () => {
     expect(wf).toContain('-safeheap');
+    expect(wf).toContain('-names');
     expect(wf).toContain('${SAFE_SUFFIX}');
+  });
+
+  it('🔴 名前つきビルドも同じ入力から導かれ、tag を汚さない', () => {
+    const block = inputsBlock();
+    expect(block).toContain('profiling_funcs:');
+    const pf = block.slice(block.indexOf('profiling_funcs:'));
+    expect(pf).toMatch(/type:\s*boolean/);
+    expect(pf).toMatch(/default:\s*false/);
+    // patch step が同じ入力から導く
+    const at = wf.indexOf('export PKC3_PROFILING_FUNCS=1');
+    expect(at, 'PKC3_PROFILING_FUNCS を渡していない').toBeGreaterThan(-1);
+    expect(wf.slice(Math.max(0, at - 200), at)).toContain('inputs.profiling_funcs');
+    expect(wf).toContain('export PKC3_PROFILING_FUNCS=0');
+  });
+
+  /**
+   * 🔴 **tag と版を、同じ 1 つの接尾辞から導く。**
+   * ⚠ 2 か所で組み立てると「版は素なのに tag は調査用」がいつか起きる ──
+   *   そうなると、どの一式を見ているか**版で確かめられなくなる**。
+   */
+  it('🔴 tag は接尾辞から導く(素のときだけ配布 tag)', () => {
+    expect(wf).toContain('tag="lo-wasm${SAFE_SUFFIX}"');
+    expect(wf).toContain('tag=lo-wasm-dev');
+    const at = wf.indexOf('tag="lo-wasm${SAFE_SUFFIX}"');
+    // 接尾辞が空のときだけ配布 tag へ落ちる
+    expect(wf.slice(Math.max(0, at - 200), at)).toContain('-n "$SAFE_SUFFIX"');
   });
 });

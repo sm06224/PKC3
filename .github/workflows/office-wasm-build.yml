@@ -56,6 +56,15 @@ on:
         description: '調査用: SAFE_HEAP を有効にする(遅い。別 tag へ出る)'
         type: boolean
         default: false
+      profiling_funcs:
+        # 🔴 **調査用**(#134)。`--profiling-funcs` で wasm に **name section** を残す。
+        #    ⚠ SAFE_HEAP とは目的が違う ── あちらは load/store の検査、こちらは
+        #    **スタックに関数名を出す**ためのもの。手元で #134 を再現できたのに、
+        #    出荷 wasm には名前が無いので **10 段のスタックが全部ただの整数**だった。
+        #    🔑 実行は遅くならない(増えるのは配る量だけ = 気にしない側)。
+        description: '調査用: wasm に関数名を残す(スタックが読める。別 tag へ出る)'
+        type: boolean
+        default: false
 
 # ⚠ 既定の 6 時間で足りない可能性が高い。足りなければ段を分けて artifact で繋ぐ
 jobs:
@@ -296,6 +305,11 @@ jobs:
           else
             export PKC3_SAFE_HEAP=0
           fi
+          if [ "${{ inputs.profiling_funcs }}" = "true" ]; then
+            export PKC3_PROFILING_FUNCS=1
+          else
+            export PKC3_PROFILING_FUNCS=0
+          fi
           for p in "$GITHUB_WORKSPACE"/build/office-wasm/patch-*.py; do
             python3 "$p" ~/lo-core
             n=$((n + 1))
@@ -494,9 +508,12 @@ jobs:
           #    **clone が失敗した回にも走る**。そこで落ちると、いちばん欲しい
           #    「落ちた回の成果物」が publish されない
           sha="${LO_SHA:-unknown}"
-          # ⚠ 調査ビルドは**版の字面で見分けが付く**ようにする(設定画面に出る)
+          # ⚠ 調査ビルドは**版の字面で見分けが付く**ようにする(設定画面に出る)。
+          #    🔑 **tag も版も、この 1 つの接尾辞から導く** ── 2 か所で組み立てると
+          #    「版は素なのに tag は調査用」がいつか起きる
           SAFE_SUFFIX=""
-          if [ "${{ inputs.safe_heap }}" = "true" ]; then SAFE_SUFFIX="-safeheap"; fi
+          if [ "${{ inputs.safe_heap }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-safeheap"; fi
+          if [ "${{ inputs.profiling_funcs }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-names"; fi
           printf '%s\n' "{
             \"version\": \"lo-${sha:0:12}-run${GITHUB_RUN_ID}${SAFE_SUFFIX}\",
             \"lo_sha\": \"${sha}\",
@@ -505,6 +522,7 @@ jobs:
             \"run_id\": \"${GITHUB_RUN_ID}\",
             \"pkc3_commit\": \"${GITHUB_SHA}\",
             \"safe_heap\": \"${{ inputs.safe_heap }}\",
+            \"profiling_funcs\": \"${{ inputs.profiling_funcs }}\",
             \"built_at\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
           }" > build-info.json
           cat build-info.json
@@ -514,8 +532,10 @@ jobs:
           #    調査ビルド(SAFE_HEAP)は実行が数倍遅いので、**配布 tag へ出したら
           #    user の Office が使い物にならなくなる**。⚠ 「間違えないよう気をつける」
           #    ではなく、**間違えられない形**にする ── 入力に tag を持たせない。
-          if [ "${{ inputs.safe_heap }}" = "true" ]; then
-            tag=lo-wasm-safeheap
+          #    🔑 上で組んだ接尾辞をそのまま使う ── `lo-wasm-safeheap` /
+          #    `lo-wasm-names` / `lo-wasm-safeheap-names`、素なら `lo-wasm-dev`。
+          if [ -n "$SAFE_SUFFIX" ]; then
+            tag="lo-wasm${SAFE_SUFFIX}"
           else
             tag=lo-wasm-dev
           fi
