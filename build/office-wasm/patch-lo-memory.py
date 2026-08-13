@@ -215,12 +215,33 @@ def main() -> int:
     # ⚠ 錨がそのまま残っていたら「置換したつもり」である。
     #    heap の錨は **部分列**なので、`in` で消えたことまで確かめる
     # ⚠ **頼んだときだけ入る**ことを両方向で確かめる(「静かに調査ビルドを配る」を防ぐ)
+    # 🔴 **見るのは「自分が書いた行」だけ。全文で探さない**(2026-08-13、CI で踏んだ)。
+    #
+    # 初稿は `mark in text` で file 全体を見ていた。ところが上流には
+    #
+    #     # avoid -s SAFE_HEAP=1 - c.f. gh#8584 this breaks source maps
+    #
+    # という**コメントが在る**(`EMSCRIPTEN_INTEL_GCC.mk:13`)。つまり
+    # `"SAFE_HEAP=1" in text` は**何もしなくても常に真**で、頼まなかったときに
+    # 必ず食い違い扱いになる ── **普通の配布ビルドが全部止まる**ところだった。
+    #
+    # ⚠ **なぜ test が緑だったか**: fixture が該当の 6 行だけの合成物で、
+    # **この注記行を持っていなかった**。「fixture のゼロ件の次元は測っていない次元」
+    # (CLAUDE.md)そのもの ── いまは fixture に上流の注記行を入れてある。
+    #
+    # ⚠ そして**この不具合は片側でしか出ない**。`PKC3_SAFE_HEAP=1` の回は
+    # want も現物も真なので通る ── 初回の調査ビルドが通ったのはそのためで、
+    # 「両方向を検めている」という触れ込みの検査が**片方向でしか走っていなかった**。
+    mem_line = next((l for l in text.splitlines() if "INITIAL_MEMORY=1GB" in l), "")
+    if mem_line == "":
+        print("ERROR: 置換後のメモリ行が見つからない", file=sys.stderr)
+        return 1
     for env, mark in (
         ("PKC3_SAFE_HEAP", "SAFE_HEAP=1"),
         ("PKC3_PROFILING_FUNCS", "--profiling-funcs"),
     ):
         want = os.environ.get(env) == "1"
-        if want != (mark in text):
+        if want != (mark in mem_line):
             print(f"ERROR: {mark} の有無が要求と食い違う(要求={want})", file=sys.stderr)
             return 1
     for gone in ("TOTAL_MEMORY=1GB", "STACK_SIZE=131072", ANCHOR_HEAPS, "PTHREAD_POOL_SIZE=7"):
