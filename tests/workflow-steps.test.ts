@@ -188,16 +188,78 @@ describe('office-wasm のパッチ', () => {
   const YML = join(DIR, 'office-wasm-build.yml');
   const PATCH_DIR = 'build/office-wasm';
 
-  it('🔴 workflow が主張する本数と、実在する patch-*.py の数が一致する', () => {
-    expect(existsSync(YML), `${YML} が無い`).toBe(true);
-    const files = readdirSync(PATCH_DIR).filter((f) => /^patch-.*\.py$/.test(f));
-    // 空振り防止 ── パッチが 1 本も無い状態で「一致した」と言わない
-    expect(files.length).toBeGreaterThan(0);
+  /**
+   * workflow の中の「**glob で回して本数を主張する**」組を全部拾う。
+   *
+   * 🔴 初稿は `test "$n" -eq (\d+)` を **1 件だけ**取っていた(2026-08-13 に破れた)。
+   * qtbase 用のループを足した瞬間、**先頭 1 件しか見ない**ので
+   * 「qtbase の本数(1)」を「LO のパッチ本数(3)」と突き合わせて落ちる ──
+   * ⚠ 検査そのものが、**対象が 1 組しか無い前提**で書かれていた。
+   * 🔑 いまは **glob と主張を対にして全部**拾い、それぞれ実在数と突き合わせる。
+   */
+  function loops(): { glob: string; claimed: number }[] {
+    const yml = readFileSync(YML, 'utf-8');
+    const out: { glob: string; claimed: number }[] = [];
+    const re = /for p in "\$GITHUB_WORKSPACE"\/build\/office-wasm\/([^;]+); do/g;
+    for (const m of yml.matchAll(re)) {
+      const rest = yml.slice(m.index + m[0].length);
+      const claim = /test "\$n" -eq (\d+)/.exec(rest);
+      expect(claim, `${m[1]} のループに本数の主張が無い`).not.toBeNull();
+      out.push({ glob: m[1]!.trim(), claimed: Number(claim![1]) });
+    }
+    return out;
+  }
 
-    const m = /test "\$n" -eq (\d+)/.exec(readFileSync(YML, 'utf-8'));
-    expect(m, 'workflow に本数の主張が無い(検査が空振りしている)').not.toBeNull();
-    expect(Number(m![1]), `patch-*.py は ${files.join(', ')} の ${files.length} 本`).toBe(
-      files.length,
-    );
+  /** shell の glob(`patch-*.py`)を正規表現へ。 */
+  function toRe(glob: string): RegExp {
+    return new RegExp(`^${glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`);
+  }
+
+  it('🔴 workflow が主張する本数と、実在する数が glob ごとに一致する', () => {
+    expect(existsSync(YML), `${YML} が無い`).toBe(true);
+    const all = readdirSync(PATCH_DIR);
+    const found = loops();
+    // 空振り防止 ── ループが 1 つも見つからない形で「一致した」と言わない
+    expect(found.length, 'パッチのループを 1 つも見つけられていない').toBeGreaterThan(1);
+    for (const { glob, claimed } of found) {
+      const files = all.filter((f) => toRe(glob).test(f));
+      expect(files.length, `${glob} に当たる file が 1 本も無い`).toBeGreaterThan(0);
+      expect(claimed, `${glob} = ${files.join(', ')} の ${files.length} 本`).toBe(files.length);
+    }
+  });
+
+  /**
+   * 🔴 **qtbase のパッチは Qt の cache 鍵に入っていなければならない**(#134)。
+   * ⚠ 入っていないと、パッチを足したのに**パッチ前の Qt が復元され**、
+   *   当てたつもりで効かない ── workflow が同じ罠を別の箇所で注記している。
+   */
+  it('🔴 qtbase のパッチが Qt / ccache の鍵に含まれる', () => {
+    const yml = readFileSync(YML, 'utf-8');
+    const keys = [...yml.matchAll(/^\s*key: (.+)$/gm)].map((m) => m[1]!);
+    const qtKeys = keys.filter((k) => /^qt-|^ccache-/.test(k));
+    expect(qtKeys.length, 'Qt / ccache の鍵が見つからない').toBeGreaterThan(0);
+    for (const k of qtKeys) {
+      expect(k, `鍵が qtbase パッチを見ていない: ${k}`).toContain('qtbase-patch-');
+    }
+  });
+
+  /**
+   * ⚠ qtbase のパッチは **Qt をビルドする前**に当たること(後では意味が無い)。
+   *
+   * 🔴 初稿は `indexOf('qtbase-patch-*.py')` で位置を採ったが、**cache 鍵のほうに
+   * 当たっていた**(鍵は file の上のほうに在るので、step をどこへ動かしても
+   * 常に「前」になる)── **代替物に満たされる条件**だった(CLAUDE.md)。
+   * 🔑 いまは**実行する行そのもの**(`for p in …qtbase-patch-*.py`)で採る。
+   */
+  it('🔴 qtbase のパッチは Qt のビルドより前に当たる', () => {
+    const yml = readFileSync(YML, 'utf-8');
+    const patchAt = yml.indexOf('/qtbase-patch-*.py; do');
+    const buildAt = yml.indexOf('- name: Qt6 wasm ビルド');
+    expect(patchAt, 'qtbase のパッチを実行するループが無い').toBeGreaterThan(-1);
+    expect(buildAt, 'Qt6 wasm ビルドの step が無い').toBeGreaterThan(-1);
+    expect(patchAt, 'ビルドより後に当てている').toBeLessThan(buildAt);
+    // ⚠ 当てる先が qtbase であること(`~/lo-core` を渡すと「src/plugins が無い」で落ちる)
+    const loop = yml.slice(patchAt, patchAt + 400);
+    expect(loop, 'qtbase 以外へ当てている').toContain('~/qtbase');
   });
 });

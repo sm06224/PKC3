@@ -135,7 +135,7 @@ jobs:
           path: |
             /home/runner/qt-host/install
             /home/runner/qt-wasm/install
-          key: qt-${{ inputs.qt_ref }}-emsdk-${{ inputs.emsdk }}-${{ hashFiles('build/office-wasm/qt-wasm-configure.args') }}
+          key: qt-${{ inputs.qt_ref }}-emsdk-${{ inputs.emsdk }}-${{ hashFiles('build/office-wasm/qt-wasm-configure.args', 'build/office-wasm/qtbase-patch-*.py') }}
 
       # 🔴 **ccache の鍵にも Qt の同一性を入れる**(2026-08-10、実測で判明)。
       #    ⚠ **Qt キャッシュの鍵だけ直して、こちらを直していなかった。**
@@ -155,9 +155,9 @@ jobs:
           path: /home/runner/.ccache
           # ⚠ 完全一致は狙わない ── 前回の続きから始められればよいので
           #    `restore-keys` で**同じ Qt の**直近のものを拾う
-          key: ccache-lo-qt6-${{ inputs.qt_ref }}-${{ hashFiles('build/office-wasm/qt-wasm-configure.args') }}-${{ github.sha }}
+          key: ccache-lo-qt6-${{ inputs.qt_ref }}-${{ hashFiles('build/office-wasm/qt-wasm-configure.args', 'build/office-wasm/qtbase-patch-*.py') }}-${{ github.sha }}
           restore-keys: |
-            ccache-lo-qt6-${{ inputs.qt_ref }}-${{ hashFiles('build/office-wasm/qt-wasm-configure.args') }}-
+            ccache-lo-qt6-${{ inputs.qt_ref }}-${{ hashFiles('build/office-wasm/qt-wasm-configure.args', 'build/office-wasm/qtbase-patch-*.py') }}-
 
       - name: emsdk
         if: steps.c_emsdk.outputs.cache-hit != 'true'
@@ -173,6 +173,26 @@ jobs:
       - name: qtbase を取る
         if: steps.c_qt.outputs.cache-hit != 'true'
         run: git clone --depth 1 --branch "${{ inputs.qt_ref }}" https://github.com/qt/qtbase.git ~/qtbase
+
+      # 🔴 **Qt をビルドする前に当てる**(#134)。`QWasmInputContext::setFocusObject` が
+      #    破棄中の focus 変更で `sendEvent(null, …)` を撃ち、`memory access out of bounds`
+      #    で止まる ── 上流 6.10 はこの送信ごと消しているので、それを 6.9 へ移植する。
+      # ⚠ **鍵に本パッチを含めてある**(上の `hashFiles`)── 含めないと
+      #    **パッチ前の Qt が cache から復元されて、当てたのに効かない**。
+      # ⚠ 名前が `patch-*.py` でないのは、下の LO 用ループに巻き込まないため
+      #    (あちらは `~/lo-core` を渡す)。
+      - name: qtbase に PKC3 のパッチを当てる
+        if: steps.c_qt.outputs.cache-hit != 'true'
+        run: |
+          set -euxo pipefail
+          n=0
+          for p in "$GITHUB_WORKSPACE"/build/office-wasm/qtbase-patch-*.py; do
+            python3 "$p" ~/qtbase
+            n=$((n + 1))
+          done
+          echo "applied $n qtbase patches"
+          # ⚠ 下限は実数で置く(足したらここも直す ── 直さないと落ちるので忘れない)
+          test "$n" -eq 1
 
       # 🔑 Qt6 は **host build が別に要る**(Qt5 には無かった要件)。
       # ⚠ `-no-gui` で建ててはいけない ── wasm 側で Gui/Widgets を建てるとき、host の
@@ -235,7 +255,7 @@ jobs:
           path: |
             /home/runner/qt-host/install
             /home/runner/qt-wasm/install
-          key: qt-${{ inputs.qt_ref }}-emsdk-${{ inputs.emsdk }}-${{ hashFiles('build/office-wasm/qt-wasm-configure.args') }}
+          key: qt-${{ inputs.qt_ref }}-emsdk-${{ inputs.emsdk }}-${{ hashFiles('build/office-wasm/qt-wasm-configure.args', 'build/office-wasm/qtbase-patch-*.py') }}
 
       - name: emsdk を保存
         if: always() && steps.c_emsdk.outputs.cache-hit != 'true'
@@ -581,7 +601,7 @@ jobs:
         with:
           path: /home/runner/.ccache
           # ⚠ 復元側と**同じ形**でなければ、次の run が拾えない
-          key: ccache-lo-qt6-${{ inputs.qt_ref }}-${{ hashFiles('build/office-wasm/qt-wasm-configure.args') }}-${{ github.sha }}
+          key: ccache-lo-qt6-${{ inputs.qt_ref }}-${{ hashFiles('build/office-wasm/qt-wasm-configure.args', 'build/office-wasm/qtbase-patch-*.py') }}-${{ github.sha }}
 
       - name: 外部 tarball を保存
         if: always() && steps.c_tar.outputs.cache-hit != 'true'

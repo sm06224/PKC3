@@ -15,16 +15,31 @@
  *
  * まで出す。**トラップより手前**なので、`abort` の stack がまだ生きている。
  *
- * ## 🔴 座標を打たない ── 全部キーボードで踏む
+ * ## ⚠ 「座標を打たない」は**取り下げた**(実測で崩れた)
  *
- * LO の面は canvas なので、メニューを座標でクリックすると**版によってずれる**。
- * 幸い、レポートが落とした経路は**ショートカットだけで届く**:
+ * 初稿は「ショートカットだけで届く」と書いていたが、**届かなかった** ──
+ * `Ctrl+N`(新規文書)と普通の文字入力は通るのに、**`F5`(Navigator)も
+ * `Ctrl+H`(検索と置換)もダイアログを 1 枚も開かない**(実測、両方 1/1)。
+ * レポート #5 が**メニューをマウスで開いていた**のはそのためだったと分かる。
+ *
+ * 🔑 いまはメニューを**座標でクリック**する。座標は screenshot から採ったので、
+ * **viewport を固定する**({@link VIEWPORT})── 変えると全部ずれる。
+ * ⚠ 上流の LO がメニューの並びを変えたら当たらなくなるが、そのときは
+ *   `landed` が false になるので、**黙って「落ちない」にはならない**。
  *
  * | 手 | 何が起きるはず |
  * |---|---|
  * | `Ctrl+N` | Start Center → **Writer の新規文書** |
- * | `Ctrl+H` | **検索と置換**(モードレス) |
- * | `Escape` | 閉じる ── ここで落ちる、というのがレポートの主張 |
+ * | 文字を打つ | ⚠ **対照群** ── キーが LO に届いていることの証拠 |
+ * | Tools メニュー → Word Count | モードレスのダイアログが出る |
+ * | `Escape` | 閉じる ── **ここで落ちる**(実測 1/1) |
+ *
+ * ## 実測(2026-08-13、この probe で採った)
+ *
+ * | 一式 | 結果 |
+ * |---|---|
+ * | **`lo-wasm-dev`(配布)** | `RuntimeError: memory access out of bounds` ── レポート #5 と同じ |
+ * | `lo-wasm-safeheap` | `null function or function signature mismatch` ── ⚠ **segfault は 0 件**。SAFE_HEAP はこの不具合を捕まえない |
  *
  * ## ⚠ 沈黙を成功と読まない
  *
@@ -76,6 +91,11 @@ const SETTLE_MS = Number(process.env.PKC3_SETTLE_MS ?? 20_000);
 const SHOT_SAMPLES = Number(process.env.PKC3_SHOT_SAMPLES ?? 4);
 /** 撮る間隔。⚠ カーソルの点滅周期(およそ 500ms)をまたぐ長さにする。 */
 const SHOT_GAP_MS = Number(process.env.PKC3_SHOT_GAP_MS ?? 700);
+/**
+ * 🔴 **固定する。** メニューの座標を screenshot から採っているので、
+ * ここを変えると `STEPS` の `at` が全部ずれる。
+ */
+const VIEWPORT = { width: 1280, height: 720 };
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -147,12 +167,12 @@ function serve() {
  *   届かない回は、以降の「落ちなかった」に意味が無い(空振りである)。
  */
 const STEPS = [
-  { id: 'new-doc', key: 'Control+n', why: 'Start Center → Writer の新規文書', control: true },
-  { id: 'type-text', type: 'HELLO', why: '⚠ 対照群 ── ただの文字。届いていることの証拠', control: true },
-  { id: 'navigator', key: 'F5', why: 'Navigator(モードレス)を開く', control: false },
-  { id: 'nav-escape', key: 'Escape', why: '🔴 モードレスを閉じる ── レポートの主張', control: false },
-  { id: 'find-replace', key: 'Control+h', why: '検索と置換(モードレス)を開く', control: false },
-  { id: 'fr-escape', key: 'Escape', why: '🔴 もう 1 経路。閉じると落ちるか', control: false },
+  { id: 'new-doc', key: 'Control+n', why: 'Start Center → Writer の新規文書', control: true, wait: 12_000 },
+  { id: 'type-text', type: 'hello world test', why: '⚠ 対照群 ── ただの文字。届いている証拠', control: true },
+  // ⚠ 座標は 1280x720 の screenshot から採った(VIEWPORT を変えるとずれる)
+  { id: 'tools-menu', at: [472, 37], why: 'Tools メニューを開く', control: false },
+  { id: 'word-count', at: [83, 121], why: 'Word Count…(モードレス)を開く', control: false },
+  { id: 'escape', key: 'Escape', why: '🔴 閉じる ── ここで落ちる(実測 1/1)', control: false },
 ];
 
 async function main() {
@@ -178,13 +198,20 @@ async function main() {
   /** 🔑 SAFE_HEAP の断定。`abort()` は console.error と pageerror の両方に出る。 */
   const faults = [];
   const noteFault = (text) => {
-    if (/segmentation fault|alignment fault|memory access out of bounds|Aborted\(/.test(text)) {
+    // ⚠ `null function or function signature mismatch` も拾う ── SAFE_HEAP つきで
+    //    踏むとこちらになる(同じ「でたらめなポインタ」の別の顔)
+    if (
+      /segmentation fault|alignment fault|memory access out of bounds|signature mismatch|Aborted\(/.test(
+        text,
+      )
+    ) {
       faults.push(text.slice(0, 1200));
     }
   };
 
   const browser = await chromium.launchPersistentContext(tag, {
     headless: true,
+    viewport: VIEWPORT,
     args: ['--no-sandbox', '--disable-dev-shm-usage'],
     ...(executablePath ? { executablePath } : {}),
   });
@@ -291,11 +318,14 @@ async function main() {
 
     for (const [i, step] of (outcome === 'painted' ? [...STEPS.entries()] : [])) {
       const before = faults.length;
-      result.focused = await refocus();
-      if (step.type) await page.keyboard.type(step.type, { delay: 120 }).catch(() => {});
+      // ⚠ **メニュー操作の前にクリックし直さない** ── 開いたメニューが閉じてしまう。
+      //    focus を当て直すのはキー入力の手だけ(`Ctrl+N` のあと窓が作り替わるため)
+      if (!step.at) result.focused = await refocus();
+      if (step.at) await page.mouse.click(step.at[0], step.at[1]).catch(() => {});
+      else if (step.type) await page.keyboard.type(step.type, { delay: 120 }).catch(() => {});
       else await page.keyboard.press(step.key).catch(() => {});
       // ⚠ 落ちると evaluate 自体が通らなくなる ── 待ちは page 越しに使わない
-      await new Promise((r) => setTimeout(r, SETTLE_MS));
+      await new Promise((r) => setTimeout(r, step.wait ?? SETTLE_MS));
       const afterLook = await look().catch((e) => ({ error: String(e).slice(0, 200) }));
       const shots = await shootSet(`${String(i + 1).padStart(2, '0')}-${step.id}`);
       result.steps.push({
