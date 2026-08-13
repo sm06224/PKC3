@@ -97,8 +97,15 @@
     try { ch.postMessage({ pkc3Office: type, payload: payload || {} }); } catch (e) { /* 閉じた */ }
   }
   // 生存通知。本体はこれを見て「もう開いている」を判断する(2 つ立てない)
-  var beat = setInterval(function () { say('alive'); }, 1500);
-  say('alive');
+  //
+  // 🔴 **このタブが表に居たかを一緒に載せる**(#135)。ブラウザは**背面タブの
+  //    setInterval を絞る**(5 分ほどで 1 分に 1 回まで落ちる)ので、本体が
+  //    「4 秒来なければ固まった」と判定するには**絞りが掛かっていない証拠**が要る。
+  //    ⚠ 載せないと、背面に置いただけの窓を「固まった」と誤検知する。
+  //    判定は本体の `office-hang-watch.ts` が持つ ── ここは材料を運ぶだけ。
+  function alive() { say('alive', { visible: document.visibilityState === 'visible' }); }
+  var beat = setInterval(alive, 1500);
+  alive();
 
   ch.onmessage = function (ev) {
     var d = ev && ev.data;

@@ -90,6 +90,15 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-13-office-hang-notice',
+    title: 'Office の窓が固まったとき、お知らせするようになりました',
+    items: [
+      'Office の中身が固まると、その窓のタブはクリックもキーも受け付けなくなり、窓の中には何も出せません。',
+      'PKC3 の画面に戻ってくると、下の行に「Office の窓が応答していません」と出るようになりました。',
+      '窓のタブを閉じて、もう一度「Office で開く」を押してください。',
+    ],
+  },
+  {
     id: '2026-08-13-office-copy-crash',
     title: 'Office でコピーすると操作が効かなくなる問題を直しました',
     items: [

@@ -44,7 +44,26 @@ export const OFFICE_HOST_PATH = 'office/host.html';
 export const ALIVE_TTL_MS = 4000;
 
 export type OfficeWindowEvent =
-  | { readonly type: 'alive' }
+  /**
+   * 生存通知。`visible` は**窓のタブがそのとき表に居たか**(#135)。
+   *
+   * 🔴 これが要るのは、**背面タブのタイマーが絞られる**から ── Chrome は
+   * 5 分ほど背面に居たページの `setInterval` を **1 分に 1 回**まで落とす。
+   * つまり「通知が 4 秒来ない = ハング」は**窓が表に居たときにしか言えない**。
+   * ⚠ 窓が背面なら 60 秒空くのが正常なので、同じ物差しを当てると**必ず誤検知**する。
+   * 判定は `office-hang-watch.ts` が持つ(ここは材料を運ぶだけ)。
+   *
+   * ⚠ 古い host は payload を持たない ── **その時は `false`**(= 絞られているかも
+   * しれない側)に倒す。誤検知より見逃しを選ぶ。
+   */
+  | { readonly type: 'alive'; readonly visible: boolean }
+  /**
+   * 窓が**停止した**と言ってきた(`host.html` の `died()`)。
+   *
+   * ⚠ **生存通知は止まらない**(`host.html` の注記: 止めると本体が「閉じた」と
+   * 判断して 2 つ目の窓を開く ── 1 窓 約 750MB)。だから停止はこれで別に伝わる。
+   */
+  | { readonly type: 'crashed'; readonly reason: string }
   | { readonly type: 'ready-for-document' }
   | { readonly type: 'painted'; readonly ms: number }
   | { readonly type: 'saved'; readonly name: string; readonly bytes: Uint8Array }
@@ -229,10 +248,14 @@ function parseEvent(data: unknown): OfficeWindowEvent | null {
   const d = data as { pkc3Office?: unknown; payload?: unknown };
   const p = (d.payload ?? {}) as {
     ms?: unknown; missing?: unknown; name?: unknown; bytes?: unknown;
+    visible?: unknown; reason?: unknown;
   };
   switch (d.pkc3Office) {
     case 'alive':
-      return { type: 'alive' };
+      // ⚠ 古い host は `visible` を送らない ── 既定は false(絞られている側)
+      return { type: 'alive', visible: p.visible === true };
+    case 'crashed':
+      return { type: 'crashed', reason: typeof p.reason === 'string' ? p.reason : '' };
     case 'ready-for-document':
       return { type: 'ready-for-document' };
     case 'painted':
