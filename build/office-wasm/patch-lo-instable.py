@@ -48,14 +48,19 @@ JS が動かないので、こちらの検知の仕掛けが全部止まる唯�
 つまり自動書式が選べないだけで、**ダイアログは開き、表は挿入できる**。
 いまはタブごと固まって文書を失うので、比べるまでもない。
 
-## ⚠ 残っている未確認
+## なぜ一覧が空だったか ── 別の patch が直す
 
-**なぜ一覧が空なのか**は分かっていない。`autotbl.fmt` は一式に在る
-(`/instdir/presets/config/autotbl.fmt`、35,313 バイト ── metadata の 1599 file を
-全数走査して確認)が、LO が読むのは **user プロファイル側**であり、
-そこへ複製する起動処理が wasm で走っていない可能性がある。
-🔑 **本パッチはそれとは独立に正しい** ── `assert` が消える以上、
-`-1` を渡さない保証はどこにも無いからである。
+上流は表の自動書式を **`autotbl.fmt` → `tablestyles.xml`** へ移した(GSoC 2025、
+`svx/source/table/tablestylesparser.cxx` 冒頭)のに、wasm の詰め込み一覧は
+**古いほうを入れたまま**だった。`SvxAutoFormat::Load()` は開けなければ
+`SAL_WARN` して `return false` ── **無言で空**になる。
+→ `patch-lo-fsimage.py` が入れる。
+
+🔑 **本パッチはそれとは独立に必要である。**
+`SwTableAutoFormatTable::GetData(size_t)` の実体は
+`return &*m_pImpl->m_AutoFormats[nIndex];`(`std::vector::operator[]` 素通り)で、
+`int` の `-1` は **`SIZE_MAX` に化ける**。`assert` が消える以上、
+`-1` を渡さない保証はどこにも無い。
 
 ## ⚠ 当たったことを確かめてから当てる
 
