@@ -49,6 +49,13 @@ on:
         #    必ず出力し release notes にも書く ── 再現したいときはここへ渡す(#117)。
         description: 'LibreOffice core の ref(空 = master。再現したいときは SHA を渡す)'
         default: 'master'
+      safe_heap:
+        # 🔴 **調査用**(#134)。`-sSAFE_HEAP=1` を足して焼く ── 範囲外アクセスが
+        #    起きた瞬間に**どのポインタか**が出る。⚠ 実行が数倍遅くなるので配布向きでない。
+        #    🔑 **配布 tag を汚さない仕掛けは下の `tag=` に在る**(入力ではなく導出)。
+        description: '調査用: SAFE_HEAP を有効にする(遅い。別 tag へ出る)'
+        type: boolean
+        default: false
 
 # ⚠ 既定の 6 時間で足りない可能性が高い。足りなければ段を分けて artifact で繋ぐ
 jobs:
@@ -281,6 +288,14 @@ jobs:
           #    忘れると黙って当たらない。全部拾い、**拾った本数を主張する**
           #    (glob が壊れて 0 本になったら落ちる)。
           n=0
+          # ⚠ 調査ビルドのときだけ SAFE_HEAP を足す(patch script が両方向で検める)
+          # ⚠ `[ … ] && echo 1 || echo 0` と書かない ── shell の `&&`/`||` は同順位・
+          #    左結合で、「偽のとき」と「失敗したとき」が同じ枝に落ちる(CLAUDE.md)
+          if [ "${{ inputs.safe_heap }}" = "true" ]; then
+            export PKC3_SAFE_HEAP=1
+          else
+            export PKC3_SAFE_HEAP=0
+          fi
           for p in "$GITHUB_WORKSPACE"/build/office-wasm/patch-*.py; do
             python3 "$p" ~/lo-core
             n=$((n + 1))
@@ -479,19 +494,31 @@ jobs:
           #    **clone が失敗した回にも走る**。そこで落ちると、いちばん欲しい
           #    「落ちた回の成果物」が publish されない
           sha="${LO_SHA:-unknown}"
+          # ⚠ 調査ビルドは**版の字面で見分けが付く**ようにする(設定画面に出る)
+          SAFE_SUFFIX=""
+          if [ "${{ inputs.safe_heap }}" = "true" ]; then SAFE_SUFFIX="-safeheap"; fi
           printf '%s\n' "{
-            \"version\": \"lo-${sha:0:12}-run${GITHUB_RUN_ID}\",
+            \"version\": \"lo-${sha:0:12}-run${GITHUB_RUN_ID}${SAFE_SUFFIX}\",
             \"lo_sha\": \"${sha}\",
             \"qt_ref\": \"${{ github.event.inputs.qt_ref || '6.9' }}\",
             \"emsdk\": \"${{ github.event.inputs.emsdk || '4.0.10' }}\",
             \"run_id\": \"${GITHUB_RUN_ID}\",
             \"pkc3_commit\": \"${GITHUB_SHA}\",
+            \"safe_heap\": \"${{ inputs.safe_heap }}\",
             \"built_at\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
           }" > build-info.json
           cat build-info.json
           zip -q -r /tmp/lo-wasm-qt6.zip .
           ls -la /tmp/lo-wasm-qt6.zip
-          tag=lo-wasm-dev
+          # 🔴 **tag は入力させない。導出する。**
+          #    調査ビルド(SAFE_HEAP)は実行が数倍遅いので、**配布 tag へ出したら
+          #    user の Office が使い物にならなくなる**。⚠ 「間違えないよう気をつける」
+          #    ではなく、**間違えられない形**にする ── 入力に tag を持たせない。
+          if [ "${{ inputs.safe_heap }}" = "true" ]; then
+            tag=lo-wasm-safeheap
+          else
+            tag=lo-wasm-dev
+          fi
           # 既存を消してから作り直す(tag を使い回して容量を積まない)
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
