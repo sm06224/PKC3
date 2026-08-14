@@ -197,7 +197,8 @@
         for (var i = 0; i < fonts.length; i += 1) {
           FS.writeFile('/instdir/share/fonts/truetype/' + fonts[i][0], fonts[i][1]);
         }
-        var args = [];
+        // 🔴 **製品と同じ引数で開く**(#158)。⚠ 落とすと、配る一式の見本だけ英語になる
+        var args = ['--language=ja'];
         if (docBytes) {
           try { FS.mkdir('/work'); } catch (e) { /* 既に在る */ }
           var path = '/work/' + file.name.replace(/[/\\]/g, '_');

@@ -757,7 +757,11 @@
       // ⚠ 書き終わったら手放す(MEMFS が持っている ── こちらの配列は二重持ち)
       fonts.length = 0;
       seedWindowSize(FS);
-      var args = [];
+      // 🔴 **UI を日本語で開く**(#158)。⚠ 一式に翻訳を詰めただけでは英語のままで、
+      //    **選ばせる 1 手**が要る(`desktop/source/app/cmdlineargs.cxx` の `--language`)。
+      //    🔑 user が設定画面で UI 言語を選べば**そちらが勝つ**(`langselect.cxx` の
+      //    優先順は ①設定 ②この引数 ③環境変数)ので、既定を与えるだけで上書きは妨げない。
+      var args = ['--language=ja'];
       if (docBytes) {
         try { FS.mkdir('/work'); } catch (e) { /* 既に在る */ }
         var path = '/work/' + (docName || 'document').replace(/[/\\]/g, '_');

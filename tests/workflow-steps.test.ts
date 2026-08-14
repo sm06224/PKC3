@@ -338,8 +338,15 @@ describe('office-wasm のパッチ', () => {
       // 空振り防止 ── heredoc を本当に読めているか(読めていれば必ずこれが在る)
       expect(conf?.[1], 'heredoc の抜き出しが壊れている').toContain('--with-lang=');
       // ② 🔴 **配る物に入ったか**(0 件なら落とす)
-      expect(yml, `${lang} を頼んでいるのに、配る物に入ったことを確かめていない`).toContain(
-        `grep -o '/${lang}/' workdir/installation/LibreOffice/emscripten/soffice.data.js.metadata`,
+      // 🔑 観測点は**代替物で満たせない形**にする(2026-08-14 に絞り込んだ)──
+      //    `/ja/` だけだと無関係な path(フォント等)に満たされる。見るのは
+      //    **翻訳の実体**(`.mo`)と**言語の登録**(Langpack)で、これは別の機構なので
+      //    **両方**要る(片方だけでも UI は英語のまま出荷される)。
+      expect(yml, `${lang} の翻訳が配る物に入ったことを確かめていない`).toContain(
+        `program/resource/${lang}/LC_MESSAGES/[A-Za-z0-9_]*\\.mo`,
+      );
+      expect(yml, `${lang} の言語登録が配る物に入ったことを確かめていない`).toContain(
+        `Langpack-${lang}\\.xcd`,
       );
     }
   });

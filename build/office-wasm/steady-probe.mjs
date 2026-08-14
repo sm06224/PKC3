@@ -154,7 +154,9 @@ async function init(){
     FS.writeFile('/work/steady.fodt', doc);
     for (const [n,b] of fonts) FS.writeFile('/instdir/share/fonts/truetype/'+n, b);
     globalThis.__fontsInjected = fonts.length;
-    inst.callMain(['/work/steady.fodt']);
+    // 🔴 製品と同じ引数(#158)。⚠ 定常のメモリを測る面なので、**翻訳を読んだ状態**で
+    //    測らないと user の常駐量と食い違う
+    inst.callMain(['--language=ja', '/work/steady.fodt']);
   } catch(e) { console.error(e); globalThis.__bootError = String(e && e.stack || e).slice(0,400); }
 }
 </script><script src="soffice.js"></script><script src="qtloader.js"></script></body></html>`;

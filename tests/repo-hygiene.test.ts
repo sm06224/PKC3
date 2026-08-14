@@ -29,6 +29,43 @@ function textFiles(dir: string, out: string[] = []): string[] {
   return out;
 }
 
+describe('Office の起動引数', () => {
+  /**
+   * 🔴 **LO を起こす面は 1 つではない**(#158)。翻訳を一式へ詰めても、
+   * `--language=ja` を渡す面が 1 つでも欠けると、そこだけ英語で開く。
+   *
+   * ⚠ **既知の 5 面を列挙する形にしない。** 6 つめが足された瞬間に、
+   * 「主要な経路で効いているから大丈夫」で出荷される ── CLAUDE.md §7
+   * 「同じ値を複数の経路へ渡すものは、経路ごとに pin する」の実体。
+   * 🔑 **`callMain` を原文から数え上げ、数えた数だけ見る。**
+   */
+  it('🔴 callMain を呼ぶ面は、全部 --language=ja を渡している(#158)', () => {
+    const sites: { file: string; line: number; text: string }[] = [];
+    for (const f of [...textFiles('src'), ...textFiles('build'), ...textFiles('public')]) {
+      const lines = readFileSync(f, 'utf-8').split('\n');
+      lines.forEach((text, i) => {
+        if (/\.callMain\(/.test(text)) sites.push({ file: f, line: i + 1, text });
+      });
+    }
+    // ⚠ 空振り防止 ── 0 件なら「全部通っている」ではなく「1 つも見ていない」
+    expect(sites.length, 'callMain が 1 件も見つからない = 何も検めていない').toBeGreaterThanOrEqual(
+      5,
+    );
+
+    const bad: string[] = [];
+    for (const s of sites) {
+      // 引数がその行に在る形(`callMain(['…'])`)と、変数越しの形の両方を許す。
+      // ⚠ 変数越しのときは、**その file の中で** args に ja が入っているかを見る
+      const inline = /--language=ja/.test(s.text);
+      const viaVar = /callMain\(\s*args\s*\)/.test(s.text)
+        ? /--language=ja/.test(readFileSync(s.file, 'utf-8'))
+        : false;
+      if (!inline && !viaVar) bad.push(`${s.file}:${s.line}`);
+    }
+    expect(bad, `--language=ja を渡していない面が在る:\n${bad.join('\n')}`).toEqual([]);
+  });
+});
+
 describe('リポジトリ衛生', () => {
   it('🔴 ソースに制御文字の生バイトが無い(タブ・改行を除く)', () => {
     const offenders: string[] = [];

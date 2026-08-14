@@ -570,9 +570,16 @@ jobs:
           # ⚠ configure に渡っただけでは足りない ── #145 で「渡していないから
           #    Impress が 1 file も入っていなかった」を踏んでいる。**中身を数える。**
           # ⚠ 0 件なら落とす(黙って英語だけを配らない)。
-          ja=$(grep -o '/ja/' workdir/installation/LibreOffice/emscripten/soffice.data.js.metadata | wc -l)
-          echo "日本語 resource: $ja 件"
-          test "$ja" -gt 0
+          # 🔑 **代替物で満たせない条件にする**(2026-08-14 に絞り込んだ)。
+          #    `/ja/` だけだと、無関係な path(フォントや fixture)に満たされうる ──
+          #    見るのは**翻訳の実体**(`.mo`)と**言語の登録**(Langpack)である。
+          #    ⚠ この 2 つは別の機構なので、**両方**数える(片方だけでも UI は英語のまま)。
+          meta=workdir/installation/LibreOffice/emscripten/soffice.data.js.metadata
+          mo=$(grep -o 'program/resource/ja/LC_MESSAGES/[A-Za-z0-9_]*\.mo' "$meta" | wc -l)
+          pack=$(grep -c 'Langpack-ja\.xcd' "$meta" || true)
+          echo "日本語 翻訳(.mo): $mo 件 / 言語の登録(Langpack-ja.xcd): $pack 件"
+          test "$mo" -gt 0
+          test "$pack" -gt 0
 
       # 🔴 **手元で回せるようにする**(user 指示 2026-08-10
       #    「ビルド通ってるんだから、あなたの環境に落として試せばいいんじゃない?」)。
