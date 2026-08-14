@@ -34,8 +34,11 @@ export interface LauncherTile {
    * 貸し借りが要るので、1 字の目印だけで識別価値が足りるうちは足さない。
    */
   icon?: string;
-  /** 起動の仕方。⚠ `url` は外部サイト、`app` は同梱 HTML。 */
-  kind: 'app' | 'url';
+  /**
+   * 起動の仕方。⚠ `url` は外部サイト、`app` は同梱 HTML、
+   * `office` は**組み込み**(entry を持たない ── #148)。
+   */
+  kind: 'app' | 'url' | 'office';
   /** `kind === 'url'` のときの飛び先。 */
   url?: string;
   /** `kind === 'app'` のときの実体(IDB Blob の鍵)。 */
@@ -144,4 +147,42 @@ export function buildTiles(sources: readonly TileSource[]): LauncherTile[] {
     if (tile) tiles.push(tile);
   }
   return sortTiles(tiles);
+}
+
+/**
+ * 🔴 組み込みタイルの lid(#148、user 裁定 2026-08-14「組み込みタイルの案を採用」)。
+ * entry を持たないので、entry の lid と衝突しない固定値にする。
+ * ⚠ `pkc-` で始めない ── goldens の正規化が id らしき名前を機械的に潰す
+ * リポジトリでは、「id らしく見える名前」は id として扱われる(CLAUDE.md §9)。
+ */
+export const OFFICE_TILE_LID = 'builtin:office';
+
+/** Office(Start Center)を開く組み込みタイル。 */
+export function officeTile(): LauncherTile {
+  return { lid: OFFICE_TILE_LID, title: 'Office', group: '', kind: 'office' };
+}
+
+/**
+ * 組み込み分を entry 由来の一覧へ合流させる。
+ *
+ * 🔑 Office 一式は**端末ローカル**(IndexedDB)だが、entry はコンテナに乗って
+ * 端末間を移動する ── だから組み込みは entry にせず、「一式が入っている端末に
+ * だけ出す」をここ(合流)で決める(裁定の決め手)。
+ * ⚠ entry 由来の並び(`sortTiles` 済み)には触らない。組み込みは既定グループの
+ * **先頭**に置く ── 同じものが常に同じ場所にある(不可侵指示)。
+ */
+export function withBuiltinTiles(
+  tiles: readonly LauncherTile[],
+  opts: { office: boolean },
+): LauncherTile[] {
+  return opts.office ? [officeTile(), ...tiles] : [...tiles];
+}
+
+/**
+ * 押したとき entry の選択を立てるか。
+ * ⚠ 組み込みタイルは entry を持たない ── 選択を立てると右の列が
+ * 「見つからない」になる(存在しない lid を `selectedLid` に入れない)。
+ */
+export function tileSelectsEntry(tile: LauncherTile): boolean {
+  return tile.kind !== 'office';
 }

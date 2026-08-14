@@ -11,7 +11,7 @@
 import { describe, expect, it } from 'vitest';
 import { launchTile, EXTERNAL_WINDOW_FEATURES } from '../../src/adapter/ui/launch-tile';
 import { LAUNCHER_APP_SANDBOX } from '../../src/features/launcher/app-shell';
-import type { LauncherTile } from '../../src/features/launcher/tiles';
+import { officeTile, type LauncherTile } from '../../src/features/launcher/tiles';
 
 interface FakeWin {
   closed: boolean;
@@ -45,6 +45,8 @@ interface Harness {
   win: FakeWin;
   /** `readSeed` に渡った appId(P8 段⑭ の観測点)。 */
   seedFor: string[];
+  /** `openOffice` が呼ばれた回数(#148 の観測点)。 */
+  officeOpens: { n: number };
   closeWindow: () => void;
   deps: Parameters<typeof launchTile>[1];
 }
@@ -58,6 +60,7 @@ function harness(
   const revoked: string[] = [];
   const failures: string[] = [];
   const seedFor: string[] = [];
+  const officeOpens = { n: 0 };
   const win = fakeWindow();
   let release: (() => void) | null = null;
   let seq = 0;
@@ -68,6 +71,7 @@ function harness(
     failures,
     win,
     seedFor,
+    officeOpens,
     closeWindow: () => {
       win.closed = true;
       release?.();
@@ -94,6 +98,9 @@ function harness(
         return opts.seed ?? {};
       },
       fail: (m) => failures.push(m),
+      openOffice: () => {
+        officeOpens.n += 1;
+      },
     },
   };
   return h;
@@ -289,5 +296,29 @@ describe('素のまま起動(P10)', () => {
     expect(raw, '素のままなのに shim を入れている').not.toContain(
       "Object.defineProperty(window, 'localStorage'",
     );
+  });
+});
+
+describe('組み込み Office タイル (#148)', () => {
+  it('openOffice を 1 回呼び、窓もブロブも自分では触らない', () => {
+    const h = harness(null);
+    launchTile(officeTile(), h.deps);
+    expect(h.officeOpens.n).toBe(1);
+    // ⚠ 窓の生成・使い回しは OfficeWindow の責務 ── ここで window.open すると
+    //    既に開いている Office と別に 2 つ目の窓が生える
+    expect(h.opened).toHaveLength(0);
+    expect(h.created).toHaveLength(0);
+    expect(h.failures).toHaveLength(0);
+  });
+
+  it('app / url のタイルでは openOffice を呼ばない(対称の反対側)', async () => {
+    const h = harness('<p>hi</p>');
+    launchTile(appTile, h.deps);
+    await settle();
+    launchTile(
+      { lid: 'u1', title: 'サイト', group: '', kind: 'url', url: 'https://example.com/x' },
+      h.deps,
+    );
+    expect(h.officeOpens.n).toBe(0);
   });
 });

@@ -9,8 +9,12 @@ import { describe, expect, it } from 'vitest';
 import {
   buildTiles,
   isLaunchableUrl,
+  officeTile,
+  OFFICE_TILE_LID,
   sortTiles,
   tileFrom,
+  tileSelectsEntry,
+  withBuiltinTiles,
   type LauncherTile,
 } from '../../src/features/launcher/tiles';
 
@@ -122,5 +126,42 @@ describe('並べ方 ── PKC2 と同じ順で見える', () => {
       { lid: '3', title: 'url', body: body({ 'attachment.launcher_url': 'https://e.example' }) },
     ]);
     expect(tiles.map((x) => x.lid)).toEqual(['1', '3']);
+  });
+});
+
+describe('組み込みタイルの合流 (#148)', () => {
+  const entryTiles: LauncherTile[] = [
+    { lid: 'a1', title: '見積', group: '', kind: 'app', assetKey: 'k1' },
+    { lid: 'a2', title: '外部', group: '道具', kind: 'url', url: 'https://x.test/' },
+  ];
+
+  it('一式が入っている端末では Office タイルが既定グループの先頭に付く', () => {
+    const merged = withBuiltinTiles(entryTiles, { office: true });
+    expect(merged[0]).toEqual({
+      lid: OFFICE_TILE_LID,
+      title: 'Office',
+      group: '',
+      kind: 'office',
+    });
+    // ⚠ entry 由来の並びには触らない(合流は前置だけ)
+    expect(merged.slice(1)).toEqual(entryTiles);
+  });
+
+  it('入っていない端末では 1 枚も足さない(押しても何も起きないタイルを出さない)', () => {
+    const merged = withBuiltinTiles(entryTiles, { office: false });
+    expect(merged).toEqual(entryTiles);
+    // ⚠ 「同じ長さ」だけでは足して 1 枚消す実装と区別がつかない ── kind で見る
+    expect(merged.some((t) => t.kind === 'office')).toBe(false);
+  });
+
+  it('entry が 0 件でも Office タイルだけで面が成立する', () => {
+    const merged = withBuiltinTiles([], { office: true });
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.kind).toBe('office');
+  });
+
+  it('tileSelectsEntry ── 組み込みだけ選択を立てない', () => {
+    expect(tileSelectsEntry(officeTile())).toBe(false);
+    for (const t of entryTiles) expect(tileSelectsEntry(t)).toBe(true);
   });
 });

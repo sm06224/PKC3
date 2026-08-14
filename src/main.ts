@@ -4,6 +4,7 @@ import './styles/app.css';
 
 import { Dispatcher } from '@adapter/state/dispatcher';
 import { connectStoreEffects } from '@adapter/state/store-effects';
+import { tileSelectsEntry } from '@features/launcher/tiles';
 import { StoreClient } from '@adapter/platform/storage/store-client';
 import {
   createStorePort,
@@ -720,11 +721,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         readSeed: readAppStorage,
         baseUrl: document.baseURI,
         fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
+        // #148 組み込みタイル ── 文書なしで開く = Start Center
+        openOffice: () => officeWindow.open({}),
       });
       // ⚠ 押した対象を**選択状態にもする**(P8 段⑭)── 起動しただけだと右の列が
       //    空文のままで、いま何を触ったのかが画面に残らない。「押す = 起動」の
-      //    意味は変えず、選択は同時に立つ副作用として入れる
-      dispatcher.dispatch({ type: 'SELECT_ENTRY', lid });
+      //    意味は変えず、選択は同時に立つ副作用として入れる。
+      // ⚠ 組み込みタイル(#148)は entry を持たないので立てない(tileSelectsEntry)
+      if (tileSelectsEntry(tile)) dispatcher.dispatch({ type: 'SELECT_ENTRY', lid });
     },
     /**
      * 🔴 **詳細画面から添付を起動する**(P10、user 指示 2026-08-05)。
@@ -775,6 +779,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             readSeed: readAppStorage,
             baseUrl: document.baseURI,
             fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
+            // ⚠ 添付起動の経路に office タイルは来ない(kind は 'app' 固定)が、
+            //    依存の形は 1 つに保つ
+            openOffice: () => officeWindow.open({}),
             confirmSameOrigin: (title) => {
               if (sameOriginAllowed.has(lid)) return true;
               // ⚠ 何が起きるかを**具体**で書く(「安全でない」では判断できない)
@@ -1007,7 +1014,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     const lid = dispatcher.getState().selectedLid;
     if (lid) center.noteBlockedBox(lid, blocked);
   });
-  connectStoreEffects(dispatcher, createStorePort(client, DEFAULT_CID));
+  connectStoreEffects(dispatcher, createStorePort(client, DEFAULT_CID), {
+    // #148 組み込みタイル ── 一式が入っている端末にだけ Office のタイルを出す。
+    // 控えは起動時と設置/削除の直後に setMeta で合っている(officeOpener と同じ値)
+    officeInstalled: () => appOfficePack.isInstalled(),
+  });
   /**
    * 🔴 **一式が入っているかを 1 度だけ読み、控えに写す**(#88 / O3-c)。
    *

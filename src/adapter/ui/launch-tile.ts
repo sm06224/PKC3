@@ -48,6 +48,11 @@ export interface LaunchDeps {
   /** 失敗を user に見せる。⚠ 無言で終えない。 */
   fail: (message: string) => void;
   /**
+   * 組み込み Office タイル(#148)── Office の窓(Start Center)を開く。
+   * ⚠ **同期に呼べること**(click の gesture の中で `window.open` に到達する)。
+   */
+  openOffice: () => void;
+  /**
    * 🔴 **素のまま(同一オリジン)で開く前の確認**(P10)。
    *
    * `false` を返したら**開かない**(fail closed)。呼び側がセッション中の
@@ -80,6 +85,12 @@ export function launchTile(
   // 🔴 **開く前に聞く**(fail closed)。⚠ `window.open` より前に聞く ──
   //    後にすると、断ったのに空のタブが残る
   if (raw && deps.confirmSameOrigin !== undefined && !deps.confirmSameOrigin(tile.title)) return;
+  if (tile.kind === 'office') {
+    // 🔑 組み込み(#148)── Office の窓(Start Center)を開く。窓の生成・使い回し・
+    //    寿命は OfficeWindow が持つので、ここは同期に依頼するだけ(gesture を切らない)
+    deps.openOffice();
+    return;
+  }
   if (tile.kind === 'url') {
     /**
      * ⚠ 外部サイトには **opener も referrer も渡さない**(マニュアルの約束)。

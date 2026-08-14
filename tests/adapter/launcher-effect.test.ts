@@ -15,6 +15,7 @@
 import { describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects, type StorePort } from '../../src/adapter/state/store-effects';
+import { OFFICE_TILE_LID, type LauncherTile } from '../../src/features/launcher/tiles';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 
 function meta(lid: string, archetype: string): EntryMeta {
@@ -144,5 +145,40 @@ describe('ランチャーのタイルを読む', () => {
     expect(trips).toEqual([]);
     expect(singles).toEqual([]);
     off();
+  });
+});
+
+describe('組み込み Office タイルの合流 (#148)', () => {
+  async function tilesWith(officeInstalled: boolean): Promise<readonly LauncherTile[]> {
+    const { store } = countingStore({ a1: APP_BODY });
+    const dispatcher = new Dispatcher();
+    const off = connectStoreEffects(dispatcher, store, {
+      officeInstalled: () => officeInstalled,
+    });
+    dispatcher.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c',
+      metas: [meta('a1', 'attachment')],
+      relations: [],
+    });
+    dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'launcher' });
+    await settle();
+    const tiles = dispatcher.getState().launcherTiles ?? [];
+    off();
+    return tiles;
+  }
+
+  it('一式が入っている端末では Office タイルが先頭に付く', async () => {
+    const tiles = await tilesWith(true);
+    expect(tiles[0]?.kind).toBe('office');
+    expect(tiles[0]?.lid).toBe(OFFICE_TILE_LID);
+    // ⚠ entry 由来のタイルが**消えていない**こと(置き換えではなく合流)
+    expect(tiles.some((t) => t.lid === 'a1')).toBe(true);
+  });
+
+  it('入っていない端末(と、依存を渡さない既存の呼び出し)では足されない', async () => {
+    const tiles = await tilesWith(false);
+    expect(tiles.some((t) => t.kind === 'office')).toBe(false);
+    expect(tiles.some((t) => t.lid === 'a1')).toBe(true);
   });
 });

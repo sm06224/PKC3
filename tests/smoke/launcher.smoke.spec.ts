@@ -798,3 +798,62 @@ test('🔴 囲いの中のアプリで、ページ内リンクを押してもア
   await tab.close();
   expect(errors).toEqual([]);
 });
+
+/**
+ * #148: **組み込みの Office タイル**(user 裁定 2026-08-14「組み込みタイルの案を採用」)。
+ *
+ * ⚠ unit は「合流の規則」しか見ない ── **meta を入れた端末で boot → 面に出る →
+ * 押すと Office の窓が開く**という 1 本の線は実物でしか確かめられない。
+ * ⚠ 「タイルが在る」で止めない ── 押して窓が開くところまで見る
+ * (「名前が在るかの検査は、中身が空でも通る」)。
+ */
+test('🔴 一式を入れた端末では Office タイルが出て、押すと窓が開く (#148)', async ({
+  page,
+  context,
+}) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  // Office 一式の meta を仕込む。⚠ 「入っているか」の判定は **meta の有無**
+  // (install の tx で files と一緒に書かれる ── office-pack-store.ts の作法)
+  await page.evaluate(async () => {
+    await new Promise<void>((resolve, reject) => {
+      const req = indexedDB.open('pkc3-office-pack', 1);
+      req.onupgradeneeded = () => {
+        if (!req.result.objectStoreNames.contains('files')) req.result.createObjectStore('files');
+        if (!req.result.objectStoreNames.contains('meta')) req.result.createObjectStore('meta');
+      };
+      req.onsuccess = () => {
+        const db = req.result;
+        const t = db.transaction('meta', 'readwrite');
+        t.objectStore('meta').put(
+          { version: 'smoke-pack', installedAt: Date.now(), source: 'url', totalBytes: 1, files: [] },
+          'pack',
+        );
+        t.oncomplete = () => {
+          db.close();
+          resolve();
+        };
+        t.onerror = () => reject(t.error ?? new Error('idb write failed'));
+      };
+      req.onerror = () => reject(req.error ?? new Error('idb open failed'));
+    });
+  });
+  // 控え(appOfficePack)は boot で読む ── 仕込んだ後に開き直す
+  await gotoApp(page);
+
+  await clickReal(page, '[data-pkc-browse="launcher"]');
+  const tiles = page.locator('[data-pkc-region="launcher-grid"] [data-pkc-tile]');
+  await expect(tiles).toHaveCount(1);
+  await expect(tiles.nth(0)).toContainText('Office');
+  expect(await tiles.nth(0).getAttribute('data-pkc-tile-kind')).toBe('office');
+
+  // 🔴 押すと **Office の窓**が開く
+  const popup = context.waitForEvent('page');
+  await clickReal(page, '[data-pkc-region="launcher-grid"] [data-pkc-tile]');
+  const win = await popup;
+  expect(win.url()).toContain('office/host.html');
+  await win.close();
+
+  expect(errors).toEqual([]);
+});
