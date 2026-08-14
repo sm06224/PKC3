@@ -5,6 +5,7 @@ import './styles/app.css';
 import { Dispatcher } from '@adapter/state/dispatcher';
 import { connectStoreEffects } from '@adapter/state/store-effects';
 import { tileSelectsEntry } from '@features/launcher/tiles';
+import { appEditorMode } from '@adapter/ui/render/editor-mode';
 import { StoreClient } from '@adapter/platform/storage/store-client';
 import {
   createStorePort,
@@ -847,6 +848,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      */
     setPageFormat: (format) => {
       if (isPageFormat(format)) choosePageFormat(document.documentElement, format);
+    },
+    /**
+     * ✏️ 編集の仕方(#104 第 2 弾)。⚠ **描き直さない** ── 編集の面は
+     * 編集の入りでしか組まれず、開いている編集は壊さない(効くのは次から。
+     * 設定の説明文がそう約束している)。判断(検証・保存)は store 側が持つ。
+     */
+    setEditorMode: (mode) => {
+      appEditorMode.setMode(mode);
     },
     /**
      * 🖼 外部の画像(2026-08-06、user 裁定「常にオン / 常に確認 / 常にオフ」)。

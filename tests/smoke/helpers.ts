@@ -15,6 +15,25 @@ export async function gotoApp(page: Page): Promise<void> {
 }
 
 /**
+ * 🔑 2 ペイン(split)で開く仕込み(#104 第 2 弾で既定が live になった)。
+ * 全文 textarea(`editor-body`)を**入力の道具**に使う spec は、最初の goto の
+ * **前に**これを呼ぶ。⚠ ここで試すのは「設定として支持される構成」──
+ * 既定(live)の顔は live-editor.smoke.spec.ts が守る。
+ */
+export async function useSplitEditor(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    // ⚠ init script は**全 frame**で走る ── sandbox 化された html fence の
+    //   iframe(allow-same-origin 無し)では localStorage を**読むだけで throw**
+    //   し、pageerror として計上される(fence-render smoke で実際に踏んだ)
+    try {
+      localStorage.setItem('pkc3.editor-mode', 'split');
+    } catch {
+      /* sandbox の frame ── アプリの設定とは無関係なので黙って流す */
+    }
+  });
+}
+
+/**
  * 🔴 **既知の常在ノイズ(名指しの等値リスト)。**
  *
  * cross-origin isolation(`COOP` + `COEP: credentialless`)を入れた 2026-08-10 から

@@ -90,6 +90,15 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-14-live-editor-default',
+    title: '1 面で編集(ライブエディタ)が最初の設定になりました',
+    items: [
+      '編集を開くと、描画されたままの本文の上で、押した行だけが原文になります。フラグを入れる必要は無くなりました。',
+      'これまでの 2 ペイン(原文とプレビュー)も使えます。設定の「表示」の「編集の仕方」から選べます。',
+      '切り替えは、次に編集を開いたときから効きます。',
+    ],
+  },
+  {
     id: '2026-08-14-attachment-doc-align',
     title: '添付の説明でも、文書の寄せの宣言が効くようになりました',
     items: [

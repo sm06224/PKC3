@@ -21,6 +21,7 @@ import { MARKDOWN_EXTENSIONS } from '../src/features/import/plain-markdown';
 import { REVISION_KEEP_LATEST } from '../src/adapter/platform/storage/store-port';
 import { THEMES } from '../src/adapter/ui/render/theme';
 import { PAGE_FORMATS } from '../src/features/page-format';
+import { EDITOR_MODES } from '../src/features/editor-mode';
 import { SEALED_ARCHETYPES, SEALED_VIEWS } from '../src/features/sealed';
 import { buildFormatBar } from '../src/adapter/ui/render/format-bar';
 import { FORMAT_OPS } from '../src/features/markdown/text-ops';
@@ -199,6 +200,18 @@ describe('マニュアルと実装の突合', () => {
     }
     // ⚠ cap を外す形式は**そう書いてある**こと(数字が無いので言葉で確かめる)
     expect(MANUAL, 'マニュアルに「上限なし」の説明が無い').toContain('**上限なし**');
+  });
+
+  /**
+   * 🔴 **編集の仕方の選択肢が、マニュアルと一致する**(#104 第 2 弾)。
+   * label は設定画面が `EDITOR_MODES` から作るので、名前を変えると
+   * マニュアルだけが嘘になる ── 紙面と同じ型の pin。
+   */
+  it('🔴 編集の仕方の選択肢がマニュアルと一致する', () => {
+    expect(EDITOR_MODES.length, '編集の仕方が 1 つも無い(この検査は空振り)').toBe(2);
+    for (const m of EDITOR_MODES) {
+      expect(MANUAL, `マニュアルに編集の仕方「${m.label}」が無い`).toContain(`**${m.label}**`);
+    }
   });
 
   it('🔴 描画できる fence 言語が一致する', () => {

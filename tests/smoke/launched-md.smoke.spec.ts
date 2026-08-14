@@ -13,7 +13,14 @@
  * (`isSameEntry` は同じファイルにだけ true / `createWritable` は書いた文字を貯める)。
  */
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, collectPageErrors } from './helpers';
+import { gotoApp, clickReal, collectPageErrors, useSplitEditor } from './helpers';
+
+// 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
+// (editor-body)を入力の道具に使うので、設定で split を明示する。
+// 既定(live)の顔は live-editor.smoke.spec.ts が守る。
+test.beforeEach(async ({ page }) => {
+  await useSplitEditor(page);
+});
 
 /** アプリが `armLaunchQueue` を呼ぶ前に `launchQueue` を用意する。 */
 async function stubLaunch(

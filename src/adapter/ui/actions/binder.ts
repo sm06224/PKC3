@@ -110,6 +110,11 @@ export interface BinderServices {
    */
   setPageFormat?(format: string): void;
   /**
+   * 編集の仕方(#104 第 2 弾。user 裁定 2026-08-08)。
+   * ⚠ **flag ではない**(正規設定)── 効くのは次に編集を開いたとき。
+   */
+  setEditorMode?(mode: string): void;
+  /**
    * フラグの切替(P11。user 指示 2026-08-07)。
    * ⚠ **設定ではない** ── 開発者・パワーユーザー向けで、いつか畳まれる。
    */
@@ -880,6 +885,14 @@ const ACTIONS: Record<string, ActionHandler> = {
         ? target.value
         : target.getAttribute('data-pkc-page-format-value');
     if (format) services.setPageFormat?.(format);
+  },
+  'set-editor-mode': (_dispatcher, target, services) => {
+    // ⚠ `set-theme` と同じ受け方(`<select>` でもボタンでも通す)
+    const mode =
+      target instanceof HTMLSelectElement
+        ? target.value
+        : target.getAttribute('data-pkc-editor-mode-value');
+    if (mode) services.setEditorMode?.(mode);
   },
   'set-flag': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)

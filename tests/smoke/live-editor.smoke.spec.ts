@@ -15,18 +15,14 @@ import { clickReal, createEntry, collectPageErrors } from './helpers';
  *     dispatch しても、確定の `input` が `isComposing === true` で来ることや
  *     `compositionend` の後に `input` が来ないことは**再現できない**
  *
- * ⚠ 既定 OFF なので **flag で開く**。
- *
- * 🔴 **綴りは `?pkc-flag=editor.live`**(2026-08-07 に `?pkc-live=1` から昇格)。
- * user 指示「URL クエリパラメータ切り替えはフラグ扱いである / クエリパラメータを
- * 抜け穴にしてはいけない」── **クエリを読んでよいのは flag の解決と
- * パーマリンクだけ**で、`tests/features/flags.test.ts` の全数検査が旧い綴りを落とす。
- * ⚠ この spec は昇格の commit で**直し忘れて 12 件落ちた**(unit は緑だった) ──
- *   smoke は `dist/` を配信するので、source の綴りを変えても unit には届かない。
+ * 🔴 **既定が live になった**(#104 第 2 弾、user 裁定 2026-08-08「既定でON」)
+ * ── この file は**素で開く**。⚠ 旧い `?pkc-flag=editor.live` を残してはいけない:
+ * flag は退役して**未知名は黙殺**されるので、綴りを残すと「flag で開けている」
+ * ように見えて実は**新既定に救われているだけ**の空振りになる(§1 の型)。
  */
 
 async function gotoLive(page: Page): Promise<void> {
-  await page.goto('/?pkc-flag=editor.live');
+  await page.goto('/');
   await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
 }
 
@@ -40,7 +36,7 @@ async function gotoLive(page: Page): Promise<void> {
  */
 async function openLive(page: Page, body: string): Promise<void> {
   await createEntry(page, 'text');
-  // ⚠ 作った直後は**今日の 2 列**ではなく 1 面が出ている(flag が効いている)
+  // ⚠ 作った直後は 2 列ではなく 1 面が出ている(**既定が live** ── #104 第 2 弾)
   const live = page.locator('[data-pkc-region="editor-live"]');
   await expect(live).toBeVisible();
   await clickReal(page, '[data-pkc-region="editor-live"]');
@@ -640,4 +636,25 @@ test('🔴 表・コードの行を押しても編集欄が縮まない(段落�
   expect(await box(), '段落の編集欄が全幅へ跳ねた').toBeLessThan(proseW + 20);
 
   expect(errors).toEqual([]);
+});
+
+/**
+ * 🔴 **設定昇格の visual parity**(#104 第 2 弾)── 設定の「編集の仕方」を
+ * split にすると、次の編集から 2 列に戻る。⚠ 「選択欄が在る」で止めない ──
+ * 押して、編集の面が実際に切り替わるまで見る(dead control を出さない)。
+ */
+test('🔴 設定「編集の仕方」= 2 ペインで、次の編集から 2 列に戻る', async ({ page }) => {
+  await gotoLive(page);
+
+  // 設定を開いて、本物の選択欄を split にする
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  const select = page.locator('[data-pkc-field="editor-mode-select"]');
+  await expect(select).toBeVisible();
+  await select.selectOption('split');
+
+  // ノートを作って編集に入る ── 2 列(split)が出て、live は出ない
+  await createEntry(page, 'text');
+  await expect(page.locator('[data-pkc-region="editor-split"]')).toBeVisible();
+  await expect(page.locator('[data-pkc-region="editor-live"]')).toHaveCount(0);
+  await expect(page.locator('[data-pkc-field="editor-body"]')).toBeVisible();
 });

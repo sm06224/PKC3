@@ -39,6 +39,9 @@ async function tick(ms = 10): Promise<void> {
 
 // root がテスト間で堆積すると region 外 query の事故を隠す ── 毎回掃除
 beforeEach(() => {
+  // 2026-08-14(#104 第 2 弾): 既定は live ── この file は split の機構
+  // (全文 textarea)を測るので、設定で split を明示する
+  localStorage.setItem('pkc3.editor-mode', 'split');
   document.body.textContent = '';
 });
 
