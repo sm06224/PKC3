@@ -111,7 +111,13 @@ jobs:
           # ⚠ この 6 つは開発コンテナで実際に不足していた(2026-08-09)
           sudo apt-get install -y -qq \
             flex gperf nasm xsltproc ccache libarchive-zip-perl \
-            autoconf automake bison zip unzip pkg-config build-essential
+            autoconf automake bison zip unzip pkg-config build-essential \
+            gettext
+          # 🔴 **gettext は日本語 UI に要る**(#158)。⚠ 無いと configure が
+          #    `msgfmt not found. Install GNU gettext, or re-run without languages.`
+          #    で落ちる ── **翻訳の .po を .mo へ焼くのが msgfmt** である。
+          # ⚠ 在ることを確かめる(apt が黙って失敗しても気づけるように)
+          msgfmt --version | head -1
 
       # ── ここから途中成果物の再利用 ────────────────────────────────
       # ⚠ **`cache` ではなく `cache/restore` + `cache/save` を使う** ── 素の `cache`
