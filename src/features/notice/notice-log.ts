@@ -90,6 +90,15 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-14-office-settings-persist',
+    title: 'Office の設定が、窓を閉じても残るようになりました',
+    items: [
+      'これまで、Office の中で変えた設定(画面の言語など)は窓を閉じると消えていました。',
+      'いまは閉じる前に自動で控えを取り、次に開いたときに戻します。',
+      '控えはこの端末のブラウザの中だけに置きます。外へは送りません。',
+    ],
+  },
+  {
     id: '2026-08-14-office-japanese-ui',
     title: 'Office の画面が日本語になりました',
     items: [

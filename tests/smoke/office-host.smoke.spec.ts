@@ -274,10 +274,19 @@ async function seedFakePack(
               if (!made[dir]) throw new Error('ENOENT: no such directory, ' + dir);
               if (p.indexOf(bad) !== -1) throw new Error('ENOENT');
               window.__written.push(p);
+              window.__files = window.__files || {};
+              window.__files[p] = String(data);
               if (p.indexOf('registrymodifications.xcu') !== -1) {
                 window.__xcu = String(data);
                 window.__order.push('xcu');
               }
+            },
+            // ⚠ **stub は本物の意味論を真似る**: 無い file は throw(#159 の退避が
+            //    「file がまだ無い」を静かに飛ばせることを、本物と同じ形で確かめる)
+            readFile: function (p) {
+              window.__files = window.__files || {};
+              if (!(p in window.__files)) throw new Error('ENOENT: ' + p);
+              return window.__files[p];
             },
           },
           callMain: function (a) { window.__args = a; window.__order.push('callMain'); },
@@ -477,6 +486,105 @@ test('🔴 器が測れないときは、窓の大きさを頼まない(潰れ�
   } finally {
     await ctx.close();
   }
+});
+
+/**
+ * 🔴 **user プロファイルを再読み込みの向こうへ残す**(#159)。
+ *
+ * LO の設定(`registrymodifications.xcu`)は MEMFS に在り、再読み込みで消える ──
+ * UI 言語を変えても再起動で既定へ戻る(実機レポート #8 で確定)。
+ * host が localStorage へ退避・復元する。
+ *
+ * ⚠ 観測点は 3 つとも「file / storage の中身そのもの」── 「呼んだ」では、
+ * 中身を壊す形(幾何の重複 / 壊れた XML の書き戻し)が通ってしまう。
+ */
+test('🔴 保存済みの設定が boot で書き戻り、幾何だけ今の器で上書きされる(#159)', async ({ page }) => {
+  await page.goto('/office/host.html');
+  await seedFakePack(page);
+  await page.evaluate(() => {
+    // 前セッションの退避を再現: user が変えた設定(ooLocale)+ **古い幾何**
+    localStorage.setItem('pkc3-office-profile', [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<oor:items xmlns:oor="http://openoffice.org/2001/registry">',
+      '<item oor:path="/org.openoffice.Office.Linguistic/General">',
+      '<prop oor:name="UILocale" oor:op="fuse"><value>en-US</value></prop></item>',
+      '<item oor:path="/org.openoffice.Setup/Office/Factories/x">',
+      '<prop oor:name="ooSetupFactoryWindowAttributes" oor:op="fuse">',
+      '<value>9999,9999,9999,9999;4;0,0,0,0;</value></prop></item>',
+      '</oor:items>',
+    ].join(''));
+  });
+  await page.reload();
+  await expect(page.locator('#status')).toContainText('表示中', { timeout: 15_000 });
+
+  const seen = await page.evaluate(() => {
+    const w = window as unknown as { __xcu?: string; __order: string[] };
+    return { xcu: w.__xcu ?? '', order: w.__order };
+  });
+  // ① user の設定が戻っている
+  expect(seen.xcu, '退避した設定が書き戻っていない').toContain('UILocale');
+  expect(seen.xcu).toContain('en-US');
+  // ② 🔴 幾何は**保存時のものを捨てて**今の器で仕込む(古い幾何は窓を壊す)
+  expect(seen.xcu, '保存時の古い幾何が残っている').not.toContain('9999,9999');
+  expect(seen.xcu).toContain('ooSetupFactoryWindowAttributes');
+  // ⚠ 幾何 prop は seed の 9 面ぶん**だけ**(重複が在ると「後の item が勝つ」という
+  //    未検証の順序意味論に賭けることになる ── 賭けを作らないことを pin する)
+  expect(seen.xcu.split('ooSetupFactoryWindowAttributes').length - 1).toBe(9);
+  // ③ 起動より前に書いている
+  expect(seen.order, '設定を起動より後に書いている').toEqual(['xcu', 'callMain']);
+});
+
+test('🔴 LO が書いた設定が pagehide で localStorage へ残る(#159)', async ({ page }) => {
+  await page.goto('/office/host.html');
+  await seedFakePack(page);
+  await page.reload();
+  await expect(page.locator('#status')).toContainText('表示中', { timeout: 15_000 });
+
+  const saved = await page.evaluate(() => {
+    const w = window as unknown as { __lo: { FS: { writeFile: (p: string, d: string) => void } } };
+    // 空振り防止 ── 退避はまだ無い(seed 直後の中身は基準線として除外されている)
+    const before = localStorage.getItem('pkc3-office-profile');
+    // LO が設定を書いたことを再現(fake FS は中身を保持し readFile で返す)
+    w.__lo.FS.writeFile(
+      '/instdir/user/registrymodifications.xcu',
+      '<oor:items><item><prop oor:name="PKC3_TEST_MARKER"/></item></oor:items>',
+    );
+    window.dispatchEvent(new Event('pagehide'));
+    return { before, after: localStorage.getItem('pkc3-office-profile') };
+  });
+  expect(saved.before, '書く前から退避が在る = この test は何も測っていない').toBeNull();
+  expect(saved.after ?? '', '閉じる前の退避が動いていない').toContain('PKC3_TEST_MARKER');
+});
+
+test('⚠ 壊れた退避は書き戻さず、素で始める(起動を落とさない)(#159)', async ({ page }) => {
+  await page.goto('/office/host.html');
+  await seedFakePack(page);
+  await page.evaluate(() => {
+    // ⚠ 壊し方は「**根は正しく、中で壊れている**」形にする(閉じタグの不一致)。
+    //    根から壊す(`oor:` 未宣言 等)と root の検査が先に拾ってしまい、
+    //    parsererror の検査は**この test では 1 度も通らない**(変異試験 M4 が
+    //    2 度目にそれで生き延びた ── 「分岐を書いたら分岐の数だけ走らせる」)。
+    localStorage.setItem(
+      'pkc3-office-profile',
+      '<oor:items xmlns:oor="http://openoffice.org/2001/registry">'
+        + '<item>BROKEN_TEST_MARKER</wrong>',
+    );
+  });
+  await page.reload();
+  // 🔴 起動そのものが通る(壊れた XML で die しない)
+  await expect(page.locator('#status')).toContainText('表示中', { timeout: 15_000 });
+  const xcu = await page.evaluate(() => (window as unknown as { __xcu?: string }).__xcu ?? '');
+  // ⚠ 観測点は「壊れた字面が残るか」では**足りない** ── DOMParser は壊れた XML でも
+  //    部分木を返すので、壊れた断片は serialize 結果に**そもそも現れない**(変異試験
+  //    M4 が最初この形で生き延びた)。実害は「**壊れた退避を土台に使う**」ことなので、
+  //    ① parsererror 要素を LO へ書いていない ② 素の骨組み(XML 宣言つき)で
+  //    始め直している、の 2 点で見る ── 復元経路の serialize 出力は宣言を持たないため、
+  //    宣言の有無が「土台を捨てたか」の判別になる。
+  expect(xcu, '壊れた退避を LO へ書き戻している(起動ごと壊しうる)').not.toContain('BROKEN_TEST_MARKER');
+  expect(xcu, 'parsererror 要素ごと LO へ書いている(壊れた退避を土台にした)').not.toContain('parsererror');
+  expect(xcu.startsWith('<?xml'), '壊れた退避を土台に使っている(素の骨組みで始まっていない)').toBe(true);
+  // 素の骨組みで始まっている(幾何は入る)
+  expect(xcu).toContain('ooSetupFactoryWindowAttributes');
 });
 
 /**
