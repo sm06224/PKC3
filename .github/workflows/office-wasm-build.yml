@@ -421,6 +421,7 @@ jobs:
           --enable-emscripten-jspi
           --disable-emscripten-proxy-to-pthread
           --with-wasm-module=calc writer impress
+          --with-lang=en-US ja
           CONF
           . ~/emsdk/emsdk_env.sh
           ./autogen.sh --with-distro=PKC3WASM-Qt6
@@ -428,6 +429,13 @@ jobs:
           grep -q '^export ENABLE_QT6=TRUE' config_host.mk
           grep -q '^export ENABLE_QT5=$' config_host.mk
           grep -q '^export VCL_PLUGIN_INFO= qt6$' config_host.mk
+          # 🔴 **日本語 UI を建てる**(#158)。⚠ 渡すまで **`--with-lang` は 1 件も無く、
+          #    en-US だけを建てていた** ── 日本語フォントは入れてあるので
+          #    「描画は日本語・UI は英語」という食い違いになっていた(user が実機で発見)。
+          # ⚠ 「渡した」ではなく **構成に入った**ことを見る(#145 と同じ空振り防止)。
+          #    値に空白が入るが、autogen.sh は行をそのまま 1 引数にする
+          #    (`--with-wasm-module=calc writer impress` で通っている前例)。
+          grep -qE '^export WITH_LANG=.*\bja\b' config_host.mk
           # 🔴 **Impress(と Draw / Math / Basic)が落とされていないことを確かめる**(#145)。
           #    上流 configure.ac の `--with-wasm-module` 既定は **'calc writer'** なので、
           #    渡さないと Impress は**一式に 1 file も入らない**(実測: simpress 0 / sdraw 0)。
@@ -512,6 +520,13 @@ jobs:
                    qt_soffice.html qtloader.js; do
             test -f "workdir/installation/LibreOffice/emscripten/$f"
           done
+          # 🔴 **日本語 UI が一式に入ったことを、配る物で確かめる**(#158)。
+          # ⚠ configure に渡っただけでは足りない ── #145 で「渡していないから
+          #    Impress が 1 file も入っていなかった」を踏んでいる。**中身を数える。**
+          # ⚠ 0 件なら落とす(黙って英語だけを配らない)。
+          ja=$(grep -o '/ja/' workdir/installation/LibreOffice/emscripten/soffice.data.js.metadata | wc -l)
+          echo "日本語 resource: $ja 件"
+          test "$ja" -gt 0
 
       # 🔴 **手元で回せるようにする**(user 指示 2026-08-10
       #    「ビルド通ってるんだから、あなたの環境に落として試せばいいんじゃない?」)。

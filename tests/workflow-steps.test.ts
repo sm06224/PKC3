@@ -277,6 +277,45 @@ describe('office-wasm のパッチ', () => {
    * grep を足し忘れると、**確かめないまま焼く**ことになる
    * (CLAUDE.md「片側を直したら、対称の反対側を必ず疑う」)。
    */
+  /**
+   * 🔴 **頼んだ UI 言語と、確かめる検品の釣り合い**(#158)。
+   *
+   * ⚠ `--with-lang` は**渡していなかった** ── LO の既定は en-US だけなので、
+   * **日本語 UI が 1 file も入っていなかった**(日本語フォントは入れてあったので
+   * 「描画は日本語・UI は英語」という食い違いになり、user が実機で気づいた)。
+   * 🔑 縛るのは**釣り合い**である ── 言語を足したら
+   * ① 構成に入ったか(`WITH_LANG`)② **配る物に入ったか**(metadata の件数)
+   * の 2 段を必ず持つ。⚠ ①だけだと #145 と同じ轍(渡したのに入っていない)。
+   */
+  it('🔴 頼んだ UI 言語は、構成と配る物の 2 段で確かめている', () => {
+    const yml = readFileSync(YML, 'utf-8');
+    const m = /--with-lang=([^\n]*)/.exec(yml);
+    expect(m, 'configure が --with-lang を渡していない').not.toBeNull();
+    const langs = m![1]!.trim().split(/\s+/).filter(Boolean);
+    // 空振り防止 ── 1 つも読めていない形で「全部確かめた」と言わない
+    expect(langs.length, '言語を 1 つも読めていない').toBeGreaterThan(0);
+    expect(langs, '既定の en-US を落としている').toContain('en-US');
+    /**
+     * 🔴 **日本語を配ることそのものを縛る**(#158)。
+     * ⚠ 上の釣り合いだけでは **`ja` を外す変異が生き延びる**(実測)──
+     * 「頼んだ言語には検品が在る」は、**1 つも頼まなければ真**である。
+     * user が実機で困ったのは「UI が英語」なので、**要件のほうを pin する**。
+     */
+    expect(langs, '日本語 UI を配らない構成になっている').toContain('ja');
+
+    for (const lang of langs) {
+      if (lang === 'en-US') continue; // 既定なので検品は要らない
+      // ① 構成に入ったか
+      expect(yml, `${lang} を頼んでいるのに、構成に入ったことを確かめていない`).toContain(
+        `grep -qE '^export WITH_LANG=.*\\b${lang}\\b' config_host.mk`,
+      );
+      // ② 🔴 **配る物に入ったか**(0 件なら落とす)
+      expect(yml, `${lang} を頼んでいるのに、配る物に入ったことを確かめていない`).toContain(
+        `grep -o '/${lang}/' workdir/installation/LibreOffice/emscripten/soffice.data.js.metadata`,
+      );
+    }
+  });
+
   it('🔴 頼んだ wasm モジュールは、全部「落とされていない」ことを確かめている', () => {
     const yml = readFileSync(YML, 'utf-8');
     const m = /--with-wasm-module=([^\n]*)/.exec(yml);
