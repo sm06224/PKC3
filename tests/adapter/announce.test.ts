@@ -155,6 +155,34 @@ describe('お知らせの帯', () => {
     expect(mute.getAttribute('title') ?? '', '戻せることが書かれていない').toContain('設定');
   });
 
+  /**
+   * 🔴 **閉じるは、流れる箱の外に在る**(#151、2026-08-14 の実機報告)。
+   *
+   * ⚠ 「導線が在る」だけの上の test は、**壊れていても通っていた** ──
+   * 閉じるは本文・案内文のあとに在り、面は `max-height: 30vh` で中を流すので、
+   * お知らせが 2 件も在れば**箱の中で見切れて**いた(実機で「閉じ方が分からない」)。
+   * 🔑 だから見るのは**在るか**ではなく**どこに在るか**である ──
+   * 流れるのは `announce-body` だけなので、閉じるが**その中に居ないこと**を pin する。
+   * ⚠ 実際に見えているか(高さ・重なり)は DOM では測れない ── smoke が見る
+   * (`tests/smoke/help-announce.smoke.spec.ts`)。
+   */
+  it('🔴 閉じるは見出しの行に在り、流れる本文の中に入っていない', () => {
+    createAnnounce(region, new NoticeStore(memory()), NOTES).present();
+    const close = region.querySelector('[data-pkc-action="dismiss-announce"]')!;
+    const head = region.querySelector('[data-pkc-field="announce-title"]')!;
+    const body = region.querySelector('[data-pkc-field="announce-body"]')!;
+    // ⚠ 空振り防止 ── 本文の箱そのものが在ること(無ければ下の 2 つは自明に通る)
+    expect(body, '流れる本文の箱が無い').not.toBeNull();
+    expect(head.contains(close), '閉じるが見出しの行に無い').toBe(true);
+    expect(body.contains(close), '閉じるが流れる箱の中に在る(見切れる)').toBe(false);
+    // 🔑 **順も pin する** ── 見出しを本文の後ろへ回すと、包含関係は保ったまま
+    //    「見出し」が本文の下に出る(マニュアルの「見出しに在るので」が嘘になる)
+    expect(
+      head.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING,
+      '見出しが本文より後ろに在る',
+    ).toBeTruthy();
+  });
+
   /** ⚠ 件数を出す(「何件あるか」に気づく手掛かり)。 */
   it('⚠ 2 件以上なら件数が出る', () => {
     createAnnounce(region, new NoticeStore(memory()), NOTES).present();
@@ -345,6 +373,93 @@ describe('🔴 帯の置き場', () => {
         expect(rows, `${name} の行が 1 つではない版面がある`).toHaveLength(1);
       }
     }
+  });
+
+  /**
+   * 🔴 **お知らせと注意は同じ形**(#151。「同じものは同じ場所に在る」)。
+   *
+   * どちらも `max-height: 30vh` の帯で、中身が溢れうる。**流れてよいのは
+   * 読むものだけ**で、閉じる導線を流してはいけない ── お知らせ側で実機報告された
+   * 欠陥(閉じるが箱の中で見切れる)の同型が、注意側にも在った。
+   *
+   * ⚠ **実ブラウザで見ているのはお知らせ側だけ**である(注意の帯を溢れさせるには
+   * 200 件級の取込が要る)。ここは**構造が揃っていること**を静的に pin する ──
+   * 片方だけ直す変更をこの test が落とす。
+   * ⚠ コメントを剥いでから読む(注記の中の字面に当てない)。
+   */
+  it('🔴 お知らせと注意は同じ形 ── 流れるのは中身だけで、見出しは固定', async () => {
+    const raw = await import('node:fs').then((fs) =>
+      fs.readFileSync('src/styles/app.css', 'utf-8'),
+    );
+    /**
+     * ⚠ **`@media` の中まで拾わない**(レビュー 2026-08-14)。
+     * 「どれかに在ればよい」という主張なので、印刷や狭い版面だけの規則で
+     * **画面の規則を消しても緑**になりうる。この file は「`@media` は最後に置く」
+     * 規約なので、最初の `@media` で切る ── ⚠ 規約が破れたら**落ちる**側に倒れる。
+     */
+    const stripped = raw.replace(/\/\*[\s\S]*?\*\//g, '');
+    const at = stripped.indexOf('@media');
+    expect(at, '@media が 1 つも無い(規約が変わった可能性)').toBeGreaterThan(0);
+    const css = stripped.slice(0, at);
+    /**
+     * ⚠ **同じ selector の規則は 1 つとは限らない。** 1 稿目は
+     * `indexOf` で最初の 1 つだけ読み、**版面の `grid-area` の規則**に当たって
+     * 落ちた ── 隣の test が戒めているのと同じ罠を、同じ file で踏んだ。
+     * ⚠ 2 稿目は `"${sel} {"` で探したので、**選択子リスト**
+     * (`A,\nB {`)に書いた規則を 1 つも拾えなかった(空振りで落ちて判明)。
+     * 🔑 **構文で拾う** ── `選択子 { 宣言 }` を全部読み、選択子リストを
+     * `,` で割って**丸ごと一致**を見る。部分一致より厳密である
+     * (`A > button` を A の規則と読み違えない)。
+     */
+    const block = (selector: string): string => {
+      const found: string[] = [];
+      const re = /([^{}]+)\{([^{}]*)\}/g;
+      for (let m = re.exec(css); m; m = re.exec(css)) {
+        const sels = (m[1] ?? '').split(',').map((x) => x.trim());
+        if (sels.includes(selector)) found.push(m[2] ?? '');
+      }
+      expect(found.length, `${selector} の規則が無い(空振り)`).toBeGreaterThan(0);
+      return found.join('\n');
+    };
+
+    for (const region of ["[data-pkc-region='announce']", "[data-pkc-region='notices']"]) {
+      /**
+       * ⚠ **`flex-direction` だけでは足りない**(レビュー 2026-08-14、実際に
+       * 変異を当てて生存を確認された)。`display: flex` を消すと
+       * `flex-direction` は無効になり、中身が縮まなくなって**帯ごと流れる**
+       * = #151 で直した欠陥が戻る。宣言を名指しで全部見る。
+       */
+      expect(block(region), `${region} が flex になっていない`).toMatch(/display:\s*flex/);
+      expect(block(region), `${region} が縦並びの箱になっていない`).toMatch(
+        /flex-direction:\s*column/,
+      );
+      // ⚠ 高さを切っていないと、そもそも溢れず本文の 1fr を食う(P8 段㉒)
+      expect(block(region), `${region} の高さが青天井`).toMatch(/max-height:\s*30vh/);
+      // ⚠ 逃げ場(低い画面で中身がこぼれない)
+      expect(block(region), `${region} に逃げ場が無い`).toMatch(/overflow:\s*auto/);
+    }
+    /**
+     * 🔑 **見出しの行が flex でなければ、右端へ寄せる規則は 1 行も効かない**
+     * (`margin-inline-start: auto` は inline-level では 0 に解決される)。
+     * ⚠ 字面と貼り付きも、寄せ直すときに落としやすい ── 実際 1 稿目で
+     * `font-weight` を落とし、見出しが中の見出しより細くなっていた。
+     */
+    for (const head of [
+      "[data-pkc-field='announce-title']",
+      "[data-pkc-field='notices-title']",
+    ]) {
+      expect(block(head), `${head} が flex の行になっていない`).toMatch(/display:\s*flex/);
+      expect(block(head), `${head} の見出しが太字でない`).toMatch(/font-weight:\s*600/);
+      expect(block(head), `${head} が送っても残らない`).toMatch(/position:\s*sticky/);
+    }
+    // 🔑 **流れるのは中身のほう** ── これが無いと帯ごと流れて見出しが消える
+    for (const scroller of ["[data-pkc-field='announce-body']", "[data-pkc-region='notices'] ul"]) {
+      expect(block(scroller), `${scroller} が流れない`).toMatch(/overflow:\s*auto/);
+    }
+    // 🔑 **閉じるは右端**(お知らせの文面とマニュアルがそう書いている)
+    expect(css, '閉じるを右端へ寄せる規則が無い').toMatch(
+      /\[data-pkc-field='notices-title'\]\s*>\s*button\s*\{[^}]*margin-inline-start:\s*auto/,
+    );
   });
 });
 

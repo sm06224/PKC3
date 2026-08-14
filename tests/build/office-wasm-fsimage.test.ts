@@ -59,13 +59,65 @@ const UPSTREAM = [
   '',
   'gb_emscripten_fs_image_files += \\',
   '    $(INSTROOT)/$(LIBO_SHARE_FOLDER)/registry/main.xcd \\',
+  '    $(INSTROOT)/$(LIBO_SHARE_FOLDER)/registry/Langpack-en-US.xcd \\',
+  '',
+  // ⚠ **定義の順は上流の実物に合わせる**(2026-08-14 に fixture 側だけ逆順にして、
+  //    実物では通る patch を fixture が偽って落とした)── 上流は
+  //    `emscripten_fs_image_WORKDIR :=`(1787 行)→ `all_files =`(1808 行)→
+  //    filelist 規則、の順。MO_BLOCK の前提行は WORKDIR を展開するので、
+  //    **all_files より前に WORKDIR が定義済み**であることが上流の実物の前提である。
+  'emscripten_fs_image_WORKDIR := $(WORKDIR)/fsimg',
+  '',
+  // ⚠ **言語ブロックの錨**(#158)。registry はこの行より**前**(前提の側)、
+  //    .mo の `+=` はこの行より**後ろ**(上書きで消えない側)に入る。
+  'gb_emscripten_fs_image_all_files = $(gb_emscripten_fs_image_files) $(EXTRA)',
+  '',
+  // ⚠ 上流の filelist 規則の縮小版。**recipe の実行時に all_files を展開して file へ
+  //    書く**という性質が本物と同じであることが、.mo の wildcard 検査の成立条件。
+  '$(emscripten_fs_image_WORKDIR)/.dir:',
+  '\tmkdir -p $(dir $@)',
+  '.PHONY: $(emscripten_fs_image_WORKDIR)/soffice.data.filelist',
+  '$(emscripten_fs_image_WORKDIR)/soffice.data.filelist: $(gb_emscripten_fs_image_files) | $(emscripten_fs_image_WORKDIR)/.dir',
+  '\t@printf "%s\\n" $(gb_emscripten_fs_image_all_files) > $@',
   '',
 ].join('\n');
 
 /** make に解析させるだけの受け皿。⚠ 変数の**中身**を出す。 */
 const HARNESS = [
-  'INSTROOT := /I',
+  // ⚠ INSTROOT は**実在するディレクトリ**にする ── .mo の wildcard 検査は
+  //    「AllResources が建てた実 file を拾えるか」を見るため
+  'INSTROOT := $(CURDIR)/I',
+  'WORKDIR := $(CURDIR)/W',
   'LIBO_SHARE_FOLDER := share',
+  'SRCDIR := $(CURDIR)',
+  'LIBO_SHARE_RESOURCE_FOLDER := program/resource',
+  'gb_WITH_LANG ?= en-US ja',
+  'gb_Configuration_LANGS := en-US $(filter-out en-US,$(gb_WITH_LANG))',
+  // ⚠ 上流の Postprocess の縮小版。**本物と同じ意味論**にする ──
+  //    「AllResources を建てたときに初めて .mo が INSTROOT に現れる」。
+  //    stub が最初から file を置いてしまうと、**前提(順序)の欠落が隠れる**。
+  // ⚠ 上流の Package catch-all の縮小版 ── 「名指しの前提には install 規則が在る」
+  //    という前提を fixture でも成立させる(実 file を作って配達の代わりにする)。
+  //    ⚠ 本物と違い、これは**どんな名前でも黙って作る**ので、「規則の無い名前を
+  //    要求して止まる」失敗の形は fixture では出ない ── その守りは変数側の
+  //    「.mo が名指しの前提に居ない」assert が担う(registry の test)。
+  '$(INSTROOT)/%:',
+  '\tmkdir -p $(dir $@) && printf x > $@',
+  '',
+  // 🔴 **make の dir cache をわざと温める**(レビュー指摘 C の再現)── 解析時に
+  //    resource dir を一度読むと、make は**その時点の内容(空)をキャッシュ**し、
+  //    recipe 時の `$(wildcard)` は自分が作った .mo を見ない(GNU Make 4.3 実測)。
+  //    実装が `$(shell find)` なら影響しない ── つまりこの 1 行が
+  //    **find → wildcard の変異を殺す**。上流の誰かが同じ dir を読む日への備え。
+  'PKC3_TEST_CACHE_PRIME := $(wildcard $(INSTROOT)/$(LIBO_SHARE_RESOURCE_FOLDER)/*/LC_MESSAGES/*.mo)',
+  '',
+  'gb_Postprocess_get_target = $(WORKDIR)/Postprocess/$(1)',
+  '$(WORKDIR)/Postprocess/AllResources:',
+  '\tmkdir -p $(INSTROOT)/$(LIBO_SHARE_RESOURCE_FOLDER)/ja/LC_MESSAGES',
+  '\tprintf x > $(INSTROOT)/$(LIBO_SHARE_RESOURCE_FOLDER)/ja/LC_MESSAGES/sw.mo',
+  '\tprintf x > $(INSTROOT)/$(LIBO_SHARE_RESOURCE_FOLDER)/ja/LC_MESSAGES/sc.mo',
+  '\tmkdir -p $(dir $@) && touch $@',
+  '',
   `include ${MK}`,
   'print:',
   '\t@echo "FILES=$(gb_emscripten_fs_image_files)"',
@@ -110,6 +162,7 @@ function apply(source = UPSTREAM): Run {
 /**
  * make に読ませて、変数に入った path を返す。
  * ⚠ 解析に失敗したら**例外**にする(`missing separator` を「0 件」と読まない)。
+ * ⚠ INSTROOT は実在 dir(`$(CURDIR)/I`)なので、比較しやすいよう `/I` へ正規化する。
  */
 function fileList(dir: string, env: Record<string, string> = {}): string[] {
   const out = execFileSync('make', ['-C', dir, '-f', 'harness.mk', 'print'], {
@@ -119,7 +172,33 @@ function fileList(dir: string, env: Record<string, string> = {}): string[] {
   });
   const line = out.split('\n').find((l) => l.startsWith('FILES='));
   if (line === undefined) throw new Error(`make の出力に FILES= が無い:\n${out}`);
-  return line.slice('FILES='.length).trim().split(/\s+/).filter(Boolean);
+  return line
+    .slice('FILES='.length)
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((p) => p.replaceAll(`${dir}/I`, '/I'));
+}
+
+/**
+ * 🔴 filelist を**実際に build して**、詰まる一覧を読む(#158 の .mo の観測点)。
+ *
+ * ⚠ 変数の print では足りない ── .mo は `gb_emscripten_fs_image_all_files` の
+ * **recipe 実行時の wildcard** で入るので、「AllResources が前提として走ったか」
+ * まで含めて **make に本当に建てさせないと**検査にならない。
+ */
+function builtFileList(dir: string, env: Record<string, string> = {}): string[] {
+  // ⚠ target は harness の `$(CURDIR)/W/…` と**同じ綴り**(絶対 path)で頼む ──
+  //    相対で頼むと make は「そんな target は無い」と言う
+  execFileSync(
+    'make',
+    ['-C', dir, '-f', 'harness.mk', join(dir, 'W', 'fsimg', 'soffice.data.filelist')],
+    { encoding: 'utf-8', stdio: 'pipe', env: { ...process.env, ...env } },
+  );
+  return readFileSync(join(dir, 'W', 'fsimg', 'soffice.data.filelist'), 'utf-8')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((p) => p.replaceAll(`${dir}/I`, '/I'));
 }
 
 /** コードが読むのに一式へ入っていなかった 4 件(全数走査の結果)。 */
@@ -129,6 +208,19 @@ const ADDED = {
   'Calc 表スタイル': '/I/share/calc/tablestyles.xml',
   'Calc 既定セルスタイル': '/I/share/calc/styles.xml',
 } as const;
+
+/**
+ * 🔴 **日本語 UI のために「名指しの前提」で入るもの**(#158)= 言語の登録(registry)。
+ *
+ * ⚠ `.mo` はここに**居ない** ── 名簿から予言すると、構成で建たないもの(`cnr` =
+ * DBCONNECTIVITY 落ち)を要求して**ビルド全体が止まる**(run 31777661606 で実証)。
+ * `.mo` は AllResources を建てさせてから wildcard で拾う(下の専用 test)。
+ */
+const LANG_ADDED = [
+  '/I/share/registry/Langpack-ja.xcd',
+  '/I/share/registry/res/fcfg_langpack_ja.xcd',
+  '/I/share/registry/res/registry_ja.xcd',
+] as const;
 
 describe('wasm 一式の詰め込み一覧(#135)', () => {
   it('🔴 make が解析でき、4 件が変数に入る(対照群では 0 件)', () => {
@@ -146,7 +238,8 @@ describe('wasm 一式の詰め込み一覧(#135)', () => {
     }
     // ⚠ 既存の entry を巻き添えにしていない(下限も置く)
     expect(after).toContain('/I/share/filter/vml-shape-types');
-    expect(after.length).toBe(control.length + 4);
+    // #135 の 4 件 + #158 の言語 6 件(.mo 3 × ja + registry 3 × ja)
+    expect(after.length).toBe(control.length + 4 + LANG_ADDED.length);
   });
 
   /**
@@ -162,6 +255,83 @@ describe('wasm 一式の詰め込み一覧(#135)', () => {
     expect(stripped).not.toContain(ADDED['Writer ラベル定義']);
     expect(stripped).toContain(ADDED['Calc 表スタイル']);
     expect(stripped).toContain(ADDED['Calc 既定セルスタイル']);
+  });
+
+  /**
+   * 🔴 **日本語 UI の「言語の登録」**(#158)。上流の一覧は言語成果物を `en-US` で
+   * **名指し**しており、他言語の registry を 1 行も入れていない。
+   *
+   * ⚠ 観測点は「`ja` という字が在るか」ではなく **path が組み上がっているか**である。
+   * make は `\` + 改行を**空白 1 個**にするので、path の途中で折ると
+   * `…/registry/ Langpack-…` に化ける ── 字面検査では通ってしまう。
+   */
+  it('🔴 頼んだ言語の registry が、正しい path で一覧に入る(#158)', () => {
+    const control = fileList(seed());
+    for (const p of LANG_ADDED) {
+      expect(control, `対照群に既に在る = 何も測っていない: ${p}`).not.toContain(p);
+    }
+    const r = apply();
+    expect(r.status, r.stderr).toBe(0);
+    const after = fileList(r.dir);
+    for (const p of LANG_ADDED) expect(after, `入っていない: ${p}`).toContain(p);
+    // ⚠ en-US を二重に入れていない(上流が既に持っている)
+    expect(after.filter((p) => p.includes('Langpack-en-US')).length).toBe(1);
+    // ⚠ .mo は**名指しの前提に居ない**こと ── 居ると、構成で建たないもの(cnr)を
+    //    要求して catch-all が `$<` 空で止まる(run 31777661606 の実物の落ち方)
+    expect(after.filter((p) => p.endsWith('.mo')), '.mo を名指しの前提に戻している').toEqual([]);
+  });
+
+  /**
+   * 🔴 **`.mo` は「建てさせてから、届いた物を拾う」**(#158 の本体)。
+   *
+   * REGISTERED からの予言は cnr(DBCONNECTIVITY 落ちで建たない)を要求して
+   * **ビルド全体を止めた**(run 31777661606)。正しい形は:
+   * ① filelist の前提に AllResources(**この構成で実体化した** mo の全集合)
+   * ② 一覧は recipe 実行時の wildcard(前提が済んだ後の実在 file が入る)
+   *
+   * ⚠ harness の AllResources stub は**本物と同じ意味論** ── 建てたときに初めて
+   * `.mo` が INSTROOT に現れる。だからこの test は「①の前提が本当に張られて
+   * いるか」まで守る(前提が消えると wildcard が空を拾い、ここで落ちる)。
+   */
+  it('🔴 .mo は AllResources を建てさせてから wildcard で拾う(#158)', () => {
+    // 対照群 ── patch 前は、build しても .mo が 1 件も入らない
+    const control = builtFileList(seed());
+    expect(control.filter((p) => p.endsWith('.mo')), '対照群に .mo が在る = 測っていない').toEqual(
+      [],
+    );
+
+    const r = apply();
+    expect(r.status, r.stderr).toBe(0);
+    const after = builtFileList(r.dir);
+    expect(after, 'sw.mo が詰まっていない').toContain('/I/program/resource/ja/LC_MESSAGES/sw.mo');
+    expect(after, 'sc.mo が詰まっていない').toContain('/I/program/resource/ja/LC_MESSAGES/sc.mo');
+    // registry も最終の一覧に居る(前提 → all_files 経由)
+    expect(after).toContain('/I/share/registry/Langpack-ja.xcd');
+  });
+
+  /**
+   * 🔴 **言語を頼まなければ止まる。** `+=` は空でも**成功する**ので、
+   * 黙って英語だけを配る形(#135 と同じ「無言で空」)を作らない。
+   */
+  it('🔴 --with-lang に en-US しか無いなら make が止まる(#158)', () => {
+    const r = apply();
+    expect(r.status, r.stderr).toBe(0);
+    expect(() => fileList(r.dir, { gb_WITH_LANG: 'en-US' })).toThrow(/配る言語が無い/);
+  });
+
+  /**
+   * ⚠ `qtz` は翻訳 QA 用の**疑似ロケール**。配ると LO の UI 言語の一覧に
+   * 化けた言語が並ぶ。上流も `gb_AllLangMoTarget_LANGS` で同じ理由で外している。
+   * 🔑 この分岐は**実際に走らせて**確かめる(「両方向」と書いた検査が片方しか
+   * 走っていなかった 2026-08-13 の反省)。
+   */
+  it('⚠ qtz が混ざっても registry を配らない(#158)', () => {
+    const r = apply();
+    expect(r.status, r.stderr).toBe(0);
+    const withQtz = fileList(r.dir, { gb_WITH_LANG: 'en-US ja qtz' });
+    expect(withQtz.filter((p) => p.includes('qtz')), 'qtz を配ろうとしている').toEqual([]);
+    // ⚠ 空振り防止 ── qtz を外した結果、ja まで消えていないか
+    expect(withQtz).toContain('/I/share/registry/Langpack-ja.xcd');
   });
 
   it('🔴 Calc を切ると Calc 用の 2 件だけ消える', () => {
@@ -214,6 +384,10 @@ describe('wasm 一式の詰め込み一覧(#135)', () => {
       '    $(INSTROOT)/$(LIBO_SHARE_FOLDER)/config/soffice.cfg/modules/scalc/x.xml \\',
       '',
       'endif # !ENABLE_WASM_STRIP_CALC',
+      '',
+      // ⚠ 言語ブロックの錨は在らせる ── 無いと**そちらの検査で先に落ちて**、
+      //    この test が主張したい「ブロックの外」を 1 度も通らなくなる
+      'gb_emscripten_fs_image_all_files = $(gb_emscripten_fs_image_files)',
       '',
     ].join('\n');
     const r = apply(broken);

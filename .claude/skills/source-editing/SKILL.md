@@ -24,18 +24,57 @@ perl -i -pe 's/\x00/\\u0000/g' <file>
 
 ## 🔴 2. template literal の中にバッククォートを書かない
 
-`src/features/export/pkc3-html.ts` の `VIEWER` は巨大な template literal である。
+`src/features/export/pkc3-html.ts` の `viewer()` が返すのは巨大な template literal である。
 中の CSS コメントに ``` `.b` ``` のようなバッククォートを書くと**リテラルが早期終了し、
 tsc が意味不明な位置でエラーを出す**(この file で **5 度**踏んだ)。
 
 ```bash
-# VIEWER の範囲にバッククォートが無いことを確かめる
-awk '/^const VIEWER = `/{s=1;next} /^<\/script>`;$/{s=0} s && /`/ {print NR": "$0}' \
+# リテラルの範囲にバッククォートが無いことを確かめる(0 行が正しい)
+awk '/^  return `$/{s=1;next} /^<\/script>`;$/{s=0} s && /`/ {print NR": "$0}' \
   src/features/export/pkc3-html.ts
 ```
 
+🔴 **2026-08-14 まで、この検査は 1 行も検めていなかった。** 開始アンカーが
+`^const VIEWER = ` のままだったが、実体は `function viewer()` の中の `return` へ
+移っている ── **当たらないので常に 0 行 = 常に合格**だった。
+🔑 **「0 行だから安全」と読む前に、わざと 1 個入れて鳴ることを見る。**
+実際に当てた対照群(2026-08-14):
+
+```bash
+sed '300i\  /* `.b` */' src/features/export/pkc3-html.ts > /tmp/inj.ts
+# 新アンカー → 1 行(鳴る) / 旧アンカー → 0 行(死んでいる)
+```
+
+⚠ 開始アンカーの**出現数が 1** であることも併せて見る(`grep -c` が 0 なら、
+その検査は何も見ていない)。これは CLAUDE.md §1「ガードは代替物で満たせない条件にする」の
+**アンカー版**である ── file の構造が変わると、検査は落ちるのではなく**黙る**。
+
 ⚠ 同じ理由で、`${…}` を**文字として**書きたいときも工夫が要る ── **書かないのが正解**
 (散文で言い換える)。
+
+### ⚠ template literal の中では、正規表現のバックスラッシュを二重にする
+
+`` `…replace(/\s+/g, ' ')…` `` と書くと `\s` が**リテラルに食われて `s`** になり、
+「**文字 s の連続**」を置換する別物になる(2026-08-14、`build/office-wasm/io-layer-probe.mjs`
+で実害)。⚠ **出力が変わらないことが多い**ので、走らせても気づけない ── この件は
+たまたま窓の題名に `s` の連続が無く、**eslint が拾わなければ永久に露見しなかった**。
+
+```bash
+# template literal の中の一重バックスラッシュを洗う(意図的な一重が無いことを確かめる)
+grep -n '\\[sdwbSDWB]' build/office-wasm/*.mjs
+```
+
+⚠ **注記そのものが罠を踏む** ── 2026-08-14 は、この罠をコメントに書く途中で
+バッククォートを入れて構文エラーにした。
+
+### ⚠ DOM の `append` は「追加」ではなく「移動」である
+
+器を移す編集では、**元の `append` を消したか**を必ず見る。`ParentNode.append` は
+`insertBefore` 意味論なので、既に別の親に付いているノードは**移動する**。
+実例(2026-08-14): `src/adapter/ui/render/announce.ts` で「閉じる」を見出しへ移したのに、
+下の `acts.append(close, mute)` が残っていて**元へ戻っていた**。
+🔑 捕まえるのは包含の pin(`tests/adapter/announce.test.ts` の `head.contains(close)`)──
+**移した先を assert する test を、移すのと同じ commit で書く**。
 
 ## 🔴 3. 整形ツールを既存 file に掛けない
 

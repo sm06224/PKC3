@@ -163,7 +163,9 @@ async function init(){
     try { FS.mkdir('/work'); } catch(e) {}
     FS.writeFile('/work/case.fodt', doc);
     for (const [n,b] of fonts) FS.writeFile('/instdir/share/fonts/truetype/'+n, b);
-    inst.callMain(['/work/case.fodt']);
+    // 🔴 製品と同じ引数(#158)。⚠ **和文組版を見る面が英語 UI** だと、測っている
+    //    条件が user の条件と違う ── いちばん取り違えやすい面である
+    inst.callMain(['--language=ja', '/work/case.fodt']);
   } catch(e) { console.error(e); globalThis.__bootError = String(e && e.stack || e).slice(0,400); }
 }
 </script><script src="soffice.js"></script><script src="qtloader.js"></script></body></html>`;

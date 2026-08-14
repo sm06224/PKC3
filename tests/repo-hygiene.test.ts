@@ -29,6 +29,78 @@ function textFiles(dir: string, out: string[] = []): string[] {
   return out;
 }
 
+describe('Office の起動引数', () => {
+  /**
+   * 🔴 **LO を起こす面は 1 つではない**(#158)。翻訳を一式へ詰めても、
+   * `--language=ja` を渡す面が 1 つでも欠けると、そこだけ英語で開く。
+   *
+   * ⚠ **既知の 5 面を列挙する形にしない。** 6 つめが足された瞬間に、
+   * 「主要な経路で効いているから大丈夫」で出荷される ── CLAUDE.md §7
+   * 「同じ値を複数の経路へ渡すものは、経路ごとに pin する」の実体。
+   * 🔑 **`callMain` を原文から数え上げ、数えた数だけ見る。**
+   */
+  it('🔴 callMain を呼ぶ面は、全部 --language=ja を渡している(#158)', () => {
+    const sites: { file: string; line: number; text: string }[] = [];
+    for (const f of [...textFiles('src'), ...textFiles('build'), ...textFiles('public')]) {
+      const lines = readFileSync(f, 'utf-8').split('\n');
+      lines.forEach((text, i) => {
+        if (/\.callMain\(/.test(text)) sites.push({ file: f, line: i + 1, text });
+      });
+    }
+    // ⚠ 空振り防止 ── 0 件なら「全部通っている」ではなく「1 つも見ていない」
+    expect(sites.length, 'callMain が 1 件も見つからない = 何も検めていない').toBeGreaterThanOrEqual(
+      5,
+    );
+
+    const bad: string[] = [];
+    for (const s of sites) {
+      // 引数がその行に在る形(`callMain(['…'])`)と、変数越しの形の両方を許す。
+      // 🔴 変数越しは「file のどこかに ja」では**緩すぎる**(レビュー指摘 E)──
+      //    コメントに書いてあるだけでも通り、args を組み直す refactor が生き延びる。
+      //    見るのは **args の代入行そのもの**(コメント行は先に落とす)。
+      const inline = /--language=ja/.test(s.text);
+      const code = readFileSync(s.file, 'utf-8')
+        .split('\n')
+        .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+        .join('\n');
+      // ⚠ 宣言が ja でも、callMain までに**再代入**されたら意味が無い(変異試験で
+      //    実際に生き延びた形)── 素の `args = …` を ja 以外へ張る行が無いことまで見る
+      const decl = /(?:var|const|let)\s+args\s*=\s*\[\s*'--language=ja'/.test(code);
+      const reassigned = /^\s*args\s*=\s*(?!\[\s*'--language=ja')/m.test(code);
+      const viaVar = /callMain\(\s*args\s*\)/.test(s.text) ? decl && !reassigned : false;
+      if (!inline && !viaVar) bad.push(`${s.file}:${s.line}`);
+    }
+    expect(bad, `--language=ja を渡していない面が在る:\n${bad.join('\n')}`).toEqual([]);
+  });
+
+  /**
+   * ⚠ **LO を起こす面は callMain だけではない**(レビュー指摘 F)── probe 群は
+   * `qt_soffice.html`(上流の素の page)を直接開くので、上の数え上げに入らない。
+   * それらは**英語 UI で起動する**。I/O の機構(crash / focus / 当たり判定)を測る
+   * 面なので言語非依存として許すが、🔑 **既知リストの等値 pin** にする ──
+   * 新しい面が増えたら、ここで「ja を渡すか、理由を書いてこの表に載せるか」を
+   * 選ばせる(黙って英語の面が増えない)。
+   */
+  it('⚠ qt_soffice.html を直接開く面は、既知リストと一致する(#158)', () => {
+    const KNOWN_ENGLISH_BOOT = [
+      'build/office-wasm/boot-probe.mjs', // 起動可否だけを見る(言語非依存)
+      'build/office-wasm/dialog-crash-probe.mjs', // ダイアログの停止を測る(同上)
+      'build/office-wasm/ime-probe.mjs', // IME の配管の有無を測る(同上)
+      'build/office-wasm/io-layer-probe.mjs', // event 登録の層を解剖する(同上)
+      'build/office-wasm/office-real-path-probe.mjs', // 実 user 経路(host 経由 = ja 済み)+ 対照で直も開く
+      'src/adapter/platform/office/office-pack-acquire.ts', // 一式の file 名として言及するだけ(起動しない)
+    ].sort();
+    const found: string[] = [];
+    for (const f of [...textFiles('src'), ...textFiles('build'), ...textFiles('public')]) {
+      if (readFileSync(f, 'utf-8').includes('qt_soffice.html')) found.push(f);
+    }
+    // office-real-path-probe は io-layer 経由なので qt_soffice.html の字面を持つ場合のみ載る
+    expect(found.sort(), 'qt_soffice.html を開く面が増減した ── ja を渡すか、理由つきで表へ').toEqual(
+      KNOWN_ENGLISH_BOOT,
+    );
+  });
+});
+
 describe('リポジトリ衛生', () => {
   it('🔴 ソースに制御文字の生バイトが無い(タブ・改行を除く)', () => {
     const offenders: string[] = [];

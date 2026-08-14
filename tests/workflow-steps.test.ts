@@ -277,6 +277,80 @@ describe('office-wasm のパッチ', () => {
    * grep を足し忘れると、**確かめないまま焼く**ことになる
    * (CLAUDE.md「片側を直したら、対称の反対側を必ず疑う」)。
    */
+  /**
+   * 🔴 **頼んだ UI 言語と、確かめる検品の釣り合い**(#158)。
+   *
+   * ⚠ `--with-lang` は**渡していなかった** ── LO の既定は en-US だけなので、
+   * **日本語 UI が 1 file も入っていなかった**(日本語フォントは入れてあったので
+   * 「描画は日本語・UI は英語」という食い違いになり、user が実機で気づいた)。
+   * 🔑 縛るのは**釣り合い**である ── 言語を足したら
+   * ① 構成に入ったか(`WITH_LANG`)② **配る物に入ったか**(metadata の件数)
+   * の 2 段を必ず持つ。⚠ ①だけだと #145 と同じ轍(渡したのに入っていない)。
+   */
+  it('🔴 頼んだ UI 言語は、構成と配る物の 2 段で確かめている', () => {
+    const yml = readFileSync(YML, 'utf-8');
+    const m = /--with-lang=([^\n]*)/.exec(yml);
+    expect(m, 'configure が --with-lang を渡していない').not.toBeNull();
+    const langs = m![1]!.trim().split(/\s+/).filter(Boolean);
+    // 空振り防止 ── 1 つも読めていない形で「全部確かめた」と言わない
+    expect(langs.length, '言語を 1 つも読めていない').toBeGreaterThan(0);
+    expect(langs, '既定の en-US を落としている').toContain('en-US');
+    /**
+     * 🔴 **日本語を配ることそのものを縛る**(#158)。
+     * ⚠ 上の釣り合いだけでは **`ja` を外す変異が生き延びる**(実測)──
+     * 「頼んだ言語には検品が在る」は、**1 つも頼まなければ真**である。
+     * user が実機で困ったのは「UI が英語」なので、**要件のほうを pin する**。
+     */
+    expect(langs, '日本語 UI を配らない構成になっている').toContain('ja');
+
+    for (const lang of langs) {
+      if (lang === 'en-US') continue; // 既定なので検品は要らない
+      // ① 構成の途中経過は **assert しない**(2026-08-14 に訂正)。
+      // ⚠ ここは 3 回続けて「**達成できると確かめていない結果**」を後条件に固めた場所で
+      //    ある ── `WITH_LANG` に `ja`(wasm では変数ごと別 file)→
+      //    `--disable-wasm-strip-locales`(上流に無い option)→
+      //    `ENABLE_WASM_STRIP_LOCALES=$`(**死に変数**。上流全体で読み手ゼロ、
+      //    かつ `configure.ac:1301` が `enable_wasm_strip=yes` を無条件に上書きする)。
+      //    どれも「渡せばこうなるはず」を pin しており、落ちたとき
+      //    「実装が悪いのか、期待が間違いか」が区別できなかった。
+      // 🔑 **未確認は診断で出す**。構成の実体(`config_host_lang.mk`)は印字して次の回転で
+      //    読む ── 通ったのを見てから後条件へ昇格させる。
+      expect(yml, '構成の実体(config_host_lang.mk)を診断に出していない').toContain(
+        'cat config_host_lang.mk',
+      );
+      // 🚫 死に変数への guard を**戻さない**ための等値 pin(直したら消さないと落ちる形)。
+      expect(yml, '効かないと分かっている guard が戻っている').not.toContain(
+        "grep -q '^export ENABLE_WASM_STRIP_LOCALES=$' config_host.mk",
+      );
+      // 🚫 `--disable-wasm-strip` は Emscripten では上書きされて効かない(上記)。
+      //    ⚠ 仮に効いたら `enable_dynamic_loading` まで戻ってリンクしない。
+      // 🔴 **見るのは distro conf の中だけ**(2026-08-14、この 1 行で実際に踏んだ)。
+      //    file 全体で `not.toContain` すると、**上の解説コメントに満たされて必ず落ちる**
+      //    ── CLAUDE.md §1「検査の範囲を、自分が書いた場所に限定する」の
+      //    (`SAFE_HEAP` の件と)**同じ罠**である。渡す行は heredoc の中にしか無い。
+      const conf = /cat > distro-configs\/PKC3WASM-Qt6\.conf <<'CONF'\n([\s\S]*?)\n\s*CONF\n/.exec(
+        yml,
+      );
+      expect(conf, 'distro conf の heredoc が読めない ── 検査が空振りしている').not.toBeNull();
+      expect(conf?.[1], '効かない --disable-wasm-strip が distro conf に戻っている').not.toContain(
+        '--disable-wasm-strip',
+      );
+      // 空振り防止 ── heredoc を本当に読めているか(読めていれば必ずこれが在る)
+      expect(conf?.[1], 'heredoc の抜き出しが壊れている').toContain('--with-lang=');
+      // ② 🔴 **配る物に入ったか**(0 件なら落とす)
+      // 🔑 観測点は**代替物で満たせない形**にする(2026-08-14 に絞り込んだ)──
+      //    `/ja/` だけだと無関係な path(フォント等)に満たされる。見るのは
+      //    **翻訳の実体**(`.mo`)と**言語の登録**(Langpack)で、これは別の機構なので
+      //    **両方**要る(片方だけでも UI は英語のまま出荷される)。
+      expect(yml, `${lang} の翻訳が配る物に入ったことを確かめていない`).toContain(
+        `program/resource/${lang}/LC_MESSAGES/[A-Za-z0-9_]*\\.mo`,
+      );
+      expect(yml, `${lang} の言語登録が配る物に入ったことを確かめていない`).toContain(
+        `Langpack-${lang}\\.xcd`,
+      );
+    }
+  });
+
   it('🔴 頼んだ wasm モジュールは、全部「落とされていない」ことを確かめている', () => {
     const yml = readFileSync(YML, 'utf-8');
     const m = /--with-wasm-module=([^\n]*)/.exec(yml);

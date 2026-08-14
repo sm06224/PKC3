@@ -111,7 +111,13 @@ jobs:
           # ⚠ この 6 つは開発コンテナで実際に不足していた(2026-08-09)
           sudo apt-get install -y -qq \
             flex gperf nasm xsltproc ccache libarchive-zip-perl \
-            autoconf automake bison zip unzip pkg-config build-essential
+            autoconf automake bison zip unzip pkg-config build-essential \
+            gettext
+          # 🔴 **gettext は日本語 UI に要る**(#158)。⚠ 無いと configure が
+          #    `msgfmt not found. Install GNU gettext, or re-run without languages.`
+          #    で落ちる ── **翻訳の .po を .mo へ焼くのが msgfmt** である。
+          # ⚠ 在ることを確かめる(apt が黙って失敗しても気づけるように)
+          msgfmt --version | head -1
 
       # ── ここから途中成果物の再利用 ────────────────────────────────
       # ⚠ **`cache` ではなく `cache/restore` + `cache/save` を使う** ── 素の `cache`
@@ -293,6 +299,14 @@ jobs:
           sha=$(git rev-parse HEAD)
           echo "LO_SHA=$sha" >> "$GITHUB_ENV"
           echo "建てる LibreOffice: $ref ($sha)"
+          # 🔴 **翻訳の実体を取る**(#158)。`--with-lang` を渡すと configure は
+          #    `translations/` を要求するが、**`git clone` では付いてこない**
+          #    (LO は translations / dictionaries / helpcontent2 を submodule で持つ)。
+          # ⚠ ここを飛ばすと configure が落ちる ── 実際 1 度落とした。
+          # ⚠ **浅く取る**(全履歴は要らない)。取れなければ**そこで落とす** ──
+          #    黙って英語だけを配らない(#158 の検品と同じ向き)。
+          git submodule update --init --depth 1 translations
+          test -d translations/source/ja
 
       # ⚠ 復元は **clone のあと** ── `git clone` は空でないディレクトリを嫌う
       - name: 外部 tarball を復元
@@ -421,13 +435,53 @@ jobs:
           --enable-emscripten-jspi
           --disable-emscripten-proxy-to-pthread
           --with-wasm-module=calc writer impress
+          --with-lang=en-US ja
           CONF
           . ~/emsdk/emsdk_env.sh
-          ./autogen.sh --with-distro=PKC3WASM-Qt6
+          # 🔴 **出力を残す**(2026-08-14)。⚠ `make` には `tee` が在るのに
+          #    configure には無く、**落ちた回のエラーがジョブの末尾から読めなかった**
+          #    ── 「エラー行はジョブの最後に出す」を configure に適用していなかった。
+          #    ⚠ `tee` は早期終了しないので SIGPIPE の罠は無い(`pipefail` は立ててある)。
+          ./autogen.sh --with-distro=PKC3WASM-Qt6 2>&1 | tee /tmp/configure.log
           # 空振り防止 ── 本当に qt6 単独で構成されたか
           grep -q '^export ENABLE_QT6=TRUE' config_host.mk
           grep -q '^export ENABLE_QT5=$' config_host.mk
           grep -q '^export VCL_PLUGIN_INFO= qt6$' config_host.mk
+          # 🔴 **日本語 UI を建てる**(#158)。⚠ 渡すまで **`--with-lang` は 1 件も無く、
+          #    en-US だけを建てていた** ── 日本語フォントは入れてあるので
+          #    「描画は日本語・UI は英語」という食い違いになっていた(user が実機で発見)。
+          # ⚠ 「渡した」ではなく **構成に入った**ことを見る(#145 と同じ空振り防止)。
+          #    値に空白が入るが、autogen.sh は行をそのまま 1 引数にする
+          #    (`--with-wasm-module=calc writer impress` で通っている前例)。
+          # 🔴 **2026-08-14: ここに書いてあったことは 3 つとも誤りだった**(上流の実物を
+          #    落として確定 ── `LibreOffice/core@4a810c46` を checkout して全数 grep)。
+          #    ① `ENABLE_WASM_STRIP_LOCALES` は **死に変数**。上流全体で一致するのは
+          #       `config_host.mk.in:265` の 1 行だけで、**makefile も C++ も誰も読まない**
+          #       (`config_wasm_strip.h.in` にも無い)。剥がしの実体ではなかった。
+          #    ② `--disable-wasm-strip` は **Emscripten では効かない**。
+          #       `configure.ac:1301` が host case で `enable_wasm_strip=yes` を
+          #       **無条件に上書き**する(option 解析はその前に終わっている)。
+          #       ⚠ 当時「WRITER / CALC / CANVAS が空になったから効いた」と読んだが、
+          #       あれは `--with-wasm-module`(#145)と、`config_host.mk.in` の
+          #       **右辺が空リテラル**の行(CHART / HUNSPELL / RECENT)によるものだった。
+          #       ⚠ 仮に本当に無効化できたら `configure.ac:3457-3505` が発火せず
+          #       `enable_dynamic_loading` まで戻るので、**wasm はリンクしない**。
+          #    ③ `WITH_LANG` が出ないのではなく、**出る file が違う** ──
+          #       `config_host_lang.mk`(`config_host.mk.in:831` が include する)。
+          #       ⚠ `export` が付かないのは意図的(shell で source する file ではない)
+          #       ので、`grep '^export WITH_LANG'` は**永久に一致しない**。
+          #
+          # 🔴 **未確認のものは assert にせず、診断で出す**(この節で 3 回続けて踏んだ)。
+          #    `WITH_LANG=en-US ja` になる「はず」だが**まだ 1 度も見ていない**ので、
+          #    ここでは**印字するだけ**にする。通ったのを見てから後条件へ昇格させる。
+          #    🔑 本当に守りたい後条件は下の「配る物に `/ja/` が在るか」であって、
+          #    構成の途中経過ではない。
+          echo '--- config_host_lang.mk(WITH_LANG の実体はこちら)---'
+          if [ -f config_host_lang.mk ]; then
+            cat config_host_lang.mk
+          else
+            echo '(config_host_lang.mk が無い ── AC_CONFIG_FILES を確かめる)'
+          fi
           # 🔴 **Impress(と Draw / Math / Basic)が落とされていないことを確かめる**(#145)。
           #    上流 configure.ac の `--with-wasm-module` 既定は **'calc writer'** なので、
           #    渡さないと Impress は**一式に 1 file も入らない**(実測: simpress 0 / sdraw 0)。
@@ -512,6 +566,23 @@ jobs:
                    qt_soffice.html qtloader.js; do
             test -f "workdir/installation/LibreOffice/emscripten/$f"
           done
+          # 🔴 **日本語 UI が一式に入ったことを、配る物で確かめる**(#158)。
+          # ⚠ configure に渡っただけでは足りない ── #145 で「渡していないから
+          #    Impress が 1 file も入っていなかった」を踏んでいる。**中身を数える。**
+          # ⚠ 0 件なら落とす(黙って英語だけを配らない)。
+          # 🔑 **代替物で満たせない条件にする**(2026-08-14 に絞り込んだ)。
+          #    `/ja/` だけだと、無関係な path(フォントや fixture)に満たされうる ──
+          #    見るのは**翻訳の実体**(`.mo`)と**言語の登録**(Langpack)である。
+          #    ⚠ この 2 つは別の機構なので、**両方**数える(片方だけでも UI は英語のまま)。
+          meta=workdir/installation/LibreOffice/emscripten/soffice.data.js.metadata
+          # ⚠ `pipefail` の下では、0 件のとき grep の exit 1 が代入ごと殺し、
+          #    **いちばん読みたい「0 件」の行が出ない**(レビュー指摘)──
+          #    `|| true` を grep の側に置き、数える・報せる・落とす、を分ける
+          mo=$( (grep -o 'program/resource/ja/LC_MESSAGES/[A-Za-z0-9_]*\.mo' "$meta" || true) | wc -l)
+          pack=$( (grep -o 'Langpack-ja\.xcd' "$meta" || true) | wc -l)
+          echo "日本語 翻訳(.mo): $mo 件 / 言語の登録(Langpack-ja.xcd): $pack 件"
+          test "$mo" -gt 0
+          test "$pack" -gt 0
 
       # 🔴 **手元で回せるようにする**(user 指示 2026-08-10
       #    「ビルド通ってるんだから、あなたの環境に落として試せばいいんじゃない?」)。
@@ -669,7 +740,35 @@ jobs:
             echo '(soffice.js 無し)'
           fi
 
-          echo '########## 3. make のエラー ##########'
+          echo '########## 3. 構成の実物(config_host.mk)##########'
+          # 🔴 **検品の grep が落ちたとき、何と食い違ったのかを読めるようにする**
+          #    (2026-08-14。ここが無くて「どの grep が落ちたか」すら分からなかった)。
+          if [ -f ~/lo-core/config_host.mk ]; then
+            grep -E '^export (WITH_LANG|ENABLE_QT|VCL_PLUGIN_INFO|ENABLE_WASM_STRIP|ENABLE_EMSCRIPTEN)' \
+              ~/lo-core/config_host.mk || echo '(該当なし)'
+          else
+            echo '(config_host.mk 無し)'
+          fi
+
+          echo '########## 3b. 上流が持つ wasm-strip / lang の選択肢 ##########'
+          # 🔴 **推測で option を当てない**(2026-08-14 に 2 度やった)。
+          #    上流の configure.ac は runner に在るのだから、**名前を読む**。
+          if [ -f ~/lo-core/configure.ac ]; then
+            grep -nE 'wasm-strip|with-lang' ~/lo-core/configure.ac | head -20 || echo '(該当なし)'
+          else
+            echo '(configure.ac 無し)'
+          fi
+
+          echo '########## 4. configure のエラー ##########'
+          if [ -f /tmp/configure.log ]; then
+            grep -m 10 -nE 'Error|error:|not found|requires' /tmp/configure.log || echo '(該当なし)'
+            echo '--- 末尾 20 行 ---'
+            tail -20 < /tmp/configure.log
+          else
+            echo '(configure.log 無し)'
+          fi
+
+          echo '########## 5. make のエラー ##########'
           if [ -f /tmp/make.log ]; then
             grep -m 20 -nE 'wasm-ld: error|error:|^make.*\*\*\*' /tmp/make.log || echo '(該当なし)'
             grep -oE 'undefined symbol: [A-Za-z0-9_:]+' /tmp/make.log > /tmp/undef.txt || true

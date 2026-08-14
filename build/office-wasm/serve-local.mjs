@@ -121,7 +121,9 @@ async function boot(file) {
     });
     const FS = inst.FS;
     for (const [n, b] of fontBytes) FS.writeFile('/instdir/share/fonts/truetype/' + n, b);
-    const args = [];
+    // 🔴 **製品と同じ引数で開く**(#158)── ここが英語のままだと、手元で見た画面と
+    //    user が見る画面が違ってしまう(「実機は日本語なのに probe は英語」)
+    const args = ['--language=ja'];
     if (docBytes) {
       try { FS.mkdir('/work'); } catch (e) { /* 既に在る */ }
       // ⚠ 題名はそのまま使う(日本語のファイル名も通る)
