@@ -68,24 +68,33 @@ def main() -> int:
         return 1
     text = path.read_text(encoding="utf-8")
 
+    # ⚠ 上流が既に直していたら止める(patch が要らなくなった合図)。
+    #    🔑 錨の検査より**先**に見る ── 上流が自分でこの修正を入れた場合は錨も
+    #    消えるので、後に置くと「錨が 0 件」という誤った説明で落ちる(レビュー指摘)。
+    #    🔑 コメントを剥いだ**コード行だけ**で見る ── 当該箇所の直上は focus 問題を
+    #    論じるコメント塊で、上流がこの語をコメントに足すだけで偽の停止になる
+    #    (CLAUDE.md §1「検査が散文に満たされる」の顔違い)。
+    code_only = "\n".join(line.split("//", 1)[0] for line in text.splitlines())
+    if "WindowDoesNotAcceptFocus" in code_only:
+        print(
+            "ERROR: 上流が既に WindowDoesNotAcceptFocus をコードで扱っている\n"
+            "  → 本 patch は要らなくなった可能性がある。確かめてから外すこと",
+            file=sys.stderr,
+        )
+        return 1
     # ⚠ 錨は 1 件でなければ異常終了(TOOLTIP 分岐の `Qt::ToolTip;` とは別の字面)
     hits = text.count(ANCHOR)
     if hits != 1:
         print(f"ERROR: 錨が {hits} 件({SRC}): {ANCHOR.strip()}", file=sys.stderr)
         return 1
-    # ⚠ 上流が既に直していたら止める(patch が要らなくなった合図)
-    if "WindowDoesNotAcceptFocus" in text:
-        print(
-            "ERROR: 上流が既に WindowDoesNotAcceptFocus を扱っている\n"
-            "  → 本 patch は要らなくなった可能性がある。確かめてから外すこと",
-            file=sys.stderr,
-        )
-        return 1
 
     text = text.replace(ANCHOR, REPLACE)
 
-    # 後条件 ── isPopup の分岐の中に入ったこと(字面だけでなく位置)
-    at = text.index("Qt::WindowDoesNotAcceptFocus")
+    # 後条件 ── isPopup の分岐の中に入ったこと(字面だけでなく位置)。
+    # ⚠ 単語で探さない ── 上流が `Qt::` 付きの語を**コメント散文**に書いただけで
+    #    最初の一致がそちらへ移り、偽の停止になる(検証ハーネスで実証)。
+    #    挿入した REPLACE ブロック丸ごとなら散文には現れない。
+    at = text.index(REPLACE)
     popup_at = text.index("else if (isPopup())")
     tool_at = text.index("else if (nStyle & SalFrameStyleFlags::TOOLWINDOW)")
     if not (popup_at < at < tool_at):
@@ -93,6 +102,13 @@ def main() -> int:
         return 1
 
     path.write_text(text, encoding="utf-8")
+    # 🔴 書いた**あとに再読して**確かめる(レビューの変異 M-1: write を落としても
+    #    ここまでの検査は in-memory の text に対して全部通り、CI 全緑のまま修正が
+    #    artifact に 1 バイトも入らない ── 検出手段が手動 probe だけになる)。
+    written = path.read_text(encoding="utf-8")
+    if "| Qt::WindowDoesNotAcceptFocus;" not in written:
+        print(f"ERROR: 書き戻し後の {SRC} に flag が無い(write が落ちている)", file=sys.stderr)
+        return 1
     print(f"patched: {SRC}(popup の窓は focus を取らない /#157)")
     return 0
 

@@ -109,6 +109,12 @@ const SURVEY = `(() => {
 /** コンボ周辺の切り抜きを 2 枚(700ms あけて)撮り、hash の集合で返す。 */
 async function comboHashes(page, tag) {
   const clip = { x: C_COMBO[0] - 90, y: C_COMBO[1] - 14, width: 120, height: 28 };
+  // 🔴 撮る前に pointer を切り抜きの**外**へ駐め直す(着地前レビュー ⚠)。
+  //    openPopup の最後のクリックで pointer は C_COMBO(= 切り抜きの内側)に
+  //    駐まったままになる ── ▼の hover 描画が写れば、値が変わっていなくても
+  //    hash が入れ替わり「変わった」と誤読する(kbd 対照群が空洞化する)。
+  await page.mouse.move(C_COMBO[0] - 200, C_COMBO[1] + 300);
+  await page.waitForTimeout(300);
   const hashes = [];
   for (let i = 0; i < 2; i += 1) {
     const buf = await page.screenshot({ clip, path: join(SHOTS, `crop-${tag}-${i}.png`) });
@@ -236,6 +242,14 @@ async function main() {
     if (popup1) {
       const px = popup1.x + Math.round(popup1.w * C_ITEM[0]);
       const py = popup1.y + Math.round(C_ITEM[1] * 26);
+      // 🔴 押し先が popup の**中**であることを先に確かめる(着地前レビュー ⚠)。
+      //    行高 26px 決め打ちなので、低い popup では外へ落ち「選択されなかった =
+      //    修正が効いていない」という**偽の赤**を黙って返す ── 黙らせず止める。
+      if (py >= popup1.y + popup1.h || px >= popup1.x + popup1.w) {
+        throw new Error(
+          `PKC3_C_ITEM の押し先 (${px},${py}) が popup の外(rect ${JSON.stringify(popup1)})── C_ITEM を下げること`,
+        );
+      }
       result.mouseClickAt = [px, py];
       /**
        * 🔴 **event がどの要素へ落ちるかを計装してから押す**(#157 の本丸)。
