@@ -90,6 +90,15 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-14-office-tile',
+    title: 'アプリの一覧から Office を開けるようになりました',
+    items: [
+      'Office のひとそろいを入れてある端末では、アプリの一覧に「Office」が並びます。',
+      '押すと Office の窓が開き、新しい文書・表計算・プレゼンテーションを作れます。',
+      '入れていない端末には出ません。設定の「Office 表示」からいつでも入れられます。',
+    ],
+  },
+  {
     id: '2026-08-14-office-mouse-select',
     title: 'Office のメニューやドロップダウンが、マウスで選べるようになりました',
     items: [

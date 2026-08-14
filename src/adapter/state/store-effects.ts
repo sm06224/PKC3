@@ -11,7 +11,7 @@ import { extractMeta } from '@features/flavor';
 import { withTodoStatus } from '@features/flavor/todo-flavor';
 import { appendBlock } from '@features/markdown/text-ops';
 import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
-import { buildTiles, type TileSource } from '@features/launcher/tiles';
+import { buildTiles, withBuiltinTiles, type TileSource } from '@features/launcher/tiles';
 import type { Relation } from '@core/model/entry-meta';
 import type { Dispatcher } from './dispatcher';
 
@@ -96,9 +96,30 @@ export interface StorePort {
 export function connectStoreEffects(
   dispatcher: Dispatcher,
   store: StorePort,
+  opts: {
+    /**
+     * Office 一式が入っているか(#148 の組み込みタイル)。
+     * ⚠ 同期で答えられる控え(`appOfficePack.isInstalled` 相当)を渡す。
+     * 既定 false = 組み込みタイルを出さない(test の既存呼び出しを変えない)。
+     */
+    officeInstalled?: () => boolean;
+  } = {},
 ): () => void {
   let queue: Promise<void> = Promise.resolve();
   let disposed = false;
+  const officeInstalled = opts.officeInstalled ?? ((): boolean => false);
+  /**
+   * 🔑 タイル一覧の**出口は 1 つ**(CLAUDE.md §7「同じ値を複数の経路へ渡すものは
+   * 経路ごとに pin する」の予防形)── 組み込み分の合流を dispatch 側 2 か所へ
+   * 書き写さず、ここで 1 度だけ決める。
+   */
+  const dispatchTiles = (sources: readonly TileSource[]): void => {
+    if (disposed) return;
+    dispatcher.dispatch({
+      type: 'LAUNCHER_TILES_LOADED',
+      tiles: withBuiltinTiles(buildTiles(sources), { office: officeInstalled() }),
+    });
+  };
 
   /** 全 store op を単一 chain に直列化(順序保証)。op の失敗は chain を殺さない。 */
   const enqueue = (op: () => Promise<void>): void => {
@@ -349,7 +370,7 @@ export function connectStoreEffects(
               const title = titles.get(row.lid);
               if (title !== undefined) sources.push({ lid: row.lid, title, body: row.body });
             }
-            dispatcher.dispatch({ type: 'LAUNCHER_TILES_LOADED', tiles: buildTiles(sources) });
+            dispatchTiles(sources);
           } catch (e) {
             if (!disposed)
               dispatcher.dispatch({
@@ -377,10 +398,7 @@ export function connectStoreEffects(
               const title = titles.get(row.lid);
               if (title !== undefined) sources.push({ lid: row.lid, title, body: row.body });
             }
-            dispatcher.dispatch({
-              type: 'LAUNCHER_TILES_LOADED',
-              tiles: buildTiles(sources),
-            });
+            dispatchTiles(sources);
           } catch (e) {
             if (!disposed)
               dispatcher.dispatch({
