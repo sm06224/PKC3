@@ -24,8 +24,10 @@
  *
  * 🔑 いまはメニューを**座標でクリック**する。座標は screenshot から採ったので、
  * **viewport を固定する**({@link VIEWPORT})── 変えると全部ずれる。
- * ⚠ 上流の LO がメニューの並びを変えたら当たらなくなるが、そのときは
- *   `landed` が false になるので、**黙って「落ちない」にはならない**。
+ * ⚠ 上流の LO がメニューの並びを変えたら当たらなくなる。**多くの場合**は
+ *   `landed` が false になって鳴るが、外れたクリック自体が絵を変える
+ *   (別のメニューが開く / 版面に当たって caret が動く)と素通りする ──
+ *   疑わしい回は `__shots-<suite>` の `01-…png` を目視する(レビュー 2026-08-14)。
  *
  * | 手 | 何が起きるはず |
  * |---|---|
@@ -216,9 +218,49 @@ const SUITES = {
     { id: 'escape', key: 'Escape', why: '開けたなら閉じてみる', control: false },
   ],
   /**
+   * #117 ── **`Ctrl+W`(文書を閉じる)で窓が半壊する**(2026-08-13、2/2)。
+   *
+   * 症状: Start Center へ戻らず、メニューとツールバーが消えた半壊の Writer が残り、
+   * 直後に `RuntimeError: null function or function signature mismatch`
+   * (`Scheduler::CallbackTaskScheduling` ← `QtTimer::timeoutActivated`)。
+   *
+   * 🔑 観測点は **fault の発火**である(`noteFault` が `signature mismatch` も
+   * `memory access out of bounds` も拾う ── 素の一式では別の顔で出うる)。
+   * 「Start Center に戻ったか」は screenshot で見る ── `landed`(絵が変わった)を
+   * 「戻った」と読まない(#117 で実際に誤読した)。
+   *
+   * ⚠ この suite の仕事は「**対照群の一式(Impress 無し)でも起きるか**」の判定
+   * (#117 の次の一手)── 起きるなら Impress とは完全に独立。
+   *
+   * 🔴 **`OPEN_DOC` を使ってはいけない**(2026-08-14、初稿で踏んだ)。
+   * 対照群の `type-text` が文書を **dirty** にするので、`Ctrl+W` は閉じずに
+   * **`Save Document?` ダイアログを出す** ── 閉じる動作が 1 度も起きないまま
+   * 「再現せず」になる(screenshot で裏を取った。NOT-APPLIED の別の顔)。
+   * issue の手順どおり **Start Center からクリックで開き、打鍵せず clean のまま閉じる**。
+   * ⚠ `landed` は「届いた」の証明にならない ── close-doc の差分窓には
+   * **refocus のクリック分も混ざる**(レビュー 2026-08-14)。「再現せず」の回は
+   * `__shots-closedoc/02-close-doc*.png` で **Start Center に戻ったか**を必ず目で確かめる。
+   */
+  closedoc: [
+    {
+      id: 'new-writer',
+      at: [133, 341],
+      why: '⚠ 対照群 ── Start Center の Writer Document(押せている証拠。#117 の手順どおり)',
+      control: true,
+      wait: 12_000,
+    },
+    {
+      id: 'close-doc',
+      key: 'Control+w',
+      why: '🔴 文書を閉じる(clean のまま)── 半壊 + signature mismatch(#117、直す前 2/2)',
+      control: false,
+      wait: 20_000,
+    },
+  ],
+  /**
    * #145 ── Start Center から **Impress** を開く。
    *
-   * ⚠ `OPEN_DOC` を**使わない**唯一の suite である ── 見たいのは
+   * ⚠ `OPEN_DOC` を**使わない** suite の 1 つである(closedoc も使わない)── 見たいのは
    * 「Start Center の項目が生きているか」なので、先に Writer を開くと
    * **Start Center が消えて**押せない。
    *
@@ -285,9 +327,13 @@ async function main() {
   const faults = [];
   const noteFault = (text) => {
     // ⚠ `null function or function signature mismatch` も拾う ── SAFE_HEAP つきで
-    //    踏むとこちらになる(同じ「でたらめなポインタ」の別の顔)
+    //    踏むとこちらになる(同じ「でたらめなポインタ」の別の顔)。
+    //    `RuntimeError: unreachable`(wasm の trap)と `table index is out of bounds`
+    //    (間接呼びの table OOB)も同族の顔(レビュー 2026-08-14)。⚠ 裸の
+    //    `unreachable` では拾わない ── 散文の警告に誤爆する(false-keep はよいが、
+    //    「直った?」の検証で偽の「まだ落ちる」を出すのは向きが逆)
     if (
-      /segmentation fault|alignment fault|memory access out of bounds|signature mismatch|Aborted\(/.test(
+      /segmentation fault|alignment fault|memory access out of bounds|signature mismatch|Aborted\(|RuntimeError: unreachable|table index is out of bounds/.test(
         text,
       )
     ) {
