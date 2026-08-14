@@ -15,7 +15,9 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import {
+  mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, statSync, existsSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -58,14 +60,25 @@ function fakePack(withBuildInfo: string | null): string {
   return src;
 }
 
-function build(src: string, env: Record<string, string> = {}): Record<string, unknown> {
+/** 組み立てて、**出力先も返す**(目録と実物を突き合わせる test が要る)。 */
+function buildTo(
+  src: string,
+  env: Record<string, string> = {},
+): { pack: Record<string, unknown>; out: string } {
   const out = mkdtempSync(join(tmpdir(), 'pkc3-site-'));
   made.push(out);
   execFileSync('node', [BUNDLER, src, out], {
     stdio: 'pipe',
     env: { ...process.env, PKC3_LO_TAG: '', ...env },
   });
-  return JSON.parse(readFileSync(join(out, 'pack.json'), 'utf-8')) as Record<string, unknown>;
+  return {
+    pack: JSON.parse(readFileSync(join(out, 'pack.json'), 'utf-8')) as Record<string, unknown>,
+    out,
+  };
+}
+
+function build(src: string, env: Record<string, string> = {}): Record<string, unknown> {
+  return buildTo(src, env).pack;
 }
 
 describe('配信一式の版', () => {
@@ -89,6 +102,30 @@ describe('配信一式の版', () => {
     expect(pack.version).toBe('unknown');
     // ⚠ 空振り防止 ── 版が取れなくても一式そのものは出来ていること
     expect(Array.isArray(pack.files) && (pack.files as string[]).length).toBeGreaterThan(0);
+  });
+
+  /**
+   * 🔴 **宣言した大きさと、実際に落ちてくる大きさを一致させる**(2026-08-14、実機検証)。
+   *
+   * `totalBytes` は `coi-serviceworker.js`(**目録に載らない** ── 配信 index.html
+   * だけが使う)まで数えていたので、宣言 97,311,959 に対し実際に入るのは
+   * 97,305,931 で **6,028 バイトずれていた**。検証した人はこれを
+   * 「別ビルドが混ざった兆候では」と読んだ ── **数字が合わないこと自体が
+   * 事故の兆候に見える**ので、合わせておく価値がある。
+   */
+  it('🔴 totalBytes は目録が指すものの合計(配らない file を数えない)', () => {
+    const { pack, out } = buildTo(fakePack(null), { PKC3_LO_TAG: 'lo-wasm-dev' });
+    const files = pack.files as string[];
+    const fonts = pack.fonts as string[];
+    // ⚠ 空振り防止 ── 目録が空だと「合計 0 = 0」で一致してしまう
+    expect(files.length).toBeGreaterThan(0);
+    expect(fonts.length).toBeGreaterThan(0);
+    const sum = [...files, ...fonts].reduce((a, f) => a + statSync(join(out, f)).size, 0);
+    expect(pack.totalBytes, '目録に無い file を数えている').toBe(sum);
+    // 🔑 **反対側も pin する** ── 「目録から外したから一致した」ではなく、
+    //    その file は**在るのに載せていない**(だから合計にも入らない)という形
+    expect(existsSync(join(out, 'coi-serviceworker.js')), '出力されていない').toBe(true);
+    expect(files).not.toContain('coi-serviceworker.js');
   });
 
   it('⚠ build-info.json が壊れていても組み立てを止めない', () => {
