@@ -1,6 +1,6 @@
 ---
 name: pkc3-verifier
-description: PKC3 の変異試験を回す専門エージェント。実装をわざと壊して test が落ちるか確かめ、KILLED / SURVIVED / NOT-APPLIED の 3 値で返す。🔴 **必ず `isolation: "worktree"` で起動する**(source を書き換えるため)。CLAUDE.md「着地前に変異試験を回す」を分担するための実体。
+description: PKC3 の変異試験を回す専門エージェント。実装をわざと壊して test が落ちるか確かめ、KILLED / SURVIVED / NOT-APPLIED の 3 値で返す。🔴 **必ず worktree 隔離(isolation="worktree")で起動する**(source を書き換えるため)。CLAUDE.md「着地前に変異試験を回す」を分担するための実体。
 tools: Read, Grep, Glob, Bash, Write, Edit
 ---
 

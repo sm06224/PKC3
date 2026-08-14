@@ -305,13 +305,38 @@ describe('office-wasm のパッチ', () => {
 
     for (const lang of langs) {
       if (lang === 'en-US') continue; // 既定なので検品は要らない
-      // ① 構成に入ったか
-      // ⚠ 観測点は `WITH_LANG` ではない ── wasm 版の config_host.mk には**出ない**
-      //    (`ENABLE_WASM_STRIP_LOCALES=TRUE` で locale を設計として剥がすため)。
-      //    見るのは**剥がしが止まったか**である(実物を出して判明、2026-08-14)。
-      expect(yml, '言語を頼んでいるのに、locale の剥がしを止めていない').toContain(
+      // ① 構成の途中経過は **assert しない**(2026-08-14 に訂正)。
+      // ⚠ ここは 3 回続けて「**達成できると確かめていない結果**」を後条件に固めた場所で
+      //    ある ── `WITH_LANG` に `ja`(wasm では変数ごと別 file)→
+      //    `--disable-wasm-strip-locales`(上流に無い option)→
+      //    `ENABLE_WASM_STRIP_LOCALES=$`(**死に変数**。上流全体で読み手ゼロ、
+      //    かつ `configure.ac:1301` が `enable_wasm_strip=yes` を無条件に上書きする)。
+      //    どれも「渡せばこうなるはず」を pin しており、落ちたとき
+      //    「実装が悪いのか、期待が間違いか」が区別できなかった。
+      // 🔑 **未確認は診断で出す**。構成の実体(`config_host_lang.mk`)は印字して次の回転で
+      //    読む ── 通ったのを見てから後条件へ昇格させる。
+      expect(yml, '構成の実体(config_host_lang.mk)を診断に出していない').toContain(
+        'cat config_host_lang.mk',
+      );
+      // 🚫 死に変数への guard を**戻さない**ための等値 pin(直したら消さないと落ちる形)。
+      expect(yml, '効かないと分かっている guard が戻っている').not.toContain(
         "grep -q '^export ENABLE_WASM_STRIP_LOCALES=$' config_host.mk",
       );
+      // 🚫 `--disable-wasm-strip` は Emscripten では上書きされて効かない(上記)。
+      //    ⚠ 仮に効いたら `enable_dynamic_loading` まで戻ってリンクしない。
+      // 🔴 **見るのは distro conf の中だけ**(2026-08-14、この 1 行で実際に踏んだ)。
+      //    file 全体で `not.toContain` すると、**上の解説コメントに満たされて必ず落ちる**
+      //    ── CLAUDE.md §1「検査の範囲を、自分が書いた場所に限定する」の
+      //    (`SAFE_HEAP` の件と)**同じ罠**である。渡す行は heredoc の中にしか無い。
+      const conf = /cat > distro-configs\/PKC3WASM-Qt6\.conf <<'CONF'\n([\s\S]*?)\n\s*CONF\n/.exec(
+        yml,
+      );
+      expect(conf, 'distro conf の heredoc が読めない ── 検査が空振りしている').not.toBeNull();
+      expect(conf?.[1], '効かない --disable-wasm-strip が distro conf に戻っている').not.toContain(
+        '--disable-wasm-strip',
+      );
+      // 空振り防止 ── heredoc を本当に読めているか(読めていれば必ずこれが在る)
+      expect(conf?.[1], 'heredoc の抜き出しが壊れている').toContain('--with-lang=');
       // ② 🔴 **配る物に入ったか**(0 件なら落とす)
       expect(yml, `${lang} を頼んでいるのに、配る物に入ったことを確かめていない`).toContain(
         `grep -o '/${lang}/' workdir/installation/LibreOffice/emscripten/soffice.data.js.metadata`,

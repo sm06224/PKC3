@@ -61,6 +61,46 @@ Agent({ subagent_type: 'pkc3-implementer', isolation: 'worktree', prompt: … })
 終わった**(`URL.revokeObjectURL` が消えていた)。自分の変更と混ざるので diff でも
 気づきにくい。⚠ だから `pkc3-reviewer` / `pkc3-surveyor` は read-only に固定してある。
 
+### ⚠ worktree 隔離が起動できない箱がある(2026-08-14 実測)
+
+```
+Cannot create agent worktree: not in a git repository and
+no WorktreeCreate hooks are configured.
+```
+
+⚠ **repo の側の問題ではない** ── `/home/user/PKC3` は git repo で `git worktree list` も
+通る。`WorktreeCreate` hook が設定されていないのが理由である(hook の書式は**未検証**)。
+
+🔴 **このとき、書き込み権のあるエージェントを隔離なしで起動してはならない。**
+「patch だけ返して」とプロンプトで頼むのは**退避策ではない** ── `Write` / `Edit` を
+持ったまま走るので、**守っているのは指示だけ**である。2026-08-04 に壊されたときも、
+そのエージェントは「書け」と頼まれてはいなかった。
+🔑 **規律を守るのは tools の一覧であって、プロンプトの文言ではない。**
+
+**正しい退避は、read-only のエージェント型に下書きさせること。**
+
+```
+Agent({ subagent_type: 'pkc3-surveyor', prompt: '…patch を返せ(file は書き換えるな)…' })
+```
+
+`pkc3-surveyor` / `pkc3-reviewer` は **`Write` / `Edit` を持たない**ので、頼み方に
+関わらず**依頼者のツリーを書き換えられない**。当てるのは依頼者である。
+⚠ **依頼者が当てる以上、typecheck / lint / test を回すのも依頼者**である。
+
+受け渡しの様式(これを書かないと代行は成立しない)── 1 件ごとに:
+
+- `file path`(絶対 path)
+- `old_string` ── **原文そのまま**。⚠ **前後を含めて一意**にする(短い断片は別行に刺さる)
+- `new_string`
+- **なぜ**(1〜2 行)
+
+⚠ `Edit` が当たらなかったら**アンカーを直させる**(こちらで書き換えない ── 何を直したのか
+分からなくなる)。⚠ **代行が「変異試験を回しました」と書けないことに注意** ── 回したのは
+依頼者である。代行が返せるのは**当てる場所と当て方**までである。
+
+⚠ hook が設定されて worktree が使えるようになったら、**実装は隔離側へ戻す**
+(そちらは test まで走らせられるので上位互換である)。
+
 ## 2. 投げ方 ── プロンプトに必ず入れる 5 つ
 
 1. **範囲を確定する** ── 「この PR」ではなく `git diff <base>..HEAD` の base を書く

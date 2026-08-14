@@ -26,6 +26,12 @@ UNIT_CMD = "npx vitest run tests/"
 SMOKE_GREP = "your-spec-name"
 # smoke の変異が生成物に届いたかを確かめる目印。
 # ⚠ **変異で消える / 現れる字面**にする。無関係な字面だと空振りを検出できない
+# 🔴 **CSS の目印を「コメント」にしない**(2026-08-14 実測)── minify が消すので
+#    dist に 1 つも残らず、**当たっているのに永久に NOT-APPLIED** になる
+#    (出荷 css のコメントは 0 件、custom property は残る)。印は `--mut-a: 1` のような
+#    **custom property** を足して、それを探す。
+# ⚠ **規則ごと消す変異にも印を残す** ── 消すだけだと「当たったこと」を dist から
+#    確かめられない。消した規則の代わりに `--mut-x: 1` を置くと、当たりが見える。
 DIST_MARKER = "put-a-string-that-the-mutation-changes-here"
 # DIST_MARKER が「変異後に消える」なら True、「変異後に現れる」なら False
 DIST_MARKER_DISAPPEARS = True
@@ -50,11 +56,17 @@ def run(cmd, timeout=1800):
     )
 
 
-def dist_js() -> str:
-    return "\n".join(
-        p.read_text(encoding="utf-8", errors="replace")
-        for p in sorted((ROOT / "dist" / "assets").glob("*.js"))
-    )
+def dist_assets() -> str:
+    """出荷される生成物を全部つないで返す。
+
+    🔴 **`*.js` だけを読むと CSS の変異が永久に NOT-APPLIED になる。**
+    `src/styles/app.css` は `dist/assets/*.css` へ**別 file** で出る
+    (2026-08-14 実測: js 105 件 / css 1 件)。目印を js の中だけ探していたので、
+    CSS を壊す変異は「dist に印が無い」で必ず弾かれていた。
+    """
+    assets = ROOT / "dist" / "assets"
+    files = sorted(assets.glob("*.js")) + sorted(assets.glob("*.css"))
+    return "\n".join(p.read_text(encoding="utf-8", errors="replace") for p in files)
 
 
 def first_reason(out: str) -> str:
@@ -91,7 +103,7 @@ def main() -> int:
                     # 下限 tripwire(検品)が止めた形 ── これは守られている
                     results.append((mid, "KILLED", "build が落ちた(検品 tripwire)"))
                     continue
-                present = DIST_MARKER in dist_js()
+                present = DIST_MARKER in dist_assets()
                 if DIST_MARKER_DISAPPEARS and present:
                     results.append((mid, "NOT-APPLIED", "目印が dist に残っている"))
                     continue

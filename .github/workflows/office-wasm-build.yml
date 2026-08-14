@@ -436,7 +436,6 @@ jobs:
           --disable-emscripten-proxy-to-pthread
           --with-wasm-module=calc writer impress
           --with-lang=en-US ja
-          --disable-wasm-strip
           CONF
           . ~/emsdk/emsdk_env.sh
           # 🔴 **出力を残す**(2026-08-14)。⚠ `make` には `tee` が在るのに
@@ -454,16 +453,35 @@ jobs:
           # ⚠ 「渡した」ではなく **構成に入った**ことを見る(#145 と同じ空振り防止)。
           #    値に空白が入るが、autogen.sh は行をそのまま 1 引数にする
           #    (`--with-wasm-module=calc writer impress` で通っている前例)。
-          # 🔴 **上流には親スイッチしか無い**(2026-08-14、実物で確定)。
-          #    `--disable-wasm-strip-locales` は `unrecognized options` で落ちる。
-          #    `configure.ac:6336` に在るのは `--enable-wasm-strip` の 1 つだけなので、
-          #    **全部の剥がしを止める**しかない(user 裁定 2026-08-14「OK」)。
-          #    ⚠ locale 以外(RECOVERYUI / SPLASH / SWEXPORTS / SCEXPORTS …)も戻る。
-          # 🔴 **観測点を「実在するもの」へ変える**(2026-08-14、実物を出して判明)。
-          #    ⚠ `WITH_LANG` は config_host.mk に **1 行も出ない** ── wasm 版は
-          #    `ENABLE_WASM_STRIP_LOCALES=TRUE` で **locale を設計として剥がす**ため。
-          #    だから見るのは**剥がしが止まったか**である(空 = 剥がさない)。
-          grep -q '^export ENABLE_WASM_STRIP_LOCALES=$' config_host.mk
+          # 🔴 **2026-08-14: ここに書いてあったことは 3 つとも誤りだった**(上流の実物を
+          #    落として確定 ── `LibreOffice/core@4a810c46` を checkout して全数 grep)。
+          #    ① `ENABLE_WASM_STRIP_LOCALES` は **死に変数**。上流全体で一致するのは
+          #       `config_host.mk.in:265` の 1 行だけで、**makefile も C++ も誰も読まない**
+          #       (`config_wasm_strip.h.in` にも無い)。剥がしの実体ではなかった。
+          #    ② `--disable-wasm-strip` は **Emscripten では効かない**。
+          #       `configure.ac:1301` が host case で `enable_wasm_strip=yes` を
+          #       **無条件に上書き**する(option 解析はその前に終わっている)。
+          #       ⚠ 当時「WRITER / CALC / CANVAS が空になったから効いた」と読んだが、
+          #       あれは `--with-wasm-module`(#145)と、`config_host.mk.in` の
+          #       **右辺が空リテラル**の行(CHART / HUNSPELL / RECENT)によるものだった。
+          #       ⚠ 仮に本当に無効化できたら `configure.ac:3457-3505` が発火せず
+          #       `enable_dynamic_loading` まで戻るので、**wasm はリンクしない**。
+          #    ③ `WITH_LANG` が出ないのではなく、**出る file が違う** ──
+          #       `config_host_lang.mk`(`config_host.mk.in:831` が include する)。
+          #       ⚠ `export` が付かないのは意図的(shell で source する file ではない)
+          #       ので、`grep '^export WITH_LANG'` は**永久に一致しない**。
+          #
+          # 🔴 **未確認のものは assert にせず、診断で出す**(この節で 3 回続けて踏んだ)。
+          #    `WITH_LANG=en-US ja` になる「はず」だが**まだ 1 度も見ていない**ので、
+          #    ここでは**印字するだけ**にする。通ったのを見てから後条件へ昇格させる。
+          #    🔑 本当に守りたい後条件は下の「配る物に `/ja/` が在るか」であって、
+          #    構成の途中経過ではない。
+          echo '--- config_host_lang.mk(WITH_LANG の実体はこちら)---'
+          if [ -f config_host_lang.mk ]; then
+            cat config_host_lang.mk
+          else
+            echo '(config_host_lang.mk が無い ── AC_CONFIG_FILES を確かめる)'
+          fi
           # 🔴 **Impress(と Draw / Math / Basic)が落とされていないことを確かめる**(#145)。
           #    上流 configure.ac の `--with-wasm-module` 既定は **'calc writer'** なので、
           #    渡さないと Impress は**一式に 1 file も入らない**(実測: simpress 0 / sdraw 0)。
