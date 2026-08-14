@@ -232,6 +232,67 @@ describe('添付の説明に書いた図(P8 段⑬)', () => {
 });
 
 /**
+ * 🔴 **添付の説明にも文書 globals が届く**(#106 / Issue #103 の残面)。
+ * `data-pkc-doc-align` を消費する面は 5 つ(読む面 / プレビュー / ライブ /
+ * 添付の説明 / 書き出し)だが、**添付の説明だけ誰も見ていなかった** ──
+ * 書き出し(pkc3-html.ts)は同じ entry に attrs を焼くので、渡し忘れは
+ * 「配った HTML でだけ |> が反対に寄る」という面間の食い違いになる。
+ */
+describe('添付の説明の文書 globals(#106)', () => {
+  const noLender: AssetLender = {
+    lend: async () => null,
+    getBlob: async () => null,
+  };
+
+  it('🔴 宣言した寄せ・書字方向が説明の器に付く(|> の反転が成立する前提)', async () => {
+    const body = [
+      '---',
+      'attachment.name: p.png',
+      'attachment.mime: image/png',
+      'attachment.size: 3',
+      'attachment.asset_key: ast-1',
+      'align: right',
+      'direction: rtl',
+      '---',
+      '',
+      '|> 説明の行',
+      '',
+    ].join('\n');
+    const { d, q } = setup({ a1: body, a2: '# text' }, noLender);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    await tick(20);
+
+    const desc = q('[data-pkc-field="detail-body"]');
+    expect(desc, '説明の器が出ていない(この検査が空振りしている)').not.toBeNull();
+    expect(desc!.getAttribute('data-pkc-doc-align'), '宣言した寄せが届いていない').toBe('right');
+    expect(desc!.getAttribute('dir'), '書字方向が届いていない').toBe('rtl');
+    // 入れ替え規則は `.pkc-md-rendered[data-pkc-doc-align=…] [data-pkc-align=opposite]`
+    // ── class と属性が揃って初めて当たる(live-editor.test.ts の同型の観点)
+    expect(
+      desc!.classList.contains('pkc-md-rendered'),
+      '説明の器が markdown の CSS の外に居る(属性だけ届いても寄らない)',
+    ).toBe(true);
+    // 空振り防止 ── この面で記法の次元がゼロなら、上の属性 pin は何も守らない
+    expect(
+      desc!.querySelector('[data-pkc-align="opposite"]'),
+      '説明の |> が opposite を出していない',
+    ).not.toBeNull();
+  });
+
+  it('宣言が無ければ属性も無い(付けっぱなしにしない)', async () => {
+    const body =
+      attachmentBody({ name: 'p.png', mime: 'image/png', size: 3, assetKey: 'ast-1' }) +
+      '\n\n説明の行\n';
+    const { d, q } = setup({ a1: body, a2: '# text' }, noLender);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    await tick(20);
+    const desc = q('[data-pkc-field="detail-body"]')!;
+    expect(desc.hasAttribute('data-pkc-doc-align')).toBe(false);
+    expect(desc.hasAttribute('dir')).toBe(false);
+  });
+});
+
+/**
  * 🔴 **詳細画面から起動できる**(P10、user 指示 2026-08-05
  * 「HTML アセットの詳細画面から起動できない」)。
  *
