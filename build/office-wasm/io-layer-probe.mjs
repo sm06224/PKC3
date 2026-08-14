@@ -115,7 +115,10 @@ const SURVEY = `(() => {
           attrH: el.tagName === 'CANVAS' ? el.height : null,
           // 🔴 **題名で見分ける**。窓の数では「メニューが閉じてダイアログが開いた」を
           //    「何も起きなかった」と区別できない(実際に取り違えた)
-          title: isWin ? (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 40) : null,
+          // ⚠ ここはテンプレートリテラルの中なので、バックスラッシュを二重にする ──
+          //    一重だとリテラルに食われて「文字 s の連続」を置換する正規表現になる。
+          //    ⚠ この注記にバッククォートを書くとリテラルが閉じる(1 度やった)
+          title: isWin ? (el.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 40) : null,
         });
       }
       if (el.shadowRoot) walk(el.shadowRoot);
@@ -184,8 +187,11 @@ async function main() {
       if (t && t.host) return `shadowRoot(${t.host.tagName ?? ''})`;
       return Object.prototype.toString.call(t);
     };
-    const orig = EventTarget.prototype.addEventListener;
-    EventTarget.prototype.addEventListener = function (type, fn, opts) {
+    // ⚠ `EventTarget` を裸で書かない ── この関数は browser で走るが、
+    //    lint は node として読むので `no-undef` になる(CI で赤にした)
+    const ET = /** @type {any} */ (globalThis).EventTarget;
+    const orig = ET.prototype.addEventListener;
+    ET.prototype.addEventListener = function (type, fn, opts) {
       try {
         W.__io.adds.push({
           target: name(this),
