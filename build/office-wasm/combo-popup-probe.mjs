@@ -237,7 +237,60 @@ async function main() {
       const px = popup1.x + Math.round(popup1.w * C_ITEM[0]);
       const py = popup1.y + Math.round(C_ITEM[1] * 26);
       result.mouseClickAt = [px, py];
-      await page.mouse.click(px, py);
+      /**
+       * 🔴 **event がどの要素へ落ちるかを計装してから押す**(#157 の本丸)。
+       *
+       * Qt wasm は pointer を **DIV(窓の器)**で拾う(io-layer-probe の実測)。
+       * popup の DIV に落ちていれば Qt の中の話、**main 窓の DIV に落ちていれば
+       * DOM の重なり(z-index / pointer-events)の話** ── 直す層がここで分かれる。
+       * ⚠ composedPath の先頭(実際の的)を記録する ── shadow DOM 越しでも本物が出る。
+       */
+      result.hitTest = await page.evaluate(([x, y]) => {
+        const g = /** @type {any} */ (globalThis);
+        g.__hits = [];
+        const label = (el) =>
+          el && el.tagName
+            ? `${el.tagName}${el.id ? '#' + el.id : ''}.${(el.className || '').toString().split(' ').slice(0, 2).join('.')}`
+            : String(el);
+        for (const t of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click']) {
+          g.document.addEventListener(
+            t,
+            (e) => {
+              g.__hits.push({ t, target: label(e.composedPath()[0]), x: e.clientX, y: e.clientY });
+            },
+            { capture: true },
+          );
+        }
+        // elementFromPoint は shadow を貫かない ── 貫くまで潜る
+        let el = g.document.elementFromPoint(x, y);
+        const chain = [];
+        while (el) {
+          chain.push(label(el));
+          const deeper = el.shadowRoot && el.shadowRoot.elementFromPoint(x, y);
+          if (!deeper || deeper === el) break;
+          el = deeper;
+        }
+        return chain;
+      }, [px, py]);
+      /**
+       * 🔴 **押下と解放を分ける**(PKC3_SPLIT=1)。「閉じたのはどちらか」を確定する ──
+       * down で閉じるなら Qt の press 側の判定(grab / 外側判定)、up まで生きて
+       * いるなら release 側の配送、と直す場所が分かれる。
+       */
+      if (process.env.PKC3_SPLIT === '1') {
+        await page.mouse.move(px, py);
+        await page.mouse.down();
+        await page.waitForTimeout(600);
+        result.betweenDownUp = {
+          windows: await page.evaluate(SURVEY),
+          hits: await page.evaluate(() => /** @type {any} */ (globalThis).__hits),
+        };
+        await page.screenshot({ path: join(SHOTS, '03a-between-down-up.png') });
+        await page.mouse.up();
+      } else {
+        await page.mouse.click(px, py);
+      }
+      result.hits = await page.evaluate(() => /** @type {any} */ (globalThis).__hits);
       await page.waitForTimeout(2500);
       await page.screenshot({ path: join(SHOTS, '03-after-mouse-pick.png') });
       result.afterMouse = await comboHashes(page, 'after-mouse');
