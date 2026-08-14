@@ -90,6 +90,15 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-14-office-japanese-ui',
+    title: 'Office の画面が日本語になりました',
+    items: [
+      'メニューやダイアログが日本語で出ます。これまでは文字は日本語で書けるのに、画面は英語のままでした。',
+      '直っているのは新しいひとそろいのほうです。設定の「Office 表示」から入れ直してください。',
+      '英語に戻したいときは、Office の「ツール → オプション → 言語設定」でいつでも選べます。',
+    ],
+  },
+  {
     id: '2026-08-14-announce-close',
     title: 'お知らせの「閉じる」が見出しの行に移りました',
     items: [
