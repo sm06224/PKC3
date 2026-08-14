@@ -90,6 +90,15 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-14-office-mouse-select',
+    title: 'Office のメニューやドロップダウンが、マウスで選べるようになりました',
+    items: [
+      'これまで、メニューの項目やドロップダウンの一覧を押しても、閉じるだけで選べないことがありました。',
+      '押した瞬間に一覧が消えてしまう作りの穴をふさぎました。マウスだけで選べます。',
+      '直っているのは新しいひとそろいのほうです。設定の「Office 表示」から入れ直してください。',
+    ],
+  },
+  {
     id: '2026-08-14-office-settings-persist',
     title: 'Office の設定が、窓を閉じても残るようになりました',
     items: [
