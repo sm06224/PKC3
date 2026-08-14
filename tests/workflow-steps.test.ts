@@ -306,8 +306,11 @@ describe('office-wasm のパッチ', () => {
     for (const lang of langs) {
       if (lang === 'en-US') continue; // 既定なので検品は要らない
       // ① 構成に入ったか
-      expect(yml, `${lang} を頼んでいるのに、構成に入ったことを確かめていない`).toContain(
-        `grep -qE '^export WITH_LANG(_LIST)?=.*\\b${lang}\\b' config_host.mk`,
+      // ⚠ 観測点は `WITH_LANG` ではない ── wasm 版の config_host.mk には**出ない**
+      //    (`ENABLE_WASM_STRIP_LOCALES=TRUE` で locale を設計として剥がすため)。
+      //    見るのは**剥がしが止まったか**である(実物を出して判明、2026-08-14)。
+      expect(yml, '言語を頼んでいるのに、locale の剥がしを止めていない').toContain(
+        "grep -q '^export ENABLE_WASM_STRIP_LOCALES=$' config_host.mk",
       );
       // ② 🔴 **配る物に入ったか**(0 件なら落とす)
       expect(yml, `${lang} を頼んでいるのに、配る物に入ったことを確かめていない`).toContain(

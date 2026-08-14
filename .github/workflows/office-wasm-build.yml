@@ -436,6 +436,7 @@ jobs:
           --disable-emscripten-proxy-to-pthread
           --with-wasm-module=calc writer impress
           --with-lang=en-US ja
+          --disable-wasm-strip-locales
           CONF
           . ~/emsdk/emsdk_env.sh
           # 🔴 **出力を残す**(2026-08-14)。⚠ `make` には `tee` が在るのに
@@ -453,9 +454,11 @@ jobs:
           # ⚠ 「渡した」ではなく **構成に入った**ことを見る(#145 と同じ空振り防止)。
           #    値に空白が入るが、autogen.sh は行をそのまま 1 引数にする
           #    (`--with-wasm-module=calc writer impress` で通っている前例)。
-          # ⚠ 変数名は上流の版で変わる(WITH_LANG / WITH_LANG_LIST)。どちらでも見る ──
-          #    ⚠ ただし **ja が在ること**は必ず要求する(名前を緩めても主張は緩めない)
-          grep -qE '^export WITH_LANG(_LIST)?=.*\bja\b' config_host.mk
+          # 🔴 **観測点を「実在するもの」へ変える**(2026-08-14、実物を出して判明)。
+          #    ⚠ `WITH_LANG` は config_host.mk に **1 行も出ない** ── wasm 版は
+          #    `ENABLE_WASM_STRIP_LOCALES=TRUE` で **locale を設計として剥がす**ため。
+          #    だから見るのは**剥がしが止まったか**である(空 = 剥がさない)。
+          grep -q '^export ENABLE_WASM_STRIP_LOCALES=$' config_host.mk
           # 🔴 **Impress(と Draw / Math / Basic)が落とされていないことを確かめる**(#145)。
           #    上流 configure.ac の `--with-wasm-module` 既定は **'calc writer'** なので、
           #    渡さないと Impress は**一式に 1 file も入らない**(実測: simpress 0 / sdraw 0)。
@@ -712,6 +715,15 @@ jobs:
               ~/lo-core/config_host.mk || echo '(該当なし)'
           else
             echo '(config_host.mk 無し)'
+          fi
+
+          echo '########## 3b. 上流が持つ wasm-strip / lang の選択肢 ##########'
+          # 🔴 **推測で option を当てない**(2026-08-14 に 2 度やった)。
+          #    上流の configure.ac は runner に在るのだから、**名前を読む**。
+          if [ -f ~/lo-core/configure.ac ]; then
+            grep -nE 'wasm-strip|with-lang' ~/lo-core/configure.ac | head -20 || echo '(該当なし)'
+          else
+            echo '(configure.ac 無し)'
           fi
 
           echo '########## 4. configure のエラー ##########'
