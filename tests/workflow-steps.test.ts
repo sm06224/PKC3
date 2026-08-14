@@ -307,7 +307,7 @@ describe('office-wasm のパッチ', () => {
       if (lang === 'en-US') continue; // 既定なので検品は要らない
       // ① 構成に入ったか
       expect(yml, `${lang} を頼んでいるのに、構成に入ったことを確かめていない`).toContain(
-        `grep -qE '^export WITH_LANG=.*\\b${lang}\\b' config_host.mk`,
+        `grep -qE '^export WITH_LANG(_LIST)?=.*\\b${lang}\\b' config_host.mk`,
       );
       // ② 🔴 **配る物に入ったか**(0 件なら落とす)
       expect(yml, `${lang} を頼んでいるのに、配る物に入ったことを確かめていない`).toContain(
