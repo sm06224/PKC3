@@ -575,8 +575,11 @@ jobs:
           #    見るのは**翻訳の実体**(`.mo`)と**言語の登録**(Langpack)である。
           #    ⚠ この 2 つは別の機構なので、**両方**数える(片方だけでも UI は英語のまま)。
           meta=workdir/installation/LibreOffice/emscripten/soffice.data.js.metadata
-          mo=$(grep -o 'program/resource/ja/LC_MESSAGES/[A-Za-z0-9_]*\.mo' "$meta" | wc -l)
-          pack=$(grep -c 'Langpack-ja\.xcd' "$meta" || true)
+          # ⚠ `pipefail` の下では、0 件のとき grep の exit 1 が代入ごと殺し、
+          #    **いちばん読みたい「0 件」の行が出ない**(レビュー指摘)──
+          #    `|| true` を grep の側に置き、数える・報せる・落とす、を分ける
+          mo=$( (grep -o 'program/resource/ja/LC_MESSAGES/[A-Za-z0-9_]*\.mo' "$meta" || true) | wc -l)
+          pack=$( (grep -o 'Langpack-ja\.xcd' "$meta" || true) | wc -l)
           echo "日本語 翻訳(.mo): $mo 件 / 言語の登録(Langpack-ja.xcd): $pack 件"
           test "$mo" -gt 0
           test "$pack" -gt 0

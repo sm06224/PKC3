@@ -69,34 +69,53 @@ user 報告「そもそも UI が日本語ではないから、操作がしに�
 `--disable-wasm-strip` は `configure.ac:1301` が `enable_wasm_strip=yes` を無条件に
 上書きするので **Emscripten では効かない**。**詰め込み一覧しか経路が無い。**
 
-## 🔴 file 名を直書きしない ── 名指しすると make が全体を止める
+## 🔴 `.mo` は名簿から予言しない ── 建てさせてから、届いた物を拾う
 
-`.mo` の一覧は **登録済みモジュール × 頼んだ言語**から生成する:
+1 稿目は `gb_AllLangMoTarget_REGISTERED` × 言語の直積で `.mo` の path を**予言**した。
+⚠ **REGISTERED は「名前として許される一覧」であって「この構成で建つ一覧」ではない**
+(2026-08-14、run 31777661606 で実際に落ちた)── `Repository.mk` は `cnr` を無条件で
+登録するが、`connectivity/Module_connectivity.mk:17` が
+`ifneq (,$(filter DBCONNECTIVITY,$(BUILD_TYPE)))` で **l10n target ごと**包んでおり、
+wasm(DBACCESS 剥がし)では `cnr.mo` の install 規則が**生成されない**。規則の無い
+file を要求すると `Package.mk` の catch-all が `$<` 空で
+`gb_Deliver_deliver: file does not exist in instdir` を出して**ビルド全体が止まる**。
 
-    gb_AllLangMoTarget_LANGS      := $(filter-out qtz,$(filter-out en-US,$(gb_WITH_LANG)))
-    gb_AllLangMoTarget_REGISTERED += …            # Repository.mk:1191 が登録
-    gb_MoTarget_get_install_target = $(INSTROOT)/$(LIBO_SHARE_RESOURCE_FOLDER)/$(1).mo
+🔑 上流自身が答えを持っている ── `AllLangMoTarget.mk:91` が**実体化した mo target
+だけ**を postprocess **`AllResources`** に登録する。だから:
 
-⚠ 直書きすると、**wasm で落ちるモジュール**(`avmedia` / `basctl` / `sb` / `xsc` …)の
-`.mo` を要求してしまい、規則が無いので `no rule to make target` で**ビルド全体が止まる**。
-`gb_Helper_optional` で外れたものが自動で除かれるのが、生成する形の利点である。
+1. **`soffice.data.filelist` の前提に `AllResources` を足す**
+   (この構成で建つ全 `.mo` が INSTROOT へ**配られてから**詰め込みが走る)
+2. **詰める一覧は `$(shell find $(INSTROOT)/…/ -name '*.mo')` で拾う**
+   ── `gb_emscripten_fs_image_all_files` は**再帰変数で、recipe の実行時に展開**
+   されるので、1 の前提が済んだ後の実在 file が入る
 
-⚠ 場所は `$(lang)` ではなく **`localestr $(lang)`**(上流と同じ式)。`ja` は `ja` だが、
-`zh-CN` → `zh_CN` のように化ける言語が在るので、上流の式をそのまま使う。
+🔴 **`$(wildcard)` を使ってはいけない**(レビューが GNU Make 4.3 で実測)── make は
+**最初にその dir を読んだ時点の内容をキャッシュ**するので、上流の誰かが同じ dir を
+解析時に一度でも読むと、recipe 時の wildcard は**自分が作った file を見ない**
+(= 翻訳 0 件を黙って出荷)。`$(shell find)` はキャッシュを通らない。
 
-⚠ **空になったら止める。** この 2 つの変数が未定義のまま展開されると、`+=` は
-**何も足さずに成功する** ── 「無言で空になる」という #135 と同じ壊れ方をするので、
-make 側に `$(error …)` を置く。
+⚠ find は「在るものを拾う」ので **0 件でも黙って通る** ── その口は
+workflow 側の後条件(`soffice.data.js.metadata` の `.mo` を数えて `-gt 0`)が塞ぐ。
+
+⚠ 言語の**登録**(`Langpack-$(lang).xcd` ほか registry 3 種)は逆に**名指しの前提の
+まま**にする ── `postprocess/Package_registry.mk` が `gb_Configuration_LANGS` の全言語分を
+**無条件に**作るので規則は必ず在り、名指しなら**欠けたとき大声で落ちる**(wildcard に
+すると欠けても黙る)。⚠ **`.mo` と registry で向きが逆**なのは、規則の在り方が違うから。
+
+⚠ **空になったら止める。** 言語の変数が空のまま展開されると `+=` は**何も足さずに
+成功する**(#135 と同じ「無言で空」)ので、make 側に `$(error …)` を置く。
 
 ⚠ `cjk_ja.xcd` は**入れない**。一式は既に全言語版の `cjk.xcd` を持っている
 (`registry/cjk.xcd`)ので、ja 固有版は要らない ── ⚠ ただし configmgr の読み込み経路
 までは追っていない。日本語で入力できるのに変換周りが変なら、ここを疑う。
 
-⚠ **`qtz` を外す。** これは翻訳 QA 用の**疑似ロケール**である。この構成では
-`gb_WITH_LANG`(= `WITH_LANG`)に入らない ── qtz が足されるのは `WITH_LANG_LIST` の
-ほうで(`configure.ac:15488`)、`gb_WITH_LANG = $(WITH_LANG)` は別物 ── が、
-`--with-lang=ALL` では入りうる。入れると **LO の UI 言語の一覧に化けた言語が並ぶ**。
-上流の `gb_AllLangMoTarget_LANGS` も同じ理由で `filter-out qtz` している。
+🔴 **`qtz` を外す ── これは現役のガードである**(2026-08-14 のレビューで訂正。
+当初「この構成では入らない」と書いたが**事実と逆**だった)。`langlist.mk:159-161` が
+`WITH_LANG_LIST` に qtz が居れば **`gb_WITH_LANG += qtz`** し、PKC3 は
+`--enable-release-build` を渡していないので `configure.ac:15487-15489` が qtz を足す
+── つまり**この構成の `gb_Configuration_LANGS` は `en-US ja qtz` である**。
+`filter-out qtz` は、いままさに `Langpack-qtz.xcd`(翻訳 QA 用の疑似ロケール)の
+出荷を止めている。消すと **LO の UI 言語の一覧に化けた言語が並ぶ**。
 
 ⚠ **この block は `make` を実際に走らせて展開を確かめてある**(下の「検算」)。
 読むだけでは分からない罠が 2 つ出た ── path の行またぎ、と qtz の混入である。
@@ -128,25 +147,41 @@ ANCHOR_ALL = "\ngb_emscripten_fs_image_all_files = "
 # 🔴 上流が既に言語を入れたら止める(二重に入れない / 直ったことに気づく)
 UPSTREAM_ALREADY = "LC_MESSAGES"
 
-LANG_BLOCK = """# PKC3: 日本語 UI を配る(#158)── 上流の一覧は en-US を名指しで焼いており、
-# program/resource/**(.mo)を 1 行も入れていない。configure にレバーは無い
+LANG_BLOCK = """# PKC3: 日本語 UI の「言語の登録」を配る(#158)── 上流の一覧は en-US を名指しで
+# 焼いており、他言語の registry を 1 行も入れていない。configure にレバーは無い
 # (ENABLE_WASM_STRIP_LOCALES は死に変数 / --disable-wasm-strip は Emscripten で無効)。
-# 🔴 file 名を直書きしない ── wasm で落ちるモジュールの .mo を要求すると
-#    `no rule to make target` でビルド全体が止まる。登録済み × 頼んだ言語から生成する。
+# ⚠ registry は**名指しの前提のまま**にする ── Package_registry.mk が
+#    gb_Configuration_LANGS の全言語分を無条件に作るので規則は必ず在り、
+#    名指しなら欠けたとき大声で落ちる(.mo とは規則の在り方が違う ── そちらは下の
+#    AllResources + wildcard の側)。
 # ⚠ 空のまま素通りさせない ── `+=` は何も足さずに成功するので、#135 と同じ
 #    「無言で空になる」壊れ方をする。
-ifeq ($(strip $(gb_AllLangMoTarget_LANGS)),)
-$(error PKC3/#158: gb_AllLangMoTarget_LANGS が空 ── --with-lang に en-US 以外が渡っていない)
-endif
-ifeq ($(strip $(gb_AllLangMoTarget_REGISTERED)),)
-$(error PKC3/#158: gb_AllLangMoTarget_REGISTERED が空 ── Repository.mk より前に展開された)
+ifeq ($(strip $(filter-out qtz en-US,$(gb_Configuration_LANGS))),)
+$(error PKC3/#158: 配る言語が無い ── --with-lang に en-US 以外が渡っていない)
 endif
 # ⚠ **path を行またぎで書かない** ── make は `\\` + 改行を**空白 1 個**にするので、
-#    path の途中で折ると `…/program/resource/ ja/LC_MESSAGES/…` に化ける(実際に踏んだ)。
+#    path の途中で折ると `…/registry/ Langpack-…` に化ける(実際に踏んだ)。
 #    折ってよいのは**要素と要素の間**だけ。だから 1 行が長い。
 gb_emscripten_fs_image_files += \\
-    $(foreach lang,$(gb_AllLangMoTarget_LANGS),$(foreach mo,$(gb_AllLangMoTarget_REGISTERED),$(INSTROOT)/$(LIBO_SHARE_RESOURCE_FOLDER)/$(shell $(SRCDIR)/solenv/bin/localestr $(lang))/LC_MESSAGES/$(mo).mo)) \\
     $(foreach lang,$(filter-out qtz,$(filter-out en-US,$(gb_Configuration_LANGS))),$(INSTROOT)/$(LIBO_SHARE_FOLDER)/registry/Langpack-$(lang).xcd $(INSTROOT)/$(LIBO_SHARE_FOLDER)/registry/res/fcfg_langpack_$(lang).xcd $(INSTROOT)/$(LIBO_SHARE_FOLDER)/registry/res/registry_$(lang).xcd)
+"""
+
+# .mo の側 ── `gb_emscripten_fs_image_all_files = ` の**後ろ**に入れる
+# (`+=` なので、`=` の定義より前に置くと上書きされて消える)
+MO_BLOCK = """# PKC3: 翻訳(.mo)を配る(#158)── 名簿(REGISTERED)から予言しない。
+# 「この構成で建つ .mo」は構成条件で変わる(cnr / dba / rpt / frm は DBCONNECTIVITY
+# 落ちで建たない ── Module_connectivity.mk:17)。上流が実体化した mo だけを
+# AllResources に登録する(AllLangMoTarget.mk:91)ので、**建てさせてから、INSTROOT に
+# 届いた物を拾う**:
+#   前提 = AllResources(全 .mo が配られてから詰め込みが走る)
+#   中身 = shell find(all_files は再帰変数 ── recipe 実行時に展開される)
+# 🔴 wildcard を使ってはいけない ── make は**最初にその dir を読んだ時点の内容を
+#    キャッシュ**するので、同じ run の中で自分が作った file が見えないことがある
+#    (レビューが GNU Make 4.3 で実際に再現した)。`$(shell find …)` はキャッシュを
+#    通らない。⚠ find も 0 件で黙って通る ── その口は workflow の後条件
+#    (metadata の .mo を数える)が塞ぐ。
+$(emscripten_fs_image_WORKDIR)/soffice.data.filelist: $(call gb_Postprocess_get_target,AllResources)
+gb_emscripten_fs_image_all_files += $(shell find $(INSTROOT)/$(LIBO_SHARE_RESOURCE_FOLDER) -name '*.mo' 2>/dev/null | LC_ALL=C sort)
 """
 
 
@@ -195,10 +230,17 @@ def main() -> int:
             )
             return 1
 
-    # ⚠ 上流が言語を入れ始めたら止める(#158 の patch が要らなくなった合図)
-    if UPSTREAM_ALREADY in text:
+    # ⚠ 上流が言語を入れ始めたら止める(#158 の patch が要らなくなった合図)。
+    # 🔴 **コメント行を外してから探す** ── file 全体で問うと、上流が
+    #    `# TODO: add LC_MESSAGES here` のような散文を 1 行足しただけで
+    #    焼くたびに落ちる(CLAUDE.md §1「範囲が広すぎて散文に満たされる」の同型。
+    #    レビュー指摘 G)。見るのは**実行される行**である。
+    code_only = "\n".join(
+        l for l in text.splitlines() if not l.lstrip().startswith("#")
+    )
+    if UPSTREAM_ALREADY in code_only:
         print(
-            f"ERROR: 上流が既に翻訳を入れている({UPSTREAM_ALREADY} が在る)\n"
+            f"ERROR: 上流が既に翻訳を入れている({UPSTREAM_ALREADY} が実行行に在る)\n"
             "  → #158 の分は要らなくなった可能性がある。確かめてから外すこと",
             file=sys.stderr,
         )
@@ -213,6 +255,10 @@ def main() -> int:
         "\n" + _block(CALC_FILES, "Calc が読むのに入っていなかった(#135)") + ANCHOR_CALC,
     )
     text = text.replace(ANCHOR_ALL, "\n" + LANG_BLOCK + ANCHOR_ALL)
+    # .mo のブロックは all_files の**定義行の直後**へ(`+=` なので前に置くと上書きで消える)
+    all_line_start = text.index(ANCHOR_ALL) + 1
+    all_line_end = text.index("\n", all_line_start)
+    text = text[: all_line_end + 1] + "\n" + MO_BLOCK + text[all_line_end + 1 :]
 
     # 🔴 後条件 ── 「入った」だけでなく「**正しいブロックの中に**入った」を見る。
     #    ⚠ 一覧の外へ落ちると、make は通るのに file は詰まらない(無言で元の症状に戻る)
@@ -233,13 +279,35 @@ def main() -> int:
                 print(f"ERROR: {f} が {who} のブロックの外に在る", file=sys.stderr)
                 return 1
 
-    # 🔴 言語のブロックの後条件 ── 「入った」だけでなく「**一覧が閉じる前に**入った」を見る。
-    #    ⚠ `gb_emscripten_fs_image_all_files` より後ろに落ちると、make は通るのに
-    #    file は詰まらない(#135 と同じ「無言で空」)。
-    at_lang = text.index("$(gb_AllLangMoTarget_REGISTERED),$(INSTROOT)")
+    # 🔴 言語のブロックの後条件 ── 「入った」だけでなく「**正しい側に**入った」を見る。
+    #    ⚠ registry(前提の側)は all_files の**前**、.mo(`+=` の側)は all_files の
+    #    **後ろ**でなければならない ── 逆だと make は通るのに file は詰まらない
+    #    (#135 と同じ「無言で空」)。
+    at_lang = text.index("registry/Langpack-$(lang).xcd")
     at_all = text.index("\ngb_emscripten_fs_image_all_files = ")
+    at_mo_dep = text.index(": $(call gb_Postprocess_get_target,AllResources)")
+    at_mo_add = text.index("gb_emscripten_fs_image_all_files += $(shell find ")
     if not at_lang < at_all:
-        print("ERROR: 言語のブロックが一覧の外(all_files より後ろ)に在る", file=sys.stderr)
+        print("ERROR: registry のブロックが一覧の外(all_files より後ろ)に在る", file=sys.stderr)
+        return 1
+    if not (at_all < at_mo_dep and at_all < at_mo_add):
+        print("ERROR: .mo のブロックが all_files の定義より前に在る(上書きで消える)", file=sys.stderr)
+        return 1
+    # ⚠ `=` の定義が 1 つだけで、`+=` がその後に居ること(定義の 2 重化を検出)
+    if text.count("\ngb_emscripten_fs_image_all_files = ") != 1:
+        print("ERROR: all_files の定義が 1 件でない", file=sys.stderr)
+        return 1
+    # 🔴 MO_BLOCK の前提行は `$(emscripten_fs_image_WORKDIR)` を**その場で**展開する。
+    #    定義(`:=`)が挿入点より後ろへ動くと、空に展開されて**別の target**
+    #    (`/soffice.data.filelist`)へ前提を張り、AllResources が走らない ──
+    #    「無言で英語のまま」に戻る(fixture の順序違いで実際に観測した壊れ方)。
+    at_wd = text.index("\nemscripten_fs_image_WORKDIR := ")
+    if not at_wd < at_mo_dep:
+        print(
+            "ERROR: emscripten_fs_image_WORKDIR の定義が MO_BLOCK より後ろに在る"
+            "(前提が空 target に化ける)",
+            file=sys.stderr,
+        )
         return 1
     # ⚠ path を行またぎで折っていないこと ── make は `\` + 改行を**空白 1 個**にするので、
     #    path の途中で折ると `…/program/resource/ ja/LC_MESSAGES/…` に化ける。
