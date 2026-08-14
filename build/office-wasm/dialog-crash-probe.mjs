@@ -216,6 +216,45 @@ const SUITES = {
     { id: 'escape', key: 'Escape', why: '開けたなら閉じてみる', control: false },
   ],
   /**
+   * #117 ── **`Ctrl+W`(文書を閉じる)で窓が半壊する**(2026-08-13、2/2)。
+   *
+   * 症状: Start Center へ戻らず、メニューとツールバーが消えた半壊の Writer が残り、
+   * 直後に `RuntimeError: null function or function signature mismatch`
+   * (`Scheduler::CallbackTaskScheduling` ← `QtTimer::timeoutActivated`)。
+   *
+   * 🔑 観測点は **fault の発火**である(`noteFault` が `signature mismatch` も
+   * `memory access out of bounds` も拾う ── 素の一式では別の顔で出うる)。
+   * 「Start Center に戻ったか」は screenshot で見る ── `landed`(絵が変わった)を
+   * 「戻った」と読まない(#117 で実際に誤読した)。
+   *
+   * ⚠ この suite の仕事は「**対照群の一式(Impress 無し)でも起きるか**」の判定
+   * (#117 の次の一手)── 起きるなら Impress とは完全に独立。
+   *
+   * 🔴 **`OPEN_DOC` を使ってはいけない**(2026-08-14、初稿で踏んだ)。
+   * 対照群の `type-text` が文書を **dirty** にするので、`Ctrl+W` は閉じずに
+   * **`Save Document?` ダイアログを出す** ── 閉じる動作が 1 度も起きないまま
+   * 「再現せず」になる(screenshot で裏を取った。NOT-APPLIED の別の顔)。
+   * issue の手順どおり **Start Center からクリックで開き、打鍵せず clean のまま閉じる**。
+   * キーの届きは screenshot の変化で見える ── `Ctrl+W` が届かなければ絵が
+   * 変わらず `landed: false` になるので、黙って「落ちない」にはならない。
+   */
+  closedoc: [
+    {
+      id: 'new-writer',
+      at: [133, 341],
+      why: '⚠ 対照群 ── Start Center の Writer Document(押せている証拠。#117 の手順どおり)',
+      control: true,
+      wait: 12_000,
+    },
+    {
+      id: 'close-doc',
+      key: 'Control+w',
+      why: '🔴 文書を閉じる(clean のまま)── 半壊 + signature mismatch(#117、直す前 2/2)',
+      control: false,
+      wait: 20_000,
+    },
+  ],
+  /**
    * #145 ── Start Center から **Impress** を開く。
    *
    * ⚠ `OPEN_DOC` を**使わない**唯一の suite である ── 見たいのは
