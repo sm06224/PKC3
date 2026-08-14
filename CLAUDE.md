@@ -567,6 +567,13 @@ P4 assets → P5 revisions → P6 import/export → P7 v3.0.0(Pages product + PW
 | `.claude/agents/pkc3-implementer.md` | 実装を 1 主題ずつ分担する | 🔴 **worktree** |
 | `.claude/agents/pkc3-verifier.md` | 変異試験を回す | 🔴 **worktree** |
 
+⚠ **`isolation: "worktree"` が起動できない箱がある**(2026-08-14 実測
+`no WorktreeCreate hooks are configured`)。🔴 **そのとき書けるエージェントを隔離なしで
+起動しない** ── 「patch だけ返して」と頼むのは退避策ではない(`Write`/`Edit` を持ったまま
+走るので、守っているのは指示だけである)。正しい退避は **read-only の型に下書きさせ、
+依頼者が当てる**こと。🔑 **規律を守るのは tools の一覧であって、プロンプトの文言ではない。**
+手順は `.claude/skills/subagent-scale/SKILL.md` §1
+
 | スキル(手順) | 中身 |
 |---|---|
 | `subagent-scale/` | **大量に投げて突き合わせる**(上の方針の実体)/ 隔離 / 検算 |

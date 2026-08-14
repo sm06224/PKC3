@@ -26,6 +26,17 @@ description: PKC3 の PR を作ってから CI green 確認 → 自己監査 →
 
 ## 2. 着地前のチェック(この順で)
 
+**先に**(⚠ どれも**作業ツリーを触る**ので、下の一式より前に済ませる):
+- **変異試験**(`.claude/skills/mutation-testing/`)── 生き延びたものが無いこと
+- **code review**(`.claude/commands/review.md`)── **修正したら 2 巡目**を回す
+- **視覚を持つ変更**なら smoke 最低 1 件(`.claude/skills/smoke-testing/`)
+
+🔴 **順序が逆だと嘘の緑を見る。** 2026-08-10 に、変異試験のスイープの最後で
+バックアップが書き戻されて**直したはずの実装が巻き戻り**、そのまま commit して CI が
+赤くなった ── 手元では**スイープの前**に緑を見ていたので「通ったのに落ちた」に見える。
+
+**そのあとに**:
+
 ```bash
 npm run typecheck && npm run lint && npm test
 VITE_PKC_KIND=dev npm run build && node scripts/check-dist.mjs dev
@@ -35,10 +46,16 @@ PKC3_CHROMIUM=/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headles
   npm run test:smoke
 ```
 
-さらに:
-- **変異試験**(`.claude/skills/mutation-testing/`)── 生き延びたものが無いこと
-- **code review**(`.claude/commands/review.md`)── **修正したら 2 巡目**を回す
-- **視覚を持つ変更**なら smoke 最低 1 件(`.claude/skills/smoke-testing/`)
+🔴 **画面に出た赤を消してから commit する**(2026-08-14)。eslint の赤を**見たまま**
+commit して CI を赤くした。⚠ **2 件のうち 1 件は様式ではなく実害**だった ── 窓の題名を
+採る式が template literal の中に在るので `\s` が**リテラルに食われて `s` になり**、
+「文字 s の連続」を置換する正規表現になっていた。⚠ たまたま該当が無く**出力が変わらない**
+ので、**赤を消さなければ永久に露見しない**形だった。
+🔑 **ツールの赤は「様式の小言」ではない。1 件ずつ中身を読んでから消す。**
+🔑 1 件直したら**その command をもう一度回す**(1 件目の陰に 2 件目が居る)。
+
+⚠ `npm run lint` の範囲は **`src tests build scripts`** ── `build/` の赤を
+「CI に関係ない」と切り捨てない(CLAUDE.md の記述が `src tests` のままで、実際に踏んだ)。
 
 ## 3. PR 本文に書くこと
 
