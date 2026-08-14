@@ -92,7 +92,8 @@ function editing(body: string): AppState {
 
 /** ⚠ flag は URL から解決される(`live-editor.test.ts` と同じ差し方)。 */
 function setLive(on: boolean): void {
-  history.replaceState(null, '', on ? '/?pkc-flag=editor.live' : '/');
+  // 2026-08-14: flag は設定 `pkc3.editor-mode` へ昇格(#104 第 2 弾。既定 live)
+  localStorage.setItem('pkc3.editor-mode', on ? 'live' : 'split');
 }
 
 let root: HTMLElement;
@@ -103,7 +104,7 @@ beforeEach(() => {
   //    早期 return する(外れた器へ描かない規律)ので、繋がないと何も出ない
   document.body.append(root);
 });
-afterEach(() => setLive(false));
+afterEach(() => localStorage.removeItem('pkc3.editor-mode'));
 
 async function settle(): Promise<void> {
   await new Promise((r) => setTimeout(r, 0));

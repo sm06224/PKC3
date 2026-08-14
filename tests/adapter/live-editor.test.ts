@@ -7,7 +7,7 @@
  *
  * ① **既定は今日の 2 列**(user 裁定 = 設計 §9 論点 C:塊を跨ぐ Ctrl+Z が
  *    入るまで既定にしない)── 既定が入れ替わると全 user に影響する
- * ② `?pkc-flag=editor.live` で**1 面**になる(2 列の原文欄は出ない)
+ * ② 設定 `pkc3.editor-mode` = 'split' で 2 列に戻る(2 ペインは廃止しない)
  * ③ 🔴 **確定した本文が外へ出る**(`onBodyChange`)── ここが落ちると
  *    **画面は変わるのに保存されない**(いちばん静かな壊れ方)
  * ④ **分割が組めない本文では原文の編集欄へ退避**する ── 壊れた分割の上で
@@ -44,15 +44,14 @@ function editing(body: string): AppState {
 }
 
 /**
- * ⚠ `location.search` は `history.replaceState` で変える ── グローバルを
- * 丸ごと差し替えない(CLAUDE.md「必要な静的メソッドだけ」)。
+ * ⚠ 2026-08-14: flag `editor.live` は設定 `pkc3.editor-mode` へ昇格した
+ *   (#104 第 2 弾。既定 live)。getMode() は読むたびに保存を見るので、
+ *   localStorage を書けば即効く(URL はもう読まない)。
  */
 function setLive(on: boolean): void {
-  // ⚠ 2026-08-07: `?pkc-live=1` は flag へ昇格した(user 指示「クエリパラメータを
-  //    抜け穴にしてはいけない」)── 綴りは `?pkc-flag=editor.live` になった
-  history.replaceState(null, '', on ? '/?pkc-flag=editor.live' : '/');
+  localStorage.setItem('pkc3.editor-mode', on ? 'live' : 'split');
 }
-afterEach(() => setLive(false));
+afterEach(() => localStorage.removeItem('pkc3.editor-mode'));
 
 /** worker の無い環境の同期経路(= happy-dom)でも `follower` は microtask で返る。 */
 async function settle(): Promise<void> {
@@ -84,17 +83,14 @@ function rig(body: string): Rig {
 const DOC = ['# 題', '', '最初の段落。', '', '次の段落。'].join('\n');
 
 describe('ライブエディタ(1 面)の配線', () => {
-  it('① 既定は今日の 2 列(原文 | プレビュー)── 勝手に入れ替わっていない', async () => {
-    setLive(false);
-    const r = rig(DOC);
-    await settle();
-    expect(r.root.querySelector('[data-pkc-region="editor-split"]')).not.toBeNull();
-    expect(r.root.querySelector('[data-pkc-region="editor-live"]')).toBeNull();
-    expect(r.root.querySelector('[data-pkc-field="editor-body"]')).not.toBeNull();
-  });
-
-  it('② `?pkc-flag=editor.live` で 1 面になり、2 列の原文欄は出ない', async () => {
-    setLive(true);
+  /**
+   * ① 🔴 **既定は 1 面(ライブ)**(user 裁定 2026-08-08「既定でON」/
+   * #104 第 2 弾)。⚠ setLive を**呼ばずに**確かめる ── 設定が無い環境
+   * そのもの(flag `editor.live` を保存していた旧環境も、残骸が黙殺されて
+   * ここへ落ちる = 挙動は同値)。既定が入れ替わると全 user に影響する。
+   */
+  it('① 既定は 1 面(ライブ)── 設定なしで live が開く', async () => {
+    localStorage.removeItem('pkc3.editor-mode');
     const r = rig(DOC);
     await settle();
     expect(r.root.querySelector('[data-pkc-region="editor-live"]')).not.toBeNull();
@@ -103,6 +99,19 @@ describe('ライブエディタ(1 面)の配線', () => {
     // 画面は**描画済み文書**(原文がそのまま出ているのではない)
     const live = r.root.querySelector('[data-pkc-region="editor-live"]')!;
     expect(live.querySelector('h1')?.textContent).toContain('題');
+  });
+
+  /**
+   * ② 🔴 **設定 'split' で今日の 2 列に戻る**(裁定の後半「設定で2ペイン編集は
+   * できるようにする」── 2 ペインは廃止されていない)。
+   */
+  it('② 設定 split で 2 列(原文 | プレビュー)に戻る', async () => {
+    setLive(false);
+    const r = rig(DOC);
+    await settle();
+    expect(r.root.querySelector('[data-pkc-region="editor-split"]')).not.toBeNull();
+    expect(r.root.querySelector('[data-pkc-region="editor-live"]')).toBeNull();
+    expect(r.root.querySelector('[data-pkc-field="editor-body"]')).not.toBeNull();
   });
 
   it('③ 🔴 行を書き換えて確定すると、継ぎ足した本文が外へ出る', async () => {

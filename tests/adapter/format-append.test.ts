@@ -13,7 +13,7 @@
  * 届いていない」実装が緑で通り、**保存すると書式が消える**。
  */
 import { stubStamps } from '../helpers/store-stamps';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -82,6 +82,12 @@ function press(
 }
 
 describe('書式パネル(P8 段⑥)', () => {
+  // 2026-08-14(#104 第 2 弾): 既定は live ── この describe は split の面
+  // (editor-body)で測るので、設定で split を明示する
+  beforeEach(() => {
+    localStorage.setItem('pkc3.editor-mode', 'split');
+  });
+
   it('🔴 押すと本文・state・プレビューが**そろって**変わる', async () => {
     const { d, q } = setup([meta('a')], { a: '強調したい' });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
@@ -174,7 +180,8 @@ describe('書式パネル(P8 段⑥)', () => {
  */
 describe('書式パネル ── live の 1 面(2026-08-08)', () => {
   const setLive = (on: boolean): void => {
-    history.replaceState(null, '', on ? '/?pkc-flag=editor.live' : '/');
+    // 2026-08-14: flag は設定 `pkc3.editor-mode` へ昇格(#104 第 2 弾。既定 live)
+  localStorage.setItem('pkc3.editor-mode', on ? 'live' : 'split');
   };
   afterEach(() => setLive(false));
 

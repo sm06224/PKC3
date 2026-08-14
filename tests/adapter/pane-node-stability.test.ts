@@ -75,6 +75,9 @@ function afterStampAck(prev: AppState, at: string): AppState {
 
 let region: HTMLElement;
 beforeEach(() => {
+  // 2026-08-14(#104 第 2 弾): 既定は live ── この file は split の機構
+  // (全文 textarea)を測るので、設定で split を明示する
+  localStorage.setItem('pkc3.editor-mode', 'split');
   document.body.textContent = '';
   region = document.createElement('div');
   document.body.append(region);

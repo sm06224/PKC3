@@ -124,7 +124,8 @@ function state(body: string, over: Partial<EntryMeta> = {}): AppState {
 const editing = (body: string): AppState => reduce(state(body), { type: 'START_EDIT' }).state;
 const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 const setLive = (on: boolean): void => {
-  history.replaceState(null, '', on ? '/?pkc-flag=editor.live' : '/');
+  // 2026-08-14: flag は設定 `pkc3.editor-mode` へ昇格(#104 第 2 弾。既定 live)
+  localStorage.setItem('pkc3.editor-mode', on ? 'live' : 'split');
 };
 
 /** その面に出た段落が、読み幅の規則に**実際に当たる**か。 */

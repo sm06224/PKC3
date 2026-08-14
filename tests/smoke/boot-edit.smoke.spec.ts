@@ -3,7 +3,14 @@
  * happy-dom の e2e が保証しない層(実座標のクリック・可視高さ・pageerror 0)を検品。
  */
 import { test, expect } from '@playwright/test';
-import { gotoApp, collectPageErrors, clickReal, createEntry } from './helpers';
+import { gotoApp, collectPageErrors, clickReal, createEntry, useSplitEditor } from './helpers';
+
+// 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
+// (editor-body)を入力の道具に使うので、設定で split を明示する。
+// 既定(live)の顔は live-editor.smoke.spec.ts が守る。
+test.beforeEach(async ({ page }) => {
+  await useSplitEditor(page);
+});
 
 test('boot → ノート作成 → 編集 → 保存が画面に反映される', async ({ page }) => {
   const errors = collectPageErrors(page);

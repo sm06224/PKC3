@@ -3,7 +3,14 @@
  * 「実際に画面に出る」+ Blob 直 put 経路の end-to-end(実 IDB + 実 sqlite meta)。
  */
 import { test, expect } from '@playwright/test';
-import { gotoApp, collectPageErrors, clickReal, expectImageRendered, createEntry } from './helpers';
+import { gotoApp, collectPageErrors, clickReal, expectImageRendered, createEntry, useSplitEditor } from './helpers';
+
+// 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
+// (editor-body)を入力の道具に使うので、設定で split を明示する。
+// 既定(live)の顔は live-editor.smoke.spec.ts が守る。
+test.beforeEach(async ({ page }) => {
+  await useSplitEditor(page);
+});
 
 // 1x1 PNG(67 bytes)
 const PNG_1X1 = Buffer.from(

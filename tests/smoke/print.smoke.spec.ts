@@ -25,7 +25,14 @@
 import { test, expect } from '@playwright/test';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { gotoApp, clickReal, createEntry } from './helpers';
+import { gotoApp, clickReal, createEntry, useSplitEditor } from './helpers';
+
+// 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
+// (editor-body)を入力の道具に使うので、設定で split を明示する。
+// 既定(live)の顔は live-editor.smoke.spec.ts が守る。
+test.beforeEach(async ({ page }) => {
+  await useSplitEditor(page);
+});
 
 /** A4 縦(96dpi 換算)。⚠ 罠② の狭幅上書きがここで発火する。 */
 const A4 = { width: 794, height: 1123 };

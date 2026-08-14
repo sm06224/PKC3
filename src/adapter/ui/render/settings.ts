@@ -14,6 +14,8 @@ import type { AppState } from '@adapter/state/app-state';
 import { THEMES } from './theme';
 import { PAGE_FORMATS } from '@features/page-format';
 import { currentPageFormat } from './page-format';
+import { EDITOR_MODES } from '@features/editor-mode';
+import { appEditorMode, EditorModeStore } from './editor-mode';
 import { EXTERNAL_IMAGE_MODES } from '@features/markdown/external-images';
 import { appExternalImages, ExternalImagePolicy } from './external-images';
 import { appJobMonitor, type JobMonitor } from '@adapter/platform/job-monitor';
@@ -51,6 +53,8 @@ export class SettingsRenderer {
      * `tests/adapter/announce.test.ts` がこの往復を守る。
      */
     private readonly notices: NoticeStore = appNoticeStore,
+    /** 編集の仕方(#104 第 2 弾)。⚠ test は自分で `new` して渡す。 */
+    private readonly editorMode: EditorModeStore = appEditorMode,
   ) {}
 
   render(state: AppState): void {
@@ -58,6 +62,7 @@ export class SettingsRenderer {
       // 配色は user 操作でしか変わらない ── 毎 state で組み直さない
       this.syncTheme();
       this.syncPageFormat();
+      this.syncEditorMode();
       this.syncExternalImages();
       this.syncNotices();
       // 🔴 **隠れている間に来た変化をここで拾う**(2026-08-05、user 報告)。
@@ -153,6 +158,36 @@ export class SettingsRenderer {
     dl.append(pt, pd);
 
     /**
+     * ✏️ **編集の仕方**(#104 第 2 弾。user 裁定 2026-08-08「既定でONかつ
+     * 設定で2ペイン編集はできるようにする」)。
+     * ⚠ **flag ではない**(正規設定)── flag `editor.live` はここへ昇格して退役した。
+     * ⚠ ここ「表示」に置く ── 見た目と書き方の好みで、外へ何が伝わるかの判断ではない。
+     */
+    const et = document.createElement('dt');
+    et.textContent = '編集の仕方';
+    const ed = document.createElement('dd');
+    const eselect = document.createElement('select');
+    eselect.setAttribute('data-pkc-action', 'set-editor-mode');
+    eselect.setAttribute('data-pkc-field', 'editor-mode-select');
+    eselect.setAttribute('aria-label', '編集の仕方');
+    for (const m of EDITOR_MODES) {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = m.label;
+      eselect.append(opt);
+    }
+    ed.append(eselect);
+    const enote = document.createElement('p');
+    enote.setAttribute('data-pkc-field', 'settings-note');
+    // ⚠ **いつ効くか**を書く ── 書かないと「押したのに変わらない」に見える
+    enote.textContent =
+      '押した行だけが原文になる 1 面の編集(ライブ)が最初の設定です。' +
+      '2 ペインは左に原文、右にプレビューが並びます。' +
+      '切り替えは、次に編集を開いたときから効きます。';
+    ed.append(enote);
+    dl.append(et, ed);
+
+    /**
      * 📣 **お知らせを出すか**(P11 段⑤)。
      *
      * 🔑 **ここが「今後は出さない」の戻し道である。** 帯にしか導線が無いと、
@@ -199,6 +234,7 @@ export class SettingsRenderer {
     this.region.append(body);
     this.syncTheme();
     this.syncPageFormat();
+    this.syncEditorMode();
     this.syncExternalImages();
     this.syncNotices();
     this.refresh();
@@ -412,6 +448,18 @@ export class SettingsRenderer {
       '[data-pkc-field="external-images-select"]',
     );
     const cur = this.externalImages.getMode();
+    if (select && select.value !== cur) select.value = cur;
+  }
+
+  /**
+   * ⚠ 画面の値を**いまの編集の仕方に合わせる**(器は 1 度しか組まない ──
+   * 映さないと古い値が見える。CLAUDE.md §7「設定画面の値の同期」)。
+   */
+  private syncEditorMode(): void {
+    const select = this.region.querySelector<HTMLSelectElement>(
+      '[data-pkc-field="editor-mode-select"]',
+    );
+    const cur = this.editorMode.getMode();
     if (select && select.value !== cur) select.value = cur;
   }
 

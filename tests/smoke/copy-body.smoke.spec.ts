@@ -1,5 +1,12 @@
 import { test, expect, type Page } from '@playwright/test';
-import { clickReal, createEntry, collectPageErrors, gotoApp } from './helpers';
+import { clickReal, createEntry, collectPageErrors, gotoApp, useSplitEditor } from './helpers';
+
+// 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
+// (editor-body)を入力の道具に使うので、設定で split を明示する。
+// 既定(live)の顔は live-editor.smoke.spec.ts が守る。
+test.beforeEach(async ({ page }) => {
+  await useSplitEditor(page);
+});
 
 /**
  * 🔴 **本文のコピー 3 系統**(2026-08-08。user 裁定「マークダウンのテキストとしての

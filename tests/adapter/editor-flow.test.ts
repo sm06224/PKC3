@@ -4,7 +4,7 @@
  * state mutation → consumer 観測点(DOM / 副作用)まで通す(PKC2 Testing 規約)。
  */
 import { stubStamps } from '../helpers/store-stamps';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -62,6 +62,12 @@ function setup(bodies: Record<string, string>) {
   const q = <T extends HTMLElement>(sel: string) => root.querySelector<T>(sel);
   return { root, d, persisted, q };
 }
+
+// 2026-08-14(#104 第 2 弾): 既定は live ── この file は split の機構
+// (全文 textarea)を測るので、設定で split を明示する
+beforeEach(() => {
+  localStorage.setItem('pkc3.editor-mode', 'split');
+});
 
 describe('editor flow (P3-5)', () => {
   it('編集 → 入力 → 保存: DOM と store まで一貫する', async () => {

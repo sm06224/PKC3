@@ -45,8 +45,7 @@ import { isAppMime } from '@features/launcher/tiles';
 import { buildOfficeEntry } from './office-entry-view';
 import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
 import type { AppState, AppPhase } from '@adapter/state/app-state';
-import { appFlags } from '@adapter/platform/flag-store';
-import { FLAG_LIVE_EDITOR } from '@features/flags';
+import { appEditorMode } from './editor-mode';
 
 /** 添付表示のための asset 面(main が AssetBlobStore を cid 束縛で注入)。 */
 export interface AssetLender {
@@ -62,16 +61,14 @@ type BarShape = 'edit' | 'retry' | 'none';
 /**
  * 🔴 **ライブエディタの口**。1 面に畳む(2026-08-05)。
  *
- * ⚠ **2026-08-07 に flag へ昇格した**(user 指示。不可侵)。かつてここは
- * 「URL だけ・保存しない・一覧に出さない」で、理由を「計測用の逃がし口を正規 flag に
- * すると上限 15 と宣言義務を計測器が食う」としていた ── **それが抜け穴だった**。
- * user 指示「**URL クエリパラメータ切り替えはフラグ扱いである / クエリパラメータを
- * 抜け穴にしてはいけない**」により、いまは `editor.live` として宣言され、
- * 予算に数えられ、フラグ画面に出る。
- * ⚠ 既定 OFF(設計 §9 論点 C ── 塊を跨ぐ Ctrl+Z が入るまで既定にしない)。
+ * 来歴: `?pkc-live=1`(URL のみ)→ flag `editor.live`(2026-08-07、
+ * 「クエリパラメータを抜け穴にしてはいけない」)→ **正規設定 `pkc3.editor-mode`**
+ * (2026-08-14。user 裁定 2026-08-08「既定でONかつ設定で2ペイン編集は
+ * できるようにする」── #104 第 2 弾)。🔴 **既定は live**。2 ペインは設定から選ぶ。
+ * ⚠ 切替が効くのは**次に編集を開いたとき**(編集の面は入りで 1 度だけ組む)。
  */
 export function liveEditorEnabled(): boolean {
-  return appFlags.isOn(FLAG_LIVE_EDITOR.name);
+  return appEditorMode.getMode() === 'live';
 }
 
 /**
@@ -768,13 +765,11 @@ export class DetailRenderer {
      * 🔴 **ライブエディタ(行の入れ替え)**(2026-08-05。ライブエディタ S5。
      * 設計 doc `live-editor-design-2026-08.md`)。
      *
-     * 既定は今日の 2 列(原文 | プレビュー)。flag `editor.live` で**1 面**に畳む
-     * ── 画面は常に描画済み文書で、クリックした行だけが原文の入力欄になる。
-     * ⚠ 既定 OFF は user 裁定(設計 §9 論点 C ── 塊を跨ぐ Ctrl+Z が入るまで開けない)。
-     * 🔴 **flag である**(2026-08-07 に `?pkc-live=1` から昇格。user 指示
-     *   「URL クエリパラメータ切り替えはフラグ扱いである / クエリパラメータを
-     *   抜け穴にしてはいけない」)── 15 枠に数え、`foldWhen` を宣言し、
-     *   フラグ画面に出る。⚠ 「計測用だから枠を食わない」は禁じ手である。
+     * 🔴 **既定は 1 面(ライブ)**(#104 第 2 弾。user 裁定 2026-08-08
+     * 「既定でONかつ設定で2ペイン編集はできるようにする」)── 画面は常に
+     * 描画済み文書で、クリックした行だけが原文の入力欄になる。
+     * 2 列(原文 | プレビュー)は設定 `pkc3.editor-mode` = 'split' で選ぶ。
+     * ⚠ flag `editor.live` は設定へ昇格して退役(枠を 1 返した)。
      */
     /**
      * プレビューに渡す既定(2026-08-06)。

@@ -124,9 +124,14 @@ describe('追記(P8 段⑧)', () => {
     q('[data-pkc-action="append-entry"]')!.click();
     await tick();
 
-    // ① 🔴 **編集に入っていない**(ここが段⑥ との違いの本体)
+    // ① 🔴 **編集に入っていない**(ここが段⑥ との違いの本体)。
+    //    ⚠ 面に依らない形で見る(2026-08-14、#104 第 2 弾)── editor-body だけを
+    //    見ると、既定が live の今は編集に入っても null で**空振りのまま緑**になる
     expect(d.getState().phase).toBe('ready');
-    expect(q('[data-pkc-field="editor-body"]'), '編集画面が開いてしまっている').toBeNull();
+    expect(
+      q('[data-pkc-region="editor-split"], [data-pkc-region="editor-live"]'),
+      '編集画面が開いてしまっている',
+    ).toBeNull();
     // ② disk に着いた
     expect(persisted).toHaveLength(1);
     expect(persisted[0]!.body).toMatch(

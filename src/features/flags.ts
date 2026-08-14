@@ -158,13 +158,8 @@ export const FLAG_ASSET_INLINE = defineFlag('asset.inline', {
   needsRestart: true,
 });
 
-/**
- * ライブエディタ(原文とプレビューを 1 面に畳む)。
- * ⚠ 既定 OFF ── 塊を跨ぐ取り消しが揃うまで既定にしない(設計 §9 論点 C)。
- * ⚠ 描画のたびに読まれるので**再起動は要らない**。
- */
-export const FLAG_LIVE_EDITOR = defineFlag('editor.live', {
-  default: false,
-  foldWhen: '塊を跨ぐ取り消しが揃い、既定 ON にできたら',
-  summary: '編集を 1 面に畳む(原文とプレビューを分けない)',
-});
+// 🔴 `editor.live` は 2026-08-14 に**退役**した(user 裁定 2026-08-08
+//    「既定でONかつ設定で2ペイン編集はできるようにする」)。foldWhen
+//    「既定 ON にできたら」が成就し、設定 `pkc3.editor-mode` へ昇格(既定 live)。
+//    保存に残る残骸は `resolveFlags` が捨てる(上の「知らない名前は黙って捨てる」)。
+//    ⚠ flag として再宣言しない ── `tests/features/flags.test.ts` が落とす。
