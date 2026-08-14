@@ -293,6 +293,14 @@ jobs:
           sha=$(git rev-parse HEAD)
           echo "LO_SHA=$sha" >> "$GITHUB_ENV"
           echo "建てる LibreOffice: $ref ($sha)"
+          # 🔴 **翻訳の実体を取る**(#158)。`--with-lang` を渡すと configure は
+          #    `translations/` を要求するが、**`git clone` では付いてこない**
+          #    (LO は translations / dictionaries / helpcontent2 を submodule で持つ)。
+          # ⚠ ここを飛ばすと configure が落ちる ── 実際 1 度落とした。
+          # ⚠ **浅く取る**(全履歴は要らない)。取れなければ**そこで落とす** ──
+          #    黙って英語だけを配らない(#158 の検品と同じ向き)。
+          git submodule update --init --depth 1 translations
+          test -d translations/source/ja
 
       # ⚠ 復元は **clone のあと** ── `git clone` は空でないディレクトリを嫌う
       - name: 外部 tarball を復元
@@ -424,7 +432,11 @@ jobs:
           --with-lang=en-US ja
           CONF
           . ~/emsdk/emsdk_env.sh
-          ./autogen.sh --with-distro=PKC3WASM-Qt6
+          # 🔴 **出力を残す**(2026-08-14)。⚠ `make` には `tee` が在るのに
+          #    configure には無く、**落ちた回のエラーがジョブの末尾から読めなかった**
+          #    ── 「エラー行はジョブの最後に出す」を configure に適用していなかった。
+          #    ⚠ `tee` は早期終了しないので SIGPIPE の罠は無い(`pipefail` は立ててある)。
+          ./autogen.sh --with-distro=PKC3WASM-Qt6 2>&1 | tee /tmp/configure.log
           # 空振り防止 ── 本当に qt6 単独で構成されたか
           grep -q '^export ENABLE_QT6=TRUE' config_host.mk
           grep -q '^export ENABLE_QT5=$' config_host.mk
@@ -684,7 +696,16 @@ jobs:
             echo '(soffice.js 無し)'
           fi
 
-          echo '########## 3. make のエラー ##########'
+          echo '########## 3. configure のエラー ##########'
+          if [ -f /tmp/configure.log ]; then
+            grep -m 10 -nE 'Error|error:|not found|requires' /tmp/configure.log || echo '(該当なし)'
+            echo '--- 末尾 20 行 ---'
+            tail -20 < /tmp/configure.log
+          else
+            echo '(configure.log 無し)'
+          fi
+
+          echo '########## 4. make のエラー ##########'
           if [ -f /tmp/make.log ]; then
             grep -m 20 -nE 'wasm-ld: error|error:|^make.*\*\*\*' /tmp/make.log || echo '(該当なし)'
             grep -oE 'undefined symbol: [A-Za-z0-9_:]+' /tmp/make.log > /tmp/undef.txt || true
