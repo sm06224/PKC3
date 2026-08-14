@@ -2091,6 +2091,12 @@ select:focus-visible {
    * なので、ここが伸びると本体の `1fr` を食う ── 200 件のバックアップを取り込み
    * 直すと注意が 200 行出て、3 列が数十 px まで潰れ、閉じるまで作業できなかった */
   max-height: 30vh;
+  /* 🔴 **お知らせと同じ形にする**(#151。「同じものは同じ場所に在る」)。
+   * ⚠ ここは 200 件の注意が出うる面で、**流れる箱の中に閉じるが在った** ──
+   *   読み下ろすと閉じるが上へ流れて消える(お知らせで実機報告された欠陥の同型)。
+   *   一覧だけを流し、見出しの行は固定する。⚠ `overflow` は逃げ場として残す。 */
+  display: flex;
+  flex-direction: column;
   overflow: auto;
 }
 [data-pkc-field='notices-title'] {
@@ -2098,6 +2104,8 @@ select:focus-visible {
   margin-bottom: var(--s2);
 }
 [data-pkc-region='notices'] ul {
+  /* 🔴 流れるのは一覧だけ(上の注記) */
+  overflow: auto;
   margin: 0;
   padding-left: 1.2em;
 }
@@ -2126,24 +2134,39 @@ select:focus-visible {
    *   高さを切ってよいのは**読むもの**だけで、**畳む手を切ってはいけない**。 */
   display: flex;
   flex-direction: column;
+  /* ⚠ **逃げ場は残す。** 本文を 0 まで縮めても入りきらない高さ(実測 30vh が
+   * 約 96px を切るあたり = viewport 320px 以下)では、これが無いと
+   * **「今後は出さない」が帯の外へこぼれ、画面ごとスクロールする**
+   * (実測 H=260 で画面の外・docScroll 284 > 260)。⚠ 常用では効かない ──
+   * 本文が先に縮むので、面の高さは max-height と釣り合う。 */
+  overflow: auto;
 }
-[data-pkc-field='announce-title'] {
-  font-weight: 600;
-  margin-bottom: var(--s2);
-  /* 見出しと「閉じる」を同じ行に置く ── ここは流れないので常に視界に在る */
+[data-pkc-field='announce-body'] {
+  /* 🔴 **流れるのはここだけ。** ⚠ `min-height: 0` は要らない ──
+   * この宣言(`overflow` が `visible` でない)だけで flex の
+   * automatic minimum size が 0 に解決される。書いたら実測で確かめたところ
+   * **外しても本文は h=0 まで縮んだ**(数値まで一致)ので、
+   * 「守れないものは持たない」に従って消した(`features/launcher/tiles.ts`
+   * の並べ替えで同じ判断をしている)。 */
+  overflow: auto;
+}
+/* 🔴 **見出しの行は 2 面で同じ規則にする**(#151)。
+ * ⚠ 判定を 2 か所に書くと、片方だけ直って「同じものが違う場所に在る」になる ──
+ *   実際 1 稿目は announce だけ `> span { flex: 1 }` で右寄せし、notices は
+ *   題名の直後に閉じるが付いたままだった。
+ * 🔑 `margin-inline-start: auto` は**題が素のテキストでも効く**
+ *   (notices の見出しは text node + button なので、`flex: 1` を当てる箱が無い)。 */
+[data-pkc-field='announce-title'],
+[data-pkc-field='notices-title'] {
   display: flex;
   align-items: center;
   gap: var(--s3);
 }
-/* 題(件数)が伸びて、閉じるが右端に付く */
-[data-pkc-field='announce-title'] > span {
-  flex: 1;
-}
-[data-pkc-field='announce-body'] {
-  overflow: auto;
-  /* 🔴 **flex の子は既定で縮まない**(`min-height: auto`)。これが無いと本文が
-   * 縮まず、面が 30vh を超えて**見出しごと押し出される** = 直した意味が消える。 */
-  min-height: 0;
+/* 閉じるは**右端**。⚠ お知らせの文面とマニュアルが「見出しの右端」と書いている ──
+ * この 1 行がその主張の実体である(smoke が右端に在ることを見る)。 */
+[data-pkc-field='announce-title'] > button,
+[data-pkc-field='notices-title'] > button {
+  margin-inline-start: auto;
 }
 [data-pkc-region='announce'] h3 {
   margin: var(--s3) 0 var(--s1);

@@ -180,5 +180,120 @@ test('🔴 お知らせが溢れていても、閉じるはスクロールせず
   });
   expect(hit.ok, `閉じるがその場で押せない(当たったのは ${hit.why})`).toBe(true);
 
+  /**
+   * ⚠ **「見出しの右端にあります」は user への約束である**
+   * (`notice-log.ts` のお知らせ / `docs/manual.md` §8)。⚠ 右へ寄せているのは
+   * CSS 1 行(`margin-inline-start: auto`)だけなので、消えても上の当たり判定は
+   * 通ってしまう ── **約束のほうを見る**。
+   */
+  const geo = await page.evaluate(() => {
+    const btn = document.querySelector('[data-pkc-action="dismiss-announce"]');
+    const head = document.querySelector('[data-pkc-field="announce-title"]');
+    if (!btn || !head) return null;
+    const body = document.querySelector('[data-pkc-field="announce-body"]');
+    const b = btn.getBoundingClientRect();
+    const h = head.getBoundingClientRect();
+    const bd = body?.getBoundingClientRect();
+    return {
+      btnRight: b.right,
+      headLeft: h.left,
+      headWidth: h.width,
+      headBottom: h.bottom,
+      bodyTop: bd ? bd.top : null,
+    };
+  });
+  expect(geo, '見出しか閉じるが無い').not.toBeNull();
+  expect(
+    geo!.btnRight,
+    '閉じるが見出しの右端に無い(お知らせとマニュアルの「右端」が嘘になる)',
+  ).toBeGreaterThan(geo!.headLeft + geo!.headWidth * 0.7);
+
+  /**
+   * ⚠ **見出しが場所を取っていること**も見る ── `position: absolute` 等で
+   * 流れから外すと、**見出しが本文に重なった**まま右端 assert も当たり判定も通る
+   * (レビュー 2026-08-14 の指摘)。重なっていないことを見れば、その型は死ぬ。
+   */
+  expect(geo!.bodyTop, '流れる本文の箱が無い').not.toBeNull();
+  expect(geo!.headBottom, '見出しが本文に重なっている(流れから外れている)').toBeLessThanOrEqual(
+    geo!.bodyTop! + 1,
+  );
+
+  expect(errors).toEqual([]);
+});
+
+/**
+ * 🔴 **中を送っても、閉じるはそこから動かない**(#151)。
+ *
+ * これは user への約束そのものである ── お知らせ本文と `docs/manual.md` §8 が
+ * 「中の文をどれだけ送っても、そこから動きません」と書いている。
+ *
+ * ⚠ **`overflow: auto` を `hidden` に変えても、上の 2 つの test は通る**
+ * (溢れているかは `scrollHeight > clientHeight` で真のまま、閉じるも見えている)。
+ * その状態は **3 件目以降のお知らせが二度と読めない**という実害である。
+ * 🔑 だから**実際にホイールを回して、送れたこと**を見る。
+ * ⚠ `el.scrollTop = n` の代入では殺せない ── `overflow: hidden` でも代入は通る。
+ */
+test('🔴 お知らせの中を送っても、閉じるはそこから動かない', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await gotoApp(page);
+
+  const band = page.locator('[data-pkc-region="announce"]');
+  await expect(band, '起動時にお知らせが出ていない').toBeVisible({ timeout: 10_000 });
+  const body = page.locator('[data-pkc-field="announce-body"]');
+  const box = await body.boundingBox();
+  expect(box, '流れる本文の箱が無い').not.toBeNull();
+
+  const before = await page.locator('[data-pkc-action="dismiss-announce"]').boundingBox();
+  expect(before, '閉じるが画面に出ていない').not.toBeNull();
+
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await page.mouse.wheel(0, 400);
+  // 🔴 **送れたことを確かめる**(hidden ならここで止まる)
+  await expect
+    .poll(() => body.evaluate((el) => el.scrollTop), {
+      message: 'ホイールで送れない ── 読めないお知らせが残る',
+    })
+    .toBeGreaterThan(0);
+
+  // 🔑 送ったあとも**同じ場所に**在る(= 見出しごと流れていない)
+  const after = await page.locator('[data-pkc-action="dismiss-announce"]').boundingBox();
+  expect(after, '送ったら閉じるが消えた').not.toBeNull();
+  expect(Math.abs(after!.y - before!.y), '送ったら閉じるが動いた').toBeLessThanOrEqual(1);
+
+  expect(errors).toEqual([]);
+});
+
+/**
+ * 🔴 **低い画面でも、帯が版面を押し出さない**(#151 のレビューで判明)。
+ *
+ * 面ごと流すのをやめた副作用として、**本文を 0 まで縮めても入りきらない高さ**
+ * では中身が帯の外へこぼれる。実測(直す前): H=260 で「今後は出さない」が
+ * **画面の外**、`documentElement.scrollHeight` が 284 > 260 ──
+ * **1 画面で完結する**(不可侵の「業務画面」)が崩れていた。
+ * ⚠ 拡大表示で普通に届く高さである(900px の画面を 300% にすると 300px)。
+ */
+test('🔴 低い画面でも、お知らせの帯が画面ごとスクロールさせない', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 260 });
+  await gotoApp(page);
+  await expect(page.locator('[data-pkc-region="announce"]')).toBeVisible({ timeout: 10_000 });
+
+  const m = await page.evaluate(() => {
+    const band = document.querySelector('[data-pkc-region="announce"]');
+    return {
+      doc: document.documentElement.scrollHeight,
+      view: window.innerHeight,
+      // ⚠ 空振り防止 ── 帯の中身が実際に入りきっていないこと(入るなら検査にならない)
+      bandOverflows: band instanceof HTMLElement ? band.scrollHeight > band.clientHeight : false,
+      // 逃げ場が生きていること(こぼすのではなく、中で送れる形になっている)
+      bandScrollable:
+        band instanceof HTMLElement ? getComputedStyle(band).overflowY !== 'visible' : false,
+    };
+  });
+  expect(m.bandOverflows, '帯の中身が入りきっている ── この高さでは検査にならない').toBe(true);
+  expect(m.bandScrollable, '帯に逃げ場が無い(中身がこぼれる)').toBe(true);
+  expect(m.doc, `帯が版面を押し出している(${m.doc} > ${m.view})`).toBeLessThanOrEqual(m.view + 1);
+
   expect(errors).toEqual([]);
 });

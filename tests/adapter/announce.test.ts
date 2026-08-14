@@ -175,6 +175,12 @@ describe('お知らせの帯', () => {
     expect(body, '流れる本文の箱が無い').not.toBeNull();
     expect(head.contains(close), '閉じるが見出しの行に無い').toBe(true);
     expect(body.contains(close), '閉じるが流れる箱の中に在る(見切れる)').toBe(false);
+    // 🔑 **順も pin する** ── 見出しを本文の後ろへ回すと、包含関係は保ったまま
+    //    「見出し」が本文の下に出る(マニュアルの「見出しに在るので」が嘘になる)
+    expect(
+      head.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING,
+      '見出しが本文より後ろに在る',
+    ).toBeTruthy();
   });
 
   /** ⚠ 件数を出す(「何件あるか」に気づく手掛かり)。 */
@@ -367,6 +373,57 @@ describe('🔴 帯の置き場', () => {
         expect(rows, `${name} の行が 1 つではない版面がある`).toHaveLength(1);
       }
     }
+  });
+
+  /**
+   * 🔴 **お知らせと注意は同じ形**(#151。「同じものは同じ場所に在る」)。
+   *
+   * どちらも `max-height: 30vh` の帯で、中身が溢れうる。**流れてよいのは
+   * 読むものだけ**で、閉じる導線を流してはいけない ── お知らせ側で実機報告された
+   * 欠陥(閉じるが箱の中で見切れる)の同型が、注意側にも在った。
+   *
+   * ⚠ **実ブラウザで見ているのはお知らせ側だけ**である(注意の帯を溢れさせるには
+   * 200 件級の取込が要る)。ここは**構造が揃っていること**を静的に pin する ──
+   * 片方だけ直す変更をこの test が落とす。
+   * ⚠ コメントを剥いでから読む(注記の中の字面に当てない)。
+   */
+  it('🔴 お知らせと注意は同じ形 ── 流れるのは中身だけで、見出しは固定', async () => {
+    const raw = await import('node:fs').then((fs) =>
+      fs.readFileSync('src/styles/app.css', 'utf-8'),
+    );
+    const css = raw.replace(/\/\*[\s\S]*?\*\//g, '');
+    /**
+     * ⚠ **同じ selector の規則は 1 つとは限らない。** 1 稿目は
+     * `indexOf` で最初の 1 つだけ読み、**版面の `grid-area` の規則**に当たって
+     * 落ちた ── 隣の test が戒めているのと同じ罠を、同じ file で踏んだ。
+     * 🔑 **全部拾って繋ぐ**(どれかに在ればよい、という主張である)。
+     */
+    const block = (selector: string): string => {
+      const found: string[] = [];
+      for (let i = css.indexOf(`${selector} {`); i >= 0; i = css.indexOf(`${selector} {`, i + 1)) {
+        const end = css.indexOf('}', i);
+        expect(end, `${selector} の規則が閉じていない`).toBeGreaterThan(i);
+        found.push(css.slice(i, end));
+      }
+      expect(found.length, `${selector} の規則が無い(空振り)`).toBeGreaterThan(0);
+      return found.join('\n');
+    };
+
+    for (const region of ["[data-pkc-region='announce']", "[data-pkc-region='notices']"]) {
+      expect(block(region), `${region} が縦並びの箱になっていない`).toMatch(
+        /flex-direction:\s*column/,
+      );
+      // ⚠ 逃げ場(低い画面で中身がこぼれない)
+      expect(block(region), `${region} に逃げ場が無い`).toMatch(/overflow:\s*auto/);
+    }
+    // 🔑 **流れるのは中身のほう** ── これが無いと帯ごと流れて見出しが消える
+    for (const scroller of ["[data-pkc-field='announce-body']", "[data-pkc-region='notices'] ul"]) {
+      expect(block(scroller), `${scroller} が流れない`).toMatch(/overflow:\s*auto/);
+    }
+    // 🔑 **閉じるは右端**(お知らせの文面とマニュアルがそう書いている)
+    expect(css, '閉じるを右端へ寄せる規則が無い').toMatch(
+      /\[data-pkc-field='notices-title'\]\s*>\s*button\s*\{[^}]*margin-inline-start:\s*auto/,
+    );
   });
 });
 
