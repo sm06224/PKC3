@@ -554,47 +554,140 @@
   // Qt の窓装飾(CSS px)。⚠ 実測: `.title-bar` 22 + 枠 8 = 高さ 30 / 幅 8
   var FRAME_W = 8;
   var FRAME_H = 30;
+
+  /**
+   * 🔴 user プロファイルの永続化(#159)。
+   *
+   * LO は設定を `registrymodifications.xcu`(MEMFS)へ書くが、MEMFS は
+   * **再読み込みで消える** ── UI 言語もツールバー配置も、user が LO 内で変えた
+   * 全設定が窓を閉じるたびに消えていた(実機レポート #8 で確定)。
+   * 閉じる前に読み出して localStorage へ、次の起動で書き戻す。
+   *
+   * ⚠ 退避するのは**この 1 file だけ**(漠然と home を丸ごと退避しない)。
+   * ⚠ 1MB を超えたら退避しない ── localStorage の割り当てを 1 つの設定 file で
+   *    食い潰して、本体側の保存まで壊すほうが害が大きい。
+   */
+  var PROFILE_PATH = '/instdir/user/registrymodifications.xcu';
+  var PROFILE_KEY = 'pkc3-office-profile';
+  var PROFILE_MAX = 1000000;
+  var lastSavedProfile = null;
+
+  /**
+   * 保存済みプロファイルを読み、**窓の幾何の prop を剥いで**返す(無効なら null)。
+   *
+   * 🔴 幾何を剥ぐのは、seed の幾何と**同じ prop の item を二重に持たないため**。
+   * 「後の item が勝つ」という順序の意味論に**賭けない** ── それは上流の実装を
+   * 読んだだけで、実機で確かめていない。重複を作らなければ賭けは要らない。
+   * ⚠ 剥ぐのは復元側(古い退避にも効く)。保存側では剥がない。
+   */
+  function loadSavedProfile() {
+    try {
+      var txt = localStorage.getItem(PROFILE_KEY);
+      if (!txt) return null;
+      var doc = new DOMParser().parseFromString(txt, 'application/xml');
+      // ⚠ 壊れた XML を書き戻すと起動ごと壊しうる ── parse できなければ捨てて素で始める
+      if (doc.getElementsByTagName('parsererror').length > 0) return null;
+      var root = doc.documentElement;
+      if (!root || root.localName !== 'items') return null;
+      var props = doc.getElementsByTagName('prop');
+      var drop = [];
+      for (var i = 0; i < props.length; i += 1) {
+        if (props[i].getAttribute('oor:name') === 'ooSetupFactoryWindowAttributes') {
+          drop.push(props[i]);
+        }
+      }
+      for (var j = 0; j < drop.length; j += 1) {
+        var item = drop[j].parentNode;
+        item.removeChild(drop[j]);
+        // prop が空になった item は殻なので item ごと消す
+        if (item.getElementsByTagName('prop').length === 0 && item.parentNode) {
+          item.parentNode.removeChild(item);
+        }
+      }
+      return new XMLSerializer().serializeToString(doc);
+    } catch (e) {
+      console.warn('保存済みプロファイルを読めませんでした(素で始めます)', e);
+      return null;
+    }
+  }
+
   function seedWindowSize(FS) {
     try {
-      var r = screenEl.getBoundingClientRect();
-      // ⚠ 器が測れていないなら書かない(0x0 の窓を頼むほうが悪い)
-      if (r.width < 1 || r.height < 1) return;
-      var k = window.devicePixelRatio || 1;
-      // ⚠ 装飾を引く。⚠ 引きすぎて 0 以下にしない(極端に小さい窓で潰れる)
-      var w = Math.max(320, Math.round(r.width) - FRAME_W);
-      var h = Math.max(240, Math.round(r.height) - FRAME_H);
-      // ⚠ 原点にも**左枠ぶん**を足す。0 のままだと窓が 4px 左へずれ、
-      //    左がはみ出して右に隙間ができる(実測: 窓 x = -4)
-      var geom = Math.round((FRAME_W / 2) * k) + ',0,'
-        + Math.round(w * k) + ',' + Math.round(h * k) + ';4;0,0,0,0;';
-      var mods = [
-        'com.sun.star.frame.StartModule',
-        'com.sun.star.text.TextDocument',
-        'com.sun.star.sheet.SpreadsheetDocument',
-        'com.sun.star.presentation.PresentationDocument',
-        'com.sun.star.drawing.DrawingDocument',
-        'com.sun.star.text.WebDocument',
-        'com.sun.star.text.GlobalDocument',
-        'com.sun.star.chart2.ChartDocument',
-        'com.sun.star.formula.FormulaProperties',
-      ];
       var items = '';
-      for (var i = 0; i < mods.length; i += 1) {
-        items += '<item oor:path="/org.openoffice.Setup/Office/Factories/'
-          + 'org.openoffice.Setup:Factory[&apos;' + mods[i] + '&apos;]">'
-          + '<prop oor:name="ooSetupFactoryWindowAttributes" oor:op="fuse">'
-          + '<value>' + geom + '</value></prop></item>';
+      var r = screenEl.getBoundingClientRect();
+      // ⚠ 器が測れていないなら幾何は書かない(0x0 の窓を頼むほうが悪い)
+      if (r.width >= 1 && r.height >= 1) {
+        var k = window.devicePixelRatio || 1;
+        // ⚠ 装飾を引く。⚠ 引きすぎて 0 以下にしない(極端に小さい窓で潰れる)
+        var w = Math.max(320, Math.round(r.width) - FRAME_W);
+        var h = Math.max(240, Math.round(r.height) - FRAME_H);
+        // ⚠ 原点にも**左枠ぶん**を足す。0 のままだと窓が 4px 左へずれ、
+        //    左がはみ出して右に隙間ができる(実測: 窓 x = -4)
+        var geom = Math.round((FRAME_W / 2) * k) + ',0,'
+          + Math.round(w * k) + ',' + Math.round(h * k) + ';4;0,0,0,0;';
+        var mods = [
+          'com.sun.star.frame.StartModule',
+          'com.sun.star.text.TextDocument',
+          'com.sun.star.sheet.SpreadsheetDocument',
+          'com.sun.star.presentation.PresentationDocument',
+          'com.sun.star.drawing.DrawingDocument',
+          'com.sun.star.text.WebDocument',
+          'com.sun.star.text.GlobalDocument',
+          'com.sun.star.chart2.ChartDocument',
+          'com.sun.star.formula.FormulaProperties',
+        ];
+        for (var i = 0; i < mods.length; i += 1) {
+          items += '<item oor:path="/org.openoffice.Setup/Office/Factories/'
+            + 'org.openoffice.Setup:Factory[&apos;' + mods[i] + '&apos;]">'
+            + '<prop oor:name="ooSetupFactoryWindowAttributes" oor:op="fuse">'
+            + '<value>' + geom + '</value></prop></item>';
+        }
       }
-      var xcu = '<?xml version="1.0" encoding="UTF-8"?>\n'
-        + '<oor:items xmlns:oor="http://openoffice.org/2001/registry"'
-        + ' xmlns:xs="http://www.w3.org/2001/XMLSchema"'
-        + ' xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">' + items + '</oor:items>';
+      // 🔴 復元(#159)── 保存済みの設定を土台に、幾何だけ今の器で上書きする。
+      //    幾何は保存時の窓の大きさなので**古い**(復元してはいけない側)。
+      var base = loadSavedProfile();
+      var xcu;
+      var close = '</oor:items>';
+      if (base && base.lastIndexOf(close) !== -1) {
+        var at = base.lastIndexOf(close);
+        xcu = base.slice(0, at) + items + base.slice(at);
+      } else {
+        // 土台が無い(初回 / 退避が壊れていた)── 素の骨組みで始める
+        if (items === '') return;
+        xcu = '<?xml version="1.0" encoding="UTF-8"?>\n'
+          + '<oor:items xmlns:oor="http://openoffice.org/2001/registry"'
+          + ' xmlns:xs="http://www.w3.org/2001/XMLSchema"'
+          + ' xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">' + items + close;
+      }
       // 保管先は `UserInstallation=$ORIGIN/..`(bootstraprc)= `/instdir/user`
       FS.mkdirTree('/instdir/user');
-      FS.writeFile('/instdir/user/registrymodifications.xcu', xcu);
+      FS.writeFile(PROFILE_PATH, xcu);
+      // ⚠ 起動直後に「同じ中身をまた退避する」空回りを避ける基準線
+      lastSavedProfile = xcu;
     } catch (e) {
       // ⚠ **大きさのために起動を落とさない。** 小さい窓のほうが、開かないよりましである
       console.warn('窓の大きさを仕込めませんでした', e);
+    }
+  }
+
+  /**
+   * LO が書いた最新のプロファイルを localStorage へ退避する(#159)。
+   *
+   * 呼び時は 2 つ: ① pagehide(閉じる・再読み込みの直前)② 30 秒ごと(変化時のみ)。
+   * ⚠ ② が要るのは **crash では pagehide が当てにならない**ため ── この app は
+   *    wasm の停止(#134 系)が現実に起きる。30 秒あれば「設定を変えて直後に落ちた」
+   *    以外は拾える。⚠ 読み比べて同じなら書かない(空回りしない)。
+   */
+  function saveProfile(FS) {
+    try {
+      if (!FS) return;
+      var txt = FS.readFile(PROFILE_PATH, { encoding: 'utf8' });
+      if (!txt || txt === lastSavedProfile) return;
+      if (txt.length > PROFILE_MAX) return;
+      localStorage.setItem(PROFILE_KEY, txt);
+      lastSavedProfile = txt;
+    } catch (e) {
+      // file がまだ無い / quota ── 退避できないだけで、動作は続ける
     }
   }
 
@@ -757,6 +850,13 @@
       // ⚠ 書き終わったら手放す(MEMFS が持っている ── こちらの配列は二重持ち)
       fonts.length = 0;
       seedWindowSize(FS);
+      // 🔴 設定の退避(#159)── pagehide + 30 秒ごと(変化時のみ)。
+      //    ⚠ crash では pagehide が当てにならないので間隔の側が保険になる
+      var profTimer = setInterval(function () { saveProfile(FS); }, 30000);
+      window.addEventListener('pagehide', function () {
+        clearInterval(profTimer);
+        saveProfile(FS);
+      });
       // 🔴 **UI を日本語で開く**(#158)。⚠ 一式に翻訳を詰めただけでは英語のままで、
       //    **選ばせる 1 手**が要る(`desktop/source/app/cmdlineargs.cxx` の `--language`)。
       //    🔑 user が設定画面で UI 言語を選べば**そちらが勝つ**(`langselect.cxx` の
