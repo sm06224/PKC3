@@ -183,6 +183,24 @@ async function main() {
     );
     await page.waitForTimeout(15_000);
     result.steps.push({ at: 'booted', windows: await page.evaluate(SURVEY) });
+
+    /**
+     * 🔴 **起動後に器の大きさを変える**(`PKC3_RESIZE=1`)。
+     *
+     * host.html が明記している既知の限界:
+     * 「**起動後にブラウザを縮めても窓は追従しない**(状態ビットを変えても同じ、実測)」
+     *
+     * ⚠ 追従しないだけなら「余白ができる」で済むが、**canvas の CSS 寸法だけが
+     * 変わって Qt 内部の寸法が変わらない**なら、当たり判定は**倍率でずれる** ──
+     * 原点に近いメニューバーは当たり、遠い項目ほど外す。
+     * 🔑 user の症状(**メニューは開くが項目が効かない**)と形が一致する。
+     */
+    if (process.env.PKC3_RESIZE === '1') {
+      await page.setViewportSize({ width: 1000, height: 700 });
+      await page.waitForTimeout(3000);
+      result.steps.push({ at: 'resized', windows: await page.evaluate(SURVEY) });
+      await page.screenshot({ path: join(SHOTS, '00b-resized.png') });
+    }
     await page.screenshot({ path: join(SHOTS, '00-booted.png') });
 
     /**
@@ -206,9 +224,19 @@ async function main() {
      * (1 稿目で実際に外した)。screenshot から採った**画面の実座標**を使う。
      * ⚠ CSS 座標なので DPR を変えても同じ位置である。
      */
-    await page.mouse.click(476, 71);
-    await page.waitForTimeout(3000);
-    const opened = await page.evaluate(SURVEY);
+    /**
+     * ⚠ **開いたことを確かめてから次へ行く。** 1 回目で開かない回が実在した
+     * (LO が busy だと押下が落ちる)。開かないまま項目を押すと、
+     * 「押し方のせいで効かない」と**誤読する** ── 空振りを結果と読まない。
+     */
+    let opened = [];
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      await page.mouse.click(476, 71);
+      await page.waitForTimeout(3000);
+      opened = await page.evaluate(SURVEY);
+      result.menuAttempts = attempt;
+      if (opened.length > 1) break;
+    }
     result.steps.push({ at: 'menu-open', windows: opened });
     await page.screenshot({ path: join(SHOTS, '02-menu-open.png') });
 
@@ -216,7 +244,25 @@ async function main() {
     const popup = opened.length > 1 ? opened[opened.length - 1] : null;
     result.popup = popup;
     if (popup) {
-      await page.mouse.click(popup.x + 83, popup.y + 121);
+      /**
+       * 🔴 **押し方を変えられるようにする**(`PKC3_PICK=drag`)。
+       *
+       * ⚠ mac の user は**メニュー題名を押したまま項目へ滑らせて離す**ことが多い。
+       * その形だと `pointerdown` で**暗黙のポインタ捕捉**が起き、`pointerup` が
+       * **メニューバー側の要素**へ配送されうる ── Qt から見ると「popup の外で
+       * 離した」= **閉じるだけで実行しない**。user の症状と形が一致する。
+       * 🔑 `click`(押して離すだけ)と `drag`(押したまま滑らせて離す)を
+       * **同じ probe で比べる**ことで、そこが原因かどうかが決まる。
+       */
+      if (process.env.PKC3_PICK === 'drag') {
+        await page.mouse.move(476, 71);
+        await page.mouse.down();
+        await page.mouse.move(popup.x + 83, popup.y + 121, { steps: 8 });
+        await page.waitForTimeout(300);
+        await page.mouse.up();
+      } else {
+        await page.mouse.click(popup.x + 83, popup.y + 121);
+      }
       await page.waitForTimeout(6000);
       const after = await page.evaluate(SURVEY);
       result.steps.push({ at: 'menu-pick', windows: after });
