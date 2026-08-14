@@ -235,8 +235,9 @@ const SUITES = {
    * **`Save Document?` ダイアログを出す** ── 閉じる動作が 1 度も起きないまま
    * 「再現せず」になる(screenshot で裏を取った。NOT-APPLIED の別の顔)。
    * issue の手順どおり **Start Center からクリックで開き、打鍵せず clean のまま閉じる**。
-   * キーの届きは screenshot の変化で見える ── `Ctrl+W` が届かなければ絵が
-   * 変わらず `landed: false` になるので、黙って「落ちない」にはならない。
+   * ⚠ `landed` は「届いた」の証明にならない ── close-doc の差分窓には
+   * **refocus のクリック分も混ざる**(レビュー 2026-08-14)。「再現せず」の回は
+   * `__shots-closedoc/02-close-doc*.png` で **Start Center に戻ったか**を必ず目で確かめる。
    */
   closedoc: [
     {
@@ -257,7 +258,7 @@ const SUITES = {
   /**
    * #145 ── Start Center から **Impress** を開く。
    *
-   * ⚠ `OPEN_DOC` を**使わない**唯一の suite である ── 見たいのは
+   * ⚠ `OPEN_DOC` を**使わない** suite の 1 つである(closedoc も使わない)── 見たいのは
    * 「Start Center の項目が生きているか」なので、先に Writer を開くと
    * **Start Center が消えて**押せない。
    *
@@ -324,9 +325,13 @@ async function main() {
   const faults = [];
   const noteFault = (text) => {
     // ⚠ `null function or function signature mismatch` も拾う ── SAFE_HEAP つきで
-    //    踏むとこちらになる(同じ「でたらめなポインタ」の別の顔)
+    //    踏むとこちらになる(同じ「でたらめなポインタ」の別の顔)。
+    //    `RuntimeError: unreachable`(wasm の trap)と `table index is out of bounds`
+    //    (間接呼びの table OOB)も同族の顔(レビュー 2026-08-14)。⚠ 裸の
+    //    `unreachable` では拾わない ── 散文の警告に誤爆する(false-keep はよいが、
+    //    「直った?」の検証で偽の「まだ落ちる」を出すのは向きが逆)
     if (
-      /segmentation fault|alignment fault|memory access out of bounds|signature mismatch|Aborted\(/.test(
+      /segmentation fault|alignment fault|memory access out of bounds|signature mismatch|Aborted\(|RuntimeError: unreachable|table index is out of bounds/.test(
         text,
       )
     ) {
