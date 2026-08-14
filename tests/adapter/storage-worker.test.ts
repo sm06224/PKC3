@@ -919,3 +919,67 @@ describe('🔴 未知の op を名指しで断る', () => {
     await expect(request({ op: 'counts', cid: 'c1' })).resolves.toBeTruthy();
   });
 });
+
+/**
+ * 🔴 #100 段② ── 添付 key → 所有 entry の逆引き(`findAssetOwner`)。
+ *
+ * ⚠ **誤爆の pin が本体**である(Issue #100 の名指しの罠): 本文に `asset:<key>` と
+ * **書いただけ**の text ノートへ飛んではいけない ── 判定は「archetype='attachment'
+ * かつ frontmatter の asset_key 等値」だけ(GC の false-keep 側 scanAssetRefs を
+ * 流用しない)。
+ */
+describe('findAssetOwner(#100 段②)', () => {
+  const ATT = [
+    '---',
+    'attachment.name: p.png',
+    'attachment.mime: image/png',
+    'attachment.size: 3',
+    'attachment.asset_key: ast-own-1',
+    '---',
+    '',
+  ].join('\n');
+
+  it('🔴 所有する attachment の lid が返り、書いただけの text には飛ばない', async () => {
+    // ⚠ 誤爆候補(text で key を散文に含む)を**先に**入れる ── 走査順で
+    //   先に当たっても falsely 返さないことを見る
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('fa-text', '本文で ast-own-1 と asset:ast-own-1 に触れただけ', {
+        archetype: 'text',
+        entryOrder: 1,
+      }),
+      checkpoint: false,
+    });
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('fa-att', ATT, { archetype: 'attachment', entryOrder: 2 }),
+      checkpoint: false,
+    });
+    // 別 key の attachment(等値の pin ── 前方一致等で当たらない)
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('fa-att2', ATT.replace('ast-own-1', 'ast-own-10'), {
+        archetype: 'attachment',
+        entryOrder: 3,
+      }),
+      checkpoint: false,
+    });
+
+    const hit = (await request({ op: 'findAssetOwner', cid: 'c1', assetKey: 'ast-own-1' })) as {
+      lid: string | null;
+    };
+    expect(hit.lid).toBe('fa-att');
+  });
+
+  it('見つからなければ null(呼び側が断る ── 黙る dead click にしない)', async () => {
+    const miss = (await request({
+      op: 'findAssetOwner',
+      cid: 'c1',
+      assetKey: 'ast-missing',
+    })) as { lid: string | null };
+    expect(miss.lid).toBeNull();
+  });
+});

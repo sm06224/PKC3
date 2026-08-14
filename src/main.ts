@@ -858,6 +858,32 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       appEditorMode.setMode(mode);
     },
     /**
+     * 🔗 添付の携帯参照 → **所有ノートへ飛ぶ**(#100 段②)。
+     * 逆引きは storage worker(狭い判定 ── attachment の asset_key 等値)。
+     * ⚠ 見つからないときは**黙らない**(整理済み等 ── 断りを出す)。
+     */
+    navigateAssetRef: (assetKey) => {
+      void (async () => {
+        try {
+          const r = (await client.request({
+            op: 'findAssetOwner',
+            cid: DEFAULT_CID,
+            assetKey,
+          })) as { lid: string | null };
+          if (r.lid !== null) {
+            dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: r.lid });
+          } else {
+            dispatcher.dispatch({
+              type: 'OP_FAILED',
+              error: 'この参照の添付が見つかりません(整理された可能性)',
+            });
+          }
+        } catch (e) {
+          dispatcher.dispatch({ type: 'OP_FAILED', error: `参照を解決できません: ${String(e)}` });
+        }
+      })();
+    },
+    /**
      * 🖼 外部の画像(2026-08-06、user 裁定「常にオン / 常に確認 / 常にオフ」)。
      * ⚠ 変えたら**いま開いているノートを描き直す** ── 描き直さないと、
      *   「常にオフ」にしても見ているノートの画像は出たままで、設定が嘘になる。

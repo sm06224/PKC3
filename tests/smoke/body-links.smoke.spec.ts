@@ -201,3 +201,49 @@ test('🔴 編集中に一覧の行を押すと、理由が画面に出る', asy
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * 🔴 #100 段②: 本文の `pkc://<自分>/asset/<key>` を押すと**所有ノートへ飛ぶ**。
+ *
+ * unit は「焼く」(container-id-render)と「逆引き」(storage-worker)を別々に
+ * 見る ── **焼いた属性 → binder → worker の逆引き → SELECT_ENTRY** が 1 本に
+ * つながるかは実物でしか確かめられない。
+ */
+test('🔴 pkc:// の asset あては押すと所有ノート(添付)へ飛ぶ', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  // ① 添付を作る(所有ノート)── key は画面の実属性から採る(でっち上げない)
+  await clickReal(page, '[data-pkc-action="attach-file"]');
+  await page.locator('[data-pkc-field="attach-input"]').setInputFiles({
+    name: 'owner.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+  });
+  const dl = page.locator('[data-pkc-action="download-asset"]');
+  await expect(dl).toBeVisible({ timeout: 15000 });
+  const key = await dl.getAttribute('data-pkc-asset-key');
+  expect(key, '添付の key を画面から採れていない(fixture の空振り)').toBeTruthy();
+
+  // ② 参照を本文に書いたノートを作る
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('参照の元');
+  await page.locator('[data-pkc-field="editor-body"]').fill(`[図へ](pkc://default/asset/${key})\n`);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  // ③ 焼けていること(action + 受け手が読む key 属性)
+  const link = page.locator('[data-pkc-field="detail-body"] [data-pkc-action="navigate-asset-ref"]');
+  await expect(link, '自分あての asset 参照が焼かれていない').toHaveCount(1);
+  expect(await link.getAttribute('data-pkc-asset-ref')).toBe(key);
+
+  // ④ 押すと所有ノート(添付)へ飛ぶ ── 添付の面が出る
+  const urlBefore = page.url();
+  await clickReal(page, '[data-pkc-field="detail-body"] [data-pkc-action="navigate-asset-ref"]');
+  await expect(
+    page.locator('[data-pkc-field="attachment-media"]'),
+    '所有ノートに着いていない(添付の面が出ない)',
+  ).toBeVisible();
+  expect(page.url(), 'ブラウザが未知スキームへ遷移した').toBe(urlBefore);
+
+  expect(errors).toEqual([]);
+});

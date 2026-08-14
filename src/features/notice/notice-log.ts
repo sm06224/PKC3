@@ -90,6 +90,14 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-14-asset-ref-link',
+    title: '本文の添付参照から、その添付のノートへ飛べるようになりました',
+    items: [
+      '本文に書いた pkc:// の添付あての参照を押すと、その添付を持つノートが開きます。',
+      '参照先が見つからないときは理由を出します。押しても何も起きない、をやめました。',
+    ],
+  },
+  {
     id: '2026-08-14-live-editor-default',
     title: '1 面で編集(ライブエディタ)が最初の設定になりました',
     items: [
