@@ -1198,6 +1198,16 @@ export class DetailRenderer {
         allowExternalImages: this.externalImages.allows(lid),
         currentContainerId,
       });
+      /**
+       * 🔴 文書 globals(書字方向・既定の寄せ)を説明の器にも当てる(#106 /
+       * Issue #103 の残面)。書き出し(pkc3-html.ts)は添付 entry にも同じ attrs を
+       * 焼いて閲覧側で当てるので、ここだけ素通りすると「align を宣言した添付では、
+       * 配った HTML でだけ |> が反対に寄る」── 入れ替え規則は器の doc-align 属性が
+       * 無いと発火しない。
+       * ⚠ 材料は **rawBody(frontmatter 込み)** ── description(fm.body)からでは
+       *   globals が見えない(Split プレビューが ta.value から取るのと同じ注意)。
+       */
+      applyDocumentGlobals(desc, extractDocumentGlobals(rawBody));
       host.append(desc);
       void this.hydrateAssetRefs(desc, this.hydrateToken);
       // 🔴 添付の説明にも図が書ける(P8 段⑬ review L-3)。かつてここだけ

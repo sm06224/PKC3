@@ -90,6 +90,14 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-14-attachment-doc-align',
+    title: '添付の説明でも、文書の寄せの宣言が効くようになりました',
+    items: [
+      '添付の説明に書いた行頭の |> や <| が、文書全体の寄せの反対側に寄ります。',
+      'これまで添付の説明だけ align や direction の宣言が効かず、書き出した HTML と見え方が食い違っていました。',
+    ],
+  },
+  {
     id: '2026-08-14-office-tile',
     title: 'アプリの一覧から Office を開けるようになりました',
     items: [
