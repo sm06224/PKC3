@@ -436,7 +436,7 @@ jobs:
           --disable-emscripten-proxy-to-pthread
           --with-wasm-module=calc writer impress
           --with-lang=en-US ja
-          --disable-wasm-strip-locales
+          --disable-wasm-strip
           CONF
           . ~/emsdk/emsdk_env.sh
           # 🔴 **出力を残す**(2026-08-14)。⚠ `make` には `tee` が在るのに
@@ -454,6 +454,11 @@ jobs:
           # ⚠ 「渡した」ではなく **構成に入った**ことを見る(#145 と同じ空振り防止)。
           #    値に空白が入るが、autogen.sh は行をそのまま 1 引数にする
           #    (`--with-wasm-module=calc writer impress` で通っている前例)。
+          # 🔴 **上流には親スイッチしか無い**(2026-08-14、実物で確定)。
+          #    `--disable-wasm-strip-locales` は `unrecognized options` で落ちる。
+          #    `configure.ac:6336` に在るのは `--enable-wasm-strip` の 1 つだけなので、
+          #    **全部の剥がしを止める**しかない(user 裁定 2026-08-14「OK」)。
+          #    ⚠ locale 以外(RECOVERYUI / SPLASH / SWEXPORTS / SCEXPORTS …)も戻る。
           # 🔴 **観測点を「実在するもの」へ変える**(2026-08-14、実物を出して判明)。
           #    ⚠ `WITH_LANG` は config_host.mk に **1 行も出ない** ── wasm 版は
           #    `ENABLE_WASM_STRIP_LOCALES=TRUE` で **locale を設計として剥がす**ため。
