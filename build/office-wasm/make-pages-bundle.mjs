@@ -93,7 +93,19 @@ async function main() {
   const shipped = ['soffice.wasm.gz', 'soffice.data.gz', 'coi-serviceworker.js', ...VERBATIM];
   const missing = shipped.filter((f) => !existsSync(join(OUT, f)));
   if (missing.length) throw new Error(`出力に足りない: ${missing.join(', ')}`);
-  const totalMb = shipped.reduce((a, f) => a + statSync(join(OUT, f)).size, 0)
+  /**
+   * 🔴 **目録に載せるものと、合計を数える相手を 1 つにする**(2026-08-14、実機検証で判明)。
+   *
+   * ⚠ `coi-serviceworker.js` は**この index.html だけが使う**ので目録(`files`)には
+   * 載せない ── ところが合計は `shipped` から数えていたので、**取る側が落とさない
+   * 6,028 バイトが「一式の大きさ」に混ざっていた**。
+   * 外から見ると「宣言 97,311,959 に対し実際に入るのは 97,305,931」という
+   * **説明のつかない食い違い**になり、検証した人に「別ビルドが混ざったのでは」と
+   * 疑わせた(実際にそう報告された)。数字が合わないこと自体が事故の兆候に見える。
+   * 🔑 **目録が指すものの合計 = totalBytes**。判定を 2 か所に持たない。
+   */
+  const manifestFiles = shipped.filter((f) => f !== 'coi-serviceworker.js');
+  const totalMb = manifestFiles.reduce((a, f) => a + statSync(join(OUT, f)).size, 0)
     + fonts.reduce((a, f) => a + statSync(join(OUT, 'fonts', f)).size, 0);
   let html = readFileSync(join(HERE, 'pages', 'index.html'), 'utf-8');
   html = html.replace('<script src="coi-serviceworker.js"></script>',
@@ -144,7 +156,7 @@ async function main() {
         // ⚠ 版の**出どころ**も残す ── 「どの LO commit か」を後から辿れるようにする
         build,
         builtAt: new Date().toISOString(),
-        files: shipped.filter((f) => f !== 'coi-serviceworker.js'),
+        files: manifestFiles,
         fonts: fonts.map((f) => `fonts/${f}`),
         totalBytes: totalMb,
       },
