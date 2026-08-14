@@ -391,30 +391,66 @@ describe('🔴 帯の置き場', () => {
     const raw = await import('node:fs').then((fs) =>
       fs.readFileSync('src/styles/app.css', 'utf-8'),
     );
-    const css = raw.replace(/\/\*[\s\S]*?\*\//g, '');
+    /**
+     * ⚠ **`@media` の中まで拾わない**(レビュー 2026-08-14)。
+     * 「どれかに在ればよい」という主張なので、印刷や狭い版面だけの規則で
+     * **画面の規則を消しても緑**になりうる。この file は「`@media` は最後に置く」
+     * 規約なので、最初の `@media` で切る ── ⚠ 規約が破れたら**落ちる**側に倒れる。
+     */
+    const stripped = raw.replace(/\/\*[\s\S]*?\*\//g, '');
+    const at = stripped.indexOf('@media');
+    expect(at, '@media が 1 つも無い(規約が変わった可能性)').toBeGreaterThan(0);
+    const css = stripped.slice(0, at);
     /**
      * ⚠ **同じ selector の規則は 1 つとは限らない。** 1 稿目は
      * `indexOf` で最初の 1 つだけ読み、**版面の `grid-area` の規則**に当たって
      * 落ちた ── 隣の test が戒めているのと同じ罠を、同じ file で踏んだ。
-     * 🔑 **全部拾って繋ぐ**(どれかに在ればよい、という主張である)。
+     * ⚠ 2 稿目は `"${sel} {"` で探したので、**選択子リスト**
+     * (`A,\nB {`)に書いた規則を 1 つも拾えなかった(空振りで落ちて判明)。
+     * 🔑 **構文で拾う** ── `選択子 { 宣言 }` を全部読み、選択子リストを
+     * `,` で割って**丸ごと一致**を見る。部分一致より厳密である
+     * (`A > button` を A の規則と読み違えない)。
      */
     const block = (selector: string): string => {
       const found: string[] = [];
-      for (let i = css.indexOf(`${selector} {`); i >= 0; i = css.indexOf(`${selector} {`, i + 1)) {
-        const end = css.indexOf('}', i);
-        expect(end, `${selector} の規則が閉じていない`).toBeGreaterThan(i);
-        found.push(css.slice(i, end));
+      const re = /([^{}]+)\{([^{}]*)\}/g;
+      for (let m = re.exec(css); m; m = re.exec(css)) {
+        const sels = (m[1] ?? '').split(',').map((x) => x.trim());
+        if (sels.includes(selector)) found.push(m[2] ?? '');
       }
       expect(found.length, `${selector} の規則が無い(空振り)`).toBeGreaterThan(0);
       return found.join('\n');
     };
 
     for (const region of ["[data-pkc-region='announce']", "[data-pkc-region='notices']"]) {
+      /**
+       * ⚠ **`flex-direction` だけでは足りない**(レビュー 2026-08-14、実際に
+       * 変異を当てて生存を確認された)。`display: flex` を消すと
+       * `flex-direction` は無効になり、中身が縮まなくなって**帯ごと流れる**
+       * = #151 で直した欠陥が戻る。宣言を名指しで全部見る。
+       */
+      expect(block(region), `${region} が flex になっていない`).toMatch(/display:\s*flex/);
       expect(block(region), `${region} が縦並びの箱になっていない`).toMatch(
         /flex-direction:\s*column/,
       );
+      // ⚠ 高さを切っていないと、そもそも溢れず本文の 1fr を食う(P8 段㉒)
+      expect(block(region), `${region} の高さが青天井`).toMatch(/max-height:\s*30vh/);
       // ⚠ 逃げ場(低い画面で中身がこぼれない)
       expect(block(region), `${region} に逃げ場が無い`).toMatch(/overflow:\s*auto/);
+    }
+    /**
+     * 🔑 **見出しの行が flex でなければ、右端へ寄せる規則は 1 行も効かない**
+     * (`margin-inline-start: auto` は inline-level では 0 に解決される)。
+     * ⚠ 字面と貼り付きも、寄せ直すときに落としやすい ── 実際 1 稿目で
+     * `font-weight` を落とし、見出しが中の見出しより細くなっていた。
+     */
+    for (const head of [
+      "[data-pkc-field='announce-title']",
+      "[data-pkc-field='notices-title']",
+    ]) {
+      expect(block(head), `${head} が flex の行になっていない`).toMatch(/display:\s*flex/);
+      expect(block(head), `${head} の見出しが太字でない`).toMatch(/font-weight:\s*600/);
+      expect(block(head), `${head} が送っても残らない`).toMatch(/position:\s*sticky/);
     }
     // 🔑 **流れるのは中身のほう** ── これが無いと帯ごと流れて見出しが消える
     for (const scroller of ["[data-pkc-field='announce-body']", "[data-pkc-region='notices'] ul"]) {

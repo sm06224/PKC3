@@ -196,17 +196,22 @@ test('🔴 お知らせが溢れていても、閉じるはスクロールせず
     const bd = body?.getBoundingClientRect();
     return {
       btnRight: b.right,
-      headLeft: h.left,
-      headWidth: h.width,
+      headRight: h.right,
       headBottom: h.bottom,
       bodyTop: bd ? bd.top : null,
     };
   });
   expect(geo, '見出しか閉じるが無い').not.toBeNull();
+  /**
+   * ⚠ **「右の 7 割より右」では緩い**(レビュー 2026-08-14)。`margin-inline-start: auto`
+   * は余白を**手前の要素の前**に吸うので、`head.append(close, label)` と書くと
+   * 並びは「余白 → 閉じる → 題名」になり、**題名が右端**でもしきい値は通る。
+   * 🔑 **右辺にぴったり**を見る。
+   */
   expect(
-    geo!.btnRight,
+    geo!.headRight - geo!.btnRight,
     '閉じるが見出しの右端に無い(お知らせとマニュアルの「右端」が嘘になる)',
-  ).toBeGreaterThan(geo!.headLeft + geo!.headWidth * 0.7);
+  ).toBeLessThanOrEqual(2);
 
   /**
    * ⚠ **見出しが場所を取っていること**も見る ── `position: absolute` 等で
@@ -243,6 +248,16 @@ test('🔴 お知らせの中を送っても、閉じるはそこから動かな
   const body = page.locator('[data-pkc-field="announce-body"]');
   const box = await body.boundingBox();
   expect(box, '流れる本文の箱が無い').not.toBeNull();
+  /**
+   * ⚠ **空振り防止**(レビュー 2026-08-14)。本文が溢れていない画面では
+   * `scrollTop` は 0 のままなので、「ホイールで送れない」という**原因を
+   * 取り違えたメッセージ**で落ちる ── 登記表が減っただけのときに、
+   * CSS の欠陥だと読んでしまう。
+   */
+  const fit = await body.evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight }));
+  expect(fit.scroll, `本文が溢れていない(${fit.scroll} ≤ ${fit.client})`).toBeGreaterThan(
+    fit.client + 1,
+  );
 
   const before = await page.locator('[data-pkc-action="dismiss-announce"]').boundingBox();
   expect(before, '閉じるが画面に出ていない').not.toBeNull();
@@ -281,19 +296,42 @@ test('🔴 低い画面でも、お知らせの帯が画面ごとスクロール
 
   const m = await page.evaluate(() => {
     const band = document.querySelector('[data-pkc-region="announce"]');
+    const bandBox = band?.getBoundingClientRect();
     return {
       doc: document.documentElement.scrollHeight,
       view: window.innerHeight,
+      bandBottom: bandBox ? bandBox.bottom : Number.POSITIVE_INFINITY,
       // ⚠ 空振り防止 ── 帯の中身が実際に入りきっていないこと(入るなら検査にならない)
       bandOverflows: band instanceof HTMLElement ? band.scrollHeight > band.clientHeight : false,
-      // 逃げ場が生きていること(こぼすのではなく、中で送れる形になっている)
-      bandScrollable:
-        band instanceof HTMLElement ? getComputedStyle(band).overflowY !== 'visible' : false,
     };
   });
   expect(m.bandOverflows, '帯の中身が入りきっている ── この高さでは検査にならない').toBe(true);
-  expect(m.bandScrollable, '帯に逃げ場が無い(中身がこぼれる)').toBe(true);
-  expect(m.doc, `帯が版面を押し出している(${m.doc} > ${m.view})`).toBeLessThanOrEqual(m.view + 1);
+  // 🔑 **帯の外形が画面に収まっている**(落ちたとき原因が名前で分かる側)
+  expect(m.bandBottom, `帯が画面からはみ出している(${m.bandBottom} > ${m.view})`)
+    .toBeLessThanOrEqual(m.view + 1);
+  // ⚠ 版面全体 ── 帯以外の回帰でも鳴りうるので、上の 1 行と対で読む
+  expect(m.doc, `版面が画面を押し出している(${m.doc} > ${m.view})`).toBeLessThanOrEqual(m.view + 1);
+
+  /**
+   * 🔴 **逃げ場が「効く」ことを見る**(レビュー 2026-08-14)。
+   * ⚠ `overflow` が `visible` でないことだけ見ていたが、それは **`hidden` でも真** ──
+   * その状態では「今後は出さない」へ**永久に到達できない**のに緑だった。
+   * 🔑 実際にホイールを回し、送れたうえで**閉じるが画面に残る**ことまで見る
+   * (`docs/manual.md` §8 の「どれだけ送っても画面から出ません」の実体)。
+   */
+  const band = page.locator('[data-pkc-region="announce"]');
+  const bb = await band.boundingBox();
+  expect(bb, '帯が画面に出ていない').not.toBeNull();
+  await page.mouse.move(bb!.x + bb!.width / 2, bb!.y + bb!.height / 2);
+  await page.mouse.wheel(0, 200);
+  await expect
+    .poll(() => band.evaluate((el) => el.scrollTop), {
+      message: '帯に逃げ場が無い ── 「今後は出さない」へ到達できない',
+    })
+    .toBeGreaterThan(0);
+  const closeBox = await page.locator('[data-pkc-action="dismiss-announce"]').boundingBox();
+  expect(closeBox, '送ったら閉じるが消えた').not.toBeNull();
+  expect(closeBox!.y, '送ったら閉じるが画面の外へ出た').toBeGreaterThanOrEqual(0);
 
   expect(errors).toEqual([]);
 });

@@ -66,6 +66,12 @@ describe('showNotices', () => {
     expect(list, '流れる一覧が無い').not.toBeNull();
     expect(head.contains(close), '閉じるが見出しの行に無い').toBe(true);
     expect(list.contains(close), '閉じるが流れる一覧の中に在る(読み下ろすと消える)').toBe(false);
+    // 🔑 **順も pin する**(お知らせ側と同文)── 包含関係を保ったまま
+    //    見出しを一覧の後ろへ回すと、「同じものが同じ場所」が崩れる
+    expect(
+      head.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING,
+      '見出しが一覧より後ろに在る',
+    ).toBeTruthy();
   });
 
   it('本文は textContent で入る(HTML として解釈しない)', () => {

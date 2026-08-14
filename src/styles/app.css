@@ -2099,10 +2099,7 @@ select:focus-visible {
   flex-direction: column;
   overflow: auto;
 }
-[data-pkc-field='notices-title'] {
-  font-weight: 600;
-  margin-bottom: var(--s2);
-}
+
 [data-pkc-region='notices'] ul {
   /* 🔴 流れるのは一覧だけ(上の注記) */
   overflow: auto;
@@ -2158,9 +2155,26 @@ select:focus-visible {
  *   (notices の見出しは text node + button なので、`flex: 1` を当てる箱が無い)。 */
 [data-pkc-field='announce-title'],
 [data-pkc-field='notices-title'] {
+  /* 🔴 **字面もここで持つ**(2026-08-14 のレビューで判明)。1 稿目は規則を
+   * 寄せたときに `font-weight` と `margin-bottom` を**移し忘れ**、
+   * お知らせの見出しだけ**中の見出し(h3=700)より細い 400** になっていた
+   * (実測: announceWeight 400 / marginBottom 0px)。⚠ 注意の帯は自分の規則で
+   * 保っていたので、**寄せた側だけが崩れる**形だった。 */
+  font-weight: 600;
+  margin-bottom: var(--s2);
   display: flex;
   align-items: center;
   gap: var(--s3);
+  /* 🔴 **帯自身が流れる高さでも、見出しを画面に残す**(同レビュー)。
+   * 逃げ場(region の `overflow`)が効くのは viewport が 410px を切るあたりで、
+   * そこでは**溢れ 24px に対し見出しが 26px** ── 少し送っただけで
+   * 「閉じる」が消える。⚠ それは `docs/manual.md` §8 とお知らせ本文の
+   * 「どれだけ送っても画面から出ません」を**低い画面で嘘にする**。
+   * ⚠ 地を塗る ── 塗らないと本文が透ける(`detail-bar-slot` と同じ作法)。 */
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-2);
 }
 /* 閉じるは**右端**。⚠ お知らせの文面とマニュアルが「見出しの右端」と書いている ──
  * この 1 行がその主張の実体である(smoke が右端に在ることを見る)。 */
