@@ -127,3 +127,58 @@ test('🔴 お知らせの帯が出て、閉じると次から出ない', async 
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * 🔴 **お知らせが溢れていても、「閉じる」はその場で押せる**(#151)。
+ *
+ * ## なぜ実ブラウザで見るのか
+ *
+ * unit は「閉じるが流れる箱の外に在る」までしか言えない ── **実際に見えているか**は
+ * 高さ・重なり・スクロール位置の話なので、描いてみないと分からない。
+ *
+ * ## ⚠ ここで `clickReal` / `expectReachable` を使ってはいけない
+ *
+ * あれらは `scrollIntoViewIfNeeded()` を挟む(`helpers.ts:150`。fold 下の要素を
+ * 「覆われている」と誤診しないための正しい配慮である)。ところが #151 の欠陥は
+ * **まさに「スクロールしないと届かない」**ことだったので、**検査が user の代わりに
+ * スクロールして**しまい、壊れたまま CI が緑だった。
+ * 🔑 だから**スクロールさせずに** `elementFromPoint` で当てる。
+ *
+ * ⚠ 空振り防止 ── 本文が実際に溢れていることを先に確かめる。溢れていない画面では
+ * 「見えている」は自明で、この test は何も守らない。
+ */
+test('🔴 お知らせが溢れていても、閉じるはスクロールせずに押せる', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await gotoApp(page);
+
+  const band = page.locator('[data-pkc-region="announce"]');
+  await expect(band, '起動時にお知らせが出ていない').toBeVisible({ timeout: 10_000 });
+
+  // ⚠ **溢れているか**を先に見る(この次元がゼロなら、以下は測っていないのと同じ)
+  const box = await page.evaluate(() => {
+    const b = document.querySelector('[data-pkc-field="announce-body"]');
+    return b instanceof HTMLElement ? { scroll: b.scrollHeight, client: b.clientHeight } : null;
+  });
+  expect(box, '流れる本文の箱が無い').not.toBeNull();
+  expect(
+    box!.scroll,
+    `本文が溢れていない(${box!.scroll} ≤ ${box!.client})── 見切れ得ないので検査にならない`,
+  ).toBeGreaterThan(box!.client + 1);
+
+  // 🔴 **スクロールさせずに**、その場で当たるか
+  const hit = await page.evaluate(() => {
+    const btn = document.querySelector('[data-pkc-action="dismiss-announce"]');
+    if (!btn) return { ok: false, why: 'ボタンが無い' };
+    const r = btn.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) return { ok: false, why: '面積が無い' };
+    const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return {
+      ok: !!(at && (at === btn || btn.contains(at))),
+      why: at ? `${at.tagName}${at.getAttribute('data-pkc-region') ?? ''}` : '画面の外',
+    };
+  });
+  expect(hit.ok, `閉じるがその場で押せない(当たったのは ${hit.why})`).toBe(true);
+
+  expect(errors).toEqual([]);
+});

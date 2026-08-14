@@ -90,6 +90,14 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-14-announce-close',
+    title: 'お知らせの「閉じる」が見出しの行に移りました',
+    items: [
+      'お知らせが多いときは、この枠の中を下までたどらないと「閉じる」に届きませんでした。',
+      '「閉じる」は見出しの右端にあります。中の文をどれだけ送っても、そこから動きません。',
+    ],
+  },
+  {
     id: '2026-08-13-office-dialog-crash',
     title: 'Office でダイアログを閉じると止まる問題を直しました',
     items: [

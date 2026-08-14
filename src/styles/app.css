@@ -2120,11 +2120,30 @@ select:focus-visible {
   padding: var(--s3);
   background: var(--surface-2);
   max-height: 30vh;
-  overflow: auto;
+  /* 🔴 **流すのは本文だけ**(#151、2026-08-14 の実機報告)。
+   * ⚠ 以前は面ごと `overflow: auto` にしていたので、末尾に置いた「閉じる」が
+   *   30vh の箱の中で**見切れ**、実機で「閉じ方が分からない」になった。
+   *   高さを切ってよいのは**読むもの**だけで、**畳む手を切ってはいけない**。 */
+  display: flex;
+  flex-direction: column;
 }
 [data-pkc-field='announce-title'] {
   font-weight: 600;
   margin-bottom: var(--s2);
+  /* 見出しと「閉じる」を同じ行に置く ── ここは流れないので常に視界に在る */
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+}
+/* 題(件数)が伸びて、閉じるが右端に付く */
+[data-pkc-field='announce-title'] > span {
+  flex: 1;
+}
+[data-pkc-field='announce-body'] {
+  overflow: auto;
+  /* 🔴 **flex の子は既定で縮まない**(`min-height: auto`)。これが無いと本文が
+   * 縮まず、面が 30vh を超えて**見出しごと押し出される** = 直した意味が消える。 */
+  min-height: 0;
 }
 [data-pkc-region='announce'] h3 {
   margin: var(--s3) 0 var(--s1);

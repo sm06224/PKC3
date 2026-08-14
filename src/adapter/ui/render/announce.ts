@@ -64,9 +64,27 @@ export function createAnnounce(
       region.textContent = '';
       region.hidden = false;
 
+      /**
+       * 🔴 **閉じるは見出しの行に置く**(#151、2026-08-14 の実機報告)。
+       *
+       * ⚠ 以前は本文・案内文のあとに置いていたが、面は `max-height: 30vh` で
+       * **中を流す**ので、お知らせが 2 件も在れば**箱の中で見切れて**いた ──
+       * user からは「閉じ方が分からない帯が画面の 1/3 を占領している」に見える。
+       * 🔑 高さを切ってよいのは**読むもの**だけで、**閉じる導線を切ってはいけない**
+       * (`app.css` の「幅が足りないなら場所を変えるのであって、操作を無くして
+       * よい理由にはならない」と同じ。あれの縦版である)。
+       * ⚠ 「今後は出さない」は末尾のままでよい ── 常に見えている必要があるのは
+       * **その場を畳む手**だけである。
+       */
       const head = document.createElement('div');
       head.setAttribute('data-pkc-field', 'announce-title');
-      head.textContent = unread.length === 1 ? 'お知らせ' : `お知らせ(${unread.length} 件)`;
+      const label = document.createElement('span');
+      label.textContent = unread.length === 1 ? 'お知らせ' : `お知らせ(${unread.length} 件)`;
+      const close = document.createElement('button');
+      close.type = 'button';
+      close.setAttribute('data-pkc-action', 'dismiss-announce');
+      close.textContent = '閉じる';
+      head.append(label, close);
       region.append(head);
 
       const body = document.createElement('div');
@@ -99,17 +117,13 @@ export function createAnnounce(
       region.append(where);
 
       const acts = document.createElement('p');
-      const close = document.createElement('button');
-      close.type = 'button';
-      close.setAttribute('data-pkc-action', 'dismiss-announce');
-      close.textContent = '閉じる';
       const mute = document.createElement('button');
       mute.type = 'button';
       mute.setAttribute('data-pkc-action', 'mute-announce');
       mute.textContent = '今後は出さない';
       /** ⚠ **戻し道をその場に書く**(押した後に探させない)。 */
       mute.title = '設定の「表示」からいつでも戻せます';
-      acts.append(close, mute);
+      acts.append(mute);
       region.append(acts);
     },
 

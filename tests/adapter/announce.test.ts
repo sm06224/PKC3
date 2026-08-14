@@ -155,6 +155,28 @@ describe('お知らせの帯', () => {
     expect(mute.getAttribute('title') ?? '', '戻せることが書かれていない').toContain('設定');
   });
 
+  /**
+   * 🔴 **閉じるは、流れる箱の外に在る**(#151、2026-08-14 の実機報告)。
+   *
+   * ⚠ 「導線が在る」だけの上の test は、**壊れていても通っていた** ──
+   * 閉じるは本文・案内文のあとに在り、面は `max-height: 30vh` で中を流すので、
+   * お知らせが 2 件も在れば**箱の中で見切れて**いた(実機で「閉じ方が分からない」)。
+   * 🔑 だから見るのは**在るか**ではなく**どこに在るか**である ──
+   * 流れるのは `announce-body` だけなので、閉じるが**その中に居ないこと**を pin する。
+   * ⚠ 実際に見えているか(高さ・重なり)は DOM では測れない ── smoke が見る
+   * (`tests/smoke/help-announce.smoke.spec.ts`)。
+   */
+  it('🔴 閉じるは見出しの行に在り、流れる本文の中に入っていない', () => {
+    createAnnounce(region, new NoticeStore(memory()), NOTES).present();
+    const close = region.querySelector('[data-pkc-action="dismiss-announce"]')!;
+    const head = region.querySelector('[data-pkc-field="announce-title"]')!;
+    const body = region.querySelector('[data-pkc-field="announce-body"]')!;
+    // ⚠ 空振り防止 ── 本文の箱そのものが在ること(無ければ下の 2 つは自明に通る)
+    expect(body, '流れる本文の箱が無い').not.toBeNull();
+    expect(head.contains(close), '閉じるが見出しの行に無い').toBe(true);
+    expect(body.contains(close), '閉じるが流れる箱の中に在る(見切れる)').toBe(false);
+  });
+
   /** ⚠ 件数を出す(「何件あるか」に気づく手掛かり)。 */
   it('⚠ 2 件以上なら件数が出る', () => {
     createAnnounce(region, new NoticeStore(memory()), NOTES).present();
