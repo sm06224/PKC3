@@ -572,22 +572,26 @@ md.renderer.rules.link_open = function (tokens, idx, options, env, self) {
     const currentContainerId =
       typeof rawEnv.currentContainerId === 'string' ? rawEnv.currentContainerId : '';
     /**
-     * 🔴 **添付の携帯参照は、まだ同一コンテナ枝へ入れない**(2026-08-08)。
-     * 段①(cid を描画へ渡す)で条件が通るようになったが、`navigate-asset-ref` の
-     * **受け手はまだ無い**(key → lid の逆引きが段②。Issue #100)。入れてしまうと
-     * `<a href>` の既定を `preventDefault` する #97 の配線に当たり、
-     * **押しても黙る**(= #98 で 4 面ぶん潰したばかりの無言の dead click)になる。
-     * ⚠ いまの札(`pkc-portable-reference-placeholder`)は container / target を
-     *   title に出すので、**黙る link より情報が多い**。退行させない。
-     * 🔑 段②で受け手が入ったらこの `kind === 'entry'` を外す
-     *   ── `tests/repo-hygiene.test.ts` の `KNOWN_DEAD` が等値 pin なので忘れられない。
+     * 🔴 同一コンテナの携帯参照は 2 種(#100)── entry は `navigate-entry-ref`、
+     * asset は `navigate-asset-ref`(段②、2026-08-14)。⚠ 受け手の無い action を
+     * 焼くと #97 の `preventDefault` に当たって**無言の dead click**になるため、
+     * 段②までは asset 枝を閉じていた(枝と受け手は同じ PR で開ける)。
+     * cross-container は今までどおり札(`pkc-portable-reference-placeholder`)。
      */
-    const sameContainerEntry =
-      parsed !== null &&
-      parsed.kind === 'entry' &&
-      currentContainerId !== '' &&
-      parsed.containerId === currentContainerId;
-    if (sameContainerEntry) {
+    const sameContainer =
+      parsed !== null && currentContainerId !== '' && parsed.containerId === currentContainerId;
+    if (sameContainer && parsed!.kind === 'asset') {
+      /**
+       * 🔴 同一コンテナの添付参照(#100 段②)── **所有ノートへ飛ぶ**。
+       * 受け手は binder の `navigate-asset-ref`(storage worker の
+       * `findAssetOwner` で key → lid を引く)。⚠ 段②が入るまでは
+       * 「受け手の無い action を焼くと無言の dead click になる」ため
+       * この枝を閉じていた ── 受け手と**同じ PR で**開けている。
+       */
+      token.attrSet('data-pkc-action', 'navigate-asset-ref');
+      token.attrSet('data-pkc-asset-ref', parsed!.targetId);
+      token.attrSet('rel', 'noopener noreferrer');
+    } else if (sameContainer && parsed!.kind === 'entry') {
       // Same-container Portable Reference fallback rendering
       // (spec/pkc-link-unification-v0.md §5.5). Paste conversion
       // normally demotes `pkc://<self>/...` to `entry:<lid>`

@@ -12,6 +12,7 @@ import { DB_SCHEMA_VERSION, SCHEMA_DDL, REVISION_ADDED_COLUMNS } from './schema'
 import type { EntryUpsert } from './schema';
 import { contentHash64Hex } from './content-hash';
 import { scanAssetRefsInto } from '@features/asset/asset-ref-scan';
+import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import {
   applyLinePatch,
   diffLines,
@@ -537,6 +538,30 @@ const handlers: Handlers = {
       if (rows.length > 0) out.push({ lid, body: rows[0]?.body as string });
     }
     return out;
+  },
+  findAssetOwner: (req) => {
+    /**
+     * #100 段② ── key → 所有 entry の逆引き。
+     * 🔴 判定は**狭く当てる**: `archetype='attachment'` に絞った上で、frontmatter の
+     * `attachment.asset_key` の**等値**だけを見る(protocol.ts の注記)。
+     * ⚠ 全 body を一度に materialize しない ── 行ごとの callback で読み、
+     * 見つかったら false を返して走査を止める(GC の scanText と同じ作法)。
+     */
+    let found: string | null = null;
+    need().exec({
+      sql: "SELECT lid, body FROM entries WHERE cid = ? AND archetype = 'attachment'",
+      bind: [req.cid],
+      rowMode: 'object',
+      callback: (row) => {
+        // ⚠ 型は SqlValue のまま来る ── rowMode 'object' の実行時形へ狭める
+        const r = row as unknown as { lid: string; body: string };
+        if (readAttachmentMeta(r.body).assetKey === req.assetKey) {
+          found = r.lid;
+          return false; // 走査を止める
+        }
+      },
+    });
+    return { lid: found };
   },
   listBodies: (req) => {
     // 🔴 **カーソルは ORDER BY と同じ複合キー**。`entry_order > ?` だけだと

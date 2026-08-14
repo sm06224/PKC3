@@ -95,31 +95,29 @@ describe('リンクの解決(pkc:// の携帯参照)', () => {
 });
 
 /**
- * 🔴 **添付の携帯参照は、受け手ができるまで焼かない**(2026-08-08、Issue #100 段①)。
- *
- * 段①で `currentContainerId` が届くようになったので、条件だけ見れば
- * `pkc://<自分>/asset/<key>` は `navigate-asset-ref` で焼ける。⚠ **だが受け手が無い**
- * (② key→lid の逆引きが未着手)ため、焼くと `<a href>` の既定を止める配線に当たり
- * **押しても黙る** ── #98 で 4 面ぶん潰した無言の dead click を新設してしまう。
- * だから同一コンテナ枝を `kind === 'entry'` に限り、添付は札のままにした。
- *
- * ⚠ この test が守るのは「**退行させていないこと**」である。段②で受け手ができたら
- *   焼いてよい ── そのときここを書き換える(`KNOWN_DEAD` は既に空なので、
- *   受け手の無い action を足せば `repo-hygiene` が落ちる = 二重の門になっている)。
+ * 🔴 添付の携帯参照(Issue #100)。段①(2026-08-08)では受け手が無く
+ * 「焼くと無言の dead click」だったため札のままにしていた ──
+ * **段②(2026-08-14)で受け手(`navigate-asset-ref` → worker の逆引き)と
+ * 同じ PR で枝を開けた**。ここが守るのは「同一コンテナだけ焼く」の線引き。
  */
-describe('添付の携帯参照は焼かない(段②までの取り決め)', () => {
+describe('添付の携帯参照(#100 段② ── 受け手と同じ PR で開けた)', () => {
   const render = (src: string): string =>
     renderMarkdown(src, { currentContainerId: 'c-mine', silentHallucinationWarnings: true });
 
-  it('🔴 自分あての asset は押せるリンクにならず、札のまま出る', () => {
+  it('🔴 自分あての asset は所有ノートへ飛ぶリンクになる(受け手が読む key 属性つき)', () => {
     const html = render('[添付](pkc://c-mine/asset/ast-1)\n');
-    expect(html, '受け手の無い action を焼いている(押すと黙る)').not.toContain(
-      'navigate-asset-ref',
-    );
-    expect(html, '札にもなっていない(参照先が読めない)').toContain(
+    expect(html, '段②の枝が開いていない').toContain('navigate-asset-ref');
+    expect(html, '受け手が読む key が載っていない').toContain('data-pkc-asset-ref="ast-1"');
+    expect(html, 'リンクにしたのに札も重ねている').not.toContain(
       'pkc-portable-reference-placeholder',
     );
-    expect(html, '札に target が載っていない').toContain('data-pkc-portable-target="ast-1"');
+  });
+
+  it('🔑 対照群: 別コンテナあての asset は札のまま(cid を見ずに全部焼く実装を落とす)', () => {
+    const html = render('[添付](pkc://c-other/asset/ast-1)\n');
+    expect(html, '外あてまでリンクにしている').not.toContain('navigate-asset-ref');
+    expect(html).toContain('pkc-portable-reference-placeholder');
+    expect(html).toContain('data-pkc-portable-target="ast-1"');
   });
 
   it('🔑 対照群: 自分あての entry は押せるリンクになる(段①の本体)', () => {

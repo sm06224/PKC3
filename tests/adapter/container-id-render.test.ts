@@ -58,6 +58,8 @@ const BODY = [
   '自分あて [題](pkc://c-mine/entry/b) と',
   '',
   '外あて [題](pkc://c-other/entry/b) を 1 つの本文に置く。',
+  '',
+  '添付あて [図](pkc://c-mine/asset/ast-9)(#100 段②)。',
 ].join('\n');
 
 function meta(lid: string, archetype = 'text'): EntryMeta {
@@ -126,6 +128,12 @@ function expectSelfLinkAndForeignBadge(scope: Element, face: string): void {
   expect(mine!.getAttribute('data-pkc-entry-ref'), `${face}: 飛び先が入っていない`).toBe(
     'entry:b',
   );
+  // #100 段②: 同一コンテナの asset あては**所有ノートへ飛ぶリンク**になる
+  const asset = scope.querySelector('[data-pkc-action="navigate-asset-ref"]');
+  expect(asset, `${face}: 自分あての asset 参照が押せるリンクになっていない`).not.toBeNull();
+  expect(asset!.getAttribute('data-pkc-asset-ref'), `${face}: 添付の key が入っていない`).toBe(
+    'ast-9',
+  );
   const foreign = scope.querySelector('.pkc-portable-reference-placeholder');
   expect(foreign, `${face}: 外あてまでリンクにしている(cid を見ていない)`).not.toBeNull();
   expect(
@@ -177,7 +185,14 @@ describe('① 読む面', () => {
       host.querySelector('[data-pkc-action="navigate-entry-ref"]'),
       'cid が無いのに焼いた(既定値をでっち上げていないか)',
     ).toBeNull();
-    expect(host.querySelectorAll('.pkc-portable-reference-placeholder')).toHaveLength(3);
+    // #100 段②: asset あても cid が無ければ焼かない(同じ「でっち上げ」の pin)
+    expect(
+      host.querySelector('[data-pkc-action="navigate-asset-ref"]'),
+      'cid が無いのに asset を焼いた',
+    ).toBeNull();
+    // 旧 BODY(entry 2 本)で 3 だった実測に、asset あて 1 本が加わって 4
+    //(class は他の札とも共有 ── 数は取り違え検出の tripwire として見る)
+    expect(host.querySelectorAll('.pkc-portable-reference-placeholder')).toHaveLength(4);
   });
 });
 

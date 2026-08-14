@@ -21,6 +21,15 @@ export type StorageRequest =
    */
   | { op: 'getBodies'; cid: string; lids: string[] }
   /**
+   * 添付の key から**所有 entry** を引く(#100 段② ── 本文の
+   * `pkc://<自分>/asset/<key>` を押したとき、所有ノートへ飛ぶための逆引き)。
+   * ⚠ 判定は**狭く当てる**(`archetype='attachment'` かつ frontmatter の
+   * `attachment.asset_key` が等値)── `scanAssetRefs`(GC の false-keep 側)を
+   * 流用しない。本文に `asset:<key>` と**書いただけ**の text ノートへ飛ぶと、
+   * 「所有者へ飛ぶ」が別ノートへ飛ぶ誤爆になる(Issue #100 の名指しの罠)。
+   */
+  | { op: 'findAssetOwner'; cid: string; assetKey: string }
+  /**
    * 本文を **まとめて** 取る(P6d ── 書出し用)。
    *
    * ⚠ `getBody` を N 回呼ぶと 5000 entry の書出しが 5000 往復になる。
@@ -289,6 +298,8 @@ export interface ResultMap {
   getBody: string | null;
   /** 読めたものだけ(要求順)。⚠ 無い lid は**黙って落ちる**。 */
   getBodies: Array<{ lid: string; body: string }>;
+  /** 所有 entry の lid。見つからなければ null(呼び側が user へ断る)。 */
+  findAssetOwner: { lid: string | null };
   /**
    * `done` = これ以上ない。`rows` は `entry_order, lid` 順(並びの正本)。
    * `next` = 続きのカーソル(呼び出し側はこれをそのまま渡す ── 自分で組まない)。

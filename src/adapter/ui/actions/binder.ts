@@ -115,6 +115,11 @@ export interface BinderServices {
    */
   setEditorMode?(mode: string): void;
   /**
+   * 添付の携帯参照(`pkc://<自分>/asset/<key>`)から**所有ノートへ飛ぶ**(#100 段②)。
+   * ⚠ 見つからないときは黙らない(OP_FAILED で断る ── 無言の dead click を作らない)。
+   */
+  navigateAssetRef?(assetKey: string): void;
+  /**
    * フラグの切替(P11。user 指示 2026-08-07)。
    * ⚠ **設定ではない** ── 開発者・パワーユーザー向けで、いつか畳まれる。
    */
@@ -448,6 +453,15 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'navigate-card-ref': (dispatcher, target) => {
     navigateToLink(dispatcher, target.getAttribute('data-pkc-card-target'));
+  },
+  /**
+   * `pkc://<自分>/asset/<key>` ── 添付の**所有ノートへ飛ぶ**(#100 段②)。
+   * ⚠ key → lid の逆引きは storage worker(`findAssetOwner`)なので非同期 ──
+   *   判断は services 側(main.ts が worker へ問い、見つかれば SELECT_ENTRY)。
+   */
+  'navigate-asset-ref': (_dispatcher, target, services) => {
+    const key = target.getAttribute('data-pkc-asset-ref');
+    if (key) services.navigateAssetRef?.(key);
   },
   /**
    * 一覧 / フォルダ / かんばん / カレンダーの行。
