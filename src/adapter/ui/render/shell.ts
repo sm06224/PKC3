@@ -340,12 +340,42 @@ export function buildShell(root: HTMLElement): ShellRegions {
     btn.title = `${PANE_LABELS[id]}の列を畳む・戻す`;
     paneBar.append(btn);
   }
+  /**
+   * 🔴 **本文の置換**(#191 / 台帳 #180 の B-3)。ログが伸びたときに要る。
+   *
+   * ⚠ **器は 1 度しか組まない場所に置く**(この帯)── 編集中の面は打鍵のたびに
+   *   描き直すので、そちらに入れると**打ちかけの検索語が消える**
+   *   (追記欄を別の器にしたのと同じ理由。P8 段⑧)。
+   * ⚠ 既定は畳んでおく ── 常時 2 つの欄が居座るのは「業務画面」ではない。
+   */
+  const replaceBar = document.createElement('div');
+  replaceBar.setAttribute('data-pkc-region', 'replace-bar');
+  replaceBar.hidden = true;
+  for (const [field, label] of [
+    ['replace-find', '探す語'],
+    ['replace-with', '置き換える語'],
+  ] as const) {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.setAttribute('data-pkc-field', field);
+    input.setAttribute('aria-label', label);
+    input.placeholder = label;
+    replaceBar.append(input);
+  }
+  const runReplace = iconButton('replace-all', '全部置換');
+  runReplace.title = '編集中の本文で、探す語を全部置き換えます';
+  replaceBar.append(runReplace);
+  const toggleReplace = iconButton('toggle-replace', '置換');
+  toggleReplace.title = '本文の置換(Ctrl+H)';
+  toggleReplace.setAttribute('aria-expanded', 'false');
+  paneBar.append(toggleReplace);
+
   const detail = document.createElement('div');
   detail.setAttribute('data-pkc-region', 'detail');
   const append = document.createElement('div');
   append.setAttribute('data-pkc-region', 'append');
   append.hidden = true;
-  center.append(paneBar, detail, append);
+  center.append(paneBar, replaceBar, detail, append);
 
   // ── 右(付随情報)────────────────────────────────
   const inspector = document.createElement('aside');

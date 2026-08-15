@@ -515,6 +515,30 @@ const ACTIONS: Record<string, ActionHandler> = {
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
     applyPaneVisibility(root, appPanes.toggle(id));
   },
+  /**
+   * 🔴 **置換の帯を開く・閉じる**(#191)。⚠ 開いたら**探す欄へ focus** ──
+   * 開いただけで打てないと、user は 2 手目を探すことになる。
+   */
+  'toggle-replace': (_dispatcher, target) => {
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const bar = root.querySelector<HTMLElement>('[data-pkc-region="replace-bar"]');
+    if (!bar) return;
+    bar.hidden = !bar.hidden;
+    target.setAttribute('aria-expanded', bar.hidden ? 'false' : 'true');
+    if (!bar.hidden)
+      root.querySelector<HTMLInputElement>('[data-pkc-field="replace-find"]')?.focus();
+  },
+  /**
+   * 🔴 **全部置換**(#191)。⚠ 判定(編集中か / 何件当たるか)は**reducer 1 か所**。
+   * ここでは欄の値を渡すだけ ── binder が「0 件なら押さない」等を持つと二重帳簿になる。
+   */
+  'replace-all': (dispatcher, target) => {
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const find = root.querySelector<HTMLInputElement>('[data-pkc-field="replace-find"]')?.value ?? '';
+    const replace =
+      root.querySelector<HTMLInputElement>('[data-pkc-field="replace-with"]')?.value ?? '';
+    dispatcher.dispatch({ type: 'REPLACE_IN_BODY', find, replace });
+  },
   'nav-back': (dispatcher) => dispatcher.dispatch({ type: 'NAV_HISTORY', dir: 'back' }),
   'nav-forward': (dispatcher) => dispatcher.dispatch({ type: 'NAV_HISTORY', dir: 'forward' }),
   /** 一覧の並び順(#183)。⚠ 妥当性の判定は `isEntrySort` 1 か所。 */
@@ -1369,6 +1393,17 @@ export function bindActions(
       const btn = root.querySelector<HTMLElement>(
         `[data-pkc-action="toggle-pane"][data-pkc-pane="${pane}"]`,
       );
+      if (!btn) return;
+      ke.preventDefault();
+      btn.click();
+      return;
+    }
+    /**
+     * 🔴 **置換の近道**(#191)。`Ctrl+H` ── 他のアプリと同じ手。
+     * ⚠ ボタンを**そのまま押す**(同じ操作が 2 通りの経路を持たない)。
+     */
+    if ((ke.key === 'h' || ke.key === 'H') && (ke.ctrlKey || ke.metaKey) && !ke.altKey) {
+      const btn = root.querySelector<HTMLElement>('[data-pkc-action="toggle-replace"]');
       if (!btn) return;
       ke.preventDefault();
       btn.click();

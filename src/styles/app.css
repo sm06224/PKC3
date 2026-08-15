@@ -145,6 +145,17 @@ body {
 [data-pkc-region='pane-bar'] button[aria-pressed='false'] {
   opacity: 0.6;
 }
+
+/* 置換の帯(#191)。⚠ 器は 1 度しか組まないので、打ちかけの語は描き直しで消えない */
+[data-pkc-region='replace-bar'] {
+  display: flex;
+  gap: 6px;
+  padding: 4px 6px;
+  background: var(--bg);
+}
+[data-pkc-region='replace-bar'] input {
+  min-width: 8rem;
+}
 [data-pkc-region='announce'] {
   grid-area: announce;
 }

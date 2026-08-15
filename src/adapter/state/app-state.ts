@@ -15,6 +15,7 @@ import { withTodoStatus } from '@features/flavor/todo-flavor';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import type { LauncherTile } from '@features/launcher/tiles';
 import { visibleOrder } from '@features/filter/title-filter';
+import { replaceAll } from '@features/markdown/body-replace';
 import {
   EMPTY_HISTORY,
   canGoBack,
@@ -264,6 +265,8 @@ export type UserAction =
    * 決めると、履歴と選択が二重帳簿になる(§7)。
    */
   | { type: 'NAV_HISTORY'; dir: 'back' | 'forward' }
+  /** 本文の置換(#191)。⚠ 素の文字列で当てる(正規表現にしない)。 */
+  | { type: 'REPLACE_IN_BODY'; find: string; replace: string; caseSensitive?: boolean }
   | { type: 'LAUNCHER_TILES_LOADED'; tiles: LauncherTile[] }
   /**
    * アプリの一覧を読み直す(P8 段⑱)。
@@ -882,6 +885,27 @@ function reduceCore(
       // ⚠ 編集がロックを握ることは**書かない** ── `phase === 'editing'` が既に
       // それを表している(`bodyLockOf`)。ここで別の field に写すと 2 つ目の真実
       return { state: { ...state, phase: 'editing', revisionPanel: null }, events: [] };
+    }
+    /**
+     * 🔴 **本文の置換**(#191)。⚠ 編集中だけ ── 読んでいるだけの面から本文を
+     * 書き換えると、user が「編集していない」と思っている間に内容が変わる。
+     * ⚠ **0 件のときも state を返す**(何も起きないのではなく「見つからなかった」と
+     * 言う)── 押しても無反応な dead click を作らない。
+     */
+    case 'REPLACE_IN_BODY': {
+      if (state.phase !== 'editing' || !state.openBody) return { state, events: [] };
+      const { body, count } = replaceAll(state.openBody.body, action.find, action.replace, {
+        caseSensitive: action.caseSensitive === true,
+      });
+      if (count === 0)
+        return {
+          state: { ...state, error: `「${action.find}」は本文に見つかりませんでした` },
+          events: [],
+        };
+      return {
+        state: { ...state, error: `${count} 件を置き換えました`, openBody: { ...state.openBody, body } },
+        events: [],
+      };
     }
     case 'UPDATE_OPEN_BODY': {
       if (state.phase !== 'editing' || !state.openBody) return { state, events: [] };

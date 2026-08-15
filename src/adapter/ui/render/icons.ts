@@ -200,6 +200,9 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   /** 選択の履歴(#190)── ブラウザの戻る・進むと同じ図案にする。 */
   'nav-back': 'chevron-left',
   'nav-forward': 'chevron-right',
+  /** 本文の置換(#191)── 書き換えるので鉛筆と同じ仲間の図案にする。 */
+  'toggle-replace': 'pencil',
+  'replace-all': 'check',
   /** ペインの開閉(#197)── 畳む向きの山を出す(左の列は左へ、右の列は右へ)。 */
   'toggle-pane:sidebar': 'chevron-left',
   'toggle-pane:inspector': 'chevron-right',
