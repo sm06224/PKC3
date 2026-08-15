@@ -15,6 +15,7 @@ import { sortOrder, isEntrySort, DEFAULT_ENTRY_SORT } from '../../src/features/f
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { SidebarRenderer } from '../../src/adapter/ui/render/sidebar';
+import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 
 function meta(lid: string, over: Partial<EntryMeta> = {}): EntryMeta {
@@ -124,5 +125,63 @@ describe('並び順の配線(選ぶ → 画面が変わる)', () => {
     expect(d.getState().entrySort).toBe('title');
     expect(rows(), '選んだのに画面の並びが変わらない(指紋の入れ忘れ)').toEqual(['n2', 'n1']);
     expect(d.getState().selectedLid, '並べ替えで選択が消えた').toBe('n1');
+  });
+});
+
+/**
+ * タグの札(#182)── 情報ペインに出て、押すと**そのタグで探す**。
+ * 🔴 別建てのタグ絞り込み機構を作らず、#181 の全文検索へ乗せている
+ *    (frontmatter も本文なので `tags:` ごと引ける)。
+ */
+describe('タグの札(#182)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  function withInspector() {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const d = new Dispatcher();
+    const regions = buildShell(root);
+    const inspector = new InspectorRenderer(regions.inspector);
+    d.onState((s) => inspector.render(s));
+    bindActions(root, d);
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('n1', { title: 'メモ' })],
+      relations: [],
+    });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    return { d, root };
+  }
+
+  it('🔴 本文のタグが札として出て、押すとそのタグで探す', () => {
+    const { d, root } = withInspector();
+    d.dispatch({
+      type: 'BODY_LOADED',
+      lid: 'n1',
+      body: '---\ntags: [買い物, 家事]\n---\n本文\n',
+    });
+    const chips = [...root.querySelectorAll('[data-pkc-action="filter-by-tag"]')];
+    expect(chips.map((c) => c.textContent), 'タグの札が出ていない').toEqual([
+      '買い物',
+      '家事',
+    ]);
+    (chips[0] as HTMLElement).click();
+    expect(d.getState().filterQuery, '押しても探さない').toBe('買い物');
+  });
+
+  it('本文が読めていないときは「タグ無し」と嘘を書かない', () => {
+    const { root } = withInspector();
+    const box = root.querySelector('[data-pkc-field="inspector-tags"]');
+    expect(box?.textContent, '本文未読なのに断定している').toBe('—');
+  });
+
+  it('タグの無い本文では「無し」と出る', () => {
+    const { d, root } = withInspector();
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '本文だけ\n' });
+    const box = root.querySelector('[data-pkc-field="inspector-tags"]');
+    expect(box?.textContent).toBe('無し');
   });
 });

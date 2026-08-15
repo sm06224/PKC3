@@ -489,6 +489,15 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ reducer のガード(ready / openBody 一致 / writeLock)は**ここに写さない**
    *   ── 取ってから dispatch し、入れなかったら返す(判定は reducer 1 か所)。
    */
+  /**
+   * 🔴 **タグで探す**(#182)。⚠ 押した札の語を**絞り込み欄へ入れる** ── 別建ての
+   * タグ絞り込み機構を作らない(#181 の全文検索が frontmatter ごと引く)。
+   * ⚠ 欄の値も state 経由で同期される(renderer が書き戻す)。
+   */
+  'filter-by-tag': (dispatcher, target) => {
+    const tag = target.getAttribute('data-pkc-tag');
+    if (tag) dispatcher.dispatch({ type: 'SET_ENTRY_FILTER', query: tag });
+  },
   /** 一覧の並び順(#183)。⚠ 妥当性の判定は `isEntrySort` 1 か所。 */
   'set-entry-sort': (dispatcher, target) => {
     const v = (target as HTMLSelectElement).value;

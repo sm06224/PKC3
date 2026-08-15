@@ -45,6 +45,7 @@ import { iconButton } from './icons';
 //    ここで独自に parse していた頃は、一覧に日付を出すときに規則が 2 つに増えた
 import { formatStoredDate } from '@features/datetime/stored-date';
 // 居場所の解決は `features/relation/tree` が正本(ファイラの帯・パンくずと共有)
+import { readTags } from '@features/flavor/tags';
 import { getAncestorFolders } from '@features/relation/tree';
 
 /** 素性の行(`data-pkc-field` → 値を入れる `<dd>`)。 */
@@ -127,6 +128,35 @@ export class InspectorRenderer {
       .reverse()
       .map((f) => f.title);
     this.setRow('inspector-folder', chain.length === 0 ? 'ルート' : chain.join(' / '));
+    /**
+     * 🔴 **タグを押せる札にする**(#182)。押すと**そのタグで探す** ── #181 で
+     * 本文が検索対象になったので、frontmatter の `tags:` もそのまま引ける。
+     * ⚠ **新しい絞り込み機構を足さない**(founding「盛り込みすぎない」)。
+     * ⚠ 本文が読めていないとき(一覧を眺めているだけ)は**行ごと空** ── 嘘の
+     *   「タグ無し」を出さない。
+     */
+    const tagBox = this.rows.get('inspector-tags');
+    if (tagBox) {
+      const body = state.openBody?.lid === meta.lid ? state.openBody.body : null;
+      const tags = body === null ? null : readTags(body);
+      tagBox.textContent = '';
+      if (tags === null) {
+        tagBox.textContent = '—';
+      } else if (tags.length === 0) {
+        tagBox.textContent = '無し';
+      } else {
+        for (const tag of tags) {
+          const chip = document.createElement('button');
+          chip.type = 'button';
+          chip.setAttribute('data-pkc-action', 'filter-by-tag');
+          chip.setAttribute('data-pkc-tag', tag);
+          chip.setAttribute('data-pkc-field', 'inspector-tag');
+          chip.title = `「${tag}」を含むノートを探します`;
+          chip.textContent = tag;
+          tagBox.append(chip);
+        }
+      }
+    }
     this.setRow('inspector-created', formatStoredDate(meta.createdAt));
     this.setRow('inspector-updated', formatStoredDate(meta.updatedAt));
     // 🔴 **どのファイルから来たか**を出す(2026-08-05)── 出さないと、書き戻しが
@@ -207,6 +237,11 @@ export class InspectorRenderer {
     row('居場所', 'inspector-folder');
     row('作成', 'inspector-created');
     row('更新', 'inspector-updated');
+    /**
+     * 🔴 **タグ**(#182 / 台帳 #180 の A-2)。⚠ 値は文字ではなく**押せる札**なので、
+     * `setRow`(textContent 差し替え)ではなく専用の器を持つ。
+     */
+    row('タグ', 'inspector-tags');
     if (shape === 'entry+link') row('元ファイル', 'inspector-linked-file');
     this.region.append(dl);
 
