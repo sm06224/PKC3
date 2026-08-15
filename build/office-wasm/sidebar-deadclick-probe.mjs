@@ -23,6 +23,12 @@
  *   PKC3_S_TOOLS="681,71"  ツール(T)(画面座標)
  *   PKC3_S_SIDEBAR="60,N"  表示メニュー内のサイドバー行(メニュー相対。N は上端からの px)
  *   PKC3_S_CANCEL="-150,-28"  Options のキャンセル(ダイアログの**右下**からの相対)
+ *   PKC3_S_SC_FILE / PKC3_S_SC_TOOLS  Start Center の ファイル(F) / ツール(T)
+ *
+ * 🔴 **面を取り違えない**(2026-08-15 に踏んだ)。#168 の報告は **Start Center** の
+ *   タイルが無反応になる話であって、Writer のメニューではない ── Writer で測った
+ *   「再現しない」は、**別の面の話**なので何も言っていない。だから段① は
+ *   Writer を開く**前**に、Start Center の上で完結させる。
  */
 import { createServer } from 'node:http';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
@@ -32,7 +38,9 @@ import { chromium } from '@playwright/test';
 const PACK = resolve(process.argv[2] ?? '/tmp/pages-new');
 const OUT = process.argv[3] ?? '';
 const DIST = resolve('dist');
-const SHOTS = '/tmp/pkc3-sidebar-shots';
+// ⚠ 置き場は**一式ごとに分ける** ── 共有すると対照群(旧一式)の絵を上書きして、
+//   比べる相手を自分で消す
+const SHOTS = `/tmp/pkc3-sidebar-shots/${PACK.split('/').pop()}`;
 const VIEWPORT = { width: 1280, height: 800 };
 
 const C_WRITER = [133, 315];
@@ -41,6 +49,9 @@ const C_TOOLS = (process.env.PKC3_S_TOOLS ?? '681,71').split(',').map(Number);
 // 実測(1 巡目の 02-view-menu.png)── サイドバー(P) はメニュー上端から 565px
 const C_SIDEBAR = (process.env.PKC3_S_SIDEBAR ?? '60,565').split(',').map(Number);
 const C_CANCEL = (process.env.PKC3_S_CANCEL ?? '-150,-28').split(',').map(Number);
+// Start Center のメニューバーは 3 項目(ファイル(F) / ツール(T) / ヘルプ(H))
+const C_SC_FILE = (process.env.PKC3_S_SC_FILE ?? '57,71').split(',').map(Number);
+const C_SC_TOOLS = (process.env.PKC3_S_SC_TOOLS ?? '135,71').split(',').map(Number);
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -216,8 +227,60 @@ async function main() {
     const win = (await page.evaluate(SURVEY))[0];
     result.window = win;
     if (!win) throw new Error('窓が 1 つも無い');
-    await page.mouse.click(win.x + C_WRITER[0], win.y + C_WRITER[1]);
-    await page.waitForTimeout(12_000);
+    await shoot('00-startcenter.png');
+
+    // ───── #168: Start Center の dead click(**報告どおりの面**) ─────
+    // 🔴 ここを Writer で測ると別の面の話になる(2026-08-15 に踏んだ)
+    {
+      const dc = result.deadClick;
+      // 対照群: Options を開く**前**に、Start Center のクリックが届くこと
+      const pre = await openMenu(C_SC_FILE, '00a-sc-file-menu.png');
+      dc.scControlMenuOpened = Boolean(pre);
+      if (pre) await page.keyboard.press('Escape');
+      await page.waitForTimeout(1500);
+
+      const beforeAll = new Set((await page.evaluate(SURVEY)).map(key));
+      const toolsMenu = await openMenu(C_SC_TOOLS, '00b-sc-tools-menu.png');
+      dc.scToolsMenuOpened = Boolean(toolsMenu);
+      if (toolsMenu) {
+        await page.mouse.click(toolsMenu.x + 60, toolsMenu.y + toolsMenu.h - 13);
+        await page.waitForTimeout(4000);
+        const dlg = (await page.evaluate(SURVEY))
+          .filter((w) => !beforeAll.has(key(w)))
+          .filter((w) => w.w >= 300)
+          .sort((a, b) => b.w * b.h - a.w * a.h)[0];
+        dc.scDialog = dlg ?? null;
+        await shoot('00c-sc-options.png');
+        if (dlg) {
+          await page.mouse.click(dlg.x + dlg.w + C_CANCEL[0], dlg.y + dlg.h + C_CANCEL[1]);
+          await page.waitForTimeout(4000);
+          await shoot('00d-sc-after-cancel.png');
+          dc.scDialogClosed = (await page.evaluate(SURVEY)).every((w) => key(w) !== key(dlg));
+          /**
+           * 🔑 **観測点**: タイルを押しても窓の**枚数は増えない**(Start Center が
+           * Writer に化ける)ので、枚数でも rect でも判定できない。代わりに
+           * **Writer にしか無いメニュー**(表示(V) の位置)が開くかで見る ──
+           * Start Center のメニューバーは 3 項目しかなく、その x には何も無い。
+           */
+          await page.mouse.click(win.x + C_WRITER[0], win.y + C_WRITER[1]);
+          await page.waitForTimeout(12_000);
+          await shoot('00e-sc-after-tile.png');
+          const viewProbe = await openMenu(C_VIEW, '00f-sc-view-menu.png');
+          dc.writerOpenedAfterCancel = Boolean(viewProbe);
+          dc.reproducedOnStartCenter =
+            Boolean(dc.scControlMenuOpened) && Boolean(dlg) && !viewProbe;
+          if (viewProbe) await page.keyboard.press('Escape');
+          await page.waitForTimeout(1500);
+        }
+      }
+    }
+
+    // 上の段で Writer が開いていなければ、ここで開く(#167 の前提)
+    const hasWriter = result.deadClick.writerOpenedAfterCancel === true;
+    if (!hasWriter) {
+      await page.mouse.click(win.x + C_WRITER[0], win.y + C_WRITER[1]);
+      await page.waitForTimeout(12_000);
+    }
     await shoot('01-writer.png');
     result.crashedAfterBoot = await page.evaluate(CRASHED);
 
@@ -248,9 +311,9 @@ async function main() {
       result.sidebar.note = '表示メニューが開かない ── 座標(PKC3_S_VIEW)か dead click を疑う';
     }
 
-    // ─────────────── #168: Options キャンセル後の dead click ───────────────
+    // ─── 参考: 同じことを Writer の面でも見る(#168 本体は Start Center 段) ───
     if (result.sidebar.crashed) {
-      result.deadClick.skipped = '前段(#167)で停止したので測らない';
+      result.deadClick.writerStageSkipped = '前段(#167)で停止したので測らない';
     } else {
       // 対照群①: Options を開く**前**に、ツール(T) が開くこと
       const beforeAll = new Set((await page.evaluate(SURVEY)).map(key));
