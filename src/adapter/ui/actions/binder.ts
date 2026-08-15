@@ -27,6 +27,7 @@ import { parseLinkTarget } from '@features/entry-ref/link-target';
 import { handleCopyMdBlock } from './copy-md-block';
 import { finishCopy, selectedMarkdown } from './copy-source';
 import { copyMarkdownAndHtml, copyPlainText } from '@adapter/platform/clipboard';
+import { cleanForClipboard } from '@features/export/clipboard-html';
 import { askConfirm, SUPPRESSED_MESSAGE } from '@adapter/platform/ask-confirm';
 
 type ActionHandler = (
@@ -62,6 +63,11 @@ export function generateLid(): string {
 export interface BinderServices {
   attachFiles?(files: File[]): void;
   downloadAsset?(assetKey: string, name: string): void;
+  /**
+   * 🔴 **貼る用に画像を持ち歩ける形へ**(#193)。`blob:` → `data:` の対応を返す。
+   * ⚠ **省略可** ── 無ければ画像は文字に置き換わる(壊れた画像を貼らせない)。
+   */
+  inlineImages?(urls: readonly string[]): Promise<ReadonlyMap<string, string>>;
   /**
    * 🔴 **画像を別の窓で見る**(#192)。⚠ 実体は adapter/platform 側
    * (ObjectURL の寿命が絡むので、binder は**呼ぶだけ**)。
@@ -732,12 +738,44 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (body === undefined) return;
     finishCopy(dispatcher, target, copyPlainText(body));
   },
-  'copy-note-rich': (dispatcher, target, _services, root) => {
+  /**
+   * 🔴 **よそのアプリへ貼る用に掃除してから渡す**(#193)。
+   *
+   * ⚠ 直す前は `host.innerHTML` を**そのまま**渡していた ── 画面の DOM には
+   * 「CSS で隠してあるだけのソース」「押せない操作子」「この document でしか
+   * 有効でない `blob:` 画像」が入っており、Word / Notion に貼ると**全部出る**
+   * (図の下に生の原文、壊れた画像、押せないボタン)。
+   * ⚠ 掃除は**複製に対して**行う ── 画面には触れない。
+   * ⚠ 落としたものは**数えて言う**(黙って消さない)。
+   */
+  'copy-note-rich': (dispatcher, target, services, root) => {
     const body = dispatcher.getState().openBody?.body;
     const host = viewBodyHost(root);
     if (body === undefined || host === null) return;
-    // plain 側は原文(markdown)── 貼り付け先が editor なら原文、rich なら描画
-    finishCopy(dispatcher, target, copyMarkdownAndHtml(body, host.innerHTML));
+    const clone = host.cloneNode(true) as HTMLElement;
+    const inline = services.inlineImages;
+    const run = (urls: ReadonlyMap<string, string>): void => {
+      const { html, droppedImages } = cleanForClipboard(clone, urls);
+      // plain 側は原文(markdown)── 貼り付け先が editor なら原文、rich なら描画
+      finishCopy(dispatcher, target, copyMarkdownAndHtml(body, html));
+      if (droppedImages > 0)
+        dispatcher.dispatch({
+          type: 'OP_FAILED',
+          error: `画像 ${droppedImages} 件は貼り先で読めないため文字に置き換えました`,
+        });
+    };
+    if (!inline) {
+      run(new Map());
+      return;
+    }
+    const blobs = [...clone.querySelectorAll('img')]
+      .map((i) => i.getAttribute('src') ?? '')
+      .filter((u) => u.startsWith('blob:'));
+    if (blobs.length === 0) {
+      run(new Map());
+      return;
+    }
+    void inline(blobs).then(run, () => run(new Map()));
   },
   /**
    * 選択範囲を Markdown の原文でコピーする。逆引きの規則は `copy-source.ts` の

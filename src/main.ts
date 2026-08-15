@@ -784,6 +784,30 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * 🔴 **画像を別の窓で見る**(#192)。⚠ 貸した ObjectURL は
      * `openImageWindow` が**窓の生死に合わせて**捨てる(窓が開けなければ即捨てる)。
      */
+    /**
+     * 🔴 **貼る用に画像を持ち歩ける形へ**(#193)。`blob:` を読み直して `data:` にする。
+     * ⚠ 同一 document の blob なので `fetch` で読める。⚠ 読めなかったものは
+     *   **入れない**(呼び側が「落とした」と数えて user に言う)。
+     * ⚠ 大きい画像を並べると heap に載るので、**1 枚ずつ順に**処理して都度捨てる。
+     */
+    inlineImages: async (urls) => {
+      const out = new Map<string, string>();
+      for (const url of urls) {
+        try {
+          const blob = await (await fetch(url)).blob();
+          const data = await new Promise<string>((resolve, reject) => {
+            const fr = new FileReader();
+            fr.onload = () => resolve(String(fr.result));
+            fr.onerror = () => reject(fr.error ?? new Error('read failed'));
+            fr.readAsDataURL(blob);
+          });
+          out.set(url, data);
+        } catch {
+          // 読めない 1 枚で全部を失わない ── その 1 枚だけ落ちる
+        }
+      }
+      return out;
+    },
     viewImage: (assetKey, name) => {
       void (async () => {
         try {
