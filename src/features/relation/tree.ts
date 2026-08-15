@@ -19,7 +19,8 @@
  */
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
 
-const STRUCTURAL = 'structural';
+// ⚠ 正本は `kinds.ts` ── ここで文字列を書き直さない(#185 で 3 か所から寄せた)
+import { STRUCTURAL } from './kinds';
 
 /** child lid → 正準親 lid。規約外の辺(非 folder 親 / 不在親 / 自己辺)は無視。 */
 export function resolveCanonicalParents(

@@ -17,6 +17,7 @@ import { join } from 'node:path';
 import { buildShell } from '../src/adapter/ui/render/shell';
 import { showUpdateCard } from '../src/adapter/ui/render/update-card';
 import { RENDERABLE_FENCE_LANGS } from '../src/features/markdown/markdown-render';
+import { RELATION_KINDS } from '../src/features/relation/kinds';
 import { MARKDOWN_EXTENSIONS } from '../src/features/import/plain-markdown';
 import { REVISION_KEEP_LATEST } from '../src/adapter/platform/storage/store-port';
 import { THEMES } from '../src/adapter/ui/render/theme';
@@ -497,14 +498,22 @@ describe('移行ガイドと実装の突合', () => {
   });
 
   it('🔴 relation の kind が一致する', () => {
-    const src = readFileSync('src/features/import/pkc2-convert.ts', 'utf-8');
-    const block = /const KNOWN_RELATION_KINDS = new Set\(\[([^\]]+)\]/.exec(src)?.[1] ?? '';
-    const kinds = [...block.matchAll(/'([a-z]+)'/g)].map((m) => m[1]!);
+    /**
+     * ⚠ **正本を読む**(#185 で `features/relation/kinds.ts` へ寄せた)。
+     * 初稿は取込 file の literal を正規表現で削り取っていたので、
+     * **一覧を 1 か所へ寄せた瞬間に空になって落ちた** ── 実体を動かしたら
+     * 指す先も同じ commit で張り替える(壊れたポインタを残さない)。
+     * 🔑 import で取れば、そもそも削り取りに失敗しようが無い。
+     */
+    const kinds = [...RELATION_KINDS];
     expect(kinds.length).toBeGreaterThan(0);
     for (const kind of kinds) {
       expect(MIGRATION, `移行ガイドに kind \`${kind}\` が無い`).toContain(`\`${kind}\``);
     }
     expect(MIGRATION).toContain(`${kinds.length} 種`);
+    // ⚠ 取込が**正本を使っている**ことも見る(literal を書き戻したら落とす)
+    const src = readFileSync('src/features/import/pkc2-convert.ts', 'utf-8');
+    expect(src, '取込が種類の一覧を自前で持っている').toContain('new Set(RELATION_KINDS)');
   });
 
   it('🔴 一方通行であることが両方に書いてある', () => {

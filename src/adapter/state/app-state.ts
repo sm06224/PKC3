@@ -15,6 +15,7 @@ import { withTodoStatus } from '@features/flavor/todo-flavor';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import type { LauncherTile } from '@features/launcher/tiles';
 import { visibleOrder } from '@features/filter/title-filter';
+import { STRUCTURAL } from '@features/relation/kinds';
 import { replaceAll } from '@features/markdown/body-replace';
 import {
   EMPTY_HISTORY,
@@ -1311,7 +1312,7 @@ function reduceCore(
                 id: action.relationId as string,
                 fromLid: parentLid,
                 toLid: action.lid,
-                kind: 'structural' as const,
+                kind: STRUCTURAL,
                 // ⚠ 時刻は worker が刻む(SET_ENTRY_PARENT と同じ約束)
                 createdAt: null,
                 updatedAt: null,
@@ -1434,7 +1435,7 @@ function reduceCore(
       // 楽観更新 ── 画面(ファイラ)は state.relations から描くので、
       // ここで直さないと「押したのに動かない」に見える
       const kept = state.relations.filter(
-        (r) => !(r.kind === 'structural' && r.toLid === action.lid),
+        (r) => !(r.kind === STRUCTURAL && r.toLid === action.lid),
       );
       const relations =
         parentLid === null
@@ -1445,7 +1446,7 @@ function reduceCore(
                 id: action.relationId,
                 fromLid: parentLid,
                 toLid: action.lid,
-                kind: 'structural' as const,
+                kind: STRUCTURAL,
                 // ⚠ 時刻は **worker が刻む**(`datetime('now')`)。ここは楽観表示の
                 //    ための仮値で、次の再読込で本物に置き換わる
                 createdAt: null,
