@@ -16,6 +16,7 @@ import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { CenterRouter } from '../../src/adapter/ui/render/center';
 
 describe('置換の規則(純関数)', () => {
   it('🔴 正規表現ではなく素の文字列で当てる', () => {
@@ -81,12 +82,19 @@ describe('置換の配線', () => {
     localStorage.clear();
   });
 
+  /**
+   * ⚠ **本文の面まで描く**(2026-08-15)── 置換の切替は**編集の帯**へ移したので、
+   * 器を組んだだけでは画面に出ない。`CenterRouter` を繋いで**実際に編集へ入る**。
+   * 🔑 これは規律どおりでもある: 押す物が在る状態で押す(dispatch で近道しない)。
+   */
   function editing(body: string) {
     const root = document.createElement('div');
     root.setAttribute('data-pkc-slot', 'root');
     document.body.append(root);
     const d = new Dispatcher();
-    buildShell(root);
+    const regions = buildShell(root);
+    const center = new CenterRouter(regions.detail);
+    d.onState((st) => center.render(st));
     bindActions(root, d);
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1')], relations: [] });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
@@ -133,9 +141,15 @@ describe('置換の配線', () => {
   });
 
   it('🔴 帯は既定で畳まれ、押すと開いて探す欄に焦点が来る', () => {
-    const { root } = editing('ログ\n');
+    const { root, d } = editing('ログ\n');
     const bar = root.querySelector<HTMLElement>('[data-pkc-region="replace-bar"]')!;
     expect(bar.hidden, '常に居座っている').toBe(true);
+    // ⚠ 切替は**編集の帯**に在る(閲覧中は押せない導線を置かない)
+    expect(
+      root.querySelector('[data-pkc-action="toggle-replace"]'),
+      '閲覧中なのに置換の切替が出ている',
+    ).toBeNull();
+    d.dispatch({ type: 'START_EDIT' });
     press(root, 'toggle-replace');
     expect(bar.hidden).toBe(false);
     expect(
@@ -146,8 +160,9 @@ describe('置換の配線', () => {
     expect(bar.hidden, 'もう一度押しても閉じない').toBe(true);
   });
 
-  it('🔴 Ctrl+H が同じボタンを押す', () => {
-    const { root } = editing('ログ\n');
+  it('🔴 Ctrl+H が同じボタンを押す(編集中)', () => {
+    const { root, d } = editing('ログ\n');
+    d.dispatch({ type: 'START_EDIT' });
     document.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'h', ctrlKey: true, bubbles: true, cancelable: true }),
     );

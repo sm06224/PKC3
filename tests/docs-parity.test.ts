@@ -310,7 +310,12 @@ describe('マニュアルと実装の突合', () => {
     const labels = [...bar.querySelectorAll('button')].map(
       (b) => b.querySelector('[data-pkc-field="label"]')?.textContent ?? '',
     );
-    expect(labels).toEqual(FORMAT_OPS.map((o) => o.label));
+    /**
+     * ⚠ **書式そのもの以外も 1 つ乗っている**(2026-08-15)── 置換の切替を
+     * この帯へ移した(user 指示「中央の上を潰しすぎ」)。⚠ 等値で pin したままにする
+     * ── 増えたら**ここが落ちる**のが正しい(黙って増える帯にしない)。
+     */
+    expect(labels).toEqual([...FORMAT_OPS.map((o) => o.label), '置換']);
     expect(labels.length).toBeGreaterThan(0);
     for (const label of labels) {
       expect(MANUAL, `マニュアルに書式「${label}」の説明が無い`).toContain(`**${label}**`);
