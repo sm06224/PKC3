@@ -38,7 +38,8 @@ const VIEWPORT = { width: 1280, height: 800 };
 const C_WRITER = [133, 315];
 const C_VIEW = (process.env.PKC3_S_VIEW ?? '210,71').split(',').map(Number);
 const C_TOOLS = (process.env.PKC3_S_TOOLS ?? '681,71').split(',').map(Number);
-const C_SIDEBAR = (process.env.PKC3_S_SIDEBAR ?? '60,250').split(',').map(Number);
+// 実測(1 巡目の 02-view-menu.png)── サイドバー(P) はメニュー上端から 565px
+const C_SIDEBAR = (process.env.PKC3_S_SIDEBAR ?? '60,565').split(',').map(Number);
 const C_CANCEL = (process.env.PKC3_S_CANCEL ?? '-150,-28').split(',').map(Number);
 
 const MIME = {
@@ -210,13 +211,23 @@ async function main() {
     result.sidebar.menuOpened = Boolean(viewMenu);
     result.sidebar.menu = viewMenu;
     if (viewMenu) {
+      const beforeItem = new Set((await page.evaluate(SURVEY)).map(key));
       await page.mouse.click(viewMenu.x + C_SIDEBAR[0], viewMenu.y + C_SIDEBAR[1]);
       await page.waitForTimeout(6000);
       await page.screenshot({ path: join(SHOTS, '03-after-sidebar.png') });
       result.sidebar.crashed = await page.evaluate(CRASHED);
       result.sidebar.oob = oob();
-      // 停止していなければ、窓の様子も残す(サイドバーが出たかは絵でしか分からない)
-      result.sidebar.windowsAfter = (await page.evaluate(SURVEY)).length;
+      const after = await page.evaluate(SURVEY);
+      result.sidebar.windowsAfter = after.length;
+      /**
+       * 🔑 **空振りの検出**(1 巡目で実際に踏んだ)。サイドバーは終端の項目なので、
+       * 押せばメニューは**閉じる**。新しい窓が出たなら、それは**サブメニューを持つ
+       * 別の行**を押したということ ── 「停止しなかった」は何も言っていない。
+       */
+      result.sidebar.unexpectedSubmenu = after.some((w) => !beforeItem.has(key(w)));
+      result.sidebar.menuClosed = !after.some((w) => key(w) === key(viewMenu));
+      result.sidebar.verdictValid =
+        !result.sidebar.unexpectedSubmenu && result.sidebar.menuClosed;
     } else {
       result.sidebar.note = '表示メニューが開かない ── 座標(PKC3_S_VIEW)か dead click を疑う';
     }
@@ -226,16 +237,26 @@ async function main() {
       result.deadClick.skipped = '前段(#167)で停止したので測らない';
     } else {
       // 対照群①: Options を開く**前**に、ツール(T) が開くこと
+      const beforeAll = new Set((await page.evaluate(SURVEY)).map(key));
       const before = await openMenu(C_TOOLS, '04-tools-before.png');
       result.deadClick.controlMenuOpened = Boolean(before);
       if (before) {
         // オプション… は最終行(下端から半行上)
         await page.mouse.click(before.x + 60, before.y + before.h - 13);
         await page.waitForTimeout(4000);
+        /**
+         * 🔴 **「新しく現れた窓」から選ぶ**(1 巡目はここを落として**本体窓**を
+         * Options と誤認し、以降の判定が全部無意味になった ── §1 の空振り)。
+         * ⚠ 「大きい窓」で選ぶと本体窓が常に勝つ ── 面積は代替物である。
+         */
         const dlg = (await page.evaluate(SURVEY))
+          .filter((w) => !beforeAll.has(key(w)))
           .filter((w) => w.w >= 300)
           .sort((a, b) => b.w * b.h - a.w * a.h)[0];
         result.deadClick.dialog = dlg ?? null;
+        result.deadClick.dialogIsMainWindow = Boolean(
+          dlg && dlg.w === win.w && dlg.h === win.h,
+        );
         await page.screenshot({ path: join(SHOTS, '05-options.png') });
         if (dlg) {
           // 🔴 **キャンセルのボタンで閉じる**(Escape ではない ── #168 の報告は
