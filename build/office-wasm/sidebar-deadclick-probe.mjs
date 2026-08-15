@@ -132,12 +132,28 @@ async function main() {
   page.on('console', (m) => lines.push(`[${m.type()}] ${m.text()}`.slice(0, 200)));
   const oob = () => lines.some((l) => l.includes('memory access out of bounds'));
 
+  /**
+   * 絵を残す。⚠ **失敗しても計測ごと落とさない**(2 巡目で実際に踏んだ ──
+   * 1 枚目の screenshot が 30 秒 timeout し、判定 2 件が両方とも空で終わった)。
+   * 🔑 しかも「撮れなかった」= **その瞬間ページが応答していない**という観測結果
+   *   なので、捨てずに記録する(#167 / #168 は「固まる」系の疑いである)。
+   */
+  const shoot = async (name) => {
+    try {
+      await page.screenshot({ path: join(SHOTS, name), timeout: 15_000 });
+      return true;
+    } catch {
+      (result.unresponsiveAt ??= []).push(name);
+      return false;
+    }
+  };
+
   /** メニューを開いて、**新しく現れた窓**を返す(個体で見る ── 枚数では見ない)。 */
   const openMenu = async (xy, shot) => {
     const before = new Set((await page.evaluate(SURVEY)).map(key));
     await page.mouse.click(xy[0], xy[1]);
     await page.waitForTimeout(2500);
-    if (shot) await page.screenshot({ path: join(SHOTS, shot) });
+    if (shot) await shoot(shot);
     return (await page.evaluate(SURVEY)).filter((w) => !before.has(key(w))).pop() ?? null;
   };
 
@@ -202,7 +218,7 @@ async function main() {
     if (!win) throw new Error('窓が 1 つも無い');
     await page.mouse.click(win.x + C_WRITER[0], win.y + C_WRITER[1]);
     await page.waitForTimeout(12_000);
-    await page.screenshot({ path: join(SHOTS, '01-writer.png') });
+    await shoot('01-writer.png');
     result.crashedAfterBoot = await page.evaluate(CRASHED);
 
     // ───────────────────────── #167: サイドバー ─────────────────────────
@@ -214,7 +230,7 @@ async function main() {
       const beforeItem = new Set((await page.evaluate(SURVEY)).map(key));
       await page.mouse.click(viewMenu.x + C_SIDEBAR[0], viewMenu.y + C_SIDEBAR[1]);
       await page.waitForTimeout(6000);
-      await page.screenshot({ path: join(SHOTS, '03-after-sidebar.png') });
+      await shoot('03-after-sidebar.png');
       result.sidebar.crashed = await page.evaluate(CRASHED);
       result.sidebar.oob = oob();
       const after = await page.evaluate(SURVEY);
@@ -257,13 +273,13 @@ async function main() {
         result.deadClick.dialogIsMainWindow = Boolean(
           dlg && dlg.w === win.w && dlg.h === win.h,
         );
-        await page.screenshot({ path: join(SHOTS, '05-options.png') });
+        await shoot('05-options.png');
         if (dlg) {
           // 🔴 **キャンセルのボタンで閉じる**(Escape ではない ── #168 の報告は
           //    「キャンセル後」であり、Escape 経路は #166 側で測っている)
           await page.mouse.click(dlg.x + dlg.w + C_CANCEL[0], dlg.y + dlg.h + C_CANCEL[1]);
           await page.waitForTimeout(4000);
-          await page.screenshot({ path: join(SHOTS, '06-after-cancel.png') });
+          await shoot('06-after-cancel.png');
           result.deadClick.crashedAfterCancel = await page.evaluate(CRASHED);
           result.deadClick.dialogClosed =
             (await page.evaluate(SURVEY)).every((w) => key(w) !== key(dlg));
