@@ -43,7 +43,13 @@ const DIST = resolve('dist');
 const SHOTS = `/tmp/pkc3-sidebar-shots/${PACK.split('/').pop()}`;
 const VIEWPORT = { width: 1280, height: 800 };
 
-const C_WRITER = [133, 315];
+/**
+ * Start Center の「Writer 文書ドキュメント」(窓の左上からの相対)。
+ * 🔴 **DPR で位置が変わる**(2026-08-15 実測)── DPR2 では既定値が
+ * **Calc の行**に当たり、以降の段が Calc の上で走っていた。
+ * DPR1: 133,315 / DPR2: 146,270(実測)
+ */
+const C_WRITER = (process.env.PKC3_S_WRITER ?? '133,315').split(',').map(Number);
 const C_VIEW = (process.env.PKC3_S_VIEW ?? '210,71').split(',').map(Number);
 const C_TOOLS = (process.env.PKC3_S_TOOLS ?? '681,71').split(',').map(Number);
 // 実測(1 巡目の 02-view-menu.png)── サイドバー(P) はメニュー上端から 565px
@@ -236,6 +242,7 @@ async function main() {
       // 対照群: Options を開く**前**に、Start Center のクリックが届くこと
       const pre = await openMenu(C_SC_FILE, '00a-sc-file-menu.png');
       dc.scControlMenuOpened = Boolean(pre);
+      dc.scFileMenuHeightBefore = pre?.h ?? null;
       if (pre) await page.keyboard.press('Escape');
       await page.waitForTimeout(1500);
 
@@ -258,25 +265,35 @@ async function main() {
           dc.scDialogClosed = (await page.evaluate(SURVEY)).every((w) => key(w) !== key(dlg));
           /**
            * 🔑 **観測点**: タイルを押しても窓の**枚数は増えない**(Start Center が
-           * Writer に化ける)ので、枚数でも rect でも判定できない。代わりに
-           * **Writer にしか無いメニュー**(表示(V) の位置)が開くかで見る ──
-           * Start Center のメニューバーは 3 項目しかなく、その x には何も無い。
+           * 文書アプリに化ける)ので、枚数でも rect でも判定できない。
+           *
+           * 🔴 初稿は「表示(V) の位置でメニューが開くか」で見たが、**Calc にも
+           * 表示(V) は在る**ので「Writer が開いた」の証拠にならなかった(実際
+           * DPR2 では既定座標が Calc の行に当たり、それで満たされていた)。
+           * ⚠ しかも判定名が `writerOpened…` だったので、**別のアプリが開いた回を
+           * Writer だと読む**ところだった。
+           *
+           * いまは **ファイル(F) メニューの高さ**で見る ── Start Center の
+           * ファイルメニューと文書アプリのそれは項目数が違うので、高さが変われば
+           * 「別のアプリになった」= クリックは死んでいない、と言える(個体で見る)。
            */
           await page.mouse.click(win.x + C_WRITER[0], win.y + C_WRITER[1]);
           await page.waitForTimeout(12_000);
           await shoot('00e-sc-after-tile.png');
-          const viewProbe = await openMenu(C_VIEW, '00f-sc-view-menu.png');
-          dc.writerOpenedAfterCancel = Boolean(viewProbe);
+          const post = await openMenu(C_SC_FILE, '00f-sc-file-menu-after.png');
+          dc.scFileMenuHeightAfter = post?.h ?? null;
+          dc.documentOpenedAfterCancel =
+            Boolean(post) && post.h !== dc.scFileMenuHeightBefore;
           dc.reproducedOnStartCenter =
-            Boolean(dc.scControlMenuOpened) && Boolean(dlg) && !viewProbe;
-          if (viewProbe) await page.keyboard.press('Escape');
+            Boolean(dc.scControlMenuOpened) && Boolean(dlg) && !dc.documentOpenedAfterCancel;
+          if (post) await page.keyboard.press('Escape');
           await page.waitForTimeout(1500);
         }
       }
     }
 
-    // 上の段で Writer が開いていなければ、ここで開く(#167 の前提)
-    const hasWriter = result.deadClick.writerOpenedAfterCancel === true;
+    // 上の段で文書アプリが開いていなければ、ここで開く(#167 の前提)
+    const hasWriter = result.deadClick.documentOpenedAfterCancel === true;
     if (!hasWriter) {
       await page.mouse.click(win.x + C_WRITER[0], win.y + C_WRITER[1]);
       await page.waitForTimeout(12_000);
