@@ -29,6 +29,28 @@ export function matchesTitle(title: string, normalizedQuery: string): boolean {
 }
 
 /**
+ * 🔴 **題名 + 本文**で見る(#181)。本文の当たりは SQL 側から来た lid の集合で渡す
+ * ── 本文は主スレッドに常駐していないので、ここで本文そのものは見られない。
+ *
+ * ⚠ **規則はこの 1 か所**。絞り込みを描く面は 5 つある(sidebar / launcher /
+ * filer / kanban / calendar)ので、面ごとに OR を書くと**必ずどれかが題名だけの
+ * まま取り残される**(CLAUDE.md §7 ── 実際 PKC2 で 4 面に散った)。
+ *
+ * @param bodyHits SQL が返した「本文が当たった lid」。⚠ **null は「まだ返って
+ *   いない」**であって「0 件」ではない ── 打った直後は題名の結果だけを見せ、
+ *   返ってきたら増える(消えるのではなく増える向きに倒す)。
+ */
+export function matchesEntry(
+  lid: string,
+  title: string,
+  normalizedQuery: string,
+  bodyHits: ReadonlySet<string> | null,
+): boolean {
+  if (normalizedQuery === '') return true;
+  return matchesTitle(title, normalizedQuery) || bodyHits?.has(lid) === true;
+}
+
+/**
  * 絞り込みに残る lid を**元の並びのまま**返す。
  *
  * @param titleOf lid → 題名(未知 lid は `undefined` を返してよい ── 落とす)

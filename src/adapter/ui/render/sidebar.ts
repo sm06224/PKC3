@@ -10,7 +10,7 @@
  */
 import type { EntryMeta } from '@core/model/entry-meta';
 import type { AppState } from '@adapter/state/app-state';
-import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
+import { matchesEntry, normalizeQuery } from '@features/filter/title-filter';
 import { ARCHETYPE_ICONS, iconSpan, setIcon, type IconName } from './icons';
 import { formatListDate, formatStoredDate } from '@features/datetime/stored-date';
 
@@ -35,6 +35,7 @@ export class SidebarRenderer {
   private lastOrder: readonly string[] | null = null;
   private lastSelected: string | null = null;
   /** ⚠ 絞り込みも**指紋の一部** ── 入れないと、絞っても行が減らない。 */
+  private lastHits: ReadonlySet<string> | null = null;
   private lastFilter: string | null = null;
 
   /** 絞り込み欄。⚠ **state が正** ── 欄の値は state に合わせて書き戻す。 */
@@ -57,7 +58,11 @@ export class SidebarRenderer {
     const listChanged =
       state.entryMetas !== this.lastMetas ||
       state.order !== this.lastOrder ||
-      state.filterQuery !== this.lastFilter;
+      state.filterQuery !== this.lastFilter ||
+      // 🔴 **本文の当たりも指紋の一部**(#181)。入れないと、SQL が返っても
+      //    画面が変わらない ── state だけ正しくて**行が増えない**
+      //    (絞り込みを指紋に入れ忘れた 2026-08 の再演。今回は test が捕まえた)
+      state.searchHits !== this.lastHits;
     const selectionChanged = state.selectedLid !== this.lastSelected;
     if (!listChanged && !selectionChanged) return; // 指紋一致 ── DOM に触れない
 
@@ -71,6 +76,7 @@ export class SidebarRenderer {
     if (listChanged || selectionChanged) this.patchSelection(state.selectedLid);
 
     this.lastMetas = state.entryMetas;
+    this.lastHits = state.searchHits;
     this.lastOrder = state.order;
     this.lastFilter = state.filterQuery;
     this.lastSelected = state.selectedLid;
@@ -99,7 +105,7 @@ export class SidebarRenderer {
       const meta = state.entryMetas.get(lid);
       if (!meta) continue;
       alive.add(lid);
-      if (!matchesTitle(meta.title, q)) continue;
+      if (!matchesEntry(lid, meta.title, q, state.searchHits)) continue;
       wanted.add(lid);
       visible.push(lid);
     }

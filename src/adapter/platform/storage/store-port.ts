@@ -47,6 +47,12 @@ export const REVISION_KEEP_LATEST = 100;
 export function createStorePort(client: StoreClientLike, cid: string): StorePort {
   return {
     getBody: (lid) => client.request({ op: 'getBody', cid, lid }),
+    /**
+     * 本文の全文検索(#181)。⚠ ここは**渡すだけ** ── 引き方(FTS / LIKE)の規則は
+     * `features/filter/search-query.ts` が 1 か所で持ち、実行は worker がする。
+     */
+    searchEntries: async (query) =>
+      (await client.request({ op: 'searchEntries', cid, query })).lids,
     getBodies: (lids) => client.request({ op: 'getBodies', cid, lids }),
     listBodies: (after, maxBytes) =>
       client.request({ op: 'listBodies', cid, maxBytes, ...(after ? { after } : {}) }),

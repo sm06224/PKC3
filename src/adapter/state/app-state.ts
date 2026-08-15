@@ -120,6 +120,18 @@ export interface AppState {
    */
   filterQuery: string;
   /**
+   * 🔴 **本文が当たった lid**(#181 全文検索)。⚠ `null` = **まだ返っていない**
+   * であって「0 件」ではない ── 打った直後は題名の結果だけが出て、SQL が返ると
+   * **増える**(減る向きに倒すと、打鍵のたびに行が消えてちらつく)。
+   * ⚠ 本文は常駐していないので、当たりは SQL 側からしか来ない。
+   */
+  searchHits: ReadonlySet<string> | null;
+  /**
+   * `searchHits` が**どの問い合わせの結果か**。⚠ これが無いと、遅れて返った
+   * 古い結果を新しい問い合わせの答えとして表示してしまう(打鍵は結果より速い)。
+   */
+  searchHitsQuery: string;
+  /**
    * ランチャーのタイル(P7b 段⑩)。⚠ `null` = **まだ読んでいない**。
    * 元データは attachment の frontmatter で**常駐していない**ので、
    * ランチャーを開いたときに要求して還流させる(履歴一覧と同じ流儀)。
@@ -198,6 +210,8 @@ export const initialState: AppState = {
   freshLid: null,
   viewMode: 'detail',
   filterQuery: '',
+  searchHits: null,
+  searchHitsQuery: '',
   launcherTiles: null,
   calendarMonth: null,
   showArchived: false,
@@ -214,6 +228,8 @@ export type UserAction =
   | { type: 'SELECT_ENTRY'; lid: string }
   | { type: 'SET_VIEW_MODE'; mode: ViewMode }
   | { type: 'SET_ENTRY_FILTER'; query: string }
+  /** 本文の当たりが SQL から返った(#181)。⚠ `query` は**どの問い合わせの答えか**。 */
+  | { type: 'SET_SEARCH_HITS'; query: string; lids: string[] }
   | { type: 'LAUNCHER_TILES_LOADED'; tiles: LauncherTile[] }
   /**
    * アプリの一覧を読み直す(P8 段⑱)。
@@ -387,6 +403,11 @@ export type Dispatchable = UserAction | SystemCommand;
  */
 export type DomainEvent =
   | { type: 'REQUEST_BODY'; lid: string }
+  /**
+   * 本文の全文検索を頼む(#181)。⚠ 本文は常駐していないので **SQL 側の仕事**。
+   * 空文字は「絞り込み無し」── 受け手は問い合わせずに黙って終える。
+   */
+  | { type: 'REQUEST_SEARCH'; query: string }
   /** ⚠ **どれを読むかを載せる** ── effect 層は実行時に state を見ない(review L-6)。 */
   | {
       type: 'REQUEST_TILE_UPDATE';
@@ -598,7 +619,26 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       // ⚠ 選択は消さない(`SET_VIEW_MODE` と同じ規約)── 絞り込んで消えた行を
       // 選んでいても、解除すれば戻ってくる
       if (state.filterQuery === action.query) return { state, events: [] };
-      return { state: { ...state, filterQuery: action.query }, events: [] };
+      /**
+       * 🔴 **問い合わせが変わったら本文の当たりは捨てる**(#181)── 残すと
+       * 「前の語で当たった行」が新しい絞り込みに混ざる。⚠ 捨てたうえで
+       * `REQUEST_SEARCH` を出し、返ってきたら `SET_SEARCH_HITS` で増やす。
+       */
+      return {
+        state: { ...state, filterQuery: action.query, searchHits: null, searchHitsQuery: '' },
+        events: [{ type: 'REQUEST_SEARCH', query: action.query }],
+      };
+    case 'SET_SEARCH_HITS':
+      // ⚠ **遅れて返った古い結果を捨てる**(打鍵は結果より速い)
+      if (action.query !== state.filterQuery) return { state, events: [] };
+      return {
+        state: {
+          ...state,
+          searchHits: new Set(action.lids),
+          searchHitsQuery: action.query,
+        },
+        events: [],
+      };
     case 'SET_VIEW_MODE':
       // selection は消さない(PKC2 規約)。panel は view に従属するので畳む
       /**

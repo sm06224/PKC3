@@ -27,7 +27,7 @@ import {
   listMoveTargets,
   listSiblings,
 } from '@features/relation/tree';
-import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
+import { matchesEntry, normalizeQuery } from '@features/filter/title-filter';
 // 🔑 種別の呼び名は **1 本**(P8 段⑲)── かつてここだけ独自表を持ち、
 //    同じノートがフォルダ画面では「シート」、他の全画面では「表」と出ていた
 import { archetypeLabel } from './sidebar';
@@ -231,7 +231,7 @@ export class FilerRenderer {
       scope
         ? getStructuralChildren(scope.lid, state.entryMetas, state.relations)
         : getRootEntries(state.entryMetas, state.relations)
-    ).filter((m) => matchesTitle(m.title, q));
+    ).filter((m) => matchesEntry(m.lid, m.title, q, state.searchHits));
 
     this.region.textContent = '';
     this.rows.clear();

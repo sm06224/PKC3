@@ -25,6 +25,11 @@ import type { Dispatcher } from './dispatcher';
 export interface StorePort {
   getBody(lid: string): Promise<string | null>;
   /**
+   * 本文の全文検索(#181)。⚠ **省略可** ── 検索を持たない環境(test の fake や
+   * 旧い配線)では題名の絞り込みだけが効く(壊れるのではなく、機能が減るだけ)。
+   */
+  searchEntries?(query: string): Promise<string[]>;
+  /**
    * 指定した lid の本文を **1 往復で** 取る(P7b review L-7)。
    * ⚠ 無い lid は結果に出ない ── 呼び側は「読めたものだけ」を受け取る。
    */
@@ -147,6 +152,27 @@ export function connectStoreEffects(
 
   const unsubscribe = dispatcher.onEvent((ev) => {
     switch (ev.type) {
+      /**
+       * 🔴 **本文の全文検索**(#181)。⚠ **直列 queue に載せない** ── 打鍵ごとに
+       * 走るので、載せると保存・本文読込がその後ろに詰まる(体感の主因になる)。
+       * 遅れて返った結果は reducer が `query` で捨てるので、順序保証は要らない。
+       */
+      case 'REQUEST_SEARCH': {
+        const search = store.searchEntries;
+        if (!search || ev.query.trim() === '') break;
+        const q = ev.query;
+        void search(q).then(
+          (lids) => {
+            if (disposed) return;
+            dispatcher.dispatch({ type: 'SET_SEARCH_HITS', query: q, lids });
+          },
+          () => {
+            /* ⚠ 検索の失敗で帯を出さない ── 題名の絞り込みは効いたままで、
+               user の操作は止まっていない(黙って減るのは「増えない」方向) */
+          },
+        );
+        break;
+      }
       case 'REQUEST_BODY':
         enqueue(async () => {
           if (disposed) return;

@@ -11,7 +11,7 @@ import {
   KANBAN_COLUMNS,
   type KanbanStatus,
 } from '@features/kanban/kanban-data';
-import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
+import { matchesEntry, normalizeQuery } from '@features/filter/title-filter';
 import { setIcon, type IconName } from './icons';
 
 export class KanbanRenderer {
@@ -47,7 +47,7 @@ export class KanbanRenderer {
     const ordered: EntryMeta[] = [];
     for (const lid of state.order) {
       const m = state.entryMetas.get(lid);
-      if (m && matchesTitle(m.title, q)) ordered.push(m);
+      if (m && matchesEntry(m.lid, m.title, q, state.searchHits)) ordered.push(m);
     }
     const grouped = groupTodosByStatus(ordered);
 
