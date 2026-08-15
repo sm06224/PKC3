@@ -180,6 +180,12 @@ export interface AppState {
   queryKeys: QueryKeys | null;
   queryGroups: QueryGroups | null;
   /**
+   * 🔴 **数えられなかった**(レビュー B-5)。⚠ `queryKeys === null` は「まだ」で
+   * あって「駄目だった」ではない ── 区別しないと、面が「数えています…」を出したまま
+   * **永久に止まって見える**(古い worker が残っている端末で実際に起きる)。
+   */
+  queryFailed: boolean;
+  /**
    * ランチャーのタイル(P7b 段⑩)。⚠ `null` = **まだ読んでいない**。
    * 元データは attachment の frontmatter で**常駐していない**ので、
    * ランチャーを開いたときに要求して還流させる(履歴一覧と同じ流儀)。
@@ -265,6 +271,7 @@ export const initialState: AppState = {
   queryKey: null,
   queryKeys: null,
   queryGroups: null,
+  queryFailed: false,
   launcherTiles: null,
   calendarMonth: null,
   showArchived: false,
@@ -291,13 +298,20 @@ export type UserAction =
    * 見出しだけ変わって中身が古いままの表になる。
    */
   | { type: 'SET_QUERY_KEY'; key: string | null }
-  /** 束ねられる key の目録が SQL から返った(#184)。 */
-  | { type: 'SET_QUERY_KEYS'; keys: QueryKeys }
   /**
-   * 束ねた結果が返った(#184)。⚠ `key` は**どの束ね方の答えか** ──
-   * 検索の `SET_SEARCH_HITS` と同じ理由(遅れて返った古い結果を捨てる)。
+   * 集計が返った(#184)。目録と表が **1 回の走査**で同時に届く。
+   * ⚠ `key` は**どの束ね方の答えか** ── 検索の `SET_SEARCH_HITS` と同じ理由
+   * (遅れて返った古い結果を捨てる)。
    */
-  | { type: 'SET_QUERY_GROUPS'; key: string; groups: QueryGroups }
+  | { type: 'SET_QUERY_SCAN'; key: string | null; keys: QueryKeys; groups: QueryGroups | null }
+  /** 集計が引けなかった(#184)。⚠ 「まだ」と区別する ── 出す文言が違う。 */
+  | { type: 'QUERY_FAILED' }
+  /**
+   * 数え直す(#184)。⚠ **`SET_VIEW_MODE` を借りない** ── 借りると
+   * `revisionPanel` / `trashPanel` が畳まれ、**ゴミ箱を開いたまま数え直すと
+   * 理由なく閉じる**(P8 段⑤ で「アプリ」タブが同じ形の事故を起こしている)。
+   */
+  | { type: 'REFRESH_QUERY' }
   /**
    * 選択の履歴を戻る・進む(#190)。⚠ **行き先は state が持つ** ── 呼び側が lid を
    * 決めると、履歴と選択が二重帳簿になる(§7)。
@@ -493,10 +507,10 @@ export type DomainEvent =
   | { type: 'REQUEST_SEARCH'; query: string }
   /**
    * 集計を頼む(#184)。⚠ 検索と同じ理由で **SQL 側の仕事** ── 本文は常駐していない。
-   * `REQUEST_QUERY_KEYS` = 束ねられる key の目録 / `REQUEST_QUERY_GROUPS` = 束ねた結果。
+   * ⚠ **目録と表を 1 回の走査で頼む**(`key` が `null` なら目録だけ)── 別々に
+   * 頼むと DB の全件走査が 2 回走る(レビュー B-3)。
    */
-  | { type: 'REQUEST_QUERY_KEYS' }
-  | { type: 'REQUEST_QUERY_GROUPS'; key: string }
+  | { type: 'REQUEST_QUERY_SCAN'; key: string | null }
   /** ⚠ **どれを読むかを載せる** ── effect 層は実行時に state を見ない(review L-6)。 */
   | {
       type: 'REQUEST_TILE_UPDATE';
@@ -696,8 +710,25 @@ function reduceCore(
           //    再読込では保つ(取込のたびに消えると、開いた直後に書き戻せなくなる)。
           //    ⚠ ただし**消えた lid は落とす** ── 居ない entry を指す導線を残さない
           linkedFiles: keepLinks(state, action.cid, metas),
+          /**
+           * 🔴 **集計の数字は再読込で捨てる**(レビュー C-1)。⚠ 取込はここを通るので、
+           * 残すと「N 件のノートを見ました」が**古い数**のまま出続ける。
+           * ⚠ 捨てるだけでは「数えています…」で止まるので、**面を開いていれば
+           * 数え直しも頼む**(捨てる側と頼む側は対で要る)。
+           * ⚠ 束ね方(`queryKey`)は端末の設定なので**保つ**。
+           */
+          queryKeys: null,
+          queryGroups: null,
+          queryFailed: false,
         },
-        events: keepLid === null ? [] : [{ type: 'REQUEST_BODY', lid: keepLid }],
+        events: [
+          ...(keepLid === null
+            ? []
+            : [{ type: 'REQUEST_BODY' as const, lid: keepLid }]),
+          ...(state.viewMode === 'query'
+            ? [{ type: 'REQUEST_QUERY_SCAN' as const, key: state.queryKey }]
+            : []),
+        ],
       };
     }
     case 'SELECT_ENTRY': {
@@ -786,16 +817,31 @@ function reduceCore(
        * 🔴 **前の表を必ず捨てる**(#184)。⚠ 残すと「見出しだけ変わって中身が
        * 古いまま」の表になる ── 検索が `searchHits` を捨てるのと同じ理由。
        */
-      const cleared = { ...state, queryKey: action.key, queryGroups: null };
+      const cleared = { ...state, queryKey: action.key, queryGroups: null, queryFailed: false };
       if (action.key === null) return { state: cleared, events: [] };
-      return { state: cleared, events: [{ type: 'REQUEST_QUERY_GROUPS', key: action.key }] };
+      return { state: cleared, events: [{ type: 'REQUEST_QUERY_SCAN', key: action.key }] };
     }
-    case 'SET_QUERY_KEYS':
-      return { state: { ...state, queryKeys: action.keys }, events: [] };
-    case 'SET_QUERY_GROUPS':
+    case 'REFRESH_QUERY':
+      // ⚠ 前の表は**消さない**(ランチャーと同じ ── 読み直しの間に空白を出さない)
+      return {
+        state: { ...state, queryFailed: false },
+        events: [{ type: 'REQUEST_QUERY_SCAN', key: state.queryKey }],
+      };
+    case 'SET_QUERY_SCAN':
       // ⚠ **遅れて返った古い結果を捨てる**(検索と同じ ── 選び直しは結果より速い)
       if (action.key !== state.queryKey) return { state, events: [] };
-      return { state: { ...state, queryGroups: action.groups }, events: [] };
+      return {
+        state: {
+          ...state,
+          queryKeys: action.keys,
+          // ⚠ key が無い走査は表を持たない ── そのとき前の表を消さない
+          queryGroups: action.groups ?? state.queryGroups,
+          queryFailed: false,
+        },
+        events: [],
+      };
+    case 'QUERY_FAILED':
+      return { state: { ...state, queryFailed: true }, events: [] };
     case 'SET_SEARCH_HITS':
       // ⚠ **遅れて返った古い結果を捨てる**(打鍵は結果より速い)
       if (action.query !== state.filterQuery) return { state, events: [] };
@@ -851,12 +897,7 @@ function reduceCore(
           action.mode === 'launcher'
             ? [{ type: 'REQUEST_LAUNCHER_TILES', entries: attachmentEntries(state) }]
             : action.mode === 'query'
-              ? [
-                  { type: 'REQUEST_QUERY_KEYS' },
-                  ...(state.queryKey === null
-                    ? []
-                    : [{ type: 'REQUEST_QUERY_GROUPS' as const, key: state.queryKey }]),
-                ]
+              ? [{ type: 'REQUEST_QUERY_SCAN', key: state.queryKey }]
               : [],
       };
     case 'REFRESH_LAUNCHER_TILES':

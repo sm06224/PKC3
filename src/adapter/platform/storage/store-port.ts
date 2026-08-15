@@ -57,9 +57,9 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
      * 集計(#184)。⚠ ここも**渡すだけ** ── 束ね方(並び・上限)の規則は
      * `features/query/group-by.ts` が 1 か所で持つ(PKC2 は描画関数の中に
      * 直書きして 3 実装に増やした)。
+     * ⚠ 目録と表は **1 回の走査**で返る(別々に頼むと DB を 2 度舐める)。
      */
-    queryKeys: () => client.request({ op: 'queryKeys', cid }),
-    queryGroupBy: (key) => client.request({ op: 'queryGroupBy', cid, key }),
+    queryScan: (key) => client.request({ op: 'queryScan', cid, ...(key === null ? {} : { key }) }),
     getBodies: (lids) => client.request({ op: 'getBodies', cid, lids }),
     listBodies: (after, maxBytes) =>
       client.request({ op: 'listBodies', cid, maxBytes, ...(after ? { after } : {}) }),

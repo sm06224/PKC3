@@ -11,7 +11,12 @@
  */
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { StorageRequest } from '../../src/adapter/platform/storage/protocol';
-import type { GroupResult, KeyResult } from '../../src/features/query/group-by';
+import {
+  FRONTMATTER_SCAN_CHARS,
+  type GroupResult,
+  type KeyResult,
+} from '../../src/features/query/group-by';
+import { resolveCap } from '../../src/features/notation/caps';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -48,9 +53,12 @@ const put = (lid: string, title: string, body: string, order: number) =>
     keepLatest: 10,
   } as StorageRequest);
 
-const keys = () => call({ op: 'queryKeys', cid: CID } as StorageRequest) as Promise<KeyResult>;
-const groupBy = (key: string) =>
-  call({ op: 'queryGroupBy', cid: CID, key } as StorageRequest) as Promise<GroupResult>;
+/** ⚠ 目録と表は **1 回の走査**で返る(別々に頼むと DB を 2 度舐める)。 */
+const scan = (key?: string) =>
+  call({ op: 'queryScan', cid: CID, ...(key === undefined ? {} : { key }) } as StorageRequest) as
+    Promise<{ keys: KeyResult; groups: GroupResult | null }>;
+const keys = async (): Promise<KeyResult> => (await scan()).keys;
+const groupBy = async (key: string): Promise<GroupResult> => (await scan(key)).groups!;
 
 /** frontmatter の**後ろ**に長い本文を置く(先頭だけ読む作りを踏む)。 */
 const LONG_TAIL = 'あ'.repeat(200_000);
@@ -61,8 +69,8 @@ const LONG_TAIL = 'あ'.repeat(200_000);
  * 収まってしまい、窓を 100 字に縮めても拾えてしまう。**狙う key を後ろに置く**。
  */
 const FAT_FRONTMATTER = `---\n${Array.from(
-  { length: 400 },
-  (_, i) => `pad${String(i).padStart(3, '0')}: x`,
+  { length: 1300 },
+  (_, i) => `pad${String(i).padStart(4, '0')}: x`,
 ).join('\n')}\nauthor: 大野\n---\n\n本文\n`;
 
 describe('集計を worker の実物で(#184)', () => {
@@ -100,6 +108,26 @@ describe('集計を worker の実物で(#184)', () => {
     expect(byStatus.groups[0]).toMatchObject({ value: '済', total: 1, lids: ['n1'] });
   });
 
+  it('🔴 窓の大きさは cap から導く(直書きしない ── 囲みのぶんが足りなくなる)', () => {
+    /**
+     * ⚠ 1 稿目は `16 * 1024` を直書きし、コメントに「字数はバイト数以下だから入る」と
+     * 書いていたが**因果が間違っていた** ── 上限が掛かるのは囲みの**中身**で、
+     * 窓は囲みごと切る。ASCII でちょうど上限まで書くと閉じの `---` が窓の外へ出て、
+     * そのノートは黙って「未設定」へ落ちる(実測: 中身 16,384 バイト → 本文 16,397 字)。
+     */
+    expect(FRONTMATTER_SCAN_CHARS).toBeGreaterThan(resolveCap('frontmatter', 'bytes') + 8);
+  });
+
+  it('🔴 上限ちょうどの frontmatter でも拾える(閉じの --- が窓に入る)', async () => {
+    const inner = `k: ${'a'.repeat(resolveCap('frontmatter', 'bytes') - 3)}`;
+    await put('n6', '六番', `---\n${inner}\n---\n\n本文\n`, 6);
+    const r = await groupBy('k');
+    expect(
+      r.groups.some((g) => g.lids.includes('n6')),
+      '上限ちょうどのノートが未設定へ落ちている = 窓が囲みのぶん足りない',
+    ).toBe(true);
+  });
+
   it('🔴 frontmatter が長くても、後ろに書いた項目まで読める(窓の大きさ)', async () => {
     const r = await groupBy('author');
     const ono = r.groups.find((g) => g.value === '大野');
@@ -110,9 +138,15 @@ describe('集計を worker の実物で(#184)', () => {
   });
 
   it('🔴 並びは entry_order(組の中の lid が一覧と同じ順)', async () => {
+    /**
+     * ⚠ **投入順と entry_order がずれた行を入れてから見る** ── 揃っていると
+     * `ORDER BY rowid` に変えても同じ答えになり、規則を壊す変異が生き延びる
+     * (レビュー指摘)。`n0` は**最後に入れて order は 0**。
+     */
+    await put('n0', '零番', '---\nauthor: 佐藤\n---\n\n本文\n', 0);
     const r = await groupBy('author');
     const sato = r.groups.find((g) => g.value === '佐藤');
-    expect(sato?.lids, '一覧の並びと違う').toEqual(['n2', 'n3']);
+    expect(sato?.lids, '一覧の並びと違う(entry_order で並んでいない)').toEqual(['n0', 'n2', 'n3']);
   });
 
   it('🔴 本文が 20 万字あっても frontmatter は拾える(先頭の字数が足りている)', async () => {
@@ -123,7 +157,11 @@ describe('集計を worker の実物で(#184)', () => {
 
   it('項目を持たないノートは未設定の組へ、いちばん下に', async () => {
     const r = await groupBy('author');
-    expect(r.groups.at(-1)).toMatchObject({ value: '', total: 1, lids: ['n4'] });
+    const last = r.groups.at(-1)!;
+    expect(last.value, '未設定が最後に来ていない').toBe('');
+    // ⚠ 件数は fixture の増減で動くので、**中身**で見る(n4 = frontmatter が無いノート)
+    expect(last.lids).toContain('n4');
+    expect(last.total).toBe(last.lids.length);
   });
 
   it('長い frontmatter の項目も目録に出る(上限まで)', async () => {
@@ -142,8 +180,11 @@ describe('集計を worker の実物で(#184)', () => {
 
   it('書いていない項目で束ねると、全部が未設定の 1 組になる', async () => {
     const r = await groupBy('存在しない項目');
-    expect(r.groups).toEqual([
-      { value: '', total: 5, lids: ['n1', 'n2', 'n3', 'n4', 'n5'] },
-    ]);
+    expect(r.groups).toHaveLength(1);
+    const only = r.groups[0]!;
+    expect(only.value).toBe('');
+    expect(only.total, '見た件数と組の件数が合わない').toBe(r.scanned);
+    // 並びは entry_order(投入順ではない)── n0 は最後に入れたが order は 0
+    expect(only.lids).toEqual([...only.lids].sort((a, b) => a.localeCompare(b)));
   });
 });

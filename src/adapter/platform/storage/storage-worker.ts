@@ -19,7 +19,7 @@ import { contentHash64Hex } from './content-hash';
 import { scanAssetRefsInto } from '@features/asset/asset-ref-scan';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { planSearch } from '@features/filter/search-query';
-import { collectKeys, groupByKey, type QueryRow } from '@features/query/group-by';
+import { createQueryScan, FRONTMATTER_SCAN_CHARS } from '@features/query/group-by';
 import {
   applyLinePatch,
   diffLines,
@@ -148,26 +148,51 @@ function need(): Database {
 }
 
 /**
- * 集計(#184)が読む本文の先頭の字数。
+ * 集計(#184)が 1 度に手元へ載せる行数。
  *
- * ⚠ frontmatter の上限は **16KB(バイト)**(`resolveCap('frontmatter','bytes')`)。
- * 字数はバイト数以下なので、**同じ数だけ字を取れば上限内の frontmatter は必ず収まる**
- * (日本語 1 字 = 3 バイトなら、16384 字は約 48KB ぶんに相当する)。
- * 🔑 全文を読まないので、本文が何 MB あっても集計のコストは頭打ちになる。
+ * 🔴 **全行を一度に materialize しない**(レビュー B-3)。`selectObjects` は結果を
+ * まるごと配列にするので、本文の長い container では一時ピークが跳ねる ──
+ * この file 冒頭のメモリ 2 原則(**大きな値は保持しない**)と、2026-07-27 の
+ * 不可侵指示(ゼロコピー / 生成物の即破棄)から外れる。
+ * ⚠ カーソルは `listBodies` と**同じ複合キー**(`entry_order` + `lid`)── `entry_order`
+ * 単独では境界の順序値を共有する行が飛ぶ(UNIQUE ではない)。
  */
-const FRONTMATTER_SCAN_CHARS = 16 * 1024;
+const QUERY_SCAN_CHUNK = 500;
 
 /**
- * 集計のために「lid と本文の先頭」を読む(#184)。
- * ⚠ 並びは `entry_order, lid` ── 一覧の並びの正本と同じにする。
+ * 集計を 1 回の走査で作る(#184)。
+ *
+ * 🔴 **走査は 1 回だけ**(レビュー B-3 で直した)── 1 稿目は目録と表で別々の op に
+ * していたため、面を開くたびに全件走査が **2 回**走っていた。
+ * ⚠ 読むのは**本文の先頭だけ**。窓の大きさは features 側が cap から導く
+ * (`FRONTMATTER_SCAN_CHARS` ── 直書きすると囲みのぶんだけ足りなくなる)。
  */
-function scanHeads(cid: string): QueryRow[] {
-  const rows = need().selectObjects(
-    `SELECT lid, substr(body, 1, ?) AS head FROM entries WHERE cid = ?
-      ORDER BY entry_order, lid`,
-    [FRONTMATTER_SCAN_CHARS, cid],
-  ) as unknown as Array<{ lid: string; head: string | null }>;
-  return rows.map((r) => ({ lid: r.lid, head: r.head ?? '' }));
+function runQueryScan(cid: string, key: string | null): {
+  keys: unknown;
+  groups: unknown;
+} {
+  const database = need();
+  const scan = createQueryScan(key);
+  let after: { entryOrder: number; lid: string } | undefined;
+  for (;;) {
+    const rows = database.selectObjects(
+      after === undefined
+        ? `SELECT lid, entry_order, substr(body, 1, ?) AS head FROM entries WHERE cid = ?
+             ORDER BY entry_order, lid LIMIT ?`
+        : `SELECT lid, entry_order, substr(body, 1, ?) AS head FROM entries
+            WHERE cid = ? AND (entry_order > ? OR (entry_order = ? AND lid > ?))
+            ORDER BY entry_order, lid LIMIT ?`,
+      after === undefined
+        ? [FRONTMATTER_SCAN_CHARS, cid, QUERY_SCAN_CHUNK]
+        : [FRONTMATTER_SCAN_CHARS, cid, after.entryOrder, after.entryOrder, after.lid, QUERY_SCAN_CHUNK],
+    ) as unknown as Array<{ lid: string; entry_order: number; head: string | null }>;
+    if (rows.length === 0) break;
+    scan.feed(rows.map((r) => ({ lid: r.lid, head: r.head ?? '' })));
+    const last = rows[rows.length - 1]!;
+    after = { entryOrder: last.entry_order, lid: last.lid };
+    if (rows.length < QUERY_SCAN_CHUNK) break;
+  }
+  return scan.finish();
 }
 
 /**
@@ -637,14 +662,10 @@ const handlers: Handlers = {
   },
   /**
    * 🔴 **frontmatter で束ねる**(#184)。舐めるのは worker、返すのは**束ねた結果**だけ。
-   *
-   * ⚠ 読むのは**本文の先頭 `FRONTMATTER_SCAN_CHARS` 字**だけ ── frontmatter は
-   * 定義上「本文の先頭の `---` 囲み」で、上限は 16KB(`resolveCap('frontmatter','bytes')`)。
-   * 字数は**バイト数以下**なので、16384 字を取れば上限内の frontmatter は必ず入る。
-   * ⚠ 並びは `entry_order, lid`(一覧と同じ)── 組の中の lid が一覧と同じ順に並ぶ。
+   * ⚠ 目録と表を**同じ 1 回の走査**で作る(別々の op にすると走査が 2 回になる)。
    */
-  queryKeys: (req) => collectKeys(scanHeads(req.cid)),
-  queryGroupBy: (req) => groupByKey(scanHeads(req.cid), req.key),
+  queryScan: (req) =>
+    runQueryScan(req.cid, req.key ?? null) as ResultMap['queryScan'],
   listBodies: (req) => {
     // 🔴 **カーソルは ORDER BY と同じ複合キー**。`entry_order > ?` だけだと
     // 境界の順序値を共有する行が全部飛ぶ(entry_order に UNIQUE は無い)。

@@ -35,11 +35,11 @@ export interface StorePort {
   searchEntries?(query: string): Promise<string[]>;
   /**
    * 集計(#184)。⚠ **省略可** ── 持たない環境(test の fake / 旧い配線)では
-   * 面が「束ねられる列がありません」を出すだけで、他は壊れない。
+   * 面が「この版では数えられません」と断るだけで、他は壊れない。
    * ⚠ 返るのは**束ねた結果**だけで、本文は 1 バイトも渡らない。
+   * ⚠ 目録と表は **1 回の走査**で返る(`key` が `null` なら表は `null`)。
    */
-  queryKeys?(): Promise<QueryKeys>;
-  queryGroupBy?(key: string): Promise<QueryGroups>;
+  queryScan?(key: string | null): Promise<{ keys: QueryKeys; groups: QueryGroups | null }>;
   /**
    * 指定した lid の本文を **1 往復で** 取る(P7b review L-7)。
    * ⚠ 無い lid は結果に出ない ── 呼び側は「読めたものだけ」を受け取る。
@@ -196,32 +196,28 @@ export function connectStoreEffects(
         );
         break;
       }
-      case 'REQUEST_QUERY_KEYS': {
-        const ask = store.queryKeys;
-        if (!ask) break;
-        void ask().then(
-          (keys) => {
-            if (disposed) return;
-            dispatcher.dispatch({ type: 'SET_QUERY_KEYS', keys });
-          },
-          () => {
-            /* ⚠ 目録が引けなくても帯を出さない ── 面が「列がありません」を出す */
-          },
-        );
-        break;
-      }
-      case 'REQUEST_QUERY_GROUPS': {
-        const ask = store.queryGroupBy;
-        if (!ask) break;
+      case 'REQUEST_QUERY_SCAN': {
+        const ask = store.queryScan;
+        /**
+         * 🔴 **持っていないことを画面へ伝える**(レビュー B-5)。⚠ 黙って break すると
+         * 面は「数えています…」を出したまま**永久に止まって見える** ── 落ち方は
+         * 「機能が減る」でなければならない(古い worker が service worker の
+         * キャッシュに残っている端末では、未知の op が reject で返る)。
+         */
+        if (!ask) {
+          dispatcher.dispatch({ type: 'QUERY_FAILED' });
+          break;
+        }
         const key = ev.key;
         void ask(key).then(
-          (groups) => {
+          (out) => {
             if (disposed) return;
             // ⚠ どの束ね方の答えかを載せる ── reducer が古い結果を捨てる
-            dispatcher.dispatch({ type: 'SET_QUERY_GROUPS', key, groups });
+            dispatcher.dispatch({ type: 'SET_QUERY_SCAN', key, keys: out.keys, groups: out.groups });
           },
           () => {
-            /* 同上 */
+            if (disposed) return;
+            dispatcher.dispatch({ type: 'QUERY_FAILED' });
           },
         );
         break;

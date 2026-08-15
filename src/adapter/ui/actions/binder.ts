@@ -623,11 +623,14 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'SET_QUERY_KEY', key });
   },
   /**
-   * 数え直す(#184)。⚠ **面を開き直すのと同じ経路**にする ── 集計は
-   * 保存のたびに自動では走らない(全本文の先頭を舐めるので、打つたびには回さない)。
+   * 数え直す(#184)。集計は保存のたびに自動では走らない(全本文の先頭を舐めるので、
+   * 打つたびには回さない)。
+   * 🔴 ⚠ **`SET_VIEW_MODE` を借りない**(レビュー B-2)── 借りると
+   * `revisionPanel` / `trashPanel` が畳まれ、**ゴミ箱を開いたまま数え直すと
+   * 理由なく閉じる**。P8 段⑤ で「アプリ」タブが同じ形の事故を起こしている。
    */
   'refresh-query': (dispatcher) => {
-    dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'query' });
+    dispatcher.dispatch({ type: 'REFRESH_QUERY' });
   },
   'start-edit': (dispatcher, _target, services) => {
     const lock = services.acquireEditLock;
@@ -889,7 +892,12 @@ const ACTIONS: Record<string, ActionHandler> = {
      * ⚠ 順序が効く: 先に `SET_VIEW_MODE`(目録を頼む)→ 後に `SET_QUERY_KEY`
      * (表を頼む)。逆にすると同じ走査を 2 回頼むことになる。
      */
-    if (next === 'query' && dispatcher.getState().queryKey === null) {
+    /**
+     * ⚠ **実際に開けたときだけ**(レビュー B-1)── 1 稿目は `next` を見ていたので、
+     * **編集中に押すと面は開かないのに走査だけ飛んで**いた(`SET_VIEW_MODE` は
+     * 編集中に捨てられるが、`SET_QUERY_KEY` にはその門が無い)。
+     */
+    if (dispatcher.getState().viewMode === 'query' && dispatcher.getState().queryKey === null) {
       const remembered = appQueryKey.get();
       if (remembered !== null) dispatcher.dispatch({ type: 'SET_QUERY_KEY', key: remembered });
     }

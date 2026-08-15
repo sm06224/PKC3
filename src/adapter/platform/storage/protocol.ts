@@ -51,11 +51,10 @@ export type StorageRequest =
    * ⚠ worker が読むのは**本文の先頭だけ**(`substr`)。frontmatter は定義上
    * 「本文の先頭の `---` 囲み」なので、全文を読む理由が無い。
    *
-   * `queryKeys` = 束ねられる key の目録(user に「何で束ねられるか」を出すため)。
-   * `queryGroupBy` = その key で束ねた結果。
+   * ⚠ **目録と表は 1 回の走査で返す**(`key` を渡せば表も付く)── 別々の op に
+   * すると、面を開くたびに DB の全件走査が **2 回**走る(レビュー B-3)。
    */
-  | { op: 'queryKeys'; cid: string }
-  | { op: 'queryGroupBy'; cid: string; key: string }
+  | { op: 'queryScan'; cid: string; key?: string }
   /**
    * 本文を **まとめて** 取る(P6d ── 書出し用)。
    *
@@ -338,12 +337,12 @@ export interface ResultMap {
    */
   searchEntries: { lids: string[]; truncated: boolean };
   /**
-   * 束ねられる key の目録(#184)。⚠ **捨てた数を返す**(`omittedKeys`)──
-   * 黙って切ると user は「その key は無い」と読む。
+   * 集計(#184)── **1 回の走査で目録と表を同時に返す**。
+   * ⚠ **捨てた数を返す**(`omittedKeys` / `omittedGroups`)── 黙って切ると
+   * user は「その項目は無い」と読む。
+   * ⚠ `groups` は key を渡していないとき `null`(0 組ではない)。
    */
-  queryKeys: QueryKeyResult;
-  /** 束ねた結果(#184)。組の並びと上限の規則は features 層が 1 か所で持つ。 */
-  queryGroupBy: QueryGroupResult;
+  queryScan: { keys: QueryKeyResult; groups: QueryGroupResult | null };
   /**
    * `done` = これ以上ない。`rows` は `entry_order, lid` 順(並びの正本)。
    * `next` = 続きのカーソル(呼び出し側はこれをそのまま渡す ── 自分で組まない)。

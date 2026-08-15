@@ -25,6 +25,22 @@
  */
 
 import { parseFrontmatter, type FrontmatterValue } from '../markdown/frontmatter';
+import { resolveCap } from '../notation/caps';
+
+/**
+ * 🔴 **worker が読む本文の先頭の字数**(#184。レビュー A-2 で直した)。
+ *
+ * ⚠ 1 稿目は `16 * 1024` を直書きし、コメントに「字数はバイト数以下なので、
+ * 上限内の frontmatter は必ず入る」と書いていた ── **その因果が間違っていた**。
+ * 上限(16KB)が掛かるのは**囲みの中身**であって、窓は**囲みごと**切るので、
+ * ASCII の frontmatter がちょうど上限まで書かれていると**閉じの `---` が窓の外**へ出る
+ * (実測: 中身 16,384 バイト → 本文 16,397 字。窓 16,384 字では閉じ fence が落ちる)。
+ * そのノートは `found:false` になり、**黙って「未設定」の組へ落ちる**。
+ *
+ * 🔑 だから **cap から導く**(直書きしない)── cap を将来 32KB へ上げても追従する。
+ * 余白は囲み 2 行と改行のぶん(実際に要るのは 8 字ほど。64 は安全側)。
+ */
+export const FRONTMATTER_SCAN_CHARS = resolveCap('frontmatter', 'bytes') + 64;
 
 /** 1 件ぶんの材料。`head` は**本文の先頭**(全文でも動くが、渡す側が切る)。 */
 export interface QueryRow {
@@ -109,42 +125,28 @@ function clip(s: string): string {
 }
 
 /**
- * 束ねられる key の目録を作る。
+ * 🔴 **1 回の走査で、目録と表を同時に作る**(レビュー B-3 で直した)。
  *
- * 並びは **件数の多い順 → key の字順**。⚠ 件数だけで並べると、同数の key の順が
- * 走査順(= entry_order)で揺れて、開くたびに目録の並びが変わる。
+ * ⚠ 1 稿目は目録と表が**それぞれ独立に全件を舐めて**いたので、面を開くたびに
+ * **DB の全件走査が 2 回**走っていた(op の回数は 2 でも、走査は 2 回である)。
+ * ⚠ さらに worker が**全行を一度に materialize** していたため、本文の長い container で
+ * 一時ピークが跳ねた ── `storage-worker.ts` 冒頭のメモリ 2 原則(**大きな値は
+ * 保持しない**)と、2026-07-27 の不可侵指示(ゼロコピー / 即破棄)から外れていた。
+ *
+ * 🔑 だから **少しずつ食わせる形**にする。呼び側(worker)は数百件ずつ読んで `feed` し、
+ * 最後に `finish()` する ── どの瞬間も手元に在るのは 1 まとまりだけである。
  */
-export function collectKeys(rows: readonly QueryRow[]): KeyResult {
-  const count = new Map<string, number>();
-  for (const row of rows) {
-    const { meta } = parseFrontmatter(row.head);
-    for (const [key, value] of Object.entries(meta)) {
-      // ⚠ 値を持たない key は「束ねられない」ので目録に出さない
-      if (valuesOf(value).length === 0) continue;
-      count.set(key, (count.get(key) ?? 0) + 1);
-    }
-  }
-  const all = [...count.entries()]
-    .map(([key, n]) => ({ key, count: n }))
-    .sort((a, b) => b.count - a.count || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
-  return {
-    keys: all.slice(0, QUERY_LIMITS.keys),
-    omittedKeys: Math.max(0, all.length - QUERY_LIMITS.keys),
-    scanned: rows.length,
-  };
+export interface QueryScan {
+  feed(rows: readonly QueryRow[]): void;
+  /** ⚠ `groups` は key を選んでいないとき `null`(0 組ではない)。 */
+  finish(): { keys: KeyResult; groups: GroupResult | null };
 }
 
-/**
- * 指定の key で束ねる。
- *
- * 並びは **件数の多い順 → 値の字順**、ただし**未設定は必ず最後**
- * (「持っていないもの」が先頭に来ると表が読めない)。
- *
- * ⚠ 走査順は呼び側の並び(= `entry_order`)を保つ ── 組の中の lid が
- * 一覧と同じ順に並ぶので、user が「さっき見たもの」を見失わない。
- */
-export function groupByKey(rows: readonly QueryRow[], key: string): GroupResult {
+export function createQueryScan(key: string | null): QueryScan {
+  const count = new Map<string, number>();
   const buckets = new Map<string, { total: number; lids: string[] }>();
+  let scanned = 0;
+
   const take = (value: string, lid: string): void => {
     let b = buckets.get(value);
     if (b === undefined) {
@@ -156,26 +158,79 @@ export function groupByKey(rows: readonly QueryRow[], key: string): GroupResult 
     // (「N 件中 M 件を出しています」と言えるように)
     if (b.lids.length < QUERY_LIMITS.lidsPerGroup) b.lids.push(lid);
   };
-  for (const row of rows) {
-    const { meta } = parseFrontmatter(row.head);
-    const values = valuesOf(meta[key]);
-    if (values.length === 0) {
-      take(UNSET, row.lid);
-      continue;
-    }
-    // ⚠ 同じ値が 2 回書いてあっても 1 件として数える(`tags: [a, a]`)
-    for (const value of [...new Set(values)]) take(value, row.lid);
-  }
-  const all = [...buckets.entries()]
-    .map(([value, b]) => ({ value, total: b.total, lids: b.lids }))
-    .sort((a, b) => {
-      if (a.value === UNSET) return 1;
-      if (b.value === UNSET) return -1;
-      return b.total - a.total || (a.value < b.value ? -1 : a.value > b.value ? 1 : 0);
-    });
+
   return {
-    groups: all.slice(0, QUERY_LIMITS.groups),
-    omittedGroups: Math.max(0, all.length - QUERY_LIMITS.groups),
-    scanned: rows.length,
+    feed(rows) {
+      for (const row of rows) {
+        scanned += 1;
+        const { meta } = parseFrontmatter(row.head);
+        for (const [k, value] of Object.entries(meta)) {
+          // ⚠ 値を持たない key は「束ねられない」ので目録に出さない
+          if (valuesOf(value).length === 0) continue;
+          count.set(k, (count.get(k) ?? 0) + 1);
+        }
+        if (key === null) continue;
+        const values = valuesOf(meta[key]);
+        if (values.length === 0) {
+          take(UNSET, row.lid);
+          continue;
+        }
+        // ⚠ 同じ値が 2 回書いてあっても 1 件として数える(`tags: [a, a]`)
+        for (const value of [...new Set(values)]) take(value, row.lid);
+      }
+    },
+    finish() {
+      const keys = [...count.entries()]
+        .map(([k, n]) => ({ key: k, count: n }))
+        // 並びは **件数の多い順 → key の字順**。⚠ 件数だけで並べると、同数の key の順が
+        // 走査順(= entry_order)で揺れて、開くたびに目録の並びが変わる
+        .sort((a, b) => b.count - a.count || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+      const groups = [...buckets.entries()]
+        .map(([value, b]) => ({ value, total: b.total, lids: b.lids }))
+        // 並びは **件数の多い順 → 値の字順**、ただし**未設定は必ず最後**
+        // (「持っていないもの」が先頭に来ると表が読めない)
+        .sort((a, b) => {
+          if (a.value === UNSET) return 1;
+          if (b.value === UNSET) return -1;
+          return b.total - a.total || (a.value < b.value ? -1 : a.value > b.value ? 1 : 0);
+        });
+      return {
+        keys: {
+          keys: keys.slice(0, QUERY_LIMITS.keys),
+          omittedKeys: Math.max(0, keys.length - QUERY_LIMITS.keys),
+          scanned,
+        },
+        groups:
+          key === null
+            ? null
+            : {
+                groups: groups.slice(0, QUERY_LIMITS.groups),
+                omittedGroups: Math.max(0, groups.length - QUERY_LIMITS.groups),
+                scanned,
+              },
+      };
+    },
   };
+}
+
+/**
+ * 束ねられる key の目録を作る(**1 まとめで渡す版**)。
+ * ⚠ 規則は `createQueryScan` 1 か所 ── ここは薄い包みである(判定を 2 か所に生やさない)。
+ */
+export function collectKeys(rows: readonly QueryRow[]): KeyResult {
+  const scan = createQueryScan(null);
+  scan.feed(rows);
+  return scan.finish().keys;
+}
+
+/**
+ * 指定の key で束ねる(**1 まとめで渡す版**)。
+ * ⚠ 走査順は呼び側の並び(= `entry_order`)を保つ ── 組の中の lid が
+ * 一覧と同じ順に並ぶので、user が「さっき見たもの」を見失わない。
+ */
+export function groupByKey(rows: readonly QueryRow[], key: string): GroupResult {
+  const scan = createQueryScan(key);
+  scan.feed(rows);
+  // ⚠ key を渡しているので `groups` は必ず在る
+  return scan.finish().groups!;
 }

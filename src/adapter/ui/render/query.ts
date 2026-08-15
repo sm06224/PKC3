@@ -45,29 +45,40 @@ export class QueryRenderer {
   private lastKey: string | null = null;
   private lastSelected: string | null = null;
   private lastMetas: AppState['entryMetas'] | null = null;
+  private lastFailed = false;
+  /**
+   * 🔑 **選択は Map で付け替える**(サイドバー / ファイラ / かんばんと同じ作法)。
+   * ⚠ 1 稿目は属性セレクタで引いていたが、この repo で**そこだけ**セレクタを組む形に
+   * なるうえ、想定外の lid(改行を含む等)で `querySelectorAll` が投げる ──
+   * 既存の作法へ寄せた(判定を 2 種類に増やさない)。
+   * ⚠ **1 件が複数の組に出る**(タグ)ので値は配列である。
+   */
+  private readonly rows = new Map<string, HTMLElement[]>();
+  /**
+   * 🔴 **user が畳んだ組を覚える**(レビュー B-4)。⚠ 1 稿目のコメントは
+   * 「畳んだまま残る」と書いていたが**嘘だった** ── 表を作り直すたびに
+   * `open = true` を代入していたので、数え直すと全部開いた(PKC2 と同じ)。
+   */
+  private readonly collapsed = new Set<string>();
 
   constructor(region: HTMLElement) {
     this.region = region;
   }
 
   render(state: AppState): void {
-    if (
+    const sameData =
       state.queryKeys === this.lastKeys &&
       state.queryGroups === this.lastGroups &&
       state.queryKey === this.lastKey &&
       state.entryMetas === this.lastMetas &&
-      state.selectedLid === this.lastSelected
-    )
-      return;
-    const selectionOnly =
-      state.queryKeys === this.lastKeys &&
-      state.queryGroups === this.lastGroups &&
-      state.queryKey === this.lastKey &&
-      state.entryMetas === this.lastMetas;
+      state.queryFailed === this.lastFailed;
+    if (sameData && state.selectedLid === this.lastSelected) return;
+    const selectionOnly = sameData;
     this.lastKeys = state.queryKeys;
     this.lastGroups = state.queryGroups;
     this.lastKey = state.queryKey;
     this.lastMetas = state.entryMetas;
+    this.lastFailed = state.queryFailed;
     const prevSelected = this.lastSelected;
     this.lastSelected = state.selectedLid;
 
@@ -78,12 +89,9 @@ export class QueryRenderer {
      */
     if (selectionOnly && frame.table.childElementCount > 0) {
       if (prevSelected !== null)
-        for (const el of frame.table.querySelectorAll(`[data-pkc-entry="${cssEscape(prevSelected)}"]`))
-          el.removeAttribute('data-pkc-selected');
+        for (const el of this.rows.get(prevSelected) ?? []) el.removeAttribute('data-pkc-selected');
       if (state.selectedLid !== null)
-        for (const el of frame.table.querySelectorAll(
-          `[data-pkc-entry="${cssEscape(state.selectedLid)}"]`,
-        ))
+        for (const el of this.rows.get(state.selectedLid) ?? [])
           el.setAttribute('data-pkc-selected', '');
       return;
     }
@@ -154,6 +162,14 @@ export class QueryRenderer {
     const keys = state.queryKeys;
     const groups = state.queryGroups;
     const parts: string[] = [];
+    /**
+     * 🔴 **「まだ」と「駄目だった」を分ける**(レビュー B-5)── 分けないと、
+     * 数えられない環境で「数えています…」が**永久に出続ける**。
+     */
+    if (state.queryFailed) {
+      note.textContent = 'この版では集計を数えられませんでした(読み込み直すと直ることがあります)';
+      return;
+    }
     if (keys === null) parts.push('数えています…');
     else if (keys.scanned === 0) parts.push('ノートがまだありません');
     else parts.push(`${keys.scanned} 件のノートを見ました`);
@@ -166,6 +182,14 @@ export class QueryRenderer {
 
   private renderTable(table: HTMLElement, state: AppState): void {
     table.textContent = '';
+    this.rows.clear();
+    if (state.queryFailed) {
+      const failed = document.createElement('p');
+      failed.setAttribute('data-pkc-field', 'query-empty');
+      failed.textContent = '数えられませんでした';
+      table.append(failed);
+      return;
+    }
     if (state.queryKey === null) {
       const empty = document.createElement('p');
       empty.setAttribute('data-pkc-field', 'query-empty');
@@ -189,12 +213,16 @@ export class QueryRenderer {
       box.setAttribute('data-pkc-region', 'query-group');
       box.setAttribute('data-pkc-group', group.value);
       /**
-       * ⚠ **開いた状態を既定にする**が、user が畳んだものは畳んだまま残る ──
-       * この面は表を作り直したときだけ組を作り直す(選択だけの変化では触らない)。
-       * PKC2 は `detail.open = true` を毎回代入していたので、並べ替えのたびに
-       * 畳んだ組が全部開いた。
+       * 🔴 **既定は開く。ただし user が畳んだ組は畳んだまま**(レビュー B-4)。
+       * ⚠ 1 稿目は毎回 `open = true` を代入していたので、「数え直す」を押すだけで
+       * 畳んだ組が全部開いた ── PKC2 の `detail.open = true` と**同じ形**だった
+       * (コメントには「畳んだまま残る」と書いてあり、実態と食い違っていた)。
        */
-      box.open = true;
+      box.open = !this.collapsed.has(group.value);
+      box.addEventListener('toggle', () => {
+        if (box.open) this.collapsed.delete(group.value);
+        else this.collapsed.add(group.value);
+      });
       const summary = document.createElement('summary');
       const name = document.createElement('span');
       name.setAttribute('data-pkc-field', 'query-group-name');
@@ -221,6 +249,10 @@ export class QueryRenderer {
         li.setAttribute('data-pkc-action', 'select-entry');
         li.tabIndex = 0;
         if (lid === state.selectedLid) li.setAttribute('data-pkc-selected', '');
+        // ⚠ 1 件が複数の組に出る(タグ)ので、行は**溜める**
+        const bucket = this.rows.get(lid);
+        if (bucket) bucket.push(li);
+        else this.rows.set(lid, [li]);
         const t = document.createElement('span');
         t.setAttribute('data-pkc-field', 'title');
         t.textContent = meta.title || '(題名なし)';
@@ -237,14 +269,4 @@ export class QueryRenderer {
       table.append(empty);
     }
   }
-}
-
-/**
- * 属性セレクタに入れる lid を安全にする。
- * ⚠ `CSS.escape` は happy-dom に無いことがあるので**自前で落とす** ──
- * lid は英数と `-` だけだが、想定外の値でセレクタが壊れると**選択が付かない**
- * (画面は成立して見えるので気づけない)。
- */
-function cssEscape(value: string): string {
-  return value.replace(/["\\]/g, '\\$&');
 }
