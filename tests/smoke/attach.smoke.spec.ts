@@ -219,6 +219,7 @@ test('🔴 PDF の添付は器いっぱいに出て、別の窓でも開ける',
     page.waitForEvent('popup', { timeout: 10_000 }),
     clickReal(page, '[data-pkc-action="view-asset"]'),
   ]);
+  await popup.waitForSelector('[data-pkc-field="asset-window-pdf"]', { timeout: 5000 });
   const shown = await popup.evaluate(() => {
     const o = document.querySelector('[data-pkc-field="asset-window-pdf"]');
     return {
@@ -290,5 +291,42 @@ test('🔴 配った HTML でも PDF が読める大きさで出る', async ({ p
   expect(m!.w, '幅を使い切っていない').toBeGreaterThan(m!.innerW * 0.5);
   expect(m!.fallback, '出せないときの導線が中に無い').toBe(true);
   await viewer.close();
+  expect(errors).toEqual([]);
+});
+
+/**
+ * 🔴 **画像の別窓も end-to-end で守る**(2026-08-15、着地前レビューで判明)。
+ *
+ * ⚠ `view-image` → `view-asset` の rename で、**画像側だけ end-to-end の守り手を
+ * 失っていた** ── mime→kind の写像は `main.ts` に在り、そこは**どの test からも
+ * 実行されない**(原文を読む test しか無い)。別窓の unit は `kind` を引数で受け、
+ * popup の smoke は PDF の 1 本だけだったので、写像を `'pdf'` 固定に変える変異が
+ * **全 test 緑のまま通り、画像の別窓が空の枠になる**(実際に変異試験で生き延びた)。
+ */
+test('🔴 画像の別の窓は img で開く(PDF の箱にならない)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: 'dot.png',
+    mimeType: 'image/png',
+    buffer: PNG_1X1,
+  });
+  await expect(page.locator('[data-pkc-action="view-asset"]')).toBeVisible();
+  const [popup] = await Promise.all([
+    page.waitForEvent('popup', { timeout: 10_000 }),
+    clickReal(page, '[data-pkc-action="view-asset"]'),
+  ]);
+  // ⚠ **組み上がるのを待ってから見る** ── popup の event は `about:blank` が
+  //    できた時点で飛ぶので、即 evaluate すると中身が揃っていない(flake の元)
+  await popup.waitForSelector('[data-pkc-field="asset-window-image"]', { timeout: 5000 });
+  const shown = await popup.evaluate(() => ({
+    img: document.querySelector('[data-pkc-field="asset-window-image"]') !== null,
+    pdf: document.querySelector('[data-pkc-field="asset-window-pdf"]') !== null,
+    title: document.title,
+  }));
+  expect(shown.pdf, '画像なのに PDF の箱で開いた(空の枠になる)').toBe(false);
+  expect(shown.img, '画像が入っていない').toBe(true);
+  expect(shown.title).toBe('dot.png');
+  await popup.close();
   expect(errors).toEqual([]);
 });

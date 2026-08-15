@@ -47,6 +47,13 @@ export interface OpenAssetWindowDeps {
   title: string;
   /** 画像か PDF か。⚠ 窓の大きさと中の要素が変わる。 */
   kind: AssetWindowKind;
+  /**
+   * 🔴 **窓の名前**(添付ごとに 1 枚)。2026-08-15 に flake で判明 ──
+   * `'_blank'` だと、**閉じ切っていない前の窓を使い回す**ことがあり、
+   * 一瞬だけ前の添付の中身が見える(実測: PDF の窓に画像を出す直前の状態が読めた)。
+   * ⚠ 名前を分ければ、開き直しは**その添付の窓**に出る(積み上がらない)。
+   */
+  windowName?: string;
   /** 素の別窓を開く(既定 `window.open`)。⚠ test が差せる。 */
   open?: (url: string, target: string, features: string) => Window | null;
   /** Document PiP(無い環境が普通 ── 既定は `documentPictureInPicture`)。 */
@@ -149,14 +156,33 @@ export async function openAssetWindow(
     const open = deps.open ?? ((u, t, f) => globalThis.open?.(u, t, f) ?? null);
     // ⚠ `about:blank` を開いて**こちらで組む** ── ObjectURL を直接開くと、
     //    窓の題名が blob の URL になり、user から見て「何の添付か」が分からない
-    win = open('about:blank', '_blank', `popup,width=${size.width},height=${size.height}`);
+    win = open(
+      'about:blank',
+      deps.windowName ?? '_blank',
+      `popup,width=${size.width},height=${size.height}`,
+    );
   }
   if (!win) {
     // 🔴 **開けなかったら、その場で捨てる**(押した数だけ blob が積もらない)
     lent.dispose();
     return null;
   }
-  fill(win.document, lent.url, title, kind);
+  /**
+   * ⚠ **組み立てで落ちても貸出を漏らさない**(2026-08-15、着地前レビューで指摘)。
+   * 直す前は `fill()` が投げると `waitClose` の登録に**到達しない**ので、
+   * 誰も revoke しないまま窓だけ残った(呼び側の `catch` も報告するだけ)。
+   */
+  try {
+    fill(win.document, lent.url, title, kind);
+  } catch (e) {
+    lent.dispose();
+    try {
+      win.close();
+    } catch {
+      // 閉じられなくても、貸出はもう返してある
+    }
+    throw e;
+  }
   // ⚠ 待ちは投げっぱなしにしない(reject が unhandled にならないようにする)
   void waitClose(win).then(
     () => lent.dispose(),

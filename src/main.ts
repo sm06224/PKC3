@@ -10,7 +10,7 @@ import { appEditorMode } from '@adapter/ui/render/editor-mode';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { StoreClient } from '@adapter/platform/storage/store-client';
 import { openAssetWindow } from '@adapter/platform/asset-window';
-import { assetPreviewKind } from '@features/asset/asset-preview-kind';
+import { assetWindowKind } from '@features/asset/asset-preview-kind';
 import {
   createStorePort,
   metaFromRow,
@@ -812,13 +812,27 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     viewAsset: (assetKey, name, mime) => {
       void (async () => {
         try {
+          // ⚠ 出せない種類は**借りる前に**断る(貸してから捨てる形にしない)
+          const kind = assetWindowKind(mime);
+          if (!kind) {
+            dispatcher.dispatch({
+              type: 'OP_FAILED',
+              error: `この種類は別の窓で開けません: ${name}`,
+            });
+            return;
+          }
           const lent = await blobs.lendObjectUrl(DEFAULT_CID, assetKey);
           if (!lent) {
             dispatcher.dispatch({ type: 'OP_FAILED', error: `添付が見つかりません: ${name}` });
             return;
           }
-          const kind = assetPreviewKind(mime) === 'pdf' ? 'pdf' : 'image';
-          const win = await openAssetWindow({ lent, title: name, kind });
+          const win = await openAssetWindow({
+            lent,
+            title: name,
+            kind,
+            // ⚠ 添付ごとに 1 枚(開き直しても窓が積み上がらない)
+            windowName: `pkc3-asset-${assetKey}`,
+          });
           if (!win) {
             // ⚠ popup を止められた ── **理由を言う**(押して無反応にしない)
             dispatcher.dispatch({

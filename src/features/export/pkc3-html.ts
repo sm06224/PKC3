@@ -372,14 +372,19 @@ try{
       var im=document.createElement('img');im.src=urlFor(key,sink);im.alt=name;return im;
     }
     if(mime==='application/pdf'){
+      // ⚠ **URL は 1 本しか作らない** ── fallback の a にも同じ URL を渡す。
+      //    直す前は object と a で urlFor() を 2 回呼んでおり、PDF 1 件につき
+      //    atob → Uint8Array → Blob が **2 組**できていた(全体を印刷では全 entry ぶん
+      //    同時に生きる)。ゼロコピー・即破棄の不可侵指示と逆向きだった。
+      var u=urlFor(key,sink);
       var o=document.createElement('object');o.className='p';
-      o.type='application/pdf';o.data=urlFor(key,sink);
-      o.appendChild(dl(key,name,sink));return o;
+      o.type='application/pdf';o.data=u;
+      o.appendChild(dl(key,name,sink,u));return o;
     }
     return dl(key,name,sink);
   }
-  function dl(key,name,sink){
-    var a=document.createElement('a');a.className='f';a.href=urlFor(key,sink);
+  function dl(key,name,sink,url){
+    var a=document.createElement('a');a.className='f';a.href=url||urlFor(key,sink);
     a.download=name;a.textContent='⬇ '+name;return a;
   }
   // 🔑 **本文を DOM に据える処理は 1 本に寄せる**(F-1)。画面表示と「全体を印刷」で
@@ -608,7 +613,11 @@ try{
    * ⚠ 上限を置く ── 画像が返らないときに**永久に印刷できない**ほうが困る。
    */
   function whenImagesReady(root,done){
-    var imgs=root.querySelectorAll('img'),left=0,fired=false;
+    // 🔴 **PDF の箱も数える**(2026-08-15、着地前レビューで判明)。⚠ ここは
+    //    2026-08-05 に「印刷が読み込み中の blob URL を revoke して紙から画像が落ちる」
+    //    ために足した門で、object を数えないと **PDF がその門を素通りする**
+    //    (afterprint の dropAll が読み込み途中の blob を消す)。object も load/error を出す。
+    var imgs=root.querySelectorAll('img,object[type="application/pdf"]'),left=0,fired=false;
     function fin(){if(!fired&&left===0){fired=true;done()}}
     function dec(){left--;fin()}
     for(var i=0;i<imgs.length;i++){

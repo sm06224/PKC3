@@ -1929,8 +1929,10 @@ select:focus-visible {
  *   ツールバーだけで潰れて中身が見えない状態だった。
  * 🔑 だから **PDF だけ別の規則**にする(共用のまま高さを足すと画像が伸びる)。
  * ⚠ 高さは版面基準にする ── 器は本文といっしょに縦へ伸びるので、
- *   `height:100%` では親が高さを持たず 0 になる。 */
-object[data-pkc-field='attachment-media'] {
+ *   `height:100%` では親が高さを持たず 0 になる。
+ * ⚠ 狙いは **`data-pkc-preview='pdf'` の印**で書く(タグ名で絞らない)── 印に
+ *   荷重が無いと、印を消す変異が何も壊さない「死に属性」になる(着地前レビューで指摘)。 */
+[data-pkc-preview='pdf'] {
   display: block;
   width: 100%;
   height: calc(100vh - 16rem);
@@ -2730,5 +2732,17 @@ object[data-pkc-field='attachment-media'] {
     break-after: page;
     border: 0;
     margin: 0;
+  }
+
+  /* 🔴 **PDF の箱を紙で暴れさせない**(2026-08-15、着地前レビューで指摘)。
+   * ⚠ 画面用の calc(100vh - 16rem) は紙では版面高になるので、**1 個で 1 頁近く**を
+   *   食って改頁を崩す。⚠ 配る HTML 側には同じ規則が在るのに**アプリ側に無かった**
+   *   ── 片側だけ保証している状態だった。
+   * ⚠ 埋め込んだ PDF が紙に出るかは**確かめていない**ので、保証するのは
+   *   「版面を壊さないこと」だけにする。 */
+  [data-pkc-preview='pdf'] {
+    height: 50vh;
+    min-height: 0;
+    break-inside: avoid;
   }
 }

@@ -140,9 +140,17 @@ describe('添付の別窓', () => {
     expect(obj!.data).toContain('blob:pdf');
     expect(win.document.querySelector('img'), 'PDF なのに img を入れた').toBeNull();
     expect(win.document.title).toBe('見積書.pdf');
-    // ⚠ 「小さすぎて読めない」が user 報告の症状 ── 器いっぱいにする規則を持つ
+    /**
+     * ⚠ **規則ごと切り出して見る**(2026-08-15、着地前レビューで指摘)。
+     * 1 稿目は file 全体に `height:100%` が在るかを見ていたが、同じ style には
+     * `html,body{…height:100%…}` が在るので、**object 側の宣言を消しても緑**だった
+     * (CLAUDE.md §1「範囲が広すぎて別の規則に満たされる」の CSS 版)。
+     */
     const css = win.document.querySelector('style')!.textContent ?? '';
-    expect(css, 'object を器いっぱいにしていない').toContain('height:100%');
+    const rule = /object\{([^}]*)\}/.exec(css)?.[1] ?? '';
+    expect(rule, '前提: object の規則を切り出せていない').not.toBe('');
+    expect(rule, 'object を器いっぱいにしていない').toContain('height:100%');
+    expect(rule, 'object の幅が器いっぱいでない').toContain('width:100%');
     // 🔑 出せないブラウザへの断り文を**中に**置く(空白を残さない)
     expect(obj!.textContent, '出せないときの断りが無い').toContain('ダウンロード');
   });
@@ -191,6 +199,33 @@ describe('添付の別窓', () => {
       px(calls[0]!, 'width'),
     );
     expect(px(calls[1]!, 'height')).toBeGreaterThan(px(calls[0]!, 'height'));
+  });
+
+
+  /**
+   * 🔴 **組み立てで落ちても貸出を返す**(2026-08-15、着地前レビューで指摘)。
+   * ⚠ 直す前は `fill()` が投げると `waitClose` の登録前に抜けるので、
+   * **誰も revoke しないまま**窓だけ残った。
+   */
+  it('🔴 中身の組み立てが失敗しても ObjectURL を返す', async () => {
+    const lent = { url: 'blob:x', dispose: vi.fn() };
+    const broken = {
+      closed: false,
+      get document(): Document {
+        throw new Error('document に触れない');
+      },
+      close: vi.fn(),
+    } as unknown as Window;
+    await expect(
+      openAssetWindow({
+        kind: 'pdf',
+        lent,
+        title: 'a.pdf',
+        open: () => broken,
+        waitClose: () => new Promise(() => undefined),
+      }),
+    ).rejects.toThrow();
+    expect(lent.dispose, '組み立てで落ちたのに捨てていない').toHaveBeenCalledTimes(1);
   });
 
   it('close() で閉じられる(閉じれば寿命の終わりに乗る)', async () => {

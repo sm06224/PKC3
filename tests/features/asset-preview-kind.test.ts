@@ -6,7 +6,11 @@
  * 「画面には出せるのに別窓には出せない PDF」という食い違いが生まれていた。
  */
 import { describe, expect, it } from 'vitest';
-import { assetPreviewKind, canOpenAssetWindow } from '../../src/features/asset/asset-preview-kind';
+import {
+  assetPreviewKind,
+  assetWindowKind,
+  canOpenAssetWindow,
+} from '../../src/features/asset/asset-preview-kind';
 
 describe('assetPreviewKind', () => {
   it('種類ごとに決まる(全数)', () => {
@@ -57,26 +61,62 @@ describe('canOpenAssetWindow', () => {
   });
 
   /**
-   * 🔑 **画面に出せるものの部分集合である**(片方だけ知っている状態を作らない)。
-   * ⚠ これが破れると、user 報告の食い違い ── 画面には出るのに別窓には出ない ──
-   * が別の MIME で再発する。
+   * 🔴 **恒真な包含を書かない**(2026-08-15、着地前レビューで指摘)。
+   *
+   * ⚠ 1 稿目は `if (canOpenAssetWindow(m)) expect(assetPreviewKind(m)).not.toBeNull()`
+   * と書いていたが、`canOpenAssetWindow` は `assetPreviewKind` で**定義されている**
+   * ので、この含意は**定義から従う** ── 実装を何に書き換えても落ちない。
+   * ⚠ しかも比べる相手が手書きの 9 件だったので、その外は素通りした。
+   * 🔑 **集合の等値**で pin し、母集団は**アプリが実際に作りうる MIME の全数**
+   * (`attach.ts` の `EXT_MIME` の値)にする ── 代替物で満たせない条件になる。
    */
-  it('🔴 別窓に出せるものは、画面にも出せる', () => {
-    const mimes = [
-      'image/png',
-      'image/gif',
-      'application/pdf',
-      'video/mp4',
-      'audio/mpeg',
+  it('🔴 別窓に出せるのは、画面の見せ方が image / pdf のものだけ(集合で pin)', () => {
+    // ⚠ `attach.ts:EXT_MIME` の値の全数 + 端の数件(取込で実際に付く MIME)
+    const CORPUS = [
+      'text/markdown',
       'text/plain',
+      'text/csv',
       'application/json',
-      'application/zip',
+      'text/html',
+      'image/png',
+      'image/jpeg',
+      'image/gif',
+      'image/webp',
+      'image/svg+xml',
+      'application/pdf',
+      'audio/mpeg',
+      'audio/wav',
+      'video/mp4',
+      'video/webm',
       'application/octet-stream',
+      'application/zip',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     ];
-    for (const m of mimes) {
-      if (canOpenAssetWindow(m)) {
-        expect(assetPreviewKind(m), `${m} は別窓に出せるのに画面に出せない`).not.toBeNull();
-      }
+    const opened = CORPUS.filter((m) => canOpenAssetWindow(m));
+    expect(opened.map((m) => assetPreviewKind(m)).sort(), '別窓の集合が image/pdf からずれた')
+      .toEqual(['image', 'image', 'image', 'image', 'image', 'pdf']);
+    // 🔑 `assetWindowKind` は「出せない ⇔ null」で `canOpenAssetWindow` と一致する
+    for (const m of CORPUS) {
+      expect(assetWindowKind(m) !== null, `${m}: 2 つの口の答えが食い違う`).toBe(
+        canOpenAssetWindow(m),
+      );
     }
+  });
+
+  /**
+   * 🔴 **知らない種類を黙って image に落とさない**(レビュー指摘の本体)。
+   * ⚠ 直す前は `main.ts` に三項で書いてあり、**どの test からも実行されない file**
+   * だったので、`'pdf'` 固定へ変える変異が全 test 緑のまま通り、
+   * **画像の別窓が空の枠**になった。
+   */
+  it('🔴 assetWindowKind は出せない種類に null を返す', () => {
+    expect(assetWindowKind('image/png')).toBe('image');
+    expect(assetWindowKind('image/svg+xml')).toBe('image');
+    expect(assetWindowKind('application/pdf')).toBe('pdf');
+    expect(assetWindowKind('video/mp4'), '動画を image に落としている').toBeNull();
+    expect(assetWindowKind('text/plain')).toBeNull();
+    expect(assetWindowKind('application/zip')).toBeNull();
+    expect(assetWindowKind(null)).toBeNull();
+    expect(assetWindowKind('')).toBeNull();
   });
 });

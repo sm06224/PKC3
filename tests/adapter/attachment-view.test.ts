@@ -392,6 +392,11 @@ describe('PDF の添付(窓内 + 別窓)', () => {
     expect(view!.getAttribute('data-pkc-asset-name')).toBe('見積.pdf');
     // ⚠ 何が起きるかが読めること(画像と PDF で言い方を分ける)
     expect(view!.getAttribute('title')).toContain('PDF');
+    // ⚠ 図案の鍵(`ACTION_ICONS`)を壊すと**黙って図案なし**になる ── ここで鳴らす
+    expect(
+      view!.querySelector('[data-pkc-icon] svg path'),
+      '図案が付いていない(ACTION_ICONS の鍵がずれている)',
+    ).not.toBeNull();
   });
 
   it('別窓に出せない種類には「別の窓で見る」を出さない(押せない導線を置かない)', async () => {

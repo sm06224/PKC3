@@ -35,6 +35,24 @@ export function assetPreviewKind(mime: string | null | undefined): AssetPreviewK
  * ⚠ text は本文の面で全部読めるので、窓を増やす理由が無い。
  */
 export function canOpenAssetWindow(mime: string | null | undefined): boolean {
+  return assetWindowKind(mime) !== null;
+}
+
+/** 別窓に出せる種類。⚠ `AssetPreviewKind` の**部分集合**である。 */
+export type AssetWindowKind = 'image' | 'pdf';
+
+/**
+ * 🔴 **MIME から「別窓での出し方」を決める**(2026-08-15、着地前レビューで判明)。
+ *
+ * ⚠ 直す前は `main.ts` に `assetPreviewKind(mime) === 'pdf' ? 'pdf' : 'image'` と
+ * 書いていた。**知らない種類を黙って image に落とす**形なので、
+ * ① `'pdf'` 側へ変える変異が**全 test 緑のまま通り**(`main.ts` は原文を読む test しか
+ * 無く、別窓の unit は `kind` を引数で受け、popup の smoke は PDF の 1 本だけ)、
+ * 画像の別窓が**空の枠**になる ② 将来 `canOpenAssetWindow` を広げた瞬間に、
+ * 増えた種類が黙って image になる。
+ * 🔑 **写像を features へ出して、出せないものは `null` を返す**(呼び側が断る)。
+ */
+export function assetWindowKind(mime: string | null | undefined): AssetWindowKind | null {
   const kind = assetPreviewKind(mime);
-  return kind === 'image' || kind === 'pdf';
+  return kind === 'image' || kind === 'pdf' ? kind : null;
 }
