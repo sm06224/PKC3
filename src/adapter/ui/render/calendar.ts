@@ -11,7 +11,7 @@ import {
   getMonthGrid,
   dateKey,
 } from '@features/calendar/calendar-data';
-import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
+import { matchesEntry, normalizeQuery } from '@features/filter/title-filter';
 
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'] as const;
 
@@ -56,7 +56,7 @@ export class CalendarRenderer {
     const metas: EntryMeta[] = [];
     for (const lid of state.order) {
       const m = state.entryMetas.get(lid);
-      if (m && matchesTitle(m.title, q)) metas.push(m);
+      if (m && matchesEntry(m.lid, m.title, q, state.searchHits)) metas.push(m);
     }
     const byDate = groupTodosByDate(metas, state.showArchived);
 

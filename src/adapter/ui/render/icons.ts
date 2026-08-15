@@ -146,6 +146,10 @@ const ICON_PATHS: Readonly<Record<string, readonly IconPath[]>> = {
   'chevron-down': ['M6.5 9.5l5.5 5.5 5.5-5.5'],
   /** 上向きの山(1 つ上へ)。 */
   'chevron-up': ['M6.5 14.5l5.5-5.5 5.5 5.5'],
+  /** 左向きの山(選択の戻る ── #190)。 */
+  'chevron-left': ['M14.5 6.5L9 12l5.5 5.5'],
+  /** 右向きの山(選択の進む)。 */
+  'chevron-right': ['M9.5 6.5L15 12l-5.5 5.5'],
   /** 種類が分からないもの。 */
   dot: [{ d: 'M9.5 12a2.5 2.5 0 105 0 2.5 2.5 0 00-5 0z', fill: 'solid' }],
 };
@@ -193,6 +197,20 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   /** 並べ替え(2026-08-06。user 報告 2-10)── 同じ親の下で隣と入れ替える。 */
   'move-order-up': 'chevron-up',
   'move-order-down': 'chevron-down',
+  /** 選択の履歴(#190)── ブラウザの戻る・進むと同じ図案にする。 */
+  'nav-back': 'chevron-left',
+  'nav-forward': 'chevron-right',
+  /** 画像を別窓で見る(#192)。⚠ 「開く」の仲間なので起動と同じ図案は使わない */
+  'view-image': 'grid',
+  /** 関係(#185)── 足すのは plus、消すのは close(既存の意味と揃える)。 */
+  'add-relation': 'plus',
+  'remove-relation': 'close',
+  /** 本文の置換(#191)── 書き換えるので鉛筆と同じ仲間の図案にする。 */
+  'toggle-replace': 'pencil',
+  'replace-all': 'check',
+  /** ペインの開閉(#197)── 畳む向きの山を出す(左の列は左へ、右の列は右へ)。 */
+  'toggle-pane:sidebar': 'chevron-left',
+  'toggle-pane:inspector': 'chevron-right',
 };
 
 /**

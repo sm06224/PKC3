@@ -11,6 +11,7 @@
  */
 import { SEALED_ARCHETYPES, SEALED_VIEWS } from '@features/sealed';
 import { BROWSE_ICONS, iconButton, iconSpan } from './icons';
+import { PANES, PANE_LABELS } from '@features/pane-visibility';
 import { BROWSE_TABS } from './browse';
 
 export interface ShellRegions {
@@ -144,14 +145,62 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const createBar = document.createElement('div');
   createBar.setAttribute('data-pkc-region', 'create-bar');
 
+  /**
+   * 🔴 **選択の戻る・進む**(#190 / 台帳 #180 の B-4)。
+   *
+   * ⚠ user 指示「**マウスだけで完結し、キーボードは近道**」── 近道だけ足すと
+   * **画面のどこにも無い機能**になるので、ボタンを先に置く(近道は `binder` の
+   * `Alt+←` / `Alt+→`)。
+   * ⚠ 置き場は**探す欄の左**(ブラウザと同じ並び ── 戻る・進む → 探す)。
+   * ⚠ 押せないときは `disabled` にする ── 押しても何も起きない dead click を作らない。
+   */
+  for (const [action, label, title] of [
+    ['nav-back', '戻る', '前に見ていたノートへ戻ります(Alt+←)'],
+    ['nav-forward', '進む', '戻る前のノートへ進みます(Alt+→)'],
+  ] as const) {
+    const btn = iconButton(action, label);
+    btn.title = title;
+    btn.disabled = true; // 履歴が無い間は押せない(renderer が起こす)
+    findBar.append(btn);
+  }
+
   const filter = document.createElement('input');
   filter.type = 'search';
   filter.setAttribute('data-pkc-field', 'entry-filter');
-  filter.placeholder = '絞り込み';
-  filter.title = '題名で絞り込みます(Esc で消えます)';
+  filter.placeholder = '探す';
+  /**
+   * 🔴 **文言を実態に合わせる**(#181)。全文検索が入るまでは題名だけだったので
+   * 「題名で絞り込みます」と書いてあった ── いまは**本文も探す**ので、そのままだと
+   * 「本文は探せない」という嘘を user に見せ続ける(§1 の「文言と実装の食い違い」)。
+   */
+  filter.title = '題名と本文から探します(Esc で消えます)';
   // ⚠ `placeholder` は名前ではない ── 値を入れると読み上げから消える
-  filter.setAttribute('aria-label', '題名で絞り込む');
+  filter.setAttribute('aria-label', '題名と本文から探す');
   findBar.append(filter);
+
+  /**
+   * 🔴 **並び順**(#183 / 台帳 #180 の A-3)。⚠ **手で並べ替える導線は既にある**
+   * (`move-order-up/down`)── ここで足すのは「一覧全体をどう並べるか」であって、
+   * 手動の順序を置き換えるものではない。既定は手動の順(`entry_order`)。
+   * ⚠ 場所は**探す欄の隣**(同じ「一覧の見え方」の操作なので離さない)。
+   */
+  const sort = document.createElement('select');
+  sort.setAttribute('data-pkc-field', 'entry-sort');
+  sort.setAttribute('data-pkc-action', 'set-entry-sort');
+  sort.setAttribute('aria-label', '一覧の並び順');
+  sort.title = '一覧の並び順を変えます';
+  for (const [value, label] of [
+    ['manual', '手動の順'],
+    ['updated', '更新が新しい順'],
+    ['title', '題名順'],
+    ['archetype', '種類順'],
+  ] as const) {
+    const opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = label;
+    sort.append(opt);
+  }
+  findBar.append(sort);
 
   /**
    * 🔴 **分割ボタンにする**(P10、user 指示 2026-08-05
@@ -273,12 +322,60 @@ export function buildShell(root: HTMLElement): ShellRegions {
   // 同じ器に入れると**打ちかけの追記が消え、focus も飛ぶ**(追記のたびに起きる)。
   const center = document.createElement('main');
   center.setAttribute('data-pkc-region', 'center');
+  /**
+   * 🔴 **ペインの開閉は中央に置く**(#197 / 台帳 #180 の D-1)。
+   *
+   * ⚠ 左の列の中に置くと、**左を畳んだ瞬間に「戻す」ボタンごと消える** ──
+   *   戻れない画面を作ってしまう。中央は畳めない(= 常に在る)ので、
+   *   操作子の置き場はここしか無い。
+   * ⚠ user 指示「同じものが常に同じ場所にある」── 畳んだ状態は保存する
+   *   (`adapter/ui/render/pane-visibility.ts`)。
+   */
+  const paneBar = document.createElement('div');
+  paneBar.setAttribute('data-pkc-region', 'pane-bar');
+  for (const id of PANES) {
+    const btn = iconButton('toggle-pane', PANE_LABELS[id], `toggle-pane:${id}`);
+    btn.setAttribute('data-pkc-pane', id);
+    btn.setAttribute('aria-pressed', 'true');
+    btn.title = `${PANE_LABELS[id]}の列を畳む・戻す`;
+    paneBar.append(btn);
+  }
+  /**
+   * 🔴 **本文の置換**(#191 / 台帳 #180 の B-3)。ログが伸びたときに要る。
+   *
+   * ⚠ **器は 1 度しか組まない場所に置く**(この帯)── 編集中の面は打鍵のたびに
+   *   描き直すので、そちらに入れると**打ちかけの検索語が消える**
+   *   (追記欄を別の器にしたのと同じ理由。P8 段⑧)。
+   * ⚠ 既定は畳んでおく ── 常時 2 つの欄が居座るのは「業務画面」ではない。
+   */
+  const replaceBar = document.createElement('div');
+  replaceBar.setAttribute('data-pkc-region', 'replace-bar');
+  replaceBar.hidden = true;
+  for (const [field, label] of [
+    ['replace-find', '探す語'],
+    ['replace-with', '置き換える語'],
+  ] as const) {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.setAttribute('data-pkc-field', field);
+    input.setAttribute('aria-label', label);
+    input.placeholder = label;
+    replaceBar.append(input);
+  }
+  const runReplace = iconButton('replace-all', '全部置換');
+  runReplace.title = '編集中の本文で、探す語を全部置き換えます';
+  replaceBar.append(runReplace);
+  const toggleReplace = iconButton('toggle-replace', '置換');
+  toggleReplace.title = '本文の置換(Ctrl+H)';
+  toggleReplace.setAttribute('aria-expanded', 'false');
+  paneBar.append(toggleReplace);
+
   const detail = document.createElement('div');
   detail.setAttribute('data-pkc-region', 'detail');
   const append = document.createElement('div');
   append.setAttribute('data-pkc-region', 'append');
   append.hidden = true;
-  center.append(detail, append);
+  center.append(paneBar, replaceBar, detail, append);
 
   // ── 右(付随情報)────────────────────────────────
   const inspector = document.createElement('aside');

@@ -18,11 +18,16 @@ import { archetypeLabel } from '@adapter/ui/render/sidebar';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
 import { applyFormat, type FormatOp } from '@features/markdown/text-ops';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
+import { isEntrySort } from '@features/filter/entry-sort';
+import { isPaneId } from '@features/pane-visibility';
+import { STRUCTURAL, isRelationKind } from '@features/relation/kinds';
+import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { resolveFilerScope } from '@features/relation/tree';
 import { parseLinkTarget } from '@features/entry-ref/link-target';
 import { handleCopyMdBlock } from './copy-md-block';
 import { finishCopy, selectedMarkdown } from './copy-source';
 import { copyMarkdownAndHtml, copyPlainText } from '@adapter/platform/clipboard';
+import { cleanForClipboard } from '@features/export/clipboard-html';
 import { askConfirm, SUPPRESSED_MESSAGE } from '@adapter/platform/ask-confirm';
 
 type ActionHandler = (
@@ -58,6 +63,16 @@ export function generateLid(): string {
 export interface BinderServices {
   attachFiles?(files: File[]): void;
   downloadAsset?(assetKey: string, name: string): void;
+  /**
+   * 🔴 **貼る用に画像を持ち歩ける形へ**(#193)。`blob:` → `data:` の対応を返す。
+   * ⚠ **省略可** ── 無ければ画像は文字に置き換わる(壊れた画像を貼らせない)。
+   */
+  inlineImages?(urls: readonly string[]): Promise<ReadonlyMap<string, string>>;
+  /**
+   * 🔴 **画像を別の窓で見る**(#192)。⚠ 実体は adapter/platform 側
+   * (ObjectURL の寿命が絡むので、binder は**呼ぶだけ**)。
+   */
+  viewImage?(assetKey: string, name: string): void;
   /** 未参照 asset の掃除(P4b)。確認・報告の UI も実体側の責務。 */
   purgeOrphanAssets?(): void;
   /** 注意の面を閉じる(P6c review H-2)。 */
@@ -488,6 +503,112 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ reducer のガード(ready / openBody 一致 / writeLock)は**ここに写さない**
    *   ── 取ってから dispatch し、入れなかったら返す(判定は reducer 1 か所)。
    */
+  /**
+   * 🔴 **タグで探す**(#182)。⚠ 押した札の語を**絞り込み欄へ入れる** ── 別建ての
+   * タグ絞り込み機構を作らない(#181 の全文検索が frontmatter ごと引く)。
+   * ⚠ 欄の値も state 経由で同期される(renderer が書き戻す)。
+   */
+  'filter-by-tag': (dispatcher, target) => {
+    const tag = target.getAttribute('data-pkc-tag');
+    if (tag) dispatcher.dispatch({ type: 'SET_ENTRY_FILTER', query: tag });
+  },
+  /**
+   * 🔴 **選択の戻る・進む**(#190)。⚠ **行き先をここで決めない** ── 履歴は state が
+   * 持ち、`NAV_HISTORY` が行き先も採否も決める(binder が lid を選ぶと二重帳簿になる)。
+   */
+  /**
+   * 🔴 **ペインを畳む・戻す**(#197)。⚠ **state に持たせない** ── これはこの端末の
+   * 見え方であって、ノートのデータでも container の状態でもない(`editor-mode` と
+   * 同じ扱い)。畳んだ状態は保存され、次に開いたときも同じ配置になる。
+   */
+  'toggle-pane': (_dispatcher, target) => {
+    const id = target.getAttribute('data-pkc-pane');
+    if (id === null || !isPaneId(id)) return;
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    applyPaneVisibility(root, appPanes.toggle(id));
+  },
+  /**
+   * 🔴 **置換の帯を開く・閉じる**(#191)。⚠ 開いたら**探す欄へ focus** ──
+   * 開いただけで打てないと、user は 2 手目を探すことになる。
+   */
+  'toggle-replace': (_dispatcher, target) => {
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const bar = root.querySelector<HTMLElement>('[data-pkc-region="replace-bar"]');
+    if (!bar) return;
+    bar.hidden = !bar.hidden;
+    target.setAttribute('aria-expanded', bar.hidden ? 'false' : 'true');
+    if (!bar.hidden)
+      root.querySelector<HTMLInputElement>('[data-pkc-field="replace-find"]')?.focus();
+  },
+  /**
+   * 🔴 **全部置換**(#191)。⚠ 判定(編集中か / 何件当たるか)は**reducer 1 か所**。
+   * ここでは欄の値を渡すだけ ── binder が「0 件なら押さない」等を持つと二重帳簿になる。
+   */
+  'replace-all': (dispatcher, target) => {
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const find = root.querySelector<HTMLInputElement>('[data-pkc-field="replace-find"]')?.value ?? '';
+    const replace =
+      root.querySelector<HTMLInputElement>('[data-pkc-field="replace-with"]')?.value ?? '';
+    dispatcher.dispatch({ type: 'REPLACE_IN_BODY', find, replace });
+  },
+  /**
+   * 🔴 **関係を足す**(#185)。⚠ 相手は**題名で指す**(lid は user に見えない)。
+   * ⚠ 見つからない / 曖昧なときは**理由を言う** ── 押して無反応にしない。
+   * ⚠ 判定(自分自身・重複・居場所)は **reducer 1 か所**。ここは解決だけ。
+   */
+  'add-relation': (dispatcher, target) => {
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const nameEl = root.querySelector<HTMLInputElement>('[data-pkc-field="relation-target"]');
+    const kindEl = root.querySelector<HTMLSelectElement>('[data-pkc-field="relation-kind"]');
+    const name = (nameEl?.value ?? '').trim();
+    const state = dispatcher.getState();
+    const fromLid = state.selectedLid;
+    if (fromLid === null) return;
+    if (name === '') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '相手の題名を入れてください' });
+      return;
+    }
+    const hits = [...state.entryMetas.values()].filter(
+      (m) => m.title === name && m.lid !== fromLid,
+    );
+    if (hits.length === 0) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: `「${name}」というノートが見つかりません`,
+      });
+      return;
+    }
+    if (hits.length > 1) {
+      // ⚠ 同じ題名が複数 ── **どれかを勝手に選ばない**(user の意図が決まらない)
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: `「${name}」が ${hits.length} 件あります。題名を分けてから足してください`,
+      });
+      return;
+    }
+    const kind = kindEl?.value ?? '';
+    if (!isRelationKind(kind) || kind === STRUCTURAL) return;
+    dispatcher.dispatch({
+      type: 'ADD_RELATION',
+      id: generateLid(),
+      fromLid,
+      toLid: hits[0]!.lid,
+      kind,
+    });
+    if (nameEl) nameEl.value = '';
+  },
+  /** 関係を消す(#185)。⚠ **id で消す**(押した札が持っている)。 */
+  'remove-relation': (dispatcher, target) => {
+    const id = target.getAttribute('data-pkc-relation');
+    if (id) dispatcher.dispatch({ type: 'REMOVE_RELATION', id });
+  },
+  'nav-back': (dispatcher) => dispatcher.dispatch({ type: 'NAV_HISTORY', dir: 'back' }),
+  'nav-forward': (dispatcher) => dispatcher.dispatch({ type: 'NAV_HISTORY', dir: 'forward' }),
+  /** 一覧の並び順(#183)。⚠ 妥当性の判定は `isEntrySort` 1 か所。 */
+  'set-entry-sort': (dispatcher, target) => {
+    const v = (target as HTMLSelectElement).value;
+    if (isEntrySort(v)) dispatcher.dispatch({ type: 'SET_ENTRY_SORT', sort: v });
+  },
   'start-edit': (dispatcher, _target, services) => {
     const lock = services.acquireEditLock;
     const lid = dispatcher.getState().openBody?.lid ?? null;
@@ -617,12 +738,44 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (body === undefined) return;
     finishCopy(dispatcher, target, copyPlainText(body));
   },
-  'copy-note-rich': (dispatcher, target, _services, root) => {
+  /**
+   * 🔴 **よそのアプリへ貼る用に掃除してから渡す**(#193)。
+   *
+   * ⚠ 直す前は `host.innerHTML` を**そのまま**渡していた ── 画面の DOM には
+   * 「CSS で隠してあるだけのソース」「押せない操作子」「この document でしか
+   * 有効でない `blob:` 画像」が入っており、Word / Notion に貼ると**全部出る**
+   * (図の下に生の原文、壊れた画像、押せないボタン)。
+   * ⚠ 掃除は**複製に対して**行う ── 画面には触れない。
+   * ⚠ 落としたものは**数えて言う**(黙って消さない)。
+   */
+  'copy-note-rich': (dispatcher, target, services, root) => {
     const body = dispatcher.getState().openBody?.body;
     const host = viewBodyHost(root);
     if (body === undefined || host === null) return;
-    // plain 側は原文(markdown)── 貼り付け先が editor なら原文、rich なら描画
-    finishCopy(dispatcher, target, copyMarkdownAndHtml(body, host.innerHTML));
+    const clone = host.cloneNode(true) as HTMLElement;
+    const inline = services.inlineImages;
+    const run = (urls: ReadonlyMap<string, string>): void => {
+      const { html, droppedImages } = cleanForClipboard(clone, urls);
+      // plain 側は原文(markdown)── 貼り付け先が editor なら原文、rich なら描画
+      finishCopy(dispatcher, target, copyMarkdownAndHtml(body, html));
+      if (droppedImages > 0)
+        dispatcher.dispatch({
+          type: 'OP_FAILED',
+          error: `画像 ${droppedImages} 件は貼り先で読めないため文字に置き換えました`,
+        });
+    };
+    if (!inline) {
+      run(new Map());
+      return;
+    }
+    const blobs = [...clone.querySelectorAll('img')]
+      .map((i) => i.getAttribute('src') ?? '')
+      .filter((u) => u.startsWith('blob:'));
+    if (blobs.length === 0) {
+      run(new Map());
+      return;
+    }
+    void inline(blobs).then(run, () => run(new Map()));
   },
   /**
    * 選択範囲を Markdown の原文でコピーする。逆引きの規則は `copy-source.ts` の
@@ -838,6 +991,15 @@ const ACTIONS: Record<string, ActionHandler> = {
     const key = target.getAttribute('data-pkc-asset-key');
     const name = target.getAttribute('data-pkc-asset-name') ?? 'download';
     if (key) services.downloadAsset?.(key, name);
+  },
+  /**
+   * 🔴 **画像を別窓で見る**(#192)。⚠ 開けなかったとき(popup 阻止)の後始末は
+   *   呼ばれる側が持つ ── ここで持つと、経路が増えたときに片方だけ古くなる。
+   */
+  'view-image': (_dispatcher, target, services) => {
+    const key = target.getAttribute('data-pkc-asset-key');
+    const name = target.getAttribute('data-pkc-asset-name') ?? '画像';
+    if (key) services.viewImage?.(key, name);
   },
   'dismiss-notices': (_dispatcher, _target, services) => {
     services.dismissNotices?.();
@@ -1310,10 +1472,58 @@ export function bindActions(
   const onShortcut = (ev: Event) => {
     const ke = ev as KeyboardEvent;
     if (ke.isComposing || !root.isConnected) return;
-    if (!(ke.key === 'n' || ke.key === 'N') || !(ke.ctrlKey || ke.metaKey) || ke.altKey) return;
     const field =
       ke.target instanceof HTMLElement ? ke.target.getAttribute('data-pkc-field') : null;
-    if (field === 'editor-body' || field === 'editor-title' || field === 'append-input') return;
+    const typing =
+      field === 'editor-body' || field === 'editor-title' || field === 'append-input';
+    /**
+     * 🔴 **選択の戻る・進む**(#190)。`Alt+←` / `Alt+→` ── ブラウザと同じ手。
+     * ⚠ 打っている途中でも**効かせる**(戻るは編集を壊さない ── reducer が
+     *   `editing` の間は選択を動かさないので、ここで弾く必要が無い)。
+     *   ⚠ ただし変換中(`isComposing`)は上で弾いている。
+     * ⚠ `ctrl/meta` との同時押しは受けない(OS 側の割り当てと衝突する)。
+     */
+    if ((ke.key === 'ArrowLeft' || ke.key === 'ArrowRight') && ke.altKey && !ke.ctrlKey && !ke.metaKey) {
+      ke.preventDefault();
+      dispatcher.dispatch({ type: 'NAV_HISTORY', dir: ke.key === 'ArrowLeft' ? 'back' : 'forward' });
+      return;
+    }
+    /**
+     * 🔴 **ペインの開閉の近道**(#197 / #190)。`Alt+[` = 左、`Alt+]` = 右。
+     * ⚠ 押しボタンを**そのまま押す** ── 同じ操作が 2 通りの経路を持たない(§7)。
+     */
+    if ((ke.key === '[' || ke.key === ']') && ke.altKey && !ke.ctrlKey && !ke.metaKey) {
+      const pane = ke.key === '[' ? 'sidebar' : 'inspector';
+      const btn = root.querySelector<HTMLElement>(
+        `[data-pkc-action="toggle-pane"][data-pkc-pane="${pane}"]`,
+      );
+      if (!btn) return;
+      ke.preventDefault();
+      btn.click();
+      return;
+    }
+    /**
+     * 🔴 **置換の近道**(#191)。`Ctrl+H` ── 他のアプリと同じ手。
+     * ⚠ ボタンを**そのまま押す**(同じ操作が 2 通りの経路を持たない)。
+     */
+    if ((ke.key === 'h' || ke.key === 'H') && (ke.ctrlKey || ke.metaKey) && !ke.altKey) {
+      const btn = root.querySelector<HTMLElement>('[data-pkc-action="toggle-replace"]');
+      if (!btn) return;
+      ke.preventDefault();
+      btn.click();
+      return;
+    }
+    /**
+     * 🔴 **ヘルプ**(#190)。`F1` ── 面は既にあるので開くだけ。
+     * ⚠ 入力中でも効かせる(`F1` は文字を打つ鍵ではない)。
+     */
+    if (ke.key === 'F1' && !ke.ctrlKey && !ke.metaKey && !ke.altKey) {
+      ke.preventDefault();
+      dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'help' });
+      return;
+    }
+    if (!(ke.key === 'n' || ke.key === 'N') || !(ke.ctrlKey || ke.metaKey) || ke.altKey) return;
+    if (typing) return;
     const run = root.querySelector<HTMLElement>('[data-pkc-field="create-run"]');
     if (!run) return;
     ke.preventDefault();

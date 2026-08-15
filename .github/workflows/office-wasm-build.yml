@@ -198,7 +198,7 @@ jobs:
           done
           echo "applied $n qtbase patches"
           # ⚠ 下限は実数で置く(足したらここも直す ── 直さないと落ちるので忘れない)
-          test "$n" -eq 1
+          test "$n" -eq 2
 
       # 🔑 Qt6 は **host build が別に要る**(Qt5 には無かった要件)。
       # ⚠ `-no-gui` で建ててはいけない ── wasm 側で Gui/Widgets を建てるとき、host の
@@ -351,6 +351,9 @@ jobs:
           echo "applied $n patches"
           # ⚠ **下限は実数で置く**(「2 本以上」だと 1 本落としても気づけない)。
           #    パッチを足したらここも直す ── 直さないと落ちるので忘れない
+          # 🔴 8 → 7(2026-08-15)。IME を LO 側から `QInputMethod::show()` で
+          #    要求する patch は**文書を開いた瞬間に wasm を abort させた**ので外した
+          #    (対照 3 一式で確定。代わりに `qtbase-patch-ime-panel.py` で Qt 側を直す)
           test "$n" -eq 7
 
       # 🔴 **Qt と LO の「握手」を、リンクの 16 分前に確かめる**(2026-08-10)。

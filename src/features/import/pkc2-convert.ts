@@ -16,6 +16,7 @@
  * I/O は一切しない(HTML/ZIP の読取り・bytes decode・書込は adapter 側)。
  */
 import { getFlavor } from '../flavor';
+import { RELATION_KINDS } from '@features/relation/kinds';
 import {
   buildTextlogAnchorMap,
   buildFirstLogOfDay,
@@ -103,13 +104,9 @@ export interface ConvertOptions {
 }
 
 const RESERVED_LID = /^__.+__$/;
-const KNOWN_RELATION_KINDS = new Set([
-  'structural',
-  'categorical',
-  'semantic',
-  'temporal',
-  'provenance',
-]);
+// ⚠ 正本は `features/relation/kinds.ts`(#185 で寄せた)── ここに一覧を書き写すと、
+//    種類を足したときに**取込だけ知らない**という非対称がまた生まれる
+const KNOWN_RELATION_KINDS: ReadonlySet<string> = new Set(RELATION_KINDS);
 
 /**
  * `<prefix><token>` を 1 パスで写す。

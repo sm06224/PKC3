@@ -7,7 +7,9 @@ import { bindEditLockRelease } from '@adapter/state/edit-lock-release';
 import { connectStoreEffects } from '@adapter/state/store-effects';
 import { tileSelectsEntry } from '@features/launcher/tiles';
 import { appEditorMode } from '@adapter/ui/render/editor-mode';
+import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { StoreClient } from '@adapter/platform/storage/store-client';
+import { openImageWindow } from '@adapter/platform/image-window';
 import {
   createStorePort,
   metaFromRow,
@@ -279,6 +281,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   //    user が選んだときだけ(`theme.ts` の M-7 と同じ)
   applyPageFormat(document.documentElement, initialPageFormat());
   const regions = buildShell(root);
+  /**
+   * 🔴 **畳んだペインを起動時に戻す**(#197)。⚠ これをやらないと「覚える」が
+   * 成立せず、user 指示「同じものが常に同じ場所にある」に反する ── 畳んで閉じ、
+   * 開き直すと全部戻っている、という画面になる。
+   */
+  applyPaneVisibility(root, appPanes.getHidden());
   // ⚠ 配色の選択欄は**設定の画面**に在る(段⑨c で移した)。合わせるのは
   //    `SettingsRenderer.syncTheme()` の仕事 ── ここに 2 本目を置かない
   //    (P8 段㉕:帯を探す死んだ同期が残っており、常に空振りしていた)
@@ -772,6 +780,58 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           files,
         ),
       ),
+    /**
+     * 🔴 **画像を別の窓で見る**(#192)。⚠ 貸した ObjectURL は
+     * `openImageWindow` が**窓の生死に合わせて**捨てる(窓が開けなければ即捨てる)。
+     */
+    /**
+     * 🔴 **貼る用に画像を持ち歩ける形へ**(#193)。`blob:` を読み直して `data:` にする。
+     * ⚠ 同一 document の blob なので `fetch` で読める。⚠ 読めなかったものは
+     *   **入れない**(呼び側が「落とした」と数えて user に言う)。
+     * ⚠ 大きい画像を並べると heap に載るので、**1 枚ずつ順に**処理して都度捨てる。
+     */
+    inlineImages: async (urls) => {
+      const out = new Map<string, string>();
+      for (const url of urls) {
+        try {
+          const blob = await (await fetch(url)).blob();
+          const data = await new Promise<string>((resolve, reject) => {
+            const fr = new FileReader();
+            fr.onload = () => resolve(String(fr.result));
+            fr.onerror = () => reject(fr.error ?? new Error('read failed'));
+            fr.readAsDataURL(blob);
+          });
+          out.set(url, data);
+        } catch {
+          // 読めない 1 枚で全部を失わない ── その 1 枚だけ落ちる
+        }
+      }
+      return out;
+    },
+    viewImage: (assetKey, name) => {
+      void (async () => {
+        try {
+          const lent = await blobs.lendObjectUrl(DEFAULT_CID, assetKey);
+          if (!lent) {
+            dispatcher.dispatch({ type: 'OP_FAILED', error: `画像が見つかりません: ${name}` });
+            return;
+          }
+          const win = await openImageWindow({ lent, title: name });
+          if (!win) {
+            // ⚠ popup を止められた ── **理由を言う**(押して無反応にしない)
+            dispatcher.dispatch({
+              type: 'OP_FAILED',
+              error: '別の窓を開けませんでした(ポップアップが止められています)',
+            });
+          }
+        } catch (e) {
+          dispatcher.dispatch({
+            type: 'OP_FAILED',
+            error: `画像を開けませんでした(${name}): ${String(e)}`,
+          });
+        }
+      })();
+    },
     downloadAsset: async (assetKey, name) => {
       try {
         const lent = await blobs.lendObjectUrl(DEFAULT_CID, assetKey);

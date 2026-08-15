@@ -101,7 +101,22 @@ REPLACE_STACK = (
 # view の export は**参照を 1 つ生やすだけ**でコストが無い ── 積んでおく。
 REPLACE_HEAPS = (
     '"ClassHandle",'
-    '"HEAP8","HEAPU8","HEAP16","HEAPU16","HEAP32","HEAPU32","HEAPF32","HEAPF64"'
+    '"HEAP8","HEAPU8","HEAP16","HEAPU16","HEAP32","HEAPU32","HEAPF32","HEAPF64",'
+    # 🔴 **観測のために足す**(#199、2026-08-15)。
+    #
+    # 画像を含む文書が開かない件で、16 本の pthread が**全部 futex で寝ている**
+    # ところまでは外から測れたが、**どのスレッドが何を待っているか**が読めない。
+    # emscripten は未 export の名前に **`abort()` する getter** を仕込むので、
+    # `Module.PThread` を**読んだ瞬間に LO が死ぬ** ── 調査 probe が
+    # 5 秒ごとの観測で 5 秒ごとに対象を殺していた(実測)。
+    #
+    # ⚠ **読むためだけに export する。** 触って状態を変えない
+    #   (`PThread.runningWorkers` / `unusedWorkers` の**列挙**に限る)。
+    # ⚠ `ENV` は `callMain` の前に `VCL_NO_THREAD_SCALE` / `MAX_CONCURRENCY` を
+    #   渡せるようにするため ── ただし **`getEnvStrings()` は遅延・キャッシュ**なので、
+    #   届くかは**未確認**である。後条件にせず、host 側で**値を印字して次の回転で読む**
+    #   (CLAUDE.md「未確認は assert ではなく診断で出す」)。
+    '"PThread","ENV"'
 )
 
 # 🔴 **スレッドプールを 7 → 16 にする**(#117、2026-08-12)。

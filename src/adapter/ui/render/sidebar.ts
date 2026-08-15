@@ -9,8 +9,9 @@
  * - **選択変更は属性 patch のみ**(2 行の data-pkc-selected を付け替える)
  */
 import type { EntryMeta } from '@core/model/entry-meta';
-import type { AppState } from '@adapter/state/app-state';
-import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
+import { canNavBack, canNavForward, type AppState } from '@adapter/state/app-state';
+import { matchesEntry, normalizeQuery } from '@features/filter/title-filter';
+import { sortOrder } from '@features/filter/entry-sort';
 import { ARCHETYPE_ICONS, iconSpan, setIcon, type IconName } from './icons';
 import { formatListDate, formatStoredDate } from '@features/datetime/stored-date';
 
@@ -35,10 +36,16 @@ export class SidebarRenderer {
   private lastOrder: readonly string[] | null = null;
   private lastSelected: string | null = null;
   /** ⚠ 絞り込みも**指紋の一部** ── 入れないと、絞っても行が減らない。 */
+  private lastHits: ReadonlySet<string> | null = null;
+  private lastSort = 'manual';
   private lastFilter: string | null = null;
 
   /** 絞り込み欄。⚠ **state が正** ── 欄の値は state に合わせて書き戻す。 */
   private readonly filterInput: HTMLInputElement | null;
+  /** 戻る・進む(#190)。⚠ **押せないときは殺す** ── dead click を作らない。 */
+  private readonly navBack: HTMLButtonElement | null;
+  private readonly navForward: HTMLButtonElement | null;
+  private lastHistory: AppState['selectionHistory'] | null = null;
 
   constructor(sidebarRegion: HTMLElement) {
     const list = sidebarRegion.querySelector<HTMLElement>(
@@ -49,6 +56,12 @@ export class SidebarRenderer {
     this.filterInput = sidebarRegion.querySelector<HTMLInputElement>(
       '[data-pkc-field="entry-filter"]',
     );
+    this.navBack = sidebarRegion.querySelector<HTMLButtonElement>(
+      '[data-pkc-action="nav-back"]',
+    );
+    this.navForward = sidebarRegion.querySelector<HTMLButtonElement>(
+      '[data-pkc-action="nav-forward"]',
+    );
   }
 
   render(state: AppState): void {
@@ -57,9 +70,21 @@ export class SidebarRenderer {
     const listChanged =
       state.entryMetas !== this.lastMetas ||
       state.order !== this.lastOrder ||
-      state.filterQuery !== this.lastFilter;
+      state.filterQuery !== this.lastFilter ||
+      // 🔴 **本文の当たりも指紋の一部**(#181)。入れないと、SQL が返っても
+      //    画面が変わらない ── state だけ正しくて**行が増えない**
+      //    (絞り込みを指紋に入れ忘れた 2026-08 の再演。今回は test が捕まえた)
+      state.searchHits !== this.lastHits ||
+      // ⚠ 並び順も指紋(入れないと選んでも並びが変わらない ── #181 で踏んだのと同型)
+      state.entrySort !== this.lastSort;
     const selectionChanged = state.selectedLid !== this.lastSelected;
-    if (!listChanged && !selectionChanged) return; // 指紋一致 ── DOM に触れない
+    /**
+     * ⚠ **履歴も指紋の一部**(#190)。選択と連動して動くことが多いが、
+     * 掃除(`pruneHistory`)だけが動く回もあるので**別に見る** ── 入れないと
+     * 「戻れないのにボタンが生きている」状態が残る(dead click の作り方そのもの)。
+     */
+    const historyChanged = state.selectionHistory !== this.lastHistory;
+    if (!listChanged && !selectionChanged && !historyChanged) return; // 指紋一致 ── DOM に触れない
 
     // 🔑 欄の値を state に合わせる(review M-2)。新規作成が絞り込みを解除する
     // ので、**欄だけ文字が残る**と「効いていないのに書いてある」嘘になる。
@@ -69,8 +94,15 @@ export class SidebarRenderer {
 
     if (listChanged) this.reconcileRows(state);
     if (listChanged || selectionChanged) this.patchSelection(state.selectedLid);
+    if (historyChanged) {
+      if (this.navBack) this.navBack.disabled = !canNavBack(state);
+      if (this.navForward) this.navForward.disabled = !canNavForward(state);
+    }
 
+    this.lastHistory = state.selectionHistory;
     this.lastMetas = state.entryMetas;
+    this.lastHits = state.searchHits;
+    this.lastSort = state.entrySort;
     this.lastOrder = state.order;
     this.lastFilter = state.filterQuery;
     this.lastSelected = state.selectedLid;
@@ -95,11 +127,12 @@ export class SidebarRenderer {
     const wanted = new Set<string>();
     // 一覧に**存在する** lid(絞り込み前)── 行キャッシュの掃除はこちらで判定する
     const alive = new Set<string>();
-    for (const lid of state.order) {
+    // 🔴 並び順(#183)── 規則は `sortOrder` 1 か所。既定は手動の順
+    for (const lid of sortOrder(state.order, (l) => state.entryMetas.get(l), state.entrySort)) {
       const meta = state.entryMetas.get(lid);
       if (!meta) continue;
       alive.add(lid);
-      if (!matchesTitle(meta.title, q)) continue;
+      if (!matchesEntry(lid, meta.title, q, state.searchHits)) continue;
       wanted.add(lid);
       visible.push(lid);
     }

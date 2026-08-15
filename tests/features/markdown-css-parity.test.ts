@@ -103,6 +103,11 @@ const CORPUS: ReadonlyArray<readonly [string, string]> = [
   ['csv-render fence', '```csv-render\n列A,列B\n1,2\n```\n'],
   ['html fence', '```html-render\n<b>太字</b>\n```\n'],
   ['mermaid fence', '```mermaid\ngraph TD; A-->B;\n```\n'],
+  // ⚠ 記法を足したらここにも足す(足さないとその記法は誰にも守られない)── #188
+  [
+    'chart fence',
+    '```chart\n{"type":"bar","labels":["1月"],"datasets":[{"label":"売上","data":[10]}]}\n```\n',
+  ],
   ['カード埋め込み', '@[card](entry:abc)\n'],
   ['本文の取り込み', '![別のノート](entry:abc)\n'],
   ['format ブロック', ':::format{class=highlight indent=2 align=center}\n中身\n:::\n'],
@@ -161,6 +166,7 @@ function styled(): { classes: Set<string>; attrs: Set<string> } {
 const NO_STYLE_NEEDED: Readonly<Record<string, string>> = {
   'pkc-md-rendered': '本文の器。中の要素に当てる起点で、自身は素のまま',
   'pkc-mermaid-placeholder': '器。状態は data-pkc-mermaid-state で見る',
+  'pkc-chart-placeholder': '器。状態は data-pkc-chart-state で見る(#188)',
   'pkc-md-block': '器。中の切替や操作子に当てる起点',
   'pkc-render-slot': '描画面の器。隠す規則は切替側(:checked ~)に在る',
 };

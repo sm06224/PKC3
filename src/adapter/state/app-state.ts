@@ -8,12 +8,26 @@
  *   selectedLid が選択の単一情報源
  */
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
+import { DEFAULT_ENTRY_SORT, type EntrySort } from '@features/filter/entry-sort';
 import { resolveCanonicalParents, reorderSibling } from '@features/relation/tree';
 import { extractMeta, seedBodyFor } from '@features/flavor';
 import { withTodoStatus } from '@features/flavor/todo-flavor';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import type { LauncherTile } from '@features/launcher/tiles';
 import { visibleOrder } from '@features/filter/title-filter';
+import { STRUCTURAL, type RelationKind } from '@features/relation/kinds';
+import { replaceAll } from '@features/markdown/body-replace';
+import {
+  EMPTY_HISTORY,
+  canGoBack,
+  canGoForward,
+  current as historyCurrent,
+  goBack,
+  goForward,
+  pruneHistory,
+  pushSelection,
+  type SelectionHistory,
+} from '@features/nav/selection-history';
 
 export type AppPhase = 'initializing' | 'ready' | 'editing' | 'error';
 export type ViewMode =
@@ -120,6 +134,31 @@ export interface AppState {
    */
   filterQuery: string;
   /**
+   * 🔴 **本文が当たった lid**(#181 全文検索)。⚠ `null` = **まだ返っていない**
+   * であって「0 件」ではない ── 打った直後は題名の結果だけが出て、SQL が返ると
+   * **増える**(減る向きに倒すと、打鍵のたびに行が消えてちらつく)。
+   * ⚠ 本文は常駐していないので、当たりは SQL 側からしか来ない。
+   */
+  searchHits: ReadonlySet<string> | null;
+  /**
+   * 🔴 **選択の履歴**(#190)。⚠ ブラウザの履歴は使わない ── PKC3 は単一ページで、
+   * 戻るは**アプリ内の選択**の話である(URL を汚さない = 不可侵「クエリパラメータを
+   * 抜け穴にしない」と同じ向き)。
+   * ⚠ 積むのは `reduce` の**外側 1 か所**(下の `reduce`)── 選択を動かす case は
+   * 6 つあり、case ごとに書くと必ず取りこぼす(§7「同じ判定が複数の場所にある」)。
+   */
+  selectionHistory: SelectionHistory;
+  /**
+   * 一覧の並び順(#183)。⚠ 既定は `manual` = **手で並べ替えた順**
+   * (`entry_order`)── 手動の導線を置き換えない。
+   */
+  entrySort: EntrySort;
+  /**
+   * `searchHits` が**どの問い合わせの結果か**。⚠ これが無いと、遅れて返った
+   * 古い結果を新しい問い合わせの答えとして表示してしまう(打鍵は結果より速い)。
+   */
+  searchHitsQuery: string;
+  /**
    * ランチャーのタイル(P7b 段⑩)。⚠ `null` = **まだ読んでいない**。
    * 元データは attachment の frontmatter で**常駐していない**ので、
    * ランチャーを開いたときに要求して還流させる(履歴一覧と同じ流儀)。
@@ -198,6 +237,10 @@ export const initialState: AppState = {
   freshLid: null,
   viewMode: 'detail',
   filterQuery: '',
+  searchHits: null,
+  selectionHistory: EMPTY_HISTORY,
+  entrySort: DEFAULT_ENTRY_SORT,
+  searchHitsQuery: '',
   launcherTiles: null,
   calendarMonth: null,
   showArchived: false,
@@ -214,6 +257,25 @@ export type UserAction =
   | { type: 'SELECT_ENTRY'; lid: string }
   | { type: 'SET_VIEW_MODE'; mode: ViewMode }
   | { type: 'SET_ENTRY_FILTER'; query: string }
+  /** 本文の当たりが SQL から返った(#181)。⚠ `query` は**どの問い合わせの答えか**。 */
+  | { type: 'SET_SEARCH_HITS'; query: string; lids: string[] }
+  /** 一覧の並び順を変える(#183)。⚠ 選択は消さない(絞り込みと同じ規約)。 */
+  | { type: 'SET_ENTRY_SORT'; sort: EntrySort }
+  /**
+   * 選択の履歴を戻る・進む(#190)。⚠ **行き先は state が持つ** ── 呼び側が lid を
+   * 決めると、履歴と選択が二重帳簿になる(§7)。
+   */
+  | { type: 'NAV_HISTORY'; dir: 'back' | 'forward' }
+  /** 本文の置換(#191)。⚠ 素の文字列で当てる(正規表現にしない)。 */
+  | { type: 'REPLACE_IN_BODY'; find: string; replace: string; caseSensitive?: boolean }
+  /**
+   * 🔴 **関係を作る**(#185)。⚠ **居場所(structural)はここから作らせない** ──
+   * あちらはファイラの移動が作るので、作り方が 2 つになる(§7)。
+   * ⚠ id は呼び側が採る(reducer は純関数 ── 乱数を持たない)。
+   */
+  | { type: 'ADD_RELATION'; id: string; fromLid: string; toLid: string; kind: RelationKind }
+  /** 関係を消す(#185)。⚠ **id で消す**(同じ組が複数あっても迷わない)。 */
+  | { type: 'REMOVE_RELATION'; id: string }
   | { type: 'LAUNCHER_TILES_LOADED'; tiles: LauncherTile[] }
   /**
    * アプリの一覧を読み直す(P8 段⑱)。
@@ -387,6 +449,11 @@ export type Dispatchable = UserAction | SystemCommand;
  */
 export type DomainEvent =
   | { type: 'REQUEST_BODY'; lid: string }
+  /**
+   * 本文の全文検索を頼む(#181)。⚠ 本文は常駐していないので **SQL 側の仕事**。
+   * 空文字は「絞り込み無し」── 受け手は問い合わせずに黙って終える。
+   */
+  | { type: 'REQUEST_SEARCH'; query: string }
   /** ⚠ **どれを読むかを載せる** ── effect 層は実行時に state を見ない(review L-6)。 */
   | {
       type: 'REQUEST_TILE_UPDATE';
@@ -460,6 +527,9 @@ export type DomainEvent =
       type: 'REQUEST_REORDER';
       entries: Array<{ lid: string; title: string; archetype: string; entryOrder: number }>;
     }
+  /** 関係の永続化(#185)。⚠ 1 件ずつ ── 作る操作も消す操作も 1 度に 1 つである。 */
+  | { type: 'REQUEST_RELATION_UPSERT'; id: string; fromLid: string; toLid: string; kind: string }
+  | { type: 'REQUEST_RELATION_DELETE'; id: string }
   | { type: 'REQUEST_REVISION_LIST'; lid: string }
   | {
       /** 履歴からの復元(前進変異): effect が「現状を addRevision → revision
@@ -486,7 +556,63 @@ export interface ReduceResult {
   events: DomainEvent[];
 }
 
+/**
+ * 🔴 **選択の履歴は、reducer の外側 1 か所で積む**(#190)。
+ *
+ * 選択(`selectedLid`)を動かす case は 6 つある ── `SELECT_ENTRY` / `SYS_BOOTED` の
+ * 引き継ぎ / `CREATE_ENTRY` / `ENTRY_RESTORED` / 削除の後継 / `DESELECT_ENTRY`。
+ * case ごとに `pushSelection` を書くと、**次に選択を動かす case を足した人が必ず
+ * 忘れる**(§7「同じ判定が複数の場所にある」の典型)。だから
+ * **「動いた結果」を 1 か所で見る**形にした ── 新しい case は自動で乗る。
+ *
+ * ⚠ 戻る・進む自身は積まない(積むと戻れなくなる)。
+ * ⚠ entry が消えた回は履歴も掃除する ── 残すと「戻る」が居ないノートへ飛ぶ。
+ */
 export function reduce(state: AppState, action: Dispatchable): ReduceResult {
+  if (action.type === 'NAV_HISTORY') return navHistory(state, action.dir);
+  const result = reduceCore(state, action);
+  let history = result.state.selectionHistory;
+  // ⚠ 掃除は entryMetas が**変わった回だけ**(毎回やると 50 件の走査が無駄に回る)
+  if (result.state.entryMetas !== state.entryMetas)
+    history = pruneHistory(history, (lid) => result.state.entryMetas.has(lid));
+  if (result.state.selectedLid !== null && result.state.selectedLid !== state.selectedLid)
+    history = pushSelection(history, result.state.selectedLid);
+  return history === result.state.selectionHistory
+    ? result
+    : { state: { ...result.state, selectionHistory: history }, events: result.events };
+}
+
+/**
+ * 戻る・進む。⚠ **行き先の採否は `SELECT_ENTRY` に決めさせる** ── 編集中は動かない /
+ * 居ない lid は選ばない、という規則をここに書き写すと二重帳簿になる(§7)。
+ * 🔑 だから「選択が実際に動いたか」を見て、動いたときだけ履歴を確定させる。
+ */
+function navHistory(state: AppState, dir: 'back' | 'forward'): ReduceResult {
+  const moved = dir === 'back' ? goBack(state.selectionHistory) : goForward(state.selectionHistory);
+  if (moved === state.selectionHistory) return { state, events: [] };
+  const target = historyCurrent(moved);
+  if (target === null || target === state.selectedLid) return { state, events: [] };
+  const result = reduceCore(state, { type: 'SELECT_ENTRY', lid: target });
+  if (result.state.selectedLid !== target) return { state, events: [] }; // 断られた(編集中など)
+  return { state: { ...result.state, selectionHistory: moved }, events: result.events };
+}
+
+/** 戻れるか(UI の活殺に使う)。 */
+export function canNavBack(state: AppState): boolean {
+  return canGoBack(state.selectionHistory);
+}
+
+/** 進めるか。 */
+export function canNavForward(state: AppState): boolean {
+  return canGoForward(state.selectionHistory);
+}
+
+/** ⚠ `NAV_HISTORY` は**型で除く** ── 上の wrapper が先に捌く。default 節を置いて
+ * 逃がすと、新しい action を書き忘れても tsc が黙る。 */
+function reduceCore(
+  state: AppState,
+  action: Exclude<Dispatchable, { type: 'NAV_HISTORY' }>,
+): ReduceResult {
   switch (action.type) {
     case 'SYS_BOOTED': {
       const metas = new Map(action.metas.map((m) => [m.lid, m]));
@@ -598,7 +724,30 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       // ⚠ 選択は消さない(`SET_VIEW_MODE` と同じ規約)── 絞り込んで消えた行を
       // 選んでいても、解除すれば戻ってくる
       if (state.filterQuery === action.query) return { state, events: [] };
-      return { state: { ...state, filterQuery: action.query }, events: [] };
+      /**
+       * 🔴 **問い合わせが変わったら本文の当たりは捨てる**(#181)── 残すと
+       * 「前の語で当たった行」が新しい絞り込みに混ざる。⚠ 捨てたうえで
+       * `REQUEST_SEARCH` を出し、返ってきたら `SET_SEARCH_HITS` で増やす。
+       */
+      return {
+        state: { ...state, filterQuery: action.query, searchHits: null, searchHitsQuery: '' },
+        events: [{ type: 'REQUEST_SEARCH', query: action.query }],
+      };
+    case 'SET_ENTRY_SORT':
+      // ⚠ 選択は消さない ── 並び替えただけで開いているノートが変わると驚く
+      if (state.entrySort === action.sort) return { state, events: [] };
+      return { state: { ...state, entrySort: action.sort }, events: [] };
+    case 'SET_SEARCH_HITS':
+      // ⚠ **遅れて返った古い結果を捨てる**(打鍵は結果より速い)
+      if (action.query !== state.filterQuery) return { state, events: [] };
+      return {
+        state: {
+          ...state,
+          searchHits: new Set(action.lids),
+          searchHitsQuery: action.query,
+        },
+        events: [],
+      };
     case 'SET_VIEW_MODE':
       // selection は消さない(PKC2 規約)。panel は view に従属するので畳む
       /**
@@ -748,6 +897,27 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       // ⚠ 編集がロックを握ることは**書かない** ── `phase === 'editing'` が既に
       // それを表している(`bodyLockOf`)。ここで別の field に写すと 2 つ目の真実
       return { state: { ...state, phase: 'editing', revisionPanel: null }, events: [] };
+    }
+    /**
+     * 🔴 **本文の置換**(#191)。⚠ 編集中だけ ── 読んでいるだけの面から本文を
+     * 書き換えると、user が「編集していない」と思っている間に内容が変わる。
+     * ⚠ **0 件のときも state を返す**(何も起きないのではなく「見つからなかった」と
+     * 言う)── 押しても無反応な dead click を作らない。
+     */
+    case 'REPLACE_IN_BODY': {
+      if (state.phase !== 'editing' || !state.openBody) return { state, events: [] };
+      const { body, count } = replaceAll(state.openBody.body, action.find, action.replace, {
+        caseSensitive: action.caseSensitive === true,
+      });
+      if (count === 0)
+        return {
+          state: { ...state, error: `「${action.find}」は本文に見つかりませんでした` },
+          events: [],
+        };
+      return {
+        state: { ...state, error: `${count} 件を置き換えました`, openBody: { ...state.openBody, body } },
+        events: [],
+      };
     }
     case 'UPDATE_OPEN_BODY': {
       if (state.phase !== 'editing' || !state.openBody) return { state, events: [] };
@@ -1153,7 +1323,7 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
                 id: action.relationId as string,
                 fromLid: parentLid,
                 toLid: action.lid,
-                kind: 'structural' as const,
+                kind: STRUCTURAL,
                 // ⚠ 時刻は worker が刻む(SET_ENTRY_PARENT と同じ約束)
                 createdAt: null,
                 updatedAt: null,
@@ -1276,7 +1446,7 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       // 楽観更新 ── 画面(ファイラ)は state.relations から描くので、
       // ここで直さないと「押したのに動かない」に見える
       const kept = state.relations.filter(
-        (r) => !(r.kind === 'structural' && r.toLid === action.lid),
+        (r) => !(r.kind === STRUCTURAL && r.toLid === action.lid),
       );
       const relations =
         parentLid === null
@@ -1287,7 +1457,7 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
                 id: action.relationId,
                 fromLid: parentLid,
                 toLid: action.lid,
-                kind: 'structural' as const,
+                kind: STRUCTURAL,
                 // ⚠ 時刻は **worker が刻む**(`datetime('now')`)。ここは楽観表示の
                 //    ための仮値で、次の再読込で本物に置き換わる
                 createdAt: null,
@@ -1350,6 +1520,51 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
       return {
         state: { ...state, entryMetas, order },
         events: [{ type: 'REQUEST_REORDER', entries: rows }],
+      };
+    }
+    /**
+     * 🔴 **関係を作る**(#185)。
+     * ⚠ 自分自身へは張らない / 同じ組・同じ種類は 2 本作らない(押すたびに増えない)。
+     * ⚠ 居場所は弾く ── 型でも弾いているが、**実行時にも**弾く
+     *   (dispatch は型を通らない経路からも来る)。
+     */
+    case 'ADD_RELATION': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      if (action.kind === STRUCTURAL) return { state, events: [] };
+      const { fromLid, toLid, kind } = action;
+      if (fromLid === toLid) return { state, events: [] };
+      if (!state.entryMetas.has(fromLid) || !state.entryMetas.has(toLid))
+        return { state, events: [] };
+      const dup = state.relations.some(
+        (r) => r.fromLid === fromLid && r.toLid === toLid && r.kind === kind,
+      );
+      if (dup) return { state, events: [] };
+      return {
+        state: {
+          ...state,
+          /**
+           * ⚠ 時刻は **null** で置く ── **disk が正**(worker が `datetime('now')` を
+           * 入れる)。ここで `new Date()` を呼ぶと reducer が純関数でなくなり、
+           * しかも**画面と disk で違う値**を持つことになる。
+           */
+          relations: [
+            ...state.relations,
+            { id: action.id, fromLid, toLid, kind, createdAt: null, updatedAt: null },
+          ],
+        },
+        events: [{ type: 'REQUEST_RELATION_UPSERT', id: action.id, fromLid, toLid, kind }],
+      };
+    }
+    /** 関係を消す。⚠ 居ない id でも**黙って成功**(冪等 ── 2 回押しても壊れない)。 */
+    case 'REMOVE_RELATION': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      const target = state.relations.find((r) => r.id === action.id);
+      if (!target) return { state, events: [] };
+      // ⚠ 居場所はここから消させない ── 消すとファイラの階層が壊れ、戻す導線が無い
+      if (target.kind === STRUCTURAL) return { state, events: [] };
+      return {
+        state: { ...state, relations: state.relations.filter((r) => r.id !== action.id) },
+        events: [{ type: 'REQUEST_RELATION_DELETE', id: action.id }],
       };
     }
     case 'SHOW_HISTORY': {
@@ -1636,10 +1851,13 @@ function removeEntryFromState(
     // `state.order` から取っていたので、絞り込み中に削除を続けると
     // **一覧に出ていない entry** が次々に選ばれて消えていった(実証済み)。
     // ⚠ 規則は `visibleOrder` に 1 本化 ── 一覧と後継が別々の答えを出さない
+    // ⚠ **本文の当たりも渡す**(2026-08-15)── 渡さないと、本文だけが当たっている
+    //    ノートを消したとき `indexOf` が -1 になり、選択が黙って null へ飛ぶ
     const before = visibleOrder(
       state.order,
       (l) => state.entryMetas.get(l)?.title,
       state.filterQuery,
+      state.searchHits,
     );
     const vIdx = before.indexOf(lid);
     const after = before.filter((l) => l !== lid);

@@ -103,7 +103,45 @@ export const SCHEMA_DDL: readonly string[] = [
      name TEXT NOT NULL DEFAULT '',
      active_cid TEXT
    )`,
+  /**
+   * 🔴 **本文の全文検索**(#181 / 台帳 #180 の A-1)。題名しか探せないと、
+   * ノートが増えた時点で辿れなくなる ── 北極星の「必要十分」に届いていない欠け。
+   *
+   * ## なぜ trigram か(2026-08-15 に実測して決めた。推測ではない)
+   *
+   * 同梱 sqlite は `ENABLE_FTS5` 入り。ただし **日本語は既定 / unicode61 では
+   * 1 語に潰れて引けない**(`全文検索` を入れて `全文` で MATCH → 0 件)。
+   * trigram なら引ける ── ただし **3 文字以上**(実測: `全文検索` HIT /
+   * `本語の` HIT / `りんご` HIT / `全文`(2 字)は 0 件)。
+   * ⇒ **3 文字以上は FTS、2 文字以下は LIKE** で拾う(worker 側の分岐)。
+   *
+   * ## external content(`content='entries'`)にした理由
+   *
+   * 本文を**二重に持たない**。同期は trigger に閉じるので、**書込側が索引の更新を
+   * 忘れる**型の欠陥(§1 の「材料が届いていない」)が原理的に起きない。
+   */
+  `CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
+     title, body, content='entries', content_rowid='rowid', tokenize='trigram'
+   )`,
+  `CREATE TRIGGER IF NOT EXISTS entries_fts_ai AFTER INSERT ON entries BEGIN
+     INSERT INTO entries_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body);
+   END`,
+  `CREATE TRIGGER IF NOT EXISTS entries_fts_ad AFTER DELETE ON entries BEGIN
+     INSERT INTO entries_fts(entries_fts, rowid, title, body)
+       VALUES ('delete', old.rowid, old.title, old.body);
+   END`,
+  `CREATE TRIGGER IF NOT EXISTS entries_fts_au AFTER UPDATE ON entries BEGIN
+     INSERT INTO entries_fts(entries_fts, rowid, title, body)
+       VALUES ('delete', old.rowid, old.title, old.body);
+     INSERT INTO entries_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body);
+   END`,
 ];
+
+/**
+ * trigram が引ける最小の文字数(実測値)。これ未満の問い合わせは LIKE で拾う。
+ * ⚠ 「3」は仕様ではなく**測った値**なので、tokenizer を変えたら測り直す。
+ */
+export const FTS_MIN_CHARS = 3;
 
 /** サイドバー・一覧ビューが常駐させる「リーン集約」の行(body を含まない)。 */
 export interface EntryMetaRow {

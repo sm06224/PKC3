@@ -47,6 +47,12 @@ export const REVISION_KEEP_LATEST = 100;
 export function createStorePort(client: StoreClientLike, cid: string): StorePort {
   return {
     getBody: (lid) => client.request({ op: 'getBody', cid, lid }),
+    /**
+     * 本文の全文検索(#181)。⚠ ここは**渡すだけ** ── 引き方(FTS / LIKE)の規則は
+     * `features/filter/search-query.ts` が 1 か所で持ち、実行は worker がする。
+     */
+    searchEntries: async (query) =>
+      (await client.request({ op: 'searchEntries', cid, query })).lids,
     getBodies: (lids) => client.request({ op: 'getBodies', cid, lids }),
     listBodies: (after, maxBytes) =>
       client.request({ op: 'listBodies', cid, maxBytes, ...(after ? { after } : {}) }),
@@ -76,6 +82,13 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
       await client.request({ op: 'setEntryParent', cid, lid, parentLid, relationId });
     },
     listRelations: () => client.request({ op: 'listRelations', cid }),
+    // 🔴 #185: 1 件の作成・書き換えは既存の bulk を 1 件で使う(op を 2 つにしない)
+    upsertRelation: async (rel) => {
+      await client.request({ op: 'bulkUpsertRelations', cid, relations: [rel] });
+    },
+    deleteRelation: async (id) => {
+      await client.request({ op: 'deleteRelation', cid, id });
+    },
     listRevisionMetas: (entryLid) =>
       client.request({ op: 'listRevisionMetas', cid, entryLid }),
     getRevision: (revId) => client.request({ op: 'getRevision', cid, id: revId }),

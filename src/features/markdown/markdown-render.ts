@@ -164,12 +164,12 @@ const defaultFence = md.renderer.rules.fence ??
 //    sibling combinator)── S2 Viewer popup / S4 entry-window は action-binder
 //    の無い独立 document のため、JS 配線ゼロで全 surface に効く方式を正とする。
 
-export type RenderableFenceLang = 'html' | 'mermaid' | 'csv' | 'tsv' | 'psv';
+export type RenderableFenceLang = 'html' | 'mermaid' | 'chart' | 'csv' | 'tsv' | 'psv';
 export type RenderableFenceMode = 'both' | 'render' | 'norender';
 
 /** ⚠ 公開しているのは `tests/docs-parity.test.ts` がマニュアルと突合するため。 */
 export const RENDERABLE_FENCE_LANGS: ReadonlySet<string> = new Set([
-  'html', 'mermaid', 'csv', 'tsv', 'psv',
+  'html', 'mermaid', 'chart', 'csv', 'tsv', 'psv',
 ]);
 
 export interface RenderableFence {
@@ -265,6 +265,17 @@ function buildRenderableSlotHtml(
       // 保持(HTML entity escape 必須、md.utils.escapeHtml 使用)。
       const escaped = md.utils.escapeHtml(content);
       return `<div class="pkc-mermaid-placeholder" data-pkc-mermaid-src="${escaped}" data-pkc-md-block-kind="mermaid"><pre class="pkc-mermaid-source"><code class="language-mermaid">${escaped}</code></pre></div>`;
+    }
+    case 'chart': {
+      /**
+       * 🔴 **mermaid と同じ形にする**(#188)── placeholder を出し、実際に描くのは
+       * adapter 層(`hydrateChartPlaceholders`)。features 層は DOM を持たない。
+       * ⚠ 描いた結果は **PNG の `<img>` 1 枚**(不可侵指示「描いたら焼く」)。
+       * ⚠ 原文は属性に持つ ── **同じ塊の HTML が変わらない**ことが、生きている
+       *   `<img>` を捨てないための条件である(mermaid で実測済み)。
+       */
+      const escapedChart = md.utils.escapeHtml(content);
+      return `<div class="pkc-chart-placeholder" data-pkc-chart-src="${escapedChart}" data-pkc-md-block-kind="chart"><pre class="pkc-chart-source"><code class="language-chart">${escapedChart}</code></pre></div>`;
     }
     default: {
       // csv / tsv / psv:suffix を剥がした info を渡す(`noheader` 等の

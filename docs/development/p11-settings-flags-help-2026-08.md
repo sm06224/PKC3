@@ -56,7 +56,7 @@ Status: ✅ **裁定済み(user 2026-08-07「オーケー / 続けてくださ�
 
 `ViewMode` は `detail | calendar | kanban | filer | launcher | settings` の 6 つ
 (`app-state.ts:19`)。`help` / `about` の action も図案も無い。
-これは既知で、`pkc2-feature-migration-candidates-2026-08.md:69` が
+これは既知で、PKC3 の issue #190(B-4 キーボード近道)が
 「PKC2 に在って PKC3 に無いのは 選択履歴 / ペインの開閉 / **ヘルプ**」と記録している。
 
 ### ⚠ マニュアルは在るが、アプリから到達できない

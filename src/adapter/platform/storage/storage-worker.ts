@@ -9,10 +9,16 @@
  */
 import sqlite3InitModule, { type Database } from '@sqlite.org/sqlite-wasm';
 import { DB_SCHEMA_VERSION, SCHEMA_DDL, REVISION_ADDED_COLUMNS } from './schema';
+/**
+ * 全文検索が 1 度に返す上限(#181)。⚠ **切ったことは呼び側へ言う** ── 黙って
+ * 切ると user は「無い」と読む。上限そのものは「一覧に出して意味がある量」で決めた。
+ */
+const SEARCH_LIMIT = 200;
 import type { EntryUpsert } from './schema';
 import { contentHash64Hex } from './content-hash';
 import { scanAssetRefsInto } from '@features/asset/asset-ref-scan';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
+import { planSearch } from '@features/filter/search-query';
 import {
   applyLinePatch,
   diffLines,
@@ -112,6 +118,17 @@ function applySchema(database: Database): void {
       if (!revCols.has(col))
         database.exec(`ALTER TABLE revisions ADD COLUMN ${col} TEXT`);
     }
+    /**
+     * 🔴 **既存 DB の索引を埋める**(#181 全文検索)。DDL は空の索引を作るだけ
+     * なので、**既に在る entry は 1 件も引けない**まま緑になる ── 索引を足した
+     * 型の欠陥はここに出る(§1「材料が届いていない」)。
+     * ⚠ 判定は user_version ではなく**あるべき状態の実在**(schema.ts の原則):
+     * 「entry が在るのに索引が空」なら埋める。冪等で、半端な DB も自己修復する。
+     */
+    const entryCount = Number(database.selectValue('SELECT count(*) FROM entries') ?? 0);
+    const ftsCount = Number(database.selectValue('SELECT count(*) FROM entries_fts') ?? 0);
+    if (entryCount > 0 && ftsCount === 0)
+      database.exec(`INSERT INTO entries_fts(entries_fts) VALUES ('rebuild')`);
     database.exec(`PRAGMA user_version = ${DB_SCHEMA_VERSION}`);
     database.exec('COMMIT');
   } catch (err) {
@@ -563,6 +580,37 @@ const handlers: Handlers = {
     });
     return { lid: found };
   },
+  /**
+   * 🔴 **本文の全文検索**(#181)。引き方の規則は `planSearch` が 1 か所で持つ。
+   *
+   * ⚠ **並びは entry_order**(一覧と同じ)── 関連度順にしない。検索のたびに
+   * 並びが変わると、user は「さっき見ていたもの」を見失う。
+   * ⚠ **上限を置き、切ったことを言う**(`truncated`)── 黙って切ると、user は
+   * 「無い」と読む(§1 の「無言の欠落」)。
+   */
+  searchEntries: (req) => {
+    const plan = planSearch(req.query);
+    if (plan.kind === 'none') return { lids: [], truncated: false };
+    const limit = Math.max(1, Math.min(req.limit ?? SEARCH_LIMIT, SEARCH_LIMIT));
+    const sql =
+      plan.kind === 'fts'
+        ? `SELECT e.lid AS lid FROM entries_fts f
+             JOIN entries e ON e.rowid = f.rowid
+            WHERE f.entries_fts MATCH ? AND e.cid = ?
+            ORDER BY e.entry_order, e.lid LIMIT ?`
+        : // 2 文字以下は trigram が当たらないので LIKE(実測)。⚠ ESCAPE を宣言する
+          `SELECT lid FROM entries
+            WHERE cid = ? AND (title LIKE ?2 ESCAPE '\\' OR body LIKE ?2 ESCAPE '\\')
+            ORDER BY entry_order, lid LIMIT ?3`;
+    const bind =
+      plan.kind === 'fts'
+        ? [plan.match, req.cid, limit + 1]
+        : [req.cid, plan.pattern, limit + 1];
+    const rows = need().selectObjects(sql, bind) as Array<{ lid: string }>;
+    // 🔑 **1 件多く取って切れたか判る**(件数を数え直す 2 回目の問い合わせを避ける)
+    const truncated = rows.length > limit;
+    return { lids: rows.slice(0, limit).map((r) => r.lid), truncated };
+  },
   listBodies: (req) => {
     // 🔴 **カーソルは ORDER BY と同じ複合キー**。`entry_order > ?` だけだと
     // 境界の順序値を共有する行が全部飛ぶ(entry_order に UNIQUE は無い)。
@@ -747,6 +795,18 @@ const handlers: Handlers = {
          FROM relations WHERE cid = ? ORDER BY id`,
       [req.cid],
     ) as unknown as ResultMap['listRelations'],
+  /**
+   * 🔴 **関係を 1 件消す**(#185)。⚠ 作れて消せない導線は dead click の一種なので、
+   * UI より先にここを開ける。
+   * ⚠ 居ない id を消しても**成功**にする(冪等 ── 2 回押しても壊れない)。
+   */
+  deleteRelation: (req) => {
+    need().exec({
+      sql: 'DELETE FROM relations WHERE cid = ? AND id = ?',
+      bind: [req.cid, req.id],
+    });
+    return null;
+  },
   bulkUpsertRelations: (req) => {
     const database = need();
     database.exec('BEGIN IMMEDIATE');

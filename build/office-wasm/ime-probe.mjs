@@ -52,6 +52,10 @@ const DEEP = `(() => {
           w: Math.round(r.width), h: Math.round(r.height),
           focused: el === document.activeElement,
           inputmode: el.getAttribute('inputmode'),
+          // 🔴 #156 の診断(Qt patch が書く)── 早期 return の 4 条件のうち、
+          //    どれで落ちているかを名指しする(obj0-win1-panel1-accept0 の形)。
+          //    ⚠ ここは template literal の中なので**逆引用符を書かない**(壊れる)
+          ime: el.getAttribute('data-pkc-ime'),
           autocapitalize: el.getAttribute('autocapitalize') });
       }
       if (el.shadowRoot) walk(el.shadowRoot);
