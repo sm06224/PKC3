@@ -537,7 +537,7 @@ test('🔴 塊を跨ぐドラッグ選択で、版面が文末へ飛ばない(�
  * caret を動かす ── `preventDefault` の掛け漏れ・掛けすぎは実機でしか見えない
  * (行の途中の ↓ を奪うと、複数行の入力欄の中を移動できなくなる)。
  */
-test('🔴 最終行の ↓ で次の塊が開き、行の途中の ↓ は箱の中の移動のまま', async ({ page }) => {
+test('🔴 Alt+↓ で次の塊が開き、素の ↓ は箱の中の移動のまま', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoLive(page);
@@ -548,34 +548,88 @@ test('🔴 最終行の ↓ で次の塊が開き、行の途中の ↓ は箱�
   const row = live.locator('[data-pkc-field="row-source"]');
   await expect(row).toHaveValue('最初の段落です。');
 
-  // 1 行の値 = どこに居ても最終行 ── ↓ で確定し、次の塊が開く(caret 先頭)
+  /**
+   * 🔴 **素の ↓ で飛ばない**(2026-08-15、user 報告の暴発)。
+   * ⚠ 1 行の塊は「改行が無い側」に必ず居るので、**旧実装ではここで飛んでいた**。
+   */
   await page.keyboard.press('End');
   await page.keyboard.press('ArrowDown');
+  await expect(row, '素の ↓ で隣の塊へ飛んだ').toHaveValue('最初の段落です。');
+  await page.keyboard.press('Home');
+  await page.keyboard.press('ArrowUp');
+  await expect(row, '素の ↑ で隣の塊へ飛んだ').toHaveValue('最初の段落です。');
+
+  // Alt+↓ で確定し、次の塊が開く(caret 先頭)
+  await page.keyboard.press('End');
+  await page.keyboard.press('Alt+ArrowDown');
   await expect(row, '次の塊が開いていない').toHaveValue('次の段落です。');
   expect(
     await row.evaluate((el) => (el as HTMLTextAreaElement).selectionStart),
     'caret が先頭に無い',
   ).toBe(0);
 
-  // ↑ で前の塊に戻る(caret 末尾)
-  await page.keyboard.press('ArrowUp');
+  // Alt+↑ で前の塊に戻る(caret 末尾)
+  await page.keyboard.press('Alt+ArrowUp');
   await expect(row).toHaveValue('最初の段落です。');
   expect(
     await row.evaluate((el) => (el as HTMLTextAreaElement).selectionStart),
     'caret が末尾に無い',
   ).toBe('最初の段落です。'.length);
 
-  // 複数行にして行の途中に caret ── ↓ は**箱の中の移動**のまま(奪っていない)
+  // 複数行にして先頭に caret ── 素の ↓ は**箱の中の移動**のまま(奪っていない)
   await row.fill('1 行目です。\n2 行目です。');
   await row.evaluate((el) => {
     (el as HTMLTextAreaElement).setSelectionRange(0, 0);
   });
   await page.keyboard.press('ArrowDown');
-  await expect(row, '行の途中の ↓ で確定してしまった(箱の中を移動できない)').toHaveValue(
+  await expect(row, '素の ↓ で確定してしまった(箱の中を移動できない)').toHaveValue(
     '1 行目です。\n2 行目です。',
   );
   const caret = await row.evaluate((el) => (el as HTMLTextAreaElement).selectionStart);
   expect(caret, '↓ の既定動作(次の行へ)が死んでいる').toBeGreaterThan(0);
+  expect(errors).toEqual([]);
+});
+
+/**
+ * 🔴 **長い 1 段落を開いたら、折り返した高さの箱になる**(2026-08-15、user 報告
+ * 「1 行の選択をすると表示が適切なサイズのテキストブロックにならないため編集しにくい」)。
+ *
+ * ⚠ **unit では原理的に届かない** ── happy-dom は版面を持たないので折り返しが
+ * 起きない(unit 側は値を差して分岐を走らせるだけ)。ここが**折り返しを本当に
+ * 起こせる唯一の場所**である。
+ * 🔑 観測点は `rows` ではなく **「先頭が見えていること」**(`scrollTop === 0` かつ
+ * 溢れていない)── user が困ったのは箱が文の**途中から**始まって見えたことだった。
+ */
+test('🔴 長い 1 段落は折り返したぶんだけ箱が伸びる(先頭が隠れない)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 900, height: 900 });
+  await gotoLive(page);
+  const long = `あ${'長い段落の本文です。'.repeat(30)}ん`; // 改行を 1 つも持たない
+  await openLive(page, `# 題\n\n${long}\n`);
+
+  await clickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
+  const row = page.locator('[data-pkc-region="editor-live"] [data-pkc-field="row-source"]');
+  await expect(row).toHaveValue(long);
+
+  const m = await row.evaluate((el) => {
+    const ta = el as HTMLTextAreaElement;
+    return {
+      rows: ta.rows,
+      clientHeight: ta.clientHeight,
+      scrollHeight: ta.scrollHeight,
+      scrollTop: ta.scrollTop,
+      lineHeight: Number.parseFloat(getComputedStyle(ta).lineHeight),
+    };
+  });
+  // 前提: この幅で本当に折り返している(折り返していなければ以下は空振りになる)
+  expect(m.clientHeight, '折り返していない ── 本文が短すぎて何も測っていない').toBeGreaterThan(
+    m.lineHeight * 2,
+  );
+  expect(m.rows, '改行の数(=1)のままになっている').toBeGreaterThan(1);
+  expect(m.scrollHeight, '箱の中に押し込まれている(溢れている)').toBeLessThanOrEqual(
+    m.clientHeight + 1,
+  );
+  expect(m.scrollTop, '先頭が隠れている(文の途中から見えている)').toBe(0);
   expect(errors).toEqual([]);
 });
 
