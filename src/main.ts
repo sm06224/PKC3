@@ -201,13 +201,44 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       sync = followerConn;
     } else {
       followerConn = null;
+      /**
+       * 従来の待機 ── ただし**待っている間も本体の名乗りを聞き直す**(レビュー M-5)。
+       * 本体がまだ boot 中(worker init が handshake の 1.5 秒に間に合わない)なだけの
+       * とき、一度の時間切れで旧式待機に永久落ちしていた。lease が来るか、本体と
+       * handshake できるかの早い方で進む。⚠ lease を優先する ── handshake の相手が
+       * 死んだ直後なら、こちらが本体になるのが正しい。
+       */
       root.textContent = '別のタブで開いています。そのタブを閉じると、ここで続きが開きます…';
-      await lease.whenHeld;
-      const real = await initStorage(true);
-      const host = new StoreProxyHost({ client: real.client, init: real.init });
-      client = host.localClient();
-      init = real.init;
-      sync = host;
+      let held = false;
+      const heldP = lease.whenHeld.then(() => {
+        held = true;
+      });
+      while (!held) {
+        await Promise.race([heldP, new Promise((r) => setTimeout(r, 2000))]);
+        if (held) break;
+        const again = await ProxyStoreClient.connect({ handshakeTimeoutMs: 800 });
+        if (held) {
+          again?.terminate();
+          break;
+        }
+        if (again) {
+          followerConn = again;
+          break;
+        }
+      }
+      if (followerConn?.initResult) {
+        client = followerConn;
+        init = followerConn.initResult;
+        sync = followerConn;
+      } else {
+        followerConn = null;
+        await heldP;
+        const real = await initStorage(true);
+        const host = new StoreProxyHost({ client: real.client, init: real.init });
+        client = host.localClient();
+        init = real.init;
+        sync = host;
+      }
     }
   }
   await client.request({ op: 'openContainer', cid: DEFAULT_CID, title: CONTAINER_TITLE });
@@ -463,10 +494,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   bindEditLockRelease(dispatcher, () => sync, DEFAULT_CID);
   if (followerConn) {
     const conn = followerConn;
-    conn.onEditRevoked(() => {
+    conn.onEditRevoked((_cid, lid) => {
+      // ⚠ いま編集している当のノートのときだけ言う(そうでない剥奪は user に関係ない)
+      const st = dispatcher.getState();
+      if (!(st.phase === 'editing' && st.openBody?.lid === lid)) return;
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: '本体タブの交代で編集権を失いました(別のタブが同じノートを編集中です)',
+        error:
+          '本体タブの交代で、このノートの編集権を別のタブに取られました。' +
+          'ここで保存すると相手の編集を上書きします ── 内容を控えてから編集を取り消してください',
       });
     });
     let promotedHost: StoreProxyHost | null = null;
@@ -494,6 +530,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         showStatus('このタブが本体になりました');
         paint();
       } catch (e) {
+        // 🔴 帯の常設も嘘のまま残さない(レビュー H-2)── 「本体経由」はもう成立していない
+        syncLine = '⚠ 本体への切り替えに失敗しました(保存できません ── タブを読み直してください)';
+        paint();
         dispatcher.dispatch({
           type: 'OP_FAILED',
           error: `本体への切り替えに失敗しました: ${e instanceof Error ? e.message : String(e)}`,

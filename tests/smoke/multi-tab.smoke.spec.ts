@@ -82,7 +82,7 @@ test('2 枚目のタブが本体経由で開き、別ノートは編集でき、
   expect(errorsB).toEqual([]);
 });
 
-test('本体タブを閉じると、2 枚目がその場で本体に昇格する(reload 無し)', async ({
+test('本体タブを閉じると、2 枚目がその場で本体に昇格する(reload 無し・編集も生きたまま)', async ({
   page,
   context,
 }) => {
@@ -100,22 +100,55 @@ test('本体タブを閉じると、2 枚目がその場で本体に昇格する
     '保存は本体タブ経由',
   );
 
-  await page.close(); // 本体の死 ── Web Locks が B へ lease を渡す
-  await expect(pageB.locator('[data-pkc-region="status"]')).toContainText(
-    'このタブが本体になりました',
-    { timeout: 15_000 },
-  );
-
-  // 昇格後のタブで実際に書ける(実 worker へ乗り換わっている)
+  // B は**編集中のまま**本体の死を迎える(編集ロックの昇格引き継ぎを実路で踏む)
   const rowB = pageB.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
   await rowB.first().click();
   await clickReal(pageB, '[data-pkc-action="start-edit"]');
   const taB = pageB.locator('[data-pkc-field="editor-body"]');
   await expect(taB).toBeVisible();
   await taB.fill('# 昇格後の保存');
+
+  await page.close(); // 本体の死 ── Web Locks が B へ lease を渡す
+  await expect(pageB.locator('[data-pkc-region="status"]')).toContainText(
+    'このタブが本体になりました',
+    { timeout: 15_000 },
+  );
+  // 編集は昇格をまたいで生きている(reload していない証拠でもある)
+  await expect(taB).toBeVisible();
+
+  // タブ C: 新しい本体(B)に follower として繋がる(3 枚目 ── レビュー M-6 の pin)
+  const pageC = await context.newPage();
+  const errorsC = collectPageErrors(pageC);
+  await useSplitEditor(pageC);
+  await gotoApp(pageC);
+  await expect(pageC.locator('[data-pkc-region="status"]')).toContainText(
+    '保存は本体タブ経由',
+  );
+  // 🔴 B が編集中のノートは C から取れない(heldLocks が新台帳へ引き継がれている)
+  const rowC = pageC.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  await expect(rowC).toHaveCount(1);
+  await rowC.first().click();
+  await clickReal(pageC, '[data-pkc-action="start-edit"]');
+  await expect(pageC.locator('[data-pkc-region="status"]')).toContainText(
+    '別のタブで編集中',
+  );
+
+  // B が保存 → 🔴 昇格後の書込が C へ届く(localClient 包み + 名乗りの pin)
   await clickReal(pageB, '[data-pkc-action="commit-edit"]');
   await expect(pageB.locator('[data-pkc-field="detail-body"] h1')).toContainText(
     '昇格後の保存',
   );
+  await expect(pageC.locator('[data-pkc-field="detail-body"] h1')).toContainText(
+    '昇格後の保存',
+    { timeout: 10_000 },
+  );
+
+  // C が作る → 🔴 昇格後の B に届く(B の changed 購読が新 host へ繋ぎ直されている pin)
+  await createEntry(pageC, 'text');
+  await pageC.locator('[data-pkc-field="editor-body"]').fill('# C の 2 件目');
+  await clickReal(pageC, '[data-pkc-action="commit-edit"]');
+  await expect(rowB).toHaveCount(2, { timeout: 10_000 });
+
   expect(errorsB).toEqual([]);
+  expect(errorsC).toEqual([]);
 });

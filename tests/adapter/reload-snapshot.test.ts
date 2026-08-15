@@ -137,3 +137,53 @@ describe('deferNotice(先送りの案内の差し替え)', () => {
     expect(d.getState().error).toBe('同期しました。編集を終了すると反映されます');
   });
 });
+
+/** レビュー H-3: ready 検査と dispatch の間(読込の await)に編集が始まる窓。 */
+describe('読込中に編集が始まった場合(H-3)', () => {
+  it('🔴 取ったあとに phase を見直す ── 編集中に SYS_BOOTED を落として下書きを消さない', async () => {
+    const d = booted();
+    let resolveLoad!: (s: { metas: EntryMeta[]; relations: [] }) => void;
+    const load = vi.fn(
+      () => new Promise<{ metas: EntryMeta[]; relations: [] }>((r) => (resolveLoad = r)),
+    );
+    const p = reloadSnapshot(d, 'c1', load, { deferNotice: null });
+    expect(load).toHaveBeenCalledTimes(1); // ready だったので即読みに入った
+    // 読んでいる間に user が編集を始める
+    d.dispatch({ type: 'CREATE_ENTRY', archetype: 'text', lid: 'draft', title: 'd' });
+    d.dispatch({ type: 'UPDATE_OPEN_BODY', body: '打ちかけ\n' });
+    expect(d.getState().phase).toBe('editing');
+    resolveLoad({ metas: [meta('a')], relations: [] });
+    await p;
+    await new Promise((r) => setTimeout(r, 0));
+    // 🔴 編集は生きている(SYS_BOOTED が openBody を捨てていない)
+    expect(d.getState().phase).toBe('editing');
+    expect(d.getState().openBody?.body).toBe('打ちかけ\n');
+    // 編集を終えると、**取り直した** snapshot で入れ替わる(古いのを使わない)
+    d.dispatch({ type: 'CANCEL_EDIT' });
+    await new Promise((r) => setTimeout(r, 0)); // 予約 → boot → 2 回目の load() まで進める
+    expect(load).toHaveBeenCalledTimes(2);
+    resolveLoad({ metas: [meta('b')], relations: [] }); // 2 回目の load を解決
+    await new Promise((r) => setTimeout(r, 0));
+    expect([...d.getState().entryMetas.keys()]).toContain('b');
+  });
+
+  it('先送りの予約は 1 個に束ねる(別タブの保存が N 回来ても boot は 1 回)', async () => {
+    const d = booted();
+    d.dispatch({ type: 'CREATE_ENTRY', archetype: 'text', lid: 'draft', title: 'd' });
+    const load = vi.fn(async () => ({ metas: [meta('a')], relations: [] }));
+    await reloadSnapshot(d, 'c1', load, { deferNotice: null });
+    await reloadSnapshot(d, 'c1', load, { deferNotice: null });
+    await reloadSnapshot(d, 'c1', load, { deferNotice: null });
+    d.dispatch({ type: 'CANCEL_EDIT' });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(load, '予約が積み上がって連射された').toHaveBeenCalledTimes(1);
+  });
+
+  it('読込の失敗は帯に出る(黙って落とさない ── L-2)', async () => {
+    const d = booted();
+    await reloadSnapshot(d, 'c1', async () => {
+      throw new Error('本体タブと通信できません(応答がありません)');
+    });
+    expect(d.getState().error).toContain('一覧を取り直せませんでした');
+  });
+});

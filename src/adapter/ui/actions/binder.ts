@@ -125,7 +125,7 @@ export interface BinderServices {
    * ⚠ 解放の正本は main.ts の phase 遷移 watcher ── ここの release は
    *   「取ったのに編集に入れなかった」ときの返却だけ。
    */
-  acquireEditLock?(lid: string): Promise<boolean>;
+  acquireEditLock?(lid: string): Promise<'granted' | 'denied' | 'unreachable'>;
   releaseEditLock?(lid: string): void;
   /**
    * フラグの切替(P11。user 指示 2026-08-07)。
@@ -495,18 +495,29 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'START_EDIT' });
       return;
     }
-    void lock(lid).then((granted) => {
-      if (!granted) {
+    void lock(lid).then((grant) => {
+      if (grant !== 'granted') {
+        // ⚠ 文言は理由と対(§1 / レビュー M-7)── holder 不在を「別のタブで編集中」と
+        //    言うと、user は存在しない編集タブを探す
         dispatcher.dispatch({
           type: 'OP_FAILED',
-          error: 'このノートは別のタブで編集中です(そちらを閉じるか保存してください)',
+          error:
+            grant === 'denied'
+              ? 'このノートは別のタブで編集中です(そちらを閉じるか保存してください)'
+              : '本体タブと通信できません(少し待ってもう一度お試しください)',
         });
         return;
       }
+      // 🔴 dispatch の**前**に自分の lid か確かめる(レビュー M-3)── acquire を待つ間に
+      //    user が別のノートを選んでいると、reducer は**そのノート**の編集を受理する
+      //    = ロック無しの編集が成立してしまう。dispatch は同期なのでここの検査に窓は無い
+      if (dispatcher.getState().openBody?.lid !== lid) {
+        services.releaseEditLock?.(lid);
+        return;
+      }
       dispatcher.dispatch({ type: 'START_EDIT' });
-      // ⚠ 「editing に居るか」では足りない ── acquire を待つ間に user が**別のノート**の
-      //    編集に入っていると、reducer はこの START_EDIT を断るのに phase は editing の
-      //    まま(= 検査が別人の編集に満たされる、§1 の顔)。**自分の lid が入ったか**で見る
+      // ⚠ 「editing に居るか」では足りない ── reducer が断る理由は選択以外にもある
+      //    (writeLock / tileWrite 中)。**自分の lid が入ったか**で見る
       const st = dispatcher.getState();
       if (!(st.phase === 'editing' && st.openBody?.lid === lid))
         services.releaseEditLock?.(lid);

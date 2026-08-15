@@ -39,9 +39,16 @@ export const STORE_PROXY_CHANNEL = 'pkc3-store-proxy';
 export const HANDSHAKE_TIMEOUT_MS = 1500;
 /** 要求→応答の上限。超えたら reject(永久 hang を作らない ── StoreClient と同じ規律)。 */
 export const REQUEST_TIMEOUT_MS = 10_000;
-/** 編集ロックの生存確認間隔(follower → holder)と、掃除の閾値。 */
+/**
+ * 編集ロックの生存確認間隔(follower → holder)と、掃除の閾値。
+ * ⚠ TTL は **crash した follower の置き土産**を掃除するためだけの物 ──
+ *   holder 自身のロックには適用しない(tryLock 参照。レビュー H-1: 適用すると
+ *   本体タブで 45 秒編集しただけで別タブに同じノートを取られる)。
+ * ⚠ 5 分にしてあるのは背面タブの timer throttling 対策(レビュー L-3 ──
+ *   Chrome は背面の interval を 60 秒に間引くので、45 秒だと ping が TTL を跨ぐ)。
+ */
 export const EDIT_PING_MS = 15_000;
-export const EDIT_LOCK_TTL_MS = 45_000;
+export const EDIT_LOCK_TTL_MS = 300_000;
 
 /** 書込 op = 'changed' を放送する op(protocol.ts の mutation 全数)。 */
 const MUTATING_OPS: ReadonlySet<StorageRequest['op']> = new Set([
@@ -92,11 +99,18 @@ export type ProxyWire =
   | { kind: 'edit-ping'; from: string; keys: string[] }
   | { kind: 'bye'; from: string };
 
+/**
+ * 編集権の返答は 3 値(レビュー M-7)。⚠ boolean にすると「返事が無い」と
+ * 「別タブが編集中」が同じ顔になり、holder 不在のとき user に**存在しない
+ * 編集タブを探させる**文言を出してしまう。
+ */
+export type EditGrant = 'granted' | 'denied' | 'unreachable';
+
 /** タブ間で同期すべきことの口(holder / follower の両実装が同じ形で持つ)。 */
 export interface TabSync {
   role(): 'holder' | 'follower';
-  /** この lid の編集権を取る。false = 別タブが編集中。 */
-  acquireEdit(cid: string, lid: string): Promise<boolean>;
+  /** この lid の編集権を取る。denied = 別タブが編集中 / unreachable = 本体と話せない。 */
+  acquireEdit(cid: string, lid: string): Promise<EditGrant>;
   releaseEdit(cid: string, lid: string): void;
   /** 自分以外のタブが書き込んだとき(lids = null は全面 refresh)。 */
   onChanged(fn: (cid: string, lids: string[] | null) => void): () => void;
@@ -188,8 +202,8 @@ export class StoreProxyHost implements TabSync {
     };
   }
 
-  acquireEdit(cid: string, lid: string): Promise<boolean> {
-    return Promise.resolve(this.tryLock(lockKey(cid, lid), this.id));
+  acquireEdit(cid: string, lid: string): Promise<EditGrant> {
+    return Promise.resolve(this.tryLock(lockKey(cid, lid), this.id) ? 'granted' : 'denied');
   }
 
   releaseEdit(cid: string, lid: string): void {
@@ -211,7 +225,13 @@ export class StoreProxyHost implements TabSync {
 
   private tryLock(key: string, tab: string): boolean {
     const cur = this.locks.get(key);
-    if (cur && cur.tab !== tab && this.now() - cur.seenAt <= EDIT_LOCK_TTL_MS) return false;
+    if (cur && cur.tab !== tab) {
+      // 🔴 **holder 自身のロックは時間で失効させない**(レビュー H-1)。
+      //    holder が生きている限り有効 ── 死ねば台帳ごと消えるので TTL は不要。
+      //    TTL の対象は「crash して bye も ping も出せなかった follower」だけ。
+      const stale = cur.tab !== this.id && this.now() - cur.seenAt > EDIT_LOCK_TTL_MS;
+      if (!stale) return false;
+    }
     this.locks.set(key, { tab, seenAt: this.now() });
     return true;
   }
@@ -331,12 +351,17 @@ export class ProxyStoreClient implements StoreClientLike, TabSync {
   private readonly deps: FollowerDeps;
   private nextId = 1;
   private readonly pending = new Map<number, Pending>();
-  private readonly editWaiters = new Map<number, (granted: boolean) => void>();
+  /** cid/lid を持つのは holder 交代時の**再送**のため(レビュー M-7)。 */
+  private readonly editWaiters = new Map<
+    number,
+    { cid: string; lid: string; settle: (g: EditGrant) => void }
+  >();
   /** 自分が握っている編集ロック(holder 交代時の再主張と ping に使う)。 */
   private readonly heldEdits = new Map<string, { cid: string; lid: string }>();
   private readonly changedListeners = new Set<(cid: string, lids: string[] | null) => void>();
   private readonly revokedListeners = new Set<(cid: string, lid: string) => void>();
-  private state: 'channel' | 'promoting' | 'real' = 'channel';
+  /** 'dead' = 昇格失敗(レビュー H-2)── 以後の要求は**即断る**(静かに積まない)。 */
+  private state: 'channel' | 'promoting' | 'real' | 'dead' = 'channel';
   private realClient: StoreClientLike | null = null;
   private buffered: Array<{ req: StorageRequest; resolve: (v: unknown) => void; reject: (e: Error) => void }> = [];
   private pingTimer: ReturnType<typeof setInterval> | null = null;
@@ -372,6 +397,17 @@ export class ProxyStoreClient implements StoreClientLike, TabSync {
         done = true;
         (deps.clearTimeoutFn ?? clearTimeout)(timer);
         f.startPing();
+        /**
+         * タブ終了で 'bye'(レビュー L-1)── 出せれば holder が即ロックを返すので、
+         * 「閉じたのに数分ロックが残る」を縮める。⚠ crash では出ない ── そのときの
+         * 保険が TTL(EDIT_LOCK_TTL_MS)。⚠ bfcache 誤発火(window-close.ts の教訓)は
+         * 実害が無い ── 誤って bye しても、次の編集で取り直すだけで壊れない。
+         */
+        if (typeof window !== 'undefined')
+          window.addEventListener('pagehide', () => {
+            if (!f.terminated && f.state === 'channel')
+              f.ch.postMessage({ kind: 'bye', from: f.id } satisfies ProxyWire);
+          });
         resolve(f);
       };
       f.ch.postMessage({ kind: 'hello', from: f.id } satisfies ProxyWire);
@@ -386,6 +422,10 @@ export class ProxyStoreClient implements StoreClientLike, TabSync {
 
   request<Op extends StorageRequest['op']>(req: RequestFor<Op>): Promise<ResultMap[Op]> {
     if (this.terminated) return Promise.reject(new Error('store client terminated'));
+    if (this.state === 'dead')
+      return Promise.reject(
+        new Error('本体への切り替えに失敗しています(タブを読み直してください)'),
+      );
     if (this.state === 'real' && this.realClient) return this.realClient.request(req);
     if (this.state === 'promoting') {
       return new Promise((resolve, reject) => {
@@ -410,26 +450,32 @@ export class ProxyStoreClient implements StoreClientLike, TabSync {
     });
   }
 
-  acquireEdit(cid: string, lid: string): Promise<boolean> {
-    if (this.terminated) return Promise.resolve(false);
+  acquireEdit(cid: string, lid: string): Promise<EditGrant> {
+    if (this.terminated || this.state === 'dead') return Promise.resolve('unreachable');
     const key = lockKey(cid, lid);
     if (this.state !== 'channel') {
       // 昇格後は自分が裁定者になっているはず ── 呼び側は host の TabSync に
       // 乗り換えている(onPromoted)。ここへ来たら握って良い
       this.heldEdits.set(key, { cid, lid });
-      return Promise.resolve(true);
+      return Promise.resolve('granted');
     }
     const id = this.nextId++;
     return new Promise((resolve) => {
       const setT = this.deps.setTimeoutFn ?? setTimeout;
       const timer = setT(() => {
         this.editWaiters.delete(id);
-        resolve(false); // 返事が無い = holder 不在。安全側(編集させない)へ倒す
+        // 返事が無い = holder 不在。安全側(編集させない)へ倒すが、
+        // 「別のタブが編集中」とは**別の顔**で返す(M-7 ── 文言の嘘を作らない)
+        resolve('unreachable');
       }, this.deps.requestTimeoutMs ?? REQUEST_TIMEOUT_MS);
-      this.editWaiters.set(id, (granted) => {
-        (this.deps.clearTimeoutFn ?? clearTimeout)(timer);
-        if (granted) this.heldEdits.set(key, { cid, lid });
-        resolve(granted);
+      this.editWaiters.set(id, {
+        cid,
+        lid,
+        settle: (g) => {
+          (this.deps.clearTimeoutFn ?? clearTimeout)(timer);
+          if (g === 'granted') this.heldEdits.set(key, { cid, lid });
+          resolve(g);
+        },
       });
       this.ch.postMessage({ kind: 'edit-acquire', from: this.id, id, cid, lid } satisfies ProxyWire);
     });
@@ -478,19 +524,36 @@ export class ProxyStoreClient implements StoreClientLike, TabSync {
       this.pending.delete(id);
       this.buffered.push({ req: p.req, resolve: p.resolve, reject: p.reject });
     }
-    const { client, init } = await makeReal();
-    this.realClient = client;
-    this.initResult = init;
+    let real: { client: StoreClientLike; init: InitResult };
+    try {
+      real = await makeReal();
+    } catch (e) {
+      /**
+       * 🔴 失敗を静かに hang させない(レビュー H-2)。ここで止まると promoting の
+       * バッファに以後の全要求が**無期限に**積まれ、保存が「できたように見えて
+       * disk に無い」最悪の形になる ── 積んだ物を全部断り、以後も即断る。
+       */
+      this.state = 'dead';
+      const msg = e instanceof Error ? e.message : String(e);
+      const toReject = this.buffered;
+      this.buffered = [];
+      for (const b of toReject)
+        b.reject(new Error(`本体への切り替えに失敗しました: ${msg}`));
+      this.ch.close();
+      throw e;
+    }
+    this.realClient = real.client;
+    this.initResult = real.init;
     this.state = 'real';
     const toFlush = this.buffered;
     this.buffered = [];
     for (const b of toFlush) {
-      client
+      real.client
         .request(b.req as RequestFor<StorageRequest['op']>)
         .then(b.resolve, (e: Error) => b.reject(e));
     }
     this.ch.close();
-    return { client, init };
+    return real;
   }
 
   terminate(): void {
@@ -541,13 +604,27 @@ export class ProxyStoreClient implements StoreClientLike, TabSync {
         //    同内容の上書きで、データが欠ける向きにはならない)
         for (const [id, p] of this.pending)
           this.ch.postMessage({ kind: 'req', from: this.id, id, req: p.req } satisfies ProxyWire);
+        // ②' 待っている edit-acquire も再送(M-7 ── 再送しないと、新 holder が
+        //     1 秒で立っても user の「編集」は 10 秒の満了まで黙って待たされる)
+        for (const [id, w] of this.editWaiters)
+          this.ch.postMessage({
+            kind: 'edit-acquire',
+            from: this.id,
+            id,
+            cid: w.cid,
+            lid: w.lid,
+          } satisfies ProxyWire);
         // ② 編集ロックの再主張(新 holder の台帳は空で始まる)
         for (const [key, { cid, lid }] of this.heldEdits) {
           const id = this.nextId++;
-          this.editWaiters.set(id, (granted) => {
-            if (granted) return;
-            this.heldEdits.delete(key);
-            for (const fn of this.revokedListeners) fn(cid, lid);
+          this.editWaiters.set(id, {
+            cid,
+            lid,
+            settle: (g) => {
+              if (g === 'granted') return;
+              this.heldEdits.delete(key);
+              for (const fn of this.revokedListeners) fn(cid, lid);
+            },
           });
           this.ch.postMessage({ kind: 'edit-acquire', from: this.id, id, cid, lid } satisfies ProxyWire);
         }
@@ -568,7 +645,7 @@ export class ProxyStoreClient implements StoreClientLike, TabSync {
         const w = this.editWaiters.get(msg.id);
         if (!w) return;
         this.editWaiters.delete(msg.id);
-        w(msg.granted);
+        w.settle(msg.granted ? 'granted' : 'denied');
         return;
       }
       case 'changed': {

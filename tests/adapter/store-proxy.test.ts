@@ -213,20 +213,20 @@ describe("'changed' の放送", () => {
 describe('編集ロック', () => {
   it('同じ lid は 2 枚目に渡さない。解放で渡るようになる', async () => {
     const { host, follower } = await connectPair();
-    expect(await follower.acquireEdit('c1', 'n1')).toBe(true);
-    expect(await host.acquireEdit('c1', 'n1')).toBe(false);
-    expect(await host.acquireEdit('c1', 'n2')).toBe(true); // 別ノートは並行編集できる
+    expect(await follower.acquireEdit('c1', 'n1')).toBe('granted');
+    expect(await host.acquireEdit('c1', 'n1')).toBe('denied');
+    expect(await host.acquireEdit('c1', 'n2')).toBe('granted'); // 別ノートは並行編集できる
     follower.releaseEdit('c1', 'n1');
     await drain();
-    expect(await host.acquireEdit('c1', 'n1')).toBe(true);
+    expect(await host.acquireEdit('c1', 'n1')).toBe('granted');
   });
 
   it("follower の 'close'(タブ終了)でそのタブのロックが返る", async () => {
     const { host, follower } = await connectPair();
-    expect(await follower.acquireEdit('c1', 'n1')).toBe(true);
+    expect(await follower.acquireEdit('c1', 'n1')).toBe('granted');
     await follower.request({ op: 'close' });
     await drain();
-    expect(await host.acquireEdit('c1', 'n1')).toBe(true);
+    expect(await host.acquireEdit('c1', 'n1')).toBe('granted');
   });
 
   it('生存確認が途絶えたロックは奪える(タブの crash で永久ロックにしない)', async () => {
@@ -242,9 +242,9 @@ describe('編集ロック', () => {
     });
     const follower = await ProxyStoreClient.connect({ makeChannel: hub.make, tabId: 'f1' });
     if (!follower) throw new Error('handshake failed');
-    expect(await follower.acquireEdit('c1', 'n1')).toBe(true);
-    nowMs = 46_000; // EDIT_LOCK_TTL_MS(45s)超え・ping 無し
-    expect(await host.acquireEdit('c1', 'n1')).toBe(true);
+    expect(await follower.acquireEdit('c1', 'n1')).toBe('granted');
+    nowMs = 301_000; // EDIT_LOCK_TTL_MS(5 分)超え・ping 無し
+    expect(await host.acquireEdit('c1', 'n1')).toBe('granted');
   });
 });
 
@@ -289,7 +289,7 @@ describe('昇格(holder の死 → follower が実 worker へ乗り換える)', 
     });
     const f1 = await ProxyStoreClient.connect({ makeChannel: hub.make, tabId: 'f1' });
     if (!f1) throw new Error('f1 handshake failed');
-    expect(await f1.acquireEdit('c1', 'n1')).toBe(true);
+    expect(await f1.acquireEdit('c1', 'n1')).toBe('granted');
     host.close(); // 旧 holder の死(ロック台帳ごと消える)
 
     const host2 = new StoreProxyHost({
@@ -300,6 +300,78 @@ describe('昇格(holder の死 → follower が実 worker へ乗り換える)', 
     });
     await drain(16); // holder-here → f1 の edit-acquire → host2 の edit-res
     // 再主張が新台帳に入っている ── holder2 は同じ lid を取れない
-    expect(await host2.acquireEdit('c1', 'n1')).toBe(false);
+    expect(await host2.acquireEdit('c1', 'n1')).toBe('denied');
+  });
+});
+
+describe('レビュー指摘の回帰(H-1 / H-2 / M-7)', () => {
+  it('🔴 H-1: holder 自身のロックは時間が経っても盗まれない(逆向きの TTL test)', async () => {
+    const hub = makeHub();
+    let nowMs = 0;
+    const host = new StoreProxyHost({
+      client: makeFakeReal().client,
+      init: INIT,
+      makeChannel: hub.make,
+      tabId: 'holder',
+      now: () => nowMs,
+    });
+    const follower = await ProxyStoreClient.connect({ makeChannel: hub.make, tabId: 'f1' });
+    if (!follower) throw new Error('handshake failed');
+    expect(await host.acquireEdit('c1', 'n1')).toBe('granted');
+    nowMs = 10_000_000; // TTL(5 分)をはるかに超える ── 本体の編集は分単位が普通
+    expect(
+      await follower.acquireEdit('c1', 'n1'),
+      '本体タブが長く編集しただけで別タブに同じノートを取られた',
+    ).toBe('denied');
+  });
+
+  it('🔴 H-2: 昇格失敗はバッファを全部断り、以後の要求も即断る(静かな永久 hang にしない)', async () => {
+    const { host, follower } = await connectPair();
+    host.close(); // 旧 holder の死
+    const promoted = follower.promote(async () => {
+      throw new Error('SAH が返ってこない');
+    });
+    const inFlight = follower.request({ op: 'counts', cid: 'c1' }); // promoting バッファへ
+    await expect(promoted).rejects.toThrow('SAH が返ってこない');
+    await expect(inFlight).rejects.toThrow('本体への切り替えに失敗しました');
+    // 以後の要求も**待たずに**断られる(積まれない)
+    await expect(follower.request({ op: 'counts', cid: 'c1' })).rejects.toThrow(
+      '本体への切り替えに失敗しています',
+    );
+    expect(await follower.acquireEdit('c1', 'n1')).toBe('unreachable');
+  });
+
+  it('M-7: holder 不在の acquire は「denied」ではなく「unreachable」で返る', async () => {
+    vi.useFakeTimers();
+    try {
+      const { host, follower } = await connectPair();
+      host.close(); // holder が黙る
+      const p = follower.acquireEdit('c1', 'n1');
+      await vi.advanceTimersByTimeAsync(11_000);
+      expect(await p).toBe('unreachable');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('M-7: 待っている acquire は新 holder の名乗りで再送され、満了を待たずに返る', async () => {
+    vi.useFakeTimers();
+    try {
+      const { hub, host, follower } = await connectPair();
+      host.close(); // holder の死
+      const p = follower.acquireEdit('c1', 'n1'); // 返事の来ない acquire
+      await vi.advanceTimersByTimeAsync(1_000); // 満了(10 秒)よりずっと手前
+      const host2 = new StoreProxyHost({
+        client: makeFakeReal().client,
+        init: INIT,
+        makeChannel: hub.make,
+        tabId: 'holder2',
+      });
+      await vi.advanceTimersByTimeAsync(100); // holder-here → 再送 → edit-res
+      expect(await p).toBe('granted');
+      host2.close();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
