@@ -22,6 +22,7 @@ import { isEntrySort } from '@features/filter/entry-sort';
 import { isPaneId } from '@features/pane-visibility';
 import { STRUCTURAL, isRelationKind } from '@features/relation/kinds';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
+import { appQueryKey } from '@adapter/ui/render/query-key-store';
 import { resolveFilerScope } from '@features/relation/tree';
 import { parseLinkTarget } from '@features/entry-ref/link-target';
 import { handleCopyMdBlock } from './copy-md-block';
@@ -45,6 +46,7 @@ const VIEW_MODES: ReadonlySet<string> = new Set([
   'kanban',
   'filer',
   'launcher',
+  'query',
   'settings',
   'flags',
   'help',
@@ -609,6 +611,27 @@ const ACTIONS: Record<string, ActionHandler> = {
     const v = (target as HTMLSelectElement).value;
     if (isEntrySort(v)) dispatcher.dispatch({ type: 'SET_ENTRY_SORT', sort: v });
   },
+  /**
+   * 集計の束ね方(#184)。⚠ 空文字は「選んでいない」── `null` へ落とす
+   * (空文字の key で問い合わせると、全件が「未設定」の 1 組になる)。
+   */
+  'set-query-key': (dispatcher, target) => {
+    const v = (target as HTMLSelectElement).value;
+    const key = v === '' ? null : v;
+    // ⚠ 覚えるのは**端末側**(container に書かない ── 作業の都合であってデータではない)
+    appQueryKey.set(key);
+    dispatcher.dispatch({ type: 'SET_QUERY_KEY', key });
+  },
+  /**
+   * 数え直す(#184)。集計は保存のたびに自動では走らない(全本文の先頭を舐めるので、
+   * 打つたびには回さない)。
+   * 🔴 ⚠ **`SET_VIEW_MODE` を借りない**(レビュー B-2)── 借りると
+   * `revisionPanel` / `trashPanel` が畳まれ、**ゴミ箱を開いたまま数え直すと
+   * 理由なく閉じる**。P8 段⑤ で「アプリ」タブが同じ形の事故を起こしている。
+   */
+  'refresh-query': (dispatcher) => {
+    dispatcher.dispatch({ type: 'REFRESH_QUERY' });
+  },
   'start-edit': (dispatcher, _target, services) => {
     const lock = services.acquireEditLock;
     const lid = dispatcher.getState().openBody?.lid ?? null;
@@ -861,10 +884,23 @@ const ACTIONS: Record<string, ActionHandler> = {
     //    閉じる導線がどこにも無かった ── 抜けられるのは左のタブを押すか
     //    新規作成だけで、user から見ると「画面から出られない」
     const cur = dispatcher.getState().viewMode;
-    dispatcher.dispatch({
-      type: 'SET_VIEW_MODE',
-      mode: (cur === view ? 'detail' : view) as ViewMode,
-    });
+    const next = (cur === view ? 'detail' : view) as ViewMode;
+    dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: next });
+    /**
+     * 🔴 **集計の束ね方を思い出す**(#184)。⚠ **開いたときだけ**読む ──
+     * boot で読むと、集計を一度も開かない user にも全本文の走査を負わせる。
+     * ⚠ 順序が効く: 先に `SET_VIEW_MODE`(目録を頼む)→ 後に `SET_QUERY_KEY`
+     * (表を頼む)。逆にすると同じ走査を 2 回頼むことになる。
+     */
+    /**
+     * ⚠ **実際に開けたときだけ**(レビュー B-1)── 1 稿目は `next` を見ていたので、
+     * **編集中に押すと面は開かないのに走査だけ飛んで**いた(`SET_VIEW_MODE` は
+     * 編集中に捨てられるが、`SET_QUERY_KEY` にはその門が無い)。
+     */
+    if (dispatcher.getState().viewMode === 'query' && dispatcher.getState().queryKey === null) {
+      const remembered = appQueryKey.get();
+      if (remembered !== null) dispatcher.dispatch({ type: 'SET_QUERY_KEY', key: remembered });
+    }
   },
   'toggle-todo': (dispatcher, target) => {
     // data-pkc-entry は「entry を表す要素」専用 ── ボタンからは closest で引く

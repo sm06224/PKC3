@@ -14,6 +14,10 @@ import { extractMeta, seedBodyFor } from '@features/flavor';
 import { withTodoStatus } from '@features/flavor/todo-flavor';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import type { LauncherTile } from '@features/launcher/tiles';
+import type {
+  GroupResult as QueryGroups,
+  KeyResult as QueryKeys,
+} from '@features/query/group-by';
 import { visibleOrder } from '@features/filter/title-filter';
 import { STRUCTURAL, type RelationKind } from '@features/relation/kinds';
 import { replaceAll } from '@features/markdown/body-replace';
@@ -36,6 +40,12 @@ export type ViewMode =
   | 'kanban'
   | 'filer'
   | 'launcher'
+  /**
+   * 🔴 **集計**(#184)── frontmatter の 1 つの key で束ねて表にする面。
+   * ⚠ **aside ではない**(ノートを映す面である)ので、押した行の選択は
+   * この面に留まる ── かんばん / カレンダーと同じ扱い。
+   */
+  | 'query'
   | 'settings'
   | 'flags'
   | 'help';
@@ -159,6 +169,23 @@ export interface AppState {
    */
   searchHitsQuery: string;
   /**
+   * 🔴 **集計の面**(#184)。⚠ どれも `null` = **まだ読んでいない**(0 件ではない)。
+   *
+   * ⚠ 中身は**束ねた結果だけ**で、本文は 1 バイトも入らない ── 束ねるのは worker で、
+   * 主スレッドへ来るのは「値 → lid の並び」だけである(題名は `entryMetas` に在る)。
+   * ⚠ 束ねる key(`queryKey`)は**端末の設定**として覚える(ペインの開閉と同じ流儀)──
+   * container には書かない。「どの列で見ていたか」は文書の性質ではなく作業の都合である。
+   */
+  queryKey: string | null;
+  queryKeys: QueryKeys | null;
+  queryGroups: QueryGroups | null;
+  /**
+   * 🔴 **数えられなかった**(レビュー B-5)。⚠ `queryKeys === null` は「まだ」で
+   * あって「駄目だった」ではない ── 区別しないと、面が「数えています…」を出したまま
+   * **永久に止まって見える**(古い worker が残っている端末で実際に起きる)。
+   */
+  queryFailed: boolean;
+  /**
    * ランチャーのタイル(P7b 段⑩)。⚠ `null` = **まだ読んでいない**。
    * 元データは attachment の frontmatter で**常駐していない**ので、
    * ランチャーを開いたときに要求して還流させる(履歴一覧と同じ流儀)。
@@ -241,6 +268,10 @@ export const initialState: AppState = {
   selectionHistory: EMPTY_HISTORY,
   entrySort: DEFAULT_ENTRY_SORT,
   searchHitsQuery: '',
+  queryKey: null,
+  queryKeys: null,
+  queryGroups: null,
+  queryFailed: false,
   launcherTiles: null,
   calendarMonth: null,
   showArchived: false,
@@ -261,6 +292,26 @@ export type UserAction =
   | { type: 'SET_SEARCH_HITS'; query: string; lids: string[] }
   /** 一覧の並び順を変える(#183)。⚠ 選択は消さない(絞り込みと同じ規約)。 */
   | { type: 'SET_ENTRY_SORT'; sort: EntrySort }
+  /**
+   * 集計の束ね方を選ぶ(#184)。`null` = まだ選んでいない。
+   * ⚠ 選び直しは**必ず問い合わせ直す** ── 前の key の表を残すと、
+   * 見出しだけ変わって中身が古いままの表になる。
+   */
+  | { type: 'SET_QUERY_KEY'; key: string | null }
+  /**
+   * 集計が返った(#184)。目録と表が **1 回の走査**で同時に届く。
+   * ⚠ `key` は**どの束ね方の答えか** ── 検索の `SET_SEARCH_HITS` と同じ理由
+   * (遅れて返った古い結果を捨てる)。
+   */
+  | { type: 'SET_QUERY_SCAN'; key: string | null; keys: QueryKeys; groups: QueryGroups | null }
+  /** 集計が引けなかった(#184)。⚠ 「まだ」と区別する ── 出す文言が違う。 */
+  | { type: 'QUERY_FAILED' }
+  /**
+   * 数え直す(#184)。⚠ **`SET_VIEW_MODE` を借りない** ── 借りると
+   * `revisionPanel` / `trashPanel` が畳まれ、**ゴミ箱を開いたまま数え直すと
+   * 理由なく閉じる**(P8 段⑤ で「アプリ」タブが同じ形の事故を起こしている)。
+   */
+  | { type: 'REFRESH_QUERY' }
   /**
    * 選択の履歴を戻る・進む(#190)。⚠ **行き先は state が持つ** ── 呼び側が lid を
    * 決めると、履歴と選択が二重帳簿になる(§7)。
@@ -454,6 +505,12 @@ export type DomainEvent =
    * 空文字は「絞り込み無し」── 受け手は問い合わせずに黙って終える。
    */
   | { type: 'REQUEST_SEARCH'; query: string }
+  /**
+   * 集計を頼む(#184)。⚠ 検索と同じ理由で **SQL 側の仕事** ── 本文は常駐していない。
+   * ⚠ **目録と表を 1 回の走査で頼む**(`key` が `null` なら目録だけ)── 別々に
+   * 頼むと DB の全件走査が 2 回走る(レビュー B-3)。
+   */
+  | { type: 'REQUEST_QUERY_SCAN'; key: string | null }
   /** ⚠ **どれを読むかを載せる** ── effect 層は実行時に state を見ない(review L-6)。 */
   | {
       type: 'REQUEST_TILE_UPDATE';
@@ -653,8 +710,25 @@ function reduceCore(
           //    再読込では保つ(取込のたびに消えると、開いた直後に書き戻せなくなる)。
           //    ⚠ ただし**消えた lid は落とす** ── 居ない entry を指す導線を残さない
           linkedFiles: keepLinks(state, action.cid, metas),
+          /**
+           * 🔴 **集計の数字は再読込で捨てる**(レビュー C-1)。⚠ 取込はここを通るので、
+           * 残すと「N 件のノートを見ました」が**古い数**のまま出続ける。
+           * ⚠ 捨てるだけでは「数えています…」で止まるので、**面を開いていれば
+           * 数え直しも頼む**(捨てる側と頼む側は対で要る)。
+           * ⚠ 束ね方(`queryKey`)は端末の設定なので**保つ**。
+           */
+          queryKeys: null,
+          queryGroups: null,
+          queryFailed: false,
         },
-        events: keepLid === null ? [] : [{ type: 'REQUEST_BODY', lid: keepLid }],
+        events: [
+          ...(keepLid === null
+            ? []
+            : [{ type: 'REQUEST_BODY' as const, lid: keepLid }]),
+          ...(state.viewMode === 'query'
+            ? [{ type: 'REQUEST_QUERY_SCAN' as const, key: state.queryKey }]
+            : []),
+        ],
       };
     }
     case 'SELECT_ENTRY': {
@@ -737,6 +811,37 @@ function reduceCore(
       // ⚠ 選択は消さない ── 並び替えただけで開いているノートが変わると驚く
       if (state.entrySort === action.sort) return { state, events: [] };
       return { state: { ...state, entrySort: action.sort }, events: [] };
+    case 'SET_QUERY_KEY': {
+      if (state.queryKey === action.key) return { state, events: [] };
+      /**
+       * 🔴 **前の表を必ず捨てる**(#184)。⚠ 残すと「見出しだけ変わって中身が
+       * 古いまま」の表になる ── 検索が `searchHits` を捨てるのと同じ理由。
+       */
+      const cleared = { ...state, queryKey: action.key, queryGroups: null, queryFailed: false };
+      if (action.key === null) return { state: cleared, events: [] };
+      return { state: cleared, events: [{ type: 'REQUEST_QUERY_SCAN', key: action.key }] };
+    }
+    case 'REFRESH_QUERY':
+      // ⚠ 前の表は**消さない**(ランチャーと同じ ── 読み直しの間に空白を出さない)
+      return {
+        state: { ...state, queryFailed: false },
+        events: [{ type: 'REQUEST_QUERY_SCAN', key: state.queryKey }],
+      };
+    case 'SET_QUERY_SCAN':
+      // ⚠ **遅れて返った古い結果を捨てる**(検索と同じ ── 選び直しは結果より速い)
+      if (action.key !== state.queryKey) return { state, events: [] };
+      return {
+        state: {
+          ...state,
+          queryKeys: action.keys,
+          // ⚠ key が無い走査は表を持たない ── そのとき前の表を消さない
+          queryGroups: action.groups ?? state.queryGroups,
+          queryFailed: false,
+        },
+        events: [],
+      };
+    case 'QUERY_FAILED':
+      return { state: { ...state, queryFailed: true }, events: [] };
     case 'SET_SEARCH_HITS':
       // ⚠ **遅れて返った古い結果を捨てる**(打鍵は結果より速い)
       if (action.query !== state.filterQuery) return { state, events: [] };
@@ -784,10 +889,16 @@ function reduceCore(
         // 「古い一覧を見せない」と書いてあったのは嘘だったので、実装ではなく
         // 記述を直した ── ランチャーを開くたびに「読み込んでいます…」を
         // 挟むほうが体感として悪い。読み直しは store 1 往復で終わる)
+        // 🔑 **集計も同じ流儀**(#184)── 開いたときに問い合わせる。
+        // ⚠ 元データ(frontmatter)は常駐していないので、boot で読むと
+        // 集計を一度も開かない user にも全本文の走査を負わせることになる。
+        // ⚠ 前の表は**消さない**(ランチャーと同じ ── 読み直しの間に空白を出さない)。
         events:
           action.mode === 'launcher'
             ? [{ type: 'REQUEST_LAUNCHER_TILES', entries: attachmentEntries(state) }]
-            : [],
+            : action.mode === 'query'
+              ? [{ type: 'REQUEST_QUERY_SCAN', key: state.queryKey }]
+              : [],
       };
     case 'REFRESH_LAUNCHER_TILES':
       // ⚠ **毎回要求する**。ただし前回のタイルは消さない(古い並びを出したまま

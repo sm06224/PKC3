@@ -19,6 +19,7 @@ import { contentHash64Hex } from './content-hash';
 import { scanAssetRefsInto } from '@features/asset/asset-ref-scan';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { planSearch } from '@features/filter/search-query';
+import { createQueryScan, FRONTMATTER_SCAN_CHARS } from '@features/query/group-by';
 import {
   applyLinePatch,
   diffLines,
@@ -144,6 +145,54 @@ function applySchema(database: Database): void {
 function need(): Database {
   if (!db) throw new Error('storage worker not initialized');
   return db;
+}
+
+/**
+ * 集計(#184)が 1 度に手元へ載せる行数。
+ *
+ * 🔴 **全行を一度に materialize しない**(レビュー B-3)。`selectObjects` は結果を
+ * まるごと配列にするので、本文の長い container では一時ピークが跳ねる ──
+ * この file 冒頭のメモリ 2 原則(**大きな値は保持しない**)と、2026-07-27 の
+ * 不可侵指示(ゼロコピー / 生成物の即破棄)から外れる。
+ * ⚠ カーソルは `listBodies` と**同じ複合キー**(`entry_order` + `lid`)── `entry_order`
+ * 単独では境界の順序値を共有する行が飛ぶ(UNIQUE ではない)。
+ */
+const QUERY_SCAN_CHUNK = 500;
+
+/**
+ * 集計を 1 回の走査で作る(#184)。
+ *
+ * 🔴 **走査は 1 回だけ**(レビュー B-3 で直した)── 1 稿目は目録と表で別々の op に
+ * していたため、面を開くたびに全件走査が **2 回**走っていた。
+ * ⚠ 読むのは**本文の先頭だけ**。窓の大きさは features 側が cap から導く
+ * (`FRONTMATTER_SCAN_CHARS` ── 直書きすると囲みのぶんだけ足りなくなる)。
+ */
+function runQueryScan(cid: string, key: string | null): {
+  keys: unknown;
+  groups: unknown;
+} {
+  const database = need();
+  const scan = createQueryScan(key);
+  let after: { entryOrder: number; lid: string } | undefined;
+  for (;;) {
+    const rows = database.selectObjects(
+      after === undefined
+        ? `SELECT lid, entry_order, substr(body, 1, ?) AS head FROM entries WHERE cid = ?
+             ORDER BY entry_order, lid LIMIT ?`
+        : `SELECT lid, entry_order, substr(body, 1, ?) AS head FROM entries
+            WHERE cid = ? AND (entry_order > ? OR (entry_order = ? AND lid > ?))
+            ORDER BY entry_order, lid LIMIT ?`,
+      after === undefined
+        ? [FRONTMATTER_SCAN_CHARS, cid, QUERY_SCAN_CHUNK]
+        : [FRONTMATTER_SCAN_CHARS, cid, after.entryOrder, after.entryOrder, after.lid, QUERY_SCAN_CHUNK],
+    ) as unknown as Array<{ lid: string; entry_order: number; head: string | null }>;
+    if (rows.length === 0) break;
+    scan.feed(rows.map((r) => ({ lid: r.lid, head: r.head ?? '' })));
+    const last = rows[rows.length - 1]!;
+    after = { entryOrder: last.entry_order, lid: last.lid };
+    if (rows.length < QUERY_SCAN_CHUNK) break;
+  }
+  return scan.finish();
 }
 
 /**
@@ -611,6 +660,12 @@ const handlers: Handlers = {
     const truncated = rows.length > limit;
     return { lids: rows.slice(0, limit).map((r) => r.lid), truncated };
   },
+  /**
+   * 🔴 **frontmatter で束ねる**(#184)。舐めるのは worker、返すのは**束ねた結果**だけ。
+   * ⚠ 目録と表を**同じ 1 回の走査**で作る(別々の op にすると走査が 2 回になる)。
+   */
+  queryScan: (req) =>
+    runQueryScan(req.cid, req.key ?? null) as ResultMap['queryScan'],
   listBodies: (req) => {
     // 🔴 **カーソルは ORDER BY と同じ複合キー**。`entry_order > ?` だけだと
     // 境界の順序値を共有する行が全部飛ぶ(entry_order に UNIQUE は無い)。

@@ -1836,6 +1836,72 @@ select:focus-visible {
   margin: var(--s2) 0 0;
 }
 
+/* ── 集計(#184)── frontmatter の項目で束ねて数える面 ───────── */
+[data-pkc-view-pane='query'] {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  padding: var(--s3);
+  /* ⚠ 縦に伸びる表なので、面の中で流す(版面ごと押し出さない) */
+  overflow: auto;
+}
+[data-pkc-region='query-bar'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  flex-wrap: wrap;
+}
+[data-pkc-region='query-bar'] label {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: 12px;
+  color: var(--muted);
+}
+[data-pkc-field='query-note'] {
+  margin: var(--s2) 0 var(--s3);
+  font-size: 11px;
+  color: var(--muted);
+}
+[data-pkc-region='query-group'] {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: var(--s2);
+  background: var(--surface-2);
+}
+[data-pkc-region='query-group'] > summary {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: var(--s2) var(--s3);
+  cursor: pointer;
+  font-size: 12px;
+}
+[data-pkc-field='query-group-count'] {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+[data-pkc-region='query-rows'] {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: var(--surface);
+}
+[data-pkc-region='query-rows'] > li {
+  padding: var(--s2) var(--s3);
+  border-top: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 12px;
+}
+[data-pkc-region='query-rows'] > li[data-pkc-selected] {
+  background: var(--accent-dim);
+  color: var(--accent-dim-fg);
+}
+[data-pkc-field='query-empty'] {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 /* ── かんばん / カレンダー(封印中。解いたときに効く)──────── */
 [data-pkc-view-pane='kanban'] {
   display: flex;
