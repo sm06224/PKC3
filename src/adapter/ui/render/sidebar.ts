@@ -11,6 +11,7 @@
 import type { EntryMeta } from '@core/model/entry-meta';
 import type { AppState } from '@adapter/state/app-state';
 import { matchesEntry, normalizeQuery } from '@features/filter/title-filter';
+import { sortOrder } from '@features/filter/entry-sort';
 import { ARCHETYPE_ICONS, iconSpan, setIcon, type IconName } from './icons';
 import { formatListDate, formatStoredDate } from '@features/datetime/stored-date';
 
@@ -36,6 +37,7 @@ export class SidebarRenderer {
   private lastSelected: string | null = null;
   /** ⚠ 絞り込みも**指紋の一部** ── 入れないと、絞っても行が減らない。 */
   private lastHits: ReadonlySet<string> | null = null;
+  private lastSort = 'manual';
   private lastFilter: string | null = null;
 
   /** 絞り込み欄。⚠ **state が正** ── 欄の値は state に合わせて書き戻す。 */
@@ -62,7 +64,9 @@ export class SidebarRenderer {
       // 🔴 **本文の当たりも指紋の一部**(#181)。入れないと、SQL が返っても
       //    画面が変わらない ── state だけ正しくて**行が増えない**
       //    (絞り込みを指紋に入れ忘れた 2026-08 の再演。今回は test が捕まえた)
-      state.searchHits !== this.lastHits;
+      state.searchHits !== this.lastHits ||
+      // ⚠ 並び順も指紋(入れないと選んでも並びが変わらない ── #181 で踏んだのと同型)
+      state.entrySort !== this.lastSort;
     const selectionChanged = state.selectedLid !== this.lastSelected;
     if (!listChanged && !selectionChanged) return; // 指紋一致 ── DOM に触れない
 
@@ -77,6 +81,7 @@ export class SidebarRenderer {
 
     this.lastMetas = state.entryMetas;
     this.lastHits = state.searchHits;
+    this.lastSort = state.entrySort;
     this.lastOrder = state.order;
     this.lastFilter = state.filterQuery;
     this.lastSelected = state.selectedLid;
@@ -101,7 +106,8 @@ export class SidebarRenderer {
     const wanted = new Set<string>();
     // 一覧に**存在する** lid(絞り込み前)── 行キャッシュの掃除はこちらで判定する
     const alive = new Set<string>();
-    for (const lid of state.order) {
+    // 🔴 並び順(#183)── 規則は `sortOrder` 1 か所。既定は手動の順
+    for (const lid of sortOrder(state.order, (l) => state.entryMetas.get(l), state.entrySort)) {
       const meta = state.entryMetas.get(lid);
       if (!meta) continue;
       alive.add(lid);

@@ -8,6 +8,7 @@
  *   selectedLid が選択の単一情報源
  */
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
+import { DEFAULT_ENTRY_SORT, type EntrySort } from '@features/filter/entry-sort';
 import { resolveCanonicalParents, reorderSibling } from '@features/relation/tree';
 import { extractMeta, seedBodyFor } from '@features/flavor';
 import { withTodoStatus } from '@features/flavor/todo-flavor';
@@ -127,6 +128,11 @@ export interface AppState {
    */
   searchHits: ReadonlySet<string> | null;
   /**
+   * 一覧の並び順(#183)。⚠ 既定は `manual` = **手で並べ替えた順**
+   * (`entry_order`)── 手動の導線を置き換えない。
+   */
+  entrySort: EntrySort;
+  /**
    * `searchHits` が**どの問い合わせの結果か**。⚠ これが無いと、遅れて返った
    * 古い結果を新しい問い合わせの答えとして表示してしまう(打鍵は結果より速い)。
    */
@@ -211,6 +217,7 @@ export const initialState: AppState = {
   viewMode: 'detail',
   filterQuery: '',
   searchHits: null,
+  entrySort: DEFAULT_ENTRY_SORT,
   searchHitsQuery: '',
   launcherTiles: null,
   calendarMonth: null,
@@ -230,6 +237,8 @@ export type UserAction =
   | { type: 'SET_ENTRY_FILTER'; query: string }
   /** 本文の当たりが SQL から返った(#181)。⚠ `query` は**どの問い合わせの答えか**。 */
   | { type: 'SET_SEARCH_HITS'; query: string; lids: string[] }
+  /** 一覧の並び順を変える(#183)。⚠ 選択は消さない(絞り込みと同じ規約)。 */
+  | { type: 'SET_ENTRY_SORT'; sort: EntrySort }
   | { type: 'LAUNCHER_TILES_LOADED'; tiles: LauncherTile[] }
   /**
    * アプリの一覧を読み直す(P8 段⑱)。
@@ -628,6 +637,10 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
         state: { ...state, filterQuery: action.query, searchHits: null, searchHitsQuery: '' },
         events: [{ type: 'REQUEST_SEARCH', query: action.query }],
       };
+    case 'SET_ENTRY_SORT':
+      // ⚠ 選択は消さない ── 並び替えただけで開いているノートが変わると驚く
+      if (state.entrySort === action.sort) return { state, events: [] };
+      return { state: { ...state, entrySort: action.sort }, events: [] };
     case 'SET_SEARCH_HITS':
       // ⚠ **遅れて返った古い結果を捨てる**(打鍵は結果より速い)
       if (action.query !== state.filterQuery) return { state, events: [] };

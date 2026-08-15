@@ -147,11 +147,40 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const filter = document.createElement('input');
   filter.type = 'search';
   filter.setAttribute('data-pkc-field', 'entry-filter');
-  filter.placeholder = '絞り込み';
-  filter.title = '題名で絞り込みます(Esc で消えます)';
+  filter.placeholder = '探す';
+  /**
+   * 🔴 **文言を実態に合わせる**(#181)。全文検索が入るまでは題名だけだったので
+   * 「題名で絞り込みます」と書いてあった ── いまは**本文も探す**ので、そのままだと
+   * 「本文は探せない」という嘘を user に見せ続ける(§1 の「文言と実装の食い違い」)。
+   */
+  filter.title = '題名と本文から探します(Esc で消えます)';
   // ⚠ `placeholder` は名前ではない ── 値を入れると読み上げから消える
-  filter.setAttribute('aria-label', '題名で絞り込む');
+  filter.setAttribute('aria-label', '題名と本文から探す');
   findBar.append(filter);
+
+  /**
+   * 🔴 **並び順**(#183 / 台帳 #180 の A-3)。⚠ **手で並べ替える導線は既にある**
+   * (`move-order-up/down`)── ここで足すのは「一覧全体をどう並べるか」であって、
+   * 手動の順序を置き換えるものではない。既定は手動の順(`entry_order`)。
+   * ⚠ 場所は**探す欄の隣**(同じ「一覧の見え方」の操作なので離さない)。
+   */
+  const sort = document.createElement('select');
+  sort.setAttribute('data-pkc-field', 'entry-sort');
+  sort.setAttribute('data-pkc-action', 'set-entry-sort');
+  sort.setAttribute('aria-label', '一覧の並び順');
+  sort.title = '一覧の並び順を変えます';
+  for (const [value, label] of [
+    ['manual', '手動の順'],
+    ['updated', '更新が新しい順'],
+    ['title', '題名順'],
+    ['archetype', '種類順'],
+  ] as const) {
+    const opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = label;
+    sort.append(opt);
+  }
+  findBar.append(sort);
 
   /**
    * 🔴 **分割ボタンにする**(P10、user 指示 2026-08-05

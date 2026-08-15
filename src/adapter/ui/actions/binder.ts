@@ -18,6 +18,7 @@ import { archetypeLabel } from '@adapter/ui/render/sidebar';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
 import { applyFormat, type FormatOp } from '@features/markdown/text-ops';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
+import { isEntrySort } from '@features/filter/entry-sort';
 import { resolveFilerScope } from '@features/relation/tree';
 import { parseLinkTarget } from '@features/entry-ref/link-target';
 import { handleCopyMdBlock } from './copy-md-block';
@@ -488,6 +489,11 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ reducer のガード(ready / openBody 一致 / writeLock)は**ここに写さない**
    *   ── 取ってから dispatch し、入れなかったら返す(判定は reducer 1 か所)。
    */
+  /** 一覧の並び順(#183)。⚠ 妥当性の判定は `isEntrySort` 1 か所。 */
+  'set-entry-sort': (dispatcher, target) => {
+    const v = (target as HTMLSelectElement).value;
+    if (isEntrySort(v)) dispatcher.dispatch({ type: 'SET_ENTRY_SORT', sort: v });
+  },
   'start-edit': (dispatcher, _target, services) => {
     const lock = services.acquireEditLock;
     const lid = dispatcher.getState().openBody?.lid ?? null;
