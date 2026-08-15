@@ -35,12 +35,21 @@ export function reloadSnapshot(
   dispatcher: Dispatcher,
   cid: string,
   loadSnapshot: () => Promise<Snapshot>,
+  opts?: {
+    /**
+     * 編集中で先送りするときに出す案内。省略 = 取込の文言(従来)。
+     * `null` = 黙って先送り(#177 のタブ間同期 ── 別タブの保存のたびに
+     * 「取込は完了しました」と出すのは嘘になるし、編集の邪魔でしかない)。
+     */
+    deferNotice?: string | null;
+  },
 ): Promise<void> {
   const boot = async (): Promise<void> => {
     dispatcher.dispatch({ type: 'SYS_BOOTED', cid, ...(await loadSnapshot()) });
   };
   if (dispatcher.getState().phase === 'ready') return boot();
-  dispatcher.dispatch({ type: 'OP_FAILED', error: DEFERRED_RELOAD_NOTICE });
+  const notice = opts?.deferNotice === undefined ? DEFERRED_RELOAD_NOTICE : opts.deferNotice;
+  if (notice !== null) dispatcher.dispatch({ type: 'OP_FAILED', error: notice });
   void whenPhaseReady(dispatcher).then(boot);
   return Promise.resolve();
 }

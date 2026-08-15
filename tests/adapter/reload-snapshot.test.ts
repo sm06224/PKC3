@@ -102,3 +102,38 @@ describe('取込後の一覧の入れ替え', () => {
     expect(load, '待ったあとに取っていない').toHaveBeenCalledTimes(1);
   });
 });
+
+/** #177: タブ間同期の取り直しは、編集中でも**黙って**先送りできる。 */
+describe('deferNotice(先送りの案内の差し替え)', () => {
+  function editing(): Dispatcher {
+    const d = booted();
+    d.dispatch({ type: 'CREATE_ENTRY', archetype: 'text', lid: 'draft', title: 'd' });
+    return d;
+  }
+
+  it('省略時は従来の取込文言(後方互換)', async () => {
+    const d = editing();
+    await reloadSnapshot(d, 'c1', async () => ({ metas: [], relations: [] }));
+    expect(d.getState().error).toBe(DEFERRED_RELOAD_NOTICE);
+  });
+
+  it('null なら案内を出さずに先送りだけする(別タブの保存のたびに帯を出さない)', async () => {
+    const d = editing();
+    await reloadSnapshot(d, 'c1', async () => ({ metas: [meta('a')], relations: [] }), {
+      deferNotice: null,
+    });
+    expect(d.getState().error, '黙る約束なのに帯が出ている').toBeNull();
+    // 先送り自体は生きている ── 編集を終えると入れ替わる
+    d.dispatch({ type: 'CANCEL_EDIT' });
+    await new Promise((r) => setTimeout(r, 0));
+    expect([...d.getState().entryMetas.keys()]).toContain('a');
+  });
+
+  it('文言を差し替えられる(押した場所と対の文言 ── §1)', async () => {
+    const d = editing();
+    await reloadSnapshot(d, 'c1', async () => ({ metas: [], relations: [] }), {
+      deferNotice: '同期しました。編集を終了すると反映されます',
+    });
+    expect(d.getState().error).toBe('同期しました。編集を終了すると反映されます');
+  });
+});
