@@ -144,6 +144,25 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const createBar = document.createElement('div');
   createBar.setAttribute('data-pkc-region', 'create-bar');
 
+  /**
+   * 🔴 **選択の戻る・進む**(#190 / 台帳 #180 の B-4)。
+   *
+   * ⚠ user 指示「**マウスだけで完結し、キーボードは近道**」── 近道だけ足すと
+   * **画面のどこにも無い機能**になるので、ボタンを先に置く(近道は `binder` の
+   * `Alt+←` / `Alt+→`)。
+   * ⚠ 置き場は**探す欄の左**(ブラウザと同じ並び ── 戻る・進む → 探す)。
+   * ⚠ 押せないときは `disabled` にする ── 押しても何も起きない dead click を作らない。
+   */
+  for (const [action, label, title] of [
+    ['nav-back', '戻る', '前に見ていたノートへ戻ります(Alt+←)'],
+    ['nav-forward', '進む', '戻る前のノートへ進みます(Alt+→)'],
+  ] as const) {
+    const btn = iconButton(action, label);
+    btn.title = title;
+    btn.disabled = true; // 履歴が無い間は押せない(renderer が起こす)
+    findBar.append(btn);
+  }
+
   const filter = document.createElement('input');
   filter.type = 'search';
   filter.setAttribute('data-pkc-field', 'entry-filter');

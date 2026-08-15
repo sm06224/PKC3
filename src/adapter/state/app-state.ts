@@ -15,6 +15,17 @@ import { withTodoStatus } from '@features/flavor/todo-flavor';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import type { LauncherTile } from '@features/launcher/tiles';
 import { visibleOrder } from '@features/filter/title-filter';
+import {
+  EMPTY_HISTORY,
+  canGoBack,
+  canGoForward,
+  current as historyCurrent,
+  goBack,
+  goForward,
+  pruneHistory,
+  pushSelection,
+  type SelectionHistory,
+} from '@features/nav/selection-history';
 
 export type AppPhase = 'initializing' | 'ready' | 'editing' | 'error';
 export type ViewMode =
@@ -128,6 +139,14 @@ export interface AppState {
    */
   searchHits: ReadonlySet<string> | null;
   /**
+   * 🔴 **選択の履歴**(#190)。⚠ ブラウザの履歴は使わない ── PKC3 は単一ページで、
+   * 戻るは**アプリ内の選択**の話である(URL を汚さない = 不可侵「クエリパラメータを
+   * 抜け穴にしない」と同じ向き)。
+   * ⚠ 積むのは `reduce` の**外側 1 か所**(下の `reduce`)── 選択を動かす case は
+   * 6 つあり、case ごとに書くと必ず取りこぼす(§7「同じ判定が複数の場所にある」)。
+   */
+  selectionHistory: SelectionHistory;
+  /**
    * 一覧の並び順(#183)。⚠ 既定は `manual` = **手で並べ替えた順**
    * (`entry_order`)── 手動の導線を置き換えない。
    */
@@ -217,6 +236,7 @@ export const initialState: AppState = {
   viewMode: 'detail',
   filterQuery: '',
   searchHits: null,
+  selectionHistory: EMPTY_HISTORY,
   entrySort: DEFAULT_ENTRY_SORT,
   searchHitsQuery: '',
   launcherTiles: null,
@@ -239,6 +259,11 @@ export type UserAction =
   | { type: 'SET_SEARCH_HITS'; query: string; lids: string[] }
   /** 一覧の並び順を変える(#183)。⚠ 選択は消さない(絞り込みと同じ規約)。 */
   | { type: 'SET_ENTRY_SORT'; sort: EntrySort }
+  /**
+   * 選択の履歴を戻る・進む(#190)。⚠ **行き先は state が持つ** ── 呼び側が lid を
+   * 決めると、履歴と選択が二重帳簿になる(§7)。
+   */
+  | { type: 'NAV_HISTORY'; dir: 'back' | 'forward' }
   | { type: 'LAUNCHER_TILES_LOADED'; tiles: LauncherTile[] }
   /**
    * アプリの一覧を読み直す(P8 段⑱)。
@@ -516,7 +541,63 @@ export interface ReduceResult {
   events: DomainEvent[];
 }
 
+/**
+ * 🔴 **選択の履歴は、reducer の外側 1 か所で積む**(#190)。
+ *
+ * 選択(`selectedLid`)を動かす case は 6 つある ── `SELECT_ENTRY` / `SYS_BOOTED` の
+ * 引き継ぎ / `CREATE_ENTRY` / `ENTRY_RESTORED` / 削除の後継 / `DESELECT_ENTRY`。
+ * case ごとに `pushSelection` を書くと、**次に選択を動かす case を足した人が必ず
+ * 忘れる**(§7「同じ判定が複数の場所にある」の典型)。だから
+ * **「動いた結果」を 1 か所で見る**形にした ── 新しい case は自動で乗る。
+ *
+ * ⚠ 戻る・進む自身は積まない(積むと戻れなくなる)。
+ * ⚠ entry が消えた回は履歴も掃除する ── 残すと「戻る」が居ないノートへ飛ぶ。
+ */
 export function reduce(state: AppState, action: Dispatchable): ReduceResult {
+  if (action.type === 'NAV_HISTORY') return navHistory(state, action.dir);
+  const result = reduceCore(state, action);
+  let history = result.state.selectionHistory;
+  // ⚠ 掃除は entryMetas が**変わった回だけ**(毎回やると 50 件の走査が無駄に回る)
+  if (result.state.entryMetas !== state.entryMetas)
+    history = pruneHistory(history, (lid) => result.state.entryMetas.has(lid));
+  if (result.state.selectedLid !== null && result.state.selectedLid !== state.selectedLid)
+    history = pushSelection(history, result.state.selectedLid);
+  return history === result.state.selectionHistory
+    ? result
+    : { state: { ...result.state, selectionHistory: history }, events: result.events };
+}
+
+/**
+ * 戻る・進む。⚠ **行き先の採否は `SELECT_ENTRY` に決めさせる** ── 編集中は動かない /
+ * 居ない lid は選ばない、という規則をここに書き写すと二重帳簿になる(§7)。
+ * 🔑 だから「選択が実際に動いたか」を見て、動いたときだけ履歴を確定させる。
+ */
+function navHistory(state: AppState, dir: 'back' | 'forward'): ReduceResult {
+  const moved = dir === 'back' ? goBack(state.selectionHistory) : goForward(state.selectionHistory);
+  if (moved === state.selectionHistory) return { state, events: [] };
+  const target = historyCurrent(moved);
+  if (target === null || target === state.selectedLid) return { state, events: [] };
+  const result = reduceCore(state, { type: 'SELECT_ENTRY', lid: target });
+  if (result.state.selectedLid !== target) return { state, events: [] }; // 断られた(編集中など)
+  return { state: { ...result.state, selectionHistory: moved }, events: result.events };
+}
+
+/** 戻れるか(UI の活殺に使う)。 */
+export function canNavBack(state: AppState): boolean {
+  return canGoBack(state.selectionHistory);
+}
+
+/** 進めるか。 */
+export function canNavForward(state: AppState): boolean {
+  return canGoForward(state.selectionHistory);
+}
+
+/** ⚠ `NAV_HISTORY` は**型で除く** ── 上の wrapper が先に捌く。default 節を置いて
+ * 逃がすと、新しい action を書き忘れても tsc が黙る。 */
+function reduceCore(
+  state: AppState,
+  action: Exclude<Dispatchable, { type: 'NAV_HISTORY' }>,
+): ReduceResult {
   switch (action.type) {
     case 'SYS_BOOTED': {
       const metas = new Map(action.metas.map((m) => [m.lid, m]));

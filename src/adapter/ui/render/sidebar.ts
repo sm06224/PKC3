@@ -9,7 +9,7 @@
  * - **選択変更は属性 patch のみ**(2 行の data-pkc-selected を付け替える)
  */
 import type { EntryMeta } from '@core/model/entry-meta';
-import type { AppState } from '@adapter/state/app-state';
+import { canNavBack, canNavForward, type AppState } from '@adapter/state/app-state';
 import { matchesEntry, normalizeQuery } from '@features/filter/title-filter';
 import { sortOrder } from '@features/filter/entry-sort';
 import { ARCHETYPE_ICONS, iconSpan, setIcon, type IconName } from './icons';
@@ -42,6 +42,10 @@ export class SidebarRenderer {
 
   /** 絞り込み欄。⚠ **state が正** ── 欄の値は state に合わせて書き戻す。 */
   private readonly filterInput: HTMLInputElement | null;
+  /** 戻る・進む(#190)。⚠ **押せないときは殺す** ── dead click を作らない。 */
+  private readonly navBack: HTMLButtonElement | null;
+  private readonly navForward: HTMLButtonElement | null;
+  private lastHistory: AppState['selectionHistory'] | null = null;
 
   constructor(sidebarRegion: HTMLElement) {
     const list = sidebarRegion.querySelector<HTMLElement>(
@@ -51,6 +55,12 @@ export class SidebarRenderer {
     this.list = list;
     this.filterInput = sidebarRegion.querySelector<HTMLInputElement>(
       '[data-pkc-field="entry-filter"]',
+    );
+    this.navBack = sidebarRegion.querySelector<HTMLButtonElement>(
+      '[data-pkc-action="nav-back"]',
+    );
+    this.navForward = sidebarRegion.querySelector<HTMLButtonElement>(
+      '[data-pkc-action="nav-forward"]',
     );
   }
 
@@ -68,7 +78,13 @@ export class SidebarRenderer {
       // ⚠ 並び順も指紋(入れないと選んでも並びが変わらない ── #181 で踏んだのと同型)
       state.entrySort !== this.lastSort;
     const selectionChanged = state.selectedLid !== this.lastSelected;
-    if (!listChanged && !selectionChanged) return; // 指紋一致 ── DOM に触れない
+    /**
+     * ⚠ **履歴も指紋の一部**(#190)。選択と連動して動くことが多いが、
+     * 掃除(`pruneHistory`)だけが動く回もあるので**別に見る** ── 入れないと
+     * 「戻れないのにボタンが生きている」状態が残る(dead click の作り方そのもの)。
+     */
+    const historyChanged = state.selectionHistory !== this.lastHistory;
+    if (!listChanged && !selectionChanged && !historyChanged) return; // 指紋一致 ── DOM に触れない
 
     // 🔑 欄の値を state に合わせる(review M-2)。新規作成が絞り込みを解除する
     // ので、**欄だけ文字が残る**と「効いていないのに書いてある」嘘になる。
@@ -78,7 +94,12 @@ export class SidebarRenderer {
 
     if (listChanged) this.reconcileRows(state);
     if (listChanged || selectionChanged) this.patchSelection(state.selectedLid);
+    if (historyChanged) {
+      if (this.navBack) this.navBack.disabled = !canNavBack(state);
+      if (this.navForward) this.navForward.disabled = !canNavForward(state);
+    }
 
+    this.lastHistory = state.selectionHistory;
     this.lastMetas = state.entryMetas;
     this.lastHits = state.searchHits;
     this.lastSort = state.entrySort;

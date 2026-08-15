@@ -498,6 +498,12 @@ const ACTIONS: Record<string, ActionHandler> = {
     const tag = target.getAttribute('data-pkc-tag');
     if (tag) dispatcher.dispatch({ type: 'SET_ENTRY_FILTER', query: tag });
   },
+  /**
+   * 🔴 **選択の戻る・進む**(#190)。⚠ **行き先をここで決めない** ── 履歴は state が
+   * 持ち、`NAV_HISTORY` が行き先も採否も決める(binder が lid を選ぶと二重帳簿になる)。
+   */
+  'nav-back': (dispatcher) => dispatcher.dispatch({ type: 'NAV_HISTORY', dir: 'back' }),
+  'nav-forward': (dispatcher) => dispatcher.dispatch({ type: 'NAV_HISTORY', dir: 'forward' }),
   /** 一覧の並び順(#183)。⚠ 妥当性の判定は `isEntrySort` 1 か所。 */
   'set-entry-sort': (dispatcher, target) => {
     const v = (target as HTMLSelectElement).value;
@@ -1325,10 +1331,33 @@ export function bindActions(
   const onShortcut = (ev: Event) => {
     const ke = ev as KeyboardEvent;
     if (ke.isComposing || !root.isConnected) return;
-    if (!(ke.key === 'n' || ke.key === 'N') || !(ke.ctrlKey || ke.metaKey) || ke.altKey) return;
     const field =
       ke.target instanceof HTMLElement ? ke.target.getAttribute('data-pkc-field') : null;
-    if (field === 'editor-body' || field === 'editor-title' || field === 'append-input') return;
+    const typing =
+      field === 'editor-body' || field === 'editor-title' || field === 'append-input';
+    /**
+     * 🔴 **選択の戻る・進む**(#190)。`Alt+←` / `Alt+→` ── ブラウザと同じ手。
+     * ⚠ 打っている途中でも**効かせる**(戻るは編集を壊さない ── reducer が
+     *   `editing` の間は選択を動かさないので、ここで弾く必要が無い)。
+     *   ⚠ ただし変換中(`isComposing`)は上で弾いている。
+     * ⚠ `ctrl/meta` との同時押しは受けない(OS 側の割り当てと衝突する)。
+     */
+    if ((ke.key === 'ArrowLeft' || ke.key === 'ArrowRight') && ke.altKey && !ke.ctrlKey && !ke.metaKey) {
+      ke.preventDefault();
+      dispatcher.dispatch({ type: 'NAV_HISTORY', dir: ke.key === 'ArrowLeft' ? 'back' : 'forward' });
+      return;
+    }
+    /**
+     * 🔴 **ヘルプ**(#190)。`F1` ── 面は既にあるので開くだけ。
+     * ⚠ 入力中でも効かせる(`F1` は文字を打つ鍵ではない)。
+     */
+    if (ke.key === 'F1' && !ke.ctrlKey && !ke.metaKey && !ke.altKey) {
+      ke.preventDefault();
+      dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'help' });
+      return;
+    }
+    if (!(ke.key === 'n' || ke.key === 'N') || !(ke.ctrlKey || ke.metaKey) || ke.altKey) return;
+    if (typing) return;
     const run = root.querySelector<HTMLElement>('[data-pkc-field="create-run"]');
     if (!run) return;
     ke.preventDefault();
