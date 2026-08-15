@@ -115,7 +115,7 @@ async function main() {
   const browser = await chromium.launchPersistentContext(`/tmp/pkc3-options-${process.pid}`, {
     headless: true,
     viewport: VIEWPORT,
-    deviceScaleFactor: 1,
+    deviceScaleFactor: Number(process.env.PKC3_O_DPR ?? 1),
     args: ['--no-sandbox', '--disable-dev-shm-usage'],
     executablePath: '/opt/pw-browsers/chromium',
   });
@@ -162,6 +162,13 @@ async function main() {
       });
       return { count: names.length, bytes };
     });
+
+    // #166 実験: 実機相当の復元プロファイルを seed(PKC3_O_SEED=<xcu file>)
+    if (process.env.PKC3_O_SEED) {
+      const xcu = await readFile(process.env.PKC3_O_SEED, 'utf8');
+      await page.evaluate((v) => globalThis.localStorage.setItem('pkc3-office-profile', v), xcu);
+      result.seeded = xcu.length;
+    }
 
     // 実 user 経路で起動 → Writer
     await page.goto(`${base}/office/host.html`, { waitUntil: 'commit' });
@@ -257,6 +264,82 @@ async function main() {
       return t.includes('停止') || t.includes('memory access');
     });
     result.oobInConsole = lines.some((l) => l.includes('memory access out of bounds'));
+
+    /**
+     * ── #166 実験(2026-08-15): **同一セッションでの開き直し** ──
+     * 元報告 #126 の文言は「2 回目以降」。1 回目の測定と Escape のあと、
+     * PKC3_O_REOPEN=N 回だけ ツール → オプション を開き直し、毎回
+     * 既定ペイン / 表示ペインの両方を測る(判定は毎回の対照群比 ── §4)。
+     * 停止面が出たらそこで打ち切る(以降の測定は無意味)。
+     */
+    const reopenN = Number(process.env.PKC3_O_REOPEN ?? 0);
+    result.reopens = [];
+    for (let round = 1; round <= reopenN; round += 1) {
+      if (result.escapeCrash) break;
+      const r = { round };
+      const before = await page.evaluate(SURVEY);
+      const seen = new Set(before.map(key));
+      await page.mouse.click(C_TOOLS[0], C_TOOLS[1]);
+      await page.waitForTimeout(2500);
+      const menu2 = (await page.evaluate(SURVEY)).filter((w) => !seen.has(key(w))).pop();
+      if (!menu2) {
+        r.error = 'メニューが開かない(#168 の dead click と同根の可能性)';
+        result.reopens.push(r);
+        await page.screenshot({ path: join(SHOTS, `08-reopen-${round}-nomenu.png`) });
+        break;
+      }
+      await page.mouse.click(menu2.x + 60, menu2.y + menu2.h - 13);
+      await page.waitForTimeout(4000);
+      const dlg2 = (await page.evaluate(SURVEY))
+        .filter((w) => !seen.has(key(w)))
+        .filter((w) => w.w >= 300)
+        .sort((a, b) => b.w * b.h - a.w * a.h)[0];
+      if (!dlg2) {
+        r.error = 'ダイアログが開かない';
+        result.reopens.push(r);
+        await page.screenshot({ path: join(SHOTS, `08-reopen-${round}-nodlg.png`) });
+        break;
+      }
+      const pane2 = {
+        x: Math.round(dlg2.x + dlg2.w * 0.42),
+        y: Math.round(dlg2.y + 70),
+        width: Math.round(dlg2.w * 0.54),
+        height: Math.round(dlg2.h - 140),
+      };
+      r.defaultPaneBytes = infoBytes(
+        await page.screenshot({ clip: pane2, path: join(SHOTS, `08-reopen-${round}-default.png`) }),
+      );
+      await page.mouse.click(dlg2.x + vKnob[0], dlg2.y + vKnob[1]);
+      await page.waitForTimeout(3500);
+      const s1 = await page.screenshot({
+        clip: pane2,
+        path: join(SHOTS, `08-reopen-${round}-view-0.png`),
+      });
+      await page.waitForTimeout(1200);
+      const s2 = await page.screenshot({
+        clip: pane2,
+        path: join(SHOTS, `08-reopen-${round}-view-1.png`),
+      });
+      r.viewPaneBytes = [infoBytes(s1), infoBytes(s2)];
+      r.blank = Math.max(...r.viewPaneBytes) < r.defaultPaneBytes / 4;
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(4000);
+      r.escapeCrash = await page.evaluate(() => {
+        const msg = document.getElementById('msg');
+        if (!msg || msg.hidden) return false;
+        const t = msg.textContent ?? '';
+        return t.includes('停止') || t.includes('memory access');
+      });
+      result.reopens.push(r);
+      if (r.escapeCrash) break;
+    }
+    result.profileLen = await page.evaluate(
+      () => (globalThis.localStorage.getItem('pkc3-office-profile') ?? '').length,
+    );
+    if (process.env.PKC3_O_CAPTURE) {
+      const v = await page.evaluate(() => globalThis.localStorage.getItem('pkc3-office-profile') ?? '');
+      if (v) await writeFile(process.env.PKC3_O_CAPTURE, v);
+    }
   } finally {
     result.console = lines.slice(-12);
     const text = JSON.stringify(result, null, 1);

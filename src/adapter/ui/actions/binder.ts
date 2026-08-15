@@ -120,6 +120,14 @@ export interface BinderServices {
    */
   navigateAssetRef?(assetKey: string): void;
   /**
+   * 編集権を取る(#177 多重タブ ── 同じノートの 2 枚目編集を止める)。
+   * false = 別のタブが編集中。⚠ 判断(台帳)は storage proxy 側が持つ。
+   * ⚠ 解放の正本は main.ts の phase 遷移 watcher ── ここの release は
+   *   「取ったのに編集に入れなかった」ときの返却だけ。
+   */
+  acquireEditLock?(lid: string): Promise<'granted' | 'denied' | 'unreachable'>;
+  releaseEditLock?(lid: string): void;
+  /**
    * フラグの切替(P11。user 指示 2026-08-07)。
    * ⚠ **設定ではない** ── 開発者・パワーユーザー向けで、いつか畳まれる。
    */
@@ -475,7 +483,46 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = target.getAttribute('data-pkc-entry');
     if (lid) selectEntryOrExplain(dispatcher, lid, 'ノート');
   },
-  'start-edit': (dispatcher) => dispatcher.dispatch({ type: 'START_EDIT' }),
+  /**
+   * ✏️ 編集に入る。#177: 多重タブでは**先に編集権を取ってから**入る。
+   * ⚠ reducer のガード(ready / openBody 一致 / writeLock)は**ここに写さない**
+   *   ── 取ってから dispatch し、入れなかったら返す(判定は reducer 1 か所)。
+   */
+  'start-edit': (dispatcher, _target, services) => {
+    const lock = services.acquireEditLock;
+    const lid = dispatcher.getState().openBody?.lid ?? null;
+    if (!lock || lid === null) {
+      dispatcher.dispatch({ type: 'START_EDIT' });
+      return;
+    }
+    void lock(lid).then((grant) => {
+      if (grant !== 'granted') {
+        // ⚠ 文言は理由と対(§1 / レビュー M-7)── holder 不在を「別のタブで編集中」と
+        //    言うと、user は存在しない編集タブを探す
+        dispatcher.dispatch({
+          type: 'OP_FAILED',
+          error:
+            grant === 'denied'
+              ? 'このノートは別のタブで編集中です(そちらを閉じるか保存してください)'
+              : '本体タブと通信できません(少し待ってもう一度お試しください)',
+        });
+        return;
+      }
+      // 🔴 dispatch の**前**に自分の lid か確かめる(レビュー M-3)── acquire を待つ間に
+      //    user が別のノートを選んでいると、reducer は**そのノート**の編集を受理する
+      //    = ロック無しの編集が成立してしまう。dispatch は同期なのでここの検査に窓は無い
+      if (dispatcher.getState().openBody?.lid !== lid) {
+        services.releaseEditLock?.(lid);
+        return;
+      }
+      dispatcher.dispatch({ type: 'START_EDIT' });
+      // ⚠ 「editing に居るか」では足りない ── reducer が断る理由は選択以外にもある
+      //    (writeLock / tileWrite 中)。**自分の lid が入ったか**で見る
+      const st = dispatcher.getState();
+      if (!(st.phase === 'editing' && st.openBody?.lid === lid))
+        services.releaseEditLock?.(lid);
+    });
+  },
   // ⚠ 第 4 引数の **root** を使う(target ではない)── 追記欄の出口は detail の
   //    兄弟なので、押したボタンから題名欄へは辿れない(P8 段⑲)
   'commit-edit': (dispatcher, _target, _services, root) => {
@@ -483,7 +530,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'COMMIT_EDIT' });
   },
   'cancel-edit': (dispatcher, _target, _services, root) => cancelFromEditor(dispatcher, root),
-  'create-entry': (dispatcher, target) => {
+  'create-entry': (dispatcher, target, services) => {
     // 🔑 種類は**隣の `<select>`**から取る(P8 ── ボタンを種類ぶん並べない)。
     // ⚠ 旧来どおりボタン自身が `data-pkc-archetype` を持つ形も受ける
     // (かんばん等の面から直接作る導線が将来生えても壊れない)
@@ -510,14 +557,19 @@ const ACTIONS: Record<string, ActionHandler> = {
     const parent = resolveFilerScope(st.selectedLid, st.entryMetas, st.relations);
     // 非 detail view で作ると editor が出ない(PKC2 PR-Δ19 の罠)── 先に切替
     if (st.viewMode !== 'detail') dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
+    const lid = generateLid();
     dispatcher.dispatch({
       type: 'CREATE_ENTRY',
       archetype,
-      lid: generateLid(),
+      lid,
       title: defaultTitle(dispatcher, archetype),
       parentLid: parent?.lid ?? null,
       relationId: generateLid(),
     });
+    // #177: 作成 → 即編集の編集権。lid は今生まれたばかりなので必ず取れる ──
+    // 「取れてから入る」順に直すと user gesture の同期性を失うだけで守るものが無い。
+    // 別タブは 'changed' でこの lid を知るため、登録が先に着けばよい
+    if (dispatcher.getState().phase === 'editing') void services.acquireEditLock?.(lid);
   },
   'delete-entry': (dispatcher, target) => {
     // ⚠ 実行中(書出し / 取込)のガードは `refuseWhileBusy` が 1 本で持つ

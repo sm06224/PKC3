@@ -3,6 +3,7 @@
 import './styles/app.css';
 
 import { Dispatcher } from '@adapter/state/dispatcher';
+import { bindEditLockRelease } from '@adapter/state/edit-lock-release';
 import { connectStoreEffects } from '@adapter/state/store-effects';
 import { tileSelectsEntry } from '@features/launcher/tiles';
 import { appEditorMode } from '@adapter/ui/render/editor-mode';
@@ -14,6 +15,8 @@ import {
   REVISION_KEEP_LATEST,
 } from '@adapter/platform/storage/store-port';
 import { acquireWriterLease } from '@adapter/platform/storage/writer-lease';
+import { ProxyStoreClient, StoreProxyHost } from '@adapter/platform/storage/store-proxy';
+import type { StoreClientLike, TabSync } from '@adapter/platform/storage/store-proxy';
 import type { InitResult } from '@adapter/platform/storage/protocol';
 import {
   installHtmlSandboxBlockedReporter,
@@ -166,17 +169,78 @@ async function initStorage(promoted: boolean): Promise<{
  */
 let bootLease: { release(): void } | null = null;
 
-/** boot(設計メモ §1): lease → worker init → メタ一覧(body 非読込)→ SYS_BOOTED。 */
+/** boot(設計メモ §1): lease → worker init(または #177 の proxy 接続)→ メタ一覧 → SYS_BOOTED。 */
 export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const lease = acquireWriterLease();
   bootLease = lease;
-  const promoted = !(await lease.immediate);
-  if (promoted) {
-    root.textContent = '別のタブで開いています。そのタブを閉じると、ここで続きが開きます…';
-    await lease.whenHeld;
-  }
+  const immediateHeld = await lease.immediate;
 
-  const { client, init } = await initStorage(promoted);
+  /**
+   * 🔴 多重タブ(#177)。lease を取れたタブ(本体)は実 worker + StoreProxyHost。
+   * 取れないタブは ProxyStoreClient(本体タブ経由)で **同じアプリをそのまま開く**
+   * ── PKC2 でできていた「複数タブで別々のノートを開く・編集する」を戻す。
+   * 本体が旧ビルド(handshake 応答なし)のときだけ、従来の待機に落ちる。
+   * `sync` は編集ロックと changed の口 ── 昇格で実体が host に替わるので let。
+   */
+  let client: StoreClientLike;
+  let init: InitResult;
+  let sync: TabSync;
+  let followerConn: ProxyStoreClient | null = null;
+
+  if (immediateHeld) {
+    const real = await initStorage(false);
+    const host = new StoreProxyHost({ client: real.client, init: real.init });
+    client = host.localClient();
+    init = real.init;
+    sync = host;
+  } else {
+    followerConn = await ProxyStoreClient.connect();
+    if (followerConn?.initResult) {
+      client = followerConn;
+      init = followerConn.initResult;
+      sync = followerConn;
+    } else {
+      followerConn = null;
+      /**
+       * 従来の待機 ── ただし**待っている間も本体の名乗りを聞き直す**(レビュー M-5)。
+       * 本体がまだ boot 中(worker init が handshake の 1.5 秒に間に合わない)なだけの
+       * とき、一度の時間切れで旧式待機に永久落ちしていた。lease が来るか、本体と
+       * handshake できるかの早い方で進む。⚠ lease を優先する ── handshake の相手が
+       * 死んだ直後なら、こちらが本体になるのが正しい。
+       */
+      root.textContent = '別のタブで開いています。そのタブを閉じると、ここで続きが開きます…';
+      let held = false;
+      const heldP = lease.whenHeld.then(() => {
+        held = true;
+      });
+      while (!held) {
+        await Promise.race([heldP, new Promise((r) => setTimeout(r, 2000))]);
+        if (held) break;
+        const again = await ProxyStoreClient.connect({ handshakeTimeoutMs: 800 });
+        if (held) {
+          again?.terminate();
+          break;
+        }
+        if (again) {
+          followerConn = again;
+          break;
+        }
+      }
+      if (followerConn?.initResult) {
+        client = followerConn;
+        init = followerConn.initResult;
+        sync = followerConn;
+      } else {
+        followerConn = null;
+        await heldP;
+        const real = await initStorage(true);
+        const host = new StoreProxyHost({ client: real.client, init: real.init });
+        client = host.localClient();
+        init = real.init;
+        sync = host;
+      }
+    }
+  }
   await client.request({ op: 'openContainer', cid: DEFAULT_CID, title: CONTAINER_TITLE });
   // boot と再読込は**同じ経路**で state を作る(取込後に別の作り方をしない ──
   // 分岐が増えると「取込直後だけ壊れる」型の差分が入る)
@@ -328,6 +392,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   const statusBase = init.fallbackReason ? `⚠ ${init.fallbackReason}` : '';
   regions.status.title = `${versionText()} — ${init.vfs}`;
+  /**
+   * #177: 本体タブ経由(follower)で開いているときの常設バッジ。fallback 警告と
+   * 同型(「意図と違う接続形態は user が知るべき事実」)。昇格で空にする。
+   */
+  let syncLine = followerConn ? '複数タブ: このタブの保存は本体タブ経由です' : '';
   // textContent の setter は同一文字列でも子ノードを全置換する ── 打鍵ごとの
   // state 変化で無駄な DOM 変異を起こさないよう、変わったときだけ書く
   let statusShown = statusBase;
@@ -347,17 +416,28 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   let errorLine = '';
   let noticeLine = '';
   const paint = () => {
-    const parts = [statusBase, noticeLine, errorLine].filter((t) => t !== '');
+    const parts = [statusBase, syncLine, noticeLine, errorLine].filter((t) => t !== '');
     const text = parts.join(' — ');
     if (text === statusShown) return;
     statusShown = text;
     regions.status.textContent = text;
     regions.status.hidden = text === '';
   };
+  if (syncLine !== '') paint();
   /** 一時の知らせ(コピーした / 取り込んだ)。⚠ 状態変化では消えない。 */
   const showStatus = (text: string) => {
     noticeLine = text;
     paint();
+  };
+  /**
+   * 🔗 組み込みタイルから Office を開く(#148 / #174)。
+   * ⚠ 既存窓への focus-request は user から**無反応に見える**(レポート #11 ──
+   *   noopener の別窓は最前面に来たか分からない)。一言を出す。
+   */
+  const openOfficeTile = () => {
+    const r = officeWindow.open({});
+    if (r.kind === 'already-open')
+      showStatus('Office は既に開いています(そのタブをご覧ください)');
   };
   /**
    * Office の窓が固まったことに気づく(#135)。⚠ ここは**渡すだけ** ──
@@ -389,6 +469,77 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     errorLine = state.error ? `⚠ エラー: ${state.error}` : '';
     paint();
   });
+
+  /**
+   * 🔴 多重タブの同期(#177)。
+   * - 他タブの書込('changed')→ 一覧を取り直す。編集中は**黙って**先送り
+   *   (deferNotice: null ── 実行は reload-snapshot が ready を待って持つ)。
+   *   連打は 300ms で束ねる(snapshot は発火時に取り直すので取りこぼさない)
+   * - 編集ロックの解放は **phase の遷移 1 か所**で束ねる ── editing を離れる経路は
+   *   7 つある(app-state.ts の明記)ので、経路ごとに releaseEdit を書かない
+   * - follower は lease が回ってきたら実 worker へ乗り換える(このタブが本体になる。
+   *   reload しない ── 編集中の下書きをタブの中で生かしたまま)
+   */
+  let syncReloadQueued = false;
+  const onRemoteChanged = (): void => {
+    if (syncReloadQueued) return;
+    syncReloadQueued = true;
+    setTimeout(() => {
+      syncReloadQueued = false;
+      void reloadSnapshot(dispatcher, DEFAULT_CID, loadSnapshot, { deferNotice: null });
+    }, 300);
+  };
+  let unbindChanged = sync.onChanged(onRemoteChanged);
+  // 解放は遷移 1 か所で束ねる(実体と test は edit-lock-release.ts)
+  bindEditLockRelease(dispatcher, () => sync, DEFAULT_CID);
+  if (followerConn) {
+    const conn = followerConn;
+    conn.onEditRevoked((_cid, lid) => {
+      // ⚠ いま編集している当のノートのときだけ言う(そうでない剥奪は user に関係ない)
+      const st = dispatcher.getState();
+      if (!(st.phase === 'editing' && st.openBody?.lid === lid)) return;
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error:
+          '本体タブの交代で、このノートの編集権を別のタブに取られました。' +
+          'ここで保存すると相手の編集を上書きします ── 内容を控えてから編集を取り消してください',
+      });
+    });
+    let promotedHost: StoreProxyHost | null = null;
+    void lease.whenHeld.then(async () => {
+      try {
+        await conn.promote(async () => {
+          const r = await initStorage(true);
+          const host = new StoreProxyHost({
+            client: r.client,
+            init: r.init,
+            heldLocks: conn.heldEditLocks(),
+          });
+          promotedHost = host;
+          // 🔑 promote はここが返した client を**以後の全要求 + バッファ吐き出し**に
+          //    使う ── localClient()(mutation を放送する包み)を返すことで、
+          //    乗り換え直後の書込も残りの follower へ届く
+          return { client: host.localClient(), init: r.init };
+        });
+        if (promotedHost) {
+          unbindChanged();
+          sync = promotedHost;
+          unbindChanged = sync.onChanged(onRemoteChanged);
+        }
+        syncLine = '';
+        showStatus('このタブが本体になりました');
+        paint();
+      } catch (e) {
+        // 🔴 帯の常設も嘘のまま残さない(レビュー H-2)── 「本体経由」はもう成立していない
+        syncLine = '⚠ 本体への切り替えに失敗しました(保存できません ── タブを読み直してください)';
+        paint();
+        dispatcher.dispatch({
+          type: 'OP_FAILED',
+          error: `本体への切り替えに失敗しました: ${e instanceof Error ? e.message : String(e)}`,
+        });
+      }
+    });
+  }
 
   // 🔒 attach / import と purge の排他 gate(review F1)。実体と pin は asset-gate.ts
   const withAssetGate = createAssetGate(dispatcher);
@@ -722,8 +873,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         readSeed: readAppStorage,
         baseUrl: document.baseURI,
         fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
-        // #148 組み込みタイル ── 文書なしで開く = Start Center
-        openOffice: () => officeWindow.open({}),
+        // #148 組み込みタイル ── 文書なしで開く = Start Center(#174 の一言込み)
+        openOffice: openOfficeTile,
       });
       // ⚠ 押した対象を**選択状態にもする**(P8 段⑭)── 起動しただけだと右の列が
       //    空文のままで、いま何を触ったのかが画面に残らない。「押す = 起動」の
@@ -781,8 +932,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             baseUrl: document.baseURI,
             fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
             // ⚠ 添付起動の経路に office タイルは来ない(kind は 'app' 固定)が、
-            //    依存の形は 1 つに保つ
-            openOffice: () => officeWindow.open({}),
+            //    依存の実体も 1 つに保つ(§7)
+            openOffice: openOfficeTile,
             confirmSameOrigin: (title) => {
               if (sameOriginAllowed.has(lid)) return true;
               // ⚠ 何が起きるかを**具体**で書く(「安全でない」では判断できない)
@@ -856,6 +1007,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      */
     setEditorMode: (mode) => {
       appEditorMode.setMode(mode);
+    },
+    /**
+     * ✏️🔒 編集権(#177 多重タブ)。⚠ 判断(誰が握っているか)は sync の実体
+     * (StoreProxyHost / ProxyStoreClient)が持つ ── ここは渡すだけ。
+     * `sync` は昇格で実体が替わるので、**呼ぶたびに読む**(closure に固定しない)。
+     */
+    acquireEditLock: (lid) => sync.acquireEdit(DEFAULT_CID, lid),
+    releaseEditLock: (lid) => {
+      sync.releaseEdit(DEFAULT_CID, lid);
     },
     /**
      * 🔗 添付の携帯参照 → **所有ノートへ飛ぶ**(#100 段②)。

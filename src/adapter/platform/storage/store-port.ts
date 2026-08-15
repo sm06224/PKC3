@@ -9,7 +9,7 @@ import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import type { StorePort } from '@adapter/state/store-effects';
 import type { EntryMetaRow } from './schema';
 import type { RelationRow } from './protocol';
-import type { StoreClient } from './store-client';
+import type { StoreClientLike } from './store-proxy';
 import { clearAppStorage } from '@adapter/platform/app-storage';
 
 export function relationFromRow(row: RelationRow): Relation {
@@ -44,7 +44,7 @@ export function metaFromRow(row: EntryMetaRow): EntryMeta {
  */
 export const REVISION_KEEP_LATEST = 100;
 
-export function createStorePort(client: StoreClient, cid: string): StorePort {
+export function createStorePort(client: StoreClientLike, cid: string): StorePort {
   return {
     getBody: (lid) => client.request({ op: 'getBody', cid, lid }),
     getBodies: (lids) => client.request({ op: 'getBodies', cid, lids }),

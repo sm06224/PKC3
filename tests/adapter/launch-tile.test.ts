@@ -9,6 +9,7 @@
  * 即破棄」)なので、**依存を注入して直接見る**。
  */
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { launchTile, EXTERNAL_WINDOW_FEATURES } from '../../src/adapter/ui/launch-tile';
 import { LAUNCHER_APP_SANDBOX } from '../../src/features/launcher/app-shell';
 import { officeTile, type LauncherTile } from '../../src/features/launcher/tiles';
@@ -320,5 +321,18 @@ describe('組み込み Office タイル (#148)', () => {
       h.deps,
     );
     expect(h.officeOpens.n).toBe(0);
+  });
+});
+
+/**
+ * 🔴 **`main.ts` は原文でしか pin できない**(弱いと自覚して使う)── #174:
+ * 既存窓への focus-request は無反応に見える(レポート #11)ので一言を出す。
+ */
+describe('main.ts の配線(原文 pin ── #174)', () => {
+  const MAIN = readFileSync('src/main.ts', 'utf8');
+
+  it('既存窓へ focus したとき「既に開いています」を出す', () => {
+    expect(MAIN).toContain("if (r.kind === 'already-open')");
+    expect(MAIN).toContain('Office は既に開いています(そのタブをご覧ください)');
   });
 });

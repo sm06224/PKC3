@@ -4,20 +4,23 @@ import { fileURLToPath } from 'node:url';
 import { gotoApp, clickReal } from './helpers';
 
 /**
- * P7 段⑧: **boot 前に交代されたタブが救われる**(設計 doc 段⑧ 実装記録)。
+ * P7 段⑧ → #177 で書き直し: **2 枚目のタブが、別タブの更新適用で壊れない**。
  *
- * 🔴 この機構は **1 行殺しても誰も鳴らなかった**(round-3 review H-3 で実証:
- * `location.reload()` を no-op にしても unit 1066 件 + smoke 17 件が全緑)。
- * `tests/adapter/preboot-swap.test.ts` は「いつ読み直すか」の判断しか見ておらず、
- * `tests/adapter/bootstrap-wiring.test.ts` は原文検査なので、
- * **渡した container が本物か / callback が実際に読み直すか**は原理的に見えない。
+ * 旧版はここで「lease 待ちで止まったタブが SW 交代で読み直す」を実タブ 2 枚で
+ * 確かめていた。#177 以降、2 枚目は**待たずに follower として boot する**ので、
+ * その前提(待機で止まる)は同一ビルドの 2 タブでは作れなくなった ──
+ * 待機は「本体が旧ビルド(proxy 応答なし)」のときだけの fallback で、
+ * その判断は `tests/adapter/preboot-swap.test.ts`(unit)が引き続き守る。
  *
- * ⚠ ここだけが**実タブ 2 枚**で確かめる ── lease 待ちのタブは、更新に巻き込まれた
- * まま進むと**旧 build の hash 付き URL** を取りに行って起動不能になる。
+ * いま実タブ 2 枚で守るべき主張はこれ:
+ * 1. 2 枚目は follower として boot する(待機画面ではない)
+ * 2. タブ A が更新を適用して読み直すと、**A の lease が返り、B がその場で昇格する**
+ *    (Web Locks の待ち行列は B が先頭 ── 決定的)
+ * 3. どちらのタブも error で終わらない
  */
 const SW_PATH = fileURLToPath(new URL('../../dist/sw.js', import.meta.url));
 
-test('🔴 lease 待ちのタブは、別タブの更新に気づいて読み直す', async ({ context }) => {
+test('🔴 2 枚目(follower)は、別タブの更新適用で昇格して生き残る', async ({ context }) => {
   const original = readFileSync(SW_PATH, 'utf-8');
   const buildId = /const BUILD = "([^"]+)"/.exec(original)?.[1];
   expect(buildId, 'sw.js に build id が無い').toBeTruthy();
@@ -30,24 +33,13 @@ test('🔴 lease 待ちのタブは、別タブの更新に気づいて読み直
       timeout: 20_000,
     });
 
-    // タブ B: 後から開く → lease 待ちで止まる(boot は解決しない)
+    // タブ B: 後から開く → 待機ではなく follower boot(#177)
     const b = await context.newPage();
-    await b.goto('/');
-    await expect(b.locator('[data-pkc-slot="root"]')).toContainText('別のタブで開いています', {
-      timeout: 20_000,
-    });
-    // ⚠ **前提が成立していることを見る** ── boot 済みだとこの test は別物になる
-    expect(await b.locator('[data-pkc-slot="root"]').getAttribute('data-pkc-boot')).toBeNull();
-
-    // この document が生きている印(**再読込で必ず消える**もの)
-    await b.evaluate(() => {
-      (window as unknown as Record<string, unknown>).__prebootProbe = true;
-    });
-    expect(
-      await b.evaluate(
-        () => (window as unknown as Record<string, unknown>).__prebootProbe === true,
-      ),
-    ).toBe(true);
+    await gotoApp(b);
+    await expect(b.locator('[data-pkc-region="status"]')).toContainText(
+      '保存は本体タブ経由',
+      { timeout: 20_000 },
+    );
 
     // 🔴 別 build を配って、**タブ A から**更新を適用する
     writeFileSync(SW_PATH, original.replace(`"${buildId}"`, '"prebootswap00"'));
@@ -59,36 +51,23 @@ test('🔴 lease 待ちのタブは、別タブの更新に気づいて読み直
     await expect(card).toBeVisible({ timeout: 20_000 });
     await clickReal(a, '[data-pkc-action="apply-update"]');
 
-    // ✅ B は**自分で読み直す**(押していないのに、まだ何も持っていないから安全)
-    await b.waitForFunction(
-      () => (window as unknown as Record<string, unknown>).__prebootProbe === undefined,
-      null,
+    // ✅ A の読み直しで lease が返り、B が**その場で**昇格する(reload 無し)
+    await expect(b.locator('[data-pkc-region="status"]')).toContainText(
+      'このタブが本体になりました',
       { timeout: 20_000 },
     );
-    // ⚠ **弁別しているのは上の probe だけ**である(document が入れ替わったか)。
-    // ここから下は「**壊れて終わっていない**」ことしか見ない。
-    //
-    // 🔴 当初ここに `data-pkc-boot="ready"` を待つ行を書いて **CI で落ちた**。
-    // A も「再読込」で自分を読み直すので lease を一瞬手放すが、**それを B が
-    // 取れるかは競争**である ── 手元では B が取って起動し、CI では A が取り直して
-    // B は待ちのまま。つまり**自分で flake を足していた**(しかも「弁別していない」と
-    // 注記した当の行)。⚠ 注記した時点で消すべきだった。
-    // 読み直した先で正しい状態は **2 つとも正しい** ── 両方受ける形にする
-    await b.waitForFunction(
-      () => {
-        const root = document.querySelector('[data-pkc-slot="root"]');
-        if (!root) return false;
-        return (
-          root.getAttribute('data-pkc-boot') === 'ready' ||
-          (root.textContent ?? '').includes('別のタブで開いています')
-        );
-      },
+    expect(await b.locator('[data-pkc-slot="root"]').getAttribute('data-pkc-boot')).toBe(
+      'ready',
+    );
+
+    // ✅ A も壊れて終わらない(読み直した先は follower か本体か ── どちらも正しい)
+    await a.waitForFunction(
+      () =>
+        document
+          .querySelector('[data-pkc-slot="root"]')
+          ?.getAttribute('data-pkc-boot') === 'ready',
       null,
       { timeout: 20_000 },
-    );
-    // ⚠ error で終わっていない(= 旧 hash を掴んで起動不能、になっていない)
-    expect(await b.locator('[data-pkc-slot="root"]').getAttribute('data-pkc-boot')).not.toBe(
-      'error',
     );
   } finally {
     writeFileSync(SW_PATH, original);

@@ -5,8 +5,9 @@
  * pending を全 reject する(永久 hang の防止 ── review #3)。
  */
 import type { RequestFor, ResultMap, StorageRequest, StorageResponse } from './protocol';
+import type { StoreClientLike } from './store-proxy';
 
-export class StoreClient {
+export class StoreClient implements StoreClientLike {
   private readonly worker: Worker;
   private nextId = 1;
   private terminated = false;
