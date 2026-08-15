@@ -162,3 +162,49 @@ describe('全文検索の配線(#181)', () => {
     expect(matchesEntry('n2', '買い物', '会議', new Set(['n2']))).toBe(true);
   });
 });
+
+/**
+ * 🔴 **本文だけが当たったノートを消しても、選択が消えない**(2026-08-15)。
+ *
+ * ⚠ サブエージェントのレビューが見つけた、#181 の取りこぼし。
+ *   後継選択は `visibleOrder` を使うが、そちらは**題名しか見ていなかった** ──
+ *   一覧(`matchesEntry`)と答えが食い違い、`indexOf` が -1 になって
+ *   選択が `null` へ飛ぶ(一覧には行が見えているのに中央が空になる)。
+ */
+describe('本文の当たりと削除の後継', () => {
+  function meta(lid: string, title: string): EntryMeta {
+    return {
+      lid,
+      title,
+      archetype: 'text',
+      createdAt: null,
+      updatedAt: null,
+      entryOrder: 1,
+      status: null,
+      date: null,
+      archived: false,
+    };
+  }
+
+  it('🔴 消したあと、見えている隣が選ばれる(null へ飛ばない)', () => {
+    const d = new Dispatcher();
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('n1', 'りんご'), meta('n2', 'みかん'), meta('n3', 'ぶどう')],
+      relations: [],
+    });
+    // 「りんご」で絞る ── n2 は**本文だけ**が当たっている
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'りんご' });
+    d.dispatch({ type: 'SET_SEARCH_HITS', query: 'りんご', lids: ['n2'] });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    expect(d.getState().selectedLid).toBe('n2');
+
+    d.dispatch({ type: 'DELETE_ENTRY', lid: 'n2' });
+    expect(
+      d.getState().selectedLid,
+      '本文だけ当たっていたノートを消したら選択が消えた',
+    ).not.toBeNull();
+    expect(d.getState().selectedLid).toBe('n1');
+  });
+});

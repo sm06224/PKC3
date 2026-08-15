@@ -1794,10 +1794,13 @@ function removeEntryFromState(
     // `state.order` から取っていたので、絞り込み中に削除を続けると
     // **一覧に出ていない entry** が次々に選ばれて消えていった(実証済み)。
     // ⚠ 規則は `visibleOrder` に 1 本化 ── 一覧と後継が別々の答えを出さない
+    // ⚠ **本文の当たりも渡す**(2026-08-15)── 渡さないと、本文だけが当たっている
+    //    ノートを消したとき `indexOf` が -1 になり、選択が黙って null へ飛ぶ
     const before = visibleOrder(
       state.order,
       (l) => state.entryMetas.get(l)?.title,
       state.filterQuery,
+      state.searchHits,
     );
     const vIdx = before.indexOf(lid);
     const after = before.filter((l) => l !== lid);

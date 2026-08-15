@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  matchesEntry,
   matchesTitle,
   normalizeQuery,
   visibleOrder,
@@ -33,5 +34,29 @@ describe('絞り込みの規則', () => {
     expect(visibleOrder(['a', 'zz'], (l) => (l === 'a' ? 'x' : undefined), '')).toEqual([
       'a',
     ]);
+  });
+});
+
+/**
+ * 🔴 **一覧と後継選択が同じ答えを返す**(2026-08-15。#181 の穴)。
+ * ⚠ ここが食い違うと、**本文だけが当たっているノートを消したときに選択が消える**
+ *   ── 一覧には行が見えているのに中央が空になる、という気づきにくい壊れ方をする。
+ */
+describe('本文の当たりも「見えている」に数える', () => {
+  const titles: Record<string, string> = { a: 'りんご', b: 'みかん', c: 'ぶどう' };
+  const hits = new Set(['b']);
+
+  it('題名が当たらなくても、本文が当たれば見えている', () => {
+    expect(visibleOrder(['a', 'b', 'c'], (l) => titles[l], 'りんご', hits)).toEqual(['a', 'b']);
+  });
+
+  it('🔴 一覧の規則(matchesEntry)と答えが一致する', () => {
+    const q = normalizeQuery('りんご');
+    const byList = ['a', 'b', 'c'].filter((l) => matchesEntry(l, titles[l]!, q, hits));
+    expect(visibleOrder(['a', 'b', 'c'], (l) => titles[l], 'りんご', hits)).toEqual(byList);
+  });
+
+  it('当たりがまだ返っていない(null)なら題名だけ', () => {
+    expect(visibleOrder(['a', 'b'], (l) => titles[l], 'りんご', null)).toEqual(['a']);
   });
 });

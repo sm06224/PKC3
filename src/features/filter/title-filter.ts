@@ -53,19 +53,29 @@ export function matchesEntry(
 /**
  * 絞り込みに残る lid を**元の並びのまま**返す。
  *
+ * 🔴 **本文の当たりもここで見る**(2026-08-15 に修理)。
+ * ⚠ 直す前は `matchesTitle` しか見ておらず、**一覧(`matchesEntry`)と答えが
+ *   食い違っていた** ── 唯一の呼び手は「削除したあと、次にどれを選ぶか」なので、
+ *   **本文だけが当たっているノートを消すと `indexOf` が -1 になり、選択が `null`
+ *   へ飛ぶ**(一覧にはまだ行が見えているのに、中央が空になる)。
+ * 🔑 この file の冒頭が「面ごとに OR を書くと必ずどれかが取り残される」と
+ *   戒めている、その当の事故である ── **判定は `matchesEntry` 1 つに寄せた**。
+ *
  * @param titleOf lid → 題名(未知 lid は `undefined` を返してよい ── 落とす)
+ * @param bodyHits SQL が返した「本文が当たった lid」(`null` = まだ返っていない)
  */
 export function visibleOrder(
   order: readonly string[],
   titleOf: (lid: string) => string | undefined,
   query: string,
+  bodyHits: ReadonlySet<string> | null = null,
 ): string[] {
   const q = normalizeQuery(query);
   const out: string[] = [];
   for (const lid of order) {
     const title = titleOf(lid);
     if (title === undefined) continue;
-    if (!matchesTitle(title, q)) continue;
+    if (!matchesEntry(lid, title, q, bodyHits)) continue;
     out.push(lid);
   }
   return out;

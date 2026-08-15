@@ -11,6 +11,14 @@
  * ⚠ **題名を document 全体から拾わない** ── host 自身が上の帯に file 名を出しているので、
  *   拾うと LO が 1 画素も描く前に「開けた」と言う(2026-08-15 に実際に踏んだ)。
  * ⚠ `document.title` は**この面では動かない**(常に host の題名)── 観測点として死んでいる。
+ * ⚠ `locked`(LO の `.~lock` file)も**死んだ観測点**(2026-08-15 実測)── 開けた文書でも
+ *   出ないので、これで「開いた」を判定してはいけない。生きているのは**窓の題名**だけである。
+ * 🔴 **`Module` の未 export のシンボルを読むと LO が死ぬ。** emscripten は未 export の名前に
+ *   `abort()` する getter を仕込むので、`lo.PThread` を**読んだ瞬間**に
+ *   `Aborted('PThread' was not exported…)` → `RuntimeError: unreachable` で runtime ごと落ちる
+ *   (調査で実際に踏み、5 秒ごとの観測が 5 秒ごとに対象を殺していた)。
+ *   ⚠ 触ってよいのは `FS` / `HEAPU8` / `calledRun`。**素性の分からない名前は
+ *   `Object.getOwnPropertyDescriptor` で見る**(getter を発火させない)。
  *
  * 使い方:
  *   node build/office-wasm/open-doc-probe.mjs <pack ディレクトリ> <文書|none> [出力.json] [秒]
