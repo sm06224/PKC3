@@ -14,9 +14,10 @@ import { CalendarRenderer } from './calendar';
 import { SettingsRenderer } from './settings';
 import { FlagsRenderer } from './flags';
 import { HelpRenderer } from './help';
+import { QueryRenderer } from './query';
 import type { MarkdownClient } from '@adapter/platform/render/markdown-client';
 
-type PaneView = 'detail' | 'kanban' | 'calendar' | 'settings' | 'flags' | 'help';
+type PaneView = 'detail' | 'kanban' | 'calendar' | 'query' | 'settings' | 'flags' | 'help';
 
 /**
  * 🔴 **ノートを映さない面**(P11)。ここに足し忘れると、その面は
@@ -33,7 +34,9 @@ const ASIDE: ReadonlySet<ViewMode> = new Set<ViewMode>(['settings', 'flags', 'he
  * 中央のビューではなくなったので、ここでは detail へ落ちる。
  */
 function toPane(view: ViewMode): PaneView {
-  if (view === 'kanban' || view === 'calendar') return view;
+  // ⚠ 集計(#184)は**ノートを映す面**なので aside ではない ── かんばん /
+  //    カレンダーと同じく、自分の器を持ったまま選択が中に留まる
+  if (view === 'kanban' || view === 'calendar' || view === 'query') return view;
   return ASIDE.has(view) ? (view as PaneView) : 'detail';
 }
 
@@ -45,6 +48,7 @@ export class CenterRouter {
   private readonly settings: SettingsRenderer;
   private readonly flags: FlagsRenderer;
   private readonly help: HelpRenderer;
+  private readonly query: QueryRenderer;
   private lastPane: PaneView = 'detail';
 
   constructor(
@@ -71,6 +75,7 @@ export class CenterRouter {
       detail: pane('detail'),
       kanban: pane('kanban'),
       calendar: pane('calendar'),
+      query: pane('query'),
       settings: pane('settings'),
       flags: pane('flags'),
       help: pane('help'),
@@ -78,6 +83,7 @@ export class CenterRouter {
     this.detail = new DetailRenderer(this.panes.detail, assets, markdown, onBodyChange ?? null);
     this.kanban = new KanbanRenderer(this.panes.kanban);
     this.calendar = new CalendarRenderer(this.panes.calendar, now);
+    this.query = new QueryRenderer(this.panes.query);
     this.settings = new SettingsRenderer(this.panes.settings);
     this.flags = new FlagsRenderer(this.panes.flags);
     /**
@@ -96,6 +102,7 @@ export class CenterRouter {
     }
     if (view === 'detail') this.detail.render(state);
     else if (view === 'kanban') this.kanban.render(state);
+    else if (view === 'query') this.query.render(state);
     else if (view === 'settings') this.settings.render(state);
     else if (view === 'flags') this.flags.render();
     // ⚠ ヘルプにも**コンテナ id を渡す**(Issue #100 段①)── マニュアルも

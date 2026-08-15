@@ -19,6 +19,7 @@ import { contentHash64Hex } from './content-hash';
 import { scanAssetRefsInto } from '@features/asset/asset-ref-scan';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { planSearch } from '@features/filter/search-query';
+import { collectKeys, groupByKey, type QueryRow } from '@features/query/group-by';
 import {
   applyLinePatch,
   diffLines,
@@ -144,6 +145,29 @@ function applySchema(database: Database): void {
 function need(): Database {
   if (!db) throw new Error('storage worker not initialized');
   return db;
+}
+
+/**
+ * 集計(#184)が読む本文の先頭の字数。
+ *
+ * ⚠ frontmatter の上限は **16KB(バイト)**(`resolveCap('frontmatter','bytes')`)。
+ * 字数はバイト数以下なので、**同じ数だけ字を取れば上限内の frontmatter は必ず収まる**
+ * (日本語 1 字 = 3 バイトなら、16384 字は約 48KB ぶんに相当する)。
+ * 🔑 全文を読まないので、本文が何 MB あっても集計のコストは頭打ちになる。
+ */
+const FRONTMATTER_SCAN_CHARS = 16 * 1024;
+
+/**
+ * 集計のために「lid と本文の先頭」を読む(#184)。
+ * ⚠ 並びは `entry_order, lid` ── 一覧の並びの正本と同じにする。
+ */
+function scanHeads(cid: string): QueryRow[] {
+  const rows = need().selectObjects(
+    `SELECT lid, substr(body, 1, ?) AS head FROM entries WHERE cid = ?
+      ORDER BY entry_order, lid`,
+    [FRONTMATTER_SCAN_CHARS, cid],
+  ) as unknown as Array<{ lid: string; head: string | null }>;
+  return rows.map((r) => ({ lid: r.lid, head: r.head ?? '' }));
 }
 
 /**
@@ -611,6 +635,16 @@ const handlers: Handlers = {
     const truncated = rows.length > limit;
     return { lids: rows.slice(0, limit).map((r) => r.lid), truncated };
   },
+  /**
+   * 🔴 **frontmatter で束ねる**(#184)。舐めるのは worker、返すのは**束ねた結果**だけ。
+   *
+   * ⚠ 読むのは**本文の先頭 `FRONTMATTER_SCAN_CHARS` 字**だけ ── frontmatter は
+   * 定義上「本文の先頭の `---` 囲み」で、上限は 16KB(`resolveCap('frontmatter','bytes')`)。
+   * 字数は**バイト数以下**なので、16384 字を取れば上限内の frontmatter は必ず入る。
+   * ⚠ 並びは `entry_order, lid`(一覧と同じ)── 組の中の lid が一覧と同じ順に並ぶ。
+   */
+  queryKeys: (req) => collectKeys(scanHeads(req.cid)),
+  queryGroupBy: (req) => groupByKey(scanHeads(req.cid), req.key),
   listBodies: (req) => {
     // 🔴 **カーソルは ORDER BY と同じ複合キー**。`entry_order > ?` だけだと
     // 境界の順序値を共有する行が全部飛ぶ(entry_order に UNIQUE は無い)。

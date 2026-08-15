@@ -166,6 +166,7 @@ export type IconName = keyof typeof ICON_PATHS;
  * 死んだ表は「在るのに効かない」ので、次に触る人を惑わせる。
  */
 export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
+  'set-view:query': 'list',
   'set-view:settings': 'settings',
   'set-view:flags': 'flag',
   'set-view:help': 'help',

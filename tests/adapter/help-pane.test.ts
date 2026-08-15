@@ -301,6 +301,7 @@ const ALL_VIEWS = [
   'kanban',
   'filer',
   'launcher',
+  'query',
   'settings',
   'flags',
   'help',
@@ -346,7 +347,8 @@ describe('🔴 中央の面の表が 2 つある(食い違いを落とす)', () 
        * (`filer` / `launcher`)は**本文へ落ちる**(探し方は左の列が持つ)。
        * ⚠ ここを書かないと、`app-state.ts` の表にだけ足した面が素通りする。
        */
-      const expected = view === 'kanban' || view === 'calendar' ? view : 'detail';
+      const expected =
+        view === 'kanban' || view === 'calendar' || view === 'query' ? view : 'detail';
       expect(name, `${view} の落ち先が違う(app-state.ts の表に足し忘れ)`).toBe(expected);
     }
   });

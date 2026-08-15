@@ -12,6 +12,10 @@ import { withTodoStatus } from '@features/flavor/todo-flavor';
 import { appendBlock } from '@features/markdown/text-ops';
 import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
 import { buildTiles, withBuiltinTiles, type TileSource } from '@features/launcher/tiles';
+import type {
+  GroupResult as QueryGroups,
+  KeyResult as QueryKeys,
+} from '@features/query/group-by';
 import type { Relation } from '@core/model/entry-meta';
 import type { Dispatcher } from './dispatcher';
 
@@ -29,6 +33,13 @@ export interface StorePort {
    * 旧い配線)では題名の絞り込みだけが効く(壊れるのではなく、機能が減るだけ)。
    */
   searchEntries?(query: string): Promise<string[]>;
+  /**
+   * 集計(#184)。⚠ **省略可** ── 持たない環境(test の fake / 旧い配線)では
+   * 面が「束ねられる列がありません」を出すだけで、他は壊れない。
+   * ⚠ 返るのは**束ねた結果**だけで、本文は 1 バイトも渡らない。
+   */
+  queryKeys?(): Promise<QueryKeys>;
+  queryGroupBy?(key: string): Promise<QueryGroups>;
   /**
    * 指定した lid の本文を **1 往復で** 取る(P7b review L-7)。
    * ⚠ 無い lid は結果に出ない ── 呼び側は「読めたものだけ」を受け取る。
@@ -181,6 +192,36 @@ export function connectStoreEffects(
           () => {
             /* ⚠ 検索の失敗で帯を出さない ── 題名の絞り込みは効いたままで、
                user の操作は止まっていない(黙って減るのは「増えない」方向) */
+          },
+        );
+        break;
+      }
+      case 'REQUEST_QUERY_KEYS': {
+        const ask = store.queryKeys;
+        if (!ask) break;
+        void ask().then(
+          (keys) => {
+            if (disposed) return;
+            dispatcher.dispatch({ type: 'SET_QUERY_KEYS', keys });
+          },
+          () => {
+            /* ⚠ 目録が引けなくても帯を出さない ── 面が「列がありません」を出す */
+          },
+        );
+        break;
+      }
+      case 'REQUEST_QUERY_GROUPS': {
+        const ask = store.queryGroupBy;
+        if (!ask) break;
+        const key = ev.key;
+        void ask(key).then(
+          (groups) => {
+            if (disposed) return;
+            // ⚠ どの束ね方の答えかを載せる ── reducer が古い結果を捨てる
+            dispatcher.dispatch({ type: 'SET_QUERY_GROUPS', key, groups });
+          },
+          () => {
+            /* 同上 */
           },
         );
         break;

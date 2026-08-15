@@ -64,6 +64,12 @@ export interface ShellRegions {
  * ⚠ 探し方のタブには**しない** ── タブは「どう探すか」の軸で、設定は探し方ではない。
  */
 const VIEW_BUTTONS: readonly { view: string; label: string }[] = [
+  /**
+   * 集計(#184)。⚠ **一番上**に置く ── 日々使う面であり、設定・フラグ・ヘルプ
+   * (困ったときに見る面)より手前にあるべき。PKC2 は同等の面を右ペインの
+   * セレクトの奥に埋め、**自動では 1 度も出ない**ままにして死なせた。
+   */
+  { view: 'query', label: '集計' },
   { view: 'settings', label: '設定' },
   // ⚠ 開発者・パワーユーザー向け(P11)。設定とは**別の面**にする(裁定 Q3)
   { view: 'flags', label: 'フラグ' },

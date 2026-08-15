@@ -3,6 +3,10 @@
  * メインスレッドは query/command を投げるだけで、sqlite は worker 内に閉じる。
  */
 import type { EntryMetaRow, EntryStamps, EntryUpsert } from './schema';
+import type {
+  GroupResult as QueryGroupResult,
+  KeyResult as QueryKeyResult,
+} from '@features/query/group-by';
 
 export type StorageRequest =
   | { op: 'init'; dbName: string; journalMode?: JournalMode }
@@ -36,6 +40,22 @@ export type StorageRequest =
    * ── worker は決めない(2 か所に規則を生やさない)。
    */
   | { op: 'searchEntries'; cid: string; query: string; limit?: number }
+  /**
+   * 🔴 **frontmatter で束ねる**(#184 ── 集計の面)。
+   *
+   * ⚠ **本文を主スレッドへ運ばない**。束ねるには本文が要るが、`getBodies` で全件を
+   * 渡すと不可侵指示(2026-07-27「ゼロコピー、生成物の速やかな破棄」)に正面から当たる
+   * ── だから**全文検索と同じ型**にする:重い舐めは worker、返すのは**束ねた結果**だけ。
+   * 題名は主スレッドの `entryMetas` に既に在るので、表を描くのに本文は要らない。
+   *
+   * ⚠ worker が読むのは**本文の先頭だけ**(`substr`)。frontmatter は定義上
+   * 「本文の先頭の `---` 囲み」なので、全文を読む理由が無い。
+   *
+   * `queryKeys` = 束ねられる key の目録(user に「何で束ねられるか」を出すため)。
+   * `queryGroupBy` = その key で束ねた結果。
+   */
+  | { op: 'queryKeys'; cid: string }
+  | { op: 'queryGroupBy'; cid: string; key: string }
   /**
    * 本文を **まとめて** 取る(P6d ── 書出し用)。
    *
@@ -317,6 +337,13 @@ export interface ResultMap {
    * 一覧の並びが検索のたびに変わると、user は「どこへ行ったか」を見失う。
    */
   searchEntries: { lids: string[]; truncated: boolean };
+  /**
+   * 束ねられる key の目録(#184)。⚠ **捨てた数を返す**(`omittedKeys`)──
+   * 黙って切ると user は「その key は無い」と読む。
+   */
+  queryKeys: QueryKeyResult;
+  /** 束ねた結果(#184)。組の並びと上限の規則は features 層が 1 か所で持つ。 */
+  queryGroupBy: QueryGroupResult;
   /**
    * `done` = これ以上ない。`rows` は `entry_order, lid` 順(並びの正本)。
    * `next` = 続きのカーソル(呼び出し側はこれをそのまま渡す ── 自分で組まない)。
