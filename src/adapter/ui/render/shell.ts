@@ -11,6 +11,7 @@
  */
 import { SEALED_ARCHETYPES, SEALED_VIEWS } from '@features/sealed';
 import { BROWSE_ICONS, iconButton, iconSpan } from './icons';
+import { PANES, PANE_LABELS } from '@features/pane-visibility';
 import { BROWSE_TABS } from './browse';
 
 export interface ShellRegions {
@@ -321,12 +322,30 @@ export function buildShell(root: HTMLElement): ShellRegions {
   // 同じ器に入れると**打ちかけの追記が消え、focus も飛ぶ**(追記のたびに起きる)。
   const center = document.createElement('main');
   center.setAttribute('data-pkc-region', 'center');
+  /**
+   * 🔴 **ペインの開閉は中央に置く**(#197 / 台帳 #180 の D-1)。
+   *
+   * ⚠ 左の列の中に置くと、**左を畳んだ瞬間に「戻す」ボタンごと消える** ──
+   *   戻れない画面を作ってしまう。中央は畳めない(= 常に在る)ので、
+   *   操作子の置き場はここしか無い。
+   * ⚠ user 指示「同じものが常に同じ場所にある」── 畳んだ状態は保存する
+   *   (`adapter/ui/render/pane-visibility.ts`)。
+   */
+  const paneBar = document.createElement('div');
+  paneBar.setAttribute('data-pkc-region', 'pane-bar');
+  for (const id of PANES) {
+    const btn = iconButton('toggle-pane', PANE_LABELS[id], `toggle-pane:${id}`);
+    btn.setAttribute('data-pkc-pane', id);
+    btn.setAttribute('aria-pressed', 'true');
+    btn.title = `${PANE_LABELS[id]}の列を畳む・戻す`;
+    paneBar.append(btn);
+  }
   const detail = document.createElement('div');
   detail.setAttribute('data-pkc-region', 'detail');
   const append = document.createElement('div');
   append.setAttribute('data-pkc-region', 'append');
   append.hidden = true;
-  center.append(detail, append);
+  center.append(paneBar, detail, append);
 
   // ── 右(付随情報)────────────────────────────────
   const inspector = document.createElement('aside');

@@ -361,12 +361,15 @@ describe('🔴 帯の置き場', () => {
     );
     expect(css, 'announce の区画が無い').toMatch(/\[data-pkc-region='announce'\]\s*\{[^}]*grid-area:\s*announce/);
     /**
-     * 🔴 **版面は 3 つある**(広い / 1100px 以下 / 720px 以下)。
+     * 🔴 **版面は 6 つある** ── 広い / 1100px 以下 / 720px 以下の 3 つに加えて、
+     * #197(ペインを畳む)で 左だけ / 右だけ / 両方畳んだ の 3 つが増えた。
      * ⚠ 1 巡目は `exec` で**最初の 1 つしか読んでおらず**、狭い 2 つの版面から
      *   帯の行を消す変異が素通りした(変異試験で判明)。
+     * ⚠ **数を実数で pin する** ── 版面を足した人がここで必ず気づく
+     *   (畳んだ版面から帯の行を落とすと、user は保存エラーを見られなくなる)。
      */
     const layouts = [...css.matchAll(/grid-template-areas:\s*([^;]+);/g)].map((m) => m[1] ?? '');
-    expect(layouts, '版面を全部読めていない(空振り)').toHaveLength(3);
+    expect(layouts, '版面を全部読めていない(空振り)').toHaveLength(6);
     for (const areas of layouts) {
       for (const name of ['announce', 'update', 'notices']) {
         const rows = areas.split('\n').filter((l) => l.includes(name));

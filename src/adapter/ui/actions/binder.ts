@@ -19,6 +19,8 @@ import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
 import { applyFormat, type FormatOp } from '@features/markdown/text-ops';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
 import { isEntrySort } from '@features/filter/entry-sort';
+import { isPaneId } from '@features/pane-visibility';
+import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { resolveFilerScope } from '@features/relation/tree';
 import { parseLinkTarget } from '@features/entry-ref/link-target';
 import { handleCopyMdBlock } from './copy-md-block';
@@ -502,6 +504,17 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔴 **選択の戻る・進む**(#190)。⚠ **行き先をここで決めない** ── 履歴は state が
    * 持ち、`NAV_HISTORY` が行き先も採否も決める(binder が lid を選ぶと二重帳簿になる)。
    */
+  /**
+   * 🔴 **ペインを畳む・戻す**(#197)。⚠ **state に持たせない** ── これはこの端末の
+   * 見え方であって、ノートのデータでも container の状態でもない(`editor-mode` と
+   * 同じ扱い)。畳んだ状態は保存され、次に開いたときも同じ配置になる。
+   */
+  'toggle-pane': (_dispatcher, target) => {
+    const id = target.getAttribute('data-pkc-pane');
+    if (id === null || !isPaneId(id)) return;
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    applyPaneVisibility(root, appPanes.toggle(id));
+  },
   'nav-back': (dispatcher) => dispatcher.dispatch({ type: 'NAV_HISTORY', dir: 'back' }),
   'nav-forward': (dispatcher) => dispatcher.dispatch({ type: 'NAV_HISTORY', dir: 'forward' }),
   /** 一覧の並び順(#183)。⚠ 妥当性の判定は `isEntrySort` 1 か所。 */
@@ -1345,6 +1358,20 @@ export function bindActions(
     if ((ke.key === 'ArrowLeft' || ke.key === 'ArrowRight') && ke.altKey && !ke.ctrlKey && !ke.metaKey) {
       ke.preventDefault();
       dispatcher.dispatch({ type: 'NAV_HISTORY', dir: ke.key === 'ArrowLeft' ? 'back' : 'forward' });
+      return;
+    }
+    /**
+     * 🔴 **ペインの開閉の近道**(#197 / #190)。`Alt+[` = 左、`Alt+]` = 右。
+     * ⚠ 押しボタンを**そのまま押す** ── 同じ操作が 2 通りの経路を持たない(§7)。
+     */
+    if ((ke.key === '[' || ke.key === ']') && ke.altKey && !ke.ctrlKey && !ke.metaKey) {
+      const pane = ke.key === '[' ? 'sidebar' : 'inspector';
+      const btn = root.querySelector<HTMLElement>(
+        `[data-pkc-action="toggle-pane"][data-pkc-pane="${pane}"]`,
+      );
+      if (!btn) return;
+      ke.preventDefault();
+      btn.click();
       return;
     }
     /**

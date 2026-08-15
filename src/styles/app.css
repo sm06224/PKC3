@@ -98,6 +98,53 @@ body {
 [data-pkc-region='inspector'] {
   grid-area: inspector;
 }
+
+/* 🔴 ペインの開閉(#197)── 畳んだ列は **grid から落とす**。
+ * ⚠ `display:none` を器に付けるのではなく、列の定義から外す ── 付けると
+ *   1px の共有境界だけが残って「畳んだのに線がある」見え方になる。
+ * ⚠ 中央は**畳めない**(操作子の置き場であり、1 画面完結の本体である)。 */
+[data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'] {
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 15vw);
+  grid-template-areas:
+    'detail   inspector'
+    'announce announce'
+    'update   update'
+    'notices  notices'
+    'status   status';
+}
+[data-pkc-region='shell'][data-pkc-hidden-panes~='inspector'] {
+  grid-template-columns: minmax(200px, 18vw) minmax(0, 1fr);
+  grid-template-areas:
+    'sidebar  detail'
+    'announce announce'
+    'update   update'
+    'notices  notices'
+    'status   status';
+}
+[data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'][data-pkc-hidden-panes~='inspector'] {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    'detail'
+    'announce'
+    'update'
+    'notices'
+    'status';
+}
+[data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'] [data-pkc-region='sidebar'],
+[data-pkc-region='shell'][data-pkc-hidden-panes~='inspector'] [data-pkc-region='inspector'] {
+  display: none;
+}
+
+/* 開閉の操作子。⚠ **常に見える** ── 中央は畳めないので、ここが唯一の戻り道 */
+[data-pkc-region='pane-bar'] {
+  display: flex;
+  gap: 6px;
+  padding: 4px 6px;
+  background: var(--bg);
+}
+[data-pkc-region='pane-bar'] button[aria-pressed='false'] {
+  opacity: 0.6;
+}
 [data-pkc-region='announce'] {
   grid-area: announce;
 }

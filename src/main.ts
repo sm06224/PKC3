@@ -7,6 +7,7 @@ import { bindEditLockRelease } from '@adapter/state/edit-lock-release';
 import { connectStoreEffects } from '@adapter/state/store-effects';
 import { tileSelectsEntry } from '@features/launcher/tiles';
 import { appEditorMode } from '@adapter/ui/render/editor-mode';
+import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { StoreClient } from '@adapter/platform/storage/store-client';
 import {
   createStorePort,
@@ -279,6 +280,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   //    user が選んだときだけ(`theme.ts` の M-7 と同じ)
   applyPageFormat(document.documentElement, initialPageFormat());
   const regions = buildShell(root);
+  /**
+   * 🔴 **畳んだペインを起動時に戻す**(#197)。⚠ これをやらないと「覚える」が
+   * 成立せず、user 指示「同じものが常に同じ場所にある」に反する ── 畳んで閉じ、
+   * 開き直すと全部戻っている、という画面になる。
+   */
+  applyPaneVisibility(root, appPanes.getHidden());
   // ⚠ 配色の選択欄は**設定の画面**に在る(段⑨c で移した)。合わせるのは
   //    `SettingsRenderer.syncTheme()` の仕事 ── ここに 2 本目を置かない
   //    (P8 段㉕:帯を探す死んだ同期が残っており、常に空振りしていた)
