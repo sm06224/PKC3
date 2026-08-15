@@ -1144,6 +1144,18 @@ export class DetailRenderer {
        * ⚠ 「アプリとして登録」は**要らない** ── 登録はランチャーに並べる設定で、
        *   開けることとは別である。
        */
+      /**
+       * 🔴 **画像は別の窓で見られる**(#192 / 台帳 #180 の D-2)── 添付を見ながら
+       * 本文を書くため。⚠ 出すのは**画像のときだけ**(押せない導線を置かない)。
+       * ⚠ ObjectURL の寿命は開いた窓の生死に従う(`platform/image-window.ts`)。
+       */
+      if (isImageAssetMime(meta.mime)) {
+        const view = iconButton('view-image', '別の窓で見る');
+        view.setAttribute('data-pkc-asset-key', meta.assetKey);
+        view.setAttribute('data-pkc-asset-name', meta.name || '画像');
+        view.title = '画像を別の窓で開きます(本文を書きながら見られます)';
+        info.append(view);
+      }
       if (isAppMime(meta.mime)) {
         const run = iconButton('launch-asset', '起動', 'launch-asset');
         run.title = '囲いの中で開きます(PKC3 の中身には触れません)';

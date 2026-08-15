@@ -62,6 +62,11 @@ export function generateLid(): string {
 export interface BinderServices {
   attachFiles?(files: File[]): void;
   downloadAsset?(assetKey: string, name: string): void;
+  /**
+   * 🔴 **画像を別の窓で見る**(#192)。⚠ 実体は adapter/platform 側
+   * (ObjectURL の寿命が絡むので、binder は**呼ぶだけ**)。
+   */
+  viewImage?(assetKey: string, name: string): void;
   /** 未参照 asset の掃除(P4b)。確認・報告の UI も実体側の責務。 */
   purgeOrphanAssets?(): void;
   /** 注意の面を閉じる(P6c review H-2)。 */
@@ -948,6 +953,15 @@ const ACTIONS: Record<string, ActionHandler> = {
     const key = target.getAttribute('data-pkc-asset-key');
     const name = target.getAttribute('data-pkc-asset-name') ?? 'download';
     if (key) services.downloadAsset?.(key, name);
+  },
+  /**
+   * 🔴 **画像を別窓で見る**(#192)。⚠ 開けなかったとき(popup 阻止)の後始末は
+   *   呼ばれる側が持つ ── ここで持つと、経路が増えたときに片方だけ古くなる。
+   */
+  'view-image': (_dispatcher, target, services) => {
+    const key = target.getAttribute('data-pkc-asset-key');
+    const name = target.getAttribute('data-pkc-asset-name') ?? '画像';
+    if (key) services.viewImage?.(key, name);
   },
   'dismiss-notices': (_dispatcher, _target, services) => {
     services.dismissNotices?.();

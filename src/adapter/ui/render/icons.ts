@@ -200,6 +200,8 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   /** 選択の履歴(#190)── ブラウザの戻る・進むと同じ図案にする。 */
   'nav-back': 'chevron-left',
   'nav-forward': 'chevron-right',
+  /** 画像を別窓で見る(#192)。⚠ 「開く」の仲間なので起動と同じ図案は使わない */
+  'view-image': 'grid',
   /** 関係(#185)── 足すのは plus、消すのは close(既存の意味と揃える)。 */
   'add-relation': 'plus',
   'remove-relation': 'close',

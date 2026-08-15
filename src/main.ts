@@ -9,6 +9,7 @@ import { tileSelectsEntry } from '@features/launcher/tiles';
 import { appEditorMode } from '@adapter/ui/render/editor-mode';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { StoreClient } from '@adapter/platform/storage/store-client';
+import { openImageWindow } from '@adapter/platform/image-window';
 import {
   createStorePort,
   metaFromRow,
@@ -779,6 +780,34 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           files,
         ),
       ),
+    /**
+     * 🔴 **画像を別の窓で見る**(#192)。⚠ 貸した ObjectURL は
+     * `openImageWindow` が**窓の生死に合わせて**捨てる(窓が開けなければ即捨てる)。
+     */
+    viewImage: (assetKey, name) => {
+      void (async () => {
+        try {
+          const lent = await blobs.lendObjectUrl(DEFAULT_CID, assetKey);
+          if (!lent) {
+            dispatcher.dispatch({ type: 'OP_FAILED', error: `画像が見つかりません: ${name}` });
+            return;
+          }
+          const win = await openImageWindow({ lent, title: name });
+          if (!win) {
+            // ⚠ popup を止められた ── **理由を言う**(押して無反応にしない)
+            dispatcher.dispatch({
+              type: 'OP_FAILED',
+              error: '別の窓を開けませんでした(ポップアップが止められています)',
+            });
+          }
+        } catch (e) {
+          dispatcher.dispatch({
+            type: 'OP_FAILED',
+            error: `画像を開けませんでした(${name}): ${String(e)}`,
+          });
+        }
+      })();
+    },
     downloadAsset: async (assetKey, name) => {
       try {
         const lent = await blobs.lendObjectUrl(DEFAULT_CID, assetKey);
