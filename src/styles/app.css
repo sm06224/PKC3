@@ -1236,6 +1236,23 @@ select:focus-visible {
   display: none;
 }
 
+/* グラフ(#188)。⚠ 図と**同じ扱い** ── 原文は焼けなかったときの受け皿として残す */
+.pkc-md-rendered .pkc-chart-source {
+  margin: 0;
+  font-size: 0.9em;
+}
+.pkc-md-rendered [data-pkc-chart-state='ready'] .pkc-chart-source {
+  display: none;
+}
+/* ⚠ 読めなかったときは**理由を見せる**(黙って原文だけ出さない) */
+.pkc-md-rendered [data-pkc-chart-state='failed']::before {
+  content: 'グラフを描けません: ' attr(data-pkc-chart-error);
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
 /* 取り込み待ちの器(まだ実体が入っていないことが分かる形にする) */
 .pkc-md-rendered .pkc-transclusion-placeholder,
 .pkc-md-rendered .pkc-card-placeholder {

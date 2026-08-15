@@ -83,6 +83,11 @@ export interface RasterKey {
   width: number;
   /** 画素密度(Retina で焼き直す)。 */
   dpr: number;
+  /**
+   * 🔴 **何が焼いたか**(#188)。⚠ 省略時は `mermaid`(既存の鍵と互換)。
+   * 産出器が違えば同じ原文でも別の絵になるので、鍵の一部である。
+   */
+  kind?: string;
 }
 
 /**
@@ -190,7 +195,14 @@ export function readPalette(el: HTMLElement = document.documentElement): Diagram
 const SEP = '\u0000';
 
 export function cacheKey(k: RasterKey): string {
-  return [k.theme, k.width, k.dpr, k.source].join(SEP);
+  /**
+   * 🔴 **種類を鍵に入れる**(#188 のレビューで判明)。
+   * ⚠ 初稿は「mermaid の原文と chart の原文が同一文字列になることは実際上ない」と
+   *   **確かめていない後条件**をコメントに書いていた ── CLAUDE.md が名指しで戒めている
+   *   型である。産出器が 3 つ目(別倍率の書き出し / 版の違う chart.js)になった瞬間に
+   *   **古い PNG を返す**。1 語混ぜれば起こりえなくなる。
+   */
+  return [k.kind ?? 'mermaid', k.theme, k.width, k.dpr, k.source].join(SEP);
 }
 
 /**
@@ -528,6 +540,29 @@ export async function rasterize(svg: string, width: number, dpr: number): Promis
  * ⚠ 返るのは Blob ── ObjectURL を作って捨てるのは**表示する側**の責務。
  */
 export async function renderToPng(key: RasterKey): Promise<Raster> {
+  return renderCachedPng(key, async () =>
+    serialized(async () => {
+      seq += 1;
+      const svg = await renderWith(`pkc3-mmd-${seq}`, key.source, key.palette);
+      return rasterize(svg, key.width, key.dpr);
+    }),
+  );
+}
+
+/**
+ * 🔴 **焼いたものを貯める所は 1 つ**(#188 で chart が加わったときに確立)。
+ *
+ * 鍵・LRU・上限・追い出しは**図の種類に依らない**ので、ここへ寄せる ──
+ * chart 用にもう 1 つ cache を作ると、上限が 2 つになり(32MB × 2)、
+ * 追い出しの規則も 2 か所に散る(§7「同じ判定が複数の場所にある」)。
+ * ⚠ 種類の違いは `produce`(どうやって PNG にするか)だけである。
+ * ⚠ 鍵に種類が混ざらないよう、呼び側は `source` に**原文そのもの**を渡すこと
+ *   (mermaid の原文と chart の原文が同一文字列になることは実際上ない)。
+ */
+export async function renderCachedPng(
+  key: RasterKey,
+  produce: () => Promise<Raster>,
+): Promise<Raster> {
   const k = cacheKey(key);
   const hit = await withCache<unknown>((d) => tx<unknown>(d, 'readonly', (s) => s.get(k)), null);
   if (hit !== null && typeof hit === 'object' && 'png' in hit) {
@@ -547,11 +582,7 @@ export async function renderToPng(key: RasterKey): Promise<Raster> {
   // ⚠ 旧形式(Blob をそのまま入れていた)も読める ── 互換は双方向で考える
   if (hit instanceof Blob) return { png: hit, cssWidth: key.width };
 
-  const raster = await serialized(async () => {
-    seq += 1;
-    const svg = await renderWith(`pkc3-mmd-${seq}`, key.source, key.palette);
-    return rasterize(svg, key.width, key.dpr);
-  });
+  const raster = await produce();
   // ⚠ 保存に失敗しても**描画は続ける**(キャッシュは速さの話で、正しさの話ではない)
   await withCache(
     (d) =>

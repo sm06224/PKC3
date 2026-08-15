@@ -14,6 +14,16 @@
 import { renderMarkdown } from '@features/markdown/markdown-render';
 import { parseFrontmatter, extractVars } from '@features/markdown/frontmatter';
 import { hydrateMermaid, type MermaidScope } from './mermaid-hydrate';
+import { hydrateChart } from './chart-raster';
+
+/**
+ * 🔴 **図とグラフは同じ面に出る**(#188)── 器を埋める呼び出しを 1 つに束ねる。
+ * ⚠ 片方だけ呼ぶ面が生まれると、その面でだけグラフが空のままになる
+ *   (2026-08 に mermaid で実際に起きた「器が空のまま残る」の再演)。
+ */
+function hydrateFigures(root: ParentNode | readonly ParentNode[]): MermaidScope[] {
+  return [hydrateMermaid(root), hydrateChart(root)];
+}
 import { applyBlocks, EMPTY_VIEW, type BlockView } from './apply-blocks';
 import { RowSwap } from './row-swap';
 import type { RenderedWithRanges } from '@adapter/platform/render/markdown-client';
@@ -521,7 +531,7 @@ export class DetailRenderer {
         //    `<img>` の ObjectURL を revoke してしまう)
         if (applied.inserted.length > 0) {
           void this.hydrateAssetRefs(applied.inserted, this.hydrateToken);
-          this.mermaidScopes.push(hydrateMermaid(applied.inserted));
+          this.mermaidScopes.push(...hydrateFigures(applied.inserted));
         }
         // 🔴 **差し替えで画面から消えた `<img>` のぶんを返す**(P8 段⑲)。
         //    ⚠ `inserted.length > 0` の中に入れてはいけない ── 塊が**消えるだけ**
@@ -835,7 +845,7 @@ export class DetailRenderer {
          */
         applyDocumentGlobals(preview, extractDocumentGlobals(ta.value));
         // 🔑 **新しく入った所だけ**図を面倒みる(触っていない図はそのまま)
-        if (applied.inserted.length > 0) scopes.push(hydrateMermaid(applied.inserted));
+        if (applied.inserted.length > 0) scopes.push(...hydrateFigures(applied.inserted));
         // 🔴 **積もらせない**(P8 段⑰。レビュー H-5)── 静穏 tick ごとに塊が
         //    増え、画面に無い PNG の URL と観測器が編集中ずっと生きていた
         //    (実測: 5 tick で createObjectURL 5 / revokeObjectURL 0)
@@ -1054,7 +1064,7 @@ export class DetailRenderer {
         }
         // 図の面倒は**新しく入った所だけ**(既存の規律と同じ ── 生きた `<img>` の
         // ObjectURL を revoke しない)
-        if (r.inserted.length > 0) scopes.push(hydrateMermaid(r.inserted));
+        if (r.inserted.length > 0) scopes.push(...hydrateFigures(r.inserted));
         pruneScopes(scopes);
         // 文書 globals(書字方向・既定の寄せ)── 読む面と同じ見え方にする。
         // ⚠ この面は本文をそのまま(frontmatter 込みで)描くので `body` から取る
@@ -1208,7 +1218,7 @@ export class DetailRenderer {
       // 🔴 添付の説明にも図が書ける(P8 段⑬ review L-3)。かつてここだけ
       //    `hydrateMermaid` を呼んでおらず、**器が空のまま**残っていた ──
       //    「本文なら描けるのに、添付の説明だと描けない」という一貫性の穴
-      this.mermaidScopes.push(hydrateMermaid(desc));
+      this.mermaidScopes.push(...hydrateFigures(desc));
     }
   }
 

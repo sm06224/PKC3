@@ -13,7 +13,7 @@
  * - **同じ図は焼き直さない** ── 鍵(原文 + テーマ + 幅 + dpr)が一致すれば IDB から
  * - **ObjectURL は要素の寿命終端で revoke**(2026-07-27 の不可侵指示)
  */
-import { cacheKey, renderToPng, readPalette } from './mermaid-raster';
+import { cacheKey, renderToPng, readPalette, type Raster, type RasterKey } from './mermaid-raster';
 import { ACTION_ICONS, iconSpan } from './icons';
 
 /** 1 つの器を埋めるのに要る情報。 */
@@ -121,7 +121,45 @@ export interface MermaidScope {
   prune(): number;
 }
 
+/**
+ * 🔴 **図の種類ごとの違いはここだけ**(#188 で chart が加わったときに確立)。
+ *
+ * 見えたら描く / 先読み / 配色・幅・dpr で焼き直す / ObjectURL を寿命終端で捨てる ──
+ * これらは**種類に依らない**。⚠ chart 用に hydrate をもう 1 本書くと、
+ * 上の 4 つの規律が 2 か所に散り、**片方だけ直す**未来が確定する(§7)。
+ */
+export interface DiagramKind {
+  /** 器を見つける属性(原文もここに入っている)。 */
+  attr: string;
+  /** 状態属性の前置き(`data-pkc-<name>-state`)。 */
+  name: string;
+  /** `<img>` の `data-pkc-field`。 */
+  imgField: string;
+  /** 読み上げ用の文。⚠ 原文から作る(絵しか無い面では唯一の情報)。 */
+  alt(source: string): string;
+  /** 焼く。⚠ 貯める所は共通(`renderCachedPng`)。 */
+  render(key: RasterKey): Promise<Raster>;
+  /** 「図を保存」を出すか(SVG で書き出せる種類だけ)。 */
+  savable: boolean;
+}
+
+export const MERMAID_KIND: DiagramKind = {
+  attr: 'data-pkc-mermaid-src',
+  name: 'mermaid',
+  imgField: 'mermaid-image',
+  alt: () => '図',
+  render: (key) => renderToPng(key),
+  savable: true,
+};
+
 export function hydrateMermaid(root: ParentNode | readonly ParentNode[]): MermaidScope {
+  return hydrateDiagrams(root, MERMAID_KIND);
+}
+
+export function hydrateDiagrams(
+  root: ParentNode | readonly ParentNode[],
+  kind: DiagramKind,
+): MermaidScope {
   // ⚠ **複数の根をまとめて受ける**(P8 段⑪)── 差分反映は「新しく入った要素」を
   // 何個も渡してくるので、1 個ずつ呼ぶと **要素の数だけ観測器ができる**
   // (121 個の IntersectionObserver、121 個の idle ループ)。
@@ -131,8 +169,8 @@ export function hydrateMermaid(root: ParentNode | readonly ParentNode[]): Mermai
     : [root as ParentNode];
   const hosts: HTMLElement[] = [];
   for (const r of roots) {
-    if (r instanceof Element && r.matches('[data-pkc-mermaid-src]')) hosts.push(r as HTMLElement);
-    hosts.push(...r.querySelectorAll<HTMLElement>('[data-pkc-mermaid-src]'));
+    if (r instanceof Element && r.matches(`[${kind.attr}]`)) hosts.push(r as HTMLElement);
+    hosts.push(...r.querySelectorAll<HTMLElement>(`[${kind.attr}]`));
   }
   if (hosts.length === 0) return { dispose: () => undefined, prune: () => 0 };
 
@@ -171,15 +209,16 @@ export function hydrateMermaid(root: ParentNode | readonly ParentNode[]): Mermai
         width: widthOf(p.host),
         dpr: window.devicePixelRatio || 1,
       };
-      const raster = await renderToPng(key);
+      const raster = await kind.render(key);
       if (disposed) return;
       // ⚠ 焼いている間に配色が変わった / 器が外れたなら**載せない**
       //    (載せると古い配色の絵が最後に勝つ)
       if (at !== gen || !p.host.isConnected) return;
       const url = URL.createObjectURL(raster.png);
       const img = document.createElement('img');
-      img.setAttribute('data-pkc-field', 'mermaid-image');
-      img.alt = '図';
+      img.setAttribute('data-pkc-field', kind.imgField);
+      // ⚠ **絵しか無い面で唯一の情報**。種類ごとに中身を書く(#188 の chart は数値の要約)
+      img.alt = kind.alt(p.source);
       img.decoding = 'async';
       img.src = url;
       // ⚠ 焼いた実寸ではなく**CSS 幅**で出す(dpr 倍で焼いているので縮む = 鮮明)。
@@ -189,8 +228,10 @@ export function hydrateMermaid(root: ParentNode | readonly ParentNode[]): Mermai
       img.style.maxWidth = '100%';
       img.style.height = 'auto';
       p.host.textContent = '';
-      p.host.append(img, saveButton());
-      p.host.setAttribute('data-pkc-mermaid-state', 'ready');
+      p.host.append(img);
+      // ⚠ SVG で書き出せる種類だけ「保存」を出す(押せない導線を置かない)
+      if (kind.savable) p.host.append(saveButton());
+      p.host.setAttribute(`data-pkc-${kind.name}-state`, 'ready');
       // ⚠ **差し替えてから**前の URL を捨てる(生成物の寿命終端 ── 不可侵指示)
       const prev = urlOf.get(p.host);
       urlOf.set(p.host, url);
@@ -202,8 +243,8 @@ export function hydrateMermaid(root: ParentNode | readonly ParentNode[]): Mermai
       bakedKey.set(p.host, cacheKey(key));
     } catch (e) {
       // ⚠ 失敗しても**原文は残す**(器の中の `<pre>` を消すのは成功したときだけ)
-      p.host.setAttribute('data-pkc-mermaid-state', 'failed');
-      p.host.setAttribute('data-pkc-mermaid-error', String(e).slice(0, 120));
+      p.host.setAttribute(`data-pkc-${kind.name}-state`, 'failed');
+      p.host.setAttribute(`data-pkc-${kind.name}-error`, String(e).slice(0, 120));
     }
   };
 
@@ -244,7 +285,7 @@ export function hydrateMermaid(root: ParentNode | readonly ParentNode[]): Mermai
     //    ちょうど焼いている最中の 1 枚が古い条件のまま残る
     for (const host of started) {
       if (!host.isConnected) continue;
-      const source = host.getAttribute('data-pkc-mermaid-src') ?? '';
+      const source = host.getAttribute(kind.attr) ?? '';
       const k = cacheKey({ source, theme, palette, width: widthOf(host), dpr });
       if (bakedKey.get(host) === k) continue;
       // ⚠ 飛んでいる焼きの結果を捨てる(古い条件を最後に勝たせない)。
@@ -321,13 +362,13 @@ export function hydrateMermaid(root: ParentNode | readonly ParentNode[]): Mermai
       if (!e.isIntersecting) continue;
       const host = e.target as HTMLElement;
       io.unobserve(host);
-      const source = host.getAttribute('data-pkc-mermaid-src') ?? '';
+      const source = host.getAttribute(kind.attr) ?? '';
       void paint({ host, source });
     }
   });
   for (const host of hosts) {
     io.observe(host);
-    queue.push({ host, source: host.getAttribute('data-pkc-mermaid-src') ?? '' });
+    queue.push({ host, source: host.getAttribute(kind.attr) ?? '' });
   }
 
   /**

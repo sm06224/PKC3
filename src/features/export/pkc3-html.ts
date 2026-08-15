@@ -436,11 +436,15 @@ try{
     Array.prototype.forEach.call(box.querySelectorAll('[data-pkc-action="copy-md-block"]'),function(el){
       if(el.parentNode)el.parentNode.removeChild(el);
     });
-    // 図は**原文のまま**見せる(閲覧側に mermaid を積まない ── 読めれば足りる)
-    Array.prototype.forEach.call(box.querySelectorAll('[data-pkc-mermaid-src]'),function(el){
-      var s=el.getAttribute('data-pkc-mermaid-src')||'';
-      el.textContent='';var p=document.createElement('pre');p.className='d';
-      p.textContent=s;el.appendChild(p);
+    // 図とグラフは**原文のまま**見せる(閲覧側に mermaid / chart.js を積まない)。
+    // ⚠ **両方を回す** ── mermaid だけ書くと、グラフが**空の器**で出荷される
+    //    (#188 のレビューで判明。片側だけ直す型の再演)
+    ['data-pkc-mermaid-src','data-pkc-chart-src'].forEach(function(attr){
+      Array.prototype.forEach.call(box.querySelectorAll('['+attr+']'),function(el){
+        var s=el.getAttribute(attr)||'';
+        el.textContent='';var p=document.createElement('pre');p.className='d';
+        p.textContent=s;el.appendChild(p);
+      });
     });
     // 本文の外(frontmatter)から参照している添付 ── 添付 entry はこちらだけを持つ。
     // ⚠ 本文に書かれていて**描画に現れなかった**参照(裸の asset:key など)も
