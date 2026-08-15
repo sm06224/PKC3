@@ -149,3 +149,91 @@ test('🔴 大きい添付を貼ってもメインスレッドが固まらない
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * 🔴 **PDF は読める大きさで出る + 別窓でも出る**(2026-08-15、user 報告
+ * 「PDF ビューアが動作しない / 窓内と別窓の両方を PKC2 を真似して実装してください」)。
+ *
+ * ⚠ **観測点は「PDF が描けたか」にしてはいけない** ── 内蔵 PDF ビューアは
+ * フル chromium にしか無く、**CI の PR gate(`chromium_headless_shell`)は持たない**
+ * (実測: 直接ナビゲートするとダウンロードが始まり、埋め込んでも子フレームが立たない)。
+ * 🔑 **実寸なら両方で同じ値が出る**ので、そちらを観測点にする
+ * (CLAUDE.md §5「観測点を環境差に強い側へ寄せる」)。
+ *
+ * ⚠ 直す前の実測は **302 × 152**(器は 925 × 626 空いていた)。
+ */
+// 自作の最小 PDF(605 bytes・1 ページ・依存なしで手組み)
+const PDF_MIN = Buffer.from(
+  'JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUg' +
+    'L1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAg' +
+    'UiAvTWVkaWFCb3ggWzAgMCAzMDAgMjAwXSAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA1IDAgUiA+PiA+PiAvQ29udGVudHMg' +
+    'NCAwIFIgPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCA2MSA+PgpzdHJlYW0KQlQgL0YxIDE0IFRmIDIwIDE1MCBUZCAoUEtD' +
+    'MyBQREYgdmlld2VyIHByb2JlIEFMUEhBLTQyKSBUaiBFVAplbmRzdHJlYW0KZW5kb2JqCjUgMCBvYmoKPDwgL1R5cGUgL0ZvbnQg' +
+    'L1N1YnR5cGUgL1R5cGUxIC9CYXNlRm9udCAvSGVsdmV0aWNhID4+CmVuZG9iagp4cmVmCjAgNgowMDAwMDAwMDAwIDY1NTM1IGYg' +
+    'CjAwMDAwMDAwMDkgMDAwMDAgbiAKMDAwMDAwMDA1OCAwMDAwMCBuIAowMDAwMDAwMTE1IDAwMDAwIG4gCjAwMDAwMDAyNDEgMDAw' +
+    'MDAgbiAKMDAwMDAwMDM1MiAwMDAwMCBuIAp0cmFpbGVyCjw8IC9TaXplIDYgL1Jvb3QgMSAwIFIgPj4Kc3RhcnR4cmVmCjQyMgol' +
+    'JUVPRgo=',
+  'base64',
+);
+
+test('🔴 PDF の添付は器いっぱいに出て、別の窓でも開ける', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  const downloads: string[] = [];
+  page.on('download', (d) => downloads.push(d.suggestedFilename()));
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await gotoApp(page);
+
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: '見積.pdf',
+    mimeType: 'application/pdf',
+    buffer: PDF_MIN,
+  });
+  const media = page.locator('[data-pkc-field="attachment-media"]');
+  await expect(media).toHaveAttribute('type', 'application/pdf');
+
+  const m = await media.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const pane = el.closest('[data-pkc-region="detail"]')?.getBoundingClientRect();
+    return {
+      tag: el.tagName.toLowerCase(),
+      w: Math.round(r.width),
+      h: Math.round(r.height),
+      paneW: Math.round(pane?.width ?? 0),
+      data: (el.getAttribute('data') ?? '').slice(0, 5),
+    };
+  });
+  expect(m.tag).toBe('object');
+  expect(m.data, 'blob: で渡していない').toBe('blob:');
+  // ① 🔴 切手大でない。⚠ 直す前は 152px だった
+  expect(m.h, `PDF の高さが ${m.h}px しかない(読めない)`).toBeGreaterThan(400);
+  // ② 🔴 器の幅を使い切っている(既定の 300px で止まっていない)
+  expect(m.paneW, '前提: 器の幅が取れていない').toBeGreaterThan(600);
+  expect(m.w, `器は ${m.paneW}px あるのに PDF は ${m.w}px`).toBeGreaterThan(m.paneW * 0.9);
+  // ③ 埋め込みに失敗してダウンロードへ落ちていない
+  expect(downloads, 'PDF が画面に出ずダウンロードされた').toEqual([]);
+
+  // ── 別窓 ────────────────────────────────────────────────
+  const [popup] = await Promise.all([
+    page.waitForEvent('popup', { timeout: 10_000 }),
+    clickReal(page, '[data-pkc-action="view-asset"]'),
+  ]);
+  const shown = await popup.evaluate(() => {
+    const o = document.querySelector('[data-pkc-field="asset-window-pdf"]');
+    return {
+      title: document.title,
+      type: o?.getAttribute('type') ?? null,
+      data: (o?.getAttribute('data') ?? '').slice(0, 5),
+      // 🔑 窓いっぱいか(user 報告の症状は「小さい」だった)
+      h: Math.round(o?.getBoundingClientRect().height ?? 0),
+      innerH: window.innerHeight,
+    };
+  });
+  // 🔑 題名が**添付の名前**になっている(blob の UUID ではない ── PKC2 はそうなる)
+  expect(shown.title, '別窓の題名が添付の名前でない').toBe('見積.pdf');
+  expect(shown.type).toBe('application/pdf');
+  expect(shown.data).toBe('blob:');
+  expect(shown.h, '別窓の PDF が窓いっぱいでない').toBeGreaterThan(shown.innerH * 0.9);
+  await popup.close();
+
+  expect(errors).toEqual([]);
+});

@@ -1921,6 +1921,21 @@ select:focus-visible {
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
+/* 🔴 **PDF は寸法を自分で持たない**(2026-08-15、user 報告「PDF ビューアが動作しない」)。
+ * ⚠ 上の規則は `img` / `video` / `audio` / `object` の **4 種で共用**していた。
+ *   `<img>` は固有寸法を持つので `max-width` だけで足りるが、**`<object>` は
+ *   持たない**ので CSS 既定の **300 × 150** に落ちる ── 実測 302 × 152(枠 +2px)で、
+ *   器は 925 × 626 空いていた。ビューア自体は動いており(子 frame 2 枚)、
+ *   ツールバーだけで潰れて中身が見えない状態だった。
+ * 🔑 だから **PDF だけ別の規則**にする(共用のまま高さを足すと画像が伸びる)。
+ * ⚠ 高さは版面基準にする ── 器は本文といっしょに縦へ伸びるので、
+ *   `height:100%` では親が高さを持たず 0 になる。 */
+object[data-pkc-field='attachment-media'] {
+  display: block;
+  width: 100%;
+  height: calc(100vh - 16rem);
+  min-height: 320px;
+}
 [data-pkc-asset-missing] {
   color: var(--danger);
 }

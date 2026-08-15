@@ -54,6 +54,7 @@ import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { isAppMime } from '@features/launcher/tiles';
 import { buildOfficeEntry } from './office-entry-view';
 import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
+import { assetPreviewKind, canOpenAssetWindow } from '@features/asset/asset-preview-kind';
 import type { AppState, AppPhase } from '@adapter/state/app-state';
 import { appEditorMode } from './editor-mode';
 
@@ -1145,15 +1146,23 @@ export class DetailRenderer {
        *   開けることとは別である。
        */
       /**
-       * 🔴 **画像は別の窓で見られる**(#192 / 台帳 #180 の D-2)── 添付を見ながら
-       * 本文を書くため。⚠ 出すのは**画像のときだけ**(押せない導線を置かない)。
-       * ⚠ ObjectURL の寿命は開いた窓の生死に従う(`platform/image-window.ts`)。
+       * 🔴 **画像と PDF は別の窓で見られる**(#192 で画像、2026-08-15 に PDF を追加)
+       * ── 添付を見ながら本文を書くため。⚠ 出すのは**別窓に出せるときだけ**
+       * (押せない導線を置かない)。
+       * ⚠ 判定は `features/asset/asset-preview-kind.ts` の 1 本
+       * ── 直す前は画面の preview と別の判定を使っていたので、
+       * **画面には出せるのに別窓には出せない PDF** という食い違いが生まれていた。
+       * ⚠ ObjectURL の寿命は開いた窓の生死に従う(`platform/asset-window.ts`)。
        */
-      if (isImageAssetMime(meta.mime)) {
-        const view = iconButton('view-image', '別の窓で見る');
+      if (canOpenAssetWindow(meta.mime)) {
+        const pdf = assetPreviewKind(meta.mime) === 'pdf';
+        const view = iconButton('view-asset', '別の窓で見る');
         view.setAttribute('data-pkc-asset-key', meta.assetKey);
-        view.setAttribute('data-pkc-asset-name', meta.name || '画像');
-        view.title = '画像を別の窓で開きます(本文を書きながら見られます)';
+        view.setAttribute('data-pkc-asset-name', meta.name || (pdf ? 'PDF' : '画像'));
+        view.setAttribute('data-pkc-asset-mime', meta.mime);
+        view.title = pdf
+          ? 'PDF を別の窓で開きます(大きく開くので頁を読めます)'
+          : '画像を別の窓で開きます(本文を書きながら見られます)';
         info.append(view);
       }
       if (isAppMime(meta.mime)) {
@@ -1306,7 +1315,10 @@ export class DetailRenderer {
       host.append(p);
     };
     try {
-      if (mime.startsWith('text/') || mime === 'application/json') {
+      // ⚠ 見せ方の判定は `features/asset/asset-preview-kind.ts` の 1 本だけを使う
+      //    (別窓の側と同じ規則 ── 片方だけ PDF を知っている状態を作らない)
+      const kind = assetPreviewKind(mime);
+      if (kind === 'text') {
         const blob = await assets.getBlob(assetKey);
         if (token !== this.hydrateToken) return; // stale ── DOM は既に破棄済み
         if (!blob) return missing();
@@ -1321,15 +1333,6 @@ export class DetailRenderer {
         host.append(pre);
         return;
       }
-      const kind = mime.startsWith('image/')
-        ? 'img'
-        : mime.startsWith('video/')
-          ? 'video'
-          : mime.startsWith('audio/')
-            ? 'audio'
-            : mime === 'application/pdf'
-              ? 'pdf'
-              : null;
       if (!kind) {
         /**
          * 🔴 **出せないことを言う**(2026-08-06。user 報告 minor
@@ -1358,7 +1361,7 @@ export class DetailRenderer {
       // 添付の preview は器ごと作り直す(`disposeLends()` が先に走る)ので、
       // 器そのものを持たせておけば「器が外れたら返す」で同じ規則に乗る
       this.lends.push({ dispose: lent.dispose, els: [host] });
-      if (kind === 'img') {
+      if (kind === 'image') {
         const img = document.createElement('img');
         img.setAttribute('data-pkc-field', 'attachment-media');
         img.src = lent.url;
@@ -1370,10 +1373,36 @@ export class DetailRenderer {
         media.src = lent.url;
         host.append(media);
       } else {
+        /**
+         * 🔴 **PDF はブラウザ内蔵ビューアに委ねる**(依存を足さない)。
+         * ⚠ **寸法は CSS で与える**(`app.css` の `object[data-pkc-field=…]`)──
+         * `<object>` は固有寸法を持たないので、`img` と規則を共用すると
+         * **既定の 300×150** で描かれる。2026-08-15 に user 報告で露見した症状が
+         * これで、実測 302×152(器は 925×626 空いていた)。
+         * ⚠ **`sandbox` は付けない**(`<object>` は script を実行しない)。
+         */
         const obj = document.createElement('object');
         obj.setAttribute('data-pkc-field', 'attachment-media');
+        obj.setAttribute('data-pkc-preview', 'pdf');
         obj.type = 'application/pdf';
         obj.data = lent.url;
+        /**
+         * 🔑 **出せなかったときに空白を残さない**(PKC2 の判断を採る)──
+         * `<object>` の fallback 検出はブラウザ差が大きく当てにならないので、
+         * **中に断り文を置いて**ブラウザ自身に出させる。
+         * ⚠ ダウンロードの導線は上に常に在るので、そこへ案内する。
+         */
+        /**
+         * ⚠ **`attachment-no-preview` と別の名前にする** ── あちらは
+         * 「この種類は出せない」、こちらは「出せる種類だが、この browser が
+         * 出せない」で**意味が違う**。同じ名前にすると、片方を見る test が
+         * もう片方に満たされて空振りする(CLAUDE.md §1)。
+         */
+        const note = document.createElement('p');
+        note.setAttribute('data-pkc-field', 'attachment-pdf-fallback');
+        note.textContent =
+          'この browser は PDF を画面に出せません。上の「ダウンロード」で保存して開いてください';
+        obj.append(note);
         host.append(obj);
       }
     } catch {
