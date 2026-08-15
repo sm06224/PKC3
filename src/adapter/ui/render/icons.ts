@@ -200,6 +200,9 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   /** 選択の履歴(#190)── ブラウザの戻る・進むと同じ図案にする。 */
   'nav-back': 'chevron-left',
   'nav-forward': 'chevron-right',
+  /** 関係(#185)── 足すのは plus、消すのは close(既存の意味と揃える)。 */
+  'add-relation': 'plus',
+  'remove-relation': 'close',
   /** 本文の置換(#191)── 書き換えるので鉛筆と同じ仲間の図案にする。 */
   'toggle-replace': 'pencil',
   'replace-all': 'check',

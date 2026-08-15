@@ -46,6 +46,15 @@ import { iconButton } from './icons';
 import { formatStoredDate } from '@features/datetime/stored-date';
 // 居場所の解決は `features/relation/tree` が正本(ファイラの帯・パンくずと共有)
 import { readTags } from '@features/flavor/tags';
+import {
+  CREATABLE_KINDS,
+  RELATION_LABELS,
+  STRUCTURAL,
+  relationLabel,
+} from '@features/relation/kinds';
+
+/** 相手の候補に出す上限。⚠ 超えたぶんは**件数を書く**(黙って切らない)。 */
+export const RELATION_CANDIDATE_MAX = 200;
 import { getAncestorFolders } from '@features/relation/tree';
 
 /** 素性の行(`data-pkc-field` → 値を入れる `<dd>`)。 */
@@ -75,6 +84,8 @@ export class InspectorRenderer {
   private shape: Shape | null = null;
   private rows: Rows = new Map();
   private buttons: Buttons = new Map();
+  /** 相手の候補(#185)。⚠ 器は 1 度だけ組み、中身だけ差し替える。 */
+  private candidates: HTMLDataListElement | null = null;
   /** 同じノートに戻ったら同じ位置へ(P8 段⑫。溢れるのは題名が長いときだけ)。 */
   private readonly scroll: ScrollMemory;
   /** いま出しているノート。⚠ **切り替わったときだけ**スクロールを触る。 */
@@ -155,6 +166,65 @@ export class InspectorRenderer {
           chip.textContent = tag;
           tagBox.append(chip);
         }
+      }
+    }
+    /**
+     * 🔴 **関係を出す**(#185)。⚠ 出すのは**親子以外** ── 居場所は上の行が既に
+     * 出しており、同じものを 2 か所に出すと「消したのに片方に残る」に見える。
+     * ⚠ 相手は**押せる**(その関係を辿れないと、一覧しても行き止まりになる)。
+     * ⚠ 消すボタンを対で置く ── **作れて消せない導線は dead click の一種**。
+     */
+    const relBox = this.rows.get('inspector-relations');
+    if (relBox) {
+      relBox.textContent = '';
+      const mine = state.relations.filter(
+        (r) => r.kind !== STRUCTURAL && (r.fromLid === meta.lid || r.toLid === meta.lid),
+      );
+      if (mine.length === 0) {
+        relBox.textContent = '無し';
+      } else {
+        for (const r of mine) {
+          const otherLid = r.fromLid === meta.lid ? r.toLid : r.fromLid;
+          const other = state.entryMetas.get(otherLid);
+          const item = document.createElement('span');
+          item.setAttribute('data-pkc-field', 'inspector-relation');
+          item.setAttribute('data-pkc-relation', r.id);
+          const label = document.createElement('span');
+          // ⚠ 向きを出す(→ / ←)── 出典と関連は向きで意味が変わる
+          label.textContent = `${relationLabel(r.kind)} ${r.fromLid === meta.lid ? '→' : '←'} `;
+          const go = document.createElement('button');
+          go.type = 'button';
+          go.setAttribute('data-pkc-action', 'select-entry');
+          // ⚠ 属性名は既存の規約に合わせる(`select-entry` は `data-pkc-entry` を読む)
+          //    ── ここで別名を作ると、押しても動かない導線になる(実際 1 度作った)
+          go.setAttribute('data-pkc-entry', otherLid);
+          go.setAttribute('data-pkc-field', 'relation-target-link');
+          // ⚠ 相手が消えていても**黙って空にしない**(何が壊れているか分かる形)
+          go.textContent = other?.title ?? '(見つかりません)';
+          const del = iconButton('remove-relation', '消す');
+          del.setAttribute('data-pkc-relation', r.id);
+          del.title = 'この関係を消します(ノートは消えません)';
+          item.append(label, go, del);
+          relBox.append(item);
+        }
+      }
+    }
+    /**
+     * 相手の候補。⚠ **出し切れないときは件数を書く**(黙って切らない)。
+     * ⚠ 自分自身は候補から外す(張れないものを見せない)。
+     */
+    if (this.candidates) {
+      const others = [...state.entryMetas.values()].filter((m) => m.lid !== meta.lid);
+      this.candidates.textContent = '';
+      for (const m of others.slice(0, RELATION_CANDIDATE_MAX)) {
+        const opt = document.createElement('option');
+        opt.value = m.title;
+        this.candidates.append(opt);
+      }
+      if (others.length > RELATION_CANDIDATE_MAX) {
+        const more = document.createElement('option');
+        more.value = `(候補は ${RELATION_CANDIDATE_MAX} 件まで表示。ほかに ${others.length - RELATION_CANDIDATE_MAX} 件あります)`;
+        this.candidates.append(more);
       }
     }
     this.setRow('inspector-created', formatStoredDate(meta.createdAt));
@@ -242,8 +312,45 @@ export class InspectorRenderer {
      * `setRow`(textContent 差し替え)ではなく専用の器を持つ。
      */
     row('タグ', 'inspector-tags');
+    /**
+     * 🔴 **関係**(#185 / 台帳 #180 の A-7)。⚠ 親子(居場所)は上の「居場所」行が
+     * 既に出しているので、ここは**それ以外**(関連 / 分類 / 時系列 / 出典)を出す。
+     * ⚠ 値は押せる札 + 消すボタンなので、`setRow` ではなく専用の器を持つ。
+     */
+    row('関係', 'inspector-relations');
     if (shape === 'entry+link') row('元ファイル', 'inspector-linked-file');
     this.region.append(dl);
+
+    /**
+     * 🔴 **関係を作る帯**(#185)。⚠ 器は 1 度しか組まない ── 値だけ差し替える
+     * (打ちかけの相手名が再描画で消えない。追記欄と同じ理由)。
+     * ⚠ 相手は**題名で指す** ── lid は user に見えない値なので選ばせられない。
+     *   候補は `<datalist>` に出し、**出し切れないときは件数を書く**(黙って切らない)。
+     */
+    const addBar = document.createElement('div');
+    addBar.setAttribute('data-pkc-field', 'relation-add');
+    const target = document.createElement('input');
+    target.type = 'text';
+    target.setAttribute('data-pkc-field', 'relation-target');
+    target.setAttribute('list', 'pkc-relation-candidates');
+    target.placeholder = '相手の題名';
+    target.setAttribute('aria-label', '関係を結ぶ相手の題名');
+    const list = document.createElement('datalist');
+    list.id = 'pkc-relation-candidates';
+    this.candidates = list;
+    const kind = document.createElement('select');
+    kind.setAttribute('data-pkc-field', 'relation-kind');
+    kind.setAttribute('aria-label', '関係の種類');
+    for (const k of CREATABLE_KINDS) {
+      const opt = document.createElement('option');
+      opt.value = k;
+      opt.textContent = RELATION_LABELS[k];
+      kind.append(opt);
+    }
+    const add = iconButton('add-relation', '関係を足す');
+    add.title = '選んでいるノートから、相手のノートへ関係を張ります';
+    addBar.append(target, list, kind, add);
+    this.region.append(addBar);
 
     // ⚠ **操作は対象の隣**(P8)。共通ツールバーに集約しない
     const actions = document.createElement('div');

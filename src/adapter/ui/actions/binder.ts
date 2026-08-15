@@ -20,6 +20,7 @@ import { applyFormat, type FormatOp } from '@features/markdown/text-ops';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
 import { isEntrySort } from '@features/filter/entry-sort';
 import { isPaneId } from '@features/pane-visibility';
+import { STRUCTURAL, isRelationKind } from '@features/relation/kinds';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { resolveFilerScope } from '@features/relation/tree';
 import { parseLinkTarget } from '@features/entry-ref/link-target';
@@ -538,6 +539,57 @@ const ACTIONS: Record<string, ActionHandler> = {
     const replace =
       root.querySelector<HTMLInputElement>('[data-pkc-field="replace-with"]')?.value ?? '';
     dispatcher.dispatch({ type: 'REPLACE_IN_BODY', find, replace });
+  },
+  /**
+   * 🔴 **関係を足す**(#185)。⚠ 相手は**題名で指す**(lid は user に見えない)。
+   * ⚠ 見つからない / 曖昧なときは**理由を言う** ── 押して無反応にしない。
+   * ⚠ 判定(自分自身・重複・居場所)は **reducer 1 か所**。ここは解決だけ。
+   */
+  'add-relation': (dispatcher, target) => {
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const nameEl = root.querySelector<HTMLInputElement>('[data-pkc-field="relation-target"]');
+    const kindEl = root.querySelector<HTMLSelectElement>('[data-pkc-field="relation-kind"]');
+    const name = (nameEl?.value ?? '').trim();
+    const state = dispatcher.getState();
+    const fromLid = state.selectedLid;
+    if (fromLid === null) return;
+    if (name === '') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '相手の題名を入れてください' });
+      return;
+    }
+    const hits = [...state.entryMetas.values()].filter(
+      (m) => m.title === name && m.lid !== fromLid,
+    );
+    if (hits.length === 0) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: `「${name}」というノートが見つかりません`,
+      });
+      return;
+    }
+    if (hits.length > 1) {
+      // ⚠ 同じ題名が複数 ── **どれかを勝手に選ばない**(user の意図が決まらない)
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: `「${name}」が ${hits.length} 件あります。題名を分けてから足してください`,
+      });
+      return;
+    }
+    const kind = kindEl?.value ?? '';
+    if (!isRelationKind(kind) || kind === STRUCTURAL) return;
+    dispatcher.dispatch({
+      type: 'ADD_RELATION',
+      id: generateLid(),
+      fromLid,
+      toLid: hits[0]!.lid,
+      kind,
+    });
+    if (nameEl) nameEl.value = '';
+  },
+  /** 関係を消す(#185)。⚠ **id で消す**(押した札が持っている)。 */
+  'remove-relation': (dispatcher, target) => {
+    const id = target.getAttribute('data-pkc-relation');
+    if (id) dispatcher.dispatch({ type: 'REMOVE_RELATION', id });
   },
   'nav-back': (dispatcher) => dispatcher.dispatch({ type: 'NAV_HISTORY', dir: 'back' }),
   'nav-forward': (dispatcher) => dispatcher.dispatch({ type: 'NAV_HISTORY', dir: 'forward' }),
