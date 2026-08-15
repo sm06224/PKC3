@@ -33,6 +33,7 @@ import {
   sha256Hex,
   type OfficePackFileMeta,
   type OfficePackMeta,
+  type PackBuild,
 } from './office-pack';
 
 const DB_NAME = 'pkc3-office-pack';
@@ -103,6 +104,8 @@ function isMeta(v: unknown): v is OfficePackMeta {
 
 export interface InstallOptions {
   readonly version: string;
+  /** ⚠ 目録に無ければ `null`(古い配布元 / 手元の zip)。 */
+  readonly build?: PackBuild | null;
   readonly source: 'url' | 'file';
   /** 進捗(0..1)。sha256 の計算が支配的なので、file 単位で刻む。 */
   readonly onProgress?: (done: number, total: number, name: string) => void;
@@ -125,7 +128,12 @@ export class OfficePackStore {
    */
   async readMeta(): Promise<OfficePackMeta | null> {
     const v = await read(await this.need(), META, (s) => s.get(META_KEY));
-    return isMeta(v) ? v : null;
+    if (!isMeta(v)) return null;
+    /**
+     * ⚠ **前に入れた一式は `build` を持たない**(#155)── 読んだ形をそのまま返すと
+     * `undefined` が画面まで流れる。ここで `null` に正規化する(後方互換)。
+     */
+    return v.build == null ? { ...v, build: null } : v;
   }
 
   async isInstalled(): Promise<boolean> {
@@ -173,6 +181,8 @@ export class OfficePackStore {
 
     const meta: OfficePackMeta = {
       version: opts.version,
+      // 🔴 **どのビルドかを保存する**(#155)── 版の文字列は使い回されることがある
+      build: opts.build ?? null,
       installedAt: Date.now(),
       source: opts.source,
       totalBytes,

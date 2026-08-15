@@ -29,6 +29,7 @@ import {
   readPackFromZip,
   type PackFiles,
 } from './office-pack-acquire';
+import type { PackBuild } from './office-pack';
 import type { OfficePackStore } from './office-pack-store';
 
 export type PackResult =
@@ -140,7 +141,8 @@ export class OfficePackInstaller {
         manifest.fonts,
         (phase, done, total) => progress(`${phase}(${done}/${total})`),
       );
-      return { files, version: manifest.version, source: 'url' as const };
+      // 🔴 ビルドの素性も持ち帰る(#155)── 版の文字列だけでは新旧を見分けられない
+      return { files, version: manifest.version, build: manifest.build, source: 'url' as const };
     });
   }
 
@@ -179,6 +181,8 @@ export class OfficePackInstaller {
     acquire: (progress: (text: string) => void) => Promise<{
       files: PackFiles;
       version: string;
+      /** ⚠ どのビルドか(#155)。手元の zip から入れたときは `null`。 */
+      build?: PackBuild | null;
       source: 'url' | 'file';
     }>,
   ): Promise<PackResult> {
@@ -188,12 +192,15 @@ export class OfficePackInstaller {
     this.running = true;
     const progress = (text: string): void => this.deps.onProgress?.(text);
     try {
-      const { files, version, source } = await acquire(progress);
+      const { files, version, source, build } = await acquire(progress);
       progress('配備しています');
       // ⚠ **書く前に**永続化を頼む(拒否されても入れるのは続ける)
       const persisted = await (this.deps.persist ?? requestPersist)();
       const meta = await this.deps.store.install(files, {
         version,
+        // 🔴 **素性をここで落とさない**(#155)── 落ちても画面は成立して見えるので、
+        //    変異試験で 2 件生き延びるまで誰も気づかなかった経路である
+        build: build ?? null,
         source,
         onProgress: (done, total, name) =>
           progress(name === '' ? '書き込んでいます' : `検査中: ${name}(${done}/${total})`),

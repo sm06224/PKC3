@@ -59,6 +59,30 @@ const PROSE_ROW_ATTR = 'data-pkc-row-prose';
  */
 const ROWS_CAP = 40;
 
+/**
+ * 🔴 **折り返しで増えた視覚の行を数える**(2026-08-15、user 報告)。
+ *
+ * `rows` を改行の数に合わせた**直後**に呼ぶ ── そのとき溢れている高さが、
+ * そのまま「折り返しで足りない行数」である。
+ *
+ * ⚠ **版面を持たない環境では 0 を返す**(happy-dom は `scrollHeight` も
+ * `line-height` も持たない)。⚠ そこを「折り返し無し」と読んではいけない ──
+ * **測れなかった**だけである。だから unit は改行の側だけを守り、折り返しの側は
+ * 値を差して**分岐を実際に走らせる** test と、実ブラウザの smoke で守る
+ * (「分岐を書いたら、分岐の数だけ実際に走らせた記録を持つ」)。
+ */
+function wrappedExtraRows(ta: HTMLTextAreaElement): number {
+  const view = ta.ownerDocument.defaultView;
+  if (view === null) return 0;
+  // 行の高さ。⚠ `normal` / 空(= 測れない)は NaN になるので、そこで降りる
+  const lineHeight = Number.parseFloat(view.getComputedStyle(ta).lineHeight);
+  if (!Number.isFinite(lineHeight) || lineHeight <= 0) return 0;
+  // どちらも padding を含むので、差は**中身の溢れ**そのものになる
+  const overflow = ta.scrollHeight - ta.clientHeight;
+  if (!Number.isFinite(overflow) || overflow <= 0) return 0;
+  return Math.ceil(overflow / lineHeight);
+}
+
 /** 入れ子の要素で、行ごとの刻印を持つもの(先に書いた方を優先して探す)。 */
 const SUB_UNITS: readonly { selector: string; type: string }[] = [
   { selector: 'tr', type: 'tr_open' },
@@ -904,8 +928,21 @@ export class RowSwap {
      * ⚠ **上限を置く**(S6)── `Ctrl+A` の全文差し替えでは 5000 行の箱ができて
      * しまい、面の scroll が二重になる。上限に当たったら箱の中で scroll させる。
      */
-    const wanted = Math.max(1, a.textarea.value.split('\n').length);
-    a.textarea.rows = Math.min(wanted, ROWS_CAP);
+    const logical = Math.max(1, a.textarea.value.split('\n').length);
+    a.textarea.rows = Math.min(logical, ROWS_CAP);
+    /**
+     * 🔴 **折り返した先も数える**(2026-08-15、user 報告「1 行の選択をすると
+     * 表示が適切なサイズのテキストブロックにならないため編集しにくい」)。
+     *
+     * ⚠ 改行の数だけで高さを決めていたので、**長い 1 段落は必ず `rows=1`** になり、
+     * CSS が `overflow: hidden` なので**末尾しか見えない 1 行の窓**に押し込まれていた
+     * (画面には文の途中から出る)。原文は折り返して表示されるのだから、
+     * 数えるべきは改行ではなく**視覚の行**である。
+     * 🔑 測るのは**上限に届いていないときだけ** ── 届いていれば箱の中で scroll させる
+     * ので、それ以上の測定は要らない(打鍵ごとの reflow を増やさない)。
+     */
+    const wanted = logical < ROWS_CAP ? logical + wrappedExtraRows(a.textarea) : logical;
+    if (wanted !== logical) a.textarea.rows = Math.min(wanted, ROWS_CAP);
     if (wanted > ROWS_CAP) a.textarea.setAttribute('data-pkc-scroll', '1');
     else a.textarea.removeAttribute('data-pkc-scroll');
     const open = findOpenEnds(a.textarea.value);
@@ -915,10 +952,19 @@ export class RowSwap {
   }
 
   /**
-   * 🔴 **カーソルキーで隣の塊へ**(2026-08-08。user 裁定「カーソルキーで下に行く」)。
+   * 🔴 **Alt+カーソルキーで隣の塊へ**(2026-08-15。user 指示「上下方向キー押下で
+   * 次のブロックに飛んでしまうため、Alt+方向キーのように操作の暴発を防ぐ動線が欲しい」)。
    *
-   * **端の行に居るときだけ**働く ── 行の途中の ↑↓ は textarea の中のカーソル
-   * 移動のまま(奪わない)。選択中・修飾キー付きも奪わない(Shift+↓ は選択の拡張)。
+   * ⚠ **2026-08-08 の「カーソルキーで下に行く」を、user の再裁定で置き換えた。**
+   * 旧実装は「改行が無い側に居るか」で端を判定していたが、原文は**折り返して**
+   * 表示されるので、長い 1 段落は**箱のどこに居ても端**だった ── 素の ↓ が
+   * 必ず隣へ飛ぶ(= user の言う暴発)。⚠ 高さを直しても**この判定は直らない**
+   * (視覚の端と改行の端が別物である以上、素のキーで両立できない)。
+   * 🔑 だから**修飾キーで意図を明示させる**:素の ↑↓ は箱の中だけを動き、
+   * `Alt+↑↓` が塊の移動になる ── 選択の戻る進む(`Alt+←→`)と同じ流儀に揃う。
+   *
+   * ⚠ Alt が付いている以上、**箱の中の位置は問わない**(端に居なくても移る)。
+   * Shift / Ctrl / Meta との併せ押しは奪わない(選択の拡張・OS の割り当て)。
    * 確定してから隣の**編集できる塊**(導出物 = `starts < 0` は飛ばす)を開く:
    * ↓ は次の塊の先頭へ、↑ は前の塊の末尾へ。末尾の塊で ↓ は末尾に書き足す
    * (余白クリックと同じ意味論 = `appendRow`)。
@@ -928,15 +974,9 @@ export class RowSwap {
   private arrowMove(ke: KeyboardEvent): void {
     const a = this.active;
     if (a === null) return;
-    if (ke.shiftKey || ke.ctrlKey || ke.metaKey || ke.altKey) return;
+    if (!ke.altKey || ke.shiftKey || ke.ctrlKey || ke.metaKey) return;
     const ta = a.textarea;
-    if (ta.selectionStart !== ta.selectionEnd) return;
     const down = ke.key === 'ArrowDown';
-    if (down) {
-      if (ta.value.includes('\n', ta.selectionEnd)) return; // 最終行に居ない
-    } else if (ta.value.slice(0, ta.selectionStart).includes('\n')) {
-      return; // 先頭行に居ない
-    }
     let next: number | null = null;
     if (down) {
       for (let i = a.blockIndex + a.blockCount; i < this.starts.length; i += 1) {

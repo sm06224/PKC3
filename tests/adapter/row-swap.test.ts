@@ -377,6 +377,117 @@ describe('RowSwap — 範囲差し替え(S6)', () => {
     expect(findByText(r.host, 'p', '最後の段落。')).toBeTruthy();
   });
 
+  /**
+   * 🔴 **折り返した先も数える**(2026-08-15、user 報告「1 行の選択をすると表示が
+   * 適切なサイズのテキストブロックにならないため編集しにくい」)。
+   *
+   * ⚠ happy-dom は版面を持たない(`scrollHeight` も `line-height` も出ない)ので、
+   * **値を差して分岐を実際に走らせる** ── 走らせないと「測れないから 0」と
+   * 「折り返しが無いから 0」が見分けられず、この分岐は 1 度も通らないまま緑になる。
+   */
+  it('🔴 折り返して溢れたぶんだけ箱を伸ばす(改行の数で決めない)', () => {
+    const r = rig();
+    click(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
+    expect(ta.value.includes('\n'), '前提: 改行を持たない塊で見ていない').toBe(false);
+    expect(Number(ta.rows), '版面が測れない環境では改行の数のまま').toBe(1);
+
+    /**
+     * 版面を差す: 1 行 20px の箱(20px)に 55px の中身 ── 溢れは 35px。
+     * ⚠ **端数を残す**(35 / 20 = 1.75)── 割り切れる値にすると、切り上げを
+     * 切り捨てに変える誤りが**同じ答えを出して**生き延びる。
+     */
+    const real = window.getComputedStyle.bind(window);
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((el, pseudo) =>
+      el === ta
+        ? ({ lineHeight: '20px' } as unknown as CSSStyleDeclaration)
+        : real(el as Element, pseudo),
+    );
+    Object.defineProperty(ta, 'clientHeight', { value: 20, configurable: true });
+    Object.defineProperty(ta, 'scrollHeight', { value: 55, configurable: true });
+    try {
+      ta.dispatchEvent(new Event('input'));
+      expect(Number(ta.rows), '折り返した 2 行ぶんを足していない').toBe(3);
+      expect(ta.hasAttribute('data-pkc-scroll'), '上限に届いていないのに箱の中で scroll させている').toBe(false);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('🔴 折り返しても上限は超えない(超えたら箱の中で scroll)', () => {
+    const r = rig();
+    click(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
+    const real = window.getComputedStyle.bind(window);
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((el, pseudo) =>
+      el === ta
+        ? ({ lineHeight: '20px' } as unknown as CSSStyleDeclaration)
+        : real(el as Element, pseudo),
+    );
+    // 1 行の箱に 200 行ぶん(4000px)── 上限 40 を超える
+    Object.defineProperty(ta, 'clientHeight', { value: 20, configurable: true });
+    Object.defineProperty(ta, 'scrollHeight', { value: 4000, configurable: true });
+    try {
+      ta.dispatchEvent(new Event('input'));
+      expect(Number(ta.rows)).toBe(40);
+      expect(ta.getAttribute('data-pkc-scroll'), '上限に当たったのに箱の中で scroll しない').toBe('1');
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  /**
+   * ⚠ **これは「見え方」ではなく「測りに行かないこと」を守る test** である
+   * (変異試験で `logical < ROWS_CAP` の門を外しても DOM は 1 ミリも変わらなかった
+   * ── 上限に当たっている以上 `rows` も印も同じになるので、**出力では殺せない**)。
+   * 🔑 門の目的は打鍵ごとの reflow を増やさないことなので、**測ったかどうか**を見る。
+   */
+  it('🔴 上限に届いている塊では、折り返しを測りに行かない(打鍵ごとの reflow を増やさない)', () => {
+    const r = rig(Array.from({ length: 200 }, (_, i) => `段落 ${i}。`).join('\n\n'));
+    const real = window.getComputedStyle.bind(window);
+    let measured = 0;
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((el, pseudo) => {
+      if (el instanceof HTMLTextAreaElement) measured += 1;
+      return real(el as Element, pseudo);
+    });
+    try {
+      r.swap.activateAll();
+      const ta = box(r.host)!;
+      expect(Number(ta.rows)).toBe(40);
+      measured = 0;
+      ta.dispatchEvent(new Event('input'));
+      expect(measured, '上限に届いているのに版面を測っている').toBe(0);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  /**
+   * 🔴 **行の高さが読めない版面で数を作らない**。`line-height: normal` は
+   * `parseFloat` で NaN になる ── そのまま割ると `rows` に NaN を代入することになり、
+   * **箱の高さごと壊れる**。⚠ happy-dom では溢れが常に 0 なのでこの門は素通りする
+   * (= 出力では殺せない)。だから**溢れを差してから**読めない高さを渡す。
+   */
+  it('🔴 行の高さが読めない版面では、折り返しを数えない', () => {
+    const r = rig();
+    click(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
+    const real = window.getComputedStyle.bind(window);
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((el, pseudo) =>
+      el === ta
+        ? ({ lineHeight: 'normal' } as unknown as CSSStyleDeclaration)
+        : real(el as Element, pseudo),
+    );
+    Object.defineProperty(ta, 'clientHeight', { value: 20, configurable: true });
+    Object.defineProperty(ta, 'scrollHeight', { value: 55, configurable: true });
+    try {
+      ta.dispatchEvent(new Event('input'));
+      expect(Number(ta.rows), '高さが読めないのに数を作っている(rows が壊れる)').toBe(1);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
   it('高さには上限を置く(5000 行の箱を作らない)', () => {
     const long = Array.from({ length: 200 }, (_, i) => `段落 ${i}。`).join('\n\n');
     const r = rig(long);
@@ -727,18 +838,29 @@ describe('RowSwap — 開放終端 と auto pair', () => {
 
 });
 
-describe('RowSwap — カーソルキーで隣の塊へ(2026-08-08 user 裁定)', () => {
+describe('RowSwap — Alt+カーソルキーで隣の塊へ(2026-08-15 user 再裁定)', () => {
+  /**
+   * ⚠ 既定で `altKey: true` を付ける ── **塊の移動は Alt が要る**
+   * (2026-08-15、user 指示「操作の暴発を防ぐ動線が欲しい」)。
+   * 素のキーを見る test は下の「素の ↑↓ は奪わない」に集めてある。
+   */
   const arrow = (
     ta: HTMLTextAreaElement,
     key: 'ArrowDown' | 'ArrowUp',
     init: KeyboardEventInit = {},
   ): KeyboardEvent => {
-    const ev = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
+    const ev = new KeyboardEvent('keydown', {
+      key,
+      bubbles: true,
+      cancelable: true,
+      altKey: true,
+      ...init,
+    });
     ta.dispatchEvent(ev);
     return ev;
   };
 
-  it('🔴 最終行の ↓ で確定し、次の塊が開く(caret は先頭)', () => {
+  it('🔴 最終行の Alt+↓ で確定し、次の塊が開く(caret は先頭)', () => {
     const r = rig();
     click(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
@@ -754,7 +876,7 @@ describe('RowSwap — カーソルキーで隣の塊へ(2026-08-08 user 裁定)'
     expect(next.selectionStart, 'caret が先頭に無い').toBe(0);
   });
 
-  it('🔴 先頭行の ↑ で前の塊が開く(caret は末尾)', () => {
+  it('🔴 先頭行の Alt+↑ で前の塊が開く(caret は末尾)', () => {
     const r = rig();
     click(findByText(r.host, 'p', '最後の段落。'));
     const ta = box(r.host)!;
@@ -768,25 +890,43 @@ describe('RowSwap — カーソルキーで隣の塊へ(2026-08-08 user 裁定)'
     expect(r.commits).toEqual([]); // 変えていないので確定は出ない
   });
 
-  it('行の途中 / 選択中 / Shift 付きの ↑↓ は奪わない(textarea の中の移動のまま)', () => {
+  it('🔴 素の ↑↓ は箱の中の移動のまま(改行を持たない塊でも飛ばない ── 2026-08-15 の暴発)', () => {
     const r = rig();
-    expect(r.swap.activateAll()).toBe(true);
+    click(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
-    // 行の途中(2 行目の頭)── ↓ は最終行ではないので素通り
-    ta.setSelectionRange(DOC.indexOf('最初の段落。'), DOC.indexOf('最初の段落。'));
-    expect(arrow(ta, 'ArrowDown').defaultPrevented).toBe(false);
-    expect(box(r.host)).toBe(ta);
-    // 最終行でも、選択が広がっていたら奪わない
-    ta.setSelectionRange(DOC.length - 3, DOC.length);
-    expect(arrow(ta, 'ArrowDown').defaultPrevented).toBe(false);
-    // 最終行・collapsed でも Shift(選択の拡張)は奪わない
-    ta.setSelectionRange(DOC.length, DOC.length);
-    expect(arrow(ta, 'ArrowDown', { shiftKey: true }).defaultPrevented).toBe(false);
-    expect(box(r.host)).toBe(ta);
+    /**
+     * ⚠ **この塊の原文は改行を 1 つも持たない。** 旧実装は「改行が無い側に居る」を
+     * 端と読んだので、箱のどこに居ても素の ↑↓ が隣へ飛んだ(user 報告の暴発)。
+     * ⚠ 原文は**折り返して**表示されるので、視覚の途中でも改行の端でありうる ──
+     * 高さを直しても素のキーでは両立しない。だから Alt を要る形にした。
+     */
+    expect(ta.value.includes('\n'), '前提: 改行を持たない塊で見ていない').toBe(false);
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+    expect(arrow(ta, 'ArrowDown', { altKey: false }).defaultPrevented).toBe(false);
+    ta.setSelectionRange(0, 0);
+    expect(arrow(ta, 'ArrowUp', { altKey: false }).defaultPrevented).toBe(false);
+    expect(box(r.host), '素のキーで隣の塊へ飛んでいる').toBe(ta);
     expect(r.commits).toEqual([]);
   });
 
-  it('末尾の塊の ↓ は末尾に書き足す(余白クリックと同じ意味論)', () => {
+  it('🔴 Alt+↓ は箱の途中でも移る / Shift・Ctrl・Meta の併せ押しは奪わない', () => {
+    const r = rig();
+    click(findByText(r.host, 'p', '最後の段落。'));
+    arrow(box(r.host)!, 'ArrowUp'); // 箇条書き(2 行)を開く
+    const list = box(r.host)!;
+    expect(list.value).toBe('- 一つめ\n- 二つめ');
+    // 併せ押しは奪わない(選択の拡張・OS の割り当て)
+    list.setSelectionRange(0, 0);
+    expect(arrow(list, 'ArrowDown', { shiftKey: true }).defaultPrevented).toBe(false);
+    expect(arrow(list, 'ArrowDown', { ctrlKey: true }).defaultPrevented).toBe(false);
+    expect(arrow(list, 'ArrowDown', { metaKey: true }).defaultPrevented).toBe(false);
+    expect(box(r.host), '併せ押しで隣の塊へ飛んでいる').toBe(list);
+    // 🔴 Alt が付けば**最終行に居なくても**移る(caret は 1 行目の頭のまま)
+    expect(arrow(list, 'ArrowDown').defaultPrevented).toBe(true);
+    expect(box(r.host)!.value).toBe('最後の段落。');
+  });
+
+  it('末尾の塊の Alt+↓ は末尾に書き足す(余白クリックと同じ意味論)', () => {
     const r = rig();
     click(findByText(r.host, 'p', '最後の段落。'));
     const ta = box(r.host)!;

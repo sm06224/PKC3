@@ -16,11 +16,13 @@ import {
   OfficePackError,
   parsePackManifest,
   type OfficePackMeta,
+  type PackBuild,
   type PackManifest,
 } from '../../src/adapter/platform/office/office-pack';
 
 const META: OfficePackMeta = {
   version: 'lo-wasm-dev',
+  build: null,
   installedAt: 1,
   source: 'url',
   totalBytes: 80 * 1024 * 1024,
@@ -29,13 +31,17 @@ const META: OfficePackMeta = {
 
 const MANIFEST: PackManifest = {
   version: 'lo-wasm-dev',
+  build: null,
   files: ['soffice.js'],
   fonts: ['fonts/BIZUDGothic-Regular.ttf'],
   totalBytes: 1,
 };
 
 function make(over: {
-  install?: (files: ReadonlyMap<string, Blob>, opts: { version: string; source: 'url' | 'file' }) => Promise<OfficePackMeta>;
+  install?: (
+    files: ReadonlyMap<string, Blob>,
+    opts: { version: string; source: 'url' | 'file'; build?: PackBuild | null },
+  ) => Promise<OfficePackMeta>;
   remove?: () => Promise<void>;
   readMeta?: () => Promise<OfficePackMeta | null>;
   fetchManifest?: (base: string) => Promise<PackManifest>;
@@ -53,9 +59,14 @@ function make(over: {
       return (await over.persist?.()) ?? true;
     },
     store: {
-      install: over.install ?? (async (_f: unknown, o: { version: string; source: 'url' | 'file' }) => {
+      install: over.install ?? (async (
+        _f: unknown,
+        o: { version: string; source: 'url' | 'file'; build?: PackBuild | null },
+      ) => {
         order.push('install');
-        stored = { ...META, version: o.version, source: o.source };
+        // ⚠ **本物と同じ意味論**(#155)── 受け取った素性をそのまま保存する。
+        //    stub が捨てると、配線が切れていても test が緑のままになる
+        stored = { ...META, version: o.version, source: o.source, build: o.build ?? null };
         return stored;
       }),
       remove: over.remove ?? (async () => { stored = null; }),
@@ -70,6 +81,75 @@ function make(over: {
   });
   return { installer, progress, order, setStored: (m: OfficePackMeta | null) => { stored = m; } };
 }
+
+/**
+ * 🔴 **目録の `build` を落とさない**(#155)。⚠ 版の文字列は使い回されることがあり、
+ * それだけでは**新旧を見分けられない**(`lo-wasm-dev` の頃に実際に起きた)。
+ */
+describe('ビルドの素性(#155)', () => {
+  it('🔴 取得 → 保存まで素性が届く(配線が切れていないこと)', async () => {
+    /**
+     * ⚠ 目録を読めるだけでは足りない ── **保存された meta に載っている**ことまで
+     * 見る。1 稿目は変異試験で「取得時に渡さない」「保存時に捨てる」の 2 つが
+     * 生き延びた(どちらも**画面には出ないのに誰も気づかない**形)。
+     */
+    const build: PackBuild = {
+      loSha: 'fb02e9d1fc6277a4',
+      builtAt: '2026-08-15T18:39:00Z',
+      runId: '31890208793',
+      qtRef: '6.9',
+      emsdk: '4.0.10',
+      pkc3Commit: '1c1866b',
+    };
+    const { installer } = make({
+      fetchManifest: async () => ({ ...MANIFEST, build }),
+    });
+    const r = await installer.installFromUrl();
+    expect(r.ok, '設置に失敗した').toBe(true);
+    expect(r.ok && r.meta?.build, '取得した素性が保存まで届いていない').toEqual(build);
+  });
+
+  it('目録に素性が無ければ null のまま保存される', async () => {
+    const { installer } = make({ fetchManifest: async () => ({ ...MANIFEST, build: null }) });
+    const r = await installer.installFromUrl();
+    expect(r.ok && r.meta?.build).toBeNull();
+  });
+
+  it('目録の build を読む(snake_case → camelCase)', () => {
+    const m = parsePackManifest({
+      version: 'v1',
+      files: ['soffice.js'],
+      fonts: ['fonts/a.ttf'],
+      build: {
+        lo_sha: 'abc123',
+        built_at: '2026-08-15T00:00:00Z',
+        run_id: '42',
+        qt_ref: '6.9',
+        emsdk: '4.0.10',
+        pkc3_commit: 'deadbeef',
+      },
+    });
+    expect(m.build).toEqual({
+      loSha: 'abc123',
+      builtAt: '2026-08-15T00:00:00Z',
+      runId: '42',
+      qtRef: '6.9',
+      emsdk: '4.0.10',
+      pkc3Commit: 'deadbeef',
+    });
+  });
+
+  it('🔴 build が無い / 壊れている目録でも一式は受ける(素性だけ null)', () => {
+    /**
+     * ⚠ 素性が読めないだけで一式を撥ねる理由は無い ── 撥ねると、古い配布元から
+     * **入れられなくなる**(後方互換の破壊)。
+     */
+    const base = { version: 'v1', files: ['soffice.js'], fonts: ['fonts/a.ttf'] };
+    expect(parsePackManifest(base).build).toBeNull();
+    expect(parsePackManifest({ ...base, build: 'こわれ' }).build).toBeNull();
+    expect(parsePackManifest({ ...base, build: { lo_sha: 123 } }).build).toBeNull();
+  });
+});
 
 describe('OfficePackInstaller', () => {
   it('配布元から入れると、版と出所が記録される', async () => {
