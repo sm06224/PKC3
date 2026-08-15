@@ -360,6 +360,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     paint();
   };
   /**
+   * 🔗 組み込みタイルから Office を開く(#148 / #174)。
+   * ⚠ 既存窓への focus-request は user から**無反応に見える**(レポート #11 ──
+   *   noopener の別窓は最前面に来たか分からない)。一言を出す。
+   */
+  const openOfficeTile = () => {
+    const r = officeWindow.open({});
+    if (r.kind === 'already-open')
+      showStatus('Office は既に開いています(そのタブをご覧ください)');
+  };
+  /**
    * Office の窓が固まったことに気づく(#135)。⚠ ここは**渡すだけ** ──
    * 物差しも文言も `office-hang-watch.ts` が持つ(`main.ts` は原文 pin の
    * test しか無い面なので、判断を置くと全 tests 緑のまま取り違える)。
@@ -722,8 +732,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         readSeed: readAppStorage,
         baseUrl: document.baseURI,
         fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
-        // #148 組み込みタイル ── 文書なしで開く = Start Center
-        openOffice: () => officeWindow.open({}),
+        // #148 組み込みタイル ── 文書なしで開く = Start Center(#174 の一言込み)
+        openOffice: openOfficeTile,
       });
       // ⚠ 押した対象を**選択状態にもする**(P8 段⑭)── 起動しただけだと右の列が
       //    空文のままで、いま何を触ったのかが画面に残らない。「押す = 起動」の
@@ -781,8 +791,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             baseUrl: document.baseURI,
             fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
             // ⚠ 添付起動の経路に office タイルは来ない(kind は 'app' 固定)が、
-            //    依存の形は 1 つに保つ
-            openOffice: () => officeWindow.open({}),
+            //    依存の実体も 1 つに保つ(§7)
+            openOffice: openOfficeTile,
             confirmSameOrigin: (title) => {
               if (sameOriginAllowed.has(lid)) return true;
               // ⚠ 何が起きるかを**具体**で書く(「安全でない」では判断できない)

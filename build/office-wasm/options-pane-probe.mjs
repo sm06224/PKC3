@@ -115,7 +115,7 @@ async function main() {
   const browser = await chromium.launchPersistentContext(`/tmp/pkc3-options-${process.pid}`, {
     headless: true,
     viewport: VIEWPORT,
-    deviceScaleFactor: 1,
+    deviceScaleFactor: Number(process.env.PKC3_O_DPR ?? 1),
     args: ['--no-sandbox', '--disable-dev-shm-usage'],
     executablePath: '/opt/pw-browsers/chromium',
   });
@@ -162,6 +162,13 @@ async function main() {
       });
       return { count: names.length, bytes };
     });
+
+    // #166 実験: 実機相当の復元プロファイルを seed(PKC3_O_SEED=<xcu file>)
+    if (process.env.PKC3_O_SEED) {
+      const xcu = await readFile(process.env.PKC3_O_SEED, 'utf8');
+      await page.evaluate((v) => globalThis.localStorage.setItem('pkc3-office-profile', v), xcu);
+      result.seeded = xcu.length;
+    }
 
     // 実 user 経路で起動 → Writer
     await page.goto(`${base}/office/host.html`, { waitUntil: 'commit' });
@@ -257,6 +264,13 @@ async function main() {
       return t.includes('停止') || t.includes('memory access');
     });
     result.oobInConsole = lines.some((l) => l.includes('memory access out of bounds'));
+    result.profileLen = await page.evaluate(
+      () => (globalThis.localStorage.getItem('pkc3-office-profile') ?? '').length,
+    );
+    if (process.env.PKC3_O_CAPTURE) {
+      const v = await page.evaluate(() => globalThis.localStorage.getItem('pkc3-office-profile') ?? '');
+      if (v) await writeFile(process.env.PKC3_O_CAPTURE, v);
+    }
   } finally {
     result.console = lines.slice(-12);
     const text = JSON.stringify(result, null, 1);
