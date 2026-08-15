@@ -60,9 +60,29 @@ export const GZIPPED_PACK_FILES: Readonly<Record<string, string>> = {
  */
 export const DEFAULT_PACK_BASE = '/office-pack/';
 
+/**
+ * 🔴 **どのビルドかを名指しする素性**(#155)。配る側の `pack.json` の `build`。
+ *
+ * ⚠ 版の文字列(`version`)だけでは足りない ── **使い回されることがある**
+ * (`lo-wasm-dev` の頃に実際に起きた: 中身が入れ替わっても名前が変わらず、
+ * 新旧を `soffice.js` のバイト数差で見分ける羽目になった)。
+ * ⚠ **外から来るデータ**なので、目録と同じく**形を確かめてから**受ける。
+ * ⚠ 古い一式は持っていない ── `null` を許し、画面では「不明」と出す。
+ */
+export interface PackBuild {
+  readonly loSha: string;
+  readonly builtAt: string;
+  readonly runId: string;
+  readonly qtRef: string;
+  readonly emsdk: string;
+  readonly pkc3Commit: string;
+}
+
 /** 配る側が置く目録(`pack.json`)。⚠ **取る側はこれに従う**(名前を書き写さない)。 */
 export interface PackManifest {
   readonly version: string;
+  /** ⚠ 無い配布元もある(古い一式)── そのときは `null`。 */
+  readonly build: PackBuild | null;
   readonly files: readonly string[];
   /** `fonts/…ttf` の形。⚠ 1 本も無い目録は受け付けない(日本語が豆腐になる)。 */
   readonly fonts: readonly string[];
@@ -91,10 +111,32 @@ export function parsePackManifest(v: unknown): PackManifest {
   }
   return {
     version: typeof m.version === 'string' && m.version !== '' ? m.version : 'unknown',
+    build: parsePackBuild((v as { build?: unknown }).build),
     files,
     fonts,
     totalBytes: typeof m.totalBytes === 'number' ? m.totalBytes : 0,
   };
+}
+
+/**
+ * ビルドの素性を検める(#155)。⚠ **落とすのではなく `null` にする** ──
+ * 目録の他の部分が正しいなら、素性が読めないだけで一式を撥ねる理由は無い。
+ * ⚠ 字だけを受ける(数や object が来ても画面へ流さない)。
+ */
+export function parsePackBuild(v: unknown): PackBuild | null {
+  if (typeof v !== 'object' || v === null) return null;
+  const b = v as Record<string, unknown>;
+  const str = (k: string): string => (typeof b[k] === 'string' ? (b[k] as string) : '');
+  const out: PackBuild = {
+    loSha: str('lo_sha'),
+    builtAt: str('built_at'),
+    runId: str('run_id'),
+    qtRef: str('qt_ref'),
+    emsdk: str('emsdk'),
+    pkc3Commit: str('pkc3_commit'),
+  };
+  // ⚠ 全部空なら「持っていない」と同じ ── 空の行を画面に出さない
+  return Object.values(out).some((x) => x !== '') ? out : null;
 }
 
 export interface OfficePackFileMeta {
@@ -108,6 +150,11 @@ export interface OfficePackFileMeta {
 export interface OfficePackMeta {
   /** 取り込んだ版(release の tag 等)。分からなければ `'unknown'`。 */
   readonly version: string;
+  /**
+   * 🔴 **どのビルドかを名指しする素性**(#155)。⚠ 古い一式は持たない(`null`)。
+   * これが無いと、版の文字列が使い回されたときに**新旧を見分けられない**。
+   */
+  readonly build: PackBuild | null;
   readonly installedAt: number;
   /** `url` = 同一 origin から取得 / `file` = 手元の zip を選んだ。 */
   readonly source: 'url' | 'file';

@@ -42,6 +42,29 @@ export function packStatusText(meta: OfficePackMeta | null): string {
 }
 
 /**
+ * 🔴 **どのビルドかを 1 行で言う**(#155)。
+ *
+ * ⚠ 版の文字列(`packStatusText` の側)だけでは足りない ── **使い回されることがある**。
+ * 実機の不具合報告のたびに「どのビルドを見ているか」を確かめる必要があり、
+ * それが無いと**直したはずの症状をもう一度追う**(2026-08-15 に実際に起きた)。
+ * ⚠ 古い一式は素性を持たない ── そのときは**そう言う**(黙って行を消さない。
+ * 「出ていない」と「持っていない」を user が区別できなくなる)。
+ */
+export function packBuildText(meta: OfficePackMeta | null): string {
+  if (meta === null) return '';
+  const b = meta.build;
+  if (b === null) return 'ビルドの素性は不明です(この一式を入れた頃は記録していませんでした)';
+  const parts: string[] = [];
+  // ⚠ sha は**先頭 12 字**(全部は読めないし、突合には足りる)
+  if (b.loSha !== '') parts.push(`LibreOffice ${b.loSha.slice(0, 12)}`);
+  if (b.builtAt !== '') parts.push(`焼いた日時 ${b.builtAt}`);
+  if (b.runId !== '') parts.push(`ビルド番号 ${b.runId}`);
+  if (b.qtRef !== '') parts.push(`Qt ${b.qtRef}`);
+  if (b.emsdk !== '') parts.push(`emsdk ${b.emsdk}`);
+  return parts.join(' / ');
+}
+
+/**
  * この端末で Office 表示が動くか、を 1 行で言う。
  *
  * ⚠ **設置とは別の軸**である。入れても動かない環境があるので、
@@ -131,6 +154,12 @@ export function buildOfficePackPanel(state: OfficePackState = appOfficePack): Of
 
   const status = document.createElement('p');
   status.setAttribute('data-pkc-field', 'office-pack-status');
+  /**
+   * 🔴 **どのビルドか**(#155)。⚠ 版の行の**すぐ下**に置く ── 同じ問い
+   * (「いま入っているのは何か」)の答えなので離さない。
+   */
+  const build = document.createElement('p');
+  build.setAttribute('data-pkc-field', 'office-pack-build');
   const capability = document.createElement('p');
   capability.setAttribute('data-pkc-field', 'office-pack-capability');
   /**
@@ -140,7 +169,7 @@ export function buildOfficePackPanel(state: OfficePackState = appOfficePack): Of
   const update = document.createElement('p');
   update.setAttribute('data-pkc-field', 'office-pack-update');
   update.hidden = true;
-  root.append(status, capability, update);
+  root.append(status, build, capability, update);
 
   const row = document.createElement('div');
   row.setAttribute('data-pkc-field', 'office-pack-actions');
@@ -172,6 +201,10 @@ export function buildOfficePackPanel(state: OfficePackState = appOfficePack): Of
   const sync = (): void => {
     const meta = state.getMeta();
     status.textContent = packStatusText(meta);
+    const buildText = packBuildText(meta);
+    build.textContent = buildText;
+    // ⚠ 入っていないときは行ごと出さない(空の行を置かない)
+    build.hidden = buildText === '';
     capability.textContent = packCapabilityText();
     // ⚠ 判定は `office-pack-update.ts` に 1 つだけ。ここは字にするだけ
     const text = packUpdateText(

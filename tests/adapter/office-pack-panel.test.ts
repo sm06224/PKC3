@@ -22,19 +22,63 @@ import { OfficePackState } from '../../src/adapter/ui/render/office-entry-view';
 import {
   applyPackResult,
   buildOfficePackPanel,
+  packBuildText,
   packStatusText,
 } from '../../src/adapter/ui/render/office-pack-panel';
 import type { OfficePackMeta } from '../../src/adapter/platform/office/office-pack';
 
 const META: OfficePackMeta = {
   version: 'lo-wasm-dev',
+  build: null,
   installedAt: new Date(2026, 7, 11, 12).getTime(),
   source: 'url',
   totalBytes: 80 * 1024 * 1024,
   files: [],
 };
 
+/** 🔴 #155: どのビルドかを名指しする素性(配布元の `pack.json` の `build`)。 */
+const BUILD = {
+  loSha: 'fb02e9d1fc6277a4dbd493b8956c599dc5237f62',
+  builtAt: '2026-08-15T18:39:00Z',
+  runId: '31890208793',
+  qtRef: '6.9',
+  emsdk: '4.0.10',
+  pkc3Commit: '1c1866b0000000000000000000000000000000aa',
+};
+
 beforeEach(() => { document.body.textContent = ''; });
+
+describe('🔴 どのビルドかを画面で言う(#155)', () => {
+  it('素性があれば sha の先頭と焼いた日時を出す', () => {
+    const t = packBuildText({ ...META, build: BUILD });
+    // ⚠ sha は**先頭 12 字**(全部は読めないし、突合には足りる)
+    expect(t).toContain('fb02e9d1fc62');
+    expect(t).not.toContain(BUILD.loSha);
+    expect(t).toContain('2026-08-15T18:39:00Z');
+    expect(t).toContain('31890208793');
+  });
+
+  it('🔴 素性が無い一式は「不明」と言う(黙って行を消さない)', () => {
+    /**
+     * ⚠ 行ごと消すと、user は「出ていない」と「持っていない」を区別できない ──
+     * 版が使い回されたときに**古い一式を新しいと思い込む**、いちばん質の悪い形。
+     */
+    const t = packBuildText({ ...META, build: null });
+    expect(t).toContain('不明');
+  });
+
+  it('入っていなければ何も言わない(空の行を置かない)', () => {
+    expect(packBuildText(null)).toBe('');
+  });
+
+  it('🔴 一部しか無い素性でも、在るものだけ出す(空の断片を並べない)', () => {
+    const t = packBuildText({
+      ...META,
+      build: { ...BUILD, builtAt: '', runId: '', qtRef: '', emsdk: '', pkc3Commit: '' },
+    });
+    expect(t).toBe('LibreOffice fb02e9d1fc62');
+  });
+});
 
 function mount() {
   const state = new OfficePackState();

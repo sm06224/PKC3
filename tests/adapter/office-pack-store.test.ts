@@ -124,6 +124,37 @@ describe('OfficePackStore', () => {
     expect(await store.isInstalled()).toBe(true);
   });
 
+  it('🔴 どのビルドかを保存する(#155 ── 版の文字列は使い回されることがある)', async () => {
+    /**
+     * ⚠ **保存側で落ちても画面は成立して見える**(「不明」と出るだけ)ので、
+     * ここを見ていないと配線が切れたことに誰も気づかない ── 実際、変異試験で
+     * 「保存時に build を捨てる」が生き延びた。
+     */
+    installFakeIdb('commit');
+    const store = new OfficePackStore();
+    const build = {
+      loSha: 'fb02e9d1fc6277a4',
+      builtAt: '2026-08-15T18:39:00Z',
+      runId: '31890208793',
+      qtRef: '6.9',
+      emsdk: '4.0.10',
+      pkc3Commit: '1c1866b',
+    };
+    const meta = await store.install(completePack(), { version: 'v1', source: 'url', build });
+    expect(meta.build, '保存した meta に素性が載っていない').toEqual(build);
+    expect((await store.readMeta())?.build, '読み直すと素性が消えている').toEqual(build);
+  });
+
+  it('🔴 前に入れた一式(素性を持たない)を読んでも壊れない ── null に正規化する', async () => {
+    installFakeIdb('commit');
+    const store = new OfficePackStore();
+    await store.install(completePack(), { version: 'v1', source: 'url' });
+    const meta = await store.readMeta();
+    // ⚠ `undefined` を画面まで流さない(「持っていない」は `null` で表す)
+    expect(meta?.build).toBeNull();
+    expect(meta !== null && 'build' in meta, 'field ごと欠けている').toBe(true);
+  });
+
   it('🔴 照合材料(sha256)を落とさない ── 全 file が 64 桁の hex を持つ', async () => {
     installFakeIdb('commit');
     const meta = await new OfficePackStore().install(completePack(), { version: 'v1', source: 'url' });

@@ -41,6 +41,7 @@ const OK: OfficeCapability = {
 
 const META: OfficePackMeta = {
   version: 'lo-wasm-dev',
+  build: null,
   installedAt: Date.UTC(2026, 7, 11),
   source: 'url',
   totalBytes: 80 * 1024 * 1024,
