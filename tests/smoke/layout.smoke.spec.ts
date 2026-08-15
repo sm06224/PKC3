@@ -456,11 +456,27 @@ test('🔴 面の境界が 1 本になっている(2 重線を作らない)', as
   const gap = await page.evaluate(() => {
     const s = document.querySelector('[data-pkc-region="sidebar"]')!.getBoundingClientRect();
     const d = document.querySelector('[data-pkc-region="detail"]')!.getBoundingClientRect();
+    const g = document
+      .querySelector('[data-pkc-region="pane-grip"][data-pkc-pane="sidebar"]')!
+      .getBoundingClientRect();
     const cs = getComputedStyle(document.querySelector('[data-pkc-region="sidebar"]')!);
-    return { between: Math.round(d.left - s.right), border: cs.borderRightWidth };
+    return {
+      toGrip: Math.round(g.left - s.right),
+      grip: Math.round(g.width),
+      fromGrip: Math.round(d.left - g.right),
+      border: cs.borderRightWidth,
+    };
   });
-  // 面と面の間は **1px ちょうど**(共有の線)
-  expect(gap.between, `面の間が ${gap.between}px`).toBe(1);
+  /**
+   * 🔴 **線は 1 本ずつ**(user 指示 2026-08-03「境界線は全て共有」)。
+   * ⚠ 2026-08-15 に**掴む帯**が面と面のあいだへ入った(user 指示「センターペインの
+   * 上を潰しすぎ」)ので、見る場所は「面と面」から「**面と帯**」×2 に変わった ──
+   * 守る中身は同じである(隣り合う要素のあいだが 1px を超えない = 2 重線を作らない)。
+   * ⚠ 帯の幅も pin する ── 黙って太る帯にしない。
+   */
+  expect(gap.toGrip, `左の面と帯の間が ${gap.toGrip}px`).toBe(1);
+  expect(gap.fromGrip, `帯と本文の間が ${gap.fromGrip}px`).toBe(1);
+  expect(gap.grip, `掴む帯が ${gap.grip}px(太りすぎ)`).toBe(8);
   // 面そのものは border を持たない(持つと 1px + 1px = 2px になる)
   expect(gap.border, 'サイドバーが自前の境界線を持っている').toBe('0px');
 });

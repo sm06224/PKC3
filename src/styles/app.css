@@ -60,7 +60,7 @@ body {
   /* ⚠ 12px の列 2 本は**掴む帯**(ペインの開閉)── 中央の上に帯を置くと
    * 本文が毎回 34px 削られるので、縦の隙間へ移した(user 指示 2026-08-15) */
   grid-template-columns:
-    minmax(200px, 18vw) 12px minmax(0, 1fr) 12px minmax(220px, 15vw);
+    minmax(200px, 18vw) 8px minmax(0, 1fr) 8px minmax(220px, 15vw);
   /* ⚠ notices と update は**別の行**。同じ area に載せると、両方出たとき重なる */
   /* 🔴 **上の帯を撤去した**(P10、user 指示 2026-08-05)── 載っていたのは
    * 「PKC3」の文字と設定ボタンだけで、現在地を出すはずの区画は書き手が 1 つも
@@ -107,7 +107,7 @@ body {
  *   1px の共有境界だけが残って「畳んだのに線がある」見え方になる。
  * ⚠ 中央は**畳めない**(操作子の置き場であり、1 画面完結の本体である)。 */
 [data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'] {
-  grid-template-columns: 12px minmax(0, 1fr) 12px minmax(220px, 15vw);
+  grid-template-columns: 8px minmax(0, 1fr) 8px minmax(220px, 15vw);
   grid-template-areas:
     'gripl detail   gripr inspector'
     'announce announce announce announce'
@@ -116,7 +116,7 @@ body {
     'status   status   status   status';
 }
 [data-pkc-region='shell'][data-pkc-hidden-panes~='inspector'] {
-  grid-template-columns: minmax(200px, 18vw) 12px minmax(0, 1fr) 12px;
+  grid-template-columns: minmax(200px, 18vw) 8px minmax(0, 1fr) 8px;
   grid-template-areas:
     'sidebar  gripl detail gripr'
     'announce announce announce announce'
@@ -125,7 +125,7 @@ body {
     'status   status   status   status';
 }
 [data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'][data-pkc-hidden-panes~='inspector'] {
-  grid-template-columns: 12px minmax(0, 1fr) 12px;
+  grid-template-columns: 8px minmax(0, 1fr) 8px;
   grid-template-areas:
     'gripl detail gripr'
     'announce announce announce'
@@ -140,7 +140,7 @@ body {
 
 /**
  * 🔴 **列の境目の掴む帯**(2026-08-15、user 指示「センターペインの上を潰しすぎ」)。
- * 12px の縦帯。地に溶け込ませ、指した時だけ薄く色が付く。
+ * 8px の縦帯。地に溶け込ませ、指した時だけ薄く色が付く。
  * ⚠ **畳んでも残る**(shell の列なので、隣の面を畳んでも消えない)= #197 の制約を守る。
  */
 [data-pkc-region='pane-grip'] {
@@ -2469,7 +2469,7 @@ select:focus-visible {
  * 幅が足りないなら**場所を変える**のであって、操作を無くしてよい理由にはならない。 */
 @media (max-width: 1100px) {
   [data-pkc-region='shell'] {
-    grid-template-columns: minmax(180px, 22vw) 12px minmax(0, 1fr);
+    grid-template-columns: minmax(180px, 22vw) 8px minmax(0, 1fr);
     grid-template-areas:
       'sidebar   gripl detail'
       'inspector inspector inspector'
