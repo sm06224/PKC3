@@ -1,32 +1,54 @@
 #!/usr/bin/env python3
 """Qt 6.9 wasm で **IME の入力要素が一度も focus されない**のを直す(#156)。
 
+🔴 **これは上流 Qt 6.10 の修正の backport である**(2026-08-15 に方針を差し替えた)。
+自前の思いつきではない ── 上流が同じ症状を同じ原因で直しており、
+その課題名は **QTBUG-136687「Wasm LibreOffice no longer gets keyboard input events」**、
+commit は **`a89ac4b88`「wasm: handle changes in inputMethodAccepted()」**(2025-05-12)。
+6.10 / 6.11 / 6.12 / dev に入っており、**6.9 には backport されていない**。
+
 ## 何が起きているか(実測 `build/office-wasm/ime-probe.mjs`)
 
-`<input>` は在るのに **一度も focus されない** ── ブラウザの IME は
-**focus された編集可能要素**を要求するので、変換窓すら出ない(user 報告
-「少なくとも Mac で日本語入力はできません」と一致)。
+`<input>` は在るのに **一度も focus されない**。ブラウザの IME は
+**focus された編集可能要素**を要求する(W3C UI Events: composition の target は
+"focused element")ので、変換窓すら出ない ── user 報告「Mac で日本語入力ができない」と一致。
 
-## 根(上流を読んで確定 ── 推測ではない)
+## 根(上流を clone して読んで確定 ── 推測ではない)
 
-`qwasminputcontext.cpp:358` の早期 return:
+`qwasminputcontext.cpp` の `updateInputElement()` は **4 項の AND** で早期 return する:
 
     if (!m_focusObject || !focusWindow || !m_visibleInputPanel || !m_inputMethodAccepted)
-        return;      // ← ここで blur() して戻る
+        ... blur(); focusWindow->handle()->focus();  return;   // canvas へ focus が戻る
 
-`m_visibleInputPanel` は **`showInputPanel()` が呼ばれたときだけ真**になる
-(`qwasminputcontext.cpp:309-312`)。これは**仮想キーボードの要求**であり、
-デスクトップのブラウザでは誰も呼ばない ── よって `focus()` に到達しない。
+このうち **2 つが 6.9 では恒久的に false** になる:
 
-## 直し方: 既定を `true` にする(1 行)
+1. `m_visibleInputPanel` ── 立てるのは `showInputPanel()` だけで、その唯一の呼び手は
+   `QInputMethod::show()`。さらにそれを呼ぶのは `QLineEdit` / `QTextEdit` /
+   `QPlainTextEdit` / `QGraphicsItem` の mouse/key release だけである。
+   **LibreOffice は自前描画のウィジェットなのでどれにも当たらない。**
+2. 🔴 `m_inputMethodAccepted` ── **`setFocusObject()` の中でしか代入されない**。
+   LO は `QtFrame::SetInputContext()` で `WA_InputMethodEnabled` を後から立てるので、
+   `QWidget::setAttribute()` → `QInputMethod::update(Qt::ImEnabled)` が走るが、
+   **6.9 の `QWasmInputContext::update()` は基底を呼ぶだけで member を取り直さない** ──
+   グローバルの `inputMethodAccepted()` は true になったのに、member は false のまま
+   取り残される。⚠ LO が毎キー呼ぶ `update(Qt::ImQueryInput)` は
+   **`ImEnabled` を含まない**ので、この経路でも絶対に発火しない。
 
-`qwasminputcontext.h:54` の初期値を反転させる。以後は
-`m_inputMethodAccepted`(= 実際に文字を編集できる相手に focus が在る)だけが
-条件になり、実測と噛み合う。
+⚠ **1 稿目はここを取り違えた** ── ① だけ直して焼き、効かなかった。
+② が本命であり、上流もそう直している。
 
-⚠ **`hideInputPanel()` は生きたまま**(仮想キーボードを畳む経路は壊さない)。
-⚠ `Q_ASSERT(m_visibleInputPanel)` は release ビルドで no-op、かつ真になる側なので
-   どちらにせよ発火しない。
+## 直し方(上流 6.10 の形にする)
+
+1. `update()` が `Qt::ImEnabled` の変化を拾い、`updateInputElement()` を呼ぶ
+2. `updateInputElement()` の先頭で `m_inputMethodAccepted` を**毎回取り直す**
+3. `m_visibleInputPanel` の門を**外す**(上流はメンバごと削除した。ここでは
+   既定値を true にして門を無効化する ── `hideInputPanel()` の経路を壊さないため、
+   メンバ自体は残す)
+
+上流のコメント(6.10)がこの判断そのものを書いている:
+
+    // Note: showInputPanel not necessarily called, we shall
+    // still accept input if we have a focus object and inputMethodAccepted().
 
 ## 🔴 なぜ LO 側から `QInputMethod::show()` を呼ぶ案を捨てたか(2026-08-15)
 
@@ -35,35 +57,37 @@
 
     Aborted(Assertion failed: invalid handle: 12)   /   RuntimeError: unreachable
 
-同じ対照文書で 3 つの一式を比べて確定した ── 当該ビルドだけ 14 秒で落ち、
-run31858851265 / run31793231364 は落ちない。`SetInputContext` は LO 側の
-スレッド文脈で走るので、そこから embind 越しに Qt の `val` を触るのが不正だった。
-🔑 **入力の配管は Qt の中で閉じる。** 外から呼ばない。
+同じ対照文書で 3 つの一式を比べて確定した。`SetInputContext` は LO 側のスレッド文脈で
+走るので、そこから embind 越しに Qt の `val` を触るのが不正だった。
+🔑 **入力の配管は Qt の中で閉じる。** 外から呼ばない ── 上流も同じ向きへ倒している。
 """
 import sys
 from pathlib import Path
 
 HEADER = "src/plugins/platforms/wasm/qwasminputcontext.h"
-ANCHOR = "    bool m_visibleInputPanel = false;"
-REPLACE = (
-    "    // PKC3 #156: デスクトップのブラウザでは showInputPanel() が呼ばれないので、\n"
-    "    // 既定を true にして updateInputElement() の早期 return を通す。\n"
+SRC = "src/plugins/platforms/wasm/qwasminputcontext.cpp"
+
+# ── ③ 仮想キーボードの門を無効化する(上流はメンバごと削除) ────────────
+HEAD_ANCHOR = "    bool m_visibleInputPanel = false;"
+HEAD_REPLACE = (
+    "    // PKC3 #156(上流 6.10 の a89ac4b88 に相当): showInputPanel() は\n"
+    "    // デスクトップのブラウザでは呼ばれない。上流はこのメンバごと削除したが、\n"
+    "    // ここでは hideInputPanel() の経路を壊さないため既定値だけ反転させる。\n"
     "    bool m_visibleInputPanel = true;"
 )
 
-# ── 🔴 診断(2026-08-15。1 回目の直しが効かなかったので足す)──────────────
+# ── ② 早期 return の直前で `m_inputMethodAccepted` を取り直す ────────────
 #
-# `m_visibleInputPanel` を true にしても **`<input>` は一度も focus されなかった**
-# (`ime-probe` 実測)。早期 return の条件は 4 つあるので、**どれで落ちているか**を
-# 名指しできないと、次の一手が推測になる ── 1 ビルド ≒ 4 時間なので推測は高い。
-#
-# ⚠ CLAUDE.md「未確認は assert ではなく診断で出す」。値を**画面から読める所**へ置く:
-#   `<input>` 自身の data 属性に 4 条件を書き、probe が読む。
-# ⚠ 挙動は変えない(属性を足すだけ)。
-SRC = "src/plugins/platforms/wasm/qwasminputcontext.cpp"
+# ⚠ **ここが本命**。1 稿目はこれを入れずに ③ だけ入れて効かなかった。
+# あわせて診断(4 条件を DOM に書く)も残す ── 直っていなければ、どの項が 0 かが
+# **同じ焼きで**分かる(1 ビルド ≒ 4 時間なので、2 度焼かない)。
 DIAG_ANCHOR = """    const QWindow *focusWindow = QGuiApplication::focusWindow();
     if (!m_focusObject || !focusWindow || !m_visibleInputPanel || !m_inputMethodAccepted) {"""
 DIAG_REPLACE = """    const QWindow *focusWindow = QGuiApplication::focusWindow();
+    // PKC3 #156(上流 6.10 の a89ac4b88 に相当): inputMethodAccepted() は
+    // setFocusObject() の後に変わりうる(LO は WA_InputMethodEnabled を後から立てる)。
+    // 6.9 は update() でそれを拾わないので、ここで毎回取り直す。
+    m_inputMethodAccepted = inputMethodAccepted();
     // PKC3 #156 診断: 早期 return の 4 条件を DOM から読めるようにする(挙動は変えない)
     m_inputElement.call<void>("setAttribute", std::string("data-pkc-ime"),
         std::string((m_focusObject ? "obj1" : "obj0"))
@@ -72,49 +96,66 @@ DIAG_REPLACE = """    const QWindow *focusWindow = QGuiApplication::focusWindow(
         + (m_inputMethodAccepted ? "-accept1" : "-accept0"));
     if (!m_focusObject || !focusWindow || !m_visibleInputPanel || !m_inputMethodAccepted) {"""
 
+# ── ① `update()` が ImEnabled の変化を拾う ──────────────────────────────
+# ⚠ 実物(6.9.3 alpha1、HEAD 40c135de)を読んで合わせた ── 目印には
+#    `qCDebug` の行が挟まる。**推測で書かない**(1 稿目は挟まっていない形で書いて外した)。
+UPDATE_ANCHOR = """void QWasmInputContext::update(Qt::InputMethodQueries queries)
+{
+    qCDebug(qLcQpaWasmInputContext) << Q_FUNC_INFO << queries;
+
+    QPlatformInputContext::update(queries);
+}"""
+UPDATE_REPLACE = """void QWasmInputContext::update(Qt::InputMethodQueries queries)
+{
+    qCDebug(qLcQpaWasmInputContext) << Q_FUNC_INFO << queries;
+
+    // PKC3 #156(上流 6.10 の a89ac4b88 に相当): 受け付けの可否は
+    // setFocusObject() の後に変わりうる。変わったら入力要素を作り直す ──
+    // これが無いと、LO のように「focus が定まってから WA_InputMethodEnabled を
+    // 立てる」作りでは **永久に false のまま**になり、<input> が focus されない。
+    if ((queries & Qt::ImEnabled) && (inputMethodAccepted() != m_inputMethodAccepted)) {
+        if (m_focusObject && !preeditString().isEmpty())
+            commitPreeditAndClear();
+        updateInputElement();
+    }
+    QPlatformInputContext::update(queries);
+}"""
+
+
+def patch(path: Path, anchor: str, replace: str, what: str) -> int:
+    """1 か所だけ書き換える。⚠ **当たったことを確かめる**(空振りを成功と読まない)。"""
+    if not path.exists():
+        print(f"ERROR: {what}: {path} が無い", file=sys.stderr)
+        return 1
+    src = path.read_text(encoding="utf-8")
+    if replace in src:
+        print(f"{what}: already patched")
+        return 0
+    n = src.count(anchor)
+    if n != 1:
+        print(f"ERROR: {what}: 目印が {n} 件(1 件でなければ当てない)", file=sys.stderr)
+        return 1
+    path.write_text(src.replace(anchor, replace), encoding="utf-8")
+    after = path.read_text(encoding="utf-8")
+    if replace not in after:
+        print(f"ERROR: {what}: 書き換えが残っていない", file=sys.stderr)
+        return 1
+    print(f"{what}: patched {path}")
+    return 0
+
 
 def main() -> int:
     if len(sys.argv) != 2:
         print("usage: qtbase-patch-ime-panel.py <qtbase-dir>", file=sys.stderr)
         return 2
-    path = Path(sys.argv[1]) / HEADER
-    # ⚠ **無ければ落とす。** 「無ければ skip」は当たらなかったことを
-    #   成功と見分けられなくする(§3 の NOT-APPLIED を合格と読む型)。
-    if not path.exists():
-        print(f"ERROR: {HEADER} が無い({path})", file=sys.stderr)
-        return 1
-    src = path.read_text(encoding="utf-8")
-    if REPLACE not in src:
-        n = src.count(ANCHOR)
-        if n != 1:
-            print(f"ERROR: 目印が {n} 件(1 件でなければ当てない)", file=sys.stderr)
-            return 1
-        path.write_text(src.replace(ANCHOR, REPLACE), encoding="utf-8")
-        after = path.read_text(encoding="utf-8")
-        if REPLACE not in after or ANCHOR in after:
-            print("ERROR: 書き換えが残っていない", file=sys.stderr)
-            return 1
-        print(f"patched {path}")
-
-    # 診断の側(別 file)
-    cpp = Path(sys.argv[1]) / SRC
-    if not cpp.exists():
-        print(f"ERROR: {SRC} が無い({cpp})", file=sys.stderr)
-        return 1
-    csrc = cpp.read_text(encoding="utf-8")
-    if DIAG_REPLACE in csrc:
-        print("diag already patched")
-        return 0
-    m = csrc.count(DIAG_ANCHOR)
-    if m != 1:
-        print(f"ERROR: 診断の目印が {m} 件(1 件でなければ当てない)", file=sys.stderr)
-        return 1
-    cpp.write_text(csrc.replace(DIAG_ANCHOR, DIAG_REPLACE), encoding="utf-8")
-    if DIAG_REPLACE not in cpp.read_text(encoding="utf-8"):
-        print("ERROR: 診断の書き換えが残っていない", file=sys.stderr)
-        return 1
-    print(f"patched {cpp}")
-    return 0
+    root = Path(sys.argv[1])
+    rc = patch(root / HEADER, HEAD_ANCHOR, HEAD_REPLACE, "panel-gate")
+    if rc != 0:
+        return rc
+    rc = patch(root / SRC, UPDATE_ANCHOR, UPDATE_REPLACE, "update-imenabled")
+    if rc != 0:
+        return rc
+    return patch(root / SRC, DIAG_ANCHOR, DIAG_REPLACE, "reread+diag")
 
 
 if __name__ == "__main__":
