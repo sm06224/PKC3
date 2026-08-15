@@ -30,6 +30,13 @@ export type StorageRequest =
    */
   | { op: 'findAssetOwner'; cid: string; assetKey: string }
   /**
+   * 🔴 **本文の全文検索**(#181)。題名だけの絞り込みでは、ノートが増えると
+   * 辿れない。⚠ **本文は主スレッドに常駐していない**ので、これは SQL 側の仕事。
+   * ⚠ 引き方(FTS / LIKE)の規則は `features/filter/search-query.ts` が 1 か所で持つ
+   * ── worker は決めない(2 か所に規則を生やさない)。
+   */
+  | { op: 'searchEntries'; cid: string; query: string; limit?: number }
+  /**
    * 本文を **まとめて** 取る(P6d ── 書出し用)。
    *
    * ⚠ `getBody` を N 回呼ぶと 5000 entry の書出しが 5000 往復になる。
@@ -300,6 +307,11 @@ export interface ResultMap {
   getBodies: Array<{ lid: string; body: string }>;
   /** 所有 entry の lid。見つからなければ null(呼び側が user へ断る)。 */
   findAssetOwner: { lid: string | null };
+  /**
+   * 当たった lid。⚠ **並びは entry_order**(一覧と同じ)── 関連度順にしない。
+   * 一覧の並びが検索のたびに変わると、user は「どこへ行ったか」を見失う。
+   */
+  searchEntries: { lids: string[]; truncated: boolean };
   /**
    * `done` = これ以上ない。`rows` は `entry_order, lid` 順(並びの正本)。
    * `next` = 続きのカーソル(呼び出し側はこれをそのまま渡す ── 自分で組まない)。
