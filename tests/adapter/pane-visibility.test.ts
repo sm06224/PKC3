@@ -126,11 +126,22 @@ describe('画面への適用', () => {
     btn(root, 'sidebar').click();
     const back = btn(root, 'sidebar');
     expect(back, '畳んだ側のボタンごと消えた').not.toBeNull();
-    // ⚠ 操作子は**中央**に在ること ── 左の中に置くと畳んだ瞬間に一緒に消える
+    /**
+     * ⚠ 操作子は**畳む面の外**に在ること ── 面の中に置くと畳んだ瞬間に一緒に消える。
+     * 🔴 置き場は 2026-08-15 に「中央の上の帯」から**列の境目**へ移した
+     * (user 指示「センターペインの上を潰しすぎ」)。守るべき条件は変わっていない:
+     * **畳む対象の中に居ないこと**。
+     */
     expect(
-      back.closest('[data-pkc-region="center"]'),
-      '開閉ボタンが中央の外に在る(畳むと消える置き方)',
-    ).not.toBeNull();
+      back.closest('[data-pkc-region="sidebar"]'),
+      '開閉ボタンが畳む面の中に在る(畳むと消える置き方)',
+    ).toBeNull();
+    expect(
+      back.closest('[data-pkc-region="inspector"]'),
+      '開閉ボタンが畳む面の中に在る(畳むと消える置き方)',
+    ).toBeNull();
+    // 🔑 かつ **shell の直下**に在る(面を畳んでも grid から落ちない)
+    expect(back.parentElement?.getAttribute('data-pkc-region'), 'shell の直下に無い').toBe('shell');
   });
 
   it('読み上げにも出す(aria-pressed が畳み具合と一致する)', () => {

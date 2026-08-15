@@ -57,7 +57,10 @@ body {
   /* 🔑 右列は **詰める**(P9 段②)。20vw だと Full HD で 384px あり、そこに 4 行しか
    * 載っていなかった(「要らない所が広い」)。15vw = 1920 で 288px / 1440 で 216px。
    * ⚠ 下限 220px は残す ── 1100px 以下では 2 列に畳むので、そこまでの間の保険 */
-  grid-template-columns: minmax(200px, 18vw) minmax(0, 1fr) minmax(220px, 15vw);
+  /* ⚠ 12px の列 2 本は**掴む帯**(ペインの開閉)── 中央の上に帯を置くと
+   * 本文が毎回 34px 削られるので、縦の隙間へ移した(user 指示 2026-08-15) */
+  grid-template-columns:
+    minmax(200px, 18vw) 8px minmax(0, 1fr) 8px minmax(220px, 15vw);
   /* ⚠ notices と update は**別の行**。同じ area に載せると、両方出たとき重なる */
   /* 🔴 **上の帯を撤去した**(P10、user 指示 2026-08-05)── 載っていたのは
    * 「PKC3」の文字と設定ボタンだけで、現在地を出すはずの区画は書き手が 1 つも
@@ -67,11 +70,11 @@ body {
   /* ⚠ お知らせ(P11)も**自分の行**。相乗りさせない理由は `shell.ts` に書いた */
   grid-template-rows: 1fr auto auto auto auto;
   grid-template-areas:
-    'sidebar  detail   inspector'
-    'announce announce announce'
-    'update   update   update'
-    'notices  notices  notices'
-    'status   status   status';
+    'sidebar  gripl detail   gripr inspector'
+    'announce announce announce announce announce'
+    'update   update   update   update   update'
+    'notices  notices  notices  notices  notices'
+    'status   status   status   status   status';
   height: 100%;
   /* 🔑 **境界線は共有する**(user 指示 2026-08-03「境界線は全て共有して、
    * マージンとギャップは基本いらない」)。1px の隙間に地の色を透かせて
@@ -104,46 +107,103 @@ body {
  *   1px の共有境界だけが残って「畳んだのに線がある」見え方になる。
  * ⚠ 中央は**畳めない**(操作子の置き場であり、1 画面完結の本体である)。 */
 [data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'] {
-  grid-template-columns: minmax(0, 1fr) minmax(220px, 15vw);
+  grid-template-columns: 8px minmax(0, 1fr) 8px minmax(220px, 15vw);
   grid-template-areas:
-    'detail   inspector'
-    'announce announce'
-    'update   update'
-    'notices  notices'
-    'status   status';
+    'gripl detail   gripr inspector'
+    'announce announce announce announce'
+    'update   update   update   update'
+    'notices  notices  notices  notices'
+    'status   status   status   status';
 }
 [data-pkc-region='shell'][data-pkc-hidden-panes~='inspector'] {
-  grid-template-columns: minmax(200px, 18vw) minmax(0, 1fr);
+  grid-template-columns: minmax(200px, 18vw) 8px minmax(0, 1fr) 8px;
   grid-template-areas:
-    'sidebar  detail'
-    'announce announce'
-    'update   update'
-    'notices  notices'
-    'status   status';
+    'sidebar  gripl detail gripr'
+    'announce announce announce announce'
+    'update   update   update   update'
+    'notices  notices  notices  notices'
+    'status   status   status   status';
 }
 [data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'][data-pkc-hidden-panes~='inspector'] {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: 8px minmax(0, 1fr) 8px;
   grid-template-areas:
-    'detail'
-    'announce'
-    'update'
-    'notices'
-    'status';
+    'gripl detail gripr'
+    'announce announce announce'
+    'update   update   update'
+    'notices  notices  notices'
+    'status   status   status';
 }
 [data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'] [data-pkc-region='sidebar'],
 [data-pkc-region='shell'][data-pkc-hidden-panes~='inspector'] [data-pkc-region='inspector'] {
   display: none;
 }
 
-/* 開閉の操作子。⚠ **常に見える** ── 中央は畳めないので、ここが唯一の戻り道 */
-[data-pkc-region='pane-bar'] {
-  display: flex;
-  gap: 6px;
-  padding: 4px 6px;
-  background: var(--bg);
+/**
+ * 🔴 **列の境目の掴む帯**(2026-08-15、user 指示「センターペインの上を潰しすぎ」)。
+ * 8px の縦帯。地に溶け込ませ、指した時だけ薄く色が付く。
+ * ⚠ **畳んでも残る**(shell の列なので、隣の面を畳んでも消えない)= #197 の制約を守る。
+ */
+[data-pkc-region='pane-grip'] {
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  /* ⚠ 素の `button` は `height: var(--row-h)` で**高さが固定**される ── 帯にするには
+   * 3 つとも上書きが要る(1 つ落とすと 26px の点になる。実測で踏んだ) */
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  align-self: stretch;
+  background: var(--surface-2);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1;
+  writing-mode: vertical-rl;
 }
-[data-pkc-region='pane-bar'] button[aria-pressed='false'] {
-  opacity: 0.6;
+[data-pkc-region='pane-grip'][data-pkc-pane='sidebar'] {
+  grid-area: gripl;
+}
+[data-pkc-region='pane-grip'][data-pkc-pane='inspector'] {
+  grid-area: gripr;
+}
+[data-pkc-region='pane-grip']:hover,
+[data-pkc-region='pane-grip']:focus-visible {
+  background: var(--accent-dim);
+  color: var(--accent-dim-fg);
+}
+/* 🔑 向きは**開いているか**で決める(閉じているときは「開く」向きを指す) */
+[data-pkc-region='pane-grip']::after {
+  content: '⋮';
+}
+
+/**
+ * 🔴 **1 文字のボタン**(2026-08-15、user 指示「戻る進むアイコンがデカすぎる。
+ * `<`, `>` 一文字でいい」)。地に溶け込ませ、枠を持たせない。
+ */
+button[data-pkc-glyph] {
+  border: none;
+  border-radius: 0;
+  background: none;
+  color: var(--muted);
+  padding: 0 4px;
+  min-width: 18px;
+  font-size: 13px;
+  line-height: 1;
+}
+button[data-pkc-glyph]:hover:not(:disabled),
+button[data-pkc-glyph]:focus-visible {
+  background: var(--accent-dim);
+  color: var(--accent-dim-fg);
+}
+button[data-pkc-glyph]:disabled {
+  opacity: 0.35;
+}
+
+/* 開閉の操作子。⚠ **常に見える** ── 中央は畳めないので、ここが唯一の戻り道 */
+/* ⚠ 畳んだ側は**薄く**する(押せることは変わらない ── 状態が見えるだけ) */
+[data-pkc-region='pane-grip'][aria-pressed='false'] {
+  background: var(--bg);
+  opacity: 0.7;
 }
 
 /* 置換の帯(#191)。⚠ 器は 1 度しか組まないので、打ちかけの語は描き直しで消えない */
@@ -622,11 +682,35 @@ select:focus-visible {
   z-index: 1;
   background: var(--surface);
 }
+/**
+ * 🔴 **本文の帯は「溶け込ませる」**(user 指示 2026-08-15「ボタンがボタンすぎる
+ * 見た目ですね もっと左ペイン上部のタブ切り替えボタンのように UI を溶け込ませて
+ * 欲しい」)。⚠ 左のタブと**同じ作り**にする ── 枠と角丸を落とし、区切りは
+ * `gap: 1px` の**共有の線**で作る(user 指示 2026-08-03「境界線は全て共有」と同じ向き)。
+ * ⚠ 押せることは消さない ── 指した時・焦点が来た時に色が付く。
+ */
 [data-pkc-field='detail-toolbar'] {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--s2);
-  padding-bottom: var(--s3);
+  gap: 1px;
+  background: var(--border);
+  margin-bottom: var(--s3);
+}
+/* ⚠ 余りは**地の色**で埋める(format-bar と同じ ── 線色のベタ塗りにしない) */
+[data-pkc-field='detail-toolbar']::after {
+  content: '';
+  flex: 1 1 auto;
+  background: var(--surface);
+}
+[data-pkc-field='detail-toolbar'] button {
+  border: none;
+  border-radius: 0;
+  background: var(--surface);
+}
+[data-pkc-field='detail-toolbar'] button:hover:not(:disabled),
+[data-pkc-field='detail-toolbar'] button:focus-visible {
+  background: var(--accent-dim);
+  color: var(--accent-dim-fg);
 }
 [data-pkc-action='delete-entry'],
 [data-pkc-action='purge-trash'] {
@@ -926,12 +1010,32 @@ select:focus-visible {
   margin: 0;
   overflow-wrap: anywhere;
 }
+/* ⚠ 右の列の操作も**溶け込ませる**(2026-08-15)── 本文の帯と同じ作り */
 [data-pkc-region='inspector'] [data-pkc-field='inspector-actions'] {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--s2);
-  padding: var(--s3);
+  gap: 1px;
+  background: var(--border);
   border-top: 1px solid var(--border);
+}
+[data-pkc-region='inspector'] [data-pkc-field='inspector-actions']::after {
+  content: '';
+  flex: 1 1 auto;
+  background: var(--surface);
+}
+[data-pkc-region='inspector'] [data-pkc-field='inspector-actions'] button {
+  border: none;
+  border-radius: 0;
+  background: var(--surface);
+}
+[data-pkc-region='inspector'] [data-pkc-field='inspector-actions'] button:hover:not(:disabled),
+[data-pkc-region='inspector'] [data-pkc-field='inspector-actions'] button:focus-visible {
+  background: var(--accent-dim);
+  color: var(--accent-dim-fg);
+}
+/* ⚠ 消す操作だけは**赤の字**を残す(枠は落とすが、危うさは落とさない) */
+[data-pkc-field='inspector-actions'] [data-pkc-action='delete-entry'] {
+  color: var(--danger);
 }
 [data-pkc-field='inspector-empty'] {
   padding: var(--s4);
@@ -2365,14 +2469,18 @@ select:focus-visible {
  * 幅が足りないなら**場所を変える**のであって、操作を無くしてよい理由にはならない。 */
 @media (max-width: 1100px) {
   [data-pkc-region='shell'] {
-    grid-template-columns: minmax(180px, 22vw) minmax(0, 1fr);
+    grid-template-columns: minmax(180px, 22vw) 8px minmax(0, 1fr);
     grid-template-areas:
-      'sidebar   detail'
-      'inspector inspector'
-      'announce  announce'
-      'update    update'
-      'notices   notices'
-      'status    status';
+      'sidebar   gripl detail'
+      'inspector inspector inspector'
+      'announce  announce announce'
+      'update    update   update'
+      'notices   notices  notices'
+      'status    status   status';
+  }
+  /* ⚠ 右の列は下へ寝るので、右の掴む帯は**畳む**(境目が無くなるため) */
+  [data-pkc-region='pane-grip'][data-pkc-pane='inspector'] {
+    display: none;
   }
   /* ⚠ 横に寝かせる ── 縦のままだと下に長い帯ができて本文が押し上げられる */
   [data-pkc-region='inspector'] {
@@ -2389,6 +2497,10 @@ select:focus-visible {
 
 /* 狭い画面では 1 カラムへ折る */
 @media (max-width: 720px) {
+  /* ⚠ 縦に畳むので**境目が無い** ── 掴む帯は出さない(押せない導線を残さない) */
+  [data-pkc-region='pane-grip'] {
+    display: none;
+  }
   [data-pkc-region='shell'] {
     grid-template-columns: 1fr;
     grid-template-areas:

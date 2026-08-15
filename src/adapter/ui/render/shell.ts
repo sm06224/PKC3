@@ -160,12 +160,22 @@ export function buildShell(root: HTMLElement): ShellRegions {
    * ⚠ 置き場は**探す欄の左**(ブラウザと同じ並び ── 戻る・進む → 探す)。
    * ⚠ 押せないときは `disabled` にする ── 押しても何も起きない dead click を作らない。
    */
-  for (const [action, label, title] of [
-    ['nav-back', '戻る', '前に見ていたノートへ戻ります(Alt+←)'],
-    ['nav-forward', '進む', '戻る前のノートへ進みます(Alt+→)'],
+  /**
+   * 🔴 **1 文字にする**(user 指示 2026-08-15「戻る進むアイコンがデカすぎる。
+   * `<`, `>` 一文字でいい みたいなのばっかり」)。⚠ **読み上げは残す** ──
+   * 見た目を削るのと、名前を消すのは別である(`aria-label` と `title` を持たせる)。
+   */
+  for (const [action, glyph, label, title] of [
+    ['nav-back', '‹', '戻る', '前に見ていたノートへ戻ります(Alt+←)'],
+    ['nav-forward', '›', '進む', '戻る前のノートへ進みます(Alt+→)'],
   ] as const) {
-    const btn = iconButton(action, label);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.setAttribute('data-pkc-action', action);
+    btn.setAttribute('data-pkc-glyph', '');
+    btn.setAttribute('aria-label', label);
     btn.title = title;
+    btn.textContent = glyph;
     btn.disabled = true; // 履歴が無い間は押せない(renderer が起こす)
     findBar.append(btn);
   }
@@ -329,22 +339,27 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const center = document.createElement('main');
   center.setAttribute('data-pkc-region', 'center');
   /**
-   * 🔴 **ペインの開閉は中央に置く**(#197 / 台帳 #180 の D-1)。
+   * 🔴 **ペインの開閉は「列の境目」に置く**(#197 → 2026-08-15 に置き場を変更)。
    *
-   * ⚠ 左の列の中に置くと、**左を畳んだ瞬間に「戻す」ボタンごと消える** ──
-   *   戻れない画面を作ってしまう。中央は畳めない(= 常に在る)ので、
-   *   操作子の置き場はここしか無い。
-   * ⚠ user 指示「同じものが常に同じ場所にある」── 畳んだ状態は保存する
-   *   (`adapter/ui/render/pane-visibility.ts`)。
+   * user 指示 2026-08-15: 「**サイドのペインを隠すボタンももっと他の選択肢があると
+   * 思う。貴重なセンターペインの上を潰しすぎ**」── 中央の上に帯を 1 本置く形は、
+   * **本文の面を毎回 34px 削る**。境目の 12px なら**縦の隙間**を使うので本文は削れない。
+   *
+   * ⚠ それでも #197 の制約は守る ── **畳んでも操作子が消えてはいけない**。
+   *   境目は shell の列なので、隣の面を畳んでも**残る**(面の中に置くと消える)。
+   * ⚠ user 指示「同じものが常に同じ場所にある」── 畳んだ状態は保存する。
    */
-  const paneBar = document.createElement('div');
-  paneBar.setAttribute('data-pkc-region', 'pane-bar');
+  const grips: Record<string, HTMLElement> = {};
   for (const id of PANES) {
-    const btn = iconButton('toggle-pane', PANE_LABELS[id], `toggle-pane:${id}`);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.setAttribute('data-pkc-region', 'pane-grip');
+    btn.setAttribute('data-pkc-action', 'toggle-pane');
     btn.setAttribute('data-pkc-pane', id);
     btn.setAttribute('aria-pressed', 'true');
+    btn.setAttribute('aria-label', `${PANE_LABELS[id]}の列`);
     btn.title = `${PANE_LABELS[id]}の列を畳む・戻す`;
-    paneBar.append(btn);
+    grips[id] = btn;
   }
   /**
    * 🔴 **本文の置換**(#191 / 台帳 #180 の B-3)。ログが伸びたときに要る。
@@ -371,17 +386,22 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const runReplace = iconButton('replace-all', '全部置換');
   runReplace.title = '編集中の本文で、探す語を全部置き換えます';
   replaceBar.append(runReplace);
-  const toggleReplace = iconButton('toggle-replace', '置換');
-  toggleReplace.title = '本文の置換(Ctrl+H)';
-  toggleReplace.setAttribute('aria-expanded', 'false');
-  paneBar.append(toggleReplace);
-
+  /**
+   * 🔴 **置換の切替は「編集の帯」へ**(2026-08-15、user 指示「ボタンがボタンすぎる /
+   * 中央の上を潰しすぎ」)。⚠ 置換が効くのは**編集中の本文**なので、閲覧中に
+   * 出しておくのは「押しても効かない導線」である ── 編集の帯(`format-bar`)へ移した。
+   * ⚠ **打ちかけの語を守る器はここのまま**(`replace-bar` は shell 側の兄弟)──
+   *   編集の面は打鍵のたびに描き直すので、欄をそちらへ入れると消える。
+   * ⚠ 近道(Ctrl+H)も**編集中だけ**効く ── 押すのは同じボタンで、閲覧中は
+   *   そのボタンが画面に無いからである(`binder` は「無ければ何もしない」)。
+   *   同じ操作が 2 通りの経路を持たないほうが正しい。
+   */
   const detail = document.createElement('div');
   detail.setAttribute('data-pkc-region', 'detail');
   const append = document.createElement('div');
   append.setAttribute('data-pkc-region', 'append');
   append.hidden = true;
-  center.append(paneBar, replaceBar, detail, append);
+  center.append(replaceBar, detail, append);
 
   // ── 右(付随情報)────────────────────────────────
   const inspector = document.createElement('aside');
@@ -413,7 +433,21 @@ export function buildShell(root: HTMLElement): ShellRegions {
   announce.setAttribute('data-pkc-region', 'announce');
   announce.hidden = true;
 
-  shell.append(sidebar, center, inspector, announce, update, notices, status);
+  /**
+   * ⚠ **並びは画面の左から右**(grid の area 名と揃える)── 掴む帯は
+   * 面と面の**あいだ**に置く。畳んでも残るのはここが shell の列だからである。
+   */
+  shell.append(
+    sidebar,
+    grips.sidebar!,
+    center,
+    grips.inspector!,
+    inspector,
+    announce,
+    update,
+    notices,
+    status,
+  );
   root.append(shell);
   return {
     browseHost,
