@@ -73,6 +73,11 @@ export type StorageRequest =
   | { op: 'deleteEntry'; cid: string; lid: string }
   | { op: 'listRelations'; cid: string }
   | { op: 'bulkUpsertRelations'; cid: string; relations: RelationUpsert[] }
+  /**
+   * 関係を 1 件消す(#185)。⚠ **id で消す** ── from/to/kind で消すと、
+   * 同じ組の関係が複数あるとき**どれが消えるか決まらない**。
+   */
+  | { op: 'deleteRelation'; cid: string; id: string }
   | {
       /**
        * 🔴 **居場所を張り替える 1 op**(2026-08-05。フォルダ整理)。
@@ -333,6 +338,7 @@ export interface ResultMap {
   deleteEntry: null;
   listRelations: RelationRow[];
   bulkUpsertRelations: null;
+  deleteRelation: null;
   setEntryParent: null;
   importRevisionChains: ImportRevisionsResult;
   exportRevisionChain: EncodedRevisionRow[];

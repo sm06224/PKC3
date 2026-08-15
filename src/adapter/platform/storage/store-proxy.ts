@@ -57,6 +57,7 @@ const MUTATING_OPS: ReadonlySet<StorageRequest['op']> = new Set([
   'deleteEntry',
   'setEntryParent',
   'bulkUpsertRelations',
+  'deleteRelation',
   'importRevisionChains',
   'restoreRevisionChains',
   'purgeTrash',

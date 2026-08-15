@@ -82,6 +82,13 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
       await client.request({ op: 'setEntryParent', cid, lid, parentLid, relationId });
     },
     listRelations: () => client.request({ op: 'listRelations', cid }),
+    // 🔴 #185: 1 件の作成・書き換えは既存の bulk を 1 件で使う(op を 2 つにしない)
+    upsertRelation: async (rel) => {
+      await client.request({ op: 'bulkUpsertRelations', cid, relations: [rel] });
+    },
+    deleteRelation: async (id) => {
+      await client.request({ op: 'deleteRelation', cid, id });
+    },
     listRevisionMetas: (entryLid) =>
       client.request({ op: 'listRevisionMetas', cid, entryLid }),
     getRevision: (revId) => client.request({ op: 'getRevision', cid, id: revId }),

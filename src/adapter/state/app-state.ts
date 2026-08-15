@@ -15,7 +15,7 @@ import { withTodoStatus } from '@features/flavor/todo-flavor';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import type { LauncherTile } from '@features/launcher/tiles';
 import { visibleOrder } from '@features/filter/title-filter';
-import { STRUCTURAL } from '@features/relation/kinds';
+import { STRUCTURAL, type RelationKind } from '@features/relation/kinds';
 import { replaceAll } from '@features/markdown/body-replace';
 import {
   EMPTY_HISTORY,
@@ -268,6 +268,14 @@ export type UserAction =
   | { type: 'NAV_HISTORY'; dir: 'back' | 'forward' }
   /** 本文の置換(#191)。⚠ 素の文字列で当てる(正規表現にしない)。 */
   | { type: 'REPLACE_IN_BODY'; find: string; replace: string; caseSensitive?: boolean }
+  /**
+   * 🔴 **関係を作る**(#185)。⚠ **居場所(structural)はここから作らせない** ──
+   * あちらはファイラの移動が作るので、作り方が 2 つになる(§7)。
+   * ⚠ id は呼び側が採る(reducer は純関数 ── 乱数を持たない)。
+   */
+  | { type: 'ADD_RELATION'; id: string; fromLid: string; toLid: string; kind: RelationKind }
+  /** 関係を消す(#185)。⚠ **id で消す**(同じ組が複数あっても迷わない)。 */
+  | { type: 'REMOVE_RELATION'; id: string }
   | { type: 'LAUNCHER_TILES_LOADED'; tiles: LauncherTile[] }
   /**
    * アプリの一覧を読み直す(P8 段⑱)。
@@ -519,6 +527,9 @@ export type DomainEvent =
       type: 'REQUEST_REORDER';
       entries: Array<{ lid: string; title: string; archetype: string; entryOrder: number }>;
     }
+  /** 関係の永続化(#185)。⚠ 1 件ずつ ── 作る操作も消す操作も 1 度に 1 つである。 */
+  | { type: 'REQUEST_RELATION_UPSERT'; id: string; fromLid: string; toLid: string; kind: string }
+  | { type: 'REQUEST_RELATION_DELETE'; id: string }
   | { type: 'REQUEST_REVISION_LIST'; lid: string }
   | {
       /** 履歴からの復元(前進変異): effect が「現状を addRevision → revision
@@ -1509,6 +1520,51 @@ function reduceCore(
       return {
         state: { ...state, entryMetas, order },
         events: [{ type: 'REQUEST_REORDER', entries: rows }],
+      };
+    }
+    /**
+     * 🔴 **関係を作る**(#185)。
+     * ⚠ 自分自身へは張らない / 同じ組・同じ種類は 2 本作らない(押すたびに増えない)。
+     * ⚠ 居場所は弾く ── 型でも弾いているが、**実行時にも**弾く
+     *   (dispatch は型を通らない経路からも来る)。
+     */
+    case 'ADD_RELATION': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      if (action.kind === STRUCTURAL) return { state, events: [] };
+      const { fromLid, toLid, kind } = action;
+      if (fromLid === toLid) return { state, events: [] };
+      if (!state.entryMetas.has(fromLid) || !state.entryMetas.has(toLid))
+        return { state, events: [] };
+      const dup = state.relations.some(
+        (r) => r.fromLid === fromLid && r.toLid === toLid && r.kind === kind,
+      );
+      if (dup) return { state, events: [] };
+      return {
+        state: {
+          ...state,
+          /**
+           * ⚠ 時刻は **null** で置く ── **disk が正**(worker が `datetime('now')` を
+           * 入れる)。ここで `new Date()` を呼ぶと reducer が純関数でなくなり、
+           * しかも**画面と disk で違う値**を持つことになる。
+           */
+          relations: [
+            ...state.relations,
+            { id: action.id, fromLid, toLid, kind, createdAt: null, updatedAt: null },
+          ],
+        },
+        events: [{ type: 'REQUEST_RELATION_UPSERT', id: action.id, fromLid, toLid, kind }],
+      };
+    }
+    /** 関係を消す。⚠ 居ない id でも**黙って成功**(冪等 ── 2 回押しても壊れない)。 */
+    case 'REMOVE_RELATION': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      const target = state.relations.find((r) => r.id === action.id);
+      if (!target) return { state, events: [] };
+      // ⚠ 居場所はここから消させない ── 消すとファイラの階層が壊れ、戻す導線が無い
+      if (target.kind === STRUCTURAL) return { state, events: [] };
+      return {
+        state: { ...state, relations: state.relations.filter((r) => r.id !== action.id) },
+        events: [{ type: 'REQUEST_RELATION_DELETE', id: action.id }],
       };
     }
     case 'SHOW_HISTORY': {

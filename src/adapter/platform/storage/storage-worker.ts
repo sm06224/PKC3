@@ -795,6 +795,18 @@ const handlers: Handlers = {
          FROM relations WHERE cid = ? ORDER BY id`,
       [req.cid],
     ) as unknown as ResultMap['listRelations'],
+  /**
+   * 🔴 **関係を 1 件消す**(#185)。⚠ 作れて消せない導線は dead click の一種なので、
+   * UI より先にここを開ける。
+   * ⚠ 居ない id を消しても**成功**にする(冪等 ── 2 回押しても壊れない)。
+   */
+  deleteRelation: (req) => {
+    need().exec({
+      sql: 'DELETE FROM relations WHERE cid = ? AND id = ?',
+      bind: [req.cid, req.id],
+    });
+    return null;
+  },
   bulkUpsertRelations: (req) => {
     const database = need();
     database.exec('BEGIN IMMEDIATE');

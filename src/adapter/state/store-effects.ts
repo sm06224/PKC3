@@ -65,6 +65,18 @@ export interface StorePort {
    */
   setEntryParent(lid: string, parentLid: string | null, relationId: string): Promise<void>;
   /**
+   * 🔴 **関係を作る・書き換える**(#185)。⚠ **省略可** ── 持たない配線
+   * (古い test の fake)では関係の追加が効かないだけで、他は動く。
+   */
+  upsertRelation?(rel: {
+    id: string;
+    fromLid: string;
+    toLid: string;
+    kind: string;
+  }): Promise<void>;
+  /** 🔴 **関係を消す**(#185)。⚠ 冪等(2 回押しても壊れない)。 */
+  deleteRelation?(id: string): Promise<void>;
+  /**
    * 🔴 **関係を読む**(2026-08-06。ゴミ箱からの復元で居場所を戻すために要る)。
    *
    * `deleteEntry` は relations を消さない(戻せなくなるので)が、**常駐の
@@ -281,6 +293,38 @@ export function connectStoreEffects(
           }
         });
         break;
+      /**
+       * 🔴 **関係を disk へ**(#185)。⚠ port が持っていない配線(古い fake)では
+       *   **黙って何もしない** ── 落とすと画面ごと止まるので、機能が減るだけにする。
+       * ⚠ 失敗したら**画面へ言う** ── 常駐 state には既に足してあるので、
+       *   黙ると「画面には在るが disk に無い」が残る。
+       */
+      case 'REQUEST_RELATION_UPSERT': {
+        const upsert = store.upsertRelation?.bind(store);
+        if (!upsert) break;
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            await upsert({ id: ev.id, fromLid: ev.fromLid, toLid: ev.toLid, kind: ev.kind });
+          } catch (e) {
+            dispatcher.dispatch({ type: 'OP_FAILED', error: `関係を保存できません: ${String(e)}` });
+          }
+        });
+        break;
+      }
+      case 'REQUEST_RELATION_DELETE': {
+        const remove = store.deleteRelation?.bind(store);
+        if (!remove) break;
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            await remove(ev.id);
+          } catch (e) {
+            dispatcher.dispatch({ type: 'OP_FAILED', error: `関係を消せません: ${String(e)}` });
+          }
+        });
+        break;
+      }
       case 'REQUEST_REORDER':
         /**
          * 🔴 **並べ替えを disk へ**(2026-08-06。user 報告 2-10)。
