@@ -206,6 +206,10 @@ nav button.p{width:auto;font-size:12px;padding:4px 10px;margin:2px 8px 0;
 .b>*{max-width:100%}
 a.f{display:inline-block;margin:8px 0;padding:6px 10px;border:1px solid #8884;border-radius:6px;
   color:inherit;text-decoration:none}
+/* 🔴 **PDF は読める大きさで出す**(2026-08-15)。⚠ object 要素は固有寸法を持たないので、
+   規則を書かないと **300×150** に落ちる(アプリ側で実際に踏んだ症状がこれ)。 */
+object.p{display:block;width:100%;height:calc(100vh - 12rem);min-height:320px;
+  border:1px solid #8884;border-radius:6px;margin:8px 0}
 #fail{display:block;margin:24px;font:15px/1.7 system-ui,sans-serif;white-space:pre-wrap}
 
 /* ── 印刷(F-1)。⚠ 画面用の grid と 100vh をほどくのが本題 ── ほどかないと
@@ -215,6 +219,13 @@ a.f{display:inline-block;margin:8px 0;padding:6px 10px;border:1px solid #8884;bo
   nav{display:none}
   main{overflow:visible;padding:0}
   main h2{font-size:1.5em}
+  /* ⚠ 画面の calc(100vh - 12rem) は紙では版面いっぱいになり、**1 個で 1 頁**を
+     食って改頁を崩す。⚠ **この file はテンプレート文字列の中なのでバックティックを
+     書けない**(書いた瞬間に閉じる ── 冒頭の注記のとおりで、実際に踏んだ)。
+     ⚠ 埋め込んだ PDF の中身が紙に出るかはブラウザ次第で、
+     **こちらでは確かめていない** ── 確かめていない以上、**版面を壊さないこと**
+     だけを保証する(高さを抑え、途中で割らない)。 */
+  object.p{height:50vh;min-height:0;break-inside:avoid}
   /* ⚠ 読み幅を紙でほどく規則(かつての .b の none)は置かない(2026-08-08)──
      器の cap が消えた今は死文で、紙もアプリの印刷と同じ 42rem/ブロックが裁定の向き。 */
   /* 折りたたみは**紙では展開する**(印刷時に details を開くのは JS 側) */
@@ -350,11 +361,24 @@ try{
     sink.push(url);return url;
   }
   // 添付は画像なら見せる、それ以外は保存できる導線にする(開けないより落とせる方がよい)
+  // 🔴 **PDF もその場で見せる**(2026-08-15)。⚠ 直す前はここが画像だけで、
+  //    アプリ側の画面と**見え方が食い違っていた**(あちらは器いっぱいで出る)。
+  //    面ごとに違う見え方にしない ── 出せる物は同じように出す。
+  //    ⚠ 出せないブラウザに空白を残さないよう、**中にダウンロードの導線**を置く。
   function view(key,alt,sink){
     var name=names[key]||alt||key;
-    if((mimes[key]||'').indexOf('image/')===0){
+    var mime=mimes[key]||'';
+    if(mime.indexOf('image/')===0){
       var im=document.createElement('img');im.src=urlFor(key,sink);im.alt=name;return im;
     }
+    if(mime==='application/pdf'){
+      var o=document.createElement('object');o.className='p';
+      o.type='application/pdf';o.data=urlFor(key,sink);
+      o.appendChild(dl(key,name,sink));return o;
+    }
+    return dl(key,name,sink);
+  }
+  function dl(key,name,sink){
     var a=document.createElement('a');a.className='f';a.href=urlFor(key,sink);
     a.download=name;a.textContent='⬇ '+name;return a;
   }

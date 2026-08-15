@@ -3,6 +3,8 @@
  * 「実際に画面に出る」+ Blob 直 put 経路の end-to-end(実 IDB + 実 sqlite meta)。
  */
 import { test, expect } from '@playwright/test';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { gotoApp, collectPageErrors, clickReal, expectImageRendered, createEntry, useSplitEditor } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
@@ -235,5 +237,58 @@ test('🔴 PDF の添付は器いっぱいに出て、別の窓でも開ける',
   expect(shown.h, '別窓の PDF が窓いっぱいでない').toBeGreaterThan(shown.innerH * 0.9);
   await popup.close();
 
+  expect(errors).toEqual([]);
+});
+
+/**
+ * 🔴 **配った単一 HTML でも PDF がその場で出る**(2026-08-15)。
+ *
+ * ⚠ **片側を直したら、対称の反対側を疑う** ── アプリの画面を器いっぱいに直したが、
+ * 書き出し側は**画像だけ inline で、PDF はダウンロードリンク**のままだった
+ * (面ごとに違う見え方にしない、が repo の原則)。
+ * ⚠ 配った HTML は **`file://` で開く**ので、アプリの CSS も blob の作り方も別経路。
+ * だから**実際に落として開いて測る**(既存の書き出し smoke と同じ型)。
+ */
+test('🔴 配った HTML でも PDF が読める大きさで出る', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await gotoApp(page);
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: '見積.pdf',
+    mimeType: 'application/pdf',
+    buffer: PDF_MIN,
+  });
+  await expect(page.locator('[data-pkc-field="attachment-media"]')).toHaveAttribute(
+    'type',
+    'application/pdf',
+  );
+
+  const dl = page.waitForEvent('download');
+  await clickReal(page, '[data-pkc-action="export-html"]');
+  const file = join(tmpdir(), `pkc3-pdf-${process.pid}.html`);
+  await (await dl).saveAs(file);
+
+  const viewer = await page.context().newPage();
+  await viewer.goto(`file://${file}`);
+  await expect(viewer.locator('#body')).toBeVisible();
+  const m = await viewer.evaluate(() => {
+    const o = document.querySelector('object[type="application/pdf"]');
+    if (!o) return null;
+    const r = o.getBoundingClientRect();
+    return {
+      w: Math.round(r.width),
+      h: Math.round(r.height),
+      data: (o.getAttribute('data') ?? '').slice(0, 5),
+      // 出せないブラウザ向けの導線が**中に**在る(空白を残さない)
+      fallback: o.querySelector('a[download]') !== null,
+      innerW: window.innerWidth,
+    };
+  });
+  expect(m, '配った HTML に PDF の埋め込みが無い(ダウンロードリンクのまま)').not.toBeNull();
+  expect(m!.data, 'blob: で渡していない').toBe('blob:');
+  expect(m!.h, `配った HTML の PDF が ${m!.h}px しかない`).toBeGreaterThan(400);
+  expect(m!.w, '幅を使い切っていない').toBeGreaterThan(m!.innerW * 0.5);
+  expect(m!.fallback, '出せないときの導線が中に無い').toBe(true);
+  await viewer.close();
   expect(errors).toEqual([]);
 });
