@@ -78,6 +78,7 @@ function harness(over: Partial<SaveBackDeps> = {}): {
   deps: SaveBackDeps;
   created: string[];
   replaced: string[];
+  adopted: string[];
   notices: string[];
   fails: string[];
   sb: ReturnType<typeof createOfficeSaveBack>;
@@ -85,6 +86,7 @@ function harness(over: Partial<SaveBackDeps> = {}): {
   const stage = fakeStage();
   const created: string[] = [];
   const replaced: string[] = [];
+  const adopted: string[] = [];
   const notices: string[] = [];
   const fails: string[] = [];
   const deps: SaveBackDeps = {
@@ -100,11 +102,15 @@ function harness(over: Partial<SaveBackDeps> = {}): {
       replaced.push(lid);
       return true;
     },
+    adopt: (key, lid) => adopted.push(`${key}=${lid}`),
     notify: (m) => notices.push(m),
     fail: (m) => fails.push(m),
     ...over,
   };
-  return { stage, deps, created, replaced, notices, fails, sb: createOfficeSaveBack(deps) };
+  return {
+    stage, deps, created, replaced, adopted, notices, fails,
+    sb: createOfficeSaveBack(deps),
+  };
 }
 
 describe('引き取り ── 新規と差し替えの分かれ道', () => {
@@ -133,6 +139,53 @@ describe('引き取り ── 新規と差し替えの分かれ道', () => {
     expect(await h.sb.receive('o1')).toBe('created');
     expect(h.replaced).toEqual([]);
     expect(h.created).toHaveLength(1);
+  });
+});
+
+/**
+ * 🔴 **2 回目の保存でノートを増やさない**(#217。cowork 実機 2026-08-16 で 1/1 再現)。
+ *
+ * ⚠ 窓が持っている合言葉は「PKC から渡した添付」の分だけなので、**窓の中で新規に
+ * 作った文書**は 1 回目が合言葉なしで届く ── そこで**作ったノートを窓へ返さないと**、
+ * 2 回目も合言葉なしのまま来て**また新しいノートになる**。
+ *
+ * 🔑 観測点は「返したか」ではなく **`(鍵, lid)` の対で返したか**である ──
+ * 鍵が違うと窓は自分のどの保存の話か分からず、対応表を書き換えられない。
+ */
+describe('🔴 作ったノートを窓へ返す(2 回目の保存が増えない)', () => {
+  it('新規に作ったら、鍵と lid を対で返す', async () => {
+    const h = harness();
+    h.stage.put({ key: 'o1', name: '無題 1.odt' });
+    expect(await h.sb.receive('o1')).toBe('created');
+    expect(h.adopted, '作ったノートを窓へ返していない ── 次の保存でノートが増える')
+      .toEqual(['o1=new-lid']);
+  });
+
+  it('差し替えたときは返さない(窓の合言葉は既に正しい)', async () => {
+    const h = harness();
+    h.stage.put({ key: 'o1', token: 'lid-7' });
+    expect(await h.sb.receive('o1')).toBe('replaced');
+    expect(h.adopted).toEqual([]);
+  });
+
+  it('🔴 取り込めていないのに返さない(保留 / 失敗)', async () => {
+    const busy = harness({ canWrite: () => false });
+    busy.stage.put({ key: 'o1' });
+    expect(await busy.sb.receive('o1')).toBe('deferred');
+    expect(busy.adopted, '保留したのにノートを名乗った').toEqual([]);
+
+    const stuck = harness({ createNote: async () => null });
+    stuck.stage.put({ key: 'o2' });
+    expect(await stuck.sb.receive('o2')).toBe('deferred');
+    expect(stuck.adopted).toEqual([]);
+  });
+
+  it('🔴 合言葉のノートが消えて新規へ倒れたときも返す(倒れ先を窓へ教える)', async () => {
+    const h = harness({ readAttachment: async () => null });
+    h.stage.put({ key: 'o1', token: 'lid-gone' });
+    expect(await h.sb.receive('o1')).toBe('created');
+    expect(h.adopted, '倒れ先を教えないと、以後ずっと新規になり続ける')
+      .toEqual(['o1=new-lid']);
   });
 });
 

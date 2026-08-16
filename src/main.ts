@@ -736,6 +736,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       });
       return ok;
     },
+    // 🔴 **作ったノートを窓へ教える**(#217)── 教えないと 2 回目の保存で
+    //    ノートが増える。判断は `office-save-back.ts`、ここは運ぶだけ
+    adopt: (key, lid) => { officeWindow.adoptSave(key, lid); },
     notify: showStatus,
     fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
   });

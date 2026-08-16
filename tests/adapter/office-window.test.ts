@@ -324,6 +324,27 @@ describe('OfficeWindow', () => {
     expect(h.ch.sent.filter((x) => x.type === 'document').length, 'まだ要求されていない').toBe(0);
   });
 
+  /**
+   * 🔴 **作ったノートを窓へ返す**(#217)。⚠ 返さないと、窓の中で新規に作った文書は
+   * 2 回目の保存でも合言葉が無く、**ノートが増え続ける**(cowork 実機 1/1 再現)。
+   * 🔑 指すのは **path ではなく棚の鍵** ── path だと別の窓が同じ名前の文書を
+   * 開いているとき取り違える(放送は全窓に届く)。
+   */
+  it('🔴 adoptSave は「鍵 → 合言葉」を放送する', () => {
+    const h = harness();
+    h.ow.adoptSave('sv-1', 'lid-42');
+    expect(h.ch.sent).toEqual([
+      { type: 'adopted', payload: { key: 'sv-1', token: 'lid-42' } },
+    ]);
+  });
+
+  it('🔴 片方でも空なら放送しない(空の合言葉で対応表を壊さない)', () => {
+    const h = harness();
+    h.ow.adoptSave('', 'lid-42');
+    h.ow.adoptSave('sv-1', '');
+    expect(h.ch.sent).toEqual([]);
+  });
+
   it('requestClose は頼むだけ(握っていないので強制しない)', () => {
     const h = harness();
     h.ow.requestClose();

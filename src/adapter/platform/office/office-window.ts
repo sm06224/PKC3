@@ -215,6 +215,25 @@ export class OfficeWindow {
     if (this.askedForDoc) this.sendDocument();
   }
 
+  /**
+   * 🔴 **「この保存はこのノートになった」と窓へ返す**(#217)。
+   *
+   * ⚠ これが無いと、**同じ文書を 2 回保存するとノートが 2 件できる** ──
+   * 窓が知っている合言葉は「PKC から渡した添付」の分だけで、
+   * **窓の中で新規に作った文書**(Start Center → 別名で保存)には最初から無い。
+   * 1 回目で作ったノートを窓へ教えないと、2 回目も「合言葉の無い保存」として
+   * また新規のノートになる(cowork 実機 2026-08-16 で 1/1 再現)。
+   *
+   * 🔑 **path ではなく棚の鍵で指す。** 窓は `handOff` した鍵 → path を覚えているので、
+   * 鍵で返せば**どの保存の話か**が一意に決まる ── ⚠ path で返すと、
+   * 別の窓が同じ名前の文書を開いているとき**取り違える**(`/work/報告.odt` は
+   * 窓ごとに別の MEMFS に在り、放送は全窓に届く)。
+   */
+  adoptSave(key: string, token: string): void {
+    if (key === '' || token === '') return;
+    this.ch.postMessage({ pkc3Office: 'adopted', payload: { key, token } });
+  }
+
   /** 閉じてくれと頼む。⚠ 握っていないので、こちらから強制はできない。 */
   requestClose(): void {
     this.ch.postMessage({ pkc3Office: 'close-request', payload: {} });

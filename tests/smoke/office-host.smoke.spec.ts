@@ -1140,3 +1140,156 @@ test('🔴 Office の保存が、棚に置かれて鍵が放送される(新規 
     'LO の temp を保存として拾っている',
   ).not.toContain('lu42.tmp');
 });
+
+/**
+ * 🔴 **2 回目の保存が同じノートを指す**(#217。cowork 実機 2026-08-16 で 1/1 再現)。
+ *
+ * ⚠ 上の test は「**PKC が渡した添付**の保存に合言葉が付く」ところまでしか見ていない。
+ * ところが窓の中で**新規に作った文書**(Start Center → 別名で保存)は合言葉を持たないので、
+ * 本体がノートを作った後に**窓へ返さないと 2 回目もまた新規のノートになる** ──
+ * user から見ると「保存するたびにノートが増える」。
+ *
+ * 🔑 観測点は棚の meta の `token` である ── **1 回目は空、2 回目は本体が返した lid**。
+ * ⚠ 「`adopted` を送った」だけを見る test にはしない(窓が受けていなくても通る)。
+ */
+test('🔴 取り込んだ側が返した合言葉を窓が覚え、2 回目の保存は同じノートを指す(#217)', async ({
+  page,
+}) => {
+  await page.goto('/office/host.html');
+  await seedFakePack(page);
+  await page.evaluate(async () => {
+    const root = await navigator.storage.getDirectory();
+    await root.removeEntry('pkc3-office-stage', { recursive: true }).catch(() => {});
+  });
+  // ⚠ **文書を渡さずに**開く = 窓の中で新規に作る場合と同じ(合言葉が無い状態)
+  await page.goto('/office/host.html');
+  await expect(page.locator('#status')).toContainText('表示中', { timeout: 15_000 });
+
+  const got = await page.evaluate(async () => {
+    const w = window as unknown as {
+      __lo: {
+        FS: {
+          writeFile(p: string, d: string): void;
+          open(p: string): unknown;
+          close(s: unknown): void;
+          mkdirTree(p: string): void;
+        };
+      };
+    };
+    const seen: Array<{ key: string; name: string }> = [];
+    const ch = new BroadcastChannel('pkc3-office');
+    ch.onmessage = (ev: MessageEvent): void => {
+      const d = ev.data as { pkc3Office?: string; payload?: { key: string; name: string } };
+      if (d?.pkc3Office === 'saved' && d.payload) seen.push(d.payload);
+    };
+    const waitFor = async (n: number): Promise<void> => {
+      const t0 = Date.now();
+      while (seen.length < n && Date.now() - t0 < 12_000) {
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    };
+
+    w.__lo.FS.mkdirTree('/home/web_user');
+    // ── 1 回目:合言葉なしで届く(本体は新しいノートを作る)
+    w.__lo.FS.writeFile('/home/web_user/無題 1.odt', 'FIRST-SAVE');
+    w.__lo.FS.close(w.__lo.FS.open('/home/web_user/無題 1.odt'));
+    await waitFor(1);
+    const first = seen[0]?.key ?? '';
+
+    // ── 本体が「その保存はこのノートになった」と返す
+    ch.postMessage({ pkc3Office: 'adopted', payload: { key: first, token: 'lid-ADOPTED' } });
+    await new Promise((r) => setTimeout(r, 300));
+
+    // ── 2 回目:**同じ path** をもう一度保存する
+    w.__lo.FS.writeFile('/home/web_user/無題 1.odt', 'SECOND-SAVE!');
+    w.__lo.FS.close(w.__lo.FS.open('/home/web_user/無題 1.odt'));
+    await waitFor(2);
+    ch.close();
+
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle('pkc3-office-stage', { create: true });
+    const metas: Record<string, string> = {};
+    for await (const [name, handle] of (
+      dir as unknown as { entries(): AsyncIterable<[string, FileSystemFileHandle]> }
+    ).entries()) {
+      if (name.endsWith('.json')) metas[name] = await (await handle.getFile()).text();
+    }
+    return { seen, first, metas };
+  });
+
+  // 空振り防止 ── 2 回とも保存として拾えていないと、合言葉は検査できない
+  expect(got.seen.length, '保存が 2 回拾えていない ── この test は合言葉を検査できていない')
+    .toBe(2);
+  expect(got.first, '1 回目の鍵が空').not.toBe('');
+
+  const tokenOf = (key: string): string => {
+    const text = got.metas[`${key}.json`];
+    expect(text, `棚に ${key} の meta が無い`).toBeDefined();
+    return (JSON.parse(text!) as { token?: string }).token ?? '';
+  };
+  expect(tokenOf(got.first), '1 回目は合言葉なしのはず(まだノートが無い)').toBe('');
+  expect(
+    tokenOf(got.seen[1]!.key),
+    '2 回目に合言葉が付いていない ── 保存のたびにノートが増える',
+  ).toBe('lid-ADOPTED');
+});
+
+/**
+ * 🔴 **他人の鍵で対応表を書き換えない**(#217)。⚠ 放送は**全窓に届く**ので、
+ * 別の窓の保存に対する返事を自分の対応表へ入れると、**関係のないノートへ上書き**する。
+ */
+test('🔴 自分が渡していない鍵の返事は無視する(#217)', async ({ page }) => {
+  await page.goto('/office/host.html');
+  await seedFakePack(page);
+  await page.evaluate(async () => {
+    const root = await navigator.storage.getDirectory();
+    await root.removeEntry('pkc3-office-stage', { recursive: true }).catch(() => {});
+  });
+  await page.goto('/office/host.html');
+  await expect(page.locator('#status')).toContainText('表示中', { timeout: 15_000 });
+
+  const got = await page.evaluate(async () => {
+    const w = window as unknown as {
+      __lo: { FS: {
+        writeFile(p: string, d: string): void; open(p: string): unknown;
+        close(s: unknown): void; mkdirTree(p: string): void;
+      } };
+    };
+    const seen: Array<{ key: string }> = [];
+    const ch = new BroadcastChannel('pkc3-office');
+    ch.onmessage = (ev: MessageEvent): void => {
+      const d = ev.data as { pkc3Office?: string; payload?: { key: string } };
+      if (d?.pkc3Office === 'saved' && d.payload) seen.push(d.payload);
+    };
+    // ⚠ **保存より先に**、身に覚えのない鍵で返事が来る
+    ch.postMessage({ pkc3Office: 'adopted', payload: { key: 'sv-OTHER', token: 'lid-OTHER' } });
+    await new Promise((r) => setTimeout(r, 300));
+
+    w.__lo.FS.mkdirTree('/home/web_user');
+    w.__lo.FS.writeFile('/home/web_user/無題 2.odt', 'ONLY-SAVE');
+    w.__lo.FS.close(w.__lo.FS.open('/home/web_user/無題 2.odt'));
+    const t0 = Date.now();
+    while (seen.length < 1 && Date.now() - t0 < 12_000) {
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    ch.close();
+
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle('pkc3-office-stage', { create: true });
+    const metas: Record<string, string> = {};
+    for await (const [name, handle] of (
+      dir as unknown as { entries(): AsyncIterable<[string, FileSystemFileHandle]> }
+    ).entries()) {
+      if (name.endsWith('.json')) metas[name] = await (await handle.getFile()).text();
+    }
+    return { seen, metas };
+  });
+
+  expect(got.seen.length, '保存が拾えていない ── 空振り').toBe(1);
+  const text = got.metas[`${got.seen[0]!.key}.json`];
+  expect(text).toBeDefined();
+  expect(
+    (JSON.parse(text!) as { token?: string }).token ?? '',
+    '他の窓あての返事で合言葉が付いた ── 無関係なノートを上書きする',
+  ).toBe('');
+});

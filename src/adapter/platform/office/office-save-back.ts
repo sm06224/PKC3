@@ -62,6 +62,15 @@ export interface SaveBackDeps {
     save: StagedSave,
     bytes: Uint8Array<ArrayBuffer>,
   ) => Promise<boolean>;
+  /**
+   * 🔴 **「この保存はこのノートになった」と窓へ返す**(#217)。
+   *
+   * ⚠ 返さないと、**同じ文書を 2 回保存するとノートが 2 件できる**(cowork 実機
+   * 2026-08-16 で 1/1 再現)── 窓が持っている合言葉は「PKC から渡した添付」の
+   * 分だけなので、**窓の中で新規に作った文書**は 2 回目も合言葉が無いままになる。
+   * 🔑 これは**新規に作ったときだけ**呼ぶ(差し替えは合言葉が既に正しい)。
+   */
+  readonly adopt: (key: string, lid: string) => void;
   /** user への一言(「取り込みました」)。 */
   readonly notify: (message: string) => void;
   /** 異常の報告(取り込めなかった)。 */
@@ -121,6 +130,9 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
       deferred = true;
       return 'deferred';
     }
+    // 🔴 **棚を消す前に窓へ返す**(#217)。⚠ 返し忘れると次の保存がまた新規になる。
+    //    ⚠ 窓が既に閉じていても放送は投げるだけ ── 誰も聞かなくても害は無い
+    deps.adopt(save.key, lid);
     await discardStaged(dir, save.key);
     deps.notify(`Office の保存を取り込みました: ${save.name}`);
     return 'created';

@@ -125,6 +125,13 @@
       try { window.focus(); } catch (e) { /* 無視される */ }
       return;
     }
+    if (d.pkc3Office === 'adopted') {
+      // 🔴 **「その保存はこのノートになった」**(#217)。⚠ 受けないと、
+      //    窓の中で新規に作った文書は 2 回目の保存でも合言葉が無く、
+      //    **ノートが増え続ける**(cowork 実機 2026-08-16 で 1/1 再現)
+      if (adoptSaved) adoptSaved(d.payload || {});
+      return;
+    }
     if (d.pkc3Office === 'reload-request') {
       var q = d.payload && d.payload.name
         ? '?name=' + encodeURIComponent(d.payload.name) + '&await-doc=1' : '?await-doc=1';
@@ -255,9 +262,11 @@
   //    全走査は `/` で 20〜27ms 掛かり、LO と同じスレッドに乗るので採らない。
   var saveTimer = null;
   var flushSaves = null;
+  var adoptSaved = null;
   function stopSaveWatch() {
     if (saveTimer) { clearInterval(saveTimer); saveTimer = null; }
     flushSaves = null;
+    adoptSaved = null;
   }
 
   function armSaveWatch(FS, token) {
@@ -310,6 +319,29 @@
     var dirPromise = S.openStageDir();
     var busy = false;
 
+    /**
+     * 🔴 **path → 合言葉**(#217)。⚠ 単一の合言葉ではなく**表**である。
+     *
+     * 最初に入っているのは「PKC から渡した添付」の 1 件だけ。窓の中で新規に
+     * 作った文書は合言葉を持たないので 1 回目は新規のノートになり、本体が
+     * `adopted` で返してきた時点でここに載る ── **2 回目からは差し替え**になる。
+     */
+    var pathTokens = Object.create(null);
+    if (window.__loDocPath && token) pathTokens[window.__loDocPath] = token;
+    /** 棚へ渡した鍵 → その時の path。⚠ `adopted` を**鍵で**受けるために要る。 */
+    var keyPaths = Object.create(null);
+
+    adoptSaved = function (p) {
+      var k = String((p && p.key) || '');
+      var t = String((p && p.token) || '');
+      // ⚠ **自分が渡した鍵でなければ無視する** ── 放送は全窓に届くので、
+      //    別窓の保存に対する返事で自分の対応表を書き換えてはいけない
+      var path = k ? keyPaths[k] : '';
+      if (!path || !t) return;
+      pathTokens[path] = t;
+      delete keyPaths[k];
+    };
+
     async function handOff(dir, hit) {
       var stream = FS.open(hit.path, 'r');
       try {
@@ -324,16 +356,19 @@
           meta: {
             name: hit.name,
             path: hit.path,
-            // 🔴 **合言葉が付くのは「開いた当の文書」だけ**(2026-08-16、着地前
-            //    レビュー R2)。⚠ 窓ごとに 1 個の合言葉を**全部の保存に**載せていたので、
-            //    「添付を開いた窓の中で File > 新規作成 → 別名で保存」すると、
-            //    **開いていたノートの実体がその新しい文書に差し替わって**いた。
-            //    🔑 合言葉が無い保存は新規の添付ノートになる ── それが正しい。
-            token: hit.path === window.__loDocPath ? token : '',
+            // 🔴 **合言葉は path ごとに引く**(2026-08-16、着地前レビュー R2 →
+            //    #217 で表になった)。⚠ 窓ごとに 1 個の合言葉を**全部の保存に**
+            //    載せていたので、「添付を開いた窓の中で File > 新規作成 → 別名で
+            //    保存」すると**開いていたノートの実体がその新しい文書に差し替わって**
+            //    いた。⚠ 逆に「開いた当の文書だけ」に狭めると、窓の中で作った文書は
+            //    **保存のたびにノートが増える** ── だから表にして、本体が
+            //    `adopted` で返してきた分をここへ足す。
+            token: pathTokens[hit.path] || '',
           },
         });
         // ⚠ **鍵だけ放送する**(bytes は棚に在る)。放送は全タブに届くので、
         //    引き取るのは writer リースを持つタブだけ
+        keyPaths[put.key] = hit.path;
         say('saved', { key: put.key, name: put.name, size: put.size });
       } finally {
         mine = true;
