@@ -1192,6 +1192,9 @@ export class DetailRenderer {
         name: meta.name,
         mime: meta.mime,
         assetKey: meta.assetKey,
+        // 🔴 **保存の戻り先**(#205)。⚠ ここを渡し忘れると、Office での上書き保存が
+        //    このノートを更新せず、**新しい添付ノートを増やす**
+        lid,
       });
       if (office) info.append(office);
     }

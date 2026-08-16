@@ -88,7 +88,15 @@ import {
 import { whenPhaseReady } from '@adapter/state/wait-for-ready';
 import { reloadSnapshot } from '@adapter/state/reload-snapshot';
 import { selectWhenPresent } from '@adapter/state/select-when-present';
-import { attachFiles } from '@adapter/ui/actions/attach';
+import {
+  attachFiles,
+  attachOne,
+  resolveMime,
+  type AttachDeps,
+} from '@adapter/ui/actions/attach';
+import { assetKeyFromHash } from '@adapter/platform/storage/asset-key';
+import { createOfficeSaveBack } from '@adapter/platform/office/office-save-back';
+import { openStageDir } from '@adapter/platform/office/office-stage';
 import { importFiles } from '@adapter/ui/actions/import-file';
 import type { ImportDeps } from '@adapter/ui/actions/import-pkc2';
 import {
@@ -622,6 +630,119 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * ⚠ **1 つを使い回す** ── 取込のたびに作ると、アイドル kill の意味が消える。
    */
   const assets = new AssetClient();
+
+  /**
+   * 添付を取り込む口(P4a)。⚠ **2 か所から使う** ── user の「添付」ボタンと、
+   * 🔴 **Office の窓からの保存**(#205)。同じ口を通さないと、片方だけ
+   * `hashBlob` を渡し忘れて**メインでハッシュが回る**(実測 500/726ms)。
+   */
+  const attachDeps: AttachDeps = {
+    putBlob: (key, blob) => blobs.put(DEFAULT_CID, key, blob),
+    putMeta: async (m) => {
+      await client.request({
+        op: 'putAssetMeta',
+        cid: DEFAULT_CID,
+        meta: { key: m.key, mime: m.mime, size: m.size, hash: m.hash },
+      });
+    },
+    listMetas: () => client.request({ op: 'listAssetMetas', cid: DEFAULT_CID }),
+    estimate: navigator.storage?.estimate ? () => navigator.storage.estimate() : undefined,
+    // 🔴 ハッシュは**ワーカーで**取る(P8 段㉓)。渡さないと
+    //    `blob.arrayBuffer()` が最大 64MB をメインの heap に載せる
+    //    ── 実測 32MB でメインが 241ms 止まっていた
+    hashBlob: async (blob) => (await assets.hash(blob)).hash,
+  };
+
+  /**
+   * 🔴 **Office の窓で保存されたものを引き取る**(#205)。⚠ ここは**道具を渡すだけ** ──
+   * 判断(holder か / 編集中か / 新規か差し替えか)は `office-save-back.ts` が持つ。
+   */
+  const officeSaveBack = createOfficeSaveBack({
+    stage: () => openStageDir(),
+    // ⚠ **呼ぶたびに読む** ── 昇格でこのタブが本体になることがある(#177)
+    isHolder: () => followerConn === null,
+    canWrite: () => dispatcher.getState().phase === 'ready',
+    readAttachment: async (lid) => {
+      const meta = dispatcher.getState().entryMetas.get(lid);
+      if (meta?.archetype !== 'attachment') return null;
+      const body = (await client.request({ op: 'getBody', cid: DEFAULT_CID, lid })) ?? null;
+      if (body === null) return null;
+      const key = readAttachmentMeta(body).assetKey;
+      return key === null ? null : { assetKey: key };
+    },
+    createNote: async (save, bytes) => {
+      let lid: string | null = null;
+      // ⚠ **断る側の gate を使わない**(`launchQueue` と同型 ── 選び直せない)
+      await withAssetGate.queued(async () => {
+        const attached = await attachOne(dispatcher, attachDeps, {
+          name: save.name,
+          // ⚠ 窓から戻る bytes に MIME は無い ── **名前の拡張子から引く**
+          //    (`EXT_MIME` に Office 10 種を足したのはこのため)
+          type: '',
+          size: bytes.byteLength,
+          // ⚠ **Blob へ写すのはここだけ。** OPFS の `File` をそのまま IDB へ入れると、
+          //    棚を消した瞬間に中身が読めなくなる(実測 `ERR_SOURCE_DIED_IN_TRANSIT`)
+          blob: new Blob([bytes]),
+        });
+        lid = attached?.lid ?? null;
+      });
+      return lid;
+    },
+    replaceAsset: async (lid, save, bytes) => {
+      if (dispatcher.getState().phase !== 'ready') return false;
+      let ok = false;
+      await withAssetGate.queued(async () => {
+        const mime = resolveMime(save.name, '');
+        const blob = new Blob([bytes]);
+        const { key, hash } = assetKeyFromHash((await assets.hash(blob)).hash);
+        await blobs.put(DEFAULT_CID, key, blob);
+        await client.request({
+          op: 'putAssetMeta',
+          cid: DEFAULT_CID,
+          meta: { key, mime, size: bytes.byteLength, hash },
+        });
+        dispatcher.dispatch({
+          type: 'OFFICE_ASSET_SAVED',
+          lid,
+          newKey: key,
+          newHash: hash,
+          newBytes: bytes.byteLength,
+          savedAt: new Date().toISOString(),
+        });
+        // ⚠ reducer は `ready` でなければ**黙って捨てる** ── 撃てたかを
+        //    ここで確かめる(確かめないと棚から消えて文書が失われる)
+        ok = dispatcher.getState().phase === 'ready';
+      });
+      return ok;
+    },
+    notify: showStatus,
+    fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
+  });
+  officeWindow.onEvent((ev) => {
+    if (ev.type === 'saved') void officeSaveBack.receive(ev.key);
+    else if (ev.type === 'save-failed') officeSaveBack.reportWindowFailure(ev.reason);
+    else if (ev.type === 'closed') void officeSaveBack.drainAll();
+    else if (ev.type === 'degraded') {
+      // 🔴 **窓は生きて見えるが保存が効かない**(#117)。⚠ 2026-08-16 まで、この
+      //    放送は受け側の `parseEvent` に case が無く**黙って捨てられていた**
+      showStatus('Office が不安定になりました。保存が効きません ── 窓を読み込み直してください');
+    }
+  });
+  /**
+   * 🔴 **編集が終わったら、保留していた保存を撃ち直す**(#205)。
+   *
+   * ⚠ `CREATE_ENTRY` も `OFFICE_ASSET_SAVED` も reducer が `phase !== 'ready'` を
+   * **黙って捨てる** ── だから編集中に届いた保存は棚に残してある。ここで拾わないと
+   * 次の起動まで出て来ない。⚠ `retryDeferred` は**保留が無ければ即戻る**ので、
+   * 編集を終えるたびに棚を舐めることにはならない。
+   */
+  let wasReady = false;
+  dispatcher.onState((state) => {
+    const ready = state.phase === 'ready';
+    if (ready && !wasReady) void officeSaveBack.retryDeferred().catch(() => 0);
+    wasReady = ready;
+  });
+
   const importDeps: ImportDeps = {
       // ⚠ 生存 entry だけでは足りない ── ゴミ箱の lid(entries に居ないが
       // revisions を持つ)と衝突すると、その item がゴミ箱から消え、
@@ -756,31 +877,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const sameOriginAllowed = new Set<string>();
 
   const services: BinderServices = {
-    attachFiles: (files) =>
-      void withAssetGate(() =>
-        attachFiles(
-          dispatcher,
-          {
-            putBlob: (key, blob) => blobs.put(DEFAULT_CID, key, blob),
-            putMeta: async (m) => {
-              await client.request({
-                op: 'putAssetMeta',
-                cid: DEFAULT_CID,
-                meta: { key: m.key, mime: m.mime, size: m.size, hash: m.hash },
-              });
-            },
-            listMetas: () => client.request({ op: 'listAssetMetas', cid: DEFAULT_CID }),
-            estimate: navigator.storage?.estimate
-              ? () => navigator.storage.estimate()
-              : undefined,
-            // 🔴 ハッシュは**ワーカーで**取る(P8 段㉓)。渡さないと
-            //    `blob.arrayBuffer()` が最大 64MB をメインの heap に載せる
-            //    ── 実測 32MB でメインが 241ms 止まっていた
-            hashBlob: async (blob) => (await assets.hash(blob)).hash,
-          },
-          files,
-        ),
-      ),
+    attachFiles: (files) => void withAssetGate(() => attachFiles(dispatcher, attachDeps, files)),
     /**
      * 🔴 **添付を別の窓で見る**(#192 で画像、2026-08-15 に PDF)。⚠ 貸した ObjectURL は
      * `openAssetWindow` が**窓の生死に合わせて**捨てる(窓が開けなければ即捨てる)。
@@ -1329,6 +1426,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     metas,
     relations, // 常駐(§6: 肥大が数字で出たら SQL query 化へ移す)
   });
+  /**
+   * 🔴 **棚に残っている Office の保存を拾う**(#205、B5 の入口③「起動時」)。
+   *
+   * ⚠ **これが無いと取りこぼしが永久に残る** ── 窓が引き渡し途中で閉じた / 本体の
+   * タブが編集中だった、のどちらでも棚に残るが、放送はもう来ない。
+   * 🔑 だから**取りこぼしは遅延にしかならない**(#209 の B5)。⚠ 投げっぱなしにする
+   * のは、これが boot を遅らせてよい仕事ではないからである。
+   */
+  void officeSaveBack.drainAll().catch(() => 0);
   return {
     dispatcher,
     storageVfs: init.vfs,

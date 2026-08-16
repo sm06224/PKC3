@@ -1,0 +1,252 @@
+/**
+ * 🔴 **Office の保存を引き取る判断**(#205 段 B〜D)。
+ *
+ * ⚠ ここが守るのは**文書が消えないこと**である。落とし穴は 3 つとも
+ * 「**取り込めていないのに棚から消す**」という同じ形をしている:
+ *
+ * 1. 編集中は `CREATE_ENTRY` / `OFFICE_ASSET_SAVED` が reducer に**黙って捨てられる**
+ * 2. holder でないタブは sqlite に書けない(なのに放送は届く)
+ * 3. 差し替えの dispatch が撃てなかった
+ *
+ * 🔑 だから test の観測点は「放送を受けた」ではなく
+ * **「棚から消えたか」と「何を作ったか」**である。
+ */
+import { describe, expect, it, vi } from 'vitest';
+import {
+  createOfficeSaveBack,
+  type SaveBackDeps,
+} from '@adapter/platform/office/office-save-back';
+import type { StageDir, StagedSave } from '@adapter/platform/office/office-stage';
+
+interface FakeStage {
+  dir: StageDir;
+  keys(): string[];
+  put(save: Partial<StagedSave> & { key: string }, bytes?: Uint8Array): void;
+}
+
+/** 偽の棚。⚠ `.bin` の中身と `.json` の meta を**別々に**持つ(本物と同じ形)。 */
+function fakeStage(): FakeStage {
+  const files = new Map<string, { text?: string; bytes?: Uint8Array }>();
+  const dir = {
+    async getFileHandle(name: string) {
+      const f = files.get(name);
+      if (!f) throw new Error(`NotFound ${name}`);
+      return {
+        async getFile() {
+          return {
+            size: f.bytes?.length ?? 0,
+            lastModified: 0,
+            async arrayBuffer() {
+              return (f.bytes ?? new Uint8Array(0)).slice().buffer;
+            },
+            async text() {
+              return f.text ?? '';
+            },
+          };
+        },
+      };
+    },
+    async removeEntry(name: string) {
+      if (!files.delete(name)) throw new Error(`NotFound ${name}`);
+    },
+    async *values() {
+      for (const name of [...files.keys()]) yield { kind: 'file', name };
+    },
+  } as unknown as StageDir;
+  return {
+    dir,
+    keys: () => [...files.keys()],
+    put(save, bytes = new Uint8Array([1, 2, 3])) {
+      const meta = {
+        v: 1,
+        key: save.key,
+        name: save.name ?? 'x.odt',
+        path: save.path ?? '/work/x.odt',
+        size: save.size ?? bytes.length,
+        at: save.at ?? 1,
+        ...(save.token !== undefined ? { token: save.token } : {}),
+      };
+      files.set(`${save.key}.json`, { text: JSON.stringify(meta) });
+      files.set(`${save.key}.bin`, { bytes });
+    },
+  };
+}
+
+function harness(over: Partial<SaveBackDeps> = {}): {
+  stage: FakeStage;
+  deps: SaveBackDeps;
+  created: string[];
+  replaced: string[];
+  notices: string[];
+  fails: string[];
+  sb: ReturnType<typeof createOfficeSaveBack>;
+} {
+  const stage = fakeStage();
+  const created: string[] = [];
+  const replaced: string[] = [];
+  const notices: string[] = [];
+  const fails: string[] = [];
+  const deps: SaveBackDeps = {
+    stage: async () => stage.dir,
+    isHolder: () => true,
+    canWrite: () => true,
+    readAttachment: async () => ({ assetKey: 'ast-old' }),
+    createNote: async (save) => {
+      created.push(save.name);
+      return 'new-lid';
+    },
+    replaceAsset: async (lid) => {
+      replaced.push(lid);
+      return true;
+    },
+    notify: (m) => notices.push(m),
+    fail: (m) => fails.push(m),
+    ...over,
+  };
+  return { stage, deps, created, replaced, notices, fails, sb: createOfficeSaveBack(deps) };
+}
+
+describe('引き取り ── 新規と差し替えの分かれ道', () => {
+  it('🔴 合言葉が無ければ、新しい添付ノートになる', async () => {
+    const h = harness();
+    h.stage.put({ key: 'o1', name: '無題 1.odt' });
+    expect(await h.sb.receive('o1')).toBe('created');
+    expect(h.created).toEqual(['無題 1.odt']);
+    expect(h.replaced, '合言葉が無いのに差し替えた').toEqual([]);
+    expect(h.stage.keys(), '取り込んだのに棚に残っている').toEqual([]);
+    expect(h.notices[0]).toContain('無題 1.odt');
+  });
+
+  it('🔴 合言葉があれば、そのノートを差し替える', async () => {
+    const h = harness();
+    h.stage.put({ key: 'o1', token: 'lid-7' });
+    expect(await h.sb.receive('o1')).toBe('replaced');
+    expect(h.replaced).toEqual(['lid-7']);
+    expect(h.created, '差し替えるべきなのに新しいノートを作った').toEqual([]);
+    expect(h.stage.keys()).toEqual([]);
+  });
+
+  it('🔴 合言葉のノートが消えていたら、新規へ倒す(存在しない lid へ書かない)', async () => {
+    const h = harness({ readAttachment: async () => null });
+    h.stage.put({ key: 'o1', token: 'lid-gone' });
+    expect(await h.sb.receive('o1')).toBe('created');
+    expect(h.replaced).toEqual([]);
+    expect(h.created).toHaveLength(1);
+  });
+});
+
+describe('🔴 取り込めていないのに棚から消さない(文書が消える形)', () => {
+  it('編集中は保留する ── 棚に残す', async () => {
+    const h = harness({ canWrite: () => false });
+    h.stage.put({ key: 'o1' });
+    expect(await h.sb.receive('o1')).toBe('deferred');
+    expect(h.created, '編集中なのに作りに行った').toEqual([]);
+    expect(h.stage.keys().sort(), '保留したのに棚から消えた').toEqual(['o1.bin', 'o1.json']);
+    expect(h.notices, '取り込んでいないのに「取り込みました」と言った').toEqual([]);
+  });
+
+  it('作成が撃てなかったら保留する ── 棚に残す', async () => {
+    const h = harness({ createNote: async () => null });
+    h.stage.put({ key: 'o1' });
+    expect(await h.sb.receive('o1')).toBe('deferred');
+    expect(h.stage.keys().sort()).toEqual(['o1.bin', 'o1.json']);
+  });
+
+  it('差し替えが撃てなかったら保留する ── 棚に残す', async () => {
+    const h = harness({ replaceAsset: async () => false });
+    h.stage.put({ key: 'o1', token: 'lid-7' });
+    expect(await h.sb.receive('o1')).toBe('deferred');
+    expect(h.stage.keys().sort()).toEqual(['o1.bin', 'o1.json']);
+  });
+
+  it('🔴 holder でないタブは 1 バイトも触らない(放送は全タブに届く)', async () => {
+    const h = harness({ isHolder: () => false });
+    h.stage.put({ key: 'o1' });
+    expect(await h.sb.receive('o1')).toBeNull();
+    expect(h.created).toEqual([]);
+    expect(h.stage.keys().sort(), 'holder でないのに棚を消した').toEqual(['o1.bin', 'o1.json']);
+  });
+
+  it('OPFS が無い環境では何も起きない(落ちない)', async () => {
+    const h = harness({ stage: async () => null });
+    expect(await h.sb.receive('o1')).toBeNull();
+    expect(h.fails).toEqual([]);
+  });
+});
+
+describe('保留の撃ち直し', () => {
+  it('🔴 編集が終わったら、保留していたものが取り込まれる', async () => {
+    let ready = false;
+    const h = harness({ canWrite: () => ready });
+    h.stage.put({ key: 'o1' });
+    expect(await h.sb.receive('o1')).toBe('deferred');
+    ready = true;
+    expect(await h.sb.retryDeferred()).toBe(1);
+    expect(h.created).toHaveLength(1);
+    expect(h.stage.keys()).toEqual([]);
+  });
+
+  it('🔴 保留が無ければ棚を舐めない(編集を終えるたびに走らせない)', async () => {
+    const h = harness();
+    const spy = vi.spyOn(h.deps, 'stage');
+    expect(await h.sb.retryDeferred()).toBe(0);
+    expect(spy, '保留が無いのに棚を開いた').not.toHaveBeenCalled();
+  });
+
+  it('🔑 一度撃ち直したら、次は走らない(毎回舐めない)', async () => {
+    let ready = false;
+    const h = harness({ canWrite: () => ready });
+    h.stage.put({ key: 'o1' });
+    await h.sb.receive('o1');
+    ready = true;
+    await h.sb.retryDeferred();
+    const spy = vi.spyOn(h.deps, 'stage');
+    expect(await h.sb.retryDeferred()).toBe(0);
+    expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe('起動時の掃除と全件引き取り', () => {
+  it('🔴 棚に残っている全部を取り込む(放送はもう来ない)', async () => {
+    const h = harness();
+    h.stage.put({ key: 'o1', name: 'a.odt', at: 2 });
+    h.stage.put({ key: 'o2', name: 'b.odt', at: 1 });
+    expect(await h.sb.drainAll()).toBe(2);
+    // ⚠ **古い順**(先に保存したものから戻す)
+    expect(h.created).toEqual(['b.odt', 'a.odt']);
+    expect(h.stage.keys()).toEqual([]);
+  });
+
+  it('壊れているもの(大きさが meta と食い違う)は捨てるが、黙らない', async () => {
+    const h = harness();
+    h.stage.put({ key: 'o1', name: 'x.odt', size: 999 }, new Uint8Array([1]));
+    expect(await h.sb.receive('o1')).toBe('failed');
+    expect(h.created).toEqual([]);
+    expect(h.stage.keys(), '直らないものを残した').toEqual([]);
+    expect(h.fails[0], '黙って捨てた').toContain('x.odt');
+  });
+
+  it('取り込みの途中で例外が出ても、次のものへ進む', async () => {
+    let n = 0;
+    const h = harness({
+      createNote: async () => {
+        n += 1;
+        if (n === 1) throw new Error('boom');
+        return 'lid';
+      },
+    });
+    h.stage.put({ key: 'o1', name: 'a.odt', at: 1 });
+    h.stage.put({ key: 'o2', name: 'b.odt', at: 2 });
+    expect(await h.sb.drainAll()).toBe(1);
+    expect(h.fails[0]).toContain('a.odt');
+    expect(h.stage.keys().sort(), '落ちた方は棚に残す').toEqual(['o1.bin', 'o1.json']);
+  });
+});
+
+describe('窓からの失敗報告', () => {
+  it('🔴 「渡せなかった」を user へ出す(黙って落とさない)', () => {
+    const h = harness();
+    h.sb.reportWindowFailure('OPFS がありません');
+    expect(h.fails[0]).toContain('OPFS がありません');
+  });
+});

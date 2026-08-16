@@ -27,6 +27,13 @@ export interface OfficeTarget {
   readonly name: string;
   readonly mime: string;
   readonly assetKey: string;
+  /**
+   * 🔴 **どのノートの添付か**(#205)。⚠ **これを渡さないと、その窓での保存は
+   * 「新規作成」になり、元のノートは更新されない**(新しい添付ノートが 1 件増える)。
+   * ⚠ 2026-08-16 まで、開く経路は lid を**3 段で落としていた**
+   * (描画 → 属性 → binder)ので、4 面まとめて直した。
+   */
+  readonly lid?: string;
 }
 
 export type OpenOfficeResult =
@@ -76,7 +83,13 @@ export function createOfficeOpener(deps: OfficeOpenerDeps): OfficeOpener {
       void (async () => {
         const bytes = await deps.readAsset(target.assetKey).catch(() => null);
         if (bytes === null || bytes.byteLength === 0) return;
-        deps.officeWindow.provideDocument(target.name, bytes);
+        // 🔴 **合言葉(= このノートの lid)を預ける**(#205)── 保存が戻って
+        //    きたとき、**このノートを更新する**ために要る。
+        //    ⚠ 無ければ空文字 = 窓は「新規作成」として返す(新しい添付ノートになる)。
+        //    🔑 **key ではなく lid を預ける** ── 2 回目の保存の時点で key は既に
+        //    変わっている(1 回目で差し替わる)ので、key を預けると迷子になる。
+        //    どの asset を差し替えるかは、**そのノートの現在の frontmatter**が決める
+        deps.officeWindow.provideDocument(target.name, bytes, target.lid ?? '');
       })();
       return { ok: true, reused: outcome.kind === 'already-open' };
     },

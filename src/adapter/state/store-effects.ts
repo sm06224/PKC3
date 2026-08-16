@@ -12,6 +12,8 @@ import { withTodoStatus } from '@features/flavor/todo-flavor';
 import { appendBlock } from '@features/markdown/text-ops';
 import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
 import { buildTiles, withBuiltinTiles, type TileSource } from '@features/launcher/tiles';
+import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
+import { planSaveBack } from '@features/asset/asset-replace-plan';
 import type {
   GroupResult as QueryGroups,
   KeyResult as QueryKeys,
@@ -483,6 +485,111 @@ export function connectStoreEffects(
               dispatcher.dispatch({
                 type: 'OP_FAILED',
                 error: `アプリの一覧を読み直せませんでした: ${String(e)}`,
+              });
+          }
+        });
+        break;
+      case 'REQUEST_ASSET_REPLACE':
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            // 🔴 **disk から読む**(state の body は開いていないことのほうが多い)
+            const targetBody = await store.getBody(ev.targetLid);
+            if (disposed) return;
+            if (targetBody === null) {
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: 'Office の保存を書き戻せません(ノートが見つかりません)',
+              });
+              return;
+            }
+            const oldKey = readAttachmentMeta(targetBody).assetKey;
+            if (oldKey === null) {
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: 'Office の保存を書き戻せません(添付の実体が分かりません)',
+              });
+              return;
+            }
+            const oldSize = readAttachmentMeta(targetBody).size ?? 0;
+
+            // ⚠ **全ノートの本文を 1 度舐める。** 参照(`asset:`)はどのノートにも
+            //    書けるので、範囲を狭めると**書き換え漏れ**が出る(旧 key を指した
+            //    まま残り、GC が実体を消した時点で切れる)。
+            //    🔑 保存 1 回につき 1 度なので常駐の費用ではない ── ただし
+            //    件数が多い容れ物での体感は**測っていない**(未測定と明記する)
+            const bodies = new Map<string, string>();
+            let after: { entryOrder: number; lid: string } | undefined;
+            for (;;) {
+              const page = await store.listBodies(after, 1 << 20);
+              if (disposed) return;
+              for (const row of page.rows) bodies.set(row.lid, row.body);
+              if (page.done || page.next === undefined) break;
+              after = page.next;
+            }
+            // 🔴 **添付ノート自身を必ず入れる**(`planSaveBack` は入っていないと
+            //    frontmatter の差し替えを 1 件も出さない ── 黙って何も起きなくなる)
+            bodies.set(ev.targetLid, targetBody);
+
+            const plan = planSaveBack({
+              targetLid: ev.targetLid,
+              oldKey,
+              newKey: ev.newKey,
+              newHash: ev.newHash,
+              newBytes: ev.newBytes,
+              oldBytes: oldSize,
+              savedAt: ev.savedAt,
+              bodies,
+            });
+            // ⚠ 中身が同じ = 版を積まない。**異常ではない**ので黙って終える
+            //    (「取り込みました」は呼び側 `office-save-back.ts` が出す)
+            if (plan.unchanged) return;
+
+            const metas = new Map(ev.entries.map((e) => [e.lid, e]));
+            let wrote = 0;
+            for (const edit of plan.edits) {
+              const meta = metas.get(edit.lid);
+              if (!meta) continue; // 走査の間に消えた
+              // ⚠ `planSaveBack` は**変わるものしか返さない**(添付ノート本人は
+              //    frontmatter が必ず変わり、他ノートは `rewrote > 0` のときだけ
+              //    入る)── だから「変わっていないなら書かない」の門は置かない。
+              //    🔑 置いても**絶対に発火しない = 変異試験で殺せない行**になる
+              const base = edit.nextText ?? bodies.get(edit.lid) ?? '';
+              const next = edit.frontmatter
+                ? spliceFrontmatterKeys(base, edit.frontmatter)
+                : base;
+              const ext = extractMeta(meta.archetype, next);
+              const stamps = await store.persistEntry({
+                lid: edit.lid,
+                title: meta.title,
+                archetype: meta.archetype,
+                body: next,
+                entryOrder: meta.entryOrder,
+                status: ext.status,
+                date: ext.date,
+                archived: ext.archived,
+              });
+              if (disposed) return;
+              wrote += 1;
+              stamp(edit.lid, stamps);
+              // ⚠ 開いている本文なら**その場で差し替える**(次に開き直すまで
+              //    古い情報が出る、を作らない)
+              dispatcher.dispatch({ type: 'ENTRY_BODY_REFRESHED', lid: edit.lid, body: next });
+            }
+            // 🔴 **おかしなことだけ言う。** 「取り込みました」は呼び側が出す
+            //    (この層は `showStatus` を持たない ── 出せるのは `state.error` だけ)。
+            // ⚠ 書き換え漏れは**件数を出す**(黙ると切れた参照が静かに残る)
+            const bad: string[] = [];
+            if (wrote === 0) bad.push('ノートを 1 件も更新できませんでした');
+            if (plan.stale.length > 0) bad.push(`旧い参照が残りました: ${plan.stale.length} 件`);
+            if (plan.overBudget) bad.push('版の保管上限を超えています');
+            if (bad.length > 0)
+              dispatcher.dispatch({ type: 'OP_FAILED', error: `Office の保存: ${bad.join(' / ')}` });
+          } catch (e) {
+            if (!disposed)
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: `Office の保存を書き戻せませんでした: ${String(e)}`,
               });
           }
         });

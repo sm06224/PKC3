@@ -376,6 +376,30 @@ export type UserAction =
    * 抱えたままの draft で**永久に追記できなくなる**のを防ぐ最後の出口。
    * ⚠ `discardDraft` = 編集中の draft も捨てる(編集が握っているときの解放)。
    */
+  /**
+   * 🔴 **Office の窓で上書き保存された**(#205)。添付の bytes は既に put 済みで、
+   * ここから先は「ノートの frontmatter を差し替え、旧版を台帳へ積み、本文の
+   * `asset:` 参照を書き換える」だけである(純関数 `planSaveBack` が計画を立てる)。
+   *
+   * ⚠ **`ready` でなければ何も起きない**(黙って捨てる)。呼び側は
+   * `office-save-back.ts` で、**棚から消さずに後で撃ち直す** ── ここで捨てても
+   * user の文書は失われない。⚠ この対で成り立っているので、片方だけ変えない。
+   */
+  | {
+      type: 'OFFICE_ASSET_SAVED';
+      lid: string;
+      newKey: string;
+      newHash: string | null;
+      newBytes: number;
+      /** ISO 8601。⚠ **呼び側が渡す**(reducer は時計を持たない)。 */
+      savedAt: string;
+    }
+  /**
+   * 開いている本文が **disk 側で差し替わった**(#205 の書き戻し)。
+   * ⚠ `APP_TILE_SAVED` と同じ意味論だが、**あちらはタイルのロックを 1 つ減らす** ──
+   * 流用すると計数が狂って「二度と設定を変えられない」になる(P8 段⑯ の H-1)。
+   */
+  | { type: 'ENTRY_BODY_REFRESHED'; lid: string; body: string }
   | { type: 'FORCE_RELEASE_LOCK'; discardDraft: boolean }
   | { type: 'SET_CALENDAR_MONTH'; year: number; month: number }
   | { type: 'TOGGLE_SHOW_ARCHIVED' }
@@ -524,6 +548,23 @@ export type DomainEvent =
       entryOrder: number;
       /** 書き換えた後にタイルを読み直すための材料(同上)。 */
       entries: Array<{ lid: string; title: string }>;
+    }
+  /**
+   * 🔴 **添付の実体を差し替える**(#205)。計画は `planSaveBack`(純関数)が立てる。
+   *
+   * ⚠ **全ノートの素性を運ぶ。** 参照(`asset:`)は**どのノートにも書ける**ので、
+   * 書き換え先は 1 件に閉じない ── そして effect 層は実行時に state を見ない
+   * (この file 冒頭の宣言)ので、event が持って行くしかない。
+   * ⚠ 本文は運ばない(常駐していない)── effect が `listBodies` で読む。
+   */
+  | {
+      type: 'REQUEST_ASSET_REPLACE';
+      targetLid: string;
+      newKey: string;
+      newHash: string | null;
+      newBytes: number;
+      savedAt: string;
+      entries: Array<{ lid: string; title: string; archetype: string; entryOrder: number }>;
     }
   | {
       type: 'REQUEST_LAUNCHER_TILES';
@@ -941,6 +982,60 @@ function reduceCore(
         state: {
           ...released,
           openBody: { lid: action.lid, body, baseline: body, persisted: body, diskAhead: false },
+        },
+        events: [],
+      };
+    }
+    case 'OFFICE_ASSET_SAVED': {
+      // 🔴 **`ready` でなければ何もしない。** ⚠ ただし**捨ててよいのは、呼び側が
+      //    棚から消さずに撃ち直すから**である(`office-save-back.ts`)── その対を
+      //    崩すと、編集中に届いた保存が消える
+      if (state.phase !== 'ready') return { state, events: [] };
+      const meta = state.entryMetas.get(action.lid);
+      // 消された / 添付でなくなったノートへは書かない(呼び側が新規作成へ倒す)
+      if (!meta || meta.archetype !== 'attachment') return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_ASSET_REPLACE',
+            targetLid: action.lid,
+            newKey: action.newKey,
+            newHash: action.newHash,
+            newBytes: action.newBytes,
+            savedAt: action.savedAt,
+            // ⚠ **全ノート**を運ぶ ── 参照はどのノートにも書ける
+            entries: state.order.flatMap((lid) => {
+              const m = state.entryMetas.get(lid);
+              return m
+                ? [{ lid, title: m.title, archetype: m.archetype, entryOrder: m.entryOrder }]
+                : [];
+            }),
+          },
+        ],
+      };
+    }
+    case 'ENTRY_BODY_REFRESHED': {
+      const ob = state.openBody;
+      if (ob?.lid !== action.lid) return { state, events: [] };
+      // 🔴 **編集中の draft は触らない**(`APP_TILE_SAVED` と同じ ── 捨てると
+      //    無変更 commit / cancel で旧本文が disk を上書きする)
+      if (state.phase === 'editing') {
+        return {
+          state: { ...state, openBody: { ...ob, persisted: action.body, diskAhead: true } },
+          events: [],
+        };
+      }
+      return {
+        state: {
+          ...state,
+          openBody: {
+            lid: action.lid,
+            body: action.body,
+            baseline: action.body,
+            persisted: action.body,
+            diskAhead: false,
+          },
         },
         events: [],
       };

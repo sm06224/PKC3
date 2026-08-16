@@ -52,6 +52,7 @@ const DOCX = {
   name: '報告書.docx',
   mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   assetKey: 'ast-1',
+  lid: 'lid-1',
 };
 
 function avail(installed: boolean, cap: OfficeCapability = OK): OfficeAvailabilitySource {
@@ -72,11 +73,13 @@ describe('buildOfficeEntry(O3-c)', () => {
     expect(el.querySelector('[data-pkc-field="label"]')?.textContent).toBe('Office で開く');
   });
 
-  it('🔴 開くのに要る 3 つがボタンに載っている(同期で読めないと窓が開けない)', () => {
+  it('🔴 開くのに要る 4 つがボタンに載っている(同期で読めないと窓が開けない)', () => {
     const el = buildOfficeEntry(DOCX, avail(true))!;
     expect(el.getAttribute('data-pkc-asset-key')).toBe('ast-1');
     expect(el.getAttribute('data-pkc-asset-name')).toBe('報告書.docx');
     expect(el.getAttribute('data-pkc-asset-mime')).toBe(DOCX.mime);
+    // 🔴 **4 つ目**(#205)── 落とすと上書き保存が新しいノートを増やす
+    expect(el.getAttribute('data-pkc-office-lid'), '保存の戻り先が載っていない').toBe('lid-1');
   });
 
   it('🔴 未配備は「理由」であってボタンではない(押せる物を出さない)', () => {
@@ -97,13 +100,14 @@ describe('buildOfficeEntry(O3-c)', () => {
   });
 
   it('Office でない添付には何も足さない', () => {
-    expect(buildOfficeEntry({ name: 'p.png', mime: 'image/png', assetKey: 'x' }, avail(true)))
-      .toBeNull();
+    expect(
+      buildOfficeEntry({ name: 'p.png', mime: 'image/png', assetKey: 'x', lid: 'l' }, avail(true)),
+    ).toBeNull();
   });
 
   it('拡張子だけでも拾う(MIME が octet-stream に落ちる環境がある)', () => {
     const el = buildOfficeEntry(
-      { name: '見積.xlsx', mime: 'application/octet-stream', assetKey: 'k' },
+      { name: '見積.xlsx', mime: 'application/octet-stream', assetKey: 'k', lid: 'l' },
       avail(true),
     );
     expect(el?.getAttribute('data-pkc-office-state')).toBe('open');
@@ -244,7 +248,7 @@ describe('受け口(binder)', () => {
    * 🔴 **属性をそのまま実体へ渡す**。ここが欠けると押しても無言で終わる
    * (この repo が機械化してまで止めている形)。
    */
-  it('🔴 押すと、載っている 3 つがそのまま渡る', () => {
+  it('🔴 押すと、載っている 4 つがそのまま渡る', () => {
     const root = document.createElement('div');
     document.body.append(root);
     const d = new Dispatcher();
@@ -257,6 +261,7 @@ describe('受け口(binder)', () => {
       assetKey: 'ast-1',
       name: '報告書.docx',
       mime: DOCX.mime,
+      lid: 'lid-1',
     });
   });
 

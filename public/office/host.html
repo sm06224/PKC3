@@ -68,6 +68,14 @@
 <div id="msg">読み込んでいます…</div>
 <div id="warn" hidden></div>
 <div id="screen" hidden></div>
+<!--
+  🔴 **判断は素の JS へ出す**(#205 段 A)。この HTML は bundle されないので、
+  中に書いた判断は **unit が 1 件も届かない**(`host.html` を読む test は 0 件だった)。
+  外に出せば `tests/adapter/office-save-watch.test.ts` /
+  `tests/adapter/office-stage.test.ts` が実 file を読んで当てられる。
+-->
+<script src="office-save-watch.js"></script>
+<script src="office-save-stage.js"></script>
 <script>
 (function () {
   'use strict';
@@ -139,6 +147,11 @@
     if (dead) return;
     dead = true;
     if (tick) { clearInterval(tick); tick = null; }
+    // 🔴 **止める前に 1 度だけ吐き出す**(#205)。MEMFS は JS 側の木なので
+    //    abort しても残っており、**落ちる直前の保存を助けられる**。⚠ 逆に
+    //    止めないと、死んだ窓で 500ms の見張りが回り続ける
+    if (flushSaves) { try { flushSaves(); } catch (e) { /* 助けられなかった */ } }
+    stopSaveWatch();
     // 死んでいることを**見せる**(生きている版面と区別が付かないのが問題だった)
     screenEl.style.filter = 'grayscale(1) brightness(.45)';
     screenEl.style.pointerEvents = 'none';
@@ -221,6 +234,120 @@
     if (FATAL.test(text)) { died(text); return; }
     if (DEGRADED.test(text)) degrade(text);
   });
+
+  // ── 🔴 保存を捉えて PKC へ戻す(#205)─────────────────────────────────
+  //
+  // 🔴 **UNO の文書イベントは使えない**(段 0 の probe、#209)。
+  //    `XDocumentEventListener` を**登録した瞬間**に、保存のたびに窓が死ぬ
+  //    (`Aborted(Assertion failed: invalid handle: …)`。178 秒 復帰なし)。
+  //    ⚠ 装着も自作 broadcast も通る ── 壊すのは「**登録したこと**」である。
+  //    だから **FS を包む**。⚠ この結論は `tests/adapter/office-save-watch.test.ts`
+  //    が「`addDocumentEventListener` が実行行に現れない」で pin している。
+  //
+  // ⚠ **`close` と `rename` の両方**を包む(実測で形が違う):
+  //    既存 path の上書き = temp へ write → **rename** / 新規保存 = 最終 path へ
+  //    直接 write + **close**。片方だけだと**新規を落とす**か**temp を拾う**。
+  //
+  // ⚠ **hook の中で重いことをしない。** 呼び元は LO のスレッドで、ここが詰まると
+  //    版面ごと止まる ── 記録して即戻る(判断は `office-save-watch.js`)。
+  //
+  // ⚠ 500ms の見張りが見るのは**hook が積んだ数件だけ**である(FS を舐めていない)。
+  //    全走査は `/` で 20〜27ms 掛かり、LO と同じスレッドに乗るので採らない。
+  var saveTimer = null;
+  var flushSaves = null;
+  function stopSaveWatch() {
+    if (saveTimer) { clearInterval(saveTimer); saveTimer = null; }
+    flushSaves = null;
+  }
+
+  function armSaveWatch(FS, token) {
+    var W = window.PKC3OfficeSaveWatch;
+    var S = window.PKC3OfficeStage;
+    if (!W || !S) { console.warn('保存の見張りを積めません(script が読めていない)'); return; }
+    var watch = W.createSaveWatch();
+    // ⚠ **自分が閉じた分を数えない。** 数えると「保存された」と言い続ける。
+    //    🔑 印を立てるのは**同期の 1 呼び出しだけ** ── await をまたいで立てると、
+    //    その間に来た**本物の保存を握り潰す**
+    var mine = false;
+
+    var origClose = FS.close;
+    FS.close = function (stream) {
+      var r = origClose.apply(this, arguments);
+      // ⚠ `stream.path` は `FS.open` が入れた完全な path(木を遡らない)
+      try { if (!mine && stream && stream.path) watch.note('close', stream.path); }
+      catch (e) { /* 記録に失敗しても LO を止めない */ }
+      return r;
+    };
+    var origRename = FS.rename;
+    FS.rename = function (oldPath, newPath) {
+      var r = origRename.apply(this, arguments);
+      try { if (!mine) watch.note('rename', newPath); }
+      catch (e) { /* 同上 */ }
+      return r;
+    };
+
+    // 🔴 **開いただけを保存にしない。** 実測: boot 中に同じ path の close が 3 回来る
+    if (window.__loDocPath) {
+      try {
+        var st0 = FS.stat(window.__loDocPath);
+        watch.setBaseline(window.__loDocPath, st0.size, st0.mtime.getTime());
+      } catch (e) { /* 無ければ baseline は要らない */ }
+    }
+
+    // ⚠ `mtime` は **Date** である(MEMFS の `getattr` が `new Date(...)` を返す)
+    function statOf(path) {
+      var st = FS.stat(path);
+      return { size: st.size, mtimeMs: st.mtime.getTime() };
+    }
+
+    var dirPromise = S.openStageDir();
+    var busy = false;
+
+    async function handOff(dir, hit) {
+      var stream = FS.open(hit.path, 'r');
+      try {
+        // 🔴 **刻んで読む**(丸ごと複製しない ── 不可侵指示 2026-07-27
+        //    「ゼロコピー、生成とライフサイクル後の速やかな破棄」)
+        var put = await S.stageBytes({
+          dir: dir,
+          size: hit.size,
+          read: function (into, wanted, position) {
+            return FS.read(stream, into, 0, wanted, position);
+          },
+          meta: { name: hit.name, path: hit.path, token: token },
+        });
+        // ⚠ **鍵だけ放送する**(bytes は棚に在る)。放送は全タブに届くので、
+        //    引き取るのは writer リースを持つタブだけ
+        say('saved', { key: put.key, name: put.name, size: put.size });
+      } finally {
+        mine = true;
+        try { FS.close(stream); } catch (e) { /* 既に閉じている */ }
+        mine = false;
+      }
+    }
+
+    async function pump(at) {
+      if (busy) return;
+      var hits = watch.due(statOf, at);
+      if (hits.length === 0) return;
+      busy = true;
+      try {
+        var dir = await dirPromise;
+        if (!dir) throw new Error('この browser には OPFS がありません');
+        for (var i = 0; i < hits.length; i += 1) await handOff(dir, hits[i]);
+      } catch (e) {
+        // 🔴 **黙って落とさない。** user は保存したつもりでいる
+        console.warn('保存を PKC へ渡せませんでした', e);
+        say('save-failed', { reason: String((e && e.message) || e).slice(0, 200) });
+      } finally {
+        busy = false;
+      }
+    }
+
+    saveTimer = setInterval(function () { void pump(); }, 500);
+    // 🔴 停止時に**静穏を待たずに**吐き出す(`died()` から呼ぶ)
+    flushSaves = function () { void pump(Date.now() + W.QUIET_MS); };
+  }
 
   // ── Ctrl + 英字が本文に混入するのを止める(#117)────────────────────
   //
@@ -769,6 +896,12 @@
     var docName = params.get('name') || '';
     if (docName) nameEl.textContent = docName;
 
+    // 🔴 **どのノートの添付かを表す合言葉**(#205)。⚠ **親の記憶に頼らない** ──
+    //    窓は `noopener` で handle が無く、PKC のタブを読み直すと対応表が消える
+    //    (窓は別 process なので生き残る)。だから**窓に預けて返させる**。
+    //    ⚠ 空のまま保存が来たら「新規作成」として扱う(新しい添付ノートになる)。
+    var docToken = '';
+
     // 親から文書のバイト列を貰う(無ければ Start Center)。
     var docBytes = await new Promise(function (resolve) {
       if (!params.has('await-doc')) { resolve(null); return; }
@@ -780,6 +913,7 @@
         if (d && d.pkc3Office === 'document') {
           clearTimeout(timer);
           ch.onmessage = prev;
+          docToken = String((d.payload && d.payload.token) || '');
           resolve(new Uint8Array(d.payload.bytes));
           return;
         }
@@ -869,6 +1003,10 @@
         args.push(path);
         window.__loDocPath = path;
       }
+      // 🔴 **`callMain` の前に積む。** callMain は event loop に入ったまま戻らない
+      //    ことがある ── 後ろに置くと**一生積まれない**。
+      //    ⚠ 文書が無いとき(Start Center)も積む ── 新規作成の保存がここから来る
+      armSaveWatch(FS, docToken);
       // 版面が出たら確定させる。⚠ callMain は event loop に入ったまま戻らないことがある
       //
       // ⚠ **上限を置く。** 版面が出なければ `clearInterval` に到達せず、
@@ -902,7 +1040,13 @@
   }
 
   // 本体へ「閉じた」を知らせる ── 使い回し判定を本体が持てるように
-  window.addEventListener('pagehide', function () { clearInterval(beat); say('closed'); });
+  window.addEventListener('pagehide', function () {
+    clearInterval(beat);
+    // ⚠ ここで吐き出そうとしない ── 非同期は間に合わない。取りこぼしは棚に残り、
+    //    本体の起動時に拾われる(#209 の B5「入口は 3 つ」)
+    stopSaveWatch();
+    say('closed');
+  });
   main();
 })();
 </script>
