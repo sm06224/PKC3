@@ -83,66 +83,116 @@ Emscripten の FS は `stream_ops.read` が同期。PKC の bytes は **IDB(非�
 「**いまの一式には MEMFS しか無い**」「**FS は JS から触れるが read は同期**」は
 そのまま出発点になる(同じ調査を 2 度やらないため残す)。
 
-## 3. どうやって保存を捉えるか
+## 3. どうやって保存を捉えるか(#209 の方式監査で確定)
 
-LO は保存先を自分で決める(Save ダイアログは `/home/web_user`、既に path を持つ文書は
-その path へ上書き ── どちらも §1-1 / §1-2 の実測)。**外から Ctrl+S を撃たない**
-(既存 doc の裁定。撃つと LO 側のダイアログ状態と競合する)。
+⚠ **この節は 2 度書き直している。** 1 稿目「transfer で親へ渡す」→ 2 稿目「polling +
+IDB の Blob」→ 本稿。どちらも**測る前に書いた後条件**だった(CLAUDE.md §1)。
+判定の全文は **#209**。
 
-したがって **MEMFS を見張る**:
+> **検知 = UNO の文書イベント / staging = OPFS に `Uint8Array` / 放送 = 鍵だけ /
+> polling は使わない。**
 
-- 監視するのは **`/work`(PKC から渡した文書)と `/home/web_user`(新規・別名の既定)の両方**
-  ── ⚠ 片方だけでは新規作成が落ちる
-- 🔴 **hook は無い。polling しかない**(2026-08-16 実測: `FS.trackingDelegate` は**0 件**)。
-  🔑 ただし **pthread の FS syscall は `proxyToMainThread` でメインへ寄せられる**ので、
-  **主スレッドで `window.__lo.FS` を見張れば worker が書いたものも全部見える**
-- **落ち着いてから読む**(mtime と size が 1 tick 変わらないこと)── 書いている途中で読むと壊れる
-- 🔴 **読んだら IDB の outbox へ Blob で置き、放送には鍵だけ載せる**(2026-08-16 実測で確定)。
-  ⚠ **1 稿目の「transfer で親へ渡す」は誤り** ── **BroadcastChannel は transfer できない**
-  (IDL に引数が無く、渡しても**例外にならず黙ってコピーする**。`MessagePort` を載せると
-  `DataCloneError`)。⚠ そして**放送に Blob を直接載せるのも危険**:
-  128MB で受け手の heap は **+0MB**(Blob は handle が渡る)と良いのだが、
-  **窓が閉じる最中に大きい Blob を放送すると受け手が読めない** ──
-  4MB で `NotReadableError` が chromium 2/8・headless_shell 5/8。
-  ⚠ **放送は 100% 届くのに中身だけ失われる**ので、素直に作ると
-  「保存したのに消えた」になる(データ欠損の顔)。
-  🔑 outbox 方式ならこれが**構造的に消える**(bytes は放送に載らない)うえ、
-  ①親の heap を 1 バイトも通らない ②親の再読込・タブ落ちに強い(次の起動で拾える)
-  ③**読んで消すを 1 トランザクション**にすれば、2 タブで 2 回添付することが原理的に起きない
-- ⚠ **MEMFS の file は `unlink` しない** ── それは**LO が現に開いている文書の実体**である
-  (2026-07-27 の不可侵指示が言うのは**こちらが作った中間生成物**)。手放すのは
-  読んだ `Uint8Array` の参照まで
+### 3-1. 検知 ── UNO の文書イベント(`OnSaveDone` / `OnSaveAsDone`)
 
-🔑 **どのノートへ戻すかは、開いたときに覚える** ── いま `office-open.ts` は `assetKey` を
-その場で捨てているので、まずそこを覚える形に変える。⚠ 新規作成には**元のノートが無い**ので、
-その場合は**新しい添付ノートを作る**(user 裁定 2026-08-16)。
+配布 wasm に `theGlobalEventBroadcaster` / `OnSaveDone` / `OnSaveAsDone` /
+`documentEventOccured` / `addDocumentEventListener` が**実在**する(実測)。
+`uno_scripts` は窓の main thread で `eval` される(`PROXY_TO_PTHREAD = 0` の枝)。
+
+🔑 **FS を見張る案より、判定が 1 つ少ない。** LO は profile(`registrymodifications.xcu`)・
+lock file・temp を絶えず書くので、FS 側で捉えると「**どの file が user の文書か**」という
+分類器が生まれる。UNO は**意味として**「文書の保存が終わった」をくれ、`getURL()` で
+path まで来るので、**判定が 0 個**になる(CLAUDE.md §7「判定を増やさない」)。
+
+🚫 **1 秒 polling は採らない**:
+- **範囲の矛盾が原理的に解けない** ── 既存 path を持つ文書は**元の場所**へ書かれるので
+  `/home/web_user` に狭めれば漏れ、全走査は `/` で **20〜27ms**(1,937 files)
+- **定常コストが LO と同じスレッドに乗る**(`PROXY_TO_PTHREAD = 0` なので soffice の main は
+  窓の main thread)── 不可侵指示「**効くのは定常**」「操作の応答」に正面から逆行
+- 前例 0 件(上流の作法は IDBFS `autoPersist` の **ops 差し替え**、本番の前例は JupyterLite `DriveFS`)
+
+⚠ **FS hook は捨てない。本番から降ろして probe の監査にする** ── `build/office-wasm/*.mjs`
+の中だけで `FS.close` を数え、**UNO の発火数と突き合わせて取りこぼしを検出**する。
+🔑 本番に 2 つ目の判定を置かないための配置である。
+
+### 3-2. staging ── OPFS に `Uint8Array`
+
+🔴 **`Blob` を境界の向こうへ渡さない**(実測。32MiB を書いた直後に窓を閉じる):
+
+| 経路 | chrome | headless_shell |
+|---|---|---|
+| IDB **Blob**(`tx.oncomplete` 待ち) | **ERR 4/4** | **ERR 3/3** |
+| IDB **Uint8Array** | ok 4/4 | ok 3/3 |
+| OPFS(`close()` 待ち) | ok 4/4 | ok 3/3 |
+| BC で **Uint8Array** | ok 4/4 | ok 3/3 |
+| BC で **Blob** | **ERR 4/4** | — |
+
+🔑 **Blob は「後で bytes を出す」借用証書で、発行者が生きている間しか換金できない**
+(Chromium の正体は `ERR_SOURCE_DIED_IN_TRANSIT`。256,000 B 以下は IPC 同梱なので落ちない
+= **サイズで挙動が変わる**)。
+⚠ **`tx.oncomplete` は bytes 耐久化の証拠にならない**(Blob 値のとき)。
+
+⚠ **2 稿目の「BroadcastChannel は黙ってコピーするから危ない」も誤り** ──
+**その黙ったコピーこそが安全性の正体**である(送信側が生きている瞬間に済む)。
+🚫 **BC を避ける理由に「bytes が壊れる」を使わない。**
+
+**OPFS を選ぶ理由は耐久性ではなく、常駐メモリの形だけ** ── slice 単位で書けるので
+ピークが平ら(IDB は 1 個の値として渡すので structured clone でもう 1 部要る)。
+🔑 **覆る条件**: 扱う文書が十分小さいと決まる / Safari の `createWritable` が使えない
+→ **IDB + `Uint8Array` のほうが単純で同じだけ安全**(技術が 1 つ減る)。
+
+### 3-3. staging が「あった方がよい中継」ではなく必須である理由
+
+**sqlite の `assets` 行を書けるのは writer リース保持タブだけ**(SAHPool は実質単一接続。
+`writer-lease.ts`)。**LO の窓は絶対に書けない** → bytes を LO 窓が置き、meta を
+リース保持タブが確定させる、**2 相コミットの staging** である。
+⚠ **この理由を定義の隣に書く**(書かないと次に読む人が「ただの中継」と読んで消す)。
+
+### 3-4. 守る境界(乗り換えを安くする保険。全文は #209)
+
+- **B1** 「保存をどう検知したか」を **1 module に閉じ**、外へ出す型は
+  `{ path, name, bytes: Uint8Array }` **だけ**。⚠ `Module` / `FS` / UNO の型を 1 つも外へ出さない
+- **B2** 「staged bytes がどこに居るか」を 1 module に閉じ、`stage` / `drain` / `discard` だけ公開
+- **B3** 🔴 realm または寿命の境界を越える bytes は**必ず `Uint8Array`**
+- **B4** staging の存在理由(writer リース)を定義の隣に書く
+- **B5** drain は**冪等**、入口は 3 つ(鍵の放送 / 窓が閉じた / **起動時**)
+  → 取りこぼしが**遅延にしか**ならない
+- **B6** bytes は sqlite worker に通さない
+- **B7** 「user の文書か」の判定を**本番に 0 個**にする
+
+### 3-5. どのノートへ戻すか
+
+🔑 **開いたときに覚え、窓に預けて返させる** ── いま `office-open.ts` は `assetKey` を
+その場で捨てている。⚠ 窓は `noopener` で handle が無く、**PKC タブを再読込すると
+対応表が消える**(窓は別 process なので生き残る)。だから**親の記憶に依存しない**形にする。
+⚠ token 無しの保存が来たら**新規の添付ノート**として扱う(新規作成と同じ道)。
 
 ## 4. 段階(#205 にぶら下げる)
 
 | 段 | 中身 | 量 |
 |---|---|---|
-| **A** | 保存の検知(`/work` と `/home/web_user` の両方 / 落ち着き待ち / transfer / 破棄) | M |
-| **B** | 受け手の配線 + 「どのノートへ戻すか」の対応表。⚠ `degraded` の取りこぼしも同時に直す | M |
+| **0** | 🔴 **UNO の probe 1 本**(`documentEventOccured` が実際に呼ばれるか)── 実装より先 | S |
+| **A** | 検知(UNO の購読)+ staging(OPFS へ `Uint8Array`)+ 鍵の放送 | M |
+| **B** | 受け手の配線 + token → ノートの解決。⚠ `degraded` の取りこぼしも同時に直す | M |
 | **C** | 既存添付の更新(`planSaveBack` を effect へ繋ぐ ── 純関数は既存) | M |
-| **D** | 新規作成 → 新しい添付ノート(`attachFiles` を再利用) | S〜M |
+| **D** | 新規作成 → 新しい添付ノート(`attachOne` を切り出して再利用) | S〜M |
 | **E** | 版の台帳の面(純関数は既存、UI が 0 件) | L |
-| **F** | お知らせ・マニュアル・R6 の記述訂正(「端末へ書き出し」は成立しない) | S |
+| **F** | お知らせ・マニュアル・R6 の記述訂正 | S |
 
-⚠ **焼き直しは要らない**(段 0 は消えた)。
+⚠ **焼き直しは要らない**(UNO も FS も配布物に在る)。
 
 ## 5. 危ないところ
 
-1. **放送は全タブに届く** ── 素直に購読すると 2 タブで添付が 2 回作られる(#177 の follower と噛み合わせ)
-2. **`host.html` は bundle されないので unit が 1 件も届かない**。⚠ **ただし「smoke でも走らない」は
-   誤りだった**(2026-08-16 に訂正)── 偽 pack の stub FS が `mkdirTree/mkdir/writeFile/readFile`
-   **しか持っていないだけ**で、`readdir`/`stat` を足せば watcher は**そのまま走る**。
-   しかも「偽 LO が file を書く」を test 側から任意に起こせるので**決定的**である。
-   🔑 判断(落ち着き / 除外)は素の JS へ出せば **unit も届く**。
-   実 LO の probe が要るのは「**本当に LO の保存を拾えるか**」の 1 点だけ
-3. **観測点**は「放送を出した」ではなく「**添付の key が変わり、本文の `asset:` が新しい key を指した**」まで見る
-   (`planSaveBack` が誰からも呼ばれないまま 2,000+ tests が緑だった前例)
+1. **放送は全タブに届く** ── holder(writer リース保持タブ)だけが引き取る +
+   **staging の claim を 1 トランザクション**にして、二重に塞ぐ
+2. **`host.html` は bundle されないので unit が 1 件も届かない**。⚠ ただし判断を素の JS へ
+   出せば unit は届き、偽 pack の stub に `readdir`/`stat` を足せば **smoke も走る**。
+   実 LO の probe が要るのは「**本当に拾えるか**」の 1 点だけ
+3. **観測点**は「放送を出した」ではなく「**添付の key が変わり、本文の `asset:` が
+   新しい key を指した**」まで見る(`planSaveBack` が 0 呼び出しで 2,000+ tests 緑だった前例)
 4. **窓の使い回し**(`location.replace`)は**未保存を無警告で捨てる** ── 書き戻しを足すと
    「読み物を差し替えた」から「**編集を捨てた**」へ意味が変わる
+5. 🔴 **窓が drain 途中で閉じると staging に孤児が残る** ── 債務ではなく**恒久的な運用条件**。
+   起動時 sweep で吸収する(B5)
 
 ## 6. 隣の話(別 issue)
 
