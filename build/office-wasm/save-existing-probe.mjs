@@ -224,9 +224,21 @@ try {
     return [...set];
   };
 
+  /**
+   * 🔴 **題名も名前も外へ出さない**(機密資料の取り扱い 1。2 巡目レビューで判明)。
+   *
+   * ⚠ 最上位の `doc` を消しただけでは**塞がっていなかった** ── 保存の放送 payload
+   * (`{ key, name, size }`)の `name` は**文書名そのもの**であり、`__saved` に丸ごと
+   * 積んで JSON と端末へ出していた。⚠ `safeLine`(非 ASCII を捨てる)は **console
+   * にしか掛かっておらず**、しかも ASCII の名前は素通りする。
+   * 🔑 観測点として要るのは**個体の弁別**だけなので、鍵と大きさ・題名の長さで足りる。
+   */
   const snap = async (at) => ({
-    at, stat: await page.evaluate(STAT), windows: await page.evaluate(WINDOWS),
-    saved: await page.evaluate('globalThis.__saved || []'),
+    at,
+    stat: await page.evaluate(STAT),
+    windows: (await page.evaluate(WINDOWS)).map((t) => t.length),
+    saved: (await page.evaluate('globalThis.__saved || []'))
+      .map((s) => ({ key: s.key, size: s.size })),
   });
   result.steps.push(await snap('起動直後'));
 

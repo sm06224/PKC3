@@ -350,7 +350,8 @@
           //    `makeKey` は `'o' + Date.now() + '-0'` に落ち、**ミリ秒の解像度**しか
           //    無い ── `office-save-stage.js` の注記(「`randomUUID` が在れば使う」)は
           //    **呼び元が渡していなかったので嘘だった**。鍵で別窓の返事を弾く
-          //    ガード(下の `keyPaths`)は、この一意性の上に乗っている
+          //    ガード(`office-save-watch.js` の `createTokenTable`)は、
+          //    この一意性の上に乗っている
           uuid: (self.crypto && self.crypto.randomUUID)
             ? function () { return self.crypto.randomUUID(); }
             : undefined,

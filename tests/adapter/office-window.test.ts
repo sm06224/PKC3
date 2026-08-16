@@ -361,6 +361,10 @@ describe('OfficeWindow', () => {
       host,
       '本体が返す種別を窓が受けていない ── 2 回目の保存でノートが増える',
     ).toContain(`d.pkc3Office === '${OFFICE_ADOPTED}'`);
+    // ⚠ **payload の綴りも同じ穴を持つ**(2 巡目レビュー)── 種別だけ突合しても、
+    //    `key` / `token` を一貫して改名すれば **unit も smoke も緑のまま**届かなくなる
+    expect(host, '窓が payload の鍵を読んでいない').toContain('p && p.key');
+    expect(host, '窓が payload の合言葉を読んでいない').toContain('p && p.token');
   });
 
   it('🔴 放送で投げても、呼び元へ抜けない(棚が残ると 1 件増える)', () => {

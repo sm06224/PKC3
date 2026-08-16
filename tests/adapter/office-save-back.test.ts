@@ -179,7 +179,8 @@ describe('🔴 作ったノートを窓へ返す(2 回目の保存が増えな�
    *
    * ⚠ 「新規のときだけ返す」に狭めると穴が残る:編集中に同じ文書が 2 件溜まると
    * 1 件目=新規 / **2 件目=差し替え**になり、窓が覚えているのは**新しいほうの鍵**
-   * だけなので(古い鍵は `forgetOlderKeys` で落ちる)、**返事がどこにも着かない**
+   * だけとは限らず(窓が覚える鍵には上限が在る ── `KEY_MEMORY_MAX`)、
+   * **返事がどこにも着かないことがある**
    * → 次の保存でまたノートが増える。
    */
   it('🔴 束ねて差し替えになった保存は、その鍵でも返す', async () => {
@@ -252,6 +253,22 @@ describe('🔴 編集中に溜まった同じ文書の保存を、1 件のノー
     expect(h.created, '同じ文書なのにノートを 2 件作った').toEqual(['無題 1.odt']);
     expect(h.replaced, '2 件目は差し替えのはず').toEqual(['new-lid']);
     expect(h.stage.keys(), '取り込んだのに棚に残っている').toEqual([]);
+  });
+
+  /**
+   * 🔴 **合言葉が「在るが死んでいる」ときも束ねる**(2 巡目レビュー)。
+   *
+   * ⚠ `save.token` を無条件に優先すると、束ねの表を**一度も見ない** ──
+   * 開いていた添付を user が消した状態で編集中に 2 件溜まると、
+   * 1 件目=新規 / 2 件目も**新規**になり、ここでもノートが 2 件できる。
+   */
+  it('🔴 合言葉が死んでいても、この引き取りで作った先へ倒す', async () => {
+    const h = harness({ readAttachment: async (lid) => (lid === 'new-lid' ? { assetKey: 'a' } : null) });
+    h.stage.put({ key: 'o1', name: 'x.odt', path: '/work/x.odt', token: 'lid-gone' });
+    h.stage.put({ key: 'o2', name: 'x.odt', path: '/work/x.odt', token: 'lid-gone' });
+    expect(await h.sb.drainAll()).toBe(2);
+    expect(h.created, '死んだ合言葉を優先してノートを 2 件作った').toEqual(['x.odt']);
+    expect(h.replaced).toEqual(['new-lid']);
   });
 
   it('🔴 path が違えば束ねない(別々の文書)', async () => {
@@ -452,6 +469,23 @@ describe('holder の門(main.ts の配線)', () => {
     expect(code, '後条件が phase しか見ていない ── 捨てられたのに棚を空にする').toContain(
       "after.entryMetas.get(lid)?.archetype === 'attachment'",
     );
+  });
+
+  /**
+   * 🔴 **作ったノートを窓へ返す配線**(2 巡目レビュー)。
+   *
+   * ⚠ `main.ts` は**どの test からも import されない**ので、ここを原文で pin しないと
+   * 誰も見ていない。実際、引数を入れ替える変異
+   * (`officeWindow.adoptSave(lid, key)`)は **unit も smoke も typecheck も緑のまま**
+   * #217 を完全に未修正へ戻す(窓は `paths[lid]` を知らないので返事が捨てられる。
+   * 引数は両方 `string` なので型でも止まらない)。
+   * 🔑 だから**引数の順まで**含めて等値で見る ── 「名前が在る」では足りない。
+   */
+  it('🔴 作ったノートを窓へ返している(引数の順まで)', () => {
+    expect(
+      code,
+      'adopt が窓へ届いていない ── 2 回目の保存でノートが増える',
+    ).toContain('adopt: (key, lid) => { officeWindow.adoptSave(key, lid); }');
   });
 
   it('🔴 boot で取れたときと、昇格したときの**両方**で真になる', () => {

@@ -127,7 +127,8 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
    */
   function sameDoc(save: StagedSave): string | null {
     if (save.win === undefined || save.path === '') return null;
-    // ⚠ 区切りは `|` ── 窓の id は 16 進と `-` だけなので**曖昧にならない**。
+    // ⚠ 区切りは `|` ── 窓の id は 16 進 / base36 と `-` だけで `|` を含まないので、
+    //    分かち書きが**曖昧にならない**。
     //    🔑 制御文字を区切りに使わない ── `tests/repo-hygiene.test.ts` が生バイトを止める。
     //    実際この行の初稿で編集ツールが U+0000 を生バイトで書き、そこで捕まった
     return `${save.win}|${save.path}`;
@@ -162,8 +163,16 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
     // 🔴 **窓が知っていたか。** 知らなかった保存は、取り込み先を**必ず返す**
     //    ── 新規でも差し替えでも同じ(`adopt` の注記)
     const windowKnew = save.token !== undefined;
-    const token = save.token ?? (group === null ? undefined : madeHere.get(group));
-    const target = token === undefined ? null : await deps.readAttachment(token);
+    const mine = group === null ? undefined : madeHere.get(group);
+    let token = save.token ?? mine;
+    let target = token === undefined ? null : await deps.readAttachment(token);
+    // ⚠ **合言葉が「在るが死んでいる」ときも束ねへ倒す**(2 巡目レビュー)。
+    //    倒さないと、開いていた添付を user が消した状態で編集中に 2 件溜まった場合、
+    //    1 件目=新規 / 2 件目も**新規**になり、ここでもノートが 2 件できる
+    if (target === null && mine !== undefined && mine !== token) {
+      token = mine;
+      target = await deps.readAttachment(mine);
+    }
     if (token !== undefined && target !== null) {
       const ok = await deps.replaceAsset(token, save, bytes);
       if (!ok) {
