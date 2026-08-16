@@ -14,6 +14,7 @@ import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
 import { buildTiles, withBuiltinTiles, type TileSource } from '@features/launcher/tiles';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { planSaveBack } from '@features/asset/asset-replace-plan';
+import { readVersions, totalHistoryBytes } from '@features/flavor/attachment-versions';
 import type {
   GroupResult as QueryGroups,
   KeyResult as QueryKeys,
@@ -516,8 +517,18 @@ export function connectStoreEffects(
             // ⚠ **全ノートの本文を 1 度舐める。** 参照(`asset:`)はどのノートにも
             //    書けるので、範囲を狭めると**書き換え漏れ**が出る(旧 key を指した
             //    まま残り、GC が実体を消した時点で切れる)。
-            //    🔑 保存 1 回につき 1 度なので常駐の費用ではない ── ただし
-            //    件数が多い容れ物での体感は**測っていない**(未測定と明記する)
+            //    🔑 **測った**(2026-08-16、着地前レビュー R9 を受けて):
+            //      | ノート数 | 本文計 | この計画づくり |
+            //      |---|---|---|
+            //      | 100 | 0.1MB | 3.0ms |
+            //      | 1,000 | 0.9MB | 16.6ms |
+            //      | 5,000 | 4.3MB | **36.7ms** |
+            //    対照群(`oldKey === newKey` = 早期 return)は全件 0.0〜0.1ms なので、
+            //    費用は**走査そのもの**である。⚠ 手法の範囲: node の V8 で 1 サンプル、
+            //    2KB / 件・参照を持つのは 1%。**実ブラウザでは測っていない**。
+            //    🔑 保存 1 回につき 1 度で、long task の目安 50ms は下回る ── ただし
+            //    これは **user の操作起点ではない**(別窓からの到着)ので、
+            //    件数が伸びたらワーカーへ出す(そのときの分水嶺はこの表)
             const bodies = new Map<string, string>();
             let after: { entryOrder: number; lid: string } | undefined;
             for (;;) {
@@ -525,7 +536,19 @@ export function connectStoreEffects(
               if (disposed) return;
               for (const row of page.rows) bodies.set(row.lid, row.body);
               if (page.done || page.next === undefined) break;
-              after = page.next;
+              // 🔴 **前へ進んでいないなら止める**(2026-08-16、着地前レビュー R8)。
+              //    ⚠ この鎖は単一 queue なので、ここで回り続けると**以降の store
+              //    effect が 1 件も走らなくなる**(保存も永続化も止まる)── 画面は
+              //    生きているので user は気づけない。他の全走査 3 か所と同じ形
+              const next = page.next;
+              if (
+                after !== undefined &&
+                !(next.entryOrder > after.entryOrder ||
+                  (next.entryOrder === after.entryOrder && next.lid > after.lid))
+              ) {
+                throw new Error('本文の読み出しが進みません(カーソルが前進していません)');
+              }
+              after = next;
             }
             // 🔴 **添付ノート自身を必ず入れる**(`planSaveBack` は入っていないと
             //    frontmatter の差し替えを 1 件も出さない ── 黙って何も起きなくなる)
@@ -540,6 +563,16 @@ export function connectStoreEffects(
               oldBytes: oldSize,
               savedAt: ev.savedAt,
               bodies,
+              // 🔴 **他の添付が既に使っている分を数える**(2026-08-16、着地前
+              //    レビュー R5)。⚠ 渡さないと上限が**この添付の中だけ**で閉じ、
+              //    全体では超える ── 30MB × 5 世代 のノートが 10 件で 1.5GB になり、
+              //    `overBudget` も一度も立たないので誰も気づけない。
+              //    🔑 数えるが**落とさない**(無関係なノートの履歴を巻き添えにしない)
+              otherBytes: totalHistoryBytes(
+                [...bodies]
+                  .filter(([lid]) => lid !== ev.targetLid)
+                  .map(([, body]) => readVersions(body)),
+              ),
             });
             // ⚠ 中身が同じ = 版を積まない。**異常ではない**ので黙って終える
             //    (「取り込みました」は呼び側 `office-save-back.ts` が出す)

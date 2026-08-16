@@ -47,8 +47,15 @@ export interface AttachDeps {
 }
 
 
-/** file.type が空のときの拡張子 fallback(PKC2 は無くて後段の補正 hack を生んだ)。 */
-const EXT_MIME: Record<string, string> = {
+/**
+ * file.type が空のときの拡張子 fallback(PKC2 は無くて後段の補正 hack を生んだ)。
+ *
+ * 🔴 **export する**(2026-08-16、着地前レビュー R11)。⚠ 同じ「拡張子 ↔ MIME」の
+ * 対応が **3 か所**に在る(ここ / `pkc3-markdown-zip.ts` の `EXT_BY_MIME` /
+ * `office-entry.ts` の `OFFICE_MIMES` + `OFFICE_EXTS`)── 手写しの例を並べた test
+ * では**表ごと消す変異が生き延びる**ので、**母集団をここから採って全数で回す**。
+ */
+export const EXT_MIME: Record<string, string> = {
   md: 'text/markdown',
   txt: 'text/plain',
   csv: 'text/csv',
@@ -79,6 +86,12 @@ const EXT_MIME: Record<string, string> = {
   xls: 'application/vnd.ms-excel',
   ppt: 'application/vnd.ms-powerpoint',
   rtf: 'application/rtf',
+  // ⚠ 入口(`office-entry.ts` の `OFFICE_EXTS`)には**前から在った**のに、
+  //    この表と書出しの逆表に無かった ── 「開けるのに書き出すと `.bin`」だった
+  odg: 'application/vnd.oasis.opendocument.graphics',
+  fodt: 'application/vnd.oasis.opendocument.text-flat-xml',
+  fods: 'application/vnd.oasis.opendocument.spreadsheet-flat-xml',
+  fodp: 'application/vnd.oasis.opendocument.presentation-flat-xml',
 };
 
 export function resolveMime(name: string, declared: string): string {

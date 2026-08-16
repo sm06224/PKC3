@@ -12,6 +12,7 @@
  * **「棚から消えたか」と「何を作ったか」**である。
  */
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import {
   createOfficeSaveBack,
   type SaveBackDeps,
@@ -248,5 +249,59 @@ describe('窓からの失敗報告', () => {
     const h = harness();
     h.sb.reportWindowFailure('OPFS がありません');
     expect(h.fails[0]).toContain('OPFS がありません');
+  });
+});
+
+/**
+ * 🔴 **昇格したタブでも門が開く**(2026-08-16、着地前レビュー R1)。
+ *
+ * ⚠ この配線は `main.ts` に在り、あそこは**原文を読む test しか無い** ──
+ * だから弱い pin であることを自覚して使う(CLAUDE.md §2)。
+ * ⚠ 初稿は `isHolder: () => followerConn === null` と書き、コメントに
+ * 「呼ぶたびに読む」とまで書いていたのに、**`followerConn` は boot 以外で
+ * 代入されない**ので値が変わらなかった ── 昇格したタブでは Office の保存が
+ * 棚に溜まり続け、アプリを開き直すまで届かなかった。
+ *
+ * 🔑 見るのは「変数名が在る」ではなく **3 つが揃っていること**:
+ * ①門がその変数を読む ②boot で取れたら真 ③**昇格でも真になる**。
+ */
+describe('holder の門(main.ts の配線)', () => {
+  const src = readFileSync('src/main.ts', 'utf-8');
+  // 実行する行だけを見る(コメントに書いただけで通らないように)
+  const code = src
+    .split('\n')
+    .filter((l) => !/^\s*(\*|\/\/)/.test(l))
+    .join('\n');
+
+  it('🔴 門は昇格で変わる値を読んでいる', () => {
+    expect(code, 'isHolder が writerHolder を読んでいない').toContain(
+      'isHolder: () => writerHolder',
+    );
+  });
+
+  /**
+   * 🔴 **撃てたかの後条件は、reducer の門を**全部**見る**(R6 / 変異 N8)。
+   * ⚠ `OFFICE_ASSET_SAVED` の reducer は門を 2 つ持つ(`ready` か / いまも添付か)。
+   * `phase` だけ見ていると、2 つ目で黙って捨てられたときに
+   * **何も書かずに「取り込みました」と言って棚を空にする**。
+   * ⚠ 同じ commit の `attachOne` は本物の後条件(`entryMetas.has(lid)`)を
+   * 持っており、**非対称**だった。
+   */
+  it('🔴 差し替えの後条件が、archetype まで見ている', () => {
+    expect(code, '後条件が phase しか見ていない ── 捨てられたのに棚を空にする').toContain(
+      "after.entryMetas.get(lid)?.archetype === 'attachment'",
+    );
+  });
+
+  it('🔴 boot で取れたときと、昇格したときの**両方**で真になる', () => {
+    // ⚠ 片方だけだと、もう片方の経路で保存が永久に届かない
+    const assigns = code.match(/writerHolder = true;/g) ?? [];
+    expect(assigns.length, 'writerHolder を真にする場所が 2 つ無い(boot / 昇格)').toBe(2);
+    // 昇格の分岐の中に在ることまで見る(どこかに 2 個ある、では足りない)
+    const promoted = code.slice(code.indexOf('if (promotedHost) {'));
+    expect(
+      promoted.slice(0, promoted.indexOf('}')),
+      '昇格の分岐で holder になっていない',
+    ).toContain('writerHolder = true;');
   });
 });

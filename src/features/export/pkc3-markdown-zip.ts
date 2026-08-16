@@ -101,8 +101,13 @@ const EXT_BY_MIME: Readonly<Record<string, string>> = {
   'application/vnd.oasis.opendocument.spreadsheet': 'ods',
   'application/vnd.oasis.opendocument.presentation': 'odp',
   'application/rtf': 'rtf',
-  // ⚠ 古い綴り(一部のブラウザ / OS が返す)
+  // ⚠ 古い綴り(一部のブラウザ / OS が返す)。⚠ **逆向きには使わない**
+  //    (`rtf` → `application/rtf` が正 ── parity test はそちらだけを見る)
   'text/rtf': 'rtf',
+  'application/vnd.oasis.opendocument.graphics': 'odg',
+  'application/vnd.oasis.opendocument.text-flat-xml': 'fodt',
+  'application/vnd.oasis.opendocument.spreadsheet-flat-xml': 'fods',
+  'application/vnd.oasis.opendocument.presentation-flat-xml': 'fodp',
 };
 
 export function extForMime(mime: string | null): string {

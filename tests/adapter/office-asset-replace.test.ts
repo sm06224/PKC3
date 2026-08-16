@@ -51,10 +51,13 @@ function setup(bodies: Record<string, string>, metas: EntryMeta[]): {
   writes: string[];
   /** 走査(`listBodies`)からだけ隠す lid ── 頁が切れた状態を作る。 */
   hideFromScan: Set<string>;
+  /** カーソルが前へ進まない状態にする。 */
+  stick(): void;
 } {
   const store = { ...bodies };
   const writes: string[] = [];
   const hideFromScan = new Set<string>();
+  let stuckCursor = false;
   const d = new Dispatcher();
   connectStoreEffects(d, {
     ...stubRevisionOps(),
@@ -62,12 +65,20 @@ function setup(bodies: Record<string, string>, metas: EntryMeta[]): {
     getBodies: async (lids) =>
       lids.filter((l) => store[l] !== undefined).map((l) => ({ lid: l, body: store[l]! })),
     // ⚠ **全文の走査**はここを通る(差し替えは参照を全ノートで直す)
-    listBodies: async () => ({
-      rows: Object.entries(store)
-        .filter(([lid]) => !hideFromScan.has(lid))
-        .map(([lid, body]) => ({ lid, body })),
-      done: true,
-    }),
+    listBodies: async () =>
+      stuckCursor
+        ? // ⚠ **前へ進まないカーソル**(壊れた worker / 実装ミス)を模す
+          {
+            rows: Object.entries(store).map(([lid, body]) => ({ lid, body })),
+            done: false,
+            next: { entryOrder: 0, lid: 'a1' },
+          }
+        : {
+            rows: Object.entries(store)
+              .filter(([lid]) => !hideFromScan.has(lid))
+              .map(([lid, body]) => ({ lid, body })),
+            done: true,
+          },
     persistEntry: async (e) => {
       writes.push(e.lid);
       store[e.lid] = e.body;
@@ -77,7 +88,15 @@ function setup(bodies: Record<string, string>, metas: EntryMeta[]): {
     setEntryParent: async () => {},
   });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas, relations: [] });
-  return { d, bodies: store, writes, hideFromScan };
+  return {
+    d,
+    bodies: store,
+    writes,
+    hideFromScan,
+    stick: () => {
+      stuckCursor = true;
+    },
+  };
 }
 
 const saved = (lid: string, key = 'ast-new'): Parameters<Dispatcher['dispatch']>[0] => ({
@@ -183,6 +202,25 @@ describe('Office の保存でノートの添付が差し替わる', () => {
     expect(h.d.getState().error, '知らない lid で苦情が出た').toBe(null);
   });
 
+  /**
+   * 🔴 **書き換え漏れは件数を出す**(2026-08-16、着地前レビュー R12)。
+   * ⚠ 逃がし文字入りの参照(`asset:ast\-old`)は**狭い規則が当たらない**ので
+   * 旧 key を指したまま残る ── 黙って「取り込みました」と言うと、GC が実体を
+   * 消した時点で**切れた参照だけが残る**。`asset-ref-rewrite.ts` が
+   * 「呼び側は数え直して user に出す」と明記している当の保証である。
+   */
+  it('🔴 書き換えられなかった参照は、件数を出す(黙って「差し替えました」と言わない)', async () => {
+    const h = setup(
+      { a1: DOC, n1: 'これ [報告書](asset:ast\\-old) ね\n' },
+      [meta('a1', 'attachment'), meta('n1', 'text')],
+    );
+    h.d.dispatch(saved('a1'));
+    await tick();
+    expect(h.d.getState().error, '旧い参照が残ったのに黙っている').toContain(
+      '旧い参照が残りました: 1 件',
+    );
+  });
+
   it('🔴 開いている本文は、その場で差し替わる(次に開き直すまで古い、を作らない)', async () => {
     const h = setup({ a1: DOC }, [meta('a1', 'attachment')]);
     h.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
@@ -190,5 +228,53 @@ describe('Office の保存でノートの添付が差し替わる', () => {
     h.d.dispatch(saved('a1'));
     await tick();
     expect(h.d.getState().openBody?.body, '画面の本文が古いまま').toContain('ast-new');
+  });
+});
+
+/**
+ * 🔴 **レビュー後に足した門**(2026-08-16、着地前レビュー R5 / R8)。
+ * ⚠ どちらも 1 巡目の変異試験で**生き延びた** ── 「直した」だけでは守られない。
+ */
+describe('レビューで足した門', () => {
+  /**
+   * 🔴 **版の 200MB は容れ物全体で見る**(R5)。⚠ `otherBytes` を渡さないと
+   * 上限が**この添付の中だけ**で閉じ、30MB × 5 世代 のノートが 10 件で 1.5GB に
+   * なっても `overBudget` すら立たない(誰も気づけない)。
+   */
+  it('🔴 他の添付が使っている分を数える(数えないと上限が効かない)', async () => {
+    // 別の添付ノートが、既に上限ちょうど(200MiB)ぶんの版を持っている。
+    // ⚠ **上限は `200 * 1024 * 1024`**(= 209,715,200)── 「200MB」を
+    //    200,000,000 と読むと**この test は何も見ずに緑になる**(実際 1 度そうなった)
+    const other = [
+      '---',
+      'attachment.name: b.odt',
+      'attachment.asset_key: ast-b',
+      // ⚠ 時刻に `:` が入るので**引用する**(この repo のミニ YAML の規約)
+      'attachment.history: ["2026-01-01T00:00:00.000Z|auto|ast-b0|209715200|"]',
+      '---',
+      '',
+    ].join('\n');
+    const h = setup({ a1: DOC, a2: other }, [meta('a1', 'attachment'), meta('a2', 'attachment')]);
+    h.d.dispatch(saved('a1'));
+    await tick();
+    const hist = parseFrontmatter(h.bodies.a1!).meta['attachment.history'];
+    // ⚠ 全体で 200MB を超えるので、**この保存の版は残らない**
+    expect(hist, '他の添付の分を数えていない ── 上限が全体で効いていない').toBeUndefined();
+    // ⚠ 他所の版は**巻き添えにしない**(数えるが落とさない)
+    expect(String(h.bodies.a2)).toContain('ast-b0');
+  });
+
+  /**
+   * 🔴 **前へ進まないカーソルで無限に回らない**(R8)。⚠ この鎖は単一 queue なので、
+   * 回り続けると**以降の store effect が 1 件も走らなくなる**(保存も永続化も止まる)
+   * ── 画面は生きているので user は気づけない。他の全走査 3 か所と同じ形。
+   */
+  it('🔴 前へ進まないカーソルで無限に回らない(止まって理由を出す)', async () => {
+    const h = setup({ a1: DOC }, [meta('a1', 'attachment')]);
+    h.stick();
+    h.d.dispatch(saved('a1'));
+    await tick(60);
+    expect(h.d.getState().error, '止まったのに理由が出ない').toContain('書き戻せませんでした');
+    expect(h.writes, '壊れた走査の結果で書いた').toEqual([]);
   });
 });

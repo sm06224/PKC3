@@ -1021,8 +1021,34 @@ test('🔴 Office の保存が、棚に置かれて鍵が放送される(新規 
     const root = await navigator.storage.getDirectory();
     await root.removeEntry('pkc3-office-stage', { recursive: true }).catch(() => {});
   });
-  await page.reload();
+  /**
+   * 🔴 **合言葉(lid)を預けた状態で開く**(2026-08-16、着地前レビュー R3)。
+   * ⚠ この中段 ── 窓が `document` の payload から token を覚え、staging の meta に
+   * 載せるところ ── には test が 1 件も無く、**主機能を殺す変異が 3 本生き延びて**
+   * いた(全部の保存が「新規ノート」になり、元のノートは二度と更新されない)。
+   */
+  await page.addInitScript(() => {
+    const ch = new BroadcastChannel('pkc3-office');
+    ch.onmessage = (ev: MessageEvent): void => {
+      const d = ev.data as { pkc3Office?: string };
+      if (d?.pkc3Office !== 'ready-for-document') return;
+      ch.postMessage({
+        pkc3Office: 'document',
+        payload: {
+          name: '報告書.odt',
+          bytes: new TextEncoder().encode('ORIGINAL'),
+          token: 'lid-TEST',
+        },
+      });
+    };
+  });
+  await page.goto('/office/host.html?name=%E5%A0%B1%E5%91%8A%E6%9B%B8.odt&await-doc=1');
   await expect(page.locator('#status')).toContainText('表示中', { timeout: 15_000 });
+  // 空振り防止 ── 文書が実際に流し込まれたか(流れていなければ token も検査できない)
+  expect(
+    await page.evaluate(() => (window as unknown as { __loDocPath?: string }).__loDocPath),
+    '文書が流し込まれていない ── この test は合言葉を検査できていない',
+  ).toBe('/work/報告書.odt');
 
   const got = await page.evaluate(async () => {
     const w = window as unknown as {
@@ -1046,10 +1072,10 @@ test('🔴 Office の保存が、棚に置かれて鍵が放送される(新規 
     // ⚠ stub は本物と同じく親ディレクトリを要求する(MEMFS の ENOENT)
     w.__lo.FS.mkdirTree('/home/web_user');
     w.__lo.FS.mkdirTree('/work');
-    // ① 新規保存 = 最終 path へ直接 write して close
+    // ① **開いた文書以外**の新規保存 = 最終 path へ直接 write して close
     w.__lo.FS.writeFile('/home/web_user/無題 1.odt', 'NEW-DOC-BYTES');
     w.__lo.FS.close(w.__lo.FS.open('/home/web_user/無題 1.odt'));
-    // ② 既存の上書き = temp へ書いて rename で置換
+    // ② **開いた当の文書**の上書き = temp へ書いて rename で置換
     w.__lo.FS.writeFile('/work/lu42.tmp', 'OVERWRITTEN-BYTES!!');
     w.__lo.FS.rename('/work/lu42.tmp', '/work/報告書.odt');
 
@@ -1092,11 +1118,22 @@ test('🔴 Office の保存が、棚に置かれて鍵が放送される(新規 
   // 🔑 meta は **`.json` が commit の印**(`.bin` を先に閉じてから置く)
   const metas = Object.entries(got.files).filter(([n]) => n.endsWith('.json'));
   expect(metas.length).toBe(2);
+  const byName = new Map<string, { key: string; name: string; token?: string; v: number }>();
   for (const [, text] of metas) {
-    const m = JSON.parse(text) as { key: string; name: string; size: number; v: number };
+    const m = JSON.parse(text) as { key: string; name: string; size: number; v: number; token?: string };
     expect(m.v).toBe(1);
     expect(got.files[`${m.key}.bin`], 'meta が指す bytes が無い').toBeDefined();
+    byName.set(m.name, m);
   }
+  // ── ③ 🔴 **合言葉は「開いた当の文書」にだけ付く**(レビュー R2 / R3)──────
+  expect(
+    byName.get('報告書.odt')?.token,
+    '開いた文書の保存に合言葉が付いていない ── 上書き保存が新しいノートを増やす',
+  ).toBe('lid-TEST');
+  expect(
+    byName.get('無題 1.odt')?.token ?? '',
+    '別の文書の保存に合言葉が付いた ── 開いていたノートが別物に差し替わる',
+  ).toBe('');
   // ⚠ temp を拾っていない(拾うと「保存」として親へ流れる)
   expect(
     metas.map(([, t]) => (JSON.parse(t) as { name: string }).name),

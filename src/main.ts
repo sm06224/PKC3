@@ -197,8 +197,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   let init: InitResult;
   let sync: TabSync;
   let followerConn: ProxyStoreClient | null = null;
+  /**
+   * 🔴 **このタブが writer リースの保持者か**(#205)。⚠ **昇格で真になる** ──
+   * 「呼ぶたびに読む」だけでは足りず、**変わる値**を持たないと門が開かない。
+   * ⚠ `followerConn` を流用しない(あれは接続の口であって、役ではない)。
+   */
+  let writerHolder = false;
 
   if (immediateHeld) {
+    writerHolder = true;
     const real = await initStorage(false);
     const host = new StoreProxyHost({ client: real.client, init: real.init });
     client = host.localClient();
@@ -542,6 +549,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           unbindChanged();
           sync = promotedHost;
           unbindChanged = sync.onChanged(onRemoteChanged);
+          // 🔴 **このタブが本体になったことを控える**(2026-08-16、着地前レビュー R1)。
+          //    ⚠ ここを落とすと、Office の保存を引き取る門(`isHolder`)が
+          //    **閉じたまま**になり、昇格したタブでは保存が棚に溜まり続けて
+          //    **アプリを開き直すまで届かない**。
+          //    ⚠ 「呼ぶたびに読む」だけでは足りない、が正体である ── 読む値の側が
+          //    変わらなかった(`followerConn` は boot 以外で代入されない)。
+          //    🔑 `lease.state()` を直に見ないのは、**lock が granted になる瞬間と
+          //    店(store)が使えるようになる瞬間がずれる**からである(`promote` の
+          //    中で新しい worker を建てている)── 早すぎると書きに行って失敗する
+          writerHolder = true;
         }
         syncLine = '';
         showStatus('このタブが本体になりました');
@@ -660,7 +677,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const officeSaveBack = createOfficeSaveBack({
     stage: () => openStageDir(),
     // ⚠ **呼ぶたびに読む** ── 昇格でこのタブが本体になることがある(#177)
-    isHolder: () => followerConn === null,
+    isHolder: () => writerHolder,
     canWrite: () => dispatcher.getState().phase === 'ready',
     readAttachment: async (lid) => {
       const meta = dispatcher.getState().entryMetas.get(lid);
@@ -709,9 +726,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           newBytes: bytes.byteLength,
           savedAt: new Date().toISOString(),
         });
-        // ⚠ reducer は `ready` でなければ**黙って捨てる** ── 撃てたかを
-        //    ここで確かめる(確かめないと棚から消えて文書が失われる)
-        ok = dispatcher.getState().phase === 'ready';
+        // ⚠ reducer は**門を 2 つ**持っている(`ready` か / いまも添付か)── 撃てたかを
+        //    ここで確かめる。確かめないと棚から消えて文書が失われる。
+        //    ⚠ 2026-08-16 の着地前レビュー R6: `phase` だけ見ていたので、
+        //    引き取りの途中でノートが消える / archetype が変わると、
+        //    **何も書かずに「取り込みました」と言って棚を空にして**いた
+        const after = dispatcher.getState();
+        ok = after.phase === 'ready' && after.entryMetas.get(lid)?.archetype === 'attachment';
       });
       return ok;
     },

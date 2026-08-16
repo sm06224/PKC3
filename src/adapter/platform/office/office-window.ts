@@ -68,9 +68,10 @@ export type OfficeWindowEvent =
    * 版面は生きているが**命令が通らなくなった**(`host.html` の `degrade()`)。
    *
    * ⚠ **2026-08-16 まで、これは受け側で黙って捨てられていた** ── 窓は
-   * `host.html:197` から放送していたのに `parseEvent` に case が無く `null` に落ちて
-   * いた。**保存が効かなくなったことを user へ伝える唯一の信号**なので、
-   * 取りこぼすと「保存したのに残っていない」だけが残る。
+   * `host.html` の `degrade()` から放送していたのに `parseEvent` に case が無く
+   * `null` に落ちていた。**保存が効かなくなったことを user へ伝える唯一の信号**
+   * なので、取りこぼすと「保存したのに残っていない」だけが残る。
+   * ⚠ 他 file を**行番号で指さない**(この件の初稿は 146 行ずれていた)。
    */
   | { readonly type: 'degraded'; readonly reason: string }
   | { readonly type: 'ready-for-document' }

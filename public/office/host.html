@@ -263,7 +263,14 @@
   function armSaveWatch(FS, token) {
     var W = window.PKC3OfficeSaveWatch;
     var S = window.PKC3OfficeStage;
-    if (!W || !S) { console.warn('保存の見張りを積めません(script が読めていない)'); return; }
+    if (!W || !S) {
+      // 🔴 **黙らない**(2026-08-16、着地前レビュー R13)。⚠ console だけだと、
+      //    窓は正常に見えたまま**保存が 1 件も PKC へ渡らない** ── 帯を出して
+      //    「保存が効かない」と伝える(`degrade()` が在る理由そのもの)
+      console.warn('保存の見張りを積めません(script が読めていない)');
+      degrade('保存の見張りを積めませんでした(保存は PKC へ渡りません)');
+      return;
+    }
     var watch = W.createSaveWatch();
     // ⚠ **自分が閉じた分を数えない。** 数えると「保存された」と言い続ける。
     //    🔑 印を立てるのは**同期の 1 呼び出しだけ** ── await をまたいで立てると、
@@ -314,7 +321,16 @@
           read: function (into, wanted, position) {
             return FS.read(stream, into, 0, wanted, position);
           },
-          meta: { name: hit.name, path: hit.path, token: token },
+          meta: {
+            name: hit.name,
+            path: hit.path,
+            // 🔴 **合言葉が付くのは「開いた当の文書」だけ**(2026-08-16、着地前
+            //    レビュー R2)。⚠ 窓ごとに 1 個の合言葉を**全部の保存に**載せていたので、
+            //    「添付を開いた窓の中で File > 新規作成 → 別名で保存」すると、
+            //    **開いていたノートの実体がその新しい文書に差し替わって**いた。
+            //    🔑 合言葉が無い保存は新規の添付ノートになる ── それが正しい。
+            token: hit.path === window.__loDocPath ? token : '',
+          },
         });
         // ⚠ **鍵だけ放送する**(bytes は棚に在る)。放送は全タブに届くので、
         //    引き取るのは writer リースを持つタブだけ
@@ -347,6 +363,24 @@
     saveTimer = setInterval(function () { void pump(); }, 500);
     // 🔴 停止時に**静穏を待たずに**吐き出す(`died()` から呼ぶ)
     flushSaves = function () { void pump(Date.now() + W.QUIET_MS); };
+
+    /**
+     * 🔴 **渡し切る前に閉じさせない**(2026-08-16、着地前レビュー R4)。
+     *
+     * ⚠ **`pagehide` では間に合わない。** 棚へ書くのは非同期なので、押さえていない
+     * 保存は**どこにも残らずに消える** ── `watch.pending` は JS のオブジェクトで、
+     * 棚に載るのは `.json` まで書けたものだけである。
+     * 窓の幅は確定値で出せる:静穏 700ms + 見張り 500ms = **0.7〜1.2 秒**
+     * (大きい文書ならさらに書き出しの時間)。⚠ user が Ctrl+S を押して
+     * 「保存できた」と思い、**その 1 秒以内にタブを閉じる**のはごく自然な動作である。
+     *
+     * ⚠ 出すのは**渡している最中だけ** ── 平常時に確認を出すと、ただの邪魔になる。
+     */
+    window.addEventListener('beforeunload', function (e) {
+      if (watch.pendingCount() === 0 && !busy) return;
+      e.preventDefault();
+      e.returnValue = '';   // 旧い browser 向け(文面は browser が決める)
+    });
   }
 
   // ── Ctrl + 英字が本文に混入するのを止める(#117)────────────────────
@@ -1042,8 +1076,10 @@
   // 本体へ「閉じた」を知らせる ── 使い回し判定を本体が持てるように
   window.addEventListener('pagehide', function () {
     clearInterval(beat);
-    // ⚠ ここで吐き出そうとしない ── 非同期は間に合わない。取りこぼしは棚に残り、
-    //    本体の起動時に拾われる(#209 の B5「入口は 3 つ」)
+    // ⚠ **ここで吐き出そうとしない** ── 非同期は間に合わない。
+    //    ⚠ 2026-08-16 まで「取りこぼしは棚に残る」と書いていたが**嘘だった**:
+    //    棚に残るのは `.json` まで書けたものだけで、静穏待ちの分は消える。
+    //    塞いだのは `beforeunload`(上)── **閉じる前に user に止まってもらう**
     stopSaveWatch();
     say('closed');
   });
