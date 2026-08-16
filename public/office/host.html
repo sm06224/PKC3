@@ -320,26 +320,22 @@
     var busy = false;
 
     /**
-     * 🔴 **path → 合言葉**(#217)。⚠ 単一の合言葉ではなく**表**である。
-     *
-     * 最初に入っているのは「PKC から渡した添付」の 1 件だけ。窓の中で新規に
-     * 作った文書は合言葉を持たないので 1 回目は新規のノートになり、本体が
-     * `adopted` で返してきた時点でここに載る ── **2 回目からは差し替え**になる。
+     * 🔴 **path → 合言葉の表**(#217)。⚠ 単一の合言葉ではなく**表**である。
+     * 判断は `office-save-watch.js` に在る(ここは bundle されず unit が届かない)。
      */
-    var pathTokens = Object.create(null);
-    if (window.__loDocPath && token) pathTokens[window.__loDocPath] = token;
-    /** 棚へ渡した鍵 → その時の path。⚠ `adopted` を**鍵で**受けるために要る。 */
-    var keyPaths = Object.create(null);
+    var tokens = W.createTokenTable();
+    tokens.seed(window.__loDocPath, token);
+    /**
+     * 🔴 **この窓の id**(#217)。⚠ 引き取る側が「同じ文書の保存」を束ねるのに要る。
+     * 束ねる鍵を path だけにすると、2 枚目の窓が同じ名前で保存したときに
+     * **別の文書どうしを 1 つのノートへ潰す**(path は窓ごとに別の MEMFS に在る)。
+     */
+    var winId = (self.crypto && self.crypto.randomUUID)
+      ? self.crypto.randomUUID()
+      : 'w' + Date.now().toString(36) + '-' + Math.floor(Math.random() * 1e9).toString(36);
 
     adoptSaved = function (p) {
-      var k = String((p && p.key) || '');
-      var t = String((p && p.token) || '');
-      // ⚠ **自分が渡した鍵でなければ無視する** ── 放送は全窓に届くので、
-      //    別窓の保存に対する返事で自分の対応表を書き換えてはいけない
-      var path = k ? keyPaths[k] : '';
-      if (!path || !t) return;
-      pathTokens[path] = t;
-      delete keyPaths[k];
+      tokens.adopt(String((p && p.key) || ''), String((p && p.token) || ''));
     };
 
     async function handOff(dir, hit) {
@@ -350,6 +346,14 @@
         var put = await S.stageBytes({
           dir: dir,
           size: hit.size,
+          // 🔴 **鍵を本当に一意にする**(2026-08-16、着地前レビュー)。⚠ 渡さないと
+          //    `makeKey` は `'o' + Date.now() + '-0'` に落ち、**ミリ秒の解像度**しか
+          //    無い ── `office-save-stage.js` の注記(「`randomUUID` が在れば使う」)は
+          //    **呼び元が渡していなかったので嘘だった**。鍵で別窓の返事を弾く
+          //    ガード(下の `keyPaths`)は、この一意性の上に乗っている
+          uuid: (self.crypto && self.crypto.randomUUID)
+            ? function () { return self.crypto.randomUUID(); }
+            : undefined,
           read: function (into, wanted, position) {
             return FS.read(stream, into, 0, wanted, position);
           },
@@ -363,12 +367,15 @@
             //    いた。⚠ 逆に「開いた当の文書だけ」に狭めると、窓の中で作った文書は
             //    **保存のたびにノートが増える** ── だから表にして、本体が
             //    `adopted` で返してきた分をここへ足す。
-            token: pathTokens[hit.path] || '',
+            token: tokens.tokenFor(hit.path),
+            // 🔴 **どの窓が置いたか**(#217)。引き取る側が「同じ文書の保存」を
+            //    束ねるのに要る ── 合言葉の返事が間に合わない経路(編集中に溜めた分)
+            win: winId,
           },
         });
         // ⚠ **鍵だけ放送する**(bytes は棚に在る)。放送は全タブに届くので、
         //    引き取るのは writer リースを持つタブだけ
-        keyPaths[put.key] = hit.path;
+        tokens.remember(put.key, hit.path);
         say('saved', { key: put.key, name: put.name, size: put.size });
       } finally {
         mine = true;

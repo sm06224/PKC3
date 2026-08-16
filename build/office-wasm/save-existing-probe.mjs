@@ -36,7 +36,7 @@
  *   PKC3_NO_HOOK=1 を付けると **保存の見張りを積まない**(対照群)
  */
 import { createServer } from 'node:http';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join, extname, resolve, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Buffer } from 'node:buffer';
@@ -92,11 +92,23 @@ const server = await new Promise((ok) => {
 const base = `http://127.0.0.1:${server.address().port}`;
 
 const NAME = basename(DOC);
-const b64 = (await readFile(DOC)).toString('base64');
-const result = { hook: !NO_HOOK, doc: NAME, steps: [], console: [] };
+const raw = await readFile(DOC);
+const b64 = raw.toString('base64');
+/**
+ * 🔴 **渡された文書の名前を出さない**(CLAUDE.md「機密資料の取り扱い」1)。
+ * ⚠ 禁じられるのは本文だけではない ── **題名も「類推させる材料」**である。
+ * この probe は user から貰った実文書を引数に取る作りなので、名前を控えると
+ * JSON と端末に落ちる。⚠ 観測点として要るのは**形式と大きさ**だけ。
+ */
+const result = {
+  hook: !NO_HOOK, docExt: extname(NAME), docBytes: raw.byteLength,
+  steps: [], console: [],
+};
 const safeLine = (s) => (/[^\x20-\x7e]/.test(s) ? null : s.slice(0, 160));
 
-const browser = await chromium.launchPersistentContext(`${tmpdir()}/pkc3-save-${process.pid}`, {
+/** ⚠ **使い終わったら消す**(機密資料の取り扱い 5:profile も痕跡である)。 */
+const PROFILE = `${tmpdir()}/pkc3-save-${process.pid}`;
+const browser = await chromium.launchPersistentContext(PROFILE, {
   headless: true, viewport: { width: 1280, height: 900 },
   args: ['--no-sandbox', '--disable-dev-shm-usage'],
   executablePath: '/opt/pw-browsers/chromium',
@@ -267,6 +279,8 @@ try {
 
 await browser.close().catch(() => {});
 server.close();
+// 🔴 **profile を残さない**(開いた文書の痕跡が入る)。⚠ 「後で使うかも」は残す理由にならない
+await rm(PROFILE, { recursive: true, force: true }).catch(() => {});
 const text = JSON.stringify(result, null, 1);
 if (OUT) await writeFile(OUT, text);
 console.log(text);

@@ -78,7 +78,7 @@
    * @param deps.size   全体の大きさ(byte)
    * @param deps.read   `(into, wanted, position) -> 読めた byte 数`。
    *                    ⚠ **`into` は使い回される** ── 呼ばれた側は溜め込まない
-   * @param deps.meta   `{ name, path, token }`(⚠ bytes は入れない)
+   * @param deps.meta   `{ name, path, token, win }`(⚠ bytes は入れない)
    * @param deps.key    鍵(省略時は `makeKey`)
    * @returns `{ key, name, size }`
    */
@@ -122,8 +122,11 @@
       size: size,
       at: typeof deps.now === 'function' ? deps.now() : Date.now(),
     };
-    // ⚠ token は**在るときだけ**入れる(無い field を作らない)
+    // ⚠ token / win は**在るときだけ**入れる(無い field を作らない)
     if (meta.token) record.token = String(meta.token);
+    // 🔴 置いた窓の id(#217)。⚠ 引き取る側が `path` で同じ文書を束ねる**前提**である
+    //    ── これが無い meta は束ねられない(別の窓の同名文書と潰さないため)
+    if (meta.win) record.win = String(meta.win);
 
     var metaHandle = await dir.getFileHandle(key + '.json', { create: true });
     var mw = await metaHandle.createWritable();

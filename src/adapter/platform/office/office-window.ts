@@ -40,6 +40,17 @@ export const OFFICE_CHANNEL = 'pkc3-office';
 /** `host.html` の位置。⚠ 本体の hash 付き chunk 名に引きずられない固定 path。 */
 export const OFFICE_HOST_PATH = 'office/host.html';
 
+/**
+ * 🔴 **「このノートになった」を返す放送の種別**(#217)。
+ *
+ * ⚠ **`public/office/host.html` と同じ綴りでなければ機構ごと死ぬ**。しかも
+ * 両側とも自分の literal を test で pin しているだけなので、**一貫して改名すると
+ * unit も smoke も緑のまま本番だけ壊れる**(着地前レビューで実際に構成された)。
+ * 🔑 だから定数にして、`tests/adapter/office-window.test.ts` が
+ * **`host.html` の原文と突合する**(`OFFICE_STAGE_DIR` と同じ形)。
+ */
+export const OFFICE_ADOPTED = 'adopted';
+
 /** 窓が生きていると見なす猶予。heartbeat はこれより短い間隔で来る。 */
 export const ALIVE_TTL_MS = 4000;
 
@@ -231,7 +242,14 @@ export class OfficeWindow {
    */
   adoptSave(key: string, token: string): void {
     if (key === '' || token === '') return;
-    this.ch.postMessage({ pkc3Office: 'adopted', payload: { key, token } });
+    // ⚠ **投げさせない。** ここが投げると、呼び元(`office-save-back.ts`)が棚を
+    //    消す前に抜け、次の掃除で**もう 1 件ノートができる** ── 直したい症状の逆向き。
+    //    🔑 窓側の `say()` も同じ形で包んである(閉じたチャネルは投げる)
+    try {
+      this.ch.postMessage({ pkc3Office: OFFICE_ADOPTED, payload: { key, token } });
+    } catch {
+      // 閉じている ── 返せないだけで、取り込みは成功している
+    }
   }
 
   /** 閉じてくれと頼む。⚠ 握っていないので、こちらから強制はできない。 */

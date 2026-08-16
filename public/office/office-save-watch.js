@@ -142,12 +142,82 @@
     };
   }
 
+  /**
+   * 覚えておく鍵の上限(#217)。⚠ **要るのは「まだ返事が来ていない保存」だけ**で、
+   * 実際に返事が来るのは合言葉を知らなかった分に限られる。⚠ 上限が無いと、
+   * 合言葉が付いたあとの定常(差し替え = 返事が来ない)で**保存のたびに 1 件ずつ
+   * 永久に積む**(不可侵指示「生成物のライフサイクル終端で速やかに破棄」)。
+   */
+  var KEY_MEMORY_MAX = 64;
+
+  /**
+   * 🔴 **path → 合言葉の表**(#217)。窓の中で新規に作った文書は合言葉を持たないので、
+   * 1 回目は新規のノートになる。本体が「その保存はこのノートになった」と返してきたら
+   * ここへ載せ、**2 回目からは差し替え**にする。
+   *
+   * 🔑 返事は **path ではなく棚の鍵**で受ける ── 放送は**全窓に届く**ので、path で
+   * 受けると別の窓の保存に対する返事で**自分の対応表が書き換わる**
+   * (`/work/報告.odt` は窓ごとに別の MEMFS に在り、別の文書でありうる)。
+   *
+   * ⚠ **古い鍵の返事は落とさない。** 同じ文書の古い版に対する返事でも、指している
+   * ノートは同じである ── 落とすと、編集中に溜まった 2 件の 1 件目にしか返事が
+   * 来なかった場合に**どこにも着かない**。積みすぎだけを上限で止める。
+   *
+   * ⚠ **判断をここへ出す理由**:`host.html` は bundle されず unit が 1 件も届かない
+   * (CLAUDE.md「どの test からも実行されない file に、判断を書かない」)。
+   */
+  function createTokenTable(opts) {
+    var max = (opts && opts.max) || KEY_MEMORY_MAX;
+    var tokens = Object.create(null);   // path -> 合言葉
+    var paths = Object.create(null);    // 鍵 -> path
+    var order = [];                     // 鍵を入れた順(上限を切るため)
+
+    return {
+      /** その path の保存に載せる合言葉(無ければ空文字)。 */
+      tokenFor: function (path) { return tokens[path] || ''; },
+
+      /** はじめから分かっている合言葉(PKC が渡した添付)。 */
+      seed: function (path, token) {
+        if (path && token) tokens[path] = token;
+      },
+
+      /** 棚へ渡した ── 返事が来たときに引けるようにする。 */
+      remember: function (key, path) {
+        if (!key || !path) return;
+        if (!(key in paths)) order.push(key);
+        paths[key] = path;
+        // ⚠ 古いものから落とす(返事が来る見込みが薄い順)
+        while (order.length > max) {
+          var gone = order.shift();
+          delete paths[gone];
+        }
+      },
+
+      /**
+       * 本体からの返事。⚠ **自分が渡した鍵でなければ無視する**。
+       * @returns 受け入れたか(⚠ test の観測点。無視したことを外から見たい)
+       */
+      adopt: function (key, token) {
+        var path = key ? paths[key] : '';
+        if (!path || !token) return false;
+        tokens[path] = token;
+        delete paths[key];
+        return true;
+      },
+
+      /** 覚えている鍵の数(⚠ 上限が効いていることの観測点)。 */
+      keyCount: function () { return order.length; },
+    };
+  }
+
   root.PKC3OfficeSaveWatch = {
     WATCH_DIRS: WATCH_DIRS,
     QUIET_MS: QUIET_MS,
+    KEY_MEMORY_MAX: KEY_MEMORY_MAX,
     isIgnoredName: isIgnoredName,
     watchedDirOf: watchedDirOf,
     baseName: baseName,
     createSaveWatch: createSaveWatch,
+    createTokenTable: createTokenTable,
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

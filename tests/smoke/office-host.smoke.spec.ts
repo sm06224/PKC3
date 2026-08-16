@@ -1222,23 +1222,51 @@ test('🔴 取り込んだ側が返した合言葉を窓が覚え、2 回目の�
     .toBe(2);
   expect(got.first, '1 回目の鍵が空').not.toBe('');
 
-  const tokenOf = (key: string): string => {
+  const metaOf = (key: string): { token?: string; win?: string } => {
     const text = got.metas[`${key}.json`];
     expect(text, `棚に ${key} の meta が無い`).toBeDefined();
-    return (JSON.parse(text!) as { token?: string }).token ?? '';
+    return JSON.parse(text!) as { token?: string; win?: string };
   };
-  expect(tokenOf(got.first), '1 回目は合言葉なしのはず(まだノートが無い)').toBe('');
+  expect(metaOf(got.first).token ?? '', '1 回目は合言葉なしのはず(まだノートが無い)').toBe('');
   expect(
-    tokenOf(got.seen[1]!.key),
+    metaOf(got.seen[1]!.key).token ?? '',
     '2 回目に合言葉が付いていない ── 保存のたびにノートが増える',
   ).toBe('lid-ADOPTED');
+
+  /**
+   * 🔴 **鍵が本当に一意である**(着地前レビュー 2026-08-16)。
+   *
+   * ⚠ `office-save-stage.js` は「`randomUUID` が在れば使う」と書いてあるのに、
+   * **呼び元が渡していなかった**ので `'o' + Date.now() + '-0'` に落ちていた
+   * (= ミリ秒の解像度 / 連番は常に 0)。返事を鍵で弁別するガードは、この一意性の
+   * 上に乗っている。🔑 **字面ではなく、出た鍵の形で見る**(呼び元を消せば落ちる)。
+   */
+  for (const s of got.seen) {
+    expect(s.key, `鍵が時刻由来のまま(${s.key})── 同じミリ秒の保存とぶつかる`)
+      .toMatch(/^o[0-9a-f]{32}$/);
+  }
+
+  /**
+   * 🔴 **どの窓が置いたかを載せる**(#217)。⚠ 引き取る側が「同じ文書の保存」を
+   * `path` で束ねる**前提**なので、無いと編集明けの一括取り込みでノートが増える。
+   */
+  const winA = metaOf(got.first).win ?? '';
+  expect(winA, '窓の id が meta に載っていない').not.toBe('');
+  expect(metaOf(got.seen[1]!.key).win, '同じ窓なのに id が違う').toBe(winA);
 });
 
 /**
- * 🔴 **他人の鍵で対応表を書き換えない**(#217)。⚠ 放送は**全窓に届く**ので、
+ * 🔴 **返事は「その鍵の保存」にだけ効く**(#217)。⚠ 放送は**全窓に届く**ので、
  * 別の窓の保存に対する返事を自分の対応表へ入れると、**関係のないノートへ上書き**する。
+ *
+ * ⚠ **初稿は「保存の前に、身に覚えのない鍵を投げる」形だった**(2026-08-16 の
+ * 着地前レビューで潰れた)── そのときは対応表が**空**なので、
+ * 「対応表を引かずに**直前の path** へ当てる」型の変異が**素通りする**。
+ * 🔑 だから **当てる先が 2 つ実在する**状態を作り、**片方の鍵にだけ**返事を出して、
+ * **もう片方が空のまま**であることを見る。これなら「直前へ当てる」も
+ * 「全部へ当てる」も殺せる。
  */
-test('🔴 自分が渡していない鍵の返事は無視する(#217)', async ({ page }) => {
+test('🔴 返事は、その鍵の文書にだけ効く(隣の文書へ漏れない)(#217)', async ({ page }) => {
   await page.goto('/office/host.html');
   await seedFakePack(page);
   await page.evaluate(async () => {
@@ -1255,23 +1283,41 @@ test('🔴 自分が渡していない鍵の返事は無視する(#217)', async 
         close(s: unknown): void; mkdirTree(p: string): void;
       } };
     };
-    const seen: Array<{ key: string }> = [];
+    const seen: Array<{ key: string; name: string }> = [];
     const ch = new BroadcastChannel('pkc3-office');
     ch.onmessage = (ev: MessageEvent): void => {
-      const d = ev.data as { pkc3Office?: string; payload?: { key: string } };
+      const d = ev.data as { pkc3Office?: string; payload?: { key: string; name: string } };
       if (d?.pkc3Office === 'saved' && d.payload) seen.push(d.payload);
     };
-    // ⚠ **保存より先に**、身に覚えのない鍵で返事が来る
-    ch.postMessage({ pkc3Office: 'adopted', payload: { key: 'sv-OTHER', token: 'lid-OTHER' } });
-    await new Promise((r) => setTimeout(r, 300));
+    const waitFor = async (n: number): Promise<void> => {
+      const t0 = Date.now();
+      while (seen.length < n && Date.now() - t0 < 12_000) {
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    };
+    const save = (name: string, body: string): void => {
+      w.__lo.FS.writeFile(`/home/web_user/${name}`, body);
+      w.__lo.FS.close(w.__lo.FS.open(`/home/web_user/${name}`));
+    };
 
     w.__lo.FS.mkdirTree('/home/web_user');
-    w.__lo.FS.writeFile('/home/web_user/無題 2.odt', 'ONLY-SAVE');
-    w.__lo.FS.close(w.__lo.FS.open('/home/web_user/無題 2.odt'));
-    const t0 = Date.now();
-    while (seen.length < 1 && Date.now() - t0 < 12_000) {
-      await new Promise((r) => setTimeout(r, 200));
-    }
+    // ── 2 つの文書を保存する(= 当てる先が 2 つ実在する)
+    save('あ.odt', 'DOC-A-1');
+    await waitFor(1);
+    save('い.odt', 'DOC-B-1');
+    await waitFor(2);
+    const keyA = seen.find((s) => s.name === 'あ.odt')?.key ?? '';
+    const keyB = seen.find((s) => s.name === 'い.odt')?.key ?? '';
+
+    // ⚠ **あ の鍵にだけ**返事を出す(い は名乗られていない)
+    ch.postMessage({ pkc3Office: 'adopted', payload: { key: keyA, token: 'lid-ONLY-A' } });
+    await new Promise((r) => setTimeout(r, 300));
+
+    // ── どちらも 2 回目を保存する
+    save('あ.odt', 'DOC-A-2');
+    await waitFor(3);
+    save('い.odt', 'DOC-B-2');
+    await waitFor(4);
     ch.close();
 
     const root = await navigator.storage.getDirectory();
@@ -1282,14 +1328,31 @@ test('🔴 自分が渡していない鍵の返事は無視する(#217)', async 
     ).entries()) {
       if (name.endsWith('.json')) metas[name] = await (await handle.getFile()).text();
     }
-    return { seen, metas };
+    return { seen, keyA, keyB, metas };
   });
 
-  expect(got.seen.length, '保存が拾えていない ── 空振り').toBe(1);
-  const text = got.metas[`${got.seen[0]!.key}.json`];
-  expect(text).toBeDefined();
+  // 空振り防止 ── 4 回とも拾えていないと、漏れの有無は検査できない
+  expect(got.seen.length, '保存が 4 回拾えていない ── この test は漏れを検査できていない')
+    .toBe(4);
+  expect(got.keyA, 'あ の 1 回目の鍵が取れていない').not.toBe('');
+  expect(got.keyB, 'い の 1 回目の鍵が取れていない').not.toBe('');
+
+  const tokenOf = (key: string): string => {
+    const text = got.metas[`${key}.json`];
+    expect(text, `棚に ${key} の meta が無い`).toBeDefined();
+    return (JSON.parse(text!) as { token?: string }).token ?? '';
+  };
+  const second = (name: string): string =>
+    got.seen.filter((s) => s.name === name)[1]?.key ?? '';
+
+  expect(tokenOf(got.keyA), '1 回目は合言葉なしのはず').toBe('');
+  expect(tokenOf(got.keyB), '1 回目は合言葉なしのはず').toBe('');
   expect(
-    (JSON.parse(text!) as { token?: string }).token ?? '',
-    '他の窓あての返事で合言葉が付いた ── 無関係なノートを上書きする',
+    tokenOf(second('あ.odt')),
+    '名乗られた文書に合言葉が付いていない',
+  ).toBe('lid-ONLY-A');
+  expect(
+    tokenOf(second('い.odt')),
+    '隣の文書へ合言葉が漏れた ── 無関係なノートの中身を上書きする',
   ).toBe('');
 });

@@ -17,8 +17,10 @@
  *  ⑤ 生存通知が絶えたら「開いていない」に戻る
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import {
   ALIVE_TTL_MS,
+  OFFICE_ADOPTED,
   OFFICE_CHANNEL,
   OfficeWindow,
   type OfficeWindowEvent,
@@ -34,16 +36,19 @@ interface FakeChannel {
   names: string[];
   deliver: (type: string, payload?: Record<string, unknown>) => void;
   readonly closed: number;
+  /** 閉じた放送に投げると本物は例外を出す ── その形を作れるようにする。 */
+  throwOnSend: boolean;
 }
 
 /** 放送を模す ── 送った物を控え、受け側へ差し込める。 */
 function fakeChannel(): FakeChannel {
   const sent: { type: string; payload: Record<string, unknown> }[] = [];
   const names: string[] = [];
-  const state = { closed: 0 };
+  const state = { closed: 0, throwOnSend: false };
   let handler: ((ev: MessageEvent) => void) | null = null;
   const ch = {
     postMessage(d: unknown) {
+      if (state.throwOnSend) throw new Error('InvalidStateError: channel is closed');
       const m = d as { pkc3Office: string; payload?: Record<string, unknown> };
       sent.push({ type: m.pkc3Office, payload: m.payload ?? {} });
     },
@@ -59,6 +64,8 @@ function fakeChannel(): FakeChannel {
       handler?.({ data: { pkc3Office: type, payload } } as MessageEvent);
     },
     get closed() { return state.closed; },
+    get throwOnSend() { return state.throwOnSend; },
+    set throwOnSend(v: boolean) { state.throwOnSend = v; },
   };
 }
 
@@ -334,8 +341,32 @@ describe('OfficeWindow', () => {
     const h = harness();
     h.ow.adoptSave('sv-1', 'lid-42');
     expect(h.ch.sent).toEqual([
-      { type: 'adopted', payload: { key: 'sv-1', token: 'lid-42' } },
+      { type: OFFICE_ADOPTED, payload: { key: 'sv-1', token: 'lid-42' } },
     ]);
+  });
+
+  /**
+   * 🔴 **綴りを 2 つの file で突き合わせる**(着地前レビュー 2026-08-16)。
+   *
+   * ⚠ ここが無いと、**一貫して改名しただけで機構が丸ごと死ぬのに全部緑**になる ──
+   * 送る側は自分の literal と、smoke は test 側が投げる literal と比べているだけで、
+   * **両者が同じ文字列かを見る検査が 1 件も無かった**(実際に生き延びる変異を構成した)。
+   * `OFFICE_STAGE_DIR` が同じ理由で `office-stage.test.ts` に持っている形に揃える。
+   */
+  it('🔴 窓の側(素の HTML)が、同じ綴りで受けている', () => {
+    // ⚠ 空振り防止 ── 定数が空だと `toContain('')` は常に真になる
+    expect(OFFICE_ADOPTED.length).toBeGreaterThan(3);
+    const host = readFileSync('public/office/host.html', 'utf-8');
+    expect(
+      host,
+      '本体が返す種別を窓が受けていない ── 2 回目の保存でノートが増える',
+    ).toContain(`d.pkc3Office === '${OFFICE_ADOPTED}'`);
+  });
+
+  it('🔴 放送で投げても、呼び元へ抜けない(棚が残ると 1 件増える)', () => {
+    const h = harness();
+    h.ch.throwOnSend = true;
+    expect(() => { h.ow.adoptSave('sv-1', 'lid-42'); }).not.toThrow();
   });
 
   it('🔴 片方でも空なら放送しない(空の合言葉で対応表を壊さない)', () => {
