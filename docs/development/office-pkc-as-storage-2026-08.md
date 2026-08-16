@@ -92,27 +92,50 @@ IDB の Blob」→ 本稿。どちらも**測る前に書いた後条件**だっ
 > **検知 = UNO の文書イベント / staging = OPFS に `Uint8Array` / 放送 = 鍵だけ /
 > polling は使わない。**
 
-### 3-1. 検知 ── UNO の文書イベント(`OnSaveDone` / `OnSaveAsDone`)
+### 3-1. 検知 ── FS hook(`FS.rename` + `FS.close`)
 
-配布 wasm に `theGlobalEventBroadcaster` / `OnSaveDone` / `OnSaveAsDone` /
-`documentEventOccured` / `addDocumentEventListener` が**実在**する(実測)。
-`uno_scripts` は窓の main thread で `eval` される(`PROXY_TO_PTHREAD = 0` の枝)。
+⚠ **#209 は「検知 = UNO の文書イベント」を選んだが、段 0 の probe で覆った**(2026-08-16)。
+理由は綺麗さではなく **動かない** ── **listener を登録すると、保存のたびに窓が死ぬ**。
 
-🔑 **FS を見張る案より、判定が 1 つ少ない。** LO は profile(`registrymodifications.xcu`)・
-lock file・temp を絶えず書くので、FS 側で捉えると「**どの file が user の文書か**」という
-分類器が生まれる。UNO は**意味として**「文書の保存が終わった」をくれ、`getURL()` で
-path まで来るので、**判定が 0 個**になる(CLAUDE.md §7「判定を増やさない」)。
+実測(known-good の pack、計 7 走):
 
-🚫 **1 秒 polling は採らない**:
-- **範囲の矛盾が原理的に解けない** ── 既存 path を持つ文書は**元の場所**へ書かれるので
-  `/home/web_user` に狭めれば漏れ、全走査は `/` で **20〜27ms**(1,937 files)
-- **定常コストが LO と同じスレッドに乗る**(`PROXY_TO_PTHREAD = 0` なので soffice の main は
-  窓の main thread)── 不可侵指示「**効くのは定常**」「操作の応答」に正面から逆行
-- 前例 0 件(上流の作法は IDBFS `autoPersist` の **ops 差し替え**、本番の前例は JupyterLite `DriveFS`)
+| 走 | Ctrl+S | JS が呼ばれた |
+|---|---|---|
+| listener 無し(対照群) | ✅ 保存成功 | — |
+| `unoObject` を作るが**登録しない** | ✅ 保存成功 | 0 |
+| **登録する**(global / model / 新旧いずれも) | 🔴 **固まる(178 秒 復帰なし)** | **0** |
 
-⚠ **FS hook は捨てない。本番から降ろして probe の監査にする** ── `build/office-wasm/*.mjs`
-の中だけで `FS.close` を数え、**UNO の発火数と突き合わせて取りこぼしを検出**する。
-🔑 本番に 2 つ目の判定を置かないための配置である。
+`Aborted(Assertion failed: invalid handle: 292)` / `RuntimeError: unreachable`。
+🔑 裏方(`acquire` / `queryInterface`)の印は**登録時に 11 回・Ctrl+S 以降 0 回** ──
+**abort は listener の中身ではなく、JS オブジェクトに手が届く前**に起きている。
+🔑 装着自体は全段できており、**合成 broadcast は新旧 2 経路とも届く**(配達路は生きている)。
+壊すのは「JS で UNO を実装したこと」ではなく「**listener として登録したこと**」。
+
+🔴 **これで `invalid handle` の abort は 3 件目**である ── ① LO 側から
+`QInputMethod::show()` を呼ぶ ② Qt の `update()` から `updateInputElement()` を呼ぶ(#156)
+③ UNO listener の登録。**この一式では「LO のスレッド文脈から JS/embind のオブジェクトへ
+触る」経路が全部死ぬ**(emval の handle 表は realm ごと)。設計の前提として残す。
+
+**したがって FS hook を包む**(polling ではない):
+
+- 包むのは **`FS.rename` と `FS.close` の 2 つ**。⚠ **両方要る** ── 実測で**形が違う**:
+  - 既存 path の上書き: temp へ write → **`rename`** で置換
+  - 新規保存: **最終 path へ直接 `write` + `close`**(rename ではない)
+  - → `rename` だけ見ると**新規を落とし**、`close` だけ見ると**temp を拾う**
+- 判定は **O(1)**: `/work` と `/home/web_user` の node を覚え、`stream.node.parent` の
+  **ポインタ比較**。⚠ `FS.getPath` は木を遡るので使わない
+- **静穏化して畳む**(最後の `close`/`rename` から ~300ms)── 同じ path に `close` が
+  3〜4 回来るので、畳まないと **1 回の保存が 4 通の放送**になる
+- ⚠ `.tmp` を除外。⚠ 名前は UI 言語で変わる(`--language=ja` なので `無題 1.odt` ──
+  **非 ASCII + 空白**)
+- 費用: boot 126 回で **上乗せ合計 1.57ms**、保存 1 回で 0.4〜0.7ms。⚠ hook の中は
+  同期の軽い記録だけ(呼び元は pthread で syscall は main へ proxy = 重いと worker が止まる)
+
+🔴 **`addDocumentEventListener` を製品コードに書かないことを test で pin する** ──
+この結論をコードに残さないと、次に読む人が「UNO のほうが判定 0 個で綺麗」を根拠に戻す。
+
+🚫 **1 秒 polling も採らない**(#209): 範囲の矛盾が原理的に解けない(既存 path は元の場所へ
+書かれる)/ 定常コストが LO と同じスレッドに乗る(`PROXY_TO_PTHREAD = 0`)/ 前例 0 件。
 
 ### 3-2. staging ── OPFS に `Uint8Array`
 
