@@ -6,6 +6,7 @@
  * 「画面には出せるのに別窓には出せない PDF」という食い違いが生まれていた。
  */
 import { describe, expect, it } from 'vitest';
+import { EXT_MIME } from '@adapter/ui/actions/attach';
 import {
   assetPreviewKind,
   assetWindowKind,
@@ -71,27 +72,20 @@ describe('canOpenAssetWindow', () => {
    * (`attach.ts` の `EXT_MIME` の値)にする ── 代替物で満たせない条件になる。
    */
   it('🔴 別窓に出せるのは、画面の見せ方が image / pdf のものだけ(集合で pin)', () => {
-    // ⚠ `attach.ts:EXT_MIME` の値の全数 + 端の数件(取込で実際に付く MIME)
+    /**
+     * ⚠ **母集団は実装から採る**(2026-08-16 に手写しをやめた ── 着地前レビュー D1)。
+     * 「`EXT_MIME` の値の全数」と書いてありながら**手で写していた**ので、
+     * 2026-08-16 に Office の 14 種が増えたとき **1 件も追随しなかった**
+     * (docx だけ偶然入っていた)── 表明が嘘になっていた。
+     */
     const CORPUS = [
-      'text/markdown',
-      'text/plain',
-      'text/csv',
-      'application/json',
-      'text/html',
-      'image/png',
-      'image/jpeg',
-      'image/gif',
-      'image/webp',
-      'image/svg+xml',
-      'application/pdf',
-      'audio/mpeg',
-      'audio/wav',
-      'video/mp4',
-      'video/webm',
+      ...new Set(Object.values(EXT_MIME)),
+      // 端の数件(表に無いが取込で実際に付く)
       'application/octet-stream',
       'application/zip',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     ];
+    // 空振り防止 ── 母集団が痩せると、この集合の等値は何も見ていない
+    expect(CORPUS.length, '母集団が小さすぎる').toBeGreaterThan(20);
     const opened = CORPUS.filter((m) => canOpenAssetWindow(m));
     expect(opened.map((m) => assetPreviewKind(m)).sort(), '別窓の集合が image/pdf からずれた')
       .toEqual(['image', 'image', 'image', 'image', 'image', 'pdf']);

@@ -94,6 +94,20 @@ const EXT_BY_MIME: Readonly<Record<string, string>> = {
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
   'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+  // 🔴 **ODF と rtf**(2026-08-16、#205)。⚠ 対称の反対側が抜けていた ──
+  //    取込側(`attach.ts` の `EXT_MIME`)に足したとき、**ここが `.bin` のまま**だと
+  //    「PKC で開けるのに、書き出すと外で開けない」になる
+  'application/vnd.oasis.opendocument.text': 'odt',
+  'application/vnd.oasis.opendocument.spreadsheet': 'ods',
+  'application/vnd.oasis.opendocument.presentation': 'odp',
+  'application/rtf': 'rtf',
+  // ⚠ 古い綴り(一部のブラウザ / OS が返す)。⚠ **逆向きには使わない**
+  //    (`rtf` → `application/rtf` が正 ── parity test はそちらだけを見る)
+  'text/rtf': 'rtf',
+  'application/vnd.oasis.opendocument.graphics': 'odg',
+  'application/vnd.oasis.opendocument.text-flat-xml': 'fodt',
+  'application/vnd.oasis.opendocument.spreadsheet-flat-xml': 'fods',
+  'application/vnd.oasis.opendocument.presentation-flat-xml': 'fodp',
 };
 
 export function extForMime(mime: string | null): string {

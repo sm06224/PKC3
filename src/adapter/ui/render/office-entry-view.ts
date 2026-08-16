@@ -115,6 +115,11 @@ export interface OfficeAttachment {
   readonly name: string;
   readonly mime: string;
   readonly assetKey: string;
+  /**
+   * 🔴 **どのノートの添付か**(#205)。⚠ 落とすと、その窓での保存が
+   * **このノートを更新せず、新しい添付ノートになる**。
+   */
+  readonly lid: string;
 }
 
 /**
@@ -122,7 +127,7 @@ export interface OfficeAttachment {
  *
  * ⚠ 返るのは 1 要素だけ ── 呼び側は**置き場所を選ばない**(添付の情報の器へ
  * そのまま append する)。ボタンは行に並び、理由は次の行に落ちる。
- * ⚠ 開くのに要る 3 つ(key / 名前 / MIME)は**ボタンの属性に載せる** ──
+ * ⚠ 開くのに要る 4 つ(key / 名前 / MIME / **lid**)は**ボタンの属性に載せる** ──
  * 受け口(binder)は click の同期のうちに読む必要があり、本文を読み直す暇が無い
  * (`await` を挟むと user gesture が切れてポップアップ遮断に遭う)。
  */
@@ -145,6 +150,9 @@ export function buildOfficeEntry(
     btn.setAttribute('data-pkc-asset-key', att.assetKey);
     btn.setAttribute('data-pkc-asset-name', att.name);
     btn.setAttribute('data-pkc-asset-mime', att.mime);
+    // 🔴 **4 つ目**(#205)── 保存の戻り先。⚠ 3 つのままだと戻り先が分からず、
+    //    上書き保存が**新しいノートを増やす**
+    btn.setAttribute('data-pkc-office-lid', att.lid);
     // ⚠ 別窓であることを**押す前に**言う(勝手に窓が増えたように見せない)
     btn.title = '別の窓で開きます。PKC3 の編集はそのまま続けられます';
     return btn;

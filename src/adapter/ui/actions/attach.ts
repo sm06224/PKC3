@@ -47,8 +47,15 @@ export interface AttachDeps {
 }
 
 
-/** file.type が空のときの拡張子 fallback(PKC2 は無くて後段の補正 hack を生んだ)。 */
-const EXT_MIME: Record<string, string> = {
+/**
+ * file.type が空のときの拡張子 fallback(PKC2 は無くて後段の補正 hack を生んだ)。
+ *
+ * 🔴 **export する**(2026-08-16、着地前レビュー R11)。⚠ 同じ「拡張子 ↔ MIME」の
+ * 対応が **3 か所**に在る(ここ / `pkc3-markdown-zip.ts` の `EXT_BY_MIME` /
+ * `office-entry.ts` の `OFFICE_MIMES` + `OFFICE_EXTS`)── 手写しの例を並べた test
+ * では**表ごと消す変異が生き延びる**ので、**母集団をここから採って全数で回す**。
+ */
+export const EXT_MIME: Record<string, string> = {
   md: 'text/markdown',
   txt: 'text/plain',
   csv: 'text/csv',
@@ -65,6 +72,26 @@ const EXT_MIME: Record<string, string> = {
   wav: 'audio/wav',
   mp4: 'video/mp4',
   webm: 'video/webm',
+  // 🔴 **Office**(2026-08-16、#205)。⚠ 10 種とも**1 つも入っていなかった** ──
+  //    OS が MIME を付けない環境と、**Office の窓から戻ってきた bytes**
+  //    (`File` ではないので `type` が無い)が全部 `application/octet-stream` に
+  //    落ちていた。帰結: preview が出ない / md zip 書出しの名前が **`.bin`** になる
+  odt: 'application/vnd.oasis.opendocument.text',
+  ods: 'application/vnd.oasis.opendocument.spreadsheet',
+  odp: 'application/vnd.oasis.opendocument.presentation',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  doc: 'application/msword',
+  xls: 'application/vnd.ms-excel',
+  ppt: 'application/vnd.ms-powerpoint',
+  rtf: 'application/rtf',
+  // ⚠ 入口(`office-entry.ts` の `OFFICE_EXTS`)には**前から在った**のに、
+  //    この表と書出しの逆表に無かった ── 「開けるのに書き出すと `.bin`」だった
+  odg: 'application/vnd.oasis.opendocument.graphics',
+  fodt: 'application/vnd.oasis.opendocument.text-flat-xml',
+  fods: 'application/vnd.oasis.opendocument.spreadsheet-flat-xml',
+  fodp: 'application/vnd.oasis.opendocument.presentation-flat-xml',
 };
 
 export function resolveMime(name: string, declared: string): string {
@@ -72,6 +99,91 @@ export function resolveMime(name: string, declared: string): string {
   if (!name.includes('.')) return 'application/octet-stream'; // 拡張子なし
   const ext = name.split('.').pop()?.toLowerCase() ?? '';
   return EXT_MIME[ext] ?? 'application/octet-stream';
+}
+
+/**
+ * 取り込む 1 件。⚠ **`File` でなくてよい** ── Office の窓から戻ってきた bytes は
+ * `File` ではないので、`name` / `type` を**外から**与える形にしてある(#205)。
+ */
+export interface AttachItem {
+  readonly name: string;
+  /** 宣言 MIME(空なら拡張子から引く)。 */
+  readonly type: string;
+  readonly size: number;
+  readonly blob: Blob;
+}
+
+/** 取り込めたか。⚠ `null` = 取り込まなかった(理由は既に `OP_FAILED` で出ている)。 */
+export interface AttachedOne {
+  readonly lid: string;
+  readonly assetKey: string;
+  readonly mime: string;
+  readonly hash: string | null;
+}
+
+/**
+ * 🔴 **添付 1 件を取り込む。**(2026-08-16 に `attachFiles` から取り出した ── #205 で
+ * Office の保存が同じ道を通るため。⚠ **`attachFiles` をそのまま呼ばせない**:
+ * あちらは「編集中なら断る」「gate が断る」「選択を奪う」の 3 つを user のクリック
+ * 前提で持っており、**別窓から非同期に届く保存**に当てると bytes ごと失われる)
+ *
+ * ⚠ `known` は content addressing の重複判定。**渡さなければ毎回 put する** ──
+ * IDB の `put` は同じ key なら上書きなので壊れないが、無駄に書く。
+ */
+export async function attachOne(
+  dispatcher: Dispatcher,
+  deps: AttachDeps,
+  item: AttachItem,
+  known?: Set<string>,
+): Promise<AttachedOne | null> {
+  // quota preflight ── 足りないときは黙って壊れる前に可視で止める
+  if (deps.estimate) {
+    const est = await deps.estimate();
+    if (
+      est.quota !== undefined &&
+      est.usage !== undefined &&
+      est.quota - est.usage < item.size * 1.2
+    ) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: `添付を保存する空き容量が不足しています: ${item.name}`,
+      });
+      return null;
+    }
+  }
+
+  const mime = resolveMime(item.name, item.type);
+  // key = 中身のハッシュ。同一 bytes なら**必ず**同じ key に落ちる
+  // ⚠ 帰結 2 点(review #5): sqlite assets.mime は**初回 file のまま**
+  // (表示は entry frontmatter 側 mime を使うので正しい ── assets.mime を
+  // 信じる消費者を作らない)。asset 削除は参照カウント前提になる
+  // (PKC3 の GC は body 走査ベースなので元から正しい)
+  // 🔑 ハッシュは**ワーカーで取る**(段㉓)。口が無い環境だけその場で回す
+  //    ── 返る key は同じ関数(`assetKeyFromHash`)から出るので、
+  //    「ワーカーは速さの話であって、正しさの話ではない」が保たれる
+  const { key: assetKey, hash } = deps.hashBlob
+    ? assetKeyFromHash(await deps.hashBlob(item.blob))
+    : await identifyAsset(item.blob);
+  if (!known?.has(assetKey)) {
+    await deps.putBlob(assetKey, item.blob);
+    await deps.putMeta({ key: assetKey, mime, size: item.size, hash });
+    known?.add(assetKey);
+  }
+
+  const lid = generateLid();
+  dispatcher.dispatch({
+    type: 'CREATE_ENTRY',
+    archetype: 'attachment',
+    lid,
+    title: item.name,
+    body: attachmentBody({ name: item.name, mime, size: item.size, assetKey, hash }),
+    edit: false, // 添付は editor に入らない(PKC2 の silent attach と同じ)
+  });
+  // 🔴 **作れたことを確かめてから「作れた」と言う。** `CREATE_ENTRY` の reducer は
+  //    `phase !== 'ready'` を**黙って捨てる** ── 確かめないと、Office の保存を
+  //    「取り込んだ」ことにして棚から消し、**文書が消える**
+  if (!dispatcher.getState().entryMetas.has(lid)) return null;
+  return { lid, assetKey, mime, hash };
 }
 
 /** 取込本体。file ごとに独立に成否を扱う(1 個の失敗が batch を殺さない)。 */
@@ -99,48 +211,12 @@ export async function attachFiles(
 
   for (const file of files) {
     try {
-      // quota preflight ── 足りないときは黙って壊れる前に可視で止める
-      if (deps.estimate) {
-        const est = await deps.estimate();
-        if (
-          est.quota !== undefined &&
-          est.usage !== undefined &&
-          est.quota - est.usage < file.size * 1.2
-        ) {
-          dispatcher.dispatch({
-            type: 'OP_FAILED',
-            error: `添付を保存する空き容量が不足しています: ${file.name}`,
-          });
-          continue;
-        }
-      }
-
-      const mime = resolveMime(file.name, file.type);
-      // key = 中身のハッシュ。同一 bytes なら**必ず**同じ key に落ちる
-      // ⚠ 帰結 2 点(review #5): sqlite assets.mime は**初回 file のまま**
-      // (表示は entry frontmatter 側 mime を使うので正しい ── assets.mime を
-      // 信じる消費者を作らない)。asset 削除は参照カウント前提になる
-      // (PKC3 の GC は body 走査ベースなので元から正しい)
-      // 🔑 ハッシュは**ワーカーで取る**(段㉓)。口が無い環境だけその場で回す
-      //    ── 返る key は同じ関数(`assetKeyFromHash`)から出るので、
-      //    「ワーカーは速さの話であって、正しさの話ではない」が保たれる
-      const { key: assetKey, hash } = deps.hashBlob
-        ? assetKeyFromHash(await deps.hashBlob(file))
-        : await identifyAsset(file);
-      if (!known.has(assetKey)) {
-        await deps.putBlob(assetKey, file);
-        await deps.putMeta({ key: assetKey, mime, size: file.size, hash });
-        known.add(assetKey);
-      }
-
-      dispatcher.dispatch({
-        type: 'CREATE_ENTRY',
-        archetype: 'attachment',
-        lid: generateLid(),
-        title: file.name,
-        body: attachmentBody({ name: file.name, mime, size: file.size, assetKey, hash }),
-        edit: false, // 添付は editor に入らない(PKC2 の silent attach と同じ)
-      });
+      await attachOne(
+        dispatcher,
+        deps,
+        { name: file.name, type: file.type, size: file.size, blob: file },
+        known,
+      );
     } catch (e) {
       dispatcher.dispatch({
         type: 'OP_FAILED',

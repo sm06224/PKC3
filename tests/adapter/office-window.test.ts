@@ -199,13 +199,66 @@ describe('OfficeWindow', () => {
     expect(h.ch.sent.filter((s) => s.type === 'document')).toEqual([]);
   });
 
+  /**
+   * 🔴 **保存は「鍵」で来る**(#205)。⚠ 2026-08-16 まで bytes を載せていたが、
+   * bytes は OPFS の棚に置いて**鍵だけ放送する**形へ変えた ── 窓が閉じかけの
+   * 状態で Blob を境界の向こうへ渡すと落ちる(`ERR_SOURCE_DIED_IN_TRANSIT`、実測)。
+   */
   it('🔴 空の保存は通さない(添付を空で上書きしない)', () => {
     const h = harness();
-    h.ch.deliver('saved', { name: 'a.docx', bytes: new Uint8Array(0) });
-    h.ch.deliver('saved', { name: 'a.docx', bytes: 'not bytes' });
-    expect(h.seen.filter((e) => e.type === 'saved'), '空も別型も通さない').toEqual([]);
-    h.ch.deliver('saved', { name: 'a.docx', bytes: new Uint8Array([1]) });
-    expect(h.seen.filter((e) => e.type === 'saved').length).toBe(1);
+    h.ch.deliver('saved', { name: 'a.docx', key: '', size: 10 });
+    h.ch.deliver('saved', { name: 'a.docx', key: 'o1', size: 0 });
+    h.ch.deliver('saved', { name: 'a.docx', key: 'o1' });
+    h.ch.deliver('saved', { name: 'a.docx', key: 12, size: 10 });
+    expect(h.seen.filter((e) => e.type === 'saved'), '鍵なし・大きさなしを通した').toEqual([]);
+    h.ch.deliver('saved', { name: 'a.docx', key: 'o1', size: 10 });
+    expect(h.seen.filter((e) => e.type === 'saved')).toEqual([
+      { type: 'saved', key: 'o1', name: 'a.docx', size: 10 },
+    ]);
+  });
+
+  /**
+   * 🔴 **窓は「渡せなかった」も言う**(#205)。⚠ 黙って落とすと、user は
+   * 保存したつもりのまま Office を閉じる。
+   */
+  it('🔴 保存を渡せなかったことが呼び出し側へ届く', () => {
+    const h = harness();
+    h.ch.deliver('save-failed', { reason: 'OPFS がありません' });
+    expect(h.seen.filter((e) => e.type === 'save-failed')).toEqual([
+      { type: 'save-failed', reason: 'OPFS がありません' },
+    ]);
+  });
+
+  /**
+   * 🔴 **`degraded` を捨てない**(#117 / 2026-08-16 に判明)。窓は `host.html` の
+   * `degrade()` から放送していたのに、`parseEvent` に case が無く `null` に落ちて
+   * **黙って消えていた** ── これは「保存が効かなくなった」を伝える唯一の信号である。
+   */
+  it('🔴 不安定になったことが呼び出し側へ届く', () => {
+    const h = harness();
+    h.ch.deliver('degraded', { reason: 'func is not a constructor' });
+    expect(h.seen.filter((e) => e.type === 'degraded'), 'degraded を捨てている').toEqual([
+      { type: 'degraded', reason: 'func is not a constructor' },
+    ]);
+  });
+
+  /**
+   * 🔴 **合言葉(lid)を窓へ預ける**(#205)。⚠ 落とすと、その窓での上書き保存が
+   * **元のノートを更新せず、新しい添付ノートを増やす**。
+   */
+  it('🔴 文書と一緒に合言葉が渡る / 渡さなければ空', () => {
+    const h = harness();
+    h.ow.open({ expectDocument: true });
+    h.ow.provideDocument('a.docx', new Uint8Array([1]), 'lid-9');
+    h.ch.deliver('ready-for-document');
+    const docs = h.ch.sent.filter((s) => s.type === 'document');
+    expect(docs[0]!.payload.token, '合言葉が落ちている').toBe('lid-9');
+
+    const h2 = harness();
+    h2.ow.open({ expectDocument: true });
+    h2.ow.provideDocument('a.docx', new Uint8Array([1]));
+    h2.ch.deliver('ready-for-document');
+    expect(h2.ch.sent.filter((s) => s.type === 'document')[0]!.payload.token).toBe('');
   });
 
   it('対応外・未配備・描画完了は、そのまま呼び出し側へ伝える', () => {

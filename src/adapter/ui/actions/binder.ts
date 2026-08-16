@@ -103,7 +103,7 @@ export interface BinderServices {
    * ⚠ **同期で呼ぶ**(実体側が `window.open` を user gesture の中で撃つ)。
    * ⚠ 引数は押したボタンの属性から採る ── lid から本文を読み直す暇が無い。
    */
-  openOffice?(target: { name: string; mime: string; assetKey: string }): void;
+  openOffice?(target: { name: string; mime: string; assetKey: string; lid: string }): void;
   /**
    * 🔴 **Office 一式(約 77MB)を入れる / 消す**(#88 / O6-a。user 裁定 2026-08-10
    * 「実行したい人が手動で設定した際に追加ダウンロードと idb とか opfs に配備して」)。
@@ -1102,7 +1102,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    *
    * ⚠ **同期のうちに渡しきる。** 窓は user gesture の中でしか開けないので、
    * ここで lid から本文を読み直す(= `await`)ことはできない ── 開くのに要る
-   * 3 つは**押したボタンの属性**に載っている(`office-entry-view.ts` が載せる)。
+   * 4 つは**押したボタンの属性**に載っている(`office-entry-view.ts` が載せる)。
    */
   'open-office': (_dispatcher, target, services) => {
     const assetKey = target.getAttribute('data-pkc-asset-key');
@@ -1111,6 +1111,9 @@ const ACTIONS: Record<string, ActionHandler> = {
       assetKey,
       name: target.getAttribute('data-pkc-asset-name') ?? '',
       mime: target.getAttribute('data-pkc-asset-mime') ?? '',
+      // 🔴 **保存の戻り先**(#205)。⚠ 読み落とすと、Office での上書き保存が
+      //    このノートを更新せず、新しい添付ノートを増やす
+      lid: target.getAttribute('data-pkc-office-lid') ?? '',
     });
   },
   /**

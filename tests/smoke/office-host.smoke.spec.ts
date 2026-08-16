@@ -276,6 +276,9 @@ async function seedFakePack(
               window.__written.push(p);
               window.__files = window.__files || {};
               window.__files[p] = String(data);
+              // ⚠ 保存の判定は size と mtime の両方を見る ── 書くたびに進める
+              window.__mtimes = window.__mtimes || {};
+              window.__mtimes[p] = (window.__mtimes[p] || 0) + 1000;
               if (p.indexOf('registrymodifications.xcu') !== -1) {
                 window.__xcu = String(data);
                 window.__order.push('xcu');
@@ -287,6 +290,35 @@ async function seedFakePack(
               window.__files = window.__files || {};
               if (!(p in window.__files)) throw new Error('ENOENT: ' + p);
               return window.__files[p];
+            },
+            // 保存を捉える経路(#205)を実際に走らせるための最小の FS。
+            //  これが無いと armSaveWatch は積まれても一度も通らない
+            //  (CLAUDE.md 検証の規律 2「弱いのではなく走っていない」)。
+            //  stub は本物の意味論を真似る: open が返す stream は path を持ち
+            //  (FS.getPath(node) 由来)、stat().mtime は Date である
+            open: function (p) {
+              window.__files = window.__files || {};
+              if (!(p in window.__files)) throw new Error('ENOENT: ' + p);
+              return { path: p, position: 0 };
+            },
+            close: function () {},
+            read: function (stream, buf, off, len, pos) {
+              var bytes = new TextEncoder().encode(window.__files[stream.path]);
+              var n = Math.min(len, bytes.length - pos);
+              if (n <= 0) return 0;
+              buf.set(bytes.subarray(pos, pos + n), off);
+              return n;
+            },
+            stat: function (p) {
+              window.__files = window.__files || {};
+              if (!(p in window.__files)) throw new Error('ENOENT: ' + p);
+              var bytes = new TextEncoder().encode(window.__files[p]);
+              window.__mtimes = window.__mtimes || {};
+              return { size: bytes.length, mtime: new Date(window.__mtimes[p] || 1) };
+            },
+            rename: function (a, b) {
+              window.__files[b] = window.__files[a];
+              delete window.__files[a];
             },
           },
           callMain: function (a) { window.__args = a; window.__order.push('callMain'); },
@@ -966,4 +998,145 @@ test('🔴 裏に居るときは、そう名乗る(値がべた書きでない)'
   for (const b of beats) {
     expect(b.payload?.visible, '裏に居るのに「表」と名乗っている').toBe(false);
   }
+});
+
+/**
+ * 🔴 **保存が PKC へ届く**(#205 段 A)── 窓の側の**端から端まで**。
+ *
+ * ⚠ この経路は unit では届かない部分が 3 つある(hook の装着 / OPFS への
+ * 書き出し / 放送)。⚠ そして「積んだ」ことを見るだけの test は無意味である
+ * ── `armSaveWatch` を呼ぶだけなら、hook が空でも通る(CLAUDE.md §2)。
+ * 🔑 だから観測点は **①棚に bytes が入ったこと**と**②鍵の放送が届いたこと**の 2 つ。
+ *
+ * ⚠ 保存の形は 2 通りある(実測):既存 path の上書き = **rename**、
+ * 新規保存 = 最終 path へ直接 **write + close**。**両方**を当てる。
+ */
+test('🔴 Office の保存が、棚に置かれて鍵が放送される(新規 = close / 上書き = rename)', async ({
+  page,
+}) => {
+  await page.goto('/office/host.html');
+  await seedFakePack(page);
+  // ⚠ **前の test の残骸を消す**(棚は origin 共有 ── 残っていると数が合わない)
+  await page.evaluate(async () => {
+    const root = await navigator.storage.getDirectory();
+    await root.removeEntry('pkc3-office-stage', { recursive: true }).catch(() => {});
+  });
+  /**
+   * 🔴 **合言葉(lid)を預けた状態で開く**(2026-08-16、着地前レビュー R3)。
+   * ⚠ この中段 ── 窓が `document` の payload から token を覚え、staging の meta に
+   * 載せるところ ── には test が 1 件も無く、**主機能を殺す変異が 3 本生き延びて**
+   * いた(全部の保存が「新規ノート」になり、元のノートは二度と更新されない)。
+   */
+  await page.addInitScript(() => {
+    const ch = new BroadcastChannel('pkc3-office');
+    ch.onmessage = (ev: MessageEvent): void => {
+      const d = ev.data as { pkc3Office?: string };
+      if (d?.pkc3Office !== 'ready-for-document') return;
+      ch.postMessage({
+        pkc3Office: 'document',
+        payload: {
+          name: '報告書.odt',
+          bytes: new TextEncoder().encode('ORIGINAL'),
+          token: 'lid-TEST',
+        },
+      });
+    };
+  });
+  await page.goto('/office/host.html?name=%E5%A0%B1%E5%91%8A%E6%9B%B8.odt&await-doc=1');
+  await expect(page.locator('#status')).toContainText('表示中', { timeout: 15_000 });
+  // 空振り防止 ── 文書が実際に流し込まれたか(流れていなければ token も検査できない)
+  expect(
+    await page.evaluate(() => (window as unknown as { __loDocPath?: string }).__loDocPath),
+    '文書が流し込まれていない ── この test は合言葉を検査できていない',
+  ).toBe('/work/報告書.odt');
+
+  const got = await page.evaluate(async () => {
+    const w = window as unknown as {
+      __lo: {
+        FS: {
+          writeFile(p: string, d: string): void;
+          open(p: string): unknown;
+          close(s: unknown): void;
+          rename(a: string, b: string): void;
+          mkdirTree(p: string): void;
+        };
+      };
+    };
+    const seen: Array<{ key: string; name: string; size: number }> = [];
+    const ch = new BroadcastChannel('pkc3-office');
+    ch.onmessage = (ev: MessageEvent): void => {
+      const d = ev.data as { pkc3Office?: string; payload?: { key: string; name: string; size: number } };
+      if (d?.pkc3Office === 'saved' && d.payload) seen.push(d.payload);
+    };
+
+    // ⚠ stub は本物と同じく親ディレクトリを要求する(MEMFS の ENOENT)
+    w.__lo.FS.mkdirTree('/home/web_user');
+    w.__lo.FS.mkdirTree('/work');
+    // ① **開いた文書以外**の新規保存 = 最終 path へ直接 write して close
+    w.__lo.FS.writeFile('/home/web_user/無題 1.odt', 'NEW-DOC-BYTES');
+    w.__lo.FS.close(w.__lo.FS.open('/home/web_user/無題 1.odt'));
+    // ② **開いた当の文書**の上書き = temp へ書いて rename で置換
+    w.__lo.FS.writeFile('/work/lu42.tmp', 'OVERWRITTEN-BYTES!!');
+    w.__lo.FS.rename('/work/lu42.tmp', '/work/報告書.odt');
+
+    // 静穏(700ms)+ 見張り(500ms)を越えるまで待つ
+    const t0 = Date.now();
+    while (seen.length < 2 && Date.now() - t0 < 12_000) {
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    ch.close();
+
+    // 棚の中身を読む(本体のタブが引き取るのと同じ場所)
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle('pkc3-office-stage', { create: true });
+    const files: Record<string, string> = {};
+    for await (const [name, handle] of (
+      dir as unknown as { entries(): AsyncIterable<[string, FileSystemFileHandle]> }
+    ).entries()) {
+      files[name] = await (await handle.getFile()).text();
+    }
+    return { seen, files };
+  });
+
+  // ── ①「保存された」が 2 通、鍵つきで届く ─────────────────────────
+  expect(got.seen.map((s) => s.name).sort(), '保存の放送が届いていない').toEqual([
+    '報告書.odt',
+    '無題 1.odt',
+  ]);
+  for (const s of got.seen) {
+    expect(s.key, '鍵が空 ── 引き取る側が棚を引けない').not.toBe('');
+    expect(s.size, '大きさが 0').toBeGreaterThan(0);
+  }
+
+  // ── ② 棚に **bytes そのもの**が入っている(放送だけでは届いていない)──
+  const bins = Object.entries(got.files).filter(([n]) => n.endsWith('.bin'));
+  expect(bins.length, '棚に bytes が置かれていない').toBe(2);
+  expect(bins.map(([, v]) => v).sort(), '棚の中身が保存した bytes でない').toEqual([
+    'NEW-DOC-BYTES',
+    'OVERWRITTEN-BYTES!!',
+  ]);
+  // 🔑 meta は **`.json` が commit の印**(`.bin` を先に閉じてから置く)
+  const metas = Object.entries(got.files).filter(([n]) => n.endsWith('.json'));
+  expect(metas.length).toBe(2);
+  const byName = new Map<string, { key: string; name: string; token?: string; v: number }>();
+  for (const [, text] of metas) {
+    const m = JSON.parse(text) as { key: string; name: string; size: number; v: number; token?: string };
+    expect(m.v).toBe(1);
+    expect(got.files[`${m.key}.bin`], 'meta が指す bytes が無い').toBeDefined();
+    byName.set(m.name, m);
+  }
+  // ── ③ 🔴 **合言葉は「開いた当の文書」にだけ付く**(レビュー R2 / R3)──────
+  expect(
+    byName.get('報告書.odt')?.token,
+    '開いた文書の保存に合言葉が付いていない ── 上書き保存が新しいノートを増やす',
+  ).toBe('lid-TEST');
+  expect(
+    byName.get('無題 1.odt')?.token ?? '',
+    '別の文書の保存に合言葉が付いた ── 開いていたノートが別物に差し替わる',
+  ).toBe('');
+  // ⚠ temp を拾っていない(拾うと「保存」として親へ流れる)
+  expect(
+    metas.map(([, t]) => (JSON.parse(t) as { name: string }).name),
+    'LO の temp を保存として拾っている',
+  ).not.toContain('lu42.tmp');
 });

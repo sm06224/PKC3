@@ -64,9 +64,31 @@ export type OfficeWindowEvent =
    * 判断して 2 つ目の窓を開く ── 1 窓 約 750MB)。だから停止はこれで別に伝わる。
    */
   | { readonly type: 'crashed'; readonly reason: string }
+  /**
+   * 版面は生きているが**命令が通らなくなった**(`host.html` の `degrade()`)。
+   *
+   * ⚠ **2026-08-16 まで、これは受け側で黙って捨てられていた** ── 窓は
+   * `host.html` の `degrade()` から放送していたのに `parseEvent` に case が無く
+   * `null` に落ちていた。**保存が効かなくなったことを user へ伝える唯一の信号**
+   * なので、取りこぼすと「保存したのに残っていない」だけが残る。
+   * ⚠ 他 file を**行番号で指さない**(この件の初稿は 146 行ずれていた)。
+   */
+  | { readonly type: 'degraded'; readonly reason: string }
   | { readonly type: 'ready-for-document' }
   | { readonly type: 'painted'; readonly ms: number }
-  | { readonly type: 'saved'; readonly name: string; readonly bytes: Uint8Array }
+  /**
+   * 🔴 **保存された**(#205)。⚠ **bytes は載っていない ── 鍵だけ**である。
+   *
+   * bytes は窓が OPFS の棚(`office-stage.ts`)へ置いており、引き取るのは
+   * **writer リースを持つタブだけ**(sqlite の `assets` 行を書けるのがそこだけなので)。
+   * ⚠ 放送は全タブに届くので、鍵を見ただけで書きに行かないこと。
+   */
+  | { readonly type: 'saved'; readonly key: string; readonly name: string; readonly size: number }
+  /**
+   * 🔴 **保存を PKC へ渡せなかった**(OPFS が無い / 棚に書けない)。
+   * ⚠ **黙って落とさない** ── user は保存したつもりでいる。
+   */
+  | { readonly type: 'save-failed'; readonly reason: string }
   | { readonly type: 'not-installed' }
   | { readonly type: 'unsupported'; readonly missing: readonly string[] }
   | { readonly type: 'closed' };
@@ -115,7 +137,7 @@ export class OfficeWindow {
   private readonly now: () => number;
   private readonly baseUrl: string;
   private lastAliveAt = 0;
-  private pendingDoc: { name: string; bytes: Uint8Array } | null = null;
+  private pendingDoc: { name: string; bytes: Uint8Array; token: string } | null = null;
   /** 窓が先に「ちょうだい」と言ってきたが、まだ bytes が無い状態。 */
   private askedForDoc = false;
   private readonly listeners = new Set<(ev: OfficeWindowEvent) => void>();
@@ -153,7 +175,7 @@ export class OfficeWindow {
    */
   open(opts: OpenOptions = {}): OpenOutcome {
     this.pendingDoc = opts.bytes
-      ? { name: opts.name ?? 'document', bytes: opts.bytes }
+      ? { name: opts.name ?? 'document', bytes: opts.bytes, token: '' }
       : null;
     // ⚠ 新しく開く / 読み直させるので、前の「ちょうだい」は無効にする
     this.askedForDoc = false;
@@ -180,11 +202,16 @@ export class OfficeWindow {
    *
    * ⚠ 窓が既に「ちょうだい」と言っていたら**その場で**送る。まだなら控えておき、
    * 言ってきた時に送る ── どちらの順序でも落とさない。
+   *
+   * @param token 🔴 **どのノートの添付か**を表す合言葉(#205)。窓がそのまま
+   *   保存に載せて返す ── ⚠ **こちらの記憶に頼らない**(窓は `noopener` で handle が
+   *   無く、PKC のタブを読み直すと対応表が消えるが、窓は別 process で生き残る)。
+   *   ⚠ 省くと、その窓の保存は**新しい添付ノート**になる。
    */
-  provideDocument(name: string, bytes: Uint8Array): void {
+  provideDocument(name: string, bytes: Uint8Array, token = ''): void {
     // ⚠ 空を渡して Start Center を上書きしない
     if (bytes.byteLength === 0) return;
-    this.pendingDoc = { name, bytes };
+    this.pendingDoc = { name, bytes, token };
     if (this.askedForDoc) this.sendDocument();
   }
 
@@ -238,7 +265,7 @@ export class OfficeWindow {
     //    ここだけはコピーになる。大きい文書で効くなら IDB 経由の受け渡しへ替える。
     this.ch.postMessage({
       pkc3Office: 'document',
-      payload: { name: doc.name, bytes: doc.bytes },
+      payload: { name: doc.name, bytes: doc.bytes, token: doc.token },
     });
   }
 }
@@ -247,7 +274,7 @@ function parseEvent(data: unknown): OfficeWindowEvent | null {
   if (typeof data !== 'object' || data === null) return null;
   const d = data as { pkc3Office?: unknown; payload?: unknown };
   const p = (d.payload ?? {}) as {
-    ms?: unknown; missing?: unknown; name?: unknown; bytes?: unknown;
+    ms?: unknown; missing?: unknown; name?: unknown; key?: unknown; size?: unknown;
     visible?: unknown; reason?: unknown;
   };
   switch (d.pkc3Office) {
@@ -256,6 +283,8 @@ function parseEvent(data: unknown): OfficeWindowEvent | null {
       return { type: 'alive', visible: p.visible === true };
     case 'crashed':
       return { type: 'crashed', reason: typeof p.reason === 'string' ? p.reason : '' };
+    case 'degraded':
+      return { type: 'degraded', reason: typeof p.reason === 'string' ? p.reason : '' };
     case 'ready-for-document':
       return { type: 'ready-for-document' };
     case 'painted':
@@ -267,13 +296,18 @@ function parseEvent(data: unknown): OfficeWindowEvent | null {
     case 'unsupported':
       return { type: 'unsupported', missing: Array.isArray(p.missing) ? p.missing.map(String) : [] };
     case 'saved':
-      // ⚠ **中身を検めてから通す。** 空の保存で添付を上書きしない
-      if (!(p.bytes instanceof Uint8Array) || p.bytes.byteLength === 0) return null;
+      // ⚠ **鍵と大きさを検めてから通す。** 空の保存で添付を上書きしない ──
+      //    ⚠ 2026-08-16 まで `bytes` を見ていたが、bytes は載らなくなった(棚に置く)
+      if (typeof p.key !== 'string' || p.key === '') return null;
+      if (typeof p.size !== 'number' || !(p.size > 0)) return null;
       return {
         type: 'saved',
-        name: typeof p.name === 'string' ? p.name : 'document',
-        bytes: p.bytes,
+        key: p.key,
+        name: typeof p.name === 'string' && p.name !== '' ? p.name : 'document',
+        size: p.size,
       };
+    case 'save-failed':
+      return { type: 'save-failed', reason: typeof p.reason === 'string' ? p.reason : '' };
     default:
       return null;
   }

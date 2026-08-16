@@ -1,0 +1,219 @@
+/**
+ * 🔴 **LO の保存を見つける判断**(#205 段 A / 方式監査 #209)。
+ *
+ * ⚠ `public/office/office-save-watch.js` は **bundle されない素の JS** である
+ * (`host.html` が `<script src>` で読む)。だから **`readFileSync` + `new Function` で
+ * 読み込んで**当てる ── これをやらないと、この判断は**どの test からも実行されない**
+ * (`host.html` を読む test は repo に 0 件、という前例がまさにそれ)。
+ *
+ * 🔴 守る主張:
+ * 1. **`rename` と `close` の両方**を拾う(実測で形が違う ── 既存は rename、新規は close)
+ * 2. **temp とロック file を拾わない**(拾うと「保存」として親へ流れる)
+ * 3. **監視は直下だけ**(`/` を舐めると 20〜27ms でメインが止まる)
+ * 4. **静穏化して畳む**(同じ path に close が 3〜4 回来る ── 畳まないと 1 保存 4 通)
+ * 5. **開いただけを保存にしない**(baseline)
+ */
+import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+
+interface Stat {
+  size: number;
+  mtimeMs: number;
+}
+interface Watch {
+  setBaseline(path: string, size: number, mtimeMs: number): void;
+  note(kind: string, path: string, at?: number): boolean;
+  due(stat: (p: string) => Stat | null, at?: number): { path: string; name: string; size: number }[];
+  pendingCount(): number;
+}
+interface Api {
+  QUIET_MS: number;
+  WATCH_DIRS: string[];
+  isIgnoredName(n: string): boolean;
+  watchedDirOf(p: string): string | null;
+  baseName(p: string): string;
+  createSaveWatch(opts?: { now?: () => number }): Watch;
+}
+
+/** 素の JS を読み込む。⚠ **実 file を読む**(写経すると本物とずれる)。 */
+function load(): Api {
+  const src = readFileSync('public/office/office-save-watch.js', 'utf-8');
+  const scope: Record<string, unknown> = {};
+  new Function('globalThis', src)(scope);
+  const api = scope.PKC3OfficeSaveWatch as Api | undefined;
+  expect(api, '素の JS が globalThis へ何も置いていない').toBeTruthy();
+  return api!;
+}
+
+const api = load();
+
+describe('保存の判断 ── 場所と名前', () => {
+  it('🔴 監視するのは 2 つのディレクトリの直下だけ', () => {
+    expect(api.WATCH_DIRS).toEqual(['/work', '/home/web_user']);
+    expect(api.watchedDirOf('/work/x.odt')).toBe('/work');
+    expect(api.watchedDirOf('/home/web_user/無題 1.odt')).toBe('/home/web_user');
+    // ⚠ 入れ子は見ない(`/tmp/luXXXX.tmp/` は LO の持ち物)
+    expect(api.watchedDirOf('/work/sub/x.odt'), '入れ子を拾っている').toBeNull();
+    expect(api.watchedDirOf('/tmp/lu42.tmp/y.odt')).toBeNull();
+    expect(api.watchedDirOf('/instdir/user/registrymodifications.xcu')).toBeNull();
+    // ⚠ 前方一致で `/workspace` のような別ディレクトリを拾わない
+    expect(api.watchedDirOf('/workspace/x.odt')).toBeNull();
+    expect(api.watchedDirOf('/work')).toBeNull(); // ディレクトリ自身
+  });
+
+  it('🔴 temp とロック file を拾わない(拾うと保存として親へ流れる)', () => {
+    expect(api.isIgnoredName('lu42v7msuf.tmp'), 'LO の temp を拾っている').toBe(true);
+    expect(api.isIgnoredName('.~lock.x.odt#'), 'ロック file を拾っている').toBe(true);
+    expect(api.isIgnoredName('.hidden')).toBe(true);
+    // 拾うもの ⚠ 日本語と空白を含む(実測: `--language=ja` で `無題 1.odt`)
+    expect(api.isIgnoredName('無題 1.odt')).toBe(false);
+    expect(api.isIgnoredName('x.odt')).toBe(false);
+    expect(api.isIgnoredName('見積.docx')).toBe(false);
+  });
+
+  it('名前は path の末尾(日本語・空白を保つ)', () => {
+    expect(api.baseName('/home/web_user/無題 1.odt')).toBe('無題 1.odt');
+    expect(api.baseName('x.odt')).toBe('x.odt');
+  });
+});
+
+describe('保存の判断 ── 静穏化と baseline', () => {
+  const mkStat =
+    (table: Record<string, Stat>) =>
+    (p: string): Stat | null =>
+      table[p] ?? null;
+
+  /**
+   * 🔴 **temp を「保存」として受けない**(変異試験で生き残って判明)。
+   * ⚠ `isIgnoredName` を**直接**当てる test は在ったが、`note()` が実際に
+   * それを使っているかは誰も見ていなかった ── 判定を外す変異が生き延びた。
+   * 拾うと **LO の temp が添付ノートになる**(user から見て意味不明な file が増える)。
+   */
+  it('🔴 temp とロック file は note() が受け取らない(判定を通っている)', () => {
+    const w = api.createSaveWatch();
+    const stat = (): Stat => ({ size: 100, mtimeMs: 1 });
+    expect(w.note('close', '/work/lu42v7msuf.tmp', 1000), 'temp を受けた').toBe(false);
+    expect(w.note('rename', '/work/.~lock.x.odt#', 1000), 'ロック file を受けた').toBe(false);
+    expect(w.pendingCount(), '受けないはずのものが積まれた').toBe(0);
+    expect(w.due(stat, 9999), 'temp が保存として出てきた').toEqual([]);
+    // 空振り防止 ── 同じ場所の普通の名前は受ける
+    expect(w.note('close', '/work/x.odt', 1000)).toBe(true);
+  });
+
+  it('🔴 close と rename の両方を拾う(片方だけでは必ず穴が空く)', () => {
+    const w = api.createSaveWatch();
+    // 新規保存 = 最終 path へ直接 write + close(実測)
+    expect(w.note('close', '/home/web_user/無題 1.odt', 1000), 'close を拾っていない').toBe(true);
+    // 既存の上書き = temp → rename(実測)
+    expect(w.note('rename', '/work/x.odt', 1000), 'rename を拾っていない').toBe(true);
+    // ⚠ 知らない種別は受けない
+    expect(w.note('write', '/work/x.odt', 1000)).toBe(false);
+    expect(w.pendingCount()).toBe(2);
+  });
+
+  it('🔴 静穏を過ぎるまで返さない(1 保存が 4 通にならない)', () => {
+    const w = api.createSaveWatch();
+    const stat = mkStat({ '/work/x.odt': { size: 8568, mtimeMs: 2000 } });
+    // 同じ path に close が 3〜4 回来る(自動回復の複製 ── 実測)
+    for (const t of [1000, 1100, 1250, 1400]) w.note('close', '/work/x.odt', t);
+    expect(w.pendingCount(), '畳んでいない').toBe(1);
+    // まだ静穏でない
+    expect(w.due(stat, 1400 + api.QUIET_MS - 1)).toEqual([]);
+    // ⚠ 静穏は**最後の出来事から**数える(最初からではない)
+    const out = w.due(stat, 1400 + api.QUIET_MS);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.name).toBe('x.odt');
+    expect(out[0]!.size).toBe(8568);
+    // 一度返したら消える(2 通目を出さない)
+    expect(w.due(stat, 9999)).toEqual([]);
+  });
+
+  it('🔴 開いただけを保存にしない(baseline と同じなら落とす)', () => {
+    const w = api.createSaveWatch();
+    w.setBaseline('/work/x.odt', 1309, 500);
+    const same = mkStat({ '/work/x.odt': { size: 1309, mtimeMs: 500 } });
+    // boot 中に close が 3 回来る(実測)── どれも保存ではない
+    for (const t of [10, 20, 30]) w.note('close', '/work/x.odt', t);
+    expect(w.due(same, 30 + api.QUIET_MS), '開いただけを保存として返した').toEqual([]);
+
+    // 本当に保存されたら返す
+    w.note('rename', '/work/x.odt', 1000);
+    const grown = mkStat({ '/work/x.odt': { size: 8568, mtimeMs: 2000 } });
+    expect(w.due(grown, 1000 + api.QUIET_MS)).toHaveLength(1);
+  });
+
+  it('⚠ 同じ大きさでも mtime が動けば保存とみなす(上書きで長さが偶然一致する)', () => {
+    const w = api.createSaveWatch();
+    w.setBaseline('/work/x.odt', 8568, 500);
+    w.note('rename', '/work/x.odt', 1000);
+    const sameSize = mkStat({ '/work/x.odt': { size: 8568, mtimeMs: 2000 } });
+    expect(w.due(sameSize, 1000 + api.QUIET_MS), 'mtime の変化を見ていない').toHaveLength(1);
+  });
+
+  it('消えた file / 空の file は返さない(temp を掴まない)', () => {
+    const w = api.createSaveWatch();
+    w.note('close', '/home/web_user/a.odt', 1000);
+    w.note('close', '/home/web_user/b.odt', 1000);
+    const stat = mkStat({ '/home/web_user/b.odt': { size: 0, mtimeMs: 1 } });
+    expect(w.due(stat, 1000 + api.QUIET_MS)).toEqual([]);
+  });
+
+  it('⚠ stat が投げても落ちない(消える途中を掴むことがある)', () => {
+    const w = api.createSaveWatch();
+    w.note('close', '/work/x.odt', 1000);
+    const boom = (): Stat | null => {
+      throw new Error('ENOENT');
+    };
+    expect(() => w.due(boom, 1000 + api.QUIET_MS)).not.toThrow();
+  });
+
+  /**
+   * 🔴 **返したら baseline を更新する**(変異試験で生き残って判明)。
+   * ⚠ 更新しないと、LO の自動回復の複製が同じ file を閉じ直したときに
+   * **同じ内容の保存が 2 通**出る(実測: 保存 1 回につき同じ path へ close が 3〜4 回)。
+   * 🔑 「2 回目の保存が返る」だけでは殺せない ── **中身が変わっていない 2 回目**を見る。
+   */
+  it('🔴 同じ内容で閉じ直しても、2 通目は出ない', () => {
+    const w = api.createSaveWatch();
+    const stat = mkStat({ '/work/x.odt': { size: 8568, mtimeMs: 2000 } });
+    w.note('rename', '/work/x.odt', 1000);
+    expect(w.due(stat, 1000 + api.QUIET_MS)).toHaveLength(1);
+    // 自動回復の複製が同じ file を閉じ直す(中身は変わっていない)
+    w.note('close', '/work/x.odt', 5000);
+    expect(w.due(stat, 5000 + api.QUIET_MS), '同じ内容で 2 通目が出た').toEqual([]);
+  });
+
+  it('🔑 2 回目の保存も返る(baseline を更新している)', () => {
+    const w = api.createSaveWatch();
+    w.note('rename', '/work/x.odt', 1000);
+    expect(w.due(mkStat({ '/work/x.odt': { size: 100, mtimeMs: 1 } }), 1000 + api.QUIET_MS)).toHaveLength(1);
+    w.note('rename', '/work/x.odt', 5000);
+    expect(
+      w.due(mkStat({ '/work/x.odt': { size: 200, mtimeMs: 2 } }), 5000 + api.QUIET_MS),
+      '2 回目の保存が落ちている',
+    ).toHaveLength(1);
+  });
+});
+
+/**
+ * 🔴 **UNO の listener を製品コードに書かない**(#209 の probe で確定)。
+ * ⚠ この結論をコードに残さないと、次に読む人が「UNO のほうが判定 0 個で綺麗」を
+ * 根拠に戻す ── 戻すと**保存のたびに窓が死ぬ**。
+ */
+describe('UNO の listener を登録しない(#209)', () => {
+  it('🔴 host.html と保存の判断に UNO の登録が現れない', () => {
+    for (const f of ['public/office/host.html', 'public/office/office-save-watch.js']) {
+      const src = readFileSync(f, 'utf-8');
+      // ⚠ コメントで言及するのは許す ── **実行する行**に現れないことを見たいので、
+      //    行頭が `*` や `//` の行を落としてから探す
+      const code = src
+        .split('\n')
+        .filter((l) => !/^\s*(\*|\/\/|<!--)/.test(l))
+        .join('\n');
+      expect(code, `${f}: UNO の listener を登録している(保存のたびに窓が死ぬ)`).not.toContain(
+        'addDocumentEventListener',
+      );
+      expect(code, `${f}: 旧 broadcaster に登録している`).not.toContain('theGlobalEventBroadcaster');
+    }
+  });
+});
