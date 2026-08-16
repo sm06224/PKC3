@@ -450,3 +450,76 @@ describe('md ZIP — バイト列を壊さない', () => {
     expect(got.every((v, i) => v === bytes[i])).toBe(true);
   });
 });
+
+/**
+ * 🔴 **控え(過去の版)は入れる。ただし黙って入れない**(#213 / user 裁定 A 2026-08-16)。
+ *
+ * ⚠ Office で上書き保存すると旧版が `attachment.history` に積まれ、台帳の行は
+ * **生の key を本文に含む**ので、包含の走査が控えも拾う ── それは設計どおりである
+ * (拾わないと GC が消して**戻せなくなる**)。
+ * 🔑 問題は「**なぜ zip が大きいのか**がどこにも書かれていない」ことだったので、
+ * **内訳を出す**ようにした。⚠ 「減らす」ではない。
+ */
+describe('md ZIP — 添付の控え(過去の版)', () => {
+  const withHistory = [
+    '---',
+    'attachment.name: 報告書.odt',
+    'attachment.mime: application/vnd.oasis.opendocument.text',
+    'attachment.asset_key: ast-now',
+    'attachment.history: ["2026-08-01T00:00:00.000Z|auto|ast-old1|10|", "2026-08-02T00:00:00.000Z|auto|ast-old2|20|"]',
+    '---',
+    '',
+  ].join('\n');
+
+  it('🔴 控えも zip に入る(入れないと、この zip から戻せなくなる)', async () => {
+    const src = source({
+      entries: [{ lid: 'a1', archetype: 'attachment', body: withHistory }],
+      assets: [
+        { key: 'ast-now', mime: 'application/vnd.oasis.opendocument.text', bytes: enc.encode('NOW') },
+        { key: 'ast-old1', mime: 'application/vnd.oasis.opendocument.text', bytes: enc.encode('OLD1') },
+        { key: 'ast-old2', mime: 'application/vnd.oasis.opendocument.text', bytes: enc.encode('OLD2') },
+      ],
+    });
+    const out = await writeMarkdownZip(src, NOW);
+    const names = (await readZipDirectory(out.blob)).map((e) => e.name);
+    for (const k of ['ast-now', 'ast-old1', 'ast-old2']) {
+      expect(names.some((n) => n.includes(k)), `${k} が zip に入っていない`).toBe(true);
+    }
+    expect(out.counts.assets).toBe(3);
+  });
+
+  it('🔴 内訳(うち控え N 件)を出す(黙って大きくしない)', async () => {
+    const src = source({
+      entries: [{ lid: 'a1', archetype: 'attachment', body: withHistory }],
+      assets: [
+        { key: 'ast-now', mime: null, bytes: enc.encode('NOW') },
+        { key: 'ast-old1', mime: null, bytes: enc.encode('OLD1') },
+        { key: 'ast-old2', mime: null, bytes: enc.encode('OLD2') },
+      ],
+    });
+    const out = await writeMarkdownZip(src, NOW);
+    // ⚠ **いまの版は数えない** ── 台帳に載っているのは「過去の版」だけである
+    expect(out.counts.historyAssets, '控えの件数が出ていない').toBe(2);
+    expect(
+      out.warnings.some((w) => w.includes('控え') && w.includes('2 件')),
+      '控えを含むことを画面に出していない',
+    ).toBe(true);
+    // manifest からも読める(外から理由が分かる形)
+    const manifest = (await (await open(out.blob)).manifest()) as unknown as {
+      asset_count: number;
+      history_asset_count: number;
+    };
+    expect(manifest.history_asset_count).toBe(2);
+    expect(manifest.asset_count).toBe(3);
+  });
+
+  it('控えが無いノートでは、余計なことを言わない', async () => {
+    const src = source({
+      entries: [{ lid: 'a1', archetype: 'attachment', body: '---\nattachment.asset_key: ast-now\n---\n' }],
+      assets: [{ key: 'ast-now', mime: null, bytes: enc.encode('NOW') }],
+    });
+    const out = await writeMarkdownZip(src, NOW);
+    expect(out.counts.historyAssets).toBe(0);
+    expect(out.warnings.some((w) => w.includes('控え')), '控えが無いのに言った').toBe(false);
+  });
+});

@@ -154,8 +154,15 @@ export async function exportArchive(
       const lost: string[] = [];
       if (md.dropped.relations > 0) lost.push(`関連 ${md.dropped.relations}`);
       if (md.dropped.revisionEntries > 0) lost.push(`履歴 ${md.dropped.revisionEntries} 件ぶん`);
+      // 🔴 **控え(過去の版)の件数を出す**(#213 / user 裁定 A 2026-08-16)。
+      //    ⚠ 出さないと「添付 200 件」とだけ出て、**なぜ zip が大きいのか**が
+      //    どこにも書かれていない。⚠ 減らすのではなく**言う**のが裁定 A である
+      const assetsText =
+        md.counts.historyAssets > 0
+          ? `添付 ${md.counts.assets}(うち控え ${md.counts.historyAssets})`
+          : `添付 ${md.counts.assets}`;
       detail =
-        `${md.counts.entries} 件(添付 ${md.counts.assets})── 片道` +
+        `${md.counts.entries} 件(${assetsText})── 片道` +
         (lost.length > 0 ? `(${lost.join(' / ')}が落ちます)` : '(取り込み直せません)');
     } else {
       out = await writeArchive(deps.source, iso);
