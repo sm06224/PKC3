@@ -97,8 +97,34 @@ DIAG_REPLACE = """    const QWindow *focusWindow = QGuiApplication::focusWindow(
     if (!m_focusObject || !focusWindow || !m_visibleInputPanel || !m_inputMethodAccepted) {"""
 
 # ── ① `update()` が ImEnabled の変化を拾う ──────────────────────────────
-# ⚠ 実物(6.9.3 alpha1、HEAD 40c135de)を読んで合わせた ── 目印には
-#    `qCDebug` の行が挟まる。**推測で書かない**(1 稿目は挟まっていない形で書いて外した)。
+#
+# 🔴 **2026-08-16: この hunk を外した。文書を開くと固まる退行の原因だからである。**
+#
+# 実測(対照群つき・決定的):
+#   pack lo-fb02e9d1fc62-run31890208793(**同じ LO sha・この patch 無し**) → 全段完走
+#   pack lo-fb02e9d1fc62-run31909586934(**同じ LO sha・この patch 有り**) → 文書を開くと固まる
+#   差は Qt patch だけなので、原因はここに在る。
+#
+# 症状: Start Center は健全。**文書を開いた瞬間**に CPU 100% で戻らなくなる
+#   (RSS は増えない = 割当ループではなく「戻ってこない」)。console は
+#   `Aborted(Assertion failed: invalid handle: 12)` / `RuntimeError: unreachable`。
+#
+# 🔑 **`invalid handle` は embind の handle を別スレッドから触ったときの形**である。
+#   ⚠ そして**同じ assert が、以前 LO 側から `QInputMethod::show()` を呼んで
+#   abort したとき**にも出ている(`patch-lo-qt-ime-show.py`、run31886407625)──
+#   「Qt の外の文脈から embind の val を触ると落ちる」という**同じ顔**である。
+#   LO は `update(Qt::ImQueryInput)` を**自分のスレッド文脈から毎キー**呼ぶので、
+#   そこから `updateInputElement()`(= `m_inputElement` という `emscripten::val`)を
+#   直接触るのが不正だった、というのが仮説。
+#   ⚠ **仮説である**(一致は因果の証拠ではない)── だからこの焼きで**この hunk だけ**を外す。
+#
+# 🔑 **外しても直る可能性は残っている**: `updateInputElement()` は `setFocusObject()`
+#   からも呼ばれるので、LO が `WA_InputMethodEnabled` を立てた**後の焦点移動**で
+#   ② の再取得が効けば、門を通れる。② と ③ はそのまま残す。
+#
+# 戻す条件: 「メインスレッドのときだけ DOM を触る」ガードを足した版で、
+#   文書が開けることを確かめてから。
+UNUSED_UPDATE_ANCHOR = """void QWasmInputContext::update(Qt::InputMethodQueries queries)""" 
 UPDATE_ANCHOR = """void QWasmInputContext::update(Qt::InputMethodQueries queries)
 {
     qCDebug(qLcQpaWasmInputContext) << Q_FUNC_INFO << queries;
@@ -152,9 +178,8 @@ def main() -> int:
     rc = patch(root / HEADER, HEAD_ANCHOR, HEAD_REPLACE, "panel-gate")
     if rc != 0:
         return rc
-    rc = patch(root / SRC, UPDATE_ANCHOR, UPDATE_REPLACE, "update-imenabled")
-    if rc != 0:
-        return rc
+    # ⚠ ① は外してある(上の注記 ── 文書を開くと固まる退行の原因)。
+    #    ② の再取得と ③ の門の無効化だけを当てる。
     return patch(root / SRC, DIAG_ANCHOR, DIAG_REPLACE, "reread+diag")
 
 
