@@ -39,6 +39,7 @@ import { scanLinks, rewriteLinkDests } from '@features/markdown/link-scan';
 import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
 import { createWarnCollector } from './warn-cap';
 import { scanAssetRefsInto } from '@features/asset/asset-ref-scan';
+import { readVersions } from '@features/flavor/attachment-versions';
 
 export const MD_FORMAT = 'pkc3-markdown';
 export const MD_VERSION = 1;
@@ -58,7 +59,12 @@ const ASSET_REF_RE = /asset:([A-Za-z0-9_.-]+)/g;
 export interface MarkdownZipResult {
   blob: Blob;
   warnings: string[];
-  counts: { entries: number; assets: number };
+  counts: {
+    entries: number;
+    assets: number;
+    /** うち**控え**(過去の版)の件数(#213 / 裁定 A)。⚠ `assets` に**含まれる**。 */
+    historyAssets: number;
+  };
   /** 片道で落ちたもの。**manifest と同じ数字**を UI へ渡す。 */
   dropped: { relations: number; revisionEntries: number };
 }
@@ -254,6 +260,8 @@ export async function writeMarkdownZip(
   const w = new ZipWriter();
   const mdNames = new NameAllocator();
   const used = new Set<string>();
+  /** 控え(`attachment.history` に載っている過去の版)の key。#213 の内訳に使う。 */
+  const historyKeys = new Set<string>();
   let entryCount = 0;
   let after: { entryOrder: number; lid: string } | undefined;
 
@@ -323,6 +331,18 @@ export async function writeMarkdownZip(
         const remaining = new Set([...pathOf.keys()]);
         scanAssetRefsInto(r.body, remaining, mark);
       }
+
+      /**
+       * 🔴 **控え(過去の版)の key を数えておく**(#213、user 裁定 A 2026-08-16)。
+       *
+       * ⚠ Office で上書き保存すると、入れ替える前の中身が `attachment.history` に
+       * 積まれる(5 世代 / 200MiB)。台帳の行は**生の key を本文に含む**ので、
+       * 包含の走査(上の `scanAssetRefsInto`)が**控えも「使われている」と拾う** ──
+       * それは設計どおり(拾わないと GC が消して**戻せなくなる**)。
+       * 🔑 だが user から見ると **zip が理由の分からないまま最大 6 倍**になる。
+       * ⚠ **減らす**のではなく**言う** ── user 裁定 A「入れたまま、説明を足す」。
+       */
+      for (const v of readVersions(r.body)) historyKeys.add(v.assetKey);
 
       // 添付 entry のリンク行に使う参照(こちらは meta が読めた時だけ = best effort)
       const fmRefs: Array<{ key: string; label: string }> = [];
@@ -401,6 +421,9 @@ export async function writeMarkdownZip(
   // ── 添付: **参照されているものだけ**。中身は Blob をそのまま(コピーしない)
   const missing: string[] = [];
   let assetCount = 0;
+  // 🔴 控え(過去の版)の内訳(#213 / 裁定 A)── **入れたうえで言う**
+  let historyCount = 0;
+  let historyBytes = 0;
   for (const a of assetMetas) {
     if (!used.has(a.key)) continue;
     const blob = await src.getAssetBlob(a.key);
@@ -412,6 +435,19 @@ export async function writeMarkdownZip(
     }
     await w.add(pathOf.get(a.key)!, [blob]);
     assetCount++;
+    // ⚠ **いま使われている実体は数えない** ── 台帳に載っているのは「過去の版」だけで、
+    //    いまの版は `attachment.asset_key` に在る(`attachment-versions.ts` の作り)
+    if (historyKeys.has(a.key)) {
+      historyCount++;
+      historyBytes += blob.size;
+    }
+  }
+  if (historyCount > 0) {
+    // 🔑 **黙って大きくしない**(#213、裁定 A)。⚠ 「減らせる」とは言わない ──
+    //    控えを落とすと、この zip から戻しても履歴が消える(別の話である)
+    warnings.push(
+      `添付の控え(過去の版)${historyCount} 件・約 ${Math.round(historyBytes / 1024 / 1024)}MB を含みます`,
+    );
   }
   const skipped = assetMetas.length - used.size;
   if (skipped > 0) {
@@ -441,6 +477,8 @@ export async function writeMarkdownZip(
         note: 'PKC3 から外へ出すための片道形式です。関連・履歴は含まれません。',
         entry_count: entryCount,
         asset_count: assetCount,
+        // ⚠ `asset_count` に**含まれる**内訳(#213)── 外から見て理由が分かるように
+        history_asset_count: historyCount,
         dropped: { relations, revision_entries: revisionEntries },
         missing_assets: missing,
       },
@@ -452,7 +490,7 @@ export async function writeMarkdownZip(
   return {
     blob: w.finish(),
     warnings,
-    counts: { entries: entryCount, assets: assetCount },
+    counts: { entries: entryCount, assets: assetCount, historyAssets: historyCount },
     dropped: { relations, revisionEntries },
   };
 }

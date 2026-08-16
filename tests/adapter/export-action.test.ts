@@ -231,3 +231,44 @@ describe('書出しの実行部 — ファイル名', () => {
     expect(d.files[0]!.name).toBe(`${expected}-20260802.pkc3.zip`);
   });
 });
+
+/**
+ * 🔴 **控え(過去の版)の内訳を、書き出した行に出す**(#213 / user 裁定 A 2026-08-16)。
+ *
+ * ⚠ 出さないと「添付 3」とだけ出て、**なぜ zip が大きいのか**がどこにも書かれていない。
+ * ⚠ 裁定 A は「**入れたまま、説明を足す**」── 減らす話ではない。
+ */
+describe('書出しの実行部 — 添付の控えの内訳(#213)', () => {
+  const withHistory = [
+    '---',
+    'attachment.asset_key: ast-now',
+    'attachment.history: ["2026-08-01T00:00:00.000Z|auto|ast-old1|10|"]',
+    '---',
+    '',
+  ].join('\n');
+
+  const src = (body: string): ArchiveSource => ({
+    ...source({ entries: [{ lid: 'a1', body }] }),
+    listAssetMetas: async () => [
+      { key: 'ast-now', mime: null, size: 3, hash: null },
+      { key: 'ast-old1', mime: null, size: 4, hash: null },
+    ],
+    getAssetBlob: async () => new Blob(['xxx']),
+  });
+
+  it('🔴 控えがあるときは「うち控え N」を出す', async () => {
+    const { dispatcher } = fakeDispatcher();
+    const d = deps({ source: src(withHistory) });
+    await exportArchive(dispatcher, d, 'markdown');
+    expect(d.messages.at(-1), '控えの内訳が書き出しの行に出ていない').toContain('うち控え 1');
+  });
+
+  it('控えが無いときは余計なことを言わない', async () => {
+    const { dispatcher } = fakeDispatcher();
+    const d = deps({ source: src('---\nattachment.asset_key: ast-now\n---\n') });
+    await exportArchive(dispatcher, d, 'markdown');
+    expect(d.messages.at(-1), '控えが無いのに言った').not.toContain('控え');
+    // 空振り防止 ── そもそも markdown の書出しが通っているか
+    expect(d.messages.at(-1)).toContain('書き出しました');
+  });
+});
