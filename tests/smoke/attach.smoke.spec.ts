@@ -3,6 +3,8 @@
  * 「実際に画面に出る」+ Blob 直 put 経路の end-to-end(実 IDB + 実 sqlite meta)。
  */
 import { test, expect } from '@playwright/test';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { gotoApp, collectPageErrors, clickReal, expectImageRendered, createEntry, useSplitEditor } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
@@ -147,5 +149,184 @@ test('🔴 大きい添付を貼ってもメインスレッドが固まらない
   //    80ms は「余裕をもって落ちる」閾値(flake を閾値上げで隠さないための余白)
   expect(m.maxGap, `メインスレッドが ${m.maxGap}ms 止まった`).toBeLessThan(80);
 
+  expect(errors).toEqual([]);
+});
+
+/**
+ * 🔴 **PDF は読める大きさで出る + 別窓でも出る**(2026-08-15、user 報告
+ * 「PDF ビューアが動作しない / 窓内と別窓の両方を PKC2 を真似して実装してください」)。
+ *
+ * ⚠ **観測点は「PDF が描けたか」にしてはいけない** ── 内蔵 PDF ビューアは
+ * フル chromium にしか無く、**CI の PR gate(`chromium_headless_shell`)は持たない**
+ * (実測: 直接ナビゲートするとダウンロードが始まり、埋め込んでも子フレームが立たない)。
+ * 🔑 **実寸なら両方で同じ値が出る**ので、そちらを観測点にする
+ * (CLAUDE.md §5「観測点を環境差に強い側へ寄せる」)。
+ *
+ * ⚠ 直す前の実測は **302 × 152**(器は 925 × 626 空いていた)。
+ */
+// 自作の最小 PDF(605 bytes・1 ページ・依存なしで手組み)
+const PDF_MIN = Buffer.from(
+  'JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUg' +
+    'L1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAg' +
+    'UiAvTWVkaWFCb3ggWzAgMCAzMDAgMjAwXSAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA1IDAgUiA+PiA+PiAvQ29udGVudHMg' +
+    'NCAwIFIgPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCA2MSA+PgpzdHJlYW0KQlQgL0YxIDE0IFRmIDIwIDE1MCBUZCAoUEtD' +
+    'MyBQREYgdmlld2VyIHByb2JlIEFMUEhBLTQyKSBUaiBFVAplbmRzdHJlYW0KZW5kb2JqCjUgMCBvYmoKPDwgL1R5cGUgL0ZvbnQg' +
+    'L1N1YnR5cGUgL1R5cGUxIC9CYXNlRm9udCAvSGVsdmV0aWNhID4+CmVuZG9iagp4cmVmCjAgNgowMDAwMDAwMDAwIDY1NTM1IGYg' +
+    'CjAwMDAwMDAwMDkgMDAwMDAgbiAKMDAwMDAwMDA1OCAwMDAwMCBuIAowMDAwMDAwMTE1IDAwMDAwIG4gCjAwMDAwMDAyNDEgMDAw' +
+    'MDAgbiAKMDAwMDAwMDM1MiAwMDAwMCBuIAp0cmFpbGVyCjw8IC9TaXplIDYgL1Jvb3QgMSAwIFIgPj4Kc3RhcnR4cmVmCjQyMgol' +
+    'JUVPRgo=',
+  'base64',
+);
+
+test('🔴 PDF の添付は器いっぱいに出て、別の窓でも開ける', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  const downloads: string[] = [];
+  page.on('download', (d) => downloads.push(d.suggestedFilename()));
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await gotoApp(page);
+
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: '見積.pdf',
+    mimeType: 'application/pdf',
+    buffer: PDF_MIN,
+  });
+  const media = page.locator('[data-pkc-field="attachment-media"]');
+  await expect(media).toHaveAttribute('type', 'application/pdf');
+
+  const m = await media.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const pane = el.closest('[data-pkc-region="detail"]')?.getBoundingClientRect();
+    return {
+      tag: el.tagName.toLowerCase(),
+      w: Math.round(r.width),
+      h: Math.round(r.height),
+      paneW: Math.round(pane?.width ?? 0),
+      data: (el.getAttribute('data') ?? '').slice(0, 5),
+    };
+  });
+  expect(m.tag).toBe('object');
+  expect(m.data, 'blob: で渡していない').toBe('blob:');
+  // ① 🔴 切手大でない。⚠ 直す前は 152px だった
+  expect(m.h, `PDF の高さが ${m.h}px しかない(読めない)`).toBeGreaterThan(400);
+  // ② 🔴 器の幅を使い切っている(既定の 300px で止まっていない)
+  expect(m.paneW, '前提: 器の幅が取れていない').toBeGreaterThan(600);
+  expect(m.w, `器は ${m.paneW}px あるのに PDF は ${m.w}px`).toBeGreaterThan(m.paneW * 0.9);
+  // ③ 埋め込みに失敗してダウンロードへ落ちていない
+  expect(downloads, 'PDF が画面に出ずダウンロードされた').toEqual([]);
+
+  // ── 別窓 ────────────────────────────────────────────────
+  const [popup] = await Promise.all([
+    page.waitForEvent('popup', { timeout: 10_000 }),
+    clickReal(page, '[data-pkc-action="view-asset"]'),
+  ]);
+  await popup.waitForSelector('[data-pkc-field="asset-window-pdf"]', { timeout: 5000 });
+  const shown = await popup.evaluate(() => {
+    const o = document.querySelector('[data-pkc-field="asset-window-pdf"]');
+    return {
+      title: document.title,
+      type: o?.getAttribute('type') ?? null,
+      data: (o?.getAttribute('data') ?? '').slice(0, 5),
+      // 🔑 窓いっぱいか(user 報告の症状は「小さい」だった)
+      h: Math.round(o?.getBoundingClientRect().height ?? 0),
+      innerH: window.innerHeight,
+    };
+  });
+  // 🔑 題名が**添付の名前**になっている(blob の UUID ではない ── PKC2 はそうなる)
+  expect(shown.title, '別窓の題名が添付の名前でない').toBe('見積.pdf');
+  expect(shown.type).toBe('application/pdf');
+  expect(shown.data).toBe('blob:');
+  expect(shown.h, '別窓の PDF が窓いっぱいでない').toBeGreaterThan(shown.innerH * 0.9);
+  await popup.close();
+
+  expect(errors).toEqual([]);
+});
+
+/**
+ * 🔴 **配った単一 HTML でも PDF がその場で出る**(2026-08-15)。
+ *
+ * ⚠ **片側を直したら、対称の反対側を疑う** ── アプリの画面を器いっぱいに直したが、
+ * 書き出し側は**画像だけ inline で、PDF はダウンロードリンク**のままだった
+ * (面ごとに違う見え方にしない、が repo の原則)。
+ * ⚠ 配った HTML は **`file://` で開く**ので、アプリの CSS も blob の作り方も別経路。
+ * だから**実際に落として開いて測る**(既存の書き出し smoke と同じ型)。
+ */
+test('🔴 配った HTML でも PDF が読める大きさで出る', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await gotoApp(page);
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: '見積.pdf',
+    mimeType: 'application/pdf',
+    buffer: PDF_MIN,
+  });
+  await expect(page.locator('[data-pkc-field="attachment-media"]')).toHaveAttribute(
+    'type',
+    'application/pdf',
+  );
+
+  const dl = page.waitForEvent('download');
+  await clickReal(page, '[data-pkc-action="export-html"]');
+  const file = join(tmpdir(), `pkc3-pdf-${process.pid}.html`);
+  await (await dl).saveAs(file);
+
+  const viewer = await page.context().newPage();
+  await viewer.goto(`file://${file}`);
+  await expect(viewer.locator('#body')).toBeVisible();
+  const m = await viewer.evaluate(() => {
+    const o = document.querySelector('object[type="application/pdf"]');
+    if (!o) return null;
+    const r = o.getBoundingClientRect();
+    return {
+      w: Math.round(r.width),
+      h: Math.round(r.height),
+      data: (o.getAttribute('data') ?? '').slice(0, 5),
+      // 出せないブラウザ向けの導線が**中に**在る(空白を残さない)
+      fallback: o.querySelector('a[download]') !== null,
+      innerW: window.innerWidth,
+    };
+  });
+  expect(m, '配った HTML に PDF の埋め込みが無い(ダウンロードリンクのまま)').not.toBeNull();
+  expect(m!.data, 'blob: で渡していない').toBe('blob:');
+  expect(m!.h, `配った HTML の PDF が ${m!.h}px しかない`).toBeGreaterThan(400);
+  expect(m!.w, '幅を使い切っていない').toBeGreaterThan(m!.innerW * 0.5);
+  expect(m!.fallback, '出せないときの導線が中に無い').toBe(true);
+  await viewer.close();
+  expect(errors).toEqual([]);
+});
+
+/**
+ * 🔴 **画像の別窓も end-to-end で守る**(2026-08-15、着地前レビューで判明)。
+ *
+ * ⚠ `view-image` → `view-asset` の rename で、**画像側だけ end-to-end の守り手を
+ * 失っていた** ── mime→kind の写像は `main.ts` に在り、そこは**どの test からも
+ * 実行されない**(原文を読む test しか無い)。別窓の unit は `kind` を引数で受け、
+ * popup の smoke は PDF の 1 本だけだったので、写像を `'pdf'` 固定に変える変異が
+ * **全 test 緑のまま通り、画像の別窓が空の枠になる**(実際に変異試験で生き延びた)。
+ */
+test('🔴 画像の別の窓は img で開く(PDF の箱にならない)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: 'dot.png',
+    mimeType: 'image/png',
+    buffer: PNG_1X1,
+  });
+  await expect(page.locator('[data-pkc-action="view-asset"]')).toBeVisible();
+  const [popup] = await Promise.all([
+    page.waitForEvent('popup', { timeout: 10_000 }),
+    clickReal(page, '[data-pkc-action="view-asset"]'),
+  ]);
+  // ⚠ **組み上がるのを待ってから見る** ── popup の event は `about:blank` が
+  //    できた時点で飛ぶので、即 evaluate すると中身が揃っていない(flake の元)
+  await popup.waitForSelector('[data-pkc-field="asset-window-image"]', { timeout: 5000 });
+  const shown = await popup.evaluate(() => ({
+    img: document.querySelector('[data-pkc-field="asset-window-image"]') !== null,
+    pdf: document.querySelector('[data-pkc-field="asset-window-pdf"]') !== null,
+    title: document.title,
+  }));
+  expect(shown.pdf, '画像なのに PDF の箱で開いた(空の枠になる)').toBe(false);
+  expect(shown.img, '画像が入っていない').toBe(true);
+  expect(shown.title).toBe('dot.png');
+  await popup.close();
   expect(errors).toEqual([]);
 });

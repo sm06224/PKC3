@@ -206,6 +206,10 @@ nav button.p{width:auto;font-size:12px;padding:4px 10px;margin:2px 8px 0;
 .b>*{max-width:100%}
 a.f{display:inline-block;margin:8px 0;padding:6px 10px;border:1px solid #8884;border-radius:6px;
   color:inherit;text-decoration:none}
+/* 🔴 **PDF は読める大きさで出す**(2026-08-15)。⚠ object 要素は固有寸法を持たないので、
+   規則を書かないと **300×150** に落ちる(アプリ側で実際に踏んだ症状がこれ)。 */
+object.p{display:block;width:100%;height:calc(100vh - 12rem);min-height:320px;
+  border:1px solid #8884;border-radius:6px;margin:8px 0}
 #fail{display:block;margin:24px;font:15px/1.7 system-ui,sans-serif;white-space:pre-wrap}
 
 /* ── 印刷(F-1)。⚠ 画面用の grid と 100vh をほどくのが本題 ── ほどかないと
@@ -215,6 +219,13 @@ a.f{display:inline-block;margin:8px 0;padding:6px 10px;border:1px solid #8884;bo
   nav{display:none}
   main{overflow:visible;padding:0}
   main h2{font-size:1.5em}
+  /* ⚠ 画面の calc(100vh - 12rem) は紙では版面いっぱいになり、**1 個で 1 頁**を
+     食って改頁を崩す。⚠ **この file はテンプレート文字列の中なのでバックティックを
+     書けない**(書いた瞬間に閉じる ── 冒頭の注記のとおりで、実際に踏んだ)。
+     ⚠ 埋め込んだ PDF の中身が紙に出るかはブラウザ次第で、
+     **こちらでは確かめていない** ── 確かめていない以上、**版面を壊さないこと**
+     だけを保証する(高さを抑え、途中で割らない)。 */
+  object.p{height:50vh;min-height:0;break-inside:avoid}
   /* ⚠ 読み幅を紙でほどく規則(かつての .b の none)は置かない(2026-08-08)──
      器の cap が消えた今は死文で、紙もアプリの印刷と同じ 42rem/ブロックが裁定の向き。 */
   /* 折りたたみは**紙では展開する**(印刷時に details を開くのは JS 側) */
@@ -350,12 +361,30 @@ try{
     sink.push(url);return url;
   }
   // 添付は画像なら見せる、それ以外は保存できる導線にする(開けないより落とせる方がよい)
+  // 🔴 **PDF もその場で見せる**(2026-08-15)。⚠ 直す前はここが画像だけで、
+  //    アプリ側の画面と**見え方が食い違っていた**(あちらは器いっぱいで出る)。
+  //    面ごとに違う見え方にしない ── 出せる物は同じように出す。
+  //    ⚠ 出せないブラウザに空白を残さないよう、**中にダウンロードの導線**を置く。
   function view(key,alt,sink){
     var name=names[key]||alt||key;
-    if((mimes[key]||'').indexOf('image/')===0){
+    var mime=mimes[key]||'';
+    if(mime.indexOf('image/')===0){
       var im=document.createElement('img');im.src=urlFor(key,sink);im.alt=name;return im;
     }
-    var a=document.createElement('a');a.className='f';a.href=urlFor(key,sink);
+    if(mime==='application/pdf'){
+      // ⚠ **URL は 1 本しか作らない** ── fallback の a にも同じ URL を渡す。
+      //    直す前は object と a で urlFor() を 2 回呼んでおり、PDF 1 件につき
+      //    atob → Uint8Array → Blob が **2 組**できていた(全体を印刷では全 entry ぶん
+      //    同時に生きる)。ゼロコピー・即破棄の不可侵指示と逆向きだった。
+      var u=urlFor(key,sink);
+      var o=document.createElement('object');o.className='p';
+      o.type='application/pdf';o.data=u;
+      o.appendChild(dl(key,name,sink,u));return o;
+    }
+    return dl(key,name,sink);
+  }
+  function dl(key,name,sink,url){
+    var a=document.createElement('a');a.className='f';a.href=url||urlFor(key,sink);
     a.download=name;a.textContent='⬇ '+name;return a;
   }
   // 🔑 **本文を DOM に据える処理は 1 本に寄せる**(F-1)。画面表示と「全体を印刷」で
@@ -584,7 +613,11 @@ try{
    * ⚠ 上限を置く ── 画像が返らないときに**永久に印刷できない**ほうが困る。
    */
   function whenImagesReady(root,done){
-    var imgs=root.querySelectorAll('img'),left=0,fired=false;
+    // 🔴 **PDF の箱も数える**(2026-08-15、着地前レビューで判明)。⚠ ここは
+    //    2026-08-05 に「印刷が読み込み中の blob URL を revoke して紙から画像が落ちる」
+    //    ために足した門で、object を数えないと **PDF がその門を素通りする**
+    //    (afterprint の dropAll が読み込み途中の blob を消す)。object も load/error を出す。
+    var imgs=root.querySelectorAll('img,object[type="application/pdf"]'),left=0,fired=false;
     function fin(){if(!fired&&left===0){fired=true;done()}}
     function dec(){left--;fin()}
     for(var i=0;i<imgs.length;i++){

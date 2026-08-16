@@ -71,10 +71,11 @@ export interface BinderServices {
    */
   inlineImages?(urls: readonly string[]): Promise<ReadonlyMap<string, string>>;
   /**
-   * 🔴 **画像を別の窓で見る**(#192)。⚠ 実体は adapter/platform 側
-   * (ObjectURL の寿命が絡むので、binder は**呼ぶだけ**)。
+   * 🔴 **添付を別の窓で見る**(#192 で画像、2026-08-15 に PDF を追加)。
+   * ⚠ 実体は adapter/platform 側(ObjectURL の寿命が絡むので、binder は**呼ぶだけ**)。
+   * ⚠ `mime` は**押した要素が運ぶ** ── 開く側で引き直さない。
    */
-  viewImage?(assetKey: string, name: string): void;
+  viewAsset?(assetKey: string, name: string, mime: string): void;
   /** 未参照 asset の掃除(P4b)。確認・報告の UI も実体側の責務。 */
   purgeOrphanAssets?(): void;
   /** 注意の面を閉じる(P6c review H-2)。 */
@@ -1032,10 +1033,13 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔴 **画像を別窓で見る**(#192)。⚠ 開けなかったとき(popup 阻止)の後始末は
    *   呼ばれる側が持つ ── ここで持つと、経路が増えたときに片方だけ古くなる。
    */
-  'view-image': (_dispatcher, target, services) => {
+  'view-asset': (_dispatcher, target, services) => {
     const key = target.getAttribute('data-pkc-asset-key');
-    const name = target.getAttribute('data-pkc-asset-name') ?? '画像';
-    if (key) services.viewImage?.(key, name);
+    const name = target.getAttribute('data-pkc-asset-name') ?? '添付';
+    // ⚠ MIME を**押した要素から**運ぶ ── 開く側で引き直すと、開くまでに
+    //    選択が移った場合に**別の添付の種類**で開いてしまう
+    const mime = target.getAttribute('data-pkc-asset-mime') ?? '';
+    if (key) services.viewAsset?.(key, name, mime);
   },
   'dismiss-notices': (_dispatcher, _target, services) => {
     services.dismissNotices?.();

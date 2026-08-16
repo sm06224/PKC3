@@ -813,6 +813,46 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
     }
   });
 
+  /**
+   * 🔴 **PDF 1 件につき ObjectURL は 1 本**(2026-08-15、着地前レビューで指摘)。
+   *
+   * ⚠ 直す前は `<object>` と、その中の fallback の `<a download>` で
+   * `urlFor()` を **2 回**呼んでおり、PDF 1 件ごとに
+   * `atob` → `Uint8Array` → `Blob` が **2 組**できていた。fallback の `<a>` は
+   * ブラウザが PDF を出せなかったときにしか見えないのに、**復号は常に走る** ──
+   * とくに「全体を印刷」では container 内の全 PDF ぶんが同時に生きる。
+   * ゼロコピー・生成物の即破棄(2026-07-27、不可侵)と逆向きだった。
+   */
+  it('🔴 PDF は object と fallback で ObjectURL を 1 本しか作らない', async () => {
+    const create = vi.spyOn(URL, 'createObjectURL');
+    try {
+      await run(
+        (
+          await writePortableHtml(
+            source({
+              entries: [
+                {
+                  lid: 'a1',
+                  title: '見積',
+                  body: '---\nattachment.asset_key: ast-p\nattachment.name: 見積.pdf\n---\n',
+                },
+              ],
+              assets: [{ key: 'ast-p', mime: 'application/pdf', bytes: enc.encode('PDF') }],
+            }),
+            NOW,
+          )
+        ).blob,
+      );
+      // 前提: PDF が object で出ている(空振り防止 ── 出ていなければ 1 本なのは当然)
+      const obj = document.querySelector('#body object[type="application/pdf"]');
+      expect(obj, '前提: PDF が object で出ていない').not.toBeNull();
+      expect(obj!.querySelector('a[download]'), '前提: fallback の導線が無い').not.toBeNull();
+      expect(create.mock.calls.length, 'PDF 1 件で ObjectURL を 2 本作っている').toBe(1);
+    } finally {
+      create.mockRestore();
+    }
+  });
+
   it('🔴 データが壊れていても理由を出す(黙って真っ白にしない)', async () => {
     // DL が途中で終わったファイル = JSON が切れている
     await run(

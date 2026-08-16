@@ -9,7 +9,8 @@ import { tileSelectsEntry } from '@features/launcher/tiles';
 import { appEditorMode } from '@adapter/ui/render/editor-mode';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { StoreClient } from '@adapter/platform/storage/store-client';
-import { openImageWindow } from '@adapter/platform/image-window';
+import { openAssetWindow } from '@adapter/platform/asset-window';
+import { assetWindowKind } from '@features/asset/asset-preview-kind';
 import {
   createStorePort,
   metaFromRow,
@@ -781,8 +782,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         ),
       ),
     /**
-     * 🔴 **画像を別の窓で見る**(#192)。⚠ 貸した ObjectURL は
-     * `openImageWindow` が**窓の生死に合わせて**捨てる(窓が開けなければ即捨てる)。
+     * 🔴 **添付を別の窓で見る**(#192 で画像、2026-08-15 に PDF)。⚠ 貸した ObjectURL は
+     * `openAssetWindow` が**窓の生死に合わせて**捨てる(窓が開けなければ即捨てる)。
      */
     /**
      * 🔴 **貼る用に画像を持ち歩ける形へ**(#193)。`blob:` を読み直して `data:` にする。
@@ -808,15 +809,30 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       }
       return out;
     },
-    viewImage: (assetKey, name) => {
+    viewAsset: (assetKey, name, mime) => {
       void (async () => {
         try {
-          const lent = await blobs.lendObjectUrl(DEFAULT_CID, assetKey);
-          if (!lent) {
-            dispatcher.dispatch({ type: 'OP_FAILED', error: `画像が見つかりません: ${name}` });
+          // ⚠ 出せない種類は**借りる前に**断る(貸してから捨てる形にしない)
+          const kind = assetWindowKind(mime);
+          if (!kind) {
+            dispatcher.dispatch({
+              type: 'OP_FAILED',
+              error: `この種類は別の窓で開けません: ${name}`,
+            });
             return;
           }
-          const win = await openImageWindow({ lent, title: name });
+          const lent = await blobs.lendObjectUrl(DEFAULT_CID, assetKey);
+          if (!lent) {
+            dispatcher.dispatch({ type: 'OP_FAILED', error: `添付が見つかりません: ${name}` });
+            return;
+          }
+          const win = await openAssetWindow({
+            lent,
+            title: name,
+            kind,
+            // ⚠ 添付ごとに 1 枚(開き直しても窓が積み上がらない)
+            windowName: `pkc3-asset-${assetKey}`,
+          });
           if (!win) {
             // ⚠ popup を止められた ── **理由を言う**(押して無反応にしない)
             dispatcher.dispatch({
@@ -827,7 +843,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         } catch (e) {
           dispatcher.dispatch({
             type: 'OP_FAILED',
-            error: `画像を開けませんでした(${name}): ${String(e)}`,
+            error: `添付を開けませんでした(${name}): ${String(e)}`,
           });
         }
       })();

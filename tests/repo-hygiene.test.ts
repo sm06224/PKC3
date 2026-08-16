@@ -206,3 +206,33 @@ describe('リポジトリ衛生', () => {
     expect(dead, `受け手のいない action がある(押しても無言で何も起きない)`).toEqual(KNOWN_DEAD);
   });
 });
+
+/**
+ * 🔴 **閲覧 HTML のテンプレート文字列にバッククォートを書かない**(2026-08-15)。
+ *
+ * `pkc3-html.ts` の `viewer()` は**巨大な template literal 1 本**で、そこに
+ * バッククォートを 1 つ書くと**その場で閉じて**、遠くの行が構文エラーになる。
+ * ⚠ file の中に注意書きが在るのに **6 度踏んだ**(直近は 2026-08-15、注記に
+ * 書いた `calc(...)` の囲みで)。tsc は止めてくれるが、出るのは
+ * 「This expression is not callable」という**原因と無関係な message** で、
+ * 毎回 1〜2 往復を捨てる。
+ * 🔑 **文言を 7 か所目にせず、機械に名指しさせる**(CLAUDE.md の型)。
+ */
+describe('閲覧 HTML のテンプレート文字列', () => {
+  it('🔴 viewer() の template literal の中にバッククォートが無い', () => {
+    const src = readFileSync('src/features/export/pkc3-html.ts', 'utf-8').split('\n');
+    const start = src.findIndex((l) => l.trimEnd().endsWith('return `'));
+    expect(start, '前提: viewer() の template literal を見つけられていない').toBeGreaterThan(0);
+    // 閉じは行頭が `</script>`; の行(この 1 本しか無い)
+    const end = src.findIndex((l, i) => i > start && l.includes('</script>`;'));
+    expect(end, '前提: template literal の閉じを見つけられていない').toBeGreaterThan(start);
+    const bad = src
+      .slice(start + 1, end)
+      .map((l, i) => ({ line: start + 2 + i, l }))
+      .filter((x) => x.l.includes('`'));
+    expect(
+      bad.map((x) => `${x.line}: ${x.l.trim().slice(0, 60)}`),
+      'template literal の中にバッククォートがある(その場で閉じて build が壊れる)',
+    ).toEqual([]);
+  });
+});

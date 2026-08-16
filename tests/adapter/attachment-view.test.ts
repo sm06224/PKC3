@@ -343,6 +343,77 @@ describe('添付の詳細から起動する(P10)', () => {
 });
 
 /**
+ * 🔴 **PDF の見え方**(2026-08-15、user 報告「PDF ビューアが動作しない /
+ * 窓内と別窓の両方を PKC2 を真似して実装してください」)。
+ *
+ * ⚠ **この経路には test が 1 件も無かった** ── repo 全体で `<object>` を
+ * assert する test は 0 件で、だから「302 × 152 の切手大で描かれている」ことが
+ * 誰にも鳴らなかった(CLAUDE.md §2「経路が一度も通っていない」)。
+ * ⚠ **寸法そのものは happy-dom では測れない**(版面が無い)ので、
+ * ここでは**要素と属性**を pin し、実寸は smoke が見る。
+ */
+describe('PDF の添付(窓内 + 別窓)', () => {
+  const pdfBody = attachmentBody({
+    name: '見積.pdf',
+    mime: 'application/pdf',
+    size: 605,
+    assetKey: 'ast-pdf',
+  });
+  const lender: AssetLender = {
+    lend: async () => ({ url: 'blob:fake-pdf', dispose: () => undefined }),
+    getBlob: async () => null,
+  };
+
+  it('🔴 object[type=application/pdf] が blob URL 付きで入る', async () => {
+    const { d, q } = setup({ a1: pdfBody, a2: '# text' }, lender);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    await tick(20);
+    const obj = q<HTMLObjectElement>('[data-pkc-field="attachment-media"]');
+    expect(obj, 'preview が出ていない').not.toBeNull();
+    expect(obj!.tagName.toLowerCase(), 'object で出していない').toBe('object');
+    expect(obj!.getAttribute('type')).toBe('application/pdf');
+    expect(obj!.getAttribute('data')).toBe('blob:fake-pdf');
+    // 🔑 CSS が PDF だけを狙えるようにする印(共用の規則では 300×150 に落ちる)
+    expect(obj!.getAttribute('data-pkc-preview'), 'PDF の印が無い').toBe('pdf');
+    // 出せないブラウザに空白を残さない(断り文を中に置く)
+    expect(obj!.textContent, '出せないときの断りが無い').toContain('ダウンロード');
+    // ⚠ 「画面に出せません」の断りは**出さない**(出せているので)
+    expect(q('p[data-pkc-field="attachment-no-preview"]')).toBeNull();
+  });
+
+  it('🔴 PDF にも「別の窓で見る」が出て、種類を運ぶ', async () => {
+    const { d, q } = setup({ a1: pdfBody, a2: '# text' }, lender);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    await tick(20);
+    const view = q('[data-pkc-action="view-asset"]');
+    expect(view, 'PDF に「別の窓で見る」が無い').not.toBeNull();
+    expect(view!.getAttribute('data-pkc-asset-key')).toBe('ast-pdf');
+    expect(view!.getAttribute('data-pkc-asset-mime')).toBe('application/pdf');
+    expect(view!.getAttribute('data-pkc-asset-name')).toBe('見積.pdf');
+    // ⚠ 何が起きるかが読めること(画像と PDF で言い方を分ける)
+    expect(view!.getAttribute('title')).toContain('PDF');
+    // ⚠ 図案の鍵(`ACTION_ICONS`)を壊すと**黙って図案なし**になる ── ここで鳴らす
+    expect(
+      view!.querySelector('[data-pkc-icon] svg path'),
+      '図案が付いていない(ACTION_ICONS の鍵がずれている)',
+    ).not.toBeNull();
+  });
+
+  it('別窓に出せない種類には「別の窓で見る」を出さない(押せない導線を置かない)', async () => {
+    const zipBody = attachmentBody({
+      name: 'a.zip',
+      mime: 'application/zip',
+      size: 10,
+      assetKey: 'ast-zip',
+    });
+    const { d, q } = setup({ a1: zipBody, a2: '# text' }, lender);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    await tick(20);
+    expect(q('[data-pkc-action="view-asset"]'), 'zip に別窓の導線が出ている').toBeNull();
+  });
+});
+
+/**
  * 🔴 **出せない種類は「出せない」と言う**(2026-08-06。user 報告 minor
  * 「preview を持たない添付は何も出ない」)。
  *
