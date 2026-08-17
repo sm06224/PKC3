@@ -160,6 +160,26 @@ describe('書き出す対象の解決', () => {
     // selectedLid は null のまま ── closest を見ていなければ 1 件も来ない
     expect(asked).toEqual(['other']);
   });
+
+  /**
+   * 🔴 **Word も同じ規則で引く**(#187 段①)。⚠ 隣に並ぶボタンなので、片方だけ
+   * `selectedLid` 固定にすると「**A を Word にして B を消す**」が成立する。
+   * ⚠ この test を足したのは、変異試験で「いつも選択中のノートにする」が
+   * **smoke では生き延びた**からである(情報ペインでは行と選択が必ず一致するので
+   * 差が出ない ── 差が出る入力をここで作る)。
+   */
+  it('🔴 Word の書き出しも行から closest で引く', () => {
+    const root = document.createElement('div');
+    root.innerHTML =
+      '<div data-pkc-entry="other"><button data-pkc-action="export-entry-docx">Word</button></div>';
+    document.body.append(root);
+    const d = new Dispatcher();
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
+    const asked: string[] = [];
+    bindActions(root, d, { exportEntryDocx: (lid) => asked.push(lid) });
+    root.querySelector<HTMLElement>('[data-pkc-action="export-entry-docx"]')!.click();
+    expect(asked).toEqual(['other']);
+  });
 });
 
 /**

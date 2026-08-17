@@ -174,6 +174,7 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'export-archive': 'archive',
   'export-html': 'globe',
   'export-markdown': 'page',
+  'export-entry-docx': 'page',
   'purge-orphan-assets': 'broom',
   'create-entry': 'plus',
   'attach-file': 'clip',

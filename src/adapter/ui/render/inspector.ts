@@ -363,6 +363,9 @@ export class InspectorRenderer {
     // ⚠ 文言は**実際に落ちるもの**に合わせる(P8 段⑱)── ここは可逆な
     //    アーカイブで、Markdown ではない(マニュアル §5 の表と同じ材料)
     btn('export-entry', '書き出す');
+    // 🔴 **Word で出す**(#187 段①)。⚠ 隣の「書き出す」と**別の物**である ──
+    //    あちらは取り込み直せるバックアップ、こちらは片道の Word 文書
+    btn('export-entry-docx', 'Word');
     if (shape === 'entry+link') btn('write-back-file', '書き戻す');
     btn('show-history', '履歴');
     btn('delete-entry', '削除');
@@ -376,6 +379,7 @@ export class InspectorRenderer {
  */
 const ACTION_TITLES: Record<string, string> = {
   'export-entry': 'このノートだけをバックアップ形式(.pkc3.zip)で保存します。取り込み直せます',
+  'export-entry-docx': 'このノートを Word 文書(.docx)で保存します。片道です(この版では画像は入りません)',
   'show-history': '過去の版を一覧します',
   'delete-entry': 'ゴミ箱へ移します(フォルダ画面から戻せます)',
 };

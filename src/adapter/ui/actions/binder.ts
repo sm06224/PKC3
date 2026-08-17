@@ -181,6 +181,8 @@ export interface BinderServices {
   exportHtml?(): void;
   /** md ZIP の書出し(P6d 段④)。 */
   exportMarkdown?(): void;
+  /** このノートを Word(.docx)で書き出す(#187 段①)。 */
+  exportEntryDocx?(lid: string): void;
   /** このノートだけをアーカイブとして書き出す(P6f)。 */
   exportEntry?(lid: string): void;
   /**
@@ -1203,6 +1205,13 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'export-markdown': (_dispatcher, _target, services) => {
     services.exportMarkdown?.();
+  },
+  'export-entry-docx': (dispatcher, target, services) => {
+    // ⚠ 解決規則は `export-entry` と**同じ**にする(隣に並ぶボタンなので、
+    //    片方だけ `selectedLid` 固定だと「A を Word にして B を消す」が成立する)
+    const lid = target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry')
+      ?? dispatcher.getState().selectedLid;
+    if (lid) services.exportEntryDocx?.(lid);
   },
   'export-entry': (dispatcher, target, services) => {
     // ⚠ 解決規則は `delete-entry` と**同じ**にする(review M-3)── 隣に並べる
