@@ -45,6 +45,46 @@ async function init(dbName: string, journalMode?: JournalMode): Promise<InitResu
   // 冪等(review #4): 二重 init で WASM を二重化しない・旧 db を leak しない
   if (initResult) return initResult;
 
+  /**
+   * 🔴 **使わない OPFS VFS を用意させない**(#114)。
+   *
+   * `crossOriginIsolated` が成立した(#112 / #113)結果、上流は `opfs` と `opfs-wl`
+   * という **PKC3 が 1 度も使わない VFS** を init 時に建て、そのたびに
+   * **async proxy の worker を 1 本ずつ**起こすようになった。DB 本体は
+   * 下の `installOpfsSAHPoolVfs`(SAHPool)であって、この 2 つではない。
+   *
+   * ⚠ **止め方は推測せず上流の実物で確かめた**(`@sqlite.org/sqlite-wasm` の
+   * `dist/index.mjs`)── 3 つの初期化子がそれぞれ別の鍵を見ている:
+   *
+   * | 初期化子 | 門 |
+   * |---|---|
+   * | `opfs` VFS | `config.disable?.vfs?.opfs` |
+   * | `opfs-wl` VFS | ``config.disable?.vfs?.['opfs-wl']`` |
+   * | **`opfs-sahpool`(PKC3 が使う)** | ``config.disable?.vfs?.['opfs-sahpool']`` ← **別の鍵。閉じない** |
+   *
+   * worker を作る `new Worker(...)` は `createVfsState()` の中の**1 か所だけ**で、
+   * そこへ入るのは上の 2 つの install 経路しかない ── 門を閉じれば 1 本も起きない。
+   *
+   * ## 実測(2026-08-17、同じビルドで 2 鍵だけ違う 2 つの dist を交互に 6 組)
+   *
+   * | | renderer の Pss(中央値) | 範囲 |
+   * |---|---|---|
+   * | いまのまま | 143.5 MB | 143.2–144.0 |
+   * | **この設定** | **139.6 MB** | 138.3–140.1 |
+   *
+   * **6 組とも同じ向きで、範囲が重ならない(−3.9 MB)。**
+   * ⚠ 起動は **462 → 454ms** で**範囲が重なる** ── 起動が速くなったとは言えない。
+   * ⚠ 編集セッションの計器(`run-app-session.mjs`)では ±8MB 揺れて**分解できない**
+   * (添付のラスタが揺れの主因)── だから観測点を renderer の静止時に寄せてある。
+   *
+   * ⚠ **`globalThis` に置くのが上流の作法**(`sqlite3ApiBootstrap` が
+   * `globalThis.sqlite3ApiConfig` を読んで merge し、**読んだ後に自分で消す**)。
+   * したがって init 後にこの値は残らない ── 検査は `tests/adapter/storage-vfs-config.test.ts`
+   * が**代入そのもの**を捕まえる形で置いてある。
+   */
+  (globalThis as unknown as Record<string, unknown>).sqlite3ApiConfig = {
+    disable: { vfs: { opfs: true, 'opfs-wl': true } },
+  };
   const sqlite3 = await sqlite3InitModule();
   const meta = {
     libVersion: sqlite3.version.libVersion,

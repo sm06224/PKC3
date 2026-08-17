@@ -18,6 +18,9 @@
  *
  * ## 何を出すか
  * - `attachPhase` … **添付を貼る操作**の詰まり(user が実機で気にした所)
+ * - `pssMb` … 🔴 **ブラウザのプロセス木の常駐**(#114)。⚠ `heapMb` は**メインの
+ *   realm だけ**なので、sqlite の wasm(storage worker)・ラスタ・OPFS proxy は
+ *   そこに 1 バイトも出ない ── 「常駐メモリ」を語れるのはこちらである
  * - `heapMb` / `liveObjectUrls` / `domNodes` … 定常の**傾き**(前半 / 後半の中央値)
  * - `steadyPhase` … 定常の詰まり。⚠ `longtask` は **50ms 未満を落とす**ので、
  *   **心拍(4ms)の最大空き** `maxGapMs` を併せて見る
@@ -27,8 +30,96 @@
  *   node tests/bench/run-app-session.mjs --rounds=40 --attachments=6 --attachMb=2
  */
 import { chromium } from '@playwright/test';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, rmSync, readFileSync, readdirSync } from 'node:fs';
 import { armFrom, seedEditorArm, fillBody } from './editor-arm.mjs';
+
+/**
+ * 🔴 **常駐はプロセス木で測る**(#114)。
+ *
+ * ⚠ `performance.memory.usedJSHeapSize` は**メインの realm の JS heap だけ**である。
+ * PKC3 でいちばん大きい確保元 ── **sqlite の wasm リニアメモリ**は storage worker
+ * の中に在るので、この計器は 2026-08-17 まで「継続使用の常駐メモリ」を謳いながら
+ * **その本体を 1 バイトも見ていなかった**(worker / ラスタ / OPFS proxy も同様)。
+ *
+ * 🔑 見るのは **Pss**(共有ページを持ち主の数で割った量)。⚠ `VmRSS` は同じ共有
+ * ページを**プロセスごとに数える**ので、プロセス数が変わる比較(まさに #114)では
+ * **数が増えただけで常駐が増えたように見える**。両方出して、Pss を主にする。
+ */
+function readPpid(pid) {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    // comm は空白も括弧も含みうるので **最後の `)` から**読む
+    return Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]);
+  } catch {
+    return null;
+  }
+}
+
+/** そのプロセスの常駐(Pss / Rss)を KB で返す。 */
+function memKb(pid) {
+  try {
+    const roll = readFileSync(`/proc/${pid}/smaps_rollup`, 'utf8');
+    const pss = /^Pss:\s+(\d+) kB$/m.exec(roll);
+    const rss = /^Rss:\s+(\d+) kB$/m.exec(roll);
+    if (pss && rss) return { pss: Number(pss[1]), rss: Number(rss[1]) };
+  } catch {
+    /* smaps_rollup が無い環境は status へ落ちる */
+  }
+  try {
+    const st = readFileSync(`/proc/${pid}/status`, 'utf8');
+    const rss = /^VmRSS:\s+(\d+) kB$/m.exec(st);
+    return rss ? { pss: 0, rss: Number(rss[1]) } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * profile を握っているブラウザ本体の pid を引く。
+ * ⚠ 子(renderer / gpu)は `--type=` を持つので外す ── 本体だけを根にする。
+ */
+function findBrowserPid(profileDir) {
+  for (const name of readdirSync('/proc')) {
+    if (!/^\d+$/.test(name)) continue;
+    let cmd;
+    try {
+      cmd = readFileSync(`/proc/${name}/cmdline`, 'utf8');
+    } catch {
+      continue;
+    }
+    if (!cmd.includes(`--user-data-dir=${profileDir}`)) continue;
+    if (cmd.includes('--type=')) continue;
+    return Number(name);
+  }
+  return null;
+}
+
+/** ブラウザのプロセス木を全部足す(worker は renderer の中に居るので木で採る)。 */
+function treeMemoryMb(rootPid) {
+  const kids = new Map();
+  for (const name of readdirSync('/proc')) {
+    if (!/^\d+$/.test(name)) continue;
+    const ppid = readPpid(Number(name));
+    if (ppid === null) continue;
+    if (!kids.has(ppid)) kids.set(ppid, []);
+    kids.get(ppid).push(Number(name));
+  }
+  let pss = 0;
+  let rss = 0;
+  let procs = 0;
+  const queue = [rootPid];
+  while (queue.length) {
+    const pid = queue.shift();
+    const m = memKb(pid);
+    if (m) {
+      pss += m.pss;
+      rss += m.rss;
+      procs += 1;
+    }
+    for (const k of kids.get(pid) ?? []) queue.push(k);
+  }
+  return { pssMb: +(pss / 1024).toFixed(1), rssMb: +(rss / 1024).toFixed(1), procs };
+}
 
 const args = Object.fromEntries(
   process.argv.slice(2).map((a) => {
@@ -103,6 +194,22 @@ async function main() {
   const page = ctx.pages()[0] ?? (await ctx.newPage());
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
+
+  // 🔴 **どの worker script を取りに行ったか**を数える(#114 の構造の側)。
+  // ⚠ 「常駐が減った」を主張するときは、**減った物の名前**が言えないといけない。
+  //    ここが空のまま「差が出た」と言うのは、別の理由で動いた数字を読むのと同じ。
+  const workerScripts = new Map();
+  ctx.on('request', (req) => {
+    const u = req.url();
+    if (!/\/assets\/[^/?]*(worker|proxy)[^/?]*\.js/i.test(u)) return;
+    const short = u.replace(/^https?:\/\/[^/]+/, '').replace(/-[0-9a-zA-Z_]{8}\.js/, '-*.js');
+    workerScripts.set(short, (workerScripts.get(short) ?? 0) + 1);
+  });
+
+  // 🔴 常駐を採る根(ブラウザ本体の pid)。⚠ **見つからないまま 0 を出さない** ──
+  //    「常駐 0MB」は「測れていない」の顔をしていない(いちばん危ない空振り)。
+  const browserPid = findBrowserPid(PROFILE);
+  if (browserPid === null) throw new Error(`profile ${PROFILE} を握るブラウザが /proc に居ない`);
 
   await seedEditorArm(page, ARM);   // ⚠ 最初の goto より前(#223)
   await page.goto(`http://localhost:${PORT}/`);
@@ -270,7 +377,8 @@ async function main() {
         nodes: document.getElementsByTagName('*').length,
       };
     });
-    return m;
+    // ⚠ heap は**メインの realm だけ**。worker(sqlite の wasm を含む)は木で採る
+    return { ...m, ...treeMemoryMb(browserPid) };
   };
 
   const rows = [];
@@ -340,6 +448,13 @@ async function main() {
     // 🔴 **添付を貼る操作そのもの**(user が実機で詰まりを感じた所)
     attachPhase,
     heapMb: { early: med(early.map((x) => x.heapMb)), late: med(late.map((x) => x.heapMb)) },
+    // 🔴 **プロセス木の常駐**(#114)。⚠ `heapMb` はメインの realm だけなので、
+    //    sqlite の wasm・worker・ラスタはこちらにしか出ない。主に見るのは `pssMb`。
+    pssMb: { early: med(early.map((x) => x.pssMb)), late: med(late.map((x) => x.pssMb)) },
+    rssMb: { early: med(early.map((x) => x.rssMb)), late: med(late.map((x) => x.rssMb)) },
+    procs: { early: med(early.map((x) => x.procs)), late: med(late.map((x) => x.procs)) },
+    // ⚠ 名前で言えるようにする(何本の worker script を取りに行ったか)
+    workerScripts: Object.fromEntries([...workerScripts.entries()].sort()),
     liveObjectUrls: { early: med(early.map((x) => x.live)), late: med(late.map((x) => x.live)) },
     domNodes: { early: med(early.map((x) => x.nodes)), late: med(late.map((x) => x.nodes)) },
     steadyPhase,
