@@ -269,6 +269,12 @@ export async function exportEntryDocx(
     const html = await deps.renderBody(body.slice(skip), {
       vars: extractVars(body),
       headingNumber: extractHeadingNumberConfig(body),
+      /**
+       * 🔴 **`:::if{format=docx}` を生かす**(#187 段⑤)。
+       * ⚠ ここを渡すまで、この記法は**受理はするが永久に不可視**だった
+       *   (描画は `'html'` 固定)── 出口ができたので落ちていた動線が戻る。
+       */
+      format: 'docx',
     });
     // ⚠ `<body>` で包む ── 包まないと happy-dom / 実ブラウザで木の形が揃わない
     const doc = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html');

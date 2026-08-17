@@ -578,3 +578,37 @@ describe('Word は詳細ペインと同じ材料で描く(#187 段③)', () => {
     );
   });
 });
+
+/**
+ * 🔴 **`:::if{format=docx}` が生きる**(#187 段⑤)。
+ *
+ * ⚠ この記法は**受理はするが永久に不可視**だった ── 描画が `'html'` 固定で、
+ * `format=docx` の塊は**必ず空**になっていた(`markdown-render.ts` の
+ * `processIfBlocks(text, lineMap, 'html')`)。Word の出口ができたので、
+ * 落ちていた動線が戻る(user 不可侵指示「記法を減らすことは動線を減らすこと」)。
+ */
+describe('書き出す形式で本文を出し分ける(#187 段⑤)', () => {
+  const BODY =
+    ':::if{format=docx}\nWord にだけ出る文\n:::\n\n:::if{format=html}\n画面にだけ出る文\n:::\n\nいつも出る文\n';
+
+  it('🔴 Word には docx の塊が入り、html の塊は入らない', async () => {
+    const got: Blob[] = [];
+    const d = {
+      ...deps(source({ getBody: async () => BODY })),
+      download: (_n: string, blob: Blob) => got.push(blob),
+      renderBody: async (text: string, opts?: RenderMarkdownOptions) => renderMarkdown(text, opts),
+    } as unknown as ExportDeps;
+    const { dispatcher } = fakeDispatcher('ready');
+    expect(await exportEntryDocx(dispatcher, d, 'n1')).toBe(true);
+    const text = await got[0]!.text();
+    expect(text, 'docx 向けの本文が出ていない').toContain('Word にだけ出る文');
+    expect(text, '画面向けの本文まで出ている').not.toContain('画面にだけ出る文');
+    expect(text, '共通の本文が落ちている').toContain('いつも出る文');
+  });
+
+  it('⚠ 画面(既定)は今までどおり html 向け(既定を動かしていない)', () => {
+    const html = renderMarkdown(BODY);
+    expect(html).toContain('画面にだけ出る文');
+    expect(html).not.toContain('Word にだけ出る文');
+  });
+});
