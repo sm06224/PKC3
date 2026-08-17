@@ -63,8 +63,22 @@ export type DocxBlock =
   | { readonly kind: 'hr' }
   | { readonly kind: 'table'; readonly rows: readonly (readonly DocxCell[])[] }
   /**
-   * 🔴 **写せなかったもの**(段① では画像がこれになる ── 画像は段②)。
-   * ⚠ 黙って落とさず、**その場に理由を段落として出す**。
+   * 🔴 **画像**(#187 段②)。⚠ **縦横比を保つ** ── PKC2 は全画像を 480×360 px に
+   * 潰しており、doc にもコメントにも記録が無かった(調査で初めて分かった)。
+   * ⚠ bytes はここに持たない ── 純関数のままにするため、**zip へ入れるのは呼び側**。
+   */
+  | {
+      readonly kind: 'image';
+      /** zip の中の名前(`media/image1.png` 等)。⚠ rels と一致させる。 */
+      readonly media: string;
+      /** 実寸(px)。⚠ 0 以下なら**入れない**(呼び側が `skipped` に倒す)。 */
+      readonly widthPx: number;
+      readonly heightPx: number;
+      /** 読み上げと、写せなかったときの手掛かり。 */
+      readonly alt: string;
+    }
+  /**
+   * 🔴 **写せなかったもの**。⚠ 黙って落とさず、**その場に理由を段落として出す**。
    */
   | { readonly kind: 'skipped'; readonly what: string; readonly why: string };
 
@@ -84,9 +98,22 @@ export interface DocxResult {
     readonly paragraphs: number;
     readonly tables: number;
     readonly links: number;
+    readonly images: number;
     readonly skipped: number;
   };
 }
+
+/**
+ * px → EMU(English Metric Unit)。⚠ Word の寸法は EMU で、**96dpi の px なら 9525 倍**。
+ */
+const EMU_PER_PX = 9525;
+/**
+ * 本文の幅(EMU)。A4 縦・左右余白 1134 twip → 9638 twip = **6.693 インチ**
+ * (= 17.0cm。A4 の 21cm から余白 2cm を両側)。
+ * ⚠ **これを超える画像は縮める**(はみ出すと Word が紙の外へ置く)。
+ * 🔑 縮めるときは**縦横比を保つ**(PKC2 の 480×360 固定を繰り返さない)。
+ */
+const BODY_WIDTH_EMU = Math.round(9638 / 1440 * 914400);
 
 /** 箇条書きの階層の上限。⚠ 超えた分は最深に丸める(段落ごと落とさない)。 */
 export const DOCX_LIST_DEPTH_MAX = 8;
@@ -217,6 +244,38 @@ function blockXml(block: DocxBlock, rels: Map<string, string>): string {
         .join('');
       return `<w:tbl><w:tblPr><w:tblStyle w:val="PkcTable"/><w:tblW w:w="0" w:type="auto"/><w:tblBorders><w:top w:val="single" w:sz="4" w:color="BBBBBB"/><w:left w:val="single" w:sz="4" w:color="BBBBBB"/><w:bottom w:val="single" w:sz="4" w:color="BBBBBB"/><w:right w:val="single" w:sz="4" w:color="BBBBBB"/><w:insideH w:val="single" w:sz="4" w:color="BBBBBB"/><w:insideV w:val="single" w:sz="4" w:color="BBBBBB"/></w:tblBorders></w:tblPr><w:tblGrid>${cols}</w:tblGrid>${rows}</w:tbl>`;
     }
+    case 'image': {
+      /**
+       * 🔴 **縦横比を保って本文幅に収める**(#187 段②)。
+       * ⚠ PKC2 は全画像を 480×360 px に潰していた ── 縦長の図が横に潰れて出る。
+       * 🔑 収めるのは**幅だけ**を見て、高さは同じ比で落とす。
+       */
+      let cx = Math.max(1, Math.round(block.widthPx * EMU_PER_PX));
+      let cy = Math.max(1, Math.round(block.heightPx * EMU_PER_PX));
+      if (cx > BODY_WIDTH_EMU) {
+        cy = Math.max(1, Math.round((cy * BODY_WIDTH_EMU) / cx));
+        cx = BODY_WIDTH_EMU;
+      }
+      let id = rels.get(block.media);
+      if (id === undefined) {
+        id = `rIdM${rels.size + 1}`;
+        rels.set(block.media, id);
+      }
+      const alt = xmlEscape(xmlSafe(block.alt));
+      const n = rels.size;
+      const drawing =
+        `<w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">` +
+        `<wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${n}" name="Picture ${n}" descr="${alt}"/>` +
+        `<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">` +
+        `<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
+        `<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
+        `<pic:nvPicPr><pic:cNvPr id="${n}" name="Picture ${n}" descr="${alt}"/><pic:cNvPicPr/></pic:nvPicPr>` +
+        `<pic:blipFill><a:blip r:embed="${xmlEscape(id)}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
+        `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
+        `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>` +
+        `</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing>`;
+      return paragraph(`<w:r>${drawing}</w:r>`);
+    }
     case 'skipped':
       /**
        * 🔴 **その場に理由を出す**(設計 doc 段①)。⚠ 黙って落とすと user は
@@ -230,7 +289,7 @@ function blockXml(block: DocxBlock, rels: Map<string, string>): string {
 }
 
 const CONTENT_TYPES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>`;
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="jpeg" ContentType="image/jpeg"/><Default Extension="jpg" ContentType="image/jpeg"/><Default Extension="gif" ContentType="image/gif"/><Default Extension="webp" ContentType="image/webp"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>`;
 
 const ROOT_RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/></Relationships>`;
@@ -293,14 +352,17 @@ export function buildDocx(
   const sectPr =
     '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="851" w:footer="992" w:gutter="0"/></w:sectPr>';
   const document = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>${body}${sectPr}</w:body></w:document>`;
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><w:body>${body}${sectPr}</w:body></w:document>`;
 
   const relItems = [
     '<Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>',
     '<Relationship Id="rIdNum" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>',
-    ...[...rels].map(
-      ([href, id]) =>
-        `<Relationship Id="${xmlEscape(id)}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${xmlEscape(href)}" TargetMode="External"/>`,
+    // ⚠ **画像とリンクで Type も TargetMode も違う** ── 取り違えると Word が
+    //    「リンク先が壊れている」/ 画像が出ない。id の前置き(`rIdM` / `rIdL`)で分ける
+    ...[...rels].map(([target, id]) =>
+      id.startsWith('rIdM')
+        ? `<Relationship Id="${xmlEscape(id)}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="${xmlEscape(target)}"/>`
+        : `<Relationship Id="${xmlEscape(id)}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${xmlEscape(target)}" TargetMode="External"/>`,
     ),
   ].join('');
   const documentRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -337,7 +399,8 @@ export function buildDocx(
       blocks: blocks.length,
       paragraphs: (document.match(/<w:p>|<w:p [^>]*>/g) ?? []).length,
       tables: blocks.filter((b) => b.kind === 'table').length,
-      links: rels.size,
+      links: [...rels.values()].filter((id) => id.startsWith('rIdL')).length,
+      images: blocks.filter((b) => b.kind === 'image').length,
       skipped: skipped.length,
     },
   };

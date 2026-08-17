@@ -24,7 +24,7 @@ function part(res: ReturnType<typeof buildDocx>, name: string): string {
 }
 
 /** HTML(画面と同じもの)から塊を作る。 */
-function blocksOf(html: string): { blocks: DocxBlock[]; skipped: number } {
+function blocksOf(html: string): ReturnType<typeof htmlToDocxBlocks> {
   const doc = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html');
   return htmlToDocxBlocks(doc);
 }
@@ -275,5 +275,82 @@ describe('HTML(画面と同じもの)→ 塊', () => {
   it('引用は段落ごとに quote になる', () => {
     const { blocks } = blocksOf('<blockquote><p>1 行目</p><p>2 行目</p></blockquote>');
     expect(blocks.map((b) => b.kind)).toEqual(['quote', 'quote']);
+  });
+});
+
+describe('画像(#187 段②)', () => {
+  it('🔴 縦横比を保って本文幅に収める(PKC2 は全部 480x360 に潰していた)', () => {
+    // 本文幅は 9638 twip = 6.693in = 6,120,130 EMU(A4 21cm − 余白 2cm×2 = 17cm)。
+    // それを**超える**幅(1200px = 11,430,000 EMU)を渡す
+    const res = buildDocx(
+      [{ kind: 'image', media: 'media/image1.png', widthPx: 1200, heightPx: 600, alt: 'ず' }],
+      't',
+      ISO,
+    );
+    const xml = part(res, 'word/document.xml');
+    const ext = /<wp:extent cx="(\d+)" cy="(\d+)"\/>/.exec(xml);
+    expect(ext, '画像が入っていない').not.toBeNull();
+    const cx = Number(ext![1]);
+    const cy = Number(ext![2]);
+    // ⚠ 幅は本文幅ちょうどへ収まる
+    expect(cx).toBe(6_120_130);
+    // 🔴 **比が保たれている**(2:1 のまま。潰れていない)
+    expect(Math.abs(cx / cy - 2)).toBeLessThan(0.01);
+  });
+
+  it('本文幅に収まる画像はそのままの寸法(勝手に拡大しない)', () => {
+    const res = buildDocx(
+      [{ kind: 'image', media: 'media/image1.png', widthPx: 100, heightPx: 40, alt: 'ず' }],
+      't',
+      ISO,
+    );
+    const xml = part(res, 'word/document.xml');
+    expect(xml).toContain('<wp:extent cx="952500" cy="381000"/>');
+  });
+
+  it('🔴 画像の rel は image 型で、リンクとは Type も TargetMode も違う', () => {
+    const res = buildDocx(
+      [
+        { kind: 'image', media: 'media/image1.png', widthPx: 10, heightPx: 10, alt: 'ず' },
+        { kind: 'p', runs: [{ text: 'そと', href: 'https://example.com' }] },
+      ],
+      't',
+      ISO,
+    );
+    const rels = part(res, 'word/_rels/document.xml.rels');
+    const img = /<Relationship Id="([^"]+)" Type="[^"]*\/image" Target="media\/image1.png"\/>/.exec(rels);
+    expect(img, '画像の rel が image 型でない').not.toBeNull();
+    // ⚠ 画像に TargetMode="External" が付くと Word は「外部の画像」として探しに行く
+    expect(img![0]).not.toContain('TargetMode');
+    expect(rels, 'リンクの rel が External でない').toContain('TargetMode="External"');
+    // 🔴 document がその id を指している(指し先の実在)
+    expect(part(res, 'word/document.xml')).toContain(`r:embed="${img![1]!}"`);
+  });
+
+  it('🔴 Content_Types が画像の拡張子を宣言している(宣言漏れは開けない)', () => {
+    const types = part(buildDocx([], 't', ISO), '[Content_Types].xml');
+    for (const ext of ['png', 'jpeg', 'gif', 'webp'])
+      expect(types, `${ext} の宣言が無い`).toContain(`Extension="${ext}"`);
+  });
+
+  it('🔴 添付の画像は「場所」として預けられる(bytes は adapter が解く)', () => {
+    const { blocks, images } = blocksOf(
+      '<p><img data-pkc-asset-key="k1" data-pkc-asset-name="図.png"></p>',
+    );
+    expect(images).toEqual([{ at: 0, assetKey: 'k1', alt: '図.png' }]);
+    // ⚠ 解けなかったときは **skipped のまま**(黙って消えない)
+    expect(blocks[0]).toMatchObject({ kind: 'skipped' });
+  });
+
+  /**
+   * 🔴 **段落に包まれていない画像も預ける**(2026-08-17 の変異試験 I6 で判明)。
+   * ⚠ 添付の画像を拾う所は **2 か所**ある(段落の中を辿る側 / 塊を辿る側)。
+   * 上の test は前者しか通らないので、後者を消す変異が**生き延びた**
+   * (CLAUDE.md §7「同じ値を複数の経路へ渡すものは経路ごとに pin する」)。
+   */
+  it('🔴 段落に包まれていない画像も「場所」として預けられる', () => {
+    const { blocks, images } = blocksOf('<img data-pkc-asset-key="k2" alt="直下の図">');
+    expect(images).toEqual([{ at: 0, assetKey: 'k2', alt: '直下の図' }]);
+    expect(blocks[0]).toMatchObject({ kind: 'skipped' });
   });
 });

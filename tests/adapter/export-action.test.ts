@@ -81,6 +81,8 @@ function deps(over: Partial<ExportDeps> = {}): ExportDeps & {
     download: (name, blob) => files.push({ name, blob }),
     notify: (m) => messages.push(m),
     report: (n) => notes.push([...n]),
+    // ⚠ 待つものが無い ── 「待たない」を明示する(下の test が待つ側を見る)
+    settle: async () => {},
     now: () => NOW,
     files,
     notes,

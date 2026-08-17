@@ -7,7 +7,12 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/binder';
-import { exportEntry, type ExportDeps } from '../../src/adapter/ui/actions/export-archive';
+import {
+  exportArchive,
+  exportEntry,
+  exportEntryDocx,
+  type ExportDeps,
+} from '../../src/adapter/ui/actions/export-archive';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import type { ArchiveSource } from '../../src/features/export/pkc3-archive';
 
@@ -38,12 +43,16 @@ function source(over: Partial<ArchiveSource> = {}): ArchiveSource {
   };
 }
 
-function deps(src: ArchiveSource): ExportDeps & { files: string[] } {
+function deps(
+  src: ArchiveSource,
+  settle: () => Promise<void> = async () => {},
+): ExportDeps & { files: string[] } {
   const files: string[] = [];
   return {
     source: src,
     download: (name) => files.push(name),
     report: () => {},
+    settle,
     now: () => new Date('2026-08-02T00:00:00Z'),
     files,
   };
@@ -249,5 +258,169 @@ describe('書出し中に本文を書き換えられない', () => {
     expect(events, '実行中でないのに断っている').not.toContain('OP_FAILED');
     expect(events).toContain('START_EDIT');
     vi.unstubAllGlobals();
+  });
+});
+
+/**
+ * 🔴 **保存の直後に押しても、保存した本文が出る**(2026-08-17 に実測で判明)。
+ *
+ * 書込は effect 層の **1 本の chain に直列化**されるが、書き出しの読みは
+ * **その外**に居る ── `getBody` は並んでいる書込を**追い越す**。
+ * 実測(`vite preview` + 実ブラウザ、保存して 90ms 後に Word を押す):
+ * **11/12 が保存前の本文**を書き出した(800ms 待つ対照群は 0/12)。
+ * worker への命令の順番は `upsertEntry`(改名)→ **`getBody`(書き出し)** →
+ * `upsertEntry`(本文)で、改名の書込が 67ms かかる間に読みが割り込んでいた。
+ *
+ * ⚠ **入口ごとに見る**(CLAUDE.md §7)── 3 つの出口はそれぞれ別の場所で読むので、
+ * 代表 1 つの test は他の 2 つを 1 度も通らない。
+ * ⚠ 観測点は「`settle()` を呼んだか」ではなく **落ちてきた file の中身**にする ──
+ * 呼んだだけで読みの**前**でなければ意味が無い。
+ */
+describe('書き出しは、飛んでいる書込が着地してから読む', () => {
+  const OLD = '古い本文';
+  const NEW = '保存した本文';
+
+  /** `settle()` が解けるまで**古い本文**を返す store(= 書込が飛んでいる状態)。 */
+  function lagging(): { src: ArchiveSource; settle: () => Promise<void> } {
+    let landed = false;
+    const body = (): string => (landed ? NEW : OLD);
+    return {
+      settle: async () => {
+        landed = true;
+      },
+      src: source({
+        getBody: async () => body(),
+        listBodies: async () => ({ rows: [{ lid: 'n1', body: body() }], done: true }),
+      }),
+    };
+  }
+
+  /** 落ちてきた file を捕まえる deps。 */
+  function catching(src: ArchiveSource, settle: () => Promise<void>) {
+    const got: Blob[] = [];
+    return {
+      got,
+      d: {
+        ...deps(src, settle),
+        download: (_name: string, blob: Blob) => got.push(blob),
+        renderBody: async (text: string) => `<p>${text}</p>`,
+      } as unknown as ExportDeps & { files: string[] },
+    };
+  }
+
+  it('🔴 Word(#187)── 保存前の本文を書き出さない', async () => {
+    const { src, settle } = lagging();
+    const { d, got } = catching(src, settle);
+    const { dispatcher } = fakeDispatcher('ready');
+    expect(await exportEntryDocx(dispatcher, d, 'n1')).toBe(true);
+    expect(await got[0]!.text(), '保存前の本文が入っている').toContain(NEW);
+  });
+
+  it('🔴 1 ノートのアーカイブ(P6f)── 保存前の本文を書き出さない', async () => {
+    const { src, settle } = lagging();
+    const { d, got } = catching(src, settle);
+    const { dispatcher } = fakeDispatcher('ready');
+    expect(await exportEntry(dispatcher, d, 'n1')).toBe(1);
+    expect(await got[0]!.text(), '保存前の本文が入っている').toContain(NEW);
+  });
+
+  it('🔴 まとめての書き出し(P6d)── 保存前の本文を書き出さない', async () => {
+    const { src, settle } = lagging();
+    const { d, got } = catching(src, settle);
+    const { dispatcher } = fakeDispatcher('ready');
+    expect(await exportArchive(dispatcher, d, 'archive')).toBe(1);
+    expect(await got[0]!.text(), '保存前の本文が入っている').toContain(NEW);
+  });
+
+  /**
+   * ⚠ **空振り防止** ── 上の 3 件は「`settle()` が本文を新しくする」という
+   * 仕掛けに乗っている。待たなければ**本当に古い本文が出る**ことを 1 度見ておく
+   * (見ないと、fake が常に新しい本文を返していても緑になる)。
+   */
+  it('⚠ 待たなければ古い本文が出る(仕掛けが効いていることの確認)', async () => {
+    const { src, settle } = lagging();
+    const { d, got } = catching(src, settle);
+    const { dispatcher } = fakeDispatcher('ready');
+    await exportEntryDocx(dispatcher, { ...d, settle: async () => {} }, 'n1');
+    expect(await got[0]!.text()).toContain(OLD);
+  });
+});
+
+/**
+ * 🔴 **Word に画像を入れる**(#187 段②)の adapter 側。
+ *
+ * ⚠ 組み立ての規則(EMU / 縦横比 / rels)は `tests/features/docx-export.test.ts` が
+ * 見る。ここが見るのは **adapter にしか無い所** ── 添付の bytes を解いて
+ * `word/media/*` として zip に足し、解けなかったものを**理由つきで残す**こと。
+ * ⚠ この経路は smoke でも通らない(smoke のノートに添付が無い)。
+ */
+describe('Word の画像(#187 段②)', () => {
+  /** 1×1 の PNG(67 バイト)。 */
+  const PNG = Uint8Array.from(
+    atob(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    ),
+    (c) => c.charCodeAt(0),
+  );
+
+  /** 添付 1 件を持つノート(本文は `<img data-pkc-asset-key>` を返す)。 */
+  function setup(over: { blob?: Blob | null; size?: { w: number; h: number } | null } = {}) {
+    const got: Blob[] = [];
+    const src = source({
+      getBody: async () => '![図](asset:ast-1)',
+      getAssetBlob: async () =>
+        over.blob === undefined ? new Blob([PNG], { type: 'image/png' }) : over.blob,
+    });
+    const d = {
+      ...deps(src),
+      download: (_n: string, blob: Blob) => got.push(blob),
+      renderBody: async () =>
+        '<p><img data-pkc-asset-key="ast-1" data-pkc-asset-name="図.png" alt="図"></p>',
+    } as unknown as ExportDeps;
+    // ⚠ happy-dom は `createImageBitmap` を持たない ── 実寸を返す口を立てる
+    //   (`null` を渡す arm は「読めなかった」の再現)
+    const size = over.size === undefined ? { w: 1200, h: 900 } : over.size;
+    (globalThis as unknown as Record<string, unknown>).createImageBitmap = async () => {
+      if (size === null) throw new Error('decode failed');
+      return { width: size.w, height: size.h, close: () => {} };
+    };
+    return { d, got };
+  }
+
+  it('🔴 添付が word/media に入り、document がそれを指す', async () => {
+    const { d, got } = setup();
+    const { dispatcher } = fakeDispatcher('ready');
+    expect(await exportEntryDocx(dispatcher, d, 'n1')).toBe(true);
+    const text = await got[0]!.text();
+    expect(text, 'zip に画像が入っていない').toContain('word/media/image1.png');
+    expect(text, 'document が画像を指していない').toContain('r:embed="rIdM1"');
+    expect(text, '本文が「写せませんでした」のまま').not.toContain('写せませんでした');
+  });
+
+  it('🔴 bytes が取れなければ、理由を残して本文を続ける(黙って消さない)', async () => {
+    const { d, got } = setup({ blob: null });
+    const { dispatcher } = fakeDispatcher('ready');
+    expect(await exportEntryDocx(dispatcher, d, 'n1')).toBe(true);
+    const text = await got[0]!.text();
+    expect(text).not.toContain('word/media/');
+    expect(text, '落ちたことがどこにも書かれていない').toContain('写せませんでした');
+  });
+
+  it('🔴 大きさが読めなければ入れない(潰れた図を出さない)', async () => {
+    const { d, got } = setup({ size: null });
+    const { dispatcher } = fakeDispatcher('ready');
+    expect(await exportEntryDocx(dispatcher, d, 'n1')).toBe(true);
+    const text = await got[0]!.text();
+    expect(text).not.toContain('word/media/');
+    expect(text).toContain('大きさを読めませんでした');
+  });
+
+  it('🔴 Word が読めない形式は入れず、形式名を出す', async () => {
+    const { d, got } = setup({ blob: new Blob(['<svg/>'], { type: 'image/svg+xml' }) });
+    const { dispatcher } = fakeDispatcher('ready');
+    expect(await exportEntryDocx(dispatcher, d, 'n1')).toBe(true);
+    const text = await got[0]!.text();
+    expect(text).not.toContain('word/media/');
+    expect(text).toContain('image/svg+xml');
   });
 });
