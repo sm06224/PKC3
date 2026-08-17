@@ -12,6 +12,7 @@
  * - 🔴 **帯から切った設定が、設定画面に映る** ── 器は 1 度しか組まないので、
  *   映さないと古い値が見える(CLAUDE.md「設定画面の値の同期」)
  */
+import { createHash } from 'node:crypto';
 import { describe, expect, it, beforeEach } from 'vitest';
 import { createAnnounce, announceServices } from '../../src/adapter/ui/render/announce';
 import { SettingsRenderer } from '../../src/adapter/ui/render/settings';
@@ -24,7 +25,7 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import type { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { initialState } from '../../src/adapter/state/app-state';
-import { NOTICE_SHOW_MAX, type Notice } from '../../src/features/notice/notice-log';
+import { NOTICES, NOTICE_SHOW_MAX, type Notice } from '../../src/features/notice/notice-log';
 
 function memory(): NoticeStorage {
   const data: Record<string, string> = {};
@@ -514,5 +515,70 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
     s.render(initialState); // 2 度目 = 器は組み直さない
     const box = host.querySelector<HTMLInputElement>('[data-pkc-field="notices-enabled"]')!;
     expect(box.checked, '古い値のまま見えている').toBe(false);
+  });
+});
+
+/**
+ * 🔴 **配ったお知らせの文面は、あとから書き換えても届かない**(#220-7)。
+ *
+ * 既読は **id の集合**である(`unreadNotices`)。だから既に配った entry の文面を
+ * その場で直しても、**その id を閉じた user はもう見ない** ── #219 で実際にやった
+ * (2026-08-16 の entry の 1 行を書き換えた)。id を振り直すのも禁じ手
+ * (`.claude/skills/notice-writing/SKILL.md`「id は既読の鍵」)。
+ *
+ * 🔑 だから **文面を等値 pin** して、書き換えたら**必ず落ちる**ようにする。
+ * 落ちたときの選択肢は 2 つしかない:
+ *   ① 挙動が変わったなら **新しい entry を足す**(既読の user にも帯で届く)
+ *   ② 誤字直し等で届かなくてよいなら、**この表を更新する**(= 届かないと認める)
+ * ⚠ どちらも「気づかずに書き換える」ことだけを防ぐ形である。
+ */
+describe('お知らせの文面は固定(#220-7)', () => {
+  /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
+  const KNOWN: readonly [string, string][] = [
+    ['2026-08-17-office-save-same-note', 'ed2e27ba'],
+    ['2026-08-16-office-save-to-pkc', '3cdb4883'],
+    ['2026-08-16-pdf-viewer', '14ad159e'],
+    ['2026-08-16-live-row-box', '5d66f0d8'],
+    ['2026-08-16-slim-ui', 'bdae224d'],
+    ['2026-08-15-query-view', 'd29834b1'],
+    ['2026-08-15-relations', '08672341'],
+    ['2026-08-15-chart-fence', '0712f044'],
+    ['2026-08-15-nav-and-panes', '265437d9'],
+    ['2026-08-15-search-sort-tags', '84c6fe93'],
+    ['2026-08-15-multi-tab', 'e2df18fa'],
+    ['2026-08-14-asset-ref-link', '6f84d26c'],
+    ['2026-08-14-live-editor-default', '7cdcef0b'],
+    ['2026-08-14-attachment-doc-align', '69d4a0c6'],
+    ['2026-08-14-office-tile', 'de2b82b9'],
+    ['2026-08-14-office-mouse-select', '30f84355'],
+    ['2026-08-14-office-settings-persist', '5117be07'],
+    ['2026-08-14-office-japanese-ui', '44c4f92f'],
+    ['2026-08-14-announce-close', '63803d84'],
+    ['2026-08-13-office-dialog-crash', '563191dc'],
+  ];
+
+  const digest = (n: { title: string; items: readonly string[] }): string =>
+    createHash('sha256').update(JSON.stringify([n.title, n.items])).digest('hex').slice(0, 8);
+
+  it('🔴 既に配った文面が変わっていない(変えても既読の user には届かない)', () => {
+    // 空振り防止 ── 表が空 / 件数が食い違う形で「全部一致した」と言わない
+    expect(KNOWN.length, '登記表と表の件数が違う ── 足した entry を表に足していない').toBe(
+      NOTICES.length,
+    );
+    const map = new Map(KNOWN);
+    const drift: string[] = [];
+    for (const n of NOTICES) {
+      const want = map.get(n.id);
+      if (want === undefined) {
+        drift.push(`${n.id}: 表に無い(足したなら ['${n.id}', '${digest(n)}'] を足す)`);
+        continue;
+      }
+      if (want !== digest(n))
+        drift.push(
+          `${n.id}: 文面が変わっている(${want} → ${digest(n)})` +
+            ' ── 挙動が変わったなら新しい entry を足す。届かなくてよいならこの表を直す',
+        );
+    }
+    expect(drift).toEqual([]);
   });
 });

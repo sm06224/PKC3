@@ -33,7 +33,7 @@ interface StageApi {
     dir: unknown;
     size: number;
     read: (into: Uint8Array, wanted: number, position: number) => number;
-    meta?: { name?: string; path?: string; token?: string };
+    meta?: { name?: string; path?: string; token?: string; win?: string };
     key?: string;
     now?: () => number;
   }): Promise<{ key: string; name: string; size: number }>;
@@ -165,7 +165,11 @@ describe('往復 ── 置いたものを引き取る', () => {
       dir,
       size: doc.length,
       read: r.read,
-      meta: { name: '無題 1.odt', path: '/home/web_user/無題 1.odt' },
+      // ⚠ **窓の id も通す**(#220-4)── 通さないと「置く側が meta.win を書く」
+      //    経路がこの fixture では 1 度も走らない(= 測っていない次元)。
+      //    `record.win = String(meta.name)` のような取り違えは、名前と違う値を
+      //    渡して初めて殺せる
+      meta: { name: '無題 1.odt', path: '/home/web_user/無題 1.odt', win: 'win-XYZ' },
       now: () => 4242,
     });
     expect(put.size).toBe(doc.length);
@@ -173,6 +177,7 @@ describe('往復 ── 置いたものを引き取る', () => {
     const list = await listStaged(asStageDir(dir));
     expect(list, '置いたのに一覧に出ない').toHaveLength(1);
     expect(list[0]!.name).toBe('無題 1.odt');
+    expect(list[0]!.win, '窓の id が往復していない ── 同じ文書を束ねられない').toBe('win-XYZ');
     expect(list[0]!.at).toBe(4242);
     expect(list[0]!.key).toBe(put.key);
     expect(list[0]!.token, 'token を渡していないのに付いている').toBeUndefined();

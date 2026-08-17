@@ -214,10 +214,29 @@ try {
    * ⚠ 1 枚ずつ比べない ── 点滅するカーソルだけで「変わった」になる(2026-08-13)。
    */
   const clip = { x: canvas.x, y: canvas.y, width: canvas.w, height: canvas.h };
+  /**
+   * 🔴 **撮影の口は「渡さない」形にする**(#220-2。機密資料の取り扱い 6)。
+   *
+   * user 指示は「呼ばない」ではなく **「引数を与えなければ撮れない形にする」**である。
+   * だから既定では `shoot` が **`null`** で、page へ触る術がこの関数に無い ──
+   * `PKC3_FRAMES=1` を渡した回だけ撮れる(兄弟の `open-doc-probe.mjs` の
+   * `PKC3_SHOT` と同じ作法に揃えた)。
+   *
+   * ⚠ **消さない**理由: この harness で**唯一生きている actuator の観測点**である。
+   * 初稿は `FS.stat` しか見ておらず「両群同一 = 差が無い」と読み違えて、
+   * **存在しない結論**(「ダイアログが開かないのは LO wasm の制限」)を書きかけた。
+   * 代わりになる、中身に依らない観測点は 2026-08-17 時点で見つかっていない
+   * (題名は死んでいる / 打っても FS は動かない / 窓の枚数も動かない)。
+   * ⚠ 画素は**外へ出さない** ── 出るのは sha256 の先頭 16 桁だけ、PNG は保存しない。
+   */
+  const shoot = process.env.PKC3_FRAMES === '1' ? () => page.screenshot({ clip }) : null;
   const frames = async (n = 5) => {
+    // ⚠ 撮れないときは **`null`**(空配列にしない)── 空配列だと下の `turned()` が
+    //    「全部入れ替わった」= 届いたと読む。**測っていないことを測れなかったと言う**
+    if (shoot === null) return null;
     const set = new Set();
     for (let i = 0; i < n; i += 1) {
-      const png = await page.screenshot({ clip });
+      const png = await shoot();
       set.add(createHash('sha256').update(png).digest('hex').slice(0, 16));
       await page.waitForTimeout(400);
     }
@@ -251,17 +270,23 @@ try {
   await page.waitForTimeout(4000);
   const afterType = await frames();
   // ⚠ **集合ごと入れ替わった**ときだけ「届いた」と言う(重なりが 1 つでもあれば怪しい)
-  const turned = (a, b) => b.every((h) => !a.includes(h));
+  // ⚠ 撮っていない回は `null` を返す ── **false にしない**(「届かなかった」と
+  //    読ませると、以降の判定を無意味だと誤断する)
+  const turned = (a, b) => (a === null || b === null ? null : b.every((h) => !a.includes(h)));
   result.actuators = [{
-    how: '文字入力', caretBlinks: before.length > 1,
-    landed: turned(before, afterType), before, after: afterType,
+    how: '文字入力',
+    caretBlinks: before === null ? null : before.length > 1,
+    landed: turned(before, afterType),
+    before,
+    after: afterType,
+    ...(shoot === null ? { why: 'PKC3_FRAMES=1 を渡していないので版面を見ていない' } : {}),
   }];
   result.steps.push(await snap('文字を打った'));
 
   // ⚠ 文字が届かないなら、**別の一手**を試す ── 全選択 + 太字(属性だけ動かす)。
   //    2026-08-14 の実機では Cmd+A / Cmd+B が効いていたので、鍵盤の近道は届きうる
   let last = afterType;
-  if (!result.actuators[0].landed) {
+  if (result.actuators[0].landed !== true && shoot !== null) {
     await page.keyboard.press('Control+a');
     await page.waitForTimeout(1500);
     await page.keyboard.press('Control+b');
@@ -274,7 +299,12 @@ try {
     last = afterBold;
     result.steps.push(await snap('全選択+太字'));
   }
-  result.actuated = result.actuators.some((a) => a.landed);
+  // ⚠ 1 つでも届けば真 / 全部 null なら **null**(= 測っていない)
+  result.actuated = result.actuators.some((a) => a.landed === true)
+    ? true
+    : result.actuators.every((a) => a.landed === null)
+      ? null
+      : false;
 
   // 本命: Ctrl+S(既存 path への上書き ── ダイアログは出ないはず)
   await page.keyboard.press('Control+s');

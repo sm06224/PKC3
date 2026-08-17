@@ -202,12 +202,42 @@
         if (!path || !token) return false;
         tokens[path] = token;
         delete paths[key];
+        /**
+         * 🔴 **返事が着いた鍵は順番の列からも消す**(#220-5)。
+         *
+         * ⚠ 消さないと**死んだ鍵が上限の枠を食う**。実測(2026-08-17、上限 3):
+         * `old1 old2 new3` を覚える → `new3` に返事 → `new4` を覚えると
+         * `order.shift()` が **生きている `old1` を捨て**、以後 `adopt('old1')` が
+         * false = **返事がどこにも着かない**。これは 20 行上の
+         * 「古い鍵の返事は落とさない」という自分の宣言に反していた。
+         * ⚠ 症状は #217 と同じ形(保存のたびにノートが増える)で出る。
+         */
+        var i = order.indexOf(key);
+        if (i >= 0) order.splice(i, 1);
         return true;
       },
 
       /** 覚えている鍵の数(⚠ 上限が効いていることの観測点)。 */
       keyCount: function () { return order.length; },
     };
+  }
+
+  /**
+   * 🔴 **この窓の id**(#217 / #220-4)。引き取る側が「同じ文書の保存」を束ねる鍵の
+   * 片方である(もう片方は path)。
+   *
+   * ⚠ **`|` を含めない。** 引き取る側は `win|path` で 1 本の文字列にするので
+   * (`office-save-back.ts` の `sameDoc`)、`|` が混じると分かち書きが曖昧になる。
+   * ⚠ **窓ごとに違う値**でなければならない ── 固定値にすると、2 枚目の窓が同じ名前で
+   * 保存したときに**別の文書どうしを 1 つのノートへ潰す**。
+   * 🔑 判断をここへ出す理由は `createTokenTable` と同じ:`host.html` は bundle されず
+   * unit が 1 件も届かない(CLAUDE.md「どの test からも実行されない file に判断を
+   * 書かない」)。⚠ だから host.html 側は**この関数を呼ぶ 1 行**にする。
+   */
+  function newWindowId() {
+    var c = root.crypto;
+    if (c && typeof c.randomUUID === 'function') return c.randomUUID();
+    return 'w' + Date.now().toString(36) + '-' + Math.floor(Math.random() * 1e9).toString(36);
   }
 
   root.PKC3OfficeSaveWatch = {
@@ -219,5 +249,6 @@
     baseName: baseName,
     createSaveWatch: createSaveWatch,
     createTokenTable: createTokenTable,
+    newWindowId: newWindowId,
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -356,7 +356,17 @@ describe('OfficeWindow', () => {
   it('🔴 窓の側(素の HTML)が、同じ綴りで受けている', () => {
     // ⚠ 空振り防止 ── 定数が空だと `toContain('')` は常に真になる
     expect(OFFICE_ADOPTED.length).toBeGreaterThan(3);
-    const host = readFileSync('public/office/host.html', 'utf-8');
+    /**
+     * ⚠ **実行行だけを見る**(#220-6)。file 全体に当てると、解説コメントに
+     * 満たされて「受け口を丸ごとコメントアウトする変異」が素通りする ──
+     * CLAUDE.md §1 で 5 回踏んだ型(`SAFE_HEAP` の件と同じ)。
+     * 🔑 同じ形の正解が `office-save-watch.test.ts` / `office-save-back.test.ts` に在る。
+     */
+    const host = readFileSync('public/office/host.html', 'utf-8')
+      .split('\n')
+      .filter((l) => !/^\s*(\*|\/\/|<!--)/.test(l))
+      .join('\n');
+    expect(host.length, '抜き出せていない ── 検査が空振りしている').toBeGreaterThan(1000);
     expect(
       host,
       '本体が返す種別を窓が受けていない ── 2 回目の保存でノートが増える',

@@ -39,6 +39,16 @@ import {
 /** 取り込んだ結果。⚠ `'deferred'` は**棚に残っている**(あとで撃ち直す)。 */
 export type IntakeResult = 'created' | 'replaced' | 'deferred' | 'failed';
 
+/**
+ * 「同じ文書」の表に置く上限(#220-1)。
+ *
+ * 🔑 **窓側の `KEY_MEMORY_MAX` と同じ数**にする(`public/office/office-save-watch.js`)。
+ * 揃えるのは見栄えではなく、**両側が同じ寿命で忘れる**ようにするためである ──
+ * 片方だけ覚えていると「窓は忘れたのに本体は束ねる / その逆」が起きる。
+ * ⚠ 数は `tests/adapter/office-save-back.test.ts` の parity test が突き合わせる。
+ */
+export const SAME_DOC_MAX = 64;
+
 export interface SaveBackDeps {
   /** 棚。⚠ OPFS が無い環境では `null` を返す(そこでは書き戻しが効かないだけ)。 */
   readonly stage: () => Promise<StageDir | null>;
@@ -114,7 +124,52 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
   }
 
   /**
-   * 🔴 **1 回の引き取りの中で「同じ文書」を束ねる鍵**(#217 の残り、着地前レビュー)。
+   * 🔴 **「同じ文書」→ 作ったノート**の表(#217 の残り / #220-1)。
+   *
+   * ⚠ **1 回の引き取りの中だけ**では足りない(2026-08-17 に直した)。放送は
+   * 鍵 1 件ごとに来る(`main.ts` の `receive(ev.key)`)ので、表を `run()` の
+   * ローカルに置くと **放送経路では 1 度も効かない** ── 2 回目の Ctrl+S が
+   * 1 回目の 0.7〜1.0 秒後に来て、本体の取り込みが数百 ms 掛かると窓の返事が
+   * 間に合わず、**同じ文書のノートが 2 件**できる。
+   *
+   * ⚠ 初稿のコメントは「跨ぐと、窓が読み直されて同じ path に別の文書が居るときに
+   * 取り違える」と書いていたが、**この理由は成り立たない** ── `win` は
+   * `armSaveWatch` の中で `randomUUID` で作られ(`public/office/host.html`)、
+   * 読み直しは `location.replace` / `location.reload` の**完全再読込**なので、
+   * 読み直せば `win` が変わり、跨いだ項目は当たらない。
+   * 🔑 残る本当の危険(**同じページのまま**同じ名前で別の文書を保存する)は、
+   * 窓側の表(`office-save-watch.js` の `tokens`)が**同じ粒度**で持っているので、
+   * こちらへ上げても露出は増えない。しかも `takeOne` は `readAttachment` で
+   * 生死を確かめて死んでいれば新規へ倒す。
+   */
+  const madeHere = new Map<string, string>();
+  /** 最近使った順に保ち、上限を超えたら**古いものから**落とす。 */
+  function rememberHere(group: string, lid: string): void {
+    madeHere.delete(group);
+    madeHere.set(group, lid);
+    while (madeHere.size > SAME_DOC_MAX) {
+      const oldest = madeHere.keys().next().value;
+      if (oldest === undefined) break;
+      madeHere.delete(oldest);
+    }
+  }
+
+  /**
+   * 🔴 **引き取りは 1 本ずつ**(#220-1)。`main.ts` は `void officeSaveBack.receive(...)`
+   * で撃つので、大きい文書で hash / 資産ゲートが詰まると **1 件目の `createNote` を
+   * await している間に 2 件目が走る** ── そのとき表はまだ空なので、両方が新規を作る。
+   * ⚠ `inFlight` は同じ**鍵**しか守らない(同じ**文書**の別の保存は別の鍵である)。
+   * 🔑 下流(`withAssetGate`)は既に直列なので、待ち時間は実質増えない。
+   */
+  let chain: Promise<unknown> = Promise.resolve();
+  function serial<T>(job: () => Promise<T>): Promise<T> {
+    const next = chain.then(job, job);
+    chain = next.catch(() => undefined);
+    return next;
+  }
+
+  /**
+   * 🔴 **「同じ文書」を指す鍵**(#217 の残り、着地前レビュー)。
    *
    * ⚠ 窓からの返事(`adopted`)は**往復**なので、返る前に次の保存が来ると間に合わない。
    * そして**それは編集中に確定的に起きる**:`canWrite()` が偽の間は棚に溜まるだけで
@@ -134,11 +189,7 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
     return `${save.win}|${save.path}`;
   }
 
-  async function takeOne(
-    dir: StageDir,
-    save: StagedSave,
-    madeHere: Map<string, string>,
-  ): Promise<IntakeResult> {
+  async function takeOne(dir: StageDir, save: StagedSave): Promise<IntakeResult> {
     const bytes = await readStaged(dir, save);
     if (bytes === null) {
       // 大きさが meta と食い違う = 書きかけのまま `.json` が置かれた(壊れている)。
@@ -157,8 +208,8 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
     // 合言葉があれば差し替え、無ければ新規(#205 §2 の 2 行そのもの)。
     // ⚠ **合言葉のノートが消えていたら新規へ倒す** ── 存在しない lid へ書くより、
     //    新しい添付ノートで残すほうが user の文書が残る
-    // ⚠ 合言葉が無くても、**この引き取りの中で既に同じ文書のノートを作っていたら**
-    //    それを使う(窓の返事が間に合わない経路 ── 上の `sameDoc` の注記)
+    // ⚠ 合言葉が無くても、**既に同じ文書のノートを作っていたら**それを使う
+    //    (窓の返事が間に合わない経路 ── 上の `madeHere` の注記)
     const group = sameDoc(save);
     // 🔴 **窓が知っていたか。** 知らなかった保存は、取り込み先を**必ず返す**
     //    ── 新規でも差し替えでも同じ(`adopt` の注記)
@@ -189,9 +240,9 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
       deferred = true;
       return 'deferred';
     }
-    // ⚠ **この引き取りの続きに効かせる。** 窓の返事を待つ経路とは別に、いま作った
-    //    ノートを同じ文書の次の 1 件へ渡す(編集明けの一括取り込みがこれに当たる)
-    if (group !== null) madeHere.set(group, lid);
+    // ⚠ **次の保存に効かせる。** 窓の返事を待つ経路とは別に、いま作ったノートを
+    //    同じ文書の次の 1 件へ渡す(放送 1 件ごとの `receive` / 編集明けの一括、両方)
+    if (group !== null) rememberHere(group, lid);
     // 🔴 **窓へも返す**(#217)。⚠ 返し忘れると次の**別の**引き取りでまた新規になる。
     //    ⚠ 窓が既に閉じていても放送は投げるだけ ── 誰も聞かなくても害は無い
     announce(save.key, lid);
@@ -200,29 +251,30 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
     return 'created';
   }
 
-  async function run(pick: (all: StagedSave[]) => StagedSave[]): Promise<IntakeResult[]> {
-    // 🔴 **holder だけ**(放送は全タブに届く)
-    if (!deps.isHolder()) return [];
-    const dir = await deps.stage();
-    if (dir === null) return [];
-    const all = await listStaged(dir);
-    const out: IntakeResult[] = [];
-    // ⚠ **この 1 パスの中だけ**の表(`sameDoc` の注記)。跨いで持たない ──
-    //    跨ぐと、窓が読み直されて同じ path に別の文書が居るときに取り違える
-    const madeHere = new Map<string, string>();
-    for (const save of pick(all)) {
-      if (inFlight.has(save.key)) continue;
-      inFlight.add(save.key);
-      try {
-        out.push(await takeOne(dir, save, madeHere));
-      } catch (e) {
-        deps.fail(`Office の保存を取り込めませんでした(${save.name}): ${String(e)}`);
-        out.push('failed');
-      } finally {
-        inFlight.delete(save.key);
+  function run(pick: (all: StagedSave[]) => StagedSave[]): Promise<IntakeResult[]> {
+    // 🔴 **1 本ずつ**(上の `serial` の注記)── 並行に走ると、表がまだ空のまま
+    //    同じ文書のノートを 2 件作る
+    return serial(async () => {
+      // 🔴 **holder だけ**(放送は全タブに届く)
+      if (!deps.isHolder()) return [];
+      const dir = await deps.stage();
+      if (dir === null) return [];
+      const all = await listStaged(dir);
+      const out: IntakeResult[] = [];
+      for (const save of pick(all)) {
+        if (inFlight.has(save.key)) continue;
+        inFlight.add(save.key);
+        try {
+          out.push(await takeOne(dir, save));
+        } catch (e) {
+          deps.fail(`Office の保存を取り込めませんでした(${save.name}): ${String(e)}`);
+          out.push('failed');
+        } finally {
+          inFlight.delete(save.key);
+        }
       }
-    }
-    return out;
+      return out;
+    });
   }
 
   return {

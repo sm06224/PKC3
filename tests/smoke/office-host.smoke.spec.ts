@@ -1355,4 +1355,141 @@ test('🔴 返事は、その鍵の文書にだけ効く(隣の文書へ漏れ�
     tokenOf(second('い.odt')),
     '隣の文書へ合言葉が漏れた ── 無関係なノートの中身を上書きする',
   ).toBe('');
+
+  /**
+   * 🔴 **窓の id は「名前」ではない**(#220-4)。ここは **名前が 2 つ違う保存**を
+   * 同じ窓で採っている唯一の面なので、`record.win = String(meta.name)` のような
+   * 取り違えを殺せるのはここだけである(もう 1 つの smoke は同名を 2 回保存する
+   * ので、名前を入れても値が一致してしまう)。
+   */
+  const winOf = (key: string): string => {
+    const text = got.metas[`${key}.json`];
+    expect(text, `棚に ${key} の meta が無い`).toBeDefined();
+    return (JSON.parse(text!) as { win?: string }).win ?? '';
+  };
+  expect(winOf(got.keyA), '窓の id が meta に載っていない').not.toBe('');
+  expect(
+    winOf(got.keyB),
+    '窓の id が文書ごとに違う ── 名前など「文書の属性」を入れている',
+  ).toBe(winOf(got.keyA));
+});
+
+/**
+ * 🔴 **返事の行き先は「その鍵の path」**(#220-3)。
+ *
+ * ⚠ この面は**合言葉を持つ窓**(= PKC から添付を渡して開いた窓)で、**別の文書**の
+ * 返事を受ける形である。既存の test はどちらか片方しか作れていなかった:
+ *   - `adopted` を送る 2 本は**文書を渡さずに**開く(`__loDocPath` が無い)
+ *   - 文書を渡す 1 本は `adopted` を 1 度も送らない
+ * → `tokens.remember(put.key, window.__loDocPath || hit.path)` という変異が全緑で通る。
+ * 実害は「**添付 A を上書き保存すると B のノートの実体が A の中身で置き換わる**」。
+ *
+ * 🔑 観測点は棚の meta の `token` を **2 つの文書について**見ること ──
+ * 片方だけ見ると、取り違えても半分は正しく見える。
+ */
+test('🔴 合言葉を持つ窓でも、返事は「その鍵の文書」に着く(#220-3)', async ({ page }) => {
+  await page.goto('/office/host.html');
+  await seedFakePack(page);
+  await page.evaluate(async () => {
+    const root = await navigator.storage.getDirectory();
+    await root.removeEntry('pkc3-office-stage', { recursive: true }).catch(() => {});
+  });
+  // 合言葉つきで添付を流し込む(= PKC の「Office で開く」と同じ状態)
+  await page.addInitScript(() => {
+    const ch = new BroadcastChannel('pkc3-office');
+    ch.onmessage = (ev: MessageEvent): void => {
+      const d = ev.data as { pkc3Office?: string };
+      if (d?.pkc3Office !== 'ready-for-document') return;
+      ch.postMessage({
+        pkc3Office: 'document',
+        payload: {
+          name: '報告書.odt',
+          bytes: new TextEncoder().encode('ORIGINAL'),
+          token: 'lid-TEST',
+        },
+      });
+    };
+  });
+  await page.goto('/office/host.html?name=%E5%A0%B1%E5%91%8A%E6%9B%B8.odt&await-doc=1');
+  await expect(page.locator('#status')).toContainText('表示中', { timeout: 15_000 });
+  // 空振り防止 ── 文書が流れていなければ「取り違えない」ことは検査できない
+  expect(
+    await page.evaluate(() => (window as unknown as { __loDocPath?: string }).__loDocPath),
+    '文書が流し込まれていない ── この test は取り違えを検査できていない',
+  ).toBe('/work/報告書.odt');
+
+  const got = await page.evaluate(async () => {
+    const w = window as unknown as {
+      __lo: { FS: {
+        writeFile(p: string, d: string): void; open(p: string): unknown;
+        close(s: unknown): void; rename(a: string, b: string): void; mkdirTree(p: string): void;
+      } };
+    };
+    const seen: Array<{ key: string; name: string }> = [];
+    const ch = new BroadcastChannel('pkc3-office');
+    ch.onmessage = (ev: MessageEvent): void => {
+      const d = ev.data as { pkc3Office?: string; payload?: { key: string; name: string } };
+      if (d?.pkc3Office === 'saved' && d.payload) seen.push(d.payload);
+    };
+    const waitFor = async (n: number): Promise<void> => {
+      const t0 = Date.now();
+      while (seen.length < n && Date.now() - t0 < 12_000) {
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    };
+    w.__lo.FS.mkdirTree('/home/web_user');
+    w.__lo.FS.mkdirTree('/work');
+
+    // ① 窓の中で**新しい文書**を保存(合言葉を持たない)
+    w.__lo.FS.writeFile('/home/web_user/無題 1.odt', 'NEW-1');
+    w.__lo.FS.close(w.__lo.FS.open('/home/web_user/無題 1.odt'));
+    await waitFor(1);
+    const keyNew = seen[0]?.key ?? '';
+
+    // ② **その鍵にだけ**返事を出す(本体が新しいノートを作ったときと同じ)
+    ch.postMessage({ pkc3Office: 'adopted', payload: { key: keyNew, token: 'lid-NEW' } });
+    await new Promise((r) => setTimeout(r, 400));
+
+    // ③ 2 つの文書を**それぞれ**もう一度保存する
+    w.__lo.FS.writeFile('/home/web_user/無題 1.odt', 'NEW-2');
+    w.__lo.FS.close(w.__lo.FS.open('/home/web_user/無題 1.odt'));
+    await waitFor(2);
+    w.__lo.FS.writeFile('/work/lu99.tmp', 'OVERWRITTEN');
+    w.__lo.FS.rename('/work/lu99.tmp', '/work/報告書.odt');
+    await waitFor(3);
+    ch.close();
+
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle('pkc3-office-stage', { create: true });
+    const metas: Record<string, string> = {};
+    for await (const [name, handle] of (
+      dir as unknown as { entries(): AsyncIterable<[string, FileSystemFileHandle]> }
+    ).entries()) {
+      if (name.endsWith('.json')) metas[name] = await (await handle.getFile()).text();
+    }
+    return { seen, keyNew, metas };
+  });
+
+  // 空振り防止 ── 3 回とも拾えていないと、行き先は検査できない
+  expect(got.seen.length, '保存が 3 回拾えていない').toBe(3);
+  expect(got.keyNew, '新しい文書の鍵が取れていない').not.toBe('');
+
+  const tokenOf = (key: string): string => {
+    const text = got.metas[`${key}.json`];
+    expect(text, `棚に ${key} の meta が無い`).toBeDefined();
+    return (JSON.parse(text!) as { token?: string }).token ?? '';
+  };
+  const keyOf = (name: string, nth: number): string =>
+    got.seen.filter((s) => s.name === name)[nth]?.key ?? '';
+
+  // ① 返事は**その文書**へ着く
+  expect(
+    tokenOf(keyOf('無題 1.odt', 1)),
+    '返事が新しい文書に着いていない ── 保存のたびにノートが増える',
+  ).toBe('lid-NEW');
+  // ② **開いた添付**の合言葉は変わらない(ここが取り違えの実害)
+  expect(
+    tokenOf(keyOf('報告書.odt', 0)),
+    '開いた添付の合言葉が別の文書の返事で書き換わった ── 別のノートの中身が置き換わる',
+  ).toBe('lid-TEST');
 });

@@ -28,7 +28,7 @@
  */
 
 import { createServer } from 'node:http';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, rm } from 'node:fs/promises';
 import { join, extname, resolve, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { chromium } from '@playwright/test';
@@ -287,4 +287,11 @@ try {
   else console.log(text);
   await browser.close();
   server.close();
+  /**
+   * 🔴 **profile を残さない**(#220 の併走で判明。機密資料の取り扱い 5)。
+   * ⚠ 開いた文書の痕跡(cache / IDB / 一時 file)がここに入る ── 兄弟の
+   * `save-existing-probe.mjs` は消しているのに、こちらは残していた
+   * (「片側を直したら対称の反対側を疑う」の 1 件)。
+   */
+  await rm(profile, { recursive: true, force: true }).catch(() => {});
 }

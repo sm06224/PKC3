@@ -329,10 +329,10 @@
      * 🔴 **この窓の id**(#217)。⚠ 引き取る側が「同じ文書の保存」を束ねるのに要る。
      * 束ねる鍵を path だけにすると、2 枚目の窓が同じ名前で保存したときに
      * **別の文書どうしを 1 つのノートへ潰す**(path は窓ごとに別の MEMFS に在る)。
+     * ⚠ 生成は `office-save-watch.js` に在る(#220-4)── ここへ直書きすると
+     * `var winId = 'w-1'` のような変異を**どの unit も殺せない**。
      */
-    var winId = (self.crypto && self.crypto.randomUUID)
-      ? self.crypto.randomUUID()
-      : 'w' + Date.now().toString(36) + '-' + Math.floor(Math.random() * 1e9).toString(36);
+    var winId = W.newWindowId();
 
     adoptSaved = function (p) {
       tokens.adopt(String((p && p.key) || ''), String((p && p.token) || ''));

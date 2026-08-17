@@ -15,6 +15,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
   createOfficeSaveBack,
+  SAME_DOC_MAX,
   type SaveBackDeps,
 } from '@adapter/platform/office/office-save-back';
 import type { StageDir, StagedSave } from '@adapter/platform/office/office-stage';
@@ -301,16 +302,83 @@ describe('🔴 編集中に溜まった同じ文書の保存を、1 件のノー
     expect(h.replaced).toEqual([]);
   });
 
-  it('⚠ 束ねた先は次のパスへ持ち越さない(窓を読み直すと同じ path に別の文書が居る)', async () => {
+  /**
+   * 🔴 **束ねる表はパスを跨いで持つ**(#220-1、2026-08-17 に反転させた)。
+   *
+   * ⚠ 直す前は「持ち越さない」ことを主張していたが、その理由(**窓を読み直すと
+   * 同じ path に別の文書が居る**)は**成り立たない** ── `win` は窓の中で
+   * `randomUUID` で作られ、読み直しは完全再読込なので **`win` ごと変わる**。
+   * そして持ち越さないと、**実経路(鍵 1 件ごとの放送)では束ねが 1 度も効かない**
+   * ── #217 の症状(同じ文書で 2 件できる)がタイミング次第で残っていた。
+   */
+  it('🔴 別々の放送でも同じ文書は束ねる(#217 の実経路)', async () => {
     const h = harness();
     h.stage.put({ key: 'o1', name: '無題 1.odt', path: '/work/無題 1.odt' });
-    expect(await h.sb.drainAll()).toBe(1);
+    expect(await h.sb.receive('o1')).toBe('created');
     h.stage.put({ key: 'o2', name: '無題 1.odt', path: '/work/無題 1.odt' });
-    expect(await h.sb.drainAll()).toBe(1);
-    expect(
-      h.created,
-      'パスを跨いで束ねた ── 窓の返事(adopted)だけが持ち越してよい',
-    ).toHaveLength(2);
+    // ⚠ 観測点は「差し替えになったか」── `receive` は放送 1 件ごとに来るので、
+    //    表が run のローカルだとここが必ず 'created' になる
+    expect(await h.sb.receive('o2')).toBe('replaced');
+    expect(h.created, '同じ文書でノートが 2 件できた').toHaveLength(1);
+    expect(h.replaced).toEqual(['new-lid']);
+  });
+
+  it('🔴 別々の放送でも、窓が違えば束ねない(過剰な束ねの門)', async () => {
+    const h = harness();
+    h.stage.put({ key: 'o1', name: '無題 1.odt', path: '/work/無題 1.odt', win: 'win-A' });
+    expect(await h.sb.receive('o1')).toBe('created');
+    h.stage.put({ key: 'o2', name: '無題 1.odt', path: '/work/無題 1.odt', win: 'win-B' });
+    expect(await h.sb.receive('o2')).toBe('created');
+    expect(h.created, '別の窓の同名文書を 1 つのノートへ潰した').toHaveLength(2);
+  });
+
+  it('🔴 表は上限で古いものから落ちる(際限なく溜めない)', async () => {
+    const h = harness();
+    // 上限まで**別の文書**で埋める(最初の 1 件が押し出される)
+    for (let i = 0; i < SAME_DOC_MAX + 1; i += 1) {
+      h.stage.put({ key: `k${i}`, name: `d${i}.odt`, path: `/work/d${i}.odt` });
+      expect(await h.sb.receive(`k${i}`)).toBe('created');
+    }
+    // 最初の文書をもう一度 ── 忘れているので新規になる
+    h.stage.put({ key: 'again', name: 'd0.odt', path: '/work/d0.odt' });
+    expect(await h.sb.receive('again')).toBe('created');
+  });
+
+  it('🔴 上限は窓側の記憶(KEY_MEMORY_MAX)と同じ数(片側だけ覚えない)', () => {
+    const js = readFileSync('public/office/office-save-watch.js', 'utf-8');
+    const m = /KEY_MEMORY_MAX\s*=\s*(\d+)/.exec(js);
+    expect(m, '窓側の上限が読めない ── 検査が空振りしている').not.toBeNull();
+    expect(SAME_DOC_MAX).toBe(Number(m![1]));
+  });
+
+  /**
+   * 🔴 **並行に届いても 1 本ずつ引き取る**(#220-1)。`main.ts` は `void receive(...)`
+   * で撃つので、`createNote` の await 中に 2 件目が入ると**表がまだ空**で両方新規に
+   * なる ── `inFlight` は同じ**鍵**しか守らない。
+   */
+  it('🔴 同じ文書の 2 件が同時に来ても、ノートは 1 件(直列化)', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let calls = 0;
+    const h = harness({
+      createNote: async () => {
+        calls += 1;
+        if (calls === 1) await gate; // 1 件目を止めたまま 2 件目を走らせる
+        return 'new-lid';
+      },
+    });
+    h.stage.put({ key: 'o1', name: '無題 1.odt', path: '/work/無題 1.odt' });
+    h.stage.put({ key: 'o2', name: '無題 1.odt', path: '/work/無題 1.odt' });
+    const a = h.sb.receive('o1');
+    const b = h.sb.receive('o2');
+    release();
+    expect([await a, await b]).toEqual(['created', 'replaced']);
+    // ⚠ 観測点は **`createNote` を何回呼んだか**(`h.created` は既定の実装が積むので、
+    //    差し替えたこの test では使えない ── 空振りの作り方そのもの)
+    expect(calls, '同時に来たら 2 件作りに行った').toBe(1);
+    expect(h.replaced).toEqual(['new-lid']);
   });
 });
 
