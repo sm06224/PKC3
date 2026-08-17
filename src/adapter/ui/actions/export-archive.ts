@@ -12,6 +12,9 @@ import type { Dispatcher } from '@adapter/state/dispatcher';
 import { writeArchive, type ArchiveSource } from '@features/export/pkc3-archive';
 import type { RenderMarkdownOptions } from '@features/markdown/markdown-render';
 import { writePortableHtml } from '@features/export/pkc3-html';
+import { buildDocx } from '@features/export/docx';
+import { ZipWriter } from '@features/export/zip-writer';
+import { htmlToDocxBlocks } from '@adapter/platform/export/html-blocks';
 import { DEFAULT_PAGE_FORMAT, type PageFormat } from '@features/page-format';
 import { writeMarkdownZip } from '@features/export/pkc3-markdown-zip';
 import { singleEntrySource } from '@features/export/single-entry-source';
@@ -181,5 +184,58 @@ export async function exportArchive(
     return out.counts.entries;
   } catch (e) {
     return fail(`書き出しに失敗しました: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+/**
+ * 🔴 **このノートを Word(.docx)で書き出す**(#187 段①)。
+ *
+ * 🔑 **画面と同じ HTML から組む**(設計 doc の (b))── `renderBody` は閲覧用 HTML と
+ * **同じ口**である。PKC2 はここを別のレンダラにしたせいで「Word で直した」が
+ * PDF に届かず、記録されている不具合がほぼ全部その土台に乗っていた。
+ *
+ * ⚠ **1 ノート = 1 文書**にする。Word の文書は「1 本の文書」なので、
+ * 何百件を 1 つに連ねる形は user の期待と違う(バックアップは `.pkc3.zip` が持つ)。
+ * ⚠ 段① は**画像を入れない** ── 入れない代わりに、その場に理由を書いて件数で言う。
+ */
+export async function exportEntryDocx(
+  dispatcher: Dispatcher,
+  deps: ExportDeps,
+  lid: string,
+): Promise<boolean> {
+  const fail = (msg: string): boolean => {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: msg });
+    return false;
+  };
+  // ⚠ 編集中は draft が disk と違う ── 「保存したつもりの本文」が入らない形を作らない
+  if (dispatcher.getState().phase !== 'ready')
+    return fail('編集を終了してから書き出してください');
+  if (!deps.renderBody)
+    return fail('本文を組み立てられませんでした(描画の口が渡っていません)');
+  deps.notify?.('Word で書き出しています…');
+  try {
+    // ⚠ 1 件だけの読み口(P6f)。⚠ 省略可なので**在ることを確かめてから**呼ぶ
+    if (!deps.source.getBody) return fail('本文の読み口が渡っていません');
+    const body = await deps.source.getBody(lid);
+    if (body === null) return fail('ノートが見つかりませんでした');
+    const metas = await deps.source.listEntryMetas();
+    const title = metas.find((m) => m.lid === lid)?.title ?? 'ノート';
+    const html = await deps.renderBody(body);
+    // ⚠ `<body>` で包む ── 包まないと happy-dom / 実ブラウザで木の形が揃わない
+    const doc = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html');
+    const { blocks } = htmlToDocxBlocks(doc);
+    const now = deps.now?.() ?? new Date();
+    const built = buildDocx(blocks, title, now.toISOString());
+    const zip = new ZipWriter();
+    for (const part of built.parts) await zip.add(part.name, [part.text]);
+    deps.download(`${safeName(title)}-${stamp(now)}.docx`, zip.finish());
+    // 🔴 **落としたものは件数で言う**(#213 の裁定 A と同じ向き)
+    deps.report(built.warnings);
+    // ⚠ 「書き出しました」は `notify`(一時の知らせ)で言う ── state の action に
+    //    書き出し用の型は無い(増やさない)
+    deps.notify?.(`Word で書き出しました(${built.counts.blocks} 塊)`);
+    return true;
+  } catch (e) {
+    return fail(`Word の書き出しに失敗しました: ${e instanceof Error ? e.message : String(e)}`);
   }
 }

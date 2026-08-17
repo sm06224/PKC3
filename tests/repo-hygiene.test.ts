@@ -322,3 +322,40 @@ describe('🔒 文書を扱う probe の撮影の口', () => {
     }
   });
 });
+
+/**
+ * 🔴 **計器が「全文 textarea」を掴むなら、腕を宣言してから掴む**(#223)。
+ *
+ * #172(2026-08-14)で**既定の編集面がライブ 1 面**になり、`editor-body` は設定
+ * `split` のときしか出ない。⚠ bench 4 本はそれを知らずに掴み続け、**既定では
+ * timeout / `null` で死ぬ**状態が 3 日間気づかれなかった(CI で走らないので、
+ * こちらの計器は 1 つも鳴らない)。
+ *
+ * 🔑 だから「`editor-body` を掴む file は、**腕の切替**(`pkc3.editor-mode` /
+ * `editor-arm.mjs`)も持っている」ことを機械で守る。⚠ 掴むこと自体は禁じない ──
+ * split を測る計器は正しく掴む(禁じると `--arm=split` が書けなくなる)。
+ */
+describe('計器の編集面(#223)', () => {
+  const FIELD = 'data-pkc-field="editor-body"';
+  /** 腕を宣言していると認める印(どれか 1 つで足りる)。 */
+  const ARM_MARKS = ['pkc3.editor-mode', 'editor-arm.mjs', 'useSplitEditor'];
+
+  it('🔴 全文 textarea を掴む計器は、腕の切替も持っている', () => {
+    const files = [
+      ...readdirSync('tests/bench').map((f) => join('tests/bench', f)),
+      ...readdirSync('tests/probe').map((f) => join('tests/probe', f)),
+    ].filter((f) => /\.(mjs|ts)$/.test(f));
+    // 空振り防止 ── 走査できていない形で「全部見た」と言わない
+    expect(files.length, '計器を 1 つも見つけられていない').toBeGreaterThan(5);
+    const grabbers = files.filter((f) => readFileSync(f, 'utf-8').includes(FIELD));
+    // 空振り防止 ── 掴む file が 0 件なら、この検査は何も守っていない
+    expect(grabbers.length, `${FIELD} を掴む計器が 1 つも無い`).toBeGreaterThan(0);
+    const offenders = grabbers.filter((f) => {
+      const text = readFileSync(f, 'utf-8');
+      return !ARM_MARKS.some((m) => text.includes(m));
+    });
+    expect(offenders, '腕を宣言せずに全文 textarea を掴んでいる(既定 live では無い)').toEqual(
+      [],
+    );
+  });
+});

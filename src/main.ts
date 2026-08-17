@@ -103,6 +103,7 @@ import {
   exportArchive,
   exportEntry,
   type ExportDeps,
+  exportEntryDocx,
   type ExportKind,
 } from '@adapter/ui/actions/export-archive';
 import { createAssetGate } from '@adapter/ui/actions/asset-gate';
@@ -582,7 +583,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 「meta はあるが bytes が無い」を掴んで欠けた書出しができる。
    * 形式が増えても読み出し口は 1 つ(source)で共有する。
    */
-  const runExport = (kind: ExportKind | { entryLid: string }): Promise<void> =>
+  const runExport = (
+    kind: ExportKind | { entryLid: string; as?: 'archive' | 'docx' },
+  ): Promise<void> =>
     withAssetGate(async () => {
       const deps: ExportDeps = {
         source: {
@@ -638,7 +641,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       };
       // 1 ノートだけの書出しも**同じ実行部・同じ形式**を通る(P6f)──
       // 別経路にすると「1 件書出しだけ壊れている」が起きる
-      if (typeof kind === 'object') await exportEntry(dispatcher, deps, kind.entryLid);
+      if (typeof kind === 'object') {
+        // ⚠ 1 ノートの出口は 2 つ ── バックアップ(取り込み直せる)と Word(片道)
+        if (kind.as === 'docx') await exportEntryDocx(dispatcher, deps, kind.entryLid);
+        else await exportEntry(dispatcher, deps, kind.entryLid);
+      }
       else await exportArchive(dispatcher, deps, kind);
     });
 
@@ -1312,6 +1319,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     exportHtml: () => void runExport('html'),
     exportMarkdown: () => void runExport('markdown'),
     exportEntry: (lid) => void runExport({ entryLid: lid }),
+    /**
+     * 🔴 このノートを Word で書き出す(#187 段①)。⚠ **asset gate の内側**で回す
+     * ── 画像は段②で入るので、そのとき掃除と競らないように今から内側に置く。
+     */
+    exportEntryDocx: (lid) => void runExport({ entryLid: lid, as: 'docx' }),
     /**
      * 🔑 図 1 枚をベクタで書き出す(P8 段⑦)。
      * ⚠ **asset gate の外**でよい ── store も添付も触らず、原文から焼き直すだけ。
