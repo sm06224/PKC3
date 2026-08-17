@@ -105,7 +105,13 @@ window.__probe = { booted: false, called: false, exit: null, err: null, out: nul
     FS.writeFile('/work/__INPUT__', new TextEncoder().encode(window.__input));
     window.__probe.called = true;
     // ⚠ callMain は event loop に入ったまま戻らないことがある ── 後ろに何も置かない
-    inst.callMain(['--convert-to', fmt, '--outdir', '/work', '/work/__INPUT__']);
+    // 🔴 アプリと同じ引数で起こす(#158 の --language=ja を含める)。
+    //    ⚠ 落とすと repo-hygiene の検査が止める ── その guard は正しい:
+    //    probe がアプリと違う構成で起動していたら、測っているものが別物になる
+    //    ⚠ ここはテンプレート literal の中なので **バッククォートを書かない**
+    //      (書くと文字列がそこで終わり、build も lint も落ちる ── source-editing)
+    var args = ['--language=ja', '--convert-to', fmt, '--outdir', '/work', '/work/__INPUT__'];
+    inst.callMain(args);
   } catch (e) {
     window.__probe.err = String(e).slice(0, 300);
   }
