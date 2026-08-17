@@ -12,8 +12,7 @@ import type { Dispatcher } from '@adapter/state/dispatcher';
 import { writeArchive, type ArchiveSource } from '@features/export/pkc3-archive';
 import type { RenderMarkdownOptions } from '@features/markdown/markdown-render';
 import { writePortableHtml } from '@features/export/pkc3-html';
-import { buildDocx } from '@features/export/docx';
-import { ZipWriter } from '@features/export/zip-writer';
+import { buildDocxFile } from '@adapter/platform/export/docx-client';
 import { htmlToDocxBlocks } from '@adapter/platform/export/html-blocks';
 import { DEFAULT_PAGE_FORMAT, type PageFormat } from '@features/page-format';
 import { writeMarkdownZip } from '@features/export/pkc3-markdown-zip';
@@ -358,12 +357,20 @@ export async function exportEntryDocx(
       media.push({ name: `word/${name}`, blob: drawn.blob });
     }
     const now = deps.now?.() ?? new Date();
-    // 🔴 **紙面は画面の設定と同じ**(#187 段③)── 渡さないと Word だけ A4 縦になる
-    const built = buildDocx(blocks, title, now.toISOString(), deps.pageFormat ?? DEFAULT_PAGE_FORMAT);
-    const zip = new ZipWriter();
-    for (const part of built.parts) await zip.add(part.name, [part.text]);
-    for (const m of media) await zip.add(m.name, [m.blob]);
-    deps.download(`${safeName(title)}-${stamp(now)}.docx`, zip.finish());
+    /**
+     * 🔴 **組み立てと zip はワーカーで**(#187 段④。user 指示 2026-08-03 の不可侵)。
+     * ⚠ 動かせるのはここだけ ── HTML の parse と走査は **DOM がワーカーに無い**
+     *   ので動かせない(実測: 294KB でメインの詰まり 354ms のうち parse+走査が 129ms)。
+     * ⚠ 紙面は画面の設定と同じ値を渡す(#187 段③)── 渡さないと Word だけ A4 縦。
+     */
+    const built = await buildDocxFile({
+      blocks,
+      title,
+      iso: now.toISOString(),
+      pageFormat: deps.pageFormat ?? DEFAULT_PAGE_FORMAT,
+      media,
+    });
+    deps.download(`${safeName(title)}-${stamp(now)}.docx`, built.blob);
     // 🔴 **落としたものは件数で言う**(#213 の裁定 A と同じ向き)
     deps.report(built.warnings);
     // ⚠ 「書き出しました」は `notify`(一時の知らせ)で言う ── state の action に
