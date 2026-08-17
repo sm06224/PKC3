@@ -42,6 +42,29 @@ function openDb(): Promise<IDBDatabase> {
  *
  * ⚠ 読みは `onsuccess` のままでよい(値はそこで確定していて、commit を待つと
  * 1 往復ぶん遅くなるだけ)。
+ *
+ * ## 🔴 ⚠ `oncomplete` は「tx が commit した」証拠であって、**`Blob` 値の bytes が
+ * 耐久化した証拠ではない**(#211。#209 段 0 の実測)
+ *
+ * `Blob` は「後で bytes を出す」**借用証書**で、発行した realm が生きている間しか
+ * 換金できない。32MiB を書いた**直後に発行元の窓を閉じる**と、こうなる:
+ *
+ * | 書いたもの | chrome | headless_shell |
+ * |---|---|---|
+ * | IDB **Blob**(`tx.oncomplete` を待った) | **ERR 4/4** | **ERR 3/3** |
+ * | IDB **Uint8Array** | ok 4/4 | ok 3/3 |
+ * | OPFS(`close()` を待った) | ok 4/4 | ok 3/3 |
+ *
+ * 正体は `ERR_SOURCE_DIED_IN_TRANSIT` / `NotReadableError`。
+ * ⚠ **256,000 B 以下は IPC に同梱されるので落ちない** ── **サイズで挙動が変わる**ので、
+ * 小さい添付でいくら試しても再現しない。
+ *
+ * 🔑 **いま実害が無いのは、渡している `Blob` が全部「このタブが作った物」だから**である
+ * (`attach.ts` の `File` / その場で作った `Blob`)。⚠ **別 realm(Office の窓 / worker /
+ * iframe)が作った `Blob` を `put` する経路が 1 本でも生えたら、そこから落ちる。**
+ * だから `office-stage.ts` は OPFS から `arrayBuffer()` で読んで **`Uint8Array` に
+ * 落としてから** `new Blob([bytes])` している ── **「1 コピー減らせる」と最適化して
+ * 直接 `File` を渡すと、ここで静かに壊れる**(`tests/adapter/office-stage.test.ts` が pin)。
  */
 function tx<T>(
   db: IDBDatabase,

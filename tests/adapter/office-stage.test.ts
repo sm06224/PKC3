@@ -360,3 +360,38 @@ describe('鍵', () => {
     expect(stageJs.makeKey({ uuid: () => '1-2-3' })).toMatch(/^[\x21-\x7e]+$/);
   });
 });
+
+/**
+ * 🔴 **OPFS から引き取る bytes は `Uint8Array` に落としてから渡す**(#211)。
+ *
+ * ⚠ これは「1 コピー減らせる」と**最適化して壊す**箇所である。IDB へ `Blob` を書くと、
+ * `tx.oncomplete` が返っても **bytes が耐久化した証拠にはならない** ── `Blob` は
+ * 発行した realm が生きている間しか換金できない借用証書で、実測では
+ * **32MiB を書いた直後に発行元の窓を閉じると 7/7 で読めなくなった**
+ * (`ERR_SOURCE_DIED_IN_TRANSIT` / `NotReadableError`。⚠ 256,000 B 以下は
+ * IPC 同梱なので**小さい添付では再現しない**)。
+ *
+ * 🔑 だからここは **OPFS の `File` をそのまま返さない**。
+ * ⚠ 注記だけでは守れない(コメントは実行されない)ので、**返る型で pin する**。
+ */
+describe('引き取る bytes の形(#211)', () => {
+  it('🔴 `File` / `Blob` ではなく `Uint8Array` を返す(別 realm の借用証書を渡さない)', async () => {
+    const dir = new FakeDir();
+    const doc = new Uint8Array(64).map((_, i) => i);
+    await stageJs.stageBytes({
+      dir,
+      size: doc.length,
+      read: makeReader(doc).read,
+      meta: { name: 'あ.docx', path: '/home/web_user/あ.docx' },
+      now: () => 1,
+    });
+    const [meta] = await listStaged(asStageDir(dir));
+    expect(meta, '置いたものが一覧に出ない').toBeDefined();
+    const got = await readStaged(asStageDir(dir), meta!);
+    expect(got, '読めていない').not.toBeNull();
+    // 🔴 ここが本体 ── `Blob`(= `File` も含む)を返し始めたら落とす
+    expect(got instanceof Uint8Array, '`Uint8Array` ではないものを返している').toBe(true);
+    expect(got instanceof Blob, '`Blob` を返している(#211 の罠)').toBe(false);
+    expect(Array.from(got!), '中身が違う').toEqual(Array.from(doc));
+  });
+});
