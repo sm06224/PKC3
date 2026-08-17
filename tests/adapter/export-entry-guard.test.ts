@@ -15,6 +15,10 @@ import {
 } from '../../src/adapter/ui/actions/export-archive';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import type { ArchiveSource } from '../../src/features/export/pkc3-archive';
+import {
+  renderMarkdown,
+  type RenderMarkdownOptions,
+} from '../../src/features/markdown/markdown-render';
 
 function source(over: Partial<ArchiveSource> = {}): ArchiveSource {
   return {
@@ -503,5 +507,74 @@ describe('Word の図(#187 段②)', () => {
     expect(text).toContain('描けませんでした');
     // ⚠ それでも原文は出さない(出すなら「図の原文」として意図して出す)
     expect(text).not.toContain('graph TD');
+  });
+});
+
+/**
+ * 🔴 **詳細ペインと同じ材料で描く**(#187 段③)。
+ *
+ * ⚠ 直す前の Word は `render(body)` **だけ**で呼んでいたので:
+ * ① **frontmatter が本文として出る**(`---` が水平線、`key: value` が見出しに)
+ * ② `{{vars.x}}` が**生のまま**出る ③ `heading-number: true` の番号が付かない
+ * ── 閲覧用 HTML が 2026-08-06(user 報告 2-7)で直した**同じ穴**が残っていた。
+ *
+ * 🔑 だから `renderBody` は**本物のレンダラ**を通す。fake で「渡した opts」を
+ * 見るだけだと、opts の**中身が間違っていても**緑になる。
+ */
+describe('Word は詳細ペインと同じ材料で描く(#187 段③)', () => {
+  const BODY =
+    '---\nheading-number: true\nvars:\n  who: 世界\n---\n\n# 見出し\n\nこんにちは {{vars.who}}。\n\n+++\n\n次の頁\n';
+
+  async function exportOf(body: string): Promise<string> {
+    const got: Blob[] = [];
+    const d = {
+      ...deps(source({ getBody: async () => body })),
+      download: (_n: string, blob: Blob) => got.push(blob),
+      // ⚠ **本物**を通す(アプリはワーカー越しに同じ関数を呼ぶ)
+      renderBody: async (text: string, opts?: RenderMarkdownOptions) => renderMarkdown(text, opts),
+    } as unknown as ExportDeps;
+    const { dispatcher } = fakeDispatcher('ready');
+    expect(await exportEntryDocx(dispatcher, d, 'n1')).toBe(true);
+    return got[0]!.text();
+  }
+
+  it('🔴 frontmatter は本文に出ない', async () => {
+    const text = await exportOf(BODY);
+    expect(text, 'frontmatter の key が本文に出ている').not.toContain('heading-number');
+    expect(text, '本文が入っていない').toContain('こんにちは');
+  });
+
+  it('🔴 {{vars}} が値に置き換わる(生のまま配らない)', async () => {
+    const text = await exportOf(BODY);
+    expect(text).toContain('世界');
+    expect(text, 'vars が生のまま出ている').not.toContain('{{vars.who}}');
+  });
+
+  it('🔴 見出し番号が付く(画面と同じ見え方)', async () => {
+    expect(await exportOf(BODY)).toContain('1. 見出し');
+  });
+
+  it('🔴 改頁(+++)が改頁として入る(水平線に化けない)', async () => {
+    expect(await exportOf(BODY)).toContain('<w:br w:type="page"/>');
+  });
+
+  /**
+   * ⚠ **紙面は「渡している」ところまで見る** ── 組み立て側(`buildDocx`)の test は
+   * 通っていても、**書き出しが渡さなければ**画面 A3 横 / Word A4 縦になる
+   * (変異試験 P11 が実際に生き延びた)。
+   */
+  it('🔴 画面の紙面設定が Word へ渡っている', async () => {
+    const got: Blob[] = [];
+    const d = {
+      ...deps(source({ getBody: async () => '本文' })),
+      download: (_n: string, blob: Blob) => got.push(blob),
+      renderBody: async (text: string) => `<p>${text}</p>`,
+      pageFormat: 'a3-landscape',
+    } as unknown as ExportDeps;
+    const { dispatcher } = fakeDispatcher('ready');
+    await exportEntryDocx(dispatcher, d, 'n1');
+    expect(await got[0]!.text(), '紙面が渡っていない(A4 縦のまま)').toContain(
+      '<w:pgSz w:w="23811" w:h="16838" w:orient="landscape"/>',
+    );
   });
 });

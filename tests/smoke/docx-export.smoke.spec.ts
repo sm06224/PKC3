@@ -54,7 +54,13 @@ test('🔴 情報ペインの Word で .docx が落ちてきて、本文が中�
    */
   const text = bytes.toString('utf-8');
   expect(text.slice(0, 2), 'zip ではない').toBe('PK');
-  for (const part of ['word/document.xml', 'word/numbering.xml', 'word/styles.xml'])
+  for (const part of [
+    'word/document.xml',
+    'word/numbering.xml',
+    'word/styles.xml',
+    // ページ番号(#187 段③)── 宣言だけして中身が無いと Word ごと開けない
+    'word/footer1.xml',
+  ])
     expect(text, `${part} が入っていない`).toContain(part);
   expect(text, '見出しが入っていない').toContain('見出し');
   expect(text, '本文が入っていない').toContain('ふつうの段落と');

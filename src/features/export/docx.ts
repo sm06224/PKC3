@@ -25,6 +25,8 @@
  *   `zip-writer.ts` が並べるだけにする(不可侵指示 2026-07-27「ゼロコピー」)
  */
 
+import { DEFAULT_PAGE_FORMAT, pageFormatSpec, type PageFormat } from '../page-format';
+
 /** 文字の並び(強調・傾き・等幅・リンク)。⚠ 入れ子は**畳んで**持つ。 */
 export interface DocxRun {
   readonly text: string;
@@ -61,6 +63,12 @@ export type DocxBlock =
   | { readonly kind: 'quote'; readonly runs: readonly DocxRun[] }
   | { readonly kind: 'code'; readonly text: string; readonly lang?: string }
   | { readonly kind: 'hr' }
+  /**
+   * 🔴 **改頁**(`+++` / `:::break`。#187 段③)。⚠ `hr` と**別の塊**にする ──
+   * 画面と紙では `hr.pkc-section-break` に `break-after: page` が効いており、
+   * `hr` と同じに畳むと **Word でだけ改頁が水平線になる**(実際そうだった)。
+   */
+  | { readonly kind: 'pagebreak' }
   | { readonly kind: 'table'; readonly rows: readonly (readonly DocxCell[])[] }
   /**
    * 🔴 **画像**(#187 段②)。⚠ **縦横比を保つ** ── PKC2 は全画像を 480×360 px に
@@ -114,6 +122,34 @@ const EMU_PER_PX = 9525;
  * 🔑 縮めるときは**縦横比を保つ**(PKC2 の 480×360 固定を繰り返さない)。
  */
 const BODY_WIDTH_EMU = Math.round(9638 / 1440 * 914400);
+
+/** 紙の余白(twip = 1/1440 インチ)。2cm ── 画面の紙面設定と別に持つ値ではない。 */
+const PAGE_MARGIN_TWIPS = 1134;
+
+/**
+ * 🔴 **画面の紙面設定 → Word の紙**(#187 段③)。
+ *
+ * ⚠ **紙を持たない形式(フル HD / 4:3)は A4 縦に落とす** ── 画面向けの形式で、
+ * `PAGE_FORMATS` の `paper` が `null`(= 印刷はブラウザの既定紙に任せる)である。
+ * Word は「既定紙」を持てないので、**印刷と同じ既定(A4 縦)**へ倒す。
+ * 🔑 値の正本は `features/page-format.ts` の表 ── ここは twip へ直すだけ。
+ */
+function paperTwips(fmt: PageFormat): { w: number; h: number } {
+  // A4 = 210×297mm、A3 = 297×420mm(1mm = 56.6929 twip)
+  const A4 = { w: 11906, h: 16838 };
+  const A3 = { w: 16838, h: 23811 };
+  const paper = pageFormatSpec(fmt).paper;
+  if (paper === null) return A4;
+  const base = paper.startsWith('A3') ? A3 : A4;
+  return paper.endsWith('landscape') ? { w: base.h, h: base.w } : base;
+}
+
+/**
+ * ページ番号(#187 段③)。⚠ **field で入れる** ── 数字を焼き込むと、Word で
+ * 1 行足しただけで嘘になる。
+ */
+const FOOTER_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>1</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p></w:ftr>`;
 
 /** 箇条書きの階層の上限。⚠ 超えた分は最深に丸める(段落ごと落とさない)。 */
 export const DOCX_LIST_DEPTH_MAX = 8;
@@ -223,6 +259,10 @@ function blockXml(block: DocxBlock, rels: Map<string, string>): string {
     case 'hr':
       // 水平線は「下線だけの空段落」── OOXML に `<hr>` は無い
       return `<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="999999"/></w:pBdr></w:pPr></w:p>`;
+    case 'pagebreak':
+      // ⚠ 段落そのものに `w:pageBreakBefore` を付けない ── 次の塊が何であっても
+      //    効くように、**改頁だけの段落**を置く(表の直前でも同じ形で効く)
+      return '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
     case 'table': {
       const grid = block.rows[0]?.length ?? 1;
       const cols = Array.from({ length: grid }, () => `<w:gridCol w:w="${Math.floor(9360 / grid)}"/>`).join('');
@@ -289,7 +329,7 @@ function blockXml(block: DocxBlock, rels: Map<string, string>): string {
 }
 
 const CONTENT_TYPES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="jpeg" ContentType="image/jpeg"/><Default Extension="jpg" ContentType="image/jpeg"/><Default Extension="gif" ContentType="image/gif"/><Default Extension="webp" ContentType="image/webp"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>`;
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="jpeg" ContentType="image/jpeg"/><Default Extension="jpg" ContentType="image/jpeg"/><Default Extension="gif" ContentType="image/gif"/><Default Extension="webp" ContentType="image/webp"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/><Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>`;
 
 const ROOT_RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/></Relationships>`;
@@ -342,21 +382,33 @@ export function buildDocx(
   blocks: readonly DocxBlock[],
   title: string,
   iso: string,
+  /**
+   * 🔴 **紙面**(#187 段③)。⚠ 画面の設定と**同じ値**を渡す ── 渡さないと
+   * 「画面は A3 横なのに Word だけ A4 縦」になる。省略時は A4 縦。
+   */
+  pageFormat: PageFormat = DEFAULT_PAGE_FORMAT,
 ): DocxResult {
   const rels = new Map<string, string>();
   const body = blocks.map((b) => blockXml(b, rels)).join('');
   /**
-   * ⚠ **紙面は段③**(設計 doc)。ここでは A4 縦の既定だけ置く ── 置かないと
-   * Word は Letter で開き、日本語文書が右端で切れる。
+   * 🔴 **紙面は画面の設定から採る**(#187 段③)。⚠ 順番が決まっている ──
+   * `footerReference` は `pgSz` より**前**でないと Word が読めない。
    */
+  const paper = paperTwips(pageFormat);
+  const orient = paper.w > paper.h ? ' w:orient="landscape"' : '';
   const sectPr =
-    '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="851" w:footer="992" w:gutter="0"/></w:sectPr>';
+    '<w:sectPr><w:footerReference w:type="default" r:id="rIdFooter"/>' +
+    `<w:pgSz w:w="${paper.w}" w:h="${paper.h}"${orient}/>` +
+    `<w:pgMar w:top="${PAGE_MARGIN_TWIPS}" w:right="${PAGE_MARGIN_TWIPS}" w:bottom="${PAGE_MARGIN_TWIPS}" w:left="${PAGE_MARGIN_TWIPS}" w:header="851" w:footer="992" w:gutter="0"/></w:sectPr>`;
   const document = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><w:body>${body}${sectPr}</w:body></w:document>`;
 
   const relItems = [
     '<Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>',
     '<Relationship Id="rIdNum" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>',
+    // 🔴 **ページ番号の footer**(段③)── sectPr が `rIdFooter` を指すので、
+    //    この 1 行を落とすと Word は「読み取れないコンテンツ」と言って開かない
+    '<Relationship Id="rIdFooter" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>',
     // ⚠ **画像とリンクで Type も TargetMode も違う** ── 取り違えると Word が
     //    「リンク先が壊れている」/ 画像が出ない。id の前置き(`rIdM` / `rIdL`)で分ける
     ...[...rels].map(([target, id]) =>
@@ -391,6 +443,7 @@ export function buildDocx(
       { name: 'word/_rels/document.xml.rels', text: documentRels },
       { name: 'word/styles.xml', text: stylesXml() },
       { name: 'word/numbering.xml', text: numberingXml() },
+      { name: 'word/footer1.xml', text: FOOTER_XML },
       { name: 'docProps/core.xml', text: core },
       { name: 'docProps/app.xml', text: app },
     ],

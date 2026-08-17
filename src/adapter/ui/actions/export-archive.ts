@@ -18,6 +18,8 @@ import { htmlToDocxBlocks } from '@adapter/platform/export/html-blocks';
 import { DEFAULT_PAGE_FORMAT, type PageFormat } from '@features/page-format';
 import { writeMarkdownZip } from '@features/export/pkc3-markdown-zip';
 import { singleEntrySource } from '@features/export/single-entry-source';
+import { parseFrontmatter, extractVars } from '@features/markdown/frontmatter';
+import { extractHeadingNumberConfig } from '@features/markdown/document-globals';
 import { safeName } from '@features/export/file-name';
 
 export interface ExportDeps {
@@ -254,7 +256,20 @@ export async function exportEntryDocx(
     if (body === null) return fail('ノートが見つかりませんでした');
     const metas = await deps.source.listEntryMetas();
     const title = metas.find((m) => m.lid === lid)?.title ?? 'ノート';
-    const html = await deps.renderBody(body);
+    /**
+     * 🔴 **詳細ペインと同じ材料を渡す**(#187 段③。閲覧用 HTML が 2026-08-06 に
+     * 直したのと**同じ穴**が、Word 側に残っていた)。直す前は `render(body)` だけで:
+     * - **frontmatter が本文として出る**(`---` が水平線、`key: value` が見出しに)
+     * - `{{vars.x}}` が**生のまま**載る
+     * - `heading-number: true` の文書に**番号が付かない**
+     * ⚠ どれも**全文 body**(frontmatter 込み)から取る ── 読み飛ばした本文からは
+     *   frontmatter が見えない。
+     */
+    const skip = body.length - parseFrontmatter(body).body.length;
+    const html = await deps.renderBody(body.slice(skip), {
+      vars: extractVars(body),
+      headingNumber: extractHeadingNumberConfig(body),
+    });
     // ⚠ `<body>` で包む ── 包まないと happy-dom / 実ブラウザで木の形が揃わない
     const doc = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html');
     const { blocks, images, figures } = htmlToDocxBlocks(doc);
@@ -337,7 +352,8 @@ export async function exportEntryDocx(
       media.push({ name: `word/${name}`, blob: drawn.blob });
     }
     const now = deps.now?.() ?? new Date();
-    const built = buildDocx(blocks, title, now.toISOString());
+    // 🔴 **紙面は画面の設定と同じ**(#187 段③)── 渡さないと Word だけ A4 縦になる
+    const built = buildDocx(blocks, title, now.toISOString(), deps.pageFormat ?? DEFAULT_PAGE_FORMAT);
     const zip = new ZipWriter();
     for (const part of built.parts) await zip.add(part.name, [part.text]);
     for (const m of media) await zip.add(m.name, [m.blob]);

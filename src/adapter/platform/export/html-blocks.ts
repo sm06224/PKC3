@@ -268,7 +268,12 @@ export function htmlToDocxBlocks(doc: Document): {
         continue;
       }
       if (tag === 'hr') {
-        blocks.push({ kind: 'hr' });
+        /**
+         * 🔴 **改頁は水平線ではない**(#187 段③)。`+++` / `:::break` は
+         * `hr.pkc-section-break` になり、**紙では `break-after: page`** が効く。
+         * ⚠ `hr` と同じに畳むと、画面と紙では改頁なのに **Word でだけ線**になる。
+         */
+        blocks.push(el.classList.contains('pkc-section-break') ? { kind: 'pagebreak' } : { kind: 'hr' });
         continue;
       }
       if (tag === 'table') {
