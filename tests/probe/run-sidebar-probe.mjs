@@ -24,7 +24,9 @@ import { tmpdir } from 'node:os';
 const PORT = Number(process.env.PKC3_BENCH_PORT ?? 45731);
 const PROFILE_DIR =
   process.env.PKC3_PROFILE_DIR ?? join(tmpdir(), 'pkc3-bench-profile');
-const executablePath = process.env.PKC3_CHROMIUM ?? '/opt/pw-browsers/chromium';
+// ⚠ `??` ではなく `||` ── **空文字を素通りさせない**(CI が path を取れなかった回に
+//    「どのブラウザで測ったか分からないまま緑」になるのを止める)
+const executablePath = process.env.PKC3_CHROMIUM || '/opt/pw-browsers/chromium';
 /** 行を数える器。⚠ ここより外の `data-pkc-entry` は**行ではない**(上のコメント)。 */
 const LIST = '[data-pkc-region="entry-list"]';
 
@@ -53,11 +55,29 @@ try {
     // 行ノードの同一性を後で照合するため WeakSet ではなく直接参照で保持
     window.__LIST_BEFORE__ = el;
     window.__ROWS_BEFORE__ = rows;
+    /**
+     * 🔴 **同一性だけでは「remove して同じ順に入れ直す」を弁別できない**
+     * (2026-08-17 のレビュー ⚠-11)。この repo は unit 側で **999 move が
+     * identity assert を全通過した**実証を持っており(`tests/adapter/
+     * sidebar-render.test.ts` の `countMoves`)、15,000 行・実ブラウザという
+     * この probe の固有の価値はまさに **move の数**である。
+     * 🔑 2026-08-17 に**この構成で 0 を実測**したうえで後条件へ昇格させた
+     * (CLAUDE.md「通ったのを見てから後条件へ昇格させる」)。
+     */
+    window.__LIST_MUTATIONS__ = 0;
+    // ⚠ `globalThis.` を付ける(この file は node 側の lint 環境で読まれる)
+    const obs = new globalThis.MutationObserver((recs) => {
+      for (const r of recs)
+        window.__LIST_MUTATIONS__ += r.addedNodes.length + r.removedNodes.length;
+    });
+    obs.observe(el, { childList: true }); // ⚠ subtree は見ない(行の中の文字は対象外)
     return { rowCount: rows.length, bootToRowsMs };
   }, LIST);
 
   // 実クリックで選択(binder 経路を通す)
-  await page.click('[data-pkc-entry="e42"]');
+  // ⚠ **一覧の中の行**を押す ── `page.click` は最初の一致を採り、それが不可視だと
+  //    別の一致へ移らずに待ち続ける(`data-pkc-entry` はファイラ・検索・情報ペインも書く)
+  await page.click(`${LIST} [data-pkc-entry="e42"]`);
   await page.waitForFunction(
     () => window.__APP__.dispatcher.getState().openBody?.lid === 'e42',
     null,
@@ -123,12 +143,17 @@ try {
        */
       entryAttrsOutsideList:
         document.querySelectorAll('[data-pkc-entry]').length - after.length,
+      /** 選択 → 編集 → 確定の間に一覧の**直下の子**が出入りした数(期待 0)。 */
+      listChildMutations: window.__LIST_MUTATIONS__,
     };
   }, LIST);
 
   const ok =
     steps.rowCount === 15000 &&
     result.rowsIdenticalThroughEditCycle &&
+    // 🔑 2026-08-17 に **0 を実測**したので後条件へ昇格させた(同一性だけでは
+    //    「外して同じ順に入れ直す」= move を弁別できない)
+    result.listChildMutations === 0 &&
     result.listSameNode &&
     result.selectedMarked &&
     result.persistedRoundtrip &&

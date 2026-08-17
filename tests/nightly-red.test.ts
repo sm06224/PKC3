@@ -10,13 +10,15 @@
  *   ここを緩めると、URL や method を取り違える変異が丸ごと生き延びる。
  */
 import { describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
 // @ts-expect-error -- 通知の規則は素の .mjs(ビルド対象外の CI script 群)
-import { reconcileNightlyIssue, LABEL } from '../scripts/nightly-red.mjs';
+import { reconcileNightlyIssue, unmetSteps, LABEL } from '../scripts/nightly-red.mjs';
 
 interface Call {
   method: string;
   url: string;
   body: Record<string, unknown> | null;
+  headers: Record<string, string>;
 }
 
 /** 記録つきの偽 `fetch`。`openIssues` が「いま開いている issue」の返り値。 */
@@ -28,6 +30,7 @@ function fakeFetch(openIssues: unknown[], opts: { labelStatus?: number } = {}) {
       method,
       url,
       body: init.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null,
+      headers: (init.headers ?? {}) as Record<string, string>,
     });
     if (method === 'GET') return { ok: true, status: 200, json: async () => openIssues };
     if (url.endsWith('/labels')) {
@@ -60,11 +63,24 @@ describe('夜が赤いときの台帳', () => {
     expect(out.action).toBe('created');
     expect(out.issue).toBe(999);
 
+    /**
+     * 🔴 **一覧の引き方も見る**(2026-08-17 のレビュー 🔴-3)。初稿は GET を
+     * `writes()` で捨てていたので、`labels=` を落とす変異が生き延びた ──
+     * その形だと**開いている無関係な issue の先頭**(例: 台帳 #180)に
+     * 「✅ 緑に戻りました」と書いて**閉じる**。
+     */
+    const q = new URL(calls[0]!.url).search;
+    expect(q, '開いているものだけに絞っていない').toContain('state=open');
+    expect(q, 'label で絞っていない').toContain(`labels=${encodeURIComponent(LABEL)}`);
+
     const w = writes(calls);
     expect(w.map((c) => `${c.method} ${new URL(c.url).pathname}`)).toEqual([
       'POST /repos/sm06224/PKC3/labels',
       'POST /repos/sm06224/PKC3/issues',
     ]);
+    // ⚠ **全部の呼びに鍵が付くこと** ── 付け忘れると 401/403 で、
+    //   「通知が届かない」だけが起きる(2026-08-17 のレビュー ⚠-12)
+    for (const c of calls) expect(c.headers.authorization, `${c.method} ${c.url}`).toBe('Bearer t');
     const issue = w[1]!.body!;
     expect(issue.labels).toEqual([LABEL]);
     expect(String(issue.title)).toContain('2026-08-17');
@@ -140,6 +156,15 @@ describe('夜が赤いときの台帳', () => {
     );
   });
 
+  it('🔴 緑の回も、一覧は label で絞ってから閉じる', async () => {
+    // ⚠ 閉じる経路のほうが危ない(無関係な issue を閉じる)。両方向で見る
+    const { fetch, calls } = fakeFetch([{ number: 42 }]);
+    await reconcileNightlyIssue({ ...BASE, fetch, failedSteps: [] });
+    const q = new URL(calls[0]!.url).search;
+    expect(q).toContain('state=open');
+    expect(q).toContain(`labels=${encodeURIComponent(LABEL)}`);
+  });
+
   it('🔴 コメントの投稿が落ちたら止まる(閉じるほうへ進まない)', async () => {
     const calls: string[] = [];
     const fetch = (async (url: string, init: RequestInit = {}) => {
@@ -152,5 +177,84 @@ describe('夜が赤いときの台帳', () => {
     await expect(reconcileNightlyIssue({ ...BASE, fetch, failedSteps: [] })).rejects.toThrow('500');
     // ⚠ 「落ちたのに閉じた」を作らない ── PATCH まで進んでいないこと
     expect(calls.some((c) => c.startsWith('PATCH'))).toBe(false);
+  });
+});
+
+/**
+ * 何を「赤」と数えるか(#221 のレビュー 🔴-1)。
+ *
+ * 🔴 初稿はこの判定を **workflow の `node -e` 1 行**に書いていた ──
+ * ① `skipped` / `cancelled` を**緑と読む**(仕込みが落ちて以降が飛んだ晩に
+ *    「✅ 緑に戻りました」と誤報して issue を閉じる)
+ * ② その 1 行は**どの test からも実行されない**(CLAUDE.md §2)
+ * だから script 側へ出し、ここで全経路を通す。
+ */
+describe('揃わなかった step の数え方', () => {
+  const json = (o: unknown) => JSON.stringify(o);
+
+  it('落ちた step を id:outcome で返す', () => {
+    expect(
+      unmetSteps(json({ npm_ci: { outcome: 'success' }, probe_sidebar: { outcome: 'failure' } })),
+    ).toEqual(['probe_sidebar:failure']);
+  });
+
+  it('🔴 走らなかった(skipped)も赤に数える ── 「確かめていない」は緑ではない', () => {
+    expect(
+      unmetSteps(json({ npm_ci: { outcome: 'failure' }, probe_kanban: { outcome: 'skipped' } })),
+    ).toEqual(['npm_ci:failure', 'probe_kanban:skipped']);
+  });
+
+  it('cancelled も赤に数える', () => {
+    expect(unmetSteps(json({ a: { outcome: 'cancelled' } }))).toEqual(['a:cancelled']);
+  });
+
+  it('走っている最中(outcome が空)は数えない ── 自分自身を赤にしない', () => {
+    expect(unmetSteps(json({ a: { outcome: 'success' }, ledger: { outcome: '' } }))).toEqual([]);
+  });
+
+  it('🔴 空を「緑」と読まない(id を落とすと静かに空になる)', () => {
+    expect(() => unmetSteps(json({}))).toThrow('空');
+    expect(() => unmetSteps(undefined)).toThrow('空');
+    expect(() => unmetSteps('')).toThrow('空');
+  });
+
+  it('🔴 JSON として読めないなら止まる(集計の故障を緑にしない)', () => {
+    expect(() => unmetSteps('{')).toThrow('JSON');
+    expect(() => unmetSteps(json([1, 2]))).toThrow('空');
+  });
+});
+
+/**
+ * CLI の口(`node scripts/nightly-red.mjs`)── **vitest からは 1 度も実行されない**
+ * 部分なので、ここだけ実際に起動して確かめる(CLAUDE.md §2「どの test からも
+ * 実行されない file に判断を書かない」)。⚠ 壊れたときの症状は「何もせず exit 0」
+ * = 静かな緑である。
+ */
+describe('台帳 CLI の口', () => {
+  const run = (env: Record<string, string>): { code: number; out: string } => {
+    try {
+      const out = execFileSync('node', ['scripts/nightly-red.mjs'], {
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        // ⚠ 実際の GitHub 環境変数を継がせない(手元の値で通ってしまわないように)
+        env: { PATH: process.env.PATH ?? '', ...env },
+      });
+      return { code: 0, out };
+    } catch (e) {
+      const err = e as { status?: number; stdout?: string; stderr?: string };
+      return { code: err.status ?? 1, out: `${err.stdout ?? ''}${err.stderr ?? ''}` };
+    }
+  };
+
+  it('repo / token が無ければ 2 で落ちる(黙って何もしない形にしない)', () => {
+    const r = run({});
+    expect(r.code).toBe(2);
+    expect(r.out).toContain('GITHUB_REPOSITORY');
+  });
+
+  it('🔴 steps が渡っていなければ落ちる(空を緑と読まない)', () => {
+    const r = run({ GITHUB_REPOSITORY: 'o/r', GITHUB_TOKEN: 't', GITHUB_RUN_ID: '1' });
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain('STEPS');
   });
 });

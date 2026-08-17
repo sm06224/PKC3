@@ -5,7 +5,9 @@
  */
 import { chromium } from '@playwright/test';
 
-const executablePath = process.env.PKC3_CHROMIUM ?? '/opt/pw-browsers/chromium';
+// ⚠ `??` ではなく `||` ── **空文字を素通りさせない**(CI が path を取れなかった回に
+//    「どのブラウザで測ったか分からないまま緑」になるのを止める)
+const executablePath = process.env.PKC3_CHROMIUM || '/opt/pw-browsers/chromium';
 const url =
   process.argv[2] ?? 'http://localhost:5173/tests/probe/sahpool-probe.html';
 

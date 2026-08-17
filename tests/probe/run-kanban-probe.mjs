@@ -26,7 +26,9 @@ import { tmpdir } from 'node:os';
 const PORT = Number(process.env.PKC3_BENCH_PORT ?? 45731);
 const PROFILE_DIR =
   process.env.PKC3_PROFILE_DIR ?? join(tmpdir(), 'pkc3-bench-profile');
-const executablePath = process.env.PKC3_CHROMIUM ?? '/opt/pw-browsers/chromium';
+// ⚠ `??` ではなく `||` ── **空文字を素通りさせない**(CI が path を取れなかった回に
+//    「どのブラウザで測ったか分からないまま緑」になるのを止める)
+const executablePath = process.env.PKC3_CHROMIUM || '/opt/pw-browsers/chromium';
 
 rmSync(PROFILE_DIR, { recursive: true, force: true });
 mkdirSync(PROFILE_DIR, { recursive: true });
@@ -55,8 +57,17 @@ try {
     };
 
     // 0. 前提 ── 封印中は切替ボタンが**無い**のが正しい(逆向きの tripwire)
+    /**
+     * ⚠ **不在の検査は、観測点が死んでも真になる**(2026-08-17 のレビュー)。
+     * `data-pkc-view` を改名したり、view ボタンの生成を丸ごと落としても
+     * 「kanban が無い」は真である ── だから**封印外の view が在ること**を
+     * 同時に見る(同じループが属性を付けるので、これが positive control になる)。
+     */
+    const viewButtonsAlive = q('[data-pkc-view="settings"]') !== null;
     const sealedOk =
-      q('[data-pkc-view="kanban"]') === null && q('[data-pkc-view="calendar"]') === null;
+      viewButtonsAlive &&
+      q('[data-pkc-view="kanban"]') === null &&
+      q('[data-pkc-view="calendar"]') === null;
     // ⚠ 器は boot から常駐している(`center.ts` が 7 枚まとめて作る)ので、
     //    「在ること」は切替の証拠にならない ── `hidden` の遷移で見る
     const kanbanWasHidden = pane('kanban')?.hidden === true;
@@ -89,7 +100,17 @@ try {
       q('[data-pkc-kanban-status="done"] [data-pkc-entry="e0"]') !== null,
     );
     const toggleRoundtripMs = +(performance.now() - t0).toFixed(1);
-    const othersIntact = others.every((el, i) => [...openCol.children].slice(0, 49)[i] === el);
+    /**
+     * 🔴 **器は毎回引き直す**(sidebar / editor で `listSameNode` を足したのと同じ理由。
+     * 2026-08-17 のレビュー ⚠-9 =「1 巡目の修正は 2 巡目の対象」)。掴んだままの
+     * `openCol` の子を数えると、列ごと差し替えられたとき**外れた古い列**を見て
+     * 「他のカードは無傷」という嘘の緑になる。
+     */
+    const openColNow = q('[data-pkc-kanban-status="open"] [data-pkc-region="kanban-cards"]');
+    const colSameNode = openColNow === openCol;
+    const othersIntact =
+      openColNow !== null &&
+      others.every((el, i) => [...openColNow.children].slice(0, 49)[i] === el);
     const state = window.__APP__.dispatcher.getState();
 
     // 3. calendar 初回描画
@@ -101,6 +122,8 @@ try {
 
     return {
       sealedOk,
+      viewButtonsAlive,
+      colSameNode,
       kanbanWasHidden,
       kanbanShown,
       kanbanFirstRenderMs,
@@ -124,6 +147,7 @@ try {
     result.cardCount === 1500 &&
     result.moved &&
     result.othersIntact &&
+    result.colSameNode &&
     result.toggledStatus === 'done' &&
     result.calendarShown &&
     result.gridReady &&

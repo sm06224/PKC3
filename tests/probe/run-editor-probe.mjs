@@ -37,7 +37,9 @@ import { tmpdir } from 'node:os';
 const PORT = Number(process.env.PKC3_BENCH_PORT ?? 45731);
 const PROFILE_DIR =
   process.env.PKC3_PROFILE_DIR ?? join(tmpdir(), 'pkc3-bench-profile');
-const executablePath = process.env.PKC3_CHROMIUM ?? '/opt/pw-browsers/chromium';
+// ⚠ `??` ではなく `||` ── **空文字を素通りさせない**(CI が path を取れなかった回に
+//    「どのブラウザで測ったか分からないまま緑」になるのを止める)
+const executablePath = process.env.PKC3_CHROMIUM || '/opt/pw-browsers/chromium';
 /** 行を数える器。⚠ 一覧の外の `data-pkc-entry` は**行ではない**(#221)。 */
 const LIST = '[data-pkc-region="entry-list"]';
 
@@ -178,14 +180,21 @@ try {
   let committedByRowCommit = null;
   if (ARM === 'live' && !result.error) {
     await page.keyboard.press('Tab');
-    committedByRowCommit = await page.evaluate(async () => {
+    /**
+     * ⚠ **下限ではなく等値で見る**(2026-08-17 のレビュー ⚠-7)。`>= 200_000` だと
+     * 末尾 600 字が落ちても、本文が 2 重(401,200 字)になっても真になる ──
+     * この probe が通すのは `commitActive` の **行数が変わる枝**(1 行が 3 行の塊を
+     * 置き換える)で、実装のコメント自身が「古い座標で無関係な行を潰す」危険を
+     * 書いている場所である。長さの下限では、その事故を 1 つも捕まえない。
+     */
+    committedByRowCommit = await page.evaluate(async (want) => {
       for (let i = 0; i < 100; i++) {
         const len = window.__APP__.dispatcher.getState().openBody?.body?.length ?? 0;
-        if (len >= 200_000) return true;
+        if (len === want) return true;
         await new Promise((r) => setTimeout(r, 50));
       }
-      return false;
-    });
+      return window.__APP__.dispatcher.getState().openBody?.body?.length ?? 0;
+    }, result.valueLen);
   }
 
   // 保存(実クリック)→ view 復帰 → サイドバー行同一性
@@ -216,7 +225,9 @@ try {
     return {
       rowsIdenticalThroughEditCycle: identical,
       listSameNode,
-      persistedAck: s.openBody?.persisted === s.openBody?.body,
+      // ⚠ `?.` だけだと **openBody が無い回に `undefined === undefined` で真**になる
+      //    (保存後に本文を失う退行が緑で通る。2026-08-17 のレビュー ⚠-8)
+      persistedAck: s.openBody != null && s.openBody.persisted === s.openBody.body,
       phase: s.phase,
       storageVfs: window.__APP__.storageVfs,
       // 診断 ── 一覧の外に居る `data-pkc-entry` の数(#221 で赤かった当の理由)
