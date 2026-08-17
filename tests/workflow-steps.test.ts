@@ -173,6 +173,106 @@ describe('workflow の step', () => {
 });
 
 /**
+ * 夜の検査は **1 つ落ちても後ろを止めない**(#221、2026-08-17)。
+ *
+ * 🔴 実際に踏んだ事故: `Probe — sidebar` が落ちた **13 晩**、その後ろの
+ * `Probe — editor` / `Probe — kanban` は step の既定(前が落ちたら skip)で
+ * **1 度も走っていなかった**。⚠ 症状は「赤が 1 つ」に見えるので、
+ * **走っていない検査が 2 つある**ことは run を開いても分からない
+ * (`editor` は同じ空振り検定を持っており、走っていれば同じ日に露見していた)。
+ * 🔑 CLAUDE.md「回すものの粒度: **1 job = 1 主張**。落ちたとき何が壊れたか、
+ * 名前で言える形にする」。文言では 2 度目を止められないので機械で止める。
+ */
+describe('nightly の step', () => {
+  const YML = join(DIR, 'nightly.yml');
+  const GUARD = 'if: ${{ !cancelled() }}';
+
+  /** 設定の都合で guard を持たない step の id(**明示の carve-out**)。 */
+  const SETUP_IDS = new Set(['pw']);
+
+  interface NightlyStep {
+    line: number;
+    name: string;
+    id: string | null;
+    hasGuard: boolean;
+    run: string;
+  }
+
+  /** `heavy` job の step を切り出す(この repo に YAML parser は入っていない)。 */
+  function nightlySteps(): NightlyStep[] {
+    const lines = readFileSync(YML, 'utf-8').split('\n');
+    const out: NightlyStep[] = [];
+    let inSteps = false;
+    let cur: NightlyStep | null = null;
+    for (const [n, line] of lines.entries()) {
+      if (/^ {4}steps:\s*$/.test(line)) {
+        inSteps = true;
+        continue;
+      }
+      if (!inSteps) continue;
+      if (/^ {0,4}\S/.test(line) && line.trim() !== '') break; // job の外へ出た
+      const head = /^ {6}- (name|uses): (.+?)\s*$/.exec(line);
+      if (head) {
+        if (cur) out.push(cur);
+        cur = { line: n + 1, name: head[1] === 'name' ? head[2]! : '', id: null, hasGuard: false, run: '' };
+        continue;
+      }
+      if (!cur) continue;
+      const name = /^ {8}name: (.+?)\s*$/.exec(line);
+      if (name) cur.name = name[1]!;
+      const id = /^ {8}id: (\S+)\s*$/.exec(line);
+      if (id) cur.id = id[1]!;
+      if (line.trim() === GUARD) cur.hasGuard = true;
+      const run = /^ {8}run: (.+?)\s*$/.exec(line);
+      if (run) cur.run = run[1]!;
+      if (/^ {10}\S/.test(line)) cur.run += `\n${line.trim()}`; // run: | の本体
+    }
+    if (cur) out.push(cur);
+    return out;
+  }
+
+  const steps = nightlySteps();
+
+  it('🔴 切り出しが step を取りこぼしていない(素の grep と件数が一致する)', () => {
+    // 空振り防止 ── 1 つも読めていない形で「全部 guard 付き」と言わない
+    const raw = readFileSync(YML, 'utf-8')
+      .split('\n')
+      .filter((l) => /^ {6}- (name|uses):/.test(l)).length;
+    expect(raw).toBeGreaterThan(5);
+    expect(steps.length).toBe(raw);
+  });
+
+  it('🔴 probe の step は全部「前が落ちても走る」(13 晩 skip された形を止める)', () => {
+    const probes = steps.filter((s) => s.name.startsWith('Probe —'));
+    // 空振り防止 ── probe を 1 つも見つけられていないなら検査になっていない
+    expect(probes.length, 'probe の step を見つけられていない').toBeGreaterThanOrEqual(5);
+    const offenders = probes
+      .filter((s) => !s.hasGuard || !s.id)
+      .map((s) => `${YML}:${s.line} ${s.name}${s.id ? '' : '(id が無い)'}`);
+    expect(offenders).toEqual([]);
+  });
+
+  it('🔴 id を持つ検証 step は全部 guard を持つ(足した step が静かに skip されない)', () => {
+    const offenders = steps
+      .filter((s) => s.id && !SETUP_IDS.has(s.id) && !s.hasGuard)
+      .map((s) => `${YML}:${s.line} id:${s.id}`);
+    expect(offenders).toEqual([]);
+  });
+
+  it('🔴 赤い夜を台帳へ出す step が在り、書ける権限が宣言されている', () => {
+    const ledger = steps.find((s) => s.run.includes('scripts/nightly-red.mjs'));
+    expect(ledger, '夜の結果を台帳へ出す step が無い').toBeDefined();
+    expect(ledger!.hasGuard, '台帳の step が skip されうる').toBe(true);
+    // ⚠ 権限が無いと API が 403 を返す ── script は例外で落ちるので静かではないが、
+    //   「毎晩 1 つ余計に赤い step」が常態化する。宣言のほうを縛る
+    const yml = readFileSync(YML, 'utf-8');
+    const perms = /^permissions:\n((?:[ #].*\n)+)/m.exec(yml);
+    expect(perms, 'permissions が読めない').not.toBeNull();
+    expect(perms![1], 'issues: write が無い').toContain('issues: write');
+  });
+});
+
+/**
  * LibreOffice へ当てるパッチの**本数**が、workflow の主張と一致する(#117)。
  *
  * 🔴 workflow 側は `test "$n" -eq 3` と**実数で**書いてある(「2 本以上」だと
