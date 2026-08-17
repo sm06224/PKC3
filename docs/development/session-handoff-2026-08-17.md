@@ -153,14 +153,33 @@ schedule の run を全数(17 件)数えた結果: `08-03 緑` → **13 晩赤**
 箱に `libreoffice-core` しか無く Writer の filter が無かったのが原因で、そのまま読んでいたら
 **存在しない不具合**を書いていた。
 
-🔴 **残る層は PKC 内の Office(LO wasm)側**だが、**この箱では原理的に測れない**:
+### ⚠ ここに「この箱では原理的に測れない」と書いていたが、**誤りだった**
 
-- Pages から実物の pack を取る → 外向き HTTP が proxy で止まる(`000`)
-- git から取る → `sm06224/office-pack` は **`.github` と README しか無い**(pack は CI が焼いて Pages へ出す)
+user 指摘「**githubから引っぱればいいじゃん**」で分かった。数えた経路は **2 つだけ**
+(Pages / repo の中身)で、しかも **CA bundle を渡さずに 1 回叩いた**だけだった。実際は:
 
-🔑 **分かれ目の 1 手**(実機):**図もグラフも無いノート**を Word 書き出しして PKC の Office で開く。
-**開く** → #199 と同じ現象(統合)/ **開かない** → 別の原因(#238 で追う)。
-⚠ 図つきで試すと #199 の条件を満たすので**分かれ目にならない**。
+```bash
+curl -sSL --cacert /root/.ccr/ca-bundle.crt -o /tmp/lo-wasm-qt6.zip \
+  https://github.com/sm06224/PKC3/releases/download/lo-wasm-dev/lo-wasm-qt6.zip   # 85MB / 1.4 秒
+```
+
+⚠ **release の zip には `.ttf` が 1 つも無い**ので、CJK フォントを足してから
+設定の「ファイルから入れる」に渡す(手順の正本は `.claude/skills/office-oracle/SKILL.md`)。
+
+🔑 **手元にオラクルが立つ。** そのうえで測った結論:
+
+| 中身 | 入れ物 | 画像の書き方 | native LO | LO wasm |
+|---|---|---|---|---|
+| 文字だけ | docx | ─ | ✅ | ✅ |
+| 図あり | odt | ODF | ✅ | ✅ |
+| 図あり | docx | DrawingML(PKC) | ✅ | ❌ 空 |
+| 図あり | docx | DrawingML(**LO 自身**) | ✅ | ❌ 空 |
+| 図あり | docx | DrawingML + VML 代替 | ✅ | ❌ 空 |
+| 図あり | docx | **VML のみ** | ✅ | ✅ |
+
+→ 引き金は **「docx + 画像」ではなく「docx + DrawingML」**。#238 は #199 の一例で、
+**PKC 自身の書き出しがそれを踏んでいる**。推薦は「書き出しの画像を VML で書く」で、
+⚠ **本物の Word での確認が 1 度要る**(この箱に Word は無い)。
 
 ## 🔴 最初の仕事(次のセッションへ)
 
