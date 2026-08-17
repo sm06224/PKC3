@@ -236,3 +236,89 @@ describe('閲覧 HTML のテンプレート文字列', () => {
     ).toEqual([]);
   });
 });
+
+/**
+ * 🔒 **文書を受け取る probe は、撮影の口を「渡さない」形にする**(#220-2)。
+ *
+ * user 指示(機密資料の取り扱い 6、2026-08-15。不可侵):
+ * 「**スクショを撮ってよいのは自作の file を開いたときだけ。** 同じハーネスで機密資料を
+ * 扱う日は、撮影の口を**呼ばない**のではなく**渡さない**(引数を与えなければ撮れない
+ * 形にする)」。
+ *
+ * ⚠ **消すのではなく門にした**理由: 版面の絵は、この harness で唯一生きている
+ * 「一手が届いたか」の観測点である(題名は死んでいる / 打っても FS は動かない /
+ * 窓の枚数も動かない)。消すと 2026-08-13 の失敗 ──「差が無い」を「actuate して
+ * いない」と区別できず、**存在しない結論**を書きかけた ── へ戻る。
+ * 🔑 だから既定 OFF の env 門にし、**それが在ることを機械で守る**。
+ */
+describe('🔒 文書を扱う probe の撮影の口', () => {
+  /**
+   * **等値 pin の既知リスト**(CLAUDE.md「等値 pin の既知リストは良く効く ──
+   * 直したら消さないと落ちるので忘れられない」)。文書を引数に取る probe を足したら、
+   * ここへ足す。⚠ 足さないと下の「全数」検査が落ちる。
+   */
+  const DOC_PROBES = [
+    'build/office-wasm/open-doc-probe.mjs',
+    'build/office-wasm/save-existing-probe.mjs',
+  ];
+
+  /** コメント行を落とした「実行する行」だけ返す(§1 で 5 回踏んだ型)。 */
+  const codeLines = (rel: string): string[] =>
+    readFileSync(rel, 'utf-8')
+      .split('\n')
+      .filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l));
+
+  it('🔴 一覧が全数である(user の文書を読む probe を取りこぼしていない)', () => {
+    /**
+     * 判定は「**引数から来た path の bytes を読んでいるか**」で採る。
+     * ⚠ `process.argv[3]` だけを見ると、出力先(`OUT`)に使っている probe が
+     * 12 件並んで全数検査にならない ── **user の文書に触るか**が争点である。
+     */
+    const found = readdirSync('build/office-wasm')
+      .filter((f) => f.endsWith('.mjs'))
+      .filter((f) => {
+        const lines = codeLines(join('build/office-wasm', f));
+        const fromArgv = new Set(
+          lines
+            .flatMap((l) => [...l.matchAll(/(?:const|let|var)\s+(\w+)\s*=\s*[^;]*process\.argv\[3\]/g)])
+            .map((m) => m[1]!),
+        );
+        return lines.some((l) => [...fromArgv].some((n) => new RegExp(`readFile\\(\\s*${n}\\b`).test(l)));
+      })
+      .map((f) => join('build/office-wasm', f))
+      .sort();
+    // 空振り防止 ── 1 件も見つからない形で「全部見た」と言わない
+    expect(found.length, 'user の文書を読む probe を 1 つも見つけられていない').toBeGreaterThan(0);
+    expect(found).toEqual(DOC_PROBES);
+  });
+
+  it('🔴 撮影は env の門の下にある(引数を与えなければ撮れない)', () => {
+    let shots = 0;
+    for (const rel of DOC_PROBES) {
+      const lines = codeLines(rel);
+      // その file の中で **env から作った名前**(門になりうるもの)
+      const gates = new Set(
+        lines
+          .flatMap((l) => [...l.matchAll(/(?:const|let|var)\s+(\w+)\s*=\s*[^;]*process\.env\./g)])
+          .map((m) => m[1]!),
+      );
+      const shotLines = lines.filter((l) => l.includes('page.screenshot'));
+      for (const l of shotLines) {
+        shots += 1;
+        const gated = l.includes('process.env.') || [...gates].some((g) => l.includes(g));
+        expect(gated, `${rel}: 門の無い撮影がある ── ${l.trim().slice(0, 80)}`).toBe(true);
+      }
+    }
+    // 空振り防止 ── 撮影の行が 1 つも無いなら、この検査は何も守っていない
+    expect(shots, '撮影の行が 1 つも無い ── 検査が空振りしている').toBeGreaterThan(0);
+  });
+
+  it('🔴 使い終わった profile を消している(痕跡を残さない)', () => {
+    for (const rel of DOC_PROBES) {
+      const code = codeLines(rel).join('\n');
+      expect(code, `${rel}: persistent profile を作っているのに消していない`).toMatch(
+        /rm\(\s*(PROFILE|profile)\s*,/,
+      );
+    }
+  });
+});

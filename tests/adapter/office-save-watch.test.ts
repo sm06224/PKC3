@@ -37,6 +37,7 @@ interface Api {
   QUIET_MS: number;
   WATCH_DIRS: string[];
   KEY_MEMORY_MAX: number;
+  newWindowId(): string;
   isIgnoredName(n: string): boolean;
   watchedDirOf(p: string): string | null;
   baseName(p: string): string;
@@ -209,6 +210,41 @@ describe('保存の判断 ── 静穏化と baseline', () => {
  * ⚠ この結論をコードに残さないと、次に読む人が「UNO のほうが判定 0 個で綺麗」を
  * 根拠に戻す ── 戻すと**保存のたびに窓が死ぬ**。
  */
+/**
+ * 🔴 **窓の id**(#220-4)。引き取る側が「同じ文書」を束ねる鍵の片方なので、
+ * ここが弁別しなければ**別の窓の同名文書が 1 つのノートへ潰れる**。
+ *
+ * ⚠ 直す前は生成が `host.html` に直書きで、**どの unit も届かなかった** ──
+ * `var winId = 'w-1'` という変異が全緑で通る状態だった(CLAUDE.md §2)。
+ */
+describe('窓の id(#220-4)', () => {
+  it('🔴 呼ぶたびに違う値を返す(固定値だと別の窓の文書を潰す)', () => {
+    const seen = new Set<string>();
+    for (let i = 0; i < 200; i += 1) seen.add(api.newWindowId());
+    expect(seen.size, '同じ値が返っている ── 窓を弁別できない').toBe(200);
+  });
+
+  it('🔴 空でなく、`|` を含まない(束ねる鍵の区切りと衝突しない)', () => {
+    for (let i = 0; i < 50; i += 1) {
+      const id = api.newWindowId();
+      expect(id.length).toBeGreaterThan(0);
+      // ⚠ 引き取る側は `win|path` で 1 本にする(`office-save-back.ts` の `sameDoc`)
+      expect(id, '区切りと同じ文字が入っている').not.toContain('|');
+    }
+  });
+
+  it('🔴 窓(host.html)は生成をここへ委ねている(直書きへ戻していない)', () => {
+    // ⚠ **実行行だけ**を見る(コメントに満たされない ── CLAUDE.md §1 で 5 回踏んだ型)
+    const code = readFileSync('public/office/host.html', 'utf-8')
+      .split('\n')
+      .filter((l) => !/^\s*(\*|\/\/|<!--)/.test(l))
+      .join('\n');
+    expect(code.length, '抜き出せていない ── 検査が空振りしている').toBeGreaterThan(1000);
+    expect(code, '窓の id を host.html に直書きしている').toContain('W.newWindowId()');
+    expect(code, '古い直書きが残っている').not.toContain('crypto.randomUUID()\n');
+  });
+});
+
 describe('UNO の listener を登録しない(#209)', () => {
   it('🔴 host.html と保存の判断に UNO の登録が現れない', () => {
     for (const f of ['public/office/host.html', 'public/office/office-save-watch.js']) {
@@ -297,6 +333,40 @@ describe('合言葉の表(#217)', () => {
     // ⚠ 落ちるのは**古いほうから**(返事が来る見込みが薄い順)
     expect(t.adopt('k0', 'lid-OLD')).toBe(false);
     expect(t.adopt('k9', 'lid-NEW')).toBe(true);
+  });
+
+  /**
+   * 🔴 **返事が着いた鍵は枠を食わない**(#220-5、2026-08-17)。
+   *
+   * ⚠ 直す前は `adopt` が `paths` からしか消さず、`order` に死んだ鍵が残っていた
+   * ── 死鍵が上限の枠を食い、次の `remember` で **生きている古い鍵が押し出される**。
+   * その鍵に返事が来ると `adopt` が false = **どこにも着かない**(= 保存のたびに
+   * ノートが増える #217 の形)。観測点は「数」ではなく**生きた鍵の返事が着くか**。
+   */
+  it('🔴 返事が着いた鍵が枠を食わない(生きた古い鍵を押し出さない)', () => {
+    const t = api.createTokenTable({ max: 3 });
+    t.remember('old1', '/work/あ.odt');
+    t.remember('old2', '/work/い.odt');
+    t.remember('new3', '/work/う.odt');
+    expect(t.adopt('new3', 'lid-U')).toBe(true);
+    // 死んだ鍵が枠を食っていれば、ここで old1 が押し出される
+    t.remember('new4', '/work/え.odt');
+    expect(t.adopt('old1', 'lid-A'), '生きた古い鍵を押し出した ── 返事が着かない').toBe(
+      true,
+    );
+    expect(t.tokenFor('/work/あ.odt')).toBe('lid-A');
+  });
+
+  it('返事が着いた鍵は数えない(上限の観測点が死鍵で埋まらない)', () => {
+    const t = api.createTokenTable({ max: 3 });
+    t.remember('k1', '/work/あ.odt');
+    t.remember('k2', '/work/い.odt');
+    expect(t.keyCount()).toBe(2);
+    expect(t.adopt('k1', 'lid-A')).toBe(true);
+    expect(t.keyCount(), '返事が着いた鍵を数え続けている').toBe(1);
+    // ⚠ 空振り防止 ── 受け入れなかったときは減らない
+    expect(t.adopt('nope', 'lid-X')).toBe(false);
+    expect(t.keyCount()).toBe(1);
   });
 
   it('既定の上限が宣言されている(値を散らさない)', () => {
