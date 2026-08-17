@@ -15,6 +15,7 @@ import {
 import { AssetBlobStore } from '../../src/adapter/platform/storage/asset-blob-store';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
+import { buildSettingsCommands } from '../../src/adapter/ui/render/commands';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 
 function fakePorts(over: Partial<AssetGcPorts> = {}) {
@@ -92,11 +93,18 @@ describe('asset GC (P4b)', () => {
     await expect(store.delete('a:b', 'k1')).rejects.toThrow(/cid/);
   });
 
-  it('topbar の「添付の整理」click が services.purgeOrphanAssets に届く', () => {
+  /**
+   * ⚠ **置き場が変わった**(#239、user 指示 2026-08-17「使う頻度が低いボタンは
+   * 設定画面に逃す」)── 押す口(`data-pkc-action`)も受け手も同じで、居場所だけ
+   * 左の列の下から設定の面へ移った。🔑 **委譲は `root` に張る**ので、面が変わっても
+   * 同じ 1 本の配線で届く ── その「届く」ことこそがこの test の主張である。
+   */
+  it('設定の「使っていない添付を消す」click が services.purgeOrphanAssets に届く', () => {
     document.body.textContent = '';
     const root = document.createElement('div');
     document.body.append(root);
     buildShell(root);
+    root.append(buildSettingsCommands());
     const purge = vi.fn();
     bindActions(root, new Dispatcher(), { purgeOrphanAssets: purge });
     root

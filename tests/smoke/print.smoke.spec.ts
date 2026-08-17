@@ -139,6 +139,8 @@ test('🔴 画面から印刷すると全文が紙に乗り、+++ で改頁す�
    */
   await page.emulateMedia({ media: 'screen' });
   const dl = page.waitForEvent('download');
+  // ⚠ #239 でこの操作は設定の中(書き出しと片づけ)へ移った ── 先に開く
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
   await clickReal(page, '[data-pkc-action="export-html"]');
   const download = await dl;
   const file = join(tmpdir(), `pkc3-print-${process.pid}.html`);

@@ -212,6 +212,8 @@ test('🔴 配った HTML の本文が、アプリと同じ見た目で出る', 
 
   // ── 配って、単体で開く(アプリの CSS は届かない)
   const dl = page.waitForEvent('download');
+  // ⚠ #239 でこの操作は設定の中(書き出しと片づけ)へ移った ── 先に開く
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
   await clickReal(page, '[data-pkc-action="export-html"]');
   const file = join(tmpdir(), `pkc3-bodycss-${process.pid}.html`);
   await (await dl).saveAs(file);

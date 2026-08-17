@@ -15,6 +15,11 @@ import { describe, expect, it } from 'vitest';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildShell } from '../src/adapter/ui/render/shell';
+import {
+  COLLECTION_COMMANDS,
+  SETTINGS_COMMANDS,
+  buildSettingsCommands,
+} from '../src/adapter/ui/render/commands';
 import { showUpdateCard } from '../src/adapter/ui/render/update-card';
 import { RENDERABLE_FENCE_LANGS } from '../src/features/markdown/markdown-render';
 import { RELATION_KINDS } from '../src/features/relation/kinds';
@@ -56,6 +61,7 @@ function codeOnly(src: string): string {
 const MANUAL = readFileSync('docs/manual.md', 'utf-8');
 
 const SHELL = readFileSync('src/adapter/ui/render/shell.ts', 'utf-8');
+const COMMANDS = readFileSync('src/adapter/ui/render/commands.ts', 'utf-8');
 const DETAIL = readFileSync('src/adapter/ui/render/detail.ts', 'utf-8');
 const BINDER = readFileSync('src/adapter/ui/actions/binder.ts', 'utf-8');
 const INSPECTOR = readFileSync('src/adapter/ui/render/inspector.ts', 'utf-8');const MIGRATION = readFileSync('docs/migration-from-pkc2.md', 'utf-8');
@@ -100,10 +106,7 @@ const EXPECTED_LABELS = {
   // 探し方は**左の列**が持つ
   'set-browse': ['一覧', 'フォルダ', 'アプリ'],
   'export-archive': ['バックアップ'],
-  'export-html': ['閲覧用 HTML'],
-  'export-markdown': ['Markdown'],
   'import-file': ['取り込む'],
-  'purge-orphan-assets': ['使っていない添付を消す'],
   'attach-file': ['添付'],
 } as const;
 
@@ -260,10 +263,41 @@ describe('マニュアルと実装の突合', () => {
     // 畳むと「どこにあるか探す」手間が増える。⚠ 以前は
     // `取り込む▾ 書き出す▾ 整理▾ 表示▾` と畳んでいた(その形へ戻ったら落とす)
     expect(root.querySelectorAll('details').length, '導線が畳まれている').toBe(0);
-    for (const action of ['import-file', 'export-archive', 'purge-orphan-assets']) {
+    for (const action of COLLECTION_COMMANDS.map((c) => c.action)) {
       const el = root.querySelector(`[data-pkc-action="${action}"]`);
       expect(el, `${action} が見当たらない`).not.toBeNull();
       expect(el?.closest('[hidden]'), `${action} が隠れている`).toBeNull();
+    }
+    // 🔴 **移した先でも畳まれていない**(#239)── user 指示 2026-08-17 で
+    //    低頻度の 3 つは設定へ逃がしたが、それは「畳む」ではない。
+    //    ⚠ ここを見ないと、`SETTINGS_COMMANDS` を空にしても上のループが通るので
+    //    **動線が丸ごと消えても全緑**になる(受け手だけが残るので dead-action 検査も鳴らない)
+    const commands = buildSettingsCommands();
+    expect(commands.querySelectorAll('details').length, '設定側で畳まれている').toBe(0);
+    for (const action of SETTINGS_COMMANDS.map((c) => c.action)) {
+      expect(
+        commands.querySelector(`[data-pkc-action="${action}"]`),
+        `${action} が設定の面にも無い`,
+      ).not.toBeNull();
+    }
+  });
+
+  /**
+   * 🔴 **設定へ逃がした操作の文言**(#239)。
+   *
+   * ⚠ この 3 つは `buildShell` を見る上の突合には**もう掛からない** ──
+   * 改名しても全緑で通り、マニュアルだけが嘘になる(Office 一式の節と同じ形)。
+   * 🔑 **実際に描いたボタン**と突き合わせる(ソースを grep しない)。
+   */
+  it('🔴 設定へ逃がした操作が pin と一致し、マニュアルにも在る', () => {
+    const commands = buildSettingsCommands();
+    const labels = [...commands.querySelectorAll('button')].map(
+      (b) => b.querySelector('[data-pkc-field="label"]')?.textContent ?? b.textContent ?? '',
+    );
+    // ⚠ **等値**で見る(包含だと足したものが素通りする)
+    expect(labels).toEqual(['閲覧用 HTML', 'Markdown', '使っていない添付を消す']);
+    for (const label of labels) {
+      expect(MANUAL, `マニュアルに「${label}」の説明が無い`).toContain(`**${label}**`);
     }
   });
 
@@ -551,11 +585,15 @@ describe('導線の置き場所(P8 段⑱)', () => {
   });
 
   it('🔴 全体の操作は**左の列**にある(実装と突き合わせる)', () => {
-    // shell.ts が持つラベルが、そのままマニュアル §5 / §7 に出ていること
-    for (const label of ['取り込む', 'バックアップ', '閲覧用 HTML', '使っていない添付を消す']) {
-      expect(SHELL, `${label} が実装から消えた`).toContain(`'${label}'`);
+    // ⚠ **置き場は 2 つに分かれた**(#239)── 左の列に残したものと、設定へ
+    //   逃がしたもの。どちらも `commands.ts` の 1 か所が持つので、そこと突き合わせる
+    //   (shell.ts を grep する形のままだと、移した 3 つが**どこにも縛られない**)
+    for (const label of [...COLLECTION_COMMANDS, ...SETTINGS_COMMANDS].map((c) => c.label)) {
+      expect(COMMANDS, `${label} が実装から消えた`).toContain(`'${label}'`);
       expect(MANUAL, `${label} がマニュアルに無い`).toContain(label);
     }
+    // 左の列が持つのは「よく押すもの」だけ ── 器そのものは shell.ts に在る
+    expect(SHELL, '左の列が操作の帯を持たなくなった').toContain('COLLECTION_COMMANDS');
   });
 
   it('🔴 添付の参照を本文へ入れる導線が**実在する**(書ける形式なのに書けない、を作らない)', () => {

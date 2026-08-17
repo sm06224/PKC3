@@ -2603,6 +2603,16 @@ select:focus-visible {
   margin-top: var(--s3);
 }
 
+/* 設定へ逃がした操作の並び(#239、user 指示 2026-08-17)。
+   ⚠ **Office 一式の導線と同じ体裁**にする ── 場所が違うだけで読み方は同じ、
+   という業務画面の作法(すぐ上の規則と揃えてある)。 */
+[data-pkc-field='settings-command-row'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin-top: var(--s3);
+}
+
 [data-pkc-field='settings-note'],
 .settings-note {
   margin: var(--s2) 0 0;

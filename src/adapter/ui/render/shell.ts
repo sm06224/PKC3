@@ -10,6 +10,7 @@
  * 🔑 **3 列**(一覧 / 本文 / 付随情報)。編集に入っても列は動かない。
  */
 import { SEALED_ARCHETYPES, SEALED_VIEWS } from '@features/sealed';
+import { COLLECTION_COMMANDS } from './commands';
 import { BROWSE_ICONS, iconButton, iconSpan } from './icons';
 import { PANES, PANE_LABELS } from '@features/pane-visibility';
 import { BROWSE_TABS } from './browse';
@@ -92,29 +93,6 @@ const CREATE_BUTTONS: readonly { archetype: string; label: string }[] = [
   { archetype: 'todo', label: 'Todo' },
 ] as const;
 
-/**
- * **ノート全体**に対する操作 ── だから**左の列**が持つ(P8 段⑤ の規則)。
- * ⚠ 上の帯には置かない(置いたのが「かぶり」の正体だった)。
- */
-const COLLECTION_COMMANDS: readonly { action: string; label: string; title: string }[] = [
-  {
-    action: 'import-file',
-    label: '取り込む',
-    title: 'PKC2 の書き出し(HTML / ZIP)/ PKC3 のバックアップ(.pkc3.zip)/ Markdown を取り込みます',
-  },
-  { action: 'export-archive', label: 'バックアップ', title: '元に戻せる形で保存します' },
-  { action: 'export-html', label: '閲覧用 HTML', title: '読むだけの 1 枚にまとめます' },
-  {
-    action: 'export-markdown',
-    label: 'Markdown',
-    title: 'Markdown ファイルとして保存します',
-  },
-  {
-    action: 'purge-orphan-assets',
-    label: '使っていない添付を消す',
-    title: 'どのノートからも参照されていない添付を削除します(元に戻せません)',
-  },
-] as const;
 
 export function buildShell(root: HTMLElement): ShellRegions {
   root.textContent = '';
