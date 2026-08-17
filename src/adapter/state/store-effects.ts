@@ -124,6 +124,31 @@ export interface StorePort {
   purgeTrash(): Promise<{ purged: number }>;
 }
 
+/**
+ * 購読を解く関数。**`settled()` を生やしてある**(呼び側は今までどおり
+ * `dispose()` として呼べる)。
+ */
+export interface StoreEffects {
+  (): void;
+  /**
+   * 🔴 **飛んでいる書込が着地するまで待つ**(2026-08-17 に実測して判明)。
+   *
+   * 書込はこの層の 1 本の chain に**直列化**されるが、**読みはその外**にある ──
+   * `getBody` を直に呼ぶ経路(書き出し)は、chain に並んでいる書込を**追い越す**。
+   * 実測(`vite preview` + 実ブラウザ、保存の直後に Word を押す):
+   * **11/12 で保存前の本文**が出た(800ms 待つ対照群は 0/12)。
+   * 順番はこうだった ── `upsertEntry`(改名)→ **`getBody`(書き出し)** →
+   * `upsertEntry`(本文)。改名の書込が 67ms かかる間に読みが割り込んでいる。
+   *
+   * ⚠ **待つのは「いま並んでいる分」まで**。待っている間に積まれた仕事も
+   * 拾うが、上限を置く ── 書き続ける相手(自動保存)で永久に待たない。
+   */
+  settled(): Promise<void>;
+}
+
+/** `settled()` が待つ最大の巡回数(積まれ続ける相手で永久に待たないための上限)。 */
+const SETTLE_ROUNDS_MAX = 20;
+
 export function connectStoreEffects(
   dispatcher: Dispatcher,
   store: StorePort,
@@ -135,7 +160,7 @@ export function connectStoreEffects(
      */
     officeInstalled?: () => boolean;
   } = {},
-): () => void {
+): StoreEffects {
   let queue: Promise<void> = Promise.resolve();
   let disposed = false;
   const officeInstalled = opts.officeInstalled ?? ((): boolean => false);
@@ -977,8 +1002,21 @@ export function connectStoreEffects(
     }
   });
 
-  return () => {
+  const dispose: StoreEffects = (): void => {
     disposed = true;
     unsubscribe();
   };
+  /**
+   * ⚠ **その場の tail を掴んでから待つ** ── `queue` は `enqueue` が差し替える
+   * 変数なので、待った後にもう一度見て「増えていない」ことまで確かめる。
+   * ⚠ chain は `then(op, op)` で失敗しても続くので、ここで reject は起きない。
+   */
+  dispose.settled = async (): Promise<void> => {
+    for (let round = 0; round < SETTLE_ROUNDS_MAX; round += 1) {
+      const tail = queue;
+      await tail;
+      if (queue === tail) return;
+    }
+  };
+  return dispose;
 }

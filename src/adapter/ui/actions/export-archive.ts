@@ -35,6 +35,20 @@ export interface ExportDeps {
    * (書かされること自体が「注意を捨てている」の明示になる)
    */
   report(notes: readonly string[]): void;
+  /**
+   * 🔴 **飛んでいる書込を着地させてから読む**(2026-08-17 に実測で判明)。
+   *
+   * 書込は effect 層の 1 本の chain に直列化されるが、**書き出しの読みはその外**に
+   * ある ── `getBody` は並んでいる書込を**追い越す**。実測(実ブラウザ、保存の
+   * 直後に Word を押す)では **11/12 が保存前の本文**を書き出した。
+   * 実体は `connectStoreEffects` が返す `settled()`。
+   *
+   * ⚠ **optional にしない**(`report` と同じ理由 ── review M1)。配線が落ちても
+   * typecheck が黙ると、user から見える症状は「保存したのに古い本文が出る」
+   * という**いちばん気づけない形**で戻ってくる。待つものが無い呼び側は
+   * `async () => {}` を書く(書かされること自体が「待たない」の明示になる)。
+   */
+  settle(): Promise<void>;
   now?(): Date;
   /**
    * 本文 1 件を HTML にする(閲覧用 HTML だけが使う。P8 段⑲)。
@@ -86,6 +100,8 @@ export async function exportEntry(
     return null;
   }
   try {
+    // 🔴 直前の保存が disk に着いてから読む(読みは書込の chain の外に居る)
+    await deps.settle();
     const { source, warnings } = await singleEntrySource(deps.source, lid);
     const n = await exportArchive(dispatcher, { ...deps, source }, 'archive', warnings);
     return n;
@@ -125,6 +141,8 @@ export async function exportArchive(
   };
   deps.notify?.(STARTING[kind]);
   try {
+    // 🔴 直前の保存が disk に着いてから読む(読みは書込の chain の外に居る)
+    await deps.settle();
     const now = deps.now?.() ?? new Date();
     const base = `${safeName(deps.source.title)}-${stamp(now)}`;
     const iso = now.toISOString();
@@ -214,6 +232,12 @@ export async function exportEntryDocx(
     return fail('本文を組み立てられませんでした(描画の口が渡っていません)');
   deps.notify?.('Word で書き出しています…');
   try {
+    /**
+     * 🔴 **直前の保存が disk に着いてから読む**(2026-08-17 実測)。
+     * ⚠ `phase === 'ready'` は「編集を終えた」しか言っていない ── 本文の書込は
+     * その後ろで飛んでいて、ここの `getBody` は**それを追い越す**。
+     */
+    await deps.settle();
     // ⚠ 1 件だけの読み口(P6f)。⚠ 省略可なので**在ることを確かめてから**呼ぶ
     if (!deps.source.getBody) return fail('本文の読み口が渡っていません');
     const body = await deps.source.getBody(lid);
@@ -223,19 +247,89 @@ export async function exportEntryDocx(
     const html = await deps.renderBody(body);
     // ⚠ `<body>` で包む ── 包まないと happy-dom / 実ブラウザで木の形が揃わない
     const doc = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html');
-    const { blocks } = htmlToDocxBlocks(doc);
+    const { blocks, images } = htmlToDocxBlocks(doc);
+    /**
+     * 🔴 **添付の画像を入れる**(#187 段②)。
+     * ⚠ **縦横比を保つ**ため、実寸を取ってから渡す(PKC2 は全画像を 480×360 px に
+     *   潰していた)。⚠ 取れなかったものは `skipped` のまま残す ── **黙って
+     *   落とさない**(本文にその場所と理由が出る)。
+     * ⚠ bytes は **Blob のまま** zip へ渡す(heap に載せない ── 不可侵指示 2026-07-27)。
+     */
+    const media: { name: string; blob: Blob }[] = [];
+    for (const [i, img] of images.entries()) {
+      const blob = await deps.source.getAssetBlob(img.assetKey).catch(() => null);
+      if (!blob) continue;
+      const type = blob.type || 'image/png';
+      // ⚠ Word が素で読める形だけ入れる(読めない形を入れると file ごと開けない)
+      const ext = /jpe?g/.test(type)
+        ? 'jpeg'
+        : type.includes('gif')
+          ? 'gif'
+          : type.includes('webp')
+            ? 'webp'
+            : type.includes('png')
+              ? 'png'
+              : null;
+      if (ext === null) {
+        blocks[img.at] = {
+          kind: 'skipped',
+          what: `画像「${img.alt}」`,
+          why: `この形式は Word に入れられません(${type})`,
+        };
+        continue;
+      }
+      const size = await imageSizeOf(blob);
+      if (size === null) {
+        blocks[img.at] = {
+          kind: 'skipped',
+          what: `画像「${img.alt}」`,
+          why: '大きさを読めませんでした',
+        };
+        continue;
+      }
+      const name = `media/image${i + 1}.${ext}`;
+      blocks[img.at] = {
+        kind: 'image',
+        media: name,
+        widthPx: size.w,
+        heightPx: size.h,
+        alt: img.alt,
+      };
+      media.push({ name: `word/${name}`, blob });
+    }
     const now = deps.now?.() ?? new Date();
     const built = buildDocx(blocks, title, now.toISOString());
     const zip = new ZipWriter();
     for (const part of built.parts) await zip.add(part.name, [part.text]);
+    for (const m of media) await zip.add(m.name, [m.blob]);
     deps.download(`${safeName(title)}-${stamp(now)}.docx`, zip.finish());
     // 🔴 **落としたものは件数で言う**(#213 の裁定 A と同じ向き)
     deps.report(built.warnings);
     // ⚠ 「書き出しました」は `notify`(一時の知らせ)で言う ── state の action に
     //    書き出し用の型は無い(増やさない)
-    deps.notify?.(`Word で書き出しました(${built.counts.blocks} 塊)`);
+    deps.notify?.(
+      `Word で書き出しました(${built.counts.blocks} 塊 / 画像 ${built.counts.images} 枚)`,
+    );
     return true;
   } catch (e) {
     return fail(`Word の書き出しに失敗しました: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+/**
+ * 画像の**実寸**(px)。⚠ 取れなければ `null` ── 呼び側は**入れずに理由を残す**。
+ *
+ * 🔑 `createImageBitmap` を使う(`<img>` を作らない)── DOM に足さずに読め、
+ * **すぐ `close()` して返せる**(不可侵指示 2026-07-27「生成物のライフサイクル
+ * 終端で速やかに破棄」)。
+ */
+async function imageSizeOf(blob: Blob): Promise<{ w: number; h: number } | null> {
+  try {
+    const bmp = await createImageBitmap(blob);
+    const size = { w: bmp.width, h: bmp.height };
+    bmp.close();
+    return size.w > 0 && size.h > 0 ? size : null;
+  } catch {
+    return null;
   }
 }

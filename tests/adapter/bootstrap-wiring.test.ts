@@ -224,3 +224,31 @@ describe('配布元との版ちがいの配線', () => {
     expect(tail, '知らせの出口が status につながっていない').toContain('showStatus');
   });
 });
+
+/**
+ * 🔴 **書き出しの前に、飛んでいる書込を着地させる配線**(2026-08-17 実測)。
+ *
+ * `ExportDeps.settle` は必須なので「渡し忘れ」は tsc が止めるが、
+ * **`async () => {}` を渡す**(= 待たない)ことは止められない ── そこだけを見る。
+ * ⚠ 実体の振る舞いは `store-settle.test.ts` と `export-entry-guard.test.ts` が持つ。
+ */
+describe('書き出しの settle の配線', () => {
+  /** 書き出しの deps リテラルだけを切り出す(他所の一致に救われないように)。 */
+  function exportDeps(): string {
+    const at = MAIN.indexOf('const deps: ExportDeps = {');
+    expect(at, 'ExportDeps の組み立てが無い').toBeGreaterThan(-1);
+    const end = MAIN.indexOf('await exportEntryDocx(', at);
+    expect(end, 'deps を使う所が無い').toBeGreaterThan(at);
+    return MAIN.slice(at, end);
+  }
+
+  it('🔴 effect 層の settled() を待つ(空の関数を渡していない)', () => {
+    expect(exportDeps(), 'settle が effect 層に繋がっていない').toContain(
+      'await storeEffects?.settled()',
+    );
+  });
+
+  it('🔴 その settled() の出所は connectStoreEffects である', () => {
+    expect(MAIN).toContain('storeEffects = connectStoreEffects(');
+  });
+});

@@ -4,7 +4,7 @@ import './styles/app.css';
 
 import { Dispatcher } from '@adapter/state/dispatcher';
 import { bindEditLockRelease } from '@adapter/state/edit-lock-release';
-import { connectStoreEffects } from '@adapter/state/store-effects';
+import { connectStoreEffects, type StoreEffects } from '@adapter/state/store-effects';
 import { tileSelectsEntry } from '@features/launcher/tiles';
 import { appEditorMode } from '@adapter/ui/render/editor-mode';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
@@ -579,6 +579,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   // 🔒 attach / import と purge の排他 gate(review F1)。実体と pin は asset-gate.ts
   const withAssetGate = createAssetGate(dispatcher);
   /**
+   * 🔴 **書き出しは、飛んでいる書込が着地してから読む**(2026-08-17 実測)。
+   *
+   * effect 層の配線はこの下(描画の配線の後)なので、**参照だけ先に置く** ──
+   * 購読の順番は動かさない。⚠ `null` で居るのは boot が終わるまでの間だけで、
+   * 書き出しの導線はその間まだ画面に無い。
+   */
+  let storeEffects: StoreEffects | null = null;
+  /**
    * 書出しの実行(P6d)。⚠ **asset gate の内側** ── 書出し中に添付が掃除されると
    * 「meta はあるが bytes が無い」を掴んで欠けた書出しができる。
    * 形式が増えても読み出し口は 1 つ(source)で共有する。
@@ -621,6 +629,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         // 見るのは「⚠ 注意 1 件」だけで、**どの添付が欠けたか**が消える ──
         // バックアップで一番知りたい情報がそこにある
         report: (notes) => showNotices(regions.notices, '書出し時の注意', notes),
+        /**
+         * 🔴 **保存の直後に押されても、保存した本文を書き出す**(2026-08-17 実測)。
+         * 書込は effect 層の chain に直列化されるが、**読みはその外**なので、
+         * 待たないと `getBody` が並んでいる書込を追い越す(実測 11/12 で古い本文)。
+         */
+        settle: async () => {
+          await storeEffects?.settled();
+        },
         // 🔑 閲覧用 HTML の本文描画は**ワーカーへ**(P8 段⑲)。渡さないと
         //    件数ぶんメインスレッドで描くことになる
         // ⚠ opts を素通しする(vars / 見出し番号 ── user 報告 2-7)
@@ -1418,7 +1434,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     const lid = dispatcher.getState().selectedLid;
     if (lid) center.noteBlockedBox(lid, blocked);
   });
-  connectStoreEffects(dispatcher, createStorePort(client, DEFAULT_CID), {
+  storeEffects = connectStoreEffects(dispatcher, createStorePort(client, DEFAULT_CID), {
     // #148 組み込みタイル ── 一式が入っている端末にだけ Office のタイルを出す。
     // 控えは起動時と設置/削除の直後に setMeta で合っている(officeOpener と同じ値)
     officeInstalled: () => appOfficePack.isInstalled(),

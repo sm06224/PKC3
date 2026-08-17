@@ -10,10 +10,12 @@
  * 写す規則そのものは `features/export/docx.ts` の純関数側に在る ── この file の
  * 仕事は「HTML の木を、平らな塊の列へ畳む」だけに閉じる。
  *
- * ## 段① で写さないもの(黙って落とさない)
+ * ## 写すもの・写さないもの(黙って落とさない)
  *
- * - **画像**(添付 / 図の PNG)は段② ── `skipped` として**その場に理由を出す**
- * - `<iframe>`(html fence の箱)/ `<svg>` も同じ扱い
+ * - **添付の画像**は写す(段②)── ただし bytes と実寸は adapter の上位が解くので、
+ *   ここでは**場所を預ける**だけ(`images`)。解けなければ `skipped` のまま出る
+ * - **添付でない画像**(外から読むもの)/ `<svg>`(図)/ `<iframe>`(html fence の箱)/
+ *   `<canvas>` は写さない ── `skipped` として**その場に理由を出す**
  * ⚠ PKC2 は失敗を `console.warn` にしか書かず、user から見ると
  *   「ボタンを押して何も起きない」が正常動作だった。
  */
@@ -68,9 +70,10 @@ function skippedName(el: Element): { what: string; why: string } | null {
   const tag = el.tagName.toLowerCase();
   if (tag === 'img') {
     const alt = el.getAttribute('alt') ?? '';
+    // ⚠ **添付の画像は別扱い**(#187 段②)── ここへ来るのは添付でない画像だけ
     return {
       what: alt !== '' ? `画像「${alt}」` : '画像',
-      why: 'この版では画像を Word に入れていません',
+      why: '添付ではない画像は Word に入れていません',
     };
   }
   if (tag === 'svg') return { what: '図(ベクタ)', why: 'この版では図を Word に入れていません' };
@@ -88,8 +91,16 @@ function skippedName(el: Element): { what: string; why: string } | null {
 export function htmlToDocxBlocks(doc: Document): {
   blocks: DocxBlock[];
   skipped: number;
+  /**
+   * 🔴 **添付の画像の預かり**(#187 段②)。ここでは **bytes も実寸も解けない**
+   * (store と `createImageBitmap` は adapter の上位が持つ)ので、**場所だけ**返す。
+   * 呼び側が解いて `blocks[at]` を `image` か `skipped` に**差し替える**。
+   * ⚠ 差し替えを忘れると `skipped` のまま出る = **黙って落ちない**(安全側)。
+   */
+  images: { at: number; assetKey: string; alt: string }[];
 } {
   const blocks: DocxBlock[] = [];
+  const images: { at: number; assetKey: string; alt: string }[] = [];
   let skipped = 0;
 
   /** 要素の中の文字を走りへ(木を辿って装飾を受け継ぐ)。 */
@@ -103,6 +114,19 @@ export function htmlToDocxBlocks(doc: Document): {
       if (child.nodeType !== 1) continue;
       const el = child as Element;
       const tag = el.tagName.toLowerCase();
+      const assetKey = el.tagName.toLowerCase() === 'img' ? el.getAttribute('data-pkc-asset-key') : null;
+      if (assetKey !== null && assetKey !== '') {
+        /**
+         * 🔑 **添付の画像は段落の外へ出す**(#187 段②)。Word の画像は走りに
+         * 入れられるが、本文と混ぜると行の高さが暴れる ── 1 枚 1 段落にする。
+         * ⚠ ここでは**場所を予約するだけ** ── bytes と実寸は呼び側が解く
+         * (解けなければ `skipped` のまま出るので、黙って消えない)。
+         */
+        const alt = el.getAttribute('alt') || el.getAttribute('data-pkc-asset-name') || '画像';
+        images.push({ at: blocks.length, assetKey, alt });
+        blocks.push({ kind: 'skipped', what: `画像「${alt}」`, why: '取り出せませんでした' });
+        continue;
+      }
       const gone = skippedName(el);
       if (gone !== null) {
         skipped += 1;
@@ -207,6 +231,13 @@ export function htmlToDocxBlocks(doc: Document): {
         if (rows.length > 0) blocks.push({ kind: 'table', rows });
         continue;
       }
+      const bkey = tag === 'img' ? el.getAttribute('data-pkc-asset-key') : null;
+      if (bkey !== null && bkey !== '') {
+        const alt = el.getAttribute('alt') || el.getAttribute('data-pkc-asset-name') || '画像';
+        images.push({ at: blocks.length, assetKey: bkey, alt });
+        blocks.push({ kind: 'skipped', what: `画像「${alt}」`, why: '取り出せませんでした' });
+        continue;
+      }
       const gone = skippedName(el);
       if (gone !== null) {
         skipped += 1;
@@ -225,5 +256,5 @@ export function htmlToDocxBlocks(doc: Document): {
   };
 
   walkBlocks(doc.body);
-  return { blocks, skipped };
+  return { blocks, skipped, images };
 }
