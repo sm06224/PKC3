@@ -1675,6 +1675,16 @@ export interface RenderMarkdownOptions {
    */
   readonly headingNumber?: { start: number } | null;
   /**
+   * 🔴 **何向けに描くか**(#187 段⑤)。`:::if{format=X}` の X と突き合わせる。
+   *
+   * ⚠ 既定は `'html'`(画面・印刷・閲覧用 HTML)── いままでと同じ。
+   * 🔑 Word の書き出しが `'docx'` を渡すことで、**`:::if{format=docx}` が初めて
+   * 生きる** ── それまでこの記法は「受理はするが**永久に不可視**」だった
+   * (user 不可侵指示「記法を減らすことは user の動線を減らすこと」の逆向き:
+   * 出口ができたので、落ちていた動線が戻る)。
+   */
+  readonly format?: string;
+  /**
    * 🔴 **行の対応表をここへ集める**(2026-08-05。ライブエディタ S2)。
    *
    * 渡すと `SOURCE_LINE_TOKEN_TYPES` の token ぶんの `SourceRange` が
@@ -4482,7 +4492,7 @@ export function renderMarkdown(
   // reform-2026-05 PR-F:`:::if{format=X}` conditional block(format mismatch
   // 時に content を strip、line count は空行で維持。directive-aware nested 対応)。
   // figure / quote 等の他 directive より先に走らせる(:::if が outermost wrapper)。
-  const ifResult = processIfBlocks(text, lineMap, 'html');
+  const ifResult = processIfBlocks(text, lineMap, opts.format ?? 'html');
   text = ifResult.transformed;
   lineMap = ifResult.lineMap;
   /**

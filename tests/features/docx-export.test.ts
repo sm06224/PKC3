@@ -42,6 +42,7 @@ describe('docx の骨(package)', () => {
         'docProps/core.xml',
         'word/_rels/document.xml.rels',
         'word/document.xml',
+        'word/footer1.xml',
         'word/numbering.xml',
         'word/styles.xml',
       ].sort(),
@@ -444,5 +445,64 @@ describe('本物のレンダラの出力から写す', () => {
   it('⚠ ふつうの本文はそのまま通る(空振り防止 ── 全部落としていない)', () => {
     const { blocks } = fromMarkdown('# 題\n\n本文\n\n- あ\n- い\n');
     expect(blocks.map((b) => b.kind)).toEqual(['h', 'p', 'li', 'li']);
+  });
+});
+
+/**
+ * 🔴 **紙面・改頁・ページ番号**(#187 段③)。
+ *
+ * ⚠ 段② までは「A4 縦の既定」を焼き込んでいたので、**画面が A3 横でも Word だけ A4 縦**
+ * だった。⚠ 改頁(`+++`)は `hr` と同じ塊に畳んでいたため、**Word でだけ水平線**になっていた
+ * (画面と紙では `break-after: page` が効いている)。
+ */
+describe('紙面と改頁(#187 段③)', () => {
+  const sect = (fmt?: Parameters<typeof buildDocx>[3]): string => {
+    const xml = part(buildDocx([], 't', ISO, fmt), 'word/document.xml');
+    const at = xml.indexOf('<w:sectPr>');
+    expect(at, 'sectPr が無い').toBeGreaterThan(-1);
+    return xml.slice(at);
+  };
+
+  it('🔴 画面の紙面設定が Word の紙になる(A3 横)', () => {
+    expect(sect('a3-landscape')).toContain('<w:pgSz w:w="23811" w:h="16838" w:orient="landscape"/>');
+  });
+
+  it('🔴 A4 縦は今までどおり(既定を変えていない)', () => {
+    expect(sect()).toContain('<w:pgSz w:w="11906" w:h="16838"/>');
+    expect(sect('a4-portrait')).toContain('<w:pgSz w:w="11906" w:h="16838"/>');
+  });
+
+  it('⚠ 紙を持たない形式(画面向け)は A4 縦に落ちる', () => {
+    // フル HD / 4:3 は `paper: null`(印刷はブラウザの既定紙)── Word には
+    // 「既定紙」が無いので、印刷と同じ既定へ倒す
+    expect(sect('fullhd')).toContain('<w:pgSz w:w="11906" w:h="16838"/>');
+    expect(sect('43-portrait')).toContain('<w:pgSz w:w="11906" w:h="16838"/>');
+  });
+
+  it('🔴 改頁は改頁として入る(水平線に化けない)', () => {
+    const xml = part(buildDocx([{ kind: 'pagebreak' }], 't', ISO), 'word/document.xml');
+    expect(xml, '改頁が入っていない').toContain('<w:br w:type="page"/>');
+    expect(xml, '改頁が水平線になっている').not.toContain('<w:pBdr>');
+  });
+
+  it('🔴 水平線は水平線のまま(改頁と取り違えない)', () => {
+    const xml = part(buildDocx([{ kind: 'hr' }], 't', ISO), 'word/document.xml');
+    expect(xml).toContain('<w:pBdr>');
+    expect(xml).not.toContain('<w:br w:type="page"/>');
+  });
+
+  it('🔴 ページ番号の footer が「実在して・宣言されて・指されて」いる', () => {
+    const res = buildDocx([], 't', ISO);
+    const footer = part(res, 'word/footer1.xml');
+    // ① 数字を焼かず field で入れる(1 行足したら嘘になる形にしない)
+    expect(footer, 'PAGE の field が無い').toContain('PAGE');
+    // ② Content_Types の宣言(欠けると Word はファイルごと開かない)
+    expect(part(res, '[Content_Types].xml')).toContain('/word/footer1.xml');
+    // ③ rels の実在と、④ sectPr がその id を指していること
+    const id = /<Relationship Id="([^"]+)"[^>]*relationships\/footer"/.exec(
+      part(res, 'word/_rels/document.xml.rels'),
+    )?.[1];
+    expect(id, 'footer の rel が無い').toBeDefined();
+    expect(part(res, 'word/document.xml')).toContain(`<w:footerReference w:type="default" r:id="${id!}"/>`);
   });
 });
