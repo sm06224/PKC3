@@ -16,6 +16,7 @@ import {
 import type { ArchiveSource } from '../../src/features/export/pkc3-archive';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { DOCUMENT_GLOBAL_ATTRS } from '../../src/features/markdown/document-globals';
+import { WARN_CAP } from '../../src/features/export/warn-cap';
 import { readFileSync } from 'node:fs';
 import { extractBodyCss } from '../../build/body-css';
 
@@ -256,6 +257,63 @@ describe('可搬 HTML', () => {
     const out = await writePortableHtml(withMissing, NOW);
     expect(out.warnings).toEqual(['添付の中身が見つかりませんでした: gone']);
     expect(out.counts.assets).toBe(0);
+  });
+
+  /**
+   * 🔴 **注意は同種 10 件で畳む**(#202)。
+   *
+   * ⚠ 直す前はここだけ素の `push` で、**バックアップと Markdown ZIP には効いている
+   * 規則が閲覧用 HTML にだけ無かった** ── 1 件につき 1 行積む所が 2 つあるので、
+   * 該当が多い文書では注意が件数ぶん出る(`warn-cap.ts` 冒頭が「200 行の注意で
+   * 3 列が数十 px に潰れた」事故を記録している)。
+   * 🔑 **畳んだ件数が出ることまで**見る ── `finish()` の呼び忘れは
+   * 「10 件までは出るが、超えたことは誰も知らない」になる。
+   */
+  it('🔴 中身の無い添付が多くても、注意は 10 件 + 件数に畳む', async () => {
+    const n = WARN_CAP + 7;
+    const keys = Array.from({ length: n }, (_, i) => `gone${i}`);
+    const src = source({
+      entries: [{ lid: 'n1', body: keys.map((k) => `![](asset:${k})`).join('\n\n') }],
+    });
+    const withMissing: ArchiveSource = {
+      ...src,
+      listAssetMetas: async () =>
+        keys.map((key) => ({ key, mime: 'image/png', size: 1, hash: null })),
+      getAssetBlob: async () => null,
+    };
+    const out = await writePortableHtml(withMissing, NOW);
+    const lines = out.warnings.filter((w) => w.startsWith('添付の中身が見つかりませんでした'));
+    expect(lines, '10 件で畳んでいない').toHaveLength(WARN_CAP);
+    expect(out.warnings.at(-1), '畳んだ件数を言っていない').toBe(
+      `中身の見つからない添付はほか ${n - WARN_CAP} 件あります`,
+    );
+  });
+
+  it('🔴 一覧に無い entry の注意も同じ規則で畳む(経路ごとに乗せ忘れない)', async () => {
+    const n = WARN_CAP + 3;
+    const src = source({ entries: [{ lid: 'n1', body: 'a' }] });
+    let done = false;
+    const orphans: ArchiveSource = {
+      ...src,
+      // ⚠ **一覧に出ない lid の本文**を返す(= 飛ばされる側)
+      listBodies: async () => {
+        if (done) return { rows: [], done: true };
+        done = true;
+        return {
+          // ⚠ **1 件だけ一覧に在る lid を混ぜる** ── 全部 ghost だと
+          //    「書き出せる entry が 0 件」で先に断られ、注意まで到達しない
+          rows: [
+            { lid: 'n1', body: 'a' },
+            ...Array.from({ length: n }, (_, i) => ({ lid: `ghost${i}`, body: 'x' })),
+          ],
+          done: true,
+        };
+      },
+    };
+    const out = await writePortableHtml(orphans, NOW);
+    const lines = out.warnings.filter((w) => w.startsWith('本文はあるが一覧に無い'));
+    expect(lines, '10 件で畳んでいない').toHaveLength(WARN_CAP);
+    expect(out.warnings.at(-1)).toBe(`一覧に無い entry の注意はほか ${n - WARN_CAP} 件あります`);
   });
 
   it('🔴 前進しないカーソルで無限に回らない', async () => {
