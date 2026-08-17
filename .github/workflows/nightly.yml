@@ -1,5 +1,14 @@
 # PKC3 nightly — 重い検証の受け皿(CLAUDE.md プロセス指示: PR gate は速い lane
 # 限定、視覚全量・ベンチ・大規模 probe はここへ)。schedule + 手動 dispatch。
+#
+# 🔴 **1 つ落ちても、後ろを止めない**(#221、2026-08-17)。
+#
+# 直すまでは step の既定(前が落ちたら以降 skip)のままだったので、
+# **sidebar probe が落ちた 13 晩、editor と kanban の probe は 1 度も走っていなかった**
+# ── 赤の意味が「サイドバーが壊れた」なのか「夜の検査が止まった」なのか名前で
+# 言えない状態で、CLAUDE.md「回すものの粒度: 1 job = 1 主張」に真正面から反していた。
+# 🔑 検証の step には `if: ${{ !cancelled() }}` を付け、**全部走らせてから**まとめて
+# 赤にする。落ちた step の名前は最後の step が台帳(issue)へ出す。
 name: Nightly
 on:
   schedule:
@@ -7,19 +16,31 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  # 赤い夜を issue に出す(下の「台帳へ出す」step。#221 の 3 つ目 ──
+  # 「夜が赤いまま放置される導線」を直すのが目的で、書くのは issue 1 本だけ)
+  issues: write
 jobs:
   heavy:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      # 🔑 **全 step に id を付ける**(2026-08-17 のレビュー 🔴-1)。
+      #   `steps` context に入るのは **id を宣言した step だけ**なので、id が無い step の
+      #   失敗・skip は最後の「台帳へ出す」step から**見えない** ── 仕込みが落ちた晩に
+      #   「✅ 緑に戻りました」と誤報して issue を閉じうる。
       - uses: actions/checkout@v7
+        id: checkout
       - uses: actions/setup-node@v7
+        id: node
         with:
           node-version: 24
           cache: npm
       - run: npm ci
+        id: npm_ci
       - run: npm run build
+        id: build
       - run: npx playwright install chromium --with-deps
+        id: pw_install
       # 🔴 **probe 用の path を `$GITHUB_ENV` へ書かない**(2026-08-07)。
       #
       # 直す前はここで `PKC3_CHROMIUM` を `$GITHUB_ENV` へ書いていた ── これは
@@ -32,15 +53,39 @@ jobs:
       # 検査していたことになる。
       # ⚠ probe(`tests/probe/run-*.mjs`)は GitHub runner に `/opt/pw-browsers` が
       #   無いので path を要る。だから **probe の step にだけ** `env:` で渡す。
+      # 🔴 **`echo "$(…)"` は「取れなかった」を食べる**(2026-08-17 のレビュー ⚠-5。
+      #   CLAUDE.md §6 の顔違い)── 直す前は `node` が死んでも `echo` の終了コードが
+      #   勝つので step は緑で、`path=` が空のまま probe へ渡っていた。probe 側は
+      #   `?? 既定` なので**空文字は素通りする** = 「どのブラウザで測ったか分からない回」
+      #   が緑になる(nightly の存在理由そのものを静かに壊す向き)。
       - name: Resolve chromium path for probes
         id: pw
-        run: echo "path=$(node -e "const {chromium}=require('@playwright/test'); console.log(chromium.executablePath())")" >> "$GITHUB_OUTPUT"
+        run: |
+          P=$(node -e "const {chromium}=require('@playwright/test'); console.log(chromium.executablePath())")
+          if [ -z "$P" ]; then
+            echo "::error::chromium の path が取れない ── probe がどのブラウザで走るか決まらない"
+            exit 1
+          fi
+          echo "path=$P" >> "$GITHUB_OUTPUT"
+      # 🔴 **仕込みと検証の間では止める**(同レビュー ⚠-4)。
+      #   検証 step は `!cancelled()` を持つので、仕込みが落ちた晩でも**全部走って
+      #   全部落ちる** ── 11 個の赤が並び、**本当の原因(npm ci)が名前で出ない**。
+      # 🔑 この step は guard を持たない = 手前が落ちれば **skip** される。だから
+      #   `outputs.ok` が空になり、下の検証 step は 1 つも走らない(原因だけが赤くなる)。
+      #   ⚠ 台帳側は `skipped` も赤に数えるので、「走らなかった」ことは記録に残る。
+      - name: 仕込みが揃った
+        id: setup_ok
+        run: echo "ok=1" >> "$GITHUB_OUTPUT"
       # 🔴 **smoke は 2 つのブラウザ両方で回す**(CLAUDE.md「実ブラウザ依存の spec は
       # 両方で通してから push する」)。PR gate は速さのため headless_shell 片方だけ
       # なので、**両方を突き合わせる場所は nightly しかない**。
       - name: Visual smoke (headless_shell ── PR gate と同じ)
+        id: smoke_headless_shell
+        if: ${{ !cancelled() && steps.setup_ok.outputs.ok == '1' }}
         run: npm run test:smoke
       - name: Visual smoke (フル chromium ── 実挙動が違う箇所を突き合わせる)
+        id: smoke_chromium
+        if: ${{ !cancelled() && steps.setup_ok.outputs.ok == '1' }}
         env:
           PKC3_CHROMIUM: ${{ steps.pw.outputs.path }}
         run: npm run test:smoke
@@ -50,6 +95,8 @@ jobs:
       # nightly で**ビルド → 検品 → smoke** まで通す。PR gate には足さない
       # (CI を長くしない・user 指示 2026-07-30)
       - name: Product ビルド ── 検品 + smoke(PR gate が触らない成果物)
+        id: product_build
+        if: ${{ !cancelled() && steps.setup_ok.outputs.ok == '1' }}
         run: |
           VITE_PKC_KIND=product npm run build
           node scripts/check-dist.mjs product
@@ -58,6 +105,8 @@ jobs:
       # (PR gate では cargo を走らせない ── 再ビルド漏れをここで捕まえる。
       #  rust-toolchain.toml が rustc を pin しているのでバイト一致が期待値)
       - name: Rust wasm — 再ビルドして出荷物と一致するか
+        id: rust_rebuild
+        if: ${{ !cancelled() && steps.setup_ok.outputs.ok == '1' }}
         run: |
           BEFORE=$(sha256sum src/adapter/platform/wasm/pkc_core.wasm | cut -d' ' -f1)
           ./scripts/build-wasm.sh
@@ -68,8 +117,12 @@ jobs:
             exit 1
           fi
       - name: Rust wasm — TS との等価性(再ビルド後の成果物で)
+        id: rust_parity
+        if: ${{ !cancelled() && steps.setup_ok.outputs.ok == '1' }}
         run: npx vitest run tests/adapter/wasm-parity.test.ts
       - name: Start vite dev server (probe pages)
+        id: vite_server
+        if: ${{ !cancelled() && steps.setup_ok.outputs.ok == '1' }}
         run: |
           npx vite --port 45731 > /tmp/vite.log 2>&1 &
           for i in $(seq 1 30); do
@@ -79,24 +132,79 @@ jobs:
           # 起動失敗をここで fail-fast(loop は timeout しても exit 0 のため)
           curl -sf http://localhost:45731/ > /dev/null
       - name: Probe — store (sqlite ops / orphan cascade)
+        id: probe_store
+        if: ${{ !cancelled() && steps.setup_ok.outputs.ok == '1' }}
         env:
           PKC3_CHROMIUM: ${{ steps.pw.outputs.path }}
         run: node tests/probe/run-sahpool-probe.mjs http://localhost:45731/tests/probe/store-probe.html
       - name: Probe — sahpool (VFS / journal)
+        id: probe_sahpool
+        if: ${{ !cancelled() && steps.setup_ok.outputs.ok == '1' }}
         env:
           PKC3_CHROMIUM: ${{ steps.pw.outputs.path }}
         run: node tests/probe/run-sahpool-probe.mjs http://localhost:45731/tests/probe/sahpool-probe.html
       - name: Probe — sidebar (15k 行の DOM 同一性)
+        id: probe_sidebar
+        if: ${{ !cancelled() && steps.setup_ok.outputs.ok == '1' }}
         env:
           PKC3_CHROMIUM: ${{ steps.pw.outputs.path }}
         run: node tests/probe/run-sidebar-probe.mjs
-      - name: Probe — editor (打鍵 / 対照群)
+      # 🔴 編集の面は **2 つある**(#172 で既定が live になった)。腕ごとに
+      #   主張が違う(live は打鍵で state へ届かないのが設計値)ので step を割る
+      #   ── CLAUDE.md「1 job = 1 主張」の step 版。
+      - name: Probe — editor / live (既定の面。打鍵は state へ届かない)
+        id: probe_editor_live
+        if: ${{ !cancelled() && steps.setup_ok.outputs.ok == '1' }}
         env:
           PKC3_CHROMIUM: ${{ steps.pw.outputs.path }}
-        run: node tests/probe/run-editor-probe.mjs
+        run: node tests/probe/run-editor-probe.mjs --arm=live
+      - name: Probe — editor / split (設定で選べる面。1 打鍵 = 1 dispatch)
+        id: probe_editor_split
+        if: ${{ !cancelled() && steps.setup_ok.outputs.ok == '1' }}
+        env:
+          PKC3_CHROMIUM: ${{ steps.pw.outputs.path }}
+        run: node tests/probe/run-editor-probe.mjs --arm=split
       - name: Probe — kanban (トグル往復 / move 数)
+        id: probe_kanban
+        if: ${{ !cancelled() && steps.setup_ok.outputs.ok == '1' }}
         env:
           PKC3_CHROMIUM: ${{ steps.pw.outputs.path }}
         run: node tests/probe/run-kanban-probe.mjs
       # lease-probe(多重タブの writer 昇格)は SAH 解放待ちが最も flake しやすい
       # ため nightly には入れない ── リース周りを触る PR で手動実行する運用
+      #
+      # 🔴 **夜の結果を台帳へ出す**(#221 の 3 つ目)。赤いまま 13 晩放置されたのは、
+      # 気づく導線が「たまたま Actions を開く」しか無かったからである。
+      # ⚠ ここは**通知だけ**で、赤緑そのものは上の step が決める(この step が
+      #   落ちても、落ちた step の赤は消えない)。
+      # 🔴 **この step は最後に置く**(2026-08-17 のレビュー ⚠-6)── `steps` context は
+      #   「そこまでの step」しか持たないので、後ろに検証 step を足すと**その赤は
+      #   永久に台帳へ出ない**。`tests/workflow-steps.test.ts` が末尾であることを pin する。
+      # 🔴 **仕込みの gate を付けない** ── 仕込みが落ちた晩こそ記録が要る
+      #   (`!cancelled()` だけにする)。
+      # 🔑 **判定は workflow に書かない**(同レビュー 🔴-1)── 何を赤と数えるかは
+      #   `scripts/nightly-red.mjs` の `unmetSteps` に置き、test が全経路を通す。
+      #   直す前はここに `node -e '…outcome==="failure"…'` と書いていたので、
+      #   **`skipped` を緑と読む**うえ、その 1 行は**どの test からも実行されなかった**。
+      - name: 夜の結果を台帳へ出す(赤なら issue、緑に戻ったら閉じる)
+        id: ledger
+        if: ${{ !cancelled() }}
+        env:
+          # `steps` は **id を付けた step だけ**が入る(だから全 step に id を付けた)。
+          # 名前ではなく id で出るので、id は「読んで分かる名前」にしてある
+          PKC3_NIGHTLY_STEPS: ${{ toJSON(steps) }}
+          GITHUB_TOKEN: ${{ github.token }}
+        # ⚠ **`| tee` に通さない**(CLAUDE.md §6)── パイプの終了コードは最後の命令の
+        #   ものなので、script が例外で死んでも step が緑になる(通知が届かないのが
+        #   直したい症状なのだから、ここを食べさせてはいけない)。file に落として読む。
+        run: |
+          node scripts/nightly-red.mjs > /tmp/ledger.log 2>&1; code=$?
+          cat /tmp/ledger.log
+          {
+            echo "### 夜の検査"
+            echo ""
+            echo '```'
+            cat /tmp/ledger.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $code
