@@ -33,6 +33,7 @@ import BODY_CSS from 'virtual:pkc-body-css';
 import { parseFrontmatter, type FrontmatterValue } from '../markdown/frontmatter';
 import { renderMarkdown, type RenderMarkdownOptions } from '../markdown/markdown-render';
 import { extractVars } from '../markdown/frontmatter';
+import { createWarnCollector } from './warn-cap';
 import {
   extractDocumentGlobals,
   extractHeadingNumberConfig,
@@ -691,6 +692,14 @@ export async function writePortableHtml(
   pageFormat: PageFormat = DEFAULT_PAGE_FORMAT,
 ): Promise<HtmlResult> {
   const warnings: string[] = [];
+  /**
+   * 🔴 **注意は同種 10 件で畳む**(#202)。⚠ 直す前はここだけ素の `push` で、
+   * バックアップと Markdown ZIP には効いている規則が**閲覧用 HTML にだけ無かった**
+   * ── 1 件につき 1 行積む所が 2 つあるので、該当が多い文書では注意が件数ぶん出る。
+   * (`warn-cap.ts` 冒頭が「200 行の注意で 3 列が数十 px に潰れた」事故を記録している)
+   * ⚠ `finish()` を呼び忘れると「10 件までは出るが、超えたことは誰も知らない」になる。
+   */
+  const warn = createWarnCollector(warnings);
   const metas = await src.listEntryMetas();
   // ⚠ 断るなら**変換の前に**断る(0 entry + 大量添付で全部 base64 にしてから
   // 投げると、捨てるためだけに数十秒かかる ── review L2)
@@ -725,7 +734,11 @@ export async function writePortableHtml(
     for (const r of rows) {
       const m = metaOf.get(r.lid);
       if (!m) {
-        warnings.push(`本文はあるが一覧に無い entry を飛ばしました: ${r.lid}`);
+        warn.add(
+          'orphan-body',
+          '一覧に無い entry の注意',
+          `本文はあるが一覧に無い entry を飛ばしました: ${r.lid}`,
+        );
         continue;
       }
       const { skip, refs } = frontmatterAssets(r.body);
@@ -821,7 +834,11 @@ export async function writePortableHtml(
   for (const a of assetMetas) {
     const blob = await src.getAssetBlob(a.key);
     if (!blob) {
-      warnings.push(`添付の中身が見つかりませんでした: ${a.key}`);
+      warn.add(
+        'missing-asset',
+        '中身の見つからない添付',
+        `添付の中身が見つかりませんでした: ${a.key}`,
+      );
       continue;
     }
     parts.push(`${assetCount === 0 ? '' : ','}${j(a.key)}:"`);
@@ -834,6 +851,8 @@ export async function writePortableHtml(
   parts.push('}}');
   parts.push('</script>', viewer(pageFormat));
 
+  // 🔴 畳んだぶんの行をここで足す(#202)── 呼ばないと「超えた件数」が消える
+  warn.finish();
   return {
     blob: new Blob(parts, { type: 'text/html;charset=utf-8' }),
     warnings,
