@@ -481,6 +481,16 @@ P4 assets → P5 revisions → P6 import/export → P7 v3.0.0(Pages product + PW
     PDF になった(= **ファイルは正常**、残る層は LO wasm 側)。
     🔑 **対照群が落ちた回は、まず「その道具はそもそも動くのか」を測る** ── 直せるなら
     直したほうが速い(この件は 1 回の `apt-get install` で**判定不能が決着に変わった**)
+  - 🔴 **「取れない」で終わらせる前に、取り方を数え上げる**(2026-08-17、user 指摘
+    「**githubから引っぱればいいじゃん**」)。Office 一式を「この箱では**原理的に**
+    取れない」と書いたが、⚠ 数えたのは **2 経路だけ**(Pages / repo の中身)で、
+    しかも **CA bundle を渡さずに 1 回叩いた**だけだった。実際は
+    **release 資産が `curl -sSL --cacert /root/.ccr/ca-bundle.crt` で 1.4 秒で落ちる**
+    (`github.com/.../releases/download/...` → `release-assets.githubusercontent.com` へ追従)。
+    ⚠ この誤りは**引き継ぎ doc に「原理的に立てられない」と書いてしまい**、
+    次に読む人が**試さなくなる**形で残るところだった ── 「できない」は
+    **できることより強い主張**なので、**数えた経路を書く**(書けないなら言い切らない)。
+    🔑 手順は `.claude/skills/office-oracle/SKILL.md`
 - 🔴 **一致の件数は、因果の証拠ではない**(2026-08-14)。#117 の fault と「メニューの項目が
   効かない」が **7/7 で一致**したので、「fault が LO の命令発行を殺している」を**確定として
   扱い**、その線で probe を 2 本書いた。⚠ ところが user の実機では `Cmd+A` と `Cmd+B` が
