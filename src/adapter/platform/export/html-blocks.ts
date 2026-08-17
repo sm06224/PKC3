@@ -83,6 +83,28 @@ function skippedName(el: Element): { what: string; why: string } | null {
 }
 
 /**
+ * 図・グラフの器(`markdown-render.ts` が fence から作る)。
+ * ⚠ **属性の名前は 1 か所で持つ** ── 焼く側(`mermaid-hydrate` / `chart-raster` の
+ * `DiagramKind.attr`)と同じ文字列である。片方だけ変えると、器は在るのに
+ * 誰も拾わない(= 原文が等幅で出る)状態に静かに戻る。
+ */
+const FIGURE_ATTR: readonly [string, string][] = [
+  ['data-pkc-mermaid-src', 'mermaid'],
+  ['data-pkc-chart-src', 'chart'],
+];
+
+/** user に見せる呼び名(内部語を出さない)。 */
+const FIGURE_NAME: Record<string, string> = { mermaid: '図', chart: 'グラフ' };
+
+function figureOf(el: Element): { kind: string; source: string } | null {
+  for (const [attr, kind] of FIGURE_ATTR) {
+    const source = el.getAttribute(attr);
+    if (source !== null && source !== '') return { kind, source };
+  }
+  return null;
+}
+
+/**
  * HTML(画面と同じもの)→ 塊の列。
  *
  * @param doc `DOMParser` で読んだ document(呼び側が作る ── ここでは作らない。
@@ -98,9 +120,19 @@ export function htmlToDocxBlocks(doc: Document): {
    * ⚠ 差し替えを忘れると `skipped` のまま出る = **黙って落ちない**(安全側)。
    */
   images: { at: number; assetKey: string; alt: string }[];
+  /**
+   * 🔴 **図とグラフの預かり**(#187 段②)。⚠ ここでは**焼けない**(mermaid /
+   * chart.js は adapter の上位が持つ)ので、**原文と場所**だけ返す。
+   *
+   * ⚠ **預けないと、原文が等幅の文字として出る** ── 器の中には原文の
+   * `<pre><code>` が入っているので、素通しすると **PKC2 とまったく同じ失敗**
+   * (「図は原文が黙って等幅で出る」)を再演する。実際に段① はそうなっていた。
+   */
+  figures: { at: number; kind: string; source: string }[];
 } {
   const blocks: DocxBlock[] = [];
   const images: { at: number; assetKey: string; alt: string }[] = [];
+  const figures: { at: number; kind: string; source: string }[] = [];
   let skipped = 0;
 
   /** 要素の中の文字を走りへ(木を辿って装飾を受け継ぐ)。 */
@@ -179,8 +211,29 @@ export function htmlToDocxBlocks(doc: Document): {
   };
 
   const walkBlocks = (parent: Element): void => {
+    /**
+     * 🔴 **fence は「画面に見えている面」だけを写す**(2026-08-17。段① の穴)。
+     *
+     * `markdown-render.ts` は fence を **描画の面(`.pkc-render-slot`)と
+     * 原文の面(`pre.pkc-render-source`)の両方**で出し、どちらを見せるかは
+     * CSS の切替で決めている(既定は描画)。⚠ 書き出しに CSS は無いので、
+     * **素通しすると 2 つとも出る** ── 表と csv の原文、図と図の原文が並ぶ。
+     * (実測: `csv` fence が表 + 原文、`mermaid` が図 + 原文で出ていた)
+     *
+     * ⚠ 印(`data-pkc-render-mode`)は**見ない**。この class を持つ `<pre>` は
+     * その器の中にしか出ない(原文で見せる指定 `-norender` は器ごと出ず、
+     * **素の `<pre>`** になる ── 実測)ので、親を見る条件は
+     * **絶対に発火しない行**になる(= 変異試験で殺せない = 置かない)。
+     */
     for (const el of Array.from(parent.children)) {
       const tag = el.tagName.toLowerCase();
+      /**
+       * 🔴 **画面の道具は文書ではない**(同上)。コピーの ⧉ と切替の ‹/› は
+       * fence ごとに付く器なので、素通しすると**塊ごとに ⧉ の段落**が入る
+       * (実測: ふつうのコード塊でも 1 つ入っていた)。
+       */
+      if (tag === 'button' || tag === 'input' || tag === 'label') continue;
+      if (el.classList.contains('pkc-render-source')) continue;
       const level = headingLevel(tag);
       if (level !== null) {
         blocks.push({ kind: 'h', level, runs: runsOf(el) });
@@ -231,6 +284,21 @@ export function htmlToDocxBlocks(doc: Document): {
         if (rows.length > 0) blocks.push({ kind: 'table', rows });
         continue;
       }
+      /**
+       * 🔴 **図・グラフは器ごと預ける**(#187 段②)。⚠ **降りる前に**拾う ──
+       * 器の中には原文の `<pre><code>` が在るので、降りると「図の原文が等幅で
+       * 出る」(PKC2 の失敗そのもの)になる。⚠ 焼けなければ `skipped` のまま出る。
+       */
+      const fig = figureOf(el);
+      if (fig !== null) {
+        figures.push({ at: blocks.length, ...fig });
+        blocks.push({
+          kind: 'skipped',
+          what: FIGURE_NAME[fig.kind] ?? '図',
+          why: '描けませんでした',
+        });
+        continue;
+      }
       const bkey = tag === 'img' ? el.getAttribute('data-pkc-asset-key') : null;
       if (bkey !== null && bkey !== '') {
         const alt = el.getAttribute('alt') || el.getAttribute('data-pkc-asset-name') || '画像';
@@ -256,5 +324,5 @@ export function htmlToDocxBlocks(doc: Document): {
   };
 
   walkBlocks(doc.body);
-  return { blocks, skipped, images };
+  return { blocks, skipped, images, figures };
 }

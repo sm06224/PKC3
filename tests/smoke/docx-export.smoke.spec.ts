@@ -61,3 +61,43 @@ test('🔴 情報ペインの Word で .docx が落ちてきて、本文が中�
   expect(text, '箇条書きが numbering を指していない').toContain('<w:numId');
   expect(errors, 'pageerror が出た').toEqual([]);
 });
+
+/**
+ * 🔴 **図は絵で入る。原文が等幅で出ない**(#187 段②)。
+ *
+ * ⚠ この経路は **unit では届かない** ── 焼くのは `main.ts` が渡す産出器
+ * (mermaid 本体 + canvas)で、そこは node の unit から呼べない。
+ * 段① はここが素通しで、器の中の**原文が code 塊**になっていた
+ * (PKC2 に「図は原文が黙って等幅で出る」と記録されている失敗そのもの)。
+ */
+test('🔴 mermaid の図が Word に絵として入る(原文が出ない)(#187 段②)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', '図の試験');
+  await page.fill(
+    '[data-pkc-field="editor-body"]',
+    '```mermaid\ngraph TD\n  A["始め"]-->B["終わり"]\n```\n',
+  );
+  // ⚠ **焼けたことを先に見る**(器が ready になるまで待つ)── 待たずに書き出すと
+  //    「まだ焼けていないから入らなかった」のか「配線が死んでいる」のか割れない
+  await expect(
+    page.locator('[data-pkc-region="editor-preview"] [data-pkc-mermaid-src]'),
+  ).toHaveAttribute('data-pkc-mermaid-state', 'ready', { timeout: 30_000 });
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+
+  const [download] = await Promise.all([
+    page.waitForEvent('download', { timeout: 30_000 }),
+    clickReal(page, '[data-pkc-region="inspector"] [data-pkc-action="export-entry-docx"]'),
+  ]);
+  const path = await download.path();
+  expect(path, 'file が落ちてきていない').not.toBeNull();
+  const text = readFileSync(path!).toString('utf-8');
+  expect(text, '図の PNG が入っていない').toContain('word/media/figure1.png');
+  expect(text, 'document が図を指していない').toContain('r:embed="rIdM1"');
+  // 🔴 **原文が等幅で出ていない**(PKC2 の失敗の顔)
+  expect(text, '図の原文が本文に出ている').not.toContain('graph TD');
+  expect(text, '図が「描けませんでした」になっている').not.toContain('描けませんでした');
+  expect(errors, 'pageerror が出た').toEqual([]);
+});

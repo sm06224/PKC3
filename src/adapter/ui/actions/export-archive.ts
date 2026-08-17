@@ -49,6 +49,16 @@ export interface ExportDeps {
    * `async () => {}` を書く(書かされること自体が「待たない」の明示になる)。
    */
   settle(): Promise<void>;
+  /**
+   * 🔴 **図・グラフを 1 枚の PNG に焼く**(#187 段②)。焼けなければ `null`。
+   *
+   * ⚠ **optional にしない** ── 渡し忘れると、図の器の中の**原文が等幅の文字**として
+   * 出る(PKC2 の失敗そのもの)。tsc に止めさせる。
+   * 🔑 実体は画面と**同じ産出器**(`MERMAID_KIND` / `CHART_KIND` の `render`)──
+   * ここで別に描くと、この機能の失敗の根である「レンダラが 2 本」に戻る。
+   * @returns `cssWidth` は**画面に置くときの幅**(CSS px)。PNG の画素は dpr 倍ある。
+   */
+  renderFigure(kind: string, source: string): Promise<{ blob: Blob; cssWidth: number } | null>;
   now?(): Date;
   /**
    * 本文 1 件を HTML にする(閲覧用 HTML だけが使う。P8 段⑲)。
@@ -247,7 +257,7 @@ export async function exportEntryDocx(
     const html = await deps.renderBody(body);
     // ⚠ `<body>` で包む ── 包まないと happy-dom / 実ブラウザで木の形が揃わない
     const doc = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html');
-    const { blocks, images } = htmlToDocxBlocks(doc);
+    const { blocks, images, figures } = htmlToDocxBlocks(doc);
     /**
      * 🔴 **添付の画像を入れる**(#187 段②)。
      * ⚠ **縦横比を保つ**ため、実寸を取ってから渡す(PKC2 は全画像を 480×360 px に
@@ -296,6 +306,35 @@ export async function exportEntryDocx(
         alt: img.alt,
       };
       media.push({ name: `word/${name}`, blob });
+    }
+    /**
+     * 🔴 **図とグラフを焼いて入れる**(#187 段②)。
+     *
+     * ⚠ これが無いと、器の中の**原文が等幅の文字**として出る ── PKC2 で
+     *   「図は原文が黙って出る」と記録されている失敗そのものである。
+     * 🔑 焼くのは**画面と同じ産出器**(`mermaid-hydrate` / `chart-raster`)──
+     *   別に描くとレンダラが 2 本になる(設計 doc §1-2 の失敗の根)。
+     * ⚠ 大きさは **CSS px** で渡す ── 焼いた PNG は dpr 倍の画素を持つので、
+     *   画素数をそのまま渡すと Retina の端末でだけ図が 2 倍で出る。
+     */
+    for (const [i, fig] of figures.entries()) {
+      const what = fig.kind === 'chart' ? 'グラフ' : '図';
+      const drawn = await deps.renderFigure(fig.kind, fig.source).catch(() => null);
+      const size = drawn === null ? null : await imageSizeOf(drawn.blob);
+      if (drawn === null || size === null) {
+        blocks[fig.at] = { kind: 'skipped', what, why: '描けませんでした' };
+        continue;
+      }
+      const name = `media/figure${i + 1}.png`;
+      blocks[fig.at] = {
+        kind: 'image',
+        media: name,
+        widthPx: drawn.cssWidth,
+        // ⚠ 高さは**焼いた絵の比**から出す(器の高さではない)
+        heightPx: Math.max(1, Math.round((size.h * drawn.cssWidth) / size.w)),
+        alt: what,
+      };
+      media.push({ name: `word/${name}`, blob: drawn.blob });
     }
     const now = deps.now?.() ?? new Date();
     const built = buildDocx(blocks, title, now.toISOString());

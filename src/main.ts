@@ -111,6 +111,8 @@ import { generateAssetKey } from '@adapter/platform/storage/asset-key';
 import { downloadBlob, downloadUrl } from '@adapter/platform/download';
 import { diagramFileName } from '@features/export/file-name';
 import { renderToSvg, readPalette } from '@adapter/ui/render/mermaid-raster';
+import { MERMAID_KIND } from '@adapter/ui/render/mermaid-hydrate';
+import { CHART_KIND } from '@adapter/ui/render/chart-raster';
 import { askConfirm, SUPPRESSED_MESSAGE } from '@adapter/platform/ask-confirm';
 
 const DB_NAME = 'pkc3';
@@ -636,6 +638,28 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
          */
         settle: async () => {
           await storeEffects?.settled();
+        },
+        /**
+         * 🔴 **図とグラフは画面と同じ産出器で焼く**(#187 段②)。
+         * ⚠ ここで別に描くと「レンダラが 2 本」── この機能が PKC2 で失敗した根に戻る。
+         * ⚠ 配色は**画面と同じ** ── 「図を保存」(上の `exportDiagram`)と揃える。
+         *   見えている図と、書き出した文書の図の色を違えない。
+         * ⚠ 幅は**固定**(紙の本文幅なりの 720 CSS px)── 画面の幅で焼くと、
+         *   窓の大きさで文書の中の図の大きさが変わる。
+         */
+        renderFigure: async (kind, source) => {
+          const diagram = kind === 'chart' ? CHART_KIND : MERMAID_KIND;
+          const raster = await diagram.render({
+            source,
+            kind,
+            theme: document.documentElement.getAttribute('data-pkc-theme') ?? 'light',
+            palette: readPalette(),
+            width: 720,
+            // ⚠ 紙に載るので **2 倍**で焼く(画面の dpr に合わせない ── 同じ文書が
+            //    端末ごとに違う解像度になる)
+            dpr: 2,
+          });
+          return { blob: raster.png, cssWidth: raster.cssWidth };
         },
         // 🔑 閲覧用 HTML の本文描画は**ワーカーへ**(P8 段⑲)。渡さないと
         //    件数ぶんメインスレッドで描くことになる

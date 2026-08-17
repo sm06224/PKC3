@@ -535,6 +535,7 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
+    ['2026-08-17-word-export-figures', 'c569e98b'],
     ['2026-08-17-word-export-images', '235a2980'],
     ['2026-08-17-word-export', '4454a5dd'],
     ['2026-08-17-office-save-same-note', 'ed2e27ba'],
@@ -554,7 +555,6 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-08-14-office-tile', 'de2b82b9'],
     ['2026-08-14-office-mouse-select', '30f84355'],
     ['2026-08-14-office-settings-persist', '5117be07'],
-    ['2026-08-14-office-japanese-ui', '44c4f92f'],
   ];
 
   const digest = (n: { title: string; items: readonly string[] }): string =>
