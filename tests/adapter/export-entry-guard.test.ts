@@ -53,6 +53,8 @@ function deps(
     download: (name) => files.push(name),
     report: () => {},
     settle,
+    // ⚠ 既定は「焼けない」── 図を見る test は自分で差し替える
+    renderFigure: async () => null,
     now: () => new Date('2026-08-02T00:00:00Z'),
     files,
   };
@@ -422,5 +424,84 @@ describe('Word の画像(#187 段②)', () => {
     const text = await got[0]!.text();
     expect(text).not.toContain('word/media/');
     expect(text).toContain('image/svg+xml');
+  });
+});
+
+/**
+ * 🔴 **Word の図とグラフ**(#187 段②)。
+ *
+ * ⚠ 段① は器の中の**原文を等幅で出していた**(PKC2 の失敗の再演)。ここが見るのは
+ * 「焼いた PNG が実際に zip に入り、document がそれを指すか」と、
+ * **焼けなかったときに理由が残るか**である。
+ */
+describe('Word の図(#187 段②)', () => {
+  const PNG = Uint8Array.from(
+    atob(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    ),
+    (c) => c.charCodeAt(0),
+  );
+
+  /**
+   * 図を 1 つ持つノート。
+   * @param drawn 焼けた絵(`null` = 焼けなかった)。⚠ **画素は CSS px の 2 倍**に
+   *   してある ── 画素をそのまま使う実装だと図が 2 倍の大きさで出る
+   */
+  function setup(drawn: { cssWidth: number } | null = { cssWidth: 360 }) {
+    const got: Blob[] = [];
+    const asked: string[] = [];
+    const d = {
+      ...deps(source({ getBody: async () => '```mermaid\ngraph TD; A-->B\n```' })),
+      download: (_n: string, blob: Blob) => got.push(blob),
+      renderBody: async () =>
+        '<div class="pkc-mermaid-placeholder" data-pkc-mermaid-src="graph TD; A--&gt;B">' +
+        '<pre><code class="language-mermaid">graph TD; A--&gt;B</code></pre></div>',
+      renderFigure: async (kind: string, src: string) => {
+        asked.push(`${kind}:${src}`);
+        return drawn === null
+          ? null
+          : { blob: new Blob([PNG], { type: 'image/png' }), cssWidth: drawn.cssWidth };
+      },
+    } as unknown as ExportDeps;
+    (globalThis as unknown as Record<string, unknown>).createImageBitmap = async () => ({
+      width: 720,
+      height: 480,
+      close: () => {},
+    });
+    return { d, got, asked };
+  }
+
+  it('🔴 焼いた図が zip に入り、document がそれを指す(原文を等幅で出さない)', async () => {
+    const { d, got, asked } = setup();
+    const { dispatcher } = fakeDispatcher('ready');
+    expect(await exportEntryDocx(dispatcher, d, 'n1')).toBe(true);
+    const text = await got[0]!.text();
+    expect(asked, '図の原文が産出器へ渡っていない').toEqual(['mermaid:graph TD; A-->B']);
+    expect(text, '図が zip に入っていない').toContain('word/media/figure1.png');
+    expect(text, 'document が図を指していない').toContain('r:embed="rIdM1"');
+    // 🔴 **原文が等幅で出ていない**(PKC2 の失敗の顔)
+    expect(text, '図の原文が本文に出ている').not.toContain('graph TD');
+    expect(text).not.toContain('描けませんでした');
+  });
+
+  it('🔴 大きさは CSS px で入る(焼いた画素をそのまま使うと 2 倍になる)', async () => {
+    const { d, got } = setup({ cssWidth: 360 });
+    const { dispatcher } = fakeDispatcher('ready');
+    await exportEntryDocx(dispatcher, d, 'n1');
+    const text = await got[0]!.text();
+    // 360 CSS px = 3,429,000 EMU / 高さは絵の比(720:480)で 240 px = 2,286,000 EMU
+    expect(text, '幅が CSS px でない').toContain('cx="3429000"');
+    expect(text, '高さが絵の比で出ていない').toContain('cy="2286000"');
+  });
+
+  it('🔴 焼けなければ、その場に理由が残る(黙って消えない)', async () => {
+    const { d, got } = setup(null);
+    const { dispatcher } = fakeDispatcher('ready');
+    expect(await exportEntryDocx(dispatcher, d, 'n1')).toBe(true);
+    const text = await got[0]!.text();
+    expect(text).not.toContain('word/media/');
+    expect(text).toContain('描けませんでした');
+    // ⚠ それでも原文は出さない(出すなら「図の原文」として意図して出す)
+    expect(text).not.toContain('graph TD');
   });
 });

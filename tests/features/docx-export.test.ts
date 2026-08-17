@@ -13,6 +13,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildDocx, DOCX_LIST_DEPTH_MAX, type DocxBlock } from '@features/export/docx';
 import { htmlToDocxBlocks } from '@adapter/platform/export/html-blocks';
+import { renderMarkdown } from '@features/markdown/markdown-render';
 
 const ISO = '2026-08-17T00:00:00.000Z';
 
@@ -352,5 +353,96 @@ describe('画像(#187 段②)', () => {
     const { blocks, images } = blocksOf('<img data-pkc-asset-key="k2" alt="直下の図">');
     expect(images).toEqual([{ at: 0, assetKey: 'k2', alt: '直下の図' }]);
     expect(blocks[0]).toMatchObject({ kind: 'skipped' });
+  });
+});
+
+/**
+ * 🔴 **図とグラフは「原文」ではなく絵で出す**(#187 段②)。
+ *
+ * ⚠ 段① はここが**素通し**だった ── 器の中には原文の `<pre><code>` が在るので、
+ * 降りて拾って **`code` 塊(等幅の文字)**にしていた。これは PKC2 に
+ * 「mermaid 等の図は原文が等幅で出る(黙って)」と記録されている失敗**そのもの**である。
+ */
+describe('図・グラフの器(#187 段②)', () => {
+  const MERMAID =
+    '<div class="pkc-mermaid-placeholder" data-pkc-mermaid-src="graph TD; A--&gt;B">' +
+    '<pre class="pkc-mermaid-source"><code class="language-mermaid">graph TD; A--&gt;B</code></pre></div>';
+  const CHART =
+    '<div class="pkc-chart-placeholder" data-pkc-chart-src="bar: 1,2,3">' +
+    '<pre class="pkc-chart-source"><code class="language-chart">bar: 1,2,3</code></pre></div>';
+
+  it('🔴 図は「場所と原文」として預けられる(原文を等幅で出さない)', () => {
+    const { blocks, figures } = blocksOf(MERMAID);
+    expect(figures).toEqual([{ at: 0, kind: 'mermaid', source: 'graph TD; A-->B' }]);
+    // ⚠ 焼けなければ skipped のまま(黙って消えない)
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({ kind: 'skipped', what: '図' });
+    // 🔴 **器の中の原文まで降りていない**(降りると PKC2 と同じ顔になる)
+    expect(blocks.some((b) => b.kind === 'code')).toBe(false);
+  });
+
+  it('🔴 グラフも同じ扱い(呼び名だけ変わる)', () => {
+    const { blocks, figures } = blocksOf(CHART);
+    expect(figures).toEqual([{ at: 0, kind: 'chart', source: 'bar: 1,2,3' }]);
+    expect(blocks[0]).toMatchObject({ kind: 'skipped', what: 'グラフ' });
+  });
+
+  it('⚠ 本文の中の位置が保たれる(前後の段落と混ざらない)', () => {
+    const { blocks, figures } = blocksOf(`<p>前</p>${MERMAID}<p>後</p>`);
+    expect(figures).toEqual([{ at: 1, kind: 'mermaid', source: 'graph TD; A-->B' }]);
+    expect(blocks.map((b) => b.kind)).toEqual(['p', 'skipped', 'p']);
+  });
+
+  it('⚠ ふつうのコード塊は今までどおり code のまま(図と取り違えない)', () => {
+    const { blocks, figures } = blocksOf('<pre><code class="language-js">let x = 1;</code></pre>');
+    expect(figures).toEqual([]);
+    expect(blocks[0]).toMatchObject({ kind: 'code', lang: 'js' });
+  });
+});
+
+/**
+ * 🔴 **入力は「本物のレンダラが出した HTML」にする**(2026-08-17 に踏んだ)。
+ *
+ * ここより上の test は**手書きの HTML**を渡していた。だから段① は
+ * 「実物では起きるが test では起きない」欠陥を 3 つ抱えたまま出荷していた ──
+ * ① fence ごとにコピーの **⧉ が段落として**入る(ふつうのコード塊でも)
+ * ② 切替の **‹/›** も入る
+ * ③ **描画と原文が二重に**入る(表と csv 原文 / 図と図の原文)
+ *
+ * 🔑 空振りの型としては「代替物で満たせる条件」── 手書きの HTML は
+ * **本物より素直**なので、素通しの欠陥をすり抜けさせる。
+ */
+describe('本物のレンダラの出力から写す', () => {
+  const fromMarkdown = (md: string): ReturnType<typeof htmlToDocxBlocks> => {
+    const doc = new DOMParser().parseFromString(`<body>${renderMarkdown(md)}</body>`, 'text/html');
+    return htmlToDocxBlocks(doc);
+  };
+
+  it('🔴 コピーの ⧉ と切替の ‹/› は文書に入らない(画面の道具であって本文ではない)', () => {
+    const text = JSON.stringify(fromMarkdown('```js\nlet x = 1;\n```\n\n```csv\na,b\n1,2\n```\n'));
+    expect(text, 'コピーの器が本文に入っている').not.toContain('⧉');
+    expect(text, '切替の器が本文に入っている').not.toContain('‹/›');
+  });
+
+  it('🔴 csv は表だけ入る(原文と二重にならない)', () => {
+    const { blocks } = fromMarkdown('```csv\na,b\n1,2\n```\n');
+    expect(blocks.map((b) => b.kind)).toEqual(['table']);
+  });
+
+  it('🔴 図は「図」だけ入る(原文と二重にならない)', () => {
+    const { blocks, figures } = fromMarkdown('```mermaid\ngraph TD\n  A-->B\n```\n');
+    expect(blocks.map((b) => b.kind)).toEqual(['skipped']);
+    expect(figures).toHaveLength(1);
+  });
+
+  it('⚠ 原文で見せる指定(`-norender`)は原文が入る(切替の既定を取り違えない)', () => {
+    const { blocks, figures } = fromMarkdown('```csv-norender\na,b\n1,2\n```\n');
+    expect(blocks).toEqual([{ kind: 'code', text: 'a,b\n1,2\n', lang: 'csv' }]);
+    expect(figures).toEqual([]);
+  });
+
+  it('⚠ ふつうの本文はそのまま通る(空振り防止 ── 全部落としていない)', () => {
+    const { blocks } = fromMarkdown('# 題\n\n本文\n\n- あ\n- い\n');
+    expect(blocks.map((b) => b.kind)).toEqual(['h', 'p', 'li', 'li']);
   });
 });
