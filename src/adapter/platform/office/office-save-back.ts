@@ -62,6 +62,21 @@ export interface SaveBackDeps {
     save: StagedSave,
     bytes: Uint8Array<ArrayBuffer>,
   ) => Promise<boolean>;
+  /**
+   * 🔴 **「この保存はこのノートになった」と窓へ返す**(#217)。
+   *
+   * ⚠ 返さないと、**同じ文書を 2 回保存するとノートが 2 件できる**(cowork 実機
+   * 2026-08-16 で 1/1 再現)── 窓が持っている合言葉は「PKC から渡した添付」の
+   * 分だけなので、**窓の中で新規に作った文書**は 2 回目も合言葉が無いままになる。
+   *
+   * 🔑 呼ぶのは **窓が合言葉を知らなかった保存**のときだけ ── 新規に作った場合と、
+   * **こちらで束ねて差し替えた場合**の両方である(`sameDoc`)。
+   * ⚠ 「新規のときだけ」に狭めると**穴が残る**:編集中に 2 件溜まると
+   * 1 件目=新規 / 2 件目=差し替えになり、**2 件目の鍵には返事が来ない**。
+   * 窓が覚えている鍵には上限が在る(`office-save-watch.js` の `KEY_MEMORY_MAX`)ので、
+   * 取りこぼしを「古い鍵が生きているはず」に頼らない。
+   */
+  readonly adopt: (key: string, lid: string) => void;
   /** user への一言(「取り込みました」)。 */
   readonly notify: (message: string) => void;
   /** 異常の報告(取り込めなかった)。 */
@@ -85,7 +100,45 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
   /** 🔴 編集中で取り込めなかった ── **これが立っている間だけ**撃ち直す。 */
   let deferred = false;
 
-  async function takeOne(dir: StageDir, save: StagedSave): Promise<IntakeResult> {
+  /**
+   * 窓へ「このノートになった」と返す。
+   * ⚠ **投げさせない** ── ここで抜けると呼び元が棚を消さず、次の掃除で**もう 1 件
+   * ノートができる**(この file が守っている物のちょうど逆向き)。
+   */
+  function announce(key: string, lid: string): void {
+    try {
+      deps.adopt(key, lid);
+    } catch {
+      // 返せなくても**取り込みは成功している**。棚は消してよい
+    }
+  }
+
+  /**
+   * 🔴 **1 回の引き取りの中で「同じ文書」を束ねる鍵**(#217 の残り、着地前レビュー)。
+   *
+   * ⚠ 窓からの返事(`adopted`)は**往復**なので、返る前に次の保存が来ると間に合わない。
+   * そして**それは編集中に確定的に起きる**:`canWrite()` が偽の間は棚に溜まるだけで
+   * 返事を出さないので、編集を終えた瞬間に**合言葉の無い同じ文書が複数件**流れてくる。
+   * 窓の表だけでは塞がらない ── **引き取る側にも同じ表が要る**。
+   *
+   * ⚠ 鍵は **`win` と `path` の対**である。path だけで束ねると、2 枚目の窓が同じ名前で
+   * 保存したときに**別の文書どうしを 1 つのノートへ潰す**(`/work/報告.odt` は窓ごとに
+   * 別の MEMFS に在る)。⚠ `win` を持たない古い meta は**束ねない**(安全側)。
+   */
+  function sameDoc(save: StagedSave): string | null {
+    if (save.win === undefined || save.path === '') return null;
+    // ⚠ 区切りは `|` ── 窓の id は 16 進 / base36 と `-` だけで `|` を含まないので、
+    //    分かち書きが**曖昧にならない**。
+    //    🔑 制御文字を区切りに使わない ── `tests/repo-hygiene.test.ts` が生バイトを止める。
+    //    実際この行の初稿で編集ツールが U+0000 を生バイトで書き、そこで捕まった
+    return `${save.win}|${save.path}`;
+  }
+
+  async function takeOne(
+    dir: StageDir,
+    save: StagedSave,
+    madeHere: Map<string, string>,
+  ): Promise<IntakeResult> {
     const bytes = await readStaged(dir, save);
     if (bytes === null) {
       // 大きさが meta と食い違う = 書きかけのまま `.json` が置かれた(壊れている)。
@@ -104,14 +157,29 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
     // 合言葉があれば差し替え、無ければ新規(#205 §2 の 2 行そのもの)。
     // ⚠ **合言葉のノートが消えていたら新規へ倒す** ── 存在しない lid へ書くより、
     //    新しい添付ノートで残すほうが user の文書が残る
-    const token = save.token;
-    const target = token === undefined ? null : await deps.readAttachment(token);
+    // ⚠ 合言葉が無くても、**この引き取りの中で既に同じ文書のノートを作っていたら**
+    //    それを使う(窓の返事が間に合わない経路 ── 上の `sameDoc` の注記)
+    const group = sameDoc(save);
+    // 🔴 **窓が知っていたか。** 知らなかった保存は、取り込み先を**必ず返す**
+    //    ── 新規でも差し替えでも同じ(`adopt` の注記)
+    const windowKnew = save.token !== undefined;
+    const mine = group === null ? undefined : madeHere.get(group);
+    let token = save.token ?? mine;
+    let target = token === undefined ? null : await deps.readAttachment(token);
+    // ⚠ **合言葉が「在るが死んでいる」ときも束ねへ倒す**(2 巡目レビュー)。
+    //    倒さないと、開いていた添付を user が消した状態で編集中に 2 件溜まった場合、
+    //    1 件目=新規 / 2 件目も**新規**になり、ここでもノートが 2 件できる
+    if (target === null && mine !== undefined && mine !== token) {
+      token = mine;
+      target = await deps.readAttachment(mine);
+    }
     if (token !== undefined && target !== null) {
       const ok = await deps.replaceAsset(token, save, bytes);
       if (!ok) {
         deferred = true;
         return 'deferred';
       }
+      if (!windowKnew) announce(save.key, token);
       await discardStaged(dir, save.key);
       deps.notify(`Office の保存を取り込みました: ${save.name}`);
       return 'replaced';
@@ -121,6 +189,12 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
       deferred = true;
       return 'deferred';
     }
+    // ⚠ **この引き取りの続きに効かせる。** 窓の返事を待つ経路とは別に、いま作った
+    //    ノートを同じ文書の次の 1 件へ渡す(編集明けの一括取り込みがこれに当たる)
+    if (group !== null) madeHere.set(group, lid);
+    // 🔴 **窓へも返す**(#217)。⚠ 返し忘れると次の**別の**引き取りでまた新規になる。
+    //    ⚠ 窓が既に閉じていても放送は投げるだけ ── 誰も聞かなくても害は無い
+    announce(save.key, lid);
     await discardStaged(dir, save.key);
     deps.notify(`Office の保存を取り込みました: ${save.name}`);
     return 'created';
@@ -133,11 +207,14 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
     if (dir === null) return [];
     const all = await listStaged(dir);
     const out: IntakeResult[] = [];
+    // ⚠ **この 1 パスの中だけ**の表(`sameDoc` の注記)。跨いで持たない ──
+    //    跨ぐと、窓が読み直されて同じ path に別の文書が居るときに取り違える
+    const madeHere = new Map<string, string>();
     for (const save of pick(all)) {
       if (inFlight.has(save.key)) continue;
       inFlight.add(save.key);
       try {
-        out.push(await takeOne(dir, save));
+        out.push(await takeOne(dir, save, madeHere));
       } catch (e) {
         deps.fail(`Office の保存を取り込めませんでした(${save.name}): ${String(e)}`);
         out.push('failed');

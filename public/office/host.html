@@ -125,6 +125,13 @@
       try { window.focus(); } catch (e) { /* 無視される */ }
       return;
     }
+    if (d.pkc3Office === 'adopted') {
+      // 🔴 **「その保存はこのノートになった」**(#217)。⚠ 受けないと、
+      //    窓の中で新規に作った文書は 2 回目の保存でも合言葉が無く、
+      //    **ノートが増え続ける**(cowork 実機 2026-08-16 で 1/1 再現)
+      if (adoptSaved) adoptSaved(d.payload || {});
+      return;
+    }
     if (d.pkc3Office === 'reload-request') {
       var q = d.payload && d.payload.name
         ? '?name=' + encodeURIComponent(d.payload.name) + '&await-doc=1' : '?await-doc=1';
@@ -255,9 +262,11 @@
   //    全走査は `/` で 20〜27ms 掛かり、LO と同じスレッドに乗るので採らない。
   var saveTimer = null;
   var flushSaves = null;
+  var adoptSaved = null;
   function stopSaveWatch() {
     if (saveTimer) { clearInterval(saveTimer); saveTimer = null; }
     flushSaves = null;
+    adoptSaved = null;
   }
 
   function armSaveWatch(FS, token) {
@@ -310,6 +319,25 @@
     var dirPromise = S.openStageDir();
     var busy = false;
 
+    /**
+     * 🔴 **path → 合言葉の表**(#217)。⚠ 単一の合言葉ではなく**表**である。
+     * 判断は `office-save-watch.js` に在る(ここは bundle されず unit が届かない)。
+     */
+    var tokens = W.createTokenTable();
+    tokens.seed(window.__loDocPath, token);
+    /**
+     * 🔴 **この窓の id**(#217)。⚠ 引き取る側が「同じ文書の保存」を束ねるのに要る。
+     * 束ねる鍵を path だけにすると、2 枚目の窓が同じ名前で保存したときに
+     * **別の文書どうしを 1 つのノートへ潰す**(path は窓ごとに別の MEMFS に在る)。
+     */
+    var winId = (self.crypto && self.crypto.randomUUID)
+      ? self.crypto.randomUUID()
+      : 'w' + Date.now().toString(36) + '-' + Math.floor(Math.random() * 1e9).toString(36);
+
+    adoptSaved = function (p) {
+      tokens.adopt(String((p && p.key) || ''), String((p && p.token) || ''));
+    };
+
     async function handOff(dir, hit) {
       var stream = FS.open(hit.path, 'r');
       try {
@@ -318,22 +346,37 @@
         var put = await S.stageBytes({
           dir: dir,
           size: hit.size,
+          // 🔴 **鍵を本当に一意にする**(2026-08-16、着地前レビュー)。⚠ 渡さないと
+          //    `makeKey` は `'o' + Date.now() + '-0'` に落ち、**ミリ秒の解像度**しか
+          //    無い ── `office-save-stage.js` の注記(「`randomUUID` が在れば使う」)は
+          //    **呼び元が渡していなかったので嘘だった**。鍵で別窓の返事を弾く
+          //    ガード(`office-save-watch.js` の `createTokenTable`)は、
+          //    この一意性の上に乗っている
+          uuid: (self.crypto && self.crypto.randomUUID)
+            ? function () { return self.crypto.randomUUID(); }
+            : undefined,
           read: function (into, wanted, position) {
             return FS.read(stream, into, 0, wanted, position);
           },
           meta: {
             name: hit.name,
             path: hit.path,
-            // 🔴 **合言葉が付くのは「開いた当の文書」だけ**(2026-08-16、着地前
-            //    レビュー R2)。⚠ 窓ごとに 1 個の合言葉を**全部の保存に**載せていたので、
-            //    「添付を開いた窓の中で File > 新規作成 → 別名で保存」すると、
-            //    **開いていたノートの実体がその新しい文書に差し替わって**いた。
-            //    🔑 合言葉が無い保存は新規の添付ノートになる ── それが正しい。
-            token: hit.path === window.__loDocPath ? token : '',
+            // 🔴 **合言葉は path ごとに引く**(2026-08-16、着地前レビュー R2 →
+            //    #217 で表になった)。⚠ 窓ごとに 1 個の合言葉を**全部の保存に**
+            //    載せていたので、「添付を開いた窓の中で File > 新規作成 → 別名で
+            //    保存」すると**開いていたノートの実体がその新しい文書に差し替わって**
+            //    いた。⚠ 逆に「開いた当の文書だけ」に狭めると、窓の中で作った文書は
+            //    **保存のたびにノートが増える** ── だから表にして、本体が
+            //    `adopted` で返してきた分をここへ足す。
+            token: tokens.tokenFor(hit.path),
+            // 🔴 **どの窓が置いたか**(#217)。引き取る側が「同じ文書の保存」を
+            //    束ねるのに要る ── 合言葉の返事が間に合わない経路(編集中に溜めた分)
+            win: winId,
           },
         });
         // ⚠ **鍵だけ放送する**(bytes は棚に在る)。放送は全タブに届くので、
         //    引き取るのは writer リースを持つタブだけ
+        tokens.remember(put.key, hit.path);
         say('saved', { key: put.key, name: put.name, size: put.size });
       } finally {
         mine = true;

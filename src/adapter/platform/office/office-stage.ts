@@ -50,12 +50,28 @@ export const STAGE_ORPHAN_GRACE_MS = 10 * 60 * 1000;
 export interface StagedSave {
   readonly key: string;
   readonly name: string;
-  /** LO の中での path(⚠ 診断用。ノートの同定には使わない)。 */
+  /**
+   * LO の中での path。
+   *
+   * ⚠ **これ単独ではノートを同定しない**(2026-08-16 に注記を改めた。以前は
+   * 「診断用」とだけ書いていたが、#217 で**同定の材料の一部**になった)。
+   * 使うのは **`win` と対にした 1 回の引き取りの中だけ** ── 合言葉がまだ無い
+   * 同じ文書の保存を束ねるために使う(`office-save-back.ts` の `sameDoc`)。
+   * ⚠ 窓を跨いで path で同定してはいけない ── `/work/報告.odt` は**窓ごとに
+   * 別の MEMFS に在る**ので、別の文書が同じ path を持ちうる。
+   */
   readonly path: string;
   readonly size: number;
   readonly at: number;
   /** どのノートの添付だったか(`office-open.ts` が窓へ預けた合言葉)。無ければ新規。 */
   readonly token?: string;
+  /**
+   * 🔴 **どの窓が置いたか**(#217)。窓が起動のたびに 1 つ作る id。
+   * ⚠ **`path` を同定に使うために要る** ── これが無いと、2 枚目の窓が同じ名前の
+   * 文書を保存したときに**別の文書どうしを同じノートへ束ねる**。
+   * ⚠ 古い窓が置いた meta には無い ── そのときは束ねない(安全側 = 別扱い)。
+   */
+  readonly win?: string;
 }
 
 /** OPFS の file(必要な分だけ。⚠ lib.dom の型に縛られない)。 */
@@ -117,6 +133,7 @@ function parseMeta(text: string): StagedSave | null {
     size: r.size,
     at: typeof r.at === 'number' ? r.at : 0,
     ...(typeof r.token === 'string' && r.token !== '' ? { token: r.token } : {}),
+    ...(typeof r.win === 'string' && r.win !== '' ? { win: r.win } : {}),
   };
 }
 

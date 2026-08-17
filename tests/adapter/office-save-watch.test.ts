@@ -26,13 +26,22 @@ interface Watch {
   due(stat: (p: string) => Stat | null, at?: number): { path: string; name: string; size: number }[];
   pendingCount(): number;
 }
+interface TokenTable {
+  tokenFor(path: string): string;
+  seed(path: string | undefined, token: string): void;
+  remember(key: string, path: string): void;
+  adopt(key: string, token: string): boolean;
+  keyCount(): number;
+}
 interface Api {
   QUIET_MS: number;
   WATCH_DIRS: string[];
+  KEY_MEMORY_MAX: number;
   isIgnoredName(n: string): boolean;
   watchedDirOf(p: string): string | null;
   baseName(p: string): string;
   createSaveWatch(opts?: { now?: () => number }): Watch;
+  createTokenTable(opts?: { max?: number }): TokenTable;
 }
 
 /** 素の JS を読み込む。⚠ **実 file を読む**(写経すると本物とずれる)。 */
@@ -215,5 +224,85 @@ describe('UNO の listener を登録しない(#209)', () => {
       );
       expect(code, `${f}: 旧 broadcaster に登録している`).not.toContain('theGlobalEventBroadcaster');
     }
+  });
+});
+
+/**
+ * 🔴 **path → 合言葉の表**(#217)。窓の中で新規に作った文書は合言葉を持たないので、
+ * 本体が「その保存はこのノートになった」と返してこない限り、**保存のたびにノートが増える**
+ * (cowork 実機 2026-08-16 で 1/1 再現)。
+ *
+ * ⚠ **判断がここに在る理由**:元は `host.html` に直書きしていたが、あの file は
+ * bundle されず **unit が 1 件も届かない**(CLAUDE.md「どの test からも実行されない
+ * file に、判断を書かない」)。上限の効きなど、smoke では現実的に測れないものがある。
+ */
+describe('合言葉の表(#217)', () => {
+  it('🔴 返事が来るまでは合言葉なし、来たら以後は付く', () => {
+    const t = api.createTokenTable();
+    t.remember('k1', '/home/web_user/無題 1.odt');
+    expect(t.tokenFor('/home/web_user/無題 1.odt'), '名乗られる前から合言葉がある').toBe('');
+    expect(t.adopt('k1', 'lid-9')).toBe(true);
+    expect(
+      t.tokenFor('/home/web_user/無題 1.odt'),
+      '返事を受けていない ── 2 回目の保存でノートが増える',
+    ).toBe('lid-9');
+  });
+
+  it('🔴 自分が渡していない鍵の返事は無視する(放送は全窓に届く)', () => {
+    const t = api.createTokenTable();
+    t.remember('k1', '/work/あ.odt');
+    expect(t.adopt('k-OTHER', 'lid-OTHER'), '身に覚えのない鍵を受け入れた').toBe(false);
+    expect(t.tokenFor('/work/あ.odt'), '別窓あての返事で合言葉が付いた').toBe('');
+  });
+
+  it('🔴 返事は、その鍵の path にだけ効く(隣へ漏れない)', () => {
+    const t = api.createTokenTable();
+    t.remember('kA', '/work/あ.odt');
+    t.remember('kB', '/work/い.odt');
+    t.adopt('kA', 'lid-A');
+    expect(t.tokenFor('/work/あ.odt')).toBe('lid-A');
+    expect(t.tokenFor('/work/い.odt'), '隣の文書へ漏れた').toBe('');
+  });
+
+  it('空の鍵・空の合言葉は受けない(表を壊さない)', () => {
+    const t = api.createTokenTable();
+    t.remember('k1', '/work/あ.odt');
+    expect(t.adopt('', 'lid-1')).toBe(false);
+    expect(t.adopt('k1', '')).toBe(false);
+    expect(t.tokenFor('/work/あ.odt')).toBe('');
+  });
+
+  it('PKC が渡した添付は、はじめから合言葉を持つ', () => {
+    const t = api.createTokenTable();
+    t.seed('/work/報告書.odt', 'lid-SEED');
+    expect(t.tokenFor('/work/報告書.odt')).toBe('lid-SEED');
+    // ⚠ 空を渡しても表を汚さない(文書を渡さずに開いた窓)
+    t.seed(undefined, '');
+    expect(t.tokenFor('')).toBe('');
+  });
+
+  it('🔴 古い鍵の返事も受ける(編集中に溜まった 1 件目にしか返事が来ないことがある)', () => {
+    const t = api.createTokenTable();
+    t.remember('k1', '/work/あ.odt');
+    t.remember('k2', '/work/あ.odt');   // 返事が来る前に 2 回目を保存した
+    expect(t.adopt('k1', 'lid-A'), '古い鍵を落としている ── 返事がどこにも着かない')
+      .toBe(true);
+    expect(t.tokenFor('/work/あ.odt')).toBe('lid-A');
+  });
+
+  it('🔴 覚える鍵に上限がある(差し替えの定常では返事が来ないので、無いと積み続ける)', () => {
+    const t = api.createTokenTable({ max: 3 });
+    for (let i = 0; i < 10; i += 1) t.remember(`k${i}`, '/work/あ.odt');
+    expect(t.keyCount(), '上限が効いていない ── 保存のたびに永久に積む').toBe(3);
+    // ⚠ 落ちるのは**古いほうから**(返事が来る見込みが薄い順)
+    expect(t.adopt('k0', 'lid-OLD')).toBe(false);
+    expect(t.adopt('k9', 'lid-NEW')).toBe(true);
+  });
+
+  it('既定の上限が宣言されている(値を散らさない)', () => {
+    expect(api.KEY_MEMORY_MAX).toBeGreaterThan(8);
+    const t = api.createTokenTable();
+    for (let i = 0; i < api.KEY_MEMORY_MAX + 5; i += 1) t.remember(`k${i}`, `/work/${i}.odt`);
+    expect(t.keyCount()).toBe(api.KEY_MEMORY_MAX);
   });
 });

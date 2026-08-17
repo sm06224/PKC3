@@ -40,6 +40,17 @@ export const OFFICE_CHANNEL = 'pkc3-office';
 /** `host.html` の位置。⚠ 本体の hash 付き chunk 名に引きずられない固定 path。 */
 export const OFFICE_HOST_PATH = 'office/host.html';
 
+/**
+ * 🔴 **「このノートになった」を返す放送の種別**(#217)。
+ *
+ * ⚠ **`public/office/host.html` と同じ綴りでなければ機構ごと死ぬ**。しかも
+ * 両側とも自分の literal を test で pin しているだけなので、**一貫して改名すると
+ * unit も smoke も緑のまま本番だけ壊れる**(着地前レビューで実際に構成された)。
+ * 🔑 だから定数にして、`tests/adapter/office-window.test.ts` が
+ * **`host.html` の原文と突合する**(`OFFICE_STAGE_DIR` と同じ形)。
+ */
+export const OFFICE_ADOPTED = 'adopted';
+
 /** 窓が生きていると見なす猶予。heartbeat はこれより短い間隔で来る。 */
 export const ALIVE_TTL_MS = 4000;
 
@@ -213,6 +224,32 @@ export class OfficeWindow {
     if (bytes.byteLength === 0) return;
     this.pendingDoc = { name, bytes, token };
     if (this.askedForDoc) this.sendDocument();
+  }
+
+  /**
+   * 🔴 **「この保存はこのノートになった」と窓へ返す**(#217)。
+   *
+   * ⚠ これが無いと、**同じ文書を 2 回保存するとノートが 2 件できる** ──
+   * 窓が知っている合言葉は「PKC から渡した添付」の分だけで、
+   * **窓の中で新規に作った文書**(Start Center → 別名で保存)には最初から無い。
+   * 1 回目で作ったノートを窓へ教えないと、2 回目も「合言葉の無い保存」として
+   * また新規のノートになる(cowork 実機 2026-08-16 で 1/1 再現)。
+   *
+   * 🔑 **path ではなく棚の鍵で指す。** 窓は `handOff` した鍵 → path を覚えているので、
+   * 鍵で返せば**どの保存の話か**が一意に決まる ── ⚠ path で返すと、
+   * 別の窓が同じ名前の文書を開いているとき**取り違える**(`/work/報告.odt` は
+   * 窓ごとに別の MEMFS に在り、放送は全窓に届く)。
+   */
+  adoptSave(key: string, token: string): void {
+    if (key === '' || token === '') return;
+    // ⚠ **投げさせない。** ここが投げると、呼び元(`office-save-back.ts`)が棚を
+    //    消す前に抜け、次の掃除で**もう 1 件ノートができる** ── 直したい症状の逆向き。
+    //    🔑 窓側の `say()` も同じ形で包んである(閉じたチャネルは投げる)
+    try {
+      this.ch.postMessage({ pkc3Office: OFFICE_ADOPTED, payload: { key, token } });
+    } catch {
+      // 閉じている ── 返せないだけで、取り込みは成功している
+    }
   }
 
   /** 閉じてくれと頼む。⚠ 握っていないので、こちらから強制はできない。 */

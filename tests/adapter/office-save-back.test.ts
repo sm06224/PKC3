@@ -62,10 +62,16 @@ function fakeStage(): FakeStage {
         v: 1,
         key: save.key,
         name: save.name ?? 'x.odt',
-        path: save.path ?? '/work/x.odt',
+        // ⚠ **既定の path は名前から引く。** 固定にすると、名前が違う別々の文書が
+        //    同じ path を持ち、「同じ文書を束ねる」規則に引っかかる(実際 1 件落ちた)
+        path: save.path ?? `/work/${save.name ?? 'x.odt'}`,
         size: save.size ?? bytes.length,
         at: save.at ?? 1,
         ...(save.token !== undefined ? { token: save.token } : {}),
+        // ⚠ 既定で窓の id を入れる ── 本物の窓は必ず入れる。入れないと
+        //    「同じ文書を束ねる」経路が**この fixture では一度も走らない**
+        //    (= 測っていない次元になる)
+        ...(save.win !== undefined ? { win: save.win } : { win: 'win-1' }),
       };
       files.set(`${save.key}.json`, { text: JSON.stringify(meta) });
       files.set(`${save.key}.bin`, { bytes });
@@ -78,6 +84,7 @@ function harness(over: Partial<SaveBackDeps> = {}): {
   deps: SaveBackDeps;
   created: string[];
   replaced: string[];
+  adopted: string[];
   notices: string[];
   fails: string[];
   sb: ReturnType<typeof createOfficeSaveBack>;
@@ -85,6 +92,7 @@ function harness(over: Partial<SaveBackDeps> = {}): {
   const stage = fakeStage();
   const created: string[] = [];
   const replaced: string[] = [];
+  const adopted: string[] = [];
   const notices: string[] = [];
   const fails: string[] = [];
   const deps: SaveBackDeps = {
@@ -100,11 +108,15 @@ function harness(over: Partial<SaveBackDeps> = {}): {
       replaced.push(lid);
       return true;
     },
+    adopt: (key, lid) => adopted.push(`${key}=${lid}`),
     notify: (m) => notices.push(m),
     fail: (m) => fails.push(m),
     ...over,
   };
-  return { stage, deps, created, replaced, notices, fails, sb: createOfficeSaveBack(deps) };
+  return {
+    stage, deps, created, replaced, adopted, notices, fails,
+    sb: createOfficeSaveBack(deps),
+  };
 }
 
 describe('引き取り ── 新規と差し替えの分かれ道', () => {
@@ -133,6 +145,172 @@ describe('引き取り ── 新規と差し替えの分かれ道', () => {
     expect(await h.sb.receive('o1')).toBe('created');
     expect(h.replaced).toEqual([]);
     expect(h.created).toHaveLength(1);
+  });
+});
+
+/**
+ * 🔴 **2 回目の保存でノートを増やさない**(#217。cowork 実機 2026-08-16 で 1/1 再現)。
+ *
+ * ⚠ 窓が持っている合言葉は「PKC から渡した添付」の分だけなので、**窓の中で新規に
+ * 作った文書**は 1 回目が合言葉なしで届く ── そこで**作ったノートを窓へ返さないと**、
+ * 2 回目も合言葉なしのまま来て**また新しいノートになる**。
+ *
+ * 🔑 観測点は「返したか」ではなく **`(鍵, lid)` の対で返したか**である ──
+ * 鍵が違うと窓は自分のどの保存の話か分からず、対応表を書き換えられない。
+ */
+describe('🔴 作ったノートを窓へ返す(2 回目の保存が増えない)', () => {
+  it('新規に作ったら、鍵と lid を対で返す', async () => {
+    const h = harness();
+    h.stage.put({ key: 'o1', name: '無題 1.odt' });
+    expect(await h.sb.receive('o1')).toBe('created');
+    expect(h.adopted, '作ったノートを窓へ返していない ── 次の保存でノートが増える')
+      .toEqual(['o1=new-lid']);
+  });
+
+  it('窓が既に知っている差し替えでは返さない(合言葉は既に正しい)', async () => {
+    const h = harness();
+    h.stage.put({ key: 'o1', token: 'lid-7' });
+    expect(await h.sb.receive('o1')).toBe('replaced');
+    expect(h.adopted).toEqual([]);
+  });
+
+  /**
+   * 🔴 **窓が知らないまま差し替えになった保存も返す。**
+   *
+   * ⚠ 「新規のときだけ返す」に狭めると穴が残る:編集中に同じ文書が 2 件溜まると
+   * 1 件目=新規 / **2 件目=差し替え**になり、窓が覚えているのは**新しいほうの鍵**
+   * だけとは限らず(窓が覚える鍵には上限が在る ── `KEY_MEMORY_MAX`)、
+   * **返事がどこにも着かないことがある**
+   * → 次の保存でまたノートが増える。
+   */
+  it('🔴 束ねて差し替えになった保存は、その鍵でも返す', async () => {
+    const h = harness();
+    h.stage.put({ key: 'o1', name: 'x.odt', path: '/work/x.odt' });
+    h.stage.put({ key: 'o2', name: 'x.odt', path: '/work/x.odt' });
+    expect(await h.sb.drainAll()).toBe(2);
+    expect(h.created).toEqual(['x.odt']);
+    expect(h.replaced).toEqual(['new-lid']);
+    expect(
+      h.adopted,
+      '新しいほうの鍵で返していない ── 窓は古い鍵を忘れているので届かない',
+    ).toEqual(['o1=new-lid', 'o2=new-lid']);
+  });
+
+  it('🔴 取り込めていないのに返さない(保留 / 失敗)', async () => {
+    const busy = harness({ canWrite: () => false });
+    busy.stage.put({ key: 'o1' });
+    expect(await busy.sb.receive('o1')).toBe('deferred');
+    expect(busy.adopted, '保留したのにノートを名乗った').toEqual([]);
+
+    const stuck = harness({ createNote: async () => null });
+    stuck.stage.put({ key: 'o2' });
+    expect(await stuck.sb.receive('o2')).toBe('deferred');
+    expect(stuck.adopted).toEqual([]);
+  });
+
+  it('🔴 合言葉のノートが消えて新規へ倒れたときも返す(倒れ先を窓へ教える)', async () => {
+    const h = harness({ readAttachment: async () => null });
+    h.stage.put({ key: 'o1', token: 'lid-gone' });
+    expect(await h.sb.receive('o1')).toBe('created');
+    expect(h.adopted, '倒れ先を教えないと、以後ずっと新規になり続ける')
+      .toEqual(['o1=new-lid']);
+  });
+
+  it('🔴 返せなくても、取り込みは成立して棚から消える', async () => {
+    const h = harness({ adopt: () => { throw new Error('放送が閉じている'); } });
+    h.stage.put({ key: 'o1' });
+    expect(await h.sb.receive('o1')).toBe('created');
+    expect(
+      h.stage.keys(),
+      '返せなかっただけで棚が残った ── 次の掃除でノートがもう 1 件できる',
+    ).toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **窓の返事が間に合わない経路**(#217 の残り。着地前レビュー 2026-08-16)。
+ *
+ * ⚠ 窓の表は**往復**で埋まるので、返事が返る前に次の保存が来ると素通りする。
+ * そして**それは編集中に確定的に起きる** ── `canWrite()` が偽の間は棚に溜めるだけで
+ * 返事を出さないので、編集を終えた瞬間に**合言葉の無い同じ文書が複数件**流れてくる。
+ * 🔑 窓の表だけでは塞がらない。**引き取る側も 1 パスの中で同じ文書を束ねる**。
+ *
+ * ⚠ 束ねる鍵は **`win` と `path` の対**である ── path だけだと、2 枚目の窓が
+ * 同じ名前で保存したときに**別の文書どうしを 1 つのノートへ潰す**。
+ */
+describe('🔴 編集中に溜まった同じ文書の保存を、1 件のノートに束ねる', () => {
+  it('編集明けの一括取り込みで、同じ文書はノート 1 件 + 差し替え', async () => {
+    let ready = false;
+    const h = harness({ canWrite: () => ready });
+    h.stage.put({ key: 'o1', name: '無題 1.odt', path: '/home/web_user/無題 1.odt' });
+    h.stage.put({ key: 'o2', name: '無題 1.odt', path: '/home/web_user/無題 1.odt' });
+    expect(await h.sb.receive('o1')).toBe('deferred');
+    expect(await h.sb.receive('o2')).toBe('deferred');
+    expect(h.created, '編集中なのに作った').toEqual([]);
+
+    ready = true;
+    expect(await h.sb.retryDeferred()).toBe(2);
+    expect(h.created, '同じ文書なのにノートを 2 件作った').toEqual(['無題 1.odt']);
+    expect(h.replaced, '2 件目は差し替えのはず').toEqual(['new-lid']);
+    expect(h.stage.keys(), '取り込んだのに棚に残っている').toEqual([]);
+  });
+
+  /**
+   * 🔴 **合言葉が「在るが死んでいる」ときも束ねる**(2 巡目レビュー)。
+   *
+   * ⚠ `save.token` を無条件に優先すると、束ねの表を**一度も見ない** ──
+   * 開いていた添付を user が消した状態で編集中に 2 件溜まると、
+   * 1 件目=新規 / 2 件目も**新規**になり、ここでもノートが 2 件できる。
+   */
+  it('🔴 合言葉が死んでいても、この引き取りで作った先へ倒す', async () => {
+    const h = harness({ readAttachment: async (lid) => (lid === 'new-lid' ? { assetKey: 'a' } : null) });
+    h.stage.put({ key: 'o1', name: 'x.odt', path: '/work/x.odt', token: 'lid-gone' });
+    h.stage.put({ key: 'o2', name: 'x.odt', path: '/work/x.odt', token: 'lid-gone' });
+    expect(await h.sb.drainAll()).toBe(2);
+    expect(h.created, '死んだ合言葉を優先してノートを 2 件作った').toEqual(['x.odt']);
+    expect(h.replaced).toEqual(['new-lid']);
+  });
+
+  it('🔴 path が違えば束ねない(別々の文書)', async () => {
+    const h = harness();
+    h.stage.put({ key: 'o1', name: 'あ.odt', path: '/home/web_user/あ.odt' });
+    h.stage.put({ key: 'o2', name: 'い.odt', path: '/home/web_user/い.odt' });
+    expect(await h.sb.drainAll()).toBe(2);
+    expect(h.created).toEqual(['あ.odt', 'い.odt']);
+    expect(h.replaced, '別の文書を差し替えた').toEqual([]);
+  });
+
+  it('🔴 窓が違えば束ねない(同じ path でも別の MEMFS)', async () => {
+    const h = harness();
+    h.stage.put({ key: 'o1', name: '無題 1.odt', path: '/work/無題 1.odt', win: 'win-A' });
+    h.stage.put({ key: 'o2', name: '無題 1.odt', path: '/work/無題 1.odt', win: 'win-B' });
+    expect(await h.sb.drainAll()).toBe(2);
+    expect(
+      h.created,
+      '別の窓の同名文書を 1 つのノートへ潰した ── 片方の中身が失われる',
+    ).toEqual(['無題 1.odt', '無題 1.odt']);
+    expect(h.replaced).toEqual([]);
+  });
+
+  it('🔴 窓の id が無い古い meta は束ねない(安全側へ倒す)', async () => {
+    const h = harness();
+    h.stage.put({ key: 'o1', name: '無題 1.odt', path: '/work/無題 1.odt', win: '' });
+    h.stage.put({ key: 'o2', name: '無題 1.odt', path: '/work/無題 1.odt', win: '' });
+    expect(await h.sb.drainAll()).toBe(2);
+    expect(h.created).toHaveLength(2);
+    expect(h.replaced).toEqual([]);
+  });
+
+  it('⚠ 束ねた先は次のパスへ持ち越さない(窓を読み直すと同じ path に別の文書が居る)', async () => {
+    const h = harness();
+    h.stage.put({ key: 'o1', name: '無題 1.odt', path: '/work/無題 1.odt' });
+    expect(await h.sb.drainAll()).toBe(1);
+    h.stage.put({ key: 'o2', name: '無題 1.odt', path: '/work/無題 1.odt' });
+    expect(await h.sb.drainAll()).toBe(1);
+    expect(
+      h.created,
+      'パスを跨いで束ねた ── 窓の返事(adopted)だけが持ち越してよい',
+    ).toHaveLength(2);
   });
 });
 
@@ -291,6 +469,23 @@ describe('holder の門(main.ts の配線)', () => {
     expect(code, '後条件が phase しか見ていない ── 捨てられたのに棚を空にする').toContain(
       "after.entryMetas.get(lid)?.archetype === 'attachment'",
     );
+  });
+
+  /**
+   * 🔴 **作ったノートを窓へ返す配線**(2 巡目レビュー)。
+   *
+   * ⚠ `main.ts` は**どの test からも import されない**ので、ここを原文で pin しないと
+   * 誰も見ていない。実際、引数を入れ替える変異
+   * (`officeWindow.adoptSave(lid, key)`)は **unit も smoke も typecheck も緑のまま**
+   * #217 を完全に未修正へ戻す(窓は `paths[lid]` を知らないので返事が捨てられる。
+   * 引数は両方 `string` なので型でも止まらない)。
+   * 🔑 だから**引数の順まで**含めて等値で見る ── 「名前が在る」では足りない。
+   */
+  it('🔴 作ったノートを窓へ返している(引数の順まで)', () => {
+    expect(
+      code,
+      'adopt が窓へ届いていない ── 2 回目の保存でノートが増える',
+    ).toContain('adopt: (key, lid) => { officeWindow.adoptSave(key, lid); }');
   });
 
   it('🔴 boot で取れたときと、昇格したときの**両方**で真になる', () => {

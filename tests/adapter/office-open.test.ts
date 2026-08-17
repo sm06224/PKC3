@@ -29,11 +29,11 @@ const DOCX: OfficeTarget = {
 
 function fakeWindow(): OfficeWindow & {
   opens: { name?: string; expectDocument?: boolean; bytes?: Uint8Array }[];
-  provided: { name: string; bytes: Uint8Array }[];
+  provided: { name: string; bytes: Uint8Array; token: string }[];
   alreadyOpen: boolean;
 } {
   const opens: { name?: string; expectDocument?: boolean; bytes?: Uint8Array }[] = [];
-  const provided: { name: string; bytes: Uint8Array }[] = [];
+  const provided: { name: string; bytes: Uint8Array; token: string }[] = [];
   const w = {
     opens,
     provided,
@@ -42,7 +42,12 @@ function fakeWindow(): OfficeWindow & {
       opens.push(opts);
       return { kind: w.alreadyOpen ? 'already-open' : 'opened' } as const;
     },
-    provideDocument(name: string, bytes: Uint8Array) { provided.push({ name, bytes }); },
+    // ⚠ **合言葉まで控える。** 2026-08-16 まで第 3 引数を捨てていたので、
+    //    「lid を渡すのをやめる」変異が**全緑のまま通った**(= #205 が直した当の
+    //    症状「上書き保存が新しいノートを増やす」が、誰にも守られていなかった)
+    provideDocument(name: string, bytes: Uint8Array, token = '') {
+      provided.push({ name, bytes, token });
+    },
     requestClose() {},
     dispose() {},
     isProbablyOpen() { return w.alreadyOpen; },
@@ -81,6 +86,32 @@ describe('createOfficeOpener', () => {
     await vi.waitFor(() => expect(officeWindow.provided.length).toBe(1));
     expect(officeWindow.opens.length, '後渡しでも 2 つ目を開かない').toBe(1);
     expect(officeWindow.provided[0]!.bytes).toEqual(new Uint8Array([1, 2, 3]));
+  });
+
+  /**
+   * 🔴 **合言葉(lid)を窓へ預ける**(#205 / 着地前レビュー 2026-08-16)。
+   *
+   * ⚠ ここは**この経路にしか無い**。smoke(`office-host.smoke.spec.ts`)は
+   * `document` の payload を**手で投げている**ので、この行を 1 度も通らない ──
+   * `provideDocument` から第 3 引数を落とす変異が**全緑のまま通っていた**。
+   * 実害は #205 が直した当の症状:上書き保存が元のノートを更新せず、
+   * **新しい添付ノートを増やす**。
+   */
+  it('🔴 lid を持つ添付は、合言葉ごと窓へ預ける', async () => {
+    const { opener, officeWindow } = make();
+    opener.open({ ...DOCX, lid: 'lid-77' });
+    await vi.waitFor(() => expect(officeWindow.provided.length).toBe(1));
+    expect(
+      officeWindow.provided[0]!.token,
+      '合言葉が落ちている ── その窓の保存は元のノートを更新しない',
+    ).toBe('lid-77');
+  });
+
+  it('lid が無ければ合言葉も無い(新規の添付ノートになる)', async () => {
+    const { opener, officeWindow } = make();
+    opener.open(DOCX);
+    await vi.waitFor(() => expect(officeWindow.provided.length).toBe(1));
+    expect(officeWindow.provided[0]!.token).toBe('');
   });
 
   it('🔴 窓を開くのは同期のうち(user gesture を切らない)', () => {
