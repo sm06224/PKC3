@@ -69,6 +69,8 @@ test('添付取込 → entry 出現 → image preview が可視高さを持つ',
       void d.accept();
     });
   });
+  // ⚠ #239 でこの操作は設定の中(書き出しと片づけ)へ移った ── 先に開く
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
   await clickReal(page, '[data-pkc-action="purge-orphan-assets"]');
   expect(await dialogMsg).toContain('未参照の添付データはありません');
 
@@ -265,6 +267,8 @@ test('🔴 配った HTML でも PDF が読める大きさで出る', async ({ p
   );
 
   const dl = page.waitForEvent('download');
+  // ⚠ #239 でこの操作は設定の中(書き出しと片づけ)へ移った ── 先に開く
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
   await clickReal(page, '[data-pkc-action="export-html"]');
   const file = join(tmpdir(), `pkc3-pdf-${process.pid}.html`);
   await (await dl).saveAs(file);

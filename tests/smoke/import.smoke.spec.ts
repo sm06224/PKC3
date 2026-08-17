@@ -110,6 +110,8 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
       void d.accept();
     });
   });
+  // ⚠ #239 でこの操作は設定の中(書き出しと片づけ)へ移った ── 先に開く
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
   await clickReal(page, '[data-pkc-action="purge-orphan-assets"]');
   expect(await dialogMsg).toContain('未参照の添付データはありません');
 
@@ -763,6 +765,8 @@ test('🔴 可搬 HTML: 書き出したファイルが**単体で開いて読め
   await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(2);
 
   const dl = page.waitForEvent('download');
+  // ⚠ #239 でこの操作は設定の中(書き出しと片づけ)へ移った ── 先に開く
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
   await clickReal(page, '[data-pkc-action="export-html"]');
   const download = await dl;
   expect(download.suggestedFilename()).toMatch(/\.html$/);
@@ -944,6 +948,8 @@ test('🔴 md ZIP: 落ちるものを言い、添付が**相対パス**で入る
   await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(2);
 
   const dl = page.waitForEvent('download');
+  // ⚠ #239 でこの操作は設定の中(書き出しと片づけ)へ移った ── 先に開く
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
   await clickReal(page, '[data-pkc-action="export-markdown"]');
   const download = await dl;
   expect(download.suggestedFilename()).toMatch(/\.md\.zip$/);

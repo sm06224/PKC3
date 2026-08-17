@@ -259,10 +259,25 @@ test('🔴 主要な導線が畳まれず、その場で押せる', async ({ pag
   await gotoApp(page);
 
   expect(await page.locator('details').count(), '導線が畳まれている').toBe(0);
-  for (const action of ['import-file', 'export-archive', 'export-html', 'export-markdown', 'purge-orphan-assets']) {
+  // 左の列に残るもの ── よく押す / 押せないと詰まるもの
+  for (const action of ['import-file', 'export-archive']) {
     await expect(
       page.locator(`[data-pkc-action="${action}"]`),
       `${action} が見えていない`,
+    ).toBeVisible();
+  }
+  /**
+   * 🔴 **移した先でも「畳んでいない」**(#239、user 指示 2026-08-17)。
+   *
+   * ⚠ 逃がすことと畳むことは違う ── 設定は面(region)なので、開けば 3 つとも
+   * **見えて押せる**。ここを見ないと「設定へ移した」と称して**実は消えていた**を
+   * 素通りさせる(押す口が消えて受け手だけ残る形は、こちらの検査に 1 つも鳴らない)。
+   */
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  for (const action of ['export-html', 'export-markdown', 'purge-orphan-assets']) {
+    await expect(
+      page.locator(`[data-pkc-action="${action}"]`),
+      `${action} が設定の面でも見えていない`,
     ).toBeVisible();
   }
   // 押せること(覆われていない)まで見る ── 見えていても押せない配置がある

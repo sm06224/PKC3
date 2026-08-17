@@ -22,6 +22,7 @@ import { appJobMonitor, type JobMonitor } from '@adapter/platform/job-monitor';
 import { appNoticeStore, type NoticeStore } from '@adapter/platform/notice-store';
 import { ScrollMemory } from './scroll-memory';
 import { buildOfficePackPanel, type OfficePackPanel } from './office-pack-panel';
+import { buildSettingsCommands } from './commands';
 
 /** 画面の書き換えを間引く間隔。⚠ **可視化がジャンクの原因になっては本末転倒**。 */
 const REFRESH_MS = 400;
@@ -222,6 +223,7 @@ export class SettingsRenderer {
 
     userSection.append(dl);
     body.append(userSection);
+    body.append(buildSettingsCommands());
     body.append(this.buildExternalImages());
     /**
      * 🔴 **Office 一式**(#88 / O6-a)。⚠ 「表示」の節に混ぜない ── 見た目の
