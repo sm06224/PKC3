@@ -24,6 +24,7 @@
  */
 import { chromium } from '@playwright/test';
 import { mkdirSync, rmSync } from 'node:fs';
+import { seedEditorArm, fillBody } from './editor-arm.mjs';
 
 const args = Object.fromEntries(
   process.argv.slice(2).map((a) => {
@@ -66,6 +67,12 @@ async function main() {
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
 
+  /**
+   * ⚠ 本文の**用意**は 2 ペイン(split)でやる(#223)── この計器が測るのは
+   * ラスタの上限と追い出しで、**打ち方は測定対象ではない**。決定的で速い側を使う。
+   */
+  const ARM = 'split';
+  await seedEditorArm(page, ARM);   // ⚠ 最初の goto より前
   await page.goto(`http://localhost:${PORT}/`);
   await page.waitForSelector('[data-pkc-slot="root"][data-pkc-boot="ready"]', { timeout: 60000 });
 
@@ -145,7 +152,7 @@ async function main() {
   for (let i = 0; i < DIAGRAMS; i++) {
     await page.click('[data-pkc-action="create-entry"]');
     await page.fill('[data-pkc-field="editor-title"]', `図 ${i}`);
-    await page.fill('[data-pkc-field="editor-body"]', `# 図 ${i}\n\n${diagram(i, NODES)}\n`);
+    await fillBody(page, ARM, `# 図 ${i}\n\n${diagram(i, NODES)}\n`);
     await page.click('[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
     await page.waitForSelector('[data-pkc-action="start-edit"]');
     await page.waitForSelector(img, { timeout: 60000 });
@@ -185,7 +192,7 @@ async function main() {
     const many = Array.from({ length: BURST }, (_, k) => diagram(1000 + k, NODES)).join('\n\n');
     await page.click('[data-pkc-action="create-entry"]');
     await page.fill('[data-pkc-field="editor-title"]', '図まとめ');
-    await page.fill('[data-pkc-field="editor-body"]', `# まとめ\n\n${many}\n`);
+    await fillBody(page, ARM, `# まとめ\n\n${many}\n`);
     await page.click('[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
     await page.waitForSelector('[data-pkc-action="start-edit"]');
     // 焼いている**最中**を舐める(落ち着いてから読むと山を見逃す)

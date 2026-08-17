@@ -29,6 +29,7 @@
  */
 import { chromium } from '@playwright/test';
 import { readFileSync, readdirSync, rmSync, mkdirSync } from 'node:fs';
+import { seedEditorArm } from './editor-arm.mjs';
 
 const args = Object.fromEntries(
   process.argv.slice(2).map((a) => {
@@ -114,6 +115,15 @@ try {
   page.on('pageerror', (e) => errors.push(e.message));
 
   // ── ① 本文を仕込む(今日の 2 列で作って保存 ── 実アプリの経路)
+  /**
+   * 🔴 **仕込みも腕を明示する**(#223)。⚠ ここは「①ノートを 1 件作る」段で、
+   * 下の②で腕を仕込む**前**に走る ── 何も指定しないと **#172 以降の既定(live)**で
+   * 開き、`editor-body` が無くて `ta.value` が `TypeError` になっていた
+   * (live 腕でも split 腕でも 1 回目の goto は既定 live だった)。
+   * 🔑 仕込みは split で固定する(打ち方は測定対象ではない)。②の
+   *   `addInitScript` は**この後に**足すので、測る腕はそちらが決める。
+   */
+  await seedEditorArm(page, 'split');
   await page.goto(`http://localhost:${PORT}/`);
   await page.waitForSelector('[data-pkc-boot="ready"]', { timeout: 20_000 });
   await page.click('[data-pkc-field="create-pick"]');

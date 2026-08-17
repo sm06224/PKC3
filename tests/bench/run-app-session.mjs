@@ -28,6 +28,7 @@
  */
 import { chromium } from '@playwright/test';
 import { mkdirSync, rmSync } from 'node:fs';
+import { armFrom, seedEditorArm, fillBody } from './editor-arm.mjs';
 
 const args = Object.fromEntries(
   process.argv.slice(2).map((a) => {
@@ -39,6 +40,12 @@ const PORT = Number(args.port ?? 45741);
 const ROUNDS = Number(args.rounds ?? 40);
 /** 暖機(boot と初回の遅延生成を定常に混ぜない)。 */
 const WARMUP = Number(args.warmup ?? 8);
+/**
+ * 🔴 **どの編集面の定常を測るか**(#223)。既定は **live**(#172 で user が使う面に
+ * なった)。⚠ `--arm=split` は 2026-08-14 以前の数字と並べたいときだけ使う ──
+ * 打鍵が state へ届く経路そのものが違うので、**2 つの数字は連続していない**。
+ */
+const ARM = armFrom(process.argv);
 const PROFILE = '/tmp/pkc3-app-session-profile';
 
 /**
@@ -97,6 +104,7 @@ async function main() {
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
 
+  await seedEditorArm(page, ARM);   // ⚠ 最初の goto より前(#223)
   await page.goto(`http://localhost:${PORT}/`);
   await page.waitForSelector('[data-pkc-slot="root"][data-pkc-boot="ready"]', { timeout: 60000 });
 
@@ -247,7 +255,7 @@ async function main() {
   for (let i = 0; i < FIXTURE.notes; i++) {
     await page.click('[data-pkc-action="create-entry"]');
     await page.fill('[data-pkc-field="editor-title"]', `ノート ${i}`);
-    await page.fill('[data-pkc-field="editor-body"]', body(i, 0));
+    await fillBody(page, ARM, body(i, 0));
     await page.click('[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
     await page.waitForSelector('[data-pkc-action="start-edit"]');
   }
@@ -293,7 +301,7 @@ async function main() {
     await page.locator(noteRows).nth(i).click();
     await page.waitForSelector('[data-pkc-action="start-edit"]');
     await page.click('[data-pkc-action="start-edit"]');
-    await page.fill('[data-pkc-field="editor-body"]', body(i, r + 1));
+    await fillBody(page, ARM, body(i, r + 1));
     await sleep(600); // プレビューの静穏(500ms)を越えて 1 回描かせる
     await page.click('[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
     await page.waitForSelector('[data-pkc-action="start-edit"]');
@@ -325,6 +333,7 @@ async function main() {
     // ⚠ **実際に出た数**(0 なら、その次元は測れていない)
     observed: { ...seen, attachmentBytes: attachBytes },
     rounds: ROUNDS,
+    arm: ARM,
     warmup: WARMUP,
     // ⚠ 計器の検品(既知の 300ms を見えたか)── ここが小さければ下の 0 は嘘
     instrumentProbe: probed,

@@ -25,6 +25,7 @@
  */
 import { chromium } from '@playwright/test';
 import { mkdirSync, rmSync } from 'node:fs';
+import { seedEditorArm, fillBody } from './editor-arm.mjs';
 
 const args = Object.fromEntries(
   process.argv.slice(2).map((a) => {
@@ -56,32 +57,59 @@ async function main() {
   // ── タブ A: 先に開いて lease を握る
   const a = ctx.pages()[0] ?? (await ctx.newPage());
   a.on('pageerror', (e) => errors.push(`A: ${String(e)}`));
+  /**
+   * ⚠ 本文の**用意**は 2 ペイン(split)でやる(#223)── この計器が測るのは
+   * 2 枚目のタブの待機と昇格で、**打ち方は測定対象ではない**。
+   */
+  const ARM = 'split';
+  await seedEditorArm(a, ARM);   // ⚠ 最初の goto より前
   await a.goto(`http://localhost:${PORT}/`);
   await a.waitForSelector('[data-pkc-slot="root"][data-pkc-boot="ready"]', { timeout: 60000 });
 
   for (let i = 0; i < NOTES; i++) {
     await a.click('[data-pkc-action="create-entry"]');
     await a.fill('[data-pkc-field="editor-title"]', `ノート ${i}`);
-    await a.fill('[data-pkc-field="editor-body"]', body(i, 0));
+    await fillBody(a, ARM, body(i, 0));
     await a.click('[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
     await a.waitForSelector('[data-pkc-action="start-edit"]');
   }
 
-  // ── タブ B: 後から開く → 待機に入る
+  /**
+   * ── タブ B: 後から開く → **フォロワーとして開く**(#177 で挙動が変わった)
+   *
+   * 🔴 **前提の書き換え**(2026-08-17、#223 の実走で判明)。この計器は
+   * 「2 枚目は `別のタブで開いています` で**待機する**」を前提にしていたが、
+   * #177(2026-08-15)で **2 枚目も普通に使える**ようになったので、その前提は
+   * もう成立しない ── 待機を待って **30 秒で落ちていた**。
+   * ⚠ 「観測点が死んだ」だけでなく「**主張が死んだ**」型である(CLAUDE.md §1)。
+   * 🔑 いまの前提は「**フォロワーとして boot する**」= 保存は本体タブ経由になる。
+   *   その証拠(帯の文言)を先に採る ── これが崩れると下の測定は全部無意味である。
+   */
   const b = await ctx.newPage();
   b.on('pageerror', (e) => errors.push(`B: ${String(e)}`));
   await b.goto(`http://localhost:${PORT}/`);
+  await b.waitForSelector('[data-pkc-slot="root"][data-pkc-boot="ready"]', { timeout: 60000 });
+  /**
+   * 🔴 **帯は「状態の行」だけで見る**(2026-08-17。初稿は root 全体を見ていた)。
+   * ⚠ root で探すと、**お知らせのカード**(2026-08-15 の「保存は本体タブ経由です
+   * と画面下に出ます」)に満たされて**常に真**になる ── 昇格して帯が消えても
+   * 「消えていない」と読む。実際に 1 回転それで誤った(CLAUDE.md §1)。
+   */
+  const STATUS = '[data-pkc-region="status"]';
+  const badgeOf = async (page) =>
+    ((await page.locator(STATUS).textContent()) ?? '').includes('保存は本体タブ経由です');
   await b.waitForFunction(
-    () => (document.querySelector('[data-pkc-slot="root"]')?.textContent ?? '').includes('別のタブ'),
-    null,
+    (sel) => (document.querySelector(sel)?.textContent ?? '').includes('保存は本体タブ経由です'),
+    STATUS,
     { timeout: 30000 },
   );
-  // 🔴 **前提が成立しているか**(boot 済みのタブを測っても意味がない)
-  const waiting = {
-    message: (await b.locator('[data-pkc-slot="root"]').textContent())?.slice(0, 24) ?? '',
+  const follower = {
+    badge: await badgeOf(b),
     booted: await b.locator('[data-pkc-slot="root"]').getAttribute('data-pkc-boot'),
   };
-  if (waiting.booted !== null) throw new Error(`2 枚目が待機していない: boot=${waiting.booted}`);
+  // 🔴 **前提が成立しているか**(本体として開いたタブを測っても意味がない)
+  if (!follower.badge) throw new Error('2 枚目がフォロワーになっていない(帯が出ていない)');
+  if (follower.booted !== 'ready') throw new Error(`2 枚目が boot していない: ${follower.booted}`);
 
   const sampleB = () =>
     b.evaluate(() => {
@@ -101,7 +129,7 @@ async function main() {
     await a.locator(noteRows).nth(i).click();
     await a.waitForSelector('[data-pkc-action="start-edit"]');
     await a.click('[data-pkc-action="start-edit"]');
-    await a.fill('[data-pkc-field="editor-body"]', body(i, r));
+    await fillBody(a, ARM, body(i, r));
     await a.click('[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
     await a.waitForSelector('[data-pkc-action="start-edit"]');
     lastRound = r;
@@ -113,6 +141,7 @@ async function main() {
   // ── 🔴 本丸: A を閉じて、B が昇格するか
   await a.close();
   let promoted;
+  let badgeAfterPromotion = null;
   let promotedNotes = -1;
   let promotedBody = '';
   try {
@@ -125,6 +154,12 @@ async function main() {
     await b.waitForSelector('[data-pkc-field="detail-body"]', { timeout: 30000 });
     await sleep(400);
     promotedBody = (await b.locator('[data-pkc-field="detail-body"]').textContent()) ?? '';
+    /**
+     * 🔴 **帯が消えることも見る**(`main.ts` の「本体経由はもう成立していない」)。
+     * ⚠ 消えないと、昇格したのに user は「保存は他のタブ経由」と読み続ける ──
+     * **嘘の表示が残る**形で、起動の成否だけでは捕まらない。
+     */
+    badgeAfterPromotion = await badgeOf(b);
   } catch (e) {
     promoted = `失敗(昇格しない): ${String(e).slice(0, 80)}`;
   }
@@ -141,14 +176,16 @@ async function main() {
     JSON.stringify(
       {
         fixture: { notes: NOTES, rounds: ROUNDS },
-        // ⚠ 待機していたことの証拠(ここが崩れると下は全部無意味)
-        waiting,
+        // ⚠ フォロワーとして開いたことの証拠(ここが崩れると下は全部無意味)
+        follower,
         secondTabWhileIdle: {
           heapMb: { early: med(early.map((x) => x.heapMb)), late: med(late.map((x) => x.heapMb)) },
           domNodes: { early: med(early.map((x) => x.nodes)), late: med(late.map((x) => x.nodes)) },
         },
         promotion: {
           result: promoted,
+          // 🔴 昇格したら「本体タブ経由」の帯は消えていること(嘘を残さない)
+          badgeCleared: badgeAfterPromotion === false,
           notesShown: promotedNotes,
           expectedNotes: NOTES,
           // 🔴 最後に書いた印が出ているか(空 DB で昇格していないか)
