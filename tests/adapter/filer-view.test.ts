@@ -196,6 +196,22 @@ describe('filer view (P3-7b)', () => {
     expect(d.getState().selectedLid, 'ルートへ戻すと選択まで捨てている').toBe('a');
   });
 
+  it('🔴 表そのものにも焦点を置ける(空のフォルダでも鍵の面に入れる)', async () => {
+    /**
+     * 🔴 **属性で見る** ── `tabIndex` の getter は置いていなくても `-1` を返すので
+     * `toBe(-1)` は**外しても緑**になる(#240 で実際に生き延びた変異)。
+     * ⚠ 直す前は binder の `focusFirstRow()` の中で付けていた ── つまり
+     *   **その関数を 1 度通るまで表に焦点が入らない**ので、マウスだけの user は
+     *   空のフォルダで鍵の面へ入れなかった(描く側が持つべき属性である)。
+     */
+    const { root, pane } = setup(METAS, RELS);
+    root.querySelector<HTMLElement>('[data-pkc-browse="filer"]')!.click();
+    await tick();
+    const table = pane.querySelector('[data-pkc-region="filer-table"]')!;
+    expect(table.hasAttribute('tabindex'), '表に焦点が入らない').toBe(true);
+    expect(table.getAttribute('tabindex'), 'Tab の巡回に入れてはいけない').toBe('-1');
+  });
+
   it('同一 scope 内の選択変更は属性 patch のみ(table を作り直さない ── review #2)', async () => {
     const { root, q, pane } = setup(METAS, RELS);
     root.querySelector<HTMLElement>('[data-pkc-browse="filer"]')!.click();
