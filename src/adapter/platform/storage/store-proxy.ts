@@ -69,7 +69,9 @@ const MUTATING_OPS: ReadonlySet<StorageRequest['op']> = new Set([
 function changedLids(req: StorageRequest): string[] | null {
   switch (req.op) {
     case 'upsertEntry':
-      return [req.entry.lid];
+      // ⚠ 居場所も書く形(#258)は**親フォルダの中身も変わる** ── 当たり先を
+      //    子だけに絞ると、部分更新へ変えた日に親の一覧が古いまま残る
+      return req.parent ? null : [req.entry.lid];
     case 'deleteEntry':
     case 'setEntryParent':
       return [req.lid];

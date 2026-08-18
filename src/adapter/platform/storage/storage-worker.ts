@@ -605,6 +605,37 @@ function restoreOneChain(
   }
 }
 
+/**
+ * 🔴 **居場所を張り替える中身**(tx の中で呼ぶ ── `BEGIN` はしない)。
+ *
+ * ⚠ `setEntryParent`(移動)と `upsertEntry` の `parent`(#258 の作成)の**両方**が
+ * ここを通る ── 2 か所に書くと、片方だけ直したときに**移動と作成で結果が違う**
+ * (CLAUDE.md §7「同じ判定が複数の場所にある」)。
+ */
+function writeParent(
+  database: Database,
+  cid: string,
+  lid: string,
+  parentLid: string | null,
+  relationId: string,
+): void {
+  database.exec({
+    sql: `DELETE FROM relations WHERE cid = ? AND to_lid = ? AND kind = 'structural'`,
+    bind: [cid, lid],
+  });
+  if (parentLid === null) return;
+  database.exec({
+    sql: `INSERT INTO relations (cid, id, from_lid, to_lid, kind, created_at, updated_at)
+          VALUES (?, ?, ?, ?, 'structural', datetime('now'), datetime('now'))
+          ON CONFLICT(cid, id) DO UPDATE SET
+            from_lid = excluded.from_lid,
+            to_lid = excluded.to_lid,
+            kind = excluded.kind,
+            updated_at = excluded.updated_at`,
+    bind: [cid, relationId, parentLid, lid],
+  });
+}
+
 const handlers: Handlers = {
   init: (req) => init(req.dbName, req.journalMode),
   openContainer: (req) => {
@@ -775,6 +806,14 @@ const handlers: Handlers = {
         }
       }
       database.exec({ sql: UPSERT_SQL, bind: bindUpsert(req.cid, req.entry) });
+      /**
+       * 🔴 **同じ tx で居場所も張る**(#258)。
+       * ⚠ 順序に **FK の制約は無い**(`schema.ts` の relations に FK は無い)── 行を先に
+       *   書くのは**読み手の期待**と 2 手だった頃の並びに合わせるためで、入れ替えても
+       *   DB は壊れない(「これが無いと壊れる」と書かない ── CLAUDE.md §1)。
+       */
+      if (req.parent)
+        writeParent(database, req.cid, req.entry.lid, req.parent.parentLid, req.parent.relationId);
       // 🔑 **刻んだ時刻を返す**(P9 段①)。`datetime('now')` を打つのはここだけなので、
       // 返さないと主スレッドは**次の boot まで作成・更新の時刻を知らない**
       // (実際に情報列が終日「—」になっていた)。⚠ 同 tx 内で読む ──
@@ -785,7 +824,12 @@ const handlers: Handlers = {
         [req.cid, req.entry.lid],
       )[0] as { created_at: string | null; updated_at: string | null } | undefined;
       database.exec('COMMIT');
-      return { createdAt: stamped?.created_at ?? null, updatedAt: stamped?.updated_at ?? null };
+      return {
+        createdAt: stamped?.created_at ?? null,
+        updatedAt: stamped?.updated_at ?? null,
+        // ⚠ **書いたときだけ名乗る**(旧 worker は名乗らない = 呼び側が 2 手へ落ちる)
+        ...(req.parent ? { parentWritten: true } : {}),
+      };
     } catch (err) {
       try {
         database.exec('ROLLBACK');
@@ -941,22 +985,7 @@ const handlers: Handlers = {
     const database = need();
     database.exec('BEGIN IMMEDIATE');
     try {
-      database.exec({
-        sql: `DELETE FROM relations WHERE cid = ? AND to_lid = ? AND kind = 'structural'`,
-        bind: [req.cid, req.lid],
-      });
-      if (req.parentLid !== null) {
-        database.exec({
-          sql: `INSERT INTO relations (cid, id, from_lid, to_lid, kind, created_at, updated_at)
-                VALUES (?, ?, ?, ?, 'structural', datetime('now'), datetime('now'))
-                ON CONFLICT(cid, id) DO UPDATE SET
-                  from_lid = excluded.from_lid,
-                  to_lid = excluded.to_lid,
-                  kind = excluded.kind,
-                  updated_at = excluded.updated_at`,
-          bind: [req.cid, req.relationId, req.parentLid, req.lid],
-        });
-      }
+      writeParent(database, req.cid, req.lid, req.parentLid, req.relationId);
       database.exec('COMMIT');
     } catch (err) {
       try {

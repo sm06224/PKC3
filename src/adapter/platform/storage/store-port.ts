@@ -72,6 +72,8 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
         entry,
         checkpoint: opts?.checkpoint === true,
         keepLatest: REVISION_KEEP_LATEST,
+        // ⚠ 居場所は**同じ tx**で(#258)── 省略時は辺に触らない
+        ...(opts?.parent ? { parent: opts.parent } : {}),
       }),
     /**
      * ノートを消す。⚠ **アプリの保存領域はここでは消さない**(P8 段⑳)。

@@ -98,6 +98,37 @@ CSP が止めた試行も `page.on('request')` に**上がる**(応答は 1 度�
 // → まず app 側が bare でないことを assert してから、両面を toEqual で比べる
 ```
 
+### 🔴 ③-b 時間に依存する観測点は、**負荷でしか出ない不具合**を捕まえない(2026-08-18、#258)
+
+「フォルダの中に作る → 読み込み直す → まだ中に居る」は**証拠にならなかった**。
+作成を 2 手(行を書く → ack → 辺を書く)に戻す変異を当てても **smoke は緑のまま**
+── reload まで数百 ms あるので、2 手目が間に合ってしまう。
+⚠ 元の不具合は**全量実行のときだけ**落ちた形なので、**時間で決まる観測点では
+永久に捕まらない**(単独では通り、CI の混んだ回だけ赤くなる = flake に見える)。
+
+🔑 **配線そのものを見る。** worker への命令列を採れば、時間に依らず確定する:
+
+```ts
+await page.addInitScript(() => {
+  const w = window as unknown as { __ops?: string[] };
+  w.__ops = [];
+  const orig = Worker.prototype.postMessage;
+  Worker.prototype.postMessage = function (this: Worker, data: unknown, ...rest: unknown[]) {
+    const req = (data as { req?: { op?: string; parent?: unknown } } | null)?.req;
+    if (req?.op) w.__ops!.push(req.op === 'upsertEntry' && req.parent ? 'upsertEntry+parent' : req.op);
+    return (orig as (d: unknown, ...r: unknown[]) => void).call(this, data, ...rest);
+  } as typeof Worker.prototype.postMessage;
+});
+// … 操作 …
+const ops = await page.evaluate(() => (window as unknown as { __ops: string[] }).__ops.slice());
+expect(ops, 'この test は空振り').toContain('upsertEntry+parent'); // ⚠ 空振り防止
+expect(ops, '2 手に割れている').not.toContain('setEntryParent');
+```
+
+⚠ **記録を採る前に配列を空にする**(前の操作の命令が混ざると、どちらの操作の話か読めない)。
+🔑 同型の先例: 2026-08-17「読みが書きを追い越す」も、`postMessage` を包んで
+**命令の順番を記録**したことで推測が事実に変わった。
+
 ### ④ 計算後の style だけを見ない
 
 `display: none` を併せると**改頁は消える**のに、計算後の `break-after` は `'page'` の

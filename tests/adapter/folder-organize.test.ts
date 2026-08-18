@@ -219,7 +219,7 @@ describe('居場所を変える(reducer)', () => {
 describe('いま見ているフォルダの中に作る(reducer)', () => {
   const METAS = [meta('f1', 1, 'folder'), meta('n0', 2)];
 
-  it('🔴 親つき作成 ── 辺も張り、**entry を書いた後**に永続化を頼む', () => {
+  it('🔴 親つき作成 ── 行と辺を **1 つの要求**で頼む(#258 のデータ欠損)', () => {
     const s0 = READY(METAS, []);
     const r = reduce(s0, {
       type: 'CREATE_ENTRY',
@@ -232,17 +232,18 @@ describe('いま見ているフォルダの中に作る(reducer)', () => {
     expect(
       getStructuralChildren('f1', r.state.entryMetas, r.state.relations).map((m) => m.lid),
     ).toEqual(['new1']);
-    // ⚠ 順序が本題 ── 行が無いところへ辺を張ると FK / 掃除の前提が崩れる
-    expect((r.events as Array<{ type: string }>).map((e) => e.type)).toEqual([
-      'PERSIST_ENTRY',
-      'REQUEST_SET_PARENT',
-    ]);
-    expect(r.events[1]).toEqual({
-      type: 'REQUEST_SET_PARENT',
-      lid: 'new1',
-      parentLid: 'f1',
-      relationId: 'rel-c',
-    });
+    /**
+     * 🔴 **要求は 1 つ**(#258)。直す前は `PERSIST_ENTRY` の後ろに
+     * `REQUEST_SET_PARENT` を並べる 2 手で、effect が 1 件ずつ worker へ流すので
+     * **行を書いた ack と辺の書込の間**にタブを閉じると親だけ飛んだ
+     * ── ノートは残るのにルート直下に現れる(実測。smoke が全量実行でだけ落ちた)。
+     * ⚠ 「2 つの要求を 1 回の enqueue にまとめる」では直らない(`await` で窓が開く)。
+     */
+    expect((r.events as Array<{ type: string }>).map((e) => e.type)).toEqual(['PERSIST_ENTRY']);
+    expect(
+      (r.events[0] as { parent?: unknown }).parent,
+      '居場所が同じ要求に乗っていない(2 手に割れている)',
+    ).toEqual({ parentLid: 'f1', relationId: 'rel-c' });
   });
 
   it('親を渡さなければ従来どおりルートに作る(辺は増えない)', () => {
@@ -255,6 +256,8 @@ describe('いま見ているフォルダの中に作る(reducer)', () => {
     });
     expect(r.state.relations).toEqual([]);
     expect((r.events as Array<{ type: string }>).map((e) => e.type)).toEqual(['PERSIST_ENTRY']);
+    // ⚠ 親が無いときは **`parent` を載せない**(載せると「ルートへ出す」= 辺を消す指示になる)
+    expect((r.events[0] as { parent?: unknown }).parent).toBeUndefined();
   });
 
   it('🔴 入れ先が folder でなければ、断らずにルートへ作る', () => {
@@ -271,6 +274,8 @@ describe('いま見ているフォルダの中に作る(reducer)', () => {
     expect(r.state.entryMetas.has('new3')).toBe(true);
     expect(r.state.relations).toEqual([]);
     expect((r.events as Array<{ type: string }>).map((e) => e.type)).toEqual(['PERSIST_ENTRY']);
+    // ⚠ 親が無いときは **`parent` を載せない**(載せると「ルートへ出す」= 辺を消す指示になる)
+    expect((r.events[0] as { parent?: unknown }).parent).toBeUndefined();
   });
 });
 
@@ -297,13 +302,15 @@ function setup(metas: EntryMeta[], relations: Relation[]) {
     },
   });
   const parentCalls: Array<{ lid: string; parentLid: string | null; relationId: string }> = [];
-  const persisted: Array<{ lid: string; entryOrder: number }> = [];
+  const persisted: Array<{ lid: string; entryOrder: number; parent?: unknown }> = [];
   connectStoreEffects(d, {
     ...stubRevisionOps(),
     getBody: async () => '',
-    persistEntry: async (e) => {
-      persisted.push({ lid: e.lid, entryOrder: e.entryOrder });
-      return stubStamps();
+    // ⚠ **`opts` も受け取る**(#258)── 受け取らないと、effect 層が居場所を
+    //   落とす変異を**誰も見ていない**(着地前レビュー 🔴-2)
+    persistEntry: async (e, opts) => {
+      persisted.push({ lid: e.lid, entryOrder: e.entryOrder, parent: opts?.parent });
+      return { ...stubStamps(), ...(opts?.parent ? { parentWritten: true } : {}) };
     },
     deleteEntry: async () => {},
     setEntryParent: async (lid, parentLid, relationId) => {
@@ -828,6 +835,72 @@ describe('「もう一度押す」の窓(#240 段①)', () => {
     row().click();
     expect(d.getState().scopeLid, '続けて押しても入らない').toBe('f1');
     now.mockRestore();
+  });
+});
+
+/**
+ * 🔴 **居場所が effect 層まで届いているか**(#258 の着地前レビュー 🔴-2 / ⚠-2)。
+ *
+ * ⚠ `parent` は **DomainEvent → opts → StorageRequest** と 3 段の optional を渡る ──
+ * 途中で落としても **tsc は黙る**。ここが無いと、落とす変異を殺せるのは
+ * 実ブラウザ smoke 1 本だけになる。
+ */
+describe('作成の居場所が worker まで届く(#258)', () => {
+  beforeEach(() => {
+    document.body.textContent = '';
+  });
+
+  it('🔴 1 つの要求に乗って届く(2 手に割れていない)', async () => {
+    const { d, persisted, parentCalls } = setup([meta('f1', 1, 'folder')], []);
+    d.dispatch({
+      type: 'CREATE_ENTRY',
+      archetype: 'text',
+      lid: 'n9',
+      title: 'x',
+      parentLid: 'f1',
+      relationId: 'r9',
+    });
+    await tick();
+    expect(
+      persisted.find((p) => p.lid === 'n9')?.parent,
+      '居場所が effect 層で落ちている',
+    ).toEqual({ parentLid: 'f1', relationId: 'r9' });
+    expect(parentCalls, '2 手に割れている(行を書いてから辺を書いている)').toHaveLength(0);
+  });
+
+  it('🔴 相手が旧ビルドなら(名乗らなければ)2 手へ落ちる', async () => {
+    /**
+     * ⚠ 版が配られても**押したタブしか読み込み直さない**ので、旧ビルドのタブが
+     * 本体(holder)のことがある。旧 worker は `parent` を**黙って無視する**ので、
+     * 名乗りが無いときは `setEntryParent` で追い撃ちしないと**居場所だけ落ちる**
+     * ── 2 手だった頃は書けていたので、これは新しく開く穴である(互換は双方向)。
+     */
+    document.body.textContent = '';
+    const root = document.createElement('div');
+    document.body.append(root);
+    const d = new Dispatcher();
+    const parentCalls: Array<{ lid: string; parentLid: string | null }> = [];
+    connectStoreEffects(d, {
+      ...stubRevisionOps(),
+      getBody: async () => '',
+      // 旧 worker の再現 ── `parent` を受け取っても**名乗らない**
+      persistEntry: async () => stubStamps(),
+      deleteEntry: async () => {},
+      setEntryParent: async (lid, parentLid) => void parentCalls.push({ lid, parentLid }),
+    });
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('f1', 1, 'folder')], relations: [] });
+    d.dispatch({
+      type: 'CREATE_ENTRY',
+      archetype: 'text',
+      lid: 'n8',
+      title: 'x',
+      parentLid: 'f1',
+      relationId: 'r8',
+    });
+    await tick();
+    expect(parentCalls, '旧ビルドが本体だと居場所が黙って落ちる').toEqual([
+      { lid: 'n8', parentLid: 'f1' },
+    ]);
   });
 });
 

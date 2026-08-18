@@ -66,7 +66,17 @@ export interface StorePort {
    * `checkpoint: true` = 変更前の body を履歴に 1 件積む。既定(amend)は
    * 履歴を伸ばさず鎖の頭を張り替えるだけ ── toggle / rename はこちら。
    */
-  persistEntry(entry: EntryUpsert, opts?: { checkpoint?: boolean }): Promise<EntryStamps>;
+  /**
+   * ⚠ `parent` を渡すと **同じ tx で居場所も張る**(#258)── 渡さなければ辺に触らない。
+   * 作成を 2 手に割ると、その隙にタブを閉じたとき**親だけ飛ぶ**(実測)。
+   */
+  persistEntry(
+    entry: EntryUpsert,
+    opts?: {
+      checkpoint?: boolean;
+      parent?: { parentLid: string | null; relationId: string };
+    },
+  ): Promise<EntryStamps>;
   /**
    * trash snapshot を積んで entries から落とす(P5a)。冪等。
    * ⚠ **relations は消さない**(2026-08-05)── 消すとゴミ箱から戻しても
@@ -283,7 +293,17 @@ export function connectStoreEffects(
           try {
             const stamps = await store.persistEntry(ev.entry, {
               checkpoint: ev.checkpoint === true,
+              // ⚠ 居場所が在るなら**同じ tx で**書かせる(#258)
+              ...(ev.parent ? { parent: ev.parent } : {}),
             });
+            /**
+             * 🔴 **旧ビルドのタブが本体だと `parent` は黙って無視される**
+             * (着地前レビュー ⚠-2)。名乗らなかったときだけ 2 手へ落ちる ──
+             * ⚠ 新しい worker では**常に名乗る**ので、この追い撃ちは走らない。
+             */
+            if (ev.parent && stamps.parentWritten !== true) {
+              await store.setEntryParent(ev.entry.lid, ev.parent.parentLid, ev.parent.relationId);
+            }
             if (!disposed)
               dispatcher.dispatch({
                 type: 'BODY_PERSISTED',

@@ -160,6 +160,25 @@ describe('要求の往復', () => {
 });
 
 describe("'changed' の放送", () => {
+  it('🔴 居場所も書く形(#258)は、当たり先を絞らない(親の中身も変わる)', async () => {
+    // ⚠ `upsertEntry` は今日から **2 つの lid(子と親フォルダ)に効く** op になった。
+    //   子だけを名乗ると、部分更新へ変えた日に**親の一覧が古いまま**残る
+    const { host, follower } = await connectPair();
+    const seen: Array<string[] | null> = [];
+    follower.onChanged((_cid, lids) => seen.push(lids));
+    await host.localClient().request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: { lid: 'z' } as never,
+      checkpoint: false,
+      keepLatest: 1,
+      parent: { parentLid: 'f1', relationId: 'r1' },
+    });
+    await drain();
+    expect(seen, '子だけを当たり先にしている(親の中身も変わっている)').toEqual([null]);
+  });
+
+
   it('follower の書込 → 他の follower と holder 自身に届く。発信者には届かない', async () => {
     const { hub, host, follower } = await connectPair();
     const f2 = await ProxyStoreClient.connect({ makeChannel: hub.make, tabId: 'f2' });
@@ -198,6 +217,7 @@ describe("'changed' の放送", () => {
     await drain();
     expect(seen).toEqual([['y']]);
     expect(real.calls.map((r) => r.op)).toContain('upsertEntry');
+
   });
 
   it('read op は放送しない', async () => {

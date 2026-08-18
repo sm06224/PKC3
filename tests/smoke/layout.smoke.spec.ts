@@ -1178,6 +1178,27 @@ test('🔴 markdown の装飾が実際に効く(素の段落から動いてい�
 test('🔴 フォルダに入れる → 読み込み直しても中に居る', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1920, height: 1080 });
+  /**
+   * 🔴 **worker へ出した命令を記録する**(#258 の観測点)。
+   *
+   * ⚠ 「読み直したら中に居る」は**証拠にならない** ── 実測で、作成を 2 手に戻す
+   * 変異を当てても**この test は緑のまま**だった(reload まで数百 ms あるので、
+   * 2 手目も間に合ってしまう)。⚠ 元の不具合は**負荷が高いときだけ**出る形なので、
+   * 時間に依存する観測点では捕まらない。
+   * 🔑 だから**配線そのもの**を見る ── 作成が `upsertEntry` 1 本(`parent` つき)で
+   * 済んでいるか。2 手に割れていれば `setEntryParent` が続けて出る(2026-08-17 の
+   * 「読みが書きを追い越す」を配線の記録で確定させたのと同じ手)。
+   */
+  await page.addInitScript(() => {
+    const w = window as unknown as { __ops?: string[] };
+    w.__ops = [];
+    const orig = Worker.prototype.postMessage;
+    Worker.prototype.postMessage = function (this: Worker, data: unknown, ...rest: unknown[]) {
+      const op = (data as { req?: { op?: string; parent?: unknown } } | null)?.req;
+      if (op?.op) w.__ops!.push(op.op === 'upsertEntry' && op.parent ? 'upsertEntry+parent' : op.op);
+      return (orig as (d: unknown, ...r: unknown[]) => void).call(this, data, ...rest);
+    } as typeof Worker.prototype.postMessage;
+  });
   await gotoApp(page);
   await clickReal(page, '[data-pkc-region="browse-tabs"] [data-pkc-browse="filer"]');
 
@@ -1233,17 +1254,28 @@ test('🔴 フォルダに入れる → 読み込み直しても中に居る', a
 
   // ── いま見ているフォルダの中に作る
   await expect(page.locator('[data-pkc-field="filer-create-target"]')).toBeVisible();
+  await page.evaluate(() => ((window as unknown as { __ops: string[] }).__ops.length = 0));
   const createdLid = await make('text', '# フォルダの中で作った\n');
+
+  /**
+   * 🔴 **作成は 1 本の書込で済んでいる**(#258)。⚠ ここが 2 本(`upsertEntry` に
+   * 続いて `setEntryParent`)なら、その隙にタブを閉じると**居場所だけ飛ぶ**。
+   */
+  const ops = await page.evaluate(() => (window as unknown as { __ops: string[] }).__ops.slice());
+  expect(ops, '作成の書込が記録されていない(この test は空振り)').toContain('upsertEntry+parent');
+  expect(ops, '作成が 2 手に割れている(行を書いてから辺を書いている)').not.toContain(
+    'setEntryParent',
+  );
 
   /**
    * ── ② 読み込み直す(実 sqlite から読み戻る)
    *
-   * ⚠ **書き終わるのを待ってから**読み直す。作成は「entry を書く → 辺を書く」の
-   * 2 手で、辺は entry の**後**に積まれる(`app-state.ts` の CREATE_ENTRY の並び)。
-   * 更新日の欄は entry の ack(`ENTRY_STAMPED`)で埋まるので、**それが出てから**
-   * 読み直せば、辺の書き込みが飛ぶ窓がほぼ閉じる。
-   * 🔴 ⚠ **窓はゼロではない** ── 実 user も「フォルダに作った直後に閉じる」と
-   *   居場所が飛びうる。塞ぐには作成の 2 手を 1 tx にする必要があり、それは別 PR。
+   * ⚠ **#258 の回帰を捕まえているのは上の `__ops` の assert** であって、ここではない
+   *   (着地前レビュー ⚠-1 の指摘。1 稿目は逆に書いていた ── 実測では、2 手に戻す
+   *   変異を当てても**この読み直しは緑のまま**だった:reload まで数百 ms あるので
+   *   2 手目が間に合う)。ここが見るのは **居場所が disk から読み戻る**ことである。
+   * ⚠ だから **ack は待つ** ── 待たないと「worker が処理を終える前に document ごと
+   *   破棄される」窓が残り、落ちたときに **#258 の再発に見える別原因**になる。
    */
   await expect(
     page.locator(`[data-pkc-region="filer-table"] [data-pkc-entry="${createdLid}"] td:nth-child(2)`),

@@ -637,6 +637,11 @@ export type DomainEvent =
       entry: EntryUpsert;
       /** true = 変更前の disk body を履歴に 1 件積む(P5c: 鎖の維持は worker)。 */
       checkpoint?: boolean;
+      /**
+       * 🔴 **居場所も同じ tx で**(#258)。⚠ 作成を 2 手に割ると、行を書いた ack と
+       * 辺の書込の間にタブを閉じたとき**親だけ飛ぶ**(ノートはルートに現れる)。
+       */
+      parent?: { parentLid: string | null; relationId: string };
     }
   | {
       /** かんばんトグル要求。meta snapshot は発火時(reduce)に捕獲(C-1 規律)。 */
@@ -1736,19 +1741,17 @@ function reduceCore(
               date: ext.date,
               archived: ext.archived,
             },
+            /**
+             * 🔴 **居場所は同じ tx で書く**(#258)。直す前は `REQUEST_SET_PARENT` を
+             * 後ろに並べる **2 手**で、effect が 1 件ずつ worker へ流すので
+             * 「行を書く → ack → 辺を書く」の隙にタブを閉じると**親だけ飛んだ**
+             * (フォルダの中に作ったのにルートに現れる)。⚠ 並びを入れ替えても直らない
+             * (行の無いところへ辺を張ることになる)── **1 tx にする**のが答え。
+             */
+            ...(parentLid === null
+              ? {}
+              : { parent: { parentLid, relationId: action.relationId as string } }),
           },
-          // ⚠ **entry を書いた後**に辺を書く(行が無いところへ辺を張らない)。
-          //    effect は events の順に直列化するので、この並びがそのまま順序になる
-          ...(parentLid === null
-            ? []
-            : ([
-                {
-                  type: 'REQUEST_SET_PARENT',
-                  lid: action.lid,
-                  parentLid,
-                  relationId: action.relationId as string,
-                },
-              ] as DomainEvent[])),
         ],
       };
     }

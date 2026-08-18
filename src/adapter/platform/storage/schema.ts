@@ -183,4 +183,16 @@ export interface EntryUpsert {
 export interface EntryStamps {
   createdAt: string | null;
   updatedAt: string | null;
+  /**
+   * 🔴 **同じ tx で居場所も書いたか**(#258 の着地前レビュー ⚠-2)。
+   *
+   * ⚠ **旧ビルドのタブが本体(holder)のことがある** ── 版が配られても、押した
+   * タブしか読み込み直さない(`update-prompt.ts`)。旧 worker は `parent` を
+   * **知らないので黙って無視する**(未知の op ではないので拒否も返らない)ので、
+   * 呼び側から見ると「成功したのに居場所が付いていない」になる ── 2 手だった頃は
+   * 旧 holder でも書けていたので、**これは新しく開く穴**である。
+   * 🔑 だから **書いたときだけ名乗る**。名乗らなければ呼び側が `setEntryParent` で
+   * 追い撃ちする(旧 holder では自動で 2 手へ落ちる = 互換は双方向、CLAUDE.md)。
+   */
+  parentWritten?: boolean;
 }

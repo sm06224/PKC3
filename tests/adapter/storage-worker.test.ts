@@ -983,3 +983,98 @@ describe('findAssetOwner(#100 段②)', () => {
     expect(miss.lid).toBeNull();
   });
 });
+
+/**
+ * 🔴 **作成と居場所を 1 tx で書く**(#258)。
+ *
+ * ⚠ 直す前は 2 op(行を書く → ack → 辺を書く)で、その隙にタブを閉じると
+ * **ノートは残るのに親だけ飛んだ**(フォルダの中に作ったのにルートに現れる)。
+ * ⚠ 見るのは「1 op で両方書けるか」だけでなく、**片方だけ残らないか**である。
+ * ⚠ この file は **1 つの DB を共有する** ── lid は他の test と衝突しない名前にする。
+ */
+describe('作成と居場所(#258)', () => {
+  /** ⚠ worker は **SQL の列名のまま**返す(`to_lid`)── camel に読み替えない。 */
+  const relsOf = async (toLid: string) =>
+    (
+      (await request({ op: 'listRelations', cid: 'c1' })) as unknown as Array<{
+        id: string;
+        from_lid: string;
+        to_lid: string;
+      }>
+    ).filter((r) => r.to_lid === toLid);
+
+  it('🔴 1 op で行と辺の両方が書かれる', async () => {
+    // ⚠ 親の行も実在させる(いまは FK が無いので通るが、足した日に偽陽性で落ちる)
+    await request({ op: 'upsertEntry', cid: 'c1', entry: entry('atom-folder', '', { archetype: 'folder' }) });
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('atom-child', 'x'),
+      parent: { parentLid: 'atom-folder', relationId: 'atom-rel-1' },
+    });
+    const rows = await request({ op: 'listEntryMetas', cid: 'c1' });
+    expect(
+      rows.some((m) => m.lid === 'atom-child'),
+      '行が書かれていない',
+    ).toBe(true);
+    const rels = await relsOf('atom-child');
+    expect(rels, '辺が書かれていない').toHaveLength(1);
+    expect(rels[0]!.from_lid).toBe('atom-folder');
+  });
+
+  it('`parent` を渡さなければ辺に触らない(本文の保存で居場所が消えない)', async () => {
+    // ⚠ ここが「触らない」でないと、**保存のたびにフォルダから出る**
+    await request({ op: 'upsertEntry', cid: 'c1', entry: entry('atom-child', 'y') });
+    expect(await relsOf('atom-child'), '本文を保存したら居場所が消えた').toHaveLength(1);
+  });
+
+  it('🔴 `parentLid: null` は「ルートへ出す」(辺を落とす)', async () => {
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('atom-child', 'z'),
+      parent: { parentLid: null, relationId: 'atom-rel-1' },
+    });
+    expect(await relsOf('atom-child')).toHaveLength(0);
+  });
+
+  it('🔴 **辺の書込**で落ちたら、行も残らない(1 tx が効いている)', async () => {
+    /**
+     * ⚠ **落とすのは辺の側**(着地前レビュー 🔴-1)。1 稿目は行の側(`body` に
+     * bind できない値)を落としていたが、行 → 辺の順なので **`writeParent` が
+     * 一度も走らず**、`BEGIN`/`COMMIT` を丸ごと外しても緑だった ──
+     * **ロールバックを 1 度も要求していない**空振りである。
+     */
+    const before = (await request({ op: 'listEntryMetas', cid: 'c1' })).length;
+    await expect(
+      request({
+        op: 'upsertEntry',
+        cid: 'c1',
+        entry: entry('atom-rollback', '# x\n'),
+        // ⚠ 辺の bind を落とす(行の upsert は成功済みの状態を作る)
+        parent: { parentLid: 'atom-folder', relationId: undefined as unknown as string },
+      }),
+    ).rejects.toBeTruthy();
+    const after = await request({ op: 'listEntryMetas', cid: 'c1' });
+    expect(
+      after.some((m) => m.lid === 'atom-rollback'),
+      '辺で落ちたのに行だけ残った(1 tx になっていない)',
+    ).toBe(false);
+    expect(after.length, '巻き戻っていない').toBe(before);
+    expect(await relsOf('atom-rollback')).toHaveLength(0);
+  });
+
+  it('新しい worker は「辺も書いた」と名乗る(旧 worker は名乗らない)', async () => {
+    // ⚠ 呼び側はこの申告で 2 手へ落ちるかを決める(旧ビルドが本体のときの互換)
+    const stamps = await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('atom-said', 'x'),
+      parent: { parentLid: 'atom-folder', relationId: 'atom-rel-said' },
+    });
+    expect(stamps.parentWritten, '書いたのに名乗っていない').toBe(true);
+    const plain = await request({ op: 'upsertEntry', cid: 'c1', entry: entry('atom-said', 'y') });
+    expect(plain.parentWritten, '触っていないのに名乗った').toBeUndefined();
+  });
+});
+
