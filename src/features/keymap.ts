@@ -34,7 +34,7 @@ export interface Chord {
 }
 
 /** どの面で効くか。⚠ `global` は document で受けるので**他の全部と重なりうる**。 */
-export type KeyContext = 'global' | 'editor' | 'append' | 'row' | 'live';
+export type KeyContext = 'global' | 'editor' | 'append' | 'row' | 'live' | 'filer';
 
 export interface KeyCommand {
   readonly id: string;
@@ -100,6 +100,38 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     whileTyping: true,
     // ⚠ 帯は**編集中しか画面に無い**(着地前レビュー 8)── 閲覧中に押しても何も起きない
     note: '編集中だけ効きます(置換は編集している本文に効くため)',
+  },
+  /**
+   * 🔴 **整理の面の鍵**(user 裁定 2026-08-18「**OS のファイラ動作に似せる方向で
+   * 平仄も合わせて**」)。⚠ 効くのは**フォルダの表に焦点があるとき**だけ ──
+   * 面をまたいで効かせると、#240 の着地前レビューで踏んだ「見えない所で印が増える /
+   * 現在地が動く」を繰り返す。
+   */
+  {
+    id: 'filer-open',
+    label: '開く(フォルダなら中へ)',
+    contexts: ['filer'],
+    defaults: ['Enter'],
+    note: 'OS のファイラと同じ ── 行を選んで Enter',
+  },
+  {
+    id: 'filer-parent',
+    label: '親フォルダへ',
+    contexts: ['filer'],
+    defaults: ['Backspace', 'Alt+ArrowUp'],
+  },
+  {
+    id: 'filer-trash',
+    label: '選んでいるものをゴミ箱へ',
+    contexts: ['filer'],
+    defaults: ['Delete'],
+    note: 'ゴミ箱からいつでも戻せます',
+  },
+  {
+    id: 'filer-select-all',
+    label: 'いま出ている行をぜんぶ選ぶ',
+    contexts: ['filer'],
+    defaults: ['Mod+A'],
   },
   {
     id: 'view-detail',
@@ -522,8 +554,19 @@ const NON_TEXT_KEYS = new Set([
  */
 const BARE_ALLOWED = new Set(['Escape', 'Tab']);
 
-function bareAllowed(key: string): boolean {
-  return BARE_ALLOWED.has(key) || /^F([1-9]|1[0-9]|2[0-4])$/.test(key);
+/**
+ * 🔴 **文字を打たない面**(2026-08-18、整理の面の鍵)。ここでの素の鍵は**安全**である ──
+ * 焦点が行(`<tr>`)に在るときは、そもそも字を打つ相手が居ない。
+ * ⚠ 逆に `global` は「打っている最中でも飛んでくる」ので、素の鍵を許してはいけない。
+ * 🔑 `Enter` / `Delete` / `Backspace` は **OS のファイラの標準**であり、
+ * ここを許さないと「平仄を合わせる」(user 裁定 2026-08-18)が実行できない。
+ */
+const NON_TYPING_CONTEXTS: ReadonlySet<KeyContext> = new Set<KeyContext>(['filer']);
+
+function bareAllowed(key: string, commandId?: string): boolean {
+  if (BARE_ALLOWED.has(key) || /^F([1-9]|1[0-9]|2[0-4])$/.test(key)) return true;
+  const cmd = commandId === undefined ? null : findCommand(commandId);
+  return cmd !== null && cmd !== undefined && cmd.contexts.every((c) => NON_TYPING_CONTEXTS.has(c));
 }
 
 /**
@@ -564,7 +607,7 @@ export function validateBinding(
   const c = chordFromString(chord);
   if (c === null) return { kind: 'unreadable', message: 'このキーは割り当てられません' };
   const norm = chordToString(c);
-  if (!c.mod && !c.alt && !bareAllowed(c.key)) {
+  if (!c.mod && !c.alt && !bareAllowed(c.key, commandId)) {
     return {
       kind: 'bare',
       message: 'Ctrl(⌘)か Alt と組み合わせてください ── そのままだと文字が打てなくなります',

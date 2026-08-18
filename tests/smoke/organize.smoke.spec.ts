@@ -152,13 +152,82 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
 
   // ① 掴んでフォルダへ落とす ── **実 HTML5 D&D**(unit は DataTransfer を持てない)
   await page.dragAndDrop(noteRow, folderRow);
-  // 落とした先へ付いていく(`move-entry` と同じ規則)── 中に 1 件
-  await expect(page.locator('[data-pkc-region="filer-breadcrumb"]')).toContainText('はこ');
-  await expect(rows, 'フォルダへ入っていない').toHaveCount(1);
+  /**
+   * 🔴 **落とした先へは付いていかない**(user 裁定 2026-08-18「OS のファイラ動作に
+   * 似せる」)── いまの場所から**消える**のが標準の見え方。⚠ ただし行き先は名乗る。
+   */
+  await expect(page.locator('[data-pkc-region="filer-breadcrumb"]')).not.toContainText('はこ');
+  await expect(rows, 'ルートから消えていない').toHaveCount(1);
+  await expect(page.locator('[data-pkc-region="status"]'), '行き先を言っていない').toContainText(
+    '「はこ」へ入れました',
+  );
 
-  // ② パンくず(ルート)へ落として出す
+  // ② 中に入れば居る(2 クリック)
+  await page.locator(folderRow).dblclick();
+  await expect(rows, 'フォルダへ入っていない').toHaveCount(1);
+  await expect(page.locator('[data-pkc-region="filer-breadcrumb"]')).toContainText('はこ');
+
+  // ③ パンくず(ルート)へ落として出す ── 出したものはこの場から消える
   await page.dragAndDrop(noteRow, '[data-pkc-region="filer-breadcrumb"] button');
-  await expect(rows, 'ルートへ出せていない').toHaveCount(2);
+  await expect(rows, 'ルートへ出せていない').toHaveCount(0);
+  await clickReal(page, '[data-pkc-region="filer-breadcrumb"] button');
+  await expect(rows, 'ルートに戻っていない').toHaveCount(2);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **OS のファイラと同じ鍵**(user 裁定 2026-08-18「平仄も合わせて」)。
+ *
+ * 🔴 **unit では届かない層**をここで見る:
+ * ① **実キーの既定動作**(`Backspace` はブラウザの「戻る」だった時代の名残を持つ /
+ *    `Delete` は行によっては何も起きない)── 止め損ねると**画面ごと戻る**
+ * ② **クリックで行に焦点が入るか**(happy-dom は焦点の移動を実装しきっていない)
+ */
+test('🔴 Enter で入り、Backspace で戻り、Delete でゴミ箱へ', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await makeFolder(page, 'はこ');
+  await createEntry(page, 'text');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  const rows = page.locator('[data-pkc-region="filer-table"] tbody tr');
+  await expect(rows).toHaveCount(2);
+  const folderRow = '[data-pkc-region="filer-table"] tbody tr[data-pkc-archetype="folder"]';
+
+  // ① 行を押すと**その行に焦点が入る**(鍵の効く場所が決まる)
+  await clickReal(page, folderRow);
+  expect(
+    await page.evaluate(
+      () => document.activeElement?.closest('[data-pkc-region="filer-table"]') !== null,
+    ),
+    '行を押しても焦点が入らない(鍵が効く場所が決まらない)',
+  ).toBe(true);
+
+  // ② Enter で中へ
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-pkc-region="filer-breadcrumb"]')).toContainText('はこ');
+  await expect(rows, 'フォルダの中に入れていない').toHaveCount(0);
+
+  // ③ Backspace で親へ ── ⚠ **画面ごと戻っていない**ことも見る
+  const url = page.url();
+  await page.keyboard.press('Backspace');
+  await expect(rows, '親へ戻れない').toHaveCount(2);
+  expect(page.url(), 'ブラウザの「戻る」が起きた').toBe(url);
+
+  // ④ Delete でゴミ箱へ(確認は自分で受ける ── 既定は却下)
+  const asked = new Promise<string>((resolve) => {
+    page.once('dialog', (d) => {
+      resolve(d.message());
+      void d.accept();
+    });
+  });
+  await clickReal(page, '[data-pkc-region="filer-table"] tbody tr[data-pkc-archetype="text"]');
+  await page.keyboard.press('Delete');
+  expect(await asked, '確認が出ていない').toContain('削除');
+  await expect(rows, 'ゴミ箱へ入っていない').toHaveCount(1);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+

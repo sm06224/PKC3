@@ -470,6 +470,13 @@ export type UserAction =
   /** 印を全部外す。 */
   | { type: 'CLEAR_SELECTION' }
   /**
+   * 🔴 **いま出ている行をぜんぶ選ぶ**(user 裁定 2026-08-18「OS のファイラに似せる」)。
+   * ⚠ 「全部」は **`entryMetas` の全件ではなく、いま表に出ている行**である ──
+   * 絞り込みや現在地で見えていないものを巻き込むと、まとめて削除が
+   * **画面に無いものを消す**(#240 の着地前レビューで実際に踏んだ形)。
+   */
+  | { type: 'SELECT_ALL' }
+  /**
    * 🔴 **まとめてゴミ箱へ**(#240 段③。user 指示 2026-08-17「まとめて消せない」)。
    * ⚠ **1 回の操作**として扱う ── `DELETE_ENTRY` を n 回撃つと、途中で断られたときに
    * 「半分だけ消えた」が作れる。⚠ 完全削除(`purge`)は一括で撃たせない。
@@ -1608,6 +1615,20 @@ function reduceCore(
       if (range.length === 0) return { state, events: [] };
       // ⚠ 起点は動かさない ── 動かすと `Shift` を押すたびに範囲が縮んでいく
       return { state: { ...state, selection: range }, events: [] };
+    }
+    case 'SELECT_ALL': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      // ⚠ 規則は `filerRows` 1 か所(描く側・範囲選択と同じ答えになる)
+      const rows = filerRows(state.scopeLid, state.entryMetas, state.relations, {
+        filterQuery: state.filterQuery,
+        searchHits: state.searchHits,
+        sort: state.entrySort,
+      }).map((m) => m.lid);
+      if (rows.length === 0) return { state, events: [] };
+      return {
+        state: { ...state, selection: rows, selectionAnchor: rows[rows.length - 1] ?? null },
+        events: [],
+      };
     }
     case 'CLEAR_SELECTION': {
       if (state.selection.length === 0 && state.selectionAnchor === null)

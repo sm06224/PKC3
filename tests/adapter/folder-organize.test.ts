@@ -295,11 +295,14 @@ function setup(metas: EntryMeta[], relations: Relation[]) {
   const browse = new BrowseRouter(regions.sidebar, regions.browseHost);
   let mode: 'list' | 'filer' | 'launcher' = 'list';
   d.onState((s) => browse.render(s, mode));
+  const status: string[] = [];
   bindActions(root, d, {
     setBrowse: (m) => {
       mode = m as typeof mode;
       browse.render(d.getState(), mode);
     },
+    // ⚠ 一時の知らせ(行き先の一報)は**エラーとは別の口**
+    showStatus: (t) => void status.push(t),
   });
   const parentCalls: Array<{ lid: string; parentLid: string | null; relationId: string }> = [];
   const persisted: Array<{ lid: string; entryOrder: number; parent?: unknown }> = [];
@@ -359,6 +362,7 @@ function setup(metas: EntryMeta[], relations: Relation[]) {
     nudge,
     enter,
     toRoot,
+    status,
   };
 }
 
@@ -366,7 +370,7 @@ describe('フォルダ整理の導線(画面)', () => {
   const METAS = [meta('f1', 1, 'folder'), meta('f2', 2, 'folder'), meta('n1', 3), meta('n2', 4)];
 
   it('🔴 選ぶ → 入れ先を選ぶ、で本当に入る(disk への要求まで届く)', async () => {
-    const { q, rows, moveTo, parentCalls, toRoot } = setup(METAS, []);
+    const { q, rows, moveTo, parentCalls, enter, status } = setup(METAS, []);
     expect(rows()).toEqual(['f1', 'f2', 'n1', 'n2']);
 
     q<HTMLElement>('tbody [data-pkc-entry="n1"]')!.click();
@@ -374,23 +378,27 @@ describe('フォルダ整理の導線(画面)', () => {
     moveTo('f1');
     await tick();
 
-    // ① 🔑 **画面は動かしたものに付いていく**(scope は選択の純関数なので、
-    //    n1 が f1 の中へ入った時点で「見ている場所」も f1 になる)── 入れた物が
-    //    視界から消えないので、着いたことがその場で分かる
-    expect(rows()).toEqual(['n1']);
-    expect(q('[data-pkc-region="filer-breadcrumb"]')!.textContent).toContain('t-f1');
+    /**
+     * ① 🔴 **画面は動かない**(user 裁定 2026-08-18「OS のファイラ動作に似せる」)。
+     * OS のファイラは入れた先へ勝手に移動しない ── 入れたものが**いまの場所から
+     * 消える**のが標準の見え方である。⚠ 直す前は付いていく側だった。
+     */
+    expect(rows(), '入れた先へ勝手に移動した').toEqual(['f1', 'f2', 'n2']);
+    expect(q('[data-pkc-region="filer-breadcrumb"]')!.textContent).not.toContain('t-f1');
+    // ⚠ ただし**行き先は名乗る**(消えたのか入ったのか分からない、を作らない)
+    expect(status.at(-1), '行き先を言っていない').toBe('1 件を「t-f1」へ入れました');
     // ② disk へ届く
     expect(parentCalls).toEqual([
       { lid: 'n1', parentLid: 'f1', relationId: expect.any(String) },
     ]);
-    // ③ ルートからは消えている(2 か所に見えない)
-    toRoot();
+    // ③ 入れた先には居る
+    enter('f1');
     await tick();
-    expect(rows()).toEqual(['f1', 'f2', 'n2']);
+    expect(rows()).toEqual(['n1']);
   });
 
   it('🔴 ルートへ出せる(入れたら出せない、を作らない)', async () => {
-    const { q, rows, moveTo, parentCalls, enter } = setup(METAS, [rel('r0', 'f1', 'n1')]);
+    const { q, rows, moveTo, parentCalls, enter, status } = setup(METAS, [rel('r0', 'f1', 'n1')]);
     enter('f1'); // 2 クリックで入る(#240 段①)
     await tick();
     q<HTMLElement>('tbody [data-pkc-entry="n1"]')!.click();
@@ -400,11 +408,13 @@ describe('フォルダ整理の導線(画面)', () => {
     expect(parentCalls).toEqual([
       { lid: 'n1', parentLid: null, relationId: expect.any(String) },
     ]);
-    // 出した先(= ルート)に付いていく
-    expect(rows()).toEqual(['f1', 'f2', 'n1', 'n2']);
-    enter('f1'); // ⚠ 入るのは 2 クリック(#240 段①)
+    // 🔴 出しても**中に居たまま**(OS ファイラと同じ)── f1 は空になる
+    expect(rows(), '出した先へ勝手に移動した').toEqual([]);
+    expect(status.at(-1)).toBe('1 件を「ルート」へ入れました');
+    // ルートへ戻れば居る
+    q<HTMLElement>('[data-pkc-region="filer-breadcrumb"] button')!.click();
     await tick();
-    expect(rows()).toEqual([]); // f1 は空になった
+    expect(rows()).toEqual(['f1', 'f2', 'n1', 'n2']);
   });
 
   it('🔴 選び直すと帯も追従する(別のノートが動かない)', async () => {
@@ -749,8 +759,21 @@ describe('掴んで落とす(#240 段④)', () => {
       ),
     ).toEqual(['n1', 'n2']);
     expect(parentCalls.map((c) => c.lid), 'disk への要求が出ていない').toEqual(['n1', 'n2']);
-    // ⚠ 落とした先へ**付いていく**(設計 doc §6)
-    expect(d.getState().scopeLid).toBe('f1');
+    // 🔴 **落とした先へは付いていかない**(user 裁定 2026-08-18)── 行き先は名乗る
+    expect(d.getState().scopeLid, '落とした先へ勝手に移動した').toBeNull();
+  });
+
+  it('🔴 既にそこに居たものも件数に数える(押した数と合わせる)', async () => {
+    // ⚠ user は 2 件を掴んで落としている ── 「1 件」と言われると、もう 1 件が
+    //   どうなったのか分からない(実際は両方そこに在る)
+    // n1 は既に f1 の中 ── そこへ n1 と n2 の 2 件を落とす
+    const { q, d, status } = setup(METAS, [rel('r0', 'f1', 'n1')]);
+    q('tbody [data-pkc-entry="f1"]')!.dispatchEvent(
+      dragEvent('drop', dataTransfer({ [PKC_DRAG]: 'n1 n2' })),
+    );
+    await tick();
+    expect(d.getState().error ?? '', '断りが出ている').not.toContain('入れられません');
+    expect(status.at(-1), '押した数と合っていない').toBe('2 件を「t-f1」へ入れました');
   });
 
   it('🔴 落とせない場所へ移ったら、光っていた先の印を消す', () => {

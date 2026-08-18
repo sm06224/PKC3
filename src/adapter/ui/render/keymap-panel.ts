@@ -39,6 +39,7 @@ const CONTEXT_LABELS: Readonly<Record<KeyContext, string>> = {
   append: '継ぎ足しの欄',
   row: '1 面の編集(開いている行の欄)',
   live: '1 面の編集(面そのもの)',
+  filer: 'フォルダの表(行に焦点があるとき)',
 };
 
 /** 並びの順。⚠ `KEY_COMMANDS` の並びを尊重しつつ、文脈ごとに固める。 */

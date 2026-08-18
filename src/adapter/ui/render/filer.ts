@@ -393,6 +393,15 @@ export class FilerRenderer {
        * ⚠ `draggable` は行そのものに置く(セルに置くと掴む場所が読めない)。
        */
       tr.setAttribute('draggable', 'true');
+      /**
+       * 🔴 **行に焦点を持たせる**(user 裁定 2026-08-18「OS のファイラに似せる」)。
+       * ⚠ 焦点が無いと `Enter` / `Delete` を**どこで効かせるか**が決まらない ──
+       *   面をまたいで効かせると、#240 の着地前レビューで踏んだ「見えない所で
+       *   印が増える」を繰り返す。押した行が焦点を持つのが OS と同じ形である。
+       * ⚠ `-1` にする(Tab の巡回には入れない)── 行が何百件も在るので、
+       *   Tab で 1 行ずつ辿らせるのは動線として悪い。
+       */
+      tr.tabIndex = -1;
       if (m.archetype === 'folder') tr.setAttribute('data-pkc-drop', 'folder');
       if (m.lid === state.selectedLid) tr.setAttribute('data-pkc-selected', '');
       // ⚠ **開いている**(`selected`)と**印を付けた**(`marked`)は別の印である

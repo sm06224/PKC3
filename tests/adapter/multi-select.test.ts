@@ -459,3 +459,94 @@ describe('印が指すものと、画面に見えているもの(#240 着地前�
     expect(d.getState().scopeLid, '一覧タブの 2 回押しで現在地が動いた').toBeNull();
   });
 });
+
+/**
+ * 🔴 **OS のファイラと同じ鍵**(user 裁定 2026-08-18「平仄も合わせて」)。
+ * ⚠ **行に焦点があるときだけ**効く ── 面をまたいで効かせると、#240 の着地前レビューで
+ * 踏んだ「見えない所で印が増える / 現在地が動く」を繰り返す。
+ */
+describe('フォルダの表の鍵', () => {
+  const WITH_FOLDER = [meta('f', 0, 'はこ', 'folder'), ...METAS];
+
+  /** 器を組んで、フォルダ面を描いた状態にする。 */
+  function screen(metas: EntryMeta[] = WITH_FOLDER) {
+    document.body.innerHTML = '';
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    const d = new Dispatcher();
+    const regions = buildShell(root);
+    bindActions(root, d);
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas, relations: [] });
+    const filer = new FilerRenderer(regions.browseHost);
+    d.onState((st) => filer.render(st));
+    filer.render(d.getState());
+    const row = (lid: string) =>
+      regions.browseHost.querySelector<HTMLElement>(`[data-pkc-entry="${lid}"]`)!;
+    const press = (key: string, from: HTMLElement, over: Partial<KeyboardEventInit> = {}) => {
+      const ev = new KeyboardEvent('keydown', {
+        key,
+        code: key.length === 1 ? `Key${key.toUpperCase()}` : key,
+        bubbles: true,
+        cancelable: true,
+        ...over,
+      });
+      Object.defineProperty(ev, 'target', { value: from });
+      document.dispatchEvent(ev);
+      return ev;
+    };
+    return { root, d, row, press, regions };
+  }
+
+  it('🔴 行は焦点を受けられる(どこで効かせるかが決まる)', () => {
+    // ⚠ **属性で見る** ── `tabIndex` の getter は置いていなくても `-1` を返すので、
+    //   `toBe(-1)` は**外しても緑**だった(変異が生き延びた)
+    const { row } = screen();
+    expect(
+      row('f').hasAttribute('tabindex'),
+      '行に焦点が入らない(鍵の効く場所が決まらない)',
+    ).toBe(true);
+  });
+
+  it('🔴 Enter でフォルダの中へ入る', () => {
+    const { d, row, press } = screen();
+    row('f').click();
+    press('Enter', row('f'));
+    expect(d.getState().scopeLid, 'Enter で入れない').toBe('f');
+  });
+
+  it('🔴 Enter で入ったあとも鍵が効く(焦点が連れて行かれる)', () => {
+    // ⚠ 押した行は表の組み直しで消える ── 焦点を運ばないと **次の Backspace が
+    //   効かない**(鍵の動線が 1 手で死ぬ)
+    const { d, row, press } = screen();
+    row('f').click();
+    press('Enter', row('f'));
+    expect(d.getState().scopeLid).toBe('f');
+    const now = document.activeElement as HTMLElement;
+    expect(
+      now.closest('[data-pkc-region="filer-table"]'),
+      '入ったら焦点が表の外へ落ちた',
+    ).not.toBeNull();
+    press('Backspace', now);
+    expect(d.getState().scopeLid, '親へ戻れない').toBeNull();
+  });
+
+  it('🔴 Ctrl+A はいま出ている行だけを選ぶ(絞り込みの外を巻き込まない)', () => {
+    const { d, row, press } = screen();
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'zz' }); // 題名 zz = a だけ
+    press('a', row('a'), { ctrlKey: true, code: 'KeyA' });
+    expect(d.getState().selection, '画面に無い行まで選んだ').toEqual(['a']);
+  });
+
+  it('🔴 面の外では効かない(一覧タブで Enter を押しても現在地が動かない)', () => {
+    const { d, root, press } = screen();
+    const outside = document.createElement('div');
+    outside.setAttribute('data-pkc-region', 'entry-list');
+    outside.innerHTML = '<button data-pkc-entry="f">f</button>';
+    root.append(outside);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'f' });
+    press('Enter', outside.querySelector('button')!);
+    expect(d.getState().scopeLid, '面の外の Enter で現在地が動いた').toBeNull();
+  });
+});
+
