@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   findOrphanAssets,
   purgeAssets,
+  purgeBlockReason,
   runExplicitPurge,
   type AssetGcPorts,
   type PurgeFlowDeps,
@@ -121,7 +122,7 @@ describe('runExplicitPurge (P4b)', () => {
     const alerts: string[] = [];
     const deps: PurgeFlowDeps = {
       ports,
-      isReady: () => true,
+      isReady: async () => ({ ok: true, reason: '' }),
       confirm: () => true,
       alert: (m) => alerts.push(m),
       formatSize: (n) => `${n}B`,
@@ -150,7 +151,8 @@ describe('runExplicitPurge (P4b)', () => {
   it('confirm 後に ready でなくなっていたら中止(編集開始の TOCTOU)', async () => {
     let ready = true;
     const { deps, calls, alerts } = flowDeps({
-      isReady: () => ready,
+      isReady: async () =>
+        ready ? { ok: true, reason: '' } : { ok: false, reason: '編集が始まったため中止しました' },
       confirm: () => {
         ready = false; // confirm ダイアログの間に編集が始まった
         return true;
@@ -177,7 +179,7 @@ describe('runExplicitPurge (P4b)', () => {
     const alerts: string[] = [];
     await runExplicitPurge({
       ports,
-      isReady: () => true,
+      isReady: async () => ({ ok: true, reason: '' }),
       confirm: () => true,
       alert: (m) => alerts.push(m),
       formatSize: (n) => `${n}B`,
@@ -185,5 +187,64 @@ describe('runExplicitPurge (P4b)', () => {
     // 消してよいのは「両方の走査で orphan」だった k-orphan-blob だけ
     expect(calls.filter((c) => c.startsWith('blob:'))).toEqual(['blob:k-orphan-blob']);
     expect(alerts[0]).toContain('1 件を削除しました');
+  });
+});
+
+/**
+ * 🔴 **他のタブが編集中なら整理しない**(#253)。
+ *
+ * ⚠ 未参照の走査は**保存済みの本文**しか見ないので、別のタブが編集中に貼った
+ * 画像(bytes は在るが参照は未保存の欄の中)は「使っていない」に見える。
+ * ⚠ 判定は 3 値 ── **「返事が無い」を「編集中」と同じ顔にしない**(そう言うと
+ * user は存在しないタブを探しに行く)。
+ */
+describe('整理はタブ間の編集も見る(#253)', () => {
+  it('🔴 3 値がそのまま文言に落ちる(顔を潰さない)', () => {
+    expect(purgeBlockReason('idle'), '誰も編集していないのに断った').toBeNull();
+    expect(purgeBlockReason('editing')).toContain('他のタブで編集中です');
+    // 🔑 **「返事が無い」を「編集中」と同じ顔にしない** ── 言い切ると、
+    //   user は開いていないタブを探しに行く(`EditGrant` の M-7 と同じ理由)
+    expect(purgeBlockReason('unknown'), '確かめられないのに言い切った').not.toContain(
+      '他のタブで編集中です',
+    );
+    expect(purgeBlockReason('unknown')).toContain('確かめられません');
+    // ⚠ どちらも**次の一手**を含む(断りだけ出して終わらない)
+    expect(purgeBlockReason('editing')).toContain('もう一度');
+  });
+
+  it('🔴 他のタブが編集中なら、confirm の後でも消さない', async () => {
+    const { ports, calls } = fakePorts();
+    const alerts: string[] = [];
+    await runExplicitPurge({
+      ports,
+      isReady: async () => ({
+        ok: false,
+        reason: '他のタブで編集中です。そちらを保存してからもう一度お試しください',
+      }),
+      confirm: () => true,
+      alert: (m) => alerts.push(m),
+      formatSize: (n) => `${n}B`,
+    });
+    expect(calls.filter((c) => c.startsWith('blob:')), '編集中なのに消した').toHaveLength(0);
+    expect(alerts[0]).toContain('他のタブで編集中です');
+    // 🔑 **理由がそのまま出る**(「中止しました」だけだと次の一手が分からない)
+    expect(alerts[0]).toContain('整理は行っていません');
+  });
+
+  it('⚠ 断りの文言は、判定の顔ごとに変える(存在しないタブを探させない)', async () => {
+    const { ports } = fakePorts();
+    const alerts: string[] = [];
+    await runExplicitPurge({
+      ports,
+      isReady: async () => ({
+        ok: false,
+        reason: '本体タブと通信できないため、他のタブが編集中か確かめられません',
+      }),
+      confirm: () => true,
+      alert: (m) => alerts.push(m),
+      formatSize: (n) => `${n}B`,
+    });
+    expect(alerts[0], '「編集中」と言い切っている').not.toContain('他のタブで編集中です');
+    expect(alerts[0]).toContain('確かめられません');
   });
 });

@@ -152,3 +152,66 @@ test('本体タブを閉じると、2 枚目がその場で本体に昇格する
   expect(errorsB).toEqual([]);
   expect(errorsC).toEqual([]);
 });
+
+/**
+ * 🔴 **他のタブが編集中なら、整理を断る**(#253)。
+ *
+ * ⚠ 未参照 asset の走査は**保存済みの本文**しか見ないので、別のタブが編集中に
+ * 貼った画像(bytes は在るが参照は未保存の欄の中)は「使っていない」に見える。
+ * 直す前は、**タブ B から押した整理がそれを消していた**(自タブの `phase` しか
+ * 見ていなかった)。
+ *
+ * 🔑 ここで守るのは**実物の合成** ── 実 BroadcastChannel 越しに holder が
+ * 台帳を答え、follower がそれで断ること。unit(store-proxy / asset-gc)は
+ * fake channel と純関数までしか届かない。
+ */
+test('🔴 タブ A が編集中は、タブ B からの「使っていない添付を消す」を断る(#253)', async ({
+  page,
+  context,
+}) => {
+  const errorsA = collectPageErrors(page);
+  await useSplitEditor(page);
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-action="start-edit"]')).toBeVisible();
+
+  const pageB: Page = await context.newPage();
+  const errorsB = collectPageErrors(pageB);
+  await useSplitEditor(pageB);
+  await gotoApp(pageB);
+  await expect(pageB.locator('[data-pkc-region="status"]')).toContainText('保存は本体タブ経由');
+
+  // 前提: **B だけ**なら整理は通る(この次元を測れている ── 常に断るのでは意味が無い)
+  const dialogIdle = new Promise<string>((resolve) => {
+    pageB.once('dialog', (d) => {
+      resolve(d.message());
+      void d.accept();
+    });
+  });
+  await clickReal(pageB, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await clickReal(pageB, '[data-pkc-action="purge-orphan-assets"]');
+  expect(await dialogIdle, '前提: 誰も編集していないのに断られた').toContain(
+    '未参照の添付データはありません',
+  );
+
+  // 🔴 A が編集に入る(= 編集ロックを握る)
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await expect(page.locator('[data-pkc-field="editor-body"]')).toBeVisible();
+
+  // B から整理 → **断られる**(⚠ confirm は出ない ── 走査の前で止まる)
+  let asked = false;
+  pageB.on('dialog', (d) => {
+    asked = true;
+    void d.accept();
+  });
+  await clickReal(pageB, '[data-pkc-action="purge-orphan-assets"]');
+  await expect(
+    pageB.locator('[data-pkc-region="status"]'),
+    '他のタブが編集中なのに断っていない',
+  ).toContainText('他のタブで編集中です', { timeout: 10_000 });
+  expect(asked, '断るはずが confirm まで進んだ').toBe(false);
+
+  expect(errorsA).toEqual([]);
+  expect(errorsB).toEqual([]);
+});

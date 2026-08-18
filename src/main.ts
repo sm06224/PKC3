@@ -26,7 +26,7 @@ import {
   installHtmlSandboxResizer,
 } from '@features/markdown/html-sandbox';
 import { AssetBlobStore } from '@adapter/platform/storage/asset-blob-store';
-import { runExplicitPurge } from '@adapter/platform/storage/asset-gc';
+import { purgeBlockReason, runExplicitPurge } from '@adapter/platform/storage/asset-gc';
 import { buildShell } from '@adapter/ui/render/shell';
 import { showNotices, clearNotices } from '@adapter/ui/render/notices';
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
@@ -583,6 +583,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
 
   // 🔒 attach / import と purge の排他 gate(review F1)。実体と pin は asset-gate.ts
   const withAssetGate = createAssetGate(dispatcher);
+  /**
+   * 🔴 **他のタブが編集中か**(#253)。整理(未参照 GC)の門で使う。
+   * ⚠ 3 値をそのまま文言へ落とす ── `unknown` を「編集中」と言わない。
+   */
+  const editingElsewhere = async (): Promise<{ ok: boolean; reason: string }> => {
+    // ⚠ 判定と文言は `purgeBlockReason` の 1 か所(ここは配線だけ)
+    const reason = purgeBlockReason(await sync.anyEditing());
+    return reason === null ? { ok: true, reason: '' } : { ok: false, reason };
+  };
   /**
    * 🔴 **書き出しは、飛んでいる書込が着地してから読む**(2026-08-17 実測)。
    *
@@ -1453,6 +1462,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             });
             return;
           }
+          /**
+           * 🔴 **他のタブの編集も見る**(#253)。自タブの `phase` は**自タブの
+           * ことしか言わない** ── 別のタブが編集中に貼った画像は、bytes は在るのに
+           * 参照が**未保存の欄の中**にしか無く、走査からは「使っていない」に見える。
+           * ⚠ 本体タブと話せないときは `unknown` ── **断るが、文言を分ける**
+           *   (「他のタブで編集中」と言うと、存在しないタブを探させる)。
+           */
+          const editingBefore = await editingElsewhere();
+          if (!editingBefore.ok) {
+            dispatcher.dispatch({ type: 'OP_FAILED', error: editingBefore.reason });
+            return;
+          }
           await runExplicitPurge({
             ports: {
               listMetas: () =>
@@ -1471,7 +1492,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
                 await client.request({ op: 'deleteAssetMeta', cid: DEFAULT_CID, key });
               },
             },
-            isReady: () => dispatcher.getState().phase === 'ready',
+            // ⚠ confirm の**後**にもう一度見る(TOCTOU)── 自タブと他タブの両方
+            isReady: async () => {
+              if (dispatcher.getState().phase !== 'ready')
+                return { ok: false, reason: '編集が始まったため中止しました' };
+              return editingElsewhere();
+            },
             // 一括削除なので fail closed(confirm が無い環境では実行しない ──
             // 単発の delete-entry が ?? true なのとは桁が違う)
             confirm: (msg) => ask(msg, false),
