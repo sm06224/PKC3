@@ -790,6 +790,26 @@ function reduceCore(
         state.cid === action.cid && state.selectedLid !== null && metas.has(state.selectedLid)
           ? state.selectedLid
           : null;
+      /**
+       * 🔴 **現在地と印も同じ規則で検める**(#240 の着地前レビュー 1)。
+       *
+       * ⚠ `SYS_BOOTED` は**別タブが書くたび**に飛ぶ(`main.ts` の 300ms 束ね)。
+       *    選択だけ検めて `scopeLid` を素通りさせると、**別タブがそのフォルダを
+       *    消した瞬間**に「現在地は在るが実体は無い」状態になり、表は 0 行・
+       *    パンくずはルートだけ ── **データが全部消えたように見える**。
+       *    そこで「+ ノート」を押すと親が付かず、作ったものも画面に出ない。
+       * ⚠ 印(`selection`)も同じ ── 消えた lid が残ると「N 件を選んでいます」の
+       *    帯だけが出て、まとめて削除が**画面に無いものを消す**。
+       * ⚠ 別 container(`cid` 違い)なら全部捨てる ── lid の偶然衝突を持ち越さない。
+       */
+      const sameCid = state.cid === action.cid;
+      const keepScope =
+        sameCid && state.scopeLid !== null && metas.has(state.scopeLid) ? state.scopeLid : null;
+      const keepMarks = sameCid ? state.selection.filter((l) => metas.has(l)) : [];
+      const keepAnchor =
+        sameCid && state.selectionAnchor !== null && metas.has(state.selectionAnchor)
+          ? state.selectionAnchor
+          : null;
       return {
         state: {
           ...state,
@@ -800,6 +820,9 @@ function reduceCore(
           order,
           relations: action.relations,
           selectedLid: keepLid,
+          scopeLid: keepScope,
+          selection: keepMarks,
+          selectionAnchor: keepAnchor,
           openBody: null,
           freshLid: null,
           // ⚠ 元ファイルの紐づけは**このセッションの持ち物**なので、同じ container の
@@ -1595,7 +1618,17 @@ function reduceCore(
        */
       if (action.lid !== null && !state.entryMetas.has(action.lid))
         return { state, events: [] };
-      return { state: { ...state, scopeLid: action.lid }, events: [] };
+      /**
+       * 🔴 **印は現在地のもの**(着地前レビュー 2)。場所を移ったら外す ──
+       * 残すと「画面に印が 1 つも無いのに帯だけが N 件と言う」状態になり、
+       * 押すと**画面に無いものがゴミ箱へ入る**。
+       * ⚠ 起点(`selectionAnchor`)も一緒に外す ── 別の場所の行を起点に
+       * `Shift` の範囲を採ると、見た範囲と違う集合が選ばれる。
+       */
+      return {
+        state: { ...state, scopeLid: action.lid, selection: [], selectionAnchor: null },
+        events: [],
+      };
     }
     case 'DESELECT_ENTRY': {
       // filer の「ルート」導線(scope は selection の純関数なので、root 表示 =

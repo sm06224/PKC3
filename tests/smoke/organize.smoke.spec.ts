@@ -96,11 +96,20 @@ test('🔴 まとめて選んで、まとめてゴミ箱へ入る', async ({ pag
   await expect(bulk).toBeVisible();
   await expect(bulk).toContainText('2 件');
 
-  // ③ 範囲選択(Shift)は**見えている並び**で採る ── 起点は最後に押した行
+  /**
+   * ③ 範囲選択(Shift)は**見えている並び**で採る ── 起点は最後に押した行。
+   * ⚠ **どの行に印が付いたか**で見る(件数だけ見ると、範囲選択が完全な no-op でも
+   *   前後とも 2 件のまま通る ── 着地前レビューの指摘)。
+   */
   await rows.nth(1).click({ modifiers: ['Shift'] });
-  await expect(page.locator('[data-pkc-region="filer-table"] tbody tr[data-pkc-marked]')).toHaveCount(
-    2,
-  );
+  const marked = page.locator('[data-pkc-region="filer-table"] tbody tr[data-pkc-marked]');
+  await expect(marked).toHaveCount(2);
+  // 起点 = 3 行目(直前に Ctrl で押した)→ 2 行目まで = 2 件目と 3 件目
+  await expect(marked.first()).toHaveAttribute('data-pkc-archetype', 'text');
+  await expect(
+    rows.nth(0),
+    '範囲の外(1 行目)にまで印が残っている',
+  ).not.toHaveAttribute('data-pkc-marked', '');
 
   /**
    * ④ まとめてゴミ箱へ。

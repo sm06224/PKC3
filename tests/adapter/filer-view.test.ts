@@ -233,3 +233,41 @@ describe('filer view (P3-7b)', () => {
     expect(rows()).toEqual(['y', 'x']); // entryOrder 順
   });
 });
+
+/**
+ * 🔴 **指紋に入れ忘れた材料は「死んだ操作子」になる**(#240 の着地前レビュー 3)。
+ * ⚠ `filerRows` に渡していても、指紋に入っていなければ**1 バイトも描き直さない**。
+ * ⚠ 同じ罠を sidebar で踏んで直した回帰 test は `SidebarRenderer` しか import して
+ *    いなかった ── だからこちらは誰にも守られていなかった。
+ */
+describe('フォルダ面が描き直る材料(指紋)', () => {
+  // ⚠ 題名の順と手動の順が**わざと逆**(同じなら、この test は空振りする)
+  const M = [
+    { ...meta('a', 1), title: 'zz' },
+    { ...meta('b', 2), title: 'yy' },
+    { ...meta('c', 3), title: 'xx' },
+  ];
+
+  it('🔴 並べ替えを選んだら、フォルダ面の並びも変わる', () => {
+    const { root, d, rows } = setup(M, []);
+    root.querySelector<HTMLElement>('[data-pkc-browse="filer"]')!.click();
+    expect(rows()).toEqual(['a', 'b', 'c']); // 手動(entryOrder)順
+    d.dispatch({ type: 'SET_ENTRY_SORT', sort: 'title' });
+    expect(rows(), '並べ替えを選んでも表が組み直されない(死んだ操作子)').toEqual([
+      'c',
+      'b',
+      'a',
+    ]);
+  });
+
+  it('🔴 本文検索の当たりが返ったら、フォルダ面にも増える', () => {
+    const { root, d, rows } = setup(M, []);
+    root.querySelector<HTMLElement>('[data-pkc-browse="filer"]')!.click();
+    // 題名には無い語で絞る ── 当たりが返るまでは 0 行
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'なかみ' });
+    expect(rows()).toEqual([]);
+    d.dispatch({ type: 'SET_SEARCH_HITS', query: 'なかみ', lids: ['b'] });
+    expect(rows(), '本文の当たりがフォルダ面に届いていない').toEqual(['b']);
+  });
+});
+

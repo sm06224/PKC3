@@ -275,3 +275,187 @@ describe('探し方の既定と記憶(#240 段⑤)', () => {
     expect(main, '既定が main.ts に直書きへ戻っている').not.toContain("browseMode: BrowseMode = 'list'");
   });
 });
+
+describe('印が指すものと、画面に見えているもの(#240 着地前レビュー)', () => {
+  /** はこ(フォルダ)+ 平置き 4 件。 */
+  const WITH_FOLDER = [meta('f', 0, 'はこ', 'folder'), ...METAS];
+  const bootedF = (metas: EntryMeta[] = WITH_FOLDER): AppState =>
+    reduce(initialState, { type: 'SYS_BOOTED', cid: 'c1', metas, relations: [] }).state;
+
+  it('🔴 別タブが消したフォルダ・行は、現在地からも印からも落ちる', () => {
+    let s = bootedF();
+    s = reduce(s, { type: 'SET_SCOPE', lid: 'f' }).state;
+    s = reduce(s, { type: 'TOGGLE_SELECT', lid: 'a' }).state;
+    expect(s.scopeLid).toBe('f');
+    expect(s.selection).toEqual(['a']);
+    // ⚠ 別タブの書込は `SYS_BOOTED` で届く(300ms 束ね)── ここで検めないと
+    //   「現在地は在るが実体は無い」= 表 0 行・パンくずはルートだけ、になる
+    const gone = WITH_FOLDER.filter((m) => m.lid !== 'f' && m.lid !== 'a');
+    const r = reduce(s, { type: 'SYS_BOOTED', cid: 'c1', metas: gone, relations: [] });
+    expect(r.state.scopeLid, '消えたフォルダを現在地に残した').toBeNull();
+    expect(r.state.selection, '消えた行が印に残った').toEqual([]);
+    expect(r.state.selectionAnchor).toBeNull();
+  });
+
+  it('⚠ 逆に、**在るものは残す**(再読込のたびに現在地へ戻されない)', () => {
+    let s = bootedF();
+    s = reduce(s, { type: 'SET_SCOPE', lid: 'f' }).state;
+    s = reduce(s, { type: 'TOGGLE_SELECT', lid: 'a' }).state;
+    const r = reduce(s, { type: 'SYS_BOOTED', cid: 'c1', metas: WITH_FOLDER, relations: [] });
+    expect(r.state.scopeLid, '在るフォルダなのに現在地を捨てた').toBe('f');
+    expect(r.state.selection).toEqual(['a']);
+  });
+
+  it('別の container の再読込では、現在地も印も捨てる(lid の偶然衝突)', () => {
+    let s = bootedF();
+    s = reduce(s, { type: 'SET_SCOPE', lid: 'f' }).state;
+    s = reduce(s, { type: 'TOGGLE_SELECT', lid: 'a' }).state;
+    const r = reduce(s, { type: 'SYS_BOOTED', cid: 'c2', metas: WITH_FOLDER, relations: [] });
+    expect(r.state.scopeLid).toBeNull();
+    expect(r.state.selection).toEqual([]);
+  });
+
+  it('🔴 入っているフォルダを消したら、現在地はルートへ戻る(袋小路にしない)', () => {
+    let s = bootedF();
+    s = reduce(s, { type: 'SET_SCOPE', lid: 'f' }).state;
+    // ⚠ 右のペインから消すと、**現在地だけが死んだ lid を指す** ──
+    //   表は 0 行・パンくずはルートだけ・「まだ何もありません」で袋小路になる
+    const r = reduce(s, { type: 'DELETE_ENTRY', lid: 'f' });
+    expect(r.state.scopeLid, '消したフォルダの中に取り残された').toBeNull();
+  });
+
+  it('🔴 場所を移ったら印は外れる(印は現在地のもの)', () => {
+    let s = bootedF();
+    s = reduce(s, { type: 'TOGGLE_SELECT', lid: 'a' }).state;
+    s = reduce(s, { type: 'TOGGLE_SELECT', lid: 'b' }).state;
+    expect(s.selection).toHaveLength(2);
+    const r = reduce(s, { type: 'SET_SCOPE', lid: 'f' });
+    expect(r.state.selection, '別の場所の印を持ち越した').toEqual([]);
+    expect(r.state.selectionAnchor, '起点が別の場所を指したまま').toBeNull();
+  });
+
+  it('🔴 絞り込みで見えなくなった行は、帯にも数えない', () => {
+    document.body.innerHTML = '';
+    const region = document.createElement('div');
+    document.body.append(region);
+    const filer = new FilerRenderer(region);
+    let s = booted();
+    s = reduce(s, { type: 'TOGGLE_SELECT', lid: 'a' }).state; // 題名 zz
+    s = reduce(s, { type: 'TOGGLE_SELECT', lid: 'b' }).state; // 題名 yy
+    filer.render(s);
+    expect(region.querySelector('[data-pkc-field="filer-bulk-count"]')?.textContent).toContain(
+      '2 件',
+    );
+    // 「zz」だけ残す絞り込み ── b は画面から消える
+    s = reduce(s, { type: 'SET_ENTRY_FILTER', query: 'zz' }).state;
+    filer.render(s);
+    expect(region.querySelectorAll('[data-pkc-region="filer-table"] tbody tr')).toHaveLength(1);
+    expect(
+      region.querySelector('[data-pkc-field="filer-bulk"]'),
+      '画面に印が 1 つしか無いのに帯が出ている',
+    ).toBeNull();
+  });
+
+  it('🔴 絞り込みで見えなくなった行は、まとめて削除でも消えない', () => {
+    document.body.innerHTML = '';
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    const d = new Dispatcher();
+    const regions = buildShell(root);
+    bindActions(root, d);
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: METAS, relations: [] });
+    const filer = new FilerRenderer(regions.browseHost);
+    d.onState((st) => filer.render(st));
+    filer.render(d.getState());
+    // ⚠ 押す口は**自分で置く** ── 帯は「見えている印が 2 件以上」でしか出ないので、
+    //   帯から辿ると**帯が出ないこと自体に救われて**空振りする(緑の意味が変わる)
+    const del = document.createElement('button');
+    del.setAttribute('data-pkc-action', 'delete-selected');
+    root.append(del);
+
+    d.dispatch({ type: 'TOGGLE_SELECT', lid: 'a' });
+    d.dispatch({ type: 'TOGGLE_SELECT', lid: 'b' });
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'zz' }); // 題名 zz = a だけ残る
+    expect(
+      regions.browseHost.querySelectorAll('[data-pkc-region="filer-table"] tbody tr'),
+      '絞り込みが効いていない(この test は空振り)',
+    ).toHaveLength(1);
+    del.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(d.getState().entryMetas.has('b'), '画面に無い行がゴミ箱へ入った').toBe(true);
+    expect(d.getState().entryMetas.has('a'), '見えている印は消えるはず').toBe(false);
+
+    // ⚠ 逆側 ── 絞り込みを外せば**両方**消える(消せなくなっていないこと)
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: '' });
+    d.dispatch({ type: 'TOGGLE_SELECT', lid: 'c' });
+    d.dispatch({ type: 'TOGGLE_SELECT', lid: 'd' });
+    del.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(d.getState().entryMetas.has('c')).toBe(false);
+    expect(d.getState().entryMetas.has('d')).toBe(false);
+  });
+
+  it('🔴 印が全部見えなくなっているとき、押しても黙らない(理由を出す)', () => {
+    document.body.innerHTML = '';
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    const d = new Dispatcher();
+    bindActions(root, d);
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: METAS, relations: [] });
+    const del = document.createElement('button');
+    del.setAttribute('data-pkc-action', 'delete-selected');
+    root.append(del);
+    d.dispatch({ type: 'TOGGLE_SELECT', lid: 'b' }); // 題名 yy
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'zz' }); // b は消える
+    del.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(d.getState().entryMetas.has('b')).toBe(true);
+    expect(d.getState().error ?? '', '無言の dead click になっている').toContain('絞り込み');
+  });
+
+  it('🔴 修飾つきのクリックは**フォルダ面の中だけ**(一覧・カンバンで印を作らない)', () => {
+    document.body.innerHTML = '';
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    const d = new Dispatcher();
+    bindActions(root, d);
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: METAS, relations: [] });
+    // フォルダ面**ではない**器に、同じ `select-entry` の行を置く(sidebar と同型)
+    const outside = document.createElement('div');
+    outside.setAttribute('data-pkc-region', 'entry-list');
+    outside.innerHTML =
+      '<button data-pkc-action="select-entry" data-pkc-entry="a">a</button>' +
+      '<button data-pkc-action="select-entry" data-pkc-entry="c">c</button>';
+    root.append(outside);
+    const btn = (lid: string) => outside.querySelector<HTMLElement>(`[data-pkc-entry="${lid}"]`)!;
+    btn('a').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    btn('c').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }));
+    // 🔑 一覧では **Ctrl クリックも普通のクリック**(印が 2 件に増えず、開き直す)──
+    //    増やすと、画面に印が 1 つも出ないまま帯だけが数える形になる
+    expect(d.getState().selection, '印の出ない面で印が増えた').toEqual(['c']);
+    expect(d.getState().selectedLid, '普通のクリックとして扱われていない').toBe('c');
+  });
+
+  it('🔴 「もう一度押す」もフォルダ面の中だけ(見えない現在地が動かない)', () => {
+    document.body.innerHTML = '';
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    const d = new Dispatcher();
+    bindActions(root, d);
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('f', 0, 'はこ', 'folder')],
+      relations: [],
+    });
+    const outside = document.createElement('div');
+    outside.setAttribute('data-pkc-region', 'entry-list');
+    outside.innerHTML = '<button data-pkc-action="select-entry" data-pkc-entry="f">f</button>';
+    root.append(outside);
+    const btn = outside.querySelector('button')!;
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(d.getState().scopeLid, '一覧タブの 2 回押しで現在地が動いた').toBeNull();
+  });
+});

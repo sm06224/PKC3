@@ -51,6 +51,23 @@ export function filerRows(
 }
 
 /**
+ * 🔴 **いま見えている行に絞った印**(#240 の着地前レビュー 2)。
+ *
+ * ⚠ 印(`selection`)は行が見えなくなっても残る ── 絞り込みで消えた / 別タブが
+ * 消した(`SYS_BOOTED` でも落ちるが、絞り込みは落ちない)。残ったまま
+ * 「まとめてゴミ箱へ」を押すと、**画面に無いものが消える**。
+ * 🔑 だから「帯に出す数」「まとめて消す対象」「掴んで運ぶ対象」は
+ * **全部この 1 本**を通す ── 数と対象が食い違うと、確認の文言が嘘になる。
+ */
+export function visibleSelection(
+  rows: readonly EntryMeta[],
+  selection: readonly string[],
+): string[] {
+  const shown = new Set(rows.map((m) => m.lid));
+  return selection.filter((lid) => shown.has(lid));
+}
+
+/**
  * 表示順で `from` と `to` の間を採る(両端を含む)。
  * ⚠ どちらかが見えていないときは **`to` だけ**を返す ── 見えていない行を
  * 巻き込んで消す事故を作らない。

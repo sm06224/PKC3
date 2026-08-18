@@ -54,6 +54,9 @@ export class FilerRenderer {
   private lastMarks = '';
   /** ⚠ 絞り込みも指紋の一部(review M-3 ── 絞り込み中にファイラだけ全件出ていた)。 */
   private lastFilter: string | null = null;
+  /** ⚠ 並び順と本文検索の当たりも指紋(着地前レビュー 3 ── 入れないと死んだ操作子になる)。 */
+  private lastSort: AppState['entrySort'] | null = null;
+  private lastHits: AppState['searchHits'] = null;
   /** ゴミ箱 panel の断面(参照比較 ── P5b で指紋に加わった次元)。 */
   private lastTrash: AppState['trashPanel'] = null;
   /** 居場所を変える帯の器(中身は選択が変わるたびに差し替える)。 */
@@ -101,14 +104,23 @@ export class FilerRenderer {
      * ⚠ 出すのは**ゴミ箱へ**だけ(完全削除は一括で撃たせない。戻せない操作を
      *   まとめて撃てるようにするのが、いちばん事故が大きい)。
      */
-    if (state.selection.length > 1) {
+    /**
+     * 🔴 **数えるのは「いま表に出ている印」だけ**(着地前レビュー 2)。
+     * ⚠ 印は行が見えなくなっても残る(絞り込みで消えた / 別の場所へ移った)ので、
+     *    素で数えると**画面に印が 1 つも無いのに「3 件を選んでいます」**が出て、
+     *    押すと画面に無い 3 件がゴミ箱へ入る。
+     * ⚠ 消す側(`binder` の `delete-selected`)と**同じ規則**である ── 数と対象が
+     *    食い違うと、確認の文言が嘘になる。
+     */
+    const marks = state.selection.filter((lid) => this.rows.has(lid));
+    if (marks.length > 1) {
       const bulk = document.createElement('div');
       bulk.setAttribute('data-pkc-field', 'filer-bulk');
       const count = document.createElement('span');
       count.setAttribute('data-pkc-field', 'filer-bulk-count');
-      count.textContent = `${state.selection.length} 件を選んでいます`;
+      count.textContent = `${marks.length} 件を選んでいます`;
       const del = iconButton('delete-selected', 'まとめてゴミ箱へ');
-      del.title = `選んでいる ${state.selection.length} 件をゴミ箱へ入れます(フォルダ画面から戻せます)`;
+      del.title = `選んでいる ${marks.length} 件をゴミ箱へ入れます(フォルダ画面から戻せます)`;
       const clear = document.createElement('button');
       clear.type = 'button';
       clear.setAttribute('data-pkc-action', 'clear-selection');
@@ -226,9 +238,21 @@ export class FilerRenderer {
      *   「参照が変わった」の大半は**見た目の変化ゼロ**である。
      * 🔑 だから指紋は**画面に出る材料そのもの**にする ── 参照ではなく内容。
      */
+    /**
+     * 🔴 **並び順と本文検索の当たりも指紋に入れる**(着地前レビュー 3)。
+     * ⚠ `filerRows` へ渡しているのに指紋に入れていなかったので、`SET_ENTRY_SORT`
+     *    では**1 バイトも描き直さなかった** ── 並べ替えの `<select>` は
+     *    `findBar` に在って**フォルダタブでも見えている**ので、段⑤ で既定に
+     *    なったこの面に、押しても何も起きない操作子が出ていた。
+     * ⚠ 同じ罠は sidebar で既に踏んで直してある(`sidebar.ts` の `lastSort` /
+     *    `lastHits`)── **回帰 test がそちらしか import していなかった**ので、
+     *    こちらは誰にも守られていなかった(CLAUDE.md「test の import 一覧」)。
+     */
     const listChanged =
       state.relations !== this.lastRelations ||
       state.filterQuery !== this.lastFilter ||
+      state.entrySort !== this.lastSort ||
+      state.searchHits !== this.lastHits ||
       (state.entryMetas !== this.lastMetas && this.metaSignature(state) !== this.lastSignature);
     const selectionChanged = state.selectedLid !== this.lastSelected;
     // ⚠ 現在地は選択と**別に**変わる(#240 段①)── 指紋に入れないと、
@@ -274,6 +298,8 @@ export class FilerRenderer {
     this.lastScopeLid = scopeLid;
     this.lastTrash = state.trashPanel;
     this.lastFilter = state.filterQuery;
+    this.lastSort = state.entrySort;
+    this.lastHits = state.searchHits;
     this.lastMarks = state.selection.join(' ');
 
     /**

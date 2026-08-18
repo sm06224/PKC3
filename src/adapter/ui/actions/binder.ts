@@ -13,7 +13,9 @@
  * 切り替える(その時に計測してから)。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
-import type { ViewMode } from '@adapter/state/app-state';
+import type { AppState, ViewMode } from '@adapter/state/app-state';
+import type { EntryMeta } from '@core/model/entry-meta';
+import { filerRows, visibleSelection } from '@features/relation/filer-list';
 import { archetypeLabel } from '@adapter/ui/render/sidebar';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
 import { insertText } from '@adapter/ui/render/row-swap';
@@ -64,6 +66,78 @@ export function generateLid(): string {
   lidCounter += 1;
   return `${Date.now().toString(36)}-${lidCounter.toString(36).padStart(4, '0')}`;
 }
+
+/**
+ * 🔴 **いまフォルダ面に出ている行**(着地前レビュー 2)。
+ * ⚠ 規則は `filerRows` **1 か所**を通す ── 描く側(`render/filer.ts`)・
+ * 範囲選択(reducer)・ここが別々に並びを組むと、**目で見たものと動くものが
+ * 食い違う**(CLAUDE.md §7)。
+ */
+const visibleFilerRows = (st: AppState): EntryMeta[] =>
+  filerRows(st.scopeLid, st.entryMetas, st.relations, {
+    filterQuery: st.filterQuery,
+    searchHits: st.searchHits,
+    sort: st.entrySort,
+  });
+
+/** その entry が**既にそこに居る**か(動かす必要が無い)。 */
+const alreadyThere = (st: AppState, lid: string, parentLid: string | null): boolean => {
+  const parents = st.relations.filter((r) => r.kind === STRUCTURAL && r.toLid === lid);
+  return parentLid === null
+    ? parents.length === 0
+    : parents.length === 1 && parents[0]?.fromLid === parentLid;
+};
+
+/**
+ * 🔴 **居場所を変える唯一の実体**(着地前レビュー 7)。帯の `<select>` と
+ * D&D が**別々に**書いていたので、断り方と「付いていく」の規則が経路で違った ──
+ * 帯は phase を見ずに撃って reducer が黙って捨て(無言の操作拒否)、拒否されても
+ * `SET_SCOPE` だけは撃つので**動いていないのに画面だけ移動**した。
+ *
+ * ⚠ **既にそこに居る**ものは失敗に数えない(着地前レビュー 6)── ルート直下の
+ * 物をルートへ落としたとき「フォルダは自分の中へは入れられません」と出ていた。
+ * 理由の違う断りを出すと、user は**入れ子の話だと読んで別のものを探す**。
+ */
+const moveEntries = (
+  dispatcher: Dispatcher,
+  lids: readonly string[],
+  parentLid: string | null,
+): void => {
+  if (lids.length === 0) return;
+  if (dispatcher.getState().phase !== 'ready') {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから動かしてください' });
+    return;
+  }
+  let moved = 0;
+  let same = 0;
+  for (const lid of lids) {
+    const st = dispatcher.getState();
+    if (alreadyThere(st, lid, parentLid)) {
+      same += 1;
+      continue;
+    }
+    const before = st.relations;
+    dispatcher.dispatch({ type: 'SET_ENTRY_PARENT', lid, parentLid, relationId: generateLid() });
+    if (dispatcher.getState().relations !== before) moved += 1;
+  }
+  const refused = lids.length - moved - same;
+  if (moved === 0 && same === 0) {
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: 'そこへは入れられません(フォルダは自分の中へは入れられません)',
+    });
+    return;
+  }
+  // ⚠ 一部だけ断られたときも**黙らない**(何件動いていないかを言う)
+  if (refused > 0) {
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: `${refused} 件は入れられませんでした(フォルダは自分の中へは入れられません)`,
+    });
+  }
+  // ⚠ **動かしたものに付いていく**(経路で挙動を変えない ── 設計 doc §6)
+  dispatcher.dispatch({ type: 'SET_SCOPE', lid: parentLid });
+};
 
 /** UI サービス面(storage 依存の操作は main が実体を注入。test は fake)。 */
 export interface BinderServices {
@@ -750,8 +824,22 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     if (refuseWhileBusy('delete-selected', dispatcher, services)) return;
-    const lids = st.selection.filter((lid) => st.entryMetas.has(lid));
-    if (lids.length === 0) return;
+    /**
+     * 🔴 **見えている行に絞る**(着地前レビュー 2)。印は行が見えなくなっても
+     * 残る(絞り込みで消えた / 別タブが消した)ので、素で消すと**画面に無いものが
+     * ゴミ箱へ入る**。⚠ 帯に出す数(`filer.ts`)と**同じ規則**を通す ──
+     * 食い違うと「2 件を削除しますか?」と聞いて 3 件消す形になる。
+     */
+    const lids = visibleSelection(visibleFilerRows(st), st.selection);
+    if (lids.length === 0) {
+      // ⚠ 無言で終わらせない ── 帯は出ているのに何も起きない dead click になる
+      if (st.selection.length > 0)
+        dispatcher.dispatch({
+          type: 'OP_FAILED',
+          error: '選んでいた行がいま画面にありません(絞り込みを消すか、選び直してください)',
+        });
+      return;
+    }
     if (
       !confirmOrExplain(
         dispatcher,
@@ -998,20 +1086,8 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = target.getAttribute('data-pkc-entry');
     if (!lid) return;
     const value = target instanceof HTMLSelectElement ? target.value : '';
-    const parentLid = value === '' ? null : value;
-    dispatcher.dispatch({
-      type: 'SET_ENTRY_PARENT',
-      lid,
-      parentLid,
-      relationId: generateLid(),
-    });
-    /**
-     * 🔴 **画面は動かしたものに付いていく**(#240 段①で明示化)。
-     * ⚠ 現在地が選択の純関数だった頃は**副作用として**そうなっていた ── state に
-     * 移した今、ここで撃たないと**入れた物がその場で視界から消える**(着いたのか
-     * 落としたのか user に分からない)。移した先が現在地になる、が守る性質である。
-     */
-    dispatcher.dispatch({ type: 'SET_SCOPE', lid: parentLid });
+    // 🔴 実体は `moveEntries` 1 本(D&D と同じ ── 断り方も「付いていく」も揃う)
+    moveEntries(dispatcher, [lid], value === '' ? null : value);
   },
   /**
    * 🔴 **並べ替え**(2026-08-06。user 報告 2-10)。⚠ 動かす当人は帯が持つ
@@ -1443,7 +1519,18 @@ export function bindActions(
      * ⚠ `Shift` は**表示順**で範囲を採る(規則は reducer の `filerRows` 1 か所)。
      */
     const me = ev as MouseEvent;
+    /**
+     * 🔴 **フォルダ面の中だけ**(着地前レビュー 4)。`select-entry` は 6 か所に在る
+     * (sidebar / filer / kanban / calendar / query / inspector)ので、面で切らないと:
+     * - 一覧タブの `Ctrl` クリックが**画面に出ない印**を増やす(帯だけが数える)
+     * - `Shift` の範囲は `filerRows` の並びで採るので、**目で見た並びと違う集合**になる
+     *   (フォルダの中の行なら `[]` になり、`preventDefault` 済みなので**選択すら起きない**)
+     * - inspector の「関連へ飛ぶ」ボタンで `Ctrl` クリックが奪われる
+     * 段②③④は**フォルダ面の機能**である(設計 doc §3)。
+     */
+    const inFiler = el.closest('[data-pkc-region="filer-table"]') !== null;
     if (
+      inFiler &&
       el.getAttribute('data-pkc-action') === 'select-entry' &&
       (me.ctrlKey || me.metaKey || me.shiftKey)
     ) {
@@ -1458,7 +1545,9 @@ export function bindActions(
     }
     const action = el.getAttribute('data-pkc-action');
     // ⚠ 行を素で押したときだけ「もう一度押した」を数える(修飾つきは印の話)
-    if (action === 'select-entry') {
+    // ⚠ **フォルダ面の中だけ**(上と同じ理由 ── 一覧タブで 2 回押すと、
+    //    見えていない現在地が動いて「+ ノート」の作り先だけが変わる)
+    if (inFiler && action === 'select-entry') {
       const lid = el.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
       if (lid !== null) maybeEnterFolder(lid);
     }
@@ -1781,7 +1870,12 @@ export function bindActions(
     // 🔴 **PKC の中の移動**(#240 段④)── OS からの file 受けとは**別の型**で見分ける
     if (de.dataTransfer?.types?.includes(PKC_DRAG) === true) {
       const drop = dropTargetOf(de.target);
-      if (drop === undefined) return; // 落とせない場所 ── 既定(受け取らない)のまま
+      if (drop === undefined) {
+        // ⚠ **光ったままにしない**(着地前レビュー 5)── フォルダの上を通ってから
+        //    別の行で離すと、user は「そこへ入った」と読む(実際は何も動かない)
+        clearDropTarget();
+        return; // 落とせない場所 ── 既定(受け取らない)のまま
+      }
       e.preventDefault();
       de.dataTransfer.dropEffect = 'move';
       markDropTarget(drop.el);
@@ -1819,7 +1913,9 @@ export function bindActions(
     const lid = row?.getAttribute('data-pkc-entry') ?? null;
     if (lid === null || !de.dataTransfer) return;
     const st = dispatcher.getState();
-    const lids = st.selection.includes(lid) ? [...st.selection] : [lid];
+    // ⚠ 印ごと運ぶのも**見えている分だけ**(まとめて消すのと同じ規則)
+    const marked = visibleSelection(visibleFilerRows(st), st.selection);
+    const lids = marked.includes(lid) ? marked : [lid];
     de.dataTransfer.setData(PKC_DRAG, lids.join(' '));
     de.dataTransfer.effectAllowed = 'move';
   };
@@ -1846,33 +1942,8 @@ export function bindActions(
    * 落としたものを動かす。⚠ **断る理由を出す**(無言の操作拒否を作らない)──
    * フォルダを自分の子孫へ落とす等、reducer が黙って捨てる形が在る。
    */
-  const moveDropped = (lids: readonly string[], parentLid: string | null): void => {
-    const st = dispatcher.getState();
-    if (st.phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから動かしてください' });
-      return;
-    }
-    let moved = 0;
-    for (const lid of lids) {
-      const before = dispatcher.getState().relations;
-      dispatcher.dispatch({
-        type: 'SET_ENTRY_PARENT',
-        lid,
-        parentLid,
-        relationId: generateLid(),
-      });
-      if (dispatcher.getState().relations !== before) moved += 1;
-    }
-    if (moved === 0) {
-      dispatcher.dispatch({
-        type: 'OP_FAILED',
-        error: 'そこへは入れられません(フォルダは自分の中へは入れられません)',
-      });
-      return;
-    }
-    // ⚠ **動かしたものに付いていく**(`move-entry` と同じ規則 ── 経路で挙動を変えない)
-    dispatcher.dispatch({ type: 'SET_SCOPE', lid: parentLid });
-  };
+  const moveDropped = (lids: readonly string[], parentLid: string | null): void =>
+    moveEntries(dispatcher, lids, parentLid);
   /**
    * 🔴 **フォルダは 2 クリックで開く**(#240 段①。user 指示 2026-08-17
    * 「フォルダをダブルクリックで開くように変更」)。

@@ -9,7 +9,7 @@ import { tileSelectsEntry } from '@features/launcher/tiles';
 import { appEditorMode } from '@adapter/ui/render/editor-mode';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { appKeymap } from '@adapter/ui/render/keymap';
-import { appBrowseMode } from '@adapter/ui/render/browse-mode';
+import { appBrowseMode, isBrowseMode } from '@adapter/ui/render/browse-mode';
 import { StoreClient } from '@adapter/platform/storage/store-client';
 import { openAssetWindow } from '@adapter/platform/asset-window';
 import { assetWindowKind } from '@features/asset/asset-preview-kind';
@@ -1392,7 +1392,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // 🔑 探し方の切替(P8 段⑤)。⚠ **state には持たせない** ── これは
     // 「どう探すか」という画面側の都合で、container のデータではない
     setBrowse: (mode) => {
-      if (mode !== 'list' && mode !== 'filer' && mode !== 'launcher') return;
+      // ⚠ 妥当性の判定も **`browse-mode.ts` 1 か所**(着地前レビュー 記録)──
+      //   ここに書き下すと、探し方を足したときに必ず取りこぼす
+      if (!isBrowseMode(mode)) return;
       browseMode = mode;
       appBrowseMode.set(mode); // 次に開いたときも同じ探し方で出す(#240 段⑤)
       markBrowse(mode);
