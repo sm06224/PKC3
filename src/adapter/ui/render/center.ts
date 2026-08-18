@@ -15,9 +15,18 @@ import { SettingsRenderer } from './settings';
 import { FlagsRenderer } from './flags';
 import { HelpRenderer } from './help';
 import { QueryRenderer } from './query';
+import { DualFilerRenderer } from './dual-filer';
 import type { MarkdownClient } from '@adapter/platform/render/markdown-client';
 
-type PaneView = 'detail' | 'kanban' | 'calendar' | 'query' | 'settings' | 'flags' | 'help';
+type PaneView =
+  | 'detail'
+  | 'kanban'
+  | 'calendar'
+  | 'query'
+  | 'dual'
+  | 'settings'
+  | 'flags'
+  | 'help';
 
 /**
  * 🔴 **ノートを映さない面**(P11)。ここに足し忘れると、その面は
@@ -26,7 +35,7 @@ type PaneView = 'detail' | 'kanban' | 'calendar' | 'query' | 'settings' | 'flags
  * 中央をノートへ戻すか」、こちらは「中央に自分の器を持つか」。
  * 両方に足す必要があり、`tests/adapter/help-pane.test.ts` が食い違いを落とす。
  */
-const ASIDE: ReadonlySet<ViewMode> = new Set<ViewMode>(['settings', 'flags', 'help']);
+const ASIDE: ReadonlySet<ViewMode> = new Set<ViewMode>(['settings', 'flags', 'help', 'dual']);
 
 /**
  * 🔑 中央は**常に「開いているノート」**(P8 段⑤)。
@@ -49,6 +58,7 @@ export class CenterRouter {
   private readonly flags: FlagsRenderer;
   private readonly help: HelpRenderer;
   private readonly query: QueryRenderer;
+  private readonly dual: DualFilerRenderer;
   private lastPane: PaneView = 'detail';
 
   constructor(
@@ -76,6 +86,7 @@ export class CenterRouter {
       kanban: pane('kanban'),
       calendar: pane('calendar'),
       query: pane('query'),
+      dual: pane('dual'),
       settings: pane('settings'),
       flags: pane('flags'),
       help: pane('help'),
@@ -84,6 +95,7 @@ export class CenterRouter {
     this.kanban = new KanbanRenderer(this.panes.kanban);
     this.calendar = new CalendarRenderer(this.panes.calendar, now);
     this.query = new QueryRenderer(this.panes.query);
+    this.dual = new DualFilerRenderer(this.panes.dual);
     this.settings = new SettingsRenderer(this.panes.settings);
     this.flags = new FlagsRenderer(this.panes.flags);
     /**
@@ -103,6 +115,7 @@ export class CenterRouter {
     if (view === 'detail') this.detail.render(state);
     else if (view === 'kanban') this.kanban.render(state);
     else if (view === 'query') this.query.render(state);
+    else if (view === 'dual') this.dual.render(state);
     else if (view === 'settings') this.settings.render(state);
     else if (view === 'flags') this.flags.render();
     // ⚠ ヘルプにも**コンテナ id を渡す**(Issue #100 段①)── マニュアルも

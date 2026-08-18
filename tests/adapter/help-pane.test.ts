@@ -302,6 +302,7 @@ const ALL_VIEWS = [
   'filer',
   'launcher',
   'query',
+  'dual',
   'settings',
   'flags',
   'help',

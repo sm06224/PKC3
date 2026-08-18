@@ -71,6 +71,11 @@ const VIEW_BUTTONS: readonly { view: string; label: string }[] = [
    * セレクトの奥に埋め、**自動では 1 度も出ない**ままにして死なせた。
    */
   { view: 'query', label: '集計' },
+  /**
+   * 🔴 **2 ペインで整理**(#241 段⑥-a)。⚠ 集計のすぐ下 ── 日々使う面の側に
+   * 置く(設定・フラグ・ヘルプは「困ったときに見る面」で、性質が違う)。
+   */
+  { view: 'dual', label: '2 ペイン' },
   { view: 'settings', label: '設定' },
   // ⚠ 開発者・パワーユーザー向け(P11)。設定とは**別の面**にする(裁定 Q3)
   { view: 'flags', label: 'フラグ' },

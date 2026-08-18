@@ -204,6 +204,17 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     whileTyping: true,
     note: 'PKC2 の Ctrl+? と同じ手。F1 は文字を打つ鍵ではないので打鍵中でも効きます',
   },
+  /**
+   * ⚠ **番号は末尾に足す**(#241 段⑥-a)。集計と設定の間へ差し込むと、
+   * 既に `Alt+3` を体で覚えた user と、**保存済みの割当**の両方がずれる。
+   */
+  {
+    id: 'view-dual',
+    label: '2 ペインの面へ',
+    contexts: ['global'],
+    defaults: ['Alt+6'],
+    note: '別の場所を左右に開いて、まとめて移す面です',
+  },
   {
     id: 'toggle-sidebar',
     label: '左のペインを畳む / 戻す',
