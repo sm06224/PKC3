@@ -647,6 +647,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
          * ⚠ 幅は**固定**(紙の本文幅なりの 720 CSS px)── 画面の幅で焼くと、
          *   窓の大きさで文書の中の図の大きさが変わる。
          */
+        /**
+         * 🔴 **図はベクタ(SVG)で起こす**(#238、user 指示 2026-08-17)。
+         * ⚠ 画面の PNG キャッシュは使わない ── 書き出しはベクタ
+         *   (不可侵指示 2026-08-03「SVG は書き出しのときだけ」)。
+         * ⚠ **グラフは `null`** ── chart.js は canvas に描くのでベクタ源が無い
+         *   (`chart-raster.ts` が「chart.js はベクタを吐かない」と明記している)。
+         */
+        renderFigureVector: async (kind, source) =>
+          kind === 'chart' ? null : renderToSvg(source, readPalette()),
         renderFigure: async (kind, source) => {
           const diagram = kind === 'chart' ? CHART_KIND : MERMAID_KIND;
           const raster = await diagram.render({

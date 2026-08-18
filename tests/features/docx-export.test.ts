@@ -290,14 +290,15 @@ describe('画像(#187 段②)', () => {
       ISO,
     );
     const xml = part(res, 'word/document.xml');
-    const ext = /<wp:extent cx="(\d+)" cy="(\d+)"\/>/.exec(xml);
+    // ⚠ **VML は pt で書く**(#238 で DrawingML から移した)── EMU ではない
+    const ext = /style="width:([\d.]+)pt;height:([\d.]+)pt"/.exec(xml);
     expect(ext, '画像が入っていない').not.toBeNull();
-    const cx = Number(ext![1]);
-    const cy = Number(ext![2]);
-    // ⚠ 幅は本文幅ちょうどへ収まる
-    expect(cx).toBe(6_120_130);
+    const wPt = Number(ext![1]);
+    const hPt = Number(ext![2]);
+    // ⚠ 幅は本文幅ちょうどへ収まる(6,120,130 EMU = 481.9pt)
+    expect(wPt).toBeCloseTo(6_120_130 / 12700, 1);
     // 🔴 **比が保たれている**(2:1 のまま。潰れていない)
-    expect(Math.abs(cx / cy - 2)).toBeLessThan(0.01);
+    expect(Math.abs(wPt / hPt - 2)).toBeLessThan(0.01);
   });
 
   it('本文幅に収まる画像はそのままの寸法(勝手に拡大しない)', () => {
@@ -307,7 +308,8 @@ describe('画像(#187 段②)', () => {
       ISO,
     );
     const xml = part(res, 'word/document.xml');
-    expect(xml).toContain('<wp:extent cx="952500" cy="381000"/>');
+    // 100x40 px = 952,500 x 381,000 EMU = 75.0 x 30.0 pt
+    expect(xml).toContain('style="width:75.0pt;height:30.0pt"');
   });
 
   it('🔴 画像の rel は image 型で、リンクとは Type も TargetMode も違う', () => {
@@ -326,12 +328,29 @@ describe('画像(#187 段②)', () => {
     expect(img![0]).not.toContain('TargetMode');
     expect(rels, 'リンクの rel が External でない').toContain('TargetMode="External"');
     // 🔴 document がその id を指している(指し先の実在)
-    expect(part(res, 'word/document.xml')).toContain(`r:embed="${img![1]!}"`);
+    // ⚠ VML なので `r:id`(#238 で DrawingML から移した ── `r:embed` は DrawingML の綴り)
+    expect(part(res, 'word/document.xml')).toContain(`r:id="${img![1]!}"`);
+  });
+
+  it('🔴 画像は VML(`w:pict`)で入る ── DrawingML では PKC の Office が開けない', () => {
+    const res = buildDocx(
+      [{ kind: 'image', media: 'media/image1.png', widthPx: 10, heightPx: 10, alt: 'ず' }],
+      't',
+      ISO,
+    );
+    const xml = part(res, 'word/document.xml');
+    // 🔴 2026-08-17 実測: DrawingML(PKC 版も LO 版も)は**窓が空のまま**、VML だけ開いた
+    expect(xml, 'DrawingML に戻っている').not.toContain('<w:drawing>');
+    expect(xml, 'VML で入っていない').toContain('<w:pict>');
+    expect(xml, 'VML の名前空間が無い(Word が読めない)').toContain('xmlns:v="urn:schemas-microsoft-com:vml"');
+    // ⚠ **枠なし**にする ── VML の既定は枠ありで、図の周りに線が出る(実測)
+    expect(xml, '図に枠線が出る').toContain('stroked="f"');
   });
 
   it('🔴 Content_Types が画像の拡張子を宣言している(宣言漏れは開けない)', () => {
     const types = part(buildDocx([], 't', ISO), '[Content_Types].xml');
-    for (const ext of ['png', 'jpeg', 'gif', 'webp'])
+    // ⚠ `emf` は #238 で足した(図をベクタで入れる)── 宣言が無いと Word が開けない
+    for (const ext of ['png', 'jpeg', 'gif', 'webp', 'emf'])
       expect(types, `${ext} の宣言が無い`).toContain(`Extension="${ext}"`);
   });
 

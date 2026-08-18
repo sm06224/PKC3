@@ -13,6 +13,7 @@ import { writeArchive, type ArchiveSource } from '@features/export/pkc3-archive'
 import type { RenderMarkdownOptions } from '@features/markdown/markdown-render';
 import { writePortableHtml } from '@features/export/pkc3-html';
 import { buildDocxFile } from '@adapter/platform/export/docx-client';
+import { svgToEmf } from '@features/export/svg-emf';
 import { htmlToDocxBlocks } from '@adapter/platform/export/html-blocks';
 import { DEFAULT_PAGE_FORMAT, type PageFormat } from '@features/page-format';
 import { writeMarkdownZip } from '@features/export/pkc3-markdown-zip';
@@ -60,6 +61,15 @@ export interface ExportDeps {
    * @returns `cssWidth` は**画面に置くときの幅**(CSS px)。PNG の画素は dpr 倍ある。
    */
   renderFigure(kind: string, source: string): Promise<{ blob: Blob; cssWidth: number } | null>;
+  /**
+   * 🔴 **図をベクタ(SVG)で起こす**(#238。user 指示 2026-08-17
+   * 「**フローチャートのようないじれそうなものは emf とか wmf にして欲しい**」)。
+   *
+   * ⚠ **optional にしない** ── 配線を落としても tsc が黙ると、戻ってくる症状は
+   * 「図だけ画像に戻っている」という**気づけない形**になる。
+   * ⚠ グラフ(chart.js)は **canvas に描くのでベクタ源が無い** ── `null` を返す。
+   */
+  renderFigureVector(kind: string, source: string): Promise<string | null>;
   now?(): Date;
   /**
    * 本文 1 件を HTML にする(閲覧用 HTML だけが使う。P8 段⑲)。
@@ -339,6 +349,30 @@ export async function exportEntryDocx(
      */
     for (const [i, fig] of figures.entries()) {
       const what = fig.kind === 'chart' ? 'グラフ' : '図';
+      /**
+       * 🔴 **まずベクタ(EMF)で試す**(#238)。⚠ これが本命 ── Word で拡大しても
+       * 粗くならず、図形として触れる。
+       * ⚠ **落ちたらラスタへ落とす**(下)。ベクタで書けない図のために
+       * 「図が消える」を作らない。
+       */
+      const svg = await deps.renderFigureVector(fig.kind, fig.source).catch(() => null);
+      if (svg !== null) {
+        try {
+          const emf = svgToEmf(svg);
+          const vname = `media/figure${i + 1}.emf`;
+          blocks[fig.at] = {
+            kind: 'image',
+            media: vname,
+            widthPx: emf.widthPx,
+            heightPx: emf.heightPx,
+            alt: what,
+          };
+          media.push({ name: `word/${vname}`, blob: new Blob([emf.bytes as BlobPart]) });
+          continue;
+        } catch {
+          // ⚠ 黙って消さない ── ラスタで入れ直す
+        }
+      }
       const drawn = await deps.renderFigure(fig.kind, fig.source).catch(() => null);
       const size = drawn === null ? null : await imageSizeOf(drawn.blob);
       if (drawn === null || size === null) {

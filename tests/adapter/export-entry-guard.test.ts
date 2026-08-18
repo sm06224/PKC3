@@ -58,6 +58,8 @@ function deps(
     report: () => {},
     settle,
     // ⚠ 既定は「焼けない」── 図を見る test は自分で差し替える
+    // ⚠ ベクタは使わない腕(ラスタ経路を通す)
+    renderFigureVector: async () => null,
     renderFigure: async () => null,
     now: () => new Date('2026-08-02T00:00:00Z'),
     files,
@@ -399,7 +401,8 @@ describe('Word の画像(#187 段②)', () => {
     expect(await exportEntryDocx(dispatcher, d, 'n1')).toBe(true);
     const text = await got[0]!.text();
     expect(text, 'zip に画像が入っていない').toContain('word/media/image1.png');
-    expect(text, 'document が画像を指していない').toContain('r:embed="rIdM1"');
+    // ⚠ VML なので `r:id`(#238 で DrawingML から移した)
+    expect(text, 'document が画像を指していない').toContain('r:id="rIdM1"');
     expect(text, '本文が「写せませんでした」のまま').not.toContain('写せませんでした');
   });
 
@@ -482,7 +485,8 @@ describe('Word の図(#187 段②)', () => {
     const text = await got[0]!.text();
     expect(asked, '図の原文が産出器へ渡っていない').toEqual(['mermaid:graph TD; A-->B']);
     expect(text, '図が zip に入っていない').toContain('word/media/figure1.png');
-    expect(text, 'document が図を指していない').toContain('r:embed="rIdM1"');
+    // ⚠ VML なので `r:id`(DrawingML の `r:embed` ではない ── #238)
+    expect(text, 'document が図を指していない').toContain('r:id="rIdM1"');
     // 🔴 **原文が等幅で出ていない**(PKC2 の失敗の顔)
     expect(text, '図の原文が本文に出ている').not.toContain('graph TD');
     expect(text).not.toContain('描けませんでした');
@@ -493,9 +497,49 @@ describe('Word の図(#187 段②)', () => {
     const { dispatcher } = fakeDispatcher('ready');
     await exportEntryDocx(dispatcher, d, 'n1');
     const text = await got[0]!.text();
-    // 360 CSS px = 3,429,000 EMU / 高さは絵の比(720:480)で 240 px = 2,286,000 EMU
-    expect(text, '幅が CSS px でない').toContain('cx="3429000"');
-    expect(text, '高さが絵の比で出ていない').toContain('cy="2286000"');
+    // 360 CSS px = 3,429,000 EMU = 270.0pt / 高さは絵の比(720:480)で 240px = 180.0pt
+    expect(text, '幅が CSS px でない').toContain('width:270.0pt');
+    expect(text, '高さが絵の比で出ていない').toContain('height:180.0pt');
+  });
+
+  /**
+   * 🔴 **図はベクタ(EMF)で入る**(#238。user 指示 2026-08-17
+   * 「フローチャートのようないじれそうなものは emf とか wmf にして欲しい」)。
+   *
+   * ⚠ ここが無いと、`renderFigureVector` の配線を落としても**ラスタで出るだけ**で
+   * 全部緑になる ── user から見ると「拡大すると粗い図」に静かに戻る。
+   */
+  const VECTOR_SVG =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 60" id="v">' +
+    '<style>#v rect{fill:#f5f6f8;stroke:#cdd2d9;}</style>' +
+    '<rect x="10" y="10" width="100" height="40"/></svg>';
+
+  it('🔴 図はベクタ(.emf)で zip に入り、document がそれを指す', async () => {
+    const { d, got, asked } = setup();
+    (d as unknown as { renderFigureVector: (k: string, s: string) => Promise<string | null> }).renderFigureVector =
+      async () => VECTOR_SVG;
+    const { dispatcher } = fakeDispatcher('ready');
+    expect(await exportEntryDocx(dispatcher, d, 'n1')).toBe(true);
+    const text = await got[0]!.text();
+    expect(text, 'ベクタで入っていない').toContain('word/media/figure1.emf');
+    expect(text, 'ラスタに落ちている').not.toContain('word/media/figure1.png');
+    expect(text, 'document が図を指していない').toContain('r:id="rIdM1"');
+    // ⚠ **ラスタの産出器は呼ばれない**(2 度描かない)
+    expect(asked, 'ベクタが在るのにラスタも焼いている').toEqual([]);
+    // 大きさは viewBox から(120x60 px = 90.0 x 45.0 pt)
+    expect(text).toContain('width:90.0pt');
+  });
+
+  it('🔴 ベクタに起こせない図は**ラスタへ落とす**(図が消えない)', async () => {
+    const { d, got, asked } = setup();
+    (d as unknown as { renderFigureVector: () => Promise<string | null> }).renderFigureVector = async () =>
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"></svg>'; // 図形 0 件 → 投げる
+    const { dispatcher } = fakeDispatcher('ready');
+    expect(await exportEntryDocx(dispatcher, d, 'n1')).toBe(true);
+    const text = await got[0]!.text();
+    expect(text, 'ラスタへ落ちていない').toContain('word/media/figure1.png');
+    expect(asked, 'ラスタの産出器が呼ばれていない').toHaveLength(1);
+    expect(text).not.toContain('描けませんでした');
   });
 
   it('🔴 焼けなければ、その場に理由が残る(黙って消えない)', async () => {

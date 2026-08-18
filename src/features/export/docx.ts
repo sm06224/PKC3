@@ -114,6 +114,8 @@ export interface DocxResult {
 /**
  * px → EMU(English Metric Unit)。⚠ Word の寸法は EMU で、**96dpi の px なら 9525 倍**。
  */
+/** 1pt = 12700 EMU。⚠ VML の `style` は **pt** で書く(EMU ではない)。 */
+const EMU_PER_PT = 12700;
 const EMU_PER_PX = 9525;
 /**
  * 本文の幅(EMU)。A4 縦・左右余白 1134 twip → 9638 twip = **6.693 インチ**
@@ -303,18 +305,33 @@ function blockXml(block: DocxBlock, rels: Map<string, string>): string {
       }
       const alt = xmlEscape(xmlSafe(block.alt));
       const n = rels.size;
-      const drawing =
-        `<w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">` +
-        `<wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${n}" name="Picture ${n}" descr="${alt}"/>` +
-        `<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">` +
-        `<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
-        `<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
-        `<pic:nvPicPr><pic:cNvPr id="${n}" name="Picture ${n}" descr="${alt}"/><pic:cNvPicPr/></pic:nvPicPr>` +
-        `<pic:blipFill><a:blip r:embed="${xmlEscape(id)}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
-        `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
-        `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>` +
-        `</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing>`;
-      return paragraph(`<w:r>${drawing}</w:r>`);
+      /**
+       * 🔴 **画像は VML(`w:pict`)で入れる**(#199 / #238。2026-08-17 実測)。
+       *
+       * ⚠ **DrawingML(`w:drawing`)では PKC 内の Office が開けない。**
+       * 同じ画像・同じ文書で入れ物だけ変えて測った:
+       *
+       * | 画像の書き方 | native LO | PKC の Office(wasm) |
+       * |---|---|---|
+       * | DrawingML(PKC が書いた) | ✅ | ❌ **窓が空のまま** |
+       * | DrawingML(**LO 自身**が書いた) | ✅ | ❌ 空 |
+       * | DrawingML + VML の代替(`mc:AlternateContent`) | ✅ | ❌ 空(`mc:Choice` を採って落ちる) |
+       * | **VML のみ** | ✅ | ✅ **開く** |
+       *
+       * ⚠ したがって **`mc:AlternateContent` で両立させることはできない**
+       * (救われるはずの `mc:Fallback` へ行かない)。
+       * ⚠ VML は OOXML の**移行用**(ISO 29500 Part 4)である ── Strict では使えない。
+       *   それでも選ぶのは、**PKC 自身の書き出しが PKC の Office で開けない**ほうが
+       *   実害が大きいからである(user 確認 2026-08-17「VML は開けました」)。
+       * ⚠ `stroked="f"` を落とすと **図の周りに枠線が出る**(VML の既定は枠あり)。
+       */
+      const wPt = (cx / EMU_PER_PT).toFixed(1);
+      const hPt = (cy / EMU_PER_PT).toFixed(1);
+      const pict =
+        `<w:pict><v:shape id="_x0000_i${1024 + n}" type="#_x0000_t75"` +
+        ` style="width:${wPt}pt;height:${hPt}pt" stroked="f" filled="f" alt="${alt}">` +
+        `<v:imagedata r:id="${xmlEscape(id)}" o:title="${alt}"/></v:shape></w:pict>`;
+      return paragraph(`<w:r>${pict}</w:r>`);
     }
     case 'skipped':
       /**
@@ -329,7 +346,7 @@ function blockXml(block: DocxBlock, rels: Map<string, string>): string {
 }
 
 const CONTENT_TYPES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="jpeg" ContentType="image/jpeg"/><Default Extension="jpg" ContentType="image/jpeg"/><Default Extension="gif" ContentType="image/gif"/><Default Extension="webp" ContentType="image/webp"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/><Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>`;
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="emf" ContentType="image/x-emf"/><Default Extension="jpeg" ContentType="image/jpeg"/><Default Extension="jpg" ContentType="image/jpeg"/><Default Extension="gif" ContentType="image/gif"/><Default Extension="webp" ContentType="image/webp"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/><Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>`;
 
 const ROOT_RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/></Relationships>`;
@@ -401,7 +418,7 @@ export function buildDocx(
     `<w:pgSz w:w="${paper.w}" w:h="${paper.h}"${orient}/>` +
     `<w:pgMar w:top="${PAGE_MARGIN_TWIPS}" w:right="${PAGE_MARGIN_TWIPS}" w:bottom="${PAGE_MARGIN_TWIPS}" w:left="${PAGE_MARGIN_TWIPS}" w:header="851" w:footer="992" w:gutter="0"/></w:sectPr>`;
   const document = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><w:body>${body}${sectPr}</w:body></w:document>`;
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office"><w:body>${body}${sectPr}</w:body></w:document>`;
 
   const relItems = [
     '<Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>',
