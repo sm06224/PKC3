@@ -203,3 +203,45 @@ test('🔴 資産にしている間に焦点が移っても、本文の欄に入
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **ページ中の図(`<svg>`)を貼ると、資産になって描かれる**(user 裁定 2026-08-18)。
+ *
+ * ⚠ **実ブラウザでしか測れない次元が 2 つ**ある:
+ * ① `<svg>` の中の `<script>` の**解析**(happy-dom は script 以降を丸ごと落とすので、
+ *    unit では「掃除が効いた」のか「解析器が落とした」のか**区別できない**)
+ * ② `<img>` で SVG が**実際に描ける**か(名前空間を足していないと描けない)
+ */
+test('🔴 ページ中の図を貼ると、資産になって画像として出る', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await openLiveRow(page);
+
+  await pasteText(page, ROW, {
+    html:
+      '<p>まえ</p><svg width="40" height="40" viewBox="0 0 40 40">' +
+      '<title>しかく</title><rect width="40" height="40" fill="#4a7"/>' +
+      '<script>window.__pwned = 1;</script></svg>',
+    plain: 'まえ',
+  });
+
+  const row = page.locator(ROW);
+  await expect(row, '図が資産になっていない').toHaveValue(/!\[しかく\]\(<?asset:[^)>]+/, {
+    timeout: 15_000,
+  });
+  // 🔴 **掃除が効いている**(資産の中身にスクリプトが残っていない)
+  const key = (await row.inputValue()).match(/asset:([^)>\s]+)/)?.[1] ?? '';
+  expect(key, '鍵が読めない(この test は空振り)').not.toBe('');
+  expect(
+    await page.evaluate(() => (window as unknown as { __pwned?: number }).__pwned ?? 0),
+    '貼っただけでスクリプトが動いた',
+  ).toBe(0);
+
+  // 確定すると **実際に絵として描かれる**(名前空間が足りていれば `<img>` が読める)
+  await page.keyboard.press('Tab');
+  await expectImageRendered(page, 'img[data-pkc-asset-key]');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+

@@ -13,6 +13,7 @@ import {
   convertPastedHtml,
   markdownFromBody,
   plainLooksLikeMarkdown,
+  svgImage,
   PASTE_HTML_MAX,
 } from '../../src/features/markdown/html-to-markdown';
 
@@ -311,6 +312,68 @@ describe('落としていない記法(誰も見ていなかった出力)', () =>
     // ⚠ 生バイトを書かない(CLAUDE.md §9)── `\u00a0` で組み立てる
     const nb = `<p>あ${'\u00a0'}${'\u00a0'}い</p>`;
     expect(md(nb), '見えない字が本文に居座る').toBe('あ い');
+  });
+});
+
+/**
+ * 🔴 **ページ中の図(`<svg>`)を捨てない**(user 裁定 2026-08-18)。
+ *
+ * 直す前は `SKIP` に入れて**痕跡なく消して**いた ── 図は知識の一部で、消えたことに
+ * 気づけないのがいちばん悪い。持ち出せる容れ物である以上、**中に見えていたものは
+ * 一緒に運べなければならない**。
+ */
+describe('図(svg)を資産として持つ', () => {
+  const svg = (inner: string, attrs = ''): string =>
+    `<svg width="10" height="10"${attrs}>${inner}</svg>`;
+
+  it('🔴 画像として出す(消さない)', () => {
+    const out = md(svg('<rect width="10" height="10"/>'));
+    expect(out, '図が消えた').toMatch(/^!\[図\]\(<?data:image\/svg\+xml/);
+    expect(decodeURIComponent(out ?? ''), '中身が入っていない').toContain('<rect');
+  });
+
+  it('🔴 `<script>` を落とす(書き出した `.svg` を直接開く経路が残る)', () => {
+    /**
+     * ⚠ **DOM API で組み立てる。** 解析器に食わせると happy-dom は `<svg>` の中の
+     * `<script>` を**自分で落とす**ので、掃除を外しても緑になる(実際に変異が
+     * 生き延びた ── 測っていたのは解析器の癖だった)。実ブラウザは両方を持つ。
+     */
+    const doc = new DOMParser().parseFromString('<svg width="4"><rect/></svg>', 'text/html');
+    const el = doc.querySelector('svg')!;
+    const script = doc.createElementNS('http://www.w3.org/2000/svg', 'script');
+    script.textContent = 'alert(1)';
+    el.appendChild(script);
+    // 前提: 解析器に落とされていない(空振り防止)
+    expect(el.querySelectorAll('script'), 'この test は空振り').toHaveLength(1);
+    const out = decodeURIComponent(svgImage(el));
+    expect(out, 'スクリプトが資産に入った').not.toContain('alert(1)');
+    expect(out, '図形まで落とした').toContain('<rect');
+  });
+
+  it('🔴 `on*` の属性も落とす', () => {
+    const out = decodeURIComponent(md(svg('<rect onload="alert(1)"/>')) ?? '');
+    expect(out).not.toContain('onload');
+  });
+
+  it('🔴 外を見に行く参照は落とす(開いた先で通信させない)', () => {
+    const out = decodeURIComponent(md(svg('<image href="https://e.com/a.png"/>')) ?? '');
+    expect(out).not.toContain('e.com');
+  });
+
+  it('名前空間が付く(無いと `<img>` で描けない)', () => {
+    // ⚠ これは **`XMLSerializer` が自分で付ける**(実測)── こちらで足す 1 行は
+    //   no-op だったので置いていない。ここは「結果として付いている」ことだけを見る
+    expect(decodeURIComponent(md(svg('<rect/>')) ?? '')).toContain(
+      'xmlns="http://www.w3.org/2000/svg"',
+    );
+  });
+
+  it('図の `<title>` を説明に使う', () => {
+    expect(md(svg('<title>売上の推移</title><rect/>'))).toMatch(/^!\[売上の推移\]/);
+  });
+
+  it('図だけのコピーでも介入する(素通りさせない)', () => {
+    expect(conv(svg('<rect/>'), 'PLAIN')).not.toBeNull();
   });
 });
 

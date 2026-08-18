@@ -42,7 +42,7 @@ export interface PastedClipboard {
 /** 中身を読まない要素(操作子・スクリプト・図形は貼付の役に立たない)。 */
 const SKIP = new Set([
   'script', 'style', 'noscript', 'head', 'meta', 'link', 'title', 'template',
-  'svg', 'canvas', 'iframe', 'object', 'embed', 'video', 'audio',
+  'canvas', 'iframe', 'object', 'embed', 'video', 'audio',
   'button', 'select', 'textarea', 'option', 'form',
 ]);
 
@@ -56,7 +56,7 @@ const BLOCK = new Set([
 
 /** 変換して得るものがある印(1 つでも在れば介入する)。 */
 const WORTH =
-  'h1, h2, h3, h4, h5, h6, ul, ol, pre, table, blockquote, hr, a[href], img, code, strong, b, em, i, del, s';
+  'h1, h2, h3, h4, h5, h6, ul, ol, pre, table, blockquote, hr, a[href], img, svg, code, strong, b, em, i, del, s';
 
 /** 塊 1 つ。`tight` = 直前の塊と**空行を空けずに**続ける(入れ子のリスト)。 */
 interface Block {
@@ -145,6 +145,53 @@ function imageOf(el: Element): string {
   return `![${escapeAssetLabel(alt)}](${escapeAssetTarget(src.trim())})`;
 }
 
+/**
+ * 🔴 **ページ中の `<svg>` を捨てない**(user 裁定 2026-08-18 の②「OS/容れ物の芯」)。
+ *
+ * 直す前は `SKIP` に入れて**痕跡なく消して**いた ── 図は知識の一部で、消えたことに
+ * 気づけないのがいちばん悪い。⚠ markdown に戻せる形が無いので、**画像として持つ**。
+ *
+ * 🔑 出すのは `data:image/svg+xml` ── そこから先は #251 で入れた
+ * 「埋め込み画像 → 資産」がそのまま拾う(**経路を増やさない**)。
+ * ⚠ ベクタのまま持てるので、拡大しても粗くならず書き出しにも乗る
+ * (不可侵指示 2026-08-03「SVG は書き出しのときだけ」は**画面に SVG を置かない**話であり、
+ *  保存形の話ではない ── 画面に出るのは `<img>` である)。
+ *
+ * ## 安全
+ * ⚠ **`<script>` と `on*` 属性を落とす。** 画面では `<img>` で描くのでスクリプトは
+ * 動かないが、**書き出した `.svg` を直接ブラウザで開く**経路が残る ── 容れ物は
+ * 持ち出される前提なので、持ち出した先で動く物を入れない。
+ * ⚠ 外部を参照する `href` / `xlink:href`(`http`)も落とす ── 開いた先で通信させない。
+ */
+export function svgImage(el: Element): string {
+  const copy = el.cloneNode(true) as Element;
+  for (const bad of Array.from(copy.querySelectorAll('script, foreignObject, image'))) {
+    bad.remove();
+  }
+  const strip = (node: Element): void => {
+    for (const attr of Array.from(node.attributes)) {
+      const name = attr.name.toLowerCase();
+      const isRemoteRef =
+        (name === 'href' || name.endsWith(':href')) && /^\s*(?:https?:|\/\/)/i.test(attr.value);
+      if (name.startsWith('on') || isRemoteRef) node.removeAttribute(attr.name);
+    }
+    for (const child of Array.from(node.children)) strip(child);
+  };
+  strip(copy);
+  /**
+   * ⚠ **名前空間は `XMLSerializer` が自分で付ける**(要素が SVG の名前空間に属するため。
+   * 実測で確かめた ── 付け足す 1 行は **no-op** だったので置かない)。
+   * ⚠ `outerHTML` への退避経路も持たない ── ここへ来るのは `DOMParser` で解析できた
+   * ときだけで、その環境に `XMLSerializer` は必ず在る。**通らない枝を守るふりをしない**。
+   */
+  const markup = new XMLSerializer().serializeToString(copy);
+  if (markup === '') return '';
+  // 説明は図の `<title>`(無ければ既定)── 空の alt にしない
+  const label = collapse(el.querySelector('title')?.textContent ?? '').trim();
+  const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}`;
+  return `![${escapeAssetLabel(label === '' ? '図' : label)}](${escapeAssetTarget(url)})`;
+}
+
 function inlineOf(node: Node): string {
   if (node.nodeType === 3) return escapeInline(collapse(node.textContent ?? ''));
   if (node.nodeType !== 1) return '';
@@ -153,6 +200,8 @@ function inlineOf(node: Node): string {
   if (SKIP.has(tag)) return '';
   if (tag === 'br') return '\n';
   if (tag === 'img') return imageOf(el);
+  // 🔴 図は捨てず、画像として持つ(下の `svgImage` の注記)
+  if (tag === 'svg') return svgImage(el);
   // ⚠ チェックボックスは `<li>` 側で見る(ここで文字にすると二重に出る)
   if (tag === 'input') return '';
   if (tag === 'code' || tag === 'kbd' || tag === 'samp') return codeSpan(el);
