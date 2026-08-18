@@ -41,9 +41,12 @@ function rel(id: string, fromLid: string, toLid: string): Relation {
 
 /**
  * ルート直下に **フォルダ f1 / f2** と平の **a / b / c**。
- * f1 の中に **x** が 1 件。
+ * f1 の中に **x / y** が 2 件。
  * ⚠ フォルダを 2 つ置くのは、**左右が別の場所を見る**ことを言うのに要るから
  *   (1 つだと「動いていない」と「同じ所を見ている」が区別できない)。
+ * 🔴 **f1 の中を 2 件にしてある**(変異試験 M6 が生き延びて判明)── 1 件だと
+ *   「そのペインの場所で範囲を採る」を壊しても `rangeInRows` が `[]` を返して
+ *   **早期 return し、前の印がそのまま残る**ので、正しい答えと見分けが付かない。
  */
 const METAS = [
   meta('f1', 1, 'はこ1', 'folder'),
@@ -52,8 +55,9 @@ const METAS = [
   meta('b', 4, 'い'),
   meta('c', 5, 'う'),
   meta('x', 6, 'えっくす'),
+  meta('y', 7, 'わい'),
 ];
-const RELS = [rel('r1', 'f1', 'x')];
+const RELS = [rel('r1', 'f1', 'x'), rel('r2', 'f1', 'y')];
 
 function booted(): AppState {
   return reduce(initialState, { type: 'SYS_BOOTED', cid: 'c1', metas: METAS, relations: RELS })
@@ -100,9 +104,17 @@ describe('2 ペインの reducer(#241 段⑥-a)', () => {
   it('🔴 範囲は「そのペインが見ている場所」の並びで採る', () => {
     let s = reduce(booted(), { type: 'DUAL_SET_SCOPE', side: 'left', lid: 'f1' }).state;
     s = reduce(s, { type: 'DUAL_SELECT', side: 'left', lid: 'x', mode: 'set' }).state;
-    // f1 の中は x だけ ── ルートの並びで採ると a..x のような集合になる
-    s = reduce(s, { type: 'DUAL_SELECT', side: 'left', lid: 'x', mode: 'range' }).state;
-    expect(paneOf(s.dual, 'left').selection).toEqual(['x']);
+    /**
+     * ⚠ 左の列の現在地(ルート)で並びを組むと、`x` も `y` もその並びに**居ない**
+     * ので `rangeInRows` が `[]` を返し、reducer は**早期 return する**
+     * ── つまり壊れた実装の症状は「印が増えない」である。だから
+     * **増えるはずの筋**(2 件)で見る(1 件で見ると見分けが付かない)。
+     */
+    s = reduce(s, { type: 'DUAL_SELECT', side: 'left', lid: 'y', mode: 'range' }).state;
+    expect(paneOf(s.dual, 'left').selection, '別の場所の並びで範囲を採っている').toEqual([
+      'x',
+      'y',
+    ]);
   });
 
   it('🔴 場所が変われば印は外れる(見えていないものを数えない)', () => {
@@ -191,7 +203,7 @@ describe('2 ペインの面(描画)', () => {
           `[data-pkc-region="dual-pane"][data-pkc-side="${side}"] [data-pkc-region="dual-table"] [data-pkc-entry]`,
         ),
       ].map((e) => e.getAttribute('data-pkc-entry') ?? '');
-    expect(rows('left'), '左が f1 の中を出していない').toEqual(['x']);
+    expect(rows('left'), '左が f1 の中を出していない').toEqual(['x', 'y']);
     expect(rows('right'), '右がルートを出していない').toEqual(['f1', 'f2', 'a', 'b', 'c']);
   });
 

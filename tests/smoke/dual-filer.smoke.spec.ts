@@ -1,0 +1,119 @@
+import { test, expect, type Page } from '@playwright/test';
+import { gotoApp, clickReal, createEntry, collectPageErrors } from './helpers';
+
+/**
+ * 2 ペインタブファイラ(#241 段⑥-a)。
+ *
+ * 🔴 **unit では原理的に届かない層だけ**をここで見る:
+ * 1. **実マウスの 2 クリック** ── 合成 `click` を 2 回撃つのと、実機で 2 回押すのは別
+ * 2. **面が本当に見えているか** ── `hidden` の付け替えと CSS の噛み合いは
+ *    happy-dom では読めない(`toBeVisible` は実レイアウトを見る)
+ * 3. **左右が本当に横に並んでいるか** ── `grid-template-columns: 1fr auto 1fr` が
+ *    効いていなければ、片方が画面の外へ落ちる(unit は幅を持たない)
+ */
+
+const PANE = (side: string): string =>
+  `[data-pkc-region="dual-pane"][data-pkc-side="${side}"]`;
+const ROWS = (side: string): string => `${PANE(side)} [data-pkc-region="dual-table"] tbody tr`;
+
+async function makeFolder(page: Page, title: string): Promise<void> {
+  await createEntry(page, 'folder');
+  const t = page.locator('[data-pkc-field="editor-title"]');
+  if (await t.count()) await t.fill(title);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+}
+
+test('🔴 2 ペインを開いて、左で選んだものを右の場所へ移す', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+
+  await makeFolder(page, 'はこ');
+  await createEntry(page, 'text');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  // ① 面を開く(左の列のボタン)
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="dual"]');
+  await expect(page.locator('[data-pkc-view-pane="dual"]')).toBeVisible();
+  await expect(page.locator('[data-pkc-view-pane="detail"]'), '本文の面が出たまま').toBeHidden();
+
+  /**
+   * ② 🔴 **左右が横に並んでいる**(縦積みや、片方が画面外に落ちていない)。
+   * ⚠ 「要素が在る」だけでは足りない ── **座標**で見る(CSS が効いていなければ
+   *   `x` が同じになる / 片方の幅が 0 になる)。
+   */
+  const left = await page.locator(PANE('left')).boundingBox();
+  const right = await page.locator(PANE('right')).boundingBox();
+  expect(left, '左のペインが描かれていない').not.toBeNull();
+  expect(right, '右のペインが描かれていない').not.toBeNull();
+  expect(right!.x, '左右が横に並んでいない').toBeGreaterThan(left!.x + left!.width - 1);
+  expect(Math.abs(left!.width - right!.width), '左右の幅が違う(元と先が対等に見えない)')
+    .toBeLessThan(2);
+
+  await expect(page.locator(ROWS('left'))).toHaveCount(2);
+  await expect(page.locator(ROWS('right'))).toHaveCount(2);
+
+  // ③ 🔴 実マウスの 2 クリックで、**右だけ**がフォルダの中へ入る
+  await page.locator(ROWS('right')).first().dblclick();
+  await expect(page.locator(PANE('right'))).toContainText('はこ');
+  await expect(page.locator(ROWS('right')), '右がフォルダに入れていない').toHaveCount(0);
+  await expect(page.locator(ROWS('left')), '押していない左まで動いた').toHaveCount(2);
+
+  // ④ 左のノートを選ぶ ── 焦点が左へ移り、向きの字も変わる
+  await page.locator(ROWS('left')).nth(1).click();
+  await expect(page.locator(PANE('left'))).toHaveAttribute('data-pkc-focused', '');
+  await expect(page.locator('[data-pkc-field="dual-move"]')).toContainText('右へ移す');
+
+  // ⑤ 移す ── 右(= はこの中)に現れ、左からは消える
+  await clickReal(page, '[data-pkc-field="dual-move"]');
+  await expect(page.locator(ROWS('right')), '右へ移っていない').toHaveCount(1);
+  await expect(page.locator(ROWS('left')), '左から消えていない').toHaveCount(1);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+test('🔴 何も選ばずに押したら、理由が画面に出る', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="dual"]');
+
+  await clickReal(page, '[data-pkc-field="dual-move"]');
+  /**
+   * ⚠ **観測点は状態の行だけ**(CLAUDE.md §1 の 7 度目)── root 全体の
+   * `textContent` で探すと、お知らせのカードや本文に満たされて常に真になる。
+   */
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('移すものを選んでください');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+test('🔴 タブを足して、別の場所を 1 つのペインに持てる', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await makeFolder(page, 'はこ');
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="dual"]');
+
+  const tabs = page.locator(`${PANE('left')} [data-pkc-region="dual-tab"]`);
+  await expect(tabs).toHaveCount(1);
+  // ⚠ 最後の 1 枚には閉じる口を出さない(押しても何も起きないボタンを作らない)
+  await expect(page.locator(`${PANE('left')} [data-pkc-action="dual-tab-close"]`)).toHaveCount(0);
+
+  await clickReal(page, `[data-pkc-action="dual-tab-add"][data-pkc-side="left"]`);
+  await expect(tabs).toHaveCount(2);
+  await page.locator(ROWS('left')).first().dblclick();
+  await expect(tabs.nth(1)).toContainText('はこ');
+  await expect(tabs.nth(0), '足す前のタブまで動いた').toContainText('ルート');
+
+  // 1 枚目へ戻ると、ルートの中身が出る
+  await tabs.nth(0).locator('[data-pkc-action="dual-tab-activate"]').click();
+  await expect(page.locator(ROWS('left'))).toHaveCount(1);
+
+  await page.locator(`${PANE('left')} [data-pkc-action="dual-tab-close"]`).first().click();
+  await expect(tabs).toHaveCount(1);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
