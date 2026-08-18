@@ -97,6 +97,19 @@ export interface RowSwapCallbacks {
   commit(startLine: number, endLine: number, text: string): void;
   /** 可視のお知らせ(無言で断らない)。 */
   notify?(message: string): void;
+  /**
+   * 🔴 **`update()` を経ずに DOM へ入った要素**(#250)。
+   *
+   * ⚠ `update()` の返り(`inserted`)は呼び側が面倒をみているが、**行を開く /
+   * 閉じる**ときの当て直しはここで完結していたので、**誰も面倒をみていなかった** ──
+   * 画像の塊を押して開き、閉じると `<img>` が原文の HTML から**作り直され**、
+   * `src` の無い空の枠になる(実測。本文が変わらないので follower も来ない)。
+   * 🔑 入った要素を外へ渡して、貸し出し(`asset:`)と図を差し直させる。
+   *
+   * ⚠ **optional にしない**(CLAUDE.md §7)── 配線を落としても tsc が黙ると、
+   * 戻ってくる症状は「画像が消えたまま気づけない」といういちばん静かな形になる。
+   */
+  onInserted(els: readonly Element[]): void;
 }
 
 /** `update()` の返り。⚠ `ok: false` は**行の差し替えを開かない**という意味。 */
@@ -729,6 +742,7 @@ export class RowSwap {
     this.pendingOpen = null;
     const r = applyBlocks(this.host, o.withSlot.join(''), this.view, [o.blockIndex]);
     this.view = r.view;
+    if (r.inserted.length > 0) this.cb.onInserted(r.inserted);
     const slot = this.host.querySelector<HTMLElement>('[data-pkc-row-slot]');
     if (slot === null) return false;
     if (o.prose) slot.setAttribute(PROSE_ROW_ATTR, '');
@@ -1141,6 +1155,9 @@ export class RowSwap {
     blocks[a.blockIndex] = a.originalHtml;
     const r = applyBlocks(this.host, blocks.join(''), this.view, []);
     this.view = r.view;
+    // 🔴 **閉じると塊は作り直される** ── 貸していた `<img>` の `src` はここで
+    //    失われるので、入った要素を外へ渡して差し直させる(#250)
+    if (r.inserted.length > 0) this.cb.onInserted(r.inserted);
     this.markOpenEnds();
   }
 }
@@ -1157,13 +1174,27 @@ function shrinkTrailingBlank(body: string, start: number, end: number): number {
 }
 
 /** undo に載る形で挿す。⚠ `value` 直代入は取り消せない飾りになる。 */
-function insertText(ta: HTMLTextAreaElement, text: string): void {
+export function insertText(ta: HTMLTextAreaElement, text: string): void {
   const doc = ta.ownerDocument as Document & {
     execCommand?: (cmd: string, ui?: boolean, value?: string) => boolean;
   };
   const ok = doc.execCommand?.('insertText', false, text) ?? false;
   if (ok) return;
-  // fallback(happy-dom など execCommand が無い環境)。⚠ 挙動を合わせるだけ
+  /**
+   * fallback(happy-dom など `execCommand` が無い環境 / ブラウザが断った場合)。
+   *
+   * 🔴 **本物の意味論を真似る**(2026-08-18、着地前レビュー)── ここが
+   * `execCommand` と違う振る舞いをすると、**unit はこちらしか通らない**ので
+   * 差が test から見えなくなる(CLAUDE.md §3「stub は本物の意味論を真似る」)。
+   * ⚠ 揃えるのは 2 つ:
+   * ① **caret を進める** ── 進めないと 2 枚目が 1 枚目の**前**に入る(逆順になる)
+   * ② **`input` を撃つ** ── 撃たないと `UPDATE_OPEN_BODY` が走らず、
+   *   **画面には見えているのに保存された本文には無い**(2 列の保存は state を書く)
+   */
   const { selectionStart: s, selectionEnd: e, value } = ta;
-  ta.value = value.slice(0, s ?? 0) + text + value.slice(e ?? 0);
+  const at = (s ?? value.length) + text.length;
+  ta.value = value.slice(0, s ?? value.length) + text + value.slice(e ?? s ?? value.length);
+  ta.selectionStart = at;
+  ta.selectionEnd = at;
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
 }

@@ -16,6 +16,9 @@ import type { Dispatcher } from '@adapter/state/dispatcher';
 import type { ViewMode } from '@adapter/state/app-state';
 import { archetypeLabel } from '@adapter/ui/render/sidebar';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
+import { insertText } from '@adapter/ui/render/row-swap';
+import { isImageAssetMime } from '@features/asset/asset-ref-format';
+import { resolveMime } from './attach';
 import { applyFormat, type FormatOp } from '@features/markdown/text-ops';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
 import { isEntrySort } from '@features/filter/entry-sort';
@@ -64,6 +67,16 @@ export function generateLid(): string {
 /** UI サービス面(storage 依存の操作は main が実体を注入。test は fake)。 */
 export interface BinderServices {
   attachFiles?(files: File[]): void;
+  /**
+   * 🔴 **スクショ(画像)の貼付**(#250。user 指示 2026-08-18
+   * 「PKC3 でスクショ貼付の導線がない。PKC2 と同様以上に実装してください」)。
+   *
+   * 資産として置いて、**本文に差し込む参照(markdown)**を返す。
+   * ⚠ **ノートは作らない** ── 編集中は `CREATE_ENTRY` が黙殺されるので、
+   *   そこに乗せると bytes だけ残って参照が消える(`storeAsset` の注記)。
+   * ⚠ 置けなかったものは**返さない**(呼び側が「落とした」と言えるように件数で分かる)。
+   */
+  pasteImages?(files: readonly File[]): Promise<readonly string[]>;
   downloadAsset?(assetKey: string, name: string): void;
   /**
    * 🔴 **貼る用に画像を持ち歩ける形へ**(#193)。`blob:` → `data:` の対応を返す。
@@ -1504,7 +1517,175 @@ export function bindActions(
       cancelFromEditor(dispatcher, root);
     }
   };
+  /**
+   * 🔴 **本文を書く欄**(#250)── 貼った画像を**差し込んでよい**相手。
+   *
+   * 面ではなく**欄の名前**で見る:`row-source`(1 面)/ `editor-body`(2 列)/
+   * `append-input`(継ぎ足し)の 3 つ。⚠ 継ぎ足しの欄は `detail` 面の**外**に在る
+   * (`shell.ts` で兄弟)ので、面で見ると**そこだけ落ちる** ── PKC2 は
+   * `isMarkdownTextarea` で欄を見ており、継ぎ足しにも貼れていた。
+   */
+  /**
+   * 🔴 **画像かどうかの判定は 1 本**(2026-08-18、着地前レビュー)。
+   *
+   * ⚠ `f.type` を直に見ると、**MIME を付けない環境**から `.png` を落としたとき
+   * 画像に見えない ── 拡張子から引く `resolveMime` を通す(添付の入口と同じ規則)。
+   * ⚠ `!` を付けるかの判定は `asset-ref-format.ts` が正本(「この 1 本だけを使う」)。
+   */
+  const isImageFile = (f: File): boolean => isImageAssetMime(resolveMime(f.name, f.type));
+
+  const BODY_FIELDS = new Set(['row-source', 'editor-body', 'append-input']);
+  const isBodyInput = (t: EventTarget | null): t is HTMLTextAreaElement =>
+    t instanceof HTMLTextAreaElement && BODY_FIELDS.has(t.getAttribute('data-pkc-field') ?? '');
+
+  /**
+   * 待っている間に作り直された欄を引き直す。
+   * ⚠ **同じ種類の欄へ**戻す(継ぎ足しに貼ったものが本文へ入ると事故)。
+   */
+  const reResolveInput = (from: HTMLTextAreaElement): HTMLTextAreaElement | null => {
+    if (from.isConnected) return from;
+    const field = from.getAttribute('data-pkc-field') ?? '';
+    if (field === 'append-input')
+      return root.querySelector<HTMLTextAreaElement>('[data-pkc-field="append-input"]');
+    return formatTarget(root);
+  };
+
+  /** ⚠ `DataTransfer` から **File だけ**を拾う(`files` が空なら `items` から)。 */
+  const filesOf = (dt: DataTransfer | null | undefined): File[] => {
+    const out: File[] = [];
+    const list = dt?.files;
+    if (list && list.length > 0) {
+      for (let i = 0; i < list.length; i += 1) {
+        const f = list.item(i);
+        if (f) out.push(f);
+      }
+      return out;
+    }
+    const items = dt?.items;
+    if (!items) return out;
+    for (let i = 0; i < items.length; i += 1) {
+      const it = items[i]!;
+      if (it.kind !== 'file') continue;
+      const f = it.getAsFile();
+      if (f) out.push(f);
+    }
+    return out;
+  };
+
+  /**
+   * 🔴 **画像を本文へ差し込む**(⚠ 待つので、差す先は**あとで引き直す**)。
+   */
+  const insertPasted = (files: readonly File[], from: HTMLTextAreaElement): void => {
+    // ⚠ **どのノートの編集に貼ったか**を控える(2026-08-18、着地前レビュー)──
+    //   待っている間に取り消して別のノートを開き直すと、`formatTarget` は
+    //   **新しい編集欄**を返す = 取り消したはずの貼付が別のノートに現れる。
+    const openedLid = dispatcher.getState().openBody?.lid ?? null;
+    void services.pasteImages!(files).then((refs) => {
+      // 🔴 **待っている間に編集欄が作り直されることがある**(live の面は行を組み直す)。
+      //   掴んだままの textarea へ差すと、**画面に出ていない所へ字を書く** ──
+      //   貼付が黙って消えるので、差す直前に**いま在る編集欄**へ引き直す。
+      const sameEdit = (dispatcher.getState().openBody?.lid ?? null) === openedLid;
+      const into = sameEdit ? reResolveInput(from) : null;
+      if (!into) {
+        // 🔴 **差し先が消えた。**(1 面の編集は、別の欄を触った瞬間に行を確定して
+        //   閉じる ── 実ブラウザで実際にそうなる)
+        // 🔑 **編集を抜けているなら捨てない** ── 同じ file を添付へ回す。
+        //   content addressing なので bytes は二重にならない(鍵が同じ)。
+        // ⚠ **まだ編集中なら添付にはできない**(`CREATE_ENTRY` が黙殺される)──
+        //   そのときは「もう一度」と言う。クリップボードは残っているので、
+        //   これは実際にやり直せる指示である。
+        // ⚠ どちらも黙って終わらない ──「貼ったのに出ない」を作らない。
+        const ready = dispatcher.getState().phase === 'ready';
+        if (ready && services.attachFiles) {
+          services.attachFiles([...files]);
+          dispatcher.dispatch({
+            type: 'OP_FAILED',
+            error: '編集欄が閉じたため、貼り付けた画像は添付にしました',
+          });
+        } else {
+          dispatcher.dispatch({
+            type: 'OP_FAILED',
+            error: '編集欄が閉じたため貼り付けられませんでした。もう一度貼ってください',
+          });
+        }
+        return;
+      }
+      // ⚠ `execCommand` は**焦点のある要素**に効く ── 待っている間に焦点が
+      //   移ることがあるので、差す前に戻す(戻さないと別の所へ入る)。
+      into.focus();
+      // ⚠ 差し込みは `execCommand('insertText')` ── **undo に載る**
+      for (const ref of refs) insertText(into, `${ref}\n`);
+    });
+  };
+
+  /**
+   * 🔴 **貼付 / 落とした file の行き先を決める**(#250)。
+   *
+   * 行き先は**そこが編集中の本文か**で決まる:
+   * - **編集中の本文(textarea)** … 画像は資産にして**その場に参照を差し込む**
+   *   (⚠ ノートは作らない ── 編集中は `CREATE_ENTRY` が黙殺される)
+   * - **それ以外** … 添付として取り込む(添付ボタンと同じ道)
+   *
+   * ⚠ **受け手がいなければ `false` を返す**(呼び側は既定を止めない)──
+   * 止めると文字の貼付まで死ぬ。
+   */
+  const routeFiles = (files: readonly File[], target: EventTarget | null): boolean => {
+    if (files.length === 0) return false;
+    const inBody = isBodyInput(target);
+    const images = inBody ? files.filter(isImageFile) : [];
+    const rest = files.filter((f) => !images.includes(f));
+    let handled = false;
+    if (images.length > 0 && services.pasteImages) {
+      insertPasted(images, target as HTMLTextAreaElement);
+      handled = true;
+    }
+    // ⚠ 画像**以外**(と、差し込む口が無い環境)は添付へ倒す ── 無反応にしない
+    const leftover = images.length > 0 && services.pasteImages ? rest : files;
+    if (leftover.length > 0 && services.attachFiles) {
+      services.attachFiles([...leftover]);
+      handled = true;
+    }
+    return handled;
+  };
+
+  /**
+   * 🔴 **スクショの貼付**(#250。user 指示 2026-08-18「PKC3 でスクショ貼付の導線が
+   * ない。PKC2 と同様以上に実装してください」)。
+   *
+   * ⚠ **画像が無ければ何もしない**(`preventDefault` しない)── 文字の貼付を殺さない。
+   * 🔑 PKC2 は**最初の 1 枚**だけ拾っていたが、ここは**クリップボードの画像を全部**拾う。
+   */
+  const onPaste = (e: Event): void => {
+    const ce = e as ClipboardEvent;
+    const files = filesOf(ce.clipboardData).filter(isImageFile);
+    if (routeFiles(files, ce.target)) ce.preventDefault();
+  };
+
+  /**
+   * 🔴 **OS から落とした file**(#250)。貼付と**同じ行き先**へ流す。
+   *
+   * ⚠ `dragover` を止めないと `drop` は**来ない**(既定は「受け取らない」)。
+   * ⚠ そして止めないと、ブラウザが**その file へ画面ごと遷移する** ──
+   *   編集中の本文が消えるので、受け取れなくても**止めるほうが安全**である。
+   */
+  const onDragOver = (e: Event): void => {
+    const de = e as DragEvent;
+    if (de.dataTransfer?.types?.includes('Files') !== true) return;
+    e.preventDefault();
+    if (de.dataTransfer) de.dataTransfer.dropEffect = 'copy';
+  };
+  const onDrop = (e: Event): void => {
+    const de = e as DragEvent;
+    const files = filesOf(de.dataTransfer);
+    if (files.length === 0) return;
+    // ⚠ 受け手がいなくても止める(上の理由 ── 遷移で編集が飛ぶ)
+    e.preventDefault();
+    routeFiles(files, de.target);
+  };
   root.addEventListener('click', onClick);
+  root.addEventListener('paste', onPaste);
+  root.addEventListener('dragover', onDragOver);
+  root.addEventListener('drop', onDrop);
   root.addEventListener('mousedown', onMousedown);
   root.addEventListener('input', onInput);
   root.addEventListener('change', onChange);

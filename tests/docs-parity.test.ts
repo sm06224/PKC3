@@ -245,17 +245,37 @@ describe('マニュアルと実装の突合', () => {
     }
   });
 
-  it('🔴 ドラッグ&ドロップを受けないという記述が実態と合う', () => {
-    // ⚠ これは「無い」ことの主張なので、**足した瞬間に嘘になる**。
-    // 実装したらこの test が落ちる ── そのとき doc を直す。
+  it('🔴 ドラッグ&ドロップの記述が実態と合う(#250 で受けるようになった)', () => {
+    // ⚠ 2026-08-18 まで「**受けません**」と書いてあり、この test がそれを pin して
+    // いた ── #250 で drop を足した瞬間に落ちて気づけた。**同じ向きのまま裏返す**:
+    // 今度は「受ける実装が消えたら」落ちる(マニュアルが嘘になる側で鳴る)。
     // ⚠ **src 全体**を見る(round-2 review L-4)── `binder.ts` だけを見ていると、
-    // 別 file(`main.ts` / 新規 `dnd.ts` 等)で受けたときに緑のまま嘘になる
-    const offenders = srcFiles().filter((f) => {
-      const text = readFileSync(f, 'utf-8');
-      return /addEventListener\(\s*['"](?:drop|dragover)['"]/.test(text);
-    });
-    expect(offenders, 'drop を受けるようになった ── マニュアルの記述を直すこと').toEqual([]);
-    expect(MANUAL).toContain('ドラッグ&ドロップは受けません');
+    // 別 file へ移したときに緑のまま嘘になる
+    // ⚠ **`codeOnly` を通す**(2026-08-18、着地前レビュー)── 向きを裏返した
+    //   ことで、この検査は「**在る**」ことの主張になった。注釈で満たされると
+    //   `root.addEventListener('drop', …)` を**コメントアウトしても緑**になる
+    //   (この file の `codeOnly` の docstring がまさにそう戒めている)
+    const receivers = srcFiles().filter((f) =>
+      /addEventListener\(\s*['"]drop['"]/.test(codeOnly(readFileSync(f, 'utf-8'))),
+    );
+    expect(receivers, 'drop を受ける実装が無い ── マニュアルの記述が嘘になる').not.toEqual([]);
+    // ⚠ `dragover` を止めないと `drop` は**来ない** ── 片方だけでは動かない
+    const over = srcFiles().filter((f) =>
+      /addEventListener\(\s*['"]dragover['"]/.test(codeOnly(readFileSync(f, 'utf-8'))),
+    );
+    expect(over, 'dragover を受けていない ── drop は来ない').not.toEqual([]);
+    expect(MANUAL).toContain('ドラッグ&ドロップでも入ります');
+    expect(MANUAL, '「受けません」が残っている').not.toContain('ドラッグ&ドロップは受けません');
+  });
+
+  it('🔴 スクショの貼付の記述が実態と合う(#250)', () => {
+    // ⚠ 「貼れます」はマニュアルの**約束**なので、受け口が消えたら嘘になる
+    const receivers = srcFiles().filter((f) =>
+      /addEventListener\(\s*['"]paste['"]/.test(codeOnly(readFileSync(f, 'utf-8'))),
+    );
+    expect(receivers, '貼付を受ける実装が無い').not.toEqual([]);
+    expect(MANUAL, 'マニュアルに貼付の導線が無い').toContain('`Ctrl+V`');
+    expect(MANUAL).toContain('スクリーンショットをそのまま貼れます');
   });
 
   it('🔴 主要な導線を畳まない(業務画面の作法)', () => {

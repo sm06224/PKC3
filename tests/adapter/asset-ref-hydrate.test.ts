@@ -7,13 +7,15 @@
  * - 解決前に選択が移ったら結果を捨てて即 dispose(stale 注入なし)
  */
 import { stubStamps } from '../helpers/store-stamps';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer, type AssetLender } from '../../src/adapter/ui/render/detail';
 import { stubRevisionOps } from '../helpers/revision-stub';
+import { MarkdownClient } from '../../src/adapter/platform/render/markdown-client';
+import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
 
 function meta(lid: string): EntryMeta {
   return {
@@ -30,6 +32,16 @@ function meta(lid: string): EntryMeta {
 }
 
 const tick = (ms = 10) => new Promise((r) => setTimeout(r, ms));
+
+/** 条件が満たされるまで待つ(⚠ 固定の待ちは静穏の畳み込みで空振りする)。 */
+async function waitFor(ok: () => boolean, why: string, ms = 3000): Promise<void> {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (ok()) return;
+    await tick(10);
+  }
+  throw new Error(why);
+}
 
 beforeEach(() => {
   document.body.textContent = '';
@@ -248,7 +260,8 @@ describe('借りた URL の寿命(同一ノートの差し替え)', () => {
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
     await new Promise((r) => setTimeout(r, 20));
     // 前提: 2 つの参照が **1 本**の貸出を共有している(段⑪ の規約)
-    expect(root.querySelectorAll('img[data-pkc-asset-key]'), '参照が 2 つ出ていない').toHaveLength(2);
+    const first = [...root.querySelectorAll<HTMLImageElement>('img[data-pkc-asset-key]')];
+    expect(first, '参照が 2 つ出ていない').toHaveLength(2);
     expect(n, '同じ key を 2 回借りている').toBe(1);
 
     // 上の段落だけ差し替える(下の `<img>` はそのまま残る)
@@ -260,8 +273,19 @@ describe('借りた URL の寿命(同一ノートの差し替え)', () => {
 
     const imgs = [...root.querySelectorAll<HTMLImageElement>('img[data-pkc-asset-key]')];
     expect(imgs.length, '画面から参照が消えた').toBe(2);
-    // 前提: 片方だけが borrowed し直された(= 差し替えが起きている)
-    expect(n, '差し替えが起きていない(この次元を測れていない)').toBeGreaterThan(1);
+    /**
+     * 前提: **塊が実際に差し替わった**(この次元を測れている)。
+     *
+     * ⚠ 以前はここを「借り直しが増えたか(`n > 1`)」で見ていたが、2026-08-18 に
+     * **生きている貸出を使い回す**ようにしたので、差し替わっても借り直しは増えない
+     * ── 観測点を「**node が入れ替わったか**」へ移す(そちらが本来の次元である)。
+     */
+    expect(
+      first.some((img) => !img.isConnected),
+      '差し替えが起きていない(この次元を測れていない)',
+    ).toBe(true);
+    // 🔑 使い回しているので、借りた数は増えない(IDB 読みも URL も 1 本のまま)
+    expect(n, '生きている貸出を使い回していない(tick ごとに借り直す)').toBe(1);
     for (const img of imgs) {
       expect(
         freed.has(img.getAttribute('src') ?? ''),
@@ -271,3 +295,200 @@ describe('借りた URL の寿命(同一ノートの差し替え)', () => {
   });
 });
 
+
+/**
+ * 🔴 **編集中の面でも `asset:` の画像が出る**(#250 で判明・同時に直した)。
+ *
+ * ⚠ これは貼付の bug ではない ── **前から在った穴**である。読む面(`paint`)は
+ * `hydrateAssetRefs` を呼んでいたのに、**2 面のプレビューと 1 面のライブ
+ * エディタは呼んでいなかった**(`hydrateFigures` だけ)。本文に
+ * `![…](asset:…)` と書いても、**書いている間は src の無い `<img>`** ──
+ * 何も出ない枠のままで、確定するまで見えない。
+ * 🔑 露見したのは #250 の実ブラウザ smoke である(貼った直後に出ない)。
+ * CLAUDE.md §7「片側を直したら、対称の反対側を必ず疑う」の実例。
+ *
+ * ⚠ **2 面と 1 面の両方**を見る ── 片方だけ直すのが、まさにこの穴の作られ方。
+ */
+describe('編集中の面の asset hydrate(#250)', () => {
+  // ⚠ **`afterEach` で消す**(2026-08-18、着地前レビュー)── test の末尾に置くと
+  //   assert が落ちた回に走らず、後続 test へ `'split'` が漏れる
+  afterEach(() => localStorage.removeItem('pkc3.editor-mode'));
+
+  const editing = (body: string): AppState => {
+    let s = reduce(initialState, {
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('e1')],
+      relations: [],
+    }).state;
+    s = reduce(s, { type: 'SELECT_ENTRY', lid: 'e1' }).state;
+    s = reduce(s, { type: 'BODY_LOADED', lid: 'e1', body }).state;
+    return reduce(s, { type: 'START_EDIT' }).state;
+  };
+
+  for (const mode of ['split', 'live'] as const) {
+    it(`🔴 ${mode} の面でも、貸し出した URL が <img> に差される`, async () => {
+      localStorage.setItem('pkc3.editor-mode', mode);
+      let lends = 0;
+      let disposed = 0;
+      const lender: AssetLender = {
+        lend: async (key) => {
+          lends += 1;
+          return { url: `blob:${key}`, dispose: () => (disposed += 1) };
+        },
+        getBlob: async () => null,
+      };
+      const root = document.createElement('div');
+      // ⚠ **document へ繋ぐ** ── `follower` は `isConnected` で早期 return する
+      document.body.append(root);
+      const detail = new DetailRenderer(buildShell(root).detail, lender, new MarkdownClient());
+      detail.render(editing('本文の上\n\n![貼った絵](asset:k1)\n'));
+      await tick(30);
+
+      const img = root.querySelector<HTMLImageElement>('img[data-pkc-asset-key="k1"]');
+      expect(img, `${mode}: 参照が描かれていない(この次元を測れていない)`).not.toBeNull();
+      expect(img!.getAttribute('src'), `${mode}: src が差されていない(空の枠になる)`).toBe(
+        'blob:k1',
+      );
+      expect(lends, `${mode}: 借りていない`).toBe(1);
+      expect(disposed, `${mode}: 画面に出ているのに返してしまった`).toBe(0);
+    });
+  }
+});
+
+/**
+ * 🔴 **編集中の面でも、借りた URL が積もらない**(#250 の着地前レビュー)。
+ *
+ * ⚠ 既存の寿命 test(上)は**読む面だけ**を見ており、今回足した 2 面の hydrate は
+ * 「1 回描いて 1 本借りた」しか測っていなかった ── `pruneLends()` を消す変異が
+ * **全 test 緑のまま通る**状態だった(実測)。
+ * 🔑 打鍵で塊が作り直される次元(= 積もる次元)を、繰り返しで測る。
+ */
+describe('編集中の面の URL の寿命(#250)', () => {
+  afterEach(() => localStorage.removeItem('pkc3.editor-mode'));
+
+  it('🔴 打つたびに塊が作り直されても、生きているぶんしか残らない', async () => {
+    localStorage.setItem('pkc3.editor-mode', 'split');
+    let made = 0;
+    let freed = 0;
+    const lender: AssetLender = {
+      lend: async (key) => {
+        made += 1;
+        return { url: `blob:${key}#${made}`, dispose: () => (freed += 1) };
+      },
+      getBlob: async () => null,
+    };
+    const root = document.createElement('div');
+    document.body.append(root);
+    const detail = new DetailRenderer(buildShell(root).detail, lender, new MarkdownClient());
+
+    let s = reduce(initialState, {
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('e1')],
+      relations: [],
+    }).state;
+    s = reduce(s, { type: 'SELECT_ENTRY', lid: 'e1' }).state;
+    s = reduce(s, { type: 'BODY_LOADED', lid: 'e1', body: '![絵](asset:k1)' }).state;
+    s = reduce(s, { type: 'START_EDIT' }).state;
+    detail.render(s);
+    await tick(30);
+    expect(made, '前提: 1 本も借りていない(この次元を測れていない)').toBe(1);
+
+    /**
+     * ⚠ **key を毎回変える。** 同じ key なら使い回されて借り直しが起きないので、
+     * 「積もらない」が**自明に**成立してしまう(= 測っていない)。別の添付へ
+     * 差し替えていく編集が、いちばん積もる形である。
+     */
+    // ⚠ **打鍵で駆動する** ── 編集中の面は state の再描画では動かない
+    //   (`detail.ts` 冒頭「編集中は DOM を一切触らない」)。プレビューは
+    //   textarea の `input` が回している ── そこを叩かないと 1 度も描き直らない。
+    const ta = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="editor-body"]');
+    expect(ta, '前提: 2 列の編集欄が出ていない').not.toBeNull();
+    const ROUNDS = 5;
+    for (let i = 1; i <= ROUNDS; i += 1) {
+      ta!.value = `![絵](asset:k${i + 1})`;
+      ta!.dispatchEvent(new Event('input', { bubbles: true }));
+      // 🔴 **この回の絵が実際に画面へ出るまで待つ**(follower は静穏で畳むので、
+      //    固定の待ちだと 5 回の打鍵が 1 回に潰れて「積もらない」が自明に通る)
+      await waitFor(
+        () =>
+          root.querySelector(`img[data-pkc-asset-key="k${i + 1}"]`) !== null,
+        `${i} 回目の絵が出ない`,
+      );
+    }
+
+    const imgs = [...root.querySelectorAll<HTMLImageElement>('img[data-pkc-asset-key]')];
+    expect(imgs, '画面から画像が消えた').toHaveLength(1);
+    expect(imgs[0]!.getAttribute('src'), 'src が差されていない').toMatch(/^blob:/);
+    // 前提: 毎回借り直している(この次元を測れている)
+    expect(made, '借り直しが起きていない').toBe(ROUNDS + 1);
+    // 🔑 **借りたまま残っているのは、画面に出ている 1 本だけ**
+    expect(
+      made - freed,
+      `借りたまま ${made - freed} 本残っている(made=${made} freed=${freed})`,
+    ).toBe(1);
+  });
+});
+
+/**
+ * 🔴 **1 面で行を開いて閉じても、画像が消えない**(#250 の着地前レビュー)。
+ *
+ * ⚠ `RowSwap` 側は「入り直した要素を外へ渡す」ところまで pin されているが、
+ * **受け取った `detail` が実際に差し直しているか**は誰も見ていなかった ──
+ * `onInserted` の中身を空にする変異が**全 test 緑のまま通った**(実測)。
+ * 🔑 壊れる当の振る舞い(`<img>` の `src` が戻るか)を、この面で直接見る。
+ */
+describe('1 面で行を閉じたあとの asset hydrate(#250)', () => {
+  afterEach(() => localStorage.removeItem('pkc3.editor-mode'));
+
+  it('🔴 画像の行を開いて閉じると、src が差し直される', async () => {
+    localStorage.setItem('pkc3.editor-mode', 'live');
+    let made = 0;
+    const lender: AssetLender = {
+      lend: async (key) => {
+        made += 1;
+        return { url: `blob:${key}#${made}`, dispose: () => {} };
+      },
+      getBlob: async () => null,
+    };
+    const root = document.createElement('div');
+    document.body.append(root);
+    const detail = new DetailRenderer(buildShell(root).detail, lender, new MarkdownClient());
+
+    let st = reduce(initialState, {
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('e1')],
+      relations: [],
+    }).state;
+    st = reduce(st, { type: 'SELECT_ENTRY', lid: 'e1' }).state;
+    st = reduce(st, {
+      type: 'BODY_LOADED',
+      lid: 'e1',
+      body: '上の段落。\n\n![絵](asset:k1)\n\n下の段落。\n',
+    }).state;
+    st = reduce(st, { type: 'START_EDIT' }).state;
+    detail.render(st);
+    await tick(30);
+
+    const img = () => root.querySelector<HTMLImageElement>('img[data-pkc-asset-key="k1"]');
+    expect(img(), '前提: 1 面に画像が描かれていない').not.toBeNull();
+    await waitFor(() => (img()?.getAttribute('src') ?? '') !== '', '前提: src が差されない');
+
+    // 画像の塊そのものを押して開く(= その塊が原文の入力欄に化ける)
+    img()!.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    const ta = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]');
+    expect(ta, '前提: 画像の行が開かない(この次元を測れていない)').not.toBeNull();
+
+    // ⚠ **何も打たずに**閉じる ── 本文が変わらないので描き直しは来ない
+    ta!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await tick(30);
+
+    expect(img(), '閉じたら画像そのものが消えた').not.toBeNull();
+    await waitFor(
+      () => (img()?.getAttribute('src') ?? '').startsWith('blob:'),
+      '閉じたら src が空になった(画面から画像が消える)',
+    );
+  });
+});

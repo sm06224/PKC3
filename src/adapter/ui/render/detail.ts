@@ -147,7 +147,17 @@ export class DetailRenderer {
    * 骨組みを使い回す(段⑪)以上、`disposeLends()` は選択が動いたときしか
    * 走らないので、差分描画の側にも返す道が要る(図の `pruneScopes` と同じ形)。
    */
-  private readonly lends: Array<{ dispose: () => void; els: Element[] }> = [];
+  /**
+   * 借りている ObjectURL。⚠ `key` を持つのは**借り直しを避ける**ため(#250)──
+   * 編集中は塊が打鍵ごとに作り直されるので、同じ添付を tick ごとに IDB から
+   * 読み直して URL を作り足すことになる(user 指示「効くのは定常」)。
+   */
+  private readonly lends: Array<{
+    key: string | null;
+    url: string | null;
+    dispose: () => void;
+    els: Element[];
+  }> = [];
   /** 非同期 hydrate の stale 防止(選択が移ったら結果を捨てて即 dispose)。 */
   private hydrateToken = 0;
 
@@ -846,13 +856,23 @@ export class DetailRenderer {
          */
         applyDocumentGlobals(preview, extractDocumentGlobals(ta.value));
         // 🔑 **新しく入った所だけ**図を面倒みる(触っていない図はそのまま)
-        if (applied.inserted.length > 0) scopes.push(...hydrateFigures(applied.inserted));
+        if (applied.inserted.length > 0) {
+          // 🔴 **添付の画像もここで差す**(#250 で判明)。⚠ 読む面(`paint`)には
+          //    在るのに、**編集中の 2 面と 1 面には無かった** ── 本文に
+          //    `![…](asset:…)` を書いても、書いている間は **src の無い `<img>`**
+          //    (= 何も出ない枠)のままだった。貼付を足して初めて表に出た症状だが、
+          //    原因は貼付ではない ── CLAUDE.md §7「片側を直したら反対側を疑う」。
+          void this.hydrateAssetRefs(applied.inserted, this.hydrateToken);
+          scopes.push(...hydrateFigures(applied.inserted));
+        }
         // 🔴 **積もらせない**(P8 段⑰。レビュー H-5)── 静穏 tick ごとに塊が
         //    増え、画面に無い PNG の URL と観測器が編集中ずっと生きていた
         //    (実測: 5 tick で createObjectURL 5 / revokeObjectURL 0)
         // ⚠ `inserted.length > 0` の**外**で呼ぶ(段㉗)── 図を削る編集では
         //    inserted が空になり、消えた図の URL が返らないまま残る
         pruneScopes(scopes);
+        // 🔴 消えた `<img>` のぶんを返す(#250 ── 読む面と同じ規律)
+        this.pruneLends();
       },
       (e) => {
         // 🔴 **白紙にしない**。理由を出して原文だけは読めるようにする
@@ -949,6 +969,13 @@ export class DetailRenderer {
       },
       notify: (message) => {
         note.textContent = message;
+      },
+      // 🔴 行の開閉で作り直された塊の面倒をみる(#250)── ここを渡さないと、
+      //    画像の塊を押して閉じたときに `<img>` が空の枠になる(実測)
+      onInserted: (els) => {
+        void this.hydrateAssetRefs(els, this.hydrateToken);
+        scopes.push(...hydrateFigures(els));
+        this.pruneLends();
       },
     });
     editAll.addEventListener('click', () => {
@@ -1065,8 +1092,16 @@ export class DetailRenderer {
         }
         // 図の面倒は**新しく入った所だけ**(既存の規律と同じ ── 生きた `<img>` の
         // ObjectURL を revoke しない)
-        if (r.inserted.length > 0) scopes.push(...hydrateFigures(r.inserted));
+        if (r.inserted.length > 0) {
+          // 🔴 添付の画像もここで差す(#250 ── 2 面側と同じ穴が在った)
+          void this.hydrateAssetRefs(r.inserted, this.hydrateToken);
+          scopes.push(...hydrateFigures(r.inserted));
+        }
         pruneScopes(scopes);
+        // 🔴 **画面から消えた `<img>` のぶんを返す**(読む面と同じ規律)──
+        //    ⚠ `inserted.length > 0` の**外**で呼ぶ(塊が消えるだけのとき
+        //    inserted は空で、そこが一番溜まる)
+        this.pruneLends();
         // 文書 globals(書字方向・既定の寄せ)── 読む面と同じ見え方にする。
         // ⚠ この面は本文をそのまま(frontmatter 込みで)描くので `body` から取る
         applyDocumentGlobals(pane, extractDocumentGlobals(body));
@@ -1267,6 +1302,10 @@ export class DetailRenderer {
       : [rootEls as Element];
     const byKey = new Map<string, HTMLImageElement[]>();
     const collect = (img: HTMLImageElement): void => {
+      // ⚠ **既に差してあるものは借り直さない**(#250)── 同じ `<img>` に 2 回
+      //   借りると、1 本目の URL が誰にも返されないまま生き残る(`pruneLends` は
+      //   「画面から外れた」ときしか返さない)
+      if (img.hasAttribute('src')) return;
       const key = img.getAttribute('data-pkc-asset-key') ?? '';
       const group = byKey.get(key);
       if (group) group.push(img);
@@ -1276,6 +1315,25 @@ export class DetailRenderer {
       if (r instanceof HTMLImageElement && r.hasAttribute('data-pkc-asset-key')) collect(r);
       for (const img of r.querySelectorAll<HTMLImageElement>('img[data-pkc-asset-key]'))
         collect(img);
+    }
+    if (byKey.size === 0) return;
+    /**
+     * 🔴 **生きている貸出を使い回す**(2026-08-18、着地前レビュー)。
+     *
+     * 編集中の面は打鍵のたびに塊を作り直すので、そのたびに借りると
+     * **IDB 読み + `createObjectURL` が tick ごと**に走る(`lendObjectUrl` は
+     * キャッシュを持たない)。⚠ 使い回した `<img>` を貸出の `els` に**足す**
+     * ことが要である ── 足さないと、古い `<img>` が消えた時点で `pruneLends` が
+     * 返してしまい、**画面に出ている新しい `<img>` の src が死ぬ**。
+     */
+    for (const [key, imgs] of [...byKey]) {
+      const live = this.lends.find(
+        (l) => l.key === key && l.url !== null && l.els.some((e) => e.isConnected),
+      );
+      if (!live) continue;
+      live.els.push(...imgs);
+      for (const img of imgs) img.src = live.url!;
+      byKey.delete(key);
     }
     if (byKey.size === 0) return;
     await Promise.all(
@@ -1290,7 +1348,7 @@ export class DetailRenderer {
             for (const img of imgs) img.setAttribute('data-pkc-asset-missing', '');
             return;
           }
-          this.lends.push({ dispose: lent.dispose, els: imgs });
+          this.lends.push({ key, url: lent.url, dispose: lent.dispose, els: imgs });
           for (const img of imgs) img.src = lent.url;
         } catch {
           if (token === this.hydrateToken)
@@ -1363,7 +1421,7 @@ export class DetailRenderer {
       if (!lent) return missing();
       // 添付の preview は器ごと作り直す(`disposeLends()` が先に走る)ので、
       // 器そのものを持たせておけば「器が外れたら返す」で同じ規則に乗る
-      this.lends.push({ dispose: lent.dispose, els: [host] });
+      this.lends.push({ key: null, url: null, dispose: lent.dispose, els: [host] });
       if (kind === 'image') {
         const img = document.createElement('img');
         img.setAttribute('data-pkc-field', 'attachment-media');
