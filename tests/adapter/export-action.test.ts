@@ -84,6 +84,8 @@ function deps(over: Partial<ExportDeps> = {}): ExportDeps & {
     // ⚠ 待つものが無い ── 「待たない」を明示する(下の test が待つ側を見る)
     settle: async () => {},
     // ⚠ この file は Word を通らない(図は `export-entry-guard.test.ts` が見る)
+    // ⚠ ベクタは使わない腕(ラスタ経路を通す)
+    renderFigureVector: async () => null,
     renderFigure: async () => null,
     now: () => NOW,
     files,

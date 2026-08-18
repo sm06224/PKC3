@@ -76,7 +76,7 @@ test('🔴 情報ペインの Word で .docx が落ちてきて、本文が中�
  * 段① はここが素通しで、器の中の**原文が code 塊**になっていた
  * (PKC2 に「図は原文が黙って等幅で出る」と記録されている失敗そのもの)。
  */
-test('🔴 mermaid の図が Word に絵として入る(原文が出ない)(#187 段②)', async ({ page }) => {
+test('🔴 mermaid の図が Word にベクタで入る(原文が出ない)(#187 段② / #238)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await gotoApp(page);
   await createEntry(page, 'text');
@@ -100,8 +100,12 @@ test('🔴 mermaid の図が Word に絵として入る(原文が出ない)(#187
   const path = await download.path();
   expect(path, 'file が落ちてきていない').not.toBeNull();
   const text = readFileSync(path!).toString('utf-8');
-  expect(text, '図の PNG が入っていない').toContain('word/media/figure1.png');
-  expect(text, 'document が図を指していない').toContain('r:embed="rIdM1"');
+  // 🔴 **図はベクタ(EMF)で入る**(#238、user 指示 2026-08-17)。
+  //    ⚠ ラスタ(.png)に戻っていたら、それは `renderFigureVector` の配線が落ちている
+  expect(text, '図がベクタで入っていない').toContain('word/media/figure1.emf');
+  expect(text, 'ラスタに戻っている').not.toContain('word/media/figure1.png');
+  // ⚠ VML なので `r:id`(DrawingML の `r:embed` ではない)
+  expect(text, 'document が図を指していない').toContain('r:id="rIdM1"');
   // 🔴 **原文が等幅で出ていない**(PKC2 の失敗の顔)
   expect(text, '図の原文が本文に出ている').not.toContain('graph TD');
   expect(text, '図が「描けませんでした」になっている').not.toContain('描けませんでした');
