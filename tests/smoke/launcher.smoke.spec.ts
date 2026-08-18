@@ -115,7 +115,7 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   await urlTab.waitForLoadState('domcontentloaded');
   expect(urlTab.url()).toContain('tile=1');
   /**
-   * 🔴 **opener も referrer も渡さない**(マニュアル §7-2 の約束)を**実物で**見る。
+   * 🔴 **opener も referrer も渡さない**(マニュアル §7-3 の約束)を**実物で**見る。
    *
    * ⚠ 直す前はこの約束が「`window.open` に渡す文字列」だけで pin されていた ──
    * 文字列は合っているのに引数の位置が違う、という形の間違いを 1 つも捕まえない

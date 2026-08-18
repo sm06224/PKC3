@@ -699,3 +699,83 @@ describe('クラス名と CSS 規則の突合', () => {
     expect(missing, '当たる規則が無いクラスを書いている(無スタイルで出る)').toEqual([]);
   });
 });
+
+/**
+ * 🔴 **マニュアルの節を指す参照が、指す先とずれていない**(#261 で実際にずれた)。
+ *
+ * ⚠ 節を 1 つ挿すと**以降の番号が全部動く** ── #251 で §7-2 に「文字を貼る」を
+ * 入れたとき、マニュアル内部の 4 か所は直したのに、**マニュアルの外から指していた
+ * 4 か所**(コード 1 / smoke 1 / doc 2)が別の節を指したまま残った。
+ * ⚠ 「その番号の節が在るか」だけを見ると**空振りする** ── §7-2 は在るのだから
+ * 常に真になる。だから**引用句が当の節の中に在るか**まで見る(CLAUDE.md §1)。
+ */
+describe('マニュアルの節を指す参照', () => {
+  /** `### 7-3. …` から次の `### ` までを 1 節として切る。 */
+  const sections = ((): Map<string, string> => {
+    const out = new Map<string, string>();
+    const lines = MANUAL.split('\n');
+    let key: string | null = null;
+    let buf: string[] = [];
+    for (const line of lines) {
+      const m = /^### (\d+-\d+)\./.exec(line);
+      if (m) {
+        if (key) out.set(key, buf.join('\n'));
+        key = m[1]!;
+        buf = [];
+        continue;
+      }
+      if (key) buf.push(line);
+    }
+    if (key) out.set(key, buf.join('\n'));
+    return out;
+  })();
+
+  /** 参照を書いてよい場所(散文の doc も含めて**全数**見る)。 */
+  const collect = (dir: string, ext: string, out: string[] = []): string[] => {
+    for (const name of readdirSync(dir)) {
+      const full = join(dir, name);
+      if (statSync(full).isDirectory()) collect(full, ext, out);
+      else if (name.endsWith(ext)) out.push(full);
+    }
+    return out;
+  };
+  const FILES = [
+    ...collect('src', '.ts'),
+    ...collect('tests', '.ts'),
+    ...collect('docs', '.md'),
+  ].filter((f) => f !== join('docs', 'manual.md'));
+
+  /** コメントの行頭記号・改行を落として 1 本の文字列にする(引用句は行を跨ぐ)。 */
+  const flatten = (s: string): string =>
+    s.replace(/\n\s*(?:\*|\/\/|>)?\s*/g, '').replace(/\s+/g, '');
+
+  it('🔴 指している節が実在し、引用句もその節の中に在る', () => {
+    const bad: string[] = [];
+    let refs = 0;
+    for (const file of FILES) {
+      const text = readFileSync(file, 'utf-8');
+      // 節番号だけの参照と、引用句つきの参照の両方を拾う
+      // ⚠ ここに**拾う形そのもの**を例として書かない ── 自分のコメントに
+      //   当たって落ちる(1 稿目で実際に踏んだ)
+      for (const m of text.matchAll(/マニュアル\s*§(\d+-\d+)\s*(「[^」]*」)?/gs)) {
+        refs += 1;
+        const num = m[1]!;
+        const body = sections.get(num);
+        if (body === undefined) {
+          bad.push(`${file}: §${num} という節がマニュアルに無い`);
+          continue;
+        }
+        const quote = m[2];
+        if (quote === undefined) continue;
+        // ⚠ 引用句は**先頭 8 字**で照合する(途中で切って書くことがある)
+        const needle = flatten(quote.slice(1, -1)).slice(0, 8);
+        if (needle !== '' && !flatten(body).includes(needle))
+          bad.push(`${file}: §${num} に「${needle}…」が無い(節がずれている)`);
+      }
+    }
+    // ⚠ 空振り防止 ── 参照を 1 件も拾えていないなら、この検査は何も守っていない
+    expect(refs, 'マニュアルへの参照を 1 件も拾えていない(検査が空振り)').toBeGreaterThan(2);
+    expect(bad).toEqual([]);
+  });
+});
+

@@ -537,7 +537,7 @@ describe('お知らせの文面は固定(#220-7)', () => {
   const KNOWN: readonly [string, string][] = [
     ['2026-08-18-folder-first', 'c35f066d'],
     ['2026-08-18-shortcut-keys', 'b12084ce'],
-    ['2026-08-18-paste-and-drop', 'dd7d171c'],
+    ['2026-08-18-paste-and-drop', '558597bf'],
     ['2026-08-18-word-vector-figures', 'a1641a5b'],
     ['2026-08-18-settings-commands', '82f24590'],
     ['2026-08-17-word-export-page', '0bb5cbb5'],

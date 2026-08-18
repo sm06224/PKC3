@@ -20,6 +20,8 @@ import { archetypeLabel } from '@adapter/ui/render/sidebar';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
 import { insertText } from '@adapter/ui/render/row-swap';
 import { isImageAssetMime } from '@features/asset/asset-ref-format';
+import { adoptableUrls, rewriteAdopted } from '@features/asset/inline-url-adopt';
+import { convertPastedHtml } from '@features/markdown/html-to-markdown';
 import { resolveMime } from './attach';
 import { applyFormat, type FormatOp } from '@features/markdown/text-ops';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
@@ -158,6 +160,17 @@ export interface BinderServices {
    * ⚠ **省略可** ── 無ければ画像は文字に置き換わる(壊れた画像を貼らせない)。
    */
   inlineImages?(urls: readonly string[]): Promise<ReadonlyMap<string, string>>;
+  /**
+   * 🔴 **貼り付けた本文の `data:` / `blob:` を資産にする**(#251 の B + C)。
+   * `url → asset:<key>` の対応を返す。⚠ **読めなかった url は入れない** ──
+   * 呼び側が「元のまま残した」と件数で言えるようにする(黙って消さない)。
+   * ⚠ **省略可** ── 無ければ本文はそのまま(貼付自体は成立する)。
+   */
+  adoptPastedUrls?(urls: readonly string[]): Promise<{
+    readonly adopted: ReadonlyMap<string, string>;
+    /** 置けなかった理由(空き容量など)。⚠ **呼び側が 1 本の文言に組み立てる**。 */
+    readonly problems: readonly string[];
+  }>;
   /**
    * 🔴 **添付を別の窓で見る**(#192 で画像、2026-08-15 に PDF を追加)。
    * ⚠ 実体は adapter/platform 側(ObjectURL の寿命が絡むので、binder は**呼ぶだけ**)。
@@ -1770,6 +1783,20 @@ export function bindActions(
   };
 
   /**
+   * 🔴 **待ったあとの差し先**(#250 / #251 で共用)。⚠ 待っている間に
+   * ① 編集欄が作り直される(live の面は行を組み直す)② 取り消して別のノートを
+   * 開き直す ── のどちらも起きるので、**掴んだままの textarea へ差さない**。
+   * ⚠ 別のノートを開いていたら `null`(取り消した貼付が別のノートに現れない)。
+   */
+  const insertTargetAfterAwait = (
+    from: HTMLTextAreaElement,
+    openedLid: string | null,
+  ): HTMLTextAreaElement | null => {
+    const sameEdit = (dispatcher.getState().openBody?.lid ?? null) === openedLid;
+    return sameEdit ? reResolveInput(from) : null;
+  };
+
+  /**
    * 🔴 **画像を本文へ差し込む**(⚠ 待つので、差す先は**あとで引き直す**)。
    */
   const insertPasted = (files: readonly File[], from: HTMLTextAreaElement): void => {
@@ -1781,8 +1808,7 @@ export function bindActions(
       // 🔴 **待っている間に編集欄が作り直されることがある**(live の面は行を組み直す)。
       //   掴んだままの textarea へ差すと、**画面に出ていない所へ字を書く** ──
       //   貼付が黙って消えるので、差す直前に**いま在る編集欄**へ引き直す。
-      const sameEdit = (dispatcher.getState().openBody?.lid ?? null) === openedLid;
-      const into = sameEdit ? reResolveInput(from) : null;
+      const into = insertTargetAfterAwait(from, openedLid);
       if (!into) {
         // 🔴 **差し先が消えた。**(1 面の編集は、別の欄を触った瞬間に行を確定して
         //   閉じる ── 実ブラウザで実際にそうなる)
@@ -1846,6 +1872,75 @@ export function bindActions(
   };
 
   /**
+   * 🔴 **文字の貼付**(#251)。2 つのことをする ──
+   * ① `text/html` を PKC-Markdown へ戻す ② `data:` / `blob:` を資産へ逃がす。
+   *
+   * ⚠ **どちらも要らないなら `false`** ── 既定の貼付(text/plain)に委ねる。
+   *   止めてしまうと、変換の要らない普通の貼付まで**こちらの都合で書き換わる**。
+   * ⚠ 入る先は**本文の欄だけ**(題名や検索欄に markdown を組み立てない)。
+   * ⚠ 資産化は待つので、差し先は `insertTargetAfterAwait` で引き直す(#250 と同じ)。
+   *
+   * @returns 既定の貼付を止めたら `true`
+   */
+  const pasteText = (ce: ClipboardEvent): boolean => {
+    const target = ce.target;
+    if (!isBodyInput(target)) return false;
+    const html = ce.clipboardData?.getData('text/html') ?? '';
+    const plain = ce.clipboardData?.getData('text/plain') ?? '';
+    const converted = convertPastedHtml({ html, plain });
+    const text = converted ?? plain;
+    if (text === '') return false;
+
+    const adopt = services.adoptPastedUrls;
+    const urls = adopt ? adoptableUrls(text) : [];
+    // 変換もせず、逃がすものも無い ── **何も足せない**ので既定に任せる
+    if (converted === null && urls.length === 0) return false;
+    // ⚠ 逃がすものが無い(= 資産にする口が無い環境も含む)ときは、その場で差す
+    if (urls.length === 0) {
+      insertText(target, text);
+      return true;
+    }
+
+    const from = target;
+    const openedLid = dispatcher.getState().openBody?.lid ?? null;
+    // ⚠ `urls` は `adopt` が在るときしか埋まらない(上の三項)── `pasteImages!` と同じ形
+    void adopt!(urls).then(({ adopted, problems }) => {
+      const r = rewriteAdopted(text, adopted);
+      const into = insertTargetAfterAwait(from, openedLid);
+      if (!into) {
+        // ⚠ 黙って終わらない ──「貼ったのに出ない」を作らない。
+        //   クリップボードは残っているので、これは実際にやり直せる指示である
+        dispatcher.dispatch({
+          type: 'OP_FAILED',
+          error: '編集欄が閉じたため貼り付けられませんでした。もう一度貼ってください',
+        });
+        return;
+      }
+      into.focus();
+      insertText(into, r.text);
+      /**
+       * 🔴 **断りは 1 本にまとめる**(検算で判明)。`state.error` は **1 枠**なので、
+       * 理由(空き容量)を先に出しても、件数の総括で**上書きされて消える**。
+       * ⚠ 理由が在るならそちらを出す ── 件数は「何件残ったか」しか言わないが、
+       *   理由は **user が直せる**(容量を空ける)。
+       */
+      if (problems.length > 0) {
+        dispatcher.dispatch({
+          type: 'OP_FAILED',
+          error: `貼り付けた画像を保存できませんでした: ${problems[0]!}`,
+        });
+      } else if (r.failed > 0) {
+        // ⚠ 読めなかった宛先は**元のまま残している** ── 消していないことまで言う
+        dispatcher.dispatch({
+          type: 'OP_FAILED',
+          error: `貼り付けた画像 ${r.failed} 件を読み込めませんでした(元の参照のまま残しています)`,
+        });
+      }
+    });
+    return true;
+  };
+
+  /**
    * 🔴 **スクショの貼付**(#250。user 指示 2026-08-18「PKC3 でスクショ貼付の導線が
    * ない。PKC2 と同様以上に実装してください」)。
    *
@@ -1855,7 +1950,11 @@ export function bindActions(
   const onPaste = (e: Event): void => {
     const ce = e as ClipboardEvent;
     const files = filesOf(ce.clipboardData).filter(isImageFile);
-    if (routeFiles(files, ce.target)) ce.preventDefault();
+    if (routeFiles(files, ce.target)) {
+      ce.preventDefault();
+      return;
+    }
+    if (pasteText(ce)) ce.preventDefault();
   };
 
   /**

@@ -64,6 +64,7 @@ import { readAppStorage } from '@adapter/platform/app-storage';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { formatAssetRef } from '@features/asset/asset-ref-format';
 import { pastedImageName } from '@features/asset/pasted-image-name';
+import { adoptPastedUrls } from '@adapter/ui/actions/adopt-urls';
 import { waitForWindowClose } from '@adapter/platform/window-close';
 import { copyPlainText } from '@adapter/platform/clipboard';
 import { MarkdownClient } from '@adapter/platform/render/markdown-client';
@@ -1018,6 +1019,29 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       });
       return refs;
     },
+    /**
+     * 🔴 **貼り付けた本文の `data:` / `blob:` を資産にする**(#251 の B + C)。
+     *
+     * ⚠ **`blob:` は貼った瞬間しか読めない**(document を閉じれば死ぬ)ので、
+     *   ここで bytes を握るのが唯一の機会である。⚠ `data:` は読めるが、本文に
+     *   base64 を居座らせると編集・保存・描画のたびに丸ごと運ぶ(不可侵指示
+     *   2026-08-03「効くのは定常」)。
+     * ⚠ **画像だけ**受ける ── 読んでみるまで種類は分からないので、`fetch` の
+     *   あとに判定する。画像以外は**元の参照のまま**返さない(呼び側が件数で言う)。
+     * ⚠ 貼付と同じく**整理(未参照 GC)と排他**にする ── 本文へ差すのは put の
+     *   あとなので、その窓で整理が走ると貼ったばかりの bytes を消される。
+     * ⚠ 1 件ずつ順に処理して都度捨てる(並べると heap に載る)。
+     */
+    adoptPastedUrls: (urls) =>
+      adoptPastedUrls(
+        {
+          gate: withAssetGate,
+          attach: attachDeps,
+          fetchBlob: async (url) => (await fetch(url)).blob(),
+          now: () => new Date(),
+        },
+        urls,
+      ),
     /**
      * 🔴 **添付を別の窓で見る**(#192 で画像、2026-08-15 に PDF)。⚠ 貸した ObjectURL は
      * `openAssetWindow` が**窓の生死に合わせて**捨てる(窓が開けなければ即捨てる)。

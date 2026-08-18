@@ -13,14 +13,23 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/binder';
 import { attachFiles, type AttachDeps } from '../../src/adapter/ui/actions/attach';
 
-/** clipboard を持つ paste event を作る(happy-dom に `ClipboardEvent` の実体は無い)。 */
+/**
+ * clipboard を持つ paste event を作る(happy-dom に `ClipboardEvent` の実体は無い)。
+ *
+ * ⚠ **`getData` を持たせる**(2026-08-18、#251)── 本物の `DataTransfer` は必ず
+ * 持っている。初版は `items` しか持たせておらず、文字の貼付を見る側(#251)を
+ * 足した瞬間に `getData is not a function` で落ちた ── **stub が本物より貧しいと、
+ * 実装が正しくても落ちる**(CLAUDE.md §3「stub は本物の意味論を真似る」の逆向き)。
+ */
 function pasteEvent(
   items: { kind: string; type: string; file?: File | null }[],
+  data: Readonly<Record<string, string>> = {},
 ): Event & { defaultPrevented: boolean } {
   const e = new Event('paste', { bubbles: true, cancelable: true });
   Object.defineProperty(e, 'clipboardData', {
     value: {
       items: items.map((it) => ({ kind: it.kind, type: it.type, getAsFile: () => it.file ?? null })),
+      getData: (type: string) => data[type] ?? '',
     },
   });
   return e as Event & { defaultPrevented: boolean };
