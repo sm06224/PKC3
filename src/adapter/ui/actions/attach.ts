@@ -121,21 +121,29 @@ export interface AttachedOne {
   readonly hash: string | null;
 }
 
+/** 資産として置いた結果。⚠ **ノート(entry)は作らない** ── それは呼び側の仕事。 */
+export interface StoredAsset {
+  readonly assetKey: string;
+  readonly mime: string;
+  readonly hash: string | null;
+}
+
 /**
- * 🔴 **添付 1 件を取り込む。**(2026-08-16 に `attachFiles` から取り出した ── #205 で
- * Office の保存が同じ道を通るため。⚠ **`attachFiles` をそのまま呼ばせない**:
- * あちらは「編集中なら断る」「gate が断る」「選択を奪う」の 3 つを user のクリック
- * 前提で持っており、**別窓から非同期に届く保存**に当てると bytes ごと失われる)
+ * 🔴 **bytes を資産として置く**(2026-08-18 に `attachOne` から取り出した ── #250 で
+ * **スクショの貼付**が同じ道を通るため)。
  *
- * ⚠ `known` は content addressing の重複判定。**渡さなければ毎回 put する** ──
- * IDB の `put` は同じ key なら上書きなので壊れないが、無駄に書く。
+ * ⚠ **ノートを作らない**のが要である。`CREATE_ENTRY` の reducer は
+ * `phase !== 'ready'` を**黙って捨てる**ので、**編集中に貼った画像**をノートにしようと
+ * すると bytes だけ書かれて参照が消える。編集中の貼付は「資産を置いて、本文に参照を
+ * 差す」── そこが body 走査の GC に拾われるので、迷子にならない。
+ *
+ * ⚠ 空きが足りないときは**投げる**(呼び側が user に見える形へ変える)。
  */
-export async function attachOne(
-  dispatcher: Dispatcher,
+export async function storeAsset(
   deps: AttachDeps,
   item: AttachItem,
   known?: Set<string>,
-): Promise<AttachedOne | null> {
+): Promise<StoredAsset> {
   // quota preflight ── 足りないときは黙って壊れる前に可視で止める
   if (deps.estimate) {
     const est = await deps.estimate();
@@ -144,11 +152,7 @@ export async function attachOne(
       est.usage !== undefined &&
       est.quota - est.usage < item.size * 1.2
     ) {
-      dispatcher.dispatch({
-        type: 'OP_FAILED',
-        error: `添付を保存する空き容量が不足しています: ${item.name}`,
-      });
-      return null;
+      throw new Error(`添付を保存する空き容量が不足しています: ${item.name}`);
     }
   }
 
@@ -169,6 +173,33 @@ export async function attachOne(
     await deps.putMeta({ key: assetKey, mime, size: item.size, hash });
     known?.add(assetKey);
   }
+
+  return { assetKey, mime, hash };
+}
+
+/**
+ * 🔴 **添付 1 件を取り込む。**(2026-08-16 に `attachFiles` から取り出した ── #205 で
+ * Office の保存が同じ道を通るため。⚠ **`attachFiles` をそのまま呼ばせない**:
+ * あちらは「編集中なら断る」「gate が断る」「選択を奪う」の 3 つを user のクリック
+ * 前提で持っており、**別窓から非同期に届く保存**に当てると bytes ごと失われる)
+ *
+ * ⚠ `known` は content addressing の重複判定。**渡さなければ毎回 put する** ──
+ * IDB の `put` は同じ key なら上書きなので壊れないが、無駄に書く。
+ */
+export async function attachOne(
+  dispatcher: Dispatcher,
+  deps: AttachDeps,
+  item: AttachItem,
+  known?: Set<string>,
+): Promise<AttachedOne | null> {
+  let stored: StoredAsset;
+  try {
+    stored = await storeAsset(deps, item, known);
+  } catch (e) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: (e as Error).message });
+    return null;
+  }
+  const { assetKey, mime, hash } = stored;
 
   const lid = generateLid();
   dispatcher.dispatch({

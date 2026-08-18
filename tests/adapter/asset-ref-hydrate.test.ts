@@ -14,6 +14,8 @@ import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer, type AssetLender } from '../../src/adapter/ui/render/detail';
 import { stubRevisionOps } from '../helpers/revision-stub';
+import { MarkdownClient } from '../../src/adapter/platform/render/markdown-client';
+import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
 
 function meta(lid: string): EntryMeta {
   return {
@@ -271,3 +273,60 @@ describe('借りた URL の寿命(同一ノートの差し替え)', () => {
   });
 });
 
+
+/**
+ * 🔴 **編集中の面でも `asset:` の画像が出る**(#250 で判明・同時に直した)。
+ *
+ * ⚠ これは貼付の bug ではない ── **前から在った穴**である。読む面(`paint`)は
+ * `hydrateAssetRefs` を呼んでいたのに、**2 面のプレビューと 1 面のライブ
+ * エディタは呼んでいなかった**(`hydrateFigures` だけ)。本文に
+ * `![…](asset:…)` と書いても、**書いている間は src の無い `<img>`** ──
+ * 何も出ない枠のままで、確定するまで見えない。
+ * 🔑 露見したのは #250 の実ブラウザ smoke である(貼った直後に出ない)。
+ * CLAUDE.md §7「片側を直したら、対称の反対側を必ず疑う」の実例。
+ *
+ * ⚠ **2 面と 1 面の両方**を見る ── 片方だけ直すのが、まさにこの穴の作られ方。
+ */
+describe('編集中の面の asset hydrate(#250)', () => {
+  const editing = (body: string): AppState => {
+    let s = reduce(initialState, {
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('e1')],
+      relations: [],
+    }).state;
+    s = reduce(s, { type: 'SELECT_ENTRY', lid: 'e1' }).state;
+    s = reduce(s, { type: 'BODY_LOADED', lid: 'e1', body }).state;
+    return reduce(s, { type: 'START_EDIT' }).state;
+  };
+
+  for (const mode of ['split', 'live'] as const) {
+    it(`🔴 ${mode} の面でも、貸し出した URL が <img> に差される`, async () => {
+      localStorage.setItem('pkc3.editor-mode', mode);
+      let lends = 0;
+      let disposed = 0;
+      const lender: AssetLender = {
+        lend: async (key) => {
+          lends += 1;
+          return { url: `blob:${key}`, dispose: () => (disposed += 1) };
+        },
+        getBlob: async () => null,
+      };
+      const root = document.createElement('div');
+      // ⚠ **document へ繋ぐ** ── `follower` は `isConnected` で早期 return する
+      document.body.append(root);
+      const detail = new DetailRenderer(buildShell(root).detail, lender, new MarkdownClient());
+      detail.render(editing('本文の上\n\n![貼った絵](asset:k1)\n'));
+      await tick(30);
+
+      const img = root.querySelector<HTMLImageElement>('img[data-pkc-asset-key="k1"]');
+      expect(img, `${mode}: 参照が描かれていない(この次元を測れていない)`).not.toBeNull();
+      expect(img!.getAttribute('src'), `${mode}: src が差されていない(空の枠になる)`).toBe(
+        'blob:k1',
+      );
+      expect(lends, `${mode}: 借りていない`).toBe(1);
+      expect(disposed, `${mode}: 画面に出ているのに返してしまった`).toBe(0);
+      localStorage.removeItem('pkc3.editor-mode');
+    });
+  }
+});

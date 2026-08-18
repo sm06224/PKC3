@@ -60,6 +60,8 @@ import {
 } from '@adapter/platform/office/office-pack-install';
 import { readAppStorage } from '@adapter/platform/app-storage';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
+import { formatAssetRef } from '@features/asset/asset-ref-format';
+import { pastedImageName } from '@features/asset/pasted-image-name';
 import { waitForWindowClose } from '@adapter/platform/window-close';
 import { copyPlainText } from '@adapter/platform/clipboard';
 import { MarkdownClient } from '@adapter/platform/render/markdown-client';
@@ -90,6 +92,7 @@ import { reloadSnapshot } from '@adapter/state/reload-snapshot';
 import { selectWhenPresent } from '@adapter/state/select-when-present';
 import {
   attachFiles,
+  storeAsset,
   attachOne,
   resolveMime,
   type AttachDeps,
@@ -958,6 +961,41 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
 
   const services: BinderServices = {
     attachFiles: (files) => void withAssetGate(() => attachFiles(dispatcher, attachDeps, files)),
+    /**
+     * 🔴 **スクショの貼付**(#250。user 指示 2026-08-18
+     * 「PKC3 でスクショ貼付の導線がない。PKC2 と同様以上に実装してください」)。
+     *
+     * ⚠ **base64 にしない。** PKC2 は貼付のたびに `fileToBase64` で文字列へ起こして
+     * いたが、PKC3 の storage は **bytes を Blob のまま IDB へ置く**(不可侵指示
+     * 2026-07-27「ゼロコピー」)── 起こすと heap に丸ごと載る。
+     * ⚠ 名前は**貼った日時**から作る(クリップボードの画像に名前は無い)。
+     * ⚠ 置けなかったものは**返さない** ── 呼び側で件数が合わなくなるので気づける。
+     */
+    pasteImages: async (files) => {
+      const refs: string[] = [];
+      // 🔴 **整理(未参照 GC)と排他にする。** ここは「bytes は在るが参照が無い」
+      //   窓を**添付より長く**持つ(本文へ差すのは put のあと)── 窓の中で整理が
+      //   走ると、貼ったばかりの bytes を未参照と判定して消す(`asset-gate.ts`)。
+      // ⚠ 断る側の口を使う(待たせる `queued` は「選び直せない経路」用)──
+      //   貼付はクリップボードが残っているので**もう一度貼れる**。
+      await withAssetGate(async () => {
+        const known = new Set((await attachDeps.listMetas().catch(() => [])).map((m) => m.key));
+        for (const file of files) {
+          const name = pastedImageName(file, new Date());
+          try {
+            const stored = await storeAsset(
+              attachDeps,
+              { name, type: file.type, size: file.size, blob: file },
+              known,
+            );
+            refs.push(formatAssetRef(name, `asset:${stored.assetKey}`, true));
+          } catch (e) {
+            dispatcher.dispatch({ type: 'OP_FAILED', error: (e as Error).message });
+          }
+        }
+      });
+      return refs;
+    },
     /**
      * 🔴 **添付を別の窓で見る**(#192 で画像、2026-08-15 に PDF)。⚠ 貸した ObjectURL は
      * `openAssetWindow` が**窓の生死に合わせて**捨てる(窓が開けなければ即捨てる)。
