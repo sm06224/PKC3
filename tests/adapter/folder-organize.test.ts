@@ -302,13 +302,15 @@ function setup(metas: EntryMeta[], relations: Relation[]) {
     },
   });
   const parentCalls: Array<{ lid: string; parentLid: string | null; relationId: string }> = [];
-  const persisted: Array<{ lid: string; entryOrder: number }> = [];
+  const persisted: Array<{ lid: string; entryOrder: number; parent?: unknown }> = [];
   connectStoreEffects(d, {
     ...stubRevisionOps(),
     getBody: async () => '',
-    persistEntry: async (e) => {
-      persisted.push({ lid: e.lid, entryOrder: e.entryOrder });
-      return stubStamps();
+    // ⚠ **`opts` も受け取る**(#258)── 受け取らないと、effect 層が居場所を
+    //   落とす変異を**誰も見ていない**(着地前レビュー 🔴-2)
+    persistEntry: async (e, opts) => {
+      persisted.push({ lid: e.lid, entryOrder: e.entryOrder, parent: opts?.parent });
+      return { ...stubStamps(), ...(opts?.parent ? { parentWritten: true } : {}) };
     },
     deleteEntry: async () => {},
     setEntryParent: async (lid, parentLid, relationId) => {
@@ -833,6 +835,72 @@ describe('「もう一度押す」の窓(#240 段①)', () => {
     row().click();
     expect(d.getState().scopeLid, '続けて押しても入らない').toBe('f1');
     now.mockRestore();
+  });
+});
+
+/**
+ * 🔴 **居場所が effect 層まで届いているか**(#258 の着地前レビュー 🔴-2 / ⚠-2)。
+ *
+ * ⚠ `parent` は **DomainEvent → opts → StorageRequest** と 3 段の optional を渡る ──
+ * 途中で落としても **tsc は黙る**。ここが無いと、落とす変異を殺せるのは
+ * 実ブラウザ smoke 1 本だけになる。
+ */
+describe('作成の居場所が worker まで届く(#258)', () => {
+  beforeEach(() => {
+    document.body.textContent = '';
+  });
+
+  it('🔴 1 つの要求に乗って届く(2 手に割れていない)', async () => {
+    const { d, persisted, parentCalls } = setup([meta('f1', 1, 'folder')], []);
+    d.dispatch({
+      type: 'CREATE_ENTRY',
+      archetype: 'text',
+      lid: 'n9',
+      title: 'x',
+      parentLid: 'f1',
+      relationId: 'r9',
+    });
+    await tick();
+    expect(
+      persisted.find((p) => p.lid === 'n9')?.parent,
+      '居場所が effect 層で落ちている',
+    ).toEqual({ parentLid: 'f1', relationId: 'r9' });
+    expect(parentCalls, '2 手に割れている(行を書いてから辺を書いている)').toHaveLength(0);
+  });
+
+  it('🔴 相手が旧ビルドなら(名乗らなければ)2 手へ落ちる', async () => {
+    /**
+     * ⚠ 版が配られても**押したタブしか読み込み直さない**ので、旧ビルドのタブが
+     * 本体(holder)のことがある。旧 worker は `parent` を**黙って無視する**ので、
+     * 名乗りが無いときは `setEntryParent` で追い撃ちしないと**居場所だけ落ちる**
+     * ── 2 手だった頃は書けていたので、これは新しく開く穴である(互換は双方向)。
+     */
+    document.body.textContent = '';
+    const root = document.createElement('div');
+    document.body.append(root);
+    const d = new Dispatcher();
+    const parentCalls: Array<{ lid: string; parentLid: string | null }> = [];
+    connectStoreEffects(d, {
+      ...stubRevisionOps(),
+      getBody: async () => '',
+      // 旧 worker の再現 ── `parent` を受け取っても**名乗らない**
+      persistEntry: async () => stubStamps(),
+      deleteEntry: async () => {},
+      setEntryParent: async (lid, parentLid) => void parentCalls.push({ lid, parentLid }),
+    });
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('f1', 1, 'folder')], relations: [] });
+    d.dispatch({
+      type: 'CREATE_ENTRY',
+      archetype: 'text',
+      lid: 'n8',
+      title: 'x',
+      parentLid: 'f1',
+      relationId: 'r8',
+    });
+    await tick();
+    expect(parentCalls, '旧ビルドが本体だと居場所が黙って落ちる').toEqual([
+      { lid: 'n8', parentLid: 'f1' },
+    ]);
   });
 });
 

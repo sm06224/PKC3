@@ -806,7 +806,12 @@ const handlers: Handlers = {
         }
       }
       database.exec({ sql: UPSERT_SQL, bind: bindUpsert(req.cid, req.entry) });
-      // 🔴 **同じ tx で居場所も張る**(#258)── 行を書いてから辺(順序は tx 内でも保つ)
+      /**
+       * 🔴 **同じ tx で居場所も張る**(#258)。
+       * ⚠ 順序に **FK の制約は無い**(`schema.ts` の relations に FK は無い)── 行を先に
+       *   書くのは**読み手の期待**と 2 手だった頃の並びに合わせるためで、入れ替えても
+       *   DB は壊れない(「これが無いと壊れる」と書かない ── CLAUDE.md §1)。
+       */
       if (req.parent)
         writeParent(database, req.cid, req.entry.lid, req.parent.parentLid, req.parent.relationId);
       // 🔑 **刻んだ時刻を返す**(P9 段①)。`datetime('now')` を打つのはここだけなので、
@@ -819,7 +824,12 @@ const handlers: Handlers = {
         [req.cid, req.entry.lid],
       )[0] as { created_at: string | null; updated_at: string | null } | undefined;
       database.exec('COMMIT');
-      return { createdAt: stamped?.created_at ?? null, updatedAt: stamped?.updated_at ?? null };
+      return {
+        createdAt: stamped?.created_at ?? null,
+        updatedAt: stamped?.updated_at ?? null,
+        // ⚠ **書いたときだけ名乗る**(旧 worker は名乗らない = 呼び側が 2 手へ落ちる)
+        ...(req.parent ? { parentWritten: true } : {}),
+      };
     } catch (err) {
       try {
         database.exec('ROLLBACK');

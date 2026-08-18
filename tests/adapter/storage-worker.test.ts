@@ -1004,6 +1004,8 @@ describe('作成と居場所(#258)', () => {
     ).filter((r) => r.to_lid === toLid);
 
   it('🔴 1 op で行と辺の両方が書かれる', async () => {
+    // ⚠ 親の行も実在させる(いまは FK が無いので通るが、足した日に偽陽性で落ちる)
+    await request({ op: 'upsertEntry', cid: 'c1', entry: entry('atom-folder', '', { archetype: 'folder' }) });
     await request({
       op: 'upsertEntry',
       cid: 'c1',
@@ -1036,20 +1038,43 @@ describe('作成と居場所(#258)', () => {
     expect(await relsOf('atom-child')).toHaveLength(0);
   });
 
-  it('🔴 途中で落ちたら**どちらも残らない**(片方だけ書けた、を作らない)', async () => {
+  it('🔴 **辺の書込**で落ちたら、行も残らない(1 tx が効いている)', async () => {
+    /**
+     * ⚠ **落とすのは辺の側**(着地前レビュー 🔴-1)。1 稿目は行の側(`body` に
+     * bind できない値)を落としていたが、行 → 辺の順なので **`writeParent` が
+     * 一度も走らず**、`BEGIN`/`COMMIT` を丸ごと外しても緑だった ──
+     * **ロールバックを 1 度も要求していない**空振りである。
+     */
     const before = (await request({ op: 'listEntryMetas', cid: 'c1' })).length;
     await expect(
       request({
         op: 'upsertEntry',
         cid: 'c1',
-        // ⚠ bind できない値で UPSERT を落とす ── 1 tx なら辺も巻き戻る
-        entry: entry('atom-broken', undefined as unknown as string),
-        parent: { parentLid: 'atom-folder', relationId: 'atom-rel-9' },
+        entry: entry('atom-rollback', '# x\n'),
+        // ⚠ 辺の bind を落とす(行の upsert は成功済みの状態を作る)
+        parent: { parentLid: 'atom-folder', relationId: undefined as unknown as string },
       }),
     ).rejects.toBeTruthy();
     const after = await request({ op: 'listEntryMetas', cid: 'c1' });
-    expect(after.length, '落ちたのに行が残った').toBe(before);
-    expect(await relsOf('atom-broken'), '落ちたのに辺だけ残った').toHaveLength(0);
+    expect(
+      after.some((m) => m.lid === 'atom-rollback'),
+      '辺で落ちたのに行だけ残った(1 tx になっていない)',
+    ).toBe(false);
+    expect(after.length, '巻き戻っていない').toBe(before);
+    expect(await relsOf('atom-rollback')).toHaveLength(0);
+  });
+
+  it('新しい worker は「辺も書いた」と名乗る(旧 worker は名乗らない)', async () => {
+    // ⚠ 呼び側はこの申告で 2 手へ落ちるかを決める(旧ビルドが本体のときの互換)
+    const stamps = await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('atom-said', 'x'),
+      parent: { parentLid: 'atom-folder', relationId: 'atom-rel-said' },
+    });
+    expect(stamps.parentWritten, '書いたのに名乗っていない').toBe(true);
+    const plain = await request({ op: 'upsertEntry', cid: 'c1', entry: entry('atom-said', 'y') });
+    expect(plain.parentWritten, '触っていないのに名乗った').toBeUndefined();
   });
 });
 

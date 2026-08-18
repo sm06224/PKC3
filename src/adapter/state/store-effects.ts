@@ -296,6 +296,14 @@ export function connectStoreEffects(
               // ⚠ 居場所が在るなら**同じ tx で**書かせる(#258)
               ...(ev.parent ? { parent: ev.parent } : {}),
             });
+            /**
+             * 🔴 **旧ビルドのタブが本体だと `parent` は黙って無視される**
+             * (着地前レビュー ⚠-2)。名乗らなかったときだけ 2 手へ落ちる ──
+             * ⚠ 新しい worker では**常に名乗る**ので、この追い撃ちは走らない。
+             */
+            if (ev.parent && stamps.parentWritten !== true) {
+              await store.setEntryParent(ev.entry.lid, ev.parent.parentLid, ev.parent.relationId);
+            }
             if (!disposed)
               dispatcher.dispatch({
                 type: 'BODY_PERSISTED',

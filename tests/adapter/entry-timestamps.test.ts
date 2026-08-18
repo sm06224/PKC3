@@ -144,6 +144,38 @@ describe('①b store-port が worker の値をそのまま渡す', () => {
     expect(got).toEqual({ createdAt: '1999-12-31 23:59:58', updatedAt: '1999-12-31 23:59:59' });
     expect(seen).toHaveLength(1);
   });
+
+  it('🔴 居場所(`parent`)も worker まで運ぶ(#258。落としても tsc は黙る)', () => {
+    // ⚠ `parent` は **DomainEvent → opts → StorageRequest** と 3 段の optional を渡る ──
+    //   途中で落としても型は通るので、**届いていることを 1 段ずつ pin する**
+    //   (CLAUDE.md「材料が実際に届いていることを pin する」)。この層は実ブラウザ
+    //   smoke でしか死なない変異が在った(着地前レビュー 🔴-2)。
+    const seen: Array<{ op: string; parent?: unknown }> = [];
+    const fakeClient = {
+      request: async (req: { op: string }) => {
+        seen.push(req as { op: string; parent?: unknown });
+        return { createdAt: null, updatedAt: null, parentWritten: true };
+      },
+    } as unknown as Parameters<typeof createStorePort>[0];
+    const port = createStorePort(fakeClient, 'c1');
+    void port.persistEntry(
+      {
+        lid: 'a',
+        title: 't',
+        archetype: 'text',
+        body: '# a',
+        entryOrder: 1,
+        status: null,
+        date: null,
+        archived: false,
+      },
+      { parent: { parentLid: 'f1', relationId: 'r1' } },
+    );
+    expect(seen[0]?.parent, '居場所が worker まで届いていない').toEqual({
+      parentLid: 'f1',
+      relationId: 'r1',
+    });
+  });
 });
 
 // ── ② 書込経路(7 つ)が state へ流しているか ────────────────────
