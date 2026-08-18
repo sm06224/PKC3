@@ -33,6 +33,7 @@ import { chromium } from '@playwright/test';
 import { rmSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { waitForRows } from './browse-face.mjs';
 
 const PORT = Number(process.env.PKC3_BENCH_PORT ?? 45731);
 const PROFILE_DIR =
@@ -40,8 +41,13 @@ const PROFILE_DIR =
 // ⚠ `??` ではなく `||` ── **空文字を素通りさせない**(CI が path を取れなかった回に
 //    「どのブラウザで測ったか分からないまま緑」になるのを止める)
 const executablePath = process.env.PKC3_CHROMIUM || '/opt/pw-browsers/chromium';
-/** 行を数える器。⚠ 一覧の外の `data-pkc-entry` は**行ではない**(#221)。 */
-const LIST = '[data-pkc-region="entry-list"]';
+/**
+ * 行を数える器。⚠ 一覧の外の `data-pkc-entry` は**行ではない**(#221)。
+ * 🔴 **名指ししない**(#265)── 既定のタブが入れ替わると hidden 側を見て
+ * 永久に 0 件になる。`browse-face.mjs` が**見えている面**を解く。
+ */
+/** @type {string} */
+let LIST;
 
 const ARM = (process.argv.find((a) => a.startsWith('--arm=')) ?? '--arm=live').slice(6);
 if (ARM !== 'live' && ARM !== 'split') {
@@ -67,11 +73,7 @@ try {
   }, ARM);
   await page.goto(`http://localhost:${PORT}/tests/probe/sidebar-probe.html`);
   await page.waitForFunction(() => window.__APP__, null, { timeout: 120_000 });
-  await page.waitForFunction(
-    (list) => document.querySelectorAll(`${list} [data-pkc-entry]`).length >= 15000,
-    LIST,
-    { timeout: 60_000 },
-  );
+  LIST = (await waitForRows(page, 15000)).selector;
 
   await page.evaluate((list) => {
     // 空振り防止 ── 器が無いのに「0 行が同一だった」で緑にしない
