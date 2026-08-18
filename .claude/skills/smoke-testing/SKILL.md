@@ -43,6 +43,25 @@ PKC3_CHROMIUM=/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headles
 実バグが出た。`chromium` では `afterprint` が来ないので永久に露見しなかった。
 **「CI だけで落ちる」を環境のせいにして test 側だけ緩めない。**
 
+## 🔴 「unit では原理的に届かない層」を先に数える
+
+smoke は高いので、**unit で届く物は unit に置く**。逆に、**unit が原理的に届かない層**は
+smoke でしか守れない ── 書く前にここを数えると、spec が「念のため」で増えない。
+
+happy-dom に**無い**もの(= その経路を unit は 1 度も実行しない):
+
+| 無いもの | 帰結 |
+|---|---|
+| `document.execCommand` | `insertText` 系は**必ず fallback を通る** ── 本命の経路も、fallback との**意味論の差**も unit からは見えない(#250) |
+| `ClipboardEvent` / `DragEvent` の実体 | fake を渡すので「こちらが渡した形」しか試していない |
+| `caretPositionFromPoint` | 座標 → caret(ライブエディタの行選択) |
+| 実 IME の composition | 確定の `input` が `isComposing: true` で来る等 |
+| 実 BroadcastChannel / Web Locks / OPFS | 多重タブの合成(#177 / #253) |
+| ブラウザの取り消し履歴(`Ctrl+Z`) | 「取り消せます」と**約束したのに誰も見ていない**状態になりやすい(#250) |
+
+🔑 **user に約束した文(マニュアル・お知らせ)を、この表に照らす。**
+「取り消せます」「順番どおり入ります」は unit では書けない ── そこが smoke の出番である。
+
 ## 観測点の置き方
 
 ### ① 環境差に強い側へ寄せる
