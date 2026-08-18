@@ -32,6 +32,7 @@ import {
   pushSelection,
   type SelectionHistory,
 } from '@features/nav/selection-history';
+import { filerRows, rangeInRows } from '@features/relation/filer-list';
 
 export type AppPhase = 'initializing' | 'ready' | 'editing' | 'error';
 export type ViewMode =
@@ -113,6 +114,31 @@ export interface AppState {
   relations: readonly Relation[];
   openBody: OpenBody | null;
   selectedLid: string | null;
+  /**
+   * 🔴 **いま「どのフォルダを見ているか」**(#240 段①。user 指示 2026-08-17
+   * 「フォルダ表示メインにしてフォルダをダブルクリックで開くように変更」)。
+   *
+   * ⚠ 直す前、現在地は **`selectedLid` の純関数**だった(`resolveFilerScope`)──
+   * つまり「選ぶ」と「入る」が同じ操作で、user 指示の**ダブルクリックで開く**は
+   * この 2 つを分けろという指示にほかならない。
+   * ⚠ そして**複数選択とも正面からぶつかる**(2 件選んだら現在地を 1 つに言えない)ので、
+   * 選択を集合にする前に、現在地を**状態として**持つ必要がある。
+   * ⚠ `null` = ルート。⚠ 消えた lid は指し続けない(`removeEntry` が畳む)。
+   */
+  scopeLid: string | null;
+  /**
+   * 🔴 **印を付けたもの**(#240 段②。user 指示 2026-08-17「複数選択・範囲選択」)。
+   *
+   * ⚠ `selectedLid`(= いま**開いている**ノート)とは**別の値**である ──
+   * PKC2 は 2 つを union で 1 つに畳んでおり、user audit が「最悪の UX 事故」と
+   * 記録している(呼び出し側ごとに `includeAnchor` を渡す二重規則になっていた)。
+   * 🔑 まとめて消す・まとめて動かすが見るのは**こちらだけ**。1 クリックは両方を動かし、
+   * `Ctrl` / `Shift` は**こちらだけ**動かす(中央は開き直さない)。
+   * ⚠ 並びは**押した順**(範囲選択は表示順で足す)。
+   */
+  selection: readonly string[];
+  /** 範囲選択(`Shift`)の起点。⚠ 押すたびに更新する ── 起点が古いと範囲が飛ぶ。 */
+  selectionAnchor: string | null;
   /** 直近 CREATE_ENTRY で作られ、まだ一度も commit / rename されていない lid。
    *  「未編集のまま cancel」で掃除する(PKC2 の空 entry 堆積の対策 ── P3-7a)。 */
   freshLid: string | null;
@@ -261,6 +287,9 @@ export const initialState: AppState = {
   relations: [],
   openBody: null,
   selectedLid: null,
+  scopeLid: null,
+  selection: [],
+  selectionAnchor: null,
   freshLid: null,
   viewMode: 'detail',
   filterQuery: '',
@@ -420,6 +449,32 @@ export type UserAction =
       relationId?: string;
     }
   | { type: 'DESELECT_ENTRY' }
+  /**
+   * 現在地を動かす(#240 段①)。`lid: null` = ルートへ。
+   * ⚠ **選択は動かさない** ── 中央に開いているノートはそのまま(入っただけで
+   * 本文が閉じると、フォルダを辿る間じゅう本文が消える)。
+   */
+  | { type: 'SET_SCOPE'; lid: string | null }
+  /**
+   * 印の付け外し(`Ctrl` / `Cmd` クリック。#240 段②)。
+   * ⚠ **開いているノートは動かさない** ── 動かすと `Ctrl` クリックのたびに
+   * 中央が開き直り、`REQUEST_BODY` が n 回飛ぶ。
+   */
+  | { type: 'TOGGLE_SELECT'; lid: string }
+  /**
+   * 起点から押した行までを**表示順で**印にする(`Shift` クリック。#240 段②)。
+   * ⚠ 表示順は `filerRows` 1 か所が決める ── データの順で採ると、
+   * 目で見た範囲と違うものが選ばれる。
+   */
+  | { type: 'SELECT_RANGE'; lid: string }
+  /** 印を全部外す。 */
+  | { type: 'CLEAR_SELECTION' }
+  /**
+   * 🔴 **まとめてゴミ箱へ**(#240 段③。user 指示 2026-08-17「まとめて消せない」)。
+   * ⚠ **1 回の操作**として扱う ── `DELETE_ENTRY` を n 回撃つと、途中で断られたときに
+   * 「半分だけ消えた」が作れる。⚠ 完全削除(`purge`)は一括で撃たせない。
+   */
+  | { type: 'DELETE_ENTRIES'; lids: readonly string[] }
   | { type: 'DELETE_ENTRY'; lid: string }
   | { type: 'RENAME_ENTRY_TITLE'; lid: string; title: string }
   /**
@@ -786,10 +841,25 @@ function reduceCore(
       //    消えたままで、ノートが開かない理由が画面のどこにも無かった
       //    (マニュアル「中央は常にいま開いているノート」の当の破れ)
       const leaveSettings = isAsidePane(state.viewMode);
-      if (state.selectedLid === action.lid && state.openBody?.lid === action.lid)
+      if (state.selectedLid === action.lid && state.openBody?.lid === action.lid) {
+        /**
+         * 🔴 **すでに開いている行を素で押したときも、印は 1 件へ戻す**(#240 段②)。
+         *
+         * ⚠ ここは「同じノートをもう一度押した」だけの早期 return だが、
+         * **印(複数選択)はその外に在る** ── 直す前は 3 件に印を付けたあと、
+         * そのうちの 1 件を素で押しても**印が 3 件のまま**だった(実ブラウザ smoke で
+         * 判明。unit は「別の行を押す」筋しか通っていなかった)。
+         * 🔑 修飾なしのクリックは「これだけを相手にする」の意味なので、
+         *   どの行を押したかに関わらず印は 1 件になる。
+         */
+        const marks =
+          state.selection.length === 1 && state.selection[0] === action.lid
+            ? state
+            : { ...state, selection: [action.lid], selectionAnchor: action.lid };
         return leaveSettings
-          ? { state: { ...state, viewMode: 'detail' }, events: [] }
-          : { state, events: [] };
+          ? { state: { ...marks, viewMode: 'detail' as const }, events: [] }
+          : { state: marks, events: [] };
+      }
       // 選択が変わったら旧 openBody は破棄(速やかな破棄の原則)し、新 body を要求。
       // 通知エラー(読み失敗等)は新しい試行でクリア(エラーは state 駆動 ──
       // 表示寿命が「次の操作まで」で終わらない、P3-5 review #3 の解消)
@@ -798,6 +868,12 @@ function reduceCore(
           ...state,
           ...(leaveSettings ? { viewMode: 'detail' as const } : {}),
           selectedLid: action.lid,
+          /**
+           * ⚠ **印は 1 件へ置き換える**(#240 段②)── 修飾なしのクリックは
+           * 「これだけを相手にする」の意味。`Ctrl` / `Shift` は別の action で入る。
+           */
+          selection: [action.lid],
+          selectionAnchor: action.lid,
           openBody: null,
           error: null,
           revisionPanel: null, // panel は選択に従属(P5b)
@@ -1141,7 +1217,7 @@ function reduceCore(
       const next: AppState = {
         ...state,
         phase: 'ready',
-        freshLid: state.freshLid === lid ? null : state.freshLid, // commit = 残す意思
+        freshLid: state.freshLid === lid ? null : state.freshLid,
         // 変更ありの commit は draft が正(可視内容の last-write-wins)── disk
         // 先行の印はここで畳む
         openBody: { lid, body, baseline: body, persisted, diskAhead: false },
@@ -1469,6 +1545,58 @@ function reduceCore(
       });
       return { state: { ...state, entryMetas }, events: [] };
     }
+    case 'TOGGLE_SELECT': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      if (!state.entryMetas.has(action.lid)) return { state, events: [] };
+      const has = state.selection.includes(action.lid);
+      const selection = has
+        ? state.selection.filter((l) => l !== action.lid)
+        : [...state.selection, action.lid];
+      /**
+       * ⚠ **開いているノートは動かさない**(#240 段②)── `Ctrl` クリックのたびに
+       * 中央が開き直ると、`REQUEST_BODY` が n 回飛ぶうえ「印を付けただけ」で
+       * 本文が入れ替わる。
+       * ⚠ 起点は**外したときも**更新する(次の `Shift` はここから伸ばす)。
+       */
+      return {
+        state: { ...state, selection, selectionAnchor: action.lid },
+        events: [],
+      };
+    }
+    case 'SELECT_RANGE': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      if (!state.entryMetas.has(action.lid)) return { state, events: [] };
+      /**
+       * 🔴 **表示順で採る**(#240 段②)。⚠ データの順(`order`)で採ると、
+       * 並べ替えや絞り込みを掛けているとき**目で見た範囲と違うものが選ばれる**。
+       * 規則は `filerRows` 1 か所(描く側と同じ関数)。
+       */
+      const rows = filerRows(state.scopeLid, state.entryMetas, state.relations, {
+        filterQuery: state.filterQuery,
+        searchHits: state.searchHits,
+        sort: state.entrySort,
+      });
+      const range = rangeInRows(rows, state.selectionAnchor, action.lid);
+      if (range.length === 0) return { state, events: [] };
+      // ⚠ 起点は動かさない ── 動かすと `Shift` を押すたびに範囲が縮んでいく
+      return { state: { ...state, selection: range }, events: [] };
+    }
+    case 'CLEAR_SELECTION': {
+      if (state.selection.length === 0 && state.selectionAnchor === null)
+        return { state, events: [] };
+      return { state: { ...state, selection: [], selectionAnchor: null }, events: [] };
+    }
+    case 'SET_SCOPE': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      if (state.scopeLid === action.lid) return { state, events: [] };
+      /**
+       * ⚠ **実在しない lid へは入らない**(消えたフォルダを指したまま「空です」と
+       * 出るのを防ぐ)。⚠ ただし `null`(ルート)は常に受ける。
+       */
+      if (action.lid !== null && !state.entryMetas.has(action.lid))
+        return { state, events: [] };
+      return { state: { ...state, scopeLid: action.lid }, events: [] };
+    }
     case 'DESELECT_ENTRY': {
       // filer の「ルート」導線(scope は selection の純関数なので、root 表示 =
       // 選択解除)。openBody は速やかに破棄
@@ -1599,6 +1727,27 @@ function reduceCore(
       return removeEntryFromState(state, action.lid, [
         { type: 'REQUEST_DELETE', lid: action.lid },
       ]);
+    }
+    case 'DELETE_ENTRIES': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      // ⚠ 居ないものは黙って落とす(消えた行を選んだまま押しても事故にしない)
+      const targets = action.lids.filter((lid) => state.entryMetas.has(lid));
+      if (targets.length === 0) return { state, events: [] };
+      /**
+       * ⚠ **1 件ずつ `removeEntryFromState` を畳む**(規則を 2 つ書かない)。
+       * 後継の選択・履歴の掃除・ゴミ箱の畳みは、そちらが 1 か所で持っている。
+       * ⚠ 事象(`REQUEST_DELETE`)は**まとめて 1 回**の worker op にせず 1 件ずつ出す
+       * ── 既存の効果の口をそのまま使い、片方だけ失敗しても残りが進む。
+       */
+      let next = state;
+      const events: DomainEvent[] = [];
+      for (const lid of targets) {
+        const r = removeEntryFromState(next, lid, [{ type: 'REQUEST_DELETE', lid }]);
+        next = r.state;
+        events.push(...r.events);
+      }
+      // ⚠ 消したものが印に残らない(`removeEntryFromState` が 1 件ずつ外している)
+      return { state: { ...next, selection: [], selectionAnchor: null }, events };
     }
     case 'RENAME_ENTRY_TITLE': {
       if (state.phase !== 'ready' && state.phase !== 'editing')
@@ -2081,6 +2230,17 @@ function removeEntryFromState(
       selectedLid,
       openBody: state.openBody?.lid === lid ? null : state.openBody,
       freshLid: state.freshLid === lid ? null : state.freshLid,
+      /**
+       * 🔴 **見ていたフォルダを消したらルートへ戻す**(#240 段①)。
+       * ⚠ 指したままだと、消えたフォルダの中身として**空の面**が出続ける
+       * (しかもそこで「作る」と、消えた親の子として生まれる)。
+       */
+      scopeLid: state.scopeLid === lid ? null : state.scopeLid,
+      // ⚠ 消えたものを印に残さない(#240 段②)── まとめて削除が**居ないもの**を数える
+      selection: state.selection.includes(lid)
+        ? state.selection.filter((l) => l !== lid)
+        : state.selection,
+      selectionAnchor: state.selectionAnchor === lid ? null : state.selectionAnchor,
       // 削除で履歴・ゴミ箱の断面は古くなる ── 畳んで開き直しに任せる(P5b)
       revisionPanel: null,
       trashPanel: null,

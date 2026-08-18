@@ -14,14 +14,7 @@
  *   **確定後に `<img>` が実寸を持つ**ところまで見る(§4「届いた証拠」)。
  */
 import { test, expect, type Page } from '@playwright/test';
-import {
-  clickReal,
-  createEntry,
-  collectPageErrors,
-  expectImageRendered,
-  gotoApp,
-  useSplitEditor,
-} from './helpers';
+import { clickReal, createEntry, collectPageErrors, expectImageRendered, gotoApp, useSplitEditor, useListBrowse } from './helpers';
 
 // 1x1 PNG(67 bytes)── attach.smoke.spec.ts と同じ絵
 const PNG_1X1_B64 =
@@ -77,6 +70,12 @@ async function openLiveRow(page: Page): Promise<void> {
     '空のノートで行が開かない(貼る先が無い)',
   ).toBeVisible();
 }
+
+// 🔑 #240 段⑤ で左の列の既定は**フォルダ**になった ── この file は一覧の行を
+// 掴むので、一覧タブで開く仕込みを入れる(既定の顔は organize.smoke が守る)。
+test.beforeEach(async ({ page }) => {
+  await useListBrowse(page);
+});
 
 test('🔴 編集中の本文に貼ると、確定後に画像として出る', async ({ page }) => {
   const errors = collectPageErrors(page);

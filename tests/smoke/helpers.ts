@@ -34,6 +34,25 @@ export async function useSplitEditor(page: Page): Promise<void> {
 }
 
 /**
+ * 🔑 **一覧タブで開く仕込み**(#240 段⑤ で既定が**フォルダ**になった)。
+ *
+ * 左の列の行(`[data-pkc-region="entry-list"]`)を掴む spec は、最初の `goto` の
+ * **前に**これを呼ぶ ── 既定はもうフォルダなので、呼ばないと一覧の面は `hidden` である。
+ * ⚠ 既定(フォルダ)の顔は `organize.smoke.spec.ts` が守る ── ここで既定を
+ * 上書きするのは「一覧でも同じことができる」を確かめるためであって、
+ * **既定を試験から隠すためではない**(`useSplitEditor` と同じ理由づけ)。
+ */
+export async function useListBrowse(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem('pkc3.browse', 'list');
+    } catch {
+      /* sandbox の frame ── アプリの設定とは無関係なので黙って流す */
+    }
+  });
+}
+
+/**
  * 🔴 **既知の常在ノイズ(名指しの等値リスト)。**
  *
  * cross-origin isolation(`COOP` + `COEP: credentialless`)を入れた 2026-08-10 から

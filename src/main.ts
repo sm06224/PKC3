@@ -9,6 +9,7 @@ import { tileSelectsEntry } from '@features/launcher/tiles';
 import { appEditorMode } from '@adapter/ui/render/editor-mode';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { appKeymap } from '@adapter/ui/render/keymap';
+import { appBrowseMode } from '@adapter/ui/render/browse-mode';
 import { StoreClient } from '@adapter/platform/storage/store-client';
 import { openAssetWindow } from '@adapter/platform/asset-window';
 import { assetWindowKind } from '@features/asset/asset-preview-kind';
@@ -321,9 +322,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   //    `SettingsRenderer.syncTheme()` の仕事 ── ここに 2 本目を置かない
   //    (P8 段㉕:帯を探す死んだ同期が残っており、常に空振りしていた)
   // 🔑 左の列は**探し方**で切り替わる(P8 段⑤)。中央は常に「開いているノート」
-  const browse = new BrowseRouter(regions.sidebar, regions.browseHost);
+  const browse = new BrowseRouter(regions.sidebar, regions.browseHost, appBrowseMode.get());
   const inspector = new InspectorRenderer(regions.inspector);
-  let browseMode: BrowseMode = 'list';
+  /**
+   * 🔴 **既定はフォルダ、前回の選択を覚える**(#240 段⑤。user 指示 2026-08-17)。
+   * ⚠ 既定は `browse-mode.ts` 1 か所が持つ ── ここに書くと、また 4 か所に散る。
+   */
+  let browseMode: BrowseMode = appBrowseMode.get();
   // assets: bytes は IDB Blob(sqlite には meta のみ)。表示は lend/dispose 規律
   const blobs = new AssetBlobStore();
   /**
@@ -399,7 +404,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       else btn.removeAttribute('data-pkc-active');
     }
   };
-  markBrowse('list');
+  markBrowse(browseMode);
   // 🔑 追記欄は**本文とは別の器**(P8 段⑧)── 本文は追記のたびに書き換わって
   // 再描画されるので、同じ器に入れると打ちかけの文字も focus も消える
   const appendBox = new AppendBoxRenderer(regions.append);
@@ -1389,6 +1394,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     setBrowse: (mode) => {
       if (mode !== 'list' && mode !== 'filer' && mode !== 'launcher') return;
       browseMode = mode;
+      appBrowseMode.set(mode); // 次に開いたときも同じ探し方で出す(#240 段⑤)
       markBrowse(mode);
       browse.render(dispatcher.getState(), mode);
       // ⚠ アプリの一覧は開いたときに読む(常駐していない)。

@@ -58,6 +58,11 @@ function stateOf(metas: EntryMeta[], over: Partial<AppState> = {}): AppState {
     linkedFiles: new Map(),
     trashPanel: null,
     filterQuery: '',
+    // #240 段②: 印(複数選択)。⚠ `as unknown as AppState` で作っているので
+    //    足りない field は**実行時に落ちる**まで気づけない ── 明示で置く
+    scopeLid: null,
+    selection: [],
+    selectionAnchor: null,
     ...over,
   } as unknown as AppState;
 }

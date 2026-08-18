@@ -28,7 +28,6 @@ import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibilit
 import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
 import { chordOf, findCommand, typesCharacter } from '@features/keymap';
 import { appQueryKey } from '@adapter/ui/render/query-key-store';
-import { resolveFilerScope } from '@features/relation/tree';
 import { parseLinkTarget } from '@features/entry-ref/link-target';
 import { handleCopyMdBlock } from './copy-md-block';
 import { finishCopy, selectedMarkdown } from './copy-source';
@@ -709,14 +708,15 @@ const ACTIONS: Record<string, ActionHandler> = {
      * 「+ ノート」を押しても**ルートに落ちて**いた ── フォルダの中身は
      * 「作ってから入れ直す」以外に増やしようが無かった。
      *
-     * ⚠ 入れ先は**選択の純関数**(filer と同じ `resolveFilerScope`)── 「どの
-     * 探し方を開いているか」では変えない。左の列の状態で保存先が変わると、
-     * user からは同じ操作が場所によって違う結果を出すように見える。
+     * ⚠ 入れ先は**いま見ているフォルダ**(#240 段① で `scopeLid` へ移した)。
+     * それより前は**選択の純関数**(`resolveFilerScope`)だったので、一覧で別の
+     * ノートを選ぶだけで**作る先が変わって**いた ── いまは画面に出ているパンくずと
+     * 作る先が必ず一致する。「どの探し方を開いているか」では変えない、は不変。
      * ⚠ `SET_VIEW_MODE` より**前**に読む(切替は選択を動かさないが、
      * 読む順を先に固定しておく)。
      */
     const st = dispatcher.getState();
-    const parent = resolveFilerScope(st.selectedLid, st.entryMetas, st.relations);
+    const parent = st.scopeLid === null ? null : (st.entryMetas.get(st.scopeLid) ?? null);
     // 非 detail view で作ると editor が出ない(PKC2 PR-Δ19 の罠)── 先に切替
     if (st.viewMode !== 'detail') dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
     const lid = generateLid();
@@ -733,6 +733,37 @@ const ACTIONS: Record<string, ActionHandler> = {
     // 別タブは 'changed' でこの lid を知るため、登録が先に着けばよい
     if (dispatcher.getState().phase === 'editing') void services.acquireEditLock?.(lid);
   },
+  /**
+   * 🔴 **まとめてゴミ箱へ**(#240 段③。user 指示 2026-08-17「まとめて消せない」)。
+   *
+   * ⚠ 断り方・確認・戻せることの言い方は `delete-entry` と**同じ規則**にする
+   * (押した場所が違っても、同じ理由なら同じ言い方 ── CLAUDE.md「文言は押した
+   * 場所と対で pin する」)。⚠ 完全削除は一括で撃たせない(戻せない操作は 1 件ずつ)。
+   */
+  'delete-selected': (dispatcher, _target, services) => {
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '編集を終了してから削除してください',
+      });
+      return;
+    }
+    if (refuseWhileBusy('delete-selected', dispatcher, services)) return;
+    const lids = st.selection.filter((lid) => st.entryMetas.has(lid));
+    if (lids.length === 0) return;
+    if (
+      !confirmOrExplain(
+        dispatcher,
+        `選んでいる ${lids.length} 件を削除しますか?(ゴミ箱から戻せます)`,
+        true,
+      )
+    )
+      return;
+    dispatcher.dispatch({ type: 'DELETE_ENTRIES', lids });
+  },
+  /** 印を全部外す(#240 段②)。 */
+  'clear-selection': (dispatcher) => dispatcher.dispatch({ type: 'CLEAR_SELECTION' }),
   'delete-entry': (dispatcher, target) => {
     // ⚠ 実行中(書出し / 取込)のガードは `refuseWhileBusy` が 1 本で持つ
     // 🔴 **無言で断らない**(P8 段⑲)。`DELETE_ENTRY` は `phase !== 'ready'` で
@@ -945,7 +976,19 @@ const ACTIONS: Record<string, ActionHandler> = {
   'toggle-show-archived': (dispatcher) =>
     dispatcher.dispatch({ type: 'TOGGLE_SHOW_ARCHIVED' }),
   'retry-persist': (dispatcher) => dispatcher.dispatch({ type: 'RETRY_PERSIST' }),
-  'filer-root': (dispatcher) => dispatcher.dispatch({ type: 'DESELECT_ENTRY' }),
+  /**
+   * 🔴 **フォルダへ入る / ルートへ戻る**(#240 段①)。
+   *
+   * ⚠ 直す前、パンくずのルートは `DESELECT_ENTRY` を撃っており、**現在地を戻すと
+   * 中央のノートまで閉じて**いた(現在地が `selectedLid` の純関数だったため、
+   * ルート表示 = 選択解除しか書きようが無かった)。現在地を state に持った今は、
+   * **選択に触らずに現在地だけ**動かす。
+   * ⚠ 押した要素が `data-pkc-entry` を持たなければ**ルート**(パンくずの先頭)。
+   */
+  'enter-folder': (dispatcher, target) => {
+    const lid = target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
+    dispatcher.dispatch({ type: 'SET_SCOPE', lid });
+  },
   /**
    * 🔴 **居場所を変える**(2026-08-05、user 報告「フォルダ整理のための導線がない」)。
    * 空値 = ルートへ出す。⚠ 動かす当人は**帯自身**が持っている
@@ -955,12 +998,20 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = target.getAttribute('data-pkc-entry');
     if (!lid) return;
     const value = target instanceof HTMLSelectElement ? target.value : '';
+    const parentLid = value === '' ? null : value;
     dispatcher.dispatch({
       type: 'SET_ENTRY_PARENT',
       lid,
-      parentLid: value === '' ? null : value,
+      parentLid,
       relationId: generateLid(),
     });
+    /**
+     * 🔴 **画面は動かしたものに付いていく**(#240 段①で明示化)。
+     * ⚠ 現在地が選択の純関数だった頃は**副作用として**そうなっていた ── state に
+     * 移した今、ここで撃たないと**入れた物がその場で視界から消える**(着いたのか
+     * 落としたのか user に分からない)。移した先が現在地になる、が守る性質である。
+     */
+    dispatcher.dispatch({ type: 'SET_SCOPE', lid: parentLid });
   },
   /**
    * 🔴 **並べ替え**(2026-08-06。user 報告 2-10)。⚠ 動かす当人は帯が持つ
@@ -1307,6 +1358,12 @@ const ACTIONS: Record<string, ActionHandler> = {
  * 「もう一度押したら戻る」が、鍵からも**同じように**効く。
  * ⚠ ボタンが無い面では**何も起きない**(`preventDefault` もしない = ブラウザに譲る)。
  */
+/**
+ * PKC の中の D&D で運ぶ型(#240 段④)。⚠ **OS からの file 受けと見分ける**ための
+ * 独自 mime ── `Files` を見る既存の経路(添付 / 本文への貼付)に一切触らせない。
+ */
+const PKC_DRAG = 'application/x-pkc-lids';
+
 const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
   'create-entry': '[data-pkc-field="create-run"]',
   'edit-entry': '[data-pkc-action="start-edit"]',
@@ -1376,7 +1433,36 @@ export function bindActions(
      *   目次・脚注は action を持たない)。
      */
     if (el instanceof HTMLAnchorElement && el.hasAttribute('href')) ev.preventDefault();
-    run(el.getAttribute('data-pkc-action'), el);
+    /**
+     * 🔴 **修飾つきのクリックは「印を付ける」**(#240 段②。user 指示 2026-08-17
+     * 「複数選択・範囲選択」)。
+     *
+     * ⚠ 行を選ぶ操作(`select-entry`)にだけ効かせる ── ボタンやリンクで
+     * `Ctrl` クリックを奪うと、ブラウザの「新しいタブで開く」を壊す。
+     * ⚠ **中央は開き直さない**(印を付けただけで本文が入れ替わらない)。
+     * ⚠ `Shift` は**表示順**で範囲を採る(規則は reducer の `filerRows` 1 か所)。
+     */
+    const me = ev as MouseEvent;
+    if (
+      el.getAttribute('data-pkc-action') === 'select-entry' &&
+      (me.ctrlKey || me.metaKey || me.shiftKey)
+    ) {
+      const lid = el.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
+      if (lid !== null) {
+        ev.preventDefault();
+        dispatcher.dispatch(
+          me.shiftKey ? { type: 'SELECT_RANGE', lid } : { type: 'TOGGLE_SELECT', lid },
+        );
+        return;
+      }
+    }
+    const action = el.getAttribute('data-pkc-action');
+    // ⚠ 行を素で押したときだけ「もう一度押した」を数える(修飾つきは印の話)
+    if (action === 'select-entry') {
+      const lid = el.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
+      if (lid !== null) maybeEnterFolder(lid);
+    }
+    run(action, el);
   };
   /**
    * ⚠ 書式パネルのボタンは **focus を奪わない**。奪うと押すたびに編集欄が
@@ -1692,22 +1778,130 @@ export function bindActions(
    */
   const onDragOver = (e: Event): void => {
     const de = e as DragEvent;
+    // 🔴 **PKC の中の移動**(#240 段④)── OS からの file 受けとは**別の型**で見分ける
+    if (de.dataTransfer?.types?.includes(PKC_DRAG) === true) {
+      const drop = dropTargetOf(de.target);
+      if (drop === undefined) return; // 落とせない場所 ── 既定(受け取らない)のまま
+      e.preventDefault();
+      de.dataTransfer.dropEffect = 'move';
+      markDropTarget(drop.el);
+      return;
+    }
     if (de.dataTransfer?.types?.includes('Files') !== true) return;
     e.preventDefault();
     if (de.dataTransfer) de.dataTransfer.dropEffect = 'copy';
   };
   const onDrop = (e: Event): void => {
     const de = e as DragEvent;
+    if (de.dataTransfer?.types?.includes(PKC_DRAG) === true) {
+      const drop = dropTargetOf(de.target);
+      clearDropTarget();
+      if (drop === undefined) return;
+      e.preventDefault();
+      const lids = (de.dataTransfer.getData(PKC_DRAG) || '').split(' ').filter((x) => x !== '');
+      moveDropped(lids, drop.lid);
+      return;
+    }
     const files = filesOf(de.dataTransfer);
     if (files.length === 0) return;
     // ⚠ 受け手がいなくても止める(上の理由 ── 遷移で編集が飛ぶ)
     e.preventDefault();
     routeFiles(files, de.target);
   };
+  /**
+   * 🔴 **掴んだものを運ぶ**(#240 段④)。
+   * ⚠ 掴んだ行に**印が付いていれば印ごと**運ぶ(付いていなければその 1 件だけ)──
+   *   「選んだつもりの物と動く物が違う」を作らない。
+   */
+  const onDragStart = (e: Event): void => {
+    const de = e as DragEvent;
+    const row = (de.target as HTMLElement | null)?.closest<HTMLElement>('[data-pkc-entry]');
+    const lid = row?.getAttribute('data-pkc-entry') ?? null;
+    if (lid === null || !de.dataTransfer) return;
+    const st = dispatcher.getState();
+    const lids = st.selection.includes(lid) ? [...st.selection] : [lid];
+    de.dataTransfer.setData(PKC_DRAG, lids.join(' '));
+    de.dataTransfer.effectAllowed = 'move';
+  };
+  const onDragEnd = (): void => clearDropTarget();
+  /** 落とし先(フォルダの行 / パンくずの段)。`undefined` = 落とせない場所。 */
+  const dropTargetOf = (target: EventTarget | null): { el: HTMLElement; lid: string | null } | undefined => {
+    const el = (target as HTMLElement | null)?.closest<HTMLElement>('[data-pkc-drop]');
+    if (!el || !root.contains(el)) return undefined;
+    // ⚠ パンくずのルートは `data-pkc-entry` を持たない = 出す先(ルート)
+    return { el, lid: el.getAttribute('data-pkc-entry') };
+  };
+  let dropMark: HTMLElement | null = null;
+  const markDropTarget = (el: HTMLElement): void => {
+    if (dropMark === el) return;
+    clearDropTarget();
+    dropMark = el;
+    el.setAttribute('data-pkc-dropping', '');
+  };
+  const clearDropTarget = (): void => {
+    dropMark?.removeAttribute('data-pkc-dropping');
+    dropMark = null;
+  };
+  /**
+   * 落としたものを動かす。⚠ **断る理由を出す**(無言の操作拒否を作らない)──
+   * フォルダを自分の子孫へ落とす等、reducer が黙って捨てる形が在る。
+   */
+  const moveDropped = (lids: readonly string[], parentLid: string | null): void => {
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから動かしてください' });
+      return;
+    }
+    let moved = 0;
+    for (const lid of lids) {
+      const before = dispatcher.getState().relations;
+      dispatcher.dispatch({
+        type: 'SET_ENTRY_PARENT',
+        lid,
+        parentLid,
+        relationId: generateLid(),
+      });
+      if (dispatcher.getState().relations !== before) moved += 1;
+    }
+    if (moved === 0) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: 'そこへは入れられません(フォルダは自分の中へは入れられません)',
+      });
+      return;
+    }
+    // ⚠ **動かしたものに付いていく**(`move-entry` と同じ規則 ── 経路で挙動を変えない)
+    dispatcher.dispatch({ type: 'SET_SCOPE', lid: parentLid });
+  };
+  /**
+   * 🔴 **フォルダは 2 クリックで開く**(#240 段①。user 指示 2026-08-17
+   * 「フォルダをダブルクリックで開くように変更」)。
+   *
+   * ⚠ **ネイティブの `dblclick` に頼らない。** ブラウザは「同じ node を 2 回」
+   * 押したときにしか `dblclick` を出さないので、**2 回のクリックの間に行が
+   * 作り直されると出ない** ── この面は保存の ack や別タブの更新で表を組み直すので、
+   * 実 user も「開かない」を踏む(実ブラウザ smoke で実際に落ちた)。
+   * 🔑 だから**同じ lid への連続押し**で見る ── node が入れ替わっても lid は同じ。
+   * ⚠ 1 クリック目(= 選ぶ)は `onClick` が撃っている。ここは**現在地だけ**動かす。
+   * ⚠ フォルダ以外では何もしない(ノートを 2 回押しても入る先が無い)。
+   */
+  const DOUBLE_MS = 500;
+  let lastRowClick: { lid: string; at: number } = { lid: '', at: 0 };
+  const maybeEnterFolder = (lid: string): void => {
+    const now = Date.now();
+    const again = lastRowClick.lid === lid && now - lastRowClick.at <= DOUBLE_MS;
+    lastRowClick = { lid, at: now };
+    if (!again) return;
+    if (dispatcher.getState().entryMetas.get(lid)?.archetype !== 'folder') return;
+    lastRowClick = { lid: '', at: 0 }; // 3 回目を「もう一度」と数えない
+    dispatcher.dispatch({ type: 'SET_SCOPE', lid });
+  };
   root.addEventListener('click', onClick);
   root.addEventListener('paste', onPaste);
   root.addEventListener('dragover', onDragOver);
   root.addEventListener('drop', onDrop);
+  root.addEventListener('dragstart', onDragStart);
+  root.addEventListener('dragend', onDragEnd);
   root.addEventListener('mousedown', onMousedown);
   root.addEventListener('input', onInput);
   root.addEventListener('change', onChange);

@@ -11,6 +11,7 @@
  * 5. **絞り込みを描く 4 面が全部**本文の当たりを見る(§7 ── 1 面でも題名だけの
  *    ままだと、その面でだけ「探しても出ない」)
  */
+import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -147,13 +148,25 @@ describe('全文検索の配線(#181)', () => {
    * 1 面でも `matchesTitle` のままだと、その面でだけ「探しても出ない」。
    * ⚠ launcher は **タイル**(entry ではない)ので対象外 ── 意図的に除く。
    */
-  it('🔴 絞り込みを描く 4 面が全部 matchesEntry を使っている', async () => {
-    const { readFileSync } = await import('node:fs');
-    for (const face of ['sidebar', 'filer', 'kanban', 'calendar']) {
+  it('🔴 絞り込みを描く 4 面が全部、本文の当たりも見る規則を通っている', () => {
+    for (const face of ['sidebar', 'kanban', 'calendar']) {
       const src = readFileSync(`src/adapter/ui/render/${face}.ts`, 'utf8');
       expect(src, `${face} が題名だけの絞り込みのまま`).toContain('matchesEntry(');
       expect(src, `${face} に matchesTitle が残っている`).not.toMatch(/matchesTitle\(/);
     }
+    /**
+     * ⚠ **フォルダ面だけ経路が変わった**(#240 段②)── 行を決める規則は
+     * `features/relation/filer-list.ts` の `filerRows` 1 か所へ寄せた
+     * (描く側と**範囲選択の reducer** が別の並びを持たないようにするため)。
+     * 🔑 だから見るのは 2 つ: ①面がその関数を通ること ②**本文の当たりを渡すこと**
+     *   ③その関数自身が `matchesEntry` を使うこと。
+     */
+    const filer = readFileSync('src/adapter/ui/render/filer.ts', 'utf8');
+    expect(filer, 'フォルダ面が共通の規則を通っていない').toContain('filerRows(');
+    expect(filer, 'フォルダ面が本文の当たりを渡していない').toContain('searchHits: state.searchHits');
+    expect(filer, 'フォルダ面に題名だけの絞り込みが残っている').not.toMatch(/matchesTitle\(/);
+    const rows = readFileSync('src/features/relation/filer-list.ts', 'utf8');
+    expect(rows, '共通の規則が題名だけになっている').toContain('matchesEntry(');
   });
 
   it('matchesEntry: 本文の当たりが null(未応答)でも題名は効く', () => {

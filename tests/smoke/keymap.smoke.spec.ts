@@ -20,7 +20,8 @@ test('🔴 既定の鍵が実機で効き、設定で割り当て直すと入れ
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
 
-  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  // ⚠ 左の列の既定は**フォルダ**(#240 段⑤)── 作ったノートはこちらに出る
+  const rows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   const shell = page.locator('[data-pkc-region="shell"]');
   await expect(rows).toHaveCount(0);
 

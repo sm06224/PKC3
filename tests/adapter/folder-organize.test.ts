@@ -327,14 +327,39 @@ function setup(metas: EntryMeta[], relations: Relation[]) {
   };
   const nudge = (dir: 'up' | 'down') =>
     q<HTMLButtonElement>(`[data-pkc-action="move-order-${dir}"]`);
-  return { root, d, pane, q, rows, moveSelect, moveTo, parentCalls, persisted, nudge };
+  /**
+   * 🔴 **フォルダへ入るのは 2 クリック**(#240 段①。user 指示 2026-08-17)。
+   * ⚠ 1 クリックは**選ぶだけ** ── 直す前は現在地が選択の純関数だったので
+   * 1 クリックで入っていた(その形は複数選択と両立しない)。
+   */
+  const enter = (lid: string) => {
+    const row = q<HTMLElement>(`tbody [data-pkc-entry="${lid}"]`)!;
+    row.click();
+    row.click(); // ⚠ 2 回目(#240 段①)
+  };
+  const toRoot = () => q<HTMLElement>('[data-pkc-region="filer-breadcrumb"] button')!.click();
+
+  return {
+    root,
+    d,
+    pane,
+    q,
+    rows,
+    moveSelect,
+    moveTo,
+    parentCalls,
+    persisted,
+    nudge,
+    enter,
+    toRoot,
+  };
 }
 
 describe('フォルダ整理の導線(画面)', () => {
   const METAS = [meta('f1', 1, 'folder'), meta('f2', 2, 'folder'), meta('n1', 3), meta('n2', 4)];
 
   it('🔴 選ぶ → 入れ先を選ぶ、で本当に入る(disk への要求まで届く)', async () => {
-    const { q, rows, moveTo, parentCalls } = setup(METAS, []);
+    const { q, rows, moveTo, parentCalls, toRoot } = setup(METAS, []);
     expect(rows()).toEqual(['f1', 'f2', 'n1', 'n2']);
 
     q<HTMLElement>('tbody [data-pkc-entry="n1"]')!.click();
@@ -352,14 +377,14 @@ describe('フォルダ整理の導線(画面)', () => {
       { lid: 'n1', parentLid: 'f1', relationId: expect.any(String) },
     ]);
     // ③ ルートからは消えている(2 か所に見えない)
-    q<HTMLElement>('[data-pkc-action="filer-root"]')!.click();
+    toRoot();
     await tick();
     expect(rows()).toEqual(['f1', 'f2', 'n2']);
   });
 
   it('🔴 ルートへ出せる(入れたら出せない、を作らない)', async () => {
-    const { q, rows, moveTo, parentCalls } = setup(METAS, [rel('r0', 'f1', 'n1')]);
-    q<HTMLElement>('tbody [data-pkc-entry="f1"]')!.click(); // scope = f1
+    const { q, rows, moveTo, parentCalls, enter } = setup(METAS, [rel('r0', 'f1', 'n1')]);
+    enter('f1'); // 2 クリックで入る(#240 段①)
     await tick();
     q<HTMLElement>('tbody [data-pkc-entry="n1"]')!.click();
     await tick();
@@ -370,7 +395,7 @@ describe('フォルダ整理の導線(画面)', () => {
     ]);
     // 出した先(= ルート)に付いていく
     expect(rows()).toEqual(['f1', 'f2', 'n1', 'n2']);
-    q<HTMLElement>('tbody [data-pkc-entry="f1"]')!.click();
+    enter('f1'); // ⚠ 入るのは 2 クリック(#240 段①)
     await tick();
     expect(rows()).toEqual([]); // f1 は空になった
   });
@@ -391,8 +416,8 @@ describe('フォルダ整理の導線(画面)', () => {
   });
 
   it('いまの居場所が選ばれた状態で出る(どこに居るか読める)', async () => {
-    const { q, moveSelect } = setup(METAS, [rel('r0', 'f2', 'n1')]);
-    q<HTMLElement>('tbody [data-pkc-entry="f2"]')!.click();
+    const { q, moveSelect, enter } = setup(METAS, [rel('r0', 'f2', 'n1')]);
+    enter('f2'); // ⚠ 入るのは 2 クリック(#240 段①)
     await tick();
     q<HTMLElement>('tbody [data-pkc-entry="n1"]')!.click();
     await tick();
@@ -415,8 +440,8 @@ describe('フォルダ整理の導線(画面)', () => {
   });
 
   it('🔴 いま見ているフォルダの中に作れる(押してからルートに落ちない)', async () => {
-    const { root, q, rows, d } = setup(METAS, []);
-    q<HTMLElement>('tbody [data-pkc-entry="f1"]')!.click(); // scope = f1
+    const { root, q, rows, d, enter } = setup(METAS, []);
+    enter('f1'); // 2 クリックで入る(#240 段①)
     await tick();
     // 作る先を**先に見せている**
     const where = q('[data-pkc-field="filer-create-target"]');
@@ -625,8 +650,8 @@ describe('並べ替えの導線(画面)', () => {
 
   it('フォルダの中でも並べ替えられる(root だけの機能にしない)', async () => {
     const metas = [meta('f1', 1, 'folder'), meta('x', 2), meta('y', 3)];
-    const { q, rows, nudge } = setup(metas, [rel('r1', 'f1', 'x'), rel('r2', 'f1', 'y')]);
-    q<HTMLElement>('tbody [data-pkc-entry="f1"]')!.click(); // scope = f1
+    const { q, rows, nudge, enter } = setup(metas, [rel('r1', 'f1', 'x'), rel('r2', 'f1', 'y')]);
+    enter('f1'); // 2 クリックで入る(#240 段①)
     await tick();
     q<HTMLElement>('tbody [data-pkc-entry="x"]')!.click();
     await tick();
