@@ -25,11 +25,20 @@ const two = (n: number): string => String(n).padStart(2, '0');
  * `スクリーンショット-2026-08-18-043215.png` の形(時刻は **時分秒**の 6 桁)。
  * ⚠ 秒まで入れる ── 同じ分に 2 枚貼ることは普通に起きる(名前が衝突しても
  * 中身が同じなら content addressing が 1 件に畳むが、**別の絵は別の名前**であるべき)。
+ *
+ * ⚠ `prefix` は**どこから来た画像か**を名乗る(#251)。クリップボードの生画像は
+ * スクショだが、**貼り付けた HTML の中に居た画像**(`data:` / `blob:`)は違う ──
+ * 一覧に「スクリーンショット」が並ぶと、あとから探すときに嘘の手がかりになる。
+ * ⚠ 拡張子の対応表は**この 1 か所**のまま(名前ごとに表を増やさない)。
  */
-export function pastedImageName(file: { readonly type: string }, at: Date): string {
+export function pastedImageName(
+  file: { readonly type: string },
+  at: Date,
+  prefix = 'スクリーンショット',
+): string {
   const ext = EXT[file.type.toLowerCase()] ?? 'png';
   const stamp =
     `${at.getFullYear()}-${two(at.getMonth() + 1)}-${two(at.getDate())}` +
     `-${two(at.getHours())}${two(at.getMinutes())}${two(at.getSeconds())}`;
-  return `スクリーンショット-${stamp}.${ext}`;
+  return `${prefix}-${stamp}.${ext}`;
 }

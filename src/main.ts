@@ -62,7 +62,7 @@ import {
 } from '@adapter/platform/office/office-pack-install';
 import { readAppStorage } from '@adapter/platform/app-storage';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
-import { formatAssetRef } from '@features/asset/asset-ref-format';
+import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
 import { pastedImageName } from '@features/asset/pasted-image-name';
 import { waitForWindowClose } from '@adapter/platform/window-close';
 import { copyPlainText } from '@adapter/platform/clipboard';
@@ -1017,6 +1017,41 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         }
       });
       return refs;
+    },
+    /**
+     * 🔴 **貼り付けた本文の `data:` / `blob:` を資産にする**(#251 の B + C)。
+     *
+     * ⚠ **`blob:` は貼った瞬間しか読めない**(document を閉じれば死ぬ)ので、
+     *   ここで bytes を握るのが唯一の機会である。⚠ `data:` は読めるが、本文に
+     *   base64 を居座らせると編集・保存・描画のたびに丸ごと運ぶ(不可侵指示
+     *   2026-08-03「効くのは定常」)。
+     * ⚠ **画像だけ**受ける ── 読んでみるまで種類は分からないので、`fetch` の
+     *   あとに判定する。画像以外は**元の参照のまま**返さない(呼び側が件数で言う)。
+     * ⚠ 貼付と同じく**整理(未参照 GC)と排他**にする ── 本文へ差すのは put の
+     *   あとなので、その窓で整理が走ると貼ったばかりの bytes を消される。
+     * ⚠ 1 件ずつ順に処理して都度捨てる(並べると heap に載る)。
+     */
+    adoptPastedUrls: async (urls) => {
+      const out = new Map<string, string>();
+      await withAssetGate(async () => {
+        const known = new Set((await attachDeps.listMetas().catch(() => [])).map((m) => m.key));
+        for (const url of urls) {
+          try {
+            const blob = await (await fetch(url)).blob();
+            if (blob.size === 0 || !isImageAssetMime(blob.type)) continue;
+            const name = pastedImageName({ type: blob.type }, new Date(), '貼付画像');
+            const stored = await storeAsset(
+              attachDeps,
+              { name, type: blob.type, size: blob.size, blob },
+              known,
+            );
+            out.set(url, `asset:${stored.assetKey}`);
+          } catch {
+            // 読めない 1 件で全部を失わない ── その 1 件だけ元の参照のまま残る
+          }
+        }
+      });
+      return out;
     },
     /**
      * 🔴 **添付を別の窓で見る**(#192 で画像、2026-08-15 に PDF)。⚠ 貸した ObjectURL は
