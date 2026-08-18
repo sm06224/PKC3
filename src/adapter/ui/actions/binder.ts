@@ -31,6 +31,7 @@ import { STRUCTURAL, isRelationKind } from '@features/relation/kinds';
 import { getAncestorFolders } from '@features/relation/tree';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
+import { appOpenInEdit, OpenInEditStore } from '@adapter/ui/render/open-in-edit';
 import { chordOf, findCommand, typesCharacter } from '@features/keymap';
 import { appQueryKey } from '@adapter/ui/render/query-key-store';
 import { parseLinkTarget } from '@features/entry-ref/link-target';
@@ -295,6 +296,12 @@ export interface BinderServices {
    * 開放先は user で、畳む予定も無い。⚠ 帯の「今後は出さない」の**戻し道**である。
    */
   setNoticesEnabled?(on: boolean): void;
+  /**
+   * 「開く」で編集に入るか(user 裁定 2026-08-18)。⚠ **flag ではない**(正規設定)。
+   * ⚠ 読む側は `services` ではなく `openInEdit` を引く(下の `bindActions` の引数)──
+   *   ここは**書き手**だけ。
+   */
+  setOpenInEdit?(on: boolean): void;
   /** 更新の案内を見送る(次に開いたときに再び出る)。 */
   dismissUpdate?(): void;
   /** アーカイブ書出し(P6d)。 */
@@ -1373,6 +1380,13 @@ const ACTIONS: Record<string, ActionHandler> = {
   'dismiss-update': (_dispatcher, _target, services) => {
     services.dismissUpdate?.();
   },
+  /**
+   * 「開く」で編集に入るかの設定(user 裁定 2026-08-18)。
+   * ⚠ `set-notices-enabled` と同じ作法 ── checkbox の `checked` をそのまま渡す。
+   */
+  'set-open-in-edit': (_dispatcher, target, services) => {
+    if (target instanceof HTMLInputElement) services.setOpenInEdit?.(target.checked);
+  },
   'set-notices-enabled': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
     if (target instanceof HTMLInputElement) services.setNoticesEnabled?.(target.checked);
@@ -1519,6 +1533,12 @@ export function bindActions(
    *   共有の 1 個を書き換えると、別の test に割当が漏れる。
    */
   keymap: KeymapStore = appKeymap,
+  /**
+   * 🔴 **「開く」で編集に入るか**(user 裁定 2026-08-18)。既定はアプリ共有の 1 個。
+   * ⚠ **test は自分で `new OpenInEditStore(...)` して渡す**(`keymap` と同じ作法)──
+   *   共有の 1 個を書き換えると、別の test に設定が漏れる。
+   */
+  openInEdit: OpenInEditStore = appOpenInEdit,
 ): () => void {
   /**
    * action を 1 本の口から回す。⚠ **ここを通さない呼び方をしない** ──
@@ -2245,6 +2265,72 @@ export function bindActions(
     return tr?.getAttribute('data-pkc-entry') ?? null;
   };
 
+  /** 表の中のその行(`data-pkc-entry` は user 由来ではないが、選択子に埋めない)。 */
+  const rowEl = (lid: string): HTMLElement | null =>
+    Array.from(
+      root.querySelectorAll<HTMLElement>('[data-pkc-region="filer-table"] [data-pkc-entry]'),
+    ).find((el) => el.getAttribute('data-pkc-entry') === lid) ?? null;
+
+  const focusRow = (lid: string): void => rowEl(lid)?.focus();
+
+  /**
+   * 🔴 **行送りの行き先**(user 裁定 2026-08-18「行送りに上下キーを使う」)。
+   *
+   * ⚠ 並びは **`filerRows` 1 か所**から採る(描く側・範囲選択と同じ答え)──
+   * DOM の並びを読むと、絞り込みや並べ替えのときに**目で見た順と食い違う**。
+   * ⚠ 焦点がまだ無いときは、下向きなら先頭・上向きなら末尾から入る(OS と同じ)。
+   * ⚠ 端では**止まる**(巻き戻さない)── 一覧の端で押し続けると反対側へ飛ぶのは
+   *   OS のファイラの挙動ではない。
+   */
+  const rowAt = (st: AppState, delta: number): string | null => {
+    const rows = visibleFilerRows(st);
+    if (rows.length === 0) return null;
+    const cur = focusedRowLid();
+    const i = cur === null ? -1 : rows.findIndex((m) => m.lid === cur);
+    if (i === -1) return (delta > 0 ? rows[0] : rows[rows.length - 1])?.lid ?? null;
+    return rows[Math.min(rows.length - 1, Math.max(0, i + delta))]?.lid ?? null;
+  };
+
+  /**
+   * 🔴 **ノートを「開く」**(user 裁定 2026-08-18)。
+   *
+   * > 「**Enter は閲覧を開始、インライン編集で常に開くは設定でトグル可能にすること**」
+   *
+   * 既定は**閲覧**: 中央にそのノートを開き、本文の面へ焦点を移す(読み進めと
+   * スクロールがそのままキーボードで続く)。設定が ON のときだけ、**本文が届いてから**
+   * 編集に入る。⚠ `START_EDIT` は `openBody` が揃っていないと**黙って何もしない**
+   * ので、その場で撃つと「設定を入れたのに編集にならない」になる。
+   */
+  const openNote = (lid: string): boolean => {
+    if (!selectEntryOrExplain(dispatcher, lid, 'ノート')) return false;
+    root.querySelector<HTMLElement>('[data-pkc-region="detail"]')?.focus();
+    if (openInEdit.enabled()) startEditWhenReady(lid);
+    return true;
+  };
+
+  /**
+   * 本文が届いたら 1 回だけ編集に入る。
+   * ⚠ **あきらめる条件を必ず持つ**(CLAUDE.md「短命購読は teardown で必ず外す」)──
+   * 別のノートへ移ったとき / `ready` を離れたときは購読を外す。持たないと、
+   * user が自分で編集して確定した瞬間に**もう一度勝手に編集へ入る**。
+   */
+  const startEditWhenReady = (lid: string): void => {
+    const arrived = (s: AppState): boolean => s.openBody?.lid === lid;
+    if (arrived(dispatcher.getState())) {
+      dispatcher.dispatch({ type: 'START_EDIT' });
+      return;
+    }
+    const off = dispatcher.onState((s) => {
+      if (s.selectedLid !== lid || s.phase !== 'ready') {
+        off();
+        return;
+      }
+      if (!arrived(s)) return;
+      off();
+      dispatcher.dispatch({ type: 'START_EDIT' });
+    });
+  };
+
   const runFilerKey = (cmd: string): boolean => {
     const st = dispatcher.getState();
     /**
@@ -2287,6 +2373,39 @@ export function bindActions(
       dispatcher.dispatch({ type: 'SET_SCOPE', lid: up?.lid ?? null });
       return true;
     }
+    if (cmd === 'filer-row-down' || cmd === 'filer-row-up') {
+      const lid = rowAt(st, cmd === 'filer-row-down' ? 1 : -1);
+      if (lid === null) return false;
+      /**
+       * 🔴 **送ると印も動く**(OS のファイラ = 焦点と選択が一致する)。
+       * ⚠ **中央のノートは開き直さない** ── 開くのは `Enter` の仕事である
+       *   (user 裁定 2026-08-18「Enter は閲覧を開始」)。`SELECT_ENTRY` を撃つと
+       *   1 行送るたびに本文の読み直し(worker 往復)が起きる。
+       * 🔑 既存の 2 つで足りる ── 印を空にしてから 1 件付ける(規則を増やさない)。
+       *   これで起点(`selectionAnchor`)もその行に立つので、続く `Shift` が効く。
+       */
+      dispatcher.dispatch({ type: 'CLEAR_SELECTION' });
+      dispatcher.dispatch({ type: 'TOGGLE_SELECT', lid });
+      focusRow(lid);
+      return true;
+    }
+    if (cmd === 'filer-extend-down' || cmd === 'filer-extend-up') {
+      const from = focusedRowLid();
+      const lid = rowAt(st, cmd === 'filer-extend-down' ? 1 : -1);
+      if (lid === null) return false;
+      /**
+       * ⚠ **起点が無いときは、いまの行を起点に立ててから伸ばす**。
+       * `rangeInRows` は起点 `null` を「行き先 1 件」と解くので、そのまま撃つと
+       * **押すたびに 1 件へ潰れて**積み上がらない(OS は現在行から伸びる)。
+       */
+      if (st.selectionAnchor === null && from !== null) {
+        dispatcher.dispatch({ type: 'CLEAR_SELECTION' });
+        dispatcher.dispatch({ type: 'TOGGLE_SELECT', lid: from });
+      }
+      dispatcher.dispatch({ type: 'SELECT_RANGE', lid });
+      focusRow(lid);
+      return true;
+    }
     if (cmd === 'filer-open') {
       // ⚠ 焦点が先、印は次 ── 理由は `focusedRowLid` の注記
       const lid = focusedRowLid() ?? st.selectedLid;
@@ -2296,11 +2415,7 @@ export function bindActions(
         dispatcher.dispatch({ type: 'SET_SCOPE', lid });
         return true;
       }
-      // ノートは**本文の面へ移る**(OS の「開く」に当たる)。無ければ何もしない
-      const body = root.querySelector<HTMLElement>('[data-pkc-region="detail"]');
-      if (!body) return false;
-      body.focus();
-      return true;
+      return openNote(lid);
     }
     return false;
   };

@@ -139,6 +139,71 @@ describe('設定 UI(本物の SettingsRenderer)', () => {
 });
 
 /**
+ * 🔴 **「開いたら編集に入る」**(user 裁定 2026-08-18
+ * 「**Enter は閲覧を開始、インライン編集で常に開くは設定でトグル可能にすること**」)。
+ * ⚠ 「編集の仕方」の隣に置いた設定なので、同じ file で守る。
+ */
+describe('開いたときの状態(user 裁定 2026-08-18)', () => {
+  it('既定は入っていない(押しただけで編集に入らない)', () => {
+    const region = document.createElement('div');
+    document.body.append(region);
+    new SettingsRenderer(region, new JobMonitor()).render(initialState);
+    const box = region.querySelector<HTMLInputElement>('[data-pkc-field="open-in-edit"]');
+    expect(box, '設定画面にトグルが無い').not.toBeNull();
+    expect(box!.checked, '既定で編集に入る側になっている').toBe(false);
+  });
+
+  it('🔴 面を出し直したときも、いまの値に合わせ直す(CLAUDE.md §7)', () => {
+    const region = document.createElement('div');
+    document.body.append(region);
+    const settings = new SettingsRenderer(region, new JobMonitor());
+    settings.render(initialState);
+    localStorage.setItem('pkc3.open-in-edit', '1'); // 画面を見ていない間に変わった
+    settings.render(initialState);
+    expect(
+      region.querySelector<HTMLInputElement>('[data-pkc-field="open-in-edit"]')?.checked,
+      '古い値のまま見えている',
+    ).toBe(true);
+  });
+
+  it('🔴 組み立て直後の値も、いまの設定を映す', () => {
+    // ⚠ 上と**別の経路**である(器を組んだ直後 / 組み済みの分岐)── 実際に
+    //   組み直後だけ呼び忘れて、1 稿目は「設定したのに戻っている」状態だった
+    localStorage.setItem('pkc3.open-in-edit', '1');
+    const region = document.createElement('div');
+    document.body.append(region);
+    new SettingsRenderer(region, new JobMonitor()).render(initialState);
+    expect(
+      region.querySelector<HTMLInputElement>('[data-pkc-field="open-in-edit"]')?.checked,
+    ).toBe(true);
+  });
+
+  it('🔴 トグル → binder → 実体 が繋がっている(押して無言にならない)', () => {
+    // ⚠ **合成した checkbox を押さない** ── 本物の設定画面が action を付け忘れても
+    //   緑になる形を作らない(上の編集の仕方と同じ理由)
+    localStorage.removeItem('pkc3.open-in-edit');
+    const root = document.createElement('div');
+    document.body.append(root);
+    const setOpenInEdit = vi.fn();
+    const dispatcher = { getState: () => initialState, dispatch: () => {} };
+    bindActions(root, dispatcher as never, { setOpenInEdit });
+    new SettingsRenderer(root, new JobMonitor()).render(initialState);
+    const box = root.querySelector<HTMLInputElement>('[data-pkc-field="open-in-edit"]');
+    expect(box, '設定画面にトグルが無い').not.toBeNull();
+    /**
+     * ⚠ checkbox の action は **`onClick` が拾う**(`<select>` の `change` とは
+     * 別経路 ── 合成 `change` では 1 度も通らない)。
+     * ⚠ **押す前の値を確かめてから押す** ── この file の別の test が
+     *   `localStorage` に `'1'` を残すので、前提を書かないと**反転した値**が
+     *   渡ったのを「届いていない」と読み違える(1 稿目で実際にやった)。
+     */
+    expect(box!.checked, '押す前から入っている(前提が崩れている)').toBe(false);
+    box!.click(); // click が `checked` を反転させる → true
+    expect(setOpenInEdit).toHaveBeenCalledWith(true);
+  });
+});
+
+/**
  * 🔴 **`main.ts` は原文でしか pin できない**(弱いと自覚して使う)。
  * user が選んだら保存へ渡す配線が居ることだけを見る。
  */
@@ -147,5 +212,9 @@ describe('main.ts の配線(原文 pin)', () => {
 
   it('設定の変更が appEditorMode.setMode へ届く', () => {
     expect(MAIN).toContain('appEditorMode.setMode(mode)');
+  });
+
+  it('「開いたら編集に入る」の変更が appOpenInEdit.setEnabled へ届く', () => {
+    expect(MAIN).toContain('appOpenInEdit.setEnabled(on)');
   });
 });

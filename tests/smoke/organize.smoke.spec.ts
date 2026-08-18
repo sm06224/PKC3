@@ -156,11 +156,18 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
    * 🔴 **落とした先へは付いていかない**(user 裁定 2026-08-18「OS のファイラ動作に
    * 似せる」)── いまの場所から**消える**のが標準の見え方。⚠ ただし行き先は名乗る。
    */
-  await expect(page.locator('[data-pkc-region="filer-breadcrumb"]')).not.toContainText('はこ');
-  await expect(rows, 'ルートから消えていない').toHaveCount(1);
-  await expect(page.locator('[data-pkc-region="status"]'), '行き先を言っていない').toContainText(
+  /**
+   * ⚠ **アプリ自身の信号を先に待つ**(2026-08-18)。全量(負荷のかかった回)で
+   * 1 度だけ「ルートから消えていない」で落ちた ── 実際に起きていたのは
+   * **掴み損ね**(合成 D&D は負荷で落ちることがある)で、行数を先に見ると
+   * 「移動が壊れた」と読み違える。行き先を名乗る 1 行は**移動が済んだ証拠**なので、
+   * これを先に待つと、落ちたときの意味が「掴めなかった」に定まる。
+   */
+  await expect(page.locator('[data-pkc-region="status"]'), '掴んで落とせていない').toContainText(
     '「はこ」へ入れました',
   );
+  await expect(page.locator('[data-pkc-region="filer-breadcrumb"]')).not.toContainText('はこ');
+  await expect(rows, 'ルートから消えていない').toHaveCount(1);
 
   // ② 中に入れば居る(2 クリック)
   await page.locator(folderRow).dblclick();
@@ -336,6 +343,101 @@ test('🔴 中へ入ると 1 行目に焦点が乗り、Space は印を潰さな
       ),
     )}`,
   ).toBe('行');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **上下キーの行送りと、Enter の「読む」**(user 裁定 2026-08-18)。
+ *
+ * 🔴 **unit では届かない層**をここで見る:
+ * ① **実キーの ↑↓ が既定(画面のスクロール)を奪えているか** ── 奪い損ねると
+ *    行は動かず版面だけ動く
+ * ② **焦点が本当に行へ移るか**(happy-dom は焦点の移動を実装しきっていない)
+ * ③ **設定 → 開く → 編集**が実ブラウザで繋がるか
+ */
+test('🔴 ↑↓ で行を送れて、Enter は読むところから始まる', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  for (let i = 0; i < 3; i += 1) {
+    await createEntry(page, 'text');
+    await clickReal(page, '[data-pkc-action="commit-edit"]');
+  }
+  const rows = page.locator('[data-pkc-region="filer-table"] tbody tr');
+  await expect(rows).toHaveCount(3);
+  const marked = page.locator('[data-pkc-region="filer-table"] tbody tr[data-pkc-marked]');
+  const focusedLid = () =>
+    page.evaluate(() => {
+      const el = document.activeElement;
+      return el instanceof HTMLElement
+        ? (el.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? 'なし')
+        : 'なし';
+    });
+
+  // ① 1 行目を押してから ↓ ── 焦点も印も動く
+  await rows.nth(0).click();
+  const first = await focusedLid();
+  expect(first, 'クリックで行に焦点が入らない(空振り)').not.toBe('なし');
+  await page.keyboard.press('ArrowDown');
+  const second = await focusedLid();
+  expect(second, '↓ で焦点が動かない').not.toBe(first);
+  await expect(marked, '送った先が選ばれていない').toHaveCount(1);
+  await expect(marked.first()).toHaveAttribute('data-pkc-entry', second);
+
+  // ② Shift+↓ で積み上がる
+  await page.keyboard.press('Shift+ArrowDown');
+  await expect(marked, 'Shift+↓ で積み上がらない').toHaveCount(2);
+
+  // ③ Enter は**読む**ところから(編集の欄は出ない)
+  await page.keyboard.press('ArrowUp'); // 印を 1 件へ戻す
+  await page.keyboard.press('Enter');
+  /**
+   * ⚠ 観測点は**本文の面の中の**保存の導線にする。2 度外した:
+   * ① `editor-body` / `row-source` を数えた ── 既定の live 面では**編集中でも
+   *    出ない**(原文の箱は押した行にだけ出る)ので否定側が**常に真**だった
+   * ② 面へスコープせず `commit-edit` を数えた ── **追記欄にも同じ action の
+   *    ボタンが在る**(`append-box.ts`)ので、編集していなくても 1 件あった
+   * 🔑 CLAUDE.md §1「面(region)へスコープする」。
+   */
+  await expect(
+    page.locator('[data-pkc-region="detail"] [data-pkc-action="commit-edit"]'),
+    'Enter で編集に入ってしまった(既定は読む)',
+  ).toHaveCount(0);
+  expect(
+    await page.evaluate(
+      () => document.activeElement?.closest('[data-pkc-region="detail"]') !== null,
+    ),
+    'Enter で本文の面へ焦点が移っていない',
+  ).toBe(true);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+test('🔴 設定を入れると、Enter がそのまま編集に入る', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  // ⚠ **goto の前に**仕込む(設定は面を組む前に読まれる)
+  await page.addInitScript(() => {
+    try {
+      globalThis.localStorage.setItem('pkc3.open-in-edit', '1');
+    } catch {
+      /* sandbox の frame ── アプリの設定とは無関係 */
+    }
+  });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  const rows = page.locator('[data-pkc-region="filer-table"] tbody tr');
+  await expect(rows).toHaveCount(1);
+
+  await rows.nth(0).click();
+  await page.keyboard.press('Enter');
+  // ⚠ **本文が届いてから**編集に入る(その場では入らない)ので、待って見る
+  await expect(
+    page.locator('[data-pkc-region="detail"] [data-pkc-action="commit-edit"]'),
+    '設定を入れても編集に入らない',
+  ).toHaveCount(1);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

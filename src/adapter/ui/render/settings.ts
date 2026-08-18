@@ -16,6 +16,7 @@ import { PAGE_FORMATS } from '@features/page-format';
 import { currentPageFormat } from './page-format';
 import { EDITOR_MODES } from '@features/editor-mode';
 import { appEditorMode, EditorModeStore } from './editor-mode';
+import { appOpenInEdit, OpenInEditStore } from './open-in-edit';
 import { EXTERNAL_IMAGE_MODES } from '@features/markdown/external-images';
 import { appExternalImages, ExternalImagePolicy } from './external-images';
 import { appJobMonitor, type JobMonitor } from '@adapter/platform/job-monitor';
@@ -62,6 +63,8 @@ export class SettingsRenderer {
     private readonly notices: NoticeStore = appNoticeStore,
     /** 編集の仕方(#104 第 2 弾)。⚠ test は自分で `new` して渡す。 */
     private readonly editorMode: EditorModeStore = appEditorMode,
+    /** 「開く」で編集に入るか(user 裁定 2026-08-18)。⚠ test は自分で `new` して渡す。 */
+    private readonly openInEdit: OpenInEditStore = appOpenInEdit,
   ) {}
 
   render(state: AppState): void {
@@ -70,6 +73,7 @@ export class SettingsRenderer {
       this.syncTheme();
       this.syncPageFormat();
       this.syncEditorMode();
+      this.syncOpenInEdit();
       this.syncExternalImages();
       this.syncNotices();
       // 🔴 **隠れている間に来た変化をここで拾う**(2026-08-05、user 報告)。
@@ -195,6 +199,32 @@ export class SettingsRenderer {
     dl.append(et, ed);
 
     /**
+     * 🔴 **「開く」で編集に入るか**(user 裁定 2026-08-18
+     * 「**Enter は閲覧を開始、インライン編集で常に開くは設定でトグル可能にすること**」)。
+     * ⚠ **flag ではない**(正規設定)── 開放先は user で、畳む予定も無い。
+     * ⚠ 「編集の仕方」の**すぐ下**に置く ── 同じ「編集の入り方」の話である。
+     */
+    const ot = document.createElement('dt');
+    ot.textContent = '開いたときの状態';
+    const od = document.createElement('dd');
+    const olabel = document.createElement('label');
+    const ocheck = document.createElement('input');
+    ocheck.type = 'checkbox';
+    ocheck.setAttribute('data-pkc-action', 'set-open-in-edit');
+    ocheck.setAttribute('data-pkc-field', 'open-in-edit');
+    olabel.append(ocheck, document.createTextNode(' 開いたら、そのまま編集に入る'));
+    od.append(olabel);
+    const onote = document.createElement('p');
+    onote.setAttribute('data-pkc-field', 'settings-note');
+    // ⚠ **どの操作に効くか**を書く ── 書かないと「行を押しても編集にならない」と読まれる
+    onote.textContent =
+      '最初の設定では、フォルダの表で Enter を押すと**読む**ところから始まります。' +
+      'ここを入れると、開いた時点で編集に入ります。' +
+      '行を 1 回押して選んだだけでは編集に入りません(それは「選ぶ」で、「開く」ではありません)。';
+    od.append(onote);
+    dl.append(ot, od);
+
+    /**
      * 📣 **お知らせを出すか**(P11 段⑤)。
      *
      * 🔑 **ここが「今後は出さない」の戻し道である。** 帯にしか導線が無いと、
@@ -251,6 +281,7 @@ export class SettingsRenderer {
     this.syncTheme();
     this.syncPageFormat();
     this.syncEditorMode();
+    this.syncOpenInEdit();
     this.syncExternalImages();
     this.syncNotices();
     this.refresh();
@@ -484,6 +515,15 @@ export class SettingsRenderer {
    * 🔴 帯の「今後は出さない」は**この画面を開かずに**設定を変える ── 映さないと、
    * 次に設定を開いたとき「出す」のまま見える(CLAUDE.md「設定画面の値の同期」)。
    */
+  /**
+   * ⚠ 画面の値を**いまの設定に合わせる**(器は 1 度しか組まない ── 映さないと
+   * 古い値が見える。CLAUDE.md §7「設定画面の値の同期」)。
+   */
+  private syncOpenInEdit(): void {
+    const box = this.region.querySelector<HTMLInputElement>('[data-pkc-field="open-in-edit"]');
+    if (box) box.checked = this.openInEdit.enabled();
+  }
+
   private syncNotices(): void {
     const box = this.region.querySelector<HTMLInputElement>('[data-pkc-field="notices-enabled"]');
     if (box) box.checked = this.notices.enabled();

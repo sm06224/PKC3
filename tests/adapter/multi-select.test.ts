@@ -17,10 +17,22 @@ import { initialState, reduce, type AppState } from '../../src/adapter/state/app
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { OpenInEditStore } from '../../src/adapter/ui/render/open-in-edit';
+import { KeymapStore } from '../../src/adapter/ui/render/keymap';
 import { FilerRenderer } from '../../src/adapter/ui/render/filer';
 import { BrowseRouter } from '../../src/adapter/ui/render/browse';
 import { BrowseModeStore, DEFAULT_BROWSE_MODE } from '../../src/adapter/ui/render/browse-mode';
 import { readFileSync } from 'node:fs';
+
+/** その test だけの保存(共有の localStorage を汚さない)。 */
+function memStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> {
+  const m = new Map<string, string>();
+  return {
+    getItem: (k) => m.get(k) ?? null,
+    setItem: (k, v) => void m.set(k, v),
+    removeItem: (k) => void m.delete(k),
+  };
+}
 
 function meta(lid: string, order: number, title = 't-' + lid, archetype = 'text'): EntryMeta {
   return {
@@ -475,6 +487,9 @@ describe('フォルダの表の鍵', () => {
   /** 中身が 1 件入ったフォルダ(`focusFirstRow` の**行に置く枝**を通すため)。 */
   const WITH_CHILD = [meta('f', 0, 'はこ', 'folder'), meta('n1', 1, 'なかみ')];
   const CHILD_RELS = [rel('r1', 'f', 'n1')];
+  /** 中身が 2 件のフォルダ(入った直後の Shift+↓ が伸びることを測る)。 */
+  const WITH_TWO = [meta('f', 0, 'はこ', 'folder'), meta('n1', 1, 'なかみ'), meta('n2', 2, 'ふたつめ')];
+  const TWO_RELS = [rel('r1', 'f', 'n1'), rel('r2', 'f', 'n2')];
   /** `f / g / n2` の 2 階層(`Backspace` が**すぐ上**へ戻ることを測る)。 */
   const DEEP = [
     meta('f', 0, 'はこ', 'folder'),
@@ -483,15 +498,23 @@ describe('フォルダの表の鍵', () => {
   ];
   const DEEP_RELS = [rel('r1', 'f', 'g'), rel('r2', 'g', 'n2')];
 
-  /** 器を組んで、フォルダ面を描いた状態にする。 */
-  function screen(metas: EntryMeta[] = WITH_FOLDER, relations: Relation[] = []) {
+  /**
+   * 器を組んで、フォルダ面を描いた状態にする。
+   * @param openInEdit 「開いたら編集に入る」の設定(user 裁定 2026-08-18)。
+   *   ⚠ **自分で `new` して渡す** ── アプリ共有の 1 個を書き換えると別の test に漏れる。
+   */
+  function screen(
+    metas: EntryMeta[] = WITH_FOLDER,
+    relations: Relation[] = [],
+    openInEdit: OpenInEditStore = new OpenInEditStore(memStorage()),
+  ) {
     document.body.innerHTML = '';
     const root = document.createElement('div');
     root.setAttribute('data-pkc-slot', 'root');
     document.body.append(root);
     const d = new Dispatcher();
     const regions = buildShell(root);
-    bindActions(root, d);
+    bindActions(root, d, {}, new KeymapStore(memStorage()), openInEdit);
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas, relations });
     const filer = new FilerRenderer(regions.browseHost);
     d.onState((st) => filer.render(st));
@@ -688,6 +711,123 @@ describe('フォルダの表の鍵', () => {
     press('Enter', clickRow('f'));
     press('a', document.activeElement as HTMLElement, { ctrlKey: true, code: 'KeyA' });
     expect(d.getState().selection, '現在地の外まで選んだ').toEqual(['n1']);
+  });
+
+  it('🔴 ↑↓ で行を送ると、印も一緒に動く(中央は開き直さない)', () => {
+    /**
+     * 🔴 user 裁定 2026-08-18「**行送りに上下キーを使うは提案通りで OK**」。
+     * ⚠ **開くのは Enter の仕事** ── 送るたびに `SELECT_ENTRY` を撃つと、
+     *   1 行ごとに本文の読み直し(worker 往復)が起きる。
+     */
+    const { d, clickRow, press } = screen();
+    const first = clickRow('f');
+    const opened = d.getState().selectedLid;
+    press('ArrowDown', first);
+    const after = d.getState();
+    expect(after.selection.length, '送っても印が 1 件にならない').toBe(1);
+    expect(after.selection[0], '送った先が選ばれていない').not.toBe('f');
+    expect(after.selectedLid, '送っただけで中央のノートが変わった').toBe(opened);
+    expect(
+      (document.activeElement as HTMLElement)?.getAttribute('data-pkc-entry'),
+      '焦点が送った行に乗っていない',
+    ).toBe(after.selection[0]);
+  });
+
+  it('🔴 端では止まる(巻き戻らない)', () => {
+    // ⚠ 端で押し続けて反対側へ飛ぶのは OS のファイラの挙動ではない
+    const { d, clickRow, press } = screen();
+    let el = clickRow('f'); // 先頭(entryOrder 0)
+    press('ArrowUp', el);
+    expect(d.getState().selection, '先頭で ↑ を押したら別の行へ飛んだ').toEqual(['f']);
+    // 末尾まで送ってから、もう 1 回 ↓
+    for (let i = 0; i < 10; i += 1) {
+      el = document.activeElement as HTMLElement;
+      press('ArrowDown', el);
+    }
+    const last = d.getState().selection[0];
+    press('ArrowDown', document.activeElement as HTMLElement);
+    expect(d.getState().selection[0], '末尾で ↓ を押したら巻き戻った').toBe(last);
+  });
+
+  it('🔴 Shift+↓ は起点から積み上がる(押すたびに 1 件へ潰れない)', () => {
+    const { d, clickRow, press } = screen();
+    const el = clickRow('f');
+    press('ArrowDown', el, { shiftKey: true });
+    expect(d.getState().selection.length, '1 回目で 2 件になっていない').toBe(2);
+    press('ArrowDown', document.activeElement as HTMLElement, { shiftKey: true });
+    expect(d.getState().selection.length, '2 回目で積み上がっていない').toBe(3);
+  });
+
+  it('🔴 起点が無いところからの Shift+↓ は、いまの行から伸びる', () => {
+    /**
+     * ⚠ フォルダへ入った直後が**まさにこれ** ── `SET_SCOPE` が印も起点も外すので、
+     * 焦点だけが 1 行目に乗っている。ここで `SELECT_RANGE` をそのまま撃つと
+     * `rangeInRows` が起点 `null` を「行き先 1 件」と解くので、**押しても
+     * 1 件のまま**積み上がらない。
+     * 🔑 上の「Shift で積み上がる」test は先にクリックしていて起点が在るので、
+     *   **この経路を 1 度も通らない**(変異が生き延びた)。
+     */
+    const { d, clickRow, press } = screen(WITH_TWO, TWO_RELS);
+    press('Enter', clickRow('f')); // f の中へ(印も起点も外れ、焦点は 1 行目)
+    expect(d.getState().selectionAnchor, '起点が残っている(前提が崩れている)').toBeNull();
+    expect(d.getState().scopeLid, 'フォルダに入れていない(空振り)').toBe('f');
+    press('ArrowDown', document.activeElement as HTMLElement, { shiftKey: true });
+    expect(
+      d.getState().selection.length,
+      '起点が立たず、行き先 1 件に潰れた',
+    ).toBeGreaterThan(1);
+  });
+
+  it('🔴 Enter でノートを開くと、まず**読む**(既定では編集に入らない)', () => {
+    /**
+     * 🔴 user 裁定 2026-08-18「**Enter は閲覧を開始**」。
+     * ⚠ 本文の面へ焦点も移す ── そのままスクロールと読み進めが続く。
+     */
+    const { d, clickRow, press } = screen();
+    press('Enter', clickRow('a'));
+    expect(d.getState().selectedLid, 'ノートが開いていない').toBe('a');
+    expect(d.getState().phase, '既定で編集に入ってしまった').toBe('ready');
+    // ⚠ **本文が届いたあとも**入らないことまで見る ── ここを見ないと、
+    //   「設定を見ずに常に編集へ入る」変異が生き延びる(届く前は誰も入らない)
+    d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '# a' });
+    expect(d.getState().phase, '本文が届いたら勝手に編集へ入った').toBe('ready');
+    expect(
+      (document.activeElement as HTMLElement)?.closest('[data-pkc-region="detail"]'),
+      '本文の面へ焦点が移っていない',
+    ).not.toBeNull();
+  });
+
+  it('🔴 設定を入れると、本文が届いてから編集に入る', () => {
+    /**
+     * ⚠ `START_EDIT` は `openBody` が揃っていないと**黙って何もしない**ので、
+     * 選んだ直後に撃つと「設定を入れたのに編集にならない」になる。
+     */
+    const store = new OpenInEditStore(memStorage());
+    store.setEnabled(true);
+    const { d, clickRow, press } = screen(WITH_FOLDER, [], store);
+    press('Enter', clickRow('a'));
+    expect(d.getState().phase, '本文が来る前に編集へ入った').toBe('ready');
+    d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '# a' });
+    expect(d.getState().phase, '本文が届いても編集に入らない').toBe('editing');
+  });
+
+  it('🔴 設定が入っていても、別のノートへ移ったら後から勝手に編集へ入らない', () => {
+    // ⚠ 購読を外す条件を持たないと、user が自分で確定した瞬間にもう一度入る
+    const store = new OpenInEditStore(memStorage());
+    store.setEnabled(true);
+    const { d, clickRow, press } = screen(WITH_FOLDER, [], store);
+    press('Enter', clickRow('a'));
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'b' }); // 別のノートへ移る
+    /**
+     * 🔑 **戻ってきたときが本番**である。ここを「離れたまま」で終わらせると、
+     * 購読を外さない変異が**生き延びる**(離れている間は `openBody` が別の lid
+     * なので、どちらの実装でも何も起きない)。
+     * ⚠ 戻り方は**クリック**(= 選ぶ)であって「開く」ではないので、
+     *   編集に入ってはいけない。
+     */
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '# a' });
+    expect(d.getState().phase, '選び直しただけで編集へ入った').toBe('ready');
   });
 
   it('🔴 面の外では効かない(一覧タブで Enter を押しても現在地が動かない)', () => {

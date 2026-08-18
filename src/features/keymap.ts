@@ -133,6 +133,42 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['filer'],
     defaults: ['Mod+A'],
   },
+  /**
+   * 🔴 **行送り**(user 裁定 2026-08-18「**行送りに上下キーを使うは提案通りで OK**」)。
+   *
+   * ⚠ これが無いと、**キーボードだけでは行に到達できない** ── 焦点はマウスで
+   * 1 回押さないと作れず、`Enter` / `Delete` は「近道」ですらなかった。
+   * 🔑 **送ると印も動く**(OS のファイラと同じ = 焦点と選択が一致する)。
+   *   ⚠ ただし**中央のノートは開き直さない** ── 開くのは `Enter` の仕事である
+   *   (裁定「Enter は閲覧を開始」)。送るたびに本文を読み直すと、
+   *   1 行ごとに worker 往復が起きる。
+   */
+  {
+    id: 'filer-row-down',
+    label: '次の行へ',
+    contexts: ['filer'],
+    defaults: ['ArrowDown'],
+    note: '送った行が選ばれます(開くのは Enter)',
+  },
+  {
+    id: 'filer-row-up',
+    label: '前の行へ',
+    contexts: ['filer'],
+    defaults: ['ArrowUp'],
+  },
+  {
+    id: 'filer-extend-down',
+    label: '次の行まで選び足す',
+    contexts: ['filer'],
+    defaults: ['Shift+ArrowDown'],
+    note: '起点は最後に選んだ行',
+  },
+  {
+    id: 'filer-extend-up',
+    label: '前の行まで選び足す',
+    contexts: ['filer'],
+    defaults: ['Shift+ArrowUp'],
+  },
   {
     id: 'view-detail',
     label: '本文の面へ',
