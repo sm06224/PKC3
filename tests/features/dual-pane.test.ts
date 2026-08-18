@@ -89,12 +89,28 @@ describe('2 ペインの持ち物(#241 段⑥)', () => {
     expect(paneScope(closed)).toBe('r');
   });
 
-  it('範囲外の操作は state を壊さない', () => {
-    const p = initialDual.left;
-    expect(withTabClosed(p, 99)).toBe(p);
+  /**
+   * 🔴 **範囲の門は 2 枚のときにこそ通る**(着地前レビュー M4)。
+   * ⚠ 1 枚の pane で試すと `MIN_TABS` の行で先に返るので、**範囲の判定に
+   *   1 度も到達しない**(CLAUDE.md §2「弱いのではなく走っていない」)。
+   * ⚠ `NaN` も見る ── `NaN < 0` も `NaN >= n` も **false** なので素の範囲比較を
+   *   素通りし、`active: NaN` になると `paneScope` がルートへ落ちて
+   *   「勝手に一番上へ戻った」が起きる。
+   */
+  it('🔴 範囲外・NaN の操作は state を壊さない(タブ 2 枚で確かめる)', () => {
+    const one = initialDual.left;
+    expect(withTabClosed(one, 99), '最後の 1 枚は閉じない').toBe(one);
+
+    const p = withTabAdded(withScope(one, 'r'));
+    expect(p.tabs, '前提が崩れている(2 枚になっていない)').toHaveLength(2);
+    expect(withTabClosed(p, 99), '範囲外で閉じた').toBe(p);
+    expect(withTabClosed(p, -1), '負の添字で閉じた').toBe(p);
+    expect(withTabClosed(p, Number.NaN), 'NaN が範囲の門を素通りした').toBe(p);
+    expect(withTabClosed(p, 1.5), '整数でない添字が通った').toBe(p);
     expect(withTabActive(p, 99)).toBe(p);
     expect(withTabActive(p, -1)).toBe(p);
-    expect(withTabActive(p, 0), '同じタブへ移って作り直した').toBe(p);
+    expect(withTabActive(p, Number.NaN), 'NaN が開いているタブになった').toBe(p);
+    expect(withTabActive(p, p.active), '同じタブへ移って作り直した').toBe(p);
   });
 
   it('🔴 消えた lid は印から落ちる(実在しないものを数えない)', () => {

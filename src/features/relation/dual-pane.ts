@@ -96,6 +96,18 @@ export function withScope(pane: DualPaneState, lid: string | null): DualPaneStat
   return { ...pane, tabs, selection: [], anchor: null };
 }
 
+/**
+ * 添字が使えるか。
+ * 🔴 **`Number.isInteger` まで見る**(着地前レビュー M4)。⚠ `NaN` は `< 0` も
+ * `>= n` も **false** なので、素の範囲比較を**素通りする** ── `active: NaN` に
+ * なると `paneScope` が `?? null` でルートへ落ち、この module が自分で戒めている
+ * 「勝手に一番上へ戻った」がそのまま起きる。
+ * ⚠ 上流(`binder` の `dualTabIndex`)にも同じ門が在るが、**上流 1 行だけが
+ *   守っている形**にすると、その 1 行を消す変異が誰にも殺されない。
+ */
+const inRange = (pane: DualPaneState, index: number): boolean =>
+  Number.isInteger(index) && index >= 0 && index < pane.tabs.length;
+
 /** タブを 1 枚足す(いまの場所の隣に、いまの場所を複製して開く)。 */
 export function withTabAdded(pane: DualPaneState): DualPaneState {
   if (pane.tabs.length >= MAX_TABS) return pane;
@@ -116,7 +128,7 @@ export function withTabAdded(pane: DualPaneState): DualPaneState {
  */
 export function withTabClosed(pane: DualPaneState, index: number): DualPaneState {
   if (pane.tabs.length <= MIN_TABS) return pane;
-  if (index < 0 || index >= pane.tabs.length) return pane;
+  if (!inRange(pane, index)) return pane;
   const tabs = pane.tabs.filter((_, i) => i !== index);
   const active = pane.active > index ? pane.active - 1 : Math.min(pane.active, tabs.length - 1);
   return { ...pane, tabs, active, selection: [], anchor: null };
@@ -124,7 +136,7 @@ export function withTabClosed(pane: DualPaneState, index: number): DualPaneState
 
 /** 別のタブへ移る。⚠ 範囲外は無視(state を壊さない)。 */
 export function withTabActive(pane: DualPaneState, index: number): DualPaneState {
-  if (index < 0 || index >= pane.tabs.length || index === pane.active) return pane;
+  if (!inRange(pane, index) || index === pane.active) return pane;
   return { ...pane, active: index, selection: [], anchor: null };
 }
 

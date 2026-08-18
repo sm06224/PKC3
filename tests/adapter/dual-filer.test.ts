@@ -19,7 +19,7 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { CenterRouter } from '../../src/adapter/ui/render/center';
 import { DualFilerRenderer } from '../../src/adapter/ui/render/dual-filer';
-import { paneOf, paneScope } from '../../src/features/relation/dual-pane';
+import { MAX_TABS, paneOf, paneScope } from '../../src/features/relation/dual-pane';
 
 function meta(lid: string, order: number, title = 't-' + lid, archetype = 'text'): EntryMeta {
   return {
@@ -290,6 +290,114 @@ describe('2 ペインの面(描画)', () => {
     ).toBe(rowA);
   });
 
+  /**
+   * 🔴 **上限に達したら足す口を出さない**(着地前レビュー R2)。
+   * ⚠ 「押しても何も起きないボタンを作らない」は閉じる側だけ直してあり、
+   *   足す側が同型のまま残っていた。
+   */
+  it('🔴 タブが上限に達したら、+ を出さずに理由を出す', () => {
+    const r = new DualFilerRenderer(region);
+    let s = booted();
+    const add = () =>
+      region.querySelector('[data-pkc-action="dual-tab-add"][data-pkc-side="left"]');
+    r.render(s);
+    expect(add(), '足す口が最初から無い(空振り)').not.toBeNull();
+    for (let i = 1; i < MAX_TABS; i += 1) s = reduce(s, { type: 'DUAL_TAB_ADD', side: 'left' }).state;
+    r.render(s);
+    expect(paneOf(s.dual, 'left').tabs, '前提が崩れている').toHaveLength(MAX_TABS);
+    expect(add(), '上限なのに押せる口が出ている(無言の dead click)').toBeNull();
+    expect(
+      region.querySelector('[data-pkc-side="left"] [data-pkc-field="dual-tab-full"]')?.textContent,
+    ).toBe(`タブは ${MAX_TABS} 枚までです`);
+  });
+
+  /**
+   * 🔴 **真ん中の文言も「見えている印」で数える**(着地前レビュー R5)。
+   * ⚠ 生の `selection.length` を使うと、「1 件を…入れます」と書いてあるのに
+   *   押すと「移すものを選んでください」になる(同じ問いに 3 つ目の口を作らない)。
+   */
+  it('🔴 移すボタンの説明が、件数の行と同じ数を言う', () => {
+    const r = new DualFilerRenderer(region);
+    let s = reduce(booted(), { type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' }).state;
+    r.render(s);
+    const move = () => region.querySelector<HTMLElement>('[data-pkc-field="dual-move"]')!;
+    expect(move().title).toContain('1 件');
+    s = reduce(s, { type: 'SET_ENTRY_FILTER', query: 'はこ' }).state; // a が消える
+    r.render(s);
+    expect(move().title, '画面に無い印を数えている').toBe('移すものを選んでから押してください');
+  });
+
+  /**
+   * 🔴 **入力が変わっていないなら描き直さない**(着地前レビュー R4)。
+   * ⚠ `main.ts` は state が動くたび無条件に呼ぶので、門が無いと**あらゆる変化**で
+   *   `filerRows` を 2 回(= 全 relation 走査)回すことになる。
+   * 🔑 観測点は「行の DOM が同じ object のままか」── 作り直していれば別物になる。
+   */
+  it('🔴 関係ない state 変化では、関係の一覧を歩き直さない', () => {
+    /**
+     * 🔑 **観測点は「歩いたか」**。⚠ 1 稿目は「行の DOM が同じ object か」で見たが、
+     *   門を外しても**表の指紋が同じなら行は作り直されない**ので、変異が生き延びた
+     *   (CLAUDE.md §4「その観測点は、測りたいものを測っているか」)。
+     *   門が省くのは DOM ではなく **`filerRows` の計算**(= 全 relation 走査)である。
+     * ⚠ 門は `===` しか見ないので**配列を 1 度も触らない** ── だから
+     *   「触った回数」に門の有無がそのまま出る。
+     */
+    let walks = 0;
+    const s0 = booted();
+    const relations = new Proxy(s0.relations, {
+      get(t, k) {
+        walks += 1;
+        return Reflect.get(t, k) as unknown;
+      },
+    });
+    const s = { ...s0, relations };
+    const r = new DualFilerRenderer(region);
+    r.render(s);
+    expect(walks, '1 回目で歩いていない(空振り)').toBeGreaterThan(0);
+    const after = walks;
+    // この面が読まない field だけ動かす(一時の知らせ / 開いているノート)
+    r.render({ ...s, selectedLid: 'b', error: 'なにか' });
+    expect(walks - after, '無関係な変化で関係の一覧を歩き直した').toBe(0);
+    // ⚠ 逆向きも見る ── 門が全部を止めてしまっていないこと
+    r.render({ ...s, dual: reduce(s, { type: 'DUAL_TAB_ADD', side: 'left' }).state.dual });
+    expect(walks - after, '関係のある変化でも描き直していない').toBeGreaterThan(0);
+  });
+
+  /**
+   * 🔴 **題名 / 種別 / 更新日が変わったら描き直す**(着地前レビュー M1)。
+   * ⚠ 指紋を `lid` だけにする変異が生き延びていた ── 別タブで改名された /
+   *   保存で更新日が変わった、のどちらでも**古い文字を出し続ける**。
+   */
+  it('🔴 題名が変わったら、行の文字も変わる', () => {
+    const r = new DualFilerRenderer(region);
+    const s = booted();
+    r.render(s);
+    const cell = () =>
+      region.querySelector('[data-pkc-region="dual-table"] [data-pkc-entry="a"] td')?.textContent;
+    expect(cell()).toContain('あ');
+    const metas = new Map(s.entryMetas);
+    metas.set('a', { ...metas.get('a')!, title: 'あらため' });
+    r.render({ ...s, entryMetas: metas });
+    expect(cell(), '改名が画面に届いていない').toContain('あらため');
+  });
+
+  /**
+   * 🔴 **表を組み直したら、印の指紋も戻す**(着地前レビュー M2)。
+   * ⚠ 戻さないと「印が変わらないまま行が入れ替わる」筋で塗り直しが飛び、
+   *   **画面では選ばれていないのに件数の行は数え、押すと動く**状態になる。
+   */
+  it('🔴 絞り込みで表を組み直しても、印の塗りが追いつく', () => {
+    const r = new DualFilerRenderer(region);
+    let s = reduce(booted(), { type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' }).state;
+    r.render(s);
+    // 'a' は残る絞り込み(題名「あ」)── 印は動かないが、行は作り直される
+    s = reduce(s, { type: 'SET_ENTRY_FILTER', query: 'あ' }).state;
+    r.render(s);
+    const rowA = region.querySelector('[data-pkc-region="dual-table"] [data-pkc-entry="a"]');
+    expect(rowA, '前提が崩れている(行が消えた)').not.toBeNull();
+    expect(rowA!.hasAttribute('data-pkc-marked'), '組み直したあと印が塗られていない').toBe(true);
+  });
+
   it('空のフォルダは、空だと言う', () => {
     const r = new DualFilerRenderer(region);
     const s = reduce(booted(), { type: 'DUAL_SET_SCOPE', side: 'left', lid: 'f2' }).state;
@@ -366,9 +474,15 @@ describe('2 ペインの配線(binder)', () => {
     r.render(d.getState());
   });
 
+  /**
+   * ⚠ **表へスコープする**(着地前レビュー R6)── パンくずのボタンも
+   * `data-pkc-entry` を持ち、DOM 順では**表より前**に在る。フォルダの中に
+   * 入った状態で `row(side, lid)` を呼ぶと、表の行ではなく**パンくず**が返り、
+   * 実装が壊れていても緑になる(描画側の test は同じ罠を踏んで直してある)。
+   */
   const row = (side: string, lid: string): HTMLElement =>
     region.querySelector<HTMLElement>(
-      `[data-pkc-region="dual-pane"][data-pkc-side="${side}"] [data-pkc-entry="${lid}"]`,
+      `[data-pkc-region="dual-pane"][data-pkc-side="${side}"] [data-pkc-region="dual-table"] [data-pkc-entry="${lid}"]`,
     )!;
   const click = (el: HTMLElement, init: MouseEventInit = {}): void => {
     el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ...init }));
@@ -471,6 +585,84 @@ describe('2 ペインの配線(binder)', () => {
     click(region.querySelector<HTMLElement>('[data-pkc-field="dual-move"]')!);
     expect(d.getState().error).toContain('編集を終了してから');
     expect(d.getState().relations, '編集中に動いた').toBe(before);
+    /**
+     * 🔴 **断られた回に印を消さない**(着地前レビュー R1)。
+     * ⚠ 消すと user は理由を読んで保存し、戻ってきて**選び直し**になる
+     *   (この面は編集中でも開ける設計なので、必ず踏む筋である)。
+     */
+    expect(
+      paneOf(d.getState().dual, 'left').selection,
+      '1 件も動いていないのに印が消えた(選び直しになる)',
+    ).toEqual(['a']);
+  });
+
+  it('🔴 全件断られた回も、印は残る(そこへは入れられません)', () => {
+    // フォルダ f1 を選び、反対側を f1 の中にする → f1 を自分の中へは入れられない
+    click(row('right', 'f1'));
+    click(row('right', 'f1'));
+    click(row('left', 'f1'));
+    const before = d.getState().relations;
+    click(region.querySelector<HTMLElement>('[data-pkc-field="dual-move"]')!);
+    expect(d.getState().error, '断りが出ていない').toContain('そこへは入れられません');
+    expect(d.getState().relations, '入れられないのに動いた').toBe(before);
+    expect(paneOf(d.getState().dual, 'left').selection, '断られたのに印が消えた').toEqual(['f1']);
+  });
+
+  /**
+   * 🔴 **2 クリックの記憶は面ごと**(着地前レビュー R3)。
+   * ⚠ 起動時は左右ともルートなので**同じフォルダが両方の表に出ている** ──
+   *   鍵が `lid` だけだと、左で 1 回・右で 1 回が「もう一度押した」に化け、
+   *   **印を付けたかっただけの右が中へ入る**。
+   */
+  it('🔴 左で 1 回・右で 1 回は「2 クリック」ではない', () => {
+    click(row('left', 'f1'));
+    click(row('right', 'f1'));
+    expect(paneScope(paneOf(d.getState().dual, 'right')), '別の面の 1 回で入った').toBeNull();
+    expect(paneScope(paneOf(d.getState().dual, 'left')), '別の面の 1 回で入った').toBeNull();
+    // ⚠ 同じ面で 2 回なら入る(空振り防止 ── 鍵を厳しくして全部止めていない)
+    click(row('right', 'f1'));
+    expect(paneScope(paneOf(d.getState().dual, 'right'))).toBe('f1');
+  });
+
+  /**
+   * 🔴 **ペインの地を押しても焦点が移る**(着地前レビュー M3)。
+   * ⚠ 行 / タブ / パンくずの上しか押していないと、`dual-focus` の**中身を空にする
+   *   変異が生き延びる**(`closest` はそちらに当たるので一度も呼ばれない)。
+   */
+  it('🔴 ペインの余白(件数の行)を押しても、移す元がそちらへ移る', () => {
+    expect(d.getState().dual.focus, '前提が崩れている').toBe('left');
+    click(
+      region.querySelector<HTMLElement>(
+        '[data-pkc-region="dual-pane"][data-pkc-side="right"] [data-pkc-field="dual-count"]',
+      )!,
+    );
+    expect(d.getState().dual.focus, '地を押しても元が変わらない').toBe('right');
+  });
+
+  /**
+   * ⚠ 手で立てた壊れた添字を、**下流へ流さない**(着地前レビュー M5)。
+   * 🔑 観測点は「**dispatch したか**」── 「state が変わらないこと」で見ると、
+   *   下流(`inRange` の整数検査)が受け止めてくれるので**上流を消しても緑**になる。
+   *   ここが縛りたいのは「壊れた値をそもそも流さない」ほうである。
+   */
+  it('数として読めないタブの添字は、dispatch にも届かない', () => {
+    const btn = document.createElement('button');
+    btn.setAttribute('data-pkc-action', 'dual-tab-close');
+    btn.setAttribute('data-pkc-side', 'left');
+    btn.setAttribute('data-pkc-tab', 'x');
+    region.append(btn);
+    const seen: string[] = [];
+    const orig = d.dispatch.bind(d);
+    d.dispatch = (a) => {
+      seen.push(a.type);
+      return orig(a);
+    };
+    try {
+      click(btn);
+    } finally {
+      d.dispatch = orig;
+    }
+    expect(seen, '壊れた添字がそのまま下流へ流れた').toEqual([]);
   });
 
   /**

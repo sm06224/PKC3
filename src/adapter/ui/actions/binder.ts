@@ -117,6 +117,9 @@ const dualSide = (target: HTMLElement): DualSide | null => {
 /** タブの添字。⚠ 数として読めないものは**捨てる**(0 に落とすと別のタブが閉じる)。 */
 const dualTabIndex = (target: HTMLElement): number | null => {
   const raw = target.closest('[data-pkc-tab]')?.getAttribute('data-pkc-tab');
+  // ⚠ **ここが唯一の関所ではない**(着地前レビュー M5)── 下流の `withTabClosed` /
+  //    `withTabActive` にも `Number.isInteger` の門を置いてある。上流 1 行だけが
+  //    守っている形にすると、その 1 行を消す変異が誰にも殺されない
   if (raw === null || raw === undefined || !/^\d+$/.test(raw)) return null;
   return Number(raw);
 };
@@ -983,10 +986,18 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     const to = paneScope(paneOf(st.dual, otherSide(from)));
+    const before = st.relations;
     moveEntries(dispatcher, lids, to, services.showStatus);
-    // ⚠ 移した先は反対側なので、元の印は**外す** ── 残すと、次に押したとき
-    //    「画面に無いものをもう一度動かす」になる
-    dispatcher.dispatch({ type: 'DUAL_CLEAR_SELECTION', side: from });
+    /**
+     * 🔴 **動いた回だけ印を外す**(着地前レビュー R1)。
+     * ⚠ `moveEntries` は編集中・全件拒否で**何もせず返る**ので、無条件に外すと
+     *   **1 件も動いていないのに 30 件の印が消える** ── user は断りを読んで
+     *   保存してから戻り、**選び直し**になる(この面は編集中でも開ける設計なので
+     *   必ず踏む筋である)。
+     * 🔑 印は「移した結果」に付いていく物であって、**押した事実**に付く物ではない。
+     */
+    if (dispatcher.getState().relations !== before)
+      dispatcher.dispatch({ type: 'DUAL_CLEAR_SELECTION', side: from });
   },
   'delete-entry': (dispatcher, target) => {
     // ⚠ 実行中(書出し / 取込)のガードは `refuseWhileBusy` が 1 本で持つ
@@ -2229,14 +2240,22 @@ export function bindActions(
    * ⚠ フォルダ以外では何もしない(ノートを 2 回押しても入る先が無い)。
    */
   const DOUBLE_MS = 500;
-  let lastRowClick: { lid: string; at: number } = { lid: '', at: 0 };
+  /**
+   * 🔴 **鍵に「どの面で押したか」を入れる**(着地前レビュー R3)。
+   * ⚠ 呼び手は 1 つ(左の列)から **3 つ**(左の列 / 2 ペインの左 / 右)に増えた。
+   *   `lid` だけを鍵にすると、**別々の面での 1 回ずつ**が「もう一度押した」に化ける
+   *   ── 起動時は左右ともルートなので**同じフォルダが両方の表に出ており**、
+   *   左で選んで右で選ぶと、印を付けたかっただけの右が中へ入る。
+   */
+  let lastRowClick: { key: string; at: number } = { key: '', at: 0 };
   const maybeEnterFolder = (lid: string, dual: DualSide | null = null): void => {
+    const key = `${dual ?? 'filer'}:${lid}`;
     const now = Date.now();
-    const again = lastRowClick.lid === lid && now - lastRowClick.at <= DOUBLE_MS;
-    lastRowClick = { lid, at: now };
+    const again = lastRowClick.key === key && now - lastRowClick.at <= DOUBLE_MS;
+    lastRowClick = { key, at: now };
     if (!again) return;
     if (dispatcher.getState().entryMetas.get(lid)?.archetype !== 'folder') return;
-    lastRowClick = { lid: '', at: 0 }; // 3 回目を「もう一度」と数えない
+    lastRowClick = { key: '', at: 0 }; // 3 回目を「もう一度」と数えない
     // ⚠ **入る先はその面の現在地** ── 2 ペインで `SET_SCOPE` を撃つと、
     //    押していない左の列が動いて、押した側は 1 ミリも動かない
     dispatcher.dispatch(

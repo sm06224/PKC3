@@ -55,7 +55,14 @@ test('🔴 2 ペインを開いて、左で選んだものを右の場所へ移�
 
   // ③ 🔴 実マウスの 2 クリックで、**右だけ**がフォルダの中へ入る
   await page.locator(ROWS('right')).first().dblclick();
-  await expect(page.locator(PANE('right'))).toContainText('はこ');
+  /**
+   * ⚠ **パンくずだけを見る**(着地前レビュー R7)。ペイン全体で探すと、
+   * ルートに居るときは**表の行そのものが「はこ」**なので、ダブルクリックが
+   * 1 ミリも効かなくても真になる(CLAUDE.md §1「面へスコープする」)。
+   */
+  await expect(page.locator(`${PANE('right')} [data-pkc-region="dual-crumbs"]`)).toContainText(
+    'はこ',
+  );
   await expect(page.locator(ROWS('right')), '右がフォルダに入れていない').toHaveCount(0);
   await expect(page.locator(ROWS('left')), '押していない左まで動いた').toHaveCount(2);
 
@@ -105,7 +112,7 @@ test('🔴 タブを足して、別の場所を 1 つのペインに持てる', 
   await clickReal(page, `[data-pkc-action="dual-tab-add"][data-pkc-side="left"]`);
   await expect(tabs).toHaveCount(2);
   await page.locator(ROWS('left')).first().dblclick();
-  await expect(tabs.nth(1)).toContainText('はこ');
+  await expect(tabs.nth(1), '2 枚目のタブが行き先を名乗っていない').toContainText('はこ');
   await expect(tabs.nth(0), '足す前のタブまで動いた').toContainText('ルート');
 
   // 1 枚目へ戻ると、ルートの中身が出る

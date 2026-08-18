@@ -26,7 +26,7 @@
 import type { EntryMeta } from '@core/model/entry-meta';
 import type { AppState } from '@adapter/state/app-state';
 import type { DualPaneState, DualSide } from '@features/relation/dual-pane';
-import { paneOf, paneScope } from '@features/relation/dual-pane';
+import { MAX_TABS, paneOf, paneScope } from '@features/relation/dual-pane';
 import { filerRows } from '@features/relation/filer-list';
 import { getAncestorFolders } from '@features/relation/tree';
 import { archetypeLabel } from './sidebar';
@@ -63,6 +63,13 @@ interface PaneFrame {
   signature: string | null;
   /** 印の指紋(内容で見る ── 配列は毎回作り直される)。 */
   marks: string;
+  /**
+   * 🔴 **いま表に出ている印の数**(着地前レビュー R5)。
+   * ⚠ 真ん中の操作の文言もここから読む ── 生の `selection.length` を使うと、
+   *   「1 件を…入れます」と書いてあるのに押すと「移すものを選んでください」に
+   *   なる(絞り込みで消えた印がそのまま数に入る)。**同じ問いに 3 つ目の口を作らない。**
+   */
+  shownMarks: number;
 }
 
 export class DualFilerRenderer {
@@ -70,12 +77,46 @@ export class DualFilerRenderer {
   private frame: { panes: Record<DualSide, PaneFrame>; commands: HTMLElement } | null = null;
   private lastFocus: DualSide | null = null;
   private lastCommands = '';
+  /** 入力の断面(参照で見る)。⚠ 下の門の材料 ── 増やしたらここにも足す。 */
+  private lastDual: AppState['dual'] | null = null;
+  private lastMetas: AppState['entryMetas'] | null = null;
+  private lastRelations: AppState['relations'] | null = null;
+  private lastFilter: string | null = null;
+  private lastSort: AppState['entrySort'] | null = null;
+  private lastHits: AppState['searchHits'] = null;
 
   constructor(region: HTMLElement) {
     this.region = region;
   }
 
   render(state: AppState): void {
+    /**
+     * 🔴 **入力が 1 つも変わっていないなら描かない**(着地前レビュー R4)。
+     *
+     * ⚠ `main.ts` は state が動くたび**無条件に** `center.render(state)` を呼ぶので、
+     * 門が無いと 2 ペインを開いている間じゅう、**あらゆる state 変化**(別タブの
+     * 保存 ack / 検索の着弾 / 一時の知らせ)で `filerRows` を 2 回 ──
+     * `resolveCanonicalParents` = 全 relation 走査 ── 回すことになる。
+     * 🔑 同じ計算をする `render/filer.ts` は**既にこの門を持っている**
+     * (対称の反対側が守られていなかった、が指摘の中身である)。
+     * ⚠ `state.dual` は不変更新なので、**参照 1 本**でこの面の state 変化を全部拾える。
+     */
+    if (
+      this.frame !== null &&
+      state.dual === this.lastDual &&
+      state.entryMetas === this.lastMetas &&
+      state.relations === this.lastRelations &&
+      state.filterQuery === this.lastFilter &&
+      state.entrySort === this.lastSort &&
+      state.searchHits === this.lastHits
+    )
+      return;
+    this.lastDual = state.dual;
+    this.lastMetas = state.entryMetas;
+    this.lastRelations = state.relations;
+    this.lastFilter = state.filterQuery;
+    this.lastSort = state.entrySort;
+    this.lastHits = state.searchHits;
     const frame = this.ensureFrame();
     for (const side of SIDES) {
       const pane = paneOf(state.dual, side);
@@ -98,7 +139,7 @@ export class DualFilerRenderer {
         else el.removeAttribute('data-pkc-focused');
       }
     }
-    this.renderCommands(frame.commands, state);
+    this.renderCommands(frame.commands, frame.panes[state.dual.focus], state);
   }
 
   private ensureFrame(): NonNullable<DualFilerRenderer['frame']> {
@@ -137,7 +178,17 @@ export class DualFilerRenderer {
     const foot = document.createElement('div');
     foot.setAttribute('data-pkc-field', 'dual-count');
     root.append(tabs, crumbs, table, foot);
-    return { root, tabs, crumbs, table, foot, rows: new Map(), signature: null, marks: '' };
+    return {
+      root,
+      tabs,
+      crumbs,
+      table,
+      foot,
+      rows: new Map(),
+      signature: null,
+      marks: '',
+      shownMarks: 0,
+    };
   }
 
   private renderPane(
@@ -182,6 +233,7 @@ export class DualFilerRenderer {
      * ⚠ 素で数えると、画面に印が 1 つも無いのに「3 件を選んでいます」と出る。
      */
     const shown = pane.selection.filter((lid) => frame.rows.has(lid)).length;
+    frame.shownMarks = shown;
     const text = shown > 0 ? `${rows.length} 件(${shown} 件を選んでいます)` : `${rows.length} 件`;
     if (frame.foot.textContent !== text) frame.foot.textContent = text;
   }
@@ -226,14 +278,28 @@ export class DualFilerRenderer {
       }
       host.append(tab);
     });
-    const add = document.createElement('button');
-    add.type = 'button';
-    add.setAttribute('data-pkc-action', 'dual-tab-add');
-    add.setAttribute('data-pkc-side', side);
-    add.setAttribute('aria-label', `${SIDE_LABEL[side]}にタブを足す`);
-    add.title = 'いまの場所を、もう 1 枚のタブで開きます';
-    add.textContent = '+';
-    host.append(add);
+    /**
+     * ⚠ **上限に達したら口を出さない**(着地前レビュー R2)── 押せて、何も起きず、
+     * 理由も出ないボタンは無言の dead click である。⚠ 20 行上で「最後の 1 枚には
+     * 閉じる口を出さない」を書いておきながら、**足す側が同型のまま残っていた**
+     * (CLAUDE.md「片側を直したら、対称の反対側を必ず疑う」)。
+     * 🔑 上限そのものはマニュアルで告知済み ── 足りないのは画面での断りだけ。
+     */
+    if (pane.tabs.length < MAX_TABS) {
+      const add = document.createElement('button');
+      add.type = 'button';
+      add.setAttribute('data-pkc-action', 'dual-tab-add');
+      add.setAttribute('data-pkc-side', side);
+      add.setAttribute('aria-label', `${SIDE_LABEL[side]}にタブを足す`);
+      add.title = 'いまの場所を、もう 1 枚のタブで開きます';
+      add.textContent = '+';
+      host.append(add);
+    } else {
+      const full = document.createElement('span');
+      full.setAttribute('data-pkc-field', 'dual-tab-full');
+      full.textContent = `タブは ${MAX_TABS} 枚までです`;
+      host.append(full);
+    }
   }
 
   private renderCrumbs(
@@ -309,10 +375,10 @@ export class DualFilerRenderer {
    * 同じ場所にある」)。⚠ 「移す」だけでは、どちらへ動くのか画面から読めない ──
    * 焦点のある側が**元**である。
    */
-  private renderCommands(host: HTMLElement, state: AppState): void {
+  private renderCommands(host: HTMLElement, frame: PaneFrame, state: AppState): void {
     const from = state.dual.focus;
-    const pane = paneOf(state.dual, from);
-    const count = pane.selection.length;
+    // ⚠ 数えるのは**いま表に出ている印**だけ(件数の行・移す対象と同じ規則)
+    const count = frame.shownMarks;
     const label = from === 'left' ? '→ 右へ移す' : '← 左へ移す';
     const sig = `${label}${SEP}${count}`;
     if (sig === this.lastCommands) return;

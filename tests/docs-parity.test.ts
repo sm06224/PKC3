@@ -24,6 +24,7 @@ import {
 import { showUpdateCard } from '../src/adapter/ui/render/update-card';
 import { RENDERABLE_FENCE_LANGS } from '../src/features/markdown/markdown-render';
 import { NOTICES, NOTICE_KEEP_MAX } from '../src/features/notice/notice-log';
+import { MAX_TABS } from '../src/features/relation/dual-pane';
 import { RELATION_KINDS } from '../src/features/relation/kinds';
 import { MARKDOWN_EXTENSIONS } from '../src/features/import/plain-markdown';
 import { REVISION_KEEP_LATEST } from '../src/adapter/platform/storage/store-port';
@@ -824,6 +825,21 @@ describe('情報ペインの説明が実装と合っている(2026-08-18)', () =
  * (git の履歴からしか読めない状態だった)。⚠ 受け皿を作っただけでは腐るので、
  * **登記表と CHANGELOG の対応をここで縛る**。
  */
+/**
+ * 🔴 **数字を 2 か所に書いたら、突き合わせる**(2026-08-18、着地前レビューの指摘)。
+ * ⚠ マニュアルの「12 枚まで」は**直書き**で、実装の `MAX_TABS` を上げても
+ *   誰も気づかない ── いま一致しているうちに縛る。
+ */
+describe('2 ペインの上限が、マニュアルと一致する', () => {
+  it('🔴 タブの上限の数字が実装と同じ', () => {
+    const manual = readFileSync('docs/manual.md', 'utf8');
+    expect(manual, 'マニュアルに上限の記述が無い(空振り)').toContain('タブは 1 つのペインにつき');
+    expect(manual, `実装は ${MAX_TABS} 枚だが、マニュアルの数字が違う`).toContain(
+      `**${MAX_TABS} 枚**まで`,
+    );
+  });
+});
+
 describe('お知らせの受け皿(CHANGELOG)', () => {
   const CHANGELOG = readFileSync('CHANGELOG.md', 'utf8');
   /** ⚠ 見出し(`### <題名>`)だけを拾う ── 本文の行に満たされない形にする。 */
