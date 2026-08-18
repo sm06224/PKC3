@@ -67,6 +67,19 @@ export interface SaveBackInput {
   readonly newKey: string;
   readonly newHash: string | null;
   readonly newBytes: number;
+  /**
+   * 🔴 **差し替え後の綴りと中身の種類**(#214)。
+   *
+   * ⚠ 直す前は key / size / hash / history の 4 つしか書き戻しておらず、
+   * `.odt` を `.docx` で上書き保存しても frontmatter は**古い綴りのまま**残った。
+   * 読み手は 5 面(情報行 / ダウンロード名 / 参照コピー / **Office で開く** /
+   * ランチャー起動)あり、とくに Office は**拡張子で filter を選ぶ**ので、
+   * 古い名前で渡すと開けない文書ができる。
+   * 🔑 読み手は `attachment-flavor.ts` の 1 か所に寄っているので、**ここを直せば
+   *   5 面とも直る**。
+   */
+  readonly newName: string;
+  readonly newMime: string;
   /** 旧版の大きさ(台帳に積む)。 */
   readonly oldBytes: number;
   /** ISO 8601。⚠ **呼び側が渡す**(純関数は時計を持たない)。 */
@@ -141,6 +154,9 @@ export function planSaveBack(input: SaveBackInput): SaveBackPlan {
         ? {
             'attachment.asset_key': newKey,
             'attachment.size': input.newBytes,
+            // 🔴 綴りと中身の種類(#214)── 5 面がここを読む
+            'attachment.name': input.newName,
+            'attachment.mime': input.newMime,
             // ⚠ hash が無い環境では **key を消さずに** 値だけ落とす…のではなく
             //    key ごと消す(嘘の hash を残さない)
             'attachment.hash': input.newHash ?? undefined,

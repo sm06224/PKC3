@@ -806,6 +806,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           newKey: key,
           newHash: hash,
           newBytes: bytes.byteLength,
+          /**
+           * 🔴 **綴りと中身の種類も運ぶ**(#214)。⚠ 直す前は `mime` を
+           * 資産の meta(`putAssetMeta`)にだけ書いて、**frontmatter へは
+           * 運んでいなかった** ── `.odt` を `.docx` で上書き保存すると
+           * 「Office で開く」が古い綴りのまま LO へ渡していた。
+           */
+          newName: save.name,
+          newMime: mime,
           savedAt: new Date().toISOString(),
         });
         // ⚠ reducer は**門を 2 つ**持っている(`ready` か / いまも添付か)── 撃てたかを
