@@ -65,10 +65,35 @@ export async function purgeAssets(
   return { deleted, failed };
 }
 
+/**
+ * 🔴 **他のタブの編集を見て、整理を断るかどうか**(#253)。
+ *
+ * ⚠ 判定を `main.ts` に直書きしない ── あの file は**どの test からも実行されない**
+ * (原文を読む test しか無い)ので、文言と判定の取り違えが緑のまま通る。
+ * ⚠ 3 値をそのまま文言へ落とす:**「返事が無い」を「編集中」と言わない**
+ * (言うと user は**存在しないタブ**を探しに行く ── `EditGrant` の M-7 と同じ理由)。
+ *
+ * @returns 断る理由。`null` なら進めてよい
+ */
+export function purgeBlockReason(editing: 'editing' | 'idle' | 'unknown'): string | null {
+  if (editing === 'editing')
+    return '他のタブで編集中です。そちらを保存してからもう一度お試しください';
+  if (editing === 'unknown')
+    return '本体タブと通信できないため、他のタブが編集中か確かめられません';
+  return null;
+}
+
 export interface PurgeFlowDeps {
   ports: AssetGcPorts;
-  /** confirm 待ちの間に編集が始まりうる ── 削除直前の再確認に使う。 */
-  isReady(): boolean;
+  /**
+   * 削除してよい状態か。⚠ **自タブの `phase` だけでは足りない**(#253)──
+   * 別のタブが編集中に貼った画像は、bytes は在るのに参照が**未保存の欄の中**に
+   * しか無く、走査からは「使っていない」に見える。呼び側はタブ間の編集ロックも
+   * ここで見る(だから `Promise` にしてある)。
+   *
+   * ⚠ confirm 待ちの間に編集が始まりうるので、**削除の直前にもう一度**呼ぶ。
+   */
+  isReady(): Promise<{ ok: boolean; reason: string }>;
   confirm(message: string): boolean;
   alert(message: string): void;
   formatSize(bytes: number): string;
@@ -95,8 +120,9 @@ export async function runExplicitPurge(deps: PurgeFlowDeps): Promise<void> {
       `(${deps.formatSize(first.knownBytes)})を削除します。よろしいですか?`,
   );
   if (!ok) return;
-  if (!deps.isReady()) {
-    deps.alert('編集が始まったため中止しました(整理は行っていません)');
+  const ready = await deps.isReady();
+  if (!ready.ok) {
+    deps.alert(`${ready.reason}(整理は行っていません)`);
     return;
   }
   const second = await findOrphanAssets(deps.ports);

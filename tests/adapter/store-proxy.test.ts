@@ -375,3 +375,91 @@ describe('レビュー指摘の回帰(H-1 / H-2 / M-7)', () => {
     }
   });
 });
+
+/**
+ * 🔴 **「どこかのタブが編集中か」を答える**(#253)。
+ *
+ * ⚠ これが無いと、未参照 asset の整理が**別のタブが編集中に貼った画像**を消す
+ * (走査は保存済みの本文しか見ないので「使っていない」に見える)。
+ * ⚠ 返りは 3 値 ── **「返事が無い」を「編集中」と同じ顔にしない**。
+ */
+describe('誰か編集中か(#253)', () => {
+  it('🔴 誰も握っていなければ idle、follower が握れば editing', async () => {
+    const { host, follower } = await connectPair();
+    expect(await host.anyEditing(), '前提: 最初から編集中に見えている').toBe('idle');
+
+    const grant = follower.acquireEdit('c1', 'e1');
+    await drain();
+    expect(await grant).toBe('granted');
+    expect(await host.anyEditing(), 'follower の編集を数えていない').toBe('editing');
+
+    follower.releaseEdit('c1', 'e1');
+    await drain();
+    expect(await host.anyEditing(), '離したのに編集中のまま').toBe('idle');
+  });
+
+  it('🔴 follower は holder に聞いて答える(自分のロックは数えない)', async () => {
+    const { host, follower } = await connectPair();
+    // ⚠ **聞いた本人**が握っているだけなら idle ── 呼び側は自タブの phase を
+    //   別に見ているので、ここで数えると同じ事実で二重に断る(嘘の文言になる)
+    await follower.acquireEdit('c1', 'e1');
+    await drain();
+    const mine = follower.anyEditing();
+    await drain();
+    expect(await mine, '自分のロックを「他のタブ」と数えた').toBe('idle');
+
+    // holder 自身が握ったら editing
+    await host.acquireEdit('c1', 'e2');
+    const asked = follower.anyEditing();
+    await drain();
+    expect(await asked, 'holder の編集を数えていない').toBe('editing');
+  });
+
+  it('🔴 本体と話せないときは **unknown**(「編集中」と言い切らない)', async () => {
+    const hub = makeHub();
+    const timers: Array<() => void> = [];
+    const real = makeFakeReal();
+    const host = new StoreProxyHost({
+      client: real.client,
+      init: INIT,
+      makeChannel: hub.make,
+      tabId: 'holder',
+    });
+    const follower = await ProxyStoreClient.connect({
+      makeChannel: hub.make,
+      tabId: 'f1',
+      setTimeoutFn: ((fn: () => void) => {
+        timers.push(fn);
+        return 0 as unknown as ReturnType<typeof setTimeout>;
+      }) as unknown as typeof setTimeout,
+      clearTimeoutFn: (() => {}) as unknown as typeof clearTimeout,
+    });
+    if (!follower) throw new Error('handshake failed');
+    host.close(); // 本体が消えた
+    const asked = follower.anyEditing();
+    await drain();
+    for (const t of timers.splice(0)) t(); // 返事を待ち切る
+    expect(await asked, '返事が無いのに「編集中」と言った').toBe('unknown');
+  });
+
+  it('⚠ 死んだ follower のロックは、時間で失効して数えない', async () => {
+    const hub = makeHub();
+    const real = makeFakeReal();
+    let now = 1_000;
+    const host = new StoreProxyHost({
+      client: real.client,
+      init: INIT,
+      makeChannel: hub.make,
+      tabId: 'holder',
+      now: () => now,
+    });
+    const follower = await ProxyStoreClient.connect({ makeChannel: hub.make, tabId: 'f1' });
+    if (!follower) throw new Error('handshake failed');
+    await follower.acquireEdit('c1', 'e1');
+    await drain();
+    expect(await host.anyEditing()).toBe('editing');
+    // crash して bye も ping も出せなかった ── TTL を超えたら数えない
+    now += 60 * 60 * 1000;
+    expect(await host.anyEditing(), '残骸で整理が永久に断られる').toBe('idle');
+  });
+});

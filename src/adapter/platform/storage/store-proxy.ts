@@ -98,6 +98,8 @@ export type ProxyWire =
   | { kind: 'edit-res'; to: string; id: number; granted: boolean }
   | { kind: 'edit-release'; from: string; cid: string; lid: string }
   | { kind: 'edit-ping'; from: string; keys: string[] }
+  | { kind: 'editing-ask'; from: string; id: number }
+  | { kind: 'editing-res'; to: string; id: number; editing: boolean }
   | { kind: 'bye'; from: string };
 
 /**
@@ -107,6 +109,13 @@ export type ProxyWire =
  */
 export type EditGrant = 'granted' | 'denied' | 'unreachable';
 
+/**
+ * 🔴 **どこかのタブが編集中か**(#253)。⚠ `EditGrant` と同じ理由で **3 値**である
+ * ── `unknown`(本体と話せない)を `editing` と同じ顔にすると、
+ * **存在しない編集タブを user に探させる**文言を出してしまう。
+ */
+export type EditingState = 'editing' | 'idle' | 'unknown';
+
 /** タブ間で同期すべきことの口(holder / follower の両実装が同じ形で持つ)。 */
 export interface TabSync {
   role(): 'holder' | 'follower';
@@ -115,6 +124,14 @@ export interface TabSync {
   releaseEdit(cid: string, lid: string): void;
   /** 自分以外のタブが書き込んだとき(lids = null は全面 refresh)。 */
   onChanged(fn: (cid: string, lids: string[] | null) => void): () => void;
+  /**
+   * 🔴 **いずれかのタブが編集中か**(#253)。
+   *
+   * ⚠ 未参照 asset の整理は「保存済みの本文」しか走査しないので、**別のタブが
+   * 編集中に貼った画像**(bytes は在るが参照は未保存の欄の中)を「使っていない」と
+   * 数えて消す。自タブの `phase` を見るだけでは**そのタブのことしか分からない**。
+   */
+  anyEditing(): Promise<EditingState>;
 }
 
 const lockKey = (cid: string, lid: string): string => `${cid}\uE000${lid}`;
@@ -210,6 +227,29 @@ export class StoreProxyHost implements TabSync {
   releaseEdit(cid: string, lid: string): void {
     const key = lockKey(cid, lid);
     if (this.locks.get(key)?.tab === this.id) this.locks.delete(key);
+  }
+
+  /**
+   * 台帳を見て答える(#253)。⚠ **判定はここ 1 か所** ── 自分が聞かれたときも
+   * follower に聞かれたときも同じ関数を通す(2 か所に書くと必ずずれる)。
+   */
+  anyEditing(): Promise<EditingState> {
+    return Promise.resolve(this.editingNow());
+  }
+
+  /**
+   * @param except このタブのロックは数えない(**聞いた本人**の分)。
+   *   ⚠ 数えると、呼び側が自タブの `phase` で既に見ている事実で二重に断り、
+   *   「他のタブで編集中です」という**嘘の文言**になる。
+   * ⚠ **失効した follower のロックは数えない** ── crash して `bye` も `ping` も
+   *   出せなかったタブの残骸で、整理が永久に断られる。
+   */
+  private editingNow(except?: string): EditingState {
+    const now = this.now();
+    for (const [key, v] of this.locks) {
+      if (v.tab !== this.id && now - v.seenAt > EDIT_LOCK_TTL_MS) this.locks.delete(key);
+    }
+    return [...this.locks.values()].some((v) => v.tab !== except) ? 'editing' : 'idle';
   }
 
   onChanged(fn: (cid: string, lids: string[] | null) => void): () => void {
@@ -309,6 +349,16 @@ export class StoreProxyHost implements TabSync {
         }
         return;
       }
+      case 'editing-ask': {
+        this.ch.postMessage({
+          kind: 'editing-res',
+          to: msg.from,
+          id: msg.id,
+          // ⚠ **聞いた本人のロックは数えない**(`editingNow` の注記)
+          editing: this.editingNow(msg.from) === 'editing',
+        } satisfies ProxyWire);
+        return;
+      }
       case 'bye':
         this.dropLocksOf(msg.from);
         return;
@@ -357,6 +407,8 @@ export class ProxyStoreClient implements StoreClientLike, TabSync {
     number,
     { cid: string; lid: string; settle: (g: EditGrant) => void }
   >();
+  /** 「誰か編集中?」の待ち(#253)。⚠ 返事が来ない = `unknown`。 */
+  private readonly editingWaiters = new Map<number, (v: EditingState) => void>();
   /** 自分が握っている編集ロック(holder 交代時の再主張と ping に使う)。 */
   private readonly heldEdits = new Map<string, { cid: string; lid: string }>();
   private readonly changedListeners = new Set<(cid: string, lids: string[] | null) => void>();
@@ -487,6 +539,29 @@ export class ProxyStoreClient implements StoreClientLike, TabSync {
     if (!this.heldEdits.delete(key)) return;
     if (this.state === 'channel')
       this.ch.postMessage({ kind: 'edit-release', from: this.id, cid, lid } satisfies ProxyWire);
+  }
+
+  /**
+   * 本体タブに聞く(#253)。⚠ **返事が無いときは `unknown`** ── 「編集中」と
+   * 同じ顔にすると、user は**存在しない編集タブを探しに行く**(M-7 と同じ理由)。
+   */
+  anyEditing(): Promise<EditingState> {
+    if (this.terminated || this.state === 'dead') return Promise.resolve('unknown');
+    // 昇格後は自分が裁定者 ── 自分の台帳で答える(呼び側は host へ乗り換えている)
+    if (this.state !== 'channel') return Promise.resolve('unknown');
+    const id = this.nextId++;
+    return new Promise((resolve) => {
+      const setT = this.deps.setTimeoutFn ?? setTimeout;
+      const timer = setT(() => {
+        this.editingWaiters.delete(id);
+        resolve('unknown');
+      }, this.deps.requestTimeoutMs ?? REQUEST_TIMEOUT_MS);
+      this.editingWaiters.set(id, (v) => {
+        (this.deps.clearTimeoutFn ?? clearTimeout)(timer);
+        resolve(v);
+      });
+      this.ch.postMessage({ kind: 'editing-ask', from: this.id, id } satisfies ProxyWire);
+    });
   }
 
   onChanged(fn: (cid: string, lids: string[] | null) => void): () => void {
@@ -647,6 +722,14 @@ export class ProxyStoreClient implements StoreClientLike, TabSync {
         if (!w) return;
         this.editWaiters.delete(msg.id);
         w.settle(msg.granted ? 'granted' : 'denied');
+        return;
+      }
+      case 'editing-res': {
+        if (msg.to !== this.id) return;
+        const w = this.editingWaiters.get(msg.id);
+        if (!w) return;
+        this.editingWaiters.delete(msg.id);
+        w(msg.editing ? 'editing' : 'idle');
         return;
       }
       case 'changed': {
