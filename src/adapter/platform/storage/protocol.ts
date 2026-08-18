@@ -87,6 +87,15 @@ export type StorageRequest =
       checkpoint?: boolean;
       /** 生存 entry の保持上限(未指定は worker 既定)。 */
       keepLatest?: number;
+      /**
+       * 🔴 **同じ tx で居場所も張る**(#258)。⚠ 省略 = 辺に触らない(本文の保存)。
+       *
+       * 直す前は作成が **2 手**(行を書く → ack → 辺を書く)で、その隙にタブを閉じると
+       * **ノートは残るのに親だけ飛んだ**(フォルダの中に作ったのにルートに現れる)。
+       * ⚠ 「効果側で 1 回の enqueue にまとめる」では直らない ── `await` で窓が開く。
+       * ⚠ 中身は `setEntryParent` と**同じ 1 本**(`writeParent`)を通す。
+       */
+      parent?: { parentLid: string | null; relationId: string };
     }
   | { op: 'bulkUpsertEntries'; cid: string; entries: EntryUpsert[] }
   | { op: 'deleteEntry'; cid: string; lid: string }

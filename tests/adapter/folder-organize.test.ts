@@ -219,7 +219,7 @@ describe('居場所を変える(reducer)', () => {
 describe('いま見ているフォルダの中に作る(reducer)', () => {
   const METAS = [meta('f1', 1, 'folder'), meta('n0', 2)];
 
-  it('🔴 親つき作成 ── 辺も張り、**entry を書いた後**に永続化を頼む', () => {
+  it('🔴 親つき作成 ── 行と辺を **1 つの要求**で頼む(#258 のデータ欠損)', () => {
     const s0 = READY(METAS, []);
     const r = reduce(s0, {
       type: 'CREATE_ENTRY',
@@ -232,17 +232,18 @@ describe('いま見ているフォルダの中に作る(reducer)', () => {
     expect(
       getStructuralChildren('f1', r.state.entryMetas, r.state.relations).map((m) => m.lid),
     ).toEqual(['new1']);
-    // ⚠ 順序が本題 ── 行が無いところへ辺を張ると FK / 掃除の前提が崩れる
-    expect((r.events as Array<{ type: string }>).map((e) => e.type)).toEqual([
-      'PERSIST_ENTRY',
-      'REQUEST_SET_PARENT',
-    ]);
-    expect(r.events[1]).toEqual({
-      type: 'REQUEST_SET_PARENT',
-      lid: 'new1',
-      parentLid: 'f1',
-      relationId: 'rel-c',
-    });
+    /**
+     * 🔴 **要求は 1 つ**(#258)。直す前は `PERSIST_ENTRY` の後ろに
+     * `REQUEST_SET_PARENT` を並べる 2 手で、effect が 1 件ずつ worker へ流すので
+     * **行を書いた ack と辺の書込の間**にタブを閉じると親だけ飛んだ
+     * ── ノートは残るのにルート直下に現れる(実測。smoke が全量実行でだけ落ちた)。
+     * ⚠ 「2 つの要求を 1 回の enqueue にまとめる」では直らない(`await` で窓が開く)。
+     */
+    expect((r.events as Array<{ type: string }>).map((e) => e.type)).toEqual(['PERSIST_ENTRY']);
+    expect(
+      (r.events[0] as { parent?: unknown }).parent,
+      '居場所が同じ要求に乗っていない(2 手に割れている)',
+    ).toEqual({ parentLid: 'f1', relationId: 'rel-c' });
   });
 
   it('親を渡さなければ従来どおりルートに作る(辺は増えない)', () => {
@@ -255,6 +256,8 @@ describe('いま見ているフォルダの中に作る(reducer)', () => {
     });
     expect(r.state.relations).toEqual([]);
     expect((r.events as Array<{ type: string }>).map((e) => e.type)).toEqual(['PERSIST_ENTRY']);
+    // ⚠ 親が無いときは **`parent` を載せない**(載せると「ルートへ出す」= 辺を消す指示になる)
+    expect((r.events[0] as { parent?: unknown }).parent).toBeUndefined();
   });
 
   it('🔴 入れ先が folder でなければ、断らずにルートへ作る', () => {
@@ -271,6 +274,8 @@ describe('いま見ているフォルダの中に作る(reducer)', () => {
     expect(r.state.entryMetas.has('new3')).toBe(true);
     expect(r.state.relations).toEqual([]);
     expect((r.events as Array<{ type: string }>).map((e) => e.type)).toEqual(['PERSIST_ENTRY']);
+    // ⚠ 親が無いときは **`parent` を載せない**(載せると「ルートへ出す」= 辺を消す指示になる)
+    expect((r.events[0] as { parent?: unknown }).parent).toBeUndefined();
   });
 });
 
