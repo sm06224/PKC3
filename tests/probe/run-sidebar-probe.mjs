@@ -20,6 +20,7 @@ import { chromium } from '@playwright/test';
 import { rmSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { waitForRows } from './browse-face.mjs';
 
 const PORT = Number(process.env.PKC3_BENCH_PORT ?? 45731);
 const PROFILE_DIR =
@@ -27,8 +28,14 @@ const PROFILE_DIR =
 // ⚠ `??` ではなく `||` ── **空文字を素通りさせない**(CI が path を取れなかった回に
 //    「どのブラウザで測ったか分からないまま緑」になるのを止める)
 const executablePath = process.env.PKC3_CHROMIUM || '/opt/pw-browsers/chromium';
-/** 行を数える器。⚠ ここより外の `data-pkc-entry` は**行ではない**(上のコメント)。 */
-const LIST = '[data-pkc-region="entry-list"]';
+/**
+ * 行を数える器。⚠ ここより外の `data-pkc-entry` は**行ではない**(上のコメント)。
+ * 🔴 **名指ししない**(2026-08-18、#265)── 既定のタブが `filer-table` に
+ * 変わった日に `entry-list` は hidden 側へ回り、この probe は 60 秒 待って
+ * timeout していた(nightly が赤)。`browse-face.mjs` が**見えている面**を解く。
+ */
+/** @type {string} */
+let LIST;
 
 rmSync(PROFILE_DIR, { recursive: true, force: true });
 mkdirSync(PROFILE_DIR, { recursive: true });
@@ -39,11 +46,7 @@ try {
   page.on('pageerror', (e) => console.error('[pageerror]', e.message));
   await page.goto(`http://localhost:${PORT}/tests/probe/sidebar-probe.html`);
   await page.waitForFunction(() => window.__APP__, null, { timeout: 120_000 });
-  await page.waitForFunction(
-    (list) => document.querySelectorAll(`${list} [data-pkc-entry]`).length >= 15000,
-    LIST,
-    { timeout: 60_000 },
-  );
+  LIST = (await waitForRows(page, 15000)).selector;
 
   const steps = await page.evaluate(async (list) => {
     const t0 = window.__BOOT_T0__;

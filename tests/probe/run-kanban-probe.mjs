@@ -22,6 +22,7 @@ import { chromium } from '@playwright/test';
 import { rmSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { waitForRows } from './browse-face.mjs';
 
 const PORT = Number(process.env.PKC3_BENCH_PORT ?? 45731);
 const PROFILE_DIR =
@@ -39,11 +40,8 @@ try {
   page.on('pageerror', (e) => console.error('[pageerror]', e.message));
   await page.goto(`http://localhost:${PORT}/tests/probe/sidebar-probe.html`);
   await page.waitForFunction(() => window.__APP__, null, { timeout: 120_000 });
-  await page.waitForFunction(
-    (list) => document.querySelectorAll(`${list} [data-pkc-entry]`).length >= 15000,
-    '[data-pkc-region="entry-list"]',
-    { timeout: 60_000 },
-  );
+  // 🔴 面を名指ししない(#265)── 既定のタブが入れ替わると hidden 側を見る
+  await waitForRows(page, 15000);
 
   const result = await page.evaluate(async () => {
     const q = (sel) => document.querySelector(sel);
