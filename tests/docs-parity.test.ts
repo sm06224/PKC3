@@ -12,6 +12,7 @@
  * 「いま動くものだけを書く」と明記してある。
  */
 import { describe, expect, it } from 'vitest';
+import { KEY_COMMANDS, chordLabel } from '../src/features/keymap';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildShell } from '../src/adapter/ui/render/shell';
@@ -538,6 +539,38 @@ describe('マニュアルと実装の突合', () => {
     expect(msg, '削除の確認文言が読めない').toBeTruthy();
     expect(msg, 'マニュアルは「戻せます」と書いてある').not.toContain('元に戻せません');
     expect(MANUAL).toContain('消したノートはここに入り、**戻せます**');
+  });
+});
+
+describe('ショートカットとマニュアルの突合(#256)', () => {
+  /**
+   * 🔴 **マニュアル §10 は 3 つ目の面である**(着地前レビュー 5)。
+   *
+   * 設定とヘルプの一覧は `KEY_COMMANDS` から出るのでズレようがないが、
+   * **マニュアルは手書き**で、しかも焼き込まれてヘルプの中に出る。
+   * ⚠ PKC2 はまさにここでズレた(一度 audit したのに再びズレた)ので、
+   * **既定の割当と名前が、マニュアルに載っていること**を機械で見る。
+   */
+  it('🔴 既定の割当と名前が、マニュアルに全部載っている', () => {
+    // 空振り防止 ── §10 が丸ごと消えたら落ちる
+    const section = MANUAL.slice(MANUAL.indexOf('## 10. ショートカットキー'));
+    expect(section.length, 'マニュアルに §10 が無い').toBeGreaterThan(500);
+    const missing: string[] = [];
+    for (const cmd of KEY_COMMANDS) {
+      for (const chord of cmd.defaults) {
+        // ⚠ 表示は `chordLabel`(win 表記)── user が読む形そのもので突き合わせる
+        const label = chordLabel(chord, false);
+        if (!section.includes(label)) missing.push(`${cmd.id}: ${label}`);
+      }
+    }
+    expect(missing, 'マニュアルに載っていない既定の割当がある').toEqual([]);
+  });
+
+  it('🔴 割り当て直しの導線がマニュアルに書いてある', () => {
+    const section = MANUAL.slice(MANUAL.indexOf('## 10. ショートカットキー'));
+    for (const word of ['割り当て', '既定に戻す', 'すべて既定に戻す']) {
+      expect(section, `マニュアルに「${word}」の説明が無い`).toContain(word);
+    }
   });
 });
 

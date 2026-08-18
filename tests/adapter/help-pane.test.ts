@@ -130,7 +130,7 @@ describe('ヘルプの面', () => {
   it('⚠ 「これまでのお知らせ」と「マニュアル」の見出しが出る', () => {
     new HelpRenderer(region).render();
     const heads = [...region.querySelectorAll('h3')].map((e) => e.textContent);
-    expect(heads, '見出しが足りない').toEqual(['これまでのお知らせ', 'マニュアル']);
+    expect(heads, '見出しが足りない').toEqual(['これまでのお知らせ', 'ショートカットキー', 'マニュアル']);
   });
 
   /**

@@ -8,6 +8,7 @@ import { connectStoreEffects, type StoreEffects } from '@adapter/state/store-eff
 import { tileSelectsEntry } from '@features/launcher/tiles';
 import { appEditorMode } from '@adapter/ui/render/editor-mode';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
+import { appKeymap } from '@adapter/ui/render/keymap';
 import { StoreClient } from '@adapter/platform/storage/store-client';
 import { openAssetWindow } from '@adapter/platform/asset-window';
 import { assetWindowKind } from '@features/asset/asset-preview-kind';
@@ -309,6 +310,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 開き直すと全部戻っている、という画面になる。
    */
   applyPaneVisibility(root, appPanes.getHidden());
+  /**
+   * 🔴 **別のタブで変えたキー割当を、このタブにも効かせる**(#256)。
+   * ⚠ これが無いと「2 枚目のタブで割り当て直したのに、1 枚目は再読込まで古いまま」に
+   * なる ── 割当は端末の手癖なので、タブごとに違うのは事故である。
+   * ⚠ 外さない(アプリと同寿命)── 外す先が無いのは `applyPaneVisibility` と同じ。
+   */
+  appKeymap.watchOtherTabs(window);
   // ⚠ 配色の選択欄は**設定の画面**に在る(段⑨c で移した)。合わせるのは
   //    `SettingsRenderer.syncTheme()` の仕事 ── ここに 2 本目を置かない
   //    (P8 段㉕:帯を探す死んだ同期が残っており、常に空振りしていた)

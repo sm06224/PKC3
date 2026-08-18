@@ -42,6 +42,7 @@ import { findOpenEnds, scanContainers } from '@features/markdown/source-blocks';
 import { autoPairFor } from '@features/markdown/text-ops';
 // ⚠ 継ぎ足しの規則は **1 本**(`detail.ts` の commit と同じ関数を使う)
 import { spliceLines } from '@features/markdown/edit-journal';
+import { appKeymap, type KeymapStore } from './keymap';
 
 /** 活性塊の代わりに置く定数。⚠ **中身が固定**なので差分の対象から自然に外れる。 */
 const SLOT_HTML = '<div data-pkc-row-slot="1"></div>';
@@ -195,6 +196,12 @@ export class RowSwap {
   constructor(
     private readonly host: HTMLElement,
     private readonly cb: RowSwapCallbacks,
+    /**
+     * 🔴 **キーの割当**(#256)。⚠ **判定はここに書かない** ── 割当の正本は
+     * `features/keymap.ts` の表で、この面は「自分は `row` の文脈だ」と名乗るだけ。
+     * ⚠ test は自分で `new KeymapStore(...)` を渡す(共有の 1 個を汚さない)。
+     */
+    private readonly keymap: KeymapStore = appKeymap,
   ) {
     this.onClick = (ev: Event) => this.handleClick(ev as MouseEvent);
     this.onDown = (ev: Event) => this.handleDown(ev as MouseEvent);
@@ -878,30 +885,27 @@ export class RowSwap {
       const ke = ev as KeyboardEvent;
       // ⚠ 変換中のキーは**全部** IME のもの(実測: Enter / Tab / Escape すべて isComposing)
       if (ke.isComposing) return;
-      if (ke.key === 'Escape') {
+      const cmd = this.keymap.match(ke, 'row');
+      if (cmd === 'row-cancel') {
         ev.preventDefault();
         this.cancelActive();
         return;
       }
-      if (ke.key === 'Tab' || (ke.key === 'Enter' && (ke.ctrlKey || ke.metaKey))) {
+      if (cmd === 'row-commit') {
         ev.preventDefault();
         this.commitActive();
         return;
       }
       /**
-       * 🔴 **Ctrl/Cmd+S = 確定**(2026-08-08)。ここで受けないと**ブラウザの
-       * 保存ダイアログが開く** ── binder の門は `editor-body` / `editor-title`
-       * だけを見るので、行の入力欄には届かない。
-       * ⚠ 意味は「行の確定」(Tab と同じ)── 編集の面は続く。`COMMIT_EDIT` は
+       * 🔴 **`Ctrl/Cmd+S` も「行の確定」**(2026-08-08)── ここで受けないと
+       * **ブラウザの保存ダイアログが開く**(binder の門は `editor-body` /
+       * `editor-title` だけを見るので、行の入力欄には届かない)。
+       * ⚠ 意味は Tab と同じ「行の確定」で、編集の面は続く。`COMMIT_EDIT` は
        * 撃たない(それは編集の面ごと閉じる別の操作である)。
+       * 🔑 いまは `row-commit` の別名として **1 か所(keymap の表)**に在る。
        */
-      if ((ke.key === 's' || ke.key === 'S') && (ke.ctrlKey || ke.metaKey) && !ke.altKey) {
-        ev.preventDefault();
-        this.commitActive();
-        return;
-      }
-      if (ke.key === 'ArrowDown' || ke.key === 'ArrowUp') {
-        this.arrowMove(ke);
+      if (cmd === 'row-next' || cmd === 'row-prev') {
+        this.arrowMove(ev as KeyboardEvent, cmd === 'row-next');
         return;
       }
       this.autoPair(ke);
@@ -985,12 +989,10 @@ export class RowSwap {
    * ⚠ 行数が変わる確定の座標ずれは `activate` / `appendRow` の予約が持つ ──
    * ここに 2 本目の座標計算を書かない。
    */
-  private arrowMove(ke: KeyboardEvent): void {
+  private arrowMove(ke: KeyboardEvent, down: boolean): void {
     const a = this.active;
     if (a === null) return;
-    if (!ke.altKey || ke.shiftKey || ke.ctrlKey || ke.metaKey) return;
     const ta = a.textarea;
-    const down = ke.key === 'ArrowDown';
     let next: number | null = null;
     if (down) {
       for (let i = a.blockIndex + a.blockCount; i < this.starts.length; i += 1) {
