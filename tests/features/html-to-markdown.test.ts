@@ -214,3 +214,103 @@ describe('介入するかどうか(`convertPastedHtml`)', () => {
     expect(conv('<h2>題</h2><p>本文</p>', '題 本文')).toBe('## 題\n\n本文');
   });
 });
+
+/**
+ * 🔴 **着地前レビューで見つかった、黙って壊れる形**(#261)。
+ * どれも「実際のコピー元で普通に起きる」形である ── 実測で確かめてから直した。
+ */
+describe('現実のコピー元で壊れない', () => {
+  it('🔴 行内の器が塊を抱えていても潰れない(Google ドキュメントは全体を b で包む)', () => {
+    // ⚠ **塊を 2 つ以上**置く ── 1 つだと、潰しても同じ文字列になるので空振りする
+    //   (直す前の実測: `題あい` ── 見出しも箇条書きも消え、語まで繋がった)
+    const out = md(
+      '<b style="font-weight:normal" id="docs-internal-guid-x">' +
+        '<h1>題</h1><p>あ</p><ul><li>い</li></ul></b>',
+    );
+    expect(out).toBe('# 題\n\nあ\n- い');
+    expect(out, '語が繋がっている(区切りが消えた)').not.toContain('題あい');
+  });
+
+  it('span が塊を抱えていても同じ', () => {
+    expect(md('<span><h2>題</h2><p>本文</p></span>')).toBe('## 題\n\n本文');
+  });
+
+  it('🔴 リンクが塊を抱えていたら、語は繋げずリンクは残す(ニュースのカード)', () => {
+    // ⚠ ここは**降りない** ── 降りると宛先を失う(記法 1 つ = user の動線 1 つ)
+    expect(md('<a href="https://e.com/a"><h3>題名</h3><p>説明</p></a>')).toBe(
+      '[題名 説明](https://e.com/a)',
+    );
+  });
+
+  it('🔴 リストの直下に在る入れ子で、項目が消えない', () => {
+    // 直す前の実測: `1. 一` だけ ── 「二」が黙って消えていた
+    expect(md('<ol><li>一</li><ol><li>二</li></ol></ol>')).toBe('1. 一\n   1. 二');
+  });
+
+  it('🔴 `li` が包まれていても、中身は消えない', () => {
+    expect(md('<ul><div><li>あ</li></div></ul>'), 'リストが丸ごと消えた').toContain('あ');
+  });
+
+  it('🔴 入れ子の表を二重に拾わない(HTML メール / 表レイアウト)', () => {
+    const out = md('<table><tr><td>外<table><tr><td>内</td></tr></table></td></tr></table>');
+    // 直す前の実測: `| 外内 |` の下に `| 内 |` が出て、同じ中身が 2 回入っていた
+    expect(out?.split('\n').filter((l) => l.includes('内')), '内側の行が 2 回出ている')
+      .toHaveLength(1);
+  });
+
+  it('🔴 入れ子のタスクで、親まで済みにしない(`- 親` の下に `- [x] 子`)', () => {
+    const out = md(
+      '<ul><li>親<ul><li><input type="checkbox" checked>子</li></ul></li></ul>',
+    );
+    expect(out).toBe('- 親\n  - [x] 子');
+    expect(out, '親はタスクですらないのに済みになった').not.toContain('[x] 親');
+  });
+
+  it('🔴 ただし `<p>` に包まれた箱は拾う(loose なリストで印を落とさない)', () => {
+    // ⚠ 上を「直下だけ」で直すと**こちらが壊れる** ── GFM の loose なリストは
+    //   `<li><p><input>…` の形である(主張の向きを変えたら反対側を見る)
+    expect(md('<ul><li><p><input type="checkbox"> あ</p></li></ul>')).toBe('- [ ] あ');
+  });
+
+  it('親も子もタスクなら、両方に印が付く(GitHub の入れ子タスク)', () => {
+    const out = md(
+      '<ul><li><input type="checkbox">親<ul><li><input type="checkbox" checked>子</li></ul></li></ul>',
+    );
+    expect(out).toBe('- [ ] 親\n  - [x] 子');
+  });
+});
+
+describe('落としていない記法(誰も見ていなかった出力)', () => {
+  it('区切り線', () => {
+    expect(md('<p>あ</p><hr><p>い</p>')).toBe('あ\n\n---\n\nい');
+  });
+
+  it('🔴 行ごとに列数が違う表で、列が落ちない', () => {
+    // ⚠ 幅を先頭行で決めると 2 行目の `y` が落ちる(**データ欠損の向き**)
+    const out = md('<table><tr><th>a</th></tr><tr><td>x</td><td>y</td></tr></table>');
+    expect(out).toBe('| a |  |\n| --- | --- |\n| x | y |');
+  });
+
+  it('🔴 セルの中の改行は空白へ(表が途中で割れない)', () => {
+    const out = md('<table><tr><th>a</th></tr><tr><td>x<br>y</td></tr></table>');
+    expect(out).toBe('| a |\n| --- |\n| x y |');
+  });
+
+  it('🔴 画像の説明に `]` が在ってもリンクが壊れない', () => {
+    expect(md('<img src="https://e.com/a.png" alt="図 1]の続き">')).toBe(
+      '![図 1\\]の続き](https://e.com/a.png)',
+    );
+  });
+
+  it('言語クラスの別名も読む(GitHub / highlight.js)', () => {
+    expect(md('<pre><code class="highlight-source-ts">x</code></pre>')).toBe('```ts\nx\n```');
+    expect(md('<pre><code class="lang-py">x</code></pre>')).toBe('```py\nx\n```');
+  });
+
+  it('🔴 NBSP も畳む(Word / Google ドキュメント由来の見えない字)', () => {
+    // ⚠ 生バイトを書かない(CLAUDE.md §9)── `\u00a0` で組み立てる
+    const nb = `<p>あ${'\u00a0'}${'\u00a0'}い</p>`;
+    expect(md(nb), '見えない字が本文に居座る').toBe('あ い');
+  });
+});
+

@@ -62,8 +62,9 @@ import {
 } from '@adapter/platform/office/office-pack-install';
 import { readAppStorage } from '@adapter/platform/app-storage';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
-import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
+import { formatAssetRef } from '@features/asset/asset-ref-format';
 import { pastedImageName } from '@features/asset/pasted-image-name';
+import { adoptPastedUrls } from '@adapter/ui/actions/adopt-urls';
 import { waitForWindowClose } from '@adapter/platform/window-close';
 import { copyPlainText } from '@adapter/platform/clipboard';
 import { MarkdownClient } from '@adapter/platform/render/markdown-client';
@@ -1031,28 +1032,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   あとなので、その窓で整理が走ると貼ったばかりの bytes を消される。
      * ⚠ 1 件ずつ順に処理して都度捨てる(並べると heap に載る)。
      */
-    adoptPastedUrls: async (urls) => {
-      const out = new Map<string, string>();
-      await withAssetGate(async () => {
-        const known = new Set((await attachDeps.listMetas().catch(() => [])).map((m) => m.key));
-        for (const url of urls) {
-          try {
-            const blob = await (await fetch(url)).blob();
-            if (blob.size === 0 || !isImageAssetMime(blob.type)) continue;
-            const name = pastedImageName({ type: blob.type }, new Date(), '貼付画像');
-            const stored = await storeAsset(
-              attachDeps,
-              { name, type: blob.type, size: blob.size, blob },
-              known,
-            );
-            out.set(url, `asset:${stored.assetKey}`);
-          } catch {
-            // 読めない 1 件で全部を失わない ── その 1 件だけ元の参照のまま残る
-          }
-        }
-      });
-      return out;
-    },
+    adoptPastedUrls: (urls) =>
+      adoptPastedUrls(
+        {
+          gate: withAssetGate,
+          attach: attachDeps,
+          fetchBlob: async (url) => (await fetch(url)).blob(),
+          now: () => new Date(),
+        },
+        urls,
+      ),
     /**
      * 🔴 **添付を別の窓で見る**(#192 で画像、2026-08-15 に PDF)。⚠ 貸した ObjectURL は
      * `openAssetWindow` が**窓の生死に合わせて**捨てる(窓が開けなければ即捨てる)。

@@ -159,6 +159,9 @@ function inlineOf(node: Node): string {
   if (tag === 'a') return anchorOf(el);
 
   const inner = inlineChildren(el);
+  // ⚠ **行内として読まれた塊**(`<a>` が見出しと段落を抱えるカード等)── 前後に
+  //   空白を入れないと `[題名説明](url)` のように**語が繋がる**(実測)
+  if (BLOCK.has(tag)) return ` ${inner} `;
   if ((tag === 'strong' || tag === 'b') && !neutralized(el, 'font-weight')) return wrap(inner, '**');
   if ((tag === 'em' || tag === 'i') && !neutralized(el, 'font-style')) return wrap(inner, '*');
   if (tag === 'del' || tag === 's' || tag === 'strike') return wrap(inner, '~~');
@@ -217,9 +220,23 @@ function preBlock(el: Element): Block {
   return { text: `${fence}${lang}\n${body}\n${fence}`, tight: false };
 }
 
-/** `<li>` の先頭のチェックボックス(GFM のタスクリスト)。 */
+/**
+ * その `<li>` **自身の**チェックボックス(GFM のタスクリスト)。
+ *
+ * ⚠ **子孫をそのまま見ない**(着地前レビュー E)── 見ると、`- 親` の下に
+ * `- [x] 子` がぶら下がる混在リストで**親まで `[x]`** になる(実測で
+ * `<li>親<ul><li><input checked>子` が `- [x] 親` になった ── 親はタスクですらない)。
+ * ⚠ **直下(`:scope >`)にも縮めない**(検算で判明)── loose な GFM リストは
+ * `<li><p><input>…` なので、縮めると**印を丸ごと落とす**。⚠ 主張の向きを変えたら、
+ * 反対側で何が壊れるかを必ず見る(CLAUDE.md §1)。
+ */
 function taskMark(li: Element): string {
-  const box = li.querySelector('input[type="checkbox"]');
+  // ⚠ **直下だけでは足りない**(検算で判明)── loose な GFM リストは
+  //   `<li><p><input>…` の形なので、直下に絞ると**印を丸ごと落とす**。
+  // 🔑 正しい規則は「**その `li` 自身に属する**最初の箱」= いちばん近い `li` が自分。
+  const box = Array.from(li.querySelectorAll('input[type="checkbox"]')).find(
+    (b) => b.closest('li') === li,
+  );
   if (!box) return '';
   return box.hasAttribute('checked') || (box as HTMLInputElement).checked === true
     ? '[x] '
@@ -227,22 +244,50 @@ function taskMark(li: Element): string {
 }
 
 function listBlock(el: Element, ordered: boolean): Block | null {
-  const items = Array.from(el.children).filter((c) => tagOf(c) === 'li');
-  if (items.length === 0) return null;
+  const kids = Array.from(el.children).filter((c) => !SKIP.has(tagOf(c)));
+  /**
+   * ⚠ **`li` が 1 つも無いことがある**(着地前レビュー C)── `<ul><div><li>…` のように
+   * 包まれている形。ここで諦めると**リストが丸ごと消える**ので、器として降りる。
+   */
+  if (!kids.some((c) => tagOf(c) === 'li')) {
+    const inner = blocksOf(el);
+    return inner.length === 0 ? null : { text: joinBlocks(inner), tight: false };
+  }
   const startAttr = Number.parseInt(el.getAttribute('start') ?? '', 10);
   let n = Number.isFinite(startAttr) && startAttr > 0 ? startAttr : 1;
   const lines: string[] = [];
-  for (const li of items) {
+  let pad = '  ';
+  for (const kid of kids) {
+    const tag = tagOf(kid);
+    if (tag === 'ul' || tag === 'ol') {
+      /**
+       * 🔴 **リストの直下に在る入れ子**(古い HTML / 一部 CMS が出す形)。
+       * ⚠ 直す前は `li` しか見ていなかったので、実測で
+       * `<ol><li>一</li><ol><li>二</li></ol></ol>` が **`1. 一`** になり
+       * **「二」が黙って消えていた**(消える向きの誤差は作らない)。
+       * 🔑 直前の項目の**続き**として字下げして足す(見た目は入れ子と同じ)。
+       */
+      const sub = listBlock(kid, tag === 'ol');
+      if (!sub) continue;
+      const shifted = sub.text
+        .split('\n')
+        .map((l) => (l === '' ? '' : pad + l))
+        .join('\n');
+      if (lines.length === 0) lines.push(shifted);
+      else lines[lines.length - 1] += `\n${shifted}`;
+      continue;
+    }
+    if (tag !== 'li') continue;
     const marker = ordered ? `${n}.` : '-';
     n += 1;
-    const body = joinBlocks(blocksOf(li));
-    const text = `${taskMark(li)}${body}`.trim();
-    const pad = ' '.repeat(marker.length + 1);
+    const body = joinBlocks(blocksOf(kid));
+    const text = `${taskMark(kid)}${body}`.trim();
+    pad = ' '.repeat(marker.length + 1);
     const [head = '', ...rest] = text.split('\n');
     // ⚠ 2 行目以降は**記号の幅だけ**字下げする(しないと項目が切れる)
     lines.push([`${marker} ${head}`, ...rest.map((l) => (l === '' ? '' : pad + l))].join('\n'));
   }
-  return { text: lines.join('\n'), tight: false };
+  return lines.length === 0 ? null : { text: lines.join('\n'), tight: false };
 }
 
 /** 表のセル 1 つ ── `|` を逃がし、改行は空白へ(GFM の行は 1 行で閉じる)。 */
@@ -252,7 +297,12 @@ function cellText(el: Element): string {
 
 function tableBlocks(el: Element): Block[] {
   const rows: { cells: string[]; head: boolean }[] = [];
-  for (const tr of Array.from(el.querySelectorAll('tr'))) {
+  // ⚠ **自分の行だけ**を拾う(着地前レビュー D)── `querySelectorAll` は子孫すべてを
+  //    拾うので、入れ子の表(HTML メール / 表レイアウト)では内側の行が**外側の行と
+  //    しても**出て、同じ中身が 2 回入る(実測で `| 外内 |` の下に `| 内 |` が出た)
+  for (const tr of Array.from(el.querySelectorAll('tr')).filter(
+    (tr) => tr.closest('table') === el,
+  )) {
     const cells = Array.from(tr.children).filter((c) => tagOf(c) === 'td' || tagOf(c) === 'th');
     if (cells.length === 0) continue;
     rows.push({ cells: cells.map(cellText), head: cells.every((c) => tagOf(c) === 'th') });
@@ -313,6 +363,9 @@ function blockOf(el: Element, tag: string): Block[] {
   return blocksOf(el);
 }
 
+/** `BLOCK` を選択子にしたもの(行内の器が塊を抱えていないか見るため)。 */
+const BLOCK_SELECTOR = [...BLOCK].join(',');
+
 function blocksOf(parent: Node): Block[] {
   const out: Block[] = [];
   let buf = '';
@@ -329,6 +382,20 @@ function blocksOf(parent: Node): Block[] {
       if (BLOCK.has(tag)) {
         flush();
         out.push(...blockOf(el, tag));
+        continue;
+      }
+      /**
+       * 🔴 **行内の器が塊を抱えていることがある**(着地前レビュー A)。
+       * Google ドキュメントは本文全体を `<b style="font-weight:normal">` で包むので、
+       * ここで降りないと `inlineOf` が**区切り無しで連結**する ── 実測で
+       * `<b><h1>題</h1><p>あ</p><ul><li>い</li></ul></b>` が **`題あい`** になった
+       * (見出しも箇条書きも消え、**語まで繋がる**)。
+       * ⚠ `a` は**降りない** ── 降りるとリンクの宛先を失う(記法 1 つ = 動線 1 つ)。
+       *   代わりに行内側で空白を入れて、語が繋がるのだけを止める。
+       */
+      if (tag !== 'a' && el.querySelector(BLOCK_SELECTOR) !== null) {
+        flush();
+        out.push(...blocksOf(el));
         continue;
       }
     }

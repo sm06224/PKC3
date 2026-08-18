@@ -166,7 +166,11 @@ export interface BinderServices {
    * 呼び側が「元のまま残した」と件数で言えるようにする(黙って消さない)。
    * ⚠ **省略可** ── 無ければ本文はそのまま(貼付自体は成立する)。
    */
-  adoptPastedUrls?(urls: readonly string[]): Promise<ReadonlyMap<string, string>>;
+  adoptPastedUrls?(urls: readonly string[]): Promise<{
+    readonly adopted: ReadonlyMap<string, string>;
+    /** 置けなかった理由(空き容量など)。⚠ **呼び側が 1 本の文言に組み立てる**。 */
+    readonly problems: readonly string[];
+  }>;
   /**
    * 🔴 **添付を別の窓で見る**(#192 で画像、2026-08-15 に PDF を追加)。
    * ⚠ 実体は adapter/platform 側(ObjectURL の寿命が絡むので、binder は**呼ぶだけ**)。
@@ -1900,8 +1904,8 @@ export function bindActions(
     const from = target;
     const openedLid = dispatcher.getState().openBody?.lid ?? null;
     // ⚠ `urls` は `adopt` が在るときしか埋まらない(上の三項)── `pasteImages!` と同じ形
-    void adopt!(urls).then((map) => {
-      const r = rewriteAdopted(text, map);
+    void adopt!(urls).then(({ adopted, problems }) => {
+      const r = rewriteAdopted(text, adopted);
       const into = insertTargetAfterAwait(from, openedLid);
       if (!into) {
         // ⚠ 黙って終わらない ──「貼ったのに出ない」を作らない。
@@ -1914,7 +1918,18 @@ export function bindActions(
       }
       into.focus();
       insertText(into, r.text);
-      if (r.failed > 0) {
+      /**
+       * 🔴 **断りは 1 本にまとめる**(検算で判明)。`state.error` は **1 枠**なので、
+       * 理由(空き容量)を先に出しても、件数の総括で**上書きされて消える**。
+       * ⚠ 理由が在るならそちらを出す ── 件数は「何件残ったか」しか言わないが、
+       *   理由は **user が直せる**(容量を空ける)。
+       */
+      if (problems.length > 0) {
+        dispatcher.dispatch({
+          type: 'OP_FAILED',
+          error: `貼り付けた画像を保存できませんでした: ${problems[0]!}`,
+        });
+      } else if (r.failed > 0) {
         // ⚠ 読めなかった宛先は**元のまま残している** ── 消していないことまで言う
         dispatcher.dispatch({
           type: 'OP_FAILED',

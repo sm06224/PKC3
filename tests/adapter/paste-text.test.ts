@@ -36,7 +36,7 @@ function setup(over: Partial<BinderServices> = {}) {
   const services: BinderServices = {
     adoptPastedUrls: async (urls) => {
       asked.push(urls);
-      return new Map(urls.map((u, i) => [u, `asset:k${i + 1}`]));
+      return { adopted: new Map(urls.map((u, i) => [u, `asset:k${i + 1}`])), problems: [] };
     },
     ...over,
   };
@@ -108,6 +108,45 @@ describe('HTML の貼付を markdown へ戻す', () => {
     ta.dispatchEvent(pasteEvent({ 'text/html': '<h2>題</h2>', 'text/plain': '題' }));
     expect(dispatcher.getState().openBody?.body ?? '', 'state に届いていない').toContain('## 題');
   });
+
+  it('🔴 画像を貼ったときは、文字の変換まで走らせない(同じ絵が 2 回入る)', () => {
+    // ⚠ Chrome はウェブページの画像 1 枚のコピーに **file と text/html の両方**を載せる。
+    //   画像を処理したあとに文字も処理すると、資産の参照 1 本 + 外部 URL 1 本の
+    //   **同じ絵が 2 回**入る
+    const pasted: (readonly File[])[] = [];
+    const { ta } = setup({
+      pasteImages: async (files) => {
+        pasted.push(files);
+        return ['![ず](asset:k1)'];
+      },
+    });
+    const e = new Event('paste', { bubbles: true, cancelable: true });
+    const file = new File([new Uint8Array([1])], 'x.png', { type: 'image/png' });
+    Object.defineProperty(e, 'clipboardData', {
+      value: {
+        items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }],
+        getData: (t: string) =>
+          t === 'text/html' ? '<img src="https://e.com/a.png" alt="ず">' : '',
+      },
+    });
+    ta.dispatchEvent(e);
+    expect(pasted, '画像が資産へ回っていない(この test は空振り)').toHaveLength(1);
+    // 🔴 文字側は走っていない ── 走ると外部 URL の参照が**その場で**入る
+    expect(ta.value, '画像と文字の両方が入った(同じ絵が 2 回)').toBe('');
+  });
+
+  it('🔴 本文の欄でない `<textarea>` では変換しない(名前で見分ける)', () => {
+    // ⚠ 観測点を `<input>` にすると `instanceof HTMLTextAreaElement` だけで満たされ、
+    //   **名前の allow-list を 1 度も検めない**(代替物で満たせるガード)
+    const { root } = setup();
+    const other = document.createElement('textarea');
+    other.setAttribute('data-pkc-field', 'query-key');
+    root.append(other);
+    const e = pasteEvent({ 'text/html': '<h2>題</h2>', 'text/plain': '題' });
+    other.dispatchEvent(e);
+    expect(e.defaultPrevented, '本文でない欄で markdown を組み立てた').toBe(false);
+    expect(other.value).toBe('');
+  });
 });
 
 describe('`data:` / `blob:` を資産へ逃がす', () => {
@@ -131,11 +170,30 @@ describe('`data:` / `blob:` を資産へ逃がす', () => {
   });
 
   it('🔴 読めなかった分は**元のまま残し**、件数を言う(黙って消さない)', async () => {
-    const { ta, errors } = setup({ adoptPastedUrls: async () => new Map() });
+    const { ta, errors } = setup({
+      adoptPastedUrls: async () => ({ adopted: new Map(), problems: [] }),
+    });
     ta.dispatchEvent(pasteEvent({ 'text/plain': `![ず](${DATA})` }));
     await vi.waitFor(() => expect(errors).toHaveLength(1));
     expect(ta.value, '読めないのに参照を消した').toBe(`![ず](${DATA})`);
     expect(errors[0]).toContain('1 件');
+  });
+
+  it('🔴 置けなかった理由は、件数の総括に**上書きされない**(`state.error` は 1 枠)', async () => {
+    // ⚠ 直す前は資産化の側で `OP_FAILED` を撃っていたので、直後に出る
+    //   「N 件を読み込めませんでした」に**上書きされて消えて**いた ── user は
+    //   直せる原因(空き容量)を知らないまま、同じ操作を繰り返す
+    const { ta, errors } = setup({
+      adoptPastedUrls: async () => ({
+        adopted: new Map(),
+        problems: ['添付を保存する空き容量が不足しています: 貼付画像-x.png'],
+      }),
+    });
+    ta.dispatchEvent(pasteEvent({ 'text/plain': `![ず](${DATA})` }));
+    await vi.waitFor(() => expect(errors.length).toBeGreaterThan(0));
+    // 🔴 **最後に残っている文言**を見る(途中で出ても上書きされたら意味が無い)
+    expect(errors[errors.length - 1], '理由が総括に上書きされた').toContain('空き容量');
+    expect(ta.value, '読めないのに参照を消した').toBe(`![ず](${DATA})`);
   });
 
   it('🔴 待っている間に**別のノートを開いたら差し込まない**(断りは出す)', async () => {

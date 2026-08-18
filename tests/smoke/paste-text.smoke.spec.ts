@@ -10,7 +10,14 @@
  *    本文で**画像として描かれる**か(字が入っただけなら壊れた key でも通る)
  */
 import { test, expect, type Page } from '@playwright/test';
-import { clickReal, createEntry, collectPageErrors, expectImageRendered, gotoApp } from './helpers';
+import {
+  clickReal,
+  createEntry,
+  collectPageErrors,
+  expectImageRendered,
+  gotoApp,
+  useSplitEditor,
+} from './helpers';
 
 // 1x1 PNG(67 bytes)── 他の smoke と同じ絵
 const PNG_1X1_B64 =
@@ -151,6 +158,48 @@ test('🔴 markdown 原文を渡してくるコピー(AI の「コピー」)は�
     plain: '題 本文',
   });
   expect(stoppedRich, '形のあるコピーまで素通りしている').toBe(true);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **資産にしている最中に焦点が移っても、本文の欄に入る**(#251)。
+ *
+ * ⚠ unit では**この行を 1 度も走らせられない** ── happy-dom に `execCommand` が無く、
+ * 必ず fallback の `value` 直代入を通るので、焦点の有無が結果を変えない
+ * (CLAUDE.md §2「弱いのではなく走っていない」)。#250 と同じ穴がここにも在る。
+ * ⚠ **2 列の面で測る** ── 1 面は別の欄を触った瞬間に行を閉じるので、
+ *   「欄は生きているのに焦点だけ外れた」というこの次元が作れない。
+ */
+test('🔴 資産にしている間に焦点が移っても、本文の欄に入る(2 列)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await useSplitEditor(page);
+  await gotoApp(page);
+  await createEntry(page, 'text');
+
+  const sel = '[data-pkc-field="editor-body"]';
+  await expect(page.locator(sel)).toBeVisible();
+  await pasteText(page, sel, {
+    html: `<p>まえ</p><img src="data:image/png;base64,${PNG_1X1_B64}" alt="ず">`,
+    plain: 'まえ',
+  });
+  // ⚠ 資産にしている**最中に**焦点を奪う(user が絞り込み欄を触った、の再現)
+  await page.evaluate((sel) => {
+    const ta = document.querySelector<HTMLTextAreaElement>(sel);
+    if (ta?.value.includes('asset:'))
+      throw new Error('この次元を測れていない(資産化が先に終わった)');
+    const other = document.querySelector<HTMLElement>('[data-pkc-field="entry-filter"]');
+    if (!other) throw new Error('焦点を移す先が無い(この次元を測れていない)');
+    other.focus();
+  }, sel);
+
+  await expect(page.locator(sel), '本文の欄に入っていない(焦点を戻していない)').toHaveValue(
+    /!\[ず\]\(asset:[^)]+\)/,
+    { timeout: 15_000 },
+  );
+  // ⚠ **絞り込み欄に入っていない**(入ると検索語が壊れる ── 静かな事故)
+  await expect(page.locator('[data-pkc-field="entry-filter"]')).toHaveValue('');
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
