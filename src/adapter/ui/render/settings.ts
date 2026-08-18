@@ -218,7 +218,9 @@ export class SettingsRenderer {
     onote.setAttribute('data-pkc-field', 'settings-note');
     // ⚠ **どの操作に効くか**を書く ── 書かないと「行を押しても編集にならない」と読まれる
     onote.textContent =
-      '最初の設定では、フォルダの表で Enter を押すと**読む**ところから始まります。' +
+      // ⚠ **記法を書かない** ── ここは `textContent` なので `**` がそのまま画面に出る
+      //   (PKC2 が同じ失敗をしていて、`notice-log.ts` の冒頭がまさにこれを戒めている)
+      '最初の設定では、フォルダの表で Enter を押すと「読む」ところから始まります。' +
       'ここを入れると、開いた時点で編集に入ります。' +
       '行を 1 回押して選んだだけでは編集に入りません(それは「選ぶ」で、「開く」ではありません)。';
     od.append(onote);

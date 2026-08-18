@@ -779,3 +779,37 @@ describe('マニュアルの節を指す参照', () => {
   });
 });
 
+/**
+ * 🔴 **画面の説明(tooltip)を実装と突き合わせる**(2026-08-18)。
+ *
+ * ⚠ `ACTION_TITLES` は**どの test からも参照されていなかった** ── その結果、
+ * Word 書き出しの説明が「**この版では画像は入りません**」のまま残り、
+ * 実装(画像も図もグラフも入る)ともマニュアルとも食い違って、
+ * **user に「押しても無駄」と思わせていた**。
+ * 🔑 「空でないか」を数えるだけの検査は**中身が腐っても通る** ── 等値で pin する
+ * (`tests/adapter/collection-commands.test.ts` が既にこの型を使っている)。
+ */
+describe('情報ペインの説明が実装と合っている(2026-08-18)', () => {
+  /**
+   * ⚠ **コメントを落としてから見る**(1 稿目で踏んだ)。直した理由を書いた
+   * 解説コメントに旧文言(「この版では画像は入りません」)が入っているので、
+   * file 全体を見ると**直したのに必ず落ちる**。CLAUDE.md §1「見るのは実行する行」。
+   */
+  const codeOnly = (text: string): string =>
+    text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const TITLES = codeOnly(readFileSync('src/adapter/ui/render/inspector.ts', 'utf8'));
+
+  it('🔴 Word の説明が「入らない」と言っていない(実装は入れている)', () => {
+    // 空振り防止 ── ①説明そのものが在る ②コメント落としで本体まで消していない
+    expect(TITLES, 'Word の説明が消えている').toContain("'export-entry-docx':");
+    expect(TITLES.length, 'コメント落としが本体まで消した').toBeGreaterThan(2000);
+    expect(TITLES, '画像が入らないという古い断りが残っている').not.toContain(
+      'この版では画像は入りません',
+    );
+    // マニュアルは「入ります」と書いている ── 画面もそちらへ揃える
+    expect(readFileSync('docs/manual.md', 'utf8'), 'マニュアルの側が変わっている').toContain(
+      '本文に貼った添付の画像も、図(mermaid)もグラフも入ります',
+    );
+    expect(TITLES, '画面の説明が「入る」と言っていない').toContain('画像も、図はベクタで');
+  });
+});
