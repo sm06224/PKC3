@@ -23,6 +23,7 @@ import {
 } from '../src/adapter/ui/render/commands';
 import { showUpdateCard } from '../src/adapter/ui/render/update-card';
 import { RENDERABLE_FENCE_LANGS } from '../src/features/markdown/markdown-render';
+import { NOTICES, NOTICE_KEEP_MAX } from '../src/features/notice/notice-log';
 import { RELATION_KINDS } from '../src/features/relation/kinds';
 import { MARKDOWN_EXTENSIONS } from '../src/features/import/plain-markdown';
 import { REVISION_KEEP_LATEST } from '../src/adapter/platform/storage/store-port';
@@ -812,5 +813,46 @@ describe('情報ペインの説明が実装と合っている(2026-08-18)', () =
       '本文に貼った添付の画像も、図(mermaid)もグラフも入ります',
     );
     expect(TITLES, '画面の説明が「入る」と言っていない').toContain('画像も、図はベクタで');
+  });
+});
+
+/**
+ * 🔴 **落ちたお知らせが、どこにも残らない状態を作らない**(2026-08-18)。
+ *
+ * アプリの登記表は `NOTICE_KEEP_MAX` 件で頭打ちで、**古い方から静かに落ちる**。
+ * 落ちた分の受け皿がどこにも無かったので、**42 件のうち 22 件が既に消えていた**
+ * (git の履歴からしか読めない状態だった)。⚠ 受け皿を作っただけでは腐るので、
+ * **登記表と CHANGELOG の対応をここで縛る**。
+ */
+describe('お知らせの受け皿(CHANGELOG)', () => {
+  const CHANGELOG = readFileSync('CHANGELOG.md', 'utf8');
+  /** ⚠ 見出し(`### <題名>`)だけを拾う ── 本文の行に満たされない形にする。 */
+  const headings = [...CHANGELOG.matchAll(/^### (.+)$/gm)].map((m) => m[1]);
+
+  it('🔴 いま配っているお知らせは、全部 CHANGELOG に在る', () => {
+    expect(NOTICES.length, '登記表が空(空振り)').toBeGreaterThan(0);
+    for (const n of NOTICES) {
+      expect(headings, `CHANGELOG に「${n.title}」が無い(落ちたら読めなくなる)`).toContain(
+        n.title,
+      );
+    }
+  });
+
+  /**
+   * 🔴 **受け皿として実際に効いていること**を見る。
+   * ⚠ 「登記表の分が在る」だけだと、**受け皿が登記表のコピーでも通る** ──
+   *   それでは落ちた分を残していない。上限より多いことまで見る。
+   */
+  it('🔴 CHANGELOG は、アプリから落ちた分まで持っている', () => {
+    expect(
+      headings.length,
+      `CHANGELOG が ${NOTICE_KEEP_MAX} 件以下 ── 落ちた分を残していない`,
+    ).toBeGreaterThan(NOTICE_KEEP_MAX);
+  });
+
+  it('CHANGELOG の見出しが重複していない(同じ題名を 2 回残さない)', () => {
+    expect(new Set(headings).size, `重複: ${headings.length - new Set(headings).size} 件`).toBe(
+      headings.length,
+    );
   });
 });
