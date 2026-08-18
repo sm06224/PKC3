@@ -17,6 +17,8 @@ import type { ViewMode } from '@adapter/state/app-state';
 import { archetypeLabel } from '@adapter/ui/render/sidebar';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
 import { insertText } from '@adapter/ui/render/row-swap';
+import { isImageAssetMime } from '@features/asset/asset-ref-format';
+import { resolveMime } from './attach';
 import { applyFormat, type FormatOp } from '@features/markdown/text-ops';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
 import { isEntrySort } from '@features/filter/entry-sort';
@@ -1523,6 +1525,15 @@ export function bindActions(
    * (`shell.ts` で兄弟)ので、面で見ると**そこだけ落ちる** ── PKC2 は
    * `isMarkdownTextarea` で欄を見ており、継ぎ足しにも貼れていた。
    */
+  /**
+   * 🔴 **画像かどうかの判定は 1 本**(2026-08-18、着地前レビュー)。
+   *
+   * ⚠ `f.type` を直に見ると、**MIME を付けない環境**から `.png` を落としたとき
+   * 画像に見えない ── 拡張子から引く `resolveMime` を通す(添付の入口と同じ規則)。
+   * ⚠ `!` を付けるかの判定は `asset-ref-format.ts` が正本(「この 1 本だけを使う」)。
+   */
+  const isImageFile = (f: File): boolean => isImageAssetMime(resolveMime(f.name, f.type));
+
   const BODY_FIELDS = new Set(['row-source', 'editor-body', 'append-input']);
   const isBodyInput = (t: EventTarget | null): t is HTMLTextAreaElement =>
     t instanceof HTMLTextAreaElement && BODY_FIELDS.has(t.getAttribute('data-pkc-field') ?? '');
@@ -1565,11 +1576,16 @@ export function bindActions(
    * 🔴 **画像を本文へ差し込む**(⚠ 待つので、差す先は**あとで引き直す**)。
    */
   const insertPasted = (files: readonly File[], from: HTMLTextAreaElement): void => {
+    // ⚠ **どのノートの編集に貼ったか**を控える(2026-08-18、着地前レビュー)──
+    //   待っている間に取り消して別のノートを開き直すと、`formatTarget` は
+    //   **新しい編集欄**を返す = 取り消したはずの貼付が別のノートに現れる。
+    const openedLid = dispatcher.getState().openBody?.lid ?? null;
     void services.pasteImages!(files).then((refs) => {
       // 🔴 **待っている間に編集欄が作り直されることがある**(live の面は行を組み直す)。
       //   掴んだままの textarea へ差すと、**画面に出ていない所へ字を書く** ──
       //   貼付が黙って消えるので、差す直前に**いま在る編集欄**へ引き直す。
-      const into = reResolveInput(from);
+      const sameEdit = (dispatcher.getState().openBody?.lid ?? null) === openedLid;
+      const into = sameEdit ? reResolveInput(from) : null;
       if (!into) {
         // 🔴 **差し先が消えた。**(1 面の編集は、別の欄を触った瞬間に行を確定して
         //   閉じる ── 実ブラウザで実際にそうなる)
@@ -1616,7 +1632,7 @@ export function bindActions(
   const routeFiles = (files: readonly File[], target: EventTarget | null): boolean => {
     if (files.length === 0) return false;
     const inBody = isBodyInput(target);
-    const images = inBody ? files.filter((f) => f.type.startsWith('image/')) : [];
+    const images = inBody ? files.filter(isImageFile) : [];
     const rest = files.filter((f) => !images.includes(f));
     let handled = false;
     if (images.length > 0 && services.pasteImages) {
@@ -1641,7 +1657,7 @@ export function bindActions(
    */
   const onPaste = (e: Event): void => {
     const ce = e as ClipboardEvent;
-    const files = filesOf(ce.clipboardData).filter((f) => f.type.startsWith('image/'));
+    const files = filesOf(ce.clipboardData).filter(isImageFile);
     if (routeFiles(files, ce.target)) ce.preventDefault();
   };
 

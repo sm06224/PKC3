@@ -22,7 +22,7 @@ const EXT: Readonly<Record<string, string>> = {
 const two = (n: number): string => String(n).padStart(2, '0');
 
 /**
- * `スクリーンショット-2026-08-18-0432.png` の形。
+ * `スクリーンショット-2026-08-18-043215.png` の形(時刻は **時分秒**の 6 桁)。
  * ⚠ 秒まで入れる ── 同じ分に 2 枚貼ることは普通に起きる(名前が衝突しても
  * 中身が同じなら content addressing が 1 件に畳むが、**別の絵は別の名前**であるべき)。
  */

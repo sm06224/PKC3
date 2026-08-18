@@ -19,6 +19,7 @@ import {
   createEntry,
   collectPageErrors,
   expectImageRendered,
+  gotoApp,
   useSplitEditor,
 } from './helpers';
 
@@ -31,11 +32,6 @@ const PNG_1X1_B64 =
  */
 const PNG_64_B64 =
   'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAT0lEQVR42u3PQQkAAAgEsAt2/VMYxgi+hcEKLNO+FgEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQGBywI8cEE8aU9dHgAAAABJRU5ErkJggg==';
-
-async function gotoApp(page: Page): Promise<void> {
-  await page.goto('/');
-  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
-}
 
 /**
  * 本物の event を、**その要素の上で**発火させる。
@@ -103,9 +99,57 @@ test('🔴 編集中の本文に貼ると、確定後に画像として出る', 
   //    bytes だけ書かれて参照が消える形になっていないことを、件数で確かめる)
   await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(1);
 
-  // ③ 確定すると、その参照が**実際の画像として描かれる**(key が本物である証拠)
+  // ③ 🔴 **取り消せる**(お知らせとマニュアルが約束している ── `Ctrl+Z`)
+  //    ⚠ unit では確かめられない(happy-dom は `execCommand` を持たないので
+  //    fallback を通り、ブラウザの取り消し履歴に載らない)
+  await page.keyboard.press('Control+z');
+  await expect(row, '取り消しで戻っていない(お知らせの約束が嘘になる)').not.toHaveValue(
+    /asset:/,
+  );
+  await page.keyboard.press('Control+y');
+  await expect(row, 'やり直しで戻せない').toHaveValue(/asset:/);
+
+  // ④ 確定すると、その参照が**実際の画像として描かれる**(key が本物である証拠)
   await page.keyboard.press('Tab');
   await expectImageRendered(page, 'img[data-pkc-asset-key]');
+
+  expect(errors).toEqual([]);
+});
+
+/**
+ * 🔑 **2 枚同時に貼ると、2 枚とも順番どおり入る**(#250)。
+ *
+ * ⚠ PKC2 は先頭 1 枚だけ拾っていた。⚠ 順番は unit では測れない ──
+ * happy-dom の fallback は caret を進めるが、実ブラウザは `execCommand` が進める
+ * ので、**入る順は実ブラウザでしか確かめられない**。
+ */
+test('🔴 2 枚まとめて貼ると、2 枚とも順番どおり入る', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await openLiveRow(page);
+
+  const row = page.locator('[data-pkc-region="editor-live"] [data-pkc-field="row-source"]');
+  // ⚠ **種類を変える**(名前は貼った日時から作るので、同じ秒に貼った 2 枚は
+  //   `.png` どうしだと**同じ名前**になり、入る順を名前で言えない)
+  await sendFiles(page, '[data-pkc-region="editor-live"] [data-pkc-field="row-source"]', 'paste', [
+    { name: 'a.png', type: 'image/png', b64: PNG_1X1_B64 },
+    { name: 'b.webp', type: 'image/webp', b64: PNG_64_B64 },
+  ]);
+  await expect(row).toHaveValue(/asset:[\s\S]*asset:/, { timeout: 15_000 });
+
+  const keys = await row.evaluate((el) =>
+    [...(el as HTMLTextAreaElement).value.matchAll(/asset:([^)]+)\)/g)].map((m) => m[1]!),
+  );
+  expect(keys, '2 枚入っていない').toHaveLength(2);
+  expect(keys[0], '同じ鍵が 2 つ(別の絵なのに畳まれた)').not.toBe(keys[1]);
+  // 🔑 **1 枚目が上**(caret が進んでいないと逆順に入る)
+  const alts = await row.evaluate((el) =>
+    [...(el as HTMLTextAreaElement).value.matchAll(/!\[([^\]]+)\]/g)].map((m) => m[1]!),
+  );
+  expect(alts, '名前が 2 つ入っていない').toHaveLength(2);
+  expect(alts[0], `入る順が逆(${alts.join(' → ')})`).toMatch(/\.png$/);
+  expect(alts[1], `入る順が逆(${alts.join(' → ')})`).toMatch(/\.webp$/);
 
   expect(errors).toEqual([]);
 });
@@ -136,11 +180,17 @@ test('🔴 貼ったあとに焦点が移っても、本文の欄に入る(2 列
     { name: 'clip.png', type: 'image/png', b64: PNG_1X1_B64 },
   ]);
   // ⚠ 資産を置いている**最中に**焦点を奪う(user が絞り込み欄を触った、の再現)
-  await page.evaluate(() => {
+  // 🔴 **まだ差し込まれていないこと**を同じ evaluate の中で確かめる ── put が
+  //    先に終わっていたら「焦点が移った後に差し込む」次元を**測っていない**
+  //    (§2「弱いのではなく走っていない」の、smoke 版)
+  await page.evaluate((sel) => {
+    const ta = document.querySelector<HTMLTextAreaElement>(sel);
+    if (ta?.value.includes('asset:'))
+      throw new Error('この次元を測れていない(貼付が先に終わった)');
     const other = document.querySelector<HTMLElement>('[data-pkc-field="entry-filter"]');
     if (!other) throw new Error('焦点を移す先が無い(この次元を測れていない)');
     other.focus();
-  });
+  }, sel);
   // 前提: **欄は生きている**(2 列は焦点が外れても閉じない ── この次元の条件)
   await expect(page.locator(sel), '前提: 編集欄が閉じてしまった').toBeVisible();
 
@@ -172,6 +222,10 @@ test('🔴 貼っている最中に行が閉じたら、やり直せる形で断
     { name: 'clip.png', type: 'image/png', b64: PNG_1X1_B64 },
   ]);
   await page.evaluate(() => {
+    const ta = document.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]');
+    // ⚠ 差し込みが先に終わっていたら、この test は「行が閉じた」次元を測っていない
+    if (ta?.value.includes('asset:'))
+      throw new Error('この次元を測れていない(貼付が先に終わった)');
     const other = document.querySelector<HTMLElement>('[data-pkc-field="entry-filter"]');
     if (!other) throw new Error('焦点を移す先が無い(この次元を測れていない)');
     other.focus();

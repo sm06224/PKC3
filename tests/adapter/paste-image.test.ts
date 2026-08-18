@@ -11,6 +11,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/binder';
+import { attachFiles, type AttachDeps } from '../../src/adapter/ui/actions/attach';
 
 /** clipboard を持つ paste event を作る(happy-dom に `ClipboardEvent` の実体は無い)。 */
 function pasteEvent(
@@ -118,8 +119,57 @@ describe('スクショの貼付(#250)', () => {
     expect(calls.attach).toHaveLength(0);
   });
 
+  it('🔴 画像**でない file** を貼っても何もしない(既定を止めない)', () => {
+    // ⚠ 1 巡目の「画像が無ければ何もしない」は `kind: 'string'` を渡していたので、
+    //   `filesOf` が先に捨てて**画像の filter が 1 度も評価されなかった**(空振り)。
+    //   ここは **file なのに画像でない**ものを渡す ── filter の側を通す。
+    // 🔑 貼付と drop は**わざと非対称**である: 落とした file は添付にするが、
+    //   貼付は画像だけ受ける(文字と file が同居する貼付で、文字を落とさないため)。
+    const { ta, calls } = setup();
+    const pdf = new File([new Uint8Array([1])], 'a.pdf', { type: 'application/pdf' });
+    const e = pasteEvent([{ kind: 'file', type: 'application/pdf', file: pdf }]);
+    ta.dispatchEvent(e);
+    expect(e.defaultPrevented, '画像でないのに既定を止めている').toBe(false);
+    expect(calls.paste).toHaveLength(0);
+    expect(calls.attach, '貼付で添付を作っている(drop との非対称が崩れた)').toHaveLength(0);
+  });
+
+  it('🔴 MIME が空でも、**拡張子が画像なら**本文へ入る', () => {
+    // ⚠ OS によっては file に MIME が付かない ── `f.type` を直に見ると
+    //   「画像でない」に落ちて、編集中は `attachFiles` が断る = **何も起きない**
+    const { ta, calls } = setup();
+    const bare = new File([new Uint8Array([1])], 'shot.PNG', { type: '' });
+    ta.dispatchEvent(pasteEvent([{ kind: 'file', type: '', file: bare }]));
+    expect(calls.paste[0], '拡張子から画像と読めていない').toHaveLength(1);
+  });
+
+  it('🔴 待っている間に**別のノートの編集**へ移ったら、そこへは差さない', async () => {
+    const { ta, dispatcher, calls } = setup();
+    dispatcher.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
+    dispatcher.dispatch({ type: 'CREATE_ENTRY', lid: 'e1', archetype: 'text', title: 'a' });
+    dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
+    dispatcher.dispatch({ type: 'BODY_LOADED', lid: 'e1', body: '' });
+    dispatcher.dispatch({ type: 'START_EDIT' });
+    ta.dispatchEvent(pasteEvent([{ kind: 'file', type: 'image/png', file: png() }]));
+    // ⚠ 取り消して**別のノート**を開き直す(欄は在るが、中身は別物)
+    dispatcher.dispatch({ type: 'CANCEL_EDIT' });
+    dispatcher.dispatch({ type: 'CREATE_ENTRY', lid: 'e2', archetype: 'text', title: 'b' });
+    dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: 'e2' });
+    dispatcher.dispatch({ type: 'BODY_LOADED', lid: 'e2', body: '' });
+    dispatcher.dispatch({ type: 'START_EDIT' });
+    await vi.waitFor(() => expect(dispatcher.getState().error).toBeTruthy());
+    expect(ta.value, '別のノートの編集へ差し込んだ').toBe('');
+    expect(calls.attach, '編集中なのに添付へ回した').toHaveLength(0);
+  });
+
   it('🔑 クリップボードの画像を**全部**拾う(PKC2 は先頭 1 枚だけだった)', async () => {
     const { ta, calls } = setup();
+    // ⚠ **本文の途中に caret を置く** ── 末尾だと、差し込みが caret を進めなくても
+    //   「`.value` の代入が caret を末尾へ飛ばす」に救われて**順序が保たれてしまう**
+    //   (この形にする前は、caret を進めない変異が生き延びた)
+    ta.value = 'まえうしろ';
+    ta.selectionStart = 3;
+    ta.selectionEnd = 3;
     const e = pasteEvent([
       { kind: 'file', type: 'image/png', file: png('a.png') },
       { kind: 'string', type: 'text/plain' },
@@ -128,6 +178,35 @@ describe('スクショの貼付(#250)', () => {
     ta.dispatchEvent(e);
     await vi.waitFor(() => expect(ta.value).toContain('asset:k2'));
     expect(calls.paste[0], '2 枚目を落としている').toHaveLength(2);
+    // 🔴 **2 枚が続けて、caret の位置に入る**
+    // ⚠ caret を進めないと 2 枚目が**末尾**(「うしろ」の後ろ)へ飛ぶ
+    expect(ta.value.replace(/\n/g, ' / '), '2 枚目が離れた所に入った').toMatch(
+      /^まえう!\[ず\]\(asset:k1\) \/ !\[ず\]\(asset:k2\) \/ しろ$/,
+    );
+  });
+
+  it('🔴 差し込みは **state にも届く**(画面だけ変わって保存されない、を作らない)', async () => {
+    // ⚠ 2 列の保存は `COMMIT_EDIT` が **state の openBody** を書く ── 差し込みが
+    //   `input` を撃たないと、**欄には見えているのに保存された本文には無い**。
+    //   ⚠ happy-dom は `execCommand` を持たないので、unit が通るのは fallback の側
+    //   である ── そこが本物と同じ意味論でないと、この穴が test から見えない。
+    const { root, dispatcher } = setup();
+    const host = root.querySelector('[data-pkc-region="detail"]')!;
+    const ta = document.createElement('textarea');
+    ta.setAttribute('data-pkc-field', 'editor-body');
+    host.append(ta);
+    dispatcher.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
+    dispatcher.dispatch({ type: 'CREATE_ENTRY', lid: 'e1', archetype: 'text', title: 'n' });
+    dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
+    dispatcher.dispatch({ type: 'BODY_LOADED', lid: 'e1', body: '' });
+    dispatcher.dispatch({ type: 'START_EDIT' });
+
+    ta.dispatchEvent(pasteEvent([{ kind: 'file', type: 'image/png', file: png() }]));
+    await vi.waitFor(() => expect(ta.value).toContain('asset:k1'));
+    expect(
+      dispatcher.getState().openBody?.body ?? '',
+      'state に届いていない(保存すると参照が消える)',
+    ).toContain('asset:k1');
   });
 
   it('⚠ 画像を取り出せない項目は飛ばす(null で落ちない)', () => {
@@ -243,5 +322,49 @@ describe('スクショの貼付(#250)', () => {
     const e = pasteEvent([{ kind: 'file', type: 'image/png', file: png() }]);
     ta.dispatchEvent(e);
     expect(calls.attach, '無反応になっている').toHaveLength(1);
+  });
+});
+
+/**
+ * 🔴 **fake ではなく本物の `attachFiles` を通す**(2026-08-18、着地前レビュー)。
+ *
+ * ⚠ 上の test 群の `attachFiles` は「呼ばれたか」しか見ない fake で、**本物より
+ * 寛容**である ── 本物は `phase !== 'ready'` を**断る**(`attach.ts`)。
+ * そのせいで「編集中に画像以外を落としたら添付になる」という**成り立たない主張**を
+ * マニュアルに書いていた(CLAUDE.md §3「stub は本物の意味論を真似る」)。
+ */
+describe('本物の添付を通したときの断り(#250)', () => {
+  it('🔴 編集中に画像以外を落とすと、**断りが出て何も置かれない**', async () => {
+    document.body.textContent = '';
+    const root = document.createElement('div');
+    root.innerHTML =
+      '<div data-pkc-region="detail"><textarea data-pkc-field="row-source"></textarea></div>';
+    document.body.append(root);
+    const stored: string[] = [];
+    const deps: AttachDeps = {
+      putBlob: async (key) => void stored.push(key),
+      putMeta: async () => {},
+      listMetas: async () => [],
+    };
+    const dispatcher = new Dispatcher();
+    bindActions(root, dispatcher, {
+      // 🔑 **本物**を通す(fake は「呼ばれたか」しか見ず、本物より寛容だった)
+      attachFiles: (files) => void attachFiles(dispatcher, deps, files),
+      pasteImages: async () => [],
+    });
+    dispatcher.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
+    dispatcher.dispatch({ type: 'CREATE_ENTRY', lid: 'e1', archetype: 'text', title: 'n' });
+    dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
+    dispatcher.dispatch({ type: 'BODY_LOADED', lid: 'e1', body: '' });
+    dispatcher.dispatch({ type: 'START_EDIT' });
+
+    const ta = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')!;
+    const pdf = new File([new Uint8Array([1])], 'a.pdf', { type: 'application/pdf' });
+    ta.dispatchEvent(dragEvent('drop', [pdf]));
+    await vi.waitFor(() =>
+      expect(dispatcher.getState().error, '断りが出ていない').toContain('編集を終了してから'),
+    );
+    // 🔑 **bytes も置かれていない**(断ったのに書いていたら、参照の無い残骸になる)
+    expect(stored, '断ったのに bytes を書いた').toEqual([]);
   });
 });

@@ -40,6 +40,8 @@ interface Rig {
   swap: RowSwap;
   commits: { start: number; end: number; text: string }[];
   notes: string[];
+  /** 🔴 開閉で DOM へ入り直した要素(#250)── 呼び側が面倒をみる対象。 */
+  inserted: Element[][];
   /** 本文を差し替えて描き直す(`detail.ts` の `commit` と同じ継ぎ足し規則)。 */
   render(body: string): void;
   /** 溜めた描き直しを流す(`defer` のとき)。 */
@@ -57,6 +59,8 @@ function rig(initial = DOC, defer = false): Rig {
   document.body.append(host);
   const commits: Rig['commits'] = [];
   const notes: string[] = [];
+  /** 🔴 開閉で DOM へ入り直した要素(#250)── 呼び側が面倒をみる対象。 */
+  const inserted: Element[][] = [];
   let body = initial;
   let queued: string | null = null;
   const swap = new RowSwap(host, {
@@ -68,6 +72,7 @@ function rig(initial = DOC, defer = false): Rig {
       else render(body);
     },
     notify: (m) => notes.push(m),
+    onInserted: (els) => inserted.push([...els]),
   });
   const render = (text: string): void => {
     const { html, ranges } = renderMarkdownWithRanges(text);
@@ -80,6 +85,7 @@ function rig(initial = DOC, defer = false): Rig {
     swap,
     commits,
     notes,
+    inserted,
     render,
     flush: () => {
       if (queued !== null) {
@@ -1089,11 +1095,60 @@ describe('RowSwap — Ctrl+S(2026-08-08)', () => {
   });
 });
 
+/**
+ * 🔴 **開閉で作り直した塊を、外へ渡す**(#250)。
+ *
+ * ⚠ `update()` の返り(`inserted`)は呼び側が面倒をみているが、**行を開く /
+ * 閉じる**ときの当て直しはこのクラスの中で完結しており、**誰も面倒をみていなかった**
+ * ── 画像(`![…](asset:…)`)の塊を押して開き、**何も打たずに閉じる**と `<img>` は
+ * 原文の HTML から作り直され、`src` の無い空の枠になる(実測)。本文は変わらないので
+ * 描き直しも来ない = **画面から画像が消えたまま**。
+ *
+ * ⚠ 発火点は **2 か所**(開く / 閉じる)なので、test も 2 本要る。
+ */
+describe('RowSwap — 開閉で入り直した要素を外へ渡す(#250)', () => {
+  const IMG = ['上の段落。', '', '![絵](asset:k1)', '', '下の段落。', ''].join('\n');
+
+  it('🔴 行を**開いた**ときに渡る', () => {
+    const r = rig(IMG);
+    const before = r.inserted.length;
+    click(findByText(r.host, 'p', '上の段落'));
+    expect(r.host.querySelector('[data-pkc-field="row-source"]'), '前提: 行が開いていない')
+      .not.toBeNull();
+    expect(r.inserted.length, '開いたのに何も渡っていない').toBeGreaterThan(before);
+    // 空振り防止 ── 空の配列を渡して「呼んだ」で終えていない
+    expect(r.inserted.at(-1)!.length).toBeGreaterThan(0);
+  });
+
+  it('🔴 行を**閉じた**ときに渡る(そこに画像が居る)', () => {
+    const r = rig(IMG);
+    // 画像の塊そのものを押して開く ── 閉じるとこの塊が作り直される
+    const img = r.host.querySelector('img[data-pkc-asset-key]');
+    expect(img, '前提: 画像が描かれていない').not.toBeNull();
+    click(img!);
+    const ta = r.host.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]');
+    expect(ta, '前提: 画像の行が開かない').not.toBeNull();
+    const before = r.inserted.length;
+    // 何も打たずに閉じる(⚠ **本文が変わらない** = 描き直しは来ない)
+    ta!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(r.commits, '前提: 本文が変わってしまった(この次元を測れていない)').toHaveLength(0);
+    expect(r.inserted.length, '閉じたのに何も渡っていない').toBeGreaterThan(before);
+    // 🔑 渡った中に**画像そのもの**が居る(渡す口が在るだけでは足りない)
+    const els = r.inserted.at(-1)!;
+    const has = els.some(
+      (e) =>
+        (e instanceof Element && e.matches('img[data-pkc-asset-key]')) ||
+        e.querySelector?.('img[data-pkc-asset-key]') != null,
+    );
+    expect(has, '作り直された画像が渡っていない(src が空のまま残る)').toBe(true);
+  });
+});
+
 describe('RowSwap — 組めない本文', () => {
   it('分割が組めなければ `ok: false` を返して差し替えを開かない', () => {
     const host = document.createElement('div');
     document.body.append(host);
-    const swap = new RowSwap(host, { commit: vi.fn() });
+    const swap = new RowSwap(host, { commit: vi.fn(), onInserted: () => {} });
     /**
      * ⚠ **直った形を使い続けない**(2026-08-06 に 2 度取り替えた)。入れ子の `:::` も
      * id 無しの `:::figure` も直ったので、いまの実物は「**renderer が知らない名前**」

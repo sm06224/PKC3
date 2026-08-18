@@ -147,7 +147,17 @@ export class DetailRenderer {
    * 骨組みを使い回す(段⑪)以上、`disposeLends()` は選択が動いたときしか
    * 走らないので、差分描画の側にも返す道が要る(図の `pruneScopes` と同じ形)。
    */
-  private readonly lends: Array<{ dispose: () => void; els: Element[] }> = [];
+  /**
+   * 借りている ObjectURL。⚠ `key` を持つのは**借り直しを避ける**ため(#250)──
+   * 編集中は塊が打鍵ごとに作り直されるので、同じ添付を tick ごとに IDB から
+   * 読み直して URL を作り足すことになる(user 指示「効くのは定常」)。
+   */
+  private readonly lends: Array<{
+    key: string | null;
+    url: string | null;
+    dispose: () => void;
+    els: Element[];
+  }> = [];
   /** 非同期 hydrate の stale 防止(選択が移ったら結果を捨てて即 dispose)。 */
   private hydrateToken = 0;
 
@@ -1307,6 +1317,25 @@ export class DetailRenderer {
         collect(img);
     }
     if (byKey.size === 0) return;
+    /**
+     * 🔴 **生きている貸出を使い回す**(2026-08-18、着地前レビュー)。
+     *
+     * 編集中の面は打鍵のたびに塊を作り直すので、そのたびに借りると
+     * **IDB 読み + `createObjectURL` が tick ごと**に走る(`lendObjectUrl` は
+     * キャッシュを持たない)。⚠ 使い回した `<img>` を貸出の `els` に**足す**
+     * ことが要である ── 足さないと、古い `<img>` が消えた時点で `pruneLends` が
+     * 返してしまい、**画面に出ている新しい `<img>` の src が死ぬ**。
+     */
+    for (const [key, imgs] of [...byKey]) {
+      const live = this.lends.find(
+        (l) => l.key === key && l.url !== null && l.els.some((e) => e.isConnected),
+      );
+      if (!live) continue;
+      live.els.push(...imgs);
+      for (const img of imgs) img.src = live.url!;
+      byKey.delete(key);
+    }
+    if (byKey.size === 0) return;
     await Promise.all(
       [...byKey].map(async ([key, imgs]) => {
         try {
@@ -1319,7 +1348,7 @@ export class DetailRenderer {
             for (const img of imgs) img.setAttribute('data-pkc-asset-missing', '');
             return;
           }
-          this.lends.push({ dispose: lent.dispose, els: imgs });
+          this.lends.push({ key, url: lent.url, dispose: lent.dispose, els: imgs });
           for (const img of imgs) img.src = lent.url;
         } catch {
           if (token === this.hydrateToken)
@@ -1392,7 +1421,7 @@ export class DetailRenderer {
       if (!lent) return missing();
       // 添付の preview は器ごと作り直す(`disposeLends()` が先に走る)ので、
       // 器そのものを持たせておけば「器が外れたら返す」で同じ規則に乗る
-      this.lends.push({ dispose: lent.dispose, els: [host] });
+      this.lends.push({ key: null, url: null, dispose: lent.dispose, els: [host] });
       if (kind === 'image') {
         const img = document.createElement('img');
         img.setAttribute('data-pkc-field', 'attachment-media');

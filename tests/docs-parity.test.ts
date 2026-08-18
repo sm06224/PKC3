@@ -251,14 +251,17 @@ describe('マニュアルと実装の突合', () => {
     // 今度は「受ける実装が消えたら」落ちる(マニュアルが嘘になる側で鳴る)。
     // ⚠ **src 全体**を見る(round-2 review L-4)── `binder.ts` だけを見ていると、
     // 別 file へ移したときに緑のまま嘘になる
-    const receivers = srcFiles().filter((f) => {
-      const text = readFileSync(f, 'utf-8');
-      return /addEventListener\(\s*['"]drop['"]/.test(text);
-    });
+    // ⚠ **`codeOnly` を通す**(2026-08-18、着地前レビュー)── 向きを裏返した
+    //   ことで、この検査は「**在る**」ことの主張になった。注釈で満たされると
+    //   `root.addEventListener('drop', …)` を**コメントアウトしても緑**になる
+    //   (この file の `codeOnly` の docstring がまさにそう戒めている)
+    const receivers = srcFiles().filter((f) =>
+      /addEventListener\(\s*['"]drop['"]/.test(codeOnly(readFileSync(f, 'utf-8'))),
+    );
     expect(receivers, 'drop を受ける実装が無い ── マニュアルの記述が嘘になる').not.toEqual([]);
     // ⚠ `dragover` を止めないと `drop` は**来ない** ── 片方だけでは動かない
     const over = srcFiles().filter((f) =>
-      /addEventListener\(\s*['"]dragover['"]/.test(readFileSync(f, 'utf-8')),
+      /addEventListener\(\s*['"]dragover['"]/.test(codeOnly(readFileSync(f, 'utf-8'))),
     );
     expect(over, 'dragover を受けていない ── drop は来ない').not.toEqual([]);
     expect(MANUAL).toContain('ドラッグ&ドロップでも入ります');
@@ -268,7 +271,7 @@ describe('マニュアルと実装の突合', () => {
   it('🔴 スクショの貼付の記述が実態と合う(#250)', () => {
     // ⚠ 「貼れます」はマニュアルの**約束**なので、受け口が消えたら嘘になる
     const receivers = srcFiles().filter((f) =>
-      /addEventListener\(\s*['"]paste['"]/.test(readFileSync(f, 'utf-8')),
+      /addEventListener\(\s*['"]paste['"]/.test(codeOnly(readFileSync(f, 'utf-8'))),
     );
     expect(receivers, '貼付を受ける実装が無い').not.toEqual([]);
     expect(MANUAL, 'マニュアルに貼付の導線が無い').toContain('`Ctrl+V`');
