@@ -984,6 +984,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
 
   const services: BinderServices = {
     attachFiles: (files) => void withAssetGate(() => attachFiles(dispatcher, attachDeps, files)),
+    // 🔑 一時の知らせ(「3 件を『はこ』へ入れました」)── **エラーの行とは別**
+    showStatus,
     /**
      * 🔴 **スクショの貼付**(#250。user 指示 2026-08-18
      * 「PKC3 でスクショ貼付の導線がない。PKC2 と同様以上に実装してください」)。

@@ -318,6 +318,27 @@ export class FilerRenderer {
       sort: state.entrySort,
     });
 
+    /**
+     * 🔴 **焦点を落とさずに組み直す**(2026-08-18。実ブラウザで実測)。
+     *
+     * この面は `textContent = ''` で**丸ごと**作り直すので、中に焦点があると
+     * `document.activeElement` は **`body` へ落ちる**。⚠ すると
+     * `binder` の「フォルダの表の中でだけ効く」門(`closest(...)`)に当たらなくなり、
+     * **鍵が 1 手で全部死ぬ**(Enter で入ったあとの Backspace / Delete / Ctrl+A)。
+     * ⚠ binder 側で「dispatch のあとに置き直す」形では足りない ── **その後に来る
+     * 別の再描画**(本文の読み込み完了など)でまた落ちる。実際、中身のある
+     * フォルダへ入る smoke がそれで落ちた(焦点は `body` に在った)。
+     * 🔑 **壊す側が直す** ── 組み直す直前に「中に焦点があったか」を採り、
+     *   組み直したあとに**同じ行**(無ければ先頭行、無ければ表)へ戻す。
+     * ⚠ 外に焦点があるときは**触らない**(絞り込み欄に打っている最中に
+     *   奪うと、打鍵が表へ飛ぶ)。
+     */
+    let focusedBefore: string | null = null;
+    const activeNow = this.region.ownerDocument.activeElement;
+    if (activeNow instanceof HTMLElement && this.region.contains(activeNow)) {
+      focusedBefore = activeNow.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? '';
+    }
+
     this.region.textContent = '';
     this.rows.clear();
 
@@ -367,6 +388,15 @@ export class FilerRenderer {
 
     const table = document.createElement('table');
     table.setAttribute('data-pkc-region', 'filer-table');
+    /**
+     * 🔴 **表そのものにも焦点を置けるようにする**(2026-08-18 の着地前レビュー 8)。
+     * 空のフォルダには置く先の行が無いので、ここが `filer` 文脈の鍵の受け皿になる。
+     * ⚠ **`-1`** ── Tab の巡回には入れない(15,000 件の平置きで巡回に入ると
+     *   Tab を数千回押すことになる)。⚠ **binder では書かない** ── 直す前は
+     *   `focusFirstRow()` の中で付けていたので、**その関数を 1 度通るまで
+     *   表に焦点が入らなかった**(= マウスだけの user は鍵の面へ入れない)。
+     */
+    table.tabIndex = -1;
     const thead = document.createElement('thead');
     const hr = document.createElement('tr');
     // 🔴 **種別の列は持たない**(P9 段③)。以前は 3 列作って `display: none` で
@@ -393,6 +423,15 @@ export class FilerRenderer {
        * ⚠ `draggable` は行そのものに置く(セルに置くと掴む場所が読めない)。
        */
       tr.setAttribute('draggable', 'true');
+      /**
+       * 🔴 **行に焦点を持たせる**(user 裁定 2026-08-18「OS のファイラに似せる」)。
+       * ⚠ 焦点が無いと `Enter` / `Delete` を**どこで効かせるか**が決まらない ──
+       *   面をまたいで効かせると、#240 の着地前レビューで踏んだ「見えない所で
+       *   印が増える」を繰り返す。押した行が焦点を持つのが OS と同じ形である。
+       * ⚠ `-1` にする(Tab の巡回には入れない)── 行が何百件も在るので、
+       *   Tab で 1 行ずつ辿らせるのは動線として悪い。
+       */
+      tr.tabIndex = -1;
       if (m.archetype === 'folder') tr.setAttribute('data-pkc-drop', 'folder');
       if (m.lid === state.selectedLid) tr.setAttribute('data-pkc-selected', '');
       // ⚠ **開いている**(`selected`)と**印を付けた**(`marked`)は別の印である
@@ -488,5 +527,31 @@ export class FilerRenderer {
       trashBar.append(ul);
     }
     this.region.append(trashBar);
+
+    /**
+     * 🔴 組み直しで落ちた焦点を戻す(上の `focusedBefore` の注記)。規則は 3 つ:
+     *
+     * ① **同じ行が在れば、そこへ戻す**(ただの再描画では焦点を動かさない)
+     * ② **現在地が変わったなら、1 行目へ**(移った先の先頭 ── OS のファイラ)
+     * ③ **それ以外で行が消えたなら、表そのものへ**(鍵は生きるが、
+     *    **押していない行に枠を置かない**)
+     *
+     * ⚠ ①③ を分けずに「無ければ 1 行目」と書いて実機で踏んだ:
+     * 印を消すだけの再描画で焦点が**別の行へ移り**、その状態の Enter が
+     * 「フォルダを開く」ではなく「**そのノートを開く**」になっていた
+     * (焦点の足跡で確認: `TR#folder` → `TR#別のノート` → `DIV@detail`)。
+     * 🔑 焦点は**進む操作の対象**なので、勝手に移すと**別のものが開く**。
+     */
+    if (focusedBefore !== null) {
+      const sameRow = focusedBefore === '' ? undefined : this.rows.get(focusedBefore);
+      const firstRow = scopeChanged
+        ? this.region.querySelector<HTMLElement>('[data-pkc-region="filer-table"] tbody tr')
+        : null;
+      const back =
+        sameRow ??
+        firstRow ??
+        this.region.querySelector<HTMLElement>('[data-pkc-region="filer-table"]');
+      back?.focus();
+    }
   }
 }

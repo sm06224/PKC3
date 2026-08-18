@@ -1245,7 +1245,15 @@ test('🔴 フォルダに入れる → 読み込み直しても中に居る', a
   );
   await move.selectOption(folderLid); // ⚠ 値 = lid で選ぶ(題名に依存しない)
 
-  // 画面は動かしたものに付いていく(入れた先の中が見える)
+  /**
+   * 🔴 **画面は動かない**(user 裁定 2026-08-18「OS のファイラ動作に似せる」)──
+   * 入れたものが**この場から消える**のが標準の見え方。行き先は状態の行が名乗る。
+   */
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('へ入れました');
+  expect(await lidsOf(), '入れた先へ勝手に移動した').toEqual([folderLid]);
+
+  // 中に入る(2 クリック)── ここから「いま見ているフォルダの中に作る」を見る
+  await page.locator(`[data-pkc-region="filer-table"] [data-pkc-entry="${folderLid}"]`).dblclick();
   await expect(
     page.locator('[data-pkc-region="filer-breadcrumb"] [data-pkc-entry]'),
     '入れた先のフォルダが道に出ていない',

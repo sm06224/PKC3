@@ -28,6 +28,7 @@ import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
 import { isEntrySort } from '@features/filter/entry-sort';
 import { isPaneId, PANES } from '@features/pane-visibility';
 import { STRUCTURAL, isRelationKind } from '@features/relation/kinds';
+import { getAncestorFolders } from '@features/relation/tree';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
 import { chordOf, findCommand, typesCharacter } from '@features/keymap';
@@ -104,6 +105,7 @@ const moveEntries = (
   dispatcher: Dispatcher,
   lids: readonly string[],
   parentLid: string | null,
+  report?: (text: string) => void,
 ): void => {
   if (lids.length === 0) return;
   if (dispatcher.getState().phase !== 'ready') {
@@ -137,8 +139,21 @@ const moveEntries = (
       error: `${refused} 件は入れられませんでした(フォルダは自分の中へは入れられません)`,
     });
   }
-  // ⚠ **動かしたものに付いていく**(経路で挙動を変えない ── 設計 doc §6)
-  dispatcher.dispatch({ type: 'SET_SCOPE', lid: parentLid });
+  /**
+   * 🔴 **画面は動かさない**(user 裁定 2026-08-18「**OS のファイラ動作に似せる方向で
+   * 平仄も合わせて、日常の違和感が減る**」)。OS のファイラは、入れた先へ勝手に
+   * 移動しない ── 入れたものが**いまの場所から消える**のが標準の見え方である。
+   *
+   * ⚠ ただし **PKC3 は行き先を名乗る** ── 「無言で終わらせない」を通してきたので、
+   *   消えたのか入ったのかが分かる 1 行だけ残す(OS より一言多い)。
+   * ⚠ 知らせは `OP_FAILED` に載せない(あれは**エラーの行**)── `showStatus` は
+   *   `main.ts` の「一時の知らせ」へ出る。
+   */
+  const where =
+    parentLid === null
+      ? 'ルート'
+      : (dispatcher.getState().entryMetas.get(parentLid)?.title ?? 'フォルダ');
+  report?.(`${moved + same} 件を「${where}」へ入れました`);
 };
 
 /** UI サービス面(storage 依存の操作は main が実体を注入。test は fake)。 */
@@ -166,6 +181,12 @@ export interface BinderServices {
    * 呼び側が「元のまま残した」と件数で言えるようにする(黙って消さない)。
    * ⚠ **省略可** ── 無ければ本文はそのまま(貼付自体は成立する)。
    */
+  /**
+   * 🔴 **一時の知らせ**(「3 件を『はこ』へ入れました」)。⚠ エラー(`OP_FAILED`)とは
+   * **別の行**である ── `main.ts` が優先順位(エラー > 知らせ > 常設)を持っているので、
+   * 成功の一報を `OP_FAILED` に載せない(載せると赤い意味の欄に出る)。
+   */
+  showStatus?(text: string): void;
   adoptPastedUrls?(urls: readonly string[]): Promise<{
     readonly adopted: ReadonlyMap<string, string>;
     /** 置けなかった理由(空き容量など)。⚠ **呼び側が 1 本の文言に組み立てる**。 */
@@ -845,12 +866,22 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     const lids = visibleSelection(visibleFilerRows(st), st.selection);
     if (lids.length === 0) {
-      // ⚠ 無言で終わらせない ── 帯は出ているのに何も起きない dead click になる
-      if (st.selection.length > 0)
-        dispatcher.dispatch({
-          type: 'OP_FAILED',
-          error: '選んでいた行がいま画面にありません(絞り込みを消すか、選び直してください)',
-        });
+      /**
+       * ⚠ **無言で終わらせない** ── 帯は出ているのに何も起きない dead click になる。
+       * 🔴 **印が 0 件のときも黙らない**(2026-08-18 の着地前レビュー 2)。
+       * `Delete` の鍵から来る筋では、`Enter` でフォルダへ入った直後が
+       * まさにこれ(`SET_SCOPE` が印を外すので `selection` は空)── 焦点の枠は
+       * 行に見えているので、user は「選べているのに Delete が効かない」と読む。
+       * ⚠ OS のファイラも「選んでいなければ何もしない」が、PKC3 は
+       *   **理由を出す**側に倒す(この面の他の断りと揃える)。
+       */
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error:
+          st.selection.length > 0
+            ? '選んでいた行がいま画面にありません(絞り込みを消すか、選び直してください)'
+            : '削除するものを選んでください(行を押すと選べます)',
+      });
       return;
     }
     if (
@@ -1095,12 +1126,12 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 空値 = ルートへ出す。⚠ 動かす当人は**帯自身**が持っている
    * (`selectedLid` を読み直すと、選び直した直後に別のものを動かす)。
    */
-  'move-entry': (dispatcher, target) => {
+  'move-entry': (dispatcher, target, services) => {
     const lid = target.getAttribute('data-pkc-entry');
     if (!lid) return;
     const value = target instanceof HTMLSelectElement ? target.value : '';
-    // 🔴 実体は `moveEntries` 1 本(D&D と同じ ── 断り方も「付いていく」も揃う)
-    moveEntries(dispatcher, [lid], value === '' ? null : value);
+    // 🔴 実体は `moveEntries` 1 本(D&D と同じ ── 断り方も知らせ方も揃う)
+    moveEntries(dispatcher, [lid], value === '' ? null : value, services.showStatus);
   },
   /**
    * 🔴 **並べ替え**(2026-08-06。user 報告 2-10)。⚠ 動かす当人は帯が持つ
@@ -1647,18 +1678,24 @@ export function bindActions(
      * 🔴 **`role="link"` のものは Enter / Space で押せる**(2026-08-08)。
      *
      * `@card` の placeholder は `<span role="link" tabindex="0">` で出る
-     * (`markdown-render.ts`)── PKC3 で `tabindex="0"` を持つ要素は**これだけ**で、
-     * ⚠ 直す前はこの下の `data-pkc-field` の門で**必ず抜けていた**ので、
-     * **フォーカスできるのに Enter が効かない**要素が 1 種類だけ存在していた
-     * (user 指示「マウスだけで完結し、キーボードは近道」の破れ)。
+     * (`markdown-render.ts`)── ⚠ 直す前はこの下の `data-pkc-field` の門で
+     * **必ず抜けていた**ので、**フォーカスできるのに Enter が効かない**要素が
+     * 存在していた(user 指示「マウスだけで完結し、キーボードは近道」の破れ)。
      *
      * ⚠ **`data-pkc-field` の門より前**に置く(placeholder は field を持たない)。
-     * ⚠ `<button>` / `<a>` はブラウザ既定で Enter → click に乗るので**対象外** ──
-     *   二重に撃たないよう `[tabindex]` を持つものだけ拾う。
+     * ⚠ `<button>` / `<a>` はブラウザ既定で Enter → click に乗るので**対象外**。
+     *
+     * 🔴 **拾うのは `tabindex="0"`(巡回に入るもの)だけ**(2026-08-18 の着地前
+     * レビュー 3)。`hasAttribute('tabindex')` で書いていたので、フォルダの行に
+     * `tabindex="-1"` を足した瞬間に**行がこの経路へ入った** ── `-1` は
+     * 「焦点を**置ける**」であって「**押せる**」ではないのに、`Space` が
+     * `select-entry` を撃つ**登録も設定も説明も無い鍵**になっていた
+     * (Ctrl クリックで 5 行に印 → 送ろうと Space → 印が 1 件に潰れる)。
+     * ⚠ 行を相手にするのは `filer` 文脈の鍵のほう(下の `runFilerKey`)。
      */
     if (ke.key === 'Enter' || ke.key === ' ') {
       const el = ke.target instanceof HTMLElement ? ke.target : null;
-      if (el?.hasAttribute('tabindex') && el.hasAttribute('data-pkc-action')) {
+      if (el?.getAttribute('tabindex') === '0' && el.hasAttribute('data-pkc-action')) {
         // ⚠ Space は既定でページを送る ── 押した先が動くほうが正しい
         ke.preventDefault();
         run(el.getAttribute('data-pkc-action'), el);
@@ -2042,7 +2079,7 @@ export function bindActions(
    * フォルダを自分の子孫へ落とす等、reducer が黙って捨てる形が在る。
    */
   const moveDropped = (lids: readonly string[], parentLid: string | null): void =>
-    moveEntries(dispatcher, lids, parentLid);
+    moveEntries(dispatcher, lids, parentLid, services.showStatus);
   /**
    * 🔴 **フォルダは 2 クリックで開く**(#240 段①。user 指示 2026-08-17
    * 「フォルダをダブルクリックで開くように変更」)。
@@ -2109,6 +2146,19 @@ export function bindActions(
       (el instanceof HTMLInputElement &&
         !/^(button|checkbox|radio|file|submit|reset|image)$/.test(el.type)) ||
       el?.isContentEditable === true;
+    /**
+     * 🔴 **フォルダの表の中は、別の文脈**(user 裁定 2026-08-18「OS のファイラ動作に
+     * 似せる方向で平仄も合わせて」)。⚠ **行に焦点があるときだけ**効かせる ──
+     * 面をまたいで効かせると、#240 の着地前レビューで踏んだ
+     * 「見えない所で印が増える / 現在地が動く」を繰り返す。
+     */
+    if (el?.closest('[data-pkc-region="filer-table"]')) {
+      const fcmd = keymap.match(ke, 'filer');
+      if (fcmd !== null && runFilerKey(fcmd)) {
+        ke.preventDefault();
+        return;
+      }
+    }
     const cmd = keymap.match(ke, 'global');
     if (cmd === null) return;
     /**
@@ -2157,6 +2207,102 @@ export function bindActions(
     if (!btn) return;
     ke.preventDefault();
     btn.click();
+  };
+  /**
+   * 🔴 **整理の面の鍵**(user 裁定 2026-08-18)。⚠ **既にある動線を呼ぶだけ**にする ──
+   * ここで別の実装を書くと、押しボタンと鍵で結果が違う形になる(CLAUDE.md §7)。
+   * @returns 効いたら true(呼び側が既定を止める)
+   */
+  /**
+   * 🔴 **焦点の面倒は「描く側」が 1 か所で見る**(2026-08-18。実ブラウザで実測)。
+   *
+   * ⚠ ここに「dispatch のあとに 1 行目へ置き直す」を書いていたが**足りなかった**
+   * ── 表を丸ごと組み直すのは renderer なので、**そのあとに来る別の再描画**
+   * (本文の読み込み完了など)で焦点がまた `body` へ落ちる。中身のあるフォルダへ
+   * 入る smoke が、まさにそれで落ちた(焦点は `body` に在った)。
+   * 🔑 **壊す側が直す** ── `filer.ts` が組み直しの前後で焦点を持ち越す。
+   *   binder は「どこへ移るか」だけを決め、焦点には触らない
+   *   (CLAUDE.md §7「同じ問いに答える口を 2 つ作らない」)。
+   */
+
+  /**
+   * 🔴 **いま焦点の枠が乗っている行**(2026-08-18 の着地前レビュー 2)。
+   *
+   * ⚠ `selectedLid`(= 中央に開いているノート)と**別物**である。フォルダへ
+   * 入ると `SET_SCOPE` が印を外し、`filer.ts` が 1 行目へ**焦点だけ**
+   * 持ち越す ── このとき `selectedLid` は**入る前に押した行のまま**なので、
+   * 直す前は「もう一度 Enter」が**同じフォルダを開き直そうとして無言で終わって**
+   * いた(reducer が `scopeLid === action.lid` を弾く)。⚠ user から見ると
+   * 「枠は次の行に見えているのに Enter が効かない」。
+   * 🔑 **進む操作は焦点に従い、壊す操作は印を要る**(誤差の向きを決める)──
+   *   `filer-trash` はここを使わない(焦点は自動で乗るので、押していない行が
+   *   ゴミ箱へ入る道を作らない)。
+   */
+  const focusedRowLid = (): string | null => {
+    const el = root.ownerDocument.activeElement;
+    if (!(el instanceof HTMLElement)) return null;
+    const tr = el.closest('[data-pkc-region="filer-table"] [data-pkc-entry]');
+    return tr?.getAttribute('data-pkc-entry') ?? null;
+  };
+
+  const runFilerKey = (cmd: string): boolean => {
+    const st = dispatcher.getState();
+    /**
+     * 🔴 **無言で断らない**(2026-08-18 の着地前レビュー 7)。
+     *
+     * `SET_SCOPE` も `SELECT_ALL` も reducer が `phase !== 'ready'` で**黙って
+     * state を返す**ので、直す前は編集中に `Backspace` / `Ctrl+A` を押すと
+     * **1 ドットも動かず理由も出なかった**(しかも `preventDefault` は走るので
+     * ブラウザの既定 = 「前のページへ戻る」まで消えていた)。同じ面の
+     * `Delete` は `delete-selected` が理由を出すので、**4 つの鍵で断り方が
+     * 揃っていなかった**。⚠ 判定は**ここ 1 か所**(4 か所に散らさない)。
+     */
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '編集を終了してからフォルダの操作をしてください',
+      });
+      return true;
+    }
+    if (cmd === 'filer-select-all') {
+      dispatcher.dispatch({ type: 'SELECT_ALL' });
+      return true;
+    }
+    if (cmd === 'filer-trash') {
+      // ⚠ 実体は「まとめてゴミ箱へ」と同じ(確認・見えている印への絞り込み込み)
+      run('delete-selected', root);
+      /**
+       * 🔴 **消したあとも焦点を連れて行く**(着地前レビュー 4)。表は
+       * `entryMetas` が変わると `filer.ts` が丸ごと組み直すので、押した行と
+       * 一緒に**焦点が body へ落ちる** ── 直す前は 1 回消したらそこで
+       * `Backspace` も `Delete` も `Ctrl+A` も死んでいた(門に当たらなくなる)。
+       * ⚠ 移動の 2 つ(`filer-parent` / `filer-open`)にだけ入れて、ここに
+       *   入れていなかった ── CLAUDE.md「片側を直したら反対側を必ず疑う」。
+       */
+      return true;
+    }
+    if (cmd === 'filer-parent') {
+      if (st.scopeLid === null) return false; // ルートで押しても何も起きない
+      const up = getAncestorFolders(st.scopeLid, st.entryMetas, st.relations)[0] ?? null;
+      dispatcher.dispatch({ type: 'SET_SCOPE', lid: up?.lid ?? null });
+      return true;
+    }
+    if (cmd === 'filer-open') {
+      // ⚠ 焦点が先、印は次 ── 理由は `focusedRowLid` の注記
+      const lid = focusedRowLid() ?? st.selectedLid;
+      if (lid === null) return false;
+      // フォルダなら中へ(2 クリックと同じ)。⚠ 規則は 1 か所 ── `SET_SCOPE` を撃つ
+      if (st.entryMetas.get(lid)?.archetype === 'folder') {
+        dispatcher.dispatch({ type: 'SET_SCOPE', lid });
+        return true;
+      }
+      // ノートは**本文の面へ移る**(OS の「開く」に当たる)。無ければ何もしない
+      const body = root.querySelector<HTMLElement>('[data-pkc-region="detail"]');
+      if (!body) return false;
+      body.focus();
+      return true;
+    }
+    return false;
   };
   const doc = root.ownerDocument;
   doc.addEventListener('keydown', onShortcut);

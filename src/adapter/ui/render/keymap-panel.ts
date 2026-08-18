@@ -33,16 +33,32 @@ import {
 import { appKeymap, type KeymapStore } from './keymap';
 
 /** 文脈の見出し。⚠ user は「文脈」とは呼ばない ── **どこで効くか**で書く。 */
-const CONTEXT_LABELS: Readonly<Record<KeyContext, string>> = {
+/** 文脈の見出し。⚠ test が「名乗った文脈の下に出ているか」を全数で突き合わせる。 */
+export const CONTEXT_LABELS: Readonly<Record<KeyContext, string>> = {
   global: '画面のどこでも',
   editor: '2 列の編集(原文・題名の欄)',
   append: '継ぎ足しの欄',
   row: '1 面の編集(開いている行の欄)',
   live: '1 面の編集(面そのもの)',
+  filer: 'フォルダの表(行に焦点があるとき)',
 };
 
 /** 並びの順。⚠ `KEY_COMMANDS` の並びを尊重しつつ、文脈ごとに固める。 */
-const CONTEXT_ORDER: readonly KeyContext[] = ['global', 'editor', 'append', 'row', 'live'];
+/**
+ * ⚠ **`KeyContext` を 1 つ残らず並べる。** 抜けた文脈のコマンドは
+ * `primaryContext` の既定で **`global`(「画面のどこでも」)へ落ちる** ──
+ * 2026-08-18 に `filer` を足したとき実際に踏んだ:「行に焦点があるときだけ」が
+ * 売りの 4 つの鍵が、設定画面で**「画面のどこでも Delete」**と名乗っていた
+ * (= この面の中心的な安全主張の真逆)。全数は test が pin する。
+ */
+const CONTEXT_ORDER: readonly KeyContext[] = [
+  'global',
+  'filer',
+  'editor',
+  'append',
+  'row',
+  'live',
+];
 
 function primaryContext(cmd: KeyCommand): KeyContext {
   for (const c of CONTEXT_ORDER) if (cmd.contexts.includes(c)) return c;

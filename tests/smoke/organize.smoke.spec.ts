@@ -152,13 +152,190 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
 
   // ① 掴んでフォルダへ落とす ── **実 HTML5 D&D**(unit は DataTransfer を持てない)
   await page.dragAndDrop(noteRow, folderRow);
-  // 落とした先へ付いていく(`move-entry` と同じ規則)── 中に 1 件
-  await expect(page.locator('[data-pkc-region="filer-breadcrumb"]')).toContainText('はこ');
-  await expect(rows, 'フォルダへ入っていない').toHaveCount(1);
+  /**
+   * 🔴 **落とした先へは付いていかない**(user 裁定 2026-08-18「OS のファイラ動作に
+   * 似せる」)── いまの場所から**消える**のが標準の見え方。⚠ ただし行き先は名乗る。
+   */
+  await expect(page.locator('[data-pkc-region="filer-breadcrumb"]')).not.toContainText('はこ');
+  await expect(rows, 'ルートから消えていない').toHaveCount(1);
+  await expect(page.locator('[data-pkc-region="status"]'), '行き先を言っていない').toContainText(
+    '「はこ」へ入れました',
+  );
 
-  // ② パンくず(ルート)へ落として出す
+  // ② 中に入れば居る(2 クリック)
+  await page.locator(folderRow).dblclick();
+  await expect(rows, 'フォルダへ入っていない').toHaveCount(1);
+  await expect(page.locator('[data-pkc-region="filer-breadcrumb"]')).toContainText('はこ');
+
+  // ③ パンくず(ルート)へ落として出す ── 出したものはこの場から消える
   await page.dragAndDrop(noteRow, '[data-pkc-region="filer-breadcrumb"] button');
-  await expect(rows, 'ルートへ出せていない').toHaveCount(2);
+  await expect(rows, 'ルートへ出せていない').toHaveCount(0);
+  await clickReal(page, '[data-pkc-region="filer-breadcrumb"] button');
+  await expect(rows, 'ルートに戻っていない').toHaveCount(2);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **OS のファイラと同じ鍵**(user 裁定 2026-08-18「平仄も合わせて」)。
+ *
+ * 🔴 **unit では届かない層**をここで見る:
+ * ① **実キーの既定動作**(`Backspace` はブラウザの「戻る」だった時代の名残を持つ /
+ *    `Delete` は行によっては何も起きない)── 止め損ねると**画面ごと戻る**
+ * ② **クリックで行に焦点が入るか**(happy-dom は焦点の移動を実装しきっていない)
+ */
+test('🔴 Enter で入り、Backspace で戻り、Delete でゴミ箱へ', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await makeFolder(page, 'はこ');
+  await createEntry(page, 'text');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  const rows = page.locator('[data-pkc-region="filer-table"] tbody tr');
+  await expect(rows).toHaveCount(2);
+  const folderRow = '[data-pkc-region="filer-table"] tbody tr[data-pkc-archetype="folder"]';
+
+  // ① 行を押すと**その行に焦点が入る**(鍵の効く場所が決まる)
+  // ⚠ `closest(...) !== null` で書くと、`activeElement` が `null` の回に
+  //   `undefined !== null` = true で**通ってしまう**。しかも表そのものでも
+  //   満たされるので、**`TR` であること**まで見る(代替物で満たせる条件にしない)
+  await clickReal(page, folderRow);
+  expect(
+    await page.evaluate(() => {
+      const el = document.activeElement;
+      if (!(el instanceof HTMLElement)) return 'なし';
+      return el.closest('[data-pkc-region="filer-table"]') ? el.tagName : '表の外';
+    }),
+    '行を押しても焦点が行に入らない(鍵が効く場所が決まらない)',
+  ).toBe('TR');
+
+  // ② Enter で中へ
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-pkc-region="filer-breadcrumb"]')).toContainText('はこ');
+  await expect(rows, 'フォルダの中に入れていない').toHaveCount(0);
+
+  // ③ Backspace で親へ ── ⚠ **画面ごと戻っていない**ことも見る
+  const url = page.url();
+  await page.keyboard.press('Backspace');
+  await expect(rows, '親へ戻れない').toHaveCount(2);
+  expect(page.url(), 'ブラウザの「戻る」が起きた').toBe(url);
+
+  // ④ Delete でゴミ箱へ(確認は自分で受ける ── 既定は却下)
+  const asked = new Promise<string>((resolve) => {
+    page.once('dialog', (d) => {
+      resolve(d.message());
+      void d.accept();
+    });
+  });
+  await clickReal(page, '[data-pkc-region="filer-table"] tbody tr[data-pkc-archetype="text"]');
+  await page.keyboard.press('Delete');
+  expect(await asked, '確認が出ていない').toContain('削除');
+  await expect(rows, 'ゴミ箱へ入っていない').toHaveCount(1);
+
+  /**
+   * ⑤ 🔴 **消したあとも鍵が生きている**。表は `entryMetas` が変わると丸ごと
+   * 組み直されるので、押した行と一緒に**焦点が body へ落ちる** ── 直す前は
+   * 1 回消したらそこで `Backspace` も `Delete` も `Ctrl+A` も死んでいた。
+   * ⚠ ここは**時間ではなく続きの操作**で見る(焦点の有無だけ見ると、次の鍵が
+   *   本当に届くかは分からない)。
+   */
+  await expect(rows).toHaveCount(1);
+  await page.keyboard.press('Backspace'); // ルートに居るので何も起きない = 安全な一手
+  expect(
+    await page.evaluate(() => {
+      const el = document.activeElement;
+      return el instanceof HTMLElement &&
+        el.closest('[data-pkc-region="filer-table"]') !== null
+        ? 'ある'
+        : 'ない';
+    }),
+    '消したら焦点が表の外へ落ちた(次の鍵が届かない)',
+  ).toBe('ある');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **中身のあるフォルダ**でしか通らない枝を、実ブラウザで通す。
+ *
+ * ⚠ これまでの smoke はフォルダが**空**だったので、「入った先の 1 行目へ焦点を
+ * 置く」という本命の枝は **unit でも smoke でも 1 度も実行されていなかった**
+ * (CLAUDE.md §2「経路が一度も通っていない ── 弱いのではなく走っていない」)。
+ * ⚠ あわせて **`Space` が鍵になっていないこと**も見る ── 行に `tabindex` を
+ * 足した副作用で、登録も設定も説明も無い「印を 1 件へ潰す」鍵が開いていた。
+ */
+test('🔴 中へ入ると 1 行目に焦点が乗り、Space は印を潰さない', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await makeFolder(page, 'はこ');
+  await createEntry(page, 'text');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await createEntry(page, 'text');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  const rows = page.locator('[data-pkc-region="filer-table"] tbody tr');
+  await expect(rows).toHaveCount(3);
+  const folderRow = '[data-pkc-region="filer-table"] tbody tr[data-pkc-archetype="folder"]';
+  const noteSel = '[data-pkc-region="filer-table"] tbody tr[data-pkc-archetype="text"]';
+  const marked = page.locator('[data-pkc-region="filer-table"] tbody tr[data-pkc-marked]');
+
+  // ① 1 件をフォルダへ入れる(= 入った先が空でなくなる)
+  await page.dragAndDrop(noteSel, folderRow);
+  await expect(rows, 'フォルダへ入っていない').toHaveCount(2);
+
+  // ② 印を 2 件付けて、Space を押しても潰れないことを見る
+  await clickReal(page, folderRow);
+  await page.locator(noteSel).first().click({ modifiers: ['ControlOrMeta'] });
+  await expect(marked, '印が 2 件になっていない(空振り)').toHaveCount(2);
+  await page.keyboard.press('Space');
+  await expect(marked, 'Space が印を潰した').toHaveCount(2);
+
+  // ③ フォルダへ Enter ── 入った先の**行**に焦点が乗る(表そのものではない)
+  /**
+   * ⚠ **焦点の足跡を採る**。落ちたときに「行に乗らなかった」だけでは、
+   * *置けなかった*のか *後から誰かに奪われた*のかが区別できない
+   * (1 稿目で実際に 2 回読み違えた)。`focusin` を記録して**名前で**出す。
+   */
+  await page.evaluate(() => {
+    const w = window as unknown as { __focusTrail__?: string[] };
+    w.__focusTrail__ = [];
+    const name = (t: unknown): string =>
+      t instanceof HTMLElement
+        ? `${t.tagName}${t.getAttribute('data-pkc-entry') ? '#' + t.getAttribute('data-pkc-entry') : ''}${t.getAttribute('data-pkc-region') ? '@' + t.getAttribute('data-pkc-region') : ''}`
+        : String(t);
+    document.addEventListener('focusin', (e) => w.__focusTrail__?.push('in:' + name(e.target)), true);
+    document.addEventListener('keydown', (e) => w.__focusTrail__?.push('key:' + e.key), true);
+  });
+  /**
+   * ⚠ **連打を切る** ── 直前に同じ行を押していると、この 1 打が「2 クリック」に
+   * 数えられて**キーを押す前に入ってしまう**(1 稿目で実際に踏み、Enter が
+   * 中のノートに当たって `detail` へ飛んだ)。既存 test と同じ作法。
+   */
+  await clickReal(page, noteSel);
+  await clickReal(page, folderRow);
+  // 空振り防止 ── **押す前はまだルートに居る**(入っていたら以降は別の主張になる)
+  await expect(
+    page.locator('[data-pkc-region="filer-breadcrumb"]'),
+    'Enter を押す前に入ってしまっている',
+  ).not.toContainText('はこ');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-pkc-region="filer-breadcrumb"]')).toContainText('はこ');
+  await expect(rows, 'フォルダの中身が 1 件でない(空振り)').toHaveCount(1);
+  expect(
+    await page.evaluate(() => {
+      const el = document.activeElement;
+      if (!(el instanceof HTMLElement)) return 'なし';
+      if (!el.closest('[data-pkc-region="filer-table"]')) return '表の外';
+      return el.tagName === 'TR' ? '行' : el.tagName;
+    }),
+    `入った先で焦点が行に乗らない。焦点の足跡: ${JSON.stringify(
+      await page.evaluate(
+        () => (window as unknown as { __focusTrail__?: string[] }).__focusTrail__ ?? [],
+      ),
+    )}`,
+  ).toBe('行');
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

@@ -376,6 +376,12 @@ export function buildShell(root: HTMLElement): ShellRegions {
    */
   const detail = document.createElement('div');
   detail.setAttribute('data-pkc-region', 'detail');
+  /**
+   * ⚠ **焦点を受けられるようにする**(user 裁定 2026-08-18 の平仄)── フォルダの表で
+   * `Enter` を押したときの行き先(OS の「開く」に当たる)。`-1` なので Tab の巡回には
+   * 入らない ── 入れると、本文へ辿り着くまでの Tab が 1 つ増える。
+   */
+  detail.tabIndex = -1;
   const append = document.createElement('div');
   append.setAttribute('data-pkc-region', 'append');
   append.hidden = true;

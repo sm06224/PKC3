@@ -17,7 +17,7 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { KeymapStore } from '../../src/adapter/ui/render/keymap';
-import { buildKeymapPanel } from '../../src/adapter/ui/render/keymap-panel';
+import { buildKeymapPanel, CONTEXT_LABELS as LABEL_OF } from '../../src/adapter/ui/render/keymap-panel';
 import { HelpRenderer } from '../../src/adapter/ui/render/help';
 import { KEY_COMMANDS, chordLabel } from '../../src/features/keymap';
 import { RowSwap } from '../../src/adapter/ui/render/row-swap';
@@ -442,6 +442,46 @@ describe('設定の面(割り当て直す口)', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
     localStorage.clear();
+  });
+
+  it('🔴 どのコマンドも、自分が名乗った文脈の見出しの下に出る', () => {
+    /**
+     * 🔴 **見出しが嘘をつくと、安全の主張が真逆になる**(2026-08-18 の着地前
+     * レビュー 1)。`CONTEXT_ORDER` に文脈を足し忘れると `primaryContext` の
+     * 既定で **`global`(「画面のどこでも」)へ落ちる** ── フォルダの 4 つの鍵は
+     * 「行に焦点があるときだけ」が売りなのに、設定画面が
+     * **「画面のどこでも Delete」**と名乗っていた(本文の編集中に Delete で
+     * ノートが消えると読む)。
+     * ⚠ 型(`Record<KeyContext, string>`)はラベルが**在ること**は強制するが、
+     *   **使われること**は誰も強制しない ── 足したラベルは 1 度も描かれない
+     *   死んだ文字列だった。だから**全数**を機械で突き合わせる。
+     */
+    const store = new KeymapStore(fakeStorage());
+    const panel = buildKeymapPanel(store, document);
+    document.body.append(panel.root);
+    // 見出し → その下に並ぶコマンド、を DOM の並びから復元する
+    const headingOf = new Map<string, string>();
+    let head = '';
+    for (const el of panel.root.querySelectorAll(
+      '[data-pkc-field="keymap-group"],[data-pkc-field="keymap-row"]',
+    )) {
+      if (el.getAttribute('data-pkc-field') === 'keymap-group') head = el.textContent ?? '';
+      else headingOf.set(el.getAttribute('data-pkc-command') ?? '', head);
+    }
+    expect(headingOf.size, '1 行も描けていない(空振り)').toBe(KEY_COMMANDS.length);
+    // 全数: 名乗った文脈の**どれか**の見出しの下に居ること(既定へ落ちていない)
+    const seen = new Set(headingOf.values());
+    for (const cmd of KEY_COMMANDS) {
+      const label = headingOf.get(cmd.id) ?? '';
+      expect(label, `${cmd.id} の見出しが無い`).not.toBe('');
+      expect(
+        cmd.contexts.some((c) => LABEL_OF[c] === label),
+        `${cmd.id} は ${cmd.contexts.join('/')} を名乗るのに「${label}」の下に出ている`,
+      ).toBe(true);
+    }
+    // 空振り防止 ── 文脈が 1 種類しか描かれていないなら上の全数は意味を持たない
+    expect(seen.size, '見出しが 1 種類しか出ていない').toBeGreaterThan(1);
+    panel.dispose();
   });
 
   it('一覧はコマンド表から出る(手書きしない)', () => {
