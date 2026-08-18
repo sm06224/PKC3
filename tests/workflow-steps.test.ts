@@ -512,3 +512,59 @@ describe('office-wasm のパッチ', () => {
     }
   });
 });
+
+/**
+ * 🔴 **PR gate は 2 job のまま**(2026-08-18)。
+ *
+ * ⚠ 直す前は smoke が `verify` に同居しており、`playwright install --with-deps` が
+ * **22 秒 / 291 秒 / 390 秒**(3 回測った)とぶれるせいで、**10 分の speed budget を
+ * 2 度踏んで job ごと cancel** された ── 緑だったはずの PR が赤に見えた。
+ * 🔑 守る主張は「**遅い install が速い lane の budget を食わない**」なので、
+ *   検査も**その形**で書く(job 数だけ数えても、install が verify に戻れば素通りする)。
+ */
+describe('PR gate の形(2026-08-18)', () => {
+  /**
+   * ⚠ **コメントを落としてから見る**(1 稿目で踏んだ)。job の切り出しは
+   * 「次の job の見出しまで」なので、**次の job の直前に置いた解説コメント**が
+   * 前の job の本文に入る ── そこに `playwright install` と書いてあるだけで
+   * 「速い lane に戻っている」と判定していた(CLAUDE.md §1「注釈が検査を満たす」)。
+   */
+  const codeOnly = (text: string): string =>
+    text
+      .split('\n')
+      .filter((l) => !/^\s*#/.test(l))
+      .join('\n');
+  const CI = codeOnly(readFileSync(join(DIR, 'ci.yml'), 'utf8'));
+  /** job 名 → その job の本文(次の job の見出しまで)。 */
+  const jobsOf = (text: string): Map<string, string> => {
+    const body = text.slice(text.indexOf('\njobs:'));
+    const out = new Map<string, string>();
+    const re = /\n {2}([A-Za-z0-9_-]+):\n/g;
+    const heads = [...body.matchAll(re)];
+    for (let i = 0; i < heads.length; i += 1) {
+      const start = heads[i]!.index! + heads[i]![0].length;
+      const end = i + 1 < heads.length ? heads[i + 1]!.index! : body.length;
+      out.set(heads[i]![1]!, body.slice(start, end));
+    }
+    return out;
+  };
+
+  it('🔴 遅い `playwright install` は smoke 側だけに在る(速い lane の budget を食わない)', () => {
+    const jobs = jobsOf(CI);
+    // 空振り防止 ── 切り出しが壊れて 1 job も取れていない形で「一致 0 件」と言わない
+    expect([...jobs.keys()], 'job の切り出しが壊れている').toEqual(['verify', 'smoke']);
+    expect(jobs.get('smoke'), 'smoke に install が無い').toContain('playwright install');
+    expect(jobs.get('verify'), '遅い install が速い lane へ戻っている').not.toContain(
+      'playwright install',
+    );
+    expect(jobs.get('verify'), 'smoke が速い lane へ戻っている').not.toContain('test:smoke');
+  });
+
+  it('🔴 2 つは並列(直列にすると budget の問題が解けない)', () => {
+    const jobs = jobsOf(CI);
+    for (const [name, body] of jobs) {
+      expect(body, `${name} に needs が付いている(直列になっている)`).not.toContain('needs:');
+      expect(body, `${name} に速度予算の tripwire が無い`).toContain('timeout-minutes: 10');
+    }
+  });
+});
