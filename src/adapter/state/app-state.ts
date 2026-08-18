@@ -420,6 +420,16 @@ export type UserAction =
       newKey: string;
       newHash: string | null;
       newBytes: number;
+      /**
+       * 🔴 **差し替え後の綴りと中身の種類**(#214)。
+       *
+       * ⚠ 直す前はここに載っていなかったので、`.odt` を開いて `.docx` で
+       * 上書き保存しても frontmatter は**古い綴りのまま**残り、
+       * 「Office で開く」が **`報告.odt` という名前で docx を渡して**いた
+       * (LO は拡張子で filter を選ぶ)。読み手は 5 面ある。
+       */
+      newName: string;
+      newMime: string;
       /** ISO 8601。⚠ **呼び側が渡す**(reducer は時計を持たない)。 */
       savedAt: string;
     }
@@ -625,6 +635,9 @@ export type DomainEvent =
       newKey: string;
       newHash: string | null;
       newBytes: number;
+      /** 差し替え後の綴りと中身の種類(#214)。⚠ frontmatter に書き戻す。 */
+      newName: string;
+      newMime: string;
       savedAt: string;
       entries: Array<{ lid: string; title: string; archetype: string; entryOrder: number }>;
     }
@@ -1114,6 +1127,8 @@ function reduceCore(
             newKey: action.newKey,
             newHash: action.newHash,
             newBytes: action.newBytes,
+            newName: action.newName,
+            newMime: action.newMime,
             savedAt: action.savedAt,
             // ⚠ **全ノート**を運ぶ ── 参照はどのノートにも書ける
             entries: state.order.flatMap((lid) => {

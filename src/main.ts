@@ -7,6 +7,7 @@ import { bindEditLockRelease } from '@adapter/state/edit-lock-release';
 import { connectStoreEffects, type StoreEffects } from '@adapter/state/store-effects';
 import { tileSelectsEntry } from '@features/launcher/tiles';
 import { appEditorMode } from '@adapter/ui/render/editor-mode';
+import { appOpenInEdit } from '@adapter/ui/render/open-in-edit';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { appKeymap } from '@adapter/ui/render/keymap';
 import { appBrowseMode, isBrowseMode } from '@adapter/ui/render/browse-mode';
@@ -806,6 +807,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           newKey: key,
           newHash: hash,
           newBytes: bytes.byteLength,
+          /**
+           * 🔴 **綴りと中身の種類も運ぶ**(#214)。⚠ 直す前は `mime` を
+           * 資産の meta(`putAssetMeta`)にだけ書いて、**frontmatter へは
+           * 運んでいなかった** ── `.odt` を `.docx` で上書き保存すると
+           * 「Office で開く」が古い綴りのまま LO へ渡していた。
+           */
+          newName: save.name,
+          newMime: mime,
           savedAt: new Date().toISOString(),
         });
         // ⚠ reducer は**門を 2 つ**持っている(`ready` か / いまも添付か)── 撃てたかを
@@ -1346,6 +1355,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      */
     setEditorMode: (mode) => {
       appEditorMode.setMode(mode);
+    },
+    /**
+     * ✏️ **開いたら編集に入るか**(user 裁定 2026-08-18)。⚠ **描き直さない** ──
+     * 効くのは次に「開く」を押したときからで、いま開いている面は壊さない
+     * (設定の説明文がそう約束している)。判断も保存も store 側が持つ。
+     */
+    setOpenInEdit: (on) => {
+      appOpenInEdit.setEnabled(on);
     },
     /**
      * ✏️🔒 編集権(#177 多重タブ)。⚠ 判断(誰が握っているか)は sync の実体

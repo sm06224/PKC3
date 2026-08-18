@@ -38,6 +38,10 @@ function plan(bodies: Record<string, string>, over: Partial<Parameters<typeof pl
     newKey: NEW,
     newHash: 'hh',
     newBytes: 222,
+    /** ⚠ 既定は**元と違う綴り・違う種類**にする ── 同じにすると
+     *  「書き戻していない」変異が素通りする(#214)。 */
+    newName: '報告書.odt',
+    newMime: 'application/vnd.oasis.opendocument.text',
     oldBytes: 100,
     savedAt: AT,
     bodies: new Map(Object.entries(bodies)),
@@ -75,6 +79,7 @@ describe('planSaveBack', () => {
   it('🔴 中身が同じなら何もしない(保存しただけで版を積まない)', () => {
     const p = planSaveBack({
       targetLid: 'a1', oldKey: OLD, newKey: OLD, newHash: null, newBytes: 1,
+      newName: '報告書.docx', newMime: 'application/msword',
       oldBytes: 1, savedAt: AT, bodies: new Map([['a1', attachBody()]]),
     });
     expect(p.unchanged).toBe(true);

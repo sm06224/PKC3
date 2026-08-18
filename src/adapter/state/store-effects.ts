@@ -605,6 +605,9 @@ export function connectStoreEffects(
               newKey: ev.newKey,
               newHash: ev.newHash,
               newBytes: ev.newBytes,
+              // 🔴 綴りと中身の種類も frontmatter へ戻す(#214)
+              newName: ev.newName,
+              newMime: ev.newMime,
               oldBytes: oldSize,
               savedAt: ev.savedAt,
               bodies,

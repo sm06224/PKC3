@@ -1,7 +1,32 @@
-# PKC3 CI — verify(設計 doc §7・§11 P1)
+# PKC3 CI — PR gate(設計 doc §7・§11 P1)
 # PR gate は速い lane に限定(CLAUDE.md プロセス指示、user 指示 2026-07-30
 # 「PKC2 は CI 長すぎ問題があった」)。重い検証(視覚全量・ベンチ・matrix)は
 # main push / nightly / 手動 dispatch へ。timeout 10 分は速度予算の tripwire。
+#
+# 🔴 **job は 2 つに割ってある**(2026-08-18)。
+#
+# ⚠ 直す前は smoke を `verify` に同居させており、その理由は
+# 「`npm ci` / build の二重払い(PKC2 のセットアップ税)を避けるため」と
+# 書いてあった。**実測すると、その理由は成り立っていなかった**:
+#
+# | step | 実測 |
+# |---|---|
+# | `npm ci` | 5〜7 秒 |
+# | `npm run build` | 3 秒 |
+# | **`playwright install --with-deps`** | **22 秒 / 291 秒 / 390 秒**(3 回測った) |
+#
+# つまり払っていた「税」は **10 秒**で、budget を溶かしていたのは**その隣**だった。
+# ⚠ ブラウザの**ダウンロードは 114.7 MiB を 1 秒**で終えている(ログで確認)ので、
+# ぶれているのは `--with-deps` の apt 側である。⚠ キャッシュしても効かない。
+#
+# 帰結: install が遅い回に **speed budget(10 分)を 2 度踏んで job ごと cancel** され、
+# **緑だったはずの PR が赤に見えた**(smoke は 105/165 まで通っていた)。
+# 🔑 割れば、速い lane は ~90 秒で確定し、smoke lane は最悪の install でも 10 分に収まる。
+# 🔑 **1 job = 1 主張**(user 指示 2026-08-10)にも合う ── 落ちたとき、
+#   「型 / lint / unit が壊れた」のか「実ブラウザで壊れた」のかが**名前で分かる**。
+#
+# ⚠ 2 つは**並列**に走らせる(`needs:` を張らない)── 直列にすると、速い lane が
+#   緑でも smoke の結果が 90 秒遅れるだけで、budget の問題は何も解けない。
 name: CI
 on:
   push:
@@ -11,6 +36,7 @@ on:
 permissions:
   contents: read
 jobs:
+  # ── 速い lane: 型 / lint / unit / build / 生成物の検品 ─────────────────
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -50,9 +76,23 @@ jobs:
       # product 固有の検品は tests/build-config.test.ts(config)+ nightly / release(実物)
       - name: dist の検品(map の有無 / 参照の実在 / 配る量の tripwire)
         run: node scripts/check-dist.mjs dev
-      # 視覚 smoke は「数 spec・秒オーダー」のみ PR gate に載せる(CLAUDE.md
-      # プロセス指示)。別 job にしない ── npm ci / build の二重払い(PKC2 の
-      # セットアップ税)を避けるため verify に同居。全量・重い検証は nightly.yml
+
+  # ── 実ブラウザ lane: 最小 smoke(全量は nightly) ─────────────────────
+  # ⚠ ここだけ `playwright install` を払う。上の注記のとおり、この step は
+  #   22〜390 秒でぶれるので**速い lane と同じ budget に同居させない**。
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # ⚠ smoke は `vite preview` で **`dist/` を配信する**ので、build が要る
+      #   (source を書き換えただけでは smoke に一切届かない ── CLAUDE.md §3)
+      - run: VITE_PKC_KIND=dev npm run build
       - run: npx playwright install chromium --with-deps
       - name: Visual smoke (PR gate lane — 全量は nightly)
         run: npm run test:smoke

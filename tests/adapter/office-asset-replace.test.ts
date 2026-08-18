@@ -17,6 +17,7 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import { parseFrontmatter } from '../../src/features/markdown/frontmatter';
+import { readAttachmentMeta } from '../../src/features/flavor/attachment-flavor';
 
 const tick = (ms = 20): Promise<unknown> => new Promise((r) => setTimeout(r, ms));
 
@@ -99,12 +100,21 @@ function setup(bodies: Record<string, string>, metas: EntryMeta[]): {
   };
 }
 
-const saved = (lid: string, key = 'ast-new'): Parameters<Dispatcher['dispatch']>[0] => ({
+const saved = (
+  lid: string,
+  key = 'ast-new',
+  /** 差し替え後の綴りと中身の種類(#214)。⚠ 既定は**別の拡張子**にする ── 元と
+   *  同じにすると「書き戻していない」変異が素通りする。 */
+  name = '報告.docx',
+  mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+): Parameters<Dispatcher['dispatch']>[0] => ({
   type: 'OFFICE_ASSET_SAVED',
   lid,
   newKey: key,
   newHash: 'h'.repeat(64),
   newBytes: 4242,
+  newName: name,
+  newMime: mime,
   savedAt: '2026-08-16T00:00:00.000Z',
 });
 
@@ -117,6 +127,30 @@ describe('Office の保存でノートの添付が差し替わる', () => {
     expect(fm['attachment.asset_key'], 'key が古いまま').toBe('ast-new');
     expect(fm['attachment.size']).toBe(4242);
     expect(fm['attachment.hash']).toBe('h'.repeat(64));
+  });
+
+  it('🔴 綴りと中身の種類も新しくなる(#214)── 読み手 5 面が同じ場所を見る', async () => {
+    /**
+     * 🔴 直す前は key / size / hash / history の 4 つしか書き戻しておらず、
+     * `.odt` を `.docx` で上書き保存しても frontmatter は**古い綴りのまま**残った。
+     * ⚠ いちばん効くのは **「Office で開く」** ── LO は**拡張子で filter を選ぶ**ので、
+     * `報告.odt` という名前で docx を渡すと開けない。
+     * 🔑 読み手は `readAttachmentMeta` 1 か所に寄っているので、**そこから見る**
+     * (frontmatter の生の key を数えるだけだと、読み手が別 key を見ていても緑になる)。
+     */
+    const h = setup({ a1: DOC }, [meta('a1', 'attachment')]);
+    // 空振り防止 ── 差し替え前は**古い綴り**であること
+    const before = readAttachmentMeta(h.bodies.a1!);
+    expect(before.name, '前提が崩れている(既に新しい綴り)').not.toBe('報告.docx');
+    h.d.dispatch(saved('a1'));
+    await tick();
+    const after = readAttachmentMeta(h.bodies.a1!);
+    expect(after.name, '綴りが古いまま(ダウンロード名 / Office の filter が狂う)').toBe(
+      '報告.docx',
+    );
+    expect(after.mime, '中身の種類が古いまま').toBe(
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    );
   });
 
   it('🔴 旧版が台帳に積まれる(戻せなくならない)', async () => {
