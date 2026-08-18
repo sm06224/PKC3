@@ -131,8 +131,14 @@ test('🔴 近道はブラウザの既定を止める(保存ダイアログ / �
     () => (window as unknown as { __keys: { key: string; prevented: boolean }[] }).__keys,
   );
   const prevented = (k: string) => seen.find((s) => s.key.toLowerCase() === k)?.prevented;
-  expect(prevented('n'), 'Ctrl+N がブラウザに渡っている(新しい窓が開く)').toBe(true);
-  expect(prevented('3'), 'Alt+3 がブラウザに渡っている').toBe(true);
+  /**
+   * ⚠ 見ているのは「**アプリが既定を止めた**」ことだけである(着地前レビュー 10)。
+   * ブラウザが予約している鍵(`Ctrl+N` / `Ctrl+T` / `Ctrl+W`)を実際に奪えるかは
+   * **ページからは確かめられない** ── そこは user の実機で見る話で、ここでは
+   * 「アプリが受けて止めている」までを主張する(計器の名前を主張より広げない)。
+   */
+  expect(prevented('n'), 'Ctrl+N をアプリが受けて止めていない').toBe(true);
+  expect(prevented('3'), 'Alt+3 をアプリが受けて止めていない').toBe(true);
   expect(prevented('f9'), '割り当てていない鍵まで止めている').toBe(false);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);

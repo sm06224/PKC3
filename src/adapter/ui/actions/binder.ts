@@ -26,7 +26,7 @@ import { isPaneId, PANES } from '@features/pane-visibility';
 import { STRUCTURAL, isRelationKind } from '@features/relation/kinds';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
-import { findCommand } from '@features/keymap';
+import { chordOf, findCommand, typesCharacter } from '@features/keymap';
 import { appQueryKey } from '@adapter/ui/render/query-key-store';
 import { resolveFilerScope } from '@features/relation/tree';
 import { parseLinkTarget } from '@features/entry-ref/link-target';
@@ -1728,25 +1728,34 @@ export function bindActions(
     const ke = ev as KeyboardEvent;
     if (ke.isComposing || !root.isConnected) return;
     const el = ke.target instanceof HTMLElement ? ke.target : null;
-    const field = el?.getAttribute('data-pkc-field') ?? null;
     /**
-     * 🔴 **打っている欄**の数え方(#256 で 2 つ足した)。
-     * ⚠ `row-source`(1 面の行の欄)を数えていなかったので、**ライブ編集で
-     *   打っている最中に `Ctrl+N` が通り、別のノートへ飛んでいた**
-     *   ── マニュアルの「Ctrl+N は編集中には効きません」が破れていた。
-     * ⚠ `contenteditable` も数える ── PKC2 は keymap registry がここを見ておらず、
-     *   セル編集中に面が切り替わる穴が残っていた(PKC2 全数調査 2026-08-18)。
+     * 🔴 **打っている欄は「名前」ではなく「構造」で見る**(着地前レビュー 4)。
+     *
+     * ⚠ 直す前は `data-pkc-field` の名指し 4 つ + `contenteditable` だった ──
+     * **実在する入力欄を 6 つ数え落として**いた(絞り込み `entry-filter` /
+     * 置換の 2 欄 / 関係の相手 / アプリの分類・図案)。絞り込みに語を打っている
+     * 最中の `Ctrl+E` で**編集に入って面が変わる**、`Alt+2` で集計へ飛ぶ、が起きる。
+     * ⚠ 名指しの表は「欄が増えるたびに直す」形で、**増やした人は気づけない**。
+     * 🔑 `<textarea>` / 文字を打つ `<input>` / `contenteditable` を構造で拾う。
+     * ⚠ `button` / `checkbox` / `radio` / `file` / `submit` は**打つ欄ではない**
+     *   (押しボタンに焦点があるときまで近道を止めると、キーボードだけの動線が死ぬ)。
      */
     const typing =
-      field === 'editor-body' ||
-      field === 'editor-title' ||
-      field === 'append-input' ||
-      field === 'row-source' ||
+      el instanceof HTMLTextAreaElement ||
+      (el instanceof HTMLInputElement &&
+        !/^(button|checkbox|radio|file|submit|reset|image)$/.test(el.type)) ||
       el?.isContentEditable === true;
     const cmd = keymap.match(ke, 'global');
     if (cmd === null) return;
-    // 打鍵中に効かせてよいかは**コマンドが名乗る**(`features/keymap.ts` の表)
-    if (typing && findCommand(cmd)?.whileTyping !== true) return;
+    /**
+     * 打鍵中に効かせてよいか。**コマンドが名乗る** + **その和音が文字を打たない**の
+     * 両方が要る(着地前レビュー 2)── `open-help` は `F1` のために名乗っているが、
+     * 別名の `Alt+5` は mac で `∞` を打つ鍵である。名乗りだけを見ると、
+     * **本文に記号が入らずヘルプが開く**。
+     */
+    const chord = chordOf(ke);
+    if (typing && !(findCommand(cmd)?.whileTyping === true && chord !== null && !typesCharacter(chord)))
+      return;
     if (cmd === 'nav-back' || cmd === 'nav-forward') {
       ke.preventDefault();
       dispatcher.dispatch({ type: 'NAV_HISTORY', dir: cmd === 'nav-back' ? 'back' : 'forward' });

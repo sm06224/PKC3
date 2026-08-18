@@ -82,7 +82,8 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     label: '選んでいるノートを編集する',
     contexts: ['global'],
     defaults: ['Mod+E'],
-    note: 'PKC2 の Ctrl+E と同じ手',
+    // ⚠ 「編集」の押しボタンは**ノートを選んでいるときだけ**在る(着地前レビュー 8)
+    note: 'ノートを選んでいるときだけ効きます(PKC2 の Ctrl+E と同じ手)',
   },
   {
     id: 'focus-search',
@@ -97,6 +98,8 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global'],
     defaults: ['Mod+H'],
     whileTyping: true,
+    // ⚠ 帯は**編集中しか画面に無い**(着地前レビュー 8)── 閲覧中に押しても何も起きない
+    note: '編集中だけ効きます(置換は編集している本文に効くため)',
   },
   {
     id: 'view-detail',
@@ -217,7 +220,10 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     id: 'row-commit',
     label: 'その行を確定して閉じる',
     contexts: ['row'],
-    defaults: ['Tab', 'Mod+Enter', 'Mod+S'],
+    // ⚠ `Shift+Tab` を残す(着地前レビュー 9)── 直す前は `ke.key === 'Tab'` で
+    //    **修飾を見ていなかった**ので `Shift+Tab` でも確定していた。和音一致に
+    //    変えた時点で静かに落ちており、押すと焦点だけがブラウザ既定で飛んでいた
+    defaults: ['Tab', 'Shift+Tab', 'Mod+Enter', 'Mod+S'],
   },
   {
     id: 'row-cancel',
@@ -302,6 +308,16 @@ const NAMED_CODES: Readonly<Record<string, string>> = {
   Minus: 'Minus',
   Equal: 'Equal',
   Backquote: 'Backquote',
+  /**
+   * 🔴 **US 配列に無い物理キー**(着地前レビュー 7)。`code` に賭けた以上、
+   * JIS の `IntlYen` / `IntlRo`、ISO の `IntlBackslash` は**名前を持たない** ──
+   * 既定の `Ctrl+\\`(左のペイン)が、その配列では**押せない鍵**になる。
+   * ⚠ 同じ「バックスラッシュを打つ鍵」へ寄せる ── ISO では 1 つの名前に 2 つの
+   * 物理キーが当たるが、「押せない」より良いと判断した。
+   */
+  IntlYen: 'Backslash',
+  IntlRo: 'Backslash',
+  IntlBackslash: 'Backslash',
 };
 
 /** 表示のときだけ使う「刻印」。⚠ 割当の同一性はあくまで `code` 側の名前で見る。 */
@@ -463,6 +479,42 @@ export function isMac(): boolean {
 }
 
 /**
+ * 🔴 **その和音は「文字を打つ手」とぶつかるか**(着地前レビュー 2)。
+ *
+ * ⚠ `whileTyping` を**コマンド単位**にしていたので、`F1` のための免除が
+ * **同じコマンドの別名 `Alt+5` にもそのまま効いて**いた ── mac では
+ * `Option+5` が `∞`、`Option+[` が `“` を打つ鍵なので、**本文を書いている最中に
+ * 文字が入らずヘルプが開く / ペインが畳まれる**(実装を読んで判明。mac 実機は未確認)。
+ * 🔑 判定は**和音**でやる: `Mod` を含む / F キー / 矢印・編集キーは文字を打たない。
+ * それ以外(`Alt+<1 文字>` や素の 1 文字)は、打鍵中は効かせない。
+ */
+export function typesCharacter(chord: Chord): boolean {
+  if (chord.mod) return false; // Ctrl / ⌘ の組み合わせは文字にならない
+  if (/^F([1-9]|1[0-9]|2[0-4])$/.test(chord.key)) return false;
+  // 矢印・移動・編集キーは「文字を打つ鍵」ではない(mac の Option+← は移動 ──
+  // ⚠ そこを奪う是非は別の話で、直す前からの挙動をここでは変えない)
+  if (NON_TEXT_KEYS.has(chord.key)) return false;
+  return true;
+}
+
+/** 文字を打たないキー(移動・編集)。⚠ **記号は入れない** ── `Alt+[` は打てる。 */
+const NON_TEXT_KEYS = new Set([
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight',
+  'Home',
+  'End',
+  'PageUp',
+  'PageDown',
+  'Escape',
+  'Delete',
+  'Backspace',
+  'Tab',
+  'Enter',
+]);
+
+/**
  * 🔴 **修飾の無い割当は原則断る** ── 素の `B` を割り当てると、その面で **B が打てなくなる**。
  * 例外は「文字を打つ鍵ではない」もの(F1〜F24 / Escape / Tab)だけ。
  * ⚠ Tab を例外に入れるのは既定(`row-commit`)がそうだから ── 例外を作らないと
@@ -479,7 +531,19 @@ function bareAllowed(key: string): boolean {
  * ⚠ `Mod+S` / `Mod+A` / `Mod+Z` は **PKC3 が既に横取りしている**(既定)ので入れない ──
  * 「入れたら既定が違反になる」条件を書かない(§1「成り立たない主張」の予防)。
  */
-const REFUSED: readonly string[] = ['Mod+C', 'Mod+V', 'Mod+X', 'Mod+Q', 'Mod+W', 'Mod+T'];
+const REFUSED: readonly string[] = [
+  'Mod+C',
+  'Mod+V',
+  'Mod+X',
+  'Mod+Q',
+  'Mod+W',
+  'Mod+T',
+  // 🔴 **奪えてしまう鍵**(着地前レビュー 6)── ブラウザが守る `Mod+W` 等と違い、
+  //    再読込と印刷は**ページが横取りできる**。奪うと user は戻し道を見失う
+  //    (「再読込できないと直せない」と思う)
+  'Mod+R',
+  'Mod+P',
+];
 
 export interface BindingProblem {
   readonly kind: 'unreadable' | 'bare' | 'refused' | 'conflict';

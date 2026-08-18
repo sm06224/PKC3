@@ -20,7 +20,6 @@ import {
   chordOf,
   chordToString,
   chordFromString,
-  defaultBindings,
   findCommand,
   KEY_COMMANDS,
   matchCommand,
@@ -208,6 +207,3 @@ export class KeymapStore {
 
 /** アプリ共有の 1 個。⚠ 読む側は必ずこれを引く(`appFlags` / `appEditorMode` と同じ規律)。 */
 export const appKeymap = new KeymapStore();
-
-/** 既定だけの割当(test / 表示の対照群)。 */
-export const DEFAULT_BINDINGS: KeymapBindings = defaultBindings();

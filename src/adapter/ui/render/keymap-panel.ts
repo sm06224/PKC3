@@ -143,6 +143,21 @@ export function buildKeymapPanel(
       assign.addEventListener('click', () => {
         startCapture(cmd.id);
       });
+      /**
+       * 🔴 **面を離れたら捕獲をやめる**(着地前レビュー 1)。
+       *
+       * ⚠ 直す前、捕獲を落とすのは「Esc」「何か押した」「dispose」の 3 つだけで、
+       * **面が `hidden` になっても生きていた** ── 割り当てを押したまま左の一覧を
+       * クリックして本文へ移り、そこで `Ctrl+B` を押すと**その鍵が黙って
+       * 「編集する」に化ける**(断り文も成功の表示も hidden の面の中なので、
+       * 画面には何も出ない)。
+       * 🔑 焦点が離れる = 面を離れる、なので `blur` 1 つで経路がまとめて塞がる。
+       */
+      assign.addEventListener('blur', () => {
+        if (capturing !== cmd.id) return;
+        stopCapture();
+        sync();
+      });
       reset.addEventListener('click', () => {
         store.resetCommand(cmd.id);
       });
