@@ -184,6 +184,8 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'export-entry': 'arrow-out',
   'show-history': 'clock',
   'delete-entry': 'trash',
+  // まとめてゴミ箱へ(#240 段③)── 1 件の削除と**同じ図案**(同じ意味だから)
+  'delete-selected': 'trash',
   /** 図を保存(`mermaid-hydrate` が手組みしていた ⬇ をここへ寄せた)。 */
   'save-diagram': 'arrow-down',
   /** 種類を選ぶ(分割ボタンの ▼)。 */

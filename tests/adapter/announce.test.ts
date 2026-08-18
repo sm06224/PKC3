@@ -535,6 +535,7 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
+    ['2026-08-18-folder-first', 'c35f066d'],
     ['2026-08-18-shortcut-keys', 'b12084ce'],
     ['2026-08-18-paste-and-drop', 'dd7d171c'],
     ['2026-08-18-word-vector-figures', 'a1641a5b'],
@@ -554,7 +555,6 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-08-15-nav-and-panes', '265437d9'],
     ['2026-08-15-search-sort-tags', '84c6fe93'],
     ['2026-08-15-multi-tab', 'e2df18fa'],
-    ['2026-08-14-live-editor-default', '7cdcef0b'],
   ];
 
   const digest = (n: { title: string; items: readonly string[] }): string =>

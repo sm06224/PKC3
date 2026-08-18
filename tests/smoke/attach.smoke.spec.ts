@@ -5,12 +5,13 @@
 import { test, expect } from '@playwright/test';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { gotoApp, collectPageErrors, clickReal, expectImageRendered, createEntry, useSplitEditor } from './helpers';
+import { gotoApp, collectPageErrors, clickReal, expectImageRendered, createEntry, useSplitEditor, useListBrowse } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
 // 既定(live)の顔は live-editor.smoke.spec.ts が守る。
 test.beforeEach(async ({ page }) => {
+  await useListBrowse(page);
   await useSplitEditor(page);
 });
 

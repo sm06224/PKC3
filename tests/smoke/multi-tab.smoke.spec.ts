@@ -9,7 +9,13 @@
  *   origin + profile 単位 ── context を分けると別世界になり、何も検証しない)。
  */
 import { test, expect, type Page } from '@playwright/test';
-import { gotoApp, collectPageErrors, clickReal, createEntry, useSplitEditor } from './helpers';
+import { gotoApp, collectPageErrors, clickReal, createEntry, useSplitEditor, useListBrowse } from './helpers';
+
+// 🔑 #240 段⑤ で左の列の既定は**フォルダ**になった ── この file は一覧の行を
+// 掴むので、一覧タブで開く仕込みを入れる(既定の顔は organize.smoke が守る)。
+test.beforeEach(async ({ page }) => {
+  await useListBrowse(page);
+});
 
 test('2 枚目のタブが本体経由で開き、別ノートは編集でき、同じノートは断られる', async ({
   page,

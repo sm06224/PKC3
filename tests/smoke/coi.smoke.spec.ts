@@ -129,9 +129,11 @@ test('🔴 分離した状態で worker が読める(COEP は worker script に�
   await booted(page);
 
   expect(blocked, 'COEP が何かを弾いている').toEqual([]);
-  // storage worker が生きている = ノートを 1 件作って一覧に出る
+  // storage worker が生きている = ノートを 1 件作って左の列に出る
+  // ⚠ 既定の面は**フォルダ**(#240 段⑤)── ここで見たいのは「worker が返事をした」
+  //    ことなので、既定の面のまま数える(一覧タブへ切り替える必要は無い)
   await page.locator('[data-pkc-action="create-entry"]').first().click();
-  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(1);
+  await expect(page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]')).toHaveCount(1);
 });
 
 test('🔴 オフラインで cache から出した文書でも分離が外れない', async ({ page, context }, testInfo) => {

@@ -19,15 +19,13 @@
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import type { AppState } from '@adapter/state/app-state';
 import {
-  getStructuralChildren,
-  getRootEntries,
   getAncestorFolders,
   resolveCanonicalParents,
-  resolveFilerScope,
   listMoveTargets,
   listSiblings,
 } from '@features/relation/tree';
-import { matchesEntry, normalizeQuery } from '@features/filter/title-filter';
+import { filerRows } from '@features/relation/filer-list';
+import { normalizeQuery } from '@features/filter/title-filter';
 // 🔑 種別の呼び名は **1 本**(P8 段⑲)── かつてここだけ独自表を持ち、
 //    同じノートがフォルダ画面では「シート」、他の全画面では「表」と出ていた
 import { archetypeLabel } from './sidebar';
@@ -52,8 +50,13 @@ export class FilerRenderer {
   private lastRelations: readonly Relation[] | null = null;
   private lastSelected: string | null = null;
   private lastScopeLid: string | null = null;
+  /** 印(複数選択)の指紋。⚠ 参照ではなく**中身**で見る(配列は毎回作り直される)。 */
+  private lastMarks = '';
   /** ⚠ 絞り込みも指紋の一部(review M-3 ── 絞り込み中にファイラだけ全件出ていた)。 */
   private lastFilter: string | null = null;
+  /** ⚠ 並び順と本文検索の当たりも指紋(着地前レビュー 3 ── 入れないと死んだ操作子になる)。 */
+  private lastSort: AppState['entrySort'] | null = null;
+  private lastHits: AppState['searchHits'] = null;
   /** ゴミ箱 panel の断面(参照比較 ── P5b で指紋に加わった次元)。 */
   private lastTrash: AppState['trashPanel'] = null;
   /** 居場所を変える帯の器(中身は選択が変わるたびに差し替える)。 */
@@ -75,10 +78,56 @@ export class FilerRenderer {
    * 「いま選んでいるものの居場所」を**いつも同じ場所**に出す
    * (user 指示 2026-08-03「同じものが常に同じ場所にある」)。
    */
+  /**
+   * 印(複数選択)だけを塗り直す(#240 段②)。
+   * ⚠ 表を組み直さない**速い経路**でも呼ぶ ── 呼ばないと `Ctrl` クリックで
+   * state だけ動いて画面が追いつかない。
+   */
+  private paintMarks(state: AppState): void {
+    const marked = new Set(state.selection);
+    for (const [lid, tr] of this.rows) {
+      if (marked.has(lid)) tr.setAttribute('data-pkc-marked', '');
+      else tr.removeAttribute('data-pkc-marked');
+    }
+    this.lastMarks = state.selection.join(' ');
+  }
+
   private renderMoveBar(state: AppState, scope: EntryMeta | null): void {
     const host = this.moveBar;
     if (!host) return;
     host.textContent = '';
+
+    /**
+     * 🔴 **まとめて操作する帯**(#240 段③。user 指示 2026-08-17「まとめて消せない」)。
+     *
+     * ⚠ **2 件以上のときだけ**出す ── 1 件のときは下の「居場所」の帯と役割が重なる。
+     * ⚠ 出すのは**ゴミ箱へ**だけ(完全削除は一括で撃たせない。戻せない操作を
+     *   まとめて撃てるようにするのが、いちばん事故が大きい)。
+     */
+    /**
+     * 🔴 **数えるのは「いま表に出ている印」だけ**(着地前レビュー 2)。
+     * ⚠ 印は行が見えなくなっても残る(絞り込みで消えた / 別の場所へ移った)ので、
+     *    素で数えると**画面に印が 1 つも無いのに「3 件を選んでいます」**が出て、
+     *    押すと画面に無い 3 件がゴミ箱へ入る。
+     * ⚠ 消す側(`binder` の `delete-selected`)と**同じ規則**である ── 数と対象が
+     *    食い違うと、確認の文言が嘘になる。
+     */
+    const marks = state.selection.filter((lid) => this.rows.has(lid));
+    if (marks.length > 1) {
+      const bulk = document.createElement('div');
+      bulk.setAttribute('data-pkc-field', 'filer-bulk');
+      const count = document.createElement('span');
+      count.setAttribute('data-pkc-field', 'filer-bulk-count');
+      count.textContent = `${marks.length} 件を選んでいます`;
+      const del = iconButton('delete-selected', 'まとめてゴミ箱へ');
+      del.title = `選んでいる ${marks.length} 件をゴミ箱へ入れます(フォルダ画面から戻せます)`;
+      const clear = document.createElement('button');
+      clear.type = 'button';
+      clear.setAttribute('data-pkc-action', 'clear-selection');
+      clear.textContent = '選択を解除';
+      bulk.append(count, del, clear);
+      host.append(bulk);
+    }
 
     const moving = state.selectedLid ? (state.entryMetas.get(state.selectedLid) ?? null) : null;
     if (!moving) {
@@ -189,16 +238,41 @@ export class FilerRenderer {
      *   「参照が変わった」の大半は**見た目の変化ゼロ**である。
      * 🔑 だから指紋は**画面に出る材料そのもの**にする ── 参照ではなく内容。
      */
+    /**
+     * 🔴 **並び順と本文検索の当たりも指紋に入れる**(着地前レビュー 3)。
+     * ⚠ `filerRows` へ渡しているのに指紋に入れていなかったので、`SET_ENTRY_SORT`
+     *    では**1 バイトも描き直さなかった** ── 並べ替えの `<select>` は
+     *    `findBar` に在って**フォルダタブでも見えている**ので、段⑤ で既定に
+     *    なったこの面に、押しても何も起きない操作子が出ていた。
+     * ⚠ 同じ罠は sidebar で既に踏んで直してある(`sidebar.ts` の `lastSort` /
+     *    `lastHits`)── **回帰 test がそちらしか import していなかった**ので、
+     *    こちらは誰にも守られていなかった(CLAUDE.md「test の import 一覧」)。
+     */
     const listChanged =
       state.relations !== this.lastRelations ||
       state.filterQuery !== this.lastFilter ||
+      state.entrySort !== this.lastSort ||
+      state.searchHits !== this.lastHits ||
       (state.entryMetas !== this.lastMetas && this.metaSignature(state) !== this.lastSignature);
     const selectionChanged = state.selectedLid !== this.lastSelected;
+    // ⚠ 現在地は選択と**別に**変わる(#240 段①)── 指紋に入れないと、
+    //    フォルダへ入っても表が組み直されない
+    const scopeChanged = state.scopeLid !== this.lastScopeLid;
+    // ⚠ 印(複数選択)も指紋に入れる(#240 段②)── 入れないと Ctrl クリックしても
+    //    行の印が付かない(state だけ動いて画面が嘘をつく)
+    const marksChanged = state.selection.join(' ') !== this.lastMarks;
     const trashChanged = state.trashPanel !== this.lastTrash;
-    if (!listChanged && !selectionChanged && !trashChanged) return;
+    if (!listChanged && !selectionChanged && !trashChanged && !scopeChanged && !marksChanged)
+      return;
 
-    const scope = resolveFilerScope(state.selectedLid, state.entryMetas, state.relations);
-    const scopeLid = scope?.lid ?? null;
+    /**
+     * 🔴 **現在地は state が持つ**(#240 段①)。直す前はここが
+     * `resolveFilerScope(state.selectedLid, …)` ── **選ぶと入ってしまう**ので、
+     * user 指示「ダブルクリックで開く」も、この先の複数選択も成り立たなかった。
+     * ⚠ 消えた lid は `removeEntry` が畳むので、ここでは引けなければルート扱い。
+     */
+    const scopeLid = state.scopeLid;
+    const scope = scopeLid === null ? null : (state.entryMetas.get(scopeLid) ?? null);
 
     if (!listChanged && !trashChanged && scopeLid === this.lastScopeLid) {
       // 選択だけの変化(scope 不変)── 属性 patch のみで済ませる
@@ -209,6 +283,7 @@ export class FilerRenderer {
         this.rows.get(state.selectedLid)?.setAttribute('data-pkc-selected', '');
       }
       this.lastSelected = state.selectedLid;
+      this.paintMarks(state);
       // 🔴 **居場所の帯は選択に追従する**(2026-08-05)。ここを忘れると、
       //    行を選び直しても帯は**前に選んでいたものを指したまま**になり、
       //    「移動」を押すと**別のノートが動く**(見えない取り違え)
@@ -223,15 +298,25 @@ export class FilerRenderer {
     this.lastScopeLid = scopeLid;
     this.lastTrash = state.trashPanel;
     this.lastFilter = state.filterQuery;
+    this.lastSort = state.entrySort;
+    this.lastHits = state.searchHits;
+    this.lastMarks = state.selection.join(' ');
 
-    // ⚠ 絞り込みは**全部の面**に同じ規則で効かせる(review M-3)。
-    // scope(どのフォルダを見ているか)は動かさない ── 絞るのは**中身**だけ
+    /**
+     * 🔴 **行を決めるのは `filerRows` 1 か所**(#240 段②)。
+     *
+     * ⚠ ここで組み直すと、**範囲選択(reducer)と表示(ここ)が別の並びを持つ** ──
+     * 目で見た範囲と選ばれる範囲が食い違う、いちばん気づけない形になる
+     * (CLAUDE.md §7)。⚠ 絞り込みは全部の面に同じ規則で効かせる(review M-3)。
+     * 🔑 **並び順(#183)もここで効く**ようになった ── 直す前、フォルダ面は
+     * 並べ替えを 1 度も見ておらず、一覧タブで題名順にしても中は作成順のままだった。
+     */
     const q = normalizeQuery(state.filterQuery);
-    const list = (
-      scope
-        ? getStructuralChildren(scope.lid, state.entryMetas, state.relations)
-        : getRootEntries(state.entryMetas, state.relations)
-    ).filter((m) => matchesEntry(m.lid, m.title, q, state.searchHits));
+    const list = filerRows(scopeLid, state.entryMetas, state.relations, {
+      filterQuery: state.filterQuery,
+      searchHits: state.searchHits,
+      sort: state.entrySort,
+    });
 
     this.region.textContent = '';
     this.rows.clear();
@@ -241,7 +326,11 @@ export class FilerRenderer {
     crumb.setAttribute('data-pkc-region', 'filer-breadcrumb');
     const rootSeg = document.createElement('button');
     rootSeg.type = 'button';
-    rootSeg.setAttribute('data-pkc-action', 'filer-root');
+    // ⚠ ルートは**現在地だけ**を戻す(#240 段①)── 直す前は `DESELECT_ENTRY` で
+    //    選択ごと捨てており、**ルートに戻ると中央のノートまで閉じて**いた
+    rootSeg.setAttribute('data-pkc-action', 'enter-folder');
+    // ⚠ パンくずは**出す**ための落とし先(#240 段④)── 上の階層へ戻す唯一の D&D 動線
+    rootSeg.setAttribute('data-pkc-drop', 'crumb');
     rootSeg.textContent = 'ルート';
     crumb.append(rootSeg);
     if (scope) {
@@ -256,16 +345,25 @@ export class FilerRenderer {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.setAttribute('data-pkc-entry', seg.lid);
-        btn.setAttribute('data-pkc-action', 'select-entry');
+        // パンくずの段は「そこへ入る」── 選ぶ操作ではない(#240 段①)
+        btn.setAttribute('data-pkc-action', 'enter-folder');
+        btn.setAttribute('data-pkc-drop', 'crumb');
         btn.textContent = seg.title;
         crumb.append(btn);
       }
     }
     this.region.append(crumb);
+    /**
+     * 🔴 **操作の帯は表の「下」に置く**(#240 段①〜③ の実装中に実測で判明)。
+     *
+     * ⚠ 帯を表の**上**に置くと、**1 回目のクリックで帯が伸びて表が下へずれる** ──
+     * 2 回目のクリックは**別の行に落ちる**ので、「2 クリックで開く」も
+     * 「素早く 2 回押す」操作も成立しない(実ブラウザで再現。9ms 差の 2 打で
+     * `click detail=2` は届いているのに、当たっている要素が違っていた)。
+     * 🔑 表を先に置けば、帯が伸び縮みしても**行は動かない**。
+     */
     this.moveBar = document.createElement('div');
     this.moveBar.setAttribute('data-pkc-region', 'filer-move');
-    this.region.append(this.moveBar);
-    this.renderMoveBar(state, scope);
 
     const table = document.createElement('table');
     table.setAttribute('data-pkc-region', 'filer-table');
@@ -288,7 +386,17 @@ export class FilerRenderer {
       tr.setAttribute('data-pkc-entry', m.lid);
       tr.setAttribute('data-pkc-action', 'select-entry');
       tr.setAttribute('data-pkc-archetype', m.archetype);
+      /**
+       * 🔴 **掴んで動かす**(#240 段④。user 指示 2026-08-17「D&D を導入すること」)。
+       * ⚠ 落とし先は**フォルダの行**と**パンくず**の 2 つだけ ── 行と行の隙間
+       * (並べ替え)は別の主題なので、この段では作らない(doc §6-3 の裁定)。
+       * ⚠ `draggable` は行そのものに置く(セルに置くと掴む場所が読めない)。
+       */
+      tr.setAttribute('draggable', 'true');
+      if (m.archetype === 'folder') tr.setAttribute('data-pkc-drop', 'folder');
       if (m.lid === state.selectedLid) tr.setAttribute('data-pkc-selected', '');
+      // ⚠ **開いている**(`selected`)と**印を付けた**(`marked`)は別の印である
+      if (state.selection.includes(m.lid)) tr.setAttribute('data-pkc-marked', '');
       const name = document.createElement('td');
       name.setAttribute('data-pkc-field', 'title');
       // ⚠ 図案は**題名の文字列に混ぜない**(P9 段③)。以前は '📁 ' を題名の頭に
@@ -314,6 +422,9 @@ export class FilerRenderer {
     }
     table.append(thead, tbody);
     this.region.append(table);
+    // ⚠ 帯は**表の後**(上の注記)── 選んだ瞬間に行が動かないようにする
+    this.region.append(this.moveBar);
+    this.renderMoveBar(state, scope);
 
     if (list.length === 0) {
       const empty = document.createElement('p');

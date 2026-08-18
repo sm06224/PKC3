@@ -8,18 +8,19 @@
  * - 書いた bytes が**実 IDB** に入り、preview が blob: で**実際に描画**される
  * - 取り込んだ entry と履歴が、実 sqlite 経由の再読込で画面に現れる
  */
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { gzipSync, crc32 } from 'node:zlib';
 import { readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { gotoApp, collectPageErrors, clickReal, expectImageRendered, useSplitEditor } from './helpers';
+import { gotoApp, collectPageErrors, clickReal, expectImageRendered, useSplitEditor, useListBrowse } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
 // 既定(live)の顔は live-editor.smoke.spec.ts が守る。
 test.beforeEach(async ({ page }) => {
+  await useListBrowse(page);
   await useSplitEditor(page);
 });
 
@@ -68,6 +69,18 @@ const FILE = () => ({
   mimeType: 'text/html',
   buffer: Buffer.from(pkc2Html(), 'utf-8'),
 });
+
+/** フォルダの行へ入る(#240 段① で 2 クリックになった)。 */
+async function enterFolderRow(page: Page, selector: string): Promise<void> {
+  /**
+   * ⚠ **`locator.dblclick()` を使う**(`page.mouse.dblclick` ではなく)。
+   * 座標を先に採る書き方は、**採ってから押すまでの間に表が組み直されると**
+   * 2 回のクリックが別のノードに落ちて `dblclick` が出ない
+   * (再描画で node が差し替わるのは正常 ── `helpers.ts` の `withRerenderRetry` と同じ話)。
+   * locator 側は「安定するまで待ってから押す」ので、その窓が消える。
+   */
+  await page.locator(selector).first().dblclick();
+}
 
 test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画される', async ({ page }) => {
   const errors = collectPageErrors(page);
@@ -542,7 +555,8 @@ test('folder-export 取込 → filer で階層が実際にたどれる', async (
   ).toBe(2);
 
   // root へ入る → 「2026」フォルダと「直下メモ」
-  await clickReal(page, '[data-pkc-region="filer-table"] tbody tr:first-child');
+  // ⚠ フォルダへ入るのは**2 クリック**(#240 段①)
+  await enterFolderRow(page, '[data-pkc-region="filer-table"] tbody tr:first-child');
   await expect(rows).toHaveCount(2);
   await expect(rows.locator('[data-pkc-field="title"]')).toHaveText(['2026', '直下メモ']);
 
@@ -554,7 +568,8 @@ test('folder-export 取込 → filer で階層が実際にたどれる', async (
     .locator('[data-pkc-region="filer-table"] tbody tr[data-pkc-archetype="folder"]')
     .getAttribute('data-pkc-entry');
   // ⚠ 一覧タブにも同じ lid の行が居る(隠れている)── **表の中**を押す
-  await clickReal(page, `[data-pkc-region="filer-table"] [data-pkc-entry="${subLid}"]`);
+  // ⚠ 入るのは 2 クリック(#240 段①)
+  await enterFolderRow(page, `[data-pkc-region="filer-table"] [data-pkc-entry="${subLid}"]`);
   await expect(rows.locator('[data-pkc-field="title"]')).toHaveText(['空フォルダ', '議事録']);
 
   expect(errors).toEqual([]);

@@ -11,7 +11,7 @@
  * 誰も見ていなかった。ここでは「画面の操作 → state → 永続化要求」まで通す。
  */
 import { stubStamps } from '../helpers/store-stamps';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EntryMeta, Relation } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
@@ -327,14 +327,39 @@ function setup(metas: EntryMeta[], relations: Relation[]) {
   };
   const nudge = (dir: 'up' | 'down') =>
     q<HTMLButtonElement>(`[data-pkc-action="move-order-${dir}"]`);
-  return { root, d, pane, q, rows, moveSelect, moveTo, parentCalls, persisted, nudge };
+  /**
+   * 🔴 **フォルダへ入るのは 2 クリック**(#240 段①。user 指示 2026-08-17)。
+   * ⚠ 1 クリックは**選ぶだけ** ── 直す前は現在地が選択の純関数だったので
+   * 1 クリックで入っていた(その形は複数選択と両立しない)。
+   */
+  const enter = (lid: string) => {
+    const row = q<HTMLElement>(`tbody [data-pkc-entry="${lid}"]`)!;
+    row.click();
+    row.click(); // ⚠ 2 回目(#240 段①)
+  };
+  const toRoot = () => q<HTMLElement>('[data-pkc-region="filer-breadcrumb"] button')!.click();
+
+  return {
+    root,
+    d,
+    pane,
+    q,
+    rows,
+    moveSelect,
+    moveTo,
+    parentCalls,
+    persisted,
+    nudge,
+    enter,
+    toRoot,
+  };
 }
 
 describe('フォルダ整理の導線(画面)', () => {
   const METAS = [meta('f1', 1, 'folder'), meta('f2', 2, 'folder'), meta('n1', 3), meta('n2', 4)];
 
   it('🔴 選ぶ → 入れ先を選ぶ、で本当に入る(disk への要求まで届く)', async () => {
-    const { q, rows, moveTo, parentCalls } = setup(METAS, []);
+    const { q, rows, moveTo, parentCalls, toRoot } = setup(METAS, []);
     expect(rows()).toEqual(['f1', 'f2', 'n1', 'n2']);
 
     q<HTMLElement>('tbody [data-pkc-entry="n1"]')!.click();
@@ -352,14 +377,14 @@ describe('フォルダ整理の導線(画面)', () => {
       { lid: 'n1', parentLid: 'f1', relationId: expect.any(String) },
     ]);
     // ③ ルートからは消えている(2 か所に見えない)
-    q<HTMLElement>('[data-pkc-action="filer-root"]')!.click();
+    toRoot();
     await tick();
     expect(rows()).toEqual(['f1', 'f2', 'n2']);
   });
 
   it('🔴 ルートへ出せる(入れたら出せない、を作らない)', async () => {
-    const { q, rows, moveTo, parentCalls } = setup(METAS, [rel('r0', 'f1', 'n1')]);
-    q<HTMLElement>('tbody [data-pkc-entry="f1"]')!.click(); // scope = f1
+    const { q, rows, moveTo, parentCalls, enter } = setup(METAS, [rel('r0', 'f1', 'n1')]);
+    enter('f1'); // 2 クリックで入る(#240 段①)
     await tick();
     q<HTMLElement>('tbody [data-pkc-entry="n1"]')!.click();
     await tick();
@@ -370,7 +395,7 @@ describe('フォルダ整理の導線(画面)', () => {
     ]);
     // 出した先(= ルート)に付いていく
     expect(rows()).toEqual(['f1', 'f2', 'n1', 'n2']);
-    q<HTMLElement>('tbody [data-pkc-entry="f1"]')!.click();
+    enter('f1'); // ⚠ 入るのは 2 クリック(#240 段①)
     await tick();
     expect(rows()).toEqual([]); // f1 は空になった
   });
@@ -391,8 +416,8 @@ describe('フォルダ整理の導線(画面)', () => {
   });
 
   it('いまの居場所が選ばれた状態で出る(どこに居るか読める)', async () => {
-    const { q, moveSelect } = setup(METAS, [rel('r0', 'f2', 'n1')]);
-    q<HTMLElement>('tbody [data-pkc-entry="f2"]')!.click();
+    const { q, moveSelect, enter } = setup(METAS, [rel('r0', 'f2', 'n1')]);
+    enter('f2'); // ⚠ 入るのは 2 クリック(#240 段①)
     await tick();
     q<HTMLElement>('tbody [data-pkc-entry="n1"]')!.click();
     await tick();
@@ -415,8 +440,8 @@ describe('フォルダ整理の導線(画面)', () => {
   });
 
   it('🔴 いま見ているフォルダの中に作れる(押してからルートに落ちない)', async () => {
-    const { root, q, rows, d } = setup(METAS, []);
-    q<HTMLElement>('tbody [data-pkc-entry="f1"]')!.click(); // scope = f1
+    const { root, q, rows, d, enter } = setup(METAS, []);
+    enter('f1'); // 2 クリックで入る(#240 段①)
     await tick();
     // 作る先を**先に見せている**
     const where = q('[data-pkc-field="filer-create-target"]');
@@ -625,8 +650,8 @@ describe('並べ替えの導線(画面)', () => {
 
   it('フォルダの中でも並べ替えられる(root だけの機能にしない)', async () => {
     const metas = [meta('f1', 1, 'folder'), meta('x', 2), meta('y', 3)];
-    const { q, rows, nudge } = setup(metas, [rel('r1', 'f1', 'x'), rel('r2', 'f1', 'y')]);
-    q<HTMLElement>('tbody [data-pkc-entry="f1"]')!.click(); // scope = f1
+    const { q, rows, nudge, enter } = setup(metas, [rel('r1', 'f1', 'x'), rel('r2', 'f1', 'y')]);
+    enter('f1'); // 2 クリックで入る(#240 段①)
     await tick();
     q<HTMLElement>('tbody [data-pkc-entry="x"]')!.click();
     await tick();
@@ -635,3 +660,174 @@ describe('並べ替えの導線(画面)', () => {
     expect(rows()).toEqual(['y', 'x']);
   });
 });
+
+/**
+ * 🔴 **掴んで落とす(#240 段④)の unit**(着地前レビュー 8)。
+ *
+ * ⚠ 段④ には unit が 1 件も無く、smoke 1 本が「入る・出る」だけを見ていた ──
+ * **印ごと運ぶ / 落とし先の印 / フォルダ以外に落とせない**は誰も守っていなかった。
+ * ⚠ 「happy-dom に `DataTransfer` が無いから届かない」は誤り ── 実装が使うのは
+ * `types` / `getData` / `setData` / `dropEffect` の 4 つだけなので、最小の stub で回せる。
+ */
+const PKC_DRAG = 'application/x-pkc-lids';
+
+function dataTransfer(initial: Record<string, string> = {}) {
+  const data = new Map(Object.entries(initial));
+  return {
+    dropEffect: 'none',
+    effectAllowed: 'none',
+    get types(): string[] {
+      return [...data.keys()];
+    },
+    getData: (t: string) => data.get(t) ?? '',
+    setData: (t: string, v: string) => void data.set(t, v),
+    files: { length: 0, item: () => null },
+    items: [] as unknown[],
+  };
+}
+
+function dragEvent(type: string, dt: ReturnType<typeof dataTransfer>): Event {
+  const e = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(e, 'dataTransfer', { value: dt });
+  return e;
+}
+
+describe('掴んで落とす(#240 段④)', () => {
+  const METAS = [meta('f1', 1, 'folder'), meta('f2', 2, 'folder'), meta('n1', 3), meta('n2', 4)];
+
+  beforeEach(() => {
+    document.body.textContent = '';
+  });
+
+  it('🔴 落とし先はフォルダの行とパンくずだけ(ノートの行では受けない)', () => {
+    const { q } = setup(METAS, []);
+    expect(q('tbody [data-pkc-entry="f1"]')!.getAttribute('data-pkc-drop')).toBe('folder');
+    expect(
+      q('tbody [data-pkc-entry="n1"]')!.hasAttribute('data-pkc-drop'),
+      'ノートの行にも落とせる印が付いている',
+    ).toBe(false);
+    expect(q('[data-pkc-region="filer-breadcrumb"] button')!.getAttribute('data-pkc-drop')).toBe(
+      'crumb',
+    );
+  });
+
+  it('🔴 掴んだ行に印が付いていれば**印ごと**運ぶ', () => {
+    const { q, d } = setup(METAS, []);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'TOGGLE_SELECT', lid: 'n2' });
+    const dt = dataTransfer();
+    q('tbody [data-pkc-entry="n1"]')!.dispatchEvent(dragEvent('dragstart', dt));
+    expect(dt.getData(PKC_DRAG).split(' ').sort(), '印を付けた分が運ばれない').toEqual([
+      'n1',
+      'n2',
+    ]);
+  });
+
+  it('印の付いていない行を掴んだら、その 1 件だけ運ぶ', () => {
+    const { q, d } = setup(METAS, []);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    const dt = dataTransfer();
+    q('tbody [data-pkc-entry="n2"]')!.dispatchEvent(dragEvent('dragstart', dt));
+    expect(dt.getData(PKC_DRAG)).toBe('n2');
+  });
+
+  it('🔴 落とすとその中へ入り、永続化まで要求する', async () => {
+    const { q, d, parentCalls } = setup(METAS, []);
+    const dt = dataTransfer({ [PKC_DRAG]: 'n1 n2' });
+    q('tbody [data-pkc-entry="f1"]')!.dispatchEvent(dragEvent('drop', dt));
+    await tick();
+    expect(
+      getStructuralChildren('f1', d.getState().entryMetas, d.getState().relations).map(
+        (m) => m.lid,
+      ),
+    ).toEqual(['n1', 'n2']);
+    expect(parentCalls.map((c) => c.lid), 'disk への要求が出ていない').toEqual(['n1', 'n2']);
+    // ⚠ 落とした先へ**付いていく**(設計 doc §6)
+    expect(d.getState().scopeLid).toBe('f1');
+  });
+
+  it('🔴 落とせない場所へ移ったら、光っていた先の印を消す', () => {
+    const { q } = setup(METAS, []);
+    const folder = q<HTMLElement>('tbody [data-pkc-entry="f1"]')!;
+    const note = q<HTMLElement>('tbody [data-pkc-entry="n1"]')!;
+    folder.dispatchEvent(dragEvent('dragover', dataTransfer({ [PKC_DRAG]: 'n1' })));
+    expect(folder.hasAttribute('data-pkc-dropping')).toBe(true);
+    note.dispatchEvent(dragEvent('dragover', dataTransfer({ [PKC_DRAG]: 'n1' })));
+    expect(
+      folder.hasAttribute('data-pkc-dropping'),
+      '落とせない所へ移ったのに、前の行が光ったまま',
+    ).toBe(false);
+  });
+
+  it('🔴 既にそこに居るものを落としても、入れ子の断りを出さない', async () => {
+    const { q, d } = setup(METAS, []);
+    // ルート直下の n1 を、パンくずの「ルート」へ落とす
+    q('[data-pkc-region="filer-breadcrumb"] button')!.dispatchEvent(
+      dragEvent('drop', dataTransfer({ [PKC_DRAG]: 'n1' })),
+    );
+    await tick();
+    expect(
+      d.getState().error ?? '',
+      '理由の違う断りが出た(user は入れ子の話だと読む)',
+    ).not.toContain('自分の中');
+  });
+
+  it('🔴 輪になる落とし方は断る(黙って捨てない)', async () => {
+    const { q, d } = setup(METAS, [rel('r1', 'f1', 'f2')]);
+    // f1 を、自分の子孫である f2 の中へ
+    // ⚠ **ここで行を押さない** ── 本文が返る(`BODY_LOADED`)と `error` が消えるので、
+    //   断りの観測点が壊れる(1 稿目で実際に「無言で捨てている」と誤読した)
+    const dt = dataTransfer({ [PKC_DRAG]: 'f1' });
+    q<HTMLElement>('tbody [data-pkc-entry="f1"]')!.dispatchEvent(dragEvent('drop', dt));
+    await tick();
+    expect(d.getState().error ?? '', '無言で捨てている').toContain('自分の中');
+  });
+});
+
+describe('居場所を変える口は 1 本(着地前レビュー 7)', () => {
+  const METAS = [meta('f1', 1, 'folder'), meta('n1', 2)];
+
+  beforeEach(() => {
+    document.body.textContent = '';
+  });
+
+  it('🔴 編集中は帯の選択でも断る(無言で捨てない)', async () => {
+    const { moveTo, d, q } = setup(METAS, []);
+    q<HTMLElement>('tbody [data-pkc-entry="n1"]')!.click();
+    await tick();
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '' });
+    d.dispatch({ type: 'START_EDIT' });
+    moveTo('f1');
+    await tick();
+    expect(d.getState().error ?? '', '編集中に黙って捨てた').toContain('編集を終了');
+    // 🔴 **動いていないのに画面だけ移動する**を作らない
+    expect(d.getState().scopeLid, '動いていないのに現在地だけ動いた').toBeNull();
+    expect(
+      getStructuralChildren('f1', d.getState().entryMetas, d.getState().relations),
+    ).toHaveLength(0);
+  });
+});
+
+describe('「もう一度押す」の窓(#240 段①)', () => {
+  beforeEach(() => {
+    document.body.textContent = '';
+  });
+
+  it('🔴 間が空いたら「2 回押した」と数えない(席を立って戻ったら入る、を作らない)', () => {
+    // ⚠ 観測点は `Date.now` ── unit の 2 回のクリックは**同一ミリ秒**で走るので、
+    //   差し替えないと 500ms の窓を 1 度も通らない(通らない経路は守れない)
+    const now = vi.spyOn(Date, 'now');
+    now.mockReturnValue(1_000);
+    const { q, d } = setup([meta('f1', 1, 'folder'), meta('n1', 2)], []);
+    const row = () => q<HTMLElement>('tbody [data-pkc-entry="f1"]')!;
+    row().click();
+    now.mockReturnValue(6_000); // 5 秒後
+    row().click();
+    expect(d.getState().scopeLid, '5 秒空いたのに「続けて押した」と数えた').toBeNull();
+    now.mockReturnValue(6_200); // 続けて押した
+    row().click();
+    expect(d.getState().scopeLid, '続けて押しても入らない').toBe('f1');
+    now.mockRestore();
+  });
+});
+

@@ -1,15 +1,11 @@
 import { test, expect } from '@playwright/test';
-import {
-  gotoApp,
-  clickReal,
-  createEntry,
-  collectPageErrors,
-  expectReachable, useSplitEditor } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, expectReachable, useSplitEditor, useListBrowse } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
 // 既定(live)の顔は live-editor.smoke.spec.ts が守る。
 test.beforeEach(async ({ page }) => {
+  await useListBrowse(page);
   await useSplitEditor(page);
 });
 
@@ -1202,15 +1198,17 @@ test('🔴 フォルダに入れる → 読み込み直しても中に居る', a
   };
   const lidsOf = () => rows.evaluateAll((trs) => trs.map((t) => t.getAttribute('data-pkc-entry')));
 
-  // ⚠ ノートを**先に**作る(フォルダを選んだ状態で作ると新規はその中へ入る ──
+  // ⚠ ノートを**先に**作る(いま見ているフォルダの中に作られる ──
   //    それは後半で別に確かめる)
   const noteLid = await make('text', '# 移すノート\n');
   const folderLid = await make('folder', '# 整理先フォルダ\n');
 
-  // フォルダを作った直後は scope がその中 = 空
-  await expect(page.locator('[data-pkc-field="filer-empty"]')).toBeVisible();
-  await clickReal(page, '[data-pkc-region="filer-breadcrumb"] [data-pkc-action="filer-root"]');
-  await expect(page.locator('[data-pkc-field="filer-move-empty"]')).toBeVisible();
+  /**
+   * ⚠ **フォルダを作っても中には入らない**(#240 段①)── 現在地は state が持つように
+   * なったので、作った直後もルートのままである(直す前は現在地が選択の純関数で、
+   * 作ると勝手に中へ入っていた)。入るのは**2 クリック**。
+   */
+  expect(await lidsOf(), '作っただけで中に入っている').toEqual([noteLid, folderLid]);
 
   // ── 選ぶ → 居場所を変える
   await clickReal(page, `[data-pkc-region="filer-table"] [data-pkc-entry="${noteLid}"]`);
@@ -1237,12 +1235,27 @@ test('🔴 フォルダに入れる → 読み込み直しても中に居る', a
   await expect(page.locator('[data-pkc-field="filer-create-target"]')).toBeVisible();
   const createdLid = await make('text', '# フォルダの中で作った\n');
 
-  // ── ② 読み込み直す(実 sqlite から読み戻る)
+  /**
+   * ── ② 読み込み直す(実 sqlite から読み戻る)
+   *
+   * ⚠ **書き終わるのを待ってから**読み直す。作成は「entry を書く → 辺を書く」の
+   * 2 手で、辺は entry の**後**に積まれる(`app-state.ts` の CREATE_ENTRY の並び)。
+   * 更新日の欄は entry の ack(`ENTRY_STAMPED`)で埋まるので、**それが出てから**
+   * 読み直せば、辺の書き込みが飛ぶ窓がほぼ閉じる。
+   * 🔴 ⚠ **窓はゼロではない** ── 実 user も「フォルダに作った直後に閉じる」と
+   *   居場所が飛びうる。塞ぐには作成の 2 手を 1 tx にする必要があり、それは別 PR。
+   */
+  await expect(
+    page.locator(`[data-pkc-region="filer-table"] [data-pkc-entry="${createdLid}"] td:nth-child(2)`),
+    '作ったノートの ack が返っていない',
+  ).not.toHaveText('');
   await gotoApp(page);
   await clickReal(page, '[data-pkc-region="browse-tabs"] [data-pkc-browse="filer"]');
   // ルートには**入れたノートが居ない**
   expect(await lidsOf(), 'ルートに残っている').not.toContain(noteLid);
-  await clickReal(page, `[data-pkc-region="filer-table"] [data-pkc-entry="${folderLid}"]`);
+  // ⚠ 入るのは**2 クリック**(#240 段①)。`locator.dblclick()` は安定するまで待つ ──
+  //    座標を先に採ると、採ってから押すまでの再描画で 2 回が別ノードに落ちる
+  await page.locator(`[data-pkc-region="filer-table"] [data-pkc-entry="${folderLid}"]`).dblclick();
   expect(await lidsOf(), '読み込み直したら居場所が失われた').toEqual([noteLid, createdLid]);
 
   expect(errors).toEqual([]);

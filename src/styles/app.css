@@ -2613,6 +2613,36 @@ select:focus-visible {
   margin-top: var(--s3);
 }
 
+/* ── フォルダ面の複数選択・まとめて操作・D&D(#240 段②③④)──────────
+ *
+ * ⚠ **開いている**(`selected`)と**印を付けた**(`marked`)を**別の見え方**にする ──
+ * 同じ見え方だと「いま中央に出ているのはどれか」が読めなくなる。
+ * ⚠ 色は情報にだけ(user 指示 2026-08-03)── 印は**地の明度**、落とし先は**輪郭**。
+ */
+[data-pkc-region='filer-table'] tbody tr[data-pkc-marked] {
+  background: var(--surface-2);
+}
+[data-pkc-region='filer-table'] tbody tr[data-pkc-selected] {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+/* 落とし先(掴んだものを上に置いている場所)。⚠ 行の高さを変えない(ずれると狙えない) */
+[data-pkc-drop][data-pkc-dropping] {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
+[data-pkc-field='filer-bulk'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  margin-bottom: var(--s2);
+}
+[data-pkc-field='filer-bulk-count'] {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 /* ── ショートカットキーの割当(#256、user 指示 2026-08-18)────────────
  *
  * ⚠ **地は無彩色、色は情報にだけ**(user 指示 2026-08-03)── 鍵の粒だけ

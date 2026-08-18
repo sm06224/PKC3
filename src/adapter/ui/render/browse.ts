@@ -26,7 +26,9 @@ import { ScrollMemory } from './scroll-memory';
 import { FilerRenderer } from './filer';
 import { LauncherRenderer } from './launcher';
 
-export type BrowseMode = 'list' | 'filer' | 'launcher';
+// 🔑 型と既定は `browse-mode.ts` が持つ(#240 段⑤)── 既定が 4 か所に散っていた
+export type { BrowseMode } from './browse-mode';
+import { DEFAULT_BROWSE_MODE, type BrowseMode } from './browse-mode';
 
 /**
  * タブ。⚠ 文言は「探し方」を表す(「詳細」のような場所の名前にしない)。
@@ -50,13 +52,19 @@ export class BrowseRouter {
    * 使い回しているので、覚えないとタブを行き来しただけで位置が混ざる。
    */
   private readonly scroll: ScrollMemory;
-  private last: BrowseMode = 'list';
+  private last: BrowseMode;
 
-  constructor(sidebar: HTMLElement, host: HTMLElement) {
+  /**
+   * @param initial 最初に出す探し方(#240 段⑤)。⚠ **器の hidden も同じ値で組む** ──
+   *   ここを 'list' 固定にしていたので、既定を変えると**タブは選ばれているのに
+   *   中身は一覧のまま**という食い違いが出た(段⑤ の実装中に実際に踏んだ)。
+   */
+  constructor(sidebar: HTMLElement, host: HTMLElement, initial: BrowseMode = DEFAULT_BROWSE_MODE) {
+    this.last = initial;
     const pane = (mode: BrowseMode): HTMLElement => {
       const el = document.createElement('div');
       el.setAttribute('data-pkc-browse-pane', mode);
-      if (mode !== 'list') el.hidden = true;
+      if (mode !== initial) el.hidden = true;
       host.append(el);
       return el;
     };
@@ -67,6 +75,9 @@ export class BrowseRouter {
       filer: pane('filer'),
       launcher: pane('launcher'),
     };
+    // ⚠ 一覧は既存の region を使い回すので、`pane()` の hidden 制御を通らない ──
+    //    初期が一覧でないときは**ここで隠す**(隠し忘れると 2 面が重なって出る)
+    if (initial !== 'list') this.panes.list.hidden = true;
     this.scroll = new ScrollMemory(host);
     this.list = new SidebarRenderer(sidebar);
     this.filer = new FilerRenderer(this.panes.filer);
