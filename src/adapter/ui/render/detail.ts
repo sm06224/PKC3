@@ -57,6 +57,7 @@ import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-form
 import { assetPreviewKind, canOpenAssetWindow } from '@features/asset/asset-preview-kind';
 import type { AppState, AppPhase } from '@adapter/state/app-state';
 import { appEditorMode } from './editor-mode';
+import { appKeymap, type KeymapStore } from './keymap';
 
 /** 添付表示のための asset 面(main が AssetBlobStore を cid 束縛で注入)。 */
 export interface AssetLender {
@@ -245,6 +246,11 @@ export class DetailRenderer {
      * ⚠ 既定はアプリ共有の 1 個 ── test は自分で `new` して渡す。
      */
     private readonly externalImages: ExternalImagePolicy = appExternalImages,
+    /**
+     * 🔴 **キーの割当**(#256)。この面が名乗る文脈は `live`(全文編集 / 取り消し)。
+     * ⚠ 既定はアプリ共有の 1 個 ── test は自分で `new` して渡す。
+     */
+    private readonly keymap: KeymapStore = appKeymap,
   ) {
     this.region = region;
     this.assets = assets;
@@ -1007,15 +1013,15 @@ export class DetailRenderer {
        * ── 確定の直後は焦点が `<body>` に戻っているので、そこと面の中だけを見る。
        */
       if (!(t === document.body || (t instanceof Node && pane.contains(t)))) return;
-      if (!(ev.ctrlKey || ev.metaKey)) return;
-      const key = ev.key.toLowerCase();
+      const cmd = this.keymap.match(ev, 'live');
+      if (cmd === null) return;
       /**
        * 🔴 **Ctrl+A で全文を 1 つの入力欄にする**(S6)── これで今日の 2 列の
        * 編集画面が 1 面の**縮退形**になる(別物の画面を 2 つ持たない)。
        * ⚠ 境目は取り消しと**同じ 1 判定**(入力欄に居るかどうか)── 行の中の
        * Ctrl+A はその行を選ぶブラウザ既定のままにする。
        */
-      if (key === 'a') {
+      if (cmd === 'edit-all') {
         ev.preventDefault();
         /**
          * ⚠ **退避したら Ctrl+A も塞ぐ**(2026-08-08 の 2 巡目レビュー)。
@@ -1033,8 +1039,7 @@ export class DetailRenderer {
         if (!swap.activateAll()) note.textContent = 'この本文は全文編集に開けません';
         return;
       }
-      const forward = key === 'y' || (key === 'z' && ev.shiftKey);
-      if (key !== 'z' && key !== 'y') return;
+      const forward = cmd === 'redo';
       ev.preventDefault();
       /**
        * 🔴 **退避したら取り消しも塞ぐ**(2026-08-08 の 3 巡目レビュー。**4 件目の双子**)。

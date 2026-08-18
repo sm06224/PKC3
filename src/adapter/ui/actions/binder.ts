@@ -22,9 +22,11 @@ import { resolveMime } from './attach';
 import { applyFormat, type FormatOp } from '@features/markdown/text-ops';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
 import { isEntrySort } from '@features/filter/entry-sort';
-import { isPaneId } from '@features/pane-visibility';
+import { isPaneId, PANES } from '@features/pane-visibility';
 import { STRUCTURAL, isRelationKind } from '@features/relation/kinds';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
+import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
+import { findCommand } from '@features/keymap';
 import { appQueryKey } from '@adapter/ui/render/query-key-store';
 import { resolveFilerScope } from '@features/relation/tree';
 import { parseLinkTarget } from '@features/entry-ref/link-target';
@@ -1294,10 +1296,33 @@ const ACTIONS: Record<string, ActionHandler> = {
  * 近道のキー。⚠ **書式パネルに在る操作だけ**を割り当てる ── ここにしか無い
  * 操作を作ると「キーを知っている人にしかできないこと」が生まれる。
  */
-const FORMAT_KEYS: Readonly<Record<string, FormatOp>> = {
-  b: 'bold',
-  i: 'italic',
-  k: 'link',
+/**
+ * 🔴 **コマンド id → 書式**(#256)。直す前はここが `{b,i,k}` = **キーの綴り**だったので、
+ * 割当を変えると書式が引けなくなった ── **割当は `features/keymap.ts` の表が正本**で、
+ * ここが持つのは「そのコマンドが何をするか」だけである。
+ */
+/**
+ * 🔴 **近道は「ボタンをそのまま押す」**(#197 で確立した作法の一般化)。
+ * ⚠ 同じ操作が 2 通りの経路を持たない ── 押しボタン側の断り(編集中は無効 等)や
+ * 「もう一度押したら戻る」が、鍵からも**同じように**効く。
+ * ⚠ ボタンが無い面では**何も起きない**(`preventDefault` もしない = ブラウザに譲る)。
+ */
+const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
+  'create-entry': '[data-pkc-field="create-run"]',
+  'edit-entry': '[data-pkc-action="start-edit"]',
+  'toggle-replace': '[data-pkc-action="toggle-replace"]',
+  'toggle-sidebar': '[data-pkc-action="toggle-pane"][data-pkc-pane="sidebar"]',
+  'toggle-inspector': '[data-pkc-action="toggle-pane"][data-pkc-pane="inspector"]',
+  'view-query': '[data-pkc-action="set-view"][data-pkc-view="query"]',
+  'open-settings': '[data-pkc-action="set-view"][data-pkc-view="settings"]',
+  'open-flags': '[data-pkc-action="set-view"][data-pkc-view="flags"]',
+  'open-help': '[data-pkc-action="set-view"][data-pkc-view="help"]',
+};
+
+const FORMAT_OF: Readonly<Record<string, FormatOp>> = {
+  'format-bold': 'bold',
+  'format-italic': 'italic',
+  'format-link': 'link',
 };
 
 function isEditorBody(el: EventTarget | null): el is HTMLTextAreaElement {
@@ -1311,6 +1336,12 @@ export function bindActions(
   root: HTMLElement,
   dispatcher: Dispatcher,
   services: BinderServices = {},
+  /**
+   * 🔴 **キーの割当**(#256)。既定はアプリ共有の 1 個。
+   * ⚠ **test は自分で `new KeymapStore(...)` して渡す**(`appEditorMode` と同じ作法)──
+   *   共有の 1 個を書き換えると、別の test に割当が漏れる。
+   */
+  keymap: KeymapStore = appKeymap,
 ): () => void {
   /**
    * action を 1 本の口から回す。⚠ **ここを通さない呼び方をしない** ──
@@ -1446,9 +1477,9 @@ export function bindActions(
         return;
       }
     }
-    // 追記欄: Ctrl/Cmd+Enter で送る(欄の中だけ ── 画面全体の近道にしない)
+    // 追記欄: 既定は Ctrl/Cmd+Enter(欄の中だけ ── 画面全体の近道にしない)
     if (field === 'append-input') {
-      if (ke.key === 'Enter' && (ke.ctrlKey || ke.metaKey) && !ke.altKey) {
+      if (keymap.match(ke, 'append') === 'append-send') {
         ke.preventDefault();
         run('append-entry', ke.target as HTMLElement);
       }
@@ -1461,19 +1492,17 @@ export function bindActions(
      * (`row-swap.ts`)が「行の確定 / 行の取り消し」として持つ。ここで
      * `COMMIT_EDIT` / `CANCEL_EDIT` を撃つと**編集の面ごと閉じてしまう**(別の操作)。
      */
-    if (
-      field === 'row-source' &&
-      !ke.altKey &&
-      (ke.ctrlKey || ke.metaKey) &&
-      FORMAT_KEYS[ke.key.toLowerCase()] !== undefined
-    ) {
+    if (field === 'row-source') {
+      const rowCmd = keymap.match(ke, 'row');
+      const rowOp = rowCmd === null ? undefined : FORMAT_OF[rowCmd];
+      if (rowOp === undefined) return;
       ke.preventDefault();
       const ta = ke.target as HTMLTextAreaElement;
       writeBack(
         ta,
         applyFormat(
           { text: ta.value, start: ta.selectionStart, end: ta.selectionEnd },
-          FORMAT_KEYS[ke.key.toLowerCase()]!,
+          rowOp,
         ),
       );
       return;
@@ -1485,34 +1514,27 @@ export function bindActions(
     // ⚠ 追記(P8 段⑥)は**編集欄そのものを書き換える**ので、PKC2 のように
     // 「追記専用の textarea + Ctrl+Enter で確定」を別に持たない ── 別経路にすると
     // 編集中の draft と競合し、追記した節が保存で黙って消える(PKC2 の実測)
-    if (
-      !ke.altKey &&
-      (((ke.key === 's' || ke.key === 'S') && (ke.ctrlKey || ke.metaKey)) ||
-        (ke.key === 'Enter' && (ke.ctrlKey || ke.metaKey)))
-    ) {
+    const cmd = keymap.match(ke, 'editor');
+    const op = cmd === null ? undefined : FORMAT_OF[cmd];
+    if (cmd === 'commit-edit') {
       ke.preventDefault();
       // ⚠ 近道キーも同じ規則に乗せる(ボタンだけ止めても意味が無い)
       if (refuseWhileBusy('commit-edit', dispatcher, services)) return;
       renameFromEditorInput(dispatcher, root);
       dispatcher.dispatch({ type: 'COMMIT_EDIT' });
-    } else if (
+    } else if (field === 'editor-body' && op !== undefined) {
       // 🔑 **キーボードは近道**(業務画面の作法 ── user 指示 2026-08-03)。
       // 本文だけ。題名に太字を入れても意味が無い。⚠ `isComposing` は上で弾き済み
-      field === 'editor-body' &&
-      !ke.altKey &&
-      (ke.ctrlKey || ke.metaKey) &&
-      FORMAT_KEYS[ke.key.toLowerCase()] !== undefined
-    ) {
       ke.preventDefault();
       const ta = ke.target as HTMLTextAreaElement;
       writeBack(
         ta,
         applyFormat(
           { text: ta.value, start: ta.selectionStart, end: ta.selectionEnd },
-          FORMAT_KEYS[ke.key.toLowerCase()]!,
+          op,
         ),
       );
-    } else if (ke.key === 'Escape') {
+    } else if (cmd === 'cancel-edit') {
       ke.preventDefault();
       cancelFromEditor(dispatcher, root);
     }
@@ -1705,62 +1727,63 @@ export function bindActions(
   const onShortcut = (ev: Event) => {
     const ke = ev as KeyboardEvent;
     if (ke.isComposing || !root.isConnected) return;
-    const field =
-      ke.target instanceof HTMLElement ? ke.target.getAttribute('data-pkc-field') : null;
+    const el = ke.target instanceof HTMLElement ? ke.target : null;
+    const field = el?.getAttribute('data-pkc-field') ?? null;
+    /**
+     * 🔴 **打っている欄**の数え方(#256 で 2 つ足した)。
+     * ⚠ `row-source`(1 面の行の欄)を数えていなかったので、**ライブ編集で
+     *   打っている最中に `Ctrl+N` が通り、別のノートへ飛んでいた**
+     *   ── マニュアルの「Ctrl+N は編集中には効きません」が破れていた。
+     * ⚠ `contenteditable` も数える ── PKC2 は keymap registry がここを見ておらず、
+     *   セル編集中に面が切り替わる穴が残っていた(PKC2 全数調査 2026-08-18)。
+     */
     const typing =
-      field === 'editor-body' || field === 'editor-title' || field === 'append-input';
-    /**
-     * 🔴 **選択の戻る・進む**(#190)。`Alt+←` / `Alt+→` ── ブラウザと同じ手。
-     * ⚠ 打っている途中でも**効かせる**(戻るは編集を壊さない ── reducer が
-     *   `editing` の間は選択を動かさないので、ここで弾く必要が無い)。
-     *   ⚠ ただし変換中(`isComposing`)は上で弾いている。
-     * ⚠ `ctrl/meta` との同時押しは受けない(OS 側の割り当てと衝突する)。
-     */
-    if ((ke.key === 'ArrowLeft' || ke.key === 'ArrowRight') && ke.altKey && !ke.ctrlKey && !ke.metaKey) {
+      field === 'editor-body' ||
+      field === 'editor-title' ||
+      field === 'append-input' ||
+      field === 'row-source' ||
+      el?.isContentEditable === true;
+    const cmd = keymap.match(ke, 'global');
+    if (cmd === null) return;
+    // 打鍵中に効かせてよいかは**コマンドが名乗る**(`features/keymap.ts` の表)
+    if (typing && findCommand(cmd)?.whileTyping !== true) return;
+    if (cmd === 'nav-back' || cmd === 'nav-forward') {
       ke.preventDefault();
-      dispatcher.dispatch({ type: 'NAV_HISTORY', dir: ke.key === 'ArrowLeft' ? 'back' : 'forward' });
+      dispatcher.dispatch({ type: 'NAV_HISTORY', dir: cmd === 'nav-back' ? 'back' : 'forward' });
       return;
     }
-    /**
-     * 🔴 **ペインの開閉の近道**(#197 / #190)。`Alt+[` = 左、`Alt+]` = 右。
-     * ⚠ 押しボタンを**そのまま押す** ── 同じ操作が 2 通りの経路を持たない(§7)。
-     */
-    if ((ke.key === '[' || ke.key === ']') && ke.altKey && !ke.ctrlKey && !ke.metaKey) {
-      const pane = ke.key === '[' ? 'sidebar' : 'inspector';
-      const btn = root.querySelector<HTMLElement>(
-        `[data-pkc-action="toggle-pane"][data-pkc-pane="${pane}"]`,
-      );
-      if (!btn) return;
+    if (cmd === 'view-detail') {
+      // ⚠ 本文の面には押しボタンが無い(既定の面なので)── ここだけ dispatch する
+      if (dispatcher.getState().viewMode === 'detail') return;
       ke.preventDefault();
-      btn.click();
+      dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
       return;
     }
-    /**
-     * 🔴 **置換の近道**(#191)。`Ctrl+H` ── 他のアプリと同じ手。
-     * ⚠ ボタンを**そのまま押す**(同じ操作が 2 通りの経路を持たない)。
-     */
-    if ((ke.key === 'h' || ke.key === 'H') && (ke.ctrlKey || ke.metaKey) && !ke.altKey) {
-      const btn = root.querySelector<HTMLElement>('[data-pkc-action="toggle-replace"]');
-      if (!btn) return;
+    if (cmd === 'toggle-focus-mode') {
+      /**
+       * 🔑 **両側を一度に畳む / 戻す**(PKC2 のフォーカスモード相当)。
+       * ⚠ 押しボタン 2 つを続けて押す実装にしない ── 片方だけ畳まれている状態から
+       *   押すと**入れ替わる**だけで、user が期待する「集中」にならない。
+       */
+      const next = appPanes.getHidden().length === PANES.length ? [] : [...PANES];
       ke.preventDefault();
-      btn.click();
+      applyPaneVisibility(root, appPanes.setHidden(next));
       return;
     }
-    /**
-     * 🔴 **ヘルプ**(#190)。`F1` ── 面は既にあるので開くだけ。
-     * ⚠ 入力中でも効かせる(`F1` は文字を打つ鍵ではない)。
-     */
-    if (ke.key === 'F1' && !ke.ctrlKey && !ke.metaKey && !ke.altKey) {
+    if (cmd === 'focus-search') {
+      const input = root.querySelector<HTMLInputElement>('[data-pkc-field="entry-filter"]');
+      if (!input) return; // 欄が無い面では何も起きない(ブラウザの検索に譲る)
       ke.preventDefault();
-      dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'help' });
+      input.focus();
+      input.select();
       return;
     }
-    if (!(ke.key === 'n' || ke.key === 'N') || !(ke.ctrlKey || ke.metaKey) || ke.altKey) return;
-    if (typing) return;
-    const run = root.querySelector<HTMLElement>('[data-pkc-field="create-run"]');
-    if (!run) return;
+    const sel = SHORTCUT_BUTTON[cmd];
+    if (sel === undefined) return;
+    const btn = root.querySelector<HTMLElement>(sel);
+    if (!btn) return;
     ke.preventDefault();
-    run.click();
+    btn.click();
   };
   const doc = root.ownerDocument;
   doc.addEventListener('keydown', onShortcut);

@@ -32,6 +32,8 @@
 import { APP_ID, APP_VERSION, BUILD_KIND } from '@runtime/release-meta';
 import { NOTICES, noticeDate, recentNotices, type Notice } from '@features/notice/notice-log';
 import manualText from '../../../../docs/manual.md?raw';
+import { KEY_COMMANDS, chordLabel } from '@features/keymap';
+import { appKeymap, type KeymapStore } from './keymap';
 
 /** 焼き込んだマニュアルの原文(test から掴めるよう named export)。 */
 export const MANUAL_TEXT: string = manualText;
@@ -63,6 +65,9 @@ export interface HelpMarkdownPort {
 export class HelpRenderer {
   private built = false;
   private manualHost: HTMLElement | null = null;
+  /** ショートカットの一覧(#256)。⚠ 器は捨てず、中身だけ書き換える。 */
+  private keys: HTMLElement | null = null;
+  private offKeymap: (() => void) | null = null;
 
   constructor(
     private readonly region: HTMLElement,
@@ -74,6 +79,12 @@ export class HelpRenderer {
      * (`recentNotices` を通さず丸ごと出す変異が素通りした)。
      */
     private readonly notices: readonly Notice[] = NOTICES,
+    /**
+     * 🔴 **キーの割当**(#256)。⚠ **一覧はここで手書きしない** ── PKC2 は
+     * ヘルプの一覧を手書きの配列で持っていたので実装とズレた(2 件確認)。
+     * ここは `KEY_COMMANDS` + いまの割当を描くだけである。
+     */
+    private readonly keymap: KeymapStore = appKeymap,
   ) {}
 
   /**
@@ -141,7 +152,33 @@ export class HelpRenderer {
     }
     body.append(list);
 
-    // ── ③ マニュアル ────────────────────────────────────
+    // ── ③ ショートカットキー ────────────────────────────
+    /**
+     * 🔑 **いま効いている割当**を出す(user 指示 2026-08-18)。
+     * ⚠ 割り当て直す口は**設定の面 1 か所**にする ── 同じ操作を 2 か所に置くと、
+     *   どちらが正か user にも分からなくなる。ここは読む場所である。
+     * ⚠ 面は 1 度しか組まないので、割当が変わったら**この節だけ**描き直す
+     *   (器を捨てない ── 2026-08-07 の dead click の型)。
+     */
+    const kh = document.createElement('h3');
+    kh.textContent = 'ショートカットキー';
+    body.append(kh);
+    const kn = document.createElement('p');
+    kn.setAttribute('data-pkc-field', 'settings-note');
+    kn.textContent =
+      'Ctrl は Mac では ⌘ でも同じように効きます。割り当て直しは設定の面でできます。';
+    body.append(kn);
+    this.keys = document.createElement('div');
+    this.keys.setAttribute('data-pkc-region', 'help-keymap');
+    body.append(this.keys);
+    this.syncKeys();
+    // ⚠ 購読は器と同じ寿命(面は畳んでも捨てない)── 二重に張らないよう 1 度だけ
+    this.offKeymap?.();
+    this.offKeymap = this.keymap.onChange(() => {
+      this.syncKeys();
+    });
+
+    // ── ④ マニュアル ────────────────────────────────────
     const mh = document.createElement('h3');
     mh.textContent = 'マニュアル';
     body.append(mh);
@@ -154,6 +191,32 @@ export class HelpRenderer {
     body.append(this.manualHost);
 
     void this.drawManual(currentContainerId);
+  }
+
+  /**
+   * ショートカットの一覧を描く。⚠ **表(`KEY_COMMANDS`)が正本**。
+   * ⚠ 割当が空のコマンドも**行ごと出す** ── 「割当なし」が見えないと、
+   *   user は「そんな操作は無い」と読む(外した本人が戻せなくなる)。
+   */
+  private syncKeys(): void {
+    const host = this.keys;
+    if (!host) return;
+    const bindings = this.keymap.getBindings();
+    host.textContent = '';
+    const dl = document.createElement('dl');
+    for (const cmd of KEY_COMMANDS) {
+      const dt = document.createElement('dt');
+      dt.setAttribute('data-pkc-field', 'help-key-command');
+      dt.setAttribute('data-pkc-command', cmd.id);
+      dt.textContent = cmd.label;
+      const dd = document.createElement('dd');
+      dd.setAttribute('data-pkc-field', 'help-key-chords');
+      dd.setAttribute('data-pkc-command', cmd.id);
+      const list = bindings[cmd.id] ?? cmd.defaults;
+      dd.textContent = list.length === 0 ? '割当なし' : list.map((c) => chordLabel(c)).join(' / ');
+      dl.append(dt, dd);
+    }
+    host.append(dl);
   }
 
   /**

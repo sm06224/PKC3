@@ -2613,6 +2613,67 @@ select:focus-visible {
   margin-top: var(--s3);
 }
 
+/* ── ショートカットキーの割当(#256、user 指示 2026-08-18)────────────
+ *
+ * ⚠ **地は無彩色、色は情報にだけ**(user 指示 2026-08-03)── 鍵の粒だけ
+ * 枠で囲み、色は付けない。捕まえている最中のボタンだけ印を付ける。
+ * ⚠ 行は `dl` で組む(設定の他の節と同じ体裁 ── 場所が違っても読み方は同じ)。
+ */
+[data-pkc-region='keymap-list'] {
+  margin-top: var(--s3);
+}
+[data-pkc-field='keymap-group'] {
+  margin-top: var(--s4);
+  color: var(--muted);
+  font-size: 11px;
+}
+[data-pkc-field='keymap-row'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+}
+[data-pkc-field='keymap-chords'] {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
+[data-pkc-field='keymap-chord'] {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0 var(--s1);
+}
+[data-pkc-field='keymap-chord'] kbd {
+  font: inherit;
+  font-size: 11px;
+}
+[data-pkc-field='keymap-drop'] {
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0 2px;
+}
+[data-pkc-field='keymap-none'] {
+  color: var(--muted);
+  font-size: 11px;
+}
+/* 捕まえている最中 ── 「いまキーを待っている」が一目で分かるように。 */
+[data-pkc-field='keymap-assign'][data-pkc-capturing] {
+  outline: 2px solid var(--accent);
+}
+/* ヘルプ側の一覧(読むだけ)。⚠ 割り当て直す口は設定 1 か所。 */
+[data-pkc-region='help-keymap'] dt {
+  margin-top: var(--s2);
+}
+[data-pkc-region='help-keymap'] dd {
+  margin: 0 0 0 var(--s3);
+  color: var(--muted);
+}
+
 [data-pkc-field='settings-note'],
 .settings-note {
   margin: var(--s2) 0 0;

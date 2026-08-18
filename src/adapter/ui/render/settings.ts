@@ -23,6 +23,7 @@ import { appNoticeStore, type NoticeStore } from '@adapter/platform/notice-store
 import { ScrollMemory } from './scroll-memory';
 import { buildOfficePackPanel, type OfficePackPanel } from './office-pack-panel';
 import { buildSettingsCommands } from './commands';
+import { buildKeymapPanel, type KeymapPanel } from './keymap-panel';
 
 /** 画面の書き換えを間引く間隔。⚠ **可視化がジャンクの原因になっては本末転倒**。 */
 const REFRESH_MS = 400;
@@ -42,6 +43,11 @@ export class SettingsRenderer {
   private logScroll: ScrollMemory | null = null;
   /** Office 一式の節(#88 / O6-a)。⚠ 器と同じ寿命 ── 自分で変化を購読する。 */
   private officePack: OfficePackPanel | null = null;
+  /**
+   * ショートカットキーの節(#256)。⚠ 器と同じ寿命 ── 自分で割当の変化を購読する。
+   * ⚠ 組み直しは 1 度だけ(`built`)なので、購読も capture も 1 組しか生きない。
+   */
+  private keymapPanel: KeymapPanel | null = null;
 
   constructor(
     private readonly region: HTMLElement,
@@ -224,6 +230,14 @@ export class SettingsRenderer {
     userSection.append(dl);
     body.append(userSection);
     body.append(buildSettingsCommands());
+    /**
+     * ⌨ **ショートカットキー**(user 指示 2026-08-18)。⚠ 「表示」の節に混ぜない ──
+     * 見た目の好みではなく**操作の割当**である。⚠ 一覧は `KEY_COMMANDS` から出す
+     * (PKC2 はここを手書きにしてズレた)。
+     */
+    this.keymapPanel?.dispose();
+    this.keymapPanel = buildKeymapPanel();
+    body.append(this.keymapPanel.root);
     body.append(this.buildExternalImages());
     /**
      * 🔴 **Office 一式**(#88 / O6-a)。⚠ 「表示」の節に混ぜない ── 見た目の
