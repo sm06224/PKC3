@@ -167,6 +167,16 @@ export class DualFilerRenderer {
     // 🔑 押した所へ焦点が移る ── 「移す元」を選ぶのに専用のボタンを作らない
     root.setAttribute('data-pkc-action', 'dual-focus');
     root.setAttribute('aria-label', `${SIDE_LABEL[side]}のペイン`);
+    /**
+     * 🔴 **器そのものを焦点の受け皿にする**(#273。実ブラウザ smoke で判明)。
+     *
+     * ⚠ 行に焦点を置く作りだけだと、**空のフォルダへ入った瞬間に焦点の置き場が
+     *   消える** ── 次の keydown の的が `body` になり、`[data-pkc-region="dual-pane"]`
+     *   の親が無いので**この面の鍵が 1 つも当たらなくなる**(入ったら Backspace すら
+     *   効かず、マウスに戻るしかない)。
+     * ⚠ `-1` にする(Tab 順には入れない)── 行が在るときの入口は行のままにする。
+     */
+    root.tabIndex = -1;
 
     const tabs = document.createElement('div');
     tabs.setAttribute('data-pkc-region', 'dual-tabs');

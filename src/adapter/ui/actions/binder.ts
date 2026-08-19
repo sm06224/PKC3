@@ -2309,6 +2309,40 @@ export function bindActions(
         return;
       }
     }
+    /**
+     * 🔴 **2 ペインの中も、同じ鍵が効く**(#273)。⚠ 行き先だけが違う ──
+     * `state.scopeLid` ではなく `state.dual` の、**焦点のあるペイン**に効く。
+     */
+    const dualHost = el?.closest<HTMLElement>('[data-pkc-region="dual-pane"]');
+    if (dualHost) {
+      const dside = dualHost.getAttribute('data-pkc-side');
+      /**
+       * 🔴 **Tab は反対のペインへ**(FD / OS のファイラの基本操作)。
+       * ⚠ **行に焦点があるときだけ**奪う ── タブの帯やボタンに居るときまで奪うと、
+       *   キーボードで面から出られなくなる(閉じ込め)。
+       */
+      if (
+        ke.key === 'Tab' &&
+        !ke.ctrlKey &&
+        !ke.metaKey &&
+        !ke.altKey &&
+        (dside === 'left' || dside === 'right') &&
+        el?.closest('[data-pkc-action="dual-row"]')
+      ) {
+        const to = otherSide(dside);
+        ke.preventDefault();
+        dispatcher.dispatch({ type: 'DUAL_FOCUS', side: to });
+        const st = dispatcher.getState();
+        const lid = paneOf(st.dual, to).selection[0] ?? dualRows(st, to)[0]?.lid ?? null;
+        if (lid !== null) dualRowEl(to, lid)?.focus();
+        return;
+      }
+      const dcmd = keymap.match(ke, 'filer');
+      if ((dside === 'left' || dside === 'right') && dcmd !== null && runDualKey(dcmd, dside)) {
+        ke.preventDefault();
+        return;
+      }
+    }
     const cmd = keymap.match(ke, 'global');
     if (cmd === null) return;
     /**
@@ -2459,6 +2493,160 @@ export function bindActions(
       off();
       dispatcher.dispatch({ type: 'START_EDIT' });
     });
+  };
+
+  /**
+   * 🔴 **2 ペインをキーボードで動かす**(#273。user 指摘 2026-08-19
+   * 「OS のファイラと同じことができないといけません / 往年の FD などを見習って」)。
+   *
+   * ⚠ 直す前、2 ペインは**キーボードで 1 ミリも動かなかった** ── `filer-*` の 8 命令は
+   *   `runFilerKey` が `state.scopeLid` / `state.selection` を見るので**左の列にだけ**
+   *   効き、`state.dual` には 1 つも届いていなかった(開く `view-dual` だけが割当)。
+   * 🔑 **命令を増やさない**(`dual-*` を別に作らない)── 増やすと user は同じ操作を
+   *   2 回割り当て直すことになる。**同じ鍵が、焦点のある面に効く**形にする。
+   * 🔑 並びは `filerRows` **1 か所**から採る ── 描く側(`dual-filer.ts`)・
+   *   範囲選択(reducer)と同じ答えでないと、目で見た順と食い違う。
+   */
+  const dualRows = (st: AppState, side: DualSide): EntryMeta[] =>
+    filerRows(paneScope(paneOf(st.dual, side)), st.entryMetas, st.relations, {
+      filterQuery: st.filterQuery,
+      searchHits: st.searchHits,
+      sort: st.entrySort,
+    });
+
+  const dualRowEl = (side: DualSide, lid: string): HTMLElement | null =>
+    Array.from(
+      root.querySelectorAll<HTMLElement>(
+        '[data-pkc-region="dual-pane"] [data-pkc-action="dual-row"]',
+      ),
+    ).find(
+      (el) => el.getAttribute('data-pkc-side') === side && el.getAttribute('data-pkc-entry') === lid,
+    ) ?? null;
+
+  /** ⚠ **その側の行に焦点があるときだけ**返す(反対側の行を動かさない)。 */
+  const focusedDualLid = (side: DualSide): string | null => {
+    const el = root.ownerDocument.activeElement;
+    if (!(el instanceof HTMLElement)) return null;
+    const tr = el.closest<HTMLElement>('[data-pkc-action="dual-row"]');
+    if (tr === null || tr.getAttribute('data-pkc-side') !== side) return null;
+    return tr.getAttribute('data-pkc-entry');
+  };
+
+  /** ⚠ 端では**止まる**(巻き戻さない ── 左の列と同じ規則)。 */
+  const dualRowAt = (st: AppState, side: DualSide, delta: number): string | null => {
+    const rows = dualRows(st, side);
+    if (rows.length === 0) return null;
+    const cur = focusedDualLid(side);
+    const i = cur === null ? -1 : rows.findIndex((m) => m.lid === cur);
+    if (i === -1) return (delta > 0 ? rows[0] : rows[rows.length - 1])?.lid ?? null;
+    return rows[Math.min(rows.length - 1, Math.max(0, i + delta))]?.lid ?? null;
+  };
+
+  /**
+   * 🔴 **場所を移ったら、焦点を連れて行く**(#273。実ブラウザ smoke で判明)。
+   *
+   * ⚠ これが無いと **Enter で中へ入った次の 1 打鍵が死ぬ** ── 表は組み直され、
+   *   焦点が乗っていた行は**その場で消える**ので、次の keydown の的は `body` になる。
+   *   そこには `data-pkc-region="dual-pane"` の親が無いので、**この面の鍵は
+   *   1 つも当たらなくなる**(user から見ると「入ったら急にキーが効かない」)。
+   * ⚠ 左の列は同じ問題を `filer.ts` の側で解いている ── あちらは面が 1 つなので
+   *   描画側で持てるが、こちらは**どちらのペインへ戻すか**が要るのでここで持つ。
+   * 🔑 dispatch は同期に描画まで走るので、**この時点で新しい行が居る**。
+   */
+  const carryDualFocus = (side: DualSide): void => {
+    const st = dispatcher.getState();
+    const lid = paneOf(st.dual, side).selection[0] ?? dualRows(st, side)[0]?.lid ?? null;
+    const row = lid === null ? null : dualRowEl(side, lid);
+    if (row !== null) {
+      row.focus();
+      return;
+    }
+    /**
+     * ⚠ **行が 1 つも無いときは器へ逃がす**(空のフォルダ)── ここを落とすと
+     * 「入ったら鍵が全部死ぬ」に戻る。器は `tabIndex = -1` を持っている。
+     */
+    root
+      .querySelector<HTMLElement>(`[data-pkc-region="dual-pane"][data-pkc-side="${side}"]`)
+      ?.focus();
+  };
+
+  const runDualKey = (cmd: string, side: DualSide): boolean => {
+    const st = dispatcher.getState();
+    /**
+     * ⚠ **無言で断らない**(左の列と同じ作法)── `preventDefault` は走るので、
+     * 黙ると「押したのに何も起きず、ブラウザの既定まで消えた」になる。
+     */
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '編集を終了してからフォルダの操作をしてください',
+      });
+      return true;
+    }
+    if (cmd === 'filer-row-down' || cmd === 'filer-row-up') {
+      const lid = dualRowAt(st, side, cmd === 'filer-row-down' ? 1 : -1);
+      if (lid === null) return false;
+      // 🔑 送ると印も動く(OS のファイラ = 焦点と選択が一致する)
+      dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid, mode: 'set' });
+      dualRowEl(side, lid)?.focus();
+      return true;
+    }
+    if (cmd === 'filer-extend-down' || cmd === 'filer-extend-up') {
+      const from = focusedDualLid(side);
+      const lid = dualRowAt(st, side, cmd === 'filer-extend-down' ? 1 : -1);
+      if (lid === null) return false;
+      // ⚠ 起点が無いときは、いまの行を起点に立ててから伸ばす
+      //    (`rangeInRows` は起点 null を「行き先 1 件」と解くので、積み上がらない)
+      if (paneOf(st.dual, side).anchor === null && from !== null)
+        dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid: from, mode: 'set' });
+      dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid, mode: 'range' });
+      dualRowEl(side, lid)?.focus();
+      return true;
+    }
+    if (cmd === 'filer-select-all') {
+      const rows = dualRows(st, side);
+      const first = rows[0]?.lid;
+      const last = rows[rows.length - 1]?.lid;
+      if (first === undefined || last === undefined) return false;
+      dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid: first, mode: 'set' });
+      if (last !== first)
+        dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid: last, mode: 'range' });
+      return true;
+    }
+    if (cmd === 'filer-parent') {
+      const scope = paneScope(paneOf(st.dual, side));
+      if (scope === null) return false; // ルートで押しても何も起きない
+      const up = getAncestorFolders(scope, st.entryMetas, st.relations)[0] ?? null;
+      dispatcher.dispatch({ type: 'DUAL_SET_SCOPE', side, lid: up?.lid ?? null });
+      carryDualFocus(side);
+      return true;
+    }
+    if (cmd === 'filer-open') {
+      const lid = focusedDualLid(side) ?? paneOf(st.dual, side).selection[0] ?? null;
+      if (lid === null) return false;
+      // フォルダなら中へ(2 クリックと同じ ── 規則は `DUAL_SET_SCOPE` 1 か所)
+      if (st.entryMetas.get(lid)?.archetype === 'folder') {
+        dispatcher.dispatch({ type: 'DUAL_SET_SCOPE', side, lid });
+        carryDualFocus(side);
+        return true;
+      }
+      return openNote(lid);
+    }
+    /**
+     * 🔴 **消す鍵は、ここで必ず止める**(#273 段①)。
+     *
+     * ⚠ `false` を返すと global の `delete-selected` に落ち、**左の列の印**を消す ──
+     * user は 2 ペインを見ているのに、**画面に出ていないものが消える**。
+     * 不可逆な操作でこれを起こすわけにはいかないので、まだ実装していない旨を出して止める。
+     */
+    if (cmd === 'filer-trash') {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '2 ペインからの削除はまだできません(左の一覧から消してください)',
+      });
+      return true;
+    }
+    return false;
   };
 
   const runFilerKey = (cmd: string): boolean => {

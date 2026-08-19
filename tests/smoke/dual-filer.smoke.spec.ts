@@ -136,3 +136,52 @@ test('🔴 タブを足して、別の場所を 1 つのペインに持てる', 
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **キーボードだけで動かせる**(#273。user 指摘 2026-08-19
+ * 「OS のファイラと同じことができないといけません / 往年の FD などを見習って」)。
+ *
+ * ⚠ unit は合成 event と happy-dom の `activeElement` を見ている ── 実機で
+ * **本当に焦点が乗り、本当のキーが届くか**はここでしか分からない
+ * (焦点の移動は実ブラウザと happy-dom で最も食い違う所である)。
+ */
+test('🔴 2 ペインをキーボードだけで動かす (#273)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await makeFolder(page, 'はこ');
+  await createEntry(page, 'text');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await openDual(page);
+
+  // ① 行を押して焦点を作る(ここから先は**キーだけ**)
+  await page.locator(ROWS('left')).first().click();
+  await expect(page.locator(PANE('left'))).toHaveAttribute('data-pkc-focused', '');
+
+  // ② ↓ で送れる ── 印が動いた行に付く
+  await page.keyboard.press('ArrowDown');
+  await expect(
+    page.locator(`${PANE('left')} [data-pkc-entry][data-pkc-marked]`),
+    '↓ で印が動いていない',
+  ).toHaveCount(1);
+
+  // ③ Tab で反対のペインへ(FD の基本操作)
+  await page.keyboard.press('Tab');
+  await expect(page.locator(PANE('right')), 'Tab で反対側へ移っていない').toHaveAttribute(
+    'data-pkc-focused',
+    '',
+  );
+
+  // ④ Enter でフォルダの中へ ── 押した側だけが入る
+  await page.keyboard.press('Enter');
+  await expect(page.locator(`${PANE('right')} [data-pkc-region="dual-crumbs"]`)).toContainText(
+    'はこ',
+  );
+  await expect(page.locator(ROWS('left')), '押していない側まで入った').toHaveCount(2);
+
+  // ⑤ Backspace で戻れる
+  await page.keyboard.press('Backspace');
+  await expect(page.locator(ROWS('right')), 'Backspace で親へ戻れない').toHaveCount(2);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

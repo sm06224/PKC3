@@ -885,3 +885,153 @@ describe('2 ペインの配線(binder)', () => {
     ).toBe(false);
   });
 });
+
+/**
+ * 🔴 **2 ペインをキーボードで動かす**(#273。user 指摘 2026-08-19
+ * 「2 ペインファイラとしては非常にお粗末 / OS のファイラと同じことができないと
+ * いけません / 往年の FD などを見習ってください」)。
+ *
+ * ⚠ 直す前は**開く鍵(`Alt+6`)しか無く**、面の中では 1 打鍵も効かなかった。
+ * 🔑 守る主張は 3 つ:
+ * 1. **同じ鍵が、焦点のある面に効く**(命令は増やさない = 割り当て直しは 1 回)
+ * 2. **押していない側と、左の列は動かない**
+ * 3. 🔴 **消す鍵が、画面に出ていないものを消しに行かない**
+ */
+describe('2 ペインのキーボード操作(#273)', () => {
+  let root: HTMLElement;
+  let d: Dispatcher;
+  let region: HTMLElement;
+  let r: DualFilerRenderer;
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    d = new Dispatcher();
+    buildShell(root);
+    bindActions(root, d);
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: METAS, relations: RELS });
+    region = document.createElement('div');
+    root.append(region);
+    r = new DualFilerRenderer(region);
+    d.onState((st) => r.render(st));
+    r.render(d.getState());
+  });
+
+  const row = (side: string, lid: string): HTMLElement =>
+    region.querySelector<HTMLElement>(
+      `[data-pkc-region="dual-pane"][data-pkc-side="${side}"] [data-pkc-region="dual-table"] [data-pkc-entry="${lid}"]`,
+    )!;
+
+  /** ⚠ **行に焦点を置いてから**押す(どこで効かせるかは焦点で決まる)。 */
+  const press = (side: string, lid: string, key: string, over: Partial<KeyboardEventInit> = {}) => {
+    const el = row(side, lid);
+    el.focus();
+    const ev = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...over });
+    el.dispatchEvent(ev);
+    return ev;
+  };
+
+  const sel = (side: 'left' | 'right'): readonly string[] => paneOf(d.getState().dual, side).selection;
+
+  it('🔴 ↓ で行が送られ、印も一緒に動く(押していない側と左の列は動かない)', () => {
+    row('right', 'f1').focus();
+    press('right', 'f1', 'ArrowDown');
+    expect(sel('right'), '行送りで印が動いていない').toEqual(['f2']);
+    expect(sel('left'), '押していない側が動いた').toEqual([]);
+    expect(d.getState().selection, '左の列の印まで動いた').toEqual([]);
+    expect(d.getState().dual.focus, '押した側が元になっていない').toBe('right');
+  });
+
+  it('🔴 ↑↓ は端で止まる(巻き戻らない)', () => {
+    press('left', 'f1', 'ArrowUp');
+    expect(sel('left'), '先頭で上を押したら末尾へ飛んだ').toEqual(['f1']);
+  });
+
+  it('🔴 Shift+↓ で範囲が伸びる', () => {
+    press('left', 'f1', 'ArrowDown'); // f2 へ
+    press('left', 'f2', 'ArrowDown', { shiftKey: true });
+    expect(sel('left')).toEqual(['f2', 'a']);
+  });
+
+  /**
+   * 🔴 **起点が無いときは、いまの行を起点に立ててから伸ばす**(変異 K7 が生き延びて判明)。
+   * ⚠ 1 稿目は Shift の前に必ず ↓ を押していたので、**起点が null の経路を 1 度も
+   *   通っていなかった**(CLAUDE.md §2「弱いのではなく走っていない」)。
+   * ⚠ `rangeInRows` は起点 null を「行き先 1 件」と解くので、立てないと
+   *   **押すたびに 1 件へ潰れて**積み上がらない。
+   */
+  it('🔴 印が無い状態から Shift+↓ を押しても、そこから伸びる', () => {
+    expect(sel('left'), '前提が崩れている(既に印がある)').toEqual([]);
+    press('left', 'f1', 'ArrowDown', { shiftKey: true });
+    expect(sel('left'), '起点を立てていない(1 件へ潰れた)').toEqual(['f1', 'f2']);
+  });
+
+  /**
+   * 🔴 **反対側の行の焦点を、自分のものと読まない**(変異 K3 が生き延びて判明)。
+   * ⚠ 1 稿目は「焦点を置いた行から押す」形しか無く、**焦点と打鍵の側が食い違う経路**を
+   *   1 度も通していなかった。⚠ 読み違えると、右で押した ↓ が**左の行を基準に**動く。
+   */
+  it('🔴 焦点が反対側にあるとき、押した側は「焦点なし」として振る舞う', () => {
+    row('left', 'c').focus(); // 左の 3 行目に焦点(右には焦点が無い)
+    const host = region.querySelector<HTMLElement>(
+      '[data-pkc-region="dual-pane"][data-pkc-side="right"]',
+    )!;
+    host.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }),
+    );
+    // 右は焦点が無いので**先頭から**入る。左の 'c' の次('x' や 'b')になってはいけない
+    expect(sel('right'), '反対側の焦点を自分のものとして読んだ').toEqual(['f1']);
+    expect(sel('left'), '押していない側が動いた').toEqual([]);
+  });
+
+  it('🔴 Ctrl+A はそのペインの全部(反対側は空のまま)', () => {
+    press('right', 'a', 'a', { ctrlKey: true });
+    expect(sel('right')).toEqual(['f1', 'f2', 'a', 'b', 'c']);
+    expect(sel('left'), '反対側まで選ばれた').toEqual([]);
+  });
+
+  it('🔴 Enter でフォルダの中へ入る(押したペインだけ)', () => {
+    press('right', 'f1', 'Enter');
+    expect(paneScope(paneOf(d.getState().dual, 'right'))).toBe('f1');
+    expect(paneScope(paneOf(d.getState().dual, 'left')), '反対側まで入った').toBeNull();
+    expect(d.getState().scopeLid, '左の列まで入った').toBeNull();
+  });
+
+  it('🔴 Backspace で親へ戻る', () => {
+    d.dispatch({ type: 'DUAL_SET_SCOPE', side: 'left', lid: 'f1' });
+    press('left', 'x', 'Backspace');
+    expect(paneScope(paneOf(d.getState().dual, 'left'))).toBeNull();
+  });
+
+  it('🔴 Tab で反対のペインへ移る(FD の基本操作)', () => {
+    const ev = press('left', 'a', 'Tab');
+    expect(ev.defaultPrevented, 'Tab を受けていない').toBe(true);
+    expect(d.getState().dual.focus, '反対側へ移っていない').toBe('right');
+  });
+
+  /**
+   * 🔴 **消す鍵が、画面に出ていないものを消しに行かない**。
+   * ⚠ 素通しにすると global の `delete-selected` に落ち、**左の列の印**が消える ──
+   *   2 ペインを見ている user から見て、消えるものが画面に無い。不可逆なので必ず止める。
+   */
+  it('🔴 Delete は左の列を消しに行かず、理由が出る', () => {
+    d.dispatch({ type: 'TOGGLE_SELECT', lid: 'a' });
+    expect(d.getState().selection, '前提が崩れている(左の列に印が無い)').toEqual(['a']);
+    press('right', 'b', 'Delete');
+    expect(d.getState().selection, '左の列の印が消えた(画面に無いものを消しに行った)').toEqual([
+      'a',
+    ]);
+    expect(d.getState().error ?? '', '理由が出ていない').toContain('2 ペインからの削除');
+  });
+
+  it('🔴 編集中は理由を出して断る(無言で止めない)', () => {
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '' });
+    d.dispatch({ type: 'START_EDIT' });
+    expect(d.getState().phase, '前提が崩れている').toBe('editing');
+    press('right', 'b', 'ArrowDown');
+    expect(d.getState().error ?? '').toContain('編集を終了してから');
+  });
+});
