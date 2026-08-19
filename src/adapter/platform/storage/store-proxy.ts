@@ -50,7 +50,15 @@ export const REQUEST_TIMEOUT_MS = 10_000;
 export const EDIT_PING_MS = 15_000;
 export const EDIT_LOCK_TTL_MS = 300_000;
 
-/** 書込 op = 'changed' を放送する op(protocol.ts の mutation 全数)。 */
+/**
+ * **他タブの表示に効く**書込 op(= 'changed' を放送する op)。
+ *
+ * ⚠ 「protocol.ts の mutation 全数」ではない(2026-08-19 に訂正)──
+ * `resolveContainer` は `containers` へ INSERT しうるが、entries / relations を
+ * 1 行も動かさないので他タブは描き直す必要が無い。そもそも `broadcastChanged` が
+ * `if (!('cid' in req)) return;` で早期 return するため、入れても何も起きない。
+ * ⚠ この集合の完全性を検める test は無い ── 足すときは「他タブの一覧が古くなるか」で判断する。
+ */
 const MUTATING_OPS: ReadonlySet<StorageRequest['op']> = new Set([
   'upsertEntry',
   'bulkUpsertEntries',

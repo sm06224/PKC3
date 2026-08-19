@@ -10,10 +10,14 @@ import {
   purgeAssets,
   purgeBlockReason,
   runExplicitPurge,
+  strayBlobKeys,
   type AssetGcPorts,
   type PurgeFlowDeps,
 } from '../../src/adapter/platform/storage/asset-gc';
-import { AssetBlobStore } from '../../src/adapter/platform/storage/asset-blob-store';
+import {
+  AssetBlobStore,
+  splitStoreKey,
+} from '../../src/adapter/platform/storage/asset-blob-store';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { buildSettingsCommands } from '../../src/adapter/ui/render/commands';
@@ -29,6 +33,8 @@ function fakePorts(over: Partial<AssetGcPorts> = {}) {
     // k-orphan-meta は blob 側に無い(meta だけの dangling)、
     // k-orphan-blob は meta 側に無い(bytes だけの dangling)
     listBlobKeys: async () => ['k-ref', 'k-orphan-blob'],
+    // 既定では残骸なし(#260 の経路は専用の test で見る)
+    listStrayBlobs: async () => [],
     scanReferenced: async (candidates) => {
       calls.push(`scan:${[...candidates].sort().join(',')}`);
       return ['k-ref'];
@@ -38,6 +44,9 @@ function fakePorts(over: Partial<AssetGcPorts> = {}) {
     },
     deleteMeta: async (key) => {
       calls.push(`meta:${key}`);
+    },
+    deleteStrayBlob: async (storeKey) => {
+      calls.push(`stray:${storeKey}`);
     },
     ...over,
   };
@@ -63,7 +72,7 @@ describe('asset GC (P4b)', () => {
       scanReferenced: scan,
     });
     const found = await findOrphanAssets(ports);
-    expect(found).toEqual({ keys: [], knownBytes: 0 });
+    expect(found).toEqual({ keys: [], strays: [], knownBytes: 0 });
     expect(scan).not.toHaveBeenCalled();
   });
 
@@ -246,5 +255,95 @@ describe('整理はタブ間の編集も見る(#253)', () => {
     });
     expect(alerts[0], '「編集中」と言い切っている').not.toContain('他のタブで編集中です');
     expect(alerts[0]).toContain('確かめられません');
+  });
+});
+
+/**
+ * 🔴 **どの器にも属さない bytes の回収**(#260、着地前レビュー ⚠-3)。
+ *
+ * cid が端末ごとの採番になった帰結。IDB の key は `${cid}:${assetKey}` で、
+ * 掃除の候補集めは**自分の接頭辞しか見ない** ── OPFS を取れず `:memory:` に
+ * 落ちた回の器は次の起動に残らないので、その回に貼った添付の bytes が
+ * **誰の候補にも載らなくなる**(整理を何度押しても 0 件のまま容量だけ食う)。
+ */
+describe('器の無い bytes(#260)', () => {
+  it('🔴 key は最初の `:` で割る(中身側に `:` が入っても壊れない)', () => {
+    expect(splitStoreKey('c-abc:ast-1')).toEqual({ cid: 'c-abc', assetKey: 'ast-1' });
+    expect(splitStoreKey('c-abc:ast:with:colons')).toEqual({
+      cid: 'c-abc',
+      assetKey: 'ast:with:colons',
+    });
+    // ⚠ 知らない形は触らない(消す側の誤爆を作らない)
+    expect(splitStoreKey('no-prefix')).toBeNull();
+    expect(splitStoreKey(':leading')).toBeNull();
+  });
+
+  it('🔴 生きていない器の key だけを拾う', () => {
+    const all = [
+      { storeKey: 'c-mine:a', cid: 'c-mine' },
+      { storeKey: 'c-gone:b', cid: 'c-gone' },
+      { storeKey: 'default:c', cid: 'default' },
+    ];
+    expect(strayBlobKeys(all, ['c-mine'])).toEqual(['c-gone:b', 'default:c']);
+    expect(strayBlobKeys(all, ['c-mine', 'default'])).toEqual(['c-gone:b']);
+  });
+
+  /**
+   * 🔴 **器の一覧が空なら 1 件も返さない。**
+   * ⚠ 一覧を取り損ねた回に「全部が残骸」と読むと、**user の添付を全部消す**。
+   *   誤差はこの向きにだけ倒す(CLAUDE.md §7)。
+   */
+  it('🔴 器の一覧が空なら、1 件も残骸と言わない', () => {
+    const all = [{ storeKey: 'c-mine:a', cid: 'c-mine' }];
+    expect(strayBlobKeys(all, []), '一覧を取り損ねた回に全部消しに行く').toEqual([]);
+  });
+
+  /**
+   * ⚠ **残骸を本文の走査に掛けない** ── 器が無い以上、参照しうる body が無い。
+   * 掛けると、たまたま同じ asset key を使う**別の器の本文**に救われて永久に残る。
+   */
+  it('🔴 残骸は走査に掛けず、そのまま候補になる', async () => {
+    const { ports, calls } = fakePorts({ listStrayBlobs: async () => ['c-gone:b'] });
+    const scan = await findOrphanAssets(ports);
+    expect(scan.strays).toEqual(['c-gone:b']);
+    const scanCall = calls.find((c) => c.startsWith('scan:'));
+    expect(scanCall, '走査そのものが走っていない(空振り)').toBeTruthy();
+    expect(scanCall, '残骸まで本文の走査に掛けている').not.toContain('c-gone:b');
+  });
+
+  it('🔴 残骸は key をそのまま消す(meta は触らない)', async () => {
+    const { ports, calls } = fakePorts();
+    const r = await purgeAssets(ports, [], ['c-gone:b']);
+    expect(r).toEqual({ deleted: 1, failed: 0 });
+    expect(calls).toEqual(['stray:c-gone:b']);
+  });
+
+  /**
+   * 🔴 **残骸しか無いときに「ありません」と言わない。**
+   * ⚠ 直す前の形(`first.keys.length === 0` で早期 return)だと、残骸だけの端末は
+   *   **押しても毎回「ありません」**と出て、容量は減らない。
+   */
+  it('🔴 残骸だけでも整理が走り、件数に数える', async () => {
+    const { ports, calls } = fakePorts({
+      listMetas: async () => [],
+      listBlobKeys: async () => [],
+      listStrayBlobs: async () => ['c-gone:b', 'c-gone:c'],
+    });
+    const messages: string[] = [];
+    await runExplicitPurge({
+      ports,
+      isReady: async () => ({ ok: true, reason: '' }),
+      confirm: (m) => {
+        messages.push(m);
+        return true;
+      },
+      alert: (m) => messages.push(m),
+      formatSize: (n) => `${n}B`,
+    });
+    expect(messages[0], '残骸を数えていない').toContain('2 件');
+    expect(messages.join(' '), '残骸だけだと「ありません」で止まる').not.toContain(
+      '未参照の添付データはありません',
+    );
+    expect(calls).toEqual(['stray:c-gone:b', 'stray:c-gone:c']);
   });
 });

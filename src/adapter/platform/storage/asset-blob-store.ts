@@ -101,6 +101,18 @@ function assertCid(cid: string): void {
   if (cid.includes(':')) throw new Error(`invalid cid (":" は使えない): ${cid}`);
 }
 
+/**
+ * 🔴 **key を器と中身へ割り戻す**(#260)。⚠ 割るのは**最初の `:`** ──
+ * `assertCid` が cid 側に `:` を禁じているので、これで一意に戻せる
+ * (asset key 側に `:` が入っても壊れない)。
+ * @returns 接頭辞を持たない key は `null`(知らない形は触らない)
+ */
+export function splitStoreKey(storeKey: string): { cid: string; assetKey: string } | null {
+  const at = storeKey.indexOf(':');
+  if (at <= 0) return null;
+  return { cid: storeKey.slice(0, at), assetKey: storeKey.slice(at + 1) };
+}
+
 const key = (cid: string, assetKey: string): string => {
   assertCid(cid);
   return `${cid}:${assetKey}`;
@@ -143,6 +155,38 @@ export class AssetBlobStore {
     return keys
       .filter((k): k is string => typeof k === 'string')
       .map((k) => k.slice(prefix.length));
+  }
+
+  /**
+   * 🔴 **どの器のものでもない残骸**を拾う(#260)。
+   *
+   * key は `${cid}:${assetKey}` なので、`listKeys` は**自分の接頭辞しか見ない**。
+   * cid が固定値だった頃はそれで足りたが、端末ごとに採番するようになると
+   * **もう存在しない器の bytes** が誰の候補にも載らなくなる ── 実際に起きるのは
+   * OPFS を取れず `:memory:` に落ちた回で、その回の器は次の起動には残らない。
+   *
+   * ⚠ **消してよいかの判定はここでしない。** ここは「全部の key を、器と中身に
+   *   割って返す」だけ ── 生きている器の一覧と突き合わせるのは呼び側である
+   *   (§7「誤差の向きを決めて、両側に使い回さない」── 拾うのは広く、
+   *   消すのは狭く)。
+   * ⚠ 割るのは **最初の `:`**。`assertCid` が cid 側に `:` を禁じているので、
+   *   これで一意に戻せる(asset key 側に `:` が入っても壊れない)。
+   */
+  async listAll(): Promise<Array<{ storeKey: string; cid: string; assetKey: string }>> {
+    const keys = await tx<IDBValidKey[]>(await this.need(), 'readonly', (s) => s.getAllKeys());
+    const out: Array<{ storeKey: string; cid: string; assetKey: string }> = [];
+    for (const k of keys) {
+      if (typeof k !== 'string') continue;
+      const split = splitStoreKey(k);
+      if (split === null) continue; // 接頭辞の無い key は触らない(知らない形は消さない)
+      out.push({ storeKey: k, ...split });
+    }
+    return out;
+  }
+
+  /** `listAll` が返した key をそのまま消す。⚠ 器の綴りを組み立て直さない。 */
+  async deleteStoreKey(storeKey: string): Promise<void> {
+    await tx(await this.need(), 'readwrite', (s) => s.delete(storeKey));
   }
 
   /**

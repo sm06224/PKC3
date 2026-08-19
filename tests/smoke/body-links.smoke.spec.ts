@@ -72,10 +72,21 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
  * unit は cid を**自分で作って渡す**ので、「アプリが実際に何を渡しているか」は
  * 1 度も通らない。ここで見るのは:
  *
- * - 🔴 **本物の boot が渡す cid**(`main.ts` の `DEFAULT_CID`)が描画まで届くこと
+ * - 🔴 **本物の boot が渡す cid** が描画まで届くこと
  * - 🔴 **本物のワーカー**を通しても焼き分けが同じであること(unit の同期経路と違う)
  * - **対照群** ── 同じ本文の別コンテナあては placeholder のままであること
  *   (これが無いと「全部リンクにする」実装でも通る)
+ *
+ * ## 🔴 2026-08-19(#260)に書き換えた ── 自分の cid を**手で書かない**
+ *
+ * 直す前はここに `pkc://default/...` と**直書き**してあった。`main.ts` が
+ * 全インストール共通の `'default'` を渡していたからで、
+ * **他人の PKC3 が書いた参照が「自分のもの」と判定される**という不具合の
+ * 裏返しでもあった(#260)。いまは端末ごとに採番するので、
+ * 🔑 **cid はアプリから受け取る**(`data-pkc-container` ──
+ * `data-pkc-boot` と同じ「検査のための契約」)。
+ * ⚠ 手で書いた `default` は**対照群として残す** ── これが placeholder のままで
+ *   あることが、「他人の器と衝突していない」の観測点である。
  */
 test('🔴 pkc:// の自分あては押せて、別コンテナあては押せない', async ({ page }) => {
   const errors = collectPageErrors(page);
@@ -92,17 +103,24 @@ test('🔴 pkc:// の自分あては押せて、別コンテナあては押せ�
     .getAttribute('data-pkc-entry');
   expect(targetLid, 'リンク先の lid を採れていない(fixture の空振り)').toBeTruthy();
 
+  /**
+   * 🔴 **この端末の cid をアプリから受け取る**(#260)。
+   * ⚠ 手で書くと、採番が壊れても test だけが辻褄を合わせてしまう。
+   */
+  const selfCid = await page
+    .locator('[data-pkc-slot="root"]')
+    .getAttribute('data-pkc-container');
+  expect(selfCid, 'アプリが cid を出していない(#100 段① の観測点が消えた)').toBeTruthy();
+  expect(selfCid, '全インストール共通の既定値を名乗っている(#260)').not.toBe('default');
+
   await createEntry(page, 'text');
   await page.locator('[data-pkc-field="editor-title"]').fill('携帯参照の元');
-  /**
-   * ⚠ `default` は **`main.ts` の `DEFAULT_CID`**(このアプリが boot で渡す値)。
-   * ここを手で書いているのは、**アプリ側の値が変わったら鳴らす**ためである。
-   */
   await page
     .locator('[data-pkc-field="editor-body"]')
     .fill(
-      `[こちらへ](pkc://default/entry/${targetLid ?? ''})\n\n` +
-        `[よそへ](pkc://not-mine/entry/${targetLid ?? ''})\n`,
+      `[こちらへ](pkc://${selfCid ?? ''}/entry/${targetLid ?? ''})\n\n` +
+        `[よそへ](pkc://not-mine/entry/${targetLid ?? ''})\n\n` +
+        `[昔の既定へ](pkc://default/entry/${targetLid ?? ''})\n`,
     );
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
@@ -112,6 +130,14 @@ test('🔴 pkc:// の自分あては押せて、別コンテナあては押せ�
   await expect(
     page.locator(`${body} .pkc-portable-reference-placeholder`),
     '別コンテナあてまでリンクにしている',
+  ).toHaveCount(2);
+  /**
+   * 🔴 **他人の `default` を自分のものと読んでいない**(#260 の実害そのもの)。
+   * ⚠ 面へスコープして数える ── 本文の面の外(お知らせ等)の文字に満たされない。
+   */
+  await expect(
+    page.locator(`${body} [data-pkc-portable-container="default"]`),
+    '他人の PKC3 の参照を自分のものと判定した(#260)',
   ).toHaveCount(1);
 
   const urlBefore = page.url();
@@ -227,9 +253,17 @@ test('🔴 pkc:// の asset あては押すと所有ノート(添付)へ飛ぶ',
   expect(key, '添付の key を画面から採れていない(fixture の空振り)').toBeTruthy();
 
   // ② 参照を本文に書いたノートを作る
+  //    ⚠ cid は**アプリから受け取る**（#260 で端末ごとの採番になった ──
+  //    手で `default` と書くと、採番が壊れても test だけが辻褄を合わせる）
+  const selfCid = await page
+    .locator('[data-pkc-slot="root"]')
+    .getAttribute('data-pkc-container');
+  expect(selfCid, 'アプリが cid を出していない').toBeTruthy();
   await createEntry(page, 'text');
   await page.locator('[data-pkc-field="editor-title"]').fill('参照の元');
-  await page.locator('[data-pkc-field="editor-body"]').fill(`[図へ](pkc://default/asset/${key})\n`);
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill(`[図へ](pkc://${selfCid ?? ''}/asset/${key})\n`);
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
   // ③ 焼けていること(action + 受け手が読む key 属性)

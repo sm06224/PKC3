@@ -11,6 +11,32 @@ import type {
 export type StorageRequest =
   | { op: 'init'; dbName: string; journalMode?: JournalMode }
   | { op: 'openContainer'; cid: string; title?: string }
+  /**
+   * 🔴 **この端末のコンテナ id を決める**(#260)。
+   *
+   * 直す前は `main.ts` が `'default'` という**全インストール共通の定数**を渡して
+   * いた。`pkc://<cid>/entry/<lid>` の「自分のコンテナか」は**文字列の等値**で
+   * 決まるので、**他人の PKC3 が書いた参照**が「自分のもの」と判定されていた。
+   *
+   * 🔑 **選ぶのと作るのを 1 回の op に閉じる。** 既に在ればそれを返し、
+   * 無ければその場で採番して挿す ── worker は単一 queue なので、この 1 op の
+   * 中では**割り込まれない**。分けて書くと(読んで、無ければ書く)、
+   * 初回起動の 2 枚のタブが**別々の cid を挿して器が 2 つに割れる**
+   * (follower も holder の worker を通るので、この形なら起きない)。
+   *
+   * ⚠ **既存の DB は `'default'` のまま返る** ── cid は全テーブルの区画鍵
+   * (`WHERE cid = ?`)なので、採番し直すと**既存データがまるごと見えなくなる**。
+   * 移行は「既存はそのまま、新規から実体を持つ」でよい(#260 の推薦)。
+   */
+  | { op: 'resolveContainer'; title?: string }
+  /**
+   * 生きている器の id を全部返す(#260)。
+   * ⚠ **添付の掃除がこれを使う** ── IDB の key は `${cid}:${assetKey}` なので、
+   *   「どの器にも属さない接頭辞」= 残骸である、と判定できるのはここだけ。
+   *   現に器は 1 つしか作られないが、**`[cid]` で代用しない** ── 将来
+   *   器が増えたときに、掃除が**他の器の bytes を消す**形になる。
+   */
+  | { op: 'listContainerIds' }
   | { op: 'listEntryMetas'; cid: string }
   | { op: 'getBody'; cid: string; lid: string }
   /**
@@ -334,6 +360,19 @@ export type RequestFor<Op extends StorageRequest['op']> = Extract<
 export interface ResultMap {
   init: InitResult;
   openContainer: null;
+  /**
+   * この端末のコンテナ id。`created` は**採番した回だけ** true
+   * (⚠ test の空振り防止に使う ── 「既に在った」と見分けが付かないと、
+   * 採番を消す変異が「既存を返しただけ」に見えて生き延びる)。
+   */
+  resolveContainer: { cid: string; created: boolean };
+  /**
+   * 生きている器(作られた順)。
+   * ⚠ `createdAt` を返すのは**並びの前提を検めるため** ── `ORDER BY created_at`
+   *   は「作成時刻が入っている」ことに乗っており、NULL は ASC の先頭に来るので、
+   *   埋め忘れると**並びの主張が黙って壊れる**。返さないと test から見えない。
+   */
+  listContainerIds: { containers: Array<{ cid: string; createdAt: string | null }> };
   listEntryMetas: EntryMetaRow[];
   getBody: string | null;
   /** 読めたものだけ(要求順)。⚠ 無い lid は**黙って落ちる**。 */
