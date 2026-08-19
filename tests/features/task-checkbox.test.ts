@@ -24,15 +24,29 @@ describe('チェックの印の出し方(#277)', () => {
    */
   it('🔴 既定は disabled のまま(受け手が居ない面で押せない)', () => {
     const html = renderMarkdown(DOC);
-    expect(html, '既定で押せる形になっている').toContain('disabled');
-    expect(html, '受け手の居ない面に押す口が出ている').not.toContain('data-pkc-action="toggle-task"');
+    /**
+     * ⚠ **`disabled` を html 全体で探さない**(CLAUDE.md §1「範囲が広すぎて
+     *   無関係な文字列に満たされる」)── 別の `<input>`(fence の切替など)が
+     *   持っていると、チェック欄が押せる形になっても真になる。
+     * 🔑 **チェック欄の tag だけ**を抜き出して、その中を見る。
+     */
+    const boxes = [...html.matchAll(/<input[^>]*pkc-task-checkbox[^>]*>/g)].map((m) => m[0]);
+    expect(boxes.length, 'チェック欄が出ていない(空振り)').toBe(2);
+    for (const box of boxes) {
+      expect(box, '既定で押せる形になっている').toContain('disabled');
+      expect(box, '受け手の居ない面に押す口が出ている').not.toContain('toggle-task');
+    }
     expect(lines(html), '受け手が居ないのに行番号を焼いている').toEqual([]);
   });
 
   it('🔴 頼んだときだけ押せる形になる', () => {
     const html = renderMarkdown(DOC, { interactiveTasks: true });
-    expect(html, '頼んだのに押せないまま').toContain('data-pkc-action="toggle-task"');
-    expect(html, '押せるのに disabled が残っている').not.toContain('disabled');
+    const boxes = [...html.matchAll(/<input[^>]*pkc-task-checkbox[^>]*>/g)].map((m) => m[0]);
+    expect(boxes.length, 'チェック欄が出ていない(空振り)').toBe(2);
+    for (const box of boxes) {
+      expect(box, '頼んだのに押せないまま').toContain('data-pkc-action="toggle-task"');
+      expect(box, '押せるのに disabled が残っている').not.toContain('disabled');
+    }
     expect(lines(html)).toEqual(['2', '3']);
   });
 

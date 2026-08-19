@@ -34,7 +34,7 @@ on:
   pull_request:
     branches: [main]
 # 🔴 **重ねて push したら、古い実行を畳む**(user 指示 2026-08-19「フルスモークを
-# 乱発しない」)。この workflow は smoke(33 spec)を回すので **1 実行 4〜6 分**
+# 乱発しない」)。この workflow は smoke を**全量**回すので **1 実行 4〜6 分**
 # かかり、直して push し直すたびに**古い実行が最後まで走り続けていた**。
 # ⚠ **畳むのは PR のときだけ** ── `main` への push は「配った物の検査」なので、
 #   後続に追い越されて**検査そのものが消える**形にしない。
@@ -85,7 +85,17 @@ jobs:
       - name: dist の検品(map の有無 / 参照の実在 / 配る量の tripwire)
         run: node scripts/check-dist.mjs dev
 
-  # ── 実ブラウザ lane: 最小 smoke(全量は nightly) ─────────────────────
+  # ── 実ブラウザ lane: smoke ────────────────────────────────────────────
+  # ⚠ **2026-08-19 訂正**: ここは「最小 smoke(全量は nightly)」と書いてあったが
+  #   **事実ではない** ── `npm run test:smoke` は `tests/smoke/**` を**全部**回す
+  #   (35 spec / 181 test。手元の実測 3.9〜4.2 分)。nightly が足すのは
+  #   「もう 1 つのブラウザで回す」ことであって、件数ではない。
+  # ⚠ 2026-08-19: `playwright install --with-deps` が **10 分の job timeout に
+  #   当たって cancel** された(smoke は 1 件も走っていない)。この step は
+  #   上の注記どおり大きくぶれる ── **install 段で死んだ回は再実行が正しい対処**
+  #   であって、test を疑う場面ではない(CLAUDE.md の flaky の扱い)。
+  # 🔑 実態と食い違う注記は、次に読む人の判断を狂わせる(CLAUDE.md「実態と乖離した
+  #   記述は見つけ次第その場で直す」)── 直すなら**注記ではなく job の中身**である。
   # ⚠ ここだけ `playwright install` を払う。上の注記のとおり、この step は
   #   22〜390 秒でぶれるので**速い lane と同じ budget に同居させない**。
   smoke:
@@ -102,5 +112,6 @@ jobs:
       #   (source を書き換えただけでは smoke に一切届かない ── CLAUDE.md §3)
       - run: VITE_PKC_KIND=dev npm run build
       - run: npx playwright install chromium --with-deps
-      - name: Visual smoke (PR gate lane — 全量は nightly)
+      # ⚠ 名前も実態に合わせる(「最小」ではない ── 上の訂正を参照)
+      - name: Visual smoke (全量 ── もう 1 つのブラウザは nightly)
         run: npm run test:smoke
