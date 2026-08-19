@@ -35,6 +35,11 @@ import {
   runExplicitPurge,
   strayBlobKeys,
 } from '@adapter/platform/storage/asset-gc';
+import {
+  LEGACY_HOST_NOTICE,
+  isUnknownOpError,
+  resolveContainerCompat,
+} from '@adapter/platform/storage/resolve-container-compat';
 import { buildShell } from '@adapter/ui/render/shell';
 import { showNotices, clearNotices } from '@adapter/ui/render/notices';
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
@@ -287,7 +292,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   タブが 2 枚在ると、別々の cid を挿して器が 2 つに割れる(worker 側の
    *   `resolveContainer` が 1 op で閉じている)。
    */
-  const cid = (await client.request({ op: 'resolveContainer', title: CONTAINER_TITLE })).cid;
+  const resolved = await resolveContainerCompat(
+    {
+      resolveContainer: (title) => client.request({ op: 'resolveContainer', title }),
+      openLegacyContainer: async (legacyCid, title) => {
+        await client.request({ op: 'openContainer', cid: legacyCid, title });
+      },
+    },
+    CONTAINER_TITLE,
+  );
+  const cid = resolved.cid;
   /**
    * 🔴 **採番した id を器に出す**(#260)。user 向けの表示ではなく、
    * `data-pkc-boot="ready"` と同じ**検査のための契約**である。
@@ -1597,13 +1611,23 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
                *   損ねた回に「全部が残骸」と読むと、user の添付を全部消す。
                *   誤差はこの向きにだけ倒す(§7)。
                */
-              listStrayBlobs: async () =>
-                strayBlobKeys(
-                  await blobs.listAll(),
-                  (await client.request({ op: 'listContainerIds' })).containers.map(
+              listStrayBlobs: async () => {
+                /**
+                 * ⚠ **旧ビルドの本体はこの op を知らない**(#286)。
+                 * 落ち方は「機能が減る」側へ ── 残骸を拾えないだけで、
+                 * 整理そのものは今までどおり動かす。
+                 */
+                let cids: string[];
+                try {
+                  cids = (await client.request({ op: 'listContainerIds' })).containers.map(
                     (c) => c.cid,
-                  ),
-                ),
+                  );
+                } catch (err) {
+                  if (!isUnknownOpError(err)) throw err;
+                  return [];
+                }
+                return strayBlobKeys(await blobs.listAll(), cids);
+              },
               deleteStrayBlob: (storeKey: string) => blobs.deleteStoreKey(storeKey),
               scanReferenced: async (candidates: string[]) =>
                 (
@@ -1701,6 +1725,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     metas,
     relations, // 常駐(§6: 肥大が数字で出たら SQL query 化へ移す)
   });
+  /**
+   * ⚠ **旧ビルドの本体に合わせた回は、黙って劣化しない**(#286)。
+   * user から見ると「別のタブを閉じるまで直らない」ので、直し方まで出す。
+   * ⚠ `SYS_BOOTED` の**後**に出す ── 前に出すと boot が状態の行を組み直して消える。
+   */
+  if (resolved.legacy) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: LEGACY_HOST_NOTICE });
+  }
   /**
    * 🔴 **棚に残っている Office の保存を拾う**(#205、B5 の入口③「起動時」)。
    *
