@@ -30,7 +30,11 @@ import {
   installHtmlSandboxResizer,
 } from '@features/markdown/html-sandbox';
 import { AssetBlobStore } from '@adapter/platform/storage/asset-blob-store';
-import { purgeBlockReason, runExplicitPurge } from '@adapter/platform/storage/asset-gc';
+import {
+  purgeBlockReason,
+  runExplicitPurge,
+  strayBlobKeys,
+} from '@adapter/platform/storage/asset-gc';
 import { buildShell } from '@adapter/ui/render/shell';
 import { showNotices, clearNotices } from '@adapter/ui/render/notices';
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
@@ -662,8 +666,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       const deps: ExportDeps = {
         source: {
           cid,
-          // ⚠ `openContainer` で刻んだ題名と**同じ文字列**を使う(別定数だと
-          // ファイル名と DB の題名が食い違う ── review L-2)
+          // ⚠ 器を作るとき(`resolveContainer`)に刻んだ題名と**同じ文字列**を
+          // 使う(別定数だとファイル名と DB の題名が食い違う ── review L-2)。
+          // ⚠ ただし `containers.title` を**読むコードは 1 行も無い**
+          // (2026-08-19 に確認)── いま守れているのは「同じ定数を使う」まで
+          // であって、食い違いを鳴らす計器は無い
           title: CONTAINER_TITLE,
           listEntryMetas: () =>
             client.request({ op: 'listEntryMetas', cid }),
@@ -1576,6 +1583,28 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
               listMetas: () =>
                 client.request({ op: 'listAssetMetas', cid }),
               listBlobKeys: () => blobs.listKeys(cid),
+              /**
+               * 🔴 **どの器にも属さない bytes を拾う**(#260)。
+               *
+               * key は `${cid}:${assetKey}` で、`listKeys` は自分の接頭辞しか
+               * 見ない。cid が端末ごとの採番になったので、**もう存在しない器**の
+               * bytes が誰の候補にも載らなくなった(OPFS を取れず `:memory:` に
+               * 落ちた回の器は、次の起動には残らない)。
+               *
+               * ⚠ **生きている器は DB に聞く。`[cid]` で代用しない** ── 将来
+               *   器が増えたとき、掃除が**他の器の bytes を消す**形になる。
+               * 🔑 **1 件も返らなかったら何もしない** ── 器の一覧を取り
+               *   損ねた回に「全部が残骸」と読むと、user の添付を全部消す。
+               *   誤差はこの向きにだけ倒す(§7)。
+               */
+              listStrayBlobs: async () =>
+                strayBlobKeys(
+                  await blobs.listAll(),
+                  (await client.request({ op: 'listContainerIds' })).containers.map(
+                    (c) => c.cid,
+                  ),
+                ),
+              deleteStrayBlob: (storeKey: string) => blobs.deleteStoreKey(storeKey),
               scanReferenced: async (candidates: string[]) =>
                 (
                   await client.request({

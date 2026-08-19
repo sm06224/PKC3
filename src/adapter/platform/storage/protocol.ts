@@ -29,6 +29,14 @@ export type StorageRequest =
    * 移行は「既存はそのまま、新規から実体を持つ」でよい(#260 の推薦)。
    */
   | { op: 'resolveContainer'; title?: string }
+  /**
+   * 生きている器の id を全部返す(#260)。
+   * ⚠ **添付の掃除がこれを使う** ── IDB の key は `${cid}:${assetKey}` なので、
+   *   「どの器にも属さない接頭辞」= 残骸である、と判定できるのはここだけ。
+   *   現に器は 1 つしか作られないが、**`[cid]` で代用しない** ── 将来
+   *   器が増えたときに、掃除が**他の器の bytes を消す**形になる。
+   */
+  | { op: 'listContainerIds' }
   | { op: 'listEntryMetas'; cid: string }
   | { op: 'getBody'; cid: string; lid: string }
   /**
@@ -358,6 +366,13 @@ export interface ResultMap {
    * 採番を消す変異が「既存を返しただけ」に見えて生き延びる)。
    */
   resolveContainer: { cid: string; created: boolean };
+  /**
+   * 生きている器(作られた順)。
+   * ⚠ `createdAt` を返すのは**並びの前提を検めるため** ── `ORDER BY created_at`
+   *   は「作成時刻が入っている」ことに乗っており、NULL は ASC の先頭に来るので、
+   *   埋め忘れると**並びの主張が黙って壊れる**。返さないと test から見えない。
+   */
+  listContainerIds: { containers: Array<{ cid: string; createdAt: string | null }> };
   listEntryMetas: EntryMetaRow[];
   getBody: string | null;
   /** 読めたものだけ(要求順)。⚠ 無い lid は**黙って落ちる**。 */

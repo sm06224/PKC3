@@ -673,6 +673,14 @@ const handlers: Handlers = {
    * ⚠ 並びは `created_at` **と `cid`** で採る ── `created_at` は秒精度なので、
    *   同秒に 2 件在ると順序が決まらず、起動のたびに違う器を開きうる。
    */
+  listContainerIds: () => ({
+    containers: need()
+      .selectObjects('SELECT cid, created_at FROM containers ORDER BY created_at, cid')
+      .map((r) => ({
+        cid: String(r['cid']),
+        createdAt: typeof r['created_at'] === 'string' ? r['created_at'] : null,
+      })),
+  }),
   resolveContainer: (req) => {
     const database = need();
     const rows = database.selectObjects(
