@@ -1016,14 +1016,63 @@ describe('2 ペインのキーボード操作(#273)', () => {
    * ⚠ 素通しにすると global の `delete-selected` に落ち、**左の列の印**が消える ──
    *   2 ペインを見ている user から見て、消えるものが画面に無い。不可逆なので必ず止める。
    */
-  it('🔴 Delete は左の列を消しに行かず、理由が出る', () => {
+  /**
+   * 🔴 **消すのはこのペインの印だけ**(#273 段②)。
+   * ⚠ 素通しにすると global の `delete-selected` に落ち、**左の列の印**が消える ──
+   *   2 ペインを見ている user から見て、消えるものが画面に無い。
+   * 🔑 実体は `deleteFrom` 1 本(左の列と同じ確認・同じ断り方)。
+   */
+  it('🔴 Delete はこのペインの印を消す(左の列の印は巻き込まない)', () => {
+    d.dispatch({ type: 'TOGGLE_SELECT', lid: 'a' }); // 左の列に印(画面には出ていない相手)
+    expect(d.getState().selection, '前提が崩れている').toEqual(['a']);
+    press('right', 'b', 'ArrowDown'); // 右で 'f2' を選ぶ…ではなく行を作る
+    d.dispatch({ type: 'DUAL_SELECT', side: 'right', lid: 'c', mode: 'set' });
+    press('right', 'c', 'Delete');
+    expect(d.getState().entryMetas.has('c'), 'このペインの印が消えていない').toBe(false);
+    expect(d.getState().entryMetas.has('a'), '左の列の印まで消えた(画面に無いものが消えた)').toBe(
+      true,
+    );
+  });
+
+  /**
+   * 🔴 **押しボタンからも同じことができる**(#273 段②。user 指示 2026-08-03
+   * 「マウスだけで完結し、キーボードは近道」)。
+   */
+  it('🔴 「ゴミ箱へ」のボタンも、そのペインの印だけを消す', () => {
     d.dispatch({ type: 'TOGGLE_SELECT', lid: 'a' });
-    expect(d.getState().selection, '前提が崩れている(左の列に印が無い)').toEqual(['a']);
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'c', mode: 'set' });
+    const btn = region.querySelector<HTMLElement>('[data-pkc-field="dual-delete"]')!;
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(d.getState().entryMetas.has('c'), 'ボタンで消えていない').toBe(false);
+    expect(d.getState().entryMetas.has('a'), '左の列の印まで消えた').toBe(true);
+  });
+
+  /**
+   * 🔴 **開いている場所にフォルダを作る**(#273 段②)。
+   * ⚠ **編集に入らない** ── 入ると中央が本文の面へ切り替わり、整理の途中で
+   *   面から放り出される(FD は作ったらその場に出る)。
+   */
+  it('🔴 「新しいフォルダ」は、そのペインの場所に作る(面から出ない)', () => {
+    d.dispatch({ type: 'DUAL_SET_SCOPE', side: 'left', lid: 'f1' });
+    const before = d.getState().entryMetas.size;
+    const btn = region.querySelector<HTMLElement>('[data-pkc-field="dual-mkdir"]')!;
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    const st = d.getState();
+    expect(st.entryMetas.size, 'フォルダが増えていない').toBe(before + 1);
+    expect(st.phase, '編集に入って面から出た').toBe('ready');
+    // 🔑 **f1 の中に**居る(左の列の現在地ではなく、そのペインの場所)
+    const made = [...st.entryMetas.values()].find((m) => m.title === '新しいフォルダ')!;
+    expect(made.archetype).toBe('folder');
+    expect(
+      st.relations.some((r) => r.kind === 'structural' && r.fromLid === 'f1' && r.toLid === made.lid),
+      '開いている場所の中に作られていない',
+    ).toBe(true);
+  });
+
+  it('🔴 何も選んでいなければ、理由を出して消さない', () => {
+    d.dispatch({ type: 'DUAL_CLEAR_SELECTION', side: 'right' });
     press('right', 'b', 'Delete');
-    expect(d.getState().selection, '左の列の印が消えた(画面に無いものを消しに行った)').toEqual([
-      'a',
-    ]);
-    expect(d.getState().error ?? '', '理由が出ていない').toContain('2 ペインからの削除');
+    expect(d.getState().error ?? '').toContain('削除するものを選んでください');
   });
 
   it('🔴 編集中は理由を出して断る(無言で止めない)', () => {

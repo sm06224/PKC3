@@ -428,6 +428,29 @@ export class DualFilerRenderer {
         ? `${SIDE_LABEL[from]}で選んだ ${count} 件を、反対側の場所へ入れます`
         : '移すものを選んでから押してください';
     host.append(move);
+    /**
+     * 🔴 **整理に要る操作を、この面から届かせる**(#273 段②。user 指摘
+     * 「OS のファイラと同じことができないといけません」)。
+     * ⚠ **マウスだけで完結し、キーボードは近道**(user 指示 2026-08-03 の業務画面)──
+     *   `Delete` の鍵と同じことを、押しボタンでもできるようにする。
+     */
+    const mkdir = document.createElement('button');
+    mkdir.type = 'button';
+    mkdir.setAttribute('data-pkc-action', 'dual-mkdir');
+    mkdir.setAttribute('data-pkc-field', 'dual-mkdir');
+    mkdir.textContent = '新しいフォルダ';
+    mkdir.title = `${SIDE_LABEL[from]}のペインが開いている場所に、フォルダを作ります`;
+    host.append(mkdir);
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.setAttribute('data-pkc-action', 'dual-delete');
+    del.setAttribute('data-pkc-field', 'dual-delete');
+    del.textContent = 'ゴミ箱へ';
+    del.title =
+      count > 0
+        ? `${SIDE_LABEL[from]}で選んだ ${count} 件をゴミ箱へ入れます(戻せます)`
+        : '消すものを選んでから押してください';
+    host.append(del);
     const hint = document.createElement('p');
     hint.setAttribute('data-pkc-field', 'dual-hint');
     hint.textContent = `元は${SIDE_LABEL[from]}のペインです`;

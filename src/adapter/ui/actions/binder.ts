@@ -597,6 +597,67 @@ function selectEntryOrExplain(dispatcher: Dispatcher, lid: string, what: string)
   return true;
 }
 
+/**
+ * 🔴 **まとめてゴミ箱へ、の実体は 1 本**(#273 段②)。
+ *
+ * ⚠ 左の列と 2 ペインで**別々に書かない** ── 断り方・確認・「戻せます」の言い方が
+ * 経路で食い違うと、user は同じ操作なのに違う説明を受ける(CLAUDE.md §7)。
+ * 🔑 **相手の集合は呼び側が渡す** ── 「いまどの面を見ているか」で推測すると、
+ * 2 ペインを開いたまま左の列のボタンを押したときに**画面に無いものが消える**。
+ */
+function deleteFrom(
+  dispatcher: Dispatcher,
+  services: BinderServices,
+  rows: readonly EntryMeta[],
+  selection: readonly string[],
+): void {
+
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '編集を終了してから削除してください',
+      });
+      return;
+    }
+    if (refuseWhileBusy('delete-selected', dispatcher, services)) return;
+    /**
+     * 🔴 **見えている行に絞る**(着地前レビュー 2)。印は行が見えなくなっても
+     * 残る(絞り込みで消えた / 別タブが消した)ので、素で消すと**画面に無いものが
+     * ゴミ箱へ入る**。⚠ 帯に出す数(`filer.ts`)と**同じ規則**を通す ──
+     * 食い違うと「2 件を削除しますか?」と聞いて 3 件消す形になる。
+     */
+    const lids = visibleSelection(rows, selection);
+    if (lids.length === 0) {
+      /**
+       * ⚠ **無言で終わらせない** ── 帯は出ているのに何も起きない dead click になる。
+       * 🔴 **印が 0 件のときも黙らない**(2026-08-18 の着地前レビュー 2)。
+       * `Delete` の鍵から来る筋では、`Enter` でフォルダへ入った直後が
+       * まさにこれ(`SET_SCOPE` が印を外すので `selection` は空)── 焦点の枠は
+       * 行に見えているので、user は「選べているのに Delete が効かない」と読む。
+       * ⚠ OS のファイラも「選んでいなければ何もしない」が、PKC3 は
+       *   **理由を出す**側に倒す(この面の他の断りと揃える)。
+       */
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error:
+          selection.length > 0
+            ? '選んでいた行がいま画面にありません(絞り込みを消すか、選び直してください)'
+            : '削除するものを選んでください(行を押すと選べます)',
+      });
+      return;
+    }
+    if (
+      !confirmOrExplain(
+        dispatcher,
+        `選んでいる ${lids.length} 件を削除しますか?(ゴミ箱から戻せます)`,
+        true,
+      )
+    )
+      return;
+    dispatcher.dispatch({ type: 'DELETE_ENTRIES', lids });
+}
+
 const ACTIONS: Record<string, ActionHandler> = {
   /**
    * 🔴 **本文のリンクで別のノートへ飛ぶ**(2026-08-08。user 裁定「任せます」)。
@@ -867,49 +928,8 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'delete-selected': (dispatcher, _target, services) => {
     const st = dispatcher.getState();
-    if (st.phase !== 'ready') {
-      dispatcher.dispatch({
-        type: 'OP_FAILED',
-        error: '編集を終了してから削除してください',
-      });
-      return;
-    }
-    if (refuseWhileBusy('delete-selected', dispatcher, services)) return;
-    /**
-     * 🔴 **見えている行に絞る**(着地前レビュー 2)。印は行が見えなくなっても
-     * 残る(絞り込みで消えた / 別タブが消した)ので、素で消すと**画面に無いものが
-     * ゴミ箱へ入る**。⚠ 帯に出す数(`filer.ts`)と**同じ規則**を通す ──
-     * 食い違うと「2 件を削除しますか?」と聞いて 3 件消す形になる。
-     */
-    const lids = visibleSelection(visibleFilerRows(st), st.selection);
-    if (lids.length === 0) {
-      /**
-       * ⚠ **無言で終わらせない** ── 帯は出ているのに何も起きない dead click になる。
-       * 🔴 **印が 0 件のときも黙らない**(2026-08-18 の着地前レビュー 2)。
-       * `Delete` の鍵から来る筋では、`Enter` でフォルダへ入った直後が
-       * まさにこれ(`SET_SCOPE` が印を外すので `selection` は空)── 焦点の枠は
-       * 行に見えているので、user は「選べているのに Delete が効かない」と読む。
-       * ⚠ OS のファイラも「選んでいなければ何もしない」が、PKC3 は
-       *   **理由を出す**側に倒す(この面の他の断りと揃える)。
-       */
-      dispatcher.dispatch({
-        type: 'OP_FAILED',
-        error:
-          st.selection.length > 0
-            ? '選んでいた行がいま画面にありません(絞り込みを消すか、選び直してください)'
-            : '削除するものを選んでください(行を押すと選べます)',
-      });
-      return;
-    }
-    if (
-      !confirmOrExplain(
-        dispatcher,
-        `選んでいる ${lids.length} 件を削除しますか?(ゴミ箱から戻せます)`,
-        true,
-      )
-    )
-      return;
-    dispatcher.dispatch({ type: 'DELETE_ENTRIES', lids });
+    // ⚠ 押した場所は**左の列**なので、相手も左の列の集合(2 ペインの印を巻き込まない)
+    deleteFrom(dispatcher, services, visibleFilerRows(st), st.selection);
   },
   /** 印を全部外す(#240 段②)。 */
   'clear-selection': (dispatcher) => dispatcher.dispatch({ type: 'CLEAR_SELECTION' }),
@@ -946,6 +966,48 @@ const ACTIONS: Record<string, ActionHandler> = {
     const side = dualSide(target);
     const index = dualTabIndex(target);
     if (side && index !== null) dispatcher.dispatch({ type: 'DUAL_TAB_ACTIVATE', side, index });
+  },
+  /**
+   * 🔴 **いま開いている場所にフォルダを作る**(#273 段②)。
+   *
+   * ⚠ **編集に入らない**(`edit: false`)── 入ると中央が本文の面へ切り替わり、
+   *   整理の途中で面から放り出される。作ったら**その場に出る**のが FD の作法である。
+   * ⚠ 入れ先は**そのペインが開いている場所**(左の列の現在地ではない)。
+   */
+  'dual-mkdir': (dispatcher, target) => {
+    const side = dualSide(target) ?? dispatcher.getState().dual.focus;
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '編集を終了してからフォルダを作ってください',
+      });
+      return;
+    }
+    dispatcher.dispatch({
+      type: 'CREATE_ENTRY',
+      archetype: 'folder',
+      lid: generateLid(),
+      title: '新しいフォルダ',
+      parentLid: paneScope(paneOf(st.dual, side)),
+      relationId: generateLid(),
+      edit: false,
+    });
+  },
+  /** ⚠ 鍵(`Delete`)と**同じ実体**を押しボタンからも呼ぶ(規則を 2 つ作らない)。 */
+  'dual-delete': (dispatcher, target, services) => {
+    const side = dualSide(target) ?? dispatcher.getState().dual.focus;
+    const st = dispatcher.getState();
+    deleteFrom(
+      dispatcher,
+      services,
+      filerRows(paneScope(paneOf(st.dual, side)), st.entryMetas, st.relations, {
+        filterQuery: st.filterQuery,
+        searchHits: st.searchHits,
+        sort: st.entrySort,
+      }),
+      paneOf(st.dual, side).selection,
+    );
   },
   /**
    * 🔴 **反対側の場所へ移す**(この面の主目的)。
@@ -2633,17 +2695,15 @@ export function bindActions(
       return openNote(lid);
     }
     /**
-     * 🔴 **消す鍵は、ここで必ず止める**(#273 段①)。
+     * 🔴 **消すのは、このペインの印だけ**(#273 段②)。
      *
-     * ⚠ `false` を返すと global の `delete-selected` に落ち、**左の列の印**を消す ──
+     * ⚠ `false` を返して global の `delete-selected` に落とすと、**左の列の印**を消す ──
      * user は 2 ペインを見ているのに、**画面に出ていないものが消える**。
-     * 不可逆な操作でこれを起こすわけにはいかないので、まだ実装していない旨を出して止める。
+     * 🔑 実体は `deleteFrom` **1 本**(左の列と同じ確認・同じ断り方)── 相手の集合だけを
+     *   このペインのものにして渡す。
      */
     if (cmd === 'filer-trash') {
-      dispatcher.dispatch({
-        type: 'OP_FAILED',
-        error: '2 ペインからの削除はまだできません(左の一覧から消してください)',
-      });
+      deleteFrom(dispatcher, services, dualRows(st, side), paneOf(st.dual, side).selection);
       return true;
     }
     return false;
