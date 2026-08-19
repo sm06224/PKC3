@@ -21,7 +21,10 @@ import {
   ENTRY_ADDED_COLUMNS,
   SCHEMA_DDL,
 } from '../../src/adapter/platform/storage/schema';
-import { applySchema } from '../../src/adapter/platform/storage/storage-worker';
+import {
+  applySchema,
+  TASK_CANDIDATE_WHERE,
+} from '../../src/adapter/platform/storage/storage-worker';
 
 /**
  * 🔑 **旧い形の DDL を作る** ── いまの DDL から、後から足した列と索引を落とす。
@@ -187,6 +190,43 @@ describe('entries の後付け列(#277 段②)', () => {
     );
     expect(remaining, '塊の境目で埋め残した').toBe(0);
     expect(taskTotal(db, 'bulk-249'), '最後の塊が埋まっていない').toBe(1);
+    db.close();
+  });
+});
+
+/**
+ * 🔴 **未計算(NULL)の行も候補に入る**(#277 段②-b)。
+ *
+ * ⚠ この経路は **worker の test からは踏めない** ── 保存の口(`bindUpsert`)が
+ *   必ず本文から数えるので、NULL の行が作れないからである。実際
+ *   2026-08-19 の変異試験で「NULL を候補から外す」変異が**生き延びた**
+ *   (CLAUDE.md §2「弱いのではなく走っていない」)。
+ * 🔑 だからここで **実 DB に NULL の行を直に挿し**、製品と**同じ SQL 節**を当てる
+ *   (節の字面を見比べるのではなく、**実際に引く**)。
+ */
+describe('候補の条件(#277 段②-b)', () => {
+  it('🔴 NULL(未計算)の行も候補に入る', () => {
+    const db = new sqlite3.oo1.DB(':memory:');
+    for (const ddl of SCHEMA_DDL) db.exec(ddl);
+    const put = (lid: string, total: number | null): void => {
+      db.exec({
+        sql: `INSERT INTO entries (cid, lid, title, archetype, entry_order, archived, task_total, body)
+              VALUES ('c1', ?, 't', 'text', 1, 0, ?, '')`,
+        bind: [lid, total],
+      });
+    };
+    put('has', 2);
+    put('none', 0);
+    put('unknown', null); // ⚠ 旧ビルドが書いた行の形
+    const lids = (
+      db.selectObjects(`SELECT lid FROM entries WHERE ${TASK_CANDIDATE_WHERE} ORDER BY lid`, [
+        'c1',
+      ]) as Array<{ lid: string }>
+    ).map((r) => r.lid);
+    expect(lids, '未計算の行を候補から外している(その行は永久に出ない)').toEqual([
+      'has',
+      'unknown',
+    ]);
     db.close();
   });
 });

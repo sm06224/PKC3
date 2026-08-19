@@ -358,8 +358,14 @@ function runQueryScan(cid: string, key: string | null): {
  * ── 新ビルドで 1 度保存すれば直る(`bindUpsert` が本文から数え直す)。
  * 🔑 直すには「どの本文について数えたか」の印(`updated_at` との突き合わせ)が
  * 要るが、列がもう 1 本増えるので**いまは採らない**。
+ *
+ * ⚠ **export しているのは test のため**(2026-08-19 の変異試験 M2)。この節を
+ *   `task_total > 0` に縮める変異が**生き延びた** ── 保存の口は必ず本文から
+ *   数えるので、worker の test から NULL の行を作る道が無い(§2「弱いのでは
+ *   なく走っていない」)。`tests/adapter/schema-migration.test.ts` が
+ *   **実 DB に NULL の行を直に挿して**この節を当てる。
  */
-const TASK_CANDIDATE_WHERE = 'cid = ? AND (task_total IS NULL OR task_total > 0)';
+export const TASK_CANDIDATE_WHERE = 'cid = ? AND (task_total IS NULL OR task_total > 0)';
 
 /**
  * 走査で 1 度に読むノートの数。⚠ **本文を丸ごと**読むので、先頭だけ読む

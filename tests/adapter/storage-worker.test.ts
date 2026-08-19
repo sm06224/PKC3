@@ -12,6 +12,7 @@ import type {
   StorageRequest,
   StorageResponse,
 } from '../../src/adapter/platform/storage/protocol';
+import { TASK_LIMITS } from '../../src/features/kanban/kanban-data';
 
 type Op = StorageRequest['op'];
 
@@ -1177,16 +1178,35 @@ describe('カンバンの札を集める (#277 段②)', () => {
     expect(await scanKeys('c-other')).toEqual(['tk-other 2', 'tk-other 3']);
   });
 
-  /**
-   * 🔴 **切ったことを言う**(黙って切ると user は「無い」と読む)。
-   * ⚠ 上限は features 側(`TASK_LIMITS`)が持つので、ここでは
-   *   **上限に届かない量では切らない**ことだけ pin する ── 上限ちょうどの
-   *   走査を test で作ると、上限を上げた日に**主張ごと嘘になる**。
-   */
   it('上限に届かない量では切らない(切ったと言わない)', async () => {
     const scan = await request({ op: 'taskScan', cid: 'c1' });
     expect(scan.truncated, '切っていないのに切ったと言っている').toBe(false);
     expect(scan.scannedNotes, '候補を読み残している').toBe(scan.totalNotes);
     expect(scan.totalNotes, '候補が 1 件も無い(空振り)').toBeGreaterThan(0);
+  });
+
+  /**
+   * 🔴 **切ったら言う**(黙って切ると user は「無い」と読む)。
+   *
+   * ⚠ **上限を跨ぐ件数で試す**(CLAUDE.md §2「弱いのではなく走っていない」)──
+   *   届かない量だけを見ていると、`truncated` を常に `false` にする変異が
+   *   **生き延びる**(2026-08-19 の変異試験 M7 で実際に生き延びた)。
+   * 🔑 件数は **`TASK_LIMITS` から導く**(直書きしない)── 上限を上げた日に
+   *   「上限ちょうど」の主張が嘘になるのを避ける。
+   */
+  it('🔴 上限を超えたら、切ったと言う(黙って落とさない)', async () => {
+    await request({ op: 'openContainer', cid: 'c-many', title: 'x' });
+    const entries = Array.from({ length: TASK_LIMITS.notes + 5 }, (_, i) =>
+      entry(`many-${String(i).padStart(4, '0')}`, `- [ ] やること ${i}\n`, { entryOrder: i }),
+    );
+    await request({ op: 'bulkUpsertEntries', cid: 'c-many', entries });
+    const scan = await request({ op: 'taskScan', cid: 'c-many' });
+    expect(scan.totalNotes, '候補の総数が上限を超えていない(前提が崩れた)').toBe(
+      TASK_LIMITS.notes + 5,
+    );
+    expect(scan.truncated, '切ったのに黙っている').toBe(true);
+    expect(scan.scannedNotes, '上限を超えて読んでいる').toBe(TASK_LIMITS.notes);
+    // ⚠ 切っても**読んだ分は返る**(0 件にして「無い」と見せない)
+    expect(scan.cards.length, '切ったら何も返さなくなった').toBe(TASK_LIMITS.notes);
   });
 });
