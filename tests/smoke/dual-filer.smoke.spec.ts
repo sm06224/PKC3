@@ -210,3 +210,62 @@ test('🔴 F2 で名前を打ち替えられる (#273)', async ({ page }) => {
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **面を一巡して、押しても何も起きない口が無いことを見る**(#273)。
+ *
+ * user 指示 2026-08-14「**自前の headless で拾える不具合を cowork に拾わせたら、
+ * それはこちらのテスト不足**」── 実機へ渡す前に、**この面の押せる口を全部押す**。
+ * ⚠ 観測点は「何かが起きたか」= **状態の行に何か出るか / 画面が変わるか** ──
+ *   dead click は「押しても状態の行が空のまま、画面も同じ」で現れる。
+ */
+test('🔴 2 ペインの押せる口に、無反応が 1 つも無い (#273)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await makeFolder(page, 'はこ');
+  await createEntry(page, 'text');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await openDual(page);
+
+  /** 何も選ばずに押す ── **全部が理由を出す**(無言で終わらない)。 */
+  for (const field of ['dual-move', 'dual-copy', 'dual-rename-begin', 'dual-delete']) {
+    await page.locator('[data-pkc-region="status"]').evaluate((el) => (el.textContent = ''));
+    await clickReal(page, `[data-pkc-field="${field}"]`);
+    await expect(
+      page.locator('[data-pkc-region="status"]'),
+      `${field}: 何も選ばずに押したのに無言(dead click)`,
+    ).not.toHaveText('');
+  }
+
+  /** 選んだ状態で、壊さない口(名前を変える)が本当に開く。 */
+  await page.locator(ROWS('left')).first().click();
+  await clickReal(page, '[data-pkc-field="dual-rename-begin"]');
+  await expect(
+    page.locator(`${PANE('left')} [data-pkc-field="dual-rename"]`),
+    '選んでいるのに入力欄が出ない',
+  ).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  /** 新しいフォルダ ── 押したら**行が増える**(押しても何も起きない、にしない)。 */
+  const before = await page.locator(ROWS('left')).count();
+  await clickReal(page, '[data-pkc-field="dual-mkdir"]');
+  await expect(page.locator(ROWS('left')), 'フォルダが増えていない').toHaveCount(before + 1);
+
+  /**
+   * 写す ── 反対側が空のルートなので、押したら右の件数が増える。
+   * ⚠ **さっき押したのと別の行**を押す ── 同じ座標を短い間に 2 回押すと、
+   *   ブラウザが**ダブルクリック**と数えてフォルダの中へ入ってしまう
+   *   (この test を書いたとき実際に踏んだ。製品ではなく叩き方の問題)。
+   */
+  await page.locator(ROWS('left')).last().click();
+  // ⚠ 空振り防止 ── 押した行が本当に印になっているか(なっていなければ以降は無意味)
+  await expect(
+    page.locator(`${PANE('left')} [data-pkc-entry][data-pkc-marked]`),
+    '行を押したのに印が付いていない',
+  ).toHaveCount(1);
+  await clickReal(page, '[data-pkc-field="dual-copy"]');
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('写しました');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
