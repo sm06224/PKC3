@@ -8,6 +8,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildTiles,
+  calendarTile,
+  CALENDAR_TILE_LID,
   dualTile,
   DUAL_TILE_LID,
   isLaunchableUrl,
@@ -143,7 +145,7 @@ describe('組み込みタイルの合流 (#148)', () => {
    * ⚠ 2 ペインは**アプリに最初から在る**ので先頭、Office は**入れた端末だけ**なので
    *   その次 ── 入れたり消したりで 2 ペインの位置が動かない向きに並べる。
    */
-  it('組み込みは 2 ペイン → Office の順で、既定グループの先頭に付く', () => {
+  it('組み込みは 2 ペイン → カレンダー → Office の順で、既定グループの先頭に付く', () => {
     const merged = withBuiltinTiles(entryTiles, { office: true });
     expect(merged[0]).toEqual({
       lid: DUAL_TILE_LID,
@@ -151,30 +153,40 @@ describe('組み込みタイルの合流 (#148)', () => {
       group: '',
       kind: 'dual',
     });
+    // 🔴 カレンダー(#276 の封印解除)も**アプリに最初から在る**ので、Office より前
     expect(merged[1]).toEqual({
+      lid: CALENDAR_TILE_LID,
+      title: 'カレンダー',
+      group: '',
+      kind: 'calendar',
+    });
+    expect(merged[2]).toEqual({
       lid: OFFICE_TILE_LID,
       title: 'Office',
       group: '',
       kind: 'office',
     });
     // ⚠ entry 由来の並びには触らない(合流は前置だけ)
-    expect(merged.slice(2)).toEqual(entryTiles);
+    expect(merged.slice(3)).toEqual(entryTiles);
   });
 
-  it('🔴 Office が入っていなくても 2 ペインは出る(位置も動かない)', () => {
+  it('🔴 Office が入っていなくても、最初から在るものは出る(位置も動かない)', () => {
     const merged = withBuiltinTiles(entryTiles, { office: false });
     expect(merged[0]?.lid, 'Office の有無で 2 ペインの位置が動いた').toBe(DUAL_TILE_LID);
-    expect(merged.slice(1)).toEqual(entryTiles);
+    expect(merged[1]?.lid, 'Office の有無でカレンダーの位置が動いた').toBe(CALENDAR_TILE_LID);
+    expect(merged.slice(2)).toEqual(entryTiles);
     // ⚠ 「同じ長さ」だけでは足して 1 枚消す実装と区別がつかない ── kind で見る
     expect(merged.some((t) => t.kind === 'office')).toBe(false);
   });
 
   it('entry が 0 件でも組み込みだけで面が成立する', () => {
     const merged = withBuiltinTiles([], { office: true });
-    expect(merged).toHaveLength(2);
-    expect(merged.map((t) => t.kind)).toEqual(['dual', 'office']);
+    expect(merged.map((t) => t.kind)).toEqual(['dual', 'calendar', 'office']);
     // ⚠ Office を入れていない端末でも、面は空にならない
-    expect(withBuiltinTiles([], { office: false }).map((t) => t.kind)).toEqual(['dual']);
+    expect(withBuiltinTiles([], { office: false }).map((t) => t.kind)).toEqual([
+      'dual',
+      'calendar',
+    ]);
   });
 
   /**
@@ -184,6 +196,7 @@ describe('組み込みタイルの合流 (#148)', () => {
   it('🔴 組み込みタイルは entry の選択を立てない', () => {
     expect(tileSelectsEntry(dualTile()), '2 ペインで選択が立つ').toBe(false);
     expect(tileSelectsEntry(officeTile())).toBe(false);
+    expect(tileSelectsEntry(calendarTile()), 'カレンダーで選択が立つ').toBe(false);
     expect(tileSelectsEntry(entryTiles[0]!), 'entry 由来まで立たなくなった').toBe(true);
   });
 

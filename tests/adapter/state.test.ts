@@ -274,11 +274,12 @@ describe('reducer: lean aggregate', () => {
     const r = reduce(s, { type: 'TOGGLE_TODO_STATUS', lid: 'td' });
     expect(r.events).toEqual([
       {
-        type: 'REQUEST_TODO_TOGGLE',
+        type: 'REQUEST_BODY_REWRITE',
         lid: 'td',
         title: 't-td',
+        archetype: 'todo',
         entryOrder: 3,
-        nextStatus: 'done',
+        rewrite: { kind: 'frontmatter', keys: { status: 'done' } },
       },
     ]);
     expect(r.state.entryMetas).toBe(s.entryMetas); // ack までカードは動かない
@@ -289,7 +290,7 @@ describe('reducer: lean aggregate', () => {
     expect(reduce(s, { type: 'TOGGLE_TODO_STATUS', lid: 'td' }).events).toEqual([]);
   });
 
-  it('TODO_TOGGLED: 編集中の同一 entry では draft を触らず persisted だけ追従', () => {
+  it('BODY_REWRITTEN: 編集中の同一 entry では draft を触らず persisted だけ追従', () => {
     const todo: EntryMeta = { ...meta('td', 1), archetype: 'todo' };
     let s = reduce(initialState, {
       type: 'SYS_BOOTED',
@@ -303,9 +304,10 @@ describe('reducer: lean aggregate', () => {
     s = reduce(s, { type: 'UPDATE_OPEN_BODY', body: 'draft…' }).state;
     const toggledBody = '---\nstatus: done\n---\nx';
     s = reduce(s, {
-      type: 'TODO_TOGGLED',
+      type: 'BODY_REWRITTEN',
       lid: 'td',
       body: toggledBody,
+      rewrite: { kind: 'frontmatter', keys: { status: 'done' } },
       status: 'done',
       date: null,
       archived: false,
@@ -331,9 +333,10 @@ describe('reducer: lean aggregate', () => {
       s = reduce(s, { type: 'START_EDIT' }).state;
       // 編集中に toggle ack が着弾(draft は不触・persisted のみ追従)
       return reduce(s, {
-        type: 'TODO_TOGGLED',
+        type: 'BODY_REWRITTEN',
         lid: 'td',
         body: toggled,
+        rewrite: { kind: 'frontmatter', keys: { status: 'done' } },
         status: 'done',
         date: null,
         archived: false,
@@ -420,9 +423,10 @@ describe('reducer: lean aggregate', () => {
     // 後着の toggle(disk の旧内容基準)が成功して ack
     const toggledOld = '---\nstatus: done\n---\nv1';
     s = reduce(s, {
-      type: 'TODO_TOGGLED',
+      type: 'BODY_REWRITTEN',
       lid: 'td',
       body: toggledOld,
+      rewrite: { kind: 'frontmatter', keys: { status: 'done' } },
       status: 'done',
       date: null,
       archived: false,

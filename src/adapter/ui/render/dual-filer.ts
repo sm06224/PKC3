@@ -167,6 +167,22 @@ export class DualFilerRenderer {
     // 🔑 押した所へ焦点が移る ── 「移す元」を選ぶのに専用のボタンを作らない
     root.setAttribute('data-pkc-action', 'dual-focus');
     root.setAttribute('aria-label', `${SIDE_LABEL[side]}のペイン`);
+    /**
+     * 🔴 **器そのものを焦点の受け皿にする**(#273。実ブラウザ smoke で判明)。
+     *
+     * ⚠ 行に焦点を置く作りだけだと、**空のフォルダへ入った瞬間に焦点の置き場が
+     *   消える** ── 次の keydown の的が `body` になり、`[data-pkc-region="dual-pane"]`
+     *   の親が無いので**この面の鍵が 1 つも当たらなくなる**(入ったら Backspace すら
+     *   効かず、マウスに戻るしかない)。
+     * ⚠ `-1` にする(Tab 順には入れない)── 行が在るときの入口は行のままにする。
+     */
+    root.tabIndex = -1;
+    /**
+     * 🔴 **ペインの地(行の無い所)も落とし先**(#273 段⑤)── そのペインが
+     * 「いま開いている場所」へ入れる。⚠ 行き先の lid は `data-pkc-drop-scope` で
+     * 渡す(`data-pkc-entry` を持たせると**そのペイン自身が entry**に見える)。
+     */
+    root.setAttribute('data-pkc-drop', 'pane');
 
     const tabs = document.createElement('div');
     tabs.setAttribute('data-pkc-region', 'dual-tabs');
@@ -202,6 +218,11 @@ export class DualFilerRenderer {
     this.renderTabs(frame.tabs, side, state, pane);
     this.renderCrumbs(frame.crumbs, side, state, pane);
     /**
+     * ⚠ **落とし先の行き先を、いまの場所に追随させる**(#273 段⑤)。
+     * `''` = ルート。⚠ 書き忘れると、フォルダの中を開いていても**ルートへ**落ちる。
+     */
+    frame.root.setAttribute('data-pkc-drop-scope', paneScope(pane) ?? '');
+    /**
      * 指紋には**この面が実際に描くもの**だけを入れる(#240 の filer と同じ規律)。
      * ⚠ 逆に描くものを入れ忘れると**古い値が残る** ── 行が出しているのは
      *   `lid` / 題名 / 種別 / 更新日である。
@@ -218,8 +239,17 @@ export class DualFilerRenderer {
      * 空の理由の文言が**古いまま残る**(行が 0 件だと指紋は空文字になる)。
      */
     const filtered = normalizeQuery(state.filterQuery) !== '';
+    /**
+     * ⚠ **打ち替え中の行も指紋に入れる**(#273 段④)── 入れないと、
+     * 打ち始め / やめるで行を組み直さないので、**入力欄が出ない / 消えない**。
+     */
+    const renaming =
+      state.dual.renaming !== null && state.dual.renaming.side === side
+        ? state.dual.renaming.lid
+        : '';
     const signature = [
       filtered ? 'q' : '-',
+      `r:${renaming}`,
       ...rows.map((m) =>
         [m.lid, m.title, m.archetype, formatListDate(m.updatedAt, year)].join(SEP),
       ),
@@ -227,7 +257,7 @@ export class DualFilerRenderer {
     if (signature !== frame.signature) {
       frame.signature = signature;
       frame.marks = '';
-      this.renderTable(frame, side, rows, filtered);
+      this.renderTable(frame, side, rows, filtered, renaming);
     }
     const marks = pane.selection.join(' ');
     if (marks !== frame.marks) {
@@ -349,6 +379,8 @@ export class DualFilerRenderer {
     side: DualSide,
     rows: readonly EntryMeta[],
     filtered: boolean,
+    /** 打ち替え中の行(`''` = 無し)。⚠ その行だけ入力欄になる。 */
+    renaming: string,
   ): void {
     const year = new Date().getFullYear();
     frame.rows.clear();
@@ -376,12 +408,41 @@ export class DualFilerRenderer {
       tr.setAttribute('data-pkc-entry', m.lid);
       tr.setAttribute('data-pkc-side', side);
       tr.setAttribute('data-pkc-action', 'dual-row');
+      /**
+       * ⚠ **種別を行そのものに出す**(左の列 `render/filer.ts` と同じ)── これが
+       *   無いと、外から「ノートの行」を名指しできるのが `data-pkc-drop` の
+       *   **有無**だけになり、落とし先の印を消す変異で**狙う行が入れ替わる**
+       *   (検査が別のものを見に行く。指紋には元から種別が入っている)。
+       */
+      tr.setAttribute('data-pkc-archetype', m.archetype);
       tr.tabIndex = -1;
+      /**
+       * 🔴 **掴んで運べる**(#273 段⑤。左の列と同じ仕組み ── `PKC_DRAG`)。
+       * ⚠ `draggable` は**行そのもの**に置く(セルに置くと掴む場所が読めない)。
+       */
+      tr.setAttribute('draggable', 'true');
+      // ⚠ フォルダは**落とし先**にもなる(その中へ入れる)
+      if (m.archetype === 'folder') tr.setAttribute('data-pkc-drop', 'folder');
       const name = document.createElement('td');
-      name.append(
-        iconSpan(ARCHETYPE_ICONS[m.archetype] ?? 'page'),
-        document.createTextNode(m.title),
-      );
+      if (m.lid === renaming) {
+        /**
+         * 🔴 **その場で名前を打ち替える**(#273 段④。OS のファイラの F2)。
+         * ⚠ 行そのものの押下(`dual-row`)へ**伝えない** ── 打っている最中に
+         *   クリックが行の選択として拾われると、入力が飛ぶ。
+         */
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = m.title;
+        input.setAttribute('data-pkc-field', 'dual-rename');
+        input.setAttribute('data-pkc-entry', m.lid);
+        input.setAttribute('aria-label', '新しい名前');
+        name.append(iconSpan(ARCHETYPE_ICONS[m.archetype] ?? 'page'), input);
+      } else {
+        name.append(
+          iconSpan(ARCHETYPE_ICONS[m.archetype] ?? 'page'),
+          document.createTextNode(m.title),
+        );
+      }
       const kind = document.createElement('td');
       kind.textContent = archetypeLabel(m.archetype);
       const date = document.createElement('td');
@@ -392,6 +453,17 @@ export class DualFilerRenderer {
     }
     table.append(tbody);
     frame.table.append(table);
+    /**
+     * ⚠ **描いた直後に焦点と全選択**(#273 段④)── これが無いと、押した直後に
+     * user が自分でクリックし直す羽目になる(OS のファイラは打てる状態で出る)。
+     */
+    if (renaming !== '') {
+      const input = frame.table.querySelector<HTMLInputElement>(
+        '[data-pkc-field="dual-rename"]',
+      );
+      input?.focus();
+      input?.select();
+    }
   }
 
   /**
@@ -418,6 +490,46 @@ export class DualFilerRenderer {
         ? `${SIDE_LABEL[from]}で選んだ ${count} 件を、反対側の場所へ入れます`
         : '移すものを選んでから押してください';
     host.append(move);
+    /**
+     * 🔴 **整理に要る操作を、この面から届かせる**(#273 段②。user 指摘
+     * 「OS のファイラと同じことができないといけません」)。
+     * ⚠ **マウスだけで完結し、キーボードは近道**(user 指示 2026-08-03 の業務画面)──
+     *   `Delete` の鍵と同じことを、押しボタンでもできるようにする。
+     */
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.setAttribute('data-pkc-action', 'dual-copy');
+    copy.setAttribute('data-pkc-field', 'dual-copy');
+    copy.textContent = from === 'left' ? '→ 右へ写す' : '← 左へ写す';
+    copy.title =
+      count > 0
+        ? `${SIDE_LABEL[from]}で選んだ ${count} 件を、反対側の場所へ写します(元は残ります)`
+        : '写すものを選んでから押してください';
+    host.append(copy);
+    const ren = document.createElement('button');
+    ren.type = 'button';
+    ren.setAttribute('data-pkc-action', 'dual-rename-begin');
+    ren.setAttribute('data-pkc-field', 'dual-rename-begin');
+    ren.textContent = '名前を変える';
+    ren.title = '選んだ 1 件の名前を、その場で打ち替えます(F2)';
+    host.append(ren);
+    const mkdir = document.createElement('button');
+    mkdir.type = 'button';
+    mkdir.setAttribute('data-pkc-action', 'dual-mkdir');
+    mkdir.setAttribute('data-pkc-field', 'dual-mkdir');
+    mkdir.textContent = '新しいフォルダ';
+    mkdir.title = `${SIDE_LABEL[from]}のペインが開いている場所に、フォルダを作ります`;
+    host.append(mkdir);
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.setAttribute('data-pkc-action', 'dual-delete');
+    del.setAttribute('data-pkc-field', 'dual-delete');
+    del.textContent = 'ゴミ箱へ';
+    del.title =
+      count > 0
+        ? `${SIDE_LABEL[from]}で選んだ ${count} 件をゴミ箱へ入れます(戻せます)`
+        : '消すものを選んでから押してください';
+    host.append(del);
     const hint = document.createElement('p');
     hint.setAttribute('data-pkc-field', 'dual-hint');
     hint.textContent = `元は${SIDE_LABEL[from]}のペインです`;

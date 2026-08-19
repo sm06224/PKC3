@@ -8,7 +8,7 @@ export const APP_ID = 'pkc3' as const;
  * release workflow は `v<この値>` の tag しか受けない ── 食い違うと
  * 「配ったものと名乗る版が違う」provenance になる。
  */
-export const APP_VERSION = '3.1.0';
+export const APP_VERSION = '3.1.1';
 export const SCHEMA_VERSION = 1;
 
 export type BuildKind = 'dev' | 'stage' | 'product';

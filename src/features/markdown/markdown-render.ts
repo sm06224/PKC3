@@ -1611,13 +1611,29 @@ md.core.ruler.after('inline', 'pkc-task-list', function (state) {
     }
 
     const checkbox = new state.Token('html_inline', '', 0);
-    // 🔴 **押せない形で出す**(P8 段⑳)。直す前は `disabled` が無く、押すと
-    //    その場でチェックが付くのに**本文は 1 文字も変わらない** ── 別のノートへ
-    //    移って戻る / 追記する / 再読込すると全部外れる。user から見れば
-    //    「チェックしたのに消えた」= データを失った挙動である。
-    //    ⚠ 効かせる(本文を splice して保存する)のは新機能なので、
-    //      「読むだけ」に倒し切る ── 押せないものは押せない形にする
-    checkbox.content = `<input type="checkbox" class="pkc-task-checkbox" data-pkc-task-index="${taskIndex}" disabled${checked ? ' checked' : ''}> `;
+    /**
+     * 🔴 **押せるのは「受け手が居る面」だけ**(#277。2026-08-19)。
+     *
+     * ⚠ 既定はいまも**押せない形**である(P8 段⑳ の判断は生きている)──
+     *   `disabled` が無いのに本文が変わらないと、user から見て
+     *   「チェックしたのに消えた」= データを失った挙動になる。書き出した HTML・
+     *   Viewer・印刷など**受け手の居ない面では押せないままにする**。
+     * 🔑 効かせる面(本文の読む面)だけが `interactiveTasks` を渡す。
+     * 🔴 **行番号で指す**(索引ではない)── `list_item_open` の `map[0]` が
+     *   原文の行である。索引だと、数え方が描画側と原文側で 1 つでもずれた瞬間に
+     *   **別の行を書き換える**(いちばん静かなデータ破壊)。
+     */
+    const interactive = (state.env as { interactiveTasks?: boolean }).interactiveTasks === true;
+    const outLine = tokens[i - 2]!.map?.[0];
+    // ⚠ **原文の行へ逆引きする**(前処理で行がずれている ── 上の `env.lineMap`)
+    const map = (state.env as { lineMap?: number[] }).lineMap;
+    const srcLine =
+      typeof outLine === 'number' ? (map ? (map[outLine] ?? outLine) : outLine) : undefined;
+    const wired = interactive && typeof srcLine === 'number';
+    const attrs = wired
+      ? ` data-pkc-action="toggle-task" data-pkc-task-line="${srcLine}"`
+      : ' disabled';
+    checkbox.content = `<input type="checkbox" class="pkc-task-checkbox" data-pkc-task-index="${taskIndex}"${attrs}${checked ? ' checked' : ''}> `;
     taskIndex++;
     children.unshift(checkbox);
     token.children = children as Token[];
@@ -1636,6 +1652,15 @@ md.core.ruler.after('inline', 'pkc-task-list', function (state) {
  */
 export interface RenderMarkdownOptions {
   readonly currentContainerId?: string;
+  /**
+   * 🔴 **チェックの印を押せる形で出すか**(#277。既定 `false` = 押せない)。
+   *
+   * ⚠ **受け手(`toggle-task`)が居る面だけ** `true` にする ── 押せるのに
+   *   本文が変わらないと、user から見て「チェックしたのに消えた」= データを
+   *   失った挙動になる(P8 段⑳ で一度そうなった)。書き出した HTML・Viewer・
+   *   印刷は受け手が居ないので、**押せないまま**にする。
+   */
+  readonly interactiveTasks?: boolean;
   /**
    * M-7(wave-10-2 Phase 2、2026-05-08):本文中の `{{vars.name}}` 展開に
    * 使う変数 map。caller(presenter)は `extractVars(entry.body)` で
@@ -4618,10 +4643,17 @@ export function renderMarkdown(
   const paraAlignResult = processParagraphAlignDirective(text, lineMap);
   text = paraAlignResult.transformed;
   lineMap = paraAlignResult.lineMap;
-  const env = {
+  const env: {
+    currentContainerId: string;
+    allowExternalImages: boolean;
+    interactiveTasks: boolean;
+    lineMap?: number[];
+  } = {
     currentContainerId: opts.currentContainerId ?? '',
     // ⚠ 既定は**塞ぐ側**(`external-images.ts` の向きに従う)
     allowExternalImages: opts.allowExternalImages === true,
+    // 🔴 チェックの印を押せる形で出すか(#277)。既定は押せない
+    interactiveTasks: opts.interactiveTasks === true,
   };
   // L-5 align prefix + L-9 indent prefix を pre-process で strip(挿入あり)。
   const alignResult = preprocessAlignPrefix(text, lineMap);
@@ -4640,6 +4672,15 @@ export function renderMarkdown(
   ]);
   const indentMap = alignResult.indentMap;
   lineMap = alignResult.lineMap;
+  /**
+   * 🔴 **前処理で行がずれる**(#277)。`md.parse` に渡すのは前処理後の文字列なので、
+   * token の `map` は**前処理後の行番号**である ── そのまま焼くと、行頭の寄せ記号
+   * などが在るノートで**別の行を書き換える**。
+   * ⚠ CLAUDE.md「preprocessor の行挿入は LineMap で原文 index に逆引き」。
+   * 🔑 `sourceLineAnchors` / `collectRanges` は**描いた後**に逆引きするが、
+   *   チェックの印は**描く途中**(core rule)で焼くので、ここで渡す。
+   */
+  env.lineMap = lineMap ?? undefined;
   let html: string;
   /**
    * 🔴 **行の対応表を「属性に焼かずに」受け取る**(2026-08-05。ライブエディタ S2。

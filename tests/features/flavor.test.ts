@@ -19,12 +19,44 @@ describe('flavor registry', () => {
     }
   });
 
-  it('text fallback: fromPkc2 is identity, extract has no columns', () => {
+  /**
+   * 🔴 **普通のノートも `date` / `status` を列に写す**(#276 / #277。
+   * user 指示 2026-08-19「frontmatter でのカレンダー情報付与」)。
+   *
+   * ⚠ 2026-08-19 に**主張を裏返した**。以前は「text 系は列に写さない
+   *   (kanban / calendar は todo だけを引く ── PKC2 と同じ意味論)」だったが、
+   *   **todo は封印中**(`features/sealed.ts`)なので、その意味論では
+   *   **カレンダーに何も出せる人が居ない**。
+   * ⚠ 主張を裏返したときは前提も見直す(CLAUDE.md §1)── だから
+   *   `archived` を写さない側は**据え置き**である(下の it が守る)。
+   */
+  it('🔴 text fallback: fromPkc2 は恒等 / date と status は列に写す', () => {
     const body = '---\nstatus: done\ndate: 2026-08-01\n---\n# 見出し';
     expect(getFlavor('text').fromPkc2(body)).toBe(body);
-    // text 系は frontmatter に status 等が書かれていても列に写さない
-    // (kanban / calendar は todo だけを引く ── PKC2 と同じ意味論)
-    expect(extractMeta('text', body)).toEqual(NO_EXTRACT);
+    expect(extractMeta('text', body)).toEqual({
+      status: 'done',
+      date: '2026-08-01',
+      archived: false,
+    });
+    // フォルダなど fallback に落ちるものも同じ(面ごとに規則を変えない)
+    expect(extractMeta('folder', body).date).toBe('2026-08-01');
+  });
+
+  it('書いていなければ列は空(既定値を作らない)', () => {
+    expect(extractMeta('text', '# ただの見出し\n')).toEqual(NO_EXTRACT);
+    // ⚠ 読めない日付は列に入らない(本文には残る)
+    expect(extractMeta('text', '---\ndate: 2026-8-1\n---\n').date).toBeNull();
+  });
+
+  /**
+   * 🔴 **`archived` は普通のノートでは写さない**(#276)。
+   * ⚠ 写すと、`archived: true` と書いただけでノートが一覧から消える ──
+   *   書いた本人にも消えた理由が分からない(いちばん気づけない形)。
+   */
+  it('🔴 archived は普通のノートでは写さない(黙って消えない)', () => {
+    expect(extractMeta('text', '---\narchived: true\n---\n').archived).toBe(false);
+    // ⚠ 対照群 ── todo では今までどおり写る(そちらの意味論は変えていない)
+    expect(extractMeta('todo', '---\nstatus: open\narchived: true\n---\n').archived).toBe(true);
   });
 });
 

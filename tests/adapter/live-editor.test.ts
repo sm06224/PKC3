@@ -485,3 +485,174 @@ describe('ライブエディタ(1 面)の配線', () => {
     expect(r.bodies).toEqual([]);
   });
 });
+
+/**
+ * 🔴 **文書の情報(frontmatter)が、普通の編集で消えない**(#284)。
+ *
+ * ⚠ 直す前の実測:既定の live は**生の本文をそのまま描く**ので、
+ *   `---` が水平線・`tags: [...]` が**見出し**として画面に出ていた。
+ *   user から見れば「消してよさそうな謎の行」であり、その場で消せた ──
+ *   閉じの `---` が 1 行消えるだけで `parseFrontmatter` は `{}` を返し、
+ *   **警告 0 件でタグが全部消える**。
+ * ⚠ しかも **live を frontmatter 付きで開く test が 1 本も無かった**ので、
+ *   この挙動は全 test 緑のまま出荷されていた(CLAUDE.md §2)。
+ *
+ * 🔑 守る主張は 4 つ:
+ * 1. 情報は**本文として描かれない**(謎の見出しが出ない)
+ * 2. 情報は**札として見える**(隠すのではなく名札を付ける)
+ * 3. 🔴 **行ごとの編集が、原文の正しい行を書き換える**(ずれない)
+ * 4. 🔴 **情報を編集する口が在る**(触れなくしただけなら動線を 1 つ減らしている)
+ */
+describe('文書の情報(frontmatter)の扱い(#284)', () => {
+  const FM = ['---', 'tags: [あ, い]', '---', '# 題', '', '最初の段落。'].join('\n');
+
+  it('🔴 情報が本文として描かれない(謎の見出しが出ない)', async () => {
+    setLive(true);
+    const r = rig(FM);
+    await settle();
+    const live = r.root.querySelector('[data-pkc-region="editor-live"]')!;
+    // ⚠ 直す前は <hr> と <h2 id="tags-あ-い"> がここに出ていた
+    expect(live.querySelector('hr'), '情報が水平線として本文に出ている').toBeNull();
+    expect(
+      [...live.querySelectorAll('h1,h2,h3')].map((e) => e.textContent),
+      '情報が見出しとして本文に出ている',
+    ).toEqual(['題']);
+    // 空振り防止 ── 本文そのものは描けている
+    expect([...live.querySelectorAll('p')].map((e) => e.textContent)).toContain('最初の段落。');
+  });
+
+  it('🔴 情報は札として見える(中身つき)', async () => {
+    setLive(true);
+    const r = rig(FM);
+    await settle();
+    const card = r.root.querySelector('[data-pkc-region="live-frontmatter"]')!;
+    expect(card.hasAttribute('data-pkc-has-frontmatter'), '札が出ていない').toBe(true);
+    expect(
+      card.querySelector('[data-pkc-field="fm-summary"]')?.textContent,
+      '何が入っているか出ていない',
+    ).toContain('tags: あ, い');
+  });
+
+  it('情報の無い文書では札を出さない(空の枠を置かない)', async () => {
+    setLive(true);
+    const r = rig(DOC);
+    await settle();
+    const card = r.root.querySelector('[data-pkc-region="live-frontmatter"]')!;
+    expect(card.hasAttribute('data-pkc-has-frontmatter'), '情報が無いのに札が出た').toBe(false);
+    expect(card.textContent, '空の札に文字が出ている').toBe('');
+  });
+
+  /**
+   * 🔴 **これが本丸** ── 描く本文は情報を外した側なので、行番号が
+   * `fmLines` だけずれる。ずらし忘れると **情報の行を書き潰す**
+   * (user から見て「上の数行が消えた」)。
+   */
+  it('🔴 行を書き換えても、情報の行を書き潰さない', async () => {
+    setLive(true);
+    const r = rig(FM);
+    await settle();
+    const live = r.root.querySelector('[data-pkc-region="editor-live"]')!;
+    const p = [...live.querySelectorAll('p')].find((e) => e.textContent === '最初の段落。')!;
+    p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    const ta = live.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')!;
+    expect(ta.value, '開いた行が原文とずれている').toBe('最初の段落。');
+    ta.value = '書き換えた。';
+    ta.blur();
+    expect(r.bodies).toEqual([
+      ['---', 'tags: [あ, い]', '---', '# 題', '', '書き換えた。'].join('\n'),
+    ]);
+  });
+
+  /** ⚠ 見出し(情報のすぐ下の行)でも同じ ── 境目の 1 行で試す。 */
+  it('🔴 情報のすぐ下の行を書き換えても、ずれない', async () => {
+    setLive(true);
+    const r = rig(FM);
+    await settle();
+    const live = r.root.querySelector('[data-pkc-region="editor-live"]')!;
+    const h = live.querySelector('h1')!;
+    h.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    const ta = live.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')!;
+    expect(ta.value, '境目の行がずれている').toBe('# 題');
+    ta.value = '# 新しい題';
+    ta.blur();
+    expect(r.bodies).toEqual([
+      ['---', 'tags: [あ, い]', '---', '# 新しい題', '', '最初の段落。'].join('\n'),
+    ]);
+  });
+
+  /**
+   * 🔴 **全文編集でも情報を巻き込まない**(#284)。⚠ ここが本文側に入っていると、
+   *   「全文を編集」を押しただけで情報が入力欄に出てきて、消せてしまう。
+   */
+  it('🔴 「全文を編集」に情報は入らない', async () => {
+    setLive(true);
+    const r = rig(FM);
+    await settle();
+    const live = r.root.querySelector('[data-pkc-region="editor-live"]')!;
+    r.root.querySelector<HTMLElement>('[data-pkc-field="edit-all"]')!.click();
+    const ta = live.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')!;
+    expect(ta.value, '全文編集の入力欄に情報が入っている').not.toContain('tags:');
+    expect(ta.value, '本文が入っていない(空振り)').toContain('# 題');
+  });
+
+  /**
+   * 🔴 **情報を編集する口が在る**(#284)。⚠ 本文側から触れなくしたので、
+   *   ここが無いと**書けたものが書けなくなる**(CLAUDE.md 不可侵)。
+   */
+  it('🔴 札から情報を編集して確定できる', async () => {
+    setLive(true);
+    const r = rig(FM);
+    await settle();
+    const card = r.root.querySelector('[data-pkc-region="live-frontmatter"]')!;
+    card.querySelector<HTMLElement>('[data-pkc-field="fm-edit"]')!.click();
+    const ta = card.querySelector<HTMLTextAreaElement>('[data-pkc-field="fm-source"]')!;
+    expect(ta.value, '原文がそのまま出ていない').toBe('---\ntags: [あ, い]\n---');
+    ta.value = '---\ntags: [う]\n---';
+    card.querySelector<HTMLElement>('[data-pkc-field="fm-commit"]')!.click();
+    expect(r.bodies.at(-1), '情報だけが差し替わっていない').toBe(
+      ['---', 'tags: [う]', '---', '# 題', '', '最初の段落。'].join('\n'),
+    );
+    await settle();
+    expect(
+      r.root.querySelector('[data-pkc-field="fm-summary"]')?.textContent,
+      '札が新しい値に追随していない',
+    ).toContain('tags: う');
+  });
+
+  it('やめると本文は変わらない', async () => {
+    setLive(true);
+    const r = rig(FM);
+    await settle();
+    const card = r.root.querySelector('[data-pkc-region="live-frontmatter"]')!;
+    card.querySelector<HTMLElement>('[data-pkc-field="fm-edit"]')!.click();
+    card.querySelector<HTMLTextAreaElement>('[data-pkc-field="fm-source"]')!.value = '壊す';
+    card.querySelector<HTMLElement>('[data-pkc-field="fm-cancel"]')!.click();
+    expect(r.bodies, 'やめたのに本文が出た').toEqual([]);
+    expect(card.querySelector('[data-pkc-field="fm-summary"]')?.textContent).toContain('tags: あ');
+  });
+
+  /**
+   * 🔴 **読めなくなったら、そう言う**(#284 の本題)。
+   * ⚠ 本文は 1 文字も失われていない(原文に残る)が、**情報としては読めていない** ──
+   *   ここで黙ると、user はタグが消えたことに気づけない。
+   */
+  it('🔴 閉じの --- を消したら、読めなくなったと画面に出る', async () => {
+    setLive(true);
+    const r = rig(FM);
+    await settle();
+    const card = r.root.querySelector('[data-pkc-region="live-frontmatter"]')!;
+    card.querySelector<HTMLElement>('[data-pkc-field="fm-edit"]')!.click();
+    card.querySelector<HTMLTextAreaElement>('[data-pkc-field="fm-source"]')!.value =
+      '---\ntags: [あ]';
+    card.querySelector<HTMLElement>('[data-pkc-field="fm-commit"]')!.click();
+    const note = r.root.querySelector('[data-pkc-field="row-note"]')!;
+    expect(note.textContent, '黙って読めなくなった').toContain('読めなくなりました');
+    // ⚠ 書いたものは本文に残っている(消してはいない)
+    expect(r.bodies.at(-1), '本文から消えた').toContain('tags: [あ]');
+    await settle();
+    expect(
+      card.hasAttribute('data-pkc-has-frontmatter'),
+      '読めないのに札が出たまま(2 つ目の編集口になる)',
+    ).toBe(false);
+  });
+});

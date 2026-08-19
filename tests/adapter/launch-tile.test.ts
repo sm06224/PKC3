@@ -50,6 +50,8 @@ interface Harness {
   officeOpens: { n: number };
   /** `openDual` が呼ばれた回数(#241 の観測点)。 */
   dualOpens: { n: number };
+  /** ⚠ どの面へ切り替えたか(#276 で口が 1 本になった)。 */
+  viewOpens: string[];
   closeWindow: () => void;
   deps: Parameters<typeof launchTile>[1];
 }
@@ -65,6 +67,7 @@ function harness(
   const seedFor: string[] = [];
   const officeOpens = { n: 0 };
   const dualOpens = { n: 0 };
+  const viewOpens: string[] = [];
   const win = fakeWindow();
   let release: (() => void) | null = null;
   let seq = 0;
@@ -77,6 +80,7 @@ function harness(
     seedFor,
     officeOpens,
     dualOpens,
+    viewOpens,
     closeWindow: () => {
       win.closed = true;
       release?.();
@@ -106,8 +110,9 @@ function harness(
       openOffice: () => {
         officeOpens.n += 1;
       },
-      openDual: () => {
-        dualOpens.n += 1;
+      openView: (view) => {
+        viewOpens.push(view);
+        if (view === 'dual') dualOpens.n += 1;
       },
     },
   };

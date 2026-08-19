@@ -9,12 +9,37 @@ description: PKC3 の実ブラウザ検証(tests/smoke、Playwright)を書く・
 実ブラウザでしか分からない ── そのための最小の lane が `tests/smoke` である。
 
 ```bash
-npm run test:smoke                                    # 全量(PR gate と同じ)
-npx playwright test --config tests/smoke/playwright.config.ts <grep>
+# 🟢 既定はこちら ── **触った spec だけ**(4〜20 秒)
+npm run test:smoke -- tests/smoke/<触った>.smoke.spec.ts
+
+# 🔴 全量(33 spec)。**ここぞ**のときだけ ── 手元でも CI でも 4〜6 分かかる
+npm run test:smoke
 ```
 
 ⚠ **smoke は `vite preview` で `dist/` を配信する。** source を直しただけでは
 検査対象に**届かない** ── 必ず `npm run build` を挟む。
+
+## 🔴 フルを乱発しない(user 指示 2026-08-19)
+
+> 「**フルスモークを乱発しないように / イタズラに時間とトークンを消費します /
+> ここぞと言うときに使いましょう**」
+
+実測(2026-08-19): 狙い撃ち 1〜3 spec = **4〜20 秒** / CI のフル = **4〜6 分**
+(観測 3 回: 4m03s / 6m11s / 5m19s)。⚠ この日は同じ branch 系で **8 回 push した
+= フルが 8 回回った**。多くは **1 spec しか触っていない**変更だった。
+
+🔑 **いちばん効くのは「push をまとめる」** ── **push 1 回 = フル 1 回**である。
+1 commit ごとに投げず、手元で緑にしてからまとめて 1 回にする。
+
+**フルを回してよい「ここぞ」は 3 つだけ**:
+
+1. **共有面**を触った(boot / renderer / storage / CSS / shell)── どの spec に効くか読めない
+2. **CI のフルが落ちた**ので手元で再現したい
+3. **着地直前の最後の 1 回**
+
+⚠ **変異試験の smoke は、その変異が殺されるはずの 1 spec に絞る。**
+`build` + smoke の**対**で回るので、1 変異あたりのコストが跳ね上がる。
+🔑 コストは「実行回数」ではなく **`build` + smoke の対の回数**で数える。
 
 ## 🔴 ブラウザが 2 つある
 

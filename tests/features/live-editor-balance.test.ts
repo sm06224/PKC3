@@ -119,6 +119,25 @@ const CASES: readonly Case[] = [
   { name: ':::foo(畳まれない名前)', body: ':::foo\n中身\n:::\n', ok: true },
   { name: ':::unknown-thing', body: ':::unknown-thing\n中身\n:::\n', ok: true },
 
+  /**
+   * ── 🔴 **本物の frontmatter**(#284 で判明した穴)──────────────
+   *
+   * ⚠ この表には **`^---` で始まる形が 1 件も無かった** ── いちばん多い形
+   *   (タグを付けたノート)を**一度も検めていなかった**(CLAUDE.md §2
+   *   「fixture のゼロ件の次元は、測っていない次元」)。
+   * 🔑 いま `---` は水平線、その中身は見出しとして描かれるので釣り合う。
+   *   ⚠ この見え方を変えるとき(#284 の 2)、ここが**先に落ちる**のが正しい。
+   */
+  { name: 'frontmatter + 見出し', body: '---\ntags: [あ, い]\n---\n# 見出し\n本文\n', ok: true },
+  { name: 'frontmatter だけ', body: '---\ntags: [あ]\n---\n', ok: true },
+  {
+    name: 'frontmatter + 表',
+    body: '---\ntags: [あ]\n---\n| a | b |\n|---|---|\n| 1 | 2 |\n',
+    ok: true,
+  },
+  { name: 'frontmatter(閉じ無し)', body: '---\ntags: [あ]\n# 見出し\n本文\n', ok: true },
+  { name: '水平線で始まる本文', body: '---\n本文\n', ok: true },
+
   // ── まだ釣り合っていない形(理由つきで記録する)──────────────
   {
     name: ':::figure に使えない id',
@@ -156,7 +175,8 @@ describe('ライブエディタの釣り合い(行ごとの編集が開くか)',
     const open = CASES.filter((c) => c.ok).length;
     // ⚠ 2026-08-07: 入れ子で 28 → 32、畳まれない名前で 32 → 34。
     //    減ったら**退行**である(増えるのは歓迎)
-    expect(open, '行ごとの編集が開く形が減っている(退行)').toBeGreaterThanOrEqual(34);
+    //    ⚠ 2026-08-19: 本物の frontmatter 5 件を足して 34 → 39(#284)
+    expect(open, '行ごとの編集が開く形が減っている(退行)').toBeGreaterThanOrEqual(39);
     // ⚠ 残るのは「名前は知っているが属性が不正」な 1 件だけ。増やすには理由が要る
     expect(CASES.filter((c) => !c.ok).length, '釣り合わない形が増えている').toBeLessThanOrEqual(1);
   });

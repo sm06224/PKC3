@@ -5,12 +5,21 @@
  * PKC2 のこれらの body は素の text / markdown なので変換は恒等。opaque の
  * 「内容を解釈せず保全する」契約も恒等変換がそのまま満たす。
  */
-import { NO_EXTRACT, type FlavorSpec } from './flavor-spec';
+import type { FlavorSpec } from './flavor-spec';
+import { extractSchedule } from '../schedule/schedule-keys';
 
 export const textFlavor: FlavorSpec = {
   archetype: 'text',
-  // text 系は抽出列を持たない。frontmatter に status 等が書かれていても列に
-  // 写さない ── kanban / calendar は todo だけを引く(PKC2 と同じ意味論)
-  extract: () => NO_EXTRACT,
+  /**
+   * 🔴 **普通のノートも `date` / `status` を列に写す**(#276 / #277。
+   * user 指示 2026-08-19「frontmatter でのカレンダー情報付与」)。
+   *
+   * ⚠ 直す前は `NO_EXTRACT` を返していた ── カレンダーとカンバンが
+   *   **todo アーキタイプだけ**を引く形だったからである。todo は封印中
+   *   (`features/sealed.ts`)なので、**書ける人が誰も居ない**状態だった。
+   * ⚠ 鍵の名前と受理形は `schedule-keys.ts` の 1 か所(判定を増やさない)。
+   * ⚠ `archived` はここでは写さない ── 理由は `extractSchedule` の docstring。
+   */
+  extract: (body) => ({ ...extractSchedule(body), archived: false }),
   fromPkc2: (body) => body,
 };

@@ -55,7 +55,8 @@ describe('封印 ── 畳んであるが、壊してはいない', () => {
   it('🔴 封印している対象が pin と一致する(黙って増減しない)', () => {
     // ⚠ **等値**で見る。包含だと足したものが素通りする
     expect([...SEALED_ARCHETYPES]).toEqual(['todo', 'form']);
-    expect([...SEALED_VIEWS]).toEqual(['kanban', 'calendar']);
+    // 🔴 カレンダーは #276 で解いた(2026-08-19)── 組み込みタイルから開く
+    expect([...SEALED_VIEWS]).toEqual(['kanban']);
     // 判定関数と配列が食い違わないこと(片方だけ直す事故を止める)
     expect(SEALED_ARCHETYPES.every(isSealedArchetype)).toBe(true);
     expect(SEALED_VIEWS.every(isSealedView)).toBe(true);
@@ -74,7 +75,7 @@ describe('封印 ── 畳んであるが、壊してはいない', () => {
     expect(typeof kanbanUi.KanbanRenderer).toBe('function');
     expect(typeof calendarUi.CalendarRenderer).toBe('function');
     expect(typeof kanbanData.groupTodosByStatus).toBe('function');
-    expect(typeof calendarData.groupTodosByDate).toBe('function');
+    expect(typeof calendarData.groupEntriesByDate).toBe('function');
   });
 
   it('🔴 封印中の archetype の flavor が登録されたままである(既存 entry が読める)', () => {
@@ -101,7 +102,7 @@ describe('封印 ── 畳んであるが、壊してはいない', () => {
   });
 
   it('🔴 封印が効いているのは、shell が配列を見ているからである', async () => {
-    const sealedRoot = await buildShellWithSeal({ archetypes: ['todo', 'form'], views: ['kanban', 'calendar'] });
+    const sealedRoot = await buildShellWithSeal({ archetypes: ['todo', 'form'], views: ['kanban'] });
     expect(createKinds(sealedRoot)).not.toContain('todo');
   });
 
@@ -112,7 +113,7 @@ describe('封印 ── 畳んであるが、壊してはいない', () => {
    * ⚠ この test が落ちたら、それは**封印が壊れた**のではなく
    * **解くのに要る手当てが変わった**ということ ── `sealed.ts` の記述を直す。
    */
-  it('🔴 解いて戻るのは todo だけ(form / kanban / calendar は導線の作り直しが要る)', async () => {
+  it('🔴 解いて戻るのは todo だけ(form / kanban は導線の作り直しが要る)', async () => {
     const opened = await buildShellWithSeal({ archetypes: [], views: [] });
 
     // todo … 配列から消すだけで戻る(`CREATE_BUTTONS` に項目が残っているから)
@@ -126,13 +127,33 @@ describe('封印 ── 畳んであるが、壊してはいない', () => {
       'form が戻った ── 作成導線が足されたので sealed.ts の記述を直す',
     ).not.toContain('form');
 
-    // kanban / calendar … 消しても戻らない(P8 段⑤ で `VIEW_BUTTONS` が設定 1 つになった)
-    for (const view of ['kanban', 'calendar']) {
+    // kanban … 消しても戻らない(P8 段⑤ で `VIEW_BUTTONS` が設定 1 つになった)
+    for (const view of ['kanban']) {
       expect(
         viewButtons(opened),
         `${view} の切替が戻った ── 導線が足されたので sealed.ts の記述を直す`,
       ).not.toContain(view);
     }
+  });
+
+  /**
+   * 🔴 **解いたカレンダーには、実際に開ける導線が在る**(#276)。
+   *
+   * ⚠ 封印を解くのが「配列から 1 語消す」だけで終わっていないことを見る ──
+   *   `sealed.ts` はまさにそこ(消しても戻らない)を戒めている。
+   * 🔑 観測点は**組み込みタイル**(#241 で確立した形)── 上の帯の切替ではない。
+   */
+  it('🔴 カレンダーは組み込みタイルから開ける(封印を解いただけで終わっていない)', async () => {
+    const { calendarTile, withBuiltinTiles, tileSelectsEntry } = await import(
+      '@features/launcher/tiles'
+    );
+    expect(isSealedView('calendar'), 'カレンダーがまだ封印されている').toBe(false);
+    const tiles = withBuiltinTiles([], { office: false });
+    const cal = tiles.find((t) => t.kind === 'calendar');
+    expect(cal, 'アプリの一覧にカレンダーが出ない(解いただけで導線が無い)').toBeDefined();
+    expect(cal?.title).toBe('カレンダー');
+    // ⚠ 組み込みは entry を持たない(存在しない lid を選択に入れない)
+    expect(tileSelectsEntry(calendarTile())).toBe(false);
   });
 
   it('🔴 畳んだ smoke の記録が実態と合っている(戻す先を失わない)', () => {

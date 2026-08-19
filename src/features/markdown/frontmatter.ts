@@ -79,6 +79,51 @@ function byteLength(s: string): number {
 }
 
 /**
+ * 🔴 **先頭の frontmatter が占める「行数」**(#284)。閉じの `---` の行まで含む。
+ * frontmatter が読めないとき(開きだけ / そもそも無い)は **0**。
+ *
+ * ## なぜ `parseFrontmatter().body` の行数差で数えないか
+ *
+ * ⚠ `parseFrontmatter` が返す `body` は **CRLF を LF へ正規化**し、さらに
+ *   閉じの直後の**空行を 1 行食べる**(`remainder.startsWith('\n')` の枝)──
+ *   差分で数えると **1 行ずれる**ことがあり、そのずれは
+ *   「行ごとの編集が 1 行上を書き換える」という**静かなデータ破壊**になる。
+ * 🔑 だから**原文の物理行**をここで数え、切るのも呼び側で
+ *   `split('\n').slice(n)` に統一する(規則を 2 つ作らない)。
+ */
+export function frontmatterLineCount(body: string): number {
+  if (!body) return 0;
+  const open = OPEN_FENCE.exec(body);
+  if (open === null) return 0;
+  // ⚠ 開きは `---\s*\r?\n` ── 直後が空行なら改行を 2 つ飲んでいる
+  const openLines = (open[0].match(/\n/g) ?? []).length;
+  const lines = body.replace(OPEN_FENCE, '').split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    if (CLOSE_FENCE_LINE.test(lines[i] ?? '')) return openLines + i + 1;
+  }
+  return 0;
+}
+
+/**
+ * 閉じの `---` が無いとき、それが**壊れた frontmatter** なのか
+ * **ただの水平線で始まる文書**なのかを見分ける(#284)。
+ *
+ * ⚠ 見分けずに警告すると、`---` で始まる普通の文書が取込のたびに警告を出す
+ *   ── 警告が常在すると、本物の警告がそこに紛れる(CLAUDE.md「stderr は 0 行を保つ」
+ *   と同じ理屈)。
+ * 🔑 判定は「**最初の空行までに `key:` の行が 1 つでもあるか**」── frontmatter は
+ *   key/value の並びなので、これで水平線とはほぼ割れる。
+ */
+function looksLikeFrontmatter(lines: readonly string[]): boolean {
+  for (const line of lines) {
+    if (line.trim() === '') return false;
+    const colon = findKeyColon(line);
+    if (colon > 0 && /^[A-Za-z0-9_.-]+$/.test(line.slice(0, colon).trim())) return true;
+  }
+  return false;
+}
+
+/**
  * Split a body into its frontmatter block and the markdown remainder.
  * Always returns a defined result; on parse failure the meta is empty
  * and body is the original input.
@@ -100,6 +145,30 @@ export function parseFrontmatter(body: string): FrontmatterResult {
     }
   }
   if (closeIdx === -1) {
+    /**
+     * 🔴 **黙って通さない**(#284)。⚠ ここは `found: false` を返すので、
+     * 呼び側から見ると「frontmatter が無い文書」と**区別が付かない** ── 実測では
+     * 閉じの `---` を 1 行消しただけで `meta` が `{}` になり、**警告も 0 件**だった
+     * (タグを付けたノートで、タグが警告なしに全部消える経路)。
+     *
+     * ⚠ この file には silent fail 禁止の仕組み(`warnings`)が在るのに、
+     *   **この経路だけ 1 件も積んでいなかった**。
+     * ⚠ 先頭が水平線(`---`)の普通の文書もここへ来る ── だから**投げない**
+     *   (soft warning のまま)。呼び側が「情報として読めていない」と言えればよい。
+     */
+    /**
+     * ⚠ **開きの直後が空行なら、それは水平線である**(実測で判明)。
+     * `OPEN_FENCE` は `---\s*\r?\n` なので **`---` の次の空行まで飲む** ──
+     * `lines` だけを見ると「1 行目が `tags:`」に見えてしまい、
+     * `---`・空行・`tags: [あ]` という普通の文書を壊れた情報と読む。
+     */
+    const blankAfterOpen = (OPEN_FENCE.exec(body)?.[0].match(/\n/g)?.length ?? 1) > 1;
+    if (!blankAfterOpen && looksLikeFrontmatter(lines)) {
+      warnings.push({
+        kind: 'malformed',
+        detail: '先頭の --- に対応する閉じの --- がありません(文書の情報として読めていません)',
+      });
+    }
     return { meta: emptyMeta, body, found: false, warnings };
   }
 

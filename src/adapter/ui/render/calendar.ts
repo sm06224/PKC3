@@ -7,7 +7,7 @@
 import type { EntryMeta } from '@core/model/entry-meta';
 import type { AppState } from '@adapter/state/app-state';
 import {
-  groupTodosByDate,
+  groupEntriesByDate,
   getMonthGrid,
   dateKey,
 } from '@features/calendar/calendar-data';
@@ -58,7 +58,7 @@ export class CalendarRenderer {
       const m = state.entryMetas.get(lid);
       if (m && matchesEntry(m.lid, m.title, q, state.searchHits)) metas.push(m);
     }
-    const byDate = groupTodosByDate(metas, state.showArchived);
+    const byDate = groupEntriesByDate(metas, state.showArchived);
 
     this.region.textContent = '';
 
@@ -112,6 +112,12 @@ export class CalendarRenderer {
         if (day !== null) {
           const key = dateKey(year, month, day);
           td.setAttribute('data-pkc-date', key);
+          /**
+           * 🔴 **読むだけにしない**(#276 の 4)── 選んでいるノートがあるとき、
+           * その日を押すと frontmatter に `date` が入る。
+           * ⚠ 何も選んでいないときは**理由を出す**(無言の dead click を作らない)。
+           */
+          td.setAttribute('data-pkc-action', 'calendar-set-date');
           const num = document.createElement('div');
           num.setAttribute('data-pkc-field', 'day-number');
           num.textContent = String(day);
@@ -120,7 +126,9 @@ export class CalendarRenderer {
             const item = document.createElement('div');
             item.setAttribute('data-pkc-entry', meta.lid);
             item.setAttribute('data-pkc-action', 'select-entry');
-            item.setAttribute('data-pkc-todo-status', meta.status ?? 'open');
+            // ⚠ 状態は**書いてあるときだけ**出す(#276)── 既定値を作らない
+            //   (`status` を書いていないノートまで「未完了」に見える)
+            if (meta.status !== null) item.setAttribute('data-pkc-status', meta.status);
             if (meta.archived) item.setAttribute('data-pkc-archived', '');
             if (meta.lid === state.selectedLid)
               item.setAttribute('data-pkc-selected', '');

@@ -29,6 +29,7 @@ import { isEntrySort } from '@features/filter/entry-sort';
 import { isPaneId, PANES } from '@features/pane-visibility';
 import { STRUCTURAL, isRelationKind } from '@features/relation/kinds';
 import { getAncestorFolders } from '@features/relation/tree';
+import { planCopy } from '@features/relation/copy-plan';
 import { otherSide, paneOf, paneScope, type DualSide } from '@features/relation/dual-pane';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
@@ -180,6 +181,24 @@ export interface BinderServices {
    * ⚠ 置けなかったものは**返さない**(呼び側が「落とした」と言えるように件数で分かる)。
    */
   pasteImages?(files: readonly File[]): Promise<readonly string[]>;
+  /**
+   * 🔴 **写す(コピー)のために本文をまとめて読む**(#273 段③)。
+   * ⚠ **省略可** ── 無い環境(test の fake / 旧い配線)では「この版では写せません」と
+   *   断るだけで、他は壊れない(落ち方は「機能が減る」側 ── `store-effects` と同じ規律)。
+   * ⚠ 読めなかった lid は**返さない**(呼び側が件数で「落とした」と言える)。
+   */
+  readBodies?(lids: readonly string[]): Promise<ReadonlyMap<string, string>>;
+  /**
+   * 🔴 **飛んでいる書込が着くまで待つ**(#288)。
+   *
+   * ⚠ 書込は effect 層の chain に直列化されるが、**編集の開始はその外**に在る ──
+   *   チェックの印を押した直後に「編集」へ入ると、入力欄には**押す前の本文**が出て、
+   *   そこで 1 文字でも打つと可視内容の last-write-wins で**押した印が黙って戻る**。
+   * 🔑 待つ口は既に在る(`connectStoreEffects().settled()` ── 書き出しが
+   *   2026-08-17 に同じ穴で作ったもの)。**2 本目を作らない**。
+   * ⚠ **省略可**(`undefined` / `null`)── 無い環境では今までどおり同期に始まる。
+   */
+  settle?(): Promise<void> | null;
   downloadAsset?(assetKey: string, name: string): void;
   /**
    * 🔴 **貼る用に画像を持ち歩ける形へ**(#193)。`blob:` → `data:` の対応を返す。
@@ -597,6 +616,67 @@ function selectEntryOrExplain(dispatcher: Dispatcher, lid: string, what: string)
   return true;
 }
 
+/**
+ * 🔴 **まとめてゴミ箱へ、の実体は 1 本**(#273 段②)。
+ *
+ * ⚠ 左の列と 2 ペインで**別々に書かない** ── 断り方・確認・「戻せます」の言い方が
+ * 経路で食い違うと、user は同じ操作なのに違う説明を受ける(CLAUDE.md §7)。
+ * 🔑 **相手の集合は呼び側が渡す** ── 「いまどの面を見ているか」で推測すると、
+ * 2 ペインを開いたまま左の列のボタンを押したときに**画面に無いものが消える**。
+ */
+function deleteFrom(
+  dispatcher: Dispatcher,
+  services: BinderServices,
+  rows: readonly EntryMeta[],
+  selection: readonly string[],
+): void {
+
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '編集を終了してから削除してください',
+      });
+      return;
+    }
+    if (refuseWhileBusy('delete-selected', dispatcher, services)) return;
+    /**
+     * 🔴 **見えている行に絞る**(着地前レビュー 2)。印は行が見えなくなっても
+     * 残る(絞り込みで消えた / 別タブが消した)ので、素で消すと**画面に無いものが
+     * ゴミ箱へ入る**。⚠ 帯に出す数(`filer.ts`)と**同じ規則**を通す ──
+     * 食い違うと「2 件を削除しますか?」と聞いて 3 件消す形になる。
+     */
+    const lids = visibleSelection(rows, selection);
+    if (lids.length === 0) {
+      /**
+       * ⚠ **無言で終わらせない** ── 帯は出ているのに何も起きない dead click になる。
+       * 🔴 **印が 0 件のときも黙らない**(2026-08-18 の着地前レビュー 2)。
+       * `Delete` の鍵から来る筋では、`Enter` でフォルダへ入った直後が
+       * まさにこれ(`SET_SCOPE` が印を外すので `selection` は空)── 焦点の枠は
+       * 行に見えているので、user は「選べているのに Delete が効かない」と読む。
+       * ⚠ OS のファイラも「選んでいなければ何もしない」が、PKC3 は
+       *   **理由を出す**側に倒す(この面の他の断りと揃える)。
+       */
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error:
+          selection.length > 0
+            ? '選んでいた行がいま画面にありません(絞り込みを消すか、選び直してください)'
+            : '削除するものを選んでください(行を押すと選べます)',
+      });
+      return;
+    }
+    if (
+      !confirmOrExplain(
+        dispatcher,
+        `選んでいる ${lids.length} 件を削除しますか?(ゴミ箱から戻せます)`,
+        true,
+      )
+    )
+      return;
+    dispatcher.dispatch({ type: 'DELETE_ENTRIES', lids });
+}
+
 const ACTIONS: Record<string, ActionHandler> = {
   /**
    * 🔴 **本文のリンクで別のノートへ飛ぶ**(2026-08-08。user 裁定「任せます」)。
@@ -777,11 +857,23 @@ const ACTIONS: Record<string, ActionHandler> = {
   'start-edit': (dispatcher, _target, services) => {
     const lock = services.acquireEditLock;
     const lid = dispatcher.getState().openBody?.lid ?? null;
+    /**
+     * 🔴 **飛んでいる書込を待ってから始める**(#288)。⚠ 待たないと、
+     * チェックの印を押した直後の編集で**押す前の本文**が入力欄に出て、
+     * 打った時点で印が黙って戻る(2026-08-19 に smoke が実際に踏んだ)。
+     * ⚠ 待つのは chain が空になるまで ── 何も飛んでいなければその場で返る。
+     */
+    /**
+     * ⚠ **渡されていない環境では今までどおり同期に始まる**(`null`)── test の
+     *   fake や旧い配線を非同期に変えない(乗せ換えたとき unit が 40 件落ちた)。
+     */
+    const ready = services.settle?.() ?? null;
     if (!lock || lid === null) {
-      dispatcher.dispatch({ type: 'START_EDIT' });
+      if (ready === null) dispatcher.dispatch({ type: 'START_EDIT' });
+      else void ready.then(() => dispatcher.dispatch({ type: 'START_EDIT' }));
       return;
     }
-    void lock(lid).then((grant) => {
+    void (ready === null ? lock(lid) : ready.then(() => lock(lid))).then((grant) => {
       if (grant !== 'granted') {
         // ⚠ 文言は理由と対(§1 / レビュー M-7)── holder 不在を「別のタブで編集中」と
         //    言うと、user は存在しない編集タブを探す
@@ -867,49 +959,8 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'delete-selected': (dispatcher, _target, services) => {
     const st = dispatcher.getState();
-    if (st.phase !== 'ready') {
-      dispatcher.dispatch({
-        type: 'OP_FAILED',
-        error: '編集を終了してから削除してください',
-      });
-      return;
-    }
-    if (refuseWhileBusy('delete-selected', dispatcher, services)) return;
-    /**
-     * 🔴 **見えている行に絞る**(着地前レビュー 2)。印は行が見えなくなっても
-     * 残る(絞り込みで消えた / 別タブが消した)ので、素で消すと**画面に無いものが
-     * ゴミ箱へ入る**。⚠ 帯に出す数(`filer.ts`)と**同じ規則**を通す ──
-     * 食い違うと「2 件を削除しますか?」と聞いて 3 件消す形になる。
-     */
-    const lids = visibleSelection(visibleFilerRows(st), st.selection);
-    if (lids.length === 0) {
-      /**
-       * ⚠ **無言で終わらせない** ── 帯は出ているのに何も起きない dead click になる。
-       * 🔴 **印が 0 件のときも黙らない**(2026-08-18 の着地前レビュー 2)。
-       * `Delete` の鍵から来る筋では、`Enter` でフォルダへ入った直後が
-       * まさにこれ(`SET_SCOPE` が印を外すので `selection` は空)── 焦点の枠は
-       * 行に見えているので、user は「選べているのに Delete が効かない」と読む。
-       * ⚠ OS のファイラも「選んでいなければ何もしない」が、PKC3 は
-       *   **理由を出す**側に倒す(この面の他の断りと揃える)。
-       */
-      dispatcher.dispatch({
-        type: 'OP_FAILED',
-        error:
-          st.selection.length > 0
-            ? '選んでいた行がいま画面にありません(絞り込みを消すか、選び直してください)'
-            : '削除するものを選んでください(行を押すと選べます)',
-      });
-      return;
-    }
-    if (
-      !confirmOrExplain(
-        dispatcher,
-        `選んでいる ${lids.length} 件を削除しますか?(ゴミ箱から戻せます)`,
-        true,
-      )
-    )
-      return;
-    dispatcher.dispatch({ type: 'DELETE_ENTRIES', lids });
+    // ⚠ 押した場所は**左の列**なので、相手も左の列の集合(2 ペインの印を巻き込まない)
+    deleteFrom(dispatcher, services, visibleFilerRows(st), st.selection);
   },
   /** 印を全部外す(#240 段②)。 */
   'clear-selection': (dispatcher) => dispatcher.dispatch({ type: 'CLEAR_SELECTION' }),
@@ -946,6 +997,139 @@ const ACTIONS: Record<string, ActionHandler> = {
     const side = dualSide(target);
     const index = dualTabIndex(target);
     if (side && index !== null) dispatcher.dispatch({ type: 'DUAL_TAB_ACTIVATE', side, index });
+  },
+  /**
+   * 🔴 **いま開いている場所にフォルダを作る**(#273 段②)。
+   *
+   * ⚠ **編集に入らない**(`edit: false`)── 入ると中央が本文の面へ切り替わり、
+   *   整理の途中で面から放り出される。作ったら**その場に出る**のが FD の作法である。
+   * ⚠ 入れ先は**そのペインが開いている場所**(左の列の現在地ではない)。
+   */
+  /** 🔴 押しボタンからも名前を打ち替えられる(鍵は F2 ── 実体は同じ action)。 */
+  'dual-rename-begin': (dispatcher, target) => {
+    const side = dualSide(target) ?? dispatcher.getState().dual.focus;
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから名前を変えてください' });
+      return;
+    }
+    const marked = paneOf(st.dual, side).selection;
+    // ⚠ **1 件のときだけ** ── まとめて改名は「同じ名前が並ぶ」だけで意味が無い
+    if (marked.length !== 1) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error:
+          marked.length === 0
+            ? '名前を変えるものを選んでください(行を押すと選べます)'
+            : '名前を変えられるのは 1 件だけです',
+      });
+      return;
+    }
+    dispatcher.dispatch({ type: 'DUAL_RENAME_BEGIN', side, lid: marked[0]! });
+  },
+  'dual-mkdir': (dispatcher, target) => {
+    const side = dualSide(target) ?? dispatcher.getState().dual.focus;
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '編集を終了してからフォルダを作ってください',
+      });
+      return;
+    }
+    dispatcher.dispatch({
+      type: 'CREATE_ENTRY',
+      archetype: 'folder',
+      lid: generateLid(),
+      title: '新しいフォルダ',
+      parentLid: paneScope(paneOf(st.dual, side)),
+      relationId: generateLid(),
+      edit: false,
+    });
+  },
+  /**
+   * 🔴 **反対側の場所へ写す**(#273 段③。FD の C 相当)。
+   *
+   * ⚠ **フォルダを写したら中身も行く** ── 段取りは純関数 `planCopy` が決める
+   *   (親子の組み直しを adapter に書くと、どの test からも実行されずに壊れる)。
+   * ⚠ 本文が読めなかったぶんは**件数で言う** ── 黙って空のノートを作らない。
+   */
+  'dual-copy': (dispatcher, target, services) => {
+    const side = dualSide(target) ?? dispatcher.getState().dual.focus;
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから写してください' });
+      return;
+    }
+    const rows = filerRows(paneScope(paneOf(st.dual, side)), st.entryMetas, st.relations, {
+      filterQuery: st.filterQuery,
+      searchHits: st.searchHits,
+      sort: st.entrySort,
+    });
+    // ⚠ 数える相手は**いま表に出ている印**だけ(移す・消すと同じ規則)
+    const lids = visibleSelection(rows, paneOf(st.dual, side).selection);
+    if (lids.length === 0) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '写すものを選んでください(行を押すと選べます)',
+      });
+      return;
+    }
+    const read = services.readBodies;
+    if (!read) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版では写せません' });
+      return;
+    }
+    const to = otherSide(side);
+    const steps = planCopy(
+      lids,
+      paneScope(paneOf(st.dual, to)),
+      st.entryMetas,
+      st.relations,
+      generateLid,
+    );
+    void read(steps.map((s) => s.sourceLid)).then(
+      (bodies) => {
+        let missing = 0;
+        for (const step of steps) {
+          const body = bodies.get(step.sourceLid);
+          if (body === undefined) missing += 1;
+          dispatcher.dispatch({
+            type: 'CREATE_ENTRY',
+            archetype: step.archetype,
+            lid: step.lid,
+            title: step.title,
+            parentLid: step.parentLid,
+            relationId: generateLid(),
+            edit: false,
+            ...(body === undefined ? {} : { body }),
+          });
+        }
+        dispatcher.dispatch({
+          type: 'OP_FAILED',
+          error:
+            missing > 0
+              ? `${steps.length} 件を写しました(うち ${missing} 件は本文を読めず、空で作りました)`
+              : `${steps.length} 件を写しました`,
+        });
+      },
+      () => dispatcher.dispatch({ type: 'OP_FAILED', error: '写せませんでした(本文を読めません)' }),
+    );
+  },
+  /** ⚠ 鍵(`Delete`)と**同じ実体**を押しボタンからも呼ぶ(規則を 2 つ作らない)。 */
+  'dual-delete': (dispatcher, target, services) => {
+    const side = dualSide(target) ?? dispatcher.getState().dual.focus;
+    const st = dispatcher.getState();
+    deleteFrom(
+      dispatcher,
+      services,
+      filerRows(paneScope(paneOf(st.dual, side)), st.entryMetas, st.relations, {
+        filterQuery: st.filterQuery,
+        searchHits: st.searchHits,
+        sort: st.entrySort,
+      }),
+      paneOf(st.dual, side).selection,
+    );
   },
   /**
    * 🔴 **反対側の場所へ移す**(この面の主目的)。
@@ -1181,6 +1365,58 @@ const ACTIONS: Record<string, ActionHandler> = {
       .closest('[data-pkc-entry]')
       ?.getAttribute('data-pkc-entry');
     if (lid) dispatcher.dispatch({ type: 'TOGGLE_TODO_STATUS', lid });
+  },
+  /**
+   * 🔴 **カレンダーに書ける導線**(#276 の 4。「読むだけにしない」)。
+   *
+   * 選んでいるノートの frontmatter に `date` を入れる。⚠ 同じ日をもう一度押すと
+   * **外す**(付けた本人が外せない導線を作らない)。
+   * ⚠ **黙って断らない** ── 何も選んでいない / 編集中は、理由を出す。
+   */
+  /**
+   * 🔴 **チェックの印を押せるようにする**(#277。user 指示 2026-08-19
+   * 「チェックリストを含む場合の自動生成で…復活させるのです」)。
+   *
+   * ⚠ 押せるのは**読む面**だけ(描画側が `interactiveTasks` を渡した所)。
+   * ⚠ 指すのは**原文の行番号** ── 索引だと数え方のずれで別の行を書き換える。
+   */
+  'toggle-task': (dispatcher, target) => {
+    const raw = target.getAttribute('data-pkc-task-line');
+    const line = Number(raw);
+    if (raw === null || !Number.isInteger(line) || line < 0) return;
+    const st = dispatcher.getState();
+    const lid = st.openBody?.lid ?? st.selectedLid;
+    if (lid === null || lid === undefined) return;
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してからチェックしてください' });
+      return;
+    }
+    dispatcher.dispatch({ type: 'TOGGLE_TASK', lid, line });
+  },
+  'calendar-set-date': (dispatcher, target) => {
+    const date = target.closest('[data-pkc-date]')?.getAttribute('data-pkc-date');
+    if (date === null || date === undefined) return;
+    const st = dispatcher.getState();
+    /**
+     * ⚠ **セルの中のノートを押したときは、そちらが勝つ**(`select-entry`)──
+     * ここへは「日付の地」を押したときだけ来る。押した所と起きることを一致させる。
+     */
+    const lid = st.selectedLid;
+    if (lid === null) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '日付を付けるノートを先に選んでください(一覧から押すと選べます)',
+      });
+      return;
+    }
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから日付を変えてください' });
+      return;
+    }
+    const meta = st.entryMetas.get(lid);
+    if (!meta) return;
+    // 🔑 同じ日をもう一度押したら外す(付けたものを外せる)
+    dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: meta.date === date ? null : date });
   },
   'calendar-nav': (dispatcher, target) => {
     // 遷移先は renderer が描画時に焼き込む(binder は「今の月」を推定しない)
@@ -2185,8 +2421,22 @@ export function bindActions(
     const lid = row?.getAttribute('data-pkc-entry') ?? null;
     if (lid === null || !de.dataTransfer) return;
     const st = dispatcher.getState();
-    // ⚠ 印ごと運ぶのも**見えている分だけ**(まとめて消すのと同じ規則)
-    const marked = visibleSelection(visibleFilerRows(st), st.selection);
+    /**
+     * 🔴 **掴んだ面の印を運ぶ**(#273 段⑤)。⚠ 2 ペインから掴んだのに**左の列**の
+     * 印を運ぶと、**画面に出ていないものが動く**(移す・写す・消すと同じ罠)。
+     */
+    const side = row ? dualSide(row) : null;
+    const marked =
+      side === null
+        ? visibleSelection(visibleFilerRows(st), st.selection)
+        : visibleSelection(
+            filerRows(paneScope(paneOf(st.dual, side)), st.entryMetas, st.relations, {
+              filterQuery: st.filterQuery,
+              searchHits: st.searchHits,
+              sort: st.entrySort,
+            }),
+            paneOf(st.dual, side).selection,
+          );
     const lids = marked.includes(lid) ? marked : [lid];
     de.dataTransfer.setData(PKC_DRAG, lids.join(' '));
     de.dataTransfer.effectAllowed = 'move';
@@ -2196,6 +2446,13 @@ export function bindActions(
   const dropTargetOf = (target: EventTarget | null): { el: HTMLElement; lid: string | null } | undefined => {
     const el = (target as HTMLElement | null)?.closest<HTMLElement>('[data-pkc-drop]');
     if (!el || !root.contains(el)) return undefined;
+    /**
+     * ⚠ **ペインの地は「そのペインが開いている場所」へ落ちる**(#273 段⑤)。
+     * `data-pkc-entry` を持たせると**ペイン自身が entry** に見えるので、
+     * 行き先は別の属性で渡す。⚠ 空文字はルート(属性が**無い**のとは別物)。
+     */
+    const scope = el.getAttribute('data-pkc-drop-scope');
+    if (scope !== null) return { el, lid: scope === '' ? null : scope };
     // ⚠ パンくずのルートは `data-pkc-entry` を持たない = 出す先(ルート)
     return { el, lid: el.getAttribute('data-pkc-entry') };
   };
@@ -2302,9 +2559,81 @@ export function bindActions(
      * 面をまたいで効かせると、#240 の着地前レビューで踏んだ
      * 「見えない所で印が増える / 現在地が動く」を繰り返す。
      */
-    if (el?.closest('[data-pkc-region="filer-table"]')) {
+    /**
+     * ⚠ **打っている最中は、面の文脈キーを走らせない**。
+     * ⚠ いまの面には入力欄が 1 つ(名前の打ち替え)しか無く、**それは下の枝が先に
+     *   受ける**ので、この門は**変異試験で観測できない**(外しても test は全部通る)。
+     *   将来この面に入力欄が増えたときのための備えとして置いている ── 「これが
+     *   無いと壊れる」とは書かない(CLAUDE.md「外して壊れることを 1 度は見る」)。
+     */
+    if (!typing && el?.closest('[data-pkc-region="filer-table"]')) {
       const fcmd = keymap.match(ke, 'filer');
       if (fcmd !== null && runFilerKey(fcmd)) {
+        ke.preventDefault();
+        return;
+      }
+    }
+    /**
+     * 🔴 **2 ペインの中も、同じ鍵が効く**(#273)。⚠ 行き先だけが違う ──
+     * `state.scopeLid` ではなく `state.dual` の、**焦点のあるペイン**に効く。
+     */
+    const dualHost = el?.closest<HTMLElement>('[data-pkc-region="dual-pane"]');
+    /**
+     * 🔴 **名前を打ち替えている欄の鍵は、ここで完結させる**(#273 段④)。
+     * `Enter` で確定、`Esc` でやめる。⚠ それ以外の鍵は**入力へ通す**(打てなくなる)。
+     */
+    if (dualHost && el instanceof HTMLInputElement && el.matches('[data-pkc-field="dual-rename"]')) {
+      const lid = el.getAttribute('data-pkc-entry');
+      if (ke.key === 'Enter' && lid !== null) {
+        ke.preventDefault();
+        commitDualRename(lid, el.value);
+        return;
+      }
+      if (ke.key === 'Escape') {
+        ke.preventDefault();
+        dispatcher.dispatch({ type: 'DUAL_RENAME_END' });
+        return;
+      }
+      return;
+    }
+    if (!typing && dualHost) {
+      const dside0 = dualHost.getAttribute('data-pkc-side');
+      /**
+       * 🔴 **F2 で名前を打ち替える**(OS のファイラ / FD と同じ鍵)。
+       * ⚠ 行に焦点があるときだけ(帯やボタンの上では出さない)。
+       */
+      if (ke.key === 'F2' && (dside0 === 'left' || dside0 === 'right')) {
+        const lid = focusedDualLid(dside0) ?? paneOf(dispatcher.getState().dual, dside0).selection[0];
+        if (lid !== undefined && lid !== null) {
+          ke.preventDefault();
+          dispatcher.dispatch({ type: 'DUAL_RENAME_BEGIN', side: dside0, lid });
+          return;
+        }
+      }
+      const dside = dualHost.getAttribute('data-pkc-side');
+      /**
+       * 🔴 **Tab は反対のペインへ**(FD / OS のファイラの基本操作)。
+       * ⚠ **行に焦点があるときだけ**奪う ── タブの帯やボタンに居るときまで奪うと、
+       *   キーボードで面から出られなくなる(閉じ込め)。
+       */
+      if (
+        ke.key === 'Tab' &&
+        !ke.ctrlKey &&
+        !ke.metaKey &&
+        !ke.altKey &&
+        (dside === 'left' || dside === 'right') &&
+        el?.closest('[data-pkc-action="dual-row"]')
+      ) {
+        const to = otherSide(dside);
+        ke.preventDefault();
+        dispatcher.dispatch({ type: 'DUAL_FOCUS', side: to });
+        const st = dispatcher.getState();
+        const lid = paneOf(st.dual, to).selection[0] ?? dualRows(st, to)[0]?.lid ?? null;
+        if (lid !== null) dualRowEl(to, lid)?.focus();
+        return;
+      }
+      const dcmd = keymap.match(ke, 'filer');
+      if ((dside === 'left' || dside === 'right') && dcmd !== null && runDualKey(dcmd, dside)) {
         ke.preventDefault();
         return;
       }
@@ -2461,6 +2790,171 @@ export function bindActions(
     });
   };
 
+  /**
+   * 🔴 **2 ペインをキーボードで動かす**(#273。user 指摘 2026-08-19
+   * 「OS のファイラと同じことができないといけません / 往年の FD などを見習って」)。
+   *
+   * ⚠ 直す前、2 ペインは**キーボードで 1 ミリも動かなかった** ── `filer-*` の 8 命令は
+   *   `runFilerKey` が `state.scopeLid` / `state.selection` を見るので**左の列にだけ**
+   *   効き、`state.dual` には 1 つも届いていなかった(開く `view-dual` だけが割当)。
+   * 🔑 **命令を増やさない**(`dual-*` を別に作らない)── 増やすと user は同じ操作を
+   *   2 回割り当て直すことになる。**同じ鍵が、焦点のある面に効く**形にする。
+   * 🔑 並びは `filerRows` **1 か所**から採る ── 描く側(`dual-filer.ts`)・
+   *   範囲選択(reducer)と同じ答えでないと、目で見た順と食い違う。
+   */
+  const dualRows = (st: AppState, side: DualSide): EntryMeta[] =>
+    filerRows(paneScope(paneOf(st.dual, side)), st.entryMetas, st.relations, {
+      filterQuery: st.filterQuery,
+      searchHits: st.searchHits,
+      sort: st.entrySort,
+    });
+
+  const dualRowEl = (side: DualSide, lid: string): HTMLElement | null =>
+    Array.from(
+      root.querySelectorAll<HTMLElement>(
+        '[data-pkc-region="dual-pane"] [data-pkc-action="dual-row"]',
+      ),
+    ).find(
+      (el) => el.getAttribute('data-pkc-side') === side && el.getAttribute('data-pkc-entry') === lid,
+    ) ?? null;
+
+  /** ⚠ **その側の行に焦点があるときだけ**返す(反対側の行を動かさない)。 */
+  const focusedDualLid = (side: DualSide): string | null => {
+    const el = root.ownerDocument.activeElement;
+    if (!(el instanceof HTMLElement)) return null;
+    const tr = el.closest<HTMLElement>('[data-pkc-action="dual-row"]');
+    if (tr === null || tr.getAttribute('data-pkc-side') !== side) return null;
+    return tr.getAttribute('data-pkc-entry');
+  };
+
+  /** ⚠ 端では**止まる**(巻き戻さない ── 左の列と同じ規則)。 */
+  const dualRowAt = (st: AppState, side: DualSide, delta: number): string | null => {
+    const rows = dualRows(st, side);
+    if (rows.length === 0) return null;
+    const cur = focusedDualLid(side);
+    const i = cur === null ? -1 : rows.findIndex((m) => m.lid === cur);
+    if (i === -1) return (delta > 0 ? rows[0] : rows[rows.length - 1])?.lid ?? null;
+    return rows[Math.min(rows.length - 1, Math.max(0, i + delta))]?.lid ?? null;
+  };
+
+  /**
+   * 🔴 **場所を移ったら、焦点を連れて行く**(#273。実ブラウザ smoke で判明)。
+   *
+   * ⚠ これが無いと **Enter で中へ入った次の 1 打鍵が死ぬ** ── 表は組み直され、
+   *   焦点が乗っていた行は**その場で消える**ので、次の keydown の的は `body` になる。
+   *   そこには `data-pkc-region="dual-pane"` の親が無いので、**この面の鍵は
+   *   1 つも当たらなくなる**(user から見ると「入ったら急にキーが効かない」)。
+   * ⚠ 左の列は同じ問題を `filer.ts` の側で解いている ── あちらは面が 1 つなので
+   *   描画側で持てるが、こちらは**どちらのペインへ戻すか**が要るのでここで持つ。
+   * 🔑 dispatch は同期に描画まで走るので、**この時点で新しい行が居る**。
+   */
+  const carryDualFocus = (side: DualSide): void => {
+    const st = dispatcher.getState();
+    const lid = paneOf(st.dual, side).selection[0] ?? dualRows(st, side)[0]?.lid ?? null;
+    const row = lid === null ? null : dualRowEl(side, lid);
+    if (row !== null) {
+      row.focus();
+      return;
+    }
+    /**
+     * ⚠ **行が 1 つも無いときは器へ逃がす**(空のフォルダ)── ここを落とすと
+     * 「入ったら鍵が全部死ぬ」に戻る。器は `tabIndex = -1` を持っている。
+     */
+    root
+      .querySelector<HTMLElement>(`[data-pkc-region="dual-pane"][data-pkc-side="${side}"]`)
+      ?.focus();
+  };
+
+  /**
+   * 🔴 **名前の打ち替えを確定する**(#273 段④)。
+   *
+   * ⚠ 改名の規則は既存の `RENAME_ENTRY_TITLE` **1 つ**(左の列・編集画面と同じ)。
+   * 🔑 **空白だけ / 変わっていない、の判定はここに書かない** ── reducer が既に
+   *   持っている(`title === '' || title === meta.title` で捨てる)。ここにも書くと
+   *   **同じ問いに答える口が 2 つ**になり、片方だけ直したときに食い違う(CLAUDE.md §7)。
+   */
+  const commitDualRename = (lid: string, value: string): void => {
+    dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title: value });
+    dispatcher.dispatch({ type: 'DUAL_RENAME_END' });
+  };
+
+  const runDualKey = (cmd: string, side: DualSide): boolean => {
+    const st = dispatcher.getState();
+    /**
+     * ⚠ **無言で断らない**(左の列と同じ作法)── `preventDefault` は走るので、
+     * 黙ると「押したのに何も起きず、ブラウザの既定まで消えた」になる。
+     */
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '編集を終了してからフォルダの操作をしてください',
+      });
+      return true;
+    }
+    if (cmd === 'filer-row-down' || cmd === 'filer-row-up') {
+      const lid = dualRowAt(st, side, cmd === 'filer-row-down' ? 1 : -1);
+      if (lid === null) return false;
+      // 🔑 送ると印も動く(OS のファイラ = 焦点と選択が一致する)
+      dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid, mode: 'set' });
+      dualRowEl(side, lid)?.focus();
+      return true;
+    }
+    if (cmd === 'filer-extend-down' || cmd === 'filer-extend-up') {
+      const from = focusedDualLid(side);
+      const lid = dualRowAt(st, side, cmd === 'filer-extend-down' ? 1 : -1);
+      if (lid === null) return false;
+      // ⚠ 起点が無いときは、いまの行を起点に立ててから伸ばす
+      //    (`rangeInRows` は起点 null を「行き先 1 件」と解くので、積み上がらない)
+      if (paneOf(st.dual, side).anchor === null && from !== null)
+        dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid: from, mode: 'set' });
+      dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid, mode: 'range' });
+      dualRowEl(side, lid)?.focus();
+      return true;
+    }
+    if (cmd === 'filer-select-all') {
+      const rows = dualRows(st, side);
+      const first = rows[0]?.lid;
+      const last = rows[rows.length - 1]?.lid;
+      if (first === undefined || last === undefined) return false;
+      dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid: first, mode: 'set' });
+      if (last !== first)
+        dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid: last, mode: 'range' });
+      return true;
+    }
+    if (cmd === 'filer-parent') {
+      const scope = paneScope(paneOf(st.dual, side));
+      if (scope === null) return false; // ルートで押しても何も起きない
+      const up = getAncestorFolders(scope, st.entryMetas, st.relations)[0] ?? null;
+      dispatcher.dispatch({ type: 'DUAL_SET_SCOPE', side, lid: up?.lid ?? null });
+      carryDualFocus(side);
+      return true;
+    }
+    if (cmd === 'filer-open') {
+      const lid = focusedDualLid(side) ?? paneOf(st.dual, side).selection[0] ?? null;
+      if (lid === null) return false;
+      // フォルダなら中へ(2 クリックと同じ ── 規則は `DUAL_SET_SCOPE` 1 か所)
+      if (st.entryMetas.get(lid)?.archetype === 'folder') {
+        dispatcher.dispatch({ type: 'DUAL_SET_SCOPE', side, lid });
+        carryDualFocus(side);
+        return true;
+      }
+      return openNote(lid);
+    }
+    /**
+     * 🔴 **消すのは、このペインの印だけ**(#273 段②)。
+     *
+     * ⚠ `false` を返して global の `delete-selected` に落とすと、**左の列の印**を消す ──
+     * user は 2 ペインを見ているのに、**画面に出ていないものが消える**。
+     * 🔑 実体は `deleteFrom` **1 本**(左の列と同じ確認・同じ断り方)── 相手の集合だけを
+     *   このペインのものにして渡す。
+     */
+    if (cmd === 'filer-trash') {
+      deleteFrom(dispatcher, services, dualRows(st, side), paneOf(st.dual, side).selection);
+      return true;
+    }
+    return false;
+  };
+
   const runFilerKey = (cmd: string): boolean => {
     const st = dispatcher.getState();
     /**
@@ -2550,6 +3044,24 @@ export function bindActions(
     return false;
   };
   const doc = root.ownerDocument;
+  /**
+   * 🔴 **他所を押したら確定する**(#273 段④。OS のファイラと同じ)。
+   *
+   * ⚠ `renaming` の門は**変異試験で観測できない**(外しても test は全部通る)。
+   *   `Esc` でやめた回は `DUAL_RENAME_END` が同期に走って入力欄が DOM から外れ、
+   *   **外れた節点の focusout は root まで上がらない**ので、この handler に届かない
+   *   ── だから Chromium では門が要らない。⚠ ただし「要素を外したときに focusout を
+   *   出すか」は**エンジンで違う**ので、届いた回に打った値が蘇らないよう残している。
+   *   「これが無いと壊れる」とは書かない(CLAUDE.md「外して壊れることを 1 度は見る」)。
+   */
+  const onRenameBlur = (ev: Event): void => {
+    const el = ev.target;
+    if (!(el instanceof HTMLInputElement) || !el.matches('[data-pkc-field="dual-rename"]')) return;
+    if (dispatcher.getState().dual.renaming === null) return;
+    const lid = el.getAttribute('data-pkc-entry');
+    if (lid !== null) commitDualRename(lid, el.value);
+  };
+  root.addEventListener('focusout', onRenameBlur);
   doc.addEventListener('keydown', onShortcut);
   root.addEventListener('keydown', onKeydown);
   return () => {
@@ -2557,6 +3069,7 @@ export function bindActions(
     root.removeEventListener('mousedown', onMousedown);
     root.removeEventListener('input', onInput);
     root.removeEventListener('change', onChange);
+    root.removeEventListener('focusout', onRenameBlur);
     doc.removeEventListener('keydown', onShortcut);
     root.removeEventListener('keydown', onKeydown);
   };

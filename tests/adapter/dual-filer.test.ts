@@ -546,9 +546,9 @@ describe('2 ペインの面(描画)', () => {
 describe('2 ペインの導線(#241。アプリの組み込みタイル)', () => {
   it('🔴 アプリの一覧に、押せるタイルが最初から在る', () => {
     const tiles = withBuiltinTiles([], { office: false });
-    expect(tiles.map((t) => t.lid), 'Office を入れていない端末で出ない').toEqual([
-      DUAL_TILE_LID,
-    ]);
+    // ⚠ **2 ペインが先頭に居ること**だけを見る(#276 でカレンダーが加わった)──
+    //   一覧の全数は `tests/features/launcher-tiles.test.ts` が等値で pin する
+    expect(tiles[0]?.lid, 'Office を入れていない端末で出ない').toBe(DUAL_TILE_LID);
     expect(tiles[0]?.title).toBe('2 ペインで整理');
   });
 
@@ -573,8 +573,10 @@ describe('2 ペインの導線(#241。アプリの組み込みタイル)', () =>
         openOffice: () => {
           officeOpened += 1;
         },
-        openDual: () => {
-          opened += 1;
+        openView: (view) => {
+          // ⚠ **どの面へ切り替えたか**まで見る(#276 で口が 1 本になった)──
+          //   数えるだけだと、カレンダーへ切り替えても 2 ペインが開いたと読む
+          if (view === 'dual') opened += 1;
         },
       },
     );
@@ -883,5 +885,627 @@ describe('2 ペインの配線(binder)', () => {
       d.getState().relations.some((x) => x.toLid === 'a' && x.fromLid === 'f1'),
       '画面に無いものが動いた',
     ).toBe(false);
+  });
+});
+
+/**
+ * 🔴 **2 ペインをキーボードで動かす**(#273。user 指摘 2026-08-19
+ * 「2 ペインファイラとしては非常にお粗末 / OS のファイラと同じことができないと
+ * いけません / 往年の FD などを見習ってください」)。
+ *
+ * ⚠ 直す前は**開く鍵(`Alt+6`)しか無く**、面の中では 1 打鍵も効かなかった。
+ * 🔑 守る主張は 3 つ:
+ * 1. **同じ鍵が、焦点のある面に効く**(命令は増やさない = 割り当て直しは 1 回)
+ * 2. **押していない側と、左の列は動かない**
+ * 3. 🔴 **消す鍵が、画面に出ていないものを消しに行かない**
+ */
+describe('2 ペインのキーボード操作(#273)', () => {
+  let root: HTMLElement;
+  let d: Dispatcher;
+  let region: HTMLElement;
+  let r: DualFilerRenderer;
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    d = new Dispatcher();
+    buildShell(root);
+    bindActions(root, d);
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: METAS, relations: RELS });
+    region = document.createElement('div');
+    root.append(region);
+    r = new DualFilerRenderer(region);
+    d.onState((st) => r.render(st));
+    r.render(d.getState());
+  });
+
+  const row = (side: string, lid: string): HTMLElement =>
+    region.querySelector<HTMLElement>(
+      `[data-pkc-region="dual-pane"][data-pkc-side="${side}"] [data-pkc-region="dual-table"] [data-pkc-entry="${lid}"]`,
+    )!;
+
+  /** ⚠ **行に焦点を置いてから**押す(どこで効かせるかは焦点で決まる)。 */
+  const press = (side: string, lid: string, key: string, over: Partial<KeyboardEventInit> = {}) => {
+    const el = row(side, lid);
+    el.focus();
+    const ev = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...over });
+    el.dispatchEvent(ev);
+    return ev;
+  };
+
+  const sel = (side: 'left' | 'right'): readonly string[] => paneOf(d.getState().dual, side).selection;
+
+  it('🔴 ↓ で行が送られ、印も一緒に動く(押していない側と左の列は動かない)', () => {
+    row('right', 'f1').focus();
+    press('right', 'f1', 'ArrowDown');
+    expect(sel('right'), '行送りで印が動いていない').toEqual(['f2']);
+    expect(sel('left'), '押していない側が動いた').toEqual([]);
+    expect(d.getState().selection, '左の列の印まで動いた').toEqual([]);
+    expect(d.getState().dual.focus, '押した側が元になっていない').toBe('right');
+  });
+
+  it('🔴 ↑↓ は端で止まる(巻き戻らない)', () => {
+    press('left', 'f1', 'ArrowUp');
+    expect(sel('left'), '先頭で上を押したら末尾へ飛んだ').toEqual(['f1']);
+  });
+
+  it('🔴 Shift+↓ で範囲が伸びる', () => {
+    press('left', 'f1', 'ArrowDown'); // f2 へ
+    press('left', 'f2', 'ArrowDown', { shiftKey: true });
+    expect(sel('left')).toEqual(['f2', 'a']);
+  });
+
+  /**
+   * 🔴 **起点が無いときは、いまの行を起点に立ててから伸ばす**(変異 K7 が生き延びて判明)。
+   * ⚠ 1 稿目は Shift の前に必ず ↓ を押していたので、**起点が null の経路を 1 度も
+   *   通っていなかった**(CLAUDE.md §2「弱いのではなく走っていない」)。
+   * ⚠ `rangeInRows` は起点 null を「行き先 1 件」と解くので、立てないと
+   *   **押すたびに 1 件へ潰れて**積み上がらない。
+   */
+  it('🔴 印が無い状態から Shift+↓ を押しても、そこから伸びる', () => {
+    expect(sel('left'), '前提が崩れている(既に印がある)').toEqual([]);
+    press('left', 'f1', 'ArrowDown', { shiftKey: true });
+    expect(sel('left'), '起点を立てていない(1 件へ潰れた)').toEqual(['f1', 'f2']);
+  });
+
+  /**
+   * 🔴 **反対側の行の焦点を、自分のものと読まない**(変異 K3 が生き延びて判明)。
+   * ⚠ 1 稿目は「焦点を置いた行から押す」形しか無く、**焦点と打鍵の側が食い違う経路**を
+   *   1 度も通していなかった。⚠ 読み違えると、右で押した ↓ が**左の行を基準に**動く。
+   */
+  it('🔴 焦点が反対側にあるとき、押した側は「焦点なし」として振る舞う', () => {
+    row('left', 'c').focus(); // 左の 3 行目に焦点(右には焦点が無い)
+    const host = region.querySelector<HTMLElement>(
+      '[data-pkc-region="dual-pane"][data-pkc-side="right"]',
+    )!;
+    host.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }),
+    );
+    // 右は焦点が無いので**先頭から**入る。左の 'c' の次('x' や 'b')になってはいけない
+    expect(sel('right'), '反対側の焦点を自分のものとして読んだ').toEqual(['f1']);
+    expect(sel('left'), '押していない側が動いた').toEqual([]);
+  });
+
+  it('🔴 Ctrl+A はそのペインの全部(反対側は空のまま)', () => {
+    press('right', 'a', 'a', { ctrlKey: true });
+    expect(sel('right')).toEqual(['f1', 'f2', 'a', 'b', 'c']);
+    expect(sel('left'), '反対側まで選ばれた').toEqual([]);
+  });
+
+  it('🔴 Enter でフォルダの中へ入る(押したペインだけ)', () => {
+    press('right', 'f1', 'Enter');
+    expect(paneScope(paneOf(d.getState().dual, 'right'))).toBe('f1');
+    expect(paneScope(paneOf(d.getState().dual, 'left')), '反対側まで入った').toBeNull();
+    expect(d.getState().scopeLid, '左の列まで入った').toBeNull();
+  });
+
+  it('🔴 Backspace で親へ戻る', () => {
+    d.dispatch({ type: 'DUAL_SET_SCOPE', side: 'left', lid: 'f1' });
+    press('left', 'x', 'Backspace');
+    expect(paneScope(paneOf(d.getState().dual, 'left'))).toBeNull();
+  });
+
+  it('🔴 Tab で反対のペインへ移る(FD の基本操作)', () => {
+    const ev = press('left', 'a', 'Tab');
+    expect(ev.defaultPrevented, 'Tab を受けていない').toBe(true);
+    expect(d.getState().dual.focus, '反対側へ移っていない').toBe('right');
+  });
+
+  /**
+   * 🔴 **消す鍵が、画面に出ていないものを消しに行かない**。
+   * ⚠ 素通しにすると global の `delete-selected` に落ち、**左の列の印**が消える ──
+   *   2 ペインを見ている user から見て、消えるものが画面に無い。不可逆なので必ず止める。
+   */
+  /**
+   * 🔴 **消すのはこのペインの印だけ**(#273 段②)。
+   * ⚠ 素通しにすると global の `delete-selected` に落ち、**左の列の印**が消える ──
+   *   2 ペインを見ている user から見て、消えるものが画面に無い。
+   * 🔑 実体は `deleteFrom` 1 本(左の列と同じ確認・同じ断り方)。
+   */
+  it('🔴 Delete はこのペインの印を消す(左の列の印は巻き込まない)', () => {
+    d.dispatch({ type: 'TOGGLE_SELECT', lid: 'a' }); // 左の列に印(画面には出ていない相手)
+    expect(d.getState().selection, '前提が崩れている').toEqual(['a']);
+    press('right', 'b', 'ArrowDown'); // 右で 'f2' を選ぶ…ではなく行を作る
+    d.dispatch({ type: 'DUAL_SELECT', side: 'right', lid: 'c', mode: 'set' });
+    press('right', 'c', 'Delete');
+    expect(d.getState().entryMetas.has('c'), 'このペインの印が消えていない').toBe(false);
+    expect(d.getState().entryMetas.has('a'), '左の列の印まで消えた(画面に無いものが消えた)').toBe(
+      true,
+    );
+  });
+
+  /**
+   * 🔴 **押しボタンからも同じことができる**(#273 段②。user 指示 2026-08-03
+   * 「マウスだけで完結し、キーボードは近道」)。
+   */
+  it('🔴 「ゴミ箱へ」のボタンも、そのペインの印だけを消す', () => {
+    d.dispatch({ type: 'TOGGLE_SELECT', lid: 'a' });
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'c', mode: 'set' });
+    const btn = region.querySelector<HTMLElement>('[data-pkc-field="dual-delete"]')!;
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(d.getState().entryMetas.has('c'), 'ボタンで消えていない').toBe(false);
+    expect(d.getState().entryMetas.has('a'), '左の列の印まで消えた').toBe(true);
+  });
+
+  /**
+   * 🔴 **その場で名前を打ち替える**(#273 段④。OS のファイラの F2)。
+   * ⚠ 入力欄は **state 駆動**で出す ── DOM を直に差し替えると、別タブの保存が
+   *   届くだけで打っている最中の入力が消える(この面は state で組み直すため)。
+   */
+  const renameInput = (side: string): HTMLInputElement | null =>
+    region.querySelector<HTMLInputElement>(
+      `[data-pkc-region="dual-pane"][data-pkc-side="${side}"] [data-pkc-field="dual-rename"]`,
+    );
+
+  it('🔴 F2 で入力欄が出て、Enter で名前が変わる', () => {
+    press('left', 'a', 'F2');
+    const input = renameInput('left');
+    expect(input, 'F2 で入力欄が出ていない').toBeTruthy();
+    expect(input!.value, '元の名前が入っていない').toBe('あ');
+    input!.value = 'あたらしい名前';
+    input!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    expect(d.getState().entryMetas.get('a')?.title).toBe('あたらしい名前');
+    expect(renameInput('left'), '確定したのに入力欄が残っている').toBeNull();
+  });
+
+  it('🔴 Esc なら変えずに閉じる', () => {
+    press('left', 'a', 'F2');
+    const input = renameInput('left')!;
+    input.value = '打ちかけ';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    expect(d.getState().entryMetas.get('a')?.title, 'Esc なのに変わった').toBe('あ');
+    expect(renameInput('left')).toBeNull();
+  });
+
+  /**
+   * 🔴 **打っている最中は、面の鍵に化けない**。⚠ これが無いと `Enter` が「開く」に、
+   *   `Backspace` が「親へ」に化けて、名前が打てない。
+   */
+  it('🔴 打っている最中の Backspace は、親へ戻らない', () => {
+    d.dispatch({ type: 'DUAL_SET_SCOPE', side: 'left', lid: 'f1' });
+    d.dispatch({ type: 'DUAL_RENAME_BEGIN', side: 'left', lid: 'x' });
+    const input = renameInput('left')!;
+    input.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true }),
+    );
+    expect(paneScope(paneOf(d.getState().dual, 'left')), '親へ戻ってしまった').toBe('f1');
+  });
+
+  it('⚠ 空白だけの名前にはしない(変えずに閉じる)', () => {
+    press('left', 'a', 'F2');
+    const input = renameInput('left')!;
+    input.value = '   ';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    expect(d.getState().entryMetas.get('a')?.title).toBe('あ');
+  });
+
+  it('🔴 他所を押したら確定する(OS のファイラと同じ)', () => {
+    press('left', 'a', 'F2');
+    const input = renameInput('left')!;
+    input.value = 'ぼかし確定';
+    input.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    expect(d.getState().entryMetas.get('a')?.title).toBe('ぼかし確定');
+  });
+
+  /**
+   * ⚠ **Esc のあとに blur が来ても、打った値は入らない**。
+   * ⚠ これは**空振り気味の test** である ── 実際には `Esc` で入力欄が DOM から
+   *   外れ、外れた節点の focusout は root まで上がらないので、そもそも handler に
+   *   届かない(だから handler 側の門を外しても緑のまま)。振る舞いの記録として残す。
+   */
+  it('Esc で閉じたあとに blur が来ても、打った値は入らない', () => {
+    press('left', 'a', 'F2');
+    const input = renameInput('left')!;
+    input.value = '打ちかけ';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    // ⚠ 閉じたあとに、外れた入力欄から focusout が届く
+    input.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    expect(d.getState().entryMetas.get('a')?.title, 'Esc のあとに打った値が入った').toBe('あ');
+  });
+
+  /**
+   * 🔴 **打ち替えている相手が消えたら、打つのもやめる**(変異 R5 が生き延びて判明)。
+   * ⚠ 残すと、確定した瞬間に**どこにも無い lid へ改名が飛ぶ**。
+   */
+  it('🔴 打ち替え中に相手が消えたら、入力欄も閉じる', () => {
+    press('left', 'a', 'F2');
+    expect(d.getState().dual.renaming, '前提が崩れている').not.toBeNull();
+    d.dispatch({ type: 'DELETE_ENTRIES', lids: ['a'] });
+    expect(d.getState().dual.renaming, '消えた相手の打ち替えが残っている').toBeNull();
+  });
+
+  it('🔴 「名前を変える」は 1 件のときだけ(理由を出す)', () => {
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' });
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'b', mode: 'toggle' });
+    region.querySelector<HTMLElement>('[data-pkc-field="dual-rename-begin"]')!.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, cancelable: true }),
+    );
+    expect(d.getState().error ?? '').toContain('1 件だけ');
+  });
+
+  /**
+   * 🔴 **反対側へ写す**(#273 段③。FD の C 相当)。
+   * ⚠ この harness は `services` を渡していないので、**断り**の側だけをここで見る
+   *   (実際に写す側は下の describe が fake の `readBodies` を渡して見る)。
+   */
+  it('🔴 本文を読む口が無い版では、黙らずに断る', () => {
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' });
+    const btn = region.querySelector<HTMLElement>('[data-pkc-field="dual-copy"]')!;
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(d.getState().error ?? '').toContain('写せません');
+  });
+
+  it('🔴 何も選ばずに写そうとしたら、理由が出る', () => {
+    d.dispatch({ type: 'DUAL_CLEAR_SELECTION', side: 'left' });
+    const btn = region.querySelector<HTMLElement>('[data-pkc-field="dual-copy"]')!;
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(d.getState().error ?? '').toContain('写すものを選んでください');
+  });
+
+  /**
+   * 🔴 **開いている場所にフォルダを作る**(#273 段②)。
+   * ⚠ **編集に入らない** ── 入ると中央が本文の面へ切り替わり、整理の途中で
+   *   面から放り出される(FD は作ったらその場に出る)。
+   */
+  it('🔴 「新しいフォルダ」は、そのペインの場所に作る(面から出ない)', () => {
+    d.dispatch({ type: 'DUAL_SET_SCOPE', side: 'left', lid: 'f1' });
+    const before = d.getState().entryMetas.size;
+    const btn = region.querySelector<HTMLElement>('[data-pkc-field="dual-mkdir"]')!;
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    const st = d.getState();
+    expect(st.entryMetas.size, 'フォルダが増えていない').toBe(before + 1);
+    expect(st.phase, '編集に入って面から出た').toBe('ready');
+    // 🔑 **f1 の中に**居る(左の列の現在地ではなく、そのペインの場所)
+    const made = [...st.entryMetas.values()].find((m) => m.title === '新しいフォルダ')!;
+    expect(made.archetype).toBe('folder');
+    expect(
+      st.relations.some((r) => r.kind === 'structural' && r.fromLid === 'f1' && r.toLid === made.lid),
+      '開いている場所の中に作られていない',
+    ).toBe(true);
+  });
+
+  it('🔴 何も選んでいなければ、理由を出して消さない', () => {
+    d.dispatch({ type: 'DUAL_CLEAR_SELECTION', side: 'right' });
+    press('right', 'b', 'Delete');
+    expect(d.getState().error ?? '').toContain('削除するものを選んでください');
+  });
+
+  it('🔴 編集中は理由を出して断る(無言で止めない)', () => {
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '' });
+    d.dispatch({ type: 'START_EDIT' });
+    expect(d.getState().phase, '前提が崩れている').toBe('editing');
+    press('right', 'b', 'ArrowDown');
+    expect(d.getState().error ?? '').toContain('編集を終了してから');
+  });
+});
+
+/**
+ * 🔴 **写す(コピー)が本当に増やす**(#273 段③)。
+ * ⚠ 本文を読む口(`readBodies`)を渡した配線でしか通らない経路なので、
+ *   harness を分ける(渡さない側の断りは上の describe が見ている)。
+ */
+describe('2 ペインの写す(#273 段③)', () => {
+  let root: HTMLElement;
+  let d: Dispatcher;
+  let region: HTMLElement;
+  let asked: string[][] = [];
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    asked = [];
+    root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    d = new Dispatcher();
+    buildShell(root);
+    bindActions(root, d, {
+      readBodies: async (lids) => {
+        asked.push([...lids]);
+        return new Map(lids.map((l) => [l, `# 本文 ${l}`]));
+      },
+    });
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: METAS, relations: RELS });
+    region = document.createElement('div');
+    root.append(region);
+    const r = new DualFilerRenderer(region);
+    d.onState((st) => r.render(st));
+    r.render(d.getState());
+  });
+
+  it('🔴 平のノートを反対側の場所へ写す(元は残る)', async () => {
+    d.dispatch({ type: 'DUAL_SET_SCOPE', side: 'right', lid: 'f1' }); // 行き先は f1 の中
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' });
+    region.querySelector<HTMLElement>('[data-pkc-field="dual-copy"]')!.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, cancelable: true }),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    const st = d.getState();
+    expect(st.entryMetas.has('a'), '元が消えた(写すのであって移すのではない)').toBe(true);
+    const made = [...st.entryMetas.values()].filter((m) => m.title === 'あ' && m.lid !== 'a');
+    expect(made.length, '写した先が増えていない').toBe(1);
+    expect(
+      st.relations.some(
+        (r) => r.kind === 'structural' && r.fromLid === 'f1' && r.toLid === made[0]!.lid,
+      ),
+      '反対側の場所に入っていない',
+    ).toBe(true);
+    expect(asked[0], '本文を 1 往復で読んでいない').toEqual(['a']);
+  });
+
+  /**
+   * 🔴 **画面に出ていない印は写さない**(変異 C6 が生き延びて判明)。
+   * ⚠ 印は行が見えなくなっても残る(絞り込みで消えた)ので、素で数えると
+   *   **画面に無いものが増える** ── 移す・消すと同じ規則(`visibleSelection`)で切る。
+   */
+  it('🔴 絞り込みで消えた印は写さない(理由を出す)', () => {
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' });
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'えっくす' }); // 'あ' は消える
+    region.querySelector<HTMLElement>('[data-pkc-field="dual-copy"]')!.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, cancelable: true }),
+    );
+    expect(d.getState().error ?? '', '画面に無い印まで写した').toContain('写すものを選んでください');
+  });
+
+  /**
+   * 🔴 **フォルダを写したら中身も行く**。⚠ ここが「お粗末」と言われた所の中身で、
+   *   選んだ物だけ写すと**フォルダだけが空で増える**。
+   */
+  it('🔴 フォルダを写すと、中身も一緒に行く', async () => {
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'f1', mode: 'set' });
+    region.querySelector<HTMLElement>('[data-pkc-field="dual-copy"]')!.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, cancelable: true }),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    const st = d.getState();
+    const copy = [...st.entryMetas.values()].find((m) => m.title === 'はこ1 のコピー')!;
+    expect(copy, 'フォルダの写しが無い').toBeTruthy();
+    const kids = st.relations.filter((r) => r.kind === 'structural' && r.fromLid === copy.lid);
+    expect(kids.length, '中身が付いてきていない(空のフォルダだけ増えた)').toBe(2);
+    // ⚠ 元のフォルダの中身は**動いていない**
+    expect(
+      st.relations.filter((r) => r.kind === 'structural' && r.fromLid === 'f1').length,
+      '元の中身が減った',
+    ).toBe(2);
+  });
+});
+
+/**
+ * 🔴 **掴んで落とす(#273 段⑤。user 指摘 2026-08-19「往年の FD などを見習って
+ * ください / OS のファイラと同じことができないといけません」)。**
+ *
+ * ⚠ 2 ペインの本題は「**左右のあいだで動かす**」ことなので、掴んで落とせないと
+ *   帯のボタン(移す)だけが唯一の動線になる ── OS のファイラでは主動線である。
+ *
+ * 🔑 守る主張は 4 つ:
+ * 1. **掴んだ面の印を運ぶ**(左の列の印を運ばない ── 画面に無いものが動く)
+ * 2. **ペインの地は「そのペインがいま開いている場所」へ落ちる**(追随する)
+ * 3. **フォルダの行はその中へ**(OS のファイラと同じ)
+ * 4. **落とし先が無い所では受けない**(光ったままにしない)
+ *
+ * ⚠ `DataTransfer` は happy-dom に無いが、実装が使うのは
+ *   `types` / `getData` / `setData` / `dropEffect` の 4 つだけなので stub で回る
+ *   (`tests/adapter/folder-organize.test.ts` と同じ作法)。
+ */
+const PKC_DRAG_DUAL = 'application/x-pkc-lids';
+
+function dtStub(initial: Record<string, string> = {}) {
+  const data = new Map(Object.entries(initial));
+  return {
+    dropEffect: 'none',
+    effectAllowed: 'none',
+    get types(): string[] {
+      return [...data.keys()];
+    },
+    getData: (t: string) => data.get(t) ?? '',
+    setData: (t: string, v: string) => void data.set(t, v),
+    files: { length: 0, item: () => null },
+    items: [] as unknown[],
+  };
+}
+
+function dragEv(type: string, dt: ReturnType<typeof dtStub>): Event {
+  const e = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(e, 'dataTransfer', { value: dt });
+  return e;
+}
+
+describe('2 ペインの掴んで落とす(#273 段⑤)', () => {
+  let root: HTMLElement;
+  let d: Dispatcher;
+  let region: HTMLElement;
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    d = new Dispatcher();
+    buildShell(root);
+    bindActions(root, d);
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: METAS, relations: RELS });
+    region = document.createElement('div');
+    root.append(region);
+    const r = new DualFilerRenderer(region);
+    d.onState((st) => r.render(st));
+    r.render(d.getState());
+  });
+
+  const pane = (side: string): HTMLElement =>
+    region.querySelector<HTMLElement>(
+      `[data-pkc-region="dual-pane"][data-pkc-side="${side}"]`,
+    )!;
+  const row = (side: string, lid: string): HTMLElement =>
+    pane(side).querySelector<HTMLElement>(
+      `[data-pkc-region="dual-table"] [data-pkc-entry="${lid}"]`,
+    )!;
+  const parentOf = (lid: string): string | null =>
+    d.getState().relations.find((r) => r.kind === 'structural' && r.toLid === lid)?.fromLid ?? null;
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  it('🔴 行は掴めて、フォルダの行は落とし先にもなる', () => {
+    expect(row('left', 'a').getAttribute('draggable'), '行が掴めない').toBe('true');
+    expect(row('left', 'f1').getAttribute('data-pkc-drop')).toBe('folder');
+    expect(
+      row('left', 'a').hasAttribute('data-pkc-drop'),
+      '平のノートの行そのものが落とし先を名乗っている',
+    ).toBe(false);
+  });
+
+  /**
+   * ⚠ **ペイン自身が entry に見えてはいけない**(だから行き先は別の属性で渡す)。
+   * ここが崩れると、ペインの地へ落としたときに**ペインを entry として**動かそうと
+   * する ── `data-pkc-drop-scope` を置いている理由そのものである。
+   */
+  it('ペインの地は落とし先だが、entry ではない', () => {
+    expect(pane('right').getAttribute('data-pkc-drop')).toBe('pane');
+    expect(
+      pane('right').hasAttribute('data-pkc-entry'),
+      'ペイン自身が entry を名乗っている',
+    ).toBe(false);
+  });
+
+  /**
+   * 🔴 **行き先は、そのペインがいま開いている場所に追随する。**
+   * ⚠ 書き忘れると、フォルダの中を開いていても**ルートへ**落ちる(いちばん
+   *   気づけない形 ── 落ちること自体は成功するので、断りも出ない)。
+   */
+  it('🔴 ペインの地の行き先が、いま開いている場所に追随する', () => {
+    expect(pane('right').getAttribute('data-pkc-drop-scope'), 'ルートは空文字').toBe('');
+    d.dispatch({ type: 'DUAL_SET_SCOPE', side: 'right', lid: 'f1' });
+    expect(
+      pane('right').getAttribute('data-pkc-drop-scope'),
+      'フォルダを開いても行き先がルートのまま',
+    ).toBe('f1');
+    // ⚠ 反対側は動いていない(片方の場所がもう片方の行き先になっていない)
+    expect(pane('left').getAttribute('data-pkc-drop-scope')).toBe('');
+  });
+
+  /**
+   * 🔴 **これが段⑤の本題** ── 左のペインから掴んで、右のペインへ落とす。
+   */
+  it('🔴 反対側のペインの地へ落とすと、その場所へ入る', async () => {
+    d.dispatch({ type: 'DUAL_SET_SCOPE', side: 'right', lid: 'f1' });
+    pane('right').dispatchEvent(dragEv('drop', dtStub({ [PKC_DRAG_DUAL]: 'a' })));
+    await tick();
+    expect(parentOf('a'), '右のペインが開いている場所へ入っていない').toBe('f1');
+  });
+
+  it('🔴 ルートを開いているペインへ落とすと、フォルダから出る', async () => {
+    expect(parentOf('x'), '前提が崩れている').toBe('f1');
+    pane('right').dispatchEvent(dragEv('drop', dtStub({ [PKC_DRAG_DUAL]: 'x' })));
+    await tick();
+    expect(parentOf('x'), 'ルートへ出ていない').toBeNull();
+  });
+
+  it('🔴 フォルダの行へ落とすと、その中へ入る', async () => {
+    row('right', 'f2').dispatchEvent(dragEv('drop', dtStub({ [PKC_DRAG_DUAL]: 'a' })));
+    await tick();
+    expect(parentOf('a'), 'フォルダの行へ落としたのに入っていない').toBe('f2');
+  });
+
+  /**
+   * ⚠ **平の行へ落としても捨てない** ── 行の上で離しても、OS のファイラは
+   *   「その一覧が開いている場所」へ入れる。⚠ 無反応にすると、user は
+   *   「掴めているのに落とせない」と読む(狙いの隙間が細くなる)。
+   */
+  it('平の行へ落としても、そのペインの場所へ入る', async () => {
+    d.dispatch({ type: 'DUAL_SET_SCOPE', side: 'right', lid: 'f1' });
+    row('right', 'x').dispatchEvent(dragEv('drop', dtStub({ [PKC_DRAG_DUAL]: 'a' })));
+    await tick();
+    expect(parentOf('a'), '行の上で離したら捨てられた').toBe('f1');
+  });
+
+  /**
+   * 🔴 **掴んだ面の印を運ぶ**(#273 段⑤の要)。
+   *
+   * ⚠ ここを左の列の印(`st.selection`)のまま書くと、**画面に出ていないものが動く**
+   *   ── 移す・写す・消すで既に踏んでいる罠の 4 つ目の顔である。
+   * 🔑 空振りを避けるため、**両方の印に掴んだ行を入れ、相方だけを変える**
+   *   ── どちらか片方にしか居ないと、`marked.includes(lid)` が false になって
+   *   **どちらの実装でも「1 件だけ」**になり、変異が生き延びる。
+   */
+  it('🔴 2 ペインから掴んだら、2 ペインの印を運ぶ(左の列の印ではない)', () => {
+    // 左の列の印: a と c
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'TOGGLE_SELECT', lid: 'c' });
+    // 2 ペイン(左)の印: a と b
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' });
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'b', mode: 'toggle' });
+    const dt = dtStub();
+    row('left', 'a').dispatchEvent(dragEv('dragstart', dt));
+    expect(
+      dt.getData(PKC_DRAG_DUAL).split(' ').sort(),
+      '掴んだ面ではなく左の列の印を運んでいる',
+    ).toEqual(['a', 'b']);
+  });
+
+  it('印の付いていない行を掴んだら、その 1 件だけ運ぶ', () => {
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' });
+    const dt = dtStub();
+    row('left', 'c').dispatchEvent(dragEv('dragstart', dt));
+    expect(dt.getData(PKC_DRAG_DUAL)).toBe('c');
+  });
+
+  /**
+   * ⚠ **印は行が見えなくなっても残る** ── 素で数えると、絞り込みで消えたものまで
+   *   運ぶ(移す・写す・消すと同じ規則で切る)。
+   */
+  it('🔴 絞り込みで消えた印は運ばない', () => {
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' });
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'b', mode: 'toggle' });
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'い' }); // 'あ' が消え、'い' が残る
+    const dt = dtStub();
+    row('left', 'b').dispatchEvent(dragEv('dragstart', dt));
+    expect(dt.getData(PKC_DRAG_DUAL), '画面に無い印まで運んだ').toBe('b');
+  });
+
+  /**
+   * 🔴 **落とし先を光らせる / 落とせない所では消す**(#240 と同じ規則を
+   * 2 ペインでも通す)。⚠ 光ったままにすると「そこへ入った」と読まれる。
+   */
+  it('🔴 落とし先が光り、落とせない所へ移ったら消える', () => {
+    const folder = row('right', 'f1');
+    folder.dispatchEvent(dragEv('dragover', dtStub({ [PKC_DRAG_DUAL]: 'a' })));
+    expect(folder.hasAttribute('data-pkc-dropping'), '落とし先が光っていない').toBe(true);
+    // region の外(この面の外)へ抜ける ── 落とせない
+    root.dispatchEvent(dragEv('dragover', dtStub({ [PKC_DRAG_DUAL]: 'a' })));
+    expect(
+      folder.hasAttribute('data-pkc-dropping'),
+      '落とせない所へ移ったのに、前の行が光ったまま',
+    ).toBe(false);
+  });
+
+  /**
+   * ⚠ **断る理由を出す**(無言で捨てない)── フォルダを自分の中へは入れられない。
+   * 🔑 経路は `moveEntries` 1 本なので、断り方も帯のボタンと同じである。
+   */
+  it('🔴 輪になる落とし方は断る(黙って捨てない)', async () => {
+    d.dispatch({ type: 'DUAL_SET_SCOPE', side: 'right', lid: 'f1' });
+    pane('right').dispatchEvent(dragEv('drop', dtStub({ [PKC_DRAG_DUAL]: 'f1' })));
+    await tick();
+    expect(d.getState().error ?? '', '無言で捨てている').toContain('自分の中');
   });
 });

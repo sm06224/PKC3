@@ -11,7 +11,7 @@ import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import { DEFAULT_ENTRY_SORT, type EntrySort } from '@features/filter/entry-sort';
 import { resolveCanonicalParents, reorderSibling } from '@features/relation/tree';
 import { extractMeta, seedBodyFor } from '@features/flavor';
-import { withTodoStatus } from '@features/flavor/todo-flavor';
+import { applyBodyRewrite, type BodyRewrite } from '@features/markdown/body-rewrite';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import type { LauncherTile } from '@features/launcher/tiles';
 import type {
@@ -462,6 +462,18 @@ export type UserAction =
   | { type: 'CANCEL_EDIT' }
   | { type: 'TOGGLE_TODO_STATUS'; lid: string }
   /**
+   * 🔴 **カレンダーの日付を付け外しする**(#276)。`null` で外す。
+   * ⚠ 書くのは frontmatter の 1 鍵だけ ── 本文は byte 無傷である
+   *   (経路は `REQUEST_FRONTMATTER_SET` = todo のトグルと同じ 1 本)。
+   */
+  | { type: 'SET_ENTRY_DATE'; lid: string; date: string | null }
+  /**
+   * 🔴 **チェックの印を付け外しする**(#277)。`line` は**原文の行番号**。
+   * ⚠ 索引(何番目のチェックか)ではなく**行**で指す ── 索引だと、数え方が
+   *   描画側と原文側で 1 つでもずれた瞬間に**別の行を書き換える**。
+   */
+  | { type: 'TOGGLE_TASK'; lid: string; line: number }
+  /**
    * 🔑 **追記**(P8 段⑧)。編集画面を開かずに末尾へ足す。
    * ⚠ `heading` は binder が作って渡す(reducer は純粋のまま ── `Date` を呼ばない)。
    * ノートは `null`(見出しを勝手に足さない)。
@@ -618,7 +630,13 @@ export type UserAction =
    * 消えるが、印は state に残るので、そのまま次の場所へ移ると
    * **画面に無いものをもう一度動かそうとする**(#240 の着地前レビュー 2 と同型)。
    */
-  | { type: 'DUAL_CLEAR_SELECTION'; side: DualSide };
+  | { type: 'DUAL_CLEAR_SELECTION'; side: DualSide }
+  /**
+   * 🔴 **その行の名前を打ち替え始める / やめる**(#273 段④)。
+   * ⚠ 確定は既存の `RENAME_ENTRY_TITLE` を撃つ ── 改名の規則を 2 つ作らない。
+   */
+  | { type: 'DUAL_RENAME_BEGIN'; side: DualSide; lid: string }
+  | { type: 'DUAL_RENAME_END' };
 
 export type SystemCommand =
   | { type: 'SYS_BOOTED'; cid: string; metas: EntryMeta[]; relations: Relation[] }
@@ -636,9 +654,17 @@ export type SystemCommand =
    */
   | { type: 'ENTRY_STAMPED'; lid: string; createdAt: string | null; updatedAt: string | null }
   | {
-      type: 'TODO_TOGGLED';
+      /**
+       * 🔴 **本文の構造化書換の ack**(#276 / #277 で `TODO_TOGGLED` から改名)。
+       * ⚠ 名前を変えたのは、**同じ経路をカレンダーの日付書換にも使う**からである
+       * ── 別名で 2 本目を生やすと、書込の作法(直列 queue / 唯一の抽出経路)が
+       * 2 つに割れる(CLAUDE.md §7)。
+       */
+      type: 'BODY_REWRITTEN';
       lid: string;
       body: string;
+      /** 何をしたか。⚠ **やり直せる形**で持つ ── 未達 commit との合流に要る。 */
+      rewrite: BodyRewrite;
       status: string | null;
       date: string | null;
       archived: boolean;
@@ -774,12 +800,20 @@ export type DomainEvent =
       parent?: { parentLid: string | null; relationId: string };
     }
   | {
-      /** かんばんトグル要求。meta snapshot は発火時(reduce)に捕獲(C-1 規律)。 */
-      type: 'REQUEST_TODO_TOGGLE';
+      /**
+       * 🔴 **本文を構造化して書き換える要求**(#276 / #277 で
+       * `REQUEST_TODO_TOGGLE` を一般化)。読む→原文 splice→書く を 1 op として直列 queue に載せる。
+       * ⚠ meta snapshot は発火時(reduce)に捕獲(C-1 規律)。
+       * ⚠ **本文は載せない** ── effect が disk から読み直す(画面の古い本文を
+       *   基底にすると、別経路の書込を巻き戻す)。
+       */
+      type: 'REQUEST_BODY_REWRITE';
       lid: string;
       title: string;
+      archetype: string;
       entryOrder: number;
-      nextStatus: 'open' | 'done';
+      /** 何をするか。規則は `features/markdown/body-rewrite.ts` の 1 か所。 */
+      rewrite: BodyRewrite;
     }
   | {
       /**
@@ -1624,6 +1658,47 @@ function reduceCore(
       // 失敗は非致命。理由は effect が OP_FAILED で別に出す(phase は落とさない)
       return { state: { ...state, writeLock: null, error: action.error }, events: [] };
     }
+    case 'TOGGLE_TASK': {
+      // ready 限定(編集中の裏書換を作らない)。未知 lid は no-op
+      if (state.phase !== 'ready') return { state, events: [] };
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            rewrite: { kind: 'task', line: action.line },
+          },
+        ],
+      };
+    }
+    case 'SET_ENTRY_DATE': {
+      // ready 限定(編集中の裏書換を作らない)。未知 lid は no-op
+      if (state.phase !== 'ready') return { state, events: [] };
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] };
+      // ⚠ 同じ値なら何もしない(空の書込を投げない)
+      if ((meta.date ?? null) === action.date) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            // ⚠ `undefined` = その鍵を消す(`spliceFrontmatterKeys` の作法)
+            rewrite: { kind: 'frontmatter', keys: { date: action.date ?? undefined } },
+          },
+        ],
+      };
+    }
     case 'TOGGLE_TODO_STATUS': {
       // ready 限定(editing 中の裏書換を作らない)。todo 以外・未知 lid は no-op
       if (state.phase !== 'ready') return { state, events: [] };
@@ -1638,16 +1713,17 @@ function reduceCore(
         state,
         events: [
           {
-            type: 'REQUEST_TODO_TOGGLE',
+            type: 'REQUEST_BODY_REWRITE',
             lid: meta.lid,
             title: meta.title,
+            archetype: 'todo',
             entryOrder: meta.entryOrder,
-            nextStatus,
+            rewrite: { kind: 'frontmatter', keys: { status: nextStatus } },
           },
         ],
       };
     }
-    case 'TODO_TOGGLED': {
+    case 'BODY_REWRITTEN': {
       // TODO(P6/P7 コンテナ切替導入時): cid を event/ack に載せて跨ぎ ack を
       // 捨てる(lid 偶然衝突 ── review F と同型の穴。P3-6a review #7)
       const meta = state.entryMetas.get(action.lid);
@@ -1675,10 +1751,9 @@ function reduceCore(
           // 丸ごと差し替えると baseline===persisted になり「未達の証拠」ごと
           // 消える(review #4 ── v2 が回収不能)。baseline に status を合流させ、
           // 再保存が「未達のテキスト + 新しい status」の両方の意図を書く
-          const merged = withTodoStatus(
-            openBody.baseline,
-            action.status === 'done' ? 'done' : 'open',
-          );
+          // ⚠ 合流も**やった書換そのもの**で当て直す(#276 / #277)── todo の
+          //   status に固定していると、日付やチェックを書いた回で**それが落ちる**
+          const merged = applyBodyRewrite(openBody.baseline, action.rewrite) ?? openBody.baseline;
           openBody = {
             lid: action.lid,
             body: openBody.body === openBody.baseline ? merged : openBody.body,
@@ -2327,6 +2402,22 @@ function reduceCore(
         },
         events: [],
       };
+    }
+    case 'DUAL_RENAME_BEGIN': {
+      // ⚠ 実在しない行の名前は打てない(消えた行の入力欄を出さない)
+      if (!state.entryMetas.has(action.lid)) return { state, events: [] };
+      // ⚠ 打ち始めた側へ焦点も移す(他の押し方と揃える)
+      return {
+        state: {
+          ...state,
+          dual: { ...state.dual, focus: action.side, renaming: { side: action.side, lid: action.lid } },
+        },
+        events: [],
+      };
+    }
+    case 'DUAL_RENAME_END': {
+      if (state.dual.renaming === null) return { state, events: [] };
+      return { state: { ...state, dual: { ...state.dual, renaming: null } }, events: [] };
     }
     case 'DUAL_TAB_ACTIVATE': {
       const cur = paneOf(state.dual, action.side);

@@ -1,6 +1,6 @@
 {
   "name": "pkc3",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "private": true,
   "type": "module",
   "description": "PKC3 — portable single-HTML knowledge container, PKC-Markdown native, wasm-sqlite storage",

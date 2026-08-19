@@ -1176,6 +1176,22 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         }
       })();
     },
+    /**
+     * 🔴 **写す(コピー)のために本文をまとめて読む**(#273 段③)。
+     * ⚠ **1 往復**で読む(`getBody` を N 回呼ぶと、フォルダを写すたびに N 往復になる)。
+     * ⚠ 読めなかった lid は**入れない** ── 呼び側が件数で「落とした」と言える。
+     */
+    readBodies: async (lids: readonly string[]) =>
+      new Map(
+        (await client.request({ op: 'getBodies', cid, lids: [...lids] })).map(
+          (r) => [r.lid, r.body] as const,
+        ),
+      ),
+    /**
+     * 🔴 **飛んでいる書込を待つ口**(#288)。書き出し(`settle`)と**同じ 1 本**を
+     * 渡す ── 2 本目の待ち方を作らない(CLAUDE.md §7)。
+     */
+    settle: () => storeEffects?.settled() ?? null,
     downloadAsset: async (assetKey, name) => {
       try {
         const lent = await blobs.lendObjectUrl(cid, assetKey);
@@ -1280,7 +1296,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         // #148 組み込みタイル ── 文書なしで開く = Start Center(#174 の一言込み)
         openOffice: openOfficeTile,
         // #241 組み込みタイル ── 中央の面を 2 ペインへ(窓は開かない)
-        openDual: () => dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'dual' }),
+        openView: (view) => dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: view }),
       });
       // ⚠ 押した対象を**選択状態にもする**(P8 段⑭)── 起動しただけだと右の列が
       //    空文のままで、いま何を触ったのかが画面に残らない。「押す = 起動」の
@@ -1340,7 +1356,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             // ⚠ 添付起動の経路に組み込みタイルは来ない(kind は 'app' 固定)が、
             //    依存の実体も 1 つに保つ(§7)
             openOffice: openOfficeTile,
-            openDual: () => dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'dual' }),
+            openView: (view) => dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: view }),
             confirmSameOrigin: (title) => {
               if (sameOriginAllowed.has(lid)) return true;
               // ⚠ 何が起きるかを**具体**で書く(「安全でない」では判断できない)

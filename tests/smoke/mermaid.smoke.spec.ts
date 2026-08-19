@@ -468,12 +468,21 @@ test('🔴 図と表は、描画の下に原文を出さない(切替で入れ�
 });
 
 /**
- * P8 段⑳: 🔴 **チェック欄は押せない**(押しても保存されないため)。
+ * 🔴 **チェック欄は「保存できる面」でだけ押せる**(#277。2026-08-19)。
  *
- * 直す前は `disabled` が無く、押すとその場でチェックが付くのに本文は 1 文字も
- * 変わらなかった ── 移動 / 追記 / 再読込で全部外れる。「チェックしたのに消えた」。
+ * ⚠ この test は **2026-08-19 に主張を裏返した**。以前の主張は P8 段⑳ の
+ *   「**押せない**(押しても保存されないため)」で、それは正しかった ──
+ *   その前は `disabled` が無く、押すとチェックが付くのに本文は 1 文字も変わらず、
+ *   移動 / 追記 / 再読込で全部外れた(「チェックしたのに消えた」)。
+ * 🔑 #277 で**保存する経路ができた**ので、押せない理由が消えた。
+ *   ただし**理由が消えたのは読む面だけ**である ── だから主張は
+ *   「押せる」ではなく「**保存できる面でだけ押せる**」になる。
+ *
+ * ⚠ **主張の向きを変えたら、検査も別物として書き直す**(CLAUDE.md §1)──
+ *   「押せる」だけを見ると、**押しても保存されない**古い壊れ方に戻っても通る。
+ *   だから**押した結果が本文に残ること**まで見る。
  */
-test('🔴 本文のチェック欄は押しても変わらない(嘘をつかない)', async ({ page }) => {
+test('🔴 本文のチェック欄は、保存できる面でだけ押せる (#277)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await gotoApp(page);
   await createEntry(page, 'text');
@@ -482,12 +491,24 @@ test('🔴 本文のチェック欄は押しても変わらない(嘘をつか�
 
   const boxes = page.locator('[data-pkc-field="detail-body"] .pkc-task-checkbox');
   await expect(boxes, 'チェック欄が出ていない').toHaveCount(2);
-  // 原文の状態は反映されている(読むだけとしては正しい)
+  // 原文の状態が反映されている
   await expect(boxes.nth(0)).not.toBeChecked();
   await expect(boxes.nth(1)).toBeChecked();
-  // 🔴 押せない = 押して外れる嘘が起きない
-  await expect(boxes.nth(0), 'チェック欄が押せてしまう(押しても保存されない)').toBeDisabled();
-  await expect(boxes.nth(1)).toBeDisabled();
+
+  // 🔴 読む面では押せる(受け手が居る)
+  await expect(boxes.nth(0), '読む面なのに押せない').toBeEnabled();
+  await expect(boxes.nth(0)).toHaveAttribute('data-pkc-action', 'toggle-task');
+
+  /**
+   * ⚠ **押した印が描き直しで消えない**(follower が描き直しても戻らない)。
+   * 🔑 `toBeChecked()` はブラウザ既定の反転でも真になるので、**これだけでは
+   *   保存の証拠にならない** ── **保存されて残るか**は
+   *   `tests/smoke/task-checkbox.smoke.spec.ts` が往復させて見ている。
+   *   ここで二重に持たない(フル smoke の時間を増やさない)。
+   */
+  await boxes.nth(0).click();
+  await expect(boxes.nth(0), '押した印が描き直しで消えた').toBeChecked();
+  await expect(boxes.nth(1), '押していない方まで変わった').toBeChecked();
 
   expect(errors).toEqual([]);
 });

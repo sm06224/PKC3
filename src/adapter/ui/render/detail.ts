@@ -12,7 +12,11 @@
  * 生成した出力に限る(PKC2 と同じ安全前提)。
  */
 import { renderMarkdown } from '@features/markdown/markdown-render';
-import { parseFrontmatter, extractVars } from '@features/markdown/frontmatter';
+import {
+  frontmatterLineCount,
+  parseFrontmatter,
+  extractVars,
+} from '@features/markdown/frontmatter';
 import { hydrateMermaid, type MermaidScope } from './mermaid-hydrate';
 import { hydrateChart } from './chart-raster';
 
@@ -513,6 +517,13 @@ export class DetailRenderer {
          *   `selectedLid` / `openBody` を捨てるので、指紋は必ず一緒に動く。
          */
         currentContainerId: selfContainerId(state),
+        /**
+         * 🔴 **チェックの印を押せるようにする**(#277。2026-08-19)。
+         * ⚠ **この面だけ**である ── 書き出した HTML・Viewer・印刷には
+         *   受け手(`toggle-task`)が居ないので、押せない形のまま出す
+         *   (押せるのに本文が変わらないと「チェックしたのに消えた」になる)。
+         */
+        interactiveTasks: true,
       };
       /**
        * 🔴 **読む面もワーカーで描く**(2026-08-06。user 報告 2-8)。
@@ -961,28 +972,156 @@ export class DetailRenderer {
     editAll.setAttribute(HINT_COMMAND, 'edit-all');
     editAll.title = hintTitle('本文全体を 1 つの入力欄で編集します', 'edit-all');
     tools.append(editAll);
-    this.region.append(tools, pane, note);
+    /**
+     * 🔴 **文書の情報(frontmatter)は「札」として上に出す**(#284)。
+     *
+     * ⚠ 直す前は**生の本文をそのまま描いていた**ので、`---` が水平線、
+     *   中の `tags: [...]` が**見出し**として画面に出ていた ── user から見れば
+     *   「消してよさそうな謎の行」であり、実際その場で消せた。閉じの `---` が
+     *   1 行消えるだけで `parseFrontmatter` が `{}` を返し、**警告 0 件で
+     *   タグが全部消える**(#284 の実測)。
+     * 🔑 直し方は「隠す」ではなく **名札を付けて、編集の入口を分ける**
+     *   ── 記法は減らさない(CLAUDE.md 不可侵「記法を減らすことは
+     *   user の動線を減らすこと」)。本文側からは触れないので**事故で消えない**。
+     */
+    const fmCard = document.createElement('div');
+    fmCard.setAttribute('data-pkc-region', 'live-frontmatter');
+    this.region.append(tools, fmCard, pane, note);
 
     let body = initialBody;
+    /**
+     * 🔴 **描く本文と原文の行番号のずれ**(= frontmatter の行数)。
+     * ⚠ 行ごとの編集はこの値だけ足して原文へ書き戻す ── **1 行の取り違えが
+     *   「別の行が消える」**になるので、数え方は `frontmatterLineCount` 1 か所。
+     */
+    let fmLines = frontmatterLineCount(body);
+    /** 画面に描く側(= 情報を外した本文)。⚠ 切り方も 1 か所に寄せる。 */
+    const docOf = (src: string, n: number): string =>
+      n === 0 ? src : src.split('\n').slice(n).join('\n');
     const scopes: MermaidScope[] = [];
     /** 塊を跨ぐ取り消しの履歴(S8)。⚠ 行の配列なので 1 件は小さい。 */
     let journal = EMPTY_JOURNAL;
 
-    /** 本文を差し替えて描き直す(外へも知らせる)。⚠ **出口は 1 つ**にする。 */
+    /** 情報の札を編集中か。⚠ 描き直しで入力欄を消さないための 1 つの旗。 */
+    let fmEditing = false;
+    /**
+     * 🔴 **情報の札を描く**(#284)。frontmatter が無ければ**何も出さない**
+     * (空の枠を置くと、書いていない人の画面に意味の無い箱が出る)。
+     *
+     * ⚠ **打っている最中は描き直さない** ── 札の入力欄は本文の描き直しと
+     *   同じ経路で消えるので、旗が無いと 1 文字ごとに入力が飛ぶ。
+     */
+    const renderFmCard = (): void => {
+      if (fmEditing) return;
+      fmCard.textContent = '';
+      if (fmLines === 0) {
+        fmCard.removeAttribute('data-pkc-has-frontmatter');
+        return;
+      }
+      fmCard.setAttribute('data-pkc-has-frontmatter', '');
+      const label = document.createElement('span');
+      label.setAttribute('data-pkc-field', 'fm-label');
+      label.textContent = 'この文書の情報';
+      const summary = document.createElement('span');
+      summary.setAttribute('data-pkc-field', 'fm-summary');
+      const meta = parseFrontmatter(body).meta;
+      const keys = Object.keys(meta);
+      /**
+       * ⚠ **中身を出す**(名前だけにしない)── 「情報がある」とだけ出しても、
+       *   何が入っているか分からなければ user は開いて確かめるしかない。
+       */
+      summary.textContent =
+        keys.length === 0
+          ? '(空)'
+          : keys
+              .map((k) => `${k}: ${Array.isArray(meta[k]) ? (meta[k] as unknown[]).join(', ') : String(meta[k])}`)
+              .join(' / ');
+      const edit = document.createElement('button');
+      edit.type = 'button';
+      edit.setAttribute('data-pkc-field', 'fm-edit');
+      edit.textContent = '情報を編集';
+      edit.title = 'タグなど、この文書に付いている情報を編集します';
+      edit.addEventListener('click', () => openFmEditor());
+      fmCard.append(label, summary, edit);
+    };
+
+    /**
+     * 🔴 **情報を編集する口**(#284)。⚠ 本文側から触れなくした代わりに、
+     * **ここから必ず触れる**ようにする ── 触れなくしただけなら、それは
+     * 動線を 1 つ減らしたことになる(CLAUDE.md 不可侵)。
+     */
+    const openFmEditor = (): void => {
+      fmEditing = true;
+      fmCard.textContent = '';
+      const ta = document.createElement('textarea');
+      ta.setAttribute('data-pkc-field', 'fm-source');
+      ta.setAttribute('aria-label', 'この文書の情報(原文)');
+      ta.value = body.split('\n').slice(0, fmLines).join('\n');
+      const ok = document.createElement('button');
+      ok.type = 'button';
+      ok.setAttribute('data-pkc-field', 'fm-commit');
+      ok.textContent = '確定';
+      const cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.setAttribute('data-pkc-field', 'fm-cancel');
+      cancel.textContent = 'やめる';
+      const close = (): void => {
+        fmEditing = false;
+        renderFmCard();
+      };
+      cancel.addEventListener('click', close);
+      ok.addEventListener('click', () => {
+        const before = fmLines;
+        const next = spliceLines(body, 0, before - 1, ta.value);
+        fmEditing = false;
+        journal = record(journal, stepFor(body, 0, before - 1, ta.value));
+        setBody(next);
+        /**
+         * 🔴 **読めなくなったら、そう言う**(#284 の本題)。⚠ 本文は 1 文字も
+         *   失われていない(原文に残っている)が、**情報としては読めていない** ──
+         *   ここで黙ると、タグが消えたことに user は気づけない。
+         */
+        if (frontmatterLineCount(body) === 0) {
+          note.textContent =
+            'この文書の情報が読めなくなりました(先頭の --- と閉じの --- が要ります)── 書いた内容は本文に残っています';
+        } else {
+          note.textContent = 'この文書の情報を更新しました';
+        }
+      });
+      fmCard.append(ta, ok, cancel);
+      ta.focus();
+    };
+
+    /**
+     * 本文を差し替えて描き直す(外へも知らせる)。⚠ **出口は 1 つ**にする。
+     * ⚠ 保存されるのは**原文**(`body`)── 情報を外した側ではない。
+     *   ここを取り違えると、編集のたびに frontmatter が落ちる。
+     */
     const setBody = (next: string): void => {
       body = next;
+      // 🔴 情報の行数は**毎回引き直す**(情報そのものを編集したときに動く)
+      fmLines = frontmatterLineCount(body);
+      renderFmCard();
       this.onBodyChange?.(next);
-      follow.push(body, previewOpts);
+      follow.push(docOf(body, fmLines), previewOpts);
       follow.flush(); // 🔑 確定は**待たせない**(打鍵では 1 回も描かない代わり)
     };
 
     const swap = new RowSwap(pane, {
       commit: (startLine, endLine, text) => {
+        /**
+         * 🔴 **行番号を原文へ戻す**(#284)── `RowSwap` が見ているのは
+         * 情報を外した本文なので、そのまま splice すると **frontmatter の行を
+         * 書き潰す**(user から見て「上の数行が消えた」)。
+         * ⚠ ずらす値は `fmLines` 1 つ ── ここに 2 本目の計算を置かない。
+         */
+        const from = startLine + fmLines;
+        const to = endLine + fmLines;
         // ⚠ 継ぎ足しの規則は `edit-journal.ts` の 1 か所(取り消しと同じ規則を使う)
-        journal = record(journal, stepFor(body, startLine, endLine, text));
+        journal = record(journal, stepFor(body, from, to, text));
         // ⚠ 「変わったか」は `RowSwap` が持っている(開いた時の原文と比べる)──
         //    ここに 2 本目の判定を置かない
-        setBody(spliceLines(body, startLine, endLine, text));
+        setBody(spliceLines(body, from, to, text));
       },
       notify: (message) => {
         note.textContent = message;
@@ -1092,6 +1231,13 @@ export class DetailRenderer {
         this.onBodyChange?.(body);
       });
       note.textContent = `この本文は行ごとに編集できません(${reason})── 原文で編集します`;
+      /**
+       * ⚠ **札を畳む**(#284)── 退避先の入力欄には**原文(情報込み)**が入る。
+       *   札を出したままにすると、同じ情報を編集する口が 2 つになり、
+       *   どちらの編集が残るか分からなくなる(§7「同じ問いに答える口が 2 つ」)。
+       */
+      fmCard.textContent = '';
+      fmCard.removeAttribute('data-pkc-has-frontmatter');
       pane.append(ta);
       // 退避先は**すでに原文全体**の編集 ── 押せない理由ごと可視にする
       editAll.disabled = true;
@@ -1101,7 +1247,9 @@ export class DetailRenderer {
     const follow = this.markdown.follower<RenderedWithRanges>(
       ({ html, ranges }) => {
         if (!pane.isConnected || fellBack) return;
-        const r = swap.update(body, html, ranges);
+        // ⚠ 渡すのは**情報を外した側**(描いた html と行が一致していないと、
+        //    塊と原文の対応が 1 行ずつずれる)
+        const r = swap.update(docOf(body, fmLines), html, ranges);
         if (!r.ok) {
           // 🔴 **壊れた分割の上で編集させない**(設計 §7-9)── 今日の編集画面へ退避
           fallBack(r.reason ?? '');
@@ -1120,7 +1268,8 @@ export class DetailRenderer {
         //    inserted は空で、そこが一番溜まる)
         this.pruneLends();
         // 文書 globals(書字方向・既定の寄せ)── 読む面と同じ見え方にする。
-        // ⚠ この面は本文をそのまま(frontmatter 込みで)描くので `body` から取る
+        // ⚠ 材料は**原文**(`body`)── 描いているのは情報を外した側なので、
+        //    そちらからでは globals(frontmatter に書く)が 1 つも見えない
         applyDocumentGlobals(pane, extractDocumentGlobals(body));
       },
       (e) => {
@@ -1130,7 +1279,8 @@ export class DetailRenderer {
       { withRanges: true },
     );
 
-    follow.push(body, previewOpts);
+    renderFmCard();
+    follow.push(docOf(body, fmLines), previewOpts);
     follow.flush();
 
     this.cancelPreview = () => {

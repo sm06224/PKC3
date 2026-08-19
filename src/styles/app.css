@@ -941,6 +941,54 @@ select:focus-visible {
 [data-pkc-open-end='directive'] {
   border-left-color: var(--warn);
 }
+/* ── 文書の情報の札(#284)────────────────────────────────
+ * 🔴 frontmatter は**本文の外**に、名札を付けて出す。
+ * ⚠ 直す前は本文としてそのまま描かれていたので、`---` が水平線・中身が見出しに
+ * なり、user から見て「消してよさそうな謎の行」だった(消すとタグが全部消えた)。
+ * ⚠ **無いときは場所を取らない** ── 書いていない人の画面に空の枠を置かない。
+ * 🔑 色は使わない(地は無彩色、色は情報にだけ ── user 指示 2026-08-03)。 */
+[data-pkc-region='live-frontmatter'] {
+  display: none;
+}
+[data-pkc-region='live-frontmatter'][data-pkc-has-frontmatter] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  margin-bottom: var(--s2);
+  padding: var(--s1) var(--s2);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--surface-2, var(--surface));
+  font-size: 11.5px;
+}
+[data-pkc-field='fm-label'] {
+  color: var(--muted);
+  white-space: nowrap;
+}
+/* ⚠ 中身は長くなりうる ── 器を押し広げず、その場で折り返す */
+[data-pkc-field='fm-summary'] {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+}
+/* 情報の原文。⚠ 本文の生の行と**同じ見た目**にする(同じ「原文を打つ場所」) */
+[data-pkc-field='fm-source'] {
+  flex: 1 0 100%;
+  box-sizing: border-box;
+  min-height: 4.5em;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.7;
+  padding: 2px var(--s2);
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  background: var(--surface);
+  color: var(--fg);
+  resize: vertical;
+}
+
 /* お知らせの行(無言で断らない)。⚠ 常に同じ場所に在る = 出ても配置が動かない */
 [data-pkc-field='row-note'] {
   min-height: 1.2em;
