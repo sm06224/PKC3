@@ -188,6 +188,17 @@ export interface BinderServices {
    * ⚠ 読めなかった lid は**返さない**(呼び側が件数で「落とした」と言える)。
    */
   readBodies?(lids: readonly string[]): Promise<ReadonlyMap<string, string>>;
+  /**
+   * 🔴 **飛んでいる書込が着くまで待つ**(#288)。
+   *
+   * ⚠ 書込は effect 層の chain に直列化されるが、**編集の開始はその外**に在る ──
+   *   チェックの印を押した直後に「編集」へ入ると、入力欄には**押す前の本文**が出て、
+   *   そこで 1 文字でも打つと可視内容の last-write-wins で**押した印が黙って戻る**。
+   * 🔑 待つ口は既に在る(`connectStoreEffects().settled()` ── 書き出しが
+   *   2026-08-17 に同じ穴で作ったもの)。**2 本目を作らない**。
+   * ⚠ **省略可**(`undefined` / `null`)── 無い環境では今までどおり同期に始まる。
+   */
+  settle?(): Promise<void> | null;
   downloadAsset?(assetKey: string, name: string): void;
   /**
    * 🔴 **貼る用に画像を持ち歩ける形へ**(#193)。`blob:` → `data:` の対応を返す。
@@ -846,11 +857,23 @@ const ACTIONS: Record<string, ActionHandler> = {
   'start-edit': (dispatcher, _target, services) => {
     const lock = services.acquireEditLock;
     const lid = dispatcher.getState().openBody?.lid ?? null;
+    /**
+     * 🔴 **飛んでいる書込を待ってから始める**(#288)。⚠ 待たないと、
+     * チェックの印を押した直後の編集で**押す前の本文**が入力欄に出て、
+     * 打った時点で印が黙って戻る(2026-08-19 に smoke が実際に踏んだ)。
+     * ⚠ 待つのは chain が空になるまで ── 何も飛んでいなければその場で返る。
+     */
+    /**
+     * ⚠ **渡されていない環境では今までどおり同期に始まる**(`null`)── test の
+     *   fake や旧い配線を非同期に変えない(乗せ換えたとき unit が 40 件落ちた)。
+     */
+    const ready = services.settle?.() ?? null;
     if (!lock || lid === null) {
-      dispatcher.dispatch({ type: 'START_EDIT' });
+      if (ready === null) dispatcher.dispatch({ type: 'START_EDIT' });
+      else void ready.then(() => dispatcher.dispatch({ type: 'START_EDIT' }));
       return;
     }
-    void lock(lid).then((grant) => {
+    void (ready === null ? lock(lid) : ready.then(() => lock(lid))).then((grant) => {
       if (grant !== 'granted') {
         // ⚠ 文言は理由と対(§1 / レビュー M-7)── holder 不在を「別のタブで編集中」と
         //    言うと、user は存在しない編集タブを探す

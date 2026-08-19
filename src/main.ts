@@ -1187,6 +1187,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           (r) => [r.lid, r.body] as const,
         ),
       ),
+    /**
+     * 🔴 **飛んでいる書込を待つ口**(#288)。書き出し(`settle`)と**同じ 1 本**を
+     * 渡す ── 2 本目の待ち方を作らない(CLAUDE.md §7)。
+     */
+    settle: () => storeEffects?.settled() ?? null,
     downloadAsset: async (assetKey, name) => {
       try {
         const lent = await blobs.lendObjectUrl(cid, assetKey);

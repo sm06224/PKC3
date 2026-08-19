@@ -53,10 +53,9 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
   const regions = buildShell(root);
   const center = new CenterRouter(regions.detail, () => new Date(2026, 7, 15)); // 2026-08
   d.onState((s) => center.render(s));
-  bindActions(root, d);
   const store = { ...bodies };
   const persisted: EntryUpsert[] = [];
-  connectStoreEffects(d, {
+  const effects = connectStoreEffects(d, {
     ...stubRevisionOps(),
     getBody: async (lid) => store[lid] ?? null,
     deleteEntry: async () => {},
@@ -67,6 +66,12 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
       return stubStamps();
     },
   });
+  /**
+   * ⚠ **配線は `main.ts` と同じ形にする**(#288)── `settle` を渡さないと、
+   *   「飛んでいる書込を待ってから編集を始める」経路が**この harness では
+   *   1 度も通らない**(CLAUDE.md §2「弱いのではなく走っていない」)。
+   */
+  bindActions(root, d, { settle: () => effects.settled() });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas, relations: [] });
   const q = <T extends HTMLElement>(sel: string) => root.querySelector<T>(sel);
   const qa = (sel: string) => [...root.querySelectorAll<HTMLElement>(sel)];
@@ -262,6 +267,54 @@ describe('チェックの印(#277)', () => {
     q<HTMLElement>('[data-pkc-action="toggle-task"][data-pkc-task-line="3"]')!.click();
     await tick(20);
     expect(store['n1']!.split('\n')[3], '外れていない').toBe('- [ ] 卵');
+  });
+
+  /**
+   * 🔴 **押した直後に編集へ入っても、押す前の本文が出ない**(#288)。
+   *
+   * ⚠ 直す前は、書込が着く前に「編集」へ入ると入力欄に**押す前の本文**が出て、
+   *   そこで 1 文字でも打つと可視内容の last-write-wins で**印が黙って戻った**。
+   * 🔑 直し方は「飛んでいる書込を待ってから始める」── 待つ口は書き出しが
+   *   2026-08-17 に作った `settled()` と**同じ 1 本**(2 本目を作らない)。
+   * ⚠ **飛んでいない回は待たない**(`settle()` が `null` を返す)── 待つと
+   *   押下が必ず 1 tick 遅れ、既存の同期な動きが全部壊れる(実際 40 件落ちた)。
+   */
+  it('🔴 押した直後に編集へ入っても、印が反映済みの本文が出る (#288)', async () => {
+    const { d, q, root, store } = setup([meta('n1', { archetype: 'text', status: null })], {
+      n1: BODY,
+    });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    await tick(20);
+    // ⚠ **待たずに**続けて編集へ入る(これが踏んだ形)
+    q<HTMLElement>('[data-pkc-action="toggle-task"][data-pkc-task-line="2"]')!.click();
+    root.querySelector<HTMLElement>('[data-pkc-action="start-edit"]')!.click();
+    await tick(30);
+    expect(d.getState().phase, '編集に入っていない').toBe('editing');
+    expect(
+      d.getState().openBody?.body,
+      '押す前の本文で編集が始まった(打つと印が黙って戻る)',
+    ).toBe(store['n1']);
+    expect(d.getState().openBody?.body, '印が入っていない').toContain('- [x] 牛乳');
+  });
+
+  /**
+   * 🔴 **配線そのものを pin する**(#288。変異 W2 が生き延びて判明)。
+   *
+   * ⚠ 上の test は `settle` を**自分で渡す** harness なので、
+   *   **`main.ts` が渡し忘れても緑のまま**である ── 実際、渡す行を消す変異が
+   *   生き延びた(CLAUDE.md §2「どの test からも実行されない file に判断を書かない」)。
+   * ⚠ `main.ts` は原文を読む test しか無いので、ここは**字面**で見る。
+   *   **弱いと自覚して使う**(`resolve-container-compat.test.ts` と同じ妥協)。
+   */
+  it('🔴 boot が「飛んでいる書込を待つ口」を binder へ渡している (#288)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const code = readFileSync('src/main.ts', 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/.*$/gm, '$1');
+    expect(code.length, 'コメント落としが本体まで消した').toBeGreaterThan(1000);
+    expect(code, 'settle の配線が落ちている(押した直後の編集で本文が古くなる)').toMatch(
+      /settle:\s*\(\)\s*=>\s*storeEffects\?\.settled\(\)/,
+    );
   });
 
   /**
