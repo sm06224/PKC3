@@ -393,6 +393,7 @@ describe('経路ごとの割り当て直し', () => {
           status: null,
           date: null,
           archived: false,
+          bodyChars: null,
         },
       ],
       relations: [],

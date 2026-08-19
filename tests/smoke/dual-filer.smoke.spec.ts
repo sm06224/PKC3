@@ -78,10 +78,18 @@ test('🔴 2 ペインを開いて、左で選んだものを右の場所へ移�
   await expect(page.locator(ROWS('right')), '右がフォルダに入れていない').toHaveCount(0);
   await expect(page.locator(ROWS('left')), '押していない左まで動いた').toHaveCount(2);
 
-  // ④ 左のノートを選ぶ ── 焦点が左へ移り、向きの字も変わる
+  /**
+   * ④ 左のノートを選ぶ ── 焦点が左へ移り、**そちらが「元」だと情報行が言う**。
+   * ⚠ 2026-08-19 の作り直しで、向きは**操作の文言から情報行へ移った**
+   *   (操作行は `F6 移す` で固定 ── 焦点で字が入れ替わると端が揃わない)。
+   */
   await page.locator(ROWS('left')).nth(1).click();
   await expect(page.locator(PANE('left'))).toHaveAttribute('data-pkc-focused', '');
-  await expect(page.locator('[data-pkc-field="dual-move"]')).toContainText('右へ移す');
+  await expect(
+    page.locator(`${PANE('left')} [data-pkc-field="dual-count"]`),
+    '焦点の側が「元」だと出ていない',
+  ).toContainText('(ここが元)');
+  await expect(page.locator('[data-pkc-field="dual-move"]')).toContainText('移す');
 
   // ⑤ 移す ── 右(= はこの中)に現れ、左からは消える
   await clickReal(page, '[data-pkc-field="dual-move"]');

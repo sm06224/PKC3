@@ -35,6 +35,7 @@ function meta(lid: string, archetype = 'text'): EntryMeta {
     status: null,
     date: null,
     archived: false,
+    bodyChars: null,
   };
 }
 

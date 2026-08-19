@@ -1210,3 +1210,39 @@ describe('カンバンの札を集める (#277 段②)', () => {
     expect(scan.cards.length, '切ったら何も返さなくなった').toBe(TASK_LIMITS.notes);
   });
 });
+
+/**
+ * 🔴 **大きさの列は「保存の口」が書く**(2026-08-19、2 ペインの作り直し)。
+ *
+ * ⚠ migration の test(`schema-migration.test.ts`)は**埋め戻しの道**しか通らない ──
+ *   既に DB を持っている user の道である。**新しく保存したノート**が通るのは
+ *   こちら(`bindUpsert`)なので、片方だけでは代入を落とす変異が半分生き延びる
+ *   (CLAUDE.md §7「同じ値を複数の経路へ渡すものは、経路ごとに pin する」)。
+ * ⚠ そして **`listEntryMetas` が返すこと**も併せて見る ── 列に入っていても
+ *   SELECT に挙げ忘れると、画面には永久に届かない(数だけ正しくて表示が空)。
+ */
+describe('大きさの列(2026-08-19)', () => {
+  const charsOf = async (lid: string): Promise<number | null | undefined> =>
+    (await request({ op: 'listEntryMetas', cid: 'c1' })).find((m) => m.lid === lid)?.body_chars;
+
+  it('🔴 保存すると本文の文字数が入り、一覧にも載る', async () => {
+    await request({ op: 'upsertEntry', cid: 'c1', entry: entry('size-ja', 'あいう\n') });
+    expect(await charsOf('size-ja'), '保存の口が大きさを書いていない').toBe(4);
+  });
+
+  it('🔴 書き換えたら追従する(古い大きさが残らない)', async () => {
+    await request({ op: 'upsertEntry', cid: 'c1', entry: entry('size-grow', 'ab') });
+    expect(await charsOf('size-grow')).toBe(2);
+    await request({ op: 'upsertEntry', cid: 'c1', entry: entry('size-grow', 'abcdef') });
+    expect(await charsOf('size-grow'), 'UPSERT の更新側で列を書いていない').toBe(6);
+  });
+
+  /**
+   * ⚠ **空のノートは `0`**(「まだ数えていない」= `null` ではない)。
+   * 潰すと、埋め戻しが**毎回の open で同じ行を読み直す**(永遠に尽きない)。
+   */
+  it('🔴 空のノートは 0(未計算ではない)', async () => {
+    await request({ op: 'upsertEntry', cid: 'c1', entry: entry('size-empty', '') });
+    expect(await charsOf('size-empty')).toBe(0);
+  });
+});

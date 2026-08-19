@@ -19,6 +19,7 @@ const meta = (lid: string, order: number, archetype = 'text', title = lid): Entr
   status: null,
   date: null,
   archived: false,
+  bodyChars: null,
 });
 
 const rel = (id: string, from: string, to: string, kind = 'structural'): Relation => ({

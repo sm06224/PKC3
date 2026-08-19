@@ -15,6 +15,7 @@ function meta(lid: string, order: number, title = 't-' + lid): EntryMeta {
     status: null,
     date: null,
     archived: false,
+    bodyChars: null,
   };
 }
 

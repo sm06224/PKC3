@@ -25,6 +25,7 @@ function meta(lid: string, over: Partial<EntryMeta> = {}): EntryMeta {
     status: 'open',
     date: null,
     archived: false,
+    bodyChars: null,
     ...over,
   };
 }

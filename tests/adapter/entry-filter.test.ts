@@ -32,6 +32,7 @@ function meta(lid: string, title: string, over: Partial<EntryMeta> = {}): EntryM
     status: null,
     date: null,
     archived: false,
+    bodyChars: null,
     ...over,
   };
 }

@@ -149,6 +149,7 @@ describe('一覧のチップ ── 行を作り直さずに種別が変わっ�
       status: null,
       date: null,
       archived: false,
+      bodyChars: null,
     };
   }
   const stateWith = (m: EntryMeta): AppState =>

@@ -45,6 +45,7 @@ const META = (over: Partial<EntryMeta> = {}): EntryMeta => ({
   status: null,
   date: null,
   archived: false,
+  bodyChars: null,
   ...over,
 });
 

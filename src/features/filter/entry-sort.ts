@@ -10,13 +10,30 @@
  */
 import type { EntryMeta } from '@core/model/entry-meta';
 
-export const ENTRY_SORTS = ['manual', 'updated', 'title', 'archetype'] as const;
+export const ENTRY_SORTS = ['manual', 'updated', 'title', 'archetype', 'size'] as const;
 export type EntrySort = (typeof ENTRY_SORTS)[number];
 export const DEFAULT_ENTRY_SORT: EntrySort = 'manual';
 
 export function isEntrySort(v: string): v is EntrySort {
   return (ENTRY_SORTS as readonly string[]).includes(v);
 }
+
+/**
+ * 🔴 **その並びの「自然な向き」**(2026-08-19、2 ペインの作り直しで向きを持たせた)。
+ *
+ * ⚠ 直す前は `sortOrder` の中に `const desc = sort === 'updated'` と**埋まっていた**
+ *   ので、向きを外から選べなかった(列見出しを押しても反転できない)。
+ * 🔑 ここは「**押したとき最初にどちらへ倒すか**」だけを決める ── 実際の向きは
+ *   state が持ち、`sortOrder` は渡された向きに従う(判定を 2 か所に置かない)。
+ * ⚠ 新しい並びを足したらここにも足す(`Record` なので tsc が忘れさせない)。
+ */
+export const NATURAL_DESC: Readonly<Record<EntrySort, boolean>> = {
+  manual: false,
+  updated: true, // 更新は**新しい順**から見たい
+  title: false,
+  archetype: false,
+  size: true, // 大きさは**大きい順**から見たい(整理の面で探すのは大物である)
+};
 
 /**
  * 並べ替える。⚠ **元の配列を壊さない**(`order` は state が持つ参照で、
@@ -27,21 +44,32 @@ export function isEntrySort(v: string): v is EntrySort {
  *
  * @param metaOf 未知の lid は `undefined` を返してよい(落とさず末尾へ回す ──
  *   一覧から**黙って消える**ほうが害が大きい)
+ * @param desc 降順にするか。⚠ **省略可にしない** ── 既定を持たせると
+ *   「渡し忘れ = 昇順」が静かに通り、**列見出しの矢印と実際の並びが食い違う**
+ *   (CLAUDE.md §7)。呼び側は `NATURAL_DESC` から引くか、state の向きを渡す。
  */
 export function sortOrder(
   order: readonly string[],
   metaOf: (lid: string) => EntryMeta | undefined,
   sort: EntrySort,
+  desc: boolean,
 ): string[] {
   if (sort === 'manual') return [...order];
-  const key = (lid: string): string => {
+  /**
+   * ⚠ **鍵の型は並びごとに 1 つ**(文字か数のどちらか)── 混ぜると比較が
+   *   実行のたびに違う答えを返す。`size` だけが数で、他は全部文字である。
+   */
+  const key = (lid: string): string | number => {
     const m = metaOf(lid);
+    if (sort === 'size') {
+      // ⚠ 未知 / 未計算は**いちばん小さい**扱い(末尾でも先頭でもなく、0 と同列)
+      return m?.bodyChars ?? -1;
+    }
     if (!m) return '￿'; // 未知は末尾
     if (sort === 'title') return m.title.toLowerCase();
     if (sort === 'archetype') return m.archetype;
     return m.updatedAt ?? ''; // updated: 時刻文字列(ISO なので辞書順 = 時刻順)
   };
-  const desc = sort === 'updated'; // 更新は**新しい順**(他は昇順)
   return [...order].sort((a, b) => {
     const ka = key(a);
     const kb = key(b);

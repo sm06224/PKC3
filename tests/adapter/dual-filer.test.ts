@@ -34,6 +34,7 @@ function meta(lid: string, order: number, title = 't-' + lid, archetype = 'text'
     status: null,
     date: null,
     archived: false,
+    bodyChars: null,
   };
 }
 
@@ -236,20 +237,64 @@ describe('2 ペインの面(描画)', () => {
     expect(rows('right'), '右がルートを出していない').toEqual(['f1', 'f2', 'a', 'b', 'c']);
   });
 
-  it('🔴 焦点の側に印が付き、真ん中のボタンの向きがそれに従う', () => {
+  /**
+   * 🔴 **焦点は「移す元」そのもの**なので、2 か所で言う(2026-08-19 の作り直し)。
+   *
+   * ⚠ 直す前は**操作の文言**(「→ 右へ移す」)が向きを言っていたので、焦点を
+   *   変えるたびにボタンの字と幅が入れ替わっていた ── 不可侵指示「同じものが
+   *   常に同じ場所にある」と逆である。🔑 いまは**ペインの情報行**が言う。
+   */
+  it('🔴 焦点の側に印が付き、「ここが元」の字もそちらへ移る', () => {
     const r = new DualFilerRenderer(region);
     let s = booted();
     r.render(s);
     const pane = (side: string) =>
       region.querySelector(`[data-pkc-region="dual-pane"][data-pkc-side="${side}"]`)!;
-    const move = () => region.querySelector('[data-pkc-field="dual-move"]')!;
+    const foot = (side: string) =>
+      pane(side).querySelector('[data-pkc-field="dual-count"]')?.textContent ?? '';
     expect(pane('left').hasAttribute('data-pkc-focused'), '起動時の焦点が左でない').toBe(true);
-    expect(move().textContent, '向きが字で出ていない').toContain('右へ移す');
+    expect(foot('left'), '焦点の側が「元」だと字で出ていない').toContain('(ここが元)');
+    expect(foot('right'), '両側が「元」に見える').not.toContain('(ここが元)');
     s = reduce(s, { type: 'DUAL_FOCUS', side: 'right' }).state;
     r.render(s);
     expect(pane('right').hasAttribute('data-pkc-focused')).toBe(true);
     expect(pane('left').hasAttribute('data-pkc-focused'), '焦点が 2 つある').toBe(false);
-    expect(move().textContent, '焦点を変えても向きが変わらない').toContain('左へ移す');
+    expect(foot('right'), '焦点を変えても「元」が移らない').toContain('(ここが元)');
+    expect(foot('left'), '前の焦点に「元」が残っている').not.toContain('(ここが元)');
+  });
+
+  /**
+   * 🔴 **操作行は最下段・全幅・固定の並び**(2026-08-19 の作り直し)。
+   *
+   * ⚠ ここは**位置と並びを等値で pin する** ── 古典 4 実装(Total Commander /
+   *   Double Commander / FAR / Krusader)が例外なくこの形で、しかも
+   *   **F5 写す / F6 移す / F7 作る / F8 消す** の割当まで一致している。
+   *   並びが動くと、user の手が覚えた位置が毎回外れる。
+   * ⚠ **左右ペインの後ろ**に在ることも見る ── 間に挟まる旧配置へ戻す変異は、
+   *   並びの assert だけでは殺せない(順番は同じまま場所だけ変わる)。
+   */
+  it('🔴 操作行は左右ペインの下にあり、キーと語の並びが固定である', () => {
+    const r = new DualFilerRenderer(region);
+    r.render(booted());
+    const cmds = region.querySelector('[data-pkc-region="dual-commands"]')!;
+    const body = region.querySelector('[data-pkc-region="dual-body"]')!;
+    expect(
+      body.compareDocumentPosition(cmds) & Node.DOCUMENT_POSITION_FOLLOWING,
+      '操作行がペインより前に在る(左右の間へ戻っている)',
+    ).toBeTruthy();
+    expect(
+      [...cmds.querySelectorAll('button')].map((b) => [
+        b.getAttribute('data-pkc-action'),
+        b.querySelector('[data-pkc-field="cmd-key"]')?.textContent,
+        b.querySelector('[data-pkc-field="cmd-label"]')?.textContent,
+      ]),
+    ).toEqual([
+      ['dual-copy', 'F5', '写す'],
+      ['dual-move', 'F6', '移す'],
+      ['dual-rename-begin', 'F2', '名前'],
+      ['dual-mkdir', 'F7', 'フォルダ'],
+      ['dual-delete', 'F8', 'ゴミ箱'],
+    ]);
   });
 
   it('🔴 タブの帯: 開いている 1 枚が分かり、最後の 1 枚には閉じる口を出さない', () => {
@@ -293,12 +338,122 @@ describe('2 ペインの面(描画)', () => {
     let s = reduce(booted(), { type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' }).state;
     r.render(s);
     const foot = () =>
-      region.querySelector('[data-pkc-side="left"][data-pkc-region="dual-pane"] [data-pkc-field="dual-count"]')!;
-    expect(foot().textContent).toBe('5 件(1 件を選んでいます)');
+      region.querySelector(
+        '[data-pkc-side="left"][data-pkc-region="dual-pane"] [data-pkc-field="dual-count"]',
+      )!;
+    /**
+     * ⚠ **「選択 / 全体」を対で出す**(2026-08-19 の作り直し)── 古典 4 実装は
+     *   例外なくこの形。直す前は「5 件(1 件を選んでいます)」で、選んでいない
+     *   ときだけ全体が出る非対称な形だった。
+     */
+    expect(foot().textContent).toBe('5 件中 1 件を選択(ここが元)');
     // 絞り込みで a が消える ── 印は state に残るが、画面には出ていない
     s = reduce(s, { type: 'SET_ENTRY_FILTER', query: 'はこ' }).state;
     r.render(s);
-    expect(foot().textContent, '画面に無い印を数えている').toBe('2 件');
+    expect(foot().textContent, '画面に無い印を数えている').toBe('2 件(ここが元)');
+  });
+
+  /**
+   * 🔴 **大きさの列**(2026-08-19 の作り直し。設計 doc §3 行 C/D/F)。
+   *
+   * ⚠ 「見比べて整理する」面なので、大きさは判断材料の一等地である ──
+   *   古典 4 実装とも名前の次に置いている。
+   * ⚠ **フォルダは `—`** ── 数を出すと「中に何文字入っているか」と読まれる。
+   */
+  it('🔴 列は 名前 / 大きさ / 更新 の 3 つで、フォルダの大きさは — になる', () => {
+    const r = new DualFilerRenderer(region);
+    const s: AppState = {
+      ...booted(),
+      entryMetas: new Map(
+        [...booted().entryMetas].map(([lid, m]) => [
+          lid,
+          { ...m, bodyChars: lid === 'a' ? 1234 : lid === 'b' ? 0 : m.bodyChars },
+        ]),
+      ),
+    };
+    r.render(s);
+    const pane = region.querySelector('[data-pkc-side="right"][data-pkc-region="dual-pane"]')!;
+    expect(
+      [...pane.querySelectorAll('thead th')].map((th) => th.textContent),
+      '列見出しが 3 つでない(または並びが違う)',
+    ).toEqual(['名前', '大きさ', '更新']);
+    const sizeOf = (lid: string): string =>
+      pane.querySelector(`[data-pkc-entry="${lid}"] [data-pkc-field="dual-size"]`)?.textContent ??
+      '';
+    expect(sizeOf('a'), '1000 を超えたら K で丸める').toBe('1.2K');
+    expect(sizeOf('b'), '空のノートが未計算に見えている').toBe('0');
+    expect(sizeOf('c'), '未計算(旧ビルドが書いた行)が 0 に見えている').toBe('—');
+    expect(sizeOf('f1'), 'フォルダに数が出ている(中身の量と読まれる)').toBe('—');
+  });
+
+  /**
+   * 🔴 **見出しを押すと並べ替わり、もう一度押すと向きが反転する**(古典 4 実装が一致)。
+   *
+   * ⚠ 観測点は **`▲▼` の字と実際の行順の両方**にする ── 片方だけだと
+   *   「矢印は変わるのに並びは同じ」型の欠陥が素通りする(見た目と実態の食い違いは
+   *   いちばん気づけない)。
+   */
+  it('🔴 列見出しを押すと並び、もう一度で反転する(矢印と行順の両方)', () => {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const d = new Dispatcher();
+    const regions = buildShell(root);
+    const r = new DualFilerRenderer(regions.center);
+    d.onState((s) => r.render(s));
+    bindActions(root, d);
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: METAS, relations: RELS });
+    d.dispatch({ type: 'SET_VIEW_MODE', mode: 'dual' });
+    const th = () =>
+      regions.center.querySelector<HTMLElement>(
+        '[data-pkc-side="right"][data-pkc-region="dual-pane"] th[data-pkc-sort="title"]',
+      )!;
+    const rows = (): string[] =>
+      [
+        ...regions.center.querySelectorAll(
+          '[data-pkc-side="right"][data-pkc-region="dual-pane"] [data-pkc-region="dual-table"] [data-pkc-entry]',
+        ),
+      ].map((e) => e.getAttribute('data-pkc-entry') ?? '');
+    expect(rows(), '前提: 既定は手動の順').toEqual(['f1', 'f2', 'a', 'b', 'c']);
+    th().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(d.getState().entrySort, '押しても並びが変わっていない').toBe('title');
+    expect(d.getState().entrySortDesc, '名前は昇順から見たい').toBe(false);
+    expect(th().textContent, '向きが字で出ていない').toBe('名前 ▲');
+    // あ(a) → い(b) → う(c) → えっくす(x は f1 の中) → はこ1 → はこ2
+    expect(rows(), '昇順で並んでいない').toEqual(['a', 'b', 'c', 'f1', 'f2']);
+    th().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(d.getState().entrySortDesc, '同じ列をもう一度押しても反転しない').toBe(true);
+    expect(th().textContent, '矢印が反転していない').toBe('名前 ▼');
+    expect(rows(), '矢印だけ変わって行が動いていない').toEqual(['f2', 'f1', 'c', 'b', 'a']);
+  });
+
+  /**
+   * 🔴 **別の列へ移ったら、その列の自然な向きから始める**(`NATURAL_DESC`)。
+   * ⚠ 向きを持ち越すと、名前を押した瞬間に「ん」から並ぶ。
+   */
+  it('🔴 別の列を押したら、向きはその列の自然な向きになる', () => {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const d = new Dispatcher();
+    const regions = buildShell(root);
+    const r = new DualFilerRenderer(regions.center);
+    d.onState((s) => r.render(s));
+    bindActions(root, d);
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: METAS, relations: RELS });
+    d.dispatch({ type: 'SET_VIEW_MODE', mode: 'dual' });
+    const th = (sort: string) =>
+      regions.center.querySelector<HTMLElement>(
+        `[data-pkc-side="right"][data-pkc-region="dual-pane"] th[data-pkc-sort="${sort}"]`,
+      )!;
+    const click = (el: HTMLElement) =>
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    click(th('title'));
+    click(th('title'));
+    expect(d.getState().entrySortDesc, '前提が崩れている').toBe(true);
+    click(th('updated'));
+    expect(d.getState().entrySort).toBe('updated');
+    expect(d.getState().entrySortDesc, '更新は新しい順から見たい').toBe(true);
+    click(th('title'));
+    expect(d.getState().entrySortDesc, '前の列の向きを持ち越している').toBe(false);
   });
 
   it('印は属性の付け替えで塗る(表を組み直さない)', () => {
@@ -404,6 +559,11 @@ describe('2 ペインの面(描画)', () => {
       ['entryMetas', (x) => ({ ...x, entryMetas: new Map(x.entryMetas) })],
       ['filterQuery', (x) => ({ ...x, filterQuery: 'あ' })],
       ['entrySort', (x) => ({ ...x, entrySort: 'title' })],
+      /**
+       * ⚠ **向きも門の材料**(2026-08-19、足したその日に踏んだ)── 入れないと
+       *   `▲` を押しても**この面が 1 度も描き直さない**(state だけ反転する)。
+       */
+      ['entrySortDesc', (x) => ({ ...x, entrySortDesc: !x.entrySortDesc })],
       ['searchHits', (x) => ({ ...x, searchHits: new Set(['a']) })],
       /**
        * ⚠ `relations` は**中身が同じ新しい配列**にする(参照だけが変わる ──
@@ -430,27 +590,42 @@ describe('2 ペインの面(描画)', () => {
   });
 
   /**
-   * 🔴 **向きと呼び名は等値で pin する**(2026-08-19、リリース前監査)。
-   * ⚠ 部分一致(`toContain('右へ移す')`)だと、**矢印を逆にする変異**も
-   *   **左右の呼び名を入れ替える変異**も素通りする ── どちらも user は
-   *   「元がどちら側か」を字で読んで判断するので、逆へ動かすことになる。
+   * 🔴 **向きは操作行ではなく、説明と情報行が言う**(2026-08-19 の作り直し)。
+   *
+   * ⚠ 直す前は文言そのものが「→ 右へ移す」/「← 左へ移す」と入れ替わっていた ──
+   *   ボタンの幅まで変わるので、焦点を変えるたびに操作行の端がずれた。
+   * ⚠ それでも**呼び名の入れ替え**(左右を取り違える変異)は殺さねばならない ──
+   *   user は「元がどちら側か」を字で読んで押す。🔑 いまは `title` が受ける。
    */
-  it('🔴 向きの字・矢印・呼び名が、焦点に合わせて反転する', () => {
+  it('🔴 操作の字は動かず、向きは説明が言う(左右の呼び名は反転する)', () => {
     const r = new DualFilerRenderer(region);
     let s = booted();
     r.render(s);
     const move = () => region.querySelector<HTMLElement>('[data-pkc-field="dual-move"]')!;
-    const hint = () => region.querySelector('[data-pkc-field="dual-hint"]')?.textContent;
-    expect(move().textContent, '矢印か語が違う').toBe('→ 右へ移す');
-    expect(hint(), '元がどちら側か字で出ていない').toBe('元は左のペインです');
+    const trash = () => region.querySelector<HTMLElement>('[data-pkc-field="dual-delete"]')!;
+    expect(move().textContent, 'キーと語が違う').toBe('F6移す');
+    expect(move().title, '選ぶ前の断りが向きの説明になっている').toBe(
+      '移すものを選んでから押してください',
+    );
+    /**
+     * ⚠ **断りは呼び名から機械的に組まない**(2026-08-19 に踏んだ)。
+     *   `${label}ものを…` と書くと、ゴミ箱だけ
+     *   「**ゴミ箱ものを選んでから押してください**」になる。
+     */
+    expect(trash().title, '入れ物の名と動作の名が混ざっている').toBe(
+      'ゴミ箱へ入れるものを選んでから押してください',
+    );
     s = reduce(s, { type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' }).state;
     r.render(s);
-    expect(move().title).toBe('左で選んだ 1 件を、反対側の場所へ入れます');
+    expect(move().title).toBe('左で選んだものを、右のペインへ移します(いま 1 件)');
 
     s = reduce(s, { type: 'DUAL_FOCUS', side: 'right' }).state;
+    s = reduce(s, { type: 'DUAL_SELECT', side: 'right', lid: 'a', mode: 'set' }).state;
     r.render(s);
-    expect(move().textContent, '焦点を変えても向きが反転しない').toBe('← 左へ移す');
-    expect(hint(), '焦点を変えても元の呼び名が変わらない').toBe('元は右のペインです');
+    expect(move().textContent, '焦点を変えたら操作の字が動いた').toBe('F6移す');
+    expect(move().title, '焦点を変えても呼び名が反転しない').toBe(
+      '右で選んだものを、左のペインへ移します(いま 1 件)',
+    );
     // ⚠ ペインの読み上げ名も同じ表から引く(呼び名の入れ替えを 1 か所で殺す)
     expect(
       region

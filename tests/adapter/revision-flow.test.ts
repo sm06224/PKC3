@@ -29,6 +29,7 @@ function meta(lid: string, over: Partial<EntryMeta> = {}): EntryMeta {
     status: null,
     date: null,
     archived: false,
+    bodyChars: null,
     ...over,
   };
 }
@@ -347,6 +348,7 @@ describe('🔴 ゴミ箱一覧の後着(P8 段⑪ hotfix)', () => {
       status: null,
       date: null,
       archived: false,
+      bodyChars: null,
     };
     const base: AppState = {
       ...initialState,

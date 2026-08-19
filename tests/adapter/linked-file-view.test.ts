@@ -24,6 +24,7 @@ const meta = (lid: string, order: number): EntryMeta => ({
   status: null,
   date: null,
   archived: false,
+  bodyChars: null,
 });
 
 const booted = (cid: string, lids: string[]): Parameters<typeof reduce>[1] => ({

@@ -105,6 +105,7 @@ function meta(lid: string, over: Partial<EntryMeta> = {}): EntryMeta {
     status: null,
     date: null,
     archived: false,
+    bodyChars: null,
     ...over,
   };
 }

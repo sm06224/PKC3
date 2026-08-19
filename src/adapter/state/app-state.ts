@@ -8,7 +8,7 @@
  *   selectedLid が選択の単一情報源
  */
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
-import { DEFAULT_ENTRY_SORT, type EntrySort } from '@features/filter/entry-sort';
+import { DEFAULT_ENTRY_SORT, NATURAL_DESC, type EntrySort } from '@features/filter/entry-sort';
 import { resolveCanonicalParents, reorderSibling } from '@features/relation/tree';
 import { extractMeta, seedBodyFor } from '@features/flavor';
 import { applyBodyRewrite, type BodyRewrite } from '@features/markdown/body-rewrite';
@@ -295,6 +295,13 @@ export interface AppState {
    */
   entrySort: EntrySort;
   /**
+   * 🔴 **並びの向き**(2026-08-19、2 ペインの列見出しを押せるようにした)。
+   * ⚠ **`entrySort` に埋め込まない** ── 「更新は降順」のような決め打ちを
+   *   `sortOrder` の中に置いていたので、user が反転できなかった。
+   * 🔑 既定は並びごとの自然な向き(`NATURAL_DESC`)。
+   */
+  entrySortDesc: boolean;
+  /**
    * `searchHits` が**どの問い合わせの結果か**。⚠ これが無いと、遅れて返った
    * 古い結果を新しい問い合わせの答えとして表示してしまう(打鍵は結果より速い)。
    */
@@ -416,6 +423,7 @@ export const initialState: AppState = {
   searchHits: null,
   selectionHistory: EMPTY_HISTORY,
   entrySort: DEFAULT_ENTRY_SORT,
+  entrySortDesc: NATURAL_DESC[DEFAULT_ENTRY_SORT],
   searchHitsQuery: '',
   queryKey: null,
   queryKeys: null,
@@ -442,7 +450,12 @@ export type UserAction =
   /** 本文の当たりが SQL から返った(#181)。⚠ `query` は**どの問い合わせの答えか**。 */
   | { type: 'SET_SEARCH_HITS'; query: string; lids: string[] }
   /** 一覧の並び順を変える(#183)。⚠ 選択は消さない(絞り込みと同じ規約)。 */
-  | { type: 'SET_ENTRY_SORT'; sort: EntrySort }
+  | {
+      type: 'SET_ENTRY_SORT';
+      sort: EntrySort;
+      /** 省略 = その並びの自然な向き(`NATURAL_DESC`)。 */
+      desc?: boolean;
+    }
   /**
    * 集計の束ね方を選ぶ(#184)。`null` = まだ選んでいない。
    * ⚠ 選び直しは**必ず問い合わせ直す** ── 前の key の表を残すと、
@@ -1186,10 +1199,13 @@ function reduceCore(
         state: { ...state, filterQuery: action.query, searchHits: null, searchHitsQuery: '' },
         events: [{ type: 'REQUEST_SEARCH', query: action.query }],
       };
-    case 'SET_ENTRY_SORT':
+    case 'SET_ENTRY_SORT': {
       // ⚠ 選択は消さない ── 並び替えただけで開いているノートが変わると驚く
-      if (state.entrySort === action.sort) return { state, events: [] };
-      return { state: { ...state, entrySort: action.sort }, events: [] };
+      const desc = action.desc ?? NATURAL_DESC[action.sort];
+      if (state.entrySort === action.sort && state.entrySortDesc === desc)
+        return { state, events: [] };
+      return { state: { ...state, entrySort: action.sort, entrySortDesc: desc }, events: [] };
+    }
     case 'SET_QUERY_KEY': {
       if (state.queryKey === action.key) return { state, events: [] };
       /**
@@ -1918,6 +1934,7 @@ function reduceCore(
         filterQuery: state.filterQuery,
         searchHits: state.searchHits,
         sort: state.entrySort,
+        sortDesc: state.entrySortDesc,
       });
       const range = rangeInRows(rows, state.selectionAnchor, action.lid);
       if (range.length === 0) return { state, events: [] };
@@ -1931,6 +1948,7 @@ function reduceCore(
         filterQuery: state.filterQuery,
         searchHits: state.searchHits,
         sort: state.entrySort,
+        sortDesc: state.entrySortDesc,
       }).map((m) => m.lid);
       if (rows.length === 0) return { state, events: [] };
       return {
@@ -2000,6 +2018,8 @@ function reduceCore(
         status: ext.status,
         date: ext.date,
         archived: ext.archived,
+        // ⚠ worker が同じ本文から数え直す値と**同じ式**で置く(§7)
+        bodyChars: body.length,
       };
       /**
        * 🔴 **いま見ているフォルダの中に作る**(2026-08-05)。
@@ -2427,6 +2447,7 @@ function reduceCore(
         filterQuery: state.filterQuery,
         searchHits: state.searchHits,
         sort: state.entrySort,
+        sortDesc: state.entrySortDesc,
       });
       let next: DualPaneState;
       if (action.mode === 'range') {

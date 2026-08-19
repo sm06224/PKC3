@@ -38,6 +38,8 @@ export class SidebarRenderer {
   /** ⚠ 絞り込みも**指紋の一部** ── 入れないと、絞っても行が減らない。 */
   private lastHits: ReadonlySet<string> | null = null;
   private lastSort = 'manual';
+  /** ⚠ 向きも指紋(入れないと ▲▼ を反転しても並びが変わらない)。 */
+  private lastSortDesc = false;
   private lastFilter: string | null = null;
 
   /** 絞り込み欄。⚠ **state が正** ── 欄の値は state に合わせて書き戻す。 */
@@ -76,7 +78,8 @@ export class SidebarRenderer {
       //    (絞り込みを指紋に入れ忘れた 2026-08 の再演。今回は test が捕まえた)
       state.searchHits !== this.lastHits ||
       // ⚠ 並び順も指紋(入れないと選んでも並びが変わらない ── #181 で踏んだのと同型)
-      state.entrySort !== this.lastSort;
+      state.entrySort !== this.lastSort ||
+      state.entrySortDesc !== this.lastSortDesc;
     const selectionChanged = state.selectedLid !== this.lastSelected;
     /**
      * ⚠ **履歴も指紋の一部**(#190)。選択と連動して動くことが多いが、
@@ -103,6 +106,7 @@ export class SidebarRenderer {
     this.lastMetas = state.entryMetas;
     this.lastHits = state.searchHits;
     this.lastSort = state.entrySort;
+    this.lastSortDesc = state.entrySortDesc;
     this.lastOrder = state.order;
     this.lastFilter = state.filterQuery;
     this.lastSelected = state.selectedLid;
@@ -128,7 +132,7 @@ export class SidebarRenderer {
     // 一覧に**存在する** lid(絞り込み前)── 行キャッシュの掃除はこちらで判定する
     const alive = new Set<string>();
     // 🔴 並び順(#183)── 規則は `sortOrder` 1 か所。既定は手動の順
-    for (const lid of sortOrder(state.order, (l) => state.entryMetas.get(l), state.entrySort)) {
+    for (const lid of sortOrder(state.order, (l) => state.entryMetas.get(l), state.entrySort, state.entrySortDesc)) {
       const meta = state.entryMetas.get(lid);
       if (!meta) continue;
       alive.add(lid);

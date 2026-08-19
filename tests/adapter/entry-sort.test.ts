@@ -11,7 +11,13 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
-import { sortOrder, isEntrySort, DEFAULT_ENTRY_SORT } from '../../src/features/filter/entry-sort';
+import {
+  sortOrder,
+  isEntrySort,
+  DEFAULT_ENTRY_SORT,
+  NATURAL_DESC,
+  ENTRY_SORTS,
+} from '../../src/features/filter/entry-sort';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { SidebarRenderer } from '../../src/adapter/ui/render/sidebar';
@@ -29,6 +35,7 @@ function meta(lid: string, over: Partial<EntryMeta> = {}): EntryMeta {
     status: null,
     date: null,
     archived: false,
+    bodyChars: null,
     ...over,
   };
 }
@@ -42,18 +49,18 @@ describe('並び順の規則', () => {
   it('既定は手動の順(渡された order をそのまま)', () => {
     expect(DEFAULT_ENTRY_SORT).toBe('manual');
     const list = [meta('c'), meta('a'), meta('b')];
-    expect(sortOrder(['c', 'a', 'b'], metasOf(list), 'manual')).toEqual(['c', 'a', 'b']);
+    expect(sortOrder(['c', 'a', 'b'], metasOf(list), 'manual', NATURAL_DESC['manual'])).toEqual(['c', 'a', 'b']);
   });
 
   it('元の配列を壊さない(state の参照は指紋でもある)', () => {
     const order = ['b', 'a'];
-    sortOrder(order, metasOf([meta('a'), meta('b')]), 'title');
+    sortOrder(order, metasOf([meta('a'), meta('b')]), 'title', false);
     expect(order, '呼び側の配列がその場で書き換わった').toEqual(['b', 'a']);
   });
 
   it('題名順は昇順', () => {
     const list = [meta('x', { title: 'んご' }), meta('y', { title: 'あい' })];
-    expect(sortOrder(['x', 'y'], metasOf(list), 'title')).toEqual(['y', 'x']);
+    expect(sortOrder(['x', 'y'], metasOf(list), 'title', NATURAL_DESC['title'])).toEqual(['y', 'x']);
   });
 
   it('🔴 更新順は**新しい順**(古い順にしない)', () => {
@@ -61,30 +68,96 @@ describe('並び順の規則', () => {
       meta('old', { updatedAt: '2026-01-01T00:00:00Z' }),
       meta('new', { updatedAt: '2026-08-15T00:00:00Z' }),
     ];
-    expect(sortOrder(['old', 'new'], metasOf(list), 'updated')).toEqual(['new', 'old']);
+    expect(sortOrder(['old', 'new'], metasOf(list), 'updated', NATURAL_DESC['updated'])).toEqual(['new', 'old']);
   });
 
   it('種類順は archetype の昇順', () => {
     const list = [meta('t', { archetype: 'todo' }), meta('a', { archetype: 'attachment' })];
-    expect(sortOrder(['t', 'a'], metasOf(list), 'archetype')).toEqual(['a', 't']);
+    expect(sortOrder(['t', 'a'], metasOf(list), 'archetype', NATURAL_DESC['archetype'])).toEqual(['a', 't']);
   });
 
   it('🔴 同点は lid で割る(並びが実行ごとに変わらない)', () => {
     const list = [meta('b', { title: '同じ' }), meta('a', { title: '同じ' })];
-    const once = sortOrder(['b', 'a'], metasOf(list), 'title');
-    const twice = sortOrder(['a', 'b'], metasOf(list), 'title');
+    const once = sortOrder(['b', 'a'], metasOf(list), 'title', NATURAL_DESC['title']);
+    const twice = sortOrder(['a', 'b'], metasOf(list), 'title', NATURAL_DESC['title']);
     expect(once).toEqual(['a', 'b']);
     expect(twice, '入力の順で結果が変わる = 不安定').toEqual(once);
   });
 
   it('未知の lid は落とさず末尾へ(黙って消えるほうが害が大きい)', () => {
     const list = [meta('a', { title: 'あ' })];
-    expect(sortOrder(['ghost', 'a'], metasOf(list), 'title')).toEqual(['a', 'ghost']);
+    expect(sortOrder(['ghost', 'a'], metasOf(list), 'title', NATURAL_DESC['title'])).toEqual(['a', 'ghost']);
   });
 
-  it('isEntrySort は 4 つだけ通す', () => {
-    expect(['manual', 'updated', 'title', 'archetype'].every(isEntrySort)).toBe(true);
+  it('isEntrySort は登録した並びだけを通す', () => {
+    // ⚠ **一覧から引く**(数を直書きすると、足した日にこの test だけ古くなる)
+    expect(ENTRY_SORTS.every(isEntrySort)).toBe(true);
     expect(isEntrySort('relevance')).toBe(false);
+  });
+
+  /**
+   * 🔴 **向きは外から決まる**(2026-08-19、2 ペインの列見出し)。
+   *
+   * ⚠ 直す前は `sortOrder` の中に `const desc = sort === 'updated'` と**埋まって**
+   *   いたので、user が反転できなかった ── 列見出しを押しても向きが変わらない。
+   * ⚠ ここは**同じ入力で向きだけを変えて**見る(片方向しか回さないと、
+   *   `desc` を無視する実装が素通りする ── CLAUDE.md §2)。
+   */
+  it('🔴 同じ並びでも、向きを渡すと結果が反転する', () => {
+    const list = [meta('x', { title: 'んご' }), meta('y', { title: 'あい' })];
+    expect(sortOrder(['x', 'y'], metasOf(list), 'title', false)).toEqual(['y', 'x']);
+    expect(sortOrder(['x', 'y'], metasOf(list), 'title', true), 'desc が効いていない').toEqual([
+      'x',
+      'y',
+    ]);
+  });
+
+  /**
+   * 🔴 **自然な向きは並びごとに違う** ── 更新と大きさは「多い側から」、
+   * 名前と種類は「頭から」。⚠ 全部同じにすると、更新を選んだ瞬間に
+   * **いちばん古いノート**が上に来る(直す前の挙動を保つ)。
+   */
+  it('🔴 自然な向き: 更新と大きさは降順、名前と種類は昇順', () => {
+    expect(NATURAL_DESC.updated).toBe(true);
+    expect(NATURAL_DESC.size).toBe(true);
+    expect(NATURAL_DESC.title).toBe(false);
+    expect(NATURAL_DESC.archetype).toBe(false);
+    expect(NATURAL_DESC.manual).toBe(false);
+  });
+
+  /**
+   * 🔴 **大きさ順は「数」で比べる**(2026-08-19)。
+   * ⚠ 文字として比べると `9 > 100` になる ── 桁が混ざった瞬間に嘘の並びになり、
+   *   しかも**小さい容れ物では気づけない**(1 桁しか無ければ正しく見える)。
+   */
+  it('🔴 大きさ順は数として比べる(文字の辞書順にしない)', () => {
+    const list = [
+      meta('small', { bodyChars: 9 }),
+      meta('big', { bodyChars: 100 }),
+      meta('mid', { bodyChars: 50 }),
+    ];
+    expect(sortOrder(['small', 'big', 'mid'], metasOf(list), 'size', true)).toEqual([
+      'big',
+      'mid',
+      'small',
+    ]);
+    expect(sortOrder(['small', 'big', 'mid'], metasOf(list), 'size', false)).toEqual([
+      'small',
+      'mid',
+      'big',
+    ]);
+  });
+
+  /**
+   * ⚠ **未計算(`null`)と空(`0`)を潰さない** ── どちらもいちばん小さい側だが、
+   *   `null` は「まだ数えていない」ので `0` より更に下に置く(埋まったら動く)。
+   */
+  it('未計算の大きさは、いちばん小さい扱い(落とさない)', () => {
+    const list = [meta('unknown', { bodyChars: null }), meta('empty', { bodyChars: 0 })];
+    expect(sortOrder(['unknown', 'empty'], metasOf(list), 'size', false)).toEqual([
+      'unknown',
+      'empty',
+    ]);
   });
 });
 

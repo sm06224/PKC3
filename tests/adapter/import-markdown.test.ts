@@ -78,6 +78,7 @@ function harness(opts: { failWrite?: boolean; orderBase?: number } = {}) {
           status: e.status,
           date: e.date,
           archived: e.archived,
+          bodyChars: null,
           createdAt: '2026-08-02T00:00:00Z',
           updatedAt: '2026-08-02T00:00:00Z',
         })),

@@ -34,6 +34,7 @@ export function metaFromRow(row: EntryMetaRow): EntryMeta {
     status: row.status,
     date: row.date,
     archived: row.archived !== 0,
+    bodyChars: row.body_chars,
   };
 }
 

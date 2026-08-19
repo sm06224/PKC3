@@ -21,6 +21,12 @@ export interface FilerListOptions {
   /** 本文が当たった lid(`null` = まだ返っていない)。 */
   readonly searchHits: ReadonlySet<string> | null;
   readonly sort: EntrySort;
+  /**
+   * 降順か。⚠ **省略可にしない** ── 範囲選択(`Shift`)は「表示している並び」で
+   * 採るので、渡し忘れた経路だけ**逆順で範囲を採る**ことになる(目で見た範囲と
+   * 選ばれる範囲が食い違う、いちばん気づけない形)。
+   */
+  readonly sortDesc: boolean;
 }
 
 /**
@@ -45,6 +51,7 @@ export function filerRows(
     shown.map((m) => m.lid),
     (lid) => byLid.get(lid),
     opts.sort,
+    opts.sortDesc,
   )
     .map((lid) => byLid.get(lid))
     .filter((m): m is EntryMeta => m !== undefined);

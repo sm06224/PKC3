@@ -73,6 +73,7 @@ function meta(lid: string): EntryMeta {
     status: null,
     date: null,
     archived: false,
+    bodyChars: null,
   };
 }
 

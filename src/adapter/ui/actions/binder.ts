@@ -25,7 +25,7 @@ import { convertPastedHtml } from '@features/markdown/html-to-markdown';
 import { resolveMime } from './attach';
 import { applyFormat, type FormatOp } from '@features/markdown/text-ops';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
-import { isEntrySort } from '@features/filter/entry-sort';
+import { isEntrySort, NATURAL_DESC } from '@features/filter/entry-sort';
 import { isPaneId, PANES } from '@features/pane-visibility';
 import { STRUCTURAL, isRelationKind } from '@features/relation/kinds';
 import { getAncestorFolders } from '@features/relation/tree';
@@ -73,6 +73,7 @@ const visibleFilerRows = (st: AppState): EntryMeta[] =>
     filterQuery: st.filterQuery,
     searchHits: st.searchHits,
     sort: st.entrySort,
+    sortDesc: st.entrySortDesc,
   });
 
 /** その entry が**既にそこに居る**か(動かす必要が無い)。 */
@@ -1047,6 +1048,28 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     dispatcher.dispatch({ type: 'DUAL_RENAME_BEGIN', side, lid: marked[0]! });
   },
+  /**
+   * 🔴 **列見出しを押すと並べ替える**(2026-08-19 の作り直し)。
+   *
+   * ⚠ 並びは**左の列と同じ 1 本**(`state.entrySort`)── 面ごとに別の並びを
+   *   持たせない(§7)。だから左の探す帯の `<select>` と必ず一致する。
+   * 🔑 **同じ列をもう一度押したら向きが反転する**(古典 4 実装が一致)。
+   *   ⚠ 「もう一度で手動の順へ戻す」にしない ── そちらは**上の帯・タイルの規則**で、
+   *   一覧の見出しでは「反転」が世界共通である(手動の順へは左の `<select>` で戻る)。
+   * 🔑 **別の列に移ったときは、その列の自然な向き**(`NATURAL_DESC`)── 更新と
+   *   大きさは降順から、名前は昇順から見たい。向きを持ち越すと、名前を押した瞬間に
+   *   「ん」から並ぶ。
+   */
+  'dual-sort': (dispatcher, target) => {
+    const want = target.closest('[data-pkc-sort]')?.getAttribute('data-pkc-sort');
+    if (want === null || want === undefined || !isEntrySort(want)) return;
+    const st = dispatcher.getState();
+    dispatcher.dispatch({
+      type: 'SET_ENTRY_SORT',
+      sort: want,
+      desc: st.entrySort === want ? !st.entrySortDesc : NATURAL_DESC[want],
+    });
+  },
   'dual-mkdir': (dispatcher, target) => {
     const side = dualSide(target) ?? dispatcher.getState().dual.focus;
     const st = dispatcher.getState();
@@ -1085,6 +1108,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       filterQuery: st.filterQuery,
       searchHits: st.searchHits,
       sort: st.entrySort,
+      sortDesc: st.entrySortDesc,
     });
     // ⚠ 数える相手は**いま表に出ている印**だけ(移す・消すと同じ規則)
     const lids = visibleSelection(rows, paneOf(st.dual, side).selection);
@@ -1147,6 +1171,7 @@ const ACTIONS: Record<string, ActionHandler> = {
         filterQuery: st.filterQuery,
         searchHits: st.searchHits,
         sort: st.entrySort,
+        sortDesc: st.entrySortDesc,
       }),
       paneOf(st.dual, side).selection,
     );
@@ -1168,6 +1193,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       filterQuery: st.filterQuery,
       searchHits: st.searchHits,
       sort: st.entrySort,
+      sortDesc: st.entrySortDesc,
     });
     const lids = visibleSelection(rows, pane.selection);
     if (lids.length === 0) {
@@ -2480,6 +2506,7 @@ export function bindActions(
               filterQuery: st.filterQuery,
               searchHits: st.searchHits,
               sort: st.entrySort,
+              sortDesc: st.entrySortDesc,
             }),
             paneOf(st.dual, side).selection,
           );
@@ -2872,6 +2899,7 @@ export function bindActions(
       filterQuery: st.filterQuery,
       searchHits: st.searchHits,
       sort: st.entrySort,
+      sortDesc: st.entrySortDesc,
     });
 
   const dualRowEl = (side: DualSide, lid: string): HTMLElement | null =>

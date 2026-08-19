@@ -126,6 +126,7 @@ describe('削除と書出しの排他', () => {
           status: null,
           date: null,
           archived: false,
+          bodyChars: null,
         },
       ],
       relations: [],
