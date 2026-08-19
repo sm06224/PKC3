@@ -636,6 +636,21 @@ function writeParent(
   });
 }
 
+/**
+ * 🔴 **この端末だけの id を採番する**(#260)。
+ *
+ * ⚠ 綴りの制約は 2 つあり、どちらも**別の file が持っている**:
+ * ① `pkc://<cid>/entry/<lid>` の token 規則 `[A-Za-z0-9_-]+`
+ *    (`features/link/permalink.ts` の `TOKEN_RE`)
+ * ② `':'` を含めない(`asset-blob-store.ts` の `assertCid` ── key 空間が混ざる)
+ * 16 進 32 桁 + `c-` の前置きは、その両方に収まる**最も狭い形**である。
+ */
+function mintContainerId(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return `c-${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`;
+}
+
 const handlers: Handlers = {
   init: (req) => init(req.dbName, req.journalMode),
   openContainer: (req) => {
@@ -646,6 +661,34 @@ const handlers: Handlers = {
       bind: [req.cid, req.title ?? '', DB_SCHEMA_VERSION],
     });
     return null;
+  },
+  /**
+   * 🔴 **選ぶのと作るのを 1 op に閉じる**(#260)。
+   *
+   * ⚠ 「読んで、無ければ書く」を呼び側で 2 回に分けてはいけない ──
+   *   初回起動の 2 枚のタブが**別々の cid を挿して器が 2 つに割れる**。
+   *   worker は単一 queue なので、**この関数の中は割り込まれない**。
+   * ⚠ 既に在るものは**そのまま返す**(既存 DB の `'default'` を含む)──
+   *   cid は全テーブルの区画鍵なので、採番し直すと既存データが消えて見える。
+   * ⚠ 並びは `created_at` **と `cid`** で採る ── `created_at` は秒精度なので、
+   *   同秒に 2 件在ると順序が決まらず、起動のたびに違う器を開きうる。
+   */
+  resolveContainer: (req) => {
+    const database = need();
+    const rows = database.selectObjects(
+      'SELECT cid FROM containers ORDER BY created_at, cid LIMIT 1',
+    );
+    const existing = rows[0]?.cid;
+    if (typeof existing === 'string' && existing !== '') {
+      return { cid: existing, created: false };
+    }
+    const cid = mintContainerId();
+    database.exec({
+      sql: `INSERT INTO containers (cid, title, created_at, updated_at, schema_version)
+            VALUES (?, ?, datetime('now'), datetime('now'), ?)`,
+      bind: [cid, req.title ?? '', DB_SCHEMA_VERSION],
+    });
+    return { cid, created: true };
   },
   listEntryMetas: (req) =>
     // body 列を読まない ── boot / 一覧は O(メタ)(設計 doc §4.1)

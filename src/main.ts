@@ -124,7 +124,6 @@ import { CHART_KIND } from '@adapter/ui/render/chart-raster';
 import { askConfirm, SUPPRESSED_MESSAGE } from '@adapter/platform/ask-confirm';
 
 const DB_NAME = 'pkc3';
-const DEFAULT_CID = 'default';
 /** container の題名(書出しのファイル名にも使う ── 1 箇所で決める)。 */
 const CONTAINER_TITLE = 'PKC3';
 
@@ -270,14 +269,39 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       }
     }
   }
-  await client.request({ op: 'openContainer', cid: DEFAULT_CID, title: CONTAINER_TITLE });
+  /**
+   * 🔴 **この端末のコンテナ id は、DB に聞いて決める**(#260)。
+   *
+   * 直す前はここに `'default'` という**全インストール共通の定数**が在った。
+   * `pkc://<cid>/entry/<lid>` の「自分のコンテナか」は**文字列の等値**なので
+   * (`features/link/permalink.ts`)、**他人の PKC3 が書いた参照**が
+   * 「自分のもの」と判定され、押しても居ない lid を指すリンクになっていた。
+   *
+   * ⚠ **既存の DB は `'default'` のまま返る** ── cid は全テーブルの区画鍵
+   *   (`WHERE cid = ?`)なので、採番し直すと既存データがまるごと見えなくなる。
+   * ⚠ 「読んで、無ければ作る」を**ここで 2 回に分けない** ── 初回起動に
+   *   タブが 2 枚在ると、別々の cid を挿して器が 2 つに割れる(worker 側の
+   *   `resolveContainer` が 1 op で閉じている)。
+   */
+  const cid = (await client.request({ op: 'resolveContainer', title: CONTAINER_TITLE })).cid;
+  /**
+   * 🔴 **採番した id を器に出す**(#260)。user 向けの表示ではなく、
+   * `data-pkc-boot="ready"` と同じ**検査のための契約**である。
+   *
+   * ⚠ 出さないと、実機で「boot の cid が描画まで届いているか」を確かめる術が
+   *   無くなる ── cid が端末ごとに違う値になったので、smoke が自分で
+   *   `pkc://<自分>/entry/<lid>` を組み立てられない(#100 段① の smoke は
+   *   `'default'` が定数だったからこそ書けていた)。渡し忘れる変異は
+   *   「全部よそ扱い」に落ちて**静かに通ってしまう**。
+   */
+  root.setAttribute('data-pkc-container', cid);
   // boot と再読込は**同じ経路**で state を作る(取込後に別の作り方をしない ──
   // 分岐が増えると「取込直後だけ壊れる」型の差分が入る)
   const loadSnapshot = async () => ({
-    metas: (await client.request({ op: 'listEntryMetas', cid: DEFAULT_CID })).map(
+    metas: (await client.request({ op: 'listEntryMetas', cid })).map(
       metaFromRow,
     ),
-    relations: (await client.request({ op: 'listRelations', cid: DEFAULT_CID })).map(
+    relations: (await client.request({ op: 'listRelations', cid })).map(
       relationFromRow,
     ),
   });
@@ -370,7 +394,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     officeWindow,
     isPackInstalled: () => appOfficePack.isInstalled(),
     readAsset: async (assetKey) => {
-      const blob = await blobs.get(DEFAULT_CID, assetKey);
+      const blob = await blobs.get(cid, assetKey);
       return blob ? new Uint8Array(await blob.arrayBuffer()) : null;
     },
   });
@@ -384,8 +408,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     regions.detail,
     undefined,
     {
-      lend: (key) => blobs.lendObjectUrl(DEFAULT_CID, key),
-      getBlob: (key) => blobs.get(DEFAULT_CID, key),
+      lend: (key) => blobs.lendObjectUrl(cid, key),
+      getBlob: (key) => blobs.get(cid, key),
     },
     markdown,
     /**
@@ -542,12 +566,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     syncReloadQueued = true;
     setTimeout(() => {
       syncReloadQueued = false;
-      void reloadSnapshot(dispatcher, DEFAULT_CID, loadSnapshot, { deferNotice: null });
+      void reloadSnapshot(dispatcher, cid, loadSnapshot, { deferNotice: null });
     }, 300);
   };
   let unbindChanged = sync.onChanged(onRemoteChanged);
   // 解放は遷移 1 か所で束ねる(実体と test は edit-lock-release.ts)
-  bindEditLockRelease(dispatcher, () => sync, DEFAULT_CID);
+  bindEditLockRelease(dispatcher, () => sync, cid);
   if (followerConn) {
     const conn = followerConn;
     conn.onEditRevoked((_cid, lid) => {
@@ -637,31 +661,31 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     withAssetGate(async () => {
       const deps: ExportDeps = {
         source: {
-          cid: DEFAULT_CID,
+          cid,
           // ⚠ `openContainer` で刻んだ題名と**同じ文字列**を使う(別定数だと
           // ファイル名と DB の題名が食い違う ── review L-2)
           title: CONTAINER_TITLE,
           listEntryMetas: () =>
-            client.request({ op: 'listEntryMetas', cid: DEFAULT_CID }),
+            client.request({ op: 'listEntryMetas', cid }),
           // ⚠ 1 件だけの読み口(P6f)── 無いと 1 ノート書出しが全 body を舐める
           getBody: async (lid) =>
-            (await client.request({ op: 'getBody', cid: DEFAULT_CID, lid })) ?? null,
+            (await client.request({ op: 'getBody', cid, lid })) ?? null,
           listBodies: (after, maxBytes) =>
             client.request({
               op: 'listBodies',
-              cid: DEFAULT_CID,
+              cid,
               maxBytes,
               ...(after ? { after } : {}),
             }),
-          listRelations: () => client.request({ op: 'listRelations', cid: DEFAULT_CID }),
-          listAssetMetas: () => client.request({ op: 'listAssetMetas', cid: DEFAULT_CID }),
-          getAssetBlob: (key) => blobs.get(DEFAULT_CID, key),
+          listRelations: () => client.request({ op: 'listRelations', cid }),
+          listAssetMetas: () => client.request({ op: 'listAssetMetas', cid }),
+          getAssetBlob: (key) => blobs.get(cid, key),
           listRevisionLids: () =>
-            client.request({ op: 'listRevisionLids', cid: DEFAULT_CID }),
+            client.request({ op: 'listRevisionLids', cid }),
           // ⚠ 鎖は**保存形のまま**取る(P6e)── `getRevision` で版ごとに
           // 全文へ復元すると、アーカイブが N×M に膨らみ kind が中身と食い違う
           getRevisionChain: (entryLid) =>
-            client.request({ op: 'exportRevisionChain', cid: DEFAULT_CID, entryLid }),
+            client.request({ op: 'exportRevisionChain', cid, entryLid }),
         },
         download: downloadBlob,
         notify: (message) => showStatus(message),
@@ -748,15 +772,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * `hashBlob` を渡し忘れて**メインでハッシュが回る**(実測 500/726ms)。
    */
   const attachDeps: AttachDeps = {
-    putBlob: (key, blob) => blobs.put(DEFAULT_CID, key, blob),
+    putBlob: (key, blob) => blobs.put(cid, key, blob),
     putMeta: async (m) => {
       await client.request({
         op: 'putAssetMeta',
-        cid: DEFAULT_CID,
+        cid,
         meta: { key: m.key, mime: m.mime, size: m.size, hash: m.hash },
       });
     },
-    listMetas: () => client.request({ op: 'listAssetMetas', cid: DEFAULT_CID }),
+    listMetas: () => client.request({ op: 'listAssetMetas', cid }),
     estimate: navigator.storage?.estimate ? () => navigator.storage.estimate() : undefined,
     // 🔴 ハッシュは**ワーカーで**取る(P8 段㉓)。渡さないと
     //    `blob.arrayBuffer()` が最大 64MB をメインの heap に載せる
@@ -776,7 +800,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     readAttachment: async (lid) => {
       const meta = dispatcher.getState().entryMetas.get(lid);
       if (meta?.archetype !== 'attachment') return null;
-      const body = (await client.request({ op: 'getBody', cid: DEFAULT_CID, lid })) ?? null;
+      const body = (await client.request({ op: 'getBody', cid, lid })) ?? null;
       if (body === null) return null;
       const key = readAttachmentMeta(body).assetKey;
       return key === null ? null : { assetKey: key };
@@ -806,10 +830,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         const mime = resolveMime(save.name, '');
         const blob = new Blob([bytes]);
         const { key, hash } = assetKeyFromHash((await assets.hash(blob)).hash);
-        await blobs.put(DEFAULT_CID, key, blob);
+        await blobs.put(cid, key, blob);
         await client.request({
           op: 'putAssetMeta',
-          cid: DEFAULT_CID,
+          cid,
           meta: { key, mime, size: bytes.byteLength, hash },
         });
         dispatcher.dispatch({
@@ -876,7 +900,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       existingLids: async () =>
         new Set([
           ...dispatcher.getState().entryMetas.keys(),
-          ...(await client.request({ op: 'listRevisionLids', cid: DEFAULT_CID })),
+          ...(await client.request({ op: 'listRevisionLids', cid })),
         ]),
       existingRelationIds: () =>
         new Set(dispatcher.getState().relations.map((r) => r.id)),
@@ -898,38 +922,38 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       processAsset: (view, gzipped) => assets.process(view, gzipped),
       genRelationId: () => `rel-${crypto.randomUUID()}`,
       bulkUpsertEntries: async (entries) => {
-        await client.request({ op: 'bulkUpsertEntries', cid: DEFAULT_CID, entries });
+        await client.request({ op: 'bulkUpsertEntries', cid, entries });
       },
       bulkUpsertRelations: async (relations) => {
         await client.request({
           op: 'bulkUpsertRelations',
-          cid: DEFAULT_CID,
+          cid,
           relations,
         });
       },
       importRevisionChains: (chains) =>
-        client.request({ op: 'importRevisionChains', cid: DEFAULT_CID, chains }),
+        client.request({ op: 'importRevisionChains', cid, chains }),
       // ⚠ `keepLatest` を**明示で渡す**(review L-2)── 省くと worker の
       // 既定値が使われ、アプリ側の設定と偶然一致しているだけになる。
       // 片方を変えた瞬間に自分のバックアップが黙って削れる
       restoreRevisionChains: (chains) =>
         client.request({
           op: 'restoreRevisionChains',
-          cid: DEFAULT_CID,
+          cid,
           chains,
           keepLatest: REVISION_KEEP_LATEST,
         }),
       // ⚠ **bytes 側の台帳を見る**(review H-1)── meta 行の有無で判定すると、
       // GC が deleteBlob → deleteMeta の途中で失敗した状態(設計上の想定内)で
       // put を省いてしまい、参照だけが書かれる
-      listStoredBlobKeys: async () => new Set(await blobs.listKeys(DEFAULT_CID)),
-      putBlob: (key, blob) => blobs.put(DEFAULT_CID, key, blob),
+      listStoredBlobKeys: async () => new Set(await blobs.listKeys(cid)),
+      putBlob: (key, blob) => blobs.put(cid, key, blob),
       putAssetMeta: async (m) => {
-        await client.request({ op: 'putAssetMeta', cid: DEFAULT_CID, meta: m });
+        await client.request({ op: 'putAssetMeta', cid, meta: m });
       },
       // 🔑 中身は `reload-snapshot.ts`(段㉕ で切り出し ── closure に居ると
       //    誰も test できず、「案内は出すが実行しない」嘘が残っていた)
-      reload: () => reloadSnapshot(dispatcher, DEFAULT_CID, loadSnapshot),
+      reload: () => reloadSnapshot(dispatcher, cid, loadSnapshot),
       notify: (message) => showStatus(message),
       // 注意は**全件**を専用面へ(1 行の status では 1 件目しか届かない)
       report: (notes) => showNotices(regions.notices, '取込時の注意', notes),
@@ -1104,7 +1128,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             });
             return;
           }
-          const lent = await blobs.lendObjectUrl(DEFAULT_CID, assetKey);
+          const lent = await blobs.lendObjectUrl(cid, assetKey);
           if (!lent) {
             dispatcher.dispatch({ type: 'OP_FAILED', error: `添付が見つかりません: ${name}` });
             return;
@@ -1133,7 +1157,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     },
     downloadAsset: async (assetKey, name) => {
       try {
-        const lent = await blobs.lendObjectUrl(DEFAULT_CID, assetKey);
+        const lent = await blobs.lendObjectUrl(cid, assetKey);
         if (!lent) {
           dispatcher.dispatch({
             type: 'OP_FAILED',
@@ -1182,7 +1206,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       );
       if (!ok) return;
       void (async () => {
-        const body = (await client.request({ op: 'getBody', cid: DEFAULT_CID, lid })) ?? null;
+        const body = (await client.request({ op: 'getBody', cid, lid })) ?? null;
         if (body === null) {
           fail('本文が見つかりません(整理された可能性)');
           return;
@@ -1222,7 +1246,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       const tile = dispatcher.getState().launcherTiles?.find((t) => t.lid === lid);
       if (!tile) return;
       launchTile(tile, {
-        readBlob: (assetKey) => blobs.get(DEFAULT_CID, assetKey),
+        readBlob: (assetKey) => blobs.get(cid, assetKey),
         open: (url, features) => window.open(url, '_blank', features),
         createUrl: (blob) => URL.createObjectURL(blob),
         revokeUrl: (url) => URL.revokeObjectURL(url),
@@ -1261,7 +1285,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       if (!meta) return;
       void (async () => {
         const body =
-          (await client.request({ op: 'getBody', cid: DEFAULT_CID, lid })) ?? null;
+          (await client.request({ op: 'getBody', cid, lid })) ?? null;
         if (body === null) {
           dispatcher.dispatch({
             type: 'OP_FAILED',
@@ -1284,7 +1308,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             mime: att.mime,
           },
           {
-            readBlob: (assetKey) => blobs.get(DEFAULT_CID, assetKey),
+            readBlob: (assetKey) => blobs.get(cid, assetKey),
             open: (url, features) => window.open(url, '_blank', features),
             createUrl: (blob) => URL.createObjectURL(blob),
             revokeUrl: (url) => URL.revokeObjectURL(url),
@@ -1383,9 +1407,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * (StoreProxyHost / ProxyStoreClient)が持つ ── ここは渡すだけ。
      * `sync` は昇格で実体が替わるので、**呼ぶたびに読む**(closure に固定しない)。
      */
-    acquireEditLock: (lid) => sync.acquireEdit(DEFAULT_CID, lid),
+    acquireEditLock: (lid) => sync.acquireEdit(cid, lid),
     releaseEditLock: (lid) => {
-      sync.releaseEdit(DEFAULT_CID, lid);
+      sync.releaseEdit(cid, lid);
     },
     /**
      * 🔗 添付の携帯参照 → **所有ノートへ飛ぶ**(#100 段②)。
@@ -1397,7 +1421,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         try {
           const r = (await client.request({
             op: 'findAssetOwner',
-            cid: DEFAULT_CID,
+            cid,
             assetKey,
           })) as { lid: string | null };
           if (r.lid !== null) {
@@ -1550,19 +1574,19 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           await runExplicitPurge({
             ports: {
               listMetas: () =>
-                client.request({ op: 'listAssetMetas', cid: DEFAULT_CID }),
-              listBlobKeys: () => blobs.listKeys(DEFAULT_CID),
+                client.request({ op: 'listAssetMetas', cid }),
+              listBlobKeys: () => blobs.listKeys(cid),
               scanReferenced: async (candidates: string[]) =>
                 (
                   await client.request({
                     op: 'scanAssetRefs',
-                    cid: DEFAULT_CID,
+                    cid,
                     candidates,
                   })
                 ).referenced,
-              deleteBlob: (key: string) => blobs.delete(DEFAULT_CID, key),
+              deleteBlob: (key: string) => blobs.delete(cid, key),
               deleteMeta: async (key: string) => {
-                await client.request({ op: 'deleteAssetMeta', cid: DEFAULT_CID, key });
+                await client.request({ op: 'deleteAssetMeta', cid, key });
               },
             },
             // ⚠ confirm の**後**にもう一度見る(TOCTOU)── 自タブと他タブの両方
@@ -1604,7 +1628,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     const lid = dispatcher.getState().selectedLid;
     if (lid) center.noteBlockedBox(lid, blocked);
   });
-  storeEffects = connectStoreEffects(dispatcher, createStorePort(client, DEFAULT_CID), {
+  storeEffects = connectStoreEffects(dispatcher, createStorePort(client, cid), {
     // #148 組み込みタイル ── 一式が入っている端末にだけ Office のタイルを出す。
     // 控えは起動時と設置/削除の直後に setMeta で合っている(officeOpener と同じ値)
     officeInstalled: () => appOfficePack.isInstalled(),
@@ -1644,7 +1668,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
 
   dispatcher.dispatch({
     type: 'SYS_BOOTED',
-    cid: DEFAULT_CID,
+    cid,
     metas,
     relations, // 常駐(§6: 肥大が数字で出たら SQL query 化へ移す)
   });
