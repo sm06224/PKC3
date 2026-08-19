@@ -517,6 +517,13 @@ export class DetailRenderer {
          *   `selectedLid` / `openBody` を捨てるので、指紋は必ず一緒に動く。
          */
         currentContainerId: selfContainerId(state),
+        /**
+         * 🔴 **チェックの印を押せるようにする**(#277。2026-08-19)。
+         * ⚠ **この面だけ**である ── 書き出した HTML・Viewer・印刷には
+         *   受け手(`toggle-task`)が居ないので、押せない形のまま出す
+         *   (押せるのに本文が変わらないと「チェックしたのに消えた」になる)。
+         */
+        interactiveTasks: true,
       };
       /**
        * 🔴 **読む面もワーカーで描く**(2026-08-06。user 報告 2-8)。

@@ -11,10 +11,7 @@ import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import { DEFAULT_ENTRY_SORT, type EntrySort } from '@features/filter/entry-sort';
 import { resolveCanonicalParents, reorderSibling } from '@features/relation/tree';
 import { extractMeta, seedBodyFor } from '@features/flavor';
-import {
-  spliceFrontmatterKeys,
-  type FrontmatterValue,
-} from '@features/markdown/frontmatter';
+import { applyBodyRewrite, type BodyRewrite } from '@features/markdown/body-rewrite';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import type { LauncherTile } from '@features/launcher/tiles';
 import type {
@@ -471,6 +468,12 @@ export type UserAction =
    */
   | { type: 'SET_ENTRY_DATE'; lid: string; date: string | null }
   /**
+   * 🔴 **チェックの印を付け外しする**(#277)。`line` は**原文の行番号**。
+   * ⚠ 索引(何番目のチェックか)ではなく**行**で指す ── 索引だと、数え方が
+   *   描画側と原文側で 1 つでもずれた瞬間に**別の行を書き換える**。
+   */
+  | { type: 'TOGGLE_TASK'; lid: string; line: number }
+  /**
    * 🔑 **追記**(P8 段⑧)。編集画面を開かずに末尾へ足す。
    * ⚠ `heading` は binder が作って渡す(reducer は純粋のまま ── `Date` を呼ばない)。
    * ノートは `null`(見出しを勝手に足さない)。
@@ -652,16 +655,16 @@ export type SystemCommand =
   | { type: 'ENTRY_STAMPED'; lid: string; createdAt: string | null; updatedAt: string | null }
   | {
       /**
-       * 🔴 **frontmatter の構造化書換の ack**(#276 で `TODO_TOGGLED` から改名)。
+       * 🔴 **本文の構造化書換の ack**(#276 / #277 で `TODO_TOGGLED` から改名)。
        * ⚠ 名前を変えたのは、**同じ経路をカレンダーの日付書換にも使う**からである
        * ── 別名で 2 本目を生やすと、書込の作法(直列 queue / 唯一の抽出経路)が
        * 2 つに割れる(CLAUDE.md §7)。
        */
-      type: 'FRONTMATTER_SET';
+      type: 'BODY_REWRITTEN';
       lid: string;
       body: string;
-      /** 何を書いたか。⚠ 未達 commit との合流に要る(下の reducer を参照)。 */
-      keys: Record<string, FrontmatterValue | undefined>;
+      /** 何をしたか。⚠ **やり直せる形**で持つ ── 未達 commit との合流に要る。 */
+      rewrite: BodyRewrite;
       status: string | null;
       date: string | null;
       archived: boolean;
@@ -798,19 +801,19 @@ export type DomainEvent =
     }
   | {
       /**
-       * 🔴 **frontmatter の鍵を書き換える要求**(#276 で `REQUEST_TODO_TOGGLE` を
-       * 一般化)。読む→原文 splice→書く を 1 op として直列 queue に載せる。
+       * 🔴 **本文を構造化して書き換える要求**(#276 / #277 で
+       * `REQUEST_TODO_TOGGLE` を一般化)。読む→原文 splice→書く を 1 op として直列 queue に載せる。
        * ⚠ meta snapshot は発火時(reduce)に捕獲(C-1 規律)。
        * ⚠ **本文は載せない** ── effect が disk から読み直す(画面の古い本文を
        *   基底にすると、別経路の書込を巻き戻す)。
        */
-      type: 'REQUEST_FRONTMATTER_SET';
+      type: 'REQUEST_BODY_REWRITE';
       lid: string;
       title: string;
       archetype: string;
       entryOrder: number;
-      /** 書く鍵。⚠ `undefined` はその鍵を**消す**(`spliceFrontmatterKeys` の作法)。 */
-      keys: Record<string, FrontmatterValue | undefined>;
+      /** 何をするか。規則は `features/markdown/body-rewrite.ts` の 1 か所。 */
+      rewrite: BodyRewrite;
     }
   | {
       /**
@@ -1655,6 +1658,25 @@ function reduceCore(
       // 失敗は非致命。理由は effect が OP_FAILED で別に出す(phase は落とさない)
       return { state: { ...state, writeLock: null, error: action.error }, events: [] };
     }
+    case 'TOGGLE_TASK': {
+      // ready 限定(編集中の裏書換を作らない)。未知 lid は no-op
+      if (state.phase !== 'ready') return { state, events: [] };
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            rewrite: { kind: 'task', line: action.line },
+          },
+        ],
+      };
+    }
     case 'SET_ENTRY_DATE': {
       // ready 限定(編集中の裏書換を作らない)。未知 lid は no-op
       if (state.phase !== 'ready') return { state, events: [] };
@@ -1666,13 +1688,13 @@ function reduceCore(
         state,
         events: [
           {
-            type: 'REQUEST_FRONTMATTER_SET',
+            type: 'REQUEST_BODY_REWRITE',
             lid: meta.lid,
             title: meta.title,
             archetype: meta.archetype,
             entryOrder: meta.entryOrder,
             // ⚠ `undefined` = その鍵を消す(`spliceFrontmatterKeys` の作法)
-            keys: { date: action.date ?? undefined },
+            rewrite: { kind: 'frontmatter', keys: { date: action.date ?? undefined } },
           },
         ],
       };
@@ -1691,17 +1713,17 @@ function reduceCore(
         state,
         events: [
           {
-            type: 'REQUEST_FRONTMATTER_SET',
+            type: 'REQUEST_BODY_REWRITE',
             lid: meta.lid,
             title: meta.title,
             archetype: 'todo',
             entryOrder: meta.entryOrder,
-            keys: { status: nextStatus },
+            rewrite: { kind: 'frontmatter', keys: { status: nextStatus } },
           },
         ],
       };
     }
-    case 'FRONTMATTER_SET': {
+    case 'BODY_REWRITTEN': {
       // TODO(P6/P7 コンテナ切替導入時): cid を event/ack に載せて跨ぎ ack を
       // 捨てる(lid 偶然衝突 ── review F と同型の穴。P3-6a review #7)
       const meta = state.entryMetas.get(action.lid);
@@ -1729,9 +1751,9 @@ function reduceCore(
           // 丸ごと差し替えると baseline===persisted になり「未達の証拠」ごと
           // 消える(review #4 ── v2 が回収不能)。baseline に status を合流させ、
           // 再保存が「未達のテキスト + 新しい status」の両方の意図を書く
-          // ⚠ 合流も**書いた鍵そのもの**で行う(#276)── todo の status に
-          //   固定していると、日付だけを書いた回で**日付が落ちる**
-          const merged = spliceFrontmatterKeys(openBody.baseline, action.keys);
+          // ⚠ 合流も**やった書換そのもの**で当て直す(#276 / #277)── todo の
+          //   status に固定していると、日付やチェックを書いた回で**それが落ちる**
+          const merged = applyBodyRewrite(openBody.baseline, action.rewrite) ?? openBody.baseline;
           openBody = {
             lid: action.lid,
             body: openBody.body === openBody.baseline ? merged : openBody.body,

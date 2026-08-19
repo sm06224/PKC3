@@ -1350,6 +1350,26 @@ const ACTIONS: Record<string, ActionHandler> = {
    * **外す**(付けた本人が外せない導線を作らない)。
    * ⚠ **黙って断らない** ── 何も選んでいない / 編集中は、理由を出す。
    */
+  /**
+   * 🔴 **チェックの印を押せるようにする**(#277。user 指示 2026-08-19
+   * 「チェックリストを含む場合の自動生成で…復活させるのです」)。
+   *
+   * ⚠ 押せるのは**読む面**だけ(描画側が `interactiveTasks` を渡した所)。
+   * ⚠ 指すのは**原文の行番号** ── 索引だと数え方のずれで別の行を書き換える。
+   */
+  'toggle-task': (dispatcher, target) => {
+    const raw = target.getAttribute('data-pkc-task-line');
+    const line = Number(raw);
+    if (raw === null || !Number.isInteger(line) || line < 0) return;
+    const st = dispatcher.getState();
+    const lid = st.openBody?.lid ?? st.selectedLid;
+    if (lid === null || lid === undefined) return;
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してからチェックしてください' });
+      return;
+    }
+    dispatcher.dispatch({ type: 'TOGGLE_TASK', lid, line });
+  },
   'calendar-set-date': (dispatcher, target) => {
     const date = target.closest('[data-pkc-date]')?.getAttribute('data-pkc-date');
     if (date === null || date === undefined) return;

@@ -228,6 +228,93 @@ describe('kanban view (P3-6)', () => {
   });
 });
 
+/**
+ * 🔴 **チェックの印が押せて、本文に届く**(#277)。
+ *
+ * ⚠ 直す前は `disabled` で**読むだけ**だった ── その前は押せたが本文が
+ *   1 文字も変わらず、開き直すと全部外れた(「チェックしたのに消えた」)。
+ * 🔑 観測点は **store へ届いた本文**(画面だけ変わって保存されない、を作らない)。
+ */
+describe('チェックの印(#277)', () => {
+  const BODY = ['# 買い物', '', '- [ ] 牛乳', '- [x] 卵', '', 'ここは本文。'].join('\n');
+
+  it('🔴 押すと原文の印が反転し、保存まで届く', async () => {
+    const { d, q, persisted, store } = setup([meta('n1', { archetype: 'text', status: null })], {
+      n1: BODY,
+    });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    await tick(20);
+    const box = q<HTMLElement>('[data-pkc-action="toggle-task"][data-pkc-task-line="2"]');
+    expect(box, 'チェックが押せる形で出ていない').not.toBeNull();
+    box!.click();
+    await tick(20);
+    expect(persisted, '保存が出ていない').toHaveLength(1);
+    expect(store['n1'], '原文の印が反転していない').toBe(
+      ['# 買い物', '', '- [x] 牛乳', '- [x] 卵', '', 'ここは本文。'].join('\n'),
+    );
+  });
+
+  /** ⚠ もう一度押すと戻る(片道にしない)。 */
+  it('もう一度押すと外れる', async () => {
+    const { d, q, store } = setup([meta('n1', { archetype: 'text', status: null })], { n1: BODY });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    await tick(20);
+    q<HTMLElement>('[data-pkc-action="toggle-task"][data-pkc-task-line="3"]')!.click();
+    await tick(20);
+    expect(store['n1']!.split('\n')[3], '外れていない').toBe('- [ ] 卵');
+  });
+
+  /**
+   * 🔴 **編集中は裏で書き換えない**(変異試験 T7 が生き延びて判明)。
+   *
+   * ⚠ 押す口は編集中には**描かれない**(編集の面に替わる)ので、これは
+   *   「描かれてから phase が動くまでの隙間」を塞ぐ門である ── 隙間は狭いが、
+   *   通ると**user が見ていない本文**が書き換わる。
+   * 🔑 だから**口を直に叩いて**確かめる(DOM の都合で届かない門を、
+   *   「守られている」と書かない ── CLAUDE.md「外して壊れることを 1 度は見る」)。
+   */
+  it('🔴 編集中に押しても書き換えず、理由を出す', async () => {
+    const { d, root, persisted, store } = setup(
+      [meta('n1', { archetype: 'text', status: null })],
+      { n1: BODY },
+    );
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    await tick(20);
+    d.dispatch({ type: 'START_EDIT' });
+    await tick(20);
+    expect(d.getState().phase, '前提が崩れている').toBe('editing');
+    // ⚠ 編集中は口が描かれないので、**同じ属性の口を置いて**叩く
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.setAttribute('data-pkc-action', 'toggle-task');
+    box.setAttribute('data-pkc-task-line', '2');
+    root.append(box);
+    box.click();
+    await tick(20);
+    expect(persisted, '編集中に裏で書き込んだ').toHaveLength(0);
+    expect(store['n1'], '本文が変わった').toBe(BODY);
+    expect(d.getState().error ?? '', '無言で終わった').toContain('編集を終了してから');
+  });
+
+  /**
+   * 🔴 **本文が変わっていたら黙って別の所を書かない**(#277)。
+   * ⚠ 行番号は「描いた時の原文」のものなので、その後の書換でずれることがある。
+   */
+  it('🔴 その行がチェックでなくなっていたら、理由を出して何も書かない', async () => {
+    const { d, persisted, store } = setup([meta('n1', { archetype: 'text', status: null })], {
+      n1: BODY,
+    });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    await tick(20);
+    // 見出しの行(チェックではない)を指す
+    d.dispatch({ type: 'TOGGLE_TASK', lid: 'n1', line: 0 });
+    await tick(20);
+    expect(persisted, '当てずっぽうで書き込んだ').toHaveLength(0);
+    expect(store['n1'], '本文が変わった').toBe(BODY);
+    expect(d.getState().error ?? '', '無言で終わった').toContain('反映できません');
+  });
+});
+
 describe('calendar view (P3-6)', () => {
   it('date セルに todo が立ち、showArchived と月送りが効く', async () => {
     const { d, q, qa } = setup(
