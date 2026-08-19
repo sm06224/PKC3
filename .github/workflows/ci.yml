@@ -33,6 +33,14 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+# 🔴 **重ねて push したら、古い実行を畳む**(user 指示 2026-08-19「フルスモークを
+# 乱発しない」)。この workflow は smoke(33 spec)を回すので **1 実行 4〜6 分**
+# かかり、直して push し直すたびに**古い実行が最後まで走り続けていた**。
+# ⚠ **畳むのは PR のときだけ** ── `main` への push は「配った物の検査」なので、
+#   後続に追い越されて**検査そのものが消える**形にしない。
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
 jobs:
