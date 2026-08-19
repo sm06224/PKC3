@@ -58,6 +58,7 @@ import { assetPreviewKind, canOpenAssetWindow } from '@features/asset/asset-prev
 import type { AppState, AppPhase } from '@adapter/state/app-state';
 import { appEditorMode } from './editor-mode';
 import { appKeymap, type KeymapStore } from './keymap';
+import { HINT_BASE, HINT_COMMAND, hintTitle } from './shortcut-hint';
 
 /** 添付表示のための asset 面(main が AssetBlobStore を cid 束縛で注入)。 */
 export interface AssetLender {
@@ -765,7 +766,14 @@ export class DetailRenderer {
     // title は uncontrolled input(commit 時に binder が RENAME を先行 dispatch)
     const titleInput = document.createElement('input');
     titleInput.type = 'text';
+    /**
+     * 🔴 **読み上げから見て無名にしない**(2026-08-19 の全数監査)。
+     * ⚠ `data-pkc-field` は**機械の名前**であって、読み上げには届かない ──
+     *   `<textarea>` / `<input>` は `<label>` も無いので、直す前は
+     *   編集の面が**全部「編集」とだけ読まれる**状態だった。
+     */
     titleInput.setAttribute('data-pkc-field', 'editor-title');
+    titleInput.setAttribute('aria-label', 'ノートの題名');
     titleInput.value = state.entryMetas.get(open.lid)?.title ?? '';
     this.region.append(titleInput);
 
@@ -822,6 +830,7 @@ export class DetailRenderer {
     split.setAttribute('data-pkc-region', 'editor-split');
     const ta = document.createElement('textarea');
     ta.setAttribute('data-pkc-field', 'editor-body');
+    ta.setAttribute('aria-label', '本文(原文)');
     ta.value = open.body;
     const preview = document.createElement('div');
     preview.setAttribute('data-pkc-region', 'editor-preview');
@@ -948,7 +957,9 @@ export class DetailRenderer {
     editAll.type = 'button';
     editAll.setAttribute('data-pkc-field', 'edit-all');
     editAll.textContent = '全文を編集';
-    editAll.title = '本文全体を 1 つの入力欄で編集します(Ctrl+A と同じ)';
+    editAll.setAttribute(HINT_BASE, '本文全体を 1 つの入力欄で編集します');
+    editAll.setAttribute(HINT_COMMAND, 'edit-all');
+    editAll.title = hintTitle('本文全体を 1 つの入力欄で編集します', 'edit-all');
     tools.append(editAll);
     this.region.append(tools, pane, note);
 
@@ -1073,6 +1084,7 @@ export class DetailRenderer {
       pane.textContent = '';
       const ta = document.createElement('textarea');
       ta.setAttribute('data-pkc-field', 'editor-body');
+      ta.setAttribute('aria-label', '本文(原文)');
       ta.value = body;
       ta.addEventListener('input', () => {
         // ⚠ 退避先では**描き直さない**(原文をそのまま編集している面なので)

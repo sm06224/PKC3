@@ -10,6 +10,7 @@
  * 🔑 **3 列**(一覧 / 本文 / 付随情報)。編集に入っても列は動かない。
  */
 import { SEALED_ARCHETYPES, SEALED_VIEWS } from '@features/sealed';
+import { HINT_BASE, HINT_COMMAND, hintTitle } from './shortcut-hint';
 import { COLLECTION_COMMANDS } from './commands';
 import { BROWSE_ICONS, iconButton, iconSpan } from './icons';
 import { PANES, PANE_LABELS } from '@features/pane-visibility';
@@ -148,16 +149,23 @@ export function buildShell(root: HTMLElement): ShellRegions {
    * `<`, `>` 一文字でいい みたいなのばっかり」)。⚠ **読み上げは残す** ──
    * 見た目を削るのと、名前を消すのは別である(`aria-label` と `title` を持たせる)。
    */
-  for (const [action, glyph, label, title] of [
-    ['nav-back', '‹', '戻る', '前に見ていたノートへ戻ります(Alt+←)'],
-    ['nav-forward', '›', '進む', '戻る前のノートへ進みます(Alt+→)'],
+  /**
+    * ⚠ **鍵の綴りを直書きしない**(2026-08-19)── mac では既定のままでも
+    * `Alt` ではなく `⌥` であり、user が割当を変えれば説明だけが嘘になる。
+    * 説明の**土台**と**命令 id** だけ持たせ、`applyShortcutHints` が組み立てる。
+    */
+  for (const [action, glyph, label, title, cmd] of [
+    ['nav-back', '‹', '戻る', '前に見ていたノートへ戻ります', 'nav-back'],
+    ['nav-forward', '›', '進む', '戻る前のノートへ進みます', 'nav-forward'],
   ] as const) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.setAttribute('data-pkc-action', action);
     btn.setAttribute('data-pkc-glyph', '');
     btn.setAttribute('aria-label', label);
-    btn.title = title;
+    btn.setAttribute(HINT_BASE, title);
+    btn.setAttribute(HINT_COMMAND, cmd);
+    btn.title = hintTitle(title, cmd);
     btn.textContent = glyph;
     btn.disabled = true; // 履歴が無い間は押せない(renderer が起こす)
     findBar.append(btn);
@@ -238,7 +246,9 @@ export function buildShell(root: HTMLElement): ShellRegions {
     first ? `archetype:${first.archetype}` : 'create-entry',
   );
   create.setAttribute('data-pkc-field', 'create-run');
-  create.title = 'この種類で新しく作ります(Ctrl+N)';
+  create.setAttribute(HINT_BASE, 'この種類で新しく作ります');
+  create.setAttribute(HINT_COMMAND, 'create-entry');
+  create.title = hintTitle('この種類で新しく作ります', 'create-entry');
   // ⚠ 種類は**ボタン自身**にも持たせる ── binder はこちらを先に見るので、
   //    `<select>` を読めない状況でも取り違えない
   if (first) create.setAttribute('data-pkc-archetype', first.archetype);

@@ -17,9 +17,14 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { HelpRenderer, MANUAL_TEXT, versionText } from '../../src/adapter/ui/render/help';
 import { CenterRouter } from '../../src/adapter/ui/render/center';
+import { Dispatcher } from '../../src/adapter/state/dispatcher';
+import { buildShell } from '../../src/adapter/ui/render/shell';
+import { bindActions } from '../../src/adapter/ui/actions/binder';
 import {
+  VIEW_MODES,
   initialState,
   isAsidePane,
+  isViewMode,
   type AppState,
   type ViewMode,
 } from '../../src/adapter/state/app-state';
@@ -299,8 +304,6 @@ const ALL_VIEWS = [
   'detail',
   'calendar',
   'kanban',
-  'filer',
-  'launcher',
   'query',
   'dual',
   'settings',
@@ -319,6 +322,65 @@ void _exhaustive;
 function stateWith(viewMode: ViewMode): AppState {
   return { ...initialState, viewMode };
 }
+
+/**
+ * 🔴 **畳んだ面が戻ってきていない**(#241 段⑥-b)。
+ *
+ * `'filer'` / `'launcher'` は P8 段⑤ で「探し方」を左の列へ移して以降、
+ * **どこからも開かれない**まま `toPane` が本文へ落としていた死に値である。
+ * ⚠ **同じ綴りが別の名前空間に生きている**(左の列のタブ `BrowseMode` と、
+ *   鍵の文脈 `KeyContext`)ので、grep で消すと生きているほうを壊す ──
+ *   ここは**中央の面としてだけ**受け付けないことを見る。
+ */
+describe('畳んだ中央の面(#241 段⑥-b)', () => {
+  it('🔴 filer / launcher は中央の面として受け付けない', () => {
+    expect(isViewMode('detail'), '空振り(生きている面まで弾いている)').toBe(true);
+    for (const gone of ['filer', 'launcher']) {
+      expect(isViewMode(gone), `畳んだはずの ${gone} が中央の面に戻っている`).toBe(false);
+    }
+  });
+
+  it('表と型が 1 本(足したら両方に効く)', () => {
+    // ⚠ `VIEW_MODES` は値の側、`ALL_VIEWS` は型の全数 ── 一致していること
+    expect([...VIEW_MODES].sort()).toEqual([...ALL_VIEWS].sort());
+  });
+
+  /**
+   * 🔴 **知らない値を state へ入れない**(変異試験 B3 が生き延びて判明)。
+   * ⚠ 描く側は必ず実在の値を書くので、この枝は**製品でも test でも 1 度も
+   *   通っていなかった** ── 「上流 1 行だけが守っていて、その 1 行を誰も
+   *   試していない」形である(CLAUDE.md §2)。
+   * 🔑 畳んだ面の名前を持つボタンが将来まぎれ込んでも、ここで止まる。
+   */
+  it('🔴 知らない data-pkc-view を押しても、面は動かない', () => {
+    document.body.innerHTML = '';
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    const d = new Dispatcher();
+    buildShell(root);
+    bindActions(root, d);
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
+    const before = d.getState().viewMode;
+
+    const press = (view: string): void => {
+      const btn = document.createElement('button');
+      btn.setAttribute('data-pkc-action', 'set-view');
+      btn.setAttribute('data-pkc-view', view);
+      root.append(btn);
+      btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    };
+    // ⚠ 空振り防止: **生きている面**は本当に開く(門が全部を止めていない)
+    press('help');
+    expect(d.getState().viewMode, '生きている面まで弾いている(空振り)').toBe('help');
+    d.dispatch({ type: 'SET_VIEW_MODE', mode: before });
+
+    for (const gone of ['filer', 'launcher', 'なにか']) {
+      press(gone);
+      expect(d.getState().viewMode, `知らない値「${gone}」が state に入った`).toBe(before);
+    }
+  });
+});
 
 describe('🔴 中央の面の表が 2 つある(食い違いを落とす)', () => {
   it.each(ALL_VIEWS)('%s: 自分の器を持つ面と、ノートへ落ちる面が一致する', (view) => {

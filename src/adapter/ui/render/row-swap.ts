@@ -756,6 +756,9 @@ export class RowSwap {
 
     const ta = document.createElement('textarea');
     ta.setAttribute('data-pkc-field', 'row-source');
+    // ⚠ 読み上げから見て無名にしない(2026-08-19 の全数監査)── 1 面編集は
+    //    「いま開いている行」を編むので、本文全体と**別の名前**にする
+    ta.setAttribute('aria-label', 'この行の原文');
     ta.value = o.source;
     slot.append(ta);
 

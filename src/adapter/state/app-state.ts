@@ -51,28 +51,49 @@ import {
 } from '@features/relation/dual-pane';
 
 export type AppPhase = 'initializing' | 'ready' | 'editing' | 'error';
-export type ViewMode =
-  | 'detail'
-  | 'calendar'
-  | 'kanban'
-  | 'filer'
-  | 'launcher'
+/**
+ * 🔴 **中央の面の全数**(#241 段⑥-b で 1 本に寄せた)。
+ *
+ * ⚠ 直す前は**同じ一覧が 2 か所**に在った ── 型の union(ここ)と、
+ * `binder.ts` の `VIEW_MODES`(押されたボタンの値を検める集合)。面を足すたび
+ * 両方に書く必要があり、片方を忘れると**押しても何も起きないボタン**か、
+ * **型に無い値が state に入る**のどちらかになる(2 ペインを足したとき実際に
+ * 両方へ書いた)。⚠ 値そのものは配列 1 本にして、型はそこから引く。
+ *
+ * 🔑 **`'filer'` / `'launcher'` は畳んだ**(#241 段⑥-b。設計 doc §6 裁定 6)──
+ * P8 段⑤ で「探し方」を左の列(`browse.ts`)へ移して以降、この 2 値は
+ * **どこからも開かれない**まま `toPane` が本文へ落としていた。
+ * ⚠ 左の列のタブ(`BrowseMode`)と鍵の文脈(`KeyContext`)にも同じ綴りが在るが、
+ * **あちらは生きている**(別の名前空間である)── 消すのは中央の面の値だけ。
+ */
+export const VIEW_MODES = [
+  'detail',
+  'calendar',
+  'kanban',
   /**
    * 🔴 **集計**(#184)── frontmatter の 1 つの key で束ねて表にする面。
    * ⚠ **aside ではない**(ノートを映す面である)ので、押した行の選択は
    * この面に留まる ── かんばん / カレンダーと同じ扱い。
    */
-  | 'query'
+  'query',
   /**
    * 🔴 **2 ペインタブファイラ**(#241 段⑥。user 指示 2026-08-17
    * 「アプリに 2 ペインタブファイラを**組み込みで**提供すること」)。
    * ⚠ 裁定 6(`organize-pane-design-2026-08.md` §6)で**中央の面**と決まった
    * ── 幅は中央にしかない。左の列は「探し方」であって整理の作業台ではない。
    */
-  | 'dual'
-  | 'settings'
-  | 'flags'
-  | 'help';
+  'dual',
+  'settings',
+  'flags',
+  'help',
+] as const;
+
+export type ViewMode = (typeof VIEW_MODES)[number];
+
+/** 押されたボタンの値が、いま実在する面か。⚠ 判定はここ 1 か所。 */
+export function isViewMode(value: string): value is ViewMode {
+  return (VIEW_MODES as readonly string[]).includes(value);
+}
 
 /**
  * 🔴 **ノートを映していない中央の面**(P11)。一覧のノートを押したら中央を
@@ -1181,12 +1202,13 @@ function reduceCore(
         // ⚠ 元データ(frontmatter)は常駐していないので、boot で読むと
         // 集計を一度も開かない user にも全本文の走査を負わせることになる。
         // ⚠ 前の表は**消さない**(ランチャーと同じ ── 読み直しの間に空白を出さない)。
+        // ⚠ ランチャーの枝は #241 段⑥-b で畳んだ ── アプリの一覧は**左の列の
+        //    タブ**が持つ面になったので、読み直しは `REFRESH_LAUNCHER_TILES`
+        //    (`main.ts` が探し方の切替で撃つ)1 本である
         events:
-          action.mode === 'launcher'
-            ? [{ type: 'REQUEST_LAUNCHER_TILES', entries: attachmentEntries(state) }]
-            : action.mode === 'query'
-              ? [{ type: 'REQUEST_QUERY_SCAN', key: state.queryKey }]
-              : [],
+          action.mode === 'query'
+            ? [{ type: 'REQUEST_QUERY_SCAN', key: state.queryKey }]
+            : [],
       };
     case 'REFRESH_LAUNCHER_TILES':
       // ⚠ **毎回要求する**。ただし前回のタイルは消さない(古い並びを出したまま

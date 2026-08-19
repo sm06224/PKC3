@@ -19,6 +19,7 @@ import type { AppState } from '@adapter/state/app-state';
 import { bodyLockOf } from '@adapter/state/app-state';
 import { isAppendable } from '@features/flavor/append-spec';
 import { iconButton } from './icons';
+import { hintTitle } from './shortcut-hint';
 
 /** 追記欄の見え方。⚠ ここが唯一の判定(描画側と binder で二重に持たない)。 */
 export type AppendMode =
@@ -65,8 +66,12 @@ export class AppendBoxRenderer {
     this.form.setAttribute('data-pkc-field', 'append-form');
     this.input = document.createElement('textarea');
     this.input.setAttribute('data-pkc-field', 'append-input');
+    // ⚠ 読み上げから見て無名にしない(2026-08-19 の全数監査)
+    this.input.setAttribute('aria-label', '追記する内容');
     this.input.rows = 2;
-    this.input.placeholder = '追記する内容(Ctrl+Enter で追記)';
+    // ⚠ placeholder は `title` ではないので、`applyShortcutHints` の対象外 ──
+    //    ここは組み立てた字をそのまま入れる(割当を変えたら次の描画で追いつく)
+    this.input.placeholder = hintTitle('追記する内容', 'append-send');
     this.form.append(this.input, iconButton('append-entry', '追記'));
 
     this.lockBar = document.createElement('div');
