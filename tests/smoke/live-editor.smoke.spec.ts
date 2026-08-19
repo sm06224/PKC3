@@ -712,3 +712,59 @@ test('🔴 設定「編集の仕方」= 2 ペインで、次の編集から 2 �
   await expect(page.locator('[data-pkc-region="editor-live"]')).toHaveCount(0);
   await expect(page.locator('[data-pkc-field="editor-body"]')).toBeVisible();
 });
+
+/**
+ * 🔴 **文書の情報(frontmatter)を、普通の編集で失わない**(#284)。
+ *
+ * 🔴 **unit では届かない層**:
+ * ① **札が本当に見えているか** ── `display:none` / `[data-pkc-has-frontmatter]` の
+ *    噛み合いは happy-dom では読めない(`toBeVisible` は実レイアウトを見る)
+ * ② **実マウスで行を押したときに開く原文が、原文のその行か** ── 行の対応は
+ *    座標から引くので、1 行ずれていても unit の合成クリックでは同じ答えになる
+ */
+test('🔴 文書の情報は札に出て、本文の編集で消えない (#284)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoLive(page);
+  await openLive(page, '---\ntags: [あ, い]\n---\n# 題\n\n最初の段落です。\n');
+
+  const live = page.locator('[data-pkc-region="editor-live"]');
+  const card = page.locator('[data-pkc-region="live-frontmatter"]');
+
+  // ① 🔴 **札が見えている**(器が潰れていない・display が噛み合っている)
+  await expect(card, '情報の札が見えていない').toBeVisible();
+  await expect(card.locator('[data-pkc-field="fm-summary"]')).toContainText('tags: あ, い');
+
+  // ② 🔴 **本文には出ていない**(謎の水平線・謎の見出しが無い)
+  await expect(live.locator('hr'), '情報が水平線として本文に出ている').toHaveCount(0);
+  await expect(live.locator('h1')).toHaveText('題');
+  await expect(live.locator('h2'), '情報が見出しとして本文に出ている').toHaveCount(0);
+
+  /**
+   * ③ 🔴 **実マウスで段落を押して書き換えても、情報の行を潰さない。**
+   * ⚠ ここが 1 行ずれていると、`---` の行が段落として開く。
+   */
+  await live.locator('p', { hasText: '最初の段落です。' }).click();
+  const row = live.locator('[data-pkc-field="row-source"]');
+  await expect(row, '押した行が原文とずれている').toHaveValue('最初の段落です。');
+  await row.fill('書き換えました。');
+  await page.keyboard.press('Tab');
+  await expect(live.locator('p', { hasText: '書き換えました。' })).toBeVisible();
+  // 🔴 札は残っている(= 情報が失われていない)
+  await expect(card.locator('[data-pkc-field="fm-summary"]'), '情報が消えた').toContainText(
+    'tags: あ, い',
+  );
+
+  // ④ 🔴 **札から情報を編集できる**(触れなくしただけにしない)
+  await clickReal(page, '[data-pkc-field="fm-edit"]');
+  const src = card.locator('[data-pkc-field="fm-source"]');
+  await expect(src, '情報の原文が開かない').toBeVisible();
+  await expect(src).toHaveValue('---\ntags: [あ, い]\n---');
+  await src.fill('---\ntags: [う]\n---');
+  await clickReal(page, '[data-pkc-field="fm-commit"]');
+  await expect(card.locator('[data-pkc-field="fm-summary"]')).toContainText('tags: う');
+  // ⚠ 本文は巻き添えになっていない
+  await expect(live.locator('p', { hasText: '書き換えました。' })).toBeVisible();
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
