@@ -194,6 +194,21 @@ export function calendarTile(): LauncherTile {
 }
 
 /**
+ * 🔴 **カンバンの組み込みタイル**(#277 段②-b。封印の解除)。
+ *
+ * 🔑 カレンダー(#276)と**同じ形で戻す** ── 上の帯へ切替を返すのではなく、
+ * アプリの一覧から開く。⚠ そして中身は作り替えてある:札は
+ * 「`todo` アーキタイプのノート」ではなく**本文のチェック項目**である
+ * (`features/kanban/kanban-data.ts`)── `todo` は封印中で作れないので、
+ * 導線だけ戻しても盤面は永久に空だった。
+ */
+export const KANBAN_TILE_LID = 'builtin:kanban';
+
+export function kanbanTile(): LauncherTile {
+  return { lid: KANBAN_TILE_LID, title: 'やることの板', group: '', kind: 'kanban' };
+}
+
+/**
  * 組み込み分を entry 由来の一覧へ合流させる。
  *
  * 🔑 Office 一式は**端末ローカル**(IndexedDB)だが、entry はコンテナに乗って
@@ -211,7 +226,7 @@ export function withBuiltinTiles(
    * 2 ペインは**アプリに最初から在る**ので先頭、Office は**入れた端末だけ**なので
    * その次 ── 入れたり消したりで 2 ペインの位置が動かない向きに並べる。
    */
-  const builtin: LauncherTile[] = [dualTile(), calendarTile()];
+  const builtin: LauncherTile[] = [dualTile(), calendarTile(), kanbanTile()];
   if (opts.office) builtin.push(officeTile());
   return [...builtin, ...tiles];
 }

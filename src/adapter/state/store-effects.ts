@@ -19,6 +19,7 @@ import type {
   GroupResult as QueryGroups,
   KeyResult as QueryKeys,
 } from '@features/query/group-by';
+import type { TaskScan } from '@features/kanban/kanban-data';
 import type { Relation } from '@core/model/entry-meta';
 import type { Dispatcher } from './dispatcher';
 
@@ -43,6 +44,12 @@ export interface StorePort {
    * ⚠ 目録と表は **1 回の走査**で返る(`key` が `null` なら表は `null`)。
    */
   queryScan?(key: string | null): Promise<{ keys: QueryKeys; groups: QueryGroups | null }>;
+  /**
+   * カンバンの札(#277 段②-b)。⚠ **省略可** ── 持たない環境(test の fake /
+   * service worker に残った旧い worker)では面が「集められません」と断る。
+   * ⚠ 返るのは**項目だけ**で、本文は 1 バイトも渡らない(worker の中で舐める)。
+   */
+  taskScan?(): Promise<TaskScan>;
   /**
    * 指定した lid の本文を **1 往復で** 取る(P7b review L-7)。
    * ⚠ 無い lid は結果に出ない ── 呼び側は「読めたものだけ」を受け取る。
@@ -256,6 +263,28 @@ export function connectStoreEffects(
           () => {
             if (disposed) return;
             dispatcher.dispatch({ type: 'QUERY_FAILED' });
+          },
+        );
+        break;
+      }
+      case 'REQUEST_TASK_SCAN': {
+        const ask = store.taskScan;
+        /**
+         * 🔴 **持っていないことを画面へ伝える**(集計 #184 と同じ落ち方)。
+         * ⚠ 黙って break すると、盤面は「集めています…」で**永久に止まって見える**。
+         */
+        if (!ask) {
+          dispatcher.dispatch({ type: 'TASK_SCAN_FAILED' });
+          break;
+        }
+        void ask().then(
+          (scan) => {
+            if (disposed) return;
+            dispatcher.dispatch({ type: 'SET_TASK_SCAN', scan });
+          },
+          () => {
+            if (disposed) return;
+            dispatcher.dispatch({ type: 'TASK_SCAN_FAILED' });
           },
         );
         break;

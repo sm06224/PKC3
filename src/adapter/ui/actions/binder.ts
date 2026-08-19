@@ -13,7 +13,7 @@
  * 切り替える(その時に計測してから)。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
-import { isViewMode, type AppState, type ViewMode } from '@adapter/state/app-state';
+import { isViewMode, nextViewMode, type AppState, type ViewMode } from '@adapter/state/app-state';
 import type { EntryMeta } from '@core/model/entry-meta';
 import { filerRows, visibleSelection } from '@features/relation/filer-list';
 import { archetypeLabel } from '@adapter/ui/render/sidebar';
@@ -1341,7 +1341,8 @@ const ACTIONS: Record<string, ActionHandler> = {
     //    新規作成だけで、user から見ると「画面から出られない」
     const cur = dispatcher.getState().viewMode;
     // ⚠ cast を置かない ── `isViewMode` が絞ってあるので、表と食い違えば型が落ちる
-    const next: ViewMode = cur === view ? 'detail' : view;
+    // 🔑 規則は 1 か所(`nextViewMode`)── タイルから開く面も同じ関数を通る
+    const next: ViewMode = nextViewMode(cur, view);
     dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: next });
     /**
      * 🔴 **集計の束ね方を思い出す**(#184)。⚠ **開いたときだけ**読む ──
@@ -1385,7 +1386,18 @@ const ACTIONS: Record<string, ActionHandler> = {
     const line = Number(raw);
     if (raw === null || !Number.isInteger(line) || line < 0) return;
     const st = dispatcher.getState();
-    const lid = st.openBody?.lid ?? st.selectedLid;
+    /**
+     * 🔴 **どのノートの行かは、押した所から引く**(#277 段②-b で直した)。
+     *
+     * ⚠ 直す前は `openBody?.lid ?? selectedLid` だけを見ていた ── 本文の面では
+     *   合っているが、**カンバンの札は別のノートの行**なので、押すと
+     *   **開いているノートの同じ行番号**を書き換える(いちばん静かなデータ破壊)。
+     * 🔑 札には `data-pkc-entry` が焼いてあるので、そこから引く。
+     * ⚠ 本文の面は `data-pkc-entry` を持たない(器はノートを表す要素ではない)
+     *   ので、そのときだけ「いま開いているノート」へ落ちる。
+     */
+    const fromDom = target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
+    const lid = fromDom ?? st.openBody?.lid ?? st.selectedLid;
     if (lid === null || lid === undefined) return;
     if (st.phase !== 'ready') {
       dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してからチェックしてください' });

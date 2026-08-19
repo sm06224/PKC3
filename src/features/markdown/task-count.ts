@@ -52,16 +52,27 @@ export interface TaskCandidates {
 export const NO_TASKS: TaskCandidates = Object.freeze({ total: 0, done: 0 });
 
 /**
- * 数える。⚠ **fence の中は数えない** ── markdown-it も拾わないので、
- * 飛ばしても superset は保たれる(むしろ無駄な候補が減る)。
+ * 🔴 **走査は 1 か所**(CLAUDE.md §7「同じ判定が 2 か所にある」)。
+ *
+ * 数える側(`countTaskCandidates`。保存のたびに走る)と取り出す側
+ * (`listTaskItems`。カンバンが開いたときに走る)で**別々に行を読むと、
+ * 片方だけ直したときに「候補に入るのに札が出ない」ノートができる** ──
+ * しかも数が合わないだけなので、誰も気づかない。
+ *
+ * ⚠ だから走査はここだけに置き、外は `visit` で受ける。
+ * ⚠ 数える側は**物を作らない**(visitor に値を渡すだけ)── 保存のたびに
+ *   項目の配列を組むと、長い本文で無駄な確保が出る。
  */
-export function countTaskCandidates(body: string): TaskCandidates {
-  if (body === '' || !body.includes('[')) return NO_TASKS;
-  let total = 0;
-  let done = 0;
+function walkTaskLines(
+  body: string,
+  visit: (index: number, done: boolean, rest: string) => void,
+): void {
+  if (body === '' || !body.includes('[')) return;
   /** 開いている fence の文字と長さ。`null` = fence の外。 */
   let fence: { readonly ch: string; readonly len: number } | null = null;
-  for (const raw of body.split('\n')) {
+  const lines = body.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i]!;
     const f = FENCE.exec(raw);
     if (f !== null) {
       const mark = f[1]!;
@@ -74,8 +85,53 @@ export function countTaskCandidates(body: string): TaskCandidates {
     const line = raw.replace(QUOTE, '');
     const m = TASK.exec(line);
     if (m === null) continue;
-    total += 1;
-    if (m[1] !== ' ') done += 1;
+    // ⚠ `m[0]` は末尾の 1 字(空白 or 行末)まで含む ── その次から先が中身
+    visit(i, m[1] !== ' ', line.slice(m[0].length));
   }
+}
+
+/**
+ * 数える。⚠ **fence の中は数えない** ── markdown-it も拾わないので、
+ * 飛ばしても superset は保たれる(むしろ無駄な候補が減る)。
+ */
+export function countTaskCandidates(body: string): TaskCandidates {
+  let total = 0;
+  let done = 0;
+  walkTaskLines(body, (_i, isDone) => {
+    total += 1;
+    if (isDone) done += 1;
+  });
   return total === 0 ? NO_TASKS : { total, done };
+}
+
+/** 1 件のチェック項目(カンバンの札 1 枚ぶん)。 */
+export interface TaskItem {
+  /**
+   * 🔴 **原文の行番号**(0 始まり)。⚠ これは `TOGGLE_TASK` /
+   * `applyBodyRewrite` が指す番号と**同じもの**である ── 索引(何番目の項目か)
+   * にすると、数え方がずれた瞬間に**別の行を書き換える**。
+   */
+  readonly line: number;
+  /** 印を除いた中身(前後の空白は落とす)。⚠ markdown の記法はそのまま。 */
+  readonly text: string;
+  readonly done: boolean;
+}
+
+/**
+ * 取り出す。⚠ **カンバンの面が呼ぶ**(候補列で絞ったノートの本文だけ)。
+ *
+ * ⚠ ここも `countTaskCandidates` と同じく **markdown-it と完全一致ではない**
+ * (字下げコードの中の `- [ ] x` を拾う)。⚠ ただし**書き換える側
+ * (`body-rewrite.ts` の `TASK_LINE`)も同じ規則**なので、
+ * **札に出た物は必ず押せる**(押しても何も起きない札を出さない)。
+ * 🔑 この向き ── 「出すぎるが、出た物は動く」── を選んでいるのは、
+ *   逆(狭く取る)にすると**入れ子のリストの中の項目が丸ごと落ちて
+ *   カンバンから消える**からである(user の動線が減る)。
+ */
+export function listTaskItems(body: string): TaskItem[] {
+  const items: TaskItem[] = [];
+  walkTaskLines(body, (line, done, rest) => {
+    items.push({ line, text: rest.trim(), done });
+  });
+  return items;
 }

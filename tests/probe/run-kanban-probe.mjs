@@ -1,22 +1,29 @@
 /**
- * P3-6 DoD probe: 15,000 件(うち todo 1,500)で kanban / calendar を駆動。
- *   1. kanban 初回描画時間(切替 → 列にカードが立つまで)
- *   2. トグル実クリック → store 書込 → カード移動の往復時間と、他カードのノード同一性
+ * P3-6 DoD probe: 15,000 件(うち 1,500 件がチェックリストを持つ)で
+ * kanban / calendar を駆動。
+ *   1. 面が出るまで(同期)と、**札が立つまで**(worker の走査を含む)を**別々に**
+ *   2. チェックの実クリック → 書換 → 札が列を移る往復時間と、他の札のノード同一性
  *   3. calendar 初回描画時間
  * 前提: vite --port 45731 起動済み。persistent profile(実 OPFS)。値は向きの参考。
+ *
+ * 🔴 **札の出所が変わった**(2026-08-19、#277 段②-b)。
+ * 札は「`todo` アーキタイプのノート」ではなく**本文のチェック項目**になり、
+ * 集めるのは **storage worker** である ── だから
+ * ⚠ fixture の本文に `- [ ]` が無いと盤面は 0 枚になり
+ *   (`sidebar-probe.html` が 10 件に 1 件それを書く)、
+ * ⚠ 「初回描画」は**同期では終わらない**(往復を含む量を別の名前で出す)。
  *
  * 🔴 **切替は押さずに dispatch する**(2026-08-17、#221 の巻き添えで判明)。
  *
  * ⚠ 直すまでこの probe は `q('[data-pkc-view="kanban"]').click()` が **null** で
- * 落ちていた。#59(2026-08-04)で kanban / calendar は**封印**され
- * (`src/features/sealed.ts`「導線は畳む・描画と state は生かす」)、
- * 切替ボタンは**出ないのが正しい**からである。⚠ **13 晩 1 度も走っていなかった**
- * ので気づかなかった(手前の probe が落ちると後続 step が skip される作りだった)。
+ * 落ちていた。#59(2026-08-04)で kanban / calendar は**封印**され、切替ボタンは
+ * 出ないのが正しかったからである。⚠ **13 晩 1 度も走っていなかった**ので
+ * 気づかなかった(手前の probe が落ちると後続 step が skip される作りだった)。
  *
- * 🔑 だから「押す」のではなく `SET_VIEW_MODE` を投げて、**生きている側**
- * (描画器・state)を測る ── `tests/adapter/kanban-calendar-view.test.ts` と同じ判断。
- * 🔑 そのうえで **`sealedOk` を逆向きの tripwire** にする ── 封印が解けて
- * ボタンが戻ったら probe が落ち、「実クリックへ戻せ」と教える。
+ * 🔑 **封印は 2026-08-19 に解けたが、ここは変えない** ── 解いた形は
+ * **組み込みタイル**であって帯の切替ではないので、帯のボタンは**今も無いのが正しい**
+ * (`bandHasNoBoard` がその tripwire。導線そのものは
+ * `tests/smoke/kanban.smoke.spec.ts` が実クリックで見る)。
  */
 import { chromium } from '@playwright/test';
 import { rmSync, mkdirSync } from 'node:fs';
@@ -54,15 +61,16 @@ try {
       return false;
     };
 
-    // 0. 前提 ── 封印中は切替ボタンが**無い**のが正しい(逆向きの tripwire)
     /**
-     * ⚠ **不在の検査は、観測点が死んでも真になる**(2026-08-17 のレビュー)。
-     * `data-pkc-view` を改名したり、view ボタンの生成を丸ごと落としても
-     * 「kanban が無い」は真である ── だから**封印外の view が在ること**を
-     * 同時に見る(同じループが属性を付けるので、これが positive control になる)。
+     * 0. 前提 ── **切替は上の帯に無い**(#277 段②-b で封印を解いた後も同じ)。
+     *
+     * ⚠ 解いた形は**組み込みタイル**であって帯の切替ではないので、
+     *   `[data-pkc-view="kanban"]` は**今も無いのが正しい**。
+     * ⚠ **不在の検査は、観測点が死んでも真になる** ── だから
+     *   「封印外の view が在ること」を同時に見る(positive control)。
      */
     const viewButtonsAlive = q('[data-pkc-view="settings"]') !== null;
-    const sealedOk =
+    const bandHasNoBoard =
       viewButtonsAlive &&
       q('[data-pkc-view="kanban"]') === null &&
       q('[data-pkc-view="calendar"]') === null;
@@ -70,11 +78,25 @@ try {
     //    「在ること」は切替の証拠にならない ── `hidden` の遷移で見る
     const kanbanWasHidden = pane('kanban')?.hidden === true;
 
-    // 1. kanban 初回描画(dispatch は同期 ── 前後の壁時計で測る)
+    /**
+     * 1. 🔴 **2 つの量を分けて測る**(#277 段②-b で札の出所が変わった)。
+     *
+     * ⚠ 直す前の `kanbanFirstRenderMs` は「dispatch が返るまで」= **同期の描画**
+     *   だけを測っていた。いまは札を **storage worker が集める**ので、
+     *   同じ名前で出すと**worker の往復を測っていないのに「初回描画」と名乗る**
+     *   (CLAUDE.md §4「計器の名前が、計器の見ている範囲より広い」)。
+     * 🔑 だから 2 つ出す:
+     *   - `paneShownMs` … 面が出るまで(同期。器と列だけ)
+     *   - `cardsReadyMs` … **札が 1 枚立つまで**(worker の走査を含む)
+     */
     let t0 = performance.now();
     window.__APP__.dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'kanban' });
-    const kanbanFirstRenderMs = +(performance.now() - t0).toFixed(1);
+    const paneShownMs = +(performance.now() - t0).toFixed(1);
     const kanbanShown = pane('kanban')?.hidden === false;
+    const cardsCame = await until(
+      () => q('[data-pkc-region="kanban-cards"] [data-pkc-entry]') !== null,
+    );
+    const cardsReadyMs = +(performance.now() - t0).toFixed(1);
     const openCol = q('[data-pkc-kanban-status="open"] [data-pkc-region="kanban-cards"]');
     const doneCol = q('[data-pkc-kanban-status="done"] [data-pkc-region="kanban-cards"]');
     /**
@@ -85,17 +107,27 @@ try {
      */
     if (!openCol || !doneCol)
       return { error: 'kanban の列が無い ── 面が描かれていないか、観測点が変わった', kanbanShown };
+    if (!cardsCame)
+      return { error: '札が 1 枚も立たない ── 走査が返っていないか、本文に項目が無い', kanbanShown };
     const cardCount = openCol.children.length + doneCol.children.length;
 
-    // 2. トグル往復(e0 は todo: i%10===0)
+    /**
+     * 2. トグル往復。⚠ **押すのは本物の checkbox**(`data-pkc-task-line`)。
+     * 🔑 狙うのは `e0`(fixture は 10 件に 1 件チェックリストを持つ)の**先頭の項目**。
+     */
     const others = [...openCol.children].slice(1, 50); // 同一性照合サンプル
-    const toggle = q('[data-pkc-entry="e0"] [data-pkc-action="toggle-todo"]');
+    const firstCard = openCol.querySelector('[data-pkc-entry="e0"]');
+    const toggle = firstCard?.querySelector('[data-pkc-action="toggle-task"]');
     if (!toggle)
-      return { error: 'e0 のトグルが無い ── カードが立っていない', cardCount, kanbanShown };
+      return { error: 'e0 の札が無い ── 走査の順が変わったか、項目が拾えていない', cardCount, kanbanShown };
+    const line = toggle.getAttribute('data-pkc-task-line');
     t0 = performance.now();
     toggle.click();
-    const moved = await until(() =>
-      q('[data-pkc-kanban-status="done"] [data-pkc-entry="e0"]') !== null,
+    const moved = await until(
+      () =>
+        q(
+          `[data-pkc-kanban-status="done"] [data-pkc-entry="e0"] [data-pkc-task-line="${line}"]`,
+        ) !== null,
     );
     const toggleRoundtripMs = +(performance.now() - t0).toFixed(1);
     /**
@@ -109,7 +141,10 @@ try {
     const othersIntact =
       openColNow !== null &&
       others.every((el, i) => [...openColNow.children].slice(0, 49)[i] === el);
-    const state = window.__APP__.dispatcher.getState();
+    /** 🔑 押した札の**本文が実際に変わった**か(見た目だけ動いていないか)。 */
+    const scan = window.__APP__.dispatcher.getState().taskScan;
+    const toggledDone =
+      scan?.cards.find((c) => c.lid === 'e0' && String(c.line) === line)?.done === true;
 
     // 3. calendar 初回描画
     t0 = performance.now();
@@ -119,17 +154,22 @@ try {
     const gridReady = q('[data-pkc-region="calendar-grid"]') !== null;
 
     return {
-      sealedOk,
+      bandHasNoBoard,
       viewButtonsAlive,
       colSameNode,
       kanbanWasHidden,
       kanbanShown,
-      kanbanFirstRenderMs,
+      paneShownMs,
+      cardsReadyMs,
       cardCount,
+      /** ⚠ 上限で切ったか(切っていたら `cardCount` は「全部」ではない)。 */
+      truncated: scan?.truncated ?? null,
+      scannedNotes: scan?.scannedNotes ?? null,
+      totalNotes: scan?.totalNotes ?? null,
       moved,
       toggleRoundtripMs,
       othersIntact,
-      toggledStatus: state.entryMetas.get('e0')?.status,
+      toggledDone,
       calendarFirstRenderMs,
       calendarShown,
       gridReady,
@@ -139,14 +179,14 @@ try {
 
   const ok =
     !result.error &&
-    result.sealedOk &&
+    result.bandHasNoBoard &&
     result.kanbanWasHidden &&
     result.kanbanShown &&
-    result.cardCount === 1500 &&
+    result.cardCount > 0 &&
     result.moved &&
     result.othersIntact &&
     result.colSameNode &&
-    result.toggledStatus === 'done' &&
+    result.toggledDone &&
     result.calendarShown &&
     result.gridReady &&
     result.storageVfs === 'opfs-sahpool';

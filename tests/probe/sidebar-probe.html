@@ -22,7 +22,16 @@
               lid: 'e' + i,
               title: 'entry ' + i,
               archetype: i % 10 === 0 ? 'todo' : 'text',
-              body: `# entry ${i}\n\n本文 ${i}`,
+              /**
+               * 🔴 10 件に 1 件は**チェックリストを持つ**(#277 段②-b)。
+               * ⚠ カンバンの札は `todo` アーキタイプではなく**本文のチェック項目**に
+               *   なったので、本文に `- [ ]` が無いと盤面は 0 枚になり、
+               *   probe は「カードが立っていない」で落ちる(= 測れない)。
+               */
+              body:
+                i % 10 === 0
+                  ? `# entry ${i}\n\n- [ ] やること A\n- [ ] やること B\n- [x] 済んだこと\n`
+                  : `# entry ${i}\n\n本文 ${i}`,
               entryOrder: i,
               status: i % 10 === 0 ? 'open' : null,
               date: null,

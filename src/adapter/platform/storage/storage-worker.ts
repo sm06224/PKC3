@@ -24,7 +24,13 @@ import { contentHash64Hex } from './content-hash';
 import { scanAssetRefsInto } from '@features/asset/asset-ref-scan';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { planSearch } from '@features/filter/search-query';
-import { countTaskCandidates } from '@features/markdown/task-count';
+import { countTaskCandidates, listTaskItems } from '@features/markdown/task-count';
+import {
+  clipTaskText,
+  TASK_LIMITS,
+  type TaskCard,
+  type TaskScan,
+} from '@features/kanban/kanban-data';
 import { createQueryScan, FRONTMATTER_SCAN_CHARS } from '@features/query/group-by';
 import {
   applyLinePatch,
@@ -334,6 +340,87 @@ function runQueryScan(cid: string, key: string | null): {
     if (rows.length < QUERY_SCAN_CHUNK) break;
   }
   return scan.finish();
+}
+
+/**
+ * 🔴 **候補の条件は 1 か所**(#277 段②。CLAUDE.md §7)。
+ *
+ * 🔴 **NULL も候補に入れる**(= まだ数えていない行)。⚠ 版を上げていないので
+ * **旧ビルドも同じ DB に書く**が、旧ビルドの UPSERT はこの列を知らないので、
+ * 新しく作った行が NULL で残る。NULL を外すと、その行は**カンバンから永久に
+ * 消える**(取りこぼし)。🔑 多めに拾うのは無害 ── 本文を読んで項目 0 件と
+ * 分かるだけである。
+ *
+ * ⚠ **残っている限界**(2026-08-19 の実地調査で実測):旧ビルドが**既にある行を
+ * 書き換えた**ときは、その UPSERT が列を挙げないので値が**据え置かれる**
+ * (NULL には戻らない)。チェックが 0 件だったノートに旧ビルドでチェックを
+ * 足すと、列は 0 のままなので**その回はカンバンに出ない**。⚠ 壊れではなく遅れ
+ * ── 新ビルドで 1 度保存すれば直る(`bindUpsert` が本文から数え直す)。
+ * 🔑 直すには「どの本文について数えたか」の印(`updated_at` との突き合わせ)が
+ * 要るが、列がもう 1 本増えるので**いまは採らない**。
+ */
+const TASK_CANDIDATE_WHERE = 'cid = ? AND (task_total IS NULL OR task_total > 0)';
+
+/**
+ * 走査で 1 度に読むノートの数。⚠ **本文を丸ごと**読むので、先頭だけ読む
+ * `QUERY_SCAN_CHUNK`(500)より小さくする ── 一度に heap へ載る量が桁で違う。
+ */
+const TASK_SCAN_CHUNK = 100;
+
+/**
+ * 🔴 **カンバンの札を集める**(#277 段②-b)。
+ *
+ * 🔑 **本文は worker から出さない** ── 舐めるのはここで、返すのは項目だけ
+ * (#184 の全文走査と同じ型。不可侵指示 2026-07-27「速やかな破棄」)。
+ * ⚠ 塊で読み、塊ごとに捨てる ── 候補が 5000 件あっても、heap に載るのは
+ * 100 件ぶんの本文である。
+ */
+function runTaskScan(cid: string): TaskScan {
+  const database = need();
+  const totalNotes = Number(
+    database.selectValue(`SELECT count(*) FROM entries WHERE ${TASK_CANDIDATE_WHERE}`, [cid]) ?? 0,
+  );
+  const cards: TaskCard[] = [];
+  let scannedNotes = 0;
+  let truncated = false;
+  let stop = false;
+  let after: { entryOrder: number; lid: string } | undefined;
+  while (!stop) {
+    const rows = database.selectObjects(
+      after === undefined
+        ? `SELECT lid, entry_order, body FROM entries WHERE ${TASK_CANDIDATE_WHERE}
+             ORDER BY entry_order, lid LIMIT ?`
+        : `SELECT lid, entry_order, body FROM entries WHERE ${TASK_CANDIDATE_WHERE}
+             AND (entry_order > ? OR (entry_order = ? AND lid > ?))
+            ORDER BY entry_order, lid LIMIT ?`,
+      after === undefined
+        ? [cid, TASK_SCAN_CHUNK]
+        : [cid, after.entryOrder, after.entryOrder, after.lid, TASK_SCAN_CHUNK],
+    ) as unknown as Array<{ lid: string; entry_order: number; body: string | null }>;
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      // ⚠ **切ったら必ず `truncated`** ── 黙って切ると user は「無い」と読む
+      if (scannedNotes >= TASK_LIMITS.notes) {
+        truncated = true;
+        stop = true;
+        break;
+      }
+      scannedNotes += 1;
+      for (const item of listTaskItems(row.body ?? '')) {
+        if (cards.length >= TASK_LIMITS.items) {
+          truncated = true;
+          stop = true;
+          break;
+        }
+        cards.push({ lid: row.lid, line: item.line, text: clipTaskText(item.text), done: item.done });
+      }
+      if (stop) break;
+    }
+    const last = rows[rows.length - 1]!;
+    after = { entryOrder: last.entry_order, lid: last.lid };
+    if (rows.length < TASK_SCAN_CHUNK) break;
+  }
+  return { cards, totalNotes, scannedNotes, truncated };
 }
 
 /**
@@ -821,36 +908,7 @@ const handlers: Handlers = {
          FROM entries WHERE cid = ? ORDER BY entry_order`,
       [req.cid],
     ) as unknown as ResultMap['listEntryMetas'],
-  /**
-   * 🔴 **チェック項目を持つノートの lid だけ**(#277 段②)。
-   * ⚠ body 列は読まない ── ここで本文を返すと、絞る意味が消える
-   *   (呼び側が `getBodies` で必要な分だけ取る)。
-   */
-  listTaskEntries: (req) =>
-    (
-      need().selectObjects(
-        /**
-         * 🔴 **NULL も候補に入れる**(= まだ数えていない行)。
-         * ⚠ 版を上げていないので**旧ビルドも同じ DB に書く**が、旧ビルドの
-         *   UPSERT はこの列を知らないので、新しく作った行が NULL で残る。
-         *   NULL を外すと、その行は**カンバンから永久に消える**(取りこぼし)。
-         * 🔑 多めに拾うのは無害 ── 本文を読んで項目 0 件と分かるだけである。
-         *
-         * ⚠ **残っている限界**(2026-08-19 の実地調査で実測):旧ビルドが
-         *   **既にある行を書き換えた**ときは、その UPSERT が列を挙げないので
-         *   値が**据え置かれる**(NULL には戻らない)。チェックが 0 件だった
-         *   ノートに旧ビルドでチェックを足すと、列は 0 のままなので
-         *   **その回はカンバンに出ない**。⚠ 壊れではなく遅れ ── 新ビルドで
-         *   1 度保存すれば直る(`bindUpsert` が本文から数え直す)。
-         *   🔑 直すには「どの本文について数えたか」の印(`updated_at` との
-         *   突き合わせ)が要るが、列がもう 1 本増えるので**いまは採らない**。
-         */
-        `SELECT lid FROM entries
-          WHERE cid = ? AND (task_total IS NULL OR task_total > 0)
-          ORDER BY entry_order`,
-        [req.cid],
-      ) as Array<{ lid: string }>
-    ).map((r) => r.lid),
+  taskScan: (req) => runTaskScan(req.cid),
   getBody: (req) => {
     const rows = need().selectObjects(
       'SELECT body FROM entries WHERE cid = ? AND lid = ?',

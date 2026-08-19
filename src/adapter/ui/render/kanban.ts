@@ -1,30 +1,43 @@
 /**
- * kanban の差分描画(P3-6)。sidebar と同じ規律:
- * - 断面指紋(entryMetas / order / selectedLid の参照)一致なら DOM 不触
- * - カードは lid キーで再利用。削除 pass が先(cursor 汚染による全行 move 防止)
- * - body は読まない ── 抽出列(status / archived)だけで組む
+ * 🔴 **カンバン ── 札 1 枚 = 本文のチェック項目 1 行**(#277 段②-b)。
+ *
+ * 何が札になるかは `features/kanban/kanban-data.ts` の頭に書いてある
+ * (要約:`todo` アーキタイプは封印中で作れないので、盤面の単位を
+ * **user が実際に書いているチェックリストの行**へ移した)。
+ *
+ * ## ここが守る規律
+ *
+ * - **本文は読まない**。舐めるのは storage worker で、ここに来るのは
+ *   `state.taskScan`(項目だけ)である ── 題名は `entryMetas` から引く
+ * - **押す先は札の lid**。⚠ 開いているノートではない ── 盤面の札は
+ *   いろいろなノートの行なので、`data-pkc-entry` を札に焼いて
+ *   binder に**そこから**引かせる(`toggle-task`)
+ * - 差分描画(sidebar / 旧カンバンと同じ):断面指紋が一致なら DOM 不触 /
+ *   札は鍵で再利用 / 削除 pass が先(cursor 汚染で全札 move にしない)
+ * - 🔴 **切ったことは画面に出す**(黙って切ると user は「無い」と読む)
  */
-import type { EntryMeta } from '@core/model/entry-meta';
 import type { AppState } from '@adapter/state/app-state';
 import {
-  groupTodosByStatus,
+  groupTasksByStatus,
   KANBAN_COLUMNS,
+  taskCardKey,
   type KanbanStatus,
+  type TaskCard,
 } from '@features/kanban/kanban-data';
 import { matchesEntry, normalizeQuery } from '@features/filter/title-filter';
-import { setIcon, type IconName } from './icons';
 
 export class KanbanRenderer {
   private readonly region: HTMLElement;
   private readonly cards = new Map<string, HTMLElement>();
-  /** カードごとの描画済み meta 参照(sidebar と同じ行粒度 skip)。 */
-  private readonly cardMeta = new Map<string, EntryMeta>();
-  private columns: Record<KanbanStatus, HTMLElement> | null = null;
-  private lastMetas: ReadonlyMap<string, EntryMeta> | null = null;
-  private lastOrder: readonly string[] | null = null;
-  private lastSelected: string | null = null;
-  /** ⚠ 絞り込みも指紋の一部(review M-3 ── 絞っても盤面が変わらないのは嘘)。 */
+  /** 札ごとの描画済み参照(札粒度の skip)。 */
+  private readonly cardData = new Map<string, TaskCard>();
+  private frame: { note: HTMLElement; columns: Record<KanbanStatus, HTMLElement> } | null = null;
+  private lastScan: AppState['taskScan'] = null;
+  private lastFailed = false;
+  private lastMetas: AppState['entryMetas'] | null = null;
   private lastFilter: string | null = null;
+  private lastHits: AppState['searchHits'] = null;
+  private lastSelected: string | null = null;
 
   constructor(region: HTMLElement) {
     this.region = region;
@@ -32,79 +45,104 @@ export class KanbanRenderer {
 
   render(state: AppState): void {
     if (
+      state.taskScan === this.lastScan &&
+      state.taskScanFailed === this.lastFailed &&
       state.entryMetas === this.lastMetas &&
-      state.order === this.lastOrder &&
       state.filterQuery === this.lastFilter &&
+      state.searchHits === this.lastHits &&
       state.selectedLid === this.lastSelected
     )
       return;
+    this.lastScan = state.taskScan;
+    this.lastFailed = state.taskScanFailed;
+    this.lastMetas = state.entryMetas;
+    this.lastFilter = state.filterQuery;
+    this.lastHits = state.searchHits;
+    this.lastSelected = state.selectedLid;
 
-    const columns = this.ensureColumns();
-    // 🔑 絞り込みは**全部の面**に同じ規則で効かせる(review M-3)。初版は
-    // サイドバーとランチャーだけが効いており、「りんご」と書かれた欄の隣で
-    // 盤面が全件を出していた ── 画面が嘘をつく
+    const frame = this.ensureFrame();
+    /**
+     * 🔑 **絞り込みは全部の面に同じ規則で効かせる**。⚠ 判定は 1 か所
+     * (`matchesEntry`)── 面ごとに書くと、「りんご」と書かれた欄の隣で
+     * 盤面が全件を出す(画面が嘘をつく)。
+     * ⚠ 絞るのは**ノート単位**である(本文の当たりは `searchHits` が持つ)。
+     */
     const q = normalizeQuery(state.filterQuery);
-    const ordered: EntryMeta[] = [];
-    for (const lid of state.order) {
-      const m = state.entryMetas.get(lid);
-      if (m && matchesEntry(m.lid, m.title, q, state.searchHits)) ordered.push(m);
-    }
-    const grouped = groupTodosByStatus(ordered);
+    const all = state.taskScan?.cards ?? [];
+    const visible = all.filter((c) => {
+      const m = state.entryMetas.get(c.lid);
+      return m !== undefined && matchesEntry(m.lid, m.title, q, state.searchHits);
+    });
+    frame.note.textContent = this.noteText(state, all.length, visible.length);
+    const grouped = groupTasksByStatus(visible);
 
-    // 削除 pass を先に(sidebar review A-2 と同じ理由)
-    const wanted = new Set<string>();
-    for (const col of KANBAN_COLUMNS)
-      for (const m of grouped[col.status]) wanted.add(m.lid);
-    for (const [lid, card] of this.cards) {
-      if (!wanted.has(lid)) {
+    // 削除 pass を先に(残った実ノードが cursor を汚すと、以降が全部 move になる)
+    const wanted = new Set(visible.map(taskCardKey));
+    for (const [key, card] of this.cards) {
+      if (!wanted.has(key)) {
         card.remove();
-        this.cards.delete(lid);
-        this.cardMeta.delete(lid);
+        this.cards.delete(key);
+        this.cardData.delete(key);
       }
     }
-    // 列を移ったカードも**先に**移動元列から外す ── 残った実ノードが cursor を
-    // 汚すと、そのカード以降の全カードが insertBefore(move)になる
-    // (P3-6a review #1: open 先頭 1 枚のトグルで後続 ~749 枚が move する実測)
+    // 列を移った札も**先に**移動元から外す(同上)
     for (const col of KANBAN_COLUMNS) {
-      const host = columns[col.status];
-      for (const m of grouped[col.status]) {
-        const card = this.cards.get(m.lid);
+      const host = frame.columns[col.status];
+      for (const c of grouped[col.status]) {
+        const card = this.cards.get(taskCardKey(c));
         if (card && card.parentNode !== null && card.parentNode !== host) card.remove();
       }
     }
 
     for (const col of KANBAN_COLUMNS) {
-      const host = columns[col.status];
+      const host = frame.columns[col.status];
       let cursor: ChildNode | null = host.firstChild;
-      for (const meta of grouped[col.status]) {
-        let card = this.cards.get(meta.lid);
+      for (const data of grouped[col.status]) {
+        const key = taskCardKey(data);
+        const title = state.entryMetas.get(data.lid)?.title ?? '';
+        let card = this.cards.get(key);
         if (!card) {
-          card = this.createCard(meta);
-          this.cards.set(meta.lid, card);
-          this.cardMeta.set(meta.lid, meta);
-        } else if (this.cardMeta.get(meta.lid) !== meta) {
-          this.patchCard(card, meta);
-          this.cardMeta.set(meta.lid, meta);
+          card = this.createCard(data);
+          this.cards.set(key, card);
         }
-        if (meta.lid === state.selectedLid) card.setAttribute('data-pkc-selected', '');
+        if (this.cardData.get(key) !== data || card.getAttribute('data-pkc-note') !== title) {
+          this.patchCard(card, data, title);
+          this.cardData.set(key, data);
+        }
+        // 🔑 選択は属性の付け替えだけ(札を作り直さない)
+        if (data.lid === state.selectedLid) card.setAttribute('data-pkc-selected', '');
         else card.removeAttribute('data-pkc-selected');
-        if (cursor === card) {
-          cursor = card.nextSibling;
-        } else {
-          host.insertBefore(card, cursor);
-        }
+        if (cursor === card) cursor = card.nextSibling;
+        else host.insertBefore(card, cursor);
       }
     }
-
-    this.lastMetas = state.entryMetas;
-    this.lastOrder = state.order;
-    this.lastFilter = state.filterQuery;
-    this.lastSelected = state.selectedLid;
   }
 
-  private ensureColumns(): Record<KanbanStatus, HTMLElement> {
-    if (this.columns) return this.columns;
-    const cols = {} as Record<KanbanStatus, HTMLElement>;
+  /**
+   * 状態の 1 行。⚠ **「まだ」「駄目だった」「無い」「切った」を区別する** ──
+   * 混ぜると、集めている最中と項目 0 件が同じ顔になる。
+   */
+  private noteText(state: AppState, total: number, shown: number): string {
+    if (state.taskScanFailed)
+      return 'チェック項目を集められませんでした。面を開き直すともう一度試します。';
+    if (state.taskScan === null) return '集めています…';
+    if (total === 0)
+      return 'チェックの付いた行がまだありません。ノートに「- [ ] やること」と書くと、ここに出ます。';
+    if (shown === 0) return '絞り込みに当てはまる項目がありません。';
+    const scan = state.taskScan;
+    // 🔴 切ったなら必ず言う(「無い」と読ませない)
+    if (scan.truncated)
+      return `多いので ${scan.scannedNotes} 件のノートまでを出しています(候補は ${scan.totalNotes} 件)。`;
+    return `${shown} 件`;
+  }
+
+  private ensureFrame(): { note: HTMLElement; columns: Record<KanbanStatus, HTMLElement> } {
+    if (this.frame) return this.frame;
+    const note = document.createElement('p');
+    note.setAttribute('data-pkc-field', 'kanban-note');
+    const board = document.createElement('div');
+    board.setAttribute('data-pkc-region', 'kanban-board');
+    const columns = {} as Record<KanbanStatus, HTMLElement>;
     for (const col of KANBAN_COLUMNS) {
       const section = document.createElement('section');
       section.setAttribute('data-pkc-region', 'kanban-column');
@@ -114,46 +152,51 @@ export class KanbanRenderer {
       const host = document.createElement('div');
       host.setAttribute('data-pkc-region', 'kanban-cards');
       section.append(heading, host);
-      this.region.append(section);
-      cols[col.status] = host;
+      board.append(section);
+      columns[col.status] = host;
     }
-    this.columns = cols;
-    return cols;
+    this.region.append(note, board);
+    this.frame = { note, columns };
+    return this.frame;
   }
 
-  private createCard(meta: EntryMeta): HTMLElement {
+  private createCard(data: TaskCard): HTMLElement {
     const card = document.createElement('article');
-    card.setAttribute('data-pkc-entry', meta.lid);
+    /**
+     * 🔴 **どのノートの行かを札に焼く**。⚠ これが無いと binder は
+     * 「いま開いているノート」に書き込む ── 盤面では**別のノートを書き換える**。
+     */
+    card.setAttribute('data-pkc-entry', data.lid);
     card.setAttribute('data-pkc-action', 'select-entry');
-    // data-pkc-entry はカード(entry を表す要素)にのみ ── binder は closest で引く
-    const toggle = document.createElement('button');
-    toggle.type = 'button';
-    toggle.setAttribute('data-pkc-action', 'toggle-todo');
-    toggle.setAttribute('aria-label', '状態を切り替え');
-    // ⚠ 図案の器として印を付ける(CSS の 1.15em 固定がここに当たる)
-    toggle.setAttribute('data-pkc-icon', '');
-    const title = document.createElement('span');
-    title.setAttribute('data-pkc-field', 'title');
-    const date = document.createElement('span');
-    date.setAttribute('data-pkc-field', 'date');
-    card.append(toggle, title, date);
-    this.patchCard(card, meta);
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.className = 'pkc-task-checkbox';
+    box.setAttribute('data-pkc-action', 'toggle-task');
+    box.setAttribute('aria-label', 'チェックを切り替え');
+    const text = document.createElement('span');
+    text.setAttribute('data-pkc-field', 'text');
+    const note = document.createElement('span');
+    note.setAttribute('data-pkc-field', 'note');
+    card.append(box, text, note);
+    this.patchCard(card, data, '');
     return card;
   }
 
-  private patchCard(card: HTMLElement, meta: EntryMeta): void {
-    const done = meta.status === 'done';
-    const toggle = card.querySelector<HTMLElement>('[data-pkc-action="toggle-todo"]');
-    // ⚠ 図案は単色 SVG(P9 段③)。⚠ `textContent` で書かない ── 子ごと消える
-    const want: IconName = done ? 'check-box' : 'box';
-    if (toggle && toggle.getAttribute('data-pkc-icon-name') !== want) {
-      toggle.setAttribute('data-pkc-icon-name', want);
-      setIcon(toggle, want);
+  private patchCard(card: HTMLElement, data: TaskCard, title: string): void {
+    const box = card.querySelector<HTMLInputElement>('[data-pkc-action="toggle-task"]');
+    if (box) {
+      // 🔴 **指すのは原文の行番号**(索引ではない ── 別の行を書き換えないため)
+      box.setAttribute('data-pkc-task-line', String(data.line));
+      box.checked = data.done;
     }
-    const title = card.querySelector('[data-pkc-field="title"]');
-    if (title && title.textContent !== meta.title) title.textContent = meta.title;
-    const date = card.querySelector('[data-pkc-field="date"]');
-    const dateText = meta.date ?? '';
-    if (date && date.textContent !== dateText) date.textContent = dateText;
+    if (data.done) card.setAttribute('data-pkc-task-done', '');
+    else card.removeAttribute('data-pkc-task-done');
+    const text = card.querySelector('[data-pkc-field="text"]');
+    // ⚠ 中身が空の項目もある(`- [ ]` だけの行)── 札は出すが、字は出ない
+    if (text && text.textContent !== data.text) text.textContent = data.text;
+    const note = card.querySelector('[data-pkc-field="note"]');
+    if (note && note.textContent !== title) note.textContent = title;
+    // 🔑 題名は指紋にも使う(ノートを改名したら札の字も直る)
+    card.setAttribute('data-pkc-note', title);
   }
 }

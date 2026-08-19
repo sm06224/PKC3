@@ -1087,33 +1087,58 @@ describe('作成と居場所(#258)', () => {
  * 面は**まず列で絞ってから**候補の本文だけ読む。
  *
  * 🔑 守る主張:
- * 1. 書けば列が入り、`listTaskEntries` が**その lid だけ**返す
- * 2. 🔴 **消したら列も戻る**(片道にしない ── 消えたのに候補に残ると空振りが増える)
+ * 1. 書けば列が入り、`taskScan` が**その行だけ**を札にする(行番号は原文のもの)
+ * 2. 🔴 **消したら札も消える**(片道にしない ── 消えたのに候補に残ると空振りが増える)
  * 3. 🔴 **呼び側が値を送ってこなくても正しい**(旧いタブの follower。#286 の型)
+ * 4. 🔴 **切ったことを言う**(黙って切ると user は「無い」と読む)
+ *
+ * 🔴 **本文は worker から出ない** ── 返るのは項目だけである(不可侵指示
+ * 2026-07-27)。だから `taskScan` の結果に本文は 1 バイトも入っていない。
  */
-describe('チェック項目の候補列 (#277 段②)', () => {
+describe('カンバンの札を集める (#277 段②)', () => {
   const taskBody = '# 買い物\n\n- [ ] 牛乳\n- [x] 卵\n';
+  /** 札を集めて、鍵の一覧にする(順は entry_order → 行番号)。 */
+  const scanKeys = async (cid: string): Promise<string[]> => {
+    const scan = await request({ op: 'taskScan', cid });
+    return scan.cards.map((c) => `${c.lid} ${c.line}`);
+  };
 
-  it('🔴 チェックのあるノートだけが候補に出る', async () => {
+  it('🔴 チェックのある行が札になり、無いノートは 1 枚も出さない', async () => {
     await request({ op: 'upsertEntry', cid: 'c1', entry: entry('tk-1', taskBody) });
     await request({ op: 'upsertEntry', cid: 'c1', entry: entry('tk-2', '# ただの本文\n') });
-    const lids = await request({ op: 'listTaskEntries', cid: 'c1' });
-    expect(lids, 'チェックのあるノートが候補に出ない').toContain('tk-1');
-    expect(lids, 'チェックの無いノートまで候補に入っている').not.toContain('tk-2');
+    const keys = await scanKeys('c1');
+    // ⚠ 行番号は**原文のもの**(2 行目と 3 行目)
+    expect(keys, 'チェックの行が札になっていない').toContain('tk-1 2');
+    expect(keys).toContain('tk-1 3');
+    expect(
+      keys.some((k) => k.startsWith('tk-2 ')),
+      'チェックの無いノートまで札になっている',
+    ).toBe(false);
+  });
+
+  /** 🔴 **印の向きが本文と合っている**(取り違えると済みが未完了の列に並ぶ)。 */
+  it('🔴 印の向きが本文と合う', async () => {
+    await request({ op: 'upsertEntry', cid: 'c1', entry: entry('tk-mark', taskBody) });
+    const scan = await request({ op: 'taskScan', cid: 'c1' });
+    const mine = scan.cards.filter((c) => c.lid === 'tk-mark');
+    expect(mine.map((c) => [c.text, c.done])).toEqual([
+      ['牛乳', false],
+      ['卵', true],
+    ]);
   });
 
   /**
-   * 🔴 **消したら候補からも消える**。⚠ 片道だと、チェックを全部消したノートが
+   * 🔴 **消したら札も消える**。⚠ 片道だと、チェックを全部消したノートが
    *   いつまでも候補に残り、面を開くたびに無駄な本文の読みが増える。
    */
-  it('🔴 チェックを消すと候補から外れる(片道にしない)', async () => {
+  it('🔴 チェックを消すと札も消える(片道にしない)', async () => {
     await request({ op: 'upsertEntry', cid: 'c1', entry: entry('tk-3', taskBody) });
-    expect(await request({ op: 'listTaskEntries', cid: 'c1' })).toContain('tk-3');
+    expect(await scanKeys('c1')).toContain('tk-3 2');
     await request({ op: 'upsertEntry', cid: 'c1', entry: entry('tk-3', '# 消した\n') });
     expect(
-      await request({ op: 'listTaskEntries', cid: 'c1' }),
-      '消したのに候補に残っている',
-    ).not.toContain('tk-3');
+      (await scanKeys('c1')).some((k) => k.startsWith('tk-3 ')),
+      '消したのに札が残っている',
+    ).toBe(false);
   });
 
   /**
@@ -1125,7 +1150,7 @@ describe('チェック項目の候補列 (#277 段②)', () => {
    *   (= user のデータが書けない)。本文から数えるので、送ってこなくても効く。
    * 🔑 ここでは「余計な field を持たない素の要求」= 旧ビルドの形を再現している。
    */
-  it('🔴 旧いタブの形(数を送ってこない要求)でも、候補に出る', async () => {
+  it('🔴 旧いタブの形(数を送ってこない要求)でも、札に出る', async () => {
     await request({
       op: 'upsertEntry',
       cid: 'c1',
@@ -1133,22 +1158,35 @@ describe('チェック項目の候補列 (#277 段②)', () => {
       entry: entry('tk-old', '- [ ] 旧いタブから書いた\n'),
     });
     expect(
-      await request({ op: 'listTaskEntries', cid: 'c1' }),
-      '旧いタブから書いたノートが候補に出ない',
-    ).toContain('tk-old');
+      await scanKeys('c1'),
+      '旧いタブから書いたノートの札が出ない',
+    ).toContain('tk-old 0');
   });
 
   /** ⚠ 引用の中も拾う(素朴な行走査が落とす形 ── `task-count.test.ts` 参照)。 */
-  it('引用の中のチェックも候補になる', async () => {
+  it('引用の中のチェックも札になる', async () => {
     await request({ op: 'upsertEntry', cid: 'c1', entry: entry('tk-q', '> - [ ] 引用\n') });
-    expect(await request({ op: 'listTaskEntries', cid: 'c1' })).toContain('tk-q');
+    expect(await scanKeys('c1')).toContain('tk-q 0');
   });
 
   /** ⚠ 別の器のノートは混ざらない(cid で切れている)。 */
   it('別の器のノートは混ざらない', async () => {
     await request({ op: 'openContainer', cid: 'c-other', title: 'x' });
     await request({ op: 'upsertEntry', cid: 'c-other', entry: entry('tk-other', taskBody) });
-    expect(await request({ op: 'listTaskEntries', cid: 'c1' })).not.toContain('tk-other');
-    expect(await request({ op: 'listTaskEntries', cid: 'c-other' })).toEqual(['tk-other']);
+    expect((await scanKeys('c1')).some((k) => k.startsWith('tk-other '))).toBe(false);
+    expect(await scanKeys('c-other')).toEqual(['tk-other 2', 'tk-other 3']);
+  });
+
+  /**
+   * 🔴 **切ったことを言う**(黙って切ると user は「無い」と読む)。
+   * ⚠ 上限は features 側(`TASK_LIMITS`)が持つので、ここでは
+   *   **上限に届かない量では切らない**ことだけ pin する ── 上限ちょうどの
+   *   走査を test で作ると、上限を上げた日に**主張ごと嘘になる**。
+   */
+  it('上限に届かない量では切らない(切ったと言わない)', async () => {
+    const scan = await request({ op: 'taskScan', cid: 'c1' });
+    expect(scan.truncated, '切っていないのに切ったと言っている').toBe(false);
+    expect(scan.scannedNotes, '候補を読み残している').toBe(scan.totalNotes);
+    expect(scan.totalNotes, '候補が 1 件も無い(空振り)').toBeGreaterThan(0);
   });
 });

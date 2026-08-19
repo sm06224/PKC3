@@ -867,6 +867,7 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    'Office で保存すると、PKC のノートに残るようになりました',
     'PDF が読める大きさで出るようになりました(別の窓でも開けます)',
     '1 面編集で、行の箱の高さと上下キーを直しました',
     'ボタンの見た目を整えました(本文の面が広くなりました)',

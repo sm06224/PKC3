@@ -14,7 +14,7 @@
  *   ここを自前の正規表現で書くと「同じ問いに答える口が 3 つ目」になる。
  */
 import { describe, expect, it } from 'vitest';
-import { countTaskCandidates } from '../../src/features/markdown/task-count';
+import { countTaskCandidates, listTaskItems } from '../../src/features/markdown/task-count';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 
 /** 🔑 **描く側の真値** ── 画面に出るチェック欄の数(自前で数え直さない)。 */
@@ -51,6 +51,22 @@ const CORPUS: ReadonlyArray<readonly [string, string]> = [
   ['空', ''],
   ['角括弧なし', '# 題\n\nただの本文。\n'],
 ];
+
+/**
+ * 🔑 **描く側の真値(行番号つき)** ── `<input>` を**1 タグずつ**取り出して読む。
+ * ⚠ HTML 全体に対して `includes('checked')` を書かない ── 別のタグの属性に
+ *   満たされて、印の有無を取り違えても緑になる(CLAUDE.md §1、この repo で実際に踏んだ型)。
+ */
+function drawnLines(body: string): Array<{ line: number; done: boolean }> {
+  const html = renderMarkdown(body, { interactiveTasks: true });
+  const out: Array<{ line: number; done: boolean }> = [];
+  for (const tag of html.match(/<input\b[^>]*>/g) ?? []) {
+    const m = /data-pkc-task-line="(\d+)"/.exec(tag);
+    if (m === null) continue;
+    out.push({ line: Number(m[1]), done: / checked>/.test(tag) });
+  }
+  return out;
+}
 
 describe('チェック項目の候補を数える(#277 段②)', () => {
   /**
@@ -112,5 +128,83 @@ describe('チェック項目の候補を数える(#277 段②)', () => {
     expect(countTaskCandidates('')).toEqual({ total: 0, done: 0 });
     expect(countTaskCandidates('# 題\n本文\n')).toEqual({ total: 0, done: 0 });
     expect(countTaskCandidates('- ふつうの箇条書き\n')).toEqual({ total: 0, done: 0 });
+  });
+});
+
+/**
+ * 🔴 **取り出す側**(`listTaskItems` ── カンバンの札 1 枚ぶん)。
+ *
+ * 数える側との関係は「**同じ走査から出ている**」であって、たまたま一致して
+ * いるのではない ── 別々に行を読むと、片方だけ直したときに
+ * 「候補に入るのに札が 0 枚」のノートができる(CLAUDE.md §7)。
+ */
+describe('チェック項目を取り出す(#277 段②-b)', () => {
+  /**
+   * 🔴 **これが本丸** ── 描く側が出した**行番号**を、取り出す側が 1 つも落とさない。
+   * ⚠ 落とすと、その項目はカンバンに出ない。⚠ そして**印の向きも合っている**
+   *   こと(done を取り違えると、済んだ物が未完了の列に並ぶ)。
+   */
+  it('🔴 描く側の行番号を 1 つも落とさない(印の向きも合う)', () => {
+    const bad: string[] = [];
+    for (const [name, body] of CORPUS) {
+      const mine = new Map(listTaskItems(body).map((i) => [i.line, i.done]));
+      for (const d of drawnLines(body)) {
+        if (!mine.has(d.line)) bad.push(`${name}: 行 ${d.line} が落ちている`);
+        else if (mine.get(d.line) !== d.done) bad.push(`${name}: 行 ${d.line} の印が逆`);
+      }
+    }
+    expect(bad, '描く側と食い違っている').toEqual([]);
+  });
+
+  /** ⚠ **空振り防止** ── corpus に行番号つきの項目が十分出ていること。 */
+  it('⚠ corpus が行番号つきの項目を出している(空振り防止)', () => {
+    const total = CORPUS.reduce((n, [, b]) => n + drawnLines(b).length, 0);
+    expect(total, '描く側が行番号を 1 つも出していない').toBeGreaterThanOrEqual(12);
+  });
+
+  /**
+   * 🔴 **数える側と取り出す側は同じ走査から出ている**(§7)。
+   * ⚠ これが割れると、候補列で拾ったノートを開いても札が 0 枚になる
+   *   (しかも「そういうノートもある」に見えるので誰も気づかない)。
+   */
+  it('🔴 数える側の total と、取り出す側の件数が全 corpus で一致する', () => {
+    for (const [name, body] of CORPUS) {
+      expect(listTaskItems(body).length, `${name}: 数と件数が割れた`).toBe(
+        countTaskCandidates(body).total,
+      );
+      expect(listTaskItems(body).filter((i) => i.done).length, `${name}: 印の数が割れた`).toBe(
+        countTaskCandidates(body).done,
+      );
+    }
+  });
+
+  it('中身を取り出す(印は落とし、前後の空白は削る)', () => {
+    expect(listTaskItems('- [ ]   牛乳を買う  \n- [x] 卵\n')).toEqual([
+      { line: 0, text: '牛乳を買う', done: false },
+      { line: 1, text: '卵', done: true },
+    ]);
+  });
+
+  it('引用の中も取り出す(記号は剥がす)', () => {
+    expect(listTaskItems('> - [x] 引用の中\n')).toEqual([
+      { line: 0, text: '引用の中', done: true },
+    ]);
+  });
+
+  /** ⚠ 行番号は**原文のもの** ── 前に何行あっても、その行の番号がそのまま出る。 */
+  it('🔴 行番号は原文の行(前置きがあってもずれない)', () => {
+    const body = '# 題\n\n本文\n\n- [ ] 4 行目\n';
+    expect(listTaskItems(body).map((i) => i.line)).toEqual([4]);
+    // 🔑 描く側と突き合わせる(自前の数え直しにしない)
+    expect(drawnLines(body).map((d) => d.line)).toEqual([4]);
+  });
+
+  it('中身が空でも札は出る(印だけの行)', () => {
+    expect(listTaskItems('- [ ]\n')).toEqual([{ line: 0, text: '', done: false }]);
+  });
+
+  it('項目が無ければ空の配列', () => {
+    expect(listTaskItems('')).toEqual([]);
+    expect(listTaskItems('- ふつうの箇条書き\n')).toEqual([]);
   });
 });

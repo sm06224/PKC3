@@ -8,7 +8,6 @@ import { stubStamps } from '../helpers/store-stamps';
 import { describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
-import { extractMeta } from '../../src/features/flavor';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import type { ViewMode } from '../../src/adapter/state/app-state';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
@@ -46,7 +45,16 @@ async function tick(ms = 10): Promise<void> {
   await new Promise((r) => setTimeout(r, ms));
 }
 
-function setup(metas: EntryMeta[], bodies: Record<string, string>) {
+/**
+ * ⚠ `extra` は**店の口を足す / 差し替える**ためのもの(#277 段②-b)。
+ *   既定の fake は `taskScan` を持たない ── それ自体が
+ *   「持っていない環境では面が断る」の実演になっている。
+ */
+function setup(
+  metas: EntryMeta[],
+  bodies: Record<string, string>,
+  extra: Record<string, unknown> = {},
+) {
   const root = document.createElement('div');
   document.body.append(root);
   const d = new Dispatcher();
@@ -65,6 +73,7 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
       store[e.lid] = e.body;
       return stubStamps();
     },
+    ...extra,
   });
   /**
    * ⚠ **配線は `main.ts` と同じ形にする**(#288)── `settle` を渡さないと、
@@ -78,56 +87,102 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
   return { root, d, persisted, q, qa, store };
 }
 
-describe('kanban view (P3-6)', () => {
-  it('列振り分け → トグル実クリック → splice 書換が store に届き、カードが列を移る', async () => {
-    const { d, q, qa, persisted, store } = setup(
-      [
-        meta('e1'),
-        meta('e2', { status: 'done' }),
-        meta('e3', { archived: true }),
-        meta('e4', { archetype: 'text', status: null }),
-      ],
-      { e1: '---\nstatus: open\n---\n\n買い物メモ' },
-    );
+/**
+ * 🔴 **カンバン ── 札 1 枚 = 本文のチェック項目**(#277 段②-b)。
+ *
+ * ⚠ 2026-08-19 に**主張ごと入れ替えた**。ここは以前「`todo` アーキタイプの
+ *   ノートを status 列に振り分ける」面だったが、`todo` は封印中で作れないので
+ *   **盤面に何も出せる人が居なかった**(`features/sealed.ts`)。
+ *
+ * 🔑 ここで通すのは binder(実クリック)→ dispatcher → 書換 → CenterRouter の
+ *   一巡である。⚠ 札は worker が集めるので、その部分だけ `SET_TASK_SCAN` で与える
+ *   (worker 自身の主張は `tests/adapter/storage-worker.test.ts` が持つ)。
+ */
+describe('kanban view (#277 段②-b)', () => {
+  /** 盤面へ札を流し込む(worker が集めた結果の代わり)。 */
+  function feed(d: Dispatcher, cards: Array<{ lid: string; line: number; text: string; done: boolean }>): void {
+    d.dispatch({
+      type: 'SET_TASK_SCAN',
+      scan: { cards, totalNotes: 1, scannedNotes: 1, truncated: false },
+    });
+  }
+
+  const cardsIn = (host: HTMLElement): string[] =>
+    [...host.children].map((c) => c.getAttribute('data-pkc-entry') ?? '');
+
+  it('🔴 印の有無で列に立ち、実クリックで本文が書き換わって札が列を移る', async () => {
+    const body = '# 買い物\n\n- [ ] 牛乳\n- [x] 卵\n';
+    const { d, q, persisted, store } = setup([meta('e1', { archetype: 'text', status: null })], {
+      e1: body,
+    });
     showView(d, 'kanban');
+    feed(d, [
+      { lid: 'e1', line: 2, text: '牛乳', done: false },
+      { lid: 'e1', line: 3, text: '卵', done: true },
+    ]);
 
     const colOpen = q('[data-pkc-kanban-status="open"] [data-pkc-region="kanban-cards"]')!;
     const colDone = q('[data-pkc-kanban-status="done"] [data-pkc-region="kanban-cards"]')!;
-    expect([...colOpen.children].map((c) => c.getAttribute('data-pkc-entry'))).toEqual(['e1']);
-    expect([...colDone.children].map((c) => c.getAttribute('data-pkc-entry'))).toEqual(['e2']);
-    expect(qa('[data-pkc-entry="e3"]')).toHaveLength(0); // archived は出ない
+    expect(cardsIn(colOpen), '未完了の列が違う').toEqual(['e1']);
+    expect(cardsIn(colDone), '完了の列が違う').toEqual(['e1']);
+    const doneCardBefore = colDone.children[0];
 
-    const doneCardBefore = q('[data-pkc-entry="e2"]');
-    q<HTMLElement>('[data-pkc-entry="e1"] [data-pkc-action="toggle-todo"]')!.click();
+    // 実クリック(本物の checkbox)
+    q<HTMLElement>('[data-pkc-region="kanban-cards"] [data-pkc-task-line="2"]')!.click();
     await tick(20);
 
-    // 書込は splice 済み body + 抽出列(roundtrip pin: 列 = body 再抽出)
+    // 🔴 書込は**印の 1 文字だけ**(本文 byte 無傷)
     expect(persisted).toHaveLength(1);
-    const row = persisted[0]!;
-    expect(row.body).toBe('---\nstatus: done\n---\n\n買い物メモ'); // 本文 byte 無傷
-    expect({ status: row.status, date: row.date, archived: row.archived }).toEqual(
-      extractMeta('todo', row.body),
-    );
-    expect(store['e1']).toBe(row.body);
+    expect(persisted[0]!.body, '本文が整形された').toBe('# 買い物\n\n- [x] 牛乳\n- [x] 卵\n');
+    expect(store['e1']).toBe(persisted[0]!.body);
 
-    // ack でカードが done 列へ移り、既存カードは同一ノードのまま
-    expect([...colOpen.children]).toHaveLength(0);
-    expect([...colDone.children].map((c) => c.getAttribute('data-pkc-entry'))).toEqual([
-      'e1',
-      'e2',
-    ]);
-    expect(q('[data-pkc-entry="e2"]')).toBe(doneCardBefore);
-    expect(d.getState().entryMetas.get('e1')?.status).toBe('done');
+    // 🔑 ack で札が動く(往復を待たない)。⚠ 触っていない札は同じノードのまま
+    await tick(5);
+    expect(cardsIn(colOpen), '押した札が未完了に残っている').toEqual([]);
+    expect(colDone.children).toHaveLength(2);
+    expect(colDone.children[1], '触っていない札まで作り直した').toBe(doneCardBefore);
   });
 
-  it('列間 move は O(1): 先頭トグルで後続カードが insertBefore されない(cursor 汚染 pin)', async () => {
-    const metas = Array.from({ length: 8 }, (_, i) =>
-      meta('e' + i, { status: 'open' }),
+  /**
+   * 🔴 **押した札は、その札のノートに効く**(#277 段②-b で直した地雷)。
+   *
+   * ⚠ 直す前の binder は `openBody?.lid ?? selectedLid` だけを見ていたので、
+   *   盤面から押すと**いま開いているノート**の同じ行番号を書き換えた ──
+   *   user から見ると「触っていないノートが勝手に変わる」= 静かなデータ破壊。
+   * 🔑 だから **2 件目を選んだ状態で 1 件目の札を押す**。
+   */
+  it('🔴 開いているノートではなく、札のノートを書き換える', async () => {
+    const { d, q, persisted } = setup(
+      [meta('e1', { archetype: 'text', status: null }), meta('e2', { archetype: 'text', status: null })],
+      { e1: '- [ ] 牛乳\n', e2: '- [ ] 触るな\n' },
     );
-    const { d, q } = setup(metas, {
-      e0: '---\nstatus: open\n---\nx',
-    });
+    // e2 を開く(選択 → openBody 確立)
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'e2' });
+    await tick();
+    expect(d.getState().openBody?.lid, '当て馬が開いていない(前提が崩れた)').toBe('e2');
+
     showView(d, 'kanban');
+    feed(d, [{ lid: 'e1', line: 0, text: '牛乳', done: false }]);
+    q<HTMLElement>('[data-pkc-region="kanban-cards"] [data-pkc-task-line="0"]')!.click();
+    await tick(20);
+
+    expect(persisted, '書込が 1 件でない').toHaveLength(1);
+    expect(persisted[0]!.lid, '開いているノートを書き換えた(別ノートへの書込)').toBe('e1');
+    expect(persisted[0]!.body).toBe('- [x] 牛乳\n');
+  });
+
+  /**
+   * 列間 move は O(1)(cursor 汚染 pin ── 旧カンバンから引き継ぐ主張)。
+   * ⚠ 先頭の札を動かしたときに、後続の札まで `insertBefore` されない。
+   */
+  it('列間 move は O(1): 先頭を動かしても後続の札は動かない(cursor 汚染 pin)', async () => {
+    const lines = Array.from({ length: 8 }, (_, i) => `- [ ] やること ${i}`).join('\n') + '\n';
+    const { d, q } = setup([meta('e0', { archetype: 'text', status: null })], { e0: lines });
+    showView(d, 'kanban');
+    feed(
+      d,
+      Array.from({ length: 8 }, (_, i) => ({ lid: 'e0', line: i, text: `やること ${i}`, done: false })),
+    );
     const openHost = q('[data-pkc-kanban-status="open"] [data-pkc-region="kanban-cards"]')!;
     const doneHost = q('[data-pkc-kanban-status="done"] [data-pkc-region="kanban-cards"]')!;
 
@@ -142,59 +197,55 @@ describe('kanban view (P3-6)', () => {
         return original(node, ref);
       }) as typeof host.insertBefore;
     }
-    q<HTMLElement>('[data-pkc-entry="e0"] [data-pkc-action="toggle-todo"]')!.click();
+    q<HTMLElement>('[data-pkc-region="kanban-cards"] [data-pkc-task-line="0"]')!.click();
     await tick(20);
 
-    expect([...doneHost.children].map((c) => c.getAttribute('data-pkc-entry'))).toEqual([
-      'e0',
-    ]);
-    expect([...openHost.children]).toHaveLength(7);
-    // 移動カード 1 枚の done 列への挿入だけ ── 後続 7 枚は動かない
-    // (review #1: 修正前は移動元列の cursor 汚染で後続全カードが move した)
-    expect(moves).toBe(1);
-    // 行粒度 patch の pin(review #3): 列移動後のトグル印が「済」の図案に変わっている
-    // ⚠ P9 段③ で図案が単色 SVG になった ── 見るのは `textContent` ではなく
-    //    **どの図案が入っているか**(`data-pkc-icon-name`)と、中身が空でないこと
-    const toggleBtn = q('[data-pkc-entry="e0"] [data-pkc-action="toggle-todo"]')!;
-    expect(toggleBtn.getAttribute('data-pkc-icon-name')).toBe('check-box');
-    expect(toggleBtn.querySelector('svg path'), 'トグルの図案が空').not.toBeNull();
-    // data-pkc-entry は entry 要素(カード)専用 ── ボタンには付かない(P3-7a 規約)
-    expect(toggleBtn.hasAttribute('data-pkc-entry')).toBe(false);
+    expect(doneHost.children, '押した札が完了へ移っていない').toHaveLength(1);
+    expect(openHost.children).toHaveLength(7);
+    // 移動した 1 枚の挿入だけ ── 後続 7 枚は動かない
+    expect(moves, '後続の札まで動いた(cursor 汚染)').toBe(1);
+    // 🔑 印の向きも DOM に出ている(属性だけでなく `checked`)
+    const moved = doneHost.querySelector<HTMLInputElement>('[data-pkc-task-line="0"]')!;
+    expect(moved.checked, '移った札の印が付いていない').toBe(true);
   });
 
-  it('選択中 entry のトグル ack は openBody(body/baseline/persisted)を disk に揃える(review #2 pin)', async () => {
-    const pre = '---\nstatus: open\n---\nメモ';
-    const { d, q } = setup([meta('e1')], { e1: pre });
+  /**
+   * 🔴 **「まだ」「駄目だった」「無い」を区別する**(集計 #184 と同じ規律)。
+   * ⚠ 混ぜると、集めている最中と項目 0 件が同じ顔になり、
+   *   user は「壊れている」と読む。
+   */
+  it('🔴 集めている最中・失敗・0 件で、出す言葉が違う', async () => {
+    // ⚠ **返らない口**を渡して「まだ集めていない」を作る(0 件と区別する)
+    const { d, q } = setup([meta('e1', { archetype: 'text', status: null })], { e1: 'x' }, {
+      taskScan: () => new Promise(() => {}),
+    });
     showView(d, 'kanban');
-    q<HTMLElement>('[data-pkc-entry="e1"]')!.click(); // 選択 → openBody 確立
-    await tick();
-    expect(d.getState().openBody?.body).toBe(pre);
+    const note = (): string => q('[data-pkc-field="kanban-note"]')!.textContent ?? '';
+    expect(note(), 'まだ集めていないのに別のことを言っている').toContain('集めています');
 
-    q<HTMLElement>('[data-pkc-entry="e1"] [data-pkc-action="toggle-todo"]')!.click();
-    await tick(20);
-    const toggled = '---\nstatus: done\n---\nメモ';
-    // ready の openBody は丸ごと disk へ追従 ── stale baseline を残すと次の
-    // commit がトグルを黙って巻き戻す(review #2 の退行シナリオ)
-    expect(d.getState().openBody).toEqual({
-      lid: 'e1',
-      body: toggled,
-      baseline: toggled,
-      persisted: toggled,
-      diskAhead: false,
-    });
+    d.dispatch({ type: 'TASK_SCAN_FAILED' });
+    expect(note(), '失敗を「無い」と混同している').toContain('集められませんでした');
+
+    feed(d, []);
+    expect(note(), '0 件のときの導きが無い').toContain('- [ ]');
   });
 
-  it('編集中はトグル不可(ready 限定)/ 未知 lid・text は no-op', async () => {
-    const { d, persisted } = setup([meta('e1'), meta('e4', { archetype: 'text' })], {
-      e1: 'x',
-    });
-    d.dispatch({ type: 'TOGGLE_TODO_STATUS', lid: 'nope' });
-    d.dispatch({ type: 'TOGGLE_TODO_STATUS', lid: 'e4' });
-    await tick();
-    expect(persisted).toHaveLength(0);
+  /**
+   * 🔴 **持っていない環境では、面が黙らずに断る**(集計 #184 と同じ落ち方)。
+   * ⚠ 古い worker が service worker のキャッシュに残っている端末で実際に起きる ──
+   *   黙ると盤面は「集めています…」のまま**永久に止まって見える**。
+   * 🔑 既定の fake が `taskScan` を持たないので、これは**実演**である。
+   */
+  it('🔴 集める口を持たない環境では、断りが出る(黙って止まらない)', async () => {
+    const { d, q } = setup([meta('e1', { archetype: 'text', status: null })], { e1: 'x' });
+    showView(d, 'kanban');
+    expect(
+      q('[data-pkc-field="kanban-note"]')!.textContent ?? '',
+      '口が無いのに「集めています」のまま止まっている',
+    ).toContain('集められませんでした');
   });
 
-  it('トグル失敗は非致命 ── phase は ready のまま、通知が出て再クリックで復帰(review #1)', async () => {
+  it('トグル失敗は非致命 ── phase は ready のまま、通知が出て再クリックで復帰', async () => {
     const root = document.createElement('div');
     document.body.append(root);
     const d = new Dispatcher();
@@ -205,31 +256,52 @@ describe('kanban view (P3-6)', () => {
     let failNext = true;
     const persisted: EntryUpsert[] = [];
     connectStoreEffects(d, {
-    ...stubRevisionOps(),
-      getBody: async () => '---\nstatus: open\n---\nx',
+      ...stubRevisionOps(),
+      getBody: async () => '- [ ] やること\n',
       deleteEntry: async () => {},
-    setEntryParent: async () => {},
+      setEntryParent: async () => {},
       persistEntry: async (e) => {
         if (failNext) throw new Error('flaky');
         persisted.push(e);
         return stubStamps();
       },
     });
-    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('e1')], relations: [] });
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('e1', { archetype: 'text', status: null })],
+      relations: [],
+    });
     showView(d, 'kanban');
-    root
-      .querySelector<HTMLElement>('[data-pkc-entry="e1"] [data-pkc-action="toggle-todo"]')!
-      .click();
+    d.dispatch({
+      type: 'SET_TASK_SCAN',
+      scan: {
+        cards: [{ lid: 'e1', line: 0, text: 'やること', done: false }],
+        totalNotes: 1,
+        scannedNotes: 1,
+        truncated: false,
+      },
+    });
+    const click = (): void =>
+      root.querySelector<HTMLElement>('[data-pkc-region="kanban-cards"] [data-pkc-task-line="0"]')!.click();
+    click();
     await tick(20);
-    expect(d.getState().phase).toBe('ready'); // app は死なない
-    expect(d.getState().error).toMatch(/flaky/); // ただし黙らない
+    expect(d.getState().phase, 'アプリが死んだ').toBe('ready');
+    expect(d.getState().error, '黙って失敗した').toMatch(/flaky/);
     failNext = false;
-    root
-      .querySelector<HTMLElement>('[data-pkc-entry="e1"] [data-pkc-action="toggle-todo"]')!
-      .click();
+    click();
     await tick(20);
-    expect(persisted).toHaveLength(1); // 再クリック = retry
-    expect(d.getState().entryMetas.get('e1')?.status).toBe('done');
+    expect(persisted, '再クリックが retry になっていない').toHaveLength(1);
+  });
+
+  it('編集中はトグル不可(ready 限定)/ 未知 lid・text は no-op', async () => {
+    const { d, persisted } = setup([meta('e1'), meta('e4', { archetype: 'text' })], {
+      e1: 'x',
+    });
+    d.dispatch({ type: 'TOGGLE_TODO_STATUS', lid: 'nope' });
+    d.dispatch({ type: 'TOGGLE_TODO_STATUS', lid: 'e4' });
+    await tick();
+    expect(persisted).toHaveLength(0);
   });
 });
 

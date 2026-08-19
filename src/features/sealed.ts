@@ -20,11 +20,11 @@
  *    - `form` … 消しても**何も戻らない**。作成導線がそもそも無い
  *      (PKC2 の 2026-04-26 audit で撤去済みの判断を継いだ)── `CREATE_BUTTONS`
  *      への追加が要る
- *    - `kanban` … 消しても**何も戻らない**。P8 段⑤ で上の帯から面の切替を外し、
- *      `VIEW_BUTTONS` は設定 1 つになったので、濾す対象が無い ── 切替の導線を
- *      どこに置くかを決めて作り直す必要がある(カレンダーは #276 で
- *      **組み込みタイル**として作り直した ── 同じ形で戻せる)。
- *      加えて `SEALED_TEST_NOTES` の smoke を戻す
+ *    - `kanban` … 消しても**何も戻らなかった**(2026-08-19 に #277 で解いた)。
+ *      P8 段⑤ で上の帯から面の切替を外してあるので濾す対象が無く、
+ *      **組み込みタイル**(`kanbanTile`)を作り、`SEALED_TEST_NOTES` の smoke を
+ *      戻し、盤面の中身そのものを**チェック項目**へ作り替えて初めて戻った。
+ *      🔑 ここが「配列から 1 語消すだけでは戻らない」の**実例**である
  * 3. **うっかり復活しないこと** ── 導線を消すだけだと、次に UI を触った人が
  *    善意で戻してしまう。2 つの test が機械的に見張る:
  *    - `tests/docs-parity.test.ts` … 封印中のものが**導線に出ない**こと
@@ -46,16 +46,24 @@ export const SEALED_ARCHETYPES: readonly string[] = ['todo', 'form'] as const;
  * 封印中のビュー ── **切り替える導線を出さない**。
  * ⚠ 描画器(`kanban.ts` / `calendar.ts`)は残す。消すと、解くときに書き直しになる。
  *
- * 🔴 **カレンダーは 2026-08-19 に解いた**(#276。user 指示「かつて無くした
- * カレンダーとカンバンはここで生きてきます / 発想を変え、frontmatter での
- * カレンダー情報付与や…で復活させるのです」)。
- * 🔑 `SEAL_REASON` が求める「何をもって煮詰まったと言えるか」への答えは
- *   **todo アーキタイプに寄せるのをやめ、frontmatter の `date` を情報源にする**
- *   ことだった ── 封印中の archetype に依存していたのが破綻の形だからである。
+ * 🔴 **2026-08-19 に 2 つとも解いた。いまここは空である**(#276 / #277。
+ * user 指示「かつて無くしたカレンダーとカンバンはここで生きてきます /
+ * 発想を変え、frontmatter でのカレンダー情報付与や…で復活させるのです」)。
+ *
+ * 🔑 `SEAL_REASON` が求める「何をもって煮詰まったと言えるか」への答えは、
+ *   **2 つとも同じ形**だった ── **封印中の `todo` アーキタイプに寄せるのを
+ *   やめ、user が本文に書いている物を情報源にする**:
+ *   - カレンダー(#276)… frontmatter の `date`
+ *   - カンバン(#277)… 本文の**チェック項目**(`- [ ] …` の行)
+ *   ⚠ 破綻の形は「封印中の archetype に依存していたこと」なので、
+ *   **導線だけ戻しても盤面は永久に空**である(実際そうだった)。
  * ⚠ 解いた形は**導線の付け直し**であり、切替を上の帯へ戻したのではない ──
- *   組み込みタイル(`launcher/tiles.ts` の `calendarTile`)から開く(#241 の形)。
+ *   組み込みタイル(`launcher/tiles.ts` の `calendarTile` / `kanbanTile`)から
+ *   開く(#241 の形)。
+ * ⚠ **空でもこの配列は消さない** ── 次に何かを畳むときの受け皿であり、
+ *   `tests/docs-parity.test.ts` / `tests/features/sealed.test.ts` の口でもある。
  */
-export const SEALED_VIEWS: readonly string[] = ['kanban'] as const;
+export const SEALED_VIEWS: readonly string[] = [] as const;
 
 /**
  * なぜ封印したか(解くときに読む)。⚠ **「使われなかった」ではない** ──
@@ -76,11 +84,11 @@ export function isSealedView(view: string): boolean {
 /**
  * ⚠ 封印で**畳んだ test** の記録(解くときに戻す先)。
  *
- * - `tests/smoke/kanban.smoke.spec.ts` … 削除した。かんばんの切替ボタンが画面に
- *   無いので、実クリックで駆動できない。中身の検証は
- *   `tests/adapter/kanban-calendar-view.test.ts` が dispatch 経由で続けている
- *   (描画も state も生きている、という事実をそちらが示す)。
+ * - `tests/smoke/kanban.smoke.spec.ts` … 削除していたが、**2026-08-19 に
+ *   復活させた**(#277 段②-b)── 組み込みタイルができて実クリックで駆動できる。
  * - `tests/smoke/layout.smoke.spec.ts` … かんばん / カレンダーの見た目を見ていた
- *   assertion を、3 列と編集中の配置を見るものへ置き換えた。
+ *   assertion を、3 列と編集中の配置を見るものへ置き換えた(戻していない ──
+ *   いまの版面の主張はそちらのほうが強い)。
  */
-export const SEALED_TEST_NOTES = 'tests/smoke/kanban.smoke.spec.ts を削除(解くときは復活させる)';
+export const SEALED_TEST_NOTES =
+  'tests/smoke/kanban.smoke.spec.ts は #277 段②-b で復活済み(いま封印中の面は無い)';
