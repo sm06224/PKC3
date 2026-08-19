@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { groupTodosByStatus } from '../../src/features/kanban/kanban-data';
 import {
-  groupTodosByDate,
+  groupEntriesByDate,
   getMonthGrid,
   dateKey,
 } from '../../src/features/calendar/calendar-data';
@@ -42,19 +42,34 @@ describe('kanban-data(抽出列駆動 ── body を読まない)', () => {
 });
 
 describe('calendar-data', () => {
-  it('date を持つ todo だけを日付ごとにまとめ、showArchived を尊重', () => {
+  /**
+   * 🔴 **`date` を持つ**ノートを日付ごとにまとめる(#276)。
+   *
+   * ⚠ 2026-08-19 に**主張を裏返した**。以前は「date を持つ **todo だけ**」で、
+   *   `archetype: 'text'` の行が出ないことを pin していた ── しかし
+   *   **todo は封印中**なので、その規則ではこの面に何も出せる人が居ない。
+   */
+  it('🔴 date を持つノートを日付ごとにまとめ、showArchived を尊重', () => {
     const metas = [
       meta('a', { date: '2026-08-01' }),
       meta('b', { date: '2026-08-01', archived: true }),
       meta('c'), // date なし
       meta('d', { date: '2026-08-02', archetype: 'text' }),
     ];
-    expect(groupTodosByDate(metas, false)['2026-08-01']?.map((m) => m.lid)).toEqual(['a']);
-    expect(groupTodosByDate(metas, true)['2026-08-01']?.map((m) => m.lid)).toEqual([
+    expect(groupEntriesByDate(metas, false)['2026-08-01']?.map((m) => m.lid)).toEqual(['a']);
+    expect(groupEntriesByDate(metas, true)['2026-08-01']?.map((m) => m.lid)).toEqual([
       'a',
       'b',
     ]);
-    expect(groupTodosByDate(metas, true)['2026-08-02']).toBeUndefined();
+    // 🔴 普通のノートも出る(ここが裏返った所)
+    expect(
+      groupEntriesByDate(metas, true)['2026-08-02']?.map((m) => m.lid),
+      '普通のノートがカレンダーに出ない(todo だけの規則が残っている)',
+    ).toEqual(['d']);
+    // ⚠ date を書いていないものは、どちらでも出ない
+    expect(Object.values(groupEntriesByDate(metas, true)).flat().map((m) => m.lid)).not.toContain(
+      'c',
+    );
   });
 
   it('月間グリッド: 2026-08 は土曜始まり 31 日', () => {

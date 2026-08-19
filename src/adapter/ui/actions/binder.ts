@@ -1343,6 +1343,38 @@ const ACTIONS: Record<string, ActionHandler> = {
       ?.getAttribute('data-pkc-entry');
     if (lid) dispatcher.dispatch({ type: 'TOGGLE_TODO_STATUS', lid });
   },
+  /**
+   * 🔴 **カレンダーに書ける導線**(#276 の 4。「読むだけにしない」)。
+   *
+   * 選んでいるノートの frontmatter に `date` を入れる。⚠ 同じ日をもう一度押すと
+   * **外す**(付けた本人が外せない導線を作らない)。
+   * ⚠ **黙って断らない** ── 何も選んでいない / 編集中は、理由を出す。
+   */
+  'calendar-set-date': (dispatcher, target) => {
+    const date = target.closest('[data-pkc-date]')?.getAttribute('data-pkc-date');
+    if (date === null || date === undefined) return;
+    const st = dispatcher.getState();
+    /**
+     * ⚠ **セルの中のノートを押したときは、そちらが勝つ**(`select-entry`)──
+     * ここへは「日付の地」を押したときだけ来る。押した所と起きることを一致させる。
+     */
+    const lid = st.selectedLid;
+    if (lid === null) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '日付を付けるノートを先に選んでください(一覧から押すと選べます)',
+      });
+      return;
+    }
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから日付を変えてください' });
+      return;
+    }
+    const meta = st.entryMetas.get(lid);
+    if (!meta) return;
+    // 🔑 同じ日をもう一度押したら外す(付けたものを外せる)
+    dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: meta.date === date ? null : date });
+  },
   'calendar-nav': (dispatcher, target) => {
     // 遷移先は renderer が描画時に焼き込む(binder は「今の月」を推定しない)
     const year = Number(target.getAttribute('data-pkc-nav-year'));

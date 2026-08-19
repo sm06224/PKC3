@@ -266,6 +266,110 @@ describe('calendar view (P3-6)', () => {
     expect(qa('[data-pkc-date="2026-08-01"]')).toHaveLength(0);
   });
 
+  /**
+   * 🔴 **普通のノートがカレンダーに出る**(#276。封印の解除。user 指示 2026-08-19
+   * 「frontmatter でのカレンダー情報付与…でカンバンとカレンダーを復活させるのです」)。
+   *
+   * ⚠ 直す前は `archetype !== 'todo'` を弾いていた ── **todo は封印中**なので、
+   *   その規則では**この面に何かを出せる人が居ない**(解いても空のままになる)。
+   */
+  it('🔴 普通のノートも date を持てば出る(todo に限らない)', () => {
+    const { d, q } = setup(
+      [
+        meta('n1', { archetype: 'text', status: null, date: '2026-08-03' }),
+        meta('n2', { archetype: 'folder', status: null, date: '2026-08-03' }),
+      ],
+      {},
+    );
+    showView(d, 'calendar');
+    const cell = q('[data-pkc-date="2026-08-03"]')!;
+    expect(
+      [...cell.querySelectorAll('[data-pkc-entry]')].map((e) => e.getAttribute('data-pkc-entry')),
+      '普通のノートがカレンダーに出ない',
+    ).toEqual(['n1', 'n2']);
+    // ⚠ 状態は**書いてあるときだけ**出す(既定値「未完了」を作らない)
+    expect(
+      cell.querySelector('[data-pkc-entry="n1"]')?.hasAttribute('data-pkc-status'),
+      '書いていない状態が付いた',
+    ).toBe(false);
+  });
+
+  /**
+   * 🔴 **読むだけにしない**(#276 の 4)── 日付の地を押すと、選んでいるノートの
+   * frontmatter に `date` が入る。
+   * 🔑 観測点は **store へ届いた本文**(画面だけ変わって保存されない、を作らない)。
+   */
+  it('🔴 日を押すと、選んでいるノートに日付が入る(本文に書かれる)', async () => {
+    const { d, q, persisted, store } = setup(
+      [meta('n1', { archetype: 'text', status: null })],
+      { n1: '# 予定\n' },
+    );
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    showView(d, 'calendar');
+    q<HTMLElement>('[data-pkc-date="2026-08-07"]')!.click();
+    await tick(20);
+    expect(persisted, '書込が出ていない').toHaveLength(1);
+    expect(store['n1'], '本文に日付が入っていない').toBe('---\ndate: 2026-08-07\n---\n# 予定\n');
+    // 🔴 列にも入る(= 次の描画でカレンダーに出る)
+    expect(d.getState().entryMetas.get('n1')?.date).toBe('2026-08-07');
+    /**
+     * 🔴 **抽出は「そのノートのアーキタイプ」で行う**(#276)。
+     * ⚠ 'todo' に固定したままだと、普通のノートに **`status: open` が生える**
+     *   ── 書いていない状態が付き、カンバンにも勝手に並ぶ。
+     *   ⚠ 日付だけを見ていると**この取り違えを見逃す**(todo でも日付は入る)。
+     */
+    expect(
+      d.getState().entryMetas.get('n1')?.status,
+      '書いていない状態が生えた(抽出が todo に固定されている)',
+    ).toBeNull();
+    expect(
+      q('[data-pkc-date="2026-08-07"]')?.querySelector('[data-pkc-entry="n1"]'),
+      '入れた日に出ていない',
+    ).not.toBeNull();
+  });
+
+  /** 🔑 **同じ日をもう一度押したら外れる**(付けた本人が外せない導線を作らない)。 */
+  it('🔴 同じ日をもう一度押すと外れる', async () => {
+    const { d, q, store } = setup(
+      [meta('n1', { archetype: 'text', status: null, date: '2026-08-07' })],
+      { n1: '---\ndate: 2026-08-07\n---\n# 予定\n' },
+    );
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    showView(d, 'calendar');
+    q<HTMLElement>('[data-pkc-date="2026-08-07"]')!.click();
+    await tick(20);
+    expect(store['n1'], '日付が外れていない').not.toContain('date:');
+    expect(d.getState().entryMetas.get('n1')?.date).toBeNull();
+  });
+
+  /**
+   * ⚠ **セルの中のノートを押したときは、そちらが勝つ**(選択の意味が変わらない)。
+   * 🔑 押した所と起きることを一致させる ── 日付を変えるのは「地」を押したときだけ。
+   */
+  it('セルの中のノートを押したら、日付は変わらず選択が動く', async () => {
+    const { d, q, persisted } = setup(
+      [
+        meta('n1', { archetype: 'text', status: null, date: '2026-08-07' }),
+        meta('n2', { archetype: 'text', status: null }),
+      ],
+      { n1: '---\ndate: 2026-08-07\n---\nx', n2: 'y' },
+    );
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    showView(d, 'calendar');
+    q<HTMLElement>('[data-pkc-date="2026-08-07"] [data-pkc-entry="n1"]')!.click();
+    await tick(20);
+    expect(d.getState().selectedLid, '選択が動いていない').toBe('n1');
+    expect(persisted, 'ノートを押しただけで日付が書き換わった').toHaveLength(0);
+  });
+
+  /** ⚠ **黙って断らない**(押しても何も起きないセルを作らない)。 */
+  it('🔴 何も選ばずに日を押したら、理由が出る', () => {
+    const { d, q } = setup([meta('n1', { archetype: 'text', status: null })], {});
+    showView(d, 'calendar');
+    q<HTMLElement>('[data-pkc-date="2026-08-07"]')!.click();
+    expect(d.getState().error ?? '', '無言で終わった').toContain('先に選んでください');
+  });
+
   it('12 月から › で年を跨ぐ(reducer 正規化)', () => {
     const { d } = setup([], {});
     d.dispatch({ type: 'SET_CALENDAR_MONTH', year: 2026, month: 13 });

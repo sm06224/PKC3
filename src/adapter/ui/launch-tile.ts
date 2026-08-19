@@ -53,11 +53,12 @@ export interface LaunchDeps {
    */
   openOffice: () => void;
   /**
-   * 🔴 **組み込みの 2 ペインタブファイラ**(#241。user 指摘 2026-08-19)。
+   * 🔴 **中央の面を持つ組み込み**(#241 の 2 ペイン / #276 のカレンダー)。
    * ⚠ Office と違って**窓は開かない** ── 中央の面へ切り替える
    * (裁定 6「幅は中央にしかない」)。だから gesture の制約も無い。
+   * ⚠ 面ごとに口を作らない(`openDual` から一般化 ── CLAUDE.md §7)。
    */
-  openDual: () => void;
+  openView: (view: 'dual' | 'calendar' | 'kanban') => void;
   /**
    * 🔴 **素のまま(同一オリジン)で開く前の確認**(P10)。
    *
@@ -91,9 +92,9 @@ export function launchTile(
   // 🔴 **開く前に聞く**(fail closed)。⚠ `window.open` より前に聞く ──
   //    後にすると、断ったのに空のタブが残る
   if (raw && deps.confirmSameOrigin !== undefined && !deps.confirmSameOrigin(tile.title)) return;
-  if (tile.kind === 'dual') {
-    // 🔑 組み込み(#241)── 中央の面を 2 ペインへ切り替える。窓は開かない
-    deps.openDual();
+  if (tile.kind === 'dual' || tile.kind === 'calendar' || tile.kind === 'kanban') {
+    // 🔑 組み込み(#241 / #276)── 中央の面を切り替える。窓は開かない
+    deps.openView(tile.kind);
     return;
   }
   if (tile.kind === 'office') {

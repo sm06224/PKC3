@@ -6,16 +6,23 @@ import type { EntryMeta } from '@core/model/entry-meta';
 import { pad2 } from '../datetime/datetime-format';
 
 /**
- * date(YYYY-MM-DD)を持つ todo を日付ごとにまとめる。
- * showArchived=false なら archived を除外(PKC2 と同じ意味論)。
+ * 🔴 **`date` を持つノートを日付ごとにまとめる**(#276。user 指示 2026-08-19
+ * 「frontmatter でのカレンダー情報付与」)。
+ *
+ * ⚠ 2026-08-19 に**アーキタイプの門を外した**。以前は `archetype !== 'todo'` を
+ *   弾いていたが、**todo は封印中**(`features/sealed.ts`)なので、その門が在る限り
+ *   **この面に何かを出せる人が居ない**(封印を解いても中身が空のままになる)。
+ * 🔑 いまの規則は「**frontmatter に `date` を書いたノート**」1 つだけ ──
+ *   鍵の名前と受理形は `features/schedule/schedule-keys.ts` の 1 か所で決まる。
+ * ⚠ `showArchived=false` の除外は残す ── ただし `archived` を列に写すのは
+ *   todo だけなので、普通のノートがここで黙って消えることはない。
  */
-export function groupTodosByDate(
+export function groupEntriesByDate(
   metas: readonly EntryMeta[],
   showArchived: boolean,
 ): Record<string, EntryMeta[]> {
   const result: Record<string, EntryMeta[]> = {};
   for (const meta of metas) {
-    if (meta.archetype !== 'todo') continue;
     if (!meta.date) continue;
     if (!showArchived && meta.archived) continue;
     (result[meta.date] ??= []).push(meta);

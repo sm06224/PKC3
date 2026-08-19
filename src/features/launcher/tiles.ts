@@ -38,7 +38,7 @@ export interface LauncherTile {
    * 起動の仕方。⚠ `url` は外部サイト、`app` は同梱 HTML、
    * `office` / `dual` は**組み込み**(entry を持たない ── #148 / #241)。
    */
-  kind: 'app' | 'url' | 'office' | 'dual';
+  kind: 'app' | 'url' | 'office' | 'dual' | 'calendar' | 'kanban';
   /** `kind === 'url'` のときの飛び先。 */
   url?: string;
   /** `kind === 'app'` のときの実体(IDB Blob の鍵)。 */
@@ -179,6 +179,21 @@ export function dualTile(): LauncherTile {
 }
 
 /**
+ * 🔴 **カレンダーの組み込みタイル**(#276。封印の解除。user 指示 2026-08-19
+ * 「かつて無くしたカレンダーとカンバンはここで生きてきます / 発想を変え、
+ * frontmatter でのカレンダー情報付与や…で復活させるのです」)。
+ *
+ * ⚠ **`ViewMode` の切替を上の帯へ戻さない** ── #241 の訂正で確立した形
+ * (組み込みはアプリの一覧から開く)。描画器も面も生きているので、
+ * 封印を解くのは**導線の付け直し**である(`features/sealed.ts` の言うとおり)。
+ */
+export const CALENDAR_TILE_LID = 'builtin:calendar';
+
+export function calendarTile(): LauncherTile {
+  return { lid: CALENDAR_TILE_LID, title: 'カレンダー', group: '', kind: 'calendar' };
+}
+
+/**
  * 組み込み分を entry 由来の一覧へ合流させる。
  *
  * 🔑 Office 一式は**端末ローカル**(IndexedDB)だが、entry はコンテナに乗って
@@ -196,7 +211,7 @@ export function withBuiltinTiles(
    * 2 ペインは**アプリに最初から在る**ので先頭、Office は**入れた端末だけ**なので
    * その次 ── 入れたり消したりで 2 ペインの位置が動かない向きに並べる。
    */
-  const builtin: LauncherTile[] = [dualTile()];
+  const builtin: LauncherTile[] = [dualTile(), calendarTile()];
   if (opts.office) builtin.push(officeTile());
   return [...builtin, ...tiles];
 }
@@ -207,5 +222,17 @@ export function withBuiltinTiles(
  * 「見つからない」になる(存在しない lid を `selectedLid` に入れない)。
  */
 export function tileSelectsEntry(tile: LauncherTile): boolean {
-  return tile.kind !== 'office' && tile.kind !== 'dual';
+  return !BUILTIN_KINDS.has(tile.kind);
 }
+
+/**
+ * 🔴 **entry を持たない組み込みの種別**。⚠ 表を 1 つにする ── 足すたびに
+ * `!==` を並べると、足し忘れた所だけ「存在しない lid を選択に入れる」
+ * (右の列が「見つからない」になる)。
+ */
+export const BUILTIN_KINDS: ReadonlySet<LauncherTile['kind']> = new Set([
+  'office',
+  'dual',
+  'calendar',
+  'kanban',
+]);

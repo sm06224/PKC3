@@ -11,7 +11,10 @@ import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import { DEFAULT_ENTRY_SORT, type EntrySort } from '@features/filter/entry-sort';
 import { resolveCanonicalParents, reorderSibling } from '@features/relation/tree';
 import { extractMeta, seedBodyFor } from '@features/flavor';
-import { withTodoStatus } from '@features/flavor/todo-flavor';
+import {
+  spliceFrontmatterKeys,
+  type FrontmatterValue,
+} from '@features/markdown/frontmatter';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import type { LauncherTile } from '@features/launcher/tiles';
 import type {
@@ -462,6 +465,12 @@ export type UserAction =
   | { type: 'CANCEL_EDIT' }
   | { type: 'TOGGLE_TODO_STATUS'; lid: string }
   /**
+   * 🔴 **カレンダーの日付を付け外しする**(#276)。`null` で外す。
+   * ⚠ 書くのは frontmatter の 1 鍵だけ ── 本文は byte 無傷である
+   *   (経路は `REQUEST_FRONTMATTER_SET` = todo のトグルと同じ 1 本)。
+   */
+  | { type: 'SET_ENTRY_DATE'; lid: string; date: string | null }
+  /**
    * 🔑 **追記**(P8 段⑧)。編集画面を開かずに末尾へ足す。
    * ⚠ `heading` は binder が作って渡す(reducer は純粋のまま ── `Date` を呼ばない)。
    * ノートは `null`(見出しを勝手に足さない)。
@@ -642,9 +651,17 @@ export type SystemCommand =
    */
   | { type: 'ENTRY_STAMPED'; lid: string; createdAt: string | null; updatedAt: string | null }
   | {
-      type: 'TODO_TOGGLED';
+      /**
+       * 🔴 **frontmatter の構造化書換の ack**(#276 で `TODO_TOGGLED` から改名)。
+       * ⚠ 名前を変えたのは、**同じ経路をカレンダーの日付書換にも使う**からである
+       * ── 別名で 2 本目を生やすと、書込の作法(直列 queue / 唯一の抽出経路)が
+       * 2 つに割れる(CLAUDE.md §7)。
+       */
+      type: 'FRONTMATTER_SET';
       lid: string;
       body: string;
+      /** 何を書いたか。⚠ 未達 commit との合流に要る(下の reducer を参照)。 */
+      keys: Record<string, FrontmatterValue | undefined>;
       status: string | null;
       date: string | null;
       archived: boolean;
@@ -780,12 +797,20 @@ export type DomainEvent =
       parent?: { parentLid: string | null; relationId: string };
     }
   | {
-      /** かんばんトグル要求。meta snapshot は発火時(reduce)に捕獲(C-1 規律)。 */
-      type: 'REQUEST_TODO_TOGGLE';
+      /**
+       * 🔴 **frontmatter の鍵を書き換える要求**(#276 で `REQUEST_TODO_TOGGLE` を
+       * 一般化)。読む→原文 splice→書く を 1 op として直列 queue に載せる。
+       * ⚠ meta snapshot は発火時(reduce)に捕獲(C-1 規律)。
+       * ⚠ **本文は載せない** ── effect が disk から読み直す(画面の古い本文を
+       *   基底にすると、別経路の書込を巻き戻す)。
+       */
+      type: 'REQUEST_FRONTMATTER_SET';
       lid: string;
       title: string;
+      archetype: string;
       entryOrder: number;
-      nextStatus: 'open' | 'done';
+      /** 書く鍵。⚠ `undefined` はその鍵を**消す**(`spliceFrontmatterKeys` の作法)。 */
+      keys: Record<string, FrontmatterValue | undefined>;
     }
   | {
       /**
@@ -1630,6 +1655,28 @@ function reduceCore(
       // 失敗は非致命。理由は effect が OP_FAILED で別に出す(phase は落とさない)
       return { state: { ...state, writeLock: null, error: action.error }, events: [] };
     }
+    case 'SET_ENTRY_DATE': {
+      // ready 限定(編集中の裏書換を作らない)。未知 lid は no-op
+      if (state.phase !== 'ready') return { state, events: [] };
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] };
+      // ⚠ 同じ値なら何もしない(空の書込を投げない)
+      if ((meta.date ?? null) === action.date) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_FRONTMATTER_SET',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            // ⚠ `undefined` = その鍵を消す(`spliceFrontmatterKeys` の作法)
+            keys: { date: action.date ?? undefined },
+          },
+        ],
+      };
+    }
     case 'TOGGLE_TODO_STATUS': {
       // ready 限定(editing 中の裏書換を作らない)。todo 以外・未知 lid は no-op
       if (state.phase !== 'ready') return { state, events: [] };
@@ -1644,16 +1691,17 @@ function reduceCore(
         state,
         events: [
           {
-            type: 'REQUEST_TODO_TOGGLE',
+            type: 'REQUEST_FRONTMATTER_SET',
             lid: meta.lid,
             title: meta.title,
+            archetype: 'todo',
             entryOrder: meta.entryOrder,
-            nextStatus,
+            keys: { status: nextStatus },
           },
         ],
       };
     }
-    case 'TODO_TOGGLED': {
+    case 'FRONTMATTER_SET': {
       // TODO(P6/P7 コンテナ切替導入時): cid を event/ack に載せて跨ぎ ack を
       // 捨てる(lid 偶然衝突 ── review F と同型の穴。P3-6a review #7)
       const meta = state.entryMetas.get(action.lid);
@@ -1681,10 +1729,9 @@ function reduceCore(
           // 丸ごと差し替えると baseline===persisted になり「未達の証拠」ごと
           // 消える(review #4 ── v2 が回収不能)。baseline に status を合流させ、
           // 再保存が「未達のテキスト + 新しい status」の両方の意図を書く
-          const merged = withTodoStatus(
-            openBody.baseline,
-            action.status === 'done' ? 'done' : 'open',
-          );
+          // ⚠ 合流も**書いた鍵そのもの**で行う(#276)── todo の status に
+          //   固定していると、日付だけを書いた回で**日付が落ちる**
+          const merged = spliceFrontmatterKeys(openBody.baseline, action.keys);
           openBody = {
             lid: action.lid,
             body: openBody.body === openBody.baseline ? merged : openBody.body,

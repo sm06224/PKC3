@@ -8,7 +8,6 @@
  */
 import type { EntryStamps, EntryUpsert } from '@adapter/platform/storage/schema';
 import { extractMeta } from '@features/flavor';
-import { withTodoStatus } from '@features/flavor/todo-flavor';
 import { appendBlock } from '@features/markdown/text-ops';
 import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
 import { buildTiles, withBuiltinTiles, type TileSource } from '@features/launcher/tiles';
@@ -975,7 +974,7 @@ export function connectStoreEffects(
           }
         });
         break;
-      case 'REQUEST_TODO_TOGGLE':
+      case 'REQUEST_FRONTMATTER_SET':
         // read→rewrite→write を 1 op として直列 queue に載せる ── 同一 lid の
         // 先行 persist の後に読むことが保証される(基底の取り違え防止)
         enqueue(async () => {
@@ -984,20 +983,22 @@ export function connectStoreEffects(
             const body = await store.getBody(ev.lid);
             if (disposed) return;
             if (body === null) {
-              // 行不在の toggle: 可視通知(非致命 ── アプリごと止めない)
+              // 行不在: 可視通知(非致命 ── アプリごと止めない)
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `todo toggle: entry row missing (${ev.lid})`,
+                error: `frontmatter set: entry row missing (${ev.lid})`,
               });
               return;
             }
             // 原文 splice(本文 byte 無傷)→ 唯一の抽出経路 → 行全体 upsert
-            const newBody = withTodoStatus(body, ev.nextStatus);
-            const ext = extractMeta('todo', newBody);
+            // ⚠ 抽出は**そのノートのアーキタイプ**で行う(#276)── 'todo' に
+            //   固定していると、普通のノートの日付が列に入らない
+            const newBody = spliceFrontmatterKeys(body, ev.keys);
+            const ext = extractMeta(ev.archetype, newBody);
             const stamps = await store.persistEntry({
               lid: ev.lid,
               title: ev.title,
-              archetype: 'todo',
+              archetype: ev.archetype,
               body: newBody,
               entryOrder: ev.entryOrder,
               status: ext.status,
@@ -1006,9 +1007,10 @@ export function connectStoreEffects(
             });
             if (!disposed)
               dispatcher.dispatch({
-                type: 'TODO_TOGGLED',
+                type: 'FRONTMATTER_SET',
                 lid: ev.lid,
                 body: newBody,
+                keys: ev.keys,
                 status: ext.status,
                 date: ext.date,
                 archived: ext.archived,

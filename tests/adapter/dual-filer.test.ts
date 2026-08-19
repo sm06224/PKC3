@@ -546,9 +546,9 @@ describe('2 ペインの面(描画)', () => {
 describe('2 ペインの導線(#241。アプリの組み込みタイル)', () => {
   it('🔴 アプリの一覧に、押せるタイルが最初から在る', () => {
     const tiles = withBuiltinTiles([], { office: false });
-    expect(tiles.map((t) => t.lid), 'Office を入れていない端末で出ない').toEqual([
-      DUAL_TILE_LID,
-    ]);
+    // ⚠ **2 ペインが先頭に居ること**だけを見る(#276 でカレンダーが加わった)──
+    //   一覧の全数は `tests/features/launcher-tiles.test.ts` が等値で pin する
+    expect(tiles[0]?.lid, 'Office を入れていない端末で出ない').toBe(DUAL_TILE_LID);
     expect(tiles[0]?.title).toBe('2 ペインで整理');
   });
 
@@ -573,8 +573,10 @@ describe('2 ペインの導線(#241。アプリの組み込みタイル)', () =>
         openOffice: () => {
           officeOpened += 1;
         },
-        openDual: () => {
-          opened += 1;
+        openView: (view) => {
+          // ⚠ **どの面へ切り替えたか**まで見る(#276 で口が 1 本になった)──
+          //   数えるだけだと、カレンダーへ切り替えても 2 ペインが開いたと読む
+          if (view === 'dual') opened += 1;
         },
       },
     );

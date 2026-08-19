@@ -867,6 +867,7 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    '1 面編集で、行の箱の高さと上下キーを直しました',
     'ボタンの見た目を整えました(本文の面が広くなりました)',
     '項目ごとに束ねて数える「集計」が使えるようになりました',
     'ノート同士をつなげるようになりました',
