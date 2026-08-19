@@ -1289,3 +1289,221 @@ describe('2 ペインの写す(#273 段③)', () => {
     ).toBe(2);
   });
 });
+
+/**
+ * 🔴 **掴んで落とす(#273 段⑤。user 指摘 2026-08-19「往年の FD などを見習って
+ * ください / OS のファイラと同じことができないといけません」)。**
+ *
+ * ⚠ 2 ペインの本題は「**左右のあいだで動かす**」ことなので、掴んで落とせないと
+ *   帯のボタン(移す)だけが唯一の動線になる ── OS のファイラでは主動線である。
+ *
+ * 🔑 守る主張は 4 つ:
+ * 1. **掴んだ面の印を運ぶ**(左の列の印を運ばない ── 画面に無いものが動く)
+ * 2. **ペインの地は「そのペインがいま開いている場所」へ落ちる**(追随する)
+ * 3. **フォルダの行はその中へ**(OS のファイラと同じ)
+ * 4. **落とし先が無い所では受けない**(光ったままにしない)
+ *
+ * ⚠ `DataTransfer` は happy-dom に無いが、実装が使うのは
+ *   `types` / `getData` / `setData` / `dropEffect` の 4 つだけなので stub で回る
+ *   (`tests/adapter/folder-organize.test.ts` と同じ作法)。
+ */
+const PKC_DRAG_DUAL = 'application/x-pkc-lids';
+
+function dtStub(initial: Record<string, string> = {}) {
+  const data = new Map(Object.entries(initial));
+  return {
+    dropEffect: 'none',
+    effectAllowed: 'none',
+    get types(): string[] {
+      return [...data.keys()];
+    },
+    getData: (t: string) => data.get(t) ?? '',
+    setData: (t: string, v: string) => void data.set(t, v),
+    files: { length: 0, item: () => null },
+    items: [] as unknown[],
+  };
+}
+
+function dragEv(type: string, dt: ReturnType<typeof dtStub>): Event {
+  const e = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(e, 'dataTransfer', { value: dt });
+  return e;
+}
+
+describe('2 ペインの掴んで落とす(#273 段⑤)', () => {
+  let root: HTMLElement;
+  let d: Dispatcher;
+  let region: HTMLElement;
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    d = new Dispatcher();
+    buildShell(root);
+    bindActions(root, d);
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: METAS, relations: RELS });
+    region = document.createElement('div');
+    root.append(region);
+    const r = new DualFilerRenderer(region);
+    d.onState((st) => r.render(st));
+    r.render(d.getState());
+  });
+
+  const pane = (side: string): HTMLElement =>
+    region.querySelector<HTMLElement>(
+      `[data-pkc-region="dual-pane"][data-pkc-side="${side}"]`,
+    )!;
+  const row = (side: string, lid: string): HTMLElement =>
+    pane(side).querySelector<HTMLElement>(
+      `[data-pkc-region="dual-table"] [data-pkc-entry="${lid}"]`,
+    )!;
+  const parentOf = (lid: string): string | null =>
+    d.getState().relations.find((r) => r.kind === 'structural' && r.toLid === lid)?.fromLid ?? null;
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  it('🔴 行は掴めて、フォルダの行は落とし先にもなる', () => {
+    expect(row('left', 'a').getAttribute('draggable'), '行が掴めない').toBe('true');
+    expect(row('left', 'f1').getAttribute('data-pkc-drop')).toBe('folder');
+    expect(
+      row('left', 'a').hasAttribute('data-pkc-drop'),
+      '平のノートの行そのものが落とし先を名乗っている',
+    ).toBe(false);
+  });
+
+  /**
+   * ⚠ **ペイン自身が entry に見えてはいけない**(だから行き先は別の属性で渡す)。
+   * ここが崩れると、ペインの地へ落としたときに**ペインを entry として**動かそうと
+   * する ── `data-pkc-drop-scope` を置いている理由そのものである。
+   */
+  it('ペインの地は落とし先だが、entry ではない', () => {
+    expect(pane('right').getAttribute('data-pkc-drop')).toBe('pane');
+    expect(
+      pane('right').hasAttribute('data-pkc-entry'),
+      'ペイン自身が entry を名乗っている',
+    ).toBe(false);
+  });
+
+  /**
+   * 🔴 **行き先は、そのペインがいま開いている場所に追随する。**
+   * ⚠ 書き忘れると、フォルダの中を開いていても**ルートへ**落ちる(いちばん
+   *   気づけない形 ── 落ちること自体は成功するので、断りも出ない)。
+   */
+  it('🔴 ペインの地の行き先が、いま開いている場所に追随する', () => {
+    expect(pane('right').getAttribute('data-pkc-drop-scope'), 'ルートは空文字').toBe('');
+    d.dispatch({ type: 'DUAL_SET_SCOPE', side: 'right', lid: 'f1' });
+    expect(
+      pane('right').getAttribute('data-pkc-drop-scope'),
+      'フォルダを開いても行き先がルートのまま',
+    ).toBe('f1');
+    // ⚠ 反対側は動いていない(片方の場所がもう片方の行き先になっていない)
+    expect(pane('left').getAttribute('data-pkc-drop-scope')).toBe('');
+  });
+
+  /**
+   * 🔴 **これが段⑤の本題** ── 左のペインから掴んで、右のペインへ落とす。
+   */
+  it('🔴 反対側のペインの地へ落とすと、その場所へ入る', async () => {
+    d.dispatch({ type: 'DUAL_SET_SCOPE', side: 'right', lid: 'f1' });
+    pane('right').dispatchEvent(dragEv('drop', dtStub({ [PKC_DRAG_DUAL]: 'a' })));
+    await tick();
+    expect(parentOf('a'), '右のペインが開いている場所へ入っていない').toBe('f1');
+  });
+
+  it('🔴 ルートを開いているペインへ落とすと、フォルダから出る', async () => {
+    expect(parentOf('x'), '前提が崩れている').toBe('f1');
+    pane('right').dispatchEvent(dragEv('drop', dtStub({ [PKC_DRAG_DUAL]: 'x' })));
+    await tick();
+    expect(parentOf('x'), 'ルートへ出ていない').toBeNull();
+  });
+
+  it('🔴 フォルダの行へ落とすと、その中へ入る', async () => {
+    row('right', 'f2').dispatchEvent(dragEv('drop', dtStub({ [PKC_DRAG_DUAL]: 'a' })));
+    await tick();
+    expect(parentOf('a'), 'フォルダの行へ落としたのに入っていない').toBe('f2');
+  });
+
+  /**
+   * ⚠ **平の行へ落としても捨てない** ── 行の上で離しても、OS のファイラは
+   *   「その一覧が開いている場所」へ入れる。⚠ 無反応にすると、user は
+   *   「掴めているのに落とせない」と読む(狙いの隙間が細くなる)。
+   */
+  it('平の行へ落としても、そのペインの場所へ入る', async () => {
+    d.dispatch({ type: 'DUAL_SET_SCOPE', side: 'right', lid: 'f1' });
+    row('right', 'x').dispatchEvent(dragEv('drop', dtStub({ [PKC_DRAG_DUAL]: 'a' })));
+    await tick();
+    expect(parentOf('a'), '行の上で離したら捨てられた').toBe('f1');
+  });
+
+  /**
+   * 🔴 **掴んだ面の印を運ぶ**(#273 段⑤の要)。
+   *
+   * ⚠ ここを左の列の印(`st.selection`)のまま書くと、**画面に出ていないものが動く**
+   *   ── 移す・写す・消すで既に踏んでいる罠の 4 つ目の顔である。
+   * 🔑 空振りを避けるため、**両方の印に掴んだ行を入れ、相方だけを変える**
+   *   ── どちらか片方にしか居ないと、`marked.includes(lid)` が false になって
+   *   **どちらの実装でも「1 件だけ」**になり、変異が生き延びる。
+   */
+  it('🔴 2 ペインから掴んだら、2 ペインの印を運ぶ(左の列の印ではない)', () => {
+    // 左の列の印: a と c
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'TOGGLE_SELECT', lid: 'c' });
+    // 2 ペイン(左)の印: a と b
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' });
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'b', mode: 'toggle' });
+    const dt = dtStub();
+    row('left', 'a').dispatchEvent(dragEv('dragstart', dt));
+    expect(
+      dt.getData(PKC_DRAG_DUAL).split(' ').sort(),
+      '掴んだ面ではなく左の列の印を運んでいる',
+    ).toEqual(['a', 'b']);
+  });
+
+  it('印の付いていない行を掴んだら、その 1 件だけ運ぶ', () => {
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' });
+    const dt = dtStub();
+    row('left', 'c').dispatchEvent(dragEv('dragstart', dt));
+    expect(dt.getData(PKC_DRAG_DUAL)).toBe('c');
+  });
+
+  /**
+   * ⚠ **印は行が見えなくなっても残る** ── 素で数えると、絞り込みで消えたものまで
+   *   運ぶ(移す・写す・消すと同じ規則で切る)。
+   */
+  it('🔴 絞り込みで消えた印は運ばない', () => {
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' });
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'b', mode: 'toggle' });
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'い' }); // 'あ' が消え、'い' が残る
+    const dt = dtStub();
+    row('left', 'b').dispatchEvent(dragEv('dragstart', dt));
+    expect(dt.getData(PKC_DRAG_DUAL), '画面に無い印まで運んだ').toBe('b');
+  });
+
+  /**
+   * 🔴 **落とし先を光らせる / 落とせない所では消す**(#240 と同じ規則を
+   * 2 ペインでも通す)。⚠ 光ったままにすると「そこへ入った」と読まれる。
+   */
+  it('🔴 落とし先が光り、落とせない所へ移ったら消える', () => {
+    const folder = row('right', 'f1');
+    folder.dispatchEvent(dragEv('dragover', dtStub({ [PKC_DRAG_DUAL]: 'a' })));
+    expect(folder.hasAttribute('data-pkc-dropping'), '落とし先が光っていない').toBe(true);
+    // region の外(この面の外)へ抜ける ── 落とせない
+    root.dispatchEvent(dragEv('dragover', dtStub({ [PKC_DRAG_DUAL]: 'a' })));
+    expect(
+      folder.hasAttribute('data-pkc-dropping'),
+      '落とせない所へ移ったのに、前の行が光ったまま',
+    ).toBe(false);
+  });
+
+  /**
+   * ⚠ **断る理由を出す**(無言で捨てない)── フォルダを自分の中へは入れられない。
+   * 🔑 経路は `moveEntries` 1 本なので、断り方も帯のボタンと同じである。
+   */
+  it('🔴 輪になる落とし方は断る(黙って捨てない)', async () => {
+    d.dispatch({ type: 'DUAL_SET_SCOPE', side: 'right', lid: 'f1' });
+    pane('right').dispatchEvent(dragEv('drop', dtStub({ [PKC_DRAG_DUAL]: 'f1' })));
+    await tick();
+    expect(d.getState().error ?? '', '無言で捨てている').toContain('自分の中');
+  });
+});

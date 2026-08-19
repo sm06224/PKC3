@@ -2346,8 +2346,22 @@ export function bindActions(
     const lid = row?.getAttribute('data-pkc-entry') ?? null;
     if (lid === null || !de.dataTransfer) return;
     const st = dispatcher.getState();
-    // ⚠ 印ごと運ぶのも**見えている分だけ**(まとめて消すのと同じ規則)
-    const marked = visibleSelection(visibleFilerRows(st), st.selection);
+    /**
+     * 🔴 **掴んだ面の印を運ぶ**(#273 段⑤)。⚠ 2 ペインから掴んだのに**左の列**の
+     * 印を運ぶと、**画面に出ていないものが動く**(移す・写す・消すと同じ罠)。
+     */
+    const side = row ? dualSide(row) : null;
+    const marked =
+      side === null
+        ? visibleSelection(visibleFilerRows(st), st.selection)
+        : visibleSelection(
+            filerRows(paneScope(paneOf(st.dual, side)), st.entryMetas, st.relations, {
+              filterQuery: st.filterQuery,
+              searchHits: st.searchHits,
+              sort: st.entrySort,
+            }),
+            paneOf(st.dual, side).selection,
+          );
     const lids = marked.includes(lid) ? marked : [lid];
     de.dataTransfer.setData(PKC_DRAG, lids.join(' '));
     de.dataTransfer.effectAllowed = 'move';
@@ -2357,6 +2371,13 @@ export function bindActions(
   const dropTargetOf = (target: EventTarget | null): { el: HTMLElement; lid: string | null } | undefined => {
     const el = (target as HTMLElement | null)?.closest<HTMLElement>('[data-pkc-drop]');
     if (!el || !root.contains(el)) return undefined;
+    /**
+     * ⚠ **ペインの地は「そのペインが開いている場所」へ落ちる**(#273 段⑤)。
+     * `data-pkc-entry` を持たせると**ペイン自身が entry** に見えるので、
+     * 行き先は別の属性で渡す。⚠ 空文字はルート(属性が**無い**のとは別物)。
+     */
+    const scope = el.getAttribute('data-pkc-drop-scope');
+    if (scope !== null) return { el, lid: scope === '' ? null : scope };
     // ⚠ パンくずのルートは `data-pkc-entry` を持たない = 出す先(ルート)
     return { el, lid: el.getAttribute('data-pkc-entry') };
   };

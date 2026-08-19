@@ -177,6 +177,12 @@ export class DualFilerRenderer {
      * ⚠ `-1` にする(Tab 順には入れない)── 行が在るときの入口は行のままにする。
      */
     root.tabIndex = -1;
+    /**
+     * 🔴 **ペインの地(行の無い所)も落とし先**(#273 段⑤)── そのペインが
+     * 「いま開いている場所」へ入れる。⚠ 行き先の lid は `data-pkc-drop-scope` で
+     * 渡す(`data-pkc-entry` を持たせると**そのペイン自身が entry**に見える)。
+     */
+    root.setAttribute('data-pkc-drop', 'pane');
 
     const tabs = document.createElement('div');
     tabs.setAttribute('data-pkc-region', 'dual-tabs');
@@ -211,6 +217,11 @@ export class DualFilerRenderer {
   ): void {
     this.renderTabs(frame.tabs, side, state, pane);
     this.renderCrumbs(frame.crumbs, side, state, pane);
+    /**
+     * ⚠ **落とし先の行き先を、いまの場所に追随させる**(#273 段⑤)。
+     * `''` = ルート。⚠ 書き忘れると、フォルダの中を開いていても**ルートへ**落ちる。
+     */
+    frame.root.setAttribute('data-pkc-drop-scope', paneScope(pane) ?? '');
     /**
      * 指紋には**この面が実際に描くもの**だけを入れる(#240 の filer と同じ規律)。
      * ⚠ 逆に描くものを入れ忘れると**古い値が残る** ── 行が出しているのは
@@ -397,7 +408,21 @@ export class DualFilerRenderer {
       tr.setAttribute('data-pkc-entry', m.lid);
       tr.setAttribute('data-pkc-side', side);
       tr.setAttribute('data-pkc-action', 'dual-row');
+      /**
+       * ⚠ **種別を行そのものに出す**(左の列 `render/filer.ts` と同じ)── これが
+       *   無いと、外から「ノートの行」を名指しできるのが `data-pkc-drop` の
+       *   **有無**だけになり、落とし先の印を消す変異で**狙う行が入れ替わる**
+       *   (検査が別のものを見に行く。指紋には元から種別が入っている)。
+       */
+      tr.setAttribute('data-pkc-archetype', m.archetype);
       tr.tabIndex = -1;
+      /**
+       * 🔴 **掴んで運べる**(#273 段⑤。左の列と同じ仕組み ── `PKC_DRAG`)。
+       * ⚠ `draggable` は**行そのもの**に置く(セルに置くと掴む場所が読めない)。
+       */
+      tr.setAttribute('draggable', 'true');
+      // ⚠ フォルダは**落とし先**にもなる(その中へ入れる)
+      if (m.archetype === 'folder') tr.setAttribute('data-pkc-drop', 'folder');
       const name = document.createElement('td');
       if (m.lid === renaming) {
         /**

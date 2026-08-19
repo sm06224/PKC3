@@ -269,3 +269,62 @@ test('🔴 2 ペインの押せる口に、無反応が 1 つも無い (#273)', 
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **左右のあいだで掴んで落とす**(#273 段⑤)。
+ *
+ * 🔴 **unit では原理的に届かない層**をここで見る:
+ * ① **実 HTML5 D&D** ── `DataTransfer` は happy-dom に無いので、unit が見ているのは
+ *    「stub を渡したときの分岐」であって、**ブラウザが本当に drag を始めるか**ではない
+ *    (`draggable` 属性の綴り違い・CSS の `user-select` による掴み損ねは unit を素通りする)
+ * ② **ペインの地に本当に面積が在るか** ── 落とし先として使うのは行の無い所なので、
+ *    高さが 0 だと**狙えない**(unit は幅も高さも持たない)
+ */
+test('🔴 左のペインから掴んで、右のペインへ落とす (#273 段⑤)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await makeFolder(page, 'はこ');
+  await createEntry(page, 'text');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await openDual(page);
+
+  await expect(page.locator(ROWS('left'))).toHaveCount(2);
+  await expect(page.locator(ROWS('right'))).toHaveCount(2);
+
+  // ① 右だけを「はこ」の中へ入れる(左右が別の場所を見ている状態を作る)
+  await page.locator(ROWS('right')).first().dblclick();
+  await expect(page.locator(`${PANE('right')} [data-pkc-region="dual-crumbs"]`)).toContainText(
+    'はこ',
+  );
+  await expect(page.locator(ROWS('right')), '右が空のフォルダに入れていない').toHaveCount(0);
+
+  /**
+   * ② 🔴 **左の平のノートを掴んで、右のペインの地へ落とす。**
+   * ⚠ 落とし先はペインそのもの(行が 0 件なので、狙えるのは地しかない)──
+   *   ここに面積が無ければ Playwright は落とす座標を作れず、この test は落ちる。
+   */
+  const note = `${ROWS('left')}[data-pkc-archetype="text"]`;
+  await page.dragAndDrop(note, PANE('right'));
+
+  /**
+   * ⚠ **アプリ自身の信号を先に待つ**(#240 の smoke と同じ理由)── 行数を先に
+   *   見ると、合成 D&D の掴み損ねを「移動が壊れた」と読み違える。
+   */
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '掴んで落とせていない(または行き先を名乗っていない)',
+  ).toContainText('「はこ」へ入れました');
+  await expect(page.locator(ROWS('right')), '右(はこ の中)へ入っていない').toHaveCount(1);
+  await expect(page.locator(ROWS('left')), '左から消えていない').toHaveCount(1);
+
+  /**
+   * ③ 🔴 **逆向きも通る** ── 右から掴んで、ルートを見ている左のペインへ落とす。
+   * ⚠ 片方向だけ確かめて「D&D が効く」と書かない(§7「対称の反対側を疑う」)。
+   */
+  await page.dragAndDrop(`${ROWS('right')}[data-pkc-archetype="text"]`, PANE('left'));
+  await expect(page.locator(ROWS('left')), '左(ルート)へ戻せていない').toHaveCount(2);
+  await expect(page.locator(ROWS('right')), '右から出ていない').toHaveCount(0);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
