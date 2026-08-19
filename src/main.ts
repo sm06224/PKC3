@@ -10,6 +10,7 @@ import { appEditorMode } from '@adapter/ui/render/editor-mode';
 import { appOpenInEdit } from '@adapter/ui/render/open-in-edit';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { appKeymap } from '@adapter/ui/render/keymap';
+import { wireShortcutHints } from '@adapter/ui/render/shortcut-hint';
 import { appBrowseMode, isBrowseMode } from '@adapter/ui/render/browse-mode';
 import { StoreClient } from '@adapter/platform/storage/store-client';
 import { openAssetWindow } from '@adapter/platform/asset-window';
@@ -320,6 +321,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * ⚠ 外さない(アプリと同寿命)── 外す先が無いのは `applyPaneVisibility` と同じ。
    */
   appKeymap.watchOtherTabs(window);
+  /**
+   * 🔴 **説明のショートカットを、いまの割当で組み立て直す**(2026-08-19)。
+   *
+   * ⚠ 直す前はボタンの `title` に `(Ctrl+N)` を**直書き**していたので、
+   * **mac では既定のままでも 6/6 が食い違い**、user が割り当てを変えると
+   * 説明だけが古い綴りのまま残っていた。
+   * ⚠ **boot で 1 回だけでは足りない** ── 割当が変わったら呼び直す
+   * (別タブで変えたときも `watchOtherTabs` 経由でここへ来る)。
+   */
+  wireShortcutHints(root);
   // ⚠ 配色の選択欄は**設定の画面**に在る(段⑨c で移した)。合わせるのは
   //    `SettingsRenderer.syncTheme()` の仕事 ── ここに 2 本目を置かない
   //    (P8 段㉕:帯を探す死んだ同期が残っており、常に空振りしていた)

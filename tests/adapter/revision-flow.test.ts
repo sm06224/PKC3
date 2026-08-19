@@ -51,7 +51,14 @@ function setup(bodies: Record<string, string>, port: Partial<StorePort> = {}) {
   const filer = new FilerRenderer(filerRegion);
   d.onState((s) => {
     detail.render(s);
-    if (s.viewMode === 'filer') filer.render(s);
+    /**
+     * ⚠ **面の切替を harness の都合で借りない**(#241 段⑥-b)。
+     * 直す前は `viewMode === 'filer'` を「ファイラを描く合図」に使っていたが、
+     * フォルダの面は P8 段⑤ で**左の列**へ移っており、中央の面ではない
+     * ── 製品では既定で常に描かれている。合図に使っていた `ViewMode` の値は
+     * 死に値だったので畳んだ(この test はその借り物を返しただけ)。
+     */
+    filer.render(s);
   });
   const log: string[] = [];
   connectStoreEffects(d, {
@@ -148,7 +155,6 @@ describe('revision flow (P5b)', () => {
         }),
       },
     );
-    d.dispatch({ type: 'SET_VIEW_MODE', mode: 'filer' });
     d.dispatch({ type: 'SHOW_TRASH' });
     await tick();
     expect(d.getState().trashPanel?.items).toHaveLength(1);
@@ -225,7 +231,6 @@ describe('revision flow (P5b)', () => {
     );
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' }); // 先に e1 の body を確立
     await tick();
-    d.dispatch({ type: 'SET_VIEW_MODE', mode: 'filer' });
     d.dispatch({ type: 'SHOW_TRASH' });
     await tick();
     d.dispatch({ type: 'RESTORE_TRASH', entryLid: 'gone1', revId: 'r-t' });
@@ -309,7 +314,6 @@ describe('revision flow (P5b)', () => {
       },
     );
     bindActions(root, d);
-    d.dispatch({ type: 'SET_VIEW_MODE', mode: 'filer' });
     d.dispatch({ type: 'SHOW_TRASH' });
     await tick();
 

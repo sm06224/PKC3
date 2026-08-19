@@ -13,7 +13,7 @@
  * 切り替える(その時に計測してから)。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
-import type { AppState, ViewMode } from '@adapter/state/app-state';
+import { isViewMode, type AppState, type ViewMode } from '@adapter/state/app-state';
 import type { EntryMeta } from '@core/model/entry-meta';
 import { filerRows, visibleSelection } from '@features/relation/filer-list';
 import { archetypeLabel } from '@adapter/ui/render/sidebar';
@@ -51,18 +51,6 @@ type ActionHandler = (
   root: HTMLElement,
 ) => void;
 
-const VIEW_MODES: ReadonlySet<string> = new Set([
-  'detail',
-  'calendar',
-  'kanban',
-  'filer',
-  'launcher',
-  'query',
-  'dual',
-  'settings',
-  'flags',
-  'help',
-]);
 
 /** 既定 title の種別ラベル(連番は同 archetype の現在数 + 1)。 */
 
@@ -1163,12 +1151,13 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'set-view': (dispatcher, target) => {
     const view = target.getAttribute('data-pkc-view') ?? '';
-    if (!VIEW_MODES.has(view)) return;
+    if (!isViewMode(view)) return;
     // 🔴 **もう一度押したら戻る**(P8 段⑲)。直す前の 設定 は行きっぱなしで、
     //    閉じる導線がどこにも無かった ── 抜けられるのは左のタブを押すか
     //    新規作成だけで、user から見ると「画面から出られない」
     const cur = dispatcher.getState().viewMode;
-    const next = (cur === view ? 'detail' : view) as ViewMode;
+    // ⚠ cast を置かない ── `isViewMode` が絞ってあるので、表と食い違えば型が落ちる
+    const next: ViewMode = cur === view ? 'detail' : view;
     dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: next });
     /**
      * 🔴 **集計の束ね方を思い出す**(#184)。⚠ **開いたときだけ**読む ──

@@ -82,7 +82,7 @@ describe('ランチャーのタイルを読む', () => {
       ],
       relations: [],
     });
-    dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'launcher' });
+    dispatcher.dispatch({ type: 'REFRESH_LAUNCHER_TILES' });
     await settle();
     // ⚠ **何を**読んだか ── 出来上がるタイルは全件読んでも同じなので、
     // 結果だけを見ると「全部読む」実装と区別がつかない
@@ -103,7 +103,7 @@ describe('ランチャーのタイルを読む', () => {
       relations: [],
     });
     expect(dispatcher.getState().launcherTiles).toBeNull(); // まだ読んでいない
-    dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'launcher' });
+    dispatcher.dispatch({ type: 'REFRESH_LAUNCHER_TILES' });
     await settle();
     expect(dispatcher.getState().launcherTiles).toHaveLength(1);
     off();
@@ -119,10 +119,10 @@ describe('ランチャーのタイルを読む', () => {
       metas: [meta('a1', 'attachment')],
       relations: [],
     });
-    dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'launcher' });
+    dispatcher.dispatch({ type: 'REFRESH_LAUNCHER_TILES' });
     await settle();
     dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
-    dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'launcher' });
+    dispatcher.dispatch({ type: 'REFRESH_LAUNCHER_TILES' });
     await settle();
     expect(trips).toEqual([['a1'], ['a1']]);
     off();
@@ -138,7 +138,7 @@ describe('ランチャーのタイルを読む', () => {
       metas: [meta('a1', 'attachment')],
       relations: [],
     });
-    for (const mode of ['kanban', 'calendar', 'filer', 'detail'] as const) {
+    for (const mode of ['kanban', 'calendar', 'query', 'detail'] as const) {
       dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode });
     }
     await settle();
@@ -161,7 +161,7 @@ describe('組み込み Office タイルの合流 (#148)', () => {
       metas: [meta('a1', 'attachment')],
       relations: [],
     });
-    dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'launcher' });
+    dispatcher.dispatch({ type: 'REFRESH_LAUNCHER_TILES' });
     await settle();
     const tiles = dispatcher.getState().launcherTiles ?? [];
     off();

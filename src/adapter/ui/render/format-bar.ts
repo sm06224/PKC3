@@ -13,6 +13,7 @@
  * ちらつく ── 選択位置そのものは focus を失っても残るので、壊れはしない。
  */
 import { FORMAT_OPS } from '@features/markdown/text-ops';
+import { HINT_BASE, HINT_COMMAND, hintTitle } from './shortcut-hint';
 
 /** 書式パネルを組む。⚠ 押した所は `data-pkc-format` で分かる(binder が読む)。 */
 export function buildFormatBar(): HTMLElement {
@@ -41,7 +42,9 @@ export function buildFormatBar(): HTMLElement {
   toggleReplace.type = 'button';
   toggleReplace.setAttribute('data-pkc-action', 'toggle-replace');
   toggleReplace.setAttribute('aria-expanded', 'false');
-  toggleReplace.title = '本文の置換(Ctrl+H)';
+  toggleReplace.setAttribute(HINT_BASE, '本文の置換');
+  toggleReplace.setAttribute(HINT_COMMAND, 'toggle-replace');
+  toggleReplace.title = hintTitle('本文の置換', 'toggle-replace');
   const label = document.createElement('span');
   label.setAttribute('data-pkc-field', 'label');
   label.textContent = '置換';
