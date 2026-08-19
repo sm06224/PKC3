@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { gotoApp, collectPageErrors } from './helpers';
 
 /**
@@ -76,4 +76,46 @@ test('対照群: 包まなければ採番済みの id が出る', async ({ page 
   const cid = await page.locator('[data-pkc-slot="root"]').getAttribute('data-pkc-container');
   expect(cid, '採番されていない').toMatch(/^c-[0-9a-f]{32}$/);
   await expect(page.locator('[data-pkc-region="status"]')).not.toContainText('古い版のタブが本体');
+});
+
+/**
+ * 🔴 **user が実際に踏んだ形**(2026-08-19「複数タブの起動時だと思う」)。
+ *
+ * 上の test は「**同じタブの中の** worker が旧い」形だった。実機で起きるのは
+ * **本体タブが旧ビルド / 2 枚目が新ビルド**で、断りが **proxy を跨いで**届く形である
+ * ── 版が配られても、読み直したタブだけが新しくなるので、こちらが本命。
+ *
+ * ⚠ 「同じ原因だから通るはず」で済ませない ── 断りの文字列が proxy の
+ *   `res` を通っても保たれるかは、**通してみないと分からない**
+ *   (CLAUDE.md §7「同じ問いに答える口が 2 つある」)。
+ */
+test('🔴 本体タブが旧ビルドでも、2 枚目が起動する (#286 ── proxy 越し)', async ({
+  page,
+  context,
+}) => {
+  const errorsA = collectPageErrors(page);
+  // ⚠ **本体になる側だけ**を旧くする(2 枚目は素の新ビルド)
+  await pretendLegacyWorker(page);
+  await gotoApp(page);
+  await expect(page.locator('[data-pkc-slot="root"]')).toHaveAttribute('data-pkc-boot', 'ready');
+
+  const pageB: Page = await context.newPage();
+  const errorsB = collectPageErrors(pageB);
+  await gotoApp(pageB);
+
+  // 🔴 2 枚目が開く(ここが落ちていた)
+  await expect(
+    pageB.locator('[data-pkc-slot="root"]'),
+    '2 枚目の起動が落ちている(旧本体の断りが proxy 越しに抜けている)',
+  ).toHaveAttribute('data-pkc-boot', 'ready');
+  // ⚠ 本体経由で動いていることの確認(空振り防止 ── 単独起動なら意味が無い)
+  await expect(pageB.locator('[data-pkc-region="status"]')).toContainText('本体タブ経由');
+  // 2 枚とも旧本体の器を見ている(割れていない)
+  await expect(pageB.locator('[data-pkc-slot="root"]')).toHaveAttribute(
+    'data-pkc-container',
+    'default',
+  );
+
+  expect(errorsA, `A: ${errorsA.join(' / ')}`).toEqual([]);
+  expect(errorsB, `B: ${errorsB.join(' / ')}`).toEqual([]);
 });
