@@ -70,8 +70,11 @@ Firefox / Safari では**一度も走らせていない**からです。
 - **Office は既定では入っていません。** 使う人が設定画面で明示的に有効化したときだけ、
   約 77MB の一式を 1 回だけ取得して IndexedDB に置き、以降はローカルから起動します
   ([設計](./docs/development/office-wasm-integration-design-2026-08.md))。
-  ⚠ 一式を配っているのは**別のリポジトリの Pages**(`sm06224/office-pack`)です ──
-  同一 origin ではないので、取得は CORS を通せる形にしてあります。
+  ⚠ 一式を配っているのは**別のリポジトリの Pages**(`sm06224/office-pack`)ですが、
+  置き場は `https://sm06224.github.io/office-pack/` ── PKC3 本体と**同じ origin** です。
+  だから CORS が起きません(別 origin に置くと `fetchPackFromBase` が弾きます)。
+  ⚠ 参照は **origin 直下の絶対 path** で書いてあります ── 相対 path にすると
+  `/PKC3/` と `/PKC3/dev/` で深さが違い、開発版だけ 404 になります(2026-08-11 に踏みました)。
 - **図(mermaid)とグラフ(chart)は土台が違います。** chart.js は canvas に描くので
   `OffscreenCanvas` で**丸ごとワーカーへ逃がせます**が、mermaid は SVG を吐くうえに
   レイアウトで DOM を要求するので**主スレッドから外せません**。どちらも結果は
@@ -101,5 +104,5 @@ npm run lint       # eslint src tests build scripts
 | いつ | 何を |
 |---|---|
 | PR / main push | `verify`(型 / lint / unit / build / 生成物の検品)と `smoke`(実ブラウザ)を**並列**に。どちらも 10 分の timeout が速度予算の tripwire |
-| nightly | smoke の全量を**2 つの Chromium ビルド**で / 常駐メモリと起動の probe / 赤い間は issue に積む |
+| nightly | smoke を**2 つの Chromium ビルド**で / product ビルドの検品と smoke(PR gate が触らない成果物)/ Rust wasm の再ビルド一致 / probe 6 本(store・sahpool・15k 行の DOM・1 面編集・2 列編集・かんばん)/ 赤い間は issue に積む |
 | tag(`v*`)| release(SBOM / provenance / `pkc3-dist.zip`)→ Pages の `/` が入れ替わる |

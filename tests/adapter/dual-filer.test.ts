@@ -77,6 +77,33 @@ describe('2 ペインの reducer(#241 段⑥-a)', () => {
     expect(s.dual.focus, '押した側が元になっていない').toBe('right');
   });
 
+  /**
+   * 🔴 **場所が変わらなくても、押した側が元になる**(2026-08-19、リリース前監査)。
+   * ⚠ 「いま居る場所のパンくず」と「いま開いているタブ」は、`withScope` /
+   *   `withTabActive` が**同じ object を返す**ので、素直に早期 return すると
+   *   **枠も向きも動かない** ── 他の押し方は全部焦点を持っていくので、
+   *   この 2 つだけが例外という、いちばん気づけない形になる。
+   * ⚠ マニュアルは「押したほうのペインに枠が付き」と言い切っている。
+   */
+  it('🔴 いま居る場所のパンくずを押しても、押した側が元になる', () => {
+    const s0 = booted();
+    expect(s0.dual.focus, '前提が崩れている').toBe('left');
+    // 右はルートに居る ── その「ルート」を押す(場所は変わらない)
+    const s = reduce(s0, { type: 'DUAL_SET_SCOPE', side: 'right', lid: null }).state;
+    expect(s.dual.focus, '同じ場所を押したら焦点が動かなかった').toBe('right');
+    // ⚠ 空振り防止: 自分の側を押した回は state ごと据え置き(無駄な通知を作らない)
+    expect(reduce(s, { type: 'DUAL_SET_SCOPE', side: 'right', lid: null }).state).toBe(s);
+  });
+
+  it('🔴 いま開いているタブを押しても、押した側が元になる', () => {
+    const s0 = booted();
+    const s = reduce(s0, { type: 'DUAL_TAB_ACTIVATE', side: 'right', index: 0 }).state;
+    expect(s.dual.focus, '開いているタブを押したら焦点が動かなかった').toBe('right');
+    expect(reduce(s, { type: 'DUAL_TAB_ACTIVATE', side: 'right', index: 0 }).state).toBe(s);
+    // ⚠ 範囲外は**焦点も動かさない**(存在しないタブを押したことにしない)
+    expect(reduce(s0, { type: 'DUAL_TAB_ACTIVATE', side: 'right', index: 9 }).state).toBe(s0);
+  });
+
   it('実在しない場所へは入らない', () => {
     const s0 = booted();
     const s = reduce(s0, { type: 'DUAL_SET_SCOPE', side: 'left', lid: 'nope' }).state;
@@ -343,14 +370,16 @@ describe('2 ペインの面(描画)', () => {
      *   「触った回数」に門の有無がそのまま出る。
      */
     let walks = 0;
+    /** ⚠ **数える口は 1 つ**にする ── 差し替えるたびに包み直す(下の理由)。 */
+    const counted = (arr: AppState['relations']): AppState['relations'] =>
+      new Proxy(arr, {
+        get(t, k) {
+          walks += 1;
+          return Reflect.get(t, k) as unknown;
+        },
+      });
     const s0 = booted();
-    const relations = new Proxy(s0.relations, {
-      get(t, k) {
-        walks += 1;
-        return Reflect.get(t, k) as unknown;
-      },
-    });
-    const s = { ...s0, relations };
+    const s = { ...s0, relations: counted(s0.relations) };
     const r = new DualFilerRenderer(region);
     r.render(s);
     expect(walks, '1 回目で歩いていない(空振り)').toBeGreaterThan(0);
@@ -358,9 +387,74 @@ describe('2 ペインの面(描画)', () => {
     // この面が読まない field だけ動かす(一時の知らせ / 開いているノート)
     r.render({ ...s, selectedLid: 'b', error: 'なにか' });
     expect(walks - after, '無関係な変化で関係の一覧を歩き直した').toBe(0);
-    // ⚠ 逆向きも見る ── 門が全部を止めてしまっていないこと
-    r.render({ ...s, dual: reduce(s, { type: 'DUAL_TAB_ADD', side: 'left' }).state.dual });
-    expect(walks - after, '関係のある変化でも描き直していない').toBeGreaterThan(0);
+    /**
+     * 🔴 **門の材料を 1 つずつ動かす**(2026-08-19、リリース前監査で判明)。
+     * ⚠ 1 稿目は `dual` / `entryMetas` / `filterQuery` の 3 つしか動かしておらず、
+     *   **`relations` / `entrySort` / `searchHits` を門から落とす変異が全部
+     *   生き延びていた**(CLAUDE.md §2「弱いのではなく走っていない」)。
+     * ⚠ 実害の経路は 3 本とも実在する ── 左の列の D&D と情報ペインの
+     *   「居場所」は `relations` **だけ**を差し替え、並び順は `entrySort` だけ、
+     *   本文検索の当たりは `searchHits` だけを遅れて差し替える。
+     *   門が 1 行欠けると、2 ペインだけが古いまま残る。
+     */
+    const armed: [string, (x: AppState) => AppState][] = [
+      ['dual', (x) => ({ ...x, dual: reduce(x, { type: 'DUAL_TAB_ADD', side: 'left' }).state.dual })],
+      ['entryMetas', (x) => ({ ...x, entryMetas: new Map(x.entryMetas) })],
+      ['filterQuery', (x) => ({ ...x, filterQuery: 'あ' })],
+      ['entrySort', (x) => ({ ...x, entrySort: 'title' })],
+      ['searchHits', (x) => ({ ...x, searchHits: new Set(['a']) })],
+      /**
+       * ⚠ `relations` は**中身が同じ新しい配列**にする(参照だけが変わる ──
+       * 左の列の D&D が state に起こす変化と同じ形)。
+       * 🔴 **包み直すのを忘れない** ── 素の配列に差し替えると**計器そのものが外れ**、
+       * 「歩いていない」と読める(1 稿目はこれで変異が生き延びた。CLAUDE.md §4
+       * 「観測点が、測りたいものを測っているか」)。
+       */
+      ['relations', (x) => ({ ...x, relations: counted([...x.relations]) })],
+    ];
+    let cur = s as AppState;
+    for (const [name, mutate] of armed) {
+      cur = mutate(cur);
+      /**
+       * 🔴 **計器を読むのは、仕込みが終わってから**(2026-08-19 に踏んだ)。
+       * ⚠ `mutate` の中で `[...x.relations]` と書くと**その展開が Proxy を歩く**ので、
+       *   仕込みの前に採ると「描き直した」と読める ── 門を外す変異が生き延びた。
+       *   測りたいのは `render` が歩いた分だけである。
+       */
+      const before = walks;
+      r.render(cur);
+      expect(walks - before, `門の材料に ${name} が入っていない`).toBeGreaterThan(0);
+    }
+  });
+
+  /**
+   * 🔴 **向きと呼び名は等値で pin する**(2026-08-19、リリース前監査)。
+   * ⚠ 部分一致(`toContain('右へ移す')`)だと、**矢印を逆にする変異**も
+   *   **左右の呼び名を入れ替える変異**も素通りする ── どちらも user は
+   *   「元がどちら側か」を字で読んで判断するので、逆へ動かすことになる。
+   */
+  it('🔴 向きの字・矢印・呼び名が、焦点に合わせて反転する', () => {
+    const r = new DualFilerRenderer(region);
+    let s = booted();
+    r.render(s);
+    const move = () => region.querySelector<HTMLElement>('[data-pkc-field="dual-move"]')!;
+    const hint = () => region.querySelector('[data-pkc-field="dual-hint"]')?.textContent;
+    expect(move().textContent, '矢印か語が違う').toBe('→ 右へ移す');
+    expect(hint(), '元がどちら側か字で出ていない').toBe('元は左のペインです');
+    s = reduce(s, { type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' }).state;
+    r.render(s);
+    expect(move().title).toBe('左で選んだ 1 件を、反対側の場所へ入れます');
+
+    s = reduce(s, { type: 'DUAL_FOCUS', side: 'right' }).state;
+    r.render(s);
+    expect(move().textContent, '焦点を変えても向きが反転しない').toBe('← 左へ移す');
+    expect(hint(), '焦点を変えても元の呼び名が変わらない').toBe('元は右のペインです');
+    // ⚠ ペインの読み上げ名も同じ表から引く(呼び名の入れ替えを 1 か所で殺す)
+    expect(
+      region
+        .querySelector('[data-pkc-region="dual-pane"][data-pkc-side="right"]')
+        ?.getAttribute('aria-label'),
+    ).toBe('右のペイン');
   });
 
   /**
@@ -396,6 +490,37 @@ describe('2 ペインの面(描画)', () => {
     const rowA = region.querySelector('[data-pkc-region="dual-table"] [data-pkc-entry="a"]');
     expect(rowA, '前提が崩れている(行が消えた)').not.toBeNull();
     expect(rowA!.hasAttribute('data-pkc-marked'), '組み直したあと印が塗られていない').toBe(true);
+  });
+
+  /**
+   * 🔴 **「空」と「絞り込みで消えた」を分ける**(2026-08-19、リリース前監査)。
+   * ⚠ 左の列の探す欄はこの面と**同時に画面に在り**、面を切り替えても語は消えない
+   *   ── 語を打ったまま 2 ペインを開くと、両側が「ここには何もありません」になる。
+   * ⚠ 一覧とアプリの 2 面は理由を分けているのに、**3 面目だけ落ちていた**。
+   */
+  it('🔴 絞り込みで消えたときは、空とは別のことを言う', () => {
+    const r = new DualFilerRenderer(region);
+    let s = booted();
+    r.render(s);
+    const msg = () =>
+      region.querySelector(
+        '[data-pkc-region="dual-pane"][data-pkc-side="left"] [data-pkc-field="dual-empty"]',
+      )?.textContent ?? null;
+    expect(msg(), 'ルートに行が在るのに空だと言っている').toBeNull();
+    s = reduce(s, { type: 'SET_ENTRY_FILTER', query: 'どれにも当たらない語' }).state;
+    r.render(s);
+    expect(msg()).toBe('探している語に当たるものが、ここにはありません');
+    // 🔑 **0 件 → 0 件**でも文言が追いつく(行が 0 件だと指紋が空文字になるので、
+    //    絞り込みの有無を指紋に入れていないとここで古い字が残る)
+    s = reduce(s, { type: 'SET_ENTRY_FILTER', query: '' }).state;
+    s = reduce(s, { type: 'DUAL_SET_SCOPE', side: 'left', lid: 'f2' }).state; // 空フォルダ
+    r.render(s);
+    expect(msg()).toBe('ここには何もありません');
+    s = reduce(s, { type: 'SET_ENTRY_FILTER', query: 'どれにも当たらない語' }).state;
+    r.render(s);
+    expect(msg(), '0 件 → 0 件で文言が古いまま残った').toBe(
+      '探している語に当たるものが、ここにはありません',
+    );
   });
 
   it('空のフォルダは、空だと言う', () => {
@@ -659,10 +784,23 @@ describe('2 ペインの配線(binder)', () => {
     };
     try {
       click(btn);
+      /**
+       * ⚠ **空振り防止**(2026-08-19、リリース前監査)── 「0 件だった」は
+       * 「弾いた」だけでなく「**そもそも handler に届かなかった**」でも成り立つ。
+       * 🔑 同じ仕掛けで**正しい添字**を撃ち、そちらは届くことを見る。
+       */
+      const ok = document.createElement('button');
+      ok.setAttribute('data-pkc-action', 'dual-tab-close');
+      ok.setAttribute('data-pkc-side', 'left');
+      ok.setAttribute('data-pkc-tab', '0');
+      region.append(ok);
+      click(ok);
+      expect(seen, 'そもそも handler に届いていない(この test は空振り)').toEqual([
+        'DUAL_TAB_CLOSE',
+      ]);
     } finally {
       d.dispatch = orig;
     }
-    expect(seen, '壊れた添字がそのまま下流へ流れた').toEqual([]);
   });
 
   /**

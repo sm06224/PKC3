@@ -41,6 +41,7 @@ import {
   withPane,
   withScope as withPaneScope,
   withSelection as withPaneSelection,
+  isTabIndex,
   withTabActive,
   withTabAdded,
   withTabClosed,
@@ -100,6 +101,22 @@ const ASIDE_PANES: ReadonlySet<ViewMode> = new Set<ViewMode>([
 
 export function isAsidePane(view: ViewMode): boolean {
   return ASIDE_PANES.has(view);
+}
+
+/**
+ * 🔴 **「押した側が元になる」は、場所が変わらなくても成り立つ**
+ * (2026-08-19、リリース前監査で判明)。
+ *
+ * ⚠ 直す前は「pane が同じ object なら丸ごと捨てる」だったので、
+ * **焦点の無い側の「いま開いているタブ」や「いま居る場所のパンくず」**を押しても
+ * 枠も向きも動かなかった ── 他の押し方(行 / + / × / 別のタブ / 別の場所)は
+ * 全部焦点を持っていくので、**この 2 つだけが例外**という気づけない形だった。
+ * ⚠ マニュアルは「押したほうのペインに枠が付き」と言い切っており、
+ * 同じ節で「押しても何も起きないボタンは置きません」とまで書いている。
+ */
+function withDualFocus(state: AppState, side: DualSide): ReduceResult {
+  if (state.dual.focus === side) return { state, events: [] };
+  return { state: { ...state, dual: { ...state.dual, focus: side } }, events: [] };
 }
 
 /**
@@ -1124,7 +1141,26 @@ function reduceCore(
        * ⚠ **一覧のノートを押す(`SELECT_ENTRY`)は開けない**。あちらは「下書きを
        *   守る」理由が実在する ── ただし無言で断らないのが正しい(別主題)。
        */
-      if (state.phase === 'editing' && !isAsidePane(action.mode)) return { state, events: [] };
+      /**
+       * 🔴 **本文へ戻る道は塞がない**(2026-08-19、リリース前監査で判明)。
+       *
+       * ⚠ 直す前は `!isAsidePane(action.mode)` だけを見ていたので、
+       * **`'detail'` への切替も編集中は捨てられていた** ── つまり編集中に
+       * ヘルプ・設定・フラグ・2 ペインを開くと、**同じボタンをもう一度押しても
+       * 本文へ戻れない**(`set-view` のトグルは `'detail'` を撃つ)。
+       * ⚠ マニュアルは「**寄り道して戻っても**、打ちかけの本文も取り消しも
+       * そのまま残ります」と約束しており、**その約束が守られていなかった**。
+       * 🔑 止める理由も無い ── 編集の面は `detail` **そのもの**なので、
+       * 戻るのは「編集へ帰る」であって「編集から離れる」ではない。
+       * ⚠ かんばん / カレンダー / 集計は引き続き断る(あちらはノートを並べる面で、
+       * 開くと編集していたものが画面から消える)。
+       */
+      if (
+        state.phase === 'editing' &&
+        !isAsidePane(action.mode) &&
+        action.mode !== 'detail'
+      )
+        return { state, events: [] };
       return {
         state: {
           ...state,
@@ -2202,7 +2238,7 @@ function reduceCore(
       if (action.lid !== null && !state.entryMetas.has(action.lid))
         return { state, events: [] };
       const pane = withPaneScope(paneOf(state.dual, action.side), action.lid);
-      if (pane === paneOf(state.dual, action.side)) return { state, events: [] };
+      if (pane === paneOf(state.dual, action.side)) return withDualFocus(state, action.side);
       // 🔑 場所を触った側へ焦点も移す(移す向きは「焦点のある側から」なので、
       //    触った側が元にならないと user の意図と逆へ流れる)
       return {
@@ -2271,8 +2307,12 @@ function reduceCore(
       };
     }
     case 'DUAL_TAB_ACTIVATE': {
-      const pane = withTabActive(paneOf(state.dual, action.side), action.index);
-      if (pane === paneOf(state.dual, action.side)) return { state, events: [] };
+      const cur = paneOf(state.dual, action.side);
+      // ⚠ **実在するタブを押したときだけ**焦点を移す ── 存在しない添字で
+      //    焦点が動くと、「押したものが在る」という嘘の合図になる
+      if (!isTabIndex(cur, action.index)) return { state, events: [] };
+      const pane = withTabActive(cur, action.index);
+      if (pane === cur) return withDualFocus(state, action.side);
       return {
         state: { ...state, dual: { ...withPane(state.dual, action.side, pane), focus: action.side } },
         events: [],

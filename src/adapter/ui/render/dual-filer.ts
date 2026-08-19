@@ -28,6 +28,7 @@ import type { AppState } from '@adapter/state/app-state';
 import type { DualPaneState, DualSide } from '@features/relation/dual-pane';
 import { MAX_TABS, paneOf, paneScope } from '@features/relation/dual-pane';
 import { filerRows } from '@features/relation/filer-list';
+import { normalizeQuery } from '@features/filter/title-filter';
 import { getAncestorFolders } from '@features/relation/tree';
 import { archetypeLabel } from './sidebar';
 import { formatListDate } from '@features/datetime/stored-date';
@@ -211,13 +212,22 @@ export class DualFilerRenderer {
      * 「見た目は同じなのに作り直す」が復活する(`render/filer.ts` の教訓)。
      */
     const year = new Date().getFullYear();
-    const signature = rows
-      .map((m) => [m.lid, m.title, m.archetype, formatListDate(m.updatedAt, year)].join(SEP))
-      .join(SEP);
+    /**
+     * ⚠ **絞り込みの有無も指紋に入れる**(2026-08-19)。⚠ 入れないと、
+     * **0 件 → 0 件**(空のフォルダで語を打った / 語を消した)で指紋が動かず、
+     * 空の理由の文言が**古いまま残る**(行が 0 件だと指紋は空文字になる)。
+     */
+    const filtered = normalizeQuery(state.filterQuery) !== '';
+    const signature = [
+      filtered ? 'q' : '-',
+      ...rows.map((m) =>
+        [m.lid, m.title, m.archetype, formatListDate(m.updatedAt, year)].join(SEP),
+      ),
+    ].join(SEP);
     if (signature !== frame.signature) {
       frame.signature = signature;
       frame.marks = '';
-      this.renderTable(frame, side, rows);
+      this.renderTable(frame, side, rows, filtered);
     }
     const marks = pane.selection.join(' ');
     if (marks !== frame.marks) {
@@ -334,14 +344,28 @@ export class DualFilerRenderer {
     for (const m of chain) host.append(crumb(m.lid, m.title));
   }
 
-  private renderTable(frame: PaneFrame, side: DualSide, rows: readonly EntryMeta[]): void {
+  private renderTable(
+    frame: PaneFrame,
+    side: DualSide,
+    rows: readonly EntryMeta[],
+    filtered: boolean,
+  ): void {
     const year = new Date().getFullYear();
     frame.rows.clear();
     frame.table.textContent = '';
     if (rows.length === 0) {
+      /**
+       * 🔴 **「空」と「絞り込みで消えた」を分ける**(2026-08-19、リリース前監査)。
+       * ⚠ 一覧(`filer.ts`)とアプリ(`launcher.ts`)は分けているのに、**この 3 面目だけ
+       * 落ちていた** ── 左の列の探す欄はこの面と同時に画面に在り、しかも面を
+       * 切り替えても語は消えないので、**語を打ったまま 2 ペインを開くと
+       * 両側が「ここには何もありません」**になる。
+       */
       const empty = document.createElement('p');
       empty.setAttribute('data-pkc-field', 'dual-empty');
-      empty.textContent = 'ここには何もありません';
+      empty.textContent = filtered
+        ? '探している語に当たるものが、ここにはありません'
+        : 'ここには何もありません';
       frame.table.append(empty);
       return;
     }

@@ -18,7 +18,8 @@ user 指示 2026-08-07:
 | 起動時の帯 | `src/adapter/ui/render/announce.ts` |
 | 過去の一覧 | `src/adapter/ui/render/help.ts`(ヘルプの面) |
 | 既読(id の集合) | `src/adapter/platform/notice-store.ts` |
-| 決まりの test | `tests/adapter/help-pane.test.ts` / `tests/adapter/announce.test.ts` |
+| **落ちた分の受け皿** | `CHANGELOG.md`(repo の根。**アプリには入らない**) |
+| 決まりの test | `tests/adapter/help-pane.test.ts` / `tests/adapter/announce.test.ts` / `tests/docs-parity.test.ts` |
 
 ## 足し方
 
@@ -34,6 +35,28 @@ user 指示 2026-08-07:
   ],
 },
 ```
+
+## 🔴 上限に達しているときは、**落とす分を CHANGELOG へ移す**
+
+登記表は `NOTICE_KEEP_MAX`(20 件)で頭打ちで、**古い方から静かに落ちる**。
+⚠ 受け皿を作る前は、**配った 42 件のうち 22 件が既に消えていた**
+(git の履歴からしか読めない状態だった。2026-08-18 に復元して `CHANGELOG.md` にした)。
+
+**足すときの手順は 3 つで 1 組**:
+
+1. `NOTICES` の**先頭**に 1 件足す
+2. 20 件を超えるなら、**いちばん古い 1 件を削る**
+3. 🔴 **削った 1 件を `CHANGELOG.md` に残す** ── 日付の節に `### 題名` +
+   items を箇条書きで。**同時に `tests/docs-parity.test.ts` の `DROPPED` へ題名を 1 行足す**
+
+⚠ 3 を忘れると **CI が落ちる**(`docs-parity` が「登記表 + 落ちた分 = CHANGELOG」を
+**等値**で見る)。⚠ 数だけで縛ると**受け皿が登記表のコピーでも通る**ので、
+`DROPPED` は**身元の既知リスト**にしてある(`announce.test.ts` の `KNOWN` と同じ作法)。
+⚠ 新しく足した 1 件も CHANGELOG に要る(**落ちる前から**入れておく ──
+落ちてから足す運用にすると、落とした人が気づかない)。
+
+⚠ **CHANGELOG の文面は書き換えない。** 誤りが見つかったら、その行の下に
+`⚠ 訂正(日付)` を足す ── 何を配ったかと、何が正しいかの両方を残す。
 
 ## 書式(数で持つ ── 散文の規律にしない)
 
