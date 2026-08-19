@@ -148,6 +148,31 @@ describe('画面への配線', () => {
     expect(d.getState().selectedLid, 'Ctrl+N が効いていない').toBeTruthy();
   });
 
+  /**
+   * 🔴 **`Alt+6` で 2 ペインが開く**(2026-08-19、実測で「1 度も効いていない」と判明)。
+   *
+   * ⚠ 近道は「押しボタンを探して押す」形なので、#241 の訂正で**帯から 2 ペインの
+   *   ボタンを外した瞬間に無反応**になっていた。しかも `preventDefault` すら
+   *   しないので、user から見て手がかりが 1 つも無い。
+   * ⚠ **お知らせ・マニュアル・`shell.ts` のコメントは 3 つとも「効きます」**と
+   *   言っており、画面と doc が揃って嘘をついていた。
+   * 🔑 ボタンを持たない面は**直に投げる**(`view-detail` と同じ作法)。
+   */
+  it('🔴 Alt+6 で 2 ペインの面が開く(押しボタンが無くても効く)', () => {
+    const { d } = mounted();
+    expect(d.getState().viewMode, '前提が崩れている(最初から 2 ペイン)').not.toBe('dual');
+    press('6', { code: 'Digit6', altKey: true });
+    expect(d.getState().viewMode, 'Alt+6 が効いていない').toBe('dual');
+  });
+
+  /** 🔴 もう一度押すと本文へ戻る(帯のボタンと同じ規則を通っている)。 */
+  it('🔴 Alt+6 をもう一度押すと本文へ戻る', () => {
+    const { d } = mounted();
+    press('6', { code: 'Digit6', altKey: true });
+    press('6', { code: 'Digit6', altKey: true });
+    expect(d.getState().viewMode, '押し直しても閉じない').toBe('detail');
+  });
+
   it('🔴 割り当て直すと、新しい鍵が効いて古い鍵は効かない', () => {
     const store = new KeymapStore(fakeStorage());
     store.removeBinding('create-entry', 'Mod+N');
@@ -689,8 +714,22 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
       src.indexOf('};', src.indexOf('const SHORTCUT_BUTTON')),
     );
     const byButton = [...table.matchAll(/'([a-z-]+)':/g)].map((m) => m[1]!);
-    // ⚠ ボタンを持たない 4 つは binder が名指しで受ける(その場所も原文で確かめる)
-    const special = ['nav-back', 'nav-forward', 'view-detail', 'toggle-focus-mode', 'focus-search'];
+    /**
+     * ⚠ ボタンを持たない面は binder が名指しで受ける(その場所も原文で確かめる)。
+     * 🔴 **`view-dual` を 2026-08-19 にここへ足した** ── #241 の訂正で帯から
+     *   ボタンを外したのに表の行だけ残っており、**`Alt+6` は 1 度も効いていなかった**。
+     * ⚠ **この検査は在ったのに見逃した** ── 見ていたのは「表に名前が在るか」だけで、
+     *   **その選択子が画面に当たるか**を見ていなかった(§1「名前が在るかの検査は、
+     *   中身が空でも通る」)。当たるかどうかは `tests/docs-parity.test.ts` が見る。
+     */
+    const special = [
+      'nav-back',
+      'nav-forward',
+      'view-detail',
+      'view-dual',
+      'toggle-focus-mode',
+      'focus-search',
+    ];
     for (const id of special) {
       expect(src, `${id} の特例が消えた`).toContain(`cmd === '${id}'`);
     }

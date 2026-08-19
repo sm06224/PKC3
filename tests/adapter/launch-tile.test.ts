@@ -341,7 +341,16 @@ describe('組み込み Office タイル (#148)', () => {
  * 既存窓への focus-request は無反応に見える(レポート #11)ので一言を出す。
  */
 describe('main.ts の配線(原文 pin ── #174)', () => {
-  const MAIN = readFileSync('src/main.ts', 'utf8');
+  /**
+   * ⚠ **コメントを落としてから見る**(2026-08-19 のレビュー W-11)。
+   * 「**在る**」ことを主張する検査に生テキストを使うと、**解説コメントに
+   * 同じ字を書いた瞬間に、配線を落としても緑になる**(この repo が 5 回踏んだ型)。
+   * ⚠ 落とし過ぎの空振り防止に、落とした後も本文が十分残っていることを見る。
+   */
+  const MAIN = readFileSync('src/main.ts', 'utf8')
+    .split('\n')
+    .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+    .join('\n');
 
   it('既存窓へ focus したとき「既に開いています」を出す', () => {
     expect(MAIN).toContain("if (r.kind === 'already-open')");
@@ -362,6 +371,11 @@ describe('main.ts の配線(原文 pin ── #174)', () => {
    *   `nextViewMode` の unit(`tests/adapter/state.test.ts`)が守る ── ここは
    *   「main.ts がその関数を通しているか」だけを見る(弱いと自覚して使う)。
    */
+  it('⚠ コメントを落としても本文が残っている(空振り防止)', () => {
+    expect(MAIN.length, 'コメントを落としすぎて本文が消えた').toBeGreaterThan(20_000);
+    expect(MAIN, '配線が読めていない').toContain('dispatcher.dispatch');
+  });
+
   it('🔴 組み込みタイルの openView が nextViewMode を通る(もう一度押すと戻る)', () => {
     const opens = [...MAIN.matchAll(/openView: \(view\) =>/g)].length;
     expect(opens, 'openView の配線が読めていない(空振り)').toBeGreaterThan(0);

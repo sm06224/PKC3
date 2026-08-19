@@ -468,11 +468,6 @@ export type UserAction =
   /** 札が集められなかった(#277 段②-b)。⚠ 「まだ」と区別する ── 文言が違う。 */
   | { type: 'TASK_SCAN_FAILED' }
   /**
-   * 集め直す(#277 段②-b)。⚠ `REFRESH_QUERY` と同じ理由で
-   * **`SET_VIEW_MODE` を借りない**(借りるとペインが理由なく畳まれる)。
-   */
-  | { type: 'REFRESH_TASKS' }
-  /**
    * 選択の履歴を戻る・進む(#190)。⚠ **行き先は state が持つ** ── 呼び側が lid を
    * 決めると、履歴と選択が二重帳簿になる(§7)。
    */
@@ -1226,12 +1221,6 @@ function reduceCore(
       };
     case 'QUERY_FAILED':
       return { state: { ...state, queryFailed: true }, events: [] };
-    case 'REFRESH_TASKS':
-      // ⚠ 前の盤面は**消さない**(集計と同じ ── 集め直しの間に空白を出さない)
-      return {
-        state: { ...state, taskScanFailed: false },
-        events: [{ type: 'REQUEST_TASK_SCAN' }],
-      };
     case 'SET_TASK_SCAN':
       return { state: { ...state, taskScan: action.scan, taskScanFailed: false }, events: [] };
     case 'TASK_SCAN_FAILED':
@@ -1563,7 +1552,7 @@ function reduceCore(
         };
       }
       // 抽出はイベント発火時(= この reduce)に同期で行い、行全体を確定して運ぶ
-      const { entryMetas, entry } = buildPersist(state, meta, body);
+      const { entryMetas, entry, taskScan } = buildPersist(state, meta, body);
       // 変更前(baseline)を履歴に積むかどうか(P5c: 実際の記録は worker が
       // 同 tx で行う ── ここは「刻むか / 頭を張り替えるだけか」の意思決定)。
       // 新規作成の初回 commit は積まない ──「flavor seed へ戻す」だけの復元先は
@@ -1574,7 +1563,7 @@ function reduceCore(
       const checkpoint =
         state.freshLid !== lid && baseline !== seedBodyFor(meta.archetype);
       return {
-        state: { ...next, entryMetas },
+        state: { ...next, entryMetas, taskScan },
         events: [{ type: 'PERSIST_ENTRY', entry, checkpoint }],
       };
     }
@@ -1587,7 +1576,7 @@ function reduceCore(
       if (baseline === persisted || diskAhead) return { state, events: [] };
       const meta = state.entryMetas.get(lid);
       if (!meta) return { state, events: [] };
-      const { entryMetas, entry } = buildPersist(state, meta, baseline);
+      const { entryMetas, entry, taskScan } = buildPersist(state, meta, baseline);
       // 再送でも刻む意思は同じ(worker 側の hash skip が重複を防ぐので二重に
       // 積まれることはない ── 初回 persist が失敗していれば disk はまだ前の内容)
       const checkpoint =
@@ -1598,6 +1587,7 @@ function reduceCore(
           phase: 'ready',
           error: null,
           entryMetas,
+          taskScan,
           openBody: { lid, body: baseline, baseline, persisted, diskAhead: false },
         },
         events: [{ type: 'PERSIST_ENTRY', entry, checkpoint }],
@@ -1854,17 +1844,7 @@ function reduceCore(
        * ⚠ 触るのは**そのノートの札だけ**(他のノートを並び直さない)。
        * ⚠ 盤面を一度も開いていなければ `null` のまま(何もしない)。
        */
-      const taskScan =
-        state.taskScan === null
-          ? null
-          : {
-              ...state.taskScan,
-              cards: replaceTaskCards(
-                state.taskScan.cards,
-                action.lid,
-                listTaskItems(action.body),
-              ),
-            };
+      const taskScan = refreshTaskCards(state.taskScan, action.lid, action.body);
       return { state: { ...state, entryMetas, openBody, taskScan }, events: [] };
     }
     case 'SET_CALENDAR_MONTH': {
@@ -2786,11 +2766,38 @@ function dropLink(
  * RETRY_PERSIST 共用)。抽出は唯一経路 extractMeta。抽出値が変わらないときは
  * entryMetas の参照を維持する(sidebar / kanban の断面指紋を無駄に壊さない)。
  */
+/**
+ * 🔴 **板の札を、新しい本文から組み直す**(#277 段②-b。2026-08-19 のレビューで判明)。
+ *
+ * 札は**原文の行番号**を指すので、本文が変われば**指す先がずれる**。
+ * ⚠ 直す前は書換の ack(`BODY_REWRITTEN`)でしか組み直しておらず、
+ *   **普通の保存(`COMMIT_EDIT`)では古い行番号のまま**だった ── 板を開いて
+ *   閉じ、本文の先頭に 1 行足して保存し、板へ戻ると、札は開き直しの走査が
+ *   返るまで**古い行**を指したまま押せる。押すと**別の行が黙って完了になる**。
+ * 🔑 だから「新しい本文が state に入る所」= `buildPersist` と `BODY_REWRITTEN` の
+ *   2 か所**だけ**を通す(数えた数だけ通す ── §7)。
+ * ⚠ 板を一度も開いていなければ `null` のまま何もしない。
+ */
+function refreshTaskCards(
+  scan: TaskScan | null,
+  lid: string,
+  body: string,
+): TaskScan | null {
+  if (scan === null) return null;
+  const cards = replaceTaskCards(scan.cards, lid, listTaskItems(body));
+  return cards === scan.cards ? scan : { ...scan, cards };
+}
+
 function buildPersist(
   state: AppState,
   meta: EntryMeta,
   body: string,
-): { entryMetas: ReadonlyMap<string, EntryMeta>; entry: EntryUpsert } {
+): {
+  entryMetas: ReadonlyMap<string, EntryMeta>;
+  entry: EntryUpsert;
+  /** ⚠ 板を開いていなければ `null`(呼び側はそのまま state へ入れてよい)。 */
+  taskScan: TaskScan | null;
+} {
   const ext = extractMeta(meta.archetype, body);
   const changed =
     meta.status !== ext.status ||
@@ -2801,6 +2808,8 @@ function buildPersist(
     : state.entryMetas;
   return {
     entryMetas,
+    // 🔑 本文が変われば札の行番号もずれる ── ここで組み直す(上の docstring)
+    taskScan: refreshTaskCards(state.taskScan, meta.lid, body),
     entry: {
       lid: meta.lid,
       title: meta.title,

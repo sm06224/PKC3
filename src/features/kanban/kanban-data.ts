@@ -101,11 +101,14 @@ export function taskCardKey(card: { lid: string; line: number }): string {
  * ⚠ 盤面ぜんぶを集め直さない ── 他のノートまで並び直すと、
  * 押した瞬間に無関係な札が動く(しかも DB を舐め直す)。
  *
- * 🔑 **並びは保つ**。札は(ノートの並び, 行番号)順なので、同じ lid の札は
- * **必ず連続している** ── その区間をそっくり入れ替える。
+ * 🔑 **並びは保つ**。⚠ **「同じ lid の札は連続している」を前提にしない**
+ * (2026-08-19 のレビュー D-3)── 前提が崩れると**札が 1 枚黙って消える**
+ * (同じ鍵が 2 回現れ、DOM が 1 個だけ置かれる)。その lid の札を**全部抜いて**、
+ * **最初に居た位置へ**まとめて差し込む ── 連続でも飛んでいても同じ結果になる。
  * ⚠ 元々 1 枚も無かった lid は**入れない**(どこへ入れるべきか、ここでは
  * 分からない ── ノートの並びを知っているのは worker である)。次に面を開けば出る。
- * ⚠ 変わらないときは**同じ配列を返す**(描画側の指紋を無駄に壊さない)。
+ * ⚠ 触る札が無いときは**同じ配列を返す** ── 呼び側(`refreshTaskCards`)が
+ *   それを見て `TaskScan` ごと据え置くので、描画側の指紋が無駄に壊れない。
  */
 export function replaceTaskCards(
   cards: readonly TaskCard[],
@@ -114,13 +117,14 @@ export function replaceTaskCards(
 ): readonly TaskCard[] {
   const from = cards.findIndex((c) => c.lid === lid);
   if (from < 0) return cards;
-  let to = from;
-  while (to < cards.length && cards[to]!.lid === lid) to += 1;
+  // ⚠ `from` は**元の並び**での最初の位置 ── 抜いた後の配列でも、そこより前に
+  //    この lid の札は 1 枚も無いので、そのまま差し込み位置として使える
+  const others = cards.filter((c) => c.lid !== lid);
   const next = items.map((i) => ({
     lid,
     line: i.line,
     text: clipTaskText(i.text),
     done: i.done,
   }));
-  return [...cards.slice(0, from), ...next, ...cards.slice(to)];
+  return [...others.slice(0, from), ...next, ...others.slice(from)];
 }

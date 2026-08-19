@@ -403,3 +403,79 @@ describe('画面の文字列に記法を書かない(2026-08-18)', () => {
     expect(offenders, '画面に出る文字列に記法が書かれている(そのまま記号が見える)').toEqual([]);
   });
 });
+
+/**
+ * 🔴 **本文を書く action は、忙しい間の門(`BODY_WRITE_ACTIONS`)に必ず載る**
+ * (2026-08-19 のレビュー W-4)。
+ *
+ * ⚠ `toggle-task`(#287)と `calendar-set-date`(#276)は、`toggle-todo` と
+ *   **同じ `REQUEST_BODY_REWRITE` を撃つ**のに門から漏れていた ── PKC3 の
+ *   `AppPhase` に `'exporting'` は無く、取り込み・書き出し中も `phase` は
+ *   `'ready'` のままなので、reducer の門は効かない。止められるのは
+ *   `services.busy()` だけであり、その入口がこの配列である。
+ * 🔑 **散文では守れない**(2 回とも足し忘れた)ので、
+ *   「reducer が本文の書込へ変える action 型」→「それを撃つ binder の action 名」を
+ *   **機械で数え上げて**突き合わせる。
+ */
+describe('本文を書く導線は、忙しい間の門に載っている', () => {
+  const STATE = readFileSync('src/adapter/state/app-state.ts', 'utf-8');
+  const BINDER = readFileSync('src/adapter/ui/actions/binder.ts', 'utf-8');
+
+  /** reducer の `case 'X':` を境に切って、本文の書込を出す型を拾う。 */
+  const writingActionTypes = (): Set<string> => {
+    const out = new Set<string>();
+    const parts = STATE.split(/\n {4}case '/);
+    for (const part of parts.slice(1)) {
+      const name = /^([A-Z_]+)'/.exec(part)?.[1];
+      if (name === undefined) continue;
+      // ⚠ 次の case までを見る(case を跨いで拾わない)
+      const body = part.split(/\n {4}case '/)[0]!;
+      if (/type: 'REQUEST_BODY_REWRITE'|type: 'PERSIST_ENTRY'/.test(body)) out.add(name);
+    }
+    return out;
+  };
+
+  /**
+   * binder の ACTIONS 表を、handler ごとに切る。
+   * ⚠ **表の終わりで切る**(2026-08-19 に自分で踏んだ)── file 末尾まで取ると、
+   *   最後の handler の本文が**表の外のコード**(別の対応表など)を飲み込み、
+   *   無関係な `type: '...'` に満たされて**偽の漏れ**が出る(§1「範囲が広すぎる」)。
+   */
+  const handlerBodies = (): Map<string, string> => {
+    const from = BINDER.indexOf('const ACTIONS: Record<string, ActionHandler> = {');
+    // 表は行頭の `};` で閉じる ── そこまでを表と見なす
+    const rel = BINDER.slice(from).search(/\n\};\n/);
+    expect(rel, 'ACTIONS 表の終わりを読めていない').toBeGreaterThan(0);
+    const table = BINDER.slice(from, from + rel);
+    const out = new Map<string, string>();
+    const marks = [...table.matchAll(/^ {2}'([a-z0-9-]+)':/gm)];
+    for (let i = 0; i < marks.length; i++) {
+      const start = marks[i]!.index!;
+      const end = i + 1 < marks.length ? marks[i + 1]!.index! : table.length;
+      out.set(marks[i]![1]!, table.slice(start, end));
+    }
+    return out;
+  };
+
+  it('⚠ 数え上げが空振りしていない(表を読めている)', () => {
+    const types = writingActionTypes();
+    expect(types.size, 'reducer から本文の書込を出す型を 1 つも読めていない').toBeGreaterThan(2);
+    expect(types, 'よく知られた書込の型が拾えていない').toContain('TOGGLE_TASK');
+    expect(handlerBodies().size, 'binder の表を読めていない').toBeGreaterThan(20);
+  });
+
+  it('🔴 本文を書く action が門から漏れていない', () => {
+    const types = writingActionTypes();
+    const gate = new Set(
+      [...(/const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set\(\[([\s\S]*?)\]\)/
+        .exec(BINDER)?.[1] ?? '').matchAll(/'([a-z0-9-]+)'/g)].map((m) => m[1]!),
+    );
+    expect(gate.size, '門の一覧を読めていない(空振り)').toBeGreaterThan(5);
+    const missing: string[] = [];
+    for (const [action, body] of handlerBodies()) {
+      const dispatched = [...body.matchAll(/type: '([A-Z_]+)'/g)].map((m) => m[1]!);
+      if (dispatched.some((t) => types.has(t)) && !gate.has(action)) missing.push(action);
+    }
+    expect(missing, '本文を書くのに BODY_WRITE_ACTIONS に無い action がある').toEqual([]);
+  });
+});

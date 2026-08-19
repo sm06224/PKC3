@@ -16,6 +16,7 @@
 import { describe, expect, it } from 'vitest';
 import { countTaskCandidates, listTaskItems } from '../../src/features/markdown/task-count';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
+import { applyBodyRewrite, isTaskLine } from '../../src/features/markdown/body-rewrite';
 
 /** 🔑 **描く側の真値** ── 画面に出るチェック欄の数(自前で数え直さない)。 */
 function drawn(body: string): number {
@@ -37,6 +38,14 @@ const CORPUS: ReadonlyArray<readonly [string, string]> = [
   ['🔴 引用の中', '> - [ ] 引用の中\n'],
   ['🔴 引用の入れ子', '> > - [x] 二重の引用\n'],
   ['🔴 字下げ 4 のコード', '    - [ ] コード扱い\n\n- [ ] 本物\n'],
+  /**
+   * 🔴 **字下げコードの中の fence 記号**(2026-08-19 のレビューで判明)。
+   * CommonMark の fence は**字下げ 3 まで** ── 4 以上はコードの中身なので、
+   * fence として数えると**そこから後の項目を全部落とす**(少なく数える = 禁じた向き)。
+   */
+  ['🔴 字下げ 4 の fence 記号', '    ```\n\n- [ ] 本物のやること\n'],
+  ['🔴 リストの中の深い字下げ fence', '- 例:\n\n      ```\n\n- [ ] 本物\n'],
+  ['字下げ 3 の fence(こちらは正規)', '   ```\n- [ ] 中\n   ```\n\n- [ ] 外\n'],
   ['入れ子', '- [ ] 親\n  - [ ] 子\n'],
   ['番号つき', '1. [ ] a\n2) [x] b\n'],
   ['印の後ろが空', '- [ ]\n'],
@@ -206,5 +215,38 @@ describe('チェック項目を取り出す(#277 段②-b)', () => {
   it('項目が無ければ空の配列', () => {
     expect(listTaskItems('')).toEqual([]);
     expect(listTaskItems('- ふつうの箇条書き\n')).toEqual([]);
+  });
+
+  /**
+   * 🔴 **札に出た行は、必ず書き換えられる**(2026-08-19 のレビューで判明した穴)。
+   *
+   * ⚠ `task-count.ts` は引用記号を剥がしてから判定するのに、書き換える側
+   * (`body-rewrite.ts` の `TASK_LINE`)は剥がしていなかった ── つまり
+   * **`> - [ ] やること` は札に出るのに押しても書き換わらない**。
+   * 押すとブラウザが印を付け、帯には「本文が変わっているため反映できませんでした
+   * (開き直してください)」という**嘘の理由**が出て、開き直しても永久に直らない。
+   * これは `markdown-render.ts` が明文で禁じている
+   * 「押せるのに本文が変わらない = チェックしたのに消えた」そのものである。
+   *
+   * 🔑 **この parity はどこにも無かった。** `walkTaskLines` と `TASK_LINE` は
+   *   別実装なので、これは同じ関数を 2 回呼ぶ偽の parity ではない(§7)。
+   */
+  it('🔴 札に出た行は必ず書き換えられる(押せない札を出さない)', () => {
+    const dead: string[] = [];
+    for (const [name, body] of CORPUS) {
+      for (const item of listTaskItems(body)) {
+        if (!isTaskLine(body, item.line)) dead.push(`${name}: 行 ${item.line}`);
+        // ⚠ 「判定は通るが書き換わらない」も潰す ── 実際に当ててみる
+        else if (applyBodyRewrite(body, { kind: 'task', line: item.line }) === null)
+          dead.push(`${name}: 行 ${item.line}(判定は通るのに書換が null)`);
+      }
+    }
+    expect(dead, '押しても何も起きない札を出している').toEqual([]);
+  });
+
+  /** ⚠ **空振り防止** ── 引用の札が実際に corpus から出ていること。 */
+  it('⚠ 引用の中の札が corpus から出ている(空振り防止)', () => {
+    expect(listTaskItems('> - [ ] 引用の中\n'), '引用の札が出ていない').toHaveLength(1);
+    expect(listTaskItems('> > - [x] 二重\n'), '二重引用の札が出ていない').toHaveLength(1);
   });
 });

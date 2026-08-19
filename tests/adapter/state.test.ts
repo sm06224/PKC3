@@ -838,6 +838,40 @@ describe('カンバンの札(#277 段②-b)', () => {
     expect(out.events).not.toContainEqual({ type: 'REQUEST_TASK_SCAN' });
   });
 
+  /**
+   * 🔴 **普通の保存でも札の行番号が追従する**(2026-08-19 のレビュー W-5)。
+   *
+   * ⚠ 直す前は書換の ack でしか組み直しておらず、**`COMMIT_EDIT` では古いまま**
+   *   だった ── 板を閉じ、本文の先頭に 1 行足して保存し、板へ戻ると、
+   *   走査が返るまで札は**古い行**を指したまま押せる。押すと
+   *   **別の行が黙って完了になる**(落ちる向きがデータ破壊)。
+   * 🔑 直しは「新しい本文が state に入る所」= `buildPersist` 1 か所を通すこと。
+   */
+  it('🔴 保存すると、札の行番号が新しい本文に追従する', () => {
+    let s = reduce(booted(), { type: 'SET_VIEW_MODE', mode: 'kanban' }).state;
+    s = reduce(s, { type: 'SELECT_ENTRY', lid: 'a' }).state;
+    s = reduce(s, { type: 'BODY_LOADED', lid: 'a', body: '- [ ] A\n- [ ] B\n' }).state;
+    s = reduce(s, {
+      type: 'SET_TASK_SCAN',
+      scan: scan([
+        { lid: 'a', line: 0, text: 'A', done: false },
+        { lid: 'a', line: 1, text: 'B', done: false },
+      ]),
+    }).state;
+    // 先頭に 1 行足して保存 ── A は 0 行目から 1 行目へずれる
+    s = reduce(s, { type: 'START_EDIT' }).state;
+    s = reduce(s, { type: 'UPDATE_OPEN_BODY', body: '- [ ] 新しいやること\n- [ ] A\n- [ ] B\n' }).state;
+    const out = reduce(s, { type: 'COMMIT_EDIT' });
+    expect(
+      out.state.taskScan?.cards.map((c) => [c.line, c.text]),
+      '保存しても札が古い行を指したまま(押すと別の行が完了になる)',
+    ).toEqual([
+      [0, '新しいやること'],
+      [1, 'A'],
+      [2, 'B'],
+    ]);
+  });
+
   /** ⚠ 盤面を一度も開いていなければ、ack は札に触らない(null のまま)。 */
   it('盤面を開いていなければ ack は何もしない', () => {
     const out = reduce(booted(), {
@@ -856,9 +890,14 @@ describe('カンバンの札(#277 段②-b)', () => {
     const s = reduce(booted(), { type: 'TASK_SCAN_FAILED' }).state;
     expect(s.taskScanFailed).toBe(true);
     expect(s.taskScan, '失敗で札を作ってしまっている').toBeNull();
-    // 集め直しを頼むと、断りは解ける(前の盤面は消さない)
-    const out = reduce(s, { type: 'REFRESH_TASKS' });
-    expect(out.state.taskScanFailed).toBe(false);
-    expect(out.events).toContainEqual({ type: 'REQUEST_TASK_SCAN' });
+    /**
+     * ⚠ **集め直しの action は持たない**(2026-08-19 のレビュー W-3)。
+     * 集計には「集め直す」ボタンが在るが、板には**導線が無い**まま
+     * `REFRESH_TASKS` だけが在り、`src/` の誰も送っていなかった ──
+     * 実行するのが test だけの分岐は、製品の何も守らない(§2)。
+     * 🔑 集め直す口は `SET_VIEW_MODE`(面を開く)1 本に寄せた。
+     */
+    const reopened = reduce(s, { type: 'SET_VIEW_MODE', mode: 'kanban' });
+    expect(reopened.events).toContainEqual({ type: 'REQUEST_TASK_SCAN' });
   });
 });

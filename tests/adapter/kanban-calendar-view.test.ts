@@ -32,10 +32,15 @@ function meta(lid: string, over: Partial<EntryMeta> = {}): EntryMeta {
 }
 
 /**
- * 🔒 かんばん / カレンダーは**封印中**(`features/sealed.ts`)なので、切替ボタンが
- * 画面に無い。導線ではなく直接 dispatch で見せる ── **封印は導線を畳んだだけで、
- * 描画も state も生きている**という事実を、この test 自身が示している。
- * 封印を解いたら、ここをボタンのクリックへ戻す。
+ * 🔑 **面の切替は dispatch で作る**(2026-08-19 に理由を書き直した)。
+ *
+ * ⚠ 以前ここには「封印中なので切替ボタンが画面に無い。**解いたらボタンのクリックへ
+ *   戻す**」と書いてあったが、封印は #276 / #277 で解けたのに**戻していない** ──
+ *   古い指示が残っていた。
+ * 🔑 戻さないのが正しい:解いた形は**組み込みタイル**であって帯の切替ではないので、
+ *   ここでボタンを押すなら**ランチャーの面まで組む**ことになる。導線が実際に効くかは
+ *   `tests/smoke/kanban.smoke.spec.ts` が**実クリック**で見る ── unit は
+ *   **描画と state** を見る場所として dispatch のままにする(役割で分ける)。
  */
 function showView(d: Dispatcher, mode: ViewMode): void {
   d.dispatch({ type: 'SET_VIEW_MODE', mode });
@@ -292,6 +297,140 @@ describe('kanban view (#277 段②-b)', () => {
     click();
     await tick(20);
     expect(persisted, '再クリックが retry になっていない').toHaveLength(1);
+  });
+
+  /**
+   * 🔴 **断られたとき、印だけが付いたまま残らない**(2026-08-19 のレビュー W-2)。
+   * ⚠ 直す前はブラウザの既定動作で `checked` が反転し、断り経路(編集中 /
+   *   書換が当たらない / 保存の失敗)では**戻す者が居なかった** ──
+   *   「チェックしたのに保存されない」という、いちばん質の悪い見え方。
+   * 🔑 いまは押した瞬間に何も変えない(`preventDefault`)。
+   */
+  it('🔴 編集中に札を押しても、印は付かない(見た目が嘘をつかない)', async () => {
+    const { d, q, persisted } = setup([meta('e1', { archetype: 'text', status: null })], {
+      e1: '- [ ] やること\n',
+    });
+    showView(d, 'kanban');
+    feed(d, [{ lid: 'e1', line: 0, text: 'やること', done: false }]);
+    // 編集中にする(札は ready 限定)
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
+    await tick();
+    d.dispatch({ type: 'START_EDIT' });
+    await tick();
+    const box = q<HTMLInputElement>('[data-pkc-region="kanban-cards"] [data-pkc-task-line="0"]')!;
+    box.click();
+    await tick(20);
+    expect(box.checked, '断られたのに印が付いたまま残っている').toBe(false);
+    expect(persisted, '編集中なのに書き込んだ').toHaveLength(0);
+  });
+
+  /**
+   * ⚠ **空振り防止** ── 上の test は「そもそも click が印を動かさない環境」でも
+   * 通ってしまう。**素の checkbox は反転する**ことを同じ環境で確かめる。
+   */
+  it('⚠ 素の checkbox は click で反転する(空振り防止)', () => {
+    const plain = document.createElement('input');
+    plain.type = 'checkbox';
+    document.body.append(plain);
+    plain.click();
+    expect(plain.checked, 'この環境では click が既定動作を起こさない = 上の test は空振り').toBe(
+      true,
+    );
+    plain.remove();
+  });
+
+  /**
+   * 🔴 **切ったことを画面に出す**(2026-08-19 のレビュー W-6)。
+   * ⚠ `truncated` を描画側で与える test が 1 件も無く、
+   *   「切ったなら必ず言う」の 1 行だけが無防備だった。
+   */
+  it('🔴 上限で切ったら、そう画面に書く(「無い」と読ませない)', () => {
+    const { d, q } = setup([meta('e1', { archetype: 'text', status: null })], { e1: 'x' });
+    showView(d, 'kanban');
+    d.dispatch({
+      type: 'SET_TASK_SCAN',
+      scan: {
+        cards: [{ lid: 'e1', line: 0, text: 'やること', done: false }],
+        totalNotes: 900,
+        scannedNotes: 500,
+        truncated: true,
+      },
+    });
+    const note = q('[data-pkc-field="kanban-note"]')!.textContent ?? '';
+    expect(note, '切ったことを言っていない').toContain('多いので');
+    expect(note, '候補の総数を出していない').toContain('900');
+  });
+
+  /**
+   * 🔴 **本文の当たり(検索)も絞り込みに効く**(レビュー W-7 / W-8)。
+   * ⚠ 題名に無い語で絞ったとき、本文が当たっているノートの札が消えると
+   *   「左の一覧には出るのに板は空」になる。
+   */
+  it('🔴 本文の当たりで絞れる(題名に無い語でも札が残る)', () => {
+    const { d, q } = setup(
+      [meta('e1', { archetype: 'text', status: null }), meta('e2', { archetype: 'text', status: null })],
+      { e1: 'x', e2: 'y' },
+    );
+    showView(d, 'kanban');
+    feed(d, [
+      { lid: 'e1', line: 0, text: 'あ', done: false },
+      { lid: 'e2', line: 0, text: 'い', done: false },
+    ]);
+    const cards = (): number =>
+      q('[data-pkc-view-pane="kanban"]')!.querySelectorAll('[data-pkc-region="kanban-cards"] [data-pkc-entry]').length;
+    expect(cards()).toBe(2);
+    // 題名(t-e1 / t-e2)に無い語で絞る ── 本文の当たりだけが根拠になる
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'ぜんぜん違う語' });
+    expect(cards(), '当たりが無いのに残っている').toBe(0);
+    d.dispatch({ type: 'SET_SEARCH_HITS', query: 'ぜんぜん違う語', lids: ['e1'] });
+    expect(cards(), '本文の当たりが盤面に効いていない').toBe(1);
+  });
+
+  /** 🔴 ノートを改名したら、札の出どころの字も直る(レビュー W-9)。 */
+  it('🔴 改名が札に映る', async () => {
+    const { d, q } = setup([meta('e1', { archetype: 'text', status: null })], { e1: 'x' });
+    showView(d, 'kanban');
+    feed(d, [{ lid: 'e1', line: 0, text: 'やること', done: false }]);
+    const note = (): string =>
+      q('[data-pkc-region="kanban-cards"] [data-pkc-field="note"]')!.textContent ?? '';
+    expect(note()).toBe('t-e1');
+    d.dispatch({ type: 'RENAME_ENTRY_TITLE', lid: 'e1', title: '新しい名前' });
+    await tick();
+    expect(note(), '改名が札に映っていない').toBe('新しい名前');
+  });
+
+  /** 🔴 済みの札に印が付く / 選んだ札に印が付く(レビュー W-10)。 */
+  it('🔴 済みと選択が DOM の属性に出る', () => {
+    const { d, q } = setup([meta('e1', { archetype: 'text', status: null })], { e1: 'x' });
+    showView(d, 'kanban');
+    feed(d, [
+      { lid: 'e1', line: 0, text: 'まだ', done: false },
+      { lid: 'e1', line: 1, text: 'すんだ', done: true },
+    ]);
+    const done = q('[data-pkc-kanban-status="done"] [data-pkc-entry]')!;
+    expect(done.hasAttribute('data-pkc-task-done'), '済みの印が無い(取り消し線が効かない)').toBe(
+      true,
+    );
+    const open = q('[data-pkc-kanban-status="open"] [data-pkc-entry]')!;
+    expect(open.hasAttribute('data-pkc-task-done'), '未完了に済みの印が付いている').toBe(false);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
+    expect(open.hasAttribute('data-pkc-selected'), '選んだ札に印が付かない').toBe(true);
+  });
+
+  /**
+   * 🔴 **片付けたノートの項目は、カレンダーと同じ規則**(レビュー指摘)。
+   */
+  it('🔴 片付けたノートの札は既定で出ない(見せる設定なら出る)', () => {
+    const { d, q } = setup([meta('e1', { archetype: 'text', status: null, archived: true })], {
+      e1: 'x',
+    });
+    showView(d, 'kanban');
+    feed(d, [{ lid: 'e1', line: 0, text: 'やること', done: false }]);
+    const cards = (): number =>
+      q('[data-pkc-view-pane="kanban"]')!.querySelectorAll('[data-pkc-region="kanban-cards"] [data-pkc-entry]').length;
+    expect(cards(), '片付けたノートの項目が既定で出ている').toBe(0);
+    d.dispatch({ type: 'TOGGLE_SHOW_ARCHIVED' });
+    expect(cards(), '見せる設定にしても出ない').toBe(1);
   });
 
   it('編集中はトグル不可(ready 限定)/ 未知 lid・text は no-op', async () => {

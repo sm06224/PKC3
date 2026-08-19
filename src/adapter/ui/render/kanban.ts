@@ -20,6 +20,7 @@ import type { AppState } from '@adapter/state/app-state';
 import {
   groupTasksByStatus,
   KANBAN_COLUMNS,
+  TASK_LIMITS,
   taskCardKey,
   type KanbanStatus,
   type TaskCard,
@@ -37,6 +38,13 @@ export class KanbanRenderer {
   private lastMetas: AppState['entryMetas'] | null = null;
   private lastFilter: string | null = null;
   private lastHits: AppState['searchHits'] = null;
+  private lastShowArchived: boolean | null = null;
+  /**
+   * ⚠ **断りも指紋の一部**(2026-08-19 のレビュー W-2)。押した札が断られたとき、
+   * ここを見ていないと**描画器が早期 return して印が戻らない**。
+   * 🔑 いまは押した瞬間に印を付けない(binder が `preventDefault`)ので二重の守り。
+   */
+  private lastError: AppState['error'] = null;
   private lastSelected: string | null = null;
 
   constructor(region: HTMLElement) {
@@ -50,6 +58,8 @@ export class KanbanRenderer {
       state.entryMetas === this.lastMetas &&
       state.filterQuery === this.lastFilter &&
       state.searchHits === this.lastHits &&
+      state.showArchived === this.lastShowArchived &&
+      state.error === this.lastError &&
       state.selectedLid === this.lastSelected
     )
       return;
@@ -58,6 +68,8 @@ export class KanbanRenderer {
     this.lastMetas = state.entryMetas;
     this.lastFilter = state.filterQuery;
     this.lastHits = state.searchHits;
+    this.lastShowArchived = state.showArchived;
+    this.lastError = state.error;
     this.lastSelected = state.selectedLid;
 
     const frame = this.ensureFrame();
@@ -71,7 +83,15 @@ export class KanbanRenderer {
     const all = state.taskScan?.cards ?? [];
     const visible = all.filter((c) => {
       const m = state.entryMetas.get(c.lid);
-      return m !== undefined && matchesEntry(m.lid, m.title, q, state.searchHits);
+      if (m === undefined) return false;
+      /**
+       * 🔴 **片付けたノートの項目は、カレンダーと同じ規則で扱う**
+       * (2026-08-19 のレビュー)。旧カンバンは `archived` を常に外し、
+       * カレンダーは `showArchived` を尊重していた ── **同じ日に直した 2 面で
+       * 扱いが割れる**のを避け、判定を 1 つにする(§7)。
+       */
+      if (m.archived && !state.showArchived) return false;
+      return matchesEntry(m.lid, m.title, q, state.searchHits);
     });
     frame.note.textContent = this.noteText(state, all.length, visible.length);
     const grouped = groupTasksByStatus(visible);
@@ -126,13 +146,23 @@ export class KanbanRenderer {
     if (state.taskScanFailed)
       return 'チェック項目を集められませんでした。面を開き直すともう一度試します。';
     if (state.taskScan === null) return '集めています…';
+    const scan = state.taskScan;
+    /**
+     * 🔴 **切ったことを先に言う**(2026-08-19 のレビュー D-2)。⚠ 直す前は
+     *   「絞り込みに当てはまる項目がありません」「まだありません」が**先**だったので、
+     *   **切った結果 0 件になった**ときに「無い」と言い切っていた ──
+     *   黙って切らない、の趣旨から外れる。
+     */
+    if (scan.truncated) {
+      const where =
+        scan.scannedNotes < scan.totalNotes
+          ? `${scan.scannedNotes} 件のノートまで`
+          : `${TASK_LIMITS.items} 件の項目まで`;
+      return `多いので ${where} を出しています(候補のノートは ${scan.totalNotes} 件)。`;
+    }
     if (total === 0)
       return 'チェックの付いた行がまだありません。ノートに「- [ ] やること」と書くと、ここに出ます。';
     if (shown === 0) return '絞り込みに当てはまる項目がありません。';
-    const scan = state.taskScan;
-    // 🔴 切ったなら必ず言う(「無い」と読ませない)
-    if (scan.truncated)
-      return `多いので ${scan.scannedNotes} 件のノートまでを出しています(候補は ${scan.totalNotes} 件)。`;
     return `${shown} 件`;
   }
 
