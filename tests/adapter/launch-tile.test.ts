@@ -48,6 +48,8 @@ interface Harness {
   seedFor: string[];
   /** `openOffice` が呼ばれた回数(#148 の観測点)。 */
   officeOpens: { n: number };
+  /** `openDual` が呼ばれた回数(#241 の観測点)。 */
+  dualOpens: { n: number };
   closeWindow: () => void;
   deps: Parameters<typeof launchTile>[1];
 }
@@ -62,6 +64,7 @@ function harness(
   const failures: string[] = [];
   const seedFor: string[] = [];
   const officeOpens = { n: 0 };
+  const dualOpens = { n: 0 };
   const win = fakeWindow();
   let release: (() => void) | null = null;
   let seq = 0;
@@ -73,6 +76,7 @@ function harness(
     win,
     seedFor,
     officeOpens,
+    dualOpens,
     closeWindow: () => {
       win.closed = true;
       release?.();
@@ -101,6 +105,9 @@ function harness(
       fail: (m) => failures.push(m),
       openOffice: () => {
         officeOpens.n += 1;
+      },
+      openDual: () => {
+        dualOpens.n += 1;
       },
     },
   };

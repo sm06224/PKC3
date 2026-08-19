@@ -19,6 +19,7 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import { parseFrontmatter } from '../../src/features/markdown/frontmatter';
+import type { LauncherTile } from '../../src/features/launcher/tiles';
 
 const tick = (ms = 10): Promise<unknown> => new Promise((r) => setTimeout(r, ms));
 
@@ -75,6 +76,15 @@ function setup(
   };
 }
 
+/**
+ * entry 由来のタイルだけ(#241 で**組み込みの 2 ペイン**が常に 1 枚居るようになった)。
+ * ⚠ 素で数えると、組み込みを足し引きするたびにこの file が意味なく落ちる ──
+ *   ここが見たいのは「添付の frontmatter がタイルに反映されるか」だけである。
+ */
+function entryTiles(h: { d: { getState: () => { launcherTiles: readonly LauncherTile[] | null } } }) {
+  return (h.d.getState().launcherTiles ?? []).filter((t) => !t.lid.startsWith('builtin:'));
+}
+
 describe('タイル設定を書く(P8 段⑭)', () => {
   beforeEach(() => {
     document.body.textContent = '';
@@ -87,7 +97,12 @@ describe('タイル設定を書く(P8 段⑭)', () => {
     const fm = parseFrontmatter(h.bodies.a1!).meta;
     expect(fm['attachment.registered_as_app']).toBe(true);
     // ⚠ **タイルが出る**ところまで見る(書いただけで画面に出ないのが元の姿)
-    expect(h.d.getState().launcherTiles?.map((t) => t.lid)).toEqual(['a1']);
+    /**
+     * ⚠ **組み込みタイル(#241 の 2 ペイン)は常に 1 枚居る**ので、
+     * ここは **entry 由来だけ**を見る ── 素で数えると、組み込みを足したり
+     * 減らしたりするたびにこの test が意味なく落ちる。
+     */
+    expect(entryTiles(h).map((t) => t.lid)).toEqual(['a1']);
   });
 
   it('🔴 本文と他の key を**壊さない**(原文 splice)', async () => {
@@ -107,7 +122,7 @@ describe('タイル設定を書く(P8 段⑭)', () => {
     h.d.dispatch({ type: 'SET_APP_TILE', lid: 'a1', registered: false });
     await tick(20);
     expect(h.bodies.a1).not.toContain('registered_as_app');
-    expect(h.d.getState().launcherTiles).toEqual([]);
+    expect(entryTiles(h), 'entry 由来のタイルが残っている').toEqual([]);
   });
 
   it('グループと目印が付き、空にすると消える', async () => {
@@ -116,12 +131,12 @@ describe('タイル設定を書く(P8 段⑭)', () => {
     await tick(20);
     h.d.dispatch({ type: 'SET_APP_TILE', lid: 'a1', group: '道具', icon: '🧮' });
     await tick(20);
-    expect(h.d.getState().launcherTiles?.[0]?.group).toBe('道具');
-    expect(h.d.getState().launcherTiles?.[0]?.icon).toBe('🧮');
+    expect(entryTiles(h)[0]?.group).toBe('道具');
+    expect(entryTiles(h)[0]?.icon).toBe('🧮');
     h.d.dispatch({ type: 'SET_APP_TILE', lid: 'a1', group: '' });
     await tick(20);
     expect(h.bodies.a1).not.toContain('app_group');
-    expect(h.d.getState().launcherTiles?.[0]?.group).toBe('');
+    expect(entryTiles(h)[0]?.group).toBe('');
   });
 
   it('⚠ 変わらないなら**書かない**(同じ値で disk を叩かない)', async () => {
@@ -203,7 +218,7 @@ describe('タイル設定を書く(P8 段⑭)', () => {
     h.d.dispatch({ type: 'SET_APP_TILE', lid: 'a1', group: '道具' });
     h.d.dispatch({ type: 'SET_APP_TILE', lid: 'a1', icon: '🧮' });
     await tick(40);
-    const t = h.d.getState().launcherTiles?.[0];
+    const t = entryTiles(h)[0];
     expect(t?.group, '2 件目が落ちた').toBe('道具');
     expect(t?.icon, '3 件目が落ちた').toBe('🧮');
     expect(h.d.getState().tileWrite, '数え上げが戻っていない').toBeNull();

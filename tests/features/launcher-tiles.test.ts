@@ -8,6 +8,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildTiles,
+  dualTile,
+  DUAL_TILE_LID,
   isLaunchableUrl,
   officeTile,
   OFFICE_TILE_LID,
@@ -135,29 +137,54 @@ describe('組み込みタイルの合流 (#148)', () => {
     { lid: 'a2', title: '外部', group: '道具', kind: 'url', url: 'https://x.test/' },
   ];
 
-  it('一式が入っている端末では Office タイルが既定グループの先頭に付く', () => {
+  /**
+   * 🔴 **並びは固定**(#241。user 指摘 2026-08-19「2 ペインファイラはアプリとして
+   * Office のように組み込みの導線を用意しろ」)。
+   * ⚠ 2 ペインは**アプリに最初から在る**ので先頭、Office は**入れた端末だけ**なので
+   *   その次 ── 入れたり消したりで 2 ペインの位置が動かない向きに並べる。
+   */
+  it('組み込みは 2 ペイン → Office の順で、既定グループの先頭に付く', () => {
     const merged = withBuiltinTiles(entryTiles, { office: true });
     expect(merged[0]).toEqual({
+      lid: DUAL_TILE_LID,
+      title: '2 ペインで整理',
+      group: '',
+      kind: 'dual',
+    });
+    expect(merged[1]).toEqual({
       lid: OFFICE_TILE_LID,
       title: 'Office',
       group: '',
       kind: 'office',
     });
     // ⚠ entry 由来の並びには触らない(合流は前置だけ)
-    expect(merged.slice(1)).toEqual(entryTiles);
+    expect(merged.slice(2)).toEqual(entryTiles);
   });
 
-  it('入っていない端末では 1 枚も足さない(押しても何も起きないタイルを出さない)', () => {
+  it('🔴 Office が入っていなくても 2 ペインは出る(位置も動かない)', () => {
     const merged = withBuiltinTiles(entryTiles, { office: false });
-    expect(merged).toEqual(entryTiles);
+    expect(merged[0]?.lid, 'Office の有無で 2 ペインの位置が動いた').toBe(DUAL_TILE_LID);
+    expect(merged.slice(1)).toEqual(entryTiles);
     // ⚠ 「同じ長さ」だけでは足して 1 枚消す実装と区別がつかない ── kind で見る
     expect(merged.some((t) => t.kind === 'office')).toBe(false);
   });
 
-  it('entry が 0 件でも Office タイルだけで面が成立する', () => {
+  it('entry が 0 件でも組み込みだけで面が成立する', () => {
     const merged = withBuiltinTiles([], { office: true });
-    expect(merged).toHaveLength(1);
-    expect(merged[0]?.kind).toBe('office');
+    expect(merged).toHaveLength(2);
+    expect(merged.map((t) => t.kind)).toEqual(['dual', 'office']);
+    // ⚠ Office を入れていない端末でも、面は空にならない
+    expect(withBuiltinTiles([], { office: false }).map((t) => t.kind)).toEqual(['dual']);
+  });
+
+  /**
+   * ⚠ 組み込みは entry を持たない ── 押して選択を立てると右の列が
+   * 「見つからない」になる(存在しない lid を `selectedLid` に入れない)。
+   */
+  it('🔴 組み込みタイルは entry の選択を立てない', () => {
+    expect(tileSelectsEntry(dualTile()), '2 ペインで選択が立つ').toBe(false);
+    expect(tileSelectsEntry(officeTile())).toBe(false);
+    expect(tileSelectsEntry(entryTiles[0]!), 'entry 由来まで立たなくなった').toBe(true);
   });
 
   it('tileSelectsEntry ── 組み込みだけ選択を立てない', () => {

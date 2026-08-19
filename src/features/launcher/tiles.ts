@@ -36,9 +36,9 @@ export interface LauncherTile {
   icon?: string;
   /**
    * 起動の仕方。⚠ `url` は外部サイト、`app` は同梱 HTML、
-   * `office` は**組み込み**(entry を持たない ── #148)。
+   * `office` / `dual` は**組み込み**(entry を持たない ── #148 / #241)。
    */
-  kind: 'app' | 'url' | 'office';
+  kind: 'app' | 'url' | 'office' | 'dual';
   /** `kind === 'url'` のときの飛び先。 */
   url?: string;
   /** `kind === 'app'` のときの実体(IDB Blob の鍵)。 */
@@ -163,6 +163,22 @@ export function officeTile(): LauncherTile {
 }
 
 /**
+ * 🔴 **2 ペインタブファイラの組み込みタイル**(#241。user 指摘 2026-08-19
+ * 「2 ペインファイラはアプリとして Office のように組み込みの導線を用意しろ」)。
+ *
+ * ⚠ 1 稿目は左の列の下(設定・フラグ・ヘルプが並ぶ「アプリ全体の操作」)に
+ * ボタンを置いていた ── **user が言った「組み込み」はそこではない**。
+ * Office と同じく**アプリの一覧に出る**のが正しい形である。
+ * 🔑 Office との違いは**出る条件**: Office 一式は端末に入れた人だけだが、
+ * この面は**アプリに最初から在る**ので、常に出す。
+ */
+export const DUAL_TILE_LID = 'builtin:dual';
+
+export function dualTile(): LauncherTile {
+  return { lid: DUAL_TILE_LID, title: '2 ペインで整理', group: '', kind: 'dual' };
+}
+
+/**
  * 組み込み分を entry 由来の一覧へ合流させる。
  *
  * 🔑 Office 一式は**端末ローカル**(IndexedDB)だが、entry はコンテナに乗って
@@ -175,7 +191,14 @@ export function withBuiltinTiles(
   tiles: readonly LauncherTile[],
   opts: { office: boolean },
 ): LauncherTile[] {
-  return opts.office ? [officeTile(), ...tiles] : [...tiles];
+  /**
+   * ⚠ **並びは固定**(同じものが常に同じ場所にある ── 不可侵指示)。
+   * 2 ペインは**アプリに最初から在る**ので先頭、Office は**入れた端末だけ**なので
+   * その次 ── 入れたり消したりで 2 ペインの位置が動かない向きに並べる。
+   */
+  const builtin: LauncherTile[] = [dualTile()];
+  if (opts.office) builtin.push(officeTile());
+  return [...builtin, ...tiles];
 }
 
 /**
@@ -184,5 +207,5 @@ export function withBuiltinTiles(
  * 「見つからない」になる(存在しない lid を `selectedLid` に入れない)。
  */
 export function tileSelectsEntry(tile: LauncherTile): boolean {
-  return tile.kind !== 'office';
+  return tile.kind !== 'office' && tile.kind !== 'dual';
 }

@@ -53,6 +53,12 @@ export interface LaunchDeps {
    */
   openOffice: () => void;
   /**
+   * 🔴 **組み込みの 2 ペインタブファイラ**(#241。user 指摘 2026-08-19)。
+   * ⚠ Office と違って**窓は開かない** ── 中央の面へ切り替える
+   * (裁定 6「幅は中央にしかない」)。だから gesture の制約も無い。
+   */
+  openDual: () => void;
+  /**
    * 🔴 **素のまま(同一オリジン)で開く前の確認**(P10)。
    *
    * `false` を返したら**開かない**(fail closed)。呼び側がセッション中の
@@ -85,6 +91,11 @@ export function launchTile(
   // 🔴 **開く前に聞く**(fail closed)。⚠ `window.open` より前に聞く ──
   //    後にすると、断ったのに空のタブが残る
   if (raw && deps.confirmSameOrigin !== undefined && !deps.confirmSameOrigin(tile.title)) return;
+  if (tile.kind === 'dual') {
+    // 🔑 組み込み(#241)── 中央の面を 2 ペインへ切り替える。窓は開かない
+    deps.openDual();
+    return;
+  }
   if (tile.kind === 'office') {
     // 🔑 組み込み(#148)── Office の窓(Start Center)を開く。窓の生成・使い回し・
     //    寿命は OfficeWindow が持つので、ここは同期に依頼するだけ(gesture を切らない)

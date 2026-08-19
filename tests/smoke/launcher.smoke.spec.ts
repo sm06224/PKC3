@@ -11,6 +11,21 @@ test.beforeEach(async ({ page }) => {
 });
 
 /**
+ * 🔴 **取り込み・登録で生えたタイルだけを数える**（2026-08-19、#241 の組み込みタイル）。
+ *
+ * ⚠ 一覧には**組み込み**（`builtin:dual` / `builtin:office`）が常に居る ──
+ *   `[data-pkc-tile]` をそのまま数えると、この file の主張
+ *   （「登録した物が出る / 外すと消える」）が**別の population に満たされる**
+ *   （CLAUDE.md §1「面へスコープする」の同型）。
+ */
+const USER_TILES =
+  '[data-pkc-region="launcher-grid"] [data-pkc-tile]:not([data-pkc-tile^="builtin:"])';
+
+/** 組み込みタイルを名指す（空振り防止 ── 一覧そのものが消えていないことを見る）。 */
+const builtinTile = (id: string): string =>
+  `[data-pkc-region="launcher-grid"] [data-pkc-tile="builtin:${id}"]`;
+
+/**
  * P7b 段⑩: **取り込んだランチャーのタイルが見えて、押すと開く**。
  *
  * 🔴 これは「新機能」ではなく**到達不能の解消**である ── `attachment-flavor.ts` は
@@ -90,9 +105,11 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
 
   // ランチャーへ
   await clickReal(page, '[data-pkc-browse="launcher"]');
-  const tiles = page.locator('[data-pkc-region="launcher-grid"] [data-pkc-tile]');
+  const tiles = page.locator(USER_TILES);
   // ① 🔴 **素の添付は出ない**(4 件のうちタイルは 3 件)
   await expect(tiles).toHaveCount(3);
+  // ⚠ 空振り防止：組み込みは同じ一覧に居る（除いたことを確かめる）
+  await expect(page.locator(builtinTile('dual'))).toHaveCount(1);
 
   // ② 🔴 **PKC2 と同じ順** ── 既定群が先頭、グループ内は app_order 順
   await expect(tiles.nth(0)).toContainText('電卓');
@@ -353,7 +370,7 @@ test('🔴 登録 → タイル → SPA が動き、開き直しても続きが�
 
   // ② タイルが出る(グループ見出しと目印つき)
   await clickReal(page, '[data-pkc-browse="launcher"]');
-  const tile = page.locator('[data-pkc-region="launcher-grid"] [data-pkc-tile]');
+  const tile = page.locator(USER_TILES);
   await expect(tile).toHaveCount(1, { timeout: 15000 });
   await expect(page.locator('[data-pkc-field="launcher-group"]')).toHaveText('道具');
   await expect(tile.locator('[data-pkc-field="tile-icon"]')).toHaveText('🧮');
@@ -422,7 +439,14 @@ test('🔴 登録 → タイル → SPA が動き、開き直しても続きが�
   await page.locator('[data-pkc-field="app-register"]').uncheck();
   await clickReal(page, '[data-pkc-browse="launcher"]');
   await expect(tile).toHaveCount(0, { timeout: 15000 });
-  await expect(page.locator('[data-pkc-field="launcher-empty"]')).toBeVisible();
+  /**
+   * ⚠ ここで「一覧が空」を見ない（2026-08-19）── 組み込みタイルが常に居る以上、
+   *   `launcher-empty` は**絞り込みを掛けたときしか成り立たない**
+   *   （CLAUDE.md §1「成り立ちえない条件を固定しない」）。
+   * 🔑 代わりに**一覧が生きている**ことを見る ── 面ごと消えたのではなく、
+   *   登録を外した 1 枚だけが消えたことの証拠である。
+   */
+  await expect(page.locator(builtinTile('dual'))).toHaveCount(1);
 
   expect(errors).toEqual([]);
 });
@@ -473,7 +497,7 @@ test('🔴 行儀の悪いアプリが保管庫を占有できない(上限は�
   await register.check();
 
   await clickReal(page, '[data-pkc-browse="launcher"]');
-  const tile = page.locator('[data-pkc-region="launcher-grid"] [data-pkc-tile]');
+  const tile = page.locator(USER_TILES);
   await expect(tile).toHaveCount(1, { timeout: 15000 });
   const [tab] = await Promise.all([context.waitForEvent('page'), tile.click()]);
   await tab.waitForLoadState('domcontentloaded');
@@ -851,14 +875,19 @@ test('🔴 一式を入れた端末では Office タイルが出て、押すと�
   await gotoApp(page);
 
   await clickReal(page, '[data-pkc-browse="launcher"]');
-  const tiles = page.locator('[data-pkc-region="launcher-grid"] [data-pkc-tile]');
-  await expect(tiles).toHaveCount(1);
-  await expect(tiles.nth(0)).toContainText('Office');
-  expect(await tiles.nth(0).getAttribute('data-pkc-tile-kind')).toBe('office');
+  /**
+   * ⚠ **Office だけを名指す**（2026-08-19）── 組み込みは 2 枚になった
+   *   （2 ペイン + Office、#241）ので、`nth(0)` はもう Office ではない。
+   */
+  const office = page.locator(builtinTile('office'));
+  await expect(page.locator(USER_TILES), '仕込んだ覚えの無いタイルが出ている').toHaveCount(0);
+  await expect(office).toHaveCount(1);
+  await expect(office).toContainText('Office');
+  expect(await office.getAttribute('data-pkc-tile-kind')).toBe('office');
 
   // 🔴 押すと **Office の窓**が開く
   const popup = context.waitForEvent('page');
-  await clickReal(page, '[data-pkc-region="launcher-grid"] [data-pkc-tile]');
+  await clickReal(page, builtinTile('office'));
   const win = await popup;
   expect(win.url()).toContain('office/host.html');
   await win.close();
