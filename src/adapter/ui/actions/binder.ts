@@ -29,6 +29,7 @@ import { isEntrySort } from '@features/filter/entry-sort';
 import { isPaneId, PANES } from '@features/pane-visibility';
 import { STRUCTURAL, isRelationKind } from '@features/relation/kinds';
 import { getAncestorFolders } from '@features/relation/tree';
+import { otherSide, paneOf, paneScope, type DualSide } from '@features/relation/dual-pane';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
 import { appOpenInEdit, OpenInEditStore } from '@adapter/ui/render/open-in-edit';
@@ -57,6 +58,7 @@ const VIEW_MODES: ReadonlySet<string> = new Set([
   'filer',
   'launcher',
   'query',
+  'dual',
   'settings',
   'flags',
   'help',
@@ -102,6 +104,26 @@ const alreadyThere = (st: AppState, lid: string, parentLid: string | null): bool
  * 物をルートへ落としたとき「フォルダは自分の中へは入れられません」と出ていた。
  * 理由の違う断りを出すと、user は**入れ子の話だと読んで別のものを探す**。
  */
+/**
+ * 押した物から**どちらのペインか**を辿る(#241 段⑥-a)。
+ * ⚠ state の `focus` から推測しない ── 焦点の無いほうを押したときに
+ *   **反対側が動く**(押した所と効く所が違う、いちばん気づけない形)。
+ */
+const dualSide = (target: HTMLElement): DualSide | null => {
+  const raw = target.closest('[data-pkc-side]')?.getAttribute('data-pkc-side');
+  return raw === 'left' || raw === 'right' ? raw : null;
+};
+
+/** タブの添字。⚠ 数として読めないものは**捨てる**(0 に落とすと別のタブが閉じる)。 */
+const dualTabIndex = (target: HTMLElement): number | null => {
+  const raw = target.closest('[data-pkc-tab]')?.getAttribute('data-pkc-tab');
+  // ⚠ **ここが唯一の関所ではない**(着地前レビュー M5)── 下流の `withTabClosed` /
+  //    `withTabActive` にも `Number.isInteger` の門を置いてある。上流 1 行だけが
+  //    守っている形にすると、その 1 行を消す変異が誰にも殺されない
+  if (raw === null || raw === undefined || !/^\d+$/.test(raw)) return null;
+  return Number(raw);
+};
+
 const moveEntries = (
   dispatcher: Dispatcher,
   lids: readonly string[],
@@ -903,6 +925,80 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   /** 印を全部外す(#240 段②)。 */
   'clear-selection': (dispatcher) => dispatcher.dispatch({ type: 'CLEAR_SELECTION' }),
+  // ── 2 ペインタブファイラ(#241 段⑥-a)──────────────────────────
+  // ⚠ 側は**押した物から辿る**(`data-pkc-side`)── 面の側を state から
+  //    推測すると、焦点の無いほうを押したときに反対側が動く
+  'dual-focus': (dispatcher, target) => {
+    const side = dualSide(target);
+    if (side) dispatcher.dispatch({ type: 'DUAL_FOCUS', side });
+  },
+  'dual-row': (dispatcher, target) => {
+    const side = dualSide(target);
+    const lid = target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry');
+    // ⚠ 修飾なしのクリックは「これだけを相手にする」── 印は 1 件になる
+    if (side && lid) dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid, mode: 'set' });
+  },
+  'dual-crumb': (dispatcher, target) => {
+    const side = dualSide(target);
+    if (!side) return;
+    // ⚠ `data-pkc-entry` を持たないパンくず = ルート(`null`)
+    const lid = target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
+    dispatcher.dispatch({ type: 'DUAL_SET_SCOPE', side, lid });
+  },
+  'dual-tab-add': (dispatcher, target) => {
+    const side = dualSide(target);
+    if (side) dispatcher.dispatch({ type: 'DUAL_TAB_ADD', side });
+  },
+  'dual-tab-close': (dispatcher, target) => {
+    const side = dualSide(target);
+    const index = dualTabIndex(target);
+    if (side && index !== null) dispatcher.dispatch({ type: 'DUAL_TAB_CLOSE', side, index });
+  },
+  'dual-tab-activate': (dispatcher, target) => {
+    const side = dualSide(target);
+    const index = dualTabIndex(target);
+    if (side && index !== null) dispatcher.dispatch({ type: 'DUAL_TAB_ACTIVATE', side, index });
+  },
+  /**
+   * 🔴 **反対側の場所へ移す**(この面の主目的)。
+   *
+   * ⚠ **実体は `moveEntries` 1 本**(帯の `<select>` / D&D と同じ)── 断り方も
+   *   「付いていく」の規則も経路で変えない(§7「判定を増やさない」)。
+   * ⚠ 数える対象は**いま表に出ている印**だけ ── 素で数えると、画面に無いものが
+   *   動く(#240 の着地前レビュー 2)。
+   * ⚠ **黙って断らない** ── 何も選んでいないときは、その理由を出す。
+   */
+  'dual-move': (dispatcher, _target, services) => {
+    const st = dispatcher.getState();
+    const from = st.dual.focus;
+    const pane = paneOf(st.dual, from);
+    const rows = filerRows(paneScope(pane), st.entryMetas, st.relations, {
+      filterQuery: st.filterQuery,
+      searchHits: st.searchHits,
+      sort: st.entrySort,
+    });
+    const lids = visibleSelection(rows, pane.selection);
+    if (lids.length === 0) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '移すものを選んでください(行を押すと選べます)',
+      });
+      return;
+    }
+    const to = paneScope(paneOf(st.dual, otherSide(from)));
+    const before = st.relations;
+    moveEntries(dispatcher, lids, to, services.showStatus);
+    /**
+     * 🔴 **動いた回だけ印を外す**(着地前レビュー R1)。
+     * ⚠ `moveEntries` は編集中・全件拒否で**何もせず返る**ので、無条件に外すと
+     *   **1 件も動いていないのに 30 件の印が消える** ── user は断りを読んで
+     *   保存してから戻り、**選び直し**になる(この面は編集中でも開ける設計なので
+     *   必ず踏む筋である)。
+     * 🔑 印は「移した結果」に付いていく物であって、**押した事実**に付く物ではない。
+     */
+    if (dispatcher.getState().relations !== before)
+      dispatcher.dispatch({ type: 'DUAL_CLEAR_SELECTION', side: from });
+  },
   'delete-entry': (dispatcher, target) => {
     // ⚠ 実行中(書出し / 取込)のガードは `refuseWhileBusy` が 1 本で持つ
     // 🔴 **無言で断らない**(P8 段⑲)。`DELETE_ENTRY` は `phase !== 'ready'` で
@@ -1505,6 +1601,7 @@ const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
   'toggle-sidebar': '[data-pkc-action="toggle-pane"][data-pkc-pane="sidebar"]',
   'toggle-inspector': '[data-pkc-action="toggle-pane"][data-pkc-pane="inspector"]',
   'view-query': '[data-pkc-action="set-view"][data-pkc-view="query"]',
+  'view-dual': '[data-pkc-action="set-view"][data-pkc-view="dual"]',
   'open-settings': '[data-pkc-action="set-view"][data-pkc-view="settings"]',
   'open-flags': '[data-pkc-action="set-view"][data-pkc-view="flags"]',
   'open-help': '[data-pkc-action="set-view"][data-pkc-view="help"]',
@@ -1593,6 +1690,29 @@ export function bindActions(
      * 段②③④は**フォルダ面の機能**である(設計 doc §3)。
      */
     const inFiler = el.closest('[data-pkc-region="filer-table"]') !== null;
+    /**
+     * 🔴 **2 ペインの行も同じ作法**(#241 段⑥-a)── `Ctrl` / `Cmd` で足し外し、
+     * `Shift` で表示順の範囲。⚠ 面ごとに違う選び方を作らない(user は 1 つの
+     * ファイラだと思って触る)。
+     * ⚠ 側は**押した行**から辿る(`dualSide`)── state の焦点から推測しない。
+     */
+    if (
+      el.getAttribute('data-pkc-action') === 'dual-row' &&
+      (me.ctrlKey || me.metaKey || me.shiftKey)
+    ) {
+      const side = dualSide(el);
+      const lid = el.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
+      if (side !== null && lid !== null) {
+        ev.preventDefault();
+        dispatcher.dispatch({
+          type: 'DUAL_SELECT',
+          side,
+          lid,
+          mode: me.shiftKey ? 'range' : 'toggle',
+        });
+        return;
+      }
+    }
     if (
       inFiler &&
       el.getAttribute('data-pkc-action') === 'select-entry' &&
@@ -1614,6 +1734,13 @@ export function bindActions(
     if (inFiler && action === 'select-entry') {
       const lid = el.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
       if (lid !== null) maybeEnterFolder(lid);
+    }
+    // ⚠ 2 ペインも**同じ 2 クリック**でフォルダへ入る(規則は 1 本 ── ただし
+    //    入る先はそのペインなので、撃つ action だけが違う)
+    if (action === 'dual-row') {
+      const side = dualSide(el);
+      const lid = el.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
+      if (side !== null && lid !== null) maybeEnterFolder(lid, side);
     }
     run(action, el);
   };
@@ -2113,15 +2240,29 @@ export function bindActions(
    * ⚠ フォルダ以外では何もしない(ノートを 2 回押しても入る先が無い)。
    */
   const DOUBLE_MS = 500;
-  let lastRowClick: { lid: string; at: number } = { lid: '', at: 0 };
-  const maybeEnterFolder = (lid: string): void => {
+  /**
+   * 🔴 **鍵に「どの面で押したか」を入れる**(着地前レビュー R3)。
+   * ⚠ 呼び手は 1 つ(左の列)から **3 つ**(左の列 / 2 ペインの左 / 右)に増えた。
+   *   `lid` だけを鍵にすると、**別々の面での 1 回ずつ**が「もう一度押した」に化ける
+   *   ── 起動時は左右ともルートなので**同じフォルダが両方の表に出ており**、
+   *   左で選んで右で選ぶと、印を付けたかっただけの右が中へ入る。
+   */
+  let lastRowClick: { key: string; at: number } = { key: '', at: 0 };
+  const maybeEnterFolder = (lid: string, dual: DualSide | null = null): void => {
+    const key = `${dual ?? 'filer'}:${lid}`;
     const now = Date.now();
-    const again = lastRowClick.lid === lid && now - lastRowClick.at <= DOUBLE_MS;
-    lastRowClick = { lid, at: now };
+    const again = lastRowClick.key === key && now - lastRowClick.at <= DOUBLE_MS;
+    lastRowClick = { key, at: now };
     if (!again) return;
     if (dispatcher.getState().entryMetas.get(lid)?.archetype !== 'folder') return;
-    lastRowClick = { lid: '', at: 0 }; // 3 回目を「もう一度」と数えない
-    dispatcher.dispatch({ type: 'SET_SCOPE', lid });
+    lastRowClick = { key: '', at: 0 }; // 3 回目を「もう一度」と数えない
+    // ⚠ **入る先はその面の現在地** ── 2 ペインで `SET_SCOPE` を撃つと、
+    //    押していない左の列が動いて、押した側は 1 ミリも動かない
+    dispatcher.dispatch(
+      dual === null
+        ? { type: 'SET_SCOPE', lid }
+        : { type: 'DUAL_SET_SCOPE', side: dual, lid },
+    );
   };
   root.addEventListener('click', onClick);
   root.addEventListener('paste', onPaste);

@@ -379,7 +379,12 @@ export class InspectorRenderer {
  */
 const ACTION_TITLES: Record<string, string> = {
   'export-entry': 'このノートだけをバックアップ形式(.pkc3.zip)で保存します。取り込み直せます',
-  'export-entry-docx': 'このノートを Word 文書(.docx)で保存します。片道です(この版では画像は入りません)',
+  // 🔴 **実装に合わせる**(2026-08-18)。直す前は「この版では画像は入りません」と
+  //    書いてあったが、画像も図もグラフも**入る**(`features/export/docx.ts` の VML /
+  //    `svg-emf.ts` のベクタ)。マニュアル(§5)もお知らせ 2 件も「入る」と言っており、
+  //    ⚠ **画面の説明だけが古いまま user に嘘をついていた**(押すのを諦めさせる向き)。
+  'export-entry-docx':
+    'このノートを Word 文書(.docx)で保存します。片道です(画像も、図はベクタで、グラフは絵で入ります)',
   'show-history': '過去の版を一覧します',
   'delete-entry': 'ゴミ箱へ移します(フォルダ画面から戻せます)',
 };

@@ -9,37 +9,51 @@
 
 ## 使う
 
+| | どこ | 中身 |
+|---|---|---|
+| **製品版** | <https://sm06224.github.io/PKC3/> | いちばん新しい**安定タグ**の中身 |
+| **開発版** | <https://sm06224.github.io/PKC3/dev/> | `main` の先頭。新しい代わりに壊れていることがある |
+
+⚠ **2 つは別のデータを持ちません** ── 同じ origin なので、同じ OPFS / IndexedDB を
+見ます。片方で作ったノートはもう片方にも出ます。
+⚠ 製品版はタグを出したときだけ更新されます。**開発版と離れることがあります**。
+
 - 📖 **[マニュアル](./docs/manual.md)** ── 作る・書く・書き出す・取り込む・更新
+- 📜 **[変更のあゆみ](./CHANGELOG.md)** ── アプリのお知らせに出した内容(全部)
 - 🚚 **[PKC2 からの移行ガイド](./docs/migration-from-pkc2.md)** ── 何がどう変わるか、何が落ちるか
 
 ## 対応ブラウザ
 
-**フル機能は Chromium 系(Chrome / Edge)。** それ以外は**部分機能**で動きます
+**フル機能は Chromium 系(Chrome / Edge)。** それ以外は**部分機能**です
 (user 裁定 2026-08-10「ブラウザ的にはどれか一つがフル機能使えて、それ以外は部分機能対応と
-しましょう」)。⚠ **落ちるのは Office 表示だけ**で、ノートを書く・読む・書き出す・
-取り込むといった本体機能はどこでも動きます。
+しましょう」)。
+
+🔴 **この表は「確かめたか」を書きます。**「仕様上は動くはず」を ✅ にはしません ──
+自動検証(smoke / probe)は **Chromium の 2 つのビルドだけ**で回しており、
+Firefox / Safari では**一度も走らせていない**からです。
 
 | 機能 | Chrome / Edge | Firefox | Safari | 必要な土台 |
 |---|:---:|:---:|:---:|---|
-| ノートの作成・編集・閲覧 | ✅ | ✅ | ✅ | ─ |
-| 保存(OPFS SAHPool + SQLite) | ✅ | ✅ | ✅ | OPFS |
-| 添付(IndexedDB Blob) | ✅ | ✅ | ✅ | IndexedDB |
-| 図(Mermaid → PNG ラスタ) | ✅ | ✅ | ✅ | OffscreenCanvas |
-| 書き出し / 取り込み(zip) | ✅ | ✅ | ✅ | ─ |
-| 印刷・PDF | ✅ | ✅ | ✅ | ─ |
-| オフライン(PWA) | ✅ | ✅ | ✅ | Service Worker |
-| 外部画像(同意つき) | ✅ | ✅ | ✅ | ─(分離が無い環境でも通常どおり出ます) |
-| **Office 表示・編集**(LibreOffice wasm) | ✅ | ⚠️ | ❌ | **JSPI** + SharedArrayBuffer |
+| ノートの作成・編集・閲覧 | ✅ | ❓ | ❓ | ─ |
+| 保存(OPFS SAHPool + SQLite) | ✅ | ❓ | ❓ | OPFS の同期アクセスハンドル |
+| 添付(IndexedDB Blob) | ✅ | ❓ | ❓ | IndexedDB |
+| 図(Mermaid → PNG ラスタ) | ✅ | ❓ | ❓ | canvas(**主スレッド**。理由は下記) |
+| グラフ(chart → PNG ラスタ) | ✅ | ❓ | ❓ | OffscreenCanvas(ワーカー) |
+| 書き出し / 取り込み(zip) | ✅ | ❓ | ❓ | ─ |
+| 印刷・PDF | ✅ | ❓ | ❓ | ─ |
+| オフライン(PWA) | ✅ | ❓ | ❓ | Service Worker |
+| 外部画像(同意つき) | ✅ | ❓ | ❓ | ─(分離が無い環境でも通常どおり出ます) |
+| **Office 表示・編集**(LibreOffice wasm) | ✅ | ❌ | ❌ | **JSPI** + SharedArrayBuffer |
 
-凡例: ✅ 動く / ⚠️ 環境や版に依存(下記) / ❌ 動かない
+凡例: ✅ 実際に動かして確かめた / ❓ **未検証**(動かないという意味ではありません) /
+❌ 土台が無いので動かない(理由は下記)
 
 ### なぜそうなるか
 
 - **Office は JSPI(WebAssembly の Promise 統合)を要求します。** この LibreOffice は
   `--enable-emscripten-jspi` で焼いており、Qt6 の wasm plugin が DOM を直に触るため
   worker へ逃がせません([経緯](./docs/development/office-wasm-selection-2026-08.md))。
-  **手元で確認できたのは Chromium(141)のみ**です ── Firefox / Safari は
-  JSPI の対応状況に依存し、**未検証**です(推測で ✅ とは書きません)。
+  **手元で確認できたのは Chromium(141)のみ**です。
 - **`SharedArrayBuffer` に cross-origin isolation が要ります。** PKC3 は
   `Cross-Origin-Opener-Policy: same-origin` + `Cross-Origin-Embedder-Policy: credentialless`
   を返します。⚠ `require-corp` ではなく `credentialless` を選んだのは、
@@ -56,12 +70,24 @@
 - **Office は既定では入っていません。** 使う人が設定画面で明示的に有効化したときだけ、
   約 77MB の一式を 1 回だけ取得して IndexedDB に置き、以降はローカルから起動します
   ([設計](./docs/development/office-wasm-integration-design-2026-08.md))。
+  ⚠ 一式を配っているのは**別のリポジトリの Pages**(`sm06224/office-pack`)ですが、
+  置き場は `https://sm06224.github.io/office-pack/` ── PKC3 本体と**同じ origin** です。
+  だから CORS が起きません(別 origin に置くと `fetchPackFromBase` が弾きます)。
+  ⚠ 参照は **origin 直下の絶対 path** で書いてあります ── 相対 path にすると
+  `/PKC3/` と `/PKC3/dev/` で深さが違い、開発版だけ 404 になります(2026-08-11 に踏みました)。
+- **図(mermaid)とグラフ(chart)は土台が違います。** chart.js は canvas に描くので
+  `OffscreenCanvas` で**丸ごとワーカーへ逃がせます**が、mermaid は SVG を吐くうえに
+  レイアウトで DOM を要求するので**主スレッドから外せません**。どちらも結果は
+  **PNG に焼いて IndexedDB に置き**、画面には `<img>` 1 枚として出します
+  (user 指示 2026-08-03「描いたら焼く」)。
 
 ## 開発
 
-- **現況**: P7(v3.0.0 = Pages product + PWA 仕上げ)
+- **現況**: v3.0.0 を 2026-08-03 に公開済み。以降は P8 以降の是正・機能追加を
+  `main` へ積んでいます(**製品版のタグと `main` は離れます** ── 上の表を参照)
 - **設計 doc(founding doc)**: [`docs/development/pkc3-major-upgrade-design-2026-07.md`](./docs/development/pkc3-major-upgrade-design-2026-07.md)
-- **P7 設計 doc**: [`docs/development/p7-product-release-design-2026-08.md`](./docs/development/p7-product-release-design-2026-08.md)
+- **残件の台帳は GitHub Issues** ── doc に「やることの一覧」は置きません
+  (user 指示 2026-08-15。doc に書いてよいのは**設計と根拠**だけ)
 - PKC2 リポジトリは参照のみ(read-only)。PKC3 の開発はすべて本リポジトリで行う
 
 ```bash
@@ -72,3 +98,11 @@ npm run test:smoke # playwright(実ビルドを preview して検品)
 npm run typecheck  # tsc --noEmit
 npm run lint       # eslint src tests build scripts
 ```
+
+### CI
+
+| いつ | 何を |
+|---|---|
+| PR / main push | `verify`(型 / lint / unit / build / 生成物の検品)と `smoke`(実ブラウザ)を**並列**に。どちらも 10 分の timeout が速度予算の tripwire |
+| nightly | smoke を**2 つの Chromium ビルド**で / product ビルドの検品と smoke(PR gate が触らない成果物)/ Rust wasm の再ビルド一致 / probe 6 本(store・sahpool・15k 行の DOM・1 面編集・2 列編集・かんばん)/ 赤い間は issue に積む |
+| tag(`v*`)| release(SBOM / provenance / `pkc3-dist.zip`)→ Pages の `/` が入れ替わる |

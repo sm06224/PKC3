@@ -209,7 +209,16 @@ describe('filer view (P3-7b)', () => {
     await tick();
     const table = pane.querySelector('[data-pkc-region="filer-table"]')!;
     expect(table.hasAttribute('tabindex'), '表に焦点が入らない').toBe(true);
-    expect(table.getAttribute('tabindex'), 'Tab の巡回に入れてはいけない').toBe('-1');
+    /**
+     * 🔴 **`0`**(2026-08-18)── お知らせで「マウスを使わずに行までたどり着けます」と
+     * 配ったのに、`-1` では **Tab の巡回に入らず**、焦点はマウスでしか作れなかった。
+     * ⚠ **行のほうは `-1` のまま**(15,000 件を巡回に入れない)── 下で確かめる。
+     */
+    expect(table.getAttribute('tabindex'), 'Tab で表に入れない(配った約束が嘘になる)').toBe(
+      '0',
+    );
+    const row = pane.querySelector('[data-pkc-region="filer-table"] tbody tr');
+    expect(row?.getAttribute('tabindex'), '行まで巡回に入れると Tab が数千回になる').toBe('-1');
   });
 
   it('同一 scope 内の選択変更は属性 patch のみ(table を作り直さない ── review #2)', async () => {

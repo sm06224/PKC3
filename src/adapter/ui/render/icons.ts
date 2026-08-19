@@ -167,6 +167,7 @@ export type IconName = keyof typeof ICON_PATHS;
  */
 export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'set-view:query': 'list',
+  'set-view:dual': 'folder',
   'set-view:settings': 'settings',
   'set-view:flags': 'flag',
   'set-view:help': 'help',

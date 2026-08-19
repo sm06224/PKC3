@@ -33,6 +33,22 @@ import {
   type SelectionHistory,
 } from '@features/nav/selection-history';
 import { filerRows, rangeInRows } from '@features/relation/filer-list';
+import {
+  initialDual,
+  paneOf,
+  paneScope,
+  pruneDual,
+  withPane,
+  withScope as withPaneScope,
+  withSelection as withPaneSelection,
+  isTabIndex,
+  withTabActive,
+  withTabAdded,
+  withTabClosed,
+  type DualPaneState,
+  type DualSide,
+  type DualState,
+} from '@features/relation/dual-pane';
 
 export type AppPhase = 'initializing' | 'ready' | 'editing' | 'error';
 export type ViewMode =
@@ -47,6 +63,13 @@ export type ViewMode =
    * この面に留まる ── かんばん / カレンダーと同じ扱い。
    */
   | 'query'
+  /**
+   * 🔴 **2 ペインタブファイラ**(#241 段⑥。user 指示 2026-08-17
+   * 「アプリに 2 ペインタブファイラを**組み込みで**提供すること」)。
+   * ⚠ 裁定 6(`organize-pane-design-2026-08.md` §6)で**中央の面**と決まった
+   * ── 幅は中央にしかない。左の列は「探し方」であって整理の作業台ではない。
+   */
+  | 'dual'
   | 'settings'
   | 'flags'
   | 'help';
@@ -59,10 +82,41 @@ export type ViewMode =
  * 取りこぼすので(P8 段⑲ で直した「開かない理由が画面のどこにも無い」の再演)、
  * **集合にして 1 か所へ寄せた**(CLAUDE.md「判定を増やさない」)。
  */
-const ASIDE_PANES: ReadonlySet<ViewMode> = new Set<ViewMode>(['settings', 'flags', 'help']);
+const ASIDE_PANES: ReadonlySet<ViewMode> = new Set<ViewMode>([
+  'settings',
+  'flags',
+  'help',
+  /**
+   * 🔴 **2 ペインタブファイラもここ**(#241 段⑥)。理由は 2 つとも aside と同じ:
+   * ① この面は**開いているノートを映さない**ので、左の一覧でノートを押したのに
+   *    中央が動かないと、**押しても何も起きない**(P8 段⑲ で直した当の症状)。
+   * ② **編集中でも開ける** ── 場所を眺めるだけなら下書きに触らない。
+   *    ⚠ 設計 doc §6 裁定 6 は「編集中に押したときの断り文を足す」と書いたが、
+   *    **取り下げる**(2026-08-18)── 断るべきは「開く」ではなく「実際に動かす」で、
+   *    そちらは `moveEntries` が既に声に出して断っている。開くほうを止めると、
+   *    P11 で 1 個 → 3 個に増やしてしまった無言の dead click を作り直すことになる。
+   */
+  'dual',
+]);
 
 export function isAsidePane(view: ViewMode): boolean {
   return ASIDE_PANES.has(view);
+}
+
+/**
+ * 🔴 **「押した側が元になる」は、場所が変わらなくても成り立つ**
+ * (2026-08-19、リリース前監査で判明)。
+ *
+ * ⚠ 直す前は「pane が同じ object なら丸ごと捨てる」だったので、
+ * **焦点の無い側の「いま開いているタブ」や「いま居る場所のパンくず」**を押しても
+ * 枠も向きも動かなかった ── 他の押し方(行 / + / × / 別のタブ / 別の場所)は
+ * 全部焦点を持っていくので、**この 2 つだけが例外**という気づけない形だった。
+ * ⚠ マニュアルは「押したほうのペインに枠が付き」と言い切っており、
+ * 同じ節で「押しても何も起きないボタンは置きません」とまで書いている。
+ */
+function withDualFocus(state: AppState, side: DualSide): ReduceResult {
+  if (state.dual.focus === side) return { state, events: [] };
+  return { state: { ...state, dual: { ...state.dual, focus: side } }, events: [] };
 }
 
 /**
@@ -126,6 +180,15 @@ export interface AppState {
    * ⚠ `null` = ルート。⚠ 消えた lid は指し続けない(`removeEntry` が畳む)。
    */
   scopeLid: string | null;
+  /**
+   * 🔴 **2 ペインタブファイラの持ち物**(#241 段⑥)。
+   *
+   * ⚠ 上の `scopeLid` / `selection` は**左の列(探し方)のもの**で、こちらは
+   * **中央の 2 ペイン面のもの**である。同じ「どこを見ているか」でも、
+   * **窓が違えば別の答えでよい** ── ファイラの窓を 2 枚開くのと同じ。
+   * 🔑 規則(`filerRows`)は 1 本のまま ── 増えるのは *state* だけである。
+   */
+  dual: DualState;
   /**
    * 🔴 **印を付けたもの**(#240 段②。user 指示 2026-08-17「複数選択・範囲選択」)。
    *
@@ -288,6 +351,7 @@ export const initialState: AppState = {
   openBody: null,
   selectedLid: null,
   scopeLid: null,
+  dual: initialDual,
   selection: [],
   selectionAnchor: null,
   freshLid: null,
@@ -508,7 +572,32 @@ export type UserAction =
   | { type: 'SHOW_TRASH' }
   | { type: 'HIDE_TRASH' }
   | { type: 'RESTORE_TRASH'; entryLid: string; revId: string }
-  | { type: 'PURGE_TRASH' };
+  | { type: 'PURGE_TRASH' }
+  /**
+   * 🔴 **2 ペインタブファイラの操作**(#241 段⑥。user 指示 2026-08-17)。
+   *
+   * ⚠ **既存の `SET_SCOPE` / `TOGGLE_SELECT` を借りない。** 借りると左の列と
+   * 中央の 2 ペインが**同じ現在地を共有**し、左を動かすたびに 2 ペインの
+   * 見ている場所が飛ぶ(2 ペインである意味が消える)。
+   * 🔑 増えるのは *state* だけで、**並びの規則は `filerRows` 1 本のまま**である
+   * (CLAUDE.md §7「同じ問いに答える口を 2 つ作らない」── 口ではなく器が 2 つ)。
+   */
+  | { type: 'DUAL_FOCUS'; side: DualSide }
+  | { type: 'DUAL_SET_SCOPE'; side: DualSide; lid: string | null }
+  /**
+   * 印の付け方。⚠ **左の列と同じ 3 種**にする(`set` = 1 件 / `toggle` = 足し外し /
+   * `range` = 起点から表示順で)── 面ごとに違う規則を作らない。
+   */
+  | { type: 'DUAL_SELECT'; side: DualSide; lid: string; mode: 'set' | 'toggle' | 'range' }
+  | { type: 'DUAL_TAB_ADD'; side: DualSide }
+  | { type: 'DUAL_TAB_CLOSE'; side: DualSide; index: number }
+  | { type: 'DUAL_TAB_ACTIVATE'; side: DualSide; index: number }
+  /**
+   * 片側の印を全部外す。⚠ **移した直後に要る** ── 移すと元のペインから行が
+   * 消えるが、印は state に残るので、そのまま次の場所へ移ると
+   * **画面に無いものをもう一度動かそうとする**(#240 の着地前レビュー 2 と同型)。
+   */
+  | { type: 'DUAL_CLEAR_SELECTION'; side: DualSide };
 
 export type SystemCommand =
   | { type: 'SYS_BOOTED'; cid: string; metas: EntryMeta[]; relations: Relation[] }
@@ -750,14 +839,22 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
   if (action.type === 'NAV_HISTORY') return navHistory(state, action.dir);
   const result = reduceCore(state, action);
   let history = result.state.selectionHistory;
-  // ⚠ 掃除は entryMetas が**変わった回だけ**(毎回やると 50 件の走査が無駄に回る)
-  if (result.state.entryMetas !== state.entryMetas)
+  /**
+   * 🔴 **消えた lid の掃除も、ここ 1 か所でやる**(#241 段⑥)。
+   * ⚠ 2 ペインの印と現在地を case ごとに検めると、**次に entry を消す case を
+   *   足した人が必ず忘れる**(履歴を 1 か所へ寄せたのと同じ理由)── 忘れると
+   *   「N 件を移す」が居ないものを数え、消えたフォルダの中身として空の表が出る。
+   * ⚠ 掃除は entryMetas が**変わった回だけ**(毎回やると 50 件の走査が無駄に回る)
+   */
+  let dual = result.state.dual;
+  if (result.state.entryMetas !== state.entryMetas) {
     history = pruneHistory(history, (lid) => result.state.entryMetas.has(lid));
+    dual = pruneDual(dual, (lid) => result.state.entryMetas.has(lid));
+  }
   if (result.state.selectedLid !== null && result.state.selectedLid !== state.selectedLid)
     history = pushSelection(history, result.state.selectedLid);
-  return history === result.state.selectionHistory
-    ? result
-    : { state: { ...result.state, selectionHistory: history }, events: result.events };
+  if (history === result.state.selectionHistory && dual === result.state.dual) return result;
+  return { state: { ...result.state, selectionHistory: history, dual }, events: result.events };
 }
 
 /**
@@ -831,6 +928,12 @@ function reduceCore(
       const keepScope =
         sameCid && state.scopeLid !== null && metas.has(state.scopeLid) ? state.scopeLid : null;
       const keepMarks = sameCid ? state.selection.filter((l) => metas.has(l)) : [];
+      /**
+       * ⚠ **別 container なら 2 ペインも畳む**(印の持ち越しと同じ判断)──
+       * lid の偶然衝突で「他人のフォルダを開いた 2 枚のタブ」を残さない。
+       * 🔑 同じ container のときの掃除は `reduce` の 1 か所がやる(上の注記)。
+       */
+      const keepDual = sameCid ? state.dual : initialDual;
       const keepAnchor =
         sameCid && state.selectionAnchor !== null && metas.has(state.selectionAnchor)
           ? state.selectionAnchor
@@ -846,6 +949,7 @@ function reduceCore(
           relations: action.relations,
           selectedLid: keepLid,
           scopeLid: keepScope,
+          dual: keepDual,
           selection: keepMarks,
           selectionAnchor: keepAnchor,
           openBody: null,
@@ -1037,7 +1141,26 @@ function reduceCore(
        * ⚠ **一覧のノートを押す(`SELECT_ENTRY`)は開けない**。あちらは「下書きを
        *   守る」理由が実在する ── ただし無言で断らないのが正しい(別主題)。
        */
-      if (state.phase === 'editing' && !isAsidePane(action.mode)) return { state, events: [] };
+      /**
+       * 🔴 **本文へ戻る道は塞がない**(2026-08-19、リリース前監査で判明)。
+       *
+       * ⚠ 直す前は `!isAsidePane(action.mode)` だけを見ていたので、
+       * **`'detail'` への切替も編集中は捨てられていた** ── つまり編集中に
+       * ヘルプ・設定・フラグ・2 ペインを開くと、**同じボタンをもう一度押しても
+       * 本文へ戻れない**(`set-view` のトグルは `'detail'` を撃つ)。
+       * ⚠ マニュアルは「**寄り道して戻っても**、打ちかけの本文も取り消しも
+       * そのまま残ります」と約束しており、**その約束が守られていなかった**。
+       * 🔑 止める理由も無い ── 編集の面は `detail` **そのもの**なので、
+       * 戻るのは「編集へ帰る」であって「編集から離れる」ではない。
+       * ⚠ かんばん / カレンダー / 集計は引き続き断る(あちらはノートを並べる面で、
+       * 開くと編集していたものが画面から消える)。
+       */
+      if (
+        state.phase === 'editing' &&
+        !isAsidePane(action.mode) &&
+        action.mode !== 'detail'
+      )
+        return { state, events: [] };
       return {
         state: {
           ...state,
@@ -2096,6 +2219,104 @@ function reduceCore(
     case 'PURGE_TRASH': {
       if (state.phase !== 'ready') return { state, events: [] };
       return { state, events: [{ type: 'REQUEST_TRASH_PURGE' }] };
+    }
+    /* ── 2 ペインタブファイラ(#241 段⑥)───────────────────────────
+     * 🔴 **どれも `phase` を見ない**(= 編集中でも通る)。
+     * ⚠ 直前の稿は `phase !== 'ready'` で黙って捨てていたが、それは #240 と P11 で
+     *   2 度踏んだ**無言の操作拒否**そのものである ── 場所を移る・印を付けるは
+     *   下書きに 1 バイトも触らないので、止める理由が無い(`SET_VIEW_MODE` が
+     *   ヘルプ・設定を編集中に通すのと同じ判断:「書きながら置き場を眺める」)。
+     * 🔑 **断りが要るのは「実際に動かす操作」だけ** ── そちらは `moveEntries` /
+     *   `DELETE_ENTRIES` が既に**声に出して**断っている(判定を増やさない)。
+     */
+    case 'DUAL_FOCUS': {
+      if (state.dual.focus === action.side) return { state, events: [] };
+      return { state: { ...state, dual: { ...state.dual, focus: action.side } }, events: [] };
+    }
+    case 'DUAL_SET_SCOPE': {
+      // ⚠ 実在しない lid へは入らない(消えたフォルダの中身として空の表を出さない)
+      if (action.lid !== null && !state.entryMetas.has(action.lid))
+        return { state, events: [] };
+      const pane = withPaneScope(paneOf(state.dual, action.side), action.lid);
+      if (pane === paneOf(state.dual, action.side)) return withDualFocus(state, action.side);
+      // 🔑 場所を触った側へ焦点も移す(移す向きは「焦点のある側から」なので、
+      //    触った側が元にならないと user の意図と逆へ流れる)
+      return {
+        state: { ...state, dual: { ...withPane(state.dual, action.side, pane), focus: action.side } },
+        events: [],
+      };
+    }
+    case 'DUAL_SELECT': {
+      if (!state.entryMetas.has(action.lid)) return { state, events: [] };
+      const pane = paneOf(state.dual, action.side);
+      /**
+       * 🔑 **範囲は「表示している並び」で採る**(#240 段②と同じ規則・同じ関数)。
+       * ⚠ ここで並びを組み直すと、目で見た範囲と選ばれる範囲が食い違う。
+       */
+      const rows = filerRows(paneScope(pane), state.entryMetas, state.relations, {
+        filterQuery: state.filterQuery,
+        searchHits: state.searchHits,
+        sort: state.entrySort,
+      });
+      let next: DualPaneState;
+      if (action.mode === 'range') {
+        const range = rangeInRows(rows, pane.anchor, action.lid);
+        if (range.length === 0) return { state, events: [] };
+        // ⚠ 起点は動かさない(動かすと Shift を押すたびに範囲が縮む)
+        next = withPaneSelection(pane, range, pane.anchor);
+      } else if (action.mode === 'toggle') {
+        const has = pane.selection.includes(action.lid);
+        const sel = has
+          ? pane.selection.filter((l) => l !== action.lid)
+          : [...pane.selection, action.lid];
+        // ⚠ 起点は**外したときも**更新する(次の Shift はここから伸ばす)
+        next = withPaneSelection(pane, sel, action.lid);
+      } else {
+        next = withPaneSelection(pane, [action.lid], action.lid);
+      }
+      return {
+        state: { ...state, dual: { ...withPane(state.dual, action.side, next), focus: action.side } },
+        events: [],
+      };
+    }
+    case 'DUAL_TAB_ADD': {
+      const pane = withTabAdded(paneOf(state.dual, action.side));
+      if (pane === paneOf(state.dual, action.side)) return { state, events: [] };
+      return {
+        state: { ...state, dual: { ...withPane(state.dual, action.side, pane), focus: action.side } },
+        events: [],
+      };
+    }
+    case 'DUAL_TAB_CLOSE': {
+      const pane = withTabClosed(paneOf(state.dual, action.side), action.index);
+      if (pane === paneOf(state.dual, action.side)) return { state, events: [] };
+      return {
+        state: { ...state, dual: { ...withPane(state.dual, action.side, pane), focus: action.side } },
+        events: [],
+      };
+    }
+    case 'DUAL_CLEAR_SELECTION': {
+      const pane = paneOf(state.dual, action.side);
+      if (pane.selection.length === 0 && pane.anchor === null) return { state, events: [] };
+      return {
+        state: {
+          ...state,
+          dual: withPane(state.dual, action.side, withPaneSelection(pane, [], null)),
+        },
+        events: [],
+      };
+    }
+    case 'DUAL_TAB_ACTIVATE': {
+      const cur = paneOf(state.dual, action.side);
+      // ⚠ **実在するタブを押したときだけ**焦点を移す ── 存在しない添字で
+      //    焦点が動くと、「押したものが在る」という嘘の合図になる
+      if (!isTabIndex(cur, action.index)) return { state, events: [] };
+      const pane = withTabActive(cur, action.index);
+      if (pane === cur) return withDualFocus(state, action.side);
+      return {
+        state: { ...state, dual: { ...withPane(state.dual, action.side, pane), focus: action.side } },
+        events: [],
+      };
     }
     case 'ENTRY_RESTORED': {
       // 🔒 編集中の着弾(review P5b F1 ── 反例実験で draft 全損と editor

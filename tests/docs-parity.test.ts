@@ -23,6 +23,8 @@ import {
 } from '../src/adapter/ui/render/commands';
 import { showUpdateCard } from '../src/adapter/ui/render/update-card';
 import { RENDERABLE_FENCE_LANGS } from '../src/features/markdown/markdown-render';
+import { NOTICES, NOTICE_KEEP_MAX } from '../src/features/notice/notice-log';
+import { MAX_TABS } from '../src/features/relation/dual-pane';
 import { RELATION_KINDS } from '../src/features/relation/kinds';
 import { MARKDOWN_EXTENSIONS } from '../src/features/import/plain-markdown';
 import { REVISION_KEEP_LATEST } from '../src/adapter/platform/storage/store-port';
@@ -103,7 +105,8 @@ const EXPECTED_LABELS = {
   // ⚠ **アプリ全体**のものだけ(P8 段⑤。P10 で上の帯は撤去され、左の列の下へ)
   //    フラグは P11 で追加 ── 設定(user 開放)とは**別の面**にする(user 裁定 2026-08-07)
   // ⚠ 集計(#184)は**一番上** ── 日々使う面を、困ったときに見る面より手前に置く
-  'set-view': ['集計', '設定', 'フラグ', 'ヘルプ'],
+  // ⚠ 「2 ペイン」(#241 段⑥-a)は集計の**すぐ下** ── どちらも日々使う面である
+  'set-view': ['集計', '2 ペイン', '設定', 'フラグ', 'ヘルプ'],
   // 探し方は**左の列**が持つ
   'set-browse': ['一覧', 'フォルダ', 'アプリ'],
   'export-archive': ['バックアップ'],
@@ -779,3 +782,135 @@ describe('マニュアルの節を指す参照', () => {
   });
 });
 
+/**
+ * 🔴 **画面の説明(tooltip)を実装と突き合わせる**(2026-08-18)。
+ *
+ * ⚠ `ACTION_TITLES` は**どの test からも参照されていなかった** ── その結果、
+ * Word 書き出しの説明が「**この版では画像は入りません**」のまま残り、
+ * 実装(画像も図もグラフも入る)ともマニュアルとも食い違って、
+ * **user に「押しても無駄」と思わせていた**。
+ * 🔑 「空でないか」を数えるだけの検査は**中身が腐っても通る** ── 等値で pin する
+ * (`tests/adapter/collection-commands.test.ts` が既にこの型を使っている)。
+ */
+describe('情報ペインの説明が実装と合っている(2026-08-18)', () => {
+  /**
+   * ⚠ **コメントを落としてから見る**(1 稿目で踏んだ)。直した理由を書いた
+   * 解説コメントに旧文言(「この版では画像は入りません」)が入っているので、
+   * file 全体を見ると**直したのに必ず落ちる**。CLAUDE.md §1「見るのは実行する行」。
+   */
+  const codeOnly = (text: string): string =>
+    text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const TITLES = codeOnly(readFileSync('src/adapter/ui/render/inspector.ts', 'utf8'));
+
+  it('🔴 Word の説明が「入らない」と言っていない(実装は入れている)', () => {
+    // 空振り防止 ── ①説明そのものが在る ②コメント落としで本体まで消していない
+    expect(TITLES, 'Word の説明が消えている').toContain("'export-entry-docx':");
+    expect(TITLES.length, 'コメント落としが本体まで消した').toBeGreaterThan(2000);
+    expect(TITLES, '画像が入らないという古い断りが残っている').not.toContain(
+      'この版では画像は入りません',
+    );
+    // マニュアルは「入ります」と書いている ── 画面もそちらへ揃える
+    expect(readFileSync('docs/manual.md', 'utf8'), 'マニュアルの側が変わっている').toContain(
+      '本文に貼った添付の画像も、図(mermaid)もグラフも入ります',
+    );
+    expect(TITLES, '画面の説明が「入る」と言っていない').toContain('画像も、図はベクタで');
+  });
+});
+
+/**
+ * 🔴 **落ちたお知らせが、どこにも残らない状態を作らない**(2026-08-18)。
+ *
+ * アプリの登記表は `NOTICE_KEEP_MAX` 件で頭打ちで、**古い方から静かに落ちる**。
+ * 落ちた分の受け皿がどこにも無かったので、**42 件のうち 22 件が既に消えていた**
+ * (git の履歴からしか読めない状態だった)。⚠ 受け皿を作っただけでは腐るので、
+ * **登記表と CHANGELOG の対応をここで縛る**。
+ */
+/**
+ * 🔴 **数字を 2 か所に書いたら、突き合わせる**(2026-08-18、着地前レビューの指摘)。
+ * ⚠ マニュアルの「12 枚まで」は**直書き**で、実装の `MAX_TABS` を上げても
+ *   誰も気づかない ── いま一致しているうちに縛る。
+ */
+describe('2 ペインの上限が、マニュアルと一致する', () => {
+  it('🔴 タブの上限の数字が実装と同じ', () => {
+    const manual = readFileSync('docs/manual.md', 'utf8');
+    expect(manual, 'マニュアルに上限の記述が無い(空振り)').toContain('タブは 1 つのペインにつき');
+    expect(manual, `実装は ${MAX_TABS} 枚だが、マニュアルの数字が違う`).toContain(
+      `**${MAX_TABS} 枚**まで`,
+    );
+  });
+});
+
+describe('お知らせの受け皿(CHANGELOG)', () => {
+  const CHANGELOG = readFileSync('CHANGELOG.md', 'utf8');
+  /** ⚠ 見出し(`### <題名>`)だけを拾う ── 本文の行に満たされない形にする。 */
+  const headings = [...CHANGELOG.matchAll(/^### (.+)$/gm)].map((m) => m[1]);
+
+  it('🔴 いま配っているお知らせは、全部 CHANGELOG に在る', () => {
+    expect(NOTICES.length, '登記表が空(空振り)').toBeGreaterThan(0);
+    for (const n of NOTICES) {
+      expect(headings, `CHANGELOG に「${n.title}」が無い(落ちたら読めなくなる)`).toContain(
+        n.title,
+      );
+    }
+  });
+
+  /**
+   * 🔴 **落ちた分は「身元」で pin する**(2026-08-19、リリース前監査で判明)。
+   *
+   * ⚠ 1 稿目は「見出しが `NOTICE_KEEP_MAX` より多い」という**数**しか見ておらず、
+   *   **落ちた 22 件のうち 21 件を消しても緑**だった(受け皿の意味が消える)。
+   *   `NOTICE_KEEP_MAX` は需要側の数なので、供給側を数で縛るのは同型の空振りである。
+   * 🔑 `tests/adapter/announce.test.ts` の `KNOWN` と同じ作法 ── **等値の既知リスト**は
+   *   「直したら消さないと落ちる」ので忘れられない。
+   * ⚠ 新しく落ちた 1 件は、ここへ 1 行足すのが手順である
+   *   (`.claude/skills/notice-writing/SKILL.md`)。
+   */
+  const DROPPED: readonly string[] = [
+    '本文から探せるようになりました(並び順とタグも)',
+    '戻る・進むと、ペインの開閉ができるようになりました',
+    '複数のタブで同時に使えるようになりました',
+    'アプリの一覧から Office を開けるようになりました',
+    'Office の設定が、窓を閉じても残るようになりました',
+    'Office のメニューやドロップダウンが、マウスで選べるようになりました',
+    'Office の画面が日本語になりました',
+    '1 面で編集(ライブエディタ)が最初の設定になりました',
+    '添付の説明でも、文書の寄せの宣言が効くようになりました',
+    '本文の添付参照から、その添付のノートへ飛べるようになりました',
+    'お知らせの「閉じる」が見出しの行に移りました',
+    'Office の窓が固まったとき、お知らせするようになりました',
+    'Office でダイアログを閉じると止まる問題を直しました',
+    'Office でコピーすると操作が効かなくなる問題を直しました',
+    'Office の窓が画面いっぱいで開くようになりました',
+    'Office の窓の不具合を直しました',
+    'Word / Excel / PowerPoint の添付を読めるようになりました',
+    '本文の読み幅と印刷の紙を選べるようになりました',
+    'フラグ画面とヘルプ画面ができました',
+    '本文のコピーと、1 面編集の操作が増えました',
+    '本文のリンクが押せるようになりました',
+    '本文の寄せと幅が、画面と配布物で揃いました',
+  ];
+
+  it('🔴 アプリから落ちた分が、1 件残らず CHANGELOG に在る', () => {
+    expect(DROPPED.length, '既知リストが空(空振り)').toBeGreaterThan(0);
+    for (const title of DROPPED) {
+      expect(headings, `落ちたお知らせ「${title}」が CHANGELOG から消えている`).toContain(title);
+    }
+  });
+
+  it('🔴 CHANGELOG = いま配っている分 + 落ちた分(過不足なし)', () => {
+    const want = new Set([...NOTICES.map((n) => n.title), ...DROPPED]);
+    expect(want.size, '登記表と既知リストが重複している').toBe(NOTICES.length + DROPPED.length);
+    // ⚠ **等値**で見る ── 「足りない」も「身に覚えのない見出しが増えた」も落とす
+    expect([...headings].sort()).toEqual([...want].sort());
+    // ⚠ 受け皿が登記表のコピーになっていないこと(落ちた分を本当に持っている)
+    expect(headings.length, '受け皿が登記表のコピーになっている').toBeGreaterThan(
+      NOTICE_KEEP_MAX,
+    );
+  });
+
+  it('CHANGELOG の見出しが重複していない(同じ題名を 2 回残さない)', () => {
+    expect(new Set(headings).size, `重複: ${headings.length - new Set(headings).size} 件`).toBe(
+      headings.length,
+    );
+  });
+});

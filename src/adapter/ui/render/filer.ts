@@ -396,7 +396,14 @@ export class FilerRenderer {
      *   `focusFirstRow()` の中で付けていたので、**その関数を 1 度通るまで
      *   表に焦点が入らなかった**(= マウスだけの user は鍵の面へ入れない)。
      */
-    table.tabIndex = -1;
+    /**
+     * 🔴 **`0`**(2026-08-18)── お知らせで「**マウスを使わずに行までたどり着けます**」と
+     * 配ったのに、直す前は表も行も `-1` で **Tab の巡回に入らず**、焦点は
+     * マウスで 1 回押さないと作れなかった(= 配った約束が嘘だった)。
+     * ⚠ **行は `-1` のまま** ── 15,000 件の平置きを巡回に入れると Tab を数千回
+     *   押すことになる。入口は**表 1 つ**で、そこから ↑↓ で送る。
+     */
+    table.tabIndex = 0;
     const thead = document.createElement('thead');
     const hr = document.createElement('tr');
     // 🔴 **種別の列は持たない**(P9 段③)。以前は 3 列作って `display: none` で

@@ -125,6 +125,23 @@ describe('reducer: lean aggregate', () => {
       reduce(s, { type: 'SET_VIEW_MODE', mode: 'help' }).state.viewMode,
       '編集中にヘルプを開けない(無言の dead click)',
     ).toBe('help');
+    /**
+     * 🔴 **そして本文へ戻れる**(2026-08-19、リリース前監査で判明)。
+     *
+     * ⚠ 直す前は `'detail'` への切替も編集中は捨てられていたので、
+     * **開いたら最後、同じボタンをもう一度押しても本文へ戻れなかった**
+     * (`set-view` のトグルは `'detail'` を撃つ)── マニュアルは
+     * 「**寄り道して戻っても**、打ちかけの本文も取り消しもそのまま残ります」と
+     * 約束しており、**その約束が守られていなかった**。
+     * 🔑 編集の面は `detail` **そのもの**なので、戻るのは「編集へ帰る」である。
+     */
+    const away = reduce(s, { type: 'SET_VIEW_MODE', mode: 'help' }).state;
+    const back = reduce(away, { type: 'SET_VIEW_MODE', mode: 'detail' });
+    expect(back.state.viewMode, '編集中に開いたら本文へ戻れない(片道の袋小路)').toBe(
+      'detail',
+    );
+    expect(back.state.phase, '戻ったら編集が終わっていた').toBe('editing');
+    expect(back.state.openBody?.body, '戻ったら打ちかけが消えていた').toBe('# A');
     // editing 外での UPDATE_OPEN_BODY は無効
     const ready = loadedA();
     expect(

@@ -359,3 +359,47 @@ describe('計器の編集面(#223)', () => {
     );
   });
 });
+
+/**
+ * 🔴 **画面に出す文字列に markdown の記法を書かない**(2026-08-18 に実際に踏んだ)。
+ *
+ * 設定の説明文を `textContent` に代入しているのに `**読む**` と書いたので、
+ * **アスタリスクがそのまま画面に出ていた**。⚠ PKC2 が同じ失敗をしており、
+ * `src/features/notice/notice-log.ts` の冒頭が「`textContent` で描くのに本文が
+ * `**強調**` で書かれ、アスタリスクが見えていた」と**戒めている当のもの**である
+ * (お知らせ側には既に検査が在り、設定側に無かった)。
+ *
+ * ⚠ **範囲を絞る** ── src 全体で `**` を禁じると、コメントの強調が全部落ちる。
+ * 見るのは「**`textContent` に代入している文字列リテラル**」だけ。
+ */
+describe('画面の文字列に記法を書かない(2026-08-18)', () => {
+  const UI_FILES = readdirSync('src/adapter/ui/render')
+    .filter((f) => f.endsWith('.ts'))
+    .map((f) => join('src/adapter/ui/render', f));
+
+  it('🔴 textContent に代入する文字列に markdown の強調が無い', () => {
+    // 空振り防止 ── 走査対象が 0 件 / 代入が 1 件も見つからない形で緑にしない
+    expect(UI_FILES.length, '面の file を 1 つも見ていない').toBeGreaterThan(10);
+    const offenders: string[] = [];
+    let assignments = 0;
+    for (const file of UI_FILES) {
+      const text = readFileSync(file, 'utf8');
+      // `x.textContent = …;` の右辺(複数行の連結も拾う)
+      for (const m of text.matchAll(/\.textContent\s*=\s*([\s\S]*?);\n/g)) {
+        assignments += 1;
+        const rhs = m[1] ?? '';
+        // 文字列リテラルの中だけを見る(識別子や式は対象外)
+        for (const lit of rhs.matchAll(/'([^'\\]*(?:\\.[^'\\]*)*)'/g)) {
+          const body = lit[1] ?? '';
+          if (/\*\*[^*]+\*\*/.test(body) || /`[^`]+`/.test(body)) {
+            offenders.push(`${file}: ${body.slice(0, 40)}`);
+          }
+        }
+      }
+    }
+    expect(assignments, 'textContent への代入を 1 件も拾えていない(走査が壊れている)').toBeGreaterThan(
+      20,
+    );
+    expect(offenders, '画面に出る文字列に記法が書かれている(そのまま記号が見える)').toEqual([]);
+  });
+});
