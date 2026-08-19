@@ -982,6 +982,28 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   整理の途中で面から放り出される。作ったら**その場に出る**のが FD の作法である。
    * ⚠ 入れ先は**そのペインが開いている場所**(左の列の現在地ではない)。
    */
+  /** 🔴 押しボタンからも名前を打ち替えられる(鍵は F2 ── 実体は同じ action)。 */
+  'dual-rename-begin': (dispatcher, target) => {
+    const side = dualSide(target) ?? dispatcher.getState().dual.focus;
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから名前を変えてください' });
+      return;
+    }
+    const marked = paneOf(st.dual, side).selection;
+    // ⚠ **1 件のときだけ** ── まとめて改名は「同じ名前が並ぶ」だけで意味が無い
+    if (marked.length !== 1) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error:
+          marked.length === 0
+            ? '名前を変えるものを選んでください(行を押すと選べます)'
+            : '名前を変えられるのは 1 件だけです',
+      });
+      return;
+    }
+    dispatcher.dispatch({ type: 'DUAL_RENAME_BEGIN', side, lid: marked[0]! });
+  },
   'dual-mkdir': (dispatcher, target) => {
     const side = dualSide(target) ?? dispatcher.getState().dual.focus;
     const st = dispatcher.getState();
@@ -2441,7 +2463,14 @@ export function bindActions(
      * 面をまたいで効かせると、#240 の着地前レビューで踏んだ
      * 「見えない所で印が増える / 現在地が動く」を繰り返す。
      */
-    if (el?.closest('[data-pkc-region="filer-table"]')) {
+    /**
+     * ⚠ **打っている最中は、面の文脈キーを走らせない**。
+     * ⚠ いまの面には入力欄が 1 つ(名前の打ち替え)しか無く、**それは下の枝が先に
+     *   受ける**ので、この門は**変異試験で観測できない**(外しても test は全部通る)。
+     *   将来この面に入力欄が増えたときのための備えとして置いている ── 「これが
+     *   無いと壊れる」とは書かない(CLAUDE.md「外して壊れることを 1 度は見る」)。
+     */
+    if (!typing && el?.closest('[data-pkc-region="filer-table"]')) {
       const fcmd = keymap.match(ke, 'filer');
       if (fcmd !== null && runFilerKey(fcmd)) {
         ke.preventDefault();
@@ -2453,7 +2482,38 @@ export function bindActions(
      * `state.scopeLid` ではなく `state.dual` の、**焦点のあるペイン**に効く。
      */
     const dualHost = el?.closest<HTMLElement>('[data-pkc-region="dual-pane"]');
-    if (dualHost) {
+    /**
+     * 🔴 **名前を打ち替えている欄の鍵は、ここで完結させる**(#273 段④)。
+     * `Enter` で確定、`Esc` でやめる。⚠ それ以外の鍵は**入力へ通す**(打てなくなる)。
+     */
+    if (dualHost && el instanceof HTMLInputElement && el.matches('[data-pkc-field="dual-rename"]')) {
+      const lid = el.getAttribute('data-pkc-entry');
+      if (ke.key === 'Enter' && lid !== null) {
+        ke.preventDefault();
+        commitDualRename(lid, el.value);
+        return;
+      }
+      if (ke.key === 'Escape') {
+        ke.preventDefault();
+        dispatcher.dispatch({ type: 'DUAL_RENAME_END' });
+        return;
+      }
+      return;
+    }
+    if (!typing && dualHost) {
+      const dside0 = dualHost.getAttribute('data-pkc-side');
+      /**
+       * 🔴 **F2 で名前を打ち替える**(OS のファイラ / FD と同じ鍵)。
+       * ⚠ 行に焦点があるときだけ(帯やボタンの上では出さない)。
+       */
+      if (ke.key === 'F2' && (dside0 === 'left' || dside0 === 'right')) {
+        const lid = focusedDualLid(dside0) ?? paneOf(dispatcher.getState().dual, dside0).selection[0];
+        if (lid !== undefined && lid !== null) {
+          ke.preventDefault();
+          dispatcher.dispatch({ type: 'DUAL_RENAME_BEGIN', side: dside0, lid });
+          return;
+        }
+      }
       const dside = dualHost.getAttribute('data-pkc-side');
       /**
        * 🔴 **Tab は反対のペインへ**(FD / OS のファイラの基本操作)。
@@ -2709,6 +2769,19 @@ export function bindActions(
       ?.focus();
   };
 
+  /**
+   * 🔴 **名前の打ち替えを確定する**(#273 段④)。
+   *
+   * ⚠ 改名の規則は既存の `RENAME_ENTRY_TITLE` **1 つ**(左の列・編集画面と同じ)。
+   * 🔑 **空白だけ / 変わっていない、の判定はここに書かない** ── reducer が既に
+   *   持っている(`title === '' || title === meta.title` で捨てる)。ここにも書くと
+   *   **同じ問いに答える口が 2 つ**になり、片方だけ直したときに食い違う(CLAUDE.md §7)。
+   */
+  const commitDualRename = (lid: string, value: string): void => {
+    dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title: value });
+    dispatcher.dispatch({ type: 'DUAL_RENAME_END' });
+  };
+
   const runDualKey = (cmd: string, side: DualSide): boolean => {
     const st = dispatcher.getState();
     /**
@@ -2875,6 +2948,24 @@ export function bindActions(
     return false;
   };
   const doc = root.ownerDocument;
+  /**
+   * 🔴 **他所を押したら確定する**(#273 段④。OS のファイラと同じ)。
+   *
+   * ⚠ `renaming` の門は**変異試験で観測できない**(外しても test は全部通る)。
+   *   `Esc` でやめた回は `DUAL_RENAME_END` が同期に走って入力欄が DOM から外れ、
+   *   **外れた節点の focusout は root まで上がらない**ので、この handler に届かない
+   *   ── だから Chromium では門が要らない。⚠ ただし「要素を外したときに focusout を
+   *   出すか」は**エンジンで違う**ので、届いた回に打った値が蘇らないよう残している。
+   *   「これが無いと壊れる」とは書かない(CLAUDE.md「外して壊れることを 1 度は見る」)。
+   */
+  const onRenameBlur = (ev: Event): void => {
+    const el = ev.target;
+    if (!(el instanceof HTMLInputElement) || !el.matches('[data-pkc-field="dual-rename"]')) return;
+    if (dispatcher.getState().dual.renaming === null) return;
+    const lid = el.getAttribute('data-pkc-entry');
+    if (lid !== null) commitDualRename(lid, el.value);
+  };
+  root.addEventListener('focusout', onRenameBlur);
   doc.addEventListener('keydown', onShortcut);
   root.addEventListener('keydown', onKeydown);
   return () => {
@@ -2882,6 +2973,7 @@ export function bindActions(
     root.removeEventListener('mousedown', onMousedown);
     root.removeEventListener('input', onInput);
     root.removeEventListener('change', onChange);
+    root.removeEventListener('focusout', onRenameBlur);
     doc.removeEventListener('keydown', onShortcut);
     root.removeEventListener('keydown', onKeydown);
   };

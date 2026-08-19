@@ -41,6 +41,14 @@ export interface DualState {
   readonly right: DualPaneState;
   /** いま操作している側。⚠ 「移す」の向き(移す元)を決めるのはこれ。 */
   readonly focus: DualSide;
+  /**
+   * 🔴 **いま名前を打ち替えている行**(#273 段④)。`null` = 誰も打っていない。
+   *
+   * ⚠ **state に持つ**(DOM を直に差し替えない)── この面は state が変わるたびに
+   * 行を組み直すので、DOM 側で `<input>` に挿げ替えても**次の描画で消える**
+   * (打っている最中に別タブの保存が届くだけで入力が飛ぶ)。
+   */
+  readonly renaming: { readonly side: DualSide; readonly lid: string } | null;
 }
 
 /** ⚠ タブは**必ず 1 枚以上**(0 枚のペインは「場所が無い」= 何も描けない)。 */
@@ -64,6 +72,7 @@ export const initialDual: DualState = {
   left: emptyPane(),
   right: emptyPane(),
   focus: 'left',
+  renaming: null,
 };
 
 /** 開いているタブの場所。⚠ 添字が壊れていてもルートに落ちる(描けない状態を作らない)。 */
@@ -192,6 +201,12 @@ export function pruneDual(
   };
   const left = prune(state.left);
   const right = prune(state.right);
-  if (left === state.left && right === state.right) return state;
-  return { ...state, left, right };
+  /**
+   * ⚠ **打ち替えている相手が消えたら、打つのもやめる** ── 残すと、消えた行の
+   * 名前を打ち続けられて、確定した瞬間に**どこにも無い lid へ RENAME が飛ぶ**。
+   */
+  const renaming =
+    state.renaming !== null && !alive(state.renaming.lid) ? null : state.renaming;
+  if (left === state.left && right === state.right && renaming === state.renaming) return state;
+  return { ...state, left, right, renaming };
 }

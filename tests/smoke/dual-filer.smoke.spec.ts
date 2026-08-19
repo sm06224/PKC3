@@ -185,3 +185,28 @@ test('🔴 2 ペインをキーボードだけで動かす (#273)', async ({ pag
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **その場で名前を打ち替える**(#273 段④)。
+ * ⚠ 焦点と `select()`、そして「打っている最中に面の鍵へ化けない」ことは
+ * 実ブラウザでしか確かめられない(合成 event では焦点の意味論が違う)。
+ */
+test('🔴 F2 で名前を打ち替えられる (#273)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await makeFolder(page, 'はこ');
+  await openDual(page);
+
+  await page.locator(ROWS('left')).first().click();
+  await page.keyboard.press('F2');
+  const input = page.locator(`${PANE('left')} [data-pkc-field="dual-rename"]`);
+  await expect(input, 'F2 で入力欄が出ていない').toBeVisible();
+  // ⚠ 出た時点で**打てる**(全選択されている)── 打ち直すだけで置き換わる
+  await page.keyboard.type('あたらしい名前');
+  await page.keyboard.press('Enter');
+  await expect(input, '確定したのに入力欄が残っている').toHaveCount(0);
+  await expect(page.locator(ROWS('left')).first()).toContainText('あたらしい名前');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

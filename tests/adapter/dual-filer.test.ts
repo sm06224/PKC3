@@ -1048,6 +1048,102 @@ describe('2 ペインのキーボード操作(#273)', () => {
   });
 
   /**
+   * 🔴 **その場で名前を打ち替える**(#273 段④。OS のファイラの F2)。
+   * ⚠ 入力欄は **state 駆動**で出す ── DOM を直に差し替えると、別タブの保存が
+   *   届くだけで打っている最中の入力が消える(この面は state で組み直すため)。
+   */
+  const renameInput = (side: string): HTMLInputElement | null =>
+    region.querySelector<HTMLInputElement>(
+      `[data-pkc-region="dual-pane"][data-pkc-side="${side}"] [data-pkc-field="dual-rename"]`,
+    );
+
+  it('🔴 F2 で入力欄が出て、Enter で名前が変わる', () => {
+    press('left', 'a', 'F2');
+    const input = renameInput('left');
+    expect(input, 'F2 で入力欄が出ていない').toBeTruthy();
+    expect(input!.value, '元の名前が入っていない').toBe('あ');
+    input!.value = 'あたらしい名前';
+    input!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    expect(d.getState().entryMetas.get('a')?.title).toBe('あたらしい名前');
+    expect(renameInput('left'), '確定したのに入力欄が残っている').toBeNull();
+  });
+
+  it('🔴 Esc なら変えずに閉じる', () => {
+    press('left', 'a', 'F2');
+    const input = renameInput('left')!;
+    input.value = '打ちかけ';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    expect(d.getState().entryMetas.get('a')?.title, 'Esc なのに変わった').toBe('あ');
+    expect(renameInput('left')).toBeNull();
+  });
+
+  /**
+   * 🔴 **打っている最中は、面の鍵に化けない**。⚠ これが無いと `Enter` が「開く」に、
+   *   `Backspace` が「親へ」に化けて、名前が打てない。
+   */
+  it('🔴 打っている最中の Backspace は、親へ戻らない', () => {
+    d.dispatch({ type: 'DUAL_SET_SCOPE', side: 'left', lid: 'f1' });
+    d.dispatch({ type: 'DUAL_RENAME_BEGIN', side: 'left', lid: 'x' });
+    const input = renameInput('left')!;
+    input.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true }),
+    );
+    expect(paneScope(paneOf(d.getState().dual, 'left')), '親へ戻ってしまった').toBe('f1');
+  });
+
+  it('⚠ 空白だけの名前にはしない(変えずに閉じる)', () => {
+    press('left', 'a', 'F2');
+    const input = renameInput('left')!;
+    input.value = '   ';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    expect(d.getState().entryMetas.get('a')?.title).toBe('あ');
+  });
+
+  it('🔴 他所を押したら確定する(OS のファイラと同じ)', () => {
+    press('left', 'a', 'F2');
+    const input = renameInput('left')!;
+    input.value = 'ぼかし確定';
+    input.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    expect(d.getState().entryMetas.get('a')?.title).toBe('ぼかし確定');
+  });
+
+  /**
+   * ⚠ **Esc のあとに blur が来ても、打った値は入らない**。
+   * ⚠ これは**空振り気味の test** である ── 実際には `Esc` で入力欄が DOM から
+   *   外れ、外れた節点の focusout は root まで上がらないので、そもそも handler に
+   *   届かない(だから handler 側の門を外しても緑のまま)。振る舞いの記録として残す。
+   */
+  it('Esc で閉じたあとに blur が来ても、打った値は入らない', () => {
+    press('left', 'a', 'F2');
+    const input = renameInput('left')!;
+    input.value = '打ちかけ';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    // ⚠ 閉じたあとに、外れた入力欄から focusout が届く
+    input.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    expect(d.getState().entryMetas.get('a')?.title, 'Esc のあとに打った値が入った').toBe('あ');
+  });
+
+  /**
+   * 🔴 **打ち替えている相手が消えたら、打つのもやめる**(変異 R5 が生き延びて判明)。
+   * ⚠ 残すと、確定した瞬間に**どこにも無い lid へ改名が飛ぶ**。
+   */
+  it('🔴 打ち替え中に相手が消えたら、入力欄も閉じる', () => {
+    press('left', 'a', 'F2');
+    expect(d.getState().dual.renaming, '前提が崩れている').not.toBeNull();
+    d.dispatch({ type: 'DELETE_ENTRIES', lids: ['a'] });
+    expect(d.getState().dual.renaming, '消えた相手の打ち替えが残っている').toBeNull();
+  });
+
+  it('🔴 「名前を変える」は 1 件のときだけ(理由を出す)', () => {
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' });
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'b', mode: 'toggle' });
+    region.querySelector<HTMLElement>('[data-pkc-field="dual-rename-begin"]')!.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, cancelable: true }),
+    );
+    expect(d.getState().error ?? '').toContain('1 件だけ');
+  });
+
+  /**
    * 🔴 **反対側へ写す**(#273 段③。FD の C 相当)。
    * ⚠ この harness は `services` を渡していないので、**断り**の側だけをここで見る
    *   (実際に写す側は下の describe が fake の `readBodies` を渡して見る)。

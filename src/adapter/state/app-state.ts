@@ -618,7 +618,13 @@ export type UserAction =
    * 消えるが、印は state に残るので、そのまま次の場所へ移ると
    * **画面に無いものをもう一度動かそうとする**(#240 の着地前レビュー 2 と同型)。
    */
-  | { type: 'DUAL_CLEAR_SELECTION'; side: DualSide };
+  | { type: 'DUAL_CLEAR_SELECTION'; side: DualSide }
+  /**
+   * 🔴 **その行の名前を打ち替え始める / やめる**(#273 段④)。
+   * ⚠ 確定は既存の `RENAME_ENTRY_TITLE` を撃つ ── 改名の規則を 2 つ作らない。
+   */
+  | { type: 'DUAL_RENAME_BEGIN'; side: DualSide; lid: string }
+  | { type: 'DUAL_RENAME_END' };
 
 export type SystemCommand =
   | { type: 'SYS_BOOTED'; cid: string; metas: EntryMeta[]; relations: Relation[] }
@@ -2327,6 +2333,22 @@ function reduceCore(
         },
         events: [],
       };
+    }
+    case 'DUAL_RENAME_BEGIN': {
+      // ⚠ 実在しない行の名前は打てない(消えた行の入力欄を出さない)
+      if (!state.entryMetas.has(action.lid)) return { state, events: [] };
+      // ⚠ 打ち始めた側へ焦点も移す(他の押し方と揃える)
+      return {
+        state: {
+          ...state,
+          dual: { ...state.dual, focus: action.side, renaming: { side: action.side, lid: action.lid } },
+        },
+        events: [],
+      };
+    }
+    case 'DUAL_RENAME_END': {
+      if (state.dual.renaming === null) return { state, events: [] };
+      return { state: { ...state, dual: { ...state.dual, renaming: null } }, events: [] };
     }
     case 'DUAL_TAB_ACTIVATE': {
       const cur = paneOf(state.dual, action.side);

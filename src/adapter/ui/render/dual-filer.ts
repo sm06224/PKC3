@@ -228,8 +228,17 @@ export class DualFilerRenderer {
      * 空の理由の文言が**古いまま残る**(行が 0 件だと指紋は空文字になる)。
      */
     const filtered = normalizeQuery(state.filterQuery) !== '';
+    /**
+     * ⚠ **打ち替え中の行も指紋に入れる**(#273 段④)── 入れないと、
+     * 打ち始め / やめるで行を組み直さないので、**入力欄が出ない / 消えない**。
+     */
+    const renaming =
+      state.dual.renaming !== null && state.dual.renaming.side === side
+        ? state.dual.renaming.lid
+        : '';
     const signature = [
       filtered ? 'q' : '-',
+      `r:${renaming}`,
       ...rows.map((m) =>
         [m.lid, m.title, m.archetype, formatListDate(m.updatedAt, year)].join(SEP),
       ),
@@ -237,7 +246,7 @@ export class DualFilerRenderer {
     if (signature !== frame.signature) {
       frame.signature = signature;
       frame.marks = '';
-      this.renderTable(frame, side, rows, filtered);
+      this.renderTable(frame, side, rows, filtered, renaming);
     }
     const marks = pane.selection.join(' ');
     if (marks !== frame.marks) {
@@ -359,6 +368,8 @@ export class DualFilerRenderer {
     side: DualSide,
     rows: readonly EntryMeta[],
     filtered: boolean,
+    /** 打ち替え中の行(`''` = 無し)。⚠ その行だけ入力欄になる。 */
+    renaming: string,
   ): void {
     const year = new Date().getFullYear();
     frame.rows.clear();
@@ -388,10 +399,25 @@ export class DualFilerRenderer {
       tr.setAttribute('data-pkc-action', 'dual-row');
       tr.tabIndex = -1;
       const name = document.createElement('td');
-      name.append(
-        iconSpan(ARCHETYPE_ICONS[m.archetype] ?? 'page'),
-        document.createTextNode(m.title),
-      );
+      if (m.lid === renaming) {
+        /**
+         * 🔴 **その場で名前を打ち替える**(#273 段④。OS のファイラの F2)。
+         * ⚠ 行そのものの押下(`dual-row`)へ**伝えない** ── 打っている最中に
+         *   クリックが行の選択として拾われると、入力が飛ぶ。
+         */
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = m.title;
+        input.setAttribute('data-pkc-field', 'dual-rename');
+        input.setAttribute('data-pkc-entry', m.lid);
+        input.setAttribute('aria-label', '新しい名前');
+        name.append(iconSpan(ARCHETYPE_ICONS[m.archetype] ?? 'page'), input);
+      } else {
+        name.append(
+          iconSpan(ARCHETYPE_ICONS[m.archetype] ?? 'page'),
+          document.createTextNode(m.title),
+        );
+      }
       const kind = document.createElement('td');
       kind.textContent = archetypeLabel(m.archetype);
       const date = document.createElement('td');
@@ -402,6 +428,17 @@ export class DualFilerRenderer {
     }
     table.append(tbody);
     frame.table.append(table);
+    /**
+     * ⚠ **描いた直後に焦点と全選択**(#273 段④)── これが無いと、押した直後に
+     * user が自分でクリックし直す羽目になる(OS のファイラは打てる状態で出る)。
+     */
+    if (renaming !== '') {
+      const input = frame.table.querySelector<HTMLInputElement>(
+        '[data-pkc-field="dual-rename"]',
+      );
+      input?.focus();
+      input?.select();
+    }
   }
 
   /**
@@ -444,6 +481,13 @@ export class DualFilerRenderer {
         ? `${SIDE_LABEL[from]}で選んだ ${count} 件を、反対側の場所へ写します(元は残ります)`
         : '写すものを選んでから押してください';
     host.append(copy);
+    const ren = document.createElement('button');
+    ren.type = 'button';
+    ren.setAttribute('data-pkc-action', 'dual-rename-begin');
+    ren.setAttribute('data-pkc-field', 'dual-rename-begin');
+    ren.textContent = '名前を変える';
+    ren.title = '選んだ 1 件の名前を、その場で打ち替えます(F2)';
+    host.append(ren);
     const mkdir = document.createElement('button');
     mkdir.type = 'button';
     mkdir.setAttribute('data-pkc-action', 'dual-mkdir');
