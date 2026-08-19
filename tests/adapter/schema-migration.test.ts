@@ -22,7 +22,6 @@ import {
   SCHEMA_DDL,
 } from '../../src/adapter/platform/storage/schema';
 import { applySchema } from '../../src/adapter/platform/storage/storage-worker';
-import { countTaskCandidates } from '../../src/features/markdown/task-count';
 
 /**
  * 🔑 **旧い形の DDL を作る** ── いまの DDL から、後から足した列と索引を落とす。
@@ -141,18 +140,18 @@ describe('entries の後付け列(#277 段②)', () => {
   });
 
   /**
-   * 🔴 **旧ビルドと混ざったときの限界を、はっきり書いておく**(#277 段②)。
+   * 🔴 **旧ビルドが書いた行を取りこぼさない**(#277 段②、2026-08-19 の実地調査で改良)。
    *
-   * 版(`DB_SCHEMA_VERSION`)を**上げていない**ので、旧ビルドは同じ DB を
-   * 普通に開ける(#286 の「アプリが起動しない」を作らないための判断)。
-   * ⚠ その代わり、**旧ビルドが新しく作ったノート**は列が既定(0)のままになる
-   * ── カンバンの候補から漏れる。
-   * 🔑 ただし**壊れではなく遅れ**である:新ビルドで 1 度保存すれば直る。
-   *   ここではその**両方**を pin する(限界と、直り方)。
-   * ⚠ 「open のたびに本文を LIKE で走査して埋め忘れを探す」形は採らない ──
-   *   絞るために列を足した意味が消える(#212 の穴)。
+   * 版(`DB_SCHEMA_VERSION`)を**上げていない**ので、旧ビルドは同じ DB を普通に
+   * 開いて書く(#286 の「アプリが起動しない」を作らないための判断)。
+   * ⚠ 旧ビルドの UPSERT はこの列を知らないので、**新しく作った行は NULL** になる。
+   *
+   * 🔑 だから列を **`NOT NULL DEFAULT 0` にしない** ── 既定 0 にすると
+   *   「まだ数えていない」と「チェックが 0 件」が同じ値に潰れ、
+   *   **その行が二度と拾えなくなる**(= カンバンから永久に消える)。
+   *   NULL = 未計算と読めるからこそ、次の open が埋め戻せる。
    */
-  it('🔴 旧ビルドが作った行は 0 のまま(= 候補から漏れる)が、保存し直せば直る', () => {
+  it('🔴 旧ビルドが書いた行は NULL で残り、次の open で埋まる', () => {
     const db = new sqlite3.oo1.DB(':memory:');
     for (const ddl of SCHEMA_DDL) db.exec(ddl);
     db.exec(`PRAGMA user_version = ${DB_SCHEMA_VERSION}`);
@@ -162,16 +161,32 @@ describe('entries の後付け列(#277 段②)', () => {
             VALUES ('c1', 'oldwrite', 't', 'text', 1, 0, ?)`,
       bind: ['- [ ] 旧ビルドが書いた\n'],
     });
-    expect(taskTotal(db, 'oldwrite'), '既定が 0 でない(前提が崩れている)').toBe(0);
-    // open し直しても、ここは直らない(限界)
+    expect(
+      db.selectValue(`SELECT task_total FROM entries WHERE lid = 'oldwrite'`),
+      '既定が NULL でない(0 に潰れると、この行は二度と拾えない)',
+    ).toBeNull();
+    // 🔑 次の open で埋まる(判定は「NULL の行が在るか」)
     applySchema(db);
-    expect(taskTotal(db, 'oldwrite'), '限界の説明と実装が食い違っている').toBe(0);
-    // 🔑 新ビルドで保存し直せば直る(= `bindUpsert` が本文から数える)
-    db.exec({
-      sql: `UPDATE entries SET task_total = ? WHERE lid = 'oldwrite'`,
-      bind: [countTaskCandidates('- [ ] 旧ビルドが書いた\n').total],
-    });
-    expect(taskTotal(db, 'oldwrite'), '保存し直しても直らない').toBe(1);
+    expect(taskTotal(db, 'oldwrite'), '旧ビルドが書いた行が埋まっていない').toBe(1);
+    db.close();
+  });
+
+  /**
+   * 🔴 **塊で回しても取りこぼさない**(埋め戻しは本文を一度に heap へ載せない)。
+   * ⚠ 実地調査の指摘:全件を 1 回で読むと、20MB の容れ物で boot の worker が
+   *   20MB 抱える(不可侵指示 2026-07-27「速やかな破棄」に反する)。
+   * 🔑 塊の大きさ(200)を**跨ぐ件数**で試す ── 跨がないと分割の枝を 1 度も通らない。
+   */
+  it('🔴 塊の境目を跨ぐ件数でも、全部埋まる', () => {
+    const rows: Array<readonly [string, string]> = [];
+    for (let i = 0; i < 250; i++) rows.push([`bulk-${i}`, `- [${i % 2 ? 'x' : ' '}] ${i}\n`]);
+    const db = oldDb(rows);
+    applySchema(db);
+    const remaining = Number(
+      db.selectValue(`SELECT count(*) FROM entries WHERE task_total IS NULL`) ?? -1,
+    );
+    expect(remaining, '塊の境目で埋め残した').toBe(0);
+    expect(taskTotal(db, 'bulk-249'), '最後の塊が埋まっていない').toBe(1);
     db.close();
   });
 });

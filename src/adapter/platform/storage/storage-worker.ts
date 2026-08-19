@@ -143,16 +143,24 @@ async function init(dbName: string, journalMode?: JournalMode): Promise<InitResu
  *   変えていないので索引の中身は同じ値に書き直されるだけ(害は無い)。
  */
 function backfillTaskTotals(database: Database): void {
-  const rows = database.selectObjects(
-    `SELECT cid, lid, body, task_total FROM entries`,
-  ) as Array<{ cid: string; lid: string; body: string; task_total: number }>;
-  for (const r of rows) {
-    const total = countTaskCandidates(r.body ?? '').total;
-    if (total === r.task_total) continue;
-    database.exec({
-      sql: `UPDATE entries SET task_total = ? WHERE cid = ? AND lid = ?`,
-      bind: [total, r.cid, r.lid],
-    });
+  for (;;) {
+    /**
+     * ⚠ **本文を全件いっぺんに heap へ載せない**(不可侵指示 2026-07-27
+     * 「ゼロコピー、生成とライフサイクル後の速やかな破棄」)── 20MB の容れ物で
+     * boot の worker が 20MB 抱える形になる。**塊で回して都度捨てる**。
+     * 🔑 対象は **NULL の行だけ**なので、進めば必ず尽きる(無限には回らない)。
+     */
+    const rows = database.selectObjects(
+      `SELECT cid, lid, body FROM entries WHERE task_total IS NULL LIMIT ${BACKFILL_CHUNK}`,
+    ) as Array<{ cid: string; lid: string; body: string }>;
+    if (rows.length === 0) return;
+    for (const r of rows) {
+      database.exec({
+        sql: `UPDATE entries SET task_total = ? WHERE cid = ? AND lid = ?`,
+        bind: [countTaskCandidates(r.body ?? '').total, r.cid, r.lid],
+      });
+    }
+    if (rows.length < BACKFILL_CHUNK) return;
   }
 }
 
@@ -242,7 +250,16 @@ export function applySchema(database: Database): void {
      *   全本文を読むことになり、絞るために列を足した意味が消える(#212 の穴)。
      * 🔑 本文は既に DB に在るので、**ここで数え直せる**(取り込み直しは要らない)。
      */
-    if (addedEntryCols.includes('task_total')) backfillTaskTotals(database);
+    /**
+     * ⚠ 判定は「列をいま足したか」**ではなく**「**NULL の行が在るか**」──
+     *   旧ビルドが書いた行(この列を知らない UPSERT)も NULL で残るので、
+     *   次の open で拾える(schema.ts の原則「あるべき状態の実在」)。
+     * 🔑 判定そのものは索引が効く(`idx_entries_task`)ので、本文は読まない。
+     */
+    if (
+      database.selectValue(`SELECT 1 FROM entries WHERE task_total IS NULL LIMIT 1`) !== undefined
+    )
+      backfillTaskTotals(database);
     /**
      * 🔴 **既存 DB の索引を埋める**(#181 全文検索)。DDL は空の索引を作るだけ
      * なので、**既に在る entry は 1 件も引けない**まま緑になる ── 索引を足した
@@ -329,6 +346,9 @@ type Handlers = {
     req: RequestFor<Op>,
   ) => ResultMap[Op] | Promise<ResultMap[Op]>;
 };
+
+/** 埋め戻しを回す塊の大きさ(本文を一度に heap へ載せない)。 */
+const BACKFILL_CHUNK = 200;
 
 const UPSERT_SQL = `INSERT INTO entries
     (cid, lid, title, archetype, created_at, updated_at,
@@ -809,8 +829,24 @@ const handlers: Handlers = {
   listTaskEntries: (req) =>
     (
       need().selectObjects(
+        /**
+         * 🔴 **NULL も候補に入れる**(= まだ数えていない行)。
+         * ⚠ 版を上げていないので**旧ビルドも同じ DB に書く**が、旧ビルドの
+         *   UPSERT はこの列を知らないので、新しく作った行が NULL で残る。
+         *   NULL を外すと、その行は**カンバンから永久に消える**(取りこぼし)。
+         * 🔑 多めに拾うのは無害 ── 本文を読んで項目 0 件と分かるだけである。
+         *
+         * ⚠ **残っている限界**(2026-08-19 の実地調査で実測):旧ビルドが
+         *   **既にある行を書き換えた**ときは、その UPSERT が列を挙げないので
+         *   値が**据え置かれる**(NULL には戻らない)。チェックが 0 件だった
+         *   ノートに旧ビルドでチェックを足すと、列は 0 のままなので
+         *   **その回はカンバンに出ない**。⚠ 壊れではなく遅れ ── 新ビルドで
+         *   1 度保存すれば直る(`bindUpsert` が本文から数え直す)。
+         *   🔑 直すには「どの本文について数えたか」の印(`updated_at` との
+         *   突き合わせ)が要るが、列がもう 1 本増えるので**いまは採らない**。
+         */
         `SELECT lid FROM entries
-          WHERE cid = ? AND task_total > 0
+          WHERE cid = ? AND (task_total IS NULL OR task_total > 0)
           ORDER BY entry_order`,
         [req.cid],
       ) as Array<{ lid: string }>

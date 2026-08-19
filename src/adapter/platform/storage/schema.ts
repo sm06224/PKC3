@@ -44,13 +44,22 @@ export const DB_SCHEMA_VERSION = 3;
  * `pragma_table_info` で列の実在を見る)── 半端な DB も次回 open で自己修復する。
  *
  * 🔴 ⚠ **列を足すだけでは足りない。既存行を埋めること。**
- * DDL / ALTER は既存行を **既定値(0)のまま**にするので、埋めないと
+ * ALTER で足した列は既存行が **NULL** になるので、埋めないと
  * **いま在るノートが 1 件もカンバンに出ない**まま緑になる ── 全文検索(#181)で
  * 索引を足したときに実際に踏んだ型(§1「材料が届いていない」)。
  * 埋める処理は `storage-worker.ts` の `applySchema` に在る。
+ *
+ * 🔴 **`NOT NULL DEFAULT 0` にしない**(2026-08-19 の実地調査で判明)。
+ * 既定 0 を入れると「**まだ数えていない**」と「**チェックが 0 件**」が
+ * 同じ値に潰れ、**どの行を埋め直すべきか二度と分からなくなる**。
+ * ⚠ これは実際に効く ── 版を上げていないので**旧ビルドも同じ DB に書く**が、
+ *   旧ビルドの UPSERT はこの列を知らないので、**新しく作った行が NULL になる**。
+ *   NULL = 未計算と読めるからこそ、`listTaskEntries` が
+ *   「NULL は候補に入れる」で**取りこぼさない**(schema.ts の原則
+ *   「判定はあるべき状態の実在」の、この列における形)。
  */
 export const ENTRY_ADDED_COLUMNS: readonly { readonly name: string; readonly ddl: string }[] = [
-  { name: 'task_total', ddl: 'INTEGER NOT NULL DEFAULT 0' },
+  { name: 'task_total', ddl: 'INTEGER' },
 ];
 
 export const REVISION_ADDED_COLUMNS: readonly string[] = [
@@ -79,7 +88,7 @@ export const SCHEMA_DDL: readonly string[] = [
      status TEXT,
      date TEXT,
      archived INTEGER NOT NULL DEFAULT 0,
-     task_total INTEGER NOT NULL DEFAULT 0,
+     task_total INTEGER,
      body TEXT NOT NULL DEFAULT '',
      PRIMARY KEY (cid, lid)
    )`,
