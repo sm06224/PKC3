@@ -236,3 +236,31 @@ ls node_modules/.bin/vitest >/dev/null 2>&1 || npm ci
 2026-08-07 に `external-images` の smoke が CI で 3 回に 1 回落ちたのは flake ではなく
 **製品の穴**だった(CSP 違反の見張りが user の中身より後ろに登録されていた)。
 環境のせいにして test を緩めていたら、バグごと埋めていた。
+
+## 7. 🔴 merge と「本番リリース」は別物(user 指示 2026-08-19)
+
+**merge = `/dev/` へ配ること。** これは自分の裁定でやってよい。
+**本番リリース = `/`(最新の安定 tag)を動かすこと。⚠ user の示唆を待つ。**
+
+本番を動かす操作は **2 つだけ**。どちらも**自分から実行しない**:
+
+1. `v*` tag を push する
+2. `release.yml` を `workflow_dispatch` で起動する
+
+⚠ **版を上げるのは配布ではない。** `package.json` / `src/runtime/release-meta.ts` の
+`APP_VERSION` を上げ、お知らせ(`notice-log.ts`)と `CHANGELOG.md` を書くところまでは
+**準備**なので進めてよい ── 引き金だけ引かずに待つ。
+
+準備の手順(2026-08-19 に実際に踏んだ順):
+
+1. `package.json` と `APP_VERSION` を**両方**上げる(`tests/release-meta.test.ts` が一致を pin)
+2. お知らせを 1 件足す。⚠ **記法を書かない**(`**` / バッククォート / `](` は
+   `tests/adapter/help-pane.test.ts` が止める ── 素のテキストとして出るため)
+3. `CHANGELOG.md` に**同じ見出し**で足す(`tests/docs-parity.test.ts` が対応を縛る)
+4. 登記表が **20 件(`NOTICE_KEEP_MAX`)を超えたら、いちばん古い 1 件を落とし**、
+   その題名を `docs-parity.test.ts` の `DROPPED` へ 1 行足す
+5. `tests/adapter/announce.test.ts` の `KNOWN` を更新
+   (足した 1 件の digest を登録 / 落とした 1 件を削除。件数が一致しないと落ちる)
+
+🔑 **理由は「不可逆」** ── dev は壊しても読み直せば直るが、本番は user の手元へ届いて
+取り消せない。規律の正本は `CLAUDE.md`「委任の境界」。
