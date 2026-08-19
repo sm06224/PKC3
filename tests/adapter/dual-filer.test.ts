@@ -1048,6 +1048,25 @@ describe('2 ペインのキーボード操作(#273)', () => {
   });
 
   /**
+   * 🔴 **反対側へ写す**(#273 段③。FD の C 相当)。
+   * ⚠ この harness は `services` を渡していないので、**断り**の側だけをここで見る
+   *   (実際に写す側は下の describe が fake の `readBodies` を渡して見る)。
+   */
+  it('🔴 本文を読む口が無い版では、黙らずに断る', () => {
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' });
+    const btn = region.querySelector<HTMLElement>('[data-pkc-field="dual-copy"]')!;
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(d.getState().error ?? '').toContain('写せません');
+  });
+
+  it('🔴 何も選ばずに写そうとしたら、理由が出る', () => {
+    d.dispatch({ type: 'DUAL_CLEAR_SELECTION', side: 'left' });
+    const btn = region.querySelector<HTMLElement>('[data-pkc-field="dual-copy"]')!;
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(d.getState().error ?? '').toContain('写すものを選んでください');
+  });
+
+  /**
    * 🔴 **開いている場所にフォルダを作る**(#273 段②)。
    * ⚠ **編集に入らない** ── 入ると中央が本文の面へ切り替わり、整理の途中で
    *   面から放り出される(FD は作ったらその場に出る)。
@@ -1082,5 +1101,95 @@ describe('2 ペインのキーボード操作(#273)', () => {
     expect(d.getState().phase, '前提が崩れている').toBe('editing');
     press('right', 'b', 'ArrowDown');
     expect(d.getState().error ?? '').toContain('編集を終了してから');
+  });
+});
+
+/**
+ * 🔴 **写す(コピー)が本当に増やす**(#273 段③)。
+ * ⚠ 本文を読む口(`readBodies`)を渡した配線でしか通らない経路なので、
+ *   harness を分ける(渡さない側の断りは上の describe が見ている)。
+ */
+describe('2 ペインの写す(#273 段③)', () => {
+  let root: HTMLElement;
+  let d: Dispatcher;
+  let region: HTMLElement;
+  let asked: string[][] = [];
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    asked = [];
+    root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    d = new Dispatcher();
+    buildShell(root);
+    bindActions(root, d, {
+      readBodies: async (lids) => {
+        asked.push([...lids]);
+        return new Map(lids.map((l) => [l, `# 本文 ${l}`]));
+      },
+    });
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: METAS, relations: RELS });
+    region = document.createElement('div');
+    root.append(region);
+    const r = new DualFilerRenderer(region);
+    d.onState((st) => r.render(st));
+    r.render(d.getState());
+  });
+
+  it('🔴 平のノートを反対側の場所へ写す(元は残る)', async () => {
+    d.dispatch({ type: 'DUAL_SET_SCOPE', side: 'right', lid: 'f1' }); // 行き先は f1 の中
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' });
+    region.querySelector<HTMLElement>('[data-pkc-field="dual-copy"]')!.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, cancelable: true }),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    const st = d.getState();
+    expect(st.entryMetas.has('a'), '元が消えた(写すのであって移すのではない)').toBe(true);
+    const made = [...st.entryMetas.values()].filter((m) => m.title === 'あ' && m.lid !== 'a');
+    expect(made.length, '写した先が増えていない').toBe(1);
+    expect(
+      st.relations.some(
+        (r) => r.kind === 'structural' && r.fromLid === 'f1' && r.toLid === made[0]!.lid,
+      ),
+      '反対側の場所に入っていない',
+    ).toBe(true);
+    expect(asked[0], '本文を 1 往復で読んでいない').toEqual(['a']);
+  });
+
+  /**
+   * 🔴 **画面に出ていない印は写さない**(変異 C6 が生き延びて判明)。
+   * ⚠ 印は行が見えなくなっても残る(絞り込みで消えた)ので、素で数えると
+   *   **画面に無いものが増える** ── 移す・消すと同じ規則(`visibleSelection`)で切る。
+   */
+  it('🔴 絞り込みで消えた印は写さない(理由を出す)', () => {
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' });
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'えっくす' }); // 'あ' は消える
+    region.querySelector<HTMLElement>('[data-pkc-field="dual-copy"]')!.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, cancelable: true }),
+    );
+    expect(d.getState().error ?? '', '画面に無い印まで写した').toContain('写すものを選んでください');
+  });
+
+  /**
+   * 🔴 **フォルダを写したら中身も行く**。⚠ ここが「お粗末」と言われた所の中身で、
+   *   選んだ物だけ写すと**フォルダだけが空で増える**。
+   */
+  it('🔴 フォルダを写すと、中身も一緒に行く', async () => {
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'f1', mode: 'set' });
+    region.querySelector<HTMLElement>('[data-pkc-field="dual-copy"]')!.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, cancelable: true }),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    const st = d.getState();
+    const copy = [...st.entryMetas.values()].find((m) => m.title === 'はこ1 のコピー')!;
+    expect(copy, 'フォルダの写しが無い').toBeTruthy();
+    const kids = st.relations.filter((r) => r.kind === 'structural' && r.fromLid === copy.lid);
+    expect(kids.length, '中身が付いてきていない(空のフォルダだけ増えた)').toBe(2);
+    // ⚠ 元のフォルダの中身は**動いていない**
+    expect(
+      st.relations.filter((r) => r.kind === 'structural' && r.fromLid === 'f1').length,
+      '元の中身が減った',
+    ).toBe(2);
   });
 });

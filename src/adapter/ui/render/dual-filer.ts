@@ -434,6 +434,16 @@ export class DualFilerRenderer {
      * ⚠ **マウスだけで完結し、キーボードは近道**(user 指示 2026-08-03 の業務画面)──
      *   `Delete` の鍵と同じことを、押しボタンでもできるようにする。
      */
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.setAttribute('data-pkc-action', 'dual-copy');
+    copy.setAttribute('data-pkc-field', 'dual-copy');
+    copy.textContent = from === 'left' ? '→ 右へ写す' : '← 左へ写す';
+    copy.title =
+      count > 0
+        ? `${SIDE_LABEL[from]}で選んだ ${count} 件を、反対側の場所へ写します(元は残ります)`
+        : '写すものを選んでから押してください';
+    host.append(copy);
     const mkdir = document.createElement('button');
     mkdir.type = 'button';
     mkdir.setAttribute('data-pkc-action', 'dual-mkdir');

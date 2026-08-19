@@ -29,6 +29,7 @@ import { isEntrySort } from '@features/filter/entry-sort';
 import { isPaneId, PANES } from '@features/pane-visibility';
 import { STRUCTURAL, isRelationKind } from '@features/relation/kinds';
 import { getAncestorFolders } from '@features/relation/tree';
+import { planCopy } from '@features/relation/copy-plan';
 import { otherSide, paneOf, paneScope, type DualSide } from '@features/relation/dual-pane';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
@@ -180,6 +181,13 @@ export interface BinderServices {
    * ⚠ 置けなかったものは**返さない**(呼び側が「落とした」と言えるように件数で分かる)。
    */
   pasteImages?(files: readonly File[]): Promise<readonly string[]>;
+  /**
+   * 🔴 **写す(コピー)のために本文をまとめて読む**(#273 段③)。
+   * ⚠ **省略可** ── 無い環境(test の fake / 旧い配線)では「この版では写せません」と
+   *   断るだけで、他は壊れない(落ち方は「機能が減る」側 ── `store-effects` と同じ規律)。
+   * ⚠ 読めなかった lid は**返さない**(呼び側が件数で「落とした」と言える)。
+   */
+  readBodies?(lids: readonly string[]): Promise<ReadonlyMap<string, string>>;
   downloadAsset?(assetKey: string, name: string): void;
   /**
    * 🔴 **貼る用に画像を持ち歩ける形へ**(#193)。`blob:` → `data:` の対応を返す。
@@ -993,6 +1001,75 @@ const ACTIONS: Record<string, ActionHandler> = {
       relationId: generateLid(),
       edit: false,
     });
+  },
+  /**
+   * 🔴 **反対側の場所へ写す**(#273 段③。FD の C 相当)。
+   *
+   * ⚠ **フォルダを写したら中身も行く** ── 段取りは純関数 `planCopy` が決める
+   *   (親子の組み直しを adapter に書くと、どの test からも実行されずに壊れる)。
+   * ⚠ 本文が読めなかったぶんは**件数で言う** ── 黙って空のノートを作らない。
+   */
+  'dual-copy': (dispatcher, target, services) => {
+    const side = dualSide(target) ?? dispatcher.getState().dual.focus;
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから写してください' });
+      return;
+    }
+    const rows = filerRows(paneScope(paneOf(st.dual, side)), st.entryMetas, st.relations, {
+      filterQuery: st.filterQuery,
+      searchHits: st.searchHits,
+      sort: st.entrySort,
+    });
+    // ⚠ 数える相手は**いま表に出ている印**だけ(移す・消すと同じ規則)
+    const lids = visibleSelection(rows, paneOf(st.dual, side).selection);
+    if (lids.length === 0) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '写すものを選んでください(行を押すと選べます)',
+      });
+      return;
+    }
+    const read = services.readBodies;
+    if (!read) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版では写せません' });
+      return;
+    }
+    const to = otherSide(side);
+    const steps = planCopy(
+      lids,
+      paneScope(paneOf(st.dual, to)),
+      st.entryMetas,
+      st.relations,
+      generateLid,
+    );
+    void read(steps.map((s) => s.sourceLid)).then(
+      (bodies) => {
+        let missing = 0;
+        for (const step of steps) {
+          const body = bodies.get(step.sourceLid);
+          if (body === undefined) missing += 1;
+          dispatcher.dispatch({
+            type: 'CREATE_ENTRY',
+            archetype: step.archetype,
+            lid: step.lid,
+            title: step.title,
+            parentLid: step.parentLid,
+            relationId: generateLid(),
+            edit: false,
+            ...(body === undefined ? {} : { body }),
+          });
+        }
+        dispatcher.dispatch({
+          type: 'OP_FAILED',
+          error:
+            missing > 0
+              ? `${steps.length} 件を写しました(うち ${missing} 件は本文を読めず、空で作りました)`
+              : `${steps.length} 件を写しました`,
+        });
+      },
+      () => dispatcher.dispatch({ type: 'OP_FAILED', error: '写せませんでした(本文を読めません)' }),
+    );
   },
   /** ⚠ 鍵(`Delete`)と**同じ実体**を押しボタンからも呼ぶ(規則を 2 つ作らない)。 */
   'dual-delete': (dispatcher, target, services) => {

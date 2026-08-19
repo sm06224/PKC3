@@ -1176,6 +1176,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         }
       })();
     },
+    /**
+     * 🔴 **写す(コピー)のために本文をまとめて読む**(#273 段③)。
+     * ⚠ **1 往復**で読む(`getBody` を N 回呼ぶと、フォルダを写すたびに N 往復になる)。
+     * ⚠ 読めなかった lid は**入れない** ── 呼び側が件数で「落とした」と言える。
+     */
+    readBodies: async (lids: readonly string[]) =>
+      new Map(
+        (await client.request({ op: 'getBodies', cid, lids: [...lids] })).map(
+          (r) => [r.lid, r.body] as const,
+        ),
+      ),
     downloadAsset: async (assetKey, name) => {
       try {
         const lent = await blobs.lendObjectUrl(cid, assetKey);
