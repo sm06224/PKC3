@@ -20,6 +20,8 @@ import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { CenterRouter } from '../../src/adapter/ui/render/center';
 import { DualFilerRenderer } from '../../src/adapter/ui/render/dual-filer';
 import { MAX_TABS, paneOf, paneScope } from '../../src/features/relation/dual-pane';
+import { DUAL_TILE_LID, withBuiltinTiles } from '../../src/features/launcher/tiles';
+import { launchTile } from '../../src/adapter/ui/launch-tile';
 
 function meta(lid: string, order: number, title = 't-' + lid, archetype = 'text'): EntryMeta {
   return {
@@ -532,6 +534,66 @@ describe('2 ペインの面(描画)', () => {
         '[data-pkc-region="dual-pane"][data-pkc-side="left"] [data-pkc-field="dual-empty"]',
       )?.textContent,
     ).toBe('ここには何もありません');
+  });
+});
+
+/**
+ * 🔴 **導線は「アプリ」の組み込みタイル**(user 指摘 2026-08-19
+ * 「2 ペインファイラは**アプリとして** Office のように組み込みの導線を用意しろ」)。
+ * ⚠ 1 稿目は左の列の下(アプリ全体の操作が並ぶ帯)にボタンを置いていた ──
+ *   user が言った「組み込み」はそこではない。
+ */
+describe('2 ペインの導線(#241。アプリの組み込みタイル)', () => {
+  it('🔴 アプリの一覧に、押せるタイルが最初から在る', () => {
+    const tiles = withBuiltinTiles([], { office: false });
+    expect(tiles.map((t) => t.lid), 'Office を入れていない端末で出ない').toEqual([
+      DUAL_TILE_LID,
+    ]);
+    expect(tiles[0]?.title).toBe('2 ペインで整理');
+  });
+
+  it('🔴 押すと中央が 2 ペインになる(窓は開かない)', () => {
+    let opened = 0;
+    let officeOpened = 0;
+    launchTile(
+      { lid: DUAL_TILE_LID, title: '2 ペインで整理', group: '', kind: 'dual' },
+      {
+        readBlob: async () => null,
+        open: () => {
+          throw new Error('窓を開いてはいけない');
+        },
+        createUrl: () => '',
+        revokeUrl: () => undefined,
+        whenClosed: async () => undefined,
+        readSeed: () => ({}),
+        baseUrl: 'https://example.test/',
+        fail: (m) => {
+          throw new Error(`断られた: ${m}`);
+        },
+        openOffice: () => {
+          officeOpened += 1;
+        },
+        openDual: () => {
+          opened += 1;
+        },
+      },
+    );
+    expect(opened, '2 ペインが開かない').toBe(1);
+    expect(officeOpened, 'Office を開いてしまった').toBe(0);
+  });
+
+  it('🔴 左の列の帯には、もう入口を出さない(入口は 1 つ)', () => {
+    document.body.innerHTML = '';
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    buildShell(root);
+    // ⚠ 空振り防止 ── ほかの面のボタンは在る(帯そのものが消えていない)
+    expect(root.querySelector('[data-pkc-action="set-view"][data-pkc-view="help"]')).not.toBeNull();
+    expect(
+      root.querySelector('[data-pkc-action="set-view"][data-pkc-view="dual"]'),
+      '帯にも入口が残っている(同じ物の入口が 2 か所)',
+    ).toBeNull();
   });
 });
 

@@ -16,6 +16,18 @@ const PANE = (side: string): string =>
   `[data-pkc-region="dual-pane"][data-pkc-side="${side}"]`;
 const ROWS = (side: string): string => `${PANE(side)} [data-pkc-region="dual-table"] tbody tr`;
 
+/**
+ * 🔴 **本物の導線で開く**(user 指摘 2026-08-19「2 ペインファイラは**アプリとして**
+ * Office のように組み込みの導線を用意しろ」)。
+ * ⚠ 1 稿目は左の列の帯のボタンを押していたが、**そのボタンはもう無い** ──
+ *   ここを直さないと、導線を消した瞬間に smoke ごと嘘になる。
+ * ⚠ タイルは**アプリのタブを開かないと描かれない**(左の列は探し方で切り替わる)。
+ */
+async function openDual(page: Page): Promise<void> {
+  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await clickReal(page, '[data-pkc-action="open-tile"][data-pkc-tile="builtin:dual"]');
+}
+
 async function makeFolder(page: Page, title: string): Promise<void> {
   await createEntry(page, 'folder');
   const t = page.locator('[data-pkc-field="editor-title"]');
@@ -33,7 +45,7 @@ test('🔴 2 ペインを開いて、左で選んだものを右の場所へ移�
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
   // ① 面を開く(左の列のボタン)
-  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="dual"]');
+  await openDual(page);
   await expect(page.locator('[data-pkc-view-pane="dual"]')).toBeVisible();
   await expect(page.locator('[data-pkc-view-pane="detail"]'), '本文の面が出たまま').toBeHidden();
 
@@ -85,7 +97,7 @@ test('🔴 何も選ばずに押したら、理由が画面に出る', async ({ 
   await gotoApp(page);
   await createEntry(page, 'text');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
-  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="dual"]');
+  await openDual(page);
 
   await clickReal(page, '[data-pkc-field="dual-move"]');
   /**
@@ -102,7 +114,7 @@ test('🔴 タブを足して、別の場所を 1 つのペインに持てる', 
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
   await makeFolder(page, 'はこ');
-  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="dual"]');
+  await openDual(page);
 
   const tabs = page.locator(`${PANE('left')} [data-pkc-region="dual-tab"]`);
   await expect(tabs).toHaveCount(1);

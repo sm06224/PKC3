@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects, type StorePort } from '../../src/adapter/state/store-effects';
-import { OFFICE_TILE_LID, type LauncherTile } from '../../src/features/launcher/tiles';
+import { DUAL_TILE_LID, OFFICE_TILE_LID, type LauncherTile } from '../../src/features/launcher/tiles';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 
 function meta(lid: string, archetype: string): EntryMeta {
@@ -105,7 +105,8 @@ describe('ランチャーのタイルを読む', () => {
     expect(dispatcher.getState().launcherTiles).toBeNull(); // まだ読んでいない
     dispatcher.dispatch({ type: 'REFRESH_LAUNCHER_TILES' });
     await settle();
-    expect(dispatcher.getState().launcherTiles).toHaveLength(1);
+    // ⚠ 組み込みの 2 ペインが常に 1 枚居る(#241)── entry 由来は 1 件
+    expect(dispatcher.getState().launcherTiles).toHaveLength(2);
     off();
   });
 
@@ -168,17 +169,25 @@ describe('組み込み Office タイルの合流 (#148)', () => {
     return tiles;
   }
 
-  it('一式が入っている端末では Office タイルが先頭に付く', async () => {
+  /**
+   * 🔴 **並びは固定**(#241 で 2 ペインが加わった。user 指摘 2026-08-19)。
+   * ⚠ 2 ペインは**アプリに最初から在る**ので先頭、Office は**入れた端末だけ**
+   *   なのでその次 ── 入れたり消したりで 2 ペインの位置が動かない向きに並べる
+   *   (「同じものが常に同じ場所にある」)。
+   */
+  it('組み込みは 2 ペイン → Office の順で先頭に付く', async () => {
     const tiles = await tilesWith(true);
-    expect(tiles[0]?.kind).toBe('office');
-    expect(tiles[0]?.lid).toBe(OFFICE_TILE_LID);
+    expect(tiles[0]?.lid, '2 ペインが先頭でない').toBe(DUAL_TILE_LID);
+    expect(tiles[1]?.kind).toBe('office');
+    expect(tiles[1]?.lid).toBe(OFFICE_TILE_LID);
     // ⚠ entry 由来のタイルが**消えていない**こと(置き換えではなく合流)
     expect(tiles.some((t) => t.lid === 'a1')).toBe(true);
   });
 
-  it('入っていない端末(と、依存を渡さない既存の呼び出し)では足されない', async () => {
+  it('🔴 Office が入っていなくても、2 ペインは出る(位置も動かない)', async () => {
     const tiles = await tilesWith(false);
     expect(tiles.some((t) => t.kind === 'office')).toBe(false);
+    expect(tiles[0]?.lid, 'Office の有無で 2 ペインの位置が動いた').toBe(DUAL_TILE_LID);
     expect(tiles.some((t) => t.lid === 'a1')).toBe(true);
   });
 });
