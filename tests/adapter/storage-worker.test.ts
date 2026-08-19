@@ -1078,3 +1078,77 @@ describe('作成と居場所(#258)', () => {
   });
 });
 
+
+/**
+ * 🔴 **チェック項目の候補を列に持つ**(#277 段②。user 裁定 2026-08-19「推薦 A」)。
+ *
+ * カンバンは「チェック項目を持つノート」だけを集める。全ノートの本文を読むと
+ * **面を開くたびの全文走査**になる(#212 と同じ穴)ので、保存時に列へ書き、
+ * 面は**まず列で絞ってから**候補の本文だけ読む。
+ *
+ * 🔑 守る主張:
+ * 1. 書けば列が入り、`listTaskEntries` が**その lid だけ**返す
+ * 2. 🔴 **消したら列も戻る**(片道にしない ── 消えたのに候補に残ると空振りが増える)
+ * 3. 🔴 **呼び側が値を送ってこなくても正しい**(旧いタブの follower。#286 の型)
+ */
+describe('チェック項目の候補列 (#277 段②)', () => {
+  const taskBody = '# 買い物\n\n- [ ] 牛乳\n- [x] 卵\n';
+
+  it('🔴 チェックのあるノートだけが候補に出る', async () => {
+    await request({ op: 'upsertEntry', cid: 'c1', entry: entry('tk-1', taskBody) });
+    await request({ op: 'upsertEntry', cid: 'c1', entry: entry('tk-2', '# ただの本文\n') });
+    const lids = await request({ op: 'listTaskEntries', cid: 'c1' });
+    expect(lids, 'チェックのあるノートが候補に出ない').toContain('tk-1');
+    expect(lids, 'チェックの無いノートまで候補に入っている').not.toContain('tk-2');
+  });
+
+  /**
+   * 🔴 **消したら候補からも消える**。⚠ 片道だと、チェックを全部消したノートが
+   *   いつまでも候補に残り、面を開くたびに無駄な本文の読みが増える。
+   */
+  it('🔴 チェックを消すと候補から外れる(片道にしない)', async () => {
+    await request({ op: 'upsertEntry', cid: 'c1', entry: entry('tk-3', taskBody) });
+    expect(await request({ op: 'listTaskEntries', cid: 'c1' })).toContain('tk-3');
+    await request({ op: 'upsertEntry', cid: 'c1', entry: entry('tk-3', '# 消した\n') });
+    expect(
+      await request({ op: 'listTaskEntries', cid: 'c1' }),
+      '消したのに候補に残っている',
+    ).not.toContain('tk-3');
+  });
+
+  /**
+   * 🔴 **呼び側が数を送ってこなくても正しい**(#286 と同じ型)。
+   *
+   * 多重タブでは follower の要求が本体タブの worker へ proxy される。
+   * ⚠ **follower が旧ビルド**だと、新しい field を載せてこない ── そこで
+   *   要求の中身に依存していると、`NOT NULL` で**保存そのものが落ちる**
+   *   (= user のデータが書けない)。本文から数えるので、送ってこなくても効く。
+   * 🔑 ここでは「余計な field を持たない素の要求」= 旧ビルドの形を再現している。
+   */
+  it('🔴 旧いタブの形(数を送ってこない要求)でも、候補に出る', async () => {
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      // ⚠ `entry()` は taskTotal を持たない ── これがまさに旧ビルドの形
+      entry: entry('tk-old', '- [ ] 旧いタブから書いた\n'),
+    });
+    expect(
+      await request({ op: 'listTaskEntries', cid: 'c1' }),
+      '旧いタブから書いたノートが候補に出ない',
+    ).toContain('tk-old');
+  });
+
+  /** ⚠ 引用の中も拾う(素朴な行走査が落とす形 ── `task-count.test.ts` 参照)。 */
+  it('引用の中のチェックも候補になる', async () => {
+    await request({ op: 'upsertEntry', cid: 'c1', entry: entry('tk-q', '> - [ ] 引用\n') });
+    expect(await request({ op: 'listTaskEntries', cid: 'c1' })).toContain('tk-q');
+  });
+
+  /** ⚠ 別の器のノートは混ざらない(cid で切れている)。 */
+  it('別の器のノートは混ざらない', async () => {
+    await request({ op: 'openContainer', cid: 'c-other', title: 'x' });
+    await request({ op: 'upsertEntry', cid: 'c-other', entry: entry('tk-other', taskBody) });
+    expect(await request({ op: 'listTaskEntries', cid: 'c1' })).not.toContain('tk-other');
+    expect(await request({ op: 'listTaskEntries', cid: 'c-other' })).toEqual(['tk-other']);
+  });
+});

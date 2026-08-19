@@ -38,6 +38,16 @@ export type StorageRequest =
    */
   | { op: 'listContainerIds' }
   | { op: 'listEntryMetas'; cid: string }
+  /**
+   * 🔴 **チェック項目を持つノートの lid だけ**を返す(#277 段②)。
+   *
+   * ⚠ カンバンが**全ノートの本文を読まない**ための門である ── 面を開くたびの
+   *   全文走査を作らない(#212 と同じ穴を掘らない)。
+   * 🔑 判定は保存時に書いた列(`task_total`)で、索引が効く。
+   * ⚠ 列は**多めに数えた候補**なので、返った lid に項目が 0 件のことは在る
+   *   (呼び側は本文を読んで、描く側の規則で数え直すこと)。
+   */
+  | { op: 'listTaskEntries'; cid: string }
   | { op: 'getBody'; cid: string; lid: string }
   /**
    * 指定した lid の本文だけを **1 往復で** 取る(P7b review L-7)。
@@ -374,6 +384,8 @@ export interface ResultMap {
    */
   listContainerIds: { containers: Array<{ cid: string; createdAt: string | null }> };
   listEntryMetas: EntryMetaRow[];
+  /** チェック項目を持つ**候補**の lid(entry_order 順)。⚠ 0 件のことも在る。 */
+  listTaskEntries: string[];
   getBody: string | null;
   /** 読めたものだけ(要求順)。⚠ 無い lid は**黙って落ちる**。 */
   getBodies: Array<{ lid: string; body: string }>;

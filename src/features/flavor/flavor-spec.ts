@@ -10,12 +10,13 @@
  * presenter として P3-5 以降で実装する(features 層に DOM を持ち込まない)。
  */
 
-/** entries 表の抽出列(status / date / archived)。kanban / calendar が SQL で引く。 */
+/** entries 表の抽出列のうち、**フレーバーが決める**分(status / date / archived)。 */
 export interface FlavorExtract {
   status: string | null;
   date: string | null;
   archived: boolean;
 }
+
 
 export interface FlavorSpec {
   archetype: string;

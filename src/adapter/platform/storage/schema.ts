@@ -8,6 +8,19 @@
  * - assets は meta + ポインタのみ(bytes は Blob storage 側 ── §4.2)
  * - settings(正規設定)と flags(実験、上限 15)は別表(§6)
  */
+/**
+ * ⚠ **`task_total` を足しても上げていない**(#277 段②、2026-08-19)。
+ *
+ * 🔴 上げると**旧ビルドが同じ DB を開けなくなる** ── `storage-worker.ts` は
+ *   `userVersion > DB_SCHEMA_VERSION` を**明示 reject** するので、新ビルドで
+ *   1 度開いた瞬間に、手元に残っている旧 `index.html` が
+ *   「アプリが起動しない」状態になる(#286 で実際に user が踏んだ形)。
+ * 🔑 今回の変更は**足すだけ**(additive)── 旧ビルドはこの列を読まないので、
+ *   知らないまま普通に動く。**読めなくなる変更ではないから上げない**。
+ * ⚠ 逆に、列を**消す / 意味を変える**変更は上げること(そちらは本当に読めない)。
+ * ⚠ 旧ビルドが**新しく作った**ノートは `task_total` が既定(0)のままになる ──
+ *   カンバンの候補から漏れるが、新ビルドで 1 度保存すれば直る(壊れではなく遅れ)。
+ */
 export const DB_SCHEMA_VERSION = 3;
 
 /**
@@ -24,6 +37,22 @@ export const DB_SCHEMA_VERSION = 3;
  * user_version = 未来 version の reject 用)。
  * NULL の kind は 'full' 扱い ── v2 までの既存行はすべて全文なので互換で正しい。
  */
+/**
+ * 🔴 **entries の後付け列**(v4: task_total ── #277 段②)。
+ *
+ * ⚠ 適用の判定は `REVISION_ADDED_COLUMNS` と**同じ原則**(user_version ではなく
+ * `pragma_table_info` で列の実在を見る)── 半端な DB も次回 open で自己修復する。
+ *
+ * 🔴 ⚠ **列を足すだけでは足りない。既存行を埋めること。**
+ * DDL / ALTER は既存行を **既定値(0)のまま**にするので、埋めないと
+ * **いま在るノートが 1 件もカンバンに出ない**まま緑になる ── 全文検索(#181)で
+ * 索引を足したときに実際に踏んだ型(§1「材料が届いていない」)。
+ * 埋める処理は `storage-worker.ts` の `applySchema` に在る。
+ */
+export const ENTRY_ADDED_COLUMNS: readonly { readonly name: string; readonly ddl: string }[] = [
+  { name: 'task_total', ddl: 'INTEGER NOT NULL DEFAULT 0' },
+];
+
 export const REVISION_ADDED_COLUMNS: readonly string[] = [
   'title',
   'archetype',
@@ -50,12 +79,19 @@ export const SCHEMA_DDL: readonly string[] = [
      status TEXT,
      date TEXT,
      archived INTEGER NOT NULL DEFAULT 0,
+     task_total INTEGER NOT NULL DEFAULT 0,
      body TEXT NOT NULL DEFAULT '',
      PRIMARY KEY (cid, lid)
    )`,
   `CREATE INDEX IF NOT EXISTS idx_entries_order ON entries (cid, entry_order)`,
   `CREATE INDEX IF NOT EXISTS idx_entries_status ON entries (cid, status)`,
   `CREATE INDEX IF NOT EXISTS idx_entries_date ON entries (cid, date)`,
+  /**
+   * 🔴 **チェック項目を持つノートだけを引く索引**(#277 段②)。
+   * ⚠ 索引が無いと、カンバンを開くたびに entries の全走査になる ── 列を足した
+   * 意味が半分消える(`idx_entries_status` / `idx_entries_date` と同じ理由)。
+   */
+  `CREATE INDEX IF NOT EXISTS idx_entries_task ON entries (cid, task_total)`,
   `CREATE TABLE IF NOT EXISTS relations (
      cid TEXT NOT NULL,
      id TEXT NOT NULL,
@@ -171,6 +207,19 @@ export interface EntryUpsert {
   status: string | null;
   date: string | null;
   archived: boolean;
+  /**
+   * ⚠ **`task_total` はここに無い**(#277 段②)。列は**本文から導かれる**ので、
+   * **本文を持っている worker が書くとき数える**(`bindUpsert`)。
+   *
+   * 🔴 理由は 2 つ:
+   * ① **書き忘れる経路が作れない** ── 呼び側 12 経路のどれかが代入を落とすと、
+   *   そのノートだけカンバンから消える。渡さない形なら、その穴が原理的に無い
+   * ② 🔴 **旧いタブと混ざっても壊れない**(#286 と同じ型)── 多重タブでは
+   *   follower の要求が本体タブの worker へ proxy される。**follower が旧ビルド**
+   *   だと `taskTotal` を載せてこないので、必須にすると
+   *   `NOT NULL constraint failed` で**保存そのものが落ちる**(= user のデータが
+   *   書けない)。実際 test の cast 越しの呼び出しで踏んだ。
+   */
 }
 
 /**

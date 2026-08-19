@@ -8,7 +8,12 @@
  * 内部完結 API のみを使う)/ 大きな値は保持しない。
  */
 import sqlite3InitModule, { type Database } from '@sqlite.org/sqlite-wasm';
-import { DB_SCHEMA_VERSION, SCHEMA_DDL, REVISION_ADDED_COLUMNS } from './schema';
+import {
+  DB_SCHEMA_VERSION,
+  SCHEMA_DDL,
+  REVISION_ADDED_COLUMNS,
+  ENTRY_ADDED_COLUMNS,
+} from './schema';
 /**
  * 全文検索が 1 度に返す上限(#181)。⚠ **切ったことは呼び側へ言う** ── 黙って
  * 切ると user は「無い」と読む。上限そのものは「一覧に出して意味がある量」で決めた。
@@ -19,6 +24,7 @@ import { contentHash64Hex } from './content-hash';
 import { scanAssetRefsInto } from '@features/asset/asset-ref-scan';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { planSearch } from '@features/filter/search-query';
+import { countTaskCandidates } from '@features/markdown/task-count';
 import { createQueryScan, FRONTMATTER_SCAN_CHARS } from '@features/query/group-by';
 import {
   applyLinePatch,
@@ -126,7 +132,40 @@ async function init(dbName: string, journalMode?: JournalMode): Promise<InitResu
   return initResult;
 }
 
-function applySchema(database: Database): void {
+/**
+ * 🔴 **既存行の `task_total` を数え直す**(#277 段②の埋め戻し)。
+ *
+ * ⚠ **1 件ずつ UPDATE しない** ── 行数ぶん往復すると、取り込み直後の大きな
+ *   コンテナで open が固まる。読みは 1 回、書きは変わる行だけ。
+ * ⚠ **`updated_at` を触らない** ── 埋め戻しは user の編集ではない。
+ *   触ると「今日ぜんぶ更新された」ように見える(情報列の嘘)。
+ * ⚠ FTS の trigger は `AFTER UPDATE` で発火するが、`title` / `body` は
+ *   変えていないので索引の中身は同じ値に書き直されるだけ(害は無い)。
+ */
+function backfillTaskTotals(database: Database): void {
+  const rows = database.selectObjects(
+    `SELECT cid, lid, body, task_total FROM entries`,
+  ) as Array<{ cid: string; lid: string; body: string; task_total: number }>;
+  for (const r of rows) {
+    const total = countTaskCandidates(r.body ?? '').total;
+    if (total === r.task_total) continue;
+    database.exec({
+      sql: `UPDATE entries SET task_total = ? WHERE cid = ? AND lid = ?`,
+      bind: [total, r.cid, r.lid],
+    });
+  }
+}
+
+/**
+ * 🔴 **export しているのは、migration を test から回すため**(#277 段②)。
+ *
+ * ⚠ ここは「**既に DB を持っている user**」だけが通る道なので、手元の
+ *   新規 DB では**一度も走らない** ── つまり普通の test では
+ *   「弱い」のではなく**そもそも実行されない**(CLAUDE.md §2)。
+ * 🔑 だから `tests/adapter/schema-migration.test.ts` が、**旧い形の DB を自分で作って**
+ *   ここへ通す。⚠ 呼ぶのは worker の init と、その test だけ。
+ */
+export function applySchema(database: Database): void {
   // schema 進化の seam(review #7): user_version を v1 から刻む。
   // 新しい DB(未来の user_version)は読み書きせず明示 reject ── 単調・明示 reject の
   // 規約(schema-migration-policy)を storage 層でも守る
@@ -144,7 +183,38 @@ function applySchema(database: Database): void {
   //   (d2) ALTER 半端 + 旧版刻印 → 次回 open が duplicate column で毎回 throw
   database.exec('BEGIN IMMEDIATE');
   try {
-    // 新規 DB は最新 DDL がそのまま最新形を作る(既存 DB では no-op)
+    /**
+     * 🔴 **後付け列は DDL より先に足す**(#277 段②。migration の test が実際に捕まえた)。
+     *
+     * ⚠ 順序を逆にすると、**既存 DB が開かなくなる**:
+     *   `SCHEMA_DDL` には新しい列を使う索引
+     *   (`CREATE INDEX … ON entries (cid, task_total)`)が入っているので、
+     *   列を足す前に走ると `no such column` で **tx ごと落ちる** ── つまり
+     *   **いま使っている user 全員のアプリが起動しなくなる**。
+     * ⚠ 新規 DB には entries がまだ無いので、**表の実在を見てから** ALTER する
+     *   (判定は user_version ではなく「あるべき状態の実在」── schema.ts の原則)。
+     */
+    const hasEntries =
+      database.selectValue(
+        `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'entries'`,
+      ) !== undefined;
+    const addedEntryCols: string[] = [];
+    if (hasEntries) {
+      const entryCols = new Set(
+        (
+          database.selectObjects(
+            `SELECT name FROM pragma_table_info('entries')`,
+          ) as Array<{ name: string }>
+        ).map((r) => r.name),
+      );
+      for (const col of ENTRY_ADDED_COLUMNS) {
+        if (entryCols.has(col.name)) continue;
+        database.exec(`ALTER TABLE entries ADD COLUMN ${col.name} ${col.ddl}`);
+        addedEntryCols.push(col.name);
+      }
+    }
+    // 新規 DB は最新 DDL がそのまま最新形を作る(既存 DB では no-op)。
+    // ⚠ 索引はここで作られる ── 上で列を足した**後**であることが要。
     for (const ddl of SCHEMA_DDL) database.exec(ddl);
     // v2(P5)migration: 判定は user_version ではなく**列の実在**(冪等)──
     // 上記 (d1)(d2) の半端状態も次回 open で自己修復する(schema.ts の原則)
@@ -159,6 +229,20 @@ function applySchema(database: Database): void {
       if (!revCols.has(col))
         database.exec(`ALTER TABLE revisions ADD COLUMN ${col} TEXT`);
     }
+    /**
+     * 🔴 **足した列は、既存行を埋める**(#277 段②)。
+     *
+     * ⚠ ALTER は既存行を**既定値(0)のまま**にするので、埋めないと
+     *   **いま在るノートが 1 件もカンバンに出ない**まま緑になる ── 全文検索(#181)で
+     *   索引を足したときに踏んだのと同じ型(§1「材料が届いていない」)。
+     * ⚠ 判定は「**列をいま足したか**」で足りる ── ALTER も埋め戻しも刻印も
+     *   **1 つの tx** に入っているので、「列は在るが埋まっていない」半端な状態は
+     *   作れない(落ちれば ALTER ごと巻き戻る)。
+     * ⚠ 「本文を LIKE で走査して埋め忘れを探す」形は**採らない** ── 毎回の open で
+     *   全本文を読むことになり、絞るために列を足した意味が消える(#212 の穴)。
+     * 🔑 本文は既に DB に在るので、**ここで数え直せる**(取り込み直しは要らない)。
+     */
+    if (addedEntryCols.includes('task_total')) backfillTaskTotals(database);
     /**
      * 🔴 **既存 DB の索引を埋める**(#181 全文検索)。DDL は空の索引を作るだけ
      * なので、**既に在る entry は 1 件も引けない**まま緑になる ── 索引を足した
@@ -248,8 +332,8 @@ type Handlers = {
 
 const UPSERT_SQL = `INSERT INTO entries
     (cid, lid, title, archetype, created_at, updated_at,
-     entry_order, status, date, archived, body)
-  VALUES (?, ?, ?, ?, datetime('now'), datetime('now'), ?, ?, ?, ?, ?)
+     entry_order, status, date, archived, task_total, body)
+  VALUES (?, ?, ?, ?, datetime('now'), datetime('now'), ?, ?, ?, ?, ?, ?)
   ON CONFLICT(cid, lid) DO UPDATE SET
     title = excluded.title,
     archetype = excluded.archetype,
@@ -258,6 +342,7 @@ const UPSERT_SQL = `INSERT INTO entries
     status = excluded.status,
     date = excluded.date,
     archived = excluded.archived,
+    task_total = excluded.task_total,
     body = excluded.body`;
 
 function bindUpsert(cid: string, e: EntryUpsert): (string | number | null)[] {
@@ -270,6 +355,16 @@ function bindUpsert(cid: string, e: EntryUpsert): (string | number | null)[] {
     e.status,
     e.date,
     e.archived ? 1 : 0,
+    /**
+     * 🔴 **チェック項目の数は、書くときここで数える**(#277 段②)。
+     *
+     * ⚠ 呼び側に持たせない ── 12 ある書込経路のどれかが代入を落とすと、
+     *   **そのノートだけカンバンから消える**(しかも tsc は黙る)。
+     * ⚠ そして**旧いタブの follower**が要求を proxy してくる形(#286)でも、
+     *   本文さえ在れば正しい値になる ── 送ってこない field に依存しない。
+     * 🔑 実費は行走査 1 回(16KB の本文で 0.04ms 実測)。
+     */
+    countTaskCandidates(e.body).total,
     e.body,
   ];
 }
@@ -706,6 +801,20 @@ const handlers: Handlers = {
          FROM entries WHERE cid = ? ORDER BY entry_order`,
       [req.cid],
     ) as unknown as ResultMap['listEntryMetas'],
+  /**
+   * 🔴 **チェック項目を持つノートの lid だけ**(#277 段②)。
+   * ⚠ body 列は読まない ── ここで本文を返すと、絞る意味が消える
+   *   (呼び側が `getBodies` で必要な分だけ取る)。
+   */
+  listTaskEntries: (req) =>
+    (
+      need().selectObjects(
+        `SELECT lid FROM entries
+          WHERE cid = ? AND task_total > 0
+          ORDER BY entry_order`,
+        [req.cid],
+      ) as Array<{ lid: string }>
+    ).map((r) => r.lid),
   getBody: (req) => {
     const rows = need().selectObjects(
       'SELECT body FROM entries WHERE cid = ? AND lid = ?',
