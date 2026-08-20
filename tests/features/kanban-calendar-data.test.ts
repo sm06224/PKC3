@@ -160,3 +160,80 @@ describe('calendar-data', () => {
     expect(dateKey(2026, 8, 3)).toBe('2026-08-03');
   });
 });
+
+/**
+ * 🔴 **変わっていないなら、同じ配列を返す**(2026-08-20)。
+ *
+ * ⚠ 2026-08-20 に「新しい本文が state に入る所は**全部**札を組み直す」へ広げた結果、
+ *   `BODY_LOADED`(= **ノートを押すたび**に飛ぶ)もここを通るようになった。
+ *   値が同じでも新しい配列を返していると、**押すだけで盤面の指紋が壊れ**、
+ *   そのノートの札が毎回描き直される。
+ * 🔑 だから**値で**突き合わせる ── `next` は毎回作り直すので、参照比較では
+ *   「変わっていない」を 1 度も検出できない。
+ */
+describe('replaceTaskCards は、変わっていないなら据え置く(2026-08-20)', () => {
+  const card = (lid: string, line: number, text: string, done = false) => ({
+    lid,
+    line,
+    text,
+    done,
+  });
+
+  /**
+   * ⚠ **同じ lid の札は連続させて置く** ── worker はノート順に返すので実際そうなる。
+   *   飛び飛びの並びを渡すと、この関数は仕様どおり**まとめ直す**(D-3 の安全網)ので、
+   *   「変わっていない」にはならない。1 稿目はそこを取り違えて落ちた。
+   */
+  it('🔴 同じ内容を渡したら、同じ配列オブジェクトが返る', () => {
+    const cards = [card('a', 0, 'あ'), card('a', 5, 'う', true), card('b', 2, 'い')];
+    const same = replaceTaskCards(cards, 'a', [
+      { line: 0, text: 'あ', done: false },
+      { line: 5, text: 'う', done: true },
+    ]);
+    expect(same, '中身が同じなのに新しい配列を返した(押すたび描き直しになる)').toBe(cards);
+  });
+
+  /**
+   * ⚠ **飛び飛びの並びは「変わった」側**でよい ── まとめ直すのが正しい動きなので、
+   *   据え置いてはいけない(据え置くと札が 1 枚黙って消える D-3 の穴に戻る)。
+   */
+  it('飛び飛びに並んでいたら、まとめ直して新しい配列を返す', () => {
+    const cards = [card('a', 0, 'あ'), card('b', 2, 'い'), card('a', 5, 'う', true)];
+    const next = replaceTaskCards(cards, 'a', [
+      { line: 0, text: 'あ', done: false },
+      { line: 5, text: 'う', done: true },
+    ]);
+    expect(next, 'まとめ直していない').not.toBe(cards);
+    expect(next.map((c) => `${c.lid}${c.line}`)).toEqual(['a0', 'a5', 'b2']);
+  });
+
+  it('⚠ 空振り防止: 中身が変われば新しい配列になる', () => {
+    const cards = [card('a', 0, 'あ'), card('b', 2, 'い')];
+    expect(
+      replaceTaskCards(cards, 'a', [{ line: 0, text: 'あ', done: true }]),
+      '印が変わったのに据え置いた',
+    ).not.toBe(cards);
+    expect(
+      replaceTaskCards(cards, 'a', [{ line: 1, text: 'あ', done: false }]),
+      '行番号が変わったのに据え置いた',
+    ).not.toBe(cards);
+    expect(
+      replaceTaskCards(cards, 'a', [{ line: 0, text: 'ちがう', done: false }]),
+      '字が変わったのに据え置いた',
+    ).not.toBe(cards);
+    expect(replaceTaskCards(cards, 'a', []), '札が消えたのに据え置いた').not.toBe(cards);
+  });
+
+  /**
+   * ⚠ **丸めた後で突き合わせる** ── 上限(200 字)を超える字は `clipTaskText` が
+   *   切るので、切る前の字で比べると「変わっていない」を取り逃がす。
+   */
+  it('長い字は丸めた形で突き合わせる', () => {
+    const long = 'あ'.repeat(300);
+    const clipped = replaceTaskCards([card('a', 0, 'x')], 'a', [
+      { line: 0, text: long, done: false },
+    ]);
+    const again = replaceTaskCards(clipped, 'a', [{ line: 0, text: long, done: false }]);
+    expect(again, '丸めた後の字で比べていない').toBe(clipped);
+  });
+});

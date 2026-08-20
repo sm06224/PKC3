@@ -109,6 +109,12 @@ export function taskCardKey(card: { lid: string; line: number }): string {
  * 分からない ── ノートの並びを知っているのは worker である)。次に面を開けば出る。
  * ⚠ 触る札が無いときは**同じ配列を返す** ── 呼び側(`refreshTaskCards`)が
  *   それを見て `TaskScan` ごと据え置くので、描画側の指紋が無駄に壊れない。
+ * 🔴 **中身が変わっていないときも同じ配列を返す**(2026-08-20)。
+ *   ⚠ 直す前は `from >= 0` なら**必ず新しい配列**を組んでいた。同じ日に
+ *   「本文が state に入る所は全部組み直す」へ広げたので、**ノートを押すだけで**
+ *   (`BODY_LOADED`)盤面の指紋が壊れ、そのノートの札が毎回描き直される形になった。
+ *   🔑 値で突き合わせて据え置く ── 実費は札 1000 枚の 1 走査で、DOM を作り直す
+ *   より桁で安い。
  */
 export function replaceTaskCards(
   cards: readonly TaskCard[],
@@ -126,5 +132,21 @@ export function replaceTaskCards(
     text: clipTaskText(i.text),
     done: i.done,
   }));
-  return [...others.slice(0, from), ...next, ...others.slice(from)];
+  const merged = [...others.slice(0, from), ...next, ...others.slice(from)];
+  return sameCards(merged, cards) ? cards : merged;
+}
+
+/**
+ * 値で見て同じか。⚠ **参照では見ない** ── `next` は毎回作り直すので、
+ * 参照比較だと「変わっていない」を一度も検出できない。
+ */
+function sameCards(a: readonly TaskCard[], b: readonly TaskCard[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!;
+    const y = b[i]!;
+    if (x.lid !== y.lid || x.line !== y.line || x.done !== y.done || x.text !== y.text)
+      return false;
+  }
+  return true;
 }
