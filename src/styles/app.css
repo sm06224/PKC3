@@ -2136,38 +2136,116 @@ select:focus-visible {
   text-decoration: line-through;
   color: var(--muted);
 }
+/* ══ カレンダー(#276 / 2026-08-20 に面を作り直し)════════════════════
+ * user 指示「カレンダーを利用するための導線が不足している」を受けた直し。
+ * 実測(1440×900、直す前):曜日の列が **40.6px×6 + 696.1px×1**(予定のある
+ * 列だけが伸びる)/ 表の高さが器の **30.6%**(626px の器に 191.5px)。 */
 [data-pkc-field='calendar-toolbar'] {
   display: flex;
   align-items: center;
   gap: var(--s2);
   margin-bottom: var(--s3);
+  flex-wrap: wrap;
 }
 [data-pkc-field='calendar-month'] {
   font-weight: 600;
 }
+/* 🔴 **どのノートに日付が付くか**を帯に出す(押す前に分かるように)。
+ * ⚠ 余った幅を全部食わせて右端へ寄せる ── 操作子と混ざらない。 */
+[data-pkc-field='calendar-target'] {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 🔴 **面いっぱいに配る**(2026-08-20)── 直す前は `[data-pkc-view-pane='calendar']`
+ * に対する規則が **1 本も無く**、表が中身の高さのまま上に貼り付いていた。 */
+[data-pkc-view-pane='calendar'] {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  padding: var(--s3);
+}
+/* 🔴 **曜日の列は等幅**(`table-layout: fixed`)。⚠ 無いと中身なりに伸び、
+ * 予定が 1 件入っただけで 1 列が 696px を占める(上の実測)。
+ * ⚠ `height: 100%` は flex の子に効かせるため `flex: 1` と対で置く。 */
 [data-pkc-region='calendar-grid'] {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
+  flex: 1;
+  min-height: 0;
 }
 [data-pkc-region='calendar-grid'] th,
 [data-pkc-region='calendar-grid'] td {
   border: 1px solid var(--border);
   vertical-align: top;
   padding: var(--s2);
+  overflow: hidden;
 }
 [data-pkc-region='calendar-grid'] th {
   background: var(--surface-2);
   font-size: 11px;
   color: var(--muted);
+  height: 1px; /* 見出しは中身なり ── 残りを日のセルへ配る */
+}
+/* ⚠ **日のセルは押す所**なので、指標を出す(直す前は「地を押す」ことが
+ *   画面から読めなかった)。⚠ 高さは変えない(ずれると狙えない)。 */
+[data-pkc-region='calendar-grid'] td[data-pkc-date]:hover {
+  background: var(--surface-2);
+  cursor: pointer;
+}
+/* 🔴 **今日**(2026-08-20)── カレンダーで最初に探すものが無かった。
+ * ⚠ 地の明度ではなく**数字の側**を強める ── 地は「押せる(hover)」と
+ *   「選んだ予定」が既に使っている(同じ手を 3 つの意味に使わない)。 */
+[data-pkc-region='calendar-grid'] td[data-pkc-today] [data-pkc-field='day-number'] {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-radius: 999px;
+  display: inline-block;
+  min-width: 1.6em;
+  text-align: center;
+  font-weight: 600;
+}
+/* 月外のセル ── 押せないので、そう見せる(無言の dead click を作らない)。 */
+[data-pkc-region='calendar-grid'] td[data-pkc-outside] {
+  background: var(--surface-2);
+  opacity: 0.5;
+}
+/* 土日 ── 地は無彩色のまま、わずかに沈める(色は情報にだけ使う)。 */
+[data-pkc-region='calendar-grid'] th[data-pkc-weekend],
+[data-pkc-region='calendar-grid'] td[data-pkc-weekend]:not([data-pkc-outside]) {
+  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
 }
 [data-pkc-field='day-number'] {
   font-size: 11px;
   color: var(--muted);
 }
+/* 🔴 **予定は押せる形に**(2026-08-20)── 直す前は素のテキストで、
+ * 手がかりが `cursor: pointer` だけだった(押せると分からない)。 */
 [data-pkc-region='calendar-grid'] [data-pkc-entry] {
   display: block;
   cursor: pointer;
   font-size: 11px;
+  margin-top: 2px;
+  padding: 1px var(--s1);
+  border-radius: 3px;
+  background: var(--surface-2);
+  border-left: 2px solid var(--border);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-pkc-region='calendar-grid'] [data-pkc-entry]:hover {
+  border-left-color: var(--muted);
+}
+/* 済んだ予定は、線で示す(色を足さない)。 */
+[data-pkc-region='calendar-grid'] [data-pkc-status='done'] {
+  text-decoration: line-through;
+  color: var(--muted);
 }
 [data-pkc-archived] {
   opacity: 0.55;

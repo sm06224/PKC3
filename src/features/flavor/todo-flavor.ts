@@ -9,6 +9,7 @@ import {
   type FrontmatterValue,
 } from '../markdown/frontmatter';
 import type { FlavorSpec } from './flavor-spec';
+import { readScheduleDate } from '../schedule/schedule-keys';
 
 /**
  * かんばんトグル等の構造化操作: status だけを原文 splice で書き換える
@@ -18,8 +19,13 @@ export function withTodoStatus(body: string, status: 'open' | 'done'): string {
   return spliceFrontmatterKeys(body, { status });
 }
 
-/** 抽出列 date の受理形。列は SQL の範囲検索に使うため厳密に YYYY-MM-DD のみ。 */
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+/**
+ * ⚠ **日付の受理形をここに持たない**(2026-08-20)── `schedule-keys.ts` の
+ * `readScheduleDate` 1 か所へ寄せた。直す前は同じ `/^\d{4}-\d{2}-\d{2}$/` が
+ * **3 か所**に在り(ここ / schedule-keys / entry-ref)、片方だけ直すと
+ * 「todo は列に入るのに普通のノートは入らない」型の食い違いが作れた
+ * (CLAUDE.md §7「同じ判定が 2 か所にある」)。
+ */
 
 /** PKC2 todo-body.ts と同じ寛容 parse(不正 JSON = description 扱いで落とさない)。 */
 function parsePkc2Todo(body: string): {
@@ -51,10 +57,8 @@ export const todoFlavor: FlavorSpec = {
       // 'done' 以外はすべて 'open'(PKC2 parseTodoBody と同じ正規化)。
       // todo は常に status を持つ ── kanban が SQL だけで全 todo を引けること
       status: meta['status'] === 'done' ? 'done' : 'open',
-      date:
-        typeof meta['date'] === 'string' && DATE_RE.test(meta['date'])
-          ? meta['date']
-          : null,
+      // ⚠ 受理形は `schedule-keys.ts` の 1 か所(上の docstring)
+      date: readScheduleDate(meta),
       archived: meta['archived'] === true,
     };
   },

@@ -3,7 +3,7 @@
 import './styles/app.css';
 
 import { Dispatcher } from '@adapter/state/dispatcher';
-import { nextViewMode } from '@adapter/state/app-state';
+import { isAsidePane, nextViewMode } from '@adapter/state/app-state';
 import { bindEditLockRelease } from '@adapter/state/edit-lock-release';
 import { connectStoreEffects, type StoreEffects } from '@adapter/state/store-effects';
 import { tileSelectsEntry } from '@features/launcher/tiles';
@@ -1531,7 +1531,26 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       //    `SET_VIEW_MODE 'launcher'` を撃っていたので、タブを切り替えただけで
       //    中央下の追記欄が消えていた(他の 2 タブでは残る)
       if (mode === 'launcher') dispatcher.dispatch({ type: 'REFRESH_LAUNCHER_TILES' });
-      if (dispatcher.getState().viewMode !== 'detail')
+      /**
+       * 🔴 **面を畳むのは「わきの面」だけ**(2026-08-20。user 指示
+       * 「カレンダーを利用するための導線が不足している」の調査で判明)。
+       *
+       * ⚠ 直す前は `viewMode !== 'detail'` で**一律に畳んで**いた。帰結は
+       *   **閉ループ**である ── カレンダーは「ノートを先に選んでから日を押す」
+       *   設計なのに、① 開く道はアプリタブのタイルだけ ② そこにノートの一覧は
+       *   無い ③ 一覧へ行こうとタブを押すと**カレンダーごと閉じる**。
+       *   つまり「カレンダーが開いていて、かつノート一覧が見えている」状態が
+       *   **存在し得なかった** = 日付を付ける動線が実質塞がっていた。
+       * 🔑 判定は既に在る(`isAsidePane`)── `SELECT_ENTRY` が
+       *   「選んだら本文へ戻るか」を決めるのに**同じ関数**を使っている
+       *   (`app-state.ts` の `leaveSettings`)。カレンダー / カンバン / 集計は
+       *   「選択が面に留まる」側だと**既に決まっていた**のに、
+       *   左のタブ経由だけがその意味論を破っていた(CLAUDE.md §7)。
+       * ⚠ **帰り道は減る** ── これらの面では、タブを押しても本文へ戻らなくなる。
+       *   残る帰り道は「開いたタイルをもう一度押す」(`nextViewMode`)と `Alt+1`。
+       *   わきの面(設定 / フラグ / ヘルプ / 2 ペイン)は今までどおり畳む。
+       */
+      if (isAsidePane(dispatcher.getState().viewMode))
         dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
     },
     /**

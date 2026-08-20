@@ -535,6 +535,7 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
+    ['2026-08-20-calendar-lines', 'd1b89975'],
     ['2026-08-19-dual-rebuild', 'e2a78fa2'],
     ['2026-08-19-kanban', 'fa4af446'],
     ['2026-08-19-task-checkbox', '658e6d6f'],
@@ -554,7 +555,8 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-08-17-word-export-page', '0bb5cbb5'],
     ['2026-08-17-word-export-figures', 'c569e98b'],
     ['2026-08-17-word-export-images', '235a2980'],
-    ['2026-08-17-word-export', '4454a5dd'],
+    // ⚠ 上限 20 を超えたので 2026-08-20 に落とした(原本は CHANGELOG)
+    // ['2026-08-17-word-export', '4454a5dd'],
   ];
 
   const digest = (n: { title: string; items: readonly string[] }): string =>
