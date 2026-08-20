@@ -1183,6 +1183,12 @@ function reduceCore(
             persisted: action.body,
             diskAhead: false,
           },
+          /**
+           * ⚠ **disk の本文は、板の走査より新しいことがある**(別タブが書いた等)。
+           *   組み直さないと、その 1 件だけ古い行番号を指したまま押せる。
+           * 🔑 板を開いていなければ即 `null` で返るので、実費はほぼ無い。
+           */
+          taskScan: refreshTaskCards(state.taskScan, action.lid, action.body),
         },
         events: [],
       };
@@ -1431,6 +1437,8 @@ function reduceCore(
             persisted: action.body,
             diskAhead: false,
           },
+          // ⚠ 名前のとおり**本文が入れ替わる**所 ── 札も組み直す(上と同じ理由)
+          taskScan: refreshTaskCards(state.taskScan, action.lid, action.body),
         },
         events: [],
       };
@@ -1737,7 +1745,23 @@ function reduceCore(
             }
           : state.openBody;
       return {
-        state: { ...state, entryMetas, openBody, writeLock: null },
+        state: {
+          ...state,
+          entryMetas,
+          openBody,
+          writeLock: null,
+          /**
+           * 🔴 **ここも「新しい本文が state に入る所」である**(2026-08-20 に判明)。
+           *
+           * ⚠ `refreshTaskCards` の docstring は「2 か所**だけ**を通す」と宣言して
+           *   いたが、**この 3 か所目が漏れていた** ── §7 の「数えた数だけ通す」で
+           *   数を間違えた形である(宣言が在るぶん、次に読む人は疑わない)。
+           * ⚠ いまの追記は**末尾に足す**ので既存の札の行番号はずれない。実害は
+           *   「**足したチェック項目が板に出ない**」(開き直すまで)。⚠ ただし
+           *   板から「やること」を足す口を作ると、これが正面の欠陥になる。
+           */
+          taskScan: refreshTaskCards(state.taskScan, action.lid, action.body),
+        },
         events: [],
       };
     }
@@ -2630,6 +2654,19 @@ function reduceCore(
             persisted: action.body,
             diskAhead: false,
           },
+          /**
+           * 🔴 **復元も「新しい本文が state に入る所」である**(2026-08-20 に判明)。
+           *
+           * ⚠ 履歴の復元も ゴミ箱からの復元も、本文を**丸ごと**入れ替える ──
+           *   板を開いたまま古い版へ戻すと、札は**入れ替わる前の行番号**を指したまま
+           *   押せる。押すと**別の行が黙って完了になる**(#277 段②-b と同じ形)。
+           * 🔑 この漏れは、手で数え直したのではなく **`tests/repo-hygiene.test.ts` が
+           *   reducer を全数走査して見つけた** ── 宣言(「2 か所だけ」)を信じて
+           *   いた間は、2 つとも見えていなかった。
+           * ⚠ 上の editing 分岐は `persisted` の印だけを付ける(本文を差し替えない)
+           *   ので、こちらは通さない ── そもそも編集中に板は開けない。
+           */
+          taskScan: refreshTaskCards(state.taskScan, action.meta.lid, action.body),
           error: null,
         },
         events: [],
@@ -2831,8 +2868,17 @@ function dropLink(
  *   **普通の保存(`COMMIT_EDIT`)では古い行番号のまま**だった ── 板を開いて
  *   閉じ、本文の先頭に 1 行足して保存し、板へ戻ると、札は開き直しの走査が
  *   返るまで**古い行**を指したまま押せる。押すと**別の行が黙って完了になる**。
- * 🔑 だから「新しい本文が state に入る所」= `buildPersist` と `BODY_REWRITTEN` の
- *   2 か所**だけ**を通す(数えた数だけ通す ── §7)。
+ * 🔑 だから「新しい本文が state に入る所」は**全部ここを通す**(§7)。
+ * ⚠ **数え間違えた**(2026-08-20 に訂正)── ここには「`buildPersist` と
+ *   `BODY_REWRITTEN` の **2 か所だけ**」と書いてあったが、実際は **6 か所**あった
+ *   (`ENTRY_APPENDED` / `ENTRY_RESTORED` / `BODY_LOADED` /
+ *   `ENTRY_BODY_REFRESHED` が漏れ、`UPDATE_OPEN_BODY` だけが除外に値した)。
+ *   宣言が在るぶん次に読む人は疑わないので、数の誤りは
+ *   「その経路は考えなくてよい」という誤った安心を配る。
+ * 🔑 **手で数え直して見つけたのではない** ── 機械に全数走査させたら出てきた。
+ *   「数えた数だけ通す」と書くなら、**数える所も機械にする**。
+ * 🔑 いまは **`tests/repo-hygiene.test.ts` が reducer を全数走査して数える** ──
+ *   `openBody` に新しい本文を入れる case を足した人は、通し忘れるとその場で落ちる。
  * ⚠ 板を一度も開いていなければ `null` のまま何もしない。
  */
 function refreshTaskCards(

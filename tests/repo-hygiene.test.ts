@@ -479,3 +479,131 @@ describe('本文を書く導線は、忙しい間の門に載っている', () =
     expect(missing, '本文を書くのに BODY_WRITE_ACTIONS に無い action がある').toEqual([]);
   });
 });
+
+/**
+ * 🔴 **新しい本文が state に入る所は、全部 `refreshTaskCards` を通る**
+ * (2026-08-20。#277 段②-b の宣言が**数を間違えていた**ので、機械で数える形へ変えた)。
+ *
+ * ## なぜ機械で数えるか
+ *
+ * `refreshTaskCards` の docstring には「`buildPersist` と `BODY_REWRITTEN` の
+ * **2 か所だけ**を通す(数えた数だけ通す ── §7)」と書いてあったが、
+ * **`ENTRY_APPENDED` が 3 か所目**として漏れていた。
+ * ⚠ 宣言が在るぶん、次に読む人は**数え直さない** ── 誤った安心が配られる。
+ *
+ * 🔑 板の札は**原文の行番号**を指すので、本文が変わったのに組み直さないと
+ *   **押したとき別の行が黙って完了になる**(#277 段②-b で実際に踏んだ形)。
+ *
+ * ⚠ この検査は**漏れを名指しする**だけで、中身の正しさは見ない
+ *   (`refreshTaskCards` を呼んでいれば通る)── 弱いと自覚して使う。
+ *   行番号の追従そのものは `tests/adapter/state.test.ts` の変異試験が守る。
+ */
+describe('新しい本文が state に入る所は、札の組み直しを通る', () => {
+  /**
+   * 🔴 **コメントを落としてから見る**(2026-08-20、着地前の変異試験が突いた)。
+   *
+   * ⚠ ここは「**在る**」ことを主張する検査なので、注釈が検査を満たす ──
+   *   1 稿目は原文のまま見ていたので、実装から `refreshTaskCards(...)` の**呼び出しを
+   *   消しても**、同じ case に書いた解説コメントの中の `refreshTaskCards` の 5 文字に
+   *   満たされて**緑のまま**だった(変異 R1 が生き延びて判明)。
+   * ⚠ この罠は `tests/docs-parity.test.ts` の `codeOnly` が名指しで戒めているのに、
+   *   **同じセッションでそれを引用しておきながら踏んだ**。
+   */
+  const STATE = readFileSync('src/adapter/state/app-state.ts', 'utf-8')
+    .split('\n')
+    .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+    .join('\n');
+
+  /**
+   * reducer の `case 'X':` を境に切り、**`openBody` に新しい本文を入れる** case を拾う。
+   * ⚠ 「`openBody` の語が在る」では拾いすぎる(読むだけの case も当たる)ので、
+   *   **`body:` を持つ object を組んでいる**ことを条件にする。
+   */
+  const bodyIntoStateCases = (): Map<string, string> => {
+    const out = new Map<string, string>();
+    for (const part of STATE.split(/\n {4}case '/).slice(1)) {
+      const name = /^([A-Z_]+)'/.exec(part)?.[1];
+      if (name === undefined) continue;
+      const body = part.split(/\n {4}case '/)[0]!;
+      /**
+       * 🔴 **距離で拾わない**(2026-08-20 に自分で踏んだ)。1 稿目は
+       *   `openBody …{0,400}… body: action.body` と**文字数の窓**で書いていたので、
+       *   実装に**コメントを 1 つ足しただけで拾う集合が変わった**
+       *   (窓の外へ押し出された case が静かに消える)。
+       * 🔑 距離を使わず「その case が `openBody` を組み立てていて、かつ
+       *   `body: action.<何か>` を書いている」で見る。
+       */
+      if (/\bopenBody\b/.test(body) && /\bbody:\s*action\.\w+/.test(body))
+        out.set(name, body);
+    }
+    return out;
+  };
+
+  /**
+   * 🔴 **通さなくてよい case は、理由つきで名指しする**(黙って除外しない)。
+   *
+   * ⚠ 一覧に足すのは「**板が見ていない本文**」だけである。増やすときは、
+   *   その本文が板に届く筋が無いことを**書いてから**足すこと。
+   */
+  const EXEMPT: Readonly<Record<string, string>> = {
+    /**
+     * 打鍵ごとの draft。⚠ 板は**保存された本文**を映すので、draft を追う必要が無い
+     * ── そして編集中は `SET_VIEW_MODE` が板を開かせない(reducer が捨てる)ので、
+     * draft が板に届く筋がそもそも存在しない。⚠ 追ったら 1 打鍵ごとに札を組み直す。
+     */
+    UPDATE_OPEN_BODY: '打鍵ごとの draft(編集中は板を開けないので届かない)',
+  };
+
+  it('⚠ 前提: そういう case が実在する(空振り防止)', () => {
+    const found = bodyIntoStateCases();
+    expect(found.size, '1 件も拾えていない ── 拾い方が壊れている').toBeGreaterThan(0);
+    /**
+     * ⚠ **既知の顔ぶれを等値で pin する** ── 「件数が N 以上」だと、足した人が
+     *   通し忘れても既存の件数で満たされる(§1 の空振り)。
+     * 🔴 この一覧は 2026-08-20 に **4 件増えた** ── 実装の docstring は
+     *   「2 か所だけ」と宣言していたが、実際は 6 か所(うち 5 か所が要追従)だった。
+     */
+    expect([...found.keys()].sort()).toEqual([
+      'BODY_LOADED',
+      'BODY_REWRITTEN',
+      'ENTRY_APPENDED',
+      'ENTRY_BODY_REFRESHED',
+      'ENTRY_RESTORED',
+      'UPDATE_OPEN_BODY',
+    ]);
+  });
+
+  /**
+   * 🔴 **除外の一覧そのものを等値で pin する**(2026-08-20、変異 R8 が突いた)。
+   *
+   * ⚠ 除外は**自分で書ける逃げ道**である ── 検査が落ちたときに名前を 1 つ足せば
+   *   黙る。実際、`ENTRY_RESTORED` / `BODY_LOADED` を除外へ足す変異は**生き延びた**。
+   * 🔑 等値で pin してあれば、除外を増やすには**ここも書き換える**しかない ──
+   *   そのとき「本当に板へ届かないのか」を書く場所が目の前に出る。
+   */
+  it('🔴 除外してよいのは、板へ届かない本文だけ(逃げ道を増やせない)', () => {
+    expect(Object.keys(EXEMPT).sort()).toEqual(['UPDATE_OPEN_BODY']);
+  });
+
+  it('🔴 拾った case が全部 refreshTaskCards を通っている', () => {
+    const missing = [...bodyIntoStateCases()]
+      .filter(([name]) => EXEMPT[name] === undefined)
+      .filter(([, body]) => !body.includes('refreshTaskCards'))
+      .map(([name]) => name);
+    expect(
+      missing,
+      `新しい本文を state へ入れているのに札を組み直していない case がある(押すと別の行が完了になる): ${missing.join(' / ')}`,
+    ).toEqual([]);
+  });
+
+  /**
+   * ⚠ `COMMIT_EDIT` / `RETRY_PERSIST` は `buildPersist` 経由なので上の拾い方には
+   *   出てこない。**そちらも通っていること**を別に見る(経路ごとに pin ── §7)。
+   */
+  it('🔴 buildPersist も札を組み直す', () => {
+    const from = STATE.indexOf('function buildPersist(');
+    expect(from, 'buildPersist を読めていない').toBeGreaterThan(0);
+    const fn = STATE.slice(from, STATE.indexOf('\n}\n', from));
+    expect(fn, 'buildPersist が札を組み直していない').toContain('refreshTaskCards');
+  });
+});
