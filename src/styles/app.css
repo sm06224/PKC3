@@ -2546,20 +2546,33 @@ select:focus-visible {
   display: none !important;
 }
 
-/* ══ 2 ペインタブファイラ(#241 段⑥-a)══════════════════════════
+/* ══ 2 ペインタブファイラ(#241 段⑥-a / 2026-08-19 に全面作り直し)══════
+ *
+ * 🔴 **作り直しの根拠は `docs/development/dual-pane-and-task-redesign-2026-08.md`**
+ * (user 指示「市井の 2 ペインファイラをもっと研究してから実装してください」)。
+ * 古典 4 実装(Total Commander / Double Commander / FAR / Krusader)を当たった結果、
+ * **例外なく一致していた 3 点**だけをここで守る:
+ *   ① 操作は**最下段の全幅・等分割 1 行**(中央に置く実装は 1 つも無い)
+ *   ② 一覧は**列見出しを持ち、押すと並べ替わる**
+ *   ③ 焦点(= 移す元)は**帯の地色**で示す ── 枠や色文字ではない
+ *
  * 🔴 **左右は必ず同じ幅**(`1fr 1fr`)── 片方が広いと「元」と「先」が
  * 対等に見えず、user は広いほうを本命だと読む。
  * ⚠ 版面の高さは**器で決める**(`min-height: 0` を置く)── 置かないと
- *   表の高さがそのまま面を押し広げ、真ん中の操作が画面外へ落ちる。 */
+ *   表の高さがそのまま面を押し広げ、下端の操作行が画面外へ落ちる。 */
 [data-pkc-view-pane='dual'] {
   display: flex;
   flex-direction: column;
   min-height: 0;
   height: 100%;
 }
+/* ⚠ **中央の列を持たない**(2026-08-19)── 直す前は `1fr auto 1fr` で、
+ *   真ん中の操作が 1440px でも 1100px でも **110.8px を固定で食っていた**
+ *   (題名が「2026-08-19 フォル…」と切れているのに、ボタンは 1 文字も削れない)。
+ *   その 110.8px は丸ごと一覧へ返っている。 */
 [data-pkc-region='dual-body'] {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: var(--s3);
   align-items: stretch;
   min-height: 0;
@@ -2571,40 +2584,71 @@ select:focus-visible {
   min-height: 0;
   border: 1px solid var(--border);
   border-radius: 4px;
-  padding: var(--s2);
+  /* ⚠ 帯を器の端まで届かせるので、余白は**中身の側**が持つ */
+  padding: 0;
+  overflow: hidden;
 }
-/* 🔴 **焦点のある側を字ではなく面で示す**(移す向きそのものなので、
- * 見落とすと反対向きに動く)。⚠ 地の色ではなく**輪郭** ── 印(`marked`)が
- * 地の明度を使っているので、同じ手を 2 つの意味に使わない。 */
+/* 🔴 **焦点のある側は「帯の地色」で示す**(2026-08-19 に作り直し)。
+ *
+ * ⚠ 直す前は**緑の 2px 枠**(`outline: 2px solid var(--accent)`)だった ──
+ *   不可侵指示「**地は無彩色、色は情報にだけ使う**」に正面から反する。
+ * 🔑 古典 4 実装はどれも**見出し帯の明度**で示す。地の明度なら無彩色のまま、
+ *   しかも**面の端から端まで**届くので、視野の隅でも「どちらが元か」が読める。
+ * ⚠ 印(`marked`)も地の明度を使うが、**別の器**(行 / 帯)なので衝突しない。 */
 [data-pkc-region='dual-pane'][data-pkc-focused] {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
+  border-color: var(--muted);
 }
+[data-pkc-region='dual-pane'][data-pkc-focused] [data-pkc-region='dual-tabs'] {
+  background: var(--surface-2);
+  border-bottom-color: var(--muted);
+}
+/* タブの帯。⚠ **パンくずと別の見た目にする**(§1-1 の C)── 直す前は
+ *   どちらも同じ地・同じボタンで「ルート」が縦に 2 つ並び、
+ *   **どちらが何か画面から読めなかった**。こちらは**帯**、下は**文字列**。 */
 [data-pkc-region='dual-tabs'] {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--s1);
-  margin-bottom: var(--s2);
+  padding: var(--s1) var(--s2);
+  border-bottom: 1px solid var(--border);
 }
 [data-pkc-region='dual-tab'] {
   display: inline-flex;
   align-items: center;
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: 3px;
   font-size: 12px;
 }
 [data-pkc-region='dual-tab'][data-pkc-active] {
-  background: var(--surface-2);
+  background: var(--surface);
+  border-color: var(--border);
   font-weight: 600;
 }
+/* パンくず。⚠ **`›` の連なり**にする(DOpus / Dolphin と同型)── ボタンの列だと
+ *   タブと見分けが付かない。区切りは CSS が置く(DOM に飾りを入れない)。 */
 [data-pkc-region='dual-crumbs'] {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--s1);
-  margin-bottom: var(--s2);
+  padding: var(--s1) var(--s2);
   font-size: 12px;
+  color: var(--muted);
+}
+[data-pkc-region='dual-crumbs'] [data-pkc-action='dual-crumb'] {
+  border: none;
+  background: none;
+  padding: 0 var(--s1);
+  font-size: 12px;
+  color: inherit;
+}
+[data-pkc-region='dual-crumbs'] [data-pkc-action='dual-crumb']:hover {
+  text-decoration: underline;
+}
+[data-pkc-region='dual-crumbs'] [data-pkc-action='dual-crumb'] + [data-pkc-action='dual-crumb']::before {
+  content: '\203a';
+  margin-right: var(--s1);
+  color: var(--border);
 }
 /* ⚠ **表だけがスクロールする** ── 面ごと流れると、タブとパンくずが
  *   上へ消えて「いま何処に居るか」が読めなくなる。 */
@@ -2619,6 +2663,36 @@ select:focus-visible {
   border-collapse: collapse;
   font-size: 12px;
 }
+/* 🔴 **列見出し**(2026-08-19)── 直す前は `<thead>` が 1 つも無く、
+ *   並べ替えができない / 列の意味も読めなかった。
+ * ⚠ **貼り付ける**(`position: sticky`)── 表だけが流れるので、
+ *   貼らないと 30 行目で列の意味が消える。 */
+[data-pkc-region='dual-table'] th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: var(--s1) var(--s2);
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+[data-pkc-region='dual-table'] th[data-pkc-action='dual-sort'] {
+  cursor: pointer;
+  user-select: none;
+}
+[data-pkc-region='dual-table'] th[data-pkc-action='dual-sort']:hover {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+[data-pkc-region='dual-table'] th[data-pkc-sorted] {
+  color: var(--fg);
+}
 [data-pkc-region='dual-table'] td {
   border: none;
   border-bottom: 1px solid var(--border);
@@ -2629,41 +2703,111 @@ select:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 🔴 **名前が残りを全部食う**(2026-08-19)── 直す前は種類と名前が
+ *   **同じ幅**(実測 172.1 = 172.1)で、狭い版面では題名だけが切れ、
+ *   3 文字の「ノート」に 94.3px が割かれていた。
+ * 🔑 Total Commander は名前列にだけ幅指定を持たない。だからここも
+ *   **最後の列にだけ幅を書く**(名前の列には 1 行も書かない)。 */
+[data-pkc-region='dual-table'] th:nth-child(2),
+[data-pkc-region='dual-table'] td:nth-child(2) {
+  width: 4.5em;
+  text-align: right;
+}
+[data-pkc-region='dual-table'] th:last-child,
 [data-pkc-region='dual-table'] td:last-child {
   width: 4.4em;
   text-align: right;
+}
+/* ⚠ 数の列は**等幅**にする ── 桁が揃わないと、目で大小が比べられない
+ *   (この面の目的が「見比べて整理する」である以上、揃わないのは機能の欠落)。 */
+[data-pkc-region='dual-table'] td:nth-child(2),
+[data-pkc-region='dual-table'] td:last-child {
   color: var(--muted);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
-/* 印は**地の明度**(フォルダ面と同じ規則 ── 面ごとに別の見え方を作らない)。 */
-[data-pkc-region='dual-table'] tbody tr[data-pkc-marked] {
+/* 🔴 **行の 4 状態を、別の見え方にする**(2026-08-19 の作り直し。設計 doc §3 行 H)。
+ *
+ * ⚠ 直す前は **印(`marked`)と hover が同じ色**(実測どちらも `#f5f6f8`)で、
+ *   しかもカーソルが**そもそも無かった** ── 「いまどの行に居るか」も
+ *   「どれを選んだか」も画面から読めない状態だった。
+ * 🔑 手を分ける:**印は地の明度 / カーソルは輪郭 / hover はもっと薄い地**。
+ *   同じ手(地の明度)を 2 つの意味に使わないので、**印の付いた行にカーソルが
+ *   在る**という 4 つ目の状態も、重ねるだけで読める。
+ * ⚠ カーソルは `outline`(`border` ではない)── `border` は行の高さを変えるので、
+ *   送るたびに下の行がずれて狙えなくなる。 */
+[data-pkc-region='dual-table'] tbody tr[data-pkc-marked] td {
   background: var(--surface-2);
+  font-weight: 600;
 }
 [data-pkc-region='dual-table'] tbody tr:hover td {
   background: var(--surface-2);
 }
-[data-pkc-field='dual-empty'],
-[data-pkc-field='dual-count'] {
+[data-pkc-region='dual-table'] tbody tr[data-pkc-cursor] {
+  outline: 1px solid var(--muted);
+  outline-offset: -1px;
+}
+/* ⚠ **焦点のあるペインのカーソルだけ**を濃くする ── 2 本とも同じ濃さだと、
+ *   どちらが「元」か分からなくなる(帯の地色と同じことを行でも言う)。 */
+[data-pkc-region='dual-pane'][data-pkc-focused]
+  [data-pkc-region='dual-table']
+  tbody
+  tr[data-pkc-cursor] {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+/* ⚠ 行そのものの `:focus` は**描かない**(カーソルの輪郭と二重になる)。
+ *   到達性は `data-pkc-cursor` が受け持つ ── 焦点は必ずカーソルに追従する。 */
+[data-pkc-region='dual-table'] tbody tr:focus {
+  outline: none;
+}
+[data-pkc-field='dual-empty'] {
   color: var(--muted);
   font-size: 12px;
-  padding: var(--s1) 0;
+  padding: var(--s2);
 }
-/* 真ん中の操作。⚠ **縦の中央**に置く ── 上に寄せると、どちらのペインの
- * 持ち物か分からなくなる(両方から等距離であることが役割の表明である)。 */
-[data-pkc-region='dual-commands'] {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  gap: var(--s2);
-  min-width: 7.5em;
-}
-[data-pkc-field='dual-hint'] {
+/* 情報行。⚠ 「N 件中 M 件を選択」を**対で**出す(古典 4 つとも同じ形)。 */
+[data-pkc-field='dual-count'] {
   color: var(--muted);
   font-size: 11px;
-  text-align: center;
-  margin: 0;
+  padding: var(--s1) var(--s2);
+  border-top: 1px solid var(--border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 🔴 **操作行は最下段・全幅・等分割**(2026-08-19 の作り直し)。
+ *
+ * ⚠ 直す前は**左右ペインの間に縦積み**で、幅が文字数なりだったので
+ *   **端が 1 つも揃わなかった**(「醜い」の主因)。
+ * 🔑 古典 4 実装は例外なく**最下段の全幅・等分割**である。等分割は
+ *   `grid-auto-columns: 1fr` で採る ── 個数が増えても端は揃ったまま。 */
+[data-pkc-region='dual-commands'] {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: var(--s1);
+  margin-top: var(--s2);
+}
+[data-pkc-region='dual-commands'] button {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0.4em;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+/* ⚠ キーは**弱める** ── 語のほうが主で、キーは近道の案内である
+ *   (Krusader のバーがそのまま覚え書きになっている形)。 */
+[data-pkc-field='cmd-key'] {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+[data-pkc-field='cmd-label'] {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ── 画面幅に応じた上書き ─────────────────────────────

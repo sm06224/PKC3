@@ -21,6 +21,12 @@ export interface FilerListOptions {
   /** 本文が当たった lid(`null` = まだ返っていない)。 */
   readonly searchHits: ReadonlySet<string> | null;
   readonly sort: EntrySort;
+  /**
+   * 降順か。⚠ **省略可にしない** ── 範囲選択(`Shift`)は「表示している並び」で
+   * 採るので、渡し忘れた経路だけ**逆順で範囲を採る**ことになる(目で見た範囲と
+   * 選ばれる範囲が食い違う、いちばん気づけない形)。
+   */
+  readonly sortDesc: boolean;
 }
 
 /**
@@ -45,6 +51,7 @@ export function filerRows(
     shown.map((m) => m.lid),
     (lid) => byLid.get(lid),
     opts.sort,
+    opts.sortDesc,
   )
     .map((lid) => byLid.get(lid))
     .filter((m): m is EntryMeta => m !== undefined);
@@ -65,6 +72,30 @@ export function visibleSelection(
 ): string[] {
   const shown = new Set(rows.map((m) => m.lid));
   return selection.filter((lid) => shown.has(lid));
+}
+
+/**
+ * 🔴 **操作の相手**(2026-08-19 の作り直し。設計 doc §3 行 H)。
+ *
+ * > **印が 1 つでも在ればその印、無ければカーソルの行。**
+ *
+ * ⚠ **この規則が無いと、カーソルが飾りになる。** `↑↓` を印から切り離した瞬間、
+ *   「矢印で目当ての行まで下りて F6」という古典 4 実装(Total Commander /
+ *   Double Commander / FAR / Krusader)で最も多い手が、
+ *   **「移すものを選んでください」で断られ続ける**動線に変わる。
+ * 🔑 **写す / 移す / ゴミ箱 / 操作行の件数**が全部ここを通る ── 数と相手が
+ *   食い違うと、ボタンの説明(「いま 1 件」)が嘘になる(CLAUDE.md §7)。
+ * ⚠ 相手は必ず**いま表に出ている行**に絞る(`visibleSelection` と同じ理由)──
+ *   絞り込みで消えた印や、消えた行を指したままのカーソルを動かさない。
+ */
+export function operationTargets(
+  rows: readonly EntryMeta[],
+  selection: readonly string[],
+  cursor: string | null,
+): string[] {
+  const marked = visibleSelection(rows, selection);
+  if (marked.length > 0) return marked;
+  return cursor !== null && rows.some((m) => m.lid === cursor) ? [cursor] : [];
 }
 
 /**

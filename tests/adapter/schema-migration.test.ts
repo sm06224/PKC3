@@ -78,6 +78,11 @@ const cols = (db: Database): Set<string> =>
   );
 const taskTotal = (db: Database, lid: string): number =>
   Number(db.selectValue(`SELECT task_total FROM entries WHERE lid = ?`, [lid]) ?? -1);
+/** ⚠ `-1` は「行が無い」/ `null` は「まだ数えていない」── **潰さない**。 */
+const bodyChars = (db: Database, lid: string): number | null => {
+  const v = db.selectValue(`SELECT body_chars FROM entries WHERE lid = ?`, [lid]);
+  return v === undefined ? -1 : v === null ? null : Number(v);
+};
 
 describe('entries の後付け列(#277 段②)', () => {
   /** ⚠ **空振り防止** ── 旧い DDL が本当に列を持っていないこと。 */
@@ -180,6 +185,52 @@ describe('entries の後付け列(#277 段②)', () => {
    *   20MB 抱える(不可侵指示 2026-07-27「速やかな破棄」に反する)。
    * 🔑 塊の大きさ(200)を**跨ぐ件数**で試す ── 跨がないと分割の枝を 1 度も通らない。
    */
+  /**
+   * 🔴 **大きさの列も同じ道で埋まる**(2026-08-19、2 ペインの作り直し)。
+   *
+   * ⚠ **`task_total` の test に相乗りできない** ── 埋め戻しの条件は
+   *   `task_total IS NULL OR body_chars IS NULL` という **OR** なので、
+   *   前者だけを見る test は**後者を落とす変異を 1 つも殺さない**
+   *   (`body_chars = ?` の代入を消しても、`task_total` は埋まるので緑)。
+   */
+  it('🔴 大きさ(本文の文字数)も埋まる', () => {
+    const db = oldDb([
+      ['s-empty', ''],
+      ['s-ascii', 'abcde'],
+      ['s-ja', 'あいう\n'],
+    ]);
+    applySchema(db);
+    expect(bodyChars(db, 's-ascii'), '文字数が入っていない').toBe(5);
+    expect(bodyChars(db, 's-ja'), '改行を数えていない').toBe(4);
+    /**
+     * ⚠ **`0` と `null` を潰さない** ── 空のノートは `0`(数えた結果)であって、
+     *   「まだ数えていない」ではない。潰すと、埋め戻しが**毎回の open で
+     *   同じ行を読み直す**(永遠に尽きない)。
+     */
+    expect(bodyChars(db, 's-empty'), '空のノートが未計算に見えている').toBe(0);
+    db.close();
+  });
+
+  /**
+   * 🔴 **片方だけ埋まっている行**(2026-08-19)── これが**実際に全 user が居る状態**である。
+   *
+   * #277 が配られた後の DB は `task_total` が埋まっており、`body_chars` は
+   * 列ごと存在しない。⚠ もし埋め戻しの条件を `task_total IS NULL` のままにすると、
+   * **probe が「要らない」と言って 1 行も埋まらず**、大きさの列が全部 `—` になる
+   * (しかも誰も気づかない ── 表示が空なだけで、test は緑)。
+   */
+  it('🔴 task_total だけ埋まっている行も、次の open で大きさが埋まる', () => {
+    const db = oldDb([['half', '- [ ] やること\n']]);
+    // 1 巡目 = #277 が配られた後の状態を作る
+    applySchema(db);
+    expect(taskTotal(db, 'half'), '前提が崩れている').toBe(1);
+    // ⚠ 大きさだけを消す(= 列を後から足した直後と同じ状態)
+    db.exec(`UPDATE entries SET body_chars = NULL WHERE lid = 'half'`);
+    applySchema(db);
+    expect(bodyChars(db, 'half'), '片方だけ NULL の行が埋め残された').toBe(11);
+    db.close();
+  });
+
   it('🔴 塊の境目を跨ぐ件数でも、全部埋まる', () => {
     const rows: Array<readonly [string, string]> = [];
     for (let i = 0; i < 250; i++) rows.push([`bulk-${i}`, `- [${i % 2 ? 'x' : ' '}] ${i}\n`]);

@@ -64,6 +64,13 @@ export const DB_SCHEMA_VERSION = 3;
  */
 export const ENTRY_ADDED_COLUMNS: readonly { readonly name: string; readonly ddl: string }[] = [
   { name: 'task_total', ddl: 'INTEGER' },
+  /**
+   * 🔴 **本文の文字数**(2026-08-19、2 ペインの作り直し ── 大きさの列)。
+   * ⚠ `task_total` と**同じ作法**:NOT NULL にしない / 既定値を入れない /
+   *   NULL は「まだ数えていない」── 旧ビルドが書いた行を次の open で埋め戻せる。
+   * ⚠ 索引は**作らない**(絞り込みに使わない列である)。
+   */
+  { name: 'body_chars', ddl: 'INTEGER' },
 ];
 
 export const REVISION_ADDED_COLUMNS: readonly string[] = [
@@ -93,6 +100,7 @@ export const SCHEMA_DDL: readonly string[] = [
      date TEXT,
      archived INTEGER NOT NULL DEFAULT 0,
      task_total INTEGER,
+     body_chars INTEGER,
      body TEXT NOT NULL DEFAULT '',
      PRIMARY KEY (cid, lid)
    )`,
@@ -203,6 +211,8 @@ export interface EntryMetaRow {
   status: string | null;
   date: string | null;
   archived: number;
+  /** 本文の文字数(`null` = まだ数えていない)。⚠ 本文そのものは含めない。 */
+  body_chars: number | null;
 }
 
 /**

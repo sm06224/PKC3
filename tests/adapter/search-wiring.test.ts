@@ -33,6 +33,7 @@ function meta(lid: string, title: string): EntryMeta {
     status: null,
     date: null,
     archived: false,
+    bodyChars: null,
   };
 }
 
@@ -196,6 +197,7 @@ describe('本文の当たりと削除の後継', () => {
       status: null,
       date: null,
       archived: false,
+      bodyChars: null,
     };
   }
 

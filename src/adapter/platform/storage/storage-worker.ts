@@ -139,7 +139,11 @@ async function init(dbName: string, journalMode?: JournalMode): Promise<InitResu
 }
 
 /**
- * 🔴 **既存行の `task_total` を数え直す**(#277 段②の埋め戻し)。
+ * 🔴 **既存行の派生列(`task_total` / `body_chars`)を数え直す**(#277 段② /
+ * 2026-08-19 の 2 ペイン作り直し)。
+ *
+ * ⚠ **列ごとに走査を分けない** ── どちらも「本文を読んで数える」なので、
+ *   分けると同じ本文を 2 度読む(埋め戻しはいちばん本文を読む場所である)。
  *
  * ⚠ **1 件ずつ UPDATE しない** ── 行数ぶん往復すると、取り込み直後の大きな
  *   コンテナで open が固まる。読みは 1 回、書きは変わる行だけ。
@@ -148,7 +152,22 @@ async function init(dbName: string, journalMode?: JournalMode): Promise<InitResu
  * ⚠ FTS の trigger は `AFTER UPDATE` で発火するが、`title` / `body` は
  *   変えていないので索引の中身は同じ値に書き直されるだけ(害は無い)。
  */
-function backfillTaskTotals(database: Database): void {
+function backfillDerivedColumns(database: Database): void {
+  /**
+   * 🔴 **回数の上限を、書込の成功と無関係に置く**(2026-08-20 の変異試験で判明)。
+   *
+   * ⚠ この `for(;;)` は「**UPDATE が条件を外す**から必ず尽きる」に賭けていた ──
+   *   変異試験で `body_chars` の代入を落としたら、同じ 200 行が永久に返り続けて
+   *   **worker が open で固まった**(test が 15 分止まり、外から殺すまで戻らない)。
+   * ⚠ これは「変異だから起きた」で済ませてよい話ではない ── 尽きる理由が
+   *   **別の行(UPDATE の列名)に握られている**形そのものが脆い。列を 1 つ足す
+   *   たびに、この不変条件を人間が思い出さなければならない。
+   * 🔑 だから**行数**で天井を張る:全件を 1 度ずつ読んだら必ず抜ける。
+   *   正しく書けている限り天井には届かない(実費 0)。
+   */
+  const ceiling =
+    Number(database.selectValue('SELECT count(*) FROM entries') ?? 0) + BACKFILL_CHUNK;
+  let seen = 0;
   for (;;) {
     /**
      * ⚠ **本文を全件いっぺんに heap へ載せない**(不可侵指示 2026-07-27
@@ -157,15 +176,19 @@ function backfillTaskTotals(database: Database): void {
      * 🔑 対象は **NULL の行だけ**なので、進めば必ず尽きる(無限には回らない)。
      */
     const rows = database.selectObjects(
-      `SELECT cid, lid, body FROM entries WHERE task_total IS NULL LIMIT ${BACKFILL_CHUNK}`,
+      `SELECT cid, lid, body FROM entries WHERE ${NEEDS_BACKFILL} LIMIT ${BACKFILL_CHUNK}`,
     ) as Array<{ cid: string; lid: string; body: string }>;
     if (rows.length === 0) return;
     for (const r of rows) {
+      const body = r.body ?? '';
       database.exec({
-        sql: `UPDATE entries SET task_total = ? WHERE cid = ? AND lid = ?`,
-        bind: [countTaskCandidates(r.body ?? '').total, r.cid, r.lid],
+        sql: `UPDATE entries SET task_total = ?, body_chars = ? WHERE cid = ? AND lid = ?`,
+        bind: [countTaskCandidates(body).total, body.length, r.cid, r.lid],
       });
     }
+    seen += rows.length;
+    // ⚠ **進んでいないなら抜ける** ── 「尽きる」を書込の成否に依存させない
+    if (seen > ceiling) return;
     if (rows.length < BACKFILL_CHUNK) return;
   }
 }
@@ -263,9 +286,9 @@ export function applySchema(database: Database): void {
      * 🔑 判定そのものは索引が効く(`idx_entries_task`)ので、本文は読まない。
      */
     if (
-      database.selectValue(`SELECT 1 FROM entries WHERE task_total IS NULL LIMIT 1`) !== undefined
+      database.selectValue(`SELECT 1 FROM entries WHERE ${NEEDS_BACKFILL} LIMIT 1`) !== undefined
     )
-      backfillTaskTotals(database);
+      backfillDerivedColumns(database);
     /**
      * 🔴 **既存 DB の索引を埋める**(#181 全文検索)。DDL は空の索引を作るだけ
      * なので、**既に在る entry は 1 件も引けない**まま緑になる ── 索引を足した
@@ -443,10 +466,22 @@ type Handlers = {
 /** 埋め戻しを回す塊の大きさ(本文を一度に heap へ載せない)。 */
 const BACKFILL_CHUNK = 200;
 
+/**
+ * 🔴 **埋め戻しが要る行の条件**(§7「同じ判定が 2 か所にある」)。
+ *
+ * ⚠ 「回すか」を見る probe と「どの行を読むか」を見る塊取りは**必ず同じ条件**で
+ *   なければならない ── 食い違うと、probe が「要る」と言い続けるのに塊が
+ *   1 件も返らず、**open のたびに空回りする**(または逆に、埋まらない行が残る)。
+ * ⚠ 列を足したらここに足す。⚠ **`OR` で並べる**(片方だけ NULL の行が実在する ──
+ *   `task_total` は #277 で、`body_chars` は 2026-08-19 に足したので、
+ *   その間に書かれた行は前者だけ埋まっている)。
+ */
+const NEEDS_BACKFILL = 'task_total IS NULL OR body_chars IS NULL';
+
 const UPSERT_SQL = `INSERT INTO entries
     (cid, lid, title, archetype, created_at, updated_at,
-     entry_order, status, date, archived, task_total, body)
-  VALUES (?, ?, ?, ?, datetime('now'), datetime('now'), ?, ?, ?, ?, ?, ?)
+     entry_order, status, date, archived, task_total, body_chars, body)
+  VALUES (?, ?, ?, ?, datetime('now'), datetime('now'), ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(cid, lid) DO UPDATE SET
     title = excluded.title,
     archetype = excluded.archetype,
@@ -456,6 +491,7 @@ const UPSERT_SQL = `INSERT INTO entries
     date = excluded.date,
     archived = excluded.archived,
     task_total = excluded.task_total,
+    body_chars = excluded.body_chars,
     body = excluded.body`;
 
 function bindUpsert(cid: string, e: EntryUpsert): (string | number | null)[] {
@@ -478,6 +514,13 @@ function bindUpsert(cid: string, e: EntryUpsert): (string | number | null)[] {
      * 🔑 実費は行走査 1 回(16KB の本文で 0.04ms 実測)。
      */
     countTaskCandidates(e.body).total,
+    /**
+     * 🔴 **本文の大きさも、書くときここで数える**(2026-08-19)。理由は上と同じ
+     * ── 呼び側 12 経路に持たせると、落とした経路のノートだけ大きさが古くなる。
+     * ⚠ 数えるのは **UTF-16 の長さ**(`String.length`)── 画面には `1.2K` 形式へ
+     *   丸めて出すので、書記素まで数え直す実費を払う理由が無い。
+     */
+    e.body.length,
     e.body,
   ];
 }
@@ -910,7 +953,7 @@ const handlers: Handlers = {
     // body 列を読まない ── boot / 一覧は O(メタ)(設計 doc §4.1)
     need().selectObjects(
       `SELECT lid, title, archetype, created_at, updated_at, entry_order,
-              status, date, archived
+              status, date, archived, body_chars
          FROM entries WHERE cid = ? ORDER BY entry_order`,
       [req.cid],
     ) as unknown as ResultMap['listEntryMetas'],

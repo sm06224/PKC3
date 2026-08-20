@@ -34,7 +34,21 @@ export interface Chord {
 }
 
 /** どの面で効くか。⚠ `global` は document で受けるので**他の全部と重なりうる**。 */
-export type KeyContext = 'global' | 'editor' | 'append' | 'row' | 'live' | 'filer';
+/**
+ * ⚠ **`dual` を分けている理由**(2026-08-19)── 「反対のペインへ写す / 移す」は
+ * **2 ペインの面にしか存在しない操作**である。`filer` に混ぜると、左の列の表に
+ * 焦点があるときも設定画面に並び、押しても何も起きない鍵になる(dead key)。
+ * 🔑 逆に**両方に在る操作**(開く / ゴミ箱 / 行送り)は `filer` 1 つのまま ──
+ *   user に同じ操作を 2 回割り当て直させない(#273 で確立した規律)。
+ */
+export type KeyContext =
+  | 'global'
+  | 'editor'
+  | 'append'
+  | 'row'
+  | 'live'
+  | 'filer'
+  | 'dual';
 
 export interface KeyCommand {
   readonly id: string;
@@ -110,27 +124,29 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   {
     id: 'filer-open',
     label: '開く(フォルダなら中へ)',
-    contexts: ['filer'],
-    defaults: ['Enter'],
-    note: 'OS のファイラと同じ ── 行を選んで Enter',
+    contexts: ['filer', 'dual'],
+    // ⚠ `F3` は古典 4 実装(TC / DC / FAR / Krusader)の「見る」と同じ位置
+    defaults: ['Enter', 'F3'],
+    note: 'OS のファイラと同じ ── 行を選んで Enter(F3 でも開きます)',
   },
   {
     id: 'filer-parent',
     label: '親フォルダへ',
-    contexts: ['filer'],
+    contexts: ['filer', 'dual'],
     defaults: ['Backspace', 'Alt+ArrowUp'],
   },
   {
     id: 'filer-trash',
     label: '選んでいるものをゴミ箱へ',
-    contexts: ['filer'],
-    defaults: ['Delete'],
-    note: 'ゴミ箱からいつでも戻せます',
+    contexts: ['filer', 'dual'],
+    // ⚠ `F8` は古典 4 実装が一致している鍵 ── 操作行にもそう書いてある
+    defaults: ['Delete', 'F8'],
+    note: 'ゴミ箱からいつでも戻せます(印が無ければカーソルの行)',
   },
   {
     id: 'filer-select-all',
     label: 'いま出ている行をぜんぶ選ぶ',
-    contexts: ['filer'],
+    contexts: ['filer', 'dual'],
     defaults: ['Mod+A'],
   },
   /**
@@ -146,28 +162,75 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   {
     id: 'filer-row-down',
     label: '次の行へ',
-    contexts: ['filer'],
+    contexts: ['filer', 'dual'],
     defaults: ['ArrowDown'],
-    note: '送った行が選ばれます(開くのは Enter)',
+    note: '2 ペインではカーソルだけが動きます(印は Space)',
   },
   {
     id: 'filer-row-up',
     label: '前の行へ',
-    contexts: ['filer'],
+    contexts: ['filer', 'dual'],
     defaults: ['ArrowUp'],
   },
   {
     id: 'filer-extend-down',
     label: '次の行まで選び足す',
-    contexts: ['filer'],
+    contexts: ['filer', 'dual'],
     defaults: ['Shift+ArrowDown'],
     note: '起点は最後に選んだ行',
   },
   {
     id: 'filer-extend-up',
     label: '前の行まで選び足す',
-    contexts: ['filer'],
+    contexts: ['filer', 'dual'],
     defaults: ['Shift+ArrowUp'],
+  },
+  /**
+   * 🔴 **2 ペインだけの鍵**(2026-08-19 の作り直し。設計 doc §3-3)。
+   *
+   * ⚠ 割当は古典 4 実装(Total Commander / Double Commander / FAR / Krusader)で
+   *   **一致しているもの**を採った ── `F5 写す / F6 移す / F7 作る / F8 消す`。
+   * 🔑 **操作行のラベルはこの表から作る**(Krusader 方式)── user が鍵を変えたら
+   *   画面の字も追従する。⚠ 直書きすると、変えた瞬間に**画面が嘘をつく**。
+   */
+  {
+    id: 'dual-mark',
+    label: '印を付ける / 外して次の行へ',
+    contexts: ['dual'],
+    defaults: ['Space', 'Insert'],
+    note: 'カーソルは印と別です ── 見て回るのは矢印、選ぶのは Space',
+  },
+  {
+    id: 'dual-copy-to-other',
+    label: '反対のペインへ写す',
+    contexts: ['dual'],
+    defaults: ['F5'],
+    note: '元は残ります(印が無ければカーソルの行)',
+  },
+  {
+    id: 'dual-move-to-other',
+    label: '反対のペインへ移す',
+    contexts: ['dual'],
+    defaults: ['F6'],
+    note: '印が無ければカーソルの行が動きます',
+  },
+  {
+    id: 'dual-rename',
+    label: '名前を打ち替える',
+    contexts: ['dual'],
+    defaults: ['F2'],
+  },
+  {
+    id: 'dual-new-folder',
+    label: 'いまの場所にフォルダを作る',
+    contexts: ['dual'],
+    defaults: ['F7'],
+  },
+  {
+    id: 'dual-other-pane',
+    label: '反対のペインへ移る',
+    contexts: ['dual'],
+    defaults: ['Tab'],
   },
   {
     id: 'view-detail',
@@ -608,7 +671,7 @@ const BARE_ALLOWED = new Set(['Escape', 'Tab']);
  * 🔑 `Enter` / `Delete` / `Backspace` は **OS のファイラの標準**であり、
  * ここを許さないと「平仄を合わせる」(user 裁定 2026-08-18)が実行できない。
  */
-const NON_TYPING_CONTEXTS: ReadonlySet<KeyContext> = new Set<KeyContext>(['filer']);
+const NON_TYPING_CONTEXTS: ReadonlySet<KeyContext> = new Set<KeyContext>(['filer', 'dual']);
 
 function bareAllowed(key: string, commandId?: string): boolean {
   if (BARE_ALLOWED.has(key) || /^F([1-9]|1[0-9]|2[0-4])$/.test(key)) return true;

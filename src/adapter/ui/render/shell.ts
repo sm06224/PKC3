@@ -207,6 +207,8 @@ export function buildShell(root: HTMLElement): ShellRegions {
     ['updated', '更新が新しい順'],
     ['title', '題名順'],
     ['archetype', '種類順'],
+    // ⚠ 2 ペインの「大きさ」の列と**同じ 1 本**(§7)── 面ごとに別の並びを作らない
+    ['size', '大きさ順'],
   ] as const) {
     const opt = document.createElement('option');
     opt.value = value;

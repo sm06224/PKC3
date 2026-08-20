@@ -56,6 +56,8 @@ export class FilerRenderer {
   private lastFilter: string | null = null;
   /** ⚠ 並び順と本文検索の当たりも指紋(着地前レビュー 3 ── 入れないと死んだ操作子になる)。 */
   private lastSort: AppState['entrySort'] | null = null;
+  /** ⚠ 向きも指紋(2 ペイン側で実際に踏んだ ── 同型なのでこちらも入れる)。 */
+  private lastSortDesc: boolean | null = null;
   private lastHits: AppState['searchHits'] = null;
   /** ゴミ箱 panel の断面(参照比較 ── P5b で指紋に加わった次元)。 */
   private lastTrash: AppState['trashPanel'] = null;
@@ -252,6 +254,7 @@ export class FilerRenderer {
       state.relations !== this.lastRelations ||
       state.filterQuery !== this.lastFilter ||
       state.entrySort !== this.lastSort ||
+      state.entrySortDesc !== this.lastSortDesc ||
       state.searchHits !== this.lastHits ||
       (state.entryMetas !== this.lastMetas && this.metaSignature(state) !== this.lastSignature);
     const selectionChanged = state.selectedLid !== this.lastSelected;
@@ -299,6 +302,7 @@ export class FilerRenderer {
     this.lastTrash = state.trashPanel;
     this.lastFilter = state.filterQuery;
     this.lastSort = state.entrySort;
+    this.lastSortDesc = state.entrySortDesc;
     this.lastHits = state.searchHits;
     this.lastMarks = state.selection.join(' ');
 
@@ -316,6 +320,7 @@ export class FilerRenderer {
       filterQuery: state.filterQuery,
       searchHits: state.searchHits,
       sort: state.entrySort,
+      sortDesc: state.entrySortDesc,
     });
 
     /**

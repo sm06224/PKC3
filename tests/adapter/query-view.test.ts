@@ -30,6 +30,7 @@ function meta(lid: string, title: string, order: number): EntryMeta {
     status: null,
     date: null,
     archived: false,
+    bodyChars: null,
   };
 }
 

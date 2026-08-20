@@ -78,10 +78,18 @@ test('🔴 2 ペインを開いて、左で選んだものを右の場所へ移�
   await expect(page.locator(ROWS('right')), '右がフォルダに入れていない').toHaveCount(0);
   await expect(page.locator(ROWS('left')), '押していない左まで動いた').toHaveCount(2);
 
-  // ④ 左のノートを選ぶ ── 焦点が左へ移り、向きの字も変わる
+  /**
+   * ④ 左のノートを選ぶ ── 焦点が左へ移り、**そちらが「元」だと情報行が言う**。
+   * ⚠ 2026-08-19 の作り直しで、向きは**操作の文言から情報行へ移った**
+   *   (操作行は `F6 移す` で固定 ── 焦点で字が入れ替わると端が揃わない)。
+   */
   await page.locator(ROWS('left')).nth(1).click();
   await expect(page.locator(PANE('left'))).toHaveAttribute('data-pkc-focused', '');
-  await expect(page.locator('[data-pkc-field="dual-move"]')).toContainText('右へ移す');
+  await expect(
+    page.locator(`${PANE('left')} [data-pkc-field="dual-count"]`),
+    '焦点の側が「元」だと出ていない',
+  ).toContainText('(ここが元)');
+  await expect(page.locator('[data-pkc-field="dual-move"]')).toContainText('移す');
 
   // ⑤ 移す ── 右(= はこの中)に現れ、左からは消える
   await clickReal(page, '[data-pkc-field="dual-move"]');
@@ -158,12 +166,26 @@ test('🔴 2 ペインをキーボードだけで動かす (#273)', async ({ pag
   await page.locator(ROWS('left')).first().click();
   await expect(page.locator(PANE('left'))).toHaveAttribute('data-pkc-focused', '');
 
-  // ② ↓ で送れる ── 印が動いた行に付く
+  /**
+   * ② ↓ で**カーソルだけ**が送られる(2026-08-19 の作り直し)。
+   *
+   * ⚠ 直す前のこの行は「印が 1 件ある」を見ていたが、①のクリックが既に 1 件
+   *   印を付けているので、**↓ が何もしなくても緑**だった(CLAUDE.md §1 の空振り)。
+   * 🔑 いまは「**カーソルが 2 行目に在り、印は 1 行目のまま**」を等値で見る ──
+   *   カーソルと印を分けたことが、この 2 行でしか言えない。
+   */
   await page.keyboard.press('ArrowDown');
+  const rowKey = (loc: ReturnType<Page['locator']>) => loc.getAttribute('data-pkc-entry');
+  const first = await rowKey(page.locator(ROWS('left')).nth(0));
+  const second = await rowKey(page.locator(ROWS('left')).nth(1));
+  await expect(
+    page.locator(`${PANE('left')} [data-pkc-entry][data-pkc-cursor]`),
+    '↓ でカーソルが送られていない',
+  ).toHaveAttribute('data-pkc-entry', second ?? '');
   await expect(
     page.locator(`${PANE('left')} [data-pkc-entry][data-pkc-marked]`),
-    '↓ で印が動いていない',
-  ).toHaveCount(1);
+    '↓ で印まで動いた(カーソルと分けた意味が消える)',
+  ).toHaveAttribute('data-pkc-entry', first ?? '');
 
   // ③ Tab で反対のペインへ(FD の基本操作)
   await page.keyboard.press('Tab');
@@ -325,6 +347,90 @@ test('🔴 左のペインから掴んで、右のペインへ落とす (#273 �
   await page.dragAndDrop(`${ROWS('right')}[data-pkc-archetype="text"]`, PANE('left'));
   await expect(page.locator(ROWS('left')), '左(ルート)へ戻せていない').toHaveCount(2);
   await expect(page.locator(ROWS('right')), '右から出ていない').toHaveCount(0);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **作り直した見た目を、実レイアウトで確かめる**(2026-08-19。
+ * user 指示「ボタン配置やペインの見せ方、列全てがイライラさせる醜いデザイン」)。
+ *
+ * ⚠ ここは **unit では原理的に届かない層**だけを見る ── どれも
+ *   「DOM に在るか」ではなく「**実際に何 px どこに置かれたか**」である:
+ * 1. 操作行が**左右ペインより下**に、**器の幅いっぱい**で在る
+ * 2. 5 つのボタンの**幅が揃っている**(等分割 ── 直す前は文字数なりで端が揃わなかった)
+ * 3. **名前の列がいちばん広い**(直す前は種類の列と同じ幅だった)
+ */
+test('🔴 操作行は下端の全幅・等分割で、名前の列がいちばん広い', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await openDual(page);
+
+  const box = async (sel: string) => {
+    const b = await page.locator(sel).first().boundingBox();
+    expect(b, `${sel} が画面に無い`).not.toBeNull();
+    return b!;
+  };
+  const body = await box('[data-pkc-region="dual-body"]');
+  const cmds = await box('[data-pkc-region="dual-commands"]');
+  expect(cmds.y, '操作行がペインより上に在る(左右の間へ戻っている)').toBeGreaterThan(body.y);
+  // ⚠ 幅は**器いっぱい**(1px の丸めは許す)
+  expect(Math.abs(cmds.width - body.width), '操作行が全幅でない').toBeLessThanOrEqual(1);
+
+  const widths = await page
+    .locator('[data-pkc-region="dual-commands"] button')
+    .evaluateAll((els) => els.map((el) => el.getBoundingClientRect().width));
+  expect(widths.length, 'ボタンが 5 つ出ていない').toBe(5);
+  expect(
+    Math.max(...widths) - Math.min(...widths),
+    `ボタンの幅が揃っていない(等分割になっていない): ${widths.join(' / ')}`,
+  ).toBeLessThanOrEqual(1);
+
+  const cols = await page
+    .locator(`${PANE('left')} [data-pkc-region="dual-table"] thead th`)
+    .evaluateAll((els) => els.map((el) => el.getBoundingClientRect().width));
+  expect(cols.length, '列見出しが 3 つ出ていない').toBe(3);
+  expect(
+    cols[0],
+    `名前の列がいちばん広くない(${cols.join(' / ')})`,
+  ).toBeGreaterThan(Math.max(cols[1] ?? 0, cols[2] ?? 0) * 2);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **Space で飛び飛びに選べる**(2026-08-19。設計 doc §3-3)。
+ * ⚠ 実ブラウザで見るのは **`Space` がページを送らない**ことも含む ── 既定を
+ *   止め忘れると、押すたびに一覧がスクロールして「押した行が見えなくなる」。
+ */
+test('🔴 Space は印を付けて 1 行下へ(ページは動かない)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  for (const t of ['あ', 'い', 'う']) {
+    await createEntry(page, 'text');
+    const title = page.locator('[data-pkc-field="editor-title"]');
+    if (await title.count()) await title.fill(t);
+    await clickReal(page, '[data-pkc-action="commit-edit"]');
+  }
+  await openDual(page);
+
+  await page.locator(ROWS('left')).first().click();
+  const marked = page.locator(`${PANE('left')} [data-pkc-entry][data-pkc-marked]`);
+  // ⚠ 押した行に印が 1 つ(前提)
+  await expect(marked).toHaveCount(1);
+  // Space で外れて 1 行下へ → もう一度 Space で 2 行目に印
+  await page.keyboard.press('Space');
+  await expect(marked, 'Space で印が外れていない').toHaveCount(0);
+  await page.keyboard.press('Space');
+  await expect(marked, 'Space で印が付いていない').toHaveCount(1);
+  // 1 つ飛ばして印 ── カーソルと印が別だからできる
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Space');
+  await expect(marked, '飛び飛びに選べていない').toHaveCount(2);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

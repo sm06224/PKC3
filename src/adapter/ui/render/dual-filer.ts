@@ -30,8 +30,9 @@ import { MAX_TABS, paneOf, paneScope } from '@features/relation/dual-pane';
 import { filerRows } from '@features/relation/filer-list';
 import { normalizeQuery } from '@features/filter/title-filter';
 import { getAncestorFolders } from '@features/relation/tree';
-import { archetypeLabel } from './sidebar';
 import { formatListDate } from '@features/datetime/stored-date';
+import { chordLabel, findCommand } from '@features/keymap';
+import { appKeymap, type KeymapStore } from './keymap';
 import { ARCHETYPE_ICONS, iconSpan } from './icons';
 
 /**
@@ -46,6 +47,112 @@ const SIDES: readonly DualSide[] = ['left', 'right'];
 
 /** 側の呼び名。⚠ **画面に出る字**なので features には置かない(層規約)。 */
 const SIDE_LABEL: Readonly<Record<DualSide, string>> = { left: '左', right: '右' };
+
+/**
+ * 🔴 **列の定義**(2026-08-19 の作り直し)。
+ *
+ * ⚠ **名前の列にだけ幅を書かない** ── 残りを全部食わせる(Total Commander が
+ *   まさにそう作られており、Double Commander の実数も 250:70:140 と名前が最大)。
+ *   幅は CSS 側(`app.css`)で `td:last-child` にだけ与える。
+ * ⚠ **種類の列は持たない**(行頭の図案が示す ── 左の「フォルダ」タブと同じ)。
+ * 🔑 `sort` が `null` の列は押せない(並べ替えの規則を持たない列を押させない)。
+ */
+const COLUMNS: readonly { key: string; label: string; sort: AppState['entrySort'] | null }[] = [
+  { key: 'name', label: '名前', sort: 'title' },
+  { key: 'size', label: '大きさ', sort: 'size' },
+  { key: 'updated', label: '更新', sort: 'updated' },
+];
+
+/**
+ * 並べている列に付ける印。⚠ **向きを字で出す**(2026-08-19)── 出さないと
+ * 「押すたびに何かが変わるが、いまどちら向きか分からない」になる。
+ * 🔑 古典 4 実装とも矢印 1 つで示す。
+ */
+const SORT_MARK: Readonly<Record<'asc' | 'desc', string>> = { asc: ' ▲', desc: ' ▼' };
+
+/**
+ * 🔴 **大きさの見せ方**(2026-08-19)。単位は**文字**で、桁は 1000 区切り。
+ *
+ * ⚠ **バイトではない** ── PKC3 の中身は本文(PKC-Markdown)なので、
+ *   user が判断に使うのは「どれくらい書いてあるか」である。`formatSize`
+ *   (添付のバイト数)とは**別の量**なので、同じ関数を使い回さない。
+ * ⚠ `null` = **まだ数えていない**(旧ビルドが書いた行)。`0`(空のノート)と
+ *   区別して出す ── 潰すと「空なのか未計算なのか」が読めない。
+ */
+export function formatBodyChars(chars: number | null): string {
+  if (chars === null) return '—';
+  if (chars < 1000) return String(chars);
+  if (chars < 1_000_000) return `${(chars / 1000).toFixed(1)}K`;
+  return `${(chars / 1_000_000).toFixed(1)}M`;
+}
+
+/**
+ * 🔴 **操作行の並び**(2026-08-19 の作り直し)。
+ *
+ * ⚠ **並びは固定**(不可侵指示「同じものが常に同じ場所にある」)── 焦点が
+ *   変わっても**位置も文言も動かない**。変わるのは説明(`title`)だけ。
+ * 🔑 割当は古典 4 実装(Total Commander / Double Commander / FAR / Krusader)で
+ *   一致している **F5 写す / F6 移す / F7 作る / F8 消す**。⚠ ただし**鍵は
+ *   ここに書かない** ── `command` から `keymap` を引く(user が変えたら追従する)。
+ */
+const COMMAND_ITEMS: readonly {
+  /** 押しボタンの口(`data-pkc-action`)。 */
+  readonly action: string;
+  /** その操作の鍵を引くコマンド id(⚠ `action` とは**別物**)。 */
+  readonly command: string;
+  readonly label: string;
+  /** 説明。⚠ 「元」と「先」の呼び名は**焦点で入れ替わる**ので、関数で受ける。 */
+  readonly hint: (from: string, to: string) => string;
+  /**
+   * 印が 1 つも無いときの断り。`null` = 印を要らない操作。
+   *
+   * ⚠ **呼び名から機械的に組まない**(2026-08-19)── 1 稿目は
+   *   `${label}ものを選んでから` と書いていたので、ゴミ箱だけ
+   *   **「ゴミ箱ものを選んでから押してください」**という日本語になっていた
+   *   (入れ物の名と、動作の名が混ざる)。文言は**押した場所と対で pin する**
+   *   (CLAUDE.md §1)。
+   */
+  readonly empty: string | null;
+}[] = [
+  {
+    action: 'dual-copy',
+    command: 'dual-copy-to-other',
+    label: '写す',
+    hint: (from, to) => `${from}で選んだものを、${to}のペインへ写します(元は残ります)`,
+    empty: '写すものを選んでから押してください',
+  },
+  {
+    action: 'dual-move',
+    command: 'dual-move-to-other',
+    label: '移す',
+    hint: (from, to) => `${from}で選んだものを、${to}のペインへ移します`,
+    empty: '移すものを選んでから押してください',
+  },
+  {
+    action: 'dual-rename-begin',
+    command: 'dual-rename',
+    label: '名前',
+    hint: () => '選んだ 1 件の名前を、その場で打ち替えます',
+    empty: null,
+  },
+  {
+    action: 'dual-mkdir',
+    command: 'dual-new-folder',
+    label: 'フォルダ',
+    hint: (from) => `${from}のペインが開いている場所に、新しいフォルダを作ります`,
+    empty: null,
+  },
+  {
+    action: 'dual-delete',
+    command: 'filer-trash',
+    label: 'ゴミ箱',
+    hint: (from) => `${from}で選んだものを、ゴミ箱へ入れます(あとで戻せます)`,
+    empty: 'ゴミ箱へ入れるものを選んでから押してください',
+  },
+];
+
+const otherSideLabel = (side: DualSide): string =>
+  SIDE_LABEL[side === 'left' ? 'right' : 'left'];
 
 /** 1 つのペインの部品(器は 1 度だけ作る)。 */
 interface PaneFrame {
@@ -65,12 +172,33 @@ interface PaneFrame {
   /** 印の指紋(内容で見る ── 配列は毎回作り直される)。 */
   marks: string;
   /**
+   * 🔴 **いまカーソルが在る行**(2026-08-19)。⚠ 印と**別に持つ** ── 同じ変数に
+   * 詰めると、印を塗り直すたびにカーソルまで動く(分けた意味が消える)。
+   */
+  cursor: string;
+  /**
    * 🔴 **いま表に出ている印の数**(着地前レビュー R5)。
    * ⚠ 真ん中の操作の文言もここから読む ── 生の `selection.length` を使うと、
    *   「1 件を…入れます」と書いてあるのに押すと「移すものを選んでください」に
    *   なる(絞り込みで消えた印がそのまま数に入る)。**同じ問いに 3 つ目の口を作らない。**
    */
   shownMarks: number;
+}
+
+/**
+ * 🔴 **操作行に出す鍵は、割当の表から引く**(2026-08-19。Krusader 方式)。
+ *
+ * ⚠ 直書きすると、user が設定画面で割当を変えた瞬間に**画面が嘘をつく**
+ *   (「F6 移す」と書いてあるのに F6 では動かない)。
+ * 🔑 **関数キーを優先**する ── ここは古典の「ファンクションキー行」であって、
+ *   `Delete` のような別名まで拾うと帯の意味が変わる。関数キーが 1 つも
+ *   割り当てられていなければ、素直に先頭の割当を出す(無い、とは書かない)。
+ */
+function barKey(id: string, keymap: KeymapStore): string {
+  const list = keymap.getBindings()[id] ?? findCommand(id)?.defaults ?? [];
+  const fn = list.find((c) => /^F(?:[1-9]|1[0-9]|2[0-4])$/.test(c));
+  const pick = fn ?? list[0];
+  return pick === undefined ? '' : chordLabel(pick);
 }
 
 export class DualFilerRenderer {
@@ -84,9 +212,19 @@ export class DualFilerRenderer {
   private lastRelations: AppState['relations'] | null = null;
   private lastFilter: string | null = null;
   private lastSort: AppState['entrySort'] | null = null;
+  /**
+   * 🔴 **向きも門の材料**(2026-08-19、足したその日に test が捕まえた)。
+   * ⚠ 入れないと、`▲` を押して state は反転するのに**この面が 1 度も描き直さない**
+   *   ── 矢印も行順も古いまま(「押しても何も起きない」に見える)。
+   */
+  private lastSortDesc: boolean | null = null;
   private lastHits: AppState['searchHits'] = null;
 
-  constructor(region: HTMLElement) {
+  constructor(
+    region: HTMLElement,
+    /** ⚠ 差し替えられるようにしておく(test が保存を持たない store を渡す)。 */
+    private readonly keymap: KeymapStore = appKeymap,
+  ) {
     this.region = region;
   }
 
@@ -109,6 +247,7 @@ export class DualFilerRenderer {
       state.relations === this.lastRelations &&
       state.filterQuery === this.lastFilter &&
       state.entrySort === this.lastSort &&
+      state.entrySortDesc === this.lastSortDesc &&
       state.searchHits === this.lastHits
     )
       return;
@@ -117,6 +256,7 @@ export class DualFilerRenderer {
     this.lastRelations = state.relations;
     this.lastFilter = state.filterQuery;
     this.lastSort = state.entrySort;
+    this.lastSortDesc = state.entrySortDesc;
     this.lastHits = state.searchHits;
     const frame = this.ensureFrame();
     for (const side of SIDES) {
@@ -125,6 +265,7 @@ export class DualFilerRenderer {
         filterQuery: state.filterQuery,
         searchHits: state.searchHits,
         sort: state.entrySort,
+        sortDesc: state.entrySortDesc,
       });
       this.renderPane(frame.panes[side], side, state, pane, rows);
     }
@@ -145,17 +286,33 @@ export class DualFilerRenderer {
 
   private ensureFrame(): NonNullable<DualFilerRenderer['frame']> {
     if (this.frame) return this.frame;
-    const title = document.createElement('h2');
+    /**
+     * ⚠ **`<h2>` にしない**(2026-08-19 の実測で 上下に 9.13px の UA margin が
+     *   入り、面の題名だけが浮いていた)。他の 4 面は `div` で作っている。
+     */
+    const title = document.createElement('div');
     title.setAttribute('data-pkc-field', 'pane-title');
     title.textContent = '2 ペインで整理';
     const body = document.createElement('div');
     body.setAttribute('data-pkc-region', 'dual-body');
     const left = this.buildPane('left');
+    const right = this.buildPane('right');
+    /**
+     * 🔴 **操作は最下段の全幅・1 行**(2026-08-19 の作り直し。市井の調査)。
+     *
+     * ⚠ 直す前は**左右ペインの間に縦積み**で、文字数なりの幅だったので
+     *   **端が 1 つも揃わず**、狭い版面でも 110.8px を固定で食っていた
+     *   (題名は「2026-08-19 フォル…」と切れているのにボタンは 1 文字も削れない)。
+     * 🔑 古典 4 実装(Total Commander / Double Commander / FAR / Krusader)は
+     *   **例外なく最下段の全幅**に置き、**等分割**する ── 中央に操作を置く実装は
+     *   1 つも無かった。⚠ 近代系(Dolphin / Files / Nemo)は F キー行を捨てて
+     *   **右クリック**へ寄せたが、PKC3 に右クリックメニューは 1 つも無いので
+     *   その道は採れない(捨てた先が無い)。
+     */
+    body.append(left.root, right.root);
     const commands = document.createElement('div');
     commands.setAttribute('data-pkc-region', 'dual-commands');
-    const right = this.buildPane('right');
-    body.append(left.root, commands, right.root);
-    this.region.append(title, body);
+    this.region.append(title, body, commands);
     this.frame = { panes: { left, right }, commands };
     return this.frame;
   }
@@ -204,6 +361,7 @@ export class DualFilerRenderer {
       rows: new Map(),
       signature: null,
       marks: '',
+      cursor: '',
       shownMarks: 0,
     };
   }
@@ -249,15 +407,27 @@ export class DualFilerRenderer {
         : '';
     const signature = [
       filtered ? 'q' : '-',
+      // ⚠ 見出しの印が並びと向きで変わる ── 入れないと印が古いまま残る
+      `s:${state.entrySort}${state.entrySortDesc ? '-' : '+'}`,
       `r:${renaming}`,
       ...rows.map((m) =>
-        [m.lid, m.title, m.archetype, formatListDate(m.updatedAt, year)].join(SEP),
+        [
+          m.lid,
+          m.title,
+          m.archetype,
+          // ⚠ **画面に出る形**で入れる(生の値だと、丸めて同じに見える回で作り直す)
+          formatBodyChars(m.bodyChars),
+          formatListDate(m.updatedAt, year),
+        ].join(SEP),
       ),
     ].join(SEP);
     if (signature !== frame.signature) {
       frame.signature = signature;
       frame.marks = '';
-      this.renderTable(frame, side, rows, filtered, renaming);
+      // ⚠ 行の object ごと入れ替わるので、**カーソルの指紋も捨てる** ──
+      //   捨てないと「同じ lid だから塗らない」で **枠が消えたまま**になる
+      frame.cursor = '';
+      this.renderTable(frame, side, rows, filtered, renaming, state.entrySort, state.entrySortDesc);
     }
     const marks = pane.selection.join(' ');
     if (marks !== frame.marks) {
@@ -269,12 +439,31 @@ export class DualFilerRenderer {
       }
     }
     /**
+     * 🔴 **カーソルは属性の付け替えで塗る**(印と同じ作法 ── 表を組み直さない)。
+     * ⚠ 組み直すと、押す寸前の行が作り直されて dead click になる。
+     */
+    const cursor = pane.cursor ?? '';
+    if (cursor !== frame.cursor) {
+      const prev = frame.rows.get(frame.cursor);
+      if (prev) prev.removeAttribute('data-pkc-cursor');
+      frame.cursor = cursor;
+      frame.rows.get(cursor)?.setAttribute('data-pkc-cursor', '');
+    }
+    /**
      * 🔴 **数えるのは「いま表に出ている印」だけ**(#240 の着地前レビュー 2)。
      * ⚠ 素で数えると、画面に印が 1 つも無いのに「3 件を選んでいます」と出る。
      */
     const shown = pane.selection.filter((lid) => frame.rows.has(lid)).length;
     frame.shownMarks = shown;
-    const text = shown > 0 ? `${rows.length} 件(${shown} 件を選んでいます)` : `${rows.length} 件`;
+    /**
+     * 🔴 **「全 N 件中 M 件を選択」**(2026-08-19。市井の情報行に合わせた)。
+     * ⚠ 直す前は「N 件(M 件を選んでいます)」で、**選んでいないときは件数だけ**
+     *   だった。古典は例外なく「選択 / 全体」を対で出す。
+     * 🔑 焦点のある側は**そこが「元」である**ことも言う ── 操作行から向きの字を
+     *   外した代わりに、ここが受ける。
+     */
+    const here = side === state.dual.focus ? '(ここが元)' : '';
+    const text = shown > 0 ? `${rows.length} 件中 ${shown} 件を選択${here}` : `${rows.length} 件${here}`;
     if (frame.foot.textContent !== text) frame.foot.textContent = text;
   }
 
@@ -381,6 +570,10 @@ export class DualFilerRenderer {
     filtered: boolean,
     /** 打ち替え中の行(`''` = 無し)。⚠ その行だけ入力欄になる。 */
     renaming: string,
+    /** いまの並び ── 見出しの印に出す。 */
+    sort: AppState['entrySort'],
+    /** いまの向き ── ▲▼ の向きに出す。 */
+    sortDesc: boolean,
   ): void {
     const year = new Date().getFullYear();
     frame.rows.clear();
@@ -402,6 +595,38 @@ export class DualFilerRenderer {
       return;
     }
     const table = document.createElement('table');
+    /**
+     * 🔴 **列見出しを持つ**(2026-08-19 の作り直し)。
+     *
+     * ⚠ 直す前は `<thead>` が 1 つも無く、**並べ替えができない / 列の意味が
+     *   読めない**状態だった。⚠ しかも**左の「フォルダ」タブは既に見出しを持って
+     *   いる**(`filer.ts`)ので、同じ仕事をする 2 面で作法が割れていた。
+     * 🔑 古典 4 実装とも見出しを持ち、**押すと並べ替え**る。
+     * ⚠ 並び順は**左の列と同じ 1 本**(`state.entrySort`)── 面ごとに別の並びを
+     *   持たせない(§7)。だから左の探す帯の `<select>` と**必ず一致**する。
+     */
+    const thead = document.createElement('thead');
+    const hr = document.createElement('tr');
+    for (const col of COLUMNS) {
+      const th = document.createElement('th');
+      th.setAttribute('data-pkc-field', `col-${col.key}`);
+      if (col.sort !== null) {
+        th.setAttribute('data-pkc-action', 'dual-sort');
+        th.setAttribute('data-pkc-sort', col.sort);
+        th.setAttribute('role', 'button');
+        th.tabIndex = -1;
+        const active = sort === col.sort;
+        if (active) th.setAttribute('data-pkc-sorted', sortDesc ? 'desc' : 'asc');
+        th.title = active
+          ? `${col.label} の${sortDesc ? '大きい' : '小さい'}順です(もう一度押すと逆になります)`
+          : `${col.label} で並べ替えます`;
+      }
+      th.textContent =
+        col.label + (sort === col.sort ? SORT_MARK[sortDesc ? 'desc' : 'asc'] : '');
+      hr.append(th);
+    }
+    thead.append(hr);
+    table.append(thead);
     const tbody = document.createElement('tbody');
     for (const m of rows) {
       const tr = document.createElement('tr');
@@ -443,11 +668,25 @@ export class DualFilerRenderer {
           document.createTextNode(m.title),
         );
       }
-      const kind = document.createElement('td');
-      kind.textContent = archetypeLabel(m.archetype);
+      /**
+       * 🔴 **種類の列は持たない**(2026-08-19 の作り直し)。⚠ 直す前は
+       *   「ノート」「フォルダ」を**文字の列**で出しており、`table-layout: fixed` で
+       *   **名前と同じ幅**(実測 172.1 = 172.1)を食っていた ── 狭い版面では
+       *   題名だけが切れ、3 文字の「ノート」に 94.3px が割かれていた。
+       * 🔑 種類は**行頭の図案**が示す ── 左の「フォルダ」タブが P9 段③ で
+       *   既に決めた形であり、近代系のファイラも拡張子列を畳んでいる。
+       */
+      /**
+       * 🔴 **大きさの列**(2026-08-19)。⚠ **フォルダは `—`** ── フォルダにも
+       *   本文は在るが、数を出すと「中に何文字入っているか」と読まれる
+       *   (古典が `<DIR>` と書くのは、まさにその誤読を止めるためである)。
+       */
+      const size = document.createElement('td');
+      size.setAttribute('data-pkc-field', 'dual-size');
+      size.textContent = m.archetype === 'folder' ? '—' : formatBodyChars(m.bodyChars);
       const date = document.createElement('td');
       date.textContent = formatListDate(m.updatedAt, year);
-      tr.append(name, kind, date);
+      tr.append(name, size, date);
       tbody.append(tr);
       frame.rows.set(m.lid, tr);
     }
@@ -467,72 +706,50 @@ export class DualFilerRenderer {
   }
 
   /**
-   * 🔴 **真ん中の操作は「向き」を字で言う**(user 指示 2026-08-03「同じものが常に
-   * 同じ場所にある」)。⚠ 「移す」だけでは、どちらへ動くのか画面から読めない ──
-   * 焦点のある側が**元**である。
+   * 🔴 **操作行は「キー + 語」で、常に同じ並び**(2026-08-19 の作り直し)。
+   *
+   * ⚠ 直す前は「→ 右へ移す」のように**向きを文言に埋めて**いたので、
+   *   焦点が変わるたびに字が入れ替わり、幅も変わって端が揃わなかった。
+   * 🔑 市井は**キーと語を連結**して出す(Krusader は実際の割当から生成し、
+   *   **バー自体がチートシート**になっている ── user が鍵を変えたら表示も追従する)。
+   *   FAR / TC / DC の 3 実装で **F5 写す / F6 移す / F7 作る / F8 消す** が一致。
+   * 🔑 **向きは操作行ではなく、焦点のあるペインが言う**(そちらが「元」である)。
    */
   private renderCommands(host: HTMLElement, frame: PaneFrame, state: AppState): void {
     const from = state.dual.focus;
     // ⚠ 数えるのは**いま表に出ている印**だけ(件数の行・移す対象と同じ規則)
     const count = frame.shownMarks;
-    const label = from === 'left' ? '→ 右へ移す' : '← 左へ移す';
-    const sig = `${label}${SEP}${count}`;
+    /**
+     * ⚠ **鍵の字も指紋に入れる**(2026-08-19)── 入れないと、設定画面で割当を
+     *   変えて戻ってきたときに**古い鍵が出たまま**になる(画面が嘘をつく)。
+     */
+    const keys = COMMAND_ITEMS.map((it) => barKey(it.command, this.keymap));
+    const sig = [from, String(count), ...keys].join(SEP);
     if (sig === this.lastCommands) return;
     this.lastCommands = sig;
+    const to = otherSideLabel(from);
     host.textContent = '';
-    const move = document.createElement('button');
-    move.type = 'button';
-    move.setAttribute('data-pkc-action', 'dual-move');
-    move.setAttribute('data-pkc-field', 'dual-move');
-    move.textContent = label;
-    move.title =
-      count > 0
-        ? `${SIDE_LABEL[from]}で選んだ ${count} 件を、反対側の場所へ入れます`
-        : '移すものを選んでから押してください';
-    host.append(move);
-    /**
-     * 🔴 **整理に要る操作を、この面から届かせる**(#273 段②。user 指摘
-     * 「OS のファイラと同じことができないといけません」)。
-     * ⚠ **マウスだけで完結し、キーボードは近道**(user 指示 2026-08-03 の業務画面)──
-     *   `Delete` の鍵と同じことを、押しボタンでもできるようにする。
-     */
-    const copy = document.createElement('button');
-    copy.type = 'button';
-    copy.setAttribute('data-pkc-action', 'dual-copy');
-    copy.setAttribute('data-pkc-field', 'dual-copy');
-    copy.textContent = from === 'left' ? '→ 右へ写す' : '← 左へ写す';
-    copy.title =
-      count > 0
-        ? `${SIDE_LABEL[from]}で選んだ ${count} 件を、反対側の場所へ写します(元は残ります)`
-        : '写すものを選んでから押してください';
-    host.append(copy);
-    const ren = document.createElement('button');
-    ren.type = 'button';
-    ren.setAttribute('data-pkc-action', 'dual-rename-begin');
-    ren.setAttribute('data-pkc-field', 'dual-rename-begin');
-    ren.textContent = '名前を変える';
-    ren.title = '選んだ 1 件の名前を、その場で打ち替えます(F2)';
-    host.append(ren);
-    const mkdir = document.createElement('button');
-    mkdir.type = 'button';
-    mkdir.setAttribute('data-pkc-action', 'dual-mkdir');
-    mkdir.setAttribute('data-pkc-field', 'dual-mkdir');
-    mkdir.textContent = '新しいフォルダ';
-    mkdir.title = `${SIDE_LABEL[from]}のペインが開いている場所に、フォルダを作ります`;
-    host.append(mkdir);
-    const del = document.createElement('button');
-    del.type = 'button';
-    del.setAttribute('data-pkc-action', 'dual-delete');
-    del.setAttribute('data-pkc-field', 'dual-delete');
-    del.textContent = 'ゴミ箱へ';
-    del.title =
-      count > 0
-        ? `${SIDE_LABEL[from]}で選んだ ${count} 件をゴミ箱へ入れます(戻せます)`
-        : '消すものを選んでから押してください';
-    host.append(del);
-    const hint = document.createElement('p');
-    hint.setAttribute('data-pkc-field', 'dual-hint');
-    hint.textContent = `元は${SIDE_LABEL[from]}のペインです`;
-    host.append(hint);
+    COMMAND_ITEMS.forEach((it, i) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.setAttribute('data-pkc-action', it.action);
+      b.setAttribute('data-pkc-field', it.action);
+      /**
+       * ⚠ **キーと語は別の要素**にする ── CSS でキーだけ弱めるため。
+       *   `textContent` で 1 本にすると、字の重みを分けられない。
+       */
+      const key = document.createElement('span');
+      key.setAttribute('data-pkc-field', 'cmd-key');
+      key.textContent = keys[i] ?? '';
+      const label = document.createElement('span');
+      label.setAttribute('data-pkc-field', 'cmd-label');
+      label.textContent = it.label;
+      b.append(key, label);
+      b.title =
+        it.empty !== null && count === 0
+          ? it.empty
+          : `${it.hint(SIDE_LABEL[from], to)}${it.empty !== null ? `(いま ${count} 件)` : ''}`;
+      host.append(b);
+    });
   }
 }

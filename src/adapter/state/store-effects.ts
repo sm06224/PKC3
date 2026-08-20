@@ -816,6 +816,8 @@ export function connectStoreEffects(
                   status: ext.status,
                   date: ext.date,
                   archived: ext.archived,
+                  // ⚠ worker が同じ本文から数え直す値と**同じ式**で置く(§7)
+                  bodyChars: rev.body.length,
                 },
                 body: rev.body,
               });
@@ -924,6 +926,8 @@ export function connectStoreEffects(
                   status: ext.status,
                   date: ext.date,
                   archived: ext.archived,
+                  // ⚠ worker が同じ本文から数え直す値と**同じ式**で置く(§7)
+                  bodyChars: rev.body.length,
                 },
                 body: rev.body,
                 relations: restored,

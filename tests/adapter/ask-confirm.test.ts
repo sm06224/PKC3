@@ -87,6 +87,7 @@ describe('抑止されたときに理由が出る(画面の配線)', () => {
           status: null,
           date: null,
           archived: false,
+          bodyChars: null,
         },
       ],
       relations: [],

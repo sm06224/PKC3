@@ -32,6 +32,19 @@ export interface DualPaneState {
   readonly selection: readonly string[];
   /** 範囲選択の起点。 */
   readonly anchor: string | null;
+  /**
+   * 🔴 **カーソル(いま指している 1 行)**(2026-08-19 の作り直し。設計 doc §3 行 H)。
+   *
+   * ⚠ **印(`selection`)とは別物である。** 直す前は `↑↓` が印ごと動かしていたので、
+   *   「見て回る」ことと「選ぶ」ことが同じ操作になっていた ── 古典 4 実装
+   *   (Total Commander / Double Commander / FAR / Krusader)は例外なく分けており、
+   *   **カーソルで見て回り、`Space` で印を付ける**。
+   * 🔑 **印が 1 つも無いときは、カーソルの行が操作の相手になる**
+   *   (`operationTargets`)── これが無いと、カーソルだけ動かして F6 を押した user は
+   *   「移すものを選んでください」と断られ続ける(= カーソルが飾りになる)。
+   * ⚠ 場所が変わったら外す(印・起点と同じ規則)。
+   */
+  readonly cursor: string | null;
 }
 
 export type DualSide = 'left' | 'right';
@@ -65,6 +78,7 @@ const emptyPane = (): DualPaneState => ({
   active: 0,
   selection: [],
   anchor: null,
+  cursor: null,
 });
 
 /** 起動時の姿 ── 左右ともルートを 1 枚ずつ、焦点は左。 */
@@ -102,7 +116,7 @@ export const paneOf = (state: DualState, side: DualSide): DualPaneState =>
 export function withScope(pane: DualPaneState, lid: string | null): DualPaneState {
   if (paneScope(pane) === lid) return pane;
   const tabs = pane.tabs.map((t, i) => (i === pane.active ? { scopeLid: lid } : t));
-  return { ...pane, tabs, selection: [], anchor: null };
+  return { ...pane, tabs, selection: [], anchor: null, cursor: null };
 }
 
 /**
@@ -146,7 +160,7 @@ export function withTabClosed(pane: DualPaneState, index: number): DualPaneState
 /** 別のタブへ移る。⚠ 範囲外は無視(state を壊さない)。 */
 export function withTabActive(pane: DualPaneState, index: number): DualPaneState {
   if (!isTabIndex(pane, index) || index === pane.active) return pane;
-  return { ...pane, active: index, selection: [], anchor: null };
+  return { ...pane, active: index, selection: [], anchor: null, cursor: null };
 }
 
 /**
@@ -157,8 +171,19 @@ export function withSelection(
   pane: DualPaneState,
   selection: readonly string[],
   anchor: string | null,
+  /**
+   * カーソルの行き先。⚠ **省略可にしない** ── 押した行にカーソルが来ない経路が
+   * 1 つでも在ると、そこだけ「押したのに枠が動かない」になる(印は動くので、
+   * 症状は「カーソルが遅れて付いてくる」という読みにくい形で出る)。
+   */
+  cursor: string | null,
 ): DualPaneState {
-  return { ...pane, selection: [...selection], anchor };
+  return { ...pane, selection: [...selection], anchor, cursor };
+}
+
+/** カーソルだけを動かす(印には触らない ── `↑↓` の実体)。 */
+export function withCursor(pane: DualPaneState, lid: string | null): DualPaneState {
+  return pane.cursor === lid ? pane : { ...pane, cursor: lid };
 }
 
 /**
@@ -193,11 +218,24 @@ export function pruneDual(
     const selection = activeDied ? [] : p.selection.filter(alive);
     const anchor =
       !activeDied && p.anchor !== null && alive(p.anchor) ? p.anchor : null;
-    if (selection.length === p.selection.length && anchor === p.anchor && !dead) return p;
+    /**
+     * ⚠ **カーソルも落とす**(2026-08-19)── 残すと、消えた行を指したまま
+     *   `F6` を押したときに「印が無いのでカーソルの行」= **実在しない lid** を
+     *   動かそうとする(`operationTargets` の入口が汚れる)。
+     */
+    const cursor =
+      !activeDied && p.cursor !== null && alive(p.cursor) ? p.cursor : null;
+    if (
+      selection.length === p.selection.length &&
+      anchor === p.anchor &&
+      cursor === p.cursor &&
+      !dead
+    )
+      return p;
     const tabs = dead
       ? p.tabs.map((t) => (t.scopeLid !== null && !alive(t.scopeLid) ? { scopeLid: null } : t))
       : p.tabs;
-    return { ...p, tabs, selection, anchor };
+    return { ...p, tabs, selection, anchor, cursor };
   };
   const left = prune(state.left);
   const right = prune(state.right);

@@ -22,6 +22,7 @@ function meta(lid: string, order: number, title = 't-' + lid, archetype = 'text'
     status: null,
     date: null,
     archived: false,
+    bodyChars: null,
   };
 }
 const rel = (id: string, fromLid: string, toLid: string): Relation => ({

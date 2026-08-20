@@ -15,7 +15,7 @@
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { isViewMode, nextViewMode, type AppState, type ViewMode } from '@adapter/state/app-state';
 import type { EntryMeta } from '@core/model/entry-meta';
-import { filerRows, visibleSelection } from '@features/relation/filer-list';
+import { filerRows, operationTargets, visibleSelection } from '@features/relation/filer-list';
 import { archetypeLabel } from '@adapter/ui/render/sidebar';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
 import { insertText } from '@adapter/ui/render/row-swap';
@@ -25,7 +25,7 @@ import { convertPastedHtml } from '@features/markdown/html-to-markdown';
 import { resolveMime } from './attach';
 import { applyFormat, type FormatOp } from '@features/markdown/text-ops';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
-import { isEntrySort } from '@features/filter/entry-sort';
+import { isEntrySort, NATURAL_DESC } from '@features/filter/entry-sort';
 import { isPaneId, PANES } from '@features/pane-visibility';
 import { STRUCTURAL, isRelationKind } from '@features/relation/kinds';
 import { getAncestorFolders } from '@features/relation/tree';
@@ -73,6 +73,7 @@ const visibleFilerRows = (st: AppState): EntryMeta[] =>
     filterQuery: st.filterQuery,
     searchHits: st.searchHits,
     sort: st.entrySort,
+    sortDesc: st.entrySortDesc,
   });
 
 /** その entry が**既にそこに居る**か(動かす必要が無い)。 */
@@ -499,6 +500,20 @@ function writeBack(
  * 「削除は止めるのに保存は止めない」= 同じ危険に対して入口ごとに答えが違う、
  * という状態だった。⚠ **規則は 1 本**にして、本文を書き換える入口すべてに掛ける。
  */
+/**
+ * 🔴 **2 ペインの鍵 → 押しボタンの口**(2026-08-19 の作り直し)。
+ *
+ * 🔑 **実体を 2 つ作らない** ── `F5` と「写す」のボタンは**同じ関数**を通す。
+ *   分けると、断り方・確認の文言・「戻せます」の言い方が鍵とボタンで割れる
+ *   (CLAUDE.md §7。左の列と 2 ペインで `deleteFrom` を 1 本にしたのと同じ理由)。
+ * ⚠ 通すのは `run` ── 書出し中などの門(`refuseWhileBusy`)も一緒に通す。
+ */
+const DUAL_KEY_ACTION: Readonly<Record<string, string>> = {
+  'dual-copy-to-other': 'dual-copy',
+  'dual-move-to-other': 'dual-move',
+  'dual-new-folder': 'dual-mkdir',
+};
+
 const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'start-edit',
   'commit-edit',
@@ -643,12 +658,17 @@ function selectEntryOrExplain(dispatcher: Dispatcher, lid: string, what: string)
  * 経路で食い違うと、user は同じ操作なのに違う説明を受ける(CLAUDE.md §7)。
  * 🔑 **相手の集合は呼び側が渡す** ── 「いまどの面を見ているか」で推測すると、
  * 2 ペインを開いたまま左の列のボタンを押したときに**画面に無いものが消える**。
+ *
+ * @param cursor カーソルの行(`null` = その面はカーソルを持たない)。
+ *   ⚠ **省略可にしない** ── 渡し忘れた経路だけ「印が無いと断られる」に戻り、
+ *   同じ操作が面によって違う答えを返す(CLAUDE.md §7)。
  */
 function deleteFrom(
   dispatcher: Dispatcher,
   services: BinderServices,
   rows: readonly EntryMeta[],
   selection: readonly string[],
+  cursor: string | null,
 ): void {
 
     const st = dispatcher.getState();
@@ -666,7 +686,7 @@ function deleteFrom(
      * ゴミ箱へ入る**。⚠ 帯に出す数(`filer.ts`)と**同じ規則**を通す ──
      * 食い違うと「2 件を削除しますか?」と聞いて 3 件消す形になる。
      */
-    const lids = visibleSelection(rows, selection);
+    const lids = operationTargets(rows, selection, cursor);
     if (lids.length === 0) {
       /**
        * ⚠ **無言で終わらせない** ── 帯は出ているのに何も起きない dead click になる。
@@ -980,7 +1000,8 @@ const ACTIONS: Record<string, ActionHandler> = {
   'delete-selected': (dispatcher, _target, services) => {
     const st = dispatcher.getState();
     // ⚠ 押した場所は**左の列**なので、相手も左の列の集合(2 ペインの印を巻き込まない)
-    deleteFrom(dispatcher, services, visibleFilerRows(st), st.selection);
+    // ⚠ 左の列は**カーソルを持たない**(印だけの面)── だから `null`
+    deleteFrom(dispatcher, services, visibleFilerRows(st), st.selection, null);
   },
   /** 印を全部外す(#240 段②)。 */
   'clear-selection': (dispatcher) => dispatcher.dispatch({ type: 'CLEAR_SELECTION' }),
@@ -1047,6 +1068,28 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     dispatcher.dispatch({ type: 'DUAL_RENAME_BEGIN', side, lid: marked[0]! });
   },
+  /**
+   * 🔴 **列見出しを押すと並べ替える**(2026-08-19 の作り直し)。
+   *
+   * ⚠ 並びは**左の列と同じ 1 本**(`state.entrySort`)── 面ごとに別の並びを
+   *   持たせない(§7)。だから左の探す帯の `<select>` と必ず一致する。
+   * 🔑 **同じ列をもう一度押したら向きが反転する**(古典 4 実装が一致)。
+   *   ⚠ 「もう一度で手動の順へ戻す」にしない ── そちらは**上の帯・タイルの規則**で、
+   *   一覧の見出しでは「反転」が世界共通である(手動の順へは左の `<select>` で戻る)。
+   * 🔑 **別の列に移ったときは、その列の自然な向き**(`NATURAL_DESC`)── 更新と
+   *   大きさは降順から、名前は昇順から見たい。向きを持ち越すと、名前を押した瞬間に
+   *   「ん」から並ぶ。
+   */
+  'dual-sort': (dispatcher, target) => {
+    const want = target.closest('[data-pkc-sort]')?.getAttribute('data-pkc-sort');
+    if (want === null || want === undefined || !isEntrySort(want)) return;
+    const st = dispatcher.getState();
+    dispatcher.dispatch({
+      type: 'SET_ENTRY_SORT',
+      sort: want,
+      desc: st.entrySort === want ? !st.entrySortDesc : NATURAL_DESC[want],
+    });
+  },
   'dual-mkdir': (dispatcher, target) => {
     const side = dualSide(target) ?? dispatcher.getState().dual.focus;
     const st = dispatcher.getState();
@@ -1085,9 +1128,14 @@ const ACTIONS: Record<string, ActionHandler> = {
       filterQuery: st.filterQuery,
       searchHits: st.searchHits,
       sort: st.entrySort,
+      sortDesc: st.entrySortDesc,
     });
-    // ⚠ 数える相手は**いま表に出ている印**だけ(移す・消すと同じ規則)
-    const lids = visibleSelection(rows, paneOf(st.dual, side).selection);
+    // ⚠ 相手は**いま表に出ている印**、無ければ**カーソルの行**(移す・消すと同じ規則)
+    const lids = operationTargets(
+      rows,
+      paneOf(st.dual, side).selection,
+      paneOf(st.dual, side).cursor,
+    );
     if (lids.length === 0) {
       dispatcher.dispatch({
         type: 'OP_FAILED',
@@ -1147,8 +1195,10 @@ const ACTIONS: Record<string, ActionHandler> = {
         filterQuery: st.filterQuery,
         searchHits: st.searchHits,
         sort: st.entrySort,
+        sortDesc: st.entrySortDesc,
       }),
       paneOf(st.dual, side).selection,
+      paneOf(st.dual, side).cursor,
     );
   },
   /**
@@ -1168,8 +1218,9 @@ const ACTIONS: Record<string, ActionHandler> = {
       filterQuery: st.filterQuery,
       searchHits: st.searchHits,
       sort: st.entrySort,
+      sortDesc: st.entrySortDesc,
     });
-    const lids = visibleSelection(rows, pane.selection);
+    const lids = operationTargets(rows, pane.selection, pane.cursor);
     if (lids.length === 0) {
       dispatcher.dispatch({
         type: 'OP_FAILED',
@@ -2480,6 +2531,7 @@ export function bindActions(
               filterQuery: st.filterQuery,
               searchHits: st.searchHits,
               sort: st.entrySort,
+              sortDesc: st.entrySortDesc,
             }),
             paneOf(st.dual, side).selection,
           );
@@ -2643,45 +2695,26 @@ export function bindActions(
       return;
     }
     if (!typing && dualHost) {
-      const dside0 = dualHost.getAttribute('data-pkc-side');
-      /**
-       * 🔴 **F2 で名前を打ち替える**(OS のファイラ / FD と同じ鍵)。
-       * ⚠ 行に焦点があるときだけ(帯やボタンの上では出さない)。
-       */
-      if (ke.key === 'F2' && (dside0 === 'left' || dside0 === 'right')) {
-        const lid = focusedDualLid(dside0) ?? paneOf(dispatcher.getState().dual, dside0).selection[0];
-        if (lid !== undefined && lid !== null) {
-          ke.preventDefault();
-          dispatcher.dispatch({ type: 'DUAL_RENAME_BEGIN', side: dside0, lid });
-          return;
-        }
-      }
       const dside = dualHost.getAttribute('data-pkc-side');
       /**
-       * 🔴 **Tab は反対のペインへ**(FD / OS のファイラの基本操作)。
-       * ⚠ **行に焦点があるときだけ**奪う ── タブの帯やボタンに居るときまで奪うと、
-       *   キーボードで面から出られなくなる(閉じ込め)。
+       * 🔴 **鍵はぜんぶコマンド表から引く**(2026-08-19 の作り直し)。
+       *
+       * ⚠ 直す前は `F2` と `Tab` が**この場に直書き**されていた ── 操作行は
+       *   「F2 名前」と書いてあるのに、user が設定画面で割当を変えても
+       *   **F2 のまま効き、画面の字だけが変わる**(表示と実装が割れる)。
+       * 🔑 いまは `dual` 文脈のコマンド(`dual-rename` / `dual-other-pane` /
+       *   `dual-mark` / `F5` / `F6` / `F7`)として表に在り、
+       *   操作行のラベルも**同じ表**から作られる(Krusader 方式)。
+       * ⚠ **`dual` を先に見て、次に `filer`** ── 両方に在る鍵(`Enter` / `Delete`)は
+       *   `filer` 側の 1 つだけなので取り合いにならないが、順を逆にすると
+       *   `dual` 専用の鍵が `filer` の一致に食われうる。
        */
-      if (
-        ke.key === 'Tab' &&
-        !ke.ctrlKey &&
-        !ke.metaKey &&
-        !ke.altKey &&
-        (dside === 'left' || dside === 'right') &&
-        el?.closest('[data-pkc-action="dual-row"]')
-      ) {
-        const to = otherSide(dside);
-        ke.preventDefault();
-        dispatcher.dispatch({ type: 'DUAL_FOCUS', side: to });
-        const st = dispatcher.getState();
-        const lid = paneOf(st.dual, to).selection[0] ?? dualRows(st, to)[0]?.lid ?? null;
-        if (lid !== null) dualRowEl(to, lid)?.focus();
-        return;
-      }
-      const dcmd = keymap.match(ke, 'filer');
-      if ((dside === 'left' || dside === 'right') && dcmd !== null && runDualKey(dcmd, dside)) {
-        ke.preventDefault();
-        return;
+      if (dside === 'left' || dside === 'right') {
+        const dcmd = keymap.match(ke, 'dual') ?? keymap.match(ke, 'filer');
+        if (dcmd !== null && runDualKey(dcmd, dside)) {
+          ke.preventDefault();
+          return;
+        }
       }
     }
     const cmd = keymap.match(ke, 'global');
@@ -2872,6 +2905,7 @@ export function bindActions(
       filterQuery: st.filterQuery,
       searchHits: st.searchHits,
       sort: st.entrySort,
+      sortDesc: st.entrySortDesc,
     });
 
   const dualRowEl = (side: DualSide, lid: string): HTMLElement | null =>
@@ -2883,23 +2917,35 @@ export function bindActions(
       (el) => el.getAttribute('data-pkc-side') === side && el.getAttribute('data-pkc-entry') === lid,
     ) ?? null;
 
-  /** ⚠ **その側の行に焦点があるときだけ**返す(反対側の行を動かさない)。 */
-  const focusedDualLid = (side: DualSide): string | null => {
-    const el = root.ownerDocument.activeElement;
-    if (!(el instanceof HTMLElement)) return null;
-    const tr = el.closest<HTMLElement>('[data-pkc-action="dual-row"]');
-    if (tr === null || tr.getAttribute('data-pkc-side') !== side) return null;
-    return tr.getAttribute('data-pkc-entry');
-  };
+  /**
+   * 🔴 **カーソルの正本は state**(2026-08-19 の作り直し)。
+   *
+   * ⚠ 直す前は `document.activeElement` を読んでいた ── つまり**カーソルが
+   *   DOM の焦点そのもの**で、印と切り離せなかった(`↑↓` は印ごと動かすしかない)。
+   * ⚠ しかも焦点は**表を組み直すたびに消える**ので、別タブの保存が届いただけで
+   *   「いまどの行に居るか」が失われていた。
+   * 🔑 いまは state が持ち、**DOM の焦点はそれに追従するだけ**にする。
+   */
+  const dualCursor = (st: AppState, side: DualSide): string | null =>
+    paneOf(st.dual, side).cursor;
 
   /** ⚠ 端では**止まる**(巻き戻さない ── 左の列と同じ規則)。 */
   const dualRowAt = (st: AppState, side: DualSide, delta: number): string | null => {
     const rows = dualRows(st, side);
     if (rows.length === 0) return null;
-    const cur = focusedDualLid(side);
+    const cur = dualCursor(st, side);
     const i = cur === null ? -1 : rows.findIndex((m) => m.lid === cur);
     if (i === -1) return (delta > 0 ? rows[0] : rows[rows.length - 1])?.lid ?? null;
     return rows[Math.min(rows.length - 1, Math.max(0, i + delta))]?.lid ?? null;
+  };
+
+  /**
+   * 🔴 **カーソルを送る**(印には触らない)。DOM の焦点は**後から追従**させる。
+   * ⚠ `dispatch` は同期に描画まで走るので、この順でないと**古い行に focus** する。
+   */
+  const moveDualCursor = (side: DualSide, lid: string): void => {
+    dispatcher.dispatch({ type: 'DUAL_SET_CURSOR', side, lid });
+    dualRowEl(side, lid)?.focus();
   };
 
   /**
@@ -2915,8 +2961,13 @@ export function bindActions(
    */
   const carryDualFocus = (side: DualSide): void => {
     const st = dispatcher.getState();
-    const lid = paneOf(st.dual, side).selection[0] ?? dualRows(st, side)[0]?.lid ?? null;
+    const lid =
+      dualCursor(st, side) ?? paneOf(st.dual, side).selection[0] ?? dualRows(st, side)[0]?.lid ?? null;
     const row = lid === null ? null : dualRowEl(side, lid);
+    // ⚠ **カーソルを立て直す**(場所を移ると `withScope` が外すので、
+    //   立てないと次の `↑` が末尾へ飛ぶ)
+    if (lid !== null && dualCursor(dispatcher.getState(), side) !== lid)
+      dispatcher.dispatch({ type: 'DUAL_SET_CURSOR', side, lid });
     if (row !== null) {
       row.focus();
       return;
@@ -2956,16 +3007,22 @@ export function bindActions(
       });
       return true;
     }
+    /**
+     * 🔴 **行送りは「カーソルだけ」**(2026-08-19 の作り直し。設計 doc §3 行 H)。
+     *
+     * ⚠ 直す前は印ごと動かしていたので、**見て回ることが選ぶことだった** ──
+     *   3 件目まで下りると 1・2 件目の印が消えるので、飛び飛びに選べない。
+     * 🔑 印が 1 つも無ければ `F5/F6/F8` は**カーソルの行**を相手にする
+     *   (`operationTargets`)ので、「下りて F6」の動線は今までどおり通る。
+     */
     if (cmd === 'filer-row-down' || cmd === 'filer-row-up') {
       const lid = dualRowAt(st, side, cmd === 'filer-row-down' ? 1 : -1);
       if (lid === null) return false;
-      // 🔑 送ると印も動く(OS のファイラ = 焦点と選択が一致する)
-      dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid, mode: 'set' });
-      dualRowEl(side, lid)?.focus();
+      moveDualCursor(side, lid);
       return true;
     }
     if (cmd === 'filer-extend-down' || cmd === 'filer-extend-up') {
-      const from = focusedDualLid(side);
+      const from = dualCursor(st, side);
       const lid = dualRowAt(st, side, cmd === 'filer-extend-down' ? 1 : -1);
       if (lid === null) return false;
       // ⚠ 起点が無いときは、いまの行を起点に立ててから伸ばす
@@ -2974,6 +3031,45 @@ export function bindActions(
         dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid: from, mode: 'set' });
       dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid, mode: 'range' });
       dualRowEl(side, lid)?.focus();
+      return true;
+    }
+    /**
+     * 🔴 **印を付ける / 外して 1 行下へ**(FAR / Directory Opus と同型)。
+     * ⚠ **下りるところまでが 1 つの操作** ── 下りないと、同じ行に印を
+     *   付けたり外したりし続けることになる(連続して選べない)。
+     */
+    if (cmd === 'dual-mark') {
+      const lid = dualCursor(st, side);
+      if (lid === null) return false;
+      dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid, mode: 'toggle' });
+      const next = dualRowAt(dispatcher.getState(), side, 1);
+      if (next !== null) moveDualCursor(side, next);
+      return true;
+    }
+    /**
+     * 🔴 **F キーは押しボタンと同じ実体を呼ぶ**(規則を 2 つ作らない)。
+     * ⚠ `ACTIONS` を通すことで、断り方・確認・「戻せます」の言い方が
+     *   鍵とボタンで**必ず一致**する(CLAUDE.md §7)。
+     */
+    const viaButton = DUAL_KEY_ACTION[cmd];
+    if (viaButton !== undefined) {
+      const host = root.querySelector<HTMLElement>(
+        `[data-pkc-region="dual-pane"][data-pkc-side="${side}"]`,
+      );
+      if (host === null) return false;
+      run(viaButton, host);
+      return true;
+    }
+    if (cmd === 'dual-rename') {
+      const lid = dualCursor(st, side) ?? paneOf(st.dual, side).selection[0] ?? null;
+      if (lid === null) return false;
+      dispatcher.dispatch({ type: 'DUAL_RENAME_BEGIN', side, lid });
+      return true;
+    }
+    if (cmd === 'dual-other-pane') {
+      const to = otherSide(side);
+      dispatcher.dispatch({ type: 'DUAL_FOCUS', side: to });
+      carryDualFocus(to);
       return true;
     }
     if (cmd === 'filer-select-all') {
@@ -2995,7 +3091,7 @@ export function bindActions(
       return true;
     }
     if (cmd === 'filer-open') {
-      const lid = focusedDualLid(side) ?? paneOf(st.dual, side).selection[0] ?? null;
+      const lid = dualCursor(st, side) ?? paneOf(st.dual, side).selection[0] ?? null;
       if (lid === null) return false;
       // フォルダなら中へ(2 クリックと同じ ── 規則は `DUAL_SET_SCOPE` 1 か所)
       if (st.entryMetas.get(lid)?.archetype === 'folder') {
@@ -3014,7 +3110,13 @@ export function bindActions(
      *   このペインのものにして渡す。
      */
     if (cmd === 'filer-trash') {
-      deleteFrom(dispatcher, services, dualRows(st, side), paneOf(st.dual, side).selection);
+      deleteFrom(
+        dispatcher,
+        services,
+        dualRows(st, side),
+        paneOf(st.dual, side).selection,
+        paneOf(st.dual, side).cursor,
+      );
       return true;
     }
     return false;
@@ -3126,6 +3228,26 @@ export function bindActions(
     const lid = el.getAttribute('data-pkc-entry');
     if (lid !== null) commitDualRename(lid, el.value);
   };
+  /**
+   * 🔴 **DOM の焦点が行に入ったら、カーソルもそこへ**(2026-08-19 の作り直し)。
+   *
+   * ⚠ カーソルの正本は state だが、**焦点は state を通らずに動くことがある** ──
+   *   `Tab` で表へ入る / `click` の既定 / `carryDualFocus` の立て直し。
+   *   橋を架けないと「枠は左の行に見えているのに、`↓` は先頭から始まる」になる。
+   * ⚠ 逆向き(state → 焦点)は `moveDualCursor` が持つ。**2 本の橋で 1 つの値**を
+   *   同期させる形なので、どちらも**同じ値なら何もしない**(reducer が畳む)。
+   */
+  const onDualFocusIn = (ev: Event): void => {
+    const tr = (ev.target as HTMLElement | null)?.closest<HTMLElement>(
+      '[data-pkc-action="dual-row"]',
+    );
+    if (tr === null || tr === undefined) return;
+    const side = tr.getAttribute('data-pkc-side');
+    const lid = tr.getAttribute('data-pkc-entry');
+    if ((side !== 'left' && side !== 'right') || lid === null) return;
+    dispatcher.dispatch({ type: 'DUAL_SET_CURSOR', side, lid });
+  };
+  root.addEventListener('focusin', onDualFocusIn);
   root.addEventListener('focusout', onRenameBlur);
   doc.addEventListener('keydown', onShortcut);
   root.addEventListener('keydown', onKeydown);
@@ -3134,6 +3256,7 @@ export function bindActions(
     root.removeEventListener('mousedown', onMousedown);
     root.removeEventListener('input', onInput);
     root.removeEventListener('change', onChange);
+    root.removeEventListener('focusin', onDualFocusIn);
     root.removeEventListener('focusout', onRenameBlur);
     doc.removeEventListener('keydown', onShortcut);
     root.removeEventListener('keydown', onKeydown);

@@ -40,7 +40,14 @@ export const CONTEXT_LABELS: Readonly<Record<KeyContext, string>> = {
   append: '継ぎ足しの欄',
   row: '1 面の編集(開いている行の欄)',
   live: '1 面の編集(面そのもの)',
-  filer: 'フォルダの表(行に焦点があるとき)',
+  /**
+   * ⚠ **2 ペインでも効く**(2026-08-20)── 開く / ゴミ箱 / 行送りは両方の面で
+   *   同じ意味なので `filer` 1 つのままにしてある(user に同じ操作を 2 回
+   *   割り当て直させない)。見出しがどちらか一方だけを名乗ると**嘘になる**。
+   */
+  filer: 'フォルダの表と 2 ペイン(行に焦点があるとき)',
+  /** ⚠ こちらは**2 ペインにしか存在しない操作**だけ(反対側へ写す / 移す など)。 */
+  dual: '2 ペインだけの操作(そのペインに焦点があるとき)',
 };
 
 /** 並びの順。⚠ `KEY_COMMANDS` の並びを尊重しつつ、文脈ごとに固める。 */
@@ -54,6 +61,10 @@ export const CONTEXT_LABELS: Readonly<Record<KeyContext, string>> = {
 const CONTEXT_ORDER: readonly KeyContext[] = [
   'global',
   'filer',
+  // ⚠ **`filer` の次に置く**(近い面どうしを離さない)。⚠ 足し忘れると、
+  //   `dual` しか名乗らないコマンドが `primaryContext` の既定で
+  //   **「画面のどこでも」の下へ落ちる**(嘘の見出し。test が全数で突き合わせる)。
+  'dual',
   'editor',
   'append',
   'row',

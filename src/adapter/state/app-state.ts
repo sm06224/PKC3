@@ -8,7 +8,7 @@
  *   selectedLid が選択の単一情報源
  */
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
-import { DEFAULT_ENTRY_SORT, type EntrySort } from '@features/filter/entry-sort';
+import { DEFAULT_ENTRY_SORT, NATURAL_DESC, type EntrySort } from '@features/filter/entry-sort';
 import { resolveCanonicalParents, reorderSibling } from '@features/relation/tree';
 import { extractMeta, seedBodyFor } from '@features/flavor';
 import { applyBodyRewrite, type BodyRewrite } from '@features/markdown/body-rewrite';
@@ -43,6 +43,7 @@ import {
   withPane,
   withScope as withPaneScope,
   withSelection as withPaneSelection,
+  withCursor,
   isTabIndex,
   withTabActive,
   withTabAdded,
@@ -295,6 +296,13 @@ export interface AppState {
    */
   entrySort: EntrySort;
   /**
+   * 🔴 **並びの向き**(2026-08-19、2 ペインの列見出しを押せるようにした)。
+   * ⚠ **`entrySort` に埋め込まない** ── 「更新は降順」のような決め打ちを
+   *   `sortOrder` の中に置いていたので、user が反転できなかった。
+   * 🔑 既定は並びごとの自然な向き(`NATURAL_DESC`)。
+   */
+  entrySortDesc: boolean;
+  /**
    * `searchHits` が**どの問い合わせの結果か**。⚠ これが無いと、遅れて返った
    * 古い結果を新しい問い合わせの答えとして表示してしまう(打鍵は結果より速い)。
    */
@@ -416,6 +424,7 @@ export const initialState: AppState = {
   searchHits: null,
   selectionHistory: EMPTY_HISTORY,
   entrySort: DEFAULT_ENTRY_SORT,
+  entrySortDesc: NATURAL_DESC[DEFAULT_ENTRY_SORT],
   searchHitsQuery: '',
   queryKey: null,
   queryKeys: null,
@@ -442,7 +451,12 @@ export type UserAction =
   /** 本文の当たりが SQL から返った(#181)。⚠ `query` は**どの問い合わせの答えか**。 */
   | { type: 'SET_SEARCH_HITS'; query: string; lids: string[] }
   /** 一覧の並び順を変える(#183)。⚠ 選択は消さない(絞り込みと同じ規約)。 */
-  | { type: 'SET_ENTRY_SORT'; sort: EntrySort }
+  | {
+      type: 'SET_ENTRY_SORT';
+      sort: EntrySort;
+      /** 省略 = その並びの自然な向き(`NATURAL_DESC`)。 */
+      desc?: boolean;
+    }
   /**
    * 集計の束ね方を選ぶ(#184)。`null` = まだ選んでいない。
    * ⚠ 選び直しは**必ず問い合わせ直す** ── 前の key の表を残すと、
@@ -663,6 +677,12 @@ export type UserAction =
    * `range` = 起点から表示順で)── 面ごとに違う規則を作らない。
    */
   | { type: 'DUAL_SELECT'; side: DualSide; lid: string; mode: 'set' | 'toggle' | 'range' }
+  /**
+   * 🔴 **カーソルだけを動かす**(2026-08-19 の作り直し)。⚠ 印には触らない ──
+   * 触ると `↑↓` が「見て回る」と「選ぶ」を兼ねてしまい、分けた意味が消える。
+   * ⚠ `lid` が実在しなければ**何もしない**(消えた行を指さない)。
+   */
+  | { type: 'DUAL_SET_CURSOR'; side: DualSide; lid: string }
   | { type: 'DUAL_TAB_ADD'; side: DualSide }
   | { type: 'DUAL_TAB_CLOSE'; side: DualSide; index: number }
   | { type: 'DUAL_TAB_ACTIVATE'; side: DualSide; index: number }
@@ -1186,10 +1206,13 @@ function reduceCore(
         state: { ...state, filterQuery: action.query, searchHits: null, searchHitsQuery: '' },
         events: [{ type: 'REQUEST_SEARCH', query: action.query }],
       };
-    case 'SET_ENTRY_SORT':
+    case 'SET_ENTRY_SORT': {
       // ⚠ 選択は消さない ── 並び替えただけで開いているノートが変わると驚く
-      if (state.entrySort === action.sort) return { state, events: [] };
-      return { state: { ...state, entrySort: action.sort }, events: [] };
+      const desc = action.desc ?? NATURAL_DESC[action.sort];
+      if (state.entrySort === action.sort && state.entrySortDesc === desc)
+        return { state, events: [] };
+      return { state: { ...state, entrySort: action.sort, entrySortDesc: desc }, events: [] };
+    }
     case 'SET_QUERY_KEY': {
       if (state.queryKey === action.key) return { state, events: [] };
       /**
@@ -1918,6 +1941,7 @@ function reduceCore(
         filterQuery: state.filterQuery,
         searchHits: state.searchHits,
         sort: state.entrySort,
+        sortDesc: state.entrySortDesc,
       });
       const range = rangeInRows(rows, state.selectionAnchor, action.lid);
       if (range.length === 0) return { state, events: [] };
@@ -1931,6 +1955,7 @@ function reduceCore(
         filterQuery: state.filterQuery,
         searchHits: state.searchHits,
         sort: state.entrySort,
+        sortDesc: state.entrySortDesc,
       }).map((m) => m.lid);
       if (rows.length === 0) return { state, events: [] };
       return {
@@ -2000,6 +2025,8 @@ function reduceCore(
         status: ext.status,
         date: ext.date,
         archived: ext.archived,
+        // ⚠ worker が同じ本文から数え直す値と**同じ式**で置く(§7)
+        bodyChars: body.length,
       };
       /**
        * 🔴 **いま見ているフォルダの中に作る**(2026-08-05)。
@@ -2427,25 +2454,44 @@ function reduceCore(
         filterQuery: state.filterQuery,
         searchHits: state.searchHits,
         sort: state.entrySort,
+        sortDesc: state.entrySortDesc,
       });
       let next: DualPaneState;
       if (action.mode === 'range') {
         const range = rangeInRows(rows, pane.anchor, action.lid);
         if (range.length === 0) return { state, events: [] };
         // ⚠ 起点は動かさない(動かすと Shift を押すたびに範囲が縮む)
-        next = withPaneSelection(pane, range, pane.anchor);
+        // ⚠ カーソルは**押した行**へ(範囲の端であって、起点ではない)
+        next = withPaneSelection(pane, range, pane.anchor, action.lid);
       } else if (action.mode === 'toggle') {
         const has = pane.selection.includes(action.lid);
         const sel = has
           ? pane.selection.filter((l) => l !== action.lid)
           : [...pane.selection, action.lid];
         // ⚠ 起点は**外したときも**更新する(次の Shift はここから伸ばす)
-        next = withPaneSelection(pane, sel, action.lid);
+        next = withPaneSelection(pane, sel, action.lid, action.lid);
       } else {
-        next = withPaneSelection(pane, [action.lid], action.lid);
+        next = withPaneSelection(pane, [action.lid], action.lid, action.lid);
       }
       return {
         state: { ...state, dual: { ...withPane(state.dual, action.side, next), focus: action.side } },
+        events: [],
+      };
+    }
+    case 'DUAL_SET_CURSOR': {
+      if (!state.entryMetas.has(action.lid)) return { state, events: [] };
+      const pane = paneOf(state.dual, action.side);
+      if (pane.cursor === action.lid && state.dual.focus === action.side)
+        return { state, events: [] };
+      return {
+        state: {
+          ...state,
+          dual: {
+            ...withPane(state.dual, action.side, withCursor(pane, action.lid)),
+            // ⚠ 動かした側が「元」になる(押した側が焦点、と同じ規則)
+            focus: action.side,
+          },
+        },
         events: [],
       };
     }
@@ -2471,7 +2517,15 @@ function reduceCore(
       return {
         state: {
           ...state,
-          dual: withPane(state.dual, action.side, withPaneSelection(pane, [], null)),
+          /**
+           * ⚠ **カーソルは残す**(2026-08-19)── ここは「移した直後に印を外す」
+           *   ための入口なので、カーソルまで消すと**次の 1 打鍵が先頭へ飛ぶ**。
+           */
+          dual: withPane(
+            state.dual,
+            action.side,
+            withPaneSelection(pane, [], null, pane.cursor),
+          ),
         },
         events: [],
       };

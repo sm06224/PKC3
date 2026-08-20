@@ -24,6 +24,7 @@ function meta(lid: string, order: number): EntryMeta {
     status: null,
     date: null,
     archived: false,
+    bodyChars: null,
   };
 }
 

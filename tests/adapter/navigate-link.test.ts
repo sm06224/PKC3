@@ -35,6 +35,7 @@ const META = (lid: string): EntryMeta => ({
   status: 'open',
   date: null,
   archived: false,
+  bodyChars: null,
 });
 
 /**

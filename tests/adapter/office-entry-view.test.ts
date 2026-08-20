@@ -171,6 +171,7 @@ function setupDetail(body: string) {
     status: null,
     date: null,
     archived: false,
+    bodyChars: null,
   };
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta], relations: [] });
   return { d, root };

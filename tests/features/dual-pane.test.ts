@@ -37,7 +37,7 @@ describe('2 ペインの持ち物(#241 段⑥)', () => {
   });
 
   it('🔴 場所が変わったら印も起点も外れる', () => {
-    const marked = withSelection(initialDual.left, ['a', 'b'], 'b');
+    const marked = withSelection(initialDual.left, ['a', 'b'], 'b', 'b');
     expect(marked.selection, '前提が崩れている').toHaveLength(2);
     const moved = withScope(marked, 'f1');
     expect(moved.selection, '見えていないものが選ばれたまま').toEqual([]);
@@ -45,7 +45,7 @@ describe('2 ペインの持ち物(#241 段⑥)', () => {
   });
 
   it('同じ場所へ動かしても、何も起きない(印を無駄に捨てない)', () => {
-    const marked = withSelection(initialDual.left, ['a'], 'a');
+    const marked = withSelection(initialDual.left, ['a'], 'a', 'a');
     expect(withScope(marked, null), '同じ場所で印が捨てられた').toBe(marked);
   });
 
@@ -114,8 +114,8 @@ describe('2 ペインの持ち物(#241 段⑥)', () => {
   });
 
   it('🔴 消えた lid は印から落ちる(実在しないものを数えない)', () => {
-    let s = withPane(initialDual, 'left', withSelection(initialDual.left, ['a', 'b'], 'b'));
-    s = withPane(s, 'right', withSelection(initialDual.right, ['c'], 'c'));
+    let s = withPane(initialDual, 'left', withSelection(initialDual.left, ['a', 'b'], 'b', 'b'));
+    s = withPane(s, 'right', withSelection(initialDual.right, ['c'], 'c', 'c'));
     const pruned = pruneDual(s, (lid) => lid === 'a');
     expect(pruned.left.selection, '消えたものが左に残った').toEqual(['a']);
     expect(pruned.left.anchor, '消えたものが起点に残った').toBeNull();
@@ -145,12 +145,17 @@ describe('2 ペインの持ち物(#241 段⑥)', () => {
    * ⚠ 裏のタブが死んだだけでは外さない ── いま見えているものは変わっていない。
    */
   it('🔴 開いているタブの場所が死んだら、印も外れる', () => {
-    const left = withSelection(withScope(initialDual.left, 'gone'), ['m'], 'm');
-    const right = withSelection(withTabAdded(withScope(initialDual.right, 'gone')), ['m'], 'm');
+    const left = withSelection(withScope(initialDual.left, 'gone'), ['m'], 'm', 'm');
+    const right = withSelection(
+      withTabAdded(withScope(initialDual.right, 'gone')),
+      ['m'],
+      'm',
+      'm',
+    );
     // 右は 2 枚目(生きているルート)を開いたまま、1 枚目の行き先だけが死ぬ
     const rightBack = withTabActive(withScope(right, null), 1);
     let s = withPane(initialDual, 'left', left);
-    s = withPane(s, 'right', withSelection(rightBack, ['m'], 'm'));
+    s = withPane(s, 'right', withSelection(rightBack, ['m'], 'm', 'm'));
     expect(s.right.tabs[0]?.scopeLid, '前提が崩れている').toBe('gone');
     const pruned = pruneDual(s, (lid) => lid === 'm');
     expect(pruned.left.selection, '見ている場所が変わったのに印が残った').toEqual([]);
@@ -158,8 +163,31 @@ describe('2 ペインの持ち物(#241 段⑥)', () => {
     expect(pruned.right.selection, '裏のタブの都合で、見えている印まで外れた').toEqual(['m']);
   });
 
+  /**
+   * 🔴 **消えた行はカーソルからも落とす**(2026-08-20 の変異試験 M9 が生き延びて判明)。
+   *
+   * ⚠ 印だけ落としてカーソルを素通りさせると、**消えた lid を指したまま**残る ──
+   *   そこで `F6` を押すと「印が無いのでカーソルの行」= 実在しない相手を掴む
+   *   (`operationTargets` の入口が汚れる)。
+   * 🔑 `pruneDual` は「消えたものを指したまま」を**1 本で**片付ける関数である ──
+   *   印・起点・現在地・カーソルのどれか 1 つでも漏れると、その 1 つにだけ残る。
+   */
+  it('🔴 消えた行は、印だけでなくカーソルからも落ちる', () => {
+    const pane = withSelection(initialDual.left, ['dead'], 'dead', 'dead');
+    const s = withPane(initialDual, 'left', pane);
+    expect(s.left.cursor, '前提が崩れている').toBe('dead');
+    const pruned = pruneDual(s, () => false);
+    expect(pruned.left.cursor, '消えた行をカーソルが指したまま残った').toBeNull();
+    expect(pruned.left.selection, '印は落ちている(前提)').toEqual([]);
+  });
+
+  it('生きている行のカーソルは残す(掃除で場所を見失わせない)', () => {
+    const s = withPane(initialDual, 'left', withSelection(initialDual.left, [], null, 'alive'));
+    expect(pruneDual(s, (lid) => lid === 'alive').left.cursor).toBe('alive');
+  });
+
   it('落ちるものが無ければ、同じ object を返す(無駄な再描画を作らない)', () => {
-    const s = withPane(initialDual, 'left', withSelection(initialDual.left, ['a'], 'a'));
+    const s = withPane(initialDual, 'left', withSelection(initialDual.left, ['a'], 'a', 'a'));
     expect(pruneDual(s, () => true), '何も消えていないのに作り直した').toBe(s);
   });
 });

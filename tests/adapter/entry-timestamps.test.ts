@@ -191,6 +191,7 @@ function meta(lid: string, order: number, over: Partial<EntryMeta> = {}): EntryM
     status: null,
     date: null,
     archived: false,
+    bodyChars: null,
     ...over,
   };
 }
