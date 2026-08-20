@@ -153,6 +153,21 @@ async function init(dbName: string, journalMode?: JournalMode): Promise<InitResu
  *   変えていないので索引の中身は同じ値に書き直されるだけ(害は無い)。
  */
 function backfillDerivedColumns(database: Database): void {
+  /**
+   * 🔴 **回数の上限を、書込の成功と無関係に置く**(2026-08-20 の変異試験で判明)。
+   *
+   * ⚠ この `for(;;)` は「**UPDATE が条件を外す**から必ず尽きる」に賭けていた ──
+   *   変異試験で `body_chars` の代入を落としたら、同じ 200 行が永久に返り続けて
+   *   **worker が open で固まった**(test が 15 分止まり、外から殺すまで戻らない)。
+   * ⚠ これは「変異だから起きた」で済ませてよい話ではない ── 尽きる理由が
+   *   **別の行(UPDATE の列名)に握られている**形そのものが脆い。列を 1 つ足す
+   *   たびに、この不変条件を人間が思い出さなければならない。
+   * 🔑 だから**行数**で天井を張る:全件を 1 度ずつ読んだら必ず抜ける。
+   *   正しく書けている限り天井には届かない(実費 0)。
+   */
+  const ceiling =
+    Number(database.selectValue('SELECT count(*) FROM entries') ?? 0) + BACKFILL_CHUNK;
+  let seen = 0;
   for (;;) {
     /**
      * ⚠ **本文を全件いっぺんに heap へ載せない**(不可侵指示 2026-07-27
@@ -171,6 +186,9 @@ function backfillDerivedColumns(database: Database): void {
         bind: [countTaskCandidates(body).total, body.length, r.cid, r.lid],
       });
     }
+    seen += rows.length;
+    // ⚠ **進んでいないなら抜ける** ── 「尽きる」を書込の成否に依存させない
+    if (seen > ceiling) return;
     if (rows.length < BACKFILL_CHUNK) return;
   }
 }

@@ -135,7 +135,12 @@ describe('割当の検め', () => {
   it('文字を打つ鍵でないものは修飾なしで許す(既定がそう作られている)', () => {
     // ⚠ ここを閉じると **自分の既定(Tab / Escape / F1)が自分の検査に落ちる**
     expect(validateBinding('row-commit', 'Tab', base)).toBeNull();
-    expect(validateBinding('open-help', 'F7', base)).toBeNull();
+    /**
+     * ⚠ **空いている鍵で試す** ── `F7` は 2026-08-19 に
+     *   `dual-new-folder`(古典 4 実装が一致している割当)が取ったので、
+     *   ここで使うと**衝突の検出が正しく働いた**ことを失敗として読むことになる。
+     */
+    expect(validateBinding('open-help', 'F9', base)).toBeNull();
   });
 
   it('🔴 コピー・貼り付けなどは横取りさせない', () => {

@@ -43,6 +43,7 @@ import {
   withPane,
   withScope as withPaneScope,
   withSelection as withPaneSelection,
+  withCursor,
   isTabIndex,
   withTabActive,
   withTabAdded,
@@ -676,6 +677,12 @@ export type UserAction =
    * `range` = 起点から表示順で)── 面ごとに違う規則を作らない。
    */
   | { type: 'DUAL_SELECT'; side: DualSide; lid: string; mode: 'set' | 'toggle' | 'range' }
+  /**
+   * 🔴 **カーソルだけを動かす**(2026-08-19 の作り直し)。⚠ 印には触らない ──
+   * 触ると `↑↓` が「見て回る」と「選ぶ」を兼ねてしまい、分けた意味が消える。
+   * ⚠ `lid` が実在しなければ**何もしない**(消えた行を指さない)。
+   */
+  | { type: 'DUAL_SET_CURSOR'; side: DualSide; lid: string }
   | { type: 'DUAL_TAB_ADD'; side: DualSide }
   | { type: 'DUAL_TAB_CLOSE'; side: DualSide; index: number }
   | { type: 'DUAL_TAB_ACTIVATE'; side: DualSide; index: number }
@@ -2454,19 +2461,37 @@ function reduceCore(
         const range = rangeInRows(rows, pane.anchor, action.lid);
         if (range.length === 0) return { state, events: [] };
         // ⚠ 起点は動かさない(動かすと Shift を押すたびに範囲が縮む)
-        next = withPaneSelection(pane, range, pane.anchor);
+        // ⚠ カーソルは**押した行**へ(範囲の端であって、起点ではない)
+        next = withPaneSelection(pane, range, pane.anchor, action.lid);
       } else if (action.mode === 'toggle') {
         const has = pane.selection.includes(action.lid);
         const sel = has
           ? pane.selection.filter((l) => l !== action.lid)
           : [...pane.selection, action.lid];
         // ⚠ 起点は**外したときも**更新する(次の Shift はここから伸ばす)
-        next = withPaneSelection(pane, sel, action.lid);
+        next = withPaneSelection(pane, sel, action.lid, action.lid);
       } else {
-        next = withPaneSelection(pane, [action.lid], action.lid);
+        next = withPaneSelection(pane, [action.lid], action.lid, action.lid);
       }
       return {
         state: { ...state, dual: { ...withPane(state.dual, action.side, next), focus: action.side } },
+        events: [],
+      };
+    }
+    case 'DUAL_SET_CURSOR': {
+      if (!state.entryMetas.has(action.lid)) return { state, events: [] };
+      const pane = paneOf(state.dual, action.side);
+      if (pane.cursor === action.lid && state.dual.focus === action.side)
+        return { state, events: [] };
+      return {
+        state: {
+          ...state,
+          dual: {
+            ...withPane(state.dual, action.side, withCursor(pane, action.lid)),
+            // ⚠ 動かした側が「元」になる(押した側が焦点、と同じ規則)
+            focus: action.side,
+          },
+        },
         events: [],
       };
     }
@@ -2492,7 +2517,15 @@ function reduceCore(
       return {
         state: {
           ...state,
-          dual: withPane(state.dual, action.side, withPaneSelection(pane, [], null)),
+          /**
+           * ⚠ **カーソルは残す**(2026-08-19)── ここは「移した直後に印を外す」
+           *   ための入口なので、カーソルまで消すと**次の 1 打鍵が先頭へ飛ぶ**。
+           */
+          dual: withPane(
+            state.dual,
+            action.side,
+            withPaneSelection(pane, [], null, pane.cursor),
+          ),
         },
         events: [],
       };

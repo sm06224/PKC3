@@ -2726,12 +2726,40 @@ select:focus-visible {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
-/* 印は**地の明度**(フォルダ面と同じ規則 ── 面ごとに別の見え方を作らない)。 */
-[data-pkc-region='dual-table'] tbody tr[data-pkc-marked] {
+/* 🔴 **行の 4 状態を、別の見え方にする**(2026-08-19 の作り直し。設計 doc §3 行 H)。
+ *
+ * ⚠ 直す前は **印(`marked`)と hover が同じ色**(実測どちらも `#f5f6f8`)で、
+ *   しかもカーソルが**そもそも無かった** ── 「いまどの行に居るか」も
+ *   「どれを選んだか」も画面から読めない状態だった。
+ * 🔑 手を分ける:**印は地の明度 / カーソルは輪郭 / hover はもっと薄い地**。
+ *   同じ手(地の明度)を 2 つの意味に使わないので、**印の付いた行にカーソルが
+ *   在る**という 4 つ目の状態も、重ねるだけで読める。
+ * ⚠ カーソルは `outline`(`border` ではない)── `border` は行の高さを変えるので、
+ *   送るたびに下の行がずれて狙えなくなる。 */
+[data-pkc-region='dual-table'] tbody tr[data-pkc-marked] td {
   background: var(--surface-2);
+  font-weight: 600;
 }
 [data-pkc-region='dual-table'] tbody tr:hover td {
   background: var(--surface-2);
+}
+[data-pkc-region='dual-table'] tbody tr[data-pkc-cursor] {
+  outline: 1px solid var(--muted);
+  outline-offset: -1px;
+}
+/* ⚠ **焦点のあるペインのカーソルだけ**を濃くする ── 2 本とも同じ濃さだと、
+ *   どちらが「元」か分からなくなる(帯の地色と同じことを行でも言う)。 */
+[data-pkc-region='dual-pane'][data-pkc-focused]
+  [data-pkc-region='dual-table']
+  tbody
+  tr[data-pkc-cursor] {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+/* ⚠ 行そのものの `:focus` は**描かない**(カーソルの輪郭と二重になる)。
+ *   到達性は `data-pkc-cursor` が受け持つ ── 焦点は必ずカーソルに追従する。 */
+[data-pkc-region='dual-table'] tbody tr:focus {
+  outline: none;
 }
 [data-pkc-field='dual-empty'] {
   color: var(--muted);

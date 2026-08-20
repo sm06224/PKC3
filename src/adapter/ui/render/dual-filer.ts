@@ -31,6 +31,8 @@ import { filerRows } from '@features/relation/filer-list';
 import { normalizeQuery } from '@features/filter/title-filter';
 import { getAncestorFolders } from '@features/relation/tree';
 import { formatListDate } from '@features/datetime/stored-date';
+import { chordLabel, findCommand } from '@features/keymap';
+import { appKeymap, type KeymapStore } from './keymap';
 import { ARCHETYPE_ICONS, iconSpan } from './icons';
 
 /**
@@ -84,6 +86,74 @@ export function formatBodyChars(chars: number | null): string {
   return `${(chars / 1_000_000).toFixed(1)}M`;
 }
 
+/**
+ * 🔴 **操作行の並び**(2026-08-19 の作り直し)。
+ *
+ * ⚠ **並びは固定**(不可侵指示「同じものが常に同じ場所にある」)── 焦点が
+ *   変わっても**位置も文言も動かない**。変わるのは説明(`title`)だけ。
+ * 🔑 割当は古典 4 実装(Total Commander / Double Commander / FAR / Krusader)で
+ *   一致している **F5 写す / F6 移す / F7 作る / F8 消す**。⚠ ただし**鍵は
+ *   ここに書かない** ── `command` から `keymap` を引く(user が変えたら追従する)。
+ */
+const COMMAND_ITEMS: readonly {
+  /** 押しボタンの口(`data-pkc-action`)。 */
+  readonly action: string;
+  /** その操作の鍵を引くコマンド id(⚠ `action` とは**別物**)。 */
+  readonly command: string;
+  readonly label: string;
+  /** 説明。⚠ 「元」と「先」の呼び名は**焦点で入れ替わる**ので、関数で受ける。 */
+  readonly hint: (from: string, to: string) => string;
+  /**
+   * 印が 1 つも無いときの断り。`null` = 印を要らない操作。
+   *
+   * ⚠ **呼び名から機械的に組まない**(2026-08-19)── 1 稿目は
+   *   `${label}ものを選んでから` と書いていたので、ゴミ箱だけ
+   *   **「ゴミ箱ものを選んでから押してください」**という日本語になっていた
+   *   (入れ物の名と、動作の名が混ざる)。文言は**押した場所と対で pin する**
+   *   (CLAUDE.md §1)。
+   */
+  readonly empty: string | null;
+}[] = [
+  {
+    action: 'dual-copy',
+    command: 'dual-copy-to-other',
+    label: '写す',
+    hint: (from, to) => `${from}で選んだものを、${to}のペインへ写します(元は残ります)`,
+    empty: '写すものを選んでから押してください',
+  },
+  {
+    action: 'dual-move',
+    command: 'dual-move-to-other',
+    label: '移す',
+    hint: (from, to) => `${from}で選んだものを、${to}のペインへ移します`,
+    empty: '移すものを選んでから押してください',
+  },
+  {
+    action: 'dual-rename-begin',
+    command: 'dual-rename',
+    label: '名前',
+    hint: () => '選んだ 1 件の名前を、その場で打ち替えます',
+    empty: null,
+  },
+  {
+    action: 'dual-mkdir',
+    command: 'dual-new-folder',
+    label: 'フォルダ',
+    hint: (from) => `${from}のペインが開いている場所に、新しいフォルダを作ります`,
+    empty: null,
+  },
+  {
+    action: 'dual-delete',
+    command: 'filer-trash',
+    label: 'ゴミ箱',
+    hint: (from) => `${from}で選んだものを、ゴミ箱へ入れます(あとで戻せます)`,
+    empty: 'ゴミ箱へ入れるものを選んでから押してください',
+  },
+];
+
+const otherSideLabel = (side: DualSide): string =>
+  SIDE_LABEL[side === 'left' ? 'right' : 'left'];
+
 /** 1 つのペインの部品(器は 1 度だけ作る)。 */
 interface PaneFrame {
   root: HTMLElement;
@@ -102,12 +172,33 @@ interface PaneFrame {
   /** 印の指紋(内容で見る ── 配列は毎回作り直される)。 */
   marks: string;
   /**
+   * 🔴 **いまカーソルが在る行**(2026-08-19)。⚠ 印と**別に持つ** ── 同じ変数に
+   * 詰めると、印を塗り直すたびにカーソルまで動く(分けた意味が消える)。
+   */
+  cursor: string;
+  /**
    * 🔴 **いま表に出ている印の数**(着地前レビュー R5)。
    * ⚠ 真ん中の操作の文言もここから読む ── 生の `selection.length` を使うと、
    *   「1 件を…入れます」と書いてあるのに押すと「移すものを選んでください」に
    *   なる(絞り込みで消えた印がそのまま数に入る)。**同じ問いに 3 つ目の口を作らない。**
    */
   shownMarks: number;
+}
+
+/**
+ * 🔴 **操作行に出す鍵は、割当の表から引く**(2026-08-19。Krusader 方式)。
+ *
+ * ⚠ 直書きすると、user が設定画面で割当を変えた瞬間に**画面が嘘をつく**
+ *   (「F6 移す」と書いてあるのに F6 では動かない)。
+ * 🔑 **関数キーを優先**する ── ここは古典の「ファンクションキー行」であって、
+ *   `Delete` のような別名まで拾うと帯の意味が変わる。関数キーが 1 つも
+ *   割り当てられていなければ、素直に先頭の割当を出す(無い、とは書かない)。
+ */
+function barKey(id: string, keymap: KeymapStore): string {
+  const list = keymap.getBindings()[id] ?? findCommand(id)?.defaults ?? [];
+  const fn = list.find((c) => /^F(?:[1-9]|1[0-9]|2[0-4])$/.test(c));
+  const pick = fn ?? list[0];
+  return pick === undefined ? '' : chordLabel(pick);
 }
 
 export class DualFilerRenderer {
@@ -129,7 +220,11 @@ export class DualFilerRenderer {
   private lastSortDesc: boolean | null = null;
   private lastHits: AppState['searchHits'] = null;
 
-  constructor(region: HTMLElement) {
+  constructor(
+    region: HTMLElement,
+    /** ⚠ 差し替えられるようにしておく(test が保存を持たない store を渡す)。 */
+    private readonly keymap: KeymapStore = appKeymap,
+  ) {
     this.region = region;
   }
 
@@ -266,6 +361,7 @@ export class DualFilerRenderer {
       rows: new Map(),
       signature: null,
       marks: '',
+      cursor: '',
       shownMarks: 0,
     };
   }
@@ -328,6 +424,9 @@ export class DualFilerRenderer {
     if (signature !== frame.signature) {
       frame.signature = signature;
       frame.marks = '';
+      // ⚠ 行の object ごと入れ替わるので、**カーソルの指紋も捨てる** ──
+      //   捨てないと「同じ lid だから塗らない」で **枠が消えたまま**になる
+      frame.cursor = '';
       this.renderTable(frame, side, rows, filtered, renaming, state.entrySort, state.entrySortDesc);
     }
     const marks = pane.selection.join(' ');
@@ -338,6 +437,17 @@ export class DualFilerRenderer {
         if (set.has(lid)) el.setAttribute('data-pkc-marked', '');
         else el.removeAttribute('data-pkc-marked');
       }
+    }
+    /**
+     * 🔴 **カーソルは属性の付け替えで塗る**(印と同じ作法 ── 表を組み直さない)。
+     * ⚠ 組み直すと、押す寸前の行が作り直されて dead click になる。
+     */
+    const cursor = pane.cursor ?? '';
+    if (cursor !== frame.cursor) {
+      const prev = frame.rows.get(frame.cursor);
+      if (prev) prev.removeAttribute('data-pkc-cursor');
+      frame.cursor = cursor;
+      frame.rows.get(cursor)?.setAttribute('data-pkc-cursor', '');
     }
     /**
      * 🔴 **数えるのは「いま表に出ている印」だけ**(#240 の着地前レビュー 2)。
@@ -609,68 +719,17 @@ export class DualFilerRenderer {
     const from = state.dual.focus;
     // ⚠ 数えるのは**いま表に出ている印**だけ(件数の行・移す対象と同じ規則)
     const count = frame.shownMarks;
-    const sig = `${from}${SEP}${count}`;
+    /**
+     * ⚠ **鍵の字も指紋に入れる**(2026-08-19)── 入れないと、設定画面で割当を
+     *   変えて戻ってきたときに**古い鍵が出たまま**になる(画面が嘘をつく)。
+     */
+    const keys = COMMAND_ITEMS.map((it) => barKey(it.command, this.keymap));
+    const sig = [from, String(count), ...keys].join(SEP);
     if (sig === this.lastCommands) return;
     this.lastCommands = sig;
-    const to = from === 'left' ? 'right' : 'left';
-    /**
-     * ⚠ **並びは固定**(不可侵指示「同じものが常に同じ場所にある」)── 焦点が
-     *   変わっても**位置も文言も動かない**。変わるのは説明(`title`)だけ。
-     */
-    const items: readonly {
-      action: string;
-      key: string;
-      label: string;
-      hint: string;
-      /**
-       * 印が 1 つも無いときの断り。`null` = 印を要らない操作。
-       *
-       * ⚠ **呼び名から機械的に組まない**(2026-08-19)── 1 稿目は
-       *   `${label}ものを選んでから` と書いていたので、ゴミ箱だけ
-       *   **「ゴミ箱ものを選んでから押してください」**という日本語になっていた
-       *   (入れ物の名と、動作の名が混ざる)。文言は**押した場所と対で pin する**
-       *   (CLAUDE.md §1)。
-       */
-      empty: string | null;
-    }[] = [
-      {
-        action: 'dual-copy',
-        key: 'F5',
-        label: '写す',
-        hint: `${SIDE_LABEL[from]}で選んだものを、${SIDE_LABEL[to]}のペインへ写します(元は残ります)`,
-        empty: '写すものを選んでから押してください',
-      },
-      {
-        action: 'dual-move',
-        key: 'F6',
-        label: '移す',
-        hint: `${SIDE_LABEL[from]}で選んだものを、${SIDE_LABEL[to]}のペインへ移します`,
-        empty: '移すものを選んでから押してください',
-      },
-      {
-        action: 'dual-rename-begin',
-        key: 'F2',
-        label: '名前',
-        hint: '選んだ 1 件の名前を、その場で打ち替えます',
-        empty: null,
-      },
-      {
-        action: 'dual-mkdir',
-        key: 'F7',
-        label: 'フォルダ',
-        hint: `${SIDE_LABEL[from]}のペインが開いている場所に、新しいフォルダを作ります`,
-        empty: null,
-      },
-      {
-        action: 'dual-delete',
-        key: 'F8',
-        label: 'ゴミ箱',
-        hint: `${SIDE_LABEL[from]}で選んだものを、ゴミ箱へ入れます(あとで戻せます)`,
-        empty: 'ゴミ箱へ入れるものを選んでから押してください',
-      },
-    ];
+    const to = otherSideLabel(from);
     host.textContent = '';
-    for (const it of items) {
+    COMMAND_ITEMS.forEach((it, i) => {
       const b = document.createElement('button');
       b.type = 'button';
       b.setAttribute('data-pkc-action', it.action);
@@ -681,7 +740,7 @@ export class DualFilerRenderer {
        */
       const key = document.createElement('span');
       key.setAttribute('data-pkc-field', 'cmd-key');
-      key.textContent = it.key;
+      key.textContent = keys[i] ?? '';
       const label = document.createElement('span');
       label.setAttribute('data-pkc-field', 'cmd-label');
       label.textContent = it.label;
@@ -689,8 +748,8 @@ export class DualFilerRenderer {
       b.title =
         it.empty !== null && count === 0
           ? it.empty
-          : `${it.hint}${it.empty !== null ? `(いま ${count} 件)` : ''}`;
+          : `${it.hint(SIDE_LABEL[from], to)}${it.empty !== null ? `(いま ${count} 件)` : ''}`;
       host.append(b);
-    }
+    });
   }
 }
