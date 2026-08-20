@@ -2082,10 +2082,16 @@ select:focus-visible {
   color: var(--muted);
   font-size: 12px;
 }
+/* 🔴 **「完了」は横ではなく下**(2026-08-20。設計 doc §4-4)。
+ * ⚠ 直す前は 2 列を横に並べ、完了した札が**打ち消し線で残り続けて**いた ──
+ *   市井の 6 実装を当たったが、この形は 1 つも無かった(どれも畳むか落とす)。
+ * ⚠ 既定で畳むので、横並びのままだと**空の列が半分を占める** ── 縦に積み、
+ *   やることが幅を全部使う形にする。 */
 [data-pkc-region='kanban-board'] {
   display: flex;
+  flex-direction: column;
   gap: var(--s3);
-  align-items: flex-start;
+  align-items: stretch;
 }
 [data-pkc-region='kanban-column'] {
   flex: 1;
@@ -2096,11 +2102,30 @@ select:focus-visible {
 }
 [data-pkc-region='kanban-column'] > h3 {
   margin: 0;
-  padding: var(--s2) var(--s3);
   font-size: 11px;
   color: var(--muted);
   background: var(--surface-2);
   border-bottom: 1px solid var(--border);
+}
+/* 見出しの中身は、押せる側も押せない側も**同じ寸法**にする
+ * ── 揃っていないと、畳める列だけ 1px ずれて見える。 */
+[data-pkc-region='kanban-column'] > h3 > [data-pkc-field='kanban-column-label'],
+[data-pkc-region='kanban-column'] > h3 > button {
+  display: block;
+  width: 100%;
+  padding: var(--s2) var(--s3);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: none;
+}
+[data-pkc-region='kanban-column'] > h3 > button {
+  cursor: pointer;
+}
+[data-pkc-region='kanban-column'] > h3 > button:hover {
+  background: var(--surface);
+  color: var(--fg);
 }
 [data-pkc-region='kanban-cards'] {
   display: flex;

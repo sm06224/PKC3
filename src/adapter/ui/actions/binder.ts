@@ -1518,6 +1518,12 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'toggle-show-archived': (dispatcher) =>
     dispatcher.dispatch({ type: 'TOGGLE_SHOW_ARCHIVED' }),
+  /**
+   * 板の「完了」を開く / 畳む(2026-08-20。設計 doc §4-4)。
+   * ⚠ `toggle-show-archived`(片付けた**ノート**)とは別物 ── 相乗りさせない。
+   */
+  'toggle-show-done': (dispatcher) =>
+    dispatcher.dispatch({ type: 'TOGGLE_SHOW_DONE_TASKS' }),
   'retry-persist': (dispatcher) => dispatcher.dispatch({ type: 'RETRY_PERSIST' }),
   /**
    * 🔴 **フォルダへ入る / ルートへ戻る**(#240 段①)。
