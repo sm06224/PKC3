@@ -13,7 +13,7 @@
  * 切り替える(その時に計測してから)。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
-import { isViewMode, type AppState, type ViewMode } from '@adapter/state/app-state';
+import { isViewMode, nextViewMode, type AppState, type ViewMode } from '@adapter/state/app-state';
 import type { EntryMeta } from '@core/model/entry-meta';
 import { filerRows, visibleSelection } from '@features/relation/filer-list';
 import { archetypeLabel } from '@adapter/ui/render/sidebar';
@@ -504,7 +504,27 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'commit-edit',
   'append-entry',
   'toggle-todo',
+  /**
+   * 🔴 **本文を書く点では `toggle-todo` と同じ**(2026-08-19 のレビュー W-4)。
+   * ⚠ 直す前は 2 つとも抜けていた ── どちらも同じ `REQUEST_BODY_REWRITE` を撃つのに、
+   *   取り込み・書き出しの最中(`phase` は `'ready'` のまま)に押せてしまい、
+   *   entry を総入れ替えしている裏で保存が走った。
+   * 🔑 抜けを機械で止める検査は `tests/repo-hygiene.test.ts`。
+   */
+  'toggle-task',
+  'calendar-set-date',
   'toggle-app-tile',
+  /**
+   * 🔴 **作るのも disk への書込である**(2026-08-19、機械検査が見つけた 4 件)。
+   * ⚠ `move-entry` を入れた理由(「本文は書かないが disk への書込」)と同じなのに、
+   *   **作る 3 つの口と、保存の再送**が漏れていた ── 取り込みが entry を
+   *   総入れ替えしている裏で新しい行を挿すことになる。
+   * ⚠ 断りは**可視**(帯に理由が出る)なので、無言の dead click は作らない。
+   */
+  'create-entry',
+  'dual-mkdir',
+  'dual-copy',
+  'retry-persist',
   'delete-entry',
   'restore-revision',
   'restore-trash',
@@ -1341,7 +1361,8 @@ const ACTIONS: Record<string, ActionHandler> = {
     //    新規作成だけで、user から見ると「画面から出られない」
     const cur = dispatcher.getState().viewMode;
     // ⚠ cast を置かない ── `isViewMode` が絞ってあるので、表と食い違えば型が落ちる
-    const next: ViewMode = cur === view ? 'detail' : view;
+    // 🔑 規則は 1 か所(`nextViewMode`)── タイルから開く面も同じ関数を通る
+    const next: ViewMode = nextViewMode(cur, view);
     dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: next });
     /**
      * 🔴 **集計の束ね方を思い出す**(#184)。⚠ **開いたときだけ**読む ──
@@ -1385,7 +1406,18 @@ const ACTIONS: Record<string, ActionHandler> = {
     const line = Number(raw);
     if (raw === null || !Number.isInteger(line) || line < 0) return;
     const st = dispatcher.getState();
-    const lid = st.openBody?.lid ?? st.selectedLid;
+    /**
+     * 🔴 **どのノートの行かは、押した所から引く**(#277 段②-b で直した)。
+     *
+     * ⚠ 直す前は `openBody?.lid ?? selectedLid` だけを見ていた ── 本文の面では
+     *   合っているが、**カンバンの札は別のノートの行**なので、押すと
+     *   **開いているノートの同じ行番号**を書き換える(いちばん静かなデータ破壊)。
+     * 🔑 札には `data-pkc-entry` が焼いてあるので、そこから引く。
+     * ⚠ 本文の面は `data-pkc-entry` を持たない(器はノートを表す要素ではない)
+     *   ので、そのときだけ「いま開いているノート」へ落ちる。
+     */
+    const fromDom = target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
+    const lid = fromDom ?? st.openBody?.lid ?? st.selectedLid;
     if (lid === null || lid === undefined) return;
     if (st.phase !== 'ready') {
       dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してからチェックしてください' });
@@ -1826,7 +1858,6 @@ const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
   'toggle-sidebar': '[data-pkc-action="toggle-pane"][data-pkc-pane="sidebar"]',
   'toggle-inspector': '[data-pkc-action="toggle-pane"][data-pkc-pane="inspector"]',
   'view-query': '[data-pkc-action="set-view"][data-pkc-view="query"]',
-  'view-dual': '[data-pkc-action="set-view"][data-pkc-view="dual"]',
   'open-settings': '[data-pkc-action="set-view"][data-pkc-view="settings"]',
   'open-flags': '[data-pkc-action="set-view"][data-pkc-view="flags"]',
   'open-help': '[data-pkc-action="set-view"][data-pkc-view="help"]',
@@ -1895,6 +1926,21 @@ export function bindActions(
      *   目次・脚注は action を持たない)。
      */
     if (el instanceof HTMLAnchorElement && el.hasAttribute('href')) ev.preventDefault();
+    /**
+     * 🔴 **チェックの印は、DOM に先に付けさせない**(2026-08-19 のレビューで判明)。
+     *
+     * ⚠ 直す前は既定動作でブラウザが `checked` を反転していたので、
+     *   **書き込みが断られても印だけ付いたまま残った** ── 断り経路は 3 つある
+     *   (編集中 / 書換が当たらない / 保存の失敗)が、どれも `taskScan` も
+     *   `entryMetas` も動かさないので**描画器は早期 return** し、
+     *   **印を戻す者が居ない**。user から見ると「チェックしたのに保存されない」で、
+     *   `markdown-render.ts` が明文で禁じている当の挙動である。
+     * 🔑 **状態が DOM を決める**の原則へ寄せる ── 押した瞬間は何も変えず、
+     *   本文の書換が届いた時にだけ印が動く(本文の面も板も同じ経路)。
+     * ⚠ 他の checkbox(`set-flag` 等)には掛けない ── あちらは state を持たず
+     *   DOM 自身が値なので、止めると**巻き戻って見える**。
+     */
+    if (el.getAttribute('data-pkc-action') === 'toggle-task') ev.preventDefault();
     /**
      * 🔴 **修飾つきのクリックは「印を付ける」**(#240 段②。user 指示 2026-08-17
      * 「複数選択・範囲選択」)。
@@ -2678,6 +2724,25 @@ export function bindActions(
       ke.preventDefault();
       input.focus();
       input.select();
+      return;
+    }
+    /**
+     * 🔴 **押しボタンを持たない面は、ここで直に投げる**(2026-08-19 に実測で判明)。
+     *
+     * ⚠ 2 ペインは #241 の訂正で**上の帯から外して組み込みタイルへ移した**が、
+     *   近道の側は「`set-view` のボタンを探して押す」ままだったので、
+     *   **`Alt+6` は 1 度も効いていなかった**(押す先が無く、`preventDefault` すら
+     *   しないので無反応)。⚠ しかもお知らせ・マニュアル・`shell.ts` のコメントは
+     *   **3 つとも「効きます」と言っていた** ── 画面と doc が揃って嘘をついていた形。
+     * 🔑 `view-detail` が既に同じ理由で直に投げている(本文の面にもボタンは無い)。
+     *   規則は 1 つ:**ボタンが在るならボタンを押し、無い面は直に投げる**。
+     */
+    if (cmd === 'view-dual') {
+      ke.preventDefault();
+      dispatcher.dispatch({
+        type: 'SET_VIEW_MODE',
+        mode: nextViewMode(dispatcher.getState().viewMode, 'dual'),
+      });
       return;
     }
     const sel = SHORTCUT_BUTTON[cmd];

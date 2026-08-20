@@ -2071,8 +2071,18 @@ select:focus-visible {
   font-size: 12px;
 }
 
-/* ── かんばん / カレンダー(封印中。解いたときに効く)──────── */
+/* ── かんばん(#277 段②-b。札 1 枚 = 本文のチェック項目)/ カレンダー ── */
 [data-pkc-view-pane='kanban'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+[data-pkc-field='kanban-note'] {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+[data-pkc-region='kanban-board'] {
   display: flex;
   gap: var(--s3);
   align-items: flex-start;
@@ -2105,10 +2115,26 @@ select:focus-visible {
   border-radius: var(--radius);
   padding: var(--s2) var(--s3);
   cursor: pointer;
+  /* 🔑 印・中身・出どころを 1 行に。中身だけが伸びる */
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0 var(--s2);
+  align-items: baseline;
 }
-[data-pkc-region='kanban-cards'] [data-pkc-field='date'] {
+[data-pkc-region='kanban-cards'] [data-pkc-field='text'] {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* 出どころのノート名は印の下ではなく中身の下(印の列を空けたまま) */
+[data-pkc-region='kanban-cards'] [data-pkc-field='note'] {
+  grid-column: 2;
   color: var(--muted);
   font-size: 11px;
+}
+/* 済んだ札は**色ではなく線**で示す(地は無彩色、色は情報にだけ) */
+[data-pkc-region='kanban-cards'] [data-pkc-task-done] [data-pkc-field='text'] {
+  text-decoration: line-through;
+  color: var(--muted);
 }
 [data-pkc-field='calendar-toolbar'] {
   display: flex;

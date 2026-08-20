@@ -60,6 +60,11 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
      * ⚠ 目録と表は **1 回の走査**で返る(別々に頼むと DB を 2 度舐める)。
      */
     queryScan: (key) => client.request({ op: 'queryScan', cid, ...(key === null ? {} : { key }) }),
+    /**
+     * カンバンの札(#277 段②-b)。⚠ ここも**頼むだけ** ── 絞り込み(抽出列)も
+     * 上限も worker と `features/kanban/kanban-data.ts` が持つ。
+     */
+    taskScan: () => client.request({ op: 'taskScan', cid }),
     getBodies: (lids) => client.request({ op: 'getBodies', cid, lids }),
     listBodies: (after, maxBytes) =>
       client.request({ op: 'listBodies', cid, maxBytes, ...(after ? { after } : {}) }),

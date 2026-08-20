@@ -12,6 +12,8 @@ import { DEFAULT_ENTRY_SORT, type EntrySort } from '@features/filter/entry-sort'
 import { resolveCanonicalParents, reorderSibling } from '@features/relation/tree';
 import { extractMeta, seedBodyFor } from '@features/flavor';
 import { applyBodyRewrite, type BodyRewrite } from '@features/markdown/body-rewrite';
+import { listTaskItems } from '@features/markdown/task-count';
+import { replaceTaskCards, type TaskScan } from '@features/kanban/kanban-data';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import type { LauncherTile } from '@features/launcher/tiles';
 import type {
@@ -122,6 +124,25 @@ const ASIDE_PANES: ReadonlySet<ViewMode> = new Set<ViewMode>([
 
 export function isAsidePane(view: ViewMode): boolean {
   return ASIDE_PANES.has(view);
+}
+
+/**
+ * 🔴 **もう一度押したら本文へ戻る**(P8 段⑲ の規約を 1 か所へ寄せた。#277 段②-b)。
+ *
+ * 直す前の 設定 は行きっぱなしで、閉じる導線がどこにも無かった ── user から見ると
+ * 「画面から出られない」。⚠ その規約は `set-view`(上の帯)にだけ書いてあり、
+ * **組み込みタイルから開く面**(2 ペイン #241 / カレンダー #276 / カンバン #277)は
+ * 素通りしていた ── **開いたボタンをもう一度押しても閉じない**。
+ *
+ * ⚠ **「帰る道が 1 本も無い」は嘘である**(2026-08-19、smoke で実測して訂正した)。
+ *   左の探し方のタブを押すと `main.ts` の `setBrowse` が `SET_VIEW_MODE 'detail'`
+ *   を撃つので、**そこからは帰れる**。⚠ ただしそれは**別の物を動かす操作**であり
+ *   (左の列の中身が変わる)、「開いたボタンで閉じる」の代わりにはならない。
+ *
+ * 🔑 だから規則をここに 1 つ置き、**帯もタイルも同じ関数**を通す(CLAUDE.md §7)。
+ */
+export function nextViewMode(current: ViewMode, want: ViewMode): ViewMode {
+  return current === want ? 'detail' : want;
 }
 
 /**
@@ -296,6 +317,20 @@ export interface AppState {
    */
   queryFailed: boolean;
   /**
+   * 🔴 **カンバンの札**(#277 段②-b)。⚠ `null` = **まだ集めていない**(0 件ではない)。
+   *
+   * ⚠ 中身は**項目だけ**で、本文は 1 バイトも入らない ── 舐めるのは worker で、
+   * 主スレッドへ来るのは「どのノートの何行目が、何と書いてあって、済んでいるか」だけ。
+   * 題名は `entryMetas` に在るので運ばない(同じ字が 2 か所に出ない)。
+   */
+  taskScan: TaskScan | null;
+  /**
+   * 🔴 **集められなかった**(集計の `queryFailed` と同じ理由)。⚠ `taskScan === null`
+   * は「まだ」であって「駄目だった」ではない ── 区別しないと、盤面が
+   * 「集めています…」を出したまま**永久に止まって見える**。
+   */
+  taskScanFailed: boolean;
+  /**
    * ランチャーのタイル(P7b 段⑩)。⚠ `null` = **まだ読んでいない**。
    * 元データは attachment の frontmatter で**常駐していない**ので、
    * ランチャーを開いたときに要求して還流させる(履歴一覧と同じ流儀)。
@@ -386,6 +421,8 @@ export const initialState: AppState = {
   queryKeys: null,
   queryGroups: null,
   queryFailed: false,
+  taskScan: null,
+  taskScanFailed: false,
   launcherTiles: null,
   calendarMonth: null,
   showArchived: false,
@@ -426,6 +463,10 @@ export type UserAction =
    * 理由なく閉じる**(P8 段⑤ で「アプリ」タブが同じ形の事故を起こしている)。
    */
   | { type: 'REFRESH_QUERY' }
+  /** カンバンの札が集まった(#277 段②-b)。 */
+  | { type: 'SET_TASK_SCAN'; scan: TaskScan }
+  /** 札が集められなかった(#277 段②-b)。⚠ 「まだ」と区別する ── 文言が違う。 */
+  | { type: 'TASK_SCAN_FAILED' }
   /**
    * 選択の履歴を戻る・進む(#190)。⚠ **行き先は state が持つ** ── 呼び側が lid を
    * 決めると、履歴と選択が二重帳簿になる(§7)。
@@ -743,6 +784,11 @@ export type DomainEvent =
    * 頼むと DB の全件走査が 2 回走る(レビュー B-3)。
    */
   | { type: 'REQUEST_QUERY_SCAN'; key: string | null }
+  /**
+   * カンバンの札を集める(#277 段②-b)。⚠ 集計と同じ理由で **worker の仕事** ──
+   * 本文は常駐していないし、主スレッドへ運んでもいけない(不可侵指示 2026-07-27)。
+   */
+  | { type: 'REQUEST_TASK_SCAN' }
   /** ⚠ **どれを読むかを載せる** ── effect 層は実行時に state を見ない(review L-6)。 */
   | {
       type: 'REQUEST_TILE_UPDATE';
@@ -1023,6 +1069,14 @@ function reduceCore(
           queryKeys: null,
           queryGroups: null,
           queryFailed: false,
+          /**
+           * 🔴 **カンバンの札も再読込で捨てる**(集計と同じ理由 ── #277 段②-b)。
+           * ⚠ 取込はここを通るので、残すと**消えたノートの札**が盤面に残り、
+           *   押すと「見つからない」になる。⚠ 捨てるだけでは「集めています…」で
+           *   止まるので、**面を開いていれば集め直しも頼む**(対で要る)。
+           */
+          taskScan: null,
+          taskScanFailed: false,
         },
         events: [
           ...(keepLid === null
@@ -1031,6 +1085,7 @@ function reduceCore(
           ...(state.viewMode === 'query'
             ? [{ type: 'REQUEST_QUERY_SCAN' as const, key: state.queryKey }]
             : []),
+          ...(state.viewMode === 'kanban' ? [{ type: 'REQUEST_TASK_SCAN' as const }] : []),
         ],
       };
     }
@@ -1166,6 +1221,10 @@ function reduceCore(
       };
     case 'QUERY_FAILED':
       return { state: { ...state, queryFailed: true }, events: [] };
+    case 'SET_TASK_SCAN':
+      return { state: { ...state, taskScan: action.scan, taskScanFailed: false }, events: [] };
+    case 'TASK_SCAN_FAILED':
+      return { state: { ...state, taskScanFailed: true }, events: [] };
     case 'SET_SEARCH_HITS':
       // ⚠ **遅れて返った古い結果を捨てる**(打鍵は結果より速い)
       if (action.query !== state.filterQuery) return { state, events: [] };
@@ -1239,10 +1298,15 @@ function reduceCore(
         // ⚠ ランチャーの枝は #241 段⑥-b で畳んだ ── アプリの一覧は**左の列の
         //    タブ**が持つ面になったので、読み直しは `REFRESH_LAUNCHER_TILES`
         //    (`main.ts` が探し方の切替で撃つ)1 本である
+        // 🔑 **カンバンも同じ流儀**(#277 段②-b)── 開いたときに集める。
+        // ⚠ ここが唯一の入口ではない ── 札は `BODY_REWRITTEN` の ack でも
+        //   その場で更新される(押した札が往復を待たずに動く)。
         events:
           action.mode === 'query'
             ? [{ type: 'REQUEST_QUERY_SCAN', key: state.queryKey }]
-            : [],
+            : action.mode === 'kanban'
+              ? [{ type: 'REQUEST_TASK_SCAN' }]
+              : [],
       };
     case 'REFRESH_LAUNCHER_TILES':
       // ⚠ **毎回要求する**。ただし前回のタイルは消さない(古い並びを出したまま
@@ -1488,7 +1552,7 @@ function reduceCore(
         };
       }
       // 抽出はイベント発火時(= この reduce)に同期で行い、行全体を確定して運ぶ
-      const { entryMetas, entry } = buildPersist(state, meta, body);
+      const { entryMetas, entry, taskScan } = buildPersist(state, meta, body);
       // 変更前(baseline)を履歴に積むかどうか(P5c: 実際の記録は worker が
       // 同 tx で行う ── ここは「刻むか / 頭を張り替えるだけか」の意思決定)。
       // 新規作成の初回 commit は積まない ──「flavor seed へ戻す」だけの復元先は
@@ -1499,7 +1563,7 @@ function reduceCore(
       const checkpoint =
         state.freshLid !== lid && baseline !== seedBodyFor(meta.archetype);
       return {
-        state: { ...next, entryMetas },
+        state: { ...next, entryMetas, taskScan },
         events: [{ type: 'PERSIST_ENTRY', entry, checkpoint }],
       };
     }
@@ -1512,7 +1576,7 @@ function reduceCore(
       if (baseline === persisted || diskAhead) return { state, events: [] };
       const meta = state.entryMetas.get(lid);
       if (!meta) return { state, events: [] };
-      const { entryMetas, entry } = buildPersist(state, meta, baseline);
+      const { entryMetas, entry, taskScan } = buildPersist(state, meta, baseline);
       // 再送でも刻む意思は同じ(worker 側の hash skip が重複を防ぐので二重に
       // 積まれることはない ── 初回 persist が失敗していれば disk はまだ前の内容)
       const checkpoint =
@@ -1523,6 +1587,7 @@ function reduceCore(
           phase: 'ready',
           error: null,
           entryMetas,
+          taskScan,
           openBody: { lid, body: baseline, baseline, persisted, diskAhead: false },
         },
         events: [{ type: 'PERSIST_ENTRY', entry, checkpoint }],
@@ -1772,7 +1837,15 @@ function reduceCore(
           };
         }
       }
-      return { state: { ...state, entryMetas, openBody }, events: [] };
+      /**
+       * 🔴 **押した札をその場で動かす**(#277 段②-b)。ack は**新しい本文**を
+       * 持っているので、そのノートの札はここで組み直せる ── 集め直しを頼むと
+       * 往復のぶん札が固まったままになり、押した手応えが消える。
+       * ⚠ 触るのは**そのノートの札だけ**(他のノートを並び直さない)。
+       * ⚠ 盤面を一度も開いていなければ `null` のまま(何もしない)。
+       */
+      const taskScan = refreshTaskCards(state.taskScan, action.lid, action.body);
+      return { state: { ...state, entryMetas, openBody, taskScan }, events: [] };
     }
     case 'SET_CALENDAR_MONTH': {
       // 月送りの正規化(binder は 0 や 13 を送ってよい)
@@ -2693,11 +2766,38 @@ function dropLink(
  * RETRY_PERSIST 共用)。抽出は唯一経路 extractMeta。抽出値が変わらないときは
  * entryMetas の参照を維持する(sidebar / kanban の断面指紋を無駄に壊さない)。
  */
+/**
+ * 🔴 **板の札を、新しい本文から組み直す**(#277 段②-b。2026-08-19 のレビューで判明)。
+ *
+ * 札は**原文の行番号**を指すので、本文が変われば**指す先がずれる**。
+ * ⚠ 直す前は書換の ack(`BODY_REWRITTEN`)でしか組み直しておらず、
+ *   **普通の保存(`COMMIT_EDIT`)では古い行番号のまま**だった ── 板を開いて
+ *   閉じ、本文の先頭に 1 行足して保存し、板へ戻ると、札は開き直しの走査が
+ *   返るまで**古い行**を指したまま押せる。押すと**別の行が黙って完了になる**。
+ * 🔑 だから「新しい本文が state に入る所」= `buildPersist` と `BODY_REWRITTEN` の
+ *   2 か所**だけ**を通す(数えた数だけ通す ── §7)。
+ * ⚠ 板を一度も開いていなければ `null` のまま何もしない。
+ */
+function refreshTaskCards(
+  scan: TaskScan | null,
+  lid: string,
+  body: string,
+): TaskScan | null {
+  if (scan === null) return null;
+  const cards = replaceTaskCards(scan.cards, lid, listTaskItems(body));
+  return cards === scan.cards ? scan : { ...scan, cards };
+}
+
 function buildPersist(
   state: AppState,
   meta: EntryMeta,
   body: string,
-): { entryMetas: ReadonlyMap<string, EntryMeta>; entry: EntryUpsert } {
+): {
+  entryMetas: ReadonlyMap<string, EntryMeta>;
+  entry: EntryUpsert;
+  /** ⚠ 板を開いていなければ `null`(呼び側はそのまま state へ入れてよい)。 */
+  taskScan: TaskScan | null;
+} {
   const ext = extractMeta(meta.archetype, body);
   const changed =
     meta.status !== ext.status ||
@@ -2708,6 +2808,8 @@ function buildPersist(
     : state.entryMetas;
   return {
     entryMetas,
+    // 🔑 本文が変われば札の行番号もずれる ── ここで組み直す(上の docstring)
+    taskScan: refreshTaskCards(state.taskScan, meta.lid, body),
     entry: {
       lid: meta.lid,
       title: meta.title,

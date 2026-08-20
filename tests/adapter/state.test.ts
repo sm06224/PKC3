@@ -3,7 +3,12 @@ import { describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
 import { extractMeta } from '../../src/features/flavor';
-import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
+import {
+  initialState,
+  nextViewMode,
+  reduce,
+  type AppState,
+} from '../../src/adapter/state/app-state';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects, type StorePort } from '../../src/adapter/state/store-effects';
 import { stubRevisionOps } from '../helpers/revision-stub';
@@ -732,5 +737,167 @@ describe('ノートでない面から、一覧を押したら中央が戻る', (
     let s: AppState = { ...booted(), viewMode: 'kanban' };
     s = reduce(s, { type: 'SELECT_ENTRY', lid: 'a' }).state;
     expect(s.viewMode, 'kanban を勝手に畳んだ').toBe('kanban');
+  });
+});
+
+/**
+ * 🔴 **もう一度押したら本文へ戻る**(#277 段②-b で 1 か所へ寄せた規則)。
+ *
+ * ⚠ この規則は上の帯(`set-view`)にだけ書いてあり、**組み込みタイルから開く面**
+ *   (2 ペイン #241 / カレンダー #276 / カンバン #277)は素通りしていた ──
+ *   開いたら**本文へ帰るマウスの道が 1 本も無い**(鍵盤の `view-detail` だけ)。
+ * 🔑 帯もタイルも同じ関数を通すので、ここが唯一の pin である。
+ */
+describe('nextViewMode ── もう一度押したら本文へ戻る', () => {
+  it('🔴 同じ面をもう一度指すと detail へ', () => {
+    for (const view of ['kanban', 'calendar', 'dual', 'query', 'settings'] as const) {
+      expect(nextViewMode(view, view), `${view} から出られない`).toBe('detail');
+    }
+  });
+
+  it('違う面を指したら、その面へ行く', () => {
+    expect(nextViewMode('detail', 'kanban')).toBe('kanban');
+    expect(nextViewMode('kanban', 'calendar')).toBe('calendar');
+  });
+
+  /** ⚠ 既に本文に居るなら、本文を指しても本文のまま(往復しない)。 */
+  it('本文から本文は本文のまま', () => {
+    expect(nextViewMode('detail', 'detail')).toBe('detail');
+  });
+});
+
+/**
+ * 🔴 **カンバンの札は state で運ぶ**(#277 段②-b)。
+ * 集計(#184)と同じ流儀:開いたときに頼み、器の入れ替えで捨て、
+ * **書換の ack ではその場で組み直す**(往復を待たずに札が動く)。
+ */
+describe('カンバンの札(#277 段②-b)', () => {
+  const scan = (cards: Array<{ lid: string; line: number; text: string; done: boolean }>) => ({
+    cards,
+    totalNotes: 1,
+    scannedNotes: 1,
+    truncated: false,
+  });
+
+  it('🔴 面を開いたときに集めを頼む(boot では頼まない)', () => {
+    const out = reduce(booted(), { type: 'SET_VIEW_MODE', mode: 'kanban' });
+    expect(out.events, '開いたのに集めを頼んでいない').toContainEqual({ type: 'REQUEST_TASK_SCAN' });
+    // ⚠ 空振り防止 ── 他の面では頼まない(いつでも頼む実装なら上は通る)
+    expect(
+      reduce(booted(), { type: 'SET_VIEW_MODE', mode: 'settings' }).events,
+    ).not.toContainEqual({ type: 'REQUEST_TASK_SCAN' });
+  });
+
+  /**
+   * 🔴 **器を入れ替えたら捨てる**(取込はここを通る)。⚠ 残すと**消えたノートの札**が
+   * 盤面に残り、押すと「見つからない」になる。⚠ そして**開いていれば集め直す** ──
+   * 捨てるだけだと「集めています…」で止まる(捨てる側と頼む側は対で要る)。
+   */
+  it('🔴 器の読み直しで札を捨て、開いていれば集め直す', () => {
+    let s = reduce(booted(), { type: 'SET_VIEW_MODE', mode: 'kanban' }).state;
+    s = reduce(s, { type: 'SET_TASK_SCAN', scan: scan([{ lid: 'a', line: 0, text: 'x', done: false }]) }).state;
+    expect(s.taskScan?.cards).toHaveLength(1);
+    const out = reduce(s, { type: 'SYS_BOOTED', cid: 'c2', metas: [meta('a', 1)], relations: [] });
+    expect(out.state.taskScan, '古い札が残っている').toBeNull();
+    expect(out.events, '捨てただけで集め直していない').toContainEqual({ type: 'REQUEST_TASK_SCAN' });
+  });
+
+  it('開いていない面のために集め直しは頼まない', () => {
+    const s = reduce(booted(), { type: 'SET_TASK_SCAN', scan: scan([]) }).state;
+    const out = reduce(s, { type: 'SYS_BOOTED', cid: 'c2', metas: [meta('a', 1)], relations: [] });
+    expect(out.events).not.toContainEqual({ type: 'REQUEST_TASK_SCAN' });
+  });
+
+  /**
+   * 🔴 **押した札は ack でその場で動く**(集め直しを頼まない)。
+   * ⚠ 往復を待つと、押してから札が動くまで空白の間が出る。
+   */
+  it('🔴 書換の ack で、そのノートの札だけ組み直す', () => {
+    let s = reduce(booted(), { type: 'SET_VIEW_MODE', mode: 'kanban' }).state;
+    s = reduce(s, {
+      type: 'SET_TASK_SCAN',
+      scan: scan([
+        { lid: 'a', line: 0, text: '牛乳', done: false },
+        { lid: 'b', line: 0, text: '触るな', done: false },
+      ]),
+    }).state;
+    const out = reduce(s, {
+      type: 'BODY_REWRITTEN',
+      lid: 'a',
+      body: '- [x] 牛乳\n',
+      rewrite: { kind: 'task', line: 0 },
+      status: null,
+      date: null,
+      archived: false,
+    });
+    expect(out.state.taskScan?.cards.map((c) => [c.lid, c.done])).toEqual([
+      ['a', true],
+      ['b', false],
+    ]);
+    // ⚠ 集め直しは頼まない(worker を無駄に叩かない)
+    expect(out.events).not.toContainEqual({ type: 'REQUEST_TASK_SCAN' });
+  });
+
+  /**
+   * 🔴 **普通の保存でも札の行番号が追従する**(2026-08-19 のレビュー W-5)。
+   *
+   * ⚠ 直す前は書換の ack でしか組み直しておらず、**`COMMIT_EDIT` では古いまま**
+   *   だった ── 板を閉じ、本文の先頭に 1 行足して保存し、板へ戻ると、
+   *   走査が返るまで札は**古い行**を指したまま押せる。押すと
+   *   **別の行が黙って完了になる**(落ちる向きがデータ破壊)。
+   * 🔑 直しは「新しい本文が state に入る所」= `buildPersist` 1 か所を通すこと。
+   */
+  it('🔴 保存すると、札の行番号が新しい本文に追従する', () => {
+    let s = reduce(booted(), { type: 'SET_VIEW_MODE', mode: 'kanban' }).state;
+    s = reduce(s, { type: 'SELECT_ENTRY', lid: 'a' }).state;
+    s = reduce(s, { type: 'BODY_LOADED', lid: 'a', body: '- [ ] A\n- [ ] B\n' }).state;
+    s = reduce(s, {
+      type: 'SET_TASK_SCAN',
+      scan: scan([
+        { lid: 'a', line: 0, text: 'A', done: false },
+        { lid: 'a', line: 1, text: 'B', done: false },
+      ]),
+    }).state;
+    // 先頭に 1 行足して保存 ── A は 0 行目から 1 行目へずれる
+    s = reduce(s, { type: 'START_EDIT' }).state;
+    s = reduce(s, { type: 'UPDATE_OPEN_BODY', body: '- [ ] 新しいやること\n- [ ] A\n- [ ] B\n' }).state;
+    const out = reduce(s, { type: 'COMMIT_EDIT' });
+    expect(
+      out.state.taskScan?.cards.map((c) => [c.line, c.text]),
+      '保存しても札が古い行を指したまま(押すと別の行が完了になる)',
+    ).toEqual([
+      [0, '新しいやること'],
+      [1, 'A'],
+      [2, 'B'],
+    ]);
+  });
+
+  /** ⚠ 盤面を一度も開いていなければ、ack は札に触らない(null のまま)。 */
+  it('盤面を開いていなければ ack は何もしない', () => {
+    const out = reduce(booted(), {
+      type: 'BODY_REWRITTEN',
+      lid: 'a',
+      body: '- [x] x\n',
+      rewrite: { kind: 'task', line: 0 },
+      status: null,
+      date: null,
+      archived: false,
+    });
+    expect(out.state.taskScan).toBeNull();
+  });
+
+  it('集められなかったことは「まだ」と区別して覚える', () => {
+    const s = reduce(booted(), { type: 'TASK_SCAN_FAILED' }).state;
+    expect(s.taskScanFailed).toBe(true);
+    expect(s.taskScan, '失敗で札を作ってしまっている').toBeNull();
+    /**
+     * ⚠ **集め直しの action は持たない**(2026-08-19 のレビュー W-3)。
+     * 集計には「集め直す」ボタンが在るが、板には**導線が無い**まま
+     * `REFRESH_TASKS` だけが在り、`src/` の誰も送っていなかった ──
+     * 実行するのが test だけの分岐は、製品の何も守らない(§2)。
+     * 🔑 集め直す口は `SET_VIEW_MODE`(面を開く)1 本に寄せた。
+     */
+    const reopened = reduce(s, { type: 'SET_VIEW_MODE', mode: 'kanban' });
+    expect(reopened.events).toContainEqual({ type: 'REQUEST_TASK_SCAN' });
   });
 });

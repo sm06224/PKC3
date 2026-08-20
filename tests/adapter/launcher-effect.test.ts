@@ -105,10 +105,12 @@ describe('ランチャーのタイルを読む', () => {
     expect(dispatcher.getState().launcherTiles).toBeNull(); // まだ読んでいない
     dispatcher.dispatch({ type: 'REFRESH_LAUNCHER_TILES' });
     await settle();
-    // ⚠ 組み込み(2 ペイン #241 / カレンダー #276)が常に居る ── entry 由来は 1 件
+    // ⚠ 組み込み(2 ペイン #241 / カレンダー #276 / カンバン #277)が常に居る
+    //    ── entry 由来は 1 件
     expect(dispatcher.getState().launcherTiles?.map((t) => t.kind)).toEqual([
       'dual',
       'calendar',
+      'kanban',
       'app',
     ]);
     off();
@@ -179,12 +181,13 @@ describe('組み込み Office タイルの合流 (#148)', () => {
    *   なのでその次 ── 入れたり消したりで 2 ペインの位置が動かない向きに並べる
    *   (「同じものが常に同じ場所にある」)。
    */
-  it('組み込みは 2 ペイン → カレンダー → Office の順で先頭に付く', async () => {
+  it('組み込みは 2 ペイン → カレンダー → カンバン → Office の順で先頭に付く', async () => {
     const tiles = await tilesWith(true);
     expect(tiles[0]?.lid, '2 ペインが先頭でない').toBe(DUAL_TILE_LID);
     expect(tiles[1]?.kind, 'カレンダーが 2 番目でない(#276)').toBe('calendar');
-    expect(tiles[2]?.kind).toBe('office');
-    expect(tiles[2]?.lid).toBe(OFFICE_TILE_LID);
+    expect(tiles[2]?.kind, 'カンバンが 3 番目でない(#277)').toBe('kanban');
+    expect(tiles[3]?.kind).toBe('office');
+    expect(tiles[3]?.lid).toBe(OFFICE_TILE_LID);
     // ⚠ entry 由来のタイルが**消えていない**こと(置き換えではなく合流)
     expect(tiles.some((t) => t.lid === 'a1')).toBe(true);
   });
@@ -194,6 +197,7 @@ describe('組み込み Office タイルの合流 (#148)', () => {
     expect(tiles.some((t) => t.kind === 'office')).toBe(false);
     expect(tiles[0]?.lid, 'Office の有無で 2 ペインの位置が動いた').toBe(DUAL_TILE_LID);
     expect(tiles[1]?.kind, 'Office の有無でカレンダーの位置が動いた').toBe('calendar');
+    expect(tiles[2]?.kind, 'Office の有無でカンバンの位置が動いた').toBe('kanban');
     expect(tiles.some((t) => t.lid === 'a1')).toBe(true);
   });
 });

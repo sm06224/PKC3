@@ -145,12 +145,26 @@ describe('絞り込み(P7b review M-1/M-2/M-3)', () => {
     expect(filerRows()).toBe(2);
   });
 
+  /**
+   * 🔴 かんばんも同じ規則で絞られる。⚠ **札はノート単位で絞る**(#277 段②-b)──
+   *   札の字ではなくノートの題名 / 本文の当たりで決める(判定は `matchesEntry` 1 か所)。
+   */
   it('🔴 かんばんも同じ規則で絞られる', () => {
-    const { d, root, type } = setup([
-      meta('e1', 'A-りんご', { archetype: 'todo', status: 'open' }),
-      meta('e2', 'B-ひみつ', { archetype: 'todo', status: 'open' }),
-    ]);
+    const { d, root, type } = setup([meta('e1', 'A-りんご'), meta('e2', 'B-ひみつ')]);
     d.dispatch({ type: 'SET_VIEW_MODE', mode: 'kanban' });
+    // ⚠ 札は worker が集めて state に載る ── ここでは届いた形を直接与える
+    d.dispatch({
+      type: 'SET_TASK_SCAN',
+      scan: {
+        cards: [
+          { lid: 'e1', line: 0, text: 'やること 1', done: false },
+          { lid: 'e2', line: 0, text: 'やること 2', done: false },
+        ],
+        totalNotes: 2,
+        scannedNotes: 2,
+        truncated: false,
+      },
+    });
     const cards = (): number =>
       root.querySelectorAll('[data-pkc-region="kanban-cards"] [data-pkc-entry]').length;
     expect(cards()).toBe(2);

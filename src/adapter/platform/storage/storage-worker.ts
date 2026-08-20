@@ -8,7 +8,12 @@
  * 内部完結 API のみを使う)/ 大きな値は保持しない。
  */
 import sqlite3InitModule, { type Database } from '@sqlite.org/sqlite-wasm';
-import { DB_SCHEMA_VERSION, SCHEMA_DDL, REVISION_ADDED_COLUMNS } from './schema';
+import {
+  DB_SCHEMA_VERSION,
+  SCHEMA_DDL,
+  REVISION_ADDED_COLUMNS,
+  ENTRY_ADDED_COLUMNS,
+} from './schema';
 /**
  * 全文検索が 1 度に返す上限(#181)。⚠ **切ったことは呼び側へ言う** ── 黙って
  * 切ると user は「無い」と読む。上限そのものは「一覧に出して意味がある量」で決めた。
@@ -19,6 +24,13 @@ import { contentHash64Hex } from './content-hash';
 import { scanAssetRefsInto } from '@features/asset/asset-ref-scan';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { planSearch } from '@features/filter/search-query';
+import { countTaskCandidates, listTaskItems } from '@features/markdown/task-count';
+import {
+  clipTaskText,
+  TASK_LIMITS,
+  type TaskCard,
+  type TaskScan,
+} from '@features/kanban/kanban-data';
 import { createQueryScan, FRONTMATTER_SCAN_CHARS } from '@features/query/group-by';
 import {
   applyLinePatch,
@@ -126,7 +138,48 @@ async function init(dbName: string, journalMode?: JournalMode): Promise<InitResu
   return initResult;
 }
 
-function applySchema(database: Database): void {
+/**
+ * 🔴 **既存行の `task_total` を数え直す**(#277 段②の埋め戻し)。
+ *
+ * ⚠ **1 件ずつ UPDATE しない** ── 行数ぶん往復すると、取り込み直後の大きな
+ *   コンテナで open が固まる。読みは 1 回、書きは変わる行だけ。
+ * ⚠ **`updated_at` を触らない** ── 埋め戻しは user の編集ではない。
+ *   触ると「今日ぜんぶ更新された」ように見える(情報列の嘘)。
+ * ⚠ FTS の trigger は `AFTER UPDATE` で発火するが、`title` / `body` は
+ *   変えていないので索引の中身は同じ値に書き直されるだけ(害は無い)。
+ */
+function backfillTaskTotals(database: Database): void {
+  for (;;) {
+    /**
+     * ⚠ **本文を全件いっぺんに heap へ載せない**(不可侵指示 2026-07-27
+     * 「ゼロコピー、生成とライフサイクル後の速やかな破棄」)── 20MB の容れ物で
+     * boot の worker が 20MB 抱える形になる。**塊で回して都度捨てる**。
+     * 🔑 対象は **NULL の行だけ**なので、進めば必ず尽きる(無限には回らない)。
+     */
+    const rows = database.selectObjects(
+      `SELECT cid, lid, body FROM entries WHERE task_total IS NULL LIMIT ${BACKFILL_CHUNK}`,
+    ) as Array<{ cid: string; lid: string; body: string }>;
+    if (rows.length === 0) return;
+    for (const r of rows) {
+      database.exec({
+        sql: `UPDATE entries SET task_total = ? WHERE cid = ? AND lid = ?`,
+        bind: [countTaskCandidates(r.body ?? '').total, r.cid, r.lid],
+      });
+    }
+    if (rows.length < BACKFILL_CHUNK) return;
+  }
+}
+
+/**
+ * 🔴 **export しているのは、migration を test から回すため**(#277 段②)。
+ *
+ * ⚠ ここは「**既に DB を持っている user**」だけが通る道なので、手元の
+ *   新規 DB では**一度も走らない** ── つまり普通の test では
+ *   「弱い」のではなく**そもそも実行されない**(CLAUDE.md §2)。
+ * 🔑 だから `tests/adapter/schema-migration.test.ts` が、**旧い形の DB を自分で作って**
+ *   ここへ通す。⚠ 呼ぶのは worker の init と、その test だけ。
+ */
+export function applySchema(database: Database): void {
   // schema 進化の seam(review #7): user_version を v1 から刻む。
   // 新しい DB(未来の user_version)は読み書きせず明示 reject ── 単調・明示 reject の
   // 規約(schema-migration-policy)を storage 層でも守る
@@ -144,7 +197,38 @@ function applySchema(database: Database): void {
   //   (d2) ALTER 半端 + 旧版刻印 → 次回 open が duplicate column で毎回 throw
   database.exec('BEGIN IMMEDIATE');
   try {
-    // 新規 DB は最新 DDL がそのまま最新形を作る(既存 DB では no-op)
+    /**
+     * 🔴 **後付け列は DDL より先に足す**(#277 段②。migration の test が実際に捕まえた)。
+     *
+     * ⚠ 順序を逆にすると、**既存 DB が開かなくなる**:
+     *   `SCHEMA_DDL` には新しい列を使う索引
+     *   (`CREATE INDEX … ON entries (cid, task_total)`)が入っているので、
+     *   列を足す前に走ると `no such column` で **tx ごと落ちる** ── つまり
+     *   **いま使っている user 全員のアプリが起動しなくなる**。
+     * ⚠ 新規 DB には entries がまだ無いので、**表の実在を見てから** ALTER する
+     *   (判定は user_version ではなく「あるべき状態の実在」── schema.ts の原則)。
+     */
+    const hasEntries =
+      database.selectValue(
+        `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'entries'`,
+      ) !== undefined;
+    const addedEntryCols: string[] = [];
+    if (hasEntries) {
+      const entryCols = new Set(
+        (
+          database.selectObjects(
+            `SELECT name FROM pragma_table_info('entries')`,
+          ) as Array<{ name: string }>
+        ).map((r) => r.name),
+      );
+      for (const col of ENTRY_ADDED_COLUMNS) {
+        if (entryCols.has(col.name)) continue;
+        database.exec(`ALTER TABLE entries ADD COLUMN ${col.name} ${col.ddl}`);
+        addedEntryCols.push(col.name);
+      }
+    }
+    // 新規 DB は最新 DDL がそのまま最新形を作る(既存 DB では no-op)。
+    // ⚠ 索引はここで作られる ── 上で列を足した**後**であることが要。
     for (const ddl of SCHEMA_DDL) database.exec(ddl);
     // v2(P5)migration: 判定は user_version ではなく**列の実在**(冪等)──
     // 上記 (d1)(d2) の半端状態も次回 open で自己修復する(schema.ts の原則)
@@ -159,6 +243,29 @@ function applySchema(database: Database): void {
       if (!revCols.has(col))
         database.exec(`ALTER TABLE revisions ADD COLUMN ${col} TEXT`);
     }
+    /**
+     * 🔴 **足した列は、既存行を埋める**(#277 段②)。
+     *
+     * ⚠ ALTER は既存行を **NULL のまま**にするので、埋めないと
+     *   **いま在るノートが 1 件もカンバンに出ない**まま緑になる ── 全文検索(#181)で
+     *   索引を足したときに踏んだのと同じ型(§1「材料が届いていない」)。
+     * ⚠ 判定は「**列をいま足したか**」で足りる ── ALTER も埋め戻しも刻印も
+     *   **1 つの tx** に入っているので、「列は在るが埋まっていない」半端な状態は
+     *   作れない(落ちれば ALTER ごと巻き戻る)。
+     * ⚠ 「本文を LIKE で走査して埋め忘れを探す」形は**採らない** ── 毎回の open で
+     *   全本文を読むことになり、絞るために列を足した意味が消える(#212 の穴)。
+     * 🔑 本文は既に DB に在るので、**ここで数え直せる**(取り込み直しは要らない)。
+     */
+    /**
+     * ⚠ 判定は「列をいま足したか」**ではなく**「**NULL の行が在るか**」──
+     *   旧ビルドが書いた行(この列を知らない UPSERT)も NULL で残るので、
+     *   次の open で拾える(schema.ts の原則「あるべき状態の実在」)。
+     * 🔑 判定そのものは索引が効く(`idx_entries_task`)ので、本文は読まない。
+     */
+    if (
+      database.selectValue(`SELECT 1 FROM entries WHERE task_total IS NULL LIMIT 1`) !== undefined
+    )
+      backfillTaskTotals(database);
     /**
      * 🔴 **既存 DB の索引を埋める**(#181 全文検索)。DDL は空の索引を作るだけ
      * なので、**既に在る entry は 1 件も引けない**まま緑になる ── 索引を足した
@@ -236,6 +343,93 @@ function runQueryScan(cid: string, key: string | null): {
 }
 
 /**
+ * 🔴 **候補の条件は 1 か所**(#277 段②。CLAUDE.md §7)。
+ *
+ * 🔴 **NULL も候補に入れる**(= まだ数えていない行)。⚠ 版を上げていないので
+ * **旧ビルドも同じ DB に書く**が、旧ビルドの UPSERT はこの列を知らないので、
+ * 新しく作った行が NULL で残る。NULL を外すと、その行は**カンバンから永久に
+ * 消える**(取りこぼし)。🔑 多めに拾うのは無害 ── 本文を読んで項目 0 件と
+ * 分かるだけである。
+ *
+ * ⚠ **残っている限界**(2026-08-19 の実地調査で実測):旧ビルドが**既にある行を
+ * 書き換えた**ときは、その UPSERT が列を挙げないので値が**据え置かれる**
+ * (NULL には戻らない)。チェックが 0 件だったノートに旧ビルドでチェックを
+ * 足すと、列は 0 のままなので**その回はカンバンに出ない**。⚠ 壊れではなく遅れ
+ * ── 新ビルドで 1 度保存すれば直る(`bindUpsert` が本文から数え直す)。
+ * 🔑 直すには「どの本文について数えたか」の印(`updated_at` との突き合わせ)が
+ * 要るが、列がもう 1 本増えるので**いまは採らない**。
+ *
+ * ⚠ **export しているのは test のため**(2026-08-19 の変異試験 M2)。この節を
+ *   `task_total > 0` に縮める変異が**生き延びた** ── 保存の口は必ず本文から
+ *   数えるので、worker の test から NULL の行を作る道が無い(§2「弱いのでは
+ *   なく走っていない」)。`tests/adapter/schema-migration.test.ts` が
+ *   **実 DB に NULL の行を直に挿して**この節を当てる。
+ */
+export const TASK_CANDIDATE_WHERE = 'cid = ? AND (task_total IS NULL OR task_total > 0)';
+
+/**
+ * 走査で 1 度に読むノートの数。⚠ **本文を丸ごと**読むので、先頭だけ読む
+ * `QUERY_SCAN_CHUNK`(500)より小さくする ── 一度に heap へ載る量が桁で違う。
+ */
+const TASK_SCAN_CHUNK = 100;
+
+/**
+ * 🔴 **カンバンの札を集める**(#277 段②-b)。
+ *
+ * 🔑 **本文は worker から出さない** ── 舐めるのはここで、返すのは項目だけ
+ * (#184 の全文走査と同じ型。不可侵指示 2026-07-27「速やかな破棄」)。
+ * ⚠ 塊で読み、塊ごとに捨てる ── 候補が 5000 件あっても、heap に載るのは
+ * 100 件ぶんの本文である。
+ */
+function runTaskScan(cid: string): TaskScan {
+  const database = need();
+  const totalNotes = Number(
+    database.selectValue(`SELECT count(*) FROM entries WHERE ${TASK_CANDIDATE_WHERE}`, [cid]) ?? 0,
+  );
+  const cards: TaskCard[] = [];
+  let scannedNotes = 0;
+  let truncated = false;
+  let stop = false;
+  let after: { entryOrder: number; lid: string } | undefined;
+  while (!stop) {
+    const rows = database.selectObjects(
+      after === undefined
+        ? `SELECT lid, entry_order, body FROM entries WHERE ${TASK_CANDIDATE_WHERE}
+             ORDER BY entry_order, lid LIMIT ?`
+        : `SELECT lid, entry_order, body FROM entries WHERE ${TASK_CANDIDATE_WHERE}
+             AND (entry_order > ? OR (entry_order = ? AND lid > ?))
+            ORDER BY entry_order, lid LIMIT ?`,
+      after === undefined
+        ? [cid, TASK_SCAN_CHUNK]
+        : [cid, after.entryOrder, after.entryOrder, after.lid, TASK_SCAN_CHUNK],
+    ) as unknown as Array<{ lid: string; entry_order: number; body: string | null }>;
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      // ⚠ **切ったら必ず `truncated`** ── 黙って切ると user は「無い」と読む
+      if (scannedNotes >= TASK_LIMITS.notes) {
+        truncated = true;
+        stop = true;
+        break;
+      }
+      scannedNotes += 1;
+      for (const item of listTaskItems(row.body ?? '')) {
+        if (cards.length >= TASK_LIMITS.items) {
+          truncated = true;
+          stop = true;
+          break;
+        }
+        cards.push({ lid: row.lid, line: item.line, text: clipTaskText(item.text), done: item.done });
+      }
+      if (stop) break;
+    }
+    const last = rows[rows.length - 1]!;
+    after = { entryOrder: last.entry_order, lid: last.lid };
+    if (rows.length < TASK_SCAN_CHUNK) break;
+  }
+  return { cards, totalNotes, scannedNotes, truncated };
+}
+
+/**
  * op → handler の typed dispatch(review #6): 返り値型を ResultMap に pin する。
  * ⚠ 現状 init 以外は同期実装で、message 間の interleave は起きない。handler を
  * async 化するときは client 側の直列化とセットで行うこと(review #5、p2 log に pin)。
@@ -246,10 +440,13 @@ type Handlers = {
   ) => ResultMap[Op] | Promise<ResultMap[Op]>;
 };
 
+/** 埋め戻しを回す塊の大きさ(本文を一度に heap へ載せない)。 */
+const BACKFILL_CHUNK = 200;
+
 const UPSERT_SQL = `INSERT INTO entries
     (cid, lid, title, archetype, created_at, updated_at,
-     entry_order, status, date, archived, body)
-  VALUES (?, ?, ?, ?, datetime('now'), datetime('now'), ?, ?, ?, ?, ?)
+     entry_order, status, date, archived, task_total, body)
+  VALUES (?, ?, ?, ?, datetime('now'), datetime('now'), ?, ?, ?, ?, ?, ?)
   ON CONFLICT(cid, lid) DO UPDATE SET
     title = excluded.title,
     archetype = excluded.archetype,
@@ -258,6 +455,7 @@ const UPSERT_SQL = `INSERT INTO entries
     status = excluded.status,
     date = excluded.date,
     archived = excluded.archived,
+    task_total = excluded.task_total,
     body = excluded.body`;
 
 function bindUpsert(cid: string, e: EntryUpsert): (string | number | null)[] {
@@ -270,6 +468,16 @@ function bindUpsert(cid: string, e: EntryUpsert): (string | number | null)[] {
     e.status,
     e.date,
     e.archived ? 1 : 0,
+    /**
+     * 🔴 **チェック項目の数は、書くときここで数える**(#277 段②)。
+     *
+     * ⚠ 呼び側に持たせない ── 12 ある書込経路のどれかが代入を落とすと、
+     *   **そのノートだけカンバンから消える**(しかも tsc は黙る)。
+     * ⚠ そして**旧いタブの follower**が要求を proxy してくる形(#286)でも、
+     *   本文さえ在れば正しい値になる ── 送ってこない field に依存しない。
+     * 🔑 実費は行走査 1 回(16KB の本文で 0.04ms 実測)。
+     */
+    countTaskCandidates(e.body).total,
     e.body,
   ];
 }
@@ -706,6 +914,7 @@ const handlers: Handlers = {
          FROM entries WHERE cid = ? ORDER BY entry_order`,
       [req.cid],
     ) as unknown as ResultMap['listEntryMetas'],
+  taskScan: (req) => runTaskScan(req.cid),
   getBody: (req) => {
     const rows = need().selectObjects(
       'SELECT body FROM entries WHERE cid = ? AND lid = ?',

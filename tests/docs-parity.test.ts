@@ -867,6 +867,7 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    'Office で保存すると、PKC のノートに残るようになりました',
     'PDF が読める大きさで出るようになりました(別の窓でも開けます)',
     '1 面編集で、行の箱の高さと上下キーを直しました',
     'ボタンの見た目を整えました(本文の面が広くなりました)',
@@ -919,5 +920,37 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
     expect(new Set(headings).size, `重複: ${headings.length - new Set(headings).size} 件`).toBe(
       headings.length,
     );
+  });
+});
+
+/**
+ * 🔴 **近道が指すボタンは、画面に実在する**(2026-08-19、`Alt+6` の死で判明)。
+ *
+ * 近道は「押しボタンを探して押す」形なので、⚠ **ボタンを帯から外した瞬間に無反応**
+ * になる(`preventDefault` すらしないので手がかりが無い)。実際 2 ペインは #241 の
+ * 訂正で帯から外れ、`Alt+6` は**1 度も効いていなかった**のに、お知らせ・マニュアル・
+ * `shell.ts` のコメントが**3 つとも「効きます」**と言っていた。
+ *
+ * ⚠ **見るのは「常に画面に在る帯」だけ**(`set-view` / `toggle-pane`)── 本文の
+ *   「編集」ボタンのように**ノートを開いていないと出ない**ものまで要求すると、
+ *   成り立たない条件になる(§1「主張そのものが成り立たない」)。
+ *   🔑 そして**実際に壊れたのは帯の側**である。
+ */
+describe('近道の押し先が画面に在る', () => {
+  it('🔴 帯を指す近道は、全部その帯に当たる', () => {
+    const body = /const SHORTCUT_BUTTON: Readonly<Record<string, string>> = \{([\s\S]*?)\n\};/
+      .exec(BINDER)?.[1];
+    expect(body, '近道の対応表を読めていない(空振り)').toBeDefined();
+    const table = [...body!.matchAll(/'([a-z0-9-]+)':\s*'([^']+)'/g)].map(
+      (m) => [m[1]!, m[2]!] as const,
+    );
+    expect(table.length, '対応表が空(空振り)').toBeGreaterThan(5);
+    // 帯(常設)を指すものだけ ── 状態で出たり消えたりする押し先は対象外
+    const band = table.filter(([, sel]) => /set-view|toggle-pane/.test(sel));
+    expect(band.length, '帯を指す近道を 1 つも読めていない(空振り)').toBeGreaterThan(2);
+    const dead = band
+      .filter(([, sel]) => root.querySelector(sel) === null)
+      .map(([cmd, sel]) => `${cmd} → ${sel}`);
+    expect(dead, '押す先が帯に無い近道がある(無反応になる)').toEqual([]);
   });
 });

@@ -15,7 +15,13 @@
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { SEALED_ARCHETYPES, SEALED_VIEWS, isSealedArchetype, isSealedView } from '@features/sealed';
+import {
+  SEALED_ARCHETYPES,
+  SEALED_TEST_NOTES,
+  SEALED_VIEWS,
+  isSealedArchetype,
+  isSealedView,
+} from '@features/sealed';
 import { getFlavor } from '@features/flavor';
 import { SCHEMA_DDL } from '@adapter/platform/storage/schema';
 
@@ -55,8 +61,12 @@ describe('封印 ── 畳んであるが、壊してはいない', () => {
   it('🔴 封印している対象が pin と一致する(黙って増減しない)', () => {
     // ⚠ **等値**で見る。包含だと足したものが素通りする
     expect([...SEALED_ARCHETYPES]).toEqual(['todo', 'form']);
-    // 🔴 カレンダーは #276 で解いた(2026-08-19)── 組み込みタイルから開く
-    expect([...SEALED_VIEWS]).toEqual(['kanban']);
+    /**
+     * 🔴 **面の封印は 2026-08-19 に全部解けた**(カレンダー #276 / カンバン #277)。
+     * ⚠ 空になっても配列は消さない ── 次に畳むときの受け皿であり、
+     *   `isSealedView` の口でもある(下の 2 行がその生存確認)。
+     */
+    expect([...SEALED_VIEWS]).toEqual([]);
     // 判定関数と配列が食い違わないこと(片方だけ直す事故を止める)
     expect(SEALED_ARCHETYPES.every(isSealedArchetype)).toBe(true);
     expect(SEALED_VIEWS.every(isSealedView)).toBe(true);
@@ -74,7 +84,7 @@ describe('封印 ── 畳んであるが、壊してはいない', () => {
     ]);
     expect(typeof kanbanUi.KanbanRenderer).toBe('function');
     expect(typeof calendarUi.CalendarRenderer).toBe('function');
-    expect(typeof kanbanData.groupTodosByStatus).toBe('function');
+    expect(typeof kanbanData.groupTasksByStatus).toBe('function');
     expect(typeof calendarData.groupEntriesByDate).toBe('function');
   });
 
@@ -127,11 +137,15 @@ describe('封印 ── 畳んであるが、壊してはいない', () => {
       'form が戻った ── 作成導線が足されたので sealed.ts の記述を直す',
     ).not.toContain('form');
 
-    // kanban … 消しても戻らない(P8 段⑤ で `VIEW_BUTTONS` が設定 1 つになった)
-    for (const view of ['kanban']) {
+    /**
+     * kanban … 配列を空にしても**上の帯には戻らない**(P8 段⑤ で `VIEW_BUTTONS` が
+     * 設定 1 つになった)。⚠ #277 で解いた後も**ここは変わらない** ── 戻した
+     * 導線は組み込みタイル(下の test)であって、帯の切替ではない。
+     */
+    for (const view of ['kanban', 'calendar']) {
       expect(
         viewButtons(opened),
-        `${view} の切替が戻った ── 導線が足されたので sealed.ts の記述を直す`,
+        `${view} の切替が帯に戻った ── 導線の置き場が変わったので sealed.ts の記述を直す`,
       ).not.toContain(view);
     }
   });
@@ -156,19 +170,33 @@ describe('封印 ── 畳んであるが、壊してはいない', () => {
     expect(tileSelectsEntry(calendarTile())).toBe(false);
   });
 
-  it('🔴 畳んだ smoke の記録が実態と合っている(戻す先を失わない)', () => {
-    // `SEALED_TEST_NOTES` が名指しする file は**消えているのが正しい**。
-    // ⚠ 在るなら記録が古い(復活済みなのに「削除した」と書いてある)
-    let exists = true;
-    try {
-      readFileSync('tests/smoke/kanban.smoke.spec.ts', 'utf-8');
-    } catch {
-      exists = false;
-    }
-    expect(exists, 'kanban smoke が復活しているのに SEALED_TEST_NOTES が「削除した」と言っている').toBe(
-      false,
+  /**
+   * 🔴 **カンバンは組み込みタイルから開ける**(#277 段②-b。カレンダーと同じ形)。
+   * ⚠ 「封印を解く = 配列から 1 語消す」で終わっていないことを見る。
+   */
+  it('🔴 カンバンは組み込みタイルから開ける(封印を解いただけで終わっていない)', async () => {
+    const { kanbanTile, withBuiltinTiles, tileSelectsEntry } = await import(
+      '@features/launcher/tiles'
     );
-    // dispatch 経由で描画を見ている代替の test は在ること(中身の検証が消えていない)
+    expect(isSealedView('kanban'), 'カンバンがまだ封印されている').toBe(false);
+    const tiles = withBuiltinTiles([], { office: false });
+    const board = tiles.find((t) => t.kind === 'kanban');
+    expect(board, 'アプリの一覧にカンバンが出ない(解いただけで導線が無い)').toBeDefined();
+    // ⚠ 組み込みは entry を持たない(存在しない lid を選択に入れない)
+    expect(tileSelectsEntry(kanbanTile())).toBe(false);
+  });
+
+  it('🔴 畳んだ smoke の記録が実態と合っている(戻す先を失わない)', () => {
+    /**
+     * 🔴 **向きが 2026-08-19 に裏返った**(#277 段②-b)── kanban smoke は
+     * 復活させたので、**在るのが正しい**。
+     * ⚠ 主張の向きを裏返したら作法も裏返る(CLAUDE.md §1)ので、
+     *   `SEALED_TEST_NOTES` の文言も一緒に見る ── file だけ戻して記録が
+     *   「削除した」のままだと、次に読む人が**もう一度消す**。
+     */
+    expect(() => readFileSync('tests/smoke/kanban.smoke.spec.ts', 'utf-8')).not.toThrow();
+    expect(SEALED_TEST_NOTES, '記録が「削除した」のままである').toContain('復活済み');
+    // dispatch 経由で描画を見ている test も在ること(中身の検証が消えていない)
     expect(() => readFileSync('tests/adapter/kanban-calendar-view.test.ts', 'utf-8')).not.toThrow();
   });
 });

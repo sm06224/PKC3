@@ -341,10 +341,47 @@ describe('組み込み Office タイル (#148)', () => {
  * 既存窓への focus-request は無反応に見える(レポート #11)ので一言を出す。
  */
 describe('main.ts の配線(原文 pin ── #174)', () => {
-  const MAIN = readFileSync('src/main.ts', 'utf8');
+  /**
+   * ⚠ **コメントを落としてから見る**(2026-08-19 のレビュー W-11)。
+   * 「**在る**」ことを主張する検査に生テキストを使うと、**解説コメントに
+   * 同じ字を書いた瞬間に、配線を落としても緑になる**(この repo が 5 回踏んだ型)。
+   * ⚠ 落とし過ぎの空振り防止に、落とした後も本文が十分残っていることを見る。
+   */
+  const MAIN = readFileSync('src/main.ts', 'utf8')
+    .split('\n')
+    .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+    .join('\n');
 
   it('既存窓へ focus したとき「既に開いています」を出す', () => {
     expect(MAIN).toContain("if (r.kind === 'already-open')");
     expect(MAIN).toContain('Office は既に開いています(そのタブをご覧ください)');
+  });
+
+  /**
+   * 🔴 **組み込みタイルは「もう一度押したら本文へ戻る」**(#277 段②-b)。
+   *
+   * ⚠ 直す前は `SET_VIEW_MODE` を素で投げていたので、カンバン / カレンダー /
+   *   2 ペインは**開いたボタンをもう一度押しても閉じなかった**(上の帯の
+   *   `set-view` にはその規約が在ったのに、タイルだけ素通りしていた)。
+   * ⚠ **「帰る道が無い」ではない**(2026-08-19 に smoke で実測して訂正)── 左の
+   *   探し方のタブを押せば `setBrowse` が本文へ戻す。⚠ ただしそれは
+   *   **左の列まで変える別の操作**であり、「開いたボタンで閉じる」の代わりに
+   *   ならない。
+   * ⚠ この配線は `main.ts` に在るので原文でしか pin できない。**規則そのもの**は
+   *   `nextViewMode` の unit(`tests/adapter/state.test.ts`)が守る ── ここは
+   *   「main.ts がその関数を通しているか」だけを見る(弱いと自覚して使う)。
+   */
+  it('⚠ コメントを落としても本文が残っている(空振り防止)', () => {
+    expect(MAIN.length, 'コメントを落としすぎて本文が消えた').toBeGreaterThan(20_000);
+    expect(MAIN, '配線が読めていない').toContain('dispatcher.dispatch');
+  });
+
+  it('🔴 組み込みタイルの openView が nextViewMode を通る(もう一度押すと戻る)', () => {
+    const opens = [...MAIN.matchAll(/openView: \(view\) =>/g)].length;
+    expect(opens, 'openView の配線が読めていない(空振り)').toBeGreaterThan(0);
+    expect(
+      [...MAIN.matchAll(/nextViewMode\(dispatcher\.getState\(\)\.viewMode, view\)/g)].length,
+      'openView が素の SET_VIEW_MODE を投げている(押しても戻れない)',
+    ).toBe(opens);
   });
 });

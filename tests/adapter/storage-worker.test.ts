@@ -12,6 +12,7 @@ import type {
   StorageRequest,
   StorageResponse,
 } from '../../src/adapter/platform/storage/protocol';
+import { TASK_LIMITS } from '../../src/features/kanban/kanban-data';
 
 type Op = StorageRequest['op'];
 
@@ -1078,3 +1079,134 @@ describe('作成と居場所(#258)', () => {
   });
 });
 
+
+/**
+ * 🔴 **チェック項目の候補を列に持つ**(#277 段②。user 裁定 2026-08-19「推薦 A」)。
+ *
+ * カンバンは「チェック項目を持つノート」だけを集める。全ノートの本文を読むと
+ * **面を開くたびの全文走査**になる(#212 と同じ穴)ので、保存時に列へ書き、
+ * 面は**まず列で絞ってから**候補の本文だけ読む。
+ *
+ * 🔑 守る主張:
+ * 1. 書けば列が入り、`taskScan` が**その行だけ**を札にする(行番号は原文のもの)
+ * 2. 🔴 **消したら札も消える**(片道にしない ── 消えたのに候補に残ると空振りが増える)
+ * 3. 🔴 **呼び側が値を送ってこなくても正しい**(旧いタブの follower。#286 の型)
+ * 4. 🔴 **切ったことを言う**(黙って切ると user は「無い」と読む)
+ *
+ * 🔴 **本文は worker から出ない** ── 返るのは項目だけである(不可侵指示
+ * 2026-07-27)。だから `taskScan` の結果に本文は 1 バイトも入っていない。
+ */
+describe('カンバンの札を集める (#277 段②)', () => {
+  const taskBody = '# 買い物\n\n- [ ] 牛乳\n- [x] 卵\n';
+  /** 札を集めて、鍵の一覧にする(順は entry_order → 行番号)。 */
+  const scanKeys = async (cid: string): Promise<string[]> => {
+    const scan = await request({ op: 'taskScan', cid });
+    return scan.cards.map((c) => `${c.lid} ${c.line}`);
+  };
+
+  it('🔴 チェックのある行が札になり、無いノートは 1 枚も出さない', async () => {
+    await request({ op: 'upsertEntry', cid: 'c1', entry: entry('tk-1', taskBody) });
+    await request({ op: 'upsertEntry', cid: 'c1', entry: entry('tk-2', '# ただの本文\n') });
+    const keys = await scanKeys('c1');
+    // ⚠ 行番号は**原文のもの**(2 行目と 3 行目)
+    expect(keys, 'チェックの行が札になっていない').toContain('tk-1 2');
+    expect(keys).toContain('tk-1 3');
+    expect(
+      keys.some((k) => k.startsWith('tk-2 ')),
+      'チェックの無いノートまで札になっている',
+    ).toBe(false);
+  });
+
+  /** 🔴 **印の向きが本文と合っている**(取り違えると済みが未完了の列に並ぶ)。 */
+  it('🔴 印の向きが本文と合う', async () => {
+    await request({ op: 'upsertEntry', cid: 'c1', entry: entry('tk-mark', taskBody) });
+    const scan = await request({ op: 'taskScan', cid: 'c1' });
+    const mine = scan.cards.filter((c) => c.lid === 'tk-mark');
+    expect(mine.map((c) => [c.text, c.done])).toEqual([
+      ['牛乳', false],
+      ['卵', true],
+    ]);
+  });
+
+  /**
+   * 🔴 **消したら札も消える**。⚠ 片道だと、チェックを全部消したノートが
+   *   いつまでも候補に残り、面を開くたびに無駄な本文の読みが増える。
+   */
+  it('🔴 チェックを消すと札も消える(片道にしない)', async () => {
+    await request({ op: 'upsertEntry', cid: 'c1', entry: entry('tk-3', taskBody) });
+    expect(await scanKeys('c1')).toContain('tk-3 2');
+    await request({ op: 'upsertEntry', cid: 'c1', entry: entry('tk-3', '# 消した\n') });
+    expect(
+      (await scanKeys('c1')).some((k) => k.startsWith('tk-3 ')),
+      '消したのに札が残っている',
+    ).toBe(false);
+  });
+
+  /**
+   * 🔴 **呼び側が数を送ってこなくても正しい**(#286 と同じ型)。
+   *
+   * 多重タブでは follower の要求が本体タブの worker へ proxy される。
+   * ⚠ **follower が旧ビルド**だと、新しい field を載せてこない ── そこで
+   *   要求の中身に依存していると、`NOT NULL` で**保存そのものが落ちる**
+   *   (= user のデータが書けない)。本文から数えるので、送ってこなくても効く。
+   * 🔑 ここでは「余計な field を持たない素の要求」= 旧ビルドの形を再現している。
+   */
+  it('🔴 旧いタブの形(数を送ってこない要求)でも、札に出る', async () => {
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      // ⚠ `entry()` は taskTotal を持たない ── これがまさに旧ビルドの形
+      entry: entry('tk-old', '- [ ] 旧いタブから書いた\n'),
+    });
+    expect(
+      await scanKeys('c1'),
+      '旧いタブから書いたノートの札が出ない',
+    ).toContain('tk-old 0');
+  });
+
+  /** ⚠ 引用の中も拾う(素朴な行走査が落とす形 ── `task-count.test.ts` 参照)。 */
+  it('引用の中のチェックも札になる', async () => {
+    await request({ op: 'upsertEntry', cid: 'c1', entry: entry('tk-q', '> - [ ] 引用\n') });
+    expect(await scanKeys('c1')).toContain('tk-q 0');
+  });
+
+  /** ⚠ 別の器のノートは混ざらない(cid で切れている)。 */
+  it('別の器のノートは混ざらない', async () => {
+    await request({ op: 'openContainer', cid: 'c-other', title: 'x' });
+    await request({ op: 'upsertEntry', cid: 'c-other', entry: entry('tk-other', taskBody) });
+    expect((await scanKeys('c1')).some((k) => k.startsWith('tk-other '))).toBe(false);
+    expect(await scanKeys('c-other')).toEqual(['tk-other 2', 'tk-other 3']);
+  });
+
+  it('上限に届かない量では切らない(切ったと言わない)', async () => {
+    const scan = await request({ op: 'taskScan', cid: 'c1' });
+    expect(scan.truncated, '切っていないのに切ったと言っている').toBe(false);
+    expect(scan.scannedNotes, '候補を読み残している').toBe(scan.totalNotes);
+    expect(scan.totalNotes, '候補が 1 件も無い(空振り)').toBeGreaterThan(0);
+  });
+
+  /**
+   * 🔴 **切ったら言う**(黙って切ると user は「無い」と読む)。
+   *
+   * ⚠ **上限を跨ぐ件数で試す**(CLAUDE.md §2「弱いのではなく走っていない」)──
+   *   届かない量だけを見ていると、`truncated` を常に `false` にする変異が
+   *   **生き延びる**(2026-08-19 の変異試験 M7 で実際に生き延びた)。
+   * 🔑 件数は **`TASK_LIMITS` から導く**(直書きしない)── 上限を上げた日に
+   *   「上限ちょうど」の主張が嘘になるのを避ける。
+   */
+  it('🔴 上限を超えたら、切ったと言う(黙って落とさない)', async () => {
+    await request({ op: 'openContainer', cid: 'c-many', title: 'x' });
+    const entries = Array.from({ length: TASK_LIMITS.notes + 5 }, (_, i) =>
+      entry(`many-${String(i).padStart(4, '0')}`, `- [ ] やること ${i}\n`, { entryOrder: i }),
+    );
+    await request({ op: 'bulkUpsertEntries', cid: 'c-many', entries });
+    const scan = await request({ op: 'taskScan', cid: 'c-many' });
+    expect(scan.totalNotes, '候補の総数が上限を超えていない(前提が崩れた)').toBe(
+      TASK_LIMITS.notes + 5,
+    );
+    expect(scan.truncated, '切ったのに黙っている').toBe(true);
+    expect(scan.scannedNotes, '上限を超えて読んでいる').toBe(TASK_LIMITS.notes);
+    // ⚠ 切っても**読んだ分は返る**(0 件にして「無い」と見せない)
+    expect(scan.cards.length, '切ったら何も返さなくなった').toBe(TASK_LIMITS.notes);
+  });
+});
