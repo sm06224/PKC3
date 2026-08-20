@@ -581,6 +581,80 @@ describe('チェックの印(#277)', () => {
 });
 
 describe('calendar view (P3-6)', () => {
+  /**
+   * 🔴 **今日に印が付く**(2026-08-20。user 指示「カレンダーを利用するための導線が
+   * 不足している」)。⚠ 直す前は**今日を示すものが 1 つも無かった** ── カレンダーで
+   * 最初に探すものが画面に無い。
+   * 🔑 `now` は注入できる(`CenterRouter` の第 2 引数)ので、実時刻に依存しない。
+   */
+  it('🔴 今日のセルにだけ印が付く(別の月を見ているときは付かない)', () => {
+    const { d, q, qa } = setup([meta('e1', { date: '2026-08-01' })], {});
+    showView(d, 'calendar');
+    // 注入した「今日」は 2026-08-15
+    expect(qa('[data-pkc-today]').length, '今日の印が 1 つでない').toBe(1);
+    expect(q('[data-pkc-today]')?.getAttribute('data-pkc-date')).toBe('2026-08-15');
+    // 翌月へ送ると、その月に今日は無い
+    q<HTMLElement>('[data-pkc-action="calendar-nav"][data-pkc-nav-month="9"]')!.click();
+    expect(qa('[data-pkc-today]').length, '別の月なのに今日の印が出た').toBe(0);
+  });
+
+  /**
+   * ⚠ **月外のセルは「押せない」と分かる形にする** ── 直す前は素の空 td で、
+   *   見た目が月内と同じなのに押しても何も起きなかった(無言の dead click)。
+   */
+  it('月外のセルは印が付き、押す口を持たない', () => {
+    const { d, qa } = setup([], {});
+    showView(d, 'calendar');
+    const outside = qa('[data-pkc-outside]');
+    expect(outside.length, '2026-08 は 1 日が土曜なので月外のセルが在るはず').toBeGreaterThan(0);
+    for (const td of outside) {
+      expect(td.hasAttribute('data-pkc-date'), '月外のセルが日付を持っている').toBe(false);
+      expect(td.hasAttribute('data-pkc-action'), '月外のセルが押せる').toBe(false);
+    }
+  });
+
+  /**
+   * ⚠ **土日は列そのもの**に印を付ける(セルが空でも分かるように)。
+   * 🔑 曜日は格子の位置で決まる ── 見出しと本体で**同じ列**に付くことを見る
+   *   (片方だけだと、縞がずれて見える)。
+   */
+  it('土日の列に印が付く(見出しと本体で同じ列)', () => {
+    const { d, q, qa } = setup([], {});
+    showView(d, 'calendar');
+    const heads = [...q('[data-pkc-region="calendar-grid"] thead tr')!.children];
+    expect(heads.map((th) => th.hasAttribute('data-pkc-weekend'))).toEqual([
+      true, false, false, false, false, false, true,
+    ]);
+    const firstRow = [...q('[data-pkc-region="calendar-grid"] tbody tr')!.children];
+    expect(firstRow.map((td) => td.hasAttribute('data-pkc-weekend'))).toEqual([
+      true, false, false, false, false, false, true,
+    ]);
+    expect(qa('[data-pkc-weekend]').length, '空振り(1 つも付いていない)').toBeGreaterThan(2);
+  });
+
+  /**
+   * 🔴 **どのノートに日付が付くかを、押す前に出す**(2026-08-20)。
+   *
+   * ⚠ 直す前は、押して初めて「日付を付けるノートを先に選んでください」と断られた
+   *   ── 押す前に何が選ばれているか画面から読めなかった。
+   * ⚠ **文言は「押した場所」と対で pin する**(CLAUDE.md §1)── 題名が出るだけの
+   *   検査だと、選んでいないときの案内文を消す変異が生き延びる。
+   */
+  it('🔴 帯に「どのノートに日付が付くか」が出る(選ぶ前は、何をすればよいかを出す)', () => {
+    const { d, q } = setup([meta('e1', { date: null, title: 'あ' })], {});
+    showView(d, 'calendar');
+    const bar = () => q('[data-pkc-field="calendar-target"]')?.textContent;
+    expect(bar(), '選ぶ前の案内が出ていない').toBe(
+      '日を押す前に、左の一覧からノートを選んでください',
+    );
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
+    expect(bar(), '選んだノートの題名が出ていない').toBe('「あ」に日付を付けます');
+    expect(
+      q('[data-pkc-field="calendar-target"]')?.getAttribute('data-pkc-entry'),
+      '帯が指しているノートが分からない',
+    ).toBe('e1');
+  });
+
   it('date セルに todo が立ち、showArchived と月送りが効く', async () => {
     const { d, q, qa } = setup(
       [

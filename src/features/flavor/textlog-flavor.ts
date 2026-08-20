@@ -9,7 +9,8 @@
  * (高頻度ログの弁別に秒が要る)── 設計メモ §3 の `HH:mm` 表記はこの精度に更新。
  */
 import { parseTextlogBody } from '../textlog/textlog-body';
-import { NO_EXTRACT, type FlavorSpec } from './flavor-spec';
+import { type FlavorSpec } from './flavor-spec';
+import { extractSchedule } from '../schedule/schedule-keys';
 
 const pad2 = (n: number): string => String(n).padStart(2, '0');
 
@@ -30,9 +31,31 @@ export function formatHeadingTimestamp(iso: string): string {
 
 export const textlogFlavor: FlavorSpec = {
   archetype: 'textlog',
-  // ログは複数日時を持つため、単一の date 抽出列には写らない(calendar への
-  // 展開が要件になったら P3-6 で別表を設計する ── 列を歪めて詰め込まない)
-  extract: () => NO_EXTRACT,
+  /**
+   * ⚠ **ログの見出しの日時は、いまも列へ写さない** ── ログは複数日時を持つので、
+   *   単一の `date` 列に詰めると歪む(展開が要件になったら P3-6 で別表を設計する)。
+   * 🔑 ここで写すのは **user が frontmatter に書いた `date`** だけである
+   *   ── 「導出した日付」と「書いた日付」は別物で、後者は archetype によらず効く。
+   */
+  /**
+   * 🔴 **frontmatter の `date` / `status` は、アーキタイプによらず効く**
+   * (2026-08-20。user 指示「カレンダーを利用するための導線が不足している」の調査で判明)。
+   *
+   * ⚠ 直す前は `NO_EXTRACT` を返しており、**書いても列に入らなかった**。
+   *   #276 で `text` だけを `extractSchedule` へ直したときに、
+   *   **同型の 4 つが取り残された**(CLAUDE.md「片側を直したら、対称の反対側を必ず疑う」)。
+   * 🔴 症状は「効かない」で済まない ── カレンダーの日を押すと
+   *   ①本文には `date` が入る ②カレンダーには出ない ③もう一度押すと
+   *   **「本文が変わっているため反映できませんでした」という嘘の理由**が出る
+   *   (列が `null` のままなので、トグルが毎回「付ける」側を送り、
+   *   2 回目の splice が同値 = 変化なしになる)④外すこともできない。
+   * 🔑 **founding 裁定 2026-07-30「アーキタイプ = フレーバー(見せ方・編集の仕方)」**
+   *   に照らすと、`date` の意味が archetype で変わるほうが誤りである
+   *   ── 見せ方が違うだけで、**書いた日付は日付**である。
+   * ⚠ 鍵の名前と受理形は `schedule-keys.ts` の 1 か所(判定を増やさない)。
+   * ⚠ `archived` はここでは写さない ── 理由は `extractSchedule` の docstring。
+   */
+  extract: (body) => ({ ...extractSchedule(body), archived: false }),
   fromPkc2(body) {
     // PKC2: JSON { entries: [{ id, text, createdAt, flags }] }(寛容 parse)。
     // ⚠ ログ id(ULID / legacy)は markdown へ持ち込まない ── 変換後は復元

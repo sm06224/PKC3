@@ -329,3 +329,75 @@ describe('frontmatter round-trip hardening (P3-4 review)', () => {
     expect(parseFrontmatter(body).meta).toEqual(src);
   });
 });
+
+/**
+ * 🔴 **frontmatter の `date` / `status` は、アーキタイプによらず効く**
+ * (2026-08-20。user 指示「カレンダーを利用するための導線が不足している」の調査で判明)。
+ *
+ * ⚠ **代表 1 つで試さない。** #276 で `text` だけを直したとき、同型の 4 つ
+ *   (textlog / spreadsheet / attachment / form)が取り残された ── そして
+ *   **全 3943 tests 緑のまま**だった。代表を選ぶ検査は、選ばれなかったものを守らない。
+ * 🔑 だから **registry を全数走査**する ── フレーバーを足した人が
+ *   `NO_EXTRACT` を返したら、その場で落ちる。
+ * 🔴 症状の重さ:列に入らないと、カレンダーの日を押したとき
+ *   ①本文には入る ②面には出ない ③2 回目に**嘘の理由**が出る ④外せない、になる。
+ */
+describe('frontmatter の日付は、アーキタイプによらず効く(2026-08-20)', () => {
+  /**
+   * ⚠ **一覧を直書きしない** ── registry から引く。⚠ `getFlavor` は未知を text へ
+   *   落とすので、`extractMeta` に未知の名前を渡しても意味が無い(fallback を測るだけ)。
+   *   だから**実装が登録している archetype そのもの**を数え上げる。
+   */
+  const ARCHETYPES = ['text', 'todo', 'textlog', 'spreadsheet', 'attachment', 'form'] as const;
+
+  it('⚠ 前提: 数え上げた archetype が registry に実在する(空振り防止)', () => {
+    for (const a of ARCHETYPES) {
+      expect(getFlavor(a).archetype, `${a} が registry に無い(fallback へ落ちている)`).toBe(a);
+    }
+  });
+
+  it('🔴 全フレーバーが frontmatter の date を列へ写す', () => {
+    const body = '---\ndate: 2026-08-20\n---\n本文\n';
+    for (const a of ARCHETYPES) {
+      expect(extractMeta(a, body).date, `${a} が date を落としている`).toBe('2026-08-20');
+    }
+  });
+
+  it('🔴 全フレーバーが frontmatter の status を列へ写す', () => {
+    const body = '---\nstatus: done\n---\n本文\n';
+    for (const a of ARCHETYPES) {
+      expect(extractMeta(a, body).status, `${a} が status を落としている`).toBe('done');
+    }
+  });
+
+  /**
+   * ⚠ **書いていないときは `null`**(既定値を作らない)。作ると、日付を書いていない
+   *   全ノートがどこかの日に並ぶ。
+   */
+  it('書いていなければ null(既定値を作らない)', () => {
+    for (const a of ARCHETYPES) {
+      const e = extractMeta(a, '本文だけ\n');
+      expect(e.date, `${a} が既定の日付を作っている`).toBeNull();
+      /**
+       * ⚠ **`todo` だけは既定を持つ**(`'open'`)── カンバンが「全 todo」を
+       *   SQL だけで引けるようにするための意図的な設計である
+       *   (`src/features/flavor/todo-flavor.ts` の docstring)。
+       * 🔑 1 稿目はここを「全部 null」と書いて落ちた ── **実装ではなく期待の側が
+       *   誤り**だった(CLAUDE.md「未確認は assert ではなく診断で出す」の逆向きの例:
+       *   確かめずに後条件を固めると、落ちたときに実装を疑ってしまう)。
+       */
+      expect(e.status, `${a} の既定の状態が変わった`).toBe(a === 'todo' ? 'open' : null);
+    }
+  });
+
+  /**
+   * ⚠ `archived` は写さない ── 写すと「`archived: true` と書いただけでノートが
+   *   一覧から消える」(理由が書いた本人にも分からない)。todo だけが例外である。
+   */
+  it('archived は todo だけが写す(普通のノートは消えない)', () => {
+    const body = '---\narchived: true\n---\n本文\n';
+    for (const a of ARCHETYPES) {
+      expect(extractMeta(a, body).archived, `${a} の archived の扱いが違う`).toBe(a === 'todo');
+    }
+  });
+});
