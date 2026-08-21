@@ -1789,6 +1789,116 @@ describe('2 ペインの掴んで落とす(#273 段⑤)', () => {
    *   ── どちらか片方にしか居ないと、`marked.includes(lid)` が false になって
    *   **どちらの実装でも「1 件だけ」**になり、変異が生き延びる。
    */
+  /**
+   * 🔴 **落とした後を F6 と同じ形に揃える**(2026-08-21、cowork #15)。
+   *
+   * cowork の報告は「D&D の後、選択が**落とした行の 1 つ下**へ移る(実害は見ていない)」。
+   * ⚠ 調べたら選択は**移っていなかった** ── 見えていたのは `:hover` の塗りで、
+   *   `tr[data-pkc-marked] td` と `tr:hover td` が**同じ地色**だったための見間違い。
+   * 🔴 **ただし別の実害が 2 つ在った**(こちらが本体):
+   *   ① drop の経路だけ「動いた回だけ印を外す」が抜けており、次にゴミ箱を押すと
+   *      **「選んでいた行がいま画面にありません」という的外れな断り**が出る
+   *   ② 焦点の引き継ぎも抜けており、落とした直後の `↑` `↓` が**無言で死ぬ**
+   */
+  it('🔴 落とした後、掴んだ側の印が外れる(次の操作が的外れな断りを出さない)', async () => {
+    // 左で 2 件に印を付けてから掴む
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' });
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'b', mode: 'toggle' });
+    expect(d.getState().dual.left.selection.length, '前提が崩れている').toBe(2);
+
+    /**
+     * ⚠ **本当に動く落とし方にする**(1 稿目はここを間違えた)。ルートに在るものを
+     *   ルートの地へ落としても `alreadyThere` で**動かない** ── そのとき印を
+     *   外さないのが正しい挙動なので、fixture の側が主張を検査できていなかった。
+     */
+    const dt = dtStub();
+    row('left', 'a').dispatchEvent(dragEv('dragstart', dt));
+    row('right', 'f2').dispatchEvent(dragEv('drop', dt));
+    await tick();
+    expect(parentOf('a'), '前提が崩れている(動いていない)').toBe('f2');
+
+    expect(
+      d.getState().dual.left.selection,
+      '掴んだ側の印が残っている(次の操作が消えた行を指す)',
+    ).toEqual([]);
+  });
+
+  it('🔴 落とした後、掴んだ側のカーソルが生きている行を指す(↑↓ が死なない)', async () => {
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' });
+    const dt = dtStub();
+    row('left', 'a').dispatchEvent(dragEv('dragstart', dt));
+    row('right', 'f2').dispatchEvent(dragEv('drop', dt));
+    await tick();
+    expect(parentOf('a'), '前提が崩れている(動いていない)').toBe('f2');
+
+    const cur = d.getState().dual.left.cursor;
+    expect(cur, 'カーソルが立っていない(次の ↑↓ が先頭へ飛ぶ)').not.toBeNull();
+    // ⚠ **画面に出ている行**を指していること(消えた行を指したままにしない)
+    const still = pane('left').querySelector(`[data-pkc-entry="${cur}"]`);
+    expect(still, 'カーソルが画面に無い行を指している').not.toBeNull();
+  });
+
+  /**
+   * ⚠ **落とし先が無い / 動かなかった回は、印を外さない。**
+   *   外すと「掴んで戻しただけで選択が消える」になる(F6 が同じ形で守っている)。
+   */
+  /**
+   * ⚠ **落とし先は在るが、動かなかった回。**
+   *   1 稿目は「落とし先の属性が無い所」へ落としていたが、それは
+   *   `dropTargetOf === undefined` で**手前で return する**ので、
+   *   検査したい「動いた回だけ外す」の判定を**1 度も通っていなかった**
+   *   (変異試験で `relations !== before` を外しても生き延びた)。
+   * 🔑 ルートに在るものを**ルートを開いているペインの地**へ落とす ──
+   *   落とし先は成立し、`alreadyThere` で 1 件も動かない形。
+   */
+  it('落とし先は在るが動かなかった回は、印を外さない', async () => {
+    expect(parentOf('a'), '前提が崩れている(a はルートに在ること)').toBeNull();
+    expect(pane('left').getAttribute('data-pkc-drop-scope'), '前提: 左はルート').toBe('');
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' });
+    const dt = dtStub();
+    row('left', 'a').dispatchEvent(dragEv('dragstart', dt));
+    pane('left').dispatchEvent(dragEv('drop', dt));
+    await tick();
+    expect(parentOf('a'), '前提が崩れている(動いてしまった)').toBeNull();
+    expect(d.getState().dual.left.selection, '動いていないのに印が消えた').toEqual(['a']);
+  });
+
+  /**
+   * 🔴 **掴んだ側は `dragstart` のたびに決め直す**(2026-08-21)。
+   * ⚠ 決め直さないと、2 ペインで掴んだ後に**左の列**から掴んだとき、
+   *   前の側(2 ペイン)の印を外してしまう。
+   */
+  it('🔴 2 ペイン以外から掴んだ drag は、2 ペインの印を外さない', async () => {
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' });
+    // ① まず 2 ペインから掴む(ここで「掴んだ側 = left」が立つ)
+    const first = dtStub();
+    row('left', 'a').dispatchEvent(dragEv('dragstart', first));
+    // ② 次に **2 ペインの外**(器そのもの)から掴む ── 側は無い
+    const second = dtStub({ [PKC_DRAG_DUAL]: 'b' });
+    region.dispatchEvent(dragEv('dragstart', second));
+    // ③ その drag を右の f2 へ落とす(動きはする)
+    row('right', 'f2').dispatchEvent(dragEv('drop', second));
+    await tick();
+    expect(parentOf('b'), '前提が崩れている(動いていない)').toBe('f2');
+    expect(
+      d.getState().dual.left.selection,
+      '別の所から掴んだのに 2 ペインの印が外れた',
+    ).toEqual(['a']);
+  });
+
+  /**
+   * 🔴 **`dragenter` でも受理を宣言する**(2026-08-21)。
+   * ⚠ 直す前は `dragover` しか受けておらず、仕様上の受理判定点(`dragenter`)を
+   *   1 つ落としていた ── cowork の「地は 5/5・行は 0/5」という**落とし先で割れる**
+   *   非対称を説明できる、コード上で名指しできる唯一の穴だった。
+   */
+  it('🔴 dragenter でも落とし先として受理する(dragover だけに頼らない)', () => {
+    const dt = dtStub({ [PKC_DRAG_DUAL]: 'a' });
+    const ev = dragEv('dragenter', dt);
+    row('left', 'f1').dispatchEvent(ev);
+    expect(ev.defaultPrevented, 'dragenter を受理していない').toBe(true);
+  });
+
   it('🔴 2 ペインから掴んだら、2 ペインの印を運ぶ(左の列の印ではない)', () => {
     // 左の列の印: a と c
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
