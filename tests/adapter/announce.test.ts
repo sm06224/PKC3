@@ -535,6 +535,7 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
+    ['2026-08-20-boot-and-search', '73b3ae97'],
     ['2026-08-20-kanban-done-fold', '50d4ed94'],
     ['2026-08-20-calendar-lines', 'd1b89975'],
     ['2026-08-19-dual-rebuild', 'e2a78fa2'],
@@ -554,7 +555,6 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-08-18-word-vector-figures', 'a1641a5b'],
     ['2026-08-18-settings-commands', '82f24590'],
     ['2026-08-17-word-export-page', '0bb5cbb5'],
-    ['2026-08-17-word-export-figures', 'c569e98b'],
     // ⚠ 上限 20 を超えたので 2026-08-20 に落とした(原本は CHANGELOG)
     // ['2026-08-17-word-export', '4454a5dd'],
   ];

@@ -13,6 +13,7 @@ import {
   SCHEMA_DDL,
   REVISION_ADDED_COLUMNS,
   ENTRY_ADDED_COLUMNS,
+  FTS_DDL,
 } from './schema';
 /**
  * 全文検索が 1 度に返す上限(#181)。⚠ **切ったことは呼び側へ言う** ── 黙って
@@ -152,6 +153,62 @@ async function init(dbName: string, journalMode?: JournalMode): Promise<InitResu
  * ⚠ FTS の trigger は `AFTER UPDATE` で発火するが、`title` / `body` は
  *   変えていないので索引の中身は同じ値に書き直されるだけ(害は無い)。
  */
+/**
+ * 索引に入っている doc の数。
+ *
+ * 🔴 **`SELECT count(*) FROM entries_fts` で数えてはいけない**(2026-08-20 に実測)。
+ *   外部内容(`content='entries'`)の全走査は**内容表のほう**を読むので、
+ *   **索引が空でも `entries` の行数がそのまま返る**。実測値 ──
+ *   索引 0 件 / entries 3 件のとき `count(*) FROM entries_fts` = **3**、
+ *   `count(*) FROM entries_fts_docsize` = **0**(組み直した後は 3)。
+ * ⚠ これは #181 の「**索引が空なら組み直す**」判定が**一度も真にならなかった**
+ *   理由でもある(空振り §1 ── 検査が別の理由で成立していた)。
+ *   つまり **#181 より前に作られた DB の索引は、今日まで空のまま**だった。
+ * 🔑 数えるのは **`%_docsize` 影表**(1 doc = 1 行)。
+ * ⚠ 読めないとき(壊れている / 影表がまだ無い)は `null` ── 呼び側が
+ *   「合っていない」として組み直す。
+ */
+function ftsDocCount(database: Database): number | null {
+  try {
+    return Number(database.selectValue('SELECT count(*) FROM entries_fts_docsize') ?? 0);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 🔴 **全文検索の索引を `entries` に合わせる**(#181 / 2026-08-20 の起動不能)。
+ *
+ * ⚠ 呼ぶ場所が主張の半分である ── **`entries` を書き換えるどの処理よりも前**。
+ *   後ろに置くと、空の索引に trigger が `'delete'` を撃って索引を壊す
+ *   (呼び出し側の注記を読むこと)。
+ * ⚠ 判定は user_version ではなく**あるべき状態の実在**(schema.ts の原則)。
+ *   冪等なので、半端な DB も次の open で自己修復する。
+ */
+function syncFtsIndex(database: Database): void {
+  const entryCount = Number(database.selectValue('SELECT count(*) FROM entries') ?? 0);
+  if (ftsDocCount(database) === entryCount) return;
+  try {
+    database.exec(`INSERT INTO entries_fts(entries_fts) VALUES ('rebuild')`);
+    if (ftsDocCount(database) === entryCount) return;
+  } catch {
+    /* 組み直しでも直らない索引 ── 下で作り直す */
+  }
+  /**
+   * 🔴 **最後の手段:索引ごと作り直す**(2026-08-20 に実測して決めた)。
+   *
+   * ⚠ `'rebuild'` は**影表が壊れていると直せない** ── 実測:`%_docsize` を
+   *   落とした索引に `'rebuild'` を撃つと `SQLITE_ERROR` で落ちる。
+   *   ⚠ ここで throw させてはいけない。**起動そのものが失敗する**からである
+   *   (それがこの節の直している症状である)。
+   * 🔑 仮想表を落とすと**影表もろとも消える**ので、壊れ方に依らず作り直せる。
+   *   ⚠ trigger は `entries` に付いているので**消えない**(実測: drop 後も 3 本)。
+   */
+  database.exec('DROP TABLE IF EXISTS entries_fts');
+  for (const ddl of FTS_DDL) database.exec(ddl);
+  database.exec(`INSERT INTO entries_fts(entries_fts) VALUES ('rebuild')`);
+}
+
 function backfillDerivedColumns(database: Database): void {
   /**
    * 🔴 **回数の上限を、書込の成功と無関係に置く**(2026-08-20 の変異試験で判明)。
@@ -285,21 +342,34 @@ export function applySchema(database: Database): void {
      *   次の open で拾える(schema.ts の原則「あるべき状態の実在」)。
      * 🔑 判定そのものは索引が効く(`idx_entries_task`)ので、本文は読まない。
      */
+    /**
+     * 🔴 **索引を整合させるのは、`entries` を書き換える「前」**(2026-08-20、起動不能)。
+     *
+     * ⚠ 直す前はこの下の埋め戻し(`backfillDerivedColumns`)より**後**に在った ──
+     *   それが **user のアプリを起動不能にしていた**:
+     *   ① #181 より前に作られた DB には `entries_fts` も trigger も**無い**
+     *   ② この open で DDL が**空の索引**と trigger を作る
+     *   ③ 直後の埋め戻しが全行を UPDATE → `entries_fts_au` が
+     *      **空の索引に `'delete'`** を撃つ → FTS5 が
+     *      `SQLITE_CORRUPT_VTAB(267) database disk image is malformed` を返す
+     *   ④ tx ごと巻き戻るので DB は無傷のまま ── **毎回の起動で同じ所で落ちる**
+     *   ⑤ しかも壊した結果、④ の前に居た `ftsCount === 0` の判定は
+     *      **もう 0 ではない**ので、rebuild は永久に走らない(自分で自分の
+     *      救済経路を塞いでいた)
+     * 🔑 順序を入れ替えるだけで③が正当な delete/insert になる。
+     *
+     * ⚠ **判定を「空か」から「数が合うか」へ広げた** ── `=== 0` は
+     *   「一部だけずれている索引」を**素通りさせる**(空振り §1)。
+     *   外部内容(`content='entries'`)の索引は **1 entry = 1 doc** なので、
+     *   数が合わないこと自体がずれの証拠である。
+     * ⚠ 壊れた索引は `count(*)` **すら通らない**ので、読めないときも
+     *   「合っていない」として扱う(= 組み直す)。
+     */
+    syncFtsIndex(database);
     if (
       database.selectValue(`SELECT 1 FROM entries WHERE ${NEEDS_BACKFILL} LIMIT 1`) !== undefined
     )
       backfillDerivedColumns(database);
-    /**
-     * 🔴 **既存 DB の索引を埋める**(#181 全文検索)。DDL は空の索引を作るだけ
-     * なので、**既に在る entry は 1 件も引けない**まま緑になる ── 索引を足した
-     * 型の欠陥はここに出る(§1「材料が届いていない」)。
-     * ⚠ 判定は user_version ではなく**あるべき状態の実在**(schema.ts の原則):
-     * 「entry が在るのに索引が空」なら埋める。冪等で、半端な DB も自己修復する。
-     */
-    const entryCount = Number(database.selectValue('SELECT count(*) FROM entries') ?? 0);
-    const ftsCount = Number(database.selectValue('SELECT count(*) FROM entries_fts') ?? 0);
-    if (entryCount > 0 && ftsCount === 0)
-      database.exec(`INSERT INTO entries_fts(entries_fts) VALUES ('rebuild')`);
     database.exec(`PRAGMA user_version = ${DB_SCHEMA_VERSION}`);
     database.exec('COMMIT');
   } catch (err) {

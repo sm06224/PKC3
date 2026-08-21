@@ -867,6 +867,7 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    'Word の書き出しに図とグラフが入るようになりました',
     'Word の書き出しに画像が入るようになりました',
     'Office で保存すると、PKC のノートに残るようになりました',
     'Office で同じ文書を 2 回保存しても、ノートが増えなくなりました',
