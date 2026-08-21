@@ -256,6 +256,18 @@ export interface AppState {
   calendarMonth: { year: number; month: number } | null;
   /** calendar で archived todo を見せるか(PKC2 の showArchived と同じ意味論)。 */
   showArchived: boolean;
+  /**
+   * 🔴 **板で「完了」を開いているか**(2026-08-20。設計 doc §4-4)。
+   *
+   * ⚠ **既定は閉じている** ── 直す前は完了した札が「完了」列に打ち消し線で
+   *   **残り続けて**いた。市井の 6 実装を当たったが、**この形は 1 つも無かった**
+   *   (どれも畳むか、別の場所へ落とす)。⚠ 畳んでも**件数は必ず見せる** ──
+   *   黙って消すと「やったはずのものが無い」になる。
+   * ⚠ `showArchived` とは別物である ── あちらは「片付けたノート」、
+   *   こちらは「済んだ**行**」。同じ切替に相乗りさせない。
+   * ⚠ 保存しない(その場の見え方)── `showArchived` と同じ扱い。
+   */
+  showDoneTasks: boolean;
   /** 選択 entry の履歴 panel(P5b)。開いた時点のスナップショット ── 選択遷移 /
    *  編集開始 / view 切替で畳む。boot で revisions に触れない原則の受け皿。 */
   revisionPanel: { lid: string; items: readonly RevisionItem[] } | null;
@@ -438,6 +450,7 @@ export const initialState: AppState = {
   launcherTiles: null,
   calendarMonth: null,
   showArchived: false,
+  showDoneTasks: false,
   revisionPanel: null,
   trashPanel: null,
   linkedFiles: new Map(),
@@ -597,6 +610,8 @@ export type UserAction =
   | { type: 'FORCE_RELEASE_LOCK'; discardDraft: boolean }
   | { type: 'SET_CALENDAR_MONTH'; year: number; month: number }
   | { type: 'TOGGLE_SHOW_ARCHIVED' }
+  /** 板の「完了」を開く / 畳む(2026-08-20。設計 doc §4-4)。 */
+  | { type: 'TOGGLE_SHOW_DONE_TASKS' }
   | { type: 'RETRY_PERSIST' }
   /** lid / title は binder が生成して渡す(reducer は純粋のまま ── Date を呼ばない)。
    *  body 省略時は flavor seed。edit:false は「作って選択するだけ」(添付取込等 ──
@@ -1911,6 +1926,9 @@ function reduceCore(
     }
     case 'TOGGLE_SHOW_ARCHIVED':
       return { state: { ...state, showArchived: !state.showArchived }, events: [] };
+    case 'TOGGLE_SHOW_DONE_TASKS':
+      // ⚠ 選択も走査も動かさない ── 見え方だけを変える
+      return { state: { ...state, showDoneTasks: !state.showDoneTasks }, events: [] };
     case 'BODY_PERSISTED': {
       // ack された内容を disk 事実として記録(選択が移って openBody が破棄
       // 済みなら捨てる ── stale ack で別 entry の作業域を汚さない)

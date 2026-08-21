@@ -60,8 +60,31 @@ test('🔴 アプリの一覧からカンバンを開き、札を押すと元の
   const open = page.locator('[data-pkc-kanban-status="open"] [data-pkc-entry]');
   const done = page.locator('[data-pkc-kanban-status="done"] [data-pkc-entry]');
   await expect(open, '未完了の札の枚数が違う').toHaveCount(3);
-  await expect(done, '完了の札の枚数が違う').toHaveCount(1);
-  await expect(done.first(), '完了の列に居るのが「卵」でない').toContainText('卵');
+
+  /**
+   * 🔴 **完了は既定で畳まれている**(2026-08-20。設計 doc §4-4)。
+   *
+   * ⚠ 1 稿目はここで `done` の**枚数**だけを数えていたが、畳んだ後もノードは
+   *   DOM に居るので**畳んでも緑**だった(§1 の空振り)── user が見る形を測る。
+   * 🔑 畳んでも**件数は見える** ── 見出しに出す(黙って消さない)。
+   */
+  /**
+   * ⚠ **`toBeHidden()` は「居ない」でも通る**(Playwright の仕様)── 先に
+   *   **枚数**を見る。畳むときに札を捨てていないこと自体が主張の一部である
+   *   (捨てると、開いた瞬間に組み直されて押す寸前の札が dead click になる)。
+   */
+  await expect(done, '畳むときに札を捨てている(DOM に居ない)').toHaveCount(1);
+  await expect(done.first(), '完了の札が見えている(既定は畳む)').toBeHidden();
+  const doneHead = page.locator(
+    '[data-pkc-kanban-status="done"] [data-pkc-field="kanban-column-label"]',
+  );
+  await expect(doneHead, '畳んだのに件数が出ていない').toHaveText('▸ 完了(1)');
+
+  // 見出しを押すと開く ── 1 操作で戻せる
+  await clickReal(page, '[data-pkc-action="toggle-show-done"]');
+  await expect(done.first(), '押しても開かない').toBeVisible();
+  await expect(done.first(), '完了に居るのが「卵」でない').toContainText('卵');
+  await expect(doneHead, '開いたのに印が変わらない').toHaveText('▾ 完了(1)');
 
   // ③ 🔴 **1 件目の札**を押す。⚠ いま開いている(選ばれている)のは 2 件目である
   const milk = open.filter({ hasText: '牛乳' });
@@ -72,7 +95,8 @@ test('🔴 アプリの一覧からカンバンを開き、札を押すと元の
   await expect(
     page.locator('[data-pkc-kanban-status="done"] [data-pkc-entry]').filter({ hasText: '牛乳' }),
     '押した札が完了へ移っていない',
-  ).toHaveCount(1);
+  ).toBeVisible();
+  await expect(doneHead, '完了の件数が増えていない').toHaveText('▾ 完了(2)');
 
   /**
    * 🔴 **当て馬が無傷であること** ── ここが「別のノートを書き換える」壊れ方の

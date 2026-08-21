@@ -820,3 +820,96 @@ describe('calendar view (P3-6)', () => {
     expect(detailPane.querySelector('[data-pkc-field="detail-body"]')).toBe(bodyBefore);
   });
 });
+
+/**
+ * 🔴 **完了は畳んで下へ落とす**(2026-08-20。設計 doc §4-4)。
+ *
+ * ⚠ 直す前は「完了」列に**打ち消し線で残り続けて**いた ── 市井の 6 実装を
+ *   当たったが、この形は 1 つも無かった(どれも畳むか、別の場所へ落とす)。
+ * 🔴 ただし **畳むことと隠すことは違う** ── 件数は必ず見えていなければ、
+ *   user は「やったはずのものが無い」と読む。
+ */
+describe('板の「完了」は畳む(2026-08-20)', () => {
+  /**
+   * ⚠ **札は走査の結果から来る**(本文からではない)── `SET_TASK_SCAN` を撃たないと
+   *   盤面は 0 件のままである(1 稿目はここを忘れて「件数が出ない」と読み違えた)。
+   */
+  const feedCards = (d: Dispatcher, cards: { lid: string; line: number; text: string; done: boolean }[]) =>
+    d.dispatch({
+      type: 'SET_TASK_SCAN',
+      scan: { cards, totalNotes: 1, scannedNotes: 1, truncated: false },
+    });
+
+  const head = (q: (s: string) => Element | null): string =>
+    q('[data-pkc-kanban-status="done"] [data-pkc-field="kanban-column-label"]')?.textContent ?? '';
+  const doneHost = (q: (s: string) => Element | null): HTMLElement =>
+    q('[data-pkc-kanban-status="done"] [data-pkc-region="kanban-cards"]') as HTMLElement;
+
+  it('🔴 既定は畳まれていて、件数は見えている', () => {
+    const { d, q } = setup([meta('e1')], { e1: '- [ ] あ\n- [x] い\n- [x] う\n' });
+    showView(d, 'kanban');
+    feedCards(d, [
+      { lid: 'e1', line: 0, text: 'あ', done: false },
+      { lid: 'e1', line: 1, text: 'い', done: true },
+      { lid: 'e1', line: 2, text: 'う', done: true },
+    ]);
+    expect(doneHost(q).hidden, '既定で開いている(市井の 6 実装に無い形)').toBe(true);
+    expect(head(q), '畳んだのに件数が出ていない(やったものが消えたように見える)').toBe(
+      '▸ 完了(2)',
+    );
+    // ⚠ **札は作ったまま**(開くたびに組み直さない ── 器を捨てない)
+    expect(
+      doneHost(q).querySelectorAll('[data-pkc-entry]').length,
+      '畳むときに札を捨てている(開いた瞬間に作り直しになる)',
+    ).toBe(2);
+  });
+
+  it('🔴 見出しを押すと 1 操作で開き、もう一度で畳む', () => {
+    const { d, q } = setup([meta('e1')], { e1: '- [ ] あ\n- [x] い\n' });
+    showView(d, 'kanban');
+    feedCards(d, [
+      { lid: 'e1', line: 0, text: 'あ', done: false },
+      { lid: 'e1', line: 1, text: 'い', done: true },
+    ]);
+    const btn = () =>
+      q('[data-pkc-kanban-status="done"] [data-pkc-action="toggle-show-done"]') as HTMLElement;
+    btn().click();
+    expect(doneHost(q).hidden, '押しても開かない').toBe(false);
+    expect(head(q), '開いたのに印が変わらない').toBe('▾ 完了(1)');
+    btn().click();
+    expect(doneHost(q).hidden, 'もう一度押しても畳まれない').toBe(true);
+  });
+
+  /**
+   * ⚠ **「やること」側は畳めない** ── 畳んだら面が空になる。押す口も出さない
+   *   (押せて何も起きないボタンは無言の dead click)。
+   */
+  it('やること側に畳む口は無い', () => {
+    const { d, q } = setup([meta('e1')], { e1: '- [ ] あ\n' });
+    showView(d, 'kanban');
+    feedCards(d, [{ lid: 'e1', line: 0, text: 'あ', done: false }]);
+    expect(
+      q('[data-pkc-kanban-status="open"] [data-pkc-action="toggle-show-done"]'),
+      'やること側にも畳む口が出ている',
+    ).toBeNull();
+    expect(
+      (q('[data-pkc-kanban-status="open"] [data-pkc-region="kanban-cards"]') as HTMLElement).hidden,
+      'やること側が畳まれている',
+    ).toBe(false);
+  });
+
+  it('件数は絞り込みの後の数(画面に出ている分)を出す', () => {
+    const { d, q } = setup([meta('e1', { title: 'あ' }), meta('e2', { title: 'い' })], {
+      e1: '- [x] 済み A\n',
+      e2: '- [x] 済み B\n',
+    });
+    showView(d, 'kanban');
+    feedCards(d, [
+      { lid: 'e1', line: 0, text: '済み A', done: true },
+      { lid: 'e2', line: 0, text: '済み B', done: true },
+    ]);
+    expect(head(q)).toBe('▸ 完了(2)');
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'あ' });
+    expect(head(q), '絞り込みで消えた分まで数えている').toBe('▸ 完了(1)');
+  });
+});

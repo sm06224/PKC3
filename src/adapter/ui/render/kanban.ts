@@ -32,13 +32,20 @@ export class KanbanRenderer {
   private readonly cards = new Map<string, HTMLElement>();
   /** 札ごとの描画済み参照(札粒度の skip)。 */
   private readonly cardData = new Map<string, TaskCard>();
-  private frame: { note: HTMLElement; columns: Record<KanbanStatus, HTMLElement> } | null = null;
+  private frame: {
+    note: HTMLElement;
+    columns: Record<KanbanStatus, HTMLElement>;
+    /** 見出しの字(件数と開閉の印を塗る所)。 */
+    heads: Record<KanbanStatus, HTMLElement>;
+  } | null = null;
   private lastScan: AppState['taskScan'] = null;
   private lastFailed = false;
   private lastMetas: AppState['entryMetas'] | null = null;
   private lastFilter: string | null = null;
   private lastHits: AppState['searchHits'] = null;
   private lastShowArchived: boolean | null = null;
+  /** ⚠ 「完了」の開閉も指紋(入れないと押しても畳まれたまま)。 */
+  private lastShowDone: boolean | null = null;
   /**
    * ⚠ **断りも指紋の一部**(2026-08-19 のレビュー W-2)。押した札が断られたとき、
    * ここを見ていないと**描画器が早期 return して印が戻らない**。
@@ -59,6 +66,7 @@ export class KanbanRenderer {
       state.filterQuery === this.lastFilter &&
       state.searchHits === this.lastHits &&
       state.showArchived === this.lastShowArchived &&
+      state.showDoneTasks === this.lastShowDone &&
       state.error === this.lastError &&
       state.selectedLid === this.lastSelected
     )
@@ -69,6 +77,7 @@ export class KanbanRenderer {
     this.lastFilter = state.filterQuery;
     this.lastHits = state.searchHits;
     this.lastShowArchived = state.showArchived;
+    this.lastShowDone = state.showDoneTasks;
     this.lastError = state.error;
     this.lastSelected = state.selectedLid;
 
@@ -95,6 +104,30 @@ export class KanbanRenderer {
     });
     frame.note.textContent = this.noteText(state, all.length, visible.length);
     const grouped = groupTasksByStatus(visible);
+    /**
+     * 🔴 **畳んでも件数は必ず見せる**(2026-08-20)。⚠ 黙って消すと
+     *   「やったはずのものが無い」になる ── 畳むことと隠すことは違う。
+     */
+    for (const col of KANBAN_COLUMNS) {
+      const n = grouped[col.status].length;
+      const open = col.status !== 'done' || state.showDoneTasks;
+      const head = frame.heads[col.status];
+      const text =
+        col.status === 'done'
+          ? `${open ? '▾' : '▸'} ${col.label}(${n})`
+          : `${col.label}(${n})`;
+      if (head.textContent !== text) head.textContent = text;
+      const btn = head.parentElement;
+      if (btn instanceof HTMLButtonElement) {
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        btn.title = open ? '完了した項目を畳みます' : `完了した項目 ${n} 件を開きます`;
+      }
+      /**
+       * ⚠ **札は作ったまま `hidden` にする**(消さない)── 開くたびに組み直すと、
+       *   押す寸前の札が作り直されて dead click になる(器を捨てない規律)。
+       */
+      frame.columns[col.status].hidden = !open;
+    }
 
     // 削除 pass を先に(残った実ノードが cursor を汚すと、以降が全部 move になる)
     const wanted = new Set(visible.map(taskCardKey));
@@ -166,27 +199,50 @@ export class KanbanRenderer {
     return `${shown} 件`;
   }
 
-  private ensureFrame(): { note: HTMLElement; columns: Record<KanbanStatus, HTMLElement> } {
+  private ensureFrame(): {
+    note: HTMLElement;
+    columns: Record<KanbanStatus, HTMLElement>;
+    heads: Record<KanbanStatus, HTMLElement>;
+  } {
     if (this.frame) return this.frame;
     const note = document.createElement('p');
     note.setAttribute('data-pkc-field', 'kanban-note');
     const board = document.createElement('div');
     board.setAttribute('data-pkc-region', 'kanban-board');
     const columns = {} as Record<KanbanStatus, HTMLElement>;
+    const heads = {} as Record<KanbanStatus, HTMLElement>;
     for (const col of KANBAN_COLUMNS) {
       const section = document.createElement('section');
       section.setAttribute('data-pkc-region', 'kanban-column');
       section.setAttribute('data-pkc-kanban-status', col.status);
       const heading = document.createElement('h3');
-      heading.textContent = col.label;
+      /**
+       * 🔴 **「完了」の見出しは、畳む口そのものにする**(2026-08-20。設計 doc §4-4)。
+       *
+       * ⚠ 専用の切替を別の場所に置かない ── 畳んだものを開く口は、
+       *   **畳まれている物のところ**に在るのがいちばん短い(探させない)。
+       * ⚠ 「やること」側は畳めない(畳んだら面が空になる)ので、押す口も出さない。
+       */
+      const label = document.createElement('span');
+      label.setAttribute('data-pkc-field', 'kanban-column-label');
       const host = document.createElement('div');
       host.setAttribute('data-pkc-region', 'kanban-cards');
+      if (col.status === 'done') {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.setAttribute('data-pkc-action', 'toggle-show-done');
+        btn.append(label);
+        heading.append(btn);
+      } else {
+        heading.append(label);
+      }
       section.append(heading, host);
       board.append(section);
       columns[col.status] = host;
+      heads[col.status] = label;
     }
     this.region.append(note, board);
-    this.frame = { note, columns };
+    this.frame = { note, columns, heads };
     return this.frame;
   }
 
