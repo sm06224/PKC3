@@ -80,6 +80,32 @@ export const REVISION_ADDED_COLUMNS: readonly string[] = [
   'kind',
 ];
 
+/**
+ * 🔴 **全文検索の索引と、その同期 trigger**(#181)。
+ *
+ * ⚠ **名前を付けて切り出してあるのは、作り直せるようにするため**(2026-08-20)。
+ *   索引が壊れて `'rebuild'` でも直らないとき、storage worker は
+ *   `DROP TABLE entries_fts` → ここを流し直す → `'rebuild'` で**作り直す**。
+ *   ⚠ trigger は `entries` に付いているので drop では消えない(実測で確認)。
+ */
+export const FTS_DDL: readonly string[] = [
+  `CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
+     title, body, content='entries', content_rowid='rowid', tokenize='trigram'
+   )`,
+  `CREATE TRIGGER IF NOT EXISTS entries_fts_ai AFTER INSERT ON entries BEGIN
+     INSERT INTO entries_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body);
+   END`,
+  `CREATE TRIGGER IF NOT EXISTS entries_fts_ad AFTER DELETE ON entries BEGIN
+     INSERT INTO entries_fts(entries_fts, rowid, title, body)
+       VALUES ('delete', old.rowid, old.title, old.body);
+   END`,
+  `CREATE TRIGGER IF NOT EXISTS entries_fts_au AFTER UPDATE ON entries BEGIN
+     INSERT INTO entries_fts(entries_fts, rowid, title, body)
+       VALUES ('delete', old.rowid, old.title, old.body);
+     INSERT INTO entries_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body);
+   END`,
+];
+
 export const SCHEMA_DDL: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS containers (
      cid TEXT PRIMARY KEY,
@@ -177,21 +203,7 @@ export const SCHEMA_DDL: readonly string[] = [
    * 本文を**二重に持たない**。同期は trigger に閉じるので、**書込側が索引の更新を
    * 忘れる**型の欠陥(§1 の「材料が届いていない」)が原理的に起きない。
    */
-  `CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
-     title, body, content='entries', content_rowid='rowid', tokenize='trigram'
-   )`,
-  `CREATE TRIGGER IF NOT EXISTS entries_fts_ai AFTER INSERT ON entries BEGIN
-     INSERT INTO entries_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body);
-   END`,
-  `CREATE TRIGGER IF NOT EXISTS entries_fts_ad AFTER DELETE ON entries BEGIN
-     INSERT INTO entries_fts(entries_fts, rowid, title, body)
-       VALUES ('delete', old.rowid, old.title, old.body);
-   END`,
-  `CREATE TRIGGER IF NOT EXISTS entries_fts_au AFTER UPDATE ON entries BEGIN
-     INSERT INTO entries_fts(entries_fts, rowid, title, body)
-       VALUES ('delete', old.rowid, old.title, old.body);
-     INSERT INTO entries_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body);
-   END`,
+  ...FTS_DDL,
 ];
 
 /**
