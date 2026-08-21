@@ -129,6 +129,38 @@ describe('アプリ自身の確認ダイアログ(#299)', () => {
     await plain;
   });
 
+  /**
+   * 🔴 **借りた焦点を返す**(2026-08-21、段② で実際に踏んだ)。
+   *
+   * ⚠ `showModal()` は焦点をダイアログへ移す。native の `confirm` は閉じたときに
+   *   勝手に戻すが、`<dialog>` は**戻さない** ── 実害は「押した後に鍵が死ぬ」形で
+   *   出た(ファイラは組み直す直前に「表の中に焦点があったか」を見て戻すので、
+   *   焦点がダイアログに居ると `null` と判定され、削除後に `body` へ落ちる)。
+   */
+  it('🔴 閉じたら、開く前に焦点があった所へ返す', async () => {
+    const before = document.createElement('button');
+    host.append(before);
+    before.focus();
+    expect(document.activeElement, '前提が崩れている').toBe(before);
+
+    const p = confirmInApp(host, 'M');
+    expect(document.activeElement, 'ダイアログへ焦点が移っていない').toBe(cancelBtn());
+    cancelBtn().click();
+    await p;
+    expect(document.activeElement, '焦点が返ってきていない(押した後に鍵が死ぬ)').toBe(before);
+  });
+
+  /** ⚠ 開く前の要素が**消えていたら**、焦点を当てにいかない(例外にしない)。 */
+  it('開く前の要素が消えていたら、焦点を戻さない', async () => {
+    const gone = document.createElement('button');
+    host.append(gone);
+    gone.focus();
+    const p = confirmInApp(host, 'N');
+    gone.remove();
+    expect(() => okBtn().click()).not.toThrow();
+    expect(await p).toBe('ok');
+  });
+
   /** 🔑 焦点は**取り消す側** ── 戻しにくい操作で Enter が事故にならない。 */
   it('🔴 開いた直後の焦点は取り消す側', async () => {
     const p = confirmInApp(host, 'L', { danger: true });

@@ -14,6 +14,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta, Relation } from '../../src/core/model/entry-meta';
 import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
+import { answerDialog, dialogMessage } from './dialog-helper';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
@@ -1350,12 +1351,16 @@ describe('2 ペインのキーボード操作(#273)', () => {
    *   2 ペインを見ている user から見て、消えるものが画面に無い。
    * 🔑 実体は `deleteFrom` 1 本(左の列と同じ確認・同じ断り方)。
    */
-  it('🔴 Delete はこのペインの印を消す(左の列の印は巻き込まない)', () => {
+  it('🔴 Delete はこのペインの印を消す(左の列の印は巻き込まない)', async () => {
     d.dispatch({ type: 'TOGGLE_SELECT', lid: 'a' }); // 左の列に印(画面には出ていない相手)
     expect(d.getState().selection, '前提が崩れている').toEqual(['a']);
     press('right', 'b', 'ArrowDown'); // 右で 'f2' を選ぶ…ではなく行を作る
     d.dispatch({ type: 'DUAL_SELECT', side: 'right', lid: 'c', mode: 'set' });
     press('right', 'c', 'Delete');
+    // 🔴 **確認が出る**(#299 段②)── 押すまで 1 件も消えない
+    expect(d.getState().entryMetas.has('c'), '確認の前に消えている').toBe(true);
+    expect(dialogMessage(), '確認の文言に件数が出ていない').toMatch(/1\s*件/);
+    await answerDialog('ok');
     expect(d.getState().entryMetas.has('c'), 'このペインの印が消えていない').toBe(false);
     expect(d.getState().entryMetas.has('a'), '左の列の印まで消えた(画面に無いものが消えた)').toBe(
       true,
@@ -1366,11 +1371,12 @@ describe('2 ペインのキーボード操作(#273)', () => {
    * 🔴 **押しボタンからも同じことができる**(#273 段②。user 指示 2026-08-03
    * 「マウスだけで完結し、キーボードは近道」)。
    */
-  it('🔴 「ゴミ箱へ」のボタンも、そのペインの印だけを消す', () => {
+  it('🔴 「ゴミ箱へ」のボタンも、そのペインの印だけを消す', async () => {
     d.dispatch({ type: 'TOGGLE_SELECT', lid: 'a' });
     d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'c', mode: 'set' });
     const btn = region.querySelector<HTMLElement>('[data-pkc-field="dual-delete"]')!;
     btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await answerDialog('ok');
     expect(d.getState().entryMetas.has('c'), 'ボタンで消えていない').toBe(false);
     expect(d.getState().entryMetas.has('a'), '左の列の印まで消えた').toBe(true);
   });

@@ -41,7 +41,7 @@ import { handleCopyMdBlock } from './copy-md-block';
 import { finishCopy, selectedMarkdown } from './copy-source';
 import { copyMarkdownAndHtml, copyPlainText } from '@adapter/platform/clipboard';
 import { cleanForClipboard } from '@features/export/clipboard-html';
-import { askConfirm, SUPPRESSED_MESSAGE } from '@adapter/platform/ask-confirm';
+import { confirmInApp, type ConfirmOptions } from '@adapter/ui/render/app-dialog';
 
 type ActionHandler = (
   dispatcher: Dispatcher,
@@ -558,14 +558,28 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
  * 判定と文言は `platform/ask-confirm.ts` の 1 か所に置く(規則を 2 つ書かない)。
  * @param whenAbsent confirm が**無い**環境での既定(呼び側の倒し方を持ち込む)
  */
-function confirmOrExplain(
-  dispatcher: Dispatcher,
+/**
+ * 🔴 **確認を出して、受けたときだけ続きを撃つ**(#299 段②。user 裁定 2026-08-21)。
+ *
+ * > 「**ブラウザの方のアラートはマウスの動線が多くてウザいから、自前の方が嬉しい**」
+ *
+ * ⚠ **同期の `boolean` を返す形は作れない** ── `window.confirm` を捨てた時点で、
+ *   答えは**後から**来る。だから「開く → 答えが来たら続きを撃つ」に割る
+ *   (`ACTIONS` の同期契約はそのまま保てる)。
+ * ⚠ **`whenAbsent` はもう要らない** ── 「confirm が無い環境」という状態が
+ *   無くなったからである(器はいつでも作れる)。⚠ その結果、**test も実機も
+ *   同じように「押す」ことになる** ── それがこの差し替えの目的で、
+ *   確認の枝がいままで**一度も実行されていなかった**のを終わらせる。
+ */
+function confirmThen(
+  root: HTMLElement,
   message: string,
-  whenAbsent: boolean,
-): boolean {
-  const r = askConfirm(message, { whenAbsent });
-  if (r.suppressed) dispatcher.dispatch({ type: 'OP_FAILED', error: SUPPRESSED_MESSAGE });
-  return r.ok;
+  opts: ConfirmOptions,
+  onOk: () => void,
+): void {
+  void confirmInApp(root, message, opts).then((answer) => {
+    if (answer === 'ok') onOk();
+  });
 }
 
 function refuseWhileBusy(
@@ -666,6 +680,7 @@ function selectEntryOrExplain(dispatcher: Dispatcher, lid: string, what: string)
 function deleteFrom(
   dispatcher: Dispatcher,
   services: BinderServices,
+  root: HTMLElement,
   rows: readonly EntryMeta[],
   selection: readonly string[],
   cursor: string | null,
@@ -706,15 +721,12 @@ function deleteFrom(
       });
       return;
     }
-    if (
-      !confirmOrExplain(
-        dispatcher,
-        `選んでいる ${lids.length} 件を削除しますか?(ゴミ箱から戻せます)`,
-        true,
-      )
-    )
-      return;
-    dispatcher.dispatch({ type: 'DELETE_ENTRIES', lids });
+    confirmThen(
+      root,
+      `選んでいる ${lids.length} 件を削除しますか?(ゴミ箱から戻せます)`,
+      { okLabel: '削除', danger: true },
+      () => dispatcher.dispatch({ type: 'DELETE_ENTRIES', lids }),
+    );
 }
 
 const ACTIONS: Record<string, ActionHandler> = {
@@ -997,11 +1009,11 @@ const ACTIONS: Record<string, ActionHandler> = {
    * (押した場所が違っても、同じ理由なら同じ言い方 ── CLAUDE.md「文言は押した
    * 場所と対で pin する」)。⚠ 完全削除は一括で撃たせない(戻せない操作は 1 件ずつ)。
    */
-  'delete-selected': (dispatcher, _target, services) => {
+  'delete-selected': (dispatcher, _target, services, root) => {
     const st = dispatcher.getState();
     // ⚠ 押した場所は**左の列**なので、相手も左の列の集合(2 ペインの印を巻き込まない)
     // ⚠ 左の列は**カーソルを持たない**(印だけの面)── だから `null`
-    deleteFrom(dispatcher, services, visibleFilerRows(st), st.selection, null);
+    deleteFrom(dispatcher, services, root, visibleFilerRows(st), st.selection, null);
   },
   /** 印を全部外す(#240 段②)。 */
   'clear-selection': (dispatcher) => dispatcher.dispatch({ type: 'CLEAR_SELECTION' }),
@@ -1185,12 +1197,13 @@ const ACTIONS: Record<string, ActionHandler> = {
     );
   },
   /** ⚠ 鍵(`Delete`)と**同じ実体**を押しボタンからも呼ぶ(規則を 2 つ作らない)。 */
-  'dual-delete': (dispatcher, target, services) => {
+  'dual-delete': (dispatcher, target, services, root) => {
     const side = dualSide(target) ?? dispatcher.getState().dual.focus;
     const st = dispatcher.getState();
     deleteFrom(
       dispatcher,
       services,
+      root,
       filerRows(paneScope(paneOf(st.dual, side)), st.entryMetas, st.relations, {
         filterQuery: st.filterQuery,
         searchHits: st.searchHits,
@@ -1242,7 +1255,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (dispatcher.getState().relations !== before)
       dispatcher.dispatch({ type: 'DUAL_CLEAR_SELECTION', side: from });
   },
-  'delete-entry': (dispatcher, target) => {
+  'delete-entry': (dispatcher, target, _services, root) => {
     // ⚠ 実行中(書出し / 取込)のガードは `refuseWhileBusy` が 1 本で持つ
     // 🔴 **無言で断らない**(P8 段⑲)。`DELETE_ENTRY` は `phase !== 'ready'` で
     //    何も返さないので、直す前は**確認ダイアログまで出してから黙って捨てて**いた
@@ -1262,18 +1275,21 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.getState().selectedLid;
     if (!lid) return;
     const title = dispatcher.getState().entryMetas.get(lid)?.title ?? lid;
-    // P3-7a は native confirm(inline dialog は UI 磨きの回で)。
-    // 🔴 文言が**嘘になっていた**(P7 段⑥ round-2 review M-8)。P3-7a の時点では
-    // hard delete だったので「元に戻せません」と書いたが、P5b でゴミ箱と復元が
-    // 着地している(削除直前の snapshot を同 tx で積み、`RESTORE_TRASH` で戻せる)
-    // ── **必要以上に怖がらせる側の嘘**を出荷していた。
-    // ⚠ 「戻せる」ことは `docs/manual.md` §6 にも書いてある(そちらが正しかった)
-    // confirm の無い環境(headless test)は自動化として通す
-    // 🔴 **抑止されていたら理由を出す**(2026-08-06。user 報告 minor)── 黙って
-    //    false が返るので、そのままだとボタンが恒久的に無反応に見える
-    if (!confirmOrExplain(dispatcher, `「${title}」を削除しますか?(ゴミ箱から戻せます)`, true))
-      return;
-    dispatcher.dispatch({ type: 'DELETE_ENTRY', lid });
+    /**
+     * 🔴 **確認はアプリ自身のダイアログ**(#299 段②、2026-08-21)── ここに
+     *   在った「P3-7a は native confirm(inline dialog は UI 磨きの回で)」は
+     *   **その予告が実行された**ので消した。
+     * 🔴 文言が**嘘になっていた**(P7 段⑥ round-2 review M-8)。P3-7a の時点では
+     *   hard delete だったので「元に戻せません」と書いたが、P5b でゴミ箱と復元が
+     *   着地している ── **必要以上に怖がらせる側の嘘**を出荷していた。
+     * ⚠ 「戻せる」ことは `docs/manual.md` §6 にも書いてある(そちらが正しかった)。
+     */
+    confirmThen(
+      root,
+      `「${title}」を削除しますか?(ゴミ箱から戻せます)`,
+      { okLabel: '削除', danger: true },
+      () => dispatcher.dispatch({ type: 'DELETE_ENTRY', lid }),
+    );
   },
   'copy-md-block': (_dispatcher, target) => handleCopyMdBlock(target),
   /**
@@ -1390,14 +1406,14 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 返ってこない書込で**永久に追記できなくなる**のを防ぐ最後の出口。
    * ⚠ 押した人が結果を分かっていること ── 確認を出す(確認の無い環境は通す)。
    */
-  'force-release': (dispatcher) => {
-    const ok = confirmOrExplain(
-      dispatcher,
+  'force-release': (dispatcher, _target, _services, root) => {
+    confirmThen(
+      root,
       '追記の書き込みを強制的に打ち切ります。書き込みが実際には進んでいた場合、' +
         'この画面の表示が実際の中身より古くなることがあります(開き直すと直ります)。よろしいですか?',
-      true,
+      { okLabel: '打ち切る', danger: true },
+      () => dispatcher.dispatch({ type: 'FORCE_RELEASE_LOCK', discardDraft: false }),
     );
-    if (ok) dispatcher.dispatch({ type: 'FORCE_RELEASE_LOCK', discardDraft: false });
   },
   /** 左の列の**探し方**を切り替える(P8 段⑤)。⚠ 中央のビューとは別の軸。 */
   'set-browse': (_dispatcher, target, services) => {
@@ -1875,15 +1891,18 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (revId && entryLid)
       dispatcher.dispatch({ type: 'RESTORE_TRASH', entryLid, revId });
   },
-  'purge-trash': (dispatcher) => {
-    // 一括・不可逆(revision の物理削除)なので fail closed(purge-orphan-assets
-    // と同じ倒し方 ── 単発 delete-entry の ?? true とは桁が違う)
-    const ok = confirmOrExplain(
-      dispatcher,
+  'purge-trash': (dispatcher, _target, _services, root) => {
+    /**
+     * ⚠ **一括・不可逆**(revision の物理削除)── 受けボタンの字も**何が起きるか**に
+     *   する。⚠ 直す前は `whenAbsent: false` で「確認が無い環境では通さない」と
+     *   倒していたが、**その状態そのものが無くなった**(器はいつでも作れる)。
+     */
+    confirmThen(
+      root,
       'ゴミ箱を空にします(削除済み entry の履歴も消え、元に戻せません)。よろしいですか?',
-      false,
+      { okLabel: '空にする', danger: true },
+      () => dispatcher.dispatch({ type: 'PURGE_TRASH' }),
     );
-    if (ok) dispatcher.dispatch({ type: 'PURGE_TRASH' });
   },
 };
 
@@ -3190,6 +3209,7 @@ export function bindActions(
       deleteFrom(
         dispatcher,
         services,
+        root,
         dualRows(st, side),
         paneOf(st.dual, side).selection,
         paneOf(st.dual, side).cursor,

@@ -9,6 +9,7 @@
 import { stubStamps } from '../helpers/store-stamps';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
+import { answerDialog, dialogMessage } from './dialog-helper';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects, type StorePort } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
@@ -300,7 +301,13 @@ describe('revision flow (P5b)', () => {
     expect(d.getState().order).toEqual(['c1', 'a2', 'b2']);
   });
 
-  it('purge-trash: confirm 不在は fail closed、承諾で TRASH_PURGED が panel を空にする', async () => {
+  /**
+   * 🔴 **「confirm 不在は fail closed」は無くなった**(#299 段②、2026-08-21)。
+   * ⚠ `window.confirm` を捨てたので「確認が無い環境」という状態そのものが
+   *   存在しない ── 器はいつでも作れる。だから主張を**取り消しで止まる**へ
+   *   置き換える(user の意思で止まる、という同じ守り)。
+   */
+  it('purge-trash: 取り消しなら消えず、承諾で TRASH_PURGED が panel を空にする', async () => {
     let purged = 0;
     const { d, root } = setup(
       {},
@@ -320,12 +327,15 @@ describe('revision flow (P5b)', () => {
 
     const btn = document.querySelector<HTMLElement>('[data-pkc-action="purge-trash"]')!;
     expect(btn).not.toBeNull();
-    btn.click(); // happy-dom に confirm は無い → ?? false → 実行しない
-    await tick();
-    expect(purged).toBe(0);
-
-    Object.defineProperty(window, 'confirm', { value: () => true, configurable: true });
     btn.click();
+    // ⚠ 一括・不可逆なので、受けボタンの字も**何が起きるか**である
+    expect(dialogMessage(), '確認が出ていない').toContain('元に戻せません');
+    await answerDialog('cancel');
+    await tick();
+    expect(purged, '取り消したのに消えた').toBe(0);
+
+    btn.click();
+    await answerDialog('ok');
     await tick();
     expect(purged).toBe(1);
     expect(d.getState().trashPanel?.items).toHaveLength(0);

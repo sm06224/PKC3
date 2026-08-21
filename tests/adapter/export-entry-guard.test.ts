@@ -13,6 +13,7 @@ import {
   exportEntryDocx,
   type ExportDeps,
 } from '../../src/adapter/ui/actions/export-archive';
+import { answerDialog } from './dialog-helper';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import type { ArchiveSource } from '../../src/features/export/pkc3-archive';
 import {
@@ -153,12 +154,15 @@ describe('削除と書出しの排他', () => {
     vi.unstubAllGlobals();
   });
 
-  it('実行中でなければ削除できる', () => {
-    vi.stubGlobal('confirm', () => true);
+  /**
+   * ⚠ **確認はアプリ自身のダイアログ**(#299 段②)── `confirm` を差し替えても
+   *   呼ばれない。押す口はページの中に在る。
+   */
+  it('実行中でなければ削除できる', async () => {
     const { root, events } = setup({ busy: () => false });
     root.querySelector<HTMLElement>('[data-pkc-action="delete-entry"]')!.click();
+    await answerDialog('ok');
     expect(events).toContain('DELETE_ENTRY');
-    vi.unstubAllGlobals();
   });
 });
 

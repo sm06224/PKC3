@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors } from './helpers';
+import { answerAppDialog, gotoApp, clickReal, createEntry, collectPageErrors } from './helpers';
 
 /**
  * 2 ペインタブファイラ(#241 段⑥-a)。
@@ -470,24 +470,21 @@ test('🔴 2 ペインの Delete は確認を開き、却下すれば消えな�
   expect(before, '前提が崩れている(行が無い)').toBeGreaterThan(1);
   await rows.first().click();
 
-  // ── ① 却下する ── 開いたことと、文言に件数が出ることを見る
-  let seen = '';
-  const onDismiss = (d: { message(): string; dismiss(): Promise<void> }): void => {
-    seen = d.message();
-    void d.dismiss();
-  };
-  page.once('dialog', onDismiss);
+  /**
+   * ── ① 却下する ── 開いたことと、文言に件数が出ることを見る。
+   * 🔴 **確認は「アプリの中の要素」になった**(#299 段②)── `page.on('dialog')` は
+   *   もう 1 度も発火しない。⚠ そのぶん**押した所と閉じたことを直接見られる**
+   *   (native のモーダルはレンダラを止めるので CDP から触れなかった)。
+   */
   await page.keyboard.press('Delete');
-  await expect
-    .poll(() => seen, { message: '確認が開かない(Delete が届いていない)' })
-    .not.toBe('');
+  const seen = await answerAppDialog(page, 'cancel');
   expect(seen, `確認の文言に件数が出ていない: ${seen}`).toMatch(/1\s*件/);
   // ⚠ 却下したのだから **1 行も減らない**
   await expect(rows, '却下したのに消えた').toHaveCount(before);
 
   // ── ② 受け入れる ── 今度は本当に減る
-  page.once('dialog', (d) => void d.accept());
   await page.keyboard.press('Delete');
+  await answerAppDialog(page, 'ok');
   await expect(rows, '受け入れたのに消えていない').toHaveCount(before - 1);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);

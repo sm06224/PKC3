@@ -14,6 +14,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta, Relation } from '../../src/core/model/entry-meta';
 import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
+import { answerDialog, dialogMessage } from './dialog-helper';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
@@ -374,7 +375,7 @@ describe('印が指すものと、画面に見えているもの(#240 着地前�
     ).toBeNull();
   });
 
-  it('🔴 絞り込みで見えなくなった行は、まとめて削除でも消えない', () => {
+  it('🔴 絞り込みで見えなくなった行は、まとめて削除でも消えない', async () => {
     document.body.innerHTML = '';
     const root = document.createElement('div');
     root.setAttribute('data-pkc-slot', 'root');
@@ -400,6 +401,9 @@ describe('印が指すものと、画面に見えているもの(#240 着地前�
       '絞り込みが効いていない(この test は空振り)',
     ).toHaveLength(1);
     del.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    // 🔴 **確認を押すまで消えない**(#299 段②)。⚠ 件数は**見えている 1 件**である
+    expect(dialogMessage(), '確認の件数が画面に無い行まで数えている').toMatch(/1\s*件/);
+    await answerDialog('ok');
     expect(d.getState().entryMetas.has('b'), '画面に無い行がゴミ箱へ入った').toBe(true);
     expect(d.getState().entryMetas.has('a'), '見えている印は消えるはず').toBe(false);
 
@@ -408,6 +412,7 @@ describe('印が指すものと、画面に見えているもの(#240 着地前�
     d.dispatch({ type: 'TOGGLE_SELECT', lid: 'c' });
     d.dispatch({ type: 'TOGGLE_SELECT', lid: 'd' });
     del.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await answerDialog('ok');
     expect(d.getState().entryMetas.has('c')).toBe(false);
     expect(d.getState().entryMetas.has('d')).toBe(false);
   });
@@ -658,7 +663,7 @@ describe('フォルダの表の鍵', () => {
     expect(d.getState().scopeLid, '編集中に現在地が動いた').toBe('f');
   });
 
-  it('🔴 消したあとも焦点が表に残る(2 回目の Delete が効く)', () => {
+  it('🔴 消したあとも焦点が表に残る(2 回目の Delete が効く)', async () => {
     /**
      * 表は `entryMetas` が変わると丸ごと組み直されるので、押した行と一緒に
      * **焦点が body へ落ちる** ── 直す前は 1 回消したらそこで鍵の動線が死んだ
@@ -667,6 +672,7 @@ describe('フォルダの表の鍵', () => {
     const { d, row, clickRow, press } = screen();
     clickRow('a');
     press('Delete', row('a'));
+    await answerDialog('ok');
     expect(d.getState().entryMetas.has('a'), '1 件目が消えていない(空振り)').toBe(false);
     const now = document.activeElement as HTMLElement;
     expect(
@@ -675,6 +681,7 @@ describe('フォルダの表の鍵', () => {
     ).not.toBeNull();
     clickRow('b');
     press('Delete', now);
+    await answerDialog('ok');
     expect(d.getState().entryMetas.has('b'), '2 回目の Delete が効かない').toBe(false);
   });
 

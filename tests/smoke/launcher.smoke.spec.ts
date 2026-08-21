@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { gzipSync } from 'node:zlib';
-import { gotoApp, clickReal, collectPageErrors, createEntry, useSplitEditor, useListBrowse } from './helpers';
+import { answerAppDialog, gotoApp, clickReal, collectPageErrors, createEntry, useSplitEditor, useListBrowse } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -563,10 +563,11 @@ test('🔴 行儀の悪いアプリが保管庫を占有できない(上限は�
     page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('pkc3.app.')).length);
   expect(await appKeys(), 'アプリのデータが入っていない(この次元を測れていない)').toBeGreaterThan(0);
 
-  page.once('dialog', (d) => void d.accept());
   await clickReal(page, '[data-pkc-browse="list"]');
   await page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first().click();
   await clickReal(page, '[data-pkc-action="delete-entry"]');
+  // 確認は**アプリの中**の口を押す(#299 段② ── native は 1 度も開かない)
+  await answerAppDialog(page, 'ok');
   await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(0);
   expect(await appKeys(), '戻せる削除でアプリのデータまで消している').toBeGreaterThan(0);
 
@@ -582,13 +583,16 @@ test('🔴 行儀の悪いアプリが保管庫を占有できない(上限は�
   // 🔴 **ゴミ箱を空にすると消える**(唯一の不可逆点)。
   //    ここで消さないと、消したノートのデータが origin に永久に残る
   await page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first().click();
-  page.once('dialog', (d) => void d.accept());
   await clickReal(page, '[data-pkc-action="delete-entry"]');
+  await answerAppDialog(page, 'ok');
   await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(0);
   await clickReal(page, '[data-pkc-browse="filer"]');
   await clickReal(page, '[data-pkc-action="show-trash"]');
-  page.once('dialog', (d) => void d.accept());
   await clickReal(page, '[data-pkc-action="purge-trash"]');
+  // ⚠ 一括・不可逆なので、確認の文言も見る(#299 段②)
+  expect(await answerAppDialog(page, 'ok'), '確認が不可逆だと言っていない').toContain(
+    '元に戻せません',
+  );
   await expect
     .poll(appKeys, {
       timeout: 15000,

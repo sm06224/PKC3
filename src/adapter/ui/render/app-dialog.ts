@@ -155,10 +155,28 @@ function open(f: Frame, onDismiss: DialogAnswer): Promise<DialogAnswer> {
      *   **構造として起こりえなくなる**(規則を足すのではなく、場所を変える)。
      */
     let answer: DialogAnswer | null = null;
+    /**
+     * 🔴 **焦点を借りたら返す**(2026-08-21、段② で実際に踏んだ)。
+     *
+     * ⚠ `showModal()` は焦点を**ダイアログの中へ移す**。native の `confirm` は
+     *   閉じたときに勝手に戻してくれるが、`<dialog>` は**戻さない**。
+     * ⚠ 実害は「押した後に鍵が死ぬ」形で出た ── ファイラは**組み直す直前に
+     *   「表の中に焦点があったか」を見て**戻す作りなので、焦点がダイアログに
+     *   居ると `null` と判定され、削除後に焦点が `body` へ落ちて
+     *   **Backspace も Delete も Ctrl+A も効かなくなる**。
+     * 🔑 **器の側で戻す** ── 呼び出し 8 面それぞれに後始末を書くと、
+     *   1 つ書き忘れた面だけが死ぬ(CLAUDE.md §7)。
+     * ⚠ 戻すのは**続きを撃つ前** ── 後にすると、続きが起こす再描画のときに
+     *   まだダイアログに焦点が在ることになり、同じ穴に落ちる。
+     */
+    const focusedBefore = f.dialog.ownerDocument.activeElement;
     const done = (): void => {
       f.ok.removeEventListener('click', onOk);
       f.cancel.removeEventListener('click', onCancel);
       f.dialog.removeEventListener('close', onClose);
+      // ⚠ 消えていたら何もしない(消えた行へ焦点を当てにいかない)
+      if (focusedBefore instanceof HTMLElement && focusedBefore.isConnected)
+        focusedBefore.focus();
       resolve(answer ?? onDismiss);
     };
     const onOk = (): void => {
