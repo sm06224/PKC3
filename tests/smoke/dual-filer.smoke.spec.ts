@@ -434,3 +434,61 @@ test('🔴 Space は印を付けて 1 行下へ(ページは動かない)', asyn
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **`Delete` は確認を開き、答えたら消える**(2026-08-21、#299)。
+ *
+ * ⚠ **この面の `Delete` は、実ブラウザで一度も押されていなかった** ── この file に
+ *   `Delete` / `F8` / `dialog` の一致は **0 件**で、`dual-delete` ボタンは
+ *   「何も選ばずに押して理由が出るか」しか見ていなかった(= 早期 return に当たり、
+ *   確認へ到達しない)。その空白のまま実機検証へ渡し、**存在しない P0 を 1 件追わせた**。
+ *
+ * 🔴 **unit ではこの枝に原理的に届かない。** happy-dom には `window.confirm` が
+ *   **無い**ので、`ask-confirm.ts` の「confirm が無い環境」枝に落ち、
+ *   `whenAbsent = true` で**確認を素通りして削除まで走る** ── CLAUDE.md §2
+ *   「環境が持たないから代わりに動く道を書いたら、そちらが本物と同じ意味論かを
+ *   必ず確かめる」。だから**ここでしか見られない**。
+ *
+ * ⚠ 観測点を 3 つ置く:①**確認が本当に開く** ②文言に**件数**が出る
+ *   (押した対象を user が数え直せる)③**却下したら 1 行も減らない**。
+ *   ③ が無いと「開いてさえいれば緑」になり、**却下を無視して消す**変異が生き延びる。
+ */
+test('🔴 2 ペインの Delete は確認を開き、却下すれば消えない (#299)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  for (const t of ['け', 'こ']) {
+    await createEntry(page, 'text');
+    const title = page.locator('[data-pkc-field="editor-title"]');
+    if (await title.count()) await title.fill(t);
+    await clickReal(page, '[data-pkc-action="commit-edit"]');
+  }
+  await openDual(page);
+
+  const rows = page.locator(ROWS('left'));
+  const before = await rows.count();
+  expect(before, '前提が崩れている(行が無い)').toBeGreaterThan(1);
+  await rows.first().click();
+
+  // ── ① 却下する ── 開いたことと、文言に件数が出ることを見る
+  let seen = '';
+  const onDismiss = (d: { message(): string; dismiss(): Promise<void> }): void => {
+    seen = d.message();
+    void d.dismiss();
+  };
+  page.once('dialog', onDismiss);
+  await page.keyboard.press('Delete');
+  await expect
+    .poll(() => seen, { message: '確認が開かない(Delete が届いていない)' })
+    .not.toBe('');
+  expect(seen, `確認の文言に件数が出ていない: ${seen}`).toMatch(/1\s*件/);
+  // ⚠ 却下したのだから **1 行も減らない**
+  await expect(rows, '却下したのに消えた').toHaveCount(before);
+
+  // ── ② 受け入れる ── 今度は本当に減る
+  page.once('dialog', (d) => void d.accept());
+  await page.keyboard.press('Delete');
+  await expect(rows, '受け入れたのに消えていない').toHaveCount(before - 1);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

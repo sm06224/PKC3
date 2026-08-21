@@ -2711,9 +2711,22 @@ export function bindActions(
        * 🔑 いまは `dual` 文脈のコマンド(`dual-rename` / `dual-other-pane` /
        *   `dual-mark` / `F5` / `F6` / `F7`)として表に在り、
        *   操作行のラベルも**同じ表**から作られる(Krusader 方式)。
-       * ⚠ **`dual` を先に見て、次に `filer`** ── 両方に在る鍵(`Enter` / `Delete`)は
-       *   `filer` 側の 1 つだけなので取り合いにならないが、順を逆にすると
-       *   `dual` 専用の鍵が `filer` の一致に食われうる。
+       * ⚠ **`dual` を先に見て、次に `filer`** ── 順を逆にすると `dual` 専用の鍵が
+       *   `filer` の一致に食われうる。
+       *
+       * 🔴 **`?? keymap.match(ke, 'filer')` は、いまは 1 度も使われない**
+       *   (2026-08-21 に実測して判明 ── それまでここには「両方に在る鍵は
+       *   `filer` 側の 1 つだけなので取り合いにならない」と**事実と逆のこと**が
+       *   書いてあった)。`filer` を名乗るコマンド **8 個は全部 `dual` も名乗って
+       *   いる**(`filer-open` / `filer-parent` / `filer-trash` / `filer-select-all` /
+       *   `filer-row-down` / `filer-row-up` / `filer-extend-down` / `filer-extend-up`)
+       *   ので、`Delete` も `Enter` も**左辺で当たる**。
+       *   ⚠ 実測の取り方:この行を `keymap.match(ke, 'dual')` だけに変えて build し、
+       *   経路に印を撃つと `dual-branch → runDualKey:filer-trash → deleteFrom` と
+       *   出た(= 右辺を通っていない)。
+       * 🔑 **残してあるのは、`filer` だけを名乗るコマンドが将来増えたときのため**。
+       *   ⚠ だからここを壊す変異は**等価変異**であり、生き延びても test の穴ではない
+       *   (CLAUDE.md §3「差が user に見えないなら冗長なコード」の、残すと決めた側)。
        */
       if (dside === 'left' || dside === 'right') {
         const dcmd = keymap.match(ke, 'dual') ?? keymap.match(ke, 'filer');
