@@ -768,3 +768,77 @@ test('🔴 文書の情報は札に出て、本文の編集で消えない (#284
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **閉じ記号を打っても二重にならない**(2026-08-21、cowork 実機レポート #15)。
+ *
+ * ⚠ **unit だけでは守れない。** `insertText` は `execCommand('insertText')` を
+ *   使い、**happy-dom にはそれが無い**ので unit は必ず fallback 側を通る
+ *   (CLAUDE.md §2「環境が持たないから代わりに動く道を書いたら、そちらが本物と
+ *   同じ意味論かを必ず確かめる」)。**実打鍵で通るのはここだけ**である。
+ *
+ * ⚠ そして**この面は打鍵そのものを避けていた** ── この file の別の spec に
+ *   「打鍵だと auto pair が閉じてしまうので `fill` で入れる」と注記が在り、
+ *   `[` を含む本文を打つ他の smoke は **split の `editor-body`**(auto pair の
+ *   無い面)を入力の道具に使っていた。つまり**実打鍵で閉じを打つ経路は、
+ *   unit にも smoke にも存在しなかった**。
+ *
+ * 🔑 観測点は**保存される原文**(行の `value`)── 画面の見た目ではない。
+ *   直す前は `tags: [あ, い]]` になり、frontmatter が**警告 0 件で**
+ *   `{tags:["あ","い]"]}` と読んでいた(= タグが無言で別物になる)。
+ */
+test('🔴 実打鍵で括弧を閉じても二重にならない (#299 / cowork #15)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoLive(page);
+  await openLive(page, '# 題\n\nもとの段落。\n');
+
+  const live = page.locator('[data-pkc-region="editor-live"]');
+  await clickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
+  const row = live.locator('[data-pkc-field="row-source"]');
+  await expect(row).toBeFocused();
+
+  /**
+   * ⚠ **空にしてから打つ。** 全選択したまま開き記号を打つと、それは
+   *   **囲む**という別の正しい挙動になる(1 稿目はここを取り違えて、
+   *   `["あ"]` を「壊れた」と読みかけた ── test の期待の側が誤りだった)。
+   */
+  const clear = async (): Promise<void> => {
+    await row.press('Control+a');
+    await row.press('Backspace');
+    await expect(row).toHaveValue('');
+  };
+
+  // ⚠ **打鍵で入れる**(`fill` にすると auto pair を 1 度も通らない = 空振り)
+  await clear();
+  await page.keyboard.type('tags: [あ, い]');
+  await expect(row, '閉じが二重になった(タグが無言で別物になる形)').toHaveValue(
+    'tags: [あ, い]',
+  );
+
+  // ⚠ 同字対も見る ── 直す前はこちらのほうが被害が 1 文字多かった
+  await clear();
+  await page.keyboard.type('"あ"');
+  await expect(row, '同字対で新しい対を開いてしまっている').toHaveValue('"あ"');
+
+  // ⚠ 開いたまま閉じないときは、これまでどおり閉じが補われる(壊していない)
+  await clear();
+  await page.keyboard.type('[');
+  await expect(row, '開きの補完まで消してしまった').toHaveValue('[]');
+
+  /**
+   * ⚠ **選択があるときは囲む**(通り抜けに巻き込まれていない)。
+   * ⚠ **ASCII の対で見る。** Playwright の `type` は全角文字を
+   *   `Input.insertText` で入れるので **keydown が飛ばず**、auto pair の経路を
+   *   1 度も通らない(2 稿目でここを踏んだ ── `「ここ」` を期待して `「` が返った)。
+   *   🔑 全角 4 対の網羅は unit の全数表が持っている。ここは
+   *   **実打鍵でしか通らない層**(`execCommand('insertText')`)だけを見る。
+   */
+  await clear();
+  await page.keyboard.type('ここ');
+  await row.press('Control+a');
+  await page.keyboard.type('[');
+  await expect(row, '選んだ文字を囲めていない').toHaveValue('[ここ]');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

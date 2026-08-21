@@ -2496,6 +2496,12 @@ export function bindActions(
     e.preventDefault();
     if (de.dataTransfer) de.dataTransfer.dropEffect = 'copy';
   };
+  /**
+   * 掴んだのがどちらのペインか(2026-08-21)。⚠ **落とした後に印を外す先**であって、
+   * 行き先ではない ── 左から右へ落としたら、印を外すのは**左**である。
+   * ⚠ `null` = 2 ペイン以外から掴んだ(左の列など)= 何もしない。
+   */
+  let dragFromSide: DualSide | null = null;
   const onDrop = (e: Event): void => {
     const de = e as DragEvent;
     if (de.dataTransfer?.types?.includes(PKC_DRAG) === true) {
@@ -2504,7 +2510,25 @@ export function bindActions(
       if (drop === undefined) return;
       e.preventDefault();
       const lids = (de.dataTransfer.getData(PKC_DRAG) || '').split(' ').filter((x) => x !== '');
+      /**
+       * 🔴 **落とした後を F6 と同じ形に揃える**(2026-08-21、cowork #15)。
+       *
+       * ⚠ 直す前、drop の経路だけ **2 つとも抜けていた**:
+       *   ① `dual-move`(F6)が持つ「**動いた回だけ印を外す**」
+       *      ── 外さないと、次にゴミ箱を押したとき
+       *      「選んでいた行がいま画面にありません」という**的外れな断り**が出る
+       *      (印が消えた行を指したままなので。実測で再現した)
+       *   ② `filer-parent` / `filer-open` が持つ **焦点の引き継ぎ**
+       *      ── 立て直さないと、落とした直後の `↑` `↓` が**無言で死ぬ**
+       * 🔑 どちらも**既に在る関数を呼ぶだけ**。新しい規則を作らない。
+       */
+      const before = dispatcher.getState().relations;
+      const from = dragFromSide;
       moveDropped(lids, drop.lid);
+      if (from !== null && dispatcher.getState().relations !== before) {
+        dispatcher.dispatch({ type: 'DUAL_CLEAR_SELECTION', side: from });
+        carryDualFocus(from);
+      }
       return;
     }
     const files = filesOf(de.dataTransfer);
@@ -2522,13 +2546,20 @@ export function bindActions(
     const de = e as DragEvent;
     const row = (de.target as HTMLElement | null)?.closest<HTMLElement>('[data-pkc-entry]');
     const lid = row?.getAttribute('data-pkc-entry') ?? null;
+    /**
+     * ⚠ **掴んだ側は毎回の `dragstart` で決め直す** ── 早期 return する回でも
+     *   **古い側を残さない**。残すと、次に別の所から掴んだときに
+     *   **前の側の印を外す**(2026-08-21 の変異試験で気づいた)。
+     * 🔑 だから `dragend` での後始末は要らない ── 決めるのは 1 か所でよい。
+     */
+    dragFromSide = row ? dualSide(row) : null;
     if (lid === null || !de.dataTransfer) return;
     const st = dispatcher.getState();
     /**
      * 🔴 **掴んだ面の印を運ぶ**(#273 段⑤)。⚠ 2 ペインから掴んだのに**左の列**の
      * 印を運ぶと、**画面に出ていないものが動く**(移す・写す・消すと同じ罠)。
      */
-    const side = row ? dualSide(row) : null;
+    const side = dragFromSide;
     const marked =
       side === null
         ? visibleSelection(visibleFilerRows(st), st.selection)
@@ -2616,6 +2647,20 @@ export function bindActions(
   };
   root.addEventListener('click', onClick);
   root.addEventListener('paste', onPaste);
+  /**
+   * 🔴 **`dragenter` でも受理を宣言する**(2026-08-21、cowork #15)。
+   *
+   * ⚠ 直す前は `dragover` / `drop` / `dragstart` / `dragend` の **4 本だけ**で、
+   *   `dragenter` を 1 度も受けていなかった。HTML 仕様では「**新しい要素へ入った
+   *   瞬間の受理**」は `dragenter` の cancel で決まる ── Chromium は entering 時に
+   *   必ず `dragover` を続けて撃つので**現状は通る**(手元の実ブラウザ 16 試行は
+   *   16 回とも成功した)が、⚠ **ペインの地は移動の途中から `dragover` を浴びる
+   *   のに対し、行は最後の一瞬にしか入らない** ── cowork が報告した
+   *   「地は 5/5・行は 0/5」という**落とし先で割れる**非対称を説明できる、
+   *   コード上で名指しできる唯一の穴がここだった。
+   * 🔑 同じ handler を足すだけ(副作用ゼロの保険)。
+   */
+  root.addEventListener('dragenter', onDragOver);
   root.addEventListener('dragover', onDragOver);
   root.addEventListener('drop', onDrop);
   root.addEventListener('dragstart', onDragStart);
@@ -2711,9 +2756,22 @@ export function bindActions(
        * 🔑 いまは `dual` 文脈のコマンド(`dual-rename` / `dual-other-pane` /
        *   `dual-mark` / `F5` / `F6` / `F7`)として表に在り、
        *   操作行のラベルも**同じ表**から作られる(Krusader 方式)。
-       * ⚠ **`dual` を先に見て、次に `filer`** ── 両方に在る鍵(`Enter` / `Delete`)は
-       *   `filer` 側の 1 つだけなので取り合いにならないが、順を逆にすると
-       *   `dual` 専用の鍵が `filer` の一致に食われうる。
+       * ⚠ **`dual` を先に見て、次に `filer`** ── 順を逆にすると `dual` 専用の鍵が
+       *   `filer` の一致に食われうる。
+       *
+       * 🔴 **`?? keymap.match(ke, 'filer')` は、いまは 1 度も使われない**
+       *   (2026-08-21 に実測して判明 ── それまでここには「両方に在る鍵は
+       *   `filer` 側の 1 つだけなので取り合いにならない」と**事実と逆のこと**が
+       *   書いてあった)。`filer` を名乗るコマンド **8 個は全部 `dual` も名乗って
+       *   いる**(`filer-open` / `filer-parent` / `filer-trash` / `filer-select-all` /
+       *   `filer-row-down` / `filer-row-up` / `filer-extend-down` / `filer-extend-up`)
+       *   ので、`Delete` も `Enter` も**左辺で当たる**。
+       *   ⚠ 実測の取り方:この行を `keymap.match(ke, 'dual')` だけに変えて build し、
+       *   経路に印を撃つと `dual-branch → runDualKey:filer-trash → deleteFrom` と
+       *   出た(= 右辺を通っていない)。
+       * 🔑 **残してあるのは、`filer` だけを名乗るコマンドが将来増えたときのため**。
+       *   ⚠ だからここを壊す変異は**等価変異**であり、生き延びても test の穴ではない
+       *   (CLAUDE.md §3「差が user に見えないなら冗長なコード」の、残すと決めた側)。
        */
       if (dside === 'left' || dside === 'right') {
         const dcmd = keymap.match(ke, 'dual') ?? keymap.match(ke, 'filer');
@@ -2967,8 +3025,21 @@ export function bindActions(
    */
   const carryDualFocus = (side: DualSide): void => {
     const st = dispatcher.getState();
-    const lid =
-      dualCursor(st, side) ?? paneOf(st.dual, side).selection[0] ?? dualRows(st, side)[0]?.lid ?? null;
+    /**
+     * 🔴 **カーソルは「画面に出ている行」でなければ使わない**(2026-08-21、cowork #15)。
+     *
+     * ⚠ 直す前は `dualCursor(st, side)` を無条件に第 1 候補にしていた。場所を移る
+     *   経路(`filer-parent` / `filer-open`)では `withScope` がカーソルを外すので
+     *   問題にならなかったが、**D&D で行が別のフォルダへ出て行った**ときは
+     *   カーソルが**生きている lid のまま画面から消える** ── そのまま焦点を
+     *   当てようとして**どこにも当たらず**、次の `↑` `↓` が死ぬ。
+     * 🔑 「見えている行だけを相手にする」は `operationTargets` が既に持っている
+     *   不変条件である ── **同じ問いに 2 つの答えを作らない**(CLAUDE.md §7)。
+     */
+    const rows = dualRows(st, side);
+    const cur = dualCursor(st, side);
+    const visibleCur = cur !== null && rows.some((m) => m.lid === cur) ? cur : null;
+    const lid = visibleCur ?? paneOf(st.dual, side).selection[0] ?? rows[0]?.lid ?? null;
     const row = lid === null ? null : dualRowEl(side, lid);
     // ⚠ **カーソルを立て直す**(場所を移ると `withScope` が外すので、
     //   立てないと次の `↑` が末尾へ飛ぶ)

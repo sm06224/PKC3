@@ -206,18 +206,18 @@ describe('autoPairFor(auto pair の規則)', () => {
 
   it('① 行内の対は閉じが入り、caret は中に来る', () => {
     const r = autoPairFor(at('あ', 1), '「');
-    expect(r).toEqual({ insert: '「」', start: 2, end: 2 });
+    expect(r).toEqual({ kind: 'insert', insert: '「」', start: 2, end: 2 });
   });
 
   it('① 選択があるときは囲む(選んだ文字が消えない)', () => {
     const r = autoPairFor(at('あここい', 1, 3), '「');
-    expect(r).toEqual({ insert: '「ここ」', start: 2, end: 4 });
+    expect(r).toEqual({ kind: 'insert', insert: '「ここ」', start: 2, end: 4 });
   });
 
   it('② 🔴 行頭の 3 つ目のバッククォートで、閉じが**次の行**に入る', () => {
     // 行頭に `` が在る状態で 3 つ目を打つ
     const r = autoPairFor(at('``', 2), '`');
-    expect(r).toEqual({ insert: '`\n```', start: 3, end: 3 });
+    expect(r).toEqual({ kind: 'insert', insert: '`\n```', start: 3, end: 3 });
     // caret は開き記号の直後 = 言語を打てる位置
     const after = '``' + r!.insert;
     expect(after).toBe('```\n```');
@@ -232,7 +232,7 @@ describe('autoPairFor(auto pair の規則)', () => {
 
   it('② `:::` も同じ(閉じが次の行・caret は名前を打つ位置)', () => {
     const r = autoPairFor(at('::', 2), ':');
-    expect(r).toEqual({ insert: ':\n:::', start: 3, end: 3 });
+    expect(r).toEqual({ kind: 'insert', insert: ':\n:::', start: 3, end: 3 });
     expect('::' + r!.insert).toBe(':::\n:::');
   });
 
@@ -243,21 +243,148 @@ describe('autoPairFor(auto pair の規則)', () => {
   it('② 行頭でも、後ろに文字が在るならブロックとして扱わない', () => {
     // `` |あ` のような途中 ── ここでブロックの閉じを入れると本文を割る
     const r = autoPairFor(at('``あ', 2), '`');
-    expect(r).toEqual({ insert: '``', start: 3, end: 3 });
+    expect(r).toEqual({ kind: 'insert', insert: '``', start: 3, end: 3 });
   });
 
   it('② 行の途中のバッククォートは行内の対(行頭判定が緩んでいない)', () => {
     const r = autoPairFor(at('あ``', 3), '`');
-    expect(r).toEqual({ insert: '``', start: 4, end: 4 });
+    expect(r).toEqual({ kind: 'insert', insert: '``', start: 4, end: 4 });
   });
 
   it('② 2 行目の行頭でも効く(行の切り出しが先頭固定になっていない)', () => {
     const r = autoPairFor(at('あ\n``', 4), '`');
-    expect(r).toEqual({ insert: '`\n```', start: 5, end: 5 });
+    expect(r).toEqual({ kind: 'insert', insert: '`\n```', start: 5, end: 5 });
   });
 
   it('③ 対でない打鍵は null(ブラウザにそのまま打たせる)', () => {
     expect(autoPairFor(at('あ', 1), 'x')).toBeNull();
     expect(autoPairFor(at('あ', 1), 'Enter')).toBeNull();
+  });
+});
+
+/**
+ * 🔴 **閉じ記号の通り抜け**(2026-08-21、cowork 実機レポート #15)。
+ *
+ * 報告:「`tags: [あ, い]` と打つと `tags: [あ, い]]` になる」。⚠ **Q3 と Q5 の
+ * 両方で踏んでいた** ── つまり user も同じ所で必ず引っかかる。
+ *
+ * 🔴 **被害は「余分な 1 文字」では済まない。** `frontmatter.ts` は
+ * `tags: [あ, い]]` を `startsWith('[') && endsWith(']')` で受理するので、
+ * **警告 0 件で `{tags:["あ","い]"]}` と読む** ── タグが**無言で別物になる**。
+ *
+ * ⚠ **開き側しか当てていなかった。** 対は 9 組と**有限**なのに、既存の test は
+ * 開き記号(`「` / `` ` `` / `:`)しか打っておらず、閉じを打つ test は
+ * リポジトリ全体で **0 件**だった(CLAUDE.md §2「表に載っている件数は
+ * 誰かが数えた分でしかない ── 組み合わせが有限なら全部当てる」)。
+ * 🔑 だからここは **9 対 × 3 状況の全数表**にする。
+ */
+describe('🔴 閉じ記号の通り抜け(9 対の全数)', () => {
+  const at = (text: string, start: number, end = start) => ({ text, start, end });
+
+  /** 開き → 閉じ。⚠ **実装の表を写さない**(写すと本物が変わってもここは古いまま)。 */
+  const PAIRS: ReadonlyArray<readonly [string, string]> = [
+    ['`', '`'],
+    ['[', ']'],
+    ['(', ')'],
+    ['{', '}'],
+    ['「', '」'],
+    ['『', '』'],
+    ['（', '）'],
+    ['【', '】'],
+    ['"', '"'],
+  ];
+
+  /** 打鍵を 1 文字ずつ流して、出来上がる本文と caret を返す(`row-swap` の意味論)。 */
+  const typeAll = (keys: readonly string[]): { text: string; caret: number } => {
+    let text = '';
+    let caret = 0;
+    for (const key of keys) {
+      const r = autoPairFor({ text, start: caret, end: caret }, key);
+      if (r === null) {
+        text = text.slice(0, caret) + key + text.slice(caret);
+        caret += key.length;
+        continue;
+      }
+      if (r.kind === 'insert') text = text.slice(0, caret) + r.insert + text.slice(caret);
+      caret = r.start;
+    }
+    return { text, caret };
+  };
+
+  it('🔴 9 対とも、開いて中を打って閉じると「対が 1 組」になる', () => {
+    const broken: string[] = [];
+    for (const [open, close] of PAIRS) {
+      // ⚠ 行頭を避ける(行頭は ``` / ::: のブロック枝が先に効く ── 別の主張)
+      const { text } = typeAll(['x', open, 'あ', close]);
+      if (text !== `x${open}あ${close}`) broken.push(`${open}${close}: ${text}`);
+    }
+    expect(broken, `閉じが二重になった対: ${broken.join(' / ')}`).toEqual([]);
+  });
+
+  it('🔴 報告そのもの ── tags: [あ, い] がそのまま残る', () => {
+    const { text } = typeAll([...'tags: [あ, い]']);
+    expect(text, 'frontmatter のタグが無言で別物になる形').toBe('tags: [あ, い]');
+  });
+
+  it('🔴 報告そのもの ── - [ ] やること がそのまま残る', () => {
+    const { text } = typeAll([...'- [ ] やること']);
+    expect(text).toBe('- [ ] やること');
+  });
+
+  it('入れ子でも通り抜ける ── [題](url) がそのまま残る', () => {
+    const { text } = typeAll([...'[題](url)']);
+    expect(text).toBe('[題](url)');
+  });
+
+  it('通り抜けたら caret は閉じの右へ進む(挿さずに跨ぐ)', () => {
+    const r = autoPairFor(at('[]', 1), ']');
+    expect(r).toEqual({ kind: 'skip', insert: '', start: 2, end: 2 });
+  });
+
+  /**
+   * ⚠ **通り抜けてよいのは「すぐ右がその閉じ」のときだけ。**
+   *   そうでないなら普通に 1 文字打つ(= `null`)── ここを緩めると
+   *   「閉じを打ったのに入らない」という**逆の壊れ方**になる。
+   */
+  it('すぐ右が別の字なら通り抜けない(そのまま打たせる)', () => {
+    expect(autoPairFor(at('[あ', 1), ']')).toBeNull();
+    expect(autoPairFor(at('[', 1), ']')).toBeNull();
+    expect(autoPairFor(at('', 0), ']')).toBeNull();
+  });
+
+  /** ⚠ 選択があるときは通り抜けない ── 選んだ文字を閉じで囲むほうが自然。 */
+  it('選択があるときは通り抜けず、囲む(同字対)', () => {
+    const r = autoPairFor(at('"ここ"', 1, 3), '"');
+    expect(r).toEqual({ kind: 'insert', insert: '"ここ"', start: 2, end: 4 });
+  });
+
+  /**
+   * 🔴 **同字対は通り抜けを先に判定する。** 後回しにすると「開き」と読んで
+   *   新しい対を開くので、被害が 1 文字増える(直す前は `"あ"` が `"あ"""`)。
+   */
+  it('🔴 同字対(バッククォート / 二重引用符)も通り抜ける', () => {
+    expect(autoPairFor(at('x``', 2), '`')).toEqual({
+      kind: 'skip',
+      insert: '',
+      start: 3,
+      end: 3,
+    });
+    expect(autoPairFor(at('x""', 2), '"')).toEqual({
+      kind: 'skip',
+      insert: '',
+      start: 3,
+      end: 3,
+    });
+  });
+
+  /** ⚠ ブロック(``` / :::)の組み立ては、通り抜けに食われていない。 */
+  it('行頭のブロック組み立ては変わらない(通り抜けが先に効いていない)', () => {
+    expect(autoPairFor(at('``', 2), '`')).toEqual({
+      kind: 'insert',
+      insert: '`\n```',
+      start: 3,
+      end: 3,
+    });
+    expect(autoPairFor(at('```', 3), '`')).toBeNull();
   });
 });

@@ -322,12 +322,31 @@ const BLOCK_MARKERS: Readonly<Record<string, string>> = {
 };
 
 export interface AutoPair {
-  /** いまの選択範囲を置き換えて挿す文字列。 */
+  /**
+   * 🔴 **何をするか**(2026-08-21)。
+   * - `'insert'` … `insert` を挿して caret を `start`/`end` へ
+   * - `'skip'` … **何も挿さず**、caret を `start`/`end` へ動かすだけ
+   *   (= すぐ右に在る閉じを**通り抜ける**)
+   *
+   * ⚠ 通り抜けを `insert: ''` で表さない ── 呼び側は `execCommand('insertText')`
+   *   で挿すので、空文字を撃つと **undo の粒度が変わる**(この file 冒頭の戒め)。
+   */
+  kind: 'insert' | 'skip';
+  /** いまの選択範囲を置き換えて挿す文字列(`kind: 'skip'` では空)。 */
   insert: string;
   /** 挿した後の選択(caret)。 */
   start: number;
   end: number;
 }
+
+/**
+ * 閉じ記号の集合(`INLINE_PAIRS` の値)。
+ *
+ * ⚠ **同字対**(バッククォート / 二重引用符)は開きと閉じが同じなので、ここにも入る
+ *   ── だから**通り抜けを先に判定する**。後回しにすると新しい対を開いてしまい、
+ *   被害が 1 文字増える(実測で確認した)。
+ */
+const CLOSERS: ReadonlySet<string> = new Set(Object.values(INLINE_PAIRS));
 
 /**
  * その打鍵で補うものを返す。補わないなら `null`(= ブラウザにそのまま打たせる)。
@@ -353,16 +372,34 @@ export function autoPairFor(sel: TextSelection, key: string): AutoPair | null {
   ) {
     // 3 つ目で閉じを次の行に置く。caret は**開き記号の直後**(言語 / 名前を打つ所)
     if (prefix.length === 2) {
-      return { insert: key + '\n' + block, start: start + 1, end: start + 1 };
+      return { kind: 'insert', insert: key + '\n' + block, start: start + 1, end: start + 1 };
     }
     return null;
+  }
+  /**
+   * 🔴 **閉じを打ったら、すぐ右に在る同じ閉じを通り抜ける**(2026-08-21)。
+   *
+   * ⚠ **これが無いと、対になる 9 記法すべてで閉じが二重になる**(実測 9/9)──
+   *   `tags: [あ, い]` と打つと `tags: [あ, い]]` になり、しかも frontmatter は
+   *   それを **警告 0 件で `{tags:["あ","い]"]}` と読む**(= タグが無言で別物になる)。
+   * ⚠ **開きの判定より先に置く** ── 同字対は開きでもあるので、後回しにすると
+   *   通り抜けではなく**新しい対を開く**。
+   * ⚠ 選択があるときは通り抜けない(選んだ文字を閉じで囲む方が自然)。
+   */
+  if (start === end && CLOSERS.has(key) && text[start] === key) {
+    return { kind: 'skip', insert: '', start: start + 1, end: start + 1 };
   }
   const close = INLINE_PAIRS[key];
   if (close === undefined) return null;
   // 選択があるときは**囲む**(選んだ文字を消さない)
   if (start !== end) {
     const inner = text.slice(start, end);
-    return { insert: key + inner + close, start: start + 1, end: start + 1 + inner.length };
+    return {
+      kind: 'insert',
+      insert: key + inner + close,
+      start: start + 1,
+      end: start + 1 + inner.length,
+    };
   }
-  return { insert: key + close, start: start + 1, end: start + 1 };
+  return { kind: 'insert', insert: key + close, start: start + 1, end: start + 1 };
 }

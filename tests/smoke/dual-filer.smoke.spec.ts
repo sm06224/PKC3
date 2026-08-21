@@ -434,3 +434,120 @@ test('🔴 Space は印を付けて 1 行下へ(ページは動かない)', asyn
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **`Delete` は確認を開き、答えたら消える**(2026-08-21、#299)。
+ *
+ * ⚠ **この面の `Delete` は、実ブラウザで一度も押されていなかった** ── この file に
+ *   `Delete` / `F8` / `dialog` の一致は **0 件**で、`dual-delete` ボタンは
+ *   「何も選ばずに押して理由が出るか」しか見ていなかった(= 早期 return に当たり、
+ *   確認へ到達しない)。その空白のまま実機検証へ渡し、**存在しない P0 を 1 件追わせた**。
+ *
+ * 🔴 **unit ではこの枝に原理的に届かない。** happy-dom には `window.confirm` が
+ *   **無い**ので、`ask-confirm.ts` の「confirm が無い環境」枝に落ち、
+ *   `whenAbsent = true` で**確認を素通りして削除まで走る** ── CLAUDE.md §2
+ *   「環境が持たないから代わりに動く道を書いたら、そちらが本物と同じ意味論かを
+ *   必ず確かめる」。だから**ここでしか見られない**。
+ *
+ * ⚠ 観測点を 3 つ置く:①**確認が本当に開く** ②文言に**件数**が出る
+ *   (押した対象を user が数え直せる)③**却下したら 1 行も減らない**。
+ *   ③ が無いと「開いてさえいれば緑」になり、**却下を無視して消す**変異が生き延びる。
+ */
+test('🔴 2 ペインの Delete は確認を開き、却下すれば消えない (#299)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  for (const t of ['け', 'こ']) {
+    await createEntry(page, 'text');
+    const title = page.locator('[data-pkc-field="editor-title"]');
+    if (await title.count()) await title.fill(t);
+    await clickReal(page, '[data-pkc-action="commit-edit"]');
+  }
+  await openDual(page);
+
+  const rows = page.locator(ROWS('left'));
+  const before = await rows.count();
+  expect(before, '前提が崩れている(行が無い)').toBeGreaterThan(1);
+  await rows.first().click();
+
+  // ── ① 却下する ── 開いたことと、文言に件数が出ることを見る
+  let seen = '';
+  const onDismiss = (d: { message(): string; dismiss(): Promise<void> }): void => {
+    seen = d.message();
+    void d.dismiss();
+  };
+  page.once('dialog', onDismiss);
+  await page.keyboard.press('Delete');
+  await expect
+    .poll(() => seen, { message: '確認が開かない(Delete が届いていない)' })
+    .not.toBe('');
+  expect(seen, `確認の文言に件数が出ていない: ${seen}`).toMatch(/1\s*件/);
+  // ⚠ 却下したのだから **1 行も減らない**
+  await expect(rows, '却下したのに消えた').toHaveCount(before);
+
+  // ── ② 受け入れる ── 今度は本当に減る
+  page.once('dialog', (d) => void d.accept());
+  await page.keyboard.press('Delete');
+  await expect(rows, '受け入れたのに消えていない').toHaveCount(before - 1);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **フォルダの「行」へ落とす**(2026-08-21、cowork 実機レポート #15)。
+ *
+ * 報告:「**空いている所へ: 5/5 成功 / フォルダの行の上へ: 0/5**(帯も出ず、
+ * 件数も動かず = 無言)」。⚠ 手元の実ブラウザ **16 試行では 16 回とも通った**ので
+ * 症状そのものは再現していない ── だが調べる過程で**面の取りこぼし**が見つかった:
+ * **行への実 D&D を見る smoke が 1 件も無かった**(この file に `dragAndDrop` は
+ * 在るが、落とし先は**どちらもペインの地**である)。
+ *
+ * 🔑 報告の真偽と無関係に、ここは今すぐ塞ぐ価値がある
+ * (CLAUDE.md「自前の headless で拾える不具合を cowork に拾わせたら、
+ * それはこちらのテスト不足」)。
+ *
+ * ⚠ 観測点は**アプリ自身の信号を先に**(合成 D&D の掴み損ねを「移動が壊れた」と
+ *   読み違えないため)── 帯の文言 → そのあと件数。
+ */
+test('🔴 フォルダの「行」へ落とすと、その中へ入る (#273 / cowork #15)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await makeFolder(page, 'はこ');
+  await createEntry(page, 'text');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await openDual(page);
+
+  await expect(page.locator(ROWS('left'))).toHaveCount(2);
+  const folderRow = `${ROWS('right')}[data-pkc-archetype="folder"]`;
+  await expect(
+    page.locator(folderRow),
+    '前提が崩れている(フォルダの行が右に無い)',
+  ).toHaveCount(1);
+  // ⚠ 受け口が付いていること自体も見る(付いていなければ drop は原理的に飛ばない)
+  await expect(
+    page.locator(folderRow),
+    'フォルダの行が落とし先として名乗っていない',
+  ).toHaveAttribute('data-pkc-drop', 'folder');
+
+  // 🔴 **ペインの地ではなく「行」へ落とす**
+  await page.dragAndDrop(`${ROWS('left')}[data-pkc-archetype="text"]`, folderRow);
+
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '行へ落としたのに無言(帯が出ていない)',
+  ).toContainText('「はこ」へ入れました');
+  await expect(page.locator(ROWS('left')), '左から消えていない').toHaveCount(1);
+
+  /**
+   * 🔴 **落とした後、掴んだ側で `↓` が効く**(#299 の調査で見つかった抜け)。
+   * ⚠ 直す前は drop の経路だけ焦点の引き継ぎが無く、**無言で死んでいた**。
+   */
+  await page.keyboard.press('ArrowDown');
+  await expect(
+    page.locator(`${PANE('left')} [data-pkc-cursor]`),
+    '落とした直後に ↓ が効かない(焦点が引き継がれていない)',
+  ).toHaveCount(1);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
