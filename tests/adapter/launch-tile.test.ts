@@ -232,25 +232,41 @@ describe('タイルの起動', () => {
  * 確認を通らなければ開かない / 素のままでは shim を入れない / 既定は今のまま。
  */
 describe('素のまま起動(P10)', () => {
-  it('🔴 確認が false を返したら **窓すら開けない**(fail closed)', () => {
-    const h = harness('<p>x</p>');
+  /**
+   * 🔴 **`await` を忘れると、この検査は何も見なくなる**(#299 段⑤。着地前レビュー R1)。
+   *
+   * ⚠ 段③ で `launchTile` が `async` になり、`confirmSameOrigin` の `await` が
+   *   `deps.open` **より前**に来た ── つまり同期の `it` から呼ぶと、assert の時点では
+   *   答えが `true` でも `false` でも `h.opened` は必ず `[]` である。
+   *   **12 時間ほど、この fail closed は空振りだった。**
+   * 🔑 だから **`await` する**うえに、**対照群(`true` なら 1 枚開く)を同じ it に置く** ──
+   *   置かないと「await を足したのに、別の理由で空だった」を次に見抜けない。
+   */
+  it('🔴 確認が false を返したら **窓すら開けない**(fail closed)', async () => {
+    const no = harness('<p>x</p>');
     const asked: string[] = [];
-    h.deps.confirmSameOrigin = (title) => {
+    no.deps.confirmSameOrigin = async (title) => {
       asked.push(title);
       return false;
     };
-    launchTile(appTile, h.deps, { sameOrigin: true });
+    await launchTile(appTile, no.deps, { sameOrigin: true });
     // ⚠ 聞いたことと、**開いていないこと**の両方を見る ── 断ったのに空のタブが
     //    残る実装(window.open のあとで聞く形)を落とす
     expect(asked).toEqual(['見積ツール']);
-    expect(h.opened).toEqual([]);
-    expect(h.created).toEqual([]);
+    expect(no.opened, '断ったのに開いた(同一オリジン = 保存領域に手が届く)').toEqual([]);
+    expect(no.created).toEqual([]);
+
+    // 🔑 対照群 ── 承諾したら**実際に 1 枚開く**(空振りなら、こちらも空になる)
+    const yes = harness('<p>x</p>');
+    yes.deps.confirmSameOrigin = async () => true;
+    await launchTile(appTile, yes.deps, { sameOrigin: true });
+    expect(yes.opened, '対照群が届いていない ── 上の空は検査になっていない').toHaveLength(1);
   });
 
   it('🔴 囲いの中で開くときは **確認しない**', async () => {
     const h = harness('<p>x</p>');
     let asked = 0;
-    h.deps.confirmSameOrigin = () => {
+    h.deps.confirmSameOrigin = async () => {
       asked += 1;
       return true;
     };
@@ -268,7 +284,7 @@ describe('素のまま起動(P10)', () => {
         blobs.push(b);
         return 'blob:shell';
       };
-      h.deps.confirmSameOrigin = () => true;
+      h.deps.confirmSameOrigin = async () => true;
       launchTile(appTile, h.deps, { sameOrigin });
       await settle();
       expect(blobs).toHaveLength(1);
@@ -294,7 +310,7 @@ describe('素のまま起動(P10)', () => {
         blobs.push(b);
         return 'blob:shell';
       };
-      h.deps.confirmSameOrigin = () => true;
+      h.deps.confirmSameOrigin = async () => true;
       launchTile(appTile, h.deps, { sameOrigin });
       await settle();
       return blobs[0]!.text();

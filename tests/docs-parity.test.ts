@@ -546,6 +546,94 @@ describe('マニュアルと実装の突合', () => {
   });
 });
 
+describe('確認の画面とマニュアルの突合(#299)', () => {
+  /** マニュアル §4「確認の画面」の節だけを切り出す。⚠ 節ごと消えたら落ちる。 */
+  function section(): string {
+    const at = MANUAL.indexOf('### 確認の画面');
+    expect(at, 'マニュアルに「確認の画面」の節が無い').toBeGreaterThan(-1);
+    const next = MANUAL.indexOf('\n### ', at + 1);
+    return MANUAL.slice(at, next === -1 ? MANUAL.length : next);
+  }
+
+  /**
+   * 🔴 **「何が起きるかがボタンの字に出る」は、マニュアルの約束である。**
+   *
+   * 危険色を付けるのに `okLabel` を渡し忘れると、既定の **はい** が出る ──
+   * 赤い **はい** は「何が起きるか」を何も言っていない。
+   * ⚠ 字面の位置ではなく、**`danger: true` を含む object 全部**を数えて見る
+   *   (新しい面を足したときに、その面だけ抜けるのを止めるため)。
+   */
+  /**
+   * 🔴 **等値で pin する。「N 件以上」にしない**(#299 段⑤。着地前レビュー R10)。
+   *
+   * ⚠ 直す前は `toBeGreaterThanOrEqual(5)` で、実数は 7 件だった ── **2 件落としても
+   *   緑**である。マニュアルは「不可逆な操作は実行する側のボタンに色が付き、
+   *   何が起きるかが書いてある」と約束しているので、落ちた面は**画面と doc が割れる**。
+   * 🔑 **足したら 1 行足す**形にする(直したら消さないと落ちるので、忘れられない)。
+   */
+  const DANGER_SITES: readonly string[] = [
+    'binder.ts:削除', // まとめて削除(2 ペイン)
+    'binder.ts:削除', // 1 件削除(情報ペイン)
+    'binder.ts:打ち切る', // 他のタブの保存権を強制解放
+    'binder.ts:空にする', // ゴミ箱を空にする
+    'main.ts:上書きする', // md 書き出しの同名上書き
+    'main.ts:同じ場所で開く', // 素のまま起動(同一オリジン)
+    'main.ts:整理する', // 使っていない添付を消す
+  ];
+
+  it('🔴 危険色の確認は、全部「何が起きるか」をボタンに書いている', () => {
+    const files = ['src/adapter/ui/actions/binder.ts', 'src/main.ts'];
+    const found: string[] = [];
+    for (const f of files) {
+      const base = f.slice(f.lastIndexOf('/') + 1);
+      for (const m of codeOnly(readFileSync(f, 'utf-8')).matchAll(
+        /\{[^{}]*danger:\s*true[^{}]*\}/g,
+      )) {
+        const label = /okLabel:\s*'([^']+)'/.exec(m[0])?.[1];
+        // ⚠ 赤い「はい」は「何が起きるか」を何も言っていない
+        expect(label, `危険色なのに字が既定のまま: ${base} ${m[0]}`).toBeTruthy();
+        found.push(`${base}:${label ?? '(既定)'}`);
+      }
+    }
+    expect(
+      [...found].sort(),
+      '危険色の面が増減した ── 足したなら DANGER_SITES に 1 行足す(落ちたなら、その面の警告色が消えている)',
+    ).toEqual([...DANGER_SITES].sort());
+  });
+
+  /**
+   * 🔴 **危険色の面は「例」ではなく**全部**マニュアルに出す**(着地前レビュー R11)。
+   *
+   * ⚠ 直す前のマニュアルは 4 つを挙げていたが、実装は 6 種類だった ──
+   *   抜けていたのは **整理する**(添付の物理削除。**本当に戻せない**)と
+   *   **打ち切る**(他のタブの保存権の強制解放)。向きが悪いほうが抜けていた。
+   */
+  it('🔴 危険色のボタンの字が、6 種類とも マニュアルに出ている', () => {
+    const labels = [...new Set(DANGER_SITES.map((x) => x.slice(x.indexOf(':') + 1)))];
+    expect(labels.length, '危険色の字を 1 つも読めていない').toBe(6);
+    const s = section();
+    for (const label of labels)
+      expect(s, `マニュアル §4「確認の画面」に「${label}」が無い`).toContain(`**${label}**`);
+  });
+
+  it('🔴 マニュアルが「取り消しが左」と書き、実装もそう並べている', () => {
+    // ⚠ 並びそのものは `tests/adapter/app-dialog.test.ts` が **実際の DOM の順**で
+    //   見る。ここが見るのは**マニュアルと実装が同じことを言っているか**である
+    const dlg = codeOnly(readFileSync('src/adapter/ui/render/app-dialog.ts', 'utf-8'));
+    expect(dlg, '取り消しを先に append していない').toContain('row.append(cancel, ok)');
+    expect(section()).toContain('取り消す側が左、実行する側が右');
+  });
+
+  it('🔴 ブラウザの確認は 1 つも残っていない(マニュアルの言うとおり)', () => {
+    expect(section()).toContain('PKC 自身の画面');
+    const main = codeOnly(readFileSync('src/main.ts', 'utf-8'));
+    expect(main, 'window.confirm が残っている').not.toMatch(/\bwindow\.confirm\(/);
+    expect(codeOnly(BINDER), 'window.confirm が残っている').not.toMatch(
+      /\bwindow\.confirm\(/,
+    );
+  });
+});
+
 describe('ショートカットとマニュアルの突合(#256)', () => {
   /**
    * 🔴 **マニュアル §10 は 3 つ目の面である**(着地前レビュー 5)。
@@ -867,6 +955,7 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    '「閲覧用 HTML」「Markdown」「使っていない添付を消す」が設定へ移りました',
     'Word の書き出しが画面の紙面に合うようになりました',
     'Word の書き出しに図とグラフが入るようになりました',
     'Word の書き出しに画像が入るようになりました',

@@ -143,8 +143,20 @@ export interface PurgeFlowDeps {
    * ⚠ confirm 待ちの間に編集が始まりうるので、**削除の直前にもう一度**呼ぶ。
    */
   isReady(): Promise<{ ok: boolean; reason: string }>;
-  confirm(message: string): boolean;
-  alert(message: string): void;
+  /**
+   * ⚠ **非同期**(#299 段③、2026-08-21)── 確認はアプリ自身のダイアログになり、
+   *   答えは**後から**来る。⚠ この file は元から
+   *   「**将来 confirm を独自 async UI に替えても保険が残る**」と書いており、
+   *   TOCTOU の再確認(`isReady` + 再走査交差)がその保険である ── そのまま効く。
+   */
+  /**
+   * ⚠ **名前を `confirm` / `alert` にしない**(#299 段⑤)── native と同じ綴りだと、
+   *   「素の `confirm(` が戻っていないか」を見る検査(`tests/repo-hygiene.test.ts`)が
+   *   **この宣言に当たって**しまい、門を緩めるしかなくなる。`main.ts` の呼び側も
+   *   `ask` / `tell` なので、そちらに揃える。
+   */
+  ask(message: string): Promise<boolean>;
+  tell(message: string): Promise<void>;
   formatSize(bytes: number): string;
 }
 
@@ -161,17 +173,17 @@ export interface PurgeFlowDeps {
 export async function runExplicitPurge(deps: PurgeFlowDeps): Promise<void> {
   const first = await findOrphanAssets(deps.ports);
   if (first.keys.length === 0 && first.strays.length === 0) {
-    deps.alert('未参照の添付データはありません');
+    await deps.tell('未参照の添付データはありません');
     return;
   }
-  const ok = deps.confirm(
+  const ok = await deps.ask(
     `どの entry からも参照されていない添付データ ${first.keys.length + first.strays.length} 件` +
       `(${deps.formatSize(first.knownBytes)})を削除します。よろしいですか?`,
   );
   if (!ok) return;
   const ready = await deps.isReady();
   if (!ready.ok) {
-    deps.alert(`${ready.reason}(整理は行っていません)`);
+    await deps.tell(`${ready.reason}(整理は行っていません)`);
     return;
   }
   const second = await findOrphanAssets(deps.ports);
@@ -182,7 +194,7 @@ export async function runExplicitPurge(deps: PurgeFlowDeps): Promise<void> {
   const firstStrays = new Set(first.strays);
   const strays = second.strays.filter((k) => firstStrays.has(k));
   const r = await purgeAssets(deps.ports, keys, strays);
-  deps.alert(
+  await deps.tell(
     `${r.deleted} 件を削除しました` +
       (r.failed > 0 ? `(${r.failed} 件は失敗 ── 再実行で回収されます)` : ''),
   );

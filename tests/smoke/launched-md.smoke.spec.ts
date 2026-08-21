@@ -13,7 +13,7 @@
  * (`isSameEntry` は同じファイルにだけ true / `createWritable` は書いた文字を貯める)。
  */
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, collectPageErrors, useSplitEditor, useListBrowse } from './helpers';
+import { answerAppDialog, gotoApp, clickReal, collectPageErrors, useSplitEditor, useListBrowse } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -96,8 +96,8 @@ test('🔴 OS から開いた md が画面に出て、直して元ファイル�
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
 
   // ④ **元ファイルへ書き戻す**(確認は出る ── user のファイルを上書きするので)
-  page.once('dialog', (d) => void d.accept());
   await clickReal(page, '[data-pkc-action="write-back-file"]');
+  await answerAppDialog(page, 'ok');
   await expect
     .poll(() => page.evaluate(() => (window as unknown as { __written: Record<string, string> }).__written['議事録.md']))
     .toBe('# 議事録\n\n直しました。\n');

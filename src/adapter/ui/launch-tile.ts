@@ -67,7 +67,8 @@ export interface LaunchDeps {
    * IndexedDB / OPFS に手が届くので、**自分の許可記録を自分で書ける**)。
    * ⚠ 囲いの中で開くときは**呼ばれない**。
    */
-  confirmSameOrigin?: (title: string) => boolean;
+  /** ⚠ **非同期**(#299 段③)── 確認はアプリ自身のダイアログになった。 */
+  confirmSameOrigin?: (title: string) => Promise<boolean>;
 }
 
 /** 起動の仕方。既定は囲いの中。 */
@@ -77,21 +78,30 @@ export interface LaunchOptions {
 }
 
 /**
- * 起動する。**同期で始まる** ── `window.open` は最初の `await` より前に呼ぶ。
+ * 起動する。**囲いの中(既定)は同期で始まる** ── `window.open` は `await` より前に呼ぶ。
  *
  * ⚠ await をまたぐと user の操作(transient activation)が切れて、
  * Safari は `window.open` を通さない。Chromium は猶予に救われるが、
  * 「たまたま通っている」に頼らない。
+ *
+ * 🔴 **素のまま起動だけは `await` を 1 つ挟む**(#299 段③、2026-08-21)──
+ *   確認を**開く前に**出すためである(「やめる」を押したのに空のタブが残る、を作らない)。
+ * ⚠ その `await` は「OK を押した」という**新しい user の操作の直後**に解けるので、
+ *   Chromium は通る(実測)。⚠ **Safari は未確認** ── 塞がれた場合は
+ *   下の `deps.report` が理由を出すので、少なくとも無言にはならない。
+ * ⚠ 器の側も、空いているときは**同期で**開く(`app-dialog.ts` の `enqueue`)──
+ *   確認そのものが 1 マイクロタスク遅れると、この猶予がさらに細る。
  */
-export function launchTile(
+export async function launchTile(
   tile: LauncherTile,
   deps: LaunchDeps,
   opts: LaunchOptions = {},
-): void {
+): Promise<void> {
   const raw = opts.sameOrigin === true;
   // 🔴 **開く前に聞く**(fail closed)。⚠ `window.open` より前に聞く ──
   //    後にすると、断ったのに空のタブが残る
-  if (raw && deps.confirmSameOrigin !== undefined && !deps.confirmSameOrigin(tile.title)) return;
+  if (raw && deps.confirmSameOrigin !== undefined && !(await deps.confirmSameOrigin(tile.title)))
+    return;
   if (tile.kind === 'dual' || tile.kind === 'calendar' || tile.kind === 'kanban') {
     // 🔑 組み込み(#241 / #276)── 中央の面を切り替える。窓は開かない
     deps.openView(tile.kind);

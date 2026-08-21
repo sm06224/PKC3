@@ -5,7 +5,7 @@
 import { test, expect } from '@playwright/test';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { gotoApp, collectPageErrors, clickReal, expectImageRendered, createEntry, useSplitEditor, useListBrowse } from './helpers';
+import { answerAppDialog, gotoApp, collectPageErrors, clickReal, expectImageRendered, createEntry, useSplitEditor, useListBrowse } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -64,16 +64,10 @@ test('添付取込 → entry 出現 → image preview が可視高さを持つ',
   // ── P4b: 「添付の整理」(orphan GC)の end-to-end 配線 ──
   // この asset は attachment frontmatter と本文 asset: の両方から参照されて
   // いるので、実 sqlite 走査の結果は「未参照なし」が正(scan が実際に走った証拠)
-  const dialogMsg = new Promise<string>((resolve) => {
-    page.once('dialog', (d) => {
-      resolve(d.message());
-      void d.accept();
-    });
-  });
   // ⚠ #239 でこの操作は設定の中(書き出しと片づけ)へ移った ── 先に開く
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
   await clickReal(page, '[data-pkc-action="purge-orphan-assets"]');
-  expect(await dialogMsg).toContain('未参照の添付データはありません');
+  expect(await answerAppDialog(page, 'ok')).toContain('未参照の添付データはありません');
 
   expect(errors).toEqual([]);
 });

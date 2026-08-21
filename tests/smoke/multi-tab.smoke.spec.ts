@@ -9,7 +9,7 @@
  *   origin + profile 単位 ── context を分けると別世界になり、何も検証しない)。
  */
 import { test, expect, type Page } from '@playwright/test';
-import { gotoApp, collectPageErrors, clickReal, createEntry, useSplitEditor, useListBrowse } from './helpers';
+import { answerAppDialog, gotoApp, collectPageErrors, clickReal, createEntry, useSplitEditor, useListBrowse } from './helpers';
 
 // 🔑 #240 段⑤ で左の列の既定は**フォルダ**になった ── この file は一覧の行を
 // 掴むので、一覧タブで開く仕込みを入れる(既定の顔は organize.smoke が守る)。
@@ -189,15 +189,10 @@ test('🔴 タブ A が編集中は、タブ B からの「使っていない添
   await expect(pageB.locator('[data-pkc-region="status"]')).toContainText('保存は本体タブ経由');
 
   // 前提: **B だけ**なら整理は通る(この次元を測れている ── 常に断るのでは意味が無い)
-  const dialogIdle = new Promise<string>((resolve) => {
-    pageB.once('dialog', (d) => {
-      resolve(d.message());
-      void d.accept();
-    });
-  });
   await clickReal(pageB, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
   await clickReal(pageB, '[data-pkc-action="purge-orphan-assets"]');
-  expect(await dialogIdle, '前提: 誰も編集していないのに断られた').toContain(
+  // ⚠ 未参照が 0 件のときは**知らせるだけ**の形(ボタンは「閉じる」1 つ ── #299 段③)
+  expect(await answerAppDialog(pageB, 'ok'), '前提: 誰も編集していないのに断られた').toContain(
     '未参照の添付データはありません',
   );
 
@@ -205,18 +200,17 @@ test('🔴 タブ A が編集中は、タブ B からの「使っていない添
   await clickReal(page, '[data-pkc-action="start-edit"]');
   await expect(page.locator('[data-pkc-field="editor-body"]')).toBeVisible();
 
-  // B から整理 → **断られる**(⚠ confirm は出ない ── 走査の前で止まる)
-  let asked = false;
-  pageB.on('dialog', (d) => {
-    asked = true;
-    void d.accept();
-  });
+  // B から整理 → **断られる**(⚠ 確認は出ない ── 走査の前で止まる)
   await clickReal(pageB, '[data-pkc-action="purge-orphan-assets"]');
   await expect(
     pageB.locator('[data-pkc-region="status"]'),
     '他のタブが編集中なのに断っていない',
   ).toContainText('他のタブで編集中です', { timeout: 10_000 });
-  expect(asked, '断るはずが confirm まで進んだ').toBe(false);
+  // ⚠ **確認まで進んでいない**(走査の前で止まる)── ダイアログが開いていないこと
+  await expect(
+    pageB.locator('[data-pkc-region="app-dialog"][open]'),
+    '断るはずが確認まで進んだ',
+  ).toHaveCount(0);
 
   expect(errorsA).toEqual([]);
   expect(errorsB).toEqual([]);

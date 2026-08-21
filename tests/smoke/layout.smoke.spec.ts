@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, expectReachable, useSplitEditor, useListBrowse } from './helpers';
+import { answerAppDialog, gotoApp, clickReal, createEntry, collectPageErrors, expectReachable, useSplitEditor, useListBrowse } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -277,8 +277,20 @@ test('🔴 主要な導線が畳まれず、その場で押せる', async ({ pag
     ).toBeVisible();
   }
   // 押せること(覆われていない)まで見る ── 見えていても押せない配置がある
-  page.once('dialog', (d) => void d.dismiss());
   await clickReal(page, '[data-pkc-action="purge-orphan-assets"]');
+  /**
+   * ⚠ ここは「押せること」だけを見る面。未参照が 0 件なら**知らせるだけ**の形で
+   *   開くので、閉じる口は `dialog-ok` 1 つである(#299 段③ ── 1 稿目は
+   *   `cancel` を押そうとして「隠れている」で落ちた)。
+   * 🔴 **どの形が出たかを必ず見る**(#299 段⑤。着地前レビュー R12)── 文面を
+   *   見ずに `ok` を押すだけだと、この spec の前段が変わって未参照が 1 件でも
+   *   出た瞬間、**黙って本当に削除を実行する**(しかも緑のまま)。
+   *   他の 3 面(`attach` / `import` / `multi-tab`)は文面を pin しており、
+   *   ここだけ非対称だった。
+   */
+  expect(await answerAppDialog(page, 'ok'), '知らせるだけの形で開いていない').toContain(
+    '未参照の添付データはありません',
+  );
 });
 
 /**
