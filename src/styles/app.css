@@ -3188,6 +3188,58 @@ select:focus-visible {
   padding: var(--s4);
 }
 
+
+/* ══ アプリ自身の確認ダイアログ(#299。user 裁定 2026-08-21)══════════════
+ *
+ * > 「**ブラウザの方のアラートはマウスの動線が多くてウザいから、自前の方が嬉しい**」
+ *
+ * 🔴 **素の `<dialog>` を使う。** 自前で overlay を組まない ── 焦点の閉じ込め・
+ *   `Escape`・背景の不活性化はブラウザが持っている。⚠ しかも `showModal()` /
+ *   `close(値)` / `returnValue` は **happy-dom にも在る**(実測)ので、
+ *   **unit と実ブラウザで同じ経路が通る**(`window.confirm` を捨てる最大の取り分)。
+ * ⚠ **地は無彩色**(不可侵指示)── 危険色は「戻しにくい操作」の受けボタンだけに使う。 */
+[data-pkc-region='app-dialog'] {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+  padding: var(--s4);
+  /* ⚠ 狭い窓でも読める幅に収める(紙面の設定に引きずられない) */
+  max-width: min(32rem, calc(100vw - 2 * var(--s4)));
+  box-shadow: 0 8px 32px rgb(0 0 0 / 25%);
+}
+/* ⚠ **背景は暗くするが、色は付けない**(地は無彩色) */
+[data-pkc-region='app-dialog']::backdrop {
+  background: rgb(0 0 0 / 35%);
+}
+[data-pkc-field='dialog-title'] {
+  margin: 0 0 var(--s2);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+/* ⚠ 本文は**折り返す** ── 題名を含む長い断りが 1 行で溢れると読めない */
+[data-pkc-field='dialog-body'] {
+  margin: 0 0 var(--s4);
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+/* ⚠ **取り消しが先、受けるのが後**(macOS / GNOME の並び)。
+ *   右端が「進む」側になるので、押し間違えても戻しにくい方へ手が伸びない。 */
+[data-pkc-region='dialog-buttons'] {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s2);
+}
+/* 🔴 **危険色は受けボタンだけ**。⚠ 地に色を敷かない(情報にだけ使う)。 */
+[data-pkc-field='dialog-ok'][data-pkc-danger] {
+  border-color: var(--danger, #b3261e);
+  color: var(--danger, #b3261e);
+  font-weight: 600;
+}
+
 /* ── 印刷(2026-08-07)────────────────────────────────
  *
  * 🔴 **直す前は画面から印刷すると 1 頁しか出なかった**(実測)。本文の器
