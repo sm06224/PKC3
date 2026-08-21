@@ -235,7 +235,7 @@ describe('素のまま起動(P10)', () => {
   it('🔴 確認が false を返したら **窓すら開けない**(fail closed)', () => {
     const h = harness('<p>x</p>');
     const asked: string[] = [];
-    h.deps.confirmSameOrigin = (title) => {
+    h.deps.confirmSameOrigin = async (title) => {
       asked.push(title);
       return false;
     };
@@ -250,7 +250,7 @@ describe('素のまま起動(P10)', () => {
   it('🔴 囲いの中で開くときは **確認しない**', async () => {
     const h = harness('<p>x</p>');
     let asked = 0;
-    h.deps.confirmSameOrigin = () => {
+    h.deps.confirmSameOrigin = async () => {
       asked += 1;
       return true;
     };
@@ -268,7 +268,7 @@ describe('素のまま起動(P10)', () => {
         blobs.push(b);
         return 'blob:shell';
       };
-      h.deps.confirmSameOrigin = () => true;
+      h.deps.confirmSameOrigin = async () => true;
       launchTile(appTile, h.deps, { sameOrigin });
       await settle();
       expect(blobs).toHaveLength(1);
@@ -294,7 +294,7 @@ describe('素のまま起動(P10)', () => {
         blobs.push(b);
         return 'blob:shell';
       };
-      h.deps.confirmSameOrigin = () => true;
+      h.deps.confirmSameOrigin = async () => true;
       launchTile(appTile, h.deps, { sameOrigin });
       await settle();
       return blobs[0]!.text();

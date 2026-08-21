@@ -161,6 +161,28 @@ describe('アプリ自身の確認ダイアログ(#299)', () => {
     expect(await p).toBe('ok');
   });
 
+  /**
+   * 🔑 **取り消しが左、受けるのが右**(macOS / GNOME の並び)。
+   *   マニュアル §4「確認の画面」が**位置はいつも同じ**と約束しているので、
+   *   並びは**字面ではなく実際の DOM の順**で pin する。
+   * ⚠ どちらも `type="button"` ── `<form method="dialog">` にすると
+   *   **Enter で先頭のボタンが暗黙に押される**ので、削除が Enter 1 つで通る。
+   */
+  it('🔴 ボタンの並びは 取り消し → 受ける で、どちらも type="button"', async () => {
+    const p = confirmInApp(host, 'O', { danger: true, okLabel: '削除する' });
+    const row = q('[data-pkc-region="dialog-buttons"]');
+    expect([...row.children].map((el) => el.getAttribute('data-pkc-field'))).toEqual([
+      'dialog-cancel',
+      'dialog-ok',
+    ]);
+    expect([cancelBtn().type, okBtn().type], 'Enter で暗黙に押される形になっている').toEqual([
+      'button',
+      'button',
+    ]);
+    cancelBtn().click();
+    await p;
+  });
+
   /** 🔑 焦点は**取り消す側** ── 戻しにくい操作で Enter が事故にならない。 */
   it('🔴 開いた直後の焦点は取り消す側', async () => {
     const p = confirmInApp(host, 'L', { danger: true });

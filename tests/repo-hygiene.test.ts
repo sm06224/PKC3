@@ -607,3 +607,81 @@ describe('新しい本文が state に入る所は、札の組み直しを通る
     expect(fn, 'buildPersist が札を組み直していない').toContain('refreshTaskCards');
   });
 });
+
+/**
+ * 🔴 **native のダイアログは、もう使わない**(#299 段④、user 裁定 2026-08-21)。
+ *
+ * > 「**ブラウザの方のアラートはマウスの動線が多くてウザいから、自前の方が嬉しい**」
+ *
+ * ⚠ **戻ってこないことの見張り**である。`window.confirm` / `window.alert` は
+ *   1 行足すだけで戻せるうえ、戻しても**ほとんどの test は緑のまま**通る
+ *   (happy-dom に両方とも無いので、確認の枝が素通りする)── だから
+ *   **機械で塞ぐ**しかない。
+ *
+ * 🔑 捨てた理由を 3 つとも思い出せるように書いておく:
+ * ① native のモーダルは**レンダラを止める**ので、CDP から見ると
+ *    「画面が固まった」と区別が付かない(2026-08-21 に**存在しない P0** を 1 件
+ *    追わせた)② Chromium の「このページにこれ以上ダイアログを表示させない」は
+ *    **解除できない**(確認つき操作が全部 dead click になる)
+ * ③ 確認の枝が **unit からも smoke からも一度も実行されなかった**
+ */
+describe('🔴 native のダイアログを使わない(#299)', () => {
+  /**
+   * ⚠ **コメントを落としてから見る。** この file の中だけでも、上の docstring に
+   *   `window.confirm` と書いてある ── 落とさないと**自分の解説文に満たされて**
+   *   必ず落ちる(CLAUDE.md §1 で 5 回踏んだ形)。
+   * ⚠ 逆に「**在る**」ことの主張ではないので、拾い漏らすほうが危険 ──
+   *   だから**呼び出しの形**(`(`)まで含めて狭く当てる。
+   */
+  const stripComments = (src: string): string =>
+    src
+      .split('\n')
+      .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+      .join('\n');
+
+  const tsFiles = (dir: string, out: string[] = []): string[] => {
+    for (const name of readdirSync(dir)) {
+      const full = join(dir, name);
+      if (statSync(full).isDirectory()) tsFiles(full, out);
+      else if (name.endsWith('.ts')) out.push(full);
+    }
+    return out;
+  };
+
+  it('🔴 src に window.confirm / window.alert の呼び出しが 1 つも無い', () => {
+    const files = tsFiles('src');
+    // ⚠ 空振り防止 ── そもそも file を読めていないなら、この検査は何も言っていない
+    expect(files.length, 'src の TS を 1 つも読めていない').toBeGreaterThan(50);
+    const hits: string[] = [];
+    for (const f of files) {
+      const code = stripComments(readFileSync(f, 'utf-8'));
+      for (const m of code.matchAll(/window\.(confirm|alert)\s*\(/g)) hits.push(`${f}: ${m[0]}`);
+    }
+    expect(
+      hits,
+      `native のダイアログが戻っている(自前の app-dialog.ts を使うこと): ${hits.join(' / ')}`,
+    ).toEqual([]);
+  });
+
+  /**
+   * ⚠ **この検査自身が空振りしていないか**を見る ── 上の正規表現が
+   *   「そもそも何にも当たらない書き方」になっていたら、戻されても気づけない。
+   * 🔑 **当たるはずの文字列を自分で作って当てる**(製品を汚さずに感度を測る)。
+   */
+  it('検査そのものが空振りしていない(当たる形なら当たる)', () => {
+    const sample = 'const ok = window.confirm("x");\n// window.alert("y") はコメント\n';
+    const code = stripComments(sample);
+    expect([...code.matchAll(/window\.(confirm|alert)\s*\(/g)].length, '呼び出しを拾えない').toBe(
+      1,
+    );
+    expect(code, 'コメントを落とせていない').not.toContain('window.alert');
+  });
+
+  /** ⚠ 自前の器が**実在する**こと(消してから検査だけ残さない)。 */
+  it('自前の確認ダイアログが在る', () => {
+    const dialog = readFileSync('src/adapter/ui/render/app-dialog.ts', 'utf-8');
+    expect(dialog, '器が showModal を使っていない').toContain('showModal()');
+    expect(dialog, '器が confirm を出す口を持っていない').toContain('export function confirmInApp');
+    expect(dialog, '器が知らせる口を持っていない').toContain('export function alertInApp');
+  });
+});

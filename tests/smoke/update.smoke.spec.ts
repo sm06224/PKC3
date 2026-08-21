@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { gotoApp, collectPageErrors, clickReal, createEntry, useSplitEditor, useListBrowse } from './helpers';
+import { answerAppDialog, gotoApp, collectPageErrors, clickReal, createEntry, useSplitEditor, useListBrowse } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -100,17 +100,13 @@ test('🔴 新しい版が配られたら案内が出て、押すと入れ替わ
     await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]');
     await clickReal(page, '[data-pkc-action="start-edit"]');
     await expect(page.locator('[data-pkc-field="editor-body"]')).toBeVisible();
-    let asked: string | null = null;
-    page.once('dialog', (d) => {
-      asked = d.message();
-      void d.dismiss(); // ⚠ **断る** ── 何も起きないことを見る
-    });
     await page.evaluate(() => {
       (window as unknown as Record<string, unknown>).__beforeConfirm = true;
     });
     await clickReal(page, '[data-pkc-action="apply-update"]');
-    await expect.poll(() => asked, { timeout: 5_000 }).not.toBeNull();
-    expect(asked!).toContain('編集中');
+    // ⚠ **断る** ── 何も起きないことを見る(#299 段③ ── 確認はアプリの中の要素)
+    const asked = await answerAppDialog(page, 'cancel');
+    expect(asked).toContain('編集中');
     expect(
       await page.evaluate(
         () => (window as unknown as Record<string, unknown>).__beforeConfirm === true,

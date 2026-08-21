@@ -132,8 +132,8 @@ describe('runExplicitPurge (P4b)', () => {
     const deps: PurgeFlowDeps = {
       ports,
       isReady: async () => ({ ok: true, reason: '' }),
-      confirm: () => true,
-      alert: (m) => alerts.push(m),
+      confirm: () => Promise.resolve(true),
+      alert: async (m) => void alerts.push(m),
       formatSize: (n) => `${n}B`,
       ...over,
     };
@@ -141,7 +141,7 @@ describe('runExplicitPurge (P4b)', () => {
   }
 
   it('orphan ゼロなら confirm を出さずに報告だけ', async () => {
-    const confirm = vi.fn(() => true);
+    const confirm = vi.fn(async () => true);
     const { deps, calls, alerts } = flowDeps({ confirm });
     deps.ports.listMetas = async () => [];
     deps.ports.listBlobKeys = async () => [];
@@ -152,7 +152,7 @@ describe('runExplicitPurge (P4b)', () => {
   });
 
   it('confirm 拒否なら何も消さない(fail closed)', async () => {
-    const { deps, calls } = flowDeps({ confirm: () => false });
+    const { deps, calls } = flowDeps({ confirm: () => Promise.resolve(false) });
     await runExplicitPurge(deps);
     expect(calls.filter((c) => c.startsWith('blob:'))).toHaveLength(0);
   });
@@ -162,8 +162,8 @@ describe('runExplicitPurge (P4b)', () => {
     const { deps, calls, alerts } = flowDeps({
       isReady: async () =>
         ready ? { ok: true, reason: '' } : { ok: false, reason: '編集が始まったため中止しました' },
-      confirm: () => {
-        ready = false; // confirm ダイアログの間に編集が始まった
+      confirm: async () => {
+        ready = false; // 確認のダイアログの間に編集が始まった
         return true;
       },
     });
@@ -189,8 +189,8 @@ describe('runExplicitPurge (P4b)', () => {
     await runExplicitPurge({
       ports,
       isReady: async () => ({ ok: true, reason: '' }),
-      confirm: () => true,
-      alert: (m) => alerts.push(m),
+      confirm: () => Promise.resolve(true),
+      alert: async (m) => void alerts.push(m),
       formatSize: (n) => `${n}B`,
     });
     // 消してよいのは「両方の走査で orphan」だった k-orphan-blob だけ
@@ -230,8 +230,8 @@ describe('整理はタブ間の編集も見る(#253)', () => {
         ok: false,
         reason: '他のタブで編集中です。そちらを保存してからもう一度お試しください',
       }),
-      confirm: () => true,
-      alert: (m) => alerts.push(m),
+      confirm: () => Promise.resolve(true),
+      alert: async (m) => void alerts.push(m),
       formatSize: (n) => `${n}B`,
     });
     expect(calls.filter((c) => c.startsWith('blob:')), '編集中なのに消した').toHaveLength(0);
@@ -249,8 +249,8 @@ describe('整理はタブ間の編集も見る(#253)', () => {
         ok: false,
         reason: '本体タブと通信できないため、他のタブが編集中か確かめられません',
       }),
-      confirm: () => true,
-      alert: (m) => alerts.push(m),
+      confirm: () => Promise.resolve(true),
+      alert: async (m) => void alerts.push(m),
       formatSize: (n) => `${n}B`,
     });
     expect(alerts[0], '「編集中」と言い切っている').not.toContain('他のタブで編集中です');
@@ -333,11 +333,11 @@ describe('器の無い bytes(#260)', () => {
     await runExplicitPurge({
       ports,
       isReady: async () => ({ ok: true, reason: '' }),
-      confirm: (m) => {
+      confirm: async (m) => {
         messages.push(m);
         return true;
       },
-      alert: (m) => messages.push(m),
+      alert: async (m) => void messages.push(m),
       formatSize: (n) => `${n}B`,
     });
     expect(messages[0], '残骸を数えていない').toContain('2 件');

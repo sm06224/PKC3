@@ -546,6 +546,66 @@ describe('マニュアルと実装の突合', () => {
   });
 });
 
+describe('確認の画面とマニュアルの突合(#299)', () => {
+  /** マニュアル §4「確認の画面」の節だけを切り出す。⚠ 節ごと消えたら落ちる。 */
+  function section(): string {
+    const at = MANUAL.indexOf('### 確認の画面');
+    expect(at, 'マニュアルに「確認の画面」の節が無い').toBeGreaterThan(-1);
+    const next = MANUAL.indexOf('\n### ', at + 1);
+    return MANUAL.slice(at, next === -1 ? MANUAL.length : next);
+  }
+
+  /**
+   * 🔴 **「何が起きるかがボタンの字に出る」は、マニュアルの約束である。**
+   *
+   * 危険色を付けるのに `okLabel` を渡し忘れると、既定の **はい** が出る ──
+   * 赤い **はい** は「何が起きるか」を何も言っていない。
+   * ⚠ 字面の位置ではなく、**`danger: true` を含む object 全部**を数えて見る
+   *   (新しい面を足したときに、その面だけ抜けるのを止めるため)。
+   */
+  it('🔴 危険色の確認は、全部「何が起きるか」をボタンに書いている', () => {
+    const srcs = ['src/adapter/ui/actions/binder.ts', 'src/main.ts'].map((f) =>
+      codeOnly(readFileSync(f, 'utf-8')),
+    );
+    const objs = srcs.flatMap((src) => [
+      ...src.matchAll(/\{[^{}]*danger:\s*true[^{}]*\}/g),
+    ]).map((m) => m[0]);
+    // 空振り防止 ── 1 件も拾えていなければ、この検査は何も見ていない
+    expect(objs.length, 'danger: true を 1 件も拾えていない').toBeGreaterThanOrEqual(5);
+    for (const o of objs) {
+      expect(o, `危険色なのに字が既定のまま: ${o}`).toMatch(/okLabel:\s*'[^']+'/);
+    }
+  });
+
+  it('🔴 マニュアルが例に挙げるボタンの字が、実装に実在する', () => {
+    const src = codeOnly(readFileSync('src/main.ts', 'utf-8')) + codeOnly(BINDER);
+    const labels = [...src.matchAll(/okLabel:\s*'([^']+)'/g)].map((m) => m[1]);
+    expect(labels.length, 'okLabel を 1 件も読めていない').toBeGreaterThanOrEqual(5);
+    const s = section();
+    for (const label of ['削除', '空にする', '上書きする']) {
+      expect(labels, `実装に「${label}」というボタンが無い`).toContain(label);
+      expect(s, `マニュアルの例に「${label}」が無い`).toContain(`**${label}**`);
+    }
+  });
+
+  it('🔴 マニュアルが「取り消しが左」と書き、実装もそう並べている', () => {
+    // ⚠ 並びそのものは `tests/adapter/app-dialog.test.ts` が **実際の DOM の順**で
+    //   見る。ここが見るのは**マニュアルと実装が同じことを言っているか**である
+    const dlg = codeOnly(readFileSync('src/adapter/ui/render/app-dialog.ts', 'utf-8'));
+    expect(dlg, '取り消しを先に append していない').toContain('row.append(cancel, ok)');
+    expect(section()).toContain('取り消す側が左、実行する側が右');
+  });
+
+  it('🔴 ブラウザの確認は 1 つも残っていない(マニュアルの言うとおり)', () => {
+    expect(section()).toContain('PKC 自身の画面');
+    const main = codeOnly(readFileSync('src/main.ts', 'utf-8'));
+    expect(main, 'window.confirm が残っている').not.toMatch(/\bwindow\.confirm\(/);
+    expect(codeOnly(BINDER), 'window.confirm が残っている').not.toMatch(
+      /\bwindow\.confirm\(/,
+    );
+  });
+});
+
 describe('ショートカットとマニュアルの突合(#256)', () => {
   /**
    * 🔴 **マニュアル §10 は 3 つ目の面である**(着地前レビュー 5)。
@@ -867,6 +927,7 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    '「閲覧用 HTML」「Markdown」「使っていない添付を消す」が設定へ移りました',
     'Word の書き出しが画面の紙面に合うようになりました',
     'Word の書き出しに図とグラフが入るようになりました',
     'Word の書き出しに画像が入るようになりました',

@@ -67,7 +67,8 @@ export interface LaunchDeps {
    * IndexedDB / OPFS に手が届くので、**自分の許可記録を自分で書ける**)。
    * ⚠ 囲いの中で開くときは**呼ばれない**。
    */
-  confirmSameOrigin?: (title: string) => boolean;
+  /** ⚠ **非同期**(#299 段③)── 確認はアプリ自身のダイアログになった。 */
+  confirmSameOrigin?: (title: string) => Promise<boolean>;
 }
 
 /** 起動の仕方。既定は囲いの中。 */
@@ -83,15 +84,16 @@ export interface LaunchOptions {
  * Safari は `window.open` を通さない。Chromium は猶予に救われるが、
  * 「たまたま通っている」に頼らない。
  */
-export function launchTile(
+export async function launchTile(
   tile: LauncherTile,
   deps: LaunchDeps,
   opts: LaunchOptions = {},
-): void {
+): Promise<void> {
   const raw = opts.sameOrigin === true;
   // 🔴 **開く前に聞く**(fail closed)。⚠ `window.open` より前に聞く ──
   //    後にすると、断ったのに空のタブが残る
-  if (raw && deps.confirmSameOrigin !== undefined && !deps.confirmSameOrigin(tile.title)) return;
+  if (raw && deps.confirmSameOrigin !== undefined && !(await deps.confirmSameOrigin(tile.title)))
+    return;
   if (tile.kind === 'dual' || tile.kind === 'calendar' || tile.kind === 'kanban') {
     // 🔑 組み込み(#241 / #276)── 中央の面を切り替える。窓は開かない
     deps.openView(tile.kind);

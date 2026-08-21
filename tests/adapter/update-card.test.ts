@@ -120,15 +120,16 @@ describe('🔴 編集中の下書きを確認なしで捨てない(review M-2)',
     let answer = initial;
     const prompt = createUpdatePrompt(el, {
       isEditing: () => true,
-      confirmDiscard: () => answer,
+      confirmDiscard: async () => answer,
     });
     prompt.present(apply);
     return { el, apply, prompt, answer: (v: boolean) => (answer = v) };
   };
 
-  it('編集中に押されたら聞く。断られたら**何も変えない**', () => {
+  it('編集中に押されたら聞く。断られたら**何も変えない**', async () => {
     const { el, apply, prompt, answer } = editing(false);
-    prompt.apply();
+    // ⚠ 確認は**後から**返る(#299 段③)── await しないと「押した瞬間」を見てしまう
+    await prompt.apply();
     expect(apply).not.toHaveBeenCalled();
     // ⚠ 面も導線も残る ── 断ったのに導線が消えると押し直せない
     expect(el.hidden).toBe(false);
@@ -136,20 +137,20 @@ describe('🔴 編集中の下書きを確認なしで捨てない(review M-2)',
     // 🔴 **同じ prompt を**押し直せる ── ここで新しい prompt を作って試すと、
     // 「断ったときに pending を捨てる」変異に**救われる**(実際に生き残った)
     answer(true);
-    prompt.apply();
+    await prompt.apply();
     expect(apply).toHaveBeenCalledTimes(1);
   });
 
-  it('編集中でも承諾されたら進む', () => {
+  it('編集中でも承諾されたら進む', async () => {
     const { apply, prompt } = editing(true);
-    prompt.apply();
+    await prompt.apply();
     expect(apply).toHaveBeenCalledTimes(1);
   });
 
   it('編集していなければ聞かない(毎回聞くと邪魔になる)', () => {
     const el = region();
     const apply = vi.fn();
-    const confirmDiscard = vi.fn(() => true);
+    const confirmDiscard = vi.fn(async () => true);
     const prompt = createUpdatePrompt(el, { isEditing: () => false, confirmDiscard });
     prompt.present(apply);
     prompt.apply();

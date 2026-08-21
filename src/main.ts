@@ -131,7 +131,11 @@ import { diagramFileName } from '@features/export/file-name';
 import { renderToSvg, readPalette } from '@adapter/ui/render/mermaid-raster';
 import { MERMAID_KIND } from '@adapter/ui/render/mermaid-hydrate';
 import { CHART_KIND } from '@adapter/ui/render/chart-raster';
-import { askConfirm, SUPPRESSED_MESSAGE } from '@adapter/platform/ask-confirm';
+import {
+  alertInApp,
+  confirmInApp,
+  type ConfirmOptions,
+} from '@adapter/ui/render/app-dialog';
 
 const DB_NAME = 'pkc3';
 /** container の題名(書出しのファイル名にも使う ── 1 箇所で決める)。 */
@@ -332,17 +336,19 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 「確認ダイアログが抑止されるとボタンが恒久的に無反応」)。
    *
    * Chromium で user が「これ以上ダイアログを表示させない」を選ぶと、以後の
-   * `confirm` は**何も出さずに即 false**。確認つきの操作は全部「取り消し」に
-   * なるので、押しても 1 ドットも変わらないボタンになる(タブを閉じるまで戻らない)。
-   * ⚠ 抑止は解除できない ── ここがするのは**理由を出す**ことだけ。
-   * ⚠ 判定と文言は `platform/ask-confirm.ts` の 1 か所(規則を 2 つ書かない)。
-   * @param whenAbsent confirm が**無い**環境での既定(呼び側の倒し方を持ち込む)
+   * 🔴 **確認はアプリ自身のダイアログ**(#299 段③、2026-08-21。user 裁定
+   *   「ブラウザの方のアラートはマウスの動線が多くてウザいから、自前の方が嬉しい」)。
+   *
+   * ⚠ ここに在った「抑止されたら理由を出す」緩和は**根ごと要らなくなった** ──
+   *   Chromium の「このページにこれ以上ダイアログを表示させない」は
+   *   native の `confirm` にしか効かないからである。
+   * ⚠ **`whenAbsent` も消えた**:「confirm が無い環境」という状態が無くなった。
    */
-  const ask = (message: string, whenAbsent: boolean): boolean => {
-    const r = askConfirm(message, { whenAbsent });
-    if (r.suppressed) dispatcher.dispatch({ type: 'OP_FAILED', error: SUPPRESSED_MESSAGE });
-    return r.ok;
-  };
+  const ask = (message: string, opts: ConfirmOptions = {}): Promise<boolean> =>
+    confirmInApp(root, message, opts).then((a) => a === 'ok');
+  /** 知らせるだけ(`window.alert` の置き換え)。 */
+  const tell = (message: string): Promise<void> =>
+    alertInApp(root, message).then(() => undefined);
   // 🎨 配色は**枠より先**に当てる ── 後だと一瞬だけ既定色で描かれて瞬く
   const bootTheme = initialTheme();
   applyTheme(document.documentElement, bootTheme);
@@ -1037,7 +1043,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // ⚠ 再読込は open editor の下書きを捨てる(本文は AppState にしか無い)。
     // 破壊的操作は confirm を出す、というこのリポジトリの倒し方に揃える(review M-2)
     isEditing: () => dispatcher.getState().phase === 'editing',
-    confirmDiscard: () => ask('編集中の内容は保存されません。新しい版に切り替えますか?', true),
+    confirmDiscard: () => ask('編集中の内容は保存されません。新しい版に切り替えますか?', { okLabel: '切り替える' }),
   });
 
   /**
@@ -1237,13 +1243,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         fail('元のファイルとの紐づけがありません(この md をもう一度開いてください)');
         return;
       }
-      const ok = ask(
-        `「${name}」を、いまのノートの内容で上書きします。\n\n` +
-          'ファイルの元の内容は失われます(取り消せません)。よろしいですか?',
-        false,
-      );
-      if (!ok) return;
       void (async () => {
+        const ok = await ask(
+          `「${name}」を、いまのノートの内容で上書きします。\n\n` +
+            'ファイルの元の内容は失われます(取り消せません)。よろしいですか?',
+          { okLabel: '上書きする', danger: true },
+        );
+        if (!ok) return;
         const body = (await client.request({ op: 'getBody', cid, lid })) ?? null;
         if (body === null) {
           fail('本文が見つかりません(整理された可能性)');
@@ -1366,16 +1372,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           type: 'SET_VIEW_MODE',
           mode: nextViewMode(dispatcher.getState().viewMode, view),
         }),
-            confirmSameOrigin: (title) => {
+            confirmSameOrigin: async (title) => {
               if (sameOriginAllowed.has(lid)) return true;
               // ⚠ 何が起きるかを**具体**で書く(「安全でない」では判断できない)
-              const ok = ask(
+              const ok = await ask(
                 `「${title}」を PKC3 と同じ場所で開きます。\n\n` +
                   'IndexedDB や cookie を使うアプリが動くようになりますが、' +
                   'このアプリは PKC3 の保存内容(ノート・添付・設定)にも手が届きます。\n' +
                   'このタブを閉じるまでは、もう一度は聞きません(次に開いたときは聞きます)。\n\n' +
                   '開きますか?',
-                false,
+                { okLabel: '同じ場所で開く', danger: true },
               );
               if (ok) sameOriginAllowed.add(lid);
               return ok;
@@ -1694,8 +1700,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             },
             // 一括削除なので fail closed(confirm が無い環境では実行しない ──
             // 単発の delete-entry が ?? true なのとは桁が違う)
-            confirm: (msg) => ask(msg, false),
-            alert: (msg) => window.alert?.(msg),
+            confirm: (msg) => ask(msg, { okLabel: '整理する', danger: true }),
+            alert: tell,
             formatSize,
           });
         } catch (e) {

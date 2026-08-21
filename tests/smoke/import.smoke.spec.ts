@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { gotoApp, collectPageErrors, clickReal, expectImageRendered, useSplitEditor, useListBrowse } from './helpers';
+import { answerAppDialog, gotoApp, collectPageErrors, clickReal, expectImageRendered, useSplitEditor, useListBrowse } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -117,16 +117,10 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
 
   // ── 取り込んだ asset は「参照されている」と実 sqlite 走査で判定される ──
   // (旧 key のまま body に残っていたら、ここで未参照として現れる)
-  const dialogMsg = new Promise<string>((resolve) => {
-    page.once('dialog', (d) => {
-      resolve(d.message());
-      void d.accept();
-    });
-  });
   // ⚠ #239 でこの操作は設定の中(書き出しと片づけ)へ移った ── 先に開く
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
   await clickReal(page, '[data-pkc-action="purge-orphan-assets"]');
-  expect(await dialogMsg).toContain('未参照の添付データはありません');
+  expect(await answerAppDialog(page, 'ok')).toContain('未参照の添付データはありません');
 
   // ── 同じファイルをもう一度取り込む(review mutation M23 / M24 / H-2)──
   // 既存 lid・既存 relation id・entryOrder のどれか 1 つでも見ていなければ、

@@ -67,7 +67,8 @@ export interface UpdatePromptDeps {
    */
   isEditing?(): boolean;
   /** 捨ててよいか聞く。⚠ `delete-entry` / `purge-trash` と同じ倒し方に揃える。 */
-  confirmDiscard?(): boolean;
+  /** ⚠ **非同期**(#299 段③)── 確認はアプリ自身のダイアログになった。 */
+  confirmDiscard?(): Promise<boolean>;
 }
 
 /**
@@ -89,11 +90,13 @@ export function createUpdatePrompt(
       pending = apply;
       showUpdateCard(region);
     },
-    apply() {
+    async apply() {
       const run = pending;
       if (!run) return;
       // ⚠ 断られたら**何も変えない**(面も pending もそのまま)── 押し直せる
-      if (deps.isEditing?.() && !(deps.confirmDiscard?.() ?? true)) return;
+      // ⚠ 確認は**後から**返る ── ここを同期のまま書くと、押した瞬間に
+      //   再読込してしまう(確認が飾りになる)
+      if (deps.isEditing?.() === true && !((await deps.confirmDiscard?.()) ?? true)) return;
       // ⚠ 先に null にする ── 交代は一度きり。連打で 2 回頼まない
       pending = null;
       // ⚠ 面ごと消さない(review H-2)。押せる導線だけ外し、状況は残す

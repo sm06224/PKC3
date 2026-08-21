@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, expectReachable, useSplitEditor, useListBrowse } from './helpers';
+import { answerAppDialog, gotoApp, clickReal, createEntry, collectPageErrors, expectReachable, useSplitEditor, useListBrowse } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -277,8 +277,13 @@ test('🔴 主要な導線が畳まれず、その場で押せる', async ({ pag
     ).toBeVisible();
   }
   // 押せること(覆われていない)まで見る ── 見えていても押せない配置がある
-  page.once('dialog', (d) => void d.dismiss());
   await clickReal(page, '[data-pkc-action="purge-orphan-assets"]');
+  /**
+   * ⚠ ここは「押せること」だけを見る面。未参照が 0 件なら**知らせるだけ**の形で
+   *   開くので、閉じる口は `dialog-ok` 1 つである(#299 段③ ── 1 稿目は
+   *   `cancel` を押そうとして「隠れている」で落ちた)。
+   */
+  await answerAppDialog(page, 'ok');
 });
 
 /**

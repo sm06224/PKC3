@@ -555,7 +555,7 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
  * 🔴 **確認が出ていないことを黙らせない**(2026-08-06。user 報告 minor)。
  *
  * ⚠ 抑止は**解除できない**(仕様)。ここがするのは理由を出すことだけ ──
- * 判定と文言は `platform/ask-confirm.ts` の 1 か所に置く(規則を 2 つ書かない)。
+ * 文言と作法は `ui/render/app-dialog.ts` の 1 か所に置く(規則を 2 つ書かない)。
  * @param whenAbsent confirm が**無い**環境での既定(呼び側の倒し方を持ち込む)
  */
 /**

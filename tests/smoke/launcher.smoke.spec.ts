@@ -752,9 +752,10 @@ test('🔴 IndexedDB を使うアプリは、素のままで動き、囲いの�
   await boxed.close();
 
   // ② 素のまま ── **動く**。⚠ 確認が出るので受ける(fail closed の逆側)
-  page.once('dialog', (d) => void d.accept());
   const rawTab = context.waitForEvent('page');
   await clickReal(page, '[data-pkc-action="launch-asset-raw"]');
+  // ⚠ 確認は**開く前**に出る(断ったら空のタブが残らない ── #299 段③)
+  await answerAppDialog(page, 'ok');
   const raw = await rawTab;
   expect(await readApp(raw), '素のままなのに IndexedDB が動かない(直っていない)').toBe('ok');
   // 器の印も見る(どちらで開いたかが外から分かる)
