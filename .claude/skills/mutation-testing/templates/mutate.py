@@ -50,10 +50,24 @@ MUTATIONS = [
 ]
 
 
+class TimedOut(Exception):
+    """時間で切れた ── **落ちたのではない**。判定不能として出す(§4 値)。"""
+
+
 def run(cmd, timeout=1800):
-    return subprocess.run(
-        cmd, cwd=ROOT, shell=True, capture_output=True, text=True, timeout=timeout
-    )
+    """命令を回す。
+
+    🔴 **時間切れは「落ちた」ではない**(2026-08-20 に誤読した)。変異が
+    無限ループを作ると test は止まったまま返らない ── それを KILLED と読むと
+    「守られている」という**嘘の合格**が残る。ここで例外に変え、呼び側が
+    `TIMEOUT(判定不能)` として出す。
+    """
+    try:
+        return subprocess.run(
+            cmd, cwd=ROOT, shell=True, capture_output=True, text=True, timeout=timeout
+        )
+    except subprocess.TimeoutExpired as e:
+        raise TimedOut(f"{timeout}s で返らなかった: {cmd}") from e
 
 
 def dist_assets() -> str:
@@ -118,11 +132,14 @@ def main() -> int:
                 r = run(UNIT_CMD)
             verdict = "SURVIVED" if r.returncode == 0 else "KILLED"
             results.append((mid, verdict, first_reason(r.stdout + r.stderr)))
+        except TimedOut as e:
+            # ⚠ 3 値の**外** ── 「殺せた」とも「生き延びた」とも書かない
+            results.append((mid, "TIMEOUT", str(e)))
         finally:
             # ⚠ test が落ちても例外でも**必ず**戻す
             shutil.move(str(backup), str(target))
 
-    mark = {"KILLED": "○", "SURVIVED": "🔴", "NOT-APPLIED": "⚠"}
+    mark = {"KILLED": "○", "SURVIVED": "🔴", "NOT-APPLIED": "⚠", "TIMEOUT": "⏱"}
     print("\n=== 変異試験の結果 ===")
     for mid, verdict, why in results:
         print(f"{mark[verdict]} {verdict:12} {mid}")
