@@ -21,6 +21,10 @@ import { buildKeymapPanel, CONTEXT_LABELS as LABEL_OF } from '../../src/adapter/
 import { HelpRenderer } from '../../src/adapter/ui/render/help';
 import { KEY_COMMANDS, chordLabel } from '../../src/features/keymap';
 import { RowSwap } from '../../src/adapter/ui/render/row-swap';
+import {
+  confirmInApp,
+  resetAppDialogForTest,
+} from '../../src/adapter/ui/render/app-dialog';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import { MarkdownClient } from '../../src/adapter/platform/render/markdown-client';
 import { initialState, reduce } from '../../src/adapter/state/app-state';
@@ -171,6 +175,35 @@ describe('画面への配線', () => {
     press('6', { code: 'Digit6', altKey: true });
     press('6', { code: 'Digit6', altKey: true });
     expect(d.getState().viewMode, '押し直しても閉じない').toBe('detail');
+  });
+
+  /**
+   * 🔴 **確認が開いている間は近道を通さない**(#299 段⑤。着地前レビュー R6)。
+   *
+   * ⚠ native の `confirm` は**レンダラごと止めていた**ので、鍵はそもそも動かなかった。
+   *   `<dialog>` は背景を不活性にするだけなので **document の keydown は生き続ける** ──
+   *   しかも `Alt+6` / `Alt+1` / `Alt+←→` は押しボタンを経由せず**直に投げる**ので、
+   *   不活性は 1 ミリも効かない。
+   * ⚠ 実害:削除の確認を読んでいる最中に**背後で面が変わり**、「はい」と答えた先が
+   *   別の文脈になる。
+   * 🔑 対照群を同じ it に置く ── 閉じたあとは効くことまで見ないと、
+   *   「近道が丸ごと死んだ」変異と見分けが付かない。
+   */
+  it('🔴 確認が開いている間は Alt+6 が効かない(閉じれば効く)', async () => {
+    resetAppDialogForTest();
+    const { root, d } = mounted();
+    expect(d.getState().viewMode, '前提が崩れている').not.toBe('dual');
+
+    const answering = confirmInApp(root, '3 件を削除しますか?');
+    press('6', { code: 'Digit6', altKey: true });
+    expect(d.getState().viewMode, '確認を読んでいる最中に背後で面が変わった').not.toBe('dual');
+
+    root.querySelector<HTMLElement>('[data-pkc-field="dialog-cancel"]')!.click();
+    expect(await answering).toBe('cancel');
+
+    // 🔑 対照群 ── 閉じたら効く(門が近道を永久に殺していない)
+    press('6', { code: 'Digit6', altKey: true });
+    expect(d.getState().viewMode, '閉じたのに近道が戻らない').toBe('dual');
   });
 
   it('🔴 割り当て直すと、新しい鍵が効いて古い鍵は効かない', () => {

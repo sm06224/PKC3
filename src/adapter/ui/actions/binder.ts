@@ -41,7 +41,11 @@ import { handleCopyMdBlock } from './copy-md-block';
 import { finishCopy, selectedMarkdown } from './copy-source';
 import { copyMarkdownAndHtml, copyPlainText } from '@adapter/platform/clipboard';
 import { cleanForClipboard } from '@features/export/clipboard-html';
-import { confirmInApp, type ConfirmOptions } from '@adapter/ui/render/app-dialog';
+import {
+  confirmInApp,
+  isAppDialogOpen,
+  type ConfirmOptions,
+} from '@adapter/ui/render/app-dialog';
 
 type ActionHandler = (
   dispatcher: Dispatcher,
@@ -551,13 +555,6 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'write-back-file',
 ]);
 
-/**
- * 🔴 **確認が出ていないことを黙らせない**(2026-08-06。user 報告 minor)。
- *
- * ⚠ 抑止は**解除できない**(仕様)。ここがするのは理由を出すことだけ ──
- * 文言と作法は `ui/render/app-dialog.ts` の 1 か所に置く(規則を 2 つ書かない)。
- * @param whenAbsent confirm が**無い**環境での既定(呼び側の倒し方を持ち込む)
- */
 /**
  * 🔴 **確認を出して、受けたときだけ続きを撃つ**(#299 段②。user 裁定 2026-08-21)。
  *
@@ -2703,6 +2700,19 @@ export function bindActions(
   const onShortcut = (ev: Event) => {
     const ke = ev as KeyboardEvent;
     if (ke.isComposing || !root.isConnected) return;
+    /**
+     * 🔴 **確認が開いている間は近道を通さない**(#299 段⑤。着地前レビュー R6)。
+     *
+     * ⚠ native の `confirm` は**レンダラごと止めていた**ので、そもそも鍵が動かなかった。
+     *   `<dialog>` は背景を不活性にするだけなので、**document の keydown は生き続ける**。
+     * ⚠ 実害があるのは、押しボタンを経由せず**直接 dispatch する**近道である ──
+     *   `Alt+1`(本文へ)/ `Alt+6`(2 ペイン)/ `Alt+←→`(選択を戻る・進む)は
+     *   不活性に関係なく必ず走る。削除の確認を読んでいる最中に**背後で面が変わり**、
+     *   「はい」と答えた先が別の文脈になる。
+     * 🔑 判定は器の側の 1 つ(`isAppDialogOpen`)を読む ── 門をここに書き写すと、
+     *   器の作りを変えた日にここだけ古くなる(CLAUDE.md §7)。
+     */
+    if (isAppDialogOpen()) return;
     const el = ke.target instanceof HTMLElement ? ke.target : null;
     /**
      * 🔴 **打っている欄は「名前」ではなく「構造」で見る**(着地前レビュー 4)。

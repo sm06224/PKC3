@@ -648,14 +648,28 @@ describe('🔴 native のダイアログを使わない(#299)', () => {
     return out;
   };
 
-  it('🔴 src に window.confirm / window.alert の呼び出しが 1 つも無い', () => {
+  /**
+   * 🔴 **門は 1 本の定数にする**(#299 段⑤。着地前レビュー R9)。
+   *
+   * ⚠ 直す前は、門の側と「空振りしていないか」を見る側が**別の正規表現リテラル**を
+   *   持っていた ── 門を壊す変異(`\\s*\\)` を足して引数付きを拾えなくする等)を当てると
+   *   **2 本とも緑**になる(CLAUDE.md §7「期待値側と実装側が別の式を持っている」)。
+   * ⚠ そして `window.` しか見ていなかったので、**名前を変えるだけの戻し**を通していた ──
+   *   TS では `confirm(msg)` / `globalThis.confirm(msg)` / `self.confirm(msg)` がすべて
+   *   有効で、lint も黙る(型情報なしの eslint では `no-restricted-globals` が無い)。
+   * ⚠ `prompt` も塞ぐ ── いま使っていないが、次に足すなら自前の器に足すべきである。
+   */
+  const NATIVE_DIALOG =
+    /(?:window|globalThis|self)\.(?:confirm|alert|prompt)\s*\(|(?<![.\w$])(?:confirm|alert|prompt)\s*\(/g;
+
+  it('🔴 src に native のダイアログの呼び出しが 1 つも無い', () => {
     const files = tsFiles('src');
     // ⚠ 空振り防止 ── そもそも file を読めていないなら、この検査は何も言っていない
     expect(files.length, 'src の TS を 1 つも読めていない').toBeGreaterThan(50);
     const hits: string[] = [];
     for (const f of files) {
       const code = stripComments(readFileSync(f, 'utf-8'));
-      for (const m of code.matchAll(/window\.(confirm|alert)\s*\(/g)) hits.push(`${f}: ${m[0]}`);
+      for (const m of code.matchAll(NATIVE_DIALOG)) hits.push(`${f}: ${m[0]}`);
     }
     expect(
       hits,
@@ -666,15 +680,36 @@ describe('🔴 native のダイアログを使わない(#299)', () => {
   /**
    * ⚠ **この検査自身が空振りしていないか**を見る ── 上の正規表現が
    *   「そもそも何にも当たらない書き方」になっていたら、戻されても気づけない。
-   * 🔑 **当たるはずの文字列を自分で作って当てる**(製品を汚さずに感度を測る)。
+   * 🔑 **門と同じ定数を使う**(別のリテラルを書いた瞬間、感度を測る意味が消える)。
+   * 🔑 **当たるはずの形を全部並べる** ── 綴りを変えただけの戻しを 1 つずつ潰す。
    */
   it('検査そのものが空振りしていない(当たる形なら当たる)', () => {
-    const sample = 'const ok = window.confirm("x");\n// window.alert("y") はコメント\n';
-    const code = stripComments(sample);
-    expect([...code.matchAll(/window\.(confirm|alert)\s*\(/g)].length, '呼び出しを拾えない').toBe(
-      1,
-    );
-    expect(code, 'コメントを落とせていない').not.toContain('window.alert');
+    const shouldHit = [
+      'const ok = window.confirm("x");',
+      'const ok = globalThis.confirm("x");',
+      'const ok = self.alert("x");',
+      'const ok = confirm("x");',
+      'const v = prompt("x");',
+      'if (!confirm(message)) return;',
+    ];
+    for (const line of shouldHit)
+      expect([...stripComments(line).matchAll(NATIVE_DIALOG)].length, `拾えない: ${line}`).toBe(1);
+
+    // ⚠ 拾ってはいけない形(自前の器・受け渡しの名前・部分一致)
+    const shouldMiss = [
+      'const a = confirmInApp(root, "x");',
+      'await alertInApp(root, "x");',
+      'const ok = await deps.ask(message);',
+      'const ok = await this.confirm(message);',
+      'const deps = { ask: (m: string) => ask(m) };',
+    ];
+    for (const line of shouldMiss)
+      expect([...stripComments(line).matchAll(NATIVE_DIALOG)].length, `誤検知: ${line}`).toBe(0);
+
+    expect(
+      stripComments('// window.alert("y") はコメント\n'),
+      'コメントを落とせていない',
+    ).not.toContain('window.alert');
   });
 
   /** ⚠ 自前の器が**実在する**こと(消してから検査だけ残さない)。 */

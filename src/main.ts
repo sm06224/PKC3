@@ -332,10 +332,6 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
 
   const dispatcher = new Dispatcher();
   /**
-   * 🔴 **確認が出ていないことを黙らせない**(2026-08-06。user 報告 minor
-   * 「確認ダイアログが抑止されるとボタンが恒久的に無反応」)。
-   *
-   * Chromium で user が「これ以上ダイアログを表示させない」を選ぶと、以後の
    * 🔴 **確認はアプリ自身のダイアログ**(#299 段③、2026-08-21。user 裁定
    *   「ブラウザの方のアラートはマウスの動線が多くてウザいから、自前の方が嬉しい」)。
    *
@@ -346,7 +342,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   const ask = (message: string, opts: ConfirmOptions = {}): Promise<boolean> =>
     confirmInApp(root, message, opts).then((a) => a === 'ok');
-  /** 知らせるだけ(`window.alert` の置き換え)。 */
+  /**
+   * 知らせるだけ(native の `alert` の置き換え)。
+   * ⚠ **捨てない** ── 断りの理由はこれでしか届かないので、器は重なったら順番に出す。
+   */
   const tell = (message: string): Promise<void> =>
     alertInApp(root, message).then(() => undefined);
   // 🎨 配色は**枠より先**に当てる ── 後だと一瞬だけ既定色で描かれて瞬く
@@ -1698,10 +1697,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
                 return { ok: false, reason: '編集が始まったため中止しました' };
               return editingElsewhere();
             },
-            // 一括削除なので fail closed(confirm が無い環境では実行しない ──
-            // 単発の delete-entry が ?? true なのとは桁が違う)
-            confirm: (msg) => ask(msg, { okLabel: '整理する', danger: true }),
-            alert: tell,
+            // ⚠ **知らせるほうは捨てない** ── 走査は worker で数秒かかるので、
+            //    その間に別の確認が開いていることがある(器が順番に出す)
+            ask: (msg) => ask(msg, { okLabel: '整理する', danger: true }),
+            tell,
             formatSize,
           });
         } catch (e) {

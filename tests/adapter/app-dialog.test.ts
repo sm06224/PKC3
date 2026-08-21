@@ -22,6 +22,15 @@ const dialog = (): HTMLDialogElement => q<HTMLDialogElement>(`[data-pkc-region="
 const okBtn = (): HTMLButtonElement => q<HTMLButtonElement>('[data-pkc-field="dialog-ok"]');
 const cancelBtn = (): HTMLButtonElement => q<HTMLButtonElement>('[data-pkc-field="dialog-cancel"]');
 const bodyText = (): string => q('[data-pkc-field="dialog-body"]').textContent ?? '';
+/**
+ * ⚠ **並んだ 1 枚が出るのはマイクロタスク 1 つ後**(器は「空いていれば同期、
+ *   重なったときだけ並ばせる」形)。⚠ `setTimeout` で待たない ── 待ち時間で
+ *   ごまかすと、本当に出ていないときも通る。
+ */
+const tick = async (): Promise<void> => {
+  await Promise.resolve();
+  await Promise.resolve();
+};
 
 describe('アプリ自身の確認ダイアログ(#299)', () => {
   let host: HTMLElement;
@@ -104,15 +113,77 @@ describe('アプリ自身の確認ダイアログ(#299)', () => {
   });
 
   /**
-   * ⚠ **多重に開かない。** 2 枚重ねると下の 1 枚が答えを失って**永久に待つ**
-   *   ── そのまま「押しても何も起きない」になる。
+   * 🔴 **重なったら順番に出す。捨てない**(#299 段⑤。着地前レビュー R7)。
+   *
+   * ⚠ 段① は「2 枚目は待たずに `cancel` を返す」形だった ── 重ねて片方が
+   *   永久に待つのを避けるためだが、**代わりに「頼んだ操作が黙って消える」**を作った:
+   *   添付の整理は走査(worker で数秒)のあとに確認を出すので、その間にノートを
+   *   削除すると **整理の確認が即 `cancel` になり、帯にも画面にも 1 行も出ない**。
+   * 🔑 native の `confirm` は直列だった。置き換えるならそこも真似る。
    */
-  it('🔴 開いている間に呼ばれたら、待たずに取り消しを返す', async () => {
+  it('🔴 重なった確認は捨てずに、順番に出す', async () => {
     const first = confirmInApp(host, 'H');
-    expect(await confirmInApp(host, 'I'), '2 枚目が待ちに入っている').toBe('cancel');
+    const second = confirmInApp(host, 'I');
+    // ⚠ 1 枚目が出ている間に 2 枚目が本文を書き換えていない
     expect(bodyText(), '1 枚目の本文が上書きされた').toBe('H');
     cancelBtn().click();
     expect(await first).toBe('cancel');
+    await tick();
+    // 🔑 **2 枚目はここで初めて出る**(捨てられていない)
+    expect(dialog().open, '2 枚目が出ていない(捨てられた)').toBe(true);
+    expect(bodyText()).toBe('I');
+    okBtn().click();
+    expect(await second, '2 枚目の答えが返らない').toBe('ok');
+  });
+
+  /**
+   * 🔴 **知らせるものは絶対に捨てない。**
+   * ⚠ ここは `confirmInApp` とは**別の関数**なので、上の test は 1 度も通らない
+   *   (CLAUDE.md §7「同じ判定が複数の場所にある」)── 段① は alert 側の
+   *   取りこぼしを 1 件も見ていなかった。実害は**断りの理由が丸ごと消える**こと
+   *   (「他のタブで編集中です(整理は行っていません)」はこれでしか届かない)。
+   */
+  it('🔴 確認が開いている間に来た「お知らせ」も、順番に出る', async () => {
+    const asking = confirmInApp(host, 'P');
+    const telling = alertInApp(host, '他のタブで編集中です(整理は行っていません)');
+    expect(bodyText(), '確認の本文がお知らせに書き換えられた').toBe('P');
+    cancelBtn().click();
+    expect(await asking).toBe('cancel');
+    await tick();
+    expect(dialog().open, 'お知らせが出ていない(捨てられた)').toBe(true);
+    expect(bodyText()).toContain('整理は行っていません');
+    expect(cancelBtn().hidden, '知らせるだけなのに「やめる」が出ている').toBe(true);
+    okBtn().click();
+    await telling;
+  });
+
+  /**
+   * 🔴 **待っている間に面ごと組み直されても、鍵を殺さない**(着地前レビュー R8)。
+   *
+   * ⚠ 焦点の戻しは**要素の同一性**で書いてあるので、掴んだ節点が消えると誰も戻さない。
+   *   面の側の持ち越しも働かない ── `filer.ts` は「組み直す**直前**に焦点が面の中に
+   *   あったか」で判定するが、そのとき焦点は**ダイアログに在る**。
+   * ⚠ native の `confirm` はレンダラごと止めるので、この窓は無かった。
+   */
+  it('🔴 開いている間に行が作り直されたら、焦点は**その面**へ返す', async () => {
+    const region = document.createElement('section');
+    region.setAttribute('data-pkc-region', 'filer-table');
+    const table = document.createElement('table');
+    table.tabIndex = 0; // filer.ts:411 と同じ(面の中で焦点を受けられる唯一の節点)
+    const row = document.createElement('tr');
+    row.tabIndex = -1;
+    table.append(row);
+    region.append(table);
+    host.append(region);
+    row.focus();
+    expect(document.activeElement, '前提が崩れている').toBe(row);
+
+    const p = confirmInApp(host, 'Q');
+    // 待っている間に面ごと組み直される(掴んだ行は消える)
+    table.textContent = '';
+    okBtn().click();
+    expect(await p).toBe('ok');
+    expect(document.activeElement, '焦点が面の外へ落ちた(鍵が全部死ぬ)').toBe(table);
   });
 
   /** 危険色は**受けボタンだけ**に付く(地には付けない)。 */

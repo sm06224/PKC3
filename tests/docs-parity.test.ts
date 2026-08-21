@@ -563,29 +563,57 @@ describe('確認の画面とマニュアルの突合(#299)', () => {
    * ⚠ 字面の位置ではなく、**`danger: true` を含む object 全部**を数えて見る
    *   (新しい面を足したときに、その面だけ抜けるのを止めるため)。
    */
+  /**
+   * 🔴 **等値で pin する。「N 件以上」にしない**(#299 段⑤。着地前レビュー R10)。
+   *
+   * ⚠ 直す前は `toBeGreaterThanOrEqual(5)` で、実数は 7 件だった ── **2 件落としても
+   *   緑**である。マニュアルは「不可逆な操作は実行する側のボタンに色が付き、
+   *   何が起きるかが書いてある」と約束しているので、落ちた面は**画面と doc が割れる**。
+   * 🔑 **足したら 1 行足す**形にする(直したら消さないと落ちるので、忘れられない)。
+   */
+  const DANGER_SITES: readonly string[] = [
+    'binder.ts:削除', // まとめて削除(2 ペイン)
+    'binder.ts:削除', // 1 件削除(情報ペイン)
+    'binder.ts:打ち切る', // 他のタブの保存権を強制解放
+    'binder.ts:空にする', // ゴミ箱を空にする
+    'main.ts:上書きする', // md 書き出しの同名上書き
+    'main.ts:同じ場所で開く', // 素のまま起動(同一オリジン)
+    'main.ts:整理する', // 使っていない添付を消す
+  ];
+
   it('🔴 危険色の確認は、全部「何が起きるか」をボタンに書いている', () => {
-    const srcs = ['src/adapter/ui/actions/binder.ts', 'src/main.ts'].map((f) =>
-      codeOnly(readFileSync(f, 'utf-8')),
-    );
-    const objs = srcs.flatMap((src) => [
-      ...src.matchAll(/\{[^{}]*danger:\s*true[^{}]*\}/g),
-    ]).map((m) => m[0]);
-    // 空振り防止 ── 1 件も拾えていなければ、この検査は何も見ていない
-    expect(objs.length, 'danger: true を 1 件も拾えていない').toBeGreaterThanOrEqual(5);
-    for (const o of objs) {
-      expect(o, `危険色なのに字が既定のまま: ${o}`).toMatch(/okLabel:\s*'[^']+'/);
+    const files = ['src/adapter/ui/actions/binder.ts', 'src/main.ts'];
+    const found: string[] = [];
+    for (const f of files) {
+      const base = f.slice(f.lastIndexOf('/') + 1);
+      for (const m of codeOnly(readFileSync(f, 'utf-8')).matchAll(
+        /\{[^{}]*danger:\s*true[^{}]*\}/g,
+      )) {
+        const label = /okLabel:\s*'([^']+)'/.exec(m[0])?.[1];
+        // ⚠ 赤い「はい」は「何が起きるか」を何も言っていない
+        expect(label, `危険色なのに字が既定のまま: ${base} ${m[0]}`).toBeTruthy();
+        found.push(`${base}:${label ?? '(既定)'}`);
+      }
     }
+    expect(
+      [...found].sort(),
+      '危険色の面が増減した ── 足したなら DANGER_SITES に 1 行足す(落ちたなら、その面の警告色が消えている)',
+    ).toEqual([...DANGER_SITES].sort());
   });
 
-  it('🔴 マニュアルが例に挙げるボタンの字が、実装に実在する', () => {
-    const src = codeOnly(readFileSync('src/main.ts', 'utf-8')) + codeOnly(BINDER);
-    const labels = [...src.matchAll(/okLabel:\s*'([^']+)'/g)].map((m) => m[1]);
-    expect(labels.length, 'okLabel を 1 件も読めていない').toBeGreaterThanOrEqual(5);
+  /**
+   * 🔴 **危険色の面は「例」ではなく**全部**マニュアルに出す**(着地前レビュー R11)。
+   *
+   * ⚠ 直す前のマニュアルは 4 つを挙げていたが、実装は 6 種類だった ──
+   *   抜けていたのは **整理する**(添付の物理削除。**本当に戻せない**)と
+   *   **打ち切る**(他のタブの保存権の強制解放)。向きが悪いほうが抜けていた。
+   */
+  it('🔴 危険色のボタンの字が、6 種類とも マニュアルに出ている', () => {
+    const labels = [...new Set(DANGER_SITES.map((x) => x.slice(x.indexOf(':') + 1)))];
+    expect(labels.length, '危険色の字を 1 つも読めていない').toBe(6);
     const s = section();
-    for (const label of ['削除', '空にする', '上書きする']) {
-      expect(labels, `実装に「${label}」というボタンが無い`).toContain(label);
-      expect(s, `マニュアルの例に「${label}」が無い`).toContain(`**${label}**`);
-    }
+    for (const label of labels)
+      expect(s, `マニュアル §4「確認の画面」に「${label}」が無い`).toContain(`**${label}**`);
   });
 
   it('🔴 マニュアルが「取り消しが左」と書き、実装もそう並べている', () => {

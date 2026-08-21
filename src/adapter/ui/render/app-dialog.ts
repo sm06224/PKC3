@@ -66,6 +66,51 @@ interface Frame {
  */
 let frame: Frame | null = null;
 
+/**
+ * 🔴 **順番に出す**(#299 段⑤。着地前レビュー R7)。
+ *
+ * ⚠ 段① は「既に開いていたら**待たずに取り消しを返す**」形にしていた ── 2 枚重ねると
+ *   下の 1 枚が答えを失って永久に待つ、を避けるためである。**その心配は正しいが、
+ *   出した答えが間違っていた** ── 実際に起きるのは「**頼んだ操作が黙って捨てられる**」
+ *   ほうだった:
+ *   ① 設定の「使っていない添付を消す」を押す(走査は worker で数秒かかる)
+ *   ② 走査の間に一覧へ戻ってノートを削除 → 確認が開く
+ *   ③ 走査が終わって整理の確認が呼ばれる → **開いているので即 `cancel`** →
+ *      `runExplicitPurge` は無言で return ── 帯にも画面にも 1 行も出ない
+ *   ④ 知らせるだけの `alert` はもっと悪く、**断りの理由が丸ごと消える**
+ * 🔑 **native の `confirm` は直列だった**(レンダラごと止めるので、そもそも重ならない)。
+ *   置き換えるなら**そこも真似る** ── 器は 1 つのまま、**出す順番を 1 本の鎖にする**。
+ * ⚠ だから「2 枚目は捨てる」規則は要らなくなる(構造として重ならない)。
+ */
+let chain: Promise<unknown> = Promise.resolve();
+let pending = 0;
+
+/**
+ * ⚠ **空いているときは同期で開く。** 待ち行列にすると 1 マイクロタスク遅れるが、
+ *   それは**押した瞬間に開かない**ということである ── 素のまま起動は
+ *   `window.open` を user の操作の続きで呼ぶ必要があり(transient activation)、
+ *   間に微少な遅れが挟まると弾かれる実装系がある。**重なったときだけ**並ばせる。
+ */
+function enqueue<T>(run: () => Promise<T>): Promise<T> {
+  // ⚠ 前が転んでも列は進める(`run, run`)── 1 つの例外で以後が永久に止まらないように
+  const started = pending === 0 ? run() : chain.then(run, run);
+  pending += 1;
+  const settle = (): void => {
+    pending -= 1;
+  };
+  chain = started.then(settle, settle);
+  return started;
+}
+
+/**
+ * いま自前のダイアログが開いているか。
+ * 🔑 **近道キーの門がこれを読む**(`binder.ts` の `onShortcut`)── 判定を 2 か所に
+ *   書くと、片方だけ直した日に片方だけ死ぬ(CLAUDE.md §7)。
+ */
+export function isAppDialogOpen(): boolean {
+  return frame !== null && frame.dialog.open;
+}
+
 function ensureFrame(host: HTMLElement): Frame {
   if (frame !== null && host.contains(frame.dialog)) return frame;
   const dialog = document.createElement('dialog');
@@ -97,40 +142,44 @@ function ensureFrame(host: HTMLElement): Frame {
 /**
  * 確認を出して、答えを返す。
  *
- * ⚠ **多重に開かない** ── 既に開いているときは、その答えを待たずに
- *   `'cancel'` を返す(2 枚重ねると、下の 1 枚が答えを失って永久に待つ)。
+ * ⚠ **重なったら順番に出す**(上の `enqueue` を見よ)── 捨てない。
  */
 export function confirmInApp(
   host: HTMLElement,
   message: string,
   opts: ConfirmOptions = {},
 ): Promise<DialogAnswer> {
-  const f = ensureFrame(host);
-  if (f.dialog.open) return Promise.resolve<DialogAnswer>('cancel');
-  f.title.textContent = '確認';
-  f.body.textContent = message;
-  f.ok.textContent = opts.okLabel ?? 'はい';
-  f.cancel.textContent = opts.cancelLabel ?? 'やめる';
-  if (opts.danger === true) f.ok.setAttribute('data-pkc-danger', '');
-  else f.ok.removeAttribute('data-pkc-danger');
-  f.cancel.hidden = false;
-  return open(f, 'cancel');
+  // ⚠ 器は**自分の番が来てから**掴む ── 待っている間に面ごと作り直されうる
+  return enqueue(() => {
+    const f = ensureFrame(host);
+    f.title.textContent = '確認';
+    f.body.textContent = message;
+    f.ok.textContent = opts.okLabel ?? 'はい';
+    f.cancel.textContent = opts.cancelLabel ?? 'やめる';
+    if (opts.danger === true) f.ok.setAttribute('data-pkc-danger', '');
+    else f.ok.removeAttribute('data-pkc-danger');
+    f.cancel.hidden = false;
+    return open(f, 'cancel');
+  });
 }
 
 /**
  * 知らせるだけ(`window.alert` の置き換え)。
  * ⚠ ボタンは 1 つ ── 取り消す先が無いのに「やめる」を出さない。
+ * 🔴 **知らせるものは絶対に捨てない** ── 断りの理由(「他のタブで編集中です」等)は
+ *   これでしか届かない。重なったら順番に出す。
  */
 export function alertInApp(host: HTMLElement, message: string): Promise<DialogAnswer> {
-  const f = ensureFrame(host);
-  if (f.dialog.open) return Promise.resolve<DialogAnswer>('ok');
-  f.title.textContent = 'お知らせ';
-  f.body.textContent = message;
-  f.ok.textContent = '閉じる';
-  f.ok.removeAttribute('data-pkc-danger');
-  // ⚠ **消さずに隠す**(器を捨てない)── 消すと次の確認で作り直しになる
-  f.cancel.hidden = true;
-  return open(f, 'ok');
+  return enqueue(() => {
+    const f = ensureFrame(host);
+    f.title.textContent = 'お知らせ';
+    f.body.textContent = message;
+    f.ok.textContent = '閉じる';
+    f.ok.removeAttribute('data-pkc-danger');
+    // ⚠ **消さずに隠す**(器を捨てない)── 消すと次の確認で作り直しになる
+    f.cancel.hidden = true;
+    return open(f, 'ok');
+  });
 }
 
 /**
@@ -171,13 +220,34 @@ function open(f: Frame, onDismiss: DialogAnswer): Promise<DialogAnswer> {
      *   まだダイアログに焦点が在ることになり、同じ穴に落ちる。
      */
     const focusedBefore = f.dialog.ownerDocument.activeElement;
+    /**
+     * 🔴 **節点が消えても「どの面に居たか」は残す**(#299 段⑤。着地前レビュー R8)。
+     *
+     * ⚠ 上の戻しは**要素の同一性**で書いてある ── 待っている間に面ごと組み直されると
+     *   `isConnected === false` になって**誰も戻さない**。
+     * ⚠ そして面の側の持ち越しも働かない ── `filer.ts` は「組み直す**直前**に
+     *   焦点が面の中にあったか」で判定するので、焦点がダイアログに居る間は
+     *   `null` と読む(2 ペインはそもそも持ち越しを持たない)。
+     * ⚠ native の `confirm` はレンダラごと止めるので**この窓は無かった**ものである。
+     * 🔑 だから面(region)を控えて、消えていたらそこへ返す ── 「消えた行へ
+     *   焦点を当てにいかない」は保ったまま、**鍵が死ぬ**のだけを防ぐ。
+     */
+    const regionBefore =
+      focusedBefore instanceof HTMLElement ? focusedBefore.closest('[data-pkc-region]') : null;
     const done = (): void => {
       f.ok.removeEventListener('click', onOk);
       f.cancel.removeEventListener('click', onCancel);
       f.dialog.removeEventListener('close', onClose);
-      // ⚠ 消えていたら何もしない(消えた行へ焦点を当てにいかない)
+      // ⚠ 消えていたら**面へ**返す(消えた行そのものへ焦点を当てにはいかない)
       if (focusedBefore instanceof HTMLElement && focusedBefore.isConnected)
         focusedBefore.focus();
+      else if (regionBefore instanceof HTMLElement && regionBefore.isConnected)
+        // ⚠ `tabindex="-1"` も**焦点は当てられる**(タブで辿れないだけ)── 除くと
+        //    2 ペイン(器も行も -1)で 1 つも見つからず、`body` へ落ちたままになる
+        (regionBefore.hasAttribute('tabindex')
+          ? regionBefore
+          : (regionBefore.querySelector<HTMLElement>('[tabindex]') ?? regionBefore)
+        ).focus();
       resolve(answer ?? onDismiss);
     };
     const onOk = (): void => {
@@ -210,4 +280,7 @@ function open(f: Frame, onDismiss: DialogAnswer): Promise<DialogAnswer> {
 /** test の後始末(器を捨てる)。⚠ 製品からは呼ばない。 */
 export function resetAppDialogForTest(): void {
   frame = null;
+  // ⚠ 列も戻す ── 閉じ損ねた it が 1 つあると、以後の it が全部その後ろで待つ
+  chain = Promise.resolve();
+  pending = 0;
 }
