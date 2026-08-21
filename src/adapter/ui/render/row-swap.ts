@@ -1040,7 +1040,12 @@ export class RowSwap {
     const pair = autoPairFor({ text: ta.value, start: ta.selectionStart, end: ta.selectionEnd }, ke.key);
     if (pair === null) return;
     ke.preventDefault();
-    insertText(ta, pair.insert);
+    /**
+     * ⚠ **通り抜けは「挿さない」** ── caret を動かすだけ。
+     *   空文字を `execCommand('insertText')` で撃つと **undo の粒度が変わる**
+     *   ので、ここで分ける(規則は `text-ops.ts` 側が決める。ここは挿す係)。
+     */
+    if (pair.kind === 'insert') insertText(ta, pair.insert);
     ta.setSelectionRange(pair.start, pair.end);
     this.syncActiveBox();
   }

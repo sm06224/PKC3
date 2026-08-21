@@ -830,6 +830,36 @@ describe('RowSwap — 開放終端 と auto pair', () => {
     expect(ev.defaultPrevented).toBe(true);
   });
 
+  /**
+   * 🔴 **閉じを打っても増えない**(2026-08-21、cowork 実機レポート #15)。
+   *
+   * ⚠ 直す前の test は「`[` を打って `[]` になる」で**そこで終わっていた** ──
+   *   **次の打鍵を 1 つも進めていない**ので、`]` を打つと `[]]` になることを
+   *   誰も見ていなかった(CLAUDE.md §2「経路が一度も通っていない」)。
+   * ⚠ ここは DOM 側の主張である ── **通り抜けでは `insertText` を呼ばない**
+   *   (空文字を `execCommand` で撃つと undo の粒度が変わる)。
+   *   `input` event の回数で「挿していない」を観測する。
+   */
+  it('🔴 auto pair: 閉じを打つと通り抜ける(挿さない・本文が増えない)', () => {
+    const r = rig();
+    click(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
+    ta.value = '';
+    ta.setSelectionRange(0, 0);
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: '[', bubbles: true, cancelable: true }));
+    expect(ta.value, '前提が崩れている').toBe('[]');
+    expect(ta.selectionStart).toBe(1);
+
+    let inputs = 0;
+    ta.addEventListener('input', () => (inputs += 1));
+    const ev = new KeyboardEvent('keydown', { key: ']', bubbles: true, cancelable: true });
+    ta.dispatchEvent(ev);
+    expect(ta.value, '閉じが二重になった').toBe('[]');
+    expect(ta.selectionStart, 'caret が閉じの右へ進んでいない').toBe(2);
+    expect(ev.defaultPrevented, 'ブラウザにそのまま打たせてしまっている').toBe(true);
+    expect(inputs, '通り抜けなのに挿している(undo の粒度が変わる)').toBe(0);
+  });
+
   it('auto pair: 選択があるときは**囲む**(選択が消えない)', () => {
     const r = rig();
     click(findByText(r.host, 'p', '最初の段落。'));
