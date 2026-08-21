@@ -12,9 +12,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   askConfirm,
-  SUPPRESSED_MESSAGE,
   SUPPRESSED_MS,
 } from '../../src/adapter/platform/ask-confirm';
+import { answerDialog, dialogMessage } from './dialog-helper';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
@@ -119,41 +119,41 @@ describe('抑止されたときに理由が出る(画面の配線)', () => {
     return btn;
   }
 
-  it('🔴 削除が抑止されたら、理由が state に出る(黙って無反応にしない)', () => {
+  /**
+   * 🔴 **この面はもう native `confirm` を使わない**(#299 段②、2026-08-21)。
+   *
+   * ⚠ ここに在った 3 件(抑止されたら理由 / 取り消しでは出さない / 受けたら進む)は
+   *   **`window.confirm` を差し替えて `delete-entry` を押す**形だった。確認が
+   *   アプリ自身のダイアログになったので、その配線は**存在しない** ── 差し替えた
+   *   `confirm` は**呼ばれない**ので、残しても「呼ばれないものを検査する」空振りになる。
+   * 🔑 だから**主張を裏返して pin する**:この面は **native を 1 度も呼ばない**。
+   *   これは「戻ってこないこと」の見張りである。
+   * ⚠ `askConfirm` そのものの test(この file の上半分)は**残す** ──
+   *   `main.ts` の 4 面がまだ native を使っており、段③ で移す。
+   */
+  it('🔴 削除は native の confirm を 1 度も呼ばない(アプリ自身のダイアログ)', async () => {
     const { root, d } = rig();
-    withConfirm(
-      () => false, // 抑止された confirm は同期に false
-      () => deleteButton(root).click(),
-    );
-    expect(d.getState().error, '抑止されたのに理由が出ていない').toBe(SUPPRESSED_MESSAGE);
-    // ⚠ 操作は**進めない**(抑止を迂回しない)
-    expect(d.getState().entryMetas.has('a'), '確認を飛ばして削除した').toBe(true);
-  });
-
-  it('人が取り消したときは理由を出さない(邪魔をしない)', () => {
-    const { root, d } = rig();
+    let nativeCalls = 0;
     withConfirm(
       () => {
-        // 人が読んで押すまでの時間を進める。⚠ 実時間で進める ──
-        // fake timer は `performance.now()` を動かさない
-        const until = performance.now() + SUPPRESSED_MS + 2;
-        while (performance.now() < until) {
-          /* busy wait */
-        }
-        return false;
+        nativeCalls += 1;
+        return true;
       },
       () => deleteButton(root).click(),
     );
-    expect(d.getState().error, '取り消しただけで案内が出た').toBeNull();
+    expect(nativeCalls, 'native の confirm が呼ばれた(自前のダイアログに移っていない)').toBe(0);
+    // ⚠ 確認は**出ている**(押すまで消えない)── 空振りでないことを併せて見る
+    expect(dialogMessage(), '確認が出ていない').toContain('削除しますか');
+    expect(d.getState().entryMetas.has('a'), '確認の前に消えた').toBe(true);
+    await answerDialog('ok');
+    expect(d.getState().entryMetas.has('a'), '受けたのに削除されない').toBe(false);
   });
 
-  it('🔴 受けたら今までどおり進む(案内の追加で操作を壊していない)', () => {
+  it('取り消したら、何も起きない(理由も出さない)', async () => {
     const { root, d } = rig();
-    withConfirm(
-      () => true,
-      () => deleteButton(root).click(),
-    );
-    expect(d.getState().error).toBeNull();
-    expect(d.getState().entryMetas.has('a'), '受けたのに削除されない').toBe(false);
+    deleteButton(root).click();
+    await answerDialog('cancel');
+    expect(d.getState().entryMetas.has('a'), '取り消したのに消えた').toBe(true);
+    expect(d.getState().error, '取り消しただけで理由が出た').toBeNull();
   });
 });

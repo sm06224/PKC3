@@ -4,10 +4,11 @@
  * 削除(確認)/ rename。binder → dispatcher → renderer → fake store を通す。
  */
 import { stubStamps } from '../helpers/store-stamps';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
 import { initialState, reduce } from '../../src/adapter/state/app-state';
+import { answerDialog } from './dialog-helper';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
@@ -217,18 +218,15 @@ describe('create (P3-7a)', () => {
 });
 
 describe('delete (P3-7a)', () => {
-  // happy-dom は confirm 未実装 ── 関数を定義して差し替える(グローバル丸ごと
-  // 差し替えはしない ── URL 非コンストラクタ事故の教訓)
-  const setConfirm = (value: boolean) => {
-    Object.defineProperty(window, 'confirm', {
-      value: vi.fn().mockReturnValue(value),
-      configurable: true,
-      writable: true,
-    });
-  };
+  /**
+   * 🔴 **確認はアプリ自身のダイアログになった**(#299 段②、2026-08-21)。
+   * ⚠ ここに在った `setConfirm`(`window.confirm` の差し替え)は**もう効かない** ──
+   *   native は 1 度も呼ばれない。押す口はページの中に在るので、`answerDialog` で押す。
+   * 🔑 これが差し替えの目的である ── 確認の枝は、いままで unit から
+   *   **1 度も実行されていなかった**(happy-dom に `confirm` が無いため)。
+   */
 
   it('確認 OK で削除 ── 行が消え、選択が隣へ移り、store の掃除 op が走る', async () => {
-    setConfirm(true);
     const { d, q, qa, deleted } = setup(
       [meta('a', 1), meta('b', 2), meta('c', 3)],
       { a: 'A', b: 'B', c: 'C' },
@@ -236,6 +234,7 @@ describe('delete (P3-7a)', () => {
     q<HTMLElement>('[data-pkc-entry="b"]')!.click();
     await tick();
     q<HTMLElement>('[data-pkc-action="delete-entry"]')!.click();
+    await answerDialog('ok');
     await tick(20);
     expect(qa('[data-pkc-entry="b"]')).toHaveLength(0);
     expect(deleted).toEqual(['b']);
@@ -245,11 +244,11 @@ describe('delete (P3-7a)', () => {
   });
 
   it('確認キャンセルなら何もしない', async () => {
-    setConfirm(false);
     const { d, q, deleted } = setup([meta('a', 1)], { a: 'A' });
     q<HTMLElement>('[data-pkc-entry="a"]')!.click();
     await tick();
     q<HTMLElement>('[data-pkc-action="delete-entry"]')!.click();
+    await answerDialog('cancel');
     await tick();
     expect(deleted).toHaveLength(0);
     expect(d.getState().entryMetas.has('a')).toBe(true);

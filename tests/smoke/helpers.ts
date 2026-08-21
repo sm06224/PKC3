@@ -229,3 +229,22 @@ export async function expectImageRendered(page: Page, selector: string): Promise
   expect(box, `${selector} が画面に出ていない`).not.toBeNull();
   expect(box!.height).toBeGreaterThan(0);
 }
+
+/**
+ * 🔴 **アプリ自身の確認ダイアログに答える**(#299 段②)。
+ *
+ * ⚠ `page.on('dialog')` は**もう使えない** ── `window.confirm` を捨てたので
+ *   ブラウザのダイアログは 1 度も開かない。**ページの中の要素**を押す。
+ * 🔑 これが差し替えの取り分でもある ── native のモーダルはレンダラを止めるので、
+ *   CDP から見ると「画面が固まった」と区別が付かなかった(#299)。
+ *
+ * @returns 確認に出ていた文言(件数などを突き合わせるため)
+ */
+export async function answerAppDialog(page: Page, answer: 'ok' | 'cancel'): Promise<string> {
+  const body = page.locator('[data-pkc-field="dialog-body"]');
+  await expect(body, '確認のダイアログが出ていない').toBeVisible();
+  const message = (await body.textContent()) ?? '';
+  await clickReal(page, `[data-pkc-field="dialog-${answer === 'ok' ? 'ok' : 'cancel'}"]`);
+  await expect(body, 'ダイアログが閉じていない').toBeHidden();
+  return message;
+}

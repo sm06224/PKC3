@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors } from './helpers';
+import { answerAppDialog, gotoApp, clickReal, createEntry, collectPageErrors } from './helpers';
 
 /**
  * 整理の面(#240 段①〜⑤。user 指示 2026-08-17
@@ -113,21 +113,15 @@ test('🔴 まとめて選んで、まとめてゴミ箱へ入る', async ({ pag
 
   /**
    * ④ まとめてゴミ箱へ。
-   * ⚠ **`confirm` は自分で受ける** ── playwright の既定は**却下**なので、
-   *   受けないと「押したのに何も起きない」を**製品の不具合と読み違える**
-   *   (1 稿目で実際にそう読みかけた)。`boot-edit.smoke.spec.ts` と同じ作法。
+   * 🔴 **確認は「アプリの中の要素」になった**(#299 段②)── `page.on('dialog')` は
+   *   もう 1 度も発火しない。⚠ native のモーダルはレンダラを止めるので、
+   *   CDP から見ると「画面が固まった」と区別が付かなかった(それが差し替えの理由)。
    */
-  const asked = new Promise<string>((resolve) => {
-    page.once('dialog', (d) => {
-      resolve(d.message());
-      void d.accept();
-    });
-  });
   await rows.nth(0).click();
   await rows.nth(1).click({ modifiers: ['ControlOrMeta'] });
   await clickReal(page, '[data-pkc-action="delete-selected"]');
   // ⚠ 件数を**確認の文言でも**見る(1 件ずつ n 回聞く実装に戻ったら落ちる)
-  expect(await asked, '確認が件数で聞いていない').toContain('2 件');
+  expect(await answerAppDialog(page, 'ok'), '確認が件数で聞いていない').toContain('2 件');
   await expect(rows, 'まとめて消えていない').toHaveCount(1);
 
   // ⑤ 🔴 **戻せる**(ゴミ箱へ入っただけ)
@@ -228,16 +222,10 @@ test('🔴 Enter で入り、Backspace で戻り、Delete でゴミ箱へ', asyn
   await expect(rows, '親へ戻れない').toHaveCount(2);
   expect(page.url(), 'ブラウザの「戻る」が起きた').toBe(url);
 
-  // ④ Delete でゴミ箱へ(確認は自分で受ける ── 既定は却下)
-  const asked = new Promise<string>((resolve) => {
-    page.once('dialog', (d) => {
-      resolve(d.message());
-      void d.accept();
-    });
-  });
+  // ④ Delete でゴミ箱へ(確認は**アプリの中**の口を押す ── #299 段②)
   await clickReal(page, '[data-pkc-region="filer-table"] tbody tr[data-pkc-archetype="text"]');
   await page.keyboard.press('Delete');
-  expect(await asked, '確認が出ていない').toContain('削除');
+  expect(await answerAppDialog(page, 'ok'), '確認が出ていない').toContain('削除');
   await expect(rows, 'ゴミ箱へ入っていない').toHaveCount(1);
 
   /**
