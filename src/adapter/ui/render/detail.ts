@@ -14,6 +14,7 @@
 import { renderMarkdown } from '@features/markdown/markdown-render';
 import {
   frontmatterLineCount,
+  frontmatterProblem,
   parseFrontmatter,
   extractVars,
 } from '@features/markdown/frontmatter';
@@ -1022,14 +1023,33 @@ export class DetailRenderer {
     const renderFmCard = (): void => {
       if (fmEditing) return;
       fmCard.textContent = '';
-      if (fmLines === 0) {
+      /**
+       * 🔴 **読めていないときは、札が「読めている」顔をしない**(#284 / #318、
+       * 着地前レビュー G)。
+       *
+       * ⚠ 判定を `fmLines === 0` だけにしていたので、**二重 fence のノート**では
+       *   `fmLines > 0` になり、札は 1 本目だけを出して「この文書の情報 status: done」
+       *   と自信満々に言っていた ── **同じノートで、右の情報ペインは
+       *   「読めていません」**と言う。同じ問いに 2 つの答えが在る状態だった(§7)。
+       * 🔑 判定は `frontmatterProblem` 1 本へ寄せる。⚠ `fmLines === 0` でも
+       *   理由が在るなら**札を出す**(そこが直せる場所なので、黙るほうが害が大きい)。
+       */
+      const problem = frontmatterProblem(body);
+      if (fmLines === 0 && problem === null) {
         fmCard.removeAttribute('data-pkc-has-frontmatter');
         return;
       }
       fmCard.setAttribute('data-pkc-has-frontmatter', '');
       const label = document.createElement('span');
       label.setAttribute('data-pkc-field', 'fm-label');
-      label.textContent = 'この文書の情報';
+      label.textContent = problem === null ? 'この文書の情報' : '文書の情報が読めていません';
+      if (problem !== null) {
+        const why = document.createElement('span');
+        why.setAttribute('data-pkc-field', 'fm-problem');
+        why.textContent = problem;
+        fmCard.append(label, why);
+        return;
+      }
       const summary = document.createElement('span');
       summary.setAttribute('data-pkc-field', 'fm-summary');
       const meta = parseFrontmatter(body).meta;
@@ -1089,12 +1109,16 @@ export class DetailRenderer {
          *   失われていない(原文に残っている)が、**情報としては読めていない** ──
          *   ここで黙ると、タグが消えたことに user は気づけない。
          */
-        if (frontmatterLineCount(body) === 0) {
-          note.textContent =
-            'この文書の情報が読めなくなりました(先頭の --- と閉じの --- が要ります)── 書いた内容は本文に残っています';
-        } else {
-          note.textContent = 'この文書の情報を更新しました';
-        }
+        /**
+         * ⚠ **判定は `frontmatterProblem` 1 本**(着地前レビュー G)── 1 稿目は
+         *   `frontmatterLineCount === 0` で見ていたので、**二重 fence にしてしまった
+         *   ときや cap を超えたとき**に「更新しました」と言っていた。
+         */
+        const why = frontmatterProblem(body);
+        note.textContent =
+          why === null
+            ? 'この文書の情報を更新しました'
+            : `この文書の情報が読めなくなりました(${why})── 書いた内容は本文に残っています`;
       });
       fmCard.append(ta, ok, cancel);
       ta.focus();

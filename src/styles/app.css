@@ -973,6 +973,17 @@ select:focus-visible {
   overflow-wrap: anywhere;
   font-family: var(--font-mono);
 }
+/* 🔴 **読めていない理由**(#284 / #318)── 要約の代わりにここが出る。
+ * ⚠ 折り返しは要約と同じ(理由文は要約より長い)。
+ * ⚠ **色は足さない** ── 「読めていません」という札の字が意味を持っており、
+ *   地は無彩色のまま(user 指示 2026-08-03「色は情報にだけ使う」)。原文では
+ *   ないので等幅にもしない。 */
+[data-pkc-field='fm-problem'] {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
 /* 情報の原文。⚠ 本文の生の行と**同じ見た目**にする(同じ「原文を打つ場所」) */
 [data-pkc-field='fm-source'] {
   flex: 1 0 100%;

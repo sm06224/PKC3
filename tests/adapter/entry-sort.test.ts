@@ -282,6 +282,37 @@ describe('タグの札(#182)', () => {
   });
 
   /**
+   * 🔴 **理由は 1 形だけではない**(着地前レビュー M3 / M4)。
+   *
+   * ⚠ 1 稿目は `malformed`(閉じが無い)しか通していなかったので、
+   *   **`problem !== null` を `problem !== null && tags.length === 0` に弱める変異が
+   *   生き延びた** ── その変異は「**1 本目にタグが在る二重 fence**」で警告を消し、
+   *   #318 が言う「いちばん安心させる形」に戻す。
+   * 🔑 だから**理由の種類ごとに 1 件ずつ**通す(§7「経路ごとに pin する」の
+   *   画面側の顔)。
+   */
+  it('🔴 二重 fence でも、1 本目のタグに騙されずに理由を出す', () => {
+    const { d, root } = withInspector();
+    // ⚠ 1 本目に**タグが在る**ので、`tags.length === 0` に頼る検査は素通りする
+    d.dispatch({
+      type: 'BODY_LOADED',
+      lid: 'n1',
+      body: '---\ntags: [買い物]\n---\n---\ntags: [家事]\n本文\n',
+    });
+    const box = root.querySelector('[data-pkc-field="inspector-tags"]');
+    expect(box?.textContent, '1 本目が読めるので黙ってしまった').toBe('読めていません');
+    expect(box?.getAttribute('title') ?? '', '何が起きたか読めない').toContain('2 本目');
+  });
+
+  it('🔴 cap を超えた文書の情報でも「無し」と断定しない', () => {
+    const { d, root } = withInspector();
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: `---\nk: ${'あ'.repeat(20000)}\n---\n本文\n` });
+    const box = root.querySelector('[data-pkc-field="inspector-tags"]');
+    expect(box?.textContent, 'cap 超過で「無し」と断定している').toBe('読めていません');
+    expect(box?.getAttribute('title') ?? '').toContain('超過');
+  });
+
+  /**
    * ⚠ **直したら消えること**(状態が残らない)── 閉じを書き足せば元に戻る。
    * 🔑 `title` を消し忘れると、札が出ているのに古い理由が残る。
    */

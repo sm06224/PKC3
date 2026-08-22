@@ -111,10 +111,31 @@ export function frontmatterLineCount(body: string): number {
  * ⚠ 見分けずに警告すると、`---` で始まる普通の文書が取込のたびに警告を出す
  *   ── 警告が常在すると、本物の警告がそこに紛れる(CLAUDE.md「stderr は 0 行を保つ」
  *   と同じ理屈)。
- * 🔑 走は「**先頭から続く `key:` の行**(+ それに続く字下げの行)」である。
- *   frontmatter は key/value の並びなので、これで水平線と割れる。
- * ⚠ 「最初の空行まで」で数えてはいけない ── **本文の行まで走に入り**、
- *   閉じを補うときに本文の後ろへ入る(1 稿目で実際にそうなった)。
+ * 🔴 **走の文法は `parseFlatYaml` に合わせる**(着地前レビュー B / C / D)。
+ *
+ * ⚠ 1 稿目はここに**独自の文法**(「`key:` の行 + それに続く**字下げ**の行」)を
+ *   書いた。読み手と別の文法だったので、**user のデータが 4 通りに変質した**
+ *   ── どれも実測で再現した:
+ *
+ * | 本文 | 1 稿目がやったこと |
+ * |---|---|
+ * | `---\ntags:\n- あ\n- い\n本文` | 字下げ**無し**の配列を続きと見ず、`tags: []` にして**中身を本文へ落とした** |
+ * | `---\n# メモ\ntags: [あ]\n本文` | コメントで走が 0 になり、**二重 fence をそのまま作った**(#318 が直っていない) |
+ * | `---\ntags: [あ]\n# メモ\npriority: high` | コメントで走が切れ、**`priority` を本文へ追い出した** |
+ * | `---` + `tags: [あ]` + **全角空白で字下げした段落** | その段落を frontmatter へ飲み、本文から消した |
+ *
+ * ⚠ しかも「字下げの続き」を守っていたはずの `last === i - 1` は **到達時に常に真**
+ *   ── 何も守っていない **no-op** だった(28,561 形の差分で 0 件。CLAUDE.md
+ *   「これが無いと壊れると書いた規則が no-op だった」の 3 度目)。
+ *
+ * 🔑 だから **`parseFlatYaml` が実際に読む形だけ**を走に入れる:
+ *   ① `key: …` の行(字下げの有無を問わない ── あちらは `slice(0, colon).trim()`)
+ *   ② **値の無い key に続く `- item`**(字下げの有無を問わない ── あちらは `/^\s*-\s+/`)
+ *   ③ `#` で始まるコメント行 ── ⚠ **後ろに key が来るときだけ**(`last` を進めない)。
+ *      進めると `---\n# 見出し\n本文` という**水平線 + markdown 見出し**を
+ *      frontmatter と読む。
+ * ⚠ 空行では切る(保守的)── frontmatter の中の空行は `parseFlatYaml` が読み飛ばすが、
+ *   ここで跨ぐと「水平線 + 散文」を飲み込む側の誤りが増える。
  *
  * 🔴 **答えを 1 か所にする**(CLAUDE.md §7)。この関数の答えは 2 か所で使う ──
  * ① `parseFrontmatter` が「読めていない」と**警告を出すか**
@@ -128,22 +149,23 @@ export function frontmatterLineCount(body: string): number {
  *   ── 読み手が読まない形を、検出器だけが frontmatter と呼んでいた。
  */
 function frontmatterRunLength(lines: readonly string[]): number {
-  /** 走に入っている最後の行。⚠ **key の行で切る**(空行までではない)。 */
+  /** 走に入っている最後の**実のある**行(コメントでは進めない)。 */
   let last = -1;
+  /** 直前が「値の無い key」または「その続きの `- item`」か(ブロック配列の中)。 */
+  let inBlock = false;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? '';
     if (line.trim() === '') break;
+    // ③ コメント ── 後ろに key が来れば `last` が追い越すので、自然に含まれる
+    if (line.trimStart().startsWith('#')) continue;
     const colon = findKeyColon(line);
     if (colon > 0 && /^[A-Za-z_][\w.-]*$/.test(line.slice(0, colon).trim())) {
       last = i;
+      inBlock = line.slice(colon + 1).trim() === '';
       continue;
     }
-    /**
-     * ⚠ **字下げの行は「続き」である**(ブロック配列 `tags:\n  - あ`)。
-     * ここで切ると、閉じを補うとき**配列の中身が本文へ落ちる** ── user の
-     * データの意味が変わる(1 稿目で実際にそうなった)。
-     */
-    if (last === i - 1 && /^\s/.test(line)) {
+    // ② ブロック配列の項目。⚠ 字下げの有無を問わない(`parseFlatYaml` と同じ)
+    if (inBlock && /^\s*-\s+/.test(line)) {
       last = i;
       continue;
     }
@@ -171,7 +193,20 @@ function frontmatterRunLength(lines: readonly string[]): number {
  */
 export function frontmatterProblem(body: string): string | null {
   const r = parseFrontmatter(body);
-  const own = r.warnings.find((x) => x.kind === 'malformed');
+  /**
+   * 🔴 **`meta` を空にする warning は 1 か所に列挙する**(着地前レビュー E)。
+   *
+   * ⚠ 1 稿目は `malformed` しか見ていなかったので、**cap 超過(`size_limit`)の
+   *   ノートで #284 の嘘がそのまま残っていた** ── 実測(16KB 超の frontmatter):
+   *   `found: true` / `meta: {}` / `warnings: ['size_limit']` なので `readTags` は
+   *   `[]` を返し、情報ペインは **「タグ 無し」と断定**する。
+   * ⚠ しかもこの関数の docstring 自身が「画面ごとに `warnings.some(...)` を書くと
+   *   **`kind` を足したとき片方だけ拾う**」と戒めているのに、**いま実在する
+   *   2 つ目の kind を落としていた**。
+   * 🔑 書き出し側は既に正しく扱っている(`pkc3-markdown-zip.ts` の `blind`)──
+   *   **同じ問いに 2 つ目の答えが既に在り、新しい関数がそれと食い違っていた**。
+   */
+  const own = r.warnings.find((x) => x.kind === 'malformed' || x.kind === 'size_limit');
   if (own !== undefined) return own.detail;
   /**
    * 🔴 **既に二重 fence になっている本文も拾う**(#318 の「対で塞ぐもの」)。
@@ -190,7 +225,13 @@ export function frontmatterProblem(body: string): string | null {
   if (r.found) {
     const rest = parseFrontmatter(r.body);
     if (rest.warnings.some((x) => x.kind === 'malformed')) {
-      return '文書の情報の下に、閉じの --- を欠いた 2 本目が残っています(そちらは読めていません)';
+      /**
+       * ⚠ **断定しない**(着地前レビュー F)。1 稿目は「閉じの `---` を欠いた
+       *   2 本目が**残っています**」と言い切っていたが、`---` + `Note: …` で始まる
+       *   **普通の本文**でも同じ形になる ── 断定されると user は**存在しない
+       *   2 本目を探して、正しい本文を消しにいく**。観測したことだけ書く。
+       */
+      return '本文の先頭が --- で始まっていて、2 本目の文書の情報として読める形になっています(そちらは読めていません)';
     }
   }
   return null;
@@ -715,6 +756,36 @@ export function spliceFrontmatterKeys(
       if (lines.length === 0) return body;
       return `---\n${lines.join('\n')}\n---\n${body}`;
     }
+    /**
+     * 🔴 **書くものが何も無いなら、直さない**(着地前レビュー ②)。
+     * ⚠ 「無い key を消す」だけの空操作(`{ status: undefined }`)でも修理が走ると、
+     *   **user が何もしていないのに文書の見え方が変わる**(水平線に見えていた 2 行が
+     *   以後は隠れた「文書の情報」になる)。`store-effects.ts` の
+     *   `if (next === body) return fail()` も通り抜けてしまう。
+     */
+    const willWrite =
+      entries.some(([, v]) => v !== undefined) ||
+      entries.some(([key]) =>
+        parts
+          .slice(0, run)
+          .some((p) => new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*:`).test(p)),
+      );
+    if (!willWrite) return body;
+    /**
+     * 🔴 **走の最後の行に改行が無いなら、足してから閉じを挿す**(着地前レビュー A)。
+     *
+     * ⚠ `parts` は `split(/(?<=\n)/)` なので**最終要素だけ改行を持たない**。
+     *   そのまま閉じを挿すと、後続の `fmParts.push(line + eol)` が
+     *   **user の行の続きに連結**する ── 実測:
+     *   `---\ntags: [あ]`(末尾改行なし)→ `---\ntags: [あ]status: done\n---\n`
+     *   → 再 parse は `{tags: "[あ]status: done"}`(**配列が文字列に化ける**)。
+     * ⚠ これは**前置していた頃より悪い** ── あちらは行が原文にそのまま残って
+     *   復旧できたが、こちらは**行そのものが書き換わる**。
+     * 🔑 textarea は Enter を押さない限り末尾改行を持たないので、
+     *   「末尾改行の無い本文」は**例外ではなく普通**である。
+     */
+    const tail = parts[run - 1] ?? '';
+    if (tail !== '' && !/\r?\n$/.test(tail)) parts[run - 1] = tail + eol;
     // 閉じを 1 行だけ補って、通常の経路へ合流する(以降は原文 splice のまま)
     parts.splice(run, 0, `---${eol}`);
     closeAt = run;

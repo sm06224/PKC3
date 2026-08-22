@@ -544,6 +544,42 @@ describe('文書の情報(frontmatter)の扱い(#284)', () => {
   });
 
   /**
+   * 🔴 **札は「読めている」顔をしない**(#284 / #318、着地前レビュー G)。
+   *
+   * ⚠ 判定を `fmLines === 0` だけにしていたので、**二重 fence のノート**では
+   *   `fmLines > 0` になり、札は 1 本目だけを出して自信満々に要約していた ──
+   *   **同じノートで、右の情報ペインは「読めていません」**と言う。
+   *   同じ問いに 2 つの答えが在る状態だった(CLAUDE.md §7)。
+   * ⚠ 閉じが無い側(`fmLines === 0`)では、直す前は**札そのものが出なかった** ──
+   *   つまり**いちばん直したい場所で黙っていた**。
+   */
+  it('🔴 読めていないときは、札が理由を出す(要約で嘘をつかない)', async () => {
+    setLive(true);
+    for (const [name, body, want] of [
+      ['閉じが無い', '---\ntags: [あ]\n本文\n', '閉じの ---'],
+      ['二重 fence', '---\nstatus: done\n---\n---\ntags: [あ]\n本文\n', '2 本目'],
+    ] as const) {
+      const r = rig(body);
+      await settle();
+      const card = r.root.querySelector('[data-pkc-region="live-frontmatter"]')!;
+      expect(card.hasAttribute('data-pkc-has-frontmatter'), `${name}: 札が出ていない`).toBe(true);
+      expect(
+        card.querySelector('[data-pkc-field="fm-label"]')?.textContent,
+        `${name}: 読めているように見せている`,
+      ).toBe('文書の情報が読めていません');
+      expect(
+        card.querySelector('[data-pkc-field="fm-problem"]')?.textContent ?? '',
+        `${name}: 理由が出ていない`,
+      ).toContain(want);
+      // ⚠ 空振り防止 ── 要約(読めている顔)は出ていない
+      expect(
+        card.querySelector('[data-pkc-field="fm-summary"]'),
+        `${name}: 読めていないのに要約が出ている`,
+      ).toBeNull();
+    }
+  });
+
+  /**
    * 🔴 **これが本丸** ── 描く本文は情報を外した側なので、行番号が
    * `fmLines` だけずれる。ずらし忘れると **情報の行を書き潰す**
    * (user から見て「上の数行が消えた」)。
@@ -651,9 +687,32 @@ describe('文書の情報(frontmatter)の扱い(#284)', () => {
     // ⚠ 書いたものは本文に残っている(消してはいない)
     expect(r.bodies.at(-1), '本文から消えた').toContain('tags: [あ]');
     await settle();
+    /**
+     * 🔴 **向きを裏返した**(着地前レビュー G、2026-08-22)。
+     *
+     * ⚠ 1 稿目はここで「札が**消える**」を pin していた ── 理由は
+     *   「2 つ目の編集口になる」。心配は正しいが、**消すのは無言である** ──
+     *   いちばん直したい場所(本文のすぐ上)で黙ることになり、#284 の症状そのもの。
+     * 🔑 いまは**札は出るが、要約ではなく理由を出し、編集の口は持たない** ──
+     *   心配だけを外し、知らせる働きは残す。
+     * ⚠ 「検査の向きを裏返したら作法も裏返る」(CLAUDE.md §1)ので、
+     *   **心配していた当のもの(編集口)を明示的に見る**。
+     */
     expect(
       card.hasAttribute('data-pkc-has-frontmatter'),
-      '読めないのに札が出たまま(2 つ目の編集口になる)',
-    ).toBe(false);
+      '読めなくなった所で札が消えた(いちばん直したい場所で黙っている)',
+    ).toBe(true);
+    expect(
+      card.querySelector('[data-pkc-field="fm-problem"]')?.textContent ?? '',
+      '理由が出ていない',
+    ).toContain('閉じの ---');
+    expect(
+      card.querySelector('[data-pkc-field="fm-edit"]'),
+      '2 つ目の編集口が残っている(読めない情報を編集させない)',
+    ).toBeNull();
+    expect(
+      card.querySelector('[data-pkc-field="fm-summary"]'),
+      '読めていないのに要約が出ている',
+    ).toBeNull();
   });
 });
