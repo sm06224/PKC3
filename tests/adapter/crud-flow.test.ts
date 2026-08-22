@@ -243,6 +243,74 @@ describe('delete (P3-7a)', () => {
     expect(d.getState().openBody?.body).toBe('C');
   });
 
+  /**
+   * 🔴 **確認を待っている間に前提が崩れたら、理由を出して撃たない**(#308)。
+   *
+   * 自前の確認は**答えが後から返る**ので「開いてから答えるまで」の窓が在る
+   * (native の `confirm` はレンダラごと止めていたので、この窓は**置き換えで
+   * 新しく生まれた**)。⚠ 直す前は再確認せずに撃ち、reducer が
+   * `phase !== 'ready'` で黙って捨てるので、**「はい」と答えたのに
+   * 1 ドットも変わらず理由も出なかった**。
+   *
+   * ⚠ この test は #299(自前ダイアログ)より前は**書けなかった** ──
+   *   happy-dom に `window.confirm` が無く、確認の枝が 1 度も実行されなかった。
+   */
+  it('🔴 待っている間に編集が始まったら、消さずに理由を出す', async () => {
+    const { d, q, deleted } = setup([meta('a', 1)], { a: 'A' });
+    q<HTMLElement>('[data-pkc-entry="a"]')!.click();
+    await tick();
+    q<HTMLElement>('[data-pkc-action="delete-entry"]')!.click();
+
+    // 待っている間に編集が始まる(別タブ / 非同期 ack でも同じ形)
+    d.dispatch({ type: 'START_EDIT' });
+    expect(d.getState().phase, '前提が崩れている(編集中になっていない)').toBe('editing');
+
+    await answerDialog('ok');
+    await tick(20);
+
+    expect(deleted, '前提が崩れていたのに消した').toHaveLength(0);
+    expect(d.getState().entryMetas.has('a')).toBe(true);
+    // 🔴 **無言で捨てない** ── 理由が出る
+    expect(d.getState().error ?? '', '無言で捨てた(理由が出ていない)').toContain(
+      '編集を終了してから削除',
+    );
+  });
+
+  /**
+   * 🔴 **対照群**(空振り防止)── 前提が崩れていなければ、今までどおり消える。
+   * ⚠ これが落ちるなら、上は「断った」のではなく**別の理由で消えなかった**だけ。
+   */
+  it('対照群: 前提が崩れていなければ、確認 OK で消える', async () => {
+    const { d, q, deleted } = setup([meta('a', 1)], { a: 'A' });
+    q<HTMLElement>('[data-pkc-entry="a"]')!.click();
+    await tick();
+    q<HTMLElement>('[data-pkc-action="delete-entry"]')!.click();
+    await answerDialog('ok');
+    await tick(20);
+    expect(deleted, '対照群が消えていない(ハーネスが壊れている)').toEqual(['a']);
+    expect(d.getState().error ?? '', '消えたのに理由が出ている').not.toContain('編集を終了');
+  });
+
+  /**
+   * 🔴 **待っている間に対象が消えた場合**(別タブ / 取込)。
+   * ⚠ 黙って何も起きないのではなく、**もう無いことを言う**。
+   */
+  it('🔴 待っている間に対象が消えたら、その旨を出す', async () => {
+    const { d, q, deleted } = setup([meta('a', 1), meta('b', 2)], { a: 'A', b: 'B' });
+    q<HTMLElement>('[data-pkc-entry="a"]')!.click();
+    await tick();
+    q<HTMLElement>('[data-pkc-action="delete-entry"]')!.click();
+
+    // 別の経路で先に消えた(取込は entry を総入れ替えする)
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('b', 2)], relations: [] });
+
+    await answerDialog('ok');
+    await tick(20);
+
+    expect(deleted, 'もう無いものを消しに行った').toHaveLength(0);
+    expect(d.getState().error ?? '', '無言で捨てた').toContain('もうありません');
+  });
+
   it('確認キャンセルなら何もしない', async () => {
     const { d, q, deleted } = setup([meta('a', 1)], { a: 'A' });
     q<HTMLElement>('[data-pkc-entry="a"]')!.click();

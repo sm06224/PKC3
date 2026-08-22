@@ -570,15 +570,47 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
  *   同じように「押す」ことになる** ── それがこの差し替えの目的で、
  *   確認の枝がいままで**一度も実行されていなかった**のを終わらせる。
  */
+/**
+ * 🔴 **確認を待っている間に前提が崩れたら、理由を出して撃たない**(#308)。
+ *
+ * 自前の確認は**答えが後から返る**ので、「開いてから答えるまで」の窓が在る
+ * (native の `window.confirm` はレンダラごと止めていたので、この窓は
+ * **置き換えで新しく生まれた**)。直す前はその窓で前提が崩れても
+ * **再確認せずに撃って**おり、reducer が `phase !== 'ready'` で黙って捨てるので
+ * **「はい」と答えたのに 1 ドットも変わらず理由も出ない**。
+ *
+ * 🔑 `recheck` は **`onOk` より前**に置く ── 渡し忘れると `onOk`
+ *   (`() => void`)がこの位置に来て**型が落ちる**。optional にすると
+ *   「4 面のうち 1 面だけ無防備」が静かに起きる(#299 の `settled()` で踏んだ型)。
+ *
+ * @param recheck 崩れていたら**断りの文**を返す。崩れていなければ `null`。
+ */
 function confirmThen(
   root: HTMLElement,
   message: string,
   opts: ConfirmOptions,
+  dispatcher: Dispatcher,
+  recheck: () => string | null,
   onOk: () => void,
 ): void {
   void confirmInApp(root, message, opts).then((answer) => {
-    if (answer === 'ok') onOk();
+    if (answer !== 'ok') return;
+    const why = recheck();
+    if (why !== null) {
+      // ⚠ **可視に断る**(無言の操作拒否を作らない)
+      dispatcher.dispatch({ type: 'OP_FAILED', error: why });
+      return;
+    }
+    onOk();
   });
+}
+
+/**
+ * 4 面が共通で見る前提。⚠ **同じ問いに答える口を増やさない** ──
+ * 「編集中か」の判定はここ 1 つで、断り文も押した場所と対で渡す。
+ */
+function notWhileEditing(dispatcher: Dispatcher, refusal: string): () => string | null {
+  return () => (dispatcher.getState().phase === 'ready' ? null : refusal);
 }
 
 function refuseWhileBusy(
@@ -724,6 +756,21 @@ function deleteFrom(
       root,
       `選んでいる ${lids.length} 件を削除しますか?(ゴミ箱から戻せます)`,
       { okLabel: '削除', danger: true },
+      dispatcher,
+      /**
+       * ⚠ 待っている間に **①編集が始まる ②対象が消える**(別タブ / 取込)。
+       * 🔑 一部だけ消えたときは**数えて言う** ── 黙って残りを消さない
+       *   (この file の「落としたものは数えて言う」に揃える)。
+       */
+      () => {
+        const st = dispatcher.getState();
+        if (st.phase !== 'ready') return '編集を終了してから削除してください';
+        const alive = lids.filter((l) => st.entryMetas.has(l));
+        if (alive.length === 0) return '選んでいたものは、もうありません';
+        if (alive.length !== lids.length)
+          return `${lids.length - alive.length} 件が既にありません。選び直してください`;
+        return null;
+      },
       () => dispatcher.dispatch({ type: 'DELETE_ENTRIES', lids }),
     );
 }
@@ -1287,6 +1334,13 @@ const ACTIONS: Record<string, ActionHandler> = {
       root,
       `「${title}」を削除しますか?(ゴミ箱から戻せます)`,
       { okLabel: '削除', danger: true },
+      dispatcher,
+      () => {
+        const st = dispatcher.getState();
+        if (st.phase !== 'ready') return '編集を終了してから削除してください';
+        if (!st.entryMetas.has(lid)) return `「${title}」は、もうありません`;
+        return null;
+      },
       () => dispatcher.dispatch({ type: 'DELETE_ENTRY', lid }),
     );
   },
@@ -1411,6 +1465,13 @@ const ACTIONS: Record<string, ActionHandler> = {
       '追記の書き込みを強制的に打ち切ります。書き込みが実際には進んでいた場合、' +
         'この画面の表示が実際の中身より古くなることがあります(開き直すと直ります)。よろしいですか?',
       { okLabel: '打ち切る', danger: true },
+      dispatcher,
+      /**
+       * 🔴 **ここだけは門を足さない**(#308)。返ってこない書込で**永久に
+       * 追記できなくなる**のを防ぐ最後の脱出口なので、前提で塞ぐと逃げ道が消える。
+       * ⚠ 「念のため」で `phase` を見ないこと ── 実害の実測が無いまま塞がない。
+       */
+      () => null,
       () => dispatcher.dispatch({ type: 'FORCE_RELEASE_LOCK', discardDraft: false }),
     );
   },
@@ -1925,6 +1986,8 @@ const ACTIONS: Record<string, ActionHandler> = {
       root,
       'ゴミ箱を空にします(削除済み entry の履歴も消え、元に戻せません)。よろしいですか?',
       { okLabel: '空にする', danger: true },
+      dispatcher,
+      notWhileEditing(dispatcher, '編集を終了してから空にしてください'),
       () => dispatcher.dispatch({ type: 'PURGE_TRASH' }),
     );
   },
