@@ -695,7 +695,7 @@ jobs:
           path: /home/runner/lo-core/external/tarballs
           key: lo-tarballs-v1
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: lo-wasm-qt6
