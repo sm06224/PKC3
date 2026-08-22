@@ -67,6 +67,30 @@ export async function resolveListFace(page) {
 }
 
 /**
+ * 🔴 **一覧の行を指す selector を、いま見えている面から組む**(2026-08-22、#300 段①)。
+ *
+ * ⚠ この helper は 2026-08-18 に **probe 3 本のために**書かれたが、
+ * **bench 4 本は名指しのまま残っていた** ── `run-app-session` / `run-live-editor` /
+ * `run-raster-cap` / `run-second-tab` は全部 `[data-pkc-region="entry-list"] …` を
+ * 直に書いており、既定がフォルダになった日から**行を 1 つも掴めない**。
+ * 実測(2026-08-22): `run-second-tab.mjs --rounds=1 --notes=1` は
+ * `locator.click: Timeout 30000ms exceeded` で落ちる。
+ * ⚠ bench は CI で走らないので、**こちらの計器は 1 つも鳴らなかった**
+ * (CLAUDE.md「片側を直したら、対称の反対側を必ず疑う」)。
+ *
+ * 🔑 だから名指しを**この 1 か所**に閉じる。
+ *
+ * @param {import('@playwright/test').Page} page
+ * @param {string} [archetype] `text` / `attachment` など。省略すると種類を問わない
+ * @returns {Promise<string>} 行を指す selector
+ */
+export async function listRowsSelector(page, archetype) {
+  const face = await resolveListFace(page);
+  const kind = archetype ? `[data-pkc-archetype="${archetype}"]` : '';
+  return `${face.selector} [data-pkc-entry]${kind}`;
+}
+
+/**
  * 面を解いて、そこに行が出そろうのを待つ。
  * ⚠ **どの面で測ったかを必ず印字する** ── 既定が入れ替わったとき、
  *   数字だけ見て「同じものを測り続けている」と誤読しないため。

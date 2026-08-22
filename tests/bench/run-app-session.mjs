@@ -32,6 +32,7 @@
 import { chromium } from '@playwright/test';
 import { mkdirSync, rmSync, readFileSync, readdirSync } from 'node:fs';
 import { armFrom, seedEditorArm, fillBody } from './editor-arm.mjs';
+import { listRowsSelector } from '../probe/browse-face.mjs';
 
 /**
  * 🔴 **常駐はプロセス木で測る**(#114)。
@@ -295,7 +296,8 @@ async function main() {
     throw new Error(`計器が既知の 300ms の詰まりを観測できていない: ${JSON.stringify(probed)}`);
   }
 
-  const attachRows = '[data-pkc-region="entry-list"] [data-pkc-entry][data-pkc-archetype="attachment"]';
+  // ⚠ 面は**名指ししない**(既定の一覧タブは入れ替わる ── `browse-face.mjs`)
+  const attachRows = await listRowsSelector(page, 'attachment');
 
   // ── 添付を貼る ──
   // 🔴 ここは**計測する**。user が実機で気にしたのがこの操作
@@ -383,7 +385,7 @@ async function main() {
 
   const rows = [];
   const seen = { diagram: 0, table: 0, attachments: 0, attachmentPreviews: 0 };
-  const noteRows = '[data-pkc-region="entry-list"] [data-pkc-entry][data-pkc-archetype="text"]';
+  const noteRows = await listRowsSelector(page, 'text');
   // ⚠ **暖機を定常に混ぜない**。ここを loop の外で 1 度だけ立てると、初回の
   //   ラスタ生成(暖機で捨てているはずの窓)が定常の詰まりに混ざる ── 実際に踏んだ:
   //   混ざった版は最大の空きを 53ms と報告したが、暖機を外すと 28ms だった。
