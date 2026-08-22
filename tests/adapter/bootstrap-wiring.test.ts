@@ -42,6 +42,24 @@ describe('bootstrap の配線', () => {
   });
 
   /**
+   * 🔴 **開いた窓の合図は、boot のいちばん最初に返す**(#300 段③ の直し、2026-08-22)。
+   *
+   * ⚠ 順序が**主張そのもの**である ── storage の初期化(`startApp`)を待ってから
+   *   返すと、開けているのに開いた側が 2.5 秒を使い切って**中央の面へ退避する**。
+   *   そのとき本文が消える = **user の苦情そのものの再現**である。
+   * 🔑 `main.ts` はどの test からも実行されないので、**原文で位置を pin する**
+   *   (弱いと自覚して使う ── 振る舞いは `deep-link.test.ts` が見ている)。
+   */
+  it('🔴 合図は startApp より前に返す(待ち時間を使い切らせない)', () => {
+    const body = bootstrapBody();
+    const announce = body.indexOf('announceOpenedWindow()');
+    const boot = body.indexOf('startApp(root)');
+    expect(announce, '合図を返していない(開いても塞がれたと読まれる)').toBeGreaterThan(-1);
+    expect(boot, 'startApp が無い ── この検査の前提が崩れている').toBeGreaterThan(-1);
+    expect(announce, '合図が boot の後ろに落ちている').toBeLessThan(boot);
+  });
+
+  /**
    * 🔴 **面を開く口は 1 つ**(#300 段②のレビュー、2026-08-22)。
    *
    * ⚠ 「集計を開いたら憶えている束ね方を思い出す」は `binder.ts` にべた書きされて

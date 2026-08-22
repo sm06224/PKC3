@@ -21,13 +21,16 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import {
+  announceOpenedWindow,
   connectViewDeepLink,
+  currentBaseUrl,
   openableViewNames,
   readViewDeepLink,
   unusableViewMessage,
   type DeepLinkTarget,
 } from '../../src/adapter/platform/deep-link';
 import { VIEW_MODES, type ViewMode } from '../../src/adapter/state/app-state';
+import { dropViewWindowToken, formatViewDeepLink } from '../../src/features/link/permalink';
 
 /** 的 + 面の購読 + 断片の購読を 1 つにした試験台。 */
 function bench(hash: string) {
@@ -46,10 +49,22 @@ function bench(hash: string) {
       cleared += 1;
       target.hash = '';
     },
+    dropToken: () => {
+      target.hash = dropViewWindowToken(target.hash);
+    },
   };
   let failed: string | null = null;
+  /** 連れてきたノート(#300 段③ の直し)。 */
+  const selects: Array<{ containerId: string; lid: string }> = [];
+  /** 断片が指している面の遷移(`null` = 離れた)。 */
+  const holds: Array<ViewMode | null> = [];
   const off = connectViewDeepLink({
     openView: (mode) => actions.push(`open:${mode}`),
+    selectEntry: (containerId, lid) => {
+      selects.push({ containerId, lid });
+      actions.push(`select:${lid}`);
+    },
+    onHold: (v) => holds.push(v),
     fail: (m) => {
       failed = m;
       actions.push('fail');
@@ -82,6 +97,8 @@ function bench(hash: string) {
       hashListener?.();
     },
     subscribed: () => ({ view: viewListener !== null, hash: hashListener !== null }),
+    selects,
+    holds,
   };
 }
 
@@ -175,9 +192,16 @@ describe('起動時のディープリンク(#300 段②)', () => {
     }
   });
 
-  /** ⚠ 他の key と併記できる(将来「このノートを 2 ペインで」を組めるように)。 */
+  /**
+   * ⚠ 他の key と併記できる。
+   * 🔑 **段③ でその「将来」が来た** ── 併記した `container` / `entry` は
+   *   「連れてきたノート」として実際に使われる(下の describe)。
+   */
   it('⚠ 他の key と併記しても view が読める', () => {
-    expect(bench('#pkc?container=c1&entry=e1&view=dual').actions).toEqual(['open:dual']);
+    expect(bench('#pkc?container=c1&entry=e1&view=dual').actions).toEqual([
+      'select:e1',
+      'open:dual',
+    ]);
   });
 
   /** ⚠ 配線を解いたら、購読が両方外れる(閉じたタブが state を掴み続けない)。 */
@@ -206,7 +230,11 @@ describe('起動時のディープリンク(#300 段②)', () => {
    *   対照群だけは通る。**読めた側**を直に見る。
    */
   it('⚠ readViewDeepLink は読めた面をそのまま返す', () => {
-    const t = (hash: string): DeepLinkTarget => ({ hash, clearHash: () => {} });
+    const t = (hash: string): DeepLinkTarget => ({
+      hash,
+      clearHash: () => {},
+      dropToken: () => {},
+    });
     expect(readViewDeepLink(t('#pkc?view=help'))).toEqual({ view: 'help' });
     expect(readViewDeepLink(t('#pkc?view=zzz'))).toEqual({ unusable: true });
     expect(readViewDeepLink(t('#pkc?entry=e1'))).toBeNull();
@@ -238,9 +266,151 @@ describe('起動時のディープリンク(#300 段②)', () => {
       openView: opened,
       fail,
       onViewChange: () => () => {},
-      target: { hash: '#pkc?view=query', clearHash: () => {} },
+      target: { hash: '#pkc?view=query', clearHash: () => {}, dropToken: () => {} },
     });
     expect(opened).toHaveBeenCalledTimes(1);
     expect(fail, '同時に理由まで出している').not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 🔴 **別窓へ「読んでいたノート」を連れて行く**(#300 段③ の直し、2026-08-22)。
+ *
+ * ⚠ 直す前、別窓のカレンダーは `selectedLid === null` で立ち上がっていた ──
+ * 帯は「日を押す前に、左の一覧からノートを選んでください」で、**その窓では
+ * 日付を付けられない**。user は「カレンダーで日付を付けたい」から押したので、
+ * これは動線が**目的の手前で切れている**形である(動線レビュー §1)。
+ */
+describe('連れてきたノートを選ぶ(#300 段③)', () => {
+  it('🔴 `container` と `entry` が揃っていたら、面より先に選ぶ', () => {
+    const b = bench('#pkc?container=c1&entry=e7&view=calendar');
+    // 🔑 **順序が主張の一部** ── 面が先だと、開いた瞬間だけ
+    //    「ノートを選んでください」が見えてから入れ替わる
+    expect(b.actions, 'ノートを選んでいない / 面より後に選んでいる').toEqual([
+      'select:e7',
+      'open:calendar',
+    ]);
+    expect(b.selects).toEqual([{ containerId: 'c1', lid: 'e7' }]);
+  });
+
+  /**
+   * 🔴 **`container` が無ければ連れて行かない。**
+   * ⚠ 別の container の lid を拾うと、**偶然の一致で無関係なノートを選ぶ**
+   *   (`SYS_BOOTED` が `cid` を突き合わせているのと同じ理由)。
+   */
+  it('🔴 `entry` だけでは選ばない(別の container の取り違えを作らない)', () => {
+    const b = bench('#pkc?entry=e7&view=calendar');
+    expect(b.actions).toEqual(['open:calendar']);
+    expect(b.selects, 'container を検めずに選んだ').toEqual([]);
+  });
+
+  it('⚠ ノートが無い断片は今までどおり(面だけ開く)', () => {
+    const b = bench('#pkc?view=kanban');
+    expect(b.actions).toEqual(['open:kanban']);
+  });
+});
+
+/**
+ * 🔴 **開いた窓が「出ましたよ」と返す**(#300 段③ の直し)。
+ *
+ * ⚠ 直す前は「PKC が起動時に撒く名乗り」を聞いていたので、**別のタブの起動 /
+ * 自タブの昇格 / 待機画面の再接続**で誤爆した ── 誤爆すると「開いた」と読み、
+ * 塞がれた user には**退避も理由も出ない = 無言の dead click** になる。
+ */
+describe('開いた窓の合図(#300 段③)', () => {
+  function tgt(hash: string) {
+    const t = {
+      hash,
+      clearHash: () => {
+        t.hash = '';
+      },
+      dropToken: () => {
+        t.hash = dropViewWindowToken(t.hash);
+      },
+    };
+    return t;
+  }
+
+  it('🔴 合図を持って開かれた窓は、その合図をそのまま返す', () => {
+    const sent: string[] = [];
+    const t = tgt('#pkc?view=calendar&w=tok-1');
+    expect(announceOpenedWindow(t, (token) => sent.push(token))).toBe(true);
+    expect(sent, '合図を返していない(開いた側が塞がれたと誤読する)').toEqual(['tok-1']);
+  });
+
+  /**
+   * 🔴 **合図は使ったらアドレスから外す。⚠ ただし `view` は残す。**
+   * ⚠ 焼き付くと、ブックマークから開くたびに誰も聞いていない放送を撒く。
+   * ⚠ `view` まで落とすと、段② の裁定(見ている間は残す / `F5` で戻る)が壊れる。
+   */
+  it('🔴 合図だけをアドレスから外す(面は残す)', () => {
+    const t = tgt('#pkc?container=c1&entry=e7&view=calendar&w=tok-1');
+    announceOpenedWindow(t, () => {});
+    expect(t.hash, '合図が残った / 面まで落とした').toBe(
+      '#pkc?container=c1&entry=e7&view=calendar',
+    );
+  });
+
+  /** ⚠ **対照群** ── ふつうの起動では何も返さず、アドレスも触らない。 */
+  it('⚠ 合図が無ければ何もしない', () => {
+    const sent: string[] = [];
+    const t = tgt('#pkc?view=calendar');
+    expect(announceOpenedWindow(t, (x) => sent.push(x))).toBe(false);
+    expect(sent).toEqual([]);
+    expect(t.hash, 'アドレスを触った').toBe('#pkc?view=calendar');
+  });
+});
+
+/**
+ * 🔴 **「この窓はアプリの窓か」を、握っている間だけ真にする**(#300 段③ の直し)。
+ *
+ * 🔑 これで題名(タスクバーで見分ける)と `× 閉じる`(窓ごと閉じる)が決まる。
+ * ⚠ 離れた窓は**ふつうの PKC** なので、そこで窓を閉じたら本文の作業ごと失う。
+ */
+describe('アプリの窓であることを伝える(#300 段③)', () => {
+  it('🔴 開いたときに握り、user が離れたら手放す', () => {
+    const b = bench('#pkc?view=calendar');
+    expect(b.holds, '握ったことを伝えていない').toEqual(['calendar']);
+    b.viewBecomes('detail');
+    expect(b.holds, '離れたことを伝えていない(閉じるが窓を閉じ続ける)').toEqual([
+      'calendar',
+      null,
+    ]);
+  });
+
+  /** ⚠ 同じ面に留まっている間は伝え直さない(題名が点滅しない)。 */
+  it('⚠ 同じ面のままなら伝え直さない', () => {
+    const b = bench('#pkc?view=calendar');
+    b.viewBecomes('calendar');
+    b.viewBecomes('calendar');
+    expect(b.holds).toEqual(['calendar']);
+  });
+
+  it('⚠ 使えない名前では最初から握らない', () => {
+    const b = bench('#pkc?view=zzz');
+    expect(b.holds, '使えない名前でアプリの窓になった').toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **いまのアドレスから断片を落とした base**(#300 段③)。
+ *
+ * ⚠ 守り手が 1 人もいなかった(着地前レビュー 10 の変異 M4)── `location.href`
+ * をそのまま返す変異を当てると、**アプリの窓からもう 1 つアプリを開こうとした
+ * ときだけ**「別の窓を開けませんでした」に落ちる(本体タブからは再現しない)。
+ * ⚠ `document.baseURI` を使ってはいけない理由も同じ(**断片を含む**)。
+ */
+describe('currentBaseUrl(#300 段③)', () => {
+  it('🔴 断片を落とす ── そのまま `formatViewDeepLink` に食える', () => {
+    location.hash = '#pkc?view=calendar&w=tok-1';
+    const base = currentBaseUrl();
+    expect(base, '断片が残っている').not.toContain('#');
+    // 🔑 **空振り防止** ── 断片がそもそも付いていなければ何も検めていない
+    expect(location.href, '断片が付いていない(この test は何も検めていない)').toContain('#');
+    expect(
+      formatViewDeepLink(base, 'kanban'),
+      'アプリの窓から次のアプリを開けない',
+    ).toBe(`${base}#pkc?view=kanban`);
+    location.hash = '';
   });
 });

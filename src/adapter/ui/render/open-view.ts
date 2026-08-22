@@ -19,8 +19,14 @@ import { appQueryKey } from './query-key-store';
  *
  * ⚠ 順序が効く: 先に `SET_VIEW_MODE`(目録を頼む)→ 後に `SET_QUERY_KEY`
  * (表を頼む)。逆にすると同じ走査を 2 回頼むことになる。
+ *
+ * @returns 🔴 **本当に開いたか**(#300 段③ の直し、2026-08-22)。
+ *   ⚠ 編集中は `SET_VIEW_MODE` が**断られる**(`app-state.ts` が
+ *   「編集中は…を開けません」を立てて面は動かさない)。呼び側がこれを見ずに
+ *   「この画面で開きました」と言うと**嘘になる**ので、**結果を返す**。
+ *   🔑 判定は増やさない ── **既にある 1 か所の結果を読むだけ**である(§7)。
  */
-export function openView(dispatcher: Dispatcher, mode: ViewMode): void {
+export function openView(dispatcher: Dispatcher, mode: ViewMode): boolean {
   dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode });
   /**
    * 🔴 **集計の束ね方を思い出す**(#184)。⚠ **開いたときだけ**読む ──
@@ -31,4 +37,5 @@ export function openView(dispatcher: Dispatcher, mode: ViewMode): void {
     const remembered = appQueryKey.get();
     if (remembered !== null) dispatcher.dispatch({ type: 'SET_QUERY_KEY', key: remembered });
   }
+  return state.viewMode === mode;
 }

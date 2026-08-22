@@ -37,12 +37,12 @@ describe('封印中の面(#300 段②)', () => {
   });
 
   it('🔴 封印された面は、アドレスからも開けない(理由を出して断る)', () => {
-    const target = { hash: '#pkc?view=kanban', clearHash: () => {} };
+    const target = { hash: '#pkc?view=kanban', clearHash: () => {}, dropToken: () => {} };
     expect(readViewDeepLink(target), '封印した面がアドレスから開ける').toEqual({
       unusable: true,
     });
     // ⚠ 対照群 ── 封印していない面は今までどおり開ける
-    expect(readViewDeepLink({ hash: '#pkc?view=calendar', clearHash: () => {} })).toEqual({
+    expect(readViewDeepLink({ hash: '#pkc?view=calendar', clearHash: () => {}, dropToken: () => {} })).toEqual({
       view: 'calendar',
     });
   });

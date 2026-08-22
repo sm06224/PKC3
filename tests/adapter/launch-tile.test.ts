@@ -406,10 +406,59 @@ describe('main.ts の配線(原文 pin ── #174)', () => {
   it('🔴 組み込みタイルの押下が別窓へ行く(中央の面を占有しない)', () => {
     const opens = [...MAIN.matchAll(/openView: \(view\) => void openViewTile\(/g)].length;
     expect(opens, 'タイルが別窓へ行っていない(中央の面を占有する)').toBe(2);
-    // ⚠ 退避先は中央の面のまま ── `nextViewMode` を通る(もう一度押すと戻る)
+    /**
+     * 🔴 **退避は「開く」であってトグルではない**(着地前レビュー 1、2026-08-22)。
+     *
+     * ⚠ 直す前ここは `openInPane: (v) => openView(dispatcher, nextViewMode(` を
+     *   **等値で pin** していた ── つまり **不具合のほうを固定していた**。
+     *   `nextViewMode` は「タイル再押下で閉じる」ための規則なので、退避に通すと:
+     *   押す(塞がれる)→ 2.5 秒無反応 → もう一度押す → 1 本目が開く →
+     *   **2 本目がそれを閉じる**(しかも「この画面で開きました」と言う)。
+     * 🔑 いまの主張は「**退避に `nextViewMode` を通さない**」である。
+     *   ⚠ 振る舞いのほうは `tests/adapter/view-window.test.ts` が見ている
+     *   (ここは原文 pin なので、**弱いと自覚して**使う)。
+     */
     expect(
-      [...MAIN.matchAll(/openInPane: \(v\) => openView\(dispatcher, nextViewMode\(/g)].length,
-      '退避先が nextViewMode を通っていない(退避すると戻れない)',
-    ).toBe(1);
+      MAIN.includes('openInPane: (v) => openView(dispatcher, v)'),
+      '退避が「開く」になっていない',
+    ).toBe(true);
+    expect(
+      MAIN.includes('openInPane: (v) => openView(dispatcher, nextViewMode('),
+      '退避がトグルに戻っている(2 回押すと開いた面が閉じる)',
+    ).toBe(false);
+  });
+
+  /**
+   * 🔴 **組み込みの 3 つは、どれも別窓の口へ行く**(着地前レビュー 2、2026-08-22)。
+   *
+   * ⚠ 直す前、`calendar` / `kanban` のタイルを `launchTile` に渡す unit は
+   *   **0 件**だった(`harness` は `viewOpens` を作っていたのに、どの `it` からも
+   *   assert していなかった)。⚠ smoke も押すのをやめていたので、
+   *   `if (tile.kind === 'dual' || tile.kind === 'calendar')` と削る変異は
+   *   **全部緑のまま**通る ── `kanbanTile()` は `assetKey` を持たないので
+   *   下の `if (tile.assetKey === undefined) return;` に落ちて**無言で return**、
+   *   「やることの板」が**完全な dead click** になる。
+   */
+  it('🔴 組み込みの 3 つは、どれも別窓の口(openView)へ行く', () => {
+    for (const kind of ['dual', 'calendar', 'kanban'] as const) {
+      const h = harness(null);
+      void launchTile({ lid: `builtin:${kind}`, title: kind, group: '', kind }, h.deps);
+      expect(h.viewOpens, `${kind} が別窓の口へ行かない(無言の dead click)`).toEqual([kind]);
+      expect(h.opened, 'ここで直に窓を開いてはいけない(判断は view-window)').toEqual([]);
+      expect(h.failures, `${kind} で理由が出た`).toEqual([]);
+    }
+  });
+
+  /**
+   * 🔴 **組み込みは `await` をまたがずに口を叩く**(着地前レビュー 4)。
+   * ⚠ `window.open` は gesture の中でしか通らない ── 1 マイクロタスクでも
+   *   遅れると Safari は塞ぐ(Chromium は猶予に救われるので**手元では露見しない**)。
+   */
+  it('🔴 組み込みタイルは同期に口を叩く(gesture を切らない)', () => {
+    const h = harness(null);
+    void launchTile({ lid: 'builtin:calendar', title: 'c', group: '', kind: 'calendar' }, h.deps);
+    expect(h.viewOpens, 'await をまたいでから開いている(Safari で塞がれる)').toEqual([
+      'calendar',
+    ]);
   });
 });

@@ -37,6 +37,10 @@ import { appOpenInEdit, OpenInEditStore } from '@adapter/ui/render/open-in-edit'
 import { chordOf, findCommand, typesCharacter } from '@features/keymap';
 import { appQueryKey } from '@adapter/ui/render/query-key-store';
 import { openView } from '@adapter/ui/render/open-view';
+import {
+  CLOSE_VIEW_WINDOW_REFUSED,
+  type CloseViewWindowResult,
+} from '@adapter/platform/view-window';
 import { parseLinkTarget } from '@features/entry-ref/link-target';
 import { handleCopyMdBlock } from './copy-md-block';
 import { finishCopy, selectedMarkdown } from './copy-source';
@@ -238,6 +242,15 @@ export interface BinderServices {
   purgeOrphanAssets?(): void;
   /** 注意の面を閉じる(P6c review H-2)。 */
   dismissNotices?(): void;
+  /**
+   * 🔴 **アプリの窓なら、`× 閉じる` で窓ごと閉じる**(#300 段③ の直し、2026-08-22)。
+   *
+   * ⚠ 実体は `platform/view-window.ts`(`window.close()` に触るので binder は
+   *   **呼ぶだけ**)。⚠ 本体のタブでは配線されない ── `undefined` のときは
+   *   今までどおり面を畳む。
+   * @returns 閉じた / アプリの窓だが閉じられなかった / ふつうの窓
+   */
+  closeViewWindow?(): CloseViewWindowResult;
   /**
    * ランチャーのタイルを起動する(P7b 段⑩)。
    * ⚠ blob の貸し出し・`window.open` は実体側 ── binder は DOM を触らない。
@@ -1964,7 +1977,18 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔑 `SET_VIEW_MODE 'detail'` は**編集中でも通る**(2026-08-19 の「本文へ
    *   戻る道は塞がない」)ので、編集中に開いたわきの面もこの × で閉じられる。
    */
-  'close-pane': (dispatcher) => dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' }),
+  /**
+   * 🔴 **アプリの窓では、窓ごと閉じる**(#300 段③ の直し)。
+   * ⚠ 閉じられなかったときは**黙らない** ── 押したのに窓が残るので、
+   *   理由を出してから本文へ畳む(無言の dead click を作らない)。
+   */
+  'close-pane': (dispatcher, _target, services) => {
+    const closed = services.closeViewWindow?.() ?? 'not-a-window';
+    if (closed === 'closed') return; // もう画面が無い
+    dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
+    if (closed === 'refused')
+      dispatcher.dispatch({ type: 'OP_FAILED', error: CLOSE_VIEW_WINDOW_REFUSED });
+  },
   'restore-trash': (dispatcher, target) => {
     const revId = target.getAttribute('data-pkc-rev-id');
     const entryLid = target.getAttribute('data-pkc-trash-lid');

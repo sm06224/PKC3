@@ -989,6 +989,53 @@ describe('🔴 面の帯(user 目線レビュー U-3)', () => {
    *   🔑 `SET_VIEW_MODE 'detail'` は編集中でも通る(2026-08-19「本文へ戻る道は
    *   塞がない」)ので、この × はその道に乗っている。
    */
+  /**
+   * 🔴 **アプリの窓では、× が窓ごと閉じる**(#300 段③ の直し、2026-08-22)。
+   *
+   * ⚠ 直す前は別窓のカレンダーでも `SET_VIEW_MODE 'detail'` が飛ぶだけで、
+   *   **窓は残りそこに本文が出た** ── user から見ると「アプリを閉じたら
+   *   PKC がもう 1 つ増えた」である(動線レビュー §7)。
+   * ⚠ 本体のタブでは配線されない ── 上の test 群がその対照群である。
+   */
+  it('🔴 アプリの窓では、× を押しても面を畳まない(窓ごと閉じる)', async () => {
+    const s = setup([meta('n1')], { n1: '本文' });
+    const root2 = document.createElement('div');
+    document.body.append(root2);
+    // ⚠ この test だけ別の器で binder を組み直す(service を渡すため)
+    const regions = buildShell(root2);
+    const center = new CenterRouter(regions.detail, () => new Date(2026, 7, 15));
+    s.d.onState((st) => center.render(st));
+    bindActions(root2, s.d, { closeViewWindow: () => 'closed' });
+    showView(s.d, 'calendar');
+    await tick();
+    root2.querySelector<HTMLElement>('[data-pkc-action="close-pane"]')!.click();
+    await tick();
+    expect(s.d.getState().viewMode, '窓ごと閉じるはずが、面を畳んだ').toBe('calendar');
+  });
+
+  /**
+   * 🔴 **閉じられなかったら黙らない。**
+   * ⚠ user がブックマークから開いた窓は script では閉じられない ──
+   *   そのときは理由を出してから本文へ畳む(無言の dead click を作らない)。
+   */
+  it('🔴 窓を閉じられなかったら、理由を出して本文へ畳む', async () => {
+    const s = setup([meta('n1')], { n1: '本文' });
+    const root2 = document.createElement('div');
+    document.body.append(root2);
+    const regions = buildShell(root2);
+    const center = new CenterRouter(regions.detail, () => new Date(2026, 7, 15));
+    s.d.onState((st) => center.render(st));
+    bindActions(root2, s.d, { closeViewWindow: () => 'refused' });
+    showView(s.d, 'calendar');
+    await tick();
+    root2.querySelector<HTMLElement>('[data-pkc-action="close-pane"]')!.click();
+    await tick();
+    expect(s.d.getState().viewMode, '本文へ畳んでいない').toBe('detail');
+    expect(s.d.getState().error, '黙って畳んだ(窓が残る理由が分からない)').toContain(
+      '窓の ×',
+    );
+  });
+
   it('🔴 編集中に開いたヘルプも、× で閉じて編集へ帰れる', async () => {
     const s = setup([meta('n1')], { n1: '本文' });
     s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });

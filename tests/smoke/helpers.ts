@@ -268,6 +268,15 @@ export async function openViewPane(
   page: Page,
   view: 'dual' | 'calendar' | 'kanban',
 ): Promise<void> {
+  /**
+   * ⚠ **空振り防止**(着地前レビュー 8、2026-08-22)── **既に開いていたら
+   * この helper は何も検めていない**。同じ断片を書いても `hashchange` は飛ばない
+   * ので、代入は no-op になり、`toBeVisible` は最初から真で通る。
+   */
+  await expect(
+    page.locator(`[data-pkc-view-pane="${view}"]`),
+    '既に開いている(この helper は何も検めていない)',
+  ).toBeHidden();
   await page.evaluate((v) => {
     location.hash = `#pkc?view=${v}`;
   }, view);

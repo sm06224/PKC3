@@ -3,7 +3,7 @@
 import './styles/app.css';
 
 import { Dispatcher } from '@adapter/state/dispatcher';
-import { isAsidePane, nextViewMode } from '@adapter/state/app-state';
+import { isAsidePane, viewModeLabel, type ViewMode } from '@adapter/state/app-state';
 import { bindEditLockRelease } from '@adapter/state/edit-lock-release';
 import { connectStoreEffects, type StoreEffects } from '@adapter/state/store-effects';
 import { tileSelectsEntry } from '@features/launcher/tiles';
@@ -133,10 +133,17 @@ import { renderToSvg, readPalette } from '@adapter/ui/render/mermaid-raster';
 import { MERMAID_KIND } from '@adapter/ui/render/mermaid-hydrate';
 import { CHART_KIND } from '@adapter/ui/render/chart-raster';
 import { SameOriginGate } from '@adapter/platform/same-origin-grants';
-import { connectViewDeepLink } from '@adapter/platform/deep-link';
+import {
+  announceOpenedWindow,
+  connectViewDeepLink,
+  currentBaseUrl,
+} from '@adapter/platform/deep-link';
 import { openView } from '@adapter/ui/render/open-view';
-import { openViewInWindow, waitForPkcAnnounce } from '@adapter/platform/view-window';
-import { currentBaseUrl } from '@adapter/platform/deep-link';
+import {
+  closeViewWindow,
+  openViewInWindow,
+  waitForViewWindow,
+} from '@adapter/platform/view-window';
 import {
   alertInApp,
   confirmInApp,
@@ -211,6 +218,16 @@ async function initStorage(promoted: boolean): Promise<{
 let bootLease: { release(): void } | null = null;
 
 /**
+ * 🔴 **この窓が「アプリの窓」である間だけ真になる**(#300 段③ の直し、2026-08-22)。
+ *
+ * ⚠ `connectViewDeepLink` は boot の**後**に配線されるが、`× 閉じる` の受け口は
+ * boot の**中**で組む ── だから値を持つのは module 側で、配線が書き込む。
+ * ⚠ **判断はここに書かない**(`closeViewWindow` が持つ)── この file は
+ * どの test からも実行されない(CLAUDE.md §2)。
+ */
+let heldViewWindow: ViewMode | null = null;
+
+/**
  * 🔴 **組み込みタイルは別窓で開く**(#300 段③、2026-08-22)。
  *
  * ⚠ ここは**配線だけ** ── 判断(窓が出たか)・文言・退避先は `view-window.ts` に在る。
@@ -221,6 +238,7 @@ let bootLease: { release(): void } | null = null;
  */
 function openViewTile(
   dispatcher: Dispatcher,
+  cid: string,
   view: 'dual' | 'calendar' | 'kanban',
 ): Promise<unknown> {
   return openViewInWindow(view, {
@@ -229,11 +247,33 @@ function openViewTile(
       window.open(url, '_blank', 'noopener');
     },
     baseUrl: currentBaseUrl,
-    waitForAnnounce: waitForPkcAnnounce,
-    // ⚠ 退避は `open-view.ts` を通す(開いた後の後始末を落とさない)
-    openInPane: (v) => openView(dispatcher, nextViewMode(dispatcher.getState().viewMode, v)),
+    // 🔴 **いま読んでいたノートを連れて行く**(段③ の直し)── 渡さないと、
+    //    別窓のカレンダーは「ノートを選んでください」で立ち上がる
+    selected: () => {
+      const lid = dispatcher.getState().selectedLid;
+      return lid === null ? null : { containerId: cid, lid };
+    },
+    newToken: makeViewWindowToken,
+    waitForOpen: waitForViewWindow,
+    /**
+     * ⚠ 退避は `open-view.ts` を通す(開いた後の後始末を落とさない)。
+     * 🔴 **`nextViewMode` を通さない**(着地前レビュー 1)── あれは
+     *    「タイル再押下で閉じる」ための規則であって、退避は**開く**である。
+     *    通すと、塞がれて無反応だからもう一度押した回に**開いた面を閉じる**。
+     */
+    openInPane: (v) => openView(dispatcher, v),
     fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
   });
+}
+
+/**
+ * 1 回限りの合図。⚠ `store-proxy.ts` の `makeTabId` と**同じ倒し方**
+ * (`randomUUID` が無い箱でも通る)。
+ * ⚠ `formatViewDeepLink` は `[A-Za-z0-9_-]+` しか通さないので、`.` を含めない。
+ */
+function makeViewWindowToken(): string {
+  const c = globalThis.crypto;
+  return c && 'randomUUID' in c ? c.randomUUID() : `w-${Math.random().toString(36).slice(2)}`;
 }
 
 /** boot(設計メモ §1): lease → worker init(または #177 の proxy 接続)→ メタ一覧 → SYS_BOOTED。 */
@@ -1328,6 +1368,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     importFiles: (files) => void withAssetGate(() => runImport(files)),
     dismissNotices: () => clearNotices(regions.notices),
     /**
+     * 🔴 **アプリの窓なら `× 閉じる` で窓ごと閉じる**(#300 段③ の直し)。
+     * ⚠ 判断は `view-window.ts` ── ここは `window` を渡すだけである。
+     */
+    closeViewWindow: () =>
+      closeViewWindow({
+        holding: () => heldViewWindow !== null,
+        close: () => window.close(),
+        isClosed: () => window.closed,
+      }),
+    /**
      * 添付の参照をコピーする(P8 段⑱)。
      * ⚠ **結果を出す** ── コピーは押しても画面が変わらない操作なので、
      *    黙って終わると成功したのか分からない
@@ -1393,12 +1443,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
         // #148 組み込みタイル ── 文書なしで開く = Start Center(#174 の一言込み)
         openOffice: openOfficeTile,
-        // #241 組み込みタイル ── 中央の面を 2 ペインへ(窓は開かない)
-        // 🔴 **別窓で開く**(#300 段③)。⚠ 判断と文言は `view-window.ts` に在る
+        // 🔴 **組み込みタイル(#241 / #276 / #277)は別窓で開く**(#300 段③)。⚠ 判断と文言は `view-window.ts` に在る
         //    ── この file はどの test からも実行されないので、配線だけ置く。
         //    ⚠ 窓が塞がれたときの退避は `openInPane`(段⑤)。そちらは
         //    `open-view.ts` を通す(開いた後の後始末を落とさない)
-        openView: (view) => void openViewTile(dispatcher, view),
+        openView: (view) => void openViewTile(dispatcher, cid, view),
         // ⚠ **聞かない。憶えているものを確かめるだけ**(上の granted と同じ判定を
         //    通す ── ここで別の式を書くと、片方だけ直した日に食い違う)
         confirmSameOrigin: async () => granted,
@@ -1465,7 +1514,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         //    ── この file はどの test からも実行されないので、配線だけ置く。
         //    ⚠ 窓が塞がれたときの退避は `openInPane`(段⑤)。そちらは
         //    `open-view.ts` を通す(開いた後の後始末を落とさない)
-        openView: (view) => void openViewTile(dispatcher, view),
+        openView: (view) => void openViewTile(dispatcher, cid, view),
             confirmSameOrigin: async (title) => {
               /**
                * 🔴 **「アプリとして登録済みか」で憶え方が変わる**(#301。user 裁定 2026-08-21)。
@@ -1665,7 +1714,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
        *   「選択が面に留まる」側だと**既に決まっていた**のに、
        *   左のタブ経由だけがその意味論を破っていた(CLAUDE.md §7)。
        * ⚠ **帰り道は減る** ── これらの面では、タブを押しても本文へ戻らなくなる。
-       *   残る帰り道は「開いたタイルをもう一度押す」(`nextViewMode`)と `Alt+1`。
+       *   残る帰り道は **`× 閉じる`** と `Alt+1`(⚠ #300 段③ で**タイルの
+       *   再押下は帰り道ではなくなった** ── もう 1 枚窓が開く)。
        *   わきの面(設定 / フラグ / ヘルプ / 2 ペイン)は今までどおり畳む。
        */
       // 🔑 畳むときも `open-view.ts` を通す ── この file から `SET_VIEW_MODE` を
@@ -1954,6 +2004,16 @@ function bootstrap(): void {
   if (!root) return;
 
   /**
+   * 🔴 **開いた側へ「出ましたよ」と返す**(#300 段③ の直し、2026-08-22)。
+   *
+   * ⚠ **いちばん最初に呼ぶ** ── storage の初期化を待ってから返すと、開けているのに
+   *   開いた側が待ち時間を使い切って**中央の面へ退避する**(本文が消える =
+   *   user の苦情そのものの再現)。⚠ 判断・放送・アドレスの後始末は
+   *   `deep-link.ts` / `view-window.ts` に在る。
+   */
+  announceOpenedWindow();
+
+  /**
    * SW の登録。⚠ **boot と競わせない**(P7 段⑤ round-2 review L-6)。
    *
    * 当初は boot の前に呼んでいたが、`register` は precache(実測 1.6MB)の
@@ -2003,6 +2063,22 @@ function bootstrap(): void {
         // ⚠ **`openView` を渡す**(`SET_VIEW_MODE` 直撃ではない)── 開いた後の
         //   後始末が抜けると、アドレスから開いた集計だけ表が出ない
         openView: (mode) => openView(app.dispatcher, mode),
+        // 🔴 **連れてきたノートを選ぶ**(段③ の直し)。⚠ **container を検める**
+        //    ── 別の container の lid を拾うと、偶然の一致で無関係なノートを選ぶ。
+        //    ⚠ 居ない lid は `SELECT_ENTRY` 側が黙って捨てる(判定を写さない)
+        selectEntry: (containerId, lid) => {
+          if (app.dispatcher.getState().cid !== containerId) return;
+          app.dispatcher.dispatch({ type: 'SELECT_ENTRY', lid });
+        },
+        /**
+         * 🔴 **アプリの窓であることを、題名と `× 閉じる` に伝える**(段③ の直し)。
+         * ⚠ 題名を変えるのは**タスクバーで見分けるため** ── 直す前は
+         *   3 枚とも「PKC3」で、どれがカレンダーか押すまで分からなかった。
+         */
+        onHold: (view) => {
+          heldViewWindow = view;
+          document.title = view === null ? CONTAINER_TITLE : `${viewModeLabel(view)} — ${CONTAINER_TITLE}`;
+        },
         fail: (error) => app.dispatcher.dispatch({ type: 'OP_FAILED', error }),
         // ⚠ 面が変わったら断片を消す(見ている間だけ残す)
         onViewChange: (fn) => app.dispatcher.onState((s) => fn(s.viewMode)),
