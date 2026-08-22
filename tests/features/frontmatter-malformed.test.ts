@@ -330,10 +330,128 @@ describe('閉じを失った本文への書き込み(#318)', () => {
   });
 
   /**
+   * 🔴 **空行を跨ぐ**(2 巡目レビュー A-1 / MUT-1)。
+   *
+   * ⚠ `parseFlatYaml` は**空行を読み飛ばして先を読む**ので、
+   *   `---\ntitle: メモ\n\ntags: [買い物]\n---\n本文` は**今日の正規の frontmatter**。
+   *   1・2 稿目は走を空行で切っていたので、閉じを失ったこの本文を「修理」すると
+   *   **`tags` が読めない側へ落ち、しかも警告まで消えた** ── user から見ると
+   *   「警告が出ていた → チェックを付けた → 警告が消えた」なので**直ったと読む**。
+   *   **アプリ自身の修理が嘘を作っていた。**
+   * ⚠ この規則は**どちら向きにも pin されていなかった**(docstring だけが
+   *   「空行では切る」と書いていた)。
+   */
+  it('🔴 空行を含む frontmatter を修理しても、後半の key が落ちない', () => {
+    const src = '---\ntitle: メモ\n\ntags: [買い物]\n本文\n';
+    // 前提 ── 閉じさえ在れば、この形は正規に読める
+    expect(parseFrontmatter(`${src.slice(0, -3)}---\n本文\n`).meta['tags'], '前提が崩れている')
+      .toEqual(['買い物']);
+    const out = spliceFrontmatterKeys(src, { status: 'done' });
+    expect(out).toBe('---\ntitle: メモ\n\ntags: [買い物]\nstatus: done\n---\n本文\n');
+    expect(parseFrontmatter(out).meta, 'user の key が落ちた').toEqual({
+      title: 'メモ',
+      tags: ['買い物'],
+      status: 'done',
+    });
+    // ⚠ 直したのだから、警告も消えてよい(消えるのが嘘ではない状態)
+    expect(frontmatterProblem(out), '直したのに理由が残っている').toBeNull();
+  });
+
+  /** ⚠ **対照群** ── 空行の先が散文なら、そこで切る(飲みすぎない)。 */
+  it('対照群: 空行の先が散文なら、走はそこで止まる', () => {
+    expect(spliceFrontmatterKeys('---\nk: 1\n\n散文です\nk2: 2\n本文\n', { status: 'done' })).toBe(
+      '---\nk: 1\nstatus: done\n---\n\n散文です\nk2: 2\n本文\n',
+    );
+  });
+
+  /**
+   * 🔴 **ブロック配列の入口は「値の無い key の直後」だけ**(2 巡目レビュー MUT-2)。
+   * ⚠ `inBlock` を常に真にする変異が生き延びていた ── その形では
+   *   `---\ntags: [買い物]\n- 牛乳\n- 卵\n本文` の**箇条書き 2 行が frontmatter へ
+   *   飲まれ、画面から消える**(`parseFlatYaml` はその 2 行を読まないので、
+   *   どこにも出ない)。
+   */
+  it('🔴 値のある key の後ろの箇条書きは、本文のまま', () => {
+    expect(
+      spliceFrontmatterKeys('---\ntags: [買い物]\n- 牛乳\n- 卵\n本文\n', { status: 'done' }),
+    ).toBe('---\ntags: [買い物]\nstatus: done\n---\n- 牛乳\n- 卵\n本文\n');
+  });
+
+  /**
+   * 🔴 **空操作ガードが探すのは「走の中」だけ**(2 巡目レビュー MUT-3)。
+   * ⚠ 探す範囲を本文まで広げる変異が生き延びていた ── その形では
+   *   **本文中の `status:` に釣られて修理が走り**、user が何もしていないのに
+   *   `tags: [あ]` が本文から消える。
+   */
+  it('🔴 本文中の同名の行に釣られて修理しない', () => {
+    const src = '---\ntags: [あ]\n本文\nstatus: メモの話\n';
+    expect(spliceFrontmatterKeys(src, { status: undefined }), '本文に釣られて修理した').toBe(src);
+  });
+
+  /**
+   * 🔴 **字下げした key も、書き換えの対象にする**(2 巡目レビュー B-3)。
+   * ⚠ 走は字下げを frontmatter に入れるのに、書き換えは行頭固定だったので、
+   *   **同名 key が 2 本**になり(書くとき)、**無言の no-op** になっていた(消すとき)。
+   */
+  it('🔴 字下げした key を、二重にせず書き換える', () => {
+    expect(spliceFrontmatterKeys('---\n  status: open\n---\n本文\n', { status: 'done' })).toBe(
+      '---\n  status: done\n---\n本文\n',
+    );
+    expect(spliceFrontmatterKeys('---\n  status: open\n---\n本文\n', { status: undefined })).toBe(
+      '---\n---\n本文\n',
+    );
+  });
+
+  /**
    * 🔴 **「警告を出す形」と「閉じを補う形」が一致する**(CLAUDE.md §7)。
    * ⚠ 別々に数えると「**警告は出さないのに書込は壊す**」ができる ── #318 は
    *   その食い違いそのものだった。
    */
+  /**
+   * 🔴 **修理した結果が「理想形」と一致する**(2 巡目レビュー B-2)。
+   *
+   * ⚠ 下の「判定が 1 つ」は、左辺(警告)も右辺(前置したか)も
+   *   **`frontmatterRunLength` から導かれる**ので、走の文法をどう変えても
+   *   **両辺が一緒に動く** ── 守れているのは「呼び出し口が 2 か所とも同じ関数を
+   *   使っている」ことだけで、**文法が正しいことは 1 件も守っていない**
+   *   (実際、空行の扱いを裏返す変異が緑のまま通った)。
+   *
+   * 🔑 だから**期待値を独立に作る**:user が閉じの `---` を**書き足しただけ**の
+   *   本文(= 理想形)を parse した `meta` と、**修理した本文**の `meta` が一致すること。
+   *   ⚠ 理想形は `frontmatterRunLength` を 1 度も呼ばない ── そこが独立の要点である。
+   */
+  it('🔴 修理後の meta が、user が閉じを書き足した場合と一致する', () => {
+    const CASES = [
+      '---\ntags: [あ]\n本文\n',
+      '---\ntitle: メモ\n\ntags: [買い物]\n本文\n',
+      '---\ntags:\n- あ\n- い\n本文\n',
+      '---\ntags:\n  - あ\n  - い\n本文\n',
+      '---\n# メモ\ntags: [あ]\n本文\n',
+      '---\ntags: [あ]\n# メモ\npriority: high\n本文\n',
+      '---\ntags: [あ]',
+    ];
+    for (const src of CASES) {
+      const repaired = parseFrontmatter(spliceFrontmatterKeys(src, { status: 'done' }));
+      /**
+       * 理想形 ── 走の行数を**使わずに**作る。user が「本文の直前」に閉じを
+       * 書き足した姿を、**本文の側から**組む(先頭の非 frontmatter 行を探す)。
+       */
+      const lines = src.replace(/^---[ \t]*\r?\n/, '').split(/\r?\n/);
+      const bodyAt = lines.findIndex(
+        (l) => l.trim() !== '' && !l.trimStart().startsWith('#') && !/^\s*[A-Za-z_][\w.-]*\s*:/.test(l) && !/^\s*-\s+/.test(l),
+      );
+      const cut = bodyAt < 0 ? lines.length : bodyAt;
+      const ideal = parseFrontmatter(
+        `---\n${lines.slice(0, cut).join('\n')}\n---\n${lines.slice(cut).join('\n')}`,
+      );
+      expect(repaired.found, `修理したのに読めない: ${JSON.stringify(src)}`).toBe(true);
+      expect(
+        { ...repaired.meta, status: undefined },
+        `修理の結果が、閉じを書き足した場合と違う: ${JSON.stringify(src)}`,
+      ).toEqual({ ...ideal.meta, status: undefined });
+    }
+  });
+
   it('🔴 判定が 1 つ ── 警告が出る形 ⇔ 前置しない形', () => {
     const CASES = [
       ...REPAIRED.map(([, s]) => s),
@@ -362,7 +480,9 @@ describe('閉じを失った本文への書き込み(#318)', () => {
  */
 describe('frontmatterProblem ── 画面へ出す理由(#284 / #318)', () => {
   it('🔴 閉じを失った本文は理由を返す', () => {
-    expect(frontmatterProblem('---\ntags: [あ]\n本文\n')).toContain('閉じの ---');
+    const r = frontmatterProblem('---\ntags: [あ]\n本文\n');
+    expect(r?.kind, '種別が違う(1 組目が読めない)').toBe('unreadable');
+    expect(r?.detail).toContain('閉じの ---');
   });
 
   /**
@@ -381,7 +501,11 @@ describe('frontmatterProblem ── 画面へ出す理由(#284 / #318)', () => {
     expect(r.found, '前提が崩れている').toBe(true);
     expect(r.warnings.map((w) => w.kind), '前提が崩れている').toEqual(['size_limit']);
     expect(r.meta, '前提が崩れている(meta が空でない)').toEqual({});
-    expect(frontmatterProblem(big), 'cap 超過を見逃した').toContain('超過');
+    const r2 = frontmatterProblem(big);
+    expect(r2?.kind, 'cap 超過を見逃した').toBe('unreadable');
+    // ⚠ **画面へ出す字は user の言葉**(2 巡目レビュー B-5)── 内部語を出さない
+    expect(r2?.detail, '内部語がそのまま画面へ出ている').not.toMatch(/frontmatter|bytes|parse/);
+    expect(r2?.detail).toContain('大きすぎて');
   });
 
   /**
@@ -397,8 +521,9 @@ describe('frontmatterProblem ── 画面へ出す理由(#284 / #318)', () => {
       const r = parseFrontmatter(broken);
       expect(r.found, '前提が崩れている').toBe(true);
       expect(r.warnings, '前提が崩れている(1 本目で警告が出ている)').toEqual([]);
-      expect(frontmatterProblem(broken), `二重 fence を見逃した: ${JSON.stringify(broken)}`)
-        .toContain('2 本目');
+      const p2 = frontmatterProblem(broken);
+      expect(p2?.kind, `二重 fence を見逃した: ${JSON.stringify(broken)}`).toBe('trailing');
+      expect(p2?.detail).toContain('2 組目');
     }
   });
 

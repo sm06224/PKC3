@@ -155,7 +155,21 @@ function frontmatterRunLength(lines: readonly string[]): number {
   let inBlock = false;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? '';
-    if (line.trim() === '') break;
+    /**
+     * 🔴 **空行でも切らない**(2 巡目レビュー A-1)。
+     *
+     * ⚠ 1 稿目・2 稿目はここで `break` していたが、`parseFlatYaml` は
+     *   **空行を読み飛ばして先を読む** ── つまり
+     *   `---\ntitle: メモ\n\ntags: [買い物]\n---\n本文` は**今日の正規の frontmatter**
+     *   である。閉じを失ったこの本文を「修理」すると、閉じが `title:` の直後に入り、
+     *   **`tags` が読めない側へ落ちた**。
+     * ⚠ そのうえ落ちた後は `frontmatterProblem` が `null` を返すので、
+     *   **警告まで消える** ── user から見ると「警告が出ていた → チェックを付けた →
+     *   警告が消えた」なので **直ったと読む**。**アプリ自身の修理が嘘を作っていた**。
+     * 🔑 空行はコメントと同じ扱いにする(`last` を進めない)── 後ろに key が
+     *   来るときだけ跨ぐので、`---\nk: 1\n\n散文です\nk2: 2` は走 1 行のまま。
+     */
+    if (line.trim() === '') continue;
     // ③ コメント ── 後ろに key が来れば `last` が追い越すので、自然に含まれる
     if (line.trimStart().startsWith('#')) continue;
     const colon = findKeyColon(line);
@@ -175,7 +189,7 @@ function frontmatterRunLength(lines: readonly string[]): number {
 }
 
 /**
- * 🔴 **「文書の情報が読めていない」理由を 1 行で返す**(#284)。読めているなら `null`。
+ * 🔴 **文書の情報にまつわる「言うべきこと」**(#284 / #318)。無ければ `null`。
  *
  * ## なぜ要るか
  *
@@ -185,53 +199,83 @@ function frontmatterRunLength(lines: readonly string[]): number {
  * 嘘をつく**(その数行上の「本文未読では嘘を書かない」は守られているのに、
  * **対称の反対側だけ空いていた**)。
  *
+ * ## 🔴 **種別を持つ**(2 巡目レビュー A-2)
+ *
+ * ⚠ 1 稿目は 3 つの**別々の事実**を同じ `string` 1 本で返していた:
+ *
+ * | 事実 | 1 本目は読めるか |
+ * |---|---|
+ * | `malformed`(閉じが無い) | ❌ 読めない |
+ * | `size_limit`(cap 超過) | ❌ 読めない(`meta` が空) |
+ * | **2 組目らしきものが本文の先頭にある** | ✅ **完全に読める** |
+ *
+ * 呼び側は「`problem !== null` なら読めていない」と扱うので、**3 つ目でも
+ * 1 つ目と同じ扱い**になっていた ── 健全なノート(`---` + `title:` + `---` の後に
+ * 区切り線と `TODO:` が続くだけ)で、情報ペインが**実在するタグを隠し**、
+ * 1 面編集の札が**唯一の編集の口を消して**いた(#284 の嘘の裏返しを、こちらで作っていた)。
+ *
+ * 🔑 だから `kind` を返す:`unreadable` だけが要約とタグを止め、`trailing` は
+ *   **要約・編集・タグをそのまま出したうえで理由を添える**。
+ *
  * ⚠ **`warnings` の消費者が皆無というわけではない** ── 取込(`plain-markdown.ts`)と
  *   書き出し(`pkc3-markdown-zip.ts`)は既に読んでいる。無いのは**画面側の出口**だった。
+ * ⚠ その 2 つは `trailing` を見ない(データは byte 無傷で通るので実害が無く、
+ *   「parse の警告」ではないものを警告欄へ混ぜない)── 意図した境界である。
  *
  * 🔑 判定を**ここ 1 か所**に置く(§7)── 画面ごとに `warnings.some(...)` を
  *   書くと、`kind` を足したとき片方だけ拾う。
  */
-export function frontmatterProblem(body: string): string | null {
+export interface FrontmatterProblem {
+  /** `unreadable` = 1 本目が読めない / `trailing` = 1 本目は読めるが、本文の先頭にもう 1 組ある。 */
+  kind: 'unreadable' | 'trailing';
+  /** 画面にそのまま出す 1 行。⚠ **user の言葉**で書く(内部語を出さない)。 */
+  detail: string;
+}
+
+export function frontmatterProblem(body: string): FrontmatterProblem | null {
   const r = parseFrontmatter(body);
   /**
-   * 🔴 **`meta` を空にする warning は 1 か所に列挙する**(着地前レビュー E)。
-   *
-   * ⚠ 1 稿目は `malformed` しか見ていなかったので、**cap 超過(`size_limit`)の
-   *   ノートで #284 の嘘がそのまま残っていた** ── 実測(16KB 超の frontmatter):
-   *   `found: true` / `meta: {}` / `warnings: ['size_limit']` なので `readTags` は
-   *   `[]` を返し、情報ペインは **「タグ 無し」と断定**する。
-   * ⚠ しかもこの関数の docstring 自身が「画面ごとに `warnings.some(...)` を書くと
-   *   **`kind` を足したとき片方だけ拾う**」と戒めているのに、**いま実在する
-   *   2 つ目の kind を落としていた**。
+   * 🔴 **`meta` を空にする warning は 1 か所に列挙する**(1 巡目レビュー E)。
+   * ⚠ 1 稿目は `malformed` しか見ていなかったので、**cap 超過のノートで
+   *   #284 の嘘がそのまま残っていた**。
    * 🔑 書き出し側は既に正しく扱っている(`pkc3-markdown-zip.ts` の `blind`)──
    *   **同じ問いに 2 つ目の答えが既に在り、新しい関数がそれと食い違っていた**。
    */
-  const own = r.warnings.find((x) => x.kind === 'malformed' || x.kind === 'size_limit');
-  if (own !== undefined) return own.detail;
+  if (r.warnings.some((x) => x.kind === 'malformed')) {
+    return {
+      kind: 'unreadable',
+      detail: '先頭の --- に対応する閉じの --- がありません(文書の情報として読めていません)',
+    };
+  }
+  /**
+   * ⚠ **画面へ出す字は、この面の言葉で書く**(2 巡目レビュー B-5)。
+   *   `warnings` の `detail` は書き出しの log 用で「frontmatter サイズが 16384 bytes を
+   *   超過(…)、parse 中止」── 製品はこの領域を一貫して「**この文書の情報**」と
+   *   呼んでいるのに、ここだけ内部語だった(**画面へ出す口が増えたのに文面を
+   *   見直していなかった**)。
+   */
+  if (r.warnings.some((x) => x.kind === 'size_limit')) {
+    return {
+      kind: 'unreadable',
+      detail: 'この文書の情報が大きすぎて読み取れませんでした(減らすと読めるようになります)',
+    };
+  }
   /**
    * 🔴 **既に二重 fence になっている本文も拾う**(#318 の「対で塞ぐもの」)。
-   *
-   * ⚠ #318 の直しは**これから壊れるのを止める**だけで、**既に壊れた本文はそのまま
-   *   残る** ── そこが厄介で、二重 fence は 1 本目が正しく読めてしまうため
-   *   `warnings` が **0 件**になる(= この関数の上半分では拾えない)。
-   *   結果、user が書いた `tags` は本文側へ落ちているのに、情報ペインは
-   *   **「無し」と断定する**(#318 が「いちばん壊れた状態で、いちばん安心させる」
-   *   と書いた形)。
-   * 🔑 だから **読めた残り(`r.body`)をもう一度見る** ── そこがまた
-   *   「開きだけの frontmatter」なら、2 本目が残っている。
-   * ⚠ ただの水平線で始まる本文は `frontmatterRunLength` が 0 を返すので鳴らない
-   *   (判定は 1 つのまま ── §7)。
+   * ⚠ 二重 fence は 1 本目が正しく読めてしまうため `warnings` が **0 件**になる。
+   * 🔑 だから **読めた残り(`r.body`)をもう一度見る**。
+   * ⚠ **1 段だけ見る**(3 組目は追わない)── 深追いしても言えることが増えない。
+   * ⚠ **断定しない**(1 巡目レビュー F)── `---` + `Note: …` で始まる**普通の本文**でも
+   *   同じ形になる。断定されると user は**存在しない 2 組目を探して本文を消しにいく**。
    */
   if (r.found) {
     const rest = parseFrontmatter(r.body);
     if (rest.warnings.some((x) => x.kind === 'malformed')) {
-      /**
-       * ⚠ **断定しない**(着地前レビュー F)。1 稿目は「閉じの `---` を欠いた
-       *   2 本目が**残っています**」と言い切っていたが、`---` + `Note: …` で始まる
-       *   **普通の本文**でも同じ形になる ── 断定されると user は**存在しない
-       *   2 本目を探して、正しい本文を消しにいく**。観測したことだけ書く。
-       */
-      return '本文の先頭が --- で始まっていて、2 本目の文書の情報として読める形になっています(そちらは読めていません)';
+      return {
+        kind: 'trailing',
+        detail:
+          '本文の先頭が --- で始まっていて、2 組目の文書の情報として読める形になっています(上の情報は読めています)',
+      };
     }
   }
   return null;
@@ -768,7 +812,7 @@ export function spliceFrontmatterKeys(
       entries.some(([key]) =>
         parts
           .slice(0, run)
-          .some((p) => new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*:`).test(p)),
+          .some((p) => new RegExp(`^\\s*${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*:`).test(p)),
       );
     if (!willWrite) return body;
     /**
@@ -784,8 +828,10 @@ export function spliceFrontmatterKeys(
      * 🔑 textarea は Enter を押さない限り末尾改行を持たないので、
      *   「末尾改行の無い本文」は**例外ではなく普通**である。
      */
+    // ⚠ `split(/(?<=\n)/)` は末尾に空要素を作らないので、`run > 0` の下で
+    //    `parts[run-1]` が空文字になることは無い(2 巡目レビュー B-6 で確認)
     const tail = parts[run - 1] ?? '';
-    if (tail !== '' && !/\r?\n$/.test(tail)) parts[run - 1] = tail + eol;
+    if (!/\r?\n$/.test(tail)) parts[run - 1] = tail + eol;
     // 閉じを 1 行だけ補って、通常の経路へ合流する(以降は原文 splice のまま)
     parts.splice(run, 0, `---${eol}`);
     closeAt = run;
@@ -793,7 +839,13 @@ export function spliceFrontmatterKeys(
 
   const fmParts = parts.slice(0, closeAt);
   for (const [key, value] of entries) {
-    const keyRe = new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*:`);
+    /**
+     * ⚠ **字下げも見る**(2 巡目レビュー B-3)── 走は `line.slice(0, colon).trim()`
+     *   なので字下げした key を frontmatter に入れるのに、書き換えは行頭固定だった。
+     *   `---\n  status: open\n---` に `status` を書くと**同名 key が 2 本**になり、
+     *   消すときは**無言の no-op** になっていた(片側だけ揃った状態)。
+     */
+    const keyRe = new RegExp(`^\\s*${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*:`);
     // 重複 key は**最後の一致**を書く ── parseFlatYaml は last-wins なので、
     // 先頭行を書くと再抽出が変わらず永久 no-op になる(P3-6a review #5)
     let at = -1;
@@ -807,7 +859,13 @@ export function spliceFrontmatterKeys(
       } else {
         // 既存行の行末記号を保持して差し替え
         const term = fmParts[at]!.match(/\r?\n$/)?.[0] ?? eol;
-        fmParts[at] = line + term;
+        /**
+         * ⚠ **字下げも保つ**(2 巡目レビュー B-3)── この関数の契約は
+         *   「本文・他 key・空行・コメントは byte 単位で無傷」である。
+         *   字下げを落とすと、user が揃えた見た目が黙って崩れる。
+         */
+        const indent = /^\s*/.exec(fmParts[at]!)?.[0] ?? '';
+        fmParts[at] = indent + line + term;
       }
     } else if (line !== null) {
       fmParts.push(line + eol);

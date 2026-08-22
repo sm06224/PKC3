@@ -291,17 +291,45 @@ describe('タグの札(#182)', () => {
    * 🔑 だから**理由の種類ごとに 1 件ずつ**通す(§7「経路ごとに pin する」の
    *   画面側の顔)。
    */
-  it('🔴 二重 fence でも、1 本目のタグに騙されずに理由を出す', () => {
+  /**
+   * 🔴 **1 組目が読めるなら、実在するタグを隠さない**(2 巡目レビュー A-2)。
+   *
+   * ⚠ 1 稿目は「理由が在る = 読めていない」と畳んでいたので、
+   *   **本文の先頭にもう 1 組らしき行が続くだけ**の健全なノートで、
+   *   **実在するタグを画面から消して**いた ── #284 の嘘の裏返しを作っていた。
+   * 🔑 出せるものは出し、言うべきことは `title` に添える。
+   */
+  it('🔴 2 組目が残っていても、読めている 1 組目のタグは出す', () => {
     const { d, root } = withInspector();
-    // ⚠ 1 本目に**タグが在る**ので、`tags.length === 0` に頼る検査は素通りする
     d.dispatch({
       type: 'BODY_LOADED',
       lid: 'n1',
-      body: '---\ntags: [買い物]\n---\n---\ntags: [家事]\n本文\n',
+      body: '---\ntags: [買い物]\n---\n\n---\n\nTODO: 明日やる\n',
+    });
+    expect(
+      [...root.querySelectorAll('[data-pkc-action="filter-by-tag"]')].map((c) => c.textContent),
+      '実在するタグを隠した',
+    ).toEqual(['買い物']);
+    expect(
+      root.querySelector('[data-pkc-field="inspector-tags"]')?.getAttribute('title') ?? '',
+      '2 組目のことを何も言っていない',
+    ).toContain('2 組目');
+  });
+
+  /**
+   * ⚠ **ただし「無し」と言い切らない** ── 読めている 1 組目にタグが無いのは事実だが、
+   *   user のタグが 2 組目へ落ちている可能性がある。`title` だけに逃がすと
+   *   **乗せないと分からない**ので、行の字にも出す。
+   */
+  it('🔴 1 組目にタグが無く、2 組目が残っているなら「無し」と言い切らない', () => {
+    const { d, root } = withInspector();
+    d.dispatch({
+      type: 'BODY_LOADED',
+      lid: 'n1',
+      body: '---\nstatus: done\n---\n---\ntags: [買い物]\n本文\n',
     });
     const box = root.querySelector('[data-pkc-field="inspector-tags"]');
-    expect(box?.textContent, '1 本目が読めるので黙ってしまった').toBe('読めていません');
-    expect(box?.getAttribute('title') ?? '', '何が起きたか読めない').toContain('2 本目');
+    expect(box?.textContent, '「無し」と言い切っている').toContain('2 組目');
   });
 
   it('🔴 cap を超えた文書の情報でも「無し」と断定しない', () => {
@@ -309,7 +337,11 @@ describe('タグの札(#182)', () => {
     d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: `---\nk: ${'あ'.repeat(20000)}\n---\n本文\n` });
     const box = root.querySelector('[data-pkc-field="inspector-tags"]');
     expect(box?.textContent, 'cap 超過で「無し」と断定している').toBe('読めていません');
-    expect(box?.getAttribute('title') ?? '').toContain('超過');
+    // ⚠ **画面へ出す字は user の言葉**(2 巡目レビュー B-5)
+    expect(box?.getAttribute('title') ?? '', '内部語がそのまま出ている').not.toMatch(
+      /frontmatter|bytes|parse/,
+    );
+    expect(box?.getAttribute('title') ?? '').toContain('大きすぎて');
   });
 
   /**

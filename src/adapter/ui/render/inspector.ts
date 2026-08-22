@@ -167,13 +167,32 @@ export class InspectorRenderer {
       const problem = body === null ? null : frontmatterProblem(body);
       tagBox.textContent = '';
       tagBox.removeAttribute('title');
+      /**
+       * 🔴 **`trailing` では、実在するタグを隠さない**(2 巡目レビュー A-2)。
+       *
+       * ⚠ 1 稿目は「理由が在る = 読めていない」と畳んでいたので、
+       *   **1 組目が完全に読めるノート**(本文の先頭にもう 1 組らしき行が続くだけ)で
+       *   **実在するタグを画面から消して**いた ── #284 の嘘の裏返しを、こちらで
+       *   作っていたことになる。
+       * 🔑 出せるものは出し、言うべきことは `title` に添える。
+       */
+      if (problem !== null && problem.kind === 'trailing' && tags !== null) {
+        tagBox.title = problem.detail;
+      }
       if (tags === null) {
         tagBox.textContent = '—';
-      } else if (problem !== null) {
+      } else if (problem !== null && problem.kind === 'unreadable') {
         tagBox.textContent = '読めていません';
-        tagBox.title = problem;
+        tagBox.title = problem.detail;
       } else if (tags.length === 0) {
-        tagBox.textContent = '無し';
+        /**
+         * ⚠ **`trailing` では「無し」と言い切らない**(#318)── 読めている 1 組目に
+         *   タグが無いのは事実だが、**本文の先頭に読めていない組がある**なら、
+         *   user のタグはそちらに落ちている可能性が高い。`title` だけに逃がすと
+         *   **乗せないと分からない**ので、行の字にも出す。
+         */
+        tagBox.textContent =
+          problem !== null && problem.kind === 'trailing' ? '無し(2 組目は読めていません)' : '無し';
       } else {
         for (const tag of tags) {
           const chip = document.createElement('button');

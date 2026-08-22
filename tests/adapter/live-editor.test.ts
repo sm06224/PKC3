@@ -19,6 +19,7 @@ import { initialState, reduce, type AppState } from '../../src/adapter/state/app
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import { MarkdownClient } from '../../src/adapter/platform/render/markdown-client';
+import { frontmatterLineCount } from '../../src/features/markdown/frontmatter';
 
 function meta(lid: string): EntryMeta {
   return {
@@ -557,7 +558,11 @@ describe('文書の情報(frontmatter)の扱い(#284)', () => {
     setLive(true);
     for (const [name, body, want] of [
       ['閉じが無い', '---\ntags: [あ]\n本文\n', '閉じの ---'],
-      ['二重 fence', '---\nstatus: done\n---\n---\ntags: [あ]\n本文\n', '2 本目'],
+      [
+        'cap 超過',
+        `---\nk: ${'あ'.repeat(20000)}\n---\n本文\n`,
+        '大きすぎて',
+      ],
     ] as const) {
       const r = rig(body);
       await settle();
@@ -576,7 +581,41 @@ describe('文書の情報(frontmatter)の扱い(#284)', () => {
         card.querySelector('[data-pkc-field="fm-summary"]'),
         `${name}: 読めていないのに要約が出ている`,
       ).toBeNull();
+      /**
+       * 🔴 **読めなくても、触れる所は残す**(2 巡目レビュー A-5)。
+       * ⚠ 1 稿目は理由を出したら必ず `return` していたので、**cap を超えた
+       *   frontmatter は 1 面編集から手が届かなくなっていた**(`docOf` が本文から
+       *   隠すのに、`情報を編集` も出ない)。
+       * ⚠ 閉じが無い側(`fmLines === 0`)は**壊れた行が本文にそのまま見えている**
+       *   ので、そちらでは出さない(切り出す行が無く、編集器が空になる)。
+       */
+      const hasLines = frontmatterLineCount(body) > 0;
+      expect(
+        card.querySelector('[data-pkc-field="fm-edit"]') !== null,
+        `${name}: 編集の口の有無が違う(隠れている情報に手が届かない)`,
+      ).toBe(hasLines);
     }
+  });
+
+  /**
+   * 🔴 **2 組目が残っているだけなら、1 組目は普通に扱う**(2 巡目レビュー A-2)。
+   * ⚠ 1 稿目は要約も編集の口も消していたので、**健全なノートから唯一の編集導線が
+   *   消えて**いた。
+   */
+  it('🔴 2 組目が残っていても、読めている 1 組目は要約と編集を出す', async () => {
+    setLive(true);
+    const r = rig('---\ntags: [あ]\n---\n\n---\n\nTODO: 明日やる\n');
+    await settle();
+    const card = r.root.querySelector('[data-pkc-region="live-frontmatter"]')!;
+    expect(
+      card.querySelector('[data-pkc-field="fm-summary"]')?.textContent,
+      '読めている情報の要約が消えた',
+    ).toContain('tags: あ');
+    expect(card.querySelector('[data-pkc-field="fm-edit"]'), '編集の口が消えた').not.toBeNull();
+    expect(
+      card.querySelector('[data-pkc-field="fm-label"]')?.textContent,
+      '読めているのに読めていないと言っている',
+    ).toBe('この文書の情報');
   });
 
   /**
