@@ -399,10 +399,21 @@ describe('🔴 宣言と実体の parity ── manifest が言う拡張子が�
     for (const h of handlers) expect(h.action).toBe('./');
   });
 
-  it('🔴 `launch_handler` は既存 window を使う(新 window は書込 lock で止まる)', () => {
-    // ⚠ 未宣言だと既定は `auto` = **UA 任せ**。desktop の UA は新 window を作る
-    // ことがあり、その window は `acquireWriterLease` の Web Lock を取れずに
-    // 「別のタブで開いています…」のまま止まる ── ファイルはそこで死ぬ(review M-5)
+  it('🔴 `launch_handler` は既存 window を使う(開いたファイルを 2 枚目に迷子にしない)', () => {
+    /**
+     * ⚠ 未宣言だと既定は `auto` = **UA 任せ**で、desktop の UA は新 window を作ることがある。
+     *
+     * 🔴 **理由を 2026-08-22 に書き直した(#300 段⑥)。**
+     * ⚠ 直す前は「その window は `acquireWriterLease` の Web Lock を取れずに
+     *   『別のタブで開いています…』のまま止まる ── ファイルはそこで死ぬ」と書いていたが、
+     *   **#177 以降これは事実ではない** ── lease を取れない窓は `ProxyStoreClient` で
+     *   **follower としてふつうに動く**(#300 段①③ で `noopener` の窓を実測済み)。
+     * 🔑 いまの理由は**別**である:新しい窓に開くと、user が**さっきまで見ていた窓**とは
+     *   別の場所へファイルが入る ── 取り込みは成功するのに「**どこへ行ったか分からない**」
+     *   形になる。`focus-existing` なら**いま見ている窓**に届く。
+     * ⚠ 「事実ではない理由」を残すと、次に読む人が**存在しない不具合を追う**
+     *   (CLAUDE.md「実態と乖離した記述は見つけ次第その場で直す」)。
+     */
     expect(manifest.launch_handler?.client_mode).toBe('focus-existing');
   });
 
