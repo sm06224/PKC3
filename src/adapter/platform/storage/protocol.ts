@@ -137,6 +137,18 @@ export type StorageRequest =
        */
       parent?: { parentLid: string | null; relationId: string };
     }
+  /**
+   * 🔴 **題名だけを書き換える**(#178、2026-08-22)。
+   *
+   * ⚠ なぜ `upsertEntry` で済ませないのか ── **本文を書き戻すから**である。
+   * 改名は `getBody` → 題名を差し替えて**行全体を書く**形だったので、
+   * 読んでから書くまでの間に**別のタブ / 窓が本文を書いていると、それを消す**。
+   * しかも本文は変わらないので `maintainChain` が呼ばれず、**履歴にも残らない**。
+   * 🔑 だから**本文に触らない**。衝突を*検出する*のではなく、**起こらなくする**。
+   * ⚠ 抽出列(status / date / archived)は本文由来なので、本文が変わらない限り
+   *   そのままで正しい ── だからここでも触らない。
+   */
+  | { op: 'renameEntry'; cid: string; lid: string; title: string }
   | { op: 'bulkUpsertEntries'; cid: string; entries: EntryUpsert[] }
   | { op: 'deleteEntry'; cid: string; lid: string }
   | { op: 'listRelations'; cid: string }
@@ -424,6 +436,8 @@ export interface ResultMap {
    * optional にすると writer が代入を落としても tsc が黙り、全件で無効化される)
    */
   upsertEntry: EntryStamps;
+  /** ⚠ 行が無ければ `null`(消えたノートの改名 ack を握り潰さない)。 */
+  renameEntry: EntryStamps | null;
   bulkUpsertEntries: null;
   deleteEntry: null;
   listRelations: RelationRow[];

@@ -171,6 +171,57 @@ describe('revision chain (P5c ── 逆向き差分)', () => {
     );
   });
 
+  /**
+   * 🔴 **改名は本文に触らない**(#178、2026-08-22)。
+   *
+   * ## 直す前に何が起きていたか
+   *
+   * 改名は `getBody` → 題名を差し替えて **`upsertEntry` で行全体を書く**形だった。
+   * ⚠ 読んでから書くまでの間に**別のタブ / 窓が本文を書いていると、それを消す**。
+   * しかも本文は変わらないので `maintainChain` は呼ばれず、**履歴にも残らない**
+   * ── つまり **どこからも戻せない**(編集の保存は checkpoint が効くので戻せる、
+   * という #333 の性質が**この経路には効かない**)。
+   *
+   * 🔑 直し方は検出ではなく**消滅**である ── 触らなければ衝突しようがない。
+   */
+  it('🔴 改名は本文を書き戻さない ── 別の窓の本文が生き残る (#178)', async () => {
+    await write('r1', doc('初稿'));
+    await write('r1', doc('二稿'), { checkpoint: true });
+    const before = await metasOf('r1');
+    expect(before, '前提が崩れている(頭が立っていない)').toHaveLength(1);
+
+    // 🔴 **別の窓がこのノートの本文を書いた**(改名する側は、これを読んでいない)
+    await write('r1', doc('別の窓が書いた'));
+
+    // 改名 ── 題名だけを渡す(本文は渡さない)
+    const stamps = await request({
+      op: 'renameEntry',
+      cid: 'c1',
+      lid: 'r1',
+      title: '新しい題名',
+    });
+    expect(stamps, '改名の ack が返らない').not.toBeNull();
+
+    const row = (await request({ op: 'listEntryMetas', cid: 'c1' })).find((m) => m.lid === 'r1');
+    expect(row?.title, '題名が変わっていない').toBe('新しい題名');
+    expect(stamps?.updatedAt, '刻んだ時刻を返していない').toBeTruthy();
+    /**
+     * 🔑 **主張はここ** ── 別の窓が書いた本文が**そのまま在る**。
+     * ⚠ 直す前はここが `doc('二稿')`(改名する側が読んだ古い本文)に戻っていた。
+     */
+    expect(await request({ op: 'getBody', cid: 'c1', lid: 'r1' })).toBe(doc('別の窓が書いた'));
+    // ⚠ 鎖も動かない(本文が変わっていないので、元から動いていなかった)
+    expect(await metasOf('r1'), '改名で履歴が動いた').toHaveLength(before.length);
+    expect(before[0]!.id, '履歴の id が変わった(この版が別物になる)').toBe(
+      (await metasOf('r1'))[0]!.id,
+    );
+  });
+
+  /** ⚠ 消えたノートの改名を「成功」と言わない(呼び側が理由を出せる)。 */
+  it('⚠ 行が無い改名は null を返す (#178)', async () => {
+    expect(await request({ op: 'renameEntry', cid: 'c1', lid: 'no-such', title: 'x' })).toBeNull();
+  });
+
   it('checkpoint と amend をランダムに交ぜても全世代が byte 一致で戻る', async () => {
     // 決定的 PRNG(落ちたら同じ列で再現する)
     let seed = 20260801;

@@ -61,6 +61,8 @@ export const EDIT_LOCK_TTL_MS = 300_000;
  */
 const MUTATING_OPS: ReadonlySet<StorageRequest['op']> = new Set([
   'upsertEntry',
+  // ⚠ **足し忘れると、他タブの一覧に古い題名が残る**(#178)
+  'renameEntry',
   'bulkUpsertEntries',
   'deleteEntry',
   'setEntryParent',
@@ -82,6 +84,9 @@ function changedLids(req: StorageRequest): string[] | null {
       return req.parent ? null : [req.entry.lid];
     case 'deleteEntry':
     case 'setEntryParent':
+    case 'renameEntry':
+      // ⚠ 改名(#178)も**その 1 行だけ**が当たり先である ── 本文にも辺にも触らない。
+      //    ⚠ 注記を `case` の間に置かない(`no-fallthrough` の目印を隠して lint が落ちる)
       return [req.lid];
     case 'bulkUpsertEntries':
       return req.entries.map((e) => e.lid);

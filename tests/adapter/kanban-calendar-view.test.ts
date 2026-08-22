@@ -74,6 +74,11 @@ function setup(
     getBody: async (lid) => store[lid] ?? null,
     deleteEntry: async () => {},
     setEntryParent: async () => {},
+    /**
+     * ⚠ **題名だけの口**(#178)── 本物は本文に触らない。
+     *   だから fake も本文を持たない(触らないものは持たない)。
+     */
+    renameEntry: async () => stubStamps(),
     persistEntry: async (e) => {
       persisted.push(e);
       store[e.lid] = e.body;
@@ -266,6 +271,11 @@ describe('kanban view (#277 段②-b)', () => {
       getBody: async () => '- [ ] やること\n',
       deleteEntry: async () => {},
       setEntryParent: async () => {},
+      /**
+       * ⚠ **題名だけの口**(#178)── 本物は本文に触らない。
+       *   だから fake も本文を持たない(触らないものは持たない)。
+       */
+      renameEntry: async () => stubStamps(),
       persistEntry: async (e) => {
         if (failNext) throw new Error('flaky');
         persisted.push(e);

@@ -58,6 +58,11 @@ function setup(bodies: Record<string, string>, lender: AssetLender) {
   connectStoreEffects(d, {
     ...stubRevisionOps(),
     getBody: async (lid) => bodies[lid] ?? null,
+    /**
+     * ⚠ **題名だけの口**(#178)── 本物は本文に触らない。
+     *   だから fake も本文を持たない(触らないものは持たない)。
+     */
+    renameEntry: async () => stubStamps(),
     persistEntry: async () => stubStamps(),
     deleteEntry: async () => {},
     setEntryParent: async () => {},
@@ -191,6 +196,11 @@ describe('借りた URL の寿命(同一ノートの差し替え)', () => {
     connectStoreEffects(d, {
       ...stubRevisionOps(),
       getBody: async () => '一行目\n\n![画像](asset:k1)\n',
+      /**
+       * ⚠ **題名だけの口**(#178)── 本物は本文に触らない。
+       *   だから fake も本文を持たない(触らないものは持たない)。
+       */
+      renameEntry: async () => stubStamps(),
       persistEntry: async () => stubStamps(),
       deleteEntry: async () => {},
     setEntryParent: async () => {},
@@ -253,6 +263,11 @@ describe('借りた URL の寿命(同一ノートの差し替え)', () => {
     connectStoreEffects(d, {
       ...stubRevisionOps(),
       getBody: async () => body(''),
+      /**
+       * ⚠ **題名だけの口**(#178)── 本物は本文に触らない。
+       *   だから fake も本文を持たない(触らないものは持たない)。
+       */
+      renameEntry: async () => stubStamps(),
       persistEntry: async () => stubStamps(),
       deleteEntry: async () => {},
     setEntryParent: async () => {},

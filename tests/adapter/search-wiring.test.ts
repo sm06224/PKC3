@@ -55,6 +55,11 @@ function setup(hitsFor: (q: string) => string[] = () => []) {
     getBody: async () => '',
     deleteEntry: async () => {},
     setEntryParent: async () => {},
+    /**
+     * ⚠ **題名だけの口**(#178)── 本物は本文に触らない。
+     *   だから fake も本文を持たない(触らないものは持たない)。
+     */
+    renameEntry: async () => stubStamps(),
     persistEntry: async () => stubStamps(),
     searchEntries,
   });
@@ -130,6 +135,11 @@ describe('全文検索の配線(#181)', () => {
       getBody: async () => '',
       deleteEntry: async () => {},
       setEntryParent: async () => {},
+      /**
+       * ⚠ **題名だけの口**(#178)── 本物は本文に触らない。
+       *   だから fake も本文を持たない(触らないものは持たない)。
+       */
+      renameEntry: async () => stubStamps(),
       persistEntry: async () => stubStamps(),
       searchEntries: async () => {
         throw new Error('db down');

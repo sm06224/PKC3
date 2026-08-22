@@ -179,6 +179,29 @@ describe("'changed' の放送", () => {
   });
 
 
+  /**
+   * 🔴 **改名も他タブへ届く**(#178、2026-08-22)。
+   *
+   * ⚠ `MUTATING_OPS` は「他タブの表示に効く書込 op」の集合だが、その file 自身が
+   *   **「この集合の完全性を検める test は無い」**と書いている ── 実際、
+   *   `renameEntry` を集合から外す変異は**変異試験 R5 で生き延びた**。
+   * 🔑 だから**その op ごとに 1 本**置く ── 落ちたときに
+   *   「他タブの一覧に古い題名が残る」と名前で言える形にする。
+   */
+  it('🔴 改名は他タブへ放送される(一覧に古い題名を残さない) (#178)', async () => {
+    const { host, follower } = await connectPair();
+    const seen: Array<string[] | null> = [];
+    follower.onChanged((_cid, lids) => seen.push(lids));
+    await host.localClient().request({
+      op: 'renameEntry',
+      cid: 'c1',
+      lid: 'z',
+      title: '新しい題名',
+    });
+    await drain();
+    expect(seen, '改名が他タブへ届かない(一覧に古い題名が残る)').toEqual([['z']]);
+  });
+
   it('follower の書込 → 他の follower と holder 自身に届く。発信者には届かない', async () => {
     const { hub, host, follower } = await connectPair();
     const f2 = await ProxyStoreClient.connect({ makeChannel: hub.make, tabId: 'f2' });
