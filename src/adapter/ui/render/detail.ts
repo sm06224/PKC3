@@ -14,6 +14,7 @@
 import { renderMarkdown } from '@features/markdown/markdown-render';
 import {
   frontmatterLineCount,
+  frontmatterProblem,
   parseFrontmatter,
   extractVars,
 } from '@features/markdown/frontmatter';
@@ -1022,14 +1023,60 @@ export class DetailRenderer {
     const renderFmCard = (): void => {
       if (fmEditing) return;
       fmCard.textContent = '';
-      if (fmLines === 0) {
+      /**
+       * 🔴 **読めていないときは、札が「読めている」顔をしない**(#284 / #318、
+       * 着地前レビュー G)。
+       *
+       * ⚠ 判定を `fmLines === 0` だけにしていたので、**二重 fence のノート**では
+       *   `fmLines > 0` になり、札は 1 本目だけを出して「この文書の情報 status: done」
+       *   と自信満々に言っていた ── **同じノートで、右の情報ペインは
+       *   「読めていません」**と言う。同じ問いに 2 つの答えが在る状態だった(§7)。
+       * 🔑 判定は `frontmatterProblem` 1 本へ寄せる。⚠ `fmLines === 0` でも
+       *   理由が在るなら**札を出す**(そこが直せる場所なので、黙るほうが害が大きい)。
+       */
+      const problem = frontmatterProblem(body);
+      /**
+       * 🔴 **`unreadable` だけが要約を止める**(2 巡目レビュー A-2)。
+       * ⚠ 1 稿目は `trailing`(1 組目は完全に読める)でも要約と編集の口を消して
+       *   いたので、**健全なノートから唯一の編集導線が消えて**いた。
+       */
+      const unreadable = problem !== null && problem.kind === 'unreadable';
+      if (fmLines === 0 && problem === null) {
         fmCard.removeAttribute('data-pkc-has-frontmatter');
         return;
       }
       fmCard.setAttribute('data-pkc-has-frontmatter', '');
       const label = document.createElement('span');
       label.setAttribute('data-pkc-field', 'fm-label');
-      label.textContent = 'この文書の情報';
+      label.textContent = unreadable ? '文書の情報が読めていません' : 'この文書の情報';
+      const why = document.createElement('span');
+      why.setAttribute('data-pkc-field', 'fm-problem');
+      if (problem !== null) why.textContent = problem.detail;
+      /**
+       * ⚠ **早期 return は `unreadable` のときだけ**(2 巡目レビュー A-2)──
+       *   `trailing` は 1 組目が完全に読めるので、**要約も編集の口もそのまま出す**。
+       *   1 稿目はここで種別を見ずに返していたので、健全なノートから
+       *   唯一の編集導線が消えていた。
+       */
+      if (unreadable) {
+        fmCard.append(label, why);
+        /**
+         * 🔴 **読めなくても、触れる所は残す**(2 巡目レビュー A-5)。
+         *
+         * ⚠ 1 稿目は理由を出したら必ず `return` していたので、**cap を超えた
+         *   frontmatter は 1 面編集から手が届かなくなっていた** ── `fmLines > 0`
+         *   なので `docOf` が本文から隠すのに、`情報を編集` も出ない。逃げ道は
+         *   「設定で 2 ペインへ切り替える」だけだった。
+         * 🔑 **読めない原文こそ、そこで直させたい場所**である ── 「読めない情報を
+         *   編集させない」は、**触れなくすることと引き換えにする理由になっていない**
+         *   (CLAUDE.md 不可侵「記法を減らすことは動線を減らすこと」と同じ向き)。
+         * ⚠ `fmLines === 0` のときは出さない ── 切り出す行が無いので編集器が空になる。
+         *   その形では**壊れた行が本文にそのまま見えている**(`docOf` が隠さない)ので、
+         *   本文側で直せる = 動線は失われていない。
+         */
+        if (fmLines > 0) fmCard.append(fmEditButton());
+        return;
+      }
       const summary = document.createElement('span');
       summary.setAttribute('data-pkc-field', 'fm-summary');
       const meta = parseFrontmatter(body).meta;
@@ -1044,13 +1091,23 @@ export class DetailRenderer {
           : keys
               .map((k) => `${k}: ${Array.isArray(meta[k]) ? (meta[k] as unknown[]).join(', ') : String(meta[k])}`)
               .join(' / ');
+      // ⚠ `trailing` のときは、読めている要約の**後ろに**理由を添える
+      if (problem === null) fmCard.append(label, summary, fmEditButton());
+      else fmCard.append(label, summary, fmEditButton(), why);
+    };
+
+    /**
+     * 情報を編集する口。⚠ **1 か所で作る** ── 読める札と、読めないが触れる札
+     * (`fmLines > 0`)の両方が使うので、2 つ作ると片方だけ直る(§7)。
+     */
+    const fmEditButton = (): HTMLButtonElement => {
       const edit = document.createElement('button');
       edit.type = 'button';
       edit.setAttribute('data-pkc-field', 'fm-edit');
       edit.textContent = '情報を編集';
       edit.title = 'タグなど、この文書に付いている情報を編集します';
       edit.addEventListener('click', () => openFmEditor());
-      fmCard.append(label, summary, edit);
+      return edit;
     };
 
     /**
@@ -1089,12 +1146,16 @@ export class DetailRenderer {
          *   失われていない(原文に残っている)が、**情報としては読めていない** ──
          *   ここで黙ると、タグが消えたことに user は気づけない。
          */
-        if (frontmatterLineCount(body) === 0) {
-          note.textContent =
-            'この文書の情報が読めなくなりました(先頭の --- と閉じの --- が要ります)── 書いた内容は本文に残っています';
-        } else {
-          note.textContent = 'この文書の情報を更新しました';
-        }
+        /**
+         * ⚠ **判定は `frontmatterProblem` 1 本**(着地前レビュー G)── 1 稿目は
+         *   `frontmatterLineCount === 0` で見ていたので、**二重 fence にしてしまった
+         *   ときや cap を超えたとき**に「更新しました」と言っていた。
+         */
+        const why = frontmatterProblem(body);
+        note.textContent =
+          why === null || why.kind === 'trailing'
+            ? 'この文書の情報を更新しました'
+            : `この文書の情報が読めなくなりました(${why.detail})── 書いた内容は本文に残っています`;
       });
       fmCard.append(ta, ok, cancel);
       ta.focus();

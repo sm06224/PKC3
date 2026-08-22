@@ -46,6 +46,7 @@ import { iconButton } from './icons';
 import { formatStoredDate } from '@features/datetime/stored-date';
 // 居場所の解決は `features/relation/tree` が正本(ファイラの帯・パンくずと共有)
 import { readTags } from '@features/flavor/tags';
+import { frontmatterProblem } from '@features/markdown/frontmatter';
 import {
   CREATABLE_KINDS,
   RELATION_LABELS,
@@ -150,10 +151,61 @@ export class InspectorRenderer {
     if (tagBox) {
       const body = state.openBody?.lid === meta.lid ? state.openBody.body : null;
       const tags = body === null ? null : readTags(body);
+      /**
+       * 🔴 **読めていないときに「無し」と断定しない**(#284)。
+       *
+       * ⚠ `parseFrontmatter` は読めないときも「そもそも書いていない文書」と
+       *   **同じ答え**(`found: false` / `meta: {}`)を返すので、閉じの `---` を
+       *   失ったノートに対して、この行は**タグ「無し」と嘘をついていた**
+       *   ── すぐ上の「本文が読めていないときは行ごと空(嘘の『タグ無し』を
+       *   出さない)」は守られているのに、**対称の反対側だけ空いていた**
+       *   (CLAUDE.md「片側を直したら、対称の反対側を必ず疑う」)。
+       * 🔑 理由は `frontmatterProblem` が 1 行で返す ── ここで
+       *   `warnings.some(...)` を書き直さない(判定を 2 か所にしない)。
+       * ⚠ 行は狭いので、**画面には短く / 理由は `title` に**(タグの札と同じ作法)。
+       */
+      const problem = body === null ? null : frontmatterProblem(body);
       tagBox.textContent = '';
+      tagBox.removeAttribute('title');
+      /**
+       * 🔴 **`trailing` では、実在するタグを隠さない**(2 巡目レビュー A-2)。
+       *
+       * ⚠ 1 稿目は「理由が在る = 読めていない」と畳んでいたので、
+       *   **1 組目が完全に読めるノート**(本文の先頭にもう 1 組らしき行が続くだけ)で
+       *   **実在するタグを画面から消して**いた ── #284 の嘘の裏返しを、こちらで
+       *   作っていたことになる。
+       * 🔑 出せるものは出し、言うべきことは `title` に添える。
+       */
+      if (problem !== null && problem.kind === 'trailing' && tags !== null) {
+        tagBox.title = problem.detail;
+      }
       if (tags === null) {
         tagBox.textContent = '—';
+      } else if (problem !== null && problem.kind === 'unreadable') {
+        tagBox.textContent = '読めていません';
+        tagBox.title = problem.detail;
       } else if (tags.length === 0) {
+        /**
+         * 🔴 **`trailing` でも行の字は「無し」のまま**(3 巡目レビュー ②。
+         * ⚠ **同日に書いた「行の字にも出す」を、実測で取り下げた判断である**)。
+         *
+         * 実測:`trailing` は「本文が `---` で始まり、続く ASCII の `key:` の走が
+         * 閉じない」で出る。⚠ **健全なノートと #318 の実害形は、構造が同一**である ──
+         *
+         * | 本文 | 実体 |
+         * |---|---|
+         * | `---\ntags:…\n---\n---\nTODO: 明日やる` | **健全**(水平線 + 覚書) |
+         * | `---\nstatus:…\n---\n---\ntags: [買物]` | **#318 の実害**(2 組目に落ちた) |
+         *
+         * 見分けられない以上、行の字で**damage だと言い切ってはいけない** ──
+         * 健全な側では、user は**存在しない不具合を探しに行く**
+         * (CLAUDE.md「常在する警告は、本物の警告を隠す」)。
+         * ⚠ しかも「2 組目」は**内部の言葉**である(user は「組」を知らない)。
+         *
+         * 🔑 実害の側では**タグが消えているという症状が既に見えている**ので、
+         *   理由は上で立てた `title` が担う ── 行の字は事実(「無し」)だけにする。
+         *   言い切ってよいのは `unreadable`(閉じが無い = **確定**)だけである。
+         */
         tagBox.textContent = '無し';
       } else {
         for (const tag of tags) {

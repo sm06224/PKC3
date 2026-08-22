@@ -963,6 +963,7 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    '左の列が「フォルダ」で開くようになり、まとめて選べます',
     'ショートカットキーが増え、自分で割り当て直せるようになりました',
     'スクリーンショットを本文にそのまま貼れるようになりました',
     'Word に入る図が、拡大しても粗くならなくなりました',

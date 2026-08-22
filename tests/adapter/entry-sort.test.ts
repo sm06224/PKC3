@@ -257,4 +257,135 @@ describe('タグの札(#182)', () => {
     const box = root.querySelector('[data-pkc-field="inspector-tags"]');
     expect(box?.textContent).toBe('無し');
   });
+
+  /**
+   * 🔴 **読めていないときに「無し」と断定しない**(#284 の残件)。
+   *
+   * ⚠ 直す前は、閉じの `---` を失ったノートに対してこの行が**タグ「無し」と
+   *   嘘をついていた** ── `parseFrontmatter` は読めないときも「そもそも書いて
+   *   いない文書」と**同じ答え**を返すからである。
+   * 🔑 すぐ上の「本文未読では嘘を書かない」は守られていたのに、
+   *   **対称の反対側だけ空いていた**(CLAUDE.md「片側を直したら反対側を疑う」)。
+   * ⚠ **対照群を同じ節に置く** ── 正しく閉じていれば今までどおり札が出る
+   *   (上の 3 件がそれ)。
+   */
+  it('🔴 文書の情報が読めていないときは、理由を出す(「無し」と断定しない)', () => {
+    const { d, root } = withInspector();
+    // 閉じの `---` を失った本文 ── user がタグを書いたのに読めていない
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '---\ntags: [買い物]\n本文\n' });
+    const box = root.querySelector('[data-pkc-field="inspector-tags"]');
+    expect(box?.textContent, '読めていないのに「無し」と断定している').toBe('読めていません');
+    // ⚠ 理由は `title` に(行が狭いので画面には短く)
+    expect(box?.getAttribute('title') ?? '', '何が起きたか読めない').toContain('閉じの ---');
+    // ⚠ 空振り防止 ── 札は出ていない(出ていたら上の主張は無意味)
+    expect(root.querySelectorAll('[data-pkc-action="filter-by-tag"]').length).toBe(0);
+  });
+
+  /**
+   * 🔴 **理由は 1 形だけではない**(着地前レビュー M3 / M4)。
+   *
+   * ⚠ 1 稿目は `malformed`(閉じが無い)しか通していなかったので、
+   *   **`problem !== null` を `problem !== null && tags.length === 0` に弱める変異が
+   *   生き延びた** ── その変異は「**1 本目にタグが在る二重 fence**」で警告を消し、
+   *   #318 が言う「いちばん安心させる形」に戻す。
+   * 🔑 だから**理由の種類ごとに 1 件ずつ**通す(§7「経路ごとに pin する」の
+   *   画面側の顔)。
+   */
+  /**
+   * 🔴 **1 組目が読めるなら、実在するタグを隠さない**(2 巡目レビュー A-2)。
+   *
+   * ⚠ 1 稿目は「理由が在る = 読めていない」と畳んでいたので、
+   *   **本文の先頭にもう 1 組らしき行が続くだけ**の健全なノートで、
+   *   **実在するタグを画面から消して**いた ── #284 の嘘の裏返しを作っていた。
+   * 🔑 出せるものは出し、言うべきことは `title` に添える。
+   */
+  it('🔴 2 組目が残っていても、読めている 1 組目のタグは出す', () => {
+    const { d, root } = withInspector();
+    d.dispatch({
+      type: 'BODY_LOADED',
+      lid: 'n1',
+      body: '---\ntags: [買い物]\n---\n\n---\n\nTODO: 明日やる\n',
+    });
+    expect(
+      [...root.querySelectorAll('[data-pkc-action="filter-by-tag"]')].map((c) => c.textContent),
+      '実在するタグを隠した',
+    ).toEqual(['買い物']);
+    expect(
+      root.querySelector('[data-pkc-field="inspector-tags"]')?.getAttribute('title') ?? '',
+      '2 組目のことを何も言っていない',
+    ).toContain('2 組目');
+  });
+
+  /**
+   * 🔴 **`trailing` では、行の字で damage だと言い切らない**(3 巡目レビュー ②)。
+   *
+   * ⚠ **これは同日に書いた検査の向きを裏返したものである**(前稿は「『無し』と
+   *   言い切らない」を要求していた)。理由は実測 ── **健全なノートと #318 の
+   *   実害形は構造が同一**で、見分けられない:
+   *
+   * | 本文 | 実体 | `frontmatterProblem` |
+   * |---|---|---|
+   * | `---\ntags:…\n---\n---\nTODO: 明日やる` | **健全**(水平線 + 覚書) | `trailing` |
+   * | `---\nstatus:…\n---\n---\ntags: [買物]` | **#318 の実害** | `trailing` |
+   *
+   * 言い切ると、健全な側の user は**存在しない不具合を探す**。
+   *
+   * 🔑 **向きを裏返したので、元の懸念も pin し直す**(CLAUDE.md「検査の向きを
+   *   裏返したら、作法も裏返る」)── 理由が**消えた**わけではないことを、
+   *   同じ it の中で確かめる。
+   */
+  it('🔴 2 組目が残っていても行の字は「無し」── 理由は title が担う', () => {
+    const { d, root } = withInspector();
+    d.dispatch({
+      type: 'BODY_LOADED',
+      lid: 'n1',
+      body: '---\nstatus: done\n---\n---\ntags: [買い物]\n本文\n',
+    });
+    const box = root.querySelector('[data-pkc-field="inspector-tags"]');
+    expect(box?.textContent, '行の字で damage だと言い切っている').toBe('無し');
+    // ⚠ **理由まで消してはいない**(裏返した検査が守るべき、元の懸念)
+    expect(
+      box?.getAttribute('title') ?? '',
+      '理由がどこにも出ていない(乗せても分からない)',
+    ).toContain('2 組目');
+  });
+
+  /**
+   * ⚠ **対照群** ── `unreadable`(閉じが無い = **確定**)は、いまも行の字で言う。
+   *   ここまで弱めると「読めていない」が**どこにも出なくなる**。
+   */
+  it('🔴 閉じが無い(確定)なら、行の字で「読めていません」と言う', () => {
+    const { d, root } = withInspector();
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '---\ntags: [買い物]\n本文\n' });
+    const box = root.querySelector('[data-pkc-field="inspector-tags"]');
+    expect(box?.textContent, '確定している不具合まで黙った').toBe('読めていません');
+  });
+
+  it('🔴 cap を超えた文書の情報でも「無し」と断定しない', () => {
+    const { d, root } = withInspector();
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: `---\nk: ${'あ'.repeat(20000)}\n---\n本文\n` });
+    const box = root.querySelector('[data-pkc-field="inspector-tags"]');
+    expect(box?.textContent, 'cap 超過で「無し」と断定している').toBe('読めていません');
+    // ⚠ **画面へ出す字は user の言葉**(2 巡目レビュー B-5)
+    expect(box?.getAttribute('title') ?? '', '内部語がそのまま出ている').not.toMatch(
+      /frontmatter|bytes|parse/,
+    );
+    expect(box?.getAttribute('title') ?? '').toContain('大きすぎて');
+  });
+
+  /**
+   * ⚠ **直したら消えること**(状態が残らない)── 閉じを書き足せば元に戻る。
+   * 🔑 `title` を消し忘れると、札が出ているのに古い理由が残る。
+   */
+  it('🔴 閉じを書き足せば、札に戻って理由も消える', () => {
+    const { d, root } = withInspector();
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '---\ntags: [買い物]\n本文\n' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '---\ntags: [買い物]\n---\n本文\n' });
+    const box = root.querySelector('[data-pkc-field="inspector-tags"]');
+    expect(
+      [...root.querySelectorAll('[data-pkc-action="filter-by-tag"]')].map((c) => c.textContent),
+      '直したのに札が戻らない',
+    ).toEqual(['買い物']);
+    expect(box?.getAttribute('title'), '古い理由が残っている').toBeNull();
+  });
 });

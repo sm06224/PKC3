@@ -12,7 +12,12 @@
  *   ② ただの水平線では**警告が出ない**(常在する警告は、本物の警告を隠す)
  */
 import { describe, expect, it } from 'vitest';
-import { frontmatterLineCount, parseFrontmatter } from '../../src/features/markdown/frontmatter';
+import {
+  frontmatterLineCount,
+  frontmatterProblem,
+  parseFrontmatter,
+  spliceFrontmatterKeys,
+} from '../../src/features/markdown/frontmatter';
 
 describe('閉じの --- が無いとき(#284)', () => {
   it('🔴 壊れた frontmatter は警告を積む(黙って「無い」ことにしない)', () => {
@@ -29,8 +34,73 @@ describe('閉じの --- が無いとき(#284)', () => {
    */
   it('🔴 ただの水平線で始まる文書は警告を出さない', () => {
     expect(parseFrontmatter('---\n本文\n').warnings, '水平線を壊れた情報と読んだ').toEqual([]);
-    expect(parseFrontmatter('---\n\ntags: [あ]\n').warnings, '空行の先は情報ではない').toEqual([]);
     expect(parseFrontmatter('本文\n').warnings).toEqual([]);
+    // ⚠ 空行のあとが `key:` に見えない行なら、これまでどおり黙る
+    expect(parseFrontmatter('---\n\nこれは本文です\n').warnings).toEqual([]);
+  });
+
+  /**
+   * 🔴 **「開きの直後が空行なら水平線」という除外を落とした**(2026-08-22)。
+   *
+   * ⚠ **この it は、直す前の稿が「無言であること」を正しいとして pin していた
+   *   場所である**(`parseFrontmatter('---\n\ntags: [あ]\n').warnings` が
+   *   `[]` であることを要求していた)。検査そのものの主張が間違っていた
+   *   ── CLAUDE.md §1「主張そのものが成り立たない」の型。
+   *
+   * 🔑 **parse の規則と食い違っていた**のが理由である。実測:
+   *
+   * | 本文 | `parseFrontmatter` の答え |
+   * |---|---|
+   * | `---\n\ntags: [あ]\n---\n本文` | `found: true` / `meta: {tags:['あ']}` |
+   * | `---\n\ntags: [あ]\n本文` | 直す前 `warnings: []`(完全に無言) |
+   *
+   * つまり**閉じさえ在れば読める形**なのに、閉じを失ったときだけ黙っていた。
+   * ⚠ **対照群を同じ it に置く**(閉じ有りなら読める)── 置かないと
+   *   「警告が出るようになったが、実は別の理由」を次に見抜けない。
+   */
+  it('🔴 開きの直後が空行でも、閉じを失ったら黙らない(対照群つき)', () => {
+    // 対照群 ── 閉じが在れば、この形は**正規に読める**
+    const ok = parseFrontmatter('---\n\ntags: [あ]\n---\n本文\n');
+    expect(ok.found, '前提が崩れている(閉じ有りでも読めていない)').toBe(true);
+    expect(ok.meta, '前提が崩れている').toEqual({ tags: ['あ'] });
+    expect(ok.warnings, '正規の形に警告を足している').toEqual([]);
+
+    // 本題 ── 同じ形で閉じだけ失うと、黙らずに理由を出す
+    const bad = parseFrontmatter('---\n\ntags: [あ]\n本文\n');
+    expect(bad.found).toBe(false);
+    expect(bad.warnings.map((w) => w.kind), '読める形なのに黙っている').toEqual(['malformed']);
+  });
+
+  /**
+   * 🔴 **key の見分けを `parseFlatYaml` と同じ規則に揃えた**(2026-08-22)。
+   *
+   * ⚠ 直す前は検出器だけ `^[A-Za-z0-9_.-]+$` で**数字始まりを許して**いたので、
+   *   `12:30 に集合` という普通の 1 行が「壊れた frontmatter」に見えていた
+   *   ── **読み手が読まない形を、検出器だけが frontmatter と呼んでいた**。
+   */
+  it('🔴 読み手が key と読まないものは、検出器も key と読まない', () => {
+    // `parseFlatYaml` の key は `^[A-Za-z_][\w.-]*$` ── 数字始まりは key ではない
+    expect(parseFrontmatter('---\n\n12:30 に集合\n').warnings, '時刻を壊れた情報と読んだ').toEqual(
+      [],
+    );
+    // ⚠ 空振り防止 ── 英字始まりなら今までどおり拾う
+    expect(parseFrontmatter('---\n\ntags: [あ]\n').warnings.length).toBe(1);
+  });
+
+  /**
+   * ⚠ **承知のうえで残している誤警告**(2026-08-22 に測って決めた)。
+   *
+   * `---`・空行・**裸の URL** だけの文書は警告が出る ── `https://example.com/x` の
+   * `https` が `parseFlatYaml` の key の規則を満たすためである。
+   * 🔑 **わざと揃えている**:検出器を parser より厳しくすると
+   *   「parser は読むのに検出器は黙る」という**逆向きの穴**ができる(§7
+   *   「誤差の向きを決めて、両側に使い回さない」)。
+   * ⚠ この形(先頭が水平線 / 他に `---` が 1 つも無い / 最初の行が裸の URL)は
+   *   まれなので、**常在する警告にはならない**と判断した。
+   *   これが覆るのは「実際に取込の画面が警告で埋まった」という報告が出たとき。
+   */
+  it('⚠ 裸の URL は key と同じ形なので警告が出る(承知のうえで揃えている)', () => {
+    expect(parseFrontmatter('---\n\nhttps://example.com/x\n').warnings.length).toBe(1);
   });
 
   /** ⚠ 正しく閉じている文書に警告を足していない(空振り防止の反対側)。 */
@@ -116,5 +186,569 @@ describe('frontmatter が占める行数(#284)', () => {
     expect(parseFrontmatter(src).found, '前提が崩れている').toBe(true);
     expect(frontmatterLineCount(src), 'parse と行数で答えが割れている').toBe(4);
     expect(src.split('\n').slice(4)[0], '切り出しがずれた').toBe('本文');
+  });
+});
+
+
+/**
+ * 🔴 **閉じを失った本文へ書き込んでも、user の情報を壊さない**(#318)。
+ *
+ * ## 直す前に何が起きていたか(実測)
+ *
+ * ```
+ * 元:   ---\ntags: [あ]\n本文…
+ * 書込: ---\nstatus: done\n---\n---\ntags: [あ]\n本文…   ← 二重 fence
+ * ```
+ *
+ * ⚠ 再 parse は `found: true` / `meta: {status}` / **`warnings: 0 件`** を返す ──
+ * **user が書いた `tags` は読めない側へ落ちたのに、画面は「読めている」顔をする**。
+ * 到達経路は**どちらも普通の操作**(カレンダーで日付を付ける / 印を切り替える)。
+ *
+ * ## 🔴 **byte で pin する**(着地前レビュー M2)
+ *
+ * `spliceFrontmatterKeys` の存在理由は **本文が byte 単位で無傷**であること
+ * (この file 冒頭の規律)。⚠ 1 稿目は修理経路だけ `parseFrontmatter` 越しに
+ * 見ていたので、**閉じの直後へ空行を 1 本挿す変異が素通り**した
+ * (`parseFrontmatter` は閉じの直後の空行を 1 行食べる ── 同 file が自分で
+ * 警告している癖)。**前置側は `toBe` で pin してあったのに、対称の反対側だけ
+ * 空いていた。**
+ *
+ * ## ⚠ 走の文法は `parseFlatYaml` に合わせる(着地前レビュー B / C / D)
+ *
+ * 1 稿目は独自の文法を書いたので、**4 通りに user のデータが変質した**
+ * ── 下の表がその全数である。
+ */
+describe('閉じを失った本文への書き込み(#318)', () => {
+  /**
+   * 🔴 **修理した全文を byte で pin する。**
+   * ⚠ 期待値は**実測から起こす**(手で組むと、実装と同じ間違いを書ける)。
+   */
+  const REPAIRED: [string, string, string][] = [
+    ['正規(対照群)', '---\ntags: [あ]\n本文\n', '---\ntags: [あ]\nstatus: done\n---\n本文\n'],
+    [
+      '🔴 A 末尾に改行が無い ── 直す前は `tags: [あ]status: done` と融合した',
+      '---\ntags: [あ]',
+      '---\ntags: [あ]\nstatus: done\n---\n',
+    ],
+    [
+      '🔴 B 字下げ**無し**のブロック配列 ── 直す前は中身が本文へ落ちた',
+      '---\ntags:\n- あ\n- い\n本文\n',
+      '---\ntags:\n- あ\n- い\nstatus: done\n---\n本文\n',
+    ],
+    [
+      'B2 字下げ有りのブロック配列',
+      '---\ntags:\n  - あ\n  - い\n本文\n',
+      '---\ntags:\n  - あ\n  - い\nstatus: done\n---\n本文\n',
+    ],
+    [
+      '🔴 C1 先頭にコメント ── 直す前は二重 fence を作った(#318 が直っていなかった)',
+      '---\n# メモ\ntags: [あ]\n本文\n',
+      '---\n# メモ\ntags: [あ]\nstatus: done\n---\n本文\n',
+    ],
+    [
+      '🔴 C2 途中にコメント ── 直す前は後続の key を本文へ追い出した',
+      '---\ntags: [あ]\n# メモ\npriority: high\n本文\n',
+      '---\ntags: [あ]\n# メモ\npriority: high\nstatus: done\n---\n本文\n',
+    ],
+    [
+      '⚠ C4 末尾のコメントは走に入れない(本文側に残す)',
+      '---\ntags: [あ]\n# メモ\n本文\n',
+      '---\ntags: [あ]\nstatus: done\n---\n# メモ\n本文\n',
+    ],
+    [
+      '🔴 D2 全角空白で字下げした段落 ── 直す前は本文から消えた',
+      '---\ntags: [あ]\n　本文です\n続き\n',
+      '---\ntags: [あ]\nstatus: done\n---\n　本文です\n続き\n',
+    ],
+    [
+      '🔴 D3 タブで字下げした段落',
+      '---\ntags: [あ]\n\t本文です\n続き\n',
+      '---\ntags: [あ]\nstatus: done\n---\n\t本文です\n続き\n',
+    ],
+    [
+      '⚠ CRLF ── 補う閉じの行末を混ぜない',
+      '---\r\ntags: [あ]\r\n本文\r\n',
+      '---\r\ntags: [あ]\r\nstatus: done\r\n---\r\n本文\r\n',
+    ],
+  ];
+
+  it.each(REPAIRED)('🔴 %s', (_name, src, want) => {
+    expect(spliceFrontmatterKeys(src, { status: 'done' })).toBe(want);
+  });
+
+  /**
+   * 🔴 **user が書いた情報が、読める側に残っている**(byte の pin と対で見る)。
+   * ⚠ byte が合っていても**意味が変わっている**ことがある(`tags` が配列から
+   *   文字列に化ける等)ので、再 parse の中身も見る。
+   */
+  it('🔴 修理した後、user の key が読める側に残る', () => {
+    for (const [name, src] of REPAIRED.map(([n, s]) => [n, s] as const)) {
+      const r = parseFrontmatter(spliceFrontmatterKeys(src, { status: 'done' }));
+      expect(r.found, `${name}: 修理したのに読めない`).toBe(true);
+      if (src.includes('tags')) {
+        expect(r.meta['tags'], `${name}: user の tags が壊れた`).toEqual(
+          src.includes('[あ]') ? ['あ'] : ['あ', 'い'],
+        );
+      }
+      expect(r.warnings, `${name}: 直したのに警告が残っている`).toEqual([]);
+    }
+  });
+
+  /**
+   * 🔴 **前置に落ちる側**(= frontmatter ではない普通の文書)。
+   * ⚠ ここも byte で pin する ── 本文は 1 バイトも変わらない。
+   */
+  const PREPENDED: [string, string][] = [
+    ['水平線 + 空行 + 散文', '---\n\nこれは本文です\n'],
+    ['🔴 C3 水平線 + markdown 見出し(コメントに見えるが本文)', '---\n# 見出し\n本文\n'],
+    ['🔴 D1 先頭が字下げの箇条書き ── 直す前は frontmatter へ飲まれた', '---\n  - りんご\n  - みかん\n'],
+    ['本文が先に来る', '---\nこれは本文です\ntags: [あ]\n'],
+  ];
+
+  it.each(PREPENDED)('前置: %s', (_name, src) => {
+    const out = spliceFrontmatterKeys(src, { status: 'done' });
+    expect(out).toBe(`---\nstatus: done\n---\n${src}`);
+    // ⚠ 本文は byte 無傷のまま後続する
+    expect(parseFrontmatter(out).body).toBe(src);
+  });
+
+  /**
+   * 🔴 **書くものが何も無いなら、直さない**(着地前レビュー ②)。
+   * ⚠ 「無い key を消す」だけの空操作でも修理が走ると、**user が何もしていないのに
+   *   文書の見え方が変わる**(水平線に見えていた 2 行が、以後は隠れた情報になる)。
+   */
+  it('🔴 空操作(無い key の削除)では、本文に触れない', () => {
+    const src = '---\ntags: [あ]\n本文\n';
+    expect(spliceFrontmatterKeys(src, { status: undefined })).toBe(src);
+  });
+
+  /** ⚠ **対照群** ── 在る key の削除なら、修理して消す。 */
+  it('対照群: 在る key の削除は、修理してから消す', () => {
+    expect(spliceFrontmatterKeys('---\ntags: [あ]\nstatus: open\n本文\n', { status: undefined })).toBe(
+      '---\ntags: [あ]\n---\n本文\n',
+    );
+  });
+
+  /**
+   * 🔴 **空行を跨ぐ**(2 巡目レビュー A-1 / MUT-1)。
+   *
+   * ⚠ `parseFlatYaml` は**空行を読み飛ばして先を読む**ので、
+   *   `---\ntitle: メモ\n\ntags: [買い物]\n---\n本文` は**今日の正規の frontmatter**。
+   *   1・2 稿目は走を空行で切っていたので、閉じを失ったこの本文を「修理」すると
+   *   **`tags` が読めない側へ落ち、しかも警告まで消えた** ── user から見ると
+   *   「警告が出ていた → チェックを付けた → 警告が消えた」なので**直ったと読む**。
+   *   **アプリ自身の修理が嘘を作っていた。**
+   * ⚠ この規則は**どちら向きにも pin されていなかった**(docstring だけが
+   *   「空行では切る」と書いていた)。
+   */
+  it('🔴 空行を含む frontmatter を修理しても、後半の key が落ちない', () => {
+    const src = '---\ntitle: メモ\n\ntags: [買い物]\n本文\n';
+    // 前提 ── 閉じさえ在れば、この形は正規に読める
+    expect(parseFrontmatter(`${src.slice(0, -3)}---\n本文\n`).meta['tags'], '前提が崩れている')
+      .toEqual(['買い物']);
+    const out = spliceFrontmatterKeys(src, { status: 'done' });
+    expect(out).toBe('---\ntitle: メモ\n\ntags: [買い物]\nstatus: done\n---\n本文\n');
+    expect(parseFrontmatter(out).meta, 'user の key が落ちた').toEqual({
+      title: 'メモ',
+      tags: ['買い物'],
+      status: 'done',
+    });
+    // ⚠ 直したのだから、警告も消えてよい(消えるのが嘘ではない状態)
+    expect(frontmatterProblem(out), '直したのに理由が残っている').toBeNull();
+  });
+
+  /** ⚠ **対照群** ── 空行の先が散文なら、そこで切る(飲みすぎない)。 */
+  it('対照群: 空行の先が散文なら、走はそこで止まる', () => {
+    expect(spliceFrontmatterKeys('---\nk: 1\n\n散文です\nk2: 2\n本文\n', { status: 'done' })).toBe(
+      '---\nk: 1\nstatus: done\n---\n\n散文です\nk2: 2\n本文\n',
+    );
+  });
+
+  /**
+   * 🔴 **ブロック配列の入口は「値の無い key の直後」だけ**(2 巡目レビュー MUT-2)。
+   * ⚠ `inBlock` を常に真にする変異が生き延びていた ── その形では
+   *   `---\ntags: [買い物]\n- 牛乳\n- 卵\n本文` の**箇条書き 2 行が frontmatter へ
+   *   飲まれ、画面から消える**(`parseFlatYaml` はその 2 行を読まないので、
+   *   どこにも出ない)。
+   */
+  it('🔴 値のある key の後ろの箇条書きは、本文のまま', () => {
+    expect(
+      spliceFrontmatterKeys('---\ntags: [買い物]\n- 牛乳\n- 卵\n本文\n', { status: 'done' }),
+    ).toBe('---\ntags: [買い物]\nstatus: done\n---\n- 牛乳\n- 卵\n本文\n');
+  });
+
+  /**
+   * 🔴 **空操作ガードが探すのは「走の中」だけ**(2 巡目レビュー MUT-3)。
+   * ⚠ 探す範囲を本文まで広げる変異が生き延びていた ── その形では
+   *   **本文中の `status:` に釣られて修理が走り**、user が何もしていないのに
+   *   `tags: [あ]` が本文から消える。
+   */
+  it('🔴 本文中の同名の行に釣られて修理しない', () => {
+    const src = '---\ntags: [あ]\n本文\nstatus: メモの話\n';
+    expect(spliceFrontmatterKeys(src, { status: undefined }), '本文に釣られて修理した').toBe(src);
+  });
+
+  /**
+   * 🔴 **字下げした key も、書き換えの対象にする**(2 巡目レビュー B-3)。
+   * ⚠ 走は字下げを frontmatter に入れるのに、書き換えは行頭固定だったので、
+   *   **同名 key が 2 本**になり(書くとき)、**無言の no-op** になっていた(消すとき)。
+   */
+  it('🔴 字下げした key を、二重にせず書き換える', () => {
+    expect(spliceFrontmatterKeys('---\n  status: open\n---\n本文\n', { status: 'done' })).toBe(
+      '---\n  status: done\n---\n本文\n',
+    );
+    expect(spliceFrontmatterKeys('---\n  status: open\n---\n本文\n', { status: undefined })).toBe(
+      '---\n---\n本文\n',
+    );
+  });
+
+  /**
+   * 🔴 **「警告を出す形」と「閉じを補う形」が一致する**(CLAUDE.md §7)。
+   * ⚠ 別々に数えると「**警告は出さないのに書込は壊す**」ができる ── #318 は
+   *   その食い違いそのものだった。
+   */
+  /**
+   * 🔴 **修理した結果が「理想形」と一致する**(2 巡目レビュー B-2)。
+   *
+   * ⚠ 下の「判定が 1 つ」は、左辺(警告)も右辺(前置したか)も
+   *   **`frontmatterRunLength` から導かれる**ので、走の文法をどう変えても
+   *   **両辺が一緒に動く** ── 守れているのは「呼び出し口が 2 か所とも同じ関数を
+   *   使っている」ことだけで、**文法が正しいことは 1 件も守っていない**
+   *   (実際、空行の扱いを裏返す変異が緑のまま通った)。
+   *
+   * 🔑 だから**期待値を独立に作る**:user が閉じの `---` を**書き足しただけ**の
+   *   本文(= 理想形)を parse した `meta` と、**修理した本文**の `meta` が一致すること。
+   *   ⚠ 理想形は `frontmatterRunLength` を 1 度も呼ばない ── そこが独立の要点である。
+   *
+   * ## ⚠ **一致するのは、先頭の塊が全部 frontmatter の行のときだけ**
+   *
+   * 自前の総当たり(11 種 × 3 行 × 末尾改行 2 通り = **2662 形**)で
+   * **36 形の食い違い**が出た。全部**同じ家族**である ── 「**値のある key の直後の
+   * `- item`**」で走が止まる形(`---\ntags: [あ]\n- あ\npriority: high`)。
+   * `parseFlatYaml` はその `- あ` を**読み飛ばして先を読む**ので、理想形では
+   * `priority` も frontmatter に入る。
+   *
+   * 🔑 **これは欠陥ではなく、境界の選択である**(下の it が理由ごと pin する)。
+   *   だからこの it は**前提を明示して、その前提を検算してから**比べる ──
+   *   前提を書かない一致の主張は、**成り立たない条件**(§1)になる。
+   */
+  it('🔴 修理後の meta が、user が閉じを書き足した場合と一致する', () => {
+    const CASES = [
+      '---\ntags: [あ]\n本文\n',
+      '---\ntitle: メモ\n\ntags: [買い物]\n本文\n',
+      '---\ntags:\n- あ\n- い\n本文\n',
+      '---\ntags:\n  - あ\n  - い\n本文\n',
+      '---\n# メモ\ntags: [あ]\n本文\n',
+      '---\ntags: [あ]\n# メモ\npriority: high\n本文\n',
+      '---\ntags: [あ]',
+      // 🔴 3 巡目レビュー 1-B ── 行末コメントを剥がずに見ると `tags:` が
+      //    「値のある key」に見え、続く `- 牛乳` で走が止まって tags が空になる
+      '---\ntags: # 買うもの\n- 牛乳\n- パン\n買い物メモ\n',
+    ];
+    for (const src of CASES) {
+      /**
+       * ⚠ **前提の検算** ── 先頭の塊(本文が始まるまで)が全部 frontmatter の行
+       *   であること。ここが崩れる形では、下の一致は**そもそも成り立たない**。
+       */
+      const head = src.replace(/^---[ \t]*\r?\n/, '').split(/\r?\n/);
+      const bodyStart = head.findIndex(
+        (l) =>
+          l.trim() !== '' &&
+          !l.trimStart().startsWith('#') &&
+          !/^\s*[A-Za-z_][\w.-]*\s*:/.test(l) &&
+          !/^\s*-\s+/.test(l),
+      );
+      let inBlock = false;
+      let stray = false;
+      for (const l of head.slice(0, bodyStart < 0 ? head.length : bodyStart)) {
+        if (l.trim() === '' || l.trimStart().startsWith('#')) continue;
+        const m = /^\s*[A-Za-z_][\w.-]*\s*:(.*)$/.exec(l);
+        if (m) {
+          // ⚠ 「値が無い key」だけが配列の塊を開く ── 値のある key は閉じる。
+          // ⚠ 値の有無は**行末コメントを剥いでから**見る(`parseFlatYaml` と同じ。
+          //    3 巡目レビュー 1-B ── ここを剥がないと `tags: # メモ` を値ありと読む)
+          inBlock = (m[1] ?? '').replace(/\s+#.*$/u, '').trim() === '';
+          continue;
+        }
+        // `- item` は、開いている塊の中にあるときだけ正当。
+        if (/^\s*-\s+/.test(l) && !inBlock) stray = true;
+      }
+      expect(stray, `前提が崩れている(値のある key の後ろの - item): ${JSON.stringify(src)}`).toBe(
+        false,
+      );
+      const repaired = parseFrontmatter(spliceFrontmatterKeys(src, { status: 'done' }));
+      /**
+       * 理想形 ── 走の行数を**使わずに**作る。user が「本文の直前」に閉じを
+       * 書き足した姿を、**本文の側から**組む(先頭の非 frontmatter 行を探す)。
+       */
+      const lines = src.replace(/^---[ \t]*\r?\n/, '').split(/\r?\n/);
+      const bodyAt = lines.findIndex(
+        (l) => l.trim() !== '' && !l.trimStart().startsWith('#') && !/^\s*[A-Za-z_][\w.-]*\s*:/.test(l) && !/^\s*-\s+/.test(l),
+      );
+      const cut = bodyAt < 0 ? lines.length : bodyAt;
+      const ideal = parseFrontmatter(
+        `---\n${lines.slice(0, cut).join('\n')}\n---\n${lines.slice(cut).join('\n')}`,
+      );
+      expect(repaired.found, `修理したのに読めない: ${JSON.stringify(src)}`).toBe(true);
+      expect(
+        { ...repaired.meta, status: undefined },
+        `修理の結果が、閉じを書き足した場合と違う: ${JSON.stringify(src)}`,
+      ).toEqual({ ...ideal.meta, status: undefined });
+    }
+  });
+
+  /**
+   * 🔴 **ずれる側を pin する**(上の it の「前提」の裏側)。
+   *
+   * 「値のある key の直後の `- item`」で修理の走が止まる ── `parseFlatYaml` は
+   * その行を**読み飛ばして先を読む**ので、境界が 1 つずれる。
+   *
+   * ## なぜ欠陥ではないか
+   *
+   * ⚠ ずれても**原文の行は 1 行も消えない**(下の it が総当たりで確かめる)。
+   * 落ちた key は**本文として画面に見える所に残る**ので、user は書いたものを
+   * 見失わない。逆に走を伸ばせば、その行は**閉じの内側 = 隠れる側**へ入る。
+   * 🔑 **迷ったら「見える側」へ倒す**、という境界の選択である。
+   *
+   * 🔑 **これが分かったら覆る**: 修理が `parseFlatYaml` と**同じ文法**で走を
+   *   採るようになったとき(= `- item` の読み飛ばしまで真似たとき)。
+   *   そのときは下の期待が落ちるので、**この doc ごと書き換える**合図になる。
+   */
+  it('🔴 値のある key の後ろの - item で走が止まる(意図した境界)', () => {
+    const src = '---\ntags: [あ]\n- あ\npriority: high\n本文\n';
+    const out = spliceFrontmatterKeys(src, { status: 'done' });
+    const r = parseFrontmatter(out);
+    expect(r.found, '修理したのに読めない').toBe(true);
+    // 走は `tags:` で止まる ── `- あ` 以降は閉じの外(= 本文)に残る
+    expect(Object.keys(r.meta).sort(), '境界が動いた').toEqual(['status', 'tags']);
+    expect(r.body, '落ちた行が本文から消えている').toContain('- あ');
+    expect(r.body, '落ちた行が本文から消えている').toContain('priority: high');
+  });
+
+  /**
+   * 🔴 **修理は「足すだけ」── 原文の行を 1 行も落とさない。**
+   *
+   * ⚠ これが**この機構でいちばん怖い壊れ方**である ── 境界がずれるのは
+   * 見えるところに残るので気づけるが、行が消えるのは**静かに消える**。
+   *
+   * 総当たり(11 種 × 3 行 × 末尾改行 2 通り = **2662 形**)で
+   * **落ちた行 0 件**を確認した。ここではその不変量を、代表形で常時 pin する。
+   */
+  it('🔴 修理は挿入だけ ── 原文の行が 1 行も消えない', () => {
+    const PIECES = [
+      'tags: [あ]',
+      'title: メモ',
+      'tags:',
+      '- あ',
+      '  - い',
+      '# コメント',
+      '',
+      '本文です',
+      '12:30 に集合',
+      '\t字下げの段落',
+      '| a | b |',
+    ];
+    /**
+     * ⚠ **前提** ── 書き込む key(`status`)を**原文が持っていない**こと。
+     *   持っていると**書き替え**になり、その行は正しく消える(実測:
+     *   `---\nstatus: open\n本文` → `status: open` が `status: done` へ)。
+     * 🔑 PIECES に `status:` を足した人が、**この理由で落ちた**と分かるように書く。
+     */
+    expect(
+      PIECES.filter((p) => /^\s*status\s*:/.test(p)),
+      'PIECES に status: を足すと「挿入だけ」ではなく書き替えになる',
+    ).toEqual([]);
+    let checked = 0;
+    for (const a of PIECES)
+      for (const b of PIECES)
+        for (const eol of ['\n', '']) {
+          const src = `---\n${a}\n${b}${eol}`;
+          const out = spliceFrontmatterKeys(src, { status: 'done' });
+          // 原文の行(空行を除く)が、出力にすべて残っていること
+          for (const line of src.split('\n')) {
+            if (line.trim() === '') continue;
+            expect(
+              out.split('\n').includes(line),
+              `原文の行が消えた: ${JSON.stringify(line)} / 原文 ${JSON.stringify(src)}`,
+            ).toBe(true);
+          }
+          checked++;
+        }
+    // ⚠ 空振り防止 ── 0 形では上の for が 1 度も回らない
+    expect(checked, '総当たりが回っていない').toBe(PIECES.length * PIECES.length * 2);
+  });
+
+  /**
+   * 🔴 **誰も読まない行を、閉じの内側へ隠さない**(3 巡目レビュー ⑤)。
+   *
+   * ⚠ 上の 2 つの検査は、どちらもこの型の欠陥を**原理的に見られない**:
+   *
+   * | 検査 | 見ているもの | 見えない壊れ方 |
+   * |---|---|---|
+   * | 理想形との一致 | `meta` だけ | **本文から行が消えた**こと |
+   * | 挿入だけ | **byte の生存**だけ | 閉じの内側へ移って**画面から消えた**こと |
+   *
+   * しかも理想形は「同じ文法を別の綴りで書き直したもの」なので、**実装と同じ
+   * 盲点を共有する** ── 実際 3 巡目の 1-A(`tags:` + 空行 + `- item`)は
+   * **両辺が同じように間違えるので一致してしまい**、一致検査では鳴らなかった。
+   *
+   * 🔑 だからここは**実装の綴りを 1 行も参照しない**不変量で判定する:
+   *
+   * > 修理後の frontmatter 領域にある**実のある行**は、**その行を消すと `meta` が
+   * > 変わる**(= 誰かが読んでいる)。変わらないなら、その行は**隠してはいけない**。
+   *
+   * ⚠ 実測(直す前):`---\ntags:\n\n- 牛乳\n- 卵\n買い物メモ` に印を 1 つ付けると
+   *   `- 牛乳` / `- 卵` が閉じの内側に入り、しかも `meta.tags` は `[]` ──
+   *   **誰も読まない場所に user の買い物リストが消えた**。
+   */
+  it('🔴 隠した行は、必ず誰かが読んでいる(総当たり)', () => {
+    const PIECES = [
+      'tags: [あ]',
+      'tags:',
+      'tags: # 買うもの',
+      'title: メモ',
+      '- 牛乳',
+      '  - 卵',
+      '# コメント',
+      '',
+      '買い物メモ',
+      '12:30 に集合',
+    ];
+    let shapes = 0;
+    let judged = 0;
+    let hidden = 0;
+    for (const a of PIECES)
+      for (const b of PIECES)
+        for (const c of PIECES) {
+          shapes++;
+          const src = `---\n${a}\n${b}\n${c}\n本文\n`;
+          const out = spliceFrontmatterKeys(src, { status: 'done' });
+          const r = parseFrontmatter(out);
+          if (!r.found) continue;
+          // 修理後の frontmatter 領域(開き fence と閉じ fence の間)を取り出す
+          const all = out.split('\n');
+          const closeAt = all.indexOf('---', 1);
+          const region = all.slice(1, closeAt);
+          /**
+           * ⚠ **前提:同名の key が 2 本ある形は判定できない** ── `parseFlatYaml` は
+           *   last-wins なので、先の 1 本(とその配下の `- item`)を消しても
+           *   `meta` は変わらない。**読まれてはいるが上書きされている**だけで、
+           *   隠す側の欠陥ではない ── この不変量の**偽陽性**である。
+           * 🔑 だから行ごとに例外を作らず、**形ごと judged から外す**
+           *   (例外を行に足すと、そこに本物の欠陥が紛れる)。
+           */
+          const keys = region
+            .map((l) => /^\s*([A-Za-z_][\w.-]*)\s*:/.exec(l)?.[1])
+            .filter((k): k is string => k !== undefined);
+          if (new Set(keys).size !== keys.length) continue;
+          const base = JSON.stringify(r.meta);
+          for (let i = 0; i < region.length; i++) {
+            const line = region[i] ?? '';
+            // 空行とコメントは「読まれないが隠してよい」もの(見た目の一部)
+            if (line.trim() === '' || line.trimStart().startsWith('#')) continue;
+            judged++;
+            const without = [...all.slice(0, 1 + i), ...all.slice(2 + i)].join('\n');
+            if (JSON.stringify(parseFrontmatter(without).meta) === base) {
+              hidden++;
+              expect(
+                line,
+                `誰も読まない行を隠した\n  原文  : ${JSON.stringify(src)}\n  修理後: ${JSON.stringify(out)}`,
+              ).toBe('(この行は誰かが読んでいるべき)');
+            }
+          }
+        }
+    // ⚠ 空振り防止 ── ①総当たりが回った ②実際に判定した行が十分にある
+    expect(shapes, '総当たりが回っていない').toBe(PIECES.length ** 3);
+    expect(judged, '判定した行が少なすぎる(前提で外しすぎ)').toBeGreaterThan(500);
+    expect(hidden, '隠した行がある').toBe(0);
+  });
+
+  it('🔴 判定が 1 つ ── 警告が出る形 ⇔ 前置しない形', () => {
+    const CASES = [
+      ...REPAIRED.map(([, s]) => s),
+      ...PREPENDED.map(([, s]) => s),
+      '---\n\n12:30 に集合\n',
+      '---\n| a | b |\n|---|---|\n',
+    ];
+    let warned = 0;
+    for (const src of CASES) {
+      const isBroken = parseFrontmatter(src).warnings.some((w) => w.kind === 'malformed');
+      if (isBroken) warned += 1;
+      const prepended =
+        spliceFrontmatterKeys(src, { status: 'done' }) === `---\nstatus: done\n---\n${src}`;
+      expect(prepended, `判定が食い違っている: ${JSON.stringify(src)}`).toBe(!isBroken);
+    }
+    // ⚠ 空振り防止 ── 両方の側が実際に出ていること
+    expect(warned, '壊れた形が 1 件も無い(この検査は空振り)').toBeGreaterThan(0);
+    expect(warned, '全部壊れた形になっている(この検査は空振り)').toBeLessThan(CASES.length);
+  });
+});
+
+/**
+ * 🔴 **「読めていない」理由を 1 か所から返す**(#284 の出口 / #318 の対)。
+ *
+ * ⚠ 画面ごとに `warnings.some(...)` を書くと、`kind` を足したとき片方だけ拾う(§7)。
+ */
+describe('frontmatterProblem ── 画面へ出す理由(#284 / #318)', () => {
+  it('🔴 閉じを失った本文は理由を返す', () => {
+    const r = frontmatterProblem('---\ntags: [あ]\n本文\n');
+    expect(r?.kind, '種別が違う(1 組目が読めない)').toBe('unreadable');
+    expect(r?.detail).toContain('閉じの ---');
+  });
+
+  /**
+   * 🔴 **`meta` を空にする warning は全部拾う**(着地前レビュー E)。
+   *
+   * ⚠ 1 稿目は `malformed` しか見ていなかったので、**cap 超過のノートで
+   *   #284 の嘘がそのまま残っていた** ── `found: true` / `meta: {}` /
+   *   `warnings: ['size_limit']` なので、情報ペインは「タグ **無し**」と断定する。
+   * ⚠ この関数の docstring 自身が「`kind` を足したとき片方だけ拾う」と
+   *   戒めているのに、**いま実在する 2 つ目の kind を落としていた**。
+   */
+  it('🔴 cap を超えた frontmatter も「読めていない」と言う', () => {
+    const big = `---\nk: ${'あ'.repeat(20000)}\n---\n本文\n`;
+    const r = parseFrontmatter(big);
+    // 前提 ── cap 超過は `found: true` で返る(だから malformed では拾えない)
+    expect(r.found, '前提が崩れている').toBe(true);
+    expect(r.warnings.map((w) => w.kind), '前提が崩れている').toEqual(['size_limit']);
+    expect(r.meta, '前提が崩れている(meta が空でない)').toEqual({});
+    const r2 = frontmatterProblem(big);
+    expect(r2?.kind, 'cap 超過を見逃した').toBe('unreadable');
+    // ⚠ **画面へ出す字は user の言葉**(2 巡目レビュー B-5)── 内部語を出さない
+    expect(r2?.detail, '内部語がそのまま画面へ出ている').not.toMatch(/frontmatter|bytes|parse/);
+    expect(r2?.detail).toContain('大きすぎて');
+  });
+
+  /**
+   * 🔴 **既に二重 fence になっている本文も拾う**(#318 の「対で塞ぐもの」)。
+   * ⚠ そちらは 1 本目が正しく読めるので `warnings` が **0 件**になり、上半分では拾えない。
+   */
+  it('🔴 既に二重 fence になっている本文も拾う', () => {
+    for (const broken of [
+      '---\nstatus: done\n---\n---\ntags: [あ]\n本文\n',
+      // ⚠ コメント始まりの 2 本目 ── 走の文法を直すまで**拾えなかった**形
+      '---\nstatus: done\n---\n---\n# メモ\ntags: [あ]\n本文\n',
+    ]) {
+      const r = parseFrontmatter(broken);
+      expect(r.found, '前提が崩れている').toBe(true);
+      expect(r.warnings, '前提が崩れている(1 本目で警告が出ている)').toEqual([]);
+      const p2 = frontmatterProblem(broken);
+      expect(p2?.kind, `二重 fence を見逃した: ${JSON.stringify(broken)}`).toBe('trailing');
+      expect(p2?.detail).toContain('2 組目');
+    }
+  });
+
+  it('🔴 読めている本文には理由を返さない(常在する警告を作らない)', () => {
+    for (const ok of [
+      '---\ntags: [あ]\n---\n本文\n',
+      '本文だけ\n',
+      '---\n本文\n',
+      '---\n# 見出し\n本文\n', // ⚠ 水平線 + markdown 見出し
+      '---\ntags: [あ]\n---\n\n---\n\n第 2 節\n',
+      '---\ntitle: a\n---\n---\n  - りんご\n', // ⚠ 字下げの箇条書きは frontmatter ではない
+      '',
+    ]) {
+      expect(frontmatterProblem(ok), `理由を作った: ${JSON.stringify(ok)}`).toBeNull();
+    }
   });
 });
