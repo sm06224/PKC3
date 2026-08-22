@@ -7,7 +7,9 @@
  * ここで保証される(「init 以外は同期」という暗黙 invariant に依存しない)。
  */
 import type { EntryStamps, EntryUpsert } from '@adapter/platform/storage/schema';
-import { extractMeta } from '@features/flavor';
+import { extractMeta, type FlavorExtract } from '@features/flavor';
+// 🔴 追記の楽観検査(#178)── 「読んだ本文」を worker と突き合わせるための指紋
+import { contentHash64Hex } from '@adapter/platform/storage/content-hash';
 import { appendBlock } from '@features/markdown/text-ops';
 import { applyBodyRewrite } from '@features/markdown/body-rewrite';
 import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
@@ -89,6 +91,11 @@ export interface StorePort {
     opts?: {
       checkpoint?: boolean;
       parent?: { parentLid: string | null; relationId: string };
+      /**
+       * 🔴 **読んだ本文の hash**(#178)。渡すと、行の本文がそれと違っていたら
+       * **1 バイトも書かず** `conflict: true` を返す。⚠ 省略時は last-write-wins。
+       */
+      expectHash?: string;
     },
   ): Promise<EntryStamps>;
   /**
@@ -985,19 +992,59 @@ export function connectStoreEffects(
             const body = await store.getBody(ev.lid);
             if (disposed) return;
             if (body === null) return fail(`追記できません(ノートが見つかりません: ${ev.lid})`);
-            const newBody = appendBlock(body, ev.heading, ev.text);
-            if (newBody === body) return fail('追記する内容がありません');
-            const ext = extractMeta(ev.archetype, newBody);
-            const stamps = await store.persistEntry({
-              lid: ev.lid,
-              title: ev.title,
-              archetype: ev.archetype,
-              body: newBody,
-              entryOrder: ev.entryOrder,
-              status: ext.status,
-              date: ext.date,
-              archived: ext.archived,
-            });
+            /**
+             * 🔴 **読んでから書くまでの間に、別の窓が書いていたら足し直す**
+             * (#178、2026-08-22)。
+             *
+             * ⚠ 上の docstring のとおり、この経路は**わざと disk から読み直して**
+             * いる ── 画面の古い本文を基底にしない、という防御は既に在る。
+             * 残っていたのは **`getBody` と書込の間(数ミリ秒)**だけだが、
+             * そこで重なると本文は消え、`checkpoint` を渡していないので
+             * **履歴にも残らない**(= どこからも戻せない。改名と同じ形だった)。
+             *
+             * 🔑 **断るより、やり直すほうが user の意図に近い** ── 追記は
+             * 「この見出しの下にこの塊を足す」なので、**新しい本文へ足し直すのが
+             * まさに頼まれたこと**である。⚠ ただし **1 回だけ**(無限に回さない)。
+             * ⚠ それでも重なったら**黙らない** ── `APPEND_FAILED` で
+             * 書込ロックを解き、理由を出す(追記欄の字は残るので押し直せる)。
+             */
+            const tryAppend = async (
+              base: string,
+            ): Promise<{ stamps: EntryStamps; newBody: string; ext: FlavorExtract } | 'empty'> => {
+              const newBody = appendBlock(base, ev.heading, ev.text);
+              if (newBody === base) return 'empty';
+              const ext = extractMeta(ev.archetype, newBody);
+              const stamps = await store.persistEntry(
+                {
+                  lid: ev.lid,
+                  title: ev.title,
+                  archetype: ev.archetype,
+                  body: newBody,
+                  entryOrder: ev.entryOrder,
+                  status: ext.status,
+                  date: ext.date,
+                  archived: ext.archived,
+                },
+                { expectHash: contentHash64Hex(base) },
+              );
+              return { stamps, newBody, ext };
+            };
+
+            let attempt = await tryAppend(body);
+            if (attempt === 'empty') return fail('追記する内容がありません');
+            if (attempt.stamps.conflict === true) {
+              // ⚠ **読み直してから**足し直す(古い基底で再送しない)
+              const fresh = await store.getBody(ev.lid);
+              if (disposed) return;
+              if (fresh === null) return fail(`追記できません(ノートが見つかりません: ${ev.lid})`);
+              attempt = await tryAppend(fresh);
+              if (attempt === 'empty') return fail('追記する内容がありません');
+              if (attempt.stamps.conflict === true)
+                return fail(
+                  '別の窓がこのノートを書き替えたため、追記できませんでした(もう一度押してください)',
+                );
+            }
+            const { stamps, newBody, ext } = attempt;
             if (disposed) return;
             dispatcher.dispatch({
               type: 'ENTRY_APPENDED',

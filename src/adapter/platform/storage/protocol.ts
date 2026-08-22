@@ -136,6 +136,19 @@ export type StorageRequest =
        * ⚠ 中身は `setEntryParent` と**同じ 1 本**(`writeParent`)を通す。
        */
       parent?: { parentLid: string | null; relationId: string };
+      /**
+       * 🔴 **読んだ本文の hash**(#178、2026-08-22)。渡すと、**行の本文がそれと
+       * 違っていたら書かない**(`conflict: true` を返す)。
+       *
+       * ⚠ **追記のためにある。** 追記は「この見出しの下にこの塊を足す」なので
+       * **本文を本当に必要とする** ── `getBody` → `appendBlock` → 書込 の間に
+       * 別のタブ / 窓が書くと、その版を消す(しかも `checkpoint` を渡さないので
+       * **履歴にも残らない**)。⚠ 改名は本文に触らない形(`renameEntry`)で
+       * **衝突ごと消した**ので、これは要らない。
+       * ⚠ 渡さなければ今までどおり(last-write-wins)── 編集の保存はそちらである
+       * (断ると user が打った字を捨てさせることになる。#333 の判断)。
+       */
+      expectHash?: string;
     }
   /**
    * 🔴 **題名だけを書き換える**(#178、2026-08-22)。
