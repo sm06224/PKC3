@@ -2208,10 +2208,16 @@ select:focus-visible {
   width: 100%;
   table-layout: fixed;
   border-collapse: collapse;
-  /* ⚠ **縮ませない**(`flex-shrink: 0`)── セルの下限より下へ潰されると、
-   *   行が面の外へ描かれて**スクロールしても届かない**(#303)。
-   *   伸びる側(`flex-grow: 1`)は据え置き ── 器いっぱいに配るのは 2026-08-20 の直し。 */
-  flex: 1 0 auto;
+  /* ⚠ `height: 100%` は flex の子に効かせるため `flex: 1` と対で置く。
+   * 🔴 **一度 `flex: 1 0 auto` に変えたが、戻した**(#303、変異試験で判明)──
+   *   「縮むと行が面の外へ描かれて届かない」という理屈で `flex-shrink: 0` に
+   *   したが、**外して測ったら壊れなかった**(M14 / M15 とも SURVIVED。
+   *   スクロールし切って最下段の下端が器に入るところまで見ても同じ)。
+   *   届くことを担保しているのは**面の `overflow: auto`** のほうで、こちらは
+   *   外すと落ちる(M8 KILLED)。⚠ 効いていない宣言に「これが無いと壊れる」と
+   *   書くと、次に読む人が動かせなくなる。 */
+  flex: 1;
+  min-height: 0;
 }
 [data-pkc-region='calendar-grid'] th,
 [data-pkc-region='calendar-grid'] td {
@@ -2301,9 +2307,13 @@ select:focus-visible {
   font-size: 11px;
   color: var(--muted);
   /* ⚠ 帯の高さは**器の上端と対**である(#303)── 上の `--day-band` から出す。
-   *   ここを `auto` に戻すと、今日の丸(inline-block)の分だけ帯が伸びて
-   *   器が数字に食い込む。 */
-  height: var(--day-band, auto);
+   *   噛み合っているかは smoke が実寸で見る(数字の下端 == 器の上端)。
+   * 🔴 ここに `height: var(--day-band)` も書いていたが、**外して測ったら no-op
+   *   だった**(着地前レビュー A-1)── 行ボックスの高さ = `line-height` なので
+   *   `height: auto` と同値である。実測: 有り 18.39px / 無し 18.41px、
+   *   器の上端はどちらも 22.89px、今日の丸も同じ。⚠ しかも消す前のコメントは
+   *   「外すと今日の丸の分だけ帯が伸びる」と**確かめずに書いた因果**だった
+   *   (CLAUDE.md「これが無いと壊れると書く前に、外して壊れるのを見る」)。 */
   line-height: var(--day-band, normal);
 }
 /* 🔴 **予定は押せる形に**(2026-08-20)── 直す前は素のテキストで、
@@ -3425,7 +3435,8 @@ select:focus-visible {
   [data-pkc-region='calendar-grid'] tbody td {
     height: auto;
   }
-  /* ⚠ 件数は紙では要らない ── 全部出ているのに数字だけ残ると嘘になる。 */
+  /* ⚠ 件数は紙では要らない ── 全部そのまま出ているので、数える手がかりが
+   *   要らない(画面では畳まれた分を知らせる働きがある)。 */
   [data-pkc-region='calendar-grid'] [data-pkc-field='day-count'] {
     display: none;
   }

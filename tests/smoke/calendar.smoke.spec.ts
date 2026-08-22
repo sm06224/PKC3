@@ -171,12 +171,26 @@ test('🔴 曜日の列が等幅で、月が面の高さを使う', async ({ pag
     `曜日の列が等幅でない: ${cols.map((c) => c.toFixed(1)).join(' / ')}`,
   ).toBeLessThanOrEqual(1);
 
-  const paneH = (await page.locator('[data-pkc-view-pane="calendar"]').boundingBox())!.height;
-  const tableH = (await page.locator('[data-pkc-region="calendar-grid"]').boundingBox())!.height;
+  /**
+   * ⚠ **観測点を変えた**(#303 の着地前レビュー B-3)。1 稿目は
+   *   `表の高さ / 器の高さ > 0.7` を見ていたが、#303 でセルに下限(`5em`)を
+   *   置いたので、**「配っている」ではなく「下限が在る」で満たせる条件**に
+   *   変質した(6 週 × 65px + 見出し ≒ 410px が下限だけで出る)。
+   * 🔑 だから**最下段の週の下端が器の下端に届いているか**で見る ──
+   *   下限では満たせない(引き伸ばしが効いていないと必ず余白が残る)。
+   */
+  const gap = await page.evaluate(() => {
+    const pane = document.querySelector('[data-pkc-view-pane="calendar"]')!;
+    const rows = document.querySelectorAll('[data-pkc-region="calendar-grid"] tbody tr');
+    const last = rows[rows.length - 1]!.getBoundingClientRect();
+    const box = pane.getBoundingClientRect();
+    return { gap: box.bottom - last.bottom, paneH: box.height, rows: rows.length };
+  });
+  expect(gap.rows, '週が描かれていない(この検査は空振り)').toBeGreaterThanOrEqual(4);
   expect(
-    tableH / paneH,
-    `月が面の高さを使っていない(器 ${paneH.toFixed(0)}px に対し表 ${tableH.toFixed(0)}px)`,
-  ).toBeGreaterThan(0.7);
+    gap.gap,
+    `月が面の高さを使っていない(最下段の下に ${gap.gap.toFixed(0)}px 余っている / 器 ${gap.paneH.toFixed(0)}px)`,
+  ).toBeLessThanOrEqual(12);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
@@ -299,6 +313,63 @@ test('🔴 予定が積み上がっても、週の行が動かない (#303)', as
     `予定を動かしたら週の行が動いた: ${moved.map((m) => m.toFixed(1)).join(' / ')}px`,
   ).toBeLessThanOrEqual(1);
 
+  /**
+   * ③ 🔴 **日の数字の帯と、器の上端が噛み合っている**(実寸)。
+   * ⚠ この 2 つは `--day-band` という 1 つの値から出ているが、**字面 pin では
+   *   守れない** ── 片方を消しても、もう片方が同じ字面を含むので緑になる
+   *   (着地前レビュー A-1 で実際に生き延びた)。だから実寸で見る。
+   * 実測: 数字の下端 22.89px = 器の上端 22.89px。
+   */
+  const band = await cell.evaluate((td) => {
+    const top = td.getBoundingClientRect().top;
+    const num = td.querySelector('[data-pkc-field="day-number"]')!.getBoundingClientRect();
+    const ev = td.querySelector('[data-pkc-field="day-events"]')!.getBoundingClientRect();
+    return { numBottom: num.bottom - top, evTop: ev.top - top };
+  });
+  expect(
+    Math.abs(band.numBottom - band.evTop),
+    `帯と器が噛み合っていない(数字の下端 ${band.numBottom.toFixed(1)}px / 器の上端 ${band.evTop.toFixed(1)}px)`,
+  ).toBeLessThanOrEqual(1);
+
+  /**
+   * ④ 🔴 **狭い版面**(着地前レビュー A-2)── 「セルの下限」と「面ごとスクロール」は
+   *    **対で 1 つの直し**だと `app.css` に書いてあるのに、1 稿目は
+   *    **どちらも通る test が 0 本**だった(新 smoke 2 本は両方 1440×900 固定)。
+   * ⚠ ここが無いと `height: 5em` を `max-height: 5em` に変える変異が素通りする
+   *   ── 1440×900 では `flex-grow: 1` が全行を引き伸ばすので、下限が無くても
+   *   行は等しくなる(= 直しの後半分が無検査で戻る)。
+   */
+  await page.setViewportSize({ width: 700, height: 640 });
+  const cells = await page
+    .locator('[data-pkc-region="calendar-grid"] tbody td')
+    .evaluateAll((els) => els.map((e) => e.getBoundingClientRect().height));
+  expect(
+    Math.min(...cells),
+    `狭い版面でセルが潰れて狙えない: 最小 ${Math.min(...cells).toFixed(1)}px`,
+  ).toBeGreaterThanOrEqual(60);
+  /**
+   * 🔑 **観測点は「一番下の週まで実際に届くか」にする。**
+   * ⚠ `scrollHeight - clientHeight > 0` だけでは弱い ── 表が縮んで行が表の箱の
+   *   外へ描かれても、その値は 0 より大きくなる。**スクロールし切った先に
+   *   最下段の下端が入っているか**まで見て、初めて「届く」と言える。
+   */
+  const reach = await page.locator('[data-pkc-view-pane="calendar"]').evaluate((el) => {
+    const before = el.scrollHeight - el.clientHeight;
+    el.scrollTop = el.scrollHeight; // スクロールし切る
+    const rows = document.querySelectorAll('[data-pkc-region="calendar-grid"] tbody tr');
+    const last = rows[rows.length - 1]!.getBoundingClientRect();
+    const box = el.getBoundingClientRect();
+    el.scrollTop = 0;
+    return { over: before, overflowY: getComputedStyle(el).overflowY, below: last.bottom - box.bottom };
+  });
+  // ⚠ 空振り防止 ── 実際に溢れていること(溢れていなければ下の主張は自明に通る)
+  expect(reach.over, '狭い版面で表が器に収まってしまった(この検査は空振り)').toBeGreaterThan(0);
+  expect(reach.overflowY, '表が面の外へ出ているのにスクロールできない').toMatch(/auto|scroll/);
+  expect(
+    reach.below,
+    `スクロールし切っても最下段が ${reach.below.toFixed(0)}px 面の外に残る(届かない)`,
+  ).toBeLessThanOrEqual(1);
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
@@ -338,7 +409,12 @@ test('🔴 紙では、日のセルが予定の数だけ伸びる (#303)', async
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-15`;
   });
-  const N = 6;
+  /**
+   * ⚠ 件数は **器が画面で溢れる最小**にする(着地前レビュー B-5)── PR gate は
+   *   smoke を全量回すので、UI 経由のノート作成 1 件ぶんがそのまま gate の時間になる。
+   *   1440×900 の器は約 63px、予定 1 件は約 20px なので **4 件**で溢れる。
+   */
+  const N = 4;
   for (let i = 0; i < N; i++) {
     await createEntry(page, 'text');
     const title = page.locator('[data-pkc-field="editor-title"]');

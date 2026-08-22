@@ -65,6 +65,25 @@ export class CalendarRenderer {
     }
     const byDate = groupEntriesByDate(metas, state.showArchived);
 
+    /**
+     * 🔴 **器のスクロール位置を返す**(#303、着地前レビュー B-1)。
+     *
+     * この面は指紋が変わると**格子ごと作り直す**(`textContent = ''`)。⚠ 指紋には
+     * `selectedLid` が入っているので、**予定を 1 つ押しただけで**全部作り直される。
+     * 予定を器(`day-events`)に入れて中でスクロールさせるようにした以上、
+     * ここで控えておかないと **押した瞬間に器が先頭へ戻り、押した予定が視界から
+     * 消える**(押した手応えが画面から失われる)。
+     *
+     * 🔑 これは「置き換えの作法」の③**後始末**である(CLAUDE.md §10)── 直す前は
+     *   器そのものが無かったので、**この直しで新しく落ちた性質**にあたる。
+     * ⚠ 鍵は**日付**にする(node ではなく)── node は作り直されて別物になる。
+     */
+    const scrolls = new Map<string, number>();
+    for (const box of this.region.querySelectorAll<HTMLElement>('[data-pkc-field="day-events"]')) {
+      const key = box.closest('[data-pkc-date]')?.getAttribute('data-pkc-date');
+      if (key !== null && key !== undefined && box.scrollTop > 0) scrolls.set(key, box.scrollTop);
+    }
+
     this.region.textContent = '';
 
     const bar = document.createElement('div');
@@ -172,10 +191,18 @@ export class CalendarRenderer {
           td.append(num);
           const items = byDate[key] ?? [];
           /**
-           * 🔴 **件数を地の上に出す**(#303)。予定は器(下)に入れて
-           * スクロールさせるので、**入り切らない分は畳まれて見えなくなる** ──
-           * 数を出さないと「無言で消えた」に見える。
-           * ⚠ 1 件のときは出さない ── 見えている物の数を書くのは飾りである。
+           * 🔴 **その日に何件あるかを、畳まれない所に出す**(#303)。
+           *
+           * ⚠ **理由づけを直した**(着地前レビュー B-6)── 1 稿目は
+           *   「入り切らない分の手がかり」とだけ書いていたが、閾値は
+           *   「2 件以上」であって「溢れているとき」ではない。1440×900 では
+           *   3 件まで器に収まるので、**全部見えている日にも数字が出る**
+           *   ── 理由と実装が食い違っていた。
+           * 🔑 出しているのは「**その日に何件あるか**」である(業務画面の密度)。
+           *   溢れている日では、それがそのまま「畳まれた分が在る」手がかりになる。
+           * ⚠ 1 件のときは出さない ── 見えている 1 つに「1」と添えるのは飾りである。
+           * ⚠ **溢れているかで出し分けない** ── 描画のたびに実寸を読むことになり、
+           *   「放っておいても変わる観測点」を製品コードに持ち込む(CLAUDE.md §4)。
            */
           if (items.length >= 2) {
             const count = document.createElement('div');
@@ -195,6 +222,8 @@ export class CalendarRenderer {
           const events = document.createElement('div');
           events.setAttribute('data-pkc-field', 'day-events');
           td.append(events);
+          // ⚠ 位置を戻すのは**中身を入れた後**(空の器に代入しても 0 に丸められる)
+          const keep = scrolls.get(key);
           for (const meta of items) {
             const item = document.createElement('div');
             item.setAttribute('data-pkc-entry', meta.lid);
@@ -208,6 +237,7 @@ export class CalendarRenderer {
             item.textContent = meta.title;
             events.append(item);
           }
+          if (keep !== undefined) events.scrollTop = keep;
         }
         tr.append(td);
       });
