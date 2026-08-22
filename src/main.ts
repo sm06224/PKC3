@@ -1042,8 +1042,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const updatePrompt = createUpdatePrompt(regions.update, {
     // ⚠ 再読込は open editor の下書きを捨てる(本文は AppState にしか無い)。
     // 破壊的操作は confirm を出す、というこのリポジトリの倒し方に揃える(review M-2)
+    // 🔴 danger ── 下書きは AppState にしか無く beforeunload も無いので本当に戻せない。
+    //    「戻しにくい操作は危険色」の規則(docs-parity の DANGER_SITES)に照らして
+    //    付いていないほうが誤りだった(#312 の最初の仕事②)
     isEditing: () => dispatcher.getState().phase === 'editing',
-    confirmDiscard: () => ask('編集中の内容は保存されません。新しい版に切り替えますか?', { okLabel: '切り替える' }),
+    confirmDiscard: () =>
+      ask('編集中の内容は保存されません。新しい版に切り替えますか?', {
+        okLabel: '切り替える',
+        danger: true,
+      }),
   });
 
   /**

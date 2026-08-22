@@ -548,3 +548,52 @@ test('🔴 フォルダの「行」へ落とすと、その中へ入る (#273 / 
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **乗せただけの行と、印を付けた行が別の色**(#312 の最初の仕事①)。
+ *
+ * ⚠ 2026-08-19 の作り直しで hover の側だけ直り損ね、実ブラウザではどちらも
+ *   同じ地色(`--surface-2`)だった ── unit(happy-dom)は描画しないので、
+ *   「実マウスを乗せたとき何色に見えるか」はここでしか見えない。
+ * ⚠ 色の値そのものは pin しない(テーマの色替えで smoke が割れないように)──
+ *   見るのは ①乗せると色が付く(対照群: 乗せる前と変わる)②その色が印と違う
+ *   ③印の行は乗せても印の色のまま、の 3 つである。
+ */
+test('🔴 乗せただけの行が、印を付けた行と同じ色に見えない', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  for (const t of ['あ', 'い']) {
+    await createEntry(page, 'text');
+    const title = page.locator('[data-pkc-field="editor-title"]');
+    if (await title.count()) await title.fill(t);
+    await clickReal(page, '[data-pkc-action="commit-edit"]');
+  }
+  await openDual(page);
+  const rows = page.locator(ROWS('left'));
+  await expect(rows).toHaveCount(2);
+
+  // 1 行目に印(クリックで marked が 1 つ付く ── Space の spec と同じ前提)
+  await rows.first().click();
+  await expect(page.locator(`${PANE('left')} [data-pkc-entry][data-pkc-marked]`)).toHaveCount(1);
+
+  const bgOf = (row: ReturnType<typeof rows.nth>): Promise<string> =>
+    row.evaluate((el) => getComputedStyle(el.querySelector('td')!).backgroundColor);
+
+  // ⚠ 対照群 ── 乗せる前の 2 行目(素の行)の色。これが変わらないなら
+  //   「hover の規則が 1 本も効いていない」なので、以降の比較は無意味である
+  const plain = await bgOf(rows.nth(1));
+  await rows.nth(1).hover();
+  const hovered = await bgOf(rows.nth(1));
+  const marked = await bgOf(rows.first());
+
+  expect(hovered, '乗せても色が付かない(hover の規則が効いていない)').not.toBe(plain);
+  expect(hovered, '乗せただけの行が、印を付けた行と同じ色に見える(2026-08-19 の直り損ね)')
+    .not.toBe(marked);
+
+  // ③ 印の行は、乗せても印の色のまま(hover が印の地を塗り直さない)
+  await rows.first().hover();
+  expect(await bgOf(rows.first()), '乗せている間だけ印が薄く見える').toBe(marked);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

@@ -2430,8 +2430,11 @@ select:focus-visible {
   color: var(--muted);
   font-weight: 600;
 }
-[data-pkc-region='filer-table'] tr:hover td {
-  background: var(--surface-2);
+/* ⚠ hover は印(`tr[data-pkc-marked]` = `--surface-2`。フォルダ面の複数選択の節)より
+ *   薄い地にする ── 2 ペイン(dual-table)と同じ直し(#312 ①)。ここは**対称の
+ *   反対側**で、dual だけ直すと「1 面のファイラでは乗せた行が印に見える」が残る。 */
+[data-pkc-region='filer-table'] tbody tr:hover:not([data-pkc-marked]) td {
+  background: var(--surface-hover);
 }
 [data-pkc-field='filer-empty'] {
   color: var(--muted);
@@ -2838,13 +2841,19 @@ select:focus-visible {
  *   同じ手(地の明度)を 2 つの意味に使わないので、**印の付いた行にカーソルが
  *   在る**という 4 つ目の状態も、重ねるだけで読める。
  * ⚠ カーソルは `outline`(`border` ではない)── `border` は行の高さを変えるので、
- *   送るたびに下の行がずれて狙えなくなる。 */
+ *   送るたびに下の行がずれて狙えなくなる。
+ * ⚠ 2026-08-19 の作り直しは **hover の側だけ直り損ねていた** ── このコメントが
+ *   「もっと薄い地」と言うのに、実装は marked と同じ `--surface-2` のままで、
+ *   **乗せただけの行が、印を付けた行に見えた**(引き継ぎ #312 の最初の仕事①)。
+ *   hover は `--surface-hover`(`--surface` と `--surface-2` の間。全テーマで定義)。
+ * ⚠ hover は **marked の行を塗り直さない**(`:not`)── 同じ性質(地の明度)を
+ *   両方が触るので、除外しないと「乗せている間だけ印が薄く見える」が戻ってくる。 */
 [data-pkc-region='dual-table'] tbody tr[data-pkc-marked] td {
   background: var(--surface-2);
   font-weight: 600;
 }
-[data-pkc-region='dual-table'] tbody tr:hover td {
-  background: var(--surface-2);
+[data-pkc-region='dual-table'] tbody tr:hover:not([data-pkc-marked]) td {
+  background: var(--surface-hover);
 }
 [data-pkc-region='dual-table'] tbody tr[data-pkc-cursor] {
   outline: 1px solid var(--muted);
