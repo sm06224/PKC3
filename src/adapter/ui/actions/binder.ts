@@ -1882,7 +1882,19 @@ const ACTIONS: Record<string, ActionHandler> = {
     // 前進変異(復元前に現状が履歴に積まれる)なので confirm は要らない ──
     // 「復元の取り消し」も履歴から戻れる
     const revId = target.getAttribute('data-pkc-rev-id');
-    if (revId) dispatcher.dispatch({ type: 'RESTORE_REVISION', revId });
+    if (!revId) return;
+    /**
+     * 🔴 **編集中は声に出して断る**(#319)。⚠ 直す前は reducer の
+     * `phase !== 'ready'` が**黙って捨てて**いたので、押しても 1 ドットも
+     * 変わらず理由も出なかった ── P8 段⑲ で潰した「無言の操作拒否」。
+     * 🔑 断り文は**この file の既存 8 か所と同じ型**へ流し込む
+     *   (「文言は押した場所と対で pin する」── 面ごとに書き分けない)。
+     */
+    if (dispatcher.getState().phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから復元してください' });
+      return;
+    }
+    dispatcher.dispatch({ type: 'RESTORE_REVISION', revId });
   },
   'write-back-file': (dispatcher, target, services) => {
     const lid =
@@ -1895,8 +1907,13 @@ const ACTIONS: Record<string, ActionHandler> = {
   'restore-trash': (dispatcher, target) => {
     const revId = target.getAttribute('data-pkc-rev-id');
     const entryLid = target.getAttribute('data-pkc-trash-lid');
-    if (revId && entryLid)
-      dispatcher.dispatch({ type: 'RESTORE_TRASH', entryLid, revId });
+    if (!revId || !entryLid) return;
+    // 🔴 **編集中は声に出して断る**(#319。理由は `restore-revision` と同じ)
+    if (dispatcher.getState().phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから戻してください' });
+      return;
+    }
+    dispatcher.dispatch({ type: 'RESTORE_TRASH', entryLid, revId });
   },
   'purge-trash': (dispatcher, _target, _services, root) => {
     /**
