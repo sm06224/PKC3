@@ -128,6 +128,29 @@ export function isAsidePane(view: ViewMode): boolean {
 }
 
 /**
+ * 🔴 **面の呼び名**(user 目線レビュー U-2 / U-7)。
+ *
+ * ⚠ **user が画面で見ている字と同じにする** ── 断り文に内部の名前(`kanban`)が
+ *   出ると、user は**別のものを探す**(CLAUDE.md「文言は『押した場所』と対で pin する」)。
+ * 🔑 呼び名はここ 1 か所。⚠ 面を足したら**ここも足す** ── 網羅は型が守る
+ *   (`Record<ViewMode, string>` なので、足し忘れると tsc が落ちる)。
+ */
+const VIEW_LABELS: Record<ViewMode, string> = {
+  detail: '本文',
+  calendar: 'カレンダー',
+  kanban: 'やることの板',
+  query: '集計',
+  dual: '2 ペインで整理',
+  settings: '設定',
+  flags: 'フラグ',
+  help: 'ヘルプ',
+};
+
+export function viewModeLabel(view: ViewMode): string {
+  return VIEW_LABELS[view];
+}
+
+/**
  * 🔴 **もう一度押したら本文へ戻る**(P8 段⑲ の規約を 1 か所へ寄せた。#277 段②-b)。
  *
  * 直す前の 設定 は行きっぱなしで、閉じる導線がどこにも無かった ── user から見ると
@@ -1316,12 +1339,28 @@ function reduceCore(
        * ⚠ かんばん / カレンダー / 集計は引き続き断る(あちらはノートを並べる面で、
        * 開くと編集していたものが画面から消える)。
        */
-      if (
-        state.phase === 'editing' &&
-        !isAsidePane(action.mode) &&
-        action.mode !== 'detail'
-      )
-        return { state, events: [] };
+      /**
+       * 🔴 **断るなら、声に出して断る**(user 目線レビュー U-2)。
+       *
+       * ⚠ 直す前は `events: []` で**黙って捨てて**いた ── 押しても画面が 1 ドットも
+       *   動かず、帯にも何も出ない。user から見ると**タイルが壊れている**か、
+       *   押せていないのかも分からない(CLAUDE.md が繰り返し戒めている
+       *   「無言の dead click」そのもの)。
+       * ⚠ このリポジトリは**同じ場面で既に声を出している** ── `binder.ts` の
+       *   ごみ箱の復元は「編集を終了してから戻してください」と言う(#319)。
+       *   ここだけ黙っていた。
+       * 🔑 **判定はここ 1 か所のまま**にする(CLAUDE.md §7)── 呼び側
+       *   (`set-view` / タイル / 鍵)に `phase !== 'ready'` を配ると、
+       *   足すたびに取りこぼす。`error` を載せて返せば、出口は既存の 1 本で足りる。
+       */
+      if (state.phase === 'editing' && !isAsidePane(action.mode) && action.mode !== 'detail')
+        return {
+          state: {
+            ...state,
+            error: `編集中は${viewModeLabel(action.mode)}を開けません(保存するか、取り消してください)`,
+          },
+          events: [],
+        };
       return {
         state: {
           ...state,

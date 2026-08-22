@@ -535,6 +535,7 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
+    ['2026-08-22-pane-flow', '764b5ad8'],
     ['2026-08-22-frontmatter-repair', 'c4398e83'],
     ['2026-08-22-calendar-and-fixes', 'b047c4c2'],
     ['2026-08-22-hover-and-danger', '76f2b25b'],
@@ -554,7 +555,8 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-08-19-dual-pane-app', 'ddeb2847'],
     ['2026-08-18-dual-pane', 'd7be47b0'],
     ['2026-08-18-open-and-rows', 'fbcc82a6'],
-    ['2026-08-18-figures-and-folders', 'f16941e4'],
+    // ⚠ 上限 20 を超えたので 2026-08-22 に落とした（原本は CHANGELOG）
+    // ['2026-08-18-figures-and-folders', 'f16941e4'],
     // ⚠ 上限 20 を超えたので 2026-08-20 に落とした(原本は CHANGELOG)
     // ['2026-08-17-word-export', '4454a5dd'],
     // ⚠ 上限 20 を超えたので 2026-08-22 に落とした(原本は CHANGELOG)

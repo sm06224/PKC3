@@ -90,6 +90,16 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-22-pane-flow',
+    title: 'アプリの面を開いても、書きかけと読んでいた場所が消えなくなりました',
+    items: [
+      'ノートの下の追記欄に打っている途中でカレンダーやヘルプを開くと、打った字が黙って消えていました。面を開いて戻っても、そのまま残ります。',
+      '長いノートを下まで読んでから面を開いて戻ると、先頭に戻っていました。読んでいた場所に戻ります。',
+      '開いた面の上に「× 閉じる」が出るようになりました。これまでは同じタイルをもう一度押すか Alt+1 を知っているしか閉じる道がありませんでした。',
+      '編集中にカレンダーややることの板を押すと、何も起きず理由も出ませんでした。いまは画面の下に理由が出ます。',
+    ],
+  },
+  {
     id: '2026-08-22-frontmatter-repair',
     title: '文書の情報が壊れていても、黙って消さなくなりました',
     items: [
@@ -290,20 +300,10 @@ export const NOTICES: readonly Notice[] = [
       '行を 1 回押して選んだだけでは編集に入りません(それは「選ぶ」で、「開く」ではありません)。',
     ],
   },
-  {
-    id: '2026-08-18-figures-and-folders',
-    title: 'フォルダの操作を OS のファイラに合わせ、貼った図も残るようになりました',
-    items: [
-      'ウェブページの図(SVG)をコピーして貼ると、図のまま添付として保存します。拡大しても粗くならず、書き出しにも入ります。',
-      'フォルダの中でノートを作った直後にタブを閉じても、居場所(どのフォルダに入れたか)が残るようになりました。これまでは作り直した場所から出てしまうことがありました。',
-      'フォルダに入れたとき、画面はその場に留まるようになりました(入れた先へ勝手に移動しません)。どこへ入れたかは画面の下に出ます。',
-      'フォルダの表で Enter を押すと開き、Backspace で親へ戻り、Delete でゴミ箱へ入れられます。Ctrl+A でいま出ている行をぜんぶ選べます。',
-    ],
-  },
 ];
 
 /**
  * ⚠ **落としたぶんの原本は CHANGELOG に在る**(上限 20 件を超えたので、古いほうから
  *   `2026-08-16-office-save-to-pkc` / `2026-08-17-office-save-same-note`(2026-08-19)、
- *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first`(2026-08-22)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
+ *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders`(2026-08-22)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
  */

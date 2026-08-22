@@ -782,10 +782,23 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
    */
   it('🔴 打鍵中でも効くコマンドの一覧が変わっていない', () => {
     const ids = KEY_COMMANDS.filter((c) => c.whileTyping === true).map((c) => c.id);
+    /**
+     * ⚠ **2026-08-22 に `open-settings` / `view-dual` を足した**(user 目線
+     *   レビュー U-8)── わきの面(ノートを映さない面)は 4 つあるのに、
+     *   名乗っていたのは `open-flags` / `open-help` の **2 つだけ**だった。
+     *   マウスでは 4 つとも開くのに鍵では 2 つだけ、という非対称である
+     *   (user 裁定 2026-08-08「ノートを映さない面は編集中でも開ける」は
+     *   面の側でだけ守られていた)。
+     * 🔑 わきの面の全数は `tests/features/keymap.test.ts` が
+     *   `isAsidePane` から引いて検算する ── ここは**一覧が黙って動かないこと**
+     *   だけを見る(2 つの検査で役割を分ける)。
+     */
     expect(ids).toEqual([
       'toggle-replace',
+      'open-settings',
       'open-flags',
       'open-help',
+      'view-dual',
       'toggle-sidebar',
       'toggle-inspector',
       'toggle-focus-mode',

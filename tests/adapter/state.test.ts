@@ -123,6 +123,28 @@ describe('reducer: lean aggregate', () => {
       'detail',
     );
     /**
+     * 🔴 **断るなら、声に出して断る**(user 目線レビュー U-2、2026-08-22)。
+     *
+     * ⚠ 直す前は `events: []` で**黙って捨てて**いた ── 押しても画面が 1 ドットも
+     *   動かず、帯にも何も出ない。user から見ると「タイルが壊れている」としか
+     *   見えない(実際 user から「動線がクソだし、直感的ではない」と指摘された)。
+     * 🔑 **呼び名は画面の字と同じにする** ── 断り文に `kanban` と出ると
+     *   user は別のものを探す。
+     */
+    const refused = reduce(s, { type: 'SET_VIEW_MODE', mode: 'kanban' }).state;
+    expect(refused.error, '黙って捨てている(無言の dead click)').toBe(
+      '編集中はやることの板を開けません(保存するか、取り消してください)',
+    );
+    expect(
+      reduce(s, { type: 'SET_VIEW_MODE', mode: 'calendar' }).state.error,
+      '面ごとに呼び名が変わっていない',
+    ).toContain('カレンダー');
+    // ⚠ 対照群 ── 開ける面では理由を出さない(常在する断り文を作らない)
+    expect(
+      reduce(s, { type: 'SET_VIEW_MODE', mode: 'help' }).state.error,
+      '開けたのに断り文が出た',
+    ).toBeNull();
+    /**
      * 🔴 **ただし「ノートを映さない面」は編集中でも開ける**(user 裁定 2026-08-08。
      * P11 の Q5 を覆した)。⚠ ここを塞ぐと「書きながらマニュアルを読む」が
      * できない ── ヘルプの主目的である。
