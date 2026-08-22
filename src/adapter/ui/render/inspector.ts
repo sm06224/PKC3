@@ -46,6 +46,7 @@ import { iconButton } from './icons';
 import { formatStoredDate } from '@features/datetime/stored-date';
 // 居場所の解決は `features/relation/tree` が正本(ファイラの帯・パンくずと共有)
 import { readTags } from '@features/flavor/tags';
+import { frontmatterProblem } from '@features/markdown/frontmatter';
 import {
   CREATABLE_KINDS,
   RELATION_LABELS,
@@ -150,9 +151,27 @@ export class InspectorRenderer {
     if (tagBox) {
       const body = state.openBody?.lid === meta.lid ? state.openBody.body : null;
       const tags = body === null ? null : readTags(body);
+      /**
+       * 🔴 **読めていないときに「無し」と断定しない**(#284)。
+       *
+       * ⚠ `parseFrontmatter` は読めないときも「そもそも書いていない文書」と
+       *   **同じ答え**(`found: false` / `meta: {}`)を返すので、閉じの `---` を
+       *   失ったノートに対して、この行は**タグ「無し」と嘘をついていた**
+       *   ── すぐ上の「本文が読めていないときは行ごと空(嘘の『タグ無し』を
+       *   出さない)」は守られているのに、**対称の反対側だけ空いていた**
+       *   (CLAUDE.md「片側を直したら、対称の反対側を必ず疑う」)。
+       * 🔑 理由は `frontmatterProblem` が 1 行で返す ── ここで
+       *   `warnings.some(...)` を書き直さない(判定を 2 か所にしない)。
+       * ⚠ 行は狭いので、**画面には短く / 理由は `title` に**(タグの札と同じ作法)。
+       */
+      const problem = body === null ? null : frontmatterProblem(body);
       tagBox.textContent = '';
+      tagBox.removeAttribute('title');
       if (tags === null) {
         tagBox.textContent = '—';
+      } else if (problem !== null) {
+        tagBox.textContent = '読めていません';
+        tagBox.title = problem;
       } else if (tags.length === 0) {
         tagBox.textContent = '無し';
       } else {

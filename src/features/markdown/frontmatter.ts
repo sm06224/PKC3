@@ -105,22 +105,95 @@ export function frontmatterLineCount(body: string): number {
 }
 
 /**
- * 閉じの `---` が無いとき、それが**壊れた frontmatter** なのか
- * **ただの水平線で始まる文書**なのかを見分ける(#284)。
+ * 閉じの `---` が無いとき、**frontmatter として読める行が先頭から何行続くか**を返す
+ * (#284 / #318)。`0` なら「ただの水平線で始まる普通の文書」。
  *
  * ⚠ 見分けずに警告すると、`---` で始まる普通の文書が取込のたびに警告を出す
  *   ── 警告が常在すると、本物の警告がそこに紛れる(CLAUDE.md「stderr は 0 行を保つ」
  *   と同じ理屈)。
- * 🔑 判定は「**最初の空行までに `key:` の行が 1 つでもあるか**」── frontmatter は
- *   key/value の並びなので、これで水平線とはほぼ割れる。
+ * 🔑 走は「**先頭から続く `key:` の行**(+ それに続く字下げの行)」である。
+ *   frontmatter は key/value の並びなので、これで水平線と割れる。
+ * ⚠ 「最初の空行まで」で数えてはいけない ── **本文の行まで走に入り**、
+ *   閉じを補うときに本文の後ろへ入る(1 稿目で実際にそうなった)。
+ *
+ * 🔴 **答えを 1 か所にする**(CLAUDE.md §7)。この関数の答えは 2 か所で使う ──
+ * ① `parseFrontmatter` が「読めていない」と**警告を出すか**
+ * ② `spliceFrontmatterKeys` が「閉じを補って直すか、fence を前置するか」
+ * ⚠ 別々に数えると、**警告は出さないのに書込は壊す**(あるいはその逆)という
+ *   食い違いができる ── #318 はその食い違いそのものだった。
+ *
+ * ⚠ **key の見分けは `parseFlatYaml` と同じ規則にする**(`^[A-Za-z_][\w.-]*$`)。
+ *   直す前はここだけ `^[A-Za-z0-9_.-]+$` で**数字始まりを許して**いたので、
+ *   `12:30 に集合` という普通の 1 行が「壊れた frontmatter」に見えていた
+ *   ── 読み手が読まない形を、検出器だけが frontmatter と呼んでいた。
  */
-function looksLikeFrontmatter(lines: readonly string[]): boolean {
-  for (const line of lines) {
-    if (line.trim() === '') return false;
+function frontmatterRunLength(lines: readonly string[]): number {
+  /** 走に入っている最後の行。⚠ **key の行で切る**(空行までではない)。 */
+  let last = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? '';
+    if (line.trim() === '') break;
     const colon = findKeyColon(line);
-    if (colon > 0 && /^[A-Za-z0-9_.-]+$/.test(line.slice(0, colon).trim())) return true;
+    if (colon > 0 && /^[A-Za-z_][\w.-]*$/.test(line.slice(0, colon).trim())) {
+      last = i;
+      continue;
+    }
+    /**
+     * ⚠ **字下げの行は「続き」である**(ブロック配列 `tags:\n  - あ`)。
+     * ここで切ると、閉じを補うとき**配列の中身が本文へ落ちる** ── user の
+     * データの意味が変わる(1 稿目で実際にそうなった)。
+     */
+    if (last === i - 1 && /^\s/.test(line)) {
+      last = i;
+      continue;
+    }
+    break;
   }
-  return false;
+  return last + 1;
+}
+
+/**
+ * 🔴 **「文書の情報が読めていない」理由を 1 行で返す**(#284)。読めているなら `null`。
+ *
+ * ## なぜ要るか
+ *
+ * `parseFrontmatter` は読めないとき `found: false` を返すが、それは
+ * **「そもそも書いていない文書」と同じ答え**である ── 画面側はその 2 つを
+ * 区別できないので、情報ペインは壊れた本文にも「タグ **無し**」と**断定して
+ * 嘘をつく**(その数行上の「本文未読では嘘を書かない」は守られているのに、
+ * **対称の反対側だけ空いていた**)。
+ *
+ * ⚠ **`warnings` の消費者が皆無というわけではない** ── 取込(`plain-markdown.ts`)と
+ *   書き出し(`pkc3-markdown-zip.ts`)は既に読んでいる。無いのは**画面側の出口**だった。
+ *
+ * 🔑 判定を**ここ 1 か所**に置く(§7)── 画面ごとに `warnings.some(...)` を
+ *   書くと、`kind` を足したとき片方だけ拾う。
+ */
+export function frontmatterProblem(body: string): string | null {
+  const r = parseFrontmatter(body);
+  const own = r.warnings.find((x) => x.kind === 'malformed');
+  if (own !== undefined) return own.detail;
+  /**
+   * 🔴 **既に二重 fence になっている本文も拾う**(#318 の「対で塞ぐもの」)。
+   *
+   * ⚠ #318 の直しは**これから壊れるのを止める**だけで、**既に壊れた本文はそのまま
+   *   残る** ── そこが厄介で、二重 fence は 1 本目が正しく読めてしまうため
+   *   `warnings` が **0 件**になる(= この関数の上半分では拾えない)。
+   *   結果、user が書いた `tags` は本文側へ落ちているのに、情報ペインは
+   *   **「無し」と断定する**(#318 が「いちばん壊れた状態で、いちばん安心させる」
+   *   と書いた形)。
+   * 🔑 だから **読めた残り(`r.body`)をもう一度見る** ── そこがまた
+   *   「開きだけの frontmatter」なら、2 本目が残っている。
+   * ⚠ ただの水平線で始まる本文は `frontmatterRunLength` が 0 を返すので鳴らない
+   *   (判定は 1 つのまま ── §7)。
+   */
+  if (r.found) {
+    const rest = parseFrontmatter(r.body);
+    if (rest.warnings.some((x) => x.kind === 'malformed')) {
+      return '文書の情報の下に、閉じの --- を欠いた 2 本目が残っています(そちらは読めていません)';
+    }
+  }
+  return null;
 }
 
 /**
@@ -157,13 +230,24 @@ export function parseFrontmatter(body: string): FrontmatterResult {
      *   (soft warning のまま)。呼び側が「情報として読めていない」と言えればよい。
      */
     /**
-     * ⚠ **開きの直後が空行なら、それは水平線である**(実測で判明)。
-     * `OPEN_FENCE` は `---\s*\r?\n` なので **`---` の次の空行まで飲む** ──
-     * `lines` だけを見ると「1 行目が `tags:`」に見えてしまい、
-     * `---`・空行・`tags: [あ]` という普通の文書を壊れた情報と読む。
+     * 🔴 **「開きの直後が空行なら水平線」という除外を落とした**(#284、2026-08-22)。
+     *
+     * ⚠ その除外は**parse の規則と食い違っていた**。実測:
+     *
+     * | 本文 | `parseFrontmatter` の答え |
+     * |---|---|
+     * | `---\n\ntags: [あ]\n---\n本文` | `found: true` / `meta: {tags:['あ']}` ← **正規に読める** |
+     * | `---\n\ntags: [あ]\n本文` | `warnings: []` ← **完全に無言** |
+     *
+     * つまり **読めると認めている形なのに、閉じを失ったときだけ黙って**いた。
+     * ⚠ 除外の理由づけ(「`OPEN_FENCE` が空行まで飲むので水平線と区別できない」)は
+     *   正しかったが、**同じ理屈が正規の経路にも効いている** ── `\s*` が空行を飲むから
+     *   こそ、閉じさえ在れば `tags:` は frontmatter として読まれる。片側だけ除外すると
+     *   「読めるのに、壊れたときは黙る」になる。
+     * 🔑 水平線との切り分けは `frontmatterRunLength` に寄せた(`key:` の行が
+     *   1 つも無ければ 0 = 警告しない)。
      */
-    const blankAfterOpen = (OPEN_FENCE.exec(body)?.[0].match(/\n/g)?.length ?? 1) > 1;
-    if (!blankAfterOpen && looksLikeFrontmatter(lines)) {
+    if (frontmatterRunLength(lines) > 0) {
       warnings.push({
         kind: 'malformed',
         detail: '先頭の --- に対応する閉じの --- がありません(文書の情報として読めていません)',
@@ -603,14 +687,39 @@ export function spliceFrontmatterKeys(
       break;
     }
   }
+  const eol = body.includes('\r\n') ? '\r\n' : '\n'; // 新規行のみに使う
   if (closeAt === -1) {
-    // 開き fence だけで閉じが無い = frontmatter 不在扱い(parseFrontmatter と同じ)
-    const lines = entries.map(lineFor).filter((l): l is string => l !== null);
-    if (lines.length === 0) return body;
-    return `---\n${lines.join('\n')}\n---\n${body}`;
+    /**
+     * 🔴 **開きは在るが閉じが無い**(#318)。直す前はここも「frontmatter 不在」と
+     * 見なして fence を**前置**していたが、それは user のデータを壊す:
+     *
+     * ```
+     * 元:   ---\ntags: [あ]\n本文…
+     * 直前: ---\nstatus: done\n---\n---\ntags: [あ]\n本文…   ← 二重 fence
+     * ```
+     *
+     * ⚠ **そのあとが本当に悪い**(実測)── 二重になると再 parse は
+     *   `found: true` / `meta: {status:'done'}` / `warnings: 0 件` を返す。つまり
+     *   **user が書いた `tags` は読めない側へ落ちたのに、画面は「読めている」顔をする**。
+     *   いちばん壊れた状態で、いちばん安心させる形である。
+     * ⚠ 到達経路は**どちらも普通の操作**(カレンダーで日付を付ける / 印を切り替える)。
+     *
+     * 🔑 だから **閉じを補ってから書く** ── user が書いた key を残す。
+     *   補う位置は `frontmatterRunLength`(= 警告を出すかの判定と**同じ 1 つ**)。
+     * ⚠ `key:` の行が 1 つも無ければ **ただの水平線で始まる普通の文書**なので、
+     *   これまでどおり前置する(本文は byte 無傷のまま後続する)。
+     */
+    const run = frontmatterRunLength(parts.map((p) => p.replace(/\r?\n$/, '')));
+    if (run === 0) {
+      const lines = entries.map(lineFor).filter((l): l is string => l !== null);
+      if (lines.length === 0) return body;
+      return `---\n${lines.join('\n')}\n---\n${body}`;
+    }
+    // 閉じを 1 行だけ補って、通常の経路へ合流する(以降は原文 splice のまま)
+    parts.splice(run, 0, `---${eol}`);
+    closeAt = run;
   }
 
-  const eol = body.includes('\r\n') ? '\r\n' : '\n'; // 新規行のみに使う
   const fmParts = parts.slice(0, closeAt);
   for (const [key, value] of entries) {
     const keyRe = new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*:`);
