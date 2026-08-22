@@ -65,6 +65,25 @@ export class CalendarRenderer {
     }
     const byDate = groupEntriesByDate(metas, state.showArchived);
 
+    /**
+     * 🔴 **器のスクロール位置を返す**(#303、着地前レビュー B-1)。
+     *
+     * この面は指紋が変わると**格子ごと作り直す**(`textContent = ''`)。⚠ 指紋には
+     * `selectedLid` が入っているので、**予定を 1 つ押しただけで**全部作り直される。
+     * 予定を器(`day-events`)に入れて中でスクロールさせるようにした以上、
+     * ここで控えておかないと **押した瞬間に器が先頭へ戻り、押した予定が視界から
+     * 消える**(押した手応えが画面から失われる)。
+     *
+     * 🔑 これは「置き換えの作法」の③**後始末**である(CLAUDE.md §10)── 直す前は
+     *   器そのものが無かったので、**この直しで新しく落ちた性質**にあたる。
+     * ⚠ 鍵は**日付**にする(node ではなく)── node は作り直されて別物になる。
+     */
+    const scrolls = new Map<string, number>();
+    for (const box of this.region.querySelectorAll<HTMLElement>('[data-pkc-field="day-events"]')) {
+      const key = box.closest('[data-pkc-date]')?.getAttribute('data-pkc-date');
+      if (key !== null && key !== undefined && box.scrollTop > 0) scrolls.set(key, box.scrollTop);
+    }
+
     this.region.textContent = '';
 
     const bar = document.createElement('div');
@@ -170,7 +189,42 @@ export class CalendarRenderer {
           num.setAttribute('data-pkc-field', 'day-number');
           num.textContent = String(day);
           td.append(num);
-          for (const meta of byDate[key] ?? []) {
+          const items = byDate[key] ?? [];
+          /**
+           * 🔴 **その日に何件あるかを、畳まれない所に出す**(#303)。
+           *
+           * ⚠ **理由づけを直した**(着地前レビュー B-6)── 1 稿目は
+           *   「入り切らない分の手がかり」とだけ書いていたが、閾値は
+           *   「2 件以上」であって「溢れているとき」ではない。1440×900 では
+           *   3 件まで器に収まるので、**全部見えている日にも数字が出る**
+           *   ── 理由と実装が食い違っていた。
+           * 🔑 出しているのは「**その日に何件あるか**」である(業務画面の密度)。
+           *   溢れている日では、それがそのまま「畳まれた分が在る」手がかりになる。
+           * ⚠ 1 件のときは出さない ── 見えている 1 つに「1」と添えるのは飾りである。
+           * ⚠ **溢れているかで出し分けない** ── 描画のたびに実寸を読むことになり、
+           *   「放っておいても変わる観測点」を製品コードに持ち込む(CLAUDE.md §4)。
+           */
+          if (items.length >= 2) {
+            const count = document.createElement('div');
+            count.setAttribute('data-pkc-field', 'day-count');
+            count.textContent = String(items.length);
+            td.append(count);
+          }
+          /**
+           * 🔴 **予定は器に入れる**(#303)。器は絶対配置なので、
+           * **何件入れてもセルの内在高が変わらない**。
+           * ⚠ 直す前は `td` の直下に積んでいたため、予定 1 件で下の週が
+           *   最大 **53.2px** 押し下がった(1440×900 実測)── 同じ座標の
+           *   2 打目が「同じ曜日の別の週」に当たっていた。
+           * ⚠ 器は**予定が 0 件でも作る** ── 1 件目で DOM の形が変わると、
+           *   そこでまた行が動く(ゼロ件の次元を作らない)。
+           */
+          const events = document.createElement('div');
+          events.setAttribute('data-pkc-field', 'day-events');
+          td.append(events);
+          // ⚠ 位置を戻すのは**中身を入れた後**(空の器に代入しても 0 に丸められる)
+          const keep = scrolls.get(key);
+          for (const meta of items) {
             const item = document.createElement('div');
             item.setAttribute('data-pkc-entry', meta.lid);
             item.setAttribute('data-pkc-action', 'select-entry');
@@ -181,8 +235,9 @@ export class CalendarRenderer {
             if (meta.lid === state.selectedLid)
               item.setAttribute('data-pkc-selected', '');
             item.textContent = meta.title;
-            td.append(item);
+            events.append(item);
           }
+          if (keep !== undefined) events.scrollTop = keep;
         }
         tr.append(td);
       });

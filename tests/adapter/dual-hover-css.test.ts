@@ -16,22 +16,16 @@
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+/**
+ * ⚠ **道具は共有する**(#303 の着地前レビュー B-4)── ここに在った
+ *   `strip` / `blocksFor` / `withoutMedia` は `calendar-row-height.test.ts` へ
+ *   丸ごとコピーされていた。CLAUDE.md §1 に「CSS を読む test で 5 回踏んだ」と
+ *   記録がある種類の道具なので、2 か所に置くと**次に直したとき片方だけ直る**。
+ */
+import { stripComments, blocksFor, withoutMedia } from '../helpers/css-blocks';
 import { THEMES } from '../../src/adapter/ui/render/theme';
 
-/** 注釈を剥ぐ ── 剥がないと直前の注釈が選択子の一部として拾われる。 */
-const strip = (css: string): string => css.replace(/\/\*[\s\S]*?\*\//g, '');
-
-const TOKENS = strip(readFileSync('src/styles/tokens.css', 'utf-8'));
-
-/** `選択子 { 宣言 }` を全部読み、選択子に `sel` を含むブロックの宣言を返す。 */
-function blocksFor(css: string, sel: string): string[] {
-  const out: string[] = [];
-  for (const m of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-    const sels = m[1]!.split(',').map((x) => x.trim().replace(/\s+/g, ' '));
-    if (sels.includes(sel)) out.push(m[2]!);
-  }
-  return out;
-}
+const TOKENS = stripComments(readFileSync('src/styles/tokens.css', 'utf-8'));
 
 /** テーマ 1 つぶんの配色トークンを読む。無ければ undefined(呼び手が落とす)。 */
 function token(theme: string, name: string): string | undefined {
@@ -92,34 +86,8 @@ describe('2 ペインの行: hover と印(marked)の色(#312 ①)', () => {
   });
 });
 
-/**
- * `@media` ブロックを**構文で**取り除く(入れ子の brace を数えて対応する閉じまで)。
- *
- * ⚠ 「最初の `@media` で切る」では足りない ── app.css は `@media` 群の**後にも**
- *   素の規則が続く(filer の印の規則は媒体クエリより後に在り、切ると見えなくなる
- *   ── この test の 1 稿目が実際にそれで「規則が無い」と誤答した)。
- * ⚠ 中まで拾わない理由は従来どおり: 印刷や狭い版面だけの規則で
- *   「画面の規則を消しても緑」になる。
- */
-function withoutMedia(css: string): string {
-  let out = css;
-  for (let at = out.indexOf('@media'); at !== -1; at = out.indexOf('@media')) {
-    const open = out.indexOf('{', at);
-    expect(open, '@media に { が無い(構文が壊れている)').toBeGreaterThan(-1);
-    let depth = 1;
-    let i = open + 1;
-    for (; i < out.length && depth > 0; i++) {
-      if (out[i] === '{') depth++;
-      else if (out[i] === '}') depth--;
-    }
-    expect(depth, '@media の閉じ } が無い(構文が壊れている)').toBe(0);
-    out = out.slice(0, at) + out.slice(i);
-  }
-  return out;
-}
-
 describe('app.css の規則(hover が --surface-hover を使い、印を塗り直さない)', () => {
-  const css = strip(readFileSync('src/styles/app.css', 'utf-8'));
+  const css = stripComments(readFileSync('src/styles/app.css', 'utf-8'));
   const screenOnly = withoutMedia(css);
 
   it('🔴 hover の規則が --surface-hover を使っている', () => {

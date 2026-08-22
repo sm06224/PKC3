@@ -2193,6 +2193,13 @@ select:focus-visible {
   min-height: 0;
   height: 100%;
   padding: var(--s3);
+  /* 🔴 **入り切らない月は、面ごとスクロールさせる**(#303 と対)。
+   * ⚠ セルに下限(`5em`)を置いた以上、器が低い版面では表が器を超える ──
+   *   実測(700×640、1 カラムに畳まれた版面):器 58px に対し表 415.9px。
+   *   ここが `visible` のままだと、**表が面の外へ 358px はみ出す**。
+   * 🔑 下限と面のスクロールは**対で 1 つの直し**である ── 片方だけだと
+   *   「潰れて狙えない」か「はみ出して重なる」かのどちらかになる。 */
+  overflow: auto;
 }
 /* 🔴 **曜日の列は等幅**(`table-layout: fixed`)。⚠ 無いと中身なりに伸び、
  * 予定が 1 件入っただけで 1 列が 696px を占める(上の実測)。
@@ -2201,6 +2208,14 @@ select:focus-visible {
   width: 100%;
   table-layout: fixed;
   border-collapse: collapse;
+  /* ⚠ `height: 100%` は flex の子に効かせるため `flex: 1` と対で置く。
+   * 🔴 **一度 `flex: 1 0 auto` に変えたが、戻した**(#303、変異試験で判明)──
+   *   「縮むと行が面の外へ描かれて届かない」という理屈で `flex-shrink: 0` に
+   *   したが、**外して測ったら壊れなかった**(M14 / M15 とも SURVIVED。
+   *   スクロールし切って最下段の下端が器に入るところまで見ても同じ)。
+   *   届くことを担保しているのは**面の `overflow: auto`** のほうで、こちらは
+   *   外すと落ちる(M8 KILLED)。⚠ 効いていない宣言に「これが無いと壊れる」と
+   *   書くと、次に読む人が動かせなくなる。 */
   flex: 1;
   min-height: 0;
 }
@@ -2216,6 +2231,49 @@ select:focus-visible {
   font-size: 11px;
   color: var(--muted);
   height: 1px; /* 見出しは中身なり ── 残りを日のセルへ配る */
+}
+/* 🔴 **行の高さを中身から切り離す**(#303)。
+ *
+ * 直す前は予定を `td` の**直下**に積んでいたので、1 件入るごとにその週の内在高が
+ * 増え、表が `flex: 1` で引き伸ばされている分だけ**下の週が押し下がった**。
+ * 実測(1440×900、予定 1 件):週の上端が `0.0 / 53.2 / 42.8 / 32.4 / 20.8 / 10.4px`
+ * ずれる ── 同じ座標の 2 打目が**同じ曜日の別の週**に当たっていた
+ * (`binder.ts` の分岐は `meta.date === date ? null : date` なので、
+ * 2 打目は「外れる」ではなく「**その日へ移る**」= 実機報告の見え方と一致)。
+ *
+ * 🔑 直しは**器を 1 枚**(`day-events`)足して絶対配置にすること。
+ *   セルの内在高が「日の数字の帯」だけになるので、全週が等しくなる。
+ * ⚠ **`calc(100% / 6)` の類は使わない** ── 月によって 5 週 / 6 週で変わる。 */
+[data-pkc-region='calendar-grid'] tbody td {
+  position: relative;
+  /* 🔑 日の数字の帯 ── **この 1 つ**から数字の高さと器の上端を出す
+   *   (同じ数を 2 か所に書かない。片方だけ変えると帯に食い込む) */
+  --day-band: 1.15rem;
+  /* 🔴 **下限** ── 器が低いとセルが 30〜40px まで潰れて狙えなくなる。
+   *   ⚠ 入り切らない分は器の中でスクロールし、件数は日の数字の横に出る。 */
+  height: 5em;
+}
+/* 🔴 **予定の器**(#303)── 絶対配置なので、何件入れても行は動かない。
+ * ⚠ `inset` の基準は **td の padding box**(枠の内側)なので、
+ *   td の padding(`--s2`)を自分で持つ。 */
+[data-pkc-region='calendar-grid'] [data-pkc-field='day-events'] {
+  position: absolute;
+  inset: calc(var(--s2) + var(--day-band)) var(--s2) var(--s2);
+  overflow: auto;
+  /* ⚠ 内側スクロールを新設したので、ホイールが本文の面へ流れないようにする
+   *   (`[data-pkc-region='detail']` の `overflow: auto` と競合する)。 */
+  overscroll-behavior: contain;
+}
+/* 🔴 **件数**(#303)── 器に入り切らない予定はスクロールの向こうへ行く。
+ * ⚠ 流れに入れない(絶対配置)── 入れると、また中身で行が動く。 */
+[data-pkc-region='calendar-grid'] [data-pkc-field='day-count'] {
+  position: absolute;
+  top: var(--s2);
+  right: var(--s2);
+  line-height: var(--day-band);
+  font-size: 10px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 /* ⚠ **日のセルは押す所**なので、指標を出す(直す前は「地を押す」ことが
  *   画面から読めなかった)。⚠ 高さは変えない(ずれると狙えない)。 */
@@ -2248,6 +2306,15 @@ select:focus-visible {
 [data-pkc-field='day-number'] {
   font-size: 11px;
   color: var(--muted);
+  /* ⚠ 帯の高さは**器の上端と対**である(#303)── 上の `--day-band` から出す。
+   *   噛み合っているかは smoke が実寸で見る(数字の下端 == 器の上端)。
+   * 🔴 ここに `height: var(--day-band)` も書いていたが、**外して測ったら no-op
+   *   だった**(着地前レビュー A-1)── 行ボックスの高さ = `line-height` なので
+   *   `height: auto` と同値である。実測: 有り 18.39px / 無し 18.41px、
+   *   器の上端はどちらも 22.89px、今日の丸も同じ。⚠ しかも消す前のコメントは
+   *   「外すと今日の丸の分だけ帯が伸びる」と**確かめずに書いた因果**だった
+   *   (CLAUDE.md「これが無いと壊れると書く前に、外して壊れるのを見る」)。 */
+  line-height: var(--day-band, normal);
 }
 /* 🔴 **予定は押せる形に**(2026-08-20)── 直す前は素のテキストで、
  * 手がかりが `cursor: pointer` だけだった(押せると分からない)。 */
@@ -3347,5 +3414,30 @@ select:focus-visible {
     height: 50vh;
     min-height: 0;
     break-inside: avoid;
+  }
+
+  /**
+   * 🔴 **カレンダーの日は、紙では中身なりに伸ばす**(#303)。
+   *
+   * 画面では行の高さを中身から切り離している(掴んだ座標がずれないため)が、
+   * ⚠ その器は `overflow: auto` の**スクロール箱**なので、**紙では箱の高さで
+   *   予定が切られる** ── 印刷は 2 面目であり、紙にスクロールは無い。
+   * ⚠ この print ブロックに calendar 用の規則は直す前 **0 件**だった。
+   *
+   * 🔑 素通しへ戻すのは 3 つ:器の絶対配置 / 器の切り取り / セルの下限。
+   *   ⚠ 3 つとも要る ── `position` だけ戻すと器が流れに入るが `overflow: auto`
+   *   のままなので、**高さ 0 の箱**になって予定が 1 件も出ない。
+   */
+  [data-pkc-region='calendar-grid'] [data-pkc-field='day-events'] {
+    position: static;
+    overflow: visible;
+  }
+  [data-pkc-region='calendar-grid'] tbody td {
+    height: auto;
+  }
+  /* ⚠ 件数は紙では要らない ── 全部そのまま出ているので、数える手がかりが
+   *   要らない(画面では畳まれた分を知らせる働きがある)。 */
+  [data-pkc-region='calendar-grid'] [data-pkc-field='day-count'] {
+    display: none;
   }
 }
