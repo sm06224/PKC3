@@ -535,6 +535,7 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
+    ['2026-08-21-same-origin-memory', '358f6f89'],
     ['2026-08-21-app-dialog', 'e754af27'],
     ['2026-08-21-auto-pair-skip', '3d7d4b02'],
     ['2026-08-20-boot-and-search', '73b3ae97'],
@@ -554,7 +555,6 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-08-18-folder-first', 'c35f066d'],
     ['2026-08-18-shortcut-keys', 'b12084ce'],
     ['2026-08-18-paste-and-drop', '558597bf'],
-    ['2026-08-18-word-vector-figures', 'a1641a5b'],
     // ⚠ 上限 20 を超えたので 2026-08-20 に落とした(原本は CHANGELOG)
     // ['2026-08-17-word-export', '4454a5dd'],
   ];
