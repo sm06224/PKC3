@@ -126,7 +126,7 @@ jobs:
       #    明示的に回す。
       - name: emsdk を復元
         id: c_emsdk
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: /home/runner/emsdk
           key: emsdk-${{ inputs.emsdk }}-v1
@@ -136,7 +136,7 @@ jobs:
       #    ⚠ 手で `-v2` に上げる運用は忘れるので、**file の内容から導出**させる。
       - name: Qt6(host / wasm)を復元
         id: c_qt
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: |
             /home/runner/qt-host/install
@@ -156,7 +156,7 @@ jobs:
       #    🔑 **鍵で名前空間を分ける**(Qt キャッシュに対して既にやったのと同じ手)。
       - name: ccache を復元
         id: c_ccache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: /home/runner/.ccache
           # ⚠ 完全一致は狙わない ── 前回の続きから始められればよいので
@@ -256,7 +256,7 @@ jobs:
 
       - name: Qt6 を保存
         if: always() && steps.c_qt.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: |
             /home/runner/qt-host/install
@@ -265,7 +265,7 @@ jobs:
 
       - name: emsdk を保存
         if: always() && steps.c_emsdk.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: /home/runner/emsdk
           key: emsdk-${{ inputs.emsdk }}-v1
@@ -311,7 +311,7 @@ jobs:
       # ⚠ 復元は **clone のあと** ── `git clone` は空でないディレクトリを嫌う
       - name: 外部 tarball を復元
         id: c_tar
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: /home/runner/lo-core/external/tarballs
           key: lo-tarballs-v1
@@ -682,7 +682,7 @@ jobs:
       # 🔴 **失敗しても保存する** ── 次の試行を数分にするための本体
       - name: ccache を保存
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: /home/runner/.ccache
           # ⚠ 復元側と**同じ形**でなければ、次の run が拾えない
@@ -690,7 +690,7 @@ jobs:
 
       - name: 外部 tarball を保存
         if: always() && steps.c_tar.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: /home/runner/lo-core/external/tarballs
           key: lo-tarballs-v1
