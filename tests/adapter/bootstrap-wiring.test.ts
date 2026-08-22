@@ -23,6 +23,62 @@ function bootstrapBody(): string {
 }
 
 describe('bootstrap の配線', () => {
+  /**
+   * 🔴 **面を開く口は 1 つ**(#300 段②のレビュー、2026-08-22)。
+   *
+   * ⚠ 「集計を開いたら憶えている束ね方を思い出す」は `binder.ts` にべた書きされて
+   *   おり、**アドレスから開いた集計だけ表が出ない**状態だった。`open-view.ts` へ
+   *   寄せたが、⚠ **`main.ts` にはさらに 2 か所**(ランチャーのタイル / 添付起動)
+   *   同じ直撃が残っていた ── CLAUDE.md「片側を直したら、対称の反対側を必ず疑う」。
+   * 🔑 だから `bootstrap()` の中で **`SET_VIEW_MODE` を直に撃たない**ことを pin する。
+   */
+  it('🔴 面を開くのに SET_VIEW_MODE を直撃しない(open-view.ts を通す)', () => {
+    // ⚠ **file 全体**で見る ── 直撃していたのは `bootstrap()` の中ではなく
+    //   `startApp()` の中(ランチャーのタイル / 添付起動)だった。
+    //   `bootstrapBody()` に絞ると**その 2 か所を 1 つも見ない**(初稿で踏んだ)
+    const direct = [...MAIN.matchAll(/type: 'SET_VIEW_MODE'/g)].length;
+    expect(direct, 'SET_VIEW_MODE を直に撃っている(開いた後の後始末が抜ける)').toBe(0);
+    // ⚠ 空振り防止 ── 面を開く配線そのものは在ること(3 か所)
+    expect(
+      [...MAIN.matchAll(/openView\([\w.]*[Dd]ispatcher/g)].length,
+      '面を開く配線が足りない',
+    ).toBe(4);
+  });
+
+  /**
+   * 🔴 **ディープリンクは boot 完了の刻印より前に当てる**(#300 段②、2026-08-22)。
+   *
+   * ⚠ 後ろに置くと、`data-pkc-boot="ready"` を見て進む smoke / probe が
+   *   **本文の面を見てから面が入れ替わる** ── 競走になり、`flake` の顔で出る。
+   * ⚠ そして `main.ts` は**どの test からも実行されない**ので、配線を消す変異は
+   *   全緑で通る(この file の冒頭の理由)。だから原文で pin する。
+   * 🔑 判断・文言・断片の消し方は `deep-link.ts` の unit が見る ──
+   *   ここが見るのは「**呼んでいるか / 順序が正しいか**」だけ。
+   */
+  it('🔴 ディープリンクを当ててから boot 完了を刻む', () => {
+    const body = bootstrapBody();
+    const applyAt = body.indexOf('connectViewDeepLink(');
+    expect(applyAt, 'ディープリンクを当てていない').toBeGreaterThan(-1);
+    const readyAt = body.indexOf(`setAttribute('data-pkc-boot', 'ready')`);
+    expect(readyAt, 'boot 完了の刻印が無い').toBeGreaterThan(-1);
+    expect(applyAt, '刻印の後に当てている(smoke と競走になる)').toBeLessThan(readyAt);
+    const wiring = body.slice(applyAt, readyAt);
+    /**
+     * 🔴 **`openView` を渡している**(`SET_VIEW_MODE` 直撃ではない)。
+     * ⚠ 直撃にすると、開いた後の後始末(集計の束ね方を思い出す)が抜けて
+     *   **アドレスから開いた集計だけ表が出ない**(着地前レビューが拾った § 7 の実例)。
+     */
+    expect(wiring, 'openView を通していない(集計の束ね方が抜ける)').toContain(
+      'openView: (mode) => openView(app.dispatcher, mode)',
+    );
+    // ⚠ 空振り防止 ── 断り文の出口と、2 つの購読が実際に繋がっていること
+    expect(wiring, '理由を画面へ出す口が繋がっていない').toContain('OP_FAILED');
+    expect(wiring, '面の購読が繋がっていない(断片が消えない)').toContain('onViewChange');
+    expect(wiring, '断片の購読が繋がっていない(開いたまま足しても効かない)').toContain(
+      'hashchange',
+    );
+  });
+
   it('🔴 SW の登録を boot の成功側・失敗側の**両方**から呼ぶ', () => {
     // round-2 review L-6: 当初は boot より**前**に登録していたが、`register` は
     // precache(実測 1.6MB)の取得を始めるので、**初回訪問で boot の wasm /

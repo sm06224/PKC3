@@ -230,6 +230,12 @@ describe('🔴 クエリパラメータの抜け穴を作らない', () => {
   const ALLOWED: Readonly<Record<string, string>> = {
     'src/adapter/platform/flag-store.ts': 'flag の解決(ここが唯一の入口)',
     'src/features/link/permalink.ts': 'パーマリンク / ディープリンク(user 指示の唯一の用途)',
+    // 🔴 **ディープリンクを実際に読む側**(#300 段②、2026-08-22)。
+    //   ⚠ `permalink.ts` は「pure: no DOM」を名乗っているので `location` を読めない
+    //     ── **解くのが向こう、読むのがここ**、と分けてある。
+    //   ⚠ 用途は user 指示が許した 2 つのうちの「ディープリンク」そのもので、
+    //     **切替(flag)ではない** ── 面を選ぶだけで、挙動を変える枝を持たない。
+    'src/adapter/platform/deep-link.ts': 'ディープリンクの解決(アドレスを読む唯一の入口)',
     // ⚠ 読むのではなく**組み立てる**側(再起動 URL)。`location.href` を触るので
     //   検出語に掛かるが、値の解決はしていない
     'src/adapter/ui/render/flags.ts': '再起動 URL の組み立て(フラグ画面から)',
@@ -241,6 +247,18 @@ describe('🔴 クエリパラメータの抜け穴を作らない', () => {
    */
   const QUERY_READ = /location\.search|location\.href|location\.hash|URLSearchParams|searchParams/;
 
+  /**
+   * ⚠ **コメントを落とす。** 注記に書いた綴りで誤検知しない / **注記の綴りで
+   * 「生きている」と誤読しない**(2026-08-22 に後者で踏んだ ── `deep-link.ts` は
+   * 注記の 1 行だけで「読んでいる」を満たしていた)。
+   * 🔑 落とす規則は**ここ 1 か所**(CLAUDE.md §7)。
+   */
+  const codeOnly = (text: string): string =>
+    text
+      .split('\n')
+      .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+      .join('\n');
+
   it('🔴 クエリパラメータを読むのは flag の解決とパーマリンクだけ', () => {
     const offenders: string[] = [];
     const walk = (dir: string): void => {
@@ -251,12 +269,8 @@ describe('🔴 クエリパラメータの抜け穴を作らない', () => {
           continue;
         }
         if (!name.endsWith('.ts')) continue;
-        const text = readFileSync(full, 'utf-8');
         // ⚠ **コメントを落としてから**見る ── 注記に書いた綴りで誤検知しない
-        const code = text
-          .split('\n')
-          .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
-          .join('\n');
+        const code = codeOnly(readFileSync(full, 'utf-8'));
         /**
          * 🔴 **綴りの層で塞ぎ切る**(2026-08-08、レビュー指摘)。
          * ⚠ 直す前は `location.search` / `URLSearchParams` / `searchParams` の 3 語
@@ -281,12 +295,40 @@ describe('🔴 クエリパラメータの抜け穴を作らない', () => {
    */
   it('⚠ 許可した場所は実際にクエリパラメータを読んでいる(死んだ許可を残さない)', () => {
     for (const [file, why] of Object.entries(ALLOWED)) {
-      const text = readFileSync(file, 'utf-8');
+      // 🔴 **コメントを落としてから見る**(2026-08-22、着地前レビューが実測)。
+      //   ⚠ 生の text で見ていたため、`deep-link.ts` は**注記の 1 行だけ**で
+      //     満たされていた ── 実装を空にしても緑のままである。
+      //   ⚠ 落とす側(`offenders`)は `codeOnly` を通しているのに、
+      //     **主張を裏返したこちらだけ素通し**だった
+      //     (CLAUDE.md「検査の向きを裏返したら、作法も裏返る」)。
+      const text = codeOnly(readFileSync(file, 'utf-8'));
       expect(
         QUERY_READ.test(text),
         `${file} はもうクエリパラメータを読んでいない(${why} ── 表から外す)`,
       ).toBe(true);
     }
+  });
+
+  /**
+   * 🔴 **アドレスを読む口は、key を自分で取り出さない**(#300 段②、2026-08-22)。
+   *
+   * ⚠ 許可は **file 単位**なので、許した file の中に切替を 1 行足すと
+   *   全数検査を素通りする ── user が名指しで禁じた「**計測用だから枠を食わない**」を
+   *   そのまま書けてしまう(着地前レビューが、貼れる diff 付きで指摘した)。
+   * 🔑 だから `deep-link.ts` の**役目そのもの**を等値で pin する:
+   *   断片から key を取り出すのは `permalink.ts` の仕事で、ここは渡すだけ。
+   *   `location.search` は**断片を落とす 1 行にしか出てこない**。
+   */
+  it('🔴 ディープリンクの口は、断片から key を自前で取り出さない', () => {
+    const code = codeOnly(readFileSync('src/adapter/platform/deep-link.ts', 'utf-8')).split('\n');
+    expect(
+      code.filter((l) => /URLSearchParams|searchParams/.test(l)),
+      '断片から key を自前で取り出している(切替の抜け穴)',
+    ).toEqual([]);
+    expect(
+      code.filter((l) => l.includes('location.search')).map((l) => l.trim()),
+      'location.search が「断片を落とす」以外で使われている',
+    ).toEqual(['`${location.pathname}${location.search}${dropViewFromHash(location.hash)}`,']);
   });
 
   /**

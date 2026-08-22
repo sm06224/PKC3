@@ -23,6 +23,8 @@ import {
 } from '../src/adapter/ui/render/commands';
 import { showUpdateCard } from '../src/adapter/ui/render/update-card';
 import { RENDERABLE_FENCE_LANGS } from '../src/features/markdown/markdown-render';
+import { viewModeLabel, type ViewMode } from '../src/adapter/state/app-state';
+import { openableViewNames } from '../src/adapter/platform/deep-link';
 import { NOTICES, NOTICE_KEEP_MAX } from '../src/features/notice/notice-log';
 import { MAX_TABS } from '../src/features/relation/dual-pane';
 import { RELATION_KINDS } from '../src/features/relation/kinds';
@@ -1060,5 +1062,28 @@ describe('近道の押し先が画面に在る', () => {
       .filter(([, sel]) => root.querySelector(sel) === null)
       .map(([cmd, sel]) => `${cmd} → ${sel}`);
     expect(dead, '押す先が帯に無い近道がある(無反応になる)').toEqual([]);
+  });
+
+  /**
+   * 🔴 **`#pkc?view=` の表が、いま開ける面と 1 対 1**(#300 段②、2026-08-22)。
+   *
+   * ⚠ 面を足すと `deep-link.test.ts` の全数 test は `VIEW_MODES` を読むので
+   *   **自動で追随して緑**になる ── マニュアルの表にだけ載らない。
+   *   逆に面を畳むと、**存在しない名前を案内し続ける**。
+   * 🔑 だから**両向きを等値で**見る(片方だけ増やしても落ちる)。
+   */
+  it('🔴 マニュアル §4-1 の表が、アドレスから開ける面と 1 対 1', () => {
+    const manual = readFileSync('docs/manual.md', 'utf-8');
+    const at = manual.indexOf('### 4-1.');
+    expect(at, 'マニュアルに §4-1 が無い').toBeGreaterThan(-1);
+    const section = manual.slice(at, manual.indexOf('### 4-2.', at));
+    const rows = [...section.matchAll(/^\| `([a-z]+)` \| (.+?) \|$/gm)];
+    expect(
+      rows.map((m) => m[1]!).sort(),
+      'マニュアル §4-1 の名前が、アドレスから開ける面と食い違う',
+    ).toEqual([...openableViewNames()].sort());
+    for (const m of rows) {
+      expect(m[2], `${m[1]} の呼び名がマニュアルと食い違う`).toBe(viewModeLabel(m[1] as ViewMode));
+    }
   });
 });

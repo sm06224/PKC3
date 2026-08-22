@@ -133,6 +133,8 @@ import { renderToSvg, readPalette } from '@adapter/ui/render/mermaid-raster';
 import { MERMAID_KIND } from '@adapter/ui/render/mermaid-hydrate';
 import { CHART_KIND } from '@adapter/ui/render/chart-raster';
 import { SameOriginGate } from '@adapter/platform/same-origin-grants';
+import { connectViewDeepLink } from '@adapter/platform/deep-link';
+import { openView } from '@adapter/ui/render/open-view';
 import {
   alertInApp,
   confirmInApp,
@@ -1364,11 +1366,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         // #148 組み込みタイル ── 文書なしで開く = Start Center(#174 の一言込み)
         openOffice: openOfficeTile,
         // #241 組み込みタイル ── 中央の面を 2 ペインへ(窓は開かない)
+        // 🔑 **開く手続きは 1 か所**(`open-view.ts`)── ここで直に
+        //    `SET_VIEW_MODE` を撃つと、開いた後の後始末(集計の束ね方を
+        //    思い出す)が抜ける(#300 段②のレビューで判明した §7 の 3 つ目の口)
         openView: (view) =>
-        dispatcher.dispatch({
-          type: 'SET_VIEW_MODE',
-          mode: nextViewMode(dispatcher.getState().viewMode, view),
-        }),
+          openView(dispatcher, nextViewMode(dispatcher.getState().viewMode, view)),
         // ⚠ **聞かない。憶えているものを確かめるだけ**(上の granted と同じ判定を
         //    通す ── ここで別の式を書くと、片方だけ直した日に食い違う)
         confirmSameOrigin: async () => granted,
@@ -1431,11 +1433,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             // ⚠ 添付起動の経路に組み込みタイルは来ない(kind は 'app' 固定)が、
             //    依存の実体も 1 つに保つ(§7)
             openOffice: openOfficeTile,
-            openView: (view) =>
-        dispatcher.dispatch({
-          type: 'SET_VIEW_MODE',
-          mode: nextViewMode(dispatcher.getState().viewMode, view),
-        }),
+            // 🔑 **開く手続きは 1 か所**(`open-view.ts`)── ここで直に
+        //    `SET_VIEW_MODE` を撃つと、開いた後の後始末(集計の束ね方を
+        //    思い出す)が抜ける(#300 段②のレビューで判明した §7 の 3 つ目の口)
+        openView: (view) =>
+          openView(dispatcher, nextViewMode(dispatcher.getState().viewMode, view)),
             confirmSameOrigin: async (title) => {
               /**
                * 🔴 **「アプリとして登録済みか」で憶え方が変わる**(#301。user 裁定 2026-08-21)。
@@ -1638,8 +1640,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
        *   残る帰り道は「開いたタイルをもう一度押す」(`nextViewMode`)と `Alt+1`。
        *   わきの面(設定 / フラグ / ヘルプ / 2 ペイン)は今までどおり畳む。
        */
-      if (isAsidePane(dispatcher.getState().viewMode))
-        dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
+      // 🔑 畳むときも `open-view.ts` を通す ── この file から `SET_VIEW_MODE` を
+      //    直に撃たない、を**例外なし**の規則にしておく(例外を 1 つ許すと、
+      //    次に足す人が「これも例外」と読む)
+      if (isAsidePane(dispatcher.getState().viewMode)) openView(dispatcher, 'detail');
     },
     /**
      * 📣 起動したときのお知らせ(P11 段⑤)。
@@ -1959,6 +1963,27 @@ function bootstrap(): void {
       armLaunchQueue(window as unknown as LaunchTarget, app.importLaunchFiles, (message) =>
         app.dispatcher.dispatch({ type: 'OP_FAILED', error: message }),
       );
+      /**
+       * 🔗 **ディープリンク(`#pkc?view=…`)を当てる**(#300 段②)。
+       * ⚠ **boot 完了の刻印より前**に当てる ── 後に置くと、
+       *   `data-pkc-boot="ready"` を見て進む smoke / probe が
+       *   **本文の面を見てから面が入れ替わる**(競走になる)。
+       * ⚠ 判断・文言・断片の消し方は全部 `deep-link.ts` に在る ── この file は
+       *   どの test からも実行されないので、ここには**配線しか置かない**。
+       */
+      connectViewDeepLink({
+        // ⚠ **`openView` を渡す**(`SET_VIEW_MODE` 直撃ではない)── 開いた後の
+        //   後始末が抜けると、アドレスから開いた集計だけ表が出ない
+        openView: (mode) => openView(app.dispatcher, mode),
+        fail: (error) => app.dispatcher.dispatch({ type: 'OP_FAILED', error }),
+        // ⚠ 面が変わったら断片を消す(見ている間だけ残す)
+        onViewChange: (fn) => app.dispatcher.onState((s) => fn(s.viewMode)),
+        // ⚠ 開いたままのタブでアドレスへ足したときも効かせる
+        onHashChange: (fn) => {
+          window.addEventListener('hashchange', fn);
+          return () => window.removeEventListener('hashchange', fn);
+        },
+      });
       // boot 完了の正本契約(P3-8): smoke / probe は DOM 属性で待つ。
       // PKC2 の教訓 ── 「#root 存在待ち」は HTML load 段階で通過して flake 化する
       root.setAttribute('data-pkc-boot', 'ready');
