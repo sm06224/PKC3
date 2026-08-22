@@ -159,6 +159,31 @@ expect(ops, '2 手に割れている').not.toContain('setEntryParent');
 `display: none` を併せると**改頁は消える**のに、計算後の `break-after` は `'page'` の
 まま残る。**`getClientRects().length > 0`(箱が在る)と対にする**。
 
+### 🔴 ④-b DOM の消滅を見るなら、**枝ごと消える形**を数える(2026-08-22、#270)
+
+`MutationObserver` の `removedNodes` に載るのは、**観測している node の直下の子**である。
+アプリが `region.textContent = ''` で**器ごと**捨てると、載るのは**器 1 つ**で、
+中の行は 1 件も載らない。
+
+⚠ だから「行が消えたか」を `el.matches('tr[data-pkc-entry]')` で照合する probe は、
+**建て直しが原理的に映らない**。実際に踏んだ:1 稿目の trail は
+`row-removed 0 件` を出し続け、**「組み直しは起きていない」と読み違えて
+仮説を取り下げかけた**(真相は起きていた)。
+
+🔑 **消された枝の中に居たか**で数える:
+
+```js
+const inside = el.matches?.('tr[data-pkc-entry]')
+  ? 1
+  : (el.querySelectorAll?.('tr[data-pkc-entry]').length ?? 0);
+if (inside > 0) trail.push(['rows-detached', at(), inside]);
+```
+
+⚠ `addInitScript` の中では **`document.documentElement` はまだ `null`** ──
+`observe(document.documentElement, …)` は例外を投げる。`observe(document, …)` にする。
+🔑 投げた例外は `collectPageErrors` に拾われるので、**全 run が「別の理由で」赤**になり、
+本来見たかった失敗と見分けが付かなくなる(8 回まるごと捨てた)。
+
 ### ⑤ 印刷は版面が紙の幅になる
 
 `emulateMedia({media:'print'})` **だけでは viewport 幅が変わらない**。

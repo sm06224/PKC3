@@ -57,6 +57,26 @@ commit して CI を赤くした。⚠ **2 件のうち 1 件は様式ではな�
 ⚠ `npm run lint` の範囲は **`src tests build scripts`** ── `build/` の赤を
 「CI に関係ない」と切り捨てない(CLAUDE.md の記述が `src tests` のままで、実際に踏んだ)。
 
+### 🔴 **`npm test` も `npm run lint` も、型を見ていない**(2026-08-22)
+
+**最後に編集した file が test でも、`typecheck` を回し直す。**
+
+実際に踏んだ形 ── 製品コードを直して `typecheck` を通し、**そのあとに test を書き足し**、
+`lint` と `npm test`(4046 件緑)を回して push した。CI は `typecheck` で落ちた:
+
+```
+tests/adapter/…test.ts(78,65): error TS2353:
+  'deletedAt' does not exist in type 'TrashItem'
+```
+
+⚠ **手元の緑が 1 つも鳴らない**のが厄介である ── `vitest` は型を落として実行し、
+`eslint` は型を見ない。**test の fixture の型違いは、CI でしか鳴らない。**
+
+🔑 規律は「回す順」ではなく「**最後の編集の後に回す**」:
+上の一式は**最後に file を触ったあと**にもう一度通す(1 つ直したら、また通す)。
+⚠ これは §「1 件直したらその command をもう一度回す」の**別の面**である
+── あちらは「同じ command の 2 件目」、こちらは「**別の command が見ていない次元**」。
+
 ## 3. PR 本文に書くこと
 
 - **何が起きていたか(実測)** ── 直す前の値・件数。⚠ 「改善した」ではなく**数字**
