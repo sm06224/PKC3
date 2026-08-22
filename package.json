@@ -31,7 +31,7 @@
   "dependencies": {
     "@sqlite.org/sqlite-wasm": "^3.53.0-build1",
     "chart.js": "^4.5.1",
-    "markdown-it": "14.3.0",
+    "markdown-it": "15.0.0",
     "markdown-it-footnote": "4.0.0",
     "mermaid": "^11.16.1"
   }
