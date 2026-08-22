@@ -10,6 +10,7 @@
  * ⚠ ここは**めったに来ない場所**。だから常時見える帯からは外したが、
  * 押す導線そのものは畳まない(操作の帯に「設定」を置く)。
  */
+import { SameOriginGrants } from '@adapter/platform/same-origin-grants';
 import type { AppState } from '@adapter/state/app-state';
 import { THEMES } from './theme';
 import { PAGE_FORMATS } from '@features/page-format';
@@ -65,7 +66,11 @@ export class SettingsRenderer {
     private readonly editorMode: EditorModeStore = appEditorMode,
     /** 「開く」で編集に入るか(user 裁定 2026-08-18)。⚠ test は自分で `new` して渡す。 */
     private readonly openInEdit: OpenInEditStore = appOpenInEdit,
+    /** 素のまま起動の許可(#301)。⚠ test は自分で `new` して渡す。 */
+    private readonly sameOriginGrants: SameOriginGrants = new SameOriginGrants(),
   ) {}
+
+  private sameOriginList: HTMLElement | null = null;
 
   render(state: AppState): void {
     if (this.built) {
@@ -75,6 +80,7 @@ export class SettingsRenderer {
       this.syncEditorMode();
       this.syncOpenInEdit();
       this.syncExternalImages();
+      this.syncSameOrigin(state);
       this.syncNotices();
       // 🔴 **隠れている間に来た変化をここで拾う**(2026-08-05、user 報告)。
       //    `refresh()` は面が hidden の間は捨てるので(下の説明)、再表示のときに
@@ -271,6 +277,7 @@ export class SettingsRenderer {
     this.keymapPanel = buildKeymapPanel();
     body.append(this.keymapPanel.root);
     body.append(this.buildExternalImages());
+    body.append(this.buildSameOrigin());
     /**
      * 🔴 **Office 一式**(#88 / O6-a)。⚠ 「表示」の節に混ぜない ── 見た目の
      * 好みではなく、**この端末に 77MB を置くかどうか**という別の判断である。
@@ -284,6 +291,7 @@ export class SettingsRenderer {
     this.syncPageFormat();
     this.syncEditorMode();
     this.syncOpenInEdit();
+    this.syncSameOrigin(state);
     this.syncExternalImages();
     this.syncNotices();
     this.refresh();
@@ -298,6 +306,71 @@ export class SettingsRenderer {
    *   判断である。同じ場所に混ぜると、配色を選ぶ気分で押される。
    * ⚠ 何が起きるのかを書く ── 「外部画像を許可」だけでは判断できない。
    */
+  /**
+   * 🔴 **素のまま起動を許したアプリの一覧**(#301。user 裁定 2026-08-21)。
+   *
+   * > 「**同じハッシュのアプリ登録済みの URL もしくは HTML に関しては永続化
+   * > (文字通りの永続化、期間とかない)**」
+   *
+   * ⚠ **期限が無い以上、取り消す場所が要る。** 永続化そのものは user の裁定だが、
+   *   「一度許したら二度と外せない」は裁定に含まれていない ── 出口を作る。
+   * ⚠ 一覧に**限界も併記する** ── 素のままのアプリはこの一覧自体を書き換えられる。
+   *   隠すと「一覧があるから安全」と読まれるので、**実際より安全に見せない**
+   *   (`same-origin-grants.ts` 冒頭の判断と同じ向き)。
+   * ⚠ 「表示」には入れない ── 見た目の好みではなく**外へ何を渡すか**の判断である。
+   */
+  private buildSameOrigin(): HTMLElement {
+    const wrap = document.createElement('section');
+    wrap.setAttribute('data-pkc-region', 'settings-same-origin');
+    const h = document.createElement('h3');
+    h.textContent = '素のまま起動を許したアプリ';
+    const note = document.createElement('p');
+    note.setAttribute('data-pkc-field', 'settings-note');
+    note.textContent =
+      'ここに載っているアプリは、ノート・添付・設定を全部読み書きできます。' +
+      '中身が 1 バイトでも変われば許可は外れ、次に開くときまた聞きます。' +
+      '⚠ これらのアプリは、この一覧そのものも書き換えられます' +
+      '(同じ場所で動くので、どこに保存しても届きます)。';
+    this.sameOriginList = document.createElement('ul');
+    this.sameOriginList.setAttribute('data-pkc-field', 'same-origin-list');
+    wrap.append(h, note, this.sameOriginList);
+    return wrap;
+  }
+
+  /**
+   * ⚠ **毎回組み直す** ── 許可はこの面の外(添付の起動)で増えるので、
+   *   「開いている間に変わらない」という前提が成り立たない(P8 段⑩ と同じ理由で、
+   *   隠れている間の変化を取りこぼすと**画面が嘘をつく**)。
+   */
+  private syncSameOrigin(state: AppState): void {
+    const list = this.sameOriginList;
+    if (!list) return;
+    const keys = this.sameOriginGrants.list();
+    list.textContent = '';
+    if (keys.length === 0) {
+      const li = document.createElement('li');
+      li.textContent = 'まだ許可したアプリはありません';
+      list.append(li);
+      return;
+    }
+    for (const key of keys) {
+      const li = document.createElement('li');
+      li.setAttribute('data-pkc-asset-key', key);
+      const name = document.createElement('span');
+      // ⚠ 題名は**いま並んでいるタイル**から引く ── 引けないものは消えた / 登録を
+      //    外した添付なので、**鍵の頭だけ**を出す(空欄にすると取り消しようがない)
+      const tile = state.launcherTiles?.find((t) => t.assetKey === key);
+      name.textContent = tile?.title ?? `(一覧に無いアプリ ${key.slice(4, 12)}…)`;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.setAttribute('data-pkc-action', 'revoke-same-origin');
+      btn.setAttribute('data-pkc-asset-key', key);
+      btn.textContent = '取り消す';
+      li.append(name, btn);
+      list.append(li);
+    }
+  }
+
   private buildExternalImages(): HTMLElement {
     const wrap = document.createElement('section');
     wrap.setAttribute('data-pkc-region', 'settings-external-images');

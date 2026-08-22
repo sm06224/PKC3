@@ -899,3 +899,124 @@ test('🔴 一式を入れた端末では Office タイルが出て、押すと�
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * 🔴 **素のまま起動の許可は、読み込み直しても憶えている**(#301。user 裁定 2026-08-21)。
+ *
+ * > 「**同じハッシュのアプリ登録済みの URL もしくは HTML に関しては永続化
+ * > (文字通りの永続化、期間とかない)**」
+ *
+ * ⚠ **ここは unit では届かない**。`main.ts` の `openTile` が
+ *   「憶えているか」を見て `sameOrigin` を渡す配線は、原文を読む test しか無い
+ *   (CLAUDE.md §2)── ここが fail-open に壊れると、**登録しただけのアプリが
+ *   確認なしで全ノートを読める**。だから実ブラウザで 1 本張る。
+ * 🔑 見るのは 3 つ: ① 読み込み直しても聞かない ② タイルから素のまま開く
+ *   ③ **許可していないアプリは囲いの中のまま**(対照群 ── これが無いと
+ *   「全部素のまま開く」に壊しても緑になる)。
+ */
+test('🔴 一度許した素のまま起動は、読み込み直しても聞かない(#301)', async ({ page, context }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await gotoApp(page);
+
+  const APP = (name: string): string =>
+    `<!doctype html><title>${name}</title><body><p id="app">${name}</p></body></html>`;
+
+  const attach = async (name: string): Promise<void> => {
+    // ⚠ 添付は**本文の面**から ── タイルの面に居ると導線が無い
+    await clickReal(page, '[data-pkc-browse="list"]');
+    await clickReal(page, '[data-pkc-action="attach-file"]');
+    await page.locator('[data-pkc-field="attach-input"]').setInputFiles({
+      name: `${name}.html`,
+      mimeType: 'text/html',
+      buffer: Buffer.from(APP(name), 'utf-8'),
+    });
+    await expect(
+      page.locator('[data-pkc-action="launch-asset"]'),
+      `${name} の添付が出ていない`,
+    ).toBeVisible({ timeout: 15000 });
+  };
+
+  const modeOf = async (win: import('@playwright/test').Page): Promise<string | null> => {
+    const el = win.locator('[data-pkc-field="launcher-app"]');
+    await expect(el).toBeVisible({ timeout: 15000 });
+    return el.getAttribute('data-pkc-launcher-mode');
+  };
+
+  /**
+   * ⚠ **タイルが出るまで待つ。** 登録は `SET_APP_TILE` → 本文の frontmatter を
+   *   保存 → 読み直し、と**保存を往復してから**反映される ── 押した直後は
+   *   まだ「登録していない」ものとして見える(1 稿目はここで落ち、確認の文面が
+   *   「この画面を開いている間は」になっていた)。
+   */
+  const registerApp = async (expected: number): Promise<void> => {
+    await page.locator('[data-pkc-field="app-register"]').check();
+    await clickReal(page, '[data-pkc-browse="launcher"]');
+    await expect(page.locator(USER_TILES), '登録がタイルに反映されない').toHaveCount(expected, {
+      timeout: 15000,
+    });
+  };
+
+  // ① 添付して「アプリとして登録」する(タイルに並ぶ = 憶える対象になる)
+  await attach('daichou');
+  await registerApp(1);
+
+  // ② 素のまま起動を **1 度だけ** 許す
+  const first = context.waitForEvent('page');
+  await clickReal(page, '[data-pkc-action="launch-asset-raw"]');
+  const asked = await answerAppDialog(page, 'ok');
+  expect(asked, '確認の文面が変わっている').toContain('渡して開き');
+  // 🔑 **登録済みの枝を通ったこと**まで見る ── ここが「この画面を開いている間は」に
+  //    なっていたら、以後の「読み込み直しても憶えている」は**別の理由で緑**になる
+  expect(asked, '登録済みなのに、その場かぎりの確認になっている').toContain('次回から聞きません');
+  const firstWin = await first;
+  expect(await modeOf(firstWin), '1 度目が素のままで開いていない').toBe('same-origin');
+  await firstWin.close();
+
+  // ③ 🔴 **読み込み直す**(セッションの記憶は消える。憶えていれば保存の側に在る)
+  await gotoApp(page);
+
+  // ④ タイルを押す ── 確認は出ず、素のままで開く
+  await clickReal(page, '[data-pkc-browse="launcher"]');
+  const tile = page.locator(USER_TILES).first();
+  await expect(tile, 'タイルが並んでいない').toBeVisible({ timeout: 15000 });
+  const again = context.waitForEvent('page');
+  await tile.click();
+  const againWin = await again;
+  expect(await modeOf(againWin), '読み込み直したら忘れている(永続化していない)').toBe(
+    'same-origin',
+  );
+  // ⚠ **確認が出ていないこと**も見る ── 出ていたら「聞かれなくなった」は嘘である
+  await expect(
+    page.locator('[data-pkc-region="app-dialog"][open]'),
+    '憶えているのに確認が出た',
+  ).toHaveCount(0);
+  await againWin.close();
+
+  /**
+   * ⑤ 🔑 **対照群 ── 取り消したら、また囲いの中に戻る。**
+   *
+   * ⚠ これが無いと「タイルは常に素のまま開く」に壊しても緑になる(fail open)。
+   * ⚠ ついでに**マニュアルの約束**(「設定でいつでも取り消せます」)も、ここで守る
+   *   ── 期限なしで憶える以上、出口が死んでいたら二度と外せない。
+   */
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  const revoke = page.locator('[data-pkc-action="revoke-same-origin"]');
+  await expect(revoke, '設定に取り消しの導線が無い').toHaveCount(1, { timeout: 15000 });
+  await revoke.click();
+  await expect(revoke, '押しても一覧から消えない').toHaveCount(0, { timeout: 15000 });
+
+  await gotoApp(page);
+  await clickReal(page, '[data-pkc-browse="launcher"]');
+  const after = page.locator(USER_TILES).first();
+  await expect(after).toBeVisible({ timeout: 15000 });
+  const boxedTab = context.waitForEvent('page');
+  await after.click();
+  const boxedWin = await boxedTab;
+  expect(await modeOf(boxedWin), '取り消したのに素のままで開いた(fail open)').not.toBe(
+    'same-origin',
+  );
+  await boxedWin.close();
+
+  expect(errors).toEqual([]);
+});

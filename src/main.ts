@@ -131,6 +131,7 @@ import { diagramFileName } from '@features/export/file-name';
 import { renderToSvg, readPalette } from '@adapter/ui/render/mermaid-raster';
 import { MERMAID_KIND } from '@adapter/ui/render/mermaid-hydrate';
 import { CHART_KIND } from '@adapter/ui/render/chart-raster';
+import { SameOriginGate } from '@adapter/platform/same-origin-grants';
 import {
   alertInApp,
   confirmInApp,
@@ -1046,12 +1047,27 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   });
 
   /**
-   * 🔴 **素のまま起動を許した添付**(P10)。**このセッションだけ**の記憶で、
-   * どこにも保存しない ── 素のままのアプリは localStorage / IndexedDB / OPFS に
-   * 手が届くので、**永続化した許可は自分で書ける**(前の設計 doc の指摘)。
-   * ⚠ この変数への参照経路はアプリ側に無い(`opener` は切り、`parent` は外殻で止まる)。
+   * 🔴 **素のまま起動を許した添付**(P10 → #301 で永続化。user 裁定 2026-08-21)。
+   *
+   * > 「**同じハッシュのアプリ登録済みの URL もしくは HTML に関しては永続化
+   * > (文字通りの永続化、期間とかない)**」
+   *
+   * 憶え方は **2 通り**あり、**アプリとして登録してあるかどうか**で分かれる:
+   *
+   * | | 憶える鍵 | どこに | いつまで |
+   * |---|---|---|---|
+   * | 登録済み | **中身のハッシュ**(`ast-<sha256>`) | localStorage | **ずっと**(中身が変わるまで) |
+   * | 登録していない | lid | この closure | **この画面を開いている間だけ** |
+   *
+   * ⚠ **登録していない添付の記憶を lid のままにしてあるのは意図的**である ──
+   *   closure は読み込み直せば消えるので、「lid を保ったまま中身が入れ替わる」
+   *   (本文編集 / 履歴復元 / ゴミ箱復元)より寿命が短い。永続化する側は
+   *   その保証が無いので、**鍵をハッシュにしないと成り立たない**(→ `same-origin-grants.ts`)。
+   * ⚠ こちらの closure への参照経路はアプリ側に無い(`opener` は切り、`parent` は外殻で止まる)。
+   *   一方 localStorage の側は**アプリが書き換えられる** ── その判断の根拠は
+   *   `same-origin-grants.ts` の冒頭に書いてある。
    */
-  const sameOriginAllowed = new Set<string>();
+  const sameOriginGate = new SameOriginGate();
 
   const services: BinderServices = {
     attachFiles: (files) => void withAssetGate(() => attachFiles(dispatcher, attachDeps, files)),
@@ -1285,9 +1301,38 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // 🔴 **素のままの許可はここにだけ在る**(P10)。保存しない ── アプリは
     //    保存領域に手が届くので、永続化した許可は**自分で書ける**。
     //    ⚠ このタブを閉じれば消える。⚠ アプリからこの変数への参照経路は無い
+    /**
+     * 🔴 **許可を外す出口**(#301)。⚠ 永続化そのものは user 裁定だが、
+     *   「一度許したら二度と外せない」は裁定に含まれていない。
+     * ⚠ **可視に知らせる**(無言の操作拒否・無言の成功を作らない)── 押した結果が
+     *   見えないと、外れたのか押せていないのか区別が付かない。
+     */
+    revokeSameOrigin: (assetKey) => {
+      sameOriginGate.revoke(assetKey);
+      // ⚠ **自分で描き直す** ── 許可は state に持たない(この端末の判断であって
+      //    ノートのデータではない)ので、`showStatus` の `paint()` では設定の面まで
+      //    届かない。押しても一覧が消えず「効いていない」に見える(実際に踏んだ)。
+      //    `setExternalImages` と同じ倒し方に揃える。
+      center.render(dispatcher.getState());
+      showStatus('素のまま起動の許可を取り消しました');
+    },
     openTile: (lid) => {
       const tile = dispatcher.getState().launcherTiles?.find((t) => t.lid === lid);
       if (!tile) return;
+      /**
+       * 🔴 **タイルは許可を「使う」だけ。「与える」ことはしない**(#301。user 裁定 2026-08-21)。
+       *
+       * user 裁定は「アプリ登録済みのものは永続化(= 次から聞かれない)」であって、
+       * 「タイルから許可を出せるようにする」ではない。⚠ **その差は大きい** ──
+       * タイルは一覧から 1 クリックで押せる場所なので、ここを許可の入口にすると
+       * 「押しただけで全ノートを渡すか聞かれる」形になる(`detail.ts` が
+       * **対象の素性が見えている画面からだけ**入れる、と決めた理由)。
+       * 🔑 だから: **与えるのは添付の画面で 1 回だけ。以後はタイルがそれを使う。**
+       * ⚠ 許可が無ければ**今までどおり囲いの中**で開く(黙って素のままにはしない)。
+       */
+      const granted =
+        tile.kind === 'app' &&
+        sameOriginGate.allows({ lid, assetKey: tile.assetKey, registered: true });
       launchTile(tile, {
         readBlob: (assetKey) => blobs.get(cid, assetKey),
         open: (url, features) => window.open(url, '_blank', features),
@@ -1307,7 +1352,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           type: 'SET_VIEW_MODE',
           mode: nextViewMode(dispatcher.getState().viewMode, view),
         }),
-      });
+        // ⚠ **聞かない。憶えているものを確かめるだけ**(上の granted と同じ判定を
+        //    通す ── ここで別の式を書くと、片方だけ直した日に食い違う)
+        confirmSameOrigin: async () => granted,
+      }, { sameOrigin: granted });
       // ⚠ 押した対象を**選択状態にもする**(P8 段⑭)── 起動しただけだと右の列が
       //    空文のままで、いま何を触ったのかが画面に残らない。「押す = 起動」の
       //    意味は変えず、選択は同時に立つ副作用として入れる。
@@ -1372,18 +1420,36 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           mode: nextViewMode(dispatcher.getState().viewMode, view),
         }),
             confirmSameOrigin: async (title) => {
-              if (sameOriginAllowed.has(lid)) return true;
+              /**
+               * 🔴 **「アプリとして登録済みか」で憶え方が変わる**(#301。user 裁定 2026-08-21)。
+               * ⚠ 登録の判定は**タイルの一覧**から引く ── frontmatter を自分で読み直すと、
+               *   「登録済みとは何か」の規則が 2 か所に生える(`tiles.ts` が正本)。
+               */
+              const registered =
+                dispatcher.getState().launcherTiles?.some((t) => t.lid === lid && t.kind === 'app') ===
+                true;
+              const seen = { lid, assetKey: att.assetKey, registered };
+              if (sameOriginGate.allows(seen)) return true;
               // ⚠ 何が起きるかを**具体**で書く(「安全でない」では判断できない)
+              // ⚠ 「同じ場所」と書くと**同じ窓**と読まれる(user 指摘 2026-08-21)──
+              //    窓はどちらでも別窓で、変わるのは**データの入れ物**のほうである
               const ok = await ask(
-                `「${title}」を PKC3 と同じ場所で開きます。\n\n` +
-                  'IndexedDB や cookie を使うアプリが動くようになりますが、' +
-                  'このアプリは PKC3 の保存内容(ノート・添付・設定)にも手が届きます。\n' +
-                  'このタブを閉じるまでは、もう一度は聞きません(次に開いたときは聞きます)。\n\n' +
-                  '開きますか?',
-                { okLabel: '同じ場所で開く', danger: true },
+                `「${title}」に、この PKC3 のノート・添付・設定を渡して開きます。\n\n` +
+                  'このアプリは PKC3 と同じ保存領域で動くので、あなたのノートを' +
+                  '全部読めますし、書き換えもできます。\n' +
+                  (registered
+                    ? 'アプリとして登録済みなので、この中身は次回から聞きません' +
+                      '(中身が変わったらまた聞きます。設定でいつでも取り消せます)。\n'
+                    : 'この画面を開いている間は、もう一度は聞きません' +
+                      '(読み込み直すとまた聞きます)。\n') +
+                  '\n開きますか?',
+                { okLabel: 'ノートを渡して開く', danger: true },
               );
-              if (ok) sameOriginAllowed.add(lid);
-              return ok;
+              if (!ok) return false;
+              // 🔑 憶え先の判断は器の側(`SameOriginGate`)── ここに書くと
+              //    どの test からも実行されない(CLAUDE.md §2)
+              sameOriginGate.remember(seen);
+              return true;
             },
           },
           { sameOrigin: launchOpts.sameOrigin },

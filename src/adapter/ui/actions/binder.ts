@@ -279,6 +279,8 @@ export interface BinderServices {
    * ⚠ 「常にオン / 常に確認 / 常にオフ」の 3 択。⚠ flag ではない(正規設定)。
    */
   setExternalImages?(mode: string): void;
+  /** 素のまま起動の許可を 1 件外す(#301)。⚠ 鍵は**中身のハッシュ**。 */
+  revokeSameOrigin?(assetKey: string): void;
   /**
    * 紙面(2026-08-08、user 裁定「A4 と A3、フル HD と 4:3 の縦横」)。
    * ⚠ **flag ではない**(正規設定)── 散文の読み幅と、印刷の紙が決まる。
@@ -1758,6 +1760,14 @@ const ACTIONS: Record<string, ActionHandler> = {
         ? target.value
         : target.getAttribute('data-pkc-theme-value');
     if (theme) services.setTheme?.(theme);
+  },
+  /**
+   * 🔴 **素のまま起動の許可を取り消す**(#301。user 裁定 2026-08-21)。
+   * ⚠ 許可は**期限なし**で憶えるので、外す出口がここに無いと二度と外せない。
+   */
+  'revoke-same-origin': (_dispatcher, target, services) => {
+    const key = target.getAttribute('data-pkc-asset-key');
+    if (key !== null && key !== '') services.revokeSameOrigin?.(key);
   },
   'set-external-images': (_dispatcher, target, services) => {
     // ⚠ `set-theme` と同じ受け方(`<select>` でもボタンでも通す)
