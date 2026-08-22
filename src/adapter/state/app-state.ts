@@ -2401,7 +2401,16 @@ function reduceCore(
       };
     }
     case 'SHOW_TRASH': {
-      if (state.phase !== 'ready') return { state, events: [] };
+      /**
+       * 🔴 **門を持たない**(#319)。⚠ 直す前は `phase !== 'ready'` で**黙って捨てて**
+       * いたので、編集中に「ゴミ箱」を押すと**1 ドットも変わらず理由も出なかった**
+       * ── P8 段⑲ で潰した「無言の操作拒否」そのものである。
+       * 🔑 **開くのは読むだけ**で、下書きに 1 バイトも触らない ── この file の
+       *   2 ペインの節が既に同じ判断を書いている(「断りが要るのは**実際に動かす
+       *   操作**だけ」)。動かす側(復元・空にする)はそちらで断る。
+       * ⚠ 外すなら `TRASH_LIST_LOADED` も同時に ── 片方だけだと
+       *   「押せるのに一覧が来ない」という**別の無言**を作る。
+       */
       return { state, events: [{ type: 'REQUEST_TRASH_LIST' }] };
     }
     case 'FILE_LINKED': {
@@ -2415,7 +2424,8 @@ function reduceCore(
     case 'HIDE_TRASH':
       return { state: { ...state, trashPanel: null }, events: [] };
     case 'TRASH_LIST_LOADED':
-      if (state.phase !== 'ready') return { state, events: [] };
+      // 🔴 **開く側と対で門を外す**(#319)── 片方だけ残すと
+      //    「押せるのに一覧が来ない」という別の無言になる
       return {
         state: {
           ...state,
