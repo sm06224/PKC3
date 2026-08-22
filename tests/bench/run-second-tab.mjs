@@ -26,6 +26,7 @@
 import { chromium } from '@playwright/test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { seedEditorArm, fillBody } from './editor-arm.mjs';
+import { listRowsSelector } from '../probe/browse-face.mjs';
 
 const args = Object.fromEntries(
   process.argv.slice(2).map((a) => {
@@ -122,7 +123,10 @@ async function main() {
 
   // ── A が働いている間、B を測る
   const rows = [];
-  const noteRows = '[data-pkc-region="entry-list"] [data-pkc-entry][data-pkc-archetype="text"]';
+  // ⚠ 面は**名指ししない**(既定の一覧タブは入れ替わる ── `browse-face.mjs`)。
+  //   🔴 名指しのままだったせいで、この bench は 2026-08-18 から**動いていなかった**
+  //      (`locator.click: Timeout 30000ms exceeded` ── 2026-08-22 に実測)
+  const noteRows = await listRowsSelector(a, 'text');
   let lastRound = 0;
   for (let r = 1; r <= ROUNDS; r++) {
     const i = r % NOTES;

@@ -30,6 +30,7 @@
 import { chromium } from '@playwright/test';
 import { readFileSync, readdirSync, rmSync, mkdirSync } from 'node:fs';
 import { seedEditorArm } from './editor-arm.mjs';
+import { listRowsSelector } from '../probe/browse-face.mjs';
 
 const args = Object.fromEntries(
   process.argv.slice(2).map((a) => {
@@ -151,7 +152,8 @@ try {
   await page.goto(`http://localhost:${PORT}/`);
   await page.waitForSelector('[data-pkc-boot="ready"]', { timeout: 20_000 });
   // 読み直すと選択は空 ── 一覧から選ぶ(user と同じ手順)
-  await page.click('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  // ⚠ 面は**名指ししない**(既定の一覧タブは入れ替わる ── `browse-face.mjs`)
+  await page.click(await listRowsSelector(page));
   await page.waitForSelector('[data-pkc-action="start-edit"]', { timeout: 20_000 });
   await page.click('[data-pkc-action="start-edit"]');
   const pane = ARM === 'live' ? '[data-pkc-region="editor-live"]' : '[data-pkc-region="editor-split"]';

@@ -25,6 +25,7 @@
 import { chromium } from '@playwright/test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { seedEditorArm, fillBody } from './editor-arm.mjs';
+import { listRowsSelector } from '../probe/browse-face.mjs';
 
 const args = Object.fromEntries(
   process.argv.slice(2).map((a) => {
@@ -139,7 +140,8 @@ async function main() {
     });
 
   const img = '[data-pkc-field="detail-body"] img[data-pkc-field="mermaid-image"]';
-  const rows = '[data-pkc-region="entry-list"] [data-pkc-entry][data-pkc-archetype="text"]';
+  // ⚠ 面は**名指ししない**(既定の一覧タブは入れ替わる ── `browse-face.mjs`)
+  const rows = await listRowsSelector(page, 'text');
 
   // ── キャッシュが**育つ**のは、ノートを作って確定した時である。
   //    ⚠ 最初の版はここを「作る → 全部作り終わってから 1 枚ずつ開く」に分けていたが、
