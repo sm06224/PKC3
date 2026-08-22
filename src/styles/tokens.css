@@ -26,6 +26,10 @@
   --bg: #eef0f3;
   --surface: #ffffff;
   --surface-2: #f5f6f8;
+  /* hover の地(ファイラの行 ── 1 面の表と 2 ペイン)── 印(`--surface-2`)より薄い、
+     `--surface` との中間値。⚠ 全テーマで定義する(欠けたテーマは初期値へ落ちて
+     hover が見えなくなる)。`tests/adapter/dual-hover-css.test.ts` が全テーマで検算する。 */
+  --surface-hover: #fafbfc;
   --fg: #16191d;
   --muted: #59616b;
   --border: #cdd2d9;
@@ -47,6 +51,7 @@
   --bg: #14171a;
   --surface: #1c2024;
   --surface-2: #23282d;
+  --surface-hover: #202429;
   --fg: #e3e7eb;
   --muted: #9aa4af;
   --border: #333a41;
@@ -69,6 +74,7 @@
   --bg: #f6f8fa;
   --surface: #ffffff;
   --surface-2: #f6f8fa;
+  --surface-hover: #fbfcfd;
   --fg: #1f2328;
   --muted: #59636e;
   --border: #d1d9e0;
@@ -90,6 +96,7 @@
   --bg: #0d1117;
   --surface: #151b23;
   --surface-2: #212830;
+  --surface-hover: #1b222a;
   --fg: #d1d7e0;
   --muted: #9198a1;
   --border: #3d444d;
@@ -112,6 +119,7 @@
   --bg: #eee8d5; /* base2 */
   --surface: #fdf6e3; /* base3 */
   --surface-2: #eee8d5;
+  --surface-hover: #f6efdc;
   --fg: #073642; /* base02 ── base00 は本文向けで、UI には暗い側を使う */
   --muted: #546a71; /* base01 をわずかに濃く ── base01 のままだと見出し帯で 4.39:1 */
   --border: #d5cdb6;
@@ -133,6 +141,7 @@
   --bg: #002b36; /* base03 */
   --surface: #073642; /* base02 */
   --surface-2: #0b4453;
+  --surface-hover: #093d4b;
   --fg: #dce4e4;
   --muted: #9fadad; /* base1 をわずかに明るく ── base1 のままだと見出し帯で 3.99:1 */
   --border: #1c5464;
@@ -155,6 +164,7 @@
   --bg: #21222c;
   --surface: #282a36; /* Background */
   --surface-2: #343746;
+  --surface-hover: #2e313e;
   --fg: #f8f8f2; /* Foreground */
   --muted: #9aa4d0; /* Comment(#6272a4)は地に対して暗すぎるので明度を上げた */
   --border: #44475a; /* Current Line */
@@ -177,6 +187,7 @@
   --bg: #2e3440; /* nord0 */
   --surface: #3b4252; /* nord1 */
   --surface-2: #434c5e; /* nord2 */
+  --surface-hover: #3f4758;
   --fg: #eceff4; /* nord6 */
   --muted: #b9c2d0; /* nord4 寄り(nord3 は地に対して暗すぎる) */
   --border: #4c566a; /* nord3 */
@@ -199,6 +210,7 @@
   --bg: #0d0f0a;
   --surface: #111510;
   --surface-2: #162010;
+  --surface-hover: #141b10;
   --fg: #c8d8b0;
   --muted: #8ca877;
   --border: #2b3a20;
