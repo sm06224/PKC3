@@ -2193,6 +2193,13 @@ select:focus-visible {
   min-height: 0;
   height: 100%;
   padding: var(--s3);
+  /* 🔴 **入り切らない月は、面ごとスクロールさせる**(#303 と対)。
+   * ⚠ セルに下限(`5em`)を置いた以上、器が低い版面では表が器を超える ──
+   *   実測(700×640、1 カラムに畳まれた版面):器 58px に対し表 415.9px。
+   *   ここが `visible` のままだと、**表が面の外へ 358px はみ出す**。
+   * 🔑 下限と面のスクロールは**対で 1 つの直し**である ── 片方だけだと
+   *   「潰れて狙えない」か「はみ出して重なる」かのどちらかになる。 */
+  overflow: auto;
 }
 /* 🔴 **曜日の列は等幅**(`table-layout: fixed`)。⚠ 無いと中身なりに伸び、
  * 予定が 1 件入っただけで 1 列が 696px を占める(上の実測)。
@@ -2201,8 +2208,10 @@ select:focus-visible {
   width: 100%;
   table-layout: fixed;
   border-collapse: collapse;
-  flex: 1;
-  min-height: 0;
+  /* ⚠ **縮ませない**(`flex-shrink: 0`)── セルの下限より下へ潰されると、
+   *   行が面の外へ描かれて**スクロールしても届かない**(#303)。
+   *   伸びる側(`flex-grow: 1`)は据え置き ── 器いっぱいに配るのは 2026-08-20 の直し。 */
+  flex: 1 0 auto;
 }
 [data-pkc-region='calendar-grid'] th,
 [data-pkc-region='calendar-grid'] td {
@@ -2216,6 +2225,49 @@ select:focus-visible {
   font-size: 11px;
   color: var(--muted);
   height: 1px; /* 見出しは中身なり ── 残りを日のセルへ配る */
+}
+/* 🔴 **行の高さを中身から切り離す**(#303)。
+ *
+ * 直す前は予定を `td` の**直下**に積んでいたので、1 件入るごとにその週の内在高が
+ * 増え、表が `flex: 1` で引き伸ばされている分だけ**下の週が押し下がった**。
+ * 実測(1440×900、予定 1 件):週の上端が `0.0 / 53.2 / 42.8 / 32.4 / 20.8 / 10.4px`
+ * ずれる ── 同じ座標の 2 打目が**同じ曜日の別の週**に当たっていた
+ * (`binder.ts` の分岐は `meta.date === date ? null : date` なので、
+ * 2 打目は「外れる」ではなく「**その日へ移る**」= 実機報告の見え方と一致)。
+ *
+ * 🔑 直しは**器を 1 枚**(`day-events`)足して絶対配置にすること。
+ *   セルの内在高が「日の数字の帯」だけになるので、全週が等しくなる。
+ * ⚠ **`calc(100% / 6)` の類は使わない** ── 月によって 5 週 / 6 週で変わる。 */
+[data-pkc-region='calendar-grid'] tbody td {
+  position: relative;
+  /* 🔑 日の数字の帯 ── **この 1 つ**から数字の高さと器の上端を出す
+   *   (同じ数を 2 か所に書かない。片方だけ変えると帯に食い込む) */
+  --day-band: 1.15rem;
+  /* 🔴 **下限** ── 器が低いとセルが 30〜40px まで潰れて狙えなくなる。
+   *   ⚠ 入り切らない分は器の中でスクロールし、件数は日の数字の横に出る。 */
+  height: 5em;
+}
+/* 🔴 **予定の器**(#303)── 絶対配置なので、何件入れても行は動かない。
+ * ⚠ `inset` の基準は **td の padding box**(枠の内側)なので、
+ *   td の padding(`--s2`)を自分で持つ。 */
+[data-pkc-region='calendar-grid'] [data-pkc-field='day-events'] {
+  position: absolute;
+  inset: calc(var(--s2) + var(--day-band)) var(--s2) var(--s2);
+  overflow: auto;
+  /* ⚠ 内側スクロールを新設したので、ホイールが本文の面へ流れないようにする
+   *   (`[data-pkc-region='detail']` の `overflow: auto` と競合する)。 */
+  overscroll-behavior: contain;
+}
+/* 🔴 **件数**(#303)── 器に入り切らない予定はスクロールの向こうへ行く。
+ * ⚠ 流れに入れない(絶対配置)── 入れると、また中身で行が動く。 */
+[data-pkc-region='calendar-grid'] [data-pkc-field='day-count'] {
+  position: absolute;
+  top: var(--s2);
+  right: var(--s2);
+  line-height: var(--day-band);
+  font-size: 10px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 /* ⚠ **日のセルは押す所**なので、指標を出す(直す前は「地を押す」ことが
  *   画面から読めなかった)。⚠ 高さは変えない(ずれると狙えない)。 */
@@ -2248,6 +2300,11 @@ select:focus-visible {
 [data-pkc-field='day-number'] {
   font-size: 11px;
   color: var(--muted);
+  /* ⚠ 帯の高さは**器の上端と対**である(#303)── 上の `--day-band` から出す。
+   *   ここを `auto` に戻すと、今日の丸(inline-block)の分だけ帯が伸びて
+   *   器が数字に食い込む。 */
+  height: var(--day-band, auto);
+  line-height: var(--day-band, normal);
 }
 /* 🔴 **予定は押せる形に**(2026-08-20)── 直す前は素のテキストで、
  * 手がかりが `cursor: pointer` だけだった(押せると分からない)。 */
@@ -3347,5 +3404,29 @@ select:focus-visible {
     height: 50vh;
     min-height: 0;
     break-inside: avoid;
+  }
+
+  /**
+   * 🔴 **カレンダーの日は、紙では中身なりに伸ばす**(#303)。
+   *
+   * 画面では行の高さを中身から切り離している(掴んだ座標がずれないため)が、
+   * ⚠ その器は `overflow: auto` の**スクロール箱**なので、**紙では箱の高さで
+   *   予定が切られる** ── 印刷は 2 面目であり、紙にスクロールは無い。
+   * ⚠ この print ブロックに calendar 用の規則は直す前 **0 件**だった。
+   *
+   * 🔑 素通しへ戻すのは 3 つ:器の絶対配置 / 器の切り取り / セルの下限。
+   *   ⚠ 3 つとも要る ── `position` だけ戻すと器が流れに入るが `overflow: auto`
+   *   のままなので、**高さ 0 の箱**になって予定が 1 件も出ない。
+   */
+  [data-pkc-region='calendar-grid'] [data-pkc-field='day-events'] {
+    position: static;
+    overflow: visible;
+  }
+  [data-pkc-region='calendar-grid'] tbody td {
+    height: auto;
+  }
+  /* ⚠ 件数は紙では要らない ── 全部出ているのに数字だけ残ると嘘になる。 */
+  [data-pkc-region='calendar-grid'] [data-pkc-field='day-count'] {
+    display: none;
   }
 }

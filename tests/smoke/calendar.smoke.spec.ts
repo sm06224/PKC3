@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
 
 /**
  * 🔴 **カレンダー(封印の解除)**(#276。user 指示 2026-08-19
@@ -178,5 +178,229 @@ test('🔴 曜日の列が等幅で、月が面の高さを使う', async ({ pag
     `月が面の高さを使っていない(器 ${paneH.toFixed(0)}px に対し表 ${tableH.toFixed(0)}px)`,
   ).toBeGreaterThan(0.7);
 
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **予定が増えても、日のセルが動かない**(#303)。
+ *
+ * ## 何が起きていたか
+ *
+ * cowork 実機レポート #15「同じ座標を 2 回押すと別の日に当たる」。⚠ 報告は
+ * 「**列幅**が変わる」と書いていたが、列幅は #293 の `table-layout: fixed` で
+ * 既に固定済み ── **動いていたのは行の高さ**である。
+ *
+ * | 段 | なぜ動くか |
+ * |---|---|
+ * | 予定は `td` の**直下**に積む | 1 件入るごとに、その週の内在高が ~17px 増える |
+ * | 表は `flex: 1` で器いっぱいに伸びる | 伸びた週の**下の行が押し下がる** |
+ *
+ * ⇒ 同じ (x, y) の 2 打目が**同じ曜日の別の週**に当たる。しかも
+ * `binder.ts` の分岐は `meta.date === date ? null : date` なので、
+ * 2 打目は「外れる」ではなく「**その日へ移る**」── 報告の見え方と一致する。
+ *
+ * ## ⚠ この spec が unit では書けない理由
+ *
+ * 見ているのは「DOM に在るか」ではなく「**実際に何 px の所に置かれたか**」。
+ * happy-dom は表の高さ配分をしないので、原理的に届かない。
+ *
+ * ⚠ **この test は、この spec 冒頭の「座標で地を狙わない」という戒めの
+ *   製品側の答えでもある** ── あれは叩き方の問題として畳んだが、
+ *   実機では user が同じ所で詰まった。
+ *
+ * ## ⚠ **1 件では足りない**(変異試験 M6 が教えた)
+ *
+ * 1 稿目は予定を **1 件**だけ入れて「行が動かない」を見ていたが、器を流れの中へ
+ * 戻す変異(= 直す前の姿)が **SURVIVED** した ── セルの下限(`5em` = 65px)が
+ * 予定 1 件ぶん(~19px)を**吸収してしまう**からである。
+ * 🔑 **SURVIVED を「test が弱い」と読む前に、「その次元を通っているか」を疑う**
+ *   (CLAUDE.md §2)── ここは assert ではなく **fixture の件数**が足りなかった。
+ */
+test('🔴 予定が積み上がっても、週の行が動かない (#303)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  // ⚠ 本文を直に書きたいので 2 ペイン(ライブは contenteditable で `fill` できない)
+  await useSplitEditor(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+
+  /**
+   * 🔴 **5 件を同じ日へ積む。** ⚠ **1 件では足りない**(変異試験 M6 が実演した)──
+   *   セルには下限(`5em` = 65px)が在るので、予定 1 件ぶん(~19px)は下限に
+   *   吸収されて**行が動かない**。つまり 1 件だけ入れる稿は、器を流れの中へ
+   *   戻す変異を**素通りさせる**(弱いのではなく、その次元を通っていない)。
+   * 🔑 日付は frontmatter に直に書く ── 日を押して付ける手順は「選んでいる
+   *   ノート」に依存し、一覧の並びが変わると**同じ日を 2 回押して外して**しまう。
+   * ⚠ 月は**ブラウザの時計**から採る(test 側で固定値を組まない)。
+   */
+  const key = await page.evaluate(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+  });
+  const N = 5;
+  for (let i = 0; i < N; i++) {
+    await createEntry(page, 'text');
+    const title = page.locator('[data-pkc-field="editor-title"]');
+    if (await title.count()) await title.fill(`予定${i + 1}`);
+    await page.locator('[data-pkc-field="editor-body"]').first().fill(`---\ndate: ${key}\n---\n`);
+    await clickReal(page, '[data-pkc-action="commit-edit"]');
+  }
+
+  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await clickReal(page, '[data-pkc-action="open-tile"][data-pkc-tile="builtin:calendar"]');
+  await expect(page.locator('[data-pkc-view-pane="calendar"]')).toBeVisible();
+  // ⚠ 作っている間に月が変わっても落ちないよう、書いた月へ寄せる
+  const label = page.locator('[data-pkc-field="calendar-month"]');
+  for (let i = 0; i < 2 && (await label.getAttribute('data-pkc-month')) !== key.slice(0, 7); i++) {
+    await clickReal(page, '[data-pkc-action="calendar-nav"]');
+  }
+  const cell = page.locator(`[data-pkc-date="${key}"]`);
+  // ⚠ 空振り防止 ── 予定が本当に積まれたか(積まれなければ行は動かず、常に緑)
+  await expect(cell.locator('[data-pkc-entry]'), '前提が崩れている(予定が積まれていない)')
+    .toHaveCount(N);
+
+  const rowGeom = async (): Promise<{ top: number; h: number }[]> =>
+    page
+      .locator('[data-pkc-region="calendar-grid"] tbody tr')
+      .evaluateAll((els) =>
+        els.map((el) => {
+          const r = el.getBoundingClientRect();
+          return { top: r.top, h: r.height };
+        }),
+      );
+
+  const before = await rowGeom();
+  expect(before.length, '週の行が描かれていない(この検査は空振り)').toBeGreaterThanOrEqual(4);
+
+  /**
+   * ① 🔴 **どの週も同じ高さ**(仕組みの側)。1 週だけ伸びれば、その下の週は
+   *    全部ずれる ── 「同じ曜日の別の週に当たる」の正体はこれである。
+   */
+  const hs = before.map((r) => r.h);
+  expect(
+    Math.max(...hs) - Math.min(...hs),
+    `週の高さが揃っていない: ${hs.map((h) => h.toFixed(1)).join(' / ')}px`,
+  ).toBeLessThanOrEqual(1);
+
+  /**
+   * ② 🔴 **予定を動かしても、座標が動かない**(user から見える側)。
+   *    選んでいるノート(最後に作ったもの)を 20 日へ移す ── 1 日は 1 件減り、
+   *    20 日は 1 件増える。⚠ 増減が**別の週**に起きるので、片方だけ見ても足りない。
+   */
+  const other = page.locator(`[data-pkc-date="${key.slice(0, 8)}20"]`);
+  await other.locator('[data-pkc-field="day-number"]').click();
+  await expect(cell.locator('[data-pkc-entry]'), '1 日から減っていない').toHaveCount(N - 1);
+  await expect(other.locator('[data-pkc-entry]'), '20 日に増えていない').toHaveCount(1);
+
+  const after = await rowGeom();
+  expect(after.length, '週の数が変わった(比較が成り立たない)').toBe(before.length);
+  const moved = after.map((r, i) => Math.abs(r.top - before[i]!.top));
+  expect(
+    Math.max(...moved),
+    `予定を動かしたら週の行が動いた: ${moved.map((m) => m.toFixed(1)).join(' / ')}px`,
+  ).toBeLessThanOrEqual(1);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **紙では、日のセルが予定の数だけ伸びる**(#303 の対)。
+ *
+ * ## なぜ対で要るか
+ *
+ * 画面では予定を**絶対配置の器**に入れて `overflow: auto` で畳んでいる
+ * (そうしないと行が動いて座標が狙えない)。⚠ ところが**紙にスクロールは無い**
+ * ので、素通しへ戻さないと**箱の高さで予定が切られる** ── 印刷は 2 面目である。
+ * ⚠ この `@media print` ブロックに calendar 用の規則は、直す前 **0 件**だった。
+ *
+ * ## ⚠ この test が守るもう 1 つのもの
+ *
+ * `app.css` の print ブロックには「**この節は file のいちばん最後に置く**」という
+ * 戒めが在るが、そこには「2026-08-07 時点では手前へ移す変異と**等価**なので
+ * 変異試験で殺せない(承知のうえで残している)」とも書いてある。
+ * 🔑 **この直しで、その変異が初めて殺せるようになった** ── ここで上書きしている
+ * `position` / `overflow` / `height` は画面側と同じ詳細度なので、**print ブロックを
+ * 手前へ動かすと負けて、紙で予定が切られる**。この test はそれを鳴らす。
+ */
+test('🔴 紙では、日のセルが予定の数だけ伸びる (#303)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  // ⚠ 本文を直に書きたいので 2 ペイン(ライブは contenteditable で `fill` できない)
+  await useSplitEditor(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+
+  /**
+   * 🔑 **日付は frontmatter に直に書く** ── 日を押して付ける手順は「選んでいる
+   *   ノート」に依存し、一覧の並びが変わると**同じ日を 2 回押して外して**しまう
+   *   (probe の 1 稿目で実際にそうなった)。
+   * ⚠ 月は**ブラウザの時計**から採る(test 側で固定値を組まない)。
+   */
+  const key = await page.evaluate(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-15`;
+  });
+  const N = 6;
+  for (let i = 0; i < N; i++) {
+    await createEntry(page, 'text');
+    const title = page.locator('[data-pkc-field="editor-title"]');
+    if (await title.count()) await title.fill(`予定${i + 1}`);
+    await page.locator('[data-pkc-field="editor-body"]').first().fill(`---\ndate: ${key}\n---\n`);
+    await clickReal(page, '[data-pkc-action="commit-edit"]');
+  }
+
+  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await clickReal(page, '[data-pkc-action="open-tile"][data-pkc-tile="builtin:calendar"]');
+  /**
+   * ⚠ **月境をまたいでいたら、書いた月へ寄せる** ── 作っている間に月が
+   *   変わっても落ちないようにする(製品ではなく実行時刻の問題で赤くしない)。
+   */
+  const label = page.locator('[data-pkc-field="calendar-month"]');
+  for (let i = 0; i < 2 && (await label.getAttribute('data-pkc-month')) !== key.slice(0, 7); i++) {
+    await clickReal(page, '[data-pkc-action="calendar-nav"]');
+  }
+  expect(await label.getAttribute('data-pkc-month'), '書いた月へ寄せられない').toBe(key.slice(0, 7));
+
+  const cell = page.locator(`[data-pkc-date="${key}"]`);
+  await expect(cell.locator('[data-pkc-entry]'), '予定が入っていない(この検査は空振り)').toHaveCount(N);
+  // 🔴 件数が地の上に出ている ── 器に入り切らない分の手がかり
+  await expect(cell.locator('[data-pkc-field="day-count"]')).toHaveText(String(N));
+
+  /**
+   * ⚠ **空振り防止** ── 画面で本当に切られていること。切られていなければ
+   *   紙で「切られない」ことを見ても何も証明しない。
+   */
+  const clipped = await cell.locator('[data-pkc-field="day-events"]').evaluate((el) => ({
+    boxH: el.getBoundingClientRect().height,
+    scrollH: el.scrollHeight,
+  }));
+  expect(
+    clipped.scrollH,
+    `画面で畳まれていない(箱 ${clipped.boxH.toFixed(0)}px / 中身 ${clipped.scrollH}px)`,
+  ).toBeGreaterThan(clipped.boxH + 1);
+
+  // 🔴 紙 ── A4 縦。⚠ `emulateMedia` **だけでは版面幅が変わらない**
+  await page.setViewportSize({ width: 794, height: 1123 });
+  await page.emulateMedia({ media: 'print' });
+  const printed = await cell.evaluate((td) => {
+    const box = td.querySelector('[data-pkc-field="day-events"]') as HTMLElement;
+    const items = [...td.querySelectorAll('[data-pkc-entry]')];
+    const bottom = td.getBoundingClientRect().bottom;
+    return {
+      boxH: box.getBoundingClientRect().height,
+      scrollH: box.scrollHeight,
+      outside: items.filter((el) => el.getBoundingClientRect().bottom > bottom + 1).length,
+      countShown: getComputedStyle(
+        td.querySelector('[data-pkc-field="day-count"]') as HTMLElement,
+      ).display,
+    };
+  });
+  expect(
+    printed.scrollH - printed.boxH,
+    `紙でも予定が箱の高さで切られている(箱 ${printed.boxH.toFixed(0)}px / 中身 ${printed.scrollH}px)`,
+  ).toBeLessThanOrEqual(1);
+  expect(printed.outside, `${printed.outside} 件の予定がセルの外へ出ている`).toBe(0);
+  // ⚠ 紙では全部出ているので、件数だけ残ると嘘になる
+  expect(printed.countShown, '紙に件数が残っている').toBe('none');
+
+  await page.emulateMedia({ media: 'screen' });
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

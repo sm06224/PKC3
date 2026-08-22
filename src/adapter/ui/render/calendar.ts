@@ -170,7 +170,32 @@ export class CalendarRenderer {
           num.setAttribute('data-pkc-field', 'day-number');
           num.textContent = String(day);
           td.append(num);
-          for (const meta of byDate[key] ?? []) {
+          const items = byDate[key] ?? [];
+          /**
+           * 🔴 **件数を地の上に出す**(#303)。予定は器(下)に入れて
+           * スクロールさせるので、**入り切らない分は畳まれて見えなくなる** ──
+           * 数を出さないと「無言で消えた」に見える。
+           * ⚠ 1 件のときは出さない ── 見えている物の数を書くのは飾りである。
+           */
+          if (items.length >= 2) {
+            const count = document.createElement('div');
+            count.setAttribute('data-pkc-field', 'day-count');
+            count.textContent = String(items.length);
+            td.append(count);
+          }
+          /**
+           * 🔴 **予定は器に入れる**(#303)。器は絶対配置なので、
+           * **何件入れてもセルの内在高が変わらない**。
+           * ⚠ 直す前は `td` の直下に積んでいたため、予定 1 件で下の週が
+           *   最大 **53.2px** 押し下がった(1440×900 実測)── 同じ座標の
+           *   2 打目が「同じ曜日の別の週」に当たっていた。
+           * ⚠ 器は**予定が 0 件でも作る** ── 1 件目で DOM の形が変わると、
+           *   そこでまた行が動く(ゼロ件の次元を作らない)。
+           */
+          const events = document.createElement('div');
+          events.setAttribute('data-pkc-field', 'day-events');
+          td.append(events);
+          for (const meta of items) {
             const item = document.createElement('div');
             item.setAttribute('data-pkc-entry', meta.lid);
             item.setAttribute('data-pkc-action', 'select-entry');
@@ -181,7 +206,7 @@ export class CalendarRenderer {
             if (meta.lid === state.selectedLid)
               item.setAttribute('data-pkc-selected', '');
             item.textContent = meta.title;
-            td.append(item);
+            events.append(item);
           }
         }
         tr.append(td);
