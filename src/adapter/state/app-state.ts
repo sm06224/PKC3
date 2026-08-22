@@ -746,6 +746,17 @@ export type SystemCommand =
   | { type: 'BODY_LOAD_FAILED'; lid: string; error: string }
   | { type: 'BODY_PERSISTED'; lid: string; body: string }
   /**
+   * 🔴 **別のタブ / 窓がこのノートを書いた**(#178。2026-08-22、#300 段③ で別窓が
+   * 既定になったので踏みやすくなった)。
+   *
+   * ⚠ `BODY_PERSISTED`(**自分**の書込の ack)とは**別の action にする** ──
+   * 意味が違うからである(あちらは「自分が書いたものが disk に届いた」、
+   * こちらは「**自分以外**が disk を進めた」)。同じ口に混ぜると、
+   * `diskAhead`(= disk が正)の印が自分の ack でも立ってしまう。
+   * 🔑 印さえ立てば、その先の規則は**既に在る**(`diskAhead` の意味論)。
+   */
+  | { type: 'REMOTE_BODY_CHANGED'; lid: string; body: string }
+  /**
    * 🔑 **DB が刻んだ時刻が届いた**(P9 段①)。書込のたびに worker が返す。
    *
    * ⚠ 主スレッドで時刻を作らないための専用の入口 ── これが無いと
@@ -1648,10 +1659,34 @@ function reduceCore(
       // ⚠ freshLid だけでは足りない(review P5b F4): rename が fresh を解除する
       // ため「作成 → title → 本文 → 保存」の普通の流れで seed revision が積まれる
       // ── baseline が flavor seed のままなら fresh 扱いで skip する
+      /**
+       * 🔴 **別の窓の版を上書きするなら、必ず履歴へ積む**(#178、2026-08-22)。
+       *
+       * ⚠ ここは **last-write-wins のまま**である(「変更ありの commit は draft が
+       *   正」── P3-6a review #4 の判断は覆さない)。user が打った字を、
+       *   別の窓の都合で**捨てさせない**ためである。
+       * 🔑 変えるのは**残るかどうか**と**黙るかどうか**の 2 つだけ:
+       *   ① `checkpoint` を強制する(下の断り文「履歴に残しました」を**本当にする**)
+       *   ② 画面に出す ── 直す前は**完全に無言**で、user は「カレンダーで付けた
+       *      日付が消えた」としか見えなかった(戻せることを知る道が無い)。
+       * ⚠ ①は「たぶん積まれる」では足りない ── 新規作成の初回 commit は
+       *   `checkpoint` が false なので、そこだけ本当に消える。
+       */
       const checkpoint =
-        state.freshLid !== lid && baseline !== seedBodyFor(meta.archetype);
+        diskAhead || (state.freshLid !== lid && baseline !== seedBodyFor(meta.archetype));
       return {
-        state: { ...next, entryMetas, taskScan },
+        state: {
+          ...next,
+          entryMetas,
+          taskScan,
+          ...(diskAhead
+            ? {
+                error:
+                  '別の窓の変更と重なりました。こちらの内容で保存し、' +
+                  '別の窓の版は履歴に残してあります(履歴から戻せます)',
+              }
+            : {}),
+        },
         events: [{ type: 'PERSIST_ENTRY', entry, checkpoint }],
       };
     }
@@ -1977,6 +2012,28 @@ function reduceCore(
       if (ob.persisted === action.body) return { state, events: [] };
       return {
         state: { ...state, openBody: { ...ob, persisted: action.body } },
+        events: [],
+      };
+    }
+    /**
+     * 🔴 **別の窓が書いたことを、編集中のタブが知る**(#178)。
+     *
+     * ⚠ 直す前、他タブの `changed` は **`reloadSnapshot` を頼むだけ**で、
+     *   編集中は**まるごと先送り**されていた(`main.ts`)── つまり編集中のタブは
+     *   「自分が読んだ後に誰かが書いた」ことを**最後まで知らなかった**。
+     * 🔑 ここでやるのは**印を立てることだけ**。下書きには 1 バイトも触らない
+     *   (`ENTRY_RESTORED` / `BODY_REWRITTEN` の編集中分岐と同じ作法)。
+     */
+    case 'REMOTE_BODY_CHANGED': {
+      // ⚠ 編集中だけ ── `ready` は `reloadSnapshot` が先送りなしで面倒を見る
+      //   (両方で受けると、同じ問いに答える口が 2 つになる。CLAUDE.md §7)
+      if (state.phase !== 'editing') return { state, events: [] };
+      const ob = state.openBody;
+      if (!ob || ob.lid !== action.lid) return { state, events: [] };
+      // ⚠ 自分が書いた内容がそのまま返ってきた回は印を立てない(自分と衝突しない)
+      if (ob.persisted === action.body) return { state, events: [] };
+      return {
+        state: { ...state, openBody: { ...ob, persisted: action.body, diskAhead: true } },
         events: [],
       };
     }

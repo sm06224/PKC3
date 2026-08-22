@@ -139,6 +139,7 @@ import {
   currentBaseUrl,
 } from '@adapter/platform/deep-link';
 import { openView } from '@adapter/ui/render/open-view';
+import { noteRemoteChange } from '@adapter/state/remote-change';
 import {
   closeViewWindow,
   openViewInWindow,
@@ -657,7 +658,21 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   reload しない ── 編集中の下書きをタブの中で生かしたまま)
    */
   let syncReloadQueued = false;
-  const onRemoteChanged = (): void => {
+  const onRemoteChanged = (_cid: string, lids: string[] | null): void => {
+    /**
+     * 🔴 **編集中のタブにも、別の窓が書いたことを届ける**(#178、2026-08-22)。
+     * ⚠ 一覧の取り直し(下)は編集中は先送りされるので、**これが無いと編集中の
+     *   タブは最後まで気づかない**。判断は `remote-change.ts` に在る ──
+     *   この file はどの test からも実行されない(CLAUDE.md §2)。
+     */
+    void noteRemoteChange(lids, {
+      editingLid: () => {
+        const st = dispatcher.getState();
+        return st.phase === 'editing' ? (st.openBody?.lid ?? null) : null;
+      },
+      getBody: async (lid) => (await client.request({ op: 'getBody', cid, lid })) ?? null,
+      apply: (lid, body) => dispatcher.dispatch({ type: 'REMOTE_BODY_CHANGED', lid, body }),
+    });
     if (syncReloadQueued) return;
     syncReloadQueued = true;
     setTimeout(() => {
