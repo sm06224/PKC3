@@ -343,3 +343,68 @@ describe('🔴 競合ロック(P8 段⑧、user 指示 2026-08-03)', () => {
     expect(s.persisted[0]!.body).toContain('1 通目');
   });
 });
+
+/**
+ * 🔴 **面を開いても、打ちかけの追記は消えない**(user 目線レビュー U-1、2026-08-22)。
+ *
+ * ## 直す前に起きていたこと
+ *
+ * user はノートを読みながら追記欄に「明日 田中さんに確認」と打つ。日付を確かめたく
+ * なって **アプリ** → **カレンダー** を押し、見てから本文へ戻る。
+ * ⇒ **追記欄が空になっている。** 確認も、お知らせも、1 行も出ない。
+ *
+ * ⚠ 原因は `appendModeOf` が `viewMode !== 'detail'` で `hidden` を返すこと
+ *   (`append-box.ts:39`)と、render が `hidden` を「**別のノートへ移った**」と
+ *   数えていたこと。カレンダー / かんばん / 集計 / 2 ペイン / 設定 / フラグ /
+ *   **ヘルプ**のどれでも起きた。
+ * ⚠ マニュアル §4 は「**書きながらマニュアルを読んだり**」をヘルプが編集中でも
+ *   開ける理由に挙げている ── その**ヘルプを開くと打ちかけが消えて**いた。
+ * ⚠ しかも `main.ts:470` は「同じ器に入れると打ちかけの文字も focus も消える」と
+ *   書いて器を分けている。**分けた器が、面の切替で消していた。**
+ *
+ * 🔑 **対照群を同じ describe に置く** ── 「別のノートへ移ったら捨てる」ほうは
+ *   守られていること。片方だけ見ると「全部残す」に倒す変異が生き延びる。
+ */
+describe('🔴 打ちかけの追記(user 目線レビュー U-1)', () => {
+  const draft = (s: { q: <T extends HTMLElement>(x: string) => T | null }): string =>
+    s.q<HTMLTextAreaElement>('[data-pkc-field="append-input"]')?.value ?? '';
+
+  it('🔴 面を開いて戻っても、打ちかけがそのまま残る', async () => {
+    const s = setup([meta('log', 'textlog')], { log: '前の記録' });
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log' });
+    await tick();
+    type(s.q, '明日 田中さんに確認');
+    // ⚠ 面はどれでも同じ経路 ── 代表 3 つを通す(ヘルプは「読みながら書く」の当事者)
+    for (const mode of ['calendar', 'help', 'dual'] as const) {
+      s.d.dispatch({ type: 'SET_VIEW_MODE', mode });
+      await tick();
+      s.d.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
+      await tick();
+      expect(draft(s), `${mode} を開いたら打ちかけが消えた`).toBe('明日 田中さんに確認');
+    }
+  });
+
+  it('⚠ 対照群 ── 別のノートを選んだら捨てる(別のノートへ書かないため)', async () => {
+    const s = setup([meta('log', 'textlog'), meta('log2', 'textlog')], { log: 'あ', log2: 'い' });
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log' });
+    await tick();
+    type(s.q, '書きかけ');
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log2' });
+    await tick();
+    expect(draft(s), '別のノートへ打ちかけが持ち越された').toBe('');
+  });
+
+  it('⚠ 対照群 ── 面をまたいで別のノートを選んでも捨てる(隠れている間に移った)', async () => {
+    const s = setup([meta('log', 'textlog'), meta('log2', 'textlog')], { log: 'あ', log2: 'い' });
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log' });
+    await tick();
+    type(s.q, '書きかけ');
+    s.d.dispatch({ type: 'SET_VIEW_MODE', mode: 'calendar' });
+    await tick();
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log2' });
+    await tick();
+    s.d.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
+    await tick();
+    expect(draft(s), '隠れている間に移ったのに持ち越された').toBe('');
+  });
+});
