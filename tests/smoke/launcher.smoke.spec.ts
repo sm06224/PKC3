@@ -1111,7 +1111,17 @@ test('🔴 組み込みタイルを押すと別窓が開き、本文の面は残
    *   出た** ── user から見ると「アプリを閉じたら PKC がもう 1 つ増えた」。
    * 🔑 観測点は **窓が閉じたこと**である(面が畳まれたことではない)。
    */
-  await clickReal(win, '[data-pkc-action="close-pane"]');
+  /**
+   * ⚠ **押した結果その窓が閉じるので、click の ack が返らないことがある**
+   *   (2026-08-22、CI で実際に落ちた:`mouse.click: Target page, context or
+   *   browser has been closed`)。⚠ **手元は緑・CI は赤**だった ── 手元は
+   *   フル chromium、PR gate は `chromium_headless_shell` である(CLAUDE.md §5)。
+   * 🔑 **握り潰さない** ── 「閉じた」以外の失敗(ボタンが無い等)はそのまま投げる。
+   *   そして**押せたことの証拠は次の行**である(閉じていなければ落ちる)。
+   */
+  await clickReal(win, '[data-pkc-action="close-pane"]').catch((e: unknown) => {
+    if (!String(e).includes('closed')) throw e;
+  });
   await expect.poll(() => win.isClosed(), { timeout: 10_000 }).toBe(true);
 
   /**

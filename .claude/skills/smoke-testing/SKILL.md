@@ -268,3 +268,35 @@ CSP 違反の見張りが **user の中身より後ろ**に登録されていた
    再描画の競合を疑う
 2. **CI のバイナリで再現するか**
 3. 再現したら上の節へ ── **test を緩める前にアプリ側を疑う**
+
+## 🔴 **押した結果その面が閉じる**ボタンは、click の ack が返らない(2026-08-22)
+
+`× 閉じる` がアプリの窓を**窓ごと閉じる**ようになった(#300 段③)ので、
+`clickReal(win, …)` が `mouse.click: Target page, context or browser has been closed`
+で落ちることがある ── **押せなかったのではなく、押せた結果**である。
+
+⚠ **手元は緑・CI は赤**だった:手元はフル chromium、PR gate は
+`chromium_headless_shell`(§ CI と手元で別のブラウザ)。タイミングだけの差なので、
+**手元で 1 回通しても再現しない**。
+
+🔑 書き方は 2 つ。**どちらも「握り潰さない」のが肝**である:
+
+```ts
+// (a) 閉じる系だけ許す ── 押せた証拠は「閉じたこと」で見る
+await clickReal(win, '[data-pkc-action="close-pane"]').catch((e: unknown) => {
+  if (!String(e).includes('closed')) throw e;   // ボタンが無い等はそのまま投げる
+});
+await expect.poll(() => win.isClosed(), { timeout: 10_000 }).toBe(true);
+
+// (b) そもそも閉じない道で離れる ── 別の主張を見たいときはこちら
+await win.keyboard.press('Alt+1');              // 本文の面へ(窓は残る)
+```
+
+⚠ `.catch(() => {})` と**書かない** ── ボタンが消えた日に「押せた」と読む。
+⚠ (b) を使うのは「窓が閉じること」以外を見たいときだけ ── 窓を閉じる主張は
+(a) でしか見られない。
+
+⚠ **同じ罠を 1 セッションで 2 度踏んだ** ── 1 度目は
+`app-window-status.smoke.spec.ts` を書いていて `session closed` で落ち、
+帰り道を `Alt+1` に変えて避けた(= (b))。2 度目は `launcher.smoke.spec.ts` が
+**CI でだけ**落ちた。🔑 **「押すと消えるもの」を押す test を書いたら、この節へ戻る。**
