@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
+import { clickReal, collectPageErrors, createEntry, gotoApp, openViewPane, useSplitEditor } from './helpers';
 
 /**
  * 🔴 **面を開いて戻っても、読んでいた場所に戻る**(user 目線レビュー U-4、2026-08-22)。
@@ -57,15 +57,14 @@ test('🔴 カレンダーを開いて戻ると、読んでいた場所に戻る
   await page.waitForTimeout(200);
   expect(await top(), '位置を作れていない').toBe(1000);
 
-  await clickReal(page, '[data-pkc-browse="launcher"]');
-  const tile = page.locator('[data-pkc-action="open-tile"][data-pkc-tile="builtin:calendar"]');
-  await tile.click();
-  await expect(page.locator('[data-pkc-view-pane="calendar"]')).toBeVisible();
+  // ⚠ 面はアドレスから開く(#300 段③ でタイルは別窓を開くようになった)
+  await openViewPane(page, 'calendar');
   // ⚠ **対照群** ── 開いている間は丸められている(= 直しは「戻す」側で効いている。
   //    「そもそも丸められない」に変わったのなら、この test の前提が変わっている)
   expect(await top(), '丸めが起きていない ── 前提が変わった').toBe(0);
 
-  await tile.click();
+  // 帰り道は「× 閉じる」(タイルの再押下は別窓を開いてしまう)
+  await clickReal(page, '[data-pkc-action="close-pane"]');
   await expect(page.locator('[data-pkc-view-pane="detail"]')).toBeVisible();
   await page.waitForTimeout(700);
   expect(await top(), '読んでいた場所へ戻らない').toBe(1000);
@@ -73,9 +72,8 @@ test('🔴 カレンダーを開いて戻ると、読んでいた場所に戻る
   // ⚠ 2 巡目 ── 覚え直しが効く(1 回目の値に固定されない)
   await page.evaluate((sel) => { (document.querySelector(sel) as HTMLElement).scrollTop = 2500; }, box);
   await page.waitForTimeout(200);
-  await tile.click();
-  await expect(page.locator('[data-pkc-view-pane="calendar"]')).toBeVisible();
-  await tile.click();
+  await openViewPane(page, 'calendar');
+  await clickReal(page, '[data-pkc-action="close-pane"]');
   await expect(page.locator('[data-pkc-view-pane="detail"]')).toBeVisible();
   await page.waitForTimeout(700);
   expect(await top(), '2 巡目で古い位置に固定された').toBe(2500);

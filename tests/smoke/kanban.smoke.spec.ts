@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors } from './helpers';
+import { clickReal, collectPageErrors, createEntry, gotoApp, openViewPane } from './helpers';
 
 /**
  * 🔴 **カンバン(封印の解除)**(#277 段②-b。user 指示 2026-08-19
@@ -43,14 +43,16 @@ test('🔴 アプリの一覧からカンバンを開き、札を押すと元の
   await page.keyboard.press('Tab');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
-  // ① 🔴 アプリの一覧に居て、押すと開く(封印が解けている)
+  // ① 🔴 アプリの一覧に居る(封印が解けている)
+  //    ⚠ 押すと**別窓**が開く(#300 段③)ので、面そのものはアドレスから開く
   await clickReal(page, '[data-pkc-browse="launcher"]');
-  const tile = page.locator('[data-pkc-action="open-tile"][data-pkc-tile="builtin:kanban"]');
-  await expect(tile, 'アプリの一覧にカンバンが出ていない').toBeVisible();
-  await tile.click();
+  await expect(
+    page.locator('[data-pkc-action="open-tile"][data-pkc-tile="builtin:kanban"]'),
+    'アプリの一覧にカンバンが出ていない',
+  ).toBeVisible();
 
   // ② 🔴 面が見えている(本文の面は畳まれている)
-  await expect(page.locator('[data-pkc-view-pane="kanban"]')).toBeVisible();
+  await openViewPane(page, 'kanban');
   await expect(page.locator('[data-pkc-view-pane="detail"]')).toBeHidden();
 
   /**
@@ -121,10 +123,11 @@ test('🔴 アプリの一覧からカンバンを開き、札を押すと元の
     page.locator('[data-pkc-view-pane="kanban"]'),
     '札を押しただけで面が変わった',
   ).toBeVisible();
-  await tile.click();
+  // ⚠ 帰り道は「× 閉じる」(#300 段③ でタイルの再押下は別窓を開く)
+  await clickReal(page, '[data-pkc-action="close-pane"]');
   await expect(
     page.locator('[data-pkc-view-pane="detail"]'),
-    'タイルをもう一度押しても本文へ戻らない',
+    '「× 閉じる」で本文へ戻らない',
   ).toBeVisible();
   const boxes = page.locator('[data-pkc-view-pane="detail"] [data-pkc-action="toggle-task"]');
   await expect(boxes, 'チェックリストのノートに戻っていない').toHaveCount(2);

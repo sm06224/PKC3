@@ -53,10 +53,19 @@ export interface LaunchDeps {
    */
   openOffice: () => void;
   /**
-   * 🔴 **中央の面を持つ組み込み**(#241 の 2 ペイン / #276 のカレンダー)。
-   * ⚠ Office と違って**窓は開かない** ── 中央の面へ切り替える
-   * (裁定 6「幅は中央にしかない」)。だから gesture の制約も無い。
+   * 🔴 **組み込みアプリを別窓で開く**(#300 段③、2026-08-22。user 要望
+   * 「組み込みのアプリに関しては全て別窓で作業したい Office みたいに!」)。
+   *
+   * ⚠ **これは中央の面の切替ではない。** 直す前は `ViewMode` を切り替えるだけで、
+   * 開くと**本文が消えた** ── user は「アプリを見たかった」だけで
+   * 「本文を閉じたかった」わけではない(user 指摘 2026-08-22
+   * 「メインの PKC の機能を阻害する方向で PKC のセンターペインを占有するな」)。
+   *
+   * ⚠ **窓が塞がれたときは中央の面へ退避する**(段⑤)── その判断と文言は
+   * `platform/view-window.ts` に在る。ここは**押されたことを渡すだけ**。
    * ⚠ 面ごとに口を作らない(`openDual` から一般化 ── CLAUDE.md §7)。
+   * 🔑 **`window.open` は gesture の中で撃つ必要がある**ので、この口は
+   * `await` より前に呼ぶ(下の実装がそうなっている)。
    */
   openView: (view: 'dual' | 'calendar' | 'kanban') => void;
   /**
@@ -103,7 +112,8 @@ export async function launchTile(
   if (raw && deps.confirmSameOrigin !== undefined && !(await deps.confirmSameOrigin(tile.title)))
     return;
   if (tile.kind === 'dual' || tile.kind === 'calendar' || tile.kind === 'kanban') {
-    // 🔑 組み込み(#241 / #276)── 中央の面を切り替える。窓は開かない
+    // 🔑 組み込み(#241 / #276 / #300 段③)── **別窓で開く**。
+    //    ⚠ `await` より前に呼ぶ ── `window.open` は gesture の中でしか通らない
     deps.openView(tile.kind);
     return;
   }

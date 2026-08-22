@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { answerAppDialog, gotoApp, clickReal, createEntry, collectPageErrors } from './helpers';
+import { answerAppDialog, clickReal, collectPageErrors, createEntry, gotoApp, openViewPane } from './helpers';
 
 /**
  * 2 ペインタブファイラ(#241 段⑥-a)。
@@ -25,7 +25,7 @@ const ROWS = (side: string): string => `${PANE(side)} [data-pkc-region="dual-tab
  */
 async function openDual(page: Page): Promise<void> {
   await clickReal(page, '[data-pkc-browse="launcher"]');
-  await clickReal(page, '[data-pkc-action="open-tile"][data-pkc-tile="builtin:dual"]');
+  await openViewPane(page, 'dual');
 }
 
 async function makeFolder(page: Page, title: string): Promise<void> {

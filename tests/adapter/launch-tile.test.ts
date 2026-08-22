@@ -393,12 +393,23 @@ describe('main.ts の配線(原文 pin ── #174)', () => {
     expect(MAIN, '配線が読めていない').toContain('dispatcher.dispatch');
   });
 
-  it('🔴 組み込みタイルの openView が nextViewMode を通る(もう一度押すと戻る)', () => {
-    const opens = [...MAIN.matchAll(/openView: \(view\) =>/g)].length;
-    expect(opens, 'openView の配線が読めていない(空振り)').toBeGreaterThan(0);
+  /**
+   * 🔴 **組み込みタイルは別窓を開く**(#300 段③、2026-08-22 に主張を書き換えた)。
+   *
+   * ⚠ 直す前の主張は「`nextViewMode` を通る(もう一度押すと戻る)」だった ──
+   *   それは**中央の面を占有していた頃**の話である。user 指摘
+   *   「メインの PKC の機能を阻害する方向で PKC のセンターペインを占有するな」で
+   *   **仕様の側が不合格**になったので、pin もそれに合わせて書き換える。
+   * 🔑 いまの主張は「**タイルの押下は `openViewTile`(別窓)へ行く**」。
+   *   `nextViewMode` は**退避先**(窓が塞がれたときだけ通る中央の面)に残っている。
+   */
+  it('🔴 組み込みタイルの押下が別窓へ行く(中央の面を占有しない)', () => {
+    const opens = [...MAIN.matchAll(/openView: \(view\) => void openViewTile\(/g)].length;
+    expect(opens, 'タイルが別窓へ行っていない(中央の面を占有する)').toBe(2);
+    // ⚠ 退避先は中央の面のまま ── `nextViewMode` を通る(もう一度押すと戻る)
     expect(
-      [...MAIN.matchAll(/nextViewMode\(dispatcher\.getState\(\)\.viewMode, view\)/g)].length,
-      'openView が素の SET_VIEW_MODE を投げている(押しても戻れない)',
-    ).toBe(opens);
+      [...MAIN.matchAll(/openInPane: \(v\) => openView\(dispatcher, nextViewMode\(/g)].length,
+      '退避先が nextViewMode を通っていない(退避すると戻れない)',
+    ).toBe(1);
   });
 });

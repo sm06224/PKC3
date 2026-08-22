@@ -135,6 +135,8 @@ import { CHART_KIND } from '@adapter/ui/render/chart-raster';
 import { SameOriginGate } from '@adapter/platform/same-origin-grants';
 import { connectViewDeepLink } from '@adapter/platform/deep-link';
 import { openView } from '@adapter/ui/render/open-view';
+import { openViewInWindow, waitForPkcAnnounce } from '@adapter/platform/view-window';
+import { currentBaseUrl } from '@adapter/platform/deep-link';
 import {
   alertInApp,
   confirmInApp,
@@ -207,6 +209,32 @@ async function initStorage(promoted: boolean): Promise<{
  * ── だがそれは「起動に失敗しました」の画面を見ている user そのものである。
  */
 let bootLease: { release(): void } | null = null;
+
+/**
+ * 🔴 **組み込みタイルは別窓で開く**(#300 段③、2026-08-22)。
+ *
+ * ⚠ ここは**配線だけ** ── 判断(窓が出たか)・文言・退避先は `view-window.ts` に在る。
+ *   この file はどの test からも実行されないので、判断を置くと
+ *   「全 test 緑のまま出荷される」形になる(CLAUDE.md §2)。
+ * ⚠ `window.open` は **gesture の中**でしか通らない ── `openViewInWindow` は
+ *   `await` より前に `open` を呼ぶ形にしてある。
+ */
+function openViewTile(
+  dispatcher: Dispatcher,
+  view: 'dual' | 'calendar' | 'kanban',
+): Promise<unknown> {
+  return openViewInWindow(view, {
+    // ⚠ `noopener` で開く ── 別プロセスになり、閉じれば常駐が還る(段③ の実測)
+    open: (url) => {
+      window.open(url, '_blank', 'noopener');
+    },
+    baseUrl: currentBaseUrl,
+    waitForAnnounce: waitForPkcAnnounce,
+    // ⚠ 退避は `open-view.ts` を通す(開いた後の後始末を落とさない)
+    openInPane: (v) => openView(dispatcher, nextViewMode(dispatcher.getState().viewMode, v)),
+    fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
+  });
+}
 
 /** boot(設計メモ §1): lease → worker init(または #177 の proxy 接続)→ メタ一覧 → SYS_BOOTED。 */
 export async function startApp(root: HTMLElement): Promise<AppHandle> {
@@ -1366,11 +1394,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         // #148 組み込みタイル ── 文書なしで開く = Start Center(#174 の一言込み)
         openOffice: openOfficeTile,
         // #241 組み込みタイル ── 中央の面を 2 ペインへ(窓は開かない)
-        // 🔑 **開く手続きは 1 か所**(`open-view.ts`)── ここで直に
-        //    `SET_VIEW_MODE` を撃つと、開いた後の後始末(集計の束ね方を
-        //    思い出す)が抜ける(#300 段②のレビューで判明した §7 の 3 つ目の口)
-        openView: (view) =>
-          openView(dispatcher, nextViewMode(dispatcher.getState().viewMode, view)),
+        // 🔴 **別窓で開く**(#300 段③)。⚠ 判断と文言は `view-window.ts` に在る
+        //    ── この file はどの test からも実行されないので、配線だけ置く。
+        //    ⚠ 窓が塞がれたときの退避は `openInPane`(段⑤)。そちらは
+        //    `open-view.ts` を通す(開いた後の後始末を落とさない)
+        openView: (view) => void openViewTile(dispatcher, view),
         // ⚠ **聞かない。憶えているものを確かめるだけ**(上の granted と同じ判定を
         //    通す ── ここで別の式を書くと、片方だけ直した日に食い違う)
         confirmSameOrigin: async () => granted,
@@ -1433,11 +1461,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             // ⚠ 添付起動の経路に組み込みタイルは来ない(kind は 'app' 固定)が、
             //    依存の実体も 1 つに保つ(§7)
             openOffice: openOfficeTile,
-            // 🔑 **開く手続きは 1 か所**(`open-view.ts`)── ここで直に
-        //    `SET_VIEW_MODE` を撃つと、開いた後の後始末(集計の束ね方を
-        //    思い出す)が抜ける(#300 段②のレビューで判明した §7 の 3 つ目の口)
-        openView: (view) =>
-          openView(dispatcher, nextViewMode(dispatcher.getState().viewMode, view)),
+            // 🔴 **別窓で開く**(#300 段③)。⚠ 判断と文言は `view-window.ts` に在る
+        //    ── この file はどの test からも実行されないので、配線だけ置く。
+        //    ⚠ 窓が塞がれたときの退避は `openInPane`(段⑤)。そちらは
+        //    `open-view.ts` を通す(開いた後の後始末を落とさない)
+        openView: (view) => void openViewTile(dispatcher, view),
             confirmSameOrigin: async (title) => {
               /**
                * 🔴 **「アプリとして登録済みか」で憶え方が変わる**(#301。user 裁定 2026-08-21)。

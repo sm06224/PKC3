@@ -1020,3 +1020,47 @@ test('🔴 一度許した素のまま起動は、読み込み直しても聞か
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * 🔴 **組み込みアプリのタイルは、別窓を開く**(#300 段③、2026-08-22)。
+ *
+ * > 「**組み込みのアプリに関しては全て別窓で作業したい Office みたいに!**」
+ * > 「**メインの PKC の機能を阻害する方向で PKC のセンターペインを占有するな**」
+ *
+ * 🔴 **unit では原理的に届かない層だけ**をここで見る:
+ * ① **本当に窓が開くか** ── `window.open` は unit では差し替えている
+ * ② 🔴 **中央の面が 1 ミリも動かないか** ── これが user の要望そのもの
+ * ③ **窓が PKC のディープリンクで開くか** ── 開いた先がその面で立ち上がる
+ */
+test('🔴 組み込みタイルを押すと別窓が開き、本文の面は残る (#300)', async ({ page, context }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  await clickReal(page, '[data-pkc-browse="launcher"]');
+  const popup = context.waitForEvent('page');
+  await clickReal(page, builtinTile('calendar'));
+  const win = await popup;
+
+  // ③ 窓は PKC のディープリンクで開いている
+  expect(win.url(), '別窓がその面のディープリンクで開いていない').toContain('#pkc?view=calendar');
+  await expect(win.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+  await expect(
+    win.locator('[data-pkc-view-pane="calendar"]'),
+    '別窓がカレンダーで立ち上がっていない',
+  ).toBeVisible();
+
+  /**
+   * ② 🔴 **本体の中央の面は動いていない。**
+   * ⚠ 直す前はここが入れ替わって**本文が消えていた** ── user の苦情の実体である。
+   */
+  await expect(
+    page.locator('[data-pkc-view-pane="detail"]'),
+    '別窓を開いたのに本体の本文が消えた(センターペインを占有している)',
+  ).toBeVisible();
+  await expect(page.locator('[data-pkc-view-pane="calendar"]')).toBeHidden();
+
+  await win.close();
+  expect(errors).toEqual([]);
+});

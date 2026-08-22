@@ -188,3 +188,16 @@ export function connectViewDeepLink(wiring: DeepLinkWiring): () => void {
     offHash?.();
   };
 }
+
+/**
+ * 🔴 **いまのアドレスから、断片を落とした base を作る**(#300 段③、2026-08-22)。
+ *
+ * ⚠ `document.baseURI` を使ってはいけない ── **断片を含む**(2026-08-22 実測:
+ * `…/#pkc?view=calendar` で開くと `baseURI` も同じ字を返す)。`formatViewDeepLink` は
+ * base に `#` があると `null` を返すので、**黙って組めなくなる**。
+ * 🔑 アドレスを読むのはこの file の役目なので、作法もここに置く
+ * (`permalink.ts` の docstring が書いている `location.href.split('#')[0]`)。
+ */
+export function currentBaseUrl(): string {
+  return typeof location === 'object' ? location.href.split('#')[0]! : '';
+}
