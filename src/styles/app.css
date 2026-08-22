@@ -2031,6 +2031,32 @@ select:focus-visible {
   gap: var(--s3);
   flex-wrap: wrap;
 }
+/**
+ * 🔴 **開いている面の題名と、閉じる口**(user 目線レビュー U-3 / U-7、2026-08-22)。
+ *
+ * ⚠ **面ごとに置かない。中央に 1 本**(user 指示 2026-08-03「業務画面」の
+ *   「同じものが常に同じ場所にある」)── 面ごとに書くと、また 1 面だけ抜ける。
+ * ⚠ `sticky` にする ── 面の中身は縦に流れるので、下まで送ったところで
+ *   閉じたくなったときに帯が画面外に居ると**また閉じ方が無い**。
+ */
+[data-pkc-region='pane-bar'] {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: var(--s2) var(--s3);
+  /* ⚠ 地を敷く ── 透けると、下を流れる中身と字が重なって読めない */
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+[data-pkc-region='pane-bar'] [data-pkc-field='pane-title'] {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
 [data-pkc-region='query-bar'] label {
   display: flex;
   align-items: center;

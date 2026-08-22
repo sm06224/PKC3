@@ -84,6 +84,22 @@ export class CenterRouter {
    *   (一覧・情報ペイン・設定のログの 3 か所には在る)。
    */
   private readonly scroll: ScrollMemory;
+  /**
+   * 🔴 **開いている面の題名と、閉じる口**(user 目線レビュー U-3 / U-7、2026-08-22)。
+   *
+   * ⚠ 直す前、開いた面を**閉じる押しボタンは 1 つも無かった**。効く道は 2 つだけ:
+   *   ①**アプリ**タブへ戻って同じタイルをもう一度押す ② `Alt+1`
+   *   ── ①は左の列がフォルダ一覧に変わっていると**そのタイルが見えていない**し、
+   *   ②は**画面のどこにも出ていない**。つまり user から見て「閉じ方が無い」。
+   * ⚠ しかも「もう一度押すと閉じる」という規則を、**押す物が一切示していない**
+   *   (組み込みタイルには「いま開いている」印すら付かない)。
+   * ⚠ 面の題名も**集計にしか無かった** ── 「同じものが常に同じ場所にある」
+   *   (user 指示 2026-08-03「業務画面」)から外れていた。
+   *
+   * 🔑 だから **1 本の帯を中央に置き、全部の面で同じ位置に題名と × を出す**。
+   *   ⚠ 面ごとに実装しない ── 8 面ぶん書くと、また 1 面だけ抜ける。
+   */
+  private readonly bar: HTMLElement;
 
   constructor(
     region: HTMLElement,
@@ -115,6 +131,18 @@ export class CenterRouter {
       flags: pane('flags'),
       help: pane('help'),
     };
+    this.bar = document.createElement('div');
+    this.bar.setAttribute('data-pkc-region', 'pane-bar');
+    this.bar.hidden = true;
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.setAttribute('data-pkc-action', 'close-pane');
+    close.setAttribute('aria-label', '閉じて本文へ戻る');
+    // ⚠ 字も出す ── 記号だけだと「何が閉じるのか」が読めない
+    close.textContent = '× 閉じる';
+    close.title = '閉じて本文へ戻る';
+    this.bar.append(close);
+    region.prepend(this.bar);
     this.scroll = new ScrollMemory(region);
     this.detail = new DetailRenderer(this.panes.detail, assets, markdown, onBodyChange ?? null);
     this.kanban = new KanbanRenderer(this.panes.kanban);
@@ -148,6 +176,8 @@ export class CenterRouter {
       this.panes[view].hidden = false;
       this.lastPane = view;
     }
+    // 🔑 帯は**本文以外のとき**だけ出す(本文は「閉じる」対象ではない)
+    this.bar.hidden = view === 'detail';
     if (view === 'detail') this.detail.render(state);
     else if (view === 'kanban') this.kanban.render(state);
     else if (view === 'query') this.query.render(state);

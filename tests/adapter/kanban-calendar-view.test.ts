@@ -913,3 +913,93 @@ describe('板の「完了」は畳む(2026-08-20)', () => {
     expect(head(q), '絞り込みで消えた分まで数えている').toBe('▸ 完了(1)');
   });
 });
+
+/**
+ * 🔴 **開いている面を、その場で閉じられる**(user 目線レビュー U-3、2026-08-22)。
+ *
+ * ## 直す前に起きていたこと
+ *
+ * user はフォルダタブでノートを選び、**アプリ** → **カレンダー** を開く。
+ * 日付を付けるためにフォルダタブへ戻る(カレンダーは開いたまま)。
+ * 付け終えて本文に戻りたい ── ⚠ **画面のどこにも「閉じる」が無い。**
+ *
+ * 効く道は 2 つだけだった:①**アプリ**タブへ戻って同じタイルをもう一度押す
+ * ②`Alt+1`。⚠ ①はいま左の列がフォルダ一覧なので**その押す物が見えていない**、
+ * ②は**画面のどこにも出ていない**。しかも「もう一度押すと閉じる」という規則を、
+ * **押す物が一切示していない**(組み込みタイルには「いま開いている」印すら無い)。
+ *
+ * 🔑 だから **1 本の帯を中央に置き、全部の面で同じ位置に × を出す**
+ *   (user 指示 2026-08-03「業務画面」の「同じものが常に同じ場所にある」)。
+ *   ⚠ 面ごとに実装しない ── 8 面ぶん書くと、また 1 面だけ抜ける。
+ *
+ * ## ⚠ 題名は帯に入れなかった(U-7 は**取らなかった**)
+ *
+ * 初稿は帯に題名も入れたが、**実ブラウザが `pane-title` の重複を出した** ──
+ * ヘルプ・設定・フラグ・2 ペインは**自分の題名を既に持っている**(unit では
+ * 器が遅延生成なので 1 つしか見えず、気づけなかった)。
+ * 🔑 7 か所に題名を作り直すより、**既にある物はそのまま**にして、
+ *   足りなかった**帰り道だけ**を 1 か所で配るほうが小さく確実である。
+ * ⚠ カレンダー(年月が出る)/ やることの板(列見出しが出る)は、
+ *   題名が無くても**何の面か画面から分かる**ので足していない。
+ */
+describe('🔴 面の帯(user 目線レビュー U-3)', () => {
+  const bar = (root: HTMLElement): HTMLElement | null =>
+    root.querySelector('[data-pkc-region="pane-bar"]');
+
+  it('🔴 本文では帯を出さない(本文は「閉じる」対象ではない)', async () => {
+    const s = setup([meta('n1')], { n1: '本文' });
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    await tick();
+    expect(bar(s.root)?.hidden, '本文で帯が出ている').toBe(true);
+  });
+
+  it('🔴 どの面を開いても、同じ場所に閉じる口が出る', async () => {
+    const s = setup([meta('n1')], { n1: '本文' });
+    // ⚠ **全部の面を通す** ── 1 面だけ抜けるのがこの機構の壊れ方である
+    const views: ViewMode[] = ['calendar', 'kanban', 'query', 'dual', 'settings', 'flags', 'help'];
+    for (const mode of views) {
+      showView(s.d, mode);
+      await tick();
+      expect(bar(s.root)?.hidden, `${mode} で帯が出ていない`).toBe(false);
+      expect(
+        s.root.querySelector('[data-pkc-action="close-pane"]'),
+        `${mode} に閉じる口が無い`,
+      ).not.toBeNull();
+    }
+  });
+
+  it('🔴 × を押すと本文へ戻る(画面の中だけで完結する)', async () => {
+    const s = setup([meta('n1')], { n1: '本文' });
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    showView(s.d, 'calendar');
+    await tick();
+    const close = s.root.querySelector<HTMLElement>('[data-pkc-action="close-pane"]');
+    expect(close, '閉じる口が画面に無い').not.toBeNull();
+    // ⚠ 字も見る ── 記号だけだと「何が閉じるのか」が読めない
+    expect(close!.textContent, '何が起きるか読めない').toContain('閉じる');
+    close!.click();
+    await tick();
+    expect(s.d.getState().viewMode, '× を押しても閉じない').toBe('detail');
+    expect(bar(s.root)?.hidden, '閉じたのに帯が残っている').toBe(true);
+  });
+
+  /**
+   * ⚠ **編集中でも閉じられる** ── わきの面(ヘルプ等)は編集中でも開けるので、
+   *   そこで閉じられないと「入ったら出られない」になる。
+   *   🔑 `SET_VIEW_MODE 'detail'` は編集中でも通る(2026-08-19「本文へ戻る道は
+   *   塞がない」)ので、この × はその道に乗っている。
+   */
+  it('🔴 編集中に開いたヘルプも、× で閉じて編集へ帰れる', async () => {
+    const s = setup([meta('n1')], { n1: '本文' });
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    await tick();
+    s.d.dispatch({ type: 'START_EDIT' });
+    expect(s.d.getState().phase, '前提が崩れている(編集に入れていない)').toBe('editing');
+    showView(s.d, 'help');
+    await tick();
+    s.root.querySelector<HTMLElement>('[data-pkc-action="close-pane"]')!.click();
+    await tick();
+    expect(s.d.getState().viewMode, '編集中は × が効かない(袋小路)').toBe('detail');
+    expect(s.d.getState().phase, '閉じたら編集が終わっていた').toBe('editing');
+  });
+});

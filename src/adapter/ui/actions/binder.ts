@@ -1965,6 +1965,17 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'show-trash': (dispatcher) => dispatcher.dispatch({ type: 'SHOW_TRASH' }),
   'hide-trash': (dispatcher) => dispatcher.dispatch({ type: 'HIDE_TRASH' }),
+  /**
+   * 🔴 **開いている面を閉じて本文へ戻る**(user 目線レビュー U-3)。
+   *
+   * ⚠ 直す前、閉じる押しボタンは**どの面にも 1 つも無かった** ── 効くのは
+   *   「アプリタブへ戻って同じタイルをもう一度押す」か `Alt+1` だけで、
+   *   前者は左の列が別の一覧に変わっていると**その押す物が見えていない**、
+   *   後者は**画面のどこにも出ていない**。
+   * 🔑 `SET_VIEW_MODE 'detail'` は**編集中でも通る**(2026-08-19 の「本文へ
+   *   戻る道は塞がない」)ので、編集中に開いたわきの面もこの × で閉じられる。
+   */
+  'close-pane': (dispatcher) => dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' }),
   'restore-trash': (dispatcher, target) => {
     const revId = target.getAttribute('data-pkc-rev-id');
     const entryLid = target.getAttribute('data-pkc-trash-lid');
