@@ -963,6 +963,7 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    'フォルダの表を上下キーで送れます。Enter は「読む」から始まります',
     'フォルダの操作を OS のファイラに合わせ、貼った図も残るようになりました',
     '左の列が「フォルダ」で開くようになり、まとめて選べます',
     'ショートカットキーが増え、自分で割り当て直せるようになりました',

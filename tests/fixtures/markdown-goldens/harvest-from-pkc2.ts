@@ -10,8 +10,13 @@
  * ⚠ このファイルは PKC3 の typecheck から除外している(tsconfig.json の exclude)──
  *   import 先が PKC2 リポジトリで、CI には存在しないため。読み取り専用の採取であり
  *   PKC2 側には一切書き込まない。
- * ⚠ markdown-it のバージョンを動かすと golden ごと再採取・再検証が必要
- *   (両リポジトリとも 14.3.0 exact に固定中)。
+ * 🔴 **2026-08-22(#78)以降、両者の markdown-it は同じ版ではない** ──
+ *   PKC2 は **14.3.0**(凍結、read-only)、PKC3 は **15.0.0**。
+ *   ⚠ したがって**このスクリプトで採り直すと、上流が直したものが戻る**
+ *   (`console.info` を `http://console.info` へ自動リンクする v14 の挙動など)。
+ *   🔑 採り直すのは「PKC2 の本文をもう 1 件 golden に足す」ときだけにし、
+ *   足した case が落ちたら **まず上流の版差**を疑う ── 差の全数は
+ *   `tests/features/markdown-linkify.test.ts` に実測して pin してある。
  */
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import {
