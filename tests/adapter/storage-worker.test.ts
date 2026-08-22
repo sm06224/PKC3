@@ -117,6 +117,60 @@ describe('revision chain (P5c ── 逆向き差分)', () => {
     expect(await bodyOf(revId)).toBe(doc('初稿'));
   });
 
+  /**
+   * 🔴 **別の窓が書いたものは、上書きされても履歴に残るか**(#178 / #300 段③、2026-08-22)。
+   *
+   * ## なぜここで測るのか
+   *
+   * 動線レビューは「別窓の書込が本体の未保存編集に**黙って消される**」と報告した。
+   * ⚠ **「消える」と「見えなくなる」は別の主張である** ── 前者なら緊急、後者なら
+   * 「知らせていない」欠陥である。読んだだけで severity を書くと、CLAUDE.md の
+   * 「事故の報告ほど範囲を実測してから書く」を破る。だから**実物の worker で通す**。
+   *
+   * ## 再現する物語(窓 2 枚)
+   *
+   * 1. 窓 A がノート X を開く(= `doc('本文')` を読む)
+   * 2. 窓 B のカレンダーが X に日付を付ける ── `REQUEST_BODY_REWRITE` は
+   *    **`checkpoint` を渡さない**(`store-effects.ts` の `persistEntry(…)` に
+   *    opts が無い)ので **amend** である
+   * 3. 窓 A が保存する ── `COMMIT_EDIT` は既存ノートで **`checkpoint: true`**
+   *
+   * ⚠ このとき worker が履歴へ積むのは **`old.body` = ディスク上の値 = 窓 B の版**
+   * である。つまり**上書きはされるが、消えてはいない**。
+   */
+  it('🔴 別の窓が書いた版は、上書きされても履歴から戻せる (#178)', async () => {
+    const read = doc('本文'); // 窓 A が読んだ版
+    const fromOtherWindow = doc('本文') + 'date: 2026-08-22\n'; // 窓 B が書いた版
+    const commit = doc('本文を推敲した'); // 窓 A が保存した版
+
+    // ⚠ **行を作る 1 手が要る** ── 新規行には `old` が無いので `maintainChain` は
+    //    呼ばれない(1 稿目はここを取り違えて前提が落ちた。読むより測るほうが速い)
+    await write('w1', doc('作った'));
+    await write('w1', read, { checkpoint: true });
+    expect(await metasOf('w1'), '前提が崩れている(頭が立っていない)').toHaveLength(1);
+    // 窓 B(カレンダー / やることの板)── amend なので履歴は伸びない
+    await write('w1', fromOtherWindow);
+    expect(await metasOf('w1'), '前提が崩れている(別窓の書込で履歴が伸びた)').toHaveLength(1);
+
+    // 窓 A の保存 ── **窓 B の版を上書きする**
+    await write('w1', commit, { checkpoint: true });
+
+    const metas = await metasOf('w1');
+    const bodies = await Promise.all(metas.map((m) => bodyOf(m.id)));
+    /**
+     * 🔑 **主張はここ 1 つ** ── 上書きされた「窓 B の版」が履歴に在る。
+     * ⚠ `toHaveLength` で数を見ない(数は amend / prune で動く)── **中身**を見る。
+     */
+    expect(
+      bodies,
+      '別の窓が書いた版が履歴のどこにも無い(= 本当に消えている。緊急度が上がる)',
+    ).toContain(fromOtherWindow);
+    // ⚠ **空振り防止** ── 何でも入っているわけではないことを対照群で見る
+    expect(bodies, '書いていない版が履歴に在る(この検査は何も絞れていない)').not.toContain(
+      doc('存在しない版'),
+    );
+  });
+
   it('checkpoint と amend をランダムに交ぜても全世代が byte 一致で戻る', async () => {
     // 決定的 PRNG(落ちたら同じ列で再現する)
     let seed = 20260801;

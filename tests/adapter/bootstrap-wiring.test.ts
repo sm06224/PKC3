@@ -42,6 +42,23 @@ describe('bootstrap の配線', () => {
   });
 
   /**
+   * 🔴 **他タブの書込は、編集中のタブにも届ける**(#178、2026-08-22)。
+   *
+   * ⚠ 直す前ここは `reloadSnapshot` を頼むだけで、**編集中はまるごと先送り**
+   *   されていた ── だから編集中のタブは「自分が読んだ後に誰かが書いた」ことを
+   *   最後まで知らず、保存すると**黙って上書き**していた。
+   * 🔑 判断は `remote-change.ts` に在る(`main.ts` はどの test からも実行されない)
+   *   ── ここは**配線が在ること**だけを原文で pin する(弱いと自覚して使う)。
+   */
+  it('🔴 他タブの書込を編集中のタブへ届ける配線が在る', () => {
+    const body = MAIN.slice(MAIN.indexOf('const onRemoteChanged'));
+    expect(body.indexOf('noteRemoteChange('), '編集中のタブへ届けていない').toBeGreaterThan(-1);
+    // ⚠ **一覧の取り直しも残っていること** ── どちらか片方に寄せない
+    //   (ready のタブは今までどおり `reloadSnapshot` が面倒を見る)
+    expect(body.indexOf('reloadSnapshot('), '一覧の取り直しを落とした').toBeGreaterThan(-1);
+  });
+
+  /**
    * 🔴 **開いた窓の合図は、boot のいちばん最初に返す**(#300 段③ の直し、2026-08-22)。
    *
    * ⚠ 順序が**主張そのもの**である ── storage の初期化(`startApp`)を待ってから
