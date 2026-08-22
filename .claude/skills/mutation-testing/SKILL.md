@@ -316,6 +316,34 @@ CLAUDE.md と本 skill の**2 か所に書いてあって止まらなかった**
 commit して CI が赤くなった。⚠ **スイープの後にもう一度** typecheck / lint / test を
 回してから commit する ── 変異試験は**作業ツリーを触る操作**である。
 
+### 🔴 `finally` だけでは足りない ── **殺されたときにも戻す**(2026-08-22、#178)
+
+⚠ ハーネスを **timeout で殺されると `finally` は走らない**。実際に踏んだ:
+2 分の timeout でスイープごと落ち、**変異が作業ツリーに残った**。
+
+🔴 **本当に怖いのは次の走りである。** 残った変異入りの版を `orig` として読むので:
+
+1. その変異は「元の文字列が 0 件」= **NOT-APPLIED** と出る(**合格に見える**)
+2. **以後のどの復元も「変異入りの版」を書き戻す** ── スイープ全体が無意味になる
+3. 変異が **1 つ製品コードに残ったまま** commit されうる(この日は
+   **無限ループ**のコードが残った ── 字面を目視して気づいた)
+
+🔑 **シグナルでも戻す。** node のハーネスなら:
+
+```js
+const RESTORE = [];
+const restoreAll = () => { for (const [p, t] of RESTORE) { try { writeFileSync(p, t); } catch {} } };
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP'])
+  process.on(sig, () => { restoreAll(); process.exit(1); });
+process.on('exit', restoreAll);
+// 変異を当てる直前に積む
+RESTORE.push([path, orig]);
+```
+
+⚠ **背景実行にすれば安全、ではない** ── 背景でも timeout はかかる。
+🔑 **スイープの後は `git status` と字面を見る**(緑だけ見て commit しない)。
+⚠ そして **`NOT-APPLIED` を合格と読まない** ── この日それを守ったから助かった。
+
 ### ⚠ build が落ちたら、それは `KILLED` である
 
 下限 tripwire(検品)が効いた形。テンプレートはそう扱う。
