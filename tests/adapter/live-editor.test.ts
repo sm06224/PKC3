@@ -116,6 +116,68 @@ describe('ライブエディタ(1 面)の配線', () => {
     expect(r.root.querySelector('[data-pkc-field="editor-body"]')).not.toBeNull();
   });
 
+  /**
+   * 🔴 **2 ペインでは、文書の情報が原文欄にそのまま居る**(#304、2026-08-22)。
+   *
+   * ## なぜこれを pin するのか
+   *
+   * #304 は当初「**2 ペインには札が出ない = 動線が 1 つ消えている**」と読み、
+   * 札を split 側にも描く案を推薦していた。⚠ **その前提が実装と食い違っていた** ──
+   * `detail.ts` は `ta.value = open.body`(**生 body**)を入れるので、
+   * frontmatter は**原文欄の先頭にそのまま見えていて、その場で書き替えられる**。
+   * ⚠ 「2 ペイン側は剥がしている」という issue の記述も誤りで、
+   *   剥がしているのは**プレビュー側**だけだった。
+   *
+   * 🔑 だから札は足さず、**マニュアルを両モードで正確に書く**側へ倒した。
+   *   ⇒ その判断が立つのは「原文欄に居る」が真である間だけなので、ここで pin する。
+   *   ⚠ いま**これを見ている test は 1 件も無かった** ── 剥がす変更が入っても
+   *   緑のまま通り、マニュアルの記述だけが静かに嘘になる。
+   *
+   * 🔑 **画面に出るだけでは足りない** ── 書き替えが**保存まで届く**ことも見る
+   *   (`UPDATE_OPEN_BODY` の配線)。見ないと「見えているのに保存されない」を
+   *   見逃す(CLAUDE.md §2「本命の分岐を unit は 1 度も通らないことがある」)。
+   */
+  it('🔴 2 ペインの原文欄に文書の情報が居て、その場で書き替えられる (#304)', async () => {
+    setLive(false);
+    const body = '---\ntags: [買い物]\n---\n本文です\n';
+    const r = rig(body);
+    await settle();
+    const ta = r.root.querySelector<HTMLTextAreaElement>('[data-pkc-field="editor-body"]');
+    expect(ta, '2 ペインの原文欄が無い').not.toBeNull();
+    // ① 生 body ── frontmatter が剥がされていない
+    expect(ta!.value, '原文欄から文書の情報が剥がれている(札が無い動線の代わりが消える)').toBe(
+      body,
+    );
+    // ② 剥がした側(プレビュー)と取り違えていないこと ── issue #304 の誤りは
+    //    「2 ペインは剥がしている」だったが、剥がすのはプレビューだけである
+    expect(
+      r.root.querySelector('[data-pkc-region="editor-preview"]')?.textContent ?? '',
+      'プレビューに文書の情報が漏れている(剥がす側が効いていない)',
+    ).not.toContain('tags:');
+    /**
+     * ⚠ **書き替えが保存まで届くか**は、ここでは見ない ── 2 ペインの保存は
+     *   **binder 経由**(`input` → `UPDATE_OPEN_BODY`)で、この rig は binder を
+     *   繋いでいないので**必ず空振りする**。観測点を間違えたまま緑にしない。
+     * 🔑 そちらは `tests/adapter/editor-mode.test.ts` が dispatcher ごと見る。
+     */
+  });
+
+  /**
+   * ⚠ **対照群** ── 1 面編集では逆に、frontmatter は**本文から外して**札が持つ。
+   *   両方が同じ形になったら、どちらかの直しが片側へ漏れている。
+   */
+  it('⚠ 対照群 ── 1 面編集では札が持ち、本文の面には出さない', async () => {
+    setLive(true);
+    const r = rig('---\ntags: [買い物]\n---\n本文です\n');
+    await settle();
+    const card = r.root.querySelector('[data-pkc-region="live-frontmatter"]');
+    expect(card, '1 面編集で札が出ていない').not.toBeNull();
+    expect(
+      card?.querySelector('[data-pkc-field="fm-summary"]')?.textContent ?? '',
+      '札に中身が出ていない',
+    ).toContain('tags: 買い物');
+  });
+
   it('③ 🔴 行を書き換えて確定すると、継ぎ足した本文が外へ出る', async () => {
     setLive(true);
     const r = rig(DOC);

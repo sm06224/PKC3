@@ -122,6 +122,36 @@ describe('設定 UI(本物の SettingsRenderer)', () => {
    * ⚠ **合成した `<select>` を押さない**(page-format.test.ts と同じ理由)──
    * 本物の設定画面が action を付け忘れても緑になる形を作らない。
    */
+  /**
+   * 🔴 **2 ペインの原文欄に打った字は、文書の情報ごと state へ届く**(#304、2026-08-22)。
+   *
+   * #304 は「2 ペインには札が出ない = 動線が 1 つ消えている」と読んで、札を
+   * split 側にも描く案を推薦していた。⚠ **その前提が実装と食い違っていた** ──
+   * 原文欄には frontmatter がそのまま入っており、その場で書き替えられる。
+   * ⇒ 札は足さず、マニュアルを両モードで正確に書く側へ倒した。
+   *
+   * 🔑 その判断が立つのは「**書き替えが保存まで届く**」が真である間だけである。
+   *   ⚠ 画面に出ているだけでは足りない ── 届かなければ
+   *   「見えているのに保存されない」という、いちばん気づけない形になる。
+   * ⚠ この配線を見ている test は **1 件も無かった**。
+   */
+  it('🔴 2 ペインの原文欄の字は、文書の情報ごと state へ届く (#304)', () => {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const sent: unknown[] = [];
+    const dispatcher = { getState: () => initialState, dispatch: (a: unknown) => sent.push(a) };
+    bindActions(root, dispatcher as never);
+    // 2 ペインの原文欄と同じ印を持つ欄を置く(binder は**欄の名前**で見る)
+    const ta = document.createElement('textarea');
+    ta.setAttribute('data-pkc-field', 'editor-body');
+    root.append(ta);
+    ta.value = '---\ntags: [家事]\n---\n本文です\n';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(sent, '原文欄に打っても state へ届かない').toEqual([
+      { type: 'UPDATE_OPEN_BODY', body: '---\ntags: [家事]\n---\n本文です\n' },
+    ]);
+  });
+
   it('🔴 選択欄 → binder → 実体 が繋がっている(押して無言にならない)', () => {
     const root = document.createElement('div');
     document.body.append(root);

@@ -58,6 +58,7 @@ import {
 import { isPageFormat } from '@features/page-format';
 import { appExternalImages } from '@adapter/ui/render/external-images';
 import { launchTile } from '@adapter/ui/launch-tile';
+import { collectExistingLids } from '@features/import/existing-lids';
 import { appOfficePack } from '@adapter/ui/render/office-entry-view';
 import { applyPackResult } from '@adapter/ui/render/office-pack-panel';
 import { OfficeWindow } from '@adapter/platform/office/office-window';
@@ -925,11 +926,20 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       // ⚠ 生存 entry だけでは足りない ── ゴミ箱の lid(entries に居ないが
       // revisions を持つ)と衝突すると、その item がゴミ箱から消え、
       // 取り込んだ entry が他人の履歴を背負う(review H-1、実 sqlite で実証)
-      existingLids: async () =>
-        new Set([
-          ...dispatcher.getState().entryMetas.keys(),
-          ...(await client.request({ op: 'listRevisionLids', cid })),
-        ]),
+      /**
+       * 🔴 **DB に問う。state は射影であって正本ではない**(#328、2026-08-22)。
+       * 判定と理由は `features/import/existing-lids.ts` に在る ── ここは配線だけ。
+       * ⚠ 直す前はこの場で `entryMetas` を読んでいたが、`main.ts` は**原文 pin の
+       *   test しか無い層**なので、state が遅れたら上書きになる性質を誰も見て
+       *   いなかった(CLAUDE.md「どの test からも実行されない file に判断を書かない」)。
+       */
+      existingLids: () =>
+        collectExistingLids({
+          fromState: () => dispatcher.getState().entryMetas.keys(),
+          entryLids: async () =>
+            (await client.request({ op: 'listEntryMetas', cid })).map((m) => m.lid),
+          revisionLids: () => client.request({ op: 'listRevisionLids', cid }),
+        }),
       existingRelationIds: () =>
         new Set(dispatcher.getState().relations.map((r) => r.id)),
       orderBase: () => {

@@ -252,3 +252,47 @@ describe('書き出しの settle の配線', () => {
     expect(MAIN).toContain('storeEffects = connectStoreEffects(');
   });
 });
+
+/**
+ * 🔴 **取込の衝突検査は DB に問う**(#328、2026-08-22)。
+ *
+ * ⚠ 判定そのものは `features/import/existing-lids.ts` に取り出してあり、
+ *   `tests/features/existing-lids.test.ts` が決定的に見ている。
+ *   **ここが守るのは配線**(その口に何を渡しているか)── 変異試験で
+ *   「`main.ts` 側で entry の口を `[]` にする」が生き延びたので足した。
+ *
+ * ⚠ `main.ts` は原文 pin しか持てない層なので**弱いと自覚して使う**
+ *   (CLAUDE.md「取り出せないものは原文 pin で妥協するが、弱いと自覚して使う」)。
+ */
+describe('取込の衝突検査の配線(#328)', () => {
+  /** `existingLids` の配線だけを切り出す(他所の一致に救われないように)。 */
+  function existingLidsWiring(): string {
+    const at = MAIN.indexOf('existingLids: () =>');
+    expect(at, 'existingLids の配線が無い(state 直読みへ戻っていないか)').toBeGreaterThan(-1);
+    const end = MAIN.indexOf('existingRelationIds', at);
+    expect(end, '次の口が見つからない ── 切り出せていない').toBeGreaterThan(at);
+    return MAIN.slice(at, end);
+  }
+
+  it('🔴 判定は取り出した純関数へ渡す(main.ts に直書きしない)', () => {
+    expect(existingLidsWiring(), '判定が main.ts へ戻っている').toContain(
+      'collectExistingLids({',
+    );
+  });
+
+  it('🔴 DB の entry の lid を渡している(state だけに戻っていない)', () => {
+    const w = existingLidsWiring();
+    expect(w, 'DB の entry を読んでいない ── 他タブの取込を上書きする').toContain(
+      "op: 'listEntryMetas'",
+    );
+    expect(w, '読んだ meta から lid を取り出していない').toContain('.map((m) => m.lid)');
+  });
+
+  it('🔴 DB の revision の lid も渡している(ゴミ箱の履歴を背負わない)', () => {
+    expect(existingLidsWiring(), 'revision を読んでいない').toContain("op: 'listRevisionLids'");
+  });
+
+  it('⚠ state も渡している(書込 ack 待ちの lid を落とさない)', () => {
+    expect(existingLidsWiring(), 'state を捨てている').toContain('entryMetas.keys()');
+  });
+});
