@@ -338,3 +338,50 @@ P1〜P2 は並行可。P3 が最大工数。**「効果が小さい」は棄却�
 - [`docs/spec/schema-migration-policy.md`](https://github.com/sm06224/PKC2/blob/main/docs/spec/schema-migration-policy.md) ── schema 単調・明示 reject の規約(§9 の下敷き)
 - [`docs/spec/pkc-message-api-v2.md`](https://github.com/sm06224/PKC2/blob/main/docs/spec/pkc-message-api-v2.md) ── transport の正本(§2 継承)
 - [PKC2 CLAUDE.md](https://github.com/sm06224/PKC2/blob/main/CLAUDE.md) ── 不可侵指示群と Invariant 5 の判定法
+
+#### 🔴 2026-08-22 追記 ── **動線と vision の参照が 1 本も無かった**
+
+⚠ 上の 7 本は**全部 storage / transport / schema** である。この doc は
+**PKC2 の「ストレージの物語」だけから組まれていた** ── その結果、移植の台帳(#180)は
+機能の一覧になり、**「動線」という語はこの doc に 0 件**のまま進んだ
+(user 指摘 2026-08-22「PKC2 の資産をただ機能に分解してテキトーに実装させれば
+いいと勘違いしている / 私が動線も気にしろといったのはそういうところだぞ?」)。
+
+**欠けていた参照を足す。**
+
+**① 長期構想(D 系列)── PKC2 が「何を目指していたか」**
+
+- [`docs/vision/pkc-multi-window-architecture.md`](https://github.com/sm06224/PKC2/blob/main/docs/vision/pkc-multi-window-architecture.md)
+  ── **D-2**。§3 に「**編集と参照を物理的に分離できる**」「特定 view を常時表示できる
+  (TOC / calendar / search)」。⚠ **PKC3 #300 の要望と同じ内容が 2026-04-12 に書かれている**。
+  §6 の「変更は main / shared dispatcher 経由で一本化」は、PKC3 の
+  `store-proxy.ts`(holder / follower)が**既に実現している**
+- [`docs/vision/pkc-message-externalization.md`](https://github.com/sm06224/PKC2/blob/main/docs/vision/pkc-message-externalization.md)
+  ── **D-1**。PKC3 では #189 / #195 に対応
+- [`docs/vision/webrtc-p2p-collaboration.md`](https://github.com/sm06224/PKC2/blob/main/docs/vision/webrtc-p2p-collaboration.md)
+  ── **D-3**
+- [`docs/vision/pkc-application-scope-vision.md`](https://github.com/sm06224/PKC2/blob/main/docs/vision/pkc-application-scope-vision.md)
+  ── scope の定義。⚠ §4 が「**不変**」と宣言した 4 原則のうち **3 つ**
+  (single HTML product / container is source of truth / backward compatibility)は
+  **PKC3 が意図的に変えたもの**である。§7 のリスク「scope 拡大が single HTML の限界を
+  超える可能性」は的中した
+
+**② 動線の正本 ── user への約束**
+
+- [`docs/manual/`](https://github.com/sm06224/PKC2/tree/main/docs/manual) 全 15 章
+  ── とくに `03_画面とビュー.md` / `05_日常操作.md`(1118 行)/
+  `06_キーボードショートカット.md` / `10_filer_と_graph_と_inventory.md` /
+  `13_アプリランチャーと出力機能.md`
+- `src/adapter/ui/action-binder.ts`(11,939 行・`case` 245 個)──
+  **押した物と起きることの一覧**。動線を数えるならここ
+
+**③ 多窓の実装と、その診断**
+
+- `src/adapter/ui/entry-window.ts` ── `openEntryWindow` / 親子の postMessage 13 種
+- `docs/development/vscode-grade-overhaul-2026-05/MASTER.md` §1.1 / §5.1
+  ── ⚠ **5 面が同じ markdown を別経路で描いてずれる**という自己診断。
+  PKC3 が `index.html` を開く方式を採ったことで**構造的に回避されている**
+
+⚠ **これらを「移植すべき機能の一覧」として読まないこと。** 読み方は
+CLAUDE.md「PKC2 は『機能の袋』ではない。動線で読む」(user 指示 2026-08-22)に従う ──
+**①その動線が user に届いていたか ②実装形は再現しない**、の 2 段で判定する。
