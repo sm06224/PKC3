@@ -1382,6 +1382,50 @@ describe('2 ペインのキーボード操作(#273)', () => {
   });
 
   /**
+   * 🔴 **確認を待っている間に対象が消えたら、数えて言う**(#308)。
+   *
+   * ⚠ 黙って残りを消すと、user は「一部が消えなかった」ことに気づけない。
+   *   この repo の「落としたものは数えて言う」に揃える。
+   * ⚠ 直す前は再確認そのものが無く、**reducer が黙って捨てて**いた。
+   */
+  it('🔴 待っている間に一部が消えたら、黙って残りを消さない', async () => {
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' });
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'b', mode: 'toggle' });
+    expect(d.getState().dual.left.selection.length, '前提が崩れている').toBe(2);
+
+    const btn = region.querySelector<HTMLElement>('[data-pkc-field="dual-delete"]')!;
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+
+    // 待っている間に片方だけ消える(別タブ / 取込は entry を総入れ替えする)
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: METAS.filter((m) => m.lid !== 'a'),
+      relations: RELS,
+    });
+
+    await answerDialog('ok');
+
+    expect(d.getState().entryMetas.has('b'), '黙って残りを消した').toBe(true);
+    expect(d.getState().error ?? '', '無言で捨てた(理由が出ていない)').toContain(
+      '既にありません',
+    );
+  });
+
+  /**
+   * 🔴 **対照群**(空振り防止)── 何も崩れていなければ、今までどおり消える。
+   */
+  it('対照群: 崩れていなければ、まとめて消える', async () => {
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' });
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'b', mode: 'toggle' });
+    const btn = region.querySelector<HTMLElement>('[data-pkc-field="dual-delete"]')!;
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await answerDialog('ok');
+    expect(d.getState().entryMetas.has('a'), '対照群が消えていない').toBe(false);
+    expect(d.getState().entryMetas.has('b'), '対照群が消えていない').toBe(false);
+  });
+
+  /**
    * 🔴 **その場で名前を打ち替える**(#273 段④。OS のファイラの F2)。
    * ⚠ 入力欄は **state 駆動**で出す ── DOM を直に差し替えると、別タブの保存が
    *   届くだけで打っている最中の入力が消える(この面は state で組み直すため)。

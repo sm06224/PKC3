@@ -27,6 +27,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
+import { Dispatcher } from '../../src/adapter/state/dispatcher';
+import { buildShell } from '../../src/adapter/ui/render/shell';
+import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { answerDialog } from './dialog-helper';
 
 function meta(lid: string, order: number): EntryMeta {
   return {
@@ -125,5 +129,52 @@ describe('編集中の「戻す」「復元」は、理由を出して断る(#31
     const s = editing();
     const r = reduce(s, { type: 'RESTORE_REVISION', revId: 'r1' });
     expect(r.events, '編集中に復元が通ってしまう').toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **「ゴミ箱を空にする」も、待っている間に編集が始まったら断る**(#308)。
+ *
+ * ⚠ ここが抜けると「ゴミ箱のボタン 3 つのうち、開く・戻すだけ直って
+ *   **空にするだけ無言のまま**」という、いちばん見分けにくい形になる
+ *   ── 変異試験がまさにこれを生かして教えた(直す前は SURVIVED)。
+ */
+describe('ゴミ箱を空にする ── 待っている間に編集が始まったら断る(#308)', () => {
+  function mount() {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const d = new Dispatcher();
+    buildShell(root);
+    bindActions(root, d);
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', 1)], relations: [] });
+    // ⚠ 押す口は器の外に無いので、この test 用に 1 つ置く(binder は委譲で拾う)
+    const btn = document.createElement('button');
+    btn.setAttribute('data-pkc-action', 'purge-trash');
+    root.append(btn);
+    return { d, btn, root };
+  }
+
+  it('🔴 待っている間に編集が始まったら、空にせず理由を出す', async () => {
+    const { d, btn } = mount();
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '本文' });
+    d.dispatch({ type: 'START_EDIT' });
+    expect(d.getState().phase, '前提が崩れている').toBe('editing');
+
+    await answerDialog('ok');
+
+    expect(d.getState().error ?? '', '無言で捨てた(理由が出ていない)').toContain(
+      '編集を終了してから空に',
+    );
+  });
+
+  /** 🔴 **対照群** ── 崩れていなければ確認 OK がそのまま通る(空振り防止)。 */
+  it('対照群: 崩れていなければ、確認 OK がそのまま通る', async () => {
+    const { d, btn } = mount();
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await answerDialog('ok');
+    expect(d.getState().error ?? '', '崩れていないのに断った').not.toContain('編集を終了');
   });
 });
