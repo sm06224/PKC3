@@ -13,6 +13,7 @@ import type {
   StorageResponse,
 } from '../../src/adapter/platform/storage/protocol';
 import { TASK_LIMITS } from '../../src/features/kanban/kanban-data';
+import { contentHash64Hex } from '../../src/adapter/platform/storage/content-hash';
 
 type Op = StorageRequest['op'];
 
@@ -215,6 +216,71 @@ describe('revision chain (P5c ── 逆向き差分)', () => {
     expect(before[0]!.id, '履歴の id が変わった(この版が別物になる)').toBe(
       (await metasOf('r1'))[0]!.id,
     );
+  });
+
+  /**
+   * 🔴 **読んだものと違っていたら、1 バイトも書かない**(#178、2026-08-22)。
+   *
+   * ⚠ 追記のための門である ── `getBody` → `appendBlock` → 書込 の間に
+   * 別のタブ / 窓が書くと、その版を消す(`checkpoint` を渡さないので**履歴にも
+   * 残らない**)。🔑 **同じ tx の中で比べる**のが要点:ここで読む `old.body` は
+   * 「まさにこれから上書きする値」なので、比較と書込の間に隙間が無い。
+   */
+  it('🔴 expectHash が食い違ったら書かない(conflict を返す) (#178)', async () => {
+    await write('h1', doc('作った'));
+    await write('h1', doc('読んだ本文'), { checkpoint: true });
+    const revsBefore = await metasOf('h1');
+
+    // 🔴 **別の窓が書いた**(この後、古い基底のまま書こうとする)
+    await write('h1', doc('別の窓が書いた'));
+
+    const res = await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('h1', doc('古い基底に足した')),
+      checkpoint: false,
+      // ⚠ 「読んだ本文」の hash ── いまの disk は既に別物である
+      expectHash: contentHash64Hex(doc('読んだ本文')),
+    });
+
+    expect(res.conflict, '食い違いを見逃した').toBe(true);
+    expect(
+      await request({ op: 'getBody', cid: 'c1', lid: 'h1' }),
+      '書かないと言いながら書いた(別の窓の本文が消える)',
+    ).toBe(doc('別の窓が書いた'));
+    // ⚠ **鎖も動かない**(tx ごと巻き戻る)
+    expect(await metasOf('h1'), '書かなかったのに履歴が動いた').toHaveLength(revsBefore.length);
+  });
+
+  it('🔴 expectHash が一致すれば、ふつうに書く(空振り防止) (#178)', async () => {
+    await write('h2', doc('作った'));
+    await write('h2', doc('いまの本文'));
+    const res = await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('h2', doc('足した')),
+      checkpoint: false,
+      expectHash: contentHash64Hex(doc('いまの本文')),
+    });
+    expect(res.conflict, '一致しているのに断った').toBeUndefined();
+    expect(await request({ op: 'getBody', cid: 'c1', lid: 'h2' })).toBe(doc('足した'));
+  });
+
+  /**
+   * ⚠ **渡さなければ今までどおり**(last-write-wins)。
+   * 🔑 編集の保存はこちら ── 断ると user が打った字を捨てさせることになる(#333)。
+   */
+  it('⚠ expectHash を渡さなければ、食い違っていても書く(既定は変えない) (#178)', async () => {
+    await write('h3', doc('作った'));
+    await write('h3', doc('別の窓が書いた'));
+    const res = await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('h3', doc('上書きした')),
+      checkpoint: false,
+    });
+    expect(res.conflict).toBeUndefined();
+    expect(await request({ op: 'getBody', cid: 'c1', lid: 'h3' })).toBe(doc('上書きした'));
   });
 
   /** ⚠ 消えたノートの改名を「成功」と言わない(呼び側が理由を出せる)。 */

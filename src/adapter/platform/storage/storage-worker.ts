@@ -1156,6 +1156,22 @@ const handlers: Handlers = {
         'SELECT title, archetype, body FROM entries WHERE cid = ? AND lid = ?',
         [req.cid, req.entry.lid],
       )[0] as { title: string; archetype: string; body: string } | undefined;
+      /**
+       * 🔴 **読んだものと違っていたら、1 バイトも書かない**(#178、2026-08-22)。
+       *
+       * ⚠ **追記のためにある** ── `getBody` → `appendBlock` → 書込 の間に
+       * 別のタブ / 窓が書くと、その版を消す(`checkpoint` を渡さないので
+       * **履歴にも残らない** = どこからも戻せない)。
+       * 🔑 **同じ tx の中で比べる**のが要点である ── ここで読んだ `old.body` は
+       * 「まさにこれから上書きする値」なので、比較と書込の間に隙間が無い
+       * (呼び側で `getBody` して比べる形にすると、その隙間がまた開く)。
+       * ⚠ hash は**頼まれたときだけ**計算する(全書込に負荷を足さない)。
+       * ⚠ 行が無いときは比べない ── 消えていたら普通に作る(追記側が先に弾く)。
+       */
+      if (req.expectHash !== undefined && old && contentHash64Hex(old.body) !== req.expectHash) {
+        database.exec('ROLLBACK'); // ⚠ 何も書いていないことを明示して閉じる
+        return { createdAt: null, updatedAt: null, conflict: true };
+      }
       if (old && old.body !== req.entry.body) {
         // 🔒 **履歴より本文が上位**(review P5c F1 ── データ喪失方向で実証済み):
         // 鎖が既に壊れていると amend の materialize が throw し、tx ごと巻き戻って

@@ -86,6 +86,8 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
         keepLatest: REVISION_KEEP_LATEST,
         // ⚠ 居場所は**同じ tx**で(#258)── 省略時は辺に触らない
         ...(opts?.parent ? { parent: opts.parent } : {}),
+        // 🔴 読んだものと違っていたら書かせない(#178)── 省略時は last-write-wins
+        ...(opts?.expectHash !== undefined ? { expectHash: opts.expectHash } : {}),
       }),
     /**
      * ノートを消す。⚠ **アプリの保存領域はここでは消さない**(P8 段⑳)。
