@@ -42,6 +42,23 @@ describe('bootstrap の配線', () => {
   });
 
   /**
+   * 🔴 **アプリの窓では常設バッジを畳む**(#300 段④、2026-08-22)。
+   *
+   * ⚠ 実体の主張は smoke(`app-window-status.smoke.spec.ts`)が対照群つきで見る。
+   *   ここで見るのは**配線が消えていないこと**だけ ── `main.ts` はどの test からも
+   *   実行されないので、条件を落としても全 test 緑のまま出荷される(CLAUDE.md §2)。
+   */
+  it('🔴 状態の行は、アプリの窓かどうかを見てから組む', () => {
+    const paint = MAIN.slice(MAIN.indexOf('const paint = ()'));
+    const head = paint.slice(0, paint.indexOf('const text ='));
+    expect(head.indexOf('heldViewWindow'), 'アプリの窓かを見ずに帯を組んでいる').toBeGreaterThan(
+      -1,
+    );
+    // ⚠ **旗が変わった瞬間に塗り直すこと**も見る ── 倒すだけだと古い帯が残る
+    expect(MAIN.indexOf('repaintStatus()'), '旗を倒しても塗り直していない').toBeGreaterThan(-1);
+  });
+
+  /**
    * 🔴 **他タブの書込は、編集中のタブにも届ける**(#178、2026-08-22)。
    *
    * ⚠ 直す前ここは `reloadSnapshot` を頼むだけで、**編集中はまるごと先送り**

@@ -175,6 +175,12 @@ export interface AppHandle {
    * ⚠ 未読が 0 件・恒久オフなら**何も出さない**(判定は面の側)。
    */
   presentAnnounce(): void;
+  /**
+   * 🔴 **状態の行を塗り直す**(#300 段④)。⚠ 配線が「アプリの窓か」の旗を
+   * 倒した瞬間に効かせるために要る ── 旗だけ倒しても、次に何かが起きるまで
+   * 古い帯が残る(離れた瞬間に「本体タブ経由です」が戻るべきである)。
+   */
+  repaintStatus(): void;
 }
 
 /**
@@ -572,6 +578,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   /**
    * #177: 本体タブ経由(follower)で開いているときの常設バッジ。fallback 警告と
    * 同型(「意図と違う接続形態は user が知るべき事実」)。昇格で空にする。
+   *
+   * 🔴 **アプリの窓では出さない**(#300 段④、2026-08-22。動線レビュー §10)。
+   * ⚠ 理由は「情報を減らしたい」ではなく、**この帯の存在理由が成り立たない**こと:
+   *   #177 が常設にしたのは「**意図と違う**接続形態は user が知るべき事実」だから
+   *   だが、アプリの窓は **user が自分で開いた 2 枚目**である ── 意図どおりで、
+   *   しかも user がそこで**できることは何も無い**。
+   * ⚠ そして**実害がある** ── 状態の行は **1 行**なので、常設の帯が
+   *   「別の窓の変更と重なりました…」(#178)のような**本当に読ませたい文**を
+   *   横へ押し出す。⚠ ふつうの 2 枚目のタブでは今までどおり出す。
+   * 🔑 判定は `heldViewWindow`(ディープリンクを握っている間だけ真)を読む ──
+   *   新しい旗を作らない(CLAUDE.md §7)。
    */
   let syncLine = followerConn ? '複数タブ: このタブの保存は本体タブ経由です' : '';
   // textContent の setter は同一文字列でも子ノードを全置換する ── 打鍵ごとの
@@ -593,7 +610,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   let errorLine = '';
   let noticeLine = '';
   const paint = () => {
-    const parts = [statusBase, syncLine, noticeLine, errorLine].filter((t) => t !== '');
+    // ⚠ アプリの窓では常設バッジを畳む(上の理由)── `paint` は面が変わるたび
+    //    走るので、`onHold` が旗を倒した次の描画から消える
+    const sync = heldViewWindow === null ? syncLine : '';
+    const parts = [statusBase, sync, noticeLine, errorLine].filter((t) => t !== '');
     const text = parts.join(' — ');
     if (text === statusShown) return;
     statusShown = text;
@@ -2011,6 +2031,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     },
     presentUpdate: (apply) => updatePrompt.present(apply),
     presentAnnounce: () => announce.present(),
+    repaintStatus: () => paint(),
   };
 }
 
@@ -2093,6 +2114,9 @@ function bootstrap(): void {
         onHold: (view) => {
           heldViewWindow = view;
           document.title = view === null ? CONTAINER_TITLE : `${viewModeLabel(view)} — ${CONTAINER_TITLE}`;
+          // ⚠ **その場で塗り直す** ── 旗を倒しただけでは、次に何かが起きるまで
+          //    古い帯が残る(離れた瞬間に「本体タブ経由です」が戻るべきである)
+          app.repaintStatus();
         },
         fail: (error) => app.dispatcher.dispatch({ type: 'OP_FAILED', error }),
         // ⚠ 面が変わったら断片を消す(見ている間だけ残す)
