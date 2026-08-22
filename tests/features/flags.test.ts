@@ -328,7 +328,11 @@ describe('🔴 クエリパラメータの抜け穴を作らない', () => {
     expect(
       code.filter((l) => l.includes('location.search')).map((l) => l.trim()),
       'location.search が「断片を落とす」以外で使われている',
-    ).toEqual(['`${location.pathname}${location.search}${dropViewFromHash(location.hash)}`,']);
+    ).toEqual([
+      '`${location.pathname}${location.search}${dropViewFromHash(location.hash)}`,',
+      // ⚠ 合図(`w`)だけを落とす口(#300 段③ の直し)── 同じ作法で `search` は残す
+      '`${location.pathname}${location.search}${dropViewWindowToken(location.hash)}`,',
+    ]);
   });
 
   /**

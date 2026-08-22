@@ -46,7 +46,14 @@
  */
 import { VIEW_MODES, isViewMode, type ViewMode } from '../state/app-state';
 import { isSealedView } from '../../features/sealed';
-import { dropViewFromHash, parseViewDeepLink } from '../../features/link/permalink';
+import {
+  dropViewFromHash,
+  dropViewWindowToken,
+  parseViewDeepLink,
+  parseViewDeepLinkEntry,
+  parseViewWindowToken,
+} from '../../features/link/permalink';
+import { announceViewWindow } from './view-window';
 
 /** ⚠ 差し替えられるようにしておく(test は DOM を持たずに通す)。 */
 export interface DeepLinkTarget {
@@ -57,6 +64,11 @@ export interface DeepLinkTarget {
    * ⚠ **履歴を積まない**(戻るで断片が戻ってきたら、user は「戻るが効かない」と読む)。
    */
   readonly clearHash: () => void;
+  /**
+   * 🔴 **1 回限りの合図(`w`)だけを落とす**(#300 段③ の直し)。
+   * ⚠ `view` は残す ── 合図は放送した瞬間に用済みだが、面はまだ見ている。
+   */
+  readonly dropToken: () => void;
 }
 
 /** 既定の的 ── 本物のアドレス。 */
@@ -75,7 +87,37 @@ export function windowDeepLinkTarget(): DeepLinkTarget {
         `${location.pathname}${location.search}${dropViewFromHash(location.hash)}`,
       );
     },
+    dropToken: () => {
+      if (typeof history !== 'object' || typeof location !== 'object') return;
+      history.replaceState(
+        null,
+        '',
+        `${location.pathname}${location.search}${dropViewWindowToken(location.hash)}`,
+      );
+    },
   };
+}
+
+/**
+ * 🔴 **開いた窓が「出ましたよ」と返す**(#300 段③ の直し、2026-08-22)。
+ *
+ * ⚠ **`main.ts` のいちばん最初で呼ぶ** ── storage の初期化を待ってからだと、
+ * 開けているのに開いた側が待ち時間を使い切って**退避してしまう**
+ * (そのとき本文が消える = user の苦情そのものの再現)。
+ * ⚠ 合図は**使ったらアドレスから外す** ── ブックマークに焼き付くと、次に
+ * 開いたときに誰も聞いていない放送を撒く。
+ *
+ * @returns この窓が**こちらが開いたもの**だったか(test の観測点)
+ */
+export function announceOpenedWindow(
+  target: DeepLinkTarget = windowDeepLinkTarget(),
+  announce: (token: string) => void = announceViewWindow,
+): boolean {
+  const token = parseViewWindowToken(target.hash);
+  if (token === null) return false;
+  announce(token);
+  target.dropToken();
+  return true;
 }
 
 /**
@@ -135,6 +177,24 @@ export interface DeepLinkWiring {
    * **アドレスから開いた集計だけ表が出ない**形になる(`open-view.ts` を渡す)。
    */
   readonly openView: (mode: ViewMode) => void;
+  /**
+   * 🔴 **連れてきたノートを選ぶ**(#300 段③ の直し、2026-08-22)。
+   *
+   * ⚠ **`containerId` を渡す** ── 受け側で自分の container と突き合わせる。
+   * 別の container の lid を拾うと、**偶然の一致で無関係なノートを選ぶ**
+   * (`SYS_BOOTED` が `cid` を検めているのと同じ理由)。
+   * ⚠ 面より**先に**呼ぶ ── 選択が後だと、開いた瞬間だけ
+   * 「ノートを選んでください」が見えてから入れ替わる。
+   */
+  readonly selectEntry?: (containerId: string, lid: string) => void;
+  /**
+   * 🔴 **いま断片が指している面が変わったら呼ばれる**(#300 段③ の直し)。
+   *
+   * `null` = もう指していない(user が自分で離れた)。
+   * 🔑 これを見て「この窓はアプリの窓か」を決める ── 題名も、
+   * `× 閉じる` が**窓ごと閉じるか**もこれで分かれる。
+   */
+  readonly onHold?: (view: ViewMode | null) => void;
   /** 使えない名前だったときの理由(画面の下に出す)。 */
   readonly fail: (message: string) => void;
   /** いまの面が変わったら呼ばれる購読(返り値で解除)。 */
@@ -158,17 +218,26 @@ export function connectViewDeepLink(wiring: DeepLinkWiring): () => void {
   /** いま「断片が指している面」。⚠ ここから離れたら断片を消す。 */
   let held: ViewMode | null = null;
 
+  const hold = (view: ViewMode | null): void => {
+    if (held === view) return;
+    held = view;
+    wiring.onHold?.(view);
+  };
+
   const apply = (): void => {
     const read = readViewDeepLink(target);
     if (read === null) return;
     if ('view' in read) {
-      held = read.view;
+      hold(read.view);
+      // 🔑 **ノートが先、面が後**(上の docstring の理由)
+      const here = parseViewDeepLinkEntry(target.hash);
+      if (here !== null) wiring.selectEntry?.(here.containerId, here.lid);
       wiring.openView(read.view);
       return;
     }
     // ⚠ 使えない名前は**残す意味が無い**ので、その場で消す
     //   (残すと読み直しのたびに同じ断り文が出る)
-    held = null;
+    hold(null);
     target.clearHash();
     wiring.fail(unusableViewMessage());
   };
@@ -178,7 +247,7 @@ export function connectViewDeepLink(wiring: DeepLinkWiring): () => void {
   const offView = wiring.onViewChange((view) => {
     // ⚠ 自分が撃った `SET_VIEW_MODE` でも呼ばれる ── **同じ面なら何もしない**
     if (held === null || view === held) return;
-    held = null;
+    hold(null);
     target.clearHash();
   });
   const offHash = wiring.onHashChange?.(() => apply());
@@ -187,4 +256,17 @@ export function connectViewDeepLink(wiring: DeepLinkWiring): () => void {
     offView();
     offHash?.();
   };
+}
+
+/**
+ * 🔴 **いまのアドレスから、断片を落とした base を作る**(#300 段③、2026-08-22)。
+ *
+ * ⚠ `document.baseURI` を使ってはいけない ── **断片を含む**(2026-08-22 実測:
+ * `…/#pkc?view=calendar` で開くと `baseURI` も同じ字を返す)。`formatViewDeepLink` は
+ * base に `#` があると `null` を返すので、**黙って組めなくなる**。
+ * 🔑 アドレスを読むのはこの file の役目なので、作法もここに置く
+ * (`permalink.ts` の docstring が書いている `location.href.split('#')[0]`)。
+ */
+export function currentBaseUrl(): string {
+  return typeof location === 'object' ? location.href.split('#')[0]! : '';
 }

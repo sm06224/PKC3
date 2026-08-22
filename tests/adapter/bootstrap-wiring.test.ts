@@ -24,6 +24,42 @@ function bootstrapBody(): string {
 
 describe('bootstrap の配線', () => {
   /**
+   * 🔴 **組み込みの窓は `noopener` で開く**(#300 段③、2026-08-22)。
+   *
+   * ⚠ 実測(段③):`noopener` は**別プロセス**になり、閉じれば常駐が還る
+   *   (+31.7MB → −32.2MB)。外すと**同じ renderer プロセスを共有**し、
+   *   ①**閉じても還らない**(−4.6MB)②**メインスレッドを取り合う**
+   *   ── user 不可侵指示「効くのは定常 / もっさりだと嫌」と正面から逆になる。
+   * 🔑 数字は test では見られないので、**書いてあること**を pin する。
+   */
+  it('🔴 組み込みの窓は noopener で開く(別プロセスにする)', () => {
+    const at = MAIN.indexOf('openViewInWindow(view, {');
+    expect(at, '別窓の配線が無い').toBeGreaterThan(-1);
+    expect(
+      MAIN.slice(at, at + 400),
+      'noopener が付いていない(同じプロセスに残り、閉じても還らない)',
+    ).toContain(`window.open(url, '_blank', 'noopener')`);
+  });
+
+  /**
+   * 🔴 **開いた窓の合図は、boot のいちばん最初に返す**(#300 段③ の直し、2026-08-22)。
+   *
+   * ⚠ 順序が**主張そのもの**である ── storage の初期化(`startApp`)を待ってから
+   *   返すと、開けているのに開いた側が 2.5 秒を使い切って**中央の面へ退避する**。
+   *   そのとき本文が消える = **user の苦情そのものの再現**である。
+   * 🔑 `main.ts` はどの test からも実行されないので、**原文で位置を pin する**
+   *   (弱いと自覚して使う ── 振る舞いは `deep-link.test.ts` が見ている)。
+   */
+  it('🔴 合図は startApp より前に返す(待ち時間を使い切らせない)', () => {
+    const body = bootstrapBody();
+    const announce = body.indexOf('announceOpenedWindow()');
+    const boot = body.indexOf('startApp(root)');
+    expect(announce, '合図を返していない(開いても塞がれたと読まれる)').toBeGreaterThan(-1);
+    expect(boot, 'startApp が無い ── この検査の前提が崩れている').toBeGreaterThan(-1);
+    expect(announce, '合図が boot の後ろに落ちている').toBeLessThan(boot);
+  });
+
+  /**
    * 🔴 **面を開く口は 1 つ**(#300 段②のレビュー、2026-08-22)。
    *
    * ⚠ 「集計を開いたら憶えている束ね方を思い出す」は `binder.ts` にべた書きされて
@@ -38,11 +74,17 @@ describe('bootstrap の配線', () => {
     //   `bootstrapBody()` に絞ると**その 2 か所を 1 つも見ない**(初稿で踏んだ)
     const direct = [...MAIN.matchAll(/type: 'SET_VIEW_MODE'/g)].length;
     expect(direct, 'SET_VIEW_MODE を直に撃っている(開いた後の後始末が抜ける)').toBe(0);
-    // ⚠ 空振り防止 ── 面を開く配線そのものは在ること(3 か所)
+    /**
+     * ⚠ 空振り防止 ── 面を開く配線そのものは在ること(**3 か所**)。
+     * 🔴 段③ で **2 か所減った** ── ランチャーのタイル 2 本は「中央の面を開く」を
+     *   やめて**別窓を開く**(`openViewTile`)。中央の面はその**退避先**として
+     *   `openViewTile` の中から 1 回だけ通る。
+     *   残る 3 か所 = 退避 / わきの面を畳む / ディープリンク。
+     */
     expect(
       [...MAIN.matchAll(/openView\([\w.]*[Dd]ispatcher/g)].length,
       '面を開く配線が足りない',
-    ).toBe(4);
+    ).toBe(3);
   });
 
   /**

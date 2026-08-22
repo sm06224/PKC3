@@ -25,6 +25,8 @@ export default tseslint.config(
         setInterval: 'readonly',
         clearInterval: 'readonly',
         setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        BroadcastChannel: 'readonly',
         InputEvent: 'readonly',
         KeyboardEvent: 'readonly',
         MessageEvent: 'readonly',

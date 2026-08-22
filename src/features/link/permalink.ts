@@ -306,12 +306,76 @@ export function formatExternalPermalink(
  * 🔑 ここは**取り出すだけ**にして、「使える名前か」の判定と**断り文**は呼び側へ寄せる。
  */
 export function parseViewDeepLink(raw: string): string | null {
+  const view = hashParams(raw)?.get('view') ?? null;
+  return view === null || view === '' ? null : view;
+}
+
+/**
+ * 断片の `#pkc?` から先を読む。⚠ **綴りの検査はしない**(呼び側の仕事)。
+ * @returns 断片が `#pkc?` を持たなければ `null`
+ */
+function hashParams(raw: string): URLSearchParams | null {
   if (typeof raw !== 'string') return null;
   const idx = raw.indexOf(PKC_FRAGMENT_PREFIX);
   if (idx === -1) return null;
-  const queryString = raw.slice(idx + PKC_FRAGMENT_PREFIX.length);
-  const view = new URLSearchParams(queryString).get('view');
-  return view === null || view === '' ? null : view;
+  return new URLSearchParams(raw.slice(idx + PKC_FRAGMENT_PREFIX.length));
+}
+
+/**
+ * 🔴 **どのノートを見ていたか**(#300 段③ の直し、2026-08-22)。
+ *
+ * ⚠ 直す前は、別窓のカレンダーが **`selectedLid === null` で立ち上がっていた** ──
+ * 開いた瞬間の帯は「日を押す前に、左の一覧からノートを選んでください」で、
+ * user は**さっきまで読んでいたノートを探し直す**しかなかった
+ * (`render/calendar.ts` の帯。動線レビュー 2026-08-22)。
+ * 🔑 だから**連れて行く**。`container` と `entry` は External Permalink が
+ * 既に定めている key なので、**新しい綴りを作らない**(§7)──
+ * 出来上がる断片 `#pkc?container=c1&entry=e1&view=calendar` は、
+ * `view` を落とせばそのまま**正しい External Permalink** である。
+ *
+ * ⚠ **`container` が要る。** 片方だけでは受けない ── 別の container の lid を
+ * 拾うと、**偶然の一致で無関係なノートを選ぶ**(`SYS_BOOTED` が `cid` を
+ * 突き合わせているのと同じ理由)。
+ */
+export function parseViewDeepLinkEntry(
+  raw: string,
+): { containerId: string; lid: string } | null {
+  const params = hashParams(raw);
+  if (params === null) return null;
+  const containerId = params.get('container');
+  const lid = params.get('entry');
+  if (containerId === null || lid === null) return null;
+  if (!TOKEN_RE.test(containerId) || !TOKEN_RE.test(lid)) return null;
+  return { containerId, lid };
+}
+
+/**
+ * 🔴 **1 回限りの合図**(#300 段③ の直し、2026-08-22)。
+ *
+ * ## なぜ要るか ── 「名乗りを聞く」では誤爆する
+ *
+ * ⚠ 初稿は「PKC が起動時に撒く `hello` / `holder-here` を 2.5 秒待つ」だった。
+ * ところが**その放送は自分の窓のものとは限らない** ── 着地前レビューが
+ * 数え上げた誤爆経路は **4 つ**あり、docstring が書いていたのは 1 つだけだった:
+ *
+ * | | 誰の名乗りか |
+ * |---|---|
+ * | a | 別のタブ / 窓が起動した(唯一書いてあった経路) |
+ * | b | a に holder が返す `holder-here` |
+ * | c | **自タブの昇格**(待っている 2.5 秒の間に本体タブが閉じる) |
+ * | d | **「別のタブで開いています…」の待機画面が 2 秒ごとに再接続する** |
+ *
+ * ⚠ 誤爆すると「開いた」と読むので、**退避もせず理由も出ない** ──
+ * ポップアップを塞がれた user から見ると**完全に無言の dead click** である。
+ *
+ * 🔑 だから**こちらが渡した合図が返ってきたときだけ**「開いた」と読む。
+ * 合図は開く URL に載せ(`w=`)、開いた窓が**起動のいちばん最初に**放送する。
+ * ⚠ 合図は**使ったらアドレスから外す**(`dropViewWindowToken`)── ブックマークに
+ * 焼き付くと、次に開いたときに誰も聞いていない放送を撒く。
+ */
+export function parseViewWindowToken(raw: string): string | null {
+  const token = hashParams(raw)?.get('w') ?? null;
+  return token === null || token === '' ? null : token;
 }
 
 /**
@@ -326,11 +390,27 @@ export function parseViewDeepLink(raw: string): string | null {
  *   (`#pkc?` だけの断片をアドレスに残さない)
  */
 export function dropViewFromHash(raw: string): string {
+  // ⚠ 合図(`w`)も一緒に落とす ── 面を離れたら、その窓は「開いたか」を
+  //    もう誰にも聞かれない。⚠ `container` / `entry` は**残す**
+  //    (そのノートを見ているのは本当なので、正しい External Permalink になる)
+  return dropHashKeys(raw, ['view', 'w']);
+}
+
+/**
+ * 🔴 **合図だけを落とす**(#300 段③ の直し)。⚠ `view` は残す ──
+ * 合図は**放送した瞬間に用済み**だが、面はまだ見ている(`F5` で戻れる /
+ * `Ctrl+D` がそのまま効く、という段② の裁定)。
+ */
+export function dropViewWindowToken(raw: string): string {
+  return dropHashKeys(raw, ['w']);
+}
+
+function dropHashKeys(raw: string, keys: readonly string[]): string {
   if (typeof raw !== 'string') return '';
   const idx = raw.indexOf(PKC_FRAGMENT_PREFIX);
   if (idx === -1) return raw;
   const params = new URLSearchParams(raw.slice(idx + PKC_FRAGMENT_PREFIX.length));
-  params.delete('view');
+  for (const key of keys) params.delete(key);
   const rest = params.toString();
   const before = raw.slice(0, idx);
   return rest === '' ? before : `${before}${PKC_FRAGMENT_PREFIX}${rest}`;
@@ -342,11 +422,36 @@ export function dropViewFromHash(raw: string): string {
  * ⚠ `formatExternalPermalink` と同じ作法で、**`baseUrl` に `#` が残っていたら
  * 断る** ── 黙って剥がすと、古い断片が新しい URL の中に隠れる。
  */
-export function formatViewDeepLink(baseUrl: string, view: string): string | null {
+export interface ViewDeepLinkInput {
+  /** 見ていたノート。⚠ **`containerId` と対**でしか受けない(上の理由)。 */
+  readonly containerId?: string;
+  readonly entry?: string;
+  /** 1 回限りの合図(`w`)。開いた窓が起動の最初に放送して返す。 */
+  readonly token?: string;
+}
+
+export function formatViewDeepLink(
+  baseUrl: string,
+  view: string,
+  input: ViewDeepLinkInput = {},
+): string | null {
   if (typeof baseUrl !== 'string' || baseUrl === '') return null;
   if (baseUrl.includes('#')) return null;
   if (!TOKEN_RE.test(view)) return null;
-  return `${baseUrl}${PKC_FRAGMENT_PREFIX}view=${encodeURIComponent(view)}`;
+  const parts: string[] = [];
+  // ⚠ 並びは External Permalink と揃える(container → entry → …)
+  const { containerId, entry, token } = input;
+  if (containerId !== undefined && entry !== undefined) {
+    // ⚠ **綴りが通らないノートは黙って落とす** ── 面そのものは開けるべきである
+    //    (「連れて行けなかった」だけで窓が開かないほうが困る)
+    if (TOKEN_RE.test(containerId) && TOKEN_RE.test(entry)) {
+      parts.push(`container=${encodeURIComponent(containerId)}`);
+      parts.push(`entry=${encodeURIComponent(entry)}`);
+    }
+  }
+  parts.push(`view=${encodeURIComponent(view)}`);
+  if (token !== undefined && TOKEN_RE.test(token)) parts.push(`w=${encodeURIComponent(token)}`);
+  return `${baseUrl}${PKC_FRAGMENT_PREFIX}${parts.join('&')}`;
 }
 
 // ─────────────────────────────────────────────────────────────────

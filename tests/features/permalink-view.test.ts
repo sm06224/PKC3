@@ -11,8 +11,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   dropViewFromHash,
+  dropViewWindowToken,
   formatViewDeepLink,
+  parseExternalPermalink,
   parseViewDeepLink,
+  parseViewDeepLinkEntry,
+  parseViewWindowToken,
 } from '../../src/features/link/permalink';
 
 describe('view のディープリンク(#300 段②)', () => {
@@ -65,6 +69,10 @@ describe('view のディープリンク(#300 段②)', () => {
     expect(dropViewFromHash('#pkc?container=c1&entry=e1&view=dual')).toBe(
       '#pkc?container=c1&entry=e1',
     );
+    // ⚠ 合図(`w`)は道連れにする ── 面を離れた窓は「開いたか」をもう聞かれない
+    expect(dropViewFromHash('#pkc?container=c1&entry=e1&view=dual&w=tok-1')).toBe(
+      '#pkc?container=c1&entry=e1',
+    );
     // ⚠ 何も残らないなら断片ごと落とす(`#pkc?` だけをアドレスに残さない)
     expect(dropViewFromHash('#pkc?view=dual')).toBe('');
     // ⚠ 自分の断片でないものは 1 文字も触らない
@@ -86,5 +94,88 @@ describe('view のディープリンク(#300 段②)', () => {
     expect(formatViewDeepLink('https://例.test/pkc/#pkc?view=old', 'calendar')).toBeNull();
     expect(formatViewDeepLink('', 'calendar')).toBeNull();
     expect(formatViewDeepLink('https://例.test/', 'a b')).toBeNull();
+  });
+});
+
+/**
+ * 🔴 **別窓へ渡すもの**(#300 段③ の直し、2026-08-22)。
+ *
+ * 渡すのは 2 つ ── ⑴ **読んでいたノート**(渡さないと別窓のカレンダーは
+ * 「ノートを選んでください」で立ち上がる)⑵ **1 回限りの合図**
+ * (渡さないと「窓が出たか」を名乗りで当てるしかなく、誤爆する)。
+ */
+describe('別窓へ渡すもの(#300 段③)', () => {
+  it('🔴 ノートと合図を載せて組める', () => {
+    expect(
+      formatViewDeepLink('https://x.test/', 'calendar', {
+        containerId: 'c1',
+        entry: 'e7',
+        token: 'tok-1',
+      }),
+    ).toBe('https://x.test/#pkc?container=c1&entry=e7&view=calendar&w=tok-1');
+  });
+
+  /**
+   * 🔴 **`view` を落とすと、そのまま正しい External Permalink になる。**
+   * 🔑 これが「新しい綴りを作らない」の実利である ── 面を離れたアドレスは
+   *   **そのノートを指す共有リンク**として意味を持ち続ける。
+   */
+  it('🔴 view と合図を落とすと External Permalink として読める', () => {
+    const url = formatViewDeepLink('https://x.test/', 'calendar', {
+      containerId: 'c1',
+      entry: 'e7',
+      token: 'tok-1',
+    })!;
+    const rest = dropViewFromHash(url);
+    expect(parseExternalPermalink(rest)).toMatchObject({
+      kind: 'entry',
+      containerId: 'c1',
+      targetId: 'e7',
+    });
+  });
+
+  it('🔴 ノートは container と対でしか読まない', () => {
+    expect(parseViewDeepLinkEntry('#pkc?container=c1&entry=e7&view=calendar')).toEqual({
+      containerId: 'c1',
+      lid: 'e7',
+    });
+    // ⚠ 片方だけ ── 別の container の lid を偶然の一致で拾わない
+    expect(parseViewDeepLinkEntry('#pkc?entry=e7&view=calendar')).toBeNull();
+    expect(parseViewDeepLinkEntry('#pkc?container=c1&view=calendar')).toBeNull();
+    expect(parseViewDeepLinkEntry('#some-heading')).toBeNull();
+  });
+
+  /** ⚠ 綴りが通らないものは**読まない**(外から来た字をそのまま使わない)。 */
+  it('⚠ 綴りが通らない container / entry は読まない', () => {
+    expect(parseViewDeepLinkEntry('#pkc?container=c%201&entry=e7')).toBeNull();
+    expect(parseViewDeepLinkEntry('#pkc?container=c1&entry=e%207')).toBeNull();
+  });
+
+  /**
+   * 🔴 **ノートが組めなくても、面は開く。**
+   * ⚠ 「連れて行けなかった」ために**窓ごと開かない**ほうが困る ──
+   *   user が押したのは「カレンダーを開く」である。
+   */
+  it('🔴 ノートの綴りが通らなくても、面は組む', () => {
+    expect(
+      formatViewDeepLink('https://x.test/', 'calendar', { containerId: 'c 1', entry: 'e7' }),
+    ).toBe('https://x.test/#pkc?view=calendar');
+  });
+
+  it('🔴 合図を読み、合図だけを落とせる(面は残る)', () => {
+    expect(parseViewWindowToken('#pkc?view=calendar&w=tok-1')).toBe('tok-1');
+    expect(parseViewWindowToken('#pkc?view=calendar')).toBeNull();
+    expect(dropViewWindowToken('#pkc?container=c1&entry=e7&view=calendar&w=tok-1')).toBe(
+      '#pkc?container=c1&entry=e7&view=calendar',
+    );
+    // ⚠ 自分の断片でないものは 1 文字も触らない
+    expect(dropViewWindowToken('#some-heading')).toBe('#some-heading');
+  });
+
+  /** ⚠ 綴りの通らない合図は載せない(アドレスに壊れた字を作らない)。 */
+  it('⚠ 綴りの通らない合図は載せない', () => {
+    expect(formatViewDeepLink('https://x.test/', 'calendar', { token: 'a b' })).toBe(
+      'https://x.test/#pkc?view=calendar',
+    );
   });
 });

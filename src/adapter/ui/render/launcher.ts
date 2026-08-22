@@ -64,6 +64,21 @@ export class LauncherRenderer {
       return;
     }
 
+    /**
+     * 🔴 **押す前に「別の窓で開く」と分かるようにする**(#300 段③ の直し、2026-08-22)。
+     *
+     * ⚠ 直す前、タイルを押すと**画面は 1 ドットも動かなかった**(窓が背面に出る /
+     *   別の画面に出る / 塞がれる、のどれでも)── user から見ると「壊れている」で
+     *   あり、実際にもう一度押す。動線レビュー §4/§8。
+     * 🔑 1 行だけ、**一覧の頭に**置く ── 行ごとに `↗` を足すと、この一覧では
+     *   **全部のタイルが窓を開く**ので印が印にならない(`↗` は URL タイルの
+     *   「**外部サイト**へ出る」という別の主張に取ってある)。
+     */
+    const lead = document.createElement('p');
+    lead.setAttribute('data-pkc-field', 'launcher-lead');
+    lead.textContent = 'アプリは別の窓で開きます';
+    this.region.append(lead);
+
     let group: string | null = null;
     let grid: HTMLElement | null = null;
     for (const tile of tiles) {

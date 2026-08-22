@@ -248,3 +248,37 @@ export async function answerAppDialog(page: Page, answer: 'ok' | 'cancel'): Prom
   await expect(body, 'ダイアログが閉じていない').toBeHidden();
   return message;
 }
+
+/**
+ * 🔴 **中央の面を「アドレスから」開く**(#300 段③、2026-08-22)。
+ *
+ * ⚠ 直す前、smoke は**アプリの一覧のタイルを押して**面を開いていた。
+ * 段③ で**タイルは別窓を開く**ようになった(user 要望「センターペインを占有するな」)
+ * ので、その手は**この窓の面を変えない** ── 18 spec が一斉に落ちた。
+ *
+ * 🔑 面そのものの振る舞い(カレンダーのセル / 2 ペインの移動)を見る spec は、
+ * **開き方を測っていない**。だからディープリンク(段②)で開く ──
+ * ⚠ `location.hash` を書くだけで**読み直しは起きない**(`hashchange` を購読して
+ * いるので効く)。読み直すと lease を取り直すぶん遅く、揺れも増える。
+ *
+ * ⚠ **タイルが窓を開くこと自体**は `launcher.smoke.spec.ts` が見る ──
+ * こちらで兼ねると「面が出た = タイルが効いた」と誤読する。
+ */
+export async function openViewPane(
+  page: Page,
+  view: 'dual' | 'calendar' | 'kanban',
+): Promise<void> {
+  /**
+   * ⚠ **空振り防止**(着地前レビュー 8、2026-08-22)── **既に開いていたら
+   * この helper は何も検めていない**。同じ断片を書いても `hashchange` は飛ばない
+   * ので、代入は no-op になり、`toBeVisible` は最初から真で通る。
+   */
+  await expect(
+    page.locator(`[data-pkc-view-pane="${view}"]`),
+    '既に開いている(この helper は何も検めていない)',
+  ).toBeHidden();
+  await page.evaluate((v) => {
+    location.hash = `#pkc?view=${v}`;
+  }, view);
+  await expect(page.locator(`[data-pkc-view-pane="${view}"]`)).toBeVisible({ timeout: 15_000 });
+}

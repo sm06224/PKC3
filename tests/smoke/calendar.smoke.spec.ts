@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
+import { clickReal, collectPageErrors, createEntry, gotoApp, openViewPane, useSplitEditor } from './helpers';
 
 /**
  * 🔴 **カレンダー(封印の解除)**(#276。user 指示 2026-08-19
@@ -22,14 +22,17 @@ test('🔴 アプリの一覧からカレンダーを開き、日を押すと予
   await createEntry(page, 'text');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
-  // ① 🔴 **アプリの一覧に居て、押すと開く**(封印が解けている)
+  // ① 🔴 **アプリの一覧に居る**(封印が解けている)
+  //    ⚠ 押すと**別窓**が開く(#300 段③)ので、面そのものはアドレスから開く ──
+  //      タイルが窓を開くことは `launcher.smoke.spec.ts` が見る
   await clickReal(page, '[data-pkc-browse="launcher"]');
-  const tile = page.locator('[data-pkc-action="open-tile"][data-pkc-tile="builtin:calendar"]');
-  await expect(tile, 'アプリの一覧にカレンダーが出ていない').toBeVisible();
-  await tile.click();
+  await expect(
+    page.locator('[data-pkc-action="open-tile"][data-pkc-tile="builtin:calendar"]'),
+    'アプリの一覧にカレンダーが出ていない',
+  ).toBeVisible();
 
   // ② 🔴 面が見えている(本文の面は畳まれている)
-  await expect(page.locator('[data-pkc-view-pane="calendar"]')).toBeVisible();
+  await openViewPane(page, 'calendar');
   await expect(page.locator('[data-pkc-view-pane="detail"]')).toBeHidden();
 
   /**
@@ -92,7 +95,7 @@ test('🔴 カレンダーを開いたまま一覧へ行き、別のノートに
   }
 
   await clickReal(page, '[data-pkc-browse="launcher"]');
-  await clickReal(page, '[data-pkc-action="open-tile"][data-pkc-tile="builtin:calendar"]');
+  await openViewPane(page, 'calendar');
   await expect(page.locator('[data-pkc-view-pane="calendar"]')).toBeVisible();
 
   /**
@@ -151,7 +154,7 @@ test('🔴 曜日の列が等幅で、月が面の高さを使う', async ({ pag
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
   await clickReal(page, '[data-pkc-browse="launcher"]');
-  await clickReal(page, '[data-pkc-action="open-tile"][data-pkc-tile="builtin:calendar"]');
+  await openViewPane(page, 'calendar');
   const month = await page
     .locator('[data-pkc-field="calendar-month"]')
     .getAttribute('data-pkc-month');
@@ -260,7 +263,7 @@ test('🔴 予定が積み上がっても、週の行が動かない (#303)', as
   }
 
   await clickReal(page, '[data-pkc-browse="launcher"]');
-  await clickReal(page, '[data-pkc-action="open-tile"][data-pkc-tile="builtin:calendar"]');
+  await openViewPane(page, 'calendar');
   await expect(page.locator('[data-pkc-view-pane="calendar"]')).toBeVisible();
   // ⚠ 作っている間に月が変わっても落ちないよう、書いた月へ寄せる
   const label = page.locator('[data-pkc-field="calendar-month"]');
@@ -424,7 +427,7 @@ test('🔴 紙では、日のセルが予定の数だけ伸びる (#303)', async
   }
 
   await clickReal(page, '[data-pkc-browse="launcher"]');
-  await clickReal(page, '[data-pkc-action="open-tile"][data-pkc-tile="builtin:calendar"]');
+  await openViewPane(page, 'calendar');
   /**
    * ⚠ **月境をまたいでいたら、書いた月へ寄せる** ── 作っている間に月が
    *   変わっても落ちないようにする(製品ではなく実行時刻の問題で赤くしない)。
