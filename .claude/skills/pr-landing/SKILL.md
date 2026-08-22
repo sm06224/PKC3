@@ -172,6 +172,11 @@ git stash pop
 
 ### ⚠ **remote 追跡 ref も掃除する** ── `--force-with-lease` は**効かない**
 
+> 🔴 **2026-08-22 に 2 度目を踏んだ。** この節は**既に在った**のに、push の直前に
+> 読まなかった(症状も手順もここに書いてあるとおりだった)。
+> 🔑 **`git push` が `(stale info)` で落ちたら、考える前にこの節へ戻る** ──
+> 直前に PR を merge したなら、原因は**ほぼ必ずこれ**である。
+
 squash merge のあと、GitHub は **remote の branch を消す**。ところが手元の
 `origin/<branch>` は**消える前の commit を指したまま**残るので:
 
