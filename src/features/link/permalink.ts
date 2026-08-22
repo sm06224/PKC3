@@ -297,18 +297,43 @@ export function formatExternalPermalink(
  * - `…#pkc?container=c1&entry=e1&view=dual` → `'dual'`(他の key と併記できる)
  * - `#pkc?view=calendar` → `'calendar'`(⚠ base が無い断片だけでも受ける ──
  *   `location.hash` はこの形で来る)
- * - `view` が無い / 空 / 綴りが token でない → `null`
+ * - `view` が無い / 空 → `null`
+ *
+ * ⚠ **綴りの検査はしない**(2026-08-22 に外した)。初稿は `TOKEN_RE` で弾いて
+ * いたが、そうすると `#pkc?view=カレンダー`(綴りを日本語で書いた形)が
+ * **`null` と見分けがつかず、呼び側は黙って本文を開く**しかなかった ──
+ * 動線レビューが「断り文が絶対に効かない書き方へ誘導する」として拾った当の穴である。
+ * 🔑 ここは**取り出すだけ**にして、「使える名前か」の判定と**断り文**は呼び側へ寄せる。
  */
 export function parseViewDeepLink(raw: string): string | null {
   if (typeof raw !== 'string') return null;
   const idx = raw.indexOf(PKC_FRAGMENT_PREFIX);
   if (idx === -1) return null;
   const queryString = raw.slice(idx + PKC_FRAGMENT_PREFIX.length);
-  if (queryString === '') return null;
   const view = new URLSearchParams(queryString).get('view');
-  if (view === null || view === '') return null;
-  // ⚠ 綴りだけ検める(実在の面かどうかは呼び側 ── 層をまたがない)
-  return TOKEN_RE.test(view) ? view : null;
+  return view === null || view === '' ? null : view;
+}
+
+/**
+ * 🔴 **断片から `view` だけを落とす**(#300 段②のレビュー、2026-08-22)。
+ *
+ * ⚠ 初稿は「断片ごと落とす」だった ── `#pkc?container=c1&entry=e1&view=dual` の
+ * ように**併記された相手を道連れにする**。いま `container` / `entry` の消費者は
+ * 0 件なので実害は出ていないが、`parseViewDeepLink` の docstring と
+ * `tests/adapter/deep-link.test.ts` は**併記できると書いている** ── 段③ で必ず踏む。
+ *
+ * @returns 落とした後の断片(先頭 `#` 付き)。⚠ **何も残らなければ空文字**
+ *   (`#pkc?` だけの断片をアドレスに残さない)
+ */
+export function dropViewFromHash(raw: string): string {
+  if (typeof raw !== 'string') return '';
+  const idx = raw.indexOf(PKC_FRAGMENT_PREFIX);
+  if (idx === -1) return raw;
+  const params = new URLSearchParams(raw.slice(idx + PKC_FRAGMENT_PREFIX.length));
+  params.delete('view');
+  const rest = params.toString();
+  const before = raw.slice(0, idx);
+  return rest === '' ? before : `${before}${PKC_FRAGMENT_PREFIX}${rest}`;
 }
 
 /**

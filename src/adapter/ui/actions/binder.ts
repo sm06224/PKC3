@@ -36,6 +36,7 @@ import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
 import { appOpenInEdit, OpenInEditStore } from '@adapter/ui/render/open-in-edit';
 import { chordOf, findCommand, typesCharacter } from '@features/keymap';
 import { appQueryKey } from '@adapter/ui/render/query-key-store';
+import { openView } from '@adapter/ui/render/open-view';
 import { parseLinkTarget } from '@features/entry-ref/link-target';
 import { handleCopyMdBlock } from './copy-md-block';
 import { finishCopy, selectedMarkdown } from './copy-source';
@@ -1490,22 +1491,10 @@ const ACTIONS: Record<string, ActionHandler> = {
     // ⚠ cast を置かない ── `isViewMode` が絞ってあるので、表と食い違えば型が落ちる
     // 🔑 規則は 1 か所(`nextViewMode`)── タイルから開く面も同じ関数を通る
     const next: ViewMode = nextViewMode(cur, view);
-    dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: next });
-    /**
-     * 🔴 **集計の束ね方を思い出す**(#184)。⚠ **開いたときだけ**読む ──
-     * boot で読むと、集計を一度も開かない user にも全本文の走査を負わせる。
-     * ⚠ 順序が効く: 先に `SET_VIEW_MODE`(目録を頼む)→ 後に `SET_QUERY_KEY`
-     * (表を頼む)。逆にすると同じ走査を 2 回頼むことになる。
-     */
-    /**
-     * ⚠ **実際に開けたときだけ**(レビュー B-1)── 1 稿目は `next` を見ていたので、
-     * **編集中に押すと面は開かないのに走査だけ飛んで**いた(`SET_VIEW_MODE` は
-     * 編集中に捨てられるが、`SET_QUERY_KEY` にはその門が無い)。
-     */
-    if (dispatcher.getState().viewMode === 'query' && dispatcher.getState().queryKey === null) {
-      const remembered = appQueryKey.get();
-      if (remembered !== null) dispatcher.dispatch({ type: 'SET_QUERY_KEY', key: remembered });
-    }
+    // 🔑 **開く手続きは 1 か所**(`open-view.ts`)── アドレスから開く経路
+    //    (`deep-link.ts`)も同じ関数を通る。ここにべた書きすると、
+    //    集計の束ね方が**タブから開いたときだけ**思い出される形になる(§7)
+    openView(dispatcher, next);
   },
   'toggle-todo': (dispatcher, target) => {
     // data-pkc-entry は「entry を表す要素」専用 ── ボタンからは closest で引く

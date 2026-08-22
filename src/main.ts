@@ -133,7 +133,8 @@ import { renderToSvg, readPalette } from '@adapter/ui/render/mermaid-raster';
 import { MERMAID_KIND } from '@adapter/ui/render/mermaid-hydrate';
 import { CHART_KIND } from '@adapter/ui/render/chart-raster';
 import { SameOriginGate } from '@adapter/platform/same-origin-grants';
-import { applyViewDeepLink } from '@adapter/platform/deep-link';
+import { connectViewDeepLink } from '@adapter/platform/deep-link';
+import { openView } from '@adapter/ui/render/open-view';
 import {
   alertInApp,
   confirmInApp,
@@ -1968,7 +1969,19 @@ function bootstrap(): void {
        * ⚠ 判断・文言・断片の消し方は全部 `deep-link.ts` に在る ── この file は
        *   どの test からも実行されないので、ここには**配線しか置かない**。
        */
-      applyViewDeepLink((action) => app.dispatcher.dispatch(action));
+      connectViewDeepLink({
+        // ⚠ **`openView` を渡す**(`SET_VIEW_MODE` 直撃ではない)── 開いた後の
+        //   後始末が抜けると、アドレスから開いた集計だけ表が出ない
+        openView: (mode) => openView(app.dispatcher, mode),
+        fail: (error) => app.dispatcher.dispatch({ type: 'OP_FAILED', error }),
+        // ⚠ 面が変わったら断片を消す(見ている間だけ残す)
+        onViewChange: (fn) => app.dispatcher.onState((s) => fn(s.viewMode)),
+        // ⚠ 開いたままのタブでアドレスへ足したときも効かせる
+        onHashChange: (fn) => {
+          window.addEventListener('hashchange', fn);
+          return () => window.removeEventListener('hashchange', fn);
+        },
+      });
       // boot 完了の正本契約(P3-8): smoke / probe は DOM 属性で待つ。
       // PKC2 の教訓 ── 「#root 存在待ち」は HTML load 段階で通過して flake 化する
       root.setAttribute('data-pkc-boot', 'ready');

@@ -35,13 +35,26 @@ describe('bootstrap の配線', () => {
    */
   it('🔴 ディープリンクを当ててから boot 完了を刻む', () => {
     const body = bootstrapBody();
-    const applyAt = body.indexOf('applyViewDeepLink(');
+    const applyAt = body.indexOf('connectViewDeepLink(');
     expect(applyAt, 'ディープリンクを当てていない').toBeGreaterThan(-1);
     const readyAt = body.indexOf(`setAttribute('data-pkc-boot', 'ready')`);
     expect(readyAt, 'boot 完了の刻印が無い').toBeGreaterThan(-1);
     expect(applyAt, '刻印の後に当てている(smoke と競走になる)').toBeLessThan(readyAt);
-    // ⚠ 空振り防止 ── 撃つ先が dispatcher であること(呼ぶだけで捨てていない)
-    expect(body.slice(applyAt, applyAt + 200)).toContain('app.dispatcher.dispatch');
+    const wiring = body.slice(applyAt, readyAt);
+    /**
+     * 🔴 **`openView` を渡している**(`SET_VIEW_MODE` 直撃ではない)。
+     * ⚠ 直撃にすると、開いた後の後始末(集計の束ね方を思い出す)が抜けて
+     *   **アドレスから開いた集計だけ表が出ない**(着地前レビューが拾った § 7 の実例)。
+     */
+    expect(wiring, 'openView を通していない(集計の束ね方が抜ける)').toContain(
+      'openView: (mode) => openView(app.dispatcher, mode)',
+    );
+    // ⚠ 空振り防止 ── 断り文の出口と、2 つの購読が実際に繋がっていること
+    expect(wiring, '理由を画面へ出す口が繋がっていない').toContain('OP_FAILED');
+    expect(wiring, '面の購読が繋がっていない(断片が消えない)').toContain('onViewChange');
+    expect(wiring, '断片の購読が繋がっていない(開いたまま足しても効かない)').toContain(
+      'hashchange',
+    );
   });
 
   it('🔴 SW の登録を boot の成功側・失敗側の**両方**から呼ぶ', () => {
