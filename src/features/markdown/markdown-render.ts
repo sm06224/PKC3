@@ -26,9 +26,7 @@ import MarkdownIt from 'markdown-it';
 // ⚠ v15 で型は本体 package が同梱するようになり、`markdown-it/lib/**` の
 // 部分 path は exports map から**消えた**(v14 では `@types/markdown-it` が
 // `lib/token.mjs` を生やしていた)。型は本入口から名前付きで取る。
-// ⚠ `MarkdownIt` は既定 export の**値**(呼び出し互換の callable)なので、
-// 型の位置では使えない ── 型としての名前を別に取る。
-import type { MarkdownIt as MarkdownItInstance, Token } from 'markdown-it';
+import type { Token } from 'markdown-it';
 // PR-W18:HTML footnote plugin(`[^id]` → `<sup class="footnote-ref">`)。
 // CJS package だが exports map で `.mjs` を提供しているため ESM import OK。
 import footnotePlugin from 'markdown-it-footnote';
@@ -81,28 +79,81 @@ const md = new MarkdownIt({
 });
 
 /**
- * 🔴 **URL の中の `user:pass@` を URL の一部として読む**(#78、markdown-it 15 移行)。
+ * 🔴 **URL の中の `user:pass@` は、上流の既定どおり URL の外として読む**
+ * (#78、markdown-it 15 移行。⚠ **着地前レビューの指摘で ON から OFF へ翻した**)。
  *
- * ⚠ v15 は linkify-it 6 になり `urlAuth` が既定 off になった。off のとき
+ * ## 何が変わるか
+ *
+ * v15 は linkify-it 6 になり `urlAuth` が既定 off になった。off だと
  * `https://token@github.com/a/b.git` は **`https://token` で切れて**、
- * 残りの `@github.com/a/b.git` が地の文になる ── つまり **壊れたリンクが焼かれる**。
+ * 残りの `@github.com/a/b.git` が地の文になる ── v14 では 1 本だったので、
+ * user から見れば**リンクが割れる後退**である。
  *
- * 🔑 これは「リンクにしない」ではなく「**間違った先へのリンクを作る**」なので、
- * 同じ移行で受け入れた fuzzyLink off(スキームの無い `README.md` を**リンクにしない**)
- * とは向きが逆である。⚠ 前者は自動リンクを**やめる**、後者は自動リンクを**壊す**。
+ * ## それでも ON に戻さない理由(いったん戻して、取り下げた)
  *
- * ⚠ 上流が既定を off にした理由は `https://本物.example@偽.example/` 型の見せかけと
- * 思われるが、PKC は**自分のノート**であり、リンク文字列は**全文がそのまま画面に出る**
- * (ラベルで隠れない)。そして騙す側は markdown なら `[本物](https://偽)` と書けるので、
- * この既定は守りにならないまま `git` の URL を割るだけになる。
+ * 🔴 戻したときに書いた理由は「PKC は自分のノートで、リンクの字は**全文が
+ * そのまま出る**(ラベルで隠れない)から騙されない」だった。⚠ **これは誤りである。**
+ * 実測(2026-08-22): `https://example.com@evil.example/x` は ON だと
+ * **1 本のリンク**になり、`href` の**行き先は `evil.example`** なのに、
+ * 字は左から `https://example.com…` と読める ── **全文が出ていても騙せる**。
+ * 隠れているのは字ではなく、**`@` より前が host ではないという文法**のほうだった。
  *
- * 🔑 **これが分かったら覆る**: 本文が他人から来る経路(共有・受信)が既定になったら、
- * そのときは `urlAuth` を切る側が正しい。
+ * 🔑 そこで裁き直すと、天秤の両側は**どちらも壊れたリンク**である:
+ * ON は「**行き先が違うのに正しく見える**」(静か)、OFF は「**途中で切れる**」(見える)。
+ * ⚠ **静かなほうが悪い** ── だから OFF を取る。同じ物差しで `・`(下)は
+ * 「静かに別の記事へ行く」ので直し、こちらは直さない。
  *
- * ⚠ 実測(2026-08-22): 切替で動くのは**スキーム付きで auth を含む URL だけ**。
- * `mailto:` / 素のメール / CJK 句読点での終端 / fuzzy off は**どれも変わらない**。
+ * ⚠ そして「他人の本文は来ない」も成り立たない ── 貼り付け変換
+ * (`html-to-markdown.ts`)/ PKC2 の取込 / `.md` の取込は**どれも既定で在る**。
+ *
+ * 🔑 **これが分かったら覆る**: user が `user@host` 形の URL を日常的に貼っていて、
+ * 割れるのが実害だと分かったら、そのときは `urlAuth: true` + 「`@` の前に `.` を
+ * 含むものは自動リンクしない」を組で入れる(正当な token は `.` を含まない)。
+ * ⚠ **`urlAuth: true` を単独で入れ直さない** ── それが今回取り下げた形である。
+ *
+ * 🔑 pin は `tests/features/markdown-linkify.test.ts` ── **見える字と `href` を
+ * 対で見る**(片方だけ見ていると、この食い違いは検出できない)。
  */
-md.linkify.set({ urlAuth: true });
+
+/**
+ * 🔴 **中黒(・)で URL を切らない**(#78、2026-08-22。着地前の動線レビューが拾った)。
+ *
+ * ⚠ v15 は「Unicode の句読点が来たらリンクを終える」ようになった ── 日本語には
+ * 効く変更だが、**`・` は文を終える印ではなく語をつなぐ印**である。そのため
+ * `https://ja.wikipedia.org/wiki/クロード・モネ` が
+ * **`…/wiki/クロード` で切れて、実在する別の記事へ行くリンク**になっていた
+ * (日本語 Wikipedia の人名記事がそのまま該当する)。
+ *
+ * 🔑 **裁いた物差しは上の `urlAuth` と同じ**(そちらは同じ物差しで OFF になった)──
+ * 「**静かに間違う**」のがいちばん悪い。ここは**リンクの字が正しく見えて、
+ * 行き先だけが違う** ── `…/wiki/クロード` は実在の別記事なので、
+ * user は押した先が違うことに気づけない。
+ *
+ * ⚠ **代償はある。** `参考 https://a.example・以上です` のように `・` を**区切り**に
+ * 使うと、後ろの地の文まで URL に飲む(v14 と同じ形)。⚠ ただしこちらは
+ * **リンクの字に文がまるごと入る**ので user から見えて、`[題名](URL)` へ直せる。
+ * 🔑 **見える誤りを取り、見えない誤りを捨てた**、という交換である。
+ *
+ * ⚠ 句点・読点・かぎかっこ・波ダッシュは**上流のまま終端にする**(そちらは
+ * 「URL の外」に置かれる印なので、v15 の判断が正しい)。外すのは `・` の 2 字だけ。
+ *
+ * 🔑 触っているのは `linkify-it` の**公開クラス** `REBuilder` の公開 field である
+ * (`linkify.re: REBuilder` / `src_P` / `src_ZPCc` ── いずれも `.d.ts` に在る)。
+ * ⚠ それでも上流の版が動けば黙って効かなくなりうるので、
+ * `tests/features/markdown-linkify.test.ts` が**人名の URL 1 本**で見張る。
+ *
+ * ⚠ 実測(2026-08-22): `src_ZPCc` の組み直しは **`src_P` の後でなければ効かない**
+ * (前に組むと古い `src_P` が焼き込まれる)。`cache` の破棄は**いまは要らない**
+ * (最初の描画より前に走るので空である) ── 順序に依存しないための保険として置く。
+ */
+{
+  /** `・`(U+30FB)と半角の `･`(U+FF65)。⚠ 生バイトで書かない(CLAUDE.md)。 */
+  const JOIN_MARKS = '\\u30FB\\uFF65';
+  const re = md.linkify.re;
+  re.src_P = `(?![${JOIN_MARKS}])(?:${re.src_P})`;
+  re.src_ZPCc = [re.src_Z, re.src_P, re.src_Cc].join('|');
+  re.cache = {};
+}
 
 // PR-W18(user「footnote 機能してない、前々から実装した気になって実装されて
 // ない機能の代表、HTML 側もできてない」):markdown-it-footnote plugin で
@@ -4861,12 +4912,13 @@ export function hasMarkdownSyntax(text: string): boolean {
 }
 
 /**
- * Get the markdown-it instance for advanced configuration.
- * Allows adapter layer to add plugins at boot time.
+ * ⚠ **`getMarkdownInstance()` は削除した**(#78、2026-08-22。着地前レビューが拾った)。
+ * 「adapter が boot で plugin を足せるように」という触れ込みだったが、
+ * **呼び手は 5 年分の履歴を通して 1 件も無かった**(`grep` で定義行のみ)。
+ * 🔑 生かしておくと `md` の**中身を外へ配る口**になり、
+ * この file が持っている取り決め(安全な scheme の allowlist / linkify の絞り込み)を
+ * 外から黙って崩せる。⚠ 本当に要るときは「何をしたいか」の名前で口を切り直す。
  */
-export function getMarkdownInstance(): MarkdownItInstance {
-  return md;
-}
 
 /**
  * Render markdown as inline-only HTML (no <p> wrapper, no block-level

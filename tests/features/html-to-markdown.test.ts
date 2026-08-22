@@ -104,6 +104,28 @@ describe('リンクと画像', () => {
     expect(md('<p><a href="https://e.com/a">https://e.com/a</a></p>')).toBe('https://e.com/a');
   });
 
+  /**
+   * 🔴 **裸で書いてよいのは、本文の描画が拾い直せる形だけ**(#78、2026-08-22。
+   * 着地前レビューが拾った)。
+   *
+   * ⚠ 上の省略は「描画側の linkify が拾い直す」ことを前提にしていた。
+   *   その前提は markdown-it 15 で崩れた ── `fuzzyLink` が既定 off になり、
+   *   `www.…` のような**スキームの無い宛先は自動リンクされない**。
+   * 🔑 症状は「**貼ったリンクが地の文になって消える**」で、警告も出ない。
+   *   だから拾えない形は `[label](target)` を書いて残す ──
+   *   壊れる向きが「余計な記法が残る」側になり、**宛先は消えない**。
+   * ⚠ `markdown-render.ts` の linkify の絞り込みと**対の判定**である
+   *   (CLAUDE.md §7「同じ判定が複数の場所にある」)。
+   */
+  it('🔴 スキームの無い宛先は裸にしない(貼ったリンクを地の文にしない)', () => {
+    expect(
+      md('<p><a href="www.example.com">www.example.com</a></p>'),
+      '裸で出したので、本文では地の文になり宛先が消える',
+    ).toBe('[www.example.com](www.example.com)');
+    // ⚠ **対照群**(同じ it に置く)── 拾える形は今までどおり裸のまま
+    expect(md('<p><a href="https://e.com/a">https://e.com/a</a></p>')).toBe('https://e.com/a');
+  });
+
   it('🔴 `javascript:` は**リンクにしない**が、文字は残す', () => {
     const out = md('<p><a href="javascript:alert(1)">押して</a></p>');
     expect(out).toBe('押して');

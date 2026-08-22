@@ -133,7 +133,22 @@ function anchorOf(el: Element): string {
   // ⚠ 出せない宛先でも**文字は残す**(黙って消さない ── 何を貼ったか分からなくなる)
   if (!isSafeHref(href)) return label;
   const target = escapeAssetTarget(href.trim());
-  if (label === '' || bare === href.trim()) return target;
+  /**
+   * 🔴 **裸で出してよいのは、本文の描画が拾い直せる形だけ**(#78、2026-08-22)。
+   *
+   * ⚠ ここは「見える字と行き先が同じなら `[…](…)` を書かずに URL をそのまま置く」
+   * という省略で、**描画側の linkify が拾い直すこと**を前提にしていた。
+   * その前提は markdown-it 15 で崩れた ── `fuzzyLink` が既定 off になり、
+   * `www.example.com` のような**スキームの無い宛先は自動リンクされない**。
+   * 🔑 崩れると症状は「**貼ったリンクが地の文になって消える**」で、
+   * 警告も出ない(`markdown-render.ts` の linkify の絞り込みと対の判定である ──
+   * CLAUDE.md §7「同じ判定が複数の場所にある」)。
+   *
+   * 🔑 だから条件を**拾える形に狭める**。拾えないものは `[label](target)` を
+   * 書いて残す ── 壊れる向きが「余計な記法が残る」側になり、**宛先は消えない**。
+   */
+  const linkifyWillCatch = /^https?:\/\//i.test(target);
+  if (label === '' || (bare === href.trim() && linkifyWillCatch)) return target;
   return `[${label}](${target})`;
 }
 
