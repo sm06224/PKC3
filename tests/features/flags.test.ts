@@ -230,6 +230,12 @@ describe('🔴 クエリパラメータの抜け穴を作らない', () => {
   const ALLOWED: Readonly<Record<string, string>> = {
     'src/adapter/platform/flag-store.ts': 'flag の解決(ここが唯一の入口)',
     'src/features/link/permalink.ts': 'パーマリンク / ディープリンク(user 指示の唯一の用途)',
+    // 🔴 **ディープリンクを実際に読む側**(#300 段②、2026-08-22)。
+    //   ⚠ `permalink.ts` は「pure: no DOM」を名乗っているので `location` を読めない
+    //     ── **解くのが向こう、読むのがここ**、と分けてある。
+    //   ⚠ 用途は user 指示が許した 2 つのうちの「ディープリンク」そのもので、
+    //     **切替(flag)ではない** ── 面を選ぶだけで、挙動を変える枝を持たない。
+    'src/adapter/platform/deep-link.ts': 'ディープリンクの解決(アドレスを読む唯一の入口)',
     // ⚠ 読むのではなく**組み立てる**側(再起動 URL)。`location.href` を触るので
     //   検出語に掛かるが、値の解決はしていない
     'src/adapter/ui/render/flags.ts': '再起動 URL の組み立て(フラグ画面から)',

@@ -133,6 +133,7 @@ import { renderToSvg, readPalette } from '@adapter/ui/render/mermaid-raster';
 import { MERMAID_KIND } from '@adapter/ui/render/mermaid-hydrate';
 import { CHART_KIND } from '@adapter/ui/render/chart-raster';
 import { SameOriginGate } from '@adapter/platform/same-origin-grants';
+import { applyViewDeepLink } from '@adapter/platform/deep-link';
 import {
   alertInApp,
   confirmInApp,
@@ -1959,6 +1960,15 @@ function bootstrap(): void {
       armLaunchQueue(window as unknown as LaunchTarget, app.importLaunchFiles, (message) =>
         app.dispatcher.dispatch({ type: 'OP_FAILED', error: message }),
       );
+      /**
+       * 🔗 **ディープリンク(`#pkc?view=…`)を当てる**(#300 段②)。
+       * ⚠ **boot 完了の刻印より前**に当てる ── 後に置くと、
+       *   `data-pkc-boot="ready"` を見て進む smoke / probe が
+       *   **本文の面を見てから面が入れ替わる**(競走になる)。
+       * ⚠ 判断・文言・断片の消し方は全部 `deep-link.ts` に在る ── この file は
+       *   どの test からも実行されないので、ここには**配線しか置かない**。
+       */
+      applyViewDeepLink((action) => app.dispatcher.dispatch(action));
       // boot 完了の正本契約(P3-8): smoke / probe は DOM 属性で待つ。
       // PKC2 の教訓 ── 「#root 存在待ち」は HTML load 段階で通過して flake 化する
       root.setAttribute('data-pkc-boot', 'ready');

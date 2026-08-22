@@ -267,6 +267,64 @@ export function formatExternalPermalink(
 }
 
 // ─────────────────────────────────────────────────────────────────
+// Form 3b: View deep link (`<base>#pkc?view=<name>`)
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * 🔴 **「この画面で開く」のディープリンク**(#300 段②、2026-08-22)。
+ *
+ * ## なぜ要るか
+ *
+ * 組み込みアプリ(カレンダー / やることの板 / 2 ペイン)を**別窓で開く**とき、
+ * 窓に「どの面を出すか」を伝える口が要る。⚠ その口を**クエリパラメータの
+ * 切替**にしてはいけない ── user 指示 2026-08-07(不可侵)は
+ * 「クエリパラメータを読んでよいのは **flag の解決**と
+ * **パーマリンク / ディープリンク**だけ」と定めている。
+ * 🔑 だから**ディープリンクとして**足す ── 既存の External Permalink と
+ * 同じ `#pkc?` の断片を使い、`view` という key を 1 つ増やすだけにする。
+ *
+ * ## この関数の受け持ち
+ *
+ * ⚠ **文字列を読むだけ。** この file は「pure: no side effects, no DOM,
+ * no state, no I/O」を名乗っている(冒頭)ので、`location` は読まない ──
+ * 読むのは adapter(`src/adapter/platform/deep-link.ts`)である。
+ * ⚠ **面の名前が正しいかは判定しない**(`ViewMode` は adapter 層の型で、
+ * features からは引けない)。ここは**綴りの検査まで**で、実在の照合は呼び側。
+ *
+ * ## 受ける形
+ *
+ * - `…#pkc?view=calendar` → `'calendar'`
+ * - `…#pkc?container=c1&entry=e1&view=dual` → `'dual'`(他の key と併記できる)
+ * - `#pkc?view=calendar` → `'calendar'`(⚠ base が無い断片だけでも受ける ──
+ *   `location.hash` はこの形で来る)
+ * - `view` が無い / 空 / 綴りが token でない → `null`
+ */
+export function parseViewDeepLink(raw: string): string | null {
+  if (typeof raw !== 'string') return null;
+  const idx = raw.indexOf(PKC_FRAGMENT_PREFIX);
+  if (idx === -1) return null;
+  const queryString = raw.slice(idx + PKC_FRAGMENT_PREFIX.length);
+  if (queryString === '') return null;
+  const view = new URLSearchParams(queryString).get('view');
+  if (view === null || view === '') return null;
+  // ⚠ 綴りだけ検める(実在の面かどうかは呼び側 ── 層をまたがない)
+  return TOKEN_RE.test(view) ? view : null;
+}
+
+/**
+ * `<base>#pkc?view=<name>` を組む。
+ *
+ * ⚠ `formatExternalPermalink` と同じ作法で、**`baseUrl` に `#` が残っていたら
+ * 断る** ── 黙って剥がすと、古い断片が新しい URL の中に隠れる。
+ */
+export function formatViewDeepLink(baseUrl: string, view: string): string | null {
+  if (typeof baseUrl !== 'string' || baseUrl === '') return null;
+  if (baseUrl.includes('#')) return null;
+  if (!TOKEN_RE.test(view)) return null;
+  return `${baseUrl}${PKC_FRAGMENT_PREFIX}view=${encodeURIComponent(view)}`;
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Deprecated aliases (pre-correction names, kept for back-compat)
 // ─────────────────────────────────────────────────────────────────
 

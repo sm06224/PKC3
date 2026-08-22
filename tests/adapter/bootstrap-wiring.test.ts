@@ -23,6 +23,27 @@ function bootstrapBody(): string {
 }
 
 describe('bootstrap の配線', () => {
+  /**
+   * 🔴 **ディープリンクは boot 完了の刻印より前に当てる**(#300 段②、2026-08-22)。
+   *
+   * ⚠ 後ろに置くと、`data-pkc-boot="ready"` を見て進む smoke / probe が
+   *   **本文の面を見てから面が入れ替わる** ── 競走になり、`flake` の顔で出る。
+   * ⚠ そして `main.ts` は**どの test からも実行されない**ので、配線を消す変異は
+   *   全緑で通る(この file の冒頭の理由)。だから原文で pin する。
+   * 🔑 判断・文言・断片の消し方は `deep-link.ts` の unit が見る ──
+   *   ここが見るのは「**呼んでいるか / 順序が正しいか**」だけ。
+   */
+  it('🔴 ディープリンクを当ててから boot 完了を刻む', () => {
+    const body = bootstrapBody();
+    const applyAt = body.indexOf('applyViewDeepLink(');
+    expect(applyAt, 'ディープリンクを当てていない').toBeGreaterThan(-1);
+    const readyAt = body.indexOf(`setAttribute('data-pkc-boot', 'ready')`);
+    expect(readyAt, 'boot 完了の刻印が無い').toBeGreaterThan(-1);
+    expect(applyAt, '刻印の後に当てている(smoke と競走になる)').toBeLessThan(readyAt);
+    // ⚠ 空振り防止 ── 撃つ先が dispatcher であること(呼ぶだけで捨てていない)
+    expect(body.slice(applyAt, applyAt + 200)).toContain('app.dispatcher.dispatch');
+  });
+
   it('🔴 SW の登録を boot の成功側・失敗側の**両方**から呼ぶ', () => {
     // round-2 review L-6: 当初は boot より**前**に登録していたが、`register` は
     // precache(実測 1.6MB)の取得を始めるので、**初回訪問で boot の wasm /
