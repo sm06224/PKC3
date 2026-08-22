@@ -24,6 +24,28 @@ function bootstrapBody(): string {
 
 describe('bootstrap の配線', () => {
   /**
+   * 🔴 **面を開く口は 1 つ**(#300 段②のレビュー、2026-08-22)。
+   *
+   * ⚠ 「集計を開いたら憶えている束ね方を思い出す」は `binder.ts` にべた書きされて
+   *   おり、**アドレスから開いた集計だけ表が出ない**状態だった。`open-view.ts` へ
+   *   寄せたが、⚠ **`main.ts` にはさらに 2 か所**(ランチャーのタイル / 添付起動)
+   *   同じ直撃が残っていた ── CLAUDE.md「片側を直したら、対称の反対側を必ず疑う」。
+   * 🔑 だから `bootstrap()` の中で **`SET_VIEW_MODE` を直に撃たない**ことを pin する。
+   */
+  it('🔴 面を開くのに SET_VIEW_MODE を直撃しない(open-view.ts を通す)', () => {
+    // ⚠ **file 全体**で見る ── 直撃していたのは `bootstrap()` の中ではなく
+    //   `startApp()` の中(ランチャーのタイル / 添付起動)だった。
+    //   `bootstrapBody()` に絞ると**その 2 か所を 1 つも見ない**(初稿で踏んだ)
+    const direct = [...MAIN.matchAll(/type: 'SET_VIEW_MODE'/g)].length;
+    expect(direct, 'SET_VIEW_MODE を直に撃っている(開いた後の後始末が抜ける)').toBe(0);
+    // ⚠ 空振り防止 ── 面を開く配線そのものは在ること(3 か所)
+    expect(
+      [...MAIN.matchAll(/openView\([\w.]*[Dd]ispatcher/g)].length,
+      '面を開く配線が足りない',
+    ).toBe(4);
+  });
+
+  /**
    * 🔴 **ディープリンクは boot 完了の刻印より前に当てる**(#300 段②、2026-08-22)。
    *
    * ⚠ 後ろに置くと、`data-pkc-boot="ready"` を見て進む smoke / probe が

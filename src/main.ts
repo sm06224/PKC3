@@ -1366,11 +1366,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         // #148 組み込みタイル ── 文書なしで開く = Start Center(#174 の一言込み)
         openOffice: openOfficeTile,
         // #241 組み込みタイル ── 中央の面を 2 ペインへ(窓は開かない)
+        // 🔑 **開く手続きは 1 か所**(`open-view.ts`)── ここで直に
+        //    `SET_VIEW_MODE` を撃つと、開いた後の後始末(集計の束ね方を
+        //    思い出す)が抜ける(#300 段②のレビューで判明した §7 の 3 つ目の口)
         openView: (view) =>
-        dispatcher.dispatch({
-          type: 'SET_VIEW_MODE',
-          mode: nextViewMode(dispatcher.getState().viewMode, view),
-        }),
+          openView(dispatcher, nextViewMode(dispatcher.getState().viewMode, view)),
         // ⚠ **聞かない。憶えているものを確かめるだけ**(上の granted と同じ判定を
         //    通す ── ここで別の式を書くと、片方だけ直した日に食い違う)
         confirmSameOrigin: async () => granted,
@@ -1433,11 +1433,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             // ⚠ 添付起動の経路に組み込みタイルは来ない(kind は 'app' 固定)が、
             //    依存の実体も 1 つに保つ(§7)
             openOffice: openOfficeTile,
-            openView: (view) =>
-        dispatcher.dispatch({
-          type: 'SET_VIEW_MODE',
-          mode: nextViewMode(dispatcher.getState().viewMode, view),
-        }),
+            // 🔑 **開く手続きは 1 か所**(`open-view.ts`)── ここで直に
+        //    `SET_VIEW_MODE` を撃つと、開いた後の後始末(集計の束ね方を
+        //    思い出す)が抜ける(#300 段②のレビューで判明した §7 の 3 つ目の口)
+        openView: (view) =>
+          openView(dispatcher, nextViewMode(dispatcher.getState().viewMode, view)),
             confirmSameOrigin: async (title) => {
               /**
                * 🔴 **「アプリとして登録済みか」で憶え方が変わる**(#301。user 裁定 2026-08-21)。
@@ -1640,8 +1640,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
        *   残る帰り道は「開いたタイルをもう一度押す」(`nextViewMode`)と `Alt+1`。
        *   わきの面(設定 / フラグ / ヘルプ / 2 ペイン)は今までどおり畳む。
        */
-      if (isAsidePane(dispatcher.getState().viewMode))
-        dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
+      // 🔑 畳むときも `open-view.ts` を通す ── この file から `SET_VIEW_MODE` を
+      //    直に撃たない、を**例外なし**の規則にしておく(例外を 1 つ許すと、
+      //    次に足す人が「これも例外」と読む)
+      if (isAsidePane(dispatcher.getState().viewMode)) openView(dispatcher, 'detail');
     },
     /**
      * 📣 起動したときのお知らせ(P11 段⑤)。
