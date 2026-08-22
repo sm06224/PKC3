@@ -23,7 +23,12 @@
  */
 
 import MarkdownIt from 'markdown-it';
-import type Token from 'markdown-it/lib/token.mjs';
+// ⚠ v15 で型は本体 package が同梱するようになり、`markdown-it/lib/**` の
+// 部分 path は exports map から**消えた**(v14 では `@types/markdown-it` が
+// `lib/token.mjs` を生やしていた)。型は本入口から名前付きで取る。
+// ⚠ `MarkdownIt` は既定 export の**値**(呼び出し互換の callable)なので、
+// 型の位置では使えない ── 型としての名前を別に取る。
+import type { MarkdownIt as MarkdownItInstance, Token } from 'markdown-it';
 // PR-W18:HTML footnote plugin(`[^id]` → `<sup class="footnote-ref">`)。
 // CJS package だが exports map で `.mjs` を提供しているため ESM import OK。
 import footnotePlugin from 'markdown-it-footnote';
@@ -74,6 +79,30 @@ const md = new MarkdownIt({
     return highlightCode(str, lang);
   },
 });
+
+/**
+ * 🔴 **URL の中の `user:pass@` を URL の一部として読む**(#78、markdown-it 15 移行)。
+ *
+ * ⚠ v15 は linkify-it 6 になり `urlAuth` が既定 off になった。off のとき
+ * `https://token@github.com/a/b.git` は **`https://token` で切れて**、
+ * 残りの `@github.com/a/b.git` が地の文になる ── つまり **壊れたリンクが焼かれる**。
+ *
+ * 🔑 これは「リンクにしない」ではなく「**間違った先へのリンクを作る**」なので、
+ * 同じ移行で受け入れた fuzzyLink off(スキームの無い `README.md` を**リンクにしない**)
+ * とは向きが逆である。⚠ 前者は自動リンクを**やめる**、後者は自動リンクを**壊す**。
+ *
+ * ⚠ 上流が既定を off にした理由は `https://本物.example@偽.example/` 型の見せかけと
+ * 思われるが、PKC は**自分のノート**であり、リンク文字列は**全文がそのまま画面に出る**
+ * (ラベルで隠れない)。そして騙す側は markdown なら `[本物](https://偽)` と書けるので、
+ * この既定は守りにならないまま `git` の URL を割るだけになる。
+ *
+ * 🔑 **これが分かったら覆る**: 本文が他人から来る経路(共有・受信)が既定になったら、
+ * そのときは `urlAuth` を切る側が正しい。
+ *
+ * ⚠ 実測(2026-08-22): 切替で動くのは**スキーム付きで auth を含む URL だけ**。
+ * `mailto:` / 素のメール / CJK 句読点での終端 / fuzzy off は**どれも変わらない**。
+ */
+md.linkify.set({ urlAuth: true });
 
 // PR-W18(user「footnote 機能してない、前々から実装した気になって実装されて
 // ない機能の代表、HTML 側もできてない」):markdown-it-footnote plugin で
@@ -523,10 +552,36 @@ export function collectSourceLineAttrs(token: Token): string {
   );
 }
 
+/**
+ * 🔴 **属性を「文字列として」読む唯一の口**(markdown-it v15 移行、#78)。
+ *
+ * ⚠ v15 で属性値の型が `string` から **`string | number`** へ広がった
+ * (`attrSet(name, 3)` が型として許される)。PKC の描画側は href / src /
+ * title を**全部文字列として**扱う(`startsWith` / `slice` / エスケープ)ので、
+ * 広がった型がそのまま流れると **tsc が 12 か所で落ちる**。
+ *
+ * 🔑 **`String(...)` を 12 か所へ散らさない** ── 読み口を 1 つに寄せる
+ * (CLAUDE.md §7「同じ判定が複数の場所にある」)。
+ *
+ * ⚠ **`String(...)` は型のための備えであって、いま実行時に効く経路は無い**
+ * (変異試験 M3 = 文字列化をやめる変異は **SURVIVED**)。href / src / title は
+ * parser が文字列で積むもので、PKC 自身は `attrSet` に数を渡さない。
+ * 🔑 だから「これが無いと壊れる」とは**書かない** ── 効くのは
+ * 「将来 plugin が数を積んだとき」だけである(CLAUDE.md §1、no-op に因果を書かない)。
+ *
+ * 🔴 **効くのは `null` を保つほう**(こちらは変異試験 M2 が実害を示した)。
+ * ⚠ `?? ''` に畳むと「属性が無い」と「空文字の属性」が区別できなくなり、
+ * 題を書いていない添付画像に **`title=""` が全部付く**。
+ * pin は `tests/features/asset-ref-render.test.ts`。
+ */
+function attrString(token: Token, name: string): string | null {
+  const v = token.attrGet(name);
+  return v === null ? null : String(v);
+}
+
 md.renderer.rules.link_open = function (tokens, idx, options, env, self) {
   const token = tokens[idx]!;
-  const hrefIdx = token.attrIndex('href');
-  const href = hrefIdx >= 0 ? (token.attrs?.[hrefIdx]?.[1] ?? '') : '';
+  const href = attrString(token, 'href') ?? '';
   // `entry:` links stay in-app: they are routed through
   // `action-binder`'s `navigate-entry-ref` handler which parses the
   // fragment via `parseEntryRef` and scrolls to the right
@@ -706,8 +761,7 @@ const defaultImage =
 
 md.renderer.rules.image = function (tokens, idx, options, env, self) {
   const token = tokens[idx]!;
-  const srcIdx = token.attrIndex('src');
-  const src = srcIdx >= 0 ? (token.attrs?.[srcIdx]?.[1] ?? '') : '';
+  const src = attrString(token, 'src') ?? '';
   if (src.startsWith('asset:')) {
     // P4b: `![alt](asset:key)` は **src 無し** placeholder(hydrator が
     // lend した blob: URL を後から差す)。`src="asset:…"` を出すと
@@ -715,7 +769,7 @@ md.renderer.rules.image = function (tokens, idx, options, env, self) {
     // 同じ理由)。alt はそのまま保持 ── missing 時の可視 fallback を兼ねる
     const key = src.slice('asset:'.length);
     const alt = token.content ?? '';
-    const title = token.attrGet('title');
+    const title = attrString(token, 'title');
     return (
       `<img class="pkc-asset-ref"` +
       ` data-pkc-asset-key="${escapeHtmlAttr(key)}"` +
@@ -1524,7 +1578,7 @@ md.core.ruler.after('inline', 'pkc-card', function (state) {
       const label = t2.content;
       if (!isCardPresentationLabel(label)) continue;
 
-      const href = t1.attrGet('href');
+      const href = attrString(t1, 'href');
       if (href === null) continue;
 
       const parsed = parseCardPresentation(`@[${label}](${href})`);
@@ -4810,7 +4864,7 @@ export function hasMarkdownSyntax(text: string): boolean {
  * Get the markdown-it instance for advanced configuration.
  * Allows adapter layer to add plugins at boot time.
  */
-export function getMarkdownInstance(): MarkdownIt {
+export function getMarkdownInstance(): MarkdownItInstance {
   return md;
 }
 

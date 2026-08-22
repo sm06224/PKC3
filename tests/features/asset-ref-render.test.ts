@@ -70,6 +70,25 @@ describe('asset: refs in markdown (P4b)', () => {
       for (const n of el.getAttributeNames()) expect(n.startsWith('on')).toBe(false);
   });
 
+  /**
+   * 🔴 **題(title)を書いていない添付画像に、空の title を焼かない**
+   * (#78 の変異試験 M2 が拾った穴、2026-08-22)。
+   *
+   * ⚠ image rule は「`attrGet('title')` が `null` なら属性ごと出さない」で書いて
+   *   あるが、**その `null` を守る test が 1 件も無かった** ── 読み口を
+   *   `attrString`(`null` を保つ)から `?? ''` へ倒す変異が、**全 4142 件が緑のまま
+   *   生き延びた**。倒れると `title=""` が全部の添付画像に付く。
+   * 🔑 「無い」と「空」の区別は、**空のほうを見ないと守れない**
+   *   (上の test は title を**書いた**場合しか見ていない = 対称の反対側)。
+   */
+  it('🔴 題を書いていない添付画像には title 属性が付かない(空文字も焼かない)', () => {
+    const host = renderToDom('![説明](asset:k-no-title)');
+    const img = host.querySelector('img.pkc-asset-ref')!;
+    expect(img.hasAttribute('title'), '題が無いのに title 属性が焼かれた').toBe(false);
+    // ⚠ 空振り防止 ── そもそも添付画像が描けていることを見る
+    expect(img.getAttribute('data-pkc-asset-key')).toBe('k-no-title');
+  });
+
   it('通常の外部 link は従来どおり(退行なし)', () => {
     const host = renderToDom('[e](https://example.com)');
     const a = host.querySelector('a:not(.pkc-asset-link)')!;

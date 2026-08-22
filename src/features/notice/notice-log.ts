@@ -90,6 +90,16 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-22-link-detection',
+    title: '日本語の文の中に URL を書いても、リンクが途中で壊れなくなりました',
+    items: [
+      '文の中に URL を書くと、句点や読点の後ろまでリンクに飲み込まれ、押しても開けない先を指していました。URL の終わりで切れます。',
+      'README.md や console.info のようなファイル名が、勝手にリンクになっていました。押しても空白のタブが開くだけだったので、そのままの字で出します。',
+      'アドレスの頭に https:// と書いたものは、これまでどおりリンクになります。',
+      '画像の説明にコード片を書くと、その中身だけが消えていました。画像が出ないときに読む字なので、そのまま残ります。',
+    ],
+  },
+  {
     id: '2026-08-22-pane-flow',
     title: 'アプリの面を開いても、書きかけと読んでいた場所が消えなくなりました',
     items: [
@@ -290,20 +300,10 @@ export const NOTICES: readonly Notice[] = [
       '書きかけのまま開いて置き場を眺められます。実際に移すときだけ、先に保存するようお願いします。',
     ],
   },
-  {
-    id: '2026-08-18-open-and-rows',
-    title: 'フォルダの表を上下キーで送れます。Enter は「読む」から始まります',
-    items: [
-      'フォルダの表で ↑↓ を押すと行を送れます(送った行が選ばれます)。Shift を押しながらで、そこまでまとめて選べます。',
-      'これでマウスを使わずに行までたどり着けます。これまでは一度クリックしないとキーが効きませんでした。',
-      'Enter で開いたときは、まず読むところから始まります。開いてすぐ書きたいときは、設定の「開いたときの状態」で切り替えてください。',
-      '行を 1 回押して選んだだけでは編集に入りません(それは「選ぶ」で、「開く」ではありません)。',
-    ],
-  },
 ];
 
 /**
  * ⚠ **落としたぶんの原本は CHANGELOG に在る**(上限 20 件を超えたので、古いほうから
  *   `2026-08-16-office-save-to-pkc` / `2026-08-17-office-save-same-note`(2026-08-19)、
- *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders`(2026-08-22)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
+ *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
  */

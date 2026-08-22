@@ -13,7 +13,13 @@ import { parseFrontmatter, extractVars } from '../../src/features/markdown/front
  * golden は **PKC2 の renderMarkdown(markdown-it 14.3.0)から採取**した実出力
  * (manual ch12 全文 1,431 行 + fixture 3 種 + 方言の縁スニペット 20 種)。
  * 採取手順: tests/fixtures/markdown-goldens/harvest-from-pkc2.ts(手順は同ファイル冒頭)。
- * ⚠ markdown-it のバージョンを動かすと golden ごと再検証が必要(14.3.0 に固定中)。
+ * ⚠ markdown-it のバージョンを動かすと golden ごと再検証が必要。
+ * 🔴 **PKC3 は 15.0.0、採取元の PKC2 は 14.3.0 のまま**(#78、2026-08-22)── つまり
+ *   この golden は「**別の版の markdown-it の出力**」との突合になった。移行で動いたのは
+ *   下の一覧の 5 番(1 セル)だけで、残り 24 件は byte 一致のままである。
+ *   ⚠ 版が違う以上、次に上流を上げたときは「PKC2 と違えた」ではなく
+ *   「**上流が変えた**」が先に疑うべき原因になる ── 差の全数は
+ *   `tests/features/markdown-linkify.test.ts` に実測して pin してある。
  *
  * ⚠ **PKC2 と意図的に違えた点は golden 側を更新して記録する**(丸写し禁止 ──
  * user 指示 2026-07-30「流用 + 総合的見直し」)。
@@ -44,7 +50,19 @@ import { parseFrontmatter, extractVars } from '../../src/features/markdown/front
  *      反転が漏れる**。PKC2 は旧意味(logical end 固定)のままなので分岐する。
  *      動いた golden は `reform-stress-sample` / `simple-notation-sample` /
  *      `snippet-align-indent` の 3 件(差は属性値だけ)。
+ *   5. **スキームの無い文字列を自動リンクしない**(2026-08-22、#78 の markdown-it 15
+ *      移行)。v15 で linkify の `fuzzyLink` が既定 off になった。PKC2(14.3.0)は
+ *      `.info` が TLD であるため `console.info` を
+ *      `<a href="http://console.info" target="_blank">` に焼いており、**押すと
+ *      空白のタブが開くだけの壊れた外部リンク**だった(`README.md` / `main.rs` /
+ *      `build.sh` も同じ ── 開発ノートで日常的に書く形が全部リンクになる)。
+ *      ⚠ しかも PKC3 自身の `hasMarkdownSyntax` は FI-08.x(D-FB1=B)以来
+ *      「**スキームがあるものだけが URL**」と判定しており、fuzzyLink はその判定と
+ *      食い違っていた ── 釣り合いが崩れていたほうを直した形になる。
+ *      動いた golden は `manual-ch12` の 1 セルだけ。
+ *      🔑 スキーム付き(`https://…`)は今までどおりリンクになる。
  *
+
  * 🔴 **golden は「PKC2 と同じ」を守る道具であって、「正しい」を守る道具ではない。**
  * PKC2 のバグはそのまま期待値になる ── 落ちたら「壊した」ではなく
  * **「PKC2 と違えた」**を疑い、上の一覧に足してから golden を更新すること。
@@ -153,11 +171,14 @@ describe('PKC-Markdown golden parity vs PKC2 (25 cases)', () => {
    * 🔑 この test が守っているのは件数ではなく「**理由なしに golden を採り直せない**」こと ──
    * 実際、私は理由を書いて採り直したが、その理由が誤りだった。件数だけでは止められない。
    */
-  it('🔴 PKC2 と分岐した case は理由つきで 9 件だけ', () => {
+  it('🔴 PKC2 と分岐した case は理由つきで 10 件だけ', () => {
     const diverged = goldens.cases.filter((c) => c.pkc3Diverges);
     expect(diverged.map((c) => c.name).sort()).toEqual([
       'full-pkc-fixture',
       'full-pkc-fixture-anchors',
+      // 🔴 2026-08-22(#78): markdown-it 15 で fuzzyLink が既定 off。
+      //    スキームの無い `console.info` が自動リンクされなくなった。
+      'manual-ch12',
       // 🔴 2026-08-08: 行頭アラインの象形的な形が `end` → `opposite`(user 裁定 +
       //    user 指摘)。PKC2 は旧意味(logical end 固定)のままなので分岐する。
       //    ⚠ **この分岐は隠してはいけない** ── 直前まで CSS だけで反転させて
