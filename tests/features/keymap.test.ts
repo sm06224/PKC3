@@ -27,6 +27,7 @@ import {
   validateBinding,
   type KeyContext,
 } from '../../src/features/keymap';
+import { isAsidePane, type ViewMode } from '../../src/adapter/state/app-state';
 
 /** `KeyboardEvent` の形だけ作る(happy-dom を要らなくする ── ここは純関数)。 */
 function ev(
@@ -231,5 +232,72 @@ describe('打鍵 → コマンド', () => {
       matchCommand(chordOf(ev({ key: 'n', code: 'KeyN', ctrlKey: true })), 'global', b),
       '既定が残っている(上書きが「足すだけ」になっている)',
     ).toBeNull();
+  });
+});
+
+/**
+ * 🔴 **わきの面(ノートを映さない面)は、鍵でも打鍵中に開ける**
+ * (user 目線レビュー U-8、2026-08-22)。
+ *
+ * ⚠ 直す前は **4 つのうち 2 つ**(`open-flags` / `open-help`)しか名乗っておらず、
+ *   **マウスでは 4 つとも開くのに、鍵では 2 つだけ**という非対称だった ──
+ *   user 裁定 2026-08-08「ノートを映さない面は編集中でも開ける」は
+ *   *面の側では*守られているのに、*鍵の側で*落ちていた。
+ *
+ * 🔑 **全数で見る** ── `isAsidePane` に面を足した人が、鍵の宣言を足し忘れたら
+ *   ここが落ちる。⚠ 表は手で書くが、**`isAsidePane` の全数を覆っているか**も
+ *   併せて検算する(表だけ書くと、面を足しても表に載らず素通りする)。
+ *
+ * ⚠ **名乗りは通行証ではない** ── 門は「名乗る **かつ** 和音が文字を打たない」の
+ *   2 条件である。だから `Alt+3` / `Alt+6` は名乗っても通らない。それは仕様で
+ *   あって欠陥ではない(本文に記号が入るのを防ぐ)ので、ここでは**宣言だけ**を見る。
+ */
+describe('🔴 わきの面の鍵(user 目線レビュー U-8)', () => {
+  /** わきの面 → それを開くコマンド。⚠ 面を足したらここも足す。 */
+  const ASIDE_COMMANDS: Record<string, string> = {
+    settings: 'open-settings',
+    flags: 'open-flags',
+    help: 'open-help',
+    dual: 'view-dual',
+  };
+
+  it('🔴 4 つとも whileTyping を名乗る(マウスと鍵で開ける面が食い違わない)', () => {
+    for (const [pane, id] of Object.entries(ASIDE_COMMANDS)) {
+      const cmd = findCommand(id);
+      expect(cmd, `${id} というコマンドが無い(id を変えた?)`).toBeDefined();
+      expect(cmd?.whileTyping, `${pane} は鍵では編集中に開けない(面の側とだけ食い違う)`).toBe(
+        true,
+      );
+    }
+  });
+
+  it('⚠ 表が isAsidePane の全数を覆っている(面を足したら気づける)', () => {
+    const ALL: readonly ViewMode[] = [
+      'detail',
+      'calendar',
+      'kanban',
+      'query',
+      'dual',
+      'settings',
+      'flags',
+      'help',
+    ];
+    const panes = ALL.filter((v) => isAsidePane(v));
+    expect(
+      [...panes].sort(),
+      '上の表が古い ── わきの面が増減している',
+    ).toEqual(Object.keys(ASIDE_COMMANDS).sort());
+  });
+
+  /**
+   * ⚠ **対照群** ── ノートを並べる面(カレンダー等)は名乗らない。
+   *   名乗らせると「編集中に押したら本文が消える」を鍵からも作ることになる。
+   */
+  it('⚠ ノートを映す面は名乗らない(編集していたものを画面から消さない)', () => {
+    for (const id of ['view-calendar', 'view-kanban', 'view-query']) {
+      const cmd = findCommand(id);
+      if (!cmd) continue; // ⚠ 命令が無い面はここでは判定しない
+      expect(cmd.whileTyping ?? false, `${id} が打鍵中に効くと、本文が消える`).toBe(false);
+    }
   });
 });
