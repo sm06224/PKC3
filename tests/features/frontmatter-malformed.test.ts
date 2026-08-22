@@ -441,6 +441,9 @@ describe('閉じを失った本文への書き込み(#318)', () => {
       '---\n# メモ\ntags: [あ]\n本文\n',
       '---\ntags: [あ]\n# メモ\npriority: high\n本文\n',
       '---\ntags: [あ]',
+      // 🔴 3 巡目レビュー 1-B ── 行末コメントを剥がずに見ると `tags:` が
+      //    「値のある key」に見え、続く `- 牛乳` で走が止まって tags が空になる
+      '---\ntags: # 買うもの\n- 牛乳\n- パン\n買い物メモ\n',
     ];
     for (const src of CASES) {
       /**
@@ -462,7 +465,9 @@ describe('閉じを失った本文への書き込み(#318)', () => {
         const m = /^\s*[A-Za-z_][\w.-]*\s*:(.*)$/.exec(l);
         if (m) {
           // ⚠ 「値が無い key」だけが配列の塊を開く ── 値のある key は閉じる。
-          inBlock = (m[1] ?? '').trim() === '';
+          // ⚠ 値の有無は**行末コメントを剥いでから**見る(`parseFlatYaml` と同じ。
+          //    3 巡目レビュー 1-B ── ここを剥がないと `tags: # メモ` を値ありと読む)
+          inBlock = (m[1] ?? '').replace(/\s+#.*$/u, '').trim() === '';
           continue;
         }
         // `- item` は、開いている塊の中にあるときだけ正当。
@@ -571,6 +576,91 @@ describe('閉じを失った本文への書き込み(#318)', () => {
         }
     // ⚠ 空振り防止 ── 0 形では上の for が 1 度も回らない
     expect(checked, '総当たりが回っていない').toBe(PIECES.length * PIECES.length * 2);
+  });
+
+  /**
+   * 🔴 **誰も読まない行を、閉じの内側へ隠さない**(3 巡目レビュー ⑤)。
+   *
+   * ⚠ 上の 2 つの検査は、どちらもこの型の欠陥を**原理的に見られない**:
+   *
+   * | 検査 | 見ているもの | 見えない壊れ方 |
+   * |---|---|---|
+   * | 理想形との一致 | `meta` だけ | **本文から行が消えた**こと |
+   * | 挿入だけ | **byte の生存**だけ | 閉じの内側へ移って**画面から消えた**こと |
+   *
+   * しかも理想形は「同じ文法を別の綴りで書き直したもの」なので、**実装と同じ
+   * 盲点を共有する** ── 実際 3 巡目の 1-A(`tags:` + 空行 + `- item`)は
+   * **両辺が同じように間違えるので一致してしまい**、一致検査では鳴らなかった。
+   *
+   * 🔑 だからここは**実装の綴りを 1 行も参照しない**不変量で判定する:
+   *
+   * > 修理後の frontmatter 領域にある**実のある行**は、**その行を消すと `meta` が
+   * > 変わる**(= 誰かが読んでいる)。変わらないなら、その行は**隠してはいけない**。
+   *
+   * ⚠ 実測(直す前):`---\ntags:\n\n- 牛乳\n- 卵\n買い物メモ` に印を 1 つ付けると
+   *   `- 牛乳` / `- 卵` が閉じの内側に入り、しかも `meta.tags` は `[]` ──
+   *   **誰も読まない場所に user の買い物リストが消えた**。
+   */
+  it('🔴 隠した行は、必ず誰かが読んでいる(総当たり)', () => {
+    const PIECES = [
+      'tags: [あ]',
+      'tags:',
+      'tags: # 買うもの',
+      'title: メモ',
+      '- 牛乳',
+      '  - 卵',
+      '# コメント',
+      '',
+      '買い物メモ',
+      '12:30 に集合',
+    ];
+    let shapes = 0;
+    let judged = 0;
+    let hidden = 0;
+    for (const a of PIECES)
+      for (const b of PIECES)
+        for (const c of PIECES) {
+          shapes++;
+          const src = `---\n${a}\n${b}\n${c}\n本文\n`;
+          const out = spliceFrontmatterKeys(src, { status: 'done' });
+          const r = parseFrontmatter(out);
+          if (!r.found) continue;
+          // 修理後の frontmatter 領域(開き fence と閉じ fence の間)を取り出す
+          const all = out.split('\n');
+          const closeAt = all.indexOf('---', 1);
+          const region = all.slice(1, closeAt);
+          /**
+           * ⚠ **前提:同名の key が 2 本ある形は判定できない** ── `parseFlatYaml` は
+           *   last-wins なので、先の 1 本(とその配下の `- item`)を消しても
+           *   `meta` は変わらない。**読まれてはいるが上書きされている**だけで、
+           *   隠す側の欠陥ではない ── この不変量の**偽陽性**である。
+           * 🔑 だから行ごとに例外を作らず、**形ごと judged から外す**
+           *   (例外を行に足すと、そこに本物の欠陥が紛れる)。
+           */
+          const keys = region
+            .map((l) => /^\s*([A-Za-z_][\w.-]*)\s*:/.exec(l)?.[1])
+            .filter((k): k is string => k !== undefined);
+          if (new Set(keys).size !== keys.length) continue;
+          const base = JSON.stringify(r.meta);
+          for (let i = 0; i < region.length; i++) {
+            const line = region[i] ?? '';
+            // 空行とコメントは「読まれないが隠してよい」もの(見た目の一部)
+            if (line.trim() === '' || line.trimStart().startsWith('#')) continue;
+            judged++;
+            const without = [...all.slice(0, 1 + i), ...all.slice(2 + i)].join('\n');
+            if (JSON.stringify(parseFrontmatter(without).meta) === base) {
+              hidden++;
+              expect(
+                line,
+                `誰も読まない行を隠した\n  原文  : ${JSON.stringify(src)}\n  修理後: ${JSON.stringify(out)}`,
+              ).toBe('(この行は誰かが読んでいるべき)');
+            }
+          }
+        }
+    // ⚠ 空振り防止 ── ①総当たりが回った ②実際に判定した行が十分にある
+    expect(shapes, '総当たりが回っていない').toBe(PIECES.length ** 3);
+    expect(judged, '判定した行が少なすぎる(前提で外しすぎ)').toBeGreaterThan(500);
+    expect(hidden, '隠した行がある').toBe(0);
   });
 
   it('🔴 判定が 1 つ ── 警告が出る形 ⇔ 前置しない形', () => {

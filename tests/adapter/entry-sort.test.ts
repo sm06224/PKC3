@@ -317,11 +317,24 @@ describe('タグの札(#182)', () => {
   });
 
   /**
-   * ⚠ **ただし「無し」と言い切らない** ── 読めている 1 組目にタグが無いのは事実だが、
-   *   user のタグが 2 組目へ落ちている可能性がある。`title` だけに逃がすと
-   *   **乗せないと分からない**ので、行の字にも出す。
+   * 🔴 **`trailing` では、行の字で damage だと言い切らない**(3 巡目レビュー ②)。
+   *
+   * ⚠ **これは同日に書いた検査の向きを裏返したものである**(前稿は「『無し』と
+   *   言い切らない」を要求していた)。理由は実測 ── **健全なノートと #318 の
+   *   実害形は構造が同一**で、見分けられない:
+   *
+   * | 本文 | 実体 | `frontmatterProblem` |
+   * |---|---|---|
+   * | `---\ntags:…\n---\n---\nTODO: 明日やる` | **健全**(水平線 + 覚書) | `trailing` |
+   * | `---\nstatus:…\n---\n---\ntags: [買物]` | **#318 の実害** | `trailing` |
+   *
+   * 言い切ると、健全な側の user は**存在しない不具合を探す**。
+   *
+   * 🔑 **向きを裏返したので、元の懸念も pin し直す**(CLAUDE.md「検査の向きを
+   *   裏返したら、作法も裏返る」)── 理由が**消えた**わけではないことを、
+   *   同じ it の中で確かめる。
    */
-  it('🔴 1 組目にタグが無く、2 組目が残っているなら「無し」と言い切らない', () => {
+  it('🔴 2 組目が残っていても行の字は「無し」── 理由は title が担う', () => {
     const { d, root } = withInspector();
     d.dispatch({
       type: 'BODY_LOADED',
@@ -329,7 +342,23 @@ describe('タグの札(#182)', () => {
       body: '---\nstatus: done\n---\n---\ntags: [買い物]\n本文\n',
     });
     const box = root.querySelector('[data-pkc-field="inspector-tags"]');
-    expect(box?.textContent, '「無し」と言い切っている').toContain('2 組目');
+    expect(box?.textContent, '行の字で damage だと言い切っている').toBe('無し');
+    // ⚠ **理由まで消してはいない**(裏返した検査が守るべき、元の懸念)
+    expect(
+      box?.getAttribute('title') ?? '',
+      '理由がどこにも出ていない(乗せても分からない)',
+    ).toContain('2 組目');
+  });
+
+  /**
+   * ⚠ **対照群** ── `unreadable`(閉じが無い = **確定**)は、いまも行の字で言う。
+   *   ここまで弱めると「読めていない」が**どこにも出なくなる**。
+   */
+  it('🔴 閉じが無い(確定)なら、行の字で「読めていません」と言う', () => {
+    const { d, root } = withInspector();
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '---\ntags: [買い物]\n本文\n' });
+    const box = root.querySelector('[data-pkc-field="inspector-tags"]');
+    expect(box?.textContent, '確定している不具合まで黙った').toBe('読めていません');
   });
 
   it('🔴 cap を超えた文書の情報でも「無し」と断定しない', () => {

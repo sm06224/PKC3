@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   spliceFrontmatterKeys,
   parseFrontmatter,
+  extractVars,
 } from '../../src/features/markdown/frontmatter';
 import { withTodoStatus } from '../../src/features/flavor/todo-flavor';
 
@@ -45,6 +46,46 @@ describe('spliceFrontmatterKeys(原文 splice ── P3-4 review #5 の規律)',
     // 先頭行に書くと再抽出(last-wins)が変わらず永久 no-op になる
     expect(parseFrontmatter(out).meta['status']).toBe('open');
     expect(out).toBe('---\nstatus: open\nstatus: open\n---\nx');
+  });
+
+  /**
+   * 🔴 **入れ子(`vars:`)の子行を書き換えない**(3 巡目レビュー 1-C)。
+   *
+   * ⚠ **1 本の行を 2 人が別々に読んでいる**(CLAUDE.md §7)── 実測:
+   *   `parseFlatYaml` は `  status: open` を**トップレベルの `status`** として読み、
+   *   `extractVars` は**`vars.status`** として読む。だから当ててしまうと
+   *   **本文の `{{vars.status}}` の表示が黙って変わる**(消す操作なら行ごと消える)。
+   *
+   * 🔑 直す向きは §7 の「**書き換え先は誤爆しない側(狭く当てる)**」──
+   *   子行は外し、無ければ**末尾に足す**。`parseFlatYaml` は last-wins なので
+   *   足すだけで `meta` は正しくなり、`vars` は 1 バイトも動かない。
+   */
+  it('🔴 vars: の子行は書き換えない(足して last-wins で効かせる)', () => {
+    const body = '---\nvars:\n  status: open\ntitle: メモ\n---\n進捗は {{vars.status}} です\n';
+    const out = spliceFrontmatterKeys(body, { status: 'done' });
+    // ① user の `vars` は 1 バイトも動かない
+    expect(out, 'vars の子行を書き換えた').toContain('vars:\n  status: open\n');
+    expect(extractVars(out), '本文の {{vars.status}} の表示が変わった').toEqual({
+      status: 'open',
+    });
+    // ② それでも meta は要求どおり(last-wins)
+    expect(parseFrontmatter(out).meta['status'], 'meta に届いていない').toBe('done');
+    // ③ 消す操作でも子行を消さない(取り消せない側へ倒さない)
+    const del = spliceFrontmatterKeys(body, { status: undefined });
+    expect(extractVars(del), '消す操作が vars を壊した').toEqual({ status: 'open' });
+  });
+
+  /**
+   * ⚠ **対照群** ── 「字下げされているが入れ子ではない」行は、**書き換える**
+   *   (2 巡目レビュー B-3。上の直しで巻き添えにしていないことを見る)。
+   */
+  it('字下げだけの key(入れ子ではない)は、字下げを保って書き換える', () => {
+    expect(spliceFrontmatterKeys('---\n  status: open\n---\n本文\n', { status: 'done' })).toBe(
+      '---\n  status: done\n---\n本文\n',
+    );
+    expect(spliceFrontmatterKeys('---\n  status: open\n---\n本文\n', { status: undefined })).toBe(
+      '---\n---\n本文\n',
+    );
   });
 
   it('prefix が重なる key(date / date-done)を取り違えない', () => {

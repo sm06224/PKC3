@@ -154,9 +154,18 @@ function frontmatterRunLength(lines: readonly string[]): number {
   /** 直前が「値の無い key」または「その続きの `- item`」か(ブロック配列の中)。 */
   let inBlock = false;
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i] ?? '';
     /**
-     * 🔴 **空行でも切らない**(2 巡目レビュー A-1)。
+     * 🔴 **コメントを剥いでから見る**(3 巡目レビュー 1-B)── `parseFlatYaml:441` は
+     *   `stripTrailingComment` を通してから値の有無を判定する。剥がずに見ると
+     *   `tags: # 買うもの` が「**値のある key**」に見え、続く `- 牛乳` で走が止まる
+     *   ── user から見ると **`tags` が空になり、箇条書きが本文へ落ちる**。
+     * ⚠ 剥いだ後は「字下げ + `#`」の行が空文字になるので、コメントの判定は
+     *   `parseFlatYaml:442` と同じ `startsWith('#')` でよい(`trimStart()` は
+     *   **no-op になる** ── 効かない防御を残さない)。
+     */
+    const line = stripTrailingComment(lines[i] ?? '');
+    /**
+     * 🔴 **空行でも切らない。ただしブロック配列は閉じる**(2 巡目 A-1 + 3 巡目 1-A)。
      *
      * ⚠ 1 稿目・2 稿目はここで `break` していたが、`parseFlatYaml` は
      *   **空行を読み飛ばして先を読む** ── つまり
@@ -168,10 +177,26 @@ function frontmatterRunLength(lines: readonly string[]): number {
      *   警告が消えた」なので **直ったと読む**。**アプリ自身の修理が嘘を作っていた**。
      * 🔑 空行はコメントと同じ扱いにする(`last` を進めない)── 後ろに key が
      *   来るときだけ跨ぐので、`---\nk: 1\n\n散文です\nk2: 2` は走 1 行のまま。
+     *
+     * 🔴 **ただし `inBlock` は落とす**(3 巡目レビュー 1-A)。`parseFlatYaml:454-460`
+     *   のブロック配列の走査は **`- item` 以外の行で即 `break`** する ── 空行も
+     *   コメントもそこに含まれる。落とさないと、**走だけが `- item` を飲み込み、
+     *   `parseFlatYaml` は 1 件も読まない**という非対称ができる。
+     * ⚠ 実測(直す前):`---\ntags:\n\n- 牛乳\n- 卵\n買い物メモ` に印を 1 つ付けると
+     *   → `meta {"tags":[]}` / **本文は「買い物メモ」だけ** ── user が書いた
+     *   買い物リストが画面から消え、しかも警告も消えるので**直ったと読む**。
+     * 🔑 この PR 自身が宣言した境界(「迷ったら**見える側**へ倒す」)と逆向きだった
+     *   ── **誰も読まない行を、閉じの内側へ隠してはいけない**。
      */
-    if (line.trim() === '') continue;
+    if (line.trim() === '') {
+      inBlock = false;
+      continue;
+    }
     // ③ コメント ── 後ろに key が来れば `last` が追い越すので、自然に含まれる
-    if (line.trimStart().startsWith('#')) continue;
+    if (line.startsWith('#')) {
+      inBlock = false;
+      continue;
+    }
     const colon = findKeyColon(line);
     if (colon > 0 && /^[A-Za-z_][\w.-]*$/.test(line.slice(0, colon).trim())) {
       last = i;
@@ -186,6 +211,58 @@ function frontmatterRunLength(lines: readonly string[]): number {
     break;
   }
   return last + 1;
+}
+
+/**
+ * 🔴 **書き換えてよい行か**(3 巡目レビュー 1-C。**この PR 自身が入れた穴の修正**)。
+ *
+ * 2 巡目 B-3 で書き換えの当たりを `^key\s*:` から **`^\s*key\s*:`** へ広げた。
+ * 狙いは「frontmatter 全体が字下げされている本文」(`---\n  status: open\n---`)で
+ * 同名 key が 2 本になるのを止めることだったが、⚠ **入れ子の子行にも当たった**:
+ *
+ * ```
+ * ---
+ * vars:
+ *   status: open      ← todo の印を付けると、この行が書き換わる
+ * ---
+ * 進捗は {{vars.status}} です   ← 表示が黙って変わる。消す操作なら行ごと消える
+ * ```
+ *
+ * 🔑 **1 本の行を 2 人が別々に読んでいる**のが根にある(CLAUDE.md §7)── 実測:
+ *   `parseFlatYaml` はこの行を**トップレベルの `status`** として読み、
+ *   `extractVars` は**`vars.status`** として読む。だから書き換えると両方動く。
+ * 🔑 直す向きは §7 の「**どこを書き換えるかは誤爆しない側(狭く当てる)**」──
+ *   子行は**外して**、無ければ末尾に足す。`parseFlatYaml` は last-wins なので
+ *   **足すだけで meta は正しくなり、`vars` は 1 バイトも動かない**。
+ * ⚠ 消す操作だけは「子行しか無い」ときに無言の no-op になる ── それでも
+ *   **user の `vars` を壊すより良い**(取り消せない側へ倒さない)。
+ *
+ * 判定は `extractVars:617-627` の入れ子の読み方に合わせる ── 「**値の無い key**
+ * より深く字下げされた行」が子で、空行か同じ深さ以下の行で閉じる。
+ */
+function topLevelKeyLines(lines: readonly string[]): boolean[] {
+  const flags: boolean[] = [];
+  /** 開いているブロックの key の字下げ幅(閉じていれば `null`)。 */
+  let openIndent: number | null = null;
+  for (const raw of lines) {
+    const line = stripTrailingComment(raw.replace(/\r?\n$/, ''));
+    if (line.trim() === '') {
+      openIndent = null;
+      flags.push(false);
+      continue;
+    }
+    const indent = (/^[ \t]*/.exec(line)?.[0] ?? '').length;
+    if (openIndent !== null && indent > openIndent) {
+      flags.push(false);
+      continue;
+    }
+    openIndent = null;
+    const colon = findKeyColon(line);
+    const isKey = colon > 0 && /^[A-Za-z_][\w.-]*$/.test(line.slice(0, colon).trim());
+    if (isKey && line.slice(colon + 1).trim() === '') openIndent = indent;
+    flags.push(true);
+  }
+  return flags;
 }
 
 /**
@@ -838,6 +915,7 @@ export function spliceFrontmatterKeys(
   }
 
   const fmParts = parts.slice(0, closeAt);
+  const writable = topLevelKeyLines(fmParts);
   for (const [key, value] of entries) {
     /**
      * ⚠ **字下げも見る**(2 巡目レビュー B-3)── 走は `line.slice(0, colon).trim()`
@@ -850,7 +928,8 @@ export function spliceFrontmatterKeys(
     // 先頭行を書くと再抽出が変わらず永久 no-op になる(P3-6a review #5)
     let at = -1;
     for (let i = 0; i < fmParts.length; i++) {
-      if (keyRe.test(fmParts[i]!)) at = i;
+      // ⚠ **入れ子の子行は書き換えない**(3 巡目レビュー 1-C)
+      if (writable[i] === true && keyRe.test(fmParts[i]!)) at = i;
     }
     const line = lineFor([key, value]);
     if (at >= 0) {

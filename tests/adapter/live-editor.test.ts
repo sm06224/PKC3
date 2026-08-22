@@ -616,6 +616,16 @@ describe('文書の情報(frontmatter)の扱い(#284)', () => {
       card.querySelector('[data-pkc-field="fm-label"]')?.textContent,
       '読めているのに読めていないと言っている',
     ).toBe('この文書の情報');
+    /**
+     * ⚠ **理由も添える**(3 巡目レビュー MUT-E)── ここを見ていなかったので、
+     *   A-2 の後半(「なぜ 2 組目が在るのか」を書く)を**落としても緑**だった。
+     *   要約・編集の口だけ見ていると「普通のノートと同じ顔」で通ってしまい、
+     *   user は**2 組目に気づけないまま**になる。
+     */
+    expect(
+      card.querySelector('[data-pkc-field="fm-problem"]')?.textContent ?? '',
+      '2 組目が残っている理由が出ていない',
+    ).toContain('2 組目');
   });
 
   /**
@@ -747,7 +757,9 @@ describe('文書の情報(frontmatter)の扱い(#284)', () => {
     ).toContain('閉じの ---');
     expect(
       card.querySelector('[data-pkc-field="fm-edit"]'),
-      '2 つ目の編集口が残っている(読めない情報を編集させない)',
+      // ⚠ 理由は「読めない情報を編集させない」ではない(A-5 がそれを否定した)──
+      //    この形は fmLines === 0 で、壊れた行が**本文にそのまま見えている**
+      '編集口が出ている(切り出す行が無く、本文の側で直せる形)',
     ).toBeNull();
     expect(
       card.querySelector('[data-pkc-field="fm-summary"]'),
