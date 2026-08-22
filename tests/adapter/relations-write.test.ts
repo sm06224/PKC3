@@ -10,6 +10,7 @@
  * 5. 消すのは **id で**(同じ組が複数あっても迷わない)。冪等
  * 6. 時刻は **disk が正**(reducer が現在時刻を作らない)
  */
+import { stubStamps } from '../helpers/store-stamps';
 import { describe, expect, it, vi } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -126,6 +127,11 @@ describe('🔴 disk まで届く(常駐だけ動いて保存されない、を�
       getBody: async () => null,
       getBodies: async () => [],
       listBodies: async () => ({ rows: [], done: true }),
+      /**
+       * ⚠ **題名だけの口**(#178)── 本物は本文に触らない。
+       *   だから fake も本文を持たない(触らないものは持たない)。
+       */
+      renameEntry: async () => stubStamps(),
       persistEntry: async () => ({ createdAt: null, updatedAt: null }),
       deleteEntry: async () => undefined,
       setEntryParent: async () => undefined,

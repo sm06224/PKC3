@@ -65,9 +65,15 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
   const store = { ...bodies };
   const deleted: string[] = [];
   const persisted: EntryUpsert[] = [];
+  /** 🔴 題名だけの書換(#178)。⚠ **本物の意味論を真似る** ── 本文に触らない。 */
+  const renamed: Array<{ lid: string; title: string }> = [];
   connectStoreEffects(d, {
     ...stubRevisionOps(),
     getBody: async (lid) => store[lid] ?? null,
+    renameEntry: async (lid, title) => {
+      renamed.push({ lid, title });
+      return stubStamps();
+    },
     persistEntry: async (e) => {
       persisted.push(e);
       store[e.lid] = e.body;
@@ -82,7 +88,7 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas, relations: [] });
   const q = <T extends HTMLElement>(sel: string) => root.querySelector<T>(sel);
   const qa = (sel: string) => [...root.querySelectorAll<HTMLElement>(sel)];
-  return { root, d, persisted, deleted, store, q, qa };
+  return { root, d, persisted, renamed, deleted, store, q, qa };
 }
 
 describe('create (P3-7a)', () => {
@@ -146,6 +152,11 @@ describe('create (P3-7a)', () => {
     connectStoreEffects(d, {
     ...stubRevisionOps(),
       getBody: async () => '# A',
+      /**
+       * ⚠ **題名だけの口**(#178)── 本物は本文に触らない。
+       *   だから fake も本文を持たない(触らないものは持たない)。
+       */
+      renameEntry: async () => stubStamps(),
       persistEntry: async () => {
         if (failNext) {
           failNext = false;
@@ -325,7 +336,7 @@ describe('delete (P3-7a)', () => {
 
 describe('rename (P3-7a)', () => {
   it('editor の title input → 保存で sidebar と store に反映', async () => {
-    const { d, q, persisted, store } = setup([meta('a', 1)], { a: '# 本文' });
+    const { d, q, persisted, renamed, store } = setup([meta('a', 1)], { a: '# 本文' });
     q<HTMLElement>('[data-pkc-entry="a"]')!.click();
     await tick();
     q<HTMLElement>('[data-pkc-action="start-edit"]')!.click();
@@ -337,9 +348,16 @@ describe('rename (P3-7a)', () => {
     expect(
       q('[data-pkc-entry="a"] [data-pkc-field="title"]')?.textContent,
     ).toBe('新しい題');
-    // 最終的に store の行は 新 title を持つ(rename の read-modify-write)
-    const last = persisted[persisted.length - 1]!;
-    expect(last.title).toBe('新しい題');
+    /**
+     * 🔴 **題名だけが disk へ行く**(#178、2026-08-22)。
+     *
+     * ⚠ 直す前は本文を読んで**行全体を書き戻して**いた ── 読んでから書くまでの間に
+     *   別のタブ / 窓が本文を書いていると**それを消す**(しかも本文は変わらないので
+     *   履歴にも残らない)。いまは題名だけの口を通る。
+     * 🔑 **本文を書いていないこと**まで見る ── ここが緩むと、静かに戻る。
+     */
+    expect(renamed, '題名だけの口を通っていない').toEqual([{ lid: 'a', title: '新しい題' }]);
+    expect(persisted, '本文を書き戻している(別の窓の本文を消す形)').toEqual([]);
     expect(store['a']).toBe('# 本文'); // body は無傷
   });
 });

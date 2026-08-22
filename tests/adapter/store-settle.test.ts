@@ -62,6 +62,11 @@ function setup(persist: (body: string) => Promise<void>) {
   const effects = connectStoreEffects(d, {
     ...stubRevisionOps(),
     getBody: async () => '',
+    /**
+     * ⚠ **題名だけの口**(#178)── 本物は本文に触らない。
+     *   だから fake も本文を持たない(触らないものは持たない)。
+     */
+    renameEntry: async () => stubStamps(),
     persistEntry: async (e) => {
       await persist(e.body);
       written.push(e.body);

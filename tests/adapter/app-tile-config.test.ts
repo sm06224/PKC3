@@ -59,6 +59,11 @@ function setup(
       if (opts.failGetBodies) throw new Error('worker が落ちた');
       return lids.filter((l) => bodies[l] !== undefined).map((l) => ({ lid: l, body: bodies[l]! }));
     },
+    /**
+     * ⚠ **題名だけの口**(#178)── 本物は本文に触らない。
+     *   だから fake も本文を持たない(触らないものは持たない)。
+     */
+    renameEntry: async () => stubStamps(),
     persistEntry: async (e) => {
       counter.writes += 1;
       bodies[e.lid] = e.body;

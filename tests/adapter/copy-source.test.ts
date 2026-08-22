@@ -152,6 +152,11 @@ function setup(bodies: Record<string, string>) {
     getBody: async (lid) => bodies[lid] ?? null,
     deleteEntry: async () => {},
     setEntryParent: async () => {},
+    /**
+     * ⚠ **題名だけの口**(#178)── 本物は本文に触らない。
+     *   だから fake も本文を持たない(触らないものは持たない)。
+     */
+    renameEntry: async () => stubStamps(),
     persistEntry: async () => stubStamps(),
   });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a')], relations: [] });

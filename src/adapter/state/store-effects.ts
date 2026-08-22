@@ -77,6 +77,13 @@ export interface StorePort {
    * ⚠ `parent` を渡すと **同じ tx で居場所も張る**(#258)── 渡さなければ辺に触らない。
    * 作成を 2 手に割ると、その隙にタブを閉じたとき**親だけ飛ぶ**(実測)。
    */
+  /**
+   * 🔴 **題名だけを書き換える**(#178、2026-08-22)。⚠ optional にしない ──
+   * 配線を落としても tsc が黙ると、戻ってくる症状は「改名で別の窓の本文が消える」
+   * という**いちばん気づけない形**である(CLAUDE.md §7 の待ちの口と同じ理由)。
+   * @returns 行が消えていれば `null`
+   */
+  renameEntry(lid: string, title: string): Promise<EntryStamps | null>;
   persistEntry(
     entry: EntryUpsert,
     opts?: {
@@ -380,26 +387,25 @@ export function connectStoreEffects(
         enqueue(async () => {
           if (disposed) return;
           try {
-            const body = await store.getBody(ev.lid);
+            /**
+             * 🔴 **本文を読まない。書き戻さない**(#178、2026-08-22)。
+             *
+             * ⚠ 直す前は `getBody` → 題名を差し替えて**行全体を書く**形だった ──
+             * 読んでから書くまでの間に**別のタブ / 窓が本文を書いていると消える**。
+             * しかも本文は変わらないので `maintainChain` は呼ばれず、
+             * **履歴にも残らない**(= 上書きされた版はどこからも戻せない)。
+             * 🔑 衝突を*検出する*のではなく、**起こらなくする** ── 触らなければよい。
+             * ⚠ 抽出列(status / date / archived)も本文由来なので触らない。
+             */
+            const stamps = await store.renameEntry(ev.lid, ev.title);
             if (disposed) return;
-            if (body === null) {
+            if (stamps === null) {
               dispatcher.dispatch({
                 type: 'OP_FAILED',
                 error: `rename: entry row missing (${ev.lid})`,
               });
               return;
             }
-            const ext = extractMeta(ev.archetype, body);
-            const stamps = await store.persistEntry({
-              lid: ev.lid,
-              title: ev.title,
-              archetype: ev.archetype,
-              body,
-              entryOrder: ev.entryOrder,
-              status: ext.status,
-              date: ext.date,
-              archived: ext.archived,
-            });
             stamp(ev.lid, stamps);
           } catch (e) {
             if (!disposed)

@@ -207,6 +207,18 @@ function stampingStore(bodies: Record<string, string>): {
   const port = {
     ...stubRevisionOps(),
     getBody: async (lid: string) => store[lid] ?? null,
+    /**
+     * 🔴 **題名だけの口**(#178、2026-08-22)。
+     * ⚠ **本物の意味論を真似る**(CLAUDE.md §3)── 本物は
+     *   ① **本文に触らない** ② 行を 1 つ書く(= 書込として数える)
+     *   ③ **刻んだ時刻を返す**。`stubStamps()` を返すだけの stub にすると、
+     *   「rename が書込に到達していない」という**当の主張**が測れなくなる。
+     */
+    renameEntry: async (): Promise<EntryStamps> => {
+      state.writes += 1;
+      const n = String(state.writes).padStart(2, '0');
+      return { createdAt: '2026-03-04 05:06:07', updatedAt: `2026-03-04 05:06:${n}` };
+    },
     persistEntry: async (e: EntryUpsert): Promise<EntryStamps> => {
       state.writes += 1;
       store[e.lid] = e.body;
@@ -318,9 +330,17 @@ describe('② 書込のたびに state の meta が更新される', () => {
    * 駆動に大掛かりな下地が要る。そこは**書込のそばに刻みが在ること**を
    * 原文で見る(「それらしいものが在るか」ではなく「**書込 1 回に対して刻み 1 回**」)。
    */
-  it('🔴 persistEntry を呼ぶ経路の数と、刻む呼び出しの数が一致する', () => {
+  it('🔴 行を書く経路の数と、刻む呼び出しの数が一致する', () => {
     const src = readFileSync('src/adapter/state/store-effects.ts', 'utf-8');
-    const writes = [...src.matchAll(/await store\.persistEntry\(/g)].length;
+    /**
+     * ⚠ **数える口は 1 つではない**(2026-08-22、#178)── 改名は本文を書き戻すのを
+     * やめて `renameEntry`(題名だけ)へ移した。`persistEntry` だけ数えていると
+     * **経路が 1 つ消えたように見えて**、刻みの数と食い違う。
+     * 🔑 「行を書く op」を**全部**数える ── 足すときはここにも足す。
+     */
+    const writes =
+      [...src.matchAll(/await store\.persistEntry\(/g)].length +
+      [...src.matchAll(/await store\.renameEntry\(/g)].length;
     const stamps = [...src.matchAll(/^\s*stamp\(/gm)].length;
     expect(writes, '書込経路が 1 つも見つからない(scan が壊れている)').toBeGreaterThanOrEqual(7);
     expect(

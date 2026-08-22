@@ -1212,6 +1212,39 @@ const handlers: Handlers = {
       throw err;
     }
   },
+  /**
+   * 🔴 **題名だけを書き換える**(#178、2026-08-22)。
+   *
+   * ⚠ 直す前、改名は `getBody` → 題名を差し替えて `upsertEntry` で**行全体を書く**
+   * 形だった ── 読んでから書くまでの間に**別のタブ / 窓が本文を書いていると消える**。
+   * しかも本文は変わらないので `maintainChain` は呼ばれず、**履歴にも残らない**
+   * (= 上書きされた版はどこからも戻せない)。
+   * 🔑 **本文に触らなければ、衝突は起こりようがない。** 検出ではなく消滅である。
+   *
+   * ⚠ **鎖は触らない**のが正しい ── `upsertEntry` も
+   * `if (old && old.body !== req.entry.body)` で本文が変わったときだけ鎖を維持する。
+   * 改名では常に偽なので、**元から鎖は動いていなかった**(この op はその等価物である)。
+   * ⚠ 抽出列(status / date / archived)も本文由来なので触らない。
+   */
+  renameEntry: (req) => {
+    const database = need();
+    database.exec({
+      sql: `UPDATE entries SET title = ?, updated_at = datetime('now')
+              WHERE cid = ? AND lid = ?`,
+      bind: [req.title, req.cid, req.lid],
+    });
+    // ⚠ **書いた行が無ければ null** ── 消えたノートの改名を「成功」と言わない
+    if (database.changes() === 0) return null;
+    // 🔑 刻んだ時刻を返す(`upsertEntry` と同じ約束 ── P9 段①)
+    const stamped = database.selectObjects(
+      'SELECT created_at, updated_at FROM entries WHERE cid = ? AND lid = ?',
+      [req.cid, req.lid],
+    )[0] as { created_at: string | null; updated_at: string | null } | undefined;
+    return {
+      createdAt: stamped?.created_at ?? null,
+      updatedAt: stamped?.updated_at ?? null,
+    };
+  },
   bulkUpsertEntries: (req) => {
     // 1 tx に束ねる ── journal 増幅対策(計器 1 で実測した ~120 倍の主因が
     // upsert 毎の暗黙 tx であることの検証と対策を兼ねる)

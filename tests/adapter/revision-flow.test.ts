@@ -66,6 +66,11 @@ function setup(bodies: Record<string, string>, port: Partial<StorePort> = {}) {
   connectStoreEffects(d, {
     ...stubRevisionOps(),
     getBody: async (lid) => bodies[lid] ?? null,
+    /**
+     * ⚠ **題名だけの口**(#178)── 本物は本文に触らない。
+     *   だから fake も本文を持たない(触らないものは持たない)。
+     */
+    renameEntry: async () => stubStamps(),
     persistEntry: async (e, opts) => {
       // checkpoint = 「変更前の disk body を履歴に刻む」意思(実記録は worker)
       log.push(`persist:${e.lid}:${e.body}${opts?.checkpoint ? ':cp' : ''}`);
@@ -402,6 +407,11 @@ describe('ゴミ箱からの復元: 居場所と並びが戻る', () => {
     connectStoreEffects(d, {
       ...stubRevisionOps(),
       getBody: async () => '',
+      /**
+       * ⚠ **題名だけの口**(#178)── 本物は本文に触らない。
+       *   だから fake も本文を持たない(触らないものは持たない)。
+       */
+      renameEntry: async () => stubStamps(),
       persistEntry: async () => stubStamps(),
       deleteEntry: async () => {},
       setEntryParent: async () => {},

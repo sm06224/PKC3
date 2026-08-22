@@ -520,6 +520,8 @@ describe('effect layer: serialized store I/O', () => {
       },
       async deleteEntry() {},
       async setEntryParent() {},
+      /** ⚠ **題名だけの口**(#178)── 本物は本文に触らない。 */
+      renameEntry: async () => stubStamps(),
       async persistEntry(entry) {
         log.push(`put:${entry.lid}:${entry.body}`);
         return stubStamps();
@@ -565,6 +567,8 @@ describe('effect layer: serialized store I/O', () => {
       },
       async deleteEntry() {},
       async setEntryParent() {},
+      /** ⚠ **題名だけの口**(#178)── 本物は本文に触らない。 */
+      renameEntry: async () => stubStamps(),
       async persistEntry() {
         return stubStamps();
       },
@@ -594,6 +598,8 @@ describe('effect layer: serialized store I/O', () => {
       },
       async deleteEntry() {},
       async setEntryParent() {},
+      /** ⚠ **題名だけの口**(#178)── 本物は本文に触らない。 */
+      renameEntry: async () => stubStamps(),
       async persistEntry(e) {
         if (failNext) throw new Error('disk full');
         persisted.push(e.body);
@@ -631,6 +637,8 @@ describe('effect layer: serialized store I/O', () => {
       },
       async deleteEntry() {},
       async setEntryParent() {},
+      /** ⚠ **題名だけの口**(#178)── 本物は本文に触らない。 */
+      renameEntry: async () => stubStamps(),
       async persistEntry() {
         throw new Error('disk full');
       },
@@ -672,6 +680,8 @@ describe('effect layer: serialized store I/O', () => {
       },
       async deleteEntry() {},
       async setEntryParent() {},
+      /** ⚠ **題名だけの口**(#178)── 本物は本文に触らない。 */
+      renameEntry: async () => stubStamps(),
       async persistEntry(entry) {
         persisted.push(entry);
         return stubStamps();
@@ -712,6 +722,8 @@ describe('effect layer: serialized store I/O', () => {
       },
       async deleteEntry() {},
       async setEntryParent() {},
+      /** ⚠ **題名だけの口**(#178)── 本物は本文に触らない。 */
+      renameEntry: async () => stubStamps(),
       async persistEntry() {
         return stubStamps();
       },

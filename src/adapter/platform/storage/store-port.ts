@@ -71,6 +71,12 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
       client.request({ op: 'listBodies', cid, maxBytes, ...(after ? { after } : {}) }),
     // 🔑 **刻まれた時刻をそのまま返す**(P9 段①)。捨てると主スレッドは次の boot まで
     // 作成・更新を知らず、情報列が終日「—」になる(実際にそうなっていた)
+    /**
+     * 🔴 **題名だけを書き換える**(#178)。⚠ `persistEntry` を使わない ──
+     * あれは**本文を書き戻す**ので、読んでから書くまでの間に別のタブ / 窓が
+     * 本文を書いていると消える(しかも履歴にも残らない)。
+     */
+    renameEntry: (lid, title) => client.request({ op: 'renameEntry', cid, lid, title }),
     persistEntry: (entry, opts) =>
       client.request({
         op: 'upsertEntry',

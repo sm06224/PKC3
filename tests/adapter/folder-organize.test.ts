@@ -312,6 +312,11 @@ function setup(metas: EntryMeta[], relations: Relation[]) {
     getBody: async () => '',
     // ⚠ **`opts` も受け取る**(#258)── 受け取らないと、effect 層が居場所を
     //   落とす変異を**誰も見ていない**(着地前レビュー 🔴-2)
+    /**
+     * ⚠ **題名だけの口**(#178)── 本物は本文に触らない。
+     *   だから fake も本文を持たない(触らないものは持たない)。
+     */
+    renameEntry: async () => stubStamps(),
     persistEntry: async (e, opts) => {
       persisted.push({ lid: e.lid, entryOrder: e.entryOrder, parent: opts?.parent });
       return { ...stubStamps(), ...(opts?.parent ? { parentWritten: true } : {}) };
@@ -932,6 +937,11 @@ describe('作成の居場所が worker まで届く(#258)', () => {
       ...stubRevisionOps(),
       getBody: async () => '',
       // 旧 worker の再現 ── `parent` を受け取っても**名乗らない**
+      /**
+       * ⚠ **題名だけの口**(#178)── 本物は本文に触らない。
+       *   だから fake も本文を持たない(触らないものは持たない)。
+       */
+      renameEntry: async () => stubStamps(),
       persistEntry: async () => stubStamps(),
       deleteEntry: async () => {},
       setEntryParent: async (lid, parentLid) => void parentCalls.push({ lid, parentLid }),
