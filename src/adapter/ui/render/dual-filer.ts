@@ -169,6 +169,12 @@ interface PaneFrame {
    *   1 度も描かれない(2026-08-18 の着地前 test が実際に突いた)。
    */
   signature: string | null;
+  /**
+   * 🔴 **日付だけの指紋**(#270)。本体の指紋と**別に**持つ ── 混ぜると
+   * 「日付が入っただけで表を建て直す」に戻り、**掴もうとしている手の下で
+   * 行が動く**(1 面のファイラと同じ穴。`render/filer.ts` に実測を書いた)。
+   */
+  dates: string | null;
   /** 印の指紋(内容で見る ── 配列は毎回作り直される)。 */
   marks: string;
   /**
@@ -360,6 +366,7 @@ export class DualFilerRenderer {
       foot,
       rows: new Map(),
       signature: null,
+      dates: null,
       marks: '',
       cursor: '',
       shownMarks: 0,
@@ -417,17 +424,38 @@ export class DualFilerRenderer {
           m.archetype,
           // ⚠ **画面に出る形**で入れる(生の値だと、丸めて同じに見える回で作り直す)
           formatBodyChars(m.bodyChars),
-          formatListDate(m.updatedAt, year),
         ].join(SEP),
       ),
     ].join(SEP);
-    if (signature !== frame.signature) {
+    /**
+     * 🔴 **日付は本体の指紋に混ぜない**(#270)。混ぜると、保存の刻み
+     * (`ENTRY_STAMPED` ── 非同期の ack)が返っただけで表を建て直し、
+     * **掴もうとしている手の下で行が消える / 動く**(実測は `render/filer.ts`)。
+     * ⚠ ただし「更新」で並べているときは日付が**並びを変えうる**ので、
+     *   そのときは本体の指紋に含めて建て直す。
+     */
+    const byDate = state.entrySort === 'updated';
+    const dates = rows.map((m) => `${m.lid}${SEP}${formatListDate(m.updatedAt, year)}`).join(SEP);
+    if (signature !== frame.signature || (byDate && dates !== frame.dates)) {
+      frame.dates = dates;
       frame.signature = signature;
       frame.marks = '';
       // ⚠ 行の object ごと入れ替わるので、**カーソルの指紋も捨てる** ──
       //   捨てないと「同じ lid だから塗らない」で **枠が消えたまま**になる
       frame.cursor = '';
       this.renderTable(frame, side, rows, filtered, renaming, state.entrySort, state.entrySortDesc);
+    } else if (dates !== frame.dates) {
+      /**
+       * 🔴 **日付だけ差し替える**(#270)── 行の node は作り直さない。
+       * ⚠ ここを建て直しに戻すと、掴もうとしている手の下で行が動く。
+       */
+      frame.dates = dates;
+      for (const m of rows) {
+        const cell = frame.rows
+          .get(m.lid)
+          ?.querySelector<HTMLElement>('[data-pkc-field="dual-updated"]');
+        if (cell) cell.textContent = formatListDate(m.updatedAt, year);
+      }
     }
     const marks = pane.selection.join(' ');
     if (marks !== frame.marks) {
@@ -685,6 +713,8 @@ export class DualFilerRenderer {
       size.setAttribute('data-pkc-field', 'dual-size');
       size.textContent = m.archetype === 'folder' ? '—' : formatBodyChars(m.bodyChars);
       const date = document.createElement('td');
+      // ⚠ 目印を付ける ── 日付だけの変化はここを差し替えて済ませる(#270)
+      date.setAttribute('data-pkc-field', 'dual-updated');
       date.textContent = formatListDate(m.updatedAt, year);
       tr.append(name, size, date);
       tbody.append(tr);

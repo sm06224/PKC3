@@ -47,6 +47,8 @@ export class FilerRenderer {
    *   `lid` / `title` / `archetype` / 更新日(`MM/DD` に丸めた形)である。
    */
   private lastSignature: string | null = null;
+  /** 日付だけの指紋。⚠ 本体の指紋と**別に**持つ(混ぜると建て直しに戻る ── #270)。 */
+  private lastDates: string | null = null;
   private lastRelations: readonly Relation[] | null = null;
   private lastSelected: string | null = null;
   private lastScopeLid: string | null = null;
@@ -208,21 +210,64 @@ export class FilerRenderer {
   }
 
   /**
-   * 画面に出る材料だけを並べた指紋。⚠ **丸めた後の日付**を使う ── 生の
-   * `updatedAt` を入れると、同日の保存(秒だけ違う)で指紋が変わってしまい、
-   * 「見た目は同じなのに作り直す」が復活する(それが直したかった当のもの)。
+   * 行の**並びと中身**の指紋。⚠ 日付は**入れない**(下の `dateSignature` が持つ)。
+   *
+   * 🔴 **日付を混ぜると、日付が入っただけで表を丸ごと建て直す**(#270 の真因)。
+   * `CREATE_ENTRY` は `updatedAt: null` を置き、実時刻を刻むのは worker なので、
+   * ノートを作った直後に **`ENTRY_STAMPED` という非同期の ack** が届いて
+   * `''` → `MM/DD` と変わる ── それだけで `region.textContent = ''` が走っていた。
+   *
+   * ⚠ 実ブラウザで測った実害(`organize` spec 全体 × 30 回。trail を採取):
+   *   - **2 回** 押下ごと奪われ、`dragstart` しか出ない(`dragover` も `drop` も来ない)
+   *   - **約 3 回** 落とせてはいるが、**狙った行が動いていて**別の所へ入る
+   *   どちらも「掴もうとしている手の下で表が作り直される」ことから来る。
+   * 🔑 だから**日付だけの変化では建て直さない** ── セルの字を差し替える(`patchDates`)。
    */
   private metaSignature(state: AppState): string {
-    const year = new Date().getFullYear();
     // ⚠ 区切りは **NUL のエスケープ**(`\u0000`)── 題名には現れない文字なので
     //    「題名の途中が次の項目に見える」取り違えが起きない。
     //    🔴 生バイトで埋めない(`tests/repo-hygiene.test.ts` が機械的に止める)
     const SEP = '\u0000';
     const parts: string[] = [];
     for (const m of state.entryMetas.values()) {
-      parts.push([m.lid, m.title, m.archetype, formatListDate(m.updatedAt, year)].join(SEP));
+      // ⚠ **並び順も材料**(2026-08-22)── 直す前は指紋に無く、「並べ替えると
+      //    日付も変わる」ことに**間接的に頼って**建て直していた。日付を外した
+      //    瞬間に上へ/下へが 1 バイトも描き直さなくなる(回帰 test が捕まえた)
+      parts.push([m.lid, m.title, m.archetype, String(m.entryOrder)].join(SEP));
     }
     return parts.join(SEP);
+  }
+
+  /**
+   * 日付だけの指紋。⚠ **丸めた後**を使う ── 生の `updatedAt` だと、同じ日の保存
+   * (秒だけ違う)でも変わってしまい、**字が 1 文字も変わらないのに塗り直す**。
+   */
+  private dateSignature(state: AppState): string {
+    const year = new Date().getFullYear();
+    const parts: string[] = [];
+    for (const m of state.entryMetas.values()) {
+      parts.push(m.lid, formatListDate(m.updatedAt, year));
+    }
+    return parts.join(String.fromCharCode(0));
+  }
+
+  /**
+   * 日付のセルだけを差し替える(**行の node は作り直さない**)。
+   * ⚠ 並べ替えが「更新」順のときは日付が**並びを変えうる**ので、呼び手が
+   *   その場合を除いている(`render` の門)。
+   */
+  private patchDates(state: AppState): void {
+    const year = new Date().getFullYear();
+    for (const [lid, tr] of this.rows) {
+      const m = state.entryMetas.get(lid);
+      const cell = tr.querySelector<HTMLElement>('[data-pkc-field="updated"]');
+      if (!m || !cell) continue;
+      cell.textContent = formatListDate(m.updatedAt, year);
+      const full = formatStoredDate(m.updatedAt, '');
+      if (full) cell.title = `更新 ${full}`;
+      else cell.removeAttribute('title');
+    }
+    this.lastDates = this.dateSignature(state);
   }
 
   render(state: AppState): void {
@@ -250,7 +295,16 @@ export class FilerRenderer {
      *    `lastHits`)── **回帰 test がそちらしか import していなかった**ので、
      *    こちらは誰にも守られていなかった(CLAUDE.md「test の import 一覧」)。
      */
+    /**
+     * 🔴 **日付だけの変化**(#270)。⚠ 「更新」で並べているときは**並びを変えうる**
+     * ので、`listChanged` に数えて建て直す ── 字だけ差し替えると**並びが嘘になる**。
+     * ⚠ ここで数えないと、この先の「選択だけの変化」の速い経路が**飲み込む**
+     *   (日付を指紋から外した瞬間に露見した ── 回帰 test が捕まえた)。
+     */
+    const datesChanged = this.dateSignature(state) !== this.lastDates;
+    const sortedByDate = state.entrySort === 'updated';
     const listChanged =
+      (datesChanged && sortedByDate) ||
       state.relations !== this.lastRelations ||
       state.filterQuery !== this.lastFilter ||
       state.entrySort !== this.lastSort ||
@@ -265,7 +319,40 @@ export class FilerRenderer {
     //    行の印が付かない(state だけ動いて画面が嘘をつく)
     const marksChanged = state.selection.join(' ') !== this.lastMarks;
     const trashChanged = state.trashPanel !== this.lastTrash;
-    if (!listChanged && !selectionChanged && !trashChanged && !scopeChanged && !marksChanged)
+
+    /**
+     * 🔴 **日付だけが変わったら、セルの字を差し替えて帰る**(#270)。
+     *
+     * ⚠ 建て直すと、**掴もうとしている手の下で行が消える / 動く**。実ブラウザで
+     *   30 回測って、押下ごと奪われる回と、狙った行が動いて別の所へ落ちる回の
+     *   両方を記録した(`metaSignature` の注記)。
+     * ⚠ **「更新」で並べているときは除く** ── そのときは日付が**並びを変えうる**ので、
+     *   字だけ差し替えると**並びが嘘になる**(建て直すほうが正しい)。
+     */
+    if (
+      datesChanged &&
+      !sortedByDate &&
+      !listChanged &&
+      !selectionChanged &&
+      !trashChanged &&
+      !scopeChanged &&
+      !marksChanged &&
+      this.rows.size > 0
+    ) {
+      this.patchDates(state);
+      // ⚠ 参照の控えも進める ── 進めないと次の描画で「一覧が変わった」と読まれる
+      this.lastMetas = state.entryMetas;
+      return;
+    }
+
+    if (
+      !listChanged &&
+      !selectionChanged &&
+      !trashChanged &&
+      !scopeChanged &&
+      !marksChanged &&
+      !datesChanged
+    )
       return;
 
     /**
@@ -305,6 +392,7 @@ export class FilerRenderer {
     this.lastSortDesc = state.entrySortDesc;
     this.lastHits = state.searchHits;
     this.lastMarks = state.selection.join(' ');
+    this.lastDates = this.dateSignature(state);
 
     /**
      * 🔴 **行を決めるのは `filerRows` 1 か所**(#240 段②)。
@@ -460,6 +548,8 @@ export class FilerRenderer {
       chip.title = archetypeLabel(m.archetype);
       name.append(chip, document.createTextNode(m.title));
       const updated = document.createElement('td');
+      // ⚠ 目印を付ける ── 日付だけの変化はここを差し替えて済ませる(#270)
+      updated.setAttribute('data-pkc-field', 'updated');
       // ⚠ 生の SQLite UTC 文字列(`2026-08-03 13:11:39`)を出さない。
       // 🔑 **一覧の行と同じ形**(今年は MM/DD)にする(P9 段③)── `YYYY/MM/DD` だと
       //    狭い列に収まらず `2026/08/` で切れていた(実測)。年まで見たいときは
