@@ -1627,8 +1627,14 @@ md.core.ruler.after('inline', 'pkc-task-list', function (state) {
     const outLine = tokens[i - 2]!.map?.[0];
     // ⚠ **原文の行へ逆引きする**(前処理で行がずれている ── 上の `env.lineMap`)
     const map = (state.env as { lineMap?: number[] }).lineMap;
-    const srcLine =
+    const rawLine =
       typeof outLine === 'number' ? (map ? (map[outLine] ?? outLine) : outLine) : undefined;
+    /**
+     * 🔴 **剥がした行番号を原文へ戻す**(N1)。⚠ 受け手(`body-rewrite.ts`)は
+     * **原文**を splice するので、剥がした本文の行のまま焼くと別の行が書き換わる。
+     */
+    const offset = (state.env as { taskLineOffset?: number }).taskLineOffset ?? 0;
+    const srcLine = typeof rawLine === 'number' ? rawLine + offset : undefined;
     const wired = interactive && typeof srcLine === 'number';
     const attrs = wired
       ? ` data-pkc-action="toggle-task" data-pkc-task-line="${srcLine}"`
@@ -1661,6 +1667,21 @@ export interface RenderMarkdownOptions {
    *   印刷は受け手が居ないので、**押せないまま**にする。
    */
   readonly interactiveTasks?: boolean;
+  /**
+   * 🔴 **チェックの印が指す行を、原文の行へ戻すためのずらし**(N1)。
+   *
+   * 読む面は **frontmatter を剥がした本文**を描く(`detail.ts` の `fm.body`)が、
+   * 押されたときに書き換えるのは **原文**(`body-rewrite.ts` が
+   * `body.split('\n')[line]` を splice する)。ずらさないと
+   * **frontmatter の行数だけ上の、別の行**が書き換わる ── 押した項目と違う所に
+   * 印が付く、静かなデータ破壊である。
+   * ⚠ かんばんの札は `listTaskItems(row.body)`(**原文**)から行を採るので
+   *   ずらさない ── だから**ずらすのは剥がして描く面だけ**であり、
+   *   既定は `0`(何も変えない)。
+   * 🔑 live editor は同じ補正を `detail.ts` の `startLine + fmLines` で持っている。
+   *   **ずらす値は `fmLines` 1 つ** ── ここに 2 本目の計算を置かない。
+   */
+  readonly taskLineOffset?: number;
   /**
    * M-7(wave-10-2 Phase 2、2026-05-08):本文中の `{{vars.name}}` 展開に
    * 使う変数 map。caller(presenter)は `extractVars(entry.body)` で
@@ -4647,6 +4668,7 @@ export function renderMarkdown(
     currentContainerId: string;
     allowExternalImages: boolean;
     interactiveTasks: boolean;
+    taskLineOffset: number;
     lineMap?: number[];
   } = {
     currentContainerId: opts.currentContainerId ?? '',
@@ -4654,6 +4676,8 @@ export function renderMarkdown(
     allowExternalImages: opts.allowExternalImages === true,
     // 🔴 チェックの印を押せる形で出すか(#277)。既定は押せない
     interactiveTasks: opts.interactiveTasks === true,
+    // 🔴 剥がして描く面だけがずらす(既定 0)。理由は上の option の注記
+    taskLineOffset: Number.isInteger(opts.taskLineOffset) ? (opts.taskLineOffset as number) : 0,
   };
   // L-5 align prefix + L-9 indent prefix を pre-process で strip(挿入あり)。
   const alignResult = preprocessAlignPrefix(text, lineMap);

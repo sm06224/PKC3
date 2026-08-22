@@ -524,6 +524,14 @@ export class DetailRenderer {
          *   (押せるのに本文が変わらないと「チェックしたのに消えた」になる)。
          */
         interactiveTasks: true,
+        /**
+         * 🔴 **押した行を原文の行で焼く**(N1)。この面は `fm.body`(frontmatter を
+         * 剥がした本文)を描くが、受け手(`body-rewrite.ts`)は**原文**を splice する。
+         * ⚠ 渡さないと、**frontmatter の行数だけ上の別の行**が書き換わる ──
+         *   押した項目と違う所に印が付く、静かなデータ破壊になる。
+         * 🔑 ずらす値は live editor(`startLine + fmLines`)と**同じ 1 つ**。
+         */
+        taskLineOffset: frontmatterLineCount(body),
       };
       /**
        * 🔴 **読む面もワーカーで描く**(2026-08-06。user 報告 2-8)。
