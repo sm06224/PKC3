@@ -150,6 +150,40 @@ const WORKDIR = `(() => {
   } catch (e) { return { err: String(e).slice(0, 80) }; }
 })()`;
 
+/**
+ * 🔴 **一時ファイルの置き場を見る**(#225、2026-08-23)。
+ *
+ * 上流 `sfx2/source/doc/objstor.cxx:1587` / `:1623` は、**保存先が ODF でないとき**
+ * だけ `CreateTempFileNoCopy()` を通る。実測は「非 ODF 3/3 が落ち、ODF 1/1 が通る」で
+ * この分かれ目と一致した ── 🔑 **一致は因果の証拠ではない**ので、
+ * 「一時ファイルが作られたか」を直接見て、作成の側か**その先**かを割る。
+ *
+ * ⚠ 名前は出さない(機密資料の取り扱い 1)── 大きさだけで「増えたか」は言える。
+ * ⚠ `/tmp` が無い場合は `{ err }` を返す ── **空配列にしない**
+ *   (空だと「作られなかった」と読めてしまうが、「置き場が無い」は別の話である)。
+ */
+const TMPDIR = `(() => {
+  const lo = window.__lo;
+  if (!lo || !lo.FS) return null;
+  try {
+    let files = 0; let dirs = 0; let bytes = 0;
+    const walk = (path, depth) => {
+      if (depth > 3) return;
+      for (const n of lo.FS.readdir(path)) {
+        if (n === '.' || n === '..') continue;
+        const full = path + '/' + n;
+        let st = null;
+        try { st = lo.FS.stat(full); } catch (e) { continue; }
+        // ⚠ MEMFS はディレクトリも size を返す(4096)── mode で分ける
+        if (lo.FS.isDir(st.mode)) { dirs += 1; walk(full, depth + 1); }
+        else { files += 1; bytes += st.size; }
+      }
+    };
+    walk('/tmp', 0);
+    return { files: files, dirs: dirs, bytes: bytes };
+  } catch (e) { return { err: String(e).slice(0, 80) }; }
+})()`;
+
 /** 窓の題名 ── ⚠ **数ではなく個体**で見る(増減が相殺する。2026-08-14 の教訓)。 */
 const WINDOWS = `(() => {
   const out = [];
@@ -279,6 +313,7 @@ try {
     at,
     stat: await page.evaluate(STAT),
     work: await page.evaluate(WORKDIR),
+    tmp: await page.evaluate(TMPDIR),
     windows: (await page.evaluate(WINDOWS)).map((t) => t.length),
     saved: (await page.evaluate('globalThis.__saved || []'))
       .map((s) => ({ key: s.key, size: s.size })),
@@ -332,7 +367,25 @@ try {
 
   // 本命: Ctrl+S(既存 path への上書き ── ダイアログは出ないはず)
   await page.keyboard.press('Control+s');
-  await page.waitForTimeout(12000);
+  /**
+   * 🔴 **短命な一時ファイルを取り逃がさない**(#225)。
+   *
+   * ⚠ 12 秒おきの標本では、作られてすぐ消えた一時ファイルは**存在しなかったのと
+   * 同じに見える**(`MediumTempFile` は `EnableKillingFile()` 済みで、失敗すると
+   * デストラクタが消す)。🔑 押した直後だけ **500ms 刻み**で数え、
+   * **その窓で見た最大**を採る ── 「一度でも増えたか」はこれで言える。
+   */
+  const burst = [];
+  for (let i = 0; i < 24; i += 1) {
+    burst.push(await page.evaluate(TMPDIR));
+    await page.waitForTimeout(500);
+  }
+  const counts = burst.map((b) => (b && typeof b.files === 'number' ? b.files : null));
+  result.tmpBurst = {
+    seen: counts,
+    max: counts.some((c) => c === null) ? null : Math.max(...counts),
+    min: counts.some((c) => c === null) ? null : Math.min(...counts),
+  };
   result.steps.push(await snap('Ctrl+S の 12 秒後'));
   result.afterSaveFrames = await frames();
   // ⚠ 版面が動いたか(書式を訊く小窓が出ると絵が変わる)。窓一覧と突き合わせる

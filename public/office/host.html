@@ -72,13 +72,27 @@
   #restart[hidden] { display:none }
   #restart button { font:inherit; border:1px solid #fff8; background:transparent;
     color:#fff; padding:2px 10px; border-radius:6px; cursor:pointer }
+  /* 「この形式は保存できない」ことを知らせる(#225)。
+     🔑 **2 か所に出す** ── 上部バーの印は**状態**(いつ見ても同じ場所に在る)、
+     下の帯は**開いた瞬間の合図**である。⚠ 帯は閉じられる、印は消えない。
+     ⚠ `#restart`(開き直す)と場所を取り合わないよう、出るときはあちらを畳む。 */
+  #ro { opacity:.85; border:1px solid currentColor; border-radius:4px;
+    padding:0 6px; font-size:11px; margin-left:8px }
+  #ro[hidden] { display:none }
+  #nosave { position:fixed; inset:auto 0 0 0; z-index:13; display:flex; gap:12px;
+    align-items:center; justify-content:center; padding:6px 12px; font-size:13px;
+    background:#333; color:#fff }
+  #nosave[hidden] { display:none }
+  #nosave button { font:inherit; border:1px solid #fff8; background:transparent;
+    color:#fff; padding:2px 10px; border-radius:6px; cursor:pointer }
 </style>
 </head>
 <body>
-<div id="bar"><b>Office</b><span id="name"></span><span class="sp"></span><span id="status">準備中…</span></div>
+<div id="bar"><b>Office</b><span id="name"></span><span id="ro" hidden></span><span class="sp"></span><span id="status">準備中…</span></div>
 <div id="msg">読み込んでいます…</div>
 <div id="warn" hidden></div>
 <div id="restart" hidden></div>
+<div id="nosave" hidden></div>
 <div id="screen" hidden></div>
 <!--
   🔴 **判断は素の JS へ出す**(#205 段 A)。この HTML は bundle されないので、
@@ -89,6 +103,7 @@
 <script src="office-save-watch.js"></script>
 <script src="office-save-stage.js"></script>
 <script src="office-restart-watch.js"></script>
+<script src="office-format.js"></script>
 <script>
 (function () {
   'use strict';
@@ -970,11 +985,52 @@
    */
   var restartEl = document.getElementById('restart');
   var restartWatch = null;
+  var roEl = document.getElementById('ro');
+  var nosaveEl = document.getElementById('nosave');
+
+  /**
+   * 🔴 **保存できない形式だと、押す前に伝える**(#225)。
+   *
+   * 実測(2026-08-23、同じ本文から作った 4 つを同じ腕で): `.odt` は 8,289 → 9,192 B で
+   * 保存でき、`.rtf` / `.doc` / `.docx` は **1 バイトも動かず**「一般的な I/O エラー」。
+   * ⚠ user から見ると **10 分編集してから全部失う**形になる ── いちばん痛い。
+   *
+   * 🔑 **2 か所に出す。** 上部バーの印は**状態**(いつ見ても同じ場所に在る)、
+   * 下の帯は**開いた瞬間の合図**である。⚠ 帯は閉じられる、印は消えない。
+   *
+   * ⚠ **判断は `office-format.js` に在る**(ここは bundle されず unit が届かない)。
+   * ⚠ 名前が無い / 拡張子が無いときは**何も出さない** ── 窓の中で新規に作った文書は
+   *    ODF になるので、そこへ「保存できません」と出すのは嘘である。
+   */
+  function markUnsavable(name) {
+    var F = window.PKC3OfficeFormat;
+    // ⚠ 判断が読めていないなら**黙る** ── 分からないのに断らない
+    if (!F || typeof F.isSavable !== 'function') return;
+    if (F.isSavable(name)) return;
+    var ext = F.extOf(name);
+    roEl.textContent = '保存できません';
+    roEl.title = ext + ' はこの Office では保存できません(読むだけ)';
+    roEl.hidden = false;
+    if (dead || degraded) return;
+    nosaveEl.textContent = '';
+    var what = document.createElement('span');
+    what.textContent = 'この形式(' + ext + ')は、この Office では保存できません。'
+      + ' 読むことはできますが、書いた内容は保存できません。';
+    var close = document.createElement('button');
+    close.textContent = '閉じる';
+    close.addEventListener('click', function () { nosaveEl.hidden = true; });
+    nosaveEl.appendChild(what);
+    nosaveEl.appendChild(close);
+    nosaveEl.hidden = false;
+    say('unsavable-format', { ext: ext });
+  }
 
   function showRestartBand(FS) {
     // ⚠ 事故の帯(`#warn`)が出ているときは重ねない ── あちらのほうが重い話で、
     //    同じ場所に 2 枚出ると下の 1 枚が読めなくなる
     if (dead || degraded || !restartEl.hidden) return;
+    // ⚠ 下端は 1 枚しか置けない ── こちらのほうが「いま押せる」ので、あちらを畳む
+    nosaveEl.hidden = true;
     restartEl.textContent = '';
     var what = document.createElement('span');
     // ⚠ **失うものを先に書く**(`degrade()` と同じ向き)── 押してから知るのでは遅い
@@ -1205,6 +1261,8 @@
         FS.writeFile(path, docBytes);
         args.push(path);
         window.__loDocPath = path;
+        // 🔴 渡した形式が保存できないなら、**押す前に**伝える(#225)
+        markUnsavable(docName);
       }
       // 🔴 **`callMain` の前に積む。** callMain は event loop に入ったまま戻らない
       //    ことがある ── 後ろに置くと**一生積まれない**。

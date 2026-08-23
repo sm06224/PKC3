@@ -90,6 +90,15 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-23-office-format-notice',
+    title: 'Office で保存できない形式を、開いた時点でお知らせします',
+    items: [
+      'Word や Excel の形式(.docx など)を Office で開いて編集し、保存を押すと「一般的な I/O エラー」で失敗していました。編集した内容はそこで失われます。',
+      '開いた時点で画面の下に断りを出し、上の帯にも「保存できません」と印を付けるようにしました。押してから気づくことがなくなります。',
+      'ODF 形式(.odt / .ods / .odp)はこれまでどおり保存できます。実際に測って、保存できる形式だけを「できる」と言っています。',
+    ],
+  },
+  {
     id: '2026-08-23-office-restart',
     title: 'Office で表示言語を変えたとき、開き直す道ができました',
     items: [
@@ -283,21 +292,11 @@ export const NOTICES: readonly Notice[] = [
       '索引が傷んでいるときは作り直します。作り直しても直らないときは索引ごと作り直すので、これで起動できなくなることはありません。',
     ],
   },
-  {
-    id: '2026-08-20-kanban-done-fold',
-    title: 'やることの板で、完了したものを下に畳むようにしました',
-    items: [
-      'やることの板を開いたときに見えるのは、まだ終わっていないものだけになりました。済んだものは下に畳んであります。',
-      '済んだものを見るときは、下の ▸ 完了(3) のところを押してください。もう一度押すと畳みます。',
-      '畳んでいても件数は出ます。黙って消したりはしません。',
-      'チェックを付けた札は、その場で下へ落ちて畳まれます。消えたのではなく、完了の数が 1 つ増えています。',
-    ],
-  },
 ];
 
 /**
  * ⚠ **落としたぶんの原本は CHANGELOG に在る**(上限 20 件を超えたので、古いほうから
  *   `2026-08-16-office-save-to-pkc` / `2026-08-17-office-save-same-note`(2026-08-19)、
  *   `2026-08-19-dual-pane-app`(2026-08-22)、
- *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines`(2026-08-23)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
+ *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
  */
