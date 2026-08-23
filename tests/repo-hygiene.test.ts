@@ -281,6 +281,7 @@ describe('🔒 文書を扱う probe の撮影の口', () => {
    * ここへ足す。⚠ 足さないと下の「全数」検査が落ちる。
    */
   const DOC_PROBES = [
+    'build/office-wasm/doc-open-probe.mjs',
     'build/office-wasm/open-doc-probe.mjs',
     'build/office-wasm/save-existing-probe.mjs',
   ];
