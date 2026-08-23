@@ -407,17 +407,17 @@ describe('文書が開けたかの観測点(#199)', () => {
   const host = readFileSync('public/office/host.html', 'utf-8');
 
   it('⚠ 器の題名を見る診断が在り、器(screenEl)へ絞られている', () => {
-    expect(host, '器の題名を見る関数が無い').toContain('function docTitleSeen(');
+    expect(host, '器の題名を見る関数が無い').toContain('function docOpened(');
     /**
      * 🔑 **名前だけでは足りない** ── host の帯にも file 名は出るので、
      *   `document` 全体を見ると器の外の字で満たされる。器へ絞ること。
      */
-    expect(host, 'docTitleSeen が器(screenEl)へ絞られていない').toMatch(
-      /function docTitleSeen\([\s\S]*?\}\)\(screenEl\)/,
+    expect(host, 'docOpened が器(screenEl)へ絞られていない').toMatch(
+      /function docOpened\([\s\S]*?\}\)\(screenEl\)/,
     );
     // ⚠ 名前と LibreOffice の**両方**が要る(片方だけだと帯や起動直後で真になる)
     expect(host, '判定が名前だけになっている').toMatch(
-      /docTitleSeen[\s\S]*?indexOf\(leaf\)[\s\S]*?LibreOffice/,
+      /docOpened[\s\S]*?indexOf\(leaf\)[\s\S]*?LibreOffice/,
     );
   });
 
@@ -438,26 +438,42 @@ describe('文書が開けたかの観測点(#199)', () => {
       after,
       'canvas が出た時点で数えるのをやめている(上限の枝へ永久に到達しない)',
     ).not.toContain('clearInterval');
-    expect(host, '上限に達しても user に伝えていない').toContain('まだ開いていません');
+    expect(host, '上限に達しても user に伝えていない').toContain('この文書は開けませんでした');
   });
 
   /**
-   * 🔴 **器の題名で user に見える文言を決めない**(2026-08-23、実測で確定)。
+   * 🔴 **開けたら見張りを畳む**(#199、2026-08-23 に実測で昇格)。
    *
-   * ⚠ 測る前の理由は「真になるのを一度も見ていない」だったが、実物のパックで
-   *   測ったら**もっと強い理由**が出た ── `build/office-wasm/doc-open-probe.mjs`
-   *   の対照群で、**`停止` した回でも 24 秒時点で真**だった。
-   *   つまりこの信号で「開いています」と言うと、
-   *   **落ちている LO を開いていると報告する**。
-   * 🔑 だから昇格の条件は「真になるのを見る」ではなく、
-   *   **開いた回と開かない回を分ける観測点を見つけること**である
-   *   (この箱には対照群が無い = 判定不能。CLAUDE.md §4)。
+   * ⚠ **一度これを「昇格させない」と pin したが、根拠が誤りだった。** 拠り所に
+   *   していた自作 probe は**対照群の `.odt` すら開かない**壊れたハーネスで、
+   *   動く計器(`open-doc-probe.mjs`)で測り直したら逆の結果が出た:
+   *
+   *     `.odt`(対照群)  … ✅ 11 秒で検出 / 版面 37,582 B
+   *     VML の docx       … ✅ 13 秒で検出 / 版面 22,333 B
+   *     DrawingML の docx … ❌ 180 秒ずっと偽 / 版面 **9,916 B**
+   *
+   * 🔑 見るのは**構造**である ── 開けたら `clearInterval` して、
+   *   36 秒の枝が**開いた回に走らない**こと。⚠ 畳まないと、確かめ済みの
+   *   「表示中 (N 秒)」を 36 秒後に上書きする(昇格を急いで smoke を 2 件
+   *   落としたのが、まさにこの形だった)。
    */
-  it('🔴 器の題名で文言を決めない(落ちている LO を「開いた」と言わない)', () => {
-    const at = host.indexOf('docTitleSeen(docLeaf)');
-    expect(at, '前提: 診断の呼び出しを見つけられていない').toBeGreaterThan(0);
-    const branch = host.slice(at, at + 200);
-    expect(branch, '器の題名で user に見える文言を決めている').not.toContain('setStatus');
-    expect(branch, '診断を出していない(通ったことを次の回転で読めない)').toContain("say('doc-title'");
+  it('🔴 開けたら見張りを畳む(開いた回に 36 秒の枝が走らない)', () => {
+    const at = host.indexOf('docOpened(docLeaf)');
+    expect(at, '前提: 判定の呼び出しを見つけられていない').toBeGreaterThan(0);
+    const branch = host.slice(at, at + 600);
+    expect(branch, '開けたことを次の回転で読めない').toContain("say('doc-open'");
+    expect(branch, '開けても畳んでいない(36 秒の枝が開いた回にも走る)').toContain(
+      'clearInterval(tick)',
+    );
+  });
+
+  /**
+   * 🔴 **開かなかったときは「まだ」と言わない**(同日)。
+   * ⚠ 実測では、36 秒で偽の文書は**その後 180 秒まで一度も開かなかった** ──
+   *   「まだ開いていません」は user を待たせるだけである。
+   */
+  it('🔴 36 秒の枝は「開けませんでした」と言う(「まだ」で待たせない)', () => {
+    expect(host, '開けなかったことを言っていない').toContain('この文書は開けませんでした');
+    expect(host, '待たせる古い文言が残っている').not.toContain('まだ開いていません');
   });
 });
