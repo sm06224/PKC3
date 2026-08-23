@@ -1548,3 +1548,61 @@ test('🔴 表示言語を変えたら、開き直す導線を出す', async ({ 
   await expect(page.locator('#restart')).toContainText('保存していない変更は失われます');
   await expect(page.locator('#restart button'), '押す先が無い').toHaveText('開き直す');
 });
+
+/**
+ * 🔴 **保存できない形式は、押す前に伝える**(#225)。
+ *
+ * 実測(2026-08-23、同じ本文から作った 4 つを同じ腕で): `.odt` は 8,289 → 9,192 B で
+ * 保存でき、`.rtf` / `.doc` / `.docx` は **1 バイトも動かず**「一般的な I/O エラー」。
+ * ⚠ user から見ると **編集してから全部失う**形になる。
+ *
+ * ⚠ 判断(どの形式が保存できるか)は `office-format.js` の unit が守っている。
+ * 🔑 ここが守るのは**配線**である ── 判断が正しくても窓が呼んでいなければ届かない。
+ * 🔴 **対照群(`.odt`)を必ず置く** ── 何にでも出る帯なら、この検査は何も言っていない。
+ */
+async function openWithDoc(
+  page: import('@playwright/test').Page,
+  name: string,
+): Promise<void> {
+  await page.goto('/office/host.html');
+  await seedFakePack(page);
+  await page.addInitScript((docName) => {
+    const ch = new BroadcastChannel('pkc3-office');
+    ch.onmessage = (ev: MessageEvent): void => {
+      const d = ev.data as { pkc3Office?: string };
+      if (d?.pkc3Office !== 'ready-for-document') return;
+      ch.postMessage({
+        pkc3Office: 'document',
+        payload: { name: docName, bytes: new TextEncoder().encode('PKC3'), token: 'lid-TEST' },
+      });
+    };
+  }, name);
+  await page.goto(`/office/host.html?name=${encodeURIComponent(name)}&await-doc=1`);
+  await expect(page.locator('#status')).toContainText('表示中', { timeout: 15_000 });
+  // 空振り防止 ── 文書が実際に流し込まれたか(流れていなければ何も検査できない)
+  expect(
+    await page.evaluate(() => (window as unknown as { __loDocPath?: string }).__loDocPath),
+    '文書が流し込まれていない ── この test は配線を検査できていない',
+  ).toBe(`/work/${name}`);
+}
+
+test('🔴 保存できない形式(.docx)は、開いた時点で伝える', async ({ page }) => {
+  await openWithDoc(page, 'a.docx');
+  // 帯 ── 開いた瞬間の合図(閉じられる)
+  await expect(page.locator('#nosave'), '保存できない形式なのに帯が出ない').toBeVisible();
+  await expect(page.locator('#nosave')).toContainText('保存できません');
+  await expect(page.locator('#nosave')).toContainText('.docx');
+  // 印 ── 状態(いつ見ても同じ場所に在る)
+  await expect(page.locator('#ro'), '上部バーの印が出ていない').toBeVisible();
+
+  // 🔑 帯は閉じられる / ⚠ **印は消えない**(状態は残る)
+  await page.locator('#nosave button').click();
+  await expect(page.locator('#nosave')).toBeHidden();
+  await expect(page.locator('#ro'), '帯を閉じたら印まで消えている').toBeVisible();
+});
+
+test('🔴 対照群 ── 保存できる形式(.odt)では何も出さない', async ({ page }) => {
+  await openWithDoc(page, 'a.odt');
+  await expect(page.locator('#nosave'), '保存できるのに断りが出ている').toBeHidden();
+  await expect(page.locator('#ro'), '保存できるのに印が出ている').toBeHidden();
+});
