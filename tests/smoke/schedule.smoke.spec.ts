@@ -80,3 +80,67 @@ test('🔴 予定のタブで札を掴んで日へ落とすと、本文の日付
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **点が付いても、升目の高さが動かない**(#303 から持ち越した唯一の主張)。
+ *
+ * ## なぜ持ち越すのか
+ *
+ * cowork 実機レポート #15「**同じ座標を 2 回押すと別の日に当たる**」── 旧カレンダーは
+ * 予定を `td` の直下に積んでいたので、1 件入るごとにその週の内在高が増え、
+ * **下の行が押し下がって**いた(実測で週の上端が最大 53px ずれた)。
+ * ⚠ 小さな月では**升目が落とし先そのもの**なので、ずれると
+ * **別の日へ落ちる = データが黙って動く**。#303 より悪い。
+ *
+ * ## ⚠ ここは「規則が在るか」ではなく「実寸が同じか」を見る
+ *
+ * 1 稿目は CSS を構文で読み、点の `::after` が `position: absolute` であることを
+ * pin した。⚠ **測ったら、その規則は no-op だった** ── 点は 3px で、升目の
+ * 行ボックス(11px × line-height 1.4)より小さいので、流れの中に置いても
+ * 高さを押し広げない(実測: 絶対配置でも静的でも **26px / 26px**)。
+ * 🔑 だから守るべきは規則の綴りではなく**高さが揃っていること**である
+ * (CLAUDE.md「『これが無いと壊れる』と書く前に、外して壊れるのを見る」)。
+ * ⚠ この形なら、将来「件数の数字を出す」ような**本当に押し広げる変更**を捕まえる
+ *   ── 旧カレンダーが実際にそれで壊れた。
+ */
+test('🔴 予定のある日とない日で、小さな月の升目の高さが同じ', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+
+  await createEntry(page, 'text');
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill(
+      ['- [ ] 予定 A @2026-08-25', '- [ ] 予定 B @2026-08-25 09:00', '- [ ] 予定 C @2026-08-25 14:00'].join(
+        '\n',
+      ),
+    );
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await clickReal(page, '[data-pkc-browse="schedule"]');
+
+  // ⚠ **前提** ── 点が付いた日が実在する(付いていなければ何も検めていない)
+  const dotted = page.locator('[data-pkc-drop-date="2026-08-25"][data-pkc-has]');
+  await expect(dotted, '予定のある日に点が付いていない(前提が崩れている)').toBeVisible({
+    timeout: 20_000,
+  });
+
+  const heights = await page.evaluate(() => {
+    const cells = [...document.querySelectorAll('[data-pkc-field="schedule-week"] > button')];
+    const has = cells.filter((c) => c.hasAttribute('data-pkc-has'));
+    const bare = cells.filter((c) => !c.hasAttribute('data-pkc-has'));
+    const h = (el: Element): number => +el.getBoundingClientRect().height.toFixed(2);
+    return { has: has.map(h), bare: bare.map(h) };
+  });
+  // ⚠ **空振り防止** ── 両側に升目が在ること(片側が 0 件だと下の比較は空回り)
+  expect(heights.has.length, '点の付いた升目が 0 件').toBeGreaterThan(0);
+  expect(heights.bare.length, '点の無い升目が 0 件').toBeGreaterThan(0);
+  // 🔑 **全部が同じ高さ**(点の有無で分かれていないこと)
+  const all = [...heights.has, ...heights.bare];
+  expect(
+    new Set(all).size,
+    `升目の高さが揃っていない(落とし先がずれる): ${JSON.stringify(heights)}`,
+  ).toBe(1);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

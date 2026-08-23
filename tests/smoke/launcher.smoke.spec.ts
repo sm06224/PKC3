@@ -1075,10 +1075,14 @@ test('🔴 組み込みタイルを押すと別窓が開き、本文の面は残
    *   user はさっきまで読んでいたノートを**探し直す**ことになる。
    * 🔑 観測点は**アドレスに載っていること**ではなく(それは③で見た)、
    *   **その窓が実際にそのノートを選んでいること**である。
+   * ⚠ **選択の印は面によって違う**(2 ペインの表は `data-pkc-selected` を
+   *   持たない)ので、面に依らない所で見る ── **右の列(情報)の題名**は
+   *   `selectedLid` から塗られるので、どの面でも同じ観測点になる。
    */
-  await expect
-    .poll(() => win.locator('[data-pkc-entry][data-pkc-selected]').count(), { timeout: 10_000 })
-    .toBeGreaterThan(0);
+  await expect(
+    win.locator('[data-pkc-field="inspector-title"]'),
+    '読んでいたノートを置いてきた(別窓が空で立ち上がった)',
+  ).not.toBeEmpty({ timeout: 10_000 });
 
   /**
    * 🔑 **合図はアドレスから消えている**(段③ の直し)── ブックマークに

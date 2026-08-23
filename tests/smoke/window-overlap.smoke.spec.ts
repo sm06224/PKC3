@@ -30,6 +30,8 @@ import { clickReal, collectPageErrors, createEntry, gotoApp, useSplitEditor } fr
  * (同じ主張を 2 か所で見ると、片方を壊しても気づけない)。
  */
 test('🔴 別窓が同じノートを書いたら、保存時に理由が出る (#178)', async ({ page, context }) => {
+  // ⚠ **PKC の boot を 2 回通す**(本体 + 2 枚目)ので、既定の 30 秒では足りない
+  test.setTimeout(90_000);
   const errors = collectPageErrors(page);
   await useSplitEditor(page);
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -38,11 +40,12 @@ test('🔴 別窓が同じノートを書いたら、保存時に理由が出る
   // ノートを 1 件作って保存(作った直後は選ばれている)
   await createEntry(page, 'text');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
-  // 🔑 **窓 2 枚目**を、同じノートを指すディープリンクで開く(#300 段②)
-  const link = await page.evaluate(() => location.href);
+  // 🔑 **窓 2 枚目**を開き、user と同じ手で同じノートを選ぶ
+  // ⚠ ノートは 1 件しか作っていないので、先頭の行がそれである
   const win = await context.newPage();
-  await win.goto(link);
+  await win.goto('/');
   await expect(win.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+  await win.locator('[data-pkc-entry]').first().click();
   // ⚠ **前提** ── 2 枚目が同じノートを選んでいる。選べていないと、この窓は
   //    日付を付けられないので test が成り立たない
   await expect(

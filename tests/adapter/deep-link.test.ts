@@ -21,6 +21,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import {
+  MOVED_MESSAGE,
   announceOpenedWindow,
   connectViewDeepLink,
   currentBaseUrl,
@@ -60,6 +61,8 @@ function bench(hash: string) {
   const holds: Array<ViewMode | null> = [];
   const off = connectViewDeepLink({
     openView: (mode) => actions.push(`open:${mode}`),
+    // 🔴 **引っ越した面の受け皿**(#292 段⑤)── 左の列のタブ
+    openBrowse: (mode) => actions.push(`browse:${mode}`),
     selectEntry: (containerId, lid) => {
       selects.push({ containerId, lid });
       actions.push(`select:${lid}`);
@@ -281,6 +284,100 @@ describe('起動時のディープリンク(#300 段②)', () => {
  * 日付を付けられない**。user は「カレンダーで日付を付けたい」から押したので、
  * これは動線が**目的の手前で切れている**形である(動線レビュー §1)。
  */
+/**
+ * 🔴 **引っ越した面の栞を、引っ越し先へ送る**(#292 段⑤、2026-08-23)。
+ *
+ * ## user から見た物語
+ *
+ * カレンダーを開いた状態でブックマークしていた。更新して、それを開く。
+ * ⇒ 直す前:「画面名は detail / query / … のどれかです」だけが出る。
+ *   ⚠ **どこへ移ったかを知っているのは実装した本人だけ**なので、user は探せない。
+ * ⇒ いま:**左の列の「予定」が開き、どこへ移ったかが画面の下に出る。**
+ *
+ * ## ⚠ この describe が在るのは、変異試験が教えたからである
+ *
+ * 段⑤ の変異試験 N3(`MOVED_VIEWS` から `calendar` を落とす)が **SURVIVED** した
+ * ── 引っ越しの機構を見ている unit が **1 件も無かった**。
+ * 🔑 実装した当日に test を書かなかった、が原因である(smoke は在ったが、
+ *   smoke は `dist` 経由なので変異試験の輪から外れる)。
+ */
+describe('引っ越した面の栞(#292 段⑤)', () => {
+  const t = (hash: string): DeepLinkTarget => ({
+    hash,
+    clearHash: () => {},
+    dropToken: () => {},
+  });
+
+  /**
+   * ⚠ **全数を当てる**(組み合わせが有限なら全部 ── CLAUDE.md)。
+   * 🔑 表に足したのに配線しない、を止める。
+   */
+  it('🔴 引っ越した名前は、引っ越し先を返す(断らない)', () => {
+    for (const name of ['calendar', 'kanban']) {
+      expect(readViewDeepLink(t(`#pkc?view=${name}`)), `${name} の栞が死んでいる`).toEqual({
+        moved: 'schedule',
+      });
+    }
+  });
+
+  /**
+   * ⚠ **空振り防止** ── 「何でも `moved` を返す」実装でも上は通る。
+   *   生きている面と、そもそも無い名前を対照群に置く。
+   */
+  it('⚠ 対照群 ── 生きている面はそのまま、知らない名前は断る', () => {
+    expect(readViewDeepLink(t('#pkc?view=query'))).toEqual({ view: 'query' });
+    expect(readViewDeepLink(t('#pkc?view=zzz'))).toEqual({ unusable: true });
+  });
+
+  /**
+   * 🔴 **表は `isOpenable` より先に見る。**
+   * ⚠ `VIEW_MODES` から名前を消した以上、順番を入れ替えると
+   *   **引っ越しの枝に届く前に「使えない名前」として弾かれる**
+   *   (= 栞が死ぬ)── だから順番そのものを pin する。
+   * 🔑 見る形は「開ける面の一覧に**出ていない**のに、送り先が返ること」である。
+   */
+  it('🔴 引っ越した名前は開ける面の一覧に出ないが、栞としては生きている', () => {
+    for (const name of ['calendar', 'kanban']) {
+      expect(openableViewNames(), `${name} が開ける面として残っている`).not.toContain(name);
+      expect(readViewDeepLink(t(`#pkc?view=${name}`)), `${name} が断られた`).toHaveProperty(
+        'moved',
+      );
+    }
+  });
+
+  it('🔴 左の列のタブを開き、どこへ移ったかを出し、断片は消す', () => {
+    const b = bench('#pkc?view=calendar');
+    expect(b.actions, '引っ越し先を開いていない').toEqual(['browse:schedule', 'fail']);
+    expect(b.failed(), 'どこへ移ったか言っていない').toBe(MOVED_MESSAGE);
+    expect(b.failed(), '移った先の名前が文に無い').toContain('予定');
+    // ⚠ 断片は残さない(読み直しのたびに同じ案内が出る)
+    expect(b.cleared(), '使えない断片が残っている').toBe(1);
+    expect(b.hash()).toBe('');
+    b.off();
+  });
+
+  /**
+   * 🔴 **中央の面は 1 ミリも触らない**(引っ越しの理由そのもの)。
+   * ⚠ ここで `openView` を撃つと、栞から開いた人だけ**本文が消える**
+   *   ── #300 で名指しされた実害が、栞の経路にだけ残ることになる。
+   */
+  it('🔴 中央の面は開かない(本文を占有しない)', () => {
+    const b = bench('#pkc?view=kanban');
+    expect(
+      b.actions.filter((a) => a.startsWith('open:')),
+      '中央の面を開いた(引っ越しの理由と正面から逆)',
+    ).toEqual([]);
+    b.off();
+  });
+
+  /** 🔑 連れてきたノートは、引っ越し先でも選ばれる(段③ と同じ約束)。 */
+  it('連れてきたノートは、引っ越し先でも選ぶ', () => {
+    const b = bench('#pkc?container=c1&entry=e7&view=calendar');
+    expect(b.selects, 'ノートを置いてきた').toEqual([{ containerId: 'c1', lid: 'e7' }]);
+    b.off();
+  });
+});
+
 describe('連れてきたノートを選ぶ(#300 段③)', () => {
   it('🔴 `container` と `entry` が揃っていたら、面より先に選ぶ', () => {
     const b = bench('#pkc?container=c1&entry=e7&view=query');

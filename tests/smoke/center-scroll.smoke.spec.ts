@@ -15,18 +15,19 @@ import { clickReal, collectPageErrors, createEntry, gotoApp, openViewPane, useSp
  * | | scrollHeight | scrollTop |
  * |---|---|---|
  * | 本文 | 9651 | 1000 |
- * | **カレンダーを開いている間** | **626**(= clientHeight) | **0 に丸められる** |
+ * | **短い面を開いている間** | **626**(= clientHeight) | **0 に丸められる** |
  * | 本文へ戻った後 | 9651 に戻る | **0 のまま** |
  * | ヘルプを開いている間 | 4039 | 1000(**長いので偶然残る**) |
  *
  * ⚠ **ヘルプで残るのは偶然**である(マニュアルが長いだけ)── だから
- *   「ヘルプは大丈夫」を根拠にしない。短い面(カレンダー)で見る。
+ *   「ヘルプは大丈夫」を根拠にしない。**短い面**で見る
+ *   (⚠ 当時はカレンダー。#292 段⑤ で落ちたので集計へ替えた ── 見ている主張は同じ)。
  *
  * ⚠ **戻しはワーカーの後に来る** ── 本文はワーカーで描くので、面を入れ替えた
  *   直後に戻しても中身がまだ無く、また丸められる(実測:400ms 待っても 0)。
  *   `CenterRouter.restoreScroll` が届くまで数フレーム粘る。
  */
-test('🔴 カレンダーを開いて戻ると、読んでいた場所に戻る (U-4)', async ({ page }) => {
+test('🔴 短い面を開いて戻ると、読んでいた場所に戻る (U-4)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await useSplitEditor(page);
   await page.setViewportSize({ width: 1440, height: 900 });
