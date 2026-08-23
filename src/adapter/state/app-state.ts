@@ -578,6 +578,12 @@ export type UserAction =
    */
   | { type: 'SET_ENTRY_DATE'; lid: string; date: string | null }
   /**
+   * 🔴 **本文の 1 行の日付**(双方向。user 指示 2026-08-23)。
+   * ⚠ `SET_ENTRY_DATE`(ノート 1 件が丸ごと予定)とは**単位が違う**。
+   * ⚠ `date: null` は予定から外す。
+   */
+  | { type: 'SET_TASK_DATE'; lid: string; line: number; date: string | null; time?: string | null }
+  /**
    * 🔴 **チェックの印を付け外しする**(#277)。`line` は**原文の行番号**。
    * ⚠ 索引(何番目のチェックか)ではなく**行**で指す ── 索引だと、数え方が
    *   描画側と原文側で 1 つでもずれた瞬間に**別の行を書き換える**。
@@ -1878,6 +1884,36 @@ function reduceCore(
       if (action.gen !== state.lockGen) return { state, events: [] };
       // 失敗は非致命。理由は effect が OP_FAILED で別に出す(phase は落とさない)
       return { state: { ...state, writeLock: null, error: action.error }, events: [] };
+    }
+    /**
+     * 🔴 **面から予定を動かす**(user 指示 2026-08-23「なんで双方向にする発想が
+     * でねぇんだよ」)。⚠ `TOGGLE_TASK` と**同じ形** ── 書換は 1 本
+     * (`REQUEST_BODY_REWRITE`)を通り、面が独自の書込経路を持たない(§7)。
+     * ⚠ `date: null` は**外す**(予定から落とす。消すのではない)。
+     */
+    case 'SET_TASK_DATE': {
+      // ready 限定(編集中の裏書換を作らない)。未知 lid は no-op
+      if (state.phase !== 'ready') return { state, events: [] };
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            rewrite: {
+              kind: 'line-date',
+              line: action.line,
+              date: action.date,
+              ...(action.time === undefined ? {} : { time: action.time }),
+            },
+          },
+        ],
+      };
     }
     case 'TOGGLE_TASK': {
       // ready 限定(編集中の裏書換を作らない)。未知 lid は no-op

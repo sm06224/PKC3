@@ -13,6 +13,7 @@
  *   effect 層が持つ。⚠ 純関数なので unit で全部試せる。
  */
 import { spliceFrontmatterKeys, type FrontmatterValue } from './frontmatter';
+import { formatLineDate, insertionForLineDate, readLineDate } from '../schedule/line-date';
 
 /** 何をするか。⚠ **やり直せる形で持つ**(未達 commit との合流に要る)。 */
 export type BodyRewrite =
@@ -25,6 +26,26 @@ export type BodyRewrite =
       /** チェックの印を反転する。`line` は**原文の行番号**(0 始まり)。 */
       kind: 'task';
       line: number;
+    }
+  | {
+      /**
+       * 🔴 **その行の日付を書き換える**(user 指示 2026-08-23「**なんで双方向に
+       * する発想がでねぇんだよ**」)。
+       *
+       * ⚠ 1 稿目の設計は「予定は本文に書く。**面はそれを映すだけ**」だったが、
+       *   **面から書けなくする理由がどこにも無かった** ── しかも同じ面の
+       *   **チェックの印は既に本文へ書いている**(`kind: 'task'`)。
+       *   日付だけ読み取り専用にする理屈は無い。
+       * 🔑 正本が本文であるとは「**面が別のデータを持たない**」ということであって、
+       *   「面が書かない」ということではない。
+       *
+       * ⚠ `date: null` は**日付を外す**(「日付なし」へ落とす)。
+       */
+      kind: 'line-date';
+      line: number;
+      date: string | null;
+      /** ⚠ `date` が `null` なら無視される。 */
+      time?: string | null;
     };
 
 /**
@@ -57,6 +78,7 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
     const next = spliceFrontmatterKeys(body, rewrite.keys);
     return next === body ? null : next;
   }
+  if (rewrite.kind === 'line-date') return rewriteLineDate(body, rewrite);
   const lines = body.split('\n');
   const line = lines[rewrite.line];
   if (line === undefined) return null;
@@ -70,6 +92,56 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
    */
   const at = m[1]!.length + 1; // `[` の次
   lines[rewrite.line] = line.slice(0, at) + (checked ? ' ' : 'x') + line.slice(at + 1);
+  return lines.join('\n');
+}
+
+/**
+ * 🔴 **1 行の日付を書き換える**(面から予定を動かす ── 双方向の実体)。
+ *
+ * ⚠ **チェック項目の行だけ**を書き換える。散文の行に日付を挿さない ──
+ *   盤面に出ているのはチェック項目だけなので、それ以外の行を触る道が無い。
+ *   ⚠ そして行番号は**描いた時**のものなので、ずれていたら `null` を返して
+ *   **当てずっぽうで別の行を書き換えない**(`kind: 'task'` と同じ作法)。
+ *
+ * ⚠ **原文を splice する**(行を組み直さない)── 組み直すと
+ *   `-   [ ]  やること` のような空白の入れ方が勝手に整形される。
+ */
+function rewriteLineDate(
+  body: string,
+  rewrite: { line: number; date: string | null; time?: string | null },
+): string | null {
+  const lines = body.split('\n');
+  const line = lines[rewrite.line];
+  if (line === undefined) return null;
+  if (!TASK_LINE.test(line)) return null;
+  const found = readLineDate(line);
+  let next: string;
+  if (rewrite.date === null) {
+    // 日付を外す。⚠ 元から無ければ**何も起きていない**
+    if (found === null) return null;
+    const before = line.slice(0, found.start);
+    const after = line.slice(found.end);
+    /**
+     * ⚠ **区切りに置いた空白 1 つだけを戻す。**
+     * 🔑 両側が空白のときだけ 1 つ落とす ── 落とさないと空白が 2 つ空き、
+     *   落としすぎると `- [ ]` の印と中身がくっつく(**行の意味が変わる**)。
+     */
+    next =
+      /[ \t]$/.test(before) && (after === '' || /^[ \t]/.test(after))
+        ? before.slice(0, -1) + after
+        : before + after;
+  } else if (found === null) {
+    // 日付を付ける。⚠ 区切りの空白は `insertionForLineDate` 1 か所が決める(§7)
+    next = line + insertionForLineDate(line, rewrite.date, rewrite.time);
+  } else {
+    // 日付を差し替える。⚠ **記法の範囲だけ**を入れ替える(前後の字は 1 バイトも動かさない)
+    next =
+      line.slice(0, found.start) +
+      formatLineDate(rewrite.date, rewrite.time) +
+      line.slice(found.end);
+  }
+  if (next === line) return null;
+  lines[rewrite.line] = next;
   return lines.join('\n');
 }
 
