@@ -111,6 +111,8 @@ try {
      */
     if (groups.length === 0)
       return { error: '予定の束が 1 つも無い ── 面が描かれていないか、観測点が変わった', scheduleShown };
+    /** ⚠ どの日に散ったか(束が潰れたときに「何日ぶんか」が読めるように出す)。 */
+    const groupDates = groups.map((g) => g.getAttribute('data-pkc-drop-date'));
     if (!cardsCame)
       return { error: '札が 1 枚も立たない ── 走査が返っていないか、本文に日付つきの項目が無い', scheduleShown };
     const host = groups[0].querySelector('[data-pkc-region="schedule-cards"]');
@@ -178,6 +180,7 @@ try {
       cardsReadyMs,
       cardCount,
       groupCount: groups.length,
+      groupDates,
       /** ⚠ 上限で切ったか(切っていたら `cardCount` は「全部」ではない)。 */
       truncated: scan?.truncated ?? null,
       scannedNotes: scan?.scannedNotes ?? null,
@@ -199,7 +202,11 @@ try {
     result.scheduleWasHidden &&
     result.scheduleShown &&
     result.cardCount > 0 &&
-    result.groupCount > 1 &&
+    // 🔴 **束が 1 つへ潰れていないこと**(fixture の次元を test 自身が見張る)。
+    //    ⚠ fixture は 4 日ぶんに散らしてある(25 / 26 / 27 / 28)── 2026-08-23 に
+    //      「3 日に散らした」つもりで 2 日にしか散っていない fixture を書いたので、
+    //      ここで数を見る(CLAUDE.md「ゼロ件の次元は測っていない次元」)
+    result.groupCount >= 3 &&
     result.moved &&
     result.othersIntact &&
     result.hostSameNode &&
