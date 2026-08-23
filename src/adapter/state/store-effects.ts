@@ -41,6 +41,11 @@ export interface StorePort {
    */
   searchEntries?(query: string): Promise<string[]>;
   /**
+   * 🔴 このノートを参照しているノート(#348)。⚠ **optional** ── 古い worker が
+   * service worker のキャッシュに残っている端末では未知の op になる。
+   */
+  findBacklinks?(lid: string): Promise<{ lids: string[]; truncated: boolean }>;
+  /**
    * 集計(#184)。⚠ **省略可** ── 持たない環境(test の fake / 旧い配線)では
    * 面が「この版では数えられません」と断るだけで、他は壊れない。
    * ⚠ 返るのは**束ねた結果**だけで、本文は 1 バイトも渡らない。
@@ -289,6 +294,29 @@ export function connectStoreEffects(
           () => {
             /* ⚠ 検索の失敗で帯を出さない ── 題名の絞り込みは効いたままで、
                user の操作は止まっていない(黙って減るのは「増えない」方向) */
+          },
+        );
+        break;
+      }
+      /**
+       * 🔴 **このノートを参照しているのはどれか**(#348)。
+       * ⚠ **直列 queue に載せない**(検索と同じ)── 選ぶたびに走るので、
+       *   載せると保存・本文読込がその後ろに詰まる。
+       * ⚠ 遅れて返った答えは reducer が `lid` で捨てるので、順序保証は要らない。
+       */
+      case 'REQUEST_BACKLINKS': {
+        const ask = store.findBacklinks;
+        // ⚠ 古い worker(未知の op)では**何も出さない** ── 帯は出さない。
+        //    「参照しているノート」は付随情報で、操作は止まっていない
+        if (!ask) break;
+        const lid = ev.lid;
+        void ask(lid).then(
+          (r) => {
+            if (disposed) return;
+            dispatcher.dispatch({ type: 'BACKLINKS_LOADED', lid, ...r });
+          },
+          () => {
+            /* ⚠ 失敗しても黙る(付随情報なので、user の操作は止まっていない) */
           },
         );
         break;

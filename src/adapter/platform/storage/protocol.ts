@@ -81,6 +81,11 @@ export type StorageRequest =
    */
   | { op: 'searchEntries'; cid: string; query: string; limit?: number }
   /**
+   * 🔴 **このノートを参照しているのはどれか**(#348、user 裁定 2026-08-23)。
+   * ⚠ 探すのは本文の `entry:<lid>` ── ノート間リンクの**唯一の形**である。
+   */
+  | { op: 'findBacklinks'; cid: string; lid: string; limit?: number }
+  /**
    * 🔴 **frontmatter で束ねる**(#184 ── 集計の面)。
    *
    * ⚠ **本文を主スレッドへ運ばない**。束ねるには本文が要るが、`getBodies` で全件を
@@ -425,6 +430,7 @@ export interface ResultMap {
    * 一覧の並びが検索のたびに変わると、user は「どこへ行ったか」を見失う。
    */
   searchEntries: { lids: string[]; truncated: boolean };
+  findBacklinks: { lids: string[]; truncated: boolean };
   /**
    * 集計(#184)── **1 回の走査で目録と表を同時に返す**。
    * ⚠ **捨てた数を返す**(`omittedKeys` / `omittedGroups`)── 黙って切ると

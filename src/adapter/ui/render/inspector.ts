@@ -263,6 +263,43 @@ export class InspectorRenderer {
       }
     }
     /**
+     * 🔴 **このノートを参照しているノート**(#348)。
+     *
+     * ⚠ **「まだ」と「無い」を区別する** ── `null` は引いている最中であって
+     *   0 件ではない。混ぜると「無し」を出したまま結果に追いつかない。
+     * ⚠ 相手は**押せる**(辿れないと、一覧しても行き止まりになる ── 関係と同じ)。
+     * ⚠ **切ったら言う**(黙って切ると user は「これで全部」と読む)。
+     */
+    const backBox = this.rows.get('inspector-backlinks');
+    if (backBox) {
+      backBox.textContent = '';
+      const back = state.backlinks;
+      // ⚠ `null`(まだ引いていない)と `undefined`(その field を持たない state)は
+      //    どちらも「**データが無い**」── 片方だけ見ると、部分的な state で落ちる
+      if (!back || back.lid !== meta.lid) {
+        backBox.textContent = '調べています…';
+      } else if (back.lids.length === 0) {
+        backBox.textContent = '無し';
+      } else {
+        for (const otherLid of back.lids) {
+          const go = document.createElement('button');
+          go.type = 'button';
+          go.setAttribute('data-pkc-action', 'select-entry');
+          go.setAttribute('data-pkc-entry', otherLid);
+          go.setAttribute('data-pkc-field', 'inspector-backlink');
+          // ⚠ 相手が消えていても**黙って空にしない**(関係と同じ言い方)
+          go.textContent = state.entryMetas.get(otherLid)?.title ?? '(見つかりません)';
+          backBox.append(go);
+        }
+        if (back.truncated) {
+          const more = document.createElement('span');
+          more.setAttribute('data-pkc-field', 'inspector-backlinks-more');
+          more.textContent = `ほかにもあります(${back.lids.length} 件まで出しています)`;
+          backBox.append(more);
+        }
+      }
+    }
+    /**
      * 相手の候補。⚠ **出し切れないときは件数を書く**(黙って切らない)。
      * ⚠ 自分自身は候補から外す(張れないものを見せない)。
      */
@@ -416,6 +453,16 @@ export class InspectorRenderer {
      * ⚠ 値は押せる札 + 消すボタンなので、`setRow` ではなく専用の器を持つ。
      */
     row('関係', 'inspector-relations');
+    /**
+     * 🔴 **このノートを参照しているノート**(#348、user 裁定 2026-08-23)。
+     *
+     * ⚠ 上の「関係」と**別物**である ── あちらは user が手で張った辺、
+     *   こちらは**本文に書いたリンク**(`entry:<lid>`)から自動で拾ったもの。
+     *   だから**消すボタンは置かない**(消すには本文のリンクを消す)。
+     * 🔑 **中央の面は奪わない** ── 右の列に置くのは規則どおり
+     *   (`browse.ts` の表:右 = 選んでいるもの)。
+     */
+    row('参照元', 'inspector-backlinks');
     if (shape === 'entry+link') row('元ファイル', 'inspector-linked-file');
     this.region.append(dl);
 

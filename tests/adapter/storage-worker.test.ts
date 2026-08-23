@@ -1464,6 +1464,80 @@ describe('カンバンの札を集める (#277 段②)', () => {
  * ⚠ そして **`listEntryMetas` が返すこと**も併せて見る ── 列に入っていても
  *   SELECT に挙げ忘れると、画面には永久に届かない(数だけ正しくて表示が空)。
  */
+/**
+ * 🔴 **このノートを参照しているのはどれか**(#348、user 裁定 2026-08-23)。
+ *
+ * ⚠ 探すのは本文の `entry:<lid>` ── ノート間リンクの**唯一の形**である。
+ */
+describe('バックリンク (#348)', () => {
+  const link = (lid: string): string => `本文と [その先](entry:${lid}) への参照\n`;
+
+  it('🔴 参照しているノートが返る', async () => {
+    await write('bl-target', '的になるノート\n');
+    await write('bl-from', link('bl-target'));
+    await write('bl-other', '関係の無いノート\n');
+    const r = await request({ op: 'findBacklinks', cid: 'c1', lid: 'bl-target' });
+    expect(r.lids, '参照しているノートが返らない').toEqual(['bl-from']);
+    expect(r.truncated).toBe(false);
+  });
+
+  /** ⚠ **対照群** ── 誰も参照していなければ 0 件(空振り防止)。 */
+  it('⚠ 誰も参照していなければ 0 件', async () => {
+    await write('bl-lonely', 'ひとりぼっち\n');
+    expect((await request({ op: 'findBacklinks', cid: 'c1', lid: 'bl-lonely' })).lids).toEqual([]);
+  });
+
+  /**
+   * 🔴 **`entry:` を前に付けた完全な文字列で探す** ── lid の字だけで探すと、
+   * 本文にたまたま同じ字が在るノートが当たる(#348 の設計判断)。
+   */
+  it('🔴 lid の字が本文に在るだけでは当たらない', async () => {
+    await write('bl-needle', '的\n');
+    await write('bl-mention', '本文に bl-needle と書いてあるだけ(リンクではない)\n');
+    expect((await request({ op: 'findBacklinks', cid: 'c1', lid: 'bl-needle' })).lids).toEqual([]);
+  });
+
+  /** ⚠ **自分自身は外す**(一覧に出しても user は何もできない)。 */
+  it('⚠ 自分へのリンクは出さない', async () => {
+    await write('bl-self', link('bl-self'));
+    expect((await request({ op: 'findBacklinks', cid: 'c1', lid: 'bl-self' })).lids).toEqual([]);
+  });
+
+  /** ⚠ **ゴミ箱の中は出さない**(押しても一覧に無いものへ飛ぶ)。 */
+  it('⚠ ゴミ箱の中からの参照は出さない', async () => {
+    await write('bl-t2', '的\n');
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('bl-trashed', link('bl-t2'), { archived: true }),
+      checkpoint: false,
+    });
+    expect((await request({ op: 'findBacklinks', cid: 'c1', lid: 'bl-t2' })).lids).toEqual([]);
+  });
+
+  /** ⚠ 別の器のノートは混ざらない。 */
+  it('⚠ 別の器のノートは混ざらない', async () => {
+    await write('bl-t3', '的\n');
+    await request({ op: 'openContainer', cid: 'c2' });
+    await request({
+      op: 'upsertEntry',
+      cid: 'c2',
+      entry: entry('bl-elsewhere', link('bl-t3')),
+      checkpoint: false,
+    });
+    expect((await request({ op: 'findBacklinks', cid: 'c1', lid: 'bl-t3' })).lids).toEqual([]);
+  });
+
+  /** 🔴 **切ったら言う**(黙って切ると user は「これで全部」と読む)。 */
+  it('🔴 上限を超えたら、切ったと言う', async () => {
+    await write('bl-hot', '人気のノート\n');
+    for (let i = 0; i < 4; i += 1) await write(`bl-fan-${i}`, link('bl-hot'));
+    const r = await request({ op: 'findBacklinks', cid: 'c1', lid: 'bl-hot', limit: 2 });
+    expect(r.lids).toHaveLength(2);
+    expect(r.truncated, '切ったのに言わない').toBe(true);
+  });
+});
+
 describe('大きさの列(2026-08-19)', () => {
   const charsOf = async (lid: string): Promise<number | null | undefined> =>
     (await request({ op: 'listEntryMetas', cid: 'c1' })).find((m) => m.lid === lid)?.body_chars;
