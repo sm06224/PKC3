@@ -9,8 +9,6 @@
  */
 import type { AppState, ViewMode } from '@adapter/state/app-state';
 import { DetailRenderer, type AssetLender } from './detail';
-import { KanbanRenderer } from './kanban';
-import { CalendarRenderer } from './calendar';
 import { SettingsRenderer } from './settings';
 import { FlagsRenderer } from './flags';
 import { HelpRenderer } from './help';
@@ -21,8 +19,6 @@ import type { MarkdownClient } from '@adapter/platform/render/markdown-client';
 
 type PaneView =
   | 'detail'
-  | 'kanban'
-  | 'calendar'
   | 'query'
   | 'dual'
   | 'settings'
@@ -44,17 +40,15 @@ const ASIDE: ReadonlySet<ViewMode> = new Set<ViewMode>(['settings', 'flags', 'he
  * 中央のビューではなくなったので、ここでは detail へ落ちる。
  */
 function toPane(view: ViewMode): PaneView {
-  // ⚠ 集計(#184)は**ノートを映す面**なので aside ではない ── かんばん /
-  //    カレンダーと同じく、自分の器を持ったまま選択が中に留まる
-  if (view === 'kanban' || view === 'calendar' || view === 'query') return view;
+  // ⚠ 集計(#184)は**ノートを映す面**なので aside ではない ── 自分の器を
+  //    持ったまま選択が中に留まる
+  if (view === 'query') return view;
   return ASIDE.has(view) ? (view as PaneView) : 'detail';
 }
 
 export class CenterRouter {
   private readonly panes: Record<PaneView, HTMLElement>;
   private readonly detail: DetailRenderer;
-  private readonly kanban: KanbanRenderer;
-  private readonly calendar: CalendarRenderer;
   private readonly settings: SettingsRenderer;
   private readonly flags: FlagsRenderer;
   private readonly help: HelpRenderer;
@@ -123,8 +117,6 @@ export class CenterRouter {
     };
     this.panes = {
       detail: pane('detail'),
-      kanban: pane('kanban'),
-      calendar: pane('calendar'),
       query: pane('query'),
       dual: pane('dual'),
       settings: pane('settings'),
@@ -150,8 +142,6 @@ export class CenterRouter {
      *   出すので、渡さないと test が**年を跨いだ日に落ちる**
      *   (CLAUDE.md「『今年』は引数で渡す」)。
      */
-    this.kanban = new KanbanRenderer(this.panes.kanban, now);
-    this.calendar = new CalendarRenderer(this.panes.calendar, now);
     this.query = new QueryRenderer(this.panes.query);
     this.dual = new DualFilerRenderer(this.panes.dual);
     this.settings = new SettingsRenderer(this.panes.settings);
@@ -184,7 +174,6 @@ export class CenterRouter {
     // 🔑 帯は**本文以外のとき**だけ出す(本文は「閉じる」対象ではない)
     this.bar.hidden = view === 'detail';
     if (view === 'detail') this.detail.render(state);
-    else if (view === 'kanban') this.kanban.render(state);
     else if (view === 'query') this.query.render(state);
     else if (view === 'dual') this.dual.render(state);
     else if (view === 'settings') this.settings.render(state);
@@ -192,8 +181,10 @@ export class CenterRouter {
     // ⚠ ヘルプにも**コンテナ id を渡す**(Issue #100 段①)── マニュアルも
     //    この面と同じ document に描かれる文書なので、`pkc://` の扱いを本文と
     //    揃える(渡し忘れると、この面だけ「別の PKC」に見える)
-    else if (view === 'help') this.help.render(state.cid ?? '');
-    else this.calendar.render(state);
+    // ⚠ **最後は本文**(#292 段⑤ でカレンダーを外した)── 面を足したのに
+    //    ここへ足し忘れると、`PaneView` の網羅で tsc が落ちる形にはならないので
+    //    「開いたのに何も描かれない」になる。足したら必ずここにも 1 行足す
+    else this.help.render(state.cid ?? '');
     // ② 🔴 **面が入れ替わったときだけ戻す**(2 手のうち②)。
     if (switched) this.restoreScroll(view);
   }

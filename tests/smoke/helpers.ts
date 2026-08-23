@@ -264,10 +264,7 @@ export async function answerAppDialog(page: Page, answer: 'ok' | 'cancel'): Prom
  * ⚠ **タイルが窓を開くこと自体**は `launcher.smoke.spec.ts` が見る ──
  * こちらで兼ねると「面が出た = タイルが効いた」と誤読する。
  */
-export async function openViewPane(
-  page: Page,
-  view: 'dual' | 'calendar' | 'kanban',
-): Promise<void> {
+export async function openViewPane(page: Page, view: 'dual' | 'query'): Promise<void> {
   /**
    * ⚠ **空振り防止**(着地前レビュー 8、2026-08-22)── **既に開いていたら
    * この helper は何も検めていない**。同じ断片を書いても `hashchange` は飛ばない

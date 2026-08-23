@@ -6,11 +6,17 @@ import { clickReal, collectPageErrors, createEntry, gotoApp, useSplitEditor } fr
  *
  * ## user から見た物語
  *
- * 本文を書いている。⚠ **その隣で、別窓のカレンダーが同じノートに日付を付ける**
+ * 本文を書いている。⚠ **その隣で、別窓の PKC が同じノートに日付を付ける**
  * (#300 段③ で組み込みアプリは既定で別窓になったので、これは特殊な使い方ではない)。
  * そのまま保存すると、日付は上書きされる ── **直す前はそのとき画面に何も出なかった**。
- * user から見えるのは「カレンダーで付けた日付が消えた」だけで、
+ * user から見えるのは「さっき付けた日付が消えた」だけで、
  * **戻せることを知る道が無い**。
+ *
+ * ⚠ **日付を付ける手は替わった**(#292 段⑤、2026-08-23)── 当時はカレンダーの
+ *   日を押していたが、あの面は左の列のタブへ引っ越した。いまの口は
+ *   **右の列(情報)の「日付を付ける」**である。⚠ 守る主張は 1 つも変わらない
+ *   ── 見ているのは「別窓が disk を進めたときに黙らないか」であって、
+ *   どの口から進めたかではない。
  *
  * ## 🔴 unit では原理的に届かない層だけをここで見る
  *
@@ -32,19 +38,17 @@ test('🔴 別窓が同じノートを書いたら、保存時に理由が出る
   // ノートを 1 件作って保存(作った直後は選ばれている)
   await createEntry(page, 'text');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
-  // 🔑 **窓 2 枚目**をアプリの一覧のタイルから開く(user と同じ手)
-  await clickReal(page, '[data-pkc-browse="launcher"]');
-  const popup = context.waitForEvent('page');
-  await clickReal(page, '[data-pkc-action="open-tile"][data-pkc-tile="builtin:calendar"]');
-  const win = await popup;
+  // 🔑 **窓 2 枚目**を、同じノートを指すディープリンクで開く(#300 段②)
+  const link = await page.evaluate(() => location.href);
+  const win = await context.newPage();
+  await win.goto(link);
   await expect(win.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
-  await expect(win.locator('[data-pkc-view-pane="calendar"]')).toBeVisible();
-  // ⚠ **前提** ── 読んでいたノートが連れて来られている(#300 段③)。
-  //    連れて来られていないと、この窓は日付を付けられないので test が成り立たない
+  // ⚠ **前提** ── 2 枚目が同じノートを選んでいる。選べていないと、この窓は
+  //    日付を付けられないので test が成り立たない
   await expect(
-    win.locator('[data-pkc-field="calendar-target"]'),
-    '前提が崩れている(別窓にノートが渡っていない)',
-  ).toContainText('に日付を付けます');
+    win.locator('[data-pkc-action="set-entry-date"]'),
+    '前提が崩れている(2 枚目がノートを選んでいない)',
+  ).toBeVisible({ timeout: 15_000 });
 
   // 本体の窓へ戻って、本文の編集を始めて打鍵する
   // ⚠ 左の列は「アプリ」のままでよい ── 中央の面は本文のままである
@@ -54,18 +58,19 @@ test('🔴 別窓が同じノートを書いたら、保存時に理由が出る
 
   /**
    * 🔴 **別窓が同じノートに日付を付ける**(= disk が進む)。
-   * ⚠ 日付は**画面から読む**(実行月に依存する値を test 側で組まない)。
+   * ⚠ 日は**選ばない** ── 日付欄には開いた時点で今日が入っている(近道の
+   *   いちばん多い答え)ので、そのまま入れれば実行日に依存せず進む。
    */
-  const month = await win
-    .locator('[data-pkc-field="calendar-month"]')
-    .getAttribute('data-pkc-month');
-  expect(month, '月が出ていない').toMatch(/^\d{4}-\d{2}$/);
-  const cell = win.locator(`[data-pkc-date="${month}-15"]`);
-  await cell.locator('[data-pkc-field="day-number"]').click();
+  await win.bringToFront();
+  await clickReal(win, '[data-pkc-action="set-entry-date"]');
+  await expect(win.locator('[data-pkc-field="pick-date"]')).toBeVisible({ timeout: 10_000 });
+  await clickReal(win, '[data-pkc-field="dialog-ok"]');
+  // ⚠ **入ったことを確かめてから先へ進む**(入っていなければ以降は判定不能)──
+  //    「外す」が押せる = frontmatter に `date:` が在る、である
   await expect(
-    cell.locator('[data-pkc-entry]'),
+    win.locator('[data-pkc-action="clear-entry-date"]'),
     '別窓で日付が入っていない(この test の前提が崩れている)',
-  ).toHaveCount(1);
+  ).toBeVisible({ timeout: 15_000 });
 
   /**
    * 🔴 **本体の窓で保存する** ── 打った字は残り、**理由が出る**。

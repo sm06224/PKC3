@@ -74,18 +74,26 @@ describe('封印 ── 畳んであるが、壊してはいない', () => {
     expect(isSealedView('list')).toBe(false);
   });
 
-  it('🔴 描画器と整形関数が生きている(解くときに書き直しにならない)', async () => {
-    // import が通ること自体が観測点 ── 消されていれば解決に失敗して落ちる
-    const [kanbanUi, calendarUi, kanbanData, calendarData] = await Promise.all([
-      import('@adapter/ui/render/kanban'),
-      import('@adapter/ui/render/calendar'),
-      import('@features/kanban/kanban-data'),
-      import('@features/calendar/calendar-data'),
+  /**
+   * 🔴 **2026-08-23 に主張を書き直した**(#292 段⑤)。
+   *
+   * ⚠ ここは「封印した面の描画器が生きている(解くときに書き直しにならない)」を
+   *   見ていたが、**中央のカレンダー / 板そのものが無くなった** ── 予定は
+   *   **左の列の「予定」タブ**になり、描画器は `render/schedule.ts` である。
+   * 🔑 だから見るのは「消されていないこと」ではなく「**引っ越し先が在ること**」。
+   */
+  it('🔴 予定の面と、その材料が生きている', async () => {
+    const [scheduleUi, agenda, kanbanData, calendarData] = await Promise.all([
+      import('@adapter/ui/render/schedule'),
+      import('@features/schedule/agenda'),
+      import('@features/schedule/task-cards'),
+      import('@features/schedule/month-grid'),
     ]);
-    expect(typeof kanbanUi.KanbanRenderer).toBe('function');
-    expect(typeof calendarUi.CalendarRenderer).toBe('function');
-    expect(typeof kanbanData.groupTasksByStatus).toBe('function');
-    expect(typeof calendarData.groupEntriesByDate).toBe('function');
+    expect(typeof scheduleUi.ScheduleRenderer).toBe('function');
+    expect(typeof agenda.buildAgenda).toBe('function');
+    // ⚠ 札の組み立てと月の格子は**引っ越しても同じもの**を使う
+    expect(typeof kanbanData.taskCardsOf).toBe('function');
+    expect(typeof calendarData.getMonthGrid).toBe('function');
   });
 
   it('🔴 封印中の archetype の flavor が登録されたままである(既存 entry が読める)', () => {
@@ -151,52 +159,49 @@ describe('封印 ── 畳んであるが、壊してはいない', () => {
   });
 
   /**
-   * 🔴 **解いたカレンダーには、実際に開ける導線が在る**(#276)。
+   * 🔴 **2 ペインは組み込みタイルから開ける**(#241)。
    *
-   * ⚠ 封印を解くのが「配列から 1 語消す」だけで終わっていないことを見る ──
-   *   `sealed.ts` はまさにそこ(消しても戻らない)を戒めている。
-   * 🔑 観測点は**組み込みタイル**(#241 で確立した形)── 上の帯の切替ではない。
+   * ⚠ カレンダー / やることの板の同じ形の主張は **#292 段⑤ で落とした**
+   *   (2026-08-23)── あの 2 つは「アプリ」ではなく**ノートの見方**だったので、
+   *   タイルではなく**左の列のタブ**が導線になった(上の it が見ている)。
+   * 🔑 タイルに残るのは、**幅が本当に要る** 2 ペインだけである。
    */
-  it('🔴 カレンダーは組み込みタイルから開ける(封印を解いただけで終わっていない)', async () => {
-    const { calendarTile, withBuiltinTiles, tileSelectsEntry } = await import(
+  it('🔴 2 ペインは組み込みタイルから開ける', async () => {
+    const { dualTile, withBuiltinTiles, tileSelectsEntry } = await import(
       '@features/launcher/tiles'
     );
-    expect(isSealedView('calendar'), 'カレンダーがまだ封印されている').toBe(false);
     const tiles = withBuiltinTiles([], { office: false });
-    const cal = tiles.find((t) => t.kind === 'calendar');
-    expect(cal, 'アプリの一覧にカレンダーが出ない(解いただけで導線が無い)').toBeDefined();
-    expect(cal?.title).toBe('カレンダー');
+    const dual = tiles.find((t) => t.kind === 'dual');
+    expect(dual, 'アプリの一覧に 2 ペインが出ない').toBeDefined();
     // ⚠ 組み込みは entry を持たない(存在しない lid を選択に入れない)
-    expect(tileSelectsEntry(calendarTile())).toBe(false);
+    expect(tileSelectsEntry(dualTile())).toBe(false);
+    // 🔴 **引っ越した 2 つは、もうタイルに居ない**(同じものが 2 か所に無い)
+    expect(tiles.map((t) => t.kind), '引っ越した面がタイルに残っている').toEqual(['dual']);
   });
 
   /**
-   * 🔴 **カンバンは組み込みタイルから開ける**(#277 段②-b。カレンダーと同じ形)。
-   * ⚠ 「封印を解く = 配列から 1 語消す」で終わっていないことを見る。
+   * 🔴 **向きは 2 度裏返った。**(#277 段②-b で「復活させたので在るのが正しい」→
+   * #292 段⑤ で「引っ越したので**別の file に在る**のが正しい」)。
+   *
+   * ⚠ 主張の向きを裏返したら作法も裏返る(CLAUDE.md §1)ので、
+   *   **file の実在と `SEALED_TEST_NOTES` の文言を対で見る** ── 片方だけ直すと、
+   *   次に読む人が「戻す先」を見失う。
+   * 🔑 見るのは「引っ越し先が実在すること」である ── 元の file が無いことでは
+   *   ない(そちらは `git` が知っている)。**引っ越し先が消えたら、規則を実際に
+   *   駆動している物が 1 つも無くなる**、が守りたいことである。
    */
-  it('🔴 カンバンは組み込みタイルから開ける(封印を解いただけで終わっていない)', async () => {
-    const { kanbanTile, withBuiltinTiles, tileSelectsEntry } = await import(
-      '@features/launcher/tiles'
+  it('🔴 引っ越した test の記録が実態と合っている(戻す先を失わない)', () => {
+    for (const path of [
+      'tests/smoke/schedule.smoke.spec.ts',
+      'tests/adapter/schedule-view.test.ts',
+      'tests/adapter/center-pane.test.ts',
+    ]) {
+      expect(() => readFileSync(path, 'utf-8'), `引っ越し先が消えている: ${path}`).not.toThrow();
+    }
+    expect(SEALED_TEST_NOTES, '記録が古い引っ越し先を指したままである').toContain(
+      'tests/smoke/schedule.smoke.spec.ts',
     );
-    expect(isSealedView('kanban'), 'カンバンがまだ封印されている').toBe(false);
-    const tiles = withBuiltinTiles([], { office: false });
-    const board = tiles.find((t) => t.kind === 'kanban');
-    expect(board, 'アプリの一覧にカンバンが出ない(解いただけで導線が無い)').toBeDefined();
-    // ⚠ 組み込みは entry を持たない(存在しない lid を選択に入れない)
-    expect(tileSelectsEntry(kanbanTile())).toBe(false);
-  });
-
-  it('🔴 畳んだ smoke の記録が実態と合っている(戻す先を失わない)', () => {
-    /**
-     * 🔴 **向きが 2026-08-19 に裏返った**(#277 段②-b)── kanban smoke は
-     * 復活させたので、**在るのが正しい**。
-     * ⚠ 主張の向きを裏返したら作法も裏返る(CLAUDE.md §1)ので、
-     *   `SEALED_TEST_NOTES` の文言も一緒に見る ── file だけ戻して記録が
-     *   「削除した」のままだと、次に読む人が**もう一度消す**。
-     */
-    expect(() => readFileSync('tests/smoke/kanban.smoke.spec.ts', 'utf-8')).not.toThrow();
-    expect(SEALED_TEST_NOTES, '記録が「削除した」のままである').toContain('復活済み');
-    // dispatch 経由で描画を見ている test も在ること(中身の検証が消えていない)
-    expect(() => readFileSync('tests/adapter/kanban-calendar-view.test.ts', 'utf-8')).not.toThrow();
+    // ⚠ 空振り防止 ── 記録が「畳んだ」の側に戻っていないこと
+    expect(SEALED_TEST_NOTES, '封印へ戻したかのような記録になっている').toContain('引っ越し済み');
   });
 });

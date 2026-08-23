@@ -1,42 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import type { EntryMeta } from '../../src/core/model/entry-meta';
 import {
   clipTaskText,
-  groupTasksByStatus,
   replaceTaskCards,
   taskCardKey,
   TASK_LIMITS,
   type TaskCard,
-} from '../../src/features/kanban/kanban-data';
-import {
-  groupEntriesByDate,
-  getMonthGrid,
-  dateKey,
-} from '../../src/features/calendar/calendar-data';
+} from '../../src/features/schedule/task-cards';
+import { getMonthGrid, dateKey } from '../../src/features/schedule/month-grid';
 
-function meta(lid: string, over: Partial<EntryMeta> = {}): EntryMeta {
-  return {
-    lid,
-    title: 't-' + lid,
-    archetype: 'todo',
-    createdAt: null,
-    updatedAt: null,
-    entryOrder: 0,
-    status: 'open',
-    date: null,
-    archived: false,
-    bodyChars: null,
-    ...over,
-  };
-}
 
 /**
- * 🔴 **カンバンの単位はチェック項目**(#277 段②-b)。
+ * 🔴 **札の単位はチェック項目**(#277 段②-b)。
  * ⚠ 2026-08-19 に主張を裏返した ── 以前は「`todo` アーキタイプのノート 1 件 =
  *   札 1 枚」で、`archetype !== 'todo'` を落とすことを pin していた。しかし
  *   **todo は封印中で作れない**ので、その規則では盤面に何も出せる人が居なかった。
+ * ⚠ **列への振り分け(`groupTasksByStatus` / `KANBAN_COLUMNS`)は #292 段⑤ で
+ *   落とした** ── 面がカンバンから「予定」へ替わり、束ねる単位が
+ *   「状態」から「日」になったので、呼んでいたのは**この test だけ**だった。
  */
-describe('kanban-data(札 = 本文のチェック項目)', () => {
+describe('task-cards(札 = 本文のチェック項目)', () => {
   const card = (lid: string, line: number, done: boolean, text = 'x'): TaskCard => ({
     lid,
     line,
@@ -44,16 +26,6 @@ describe('kanban-data(札 = 本文のチェック項目)', () => {
     done,
     date: null,
     time: null,
-  });
-
-  it('印の有無で列に振り分け、入力順を保つ', () => {
-    const grouped = groupTasksByStatus([
-      card('a', 0, false),
-      card('a', 3, true),
-      card('b', 1, false),
-    ]);
-    expect(grouped.open.map(taskCardKey)).toEqual(['a 0', 'b 1']);
-    expect(grouped.done.map(taskCardKey)).toEqual(['a 3']);
   });
 
   /**
@@ -151,37 +123,14 @@ describe('kanban-data(札 = 本文のチェック項目)', () => {
   });
 });
 
-describe('calendar-data', () => {
-  /**
-   * 🔴 **`date` を持つ**ノートを日付ごとにまとめる(#276)。
-   *
-   * ⚠ 2026-08-19 に**主張を裏返した**。以前は「date を持つ **todo だけ**」で、
-   *   `archetype: 'text'` の行が出ないことを pin していた ── しかし
-   *   **todo は封印中**なので、その規則ではこの面に何も出せる人が居ない。
-   */
-  it('🔴 date を持つノートを日付ごとにまとめ、showArchived を尊重', () => {
-    const metas = [
-      meta('a', { date: '2026-08-01' }),
-      meta('b', { date: '2026-08-01', archived: true }),
-      meta('c'), // date なし
-      meta('d', { date: '2026-08-02', archetype: 'text' }),
-    ];
-    expect(groupEntriesByDate(metas, false)['2026-08-01']?.map((m) => m.lid)).toEqual(['a']);
-    expect(groupEntriesByDate(metas, true)['2026-08-01']?.map((m) => m.lid)).toEqual([
-      'a',
-      'b',
-    ]);
-    // 🔴 普通のノートも出る(ここが裏返った所)
-    expect(
-      groupEntriesByDate(metas, true)['2026-08-02']?.map((m) => m.lid),
-      '普通のノートがカレンダーに出ない(todo だけの規則が残っている)',
-    ).toEqual(['d']);
-    // ⚠ date を書いていないものは、どちらでも出ない
-    expect(Object.values(groupEntriesByDate(metas, true)).flat().map((m) => m.lid)).not.toContain(
-      'c',
-    );
-  });
-
+/**
+ * ⚠ **束ね方はここに無い**(#292 段⑤、2026-08-23)。`groupEntriesByDate` は落とした
+ * ── 予定の面は**行の予定とノートの予定の両方**を束ねるので、ノートだけを見る
+ * 関数では答えが半分になる。いまの正本は `features/schedule/agenda.ts`
+ * (`tests/features/agenda.test.ts` / `tests/adapter/schedule-view.test.ts`)。
+ * 🔑 ここに残すのは**升目の形**だけ ── 小さな月(予定の面の左上)が使う。
+ */
+describe('calendar-data(小さな月の升目)', () => {
   it('月間グリッド: 2026-08 は土曜始まり 31 日', () => {
     const grid = getMonthGrid(2026, 8);
     expect(grid[0]).toEqual([null, null, null, null, null, null, 1]); // 8/1 = Sat

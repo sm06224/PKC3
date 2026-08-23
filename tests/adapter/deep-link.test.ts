@@ -103,9 +103,9 @@ function bench(hash: string) {
 }
 
 describe('起動時のディープリンク(#300 段②)', () => {
-  it('🔴 `#pkc?view=calendar` でカレンダーの面が開く', () => {
-    const b = bench('#pkc?view=calendar');
-    expect(b.actions, 'その面で開いていない').toEqual(['open:calendar']);
+  it('🔴 `#pkc?view=query` でその面が開く', () => {
+    const b = bench('#pkc?view=query');
+    expect(b.actions, 'その面で開いていない').toEqual(['open:query']);
   });
 
   /**
@@ -127,21 +127,21 @@ describe('起動時のディープリンク(#300 段②)', () => {
    *   「**成功した人だけがブックマークを作れない**」形になる。
    */
   it('🔴 その面を見ている間は、断片を消さない(ブックマークが作れる)', () => {
-    const b = bench('#pkc?view=kanban');
+    const b = bench('#pkc?view=query');
     expect(b.cleared(), '開いた時点で断片を消している').toBe(0);
-    expect(b.hash(), 'アドレスから字が消えている').toBe('#pkc?view=kanban');
+    expect(b.hash(), 'アドレスから字が消えている').toBe('#pkc?view=query');
     // ⚠ 自分が撃った面の通知で消してしまわないこと(いちばん出やすい取り違え)
-    b.viewBecomes('kanban');
+    b.viewBecomes('query');
     expect(b.cleared(), '自分が開いた面の通知で消している').toBe(0);
   });
 
   it('🔴 user が別の面へ移ったら、その瞬間に断片を消す', () => {
-    const b = bench('#pkc?view=kanban');
+    const b = bench('#pkc?view=query');
     b.viewBecomes('detail');
     expect(b.cleared(), '離れても断片が残る ── 読み直しでこの面へ飛ばされる').toBe(1);
     expect(b.hash()).toBe('');
     // ⚠ 一度消したら、その後の面の移動で二重に消さない
-    b.viewBecomes('calendar');
+    b.viewBecomes('dual');
     expect(b.cleared(), '離れるたびに消しにいっている').toBe(1);
   });
 
@@ -152,7 +152,7 @@ describe('起動時のディープリンク(#300 段②)', () => {
     // ⚠ **打ち間違いの綴りをそのまま画面へ通さない**
     expect(error, '外から来た綴りをそのまま出している').not.toContain('nonsense');
     // 🔑 **打てる字**を出す(画面の呼び名を出すと、user は打てない字で書き直す)
-    expect(error, 'アドレスに打つ字が出ていない').toContain('calendar');
+    expect(error, 'アドレスに打つ字が出ていない').toContain('query');
     expect(error, '打てない字(画面の呼び名)を出している').not.toContain('カレンダー');
     // ⚠ 使えない名前は残す意味が無いので、その場で消す
     expect(b.cleared(), '断り文が読み直しのたびに出る').toBe(1);
@@ -185,7 +185,7 @@ describe('起動時のディープリンク(#300 段②)', () => {
   });
 
   it('⚠ 対照群 ── ふつうの起動では何も撃たず、断片も触らない', () => {
-    for (const hash of ['', '#', '#pkc?container=c1&entry=e1', '#other?view=calendar']) {
+    for (const hash of ['', '#', '#pkc?container=c1&entry=e1', '#other?view=query']) {
       const b = bench(hash);
       expect(b.actions, `${JSON.stringify(hash)} で面を動かした`).toEqual([]);
       expect(b.cleared(), `${JSON.stringify(hash)} で断片を消した`).toBe(0);
@@ -283,12 +283,12 @@ describe('起動時のディープリンク(#300 段②)', () => {
  */
 describe('連れてきたノートを選ぶ(#300 段③)', () => {
   it('🔴 `container` と `entry` が揃っていたら、面より先に選ぶ', () => {
-    const b = bench('#pkc?container=c1&entry=e7&view=calendar');
+    const b = bench('#pkc?container=c1&entry=e7&view=query');
     // 🔑 **順序が主張の一部** ── 面が先だと、開いた瞬間だけ
     //    「ノートを選んでください」が見えてから入れ替わる
     expect(b.actions, 'ノートを選んでいない / 面より後に選んでいる').toEqual([
       'select:e7',
-      'open:calendar',
+      'open:query',
     ]);
     expect(b.selects).toEqual([{ containerId: 'c1', lid: 'e7' }]);
   });
@@ -299,14 +299,14 @@ describe('連れてきたノートを選ぶ(#300 段③)', () => {
    *   (`SYS_BOOTED` が `cid` を突き合わせているのと同じ理由)。
    */
   it('🔴 `entry` だけでは選ばない(別の container の取り違えを作らない)', () => {
-    const b = bench('#pkc?entry=e7&view=calendar');
-    expect(b.actions).toEqual(['open:calendar']);
+    const b = bench('#pkc?entry=e7&view=query');
+    expect(b.actions).toEqual(['open:query']);
     expect(b.selects, 'container を検めずに選んだ').toEqual([]);
   });
 
   it('⚠ ノートが無い断片は今までどおり(面だけ開く)', () => {
-    const b = bench('#pkc?view=kanban');
-    expect(b.actions).toEqual(['open:kanban']);
+    const b = bench('#pkc?view=query');
+    expect(b.actions).toEqual(['open:query']);
   });
 });
 
@@ -333,7 +333,7 @@ describe('開いた窓の合図(#300 段③)', () => {
 
   it('🔴 合図を持って開かれた窓は、その合図をそのまま返す', () => {
     const sent: string[] = [];
-    const t = tgt('#pkc?view=calendar&w=tok-1');
+    const t = tgt('#pkc?view=query&w=tok-1');
     expect(announceOpenedWindow(t, (token) => sent.push(token))).toBe(true);
     expect(sent, '合図を返していない(開いた側が塞がれたと誤読する)').toEqual(['tok-1']);
   });
@@ -344,20 +344,20 @@ describe('開いた窓の合図(#300 段③)', () => {
    * ⚠ `view` まで落とすと、段② の裁定(見ている間は残す / `F5` で戻る)が壊れる。
    */
   it('🔴 合図だけをアドレスから外す(面は残す)', () => {
-    const t = tgt('#pkc?container=c1&entry=e7&view=calendar&w=tok-1');
+    const t = tgt('#pkc?container=c1&entry=e7&view=query&w=tok-1');
     announceOpenedWindow(t, () => {});
     expect(t.hash, '合図が残った / 面まで落とした').toBe(
-      '#pkc?container=c1&entry=e7&view=calendar',
+      '#pkc?container=c1&entry=e7&view=query',
     );
   });
 
   /** ⚠ **対照群** ── ふつうの起動では何も返さず、アドレスも触らない。 */
   it('⚠ 合図が無ければ何もしない', () => {
     const sent: string[] = [];
-    const t = tgt('#pkc?view=calendar');
+    const t = tgt('#pkc?view=query');
     expect(announceOpenedWindow(t, (x) => sent.push(x))).toBe(false);
     expect(sent).toEqual([]);
-    expect(t.hash, 'アドレスを触った').toBe('#pkc?view=calendar');
+    expect(t.hash, 'アドレスを触った').toBe('#pkc?view=query');
   });
 });
 
@@ -369,21 +369,21 @@ describe('開いた窓の合図(#300 段③)', () => {
  */
 describe('アプリの窓であることを伝える(#300 段③)', () => {
   it('🔴 開いたときに握り、user が離れたら手放す', () => {
-    const b = bench('#pkc?view=calendar');
-    expect(b.holds, '握ったことを伝えていない').toEqual(['calendar']);
+    const b = bench('#pkc?view=query');
+    expect(b.holds, '握ったことを伝えていない').toEqual(['query']);
     b.viewBecomes('detail');
     expect(b.holds, '離れたことを伝えていない(閉じるが窓を閉じ続ける)').toEqual([
-      'calendar',
+      'query',
       null,
     ]);
   });
 
   /** ⚠ 同じ面に留まっている間は伝え直さない(題名が点滅しない)。 */
   it('⚠ 同じ面のままなら伝え直さない', () => {
-    const b = bench('#pkc?view=calendar');
-    b.viewBecomes('calendar');
-    b.viewBecomes('calendar');
-    expect(b.holds).toEqual(['calendar']);
+    const b = bench('#pkc?view=query');
+    b.viewBecomes('query');
+    b.viewBecomes('query');
+    expect(b.holds).toEqual(['query']);
   });
 
   it('⚠ 使えない名前では最初から握らない', () => {
@@ -402,15 +402,15 @@ describe('アプリの窓であることを伝える(#300 段③)', () => {
  */
 describe('currentBaseUrl(#300 段③)', () => {
   it('🔴 断片を落とす ── そのまま `formatViewDeepLink` に食える', () => {
-    location.hash = '#pkc?view=calendar&w=tok-1';
+    location.hash = '#pkc?view=query&w=tok-1';
     const base = currentBaseUrl();
     expect(base, '断片が残っている').not.toContain('#');
     // 🔑 **空振り防止** ── 断片がそもそも付いていなければ何も検めていない
     expect(location.href, '断片が付いていない(この test は何も検めていない)').toContain('#');
     expect(
-      formatViewDeepLink(base, 'kanban'),
+      formatViewDeepLink(base, 'query'),
       'アプリの窓から次のアプリを開けない',
-    ).toBe(`${base}#pkc?view=kanban`);
+    ).toBe(`${base}#pkc?view=query`);
     location.hash = '';
   });
 });

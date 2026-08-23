@@ -1056,29 +1056,29 @@ test('🔴 組み込みタイルを押すと別窓が開き、本文の面は残
   ).toHaveText('アプリは別の窓で開きます');
 
   const popup = context.waitForEvent('page');
-  await clickReal(page, builtinTile('calendar'));
+  await clickReal(page, builtinTile('dual'));
   const win = await popup;
 
   // ③ 窓は PKC のディープリンクで開いている(面 + 連れて行くノート + 合図)
-  expect(win.url(), '別窓がその面のディープリンクで開いていない').toContain('view=calendar');
+  expect(win.url(), '別窓がその面のディープリンクで開いていない').toContain('view=dual');
   expect(win.url(), '読んでいたノートを載せていない').toMatch(/[?&]container=[^&]+&entry=/);
   expect(win.url(), '合図を載せていない(開けたかを判定できない)').toMatch(/[&]w=/);
   await expect(win.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
   await expect(
-    win.locator('[data-pkc-view-pane="calendar"]'),
-    '別窓がカレンダーで立ち上がっていない',
+    win.locator('[data-pkc-view-pane="dual"]'),
+    '別窓が 2 ペインで立ち上がっていない',
   ).toBeVisible();
 
   /**
    * ④ 🔴 **読んでいたノートが連れて来られている。**
-   * ⚠ 直す前は `selectedLid === null` で立ち上がり、帯に
-   *   「日を押す前に、左の一覧からノートを選んでください」と出ていた ──
-   *   user はカレンダーで日付を付けたくて押したのに、**その窓では付けられない**。
+   * ⚠ 連れて行かないと、別窓は `selectedLid === null` で立ち上がる ──
+   *   user はさっきまで読んでいたノートを**探し直す**ことになる。
+   * 🔑 観測点は**アドレスに載っていること**ではなく(それは③で見た)、
+   *   **その窓が実際にそのノートを選んでいること**である。
    */
-  await expect(
-    win.locator('[data-pkc-field="calendar-target"]'),
-    '読んでいたノートを置いてきた(別窓で日付を付けられない)',
-  ).toContainText('に日付を付けます');
+  await expect
+    .poll(() => win.locator('[data-pkc-entry][data-pkc-selected]').count(), { timeout: 10_000 })
+    .toBeGreaterThan(0);
 
   /**
    * 🔑 **合図はアドレスから消えている**(段③ の直し)── ブックマークに
@@ -1088,12 +1088,12 @@ test('🔴 組み込みタイルを押すと別窓が開き、本文の面は残
   await expect
     .poll(() => win.url(), { timeout: 10_000 })
     .not.toContain('&w=');
-  expect(win.url(), '面まで落とした(F5 で本文へ落ちる)').toContain('view=calendar');
+  expect(win.url(), '面まで落とした(F5 で本文へ落ちる)').toContain('view=dual');
 
-  // ⑤ 🔴 窓の題名でどれがどれか分かる(タスクバーに 3 枚並んでも見分けられる)
+  // ⑤ 🔴 窓の題名でどれがどれか分かる(タスクバーに何枚並んでも見分けられる)
   await expect
     .poll(() => win.title(), { timeout: 10_000 })
-    .toContain('カレンダー');
+    .toContain('2 ペイン');
 
   /**
    * ② 🔴 **本体の中央の面は動いていない。**
@@ -1103,7 +1103,7 @@ test('🔴 組み込みタイルを押すと別窓が開き、本文の面は残
     page.locator('[data-pkc-view-pane="detail"]'),
     '別窓を開いたのに本体の本文が消えた(センターペインを占有している)',
   ).toBeVisible();
-  await expect(page.locator('[data-pkc-view-pane="calendar"]')).toBeHidden();
+  await expect(page.locator('[data-pkc-view-pane="dual"]')).toBeHidden();
 
   /**
    * ⑥ 🔴 **`× 閉じる` は窓ごと閉じる**(動線レビュー §7)。
@@ -1125,21 +1125,10 @@ test('🔴 組み込みタイルを押すと別窓が開き、本文の面は残
   await expect.poll(() => win.isClosed(), { timeout: 10_000 }).toBe(true);
 
   /**
-   * 🔴 **やることの板も同じ道を通る**(着地前レビュー 2)。
-   * ⚠ 直す前、`kanban` のタイルを押す test は unit にも smoke にも **1 件も
-   *   無かった** ── `launch-tile.ts` の分岐から `kanban` を削る変異は全部緑で、
-   *   その変異は「やることの板」を**完全な dead click** にする。
+   * ⚠ **カレンダー / やることの板はここから外れた**(#292 段⑤、2026-08-23)──
+   *   あの 2 つは「アプリ」ではなく**ノートの見方**だったので、左の列の
+   *   「予定」タブへ引っ越した。**栞から開く道が生きているか**は
+   *   `deep-link.smoke.spec.ts` の引っ越し test が見る。
    */
-  const popup2 = context.waitForEvent('page');
-  await clickReal(page, builtinTile('kanban'));
-  const win2 = await popup2;
-  expect(win2.url(), 'やることの板が別窓で開かない').toContain('view=kanban');
-  await expect(win2.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
-  await expect(
-    win2.locator('[data-pkc-view-pane="kanban"]'),
-    '別窓がやることの板で立ち上がっていない',
-  ).toBeVisible();
-  await win2.close();
-
   expect(errors).toEqual([]);
 });

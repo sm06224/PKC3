@@ -58,7 +58,10 @@ test('🔴 カレンダーを開いて戻ると、読んでいた場所に戻る
   expect(await top(), '位置を作れていない').toBe(1000);
 
   // ⚠ 面はアドレスから開く(#300 段③ でタイルは別窓を開くようになった)
-  await openViewPane(page, 'calendar');
+  // ⚠ **短い面である必要がある**(#292 段⑤ でカレンダーから集計へ替えた)──
+  //    丸めは「開いた面が箱より短い」ときだけ起きるので、長い面に替えると
+  //    この test は**何も確かめずに緑**になる。下の対照群がそれを落とす
+  await openViewPane(page, 'query');
   // ⚠ **対照群** ── 開いている間は丸められている(= 直しは「戻す」側で効いている。
   //    「そもそも丸められない」に変わったのなら、この test の前提が変わっている)
   expect(await top(), '丸めが起きていない ── 前提が変わった').toBe(0);
@@ -72,7 +75,7 @@ test('🔴 カレンダーを開いて戻ると、読んでいた場所に戻る
   // ⚠ 2 巡目 ── 覚え直しが効く(1 回目の値に固定されない)
   await page.evaluate((sel) => { (document.querySelector(sel) as HTMLElement).scrollTop = 2500; }, box);
   await page.waitForTimeout(200);
-  await openViewPane(page, 'calendar');
+  await openViewPane(page, 'query');
   await clickReal(page, '[data-pkc-action="close-pane"]');
   await expect(page.locator('[data-pkc-view-pane="detail"]')).toBeVisible();
   await page.waitForTimeout(700);

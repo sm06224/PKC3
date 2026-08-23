@@ -35,8 +35,8 @@ function booted(): Dispatcher {
 describe('openView は「開けたか」を返す', () => {
   it('🔴 開けたら true', () => {
     const d = booted();
-    expect(openView(d, 'calendar')).toBe(true);
-    expect(d.getState().viewMode).toBe('calendar');
+    expect(openView(d, 'query')).toBe(true);
+    expect(d.getState().viewMode).toBe('query');
   });
 
   /**
@@ -49,7 +49,7 @@ describe('openView は「開けたか」を返す', () => {
     d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '本文' });
     d.dispatch({ type: 'START_EDIT' });
     expect(d.getState().phase, '前提が崩れている(編集に入れていない)').toBe('editing');
-    expect(openView(d, 'calendar'), '断られたのに「開いた」と返した').toBe(false);
+    expect(openView(d, 'query'), '断られたのに「開いた」と返した').toBe(false);
     expect(d.getState().viewMode, '編集中なのに面が変わった').toBe('detail');
   });
 

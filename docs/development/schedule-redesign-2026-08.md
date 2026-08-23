@@ -418,9 +418,39 @@ PKC2 のカレンダーは `todo` アーキタイプ 1 件 = 1 予定で、**PKC
 | ① | **記法**(`@YYYY-MM-DD [HH:MM]` の読み)+ 札の組み立てを日付で絞る | — | ✅ |
 | ② | **日付の道具**(書式の帯のボタン + ピッカー + `insertText`) | ① | ✅ |
 | ②b | 🔴 **面から日付を書き換える口**(`applyBodyRewrite` の `line-date`) | ① | ✅ |
-| ③ | **左の列の「予定」タブ**(小さな月 + 時間順の並び + **掴んで落とす**) | ②b | |
-| ④ | **右の列へノートの日付**(掴めない場面のための口) | ② | |
-| ⑤ | **中央の `calendar` / `kanban` とタイルを落とす**(§5) | ③ ④ | |
+| ③ | **左の列の「予定」タブ**(小さな月 + 時間順の並び + **掴んで落とす**) | ②b | ✅ |
+| ④ | **右の列へノートの日付**(掴めない場面のための口) | ② | ✅ |
+| ⑤ | **中央の `calendar` / `kanban` とタイルを落とす**(§5) | ③ ④ | ✅ |
 
 ⚠ **⑤ を最後に置くのは、順序が安全性そのものだから** ── 先に落とすと、
 **代わりが立つまでの間 user が予定に触れなくなる**。
+
+### 段⑤ で実際に落ちたもの / 移したもの(2026-08-23)
+
+⚠ **落とした数より、「どこへ移したか」のほうが後で要る** ── 消えた物を探す人は、
+`git log` ではなく**この表**を読む。
+
+| 落としたもの | 移した先 |
+|---|---|
+| `ViewMode` の `calendar` / `kanban` | 左の列の `BrowseMode` `schedule` |
+| `ui/render/calendar.ts` / `kanban.ts` | `ui/render/schedule.ts` + `ui/render/task-card.ts` |
+| `features/calendar/calendar-data.ts` | `features/schedule/month-grid.ts`(升目の形だけ ── `groupEntriesByDate` は `features/schedule/agenda.ts` が置き換えた) |
+| `features/kanban/kanban-data.ts` | `features/schedule/task-cards.ts` |
+| `KANBAN_COLUMNS` / `groupTasksByStatus` / `KanbanStatus` | 🔑 **落とした**(束ねる単位が「状態」から「日」になった。呼んでいたのは test だけ) |
+| `tiles.ts` の `calendarTile` / `kanbanTile` | 🔑 **落とした**(§3 のとおり分類が誤っていた) |
+| `tests/adapter/kanban-calendar-view.test.ts` | 面に依らない主張 → `tests/adapter/center-pane.test.ts` / 札の主張 → `tests/adapter/schedule-view.test.ts` |
+| `tests/adapter/calendar-row-height.test.ts` | #303 の主張 1 つ(**点が升目を押し広げない**)→ `tests/adapter/schedule-view.test.ts` |
+| `tests/smoke/calendar.smoke.spec.ts` / `kanban.smoke.spec.ts` | `tests/smoke/schedule.smoke.spec.ts` |
+
+🔴 **栞は死なせない。** `#pkc?view=calendar` / `#pkc?view=kanban` は
+`deep-link.ts` の `MOVED_VIEWS` が「予定」タブへ送り、どこへ移ったかを状態の行に出す
+── **アドレスに書けた字を黙って断らない**のが引っ越しの作法である。
+
+⚠ **段⑤ で 1 か所、実装のほうを直した** ── 器の読み直し(`SYS_BOOTED`)で
+`taskScan` を捨てたあと、**集め直しを頼む者が居なくなっていた**。中央の面だった頃は
+reducer が `viewMode === 'kanban'` を見て自分で頼めたが、予定は左の列のタブなので
+reducer からは見えない。🔑 **「開いているか」ではなく「一度でも集めたか」**
+(`taskScan !== null`)で頼み直す形にした ── 判定を `main.ts` へ出さずに済み
+(あちらはどの test からも実行されない、CLAUDE.md §2)、予定を一度も開かない user には
+撃たない。⚠ 起動時に「予定」タブを覚えていた場合の 1 発だけは `main.ts` の配線である
+(`setBrowse` の 1 行と**同じ綴り**にしてある)。

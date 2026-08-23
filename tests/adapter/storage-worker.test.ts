@@ -12,7 +12,7 @@ import type {
   StorageRequest,
   StorageResponse,
 } from '../../src/adapter/platform/storage/protocol';
-import { TASK_LIMITS } from '../../src/features/kanban/kanban-data';
+import { TASK_LIMITS } from '../../src/features/schedule/task-cards';
 import { contentHash64Hex } from '../../src/adapter/platform/storage/content-hash';
 
 type Op = StorageRequest['op'];

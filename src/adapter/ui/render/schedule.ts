@@ -36,8 +36,8 @@ import {
   type AgendaGroup,
   type AgendaItem,
 } from '@features/schedule/agenda';
-import { getMonthGrid, dateKey } from '@features/calendar/calendar-data';
-import { TASK_LIMITS, type TaskCard } from '@features/kanban/kanban-data';
+import { getMonthGrid, dateKey } from '@features/schedule/month-grid';
+import { TASK_LIMITS, type TaskCard } from '@features/schedule/task-cards';
 import { matchesEntry, normalizeQuery } from '@features/filter/title-filter';
 import { createTaskCard, patchTaskCard } from './task-card';
 
@@ -65,6 +65,15 @@ export class ScheduleRenderer {
      *   **落ちていた**。「置けるなら外せる」の裏返し(片道を作らない)。
      */
     done: HTMLButtonElement;
+    /**
+     * 🔴 **片付けたノートの予定を戻す口**(段⑤ で移した)。
+     * ⚠ 直す前、`toggle-show-archived` の口は**カレンダーの面 1 つだけ**だった
+     *   ── その面を落とすと `showArchived` は既定(false)から二度と動かせず、
+     *   **片付けたノートの予定が永久に見えなくなる**。
+     * 🔑 落とす前に**代わりを立てる**(CLAUDE.md「捨てるものの表は、行ごとに
+     *   『代わりに何ができるようになるか』を書く」)。
+     */
+    archived: HTMLButtonElement;
     groups: HTMLElement;
   } | null = null;
   private last: {
@@ -156,6 +165,7 @@ export class ScheduleRenderer {
     );
     this.paintUndatedToggle(frame.undated, state, visible.length - dated.length);
     this.paintDoneToggle(frame.done, state, all, q);
+    this.paintArchivedToggle(frame.archived, state, all);
     this.paintGroups(frame.groups, groups, state);
   }
 
@@ -278,6 +288,30 @@ export class ScheduleRenderer {
   }
 
   /**
+   * 「片付けたノートの予定も出す」の切替(段⑤ でカレンダーから移した)。
+   * ⚠ **片付けた物が 1 つも無ければ出さない** ── 押しても何も起きないボタンにしない。
+   */
+  private paintArchivedToggle(
+    btn: HTMLButtonElement,
+    state: AppState,
+    all: readonly TaskCard[],
+  ): void {
+    // ⚠ 行の札とノートの予定の**両方**を数える(片方だけ数えると 0 件に見える)
+    const lids = new Set<string>();
+    for (const c of all) if (state.entryMetas.get(c.lid)?.archived === true) lids.add(c.lid);
+    for (const [lid, m] of state.entryMetas)
+      if (m.archived && m.date !== null) lids.add(lid);
+    const show = lids.size > 0 || state.showArchived;
+    btn.hidden = !show;
+    if (!show) return;
+    btn.setAttribute('aria-pressed', state.showArchived ? 'true' : 'false');
+    const text = state.showArchived
+      ? '片付けたものを隠す'
+      : `片付けたものも出す(${lids.size})`;
+    if (btn.textContent !== text) btn.textContent = text;
+  }
+
+  /**
    * 束を描く。
    *
    * 🔑 **札も節も使い回す** ── 捨てて作り直すと、①掴んでいる札が途中で消える
@@ -393,13 +427,18 @@ export class ScheduleRenderer {
     done.setAttribute('data-pkc-action', 'toggle-show-done');
     done.setAttribute('data-pkc-field', 'schedule-done');
     // ⚠ 切替は 1 行に並べる(縦に積むと狭い列で嵩む)
+    const archived = document.createElement('button');
+    archived.type = 'button';
+    // 🔑 板 / カレンダーと**同じ action**(旗が 1 つなので、口も同じ意味論を共有する)
+    archived.setAttribute('data-pkc-action', 'toggle-show-archived');
+    archived.setAttribute('data-pkc-field', 'schedule-archived');
     const toggles = document.createElement('div');
     toggles.setAttribute('data-pkc-field', 'schedule-toggles');
-    toggles.append(undated, done);
+    toggles.append(undated, done, archived);
     const groups = document.createElement('div');
     groups.setAttribute('data-pkc-region', 'schedule-groups');
     this.region.append(bar, grid, note, toggles, groups);
-    this.frame = { month, grid, note, undated, done, groups };
+    this.frame = { month, grid, note, undated, done, archived, groups };
     return this.frame;
   }
 }

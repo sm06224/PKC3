@@ -1,5 +1,6 @@
 /**
- * 🔴 **カンバンの正体は「チェック項目」である**(#277 段②。user 裁定 2026-08-19)。
+ * 🔴 **予定の札の正体は「チェック項目」である**(#277 段② / #292 段⑤。
+ * user 裁定 2026-08-19 / 2026-08-23)。
  *
  * ## 何が変わったか
  *
@@ -12,6 +13,14 @@
  * 🔑 だから札の単位を **本文の 1 行(チェック項目)**へ移す ──
  * user が既に書いている物がそのまま盤面に出る(新しい記法を足さない)。
  *
+ * ## ⚠ 名前が 2 度替わっている(`features/kanban/kanban-data.ts` → ここ)
+ *
+ * #292 段⑤(2026-08-23)で**面がカンバンから「予定」へ引っ越した**ので、
+ * この module も `features/schedule/` へ移した ── **規則は 1 行も変えていない**。
+ * ⚠ 同時に、面と一緒に死んだ物(`KANBAN_COLUMNS` / `groupTasksByStatus` /
+ * `KanbanStatus`)は**落とした** ── 呼んでいたのは test だけで、
+ * 「実行するのが test だけの分岐は、製品の何も守らない」(CLAUDE.md §2)。
+ *
  * ## 🔴 なぜ「本文を読む」のに面を開くたびの全文走査にならないか
  *
  * 抽出列 `entries.task_total`(#277 段②-a)で**先に絞る**。読むのは
@@ -23,14 +32,6 @@
  */
 import { listTaskItems, type TaskItem } from '@features/markdown/task-count';
 import { readLineDate, stripLineDate } from '@features/schedule/line-date';
-
-export type KanbanStatus = 'open' | 'done';
-
-/** 列の定義(表示順)。 */
-export const KANBAN_COLUMNS: readonly { status: KanbanStatus; label: string }[] = [
-  { status: 'open', label: '未完了' },
-  { status: 'done', label: '完了' },
-] as const;
 
 /**
  * 札 1 枚。⚠ **題名は持たない** ── 主スレッドの `entryMetas` に在るので、
@@ -94,16 +95,6 @@ export function clipTaskText(text: string): string {
   return text.length <= TASK_LIMITS.textChars
     ? text
     : `${text.slice(0, TASK_LIMITS.textChars)}…`;
-}
-
-/**
- * 札を列へ振り分ける。⚠ **入力の順を保つ** ── 呼び側が
- * (ノートの並び, 行番号)順で渡すこと。
- */
-export function groupTasksByStatus(cards: readonly TaskCard[]): Record<KanbanStatus, TaskCard[]> {
-  const result: Record<KanbanStatus, TaskCard[]> = { open: [], done: [] };
-  for (const card of cards) result[card.done ? 'done' : 'open'].push(card);
-  return result;
 }
 
 /**

@@ -4,6 +4,7 @@ import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
 import { extractMeta } from '../../src/features/flavor';
 import {
+  VIEW_MODES,
   initialState,
   nextViewMode,
   reduce,
@@ -119,7 +120,7 @@ describe('reducer: lean aggregate', () => {
     let s = loadedA();
     s = reduce(s, { type: 'START_EDIT' }).state;
     expect(reduce(s, { type: 'SELECT_ENTRY', lid: 'b' }).state.selectedLid).toBe('a');
-    expect(reduce(s, { type: 'SET_VIEW_MODE', mode: 'kanban' }).state.viewMode).toBe(
+    expect(reduce(s, { type: 'SET_VIEW_MODE', mode: 'query' }).state.viewMode).toBe(
       'detail',
     );
     /**
@@ -128,17 +129,18 @@ describe('reducer: lean aggregate', () => {
      * ⚠ 直す前は `events: []` で**黙って捨てて**いた ── 押しても画面が 1 ドットも
      *   動かず、帯にも何も出ない。user から見ると「タイルが壊れている」としか
      *   見えない(実際 user から「動線がクソだし、直感的ではない」と指摘された)。
-     * 🔑 **呼び名は画面の字と同じにする** ── 断り文に `kanban` と出ると
+     * 🔑 **呼び名は画面の字と同じにする** ── 断り文に `query` と出ると
      *   user は別のものを探す。
+     * ⚠ **断られる面は 1 つだけになった**(#292 段⑤、2026-08-23)── カレンダー /
+     *   やることの板は中央から降りたので、残るノートを並べる面は**集計**である。
+     *   だから「面ごとに呼び名が変わるか」はここでは見られない ── 呼び名の全数は
+     *   `viewModeLabel` が `Record<ViewMode, string>` である(足し忘れは tsc が落とす)
+     *   ことと、`tests/docs-parity.test.ts` §4-1 の等値 pin が守る。
      */
-    const refused = reduce(s, { type: 'SET_VIEW_MODE', mode: 'kanban' }).state;
+    const refused = reduce(s, { type: 'SET_VIEW_MODE', mode: 'query' }).state;
     expect(refused.error, '黙って捨てている(無言の dead click)').toBe(
-      '編集中はやることの板を開けません(保存するか、取り消してください)',
+      '編集中は集計を開けません(保存するか、取り消してください)',
     );
-    expect(
-      reduce(s, { type: 'SET_VIEW_MODE', mode: 'calendar' }).state.error,
-      '面ごとに呼び名が変わっていない',
-    ).toContain('カレンダー');
     // ⚠ 対照群 ── 開ける面では理由を出さない(常在する断り文を作らない)
     expect(
       reduce(s, { type: 'SET_VIEW_MODE', mode: 'help' }).state.error,
@@ -239,7 +241,7 @@ describe('reducer: lean aggregate', () => {
     expect(ev.entry.status).toBe('done');
     expect(ev.entry.date).toBe('2026-08-01');
     expect(ev.entry.archived).toBe(true);
-    // 常駐 meta も同じ reduce で追従(sidebar / kanban が古い列を見ない)
+    // 常駐 meta も同じ reduce で追従(sidebar / 予定が古い列を見ない)
     const m = r.state.entryMetas.get('td');
     expect(m?.status).toBe('done');
     expect(m?.date).toBe('2026-08-01');
@@ -477,8 +479,8 @@ describe('reducer: lean aggregate', () => {
   it('SET_VIEW_MODE keeps selection (PKC2 convention)', () => {
     let s = booted();
     s = reduce(s, { type: 'SELECT_ENTRY', lid: 'a' }).state;
-    s = reduce(s, { type: 'SET_VIEW_MODE', mode: 'kanban' }).state;
-    expect(s.viewMode).toBe('kanban');
+    s = reduce(s, { type: 'SET_VIEW_MODE', mode: 'query' }).state;
+    expect(s.viewMode).toBe('query');
     expect(s.selectedLid).toBe('a');
   });
 });
@@ -491,7 +493,7 @@ describe('dispatcher: re-entrancy linearization', () => {
     d.onState((s) => {
       if (!fired && s.selectedLid === 'a') {
         fired = true;
-        d.dispatch({ type: 'SET_VIEW_MODE', mode: 'kanban' }); // listener 内 dispatch
+        d.dispatch({ type: 'SET_VIEW_MODE', mode: 'query' }); // listener 内 dispatch
       }
     });
     d.onState((s) => seen.push(`${s.selectedLid}/${s.viewMode}`));
@@ -503,8 +505,8 @@ describe('dispatcher: re-entrancy linearization', () => {
     });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
     // 逆転しない: 最後に観測した state が最新(review G)
-    expect(seen[seen.length - 1]).toBe('a/kanban');
-    expect(d.getState().viewMode).toBe('kanban');
+    expect(seen[seen.length - 1]).toBe('a/query');
+    expect(d.getState().viewMode).toBe('query');
   });
 });
 
@@ -769,9 +771,9 @@ describe('ノートでない面から、一覧を押したら中央が戻る', (
 
   it('⚠ ノートを映している面(detail)では viewMode を触らない', () => {
     // 空振り防止 ── 何でも detail に戻す実装でも上は通ってしまう
-    let s: AppState = { ...booted(), viewMode: 'kanban' };
+    let s: AppState = { ...booted(), viewMode: 'query' };
     s = reduce(s, { type: 'SELECT_ENTRY', lid: 'a' }).state;
-    expect(s.viewMode, 'kanban を勝手に畳んだ').toBe('kanban');
+    expect(s.viewMode, '集計を勝手に畳んだ').toBe('query');
   });
 });
 
@@ -779,20 +781,24 @@ describe('ノートでない面から、一覧を押したら中央が戻る', (
  * 🔴 **もう一度押したら本文へ戻る**(#277 段②-b で 1 か所へ寄せた規則)。
  *
  * ⚠ この規則は上の帯(`set-view`)にだけ書いてあり、**組み込みタイルから開く面**
- *   (2 ペイン #241 / カレンダー #276 / カンバン #277)は素通りしていた ──
- *   開いたら**本文へ帰るマウスの道が 1 本も無い**(鍵盤の `view-detail` だけ)。
+ *   (2 ペイン #241 ほか)は素通りしていた ── 開いたら**本文へ帰るマウスの道が
+ *   1 本も無い**(鍵盤の `view-detail` だけ)。
  * 🔑 帯もタイルも同じ関数を通すので、ここが唯一の pin である。
+ * ⚠ 見るのは **`VIEW_MODES` の全数**(名指しの一覧にしない)── 面を足したのに
+ *   ここへ足し忘れると、その面だけ**閉じられないまま**出荷される。
  */
 describe('nextViewMode ── もう一度押したら本文へ戻る', () => {
   it('🔴 同じ面をもう一度指すと detail へ', () => {
-    for (const view of ['kanban', 'calendar', 'dual', 'query', 'settings'] as const) {
+    const faces = VIEW_MODES.filter((v) => v !== 'detail');
+    expect(faces.length, '面が 1 つも無い(空振り)').toBeGreaterThan(0);
+    for (const view of faces) {
       expect(nextViewMode(view, view), `${view} から出られない`).toBe('detail');
     }
   });
 
   it('違う面を指したら、その面へ行く', () => {
-    expect(nextViewMode('detail', 'kanban')).toBe('kanban');
-    expect(nextViewMode('kanban', 'calendar')).toBe('calendar');
+    expect(nextViewMode('detail', 'query')).toBe('query');
+    expect(nextViewMode('query', 'dual')).toBe('dual');
   });
 
   /** ⚠ 既に本文に居るなら、本文を指しても本文のまま(往復しない)。 */
@@ -817,13 +823,23 @@ describe('カンバンの札(#277 段②-b)', () => {
     truncated: false,
   });
 
-  it('🔴 面を開いたときに集めを頼む(boot では頼まない)', () => {
-    const out = reduce(booted(), { type: 'SET_VIEW_MODE', mode: 'kanban' });
-    expect(out.events, '開いたのに集めを頼んでいない').toContainEqual({ type: 'REQUEST_TASK_SCAN' });
-    // ⚠ 空振り防止 ── 他の面では頼まない(いつでも頼む実装なら上は通る)
-    expect(
-      reduce(booted(), { type: 'SET_VIEW_MODE', mode: 'settings' }).events,
-    ).not.toContainEqual({ type: 'REQUEST_TASK_SCAN' });
+  /**
+   * 🔴 **口は `REFRESH_TASK_SCAN` 1 本**(#292 段⑤、2026-08-23)。
+   *
+   * ⚠ 予定は**左の列のタブ**になったので、`SET_VIEW_MODE`(中央の面)からは
+   *   もう頼まない ── 頼むのは `main.ts` がタブを切り替えたときである。
+   * ⚠ 空振り防止に**中央の面では頼まないこと**を対で見る ── 借りたままだと、
+   *   予定を一度も開かない user にも全ノートの走査を負わせる。
+   */
+  it('🔴 頼まれたら集めを頼む(中央の面を開いただけでは頼まない)', () => {
+    const out = reduce(booted(), { type: 'REFRESH_TASK_SCAN' });
+    expect(out.events, '頼まれたのに集めていない').toContainEqual({ type: 'REQUEST_TASK_SCAN' });
+    for (const mode of ['query', 'dual', 'settings', 'help'] as const) {
+      expect(
+        reduce(booted(), { type: 'SET_VIEW_MODE', mode }).events,
+        `${mode} を開いただけで走査を頼んでいる`,
+      ).not.toContainEqual({ type: 'REQUEST_TASK_SCAN' });
+    }
   });
 
   /**
@@ -831,8 +847,8 @@ describe('カンバンの札(#277 段②-b)', () => {
    * 盤面に残り、押すと「見つからない」になる。⚠ そして**開いていれば集め直す** ──
    * 捨てるだけだと「集めています…」で止まる(捨てる側と頼む側は対で要る)。
    */
-  it('🔴 器の読み直しで札を捨て、開いていれば集め直す', () => {
-    let s = reduce(booted(), { type: 'SET_VIEW_MODE', mode: 'kanban' }).state;
+  it('🔴 器の読み直しで札を捨て、一度でも集めていれば集め直す', () => {
+    let s = reduce(booted(), { type: 'REFRESH_TASK_SCAN' }).state;
     s = reduce(s, { type: 'SET_TASK_SCAN', scan: scan([{ lid: 'a', line: 0, text: 'x', done: false, date: null, time: null }]) }).state;
     expect(s.taskScan?.cards).toHaveLength(1);
     const out = reduce(s, { type: 'SYS_BOOTED', cid: 'c2', metas: [meta('a', 1)], relations: [] });
@@ -840,9 +856,14 @@ describe('カンバンの札(#277 段②-b)', () => {
     expect(out.events, '捨てただけで集め直していない').toContainEqual({ type: 'REQUEST_TASK_SCAN' });
   });
 
-  it('開いていない面のために集め直しは頼まない', () => {
-    const s = reduce(booted(), { type: 'SET_TASK_SCAN', scan: scan([]) }).state;
-    const out = reduce(s, { type: 'SYS_BOOTED', cid: 'c2', metas: [meta('a', 1)], relations: [] });
+  /**
+   * ⚠ **一度も集めていない user には撃たない**(集計と同じ流儀)── 予定を
+   * 開かない user に、取込のたびに全ノートの走査を負わせない。
+   * 🔑 判定は `taskScan === null` 1 本(直前に札を持っていたか)。
+   */
+  it('一度も集めていなければ、器を入れ替えても頼まない', () => {
+    const out = reduce(booted(), { type: 'SYS_BOOTED', cid: 'c2', metas: [meta('a', 1)], relations: [] });
+    expect(out.state.taskScan).toBeNull();
     expect(out.events).not.toContainEqual({ type: 'REQUEST_TASK_SCAN' });
   });
 
@@ -851,7 +872,7 @@ describe('カンバンの札(#277 段②-b)', () => {
    * ⚠ 往復を待つと、押してから札が動くまで空白の間が出る。
    */
   it('🔴 書換の ack で、そのノートの札だけ組み直す', () => {
-    let s = reduce(booted(), { type: 'SET_VIEW_MODE', mode: 'kanban' }).state;
+    let s = reduce(booted(), { type: 'REFRESH_TASK_SCAN' }).state;
     s = reduce(s, {
       type: 'SET_TASK_SCAN',
       scan: scan([
@@ -886,7 +907,7 @@ describe('カンバンの札(#277 段②-b)', () => {
    * 🔑 直しは「新しい本文が state に入る所」= `buildPersist` 1 か所を通すこと。
    */
   it('🔴 保存すると、札の行番号が新しい本文に追従する', () => {
-    let s = reduce(booted(), { type: 'SET_VIEW_MODE', mode: 'kanban' }).state;
+    let s = reduce(booted(), { type: 'REFRESH_TASK_SCAN' }).state;
     s = reduce(s, { type: 'SELECT_ENTRY', lid: 'a' }).state;
     s = reduce(s, { type: 'BODY_LOADED', lid: 'a', body: '- [ ] A\n- [ ] B\n' }).state;
     s = reduce(s, {
@@ -935,7 +956,7 @@ describe('カンバンの札(#277 段②-b)', () => {
      * 実行するのが test だけの分岐は、製品の何も守らない(§2)。
      * 🔑 集め直す口は `SET_VIEW_MODE`(面を開く)1 本に寄せた。
      */
-    const reopened = reduce(s, { type: 'SET_VIEW_MODE', mode: 'kanban' });
+    const reopened = reduce(s, { type: 'REFRESH_TASK_SCAN' });
     expect(reopened.events).toContainEqual({ type: 'REQUEST_TASK_SCAN' });
   });
 });

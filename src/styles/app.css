@@ -2359,7 +2359,8 @@ select:focus-visible {
   display: none;
 }
 [data-pkc-field='schedule-undated'],
-[data-pkc-field='schedule-done'] {
+[data-pkc-field='schedule-done'],
+[data-pkc-field='schedule-archived'] {
   align-self: flex-start;
   padding: 0;
   font: inherit;
@@ -2371,7 +2372,8 @@ select:focus-visible {
   cursor: pointer;
 }
 [data-pkc-field='schedule-undated']:hover,
-[data-pkc-field='schedule-done']:hover {
+[data-pkc-field='schedule-done']:hover,
+[data-pkc-field='schedule-archived']:hover {
   color: var(--fg);
 }
 [data-pkc-region='schedule-groups'] {

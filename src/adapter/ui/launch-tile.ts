@@ -67,7 +67,7 @@ export interface LaunchDeps {
    * 🔑 **`window.open` は gesture の中で撃つ必要がある**ので、この口は
    * `await` より前に呼ぶ(下の実装がそうなっている)。
    */
-  openView: (view: 'dual' | 'calendar' | 'kanban') => void;
+  openView: (view: 'dual') => void;
   /**
    * 🔴 **素のまま(同一オリジン)で開く前の確認**(P10)。
    *
@@ -111,8 +111,10 @@ export async function launchTile(
   //    後にすると、断ったのに空のタブが残る
   if (raw && deps.confirmSameOrigin !== undefined && !(await deps.confirmSameOrigin(tile.title)))
     return;
-  if (tile.kind === 'dual' || tile.kind === 'calendar' || tile.kind === 'kanban') {
-    // 🔑 組み込み(#241 / #276 / #300 段③)── **別窓で開く**。
+  if (tile.kind === 'dual') {
+    // 🔑 組み込み(#241 / #300 段③)── **別窓で開く**。
+    //    ⚠ カレンダー / やることの板は #292 段⑤ でここから外れた
+    //      (「アプリ」ではなく**ノートの見方**だったので、左の列のタブへ)。
     //    ⚠ `await` より前に呼ぶ ── `window.open` は gesture の中でしか通らない
     deps.openView(tile.kind);
     return;

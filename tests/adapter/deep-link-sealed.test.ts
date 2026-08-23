@@ -20,7 +20,9 @@ vi.mock('../../src/features/sealed', async (importOriginal) => {
   return {
     ...actual,
     // ⚠ 実在する面を 1 つだけ封印したことにする
-    isSealedView: (view: string) => view === 'kanban',
+    //    ⚠ **`kanban` は使えない**(#292 段⑤)── 引っ越し済みの名前は
+    //      `MOVED_VIEWS` が先に拾うので、封印の枝を 1 度も通らない
+    isSealedView: (view: string) => view === 'query',
   };
 });
 
@@ -31,19 +33,19 @@ const { openableViewNames, readViewDeepLink } = await import(
 describe('封印中の面(#300 段②)', () => {
   it('🔴 封印された面は、開ける名前の一覧に出ない', () => {
     const names = openableViewNames();
-    expect(names, '封印した面が一覧に残っている').not.toContain('kanban');
+    expect(names, '封印した面が一覧に残っている').not.toContain('query');
     // ⚠ 空振り防止 ── 封印していない面はちゃんと残っている
-    expect(names, '一覧が丸ごと空になっている').toContain('calendar');
+    expect(names, '一覧が丸ごと空になっている').toContain('dual');
   });
 
   it('🔴 封印された面は、アドレスからも開けない(理由を出して断る)', () => {
-    const target = { hash: '#pkc?view=kanban', clearHash: () => {}, dropToken: () => {} };
+    const target = { hash: '#pkc?view=query', clearHash: () => {}, dropToken: () => {} };
     expect(readViewDeepLink(target), '封印した面がアドレスから開ける').toEqual({
       unusable: true,
     });
     // ⚠ 対照群 ── 封印していない面は今までどおり開ける
-    expect(readViewDeepLink({ hash: '#pkc?view=calendar', clearHash: () => {}, dropToken: () => {} })).toEqual({
-      view: 'calendar',
+    expect(readViewDeepLink({ hash: '#pkc?view=dual', clearHash: () => {}, dropToken: () => {} })).toEqual({
+      view: 'dual',
     });
   });
 });

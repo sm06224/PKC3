@@ -380,7 +380,7 @@ describe('🔴 打ちかけの追記(user 目線レビュー U-1)', () => {
     await tick();
     type(s.q, '明日 田中さんに確認');
     // ⚠ 面はどれでも同じ経路 ── 代表 3 つを通す(ヘルプは「読みながら書く」の当事者)
-    for (const mode of ['calendar', 'help', 'dual'] as const) {
+    for (const mode of ['query', 'help', 'dual'] as const) {
       s.d.dispatch({ type: 'SET_VIEW_MODE', mode });
       await tick();
       s.d.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
@@ -404,7 +404,7 @@ describe('🔴 打ちかけの追記(user 目線レビュー U-1)', () => {
     s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log' });
     await tick();
     type(s.q, '書きかけ');
-    s.d.dispatch({ type: 'SET_VIEW_MODE', mode: 'calendar' });
+    s.d.dispatch({ type: 'SET_VIEW_MODE', mode: 'query' });
     await tick();
     s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log2' });
     await tick();

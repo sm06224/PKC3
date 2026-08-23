@@ -159,8 +159,10 @@ describe('全文検索の配線(#181)', () => {
    * 1 面でも `matchesTitle` のままだと、その面でだけ「探しても出ない」。
    * ⚠ launcher は **タイル**(entry ではない)ので対象外 ── 意図的に除く。
    */
-  it('🔴 絞り込みを描く 4 面が全部、本文の当たりも見る規則を通っている', () => {
-    for (const face of ['sidebar', 'kanban', 'calendar']) {
+  it('🔴 絞り込みを描く 3 面が全部、本文の当たりも見る規則を通っている', () => {
+    // ⚠ **カレンダー / かんばんは落とし、予定を足した**(#292 段⑤、2026-08-23)
+    //    ── 面が入れ替わっても「1 面でも漏れるとその面でだけ探せない」は同じ
+    for (const face of ['sidebar', 'schedule']) {
       const src = readFileSync(`src/adapter/ui/render/${face}.ts`, 'utf8');
       expect(src, `${face} が題名だけの絞り込みのまま`).toContain('matchesEntry(');
       expect(src, `${face} に matchesTitle が残っている`).not.toMatch(/matchesTitle\(/);

@@ -31,7 +31,7 @@ import {
   type TaskCard,
   taskCardsOf,
   type TaskScan,
-} from '@features/kanban/kanban-data';
+} from '@features/schedule/task-cards';
 import { createQueryScan, FRONTMATTER_SCAN_CHARS } from '@features/query/group-by';
 import {
   applyLinePatch,

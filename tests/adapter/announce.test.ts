@@ -537,7 +537,7 @@ describe('お知らせの文面は固定(#220-7)', () => {
   const KNOWN: readonly [string, string][] = [
     ['2026-08-22-window-overlap', '9f7186e0'],
     ['2026-08-22-apps-in-windows', '155f1bb6'],
-    ['2026-08-23-schedule-pane', 'ccfd21f2'],
+    ['2026-08-23-schedule-pane', 'bf8dfa8a'],
     ['2026-08-23-dated-tasks', '0214f343'],
     ['2026-08-22-link-detection', '2f5ff0ab'],
     ['2026-08-22-pane-flow', '764b5ad8'],

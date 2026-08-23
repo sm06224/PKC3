@@ -20,7 +20,7 @@
  * 🔑 **pure module**。⚠ `new Date()` を読まない ── 「今日」は呼び側が渡す
  * (読むと test が実行した日で変わる)。
  */
-import type { TaskCard } from '../kanban/kanban-data';
+import type { TaskCard } from './task-cards';
 import type { EntryMeta } from '../../core/model/entry-meta';
 /**
  * ⚠ **日付の切り方は `stored-date.ts` 1 か所**(`tests/features/stored-date.test.ts`

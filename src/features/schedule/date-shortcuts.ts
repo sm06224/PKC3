@@ -26,7 +26,7 @@
  * 🔑 **pure module**。⚠ `new Date()` を内部で読まない ── 呼び側が渡す
  * (読むと test が「実行した日」で変わる。CLAUDE.md「『今年』は引数で渡す」)。
  */
-import { dateKey } from '../calendar/calendar-data';
+import { dateKey } from './month-grid';
 
 /** 近道の並び。⚠ **画面の並び順そのもの**(近い順)。 */
 export const DATE_SHORTCUTS = [

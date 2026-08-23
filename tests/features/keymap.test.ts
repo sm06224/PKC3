@@ -274,8 +274,6 @@ describe('🔴 わきの面の鍵(user 目線レビュー U-8)', () => {
   it('⚠ 表が isAsidePane の全数を覆っている(面を足したら気づける)', () => {
     const ALL: readonly ViewMode[] = [
       'detail',
-      'calendar',
-      'kanban',
       'query',
       'dual',
       'settings',
