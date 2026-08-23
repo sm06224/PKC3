@@ -12,7 +12,7 @@ import type {
   StorageRequest,
   StorageResponse,
 } from '../../src/adapter/platform/storage/protocol';
-import { TASK_LIMITS } from '../../src/features/kanban/kanban-data';
+import { TASK_LIMITS } from '../../src/features/schedule/task-cards';
 import { contentHash64Hex } from '../../src/adapter/platform/storage/content-hash';
 
 type Op = StorageRequest['op'];
@@ -1379,6 +1379,66 @@ describe('カンバンの札を集める (#277 段②)', () => {
     expect(scan.scannedNotes, '上限を超えて読んでいる').toBe(TASK_LIMITS.notes);
     // ⚠ 切っても**読んだ分は返る**(0 件にして「無い」と見せない)
     expect(scan.cards.length, '切ったら何も返さなくなった').toBe(TASK_LIMITS.notes);
+  });
+
+  /**
+   * 🔴 **行に書いた日付が札に載る**(user 指示 2026-08-23)。
+   * ⚠ 記法(`@2026-08-25`)は**札の字から外れる** ── 残すと、同じ日付が
+   *   1 枚の札に 2 回出る(日付欄と字の両方)。
+   */
+  it('🔴 行の日付と時刻が札に載り、記法は字から外れる', async () => {
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('tk-when', '- [ ] 見積を送る @2026-08-25\n- [ ] 打合せ @2026-08-26 14:00\n- [ ] 体裁\n'),
+    });
+    const scan = await request({ op: 'taskScan', cid: 'c1' });
+    expect(scan.cards.filter((c) => c.lid === 'tk-when').map((c) => [c.text, c.date, c.time])).toEqual([
+      ['見積を送る', '2026-08-25', null],
+      ['打合せ', '2026-08-26', '14:00'],
+      // ⚠ **日付の無い行も運ぶ**(出す / 出さないを決めるのは描画側)
+      ['体裁', null, null],
+    ]);
+  });
+
+  /**
+   * 🔴 **日付を持つ札は、持たない札に押し出されない**(2026-08-23)。
+   *
+   * ⚠ 上限が 1 本だと、**体裁のチェックリストが並んだノート 1 件**で枠が埋まり、
+   *   その後ろのノートに書いた**予定が 1 つも入らない** ── いちばん要る物が
+   *   いちばん要らない物に押し出される。しかも `truncated` は立つので、
+   *   画面には「切った」としか出ず、**何が落ちたかは誰にも分からない**。
+   *
+   * 🔑 だから**別々に数える**。この test はその 1 点だけを見る。
+   */
+  it('🔴 日付の無い項目で枠が埋まっても、日付のある項目は入る', async () => {
+    await request({ op: 'openContainer', cid: 'c-starve', title: 'x' });
+    /**
+     * ⚠ **同じノートの中**でノイズを先に置き、予定を最後に置く。
+     * 🔑 これで 2 つの誤りを同時に殺せる ──
+     *   ① 上限を 1 本で数える(予定が枠から溢れる)
+     *   ② 枠が埋まった時点で**そのノートの残りを読むのをやめる**
+     *      (`continue` ではなく `break` にする)── 後ろの予定に永久に届かない
+     */
+    const lines = Array.from({ length: TASK_LIMITS.undated + 20 }, (_, i) => `- [ ] 体裁 ${i}`);
+    lines.push('- [ ] 予定 @2026-08-25');
+    await request({
+      op: 'upsertEntry',
+      cid: 'c-starve',
+      entry: entry('starve-1', lines.join('\n') + '\n'),
+    });
+    const scan = await request({ op: 'taskScan', cid: 'c-starve' });
+    // ⚠ 前提の検算:ノイズが本当に枠を埋め切っていること(埋まっていなければ空振り)
+    expect(
+      scan.cards.filter((c) => c.date === null).length,
+      '前提が崩れている(日付の無い枠が埋まっていない)',
+    ).toBe(TASK_LIMITS.undated);
+    expect(
+      scan.cards.filter((c) => c.date !== null).map((c) => [c.text, c.date]),
+      '日付のある予定が、体裁のチェックリストに押し出された',
+    ).toEqual([['予定', '2026-08-25']]);
+    // 🔑 落としたことは黙らない
+    expect(scan.truncated, '落としたのに黙っている').toBe(true);
   });
 });
 

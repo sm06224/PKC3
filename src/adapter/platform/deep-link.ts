@@ -44,6 +44,7 @@
  * ⚠ 本文の見出しへのリンク(`#slug`)でも `hashchange` は飛ぶが、
  * `#pkc?` で始まらないものは読まないので何もしない(断片も消さない)。
  */
+import type { BrowseMode } from '@adapter/ui/render/browse-mode';
 import { VIEW_MODES, isViewMode, type ViewMode } from '../state/app-state';
 import { isSealedView } from '../../features/sealed';
 import {
@@ -149,11 +150,29 @@ function isOpenable(name: string): name is ViewMode {
  */
 export function readViewDeepLink(
   target: DeepLinkTarget = windowDeepLinkTarget(),
-): { view: ViewMode } | { unusable: true } | null {
+): { view: ViewMode } | { moved: BrowseMode } | { unusable: true } | null {
   const name = parseViewDeepLink(target.hash);
   if (name === null) return null;
+  const moved = MOVED_VIEWS[name];
+  // 🔴 **引っ越した面は、引っ越し先へ送る**(下の表)── 断らない
+  if (moved !== undefined) return { moved };
   return isOpenable(name) ? { view: name } : { unusable: true };
 }
+
+/**
+ * 🔴 **引っ越した面**(#292 段⑤、2026-08-23)。
+ *
+ * カレンダーと やることの板 は**中央の面をやめて、左の列の「予定」タブ**になった。
+ * ⚠ アドレスに書けた字を**黙って断らない** ── 栞にしていた人には、
+ *   ある日から「画面名は …」という断り文だけが出ることになる。
+ * 🔑 **同じものが在る場所へ送る**のが引っ越しの作法である(消すのではない)。
+ * ⚠ 表に載せた字は `isOpenable` より**先に**見る ── そうしないと、
+ *   `VIEW_MODES` から消した瞬間に「使えない名前」として弾かれる。
+ */
+const MOVED_VIEWS: Readonly<Record<string, BrowseMode>> = {
+  calendar: 'schedule',
+  kanban: 'schedule',
+};
 
 /**
  * 🔴 **断り文**(user が次に何を打てばよいかが分かる形)。
@@ -165,6 +184,12 @@ export function readViewDeepLink(
  * 「打ち間違いの字をそのまま画面へ返さない」には触れない。
  * 🔑 **打つ字を先頭に置く** ── 状態の行は 1 行なので、狭い窓では後ろが切れる。
  */
+/**
+ * 引っ越しの案内。⚠ **どこへ行ったか**を書く(「使えません」で終わらせない)。
+ */
+export const MOVED_MESSAGE =
+  'カレンダーとやることの板は、左の列の「予定」に移りました。そちらを開きました';
+
 export function unusableViewMessage(): string {
   return `画面名は ${openableViewNames().join(' / ')} のどれかです`;
 }
@@ -177,6 +202,11 @@ export interface DeepLinkWiring {
    * **アドレスから開いた集計だけ表が出ない**形になる(`open-view.ts` を渡す)。
    */
   readonly openView: (mode: ViewMode) => void;
+  /**
+   * 🔴 **引っ越した面を開く**(#292 段⑤)── 左の列のタブ。
+   * ⚠ 省略可 ── 無い配線(古い test)では**開かないだけ**で、他は壊れない。
+   */
+  readonly openBrowse?: (mode: BrowseMode) => void;
   /**
    * 🔴 **連れてきたノートを選ぶ**(#300 段③ の直し、2026-08-22)。
    *
@@ -233,6 +263,20 @@ export function connectViewDeepLink(wiring: DeepLinkWiring): () => void {
       const here = parseViewDeepLinkEntry(target.hash);
       if (here !== null) wiring.selectEntry?.(here.containerId, here.lid);
       wiring.openView(read.view);
+      return;
+    }
+    if ('moved' in read) {
+      /**
+       * 🔴 **引っ越し先を開いて、そう言う**(段⑤)。
+       * ⚠ 黙って開くと「打った字と違う所が出た」になる ── **理由を出す**。
+       * ⚠ 断片は消す(残すと読み直しのたびに同じ案内が出る)。
+       */
+      hold(null);
+      const here = parseViewDeepLinkEntry(target.hash);
+      if (here !== null) wiring.selectEntry?.(here.containerId, here.lid);
+      target.clearHash();
+      wiring.openBrowse?.(read.moved);
+      wiring.fail(MOVED_MESSAGE);
       return;
     }
     // ⚠ 使えない名前は**残す意味が無い**ので、その場で消す

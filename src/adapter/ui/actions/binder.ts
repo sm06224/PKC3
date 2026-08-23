@@ -19,6 +19,12 @@ import { filerRows, operationTargets, visibleSelection } from '@features/relatio
 import { archetypeLabel } from '@adapter/ui/render/sidebar';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
 import { insertText } from '@adapter/ui/render/row-swap';
+import { insertionForLineDate } from '@features/schedule/line-date';
+import {
+  DATE_SHORTCUTS,
+  isDateShortcut,
+  shortcutDate,
+} from '@features/schedule/date-shortcuts';
 import { isImageAssetMime } from '@features/asset/asset-ref-format';
 import { adoptableUrls, rewriteAdopted } from '@features/asset/inline-url-adopt';
 import { convertPastedHtml } from '@features/markdown/html-to-markdown';
@@ -48,6 +54,7 @@ import { copyMarkdownAndHtml, copyPlainText } from '@adapter/platform/clipboard'
 import { cleanForClipboard } from '@features/export/clipboard-html';
 import {
   confirmInApp,
+  pickDateInApp,
   isAppDialogOpen,
   type ConfirmOptions,
 } from '@adapter/ui/render/app-dialog';
@@ -548,6 +555,13 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
    */
   'toggle-task',
   'calendar-set-date',
+  /**
+   * 🔴 **ノート 1 件の日付も disk への書込**(#292 段④)── frontmatter を書く。
+   * ⚠ `calendar-set-date` と同じ理由でここに要る(取り込みが entry を総入れ替え
+   *   している裏で frontmatter を書かせない)。機械検査は `tests/repo-hygiene.test.ts`。
+   */
+  'set-entry-date',
+  'clear-entry-date',
   'toggle-app-tile',
   /**
    * 🔴 **作るのも disk への書込である**(2026-08-19、機械検査が見つけた 4 件)。
@@ -1433,6 +1447,51 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 書式パネル(P8 段⑥)。⚠ **規則は `applyFormat` が持つ** ── ここは
    * 「選択を読む → 渡す → 書き戻す」だけ。op ごとの知識をここに漏らさない。
    */
+  /**
+   * 🔴 **日付を入れる道具**(user 指示 2026-08-23)。
+   *
+   * > 「**日付の記法としては入力がめんどくさいから、日付と時刻を簡単に入力できるし、
+   * > ついてくるツールとか用意されてもいいかも**」
+   *
+   * ⚠ **`@` を打ったら出る形は採らない** ── PKC3 に補完の機構が 1 つも無いうえ、
+   *   `@[card](…)` と 1 打鍵目で衝突し、何より不可侵指示
+   *   「**マウスだけで完結し、キーボードは近道**」に当たる(打鍵でしか出ない道具は、
+   *   マウスの人には存在しないのと同じ)。だから**書式の帯のボタン**にする。
+   * ⚠ 挿す字は `insertionForLineDate` が作る ── ここで組み立てない(§7)。
+   * ⚠ 挿すのは `insertText` ── **`Ctrl+Z` で戻せる**形にする。
+   */
+  'insert-date': (_dispatcher, _target, _services, root) => {
+    const opened = formatTarget(root);
+    if (opened === null) return;
+    /**
+     * 🔴 **caret を先に控える**(2026-08-23、実ブラウザの smoke が見つけた)。
+     *
+     * ⚠ 直す前は挿す直前に `ta.selectionStart` を読んでいた ── **実機では 0 に
+     *   戻っていた**ので、日付が**本文の先頭**に入った
+     *   (`@2026-08-24 14:00- [ ] 見積を送る`)。
+     * ⚠ **unit では出ない** ── happy-dom は `showModal()` で焦点を動かしても
+     *   選択を保つので、緑のまま出荷される形だった(CLAUDE.md §5「環境差」)。
+     * 🔑 `<dialog>` は焦点を借りて返すが、**選択位置までは返さない** ──
+     *   置き換えの作法 §10 ③「後始末をしていたか」を、借りる側が自分でやる。
+     */
+    const at = { start: opened.selectionStart, end: opened.selectionEnd };
+    void pickDateInApp(root, new Date(), DATE_SHORTCUTS, (id, now) =>
+      isDateShortcut(id) ? shortcutDate(id, now) : '',
+    ).then((picked) => {
+      if (picked === null) return;
+      /**
+       * ⚠ **欄は引き直す** ── ダイアログを開いている間に面が組み直されると、
+       *   最初に掴んだ節点は `isConnected === false` になり、挿しても画面に出ない。
+       */
+      const ta = formatTarget(root);
+      if (ta === null) return;
+      // ⚠ `execCommand('insertText')` は**焦点が要る**(器が焦点を返した後でも念のため)
+      ta.focus();
+      // ⚠ 範囲外は `setSelectionRange` が丸める(組み直しで短くなっていても落ちない)
+      ta.setSelectionRange(at.start, at.end);
+      insertText(ta, insertionForLineDate(ta.value.slice(0, at.start), picked.date, picked.time));
+    });
+  },
   'format-text': (_dispatcher, target, _services, root) => {
     const op = target.getAttribute('data-pkc-format') as FormatOp | null;
     // ⚠ live の 1 面では活性の行(`row-source`)に効く(`formatTarget` の注記)
@@ -1602,6 +1661,65 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'toggle-show-done': (dispatcher) =>
     dispatcher.dispatch({ type: 'TOGGLE_SHOW_DONE_TASKS' }),
+  /**
+   * 🔴 **日付のない項目も出す / 出さない**(user 指示 2026-08-23)。
+   * ⚠ `toggle-show-done`(済んだ**行**)/ `toggle-show-archived`(片付けた**ノート**)
+   *   とは別物 ── 3 つとも相乗りさせない(見ている次元が違う)。
+   */
+  'toggle-show-undated': (dispatcher) =>
+    dispatcher.dispatch({ type: 'TOGGLE_SHOW_UNDATED_TASKS' }),
+  /**
+   * 予定の面の月送り。⚠ **遷移先は描画時に焼いてある**(`data-pkc-nav-*`)──
+   * binder に「いま表示している月」の別ソース(実時刻)を持たせない。
+   */
+  'schedule-nav': (dispatcher, target) => {
+    const year = Number(target.getAttribute('data-pkc-nav-year'));
+    const month = Number(target.getAttribute('data-pkc-nav-month'));
+    if (!Number.isFinite(year) || !Number.isFinite(month)) return;
+    dispatcher.dispatch({ type: 'SET_CALENDAR_MONTH', year, month });
+  },
+  /**
+   * 🔴 **ノート 1 件に日付を付ける / 選び直す**(#292 段④)。
+   * ⚠ 掴む札がまだ無いとき(日付を 1 度も付けていないノート)のための口である ──
+   *   主の道は予定の面で掴んで落とすこと。
+   */
+  'set-entry-date': (dispatcher, _target, _services, root) => {
+    const lid = dispatcher.getState().selectedLid;
+    if (lid === null) return;
+    void pickDateInApp(root, new Date(), DATE_SHORTCUTS, (id, now) =>
+      isDateShortcut(id) ? shortcutDate(id, now) : '',
+    ).then((picked) => {
+      if (picked === null) return;
+      // ⚠ ノートの日付に時刻は無い(抽出列が `YYYY-MM-DD` だけを受ける)
+      dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: picked.date });
+    });
+  },
+  /** 🔴 **置けるなら外せる**(片道を作らない)。 */
+  'clear-entry-date': (dispatcher) => {
+    const lid = dispatcher.getState().selectedLid;
+    if (lid === null) return;
+    dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: null });
+  },
+  'schedule-today': (dispatcher) => {
+    const now = new Date();
+    dispatcher.dispatch({
+      type: 'SET_CALENDAR_MONTH',
+      year: now.getFullYear(),
+      month: now.getMonth() + 1,
+    });
+  },
+  /**
+   * 🔴 **升目を押したら、その日の束へ送る**(掴まずに使う道)。
+   * ⚠ 束が無い日(予定 0 件)は**何も起きない** ── 空の束を作ると、
+   *   押しても何も無い見出しが増える。
+   */
+  'schedule-pick-day': (_dispatcher, target, _services, root) => {
+    const date = target.getAttribute('data-pkc-drop-date');
+    if (date === null) return;
+    root
+      .querySelector(`[data-pkc-region="schedule-group"][data-pkc-drop-date="${date}"]`)
+      ?.scrollIntoView({ block: 'nearest' });
+  },
   'retry-persist': (dispatcher) => dispatcher.dispatch({ type: 'RETRY_PERSIST' }),
   /**
    * 🔴 **フォルダへ入る / ルートへ戻る**(#240 段①)。
@@ -2037,11 +2155,23 @@ const ACTIONS: Record<string, ActionHandler> = {
  * 独自 mime ── `Files` を見る既存の経路(添付 / 本文への貼付)に一切触らせない。
  */
 const PKC_DRAG = 'application/x-pkc-lids';
+/**
+ * 🔴 **予定の札を運ぶ**(双方向。user 指示 2026-08-23)。
+ *
+ * ⚠ **`PKC_DRAG` とは別の型**にする ── あちらは「ノートをフォルダへ移す」で、
+ *   こちらは「**本文の 1 行の日付を変える**」。混ぜると、フォルダの行へ札を
+ *   落としたときに**ノートを移そうとする**(見当違いの操作が黙って走る)。
+ * ⚠ 荷物は `lid` と**原文の行番号**だけ ── 時刻は state から引く
+ *   (画面に出ている物と同じ出どころにする。§7)。
+ */
+const PKC_TASK_DRAG = 'application/x-pkc-task';
 
 const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
   'create-entry': '[data-pkc-field="create-run"]',
   'edit-entry': '[data-pkc-action="start-edit"]',
   'toggle-replace': '[data-pkc-action="toggle-replace"]',
+  // ⚠ 近道は**ボタンをそのまま押す** ── 帯が無い(閲覧中の)面では何も起きない
+  'insert-date': '[data-pkc-action="insert-date"]',
   'toggle-sidebar': '[data-pkc-action="toggle-pane"][data-pkc-pane="sidebar"]',
   'toggle-inspector': '[data-pkc-action="toggle-pane"][data-pkc-pane="inspector"]',
   'view-query': '[data-pkc-action="set-view"][data-pkc-view="query"]',
@@ -2208,7 +2338,13 @@ export function bindActions(
    */
   const onMousedown = (ev: Event) => {
     const el = (ev.target as HTMLElement | null)?.closest<HTMLElement>('[data-pkc-action]');
-    if (el?.getAttribute('data-pkc-action') === 'format-text') ev.preventDefault();
+    /**
+     * ⚠ **日付の道具も同じ**(2026-08-23)── 押した瞬間に焦点が飛ぶと、
+     *   ダイアログを閉じたときに戻る先が**編集欄ではなくボタン**になり、
+     *   挿す場所(caret)が分からなくなる。
+     */
+    const act = el?.getAttribute('data-pkc-action');
+    if (act === 'format-text' || act === 'insert-date') ev.preventDefault();
   };
   const onInput = (ev: Event) => {
     if (isEditorBody(ev.target)) {
@@ -2608,6 +2744,19 @@ export function bindActions(
    */
   const onDragOver = (e: Event): void => {
     const de = e as DragEvent;
+    // 🔴 **予定の札**(双方向)── 落とし先は日の升目 / 束の見出し
+    if (de.dataTransfer?.types?.includes(PKC_TASK_DRAG) === true) {
+      const drop = dateTargetOf(de.target);
+      if (drop === null) {
+        // ⚠ **光ったままにしない** ── 通ってから別の場所で離すと「そこへ入った」と読む
+        clearDropTarget();
+        return;
+      }
+      e.preventDefault();
+      de.dataTransfer.dropEffect = 'move';
+      markDropTarget(drop.el);
+      return;
+    }
     // 🔴 **PKC の中の移動**(#240 段④)── OS からの file 受けとは**別の型**で見分ける
     if (de.dataTransfer?.types?.includes(PKC_DRAG) === true) {
       const drop = dropTargetOf(de.target);
@@ -2634,6 +2783,45 @@ export function bindActions(
   let dragFromSide: DualSide | null = null;
   const onDrop = (e: Event): void => {
     const de = e as DragEvent;
+    /**
+     * 🔴 **落としたら、その行の日付が変わる**(双方向の出口)。
+     * ⚠ 空文字の落とし先は「日付なし」= **外す**(消すのではない)。
+     * ⚠ 時刻は**持ち越す** ── 日を動かしただけで 14:00 が消えたら、
+     *   user は「勝手に消された」と読む。
+     */
+    if (de.dataTransfer?.types?.includes(PKC_TASK_DRAG) === true) {
+      const drop = dateTargetOf(de.target);
+      clearDropTarget();
+      if (drop === null) return;
+      e.preventDefault();
+      const [lid, rawLine] = (de.dataTransfer.getData(PKC_TASK_DRAG) || '').split(' ');
+      if (lid === undefined || lid === '') return;
+      const date = drop.date === '' ? null : drop.date;
+      /**
+       * 🔴 **単位が 2 つある**(段④)── 行番号が空なら
+       *   **ノート 1 件が丸ごと予定**で、書き換えるのは frontmatter の `date:` である。
+       * ⚠ 同じ落とし先に、書き換える場所が違う 2 種類が落ちてくる ── だから
+       *   ここで分ける(面ごとに 2 つの落とし先を作らない)。
+       */
+      if (rawLine === undefined || rawLine === '') {
+        dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date });
+        return;
+      }
+      const line = Number(rawLine);
+      if (!Number.isInteger(line)) return;
+      const card = dispatcher
+        .getState()
+        .taskScan?.cards.find((c) => c.lid === lid && c.line === line);
+      dispatcher.dispatch({
+        type: 'SET_TASK_DATE',
+        lid,
+        line,
+        date,
+        // ⚠ 外すときは時刻も一緒に落ちる(記法ごと剥がすため)
+        time: card?.time ?? null,
+      });
+      return;
+    }
     if (de.dataTransfer?.types?.includes(PKC_DRAG) === true) {
       const drop = dropTargetOf(de.target);
       clearDropTarget();
@@ -2674,6 +2862,34 @@ export function bindActions(
    */
   const onDragStart = (e: Event): void => {
     const de = e as DragEvent;
+    /**
+     * 🔴 **予定の札は別の荷物で運ぶ**(双方向)。
+     * ⚠ 行番号は**中の印から引く** ── 札にも同じ属性を置くと、
+     *   `[data-pkc-task-line=…]` を押す既存の経路が**札のほうに当たる**
+     *   (2026-08-23 に実際に踏んだ)。
+     */
+    const taskCard = (de.target as HTMLElement | null)?.closest<HTMLElement>(
+      '[data-pkc-region="schedule-cards"] > [data-pkc-entry], [data-pkc-region="kanban-cards"] > [data-pkc-entry]',
+    );
+    if (taskCard !== null && taskCard !== undefined && de.dataTransfer) {
+      const lid = taskCard.getAttribute('data-pkc-entry');
+      /**
+       * ⚠ **ノート 1 件が丸ごと予定**のときは行番号が無い(段④)── 荷物の
+       *   行番号を**空**にして、落とす側が `SET_ENTRY_DATE`(frontmatter)へ回す。
+       * 🔑 印が在るかどうかで見分けない ── **札自身の印**(`data-pkc-whole-note`)
+       *   で見る(印の有無は見た目の都合であって、単位の宣言ではない)。
+       */
+      const whole = taskCard.hasAttribute('data-pkc-whole-note');
+      const line = whole
+        ? ''
+        : taskCard.querySelector('[data-pkc-task-line]')?.getAttribute('data-pkc-task-line');
+      if (lid !== null && line !== null && line !== undefined) {
+        dragFromSide = null;
+        de.dataTransfer.setData(PKC_TASK_DRAG, `${lid} ${line}`);
+        de.dataTransfer.effectAllowed = 'move';
+        return;
+      }
+    }
     const row = (de.target as HTMLElement | null)?.closest<HTMLElement>('[data-pkc-entry]');
     const lid = row?.getAttribute('data-pkc-entry') ?? null;
     /**
@@ -2707,6 +2923,15 @@ export function bindActions(
     de.dataTransfer.effectAllowed = 'move';
   };
   const onDragEnd = (): void => clearDropTarget();
+  /**
+   * 予定の落とし先(日の升目 / 束の見出し)。`null` = 落とせない場所。
+   * ⚠ **空文字は「日付なし」**(属性が無いのとは別物)── だから `null` で表す。
+   */
+  const dateTargetOf = (target: EventTarget | null): { el: HTMLElement; date: string } | null => {
+    const el = (target as HTMLElement | null)?.closest<HTMLElement>('[data-pkc-drop-date]');
+    if (!el || !root.contains(el)) return null;
+    return { el, date: el.getAttribute('data-pkc-drop-date') ?? '' };
+  };
   /** 落とし先(フォルダの行 / パンくずの段)。`undefined` = 落とせない場所。 */
   const dropTargetOf = (target: EventTarget | null): { el: HTMLElement; lid: string | null } | undefined => {
     const el = (target as HTMLElement | null)?.closest<HTMLElement>('[data-pkc-drop]');

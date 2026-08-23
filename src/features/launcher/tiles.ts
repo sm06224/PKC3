@@ -38,7 +38,7 @@ export interface LauncherTile {
    * 起動の仕方。⚠ `url` は外部サイト、`app` は同梱 HTML、
    * `office` / `dual` は**組み込み**(entry を持たない ── #148 / #241)。
    */
-  kind: 'app' | 'url' | 'office' | 'dual' | 'calendar' | 'kanban';
+  kind: 'app' | 'url' | 'office' | 'dual';
   /** `kind === 'url'` のときの飛び先。 */
   url?: string;
   /** `kind === 'app'` のときの実体(IDB Blob の鍵)。 */
@@ -187,27 +187,6 @@ export function dualTile(): LauncherTile {
  * (組み込みはアプリの一覧から開く)。描画器も面も生きているので、
  * 封印を解くのは**導線の付け直し**である(`features/sealed.ts` の言うとおり)。
  */
-export const CALENDAR_TILE_LID = 'builtin:calendar';
-
-export function calendarTile(): LauncherTile {
-  return { lid: CALENDAR_TILE_LID, title: 'カレンダー', group: '', kind: 'calendar' };
-}
-
-/**
- * 🔴 **カンバンの組み込みタイル**(#277 段②-b。封印の解除)。
- *
- * 🔑 カレンダー(#276)と**同じ形で戻す** ── 上の帯へ切替を返すのではなく、
- * アプリの一覧から開く。⚠ そして中身は作り替えてある:札は
- * 「`todo` アーキタイプのノート」ではなく**本文のチェック項目**である
- * (`features/kanban/kanban-data.ts`)── `todo` は封印中で作れないので、
- * 導線だけ戻しても盤面は永久に空だった。
- */
-export const KANBAN_TILE_LID = 'builtin:kanban';
-
-export function kanbanTile(): LauncherTile {
-  return { lid: KANBAN_TILE_LID, title: 'やることの板', group: '', kind: 'kanban' };
-}
-
 /**
  * 組み込み分を entry 由来の一覧へ合流させる。
  *
@@ -226,7 +205,14 @@ export function withBuiltinTiles(
    * 2 ペインは**アプリに最初から在る**ので先頭、Office は**入れた端末だけ**なので
    * その次 ── 入れたり消したりで 2 ペインの位置が動かない向きに並べる。
    */
-  const builtin: LauncherTile[] = [dualTile(), calendarTile(), kanbanTile()];
+  /**
+   * ⚠ **カレンダー / やることの板は外した**(#292 段⑤、2026-08-23)──
+   *   あの 2 つは「アプリ」ではなく**ノートの見方**だった。
+   * 🔑 見分け方:**それを閉じたとき user が失うものは何か。** Office を閉じれば
+   *   Office が消えるだけだが、**カレンダーを閉じて自分のノートが見えなくなるのは
+   *   おかしい**。引っ越し先は左の列の「予定」タブ。
+   */
+  const builtin: LauncherTile[] = [dualTile()];
   if (opts.office) builtin.push(officeTile());
   return [...builtin, ...tiles];
 }
@@ -248,6 +234,4 @@ export function tileSelectsEntry(tile: LauncherTile): boolean {
 export const BUILTIN_KINDS: ReadonlySet<LauncherTile['kind']> = new Set([
   'office',
   'dual',
-  'calendar',
-  'kanban',
 ]);

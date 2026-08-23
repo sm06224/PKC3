@@ -439,14 +439,17 @@ describe('main.ts の配線(原文 pin ── #174)', () => {
    *   下の `if (tile.assetKey === undefined) return;` に落ちて**無言で return**、
    *   「やることの板」が**完全な dead click** になる。
    */
-  it('🔴 組み込みの 3 つは、どれも別窓の口(openView)へ行く', () => {
-    for (const kind of ['dual', 'calendar', 'kanban'] as const) {
-      const h = harness(null);
-      void launchTile({ lid: `builtin:${kind}`, title: kind, group: '', kind }, h.deps);
-      expect(h.viewOpens, `${kind} が別窓の口へ行かない(無言の dead click)`).toEqual([kind]);
-      expect(h.opened, 'ここで直に窓を開いてはいけない(判断は view-window)').toEqual([]);
-      expect(h.failures, `${kind} で理由が出た`).toEqual([]);
-    }
+  /**
+   * ⚠ **組み込みは 2 ペインだけになった**(#292 段⑤、2026-08-23)── カレンダーと
+   *   やることの板は「アプリ」ではなく**ノートの見方**だったので、左の列のタブへ
+   *   引っ越した(別窓の仕掛けそのものは Office と今後のアプリのために残る)。
+   */
+  it('🔴 組み込みは別窓の口(openView)へ行く', () => {
+    const h = harness(null);
+    void launchTile({ lid: 'builtin:dual', title: 'dual', group: '', kind: 'dual' }, h.deps);
+    expect(h.viewOpens, '別窓の口へ行かない(無言の dead click)').toEqual(['dual']);
+    expect(h.opened, 'ここで直に窓を開いてはいけない(判断は view-window)').toEqual([]);
+    expect(h.failures, '理由が出た').toEqual([]);
   });
 
   /**
@@ -456,9 +459,7 @@ describe('main.ts の配線(原文 pin ── #174)', () => {
    */
   it('🔴 組み込みタイルは同期に口を叩く(gesture を切らない)', () => {
     const h = harness(null);
-    void launchTile({ lid: 'builtin:calendar', title: 'c', group: '', kind: 'calendar' }, h.deps);
-    expect(h.viewOpens, 'await をまたいでから開いている(Safari で塞がれる)').toEqual([
-      'calendar',
-    ]);
+    void launchTile({ lid: 'builtin:dual', title: 'd', group: '', kind: 'dual' }, h.deps);
+    expect(h.viewOpens, 'await をまたいでから開いている(Safari で塞がれる)').toEqual(['dual']);
   });
 });

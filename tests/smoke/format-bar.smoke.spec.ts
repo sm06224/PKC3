@@ -221,3 +221,64 @@ test('🔴 追記・保存しても本文のスクロールがトップへ戻ら
   //    押しても切り替わらないので、smoke ではその窓を作れない
   expect(errors).toEqual([]);
 });
+
+/**
+ * 🔴 **日付を入れる道具**(user 指示 2026-08-23)。
+ *
+ * > 「**日付の記法としては入力がめんどくさいから、日付と時刻を簡単に入力できるし、
+ * > ついてくるツールとか用意されてもいいかも**」
+ *
+ * 🔴 unit(`tests/adapter/format-append.test.ts`)は繋がりを見ている。
+ * **ここが見るのは「実機の `<input type=date/time>` がそのまま使えるか」**である ──
+ * 格子を自作せず native を使う判断は、**実ブラウザでしか裏が取れない**
+ * (happy-dom の `<input type="date">` は文字列を入れているだけ)。
+ */
+test('🔴 日付の道具が実機で開き、選んだ日付が本文に入る', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await ta.fill('- [ ] 見積を送る');
+  // ⚠ caret を末尾へ(実 UI と同じ ── 押す前に位置は決まっている)
+  await ta.evaluate((el) => {
+    const t = el as HTMLTextAreaElement;
+    t.setSelectionRange(t.value.length, t.value.length);
+  });
+
+  await clickReal(page, '[data-pkc-action="insert-date"]');
+  const dialog = page.locator('[data-pkc-region="app-dialog"]');
+  await expect(dialog, '日付の窓が開かない').toBeVisible();
+
+  /**
+   * 🔴 **端末のピッカーをそのまま使っている**ことを、型で確かめる。
+   * ⚠ ここが `text` に落ちていたら、地域の書式もキーボード操作も自作になっている。
+   */
+  await expect(dialog.locator('[data-pkc-field="pick-date"]')).toHaveAttribute('type', 'date');
+  await expect(dialog.locator('[data-pkc-field="pick-time"]')).toHaveAttribute('type', 'time');
+
+  // 🔑 近道は**日付欄を埋めるだけ**(閉じない ── そのまま時刻も決められる)
+  await clickReal(page, '[data-pkc-shortcut="tomorrow"]');
+  await expect(dialog, '近道を押しただけで閉じた').toBeVisible();
+  const picked = await dialog.locator('[data-pkc-field="pick-date"]').inputValue();
+  expect(picked, '近道で日付が埋まっていない').toMatch(/^\d{4}-\d{2}-\d{2}$/);
+
+  // 時刻も入れる(`fill` は実機の time 入力にも効く)
+  await dialog.locator('[data-pkc-field="pick-time"]').fill('14:00');
+  await clickReal(page, '[data-pkc-field="dialog-ok"]');
+  await expect(dialog).toBeHidden();
+
+  // 🔴 本文に入り、記法として読める形になっている
+  await expect(ta, '本文に入っていない').toHaveValue(`- [ ] 見積を送る @${picked} 14:00`);
+
+  /**
+   * 🔴 **`Ctrl+Z` で戻せる**(user が打った字を捨てさせない)。
+   * ⚠ これは**実機でしか通らない主張**である ── `execCommand('insertText')` が
+   *   在るのは実ブラウザだけで、unit は必ず fallback を通る(CLAUDE.md §2)。
+   */
+  await ta.press('ControlOrMeta+z');
+  await expect(ta, '入れた日付が Ctrl+Z で戻らない').toHaveValue('- [ ] 見積を送る');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

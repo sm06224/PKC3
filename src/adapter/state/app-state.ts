@@ -12,8 +12,7 @@ import { DEFAULT_ENTRY_SORT, NATURAL_DESC, type EntrySort } from '@features/filt
 import { resolveCanonicalParents, reorderSibling } from '@features/relation/tree';
 import { extractMeta, seedBodyFor } from '@features/flavor';
 import { applyBodyRewrite, type BodyRewrite } from '@features/markdown/body-rewrite';
-import { listTaskItems } from '@features/markdown/task-count';
-import { replaceTaskCards, type TaskScan } from '@features/kanban/kanban-data';
+import { replaceTaskCards, type TaskScan } from '@features/schedule/task-cards';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import type { LauncherTile } from '@features/launcher/tiles';
 import type {
@@ -71,12 +70,23 @@ export type AppPhase = 'initializing' | 'ready' | 'editing' | 'error';
  */
 export const VIEW_MODES = [
   'detail',
-  'calendar',
-  'kanban',
+  /**
+   * 🔴 **カレンダー / やることの板は、ここから外した**(#292 段⑤、2026-08-23)。
+   *
+   * > user 指示:「**ユーザーはもう一つ PKC が開いて混乱すると思う /
+   * > ちゃんとした導線に作り直しなさい**」
+   *
+   * ⚠ 中央の面である限り、開くと**本文が消える**(#300 で名指しされた実害)。
+   *   別窓へ逃がしても「もう一つ PKC が開く」だけで、根は同じだった。
+   * 🔑 引っ越し先は**左の列の「予定」タブ**(`browse.ts` の表:左 = ノート全体)。
+   *   ⚠ **同じものが在る場所**なので、これは削除ではなく引っ越しである ──
+   *   代わりに何ができるようになったかは `docs/development/schedule-redesign-2026-08.md` §5。
+   * ⚠ 栞(`#pkc?view=calendar`)は `deep-link.ts` の `MOVED_VIEWS` が引っ越し先へ送る。
+   */
   /**
    * 🔴 **集計**(#184)── frontmatter の 1 つの key で束ねて表にする面。
    * ⚠ **aside ではない**(ノートを映す面である)ので、押した行の選択は
-   * この面に留まる ── かんばん / カレンダーと同じ扱い。
+   * この面に留まる。
    */
   'query',
   /**
@@ -137,8 +147,6 @@ export function isAsidePane(view: ViewMode): boolean {
  */
 const VIEW_LABELS: Record<ViewMode, string> = {
   detail: '本文',
-  calendar: 'カレンダー',
-  kanban: 'やることの板',
   query: '集計',
   dual: '2 ペインで整理',
   settings: '設定',
@@ -291,6 +299,22 @@ export interface AppState {
    * ⚠ 保存しない(その場の見え方)── `showArchived` と同じ扱い。
    */
   showDoneTasks: boolean;
+  /**
+   * 🔴 **日付のない項目も出すか**(user 指示 2026-08-23。既定 **false**)。
+   *
+   * > 「**そもそもすべての本文に存在するチェックリストが、なぜ看板として表示される
+   * > のか意味がわからない。文章の体裁としてチェックリストを使いたい場面もある。
+   * > それが全て看板に出てくる。これはただのノイズだよ**」
+   *
+   * 🔑 既定で出すのは **`@2026-08-25` を書いた行**だけ ── それが「予定」である。
+   * ⚠ ただし**捨てない。畳む** ── 「体裁のつもり」と「日付を書き忘れたやること」は
+   *   本文から見分けられないので、片方だけ選ぶと必ず取りこぼす。
+   *   1 押しで**全部の一覧が戻る**形にして、既定だけノイズ 0 にする。
+   * ⚠ `showDoneTasks` / `showArchived` と**別の旗**である ──
+   *   あちらは「済んだ行」「片付けたノート」で、こちらは「日付の有無」。
+   * ⚠ 保存しない(その場の見え方)。
+   */
+  showUndatedTasks: boolean;
   /** 選択 entry の履歴 panel(P5b)。開いた時点のスナップショット ── 選択遷移 /
    *  編集開始 / view 切替で畳む。boot で revisions に触れない原則の受け皿。 */
   revisionPanel: { lid: string; items: readonly RevisionItem[] } | null;
@@ -474,6 +498,7 @@ export const initialState: AppState = {
   calendarMonth: null,
   showArchived: false,
   showDoneTasks: false,
+  showUndatedTasks: false,
   revisionPanel: null,
   trashPanel: null,
   linkedFiles: new Map(),
@@ -546,6 +571,13 @@ export type UserAction =
    */
   | { type: 'REFRESH_LAUNCHER_TILES' }
   /**
+   * 🔴 **予定のタブを開いたときに集める**(#292 段③)。
+   * ⚠ ランチャーと同じ流儀 ── 探し方(`browseMode`)は state に持たないので、
+   *   「開いた」を知っているのは `main.ts` である。前の束は**消さない**
+   *   (読み直しの間に空白を出さない)。
+   */
+  | { type: 'REFRESH_TASK_SCAN' }
+  /**
    * タイル設定を書き戻した ack(P8 段⑭)。⚠ **開いている body も差し替える**。
    * ⚠ `body === null` は失敗(書けなかった)── **ロックは必ず解く**。
    */
@@ -561,6 +593,12 @@ export type UserAction =
    *   (経路は `REQUEST_FRONTMATTER_SET` = todo のトグルと同じ 1 本)。
    */
   | { type: 'SET_ENTRY_DATE'; lid: string; date: string | null }
+  /**
+   * 🔴 **本文の 1 行の日付**(双方向。user 指示 2026-08-23)。
+   * ⚠ `SET_ENTRY_DATE`(ノート 1 件が丸ごと予定)とは**単位が違う**。
+   * ⚠ `date: null` は予定から外す。
+   */
+  | { type: 'SET_TASK_DATE'; lid: string; line: number; date: string | null; time?: string | null }
   /**
    * 🔴 **チェックの印を付け外しする**(#277)。`line` は**原文の行番号**。
    * ⚠ 索引(何番目のチェックか)ではなく**行**で指す ── 索引だと、数え方が
@@ -635,6 +673,7 @@ export type UserAction =
   | { type: 'TOGGLE_SHOW_ARCHIVED' }
   /** 板の「完了」を開く / 畳む(2026-08-20。設計 doc §4-4)。 */
   | { type: 'TOGGLE_SHOW_DONE_TASKS' }
+  | { type: 'TOGGLE_SHOW_UNDATED_TASKS' }
   | { type: 'RETRY_PERSIST' }
   /** lid / title は binder が生成して渡す(reducer は純粋のまま ── Date を呼ばない)。
    *  body 省略時は flavor seed。edit:false は「作って選択するだけ」(添付取込等 ──
@@ -1142,10 +1181,10 @@ function reduceCore(
           queryGroups: null,
           queryFailed: false,
           /**
-           * 🔴 **カンバンの札も再読込で捨てる**(集計と同じ理由 ── #277 段②-b)。
+           * 🔴 **予定の札も再読込で捨てる**(集計と同じ理由 ── #277 段②-b)。
            * ⚠ 取込はここを通るので、残すと**消えたノートの札**が盤面に残り、
            *   押すと「見つからない」になる。⚠ 捨てるだけでは「集めています…」で
-           *   止まるので、**面を開いていれば集め直しも頼む**(対で要る)。
+           *   止まるので、**一度でも集めていれば集め直しも頼む**(対で要る)。
            */
           taskScan: null,
           taskScanFailed: false,
@@ -1157,7 +1196,23 @@ function reduceCore(
           ...(state.viewMode === 'query'
             ? [{ type: 'REQUEST_QUERY_SCAN' as const, key: state.queryKey }]
             : []),
-          ...(state.viewMode === 'kanban' ? [{ type: 'REQUEST_TASK_SCAN' as const }] : []),
+          /**
+           * 🔴 **予定は「開いているか」ではなく「一度でも集めたか」で頼み直す**
+           * (#292 段⑤、2026-08-23)。
+           *
+           * ⚠ 中央の面だった頃は `state.viewMode === 'kanban'` で足りたが、
+           *   予定は**左の列のタブ**になったので、reducer からは開いているか
+           *   どうかが見えない(`BrowseMode` は state に持たせていない ──
+           *   「どう探すか」は画面側の都合で container のデータではない)。
+           * 🔑 だから**直前に札を持っていたか**で決める ── 持っていたなら
+           *   その user は予定を開いており、いま `null` に落としたので
+           *   頼み直さないと**「集めています…」で止まったまま**になる。
+           * ⚠ 一度も開いていない user には撃たない(全ノートの走査を、
+           *   予定を使わない user に負わせない ── 集計と同じ流儀)。
+           * ⚠ **判定を `main.ts` へ出さない** ── あちらはどの test からも
+           *   実行されない(CLAUDE.md §2)。
+           */
+          ...(state.taskScan === null ? [] : [{ type: 'REQUEST_TASK_SCAN' as const }]),
         ],
       };
     }
@@ -1395,16 +1450,15 @@ function reduceCore(
         // ⚠ ランチャーの枝は #241 段⑥-b で畳んだ ── アプリの一覧は**左の列の
         //    タブ**が持つ面になったので、読み直しは `REFRESH_LAUNCHER_TILES`
         //    (`main.ts` が探し方の切替で撃つ)1 本である
-        // 🔑 **カンバンも同じ流儀**(#277 段②-b)── 開いたときに集める。
-        // ⚠ ここが唯一の入口ではない ── 札は `BODY_REWRITTEN` の ack でも
-        //   その場で更新される(押した札が往復を待たずに動く)。
+        // ⚠ **予定は中央の面ではない**(#292 段⑤)── 左の列のタブなので、
+        //    集め直しは `main.ts` が `REFRESH_TASK_SCAN` で頼む。
         events:
           action.mode === 'query'
             ? [{ type: 'REQUEST_QUERY_SCAN', key: state.queryKey }]
-            : action.mode === 'kanban'
-              ? [{ type: 'REQUEST_TASK_SCAN' }]
-              : [],
+            : [],
       };
+    case 'REFRESH_TASK_SCAN':
+      return { state, events: [{ type: 'REQUEST_TASK_SCAN' }] };
     case 'REFRESH_LAUNCHER_TILES':
       // ⚠ **毎回要求する**。ただし前回のタイルは消さない(古い並びを出したまま
       //    読み直し、届いたら差し替える ── 「読み込んでいます…」を挟まない)
@@ -1862,6 +1916,36 @@ function reduceCore(
       // 失敗は非致命。理由は effect が OP_FAILED で別に出す(phase は落とさない)
       return { state: { ...state, writeLock: null, error: action.error }, events: [] };
     }
+    /**
+     * 🔴 **面から予定を動かす**(user 指示 2026-08-23「なんで双方向にする発想が
+     * でねぇんだよ」)。⚠ `TOGGLE_TASK` と**同じ形** ── 書換は 1 本
+     * (`REQUEST_BODY_REWRITE`)を通り、面が独自の書込経路を持たない(§7)。
+     * ⚠ `date: null` は**外す**(予定から落とす。消すのではない)。
+     */
+    case 'SET_TASK_DATE': {
+      // ready 限定(編集中の裏書換を作らない)。未知 lid は no-op
+      if (state.phase !== 'ready') return { state, events: [] };
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            rewrite: {
+              kind: 'line-date',
+              line: action.line,
+              date: action.date,
+              ...(action.time === undefined ? {} : { time: action.time }),
+            },
+          },
+        ],
+      };
+    }
     case 'TOGGLE_TASK': {
       // ready 限定(編集中の裏書換を作らない)。未知 lid は no-op
       if (state.phase !== 'ready') return { state, events: [] };
@@ -2003,6 +2087,14 @@ function reduceCore(
     case 'TOGGLE_SHOW_DONE_TASKS':
       // ⚠ 選択も走査も動かさない ── 見え方だけを変える
       return { state: { ...state, showDoneTasks: !state.showDoneTasks }, events: [] };
+    case 'TOGGLE_SHOW_UNDATED_TASKS':
+      /**
+       * ⚠ **走査を頼み直さない**(2026-08-23)── 日付の無い札も `taskScan` に
+       *   載っているので、切替は**描画側の絞り**だけで済む。
+       * 🔑 頼み直す形にすると、押すたびに worker を叩き、しかも
+       *   **戻ってくるまで盤面が空になる**(押した手応えが消える)。
+       */
+      return { state: { ...state, showUndatedTasks: !state.showUndatedTasks }, events: [] };
     case 'BODY_PERSISTED': {
       // ack された内容を disk 事実として記録(選択が移って openBody が破棄
       // 済みなら捨てる ── stale ack で別 entry の作業域を汚さない)
@@ -3011,7 +3103,7 @@ function refreshTaskCards(
   body: string,
 ): TaskScan | null {
   if (scan === null) return null;
-  const cards = replaceTaskCards(scan.cards, lid, listTaskItems(body));
+  const cards = replaceTaskCards(scan.cards, lid, body);
   return cards === scan.cards ? scan : { ...scan, cards };
 }
 

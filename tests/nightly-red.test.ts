@@ -200,8 +200,8 @@ describe('揃わなかった step の数え方', () => {
 
   it('🔴 走らなかった(skipped)も赤に数える ── 「確かめていない」は緑ではない', () => {
     expect(
-      unmetSteps(json({ npm_ci: { outcome: 'failure' }, probe_kanban: { outcome: 'skipped' } })),
-    ).toEqual(['npm_ci:failure', 'probe_kanban:skipped']);
+      unmetSteps(json({ npm_ci: { outcome: 'failure' }, probe_schedule: { outcome: 'skipped' } })),
+    ).toEqual(['npm_ci:failure', 'probe_schedule:skipped']);
   });
 
   it('cancelled も赤に数える', () => {

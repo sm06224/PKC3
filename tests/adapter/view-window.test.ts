@@ -6,15 +6,20 @@
  *
  * ## user から見た物語
  *
- * ノートを読んでいる。カレンダーのタイルを押す。
- * ⇒ **別の窓にカレンダーが出る。本文はそのまま。しかも読んでいたノートが選ばれている。**
+ * ノートを読んでいる。2 ペインで整理のタイルを押す。
+ * ⇒ **別の窓に 2 ペインが出る。本文はそのまま。しかも読んでいたノートが選ばれている。**
  * 直す前は中央の面が入れ替わり、**本文が消えていた**。
+ *
+ * ⚠ **物語の主役は入れ替わった**(#292 段⑤、2026-08-23)── 当時の例はカレンダー
+ *   だったが、あれは「アプリ」ではなく**ノートの見方**だったので左の列の
+ *   「予定」タブへ引っ越した。ここが守るのは**組み込みを別窓で開く作法**であって、
+ *   カレンダーそのものではない。
  *
  * ## この test が守る主張
  *
  * ① 🔴 **成功したら中央の面を触らない** ── これが user の要望そのもの
- * ② 🔴 **読んでいたノートを連れて行く** ── 連れて行かないと、別窓のカレンダーは
- *    「ノートを選んでください」で立ち上がる(= その窓では日付を付けられない)
+ * ② 🔴 **読んでいたノートを連れて行く** ── 連れて行かないと、別窓は
+ *    「ノートを選んでください」で立ち上がる(= その窓では手が付けられない)
  * ③ 🔴 **窓が塞がれたら中央の面へ退避し、理由を出す**(段⑤ の退避先)。
  *    ⚠ 退避は**開く**であってトグルではない ── 2 回押しても閉じない
  * ④ 🔴 **`window.open` は待つ前に撃つ** ── gesture の中でしか通らない
@@ -34,7 +39,8 @@ import {
   type ViewWindowDeps,
 } from '../../src/adapter/platform/view-window';
 import type { Broadcaster } from '../../src/adapter/platform/storage/store-proxy';
-import type { ViewMode } from '../../src/adapter/state/app-state';
+import { isViewMode, type ViewMode } from '../../src/adapter/state/app-state';
+import { withBuiltinTiles } from '../../src/features/launcher/tiles';
 
 interface BenchOpts {
   readonly answered?: boolean;
@@ -114,9 +120,9 @@ function fakeChannel(): { ch: Broadcaster; sent: unknown[]; closed: () => number
 describe('組み込みアプリを別窓で開く(#300 段③)', () => {
   it('🔴 窓が出たら、中央の面は 1 ミリも触らない(本文が消えない)', async () => {
     const b = bench();
-    expect(await openViewInWindow('calendar', b.deps)).toBe('window');
+    expect(await openViewInWindow('dual', b.deps)).toBe('window');
     expect(b.opened, 'ディープリンク付きで開いていない').toEqual([
-      'https://xn--r8j.test/pkc/#pkc?view=calendar&w=tok-1',
+      'https://xn--r8j.test/pkc/#pkc?view=dual&w=tok-1',
     ]);
     expect(b.panes, '中央の面を占有した(user の要望と正面から逆)').toEqual([]);
     expect(b.fails, '成功したのに理由を出した').toEqual([]);
@@ -124,26 +130,42 @@ describe('組み込みアプリを別窓で開く(#300 段③)', () => {
 
   /**
    * 🔴 **②:読んでいたノートを連れて行く。**
-   * ⚠ 直す前の別窓のカレンダーは `selectedLid === null` で立ち上がり、帯に
-   *   「日を押す前に、左の一覧からノートを選んでください」と出ていた ──
+   * ⚠ 直す前の別窓は `selectedLid === null` で立ち上がり、帯に
+   *   「左の一覧からノートを選んでください」と出ていた ──
    *   user は**さっきまで読んでいたノートを探し直す**ことになる。
    */
   it('🔴 読んでいたノートを連れて行く(別窓で「選んでください」にならない)', async () => {
     const b = bench({ selected: { containerId: 'c1', lid: 'e7' } });
-    await openViewInWindow('calendar', b.deps);
+    await openViewInWindow('dual', b.deps);
     expect(b.opened[0], 'ノートを置いてきた').toBe(
-      'https://xn--r8j.test/pkc/#pkc?container=c1&entry=e7&view=calendar&w=tok-1',
+      'https://xn--r8j.test/pkc/#pkc?container=c1&entry=e7&view=dual&w=tok-1',
     );
   });
 
   it('⚠ 何も選んでいなければ、連れて行くものは付けない', async () => {
     const b = bench({ selected: null });
-    await openViewInWindow('calendar', b.deps);
-    expect(b.opened[0]).toBe('https://xn--r8j.test/pkc/#pkc?view=calendar&w=tok-1');
+    await openViewInWindow('dual', b.deps);
+    expect(b.opened[0]).toBe('https://xn--r8j.test/pkc/#pkc?view=dual&w=tok-1');
   });
 
-  it('🔴 3 つの組み込みアプリが、どれも別窓で開く', async () => {
-    for (const view of ['dual', 'calendar', 'kanban'] as const) {
+  /**
+   * 🔴 **別窓で開く組み込みは、いま 2 ペインだけ**(#292 段⑤、2026-08-23)。
+   *
+   * ⚠ カレンダー / やることの板はここから外れた ── あれは「アプリ」ではなく
+   *   **ノートの見方**だったので、左の列の「予定」タブへ引っ越した。
+   * 🔑 だから一覧を**名指しで書かない** ── `launch-tile.ts` が別窓へ渡す
+   *   組み込みタイルを**全数**当てる(タイルを足したのにここへ足し忘れると、
+   *   その組み込みだけ別窓の作法から外れたまま出荷される)。
+   */
+  it('🔴 別窓で開く組み込みタイルが、どれも別窓で開く', async () => {
+    // 🔑 **「面の名前を持つ組み込みタイル」が別窓で開く物**である ── その規則を
+    //    そのまま引く(名指しの一覧を書かない)
+    const views: ViewMode[] = [];
+    for (const tile of withBuiltinTiles([], { office: true })) {
+      if (isViewMode(tile.kind)) views.push(tile.kind);
+    }
+    expect(views.length, '別窓で開く組み込みが 1 つも無い(空振り)').toBeGreaterThan(0);
+    for (const view of views) {
       const b = bench();
       await openViewInWindow(view, b.deps);
       expect(b.opened, `${view} が別窓で開かない`).toEqual([
@@ -160,9 +182,9 @@ describe('組み込みアプリを別窓で開く(#300 段③)', () => {
    */
   it('🔴 窓が塞がれたら中央の面へ退避し、理由を出す', async () => {
     const b = bench({ answered: false });
-    expect(await openViewInWindow('kanban', b.deps)).toBe('pane');
+    expect(await openViewInWindow('dual', b.deps)).toBe('pane');
     expect(b.opened, '開こうとすらしていない').toHaveLength(1);
-    expect(b.panes, '退避していない(押しても何も起きない)').toEqual(['kanban']);
+    expect(b.panes, '退避していない(押しても何も起きない)').toEqual(['dual']);
     expect(b.fails, '黙って退避した(user は窓が出ない理由を知れない)').toHaveLength(1);
     // 🔑 **次に何をすればよいか**が書いてある(「ポップアップの許可」)
     expect(b.fails[0]).toContain('ポップアップ');
@@ -178,13 +200,13 @@ describe('組み込みアプリを別窓で開く(#300 段③)', () => {
    */
   it('🔴 塞がれた回に 2 回押しても、面は開いたままになる', async () => {
     const b = bench({ answered: false });
-    await openViewInWindow('calendar', b.deps);
-    await openViewInWindow('calendar', b.deps);
+    await openViewInWindow('dual', b.deps);
+    await openViewInWindow('dual', b.deps);
     expect(b.panes, '2 回目で閉じた(退避がトグルになっている)').toEqual([
-      'calendar',
-      'calendar',
+      'dual',
+      'dual',
     ]);
-    expect(b.mode(), '2 回押したら本文へ戻ってしまった').toBe('calendar');
+    expect(b.mode(), '2 回押したら本文へ戻ってしまった').toBe('dual');
   });
 
   /** ⚠ 既にその面を開いている(`Alt+6` 等)ときも、退避で閉じない。 */
@@ -201,7 +223,7 @@ describe('組み込みアプリを別窓で開く(#300 段③)', () => {
    */
   it('🔴 編集中で面が開けなかったら、文言もそう言う', async () => {
     const b = bench({ answered: false, editing: true });
-    await openViewInWindow('calendar', b.deps);
+    await openViewInWindow('dual', b.deps);
     expect(b.fails, '理由を出していない').toHaveLength(1);
     expect(b.fails[0], '開いていないのに「開きました」と言った').not.toContain(
       'この画面で開きました',
@@ -218,7 +240,7 @@ describe('組み込みアプリを別窓で開く(#300 段③)', () => {
    */
   it('🔴 gesture の中で撃つ(await の後ろへ落ちていない)', async () => {
     const b = bench();
-    const p = openViewInWindow('calendar', b.deps);
+    const p = openViewInWindow('dual', b.deps);
     expect(b.opened, 'await をまたいでから開いている(Safari で塞がれる)').toHaveLength(1);
     await p;
   });
@@ -226,7 +248,7 @@ describe('組み込みアプリを別窓で開く(#300 段③)', () => {
   /** ⚠ 聞く耳は**開くより前**に張る(速い窓の合図を取りこぼさない)。 */
   it('🔴 合図を待ち始めてから窓を開く(取りこぼさない)', async () => {
     const b = bench();
-    await openViewInWindow('calendar', b.deps);
+    await openViewInWindow('dual', b.deps);
     expect(b.openedBeforeWait(), '開いてから待ち始めている(合図を取りこぼす)').toBe(false);
   });
 
@@ -237,7 +259,7 @@ describe('組み込みアプリを別窓で開く(#300 段③)', () => {
    */
   it('🔴 待つ猶予は VIEW_WINDOW_ANNOUNCE_MS(勝手に延ばさない)', async () => {
     const b = bench();
-    await openViewInWindow('calendar', b.deps);
+    await openViewInWindow('dual', b.deps);
     expect(b.waits).toEqual([{ token: 'tok-1', ms: VIEW_WINDOW_ANNOUNCE_MS }]);
     // 🔑 URL に載せた合図と、待っている合図が**同じ**であること
     expect(b.opened[0]).toContain('w=tok-1');
@@ -250,17 +272,17 @@ describe('組み込みアプリを別窓で開く(#300 段③)', () => {
    */
   it('⚠ アドレスが組めないときも、理由を出してから退避する', async () => {
     const b = bench({ base: 'https://xn--r8j.test/pkc/#some-heading' });
-    expect(await openViewInWindow('calendar', b.deps)).toBe('pane');
+    expect(await openViewInWindow('dual', b.deps)).toBe('pane');
     expect(b.opened, '組めていないのに開こうとした').toEqual([]);
-    expect(b.panes).toEqual(['calendar']);
+    expect(b.panes).toEqual(['dual']);
     expect(b.fails, '黙って退避した').toHaveLength(1);
   });
 
   /** ⚠ 窓は使い回さない(#300 段③ の裁定)── 2 回押したら 2 枚開く。 */
   it('⚠ 同じタイルを 2 回押すと 2 枚開く(使い回さない)', async () => {
     const b = bench();
-    await openViewInWindow('calendar', b.deps);
-    await openViewInWindow('calendar', b.deps);
+    await openViewInWindow('dual', b.deps);
+    await openViewInWindow('dual', b.deps);
     expect(b.opened).toHaveLength(2);
     // ⚠ 合図は 1 回限り ── 使い回すと 1 枚目の返事で 2 枚目を「開いた」と読む
     expect(new Set(b.opened).size, '合図を使い回している').toBe(2);
@@ -271,7 +293,7 @@ describe('組み込みアプリを別窓で開く(#300 段③)', () => {
   it('⚠ 成功した回は fail も openInPane も呼ばない', async () => {
     const openInPane = vi.fn(() => true);
     const fail = vi.fn();
-    await openViewInWindow('calendar', {
+    await openViewInWindow('dual', {
       open: () => {},
       baseUrl: () => 'https://xn--r8j.test/',
       selected: () => null,

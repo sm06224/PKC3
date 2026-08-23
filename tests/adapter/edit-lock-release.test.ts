@@ -66,7 +66,7 @@ describe('bindEditLockRelease', () => {
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
     const releaseEdit = vi.fn();
     bindEditLockRelease(d, () => ({ releaseEdit }), 'c1');
-    d.dispatch({ type: 'SET_VIEW_MODE', mode: 'kanban' });
+    d.dispatch({ type: 'SET_VIEW_MODE', mode: 'query' });
     expect(releaseEdit).not.toHaveBeenCalled();
   });
 });

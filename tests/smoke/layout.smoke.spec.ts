@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { BROWSE_TABS } from '../../src/adapter/ui/render/browse';
 import { answerAppDialog, gotoApp, clickReal, createEntry, collectPageErrors, expectReachable, useSplitEditor, useListBrowse } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
@@ -203,11 +204,15 @@ test('🔴 上の帯は無く、設定は左の列から押せる', async ({ pag
 /**
  * P8 段⑱: 🔴 **狭い列でも探し方のタブが重ならない**。
  *
- * 左の列は 900px を切ると 180px まで縮む。3 つのタブに図案と語を両方載せると
+ * 左の列は 900px を切ると 180px まで縮む。タブに図案と語を両方載せると
  * 入りきらず、**互いに重なって語が読めなくなる**(段⑱ 以前の実際の姿)。
- * ⚠ 「畳まない」(user 指示)ので**タブは 3 つとも出したまま**、図案だけ落とす。
+ * ⚠ 「畳まない」(user 指示)ので**タブは全部出したまま**、図案だけ落とす。
+ *
+ * 🔑 **枚数は `BROWSE_TABS` から引く**(2026-08-23)── 直書きだと、タブを足した
+ *   日に「3 つ在る」が嘘になる。⚠ ただし**「減っていないこと」も見たい**ので、
+ *   下限として 4 枚を別に pin する(表ごと空にする変異を素通りさせない)。
  */
-test('🔴 狭い列でも探し方のタブが重ならない(3 つとも出たまま)', async ({ page }) => {
+test('🔴 狭い列でも探し方のタブが重ならない(全部出たまま)', async ({ page }) => {
   await page.setViewportSize({ width: 900, height: 800 });
   await gotoApp(page);
   const m = await page.evaluate(() => {
@@ -227,8 +232,10 @@ test('🔴 狭い列でも探し方のタブが重ならない(3 つとも出た
     });
     return { tabs, hostW: host.clientWidth, scrollW: host.scrollWidth };
   });
-  // ① 3 つとも在る(畳んでいない)
-  expect(m.tabs.length, 'タブが減っている(畳んだ形に戻っている)').toBe(3);
+  // ① 全部在る(畳んでいない)。⚠ 枚数は正本(`BROWSE_TABS`)から引く
+  expect(m.tabs.length, 'タブが減っている(畳んだ形に戻っている)').toBe(BROWSE_TABS.length);
+  // ⚠ 空振り防止:表ごと空にする変異を素通りさせない(2026-08-23 時点で 4 枚)
+  expect(BROWSE_TABS.length, 'タブの表が縮んでいる').toBeGreaterThanOrEqual(4);
   expect(m.tabs.every((t) => t.label !== ''), '語が消えている(図案だけでは分からない)').toBe(true);
   // ② 語が自分の箱から溢れて隣に被っていない
   for (const t of m.tabs) {

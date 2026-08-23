@@ -106,6 +106,19 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     defaults: ['Mod+F'],
     note: '左の一覧の絞り込み欄に焦点を移します',
   },
+  /**
+   * 🔴 **日付を入れる道具**(user 指示 2026-08-23)。
+   * ⚠ 近道であって**主の口ではない** ── 主は書式の帯のボタン(マウスだけで完結する)。
+   * ⚠ `Mod+;` は表計算系の「今日を入れる」と同じ位置 ── 覚え直さなくてよい。
+   */
+  {
+    id: 'insert-date',
+    label: '日付を入れる',
+    contexts: ['global'],
+    defaults: ['Mod+Semicolon'],
+    whileTyping: true,
+    note: '編集中だけ効きます(本文の caret の位置に入ります)',
+  },
   {
     id: 'toggle-replace',
     label: '置換の帯を開く / 閉じる',

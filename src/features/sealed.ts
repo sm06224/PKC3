@@ -32,7 +32,11 @@
  *      P8 段⑤ で上の帯から面の切替を外してあるので濾す対象が無く、
  *      **組み込みタイル**(`kanbanTile`)を作り、`SEALED_TEST_NOTES` の smoke を
  *      戻し、盤面の中身そのものを**チェック項目**へ作り替えて初めて戻った。
- *      🔑 ここが「配列から 1 語消すだけでは戻らない」の**実例**である
+ *      🔑 ここが「配列から 1 語消すだけでは戻らない」の**実例**である。
+ *      ⚠ **その面は 2026-08-23 に畳み直した**(#292 段⑤)── 封印へ戻したの
+ *      ではなく、**左の列の「予定」タブへ引っ越した**(user 指示
+ *      「ちゃんとした導線に作り直しなさい」)。中身(チェック項目を札にする
+ *      規則)はそのまま生きている ── 器だけが替わった
  * 3. **うっかり復活しないこと** ── 導線を消すだけだと、次に UI を触った人が
  *    善意で戻してしまう。2 つの test が機械的に見張る:
  *    - `tests/docs-parity.test.ts` … 封印中のものが**導線に出ない**こと
@@ -52,7 +56,6 @@ export const SEALED_ARCHETYPES: readonly string[] = ['todo', 'form'] as const;
 
 /**
  * 封印中のビュー ── **切り替える導線を出さない**。
- * ⚠ 描画器(`kanban.ts` / `calendar.ts`)は残す。消すと、解くときに書き直しになる。
  *
  * 🔴 **2026-08-19 に 2 つとも解いた。いまここは空である**(#276 / #277。
  * user 指示「かつて無くしたカレンダーとカンバンはここで生きてきます /
@@ -66,8 +69,14 @@ export const SEALED_ARCHETYPES: readonly string[] = ['todo', 'form'] as const;
  *   ⚠ 破綻の形は「封印中の archetype に依存していたこと」なので、
  *   **導線だけ戻しても盤面は永久に空**である(実際そうだった)。
  * ⚠ 解いた形は**導線の付け直し**であり、切替を上の帯へ戻したのではない ──
- *   組み込みタイル(`launcher/tiles.ts` の `calendarTile` / `kanbanTile`)から
- *   開く(#241 の形)。
+ *   組み込みタイルから開く(#241 の形)にした。
+ * 🔴 **その導線は 2026-08-23 に作り直した**(#292 段⑤。user 指示
+ *   「ユーザーはもう一つ PKC が開いて混乱すると思う / ちゃんとした導線に
+ *   作り直しなさい」)── **中央の面をやめ、左の列の「予定」タブ**へ引っ越した。
+ *   ⚠ 描画器(`kanban.ts` / `calendar.ts`)は**この段で落とした** ── 中身の規則
+ *   (frontmatter の `date` / 本文のチェック項目)は `features/schedule/` と
+ *   `ui/render/schedule.ts` が持っているので、**戻すときに書き直しになるのは
+ *   器だけ**である(封印が守ろうとしていた「規則」は失われていない)。
  * ⚠ **空でもこの配列は消さない** ── 次に何かを畳むときの受け皿であり、
  *   `tests/docs-parity.test.ts` / `tests/features/sealed.test.ts` の口でもある。
  */
@@ -92,11 +101,18 @@ export function isSealedView(view: string): boolean {
 /**
  * ⚠ 封印で**畳んだ test** の記録(解くときに戻す先)。
  *
- * - `tests/smoke/kanban.smoke.spec.ts` … 削除していたが、**2026-08-19 に
- *   復活させた**(#277 段②-b)── 組み込みタイルができて実クリックで駆動できる。
+ * - `tests/smoke/kanban.smoke.spec.ts` / `tests/smoke/calendar.smoke.spec.ts` …
+ *   一度は復活させた(#277 段②-b)が、**2026-08-23 に落とした**(#292 段⑤)──
+ *   面ごと左の列の「予定」タブへ引っ越したので、実クリックで駆動する先が
+ *   `tests/smoke/schedule.smoke.spec.ts` に**移った**。
+ *   ⚠ 「封印して畳んだ」のではない ── **同じことを別の場所で見ている**。
+ * - `tests/adapter/kanban-calendar-view.test.ts` … 同じ理由で落とした。
+ *   ⚠ 面に依らない主張(本文のチェックの印 / 面の帯の × 閉じる)は
+ *   `tests/adapter/center-pane.test.ts` へ、札の作法は
+ *   `tests/adapter/schedule-view.test.ts` へ**移してある**。
  * - `tests/smoke/layout.smoke.spec.ts` … かんばん / カレンダーの見た目を見ていた
  *   assertion を、3 列と編集中の配置を見るものへ置き換えた(戻していない ──
  *   いまの版面の主張はそちらのほうが強い)。
  */
 export const SEALED_TEST_NOTES =
-  'tests/smoke/kanban.smoke.spec.ts は #277 段②-b で復活済み(いま封印中の面は無い)';
+  'かんばん / カレンダーの smoke は #292 段⑤ で tests/smoke/schedule.smoke.spec.ts へ引っ越し済み(いま封印中の面は無い)';

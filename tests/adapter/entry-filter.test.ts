@@ -18,6 +18,7 @@ import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { CenterRouter } from '../../src/adapter/ui/render/center';
 import { BrowseRouter } from '../../src/adapter/ui/render/browse';
+import type { BrowseMode } from '../../src/adapter/ui/render/browse-mode';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { stubRevisionOps } from '../helpers/revision-stub';
 
@@ -48,7 +49,7 @@ function setup(metas: EntryMeta[]) {
   const regions = buildShell(root);
   const browse = new BrowseRouter(regions.sidebar, regions.browseHost);
   const center = new CenterRouter(regions.detail, () => new Date(2026, 7, 15));
-  let mode: 'list' | 'filer' | 'launcher' = 'list';
+  let mode: BrowseMode = 'list';
   const setBrowse = (m: typeof mode): void => {
     mode = m;
     browse.render(d.getState(), mode);
@@ -152,19 +153,21 @@ describe('絞り込み(P7b review M-1/M-2/M-3)', () => {
   });
 
   /**
-   * 🔴 かんばんも同じ規則で絞られる。⚠ **札はノート単位で絞る**(#277 段②-b)──
-   *   札の字ではなくノートの題名 / 本文の当たりで決める(判定は `matchesEntry` 1 か所)。
+   * 🔴 **予定も同じ規則で絞られる**(#292 段⑤ で かんばん / カレンダー から移した)。
+   * ⚠ **札はノート単位で絞る** ── 札の字ではなくノートの題名 / 本文の当たりで
+   *   決める(判定は `matchesEntry` 1 か所)。だから「やること 1」と書いてある札が、
+   *   ノートの題名「A-りんご」で残る。
    */
-  it('🔴 かんばんも同じ規則で絞られる', () => {
-    const { d, root, type } = setup([meta('e1', 'A-りんご'), meta('e2', 'B-ひみつ')]);
-    d.dispatch({ type: 'SET_VIEW_MODE', mode: 'kanban' });
+  it('🔴 予定も同じ規則で絞られる', () => {
+    const { d, root, type, setBrowse } = setup([meta('e1', 'A-りんご'), meta('e2', 'B-ひみつ')]);
+    setBrowse('schedule');
     // ⚠ 札は worker が集めて state に載る ── ここでは届いた形を直接与える
     d.dispatch({
       type: 'SET_TASK_SCAN',
       scan: {
         cards: [
-          { lid: 'e1', line: 0, text: 'やること 1', done: false },
-          { lid: 'e2', line: 0, text: 'やること 2', done: false },
+          { lid: 'e1', line: 0, text: 'やること 1', done: false, date: '2026-08-25', time: null },
+          { lid: 'e2', line: 0, text: 'やること 2', done: false, date: '2026-08-25', time: null },
         ],
         totalNotes: 2,
         scannedNotes: 2,
@@ -172,22 +175,9 @@ describe('絞り込み(P7b review M-1/M-2/M-3)', () => {
       },
     });
     const cards = (): number =>
-      root.querySelectorAll('[data-pkc-region="kanban-cards"] [data-pkc-entry]').length;
+      root.querySelectorAll('[data-pkc-region="schedule-cards"] [data-pkc-entry]').length;
     expect(cards()).toBe(2);
     type('りんご');
     expect(cards()).toBe(1);
-  });
-
-  it('🔴 カレンダーも同じ規則で絞られる', () => {
-    const { d, root, type } = setup([
-      meta('e1', 'A-りんご', { archetype: 'todo', status: 'open', date: '2026-08-10' }),
-      meta('e2', 'B-ひみつ', { archetype: 'todo', status: 'open', date: '2026-08-11' }),
-    ]);
-    d.dispatch({ type: 'SET_VIEW_MODE', mode: 'calendar' });
-    const items = (): number =>
-      root.querySelectorAll('[data-pkc-region="detail"] [data-pkc-entry]').length;
-    expect(items()).toBe(2);
-    type('りんご');
-    expect(items()).toBe(1);
   });
 });

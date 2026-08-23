@@ -52,10 +52,10 @@ test('🔴 アプリの窓は常設バッジを出さない / ふつうの 2 枚
   await page.bringToFront();
   await clickReal(page, '[data-pkc-browse="launcher"]');
   const popup = context.waitForEvent('page');
-  await clickReal(page, '[data-pkc-action="open-tile"][data-pkc-tile="builtin:calendar"]');
+  await clickReal(page, '[data-pkc-action="open-tile"][data-pkc-tile="builtin:dual"]');
   const win = await popup;
   await expect(win.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
-  await expect(win.locator('[data-pkc-view-pane="calendar"]')).toBeVisible();
+  await expect(win.locator('[data-pkc-view-pane="dual"]')).toBeVisible();
 
   /**
    * ⚠ **「出ない」は待って確かめる** ── boot の途中で一瞬出て消えるのと、

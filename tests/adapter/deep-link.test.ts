@@ -21,6 +21,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import {
+  MOVED_MESSAGE,
   announceOpenedWindow,
   connectViewDeepLink,
   currentBaseUrl,
@@ -60,6 +61,8 @@ function bench(hash: string) {
   const holds: Array<ViewMode | null> = [];
   const off = connectViewDeepLink({
     openView: (mode) => actions.push(`open:${mode}`),
+    // 🔴 **引っ越した面の受け皿**(#292 段⑤)── 左の列のタブ
+    openBrowse: (mode) => actions.push(`browse:${mode}`),
     selectEntry: (containerId, lid) => {
       selects.push({ containerId, lid });
       actions.push(`select:${lid}`);
@@ -103,9 +106,9 @@ function bench(hash: string) {
 }
 
 describe('起動時のディープリンク(#300 段②)', () => {
-  it('🔴 `#pkc?view=calendar` でカレンダーの面が開く', () => {
-    const b = bench('#pkc?view=calendar');
-    expect(b.actions, 'その面で開いていない').toEqual(['open:calendar']);
+  it('🔴 `#pkc?view=query` でその面が開く', () => {
+    const b = bench('#pkc?view=query');
+    expect(b.actions, 'その面で開いていない').toEqual(['open:query']);
   });
 
   /**
@@ -127,21 +130,21 @@ describe('起動時のディープリンク(#300 段②)', () => {
    *   「**成功した人だけがブックマークを作れない**」形になる。
    */
   it('🔴 その面を見ている間は、断片を消さない(ブックマークが作れる)', () => {
-    const b = bench('#pkc?view=kanban');
+    const b = bench('#pkc?view=query');
     expect(b.cleared(), '開いた時点で断片を消している').toBe(0);
-    expect(b.hash(), 'アドレスから字が消えている').toBe('#pkc?view=kanban');
+    expect(b.hash(), 'アドレスから字が消えている').toBe('#pkc?view=query');
     // ⚠ 自分が撃った面の通知で消してしまわないこと(いちばん出やすい取り違え)
-    b.viewBecomes('kanban');
+    b.viewBecomes('query');
     expect(b.cleared(), '自分が開いた面の通知で消している').toBe(0);
   });
 
   it('🔴 user が別の面へ移ったら、その瞬間に断片を消す', () => {
-    const b = bench('#pkc?view=kanban');
+    const b = bench('#pkc?view=query');
     b.viewBecomes('detail');
     expect(b.cleared(), '離れても断片が残る ── 読み直しでこの面へ飛ばされる').toBe(1);
     expect(b.hash()).toBe('');
     // ⚠ 一度消したら、その後の面の移動で二重に消さない
-    b.viewBecomes('calendar');
+    b.viewBecomes('dual');
     expect(b.cleared(), '離れるたびに消しにいっている').toBe(1);
   });
 
@@ -152,7 +155,7 @@ describe('起動時のディープリンク(#300 段②)', () => {
     // ⚠ **打ち間違いの綴りをそのまま画面へ通さない**
     expect(error, '外から来た綴りをそのまま出している').not.toContain('nonsense');
     // 🔑 **打てる字**を出す(画面の呼び名を出すと、user は打てない字で書き直す)
-    expect(error, 'アドレスに打つ字が出ていない').toContain('calendar');
+    expect(error, 'アドレスに打つ字が出ていない').toContain('query');
     expect(error, '打てない字(画面の呼び名)を出している').not.toContain('カレンダー');
     // ⚠ 使えない名前は残す意味が無いので、その場で消す
     expect(b.cleared(), '断り文が読み直しのたびに出る').toBe(1);
@@ -185,7 +188,7 @@ describe('起動時のディープリンク(#300 段②)', () => {
   });
 
   it('⚠ 対照群 ── ふつうの起動では何も撃たず、断片も触らない', () => {
-    for (const hash of ['', '#', '#pkc?container=c1&entry=e1', '#other?view=calendar']) {
+    for (const hash of ['', '#', '#pkc?container=c1&entry=e1', '#other?view=query']) {
       const b = bench(hash);
       expect(b.actions, `${JSON.stringify(hash)} で面を動かした`).toEqual([]);
       expect(b.cleared(), `${JSON.stringify(hash)} で断片を消した`).toBe(0);
@@ -281,14 +284,108 @@ describe('起動時のディープリンク(#300 段②)', () => {
  * 日付を付けられない**。user は「カレンダーで日付を付けたい」から押したので、
  * これは動線が**目的の手前で切れている**形である(動線レビュー §1)。
  */
+/**
+ * 🔴 **引っ越した面の栞を、引っ越し先へ送る**(#292 段⑤、2026-08-23)。
+ *
+ * ## user から見た物語
+ *
+ * カレンダーを開いた状態でブックマークしていた。更新して、それを開く。
+ * ⇒ 直す前:「画面名は detail / query / … のどれかです」だけが出る。
+ *   ⚠ **どこへ移ったかを知っているのは実装した本人だけ**なので、user は探せない。
+ * ⇒ いま:**左の列の「予定」が開き、どこへ移ったかが画面の下に出る。**
+ *
+ * ## ⚠ この describe が在るのは、変異試験が教えたからである
+ *
+ * 段⑤ の変異試験 N3(`MOVED_VIEWS` から `calendar` を落とす)が **SURVIVED** した
+ * ── 引っ越しの機構を見ている unit が **1 件も無かった**。
+ * 🔑 実装した当日に test を書かなかった、が原因である(smoke は在ったが、
+ *   smoke は `dist` 経由なので変異試験の輪から外れる)。
+ */
+describe('引っ越した面の栞(#292 段⑤)', () => {
+  const t = (hash: string): DeepLinkTarget => ({
+    hash,
+    clearHash: () => {},
+    dropToken: () => {},
+  });
+
+  /**
+   * ⚠ **全数を当てる**(組み合わせが有限なら全部 ── CLAUDE.md)。
+   * 🔑 表に足したのに配線しない、を止める。
+   */
+  it('🔴 引っ越した名前は、引っ越し先を返す(断らない)', () => {
+    for (const name of ['calendar', 'kanban']) {
+      expect(readViewDeepLink(t(`#pkc?view=${name}`)), `${name} の栞が死んでいる`).toEqual({
+        moved: 'schedule',
+      });
+    }
+  });
+
+  /**
+   * ⚠ **空振り防止** ── 「何でも `moved` を返す」実装でも上は通る。
+   *   生きている面と、そもそも無い名前を対照群に置く。
+   */
+  it('⚠ 対照群 ── 生きている面はそのまま、知らない名前は断る', () => {
+    expect(readViewDeepLink(t('#pkc?view=query'))).toEqual({ view: 'query' });
+    expect(readViewDeepLink(t('#pkc?view=zzz'))).toEqual({ unusable: true });
+  });
+
+  /**
+   * 🔴 **表は `isOpenable` より先に見る。**
+   * ⚠ `VIEW_MODES` から名前を消した以上、順番を入れ替えると
+   *   **引っ越しの枝に届く前に「使えない名前」として弾かれる**
+   *   (= 栞が死ぬ)── だから順番そのものを pin する。
+   * 🔑 見る形は「開ける面の一覧に**出ていない**のに、送り先が返ること」である。
+   */
+  it('🔴 引っ越した名前は開ける面の一覧に出ないが、栞としては生きている', () => {
+    for (const name of ['calendar', 'kanban']) {
+      expect(openableViewNames(), `${name} が開ける面として残っている`).not.toContain(name);
+      expect(readViewDeepLink(t(`#pkc?view=${name}`)), `${name} が断られた`).toHaveProperty(
+        'moved',
+      );
+    }
+  });
+
+  it('🔴 左の列のタブを開き、どこへ移ったかを出し、断片は消す', () => {
+    const b = bench('#pkc?view=calendar');
+    expect(b.actions, '引っ越し先を開いていない').toEqual(['browse:schedule', 'fail']);
+    expect(b.failed(), 'どこへ移ったか言っていない').toBe(MOVED_MESSAGE);
+    expect(b.failed(), '移った先の名前が文に無い').toContain('予定');
+    // ⚠ 断片は残さない(読み直しのたびに同じ案内が出る)
+    expect(b.cleared(), '使えない断片が残っている').toBe(1);
+    expect(b.hash()).toBe('');
+    b.off();
+  });
+
+  /**
+   * 🔴 **中央の面は 1 ミリも触らない**(引っ越しの理由そのもの)。
+   * ⚠ ここで `openView` を撃つと、栞から開いた人だけ**本文が消える**
+   *   ── #300 で名指しされた実害が、栞の経路にだけ残ることになる。
+   */
+  it('🔴 中央の面は開かない(本文を占有しない)', () => {
+    const b = bench('#pkc?view=kanban');
+    expect(
+      b.actions.filter((a) => a.startsWith('open:')),
+      '中央の面を開いた(引っ越しの理由と正面から逆)',
+    ).toEqual([]);
+    b.off();
+  });
+
+  /** 🔑 連れてきたノートは、引っ越し先でも選ばれる(段③ と同じ約束)。 */
+  it('連れてきたノートは、引っ越し先でも選ぶ', () => {
+    const b = bench('#pkc?container=c1&entry=e7&view=calendar');
+    expect(b.selects, 'ノートを置いてきた').toEqual([{ containerId: 'c1', lid: 'e7' }]);
+    b.off();
+  });
+});
+
 describe('連れてきたノートを選ぶ(#300 段③)', () => {
   it('🔴 `container` と `entry` が揃っていたら、面より先に選ぶ', () => {
-    const b = bench('#pkc?container=c1&entry=e7&view=calendar');
+    const b = bench('#pkc?container=c1&entry=e7&view=query');
     // 🔑 **順序が主張の一部** ── 面が先だと、開いた瞬間だけ
     //    「ノートを選んでください」が見えてから入れ替わる
     expect(b.actions, 'ノートを選んでいない / 面より後に選んでいる').toEqual([
       'select:e7',
-      'open:calendar',
+      'open:query',
     ]);
     expect(b.selects).toEqual([{ containerId: 'c1', lid: 'e7' }]);
   });
@@ -299,14 +396,14 @@ describe('連れてきたノートを選ぶ(#300 段③)', () => {
    *   (`SYS_BOOTED` が `cid` を突き合わせているのと同じ理由)。
    */
   it('🔴 `entry` だけでは選ばない(別の container の取り違えを作らない)', () => {
-    const b = bench('#pkc?entry=e7&view=calendar');
-    expect(b.actions).toEqual(['open:calendar']);
+    const b = bench('#pkc?entry=e7&view=query');
+    expect(b.actions).toEqual(['open:query']);
     expect(b.selects, 'container を検めずに選んだ').toEqual([]);
   });
 
   it('⚠ ノートが無い断片は今までどおり(面だけ開く)', () => {
-    const b = bench('#pkc?view=kanban');
-    expect(b.actions).toEqual(['open:kanban']);
+    const b = bench('#pkc?view=query');
+    expect(b.actions).toEqual(['open:query']);
   });
 });
 
@@ -333,7 +430,7 @@ describe('開いた窓の合図(#300 段③)', () => {
 
   it('🔴 合図を持って開かれた窓は、その合図をそのまま返す', () => {
     const sent: string[] = [];
-    const t = tgt('#pkc?view=calendar&w=tok-1');
+    const t = tgt('#pkc?view=query&w=tok-1');
     expect(announceOpenedWindow(t, (token) => sent.push(token))).toBe(true);
     expect(sent, '合図を返していない(開いた側が塞がれたと誤読する)').toEqual(['tok-1']);
   });
@@ -344,20 +441,20 @@ describe('開いた窓の合図(#300 段③)', () => {
    * ⚠ `view` まで落とすと、段② の裁定(見ている間は残す / `F5` で戻る)が壊れる。
    */
   it('🔴 合図だけをアドレスから外す(面は残す)', () => {
-    const t = tgt('#pkc?container=c1&entry=e7&view=calendar&w=tok-1');
+    const t = tgt('#pkc?container=c1&entry=e7&view=query&w=tok-1');
     announceOpenedWindow(t, () => {});
     expect(t.hash, '合図が残った / 面まで落とした').toBe(
-      '#pkc?container=c1&entry=e7&view=calendar',
+      '#pkc?container=c1&entry=e7&view=query',
     );
   });
 
   /** ⚠ **対照群** ── ふつうの起動では何も返さず、アドレスも触らない。 */
   it('⚠ 合図が無ければ何もしない', () => {
     const sent: string[] = [];
-    const t = tgt('#pkc?view=calendar');
+    const t = tgt('#pkc?view=query');
     expect(announceOpenedWindow(t, (x) => sent.push(x))).toBe(false);
     expect(sent).toEqual([]);
-    expect(t.hash, 'アドレスを触った').toBe('#pkc?view=calendar');
+    expect(t.hash, 'アドレスを触った').toBe('#pkc?view=query');
   });
 });
 
@@ -369,21 +466,21 @@ describe('開いた窓の合図(#300 段③)', () => {
  */
 describe('アプリの窓であることを伝える(#300 段③)', () => {
   it('🔴 開いたときに握り、user が離れたら手放す', () => {
-    const b = bench('#pkc?view=calendar');
-    expect(b.holds, '握ったことを伝えていない').toEqual(['calendar']);
+    const b = bench('#pkc?view=query');
+    expect(b.holds, '握ったことを伝えていない').toEqual(['query']);
     b.viewBecomes('detail');
     expect(b.holds, '離れたことを伝えていない(閉じるが窓を閉じ続ける)').toEqual([
-      'calendar',
+      'query',
       null,
     ]);
   });
 
   /** ⚠ 同じ面に留まっている間は伝え直さない(題名が点滅しない)。 */
   it('⚠ 同じ面のままなら伝え直さない', () => {
-    const b = bench('#pkc?view=calendar');
-    b.viewBecomes('calendar');
-    b.viewBecomes('calendar');
-    expect(b.holds).toEqual(['calendar']);
+    const b = bench('#pkc?view=query');
+    b.viewBecomes('query');
+    b.viewBecomes('query');
+    expect(b.holds).toEqual(['query']);
   });
 
   it('⚠ 使えない名前では最初から握らない', () => {
@@ -402,15 +499,15 @@ describe('アプリの窓であることを伝える(#300 段③)', () => {
  */
 describe('currentBaseUrl(#300 段③)', () => {
   it('🔴 断片を落とす ── そのまま `formatViewDeepLink` に食える', () => {
-    location.hash = '#pkc?view=calendar&w=tok-1';
+    location.hash = '#pkc?view=query&w=tok-1';
     const base = currentBaseUrl();
     expect(base, '断片が残っている').not.toContain('#');
     // 🔑 **空振り防止** ── 断片がそもそも付いていなければ何も検めていない
     expect(location.href, '断片が付いていない(この test は何も検めていない)').toContain('#');
     expect(
-      formatViewDeepLink(base, 'kanban'),
+      formatViewDeepLink(base, 'query'),
       'アプリの窓から次のアプリを開けない',
-    ).toBe(`${base}#pkc?view=kanban`);
+    ).toBe(`${base}#pkc?view=query`);
     location.hash = '';
   });
 });

@@ -302,8 +302,7 @@ describe('お知らせの登記表', () => {
  */
 const ALL_VIEWS = [
   'detail',
-  'calendar',
-  'kanban',
+  // ⚠ `calendar` / `kanban` は #292 段⑤ で中央の面ではなくなった(左の列のタブへ)
   'query',
   'dual',
   'settings',
@@ -406,12 +405,11 @@ describe('🔴 中央の面の表が 2 つある(食い違いを落とす)', () 
       ).not.toBeNull();
     } else {
       /**
-       * 🔑 **逆向きも見る。** かんばん / カレンダーは自分の器、探し方
-       * (`filer` / `launcher`)は**本文へ落ちる**(探し方は左の列が持つ)。
+       * 🔑 **逆向きも見る。** 集計は自分の器、探し方(`filer` / `launcher` /
+       * `schedule`)は**本文へ落ちる**(探し方は左の列が持つ)。
        * ⚠ ここを書かないと、`app-state.ts` の表にだけ足した面が素通りする。
        */
-      const expected =
-        view === 'kanban' || view === 'calendar' || view === 'query' ? view : 'detail';
+      const expected = view === 'query' ? view : 'detail';
       expect(name, `${view} の落ち先が違う(app-state.ts の表に足し忘れ)`).toBe(expected);
     }
   });

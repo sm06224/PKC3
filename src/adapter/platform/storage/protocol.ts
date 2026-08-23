@@ -7,7 +7,7 @@ import type {
   GroupResult as QueryGroupResult,
   KeyResult as QueryKeyResult,
 } from '@features/query/group-by';
-import type { TaskScan } from '@features/kanban/kanban-data';
+import type { TaskScan } from '@features/schedule/task-cards';
 
 export type StorageRequest =
   | { op: 'init'; dbName: string; journalMode?: JournalMode }

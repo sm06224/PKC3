@@ -164,12 +164,14 @@ jobs:
         env:
           PKC3_CHROMIUM: ${{ steps.pw.outputs.path }}
         run: node tests/probe/run-editor-probe.mjs --arm=split
-      - name: Probe — kanban (トグル往復 / move 数)
-        id: probe_kanban
+      # ⚠ **面が引っ越した**(#292 段⑤)── カレンダー / やることの板は
+      #   左の列の「予定」タブになったので、probe も名前ごと張り替えた
+      - name: Probe — schedule (トグル往復 / 札の同一性)
+        id: probe_schedule
         if: ${{ !cancelled() && steps.setup_ok.outputs.ok == '1' }}
         env:
           PKC3_CHROMIUM: ${{ steps.pw.outputs.path }}
-        run: node tests/probe/run-kanban-probe.mjs
+        run: node tests/probe/run-schedule-probe.mjs
       # lease-probe(多重タブの writer 昇格)は SAH 解放待ちが最も flake しやすい
       # ため nightly には入れない ── リース周りを触る PR で手動実行する運用
       #

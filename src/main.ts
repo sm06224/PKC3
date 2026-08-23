@@ -181,6 +181,12 @@ export interface AppHandle {
    * 古い帯が残る(離れた瞬間に「本体タブ経由です」が戻るべきである)。
    */
   repaintStatus(): void;
+  /**
+   * 🔴 **探し方(左の列のタブ)を切り替える**(#292 段⑤)。
+   * ⚠ 引っ越したディープリンク(`view=calendar` / `view=kanban`)を
+   *   「予定」タブへ送るために要る ── boot の外から呼ぶので handle に出す。
+   */
+  setBrowse(mode: BrowseMode): void;
 }
 
 /**
@@ -246,7 +252,14 @@ let heldViewWindow: ViewMode | null = null;
 function openViewTile(
   dispatcher: Dispatcher,
   cid: string,
-  view: 'dual' | 'calendar' | 'kanban',
+  /**
+   * ⚠ **`dual` だけになった**(#292 段⑤、2026-08-23)── カレンダーと
+   *   やることの板は**左の列の「予定」タブ**へ引っ越したので、別窓で開く
+   *   組み込みは 2 ペインだけである。
+   * 🔑 別窓の仕掛け(ディープリンク / 一回限りの合図 / `script-closable` の判定 /
+   *   follower の帯)は**残す** ── Office と今後のアプリがそのまま使う土台である。
+   */
+  view: 'dual',
 ): Promise<unknown> {
   return openViewInWindow(view, {
     // ⚠ `noopener` で開く ── 別プロセスになり、閉じれば常駐が還る(段③ の実測)
@@ -1478,10 +1491,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
         // #148 組み込みタイル ── 文書なしで開く = Start Center(#174 の一言込み)
         openOffice: openOfficeTile,
-        // 🔴 **組み込みタイル(#241 / #276 / #277)は別窓で開く**(#300 段③)。⚠ 判断と文言は `view-window.ts` に在る
-        //    ── この file はどの test からも実行されないので、配線だけ置く。
-        //    ⚠ 窓が塞がれたときの退避は `openInPane`(段⑤)。そちらは
-        //    `open-view.ts` を通す(開いた後の後始末を落とさない)
+        // 🔴 **組み込みタイルは別窓で開く**(#300 段③)。⚠ 判断と文言は
+        //    `view-window.ts` に在る ── この file はどの test からも実行されない
+        //    ので、配線だけ置く。⚠ 窓が塞がれたときの退避は `openInPane`(段⑤)。
+        //    そちらは `open-view.ts` を通す(開いた後の後始末を落とさない)
+        // ⚠ **残るのは 2 ペインだけ**(#292 段⑤)── カレンダー / やることの板は
+        //    左の列のタブへ引っ越したので、別窓で開く組み込みタイルではなくなった。
+        //    絞りは `launch-tile.ts` の `openView: (view: 'dual') => void` が型で守る
         openView: (view) => void openViewTile(dispatcher, cid, view),
         // ⚠ **聞かない。憶えているものを確かめるだけ**(上の granted と同じ判定を
         //    通す ── ここで別の式を書くと、片方だけ直した日に食い違う)
@@ -1546,10 +1562,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             //    依存の実体も 1 つに保つ(§7)
             openOffice: openOfficeTile,
             // 🔴 **別窓で開く**(#300 段③)。⚠ 判断と文言は `view-window.ts` に在る
-        //    ── この file はどの test からも実行されないので、配線だけ置く。
-        //    ⚠ 窓が塞がれたときの退避は `openInPane`(段⑤)。そちらは
-        //    `open-view.ts` を通す(開いた後の後始末を落とさない)
-        openView: (view) => void openViewTile(dispatcher, cid, view),
+            //    ── 上と同じ配線(§7:依存の実体を 1 つに保つ)
+            openView: (view) => void openViewTile(dispatcher, cid, view),
             confirmSameOrigin: async (title) => {
               /**
                * 🔴 **「アプリとして登録済みか」で憶え方が変わる**(#301。user 裁定 2026-08-21)。
@@ -1733,6 +1747,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       //    `SET_VIEW_MODE 'launcher'` を撃っていたので、タブを切り替えただけで
       //    中央下の追記欄が消えていた(他の 2 タブでは残る)
       if (mode === 'launcher') dispatcher.dispatch({ type: 'REFRESH_LAUNCHER_TILES' });
+      // 🔑 予定も同じ流儀(#292 段③)── 開いたときに集める。⚠ 前の束は消さない
+      if (mode === 'schedule') dispatcher.dispatch({ type: 'REFRESH_TASK_SCAN' });
       /**
        * 🔴 **面を畳むのは「わきの面」だけ**(2026-08-20。user 指示
        * 「カレンダーを利用するための導線が不足している」の調査で判明)。
@@ -1983,6 +1999,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     dispatcher.dispatch({ type: 'OP_FAILED', error: LEGACY_HOST_NOTICE });
   }
   /**
+   * 🔑 **覚えている探し方が「予定」なら、起動でそのまま集める**(#292 段⑤)。
+   *
+   * ⚠ 集めを頼むのは `setBrowse`(タブを押したとき)だけだったので、
+   *   **前回「予定」で閉じた user は、起動直後に「集めています…」で止まる**
+   *   ── 一度別のタブへ行って戻るまで動かない。
+   * ⚠ 配線であって判定ではない ── 条件は `setBrowse` の 1 行と**同じ綴り**に
+   *   しておく(片方だけ直すと、また片方が止まる)。
+   */
+  if (appBrowseMode.get() === 'schedule') {
+    dispatcher.dispatch({ type: 'REFRESH_TASK_SCAN' });
+  }
+  /**
    * 🔴 **棚に残っている Office の保存を拾う**(#205、B5 の入口③「起動時」)。
    *
    * ⚠ **これが無いと取りこぼしが永久に残る** ── 窓が引き渡し途中で閉じた / 本体の
@@ -2032,6 +2060,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     presentUpdate: (apply) => updatePrompt.present(apply),
     presentAnnounce: () => announce.present(),
     repaintStatus: () => paint(),
+    // 🔑 判断は `services.setBrowse` 1 か所 ── ここは呼ぶだけ
+    //    ⚠ `BinderServices` では optional なので、無い配線では**何もしない**
+    setBrowse: (mode) => services.setBrowse?.(mode),
   };
 }
 
@@ -2099,6 +2130,12 @@ function bootstrap(): void {
         // ⚠ **`openView` を渡す**(`SET_VIEW_MODE` 直撃ではない)── 開いた後の
         //   後始末が抜けると、アドレスから開いた集計だけ表が出ない
         openView: (mode) => openView(app.dispatcher, mode),
+        /**
+         * 🔴 **引っ越した面(カレンダー / 板)は左の列のタブへ送る**(段⑤)。
+         * ⚠ 栞にしていた人を「使えません」で突き放さない ── **同じものが在る
+         *   場所を開く**のが引っ越しの作法である。
+         */
+        openBrowse: (mode) => app.setBrowse(mode),
         // 🔴 **連れてきたノートを選ぶ**(段③ の直し)。⚠ **container を検める**
         //    ── 別の container の lid を拾うと、偶然の一致で無関係なノートを選ぶ。
         //    ⚠ 居ない lid は `SELECT_ENTRY` 側が黙って捨てる(判定を写さない)
@@ -2109,7 +2146,7 @@ function bootstrap(): void {
         /**
          * 🔴 **アプリの窓であることを、題名と `× 閉じる` に伝える**(段③ の直し)。
          * ⚠ 題名を変えるのは**タスクバーで見分けるため** ── 直す前は
-         *   3 枚とも「PKC3」で、どれがカレンダーか押すまで分からなかった。
+         *   何枚開いても全部「PKC3」で、どれがどれか押すまで分からなかった。
          */
         onHold: (view) => {
           heldViewWindow = view;

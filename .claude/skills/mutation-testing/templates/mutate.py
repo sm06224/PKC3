@@ -11,14 +11,44 @@
   - 結果は KILLED / SURVIVED / **NOT-APPLIED** の 3 値(空振りを合格と読まない)
   - smoke は `dist/` を配信するので、**build を挟んで生成物に届いたことを確かめる**
   - 戻しは `cp` のバックアップ。`git checkout` は使わない(他の変更ごと消える)
+  - **殺されても戻す** ── `finally` だけでは足りない(timeout の `SIGTERM` で
+    走らない)。`atexit` と signal からも戻す
+  - スイープの後は **`git status` と字面を目視する**(緑だけ見て commit しない)
 """
 
+import atexit
 import shutil
+import signal
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path("/home/user/PKC3")
+
+# 🔴 **殺されても戻す**(2026-08-22、#178 で実際に踏んだ)。timeout で `SIGTERM` を
+#    受けると `finally` は走らない ── **変異が作業ツリーに残る**。しかも次の走りは
+#    その版を `orig` として読むので、以後の変異は全部 `NOT-APPLIED` と出て、
+#    **復元は変異入りの版を書き戻す**(スイープ全体が無意味になる)。
+# 🔑 だから戻しを「手順」ではなく**ハーネスの仕掛け**に閉じ込める:
+#    生きているバックアップを表に持ち、`atexit` と signal の両方から戻す。
+_LIVE: dict[Path, Path] = {}
+
+
+def _restore_all(*_args) -> None:
+    for target, backup in list(_LIVE.items()):
+        try:
+            shutil.move(str(backup), str(target))
+        except OSError:
+            pass
+        _LIVE.pop(target, None)
+
+
+atexit.register(_restore_all)
+for _sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+    try:
+        signal.signal(_sig, lambda *_a: (_restore_all(), sys.exit(130)))
+    except (ValueError, OSError):
+        pass  # 対話でない環境では張れないことがある ── atexit が受け皿
 
 # unit を回すときのコマンド(絞ると速い。広げると取りこぼしが減る)
 UNIT_CMD = "npx vitest run tests/"
@@ -98,7 +128,11 @@ def main() -> int:
             continue
         target = ROOT / rel
         backup = target.with_suffix(target.suffix + ".mutbak")
+        # ⚠ バックアップは**変異を当てる直前に取り直す**(使い回さない)──
+        #    使い回すと、スイープの最後に「修正前のコピー」が書き戻される
+        #    (2026-08-10 に実際に踏み、その状態で commit して CI を赤くした)
         shutil.copy2(target, backup)
+        _LIVE[target] = backup
         try:
             src = target.read_text(encoding="utf-8")
             hits = src.count(old)
@@ -136,8 +170,11 @@ def main() -> int:
             # ⚠ 3 値の**外** ── 「殺せた」とも「生き延びた」とも書かない
             results.append((mid, "TIMEOUT", str(e)))
         finally:
-            # ⚠ test が落ちても例外でも**必ず**戻す
+            # ⚠ test が落ちても例外でも**必ず**戻す。
+            #    ⚠ `finally` **だけでは足りない**(殺されると走らない)ので、
+            #      上の `_LIVE` / `atexit` / signal と対で使う
             shutil.move(str(backup), str(target))
+            _LIVE.pop(target, None)
 
     mark = {"KILLED": "○", "SURVIVED": "🔴", "NOT-APPLIED": "⚠", "TIMEOUT": "⏱"}
     print("\n=== 変異試験の結果 ===")

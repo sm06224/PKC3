@@ -21,7 +21,7 @@ import type {
   GroupResult as QueryGroups,
   KeyResult as QueryKeys,
 } from '@features/query/group-by';
-import type { TaskScan } from '@features/kanban/kanban-data';
+import type { TaskScan } from '@features/schedule/task-cards';
 import type { Relation } from '@core/model/entry-meta';
 import type { Dispatcher } from './dispatcher';
 

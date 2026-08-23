@@ -13,6 +13,7 @@ import {
   alertInApp,
   confirmInApp,
   DIALOG_REGION,
+  pickDateInApp,
   resetAppDialogForTest,
 } from '../../src/adapter/ui/render/app-dialog';
 
@@ -262,5 +263,74 @@ describe('アプリ自身の確認ダイアログ(#299)', () => {
     );
     cancelBtn().click();
     await p;
+  });
+});
+
+/**
+ * 🔴 **日付を入れる道具が返す形**(user 指示 2026-08-23)。
+ *
+ * ⚠ 画面までの繋がりは `tests/adapter/format-append.test.ts` が見る。
+ * **ここが見るのは返り値の契約**である ── `time` は「空なら `null`」であって
+ * 「空なら空文字」ではない。
+ * 🔑 これを画面側の test で見ようとすると、**`formatLineDate` が空文字も落とす**ので
+ *   区別がつかない(2026-08-23 の変異試験 T8 が SURVIVED で教えた)──
+ *   同じ規則を守る場所が 2 つあるとき、**上流の契約は上流で見る**。
+ */
+describe('日付を入れる道具の返り値(2026-08-23)', () => {
+  /**
+   * ⚠ **この describe にも要る。** 上の `beforeEach` は別の describe の中に在るので
+   *   ここには効かない ── 掃除しないと `okBtn()`(document 先頭)が
+   *   **前の it が残したダイアログ**に当たり、押しても自分の Promise が解けない
+   *   (症状は「5 秒で timeout」で、原因が結果から遠い)。
+   */
+  beforeEach(() => {
+    resetAppDialogForTest();
+    document.body.innerHTML = '';
+  });
+
+  const host = (): HTMLElement => {
+    const el = document.createElement('div');
+    document.body.append(el);
+    return el;
+  };
+  const SHORTCUTS = [{ id: 'today', label: '今日' }];
+  const open = (h: HTMLElement) =>
+    pickDateInApp(h, new Date(2026, 7, 23), SHORTCUTS, () => '2026-08-23');
+  const field = (name: string): HTMLInputElement =>
+    document.querySelector<HTMLInputElement>(`[data-pkc-field="${name}"]`)!;
+
+  it('🔴 時刻が空欄なら `null`(空文字を返さない)', async () => {
+    const h = host();
+    const p = open(h);
+    await Promise.resolve();
+    okBtn().click();
+    expect(await p).toEqual({ date: '2026-08-23', time: null });
+  });
+
+  it('⚠ 空振り防止: 入れた時刻はそのまま返る', async () => {
+    const h = host();
+    const p = open(h);
+    await Promise.resolve();
+    field('pick-time').value = '14:00';
+    okBtn().click();
+    expect(await p).toEqual({ date: '2026-08-23', time: '14:00' });
+  });
+
+  it('やめたら `null`(何も返さない)', async () => {
+    const h = host();
+    const p = open(h);
+    await Promise.resolve();
+    cancelBtn().click();
+    expect(await p).toBeNull();
+  });
+
+  /** ⚠ 日付が空なら**入れない**(空の記法を本文へ挿すと、読めない字が残る)。 */
+  it('日付を消して押したら `null`', async () => {
+    const h = host();
+    const p = open(h);
+    await Promise.resolve();
+    field('pick-date').value = '';
+    okBtn().click();
+    expect(await p).toBeNull();
   });
 });
