@@ -524,16 +524,34 @@ export function connectStoreEffects(
             const next = spliceFrontmatterKeys(body, ev.updates);
             if (next === body) return fail(); // 変わらないなら書かない(ロックは解く)
             const ext = extractMeta(ev.archetype, next);
-            const stamps = await store.persistEntry({
-              lid: ev.lid,
-              title: ev.title,
-              archetype: ev.archetype,
-              body: next,
-              entryOrder: ev.entryOrder,
-              status: ext.status,
-              date: ext.date,
-              archived: ext.archived,
-            });
+            /**
+             * 🔴 **読んでから書くまでの間に別の窓が書いていたら、1 バイトも書かない**
+             * (#178 残り、2026-08-23)── 上の `REQUEST_BODY_REWRITE` と同じ理由。
+             * ⚠ `expectHash` を渡さない書込は amend なので、消した版は**履歴にも
+             * 入らない**(実測:`storage-worker.test.ts`)。
+             * 🔑 ⚠ **どの出口でもロックを解く**(P8 段⑯)── 断る側も `fail()` を通る。
+             */
+            const stamps = await store.persistEntry(
+              {
+                lid: ev.lid,
+                title: ev.title,
+                archetype: ev.archetype,
+                body: next,
+                entryOrder: ev.entryOrder,
+                status: ext.status,
+                date: ext.date,
+                archived: ext.archived,
+              },
+              { expectHash: contentHash64Hex(body) },
+            );
+            if (stamps.conflict === true) {
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error:
+                  '別の窓がこのノートを書き替えたため、設定を保存できませんでした(もう一度押してください)',
+              });
+              return fail();
+            }
             if (disposed) return;
             // ⚠ 書いたら**その場で読み直す** ── 読み直さないと、押した結果が
             //    ランチャーに出るのが「次にタブを開き直したとき」になる
@@ -1080,11 +1098,11 @@ export function connectStoreEffects(
             // 原文 splice(本文 byte 無傷)→ 唯一の抽出経路 → 行全体 upsert
             // ⚠ 抽出は**そのノートのアーキタイプ**で行う(#276)── 'todo' に
             //   固定していると、普通のノートの日付が列に入らない
-            const newBody = applyBodyRewrite(body, ev.rewrite);
             /**
              * ⚠ **当たらなかったら黙って別の所を書かない**(#277)── 行番号は
              * 描いた時の原文のものなので、その後の書換でずれていることがある。
              */
+            const newBody = applyBodyRewrite(body, ev.rewrite);
             if (newBody === null) {
               dispatcher.dispatch({
                 type: 'OP_FAILED',
@@ -1093,16 +1111,43 @@ export function connectStoreEffects(
               return;
             }
             const ext = extractMeta(ev.archetype, newBody);
-            const stamps = await store.persistEntry({
-              lid: ev.lid,
-              title: ev.title,
-              archetype: ev.archetype,
-              body: newBody,
-              entryOrder: ev.entryOrder,
-              status: ext.status,
-              date: ext.date,
-              archived: ext.archived,
-            });
+            /**
+             * 🔴 **読んでから書くまでの間に別の窓が書いていたら、1 バイトも書かない**
+             * (#178 残り、2026-08-23)。
+             *
+             * ⚠ 実測(`storage-worker.test.ts`「expectHash を渡さなければ…」)──
+             * `expectHash` の無い書込は **amend** なので、上書きされた別の窓の版は
+             * **disk からも履歴からも消える**。改名・追記と同じ形がここに残っていた。
+             *
+             * 🔑 **ここは「当て直す」ではなく「断る」** ── `applyBodyRewrite` は
+             * `kind: 'task'` / `'line-date'` で **行番号**を使い、その検査は
+             * 「その行が項目か」しか見ない。⚠ 別の窓が**行を 1 本足していた**ら、
+             * 同じ番号は**別の項目**を指す ── 当て直すと**押していない項目が
+             * 裏返る**。⚠ 追記(`REQUEST_APPEND`)が当て直してよいのは、あちらが
+             * **見出しの名前**で当てていて、しかも user が打った字を捨てさせない
+             * ためである ── ここは押し直しが 1 クリックなので、断るほうが安い。
+             */
+            const stamps = await store.persistEntry(
+              {
+                lid: ev.lid,
+                title: ev.title,
+                archetype: ev.archetype,
+                body: newBody,
+                entryOrder: ev.entryOrder,
+                status: ext.status,
+                date: ext.date,
+                archived: ext.archived,
+              },
+              { expectHash: contentHash64Hex(body) },
+            );
+            if (stamps.conflict === true) {
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error:
+                  '別の窓がこのノートを書き替えたため、反映できませんでした(もう一度押してください)',
+              });
+              return;
+            }
             if (!disposed)
               dispatcher.dispatch({
                 type: 'BODY_REWRITTEN',

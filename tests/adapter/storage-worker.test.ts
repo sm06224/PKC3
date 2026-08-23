@@ -281,6 +281,18 @@ describe('revision chain (P5c ── 逆向き差分)', () => {
     });
     expect(res.conflict).toBeUndefined();
     expect(await request({ op: 'getBody', cid: 'c1', lid: 'h3' })).toBe(doc('上書きした'));
+    /**
+     * 🔴 **そして消えた版はどこにも残らない**(#178 残り 2 本の根拠、2026-08-23)。
+     * ⚠ `checkpoint` を渡さない書込は **amend** ── 頭が復元する状態は変えないので、
+     *   上書きされた `別の窓が書いた` は**履歴に 1 度も入らない**。
+     * 🔑 だから「読んで → 直して → 書き戻す」経路(板の設定 / 面のチェック)は
+     *   **`expectHash` を渡さないと、別の窓の本文を取り返せない形で消す**。
+     */
+    const bodies = await Promise.all((await metasOf('h3')).map((m) => bodyOf(m.id)));
+    expect(
+      bodies.some((b) => b?.includes('別の窓が書いた')),
+      '消えた版が履歴に在る(前提が変わった ── 呼び側の expectHash を見直すこと)',
+    ).toBe(false);
   });
 
   /** ⚠ 消えたノートの改名を「成功」と言わない(呼び側が理由を出せる)。 */
