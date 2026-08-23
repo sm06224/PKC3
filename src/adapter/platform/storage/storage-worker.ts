@@ -24,7 +24,7 @@ import type { EntryUpsert } from './schema';
 import { contentHash64Hex } from './content-hash';
 import { scanAssetRefsInto } from '@features/asset/asset-ref-scan';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
-import { planSearch } from '@features/filter/search-query';
+import { planSearch, toLikePattern } from '@features/filter/search-query';
 import { countTaskCandidates } from '@features/markdown/task-count';
 import {
   TASK_LIMITS,
@@ -1118,6 +1118,41 @@ const handlers: Handlers = {
         : [req.cid, plan.pattern, limit + 1];
     const rows = need().selectObjects(sql, bind) as Array<{ lid: string }>;
     // 🔑 **1 件多く取って切れたか判る**(件数を数え直す 2 回目の問い合わせを避ける)
+    const truncated = rows.length > limit;
+    return { lids: rows.slice(0, limit).map((r) => r.lid), truncated };
+  },
+  /**
+   * 🔴 **このノートを参照しているのはどれか**(#348、user 裁定 2026-08-23)。
+   *
+   * ## user の物語
+   *
+   * ノート A を開いている。「**このノートを参照しているのはどれか**」が分からないので、
+   * 探し直すしかない ── 書けば書くほど、書いたことが**見つからなくなる**。
+   *
+   * ## 探し方
+   *
+   * ノート間のリンクは **`entry:<lid>` の 1 形式**しか無い(`markdown-render.ts` /
+   * `features/link/permalink.ts`)。だから needle も 1 つで足りる。
+   *
+   * ⚠ **FTS は使わない。** trigram は**部分一致**を引けるが、lid は英数字の並びなので
+   * 「たまたま同じ 3 文字」で当たる ── **`entry:` を前に付けた完全な文字列**を
+   * `LIKE` で探すほうが**当たり方が正確**である(§1「形ではなく構文で拾う」の同じ向き)。
+   * ⚠ 速さは**測ってから**直す(いまは索引を持たない ── 持つと保存のたびの維持が要る)。
+   *
+   * ⚠ **自分自身は外す** ── 本文に自分へのリンクを書けてしまうが、
+   *   「自分が自分を参照している」を一覧に出しても user は何もできない。
+   * ⚠ **ゴミ箱の中は出さない**(押しても一覧に無いものへ飛ぶ)。
+   * ⚠ 並びは `entry_order`(一覧と同じ)/ 上限を置き、**切ったことを言う**。
+   */
+  findBacklinks: (req) => {
+    const limit = Math.max(1, Math.min(req.limit ?? SEARCH_LIMIT, SEARCH_LIMIT));
+    const rows = need().selectObjects(
+      `SELECT lid FROM entries
+        WHERE cid = ?1 AND lid <> ?2 AND archived = 0 AND body LIKE ?3 ESCAPE '\\'
+        ORDER BY entry_order, lid LIMIT ?4`,
+      [req.cid, req.lid, toLikePattern(`entry:${req.lid}`), limit + 1],
+    ) as Array<{ lid: string }>;
+    // 🔑 **1 件多く取って切れたか判る**(`searchEntries` と同じ作法)
     const truncated = rows.length > limit;
     return { lids: rows.slice(0, limit).map((r) => r.lid), truncated };
   },

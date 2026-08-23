@@ -12,6 +12,7 @@
  */
 import { SameOriginGrants } from '@adapter/platform/same-origin-grants';
 import type { AppState } from '@adapter/state/app-state';
+import type { PersistState } from '@adapter/platform/storage-persist';
 import { THEMES } from './theme';
 import { PAGE_FORMATS } from '@features/page-format';
 import { currentPageFormat } from './page-format';
@@ -81,6 +82,7 @@ export class SettingsRenderer {
       this.syncOpenInEdit();
       this.syncExternalImages();
       this.syncSameOrigin(state);
+      this.syncPersist(state);
       this.syncNotices();
       // 🔴 **隠れている間に来た変化をここで拾う**(2026-08-05、user 報告)。
       //    `refresh()` は面が hidden の間は捨てるので(下の説明)、再表示のときに
@@ -205,6 +207,23 @@ export class SettingsRenderer {
     dl.append(et, ed);
 
     /**
+     * 🔴 **保存が「消えない扱い」か**(#347、user 裁定 2026-08-23
+     * 「**気になるから見るだけで**」)。
+     *
+     * ⚠ **押せるものは置かない。** ここは**知らせるだけ**である ── 帯にもダイアログにも
+     * しないのが裁定で、操作の失敗ではないので user の手を止めない。
+     * 🔑 だから `dd` に入るのは説明文 1 つだけ(選択欄もチェックも無い)。
+     */
+    const st = document.createElement('dt');
+    st.textContent = 'このアプリのデータ';
+    const sd = document.createElement('dd');
+    const snote = document.createElement('p');
+    snote.setAttribute('data-pkc-field', 'settings-note');
+    snote.setAttribute('data-pkc-field-persist', 'persist-state');
+    sd.append(snote);
+    dl.append(st, sd);
+
+    /**
      * 🔴 **「開く」で編集に入るか**(user 裁定 2026-08-18
      * 「**Enter は閲覧を開始、インライン編集で常に開くは設定でトグル可能にすること**」)。
      * ⚠ **flag ではない**(正規設定)── 開放先は user で、畳む予定も無い。
@@ -292,6 +311,7 @@ export class SettingsRenderer {
     this.syncEditorMode();
     this.syncOpenInEdit();
     this.syncSameOrigin(state);
+    this.syncPersist(state);
     this.syncExternalImages();
     this.syncNotices();
     this.refresh();
@@ -620,6 +640,18 @@ export class SettingsRenderer {
     if (select && select.value !== cur) select.value = cur;
   }
 
+  /**
+   * ⚠ 保存の状態を映す(#347)。🔴 **器は 1 度しか組まない**ので、映さないと
+   * **起動直後の「まだ確かめていません」で凍る** ── 最初の保存で分かった後も
+   * 画面だけ古いままになる(この repo が何度も踏んでいる形)。
+   */
+  private syncPersist(state: AppState): void {
+    const el = this.region.querySelector<HTMLElement>('[data-pkc-field-persist="persist-state"]');
+    if (!el) return;
+    const text = PERSIST_TEXT[state.persistState];
+    if (el.textContent !== text) el.textContent = text;
+  }
+
   /** ⚠ 画面の値を**いまの配色に合わせる**(合わせないと画面が嘘をつく)。 */
   private syncTheme(): void {
     const select = this.region.querySelector<HTMLSelectElement>(
@@ -629,6 +661,30 @@ export class SettingsRenderer {
     if (select && cur !== null && select.value !== cur) select.value = cur;
   }
 }
+
+/**
+ * 🔴 **保存の状態を、user の言葉で書く**(#347、user 指示 2026-08-21
+ * 「画面で何が起きるかで書く」)。
+ *
+ * 🔑 **`denied` / `unsupported` は「次の手」まで書く** ── 「消えることがあります」
+ * だけだと、user は不安になるだけで**何もできない**。効く手は
+ * 「**ホーム画面(デスクトップ)に追加する**」である(入れると多くのブラウザが
+ * 自動で消さない扱いにする)。
+ * ⚠ `unknown` を「断られました」と書かない ── **まだ頼んでいない**のであって、
+ * 断られたのではない(起動直後は必ずここを通る)。
+ */
+const PERSIST_TEXT: Record<PersistState, string> = {
+  persisted: 'このブラウザは、このアプリのデータを消さない扱いにしています。',
+  denied:
+    '空き容量が足りなくなると、このブラウザがデータを消すことがあります。' +
+    'ホーム画面(デスクトップ)に追加すると、消さない扱いになることがあります。' +
+    'バックアップは「書き出しと片づけ」から取れます。',
+  unsupported:
+    'このブラウザは、消さない扱いに対応していません。' +
+    '空き容量が足りなくなると、データが消えることがあります。' +
+    'バックアップを定期的に取ってください(「書き出しと片づけ」から取れます)。',
+  unknown: 'まだ確かめていません。最初に何か保存したときに確かめます。',
+};
 
 /** ⚠ 画面に出る語は**そのまま pin される**(`tests/docs-parity.test.ts`)。 */
 const PHASE_LABEL: Record<string, string> = {

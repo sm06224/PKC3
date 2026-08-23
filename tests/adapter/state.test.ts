@@ -70,7 +70,13 @@ describe('reducer: lean aggregate', () => {
     const r1 = reduce(booted(), { type: 'SELECT_ENTRY', lid: 'a' });
     expect(r1.state.selectedLid).toBe('a');
     expect(r1.state.openBody).toBeNull();
-    expect(r1.events).toEqual([{ type: 'REQUEST_BODY', lid: 'a' }]);
+    // ⚠ #348 で **選択が動いた 1 か所**から参照元も引くようになった ──
+    //    等値のまま**両方**書く(`toContainEqual` へ緩めると、余計な event が
+    //    増えても気づけなくなる)
+    expect(r1.events).toEqual([
+      { type: 'REQUEST_BODY', lid: 'a' },
+      { type: 'REQUEST_BACKLINKS', lid: 'a' },
+    ]);
   });
 
   it('re-selecting the same entry re-requests body while openBody is absent (retry path)', () => {
@@ -78,6 +84,7 @@ describe('reducer: lean aggregate', () => {
     s = reduce(s, { type: 'SELECT_ENTRY', lid: 'a' }).state;
     // 読み失敗などで openBody が無いまま同じ entry を再クリック → 再要求される
     const retry = reduce(s, { type: 'SELECT_ENTRY', lid: 'a' });
+    // ⚠ 同じノートの再選択なので**参照元は引き直さない**(選択は動いていない)
     expect(retry.events).toEqual([{ type: 'REQUEST_BODY', lid: 'a' }]);
     // openBody 確立後の同一選択は no-op
     s = reduce(s, { type: 'BODY_LOADED', lid: 'a', body: '# A' }).state;

@@ -14,6 +14,7 @@ import { extractMeta, seedBodyFor } from '@features/flavor';
 import { applyBodyRewrite, type BodyRewrite } from '@features/markdown/body-rewrite';
 import { replaceTaskCards, type TaskScan } from '@features/schedule/task-cards';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
+import type { PersistState } from '@adapter/platform/storage-persist';
 import type { LauncherTile } from '@features/launcher/tiles';
 import type {
   GroupResult as QueryGroups,
@@ -401,6 +402,24 @@ export interface AppState {
    */
   taskScanFailed: boolean;
   /**
+   * 🔴 **保存が「消えない扱い」か**(#347、user 裁定 2026-08-23)。
+   *
+   * ⚠ 出すのは**設定の面だけ**である ── 帯にもダイアログにもしない
+   * (「気になるから**見るだけで**」)。操作の失敗ではないので、user の手を止めない。
+   * ⚠ `unknown` は「断られた」ではなく「**まだ分かっていない**」── 混ぜると
+   * 画面が嘘をつく(起動直後は必ずここを通る)。
+   */
+  persistState: PersistState;
+  /**
+   * 🔴 **このノートを参照しているノート**(#348、user 裁定 2026-08-23)。
+   *
+   * ⚠ `null` = **まだ引いていない**(「0 件」ではない)── 区別しないと、
+   *   情報ペインが「無し」を出したまま、届いた結果に追いつかない。
+   * ⚠ `lid` を一緒に持つ ── 選択を切り替えた直後に前のノートの結果が届いても、
+   *   **別のノートの一覧を出さない**(遅れて届く答えは捨てる)。
+   */
+  backlinks: { lid: string; lids: string[]; truncated: boolean } | null;
+  /**
    * ランチャーのタイル(P7b 段⑩)。⚠ `null` = **まだ読んでいない**。
    * 元データは attachment の frontmatter で**常駐していない**ので、
    * ランチャーを開いたときに要求して還流させる(履歴一覧と同じ流儀)。
@@ -494,6 +513,8 @@ export const initialState: AppState = {
   queryFailed: false,
   taskScan: null,
   taskScanFailed: false,
+  persistState: 'unknown',
+  backlinks: null,
   launcherTiles: null,
   calendarMonth: null,
   showArchived: false,
@@ -805,6 +826,13 @@ export type SystemCommand =
    * 経路を足した人が時刻を落とし、そこだけ「—」に戻る
    */
   | { type: 'ENTRY_STAMPED'; lid: string; createdAt: string | null; updatedAt: string | null }
+  /**
+   * 🔴 保存が「消えない扱い」かの ack(#347)。⚠ **`unknown` は届かない** ──
+   * 分からないままのときは撃たない(state の初期値がそれである)。
+   */
+  | { type: 'PERSIST_STATE'; state: PersistState }
+  /** 🔴 バックリンクが届いた(#348)。⚠ **どのノートの分か**を一緒に運ぶ。 */
+  | { type: 'BACKLINKS_LOADED'; lid: string; lids: string[]; truncated: boolean }
   | {
       /**
        * 🔴 **本文の構造化書換の ack**(#276 / #277 で `TODO_TOGGLED` から改名)。
@@ -884,6 +912,8 @@ export type Dispatchable = UserAction | SystemCommand;
  */
 export type DomainEvent =
   | { type: 'REQUEST_BODY'; lid: string }
+  /** 🔴 このノートを参照しているノートを引く(#348)。 */
+  | { type: 'REQUEST_BACKLINKS'; lid: string }
   /**
    * 本文の全文検索を頼む(#181)。⚠ 本文は常駐していないので **SQL 側の仕事**。
    * 空文字は「絞り込み無し」── 受け手は問い合わせずに黙って終える。
@@ -1065,8 +1095,33 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
   }
   if (result.state.selectedLid !== null && result.state.selectedLid !== state.selectedLid)
     history = pushSelection(history, result.state.selectedLid);
-  if (history === result.state.selectionHistory && dual === result.state.dual) return result;
-  return { state: { ...result.state, selectionHistory: history, dual }, events: result.events };
+  /**
+   * 🔴 **バックリンクも「選択が動いた結果」を 1 か所で見る**(#348、2026-08-23)。
+   *
+   * ⚠ `REQUEST_BODY` は case ごとに撃っているが、あれは**選択以外の理由でも要る**
+   *   (復元・保存の後)。こちらは**選んだノートの周りを見せる**だけなので、
+   *   選択が動いた 1 点で足りる ── 上の履歴と同じ理屈で、
+   *   **次に選択を動かす case を足した人が忘れられない**形にする(§7)。
+   * ⚠ 前の結果は**その場で捨てる**(`null` = まだ引いていない)── 残すと、
+   *   新しいノートの下に**前のノートのバックリンク**が数百 ms 出る。
+   */
+  let backlinks = result.state.backlinks;
+  let events = result.events;
+  if (result.state.selectedLid !== state.selectedLid) {
+    backlinks = null;
+    if (result.state.selectedLid !== null)
+      events = [...events, { type: 'REQUEST_BACKLINKS', lid: result.state.selectedLid }];
+  }
+  if (
+    history === result.state.selectionHistory &&
+    dual === result.state.dual &&
+    backlinks === result.state.backlinks
+  )
+    return { state: result.state, events };
+  return {
+    state: { ...result.state, selectionHistory: history, dual, backlinks },
+    events,
+  };
 }
 
 /**
@@ -2129,6 +2184,30 @@ function reduceCore(
         events: [],
       };
     }
+    /**
+     * 🔴 保存が「消えない扱い」かの ack(#347)。
+     * ⚠ **同じなら state を差し替えない** ── 差し替えると指紋が変わり、
+     *   関係の無い面が組み直される(この repo が何度も踏んでいる形)。
+     */
+    /**
+     * 🔴 バックリンクが届いた(#348)。
+     * ⚠ **遅れて届いた別のノートの分は捨てる** ── 選択を切り替えた直後に
+     *   前のノートの答えが着くと、**別のノートの一覧**がその場に出る。
+     */
+    case 'BACKLINKS_LOADED':
+      return action.lid !== state.selectedLid
+        ? { state, events: [] }
+        : {
+            state: {
+              ...state,
+              backlinks: { lid: action.lid, lids: action.lids, truncated: action.truncated },
+            },
+            events: [],
+          };
+    case 'PERSIST_STATE':
+      return action.state === state.persistState
+        ? { state, events: [] }
+        : { state: { ...state, persistState: action.state }, events: [] };
     case 'ENTRY_STAMPED': {
       const meta = state.entryMetas.get(action.lid);
       // 消えた entry の ack は捨てる(削除と書込の競合)

@@ -8,7 +8,7 @@
  */
 import type { EntryStamps, EntryUpsert } from '@adapter/platform/storage/schema';
 import { extractMeta, type FlavorExtract } from '@features/flavor';
-import { PersistOnce } from '@adapter/platform/storage-persist';
+import { PersistOnce, type PersistState } from '@adapter/platform/storage-persist';
 // 🔴 追記の楽観検査(#178)── 「読んだ本文」を worker と突き合わせるための指紋
 import { contentHash64Hex } from '@adapter/platform/storage/content-hash';
 import { appendBlock } from '@features/markdown/text-ops';
@@ -40,6 +40,11 @@ export interface StorePort {
    * 旧い配線)では題名の絞り込みだけが効く(壊れるのではなく、機能が減るだけ)。
    */
   searchEntries?(query: string): Promise<string[]>;
+  /**
+   * 🔴 このノートを参照しているノート(#348)。⚠ **optional** ── 古い worker が
+   * service worker のキャッシュに残っている端末では未知の op になる。
+   */
+  findBacklinks?(lid: string): Promise<{ lids: string[]; truncated: boolean }>;
   /**
    * 集計(#184)。⚠ **省略可** ── 持たない環境(test の fake / 旧い配線)では
    * 面が「この版では数えられません」と断るだけで、他は壊れない。
@@ -240,10 +245,28 @@ export function connectStoreEffects(
    * ⚠ 回数は `PersistOnce` が持つ ── ここは書込のたびに呼ぶ。
    */
   const persistOnce = opts.persist ?? new PersistOnce(globalThis.navigator?.storage);
+  /**
+   * 🔴 **分かったら画面へ伝える**(#347、user 裁定 2026-08-23「気になるから見るだけで」)。
+   *
+   * ⚠ **`unknown` を弾く門は置かない。** 1 稿目は置いたが、変異試験で
+   *   **等価変異**(外しても何も壊れない)と分かった ── 同値を捨てるのは
+   *   reducer の仕事で、そちらに既に在る。⚠ 「これが無いと壊れる」と書く前に
+   *   外して壊れるのを見る(CLAUDE.md §1。`min-height: 0` と同じ型)。
+   */
+  const tellPersist = (st: PersistState): void => {
+    if (disposed) return;
+    dispatcher.dispatch({ type: 'PERSIST_STATE', state: st });
+  };
+  /**
+   * ⚠ **起動時は「尋ねずに聞く」だけ**(`persisted()`)── ブラウザが user に
+   * 尋ねることは無いので、ここで呼んでよい。頼む側(`persist()`)は
+   * **最初の書込のとき**である(下の `stamp`)。
+   */
+  void persistOnce.probe().then(tellPersist);
 
   const stamp = (lid: string, s: EntryStamps): void => {
     if (disposed) return;
-    void persistOnce.ensure();
+    void persistOnce.ensure().then(tellPersist);
     dispatcher.dispatch({
       type: 'ENTRY_STAMPED',
       lid,
@@ -271,6 +294,29 @@ export function connectStoreEffects(
           () => {
             /* ⚠ 検索の失敗で帯を出さない ── 題名の絞り込みは効いたままで、
                user の操作は止まっていない(黙って減るのは「増えない」方向) */
+          },
+        );
+        break;
+      }
+      /**
+       * 🔴 **このノートを参照しているのはどれか**(#348)。
+       * ⚠ **直列 queue に載せない**(検索と同じ)── 選ぶたびに走るので、
+       *   載せると保存・本文読込がその後ろに詰まる。
+       * ⚠ 遅れて返った答えは reducer が `lid` で捨てるので、順序保証は要らない。
+       */
+      case 'REQUEST_BACKLINKS': {
+        const ask = store.findBacklinks;
+        // ⚠ 古い worker(未知の op)では**何も出さない** ── 帯は出さない。
+        //    「参照しているノート」は付随情報で、操作は止まっていない
+        if (!ask) break;
+        const lid = ev.lid;
+        void ask(lid).then(
+          (r) => {
+            if (disposed) return;
+            dispatcher.dispatch({ type: 'BACKLINKS_LOADED', lid, ...r });
+          },
+          () => {
+            /* ⚠ 失敗しても黙る(付随情報なので、user の操作は止まっていない) */
           },
         );
         break;

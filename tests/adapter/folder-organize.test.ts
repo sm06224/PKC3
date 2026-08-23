@@ -240,7 +240,12 @@ describe('いま見ているフォルダの中に作る(reducer)', () => {
      * ── ノートは残るのにルート直下に現れる(実測。smoke が全量実行でだけ落ちた)。
      * ⚠ 「2 つの要求を 1 回の enqueue にまとめる」では直らない(`await` で窓が開く)。
      */
-    expect((r.events as Array<{ type: string }>).map((e) => e.type)).toEqual(['PERSIST_ENTRY']);
+    // ⚠ #348 で **選択が動いた 1 か所**から参照元も引く ── 作成は選択も動かす。
+    //    等値のまま**両方**書く(緩めると、余計な event が増えても気づけない)
+    expect((r.events as Array<{ type: string }>).map((e) => e.type)).toEqual([
+      'PERSIST_ENTRY',
+      'REQUEST_BACKLINKS',
+    ]);
     expect(
       (r.events[0] as { parent?: unknown }).parent,
       '居場所が同じ要求に乗っていない(2 手に割れている)',
@@ -256,7 +261,12 @@ describe('いま見ているフォルダの中に作る(reducer)', () => {
       title: 'x',
     });
     expect(r.state.relations).toEqual([]);
-    expect((r.events as Array<{ type: string }>).map((e) => e.type)).toEqual(['PERSIST_ENTRY']);
+    // ⚠ #348 で **選択が動いた 1 か所**から参照元も引く ── 作成は選択も動かす。
+    //    等値のまま**両方**書く(緩めると、余計な event が増えても気づけない)
+    expect((r.events as Array<{ type: string }>).map((e) => e.type)).toEqual([
+      'PERSIST_ENTRY',
+      'REQUEST_BACKLINKS',
+    ]);
     // ⚠ 親が無いときは **`parent` を載せない**(載せると「ルートへ出す」= 辺を消す指示になる)
     expect((r.events[0] as { parent?: unknown }).parent).toBeUndefined();
   });
@@ -274,7 +284,12 @@ describe('いま見ているフォルダの中に作る(reducer)', () => {
     });
     expect(r.state.entryMetas.has('new3')).toBe(true);
     expect(r.state.relations).toEqual([]);
-    expect((r.events as Array<{ type: string }>).map((e) => e.type)).toEqual(['PERSIST_ENTRY']);
+    // ⚠ #348 で **選択が動いた 1 か所**から参照元も引く ── 作成は選択も動かす。
+    //    等値のまま**両方**書く(緩めると、余計な event が増えても気づけない)
+    expect((r.events as Array<{ type: string }>).map((e) => e.type)).toEqual([
+      'PERSIST_ENTRY',
+      'REQUEST_BACKLINKS',
+    ]);
     // ⚠ 親が無いときは **`parent` を載せない**(載せると「ルートへ出す」= 辺を消す指示になる)
     expect((r.events[0] as { parent?: unknown }).parent).toBeUndefined();
   });

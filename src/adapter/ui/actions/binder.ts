@@ -25,6 +25,7 @@ import {
   isDateShortcut,
   shortcutDate,
 } from '@features/schedule/date-shortcuts';
+import { findTodayNote, todayNoteTitle } from '@features/schedule/today-note';
 import { isImageAssetMime } from '@features/asset/asset-ref-format';
 import { adoptableUrls, rewriteAdopted } from '@features/asset/inline-url-adopt';
 import { convertPastedHtml } from '@features/markdown/html-to-markdown';
@@ -557,6 +558,14 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
    */
   'toggle-task',
   /**
+   * 🔴 **今日のノートは「作る」ことがある**(#348、2026-08-23)。
+   * ⚠ 既に在れば選ぶだけだが、**無ければ `CREATE_ENTRY` を撃つ** ──
+   *   取り込みが entry を総入れ替えしている裏で作らせない。
+   * 🔑 「選ぶだけの回もある」は門を外す理由にならない ── **撃ちうる**なら載せる
+   *   (機械検査は `tests/repo-hygiene.test.ts`)。
+   */
+  'open-today',
+  /**
    * 🔴 **ノート 1 件の日付も disk への書込**(#292 段④)── frontmatter を書く。
    * ⚠ 取り込みが entry を総入れ替えしている裏で frontmatter を書かせない、が理由。
    *   機械検査は `tests/repo-hygiene.test.ts`。
@@ -1039,6 +1048,38 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'COMMIT_EDIT' });
   },
   'cancel-edit': (dispatcher, _target, _services, root) => cancelFromEditor(dispatcher, root),
+  /**
+   * 🔴 **今日のノートを開く**(#348、user 裁定 2026-08-23)。
+   *
+   * ⚠ **`create-entry` と同じ順序**にする ── 面を detail へ戻してから作る
+   *   (非 detail で作ると editor が出ない、という PKC2 由来の罠)。
+   * 🔑 **既に在れば作らない** ── 押すたびに増えると、その日の入れ物が
+   *   1 つに決まらず、「どっちが本物か」を user が追う羽目になる。
+   * ⚠ **入れ先(フォルダ)は見ない** ── その日の入れ物は 1 つなので、
+   *   いま開いているフォルダによって別の物ができると読みが壊れる。
+   */
+  'open-today': (dispatcher, _target, services) => {
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') return;
+    if (st.viewMode !== 'detail') dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
+    const title = todayNoteTitle(new Date());
+    const found = findTodayNote(st.entryMetas.values(), title);
+    if (found) {
+      dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: found.lid });
+      return;
+    }
+    const lid = generateLid();
+    dispatcher.dispatch({
+      type: 'CREATE_ENTRY',
+      archetype: 'text',
+      lid,
+      title,
+      parentLid: null,
+      relationId: generateLid(),
+    });
+    // ⚠ `create-entry` と同じ ── 作成 → 即編集の編集権を取る
+    if (dispatcher.getState().phase === 'editing') void services.acquireEditLock?.(lid);
+  },
   'create-entry': (dispatcher, target, services) => {
     // 🔑 種類は**隣の `<select>`**から取る(P8 ── ボタンを種類ぶん並べない)。
     // ⚠ 旧来どおりボタン自身が `data-pkc-archetype` を持つ形も受ける
