@@ -150,6 +150,8 @@ const ICON_PATHS: Readonly<Record<string, readonly IconPath[]>> = {
   'chevron-left': ['M14.5 6.5L9 12l5.5 5.5'],
   /** 右向きの山(選択の進む)。 */
   'chevron-right': ['M9.5 6.5L15 12l-5.5 5.5'],
+  /** 予定 ── 綴じの付いた紙(カレンダー)。⚠ 升目は描かない(16px で泥になる) */
+  calendar: ['M4 6.5h16V20H4z', 'M4 10.5h16', 'M8.5 3.5v4', 'M15.5 3.5v4'],
   /** 種類が分からないもの。 */
   dot: [{ d: 'M9.5 12a2.5 2.5 0 105 0 2.5 2.5 0 00-5 0z', fill: 'solid' }],
 };
@@ -243,6 +245,7 @@ export const BROWSE_ICONS: Readonly<Record<string, IconName>> = {
   list: 'list',
   filer: 'folder',
   launcher: 'apps',
+  schedule: 'calendar',
 };
 
 /** 図案 1 つを作る。⚠ 呼び側は**そのまま append する**(文字列にしない)。 */

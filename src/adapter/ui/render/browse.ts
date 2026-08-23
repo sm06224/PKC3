@@ -25,6 +25,7 @@ import { SidebarRenderer } from './sidebar';
 import { ScrollMemory } from './scroll-memory';
 import { FilerRenderer } from './filer';
 import { LauncherRenderer } from './launcher';
+import { ScheduleRenderer } from './schedule';
 
 // 🔑 型と既定は `browse-mode.ts` が持つ(#240 段⑤)── 既定が 4 か所に散っていた
 export type { BrowseMode } from './browse-mode';
@@ -39,6 +40,12 @@ export const BROWSE_TABS: readonly { mode: BrowseMode; label: string }[] = [
   { mode: 'list', label: '一覧' },
   { mode: 'filer', label: 'フォルダ' },
   { mode: 'launcher', label: 'アプリ' },
+  /**
+   * 🔴 **予定**(#292 段③。user 指示 2026-08-23)。
+   * ⚠ ここに置くのは、上の表が「**左 = ノート全体**」と決めているからである ──
+   *   予定はノート全体を横断して見るもので、**中央(本文)を退かす理由が無い**。
+   */
+  { mode: 'schedule', label: '予定' },
 ] as const;
 
 export class BrowseRouter {
@@ -46,6 +53,7 @@ export class BrowseRouter {
   private readonly list: SidebarRenderer;
   private readonly filer: FilerRenderer;
   private readonly launcher: LauncherRenderer;
+  private readonly schedule: ScheduleRenderer;
   /**
    * 🔑 **面ごとに位置を覚える**(P8 段⑫。user 指示「サイドバーも同じ、
    * スクロールが発生するすべての画面が対象だよ」)。3 つの面が**同じ器**を
@@ -59,7 +67,13 @@ export class BrowseRouter {
    *   ここを 'list' 固定にしていたので、既定を変えると**タブは選ばれているのに
    *   中身は一覧のまま**という食い違いが出た(段⑤ の実装中に実際に踏んだ)。
    */
-  constructor(sidebar: HTMLElement, host: HTMLElement, initial: BrowseMode = DEFAULT_BROWSE_MODE) {
+  constructor(
+    sidebar: HTMLElement,
+    host: HTMLElement,
+    initial: BrowseMode = DEFAULT_BROWSE_MODE,
+    /** ⚠ test 注入用(既定は実時刻)── 「今日」を面ごとに読まない。 */
+    now?: () => Date,
+  ) {
     this.last = initial;
     const pane = (mode: BrowseMode): HTMLElement => {
       const el = document.createElement('div');
@@ -74,6 +88,7 @@ export class BrowseRouter {
       list: host.querySelector<HTMLElement>('[data-pkc-region="entry-list"]') ?? pane('list'),
       filer: pane('filer'),
       launcher: pane('launcher'),
+      schedule: pane('schedule'),
     };
     // ⚠ 一覧は既存の region を使い回すので、`pane()` の hidden 制御を通らない ──
     //    初期が一覧でないときは**ここで隠す**(隠し忘れると 2 面が重なって出る)
@@ -82,6 +97,7 @@ export class BrowseRouter {
     this.list = new SidebarRenderer(sidebar);
     this.filer = new FilerRenderer(this.panes.filer);
     this.launcher = new LauncherRenderer(this.panes.launcher);
+    this.schedule = new ScheduleRenderer(this.panes.schedule, now);
   }
 
   render(state: AppState, mode: BrowseMode): void {
@@ -99,6 +115,7 @@ export class BrowseRouter {
     // ⚠ 非 active な面には render を呼ばない(裏で毎 state 仕事をしない)
     if (mode === 'list') this.list.render(state);
     else if (mode === 'filer') this.filer.render(state);
+    else if (mode === 'schedule') this.schedule.render(state);
     else this.launcher.render(state);
     // 🔑 **中身を入れ終わってから**位置を合わせる(空の器に書いても丸められる)。
     // ⚠ 面 = 探し方 × 「絞り込み中かどうか」── 絞り込んだ結果は先頭からが正しく、

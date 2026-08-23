@@ -1661,6 +1661,36 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'toggle-show-undated': (dispatcher) =>
     dispatcher.dispatch({ type: 'TOGGLE_SHOW_UNDATED_TASKS' }),
+  /**
+   * 予定の面の月送り。⚠ **遷移先は描画時に焼いてある**(`data-pkc-nav-*`)──
+   * binder に「いま表示している月」の別ソース(実時刻)を持たせない。
+   */
+  'schedule-nav': (dispatcher, target) => {
+    const year = Number(target.getAttribute('data-pkc-nav-year'));
+    const month = Number(target.getAttribute('data-pkc-nav-month'));
+    if (!Number.isFinite(year) || !Number.isFinite(month)) return;
+    dispatcher.dispatch({ type: 'SET_CALENDAR_MONTH', year, month });
+  },
+  'schedule-today': (dispatcher) => {
+    const now = new Date();
+    dispatcher.dispatch({
+      type: 'SET_CALENDAR_MONTH',
+      year: now.getFullYear(),
+      month: now.getMonth() + 1,
+    });
+  },
+  /**
+   * 🔴 **升目を押したら、その日の束へ送る**(掴まずに使う道)。
+   * ⚠ 束が無い日(予定 0 件)は**何も起きない** ── 空の束を作ると、
+   *   押しても何も無い見出しが増える。
+   */
+  'schedule-pick-day': (_dispatcher, target, _services, root) => {
+    const date = target.getAttribute('data-pkc-drop-date');
+    if (date === null) return;
+    root
+      .querySelector(`[data-pkc-region="schedule-group"][data-pkc-drop-date="${date}"]`)
+      ?.scrollIntoView({ block: 'nearest' });
+  },
   'retry-persist': (dispatcher) => dispatcher.dispatch({ type: 'RETRY_PERSIST' }),
   /**
    * 🔴 **フォルダへ入る / ルートへ戻る**(#240 段①)。
@@ -2096,6 +2126,16 @@ const ACTIONS: Record<string, ActionHandler> = {
  * 独自 mime ── `Files` を見る既存の経路(添付 / 本文への貼付)に一切触らせない。
  */
 const PKC_DRAG = 'application/x-pkc-lids';
+/**
+ * 🔴 **予定の札を運ぶ**(双方向。user 指示 2026-08-23)。
+ *
+ * ⚠ **`PKC_DRAG` とは別の型**にする ── あちらは「ノートをフォルダへ移す」で、
+ *   こちらは「**本文の 1 行の日付を変える**」。混ぜると、フォルダの行へ札を
+ *   落としたときに**ノートを移そうとする**(見当違いの操作が黙って走る)。
+ * ⚠ 荷物は `lid` と**原文の行番号**だけ ── 時刻は state から引く
+ *   (画面に出ている物と同じ出どころにする。§7)。
+ */
+const PKC_TASK_DRAG = 'application/x-pkc-task';
 
 const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
   'create-entry': '[data-pkc-field="create-run"]',
@@ -2675,6 +2715,19 @@ export function bindActions(
    */
   const onDragOver = (e: Event): void => {
     const de = e as DragEvent;
+    // 🔴 **予定の札**(双方向)── 落とし先は日の升目 / 束の見出し
+    if (de.dataTransfer?.types?.includes(PKC_TASK_DRAG) === true) {
+      const drop = dateTargetOf(de.target);
+      if (drop === null) {
+        // ⚠ **光ったままにしない** ── 通ってから別の場所で離すと「そこへ入った」と読む
+        clearDropTarget();
+        return;
+      }
+      e.preventDefault();
+      de.dataTransfer.dropEffect = 'move';
+      markDropTarget(drop.el);
+      return;
+    }
     // 🔴 **PKC の中の移動**(#240 段④)── OS からの file 受けとは**別の型**で見分ける
     if (de.dataTransfer?.types?.includes(PKC_DRAG) === true) {
       const drop = dropTargetOf(de.target);
@@ -2701,6 +2754,33 @@ export function bindActions(
   let dragFromSide: DualSide | null = null;
   const onDrop = (e: Event): void => {
     const de = e as DragEvent;
+    /**
+     * 🔴 **落としたら、その行の日付が変わる**(双方向の出口)。
+     * ⚠ 空文字の落とし先は「日付なし」= **外す**(消すのではない)。
+     * ⚠ 時刻は**持ち越す** ── 日を動かしただけで 14:00 が消えたら、
+     *   user は「勝手に消された」と読む。
+     */
+    if (de.dataTransfer?.types?.includes(PKC_TASK_DRAG) === true) {
+      const drop = dateTargetOf(de.target);
+      clearDropTarget();
+      if (drop === null) return;
+      e.preventDefault();
+      const [lid, rawLine] = (de.dataTransfer.getData(PKC_TASK_DRAG) || '').split(' ');
+      const line = Number(rawLine);
+      if (lid === undefined || lid === '' || !Number.isInteger(line)) return;
+      const card = dispatcher
+        .getState()
+        .taskScan?.cards.find((c) => c.lid === lid && c.line === line);
+      dispatcher.dispatch({
+        type: 'SET_TASK_DATE',
+        lid,
+        line,
+        date: drop.date === '' ? null : drop.date,
+        // ⚠ 外すときは時刻も一緒に落ちる(記法ごと剥がすため)
+        time: card?.time ?? null,
+      });
+      return;
+    }
     if (de.dataTransfer?.types?.includes(PKC_DRAG) === true) {
       const drop = dropTargetOf(de.target);
       clearDropTarget();
@@ -2741,6 +2821,27 @@ export function bindActions(
    */
   const onDragStart = (e: Event): void => {
     const de = e as DragEvent;
+    /**
+     * 🔴 **予定の札は別の荷物で運ぶ**(双方向)。
+     * ⚠ 行番号は**中の印から引く** ── 札にも同じ属性を置くと、
+     *   `[data-pkc-task-line=…]` を押す既存の経路が**札のほうに当たる**
+     *   (2026-08-23 に実際に踏んだ)。
+     */
+    const taskCard = (de.target as HTMLElement | null)?.closest<HTMLElement>(
+      '[data-pkc-region="schedule-cards"] > [data-pkc-entry], [data-pkc-region="kanban-cards"] > [data-pkc-entry]',
+    );
+    if (taskCard !== null && taskCard !== undefined && de.dataTransfer) {
+      const lid = taskCard.getAttribute('data-pkc-entry');
+      const line = taskCard
+        .querySelector('[data-pkc-task-line]')
+        ?.getAttribute('data-pkc-task-line');
+      if (lid !== null && line !== null && line !== undefined) {
+        dragFromSide = null;
+        de.dataTransfer.setData(PKC_TASK_DRAG, `${lid} ${line}`);
+        de.dataTransfer.effectAllowed = 'move';
+        return;
+      }
+    }
     const row = (de.target as HTMLElement | null)?.closest<HTMLElement>('[data-pkc-entry]');
     const lid = row?.getAttribute('data-pkc-entry') ?? null;
     /**
@@ -2774,6 +2875,15 @@ export function bindActions(
     de.dataTransfer.effectAllowed = 'move';
   };
   const onDragEnd = (): void => clearDropTarget();
+  /**
+   * 予定の落とし先(日の升目 / 束の見出し)。`null` = 落とせない場所。
+   * ⚠ **空文字は「日付なし」**(属性が無いのとは別物)── だから `null` で表す。
+   */
+  const dateTargetOf = (target: EventTarget | null): { el: HTMLElement; date: string } | null => {
+    const el = (target as HTMLElement | null)?.closest<HTMLElement>('[data-pkc-drop-date]');
+    if (!el || !root.contains(el)) return null;
+    return { el, date: el.getAttribute('data-pkc-drop-date') ?? '' };
+  };
   /** 落とし先(フォルダの行 / パンくずの段)。`undefined` = 落とせない場所。 */
   const dropTargetOf = (target: EventTarget | null): { el: HTMLElement; lid: string | null } | undefined => {
     const el = (target as HTMLElement | null)?.closest<HTMLElement>('[data-pkc-drop]');

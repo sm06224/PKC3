@@ -26,7 +26,7 @@ import {
   type TaskCard,
 } from '@features/kanban/kanban-data';
 import { matchesEntry, normalizeQuery } from '@features/filter/title-filter';
-import { formatListDate } from '@features/datetime/stored-date';
+import { createTaskCard, patchTaskCard } from './task-card';
 
 export class KanbanRenderer {
   private readonly region: HTMLElement;
@@ -312,70 +312,14 @@ export class KanbanRenderer {
   }
 
   private createCard(data: TaskCard): HTMLElement {
-    const card = document.createElement('article');
-    /**
-     * 🔴 **どのノートの行かを札に焼く**。⚠ これが無いと binder は
-     * 「いま開いているノート」に書き込む ── 盤面では**別のノートを書き換える**。
-     */
-    card.setAttribute('data-pkc-entry', data.lid);
-    card.setAttribute('data-pkc-action', 'select-entry');
-    const box = document.createElement('input');
-    box.type = 'checkbox';
-    box.className = 'pkc-task-checkbox';
-    box.setAttribute('data-pkc-action', 'toggle-task');
-    box.setAttribute('aria-label', 'チェックを切り替え');
-    const text = document.createElement('span');
-    text.setAttribute('data-pkc-field', 'text');
-    /**
-     * 🔴 **その行に書かれた日付**(2026-08-23)。⚠ 記法(`@2026-08-25`)は
-     *   `taskCardsOf` が札の字から外しているので、ここに出さないと**どこにも出ない**。
-     */
-    const when = document.createElement('span');
-    when.setAttribute('data-pkc-field', 'when');
-    /**
-     * ⚠ 日付と字は**同じ器に入れる**(格子の列を増やさない)。
-     * 🔑 増やすと、日付の無い札で**空の列の隙間だけが残り**、印の位置が
-     *   札ごとに 8px ずれる(`display: none` は列を消すが、その両隣の gap は残る)。
-     */
-    const line = document.createElement('div');
-    line.setAttribute('data-pkc-field', 'line');
-    line.append(when, text);
-    const note = document.createElement('span');
-    note.setAttribute('data-pkc-field', 'note');
-    card.append(box, line, note);
+    // 🔑 組み立ては `task-card.ts` 1 か所(予定の面と同じ札を出すため。§7)
+    const card = createTaskCard(data);
     this.patchCard(card, data, '');
     return card;
   }
 
+  /** ⚠ 板は束が「日」ではないので、**札に日付を出す**(予定の面は出さない)。 */
   private patchCard(card: HTMLElement, data: TaskCard, title: string): void {
-    const box = card.querySelector<HTMLInputElement>('[data-pkc-action="toggle-task"]');
-    if (box) {
-      // 🔴 **指すのは原文の行番号**(索引ではない ── 別の行を書き換えないため)
-      box.setAttribute('data-pkc-task-line', String(data.line));
-      box.checked = data.done;
-    }
-    if (data.done) card.setAttribute('data-pkc-task-done', '');
-    else card.removeAttribute('data-pkc-task-done');
-    const when = card.querySelector<HTMLElement>('[data-pkc-field="when"]');
-    if (when) {
-      /**
-       * 🔑 日付の見せ方は `formatListDate` 1 本(左の一覧と同じ規則)──
-       * 面ごとに書くと、同じ日が場所によって違う字で出る(CLAUDE.md §7)。
-       * ⚠ 今年は `MM/DD`、それ以外は `YYYY/MM/DD`。
-       */
-      const label =
-        data.date === null
-          ? ''
-          : `${formatListDate(data.date, this.now().getFullYear())}${data.time === null ? '' : ` ${data.time}`}`;
-      if (when.textContent !== label) when.textContent = label;
-      when.hidden = label === '';
-    }
-    const text = card.querySelector('[data-pkc-field="text"]');
-    // ⚠ 中身が空の項目もある(`- [ ]` だけの行)── 札は出すが、字は出ない
-    if (text && text.textContent !== data.text) text.textContent = data.text;
-    const note = card.querySelector('[data-pkc-field="note"]');
-    if (note && note.textContent !== title) note.textContent = title;
-    // 🔑 題名は指紋にも使う(ノートを改名したら札の字も直る)
-    card.setAttribute('data-pkc-note', title);
+    patchTaskCard(card, data, title, this.now().getFullYear(), true);
   }
 }

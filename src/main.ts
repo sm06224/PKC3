@@ -1733,6 +1733,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       //    `SET_VIEW_MODE 'launcher'` を撃っていたので、タブを切り替えただけで
       //    中央下の追記欄が消えていた(他の 2 タブでは残る)
       if (mode === 'launcher') dispatcher.dispatch({ type: 'REFRESH_LAUNCHER_TILES' });
+      // 🔑 予定も同じ流儀(#292 段③)── 開いたときに集める。⚠ 前の束は消さない
+      if (mode === 'schedule') dispatcher.dispatch({ type: 'REFRESH_TASK_SCAN' });
       /**
        * 🔴 **面を畳むのは「わきの面」だけ**(2026-08-20。user 指示
        * 「カレンダーを利用するための導線が不足している」の調査で判明)。

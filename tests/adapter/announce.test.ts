@@ -537,6 +537,7 @@ describe('お知らせの文面は固定(#220-7)', () => {
   const KNOWN: readonly [string, string][] = [
     ['2026-08-22-window-overlap', '9f7186e0'],
     ['2026-08-22-apps-in-windows', '155f1bb6'],
+    ['2026-08-23-schedule-pane', 'ccfd21f2'],
     ['2026-08-23-dated-tasks', '0214f343'],
     ['2026-08-22-link-detection', '2f5ff0ab'],
     ['2026-08-22-pane-flow', '764b5ad8'],
@@ -554,7 +555,8 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-08-19-task-checkbox', '658e6d6f'],
     ['2026-08-19-calendar', '5585f5ed'],
     ['2026-08-19-doc-info', 'd16ac3ff'],
-    ['2026-08-19-dual-keyboard', '89abbd57'],
+    // ⚠ 上限 20 を超えたので 2026-08-23 に落とした(原本は CHANGELOG)
+    // ['2026-08-19-dual-keyboard', '89abbd57'],
     // ⚠ 上限 20 を超えたので 2026-08-23 に落とした(原本は CHANGELOG)
     // ['2026-08-19-container-id', '70f3c9af'],
     // ⚠ 上限 20 を超えたので 2026-08-22 に落とした(原本は CHANGELOG)

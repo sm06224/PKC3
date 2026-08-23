@@ -562,6 +562,13 @@ export type UserAction =
    */
   | { type: 'REFRESH_LAUNCHER_TILES' }
   /**
+   * 🔴 **予定のタブを開いたときに集める**(#292 段③)。
+   * ⚠ ランチャーと同じ流儀 ── 探し方(`browseMode`)は state に持たないので、
+   *   「開いた」を知っているのは `main.ts` である。前の束は**消さない**
+   *   (読み直しの間に空白を出さない)。
+   */
+  | { type: 'REFRESH_TASK_SCAN' }
+  /**
    * タイル設定を書き戻した ack(P8 段⑭)。⚠ **開いている body も差し替える**。
    * ⚠ `body === null` は失敗(書けなかった)── **ロックは必ず解く**。
    */
@@ -1428,6 +1435,8 @@ function reduceCore(
               ? [{ type: 'REQUEST_TASK_SCAN' }]
               : [],
       };
+    case 'REFRESH_TASK_SCAN':
+      return { state, events: [{ type: 'REQUEST_TASK_SCAN' }] };
     case 'REFRESH_LAUNCHER_TILES':
       // ⚠ **毎回要求する**。ただし前回のタイルは消さない(古い並びを出したまま
       //    読み直し、届いたら差し替える ── 「読み込んでいます…」を挟まない)

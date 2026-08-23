@@ -2231,6 +2231,188 @@ select:focus-visible {
   text-decoration: line-through;
   color: var(--muted);
 }
+/* ══ 予定(#292 段③、2026-08-23)══════════════════════════════════
+ * 🔴 **左の列に置く**(user 指示「もう一つ PKC が開いて混乱する」)── 中央は
+ *   本文のまま。⚠ 幅は `minmax(200px, 18vw)` = 1920 で 345px / 下限 200px。
+ *   7 列の月は下限でも 28px/セルなので、**数字と点だけ**なら入る
+ *   (升目の中に予定を並べるのは捨てた ── それは下の束が持つ)。 */
+[data-pkc-browse-pane='schedule'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s2);
+  min-height: 0;
+  overflow: auto;
+}
+[data-pkc-field='schedule-toolbar'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+[data-pkc-field='schedule-toolbar'] button {
+  padding: 0 var(--s2);
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+[data-pkc-field='schedule-toolbar'] button:hover {
+  color: var(--fg);
+}
+[data-pkc-field='schedule-month'] {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+}
+/* 🔑 **曜日の列は等幅**(表が中身なりに伸びると、月として読めない) */
+[data-pkc-field='schedule-week'] {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 1px;
+}
+[data-pkc-field='schedule-week'] > span {
+  text-align: center;
+  font-size: 10px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+[data-pkc-field='schedule-week'] > button {
+  position: relative;
+  padding: 2px 0;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--fg);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+[data-pkc-field='schedule-week'] > button:hover {
+  background: var(--surface-2);
+}
+/* 🔑 **今日は線で示す**(地は無彩色、色は情報にだけ) */
+[data-pkc-field='schedule-week'] > button[data-pkc-today] {
+  border-color: var(--fg);
+  font-weight: 700;
+}
+/* 予定のある日は**点**(件数は出さない ── 升目が読めなくなる) */
+[data-pkc-field='schedule-week'] > button[data-pkc-has]::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 1px;
+  width: 3px;
+  height: 3px;
+  margin-left: -1.5px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+/* 🔴 **落とせる所は、落とす前に分かる**(掴んで通ったときだけ光る) */
+[data-pkc-drop-date][data-pkc-dropping] {
+  outline: 2px solid var(--fg);
+  outline-offset: -2px;
+}
+[data-pkc-field='schedule-note'] {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+[data-pkc-field='schedule-note']:empty {
+  display: none;
+}
+/* ⚠ 切替は 1 行に並べる(狭い列で縦に積むと嵩む) */
+[data-pkc-field='schedule-toggles'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s3);
+}
+[data-pkc-field='schedule-toggles']:not(:has(button:not([hidden]))) {
+  display: none;
+}
+[data-pkc-field='schedule-undated'],
+[data-pkc-field='schedule-done'] {
+  align-self: flex-start;
+  padding: 0;
+  font: inherit;
+  font-size: 11px;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-bottom: 1px dotted var(--border);
+  cursor: pointer;
+}
+[data-pkc-field='schedule-undated']:hover,
+[data-pkc-field='schedule-done']:hover {
+  color: var(--fg);
+}
+[data-pkc-region='schedule-groups'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+[data-pkc-field='schedule-group-label'] {
+  margin: 0 0 var(--s1);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+/* ⚠ 期限切れは**捨てない。印を付ける**(左の線 ── 地に色を敷かない) */
+[data-pkc-region='schedule-group'][data-pkc-overdue] {
+  border-left: 2px solid var(--danger, #b3261e);
+  padding-left: var(--s2);
+}
+[data-pkc-region='schedule-cards'] {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+[data-pkc-region='schedule-cards'] > [data-pkc-entry] {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0 var(--s2);
+  align-items: baseline;
+  padding: 2px var(--s2);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+[data-pkc-region='schedule-cards'] > [data-pkc-entry]:hover {
+  background: var(--surface-2);
+}
+[data-pkc-region='schedule-cards'] [data-pkc-field='line'] {
+  min-width: 0;
+  display: flex;
+  gap: var(--s2);
+  align-items: baseline;
+  font-size: 12px;
+}
+[data-pkc-region='schedule-cards'] [data-pkc-field='text'] {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+[data-pkc-region='schedule-cards'] [data-pkc-field='when'] {
+  flex: none;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+/* 出どころのノート名は印の下ではなく中身の下(印の列を空けたまま) */
+[data-pkc-region='schedule-cards'] [data-pkc-field='note'] {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: 10px;
+}
+/* 済んだ札は**色ではなく線**で示す */
+[data-pkc-region='schedule-cards'] [data-pkc-task-done] [data-pkc-field='text'] {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+
 /* ══ カレンダー(#276 / 2026-08-20 に面を作り直し)════════════════════
  * user 指示「カレンダーを利用するための導線が不足している」を受けた直し。
  * 実測(1440×900、直す前):曜日の列が **40.6px×6 + 696.1px×1**(予定のある
@@ -3130,6 +3312,24 @@ select:focus-visible {
 @media (max-width: 900px) {
   [data-pkc-region='browse-tabs'] [data-pkc-icon] {
     display: none;
+  }
+  /**
+   * 🔴 **狭い列では 2 段に折り返す**(2026-08-23、タブが 4 枚になって実測で判明)。
+   *
+   * ⚠ 900px を切ると左の列は **180px**。4 枚だと 1 枚 **44px** しか取れず、
+   *   「フォルダ」(12px で約 48px)が**隣へ 2px はみ出して重なった**
+   *   ── smoke が数字で捕まえた(語の右端 101 / 箱の右端 99)。
+   * ⚠ **字を小さくする**のは採らない ── 11px でも 44px 前後で余裕が無く、
+   *   ラベルが 1 字増えた日にまた重なる(**語の長さに依存しない**直しにする)。
+   * ⚠ **畳む**のも採らない(user 指示「畳まない」)── 折り返しは
+   *   **4 枚とも出たまま**なので、その指示に抵触しない。
+   */
+  [data-pkc-region='browse-tabs'] {
+    flex-wrap: wrap;
+  }
+  [data-pkc-region='browse-tabs'] button {
+    /* ⚠ 45% ── 2 枚で 90% + gap なので、必ず 2 枚ずつ折り返る */
+    flex: 1 1 45%;
   }
 }
 

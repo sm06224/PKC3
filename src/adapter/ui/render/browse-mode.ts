@@ -11,13 +11,14 @@
  * ⚠ 既定を**ここ 1 か所**に置く(直す前は `main.ts` に 2 か所、`browse.ts` に 2 か所
  * 散っており、変えるときに必ず取りこぼす形だった)。
  */
-export type BrowseMode = 'list' | 'filer' | 'launcher';
+export type BrowseMode = 'list' | 'filer' | 'launcher' | 'schedule';
 
 /** 🔴 既定 = フォルダ(#240 段⑤)。 */
 export const DEFAULT_BROWSE_MODE: BrowseMode = 'filer';
 
 export function isBrowseMode(v: string): v is BrowseMode {
-  return v === 'list' || v === 'filer' || v === 'launcher';
+  // ⚠ 探し方を足したらここも足す(判定はこの 1 か所 ── `main.ts` に書き下さない)
+  return v === 'list' || v === 'filer' || v === 'launcher' || v === 'schedule';
 }
 
 const KEY = 'pkc3.browse';
