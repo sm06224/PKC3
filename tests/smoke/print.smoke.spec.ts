@@ -185,6 +185,11 @@ test('🔴 画面から印刷すると全文が紙に乗り、+++ で改頁す�
  *
  * ⚠ 台帳(#180)が「PDF の書き出し口が無い」と書いていた実体は**これ**だった ──
  * `@media print` も `Ctrl+P` も最初から在り、**一覧に並んでいなかった**だけ。
+ *
+ * ⚠ **既存の smoke は 1 件も `window.print()` を呼んでいない**
+ * (`import.smoke.spec.ts` は合成 `beforeprint` を撃つ)。だから §5 のとおり
+ * **2 つのビルド両方で通してから push した** ── `chromium-1194` / CI 既定の
+ * `chromium_headless_shell-1194`(`PKC3_CHROMIUM` で差す)。どちらも 1 秒台。
  */
 test('🔴 情報ペインの「PDF」を押すと印刷が始まる', async ({ page }) => {
   await gotoApp(page);
