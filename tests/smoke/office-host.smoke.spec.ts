@@ -1493,3 +1493,58 @@ test('🔴 合言葉を持つ窓でも、返事は「その鍵の文書」に着
     '開いた添付の合言葉が別の文書の返事で書き換わった ── 別のノートの中身が置き換わる',
   ).toBe('lid-TEST');
 });
+
+/**
+ * 🔴 **表示言語を変えたのに「すぐに再起動」が効かない**(#160)。
+ *
+ * 実機レポート #8(1/1): UI 言語を変えると LO は再起動ダイアログを出すが、
+ * `すぐに再起動(R)` を押しても**何も起きない**。死んでいるのは LO の canvas の中の
+ * ボタンなので、こちらからは書き換えられない ── **こちら側に効く道**を出す。
+ *
+ * ⚠ 判断(どの設定を見るか)は `office-restart-watch.js` の unit が守っている。
+ * 🔑 ここが守るのは**配線**である ── 判断が正しくても、窓が呼んでいなければ
+ * user には何も届かない(`host.html` は bundle されないので unit が届かない)。
+ *
+ * ⚠ **対照群を先に置く。** 「時間が経てば出る」帯なら、この検査は何も言っていない。
+ */
+test('🔴 表示言語を変えたら、開き直す導線を出す', async ({ page }) => {
+  const XCU = '/instdir/user/registrymodifications.xcu';
+  await page.goto('/office/host.html');
+  await seedFakePack(page);
+  await page.reload();
+  await expect(page.locator('#status')).toContainText('表示中', { timeout: 15_000 });
+
+  // 空振り防止 ── 起動時に設定 file が実在する(= 基準を採れている前提が成り立つ)
+  expect(
+    await page.evaluate((p) => {
+      const w = window as unknown as { __files?: Record<string, string> };
+      return typeof w.__files?.[p];
+    }, XCU),
+    '設定 file が仕込まれていない(この spec の前提が崩れている)',
+  ).toBe('string');
+
+  // 🔴 **対照群** ── 何もしなければ、見張りの間隔(3 秒)を過ぎても帯は出ない
+  await page.waitForTimeout(4000);
+  await expect(page.locator('#restart'), '何もしていないのに帯が出ている').toBeHidden();
+
+  // LO が UI 言語を書いた形にする(実物と同じ path / name の item)
+  await page.evaluate((p) => {
+    const w = window as unknown as { __files: Record<string, string> };
+    const cur = w.__files[p];
+    // ⚠ 上で「在ること」を確かめてから来ているので、ここで無いのは前提の崩れ
+    if (typeof cur !== 'string') throw new Error('設定 file が消えている: ' + p);
+    w.__files[p] = cur.replace(
+      '</oor:items>',
+      '<item oor:path="/org.openoffice.Office.Linguistic/General">'
+        + '<prop oor:name="UILocale" oor:op="fuse"><value>en-US</value></prop>'
+        + '</item></oor:items>',
+    );
+  }, XCU);
+
+  await expect(page.locator('#restart'), '言語を変えても帯が出ない').toBeVisible({
+    timeout: 10_000,
+  });
+  // ⚠ **失うものが書いてあること** ── 押してから知るのでは遅い
+  await expect(page.locator('#restart')).toContainText('保存していない変更は失われます');
+  await expect(page.locator('#restart button'), '押す先が無い').toHaveText('開き直す');
+});

@@ -61,12 +61,24 @@
     background:#7a4b00; color:#fff }
   #warn[hidden] { display:none }
   #warn button { border-color:#fff8; color:#fff; padding:2px 10px }
+  /* 「開き直せば反映される」を知らせる帯(#160)。
+     ⚠ **`#warn` と同じ場所に出す**が、色は分ける ── あちらは事故(止まっている)、
+     こちらは**案内**である。地は無彩色、色は情報にだけ使う(業務画面の方針)ので
+     ここは注意色を使わない。
+     ⚠ 2 枚が重ならないよう、`#warn` が出ている間はこちらを出さない(JS 側で見る)。 */
+  #restart { position:fixed; inset:auto 0 0 0; z-index:14; display:flex; gap:12px;
+    align-items:center; justify-content:center; padding:6px 12px; font-size:13px;
+    background:#333; color:#fff }
+  #restart[hidden] { display:none }
+  #restart button { font:inherit; border:1px solid #fff8; background:transparent;
+    color:#fff; padding:2px 10px; border-radius:6px; cursor:pointer }
 </style>
 </head>
 <body>
 <div id="bar"><b>Office</b><span id="name"></span><span class="sp"></span><span id="status">準備中…</span></div>
 <div id="msg">読み込んでいます…</div>
 <div id="warn" hidden></div>
+<div id="restart" hidden></div>
 <div id="screen" hidden></div>
 <!--
   🔴 **判断は素の JS へ出す**(#205 段 A)。この HTML は bundle されないので、
@@ -76,6 +88,7 @@
 -->
 <script src="office-save-watch.js"></script>
 <script src="office-save-stage.js"></script>
+<script src="office-restart-watch.js"></script>
 <script>
 (function () {
   'use strict';
@@ -943,6 +956,59 @@
     }
   }
 
+  /**
+   * 🔴 **「開き直せば反映される」を、こちらから言う**(#160)。
+   *
+   * UI 言語を変えると LO は再起動ダイアログを出すが、`すぐに再起動` は
+   * **wasm では何も起こさない**(実機 1/1)── user から見ると「押したのに効かない
+   * ボタン」である。⚠ 死んでいるのは **LO の canvas の中**なので書き換えられない。
+   * 🔑 だから**こちら側に効く道**を出す。
+   *
+   * ⚠ **判断は `office-restart-watch.js` に在る**(ここは bundle されず unit が
+   * 届かない ── `office-save-watch.js` が分かれているのと同じ理由)。
+   * ここは「読んで、渡して、帯を出す」だけにする。
+   */
+  var restartEl = document.getElementById('restart');
+  var restartWatch = null;
+
+  function showRestartBand(FS) {
+    // ⚠ 事故の帯(`#warn`)が出ているときは重ねない ── あちらのほうが重い話で、
+    //    同じ場所に 2 枚出ると下の 1 枚が読めなくなる
+    if (dead || degraded || !restartEl.hidden) return;
+    restartEl.textContent = '';
+    var what = document.createElement('span');
+    // ⚠ **失うものを先に書く**(`degrade()` と同じ向き)── 押してから知るのでは遅い
+    what.textContent = '表示言語の設定を変えました。窓を開き直すと切り替わります。'
+      + ' ⚠ 保存していない変更は失われます。';
+    var again = document.createElement('button');
+    again.textContent = '開き直す';
+    again.addEventListener('click', function () {
+      // 🔴 **開き直す前に必ず退避する。** ここで書かないと変えた設定ごと消えて、
+      //    「開き直したのに変わらない」という**いちばん悪い形**になる(#159 の逆流)
+      saveProfile(FS);
+      location.reload();
+    });
+    restartEl.appendChild(what);
+    restartEl.appendChild(again);
+    restartEl.hidden = false;
+    say('restart-needed', {});
+  }
+
+  /**
+   * 設定 file を 1 回読んで見張りへ渡す。⚠ **最初の 1 回は基準を採るだけ**である。
+   * ⚠ file がまだ無い回は黙って戻る(次の回で見る)。
+   */
+  function checkRestart(FS) {
+    if (!restartWatch || !FS) return;
+    try {
+      if (restartWatch.note(FS.readFile(PROFILE_PATH, { encoding: 'utf8' }))) {
+        showRestartBand(FS);
+      }
+    } catch (e) {
+      // file がまだ無い ── 起動直後は普通に起きる
+    }
+  }
+
   function missing() {
     var lack = [];
     if (!window.crossOriginIsolated) lack.push('cross-origin isolation');
@@ -1112,8 +1178,20 @@
       // 🔴 設定の退避(#159)── pagehide + 30 秒ごと(変化時のみ)。
       //    ⚠ crash では pagehide が当てにならないので間隔の側が保険になる
       var profTimer = setInterval(function () { saveProfile(FS); }, 30000);
+      // 🔴 言語を変えたことに気づく(#160)。⚠ **退避の 30 秒とは別の timer** に
+      //    する ── user は「すぐに再起動」を押した直後に何も起きないのを見ており、
+      //    そこから 30 秒待たせたら「やはり壊れている」で終わる(1 timer = 1 仕事)。
+      var RW = window.PKC3OfficeRestartWatch;
+      var restTimer = null;
+      if (RW) {
+        restartWatch = RW.createRestartWatch();
+        // ⚠ 基準は**起動時の値**である ── 仕込んだ直後にここで据える
+        checkRestart(FS);
+        restTimer = setInterval(function () { checkRestart(FS); }, 3000);
+      }
       window.addEventListener('pagehide', function () {
         clearInterval(profTimer);
+        if (restTimer) clearInterval(restTimer);
         saveProfile(FS);
       });
       // 🔴 **UI を日本語で開く**(#158)。⚠ 一式に翻訳を詰めただけでは英語のままで、
