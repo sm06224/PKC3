@@ -376,3 +376,72 @@ describe('合言葉の表(#217)', () => {
     expect(t.keyCount()).toBe(api.KEY_MEMORY_MAX);
   });
 });
+
+/**
+ * 🔴 **「canvas が出た」を「開けた」と読まない**(#199、2026-08-23)。
+ *
+ * ## 何が起きていたか(自作の 3KB docx で実測)
+ *
+ * | 渡した文書 | 画像の書き方 | canvas | 文書が開いたか |
+ * |---|---|---|---|
+ * | 画像なし ← **対照群** | ─ | 出る | ✅ 11 秒 |
+ * | **DrawingML** | `w:drawing` | **出る(6.2 秒)** | 🔴 **151 秒待っても開かない** |
+ * | VML(いまの書き出し形) | `w:pict` | 出る | ✅ 10 秒 |
+ *
+ * ⚠ 直す前の判定は **`canvas.width > 0`** ── `office-oracle` スキル §4 が名指しで
+ * 戒めている観測点(「**空の窓にも canvas は在る**」)が、**製品の中に入っていた**。
+ * 帰結:**開かない文書でも「表示中 (6.2 秒)」と出る** → user は「重いだけ」と読んで
+ * 待ち続ける。⚠ 36 秒の上限枝には**到達しない**(canvas が先に出て `clearInterval`
+ * 済み)ので、**永久に無言**だった。
+ *
+ * ## ⚠ ここで見られること / 見られないこと
+ *
+ * `host.html` の当該部分は inline `<script>` なので、`new Function` では**読めない**
+ * (`Module` / `FS` / Qt の器が要る)。だから**ここでは字面の 3 点だけ**を pin する。
+ * 🔑 実際に「開かない文書で帯が出る」ことは、**Office 一式を入れた実ブラウザ**でしか
+ * 見られない ── `build/office-wasm/` の host 経由 probe が持ち場である。
+ * ⚠ **この test はそこまでは主張しない**(CLAUDE.md「後条件は、確かめた事実の上に
+ * だけ書く」)。
+ */
+describe('文書が開けたかの観測点(#199)', () => {
+  const host = readFileSync('public/office/host.html', 'utf-8');
+
+  it('🔴 「開けた」の判定が canvas だけで決まっていない', () => {
+    expect(host, '文書が開いたかを見る関数が無い').toContain('function docOpened(');
+    /**
+     * 🔑 **名前だけでは足りない** ── host の帯にも file 名は出るので、
+     *   `document` 全体を見ると**開いていなくても真**になる。器へ絞ること。
+     */
+    expect(host, 'docOpened が器(screenEl)へ絞られていない').toMatch(
+      /function docOpened\([\s\S]*?\}\)\(screenEl\)/,
+    );
+    // ⚠ 名前と LibreOffice の**両方**が要る(片方だけだと帯や起動直後で真になる)
+    expect(host, '判定が名前だけになっている').toMatch(
+      /docOpened[\s\S]*?indexOf\(leaf\)[\s\S]*?LibreOffice/,
+    );
+  });
+
+  it('🔴 開かないまま上限に達したら、黙らない', () => {
+    // ⚠ 直す前は `setStatus('起動に時間がかかっています')` だけで、帯は出なかった
+    expect(host, '上限に達しても user に伝えていない').toContain('この文書は開けませんでした');
+    expect(host, '帯(degrade)を通していない').toMatch(
+      /degrade\('この文書は開けませんでした/,
+    );
+  });
+
+  /**
+   * ⚠ **空振り防止** ── 上の 2 つは「字が在る」しか見ていないので、
+   *   **古い判定が残ったまま新しい判定を足しても通る**。
+   * 🔑 だから**古い形が消えていること**を対で見る ── `painted` を出した時点で
+   *   「表示中」と言い切る枝が残っていないこと。
+   */
+  it('⚠ 対照群: canvas が出ただけで「表示中」と言い切らない', () => {
+    const say = host.indexOf("say('painted'");
+    expect(say, '前提: painted の発火点を見つけられていない').toBeGreaterThan(0);
+    const around = host.slice(say - 400, say + 200);
+    expect(
+      around,
+      'canvas が出た時点で「表示中」と言い切っている(開かない文書でも出る)',
+    ).toContain('開いています…');
+  });
+});

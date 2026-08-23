@@ -670,6 +670,34 @@
     });
   }
 
+  /**
+   * 🔴 **文書が本当に開いたか**(#199、2026-08-23)。
+   *
+   * ⚠ 判定は「**Qt の器の中に、渡した名前と `LibreOffice` が両方出た**」である。
+   * 🔑 **名前だけでは足りない** ── host の帯(上のバー)にも file 名は出るので、
+   *   `document.body` 全体を見ると**開いていなくても真**になる。器へ絞る。
+   * ⚠ shadow root をまたぐので `textContent` 1 発では取れない ──
+   *   `deepCanvases` と同じ walk で題名を集める。
+   *
+   * 判定の作法は `build/office-wasm/open-doc-probe.mjs` と**同じ 1 つ**である
+   * (2 か所で別々に決めない ── CLAUDE.md §7)。
+   */
+  function docOpened(leaf) {
+    if (!leaf) return false;
+    var text = '';
+    (function walk(n) {
+      var els = n.querySelectorAll('*');
+      for (var i = 0; i < els.length; i += 1) {
+        // Qt は窓の題名を `title` 属性 / `aria-label` / 素のテキストへ出す
+        var el = els[i];
+        text += ' ' + (el.getAttribute('title') || '') + ' ' + (el.getAttribute('aria-label') || '');
+        if (el.children.length === 0) text += ' ' + (el.textContent || '');
+        if (el.shadowRoot) walk(el.shadowRoot);
+      }
+    })(screenEl);
+    return text.indexOf(leaf) >= 0 && /LibreOffice/i.test(text);
+  }
+
   /** Qt 6 の canvas は **shadow root の中**に在る(#88 §3.11 で 1 日溶かした罠)。 */
   function deepCanvases(root) {
     var out = [];
@@ -1090,23 +1118,83 @@
       //    300ms ごとの全走査(`querySelectorAll` を shadow root まで)が**永久に回る**。
       // 🔑 上限に達しても `died()` にはしない ── **遅いだけかもしれない**。
       //    分かっているのは「まだ出ていない」ことだけなので、そう言う。
+      /**
+       * 🔴 **「canvas が出た」を「開けた」と読まない**(#199、2026-08-23)。
+       *
+       * ⚠ 直す前の条件は **`canvas.width > 0`** だった。これは `office-oracle`
+       *   スキル §4 が名指しで戒めている観測点である ──「**空の窓にも canvas は
+       *   在る**」。実測(自作の 3KB docx、2026-08-23):
+       *
+       *   | 渡した文書 | 画像の書き方 | canvas | 文書が開いたか |
+       *   |---|---|---|---|
+       *   | 画像なし ← 対照群 | ─ | 出る | ✅ 11 秒 |
+       *   | DrawingML | `w:drawing` | **出る(6.2 秒)** | 🔴 **151 秒待っても開かない** |
+       *   | VML(いまの書き出し形)| `w:pict` | 出る | ✅ 10 秒 |
+       *
+       *   つまり **開かない文書でも「表示中 (6.2 秒)」と出ていた** ── user は
+       *   「重いだけ」と読んで待ち続ける。⚠ 36 秒の上限枝には**到達しない**
+       *   (canvas が先に出るので `clearInterval` 済み)。
+       *
+       * ⚠ これは上の `died()` の注記(「LO が abort しても『表示中 (1.8 秒)』の
+       *   まま ── **バグだらけという印象の相当部分がこれである**」)と**同じ形**
+       *   である。あちらは塞いだのに、こちらが残っていた。
+       *
+       * 🔑 **段を分ける。**
+       *   ① canvas が出た = **起動した**(アプリは生きている)
+       *   ② Qt の器の中に**渡した名前**と `LibreOffice` が**両方**出た = **開けた**
+       *   ⚠ 名前だけでは足りない(host の帯にも出る)── **器の中で両方**が要る
+       *     (判定の作法は `build/office-wasm/open-doc-probe.mjs` と同じ 1 つ)。
+       * 🔑 そして**開かないまま上限に達したら、黙らない** ── 「重い」と
+       *   「開けない」を user が区別できる形で言う。
+       */
       var ticks = 0;
+      var launched = false;
+      /** ⚠ 文書を渡していない回(Start Center)は②を待たない ── 開く物が無い。 */
+      var wantDoc = !!docBytes;
+      var docLeaf = wantDoc ? (docName || 'document').replace(/[/\\]/g, '_') : '';
       tick = setInterval(function () {
-        var cs = deepCanvases(screenEl);
-        for (var m = 0; m < cs.length; m += 1) {
-          if (cs[m].width > 0) {
-            clearInterval(tick);
-            tick = null;
-            setStatus('表示中 (' + ((Date.now() - t0) / 1000).toFixed(1) + ' 秒)');
-            say('painted', { ms: Date.now() - t0 });
-            return;
+        if (!launched) {
+          var cs = deepCanvases(screenEl);
+          for (var m = 0; m < cs.length; m += 1) {
+            if (cs[m].width > 0) {
+              launched = true;
+              say('painted', { ms: Date.now() - t0 });
+              setStatus(
+                wantDoc
+                  ? '開いています…'
+                  : '表示中 (' + ((Date.now() - t0) / 1000).toFixed(1) + ' 秒)',
+              );
+              break;
+            }
           }
+        }
+        if (launched && !wantDoc) {
+          clearInterval(tick);
+          tick = null;
+          return;
+        }
+        if (launched && wantDoc && docOpened(docLeaf)) {
+          clearInterval(tick);
+          tick = null;
+          setStatus('表示中 (' + ((Date.now() - t0) / 1000).toFixed(1) + ' 秒)');
+          say('doc-open', { ms: Date.now() - t0 });
+          return;
         }
         ticks += 1;
         if (ticks >= 120) {          // 300ms × 120 = 36 秒
           clearInterval(tick);
           tick = null;
-          setStatus('起動に時間がかかっています');
+          /**
+           * 🔴 **黙らない。** ⚠ ただし `died()` にはしない ── 分かっているのは
+           *   「まだ出ていない」ことだけで、遅いだけかもしれない。
+           * 🔑 だから**起動したかどうかで文を変える** ── user が次にやることが違う。
+           */
+          if (launched && wantDoc) {
+            degrade('この文書は開けませんでした(36 秒待ちました)。別の形式で保存し直すか、PKC 側で書き出してからお試しください');
+            setStatus('開けませんでした');
+          } else {
+            setStatus('起動に時間がかかっています');
+          }
         }
       }, 300);
       inst.callMain(args);
