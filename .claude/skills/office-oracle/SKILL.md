@@ -125,3 +125,58 @@ const deep = () => { const out = [];
 | 図あり | docx | **VML のみ** | ✅ | ✅ |
 
 🔑 **「docx + 画像」ではなく「docx + DrawingML」**が引き金である。
+
+## 8. 🔴 配った一式の**中身**を読む(「入っていない」と書く前に)
+
+CLAUDE.md §8 の「**コードが読む path と、配ったものの中身を全数で突き合わせる**」を
+この一式でやる手順。#135 / #144 / #145 はどれも「入っているはず」で外した。
+
+`soffice.data`(101MB の 1 本)は **`soffice.data.js.metadata` が目録**である ──
+`{filename, start, end}` の一覧なので、**名前の全数**はここだけで読める:
+
+```bash
+unzip -o -q /tmp/lo-wasm-qt6.zip soffice.data.js.metadata soffice.data -d /tmp/lo-pack
+python3 - <<'PY'
+import json
+meta = json.load(open('/tmp/lo-pack/soffice.data.js.metadata'))
+by = {f['filename']: (f['start'], f['end']) for f in meta['files']}
+blob = open('/tmp/lo-pack/soffice.data', 'rb')
+def read(n):
+    s, e = by[n]; blob.seek(s); return blob.read(e - s)
+print(len(by), 'files')
+print(read('/instdir/share/registry/writer.xcd')[:200])
+PY
+```
+
+見る所は 3 段。**1 段でも欠ければ動かない**ので、3 つとも見る:
+
+| 段 | 場所 | 何が分かる |
+|---|---|---|
+| ① 定義 | `share/registry/*.xcd` | フィルタが**宣言されているか**(`FilterService` の名前もここ) |
+| ② 登録 | `program/services/services.rdb` | その実装が **UNO に登録されているか** |
+| ③ 実体 | `soffice.wasm` | コードが**リンクされているか** |
+
+⚠ **`program/services.rdb`(8KB)と `program/services/services.rdb`(190KB)は別物**。
+前者には数件しか無いので、そちらだけ見て「登録されていない」と書かない。
+
+### 🔴 wasm を grep するときは **UTF-16 でも探す**
+
+⚠ LO の `OUString` リテラルは **UTF-16LE** で焼かれる。ASCII で grep すると
+**在るものが 0 件に見える**:
+
+```
+document.xml        ascii=  0   utf16le=  4
+word/document.xml   ascii=  0   utf16le=  2
+```
+
+🔑 2026-08-23 に #225 でこれを踏みかけた ── ASCII の 0 件を「Word の書き出しが
+入っていない」と読むところだった(実際は**入っている**)。
+`OString` / `const char[]` は ASCII なので、**両方で数える**:
+
+```python
+data = open('soffice.wasm', 'rb').read()
+print(data.count(s.encode()), data.count(s.encode('utf-16-le')))
+```
+
+⚠ そして**在る / 無いは「リンクされたか」までしか言わない** ── 動くかは別である。
+名前が在るのに落ちるなら、原因は**実行時**(#225 の docx がまさにこれ)。
