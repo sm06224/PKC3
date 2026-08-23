@@ -141,6 +141,28 @@ const STAT = `(() => {
   catch (e) { return { err: String(e).slice(0, 80) }; }
 })()`;
 
+/**
+ * 🔴 **「開いた」の対照群を、中身に依らない所から採る**(#156 の次にやること①、
+ * #199 の昇格判定、2026-08-23)。
+ *
+ * ⚠ 器の題名は**使えない**と実測で分かった ── `停止` した回でも文書名と
+ * `LibreOffice` が両方出る(= 開けなくても真)。#156 も「対照群も同じ ❌」と
+ * 書いており、**この面では死んだ観測点**である。
+ *
+ * 🔑 代わりに **LO が自分で作る file** を見る ── Writer は編集のために文書を
+ * 開くと、同じディレクトリに `.~lock.<名前>#` を作る。
+ * ⚠ **中身は読まない**(機密資料の取り扱い 3)── 名前と有無だけを返す。
+ * ⚠ これが**採れるかどうか自体が未確認**なので、いまは診断として出す
+ * (採れたら #199 / #156 の観測点へ昇格させる)。
+ */
+const WORKDIR = `(() => {
+  const lo = window.__lo;
+  if (!lo || !lo.FS) return null;
+  try {
+    return lo.FS.readdir('/work').filter((n) => n !== '.' && n !== '..');
+  } catch (e) { return { err: String(e).slice(0, 80) }; }
+})()`;
+
 /** 窓の題名 ── ⚠ **数ではなく個体**で見る(増減が相殺する。2026-08-14 の教訓)。 */
 const WINDOWS = `(() => {
   const out = [];
@@ -290,6 +312,7 @@ try {
       text: await page.evaluate(() => document.getElementById('status')?.textContent ?? null),
       says: await page.evaluate(() => [...new Set(globalThis.__says ?? [])].join(',')),
       detect: await page.evaluate(DETECT, LEAF),
+      work: await page.evaluate(WORKDIR),
     });
     if (result.status[result.status.length - 1].says.includes('doc-open')) break;
     await page.waitForTimeout(3000);
