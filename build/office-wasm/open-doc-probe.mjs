@@ -31,6 +31,7 @@ import { createServer } from 'node:http';
 import { readFile, writeFile, rm } from 'node:fs/promises';
 import { join, extname, resolve, basename } from 'node:path';
 import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
 import { chromium } from '@playwright/test';
 
 const PACK = resolve(process.argv[2]);
@@ -91,6 +92,32 @@ const b64 = NO_DOC ? '' : (await readFile(DOC)).toString('base64');
 //   平文の対照群まで docx として読ませていた(対照群が対照群になっていなかった)。
 const NAME = NO_DOC ? '' : basename(DOC);
 const SHOT = process.env.PKC3_SHOT ?? '';
+/** 🔴 開いた状態で IME の門を読むか(#156 段②)。⚠ 既定は読まない。 */
+const IME = process.env.PKC3_IME === '1';
+/**
+ * 編集可能要素と、パッチが書く診断(`obj1-win1-panel1-accept0` の形)。
+ * ⚠ 読み方は `ime-probe.mjs` と**同じ 1 つ**にする(2 か所で別々に決めない)。
+ * ⚠ ここは template literal なので**逆引用符を書かない**。
+ */
+const IME_DEEP = `(() => {
+  const inputs = [];
+  const walk = (node) => {
+    for (const el of node.querySelectorAll('*')) {
+      const t = el.tagName;
+      if (t === 'INPUT' || t === 'TEXTAREA' || el.isContentEditable) {
+        const r = el.getBoundingClientRect();
+        inputs.push({ tag: t, id: el.id || null, w: Math.round(r.width), h: Math.round(r.height),
+          focused: el === document.activeElement,
+          inputmode: el.getAttribute('inputmode'),
+          ime: el.getAttribute('data-pkc-ime') });
+      }
+      if (el.shadowRoot) walk(el.shadowRoot);
+    }
+  };
+  walk(document);
+  const ae = document.activeElement;
+  return { inputs, active: ae ? (ae.tagName + (ae.id ? '#' + ae.id : '')) : null };
+})()`;
 const docBytes = NO_DOC ? 0 : (await readFile(DOC)).length;
 const result = { doc: { bytes: docBytes }, events: [], console: [], samples: [] };
 const profile = `${tmpdir()}/pkc3-open-doc-${process.pid}`;
@@ -274,6 +301,73 @@ try {
     if (deadStreak >= 6) {
       result.frozen = { fromSec: result.samples[result.samples.length - 6].atSec };
       break;
+    }
+  }
+  /**
+   * 🔴 **開いた状態で IME の門を読む**(#156 の「次にやること ②」、2026-08-23)。
+   *
+   * ⚠ `ime-probe.mjs` は**文書を開かずに**読むので、そこの `accept0` は
+   * 「VCL が `SetInputContext` を呼ぶ理由が無い」だけかもしれず、
+   * **パッチの失敗の証拠でも成功の証拠でもない**(#156 本文)。
+   * 🔑 ここは**開いたことを確かめてから**読むので、その曖昧さが消える。
+   *
+   * ⚠ 版面を 1 度**押してから**読む ── VCL が `WA_InputMethodEnabled` を立てるのは
+   * 「ここは文字を入れる場所だ」と言うときだけなので、caret が要る。
+   * ⚠ **既定では何もしない**(`PKC3_IME=1` を渡した回だけ)── 既存の使い方を変えない。
+   */
+  if (IME && result.opened) {
+    try {
+      const box = await page.evaluate(`(() => {
+        let best = null;
+        const walk = (n) => { for (const el of n.querySelectorAll('*')) {
+          if (el.tagName === 'CANVAS' && el.width > 0) {
+            const r = el.getBoundingClientRect();
+            if (!best || r.width > best.w) best = { x: r.x, y: r.y, w: r.width, h: r.height };
+          }
+          if (el.shadowRoot) walk(el.shadowRoot); } };
+        walk(document);
+        return best;
+      })()`);
+      result.ime = { clicked: false, before: await page.evaluate(IME_DEEP) };
+      if (box) {
+        /**
+         * 🔴 **対照群 ── 打鍵が版面に届いたか**(CLAUDE.md §4、2026-08-13 の教訓)。
+         *
+         * ⚠ これが無いと `accept0` を読めない ── 合成クリックが caret を置けて
+         *   いなければ、健全なビルドでも `accept0` を返す(#156 本文の
+         *   「🔴 まだ言えないこと」がそれ)。
+         * ⚠ **1 枚ずつ比べない** ── 点滅するカーソルだけで「変わった」になる。
+         *   間隔をあけて数枚採り、**集合ごと入れ替わったときだけ**「届いた」と言う。
+         * ⚠ 撮れない回は `null` を返す(空配列にしない ── 空だと `every` が
+         *   真になって「届いた」と誤読する)。
+         */
+        const clip = { x: box.x, y: box.y, width: box.w, height: box.h };
+        const frames = async (n = 5) => {
+          const set = new Set();
+          for (let i = 0; i < n; i += 1) {
+            const png = IME ? await page.screenshot({ clip }) : null;
+            if (png === null) return null;
+            set.add(createHash('sha256').update(png).digest('hex').slice(0, 16));
+            await page.waitForTimeout(400);
+          }
+          return [...set];
+        };
+        await page.mouse.click(box.x + box.w * 0.4, box.y + box.h * 0.35);
+        result.ime.clicked = true;
+        await page.waitForTimeout(3000);
+        const beforeFrames = await frames();
+        await page.keyboard.type('a', { delay: 120 });
+        await page.waitForTimeout(3000);
+        const afterFrames = await frames();
+        result.ime.landed =
+          beforeFrames === null || afterFrames === null
+            ? null
+            : afterFrames.every((h) => !beforeFrames.includes(h));
+        result.ime.frames = { before: beforeFrames?.length ?? null, after: afterFrames?.length ?? null };
+      }
+      result.ime.after = await page.evaluate(IME_DEEP);
+    } catch (e) {
+      result.ime = { err: safeLine(String(e)) ?? 'error' };
     }
   }
   if (SHOT) {
