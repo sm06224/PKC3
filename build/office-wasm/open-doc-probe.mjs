@@ -359,6 +359,26 @@ try {
         await page.keyboard.type('a', { delay: 120 });
         await page.waitForTimeout(3000);
         const afterFrames = await frames();
+        /**
+         * 🔴 **キャレットが「本文」に入ったかを分ける**(#156 段③ の前段、2026-08-23)。
+         *
+         * ⚠ 上の `landed`(版面が変わった)は **「打鍵が届いた」までしか言えない** ──
+         *   工具帯の強調でも版面は変わる。ところが `accept0` を読むには
+         *   **本文にキャレットが在ること**が前提である(VCL は「ここは文字を入れる
+         *   場所だ」と言うときだけ `SetInputContext` を呼ぶ)。
+         * 🔑 **LO 自身の近道で分ける** ── `Ctrl+A`(すべて選択)は
+         *   **本文にキャレットが在るときだけ**版面を大きく変える(選択の色が乗る)。
+         *   ⚠ これも集合で採る(点滅するカーソルで誤判定しない)。
+         * ⚠ **これが偽なら `accept0` は読めない** ── 健全なビルドでも
+         *   キャレットが無ければ `accept0` を返す(#156 本文の「まだ言えないこと」)。
+         */
+        await page.keyboard.press('Control+a');
+        await page.waitForTimeout(2500);
+        const selFrames = await frames();
+        result.ime.caretInBody =
+          afterFrames === null || selFrames === null
+            ? null
+            : selFrames.every((h) => !afterFrames.includes(h));
         result.ime.landed =
           beforeFrames === null || afterFrames === null
             ? null
