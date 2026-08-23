@@ -65,6 +65,18 @@ on:
         description: '調査用: wasm に関数名を残す(スタックが読める。別 tag へ出る)'
         type: boolean
         default: false
+      ime_trace:
+        # 🔴 **調査用**(#156 段③)。LO 側の IME の配管に計装を当てて焼く ──
+        #    `Window::ImplNewInputContext()` と `QtFrame::SetInputContext()` の
+        #    **どこで途切れるか**を 1 行ずつ出す(`build/office-wasm/patch-lo-ime-trace.py`)。
+        #    ⚠ 段② の実測は `accept0` まで来たが、それは「LO が立てていない」とも
+        #    「立てたが Qt が取り直さない」とも読める ── **直す場所が正反対**なので、
+        #    当てずっぽうで直しを焼く前にここで確定させる。
+        #    🔑 出口は libc だけ(stderr + `/tmp/pkc3-ime.log`)── LO の文脈から
+        #    embind / DOM を触ると `invalid handle` で abort する(2026-08-16 に実証)。
+        description: '調査用: IME の配管に計装を当てる(#156。別 tag へ出る)'
+        type: boolean
+        default: false
 
 # ⚠ 既定の 6 時間で足りない可能性が高い。足りなければ段を分けて artifact で繋ぐ
 jobs:
@@ -344,6 +356,12 @@ jobs:
           else
             export PKC3_PROFILING_FUNCS=0
           fi
+          # ⚠ 既定は 0 ── 配る一式に計装を混ぜない(patch は錨だけ確かめて抜ける)
+          if [ "${{ inputs.ime_trace }}" = "true" ]; then
+            export PKC3_IME_TRACE=1
+          else
+            export PKC3_IME_TRACE=0
+          fi
           for p in "$GITHUB_WORKSPACE"/build/office-wasm/patch-*.py; do
             python3 "$p" ~/lo-core
             n=$((n + 1))
@@ -354,7 +372,10 @@ jobs:
           # 🔴 8 → 7(2026-08-15)。IME を LO 側から `QInputMethod::show()` で
           #    要求する patch は**文書を開いた瞬間に wasm を abort させた**ので外した
           #    (対照 3 一式で確定。代わりに `qtbase-patch-ime-panel.py` で Qt 側を直す)
-          test "$n" -eq 7
+          # 🔴 7 → 8(2026-08-23)。`patch-lo-ime-trace.py`(#156 段③ の計装)。
+          #    ⚠ **既定では 1 バイトも書き換えない**(`PKC3_IME_TRACE=1` の回だけ)が、
+          #    錨の検査は毎回する ── 門の下に隠すと上流の変形に誰も気づけない
+          test "$n" -eq 8
 
       # 🔴 **Qt と LO の「握手」を、リンクの 16 分前に確かめる**(2026-08-10)。
       #    LO は Qt の embind シンボルを名指しで export する。無いと
@@ -619,6 +640,7 @@ jobs:
           SAFE_SUFFIX=""
           if [ "${{ inputs.safe_heap }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-safeheap"; fi
           if [ "${{ inputs.profiling_funcs }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-names"; fi
+          if [ "${{ inputs.ime_trace }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-imetrace"; fi
           printf '%s\n' "{
             \"version\": \"lo-${sha:0:12}-run${GITHUB_RUN_ID}${SAFE_SUFFIX}\",
             \"lo_sha\": \"${sha}\",
@@ -628,6 +650,7 @@ jobs:
             \"pkc3_commit\": \"${GITHUB_SHA}\",
             \"safe_heap\": \"${{ inputs.safe_heap }}\",
             \"profiling_funcs\": \"${{ inputs.profiling_funcs }}\",
+            \"ime_trace\": \"${{ inputs.ime_trace }}\",
             \"built_at\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
           }" > build-info.json
           cat build-info.json

@@ -127,6 +127,29 @@ const STAT = `(() => {
   catch (e) { return { err: String(e).slice(0, 80) }; }
 })()`;
 
+/**
+ * 🔴 **`/work` の中身を全部見る**(#225、2026-08-23)。
+ *
+ * ⚠ `STAT` は `__loDocPath`(渡した 1 本)しか見ない ── LO が
+ * **別の名前で書いた**場合(「ODF 形式で保存」を選ぶと拡張子が変わる)、
+ * 「1 バイトも書かれていない」と**誤って読む**。
+ * ⚠ **名前は出さない**(機密資料の取り扱い 1)── 出すのは**拡張子と大きさ**だけで、
+ * 「何本あって、どれが動いたか」を言うには足りる。
+ */
+const WORKDIR = `(() => {
+  const lo = window.__lo;
+  if (!lo || !lo.FS) return null;
+  try {
+    return lo.FS.readdir('/work')
+      .filter((n) => n !== '.' && n !== '..')
+      .map((n) => {
+        const i = n.lastIndexOf('.');
+        try { return { ext: i < 0 ? '' : n.slice(i), size: lo.FS.stat('/work/' + n).size }; }
+        catch (e) { return { ext: i < 0 ? '' : n.slice(i), size: null }; }
+      });
+  } catch (e) { return { err: String(e).slice(0, 80) }; }
+})()`;
+
 /** 窓の題名 ── ⚠ **数ではなく個体**で見る(増減が相殺する。2026-08-14 の教訓)。 */
 const WINDOWS = `(() => {
   const out = [];
@@ -255,6 +278,7 @@ try {
   const snap = async (at) => ({
     at,
     stat: await page.evaluate(STAT),
+    work: await page.evaluate(WORKDIR),
     windows: (await page.evaluate(WINDOWS)).map((t) => t.length),
     saved: (await page.evaluate('globalThis.__saved || []'))
       .map((s) => ({ key: s.key, size: s.size })),
@@ -315,6 +339,40 @@ try {
   result.saveChangedScreen = turned(last, result.afterSaveFrames);
   await page.waitForTimeout(13000);
   result.steps.push(await snap('Ctrl+S の 27 秒後'));
+
+  /**
+   * 🔴 **出た小窓が「待っている」のか「落ちた」のかを分ける**(#225)。
+   *
+   * ⚠ 窓が 1 枚増えただけでは決まらない ── LO は非 ODF で保存すると
+   * 「Word の形式のままにしますか」と**訊く**(= 待っているだけで、押せば書ける)。
+   * これを「書き出しが落ちた」と読むと、**直す場所を丸ごと間違える**。
+   *
+   * 🔑 だから **既定の返事(Enter)を打って、bytes が動くかを見る**:
+   *   動いた → 待っていただけ(user には「押せば保存できる」)
+   *   動かない → 本当に落ちている(実機の「一般的な I/O エラー」と同じ側)
+   *
+   * ⚠ **既定では打たない**(`PKC3_ACCEPT=1` の回だけ)── 押すのは版面の状態を
+   * 変える操作なので、既存の使い方(「Ctrl+S だけで何が起きるか」)を汚さない。
+   */
+  /**
+   * 🔴 **撮影の口は「引数を与えなければ撮れない」形にする**(機密資料の取り扱い 6)。
+   *
+   * ⚠ **自作の file を開いた回にしか使ってはならない。** この probe は引数で
+   * どんな文書でも受けるので、`PKC3_SHOT` を渡すのは**自分で作った対照群**のときだけ。
+   * ⚠ **返事をする前に撮る** ── 後で撮ると小窓は消えており、「何を訊かれたか」が
+   * 永久に分からない(2026-08-23 に 1 回転捨てた)。
+   */
+  const shotPath = process.env.PKC3_SHOT ?? '';
+  if (shotPath) await page.screenshot({ path: shotPath }).catch(() => {});
+
+  if (process.env.PKC3_ACCEPT === '1') {
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(12000);
+    result.steps.push(await snap('Enter の 12 秒後'));
+    await page.waitForTimeout(13000);
+    result.steps.push(await snap('Enter の 27 秒後'));
+  }
+
 } catch (e) {
   result.error = String(e).slice(0, 300);
 }

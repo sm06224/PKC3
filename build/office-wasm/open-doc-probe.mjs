@@ -95,6 +95,16 @@ const SHOT = process.env.PKC3_SHOT ?? '';
 /** 🔴 開いた状態で IME の門を読むか(#156 段②)。⚠ 既定は読まない。 */
 const IME = process.env.PKC3_IME === '1';
 /**
+ * 🔴 **打鍵が「その場で版面に出るか」を測るか**(#154 段①)。⚠ 既定は測らない。
+ *
+ * 実機レポート #7(2/2): Impress は**打っている間、画面が更新されない** ──
+ * `Escape` を押してメニューを開いた瞬間に、打った字がいっぺんに現れる。
+ * ⚠ issue が「Impress 固有」と書いた自信度は **60%**(同一の腕で Writer と
+ * 比べていない)ので、まず**対照群を揃える**のがこの門の仕事である。
+ * ⚠ `PKC3_IME` とは**同時に使わない**(どちらも版面を押して打つので混ざる)。
+ */
+const REDRAW = process.env.PKC3_REDRAW === '1';
+/**
  * 編集可能要素と、パッチが書く診断(`obj1-win1-panel1-accept0` の形)。
  * ⚠ 読み方は `ime-probe.mjs` と**同じ 1 つ**にする(2 か所で別々に決めない)。
  * ⚠ ここは template literal なので**逆引用符を書かない**。
@@ -118,8 +128,31 @@ const IME_DEEP = `(() => {
   const ae = document.activeElement;
   return { inputs, active: ae ? (ae.tagName + (ae.id ? '#' + ae.id : '')) : null };
 })()`;
+/**
+ * 🔴 **計装の出口を MEMFS から読む**(#156 段③、`patch-lo-ime-trace.py` と対)。
+ *
+ * ⚠ LO 側の文脈から DOM を触れないので、計装は **libc だけ**で
+ *   `/tmp/pkc3-ime.log` へ追記している ── ここはその file を読むだけ。
+ * 🔑 返り値で 3 つを見分ける:
+ *     `null`   = 計装の入っていない一式(= この焼きでは測っていない)
+ *     `[]`     = 計装は在るが **1 行も出ていない**(呼ばれていない)
+ *     `[...]`  = 出た行
+ * ⚠ ここは template literal なので**逆引用符を書かない**。
+ */
+const IME_TRACE = `(() => {
+  try {
+    const lo = globalThis.__lo;
+    if (!lo || !lo.FS) return null;
+    const raw = lo.FS.readFile('/tmp/pkc3-ime.log', { encoding: 'utf8' });
+    return String(raw).split('\n').filter((l) => l.length > 0);
+  } catch (e) {
+    return String(e).indexOf('ENOENT') >= 0 || String(e).indexOf('no such file') >= 0
+      ? null
+      : ['ERR ' + String(e).slice(0, 80)];
+  }
+})()`;
 const docBytes = NO_DOC ? 0 : (await readFile(DOC)).length;
-const result = { doc: { bytes: docBytes }, events: [], console: [], samples: [] };
+const result = { doc: { bytes: docBytes }, events: [], console: [], imeConsole: [], samples: [] };
 const profile = `${tmpdir()}/pkc3-open-doc-${process.pid}`;
 const browser = await chromium.launchPersistentContext(profile, {
   headless: true,
@@ -130,7 +163,13 @@ const browser = await chromium.launchPersistentContext(profile, {
 const page = await browser.newPage();
 page.on('console', (m) => {
   const t = safeLine(`[${m.type()}] ${m.text()}`);
-  if (t && result.console.length < 60) result.console.push(t);
+  if (t === null) return;
+  // 🔴 **計装の行は別の箱へ採る**(#156 段③)。⚠ 下の一般の箱は 60 行で打ち切る
+  //    ので、起動時の洪水に**押し出される** ── 「出ていない」と「採らなかった」が
+  //    見分けられなくなる(CLAUDE.md §4「観測点が別の物に満たされる」の器版)。
+  //    🔑 本命は MEMFS の log(`result.ime.trace`)で、こちらはその控えである。
+  if (t.includes('PKC3-IME') && result.imeConsole.length < 200) result.imeConsole.push(t);
+  if (result.console.length < 60) result.console.push(t);
 });
 page.on('pageerror', (e) => {
   const t = safeLine(`[pageerror] ${String(e)}`);
@@ -315,20 +354,61 @@ try {
    * 「ここは文字を入れる場所だ」と言うときだけなので、caret が要る。
    * ⚠ **既定では何もしない**(`PKC3_IME=1` を渡した回だけ)── 既存の使い方を変えない。
    */
+  /**
+   * 版面(いちばん大きい canvas)の位置。⚠ Qt 6 の canvas は **shadow root の中**なので
+   * 潜って拾う(`host.html` が「1 日溶かした罠」と書いている当のもの)。
+   * ⚠ **2 つの門で同じものを使う** ── 別々に書くと、片方だけ直す事故が起きる。
+   */
+  const canvasBox = () => page.evaluate(`(() => {
+    let best = null;
+    const walk = (n) => { for (const el of n.querySelectorAll('*')) {
+      if (el.tagName === 'CANVAS' && el.width > 0) {
+        const r = el.getBoundingClientRect();
+        if (!best || r.width > best.w) best = { x: r.x, y: r.y, w: r.width, h: r.height };
+      }
+      if (el.shadowRoot) walk(el.shadowRoot); } };
+    walk(document);
+    return best;
+  })()`);
+
+  /**
+   * 🔴 **版面の絵を「集合」で採る**(CLAUDE.md §4、2026-08-13 の教訓)。
+   *
+   * ⚠ **1 枚ずつ比べない** ── 点滅するカーソルだけで「変わった」になる。
+   * 間隔をあけて数枚採り、**集合ごと入れ替わったときだけ**「変わった」と言う。
+   * ⚠ 撮れない回は `null` を返す(空配列にしない ── 空だと `every` が真になって
+   * 「変わった」と誤読する)。
+   */
+  const framesOf = async (clip, n = 5) => {
+    const set = new Set();
+    for (let i = 0; i < n; i += 1) {
+      const png = IME || REDRAW ? await page.screenshot({ clip }) : null;
+      if (png === null) return null;
+      set.add(createHash('sha256').update(png).digest('hex').slice(0, 16));
+      await page.waitForTimeout(400);
+    }
+    return [...set];
+  };
+  /** 2 つの集合が**丸ごと**入れ替わったか(片方でも採れていなければ `null`)。 */
+  const swapped = (a, b) => (a === null || b === null ? null : b.every((h) => !a.includes(h)));
+
   if (IME && result.opened) {
     try {
-      const box = await page.evaluate(`(() => {
-        let best = null;
-        const walk = (n) => { for (const el of n.querySelectorAll('*')) {
-          if (el.tagName === 'CANVAS' && el.width > 0) {
-            const r = el.getBoundingClientRect();
-            if (!best || r.width > best.w) best = { x: r.x, y: r.y, w: r.width, h: r.height };
-          }
-          if (el.shadowRoot) walk(el.shadowRoot); } };
-        walk(document);
-        return best;
-      })()`);
+      const box = await canvasBox();
       result.ime = { clicked: false, before: await page.evaluate(IME_DEEP) };
+      /**
+       * 🔴 **どの一手で何行出たかを分ける**(#156 段③)。
+       *
+       * ⚠ log に印を書き込めない(JS から MEMFS へ追記する口を増やすと、
+       *   計装の出口が 2 か所になる ── CLAUDE.md §7)。
+       * 🔑 代わりに**節目ごとに行数を採る** ── 差が「その一手で出た行」である。
+       *   これが無いと、起動中に出た行と押した後に出た行が混ざって読めない。
+       */
+      const traceLen = async () => {
+        const t = await page.evaluate(IME_TRACE);
+        return Array.isArray(t) ? t.length : null;
+      };
+      result.ime.marks = { opened: await traceLen() };
       if (box) {
         /**
          * 🔴 **対照群 ── 打鍵が版面に届いたか**(CLAUDE.md §4、2026-08-13 の教訓)。
@@ -342,32 +422,104 @@ try {
          *   真になって「届いた」と誤読する)。
          */
         const clip = { x: box.x, y: box.y, width: box.w, height: box.h };
-        const frames = async (n = 5) => {
-          const set = new Set();
-          for (let i = 0; i < n; i += 1) {
-            const png = IME ? await page.screenshot({ clip }) : null;
-            if (png === null) return null;
-            set.add(createHash('sha256').update(png).digest('hex').slice(0, 16));
-            await page.waitForTimeout(400);
-          }
-          return [...set];
-        };
+        const frames = (n = 5) => framesOf(clip, n);
         await page.mouse.click(box.x + box.w * 0.4, box.y + box.h * 0.35);
         result.ime.clicked = true;
         await page.waitForTimeout(3000);
+        result.ime.marks.clicked = await traceLen();
         const beforeFrames = await frames();
         await page.keyboard.type('a', { delay: 120 });
         await page.waitForTimeout(3000);
+        result.ime.marks.typed = await traceLen();
         const afterFrames = await frames();
-        result.ime.landed =
-          beforeFrames === null || afterFrames === null
-            ? null
-            : afterFrames.every((h) => !beforeFrames.includes(h));
+        /**
+         * 🔴 **キャレットが「本文」に入ったかを分ける**(#156 段③ の前段、2026-08-23)。
+         *
+         * ⚠ 上の `landed`(版面が変わった)は **「打鍵が届いた」までしか言えない** ──
+         *   工具帯の強調でも版面は変わる。ところが `accept0` を読むには
+         *   **本文にキャレットが在ること**が前提である(VCL は「ここは文字を入れる
+         *   場所だ」と言うときだけ `SetInputContext` を呼ぶ)。
+         * 🔑 **LO 自身の近道で分ける** ── `Ctrl+A`(すべて選択)は
+         *   **本文にキャレットが在るときだけ**版面を大きく変える(選択の色が乗る)。
+         *   ⚠ これも集合で採る(点滅するカーソルで誤判定しない)。
+         * ⚠ **これが偽なら `accept0` は読めない** ── 健全なビルドでも
+         *   キャレットが無ければ `accept0` を返す(#156 本文の「まだ言えないこと」)。
+         */
+        await page.keyboard.press('Control+a');
+        await page.waitForTimeout(2500);
+        result.ime.marks.selectedAll = await traceLen();
+        const selFrames = await frames();
+        result.ime.caretInBody = swapped(afterFrames, selFrames);
+        result.ime.landed = swapped(beforeFrames, afterFrames);
         result.ime.frames = { before: beforeFrames?.length ?? null, after: afterFrames?.length ?? null };
       }
       result.ime.after = await page.evaluate(IME_DEEP);
+      // 🔑 最後にまとめて読む(console の取りこぼしに左右されない本命の出口)
+      result.ime.trace = await page.evaluate(IME_TRACE);
     } catch (e) {
       result.ime = { err: safeLine(String(e)) ?? 'error' };
+    }
+  }
+
+  /**
+   * 🔴 **打鍵が「その場で」版面に出るか**(#154 段①)。
+   *
+   * 実機は「打っている間は何も変わらず、`Escape` を押した瞬間に**いっぺんに**現れる」。
+   * 🔑 だから 2 つを別々に測る ── **打った直後**に変わったか(`landedWhileTyping`)と、
+   * **`Escape` の後**に変わったか(`revealedAfterEscape`)。
+   *
+   * | 読み方 | `landedWhileTyping` | `revealedAfterEscape` |
+   * |---|---|---|
+   * | 健全(その場で出る) | `true` | 何でもよい |
+   * | 🔴 #154 の症状 | **`false`** | **`true`** |
+   * | 打鍵が届いていない | `false` | `false` ← ⚠ **判定不能**(以降は読めない) |
+   *
+   * ⚠ **3 行目が要る。** これを分けないと「届いていない」を「描いていない」と読む
+   * (2026-08-13 に、対照群を置かずに存在しない結論を書きかけたのと同じ型)。
+   * ⚠ 入れ物だけ違う対(`.odt` / `.odp`)を**同じ腕で**回して初めて
+   * 「Impress 固有」が言える ── 片方だけ回して結論を書かない。
+   */
+  if (REDRAW && result.opened) {
+    try {
+      const box = await canvasBox();
+      result.redraw = { clicked: false };
+      if (box) {
+        const clip = { x: box.x, y: box.y, width: box.w, height: box.h };
+        // ⚠ 版面の**中ほど**を押す(端は枠や定規に当たる)
+        await page.mouse.click(box.x + box.w * 0.4, box.y + box.h * 0.35);
+        result.redraw.clicked = true;
+        await page.waitForTimeout(3000);
+        const before = await framesOf(clip);
+        // ⚠ 1 文字では足りない ── 見えていても気づけない。**目に見える量**を打つ
+        await page.keyboard.type('HELLO 12345', { delay: 120 });
+        await page.waitForTimeout(3000);
+        const typed = await framesOf(clip);
+        // 🔑 実機で「いっぺんに現れた」引き金と**同じ一手**(Escape)を打つ
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(2500);
+        const escaped = await framesOf(clip);
+        /**
+         * 🔴 **陰の対照群 ── 何も打たない間は変わらないこと。**
+         *
+         * ⚠ これが無いと「変わった」が何も言っていない ── 版面が放っておいても
+         * 変わるなら(点滅・再描画・時計)、上の 2 つは**時間が経った証拠**でしかない
+         * (CLAUDE.md §4「観測点が放っておいても変わるなら、変化は届いた証拠にならない」)。
+         * ⚠ `idleChanged` が `true` の回は、**この probe の結果を 1 つも読まない**。
+         */
+        await page.waitForTimeout(2500);
+        const idle = await framesOf(clip);
+        result.redraw.landedWhileTyping = swapped(before, typed);
+        result.redraw.revealedAfterEscape = swapped(typed, escaped);
+        result.redraw.idleChanged = swapped(escaped, idle);
+        result.redraw.frames = {
+          before: before?.length ?? null,
+          typed: typed?.length ?? null,
+          escaped: escaped?.length ?? null,
+          idle: idle?.length ?? null,
+        };
+      }
+    } catch (e) {
+      result.redraw = { err: safeLine(String(e)) ?? 'error' };
     }
   }
   if (SHOT) {
