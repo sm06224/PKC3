@@ -1149,6 +1149,8 @@
        */
       var ticks = 0;
       var launched = false;
+      /** ⚠ 診断のみ ── いまは文言を決めない(上の注記)。 */
+      var docSeen = false;
       /** ⚠ 文書を渡していない回(Start Center)は②を待たない ── 開く物が無い。 */
       var wantDoc = !!docBytes;
       var docLeaf = wantDoc ? (docName || 'document').replace(/[/\\]/g, '_') : '';
@@ -1159,25 +1161,34 @@
             if (cs[m].width > 0) {
               launched = true;
               say('painted', { ms: Date.now() - t0 });
-              setStatus(
-                wantDoc
-                  ? '開いています…'
-                  : '表示中 (' + ((Date.now() - t0) / 1000).toFixed(1) + ' 秒)',
-              );
+              // ⚠ **確かめた振る舞いは変えない** ── ここは元のまま
+              setStatus('表示中 (' + ((Date.now() - t0) / 1000).toFixed(1) + ' 秒)');
               break;
             }
           }
         }
+        /**
+         * ⚠ **`docOpened` はまだ診断である**(2026-08-23)。
+         *
+         * この判定が**真になるところを一度も観測していない** ── 実物の LO で
+         * 確かめたのは `open-doc-probe.mjs`(上流の素の page を**直に**配信して
+         * `document` 全体を見る形)であって、**host 経由でも / `screenEl` へ
+         * 絞っても真になる**とは限らない。
+         * ⚠ ここに上流の page の file 名を書かないこと ──
+         *   `tests/repo-hygiene.test.ts` の「直接開く面」の等値 pin が
+         *   **注釈の字面でも当たる**(2026-08-23 に踏んだ)。
+         * 🔴 だから**まだ user に見える文言を、これで決めない**
+         *   (CLAUDE.md「未確認は assert ではなく診断で出す。通ったのを見てから
+         *   後条件へ昇格させる」)。
+         * ⚠ 昇格を急いで一度 smoke を 2 件落とした ── 昇格前のこの形が正しい。
+         */
+        if (launched && wantDoc && !docSeen && docOpened(docLeaf)) {
+          docSeen = true;
+          say('doc-open', { ms: Date.now() - t0 });
+        }
         if (launched && !wantDoc) {
           clearInterval(tick);
           tick = null;
-          return;
-        }
-        if (launched && wantDoc && docOpened(docLeaf)) {
-          clearInterval(tick);
-          tick = null;
-          setStatus('表示中 (' + ((Date.now() - t0) / 1000).toFixed(1) + ' 秒)');
-          say('doc-open', { ms: Date.now() - t0 });
           return;
         }
         ticks += 1;
@@ -1185,13 +1196,16 @@
           clearInterval(tick);
           tick = null;
           /**
-           * 🔴 **黙らない。** ⚠ ただし `died()` にはしない ── 分かっているのは
-           *   「まだ出ていない」ことだけで、遅いだけかもしれない。
-           * 🔑 だから**起動したかどうかで文を変える** ── user が次にやることが違う。
+           * 🔴 **上限に達したら黙らない**(#199)。⚠ 直す前はここへ**到達しなかった**
+           *   ── canvas が先に出て `clearInterval` していたので、開かない文書でも
+           *   「表示中 (6.2 秒)」のまま**永久に無言**だった。
+           * 🔑 いまは canvas が出ても回し続けるので、**36 秒で必ずここへ来る**。
+           * ⚠ `died()` にはしない ── 分かっているのは「まだ出ていない」ことだけ。
+           * ⚠ `docSeen` では**まだ**文言を分けない(上のとおり未確認)。
            */
           if (launched && wantDoc) {
-            degrade('この文書は開けませんでした(36 秒待ちました)。別の形式で保存し直すか、PKC 側で書き出してからお試しください');
-            setStatus('開けませんでした');
+            say('doc-slow', { ms: Date.now() - t0, docSeen: docSeen });
+            setStatus('まだ開いていません (36 秒)');
           } else {
             setStatus('起動に時間がかかっています');
           }

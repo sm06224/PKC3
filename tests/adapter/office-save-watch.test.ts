@@ -421,27 +421,39 @@ describe('文書が開けたかの観測点(#199)', () => {
     );
   });
 
-  it('🔴 開かないまま上限に達したら、黙らない', () => {
-    // ⚠ 直す前は `setStatus('起動に時間がかかっています')` だけで、帯は出なかった
-    expect(host, '上限に達しても user に伝えていない').toContain('この文書は開けませんでした');
-    expect(host, '帯(degrade)を通していない').toMatch(
-      /degrade\('この文書は開けませんでした/,
-    );
+  /**
+   * 🔴 **上限の枝へ「到達できる」ことを見る**(ここが #199 の本体)。
+   *
+   * ⚠ 直す前は canvas が出た時点で `clearInterval` していたので、
+   *   **36 秒の枝へ永久に到達しなかった** ── 開かない文書は無言のままだった。
+   * 🔑 だから見るのは文言ではなく**構造** ── canvas が出ても
+   *   `clearInterval` せず、文書を待っている間は回り続けること。
+   */
+  it('🔴 canvas が出ても、文書を待つ間は数え続ける(上限の枝へ到達できる)', () => {
+    const painted = host.indexOf("say('painted'");
+    expect(painted, '前提: painted の発火点を見つけられていない').toBeGreaterThan(0);
+    // ⚠ 直す前はこの直後に `clearInterval(tick)` が在った
+    const after = host.slice(painted, painted + 300);
+    expect(
+      after,
+      'canvas が出た時点で数えるのをやめている(上限の枝へ永久に到達しない)',
+    ).not.toContain('clearInterval');
+    expect(host, '上限に達しても user に伝えていない').toContain('まだ開いていません');
   });
 
   /**
-   * ⚠ **空振り防止** ── 上の 2 つは「字が在る」しか見ていないので、
-   *   **古い判定が残ったまま新しい判定を足しても通る**。
-   * 🔑 だから**古い形が消えていること**を対で見る ── `painted` を出した時点で
-   *   「表示中」と言い切る枝が残っていないこと。
+   * ⚠ **`docOpened` はまだ診断である** ── 真になるところを**一度も観測していない**
+   *   ので、user に見える文言をこれで決めていないことを pin する。
+   * 🔑 CLAUDE.md「未確認は assert ではなく診断で出す。**通ったのを見てから**
+   *   後条件へ昇格させる」── 昇格を急いで一度 smoke を 2 件落とした。
+   * ⚠ 実物の LO で真になるのを見たら、この test は**裏返す**(そのとき
+   *   「文言を決めてよい」へ主張が変わる)。
    */
-  it('⚠ 対照群: canvas が出ただけで「表示中」と言い切らない', () => {
-    const say = host.indexOf("say('painted'");
-    expect(say, '前提: painted の発火点を見つけられていない').toBeGreaterThan(0);
-    const around = host.slice(say - 400, say + 200);
-    expect(
-      around,
-      'canvas が出た時点で「表示中」と言い切っている(開かない文書でも出る)',
-    ).toContain('開いています…');
+  it('⚠ いまは docOpened で文言を決めない(未確認のものを後条件にしない)', () => {
+    const at = host.indexOf('docOpened(docLeaf)');
+    expect(at, '前提: docOpened の呼び出しを見つけられていない').toBeGreaterThan(0);
+    const branch = host.slice(at, at + 200);
+    expect(branch, '未確認の判定で user に見える文言を決めている').not.toContain('setStatus');
+    expect(branch, '診断を出していない(通ったことを次の回転で読めない)').toContain("say('doc-open'");
   });
 });
