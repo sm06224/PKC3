@@ -8,7 +8,7 @@
  */
 import type { EntryStamps, EntryUpsert } from '@adapter/platform/storage/schema';
 import { extractMeta, type FlavorExtract } from '@features/flavor';
-import { PersistOnce } from '@adapter/platform/storage-persist';
+import { PersistOnce, type PersistState } from '@adapter/platform/storage-persist';
 // 🔴 追記の楽観検査(#178)── 「読んだ本文」を worker と突き合わせるための指紋
 import { contentHash64Hex } from '@adapter/platform/storage/content-hash';
 import { appendBlock } from '@features/markdown/text-ops';
@@ -240,10 +240,28 @@ export function connectStoreEffects(
    * ⚠ 回数は `PersistOnce` が持つ ── ここは書込のたびに呼ぶ。
    */
   const persistOnce = opts.persist ?? new PersistOnce(globalThis.navigator?.storage);
+  /**
+   * 🔴 **分かったら画面へ伝える**(#347、user 裁定 2026-08-23「気になるから見るだけで」)。
+   *
+   * ⚠ **`unknown` を弾く門は置かない。** 1 稿目は置いたが、変異試験で
+   *   **等価変異**(外しても何も壊れない)と分かった ── 同値を捨てるのは
+   *   reducer の仕事で、そちらに既に在る。⚠ 「これが無いと壊れる」と書く前に
+   *   外して壊れるのを見る(CLAUDE.md §1。`min-height: 0` と同じ型)。
+   */
+  const tellPersist = (st: PersistState): void => {
+    if (disposed) return;
+    dispatcher.dispatch({ type: 'PERSIST_STATE', state: st });
+  };
+  /**
+   * ⚠ **起動時は「尋ねずに聞く」だけ**(`persisted()`)── ブラウザが user に
+   * 尋ねることは無いので、ここで呼んでよい。頼む側(`persist()`)は
+   * **最初の書込のとき**である(下の `stamp`)。
+   */
+  void persistOnce.probe().then(tellPersist);
 
   const stamp = (lid: string, s: EntryStamps): void => {
     if (disposed) return;
-    void persistOnce.ensure();
+    void persistOnce.ensure().then(tellPersist);
     dispatcher.dispatch({
       type: 'ENTRY_STAMPED',
       lid,

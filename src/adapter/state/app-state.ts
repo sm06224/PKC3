@@ -14,6 +14,7 @@ import { extractMeta, seedBodyFor } from '@features/flavor';
 import { applyBodyRewrite, type BodyRewrite } from '@features/markdown/body-rewrite';
 import { replaceTaskCards, type TaskScan } from '@features/schedule/task-cards';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
+import type { PersistState } from '@adapter/platform/storage-persist';
 import type { LauncherTile } from '@features/launcher/tiles';
 import type {
   GroupResult as QueryGroups,
@@ -401,6 +402,15 @@ export interface AppState {
    */
   taskScanFailed: boolean;
   /**
+   * 🔴 **保存が「消えない扱い」か**(#347、user 裁定 2026-08-23)。
+   *
+   * ⚠ 出すのは**設定の面だけ**である ── 帯にもダイアログにもしない
+   * (「気になるから**見るだけで**」)。操作の失敗ではないので、user の手を止めない。
+   * ⚠ `unknown` は「断られた」ではなく「**まだ分かっていない**」── 混ぜると
+   * 画面が嘘をつく(起動直後は必ずここを通る)。
+   */
+  persistState: PersistState;
+  /**
    * ランチャーのタイル(P7b 段⑩)。⚠ `null` = **まだ読んでいない**。
    * 元データは attachment の frontmatter で**常駐していない**ので、
    * ランチャーを開いたときに要求して還流させる(履歴一覧と同じ流儀)。
@@ -494,6 +504,7 @@ export const initialState: AppState = {
   queryFailed: false,
   taskScan: null,
   taskScanFailed: false,
+  persistState: 'unknown',
   launcherTiles: null,
   calendarMonth: null,
   showArchived: false,
@@ -805,6 +816,11 @@ export type SystemCommand =
    * 経路を足した人が時刻を落とし、そこだけ「—」に戻る
    */
   | { type: 'ENTRY_STAMPED'; lid: string; createdAt: string | null; updatedAt: string | null }
+  /**
+   * 🔴 保存が「消えない扱い」かの ack(#347)。⚠ **`unknown` は届かない** ──
+   * 分からないままのときは撃たない(state の初期値がそれである)。
+   */
+  | { type: 'PERSIST_STATE'; state: PersistState }
   | {
       /**
        * 🔴 **本文の構造化書換の ack**(#276 / #277 で `TODO_TOGGLED` から改名)。
@@ -2129,6 +2145,15 @@ function reduceCore(
         events: [],
       };
     }
+    /**
+     * 🔴 保存が「消えない扱い」かの ack(#347)。
+     * ⚠ **同じなら state を差し替えない** ── 差し替えると指紋が変わり、
+     *   関係の無い面が組み直される(この repo が何度も踏んでいる形)。
+     */
+    case 'PERSIST_STATE':
+      return action.state === state.persistState
+        ? { state, events: [] }
+        : { state: { ...state, persistState: action.state }, events: [] };
     case 'ENTRY_STAMPED': {
       const meta = state.entryMetas.get(action.lid);
       // 消えた entry の ack は捨てる(削除と書込の競合)

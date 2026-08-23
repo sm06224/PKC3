@@ -76,6 +76,35 @@ export class PersistOnce {
   }
 
   /**
+   * 🔴 **尋ねずに、いまの状態だけ聞く**(#347 の見せ方、user 裁定 2026-08-23
+   * 「気になるから見るだけで」)。
+   *
+   * ⚠ `persisted()` は**問い合わせであって依頼ではない** ── ブラウザが user に
+   * 尋ねることは無い。だから**起動時に呼んでよい**。
+   * ⚠ 逆に `persist()`(尋ねうる口)はここでは呼ばない ── あちらは
+   * **最初の書込のとき** 1 度だけである(初回訪問はまだ何も持っていないので、
+   * 断る理由しかない瞬間に聞くことになる)。
+   *
+   * 🔑 **`false` を `denied` と書かない。** まだ頼んでいないので「断られた」では
+   * なく、**分かっていない**(`unknown`)である ── ここを混ぜると、設定の面が
+   * 「断られました」と嘘をつく。
+   */
+  async probe(): Promise<PersistState> {
+    if (this.state !== 'unknown') return this.state;
+    if (!this.store || typeof this.store.persist !== 'function') {
+      this.state = 'unsupported';
+      return this.state;
+    }
+    try {
+      if (typeof this.store.persisted === 'function' && (await this.store.persisted()))
+        this.state = 'persisted';
+    } catch {
+      // ⚠ 聞けなかっただけ ── `unknown` のままにする(次の書込で頼む)
+    }
+    return this.state;
+  }
+
+  /**
    * まだ頼んでいなければ頼む。⚠ **一度決まったら二度と頼まない** ──
    * `denied` でも聞き直さない(毎回の保存で user に尋ねることになる)。
    */
