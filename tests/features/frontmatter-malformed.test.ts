@@ -398,7 +398,7 @@ describe('閉じを失った本文への書き込み(#318)', () => {
       '---\n  status: done\n---\n本文\n',
     );
     expect(spliceFrontmatterKeys('---\n  status: open\n---\n本文\n', { status: undefined })).toBe(
-      '---\n---\n本文\n',
+      '本文\n' /* #343: 最後の 1 つを外したら空の囲みごと畳む */,
     );
   });
 

@@ -68,7 +68,7 @@ describe('frontmatter の鍵(#276)', () => {
       '---\ndate: 2026-08-09\n---\n本文\n',
     );
     expect(applyBodyRewrite(body, { kind: 'frontmatter', keys: { date: undefined } })).toBe(
-      '---\n---\n本文\n',
+      '本文\n' /* #343: 最後の 1 つを外したら空の囲みごと畳む */,
     );
   });
 

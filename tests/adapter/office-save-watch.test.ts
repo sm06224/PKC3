@@ -376,3 +376,84 @@ describe('合言葉の表(#217)', () => {
     expect(t.keyCount()).toBe(api.KEY_MEMORY_MAX);
   });
 });
+
+/**
+ * 🔴 **「canvas が出た」を「開けた」と読まない**(#199、2026-08-23)。
+ *
+ * ## 何が起きていたか(自作の 3KB docx で実測)
+ *
+ * | 渡した文書 | 画像の書き方 | canvas | 文書が開いたか |
+ * |---|---|---|---|
+ * | 画像なし ← **対照群** | ─ | 出る | ✅ 11 秒 |
+ * | **DrawingML** | `w:drawing` | **出る(6.2 秒)** | 🔴 **151 秒待っても開かない** |
+ * | VML(いまの書き出し形) | `w:pict` | 出る | ✅ 10 秒 |
+ *
+ * ⚠ 直す前の判定は **`canvas.width > 0`** ── `office-oracle` スキル §4 が名指しで
+ * 戒めている観測点(「**空の窓にも canvas は在る**」)が、**製品の中に入っていた**。
+ * 帰結:**開かない文書でも「表示中 (6.2 秒)」と出る** → user は「重いだけ」と読んで
+ * 待ち続ける。⚠ 36 秒の上限枝には**到達しない**(canvas が先に出て `clearInterval`
+ * 済み)ので、**永久に無言**だった。
+ *
+ * ## ⚠ ここで見られること / 見られないこと
+ *
+ * `host.html` の当該部分は inline `<script>` なので、`new Function` では**読めない**
+ * (`Module` / `FS` / Qt の器が要る)。だから**ここでは字面の 3 点だけ**を pin する。
+ * 🔑 実際に「開かない文書で帯が出る」ことは、**Office 一式を入れた実ブラウザ**でしか
+ * 見られない ── `build/office-wasm/` の host 経由 probe が持ち場である。
+ * ⚠ **この test はそこまでは主張しない**(CLAUDE.md「後条件は、確かめた事実の上に
+ * だけ書く」)。
+ */
+describe('文書が開けたかの観測点(#199)', () => {
+  const host = readFileSync('public/office/host.html', 'utf-8');
+
+  it('🔴 「開けた」の判定が canvas だけで決まっていない', () => {
+    expect(host, '文書が開いたかを見る関数が無い').toContain('function docOpened(');
+    /**
+     * 🔑 **名前だけでは足りない** ── host の帯にも file 名は出るので、
+     *   `document` 全体を見ると**開いていなくても真**になる。器へ絞ること。
+     */
+    expect(host, 'docOpened が器(screenEl)へ絞られていない').toMatch(
+      /function docOpened\([\s\S]*?\}\)\(screenEl\)/,
+    );
+    // ⚠ 名前と LibreOffice の**両方**が要る(片方だけだと帯や起動直後で真になる)
+    expect(host, '判定が名前だけになっている').toMatch(
+      /docOpened[\s\S]*?indexOf\(leaf\)[\s\S]*?LibreOffice/,
+    );
+  });
+
+  /**
+   * 🔴 **上限の枝へ「到達できる」ことを見る**(ここが #199 の本体)。
+   *
+   * ⚠ 直す前は canvas が出た時点で `clearInterval` していたので、
+   *   **36 秒の枝へ永久に到達しなかった** ── 開かない文書は無言のままだった。
+   * 🔑 だから見るのは文言ではなく**構造** ── canvas が出ても
+   *   `clearInterval` せず、文書を待っている間は回り続けること。
+   */
+  it('🔴 canvas が出ても、文書を待つ間は数え続ける(上限の枝へ到達できる)', () => {
+    const painted = host.indexOf("say('painted'");
+    expect(painted, '前提: painted の発火点を見つけられていない').toBeGreaterThan(0);
+    // ⚠ 直す前はこの直後に `clearInterval(tick)` が在った
+    const after = host.slice(painted, painted + 300);
+    expect(
+      after,
+      'canvas が出た時点で数えるのをやめている(上限の枝へ永久に到達しない)',
+    ).not.toContain('clearInterval');
+    expect(host, '上限に達しても user に伝えていない').toContain('まだ開いていません');
+  });
+
+  /**
+   * ⚠ **`docOpened` はまだ診断である** ── 真になるところを**一度も観測していない**
+   *   ので、user に見える文言をこれで決めていないことを pin する。
+   * 🔑 CLAUDE.md「未確認は assert ではなく診断で出す。**通ったのを見てから**
+   *   後条件へ昇格させる」── 昇格を急いで一度 smoke を 2 件落とした。
+   * ⚠ 実物の LO で真になるのを見たら、この test は**裏返す**(そのとき
+   *   「文言を決めてよい」へ主張が変わる)。
+   */
+  it('⚠ いまは docOpened で文言を決めない(未確認のものを後条件にしない)', () => {
+    const at = host.indexOf('docOpened(docLeaf)');
+    expect(at, '前提: docOpened の呼び出しを見つけられていない').toBeGreaterThan(0);
+    const branch = host.slice(at, at + 200);
+    expect(branch, '未確認の判定で user に見える文言を決めている').not.toContain('setStatus');
+    expect(branch, '診断を出していない(通ったことを次の回転で読めない)').toContain("say('doc-open'");
+  });
+});
