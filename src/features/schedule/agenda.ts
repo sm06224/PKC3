@@ -21,6 +21,13 @@
  * (読むと test が実行した日で変わる)。
  */
 import type { TaskCard } from '../kanban/kanban-data';
+/**
+ * ⚠ **日付の切り方は `stored-date.ts` 1 か所**(`tests/features/stored-date.test.ts`
+ *   が src 全体を走査して pin している)。⚠ ここで自前の正規表現を書いた 1 稿目は
+ *   その全数検査に落ちた ── **規則が 2 か所に生えた瞬間に鳴る**ようにしてある。
+ */
+import { storedDateParts } from '../datetime/stored-date';
+import { pad2 } from '../datetime/datetime-format';
 
 /** 1 日ぶん(または「日付なし」)の束。 */
 export interface AgendaGroup {
@@ -43,30 +50,29 @@ const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'] as const;
 function labelOf(date: string, today: string, tomorrow: string): string {
   if (date === today) return '今日';
   if (date === tomorrow) return '明日';
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  const p = storedDateParts(date);
   // ⚠ 形が違う値は**そのまま出す**(読めなかったことが見えるほうが良い)
-  if (m === null) return date;
-  const [, y, mo, d] = m;
+  if (p === null) return date;
   /**
-   * 曜日は `Date` で引く。⚠ ここは**実在する日**にしか使わない ── 実在しない
-   * 日は `getTime()` が `NaN` になるので、そのときは曜日を出さない。
+   * 曜日は `Date` で引く。⚠ **実在する日にしか使わない** ── `2026-02-30` を
+   *   `Date` に通すと 3/2 へ黙って寄るので、**戻して同じ日か**を確かめてから出す。
    */
-  const at = new Date(Number(y), Number(mo) - 1, Number(d));
+  const at = new Date(Number(p.year), Number(p.month) - 1, Number(p.day));
   const same =
-    at.getFullYear() === Number(y) &&
-    at.getMonth() === Number(mo) - 1 &&
-    at.getDate() === Number(d);
-  const head = `${Number(mo)}/${Number(d)}`;
+    at.getFullYear() === Number(p.year) &&
+    at.getMonth() === Number(p.month) - 1 &&
+    at.getDate() === Number(p.day);
+  const head = `${Number(p.month)}/${Number(p.day)}`;
   return same ? `${head}(${WEEKDAYS[at.getDay()]})` : head;
 }
 
 /** 翌日の `YYYY-MM-DD`。⚠ 月末・年末をまたぐので `Date` に任せる。 */
 function nextDay(today: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(today);
-  if (m === null) return '';
-  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + 1);
-  const p = (n: number): string => (n < 10 ? `0${n}` : `${n}`);
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  const p = storedDateParts(today);
+  if (p === null) return '';
+  const d = new Date(Number(p.year), Number(p.month) - 1, Number(p.day) + 1);
+  // ⚠ 桁の詰め方は `pad2` 1 か所(面ごとに書くと月末で字が食い違う)
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
 /**
