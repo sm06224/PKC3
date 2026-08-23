@@ -951,5 +951,26 @@ export function spliceFrontmatterKeys(
     }
   }
   const rest = parts.slice(closeAt).join(''); // 閉じ fence 行から後ろは原文 byte のまま
+  /**
+   * 🔴 **最後の鍵を外したら、空の囲みごと畳む**(#343、2026-08-23)。
+   *
+   * ⚠ 直す前は `---\n---\n` が残った。それは「何も書いていない frontmatter」なので、
+   *   画面には**「この文書の情報 (空)」の札**が常駐する(`detail.ts` は
+   *   `frontmatterLineCount` が 0 のときだけ札を消すが、この形は **2** を返す)──
+   *   user は**何も書いていないのに、書いた物の入れ物**を見せられる。
+   * ⚠ しかも `docOf` がその 2 行を本文から隠すので、原文には**意味の無い 2 行**が
+   *   溜まったまま見えない。
+   *
+   * 🔑 **畳むのは「実のある行が 1 行も無い」ときだけ**である ── コメントや空行を
+   *   user が書いていたら、それは**書いた物**なので消さない
+   *   (この関数の契約は「本文・他 key・空行・コメントは byte 単位で無傷」)。
+   *
+   * ⚠ **往復して 1 バイトも増えないこと**を確かめてある:返す `rest` は
+   *   閉じ fence の**次の行から**なので `OPEN_FENCE`(`/^---\s*\r?\n/`)に当たらず、
+   *   次に鍵を付けると前置の経路で `---\nkey: v\n---\n` + 元の本文へ戻る。
+   */
+  if (fmParts.length === 0 || fmParts.every((l) => l.trim() === '')) {
+    return parts.slice(closeAt + 1).join('');
+  }
   return `${open}${fmParts.join('')}${rest}`;
 }

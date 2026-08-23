@@ -554,11 +554,14 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
    * 🔑 抜けを機械で止める検査は `tests/repo-hygiene.test.ts`。
    */
   'toggle-task',
-  'calendar-set-date',
   /**
    * 🔴 **ノート 1 件の日付も disk への書込**(#292 段④)── frontmatter を書く。
-   * ⚠ `calendar-set-date` と同じ理由でここに要る(取り込みが entry を総入れ替え
-   *   している裏で frontmatter を書かせない)。機械検査は `tests/repo-hygiene.test.ts`。
+   * ⚠ 取り込みが entry を総入れ替えしている裏で frontmatter を書かせない、が理由。
+   *   機械検査は `tests/repo-hygiene.test.ts`。
+   * ⚠ かつてここに `calendar-set-date` が並んでいたが、**#292 段⑤ で受け手ごと
+   *   落とした** ── 中央のカレンダーが消えて、その属性を書き出す場所が 0 件に
+   *   なったためである(下の「押した所と起きることを一致させる」は、いまは
+   *   予定の面の掴んで落とす / この 2 つのボタンが担う)。
    */
   'set-entry-date',
   'clear-entry-date',
@@ -1612,31 +1615,6 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     dispatcher.dispatch({ type: 'TOGGLE_TASK', lid, line });
-  },
-  'calendar-set-date': (dispatcher, target) => {
-    const date = target.closest('[data-pkc-date]')?.getAttribute('data-pkc-date');
-    if (date === null || date === undefined) return;
-    const st = dispatcher.getState();
-    /**
-     * ⚠ **セルの中のノートを押したときは、そちらが勝つ**(`select-entry`)──
-     * ここへは「日付の地」を押したときだけ来る。押した所と起きることを一致させる。
-     */
-    const lid = st.selectedLid;
-    if (lid === null) {
-      dispatcher.dispatch({
-        type: 'OP_FAILED',
-        error: '日付を付けるノートを先に選んでください(一覧から押すと選べます)',
-      });
-      return;
-    }
-    if (st.phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから日付を変えてください' });
-      return;
-    }
-    const meta = st.entryMetas.get(lid);
-    if (!meta) return;
-    // 🔑 同じ日をもう一度押したら外す(付けたものを外せる)
-    dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: meta.date === date ? null : date });
   },
   'calendar-nav': (dispatcher, target) => {
     // 遷移先は renderer が描画時に焼き込む(binder は「今の月」を推定しない)

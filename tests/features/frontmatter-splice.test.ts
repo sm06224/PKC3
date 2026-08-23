@@ -19,7 +19,14 @@ describe('spliceFrontmatterKeys(原文 splice ── P3-4 review #5 の規律)',
     expect(spliceFrontmatterKeys(body, { date: '2026-08-02' })).toBe(
       '---\nstatus: open\ndate: 2026-08-02\n---\nx',
     );
-    expect(spliceFrontmatterKeys(body, { status: undefined })).toBe('---\n---\nx');
+    /**
+     * 🔴 **最後の 1 つを外したら、空の囲みごと畳む**(#343、2026-08-23)。
+     * ⚠ 直す前は `'---\n---\nx'` を返し、それを**見たまま pin していた** ──
+     *   画面には「この文書の情報 **(空)**」の札が常駐し、user は何も書いていないのに
+     *   書いた物の入れ物を見せられていた。
+     * 🔑 いまは**本文だけ**が残る(往復しても 1 バイトも増えない)。
+     */
+    expect(spliceFrontmatterKeys(body, { status: undefined })).toBe('x');
   });
 
   it('frontmatter が無ければ fence を前置(本文は無傷)', () => {
@@ -83,8 +90,9 @@ describe('spliceFrontmatterKeys(原文 splice ── P3-4 review #5 の規律)',
     expect(spliceFrontmatterKeys('---\n  status: open\n---\n本文\n', { status: 'done' })).toBe(
       '---\n  status: done\n---\n本文\n',
     );
+    // ⚠ 字下げした 1 つきりの key を外した場合も、空の囲みは残さない(#343)
     expect(spliceFrontmatterKeys('---\n  status: open\n---\n本文\n', { status: undefined })).toBe(
-      '---\n---\n本文\n',
+      '本文\n',
     );
   });
 
