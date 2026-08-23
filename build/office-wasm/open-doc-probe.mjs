@@ -118,8 +118,31 @@ const IME_DEEP = `(() => {
   const ae = document.activeElement;
   return { inputs, active: ae ? (ae.tagName + (ae.id ? '#' + ae.id : '')) : null };
 })()`;
+/**
+ * 🔴 **計装の出口を MEMFS から読む**(#156 段③、`patch-lo-ime-trace.py` と対)。
+ *
+ * ⚠ LO 側の文脈から DOM を触れないので、計装は **libc だけ**で
+ *   `/tmp/pkc3-ime.log` へ追記している ── ここはその file を読むだけ。
+ * 🔑 返り値で 3 つを見分ける:
+ *     `null`   = 計装の入っていない一式(= この焼きでは測っていない)
+ *     `[]`     = 計装は在るが **1 行も出ていない**(呼ばれていない)
+ *     `[...]`  = 出た行
+ * ⚠ ここは template literal なので**逆引用符を書かない**。
+ */
+const IME_TRACE = `(() => {
+  try {
+    const lo = globalThis.__lo;
+    if (!lo || !lo.FS) return null;
+    const raw = lo.FS.readFile('/tmp/pkc3-ime.log', { encoding: 'utf8' });
+    return String(raw).split('\n').filter((l) => l.length > 0);
+  } catch (e) {
+    return String(e).indexOf('ENOENT') >= 0 || String(e).indexOf('no such file') >= 0
+      ? null
+      : ['ERR ' + String(e).slice(0, 80)];
+  }
+})()`;
 const docBytes = NO_DOC ? 0 : (await readFile(DOC)).length;
-const result = { doc: { bytes: docBytes }, events: [], console: [], samples: [] };
+const result = { doc: { bytes: docBytes }, events: [], console: [], imeConsole: [], samples: [] };
 const profile = `${tmpdir()}/pkc3-open-doc-${process.pid}`;
 const browser = await chromium.launchPersistentContext(profile, {
   headless: true,
@@ -130,7 +153,13 @@ const browser = await chromium.launchPersistentContext(profile, {
 const page = await browser.newPage();
 page.on('console', (m) => {
   const t = safeLine(`[${m.type()}] ${m.text()}`);
-  if (t && result.console.length < 60) result.console.push(t);
+  if (t === null) return;
+  // 🔴 **計装の行は別の箱へ採る**(#156 段③)。⚠ 下の一般の箱は 60 行で打ち切る
+  //    ので、起動時の洪水に**押し出される** ── 「出ていない」と「採らなかった」が
+  //    見分けられなくなる(CLAUDE.md §4「観測点が別の物に満たされる」の器版)。
+  //    🔑 本命は MEMFS の log(`result.ime.trace`)で、こちらはその控えである。
+  if (t.includes('PKC3-IME') && result.imeConsole.length < 200) result.imeConsole.push(t);
+  if (result.console.length < 60) result.console.push(t);
 });
 page.on('pageerror', (e) => {
   const t = safeLine(`[pageerror] ${String(e)}`);
@@ -329,6 +358,19 @@ try {
         return best;
       })()`);
       result.ime = { clicked: false, before: await page.evaluate(IME_DEEP) };
+      /**
+       * 🔴 **どの一手で何行出たかを分ける**(#156 段③)。
+       *
+       * ⚠ log に印を書き込めない(JS から MEMFS へ追記する口を増やすと、
+       *   計装の出口が 2 か所になる ── CLAUDE.md §7)。
+       * 🔑 代わりに**節目ごとに行数を採る** ── 差が「その一手で出た行」である。
+       *   これが無いと、起動中に出た行と押した後に出た行が混ざって読めない。
+       */
+      const traceLen = async () => {
+        const t = await page.evaluate(IME_TRACE);
+        return Array.isArray(t) ? t.length : null;
+      };
+      result.ime.marks = { opened: await traceLen() };
       if (box) {
         /**
          * 🔴 **対照群 ── 打鍵が版面に届いたか**(CLAUDE.md §4、2026-08-13 の教訓)。
@@ -355,9 +397,11 @@ try {
         await page.mouse.click(box.x + box.w * 0.4, box.y + box.h * 0.35);
         result.ime.clicked = true;
         await page.waitForTimeout(3000);
+        result.ime.marks.clicked = await traceLen();
         const beforeFrames = await frames();
         await page.keyboard.type('a', { delay: 120 });
         await page.waitForTimeout(3000);
+        result.ime.marks.typed = await traceLen();
         const afterFrames = await frames();
         /**
          * 🔴 **キャレットが「本文」に入ったかを分ける**(#156 段③ の前段、2026-08-23)。
@@ -374,6 +418,7 @@ try {
          */
         await page.keyboard.press('Control+a');
         await page.waitForTimeout(2500);
+        result.ime.marks.selectedAll = await traceLen();
         const selFrames = await frames();
         result.ime.caretInBody =
           afterFrames === null || selFrames === null
@@ -386,6 +431,8 @@ try {
         result.ime.frames = { before: beforeFrames?.length ?? null, after: afterFrames?.length ?? null };
       }
       result.ime.after = await page.evaluate(IME_DEEP);
+      // 🔑 最後にまとめて読む(console の取りこぼしに左右されない本命の出口)
+      result.ime.trace = await page.evaluate(IME_TRACE);
     } catch (e) {
       result.ime = { err: safeLine(String(e)) ?? 'error' };
     }
