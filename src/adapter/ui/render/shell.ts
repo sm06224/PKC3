@@ -285,9 +285,22 @@ export function buildShell(root: HTMLElement): ShellRegions {
     menu.append(item);
   }
 
+  /**
+   * 🔴 **今日のノートを開く**(#348、user 裁定 2026-08-23)。
+   *
+   * ⚠ **「+ ノート」の隣**に置く ── 押す動機が同じ(いま何か書きたい)なので、
+   *   探す場所も同じであるべき。⚠ 別の面(予定など)へ隠すと、
+   *   「書きたい」から「予定を開く」への回り道になる。
+   * 🔑 文言は**起きること**で書く(user 指示 2026-08-21)── 「日記」ではなく
+   *   「今日」。開くと**今日の日付のノート**が出る(無ければ作る)。
+   */
+  const today = iconButton('open-today', '今日', 'calendar');
+  today.setAttribute('data-pkc-field', 'open-today');
+  today.title = '今日の日付のノートを開きます(無ければ作ります)';
+
   const attach = iconButton('attach-file', '添付');
   attach.title = 'ファイルを取り込んで添付にします';
-  createBar.append(kind, create, pick, attach);
+  createBar.append(kind, create, pick, today, attach);
 
   const attachInput = document.createElement('input');
   attachInput.type = 'file';
