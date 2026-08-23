@@ -29,9 +29,15 @@
  * **どの日か決まらない** ── 束 = 落とし先なので、束ね方が操作を決めてしまう。
  */
 import type { AppState } from '@adapter/state/app-state';
-import { buildAgenda, type AgendaGroup } from '@features/schedule/agenda';
+import {
+  buildAgenda,
+  itemOfCard,
+  itemOfNote,
+  type AgendaGroup,
+  type AgendaItem,
+} from '@features/schedule/agenda';
 import { getMonthGrid, dateKey } from '@features/calendar/calendar-data';
-import { taskCardKey, TASK_LIMITS, type TaskCard } from '@features/kanban/kanban-data';
+import { TASK_LIMITS, type TaskCard } from '@features/kanban/kanban-data';
 import { matchesEntry, normalizeQuery } from '@features/filter/title-filter';
 import { createTaskCard, patchTaskCard } from './task-card';
 
@@ -44,7 +50,7 @@ export class ScheduleRenderer {
   private readonly region: HTMLElement;
   private readonly now: () => Date;
   private readonly cards = new Map<string, HTMLElement>();
-  private readonly cardData = new Map<string, TaskCard>();
+  private readonly cardData = new Map<string, AgendaItem>();
   /** 束の器(日付 → 節)。⚠ **使い回す**(捨てると掴んでいる札が消える)。 */
   private readonly sections = new Map<string, { section: HTMLElement; host: HTMLElement; head: HTMLElement }>();
   private frame: {
@@ -124,10 +130,30 @@ export class ScheduleRenderer {
       return matchesEntry(m.lid, m.title, q, state.searchHits);
     });
     const dated = visible.filter((c) => c.date !== null);
-    const groups = buildAgenda(visible, today, state.showUndatedTasks);
+    /**
+     * 🔴 **ノート 1 件が丸ごと予定のものも束ねる**(段④)── frontmatter の `date:`。
+     * ⚠ 受けないと、中央のカレンダー(段⑤ で落とす)が消えた瞬間に
+     *   **`date:` を書いても どこにも出ない**(動線が 1 つ消える)。
+     * ⚠ 絞り込みと片付けの規則は行の札と**同じもの**を通す(面の中で割らない)。
+     */
+    const notes: AgendaItem[] = [];
+    for (const lid of state.order) {
+      const m = state.entryMetas.get(lid);
+      if (m === undefined || m.date === null) continue;
+      if (m.archived && !state.showArchived) continue;
+      if (!matchesEntry(m.lid, m.title, q, state.searchHits)) continue;
+      notes.push(itemOfNote(m));
+    }
+    const items = [...visible.map(itemOfCard), ...notes];
+    const groups = buildAgenda(items, today, state.showUndatedTasks);
 
-    this.paintMonth(frame, state, today, visible);
-    frame.note.textContent = this.noteText(state, all.length, dated.length, groups.length);
+    this.paintMonth(frame, state, today, items);
+    frame.note.textContent = this.noteText(
+      state,
+      all.length + notes.length,
+      dated.length + notes.length,
+      groups.length,
+    );
     this.paintUndatedToggle(frame.undated, state, visible.length - dated.length);
     this.paintDoneToggle(frame.done, state, all, q);
     this.paintGroups(frame.groups, groups, state);
@@ -138,7 +164,7 @@ export class ScheduleRenderer {
     frame: NonNullable<ScheduleRenderer['frame']>,
     state: AppState,
     today: string,
-    cards: readonly TaskCard[],
+    cards: readonly AgendaItem[],
   ): void {
     const at = this.now();
     const year = state.calendarMonth?.year ?? at.getFullYear();
@@ -265,7 +291,7 @@ export class ScheduleRenderer {
         this.sections.delete(key);
       }
     }
-    const wantCards = new Set(groups.flatMap((g) => g.cards.map(taskCardKey)));
+    const wantCards = new Set(groups.flatMap((g) => g.cards.map((c) => c.key)));
     for (const [key, el] of this.cards) {
       if (!wantCards.has(key)) {
         el.remove();
@@ -311,7 +337,7 @@ export class ScheduleRenderer {
     let cursor: ChildNode | null = host.firstChild;
     const year = this.now().getFullYear();
     for (const data of g.cards) {
-      const key = taskCardKey(data);
+      const key = data.key;
       const title = state.entryMetas.get(data.lid)?.title ?? '';
       let card = this.cards.get(key);
       if (card === undefined) {

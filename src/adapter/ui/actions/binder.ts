@@ -555,6 +555,13 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
    */
   'toggle-task',
   'calendar-set-date',
+  /**
+   * 🔴 **ノート 1 件の日付も disk への書込**(#292 段④)── frontmatter を書く。
+   * ⚠ `calendar-set-date` と同じ理由でここに要る(取り込みが entry を総入れ替え
+   *   している裏で frontmatter を書かせない)。機械検査は `tests/repo-hygiene.test.ts`。
+   */
+  'set-entry-date',
+  'clear-entry-date',
   'toggle-app-tile',
   /**
    * 🔴 **作るのも disk への書込である**(2026-08-19、機械検査が見つけた 4 件)。
@@ -1671,6 +1678,28 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (!Number.isFinite(year) || !Number.isFinite(month)) return;
     dispatcher.dispatch({ type: 'SET_CALENDAR_MONTH', year, month });
   },
+  /**
+   * 🔴 **ノート 1 件に日付を付ける / 選び直す**(#292 段④)。
+   * ⚠ 掴む札がまだ無いとき(日付を 1 度も付けていないノート)のための口である ──
+   *   主の道は予定の面で掴んで落とすこと。
+   */
+  'set-entry-date': (dispatcher, _target, _services, root) => {
+    const lid = dispatcher.getState().selectedLid;
+    if (lid === null) return;
+    void pickDateInApp(root, new Date(), DATE_SHORTCUTS, (id, now) =>
+      isDateShortcut(id) ? shortcutDate(id, now) : '',
+    ).then((picked) => {
+      if (picked === null) return;
+      // ⚠ ノートの日付に時刻は無い(抽出列が `YYYY-MM-DD` だけを受ける)
+      dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: picked.date });
+    });
+  },
+  /** 🔴 **置けるなら外せる**(片道を作らない)。 */
+  'clear-entry-date': (dispatcher) => {
+    const lid = dispatcher.getState().selectedLid;
+    if (lid === null) return;
+    dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: null });
+  },
   'schedule-today': (dispatcher) => {
     const now = new Date();
     dispatcher.dispatch({
@@ -2766,8 +2795,20 @@ export function bindActions(
       if (drop === null) return;
       e.preventDefault();
       const [lid, rawLine] = (de.dataTransfer.getData(PKC_TASK_DRAG) || '').split(' ');
+      if (lid === undefined || lid === '') return;
+      const date = drop.date === '' ? null : drop.date;
+      /**
+       * 🔴 **単位が 2 つある**(段④)── 行番号が空なら
+       *   **ノート 1 件が丸ごと予定**で、書き換えるのは frontmatter の `date:` である。
+       * ⚠ 同じ落とし先に、書き換える場所が違う 2 種類が落ちてくる ── だから
+       *   ここで分ける(面ごとに 2 つの落とし先を作らない)。
+       */
+      if (rawLine === undefined || rawLine === '') {
+        dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date });
+        return;
+      }
       const line = Number(rawLine);
-      if (lid === undefined || lid === '' || !Number.isInteger(line)) return;
+      if (!Number.isInteger(line)) return;
       const card = dispatcher
         .getState()
         .taskScan?.cards.find((c) => c.lid === lid && c.line === line);
@@ -2775,7 +2816,7 @@ export function bindActions(
         type: 'SET_TASK_DATE',
         lid,
         line,
-        date: drop.date === '' ? null : drop.date,
+        date,
         // ⚠ 外すときは時刻も一緒に落ちる(記法ごと剥がすため)
         time: card?.time ?? null,
       });
@@ -2832,9 +2873,16 @@ export function bindActions(
     );
     if (taskCard !== null && taskCard !== undefined && de.dataTransfer) {
       const lid = taskCard.getAttribute('data-pkc-entry');
-      const line = taskCard
-        .querySelector('[data-pkc-task-line]')
-        ?.getAttribute('data-pkc-task-line');
+      /**
+       * ⚠ **ノート 1 件が丸ごと予定**のときは行番号が無い(段④)── 荷物の
+       *   行番号を**空**にして、落とす側が `SET_ENTRY_DATE`(frontmatter)へ回す。
+       * 🔑 印が在るかどうかで見分けない ── **札自身の印**(`data-pkc-whole-note`)
+       *   で見る(印の有無は見た目の都合であって、単位の宣言ではない)。
+       */
+      const whole = taskCard.hasAttribute('data-pkc-whole-note');
+      const line = whole
+        ? ''
+        : taskCard.querySelector('[data-pkc-task-line]')?.getAttribute('data-pkc-task-line');
       if (lid !== null && line !== null && line !== undefined) {
         dragFromSide = null;
         de.dataTransfer.setData(PKC_TASK_DRAG, `${lid} ${line}`);

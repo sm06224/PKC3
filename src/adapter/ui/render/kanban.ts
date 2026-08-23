@@ -27,6 +27,7 @@ import {
 } from '@features/kanban/kanban-data';
 import { matchesEntry, normalizeQuery } from '@features/filter/title-filter';
 import { createTaskCard, patchTaskCard } from './task-card';
+import { itemOfCard } from '@features/schedule/agenda';
 
 export class KanbanRenderer {
   private readonly region: HTMLElement;
@@ -313,13 +314,13 @@ export class KanbanRenderer {
 
   private createCard(data: TaskCard): HTMLElement {
     // 🔑 組み立ては `task-card.ts` 1 か所(予定の面と同じ札を出すため。§7)
-    const card = createTaskCard(data);
+    const card = createTaskCard(itemOfCard(data));
     this.patchCard(card, data, '');
     return card;
   }
 
   /** ⚠ 板は束が「日」ではないので、**札に日付を出す**(予定の面は出さない)。 */
   private patchCard(card: HTMLElement, data: TaskCard, title: string): void {
-    patchTaskCard(card, data, title, this.now().getFullYear(), true);
+    patchTaskCard(card, itemOfCard(data), title, this.now().getFullYear(), true);
   }
 }

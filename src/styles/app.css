@@ -2231,6 +2231,29 @@ select:focus-visible {
   text-decoration: line-through;
   color: var(--muted);
 }
+/* 情報の「日付」(#292 段④)。⚠ ボタンらしく主張させない(字のまま置く) */
+[data-pkc-field='inspector-date'] button {
+  padding: 0;
+  margin-right: var(--s2);
+  font: inherit;
+  color: var(--fg);
+  background: none;
+  border: none;
+  border-bottom: 1px dotted var(--border);
+  cursor: pointer;
+}
+[data-pkc-field='inspector-date'] [data-pkc-action='clear-entry-date'] {
+  color: var(--muted);
+}
+[data-pkc-field='inspector-date'] button:hover {
+  border-bottom-color: var(--fg);
+}
+/* ⚠ 印の無い予定(ノート 1 件が丸ごと)は、印の列を**空けたまま**揃える */
+[data-pkc-field='no-check'] {
+  display: inline-block;
+  width: 13px;
+}
+
 /* ══ 予定(#292 段③、2026-08-23)══════════════════════════════════
  * 🔴 **左の列に置く**(user 指示「もう一つ PKC が開いて混乱する」)── 中央は
  *   本文のまま。⚠ 幅は `minmax(200px, 18vw)` = 1920 で 345px / 下限 200px。

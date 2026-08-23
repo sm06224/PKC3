@@ -13,11 +13,17 @@
  * | `data-pkc-task-line` | **原文の行番号**。印の書換と、掴んだときの荷物 |
  * | `draggable` | 🔴 **掴んで日へ落とす**(双方向。user 指示 2026-08-23) |
  */
-import type { TaskCard } from '@features/kanban/kanban-data';
+import type { AgendaItem } from '@features/schedule/agenda';
 import { formatListDate } from '@features/datetime/stored-date';
 
-/** 札の器を作る(中身は `patchTaskCard` が入れる)。 */
-export function createTaskCard(data: TaskCard): HTMLElement {
+/**
+ * 札の器を作る(中身は `patchTaskCard` が入れる)。
+ *
+ * ⚠ **ノート 1 件の予定(`line === null`)には印を置かない** ── チェックする
+ *   「行」が無いので、置くと**押しても何も起きない印**になる。
+ *   🔑 代わりに**器の列を空けたまま**にする(札の頭が面ごとにずれない)。
+ */
+export function createTaskCard(data: AgendaItem): HTMLElement {
   const card = document.createElement('article');
   /**
    * 🔴 **どのノートの行かを札に焼く**。⚠ これが無いと binder は
@@ -35,11 +41,16 @@ export function createTaskCard(data: TaskCard): HTMLElement {
    * 🔑 掴んだときは**中の印から引く**(`querySelector`)── 名前も出どころも 1 つ。
    */
   card.draggable = true;
-  const box = document.createElement('input');
-  box.type = 'checkbox';
-  box.className = 'pkc-task-checkbox';
-  box.setAttribute('data-pkc-action', 'toggle-task');
-  box.setAttribute('aria-label', 'チェックを切り替え');
+  const box = document.createElement(data.line === null ? 'span' : 'input');
+  if (box instanceof HTMLInputElement) {
+    box.type = 'checkbox';
+    box.className = 'pkc-task-checkbox';
+    box.setAttribute('data-pkc-action', 'toggle-task');
+    box.setAttribute('aria-label', 'チェックを切り替え');
+  } else {
+    // ⚠ 印の代わりの**空き**(押せない)。器の列を空けて頭を揃える
+    box.setAttribute('data-pkc-field', 'no-check');
+  }
   const text = document.createElement('span');
   text.setAttribute('data-pkc-field', 'text');
   /**
@@ -74,17 +85,25 @@ export function createTaskCard(data: TaskCard): HTMLElement {
  */
 export function patchTaskCard(
   card: HTMLElement,
-  data: TaskCard,
+  data: AgendaItem,
   title: string,
   thisYear: number | null,
   showDate = true,
 ): void {
   const box = card.querySelector<HTMLInputElement>('[data-pkc-action="toggle-task"]');
-  if (box) {
+  if (box && data.line !== null) {
     // 🔴 **指すのは原文の行番号**(索引ではない ── 別の行を書き換えないため)
     box.setAttribute('data-pkc-task-line', String(data.line));
     box.checked = data.done;
   }
+  /**
+   * 🔴 **ノート 1 件の予定であることを、札に出す**(段④)。
+   * ⚠ 出さないと、行の予定と見分けが付かない ── 掴んで落としたときに
+   *   書き換わる場所が違う(行の `@…` か、frontmatter の `date:` か)のに、
+   *   画面が同じでは user が予測できない。
+   */
+  if (data.line === null) card.setAttribute('data-pkc-whole-note', '');
+  else card.removeAttribute('data-pkc-whole-note');
   if (data.done) card.setAttribute('data-pkc-task-done', '');
   else card.removeAttribute('data-pkc-task-done');
   const when = card.querySelector<HTMLElement>('[data-pkc-field="when"]');

@@ -22,6 +22,9 @@ import { ScheduleRenderer } from '../../src/adapter/ui/render/schedule';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import { taskCardsOf } from '../../src/features/kanban/kanban-data';
+import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
+import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
+import { answerDialog } from './dialog-helper';
 
 const TODAY = new Date(2026, 7, 23); // 2026-08-23(日)
 
@@ -43,7 +46,12 @@ function meta(lid: string, over: Partial<EntryMeta> = {}): EntryMeta {
 
 const tick = (ms = 10): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-function setup(bodies: Record<string, string>) {
+function setup(
+  bodies: Record<string, string>,
+  dates: Record<string, string> = {},
+  /** ⚠ 片付けた印は抽出列に載る ── ここでは直に与える。 */
+  archived: ReadonlySet<string> = new Set(),
+) {
   const root = document.createElement('div');
   document.body.append(root);
   const d = new Dispatcher();
@@ -72,7 +80,14 @@ function setup(bodies: Record<string, string>) {
   d.dispatch({
     type: 'SYS_BOOTED',
     cid: 'c1',
-    metas: Object.keys(bodies).map((lid) => meta(lid)),
+    // ⚠ 本文が無くてもノートは在りうる(frontmatter の `date:` だけ持つ形)──
+    //    だから**両方の鍵の和**でメタを組む(片方だけだと fixture が空になる)
+    metas: [...new Set([...Object.keys(bodies), ...Object.keys(dates)])].map((lid) =>
+      meta(lid, {
+        ...(dates[lid] === undefined ? {} : { date: dates[lid]! }),
+        ...(archived.has(lid) ? { archived: true } : {}),
+      }),
+    ),
     relations: [],
   });
   const cards = Object.entries(bodies).flatMap(([lid, body]) => taskCardsOf(lid, body));
@@ -280,5 +295,173 @@ describe('予定の面(#292 段③)', () => {
       .click();
     await tick(20);
     expect(store['e1']).toBe('- [x] 見積 @2026-08-23\n');
+  });
+});
+
+/**
+ * 🔴 **ノート 1 件が丸ごと予定**(段④。frontmatter の `date:`)。
+ *
+ * ⚠ ここを受けないと、中央のカレンダー(段⑤ で落とす)が消えた瞬間に
+ *   **`date:` を書いてもどこにも出ない** ── 動線が 1 つ消える。
+ */
+describe('ノート 1 件の予定(段④)', () => {
+  it('🔴 frontmatter の date を持つノートが、同じ束に出る', () => {
+    const { root, qa } = setup({ e1: '- [ ] 行の予定 @2026-08-23\n' }, { e1: '2026-08-23' });
+    expect(groups(qa)).toEqual(['今日(2)']);
+    const texts = cardsOf(root, '2026-08-23').map((c) => c.textContent ?? '');
+    expect(texts.some((t) => t.includes('行の予定')), '行の予定が出ていない').toBe(true);
+    expect(texts.some((t) => t.includes('t-e1')), 'ノートの予定が出ていない').toBe(true);
+  });
+
+  /** ⚠ 印は置かない(チェックする「行」が無い ── 押しても何も起きない印を作らない)。 */
+  /**
+   * 🔴 **絞り込みと片付けは、行の予定と同じ規則で効く**(2026-08-23、変異試験 N9)。
+   * ⚠ 面の中で規則が割れると、「りんご」と絞ったのに**ノートの予定だけ全件出る**
+   *   ── 画面が嘘をつく(CLAUDE.md §7)。
+   */
+  it('🔴 ノートの予定にも絞り込みが効く', async () => {
+    const { d, qa } = setup(
+      {},
+      { e1: '2026-08-23', e2: '2026-08-23' },
+    );
+    expect(groups(qa), '前提が崩れている').toEqual(['今日(2)']);
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 't-e1' });
+    await tick();
+    expect(groups(qa), 'ノートの予定が絞り込みを素通りしている').toEqual(['今日(1)']);
+  });
+
+  it('🔴 片付けたノートの予定は既定で出ない(見せる設定なら出る)', async () => {
+    const { d, qa } = setup({}, { e1: '2026-08-23' }, new Set(['e1']));
+    expect(groups(qa), '片付けたノートの予定が出ている').toEqual([]);
+    d.dispatch({ type: 'TOGGLE_SHOW_ARCHIVED' });
+    await tick();
+    expect(groups(qa), '見せる設定でも出ない').toEqual(['今日(1)']);
+  });
+
+  it('ノートの予定に印は出ない', () => {
+    const { root } = setup({ e1: '# ただの本文\n' }, { e1: '2026-08-23' });
+    const card = cardsOf(root, '2026-08-23')[0]!;
+    expect(card.hasAttribute('data-pkc-whole-note'), '丸ごとの印が付いていない').toBe(true);
+    expect(card.querySelector('[data-pkc-action="toggle-task"]'), '押せない印が出ている').toBeNull();
+  });
+
+  /**
+   * 🔴 **落とすと frontmatter が書き替わる**(行の予定とは書き換える場所が違う)。
+   * ⚠ 観測点は**保存された本文** ── 画面だけ動いて本文は元のまま、を作らない。
+   */
+  it('🔴 ノートの予定を別の日へ落とすと、frontmatter の date が変わる', async () => {
+    const { root, q, store } = setup({ e1: '---\ndate: 2026-08-23\n---\n\n本文\n' }, { e1: '2026-08-23' });
+    dragTo(cardsOf(root, '2026-08-23')[0]!, q('[data-pkc-drop-date="2026-08-27"]')!);
+    await tick(20);
+    expect(store['e1'], 'frontmatter が書き替わっていない').toBe(
+      '---\ndate: 2026-08-27\n---\n\n本文\n',
+    );
+  });
+
+  /** 🔴 **置けるなら外せる** ── 「日付なし」へ落とすと `date:` が消える。 */
+  it('🔴 「日付なし」へ落とすと、frontmatter の date が外れる', async () => {
+    const { root, q, qa, store } = setup(
+      { e1: '---\ndate: 2026-08-23\n---\n\n本文\n', e2: '- [ ] 体裁\n' },
+      { e1: '2026-08-23' },
+    );
+    q<HTMLElement>('[data-pkc-action="toggle-show-undated"]')!.click();
+    await tick();
+    expect(groups(qa), '前提が崩れている').toEqual(['今日(1)', '日付なし(1)']);
+    dragTo(
+      cardsOf(root, '2026-08-23')[0]!,
+      q('[data-pkc-region="schedule-group"][data-pkc-drop-date=""]')!,
+    );
+    await tick(20);
+    /**
+     * ⚠ **空の fence が残るのは、いまの `spliceFrontmatterKeys` の振る舞いである**
+     *   (この PR で入れた物ではない ── 中央のカレンダーの日付を外しても同じになる)。
+     * 🔑 **見たままを pin する** ── 「本文\n になるはず」と書くと、
+     *   落ちたときに実装と期待のどちらが悪いのか区別できない
+     *   (CLAUDE.md「後条件は、確かめた事実の上にだけ書く」)。
+     * ⚠ 空の fence を畳むかどうかは**別の主題**なので、issue に出して分ける。
+     */
+    expect(store['e1'], 'date が外れていない').toBe('---\n---\n\n本文\n');
+    // 🔑 主張の本体:**date が読めなくなっている**(束からも消える)
+    expect(store['e1']).not.toContain('date:');
+  });
+});
+
+/**
+ * 🔴 **掴む札がまだ無いときの口**(#292 段④)── 右の列(情報)の「日付」。
+ *
+ * ⚠ 日付を 1 度も付けていないノートは**予定の面に出ない**ので、掴めない。
+ *   ここが無いと、中央のカレンダー(段⑤ で落とす)が消えた瞬間に
+ *   **新しく日付を付ける道が 1 つも無くなる**。
+ */
+describe('右の列から、ノート 1 件に日付を付ける(段④)', () => {
+  function open(date: string | null) {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const d = new Dispatcher();
+    const regions = buildShell(root);
+    const store: Record<string, string> = { e1: '本文\n' };
+    const persisted: EntryUpsert[] = [];
+    const inspector = new InspectorRenderer(regions.inspector);
+    d.onState((s) => inspector.render(s));
+    bindActions(root, d);
+    connectStoreEffects(d, {
+      ...stubRevisionOps(),
+      getBody: async (lid) => store[lid] ?? null,
+      deleteEntry: async () => {},
+      setEntryParent: async () => {},
+      renameEntry: async () => stubStamps(),
+      persistEntry: async (e) => {
+        persisted.push(e);
+        store[e.lid] = e.body;
+        return stubStamps();
+      },
+    });
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [date === null ? meta('e1') : meta('e1', { date })],
+      relations: [],
+    });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
+    const q = <T extends HTMLElement>(sel: string) => root.querySelector<T>(sel);
+    return { root, d, q, store, persisted };
+  }
+
+  const setBtn = (q: <T extends HTMLElement>(s: string) => T | null) =>
+    q<HTMLButtonElement>('[data-pkc-action="set-entry-date"]')!;
+  const clearBtn = (q: <T extends HTMLElement>(s: string) => T | null) =>
+    q<HTMLButtonElement>('[data-pkc-action="clear-entry-date"]')!;
+
+  it('日付が無ければ「日付を付ける」、外す口は出さない', () => {
+    const { q } = open(null);
+    expect(setBtn(q).textContent).toBe('日付を付ける');
+    // ⚠ **押しても何も起きないボタンを出さない**(外すものが無い)
+    expect(clearBtn(q).hidden).toBe(true);
+  });
+
+  it('日付が在れば、その日と「外す」が出る', () => {
+    const { q } = open('2026-08-25');
+    expect(setBtn(q).textContent).toBe('2026/08/25');
+    expect(clearBtn(q).hidden, '置けるのに外せない(片道)').toBe(false);
+  });
+
+  it('🔴 選んで入れると、frontmatter に date が入る', async () => {
+    const { q, store } = open(null);
+    resetAppDialogForTest();
+    setBtn(q).click();
+    await Promise.resolve();
+    document.querySelector<HTMLInputElement>('[data-pkc-field="pick-date"]')!.value = '2026-08-27';
+    await answerDialog('ok');
+    await tick(20);
+    expect(store['e1'], 'frontmatter に入っていない').toBe('---\ndate: 2026-08-27\n---\n本文\n');
+  });
+
+  it('🔴 「外す」で date が消える(置けるなら外せる)', async () => {
+    const { q, store } = open('2026-08-25');
+    // ⚠ 前提:本文にも書かれている状態を作る
+    store['e1'] = '---\ndate: 2026-08-25\n---\n本文\n';
+    clearBtn(q).click();
+    await tick(20);
+    expect(store['e1']).not.toContain('date:');
   });
 });

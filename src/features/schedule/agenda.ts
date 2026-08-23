@@ -21,6 +21,7 @@
  * (読むと test が実行した日で変わる)。
  */
 import type { TaskCard } from '../kanban/kanban-data';
+import type { EntryMeta } from '../../core/model/entry-meta';
 /**
  * ⚠ **日付の切り方は `stored-date.ts` 1 か所**(`tests/features/stored-date.test.ts`
  *   が src 全体を走査して pin している)。⚠ ここで自前の正規表現を書いた 1 稿目は
@@ -28,6 +29,61 @@ import type { TaskCard } from '../kanban/kanban-data';
  */
 import { storedDateParts } from '../datetime/stored-date';
 import { pad2 } from '../datetime/datetime-format';
+
+/**
+ * 🔴 **予定 1 件**。⚠ **単位は 2 つある**(2026-08-23、段④)──
+ *
+ * | `line` | 何か | どこに日付が書いてある |
+ * |---|---|---|
+ * | 数 | **本文の 1 行**(チェック項目) | 行の `@2026-08-25` |
+ * | `null` | 🔴 **ノート 1 件が丸ごと予定** | frontmatter の `date:` |
+ *
+ * ⚠ **2 つ目を落とすと動線が 1 つ消える** ── 中央のカレンダー(段⑤ で落とす)が
+ *   `date:` を出す唯一の面だったので、ここが受けないと**書いたのに どこにも出ない**
+ *   frontmatter ができる(CLAUDE.md「捨てるものの表は、行ごとに『代わりに何が
+ *   できるようになるか』を書く」)。
+ */
+export interface AgendaItem {
+  /** 描画の再利用と、掴んだときの荷物の鍵。⚠ **行まで含める**(1 ノートに複数在る)。 */
+  readonly key: string;
+  readonly lid: string;
+  /** 原文の行番号。`null` = ノート 1 件が丸ごと予定。 */
+  readonly line: number | null;
+  readonly text: string;
+  /** ⚠ ノート 1 件の予定に印は無い(チェックする「行」が無い)。 */
+  readonly done: boolean;
+  readonly date: string | null;
+  readonly time: string | null;
+}
+
+/** 行の札を予定にする。 */
+export function itemOfCard(card: TaskCard): AgendaItem {
+  return {
+    key: `${card.lid} ${card.line}`,
+    lid: card.lid,
+    line: card.line,
+    text: card.text,
+    done: card.done,
+    date: card.date,
+    time: card.time,
+  };
+}
+
+/**
+ * ノート 1 件を予定にする(frontmatter の `date:`)。
+ * ⚠ 鍵は `line` の代わりに `note` ── 行の札と**衝突しない**形にする。
+ */
+export function itemOfNote(meta: EntryMeta): AgendaItem {
+  return {
+    key: `${meta.lid} note`,
+    lid: meta.lid,
+    line: null,
+    text: meta.title,
+    done: false,
+    date: meta.date,
+    time: null,
+  };
+}
 
 /** 1 日ぶん(または「日付なし」)の束。 */
 export interface AgendaGroup {
@@ -37,7 +93,7 @@ export interface AgendaGroup {
   readonly label: string;
   /** 🔴 今日より前か。⚠ **落とすのではなく、印を付ける**。 */
   readonly overdue: boolean;
-  readonly cards: readonly TaskCard[];
+  readonly cards: readonly AgendaItem[];
 }
 
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'] as const;
@@ -87,13 +143,13 @@ function nextDay(today: string): string {
  * @param withUndated 日付なしの束を出すか(既定 `false` = 出さない)。
  */
 export function buildAgenda(
-  cards: readonly TaskCard[],
+  cards: readonly AgendaItem[],
   today: string,
   withUndated = false,
 ): AgendaGroup[] {
   const tomorrow = nextDay(today);
-  const byDate = new Map<string, TaskCard[]>();
-  const undated: TaskCard[] = [];
+  const byDate = new Map<string, AgendaItem[]>();
+  const undated: AgendaItem[] = [];
   for (const c of cards) {
     if (c.date === null) undated.push(c);
     else {
@@ -121,7 +177,7 @@ export function buildAgenda(
  * ⚠ **安定** に並べる(同じ時刻は渡された順)── `sort` は安定なので、
  *   同値で `0` を返せばよい。
  */
-function sortByTime(cards: readonly TaskCard[]): TaskCard[] {
+function sortByTime(cards: readonly AgendaItem[]): AgendaItem[] {
   return [...cards].sort((a, b) => {
     if (a.time === b.time) return 0;
     if (a.time === null) return 1;

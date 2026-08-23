@@ -38,6 +38,7 @@
  * ⚠ 器を組み直すのは**形が変わるときだけ**(選択の有無 / 「書き戻す」の有無)。
  */
 import type { AppState } from '@adapter/state/app-state';
+import type { EntryMeta } from '@core/model/entry-meta';
 import { ScrollMemory } from './scroll-memory';
 import { archetypeLabel } from './sidebar';
 import { iconButton } from './icons';
@@ -281,6 +282,7 @@ export class InspectorRenderer {
     }
     this.setRow('inspector-created', formatStoredDate(meta.createdAt));
     this.setRow('inspector-updated', formatStoredDate(meta.updatedAt));
+    this.paintDate(meta);
     // 🔴 **どのファイルから来たか**を出す(2026-08-05)── 出さないと、書き戻しが
     //    「どこへ」書くのか分からない操作になる。⚠ 行の有無は形(= build 側)
     if (link !== null) this.setRow('inspector-linked-file', link);
@@ -324,6 +326,37 @@ export class InspectorRenderer {
     if (dd) setText(dd, value);
   }
 
+  /**
+   * 🔴 **ノート 1 件の日付**を塗る(#292 段④)。
+   *
+   * ⚠ **「置けるなら外せる」** ── 付ける口だけ出すと、間違えて付けた日付を
+   *   本文の frontmatter を開いて手で消すまで戻せない(片道を作らない)。
+   * ⚠ 器は使い回す(押す寸前のボタンを作り直さない)。
+   */
+  private paintDate(meta: EntryMeta): void {
+    const dd = this.rows.get('inspector-date');
+    if (!dd) return;
+    let set = dd.querySelector<HTMLButtonElement>('[data-pkc-action="set-entry-date"]');
+    let clear = dd.querySelector<HTMLButtonElement>('[data-pkc-action="clear-entry-date"]');
+    if (set === null) {
+      set = document.createElement('button');
+      set.type = 'button';
+      set.setAttribute('data-pkc-action', 'set-entry-date');
+      clear = document.createElement('button');
+      clear.type = 'button';
+      clear.setAttribute('data-pkc-action', 'clear-entry-date');
+      clear.textContent = '外す';
+      dd.append(set, clear);
+    }
+    const has = meta.date !== null;
+    // 🔑 日付の見せ方は `formatStoredDate` 1 本(一覧・情報列と同じ規則)
+    const label = has ? formatStoredDate(meta.date) : '日付を付ける';
+    if (set.textContent !== label) set.textContent = label;
+    set.title = has ? '日付を選び直します' : 'このノート 1 件を、その日の予定にします';
+    // ⚠ **押しても何も起きないボタンを出さない**(日付が無ければ外すものが無い)
+    if (clear) clear.hidden = !has;
+  }
+
   /** 器を組む(形が変わったときだけ呼ばれる)。 */
   private build(shape: Shape): void {
     this.region.textContent = '';
@@ -359,6 +392,19 @@ export class InspectorRenderer {
     row('居場所', 'inspector-folder');
     row('作成', 'inspector-created');
     row('更新', 'inspector-updated');
+    /**
+     * 🔴 **ノート 1 件の日付**(#292 段④。frontmatter の `date:`)。
+     *
+     * ⚠ 直す前、これを書く口は**カレンダーの日を押すこと 1 つ**だった
+     *   ── だから「日を押す前に、左の一覧からノートを選んでください」という
+     *   帯が要り、user は**本文を退かして**日付を付けていた(①の実害)。
+     * 🔑 いまは掴んで落とすのが主の道(予定の面)。ここは
+     *   **まだ日付が無くて掴む札が無いとき**のための口である。
+     * ⚠ 右の列に置くのは規則どおり(`browse.ts` の表:**右 = 選んでいるもの**)──
+     *   ノートの日付は、まさに選んでいるノートの属性である。
+     * ⚠ 値は押せるボタンなので `setRow` ではなく専用の器を持つ。
+     */
+    row('日付', 'inspector-date');
     /**
      * 🔴 **タグ**(#182 / 台帳 #180 の A-2)。⚠ 値は文字ではなく**押せる札**なので、
      * `setRow`(textContent 差し替え)ではなく専用の器を持つ。

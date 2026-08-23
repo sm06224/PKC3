@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buildAgenda } from '../../src/features/schedule/agenda';
-import type { TaskCard } from '../../src/features/kanban/kanban-data';
+import { buildAgenda, itemOfCard, itemOfNote } from '../../src/features/schedule/agenda';
+import type { EntryMeta } from '../../src/core/model/entry-meta';
 
 const card = (
   lid: string,
@@ -8,7 +8,21 @@ const card = (
   date: string | null,
   time: string | null = null,
   text = 'x',
-): TaskCard => ({ lid, line, text, done: false, date, time });
+) => itemOfCard({ lid, line, text, done: false, date, time });
+
+/** ノート 1 件が丸ごと予定(frontmatter の `date:`)。 */
+const noteMeta = (lid: string, date: string | null, title = 'n-' + lid): EntryMeta => ({
+  lid,
+  title,
+  archetype: 'text',
+  createdAt: null,
+  updatedAt: null,
+  entryOrder: 0,
+  status: null,
+  date,
+  archived: false,
+  bodyChars: null,
+});
 
 const TODAY = '2026-08-23'; // 日曜
 
@@ -109,5 +123,43 @@ describe('予定を日ごとに束ねる(#292 段③)', () => {
     const g = buildAgenda([card('a', 0, TODAY), card('b', 3, TODAY)], TODAY);
     expect(g).toHaveLength(1);
     expect(g[0]?.cards.map((c) => c.lid)).toEqual(['a', 'b']);
+  });
+});
+
+/**
+ * 🔴 **ノート 1 件が丸ごと予定**(段④。frontmatter の `date:`)。
+ *
+ * ⚠ これを受けないと、中央のカレンダー(段⑤ で落とす)が消えた瞬間に
+ *   **`date:` を書いてもどこにも出ない** ── 動線が 1 つ消える。
+ */
+describe('ノート 1 件の予定も、同じ束に入る(段④)', () => {
+  it('行の予定とノートの予定が、同じ日の束に並ぶ', () => {
+    const g = buildAgenda(
+      [card('a', 2, TODAY, null, '行の予定'), itemOfNote(noteMeta('b', TODAY, '会議のノート'))],
+      TODAY,
+    );
+    expect(g).toHaveLength(1);
+    expect(g[0]?.cards.map((c) => [c.text, c.line])).toEqual([
+      ['行の予定', 2],
+      // 🔑 `line === null` が「ノート 1 件が丸ごと」の印
+      ['会議のノート', null],
+    ]);
+  });
+
+  /**
+   * 🔴 **鍵がぶつからない。**
+   * ⚠ 同じ lid の行 0 とノートが同じ鍵になると、描画側が**1 枚しか置かない**
+   *   (片方が黙って消える)。
+   */
+  it('🔴 同じノートの「行 0」と「丸ごと」で鍵がぶつからない', () => {
+    const line0 = card('a', 0, TODAY);
+    const whole = itemOfNote(noteMeta('a', TODAY));
+    expect(line0.key).not.toBe(whole.key);
+    expect(buildAgenda([line0, whole], TODAY)[0]?.cards).toHaveLength(2);
+  });
+
+  it('ノートの予定に印は無い(チェックする行が無い)', () => {
+    expect(itemOfNote(noteMeta('a', TODAY)).done).toBe(false);
+    expect(itemOfNote(noteMeta('a', TODAY)).time).toBeNull();
   });
 });
