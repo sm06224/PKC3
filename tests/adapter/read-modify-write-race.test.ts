@@ -19,6 +19,7 @@ import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { contentHash64Hex } from '../../src/adapter/platform/storage/content-hash';
+import { PersistOnce } from '../../src/adapter/platform/storage-persist';
 
 function meta(lid: string, archetype = 'text'): EntryMeta {
   return {
@@ -78,7 +79,19 @@ let errors: string[];
 let sent: string[];
 let dispose: (() => void) | null = null;
 
+/** 🔴 保存の ack で永続化を頼んでいるか(#347)を見るための控え。 */
+let persistCalls = 0;
+let persistOnce: PersistOnce;
+
 function boot(disk: Record<string, string>, metas: EntryMeta[]) {
+  persistCalls = 0;
+  persistOnce = new PersistOnce({
+    persisted: async () => false,
+    persist: async () => {
+      persistCalls += 1;
+      return true;
+    },
+  });
   const { store, race } = makeStore(disk);
   d = new Dispatcher();
   errors = [];
@@ -93,7 +106,7 @@ function boot(disk: Record<string, string>, metas: EntryMeta[]) {
   d.onState((s) => {
     if (s.error !== null && errors[errors.length - 1] !== s.error) errors.push(s.error);
   });
-  dispose = connectStoreEffects(d, store as never);
+  dispose = connectStoreEffects(d, store as never, { persist: persistOnce });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas, relations: [] });
   return { race };
 }
@@ -107,6 +120,49 @@ afterEach(() => {
 });
 
 const TASKS = '- [ ] 牛乳を買う\n- [ ] 郵便を出す\n';
+
+/**
+ * 🔴 **最初の書込で「消えない側へ置いて」と頼む**(#347、2026-08-23)。
+ *
+ * ⚠ 直す前は `navigator.storage.persist()` の呼び出しが Office 一式の経路
+ * (`office-pack-install.ts`)にしか無く、**ノート本体は一度も頼んでいなかった** ──
+ * origin の quota は OPFS(= SQLite 本体)と共用なので、空き容量が減ると
+ * **黙って消える**(user から見ると「昨日まで在ったノートが今日は 1 件も無い」)。
+ *
+ * 🔑 観測点は**保存の ack**(`stamp`)── 全部の書込経路が通る 1 か所である。
+ * ⚠ 経路ごとに書くと必ずどれかが漏れる(#347 がまさにその形だった)。
+ */
+describe('最初の書込で永続化を頼む (#347)', () => {
+  it('🔴 書けたら頼む', async () => {
+    const disk: Record<string, string> = { a: TASKS };
+    boot(disk, [meta('a')]);
+    d.dispatch({ type: 'TOGGLE_TASK', lid: 'a', line: 0 });
+    await tick();
+    expect(disk['a'], '前提: 書けていない(この test は何も測っていない)').toContain('- [x]');
+    expect(persistCalls, '書けたのに永続化を頼んでいない').toBe(1);
+  });
+
+  it('🔴 2 回目以降は頼まない(保存のたびに user へ尋ねない)', async () => {
+    const disk: Record<string, string> = { a: TASKS };
+    boot(disk, [meta('a')]);
+    d.dispatch({ type: 'TOGGLE_TASK', lid: 'a', line: 0 });
+    await tick();
+    d.dispatch({ type: 'TOGGLE_TASK', lid: 'a', line: 1 });
+    await tick();
+    expect(disk['a'], '前提: 2 回目が書けていない').toContain('- [x] 郵便');
+    expect(persistCalls, '保存のたびに尋ねている').toBe(1);
+  });
+
+  /** ⚠ **対照群** ── 書けなかった回は頼まない(断った書込で尋ねない)。 */
+  it('⚠ 断った書込では頼まない', async () => {
+    const disk: Record<string, string> = { a: TASKS };
+    const { race } = boot(disk, [meta('a')]);
+    race('a', '- [ ] 割り込み\n' + TASKS);
+    d.dispatch({ type: 'TOGGLE_TASK', lid: 'a', line: 0 });
+    await tick();
+    expect(persistCalls, '書いていないのに尋ねた').toBe(0);
+  });
+});
 
 describe('読んで直して書き戻す経路が、別の窓の本文を消さない (#178)', () => {
   /**

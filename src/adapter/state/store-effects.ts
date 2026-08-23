@@ -8,6 +8,7 @@
  */
 import type { EntryStamps, EntryUpsert } from '@adapter/platform/storage/schema';
 import { extractMeta, type FlavorExtract } from '@features/flavor';
+import { PersistOnce } from '@adapter/platform/storage-persist';
 // 🔴 追記の楽観検査(#178)── 「読んだ本文」を worker と突き合わせるための指紋
 import { contentHash64Hex } from '@adapter/platform/storage/content-hash';
 import { appendBlock } from '@features/markdown/text-ops';
@@ -190,6 +191,12 @@ export function connectStoreEffects(
      * 既定 false = 組み込みタイルを出さない(test の既存呼び出しを変えない)。
      */
     officeInstalled?: () => boolean;
+    /**
+     * 🔴 保存を「消えない」側へ置いてもらう係(#347)。
+     * ⚠ 既定は `navigator.storage` ── **test では持たない環境が普通**なので、
+     *   その場合 `unsupported` になって何も起きない(既存の呼び出しを変えない)。
+     */
+    persist?: PersistOnce;
   } = {},
 ): StoreEffects {
   let queue: Promise<void> = Promise.resolve();
@@ -222,8 +229,21 @@ export function connectStoreEffects(
    * ⚠ 呼ぶのは **meta を差し替える action の後** ── `ENTRY_RESTORED` のように
    * meta を丸ごと置き換える action が後に来ると、刻んだ時刻が消える
    */
+  /**
+   * 🔴 **最初の書込が通った所で、永続化を 1 度だけ頼む**(#347、2026-08-23)。
+   *
+   * ⚠ **boot では頼まない** ── 初回訪問はまだ何も持っていないので、
+   *   ブラウザが尋ねる実装では**断る理由しかない瞬間**に聞くことになる。
+   * 🔑 ここ(保存の ack)は**全部の書込経路が通る 1 か所**である ──
+   *   経路ごとに書くと、必ずどれかが漏れる(#347 がまさにその形だった:
+   *   Office 一式の経路にだけ入っていた)。
+   * ⚠ 回数は `PersistOnce` が持つ ── ここは書込のたびに呼ぶ。
+   */
+  const persistOnce = opts.persist ?? new PersistOnce(globalThis.navigator?.storage);
+
   const stamp = (lid: string, s: EntryStamps): void => {
     if (disposed) return;
+    void persistOnce.ensure();
     dispatcher.dispatch({
       type: 'ENTRY_STAMPED',
       lid,

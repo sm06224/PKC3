@@ -31,6 +31,7 @@ import {
 } from './office-pack-acquire';
 import type { PackBuild } from './office-pack';
 import type { OfficePackStore } from './office-pack-store';
+import { requestPersist as requestPersistState } from '@adapter/platform/storage-persist';
 
 export type PackResult =
   | { readonly ok: true; readonly meta: OfficePackMeta | null; readonly message: string }
@@ -65,16 +66,14 @@ export interface PackInstallDeps {
  * 効かない ── **書く前に**永続化しておけば、書いた分が最初から対象になる。
  * ⚠ 拒否されることがある(engagement が足りない環境)。**拒否は失敗ではない** ──
  * 入れるのは続け、その旨だけ伝える。
+ *
+ * 🔴 **実体は `adapter/platform/storage-persist.ts` に移した**(#347、2026-08-23)。
+ * ⚠ ここにしか無かったせいで、**ノート本体は一度も永続化を頼んでいなかった** ──
+ * 同じ問いに答える口を 2 つ持たない(CLAUDE.md §7)。
  */
 async function requestPersist(): Promise<boolean> {
   const store = typeof navigator === 'undefined' ? undefined : navigator.storage;
-  if (!store || typeof store.persist !== 'function') return false;
-  try {
-    if (typeof store.persisted === 'function' && (await store.persisted())) return true;
-    return await store.persist();
-  } catch {
-    return false;
-  }
+  return (await requestPersistState(store)) === 'persisted';
 }
 
 /**
