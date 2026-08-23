@@ -38,6 +38,31 @@ export function buildFormatBar(): HTMLElement {
    * ⚠ 欄そのもの(`replace-bar`)は shell 側に在る ── ここは切替だけ。
    *   打鍵のたびに描き直される面へ欄を入れると、打ちかけの語が消える。
    */
+  /**
+   * 🔴 **日付を入れる道具**(user 指示 2026-08-23)。
+   *
+   * > 「**日付の記法としては入力がめんどくさいから、日付と時刻を簡単に入力できるし、
+   * > ついてくるツールとか用意されてもいいかも**」
+   *
+   * ⚠ ここに置く理由は 2 つ ── ① **本文を打っている場所**に在る(道具を探しに
+   *   行かせない)② **押せる形**なので、マウスだけで完結する(不可侵指示
+   *   「マウスだけで完結し、キーボードは近道」)。
+   * ⚠ `FORMAT_OPS` には入れない ── あちらは**その場で字を変える**純関数の表で、
+   *   こちらは**先に聞く**(ダイアログが挟まる)。同じ表に混ぜると
+   *   「押したら何が起きるか」が表から読めなくなる。
+   */
+  const insertDate = document.createElement('button');
+  insertDate.type = 'button';
+  insertDate.setAttribute('data-pkc-action', 'insert-date');
+  insertDate.setAttribute(HINT_BASE, '日付を入れる');
+  insertDate.setAttribute(HINT_COMMAND, 'insert-date');
+  insertDate.title = hintTitle('日付を入れる', 'insert-date');
+  const insertDateLabel = document.createElement('span');
+  insertDateLabel.setAttribute('data-pkc-field', 'label');
+  insertDateLabel.textContent = '日付';
+  insertDate.append(insertDateLabel);
+  bar.append(insertDate);
+
   const toggleReplace = document.createElement('button');
   toggleReplace.type = 'button';
   toggleReplace.setAttribute('data-pkc-action', 'toggle-replace');

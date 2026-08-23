@@ -277,8 +277,124 @@ function open(f: Frame, onDismiss: DialogAnswer): Promise<DialogAnswer> {
   });
 }
 
+/**
+ * 🔴 **日付を入れる道具**(user 指示 2026-08-23)。
+ *
+ * > 「**日付の記法としては入力がめんどくさいから、日付と時刻を簡単に入力できるし、
+ * > ついてくるツールとか用意されてもいいかも。アイデアはすごくいいと思うけど足りない**」
+ *
+ * ## なぜ格子を自作しないのか
+ *
+ * 中身は **`<input type="date">` / `<input type="time">`** である。⚠ 自作の格子に
+ * すると、端末のピッカー・キーボード操作・地域ごとの書式・IME の扱いを**全部
+ * 作り直す**ことになる ── CLAUDE.md §10 の裏返しで、**native が「ついでに」
+ * 提供している性質**を捨てないほうが強い。
+ *
+ * ## なぜ近道は「押したら入る」ではなく「日付欄に入る」なのか
+ *
+ * ⚠ 押した瞬間に閉じる形にすると、**時刻を足したい人が必ず 1 回やり直す**
+ * (「明日」を押した → 閉じた → 時刻が無い → もう一度開く)。
+ * 🔑 近道は**日付欄を埋めるだけ**にして、確定の口を **「入れる」1 つ**に保つ ──
+ *   マウスだけで 2 押し、鍵なら「近道 → Enter」で終わる。
+ *
+ * ## 返す形
+ *
+ * `{ date, time }`(時刻は空なら `null`)。⚠ **記法の字は組み立てない** ──
+ * 組み立ては `formatLineDate` 1 本(`features/schedule/line-date.ts`)である。
+ * ここが字を作ると、読む形と書く形が 2 か所で決まる(CLAUDE.md §7)。
+ */
+export interface PickedDate {
+  /** `YYYY-MM-DD`。 */
+  readonly date: string;
+  /** `HH:MM`。空欄なら `null`。 */
+  readonly time: string | null;
+}
+
+export function pickDateInApp(
+  host: HTMLElement,
+  now: Date,
+  /** ⚠ 近道の表は features 側が持つ(画面の並びと規則を 2 か所に書かない)。 */
+  shortcuts: readonly { id: string; label: string }[],
+  toDate: (id: string, now: Date) => string,
+): Promise<PickedDate | null> {
+  return enqueue(async () => {
+    const f = ensureFrame(host);
+    f.title.textContent = '日付を入れる';
+    // ⚠ 前の中身は捨てる(確認は `textContent` を上書きするので、逆向きも要る)
+    f.body.textContent = '';
+
+    const date = document.createElement('input');
+    date.type = 'date';
+    date.setAttribute('data-pkc-field', 'pick-date');
+    // 🔑 開いた時点で**今日**が入っている ── いちばん多い答えを既に選んである
+    date.value = toDate('today', now);
+    const time = document.createElement('input');
+    time.type = 'time';
+    time.setAttribute('data-pkc-field', 'pick-time');
+
+    for (const s of shortcuts) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.setAttribute('data-pkc-field', 'pick-shortcut');
+      btn.setAttribute('data-pkc-shortcut', s.id);
+      btn.textContent = s.label;
+      /**
+       * ⚠ **閉じない。日付欄を埋めるだけ**(上の docstring)。
+       * ⚠ そして**押した手応えを出す** ── 埋まったことが画面で分からないと、
+       *   user は「押しても何も起きない」と読む(欄の値は小さくて見落とす)。
+       */
+      btn.addEventListener('click', () => {
+        date.value = toDate(s.id, now);
+        for (const other of f.body.querySelectorAll('[data-pkc-field="pick-shortcut"]'))
+          other.removeAttribute('data-pkc-selected');
+        btn.setAttribute('data-pkc-selected', '');
+      });
+      f.body.append(btn);
+    }
+    const dateLabel = document.createElement('label');
+    dateLabel.append(document.createTextNode('日付 '), date);
+    const timeLabel = document.createElement('label');
+    // ⚠ 「任意」と書く ── 空欄で通ることが分からないと、user は何か入れようとする
+    timeLabel.append(document.createTextNode('時刻(任意) '), time);
+    f.body.append(dateLabel, timeLabel);
+
+    f.ok.textContent = '入れる';
+    f.ok.removeAttribute('data-pkc-danger');
+    f.cancel.textContent = 'やめる';
+    f.cancel.hidden = false;
+
+    /**
+     * ⚠ **`open()` の中は同期で `showModal()` まで走る**(`new Promise` の
+     *   executor は同期)ので、返った直後に焦点を移せる。
+     * 🔑 確認と違って焦点は**日付欄**へ ── ここは戻しにくい操作ではないし、
+     *   開いた直後にやることは「日を決める」だからである。
+     */
+    const answered = open(f, 'cancel');
+    date.focus();
+    const answer = await answered;
+    if (answer !== 'ok') return null;
+    // ⚠ 日付が空なら**入れない**(空の記法を本文へ挿すと、読めない字が残る)
+    return date.value === '' ? null : { date: date.value, time: time.value === '' ? null : time.value };
+  });
+}
+
 /** test の後始末(器を捨てる)。⚠ 製品からは呼ばない。 */
 export function resetAppDialogForTest(): void {
+  /**
+   * 🔴 **開いたままの器を、DOM から片付ける**(2026-08-23 に踏んだ)。
+   *
+   * ⚠ 直す前は参照を捨てるだけだったので、**閉じずに終わった it の `<dialog>` が
+   *   `open` のまま document に残っていた** ── 次の it の `openDialog()` は
+   *   「開いているものを探す」ので**前の it の残骸に当たり**、押すと
+   *   **前の it の Promise が解決される**(いまの it は永久に待つ)。
+   * ⚠ 症状は「入れたのに本文が変わらない」で、**単独で走らせると通る** ──
+   *   いちばん読み違えやすい形である(CLAUDE.md §5「環境差」の test 内版)。
+   * 🔑 器は 1 つに寄せてあるので、**片付けもここ 1 か所**でよい。
+   */
+  if (frame !== null) {
+    if (frame.dialog.open) frame.dialog.close();
+    frame.dialog.remove();
+  }
   frame = null;
   // ⚠ 列も戻す ── 閉じ損ねた it が 1 つあると、以後の it が全部その後ろで待つ
   chain = Promise.resolve();

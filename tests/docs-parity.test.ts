@@ -372,11 +372,16 @@ describe('マニュアルと実装の突合', () => {
       (b) => b.querySelector('[data-pkc-field="label"]')?.textContent ?? '',
     );
     /**
-     * ⚠ **書式そのもの以外も 1 つ乗っている**(2026-08-15)── 置換の切替を
-     * この帯へ移した(user 指示「中央の上を潰しすぎ」)。⚠ 等値で pin したままにする
-     * ── 増えたら**ここが落ちる**のが正しい(黙って増える帯にしない)。
+     * ⚠ **書式そのもの以外も乗っている**(2026-08-15 / 2026-08-23)──
+     * 置換の切替(user 指示「中央の上を潰しすぎ」)と、日付を入れる道具
+     * (user 指示 2026-08-23「日付と時刻を簡単に入力できる…ツール」)。
+     * ⚠ **どちらも `FORMAT_OPS` には入れない** ── あちらは「その場で字を変える
+     *   純関数」の表で、こちらは**先に聞く**(帯 / ダイアログが挟まる)。
+     *   混ぜると「押したら何が起きるか」が表から読めなくなる。
+     * ⚠ 等値で pin したままにする ── 増えたら**ここが落ちる**のが正しい
+     *   (黙って増える帯にしない)。
      */
-    expect(labels).toEqual([...FORMAT_OPS.map((o) => o.label), '置換']);
+    expect(labels).toEqual([...FORMAT_OPS.map((o) => o.label), '日付', '置換']);
     expect(labels.length).toBeGreaterThan(0);
     for (const label of labels) {
       expect(MANUAL, `マニュアルに書式「${label}」の説明が無い`).toContain(`**${label}**`);

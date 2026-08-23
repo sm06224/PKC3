@@ -3379,6 +3379,43 @@ select:focus-visible {
   justify-content: flex-end;
   gap: var(--s2);
 }
+/* 🔴 **日付を入れる道具**(2026-08-23)。⚠ 本文の `<p>` の中に置くので、
+ * 中身は phrasing content(`<button>` / `<label>` / `<input>`)だけである。 */
+[data-pkc-field='dialog-body'] [data-pkc-field='pick-shortcut'] {
+  margin: 0 var(--s2) var(--s3) 0;
+  padding: var(--s1) var(--s3);
+  font: inherit;
+  font-size: 12px;
+  color: inherit;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+[data-pkc-field='dialog-body'] [data-pkc-field='pick-shortcut']:hover {
+  background: var(--surface);
+}
+/* 🔑 選んだ印は**線**で出す(地は無彩色、色は情報にだけ) */
+[data-pkc-field='dialog-body'] [data-pkc-field='pick-shortcut'][data-pkc-selected] {
+  border-color: var(--fg);
+  font-weight: 600;
+}
+[data-pkc-field='dialog-body'] label {
+  display: inline-block;
+  margin-right: var(--s3);
+  font-size: 12px;
+  color: var(--muted);
+}
+[data-pkc-field='dialog-body'] input {
+  font: inherit;
+  font-size: 13px;
+  color: var(--fg);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--s1) var(--s2);
+}
+
 /* 🔴 **危険色は受けボタンだけ**。⚠ 地に色を敷かない(情報にだけ使う)。 */
 [data-pkc-field='dialog-ok'][data-pkc-danger] {
   border-color: var(--danger, #b3261e);

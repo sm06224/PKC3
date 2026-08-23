@@ -19,6 +19,12 @@ import { filerRows, operationTargets, visibleSelection } from '@features/relatio
 import { archetypeLabel } from '@adapter/ui/render/sidebar';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
 import { insertText } from '@adapter/ui/render/row-swap';
+import { insertionForLineDate } from '@features/schedule/line-date';
+import {
+  DATE_SHORTCUTS,
+  isDateShortcut,
+  shortcutDate,
+} from '@features/schedule/date-shortcuts';
 import { isImageAssetMime } from '@features/asset/asset-ref-format';
 import { adoptableUrls, rewriteAdopted } from '@features/asset/inline-url-adopt';
 import { convertPastedHtml } from '@features/markdown/html-to-markdown';
@@ -48,6 +54,7 @@ import { copyMarkdownAndHtml, copyPlainText } from '@adapter/platform/clipboard'
 import { cleanForClipboard } from '@features/export/clipboard-html';
 import {
   confirmInApp,
+  pickDateInApp,
   isAppDialogOpen,
   type ConfirmOptions,
 } from '@adapter/ui/render/app-dialog';
@@ -1433,6 +1440,51 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 書式パネル(P8 段⑥)。⚠ **規則は `applyFormat` が持つ** ── ここは
    * 「選択を読む → 渡す → 書き戻す」だけ。op ごとの知識をここに漏らさない。
    */
+  /**
+   * 🔴 **日付を入れる道具**(user 指示 2026-08-23)。
+   *
+   * > 「**日付の記法としては入力がめんどくさいから、日付と時刻を簡単に入力できるし、
+   * > ついてくるツールとか用意されてもいいかも**」
+   *
+   * ⚠ **`@` を打ったら出る形は採らない** ── PKC3 に補完の機構が 1 つも無いうえ、
+   *   `@[card](…)` と 1 打鍵目で衝突し、何より不可侵指示
+   *   「**マウスだけで完結し、キーボードは近道**」に当たる(打鍵でしか出ない道具は、
+   *   マウスの人には存在しないのと同じ)。だから**書式の帯のボタン**にする。
+   * ⚠ 挿す字は `insertionForLineDate` が作る ── ここで組み立てない(§7)。
+   * ⚠ 挿すのは `insertText` ── **`Ctrl+Z` で戻せる**形にする。
+   */
+  'insert-date': (_dispatcher, _target, _services, root) => {
+    const opened = formatTarget(root);
+    if (opened === null) return;
+    /**
+     * 🔴 **caret を先に控える**(2026-08-23、実ブラウザの smoke が見つけた)。
+     *
+     * ⚠ 直す前は挿す直前に `ta.selectionStart` を読んでいた ── **実機では 0 に
+     *   戻っていた**ので、日付が**本文の先頭**に入った
+     *   (`@2026-08-24 14:00- [ ] 見積を送る`)。
+     * ⚠ **unit では出ない** ── happy-dom は `showModal()` で焦点を動かしても
+     *   選択を保つので、緑のまま出荷される形だった(CLAUDE.md §5「環境差」)。
+     * 🔑 `<dialog>` は焦点を借りて返すが、**選択位置までは返さない** ──
+     *   置き換えの作法 §10 ③「後始末をしていたか」を、借りる側が自分でやる。
+     */
+    const at = { start: opened.selectionStart, end: opened.selectionEnd };
+    void pickDateInApp(root, new Date(), DATE_SHORTCUTS, (id, now) =>
+      isDateShortcut(id) ? shortcutDate(id, now) : '',
+    ).then((picked) => {
+      if (picked === null) return;
+      /**
+       * ⚠ **欄は引き直す** ── ダイアログを開いている間に面が組み直されると、
+       *   最初に掴んだ節点は `isConnected === false` になり、挿しても画面に出ない。
+       */
+      const ta = formatTarget(root);
+      if (ta === null) return;
+      // ⚠ `execCommand('insertText')` は**焦点が要る**(器が焦点を返した後でも念のため)
+      ta.focus();
+      // ⚠ 範囲外は `setSelectionRange` が丸める(組み直しで短くなっていても落ちない)
+      ta.setSelectionRange(at.start, at.end);
+      insertText(ta, insertionForLineDate(ta.value.slice(0, at.start), picked.date, picked.time));
+    });
+  },
   'format-text': (_dispatcher, target, _services, root) => {
     const op = target.getAttribute('data-pkc-format') as FormatOp | null;
     // ⚠ live の 1 面では活性の行(`row-source`)に効く(`formatTarget` の注記)
@@ -2049,6 +2101,8 @@ const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
   'create-entry': '[data-pkc-field="create-run"]',
   'edit-entry': '[data-pkc-action="start-edit"]',
   'toggle-replace': '[data-pkc-action="toggle-replace"]',
+  // ⚠ 近道は**ボタンをそのまま押す** ── 帯が無い(閲覧中の)面では何も起きない
+  'insert-date': '[data-pkc-action="insert-date"]',
   'toggle-sidebar': '[data-pkc-action="toggle-pane"][data-pkc-pane="sidebar"]',
   'toggle-inspector': '[data-pkc-action="toggle-pane"][data-pkc-pane="inspector"]',
   'view-query': '[data-pkc-action="set-view"][data-pkc-view="query"]',
@@ -2215,7 +2269,13 @@ export function bindActions(
    */
   const onMousedown = (ev: Event) => {
     const el = (ev.target as HTMLElement | null)?.closest<HTMLElement>('[data-pkc-action]');
-    if (el?.getAttribute('data-pkc-action') === 'format-text') ev.preventDefault();
+    /**
+     * ⚠ **日付の道具も同じ**(2026-08-23)── 押した瞬間に焦点が飛ぶと、
+     *   ダイアログを閉じたときに戻る先が**編集欄ではなくボタン**になり、
+     *   挿す場所(caret)が分からなくなる。
+     */
+    const act = el?.getAttribute('data-pkc-action');
+    if (act === 'format-text' || act === 'insert-date') ev.preventDefault();
   };
   const onInput = (ev: Event) => {
     if (isEditorBody(ev.target)) {

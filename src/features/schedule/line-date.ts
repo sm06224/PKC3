@@ -111,3 +111,22 @@ export function stripLineDate(line: string): string {
 export function formatLineDate(date: string, time?: string | null): string {
   return time !== undefined && time !== null && time !== '' ? `@${date} ${time}` : `@${date}`;
 }
+
+/**
+ * 🔴 **本文へ挿す形**(道具から入れるとき)。
+ *
+ * ⚠ `formatLineDate` との違いは**区切りの空白 1 つ**だけである ── caret の直前が
+ * 字なら足す。足さないと `見積を送る@2026-08-25` になり、**読めはするが読みにくい**。
+ * 🔑 「読める」と「読みやすい」は別なので、**読みは緩く、書きは整える**
+ * (走査が `@` の前に境目を求めないのは、日本語で書く人のためである ── 上の docstring)。
+ *
+ * @param before caret より前の本文(行頭からでなくてよい ── 末尾しか見ない)
+ */
+export function insertionForLineDate(
+  before: string,
+  date: string,
+  time?: string | null,
+): string {
+  const text = formatLineDate(date, time);
+  return /\S$/.test(before) ? ` ${text}` : text;
+}

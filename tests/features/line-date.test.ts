@@ -3,6 +3,7 @@ import {
   readLineDate,
   stripLineDate,
   formatLineDate,
+  insertionForLineDate,
 } from '../../src/features/schedule/line-date';
 import { readScheduleDate } from '../../src/features/schedule/schedule-keys';
 import { isScheduleDate, isScheduleTime } from '../../src/features/schedule/schedule-date';
@@ -203,5 +204,37 @@ describe('形の述語(schedule-date)', () => {
     expect(isScheduleTime('25:99')).toBe(true);
     expect(isScheduleTime('3:00')).toBe(false);
     expect(isScheduleTime('14:00:00')).toBe(false); // ⚠ 秒は受けない(道具も書かない)
+  });
+});
+
+/**
+ * 🔴 **道具から挿すときの形**。⚠ 読みは緩く(`@` の前に境目を求めない)、
+ * **書きは整える**(区切りの空白を足す)── 別の判断なので別の関数である。
+ */
+describe('insertionForLineDate ── 本文へ挿す形', () => {
+  it.each([
+    ['字の直後なら空白を足す', '- [ ] 見積を送る', ' @2026-08-25'],
+    ['空白の後なら足さない', '- [ ] 見積を送る ', '@2026-08-25'],
+    ['行頭なら足さない', '', '@2026-08-25'],
+    ['タブの後なら足さない', '- [ ] a\t', '@2026-08-25'],
+    ['改行の直後なら足さない', '- [ ] a\n', '@2026-08-25'],
+  ])('%s', (_name, before, want) => {
+    expect(insertionForLineDate(before, '2026-08-25')).toBe(want);
+  });
+
+  it('時刻も付く', () => {
+    expect(insertionForLineDate('打合せ', '2026-08-25', '14:00')).toBe(' @2026-08-25 14:00');
+  });
+
+  /**
+   * 🔴 **挿した結果が、読み戻せること。**
+   * ⚠ これは「同じ規則を 2 回書いた」検査ではない ── **挿す側は空白を足す**ので、
+   *   足した空白ごと読めるかは**別の観測**である。
+   */
+  it('🔴 挿した結果を読み戻せる(空白を足しても壊れない)', () => {
+    const before = '- [ ] 見積を送る';
+    const line = before + insertionForLineDate(before, '2026-08-25', '14:00');
+    expect(readLineDate(line)).toMatchObject({ date: '2026-08-25', time: '14:00' });
+    expect(stripLineDate(line)).toBe('- [ ] 見積を送る');
   });
 });

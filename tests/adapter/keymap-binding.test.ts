@@ -794,6 +794,8 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
      *   だけを見る(2 つの検査で役割を分ける)。
      */
     expect(ids).toEqual([
+      // ⚠ 2026-08-23 に足した(日付の道具 ── 編集中の本文へ挿す)
+      'insert-date',
       'toggle-replace',
       'open-settings',
       'open-flags',

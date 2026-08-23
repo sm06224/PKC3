@@ -23,6 +23,10 @@ import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { FORMAT_OPS } from '../../src/features/markdown/text-ops';
 import { stubRevisionOps } from '../helpers/revision-stub';
+import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
+import { answerDialog, openDialog } from './dialog-helper';
+import { DATE_SHORTCUTS, shortcutDate } from '../../src/features/schedule/date-shortcuts';
+import { readLineDate } from '../../src/features/schedule/line-date';
 
 function meta(lid: string, archetype = 'text'): EntryMeta {
   return {
@@ -257,5 +261,166 @@ describe('書式パネル ── live の 1 面(2026-08-08)', () => {
     expect(d.getState().openBody?.body).toBe('直した文。');
     expect(d.getState().phase).toBe('editing');
     expect(persisted, 'COMMIT_EDIT に化けて保存まで走った').toHaveLength(0);
+  });
+});
+
+/**
+ * 🔴 **日付を入れる道具**(user 指示 2026-08-23)。
+ *
+ * > 「**日付の記法としては入力がめんどくさいから、日付と時刻を簡単に入力できるし、
+ * > ついてくるツールとか用意されてもいいかも。アイデアはすごくいいと思うけど足りない**」
+ *
+ * 🔴 規則そのもの(近道の日付 / 記法の組み立て)は
+ * `tests/features/date-shortcuts.test.ts` / `tests/features/line-date.test.ts` が見る。
+ * **ここが見るのは繋がり**である ── 押した所から欄を見つけ、ダイアログを開き、
+ * 選んだものが **本文と state の両方**へ届くか。
+ *
+ * ⚠ 観測点を textarea の `value` だけにしない ── それだと「書き戻したが state に
+ * 届いていない」実装が緑で通り、**保存すると日付が消える**。
+ */
+describe('日付を入れる道具(user 指示 2026-08-23)', () => {
+  beforeEach(() => {
+    localStorage.setItem('pkc3.editor-mode', 'split');
+    resetAppDialogForTest();
+  });
+
+  /** 編集に入って、日付のボタンを押す。 */
+  async function openPicker(body = '見積を送る') {
+    const s = setup([meta('a')], { a: body });
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    s.q('[data-pkc-action="start-edit"]')!.click();
+    const ta = s.q<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')!;
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+    s.q('[data-pkc-action="insert-date"]')!.click();
+    await Promise.resolve();
+    return { ...s, ta };
+  }
+
+  const dialog = (): HTMLDialogElement => {
+    const d = openDialog();
+    expect(d, '日付の窓が開いていない').not.toBeNull();
+    return d!;
+  };
+  const shortcut = (id: string): HTMLButtonElement =>
+    dialog().querySelector<HTMLButtonElement>(`[data-pkc-shortcut="${id}"]`)!;
+  const field = (name: string): HTMLInputElement =>
+    dialog().querySelector<HTMLInputElement>(`[data-pkc-field="${name}"]`)!;
+
+  it('🔴 押すと窓が開き、近道と日付・時刻の欄が出る', async () => {
+    await openPicker();
+    for (const { id, label } of DATE_SHORTCUTS) {
+      expect(shortcut(id), `近道「${label}」が無い`).not.toBeNull();
+      expect(shortcut(id).textContent).toBe(label);
+    }
+    // 🔑 開いた時点で**今日**が入っている(いちばん多い答えを既に選んである)
+    expect(field('pick-date').value, '日付の欄が空で開いた').toBe(
+      shortcutDate('today', new Date()),
+    );
+    expect(field('pick-time').value, '時刻に既定を入れている(任意のはず)').toBe('');
+  });
+
+  /**
+   * 🔴 **近道は日付欄を埋めるだけ。閉じない。**
+   * ⚠ 押した瞬間に閉じる形にすると、時刻を足したい人が必ず 1 回やり直す。
+   */
+  it('🔴 近道を押しても閉じない(そのまま時刻も決められる)', async () => {
+    await openPicker();
+    shortcut('tomorrow').click();
+    expect(field('pick-date').value).toBe(shortcutDate('tomorrow', new Date()));
+    expect(openDialog(), '近道を押しただけで閉じた').not.toBeNull();
+    // 🔑 押した手応え(どれを選んだか)が画面に出る
+    expect(shortcut('tomorrow').hasAttribute('data-pkc-selected')).toBe(true);
+    expect(shortcut('today').hasAttribute('data-pkc-selected'), '前の印が残っている').toBe(false);
+  });
+
+  /**
+   * 🔴 **本文と state の両方**へ届く。
+   * ⚠ どちらか片方だと「画面には出ているのに保存すると消える」形になる。
+   */
+  it('🔴 入れると、本文にも state にも記法が入る', async () => {
+    const { d, ta } = await openPicker();
+    shortcut('tomorrow').click();
+    await answerDialog('ok');
+    await tick();
+    const want = `見積を送る @${shortcutDate('tomorrow', new Date())}`;
+    expect(ta.value, '本文に入っていない').toBe(want);
+    expect(d.getState().openBody?.body, 'state に届いていない').toBe(want);
+  });
+
+  it('時刻を入れると、記法にも入る', async () => {
+    const { ta } = await openPicker();
+    field('pick-date').value = '2026-08-25';
+    field('pick-time').value = '14:00';
+    await answerDialog('ok');
+    await tick();
+    expect(ta.value).toBe('見積を送る @2026-08-25 14:00');
+  });
+
+  /**
+   * ⚠ **caret の直前が空白なら、区切りを足さない**(足すと 2 つ空く)。
+   */
+  it('直前が空白なら、空白を足さない', async () => {
+    const { ta } = await openPicker('見積を送る ');
+    field('pick-date').value = '2026-08-25';
+    await answerDialog('ok');
+    await tick();
+    expect(ta.value).toBe('見積を送る @2026-08-25');
+  });
+
+  /** 🔴 **やめたら 1 バイトも変わらない**(空振り防止の対照群)。 */
+  it('🔴 やめたら本文は変わらない', async () => {
+    const { d, ta } = await openPicker();
+    shortcut('tomorrow').click();
+    await answerDialog('cancel');
+    await tick();
+    expect(ta.value, 'やめたのに入った').toBe('見積を送る');
+    expect(d.getState().openBody?.body).toBe('見積を送る');
+  });
+
+  /**
+   * 🔴 **入れた分は `Ctrl+Z` で戻せる**(書式パネルの他のボタンとは違う)。
+   * ⚠ ここでは「`value` 直代入ではない」ことを見る ── happy-dom に
+   *   `execCommand` は無いので `insertText` の fallback を通るが、
+   *   その fallback も **`input` を撃つ**ことが本物との約束である
+   *   (撃たないと state に届かない = 上の test が落ちる)。
+   */
+  it('🔴 挿した結果が、そのまま読み戻せる形になっている', async () => {
+    const { ta } = await openPicker();
+    field('pick-date').value = '2026-08-25';
+    field('pick-time').value = '09:30';
+    await answerDialog('ok');
+    await tick();
+    expect(readLineDate(ta.value)).toMatchObject({ date: '2026-08-25', time: '09:30' });
+  });
+
+  /**
+   * 🔴 **窓を開いている間に caret が動いても、元の位置へ入る**
+   * (2026-08-23、**実ブラウザの smoke が見つけた**不具合の回帰)。
+   *
+   * ⚠ 実機では `showModal()` のあと `selectionStart` が **0 に戻って**おり、
+   *   日付が**本文の先頭**に入っていた(`@2026-08-24 14:00- [ ] 見積を送る`)。
+   * ⚠ **happy-dom では起きない** ── 選択を保つので、直す前も緑だった。
+   * 🔑 だからここでは**実機が起こすことを手で起こす** ── 環境差そのものを
+   *   test の中に持ち込めば、どちらの箱でも同じ主張になる(CLAUDE.md §5)。
+   */
+  it('🔴 窓を開いている間に caret が 0 へ戻されても、元の位置に入る', async () => {
+    const { ta } = await openPicker('- [ ] 見積を送る');
+    // ⚠ 実機の `showModal()` が起こすことを、ここで手で起こす
+    ta.setSelectionRange(0, 0);
+    field('pick-date').value = '2026-08-25';
+    await answerDialog('ok');
+    await tick();
+    expect(ta.value, '本文の先頭に入った(caret を控えていない)').toBe(
+      '- [ ] 見積を送る @2026-08-25',
+    );
+  });
+
+  /** ⚠ 閲覧中は帯そのものが無いので、押す口も無い(dead click を作らない)。 */
+  it('閲覧中は日付のボタンが出ていない', async () => {
+    const s = setup([meta('a')], { a: 'x' });
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    expect(s.q('[data-pkc-action="insert-date"]'), '閲覧中に押せる口が出ている').toBeNull();
   });
 });
