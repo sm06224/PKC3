@@ -464,6 +464,12 @@ export class InspectorRenderer {
     // 🔴 **Word で出す**(#187 段①)。⚠ 隣の「書き出す」と**別の物**である ──
     //    あちらは取り込み直せるバックアップ、こちらは片道の Word 文書
     btn('export-entry-docx', 'Word');
+    /**
+     * 🔴 **紙に出す(= PDF)**(#187、2026-08-23)。⚠ 隣の 2 つと違い、
+     *   **file は落ちない** ── ブラウザの印刷画面が開き、そこで user が
+     *   「PDF として保存」を選ぶ。⚠ だから文言に「保存します」と書かない。
+     */
+    btn('export-entry-pdf', 'PDF');
     if (shape === 'entry+link') btn('write-back-file', '書き戻す');
     btn('show-history', '履歴');
     btn('delete-entry', '削除');
@@ -483,6 +489,10 @@ const ACTION_TITLES: Record<string, string> = {
   //    ⚠ **画面の説明だけが古いまま user に嘘をついていた**(押すのを諦めさせる向き)。
   'export-entry-docx':
     'このノートを Word 文書(.docx)で保存します。片道です(画像も、図はベクタで、グラフは絵で入ります)',
+  // ⚠ **起きることを書く**(user 指示 2026-08-21「画面で何が起きるかで書く」)──
+  //    押すと**ブラウザの印刷画面**が開く。PDF にするかはそこで user が選ぶ
+  'export-entry-pdf':
+    'このノートを紙の形に組んで、ブラウザの印刷画面を開きます。そこで「PDF として保存」を選べます(紙の大きさは設定で変えられます)',
   'show-history': '過去の版を一覧します',
   'delete-entry': 'ゴミ箱へ移します(フォルダ画面から戻せます)',
 };

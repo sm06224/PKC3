@@ -174,3 +174,43 @@ test('🔴 画面から印刷すると全文が紙に乗り、+++ で改頁す�
   }
   await viewer.close();
 });
+
+/**
+ * 🔴 **紙に出す口が画面に在り、押すと印刷が始まる**(#187、2026-08-23)。
+ *
+ * ⚠ **観測点は「印刷が始まる瞬間」**(`beforeprint`)であって、押した直後ではない
+ * ── CLAUDE.md §5:`chrome` は `beforeprint` のみ、CI 既定の `headless_shell` は
+ * `beforeprint` + `afterprint` を**同期発火**する。どちらのビルドでも成立するのは
+ * この 1 点だけである。
+ *
+ * ⚠ 台帳(#180)が「PDF の書き出し口が無い」と書いていた実体は**これ**だった ──
+ * `@media print` も `Ctrl+P` も最初から在り、**一覧に並んでいなかった**だけ。
+ */
+test('🔴 情報ペインの「PDF」を押すと印刷が始まる', async ({ page }) => {
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await ta.click();
+  await ta.fill('# 見出し\n\n本文が 1 行。\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-field="detail-body"]')).toBeVisible();
+
+  // 押した瞬間ではなく、**印刷が始まった**ことを採る
+  await page.evaluate(() => {
+    (globalThis as unknown as Record<string, unknown>).__printed = 0;
+    window.addEventListener('beforeprint', () => {
+      (globalThis as unknown as Record<string, unknown>).__printed =
+        ((globalThis as unknown as Record<string, number>).__printed ?? 0) + 1;
+    });
+  });
+
+  const pdf = page.locator('[data-pkc-action="export-entry-pdf"]');
+  await expect(pdf, '紙に出す口が画面に無い').toBeVisible();
+  // ⚠ 説明は「起きること」で書く(user 指示 2026-08-21)── file は落ちない
+  await expect(pdf).toHaveAttribute('title', /印刷画面/);
+
+  await clickReal(page, '[data-pkc-action="export-entry-pdf"]');
+  await expect
+    .poll(async () => page.evaluate(() => (globalThis as unknown as Record<string, number>).__printed))
+    .toBeGreaterThan(0);
+});

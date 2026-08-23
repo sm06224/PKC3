@@ -262,12 +262,34 @@ try {
       if (d && typeof d.pkc3Office === 'string') globalThis.__says.push(d.pkc3Office);
     };
   });
+  /**
+   * 🔴 **`docOpened` の材料を毎周期採る**(2026-08-23)。
+   * ⚠ 1 回だけ末尾で採ると「**いつ**真になったか」が読めない ── host の
+   *   ポーリングは 36 秒で止まるので、**止まった後に字が出た**のか
+   *   **そもそも届かない**のかを、この 2 つは区別できない。
+   */
+  const DETECT = (leaf) => {
+    const root = document.getElementById('screen');
+    let text = '';
+    (function walk(n) {
+      const els = n.querySelectorAll('*');
+      for (let i = 0; i < els.length; i += 1) {
+        const el = els[i];
+        text += ' ' + (el.getAttribute('title') || '') + ' ' + (el.getAttribute('aria-label') || '');
+        if (el.children.length === 0) text += ' ' + (el.textContent || '');
+        if (el.shadowRoot) walk(el.shadowRoot);
+      }
+    })(root);
+    return { leaf: text.indexOf(leaf) >= 0, lo: /LibreOffice/i.test(text) };
+  };
+  const LEAF = NAME.replace(/[/\\]/g, '_');
   result.status = [];
-  for (let i = 0; i < 14; i += 1) {
+  for (let i = 0; i < 24; i += 1) {
     result.status.push({
       atSec: Math.round((Date.now() - t0) / 1000),
       text: await page.evaluate(() => document.getElementById('status')?.textContent ?? null),
       says: await page.evaluate(() => [...new Set(globalThis.__says ?? [])].join(',')),
+      detect: await page.evaluate(DETECT, LEAF),
     });
     if (result.status[result.status.length - 1].says.includes('doc-open')) break;
     await page.waitForTimeout(3000);
