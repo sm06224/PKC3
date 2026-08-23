@@ -98,6 +98,12 @@ const ICON_PATHS: Readonly<Record<string, readonly IconPath[]>> = {
   /** ノート / Markdown ── 角の折れた紙。⚠ 本文の線は 1 本、折りは塗る */
   page: ['M6 3h8l4 4v14H6z', { d: 'M14 3l4 4h-4z', fill: 'solid' }, 'M9 14h6'],
   /** 使っていない添付を消す ── ほうき。⚠ 柄と穂をつなぐ(前は宙に浮いていた) */
+  /** 紙に出す ── 上に原稿、胴、下に刷り上がり。 */
+  printer: [
+    'M7.5 8.5V3.5h9v5',
+    { d: 'M4 8.5h16v7H4z', fill: 'soft' },
+    'M7.5 13h9v7.5h-9z',
+  ],
   broom: ['M20 5l-8 8', { d: 'M12.5 12.5l-2 7.5L4 21l1.5-7z', fill: 'soft' }],
   /** 新規 ── 十字。 */
   plus: ['M12 5v14', 'M5 12h14'],
@@ -178,6 +184,7 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'export-html': 'globe',
   'export-markdown': 'page',
   'export-entry-docx': 'page',
+  'export-entry-pdf': 'printer',
   'purge-orphan-assets': 'broom',
   'create-entry': 'plus',
   'attach-file': 'clip',

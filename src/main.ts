@@ -150,6 +150,7 @@ import {
   confirmInApp,
   type ConfirmOptions,
 } from '@adapter/ui/render/app-dialog';
+import { printNote } from '@adapter/platform/print-note';
 
 const DB_NAME = 'pkc3';
 /** container の題名(書出しのファイル名にも使う ── 1 箇所で決める)。 */
@@ -1803,6 +1804,20 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * ── 画像は段②で入るので、そのとき掃除と競らないように今から内側に置く。
      */
     exportEntryDocx: (lid) => void runExport({ entryLid: lid, as: 'docx' }),
+    /**
+     * 🔑 紙に出す(#187)。⚠ **ここは配線だけ** ── 待つ / 断る / 面を戻すの
+     *   判断は `print-note.ts` に在る(`main.ts` は test から 1 度も実行されない)。
+     */
+    printNote: (lid) =>
+      void printNote(
+        {
+          getState: () => dispatcher.getState(),
+          dispatch: (a) => dispatcher.dispatch(a),
+          onState: (cb) => dispatcher.onState(cb),
+          print: () => window.print(),
+        },
+        lid,
+      ),
     /**
      * 🔑 図 1 枚をベクタで書き出す(P8 段⑦)。
      * ⚠ **asset gate の外**でよい ── store も添付も触らず、原文から焼き直すだけ。

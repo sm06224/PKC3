@@ -369,6 +369,8 @@ export interface BinderServices {
   exportMarkdown?(): void;
   /** このノートを Word(.docx)で書き出す(#187 段①)。 */
   exportEntryDocx?(lid: string): void;
+  /** 紙に出す(#187)── 中央の面に開いてからブラウザの印刷を呼ぶ。 */
+  printNote?(lid: string): void;
   /** このノートだけをアーカイブとして書き出す(P6f)。 */
   exportEntry?(lid: string): void;
   /**
@@ -1997,6 +1999,13 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'export-markdown': (_dispatcher, _target, services) => {
     services.exportMarkdown?.();
+  },
+  'export-entry-pdf': (dispatcher, target, services) => {
+    // ⚠ 解決規則は隣の 2 つと**同じ**にする(片方だけ `selectedLid` 固定だと
+    //    「A を刷って B を消す」が成立する)
+    const lid = target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry')
+      ?? dispatcher.getState().selectedLid;
+    if (lid) services.printNote?.(lid);
   },
   'export-entry-docx': (dispatcher, target, services) => {
     // ⚠ 解決規則は `export-entry` と**同じ**にする(隣に並ぶボタンなので、

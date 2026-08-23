@@ -406,18 +406,18 @@ describe('合言葉の表(#217)', () => {
 describe('文書が開けたかの観測点(#199)', () => {
   const host = readFileSync('public/office/host.html', 'utf-8');
 
-  it('🔴 「開けた」の判定が canvas だけで決まっていない', () => {
-    expect(host, '文書が開いたかを見る関数が無い').toContain('function docOpened(');
+  it('⚠ 器の題名を見る診断が在り、器(screenEl)へ絞られている', () => {
+    expect(host, '器の題名を見る関数が無い').toContain('function docTitleSeen(');
     /**
      * 🔑 **名前だけでは足りない** ── host の帯にも file 名は出るので、
-     *   `document` 全体を見ると**開いていなくても真**になる。器へ絞ること。
+     *   `document` 全体を見ると器の外の字で満たされる。器へ絞ること。
      */
-    expect(host, 'docOpened が器(screenEl)へ絞られていない').toMatch(
-      /function docOpened\([\s\S]*?\}\)\(screenEl\)/,
+    expect(host, 'docTitleSeen が器(screenEl)へ絞られていない').toMatch(
+      /function docTitleSeen\([\s\S]*?\}\)\(screenEl\)/,
     );
     // ⚠ 名前と LibreOffice の**両方**が要る(片方だけだと帯や起動直後で真になる)
     expect(host, '判定が名前だけになっている').toMatch(
-      /docOpened[\s\S]*?indexOf\(leaf\)[\s\S]*?LibreOffice/,
+      /docTitleSeen[\s\S]*?indexOf\(leaf\)[\s\S]*?LibreOffice/,
     );
   });
 
@@ -442,18 +442,22 @@ describe('文書が開けたかの観測点(#199)', () => {
   });
 
   /**
-   * ⚠ **`docOpened` はまだ診断である** ── 真になるところを**一度も観測していない**
-   *   ので、user に見える文言をこれで決めていないことを pin する。
-   * 🔑 CLAUDE.md「未確認は assert ではなく診断で出す。**通ったのを見てから**
-   *   後条件へ昇格させる」── 昇格を急いで一度 smoke を 2 件落とした。
-   * ⚠ 実物の LO で真になるのを見たら、この test は**裏返す**(そのとき
-   *   「文言を決めてよい」へ主張が変わる)。
+   * 🔴 **器の題名で user に見える文言を決めない**(2026-08-23、実測で確定)。
+   *
+   * ⚠ 測る前の理由は「真になるのを一度も見ていない」だったが、実物のパックで
+   *   測ったら**もっと強い理由**が出た ── `build/office-wasm/doc-open-probe.mjs`
+   *   の対照群で、**`停止` した回でも 24 秒時点で真**だった。
+   *   つまりこの信号で「開いています」と言うと、
+   *   **落ちている LO を開いていると報告する**。
+   * 🔑 だから昇格の条件は「真になるのを見る」ではなく、
+   *   **開いた回と開かない回を分ける観測点を見つけること**である
+   *   (この箱には対照群が無い = 判定不能。CLAUDE.md §4)。
    */
-  it('⚠ いまは docOpened で文言を決めない(未確認のものを後条件にしない)', () => {
-    const at = host.indexOf('docOpened(docLeaf)');
-    expect(at, '前提: docOpened の呼び出しを見つけられていない').toBeGreaterThan(0);
+  it('🔴 器の題名で文言を決めない(落ちている LO を「開いた」と言わない)', () => {
+    const at = host.indexOf('docTitleSeen(docLeaf)');
+    expect(at, '前提: 診断の呼び出しを見つけられていない').toBeGreaterThan(0);
     const branch = host.slice(at, at + 200);
-    expect(branch, '未確認の判定で user に見える文言を決めている').not.toContain('setStatus');
-    expect(branch, '診断を出していない(通ったことを次の回転で読めない)').toContain("say('doc-open'");
+    expect(branch, '器の題名で user に見える文言を決めている').not.toContain('setStatus');
+    expect(branch, '診断を出していない(通ったことを次の回転で読めない)').toContain("say('doc-title'");
   });
 });
