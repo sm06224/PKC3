@@ -24,6 +24,7 @@
  *     全ノートが「未完了」としてカンバンに出る。
  */
 import { parseFrontmatter, type FrontmatterValue } from '../markdown/frontmatter';
+import { isScheduleDate } from './schedule-date';
 
 /**
  * frontmatter に書く鍵。⚠ **文字列を直接書かない**(綴り間違いが静かに効く)。
@@ -38,17 +39,19 @@ export const SCHEDULE_KEYS = {
 } as const;
 
 /**
- * 抽出列 `date` の受理形。
- * 🔴 **厳密に `YYYY-MM-DD` だけ** ── 列は範囲検索に使うので、ここが緩いと
- * 並びも比較も壊れる(`2026-8-1` と `2026-08-01` が別物として並ぶ)。
+ * 日付を読む。読めない形は `null`(本文はそのまま残る)。
+ *
+ * 🔴 **形を決めるのはここではない**(2026-08-23)── `features/schedule/schedule-date.ts`
+ * の `isScheduleDate` 1 つである。⚠ 直す前はこの file が自前の正規表現を持っており、
+ * **本文の行に書く `@2026-08-25`**(#292 の裁定 2026-08-23)を足すと
+ * **「日付とは何か」に答える口が 2 つ**になるところだった(CLAUDE.md §7)。
+ * ⚠ 食い違うと、user から見て「**frontmatter では書けるのに行では書けない日付**」が
+ *   でき、しかも**理由が画面のどこにも出ない**(どちらも「日付を書いた」つもりなので)。
  * ⚠ 「読めなかった日付」は**捨てずに落とす**(列に入らないだけで、本文には残る)。
  */
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-/** 日付を読む。読めない形は `null`(本文はそのまま残る)。 */
 export function readScheduleDate(meta: Record<string, FrontmatterValue>): string | null {
   const v = meta[SCHEDULE_KEYS.date];
-  return typeof v === 'string' && DATE_RE.test(v) ? v : null;
+  return typeof v === 'string' && isScheduleDate(v) ? v : null;
 }
 
 /**

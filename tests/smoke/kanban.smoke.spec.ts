@@ -28,7 +28,10 @@ test('🔴 アプリの一覧からカンバンを開き、札を押すと元の
   await createEntry(page, 'text');
   const live = page.locator('[data-pkc-region="editor-live"]');
   await clickReal(page, '[data-pkc-region="editor-live"]');
-  await live.locator('[data-pkc-field="row-source"]').fill('# 買い物\n\n- [ ] 牛乳\n- [x] 卵');
+  // ⚠ **日付を書く**(2026-08-23)── 盤面に出るのは「日付を書いた行」だけである
+  await live
+    .locator('[data-pkc-field="row-source"]')
+    .fill('# 買い物\n\n- [ ] 牛乳 @2026-08-25\n- [x] 卵 @2026-08-25');
   await page.keyboard.press('Tab');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
@@ -39,7 +42,10 @@ test('🔴 アプリの一覧からカンバンを開き、札を押すと元の
    */
   await createEntry(page, 'text');
   await clickReal(page, '[data-pkc-region="editor-live"]');
-  await live.locator('[data-pkc-field="row-source"]').fill('# 当て馬\n\n- [ ] 触るな\n- [ ] 触るな2');
+  // ⚠ 3 行目は**わざと日付を書かない**(体裁のチェックリスト)── 既定で出ないことを見る
+  await live
+    .locator('[data-pkc-field="row-source"]')
+    .fill('# 当て馬\n\n- [ ] 触るな @2026-08-25\n- [ ] 触るな2 @2026-08-25\n- [ ] 体裁だけ');
   await page.keyboard.press('Tab');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
@@ -62,6 +68,38 @@ test('🔴 アプリの一覧からカンバンを開き、札を押すと元の
   const open = page.locator('[data-pkc-kanban-status="open"] [data-pkc-entry]');
   const done = page.locator('[data-pkc-kanban-status="done"] [data-pkc-entry]');
   await expect(open, '未完了の札の枚数が違う').toHaveCount(3);
+
+  /**
+   * 🔴 **日付を書いていない行は盤面に出ない**(user 指示 2026-08-23)。
+   *
+   * > 「**文章の体裁としてチェックリストを使いたい場面もある。それが全て看板に
+   * > 出てくる。これはただのノイズだよ**」
+   *
+   * ⚠ ここは**実ブラウザでしか見えない**主張ではないが、**押して戻る**ところまで
+   *   通すのはこの spec だけである(unit は指紋の早期 return を素通りしうる)。
+   */
+  await expect(
+    page.locator('[data-pkc-region="kanban-board"]').getByText('体裁だけ'),
+    '日付を書いていない行が盤面に出ている(ノイズ)',
+  ).toHaveCount(0);
+  const undatedToggle = page.locator('[data-pkc-action="toggle-show-undated"]');
+  await expect(undatedToggle, '戻す口が無い(動線を減らしている)').toHaveText(
+    '日付のない項目も出す(1)',
+  );
+  await clickReal(page, '[data-pkc-action="toggle-show-undated"]');
+  await expect(
+    page.locator('[data-pkc-region="kanban-board"]').getByText('体裁だけ'),
+    '押しても日付のない項目が戻らない',
+  ).toHaveCount(1);
+  // ⚠ 既定へ戻す(以降の枚数の主張が変わらないように)
+  await clickReal(page, '[data-pkc-action="toggle-show-undated"]');
+  await expect(open, '押して戻したのに枚数が元に戻らない').toHaveCount(3);
+
+  // 🔑 日付が札に出ている(記法そのものは字から外れる)
+  await expect(
+    open.filter({ hasText: '牛乳' }).locator('[data-pkc-field="when"]'),
+    '札に日付が出ていない',
+  ).toHaveText('08/25');
 
   /**
    * 🔴 **完了は既定で畳まれている**(2026-08-20。設計 doc §4-4)。

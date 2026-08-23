@@ -42,6 +42,8 @@ describe('kanban-data(札 = 本文のチェック項目)', () => {
     line,
     text,
     done,
+    date: null,
+    time: null,
   });
 
   it('印の有無で列に振り分け、入力順を保つ', () => {
@@ -79,12 +81,11 @@ describe('kanban-data(札 = 本文のチェック項目)', () => {
       card('a', 2, false, 'a2'),
       card('b', 0, false, 'b0'),
     ];
+    /** ⚠ 空行を挟んで **0 行目と 2 行目**(`board` の行番号と揃える)。 */
+    const bodyA = '- [ ] a0\n\n- [ ] a2\n';
 
     it('🔴 並びを保ったまま、その lid の区間だけ入れ替わる', () => {
-      const next = replaceTaskCards(board, 'a', [
-        { line: 0, text: 'a0', done: true },
-        { line: 2, text: 'a2', done: false },
-      ]);
+      const next = replaceTaskCards(board, 'a', '- [x] a0\n\n- [ ] a2\n');
       expect(next.map((c) => `${c.lid}${c.line}:${c.done ? 'x' : ' '}`)).toEqual([
         'a0:x',
         'a2: ',
@@ -93,13 +94,9 @@ describe('kanban-data(札 = 本文のチェック項目)', () => {
     });
 
     it('項目が減っても増えても、他のノートの札は動かない', () => {
-      const fewer = replaceTaskCards(board, 'a', [{ line: 0, text: 'a0', done: false }]);
+      const fewer = replaceTaskCards(board, 'a', '- [ ] a0\n');
       expect(fewer.map(taskCardKey)).toEqual(['a 0', 'b 0']);
-      const more = replaceTaskCards(board, 'a', [
-        { line: 0, text: 'a0', done: false },
-        { line: 1, text: 'new', done: false },
-        { line: 2, text: 'a2', done: false },
-      ]);
+      const more = replaceTaskCards(board, 'a', '- [ ] a0\n- [ ] new\n- [ ] a2\n');
       expect(more.map(taskCardKey)).toEqual(['a 0', 'a 1', 'a 2', 'b 0']);
     });
 
@@ -108,14 +105,48 @@ describe('kanban-data(札 = 本文のチェック項目)', () => {
      * 🔑 そして**同じ配列を返す** ── 描画側の指紋を無駄に壊さない。
      */
     it('🔴 盤面に居ない lid は入れず、配列の同一性も保つ', () => {
-      const same = replaceTaskCards(board, 'zzz', [{ line: 0, text: 'x', done: false }]);
-      expect(same).toBe(board);
+      expect(replaceTaskCards(board, 'zzz', '- [ ] x\n')).toBe(board);
+    });
+
+    /**
+     * 🔑 中身が同じなら**同じ配列**(2026-08-20)── 押しただけで盤面の指紋が
+     * 壊れると、そのノートの札が毎回描き直される。
+     */
+    it('🔴 中身が変わっていなければ同じ配列', () => {
+      expect(replaceTaskCards(board, 'a', bodyA)).toBe(board);
     });
 
     it('差し替えた札の字も丸める(生の本文をそのまま出さない)', () => {
       const long = 'う'.repeat(TASK_LIMITS.textChars + 5);
-      const next = replaceTaskCards(board, 'b', [{ line: 0, text: long, done: false }]);
+      const next = replaceTaskCards(board, 'b', `- [ ] ${long}\n`);
       expect(next[next.length - 1]?.text.endsWith('…')).toBe(true);
+    });
+
+    /**
+     * 🔴 **差し替えでも日付が付く**(2026-08-23)。
+     * ⚠ これは「組み立てが 1 か所か」を見る検査である ── 直す前は
+     *   `runTaskScan`(worker)と `replaceTaskCards`(reducer)が**別々に**
+     *   札を組んでいた。片方にだけ日付を足すと、**面を開くと日付が出るのに、
+     *   チェックを押した瞬間に消える**(しかも押したノートの札だけ)。
+     */
+    it('🔴 差し替えた札にも、行の日付が付く', () => {
+      const next = replaceTaskCards(board, 'b', '- [ ] 見積を送る @2026-08-25 14:00\n');
+      const last = next[next.length - 1]!;
+      expect(last).toMatchObject({ date: '2026-08-25', time: '14:00' });
+      // 🔑 記法は札の字から外れている(同じ日付が 1 枚の札に 2 回出ない)
+      expect(last.text).toBe('見積を送る');
+    });
+
+    /**
+     * ⚠ **日付だけを書き換えたときも「変わった」と読めること。**
+     * 🔑 これが無いと、`sameCards` が日付を見ていないまま素通りし、
+     *   **画面の日付が古いまま**残る(字は同じなので誰も気づけない)。
+     */
+    it('🔴 日付だけ変えても、据え置きにならない', () => {
+      const first = replaceTaskCards(board, 'b', '- [ ] b0 @2026-08-25\n');
+      const second = replaceTaskCards(first, 'b', '- [ ] b0 @2026-08-26\n');
+      expect(second).not.toBe(first);
+      expect(second[second.length - 1]?.date).toBe('2026-08-26');
     });
   });
 });
@@ -177,7 +208,12 @@ describe('replaceTaskCards は、変わっていないなら据え置く(2026-08
     line,
     text,
     done,
+    date: null,
+    time: null,
   });
+  /** ⚠ 項目が **0 行目と 5 行目**に来る本文(下の `card(…, 0/5, …)` と揃える)。 */
+  const body = (doneSecond: boolean, first = 'あ', second = 'う'): string =>
+    `- [ ] ${first}\n\n\n\n\n- [${doneSecond ? 'x' : ' '}] ${second}\n`;
 
   /**
    * ⚠ **同じ lid の札は連続させて置く** ── worker はノート順に返すので実際そうなる。
@@ -186,10 +222,7 @@ describe('replaceTaskCards は、変わっていないなら据え置く(2026-08
    */
   it('🔴 同じ内容を渡したら、同じ配列オブジェクトが返る', () => {
     const cards = [card('a', 0, 'あ'), card('a', 5, 'う', true), card('b', 2, 'い')];
-    const same = replaceTaskCards(cards, 'a', [
-      { line: 0, text: 'あ', done: false },
-      { line: 5, text: 'う', done: true },
-    ]);
+    const same = replaceTaskCards(cards, 'a', body(true));
     expect(same, '中身が同じなのに新しい配列を返した(押すたび描き直しになる)').toBe(cards);
   });
 
@@ -199,10 +232,7 @@ describe('replaceTaskCards は、変わっていないなら据え置く(2026-08
    */
   it('飛び飛びに並んでいたら、まとめ直して新しい配列を返す', () => {
     const cards = [card('a', 0, 'あ'), card('b', 2, 'い'), card('a', 5, 'う', true)];
-    const next = replaceTaskCards(cards, 'a', [
-      { line: 0, text: 'あ', done: false },
-      { line: 5, text: 'う', done: true },
-    ]);
+    const next = replaceTaskCards(cards, 'a', body(true));
     expect(next, 'まとめ直していない').not.toBe(cards);
     expect(next.map((c) => `${c.lid}${c.line}`)).toEqual(['a0', 'a5', 'b2']);
   });
@@ -210,18 +240,24 @@ describe('replaceTaskCards は、変わっていないなら据え置く(2026-08
   it('⚠ 空振り防止: 中身が変われば新しい配列になる', () => {
     const cards = [card('a', 0, 'あ'), card('b', 2, 'い')];
     expect(
-      replaceTaskCards(cards, 'a', [{ line: 0, text: 'あ', done: true }]),
+      replaceTaskCards(cards, 'a', '- [x] あ\n'),
       '印が変わったのに据え置いた',
     ).not.toBe(cards);
     expect(
-      replaceTaskCards(cards, 'a', [{ line: 1, text: 'あ', done: false }]),
+      replaceTaskCards(cards, 'a', '\n- [ ] あ\n'),
       '行番号が変わったのに据え置いた',
     ).not.toBe(cards);
     expect(
-      replaceTaskCards(cards, 'a', [{ line: 0, text: 'ちがう', done: false }]),
+      replaceTaskCards(cards, 'a', '- [ ] ちがう\n'),
       '字が変わったのに据え置いた',
     ).not.toBe(cards);
-    expect(replaceTaskCards(cards, 'a', []), '札が消えたのに据え置いた').not.toBe(cards);
+    expect(replaceTaskCards(cards, 'a', ''), '札が消えたのに据え置いた').not.toBe(cards);
+    // 🔴 **日付だけ**変わった場合(2026-08-23)── 字も印も行番号も同じ
+    const dated = replaceTaskCards(cards, 'a', '- [ ] あ @2026-08-25\n');
+    expect(
+      replaceTaskCards(dated, 'a', '- [ ] あ @2026-08-26\n'),
+      '日付が変わったのに据え置いた',
+    ).not.toBe(dated);
   });
 
   /**
@@ -230,10 +266,8 @@ describe('replaceTaskCards は、変わっていないなら据え置く(2026-08
    */
   it('長い字は丸めた形で突き合わせる', () => {
     const long = 'あ'.repeat(300);
-    const clipped = replaceTaskCards([card('a', 0, 'x')], 'a', [
-      { line: 0, text: long, done: false },
-    ]);
-    const again = replaceTaskCards(clipped, 'a', [{ line: 0, text: long, done: false }]);
+    const clipped = replaceTaskCards([card('a', 0, 'x')], 'a', `- [ ] ${long}\n`);
+    const again = replaceTaskCards(clipped, 'a', `- [ ] ${long}\n`);
     expect(again, '丸めた後の字で比べていない').toBe(clipped);
   });
 });

@@ -1602,6 +1602,13 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'toggle-show-done': (dispatcher) =>
     dispatcher.dispatch({ type: 'TOGGLE_SHOW_DONE_TASKS' }),
+  /**
+   * 🔴 **日付のない項目も出す / 出さない**(user 指示 2026-08-23)。
+   * ⚠ `toggle-show-done`(済んだ**行**)/ `toggle-show-archived`(片付けた**ノート**)
+   *   とは別物 ── 3 つとも相乗りさせない(見ている次元が違う)。
+   */
+  'toggle-show-undated': (dispatcher) =>
+    dispatcher.dispatch({ type: 'TOGGLE_SHOW_UNDATED_TASKS' }),
   'retry-persist': (dispatcher) => dispatcher.dispatch({ type: 'RETRY_PERSIST' }),
   /**
    * 🔴 **フォルダへ入る / ルートへ戻る**(#240 段①)。

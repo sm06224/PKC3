@@ -25,11 +25,11 @@ import { contentHash64Hex } from './content-hash';
 import { scanAssetRefsInto } from '@features/asset/asset-ref-scan';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { planSearch } from '@features/filter/search-query';
-import { countTaskCandidates, listTaskItems } from '@features/markdown/task-count';
+import { countTaskCandidates } from '@features/markdown/task-count';
 import {
-  clipTaskText,
   TASK_LIMITS,
   type TaskCard,
+  taskCardsOf,
   type TaskScan,
 } from '@features/kanban/kanban-data';
 import { createQueryScan, FRONTMATTER_SCAN_CHARS } from '@features/query/group-by';
@@ -480,6 +480,13 @@ function runTaskScan(cid: string): TaskScan {
     database.selectValue(`SELECT count(*) FROM entries WHERE ${TASK_CANDIDATE_WHERE}`, [cid]) ?? 0,
   );
   const cards: TaskCard[] = [];
+  /**
+   * 🔴 **日付を持つ札と持たない札を別々に数える**(2026-08-23)。
+   * ⚠ 1 本の上限だと、体裁のチェックリストが並んだノートが 1 件在るだけで
+   *   **予定が 1 つも入らなくなる**(要る物が要らない物に押し出される)。
+   */
+  let dated = 0;
+  let undated = 0;
   let scannedNotes = 0;
   let truncated = false;
   let stop = false;
@@ -505,15 +512,25 @@ function runTaskScan(cid: string): TaskScan {
         break;
       }
       scannedNotes += 1;
-      for (const item of listTaskItems(row.body ?? '')) {
-        if (cards.length >= TASK_LIMITS.items) {
+      // 🔑 「行 → 札」は `taskCardsOf` 1 本(CLAUDE.md §7)── ここで組み直さない
+      for (const card of taskCardsOf(row.lid, row.body ?? '')) {
+        const full =
+          card.date === null ? undated >= TASK_LIMITS.undated : dated >= TASK_LIMITS.items;
+        // ⚠ 片方が埋まっても**もう片方は拾い続ける** ── `break` にすると、
+        //    先に埋まったほうが、まだ空いているほうを道連れにする
+        if (full) {
           truncated = true;
-          stop = true;
-          break;
+          continue;
         }
-        cards.push({ lid: row.lid, line: item.line, text: clipTaskText(item.text), done: item.done });
+        if (card.date === null) undated += 1;
+        else dated += 1;
+        cards.push(card);
       }
-      if (stop) break;
+      // ⚠ 両方埋まったらこのノートで打ち切る(以降を読んでも 1 枚も入らない)
+      if (dated >= TASK_LIMITS.items && undated >= TASK_LIMITS.undated) {
+        stop = true;
+        break;
+      }
     }
     const last = rows[rows.length - 1]!;
     after = { entryOrder: last.entry_order, lid: last.lid };

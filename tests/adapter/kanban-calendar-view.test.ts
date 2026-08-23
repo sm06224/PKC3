@@ -15,6 +15,7 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { CenterRouter } from '../../src/adapter/ui/render/center';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { stubRevisionOps } from '../helpers/revision-stub';
+import { taskCardsOf } from '../../src/features/kanban/kanban-data';
 
 function meta(lid: string, over: Partial<EntryMeta> = {}): EntryMeta {
   return {
@@ -111,7 +112,21 @@ function setup(
  */
 describe('kanban view (#277 段②-b)', () => {
   /** 盤面へ札を流し込む(worker が集めた結果の代わり)。 */
-  function feed(d: Dispatcher, cards: Array<{ lid: string; line: number; text: string; done: boolean }>): void {
+  function feed(
+    d: Dispatcher,
+    raw: Array<{
+      lid: string;
+      line: number;
+      text: string;
+      done: boolean;
+      date?: string | null;
+      time?: string | null;
+    }>,
+  ): void {
+    // 🔴 **日付は既定で入れる**(2026-08-23)── 盤面に出るのは「日付を書いた行」
+    //    だけなので、既定を `null` にすると**この file の test が全部空振り**になる。
+    //    ⚠ 日付の無い側を見る test は `date: null` を**明示して**渡すこと。
+    const cards = raw.map((c) => ({ date: '2026-08-25', time: null, ...c }));
     d.dispatch({
       type: 'SET_TASK_SCAN',
       scan: { cards, totalNotes: 1, scannedNotes: 1, truncated: false },
@@ -122,14 +137,15 @@ describe('kanban view (#277 段②-b)', () => {
     [...host.children].map((c) => c.getAttribute('data-pkc-entry') ?? '');
 
   it('🔴 印の有無で列に立ち、実クリックで本文が書き換わって札が列を移る', async () => {
-    const body = '# 買い物\n\n- [ ] 牛乳\n- [x] 卵\n';
+    // ⚠ 本文にも日付を書く(盤面に出るのは日付を書いた行 ── 2026-08-23)
+    const body = '# 買い物\n\n- [ ] 牛乳 @2026-08-25\n- [x] 卵 @2026-08-25\n';
     const { d, q, persisted, store } = setup([meta('e1', { archetype: 'text', status: null })], {
       e1: body,
     });
     showView(d, 'kanban');
     feed(d, [
-      { lid: 'e1', line: 2, text: '牛乳', done: false },
-      { lid: 'e1', line: 3, text: '卵', done: true },
+      { lid: 'e1', line: 2, text: '牛乳', done: false, date: '2026-08-25', time: null },
+      { lid: 'e1', line: 3, text: '卵', done: true, date: '2026-08-25', time: null },
     ]);
 
     const colOpen = q('[data-pkc-kanban-status="open"] [data-pkc-region="kanban-cards"]')!;
@@ -144,7 +160,9 @@ describe('kanban view (#277 段②-b)', () => {
 
     // 🔴 書込は**印の 1 文字だけ**(本文 byte 無傷)
     expect(persisted).toHaveLength(1);
-    expect(persisted[0]!.body, '本文が整形された').toBe('# 買い物\n\n- [x] 牛乳\n- [x] 卵\n');
+    expect(persisted[0]!.body, '本文が整形された').toBe(
+      '# 買い物\n\n- [x] 牛乳 @2026-08-25\n- [x] 卵 @2026-08-25\n',
+    );
     expect(store['e1']).toBe(persisted[0]!.body);
 
     // 🔑 ack で札が動く(往復を待たない)。⚠ 触っていない札は同じノードのまま
@@ -165,7 +183,9 @@ describe('kanban view (#277 段②-b)', () => {
   it('🔴 開いているノートではなく、札のノートを書き換える', async () => {
     const { d, q, persisted } = setup(
       [meta('e1', { archetype: 'text', status: null }), meta('e2', { archetype: 'text', status: null })],
-      { e1: '- [ ] 牛乳\n', e2: '- [ ] 触るな\n' },
+      // ⚠ **本文にも日付を書く**(2026-08-23)── 盤面に出るのは日付を書いた行なので、
+      //    本文に無いまま札だけ日付を持たせると、押した瞬間に組み直されて**消える**
+      { e1: '- [ ] 牛乳 @2026-08-25\n', e2: '- [ ] 触るな @2026-08-25\n' },
     );
     // e2 を開く(選択 → openBody 確立)
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'e2' });
@@ -173,13 +193,13 @@ describe('kanban view (#277 段②-b)', () => {
     expect(d.getState().openBody?.lid, '当て馬が開いていない(前提が崩れた)').toBe('e2');
 
     showView(d, 'kanban');
-    feed(d, [{ lid: 'e1', line: 0, text: '牛乳', done: false }]);
+    feed(d, [{ lid: 'e1', line: 0, text: '牛乳', done: false, date: '2026-08-25', time: null }]);
     q<HTMLElement>('[data-pkc-region="kanban-cards"] [data-pkc-task-line="0"]')!.click();
     await tick(20);
 
     expect(persisted, '書込が 1 件でない').toHaveLength(1);
     expect(persisted[0]!.lid, '開いているノートを書き換えた(別ノートへの書込)').toBe('e1');
-    expect(persisted[0]!.body).toBe('- [x] 牛乳\n');
+    expect(persisted[0]!.body).toBe('- [x] 牛乳 @2026-08-25\n');
   });
 
   /**
@@ -187,7 +207,9 @@ describe('kanban view (#277 段②-b)', () => {
    * ⚠ 先頭の札を動かしたときに、後続の札まで `insertBefore` されない。
    */
   it('列間 move は O(1): 先頭を動かしても後続の札は動かない(cursor 汚染 pin)', async () => {
-    const lines = Array.from({ length: 8 }, (_, i) => `- [ ] やること ${i}`).join('\n') + '\n';
+    // ⚠ 本文にも日付を書く(上と同じ理由)
+    const lines =
+      Array.from({ length: 8 }, (_, i) => `- [ ] やること ${i} @2026-08-25`).join('\n') + '\n';
     const { d, q } = setup([meta('e0', { archetype: 'text', status: null })], { e0: lines });
     showView(d, 'kanban');
     feed(
@@ -292,7 +314,7 @@ describe('kanban view (#277 段②-b)', () => {
     d.dispatch({
       type: 'SET_TASK_SCAN',
       scan: {
-        cards: [{ lid: 'e1', line: 0, text: 'やること', done: false }],
+        cards: [{ lid: 'e1', line: 0, text: 'やること', done: false, date: '2026-08-25', time: null }],
         totalNotes: 1,
         scannedNotes: 1,
         truncated: false,
@@ -319,10 +341,10 @@ describe('kanban view (#277 段②-b)', () => {
    */
   it('🔴 編集中に札を押しても、印は付かない(見た目が嘘をつかない)', async () => {
     const { d, q, persisted } = setup([meta('e1', { archetype: 'text', status: null })], {
-      e1: '- [ ] やること\n',
+      e1: '- [ ] やること @2026-08-25\n',
     });
     showView(d, 'kanban');
-    feed(d, [{ lid: 'e1', line: 0, text: 'やること', done: false }]);
+    feed(d, [{ lid: 'e1', line: 0, text: 'やること', done: false, date: '2026-08-25', time: null }]);
     // 編集中にする(札は ready 限定)
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
     await tick();
@@ -361,7 +383,7 @@ describe('kanban view (#277 段②-b)', () => {
     d.dispatch({
       type: 'SET_TASK_SCAN',
       scan: {
-        cards: [{ lid: 'e1', line: 0, text: 'やること', done: false }],
+        cards: [{ lid: 'e1', line: 0, text: 'やること', done: false, date: '2026-08-25', time: null }],
         totalNotes: 900,
         scannedNotes: 500,
         truncated: true,
@@ -384,8 +406,8 @@ describe('kanban view (#277 段②-b)', () => {
     );
     showView(d, 'kanban');
     feed(d, [
-      { lid: 'e1', line: 0, text: 'あ', done: false },
-      { lid: 'e2', line: 0, text: 'い', done: false },
+      { lid: 'e1', line: 0, text: 'あ', done: false, date: '2026-08-25', time: null },
+      { lid: 'e2', line: 0, text: 'い', done: false, date: '2026-08-25', time: null },
     ]);
     const cards = (): number =>
       q('[data-pkc-view-pane="kanban"]')!.querySelectorAll('[data-pkc-region="kanban-cards"] [data-pkc-entry]').length;
@@ -401,7 +423,7 @@ describe('kanban view (#277 段②-b)', () => {
   it('🔴 改名が札に映る', async () => {
     const { d, q } = setup([meta('e1', { archetype: 'text', status: null })], { e1: 'x' });
     showView(d, 'kanban');
-    feed(d, [{ lid: 'e1', line: 0, text: 'やること', done: false }]);
+    feed(d, [{ lid: 'e1', line: 0, text: 'やること', done: false, date: '2026-08-25', time: null }]);
     const note = (): string =>
       q('[data-pkc-region="kanban-cards"] [data-pkc-field="note"]')!.textContent ?? '';
     expect(note()).toBe('t-e1');
@@ -415,8 +437,8 @@ describe('kanban view (#277 段②-b)', () => {
     const { d, q } = setup([meta('e1', { archetype: 'text', status: null })], { e1: 'x' });
     showView(d, 'kanban');
     feed(d, [
-      { lid: 'e1', line: 0, text: 'まだ', done: false },
-      { lid: 'e1', line: 1, text: 'すんだ', done: true },
+      { lid: 'e1', line: 0, text: 'まだ', done: false, date: '2026-08-25', time: null },
+      { lid: 'e1', line: 1, text: 'すんだ', done: true, date: '2026-08-25', time: null },
     ]);
     const done = q('[data-pkc-kanban-status="done"] [data-pkc-entry]')!;
     expect(done.hasAttribute('data-pkc-task-done'), '済みの印が無い(取り消し線が効かない)').toBe(
@@ -436,7 +458,7 @@ describe('kanban view (#277 段②-b)', () => {
       e1: 'x',
     });
     showView(d, 'kanban');
-    feed(d, [{ lid: 'e1', line: 0, text: 'やること', done: false }]);
+    feed(d, [{ lid: 'e1', line: 0, text: 'やること', done: false, date: '2026-08-25', time: null }]);
     const cards = (): number =>
       q('[data-pkc-view-pane="kanban"]')!.querySelectorAll('[data-pkc-region="kanban-cards"] [data-pkc-entry]').length;
     expect(cards(), '片付けたノートの項目が既定で出ている').toBe(0);
@@ -844,10 +866,21 @@ describe('板の「完了」は畳む(2026-08-20)', () => {
    * ⚠ **札は走査の結果から来る**(本文からではない)── `SET_TASK_SCAN` を撃たないと
    *   盤面は 0 件のままである(1 稿目はここを忘れて「件数が出ない」と読み違えた)。
    */
-  const feedCards = (d: Dispatcher, cards: { lid: string; line: number; text: string; done: boolean }[]) =>
+  const feedCards = (
+    d: Dispatcher,
+    raw: { lid: string; line: number; text: string; done: boolean; date?: string | null; time?: string | null }[],
+  ) =>
     d.dispatch({
       type: 'SET_TASK_SCAN',
-      scan: { cards, totalNotes: 1, scannedNotes: 1, truncated: false },
+      scan: {
+    // 🔴 **日付は既定で入れる**(2026-08-23)── 盤面に出るのは「日付を書いた行」
+    //    だけなので、既定を `null` にすると**この file の test が全部空振り**になる。
+    //    ⚠ 日付の無い側を見る test は `date: null` を**明示して**渡すこと。
+        cards: raw.map((c) => ({ date: '2026-08-25', time: null, ...c })),
+        totalNotes: 1,
+        scannedNotes: 1,
+        truncated: false,
+      },
     });
 
   const head = (q: (s: string) => Element | null): string =>
@@ -859,9 +892,9 @@ describe('板の「完了」は畳む(2026-08-20)', () => {
     const { d, q } = setup([meta('e1')], { e1: '- [ ] あ\n- [x] い\n- [x] う\n' });
     showView(d, 'kanban');
     feedCards(d, [
-      { lid: 'e1', line: 0, text: 'あ', done: false },
-      { lid: 'e1', line: 1, text: 'い', done: true },
-      { lid: 'e1', line: 2, text: 'う', done: true },
+      { lid: 'e1', line: 0, text: 'あ', done: false, date: '2026-08-25', time: null },
+      { lid: 'e1', line: 1, text: 'い', done: true, date: '2026-08-25', time: null },
+      { lid: 'e1', line: 2, text: 'う', done: true, date: '2026-08-25', time: null },
     ]);
     expect(doneHost(q).hidden, '既定で開いている(市井の 6 実装に無い形)').toBe(true);
     expect(head(q), '畳んだのに件数が出ていない(やったものが消えたように見える)').toBe(
@@ -878,8 +911,8 @@ describe('板の「完了」は畳む(2026-08-20)', () => {
     const { d, q } = setup([meta('e1')], { e1: '- [ ] あ\n- [x] い\n' });
     showView(d, 'kanban');
     feedCards(d, [
-      { lid: 'e1', line: 0, text: 'あ', done: false },
-      { lid: 'e1', line: 1, text: 'い', done: true },
+      { lid: 'e1', line: 0, text: 'あ', done: false, date: '2026-08-25', time: null },
+      { lid: 'e1', line: 1, text: 'い', done: true, date: '2026-08-25', time: null },
     ]);
     const btn = () =>
       q('[data-pkc-kanban-status="done"] [data-pkc-action="toggle-show-done"]') as HTMLElement;
@@ -897,7 +930,7 @@ describe('板の「完了」は畳む(2026-08-20)', () => {
   it('やること側に畳む口は無い', () => {
     const { d, q } = setup([meta('e1')], { e1: '- [ ] あ\n' });
     showView(d, 'kanban');
-    feedCards(d, [{ lid: 'e1', line: 0, text: 'あ', done: false }]);
+    feedCards(d, [{ lid: 'e1', line: 0, text: 'あ', done: false, date: '2026-08-25', time: null }]);
     expect(
       q('[data-pkc-kanban-status="open"] [data-pkc-action="toggle-show-done"]'),
       'やること側にも畳む口が出ている',
@@ -915,8 +948,8 @@ describe('板の「完了」は畳む(2026-08-20)', () => {
     });
     showView(d, 'kanban');
     feedCards(d, [
-      { lid: 'e1', line: 0, text: '済み A', done: true },
-      { lid: 'e2', line: 0, text: '済み B', done: true },
+      { lid: 'e1', line: 0, text: '済み A', done: true, date: '2026-08-25', time: null },
+      { lid: 'e2', line: 0, text: '済み B', done: true, date: '2026-08-25', time: null },
     ]);
     expect(head(q)).toBe('▸ 完了(2)');
     d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'あ' });
@@ -1058,5 +1091,93 @@ describe('🔴 面の帯(user 目線レビュー U-3)', () => {
     await tick();
     expect(s.d.getState().viewMode, '編集中は × が効かない(袋小路)').toBe('detail');
     expect(s.d.getState().phase, '閉じたら編集が終わっていた').toBe('editing');
+  });
+});
+
+/**
+ * 🔴 **盤面に出るのは「日付を書いた行」だけ**(user 指示 2026-08-23)。
+ *
+ * > 「**そもそもすべての本文に存在するチェックリストが、なぜ看板として表示されるのか
+ * > 意味がわからない。文章の体裁としてチェックリストを使いたい場面もある。それが全て
+ * > 看板に出てくる。これはただのノイズだよ。ただし、日付を入れた。チェックリスト、
+ * > これが予定として機能する**」
+ *
+ * ⚠ ここで通すのは**実クリック**まで ── 「切替が state を変えた」だけでは
+ *   `render` の早期 return を素通りする(指紋に旗を入れ忘れると、押しても何も起きない)。
+ */
+describe('日付のない項目は既定で出さない(user 指示 2026-08-23)', () => {
+  const board = (q: (s: string) => Element | null): string[] =>
+    [...q('[data-pkc-region="kanban-board"]')!.querySelectorAll('[data-pkc-field="text"]')].map(
+      (e) => e.textContent ?? '',
+    );
+  const toggle = (q: <T extends HTMLElement>(s: string) => T | null) =>
+    q<HTMLButtonElement>('[data-pkc-action="toggle-show-undated"]')!;
+  const note = (q: (s: string) => Element | null): string =>
+    q('[data-pkc-field="kanban-note"]')?.textContent ?? '';
+
+  /** 本文から実際に走査させる ── 札は `taskCardsOf` が組む(fixture を手で書かない)。 */
+  function open(body: string) {
+    const s = setup([meta('e1', { archetype: 'text', status: null })], { e1: body });
+    showView(s.d, 'kanban');
+    s.d.dispatch({
+      type: 'SET_TASK_SCAN',
+      scan: {
+        cards: taskCardsOf('e1', body),
+        totalNotes: 1,
+        scannedNotes: 1,
+        truncated: false,
+      },
+    });
+    return s;
+  }
+
+  const MIXED = ['- [ ] 見積を送る @2026-08-25', '- [ ] これは体裁のチェックリスト', ''].join('\n');
+
+  it('🔴 日付を書いた行だけが出る(体裁のチェックリストは出ない)', () => {
+    const { q } = open(MIXED);
+    expect(board(q), 'ノイズが盤面に出ている').toEqual(['見積を送る']);
+  });
+
+  it('🔴 押すと全部戻る ── 動線は 1 つも減らしていない', async () => {
+    const { q } = open(MIXED);
+    toggle(q).click();
+    await tick();
+    expect(board(q), '押しても日付の無い項目が戻らない').toEqual([
+      '見積を送る',
+      'これは体裁のチェックリスト',
+    ]);
+    // ⚠ 対照群:もう一度押したら既定へ帰る(片道の切替になっていないこと)
+    toggle(q).click();
+    await tick();
+    expect(board(q)).toEqual(['見積を送る']);
+  });
+
+  it('切替は「何件戻るか」を出す(押す前に分かる)', () => {
+    const { q } = open(MIXED);
+    expect(toggle(q).textContent).toBe('日付のない項目も出す(1)');
+    expect(toggle(q).hidden, '戻せる物が在るのに隠れている').toBe(false);
+  });
+
+  /** ⚠ **押しても何も起きないボタンを出さない**(全部に日付が在るなら戻す物が無い)。 */
+  it('日付の無い項目が 1 つも無ければ、切替は出さない', () => {
+    const { q } = open('- [ ] 見積を送る @2026-08-25\n');
+    expect(toggle(q).hidden, '戻す物が無いのに押せるボタンが出ている').toBe(true);
+  });
+
+  /**
+   * 🔴 **「日付が無いから出ていない」と書く。**
+   * ⚠ 書かないと user は「チェックを書いたのに何も出ない」と読み、
+   *   **書き方が分からないまま詰まる**(既定で畳んだ側の責任である)。
+   */
+  it('🔴 1 件も日付が無いときは、書き方をそのまま出す', () => {
+    const { q } = open('- [ ] これは体裁のチェックリスト\n');
+    expect(board(q)).toEqual([]);
+    expect(note(q), '書き方が画面に出ていない').toContain('@2026-08-25');
+  });
+
+  it('日付と時刻が札に出る(記法そのものは字から外れる)', () => {
+    const { q } = open('- [ ] 打ち合わせ @2026-08-25 14:00\n');
+    expect(board(q), '記法が札の字に残っている').toEqual(['打ち合わせ']);
+    expect(q('[data-pkc-field="when"]')?.textContent).toBe('08/25 14:00');
   });
 });

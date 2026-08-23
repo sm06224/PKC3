@@ -90,6 +90,15 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-23-dated-tasks',
+    title: 'やることの板に出るのは、日付を書いた項目だけになりました',
+    items: [
+      'これまでは、本文に書いたチェックリストが 1 行残らず板に出ていました。文章の体裁として使ったチェックリストまで並ぶので、読みにくくなっていました。',
+      'これからは、日付を書いた行だけが出ます。書き方は「- [ ] 見積を送る @2026-08-25」です。時刻も書けます(@2026-08-25 14:00)。',
+      '日付を書いていない項目も見たいときは、板の上の「日付のない項目も出す」を押してください。何件あるかもそこに出ます。',
+    ],
+  },
+  {
     id: '2026-08-22-window-overlap',
     title: '別の窓の変更と重なったとき、黙って上書きしなくなりました',
     items: [
@@ -292,20 +301,11 @@ export const NOTICES: readonly Notice[] = [
       '行を掴んで反対のペインへ落とすと、そこへ移せます。フォルダの行に落とすとその中へ入ります。印を付けてあれば、掴んだペインの印ごと運びます。',
     ],
   },
-  {
-    id: '2026-08-19-container-id',
-    title: 'このアプリの入れ物に、端末ごとの名前が付きました',
-    items: [
-      'よその PKC3 で書かれたリンク(pkc:// で始まるもの)を、自分のものと取り違えなくなりました。これまでは全部の端末が同じ名前を使っていたため、押しても無いノートを探しに行くことがありました。',
-      'いま入っているノートはそのままです。名前を付け直すのは、新しく始める端末だけです。',
-      '古い版のタブを開いたままにしていると、画面の下に「古い版のタブが本体になっています」と出ることがあります。PKC3 のタブを全部閉じてから開き直すと直ります。',
-    ],
-  },
 ];
 
 /**
  * ⚠ **落としたぶんの原本は CHANGELOG に在る**(上限 20 件を超えたので、古いほうから
  *   `2026-08-16-office-save-to-pkc` / `2026-08-17-office-save-same-note`(2026-08-19)、
  *   `2026-08-19-dual-pane-app`(2026-08-22)、
- *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
+ *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id`(2026-08-23)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
  */

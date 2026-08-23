@@ -163,8 +163,8 @@ describe('絞り込み(P7b review M-1/M-2/M-3)', () => {
       type: 'SET_TASK_SCAN',
       scan: {
         cards: [
-          { lid: 'e1', line: 0, text: 'やること 1', done: false },
-          { lid: 'e2', line: 0, text: 'やること 2', done: false },
+          { lid: 'e1', line: 0, text: 'やること 1', done: false, date: '2026-08-25', time: null },
+          { lid: 'e2', line: 0, text: 'やること 2', done: false, date: '2026-08-25', time: null },
         ],
         totalNotes: 2,
         scannedNotes: 2,

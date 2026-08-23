@@ -21,7 +21,8 @@
  *
  * 🔑 **pure module**。DB も DOM も知らない ── 「何を・どの列に・どの順で」だけ。
  */
-import type { TaskItem } from '@features/markdown/task-count';
+import { listTaskItems, type TaskItem } from '@features/markdown/task-count';
+import { readLineDate, stripLineDate } from '@features/schedule/line-date';
 
 export type KanbanStatus = 'open' | 'done';
 
@@ -38,6 +39,15 @@ export const KANBAN_COLUMNS: readonly { status: KanbanStatus; label: string }[] 
 export interface TaskCard extends TaskItem {
   /** どのノートの行か。⚠ **押す先はこの lid** ── 開いているノートではない。 */
   readonly lid: string;
+  /**
+   * 🔴 **その行に書かれた日付**(`@2026-08-25`)。無ければ `null`
+   * (user 指示 2026-08-23「**日付を入れたチェックリスト、これが予定として機能する**」)。
+   * ⚠ **`null` の札は既定で画面に出さない** ── 出す / 出さないを決めるのは
+   *   描画側で、ここは**在るものを全部運ぶ**(切替のたびに worker を叩かないため)。
+   */
+  readonly date: string | null;
+  /** 時刻(`14:00`)。書いていなければ `null`。⚠ 日付が `null` なら必ず `null`。 */
+  readonly time: string | null;
 }
 
 /**
@@ -51,8 +61,19 @@ export const TASK_LIMITS = {
    * (項目と違い、ノート 1 件につき本文 1 本を worker の heap に載せる)。
    */
   notes: 500,
-  /** 盤面に出す札の数。 */
+  /**
+   * **日付を持つ札**の数。
+   * 🔴 **日付の無い札とは別に数える**(2026-08-23)。⚠ 1 本の上限にすると、
+   *   体裁のチェックリストが 1000 行あるノートが 1 件在るだけで
+   *   **予定が 1 つも入らなくなる**(いちばん要る物が、いちばん要らない物に
+   *   押し出される)── しかも `truncated` は立つので「切れた」としか読めない。
+   */
   items: 1000,
+  /**
+   * **日付を持たない札**の数(「日付のない項目も出す」を入れたときだけ意味を持つ)。
+   * ⚠ ここが埋まっても、上の `items` は 1 枚も減らない。
+   */
+  undated: 1000,
   /** 札に出す字数。⚠ 長い項目は**丸める**が、丸めたことが判る形にする。 */
   textChars: 200,
 } as const;
@@ -94,6 +115,36 @@ export function taskCardKey(card: { lid: string; line: number }): string {
 }
 
 /**
+ * 🔴 **本文 1 本を札に変える口は、ここ 1 つだけ**(2026-08-23。CLAUDE.md §7)。
+ *
+ * ⚠ 呼ぶのは **2 か所**で、走る場所がまるで違う ──
+ * ① `runTaskScan`(**storage worker の中**。面を開いたとき全件を舐める)
+ * ② `replaceTaskCards`(**reducer の中**。押した札の 1 件だけを組み直す)
+ * 🔴 直す前はこの 2 つが**別々に札を組んでいた**ので、日付を足すと
+ *   「面を開くと日付が出るのに、チェックを押した瞬間に消える」形になる ──
+ *   ⚠ しかも**押したノートの札だけ**なので、原因が結果から遠い。
+ *
+ * 🔑 だから「行 → 札」はこの関数だけが知っている。
+ * ⚠ **絞り込みはここでやらない** ── 日付の無い札も**運ぶ**。出す / 出さないは
+ *   描画側が決める(切替のたびに worker を叩き直さないため)。
+ */
+export function taskCardsOf(lid: string, body: string): TaskCard[] {
+  return listTaskItems(body).map((item) => {
+    const when = readLineDate(item.text);
+    return {
+      lid,
+      line: item.line,
+      // 🔑 記法そのものは**札の字から外す** ── 日付は札の日付欄に出るので、
+      //    残すと同じ日付が 1 枚の札に 2 回出る
+      text: clipTaskText(when === null ? item.text : stripLineDate(item.text)),
+      done: item.done,
+      date: when === null ? null : when.date,
+      time: when === null ? null : when.time,
+    };
+  });
+}
+
+/**
  * 🔴 **1 件のノートの札だけを差し替える**(#277 段②-b)。
  *
  * 押した札は**往復を待たずに動かす** ── 書換の ack(`BODY_REWRITTEN`)は
@@ -119,20 +170,15 @@ export function taskCardKey(card: { lid: string; line: number }): string {
 export function replaceTaskCards(
   cards: readonly TaskCard[],
   lid: string,
-  items: readonly TaskItem[],
+  body: string,
 ): readonly TaskCard[] {
   const from = cards.findIndex((c) => c.lid === lid);
   if (from < 0) return cards;
   // ⚠ `from` は**元の並び**での最初の位置 ── 抜いた後の配列でも、そこより前に
   //    この lid の札は 1 枚も無いので、そのまま差し込み位置として使える
   const others = cards.filter((c) => c.lid !== lid);
-  const next = items.map((i) => ({
-    lid,
-    line: i.line,
-    text: clipTaskText(i.text),
-    done: i.done,
-  }));
-  const merged = [...others.slice(0, from), ...next, ...others.slice(from)];
+  // 🔑 組み立ては `taskCardsOf` 1 本(上の docstring)── ここで組み直さない
+  const merged = [...others.slice(0, from), ...taskCardsOf(lid, body), ...others.slice(from)];
   return sameCards(merged, cards) ? cards : merged;
 }
 
@@ -145,7 +191,16 @@ function sameCards(a: readonly TaskCard[], b: readonly TaskCard[]): boolean {
   for (let i = 0; i < a.length; i++) {
     const x = a[i]!;
     const y = b[i]!;
-    if (x.lid !== y.lid || x.line !== y.line || x.done !== y.done || x.text !== y.text)
+    // ⚠ **日付と時刻も見る**(2026-08-23)── 見ないと、本文の `@…` だけを
+    //    書き換えたときに「同じ」と判定され、**画面の日付が古いまま**残る
+    if (
+      x.lid !== y.lid ||
+      x.line !== y.line ||
+      x.done !== y.done ||
+      x.text !== y.text ||
+      x.date !== y.date ||
+      x.time !== y.time
+    )
       return false;
   }
   return true;

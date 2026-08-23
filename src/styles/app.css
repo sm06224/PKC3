@@ -2119,6 +2119,23 @@ select:focus-visible {
   color: var(--muted);
   font-size: 12px;
 }
+/* 🔴 **戻し道は畳んだ物のそばに置く**(2026-08-23)── 日付のない項目を既定で
+ * 出さないので、戻す口が無いと user は「無くなった」と読む。
+ * ⚠ ボタンらしく主張させない(user 指示「ボタンがボタンすぎる」)── 字のまま置く。 */
+[data-pkc-field='kanban-undated'] {
+  align-self: flex-start;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-bottom: 1px dotted var(--border);
+  cursor: pointer;
+}
+[data-pkc-field='kanban-undated']:hover {
+  color: var(--fg);
+}
 /* 🔴 **「完了」は横ではなく下**(2026-08-20。設計 doc §4-4)。
  * ⚠ 直す前は 2 列を横に並べ、完了した札が**打ち消し線で残り続けて**いた ──
  *   市井の 6 実装を当たったが、この形は 1 つも無かった(どれも畳むか落とす)。
@@ -2183,9 +2200,25 @@ select:focus-visible {
   gap: 0 var(--s2);
   align-items: baseline;
 }
+/* 日付と字は 1 行に。⚠ 格子の列を増やさない(増やすと日付の無い札で
+ * **空の列の隙間だけ**が残り、印の位置が札ごとにずれる)。 */
+[data-pkc-region='kanban-cards'] [data-pkc-field='line'] {
+  min-width: 0;
+  display: flex;
+  gap: var(--s2);
+  align-items: baseline;
+}
 [data-pkc-region='kanban-cards'] [data-pkc-field='text'] {
   min-width: 0;
+  flex: 1;
   overflow-wrap: anywhere;
+}
+/* 🔑 日付は**情報**なので色を使わず、字面を詰めて出す(地は無彩色) */
+[data-pkc-region='kanban-cards'] [data-pkc-field='when'] {
+  flex: none;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 /* 出どころのノート名は印の下ではなく中身の下(印の列を空けたまま) */
 [data-pkc-region='kanban-cards'] [data-pkc-field='note'] {

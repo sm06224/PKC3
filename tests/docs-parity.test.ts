@@ -965,6 +965,8 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    // ⚠ 上限 20 を超えたので 2026-08-23 に落とした(原本は CHANGELOG)
+    'このアプリの入れ物に、端末ごとの名前が付きました',
     // ⚠ 上限 20 を超えたので 2026-08-22 に落とした(原本は CHANGELOG)
     '「2 ペインで整理」は、アプリの一覧から開きます',
     '2 ペインで整理できるようになりました',

@@ -26,6 +26,7 @@ import {
   type TaskCard,
 } from '@features/kanban/kanban-data';
 import { matchesEntry, normalizeQuery } from '@features/filter/title-filter';
+import { formatListDate } from '@features/datetime/stored-date';
 
 export class KanbanRenderer {
   private readonly region: HTMLElement;
@@ -34,6 +35,8 @@ export class KanbanRenderer {
   private readonly cardData = new Map<string, TaskCard>();
   private frame: {
     note: HTMLElement;
+    /** 「日付のない項目も出す」の切替(2026-08-23)。 */
+    undated: HTMLButtonElement;
     columns: Record<KanbanStatus, HTMLElement>;
     /** 見出しの字(件数と開閉の印を塗る所)。 */
     heads: Record<KanbanStatus, HTMLElement>;
@@ -46,6 +49,8 @@ export class KanbanRenderer {
   private lastShowArchived: boolean | null = null;
   /** ⚠ 「完了」の開閉も指紋(入れないと押しても畳まれたまま)。 */
   private lastShowDone: boolean | null = null;
+  /** ⚠ 「日付のない項目も出す」も指紋(同上 ── 押しても何も起きなくなる)。 */
+  private lastShowUndated: boolean | null = null;
   /**
    * ⚠ **断りも指紋の一部**(2026-08-19 のレビュー W-2)。押した札が断られたとき、
    * ここを見ていないと**描画器が早期 return して印が戻らない**。
@@ -54,8 +59,13 @@ export class KanbanRenderer {
   private lastError: AppState['error'] = null;
   private lastSelected: string | null = null;
 
-  constructor(region: HTMLElement) {
+  private readonly now: () => Date;
+
+  /** ⚠ `now` は test 注入用(既定は実時刻)── `CalendarRenderer` と同じ作法。 */
+  constructor(region: HTMLElement, now: (() => Date) | undefined = undefined) {
+    // ⚠ 既定は実時刻(`CalendarRenderer` と同じ形 ── optional で受ける)
     this.region = region;
+    this.now = now ?? ((): Date => new Date());
   }
 
   render(state: AppState): void {
@@ -67,6 +77,7 @@ export class KanbanRenderer {
       state.searchHits === this.lastHits &&
       state.showArchived === this.lastShowArchived &&
       state.showDoneTasks === this.lastShowDone &&
+      state.showUndatedTasks === this.lastShowUndated &&
       state.error === this.lastError &&
       state.selectedLid === this.lastSelected
     )
@@ -78,6 +89,7 @@ export class KanbanRenderer {
     this.lastHits = state.searchHits;
     this.lastShowArchived = state.showArchived;
     this.lastShowDone = state.showDoneTasks;
+    this.lastShowUndated = state.showUndatedTasks;
     this.lastError = state.error;
     this.lastSelected = state.selectedLid;
 
@@ -90,7 +102,20 @@ export class KanbanRenderer {
      */
     const q = normalizeQuery(state.filterQuery);
     const all = state.taskScan?.cards ?? [];
-    const visible = all.filter((c) => {
+    /**
+     * 🔴 **既定で出すのは「日付を書いた行」だけ**(user 指示 2026-08-23)。
+     *
+     * > 「**すべての本文に存在するチェックリストが…全て看板に出てくる。
+     * > これはただのノイズだよ。ただし、日付を入れたチェックリスト、
+     * > これが予定として機能する**」
+     *
+     * ⚠ **落とすのではなく畳む** ── 押せば全部戻る(`showUndatedTasks`)。
+     *   「体裁のつもり」と「日付を書き忘れたやること」は本文から見分けられないので、
+     *   片方だけ選ぶと必ず取りこぼす。
+     */
+    const dated = all.filter((c) => c.date !== null);
+    const pool = state.showUndatedTasks ? all : dated;
+    const visible = pool.filter((c) => {
       const m = state.entryMetas.get(c.lid);
       if (m === undefined) return false;
       /**
@@ -102,7 +127,8 @@ export class KanbanRenderer {
       if (m.archived && !state.showArchived) return false;
       return matchesEntry(m.lid, m.title, q, state.searchHits);
     });
-    frame.note.textContent = this.noteText(state, all.length, visible.length);
+    frame.note.textContent = this.noteText(state, all.length, dated.length, visible.length);
+    this.paintUndatedToggle(frame.undated, state, all.length - dated.length);
     const grouped = groupTasksByStatus(visible);
     /**
      * 🔴 **畳んでも件数は必ず見せる**(2026-08-20)。⚠ 黙って消すと
@@ -175,7 +201,7 @@ export class KanbanRenderer {
    * 状態の 1 行。⚠ **「まだ」「駄目だった」「無い」「切った」を区別する** ──
    * 混ぜると、集めている最中と項目 0 件が同じ顔になる。
    */
-  private noteText(state: AppState, total: number, shown: number): string {
+  private noteText(state: AppState, total: number, dated: number, shown: number): string {
     if (state.taskScanFailed)
       return 'チェック項目を集められませんでした。面を開き直すともう一度試します。';
     if (state.taskScan === null) return '集めています…';
@@ -195,18 +221,36 @@ export class KanbanRenderer {
     }
     if (total === 0)
       return 'チェックの付いた行がまだありません。ノートに「- [ ] やること」と書くと、ここに出ます。';
+    /**
+     * 🔴 **「日付が無いから出ていない」を、はっきり書く**(2026-08-23)。
+     * ⚠ 既定で日付のない項目を畳むので、ここを書かないと user は
+     *   「チェックを書いたのに何も出ない」と読む ── **書き方が分からないまま詰まる**。
+     * 🔑 だから**書き方をそのまま出す**(探させない)。
+     */
+    if (dated === 0 && !state.showUndatedTasks)
+      return '日付を書いた項目がまだありません。「- [ ] やること @2026-08-25」のように書くと、ここに出ます。';
     if (shown === 0) return '絞り込みに当てはまる項目がありません。';
     return `${shown} 件`;
   }
 
   private ensureFrame(): {
     note: HTMLElement;
+    undated: HTMLButtonElement;
     columns: Record<KanbanStatus, HTMLElement>;
     heads: Record<KanbanStatus, HTMLElement>;
   } {
     if (this.frame) return this.frame;
     const note = document.createElement('p');
     note.setAttribute('data-pkc-field', 'kanban-note');
+    /**
+     * 🔴 **戻し道は、畳んだ物のそばに置く**(2026-08-20 に「完了」で決めた作法と同じ)。
+     * ⚠ 設定画面へ隠すと、既定で消えた項目を**探す手がかりがどこにも無い**
+     *   ── 「無くなった」と読まれる。
+     */
+    const undated = document.createElement('button');
+    undated.type = 'button';
+    undated.setAttribute('data-pkc-action', 'toggle-show-undated');
+    undated.setAttribute('data-pkc-field', 'kanban-undated');
     const board = document.createElement('div');
     board.setAttribute('data-pkc-region', 'kanban-board');
     const columns = {} as Record<KanbanStatus, HTMLElement>;
@@ -241,9 +285,30 @@ export class KanbanRenderer {
       columns[col.status] = host;
       heads[col.status] = label;
     }
-    this.region.append(note, board);
-    this.frame = { note, columns, heads };
+    this.region.append(note, undated, board);
+    this.frame = { note, undated, columns, heads };
     return this.frame;
+  }
+
+  /**
+   * 「日付のない項目も出す」の切替を塗る。
+   *
+   * ⚠ **押しても何も起きないボタンを出さない** ── 日付の無い項目が 1 つも無ければ
+   *   隠す(押す前に「何件戻るか」が分かる形にもなる)。
+   * 🔑 ただし**入れている最中は 0 件でも出す** ── 消すと切ったまま戻せなくなる。
+   */
+  private paintUndatedToggle(btn: HTMLButtonElement, state: AppState, undated: number): void {
+    const show = undated > 0 || state.showUndatedTasks;
+    btn.hidden = !show;
+    if (!show) return;
+    btn.setAttribute('aria-pressed', state.showUndatedTasks ? 'true' : 'false');
+    const text = state.showUndatedTasks
+      ? '日付のない項目を隠す'
+      : `日付のない項目も出す(${undated})`;
+    if (btn.textContent !== text) btn.textContent = text;
+    btn.title = state.showUndatedTasks
+      ? '日付を書いた項目だけに戻します'
+      : '日付を書いていないチェック項目も盤面に出します';
   }
 
   private createCard(data: TaskCard): HTMLElement {
@@ -261,9 +326,23 @@ export class KanbanRenderer {
     box.setAttribute('aria-label', 'チェックを切り替え');
     const text = document.createElement('span');
     text.setAttribute('data-pkc-field', 'text');
+    /**
+     * 🔴 **その行に書かれた日付**(2026-08-23)。⚠ 記法(`@2026-08-25`)は
+     *   `taskCardsOf` が札の字から外しているので、ここに出さないと**どこにも出ない**。
+     */
+    const when = document.createElement('span');
+    when.setAttribute('data-pkc-field', 'when');
+    /**
+     * ⚠ 日付と字は**同じ器に入れる**(格子の列を増やさない)。
+     * 🔑 増やすと、日付の無い札で**空の列の隙間だけが残り**、印の位置が
+     *   札ごとに 8px ずれる(`display: none` は列を消すが、その両隣の gap は残る)。
+     */
+    const line = document.createElement('div');
+    line.setAttribute('data-pkc-field', 'line');
+    line.append(when, text);
     const note = document.createElement('span');
     note.setAttribute('data-pkc-field', 'note');
-    card.append(box, text, note);
+    card.append(box, line, note);
     this.patchCard(card, data, '');
     return card;
   }
@@ -277,6 +356,20 @@ export class KanbanRenderer {
     }
     if (data.done) card.setAttribute('data-pkc-task-done', '');
     else card.removeAttribute('data-pkc-task-done');
+    const when = card.querySelector<HTMLElement>('[data-pkc-field="when"]');
+    if (when) {
+      /**
+       * 🔑 日付の見せ方は `formatListDate` 1 本(左の一覧と同じ規則)──
+       * 面ごとに書くと、同じ日が場所によって違う字で出る(CLAUDE.md §7)。
+       * ⚠ 今年は `MM/DD`、それ以外は `YYYY/MM/DD`。
+       */
+      const label =
+        data.date === null
+          ? ''
+          : `${formatListDate(data.date, this.now().getFullYear())}${data.time === null ? '' : ` ${data.time}`}`;
+      if (when.textContent !== label) when.textContent = label;
+      when.hidden = label === '';
+    }
     const text = card.querySelector('[data-pkc-field="text"]');
     // ⚠ 中身が空の項目もある(`- [ ]` だけの行)── 札は出すが、字は出ない
     if (text && text.textContent !== data.text) text.textContent = data.text;

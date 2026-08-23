@@ -145,7 +145,12 @@ export class CenterRouter {
     region.prepend(this.bar);
     this.scroll = new ScrollMemory(region);
     this.detail = new DetailRenderer(this.panes.detail, assets, markdown, onBodyChange ?? null);
-    this.kanban = new KanbanRenderer(this.panes.kanban);
+    /**
+     * ⚠ **`now` は板にも渡す**(2026-08-23)。札の日付は「今年なら `MM/DD`」で
+     *   出すので、渡さないと test が**年を跨いだ日に落ちる**
+     *   (CLAUDE.md「『今年』は引数で渡す」)。
+     */
+    this.kanban = new KanbanRenderer(this.panes.kanban, now);
     this.calendar = new CalendarRenderer(this.panes.calendar, now);
     this.query = new QueryRenderer(this.panes.query);
     this.dual = new DualFilerRenderer(this.panes.dual);

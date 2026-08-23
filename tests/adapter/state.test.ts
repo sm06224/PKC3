@@ -807,8 +807,11 @@ describe('nextViewMode ── もう一度押したら本文へ戻る', () => {
  * **書換の ack ではその場で組み直す**(往復を待たずに札が動く)。
  */
 describe('カンバンの札(#277 段②-b)', () => {
-  const scan = (cards: Array<{ lid: string; line: number; text: string; done: boolean }>) => ({
-    cards,
+  const scan = (
+    raw: Array<{ lid: string; line: number; text: string; done: boolean; date?: string | null; time?: string | null }>,
+  ) => ({
+    // ⚠ 日付は既定 `null`(= 日付のないチェック項目)── 書く test だけが渡す
+    cards: raw.map((c) => ({ date: null, time: null, ...c })),
     totalNotes: 1,
     scannedNotes: 1,
     truncated: false,
@@ -830,7 +833,7 @@ describe('カンバンの札(#277 段②-b)', () => {
    */
   it('🔴 器の読み直しで札を捨て、開いていれば集め直す', () => {
     let s = reduce(booted(), { type: 'SET_VIEW_MODE', mode: 'kanban' }).state;
-    s = reduce(s, { type: 'SET_TASK_SCAN', scan: scan([{ lid: 'a', line: 0, text: 'x', done: false }]) }).state;
+    s = reduce(s, { type: 'SET_TASK_SCAN', scan: scan([{ lid: 'a', line: 0, text: 'x', done: false, date: null, time: null }]) }).state;
     expect(s.taskScan?.cards).toHaveLength(1);
     const out = reduce(s, { type: 'SYS_BOOTED', cid: 'c2', metas: [meta('a', 1)], relations: [] });
     expect(out.state.taskScan, '古い札が残っている').toBeNull();
@@ -852,8 +855,8 @@ describe('カンバンの札(#277 段②-b)', () => {
     s = reduce(s, {
       type: 'SET_TASK_SCAN',
       scan: scan([
-        { lid: 'a', line: 0, text: '牛乳', done: false },
-        { lid: 'b', line: 0, text: '触るな', done: false },
+        { lid: 'a', line: 0, text: '牛乳', done: false, date: null, time: null },
+        { lid: 'b', line: 0, text: '触るな', done: false, date: null, time: null },
       ]),
     }).state;
     const out = reduce(s, {
@@ -889,8 +892,8 @@ describe('カンバンの札(#277 段②-b)', () => {
     s = reduce(s, {
       type: 'SET_TASK_SCAN',
       scan: scan([
-        { lid: 'a', line: 0, text: 'A', done: false },
-        { lid: 'a', line: 1, text: 'B', done: false },
+        { lid: 'a', line: 0, text: 'A', done: false, date: null, time: null },
+        { lid: 'a', line: 1, text: 'B', done: false, date: null, time: null },
       ]),
     }).state;
     // 先頭に 1 行足して保存 ── A は 0 行目から 1 行目へずれる

@@ -12,7 +12,6 @@ import { DEFAULT_ENTRY_SORT, NATURAL_DESC, type EntrySort } from '@features/filt
 import { resolveCanonicalParents, reorderSibling } from '@features/relation/tree';
 import { extractMeta, seedBodyFor } from '@features/flavor';
 import { applyBodyRewrite, type BodyRewrite } from '@features/markdown/body-rewrite';
-import { listTaskItems } from '@features/markdown/task-count';
 import { replaceTaskCards, type TaskScan } from '@features/kanban/kanban-data';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import type { LauncherTile } from '@features/launcher/tiles';
@@ -291,6 +290,22 @@ export interface AppState {
    * ⚠ 保存しない(その場の見え方)── `showArchived` と同じ扱い。
    */
   showDoneTasks: boolean;
+  /**
+   * 🔴 **日付のない項目も出すか**(user 指示 2026-08-23。既定 **false**)。
+   *
+   * > 「**そもそもすべての本文に存在するチェックリストが、なぜ看板として表示される
+   * > のか意味がわからない。文章の体裁としてチェックリストを使いたい場面もある。
+   * > それが全て看板に出てくる。これはただのノイズだよ**」
+   *
+   * 🔑 既定で出すのは **`@2026-08-25` を書いた行**だけ ── それが「予定」である。
+   * ⚠ ただし**捨てない。畳む** ── 「体裁のつもり」と「日付を書き忘れたやること」は
+   *   本文から見分けられないので、片方だけ選ぶと必ず取りこぼす。
+   *   1 押しで**全部の一覧が戻る**形にして、既定だけノイズ 0 にする。
+   * ⚠ `showDoneTasks` / `showArchived` と**別の旗**である ──
+   *   あちらは「済んだ行」「片付けたノート」で、こちらは「日付の有無」。
+   * ⚠ 保存しない(その場の見え方)。
+   */
+  showUndatedTasks: boolean;
   /** 選択 entry の履歴 panel(P5b)。開いた時点のスナップショット ── 選択遷移 /
    *  編集開始 / view 切替で畳む。boot で revisions に触れない原則の受け皿。 */
   revisionPanel: { lid: string; items: readonly RevisionItem[] } | null;
@@ -474,6 +489,7 @@ export const initialState: AppState = {
   calendarMonth: null,
   showArchived: false,
   showDoneTasks: false,
+  showUndatedTasks: false,
   revisionPanel: null,
   trashPanel: null,
   linkedFiles: new Map(),
@@ -635,6 +651,7 @@ export type UserAction =
   | { type: 'TOGGLE_SHOW_ARCHIVED' }
   /** 板の「完了」を開く / 畳む(2026-08-20。設計 doc §4-4)。 */
   | { type: 'TOGGLE_SHOW_DONE_TASKS' }
+  | { type: 'TOGGLE_SHOW_UNDATED_TASKS' }
   | { type: 'RETRY_PERSIST' }
   /** lid / title は binder が生成して渡す(reducer は純粋のまま ── Date を呼ばない)。
    *  body 省略時は flavor seed。edit:false は「作って選択するだけ」(添付取込等 ──
@@ -2003,6 +2020,14 @@ function reduceCore(
     case 'TOGGLE_SHOW_DONE_TASKS':
       // ⚠ 選択も走査も動かさない ── 見え方だけを変える
       return { state: { ...state, showDoneTasks: !state.showDoneTasks }, events: [] };
+    case 'TOGGLE_SHOW_UNDATED_TASKS':
+      /**
+       * ⚠ **走査を頼み直さない**(2026-08-23)── 日付の無い札も `taskScan` に
+       *   載っているので、切替は**描画側の絞り**だけで済む。
+       * 🔑 頼み直す形にすると、押すたびに worker を叩き、しかも
+       *   **戻ってくるまで盤面が空になる**(押した手応えが消える)。
+       */
+      return { state: { ...state, showUndatedTasks: !state.showUndatedTasks }, events: [] };
     case 'BODY_PERSISTED': {
       // ack された内容を disk 事実として記録(選択が移って openBody が破棄
       // 済みなら捨てる ── stale ack で別 entry の作業域を汚さない)
@@ -3011,7 +3036,7 @@ function refreshTaskCards(
   body: string,
 ): TaskScan | null {
   if (scan === null) return null;
-  const cards = replaceTaskCards(scan.cards, lid, listTaskItems(body));
+  const cards = replaceTaskCards(scan.cards, lid, body);
   return cards === scan.cards ? scan : { ...scan, cards };
 }
 
