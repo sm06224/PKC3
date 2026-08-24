@@ -920,6 +920,21 @@ describe('情報ペインの説明が実装と合っている(2026-08-18)', () =
     );
     expect(TITLES, '画面の説明が「入る」と言っていない').toContain('画像も、図はベクタで');
   });
+
+  /**
+   * 🔴 **PowerPoint の説明は「切れ方」を先に言う**(#187 段⑤)。
+   * ⚠ Word と同じ顔のボタンが隣に並ぶので、**押す前に違いが分からない**と
+   *   「なぜ 12 枚もあるのか」と後から驚く(user 指示 2026-08-21
+   *   「画面で何が起きるかで書く」)。
+   */
+  it('🔴 PowerPoint の説明が、スライドの切れ方を言っている', () => {
+    expect(TITLES, 'PowerPoint の説明が無い').toContain("'export-entry-pptx':");
+    expect(TITLES, '切れ方を言っていない').toContain('スライドが切れます');
+    // マニュアルの側にも切れ方の表が在ること(正本はマニュアル)
+    expect(readFileSync('docs/manual.md', 'utf8'), 'マニュアルに書き方が無い').toContain(
+      '#### PowerPoint(.pptx)で出す',
+    );
+  });
 });
 
 /**
@@ -971,6 +986,8 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    // ⚠ 上限 20 を超えたので 2026-08-24 に落とした(原本は CHANGELOG)
+    '起動できなくなる不具合を直しました(本文の検索も効くようになりました)',
     // ⚠ 上限 20 を超えたので 2026-08-23 に落とした(原本は CHANGELOG)
     '2 ペインの面を作り直しました(列・操作の並び・カーソル)',
     'やることの板が戻りました(札はチェックリストの行です)',

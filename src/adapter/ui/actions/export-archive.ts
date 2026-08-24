@@ -12,7 +12,9 @@ import type { Dispatcher } from '@adapter/state/dispatcher';
 import { writeArchive, type ArchiveSource } from '@features/export/pkc3-archive';
 import type { RenderMarkdownOptions } from '@features/markdown/markdown-render';
 import { writePortableHtml } from '@features/export/pkc3-html';
-import { buildDocxFile } from '@adapter/platform/export/docx-client';
+import { buildOoxmlFile } from '@adapter/platform/export/ooxml-client';
+import type { OoxmlMedia } from '@adapter/platform/export/ooxml-assemble';
+import type { DocxBlock } from '@features/export/docx';
 import { svgToEmf } from '@features/export/svg-emf';
 import { htmlToDocxBlocks } from '@adapter/platform/export/html-blocks';
 import { DEFAULT_PAGE_FORMAT, type PageFormat } from '@features/page-format';
@@ -227,194 +229,288 @@ export async function exportArchive(
 }
 
 /**
- * 🔴 **このノートを Word(.docx)で書き出す**(#187 段①)。
+ * 🔴 **書き出す先の Office 形式**(#187 段⑤)。
+ *
+ * ⚠ **Word と PowerPoint で違うのはここに書いた 4 つだけ**である ── 本文の読み方も、
+ * 画像の入れ方も、図の焼き方もまったく同じなので、**1 本の道**を通す
+ * (CLAUDE.md §7「同じ判定が 2 か所に生えたら、規則を 1 つに寄せる」)。
+ */
+interface OfficeTarget {
+  /** 依頼の種別(`ooxml-assemble.ts` が読む)。 */
+  readonly kind: 'docx' | 'pptx';
+  /** user に見せる呼び名。⚠ 断り文と知らせに出る。 */
+  readonly app: string;
+  /** 落とす file の拡張子。 */
+  readonly ext: string;
+  /** `:::if{format=X}` と突き合わせる字。 */
+  readonly format: string;
+}
+
+const WORD: OfficeTarget = { kind: 'docx', app: 'Word', ext: 'docx', format: 'docx' };
+const POWERPOINT: OfficeTarget = {
+  kind: 'pptx',
+  app: 'PowerPoint',
+  ext: 'pptx',
+  format: 'pptx',
+};
+
+/**
+ * 🔴 **本文 → 塊 + bytes**(#187 段⑤ で Word / PowerPoint の共通部として括り出した)。
  *
  * 🔑 **画面と同じ HTML から組む**(設計 doc の (b))── `renderBody` は閲覧用 HTML と
  * **同じ口**である。PKC2 はここを別のレンダラにしたせいで「Word で直した」が
  * PDF に届かず、記録されている不具合がほぼ全部その土台に乗っていた。
  *
+ * ⚠ 返す `media` の名前は**形式の根からの相対**(`media/image1.png`)である ──
+ * `word/` か `ppt/` を前に付けるのは `ooxml-assemble.ts` の仕事
+ * (置く場所と rels の指す先を**同じ file で**決める)。
+ *
+ * @returns 断られたときは `null`(理由は既に `fail` が出している)
+ */
+async function collectOfficeBlocks(
+  deps: ExportDeps,
+  /**
+   * ⚠ **解決済みの描画の口を受け取る** ── `deps.renderBody` は省略可なので、
+   * ここで改めて見ると**同じ判定が 2 か所**に生える(CLAUDE.md §7)。
+   * 断るのは呼び側(知らせを出す前に断りたいので、判定はそちらに要る)。
+   */
+  renderBody: NonNullable<ExportDeps['renderBody']>,
+  lid: string,
+  target: OfficeTarget,
+  fail: (msg: string) => false,
+): Promise<{ blocks: DocxBlock[]; media: OoxmlMedia[]; title: string } | null> {
+  /**
+   * 🔴 **直前の保存が disk に着いてから読む**(2026-08-17 実測)。
+   * ⚠ `phase === 'ready'` は「編集を終えた」しか言っていない ── 本文の書込は
+   * その後ろで飛んでいて、ここの `getBody` は**それを追い越す**。
+   */
+  await deps.settle();
+  // ⚠ 1 件だけの読み口(P6f)。⚠ 省略可なので**在ることを確かめてから**呼ぶ
+  if (!deps.source.getBody) {
+    fail('本文の読み口が渡っていません');
+    return null;
+  }
+  const body = await deps.source.getBody(lid);
+  if (body === null) {
+    fail('ノートが見つかりませんでした');
+    return null;
+  }
+  const metas = await deps.source.listEntryMetas();
+  const title = metas.find((m) => m.lid === lid)?.title ?? 'ノート';
+  /**
+   * 🔴 **詳細ペインと同じ材料を渡す**(#187 段③。閲覧用 HTML が 2026-08-06 に
+   * 直したのと**同じ穴**が、Word 側に残っていた)。直す前は `render(body)` だけで:
+   * - **frontmatter が本文として出る**(`---` が水平線、`key: value` が見出しに)
+   * - `{{vars.x}}` が**生のまま**載る
+   * - `heading-number: true` の文書に**番号が付かない**
+   * ⚠ どれも**全文 body**(frontmatter 込み)から取る ── 読み飛ばした本文からは
+   *   frontmatter が見えない。
+   */
+  const skip = body.length - parseFrontmatter(body).body.length;
+  const html = await renderBody(body.slice(skip), {
+    vars: extractVars(body),
+    headingNumber: extractHeadingNumberConfig(body),
+    /**
+     * 🔴 **`:::if{format=docx}` / `:::if{format=pptx}` を生かす**(#187 段⑤)。
+     * ⚠ ここを渡すまで、この記法は**受理はするが永久に不可視**だった
+     *   (描画は `'html'` 固定)── 出口ができたので落ちていた動線が戻る。
+     */
+    format: target.format,
+  });
+  // ⚠ `<body>` で包む ── 包まないと happy-dom / 実ブラウザで木の形が揃わない
+  const doc = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html');
+  const { blocks, images, figures } = htmlToDocxBlocks(doc);
+  /**
+   * 🔴 **添付の画像を入れる**(#187 段②)。
+   * ⚠ **縦横比を保つ**ため、実寸を取ってから渡す(PKC2 は全画像を 480×360 px に
+   *   潰していた)。⚠ 取れなかったものは `skipped` のまま残す ── **黙って
+   *   落とさない**(本文にその場所と理由が出る)。
+   * ⚠ bytes は **Blob のまま** zip へ渡す(heap に載せない ── 不可侵指示 2026-07-27)。
+   */
+  const media: OoxmlMedia[] = [];
+  for (const [i, img] of images.entries()) {
+    const blob = await deps.source.getAssetBlob(img.assetKey).catch(() => null);
+    if (!blob) continue;
+    const type = blob.type || 'image/png';
+    // ⚠ Office が素で読める形だけ入れる(読めない形を入れると file ごと開けない)
+    const ext = /jpe?g/.test(type)
+      ? 'jpeg'
+      : type.includes('gif')
+        ? 'gif'
+        : type.includes('webp')
+          ? 'webp'
+          : type.includes('png')
+            ? 'png'
+            : null;
+    if (ext === null) {
+      blocks[img.at] = {
+        kind: 'skipped',
+        what: `画像「${img.alt}」`,
+        why: `この形式は ${target.app} に入れられません(${type})`,
+      };
+      continue;
+    }
+    const size = await imageSizeOf(blob);
+    if (size === null) {
+      blocks[img.at] = {
+        kind: 'skipped',
+        what: `画像「${img.alt}」`,
+        why: '大きさを読めませんでした',
+      };
+      continue;
+    }
+    const name = `media/image${i + 1}.${ext}`;
+    blocks[img.at] = {
+      kind: 'image',
+      media: name,
+      widthPx: size.w,
+      heightPx: size.h,
+      alt: img.alt,
+    };
+    media.push({ name, blob });
+  }
+  /**
+   * 🔴 **図とグラフを焼いて入れる**(#187 段②)。
+   *
+   * ⚠ これが無いと、器の中の**原文が等幅の文字**として出る ── PKC2 で
+   *   「図は原文が黙って出る」と記録されている失敗そのものである。
+   * 🔑 焼くのは**画面と同じ産出器**(`mermaid-hydrate` / `chart-raster`)──
+   *   別に描くとレンダラが 2 本になる(設計 doc §1-2 の失敗の根)。
+   * ⚠ 大きさは **CSS px** で渡す ── 焼いた PNG は dpr 倍の画素を持つので、
+   *   画素数をそのまま渡すと Retina の端末でだけ図が 2 倍で出る。
+   */
+  for (const [i, fig] of figures.entries()) {
+    const what = fig.kind === 'chart' ? 'グラフ' : '図';
+    /**
+     * 🔴 **まずベクタ(EMF)で試す**(#238)。⚠ これが本命 ── 拡大しても
+     * 粗くならず、図形として触れる。
+     * ⚠ **落ちたらラスタへ落とす**(下)。ベクタで書けない図のために
+     * 「図が消える」を作らない。
+     */
+    const svg = await deps.renderFigureVector(fig.kind, fig.source).catch(() => null);
+    if (svg !== null) {
+      try {
+        const emf = svgToEmf(svg);
+        const vname = `media/figure${i + 1}.emf`;
+        blocks[fig.at] = {
+          kind: 'image',
+          media: vname,
+          widthPx: emf.widthPx,
+          heightPx: emf.heightPx,
+          alt: what,
+        };
+        media.push({ name: vname, blob: new Blob([emf.bytes as BlobPart]) });
+        continue;
+      } catch {
+        // ⚠ 黙って消さない ── ラスタで入れ直す
+      }
+    }
+    const drawn = await deps.renderFigure(fig.kind, fig.source).catch(() => null);
+    const size = drawn === null ? null : await imageSizeOf(drawn.blob);
+    if (drawn === null || size === null) {
+      blocks[fig.at] = { kind: 'skipped', what, why: '描けませんでした' };
+      continue;
+    }
+    const name = `media/figure${i + 1}.png`;
+    blocks[fig.at] = {
+      kind: 'image',
+      media: name,
+      widthPx: drawn.cssWidth,
+      // ⚠ 高さは**焼いた絵の比**から出す(器の高さではない)
+      heightPx: Math.max(1, Math.round((size.h * drawn.cssWidth) / size.w)),
+      alt: what,
+    };
+    media.push({ name, blob: drawn.blob });
+  }
+  return { blocks, media, title };
+}
+
+/**
+ * 🔴 **このノートを Word(.docx)で書き出す**(#187 段①)。
+ *
  * ⚠ **1 ノート = 1 文書**にする。Word の文書は「1 本の文書」なので、
  * 何百件を 1 つに連ねる形は user の期待と違う(バックアップは `.pkc3.zip` が持つ)。
- * ⚠ 段① は**画像を入れない** ── 入れない代わりに、その場に理由を書いて件数で言う。
  */
 export async function exportEntryDocx(
   dispatcher: Dispatcher,
   deps: ExportDeps,
   lid: string,
 ): Promise<boolean> {
-  const fail = (msg: string): boolean => {
+  return exportEntryOffice(dispatcher, deps, lid, WORD);
+}
+
+/**
+ * 🔴 **このノートを PowerPoint(.pptx)で書き出す**(#187 段⑤)。
+ *
+ * ⚠ **Word とは切れ方が違う** ── H1 が扉、H2/H3 が新しいスライド、`---` で切れる
+ * (設計 doc §3。PKC2 と同じ切れ方である)。
+ */
+export async function exportEntryPptx(
+  dispatcher: Dispatcher,
+  deps: ExportDeps,
+  lid: string,
+): Promise<boolean> {
+  return exportEntryOffice(dispatcher, deps, lid, POWERPOINT);
+}
+
+/** Word / PowerPoint の**共通の道**(#187 段⑤)。 */
+async function exportEntryOffice(
+  dispatcher: Dispatcher,
+  deps: ExportDeps,
+  lid: string,
+  target: OfficeTarget,
+): Promise<boolean> {
+  const fail = (msg: string): false => {
     dispatcher.dispatch({ type: 'OP_FAILED', error: msg });
     return false;
   };
   // ⚠ 編集中は draft が disk と違う ── 「保存したつもりの本文」が入らない形を作らない
   if (dispatcher.getState().phase !== 'ready')
     return fail('編集を終了してから書き出してください');
-  if (!deps.renderBody)
-    return fail('本文を組み立てられませんでした(描画の口が渡っていません)');
-  deps.notify?.('Word で書き出しています…');
+  // ⚠ **知らせを出す前に断る** ── 「書き出しています…」の直後に断り文が出ると、
+  //    user には「途中で失敗した」に見える(実際は 1 バイトも読んでいない)
+  const renderBody = deps.renderBody;
+  if (!renderBody) return fail('本文を組み立てられませんでした(描画の口が渡っていません)');
+  deps.notify?.(`${target.app} で書き出しています…`);
   try {
-    /**
-     * 🔴 **直前の保存が disk に着いてから読む**(2026-08-17 実測)。
-     * ⚠ `phase === 'ready'` は「編集を終えた」しか言っていない ── 本文の書込は
-     * その後ろで飛んでいて、ここの `getBody` は**それを追い越す**。
-     */
-    await deps.settle();
-    // ⚠ 1 件だけの読み口(P6f)。⚠ 省略可なので**在ることを確かめてから**呼ぶ
-    if (!deps.source.getBody) return fail('本文の読み口が渡っていません');
-    const body = await deps.source.getBody(lid);
-    if (body === null) return fail('ノートが見つかりませんでした');
-    const metas = await deps.source.listEntryMetas();
-    const title = metas.find((m) => m.lid === lid)?.title ?? 'ノート';
-    /**
-     * 🔴 **詳細ペインと同じ材料を渡す**(#187 段③。閲覧用 HTML が 2026-08-06 に
-     * 直したのと**同じ穴**が、Word 側に残っていた)。直す前は `render(body)` だけで:
-     * - **frontmatter が本文として出る**(`---` が水平線、`key: value` が見出しに)
-     * - `{{vars.x}}` が**生のまま**載る
-     * - `heading-number: true` の文書に**番号が付かない**
-     * ⚠ どれも**全文 body**(frontmatter 込み)から取る ── 読み飛ばした本文からは
-     *   frontmatter が見えない。
-     */
-    const skip = body.length - parseFrontmatter(body).body.length;
-    const html = await deps.renderBody(body.slice(skip), {
-      vars: extractVars(body),
-      headingNumber: extractHeadingNumberConfig(body),
-      /**
-       * 🔴 **`:::if{format=docx}` を生かす**(#187 段⑤)。
-       * ⚠ ここを渡すまで、この記法は**受理はするが永久に不可視**だった
-       *   (描画は `'html'` 固定)── 出口ができたので落ちていた動線が戻る。
-       */
-      format: 'docx',
-    });
-    // ⚠ `<body>` で包む ── 包まないと happy-dom / 実ブラウザで木の形が揃わない
-    const doc = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html');
-    const { blocks, images, figures } = htmlToDocxBlocks(doc);
-    /**
-     * 🔴 **添付の画像を入れる**(#187 段②)。
-     * ⚠ **縦横比を保つ**ため、実寸を取ってから渡す(PKC2 は全画像を 480×360 px に
-     *   潰していた)。⚠ 取れなかったものは `skipped` のまま残す ── **黙って
-     *   落とさない**(本文にその場所と理由が出る)。
-     * ⚠ bytes は **Blob のまま** zip へ渡す(heap に載せない ── 不可侵指示 2026-07-27)。
-     */
-    const media: { name: string; blob: Blob }[] = [];
-    for (const [i, img] of images.entries()) {
-      const blob = await deps.source.getAssetBlob(img.assetKey).catch(() => null);
-      if (!blob) continue;
-      const type = blob.type || 'image/png';
-      // ⚠ Word が素で読める形だけ入れる(読めない形を入れると file ごと開けない)
-      const ext = /jpe?g/.test(type)
-        ? 'jpeg'
-        : type.includes('gif')
-          ? 'gif'
-          : type.includes('webp')
-            ? 'webp'
-            : type.includes('png')
-              ? 'png'
-              : null;
-      if (ext === null) {
-        blocks[img.at] = {
-          kind: 'skipped',
-          what: `画像「${img.alt}」`,
-          why: `この形式は Word に入れられません(${type})`,
-        };
-        continue;
-      }
-      const size = await imageSizeOf(blob);
-      if (size === null) {
-        blocks[img.at] = {
-          kind: 'skipped',
-          what: `画像「${img.alt}」`,
-          why: '大きさを読めませんでした',
-        };
-        continue;
-      }
-      const name = `media/image${i + 1}.${ext}`;
-      blocks[img.at] = {
-        kind: 'image',
-        media: name,
-        widthPx: size.w,
-        heightPx: size.h,
-        alt: img.alt,
-      };
-      media.push({ name: `word/${name}`, blob });
-    }
-    /**
-     * 🔴 **図とグラフを焼いて入れる**(#187 段②)。
-     *
-     * ⚠ これが無いと、器の中の**原文が等幅の文字**として出る ── PKC2 で
-     *   「図は原文が黙って出る」と記録されている失敗そのものである。
-     * 🔑 焼くのは**画面と同じ産出器**(`mermaid-hydrate` / `chart-raster`)──
-     *   別に描くとレンダラが 2 本になる(設計 doc §1-2 の失敗の根)。
-     * ⚠ 大きさは **CSS px** で渡す ── 焼いた PNG は dpr 倍の画素を持つので、
-     *   画素数をそのまま渡すと Retina の端末でだけ図が 2 倍で出る。
-     */
-    for (const [i, fig] of figures.entries()) {
-      const what = fig.kind === 'chart' ? 'グラフ' : '図';
-      /**
-       * 🔴 **まずベクタ(EMF)で試す**(#238)。⚠ これが本命 ── Word で拡大しても
-       * 粗くならず、図形として触れる。
-       * ⚠ **落ちたらラスタへ落とす**(下)。ベクタで書けない図のために
-       * 「図が消える」を作らない。
-       */
-      const svg = await deps.renderFigureVector(fig.kind, fig.source).catch(() => null);
-      if (svg !== null) {
-        try {
-          const emf = svgToEmf(svg);
-          const vname = `media/figure${i + 1}.emf`;
-          blocks[fig.at] = {
-            kind: 'image',
-            media: vname,
-            widthPx: emf.widthPx,
-            heightPx: emf.heightPx,
-            alt: what,
-          };
-          media.push({ name: `word/${vname}`, blob: new Blob([emf.bytes as BlobPart]) });
-          continue;
-        } catch {
-          // ⚠ 黙って消さない ── ラスタで入れ直す
-        }
-      }
-      const drawn = await deps.renderFigure(fig.kind, fig.source).catch(() => null);
-      const size = drawn === null ? null : await imageSizeOf(drawn.blob);
-      if (drawn === null || size === null) {
-        blocks[fig.at] = { kind: 'skipped', what, why: '描けませんでした' };
-        continue;
-      }
-      const name = `media/figure${i + 1}.png`;
-      blocks[fig.at] = {
-        kind: 'image',
-        media: name,
-        widthPx: drawn.cssWidth,
-        // ⚠ 高さは**焼いた絵の比**から出す(器の高さではない)
-        heightPx: Math.max(1, Math.round((size.h * drawn.cssWidth) / size.w)),
-        alt: what,
-      };
-      media.push({ name: `word/${name}`, blob: drawn.blob });
-    }
+    const got = await collectOfficeBlocks(deps, renderBody, lid, target, fail);
+    if (got === null) return false;
     const now = deps.now?.() ?? new Date();
     /**
      * 🔴 **組み立てと zip はワーカーで**(#187 段④。user 指示 2026-08-03 の不可侵)。
      * ⚠ 動かせるのはここだけ ── HTML の parse と走査は **DOM がワーカーに無い**
      *   ので動かせない(実測: 294KB でメインの詰まり 354ms のうち parse+走査が 129ms)。
      * ⚠ 紙面は画面の設定と同じ値を渡す(#187 段③)── 渡さないと Word だけ A4 縦。
+     *   (スライドは版面が 16:9 固定なので、pptx は紙面を受け取らない)
      */
-    const built = await buildDocxFile({
-      blocks,
-      title,
-      iso: now.toISOString(),
-      pageFormat: deps.pageFormat ?? DEFAULT_PAGE_FORMAT,
-      media,
-    });
-    deps.download(`${safeName(title)}-${stamp(now)}.docx`, built.blob);
+    const built = await buildOoxmlFile(
+      target.kind === 'docx'
+        ? {
+            kind: 'docx',
+            blocks: got.blocks,
+            title: got.title,
+            iso: now.toISOString(),
+            pageFormat: deps.pageFormat ?? DEFAULT_PAGE_FORMAT,
+            media: got.media,
+          }
+        : { kind: 'pptx', blocks: got.blocks, title: got.title, media: got.media },
+    );
+    deps.download(`${safeName(got.title)}-${stamp(now)}.${target.ext}`, built.blob);
     // 🔴 **落としたものは件数で言う**(#213 の裁定 A と同じ向き)
     deps.report(built.warnings);
     // ⚠ 「書き出しました」は `notify`(一時の知らせ)で言う ── state の action に
     //    書き出し用の型は無い(増やさない)
-    deps.notify?.(
-      `Word で書き出しました(${built.counts.blocks} 塊 / 画像 ${built.counts.images} 枚)`,
-    );
+    // ⚠ **数えて見せるものは形式で違う** ── スライドは「枚数」がいちばん効く
+    const how =
+      'slides' in built.counts
+        ? `${built.counts.slides} 枚 / 画像 ${built.counts.images} 枚`
+        : `${built.counts.blocks} 塊 / 画像 ${built.counts.images} 枚`;
+    deps.notify?.(`${target.app} で書き出しました(${how})`);
     return true;
   } catch (e) {
-    return fail(`Word の書き出しに失敗しました: ${e instanceof Error ? e.message : String(e)}`);
+    return fail(
+      `${target.app} の書き出しに失敗しました: ${e instanceof Error ? e.message : String(e)}`,
+    );
   }
 }
 

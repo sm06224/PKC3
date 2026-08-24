@@ -383,6 +383,23 @@ describe('書き出しの settle の配線', () => {
   it('🔴 その settled() の出所は connectStoreEffects である', () => {
     expect(MAIN).toContain('storeEffects = connectStoreEffects(');
   });
+
+  /**
+   * 🔴 **PowerPoint の口が実際に繋がっている**(#187 段⑤)。
+   *
+   * ⚠ `main.ts` は **test から 1 度も実行されない**(原文を読む test しか無い)ので、
+   *   ここが落ちていても全 unit が緑のまま「押しても何も落ちてこない」になる。
+   * ⚠ **押した先と、その先が呼ぶ実行部の 2 つ**を見る ── 片方だけだと
+   *   「口は在るが `as` を渡していない」/「`as` は渡すが実行部へ届かない」を見逃す。
+   */
+  it('🔴 PowerPoint のボタンが exportEntryPptx まで繋がっている', () => {
+    expect(MAIN, 'ボタンの口が無い').toContain(
+      "exportEntryPptx: (lid) => void runExport({ entryLid: lid, as: 'pptx' })",
+    );
+    expect(MAIN, 'runExport が pptx を実行部へ渡していない').toContain(
+      "kind.as === 'pptx') await exportEntryPptx(dispatcher, deps, kind.entryLid)",
+    );
+  });
 });
 
 /**

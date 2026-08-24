@@ -1,6 +1,6 @@
 /** @vitest-environment node */
 /**
- * 🔴 **Word の組み立てをワーカーで回す**(#187 段④)。
+ * 🔴 **OOXML(Word / PowerPoint)の組み立てをワーカーで回す**(#187 段④・段⑤)。
  *
  * ⚠ **node 環境で回す** ── happy-dom は `self`(= window)を持っているので、
  * worker が `self.onmessage` に差した先が**こちらの偽物ではなく window** になり、
@@ -15,9 +15,10 @@
  *    速さの話であって正しさの話ではないので、食い違ったらどちらかが嘘になる。
  */
 import { describe, expect, it, beforeAll, beforeEach } from 'vitest';
-import { assembleDocx, type DocxJob } from '../../src/adapter/platform/export/docx-assemble';
-import { buildDocxFile, setDocxWorkerSpawn } from '../../src/adapter/platform/export/docx-client';
+import { assembleOoxml, type OoxmlJob } from '../../src/adapter/platform/export/ooxml-assemble';
+import { buildOoxmlFile, setOoxmlWorkerSpawn } from '../../src/adapter/platform/export/ooxml-client';
 import type { DocxBlock } from '../../src/features/export/docx';
+import { readZipDirectory, readZipText } from '../../src/features/import/zip-reader';
 
 interface Ctx {
   onmessage: ((ev: { data: unknown }) => void) | null;
@@ -29,7 +30,7 @@ const ctx: Ctx = { onmessage: null, postMessage: (m) => sent.push(m) };
 
 beforeAll(async () => {
   (globalThis as Record<string, unknown>).self = ctx;
-  await import('../../src/adapter/platform/export/docx-worker');
+  await import('../../src/adapter/platform/export/ooxml-worker');
 });
 
 beforeEach(() => {
@@ -40,7 +41,8 @@ const BLOCKS: DocxBlock[] = [
   { kind: 'h', level: 1, runs: [{ text: '題' }] },
   { kind: 'p', runs: [{ text: '本文' }] },
 ];
-const JOB: DocxJob = {
+const JOB: OoxmlJob = {
+  kind: 'docx',
   blocks: BLOCKS,
   title: 'ノート',
   iso: '2026-08-17T00:00:00.000Z',
@@ -49,7 +51,7 @@ const JOB: DocxJob = {
 };
 
 /** worker へ 1 件流して、返った応答を取る。 */
-async function send(id: number, job: DocxJob = JOB): Promise<unknown> {
+async function send(id: number, job: OoxmlJob = JOB): Promise<unknown> {
   // 🔴 **`WorkerLease` が包む形で叩く**(`{ id, payload }`)── 平らな形で叩くと、
   //    **実際には決して通らない形**を test していることになる(実際に踏んだ)
   ctx.onmessage!({ data: { id, payload: job } });
@@ -58,7 +60,7 @@ async function send(id: number, job: DocxJob = JOB): Promise<unknown> {
   return sent.at(-1);
 }
 
-describe('docx worker', () => {
+describe('ooxml worker', () => {
   it('🔴 zip を返し、id をそのまま返す(応答の対応が崩れない)', async () => {
     const res = (await send(42)) as { id: number; ok: boolean; result: { blob: Blob } };
     expect(res.id).toBe(42);
@@ -69,7 +71,7 @@ describe('docx worker', () => {
 
   it('🔴 中身は同期経路と同じ(ワーカーは速さの話であって正しさの話ではない)', async () => {
     const res = (await send(1)) as { result: { blob: Blob } };
-    const direct = await assembleDocx(JOB);
+    const direct = await assembleOoxml(JOB);
     expect(await res.result.blob.text()).toBe(await direct.blob.text());
     expect(direct.counts.blocks).toBe(BLOCKS.length);
   });
@@ -87,11 +89,11 @@ describe('docx worker', () => {
   });
 });
 
-describe('docx client の落とし所', () => {
+describe('ooxml client の落とし所', () => {
   it('🔴 ワーカーが無い環境でも、同じ zip が出る', async () => {
     // node には `Worker` が無い ── 既定でこの経路に落ちる
-    const viaClient = await buildDocxFile(JOB);
-    const direct = await assembleDocx(JOB);
+    const viaClient = await buildOoxmlFile(JOB);
+    const direct = await assembleOoxml(JOB);
     expect(await viaClient.blob.text()).toBe(await direct.blob.text());
   });
 
@@ -100,14 +102,14 @@ describe('docx client の落とし所', () => {
    * ⚠ 起動に失敗する spawn を渡して、その場で組み直すことを見る。
    */
   it('🔴 ワーカーが失敗したら、その場で組み直す', async () => {
-    setDocxWorkerSpawn(() => {
+    setOoxmlWorkerSpawn(() => {
       throw new Error('spawn 失敗');
     });
     try {
-      const res = await buildDocxFile(JOB);
+      const res = await buildOoxmlFile(JOB);
       expect((await res.blob.text()).slice(0, 2)).toBe('PK');
     } finally {
-      setDocxWorkerSpawn(null);
+      setOoxmlWorkerSpawn(null);
     }
   });
 });
@@ -128,8 +130,8 @@ describe('client からワーカーへ実際に流れる', () => {
     onerror: unknown = null;
     onmessageerror: unknown = null;
     terminated = false;
-    postMessage(msg: { id: number; payload: DocxJob }): void {
-      void assembleDocx(msg.payload).then((result) => {
+    postMessage(msg: { id: number; payload: OoxmlJob }): void {
+      void assembleOoxml(msg.payload).then((result) => {
         this.onmessage?.({ data: { id: msg.id, ok: true, result } });
       });
     }
@@ -140,15 +142,15 @@ describe('client からワーカーへ実際に流れる', () => {
 
   it('🔴 ワーカーが組んだ zip がそのまま返る + ワーカーは使い回す', async () => {
     const made: FakeWorker[] = [];
-    setDocxWorkerSpawn(() => {
+    setOoxmlWorkerSpawn(() => {
       const w = new FakeWorker();
       made.push(w);
       return w as unknown as Worker;
     });
     try {
-      const a = await buildDocxFile(JOB);
-      const b = await buildDocxFile(JOB);
-      const direct = await assembleDocx(JOB);
+      const a = await buildOoxmlFile(JOB);
+      const b = await buildOoxmlFile(JOB);
+      const direct = await assembleOoxml(JOB);
       // ① ワーカー経由でも中身は同じ
       expect(await a.blob.text()).toBe(await direct.blob.text());
       expect(await b.blob.text()).toBe(await direct.blob.text());
@@ -157,12 +159,12 @@ describe('client からワーカーへ実際に流れる', () => {
       // ③ 空振り防止 ── 偽ワーカーが**本当に呼ばれた**(落とし所で組んでいない)
       expect(made[0]!.terminated).toBe(false);
     } finally {
-      setDocxWorkerSpawn(null);
+      setOoxmlWorkerSpawn(null);
     }
   });
 
   it('⚠ ワーカーが黙って壊れた応答を返しても、書き出しは落ちない', async () => {
-    setDocxWorkerSpawn(
+    setOoxmlWorkerSpawn(
       () =>
         ({
           onmessage: null,
@@ -175,10 +177,97 @@ describe('client からワーカーへ実際に流れる', () => {
         }) as unknown as Worker,
     );
     try {
-      const res = await buildDocxFile(JOB);
+      const res = await buildOoxmlFile(JOB);
       expect((await res.blob.text()).slice(0, 2)).toBe('PK');
     } finally {
-      setDocxWorkerSpawn(null);
+      setOoxmlWorkerSpawn(null);
     }
+  });
+});
+
+/**
+ * 🔴 **bytes は rels が指す先に入る**(#187 段⑤)。
+ *
+ * ⚠ ここまで、この対は **2 つの file に分かれて**いた ── 指す先を書くのは
+ * `docx.ts` / `pptx.ts`(純関数)、bytes を置くのは呼び側だった。
+ * つまり**片方だけ直すと「rels は在るのに絵が出ない」**という、
+ * 開くまで分からない形で壊れる(CLAUDE.md §7)。
+ * 🔑 いまは置く場所を `ooxml-assemble.ts` が決めるので、**ここで対を検める**。
+ */
+describe('宣言されて・実在して・指されて(bytes まで)', () => {
+  const PNG = new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: 'image/png' });
+  const WITH_IMAGE: DocxBlock[] = [
+    { kind: 'h', level: 1, runs: [{ text: '章' }] },
+    { kind: 'p', runs: [{ text: '本文' }] },
+    { kind: 'image', media: 'media/image1.png', widthPx: 100, heightPx: 50, alt: '絵' },
+  ];
+
+  /** zip の中の名前を全部。 */
+  const namesOf = async (blob: Blob): Promise<Set<string>> =>
+    new Set((await readZipDirectory(blob)).map((e) => e.name));
+
+  /** `a/_rels/b.xml.rels` の中の相対 Target を、zip の名前へ畳む。 */
+  const resolve = (relsName: string, target: string): string => {
+    const base = relsName.replace(/_rels\/[^/]+$/, '');
+    return (base + target)
+      .split('/')
+      .reduce<string[]>((acc, seg) => {
+        if (seg === '..') acc.pop();
+        else if (seg !== '' && seg !== '.') acc.push(seg);
+        return acc;
+      }, [])
+      .join('/');
+  };
+
+  for (const [kind, root] of [
+    ['docx', 'word'],
+    ['pptx', 'ppt'],
+  ] as const) {
+    it(`🔴 ${kind}: rels が指す先が zip に実在する(画像も含めて)`, async () => {
+      const job: OoxmlJob =
+        kind === 'docx'
+          ? {
+              kind: 'docx',
+              blocks: WITH_IMAGE,
+              title: 'ノート',
+              iso: '2026-08-24T00:00:00.000Z',
+              pageFormat: 'a4-portrait',
+              media: [{ name: 'media/image1.png', blob: PNG }],
+            }
+          : {
+              kind: 'pptx',
+              blocks: WITH_IMAGE,
+              title: 'ノート',
+              media: [{ name: 'media/image1.png', blob: PNG }],
+            };
+      const { blob } = await assembleOoxml(job);
+      const entries = await readZipDirectory(blob);
+      const names = await namesOf(blob);
+      // ⚠ 空振り防止 ── bytes が本当に入っていること
+      expect(names.has(`${root}/media/image1.png`), 'bytes が入っていない').toBe(true);
+      let checkedImages = 0;
+      for (const e of entries) {
+        if (!e.name.endsWith('.rels')) continue;
+        const text = await readZipText(blob, e);
+        for (const m of text.matchAll(/Type="([^"]+)"\s+Target="([^"]+)"/g)) {
+          const [, type, target] = m;
+          if (/^https?:/.test(target!)) continue;
+          const joined = resolve(e.name, target!);
+          expect(names.has(joined), `rels が指す先が無い: ${joined}(${e.name})`).toBe(true);
+          if (type!.endsWith('/image')) checkedImages += 1;
+        }
+      }
+      // 🔴 **画像の rels を 1 件も見ずに「全部通った」と言わない**
+      expect(checkedImages, '画像の関係を 1 件も検めていない').toBe(1);
+    });
+  }
+
+  it('🔴 pptx も同じ道を通る(ワーカーの落とし所も同じ zip を返す)', async () => {
+    const job: OoxmlJob = { kind: 'pptx', blocks: BLOCKS, title: 'ノート', media: [] };
+    const viaClient = await buildOoxmlFile(job);
+    const direct = await assembleOoxml(job);
+    expect(await viaClient.blob.text()).toBe(await direct.blob.text());
+    // ⚠ 空振り防止 ── pptx の部品が本当に入っていること
+    expect(await namesOf(viaClient.blob)).toContain('ppt/slides/slide1.xml');
   });
 });

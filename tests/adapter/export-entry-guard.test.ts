@@ -11,6 +11,7 @@ import {
   exportArchive,
   exportEntry,
   exportEntryDocx,
+  exportEntryPptx,
   type ExportDeps,
 } from '../../src/adapter/ui/actions/export-archive';
 import { answerDialog } from './dialog-helper';
@@ -200,6 +201,20 @@ describe('書き出す対象の解決', () => {
     const asked: string[] = [];
     bindActions(root, d, { exportEntryDocx: (lid) => asked.push(lid) });
     root.querySelector<HTMLElement>('[data-pkc-action="export-entry-docx"]')!.click();
+    expect(asked).toEqual(['other']);
+  });
+
+  /** 🔴 **PowerPoint も同じ規則で引く**(#187 段⑤)── 隣に並ぶ 4 つ目のボタンである。 */
+  it('🔴 PowerPoint の書き出しも行から closest で引く', () => {
+    const root = document.createElement('div');
+    root.innerHTML =
+      '<div data-pkc-entry="other"><button data-pkc-action="export-entry-pptx">PowerPoint</button></div>';
+    document.body.append(root);
+    const d = new Dispatcher();
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
+    const asked: string[] = [];
+    bindActions(root, d, { exportEntryPptx: (lid) => asked.push(lid) });
+    root.querySelector<HTMLElement>('[data-pkc-action="export-entry-pptx"]')!.click();
     expect(asked).toEqual(['other']);
   });
 });
@@ -659,5 +674,142 @@ describe('書き出す形式で本文を出し分ける(#187 段⑤)', () => {
     const html = renderMarkdown(BODY);
     expect(html).toContain('画面にだけ出る文');
     expect(html).not.toContain('Word にだけ出る文');
+  });
+});
+
+/**
+ * 🔴 **PowerPoint の出口**(#187 段⑤)。
+ *
+ * ⚠ ここが見るのは「純関数が正しいか」ではない(それは `pptx-export.test.ts`)──
+ * **押した先が本当に PowerPoint の file を落とすか**である。
+ * 🔑 Word と**同じ道**を通す作りにしたので、道が切れていれば
+ *   「PowerPoint だけ画像が入らない」という形で出る。
+ */
+describe('PowerPoint の出口(#187 段⑤)', () => {
+  const PNG = Uint8Array.from(
+    atob(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    ),
+    (c) => c.charCodeAt(0),
+  );
+
+  /** 押した結果落ちてきた file(名前と中身)。 */
+  async function exportOf(
+    body: string,
+    over: Partial<ExportDeps> = {},
+  ): Promise<{ name: string; text: string }> {
+    const got: Array<{ name: string; blob: Blob }> = [];
+    const d = {
+      ...deps(source({ getBody: async () => body })),
+      download: (name: string, blob: Blob) => got.push({ name, blob }),
+      renderBody: async (text: string, opts?: RenderMarkdownOptions) => renderMarkdown(text, opts),
+      ...over,
+    } as unknown as ExportDeps;
+    const { dispatcher } = fakeDispatcher('ready');
+    expect(await exportEntryPptx(dispatcher, d, 'n1'), '書き出しが失敗した').toBe(true);
+    expect(got, 'file が 1 つも落ちていない').toHaveLength(1);
+    return { name: got[0]!.name, text: await got[0]!.blob.text() };
+  }
+
+  it('🔴 .pptx が落ち、見出しでスライドが切れる', async () => {
+    const { name, text } = await exportOf('# 章\n\n## 副題\n\n### 節\n\n本文\n');
+    expect(name, '拡張子が pptx でない').toMatch(/\.pptx$/);
+    expect(text, 'スライドが入っていない').toContain('ppt/slides/slide1.xml');
+    // 扉(#)+ 本文(###)で 2 枚
+    expect(text, '2 枚目が無い ── 見出しで切れていない').toContain('ppt/slides/slide2.xml');
+    expect(text, '3 枚目まで作っている').not.toContain('ppt/slides/slide3.xml');
+  });
+
+  it('🔴 書き出したことを「枚数」で知らせる(塊の数では意味が伝わらない)', async () => {
+    const said: string[] = [];
+    const d = {
+      ...deps(source({ getBody: async () => '# 扉\n\n### 節\n\n本文\n' })),
+      download: () => {},
+      notify: (m: string) => said.push(m),
+      renderBody: async (text: string, opts?: RenderMarkdownOptions) => renderMarkdown(text, opts),
+    } as unknown as ExportDeps;
+    const { dispatcher } = fakeDispatcher('ready');
+    expect(await exportEntryPptx(dispatcher, d, 'n1')).toBe(true);
+    // ⚠ 「書き出しています…」→「書き出しました」の 2 本
+    expect(said.at(-1), '枚数で知らせていない').toContain('2 枚');
+    expect(said.at(-1), 'PowerPoint と名乗っていない').toContain('PowerPoint');
+  });
+
+  it('🔴 編集中は断る(保存したつもりの本文が入らない形を作らない)', async () => {
+    const d = deps(source({ getBody: async () => '本文' })) as unknown as ExportDeps;
+    const { dispatcher, dispatched } = fakeDispatcher('editing');
+    expect(await exportEntryPptx(dispatcher, d, 'n1')).toBe(false);
+    expect(dispatched[0]?.error, '断り文が出ていない').toContain('編集を終了');
+  });
+
+  it('🔴 添付が ppt/media に入り、スライドがそれを指す', async () => {
+    (globalThis as unknown as Record<string, unknown>).createImageBitmap = async () => ({
+      width: 200,
+      height: 100,
+      close: () => {},
+    });
+    const { text } = await exportOf('![絵](asset:ast-1)', {
+      source: source({
+        getBody: async () => '![絵](asset:ast-1)',
+        getAssetBlob: async () => new Blob([PNG], { type: 'image/png' }),
+      }),
+      // ⚠ 添付は `data-pkc-asset-key` で拾う(Word 側の test と同じ形)
+      renderBody: async () =>
+        '<p><img data-pkc-asset-key="ast-1" data-pkc-asset-name="絵.png" alt="絵"></p>',
+    });
+    expect(text, 'zip に画像が入っていない').toContain('ppt/media/image1.png');
+    expect(text, 'スライドが画像を指していない').toContain('<a:blip r:embed=');
+    // 🔴 目録に宣言が無いと PowerPoint は **file ごと拒む**
+    expect(text, 'png の宣言が無い').toContain('<Default Extension="png"');
+    expect(text, '本文が「写せませんでした」のまま').not.toContain('写せませんでした');
+  });
+
+  /**
+   * 🔴 **図はベクタ(EMF)で入る**(#238 と同じ向き)。
+   * ⚠ **`emf` の宣言が無いと PowerPoint は種類を決められない** ── 段⑤ で
+   *   `MEDIA_TYPES` に足すまで `application/octet-stream` になっていた。
+   */
+  it('🔴 図はベクタ(.emf)で入り、目録に emf が宣言される', async () => {
+    const VECTOR_SVG =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 60" id="v">' +
+      '<style>#v rect{fill:#f5f6f8;stroke:#cdd2d9;}</style>' +
+      '<rect x="10" y="10" width="100" height="40"/></svg>';
+    const { text } = await exportOf('```mermaid\ngraph TD; A-->B\n```\n', {
+      renderFigureVector: async () => VECTOR_SVG,
+    });
+    expect(text, 'ベクタで入っていない').toContain('ppt/media/figure1.emf');
+    expect(text, '目録に emf の宣言が無い').toContain(
+      '<Default Extension="emf" ContentType="image/x-emf"/>',
+    );
+    // 🔴 **原文が等幅で出ていない**(PKC2 の失敗の顔)
+    expect(text, '図の原文が本文に出ている').not.toContain('graph TD');
+  });
+
+  it('🔴 ベクタに起こせない図はラスタへ落とす(図が消えない)', async () => {
+    (globalThis as unknown as Record<string, unknown>).createImageBitmap = async () => ({
+      width: 720,
+      height: 480,
+      close: () => {},
+    });
+    const { text } = await exportOf('```mermaid\ngraph TD; A-->B\n```\n', {
+      renderFigureVector: async () => '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"></svg>',
+      renderFigure: async () => ({ blob: new Blob([PNG], { type: 'image/png' }), cssWidth: 360 }),
+    });
+    expect(text, 'ラスタへ落ちていない').toContain('ppt/media/figure1.png');
+    expect(text, 'ベクタが残っている').not.toContain('ppt/media/figure1.emf');
+  });
+
+  /**
+   * 🔴 **`:::if{format=pptx}` が生きる**(Word の `format=docx` と同じ向き)。
+   * ⚠ 渡していなければ「受理はするが永久に不可視」に戻る。
+   */
+  it('🔴 PowerPoint には pptx の塊が入り、docx / html の塊は入らない', async () => {
+    const { text } = await exportOf(
+      ':::if{format=pptx}\nスライドにだけ出る文\n:::\n\n' +
+        ':::if{format=docx}\nWord にだけ出る文\n:::\n\nいつも出る文\n',
+    );
+    expect(text, 'pptx 向けの本文が出ていない').toContain('スライドにだけ出る文');
+    expect(text, 'Word 向けの本文まで出ている').not.toContain('Word にだけ出る文');
+    expect(text, '共通の本文が落ちている').toContain('いつも出る文');
   });
 });
