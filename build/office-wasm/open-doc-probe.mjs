@@ -390,9 +390,57 @@ try {
   const t0 = Date.now();
   await page.goto(NO_DOC ? `${base}/office/host.html` : `${base}/office/host.html?await-doc=1&name=${encodeURIComponent(NAME)}`, { waitUntil: 'commit' });
 
+  /**
+   * 🔴 **止まった相手を「外から突いて」みる**(#199 の 4 巡目、2026-08-24)。
+   *
+   * 4 巡目で分かったのは「`QtInstance::DoYield` の**枝 A**(Qt スレッド自身)に入り、
+   * `ImplYield()` から**戻ってこない**」ところまでである(`yield:enter a=1` は出るが
+   * `yield:ret` が出ない / 対照群は 5 往復)。⚠ **戻らない理由は 2 通り**:
+   *   ① 待っている event が**永久に来ない**(誰も起こさない)
+   *   ② ループの中で**何かを掴んだまま**動けない(本物の deadlock)
+   *
+   * 🔑 **①なら、外から本物の入力を入れれば動き出す。** ②なら何をしても動かない。
+   * だから `PKC3_POKE=<秒>` を渡した回だけ、その秒数のあとに
+   * **実ブラウザの mouse / key を版面へ入れて**、その後も測り続ける。
+   * ⚠ 既定では突かない ── 既存の測り方(放っておくとどうなるか)を汚さない。
+   * ⚠ 突いた時刻を `result.poked` に残す(「突く前に開いた」と混ぜないため)。
+   */
+  const POKE_SEC = Number(process.env.PKC3_POKE ?? 0);
+  let poked = false;
+
   let deadStreak = 0;
   for (let i = 0; i * 5 < LIMIT_SEC; i += 1) {
     await page.waitForTimeout(5_000);
+    if (POKE_SEC > 0 && !poked && (Date.now() - t0) / 1000 >= POKE_SEC) {
+      poked = true;
+      result.poked = { atSec: Math.round((Date.now() - t0) / 1000) };
+      try {
+        /**
+         * 🔴 **突きが「届いた」ことを、突き自身に証明させる**(対照群の代わり)。
+         *
+         * ⚠ 詰まった回は版面が凍っているので、**絵が変わったか**では届いたか分からない
+         * (届いても変わらない)。🔑 だから **頁の DOM が event を受け取ったか**を数える
+         * ── capture 段で数えれば、Qt が食う前に通る。
+         * ⚠ ここが 0 なら**突きが届いていない**ので、その回は「動かなかった」と読まない
+         * (CLAUDE.md「対照群が届かない回は判定不能」)。
+         */
+        await page.evaluate(() => {
+          const w = globalThis;
+          w.__pkc3Poke = { down: 0, key: 0, move: 0 };
+          w.addEventListener('mousedown', () => { w.__pkc3Poke.down += 1; }, true);
+          w.addEventListener('keydown', () => { w.__pkc3Poke.key += 1; }, true);
+          w.addEventListener('mousemove', () => { w.__pkc3Poke.move += 1; }, true);
+        });
+        await page.mouse.move(640, 400);
+        await page.mouse.click(640, 400);
+        await page.keyboard.press('Shift');
+        await page.mouse.move(660, 420);
+        await page.waitForTimeout(1000);
+        result.poked.seen = await page.evaluate(() => globalThis.__pkc3Poke ?? null);
+      } catch (e) {
+        result.poked.err = safeErr(e);
+      }
+    }
     let alive = false;
     let canvas = 0;
     let title = null;

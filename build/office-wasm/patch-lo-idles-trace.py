@@ -264,6 +264,66 @@ QT_SRC = "vcl/qt5/QtInstance.cxx"
 #    🔑 手元で撮った stack とも噛み合う ── 詰まった回は **worker が 2 本**止まって
 #    おり(片方は #199 の `IdlesLockGuard`)、**ブラウザの主スレッドは暇**だった
 #    (`Debugger.pause` が頁の `alive` で止まった = wasm を実行していない)。
+QT_IMPL_ANCHOR = """bool QtInstance::ImplYield(bool bWait, bool bHandleAllCurrentEvents)
+{
+    // Re-acquire the guard for user events when called via Q_EMIT ImplYieldSignal
+    SolarMutexGuard aGuard;
+    bool wasEvent = DispatchUserEvents(bHandleAllCurrentEvents);
+"""
+QT_IMPL_REPLACE = """bool QtInstance::ImplYield(bool bWait, bool bHandleAllCurrentEvents)
+{
+    // 🔴 **5 巡目**(2026-08-24)。4 巡目で「枝 A に入り `ImplYield()` から戻らない」
+    //    ところまで確定し、**外から本物の入力を入れても動かない**ことも測った
+    //    (頁の DOM は keydown 1 / mousemove 3 を受け取っている)。
+    //    ⚠ つまり「event が来ないだけ」ではない。残るのは**何かを掴んで動けない**側。
+    // 🔑 いちばん疑わしいのは**この直後の `SolarMutexGuard`** である ── ここで
+    //    止まると、user event を配る前に固まるので、外からの入力も一切効かない。
+    //    ⚠ `yield:impl` が出て `yield:guard` が出なければ、**それが答え**である。
+    {
+        static int nPkc3Impl = 0;
+        if (nPkc3Impl < 5)
+        {
+            ++nPkc3Impl;
+            pkc3_idles_trace("yield:impl", bWait ? 1 : 0, -1, nPkc3Impl);
+        }
+    }
+    // Re-acquire the guard for user events when called via Q_EMIT ImplYieldSignal
+    SolarMutexGuard aGuard;
+    {
+        static int nPkc3Guard = 0;
+        if (nPkc3Guard < 5)
+        {
+            ++nPkc3Guard;
+            pkc3_idles_trace("yield:guard", -1, -1, nPkc3Guard);
+        }
+    }
+    bool wasEvent = DispatchUserEvents(bHandleAllCurrentEvents);
+    {
+        // ⚠ 配れたか(`PostUserEvent` で積まれたものが、ここで捌かれる)
+        static int nPkc3Disp = 0;
+        if (nPkc3Disp < 5)
+        {
+            ++nPkc3Disp;
+            pkc3_idles_trace("yield:disp", wasEvent ? 1 : 0, -1, nPkc3Disp);
+        }
+    }
+"""
+QT_PROC_ANCHOR = """    SolarMutexReleaser aReleaser;
+    QAbstractEventDispatcher* dispatcher = QAbstractEventDispatcher::instance(qApp->thread());
+"""
+QT_PROC_REPLACE = """    SolarMutexReleaser aReleaser;
+    {
+        // ⚠ ここまで来ていれば、止まっているのは Qt の event 待ちのほうである
+        static int nPkc3Proc = 0;
+        if (nPkc3Proc < 5)
+        {
+            ++nPkc3Proc;
+            pkc3_idles_trace("yield:proc", -1, -1, nPkc3Proc);
+        }
+    }
+    QAbstractEventDispatcher* dispatcher = QAbstractEventDispatcher::instance(qApp->thread());
+"""
+
 QT_ENTER_ANCHOR = """bool QtInstance::DoYield(bool bWait, bool bHandleAllCurrentEvents)
 {
     bool bWasEvent = false;
@@ -331,7 +391,10 @@ QT_WAIT_REPLACE = """        if (!bWasEvent && bWait)
 HELPER_TARGETS = (
     (SCHED_SRC, "Scheduler::IdlesLockGuard::IdlesLockGuard()\n{\n"),
     (APP_SRC, "void Application::Execute()\n{\n"),
-    (QT_SRC, "bool QtInstance::DoYield(bool bWait, bool bHandleAllCurrentEvents)\n{\n"),
+    # 🔴 **`ImplYield` は `DoYield` より前に在る**(454 行 vs 475 行)。
+    #    ⚠ ヘルパーを `DoYield` の直前へ入れると、`ImplYield` から呼べない
+    #    (宣言より前で使うことになる)。**先に在るほうへ入れる。**
+    (QT_SRC, "bool QtInstance::ImplYield(bool bWait, bool bHandleAllCurrentEvents)\n{\n"),
 )
 # ⚠ ヘルパーは TU ごとに 1 つ要る ── 当てる先が 2 file なので 2 つ入る。
 TARGETS = (
@@ -340,6 +403,8 @@ TARGETS = (
     (QT_SRC, QT_ENTER_ANCHOR, QT_ENTER_REPLACE),
     (QT_SRC, QT_PROXY_ANCHOR, QT_PROXY_REPLACE),
     (QT_SRC, QT_WAIT_ANCHOR, QT_WAIT_REPLACE),
+    (QT_SRC, QT_IMPL_ANCHOR, QT_IMPL_REPLACE),
+    (QT_SRC, QT_PROC_ANCHOR, QT_PROC_REPLACE),
 )
 
 
