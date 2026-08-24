@@ -295,6 +295,9 @@ describe('2 ペインの面(描画)', () => {
       ['dual-move', 'F6', '移す'],
       ['dual-rename-begin', 'F2', '名前'],
       ['dual-mkdir', 'F7', 'フォルダ'],
+      // 🔴 **入れ物だけでなく中身も作れる**(#273)── `F7` と隣り合わない鍵にしてある
+      //    (隣り合わせると、押し間違いで**別の種類**ができる)
+      ['dual-mknote', 'Shift + F4', 'ノート'],
       ['dual-delete', 'F8', 'ゴミ箱'],
     ]);
   });
@@ -1111,31 +1114,54 @@ describe('2 ペインの配線(binder)', () => {
    *   ここが縛りたいのは「壊れた値をそもそも流さない」ほうである。
    */
   it('数として読めないタブの添字は、dispatch にも届かない', () => {
-    const btn = document.createElement('button');
-    btn.setAttribute('data-pkc-action', 'dual-tab-close');
-    btn.setAttribute('data-pkc-side', 'left');
-    btn.setAttribute('data-pkc-tab', 'x');
-    region.append(btn);
+    /**
+     * ⚠ **観測点を「タブの命令」へ絞る**(2026-08-24、#273 で組み直した)。
+     * 直す前は「撃った全部が `['DUAL_TAB_CLOSE']` と等しい」で見ていたが、
+     * `dual-tab-close` は**押した後に焦点を立て直す**(`carryDualFocus`)ので
+     * `DUAL_SET_CURSOR` が続く ── 等値では**焦点の直しを入れた日に落ちる**。
+     * 🔑 ここが縛りたいのは「**壊れた添字がタブの命令に化けないこと**」なので、
+     *   数えるのは `DUAL_TAB_*` だけにする(3 種を前置きで拾う ── 別のタブ命令へ
+     *   すり替える変異も同じ網に掛かる)。
+     * ⚠ そのうえで**残りは許可制**にする ── 焦点の直し以外が紛れ込んだら落ちる
+     *   (絞ったせいで「何でも通る」にしない)。
+     * 🔑 **実測**(2026-08-24): 壊れた添字でも `seen` は空にならず
+     *   `DUAL_SET_CURSOR` が **2 件**出る ── `carryDualFocus` の立て直しと、
+     *   それが `focus()` した結果の `focusin`(state → 焦点 / 焦点 → state の
+     *   2 本の橋。同じ値なので reducer が畳む)。⚠ つまりこの検査は
+     *   「**記録が空だから通った**」ではない(空振りではない)。
+     */
     const seen: string[] = [];
     const orig = d.dispatch.bind(d);
     d.dispatch = (a) => {
       seen.push(a.type);
       return orig(a);
     };
+    const tabOnes = (): string[] => seen.filter((t) => t.startsWith('DUAL_TAB_'));
     try {
+      const btn = document.createElement('button');
+      btn.setAttribute('data-pkc-action', 'dual-tab-close');
+      btn.setAttribute('data-pkc-side', 'left');
+      btn.setAttribute('data-pkc-tab', 'x');
+      region.append(btn);
       click(btn);
+      expect(tabOnes(), '壊れた添字がタブの命令になって流れた').toEqual([]);
+      expect(
+        seen.filter((t) => t !== 'DUAL_SET_CURSOR'),
+        '焦点の立て直し以外が走っている(観測点を絞りすぎたか、別の副作用が入った)',
+      ).toEqual([]);
       /**
        * ⚠ **空振り防止**(2026-08-19、リリース前監査)── 「0 件だった」は
        * 「弾いた」だけでなく「**そもそも handler に届かなかった**」でも成り立つ。
        * 🔑 同じ仕掛けで**正しい添字**を撃ち、そちらは届くことを見る。
        */
+      seen.length = 0;
       const ok = document.createElement('button');
       ok.setAttribute('data-pkc-action', 'dual-tab-close');
       ok.setAttribute('data-pkc-side', 'left');
       ok.setAttribute('data-pkc-tab', '0');
       region.append(ok);
       click(ok);
-      expect(seen, 'そもそも handler に届いていない(この test は空振り)').toEqual([
+      expect(tabOnes(), 'そもそも handler に届いていない(この test は空振り)').toEqual([
         'DUAL_TAB_CLOSE',
       ]);
     } finally {
@@ -1570,6 +1596,56 @@ describe('2 ペインのキーボード操作(#273)', () => {
       st.relations.some((r) => r.kind === 'structural' && r.fromLid === 'f1' && r.toLid === made.lid),
       '開いている場所の中に作られていない',
     ).toBe(true);
+  });
+
+  /**
+   * 🔴 **入れ物だけでなく中身も作れる**(#273)。
+   *
+   * ⚠ 直す前は `dual-mkdir`(フォルダ)しか無く、整理の面で 1 枚メモを置くのに
+   *   左の列へ戻る → 作る → 開き直す → 移す、の 4 手が要った。
+   * 🔑 見るのは **種類**と**入れ先**の 2 つ ── どちらかだけだと、
+   *   「フォルダができた」も「左の列の現在地にできた」も緑で通る。
+   */
+  it('🔴 「新しいノート」は、そのペインの場所に text で作る(面から出ない)', () => {
+    d.dispatch({ type: 'DUAL_SET_SCOPE', side: 'left', lid: 'f1' });
+    const before = d.getState().entryMetas.size;
+    const btn = region.querySelector<HTMLElement>('[data-pkc-field="dual-mknote"]')!;
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    const st = d.getState();
+    expect(st.entryMetas.size, 'ノートが増えていない').toBe(before + 1);
+    expect(st.phase, '編集に入って面から出た').toBe('ready');
+    const made = [...st.entryMetas.values()].find((m) => m.title === '新しいノート')!;
+    expect(made, 'ノートが見つからない(名前が違う)').toBeDefined();
+    // 🔴 **種類** ── フォルダと同じ口を通すので、ここを取り違えると入れ物ができる
+    expect(made.archetype, 'フォルダになっている').toBe('text');
+    // 🔑 **入れ先** ── 左の列の現在地ではなく、そのペインが開いている場所
+    expect(
+      st.relations.some(
+        (r) => r.kind === 'structural' && r.fromLid === 'f1' && r.toLid === made.lid,
+      ),
+      '開いている場所の中に作られていない',
+    ).toBe(true);
+  });
+
+  /**
+   * ⚠ **断り文は「押した場所」と対で pin する**(CLAUDE.md §1)── フォルダと
+   *   同じ口を通すので、呼び名を取り違えると **user は別のものを探す**。
+   */
+  it('🔴 編集中は「ノートを作ってください」と断る(フォルダと呼び違えない)', () => {
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '' });
+    d.dispatch({ type: 'START_EDIT' });
+    const before = d.getState().entryMetas.size;
+    region
+      .querySelector<HTMLElement>('[data-pkc-field="dual-mknote"]')!
+      .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(d.getState().entryMetas.size, '編集中なのに作られた').toBe(before);
+    expect(d.getState().error ?? '').toContain('ノートを作ってください');
+    // ⚠ 対照群 ── フォルダ側は「フォルダを作ってください」と言う(同じ字にしない)
+    region
+      .querySelector<HTMLElement>('[data-pkc-field="dual-mkdir"]')!
+      .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(d.getState().error ?? '').toContain('フォルダを作ってください');
   });
 
   /**

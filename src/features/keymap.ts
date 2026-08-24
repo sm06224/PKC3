@@ -239,6 +239,23 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['dual'],
     defaults: ['F7'],
   },
+  /**
+   * 🔴 **整理の面で、入れ物だけでなく中身も作れるようにする**(#273)。
+   *
+   * ⚠ 直す前は `dual-new-folder` しか無く、**「フォルダは作れるがノートは作れない」**
+   *   という非対称だった ── 整理の途中で「ここに 1 枚メモを置きたい」と思っても、
+   *   左の列へ戻って作り、開き直して移す、という 3 手が要った。
+   * 🔑 鍵は **`Shift+F4`** ── Total Commander / Krusader が「新しいテキスト file」に
+   *   割り当てている手であり、`F7`(フォルダ)と隣り合わない
+   *   (⚠ 隣り合わせると、押し間違いで**別の種類**ができる)。
+   */
+  {
+    id: 'dual-new-note',
+    label: 'いまの場所にノートを作る',
+    contexts: ['dual'],
+    defaults: ['Shift+F4'],
+    note: '作っても本文の面へは移りません(整理を続けられます)',
+  },
   {
     id: 'dual-other-pane',
     label: '反対のペインへ移る',
