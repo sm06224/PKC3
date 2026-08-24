@@ -676,6 +676,23 @@ jobs:
           test "$mo" -gt 0
           test "$pack" -gt 0
 
+      # 🔴 **配る物そのものを検める**(#225。2026-08-24)。
+      #    非 ODF の保存が「一般的な I/O エラー」で落ちていた原因は、確認ダイアログの
+      #    `cui/ui/querydialog.ui` が**一式に入っていなかった**ことだった。
+      #    ⚠ **このとき鳴った計器は 1 つも無い** ── `patch-lo-uifiles.py` の tripwire は
+      #    **一覧(mk)の側**しか見ず、上の検品は**日本語の翻訳しか数えていない**。
+      #    🔑 だから目録(= 実際に詰め込まれた物)と一覧を **1 件ずつ**突き合わせる。
+      #    ⚠ **件数ではなく集合**で見る(同じ数だけ取り違えても件数は合う)。
+      #    ⚠ **両方向を見る** ── 「配られていない」は詰め込みの取りこぼし、
+      #    「一覧に無いのに配られた」は**こちらの読み方が上流に追随できていない**合図。
+      #    実測(2026-08-24、LO 770ef72c): 1,090 対 1,090 で両方向とも 0 件。
+      - name: 検品(ダイアログの .ui が一覧どおり配られたか)
+        if: ${{ !cancelled() }}
+        run: |
+          python3 "$GITHUB_WORKSPACE"/build/office-wasm/check-fs-image-uifiles.py \
+            ~/lo-core/static/CustomTarget_emscripten_fs_image.mk \
+            ~/lo-core/workdir/installation/LibreOffice/emscripten/soffice.data.js.metadata
+
       # 🔴 **手元で回せるようにする**(user 指示 2026-08-10
       #    「ビルド通ってるんだから、あなたの環境に落として試せばいいんじゃない?」)。
       #    ⚠ **artifact は API 経由でしか落とせず、この箱からは api.github.com が 403**。
