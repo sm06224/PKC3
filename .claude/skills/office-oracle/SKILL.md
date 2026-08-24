@@ -180,3 +180,67 @@ print(data.count(s.encode()), data.count(s.encode('utf-16-le')))
 
 ⚠ そして**在る / 無いは「リンクされたか」までしか言わない** ── 動くかは別である。
 名前が在るのに落ちるなら、原因は**実行時**(#225 の docx がまさにこれ)。
+
+## 9. 🔴 「保存できたか」の判定(2026-08-24、#225 で確立)
+
+**`save-existing-probe.mjs <pack> <doc> <out.json> <秒>`** で測る。
+
+```bash
+PKC3_FRAMES=1 PKC3_ACCEPT='Alt+e' \
+  node build/office-wasm/save-existing-probe.mjs /tmp/lo-x-pack /tmp/probe.docx /tmp/out.json 300
+```
+
+- ⚠ **`PKC3_FRAMES=1` を渡さないと `actuated` が `null`** = その回は**判定不能**
+- `PKC3_ACCEPT=<鍵>` … 非 ODF は「標準のファイル形式ではありません」と**訊かれる**ので、
+  答えないと保存は始まらない。🔑 **`Alt+e` は形式に依らず「この形式のままにする」**
+  (Writer / Calc / Impress の 7 形式で同じだった ── 訳文の綴りが 1 つだから)
+- `saveTrace` は**答える前**、`saveTraceAfterAccept` は**答えた後**。片方だけ見て
+  「保存できた」と読まない
+
+### 🔴 判定は 3 点で採る(**大きさだけを見ない**)
+
+| 見るもの | なぜ |
+|---|---|
+| **mtime が動いたか** | ⚠ **`.xls` は大きさが 1 バイトも動かない**(BIFF は区画の大きさが決まっている) |
+| `medium:commit a=1` | 実装側が「行き先へ移した」と言っている(`PKC3_SAVE_TRACE=1` の焼きのみ) |
+| PKC が取り込んだか | `steps[].saved` ── 下流まで届いた証拠 |
+
+⚠ **最初の打鍵(`actuators[0].landed`)が `false` の回は、保存の失敗として数えない。**
+実測(9 形式スイープ): 届いた回は **8/8** で保存でき、届かなかった回は **3/3** で
+保存されない ── 分かれ方が**形式ではなく計器と一致**していた。回し直せば通る。
+🔑 非対称でよい:**保存が走った証拠は、どの打鍵が効いたかに依らず読める**が、
+**走らなかったことは、入力が届いた対照群が無いと言えない**。
+⚠ Impress は遅い ── `timeout` を 900 / probe の秒を 600 にしないと**probe ごと殺され**、
+`Target page … has been closed` になる(それは「保存できない」ではない)。
+
+### 対照群の file を作る(native の LibreOffice で)
+
+```bash
+export HOME=/tmp/fx-home; mkdir -p $HOME
+soffice --headless --convert-to rtf  --outdir /tmp/fx /tmp/fx/seed.odt
+soffice --headless --convert-to xlsx --outdir /tmp/fx /tmp/fx/seed.ods
+```
+
+⚠ **`--convert-to "rtf:"` と書かない**(末尾のコロンで `Error: no export filter`)。
+⚠ `libreoffice-writer` / `-calc` / `-impress` が入っていること(`libreoffice-core` だけだと
+**対照群も開かない** ── §0)。
+
+## 10. 🔴 その一式が非 ODF を保存できるか(#225)
+
+**`cui/ui/querydialog.ui` が詰め込まれているか**の 1 点で決まる。無い一式では、
+非 ODF の保存が例外になり「一般的な I/O エラー」に化ける(押すまで分からない)。
+
+```bash
+python3 -c "
+import json;d=json.load(open('<pack>/soffice.data.js.metadata'))
+print(sum(1 for f in d['files'] if f['filename'].endswith('/cui/ui/querydialog.ui')))"
+```
+
+🔴 **完全一致で見る。** `grep -c "querydialog.ui"` は**古い一式でも 1 件返す** ──
+`vcl/ui/querydialog.ui` / `recalcquerydialog.ui` / `safemodequerydialog.ui` に
+満たされる(実測: 古い一式 4 つは完全一致 0 件 / 部分一致 3 件)。
+
+## 11. ⚠ 焼きは 1 本ずつ投げる
+
+2 本同時に dispatch したら**片方が 4 時間 11 分**かかった(単独なら 29〜33 分)。
+runner を奪い合うので、**2 本が 2 倍ではなく 8 倍**になる。
