@@ -111,6 +111,17 @@ const SHOT = process.env.PKC3_SHOT ?? '';
 /** 🔴 開いた状態で IME の門を読むか(#156 段②)。⚠ 既定は読まない。 */
 const IME = process.env.PKC3_IME === '1';
 /**
+ * 🔴 **スレッドの内訳を読む**(#199 の「次の一手 ①」)。⚠ **既定では何もしない。**
+ * ⚠ `PKC3_IME` とは別の口である ── あちらは版面を押して打つので、
+ *   「詰まっている最中」を見たいこちらと**混ぜてはいけない**。
+ */
+const PTHREAD = process.env.PKC3_PTHREAD === '1';
+/**
+ * 🔴 **全 worker の stack を 1 枚撮る**(#199 の「次の一手 ②」)。⚠ 既定では何もしない。
+ * ⚠ `PKC3_PTHREAD` の内訳が**死んだ観測点**だったので足した(下の実装を参照)。
+ */
+const STACKS = process.env.PKC3_STACKS === '1';
+/**
  * 🔴 **打鍵が「その場で版面に出るか」を測るか**(#154 段①)。⚠ 既定は測らない。
  *
  * 実機レポート #7(2/2): Impress は**打っている間、画面が更新されない** ──
@@ -188,6 +199,58 @@ const CANVAS_BOX = `(() => {
   return best;
 })()`;
 /**
+ * 🔴 **詰まっている最中のスレッドの内訳**(#199 の「次の一手 ①」、2026-08-24)。
+ *
+ * ⚠ **`PKC3_PTHREAD=1` を渡した回だけ読む** ── 既定の使い方を変えない。
+ * 🔴 **未 export の名前は「読んだ瞬間に abort する getter」である**(この file の頭)。
+ *   だから値を取る前に **`getOwnPropertyDescriptor` で見る** ── 記述子を見るのは
+ *   getter を発火させない。⚠ `lo.PThread` と素で書いた瞬間、計装の入っていない
+ *   一式では **LO ごと死ぬ**(調査で実際に踏み、5 秒ごとの観測が 5 秒ごとに対象を殺した)。
+ * ⚠ 触るのは **`runningWorkers` / `unusedWorkers` の列挙だけ**
+ *   (`patch-lo-memory.py` が出しているのはそこまで)。
+ * 🔑 返り値で 3 つを見分ける:
+ *     `null`   = この一式は `PThread` を出していない(= 測っていない)
+ *     `{...}`  = 読めた
+ *     `{err}`  = 読もうとして落ちた(**空と混ぜない**)
+ */
+const PTHREADS = `(() => {
+  try {
+    const lo = globalThis.__lo;
+    if (!lo) return null;
+    const d = Object.getOwnPropertyDescriptor(lo, 'PThread');
+    // ⚠ 記述子が getter なら**触らない**(発火させると abort する)
+    if (!d || d.get !== undefined || d.value === undefined || d.value === null) return null;
+    const P = d.value;
+    const names = (v) => {
+      if (!v) return null;
+      const arr = Array.isArray(v) ? v : (typeof v.values === 'function' ? Array.from(v.values()) : null);
+      if (arr === null) return null;
+      return arr.map((w) => {
+        try { return typeof w.name === 'string' && w.name.length > 0 ? w.name : '(名前なし)'; }
+        catch (e) { return '(読めない)'; }
+      });
+    };
+    const run = names(P.runningWorkers);
+    const idle = names(P.unusedWorkers);
+    const ed = Object.getOwnPropertyDescriptor(lo, 'ENV');
+    const env = !ed || ed.get !== undefined || !ed.value ? null : {
+      VCL_NO_THREAD_SCALE: ed.value.VCL_NO_THREAD_SCALE ?? null,
+      VCL_NO_THREAD_IMPORT: ed.value.VCL_NO_THREAD_IMPORT ?? null,
+      MAX_CONCURRENCY: ed.value.MAX_CONCURRENCY ?? null,
+    };
+    return {
+      running: run === null ? null : run.length,
+      unused: idle === null ? null : idle.length,
+      runningNames: run,
+      unusedNames: idle,
+      env,
+    };
+  } catch (e) {
+    return { err: String(e).slice(0, 120) };
+  }
+})()`;
+
+/**
  * 🔴 **渡す原文を、走らせる前に構文として検める**(2026-08-24 に踏んだ)。
  *
  * ⚠ `IME_TRACE` は**書いた日から一度も成立していなかった** ── 原文の中に
@@ -199,7 +262,7 @@ const CANVAS_BOX = `(() => {
  * 🔑 だから**名前を付けて先に落とす** ── 原文が壊れているのか、相手の頁で
  *   取れなかったのかを、出力だけで区別できるようにする。
  */
-for (const [name, src] of Object.entries({ IME_DEEP, IME_TRACE, CANVAS_BOX })) {
+for (const [name, src] of Object.entries({ IME_DEEP, IME_TRACE, CANVAS_BOX, PTHREADS })) {
   try {
     new Function(`return ${src}`);
   } catch (e) {
@@ -384,7 +447,31 @@ try {
       alive = false;
     }
     deadStreak = alive ? 0 : deadStreak + 1;
-    result.samples.push({ atSec: Math.round((Date.now() - t0) / 1000), alive, canvas, title, msg });
+    /**
+     * 🔴 **詰まっている最中に読む**(#199)。⚠ 開いた後ではなく**各サンプル**で採る ──
+     *   開かない文書が相手なので、「開いた」を待つと**一度も読めない**。
+     * ⚠ メインスレッドが応答しない回は `alive` が偽なので、そこでは読まない
+     *   (読もうとしても `evaluate` が返らない)。
+     */
+    let threads;
+    if (PTHREAD && alive) {
+      try {
+        threads = await Promise.race([
+          page.evaluate(PTHREADS),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('unresponsive')), 4000)),
+        ]);
+      } catch {
+        threads = { err: 'unresponsive' };
+      }
+    }
+    result.samples.push({
+      atSec: Math.round((Date.now() - t0) / 1000),
+      alive,
+      canvas,
+      title,
+      msg,
+      ...(threads === undefined ? {} : { threads }),
+    });
     // 🔑 「開けた」= Qt が窓の題名を差し替えたとき(Writer / Calc / Impress の名が出る)
     // 🔑 「開けた」= 窓の題名に**渡した名前**が出たとき(名前はこちらが付けた `doc.docx`)
     // 🔑 名前だけでは足りない(host の帯に出る)── **Qt の器の中で**両方が揃った時
@@ -562,6 +649,91 @@ try {
       result.redraw = { err: safeErr(e) };
     }
   }
+  /**
+   * 🔴 **詰まっている相手を「名前で」言う ── 全 worker の stack を 1 枚撮る**
+   * (#199 の「次の一手 ②」、2026-08-24)。
+   *
+   * ⚠ **`PKC3_STACKS=1` を渡した回だけ**。既定の使い方を変えない。
+   * 🔑 ここが要るのは、①(`PThread` の内訳)が**死んだ観測点**だったからである ──
+   *   詰まった回と開いた回で **`running:2 / unused:14` が完全に同じ**だった
+   *   (2026-08-24 実測。対照群つき)。数では言えないので、**中身**を見る。
+   * ⚠ 名前が読めるのは `profiling_funcs: true` で焼いた一式だけ ── 素の一式では
+   *   `$funcNNNN` になる。**それでも「止まっているか / どこに居るか」は分かる**ので、
+   *   まず機構が通ることを確かめる。
+   * 🔑 返り値で 3 つを見分ける:
+   *     `{ workers: 0 }`      = worker が 1 つも見えない(機構が通っていない)
+   *     `{ err: ... }`        = 撮ろうとして落ちた
+   *     `{ frames: [...] }`   = 撮れた
+   * ⚠ **1 本ずつ時限を切る** ── futex で寝ている worker は `Debugger.pause` に
+   *   応じないことがある。応じない 1 本のために全部を失わない。
+   */
+  if (STACKS) {
+    /**
+     * ⚠ **Playwright は worker に CDP を張れない**(2026-08-24 実測:
+     *   `browser.newCDPSession(worker)` は `expected Page or Frame` で断る)。
+     * 🔑 だから **target 越しに送る** ── 頁の session から `Target.attachToTarget`
+     *   して `sessionId` を貰い、`Target.sendMessageToTarget` で包んで渡す
+     *   (返事は `Target.receivedMessageFromTarget` で戻る)。
+     * ⚠ この 2 つは deprecated なので、**無ければ無いと書く**(黙って 0 件にしない)。
+     */
+    const shot = { workers: page.workers().length, stacks: [] };
+    try {
+      const cdp = await browser.newCDPSession(page);
+      const waiters = new Map();
+      let seq = 0;
+      cdp.on('Target.receivedMessageFromTarget', (e) => {
+        let msg;
+        try { msg = JSON.parse(e.message); } catch { return; }
+        const key = `${e.sessionId}:${msg.id}`;
+        const w = waiters.get(key);
+        if (w) { waiters.delete(key); w(msg); }
+        if (msg.method === 'Debugger.paused') {
+          const p = waiters.get(`${e.sessionId}:paused`);
+          if (p) { waiters.delete(`${e.sessionId}:paused`); p(msg.params); }
+        }
+      });
+      const call = (sessionId, method, params = {}) => {
+        seq += 1;
+        const id = seq;
+        const done = new Promise((ok) => waiters.set(`${sessionId}:${id}`, ok));
+        return cdp
+          .send('Target.sendMessageToTarget', { sessionId, message: JSON.stringify({ id, method, params }) })
+          .then(() => Promise.race([done, new Promise((ok) => setTimeout(() => ok(null), 4000))]));
+      };
+      const { targetInfos } = await cdp.send('Target.getTargets');
+      const workers = targetInfos.filter((t) => t.type === 'worker' || t.type === 'shared_worker');
+      shot.targets = workers.length;
+      for (const [i, t] of workers.entries()) {
+        const one = { i, type: t.type };
+        try {
+          const { sessionId } = await cdp.send('Target.attachToTarget', { targetId: t.targetId, flatten: false });
+          one.attached = true;
+          await call(sessionId, 'Debugger.enable');
+          const paused = new Promise((ok) => waiters.set(`${sessionId}:paused`, ok));
+          await call(sessionId, 'Debugger.pause');
+          const ev = await Promise.race([paused, new Promise((ok) => setTimeout(() => ok(null), 4000))]);
+          // ⚠ **応じなかった回は `null`**(空配列にしない ── 「寝ている」と「枠が無い」は別)
+          one.frames =
+            ev === null
+              ? null
+              : (ev.callFrames ?? []).slice(0, 20).map((f) => ({
+                  fn: String(f.functionName ?? '').slice(0, 80),
+                  url: String(f.url ?? '').slice(-40),
+                }));
+          await call(sessionId, 'Debugger.resume');
+          await cdp.send('Target.detachFromTarget', { sessionId }).catch(() => {});
+        } catch (e) {
+          one.err = safeErr(e);
+        }
+        shot.stacks.push(one);
+      }
+      await cdp.detach().catch(() => {});
+    } catch (e) {
+      shot.err = safeErr(e);
+    }
+    result.stacks = shot;
+  }
+
   if (SHOT) {
     try { await page.screenshot({ path: SHOT }); } catch { /* 固まっていたら撮れない */ }
   }

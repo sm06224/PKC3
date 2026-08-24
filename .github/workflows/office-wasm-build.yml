@@ -380,7 +380,15 @@ jobs:
           #    立てているのに Qt が受付可否を取り直さない。直しは LO 側の 1 行
           #    (`QGuiApplication::inputMethod()->update(Qt::ImEnabled)`)で、
           #    ⚠ **こちらは既定で当たる**(計装と違って配る一式にも入る)
-          test "$n" -eq 9
+          # 🔴 9 → 10(2026-08-24)。`patch-lo-idles-lock.py`(#199 の**直し**)。
+          #    名前入りの一式で stack を撮って確定した ── 画像入り docx は
+          #    `GraphicImport` → `SwXShape::dispose()` → `DelLayoutFormat` →
+          #    `Scheduler::IdlesLockGuard` の ctor で**永久に待つ**。待っている
+          #    `m_inExecuteCondtion` は `Application::Execute()` の
+          #    `if (!DoExecute())` の枝でしか set されず、wasm の Qt6 は
+          #    `m_bUseSystemLoop=true` なので**その枝へ入らない**。
+          #    ⚠ **こちらも既定で当たる**(配る一式に入る)
+          test "$n" -eq 10
 
       # 🔴 **Qt と LO の「握手」を、リンクの 16 分前に確かめる**(2026-08-10)。
       #    LO は Qt の embind シンボルを名指しで export する。無いと
