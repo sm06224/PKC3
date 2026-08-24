@@ -40,6 +40,36 @@ describe('切れ方(PKC2 と同じ)', () => {
     expect(slides[1]!.lines).toHaveLength(1);
   });
 
+  it('🔴 扉に落ちた本文と箱が、生成物にも出る(下書きだけ見ない)', () => {
+    /**
+     * 🔴 **2026-08-24 に見つけた取りこぼし。**
+     * 上の検査は「捨てない」と書きながら**下書き**(`slides[0].lines`)しか
+     * 見ていなかった ── 描く側(`slideXml`)の扉の枝は題名と副題しか出しておらず、
+     * `# 章` の直後に書いた本文・表・画像は**生成物から黙って消えていた**。
+     * ⚠ 観測点が 1 段手前だと、こういう欠落は永久に見えない(CLAUDE.md §4)。
+     */
+    const r = buildPptx([
+      h(1, '章'),
+      p('扉の本文'),
+      { kind: 'table', rows: [[{ runs: [{ text: 'セル' }] }]] },
+      { kind: 'image', media: 'media/a.png', widthPx: 100, heightPx: 50, alt: '絵' },
+    ], { title: 'T' });
+    const slide = partOf(r, 'ppt/slides/slide1.xml');
+    expect(slide, '扉の本文が消えている').toContain('<a:t>扉の本文</a:t>');
+    expect(slide, '扉の表が消えている').toContain('<a:t>セル</a:t>');
+    expect(slide, '扉の画像が消えている').toContain('<p:pic>');
+    expect(r.counts.images, '扉の画像が数えられていない').toBe(1);
+    // ⚠ id が重複すると PowerPoint が file ごと拒む(題名 2 / 副題は無い / 本文 4 / 箱 5,6)
+    const ids = [...slide.matchAll(/<p:cNvPr id="(\d+)"/g)].map((m) => m[1]!);
+    expect(new Set(ids).size, `id が重複している: ${ids.join(',')}`).toBe(ids.length);
+  });
+
+  it('🔴 扉に何も落ちていなければ、空の本文の箱を作らない(対照群)', () => {
+    const r = buildPptx([h(1, '章'), h(2, '副題')], { title: 'T' });
+    expect(partOf(r, 'ppt/slides/slide1.xml'), '空の本文の箱ができている')
+      .not.toContain('name="本文"');
+  });
+
   it('🔴 扉の副題は 1 つだけ ── 2 つ目の H2 は新しいスライドになる', () => {
     const slides = splitIntoSlides([h(1, '章'), h(2, '副題'), h(2, '二つ目')], 'ノート');
     expect(slides.map((s) => [s.kind, s.title])).toEqual([
