@@ -124,6 +124,7 @@ from pathlib import Path
 HELPER = """
 // ── PKC3 #199 の計装(挙動は変えない。`PKC3_IDLES_TRACE=1` の回だけ入る)──
 #include <cstdio>
+#include <cstring>
 #include <pthread.h>
 namespace
 {
@@ -143,11 +144,21 @@ void pkc3_idles_trace(const char* what, int a, int b, int c)
     //    🔑 だから **id そのもの**を出す ── 突合すれば推測が要らない。
     //    ⚠ `pthread_self()` は libc なので、この計装の「libc だけ」の規律を崩さない
     //    (`osl::Thread` を引くと header 依存が増え、当てる場所を選ぶ)。
-    //    ⚠ `%p` で出す ── emscripten の `pthread_t` は `struct __pthread*` なので
-    //    整数へ落とす cast を書かずに済む(header も増えない)。
+    // 🔴 **`pthread_t` の実体は toolchain によって違う。** 1 稿目は
+    //    「emscripten では `struct __pthread*` だから」と**確かめずに書いて**
+    //    `static_cast<void*>` を渡し、**焼きを 1 本落とした**(run 32786136716):
+    //        error: cannot cast from type 'pthread_t' (aka 'unsigned long')
+    //               to pointer type 'void *'
+    //    ⚠ **整数だった。** cast は「整数か pointer か」のどちらか片方でしか通らない。
+    //    🔑 だから **cast を書かない** ── byte をそのまま写す。どちらの実体でも通り、
+    //    次に上流が型を変えても壊れない(識別に要るのは値の一意性だけで、
+    //    数としての意味は要らない)。
+    unsigned long long nTid = 0;
+    pthread_t aSelf = pthread_self();
+    std::memcpy(&nTid, &aSelf, sizeof aSelf < sizeof nTid ? sizeof aSelf : sizeof nTid);
     char line[200];
-    std::snprintf(line, sizeof line, "PKC3-IDLES %d %s a=%d b=%d c=%d t=%p\\n", nSeq, what, a, b, c,
-                  static_cast<void*>(pthread_self()));
+    std::snprintf(line, sizeof line, "PKC3-IDLES %d %s a=%d b=%d c=%d t=%llu\\n", nSeq, what, a, b,
+                  c, nTid);
     std::fputs(line, stderr);
     std::fflush(stderr);
     std::FILE* pLog = std::fopen("/tmp/pkc3-idles.log", "a");
