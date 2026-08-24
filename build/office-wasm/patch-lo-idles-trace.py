@@ -50,6 +50,8 @@
 | 出る行 | 何が分かるか |
 |---|---|
 | `idles:wait a=<IsUseSystemEventLoop> b=<IsMainThread> c=<IsInExecute>` | 待ちに入った |
+| 🔴 `idles:who a=<Application::IsMainThread> b=<mpDefInst->IsMainThread> c=<mnIdlesLockCount>` | **2 つの「メインスレッド」判定が食い違っているか**(6 巡目)── 食い違っていれば **import は自分で自分を待っている**(直すのは述語)/ 一致していれば本当に別スレッド(握手を作り直す) |
+| 🔴 どの行にも付く `t=<pthread_self()>` | **誰が書いたか**(6 巡目)── `yield:enter` と `idles:wait` の `t=` を突き合わせれば「同じスレッドか」が**推測なしで**出る |
 | `idles:woke` | 待ちが返った(出なければ、そこで永久に止まっている) |
 | `execute:call` | 🔑 **対照群** ── `Application::Execute()` に入った。**これが 0 件の回は計装が効いていないので、その回は 1 つも読まない** |
 | `execute:doexec a=<返り値>` | `DoExecute()` が**返ってきた**。⚠ **出ないこと自体が答え**(中で回り続けている) |
@@ -122,6 +124,8 @@ from pathlib import Path
 HELPER = """
 // ── PKC3 #199 の計装(挙動は変えない。`PKC3_IDLES_TRACE=1` の回だけ入る)──
 #include <cstdio>
+#include <cstring>
+#include <pthread.h>
 namespace
 {
 void pkc3_idles_trace(const char* what, int a, int b, int c)
@@ -131,8 +135,30 @@ void pkc3_idles_trace(const char* what, int a, int b, int c)
     if (nSeq >= 300)
         return;
     ++nSeq;
-    char line[160];
-    std::snprintf(line, sizeof line, "PKC3-IDLES %d %s a=%d b=%d c=%d\\n", nSeq, what, a, b, c);
+    // 🔴 **6 巡目(2026-08-24)── どの行も「誰が書いたか」を持つ。**
+    //    5 巡目で残った問いは 1 つだけだった:**待っているのと `Yield()` しているのは
+    //    同じスレッドか**。⚠ `yield:enter` の判定は **Qt の**メインスレッド
+    //    (`qApp->thread() == QThread::currentThread()`)で、`idles:wait` の判定は
+    //    **osl の**メインスレッド(`mnMainThreadId`)── **別の述語**なので、
+    //    真偽を 2 つ並べても「同じスレッドか」は出ない。
+    //    🔑 だから **id そのもの**を出す ── 突合すれば推測が要らない。
+    //    ⚠ `pthread_self()` は libc なので、この計装の「libc だけ」の規律を崩さない
+    //    (`osl::Thread` を引くと header 依存が増え、当てる場所を選ぶ)。
+    // 🔴 **`pthread_t` の実体は toolchain によって違う。** 1 稿目は
+    //    「emscripten では `struct __pthread*` だから」と**確かめずに書いて**
+    //    `static_cast<void*>` を渡し、**焼きを 1 本落とした**(run 32786136716):
+    //        error: cannot cast from type 'pthread_t' (aka 'unsigned long')
+    //               to pointer type 'void *'
+    //    ⚠ **整数だった。** cast は「整数か pointer か」のどちらか片方でしか通らない。
+    //    🔑 だから **cast を書かない** ── byte をそのまま写す。どちらの実体でも通り、
+    //    次に上流が型を変えても壊れない(識別に要るのは値の一意性だけで、
+    //    数としての意味は要らない)。
+    unsigned long long nTid = 0;
+    pthread_t aSelf = pthread_self();
+    std::memcpy(&nTid, &aSelf, sizeof aSelf < sizeof nTid ? sizeof aSelf : sizeof nTid);
+    char line[200];
+    std::snprintf(line, sizeof line, "PKC3-IDLES %d %s a=%d b=%d c=%d t=%llu\\n", nSeq, what, a, b,
+                  c, nTid);
     std::fputs(line, stderr);
     std::fflush(stderr);
     std::FILE* pLog = std::fopen("/tmp/pkc3-idles.log", "a");
@@ -168,6 +194,19 @@ SCHED_REPLACE = """        pSVData->m_inExecuteCondtion.reset();
         pkc3_idles_trace("idles:wait", Application::IsUseSystemEventLoop() ? 1 : 0,
                          Application::IsMainThread() ? 1 : 0,
                          Application::IsInExecute() ? 1 : 0);
+        // 🔴 **6 巡目(2026-08-24)── 2 つの「メインスレッド」判定を並べる。**
+        //    ⚠ `Application::IsMainThread()`(`svapp.cxx:522`)は **osl の id**
+        //    (`mnMainThreadId` = `InitVCL` を走らせたスレッド)で判定するが、
+        //    `DoYield` が枝 A を選ぶのは **Qt の** thread(`QtInstance::IsMainThread()`,
+        //    `QtInstance.cxx:538` = `qApp->thread() == QThread::currentThread()`)である。
+        //    🔑 **この 2 つが食い違っていれば、import は自分で自分を待っている**
+        //    (= 直すのは述語であって握手ではない)。⚠ 一致していれば本当に別スレッドで、
+        //    そのときは握手そのものを作り直す ── **直し方が正反対なので、測ってから書く**。
+        //    ⚠ `mpDefInst` 経由で呼ぶ(`SalInstance::IsMainThread()` は virtual で、
+        //    Qt 版がその実体である)。
+        pkc3_idles_trace("idles:who", Application::IsMainThread() ? 1 : 0,
+                         pSVData->mpDefInst->IsMainThread() ? 1 : 0,
+                         rSchedCtx.mnIdlesLockCount);
         {
             SolarMutexReleaser releaser;
             pSVData->m_inExecuteCondtion.wait();
