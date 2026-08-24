@@ -90,6 +90,16 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-24-markdown-to-pandoc',
+    title: 'Markdown の書き出しが、何のための形か分かるようになりました',
+    items: [
+      '設定の「Markdown」は、1 ノート = 1 つの .md にして zip で保存します。これまで画面には「Markdown ファイルとして保存します」としか出ておらず、何に使えるかが分かりませんでした。',
+      '展開したフォルダは、Pandoc など他の道具にそのまま渡せます。EPUB や LaTeX など、アプリの中に口が無い形式はこの道です。',
+      'Word や PowerPoint や PDF は、これまでどおりアプリの中の口から出せます。そちらは値の置き換えや改頁も効きます。',
+      '書き出しの中身は前と同じです。変わったのは画面の説明とマニュアルだけです。',
+    ],
+  },
+  {
     id: '2026-08-24-paste-permalink',
     title: 'ノートへのリンクを貼ると、押せるリンクになります',
     items: [
@@ -281,21 +291,11 @@ export const NOTICES: readonly Notice[] = [
       '素のまま動くアプリはこの許可の一覧も書き換えられます。知らない相手からもらった HTML には許可を出さないでください。',
     ],
   },
-  {
-    id: '2026-08-21-app-dialog',
-    title: '確認の画面が PKC 自身のものになりました',
-    items: [
-      '削除やゴミ箱を空にするときに出る確認が、ブラウザのものから PKC 自身のものに変わりました。ボタンの位置が一定になり、マウスの動きが短くなります。',
-      '取り消す側が左、実行する側が右です。開いたときは取り消す側が選ばれているので、Enter を押しても実行はされません。',
-      '戻しにくい操作は、実行する側のボタンに色が付き、何が起きるかがボタンの字に出ます ── 削除 / 空にする / 上書きする / 同じ場所で開く / 整理する / 打ち切る の 6 種類です。',
-      'ブラウザの「このページにこれ以上ダイアログを表示させない」を選ぶと確認が出せなくなり、ボタンが効かなくなる問題がありました。これも直っています。',
-    ],
-  },
 ];
 
 /**
  * ⚠ **落としたぶんの原本は CHANGELOG に在る**(上限 20 件を超えたので、古いほうから
  *   `2026-08-16-office-save-to-pkc` / `2026-08-17-office-save-same-note`(2026-08-19)、
  *   `2026-08-19-dual-pane-app`(2026-08-22)、
- *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip`(2026-08-24)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
+ *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
  */
