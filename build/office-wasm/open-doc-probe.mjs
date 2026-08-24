@@ -736,6 +736,45 @@ try {
           .send('Target.sendMessageToTarget', { sessionId, message: JSON.stringify({ id, method, params }) })
           .then(() => Promise.race([done, new Promise((ok) => setTimeout(() => ok(null), 4000))]));
       };
+      /**
+       * 🔴 **メインスレッドも撮る**(#199 の 4 巡目、2026-08-24)。
+       *
+       * 3 巡目で「vcl の待ちループには入っているが `Application::Yield()` から
+       * 戻ってこない」ところまで確定した(`execute:loop` が 1 回で止まり
+       * `execute:set` が 0 件 / 対照群は 5 往復)。⚠ 残るのは
+       * **Yield の中のどこで止まっているか**で、それはメインの stack にしか出ない。
+       *
+       * 🔑 worker と違い、頁の session は**そのまま** `Debugger.pause` できる
+       * (`Target.sendMessageToTarget` で包む必要が無い)。
+       * ⚠ **必ず resume する** ── 止めたままだと、この後の `page.evaluate`
+       *   (計装の読み出し)が**永久に返らない**。
+       * ⚠ 3 値で読む: `null` = 止まらなかった(**JS を 1 行も実行していない**
+       *   = ブラウザの event 待ちに落ちている)/ `[]` = 枠が空 / 中身あり = そこに居る。
+       * ⚠ 名前が読めるのは `profiling_funcs: true` で焼いた一式だけ。
+       */
+      try {
+        const mainPaused = new Promise((ok) => {
+          cdp.once('Debugger.paused', (ev) => ok(ev));
+        });
+        await cdp.send('Debugger.enable');
+        await cdp.send('Debugger.pause');
+        const ev = await Promise.race([
+          mainPaused,
+          new Promise((ok) => setTimeout(() => ok(null), 4000)),
+        ]);
+        shot.main =
+          ev === null
+            ? null
+            : (ev.callFrames ?? []).slice(0, 25).map((f) => ({
+                fn: String(f.functionName ?? '').slice(0, 80),
+                url: String(f.url ?? '').slice(-40),
+              }));
+        await cdp.send('Debugger.resume').catch(() => {});
+        await cdp.send('Debugger.disable').catch(() => {});
+      } catch (e) {
+        shot.mainErr = safeErr(e);
+      }
+
       const { targetInfos } = await cdp.send('Target.getTargets');
       const workers = targetInfos.filter((t) => t.type === 'worker' || t.type === 'shared_worker');
       shot.targets = workers.length;
