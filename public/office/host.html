@@ -1002,11 +1002,12 @@
    * ⚠ 名前が無い / 拡張子が無いときは**何も出さない** ── 窓の中で新規に作った文書は
    *    ODF になるので、そこへ「保存できません」と出すのは嘘である。
    */
-  function markUnsavable(name) {
+  function markUnsavable(name, alienOk) {
     var F = window.PKC3OfficeFormat;
     // ⚠ 判断が読めていないなら**黙る** ── 分からないのに断らない
     if (!F || typeof F.isSavable !== 'function') return;
-    if (F.isSavable(name)) return;
+    // ⚠ `alienOk` を落とすと `isSavable` は **false 側**(断る)へ倒れる ── 安全側である
+    if (F.isSavable(name, alienOk)) return;
     var ext = F.extOf(name);
     roEl.textContent = '保存できません';
     roEl.title = ext + ' はこの Office では保存できません(読むだけ)';
@@ -1118,6 +1119,23 @@
       blobs[need[i]] = await idbGet(db, 'files', need[i]);
       if (!blobs[need[i]]) { fail('一式が壊れています: ' + need[i] + ' がありません'); return; }
     }
+    /**
+     * 🔴 **この一式は非 ODF を保存できるか**(#225)を、**一式そのものから採る**。
+     *
+     * 🔑 目録(`soffice.data.js.metadata`)は**もう読み込んである**ので、そこを見る。
+     * pack.json に新しい欄を足さないので、**既に入れてある一式にも遡って効く**。
+     *
+     * ⚠ **判断は `office-format.js` の `packSavesAlien` に在る**(ここは bundle されず
+     * unit が届かない)。⚠ 読めない / 関数が無いときは **false**(= 断る側へ倒す)。
+     */
+    var packAlienOk = false;
+    try {
+      var F0 = window.PKC3OfficeFormat;
+      if (F0 && typeof F0.packSavesAlien === 'function') {
+        packAlienOk = F0.packSavesAlien(await blobs['soffice.data.js.metadata'].text());
+      }
+    } catch (e) { packAlienOk = false; }
+
     var fontNames = meta.files.map(function (f) { return f.name; })
       .filter(function (n) { return n.indexOf('fonts/') === 0; });
     var fonts = [];
@@ -1262,7 +1280,7 @@
         args.push(path);
         window.__loDocPath = path;
         // 🔴 渡した形式が保存できないなら、**押す前に**伝える(#225)
-        markUnsavable(docName);
+        markUnsavable(docName, packAlienOk);
       }
       // 🔴 **`callMain` の前に積む。** callMain は event loop に入ったまま戻らない
       //    ことがある ── 後ろに置くと**一生積まれない**。
