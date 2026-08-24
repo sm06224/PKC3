@@ -480,6 +480,31 @@ describe('本文を書く導線は、忙しい間の門に載っている', () =
     return out;
   };
 
+  /**
+   * 🔴 **表の外の helper も 1 段だけ追う**(2026-08-24、変異試験 N5 が教えた)。
+   *
+   * ⚠ 直す前は handler の**本文だけ**を見ていたので、
+   *   `'dual-mkdir': (d, t) => dualCreate(d, t, 'folder'),` のように
+   *   **dispatch を helper へ出した瞬間、門の検査から消えていた**。
+   *   ⚠ しかもそれは「規則を 1 か所へ寄せる」(§7)をやると必ず起きる形なので、
+   *   **良い直しをするほど検査が緩む**という最悪の向きだった。
+   * 🔑 helper の本文を取り、handler が**その名前を呼んでいれば**中身を足して見る。
+   * ⚠ **1 段だけ**(helper が別の helper を呼ぶ形は追わない)── 追い始めると
+   *   file ぜんぶを飲み込んで、§1 の「範囲が広すぎて無関係な散文に満たされる」へ倒れる。
+   *   ⚠ 2 段目が要るようになったら、**そのとき**広げる(いま広げると空振りを買う)。
+   */
+  const helperBodies = (): Map<string, string> => {
+    const out = new Map<string, string>();
+    // ⚠ **行頭**の宣言だけ(表の中の要素を拾わない)
+    for (const m of BINDER.matchAll(/^(?:const|function) ([A-Za-z_][\w]*)\b/gm)) {
+      const start = m.index!;
+      // 宣言は行頭の `};` か `}` で閉じる ── そこまでを本文と見なす
+      const rel = BINDER.slice(start).search(/\n\};?\n/);
+      if (rel > 0) out.set(m[1]!, BINDER.slice(start, start + rel));
+    }
+    return out;
+  };
+
   it('⚠ 数え上げが空振りしていない(表を読めている)', () => {
     const types = writingActionTypes();
     expect(types.size, 'reducer から本文の書込を出す型を 1 つも読めていない').toBeGreaterThan(2);
@@ -494,9 +519,23 @@ describe('本文を書く導線は、忙しい間の門に載っている', () =
         .exec(BINDER)?.[1] ?? '').matchAll(/'([a-z0-9-]+)'/g)].map((m) => m[1]!),
     );
     expect(gate.size, '門の一覧を読めていない(空振り)').toBeGreaterThan(5);
+    const helpers = helperBodies();
+    // ⚠ 空振り防止 ── helper を 1 つも読めていないなら、下の展開は何もしていない
+    expect(helpers.size, 'binder の helper を読めていない(空振り)').toBeGreaterThan(3);
     const missing: string[] = [];
     for (const [action, body] of handlerBodies()) {
-      const dispatched = [...body.matchAll(/type: '([A-Z_]+)'/g)].map((m) => m[1]!);
+      // 🔑 handler が呼んでいる helper の本文を**1 段だけ**足して見る(上の docstring)
+      const called = [...body.matchAll(/\b([A-Za-z_][\w]*)\s*\(/g)].map((m) => m[1]!);
+      const seen = new Set<string>();
+      let scan = body;
+      for (const name of called) {
+        const h = helpers.get(name);
+        if (h !== undefined && !seen.has(name)) {
+          seen.add(name);
+          scan += h;
+        }
+      }
+      const dispatched = [...scan.matchAll(/type: '([A-Z_]+)'/g)].map((m) => m[1]!);
       if (dispatched.some((t) => types.has(t)) && !gate.has(action)) missing.push(action);
     }
     expect(missing, '本文を書くのに BODY_WRITE_ACTIONS に無い action がある').toEqual([]);

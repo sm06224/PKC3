@@ -142,6 +142,17 @@ const COMMAND_ITEMS: readonly {
     hint: (from) => `${from}のペインが開いている場所に、新しいフォルダを作ります`,
     empty: null,
   },
+  /**
+   * 🔴 **入れ物だけでなく中身も作れる**(#273)。⚠ 直す前は「フォルダ」しか無く、
+   *   整理の面で 1 枚メモを置くのに左の列まで往復していた。
+   */
+  {
+    action: 'dual-mknote',
+    command: 'dual-new-note',
+    label: 'ノート',
+    hint: (from) => `${from}のペインが開いている場所に、新しいノートを作ります`,
+    empty: null,
+  },
   {
     action: 'dual-delete',
     command: 'filer-trash',

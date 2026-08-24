@@ -234,6 +234,111 @@ test('🔴 F2 で名前を打ち替えられる (#273)', async ({ page }) => {
 });
 
 /**
+ * 🔴 **整理の面で、その場にノートを作れる**(#273)。
+ *
+ * 🔴 unit(`tests/adapter/dual-filer.test.ts`)は「種類」と「入れ先」を見ている。
+ * **ここが見るのは実機でしか捕まらない 2 つ**である ──
+ * ① **`Shift + F4` が本当に届くか**(合成 `keydown` は修飾の組み合わせを素通りする)
+ * ② **作っても面から放り出されないか**(`hidden` の付け替えと CSS の噛み合いは
+ *    happy-dom では読めない ── 本文の面へ飛ぶと 2 ペインは消える)
+ */
+test('🔴 Shift + F4 で、いまの場所にノートを作る(面から出ない) (#273)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await makeFolder(page, 'はこ');
+  await openDual(page);
+
+  // ⚠ 「はこ」の中へ入ってから作る ── 入れ先が**そのペインの場所**であることを見る
+  await page.locator(ROWS('left')).first().dblclick();
+  // 🔑 **前提を assert する** ── 入った直後に焦点がペインに残っていなければ、
+  //    以降の鍵は 1 つも当たらない(「鍵が効かない」と「焦点が無い」を混ぜない)
+  /**
+   * 🔴 **前提を assert する ── ただし「DOM の焦点」で**(2026-08-24)。
+   *
+   * ⚠ 1 稿目は `data-pkc-focused` を見ていたが、あれは **state の印**であって
+   *   `document.activeElement` ではない ── 印は立っているのに焦点は `body` に
+   *   落ちている、という食い違いを**測れなかった**(実際そうなっていた)。
+   * 🔑 鍵が当たるかを決めるのは **keydown の的**なので、そちらを見る。
+   */
+  const focusedSide = await page.evaluate(
+    () =>
+      document.activeElement
+        ?.closest('[data-pkc-region="dual-pane"]')
+        ?.getAttribute('data-pkc-side') ?? null,
+  );
+  expect(
+    focusedSide,
+    'マウスで入った直後、焦点がペインの外(body)に落ちている ── 以降の鍵が 1 つも当たらない',
+  ).toBe('left');
+  const before = await page.locator(ROWS('left')).count();
+
+  await page.keyboard.press('Shift+F4');
+  await expect(
+    page.locator(ROWS('left')),
+    'Shift + F4 でノートが増えていない(鍵が届いていない)',
+  ).toHaveCount(before + 1);
+  await expect(page.locator(ROWS('left'))).toContainText(['新しいノート']);
+
+  // 🔴 **面から出ていない** ── 作ったらその場に出るのが FD の作法
+  await expect(page.locator(PANE('left')), '作ったら 2 ペインが消えた').toBeVisible();
+
+  // ⚠ 対照群 ── **F7 はフォルダ**を作る(同じ口を通すので、種類を取り違えていないこと)
+  await page.keyboard.press('F7');
+  await expect(page.locator(ROWS('left'))).toHaveCount(before + 2);
+  await expect(page.locator(ROWS('left'))).toContainText(['新しいフォルダ']);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **マウスで動かしたあとも、鍵が効き続ける**(#273、2026-08-24 に実測して見つけた)。
+ *
+ * ⚠ この面は帯も表も**指紋が変われば丸ごと組み直す**ので、押したボタンが
+ *   押した結果 消える ── `document.activeElement` が `body` へ落ちると、
+ *   `dual` 文脈の鍵が **1 つも当たらなくなる**(`Backspace` で戻ることすらできない)。
+ * 🔑 観測点は **`document.activeElement` がペインの中に在るか** ──
+ *   `data-pkc-focused` は **state の印**であって焦点ではない(1 稿目はそれを見て
+ *   「前提は満たされている」と読み違えた)。
+ */
+test('🔴 パンくず・タブをマウスで押しても、焦点がペインの外へ落ちない (#273)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await makeFolder(page, 'はこ');
+  await openDual(page);
+
+  const focusedSide = (): Promise<string | null> =>
+    page.evaluate(
+      () =>
+        document.activeElement
+          ?.closest('[data-pkc-region="dual-pane"]')
+          ?.getAttribute('data-pkc-side') ?? null,
+    );
+
+  // ① フォルダへ入る(マウス)→ ② パンくずでルートへ戻る(マウス)
+  await page.locator(ROWS('left')).first().dblclick();
+  expect(await focusedSide(), 'フォルダへ入った直後に焦点が外れた').toBe('left');
+  await page.locator(`${PANE('left')} [data-pkc-action="dual-crumb"]`).first().click();
+  expect(await focusedSide(), 'パンくずを押した直後に焦点が外れた').toBe('left');
+
+  // ③ タブを足して切り替える(マウス)── 帯は指紋が変わるたび組み直される
+  await clickReal(page, `${PANE('left')} [data-pkc-action="dual-tab-add"]`);
+  expect(await focusedSide(), 'タブを足した直後に焦点が外れた').toBe('left');
+  await page.locator(`${PANE('left')} [data-pkc-action="dual-tab-activate"]`).first().click();
+  expect(await focusedSide(), 'タブを切り替えた直後に焦点が外れた').toBe('left');
+
+  // 🔑 **鍵が本当に効く**(焦点の位置だけでなく、結果で見る)
+  await page.keyboard.press('F7');
+  await expect(
+    page.locator(ROWS('left')),
+    'マウスで動かしたあと、F7 が効いていない',
+  ).toContainText(['新しいフォルダ']);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
  * 🔴 **面を一巡して、押しても何も起きない口が無いことを見る**(#273)。
  *
  * user 指示 2026-08-14「**自前の headless で拾える不具合を cowork に拾わせたら、
@@ -383,7 +488,13 @@ test('🔴 操作行は下端の全幅・等分割で、名前の列がいちば
   const widths = await page
     .locator('[data-pkc-region="dual-commands"] button')
     .evaluateAll((els) => els.map((el) => el.getBoundingClientRect().width));
-  expect(widths.length, 'ボタンが 5 つ出ていない').toBe(5);
+  /**
+   * ⚠ **実数で pin する**(下限にしない)── 1 本足すたびに**ここを見に来る**のが
+   *   狙いである。操作行は等分割なので、増やせば 1 つあたりが狭くなる:
+   *   足すときは「この幅で字が読めるか」を必ず測り直すこと。
+   * 🔑 6 本目は「ノート」(#273、2026-08-24)。
+   */
+  expect(widths.length, 'ボタンが 6 つ出ていない').toBe(6);
   expect(
     Math.max(...widths) - Math.min(...widths),
     `ボタンの幅が揃っていない(等分割になっていない): ${widths.join(' / ')}`,

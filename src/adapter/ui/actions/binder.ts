@@ -123,6 +123,39 @@ const dualSide = (target: HTMLElement): DualSide | null => {
   return raw === 'left' || raw === 'right' ? raw : null;
 };
 
+/**
+ * 🔴 **2 ペインの「作る」は 1 か所**(#273)── フォルダもノートも、
+ * 違うのは**種類と名前だけ**である。
+ *
+ * ⚠ **編集に入らない**(`edit: false`)── 入ると中央が本文の面へ切り替わり、
+ *   整理の途中で面から放り出される。作ったら**その場に出る**のが FD の作法である。
+ * ⚠ 入れ先は**そのペインが開いている場所**(左の列の現在地ではない)── ここを
+ *   `state.scopeLid` で書くと、**押したペインと違う場所に**できる。
+ * ⚠ 押した所からペインを辿り、辿れないときだけ焦点に落ちる(鍵から呼ぶと的が無い)。
+ */
+const dualCreate = (
+  dispatcher: Dispatcher,
+  target: HTMLElement,
+  archetype: 'folder' | 'text',
+): void => {
+  const side = dualSide(target) ?? dispatcher.getState().dual.focus;
+  const st = dispatcher.getState();
+  const what = archetype === 'folder' ? 'フォルダ' : 'ノート';
+  if (st.phase !== 'ready') {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: `編集を終了してから${what}を作ってください` });
+    return;
+  }
+  dispatcher.dispatch({
+    type: 'CREATE_ENTRY',
+    archetype,
+    lid: generateLid(),
+    title: `新しい${what}`,
+    parentLid: paneScope(paneOf(st.dual, side)),
+    relationId: generateLid(),
+    edit: false,
+  });
+};
+
 /** タブの添字。⚠ 数として読めないものは**捨てる**(0 に落とすと別のタブが閉じる)。 */
 const dualTabIndex = (target: HTMLElement): number | null => {
   const raw = target.closest('[data-pkc-tab]')?.getAttribute('data-pkc-tab');
@@ -546,6 +579,7 @@ const DUAL_KEY_ACTION: Readonly<Record<string, string>> = {
   'dual-copy-to-other': 'dual-copy',
   'dual-move-to-other': 'dual-move',
   'dual-new-folder': 'dual-mkdir',
+  'dual-new-note': 'dual-mknote',
 };
 
 const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
@@ -590,6 +624,7 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
    */
   'create-entry',
   'dual-mkdir',
+  'dual-mknote',
   'dual-copy',
   'retry-persist',
   'delete-entry',
@@ -1226,26 +1261,17 @@ const ACTIONS: Record<string, ActionHandler> = {
       desc: st.entrySort === want ? !st.entrySortDesc : NATURAL_DESC[want],
     });
   },
-  'dual-mkdir': (dispatcher, target) => {
-    const side = dualSide(target) ?? dispatcher.getState().dual.focus;
-    const st = dispatcher.getState();
-    if (st.phase !== 'ready') {
-      dispatcher.dispatch({
-        type: 'OP_FAILED',
-        error: '編集を終了してからフォルダを作ってください',
-      });
-      return;
-    }
-    dispatcher.dispatch({
-      type: 'CREATE_ENTRY',
-      archetype: 'folder',
-      lid: generateLid(),
-      title: '新しいフォルダ',
-      parentLid: paneScope(paneOf(st.dual, side)),
-      relationId: generateLid(),
-      edit: false,
-    });
-  },
+  'dual-mkdir': (dispatcher, target) => dualCreate(dispatcher, target, 'folder'),
+  /**
+   * 🔴 **いま開いている場所にノートを作る**(#273)。
+   *
+   * ⚠ 直す前は**フォルダしか作れなかった** ── 整理の面で
+   *   「入れ物は作れるが中身は作れない」という非対称で、1 枚メモを置くのに
+   *   左の列へ戻る → 作る → 開き直す → 移す、の 4 手が要った。
+   * 🔑 **フォルダと同じ口**(`dualCreate`)を通す ── 種類が違うだけで、
+   *   入れ先の決め方も編集へ移らない作法も**同じ規則である**(§7)。
+   */
+  'dual-mknote': (dispatcher, target) => dualCreate(dispatcher, target, 'text'),
   /**
    * 🔴 **反対側の場所へ写す**(#273 段③。FD の C 相当)。
    *
@@ -2253,12 +2279,36 @@ export function bindActions(
    * 実行中(書出し / 取込)のガードはここに 1 回だけ置く(P8 段㉑)。
    * 入口ごとに書くと、必ずどれかが素通しになる(実際そうだった)。
    */
+  /**
+   * 🔴 **押した部品が「押した結果」消える 2 ペインの操作**(#273、2026-08-24 に実測)。
+   *
+   * ⚠ `dual-filer.ts` は、指紋が変われば帯も表も **`textContent = ''` で丸ごと
+   *   組み直す**。だから押したボタンごと無くなり、`document.activeElement` が
+   *   **`body` へ落ちる** ── そこから先は keydown の的がペインの外になるので、
+   *   `dual` 文脈の鍵が **1 つも当たらない**(`Backspace` で戻ることすらできない)。
+   * ⚠ **キーボードで動かした回は効いていた** ── `filer-open` などが既に
+   *   `carryDualFocus` を呼んでいるからで、**マウスの経路にだけ穴が空いていた**
+   *   (CLAUDE.md「片側を直したら、対称の反対側を必ず疑う」)。
+   * 🔑 **立て直しは 1 か所**(ここ)── handler ごとに書くと、次に足す操作で
+   *   また忘れる。⚠ 左の列(`filer.ts`)は**描画側**が同じことをしている
+   *   (`focusedBefore` → 組み直しの後に戻す)ので、ここでは触らない。
+   */
+  const DUAL_REBUILDS_CLICKED: ReadonlySet<string> = new Set([
+    'dual-crumb',
+    'dual-tab-activate',
+    'dual-tab-add',
+    'dual-tab-close',
+  ]);
   const run = (action: string | null, el: HTMLElement): void => {
     if (!action) return;
     const handler = ACTIONS[action];
     if (!handler) return;
     if (refuseWhileBusy(action, dispatcher, services)) return;
     handler(dispatcher, el, services, root);
+    if (DUAL_REBUILDS_CLICKED.has(action)) {
+      const side = dualSide(el);
+      if (side !== null) carryDualFocus(side);
+    }
   };
   const onClick = (ev: Event) => {
     const el = (ev.target as HTMLElement | null)?.closest<HTMLElement>(
@@ -3099,6 +3149,23 @@ export function bindActions(
         ? { type: 'SET_SCOPE', lid }
         : { type: 'DUAL_SET_SCOPE', side: dual, lid },
     );
+    /**
+     * 🔴 **入った先で焦点を立て直す**(#273、2026-08-24 に実ブラウザで実測)。
+     *
+     * ⚠ 直す前は**マウスで入った瞬間に鍵が 1 つも効かなくなった** ── 入ると
+     *   表の行が丸ごと作り直されるので、押していた行が消えて
+     *   `document.activeElement` が **`body`** に落ちる。すると keydown の的が
+     *   ペインの外になり、`dual` 文脈の一致そのものが起きない
+     *   (`Backspace` で戻ることすらできず、もう一度マウスで押すしかない)。
+     * ⚠ **キーボードで入った回は効いていた** ── `filer-open` が既に
+     *   `carryDualFocus` を呼んでいるからで、**マウスの経路にだけ穴が空いていた**
+     *   (CLAUDE.md「片側を直したら、対称の反対側を必ず疑う」)。
+     * 🔑 立て直しは `carryDualFocus` 1 本 ── 「どの行へ当てるか」の規則を
+     *   2 か所に持たない(見えている行だけを相手にする不変条件つき)。
+     * ⚠ 左の列(`dual === null`)はここでは触らない ── **測っていないから**である
+     *   (同じ穴が在るかは別に確かめる)。
+     */
+    if (dual !== null) carryDualFocus(dual);
   };
   root.addEventListener('click', onClick);
   root.addEventListener('paste', onPaste);
