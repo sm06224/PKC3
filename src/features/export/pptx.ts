@@ -41,6 +41,7 @@ export interface PptxResult {
     readonly slides: number;
     readonly sectionSlides: number;
     readonly lines: number;
+    readonly links: number;
     readonly skipped: number;
   };
 }
@@ -86,6 +87,11 @@ export interface SlideLine {
   readonly runs: readonly ExportRun[];
   /** 箇条書きの深さ(0 起点)。⚠ `null` は箇条書きでない。 */
   readonly bullet: number | null;
+  /**
+   * 🔴 **番号付きか**(#187 段②)。⚠ `bullet` が `null` でないときだけ意味を持つ。
+   * ⚠ これを落とすと `1. 2. 3.` が**ただの点**になる ── user が書いた「順番」が消える。
+   */
+  readonly ordered?: boolean;
   /** 等幅(コード)。 */
   readonly mono?: boolean;
 }
@@ -175,7 +181,11 @@ function blockToLines(b: ExportBlock): SlideLine[] {
       // H4〜H6 は本文に落ちる(太字の 1 行)
       return [{ runs: b.runs.map((r) => ({ ...r, bold: true })), bullet: null }];
     case 'li':
-      return [{ runs: b.runs, bullet: Math.min(b.depth, PPTX_LIST_DEPTH_MAX - 1) }];
+      return [{
+        runs: b.runs,
+        bullet: Math.min(b.depth, PPTX_LIST_DEPTH_MAX - 1),
+        ...(b.ordered ? { ordered: true } : {}),
+      }];
     case 'quote':
       return [{ runs: b.runs.map((r) => ({ ...r, italic: true })), bullet: null }];
     case 'code':
@@ -197,8 +207,15 @@ function blockToLines(b: ExportBlock): SlideLine[] {
   }
 }
 
-/** 走り 1 本 → `<a:r>`。 */
-function runXml(r: ExportRun, sz: number): string {
+/**
+ * 走り 1 本 → `<a:r>`(#187 段②)。
+ *
+ * 🔴 **リンクは rels の id が要る** ── `<a:hlinkClick r:id="rIdN"/>` は
+ * **そのスライドの rels** に実体が無いと PowerPoint が file ごと拒む。
+ * だから id を配るのは呼び側で、ここは**渡された id を書くだけ**にする。
+ * ⚠ id が渡されていないリンクは**素の文字として出す**(消さない)。
+ */
+function runXml(r: ExportRun, sz: number, linkId?: string): string {
   const props: string[] = [`lang="ja-JP"`, `sz="${sz}"`];
   if (r.bold === true) props.push('b="1"');
   if (r.italic === true) props.push('i="1"');
@@ -206,18 +223,29 @@ function runXml(r: ExportRun, sz: number): string {
   const face = r.mono === true
     ? '<a:latin typeface="Consolas"/><a:ea typeface="Consolas"/>'
     : '';
-  return `<a:r><a:rPr ${props.join(' ')} dirty="0">${face}</a:rPr>`
+  const link = linkId === undefined ? '' : `<a:hlinkClick r:id="${linkId}"/>`;
+  return `<a:r><a:rPr ${props.join(' ')} dirty="0">${face}${link}</a:rPr>`
     + `<a:t>${xmlEscape(r.text)}</a:t></a:r>`;
 }
 
-/** 本文の 1 行 → `<a:p>`。 */
-function lineXml(line: SlideLine, sz: number): string {
+/**
+ * 本文の 1 行 → `<a:p>`。
+ *
+ * ⚠ **番号付きは `buAutoNum`、点は `buChar`** ── どちらも書かないと、PowerPoint は
+ * 型紙の既定に従う(= 見た目が揃わない)。
+ * ⚠ 箇条書きでない行には **`buNone`** を明示する ── 書かないと点が勝手に付く。
+ */
+function lineXml(line: SlideLine, sz: number, linkOf?: (r: ExportRun) => string | undefined): string {
   const runs = line.runs.length === 0 ? [{ text: '' } as ExportRun] : line.runs;
   const pPr = line.bullet === null
     ? '<a:pPr><a:buNone/></a:pPr>'
-    : `<a:pPr lvl="${line.bullet}"/>`;
+    : `<a:pPr lvl="${line.bullet}">`
+      + (line.ordered === true
+        ? '<a:buAutoNum type="arabicPeriod"/>'
+        : '<a:buChar char="\u2022"/>')
+      + '</a:pPr>';
   const eff = line.mono === true ? runs.map((r) => ({ ...r, mono: true })) : runs;
-  return `<a:p>${pPr}${eff.map((r) => runXml(r, sz)).join('')}</a:p>`;
+  return `<a:p>${pPr}${eff.map((r) => runXml(r, sz, linkOf?.(r))).join('')}</a:p>`;
 }
 
 /** 文字の箱 1 つ。⚠ `<a:normAutofit/>` で **PowerPoint に縮めさせる**(設計 doc §4)。 */
@@ -242,8 +270,23 @@ const NS_P = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
   + ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
   + ' xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"';
 
-/** スライド 1 枚の XML。 */
-function slideXml(s: SlideDraft): string {
+/**
+ * スライド 1 枚の XML と、そこで使ったリンクの一覧。
+ *
+ * 🔴 **リンクは rels と対で作る** ── `r:id` を書いても、そのスライドの rels に
+ * 実体が無ければ PowerPoint は file ごと拒む。だから**同じ関数で両方**を返す
+ * (2 か所で別々に組むと、片方だけ直す事故が起きる ── CLAUDE.md §7)。
+ * ⚠ 同じ URL は 1 つの id に畳む(rels を無駄に増やさない)。
+ */
+function slideXml(s: SlideDraft): { xml: string; links: string[] } {
+  const links: string[] = [];
+  // ⚠ rId1 は型紙(slideLayout)なので、リンクは **rId2 から**
+  const linkOf = (r: ExportRun): string | undefined => {
+    if (r.href === undefined || r.href === '') return undefined;
+    let i = links.indexOf(r.href);
+    if (i < 0) { links.push(r.href); i = links.length - 1; }
+    return `rId${i + 2}`;
+  };
   const shapes: string[] = [];
   if (s.kind === 'section') {
     shapes.push(textBox(2, '題名', FRAME.coverTitle,
@@ -259,10 +302,10 @@ function slideXml(s: SlideDraft): string {
     }
     if (s.lines.length > 0) {
       shapes.push(textBox(3, '本文', FRAME.body,
-        s.lines.map((l) => lineXml(l, SZ.body)).join(''), 't'));
+        s.lines.map((l) => lineXml(l, SZ.body, linkOf)).join(''), 't'));
     }
   }
-  return `${XML_HEAD}<p:sld ${NS_P}><p:cSld><p:spTree>`
+  const xml = `${XML_HEAD}<p:sld ${NS_P}><p:cSld><p:spTree>`
     + '<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>'
     + '<p:grpSpPr/>'
     + `${shapes.join('')}</p:spTree></p:cSld>`
@@ -270,6 +313,7 @@ function slideXml(s: SlideDraft): string {
     + ' accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4"'
     + ' accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/></p:clrMapOvr>'
     + '</p:sld>';
+  return { xml, links };
 }
 
 /**
@@ -368,12 +412,20 @@ export function buildPptx(
   parts.push({ name: 'ppt/presProps.xml', text: PRES_PROPS_XML });
 
   // ④ スライド
+  let links = 0;
   slides.forEach((s, i) => {
-    parts.push({ name: `ppt/slides/slide${i + 1}.xml`, text: slideXml(s) });
+    const built = slideXml(s);
+    links += built.links.length;
+    parts.push({ name: `ppt/slides/slide${i + 1}.xml`, text: built.xml });
     parts.push({
       name: `ppt/slides/_rels/slide${i + 1}.xml.rels`,
       text: `${XML_HEAD}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`
         + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>'
+        // ⚠ **外部リンクは `TargetMode="External"`** ── 付けないと PowerPoint は
+        //    package の中の部品を探し、見つからずに file ごと拒む
+        + built.links.map((href, k) =>
+          `<Relationship Id="rId${k + 2}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"`
+          + ` Target="${xmlEscape(href)}" TargetMode="External"/>`).join('')
         + '</Relationships>',
     });
   });
@@ -389,6 +441,7 @@ export function buildPptx(
       slides: slides.length,
       sectionSlides: slides.filter((s) => s.kind === 'section').length,
       lines: slides.reduce((n, s) => n + s.lines.length, 0),
+      links,
       skipped,
     },
   };
