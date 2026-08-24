@@ -156,7 +156,8 @@ export class ScheduleRenderer {
     const items = [...visible.map(itemOfCard), ...notes];
     const groups = buildAgenda(items, today, state.showUndatedTasks);
 
-    this.paintMonth(frame, state, today, items);
+    // 🔑 点は**束から**引く(下の docstring)── 期間の展開を 2 か所で決めない
+    this.paintMonth(frame, state, today, groups);
     frame.note.textContent = this.noteText(
       state,
       all.length + notes.length,
@@ -169,12 +170,20 @@ export class ScheduleRenderer {
     this.paintGroups(frame.groups, groups, state);
   }
 
-  /** 小さな月(移動 + 落とし先)。⚠ 升目は**毎回組み直す**(掴めない部品なので安全)。 */
+  /**
+   * 小さな月(移動 + 落とし先)。⚠ 升目は**毎回組み直す**(掴めない部品なので安全)。
+   *
+   * 🔴 **点は「束」から引く**(#344 段①)。⚠ 直す前は札の `date` を集めていたので、
+   *   期間(`@2026-08-25..2026-08-28`)は**開始の日にしか点が付かなかった** ──
+   *   下の一覧では 4 日に出ているのに、小さな月では 1 日だけ、という食い違いになる。
+   * 🔑 束は `buildAgenda` が展開済みなので、**「どの日に予定が在るか」の規則が 1 本**に
+   *   なる(CLAUDE.md §7 ── 同じ問いに答える口を 2 つ持たない)。
+   */
   private paintMonth(
     frame: NonNullable<ScheduleRenderer['frame']>,
     state: AppState,
     today: string,
-    cards: readonly AgendaItem[],
+    groups: readonly AgendaGroup[],
   ): void {
     const at = this.now();
     const year = state.calendarMonth?.year ?? at.getFullYear();
@@ -189,7 +198,7 @@ export class ScheduleRenderer {
       btn.setAttribute('data-pkc-nav-month', String(to));
     }
     /** その日に予定が在るか。⚠ **点だけ**(件数は出さない ── 升目が読めなくなる)。 */
-    const has = new Set(cards.map((c) => c.date).filter((d): d is string => d !== null));
+    const has = new Set(groups.map((g) => g.date).filter((d): d is string => d !== null));
     frame.grid.textContent = '';
     const head = document.createElement('div');
     head.setAttribute('data-pkc-field', 'schedule-week');

@@ -50,3 +50,19 @@ export function isScheduleDate(value: string): boolean {
 export function isScheduleTime(value: string): boolean {
   return /^\d{2}:\d{2}$/.test(value);
 }
+
+/**
+ * 🔴 **期間の形か**(#344 段①)。`start` と `end` が両方**日付の形**で、
+ * かつ **`start` が `end` より後でない**こと。
+ *
+ * ⚠ **逆順(`@2026-08-28..2026-08-25`)は通さない。** 通すと展開が 0 日になり、
+ *   **予定が束から黙って消える** ── いちばん気づけない形である。
+ * 🔑 通さないほうを選ぶと、この file の頭の裁定どおり
+ *   「記法として読まれず、user が書いた字がそのまま画面に残る」ので、**見て直せる**。
+ *
+ * ⚠ **実在しない日は通す**(`2026-02-30..2026-03-05`)── 日付 1 つのときと同じ向き。
+ *   比較は**文字列**なので、実在しなくても順序は決まる(`YYYY-MM-DD` は辞書順 = 日付順)。
+ */
+export function isScheduleRange(start: string, end: string): boolean {
+  return isScheduleDate(start) && isScheduleDate(end) && start <= end;
+}

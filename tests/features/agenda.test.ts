@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildAgenda, itemOfCard, itemOfNote } from '../../src/features/schedule/agenda';
+import {
+  AGENDA_RANGE_MAX_DAYS,
+  buildAgenda,
+  itemOfCard,
+  itemOfNote,
+} from '../../src/features/schedule/agenda';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 
 const card = (
@@ -8,7 +13,8 @@ const card = (
   date: string | null,
   time: string | null = null,
   text = 'x',
-) => itemOfCard({ lid, line, text, done: false, date, time });
+  until: string | null = null,
+) => itemOfCard({ lid, line, text, done: false, date, time, until });
 
 /** ノート 1 件が丸ごと予定(frontmatter の `date:`)。 */
 const noteMeta = (lid: string, date: string | null, title = 'n-' + lid): EntryMeta => ({
@@ -161,5 +167,114 @@ describe('ノート 1 件の予定も、同じ束に入る(段④)', () => {
   it('ノートの予定に印は無い(チェックする行が無い)', () => {
     expect(itemOfNote(noteMeta('a', TODAY)).done).toBe(false);
     expect(itemOfNote(noteMeta('a', TODAY)).time).toBeNull();
+  });
+});
+
+/**
+ * 🔴 **期間は「出る日」ぜんぶに置く**(#344 段①)。
+ *
+ * ⚠ 1 点として置くと、**途中の日に出ない** ── user は
+ *   「8/26 の予定を見に来たのに、出張が載っていない」になる。
+ */
+describe('期間(#344 段①)', () => {
+  /** `2026-08-25` から 4 日ぶんの出張。⚠ 今日(8/23)より後なので期限切れではない。 */
+  const trip = () => card('t', 0, '2026-08-25', null, '出張', '2026-08-28');
+
+  it('開始から終わりまで、すべての日の束に出る', () => {
+    const g = buildAgenda([trip()], TODAY);
+    expect(g.map((x) => x.date)).toEqual([
+      '2026-08-25',
+      '2026-08-26',
+      '2026-08-27',
+      '2026-08-28',
+    ]);
+    for (const day of g) expect(day.cards).toHaveLength(1);
+  });
+
+  /**
+   * 🔴 **対照群** ── 単日は 1 つの束にしか出ない。
+   * ⚠ 無いと「何でも複数の束に出る」実装でも上が緑になる。
+   */
+  it('⚠ 対照群 ── 期間でない札は 1 つの束にしか出ない', () => {
+    const g = buildAgenda([card('s', 0, '2026-08-25')], TODAY);
+    expect(g).toHaveLength(1);
+    expect(g[0]?.cards).toHaveLength(1);
+  });
+
+  /**
+   * 🔴 **束をまたいで鍵が重ならない**(#344 段①)。
+   *
+   * ⚠ これが**この機能でいちばん壊れやすい所**である ── 描画側
+   *   (`ui/render/schedule.ts`)は鍵 1 つにつき DOM を 1 個しか持たないので、
+   *   鍵が同じだと **1 枚の札を日から日へ動かして、結局最後の日にしか出ない**。
+   * ⚠ unit で「4 つの束に出た」だけを見ると**この壊れ方は見えない**(束の中身は
+   *   正しいので)── だから鍵の一意性を**ここで**、DOM の枚数を
+   *   `tests/adapter/schedule-view.test.ts` で見る。
+   */
+  it('🔴 束をまたいで札の鍵が一意である(同じ鍵だと DOM が 1 枚しか出ない)', () => {
+    const g = buildAgenda([trip(), card('s', 0, '2026-08-26')], TODAY);
+    const keys = g.flatMap((x) => x.cards.map((c) => c.key));
+    expect(keys.length, '前提が崩れている ── 札が展開されていない').toBe(5);
+    expect(new Set(keys).size, `鍵が重なっている: ${keys.join(' / ')}`).toBe(keys.length);
+  });
+
+  /**
+   * 🔴 **上限で切る** ── 打ち間違い 1 つで束が数十万個できるのを止める。
+   * ⚠ 切ったことは**札の側**に出る(期間の終わりを札が出す)。
+   */
+  it('🔴 長すぎる期間は上限で切る(面が固まらない)', () => {
+    const g = buildAgenda([card('t', 0, '2026-08-25', null, '長すぎ', '2999-01-01')], TODAY);
+    expect(g).toHaveLength(AGENDA_RANGE_MAX_DAYS);
+    // ⚠ 空振り防止 ── 上限そのものが 1 や 0 に潰れていないこと
+    expect(AGENDA_RANGE_MAX_DAYS).toBeGreaterThan(300);
+  });
+
+  /**
+   * 🔴 **期間(終日)はその日の先頭**。
+   * 「この日は出張中」は、その日の 10:00 の予定より**前提**である。
+   */
+  it('束の中では、期間 → 時刻あり → 時刻なし の順', () => {
+    const g = buildAgenda(
+      [
+        card('c', 0, '2026-08-26', null, '時刻なし'),
+        card('b', 0, '2026-08-26', '10:00', '10 時'),
+        trip(),
+      ],
+      TODAY,
+    );
+    const day = g.find((x) => x.date === '2026-08-26');
+    expect(day?.cards.map((c) => c.text)).toEqual(['出張', '10 時', '時刻なし']);
+  });
+
+  /**
+   * ⚠ **対照群** ── 期間が 1 枚も無ければ、並びの規則は今までどおり
+   *   「時刻の昇順、時刻なしは後ろ」。
+   */
+  it('⚠ 対照群 ── 期間が無いときの並びは変わらない', () => {
+    const g = buildAgenda(
+      [
+        card('c', 0, '2026-08-26', null, '時刻なし'),
+        card('b', 0, '2026-08-26', '10:00', '10 時'),
+        card('a', 0, '2026-08-26', '09:00', '9 時'),
+      ],
+      TODAY,
+    );
+    expect(g[0]?.cards.map((c) => c.text)).toEqual(['9 時', '10 時', '時刻なし']);
+  });
+
+  /**
+   * 🔴 **今日をまたぐ期間は、過ぎた日だけが「期限切れ」**。
+   * ⚠ 期間ごと期限切れにすると、**まだ続いている出張が赤くなる**。
+   */
+  it('今日をまたぐ期間は、過ぎた日の束だけ期限切れになる', () => {
+    const g = buildAgenda([card('t', 0, '2026-08-21', null, '出張', '2026-08-25')], TODAY);
+    const flags = g.map((x) => [x.date, x.overdue]);
+    expect(flags).toEqual([
+      ['2026-08-21', true],
+      ['2026-08-22', true],
+      ['2026-08-23', false], // 今日
+      ['2026-08-24', false],
+      ['2026-08-25', false],
+    ]);
   });
 });

@@ -469,3 +469,127 @@ describe('右の列から、ノート 1 件に日付を付ける(段④)', () =>
     expect(store['e1']).not.toContain('date:');
   });
 });
+
+/**
+ * 🔴 **期間**(`@2026-08-25..2026-08-28`)── #344 段①。
+ *
+ * ⚠ ここが見るのは **DOM の枚数**である。束ね方(`agenda.ts`)の unit は
+ *   「4 つの束に出た」までしか言えず、**描画側が同じ鍵で 1 枚を使い回して
+ *   最後の日にしか出さない**壊れ方を原理的に見られない。
+ */
+describe('期間(#344 段①)', () => {
+  const TRIP = 'e1';
+  const body = '- [ ] 出張 @2026-08-25..2026-08-28\n';
+
+  it('🔴 期間の札は、日数ぶんの札として画面に出る', () => {
+    const { root, qa } = setup({ [TRIP]: body });
+    expect(groups(qa)).toEqual(['8/25(火)(1)', '8/26(水)(1)', '8/27(木)(1)', '8/28(金)(1)']);
+    for (const day of ['2026-08-25', '2026-08-26', '2026-08-27', '2026-08-28'])
+      expect(cardsOf(root, day), `${day} に札が無い`).toHaveLength(1);
+  });
+
+  /** ⚠ 対照群 ── 単日は 1 枚のまま(何でも増える実装でも上が緑にならないように)。 */
+  it('⚠ 対照群 ── 単日の札は 1 枚だけ', () => {
+    const { root, qa } = setup({ [TRIP]: '- [ ] 見積 @2026-08-25\n' });
+    expect(groups(qa)).toEqual(['8/25(火)(1)']);
+    expect(cardsOf(root, '2026-08-25')).toHaveLength(1);
+  });
+
+  /**
+   * 🔴 **小さな月の点も、期間のあいだ全部に付く**(#344 段①)。
+   *
+   * ⚠ 直す前は札の `date`(= 開始日)だけを集めていたので、**下の一覧では 4 日に
+   *   出ているのに、小さな月では 1 日にしか点が無い**という食い違いになっていた。
+   *   🔑 変異試験では見つからない ── 該当の検査が無かったので、殺しようがなかった。
+   */
+  it('🔴 小さな月の点が、期間のあいだ全部の日に付く', () => {
+    const { q } = setup({ [TRIP]: body });
+    for (const day of ['2026-08-25', '2026-08-26', '2026-08-27', '2026-08-28'])
+      expect(q(`[data-pkc-drop-date="${day}"][data-pkc-has]`), `${day} に点が無い`).not.toBeNull();
+    // ⚠ 空振り防止 ── 期間の外の日には点を付けない(「全部の日に点」でも緑にならない)
+    expect(q('[data-pkc-drop-date="2026-08-24"][data-pkc-has]')).toBeNull();
+    expect(q('[data-pkc-drop-date="2026-08-29"][data-pkc-has]')).toBeNull();
+  });
+
+  it('札に「いつまでか」が出る(束の見出しには終わりが出ないため)', () => {
+    const { root } = setup({ [TRIP]: body });
+    const card = cardsOf(root, '2026-08-26')[0]!;
+    expect(card.getAttribute('data-pkc-task-range')).toBe('2026-08-28');
+    /**
+     * ⚠ 桁は `formatListDate` の規則(左の一覧と同じ `MM/DD`)── 束の見出しは
+     *   `8/28(金)` と桁を詰めないが、**日付の見せ方を 2 本持たない**ほうを採る
+     *   (CLAUDE.md §7)。
+     */
+    expect(card.querySelector('[data-pkc-field="when"]')?.textContent).toBe('〜08/28');
+  });
+
+  /**
+   * 🔴 **掴んだ日が、落とした日に来る**(長さは変わらない)。
+   * ⚠ 開始だけ動かすと、user は「1 日ずらした」つもりなのに**出張が伸び縮みする**。
+   */
+  it('🔴 期間ごとずれる ── 掴んだ日を落とした日へ(長さは同じ)', async () => {
+    const { root, q, store } = setup({ [TRIP]: body });
+    // 3 日目(8/27)の札を 8/30 へ = +3 日
+    dragTo(cardsOf(root, '2026-08-27')[0]!, q('[data-pkc-drop-date="2026-08-30"]')!);
+    await tick(20);
+    expect(store[TRIP]).toBe('- [ ] 出張 @2026-08-28..2026-08-31\n');
+  });
+
+  it('先頭の札を掴んだときは、開始が落とした日になる', async () => {
+    const { root, q, store } = setup({ [TRIP]: body });
+    dragTo(cardsOf(root, '2026-08-25')[0]!, q('[data-pkc-drop-date="2026-08-27"]')!);
+    await tick(20);
+    expect(store[TRIP]).toBe('- [ ] 出張 @2026-08-27..2026-08-30\n');
+  });
+
+  /**
+   * 🔴 **置けるなら外せる**(片道にしない)── 期間ごと剥がれる。
+   * ⚠ 開始だけ消えて `..2026-08-28` が本文に残る形にしない。
+   */
+  /**
+   * 🔴 **掴んだ日が荷物に無い回でも、長さは変わらない**(#344 段①)。
+   *
+   * ⚠ この枝は**普通の操作では通らない** ── 予定の面の札は必ず日の見出しの中に在るので、
+   *   掴んだ日が載る。通るのは「荷物が古い形」や「日の見出しの外から掴んだ」場合である。
+   * 🔑 だから**荷物を直に作って**通す(CLAUDE.md §2「分岐を書いたら、分岐の数だけ
+   *   実際に走らせた記録を持つ」)。⚠ 1 稿目はここで**開始だけ**を落とした日へ動かして
+   *   おり、期間が **4 日 → 6 日**に伸びていた。
+   */
+  it('🔴 掴んだ日が荷物に無くても、期間の長さは変わらない', async () => {
+    const { root, q, store } = setup({ [TRIP]: body });
+    // ⚠ 古い形の荷物(`lid line` の 2 つだけ ── 掴んだ日が無い)
+    const data = new Map<string, string>([['application/x-pkc-task', `${TRIP} 0`]]);
+    const dt = {
+      types: [...data.keys()],
+      setData: (k: string, v: string) => data.set(k, v),
+      getData: (k: string) => data.get(k) ?? '',
+      effectAllowed: '',
+      dropEffect: '',
+    };
+    const target = q('[data-pkc-region="schedule-group"][data-pkc-drop-date="2026-08-27"]')!;
+    for (const type of ['dragover', 'drop']) {
+      const ev = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperty(ev, 'dataTransfer', { value: dt });
+      target.dispatchEvent(ev);
+    }
+    await tick(20);
+    // 🔑 開始が落とした日になり、**長さ(4 日)はそのまま**
+    expect(store[TRIP]).toBe('- [ ] 出張 @2026-08-27..2026-08-30\n');
+    expect(root).toBeTruthy();
+  });
+
+  it('🔴 「日付なし」へ落とすと、期間の記法ごと剥がれる', async () => {
+    // ⚠ 束は「0 件なら作らない」ので、日付なしの項目を 1 件混ぜて落とし先を出す
+    const { root, q, qa, store } = setup({ [TRIP]: `${body}- [ ] 体裁\n` });
+    q<HTMLElement>('[data-pkc-action="toggle-show-undated"]')!.click();
+    await tick();
+    expect(groups(qa).at(-1), '前提が崩れている(日付なしの束が出ていない)').toBe('日付なし(1)');
+    dragTo(
+      cardsOf(root, '2026-08-26')[0]!,
+      q('[data-pkc-region="schedule-group"][data-pkc-drop-date=""]')!,
+    );
+    await tick(20);
+    // 🔑 開始だけ消えて `..2026-08-28` が残る、にならないこと
+    expect(store[TRIP]).toBe('- [ ] 出張\n- [ ] 体裁\n');
+  });
+});

@@ -5,6 +5,7 @@ import {
   taskCardKey,
   TASK_LIMITS,
   type TaskCard,
+  taskCardsOf,
 } from '../../src/features/schedule/task-cards';
 import { getMonthGrid, dateKey } from '../../src/features/schedule/month-grid';
 
@@ -26,6 +27,7 @@ describe('task-cards(札 = 本文のチェック項目)', () => {
     done,
     date: null,
     time: null,
+    until: null,
   });
 
   /**
@@ -159,10 +161,37 @@ describe('replaceTaskCards は、変わっていないなら据え置く(2026-08
     done,
     date: null,
     time: null,
+    until: null,
   });
   /** ⚠ 項目が **0 行目と 5 行目**に来る本文(下の `card(…, 0/5, …)` と揃える)。 */
   const body = (doneSecond: boolean, first = 'あ', second = 'う'): string =>
     `- [ ] ${first}\n\n\n\n\n- [${doneSecond ? 'x' : ' '}] ${second}\n`;
+
+  /**
+   * 🔴 **期間だけが変わった回も「変わった」と見る**(#344 段①)。
+   *
+   * ⚠ 直す前の `sameCards` は日付と時刻しか見ていなかった ── 期間を足したとき
+   *   ここを直し忘れると、`..` の**終わりだけ**を書き換えた回が「同じ」と判定され、
+   *   **画面の期間が古いまま**残る(日付・時刻でまったく同じ穴を踏んでいる)。
+   * ⚠ 他の欄は 1 つも動かさない fixture にしてある ── 動かすと、
+   *   この検査は**別の欄のおかげで**通ってしまう(救い手が変わっただけ)。
+   */
+  it('🔴 期間の終わりだけが変わっても、据え置かない', () => {
+    const before = taskCardsOf('a', '- [ ] 出張 @2026-08-25..2026-08-28\n');
+    expect(before[0], '前提が崩れている ── 期間が読めていない').toMatchObject({
+      date: '2026-08-25',
+      until: '2026-08-28',
+    });
+    const next = replaceTaskCards(before, 'a', '- [ ] 出張 @2026-08-25..2026-08-30\n');
+    expect(next, '期間が変わったのに据え置いた(画面の期間が古いまま残る)').not.toBe(before);
+    expect(next[0]).toMatchObject({ date: '2026-08-25', until: '2026-08-30' });
+  });
+
+  /** ⚠ 対照群 ── 本当に同じなら据え置く(上が「常に作り直す」で通らないように)。 */
+  it('⚠ 対照群 ── 期間が同じなら据え置く', () => {
+    const before = taskCardsOf('a', '- [ ] 出張 @2026-08-25..2026-08-28\n');
+    expect(replaceTaskCards(before, 'a', '- [ ] 出張 @2026-08-25..2026-08-28\n')).toBe(before);
+  });
 
   /**
    * ⚠ **同じ lid の札は連続させて置く** ── worker はノート順に返すので実際そうなる。
