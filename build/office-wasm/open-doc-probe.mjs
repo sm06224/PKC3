@@ -415,10 +415,28 @@ try {
       poked = true;
       result.poked = { atSec: Math.round((Date.now() - t0) / 1000) };
       try {
+        /**
+         * 🔴 **突きが「届いた」ことを、突き自身に証明させる**(対照群の代わり)。
+         *
+         * ⚠ 詰まった回は版面が凍っているので、**絵が変わったか**では届いたか分からない
+         * (届いても変わらない)。🔑 だから **頁の DOM が event を受け取ったか**を数える
+         * ── capture 段で数えれば、Qt が食う前に通る。
+         * ⚠ ここが 0 なら**突きが届いていない**ので、その回は「動かなかった」と読まない
+         * (CLAUDE.md「対照群が届かない回は判定不能」)。
+         */
+        await page.evaluate(() => {
+          const w = globalThis;
+          w.__pkc3Poke = { down: 0, key: 0, move: 0 };
+          w.addEventListener('mousedown', () => { w.__pkc3Poke.down += 1; }, true);
+          w.addEventListener('keydown', () => { w.__pkc3Poke.key += 1; }, true);
+          w.addEventListener('mousemove', () => { w.__pkc3Poke.move += 1; }, true);
+        });
         await page.mouse.move(640, 400);
         await page.mouse.click(640, 400);
         await page.keyboard.press('Shift');
         await page.mouse.move(660, 420);
+        await page.waitForTimeout(1000);
+        result.poked.seen = await page.evaluate(() => globalThis.__pkc3Poke ?? null);
       } catch (e) {
         result.poked.err = safeErr(e);
       }
