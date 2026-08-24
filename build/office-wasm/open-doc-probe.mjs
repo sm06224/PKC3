@@ -176,7 +176,13 @@ const IME_TRACE = `(() => {
     //   (= 開いた ' が閉じないまま改行 = SyntaxError)。2026-08-24 に踏んだ。
     return String(raw).split(String.fromCharCode(10)).filter((l) => l.length > 0);
   } catch (e) {
-    return String(e).indexOf('ENOENT') >= 0 || String(e).indexOf('no such file') >= 0
+    // ⚠ **大文字小文字を潰してから見る**(2026-08-24 に踏んだ)── 実際に飛ぶのは
+    //    ErrnoError: No such file or directory で、小文字の 'no such file' とは一致しない。
+    //    🔑 ここを外すと「計装が入っていない(null)」が「読もうとして落ちた(ERR)」に化け、
+    //    **対照群の意味が逆に読める**(実際 #199 の対照群で 1 度読み違えた)。
+    //    ⚠⚠ この注釈に**逆引用符を書かない** ── ここは template literal の中である。
+    const msg = String(e).toLowerCase();
+    return msg.indexOf('enoent') >= 0 || msg.indexOf('no such file') >= 0
       ? null
       : ['ERR ' + String(e).slice(0, 80)];
   }
@@ -262,7 +268,35 @@ const PTHREADS = `(() => {
  * 🔑 だから**名前を付けて先に落とす** ── 原文が壊れているのか、相手の頁で
  *   取れなかったのかを、出力だけで区別できるようにする。
  */
-for (const [name, src] of Object.entries({ IME_DEEP, IME_TRACE, CANVAS_BOX, PTHREADS })) {
+/**
+ * 🔴 **idle 錠の待ちの計装を読む**(#199。`patch-lo-idles-trace.py` が書く)。
+ *
+ * 🔑 3 行の意味:
+ *   `idles:wait a=<IsUseSystemEventLoop> b=<IsMainThread>` ── ⚠ **前提を実測で出す**
+ *   `idles:woke` ── 出なければ、そこで永久に止まっている
+ *   `execute:set` ── 0 件なら、メインスレッドが `Application::Execute()` のループに未到達
+ * ⚠ **ここで '\n' と書いてはいけない**(組み立て側で実改行に解決される。2026-08-24 に踏んだ)。
+ */
+const IDLES_TRACE = `(() => {
+  try {
+    const lo = globalThis.__lo;
+    if (!lo || !lo.FS) return null;
+    const raw = lo.FS.readFile('/tmp/pkc3-idles.log', { encoding: 'utf8' });
+    return String(raw).split(String.fromCharCode(10)).filter((l) => l.length > 0);
+  } catch (e) {
+    // ⚠ **大文字小文字を潰してから見る**(2026-08-24 に踏んだ)── 実際に飛ぶのは
+    //    ErrnoError: No such file or directory で、小文字の 'no such file' とは一致しない。
+    //    🔑 ここを外すと「計装が入っていない(null)」が「読もうとして落ちた(ERR)」に化け、
+    //    **対照群の意味が逆に読める**(実際 #199 の対照群で 1 度読み違えた)。
+    //    ⚠⚠ この注釈に**逆引用符を書かない** ── ここは template literal の中である。
+    const msg = String(e).toLowerCase();
+    return msg.indexOf('enoent') >= 0 || msg.indexOf('no such file') >= 0
+      ? null
+      : ['ERR ' + String(e).slice(0, 80)];
+  }
+})()`;
+
+for (const [name, src] of Object.entries({ IME_DEEP, IME_TRACE, CANVAS_BOX, PTHREADS, IDLES_TRACE })) {
   try {
     new Function(`return ${src}`);
   } catch (e) {
@@ -733,6 +767,10 @@ try {
     }
     result.stacks = shot;
   }
+
+  // 🔑 **計装はまとめて最後に読む**(出口を 1 つにする ── 2026-08-10 の教訓)。
+  //    ⚠ `null`(この焼きに計装が無い)と `[]`(在るが 1 行も出ていない)を混ぜない。
+  result.idlesTrace = await page.evaluate(IDLES_TRACE).catch((e) => ({ err: String(e).slice(0, 80) }));
 
   if (SHOT) {
     try { await page.screenshot({ path: SHOT }); } catch { /* 固まっていたら撮れない */ }

@@ -204,7 +204,13 @@ const SAVE_TRACE = `(() => {
     const raw = lo.FS.readFile('/tmp/pkc3-save.log', { encoding: 'utf8' });
     return String(raw).split(String.fromCharCode(10)).filter((l) => l.length > 0);
   } catch (e) {
-    return String(e).indexOf('ENOENT') >= 0 || String(e).indexOf('no such file') >= 0
+    // ⚠ **大文字小文字を潰してから見る**(2026-08-24 に踏んだ)── 実際に飛ぶのは
+    //    ErrnoError: No such file or directory で、小文字の 'no such file' とは一致しない。
+    //    🔑 ここを外すと「計装が入っていない(null)」が「読もうとして落ちた(ERR)」に化け、
+    //    **対照群の意味が逆に読める**(実際 #199 の対照群で 1 度読み違えた)。
+    //    ⚠⚠ この注釈に**逆引用符を書かない** ── ここは template literal の中である。
+    const msg = String(e).toLowerCase();
+    return msg.indexOf('enoent') >= 0 || msg.indexOf('no such file') >= 0
       ? null
       : ['ERR ' + String(e).slice(0, 80)];
   }
