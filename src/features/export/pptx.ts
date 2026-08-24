@@ -204,7 +204,21 @@ export function splitIntoSlides(
     for (const line of blockToLines(b)) ensure().lines.push(line);
   }
   if (slides.length === 0) open('content', fallbackTitle);
-  return slides;
+  /**
+   * 🔴 **中身が 1 つも無いスライドは畳む**(#187 段④)。
+   *
+   * ⚠ これは設計 doc §3「切れ方は PKC2 と同じ」から**わざと外した 1 点**である。
+   * PKC2 も畳んでいない(`export-pptx.ts` の `splitIntoSlides` は `break` で必ず
+   * push し、空を落とす処理が無い)が、markdown では **`---` を見出しの前に置くのが
+   * ごく普通**なので、user の手元では**書くたびに白い紙が挟まる**。
+   *
+   * 🔑 畳んでも**書いたものは 1 文字も失われない** ── 題名も本文も箱も無い、
+   *   つまり中身を 1 つも運んでいないスライドだけが対象である。
+   * ⚠ 全部畳まれても **1 枚は残す**(0 枚の pptx は開けない)。
+   */
+  const kept = slides.filter((s) =>
+    s.title !== '' || s.subtitle !== undefined || s.lines.length > 0 || s.boxes.length > 0);
+  return kept.length > 0 ? kept : slides.slice(0, 1);
 }
 
 /**
@@ -335,23 +349,68 @@ interface SlideRel { kind: 'hyperlink' | 'image'; target: string }
 /** 箱を置く矩形(EMU)。 */
 interface Rect { x: number; y: number; w: number; h: number }
 
+/** 1 pt = 12700 EMU。 */
+const EMU_PER_PT = 12700;
+/** 本文 1 行の高さ。⚠ 行送りは字の 1.4 倍(見出しではないので詰めすぎない)。 */
+const LINE_H = Math.round((SZ.body / 100) * 1.4 * EMU_PER_PT);
+/** 表 1 行の高さ。⚠ セルの余白ぶんを見込んで字の 1.9 倍。 */
+const ROW_H = Math.round((SZ.cell / 100) * 1.9 * EMU_PER_PT);
+/** 積んだ物の間の余白。 */
+const GAP = inch(0.15);
+
 /**
- * 🔴 **本文と箱を、本文の枠に縦へ積む**(#187 段③)。
+ * 🔴 **その物が「素のままなら」欲しがる高さ**(#187 段④)。
  *
- * ⚠ 段④ で詰めるが、ここで**重ならないこと**だけは保証する ── 重なると
- * 下の物が読めなくなり、user から見ると「消えた」のと同じである。
- * 🔑 取り分は「本文が在れば 1 + 箱の数」で等分する(単純だが、必ず収まる)。
+ * ⚠ 段③ は等分だったので、**1 行しか本文が無くても枠の 1/3 を取っていた**
+ * (焼いて目で見て分かった)。⚠ 中身の量で配れば、余りは下の空きになる。
  */
-function stack(frame: Rect, hasText: boolean, boxCount: number): { text: Rect | null; boxes: Rect[] } {
-  const parts = (hasText ? 1 : 0) + boxCount;
-  if (parts === 0) return { text: null, boxes: [] };
-  const h = Math.floor(frame.h / parts);
-  let y = frame.y;
-  const text = hasText ? { ...frame, y, h } : null;
-  if (hasText) y += h;
-  const boxes: Rect[] = [];
-  for (let i = 0; i < boxCount; i += 1) { boxes.push({ ...frame, y, h }); y += h; }
-  return { text, boxes };
+function naturalH(b: SlideBox, w: number): number {
+  if (b.kind === 'table') return Math.max(1, b.rows.length) * ROW_H;
+  const wEmu = b.widthPx * EMU_PER_PX;
+  const hEmu = b.heightPx * EMU_PER_PX;
+  // ⚠ 幅にだけ合わせたときの高さ(縦は `fit` が改めて見る)
+  return Math.max(1, Math.round(hEmu * Math.min(1, w / wEmu)));
+}
+
+/**
+ * 🔴 **本文と箱を、本文の枠に縦へ積む**(#187 段③、配り方は段④)。
+ *
+ * ⚠ **重ならないことを保証する** ── 重なると下の物が読めなくなり、
+ * user から見ると「消えた」のと同じである。
+ * 🔑 欲しがる高さのまま置き、**収まらないときだけ全部を同じ率で縮める**
+ *   (順番も比も変えない)。⚠ 余ったら**引き伸ばさず**、群ごと縦の中央へ置く。
+ */
+function stack(frame: Rect, wants: readonly number[]): Rect[] {
+  const n = wants.length;
+  if (n === 0) return [];
+  const gaps = GAP * (n - 1);
+  const avail = Math.max(1, frame.h - gaps);
+  const sum = wants.reduce((a, b) => a + b, 0);
+  const k = sum > avail ? avail / sum : 1;
+  const hs = wants.map((want) => Math.max(1, Math.floor(want * k)));
+  const used = hs.reduce((a, b) => a + b, 0) + gaps;
+  let y = frame.y + Math.max(0, Math.floor((frame.h - used) / 2));
+  const out: Rect[] = [];
+  for (const h of hs) { out.push({ x: frame.x, y, w: frame.w, h }); y += h + GAP; }
+  return out;
+}
+
+/** 本文と箱の置き場所を決める。⚠ 箱が無いときは本文が枠を丸ごと使う。 */
+function layout(
+  frame: Rect,
+  lineCount: number,
+  boxes: readonly SlideBox[],
+): { text: Rect | null; boxes: Rect[] } {
+  const hasText = lineCount > 0;
+  if (boxes.length === 0) return { text: hasText ? frame : null, boxes: [] };
+  const wants = [
+    ...(hasText ? [Math.max(1, lineCount) * LINE_H] : []),
+    ...boxes.map((b) => naturalH(b, frame.w)),
+  ];
+  const rects = stack(frame, wants);
+  return hasText
+    ? { text: rects[0]!, boxes: rects.slice(1) }
+    : { text: null, boxes: rects };
 }
 
 /**
@@ -371,13 +430,53 @@ function fit(box: Rect, widthPx: number, heightPx: number): Rect {
   return { x: box.x + Math.round((box.w - w) / 2), y: box.y + Math.round((box.h - h) / 2), w, h };
 }
 
-/** 表 1 つ → `<p:graphicFrame>`。⚠ 列は等幅(段④ で詰める)。 */
+/**
+ * 🔴 **字の見た目の幅**(#187 段④)。⚠ 全角を 2、半角を 1 と数える。
+ * 正確さは要らない ── **列の取り分の重み**として使うだけである。
+ */
+function visualWidth(runs: readonly ExportRun[]): number {
+  let n = 0;
+  for (const r of runs) {
+    for (const ch of r.text) n += /[\u0020-\u007e\uff61-\uff9f]/.test(ch) ? 1 : 2;
+  }
+  return n;
+}
+
+/** 列の重みの下限と上限。⚠ 下限が無いと空の列が潰れ、上限が無いと長い列が他を飢えさせる。 */
+const COL_W_MIN = 4;
+const COL_W_MAX = 30;
+
+/**
+ * 🔴 **列の取り分を中身の量で配る**(#187 段④)。
+ * ⚠ 段③ は等幅だったので、「項目 / 長い説明」の表で説明が細い列に押し込まれていた。
+ * 🔑 **合計は必ず `total` ちょうど**にする(最後の列で端数を吸う)── 端数が余ると
+ *   表が枠より細くなり、右端が揃わない。
+ */
+function colWidths(rows: readonly (readonly ExportCell[])[], cols: number, total: number): number[] {
+  const weights = Array.from({ length: cols }, (_, i) => {
+    const w = rows.reduce((m, r) => {
+      const c = r[i];
+      return Math.max(m, c === undefined ? 0 : visualWidth(c.runs));
+    }, 0);
+    return Math.min(COL_W_MAX, Math.max(COL_W_MIN, w));
+  });
+  const sum = weights.reduce((a, b) => a + b, 0);
+  const out: number[] = [];
+  let used = 0;
+  for (let i = 0; i < cols; i += 1) {
+    const w = i === cols - 1 ? total - used : Math.floor((total * weights[i]!) / sum);
+    out.push(w);
+    used += w;
+  }
+  return out;
+}
+
+/** 表 1 つ → `<p:graphicFrame>`。 */
 function tableXml(id: number, rect: Rect, rows: readonly (readonly ExportCell[])[]): string {
   const cols = rows.reduce((n, r) => Math.max(n, r.length), 0);
   if (cols === 0 || rows.length === 0) return '';
-  const colW = Math.floor(rect.w / cols);
   const rowH = Math.floor(rect.h / rows.length);
-  const grid = Array.from({ length: cols }, () => `<a:gridCol w="${colW}"/>`).join('');
+  const grid = colWidths(rows, cols, rect.w).map((w) => `<a:gridCol w="${w}"/>`).join('');
   const body = rows.map((row) => {
     // ⚠ 欠けた列は空セルで埋める(行ごとに列数が違うと PowerPoint が拒む)
     const cells = Array.from({ length: cols }, (_, i) => row[i]);
@@ -445,7 +544,7 @@ function slideXml(s: SlideDraft): { xml: string; rels: SlideRel[] } {
         lineXml({ runs: [{ text: s.title, bold: true }], bullet: null }, SZ.title), 'ctr'));
     }
     // 🔴 本文と箱を、本文の枠に**縦へ積む**(重ならないことを保証する)
-    const lay = stack(FRAME.body, s.lines.length > 0, s.boxes.length);
+    const lay = layout(FRAME.body, s.lines.length, s.boxes);
     if (lay.text !== null) {
       shapes.push(textBox(3, '本文', lay.text,
         s.lines.map((l) => lineXml(l, SZ.body, linkOf)).join(''), 't'));

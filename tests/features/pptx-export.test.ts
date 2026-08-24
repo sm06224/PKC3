@@ -479,17 +479,130 @@ describe('段③:表と画像は「自分の箱」で置く', () => {
     expect(slide, '本文の箱が作られている').not.toContain('name="本文"');
   });
 
-  it('箱が増えると 1 つあたりの取り分が減る(枠に収める)', () => {
-    const one = buildPptx([{ kind: 'table', rows: [[cell('A')]] }], { title: 'T' });
-    const two = buildPptx([
-      { kind: 'table', rows: [[cell('A')]] },
-      { kind: 'table', rows: [[cell('B')]] },
-    ], { title: 'T' });
-    const hOf = (r: ReturnType<typeof buildPptx>): number => {
-      const m = /<p:graphicFrame>[^]*?<a:ext cx="\d+" cy="(\d+)"\/>/.exec(partOf(r, 'ppt/slides/slide1.xml'));
-      return +m![1]!;
-    };
-    expect(hOf(two), '2 つでも取り分が変わっていない').toBeLessThan(hOf(one));
-    expect(two.counts.tables).toBe(2);
+  /**
+   * 🔴 **取り分は「中身の量」で配る**(段④)。
+   * ⚠ 段③ は等分だったので、**1 行しか本文が無くても枠の 1/3 を取っていた**
+   *   (焼いて目で見て分かった)。ここはその規則を**置き換えた**ところである。
+   */
+  const tableHOf = (r: ReturnType<typeof buildPptx>): number => {
+    const m = /<p:graphicFrame>[^]*?<a:ext cx="\d+" cy="(\d+)"\/>/.exec(partOf(r, 'ppt/slides/slide1.xml'));
+    expect(m, '表が置かれていない').not.toBeNull();
+    return +m![1]!;
+  };
+  const tableOf = (n: number): ExportBlock =>
+    ({ kind: 'table', rows: Array.from({ length: n }, (_, i) => [cell(`r${i}`)]) });
+
+  it('🔴 表の高さは行数で決まる(等分ではない)', () => {
+    const one = tableHOf(buildPptx([tableOf(1)], { title: 'T' }));
+    const three = tableHOf(buildPptx([tableOf(3)], { title: 'T' }));
+    // ⚠ 3 行はほぼ 3 倍(縮めが効く前 = 枠に余裕がある形で見る)
+    expect(three / one, '行数で高さが変わっていない').toBeGreaterThan(2.5);
+  });
+
+  it('🔴 本文が 1 行なら、本文は枠の 1/3 も取らない', () => {
+    const r = buildPptx([h(3, '節'), p('1 行'), tableOf(1)], { title: 'T' });
+    const slide = partOf(r, 'ppt/slides/slide1.xml');
+    const m = /name="本文"[^]*?<a:ext cx="\d+" cy="(\d+)"\/>/.exec(slide);
+    expect(m, '本文の箱が無い').not.toBeNull();
+    // 本文の枠は 5.1 インチ = 4663440 EMU。その 1/3 は 1554480
+    expect(+m![1]!, '本文が中身の量に対して大きすぎる').toBeLessThan(1554480);
+  });
+
+  it('🔴 収まらないときは全部を同じ率で縮め、枠からはみ出さない', () => {
+    // 30 行の表を 3 つ ── 素のままでは枠(5.1 インチ)にまるで入らない
+    const r = buildPptx([tableOf(30), tableOf(30), tableOf(30)], { title: 'T' });
+    const rects = rectsOf(partOf(r, 'ppt/slides/slide1.xml'));
+    // 題名 + 表 3 つ
+    expect(rects, '箱が 4 つ置かれていない').toHaveLength(4);
+    const boxes = rects.filter((x) => x.y >= 1371600); // 本文の枠(1.5 インチ)から下
+    expect(boxes, '表が 3 つ取れていない').toHaveLength(3);
+    // ⚠ 比は変えない ── 同じ行数なので高さも揃う
+    expect(new Set(boxes.map((b) => b.h)).size, '同じ形の表で高さが違う').toBe(1);
+    const last = boxes[boxes.length - 1]!;
+    expect(last.y + last.h, '本文の枠からはみ出している').toBeLessThanOrEqual(1371600 + 4663440);
+    expect(r.counts.tables).toBe(3);
+  });
+
+  it('🔴 列の幅は中身の量で配り、合計は表の幅ちょうどになる', () => {
+    const r = buildPptx([{
+      kind: 'table',
+      rows: [[cell('あ'), cell('とても長い説明がここに入る列である')]],
+    }], { title: 'T' });
+    const slide = partOf(r, 'ppt/slides/slide1.xml');
+    const cols = [...slide.matchAll(/<a:gridCol w="(\d+)"\/>/g)].map((m) => +m[1]!);
+    expect(cols, '列が 2 本取れていない').toHaveLength(2);
+    expect(cols[1], '長い列が広くなっていない').toBeGreaterThan(cols[0]!);
+    // 🔴 端数が余ると右端が揃わない ── 合計は表の幅ちょうど
+    const w = +(/<p:graphicFrame>[^]*?<a:ext cx="(\d+)"/.exec(slide)![1]!);
+    expect(cols[0]! + cols[1]!, '列の合計が表の幅と違う').toBe(w);
+  });
+
+  it('🔴 全角は 2 文字ぶんの幅として数える', () => {
+    /**
+     * ⚠ 変異試験 N12(全部 1 と数える)が**生き延びた** ── 1 稿目の fixture は
+     * 「短い日本語 vs 長い日本語」だったので、**字数でも同じ順**になっていた。
+     * 🔑 **順が入れ替わる形**で見る:全角 8 字(見た目 16)vs 半角 12 字(見た目 12)。
+     */
+    const r = buildPptx([{
+      kind: 'table',
+      rows: [[cell('あいうえおかきく'), cell('abcdefghijkl')]],
+    }], { title: 'T' });
+    const cols = [...partOf(r, 'ppt/slides/slide1.xml').matchAll(/<a:gridCol w="(\d+)"\/>/g)]
+      .map((m) => +m[1]!);
+    expect(cols, '列が 2 本取れていない').toHaveLength(2);
+    expect(cols[0]!, '全角の列が半角の列より狭い(字数で数えている)')
+      .toBeGreaterThan(cols[1]!);
+  });
+
+  it('🔴 とても長い列が、他の列を飢えさせない(上限がある)', () => {
+    const r = buildPptx([{
+      kind: 'table',
+      rows: [[cell('印'), cell('x'.repeat(300))]],
+    }], { title: 'T' });
+    const slide = partOf(r, 'ppt/slides/slide1.xml');
+    const cols = [...slide.matchAll(/<a:gridCol w="(\d+)"\/>/g)].map((m) => +m[1]!);
+    const total = cols.reduce((a, b) => a + b, 0);
+    // ⚠ 上限が無いと 300:4 になり、細い列は字が 1 つも入らない幅になる
+    expect(cols[0]! / total, '細い列が潰れている').toBeGreaterThan(0.1);
+  });
+
+  it('空の列も潰れない(下限がある)', () => {
+    const r = buildPptx([{
+      kind: 'table',
+      rows: [[cell(''), cell('あいうえおかきくけこさしすせそ')]],
+    }], { title: 'T' });
+    const cols = [...partOf(r, 'ppt/slides/slide1.xml').matchAll(/<a:gridCol w="(\d+)"\/>/g)]
+      .map((m) => +m[1]!);
+    expect(cols[0]!, '空の列が潰れている').toBeGreaterThan(0);
+  });
+});
+
+/**
+ * 🔴 **段④:中身が 1 つも無いスライドは畳む**。
+ *
+ * ⚠ 設計 doc §3「切れ方は PKC2 と同じ」から**わざと外した 1 点**である ──
+ * PKC2 も畳んでいないが、markdown では `---` を見出しの前に置くのがごく普通なので、
+ * user の手元では**書くたびに白い紙が挟まる**。
+ */
+describe('段④:空のスライドを畳む', () => {
+  it('🔴 `---` の直後に見出しを書いても、白いスライドができない', () => {
+    const slides = splitIntoSlides([p('前'), { kind: 'hr' }, h(3, '節'), p('後')], 'ノート');
+    expect(slides.map((s) => s.title), '空のスライドが残っている').toEqual(['ノート', '節']);
+  });
+
+  it('🔴 文書の末尾の `---` も、白いスライドを残さない', () => {
+    const slides = splitIntoSlides([p('本文'), { kind: 'hr' }], 'ノート');
+    expect(slides).toHaveLength(1);
+  });
+
+  it('中身のある切れ目は畳まない(対照群)', () => {
+    // ⚠ これが無いと「全部畳む」実装と区別できない
+    const slides = splitIntoSlides([p('前'), { kind: 'hr' }, p('後')], 'ノート');
+    expect(slides).toHaveLength(2);
+    expect(slides[1]!.title).toBe('');
+  });
+
+  it('全部が空でも 1 枚は残す(0 枚の pptx は開けない)', () => {
+    expect(splitIntoSlides([{ kind: 'hr' }, { kind: 'hr' }], '')).toHaveLength(1);
   });
 });
