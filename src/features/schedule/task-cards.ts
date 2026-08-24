@@ -49,6 +49,13 @@ export interface TaskCard extends TaskItem {
   readonly date: string | null;
   /** 時刻(`14:00`)。書いていなければ `null`。⚠ 日付が `null` なら必ず `null`。 */
   readonly time: string | null;
+  /**
+   * 🔴 **期間の終わり**(`@2026-08-25..2026-08-28`)。期間でなければ `null`(#344 段①)。
+   * ⚠ **`date` が期間の開始**である ── 期間の札は `date` から `until` まで
+   *   **すべての日の束に出る**(`buildAgenda`)。
+   * ⚠ 期間に時刻は無い(`time` は必ず `null`)── 理由は `line-date.ts`。
+   */
+  readonly until: string | null;
 }
 
 /**
@@ -131,6 +138,7 @@ export function taskCardsOf(lid: string, body: string): TaskCard[] {
       done: item.done,
       date: when === null ? null : when.date,
       time: when === null ? null : when.time,
+      until: when === null ? null : when.until,
     };
   });
 }
@@ -190,7 +198,10 @@ function sameCards(a: readonly TaskCard[], b: readonly TaskCard[]): boolean {
       x.done !== y.done ||
       x.text !== y.text ||
       x.date !== y.date ||
-      x.time !== y.time
+      x.time !== y.time ||
+      // ⚠ **期間も見る**(#344)── 見ないと、`..` の終わりだけを書き換えたときに
+      //    「同じ」と判定され、**画面の期間が古いまま**残る(日付・時刻と同じ穴)
+      x.until !== y.until
     )
       return false;
   }

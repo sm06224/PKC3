@@ -144,3 +144,63 @@ test('🔴 予定のある日とない日で、小さな月の升目の高さが
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **期間の札を、本物の drag でずらす**(#344 段①)。
+ *
+ * 🔴 unit(`tests/adapter/schedule-view.test.ts`)は「何枚出るか」「本文がどう変わるか」を
+ * 見ている。**ここが見るのは実機でしか捕まらない 2 つ**である ──
+ * ① 期間の札が**掴める**か(`draggable` の門は unit の合成 event を素通りする)
+ * ② **どの日の札を掴んだか**が荷物に載るか(荷物は実際の `dragstart` でしか作られない)
+ *
+ * ⚠ 観測点は**保存された本文** ── 札が動いただけでは意味が無い。
+ */
+test('🔴 期間の札を掴んでずらすと、長さを保ったまま本文が書き替わる', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+
+  await createEntry(page, 'text');
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await ta.fill('- [ ] 大阪出張 @2026-08-25..2026-08-28');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  await clickReal(page, '[data-pkc-browse="schedule"]');
+  const pane = page.locator('[data-pkc-browse-pane="schedule"]');
+  await expect(pane, '予定の面が出ていない').toBeVisible();
+
+  // ① 4 日ぶんの札に展開されている(1 枚を日から日へ動かしていない)
+  await expect(
+    pane.locator('[data-pkc-region="schedule-cards"] > [data-pkc-entry]'),
+    '期間が日数ぶんの札になっていない',
+  ).toHaveCount(4);
+  // ⚠ 札は「いつまでか」を出す(束の見出しには終わりが出ないため)
+  await expect(
+    pane.locator('[data-pkc-region="schedule-cards"] > [data-pkc-task-range]').first(),
+  ).toContainText('〜08/28');
+
+  // ② 🔴 3 日目(8/27)の札を掴んで、8/30 の升目へ落とす = +3 日
+  const grabbed = pane.locator(
+    '[data-pkc-region="schedule-group"][data-pkc-drop-date="2026-08-27"] [data-pkc-entry]',
+  );
+  await expect(grabbed, '8/27 の札が無い').toHaveCount(1);
+  const target = pane.locator('[data-pkc-drop-date="2026-08-30"]');
+  const from = await grabbed.boundingBox();
+  const to = await target.boundingBox();
+  expect(from, '札の位置が取れない').not.toBeNull();
+  expect(to, '升目の位置が取れない').not.toBeNull();
+  await page.mouse.move(from!.x + from!.width / 2, from!.y + from!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(to!.x + to!.width / 2, to!.y + to!.height / 2, { steps: 12 });
+  await expect(target, '落とし先が光っていない').toHaveAttribute('data-pkc-dropping', '');
+  await page.mouse.up();
+
+  // ③ 🔴 **長さは 4 日のまま**、掴んだ日が落とした日に来ている
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await expect(ta, '期間が長さを保ったままずれていない').toHaveValue(
+    '- [ ] 大阪出張 @2026-08-28..2026-08-31',
+  );
+  await clickReal(page, '[data-pkc-action="cancel-edit"]');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

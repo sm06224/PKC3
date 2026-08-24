@@ -20,6 +20,7 @@ import { archetypeLabel } from '@adapter/ui/render/sidebar';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
 import { insertText } from '@adapter/ui/render/row-swap';
 import { insertionForLineDate } from '@features/schedule/line-date';
+import { addDays, daysBetween } from '@features/datetime/date-math';
 import {
   DATE_SHORTCUTS,
   isDateShortcut,
@@ -2844,7 +2845,7 @@ export function bindActions(
       clearDropTarget();
       if (drop === null) return;
       e.preventDefault();
-      const [lid, rawLine] = (de.dataTransfer.getData(PKC_TASK_DRAG) || '').split(' ');
+      const [lid, rawLine, grabbedOn] = (de.dataTransfer.getData(PKC_TASK_DRAG) || '').split(' ');
       if (lid === undefined || lid === '') return;
       const date = drop.date === '' ? null : drop.date;
       /**
@@ -2862,13 +2863,50 @@ export function bindActions(
       const card = dispatcher
         .getState()
         .taskScan?.cards.find((c) => c.lid === lid && c.line === line);
+      /**
+       * 🔴 **期間は「長さを保ったまま」ずらす**(#344 段①)。
+       *
+       * ⚠ 掴んだ日(`grabbedOn`)と落とした日の差だけ、開始と終わりを**両方**動かす。
+       *   開始だけ動かすと、user は「1 日ずらした」つもりなのに**期間が伸び縮みする**。
+       * ⚠ 日付を**外す**とき(`date === null`)は期間ごと剥がす ── 記法まるごと消えるので
+       *   `until` も `null` を渡す(渡さないと「頼んでいない指示」になる、下の reducer)。
+       * ⚠ 差が読めなかった回は**ずらさない**(`until` を据え置く)── 当てずっぽうで
+       *   user の期間を書き換えない。
+       */
+      /**
+       * ⚠ 掴んだ日が取れなかった回(荷物が古い / 板から掴んだ)は、**開始を基準にする** ──
+       *   1 稿目は `null` にして「開始だけ落とした日へ」動かしていたが、それだと
+       *   **期間の長さが変わる**(頼んでいないのに出張が伸び縮みする)。
+       * ⚠ 差が計算できなければ **0**(= 何も動かさない)── 当てずっぽうで期間を書き換えない。
+       *   書き換えが 0 なら `rewriteLineDate` が `null` を返すので、保存も走らない。
+       */
+      const from = grabbedOn !== undefined && grabbedOn !== '' ? grabbedOn : (card?.date ?? null);
+      const shift =
+        card?.until != null && date !== null && from !== null
+          ? (daysBetween(from, date) ?? 0)
+          : null;
+      const until =
+        date === null
+          ? null
+          : card?.until == null
+            ? null
+            : shift === null
+              ? card.until
+              : (addDays(card.until, shift) ?? card.until);
+      /**
+       * ⚠ 開始も同じ差で動かす ── 落とした日は「**掴んだ札**が来る日」であって、
+       *   期間の開始ではない(掴んだのが 3 日目なら、開始は落とした日の 2 日前になる)。
+       */
+      const start =
+        shift === null || card?.date == null ? date : (addDays(card.date, shift) ?? date);
       dispatcher.dispatch({
         type: 'SET_TASK_DATE',
         lid,
         line,
-        date,
+        date: start,
         // ⚠ 外すときは時刻も一緒に落ちる(記法ごと剥がすため)
         time: card?.time ?? null,
+        until,
       });
       return;
     }
@@ -2933,9 +2971,21 @@ export function bindActions(
       const line = whole
         ? ''
         : taskCard.querySelector('[data-pkc-task-line]')?.getAttribute('data-pkc-task-line');
+      /**
+       * 🔴 **掴んだのが「どの日の札か」も載せる**(#344 段①)。
+       *
+       * ⚠ 期間の札は**複数の日に出る**ので、`lid` と行番号だけでは
+       *   「どこを掴んだか」が決まらない。🔑 直接操作として素直なのは
+       *   **掴んだ日が落とした日に来る**ことなので、その差ぶん期間ごとずらす
+       *   ── 期間の**長さが変わらない**(開始だけ動かすと、user が
+       *   頼んでいないのに出張が延びたり縮んだりする)。
+       * ⚠ 単日の札では使わない(落とした日がそのまま新しい日である)。
+       */
+      // 🔑 読み口は `dateTargetOf` 1 つ(落とす側と同じ) ── 属性名を 2 か所に書かない
+      const from = dateTargetOf(taskCard)?.date ?? '';
       if (lid !== null && line !== null && line !== undefined) {
         dragFromSide = null;
-        de.dataTransfer.setData(PKC_TASK_DRAG, `${lid} ${line}`);
+        de.dataTransfer.setData(PKC_TASK_DRAG, `${lid} ${line} ${from}`);
         de.dataTransfer.effectAllowed = 'move';
         return;
       }

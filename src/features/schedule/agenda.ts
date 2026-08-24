@@ -28,7 +28,7 @@ import type { EntryMeta } from '../../core/model/entry-meta';
  *   その全数検査に落ちた ── **規則が 2 か所に生えた瞬間に鳴る**ようにしてある。
  */
 import { storedDateParts } from '../datetime/stored-date';
-import { pad2 } from '../datetime/datetime-format';
+import { addDays } from '../datetime/date-math';
 
 /**
  * 🔴 **予定 1 件**。⚠ **単位は 2 つある**(2026-08-23、段④)──
@@ -44,7 +44,15 @@ import { pad2 } from '../datetime/datetime-format';
  *   できるようになるか』を書く」)。
  */
 export interface AgendaItem {
-  /** 描画の再利用と、掴んだときの荷物の鍵。⚠ **行まで含める**(1 ノートに複数在る)。 */
+  /**
+   * **その予定を指す鍵**。⚠ **行まで含める**(1 ノートに複数在る)。
+   *
+   * 🔴 **束に入った札の鍵は、これに「どの日の分か」が付く**(#344 段①)──
+   *   期間の札は**複数の日に出る**ので、鍵が同じだと描画側の再利用表
+   *   (`schedule.ts` の `this.cards`)が **1 枚の DOM を日から日へ動かし、
+   *   結局 1 日にしか出ない**。⚠ 掴んだときの荷物には**使われていない**
+   *   (荷物は札自身の `data-pkc-*` から組む)ので、伸ばしても落とす側は壊れない。
+   */
   readonly key: string;
   readonly lid: string;
   /** 原文の行番号。`null` = ノート 1 件が丸ごと予定。 */
@@ -52,8 +60,18 @@ export interface AgendaItem {
   readonly text: string;
   /** ⚠ ノート 1 件の予定に印は無い(チェックする「行」が無い)。 */
   readonly done: boolean;
+  /** 期間なら**開始**の日。 */
   readonly date: string | null;
   readonly time: string | null;
+  /**
+   * 🔴 **期間の終わり**(`@2026-08-25..2026-08-28`)。期間でなければ `null`(#344 段①)。
+   * ⚠ **`date` から `until` まで、すべての日の束に出る** ── 1 点として置くと
+   *   途中の日に出ず、「予定を見に来たのに載っていない」になる。
+   * ⚠ **ノート 1 件の予定(frontmatter の `date:`)には期間が無い** ── そちらは
+   *   `end:` を持てる場所が無い(抽出列を増やす = schema の移行)ので**段②**にした。
+   *   非対称であることを承知で切っている(#344 に書いてある)。
+   */
+  readonly until: string | null;
 }
 
 /** 行の札を予定にする。 */
@@ -66,6 +84,7 @@ export function itemOfCard(card: TaskCard): AgendaItem {
     done: card.done,
     date: card.date,
     time: card.time,
+    until: card.until,
   };
 }
 
@@ -82,6 +101,8 @@ export function itemOfNote(meta: EntryMeta): AgendaItem {
     done: false,
     date: meta.date,
     time: null,
+    // ⚠ frontmatter には期間の置き場が無い(#344 段②)── 常に `null`
+    until: null,
   };
 }
 
@@ -122,13 +143,31 @@ function labelOf(date: string, today: string, tomorrow: string): string {
   return same ? `${head}(${WEEKDAYS[at.getDay()]})` : head;
 }
 
-/** 翌日の `YYYY-MM-DD`。⚠ 月末・年末をまたぐので `Date` に任せる。 */
-function nextDay(today: string): string {
-  const p = storedDateParts(today);
-  if (p === null) return '';
-  const d = new Date(Number(p.year), Number(p.month) - 1, Number(p.day) + 1);
-  // ⚠ 桁の詰め方は `pad2` 1 か所(面ごとに書くと月末で字が食い違う)
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+/**
+ * 🔴 **期間を何日ぶんまで束へ展開するか**(#344 段①)。
+ *
+ * ⚠ 上限が無いと、打ち間違い 1 つ(`@2026-08-25..2999-01-01`)で
+ *   **束が 35 万個**できて面が固まる ── しかも原因は本文の 1 行なので、
+ *   user には何が起きたか分からない。
+ * 🔑 切ったことは**札に出る** ── 札は期間の終わり(`〜1/1`)を出すので、
+ *   束が途中で切れていても「そこまでの予定だ」と読める。
+ */
+export const AGENDA_RANGE_MAX_DAYS = 366;
+
+/**
+ * 期間を日の並びにする。⚠ **上限で切る**(上の定数)。
+ * ⚠ `until` が読めない字なら**開始の 1 日だけ** ── 落とすと予定が黙って消える。
+ */
+function daysOfRange(from: string, until: string): string[] {
+  const out: string[] = [from];
+  let at = from;
+  while (at < until && out.length < AGENDA_RANGE_MAX_DAYS) {
+    const next = addDays(at, 1);
+    if (next === null) break;
+    at = next;
+    out.push(at);
+  }
+  return out;
 }
 
 /**
@@ -147,15 +186,25 @@ export function buildAgenda(
   today: string,
   withUndated = false,
 ): AgendaGroup[] {
-  const tomorrow = nextDay(today);
+  const tomorrow = addDays(today, 1) ?? '';
   const byDate = new Map<string, AgendaItem[]>();
   const undated: AgendaItem[] = [];
   for (const c of cards) {
-    if (c.date === null) undated.push(c);
-    else {
-      const list = byDate.get(c.date);
-      if (list === undefined) byDate.set(c.date, [c]);
-      else list.push(c);
+    if (c.date === null) {
+      undated.push(c);
+      continue;
+    }
+    /**
+     * 🔴 **期間は「出る日」ぜんぶに置く**(#344 段①)。
+     * ⚠ 鍵に**その日**を足す ── 足さないと、描画側の再利用表が同じ鍵を
+     *   見つけて **1 枚の DOM を日から日へ動かし、最後の日にしか出ない**。
+     */
+    const days = c.until === null ? [c.date] : daysOfRange(c.date, c.until);
+    for (const day of days) {
+      const at: AgendaItem = days.length === 1 ? c : { ...c, key: `${c.key} ${day}` };
+      const list = byDate.get(day);
+      if (list === undefined) byDate.set(day, [at]);
+      else list.push(at);
     }
   }
   const groups: AgendaGroup[] = [...byDate.keys()]
@@ -179,9 +228,18 @@ export function buildAgenda(
  */
 function sortByTime(cards: readonly AgendaItem[]): AgendaItem[] {
   return [...cards].sort((a, b) => {
-    if (a.time === b.time) return 0;
-    if (a.time === null) return 1;
-    if (b.time === null) return -1;
+    /**
+     * 🔴 **期間(= 終日)はその日の先頭**(#344 段①)。
+     * ⚠ 期間の札は `time` を持たないので、直す前の規則では**いちばん後ろ**へ行った
+     *   ── 「この日は出張中」は、その日の 10:00 の予定より**前提**である
+     *   (だから上に出す)。⚠ 「いつか今日やる」を後ろへ置く理由とは向きが逆になるが、
+     *   同じ理由で決まっている:**その日の読み方に効く順**に並べる。
+     */
+    const rank = (c: AgendaItem): number => (c.until !== null ? 0 : c.time === null ? 2 : 1);
+    const ra = rank(a);
+    const rb = rank(b);
+    if (ra !== rb) return ra - rb;
+    if (a.time === b.time || a.time === null || b.time === null) return 0;
     return a.time < b.time ? -1 : 1;
   });
 }

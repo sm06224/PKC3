@@ -44,8 +44,13 @@ export type BodyRewrite =
       kind: 'line-date';
       line: number;
       date: string | null;
-      /** ⚠ `date` が `null` なら無視される。 */
+      /** ⚠ `date` が `null` なら無視される。⚠ `until` が在るときも無視される(期間に時刻は無い)。 */
       time?: string | null;
+      /**
+       * 🔴 **期間の終わり**(#344 段①)。単日にするなら渡さないか `null`。
+       * ⚠ `date` が `null`(= 日付を外す)なら無視される。
+       */
+      until?: string | null;
     };
 
 /**
@@ -108,7 +113,7 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
  */
 function rewriteLineDate(
   body: string,
-  rewrite: { line: number; date: string | null; time?: string | null },
+  rewrite: { line: number; date: string | null; time?: string | null; until?: string | null },
 ): string | null {
   const lines = body.split('\n');
   const line = lines[rewrite.line];
@@ -132,12 +137,12 @@ function rewriteLineDate(
         : before + after;
   } else if (found === null) {
     // 日付を付ける。⚠ 区切りの空白は `insertionForLineDate` 1 か所が決める(§7)
-    next = line + insertionForLineDate(line, rewrite.date, rewrite.time);
+    next = line + insertionForLineDate(line, rewrite.date, rewrite.time, rewrite.until);
   } else {
     // 日付を差し替える。⚠ **記法の範囲だけ**を入れ替える(前後の字は 1 バイトも動かさない)
     next =
       line.slice(0, found.start) +
-      formatLineDate(rewrite.date, rewrite.time) +
+      formatLineDate(rewrite.date, rewrite.time, rewrite.until) +
       line.slice(found.end);
   }
   if (next === line) return null;

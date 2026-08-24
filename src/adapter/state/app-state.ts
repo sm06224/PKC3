@@ -619,7 +619,15 @@ export type UserAction =
    * ⚠ `SET_ENTRY_DATE`(ノート 1 件が丸ごと予定)とは**単位が違う**。
    * ⚠ `date: null` は予定から外す。
    */
-  | { type: 'SET_TASK_DATE'; lid: string; line: number; date: string | null; time?: string | null }
+  | {
+      type: 'SET_TASK_DATE';
+      lid: string;
+      line: number;
+      date: string | null;
+      time?: string | null;
+      /** 🔴 期間の終わり(#344 段①)。単日にするなら渡さないか `null`。 */
+      until?: string | null;
+    }
   /**
    * 🔴 **チェックの印を付け外しする**(#277)。`line` は**原文の行番号**。
    * ⚠ 索引(何番目のチェックか)ではなく**行**で指す ── 索引だと、数え方が
@@ -1996,6 +2004,9 @@ function reduceCore(
               line: action.line,
               date: action.date,
               ...(action.time === undefined ? {} : { time: action.time }),
+              // ⚠ **渡されたときだけ**載せる(渡していないのに `null` を載せると、
+              //    「期間を外す」という**頼んでいない指示**になる)
+              ...(action.until === undefined ? {} : { until: action.until }),
             },
           },
         ],

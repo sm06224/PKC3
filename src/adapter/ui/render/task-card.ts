@@ -116,10 +116,34 @@ export function patchTaskCard(
       showDate && data.date !== null && thisYear !== null
         ? formatListDate(data.date, thisYear)
         : '';
-    const label = data.time === null ? day : day === '' ? data.time : `${day} ${data.time}`;
+    /**
+     * 🔴 **期間の終わりは、日付を出さない面でも出す**(#344 段①)。
+     *
+     * ⚠ `showDate` を切っているのは「**束の見出しと同じ日が札にも並ぶのは重複**」
+     *   だからである ── ところが**終わりの日は見出しに出ていない**。
+     *   出さないと、user は「この札はいつまでの予定か」を**本文を開くまで知れない**
+     *   (期間の札は複数の日に出るので、なおさら分からない)。
+     * 🔑 だから重複の理屈はここには当たらない ── **`showDate` とは別に**出す。
+     */
+    const till =
+      data.until !== null && thisYear !== null ? `〜${formatListDate(data.until, thisYear)}` : '';
+    const label =
+      till !== ''
+        ? `${day}${till}`
+        : data.time === null
+          ? day
+          : day === ''
+            ? data.time
+            : `${day} ${data.time}`;
     if (when.textContent !== label) when.textContent = label;
     when.hidden = label === '';
   }
+  /**
+   * 🔑 **期間であることを札の属性に出す**(#344 段①)── 見た目のためではなく、
+   * **外から見える継ぎ目**を作るため(smoke と CSS が「期間の札」を名指しできる)。
+   */
+  if (data.until !== null) card.setAttribute('data-pkc-task-range', data.until);
+  else card.removeAttribute('data-pkc-task-range');
   const text = card.querySelector('[data-pkc-field="text"]');
   // ⚠ 中身が空の項目もある(`- [ ]` だけの行)── 札は出すが、字は出ない
   if (text && text.textContent !== data.text) text.textContent = data.text;
