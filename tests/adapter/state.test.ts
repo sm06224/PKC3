@@ -517,6 +517,21 @@ describe('dispatcher: re-entrancy linearization', () => {
   });
 });
 
+/**
+ * 🔴 **壁時計で待たない。条件で待つ**(2026-08-24)。
+ *
+ * ⚠ ここは元々 `setTimeout(r, 60)` のような**固定の待ち**だった ── 手元で他の仕事と
+ *   並行に回したとき「ops are strictly serialized」が**1 度だけ赤**になった
+ *   (単独で回すと緑、その後の全量も緑)。負荷が高い回は 60ms で 4 件揃わない。
+ * ⚠ 主張(完了の順が交差しないこと)は正しいので**緩めない** ── 直すのは**待ちだけ**である。
+ * 🔑 満ちなくても**必ず返る**(締切つき)── ここで投げると
+ *   「何が足りなかったか」が消え、続く assert の文言のほうが読める。
+ */
+async function until(ok: () => boolean, budgetMs = 2000): Promise<void> {
+  const limit = Date.now() + budgetMs;
+  while (!ok() && Date.now() < limit) await new Promise((r) => setTimeout(r, 1));
+}
+
 describe('effect layer: serialized store I/O', () => {
   function fakeStore(log: string[], bodies: Record<string, string>): StorePort {
     return {
@@ -545,7 +560,7 @@ describe('effect layer: serialized store I/O', () => {
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', 1), meta('b', 2)], relations: [] });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' }); // 遅い get
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'b' }); // 速い get ── だが先行完了を待つ
-    await new Promise((r) => setTimeout(r, 60));
+    await until(() => log.length >= 4);
     // 完了順まで含めた非交差 assert: 非直列実装なら done:b が done:a を追い越して落ちる
     expect(log).toEqual(['get:a', 'done:a', 'get:b', 'done:b']);
     expect(d.getState().openBody?.lid).toBe('b');
@@ -558,7 +573,7 @@ describe('effect layer: serialized store I/O', () => {
     const off = connectStoreEffects(d, fakeStore([], {})); // 行なし
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', 1)], relations: [] });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
-    await new Promise((r) => setTimeout(r, 40));
+    await until(() => d.getState().error !== null);
     expect(d.getState().error).toMatch(/entry row missing/); // state 駆動の可視エラー
     expect(d.getState().openBody).toBeNull(); // 「空のノート」に見せない
     off();
@@ -585,12 +600,12 @@ describe('effect layer: serialized store I/O', () => {
     const off = connectStoreEffects(d, store);
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', 1)], relations: [] });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
-    await new Promise((r) => setTimeout(r, 20));
+    await until(() => d.getState().error !== null);
     expect(d.getState().error).toMatch(/boom/); // 次の成功 / 選択まで残る
     expect(d.getState().phase).toBe('ready'); // 読み失敗で app は死なない
     // 再クリック = retry(review C): queue は生きており復帰できる
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
-    await new Promise((r) => setTimeout(r, 20));
+    await until(() => d.getState().openBody?.body === 'recovered');
     expect(d.getState().openBody?.body).toBe('recovered');
     expect(d.getState().error).toBeNull(); // 成功でエラー通知はクリア
     off();
@@ -618,18 +633,20 @@ describe('effect layer: serialized store I/O', () => {
     const off = connectStoreEffects(d, store);
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', 1)], relations: [] });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
-    await new Promise((r) => setTimeout(r, 20));
+    await until(() => d.getState().openBody !== null);
     d.dispatch({ type: 'START_EDIT' });
     d.dispatch({ type: 'UPDATE_OPEN_BODY', body: '# A2' });
     d.dispatch({ type: 'COMMIT_EDIT' });
-    await new Promise((r) => setTimeout(r, 20));
+    await until(() => d.getState().phase === 'error');
     expect(d.getState().phase).toBe('error');
     // 未達の証拠が残っている
     expect(d.getState().openBody).toMatchObject({ baseline: '# A2', persisted: '# A' });
 
     failNext = false;
     d.dispatch({ type: 'RETRY_PERSIST' });
-    await new Promise((r) => setTimeout(r, 20));
+    // ⚠ `phase === 'ready'` は **RETRY を受けた時点**で真になる(書込の完了ではない)
+    //    ── 待つのは**ack が届いたこと**である
+    await until(() => d.getState().openBody?.persisted === '# A2');
     expect(persisted).toEqual(['# A2']); // baseline(最後の commit 内容)を再送
     expect(d.getState().phase).toBe('ready');
     expect(d.getState().error).toBeNull();
@@ -655,11 +672,11 @@ describe('effect layer: serialized store I/O', () => {
     const off = connectStoreEffects(d, store);
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', 1)], relations: [] });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
-    await new Promise((r) => setTimeout(r, 20));
+    await until(() => d.getState().openBody !== null);
     d.dispatch({ type: 'START_EDIT' });
     d.dispatch({ type: 'UPDATE_OPEN_BODY', body: 'A2' });
     d.dispatch({ type: 'COMMIT_EDIT' });
-    await new Promise((r) => setTimeout(r, 20));
+    await until(() => d.getState().phase === 'error');
     expect(d.getState().phase).toBe('error'); // 保存失敗は静かに失敗しない
     off();
   });
@@ -670,11 +687,11 @@ describe('effect layer: serialized store I/O', () => {
     const off = connectStoreEffects(d, fakeStore(log, { a: 'A' }));
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', 1)], relations: [] });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
-    await new Promise((r) => setTimeout(r, 40));
+    await until(() => log.includes('done:a'));
     d.dispatch({ type: 'START_EDIT' });
     d.dispatch({ type: 'UPDATE_OPEN_BODY', body: 'A2' });
     d.dispatch({ type: 'COMMIT_EDIT' });
-    await new Promise((r) => setTimeout(r, 20));
+    await until(() => log.length >= 3);
     expect(log).toEqual(['get:a', 'done:a', 'put:a:A2']);
     off();
   });
@@ -703,14 +720,14 @@ describe('effect layer: serialized store I/O', () => {
       relations: [],
     });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'td' });
-    await new Promise((r) => setTimeout(r, 20));
+    await until(() => d.getState().openBody !== null);
     d.dispatch({ type: 'START_EDIT' });
     d.dispatch({
       type: 'UPDATE_OPEN_BODY',
       body: '---\nstatus: done\ndate: 2026-08-02\n---\n芝刈り',
     });
     d.dispatch({ type: 'COMMIT_EDIT' });
-    await new Promise((r) => setTimeout(r, 20));
+    await until(() => persisted.length > 0);
     const row = persisted[0];
     if (!row) throw new Error('no entry persisted');
     // store 境界の roundtrip pin: 書かれた行の抽出列 = body への extract 再適用
@@ -721,12 +738,17 @@ describe('effect layer: serialized store I/O', () => {
     off();
   });
 
-  it('teardown stops in-flight results from dispatching (review H)', async () => {
-    const d = new Dispatcher();
-    const off = connectStoreEffects(d, {
-    ...stubRevisionOps(),
+  /**
+   * 読みの合図つきの店(teardown の 2 件が使う)。
+   * @param entered 読みに**入った**回数 / @param resolved 読みが**解けた**か
+   */
+  function tracedStore(mark: { entered: number; resolved: boolean }): StorePort {
+    return {
+      ...stubRevisionOps(),
       async getBody() {
+        mark.entered += 1;
         await new Promise((r) => setTimeout(r, 20));
+        mark.resolved = true;
         return 'late';
       },
       async deleteEntry() {},
@@ -736,11 +758,48 @@ describe('effect layer: serialized store I/O', () => {
       async persistEntry() {
         return stubStamps();
       },
-    });
+    };
+  }
+
+  it('teardown stops in-flight results from dispatching (review H)', async () => {
+    /**
+     * 🔴 **この test は 2026-08-24 まで空振りだった。**
+     *
+     * ⚠ 直す前は `SELECT_ENTRY` の直後に `off()` を呼び、40ms 待って
+     *   「`openBody` が null」を見ていた。実測すると **`getBody` は 1 度も
+     *   呼ばれていない** ── 読みは effect の鎖の先で始まるので、同期で畳むと
+     *   **始まってすらいない**。つまり「飛んでいる結果を止める」という当の主張を
+     *   1 度も通していなかった(CLAUDE.md §2「弱いのではなく走っていない」)。
+     * 🔑 **本当に飛んでいる状態にしてから畳む** ── 読みに入った合図を待つ。
+     */
+    const d = new Dispatcher();
+    const mark = { entered: 0, resolved: false };
+    const off = connectStoreEffects(d, tracedStore(mark));
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', 1)], relations: [] });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
-    off(); // in-flight のまま teardown
-    await new Promise((r) => setTimeout(r, 40));
+    await until(() => mark.entered > 0);
+    expect(mark.entered, '読みが始まっていない ── 畳む前から空振りである').toBe(1);
+    off(); // 🔴 **ここで初めて in-flight のまま teardown**
+    await until(() => mark.resolved);
+    // ⚠ 解けた**後**の続きが回るところまで進める(合図は `return` の手前で立つ)
+    for (let i = 0; i < 3; i += 1) await new Promise((r) => setTimeout(r, 0));
+    expect(mark.resolved, '読みがまだ解けていない ── 空振りで緑になっている').toBe(true);
+    expect(d.getState().openBody).toBeNull();
+  });
+
+  it('🔴 畳んだ後は、読みを始めない(上の test が偶然見ていたもの)', async () => {
+    /**
+     * ⚠ 上の test が**空振りのまま実際に見ていた**のはこちらである ──
+     *   捨てるのは惜しいので、**別の主張として**残す。
+     */
+    const d = new Dispatcher();
+    const mark = { entered: 0, resolved: false };
+    const off = connectStoreEffects(d, tracedStore(mark));
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', 1)], relations: [] });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    off(); // ⚠ 読みが始まる**前**に畳む
+    for (let i = 0; i < 5; i += 1) await new Promise((r) => setTimeout(r, 0));
+    expect(mark.entered, '畳んだのに読みを始めている').toBe(0);
     expect(d.getState().openBody).toBeNull();
   });
 });
