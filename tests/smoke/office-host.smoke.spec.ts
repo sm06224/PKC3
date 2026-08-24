@@ -235,12 +235,14 @@ test('🔴 mac では Ctrl+英字 を Qt にも渡さない(文字だけが残�
  *
  * @param opts.badFont この名前のフォントで `FS.writeFile` を投げさせる(D-4 の検査)
  * @param opts.breakWasm `instantiateWasm` を実際に走らせて失敗させる(D-3 の検査)
+ * @param opts.alienPack 目録に `cui/ui/querydialog.ui` を入れる(= 非 ODF を保存できる
+ *   一式。#225)。⚠ 既定は**入れない** ── 古い一式のほうが既定である
  */
 async function seedFakePack(
   page: import('@playwright/test').Page,
-  opts: { badFont?: string; breakWasm?: boolean } = {},
+  opts: { badFont?: string; breakWasm?: boolean; alienPack?: boolean } = {},
 ): Promise<void> {
-  await page.evaluate(async ({ badFont, breakWasm }) => {
+  await page.evaluate(async ({ badFont, breakWasm, alienPack }) => {
     const gz = async (s: string): Promise<Blob> =>
       new Response(
         new Blob([s]).stream().pipeThrough(new CompressionStream('gzip')),
@@ -372,7 +374,28 @@ async function seedFakePack(
     ].join('\n');
     await put('files', 'soffice.js', new Blob([sofficeJs]));
     await put('files', 'qtloader.js', new Blob([qtLoaderJs]));
-    await put('files', 'soffice.data.js.metadata', new Blob(['{}']));
+    /**
+     * 🔴 **目録は「非 ODF を保存できるか」の判定材料でもある**(#225)。
+     *
+     * ⚠ 囮(古い一式にも在る 3 つ)を**必ず一緒に**入れる ── 入れないと、
+     * 判定を部分一致へ書き戻す変異が**この検査を素通りする**。
+     */
+    const CFG = '/instdir/share/config/soffice.cfg';
+    const uiNames = [
+      CFG + '/vcl/ui/querydialog.ui',
+      CFG + '/modules/scalc/ui/recalcquerydialog.ui',
+      CFG + '/sfx/ui/safemodequerydialog.ui',
+    ];
+    if (alienPack) uiNames.push(CFG + '/cui/ui/querydialog.ui');
+    await put(
+      'files',
+      'soffice.data.js.metadata',
+      new Blob([
+        JSON.stringify({
+          files: uiNames.map((n, i) => ({ filename: n, start: i, end: i + 1 })),
+        }),
+      ]),
+    );
     await put('files', 'soffice.wasm.gz', await gz('not a wasm module'));
     await put('files', 'soffice.data.gz', await gz('fake package bytes'));
     // ⚠ **フォントを 0 件にしない** ── 0 件の次元は「測っていない次元」である
@@ -1563,9 +1586,10 @@ test('🔴 表示言語を変えたら、開き直す導線を出す', async ({ 
 async function openWithDoc(
   page: import('@playwright/test').Page,
   name: string,
+  opts: { alienPack?: boolean } = {},
 ): Promise<void> {
   await page.goto('/office/host.html');
-  await seedFakePack(page);
+  await seedFakePack(page, { alienPack: opts.alienPack });
   await page.addInitScript((docName) => {
     const ch = new BroadcastChannel('pkc3-office');
     ch.onmessage = (ev: MessageEvent): void => {
@@ -1605,4 +1629,50 @@ test('🔴 対照群 ── 保存できる形式(.odt)では何も出さない'
   await openWithDoc(page, 'a.odt');
   await expect(page.locator('#nosave'), '保存できるのに断りが出ている').toBeHidden();
   await expect(page.locator('#ro'), '保存できるのに印が出ている').toBeHidden();
+});
+
+/**
+ * 🔴 **同じ `.docx` でも、入っている一式で答えが変わる**(#225)。
+ *
+ * 確認ダイアログ(`cui/ui/querydialog.ui`)を持つ一式では非 ODF も保存できる ──
+ * そこで断りを出すと**嘘**になる。⚠ 逆に、持っていない一式で黙ると
+ * **user は編集を失う**。だから判定は形式だけでは決まらない。
+ *
+ * 🔑 上の 2 本(古い一式で断る / ODF では黙る)と**対で読む** ── 3 本そろって
+ * 初めて「形式と一式の両方を見ている」と言える。
+ * ⚠ 偽の一式の目録には**囮**(古い一式にも在る 3 つの `*querydialog.ui`)が
+ * 必ず入っている ── 判定を部分一致へ書き戻すと、この検査が落ちる。
+ */
+test('🔴 確認ダイアログを持つ一式なら、.docx でも断らない', async ({ page }) => {
+  await openWithDoc(page, 'a.docx', { alienPack: true });
+  await expect(page.locator('#nosave'), '保存できる一式なのに断りが出ている').toBeHidden();
+  await expect(page.locator('#ro'), '保存できる一式なのに印が出ている').toBeHidden();
+});
+
+/**
+ * 🔴 **判定の口が無い版が読まれたら、断る側へ倒れる**(#225)。
+ *
+ * `host.html` と `office-format.js` は**別の file**として同じ origin から読まれる ──
+ * ブラウザに古い `office-format.js` が残っていると、`packSavesAlien` が**無い**まま
+ * `isSavable` だけが在る、という組み合わせが実際に起こりうる。
+ *
+ * ⚠ そのとき `packAlienOk` は初期値のままになる。**初期値が `true` だと、
+ * 保存できない一式で黙る**(= user が編集を失う)。
+ * 🔑 だから初期値は `false` でなければならず、**それをここで確かめる**
+ * (この検査が無いと、初期値を裏返す変異が生き延びる ── 実際に生き延びた)。
+ */
+test('🔴 office-format.js に判定の口が無い版が読まれたら、断る側へ倒れる', async ({ page }) => {
+  // 古い版を再現する ── `packSavesAlien` だけ落とし、`isSavable` は残す
+  await page.route('**/office/office-format.js', async (route) => {
+    const res = await route.fetch();
+    const body = (await res.text()).replace('packSavesAlien: packSavesAlien,', '');
+    // 空振り防止 ── 本当に落とせたか(綴りが変わったら落とせていない)
+    expect(body, 'packSavesAlien を落とせていない').not.toContain('packSavesAlien: packSavesAlien');
+    expect(body, 'isSavable まで落としている').toContain('isSavable: isSavable');
+    await route.fulfill({ status: 200, contentType: 'application/javascript', body });
+  });
+  // ⚠ **保存できる一式**を渡す ── それでも判定できないので断る、が正しい
+  await openWithDoc(page, 'a.docx', { alienPack: true });
+  await expect(page.locator('#nosave'), '判定できないのに黙っている').toBeVisible();
+  await expect(page.locator('#ro'), '判定できないのに印が出ていない').toBeVisible();
 });
