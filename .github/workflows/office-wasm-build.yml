@@ -77,6 +77,18 @@ on:
         description: '調査用: IME の配管に計装を当てる(#156。別 tag へ出る)'
         type: boolean
         default: false
+      save_trace:
+        # 🔴 **調査用**(#225)。保存の配管に計装を当てて焼く ──
+        #    非 ODF(alien)の保存が **書き出しフィルタの中**で落ちているのか、
+        #    **行き先へ移す段**で落ちているのかを割る(`build/office-wasm/patch-lo-save-trace.py`)。
+        #    ⚠ ここまでに分かっているのは「ODF 3/3 が通り、非 ODF 5/5 が落ちる」
+        #    (3 モジュールとも)まで。⚠ `SAL_WARN` は焼かれておらず、`--convert-to` は
+        #    対照群ごと動かず、`/tmp` の走査も答えにならなかった ── **既存の口が全部死んでいる**。
+        #    🔑 出口は libc だけ(stderr + `/tmp/pkc3-save.log`)── LO の文脈から
+        #    embind / DOM を触ると `invalid handle` で abort する(2026-08-16 に実証)。
+        description: '調査用: 保存の配管に計装を当てる(#225。別 tag へ出る)'
+        type: boolean
+        default: false
 
 # ⚠ 既定の 6 時間で足りない可能性が高い。足りなければ段を分けて artifact で繋ぐ
 jobs:
@@ -362,6 +374,11 @@ jobs:
           else
             export PKC3_IME_TRACE=0
           fi
+          if [ "${{ inputs.save_trace }}" = "true" ]; then
+            export PKC3_SAVE_TRACE=1
+          else
+            export PKC3_SAVE_TRACE=0
+          fi
           for p in "$GITHUB_WORKSPACE"/build/office-wasm/patch-*.py; do
             python3 "$p" ~/lo-core
             n=$((n + 1))
@@ -388,7 +405,10 @@ jobs:
           #    `if (!DoExecute())` の枝でしか set されず、wasm の Qt6 は
           #    `m_bUseSystemLoop=true` なので**その枝へ入らない**。
           #    ⚠ **こちらも既定で当たる**(配る一式に入る)
-          test "$n" -eq 10
+          # 🔴 10 → 11(2026-08-24)。`patch-lo-save-trace.py`(#225 の**計装**)。
+          #    ⚠ **既定では 1 バイトも書き換えない**(`PKC3_SAVE_TRACE=1` の回だけ)が、
+          #    錨の検査は毎回する ── 門の下に隠すと上流の変形に誰も気づけない
+          test "$n" -eq 11
 
       # 🔴 **Qt と LO の「握手」を、リンクの 16 分前に確かめる**(2026-08-10)。
       #    LO は Qt の embind シンボルを名指しで export する。無いと
@@ -654,6 +674,7 @@ jobs:
           if [ "${{ inputs.safe_heap }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-safeheap"; fi
           if [ "${{ inputs.profiling_funcs }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-names"; fi
           if [ "${{ inputs.ime_trace }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-imetrace"; fi
+          if [ "${{ inputs.save_trace }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-savetrace"; fi
           printf '%s\n' "{
             \"version\": \"lo-${sha:0:12}-run${GITHUB_RUN_ID}${SAFE_SUFFIX}\",
             \"lo_sha\": \"${sha}\",
@@ -664,6 +685,7 @@ jobs:
             \"safe_heap\": \"${{ inputs.safe_heap }}\",
             \"profiling_funcs\": \"${{ inputs.profiling_funcs }}\",
             \"ime_trace\": \"${{ inputs.ime_trace }}\",
+            \"save_trace\": \"${{ inputs.save_trace }}\",
             \"built_at\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
           }" > build-info.json
           cat build-info.json
