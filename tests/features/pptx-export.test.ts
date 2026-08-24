@@ -10,7 +10,7 @@
  * 4. **PowerPoint に縮めさせる**(`<a:normAutofit/>`)── 切り捨てない
  */
 import { describe, expect, it } from 'vitest';
-import { buildPptx, splitIntoSlides, type ExportBlock } from '@features/export/pptx';
+import { buildPptx, splitIntoSlides, type ExportBlock, type ExportCell } from '@features/export/pptx';
 
 const h = (level: 1 | 2 | 3 | 4 | 5 | 6, text: string): ExportBlock =>
   ({ kind: 'h', level, runs: [{ text }] });
@@ -83,17 +83,35 @@ describe('切れ方(PKC2 と同じ)', () => {
 });
 
 describe('黙って落とさない', () => {
-  it('🔴 表・画像・写せなかったものは、本文に理由が出る', () => {
-    const blocks: ExportBlock[] = [
+  it('🔴 表と画像は「自分の箱」へ回る(本文の行に潰さない)', () => {
+    // ⚠ 段③ で変わった ── それまでは素の行に潰していた(中身は捨てていない)
+    const slides = splitIntoSlides([
       { kind: 'table', rows: [[{ runs: [{ text: 'A' }] }, { runs: [{ text: 'B' }] }]] },
       { kind: 'image', media: 'media/image1.png', widthPx: 10, heightPx: 10, alt: '図表' },
-      { kind: 'skipped', what: '埋め込みの箱', why: 'PowerPoint では動きません' },
-    ];
-    const slides = splitIntoSlides(blocks, 'ノート');
-    const text = slides[0]!.lines.map((l) => l.runs.map((r) => r.text).join('')).join('\n');
-    expect(text).toContain('A | B');
-    expect(text).toContain('[画像: 図表]');
-    expect(text).toContain('埋め込みの箱');
+    ], 'ノート');
+    expect(slides[0]!.boxes.map((b) => b.kind)).toEqual(['table', 'image']);
+    expect(slides[0]!.lines, '箱に回したものが本文にも残っている').toHaveLength(0);
+  });
+
+  it('🔴 大きさの分からない画像は、潰さずに理由を出す', () => {
+    // ⚠ **PKC2 は全画像を 480×360 に潰していた** ── 縦横比が計算できないものは
+    //    箱にしない。⚠ ただし**黙って消さない**(理由を本文に出す)
+    const slides = splitIntoSlides(
+      [{ kind: 'image', media: 'media/x.png', widthPx: 0, heightPx: 0, alt: '寸法不明' }],
+      'ノート',
+    );
+    expect(slides[0]!.boxes).toHaveLength(0);
+    expect(slides[0]!.lines.map((l) => l.runs.map((r) => r.text).join('')).join(''))
+      .toContain('寸法不明');
+  });
+
+  it('🔴 写せなかったものは、本文に理由が出る', () => {
+    const slides = splitIntoSlides(
+      [{ kind: 'skipped', what: '埋め込みの箱', why: 'PowerPoint では動きません' }],
+      'ノート',
+    );
+    expect(slides[0]!.lines.map((l) => l.runs.map((r) => r.text).join('')).join(''))
+      .toContain('埋め込みの箱');
   });
 
   it('コードは 1 行ずつ入る(改行が消えない)', () => {
@@ -281,5 +299,197 @@ describe('段②:箇条書きの種類とリンク', () => {
     const r = buildPptx([{ kind: 'p', runs: [{ text: '素', href: '' }] }], { title: 'T' });
     expect(partOf(r, 'ppt/slides/slide1.xml')).toContain('<a:t>素</a:t>');
     expect(r.counts.links).toBe(0);
+  });
+});
+
+/**
+ * 🔴 **段③:表と画像は「自分の箱」で置く**。
+ *
+ * docx との一番大きな違いがここである ── docx は本文の流れに置けばよいが、
+ * スライドは**位置と大きさ**が要る(設計 doc §5)。
+ *
+ * ⚠ **PKC2 はここで 2 つ落としていた**:
+ * ① 画像を全部 **480×360 px に潰していた**(縦横比を無視)
+ * ② 表を**素の文字**に潰していた(格子が消える)
+ */
+describe('段③:表と画像は「自分の箱」で置く', () => {
+  const cell = (t: string, header = false): ExportCell => ({ runs: [{ text: t }], header });
+  const img = (media: string, w: number, h: number): ExportBlock =>
+    ({ kind: 'image', media, widthPx: w, heightPx: h, alt: '図' });
+
+  /**
+   * スライドに置かれた箱の矩形(EMU)。
+   * ⚠ **文字箱・表・画像で同じ綴り**を使っているので、1 本の正規表現で全部拾える。
+   */
+  const rectsOf = (xml: string): { x: number; y: number; w: number; h: number }[] =>
+    [...xml.matchAll(/<a:off x="(-?\d+)" y="(-?\d+)"\/><a:ext cx="(\d+)" cy="(\d+)"\/>/g)]
+      .map((m) => ({ x: +m[1]!, y: +m[2]!, w: +m[3]!, h: +m[4]! }));
+
+  it('🔴 表は格子として出る(素の文字に潰さない)', () => {
+    const r = buildPptx([{
+      kind: 'table',
+      rows: [[cell('見出し', true), cell('B')], [cell('1'), cell('2')]],
+    }], { title: 'T' });
+    const slide = partOf(r, 'ppt/slides/slide1.xml');
+    expect(slide, '表が graphicFrame になっていない').toContain('<p:graphicFrame>');
+    expect(slide).toContain('<a:tbl>');
+    expect([...slide.matchAll(/<a:gridCol /g)], '列が 2 本になっていない').toHaveLength(2);
+    expect([...slide.matchAll(/<a:tr /g)], '行が 2 本になっていない').toHaveLength(2);
+    expect([...slide.matchAll(/<a:tc>/g)], 'セルが 4 つになっていない').toHaveLength(4);
+    /**
+     * ⚠ 見出しのセルは太字(`firstRow` だけでは型紙依存になる)。
+     * 🔴 **セルの中だけを見る** ── 1 稿目は `/b="1"[^]*<a:t>見出し/` と書いたが、
+     * **題名の箱の太字**に満たされて変異試験 M7 が生き延びた(CLAUDE.md §1
+     * 「救い手が変わっただけ」)。面(セル)へスコープしないと、別の場所の字で満たされる。
+     */
+    const tcOf = (t: string): string => {
+      const found = [...slide.matchAll(/<a:tc>([^]*?)<\/a:tc>/g)]
+        .map((m) => m[1]!).find((x) => x.includes(`<a:t>${t}</a:t>`));
+      expect(found, `セルが無い: ${t}`).toBeTruthy();
+      return found!;
+    };
+    expect(tcOf('見出し'), '見出しのセルが太字になっていない').toContain('b="1"');
+    // ⚠ 対照群 ── 見出しでないセルは太字にしない(全部太字にする実装と区別する)
+    expect(tcOf('1'), '見出しでないセルまで太字になっている').not.toContain('b="1"');
+    expect(r.counts.tables).toBe(1);
+  });
+
+  it('🔴 行ごとに列数が違っても、全行が同じセル数になる', () => {
+    // ⚠ 揃っていないと PowerPoint は **file ごと拒む**(表が消えるのではなく開けない)
+    const r = buildPptx([{
+      kind: 'table',
+      rows: [[cell('A'), cell('B'), cell('C')], [cell('1')]],
+    }], { title: 'T' });
+    const slide = partOf(r, 'ppt/slides/slide1.xml');
+    const rows = [...slide.matchAll(/<a:tr [^>]*>([^]*?)<\/a:tr>/g)].map((m) => m[1]!);
+    expect(rows, '行が 2 本取れていない').toHaveLength(2);
+    for (const row of rows) {
+      expect([...row.matchAll(/<a:tc>/g)], '行の列数が揃っていない').toHaveLength(3);
+    }
+  });
+
+  it('🔴 指す先が無い書式 id を書かない(`tableStyles.xml` を出していない)', () => {
+    // ⚠ 「宣言されて・実在して・指されて」の 3 点確認(docx #232 と同じ型)。
+    //    書式 id を書くなら `tableStyles.xml` を出す必要がある ── 出していないので書かない
+    const r = buildPptx([{ kind: 'table', rows: [[cell('A')]] }], { title: 'T' });
+    expect(partOf(r, 'ppt/slides/slide1.xml')).not.toContain('tableStyleId');
+  });
+
+  it('🔴 画像は縦横比を保つ(PKC2 は全部 480×360 に潰していた)', () => {
+    // 横長 / 縦長の 2 形 ── 片方だけだと「たまたま合っている」を見抜けない
+    for (const [w, h] of [[1600, 400], [400, 1600]] as const) {
+      const r = buildPptx([img('media/a.png', w, h)], { title: 'T' });
+      const slide = partOf(r, 'ppt/slides/slide1.xml');
+      const m = /<p:pic>[^]*?<a:ext cx="(\d+)" cy="(\d+)"\/>/.exec(slide);
+      expect(m, '画像が置かれていない').not.toBeNull();
+      const got = +m![1]! / +m![2]!;
+      // ⚠ 丸めのぶんだけ許す(1% 未満)── 「だいたい」ではなく**比が保たれている**
+      expect(Math.abs(got - w / h) / (w / h), `縦横比が崩れている(${w}×${h})`).toBeLessThan(0.01);
+    }
+  });
+
+  it('🔴 枠より小さい画像は引き伸ばさない(粗くしない)', () => {
+    const r = buildPptx([img('media/small.png', 100, 50)], { title: 'T' });
+    const m = /<p:pic>[^]*?<a:ext cx="(\d+)" cy="(\d+)"\/>/.exec(partOf(r, 'ppt/slides/slide1.xml'));
+    // 100px × 9525 = 952500 EMU のまま(枠いっぱいに広げない)
+    expect([+m![1]!, +m![2]!]).toEqual([952500, 476250]);
+  });
+
+  it('🔴 画像の `r:embed` は、そのスライドの rels の image を指す', () => {
+    const r = buildPptx([img('media/image1.png', 100, 100)], { title: 'T' });
+    const slide = partOf(r, 'ppt/slides/slide1.xml');
+    const m = /<a:blip r:embed="(rId\d+)"\/>/.exec(slide);
+    expect(m, '画像が embed されていない').not.toBeNull();
+    const rels = partOf(r, 'ppt/slides/_rels/slide1.xml.rels');
+    const rel = new RegExp(`<Relationship Id="${m![1]}" Type="([^"]+)" Target="([^"]+)"([^/]*)/>`).exec(rels);
+    expect(rel, `rels に ${m![1]} が無い`).not.toBeNull();
+    // ⚠ **型紙(rId1)やリンクに当たっていないこと** ── 種別まで見る(段① の P7 と同じ罠)
+    expect(rel![1], '画像を指していない').toMatch(/\/image$/);
+    // 🔴 **package の中**を指す ── 外部リンク扱いにすると bytes を読まない
+    expect(rel![3], '画像に TargetMode が付いている').not.toContain('TargetMode');
+    /**
+     * 🔴 **呼び側との契約**:`media` は形式の根からの相対名(`media/…`)で、
+     * bytes は `ppt/media/…` へ入る(段⑤ の仕事)。
+     * ⚠ ここがずれると「rels は在るのに絵が出ない」= **静かに壊れる**側なので、
+     * 解決後の名前を**そのまま pin する**。
+     */
+    const base = 'ppt/slides/';
+    const joined = (base + rel![2]!).split('/').reduce<string[]>((acc, seg) => {
+      if (seg === '..') acc.pop();
+      else if (seg !== '' && seg !== '.') acc.push(seg);
+      return acc;
+    }, []).join('/');
+    expect(joined, 'bytes を置く場所と食い違っている').toBe('ppt/media/image1.png');
+    expect(r.counts.images).toBe(1);
+  });
+
+  it('🔴 使った拡張子だけを目録に宣言する', () => {
+    const r = buildPptx([img('media/a.png', 10, 10), img('media/b.png', 10, 10)], { title: 'T' });
+    const ct = partOf(r, '[Content_Types].xml');
+    // ⚠ 宣言が無いと PowerPoint は種類を決められず **file ごと拒む**
+    expect(ct, 'png の宣言が無い').toContain('<Default Extension="png" ContentType="image/png"/>');
+    // ⚠ 使っていない種類は宣言しない(docx は全部並べているが、あれは固定の目録)
+    expect(ct, '使っていない jpeg を宣言している').not.toContain('Extension="jpeg"');
+  });
+
+  it('知らない拡張子でも宣言する(黙って落とさない)', () => {
+    const r = buildPptx([img('media/x.bmp', 10, 10)], { title: 'T' });
+    expect(partOf(r, '[Content_Types].xml'))
+      .toContain('<Default Extension="bmp" ContentType="application/octet-stream"/>');
+  });
+
+  it('🔴 本文と箱は重ならない(下の物が読めなくなる = user から見ると「消えた」)', () => {
+    const r = buildPptx([
+      h(3, '節'), p('本文'),
+      { kind: 'table', rows: [[cell('A')]] },
+      img('media/a.png', 1000, 1000),
+    ], { title: 'T' });
+    const rects = rectsOf(partOf(r, 'ppt/slides/slide1.xml'));
+    // 空振り防止 ── 題名 / 本文 / 表 / 画像 の 4 つが在ること
+    expect(rects, '箱が 4 つ置かれていない').toHaveLength(4);
+    const sorted = [...rects].sort((a, b) => a.y - b.y);
+    for (let i = 1; i < sorted.length; i += 1) {
+      const prev = sorted[i - 1]!;
+      expect(sorted[i]!.y, `${i} 番目が ${i - 1} 番目に重なっている`)
+        .toBeGreaterThanOrEqual(prev.y + prev.h);
+    }
+    // ⚠ 版面(6858000 EMU)からはみ出していないこと
+    const last = sorted[sorted.length - 1]!;
+    expect(last.y + last.h, '版面からはみ出している').toBeLessThanOrEqual(6858000);
+  });
+
+  it('🔴 1 枚の中で図形の id が重複しない(重複した id は PowerPoint が拒む)', () => {
+    const r = buildPptx([
+      h(3, '節'), p('本文'),
+      { kind: 'table', rows: [[cell('A')]] },
+      img('media/a.png', 100, 100),
+    ], { title: 'T' });
+    const ids = [...partOf(r, 'ppt/slides/slide1.xml').matchAll(/<p:cNvPr id="(\d+)"/g)]
+      .map((m) => m[1]!);
+    // 空振り防止 ── 群 1 + 題名 + 本文 + 表 + 画像 = 5
+    expect(ids, '図形が 5 つ置かれていない').toHaveLength(5);
+    expect(new Set(ids).size, `id が重複している: ${ids.join(',')}`).toBe(ids.length);
+  });
+
+  it('本文が無く箱だけのときは、空の文字箱を作らない', () => {
+    const r = buildPptx([{ kind: 'table', rows: [[cell('A')]] }], { title: 'T' });
+    const slide = partOf(r, 'ppt/slides/slide1.xml');
+    // 題名の箱 1 つ + 表 1 つ = 2(本文の箱は作らない)
+    expect(rectsOf(slide)).toHaveLength(2);
+    expect(slide, '本文の箱が作られている').not.toContain('name="本文"');
+  });
+
+  it('箱が増えると 1 つあたりの取り分が減る(枠に収める)', () => {
+    const one = buildPptx([{ kind: 'table', rows: [[cell('A')]] }], { title: 'T' });
+    const two = buildPptx([
+      { kind: 'table', rows: [[cell('A')]] },
+      { kind: 'table', rows: [[cell('B')]] },
+    ], { title: 'T' });
+    const hOf = (r: ReturnType<typeof buildPptx>): number => {
+      const m = /<p:graphicFrame>[^]*?<a:ext cx="\d+" cy="(\d+)"\/>/.exec(partOf(r, 'ppt/slides/slide1.xml'));
+      return +m![1]!;
+    };
+    expect(hOf(two), '2 つでも取り分が変わっていない').toBeLessThan(hOf(one));
+    expect(two.counts.tables).toBe(2);
   });
 });

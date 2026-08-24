@@ -14,7 +14,7 @@
  * (docx と同じ形。不可侵指示 2026-07-27「ゼロコピー」)。
  */
 
-import type { DocxBlock, DocxRun } from './docx';
+import type { DocxBlock, DocxCell, DocxRun } from './docx';
 import { xmlEscape } from './docx';
 
 /**
@@ -24,6 +24,7 @@ import { xmlEscape } from './docx';
  */
 export type ExportBlock = DocxBlock;
 export type ExportRun = DocxRun;
+export type ExportCell = DocxCell;
 
 /** zip に並べる部品(name と中身の文字列)。⚠ docx と同じ形。 */
 export interface PptxPart {
@@ -42,6 +43,8 @@ export interface PptxResult {
     readonly sectionSlides: number;
     readonly lines: number;
     readonly links: number;
+    readonly images: number;
+    readonly tables: number;
     readonly skipped: number;
   };
 }
@@ -69,10 +72,29 @@ const FRAME = {
 } as const;
 
 /** 文字の大きさ(1/100 pt。OOXML の `sz` は 100 倍)。 */
-const SZ = { coverTitle: 4400, coverSubtitle: 2400, title: 3200, body: 1800 } as const;
+const SZ = { coverTitle: 4400, coverSubtitle: 2400, title: 3200, body: 1800, cell: 1400 } as const;
+
+/** px → EMU。⚠ 96dpi の px なら 9525 倍(docx と同じ換算)。 */
+const EMU_PER_PX = 9525;
 
 /** 箇条書きの深さの上限。⚠ 超えた分は最深に丸める(行ごと落とさない)。 */
 export const PPTX_LIST_DEPTH_MAX = 8;
+
+/**
+ * 🔴 **自分の箱を持つもの**(#187 段③)。
+ *
+ * 本文の文字は 1 つの箱に流し込めるが、**表と画像は位置と大きさが要る** ──
+ * docx(本文の流れ)との一番大きな違いがここである(設計 doc §5)。
+ */
+export type SlideBox =
+  | { readonly kind: 'table'; readonly rows: readonly (readonly ExportCell[])[] }
+  | {
+      readonly kind: 'image';
+      readonly media: string;
+      readonly widthPx: number;
+      readonly heightPx: number;
+      readonly alt: string;
+    };
 
 /** スライド 1 枚の下書き。 */
 export interface SlideDraft {
@@ -80,6 +102,8 @@ export interface SlideDraft {
   title: string;
   subtitle?: string;
   readonly lines: SlideLine[];
+  /** 🔴 自分の箱を持つもの(表・画像)。⚠ 本文の下に縦に積む。 */
+  readonly boxes: SlideBox[];
 }
 
 /** スライドの本文 1 行。 */
@@ -124,7 +148,7 @@ export function splitIntoSlides(
   let current: SlideDraft | null = null;
   const ensure = (): SlideDraft => {
     if (current === null) {
-      current = { kind: 'content', title: fallbackTitle, lines: [] };
+      current = { kind: 'content', title: fallbackTitle, lines: [], boxes: [] };
       slides.push(current);
     }
     return current;
@@ -132,7 +156,7 @@ export function splitIntoSlides(
   // ⚠ 代入を**呼び側**で書く ── クロージャの中で代入すると、TS の絞り込みが
   //    `current` を `never` まで狭めて型が壊れる(実際に踏んだ)
   const open = (kind: 'section' | 'content', title: string): SlideDraft => {
-    const s: SlideDraft = { kind, title, lines: [] };
+    const s: SlideDraft = { kind, title, lines: [], boxes: [] };
     slides.push(s);
     return s;
   };
@@ -158,6 +182,23 @@ export function splitIntoSlides(
     // ⚠ `hr` も切る ── PKC2 は `page` と `rule` の**両方**で切っている
     if (b.kind === 'pagebreak' || b.kind === 'hr') {
       current = open('content', '');
+      continue;
+    }
+    // 🔴 表と画像は**自分の箱**を持つ(段③)── 本文の行に潰さない
+    if (b.kind === 'table') { ensure().boxes.push({ kind: 'table', rows: b.rows }); continue; }
+    if (b.kind === 'image') {
+      // ⚠ 実寸が取れていないものは箱にしない ── 縦横比が計算できないので、
+      //    黙って潰さず**理由を本文に出す**(PKC2 は 480×360 に潰していた)
+      if (b.widthPx > 0 && b.heightPx > 0) {
+        ensure().boxes.push({
+          kind: 'image', media: b.media, widthPx: b.widthPx, heightPx: b.heightPx, alt: b.alt,
+        });
+      } else {
+        ensure().lines.push({
+          runs: [{ text: `[画像: ${b.alt !== '' ? b.alt : b.media}(大きさが分からないので入れていません)]`, italic: true }],
+          bullet: null,
+        });
+      }
       continue;
     }
     for (const line of blockToLines(b)) ensure().lines.push(line);
@@ -191,15 +232,7 @@ function blockToLines(b: ExportBlock): SlideLine[] {
     case 'code':
       // ⚠ 1 行ずつ ── 塊のまま渡すと改行が消える
       return b.text.split('\n').map((t) => ({ runs: [{ text: t }], bullet: null, mono: true }));
-    case 'table':
-      // 段② で表として置く。⚠ それまでは**中身を捨てない**(素の行として出す)
-      return b.rows.map((row) => ({
-        runs: [{ text: row.map((c) => plain(c.runs)).join(' | ') }],
-        bullet: null,
-      }));
-    case 'image':
-      // 段③ で置く。⚠ それまでは**在ったことを言う**
-      return [{ runs: [{ text: `[画像: ${b.alt !== '' ? b.alt : b.media}]`, italic: true }], bullet: null }];
+    // ⚠ `table` / `image` はここへ来ない ── `splitIntoSlides` が**箱**へ回す(段③)
     case 'skipped':
       return [{ runs: [{ text: `[${b.what}: ${b.why}]`, italic: true }], bullet: null }];
     default:
@@ -265,10 +298,118 @@ function textBox(
     + `<a:lstStyle/>${body}</p:txBody></p:sp>`;
 }
 
+/**
+ * 画像の種類。⚠ **ここに無い拡張子は `application/octet-stream`** で宣言する ──
+ * 落とすより「種類が分からない物」として渡すほうがまし(黙って消さない)。
+ */
+const MEDIA_TYPES: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  svg: 'image/svg+xml',
+  webp: 'image/webp',
+};
+
+/** 使った画像の拡張子(小文字・重複なし)。 */
+function mediaExts(slides: readonly SlideDraft[]): string[] {
+  const out = new Set<string>();
+  for (const s of slides) {
+    for (const b of s.boxes) {
+      if (b.kind !== 'image') continue;
+      const i = b.media.lastIndexOf('.');
+      if (i >= 0) out.add(b.media.slice(i + 1).toLowerCase());
+    }
+  }
+  return [...out];
+}
+
 const XML_HEAD = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
 const NS_P = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
   + ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
   + ' xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"';
+
+/** そのスライドが要る関係(リンク / 画像)。⚠ 採番は 1 か所で持つ。 */
+interface SlideRel { kind: 'hyperlink' | 'image'; target: string }
+
+/** 箱を置く矩形(EMU)。 */
+interface Rect { x: number; y: number; w: number; h: number }
+
+/**
+ * 🔴 **本文と箱を、本文の枠に縦へ積む**(#187 段③)。
+ *
+ * ⚠ 段④ で詰めるが、ここで**重ならないこと**だけは保証する ── 重なると
+ * 下の物が読めなくなり、user から見ると「消えた」のと同じである。
+ * 🔑 取り分は「本文が在れば 1 + 箱の数」で等分する(単純だが、必ず収まる)。
+ */
+function stack(frame: Rect, hasText: boolean, boxCount: number): { text: Rect | null; boxes: Rect[] } {
+  const parts = (hasText ? 1 : 0) + boxCount;
+  if (parts === 0) return { text: null, boxes: [] };
+  const h = Math.floor(frame.h / parts);
+  let y = frame.y;
+  const text = hasText ? { ...frame, y, h } : null;
+  if (hasText) y += h;
+  const boxes: Rect[] = [];
+  for (let i = 0; i < boxCount; i += 1) { boxes.push({ ...frame, y, h }); y += h; }
+  return { text, boxes };
+}
+
+/**
+ * 🔴 **縦横比を保って枠に収める**(#187 段③)。
+ *
+ * ⚠ **PKC2 は全画像を 480×360 px に潰していた**(doc にもコメントにも記録が無く、
+ * 調査で初めて分かった)。⚠ 同じことを繰り返さない ── 枠に対して**縮めるだけ**で、
+ * 引き伸ばさず、比を変えない。中央に置く。
+ */
+function fit(box: Rect, widthPx: number, heightPx: number): Rect {
+  const wEmu = widthPx * EMU_PER_PX;
+  const hEmu = heightPx * EMU_PER_PX;
+  // ⚠ 大きいときだけ縮める(小さい画像を引き伸ばして粗くしない)
+  const scale = Math.min(1, box.w / wEmu, box.h / hEmu);
+  const w = Math.round(wEmu * scale);
+  const h = Math.round(hEmu * scale);
+  return { x: box.x + Math.round((box.w - w) / 2), y: box.y + Math.round((box.h - h) / 2), w, h };
+}
+
+/** 表 1 つ → `<p:graphicFrame>`。⚠ 列は等幅(段④ で詰める)。 */
+function tableXml(id: number, rect: Rect, rows: readonly (readonly ExportCell[])[]): string {
+  const cols = rows.reduce((n, r) => Math.max(n, r.length), 0);
+  if (cols === 0 || rows.length === 0) return '';
+  const colW = Math.floor(rect.w / cols);
+  const rowH = Math.floor(rect.h / rows.length);
+  const grid = Array.from({ length: cols }, () => `<a:gridCol w="${colW}"/>`).join('');
+  const body = rows.map((row) => {
+    // ⚠ 欠けた列は空セルで埋める(行ごとに列数が違うと PowerPoint が拒む)
+    const cells = Array.from({ length: cols }, (_, i) => row[i]);
+    return `<a:tr h="${rowH}">` + cells.map((c) => {
+      const runs = c === undefined ? [] : c.runs;
+      const head = c?.header === true;
+      const line: SlideLine = {
+        runs: head ? runs.map((r) => ({ ...r, bold: true })) : runs,
+        bullet: null,
+      };
+      return '<a:tc><a:txBody><a:bodyPr/><a:lstStyle/>'
+        + lineXml(line, SZ.cell) + '</a:txBody><a:tcPr/></a:tc>';
+    }).join('') + '</a:tr>';
+  }).join('');
+  return `<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="${id}" name="表"/>`
+    + '<p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>'
+    + `<p:xfrm><a:off x="${rect.x}" y="${rect.y}"/><a:ext cx="${rect.w}" cy="${rect.h}"/></p:xfrm>`
+    + '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table">'
+    // ⚠ `tableStyleId` は書かない ── 指す先(`tableStyles.xml`)を出していないので、
+    //    書くと「宣言したのに実在しない」になる
+    + `<a:tbl><a:tblPr firstRow="1"/><a:tblGrid>${grid}</a:tblGrid>${body}</a:tbl>`
+    + '</a:graphicData></a:graphic></p:graphicFrame>';
+}
+
+/** 画像 1 つ → `<p:pic>`。⚠ `r:embed` はそのスライドの rels に実体が要る。 */
+function picXml(id: number, rect: Rect, relId: string, alt: string): string {
+  return `<p:pic><p:nvPicPr><p:cNvPr id="${id}" name="画像" descr="${xmlEscape(alt)}"/>`
+    + '<p:cNvPicPr/><p:nvPr/></p:nvPicPr>'
+    + `<p:blipFill><a:blip r:embed="${relId}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>`
+    + `<p:spPr><a:xfrm><a:off x="${rect.x}" y="${rect.y}"/><a:ext cx="${rect.w}" cy="${rect.h}"/></a:xfrm>`
+    + '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>';
+}
 
 /**
  * スライド 1 枚の XML と、そこで使ったリンクの一覧。
@@ -278,15 +419,18 @@ const NS_P = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
  * (2 か所で別々に組むと、片方だけ直す事故が起きる ── CLAUDE.md §7)。
  * ⚠ 同じ URL は 1 つの id に畳む(rels を無駄に増やさない)。
  */
-function slideXml(s: SlideDraft): { xml: string; links: string[] } {
-  const links: string[] = [];
-  // ⚠ rId1 は型紙(slideLayout)なので、リンクは **rId2 から**
-  const linkOf = (r: ExportRun): string | undefined => {
-    if (r.href === undefined || r.href === '') return undefined;
-    let i = links.indexOf(r.href);
-    if (i < 0) { links.push(r.href); i = links.length - 1; }
-    return `rId${i + 2}`;
+function slideXml(s: SlideDraft): { xml: string; rels: SlideRel[] } {
+  // ⚠ rId1 は型紙(slideLayout)なので、ここは **rId2 から**。
+  //    🔑 リンクと画像で**同じ採番**を使う ── 別々に数えると衝突する
+  const rels: SlideRel[] = [];
+  const relFor = (kind: SlideRel['kind'], target: string): string => {
+    const i = rels.findIndex((x) => x.kind === kind && x.target === target);
+    if (i >= 0) return `rId${i + 2}`;
+    rels.push({ kind, target });
+    return `rId${rels.length + 1}`;
   };
+  const linkOf = (r: ExportRun): string | undefined =>
+    r.href === undefined || r.href === '' ? undefined : relFor('hyperlink', r.href);
   const shapes: string[] = [];
   if (s.kind === 'section') {
     shapes.push(textBox(2, '題名', FRAME.coverTitle,
@@ -300,10 +444,22 @@ function slideXml(s: SlideDraft): { xml: string; links: string[] } {
       shapes.push(textBox(2, '題名', FRAME.title,
         lineXml({ runs: [{ text: s.title, bold: true }], bullet: null }, SZ.title), 'ctr'));
     }
-    if (s.lines.length > 0) {
-      shapes.push(textBox(3, '本文', FRAME.body,
+    // 🔴 本文と箱を、本文の枠に**縦へ積む**(重ならないことを保証する)
+    const lay = stack(FRAME.body, s.lines.length > 0, s.boxes.length);
+    if (lay.text !== null) {
+      shapes.push(textBox(3, '本文', lay.text,
         s.lines.map((l) => lineXml(l, SZ.body, linkOf)).join(''), 't'));
     }
+    s.boxes.forEach((b, i) => {
+      const rect = lay.boxes[i]!;
+      // ⚠ id は 4 から(2 = 題名 / 3 = 本文)── 重複した id は PowerPoint が拒む
+      if (b.kind === 'table') shapes.push(tableXml(4 + i, rect, b.rows));
+      else {
+        shapes.push(picXml(
+          4 + i, fit(rect, b.widthPx, b.heightPx), relFor('image', b.media), b.alt,
+        ));
+      }
+    });
   }
   const xml = `${XML_HEAD}<p:sld ${NS_P}><p:cSld><p:spTree>`
     + '<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>'
@@ -313,7 +469,7 @@ function slideXml(s: SlideDraft): { xml: string; links: string[] } {
     + ' accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4"'
     + ' accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/></p:clrMapOvr>'
     + '</p:sld>';
-  return { xml, links };
+  return { xml, rels };
 }
 
 /**
@@ -355,6 +511,13 @@ export function buildPptx(
     text: `${XML_HEAD}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">`
       + '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
       + '<Default Extension="xml" ContentType="application/xml"/>'
+      /**
+       * 🔴 **画像の拡張子を宣言する**(#187 段③)。⚠ 宣言が無いと PowerPoint は
+       * その部品の種類を決められず、**file ごと拒む**。
+       * 🔑 実際に使った拡張子だけ書く(使っていない種類を宣言しない)。
+       */
+      + mediaExts(slides).map((e) =>
+        `<Default Extension="${e}" ContentType="${MEDIA_TYPES[e] ?? 'application/octet-stream'}"/>`).join('')
       + '<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>'
       + '<Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>'
       + '<Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>'
@@ -413,19 +576,28 @@ export function buildPptx(
 
   // ④ スライド
   let links = 0;
+  let images = 0;
   slides.forEach((s, i) => {
     const built = slideXml(s);
-    links += built.links.length;
+    links += built.rels.filter((x) => x.kind === 'hyperlink').length;
+    images += built.rels.filter((x) => x.kind === 'image').length;
     parts.push({ name: `ppt/slides/slide${i + 1}.xml`, text: built.xml });
     parts.push({
       name: `ppt/slides/_rels/slide${i + 1}.xml.rels`,
       text: `${XML_HEAD}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`
         + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>'
-        // ⚠ **外部リンクは `TargetMode="External"`** ── 付けないと PowerPoint は
-        //    package の中の部品を探し、見つからずに file ごと拒む
-        + built.links.map((href, k) =>
-          `<Relationship Id="rId${k + 2}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"`
-          + ` Target="${xmlEscape(href)}" TargetMode="External"/>`).join('')
+        + built.rels.map((rel, k) => {
+          const id = `rId${k + 2}`;
+          // ⚠ **外部リンクは `TargetMode="External"`** ── 付けないと PowerPoint は
+          //    package の中の部品を探し、見つからずに file ごと拒む
+          if (rel.kind === 'hyperlink') {
+            return `<Relationship Id="${id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"`
+              + ` Target="${xmlEscape(rel.target)}" TargetMode="External"/>`;
+          }
+          // ⚠ 画像は **package の中**を指す(`../media/...`)── bytes を入れるのは呼び側
+          return `<Relationship Id="${id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"`
+            + ` Target="../${xmlEscape(rel.target)}"/>`;
+        }).join('')
         + '</Relationships>',
     });
   });
@@ -442,6 +614,8 @@ export function buildPptx(
       sectionSlides: slides.filter((s) => s.kind === 'section').length,
       lines: slides.reduce((n, s) => n + s.lines.length, 0),
       links,
+      images,
+      tables: slides.reduce((n, s) => n + s.boxes.filter((b) => b.kind === 'table').length, 0),
       skipped,
     },
   };
