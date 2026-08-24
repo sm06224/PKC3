@@ -274,7 +274,9 @@ const PTHREADS = `(() => {
  * 🔑 3 行の意味:
  *   `idles:wait a=<IsUseSystemEventLoop> b=<IsMainThread>` ── ⚠ **前提を実測で出す**
  *   `idles:woke` ── 出なければ、そこで永久に止まっている
- *   `execute:set` ── 0 件なら、メインスレッドが `Application::Execute()` のループに未到達
+ *   `execute:call` ── 🔑 **対照群**。0 件の回は計装が効いていないので、その回は 1 つも読まない
+ *   `execute:doexec` ── `DoExecute()` が返ってきた。⚠ **出ないこと自体が答え**(中で回り続けている)
+ *   `execute:loop` / `execute:set` ── vcl 側の待ちループが回った / 条件を立てた(各先頭 5 回)
  * ⚠ **ここで '\n' と書いてはいけない**(組み立て側で実改行に解決される。2026-08-24 に踏んだ)。
  */
 const IDLES_TRACE = `(() => {

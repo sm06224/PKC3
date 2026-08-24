@@ -49,15 +49,30 @@
 
 | 出る行 | 何が分かるか |
 |---|---|
-| `idles:wait a=<IsUseSystemEventLoop> b=<IsMainThread> c=<IsInExecute>` | 待ちに入った。🔴 **c=0 なら、条件を立てる者がまだ走っていない**(= 待っても無駄が確定) |
+| `idles:wait a=<IsUseSystemEventLoop> b=<IsMainThread> c=<IsInExecute>` | 待ちに入った |
 | `idles:woke` | 待ちが返った(出なければ、そこで永久に止まっている) |
-| `execute:set` | `Application::Execute()` のループが条件を立てた |
+| `execute:call` | 🔑 **対照群** ── `Application::Execute()` に入った。**これが 0 件の回は計装が効いていないので、その回は 1 つも読まない** |
+| `execute:doexec a=<返り値>` | `DoExecute()` が**返ってきた**。⚠ **出ないこと自体が答え**(中で回り続けている) |
+| `execute:loop` | vcl 側の待ちループが回った(先頭 5 回まで) |
+| `execute:set` | そのループが条件を立てた(先頭 5 回まで) |
 
-- **`execute:set` が 0 件** → メインスレッドがそのループに**到達していない**
-- **`execute:set` が非 0 なのに `idles:woke` が出ない** → 立てているのに待ちが返らない
-  (条件オブジェクトの対応付け / スレッド間の伝播)
+## 🔴 2 巡目の結果と、3 巡目で割ること
 
-⚠ どちらに転んでも**次に直す場所が変わる**ので、ここを測らずに 2 度目の直しを焼かない。
+2 巡目(run 32712089791)の実測: `idles:wait a=0 b=0 c=1` / `idles:woke` **0 件** /
+`execute:set` は docx で **0 件**・対照群 `.odt` で **1 件**。
+
+⚠ **`execute:set` が 0 件**は 2 通りに読める ── ①`DoExecute()` が Qt 自身のループを
+回して**返ってこない**ので、vcl 側の while に**そもそも到達していない**
+②到達しているが `Yield()` が返らない。**どちらかで直す場所がまるで違う**。
+
+| 読み | 何が出るか | 直す場所 |
+|---|---|---|
+| ① | `execute:call` ✓ / `execute:doexec` ✗ / `execute:loop` ✗ | 条件を立てる者が居ない → `IdlesLockGuard` 側(待たない or 別経路で起こす) |
+| ② | `execute:call` ✓ / `execute:doexec` ✓ / `execute:loop` ✓ / `execute:set` ✗ | `Yield()` が返らない → そちらを追う |
+| ③ | `execute:set` ✓ なのに `idles:woke` ✗ | 立てているのに待ちが返らない(条件オブジェクトの対応付け / スレッド間の伝播) |
+
+⚠ どれに転んでも**次に直す場所が変わる**ので、ここを測らずに 2 度目の直しを焼かない
+(1 度目は前提を決め打ちして焼き 1 回を無駄にした)。
 """
 
 import os
@@ -124,16 +139,69 @@ SCHED_REPLACE = """        pSVData->m_inExecuteCondtion.reset();
 """
 
 APP_SRC = "vcl/source/app/svapp.cxx"
-APP_ANCHOR = """            Application::Yield();
+# 🔴 **3 巡目は `DoExecute()` の前後を割る**(2026-08-24)。
+#    2 巡目は `execute:set` が 0 件だったが、それは 2 通りに読める ──
+#    ①`DoExecute()` が **Qt 自身のループを回して返ってこない**ので、下の while に
+#    そもそも到達していない ②到達しているが `Yield()` が返らない。
+#    ⚠ **どちらかで直す場所がまるで違う**ので、ここを割らずに直しを焼かない。
+#    🔑 だから **呼ぶ直前**にも印を置く ── `execute:call` が出て `execute:doexec` が
+#    出なければ、①が確定する(返っていないのだから)。
+#    ⚠ **`execute:call` は対照群でもある** ── これが 1 件も出ない回は
+#    「計装が効いていない」ので、**その回の結果は 1 つも読まない**。
+APP_ANCHOR = """    int nExitCode = 0;
+    if (!pSVData->mpDefInst->DoExecute(nExitCode))
+    {
+        if (Application::IsUseSystemEventLoop())
+        {
+            SAL_WARN("vcl.schedule", "Can\'t omit DoExecute when running on system event loop!");
+            std::abort();
+        }
+        while (!pSVData->maAppData.mbAppQuit)
+        {
+            Application::Yield();
             SolarMutexReleaser releaser; // Give a chance for the waiting threads to lock the mutex
             pSVData->m_inExecuteCondtion.set();
 """
-APP_REPLACE = """            Application::Yield();
+APP_REPLACE = """    int nExitCode = 0;
+    // 🔑 **呼ぶ前**に 1 本(#199 3 巡目)── これが出ない回は計装が効いていない
+    pkc3_idles_trace("execute:call", -1, -1, -1);
+    const bool bPkc3DoExecuted = pSVData->mpDefInst->DoExecute(nExitCode);
+    // 🔴 **返ってきたことそのものが情報である** ── 出なければ `DoExecute()` の中で
+    //    回り続けている = 下の while には永久に来ない = 条件を立てる者が居ない。
+    pkc3_idles_trace("execute:doexec", bPkc3DoExecuted ? 1 : 0, -1, -1);
+    if (!bPkc3DoExecuted)
+    {
+        if (Application::IsUseSystemEventLoop())
+        {
+            SAL_WARN("vcl.schedule", "Can\'t omit DoExecute when running on system event loop!");
+            std::abort();
+        }
+        while (!pSVData->maAppData.mbAppQuit)
+        {
+            // ⚠ **高頻度の印は自前の上限を持つ** ── 共有の 300 を食い潰すと
+            //    後から来る `idles:wait` が押し出され、「出ていない」と
+            //    「採らなかった」が見分けられなくなる(観測点の器の問題)。
+            {
+                static int nPkc3Loop = 0;
+                if (nPkc3Loop < 5)
+                {
+                    ++nPkc3Loop;
+                    pkc3_idles_trace("execute:loop", nPkc3Loop, -1, -1);
+                }
+            }
+            Application::Yield();
             SolarMutexReleaser releaser; // Give a chance for the waiting threads to lock the mutex
             pSVData->m_inExecuteCondtion.set();
             // 🔑 **立てた回数を数える**(#199)── 0 件なら、メインスレッドは
             //    このループに一度も到達していない(= 直す場所はそちら側)。
-            pkc3_idles_trace("execute:set", -1, -1, -1);
+            {
+                static int nPkc3Set = 0;
+                if (nPkc3Set < 5)
+                {
+                    ++nPkc3Set;
+                    pkc3_idles_trace("execute:set", nPkc3Set, -1, -1);
+                }
+            }
 """
 
 # 🔴 **ヘルパーは file scope へ入れる。関数の中に入れてはいけない**(2026-08-24 に踏んだ)。
