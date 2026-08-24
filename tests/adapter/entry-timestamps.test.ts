@@ -333,14 +333,17 @@ describe('② 書込のたびに state の meta が更新される', () => {
   it('🔴 行を書く経路の数と、刻む呼び出しの数が一致する', () => {
     const src = readFileSync('src/adapter/state/store-effects.ts', 'utf-8');
     /**
-     * ⚠ **数える口は 1 つではない**(2026-08-22、#178)── 改名は本文を書き戻すのを
-     * やめて `renameEntry`(題名だけ)へ移した。`persistEntry` だけ数えていると
-     * **経路が 1 つ消えたように見えて**、刻みの数と食い違う。
+     * ⚠ **数える口は 1 つではない**(2026-08-22 / 2026-08-24、#178)── 改名は
+     * `renameEntry`(題名だけ)へ、並べ替えは `reorderEntry`(並びだけ)へ移した。
+     * どちらも**本文を書き戻さない**ためである。`persistEntry` だけ数えていると
+     * **経路が消えたように見えて**、刻みの数と食い違う。
      * 🔑 「行を書く op」を**全部**数える ── 足すときはここにも足す。
      */
     const writes =
       [...src.matchAll(/await store\.persistEntry\(/g)].length +
-      [...src.matchAll(/await store\.renameEntry\(/g)].length;
+      [...src.matchAll(/await store\.renameEntry\(/g)].length +
+      // ⚠ 並べ替えも本文を書き戻すのをやめた(#178 の残り、2026-08-24)
+      [...src.matchAll(/await store\.reorderEntry\(/g)].length;
     const stamps = [...src.matchAll(/^\s*stamp\(/gm)].length;
     expect(writes, '書込経路が 1 つも見つからない(scan が壊れている)').toBeGreaterThanOrEqual(7);
     expect(

@@ -219,6 +219,52 @@ describe('revision chain (P5c ── 逆向き差分)', () => {
   });
 
   /**
+   * 🔴 **並べ替えも本文を書き戻さない**(#178 の残り、2026-08-24)。
+   *
+   * ⚠ 改名と**まったく同じ穴**が残っていた ── 直す前の並べ替えは
+   * `getBody` → **本文ごと `upsertEntry`** で、読んでから書くまでの間に別のタブ /
+   * 窓が本文を書いていると**それを消していた**。しかも `checkpoint` を渡さないので
+   * **amend**、つまり**履歴にも残らない**(下の「expectHash を渡さなければ…」が
+   * その性質を実測している)。
+   * 🔑 並べ替えは**本文を必要としていない** ── 触らなければ衝突しようがない。
+   */
+  it('🔴 並べ替えは本文を書き戻さない ── 別の窓の本文が生き残る (#178)', async () => {
+    await write('o1', doc('初稿'));
+    await write('o1', doc('二稿'), { checkpoint: true });
+    const before = await metasOf('o1');
+    expect(before, '前提が崩れている(頭が立っていない)').toHaveLength(1);
+
+    // 🔴 **別の窓がこのノートの本文を書いた**(並べ替える側は、これを読んでいない)
+    await write('o1', doc('別の窓が書いた'));
+
+    const stamps = await request({ op: 'reorderEntry', cid: 'c1', lid: 'o1', entryOrder: 42 });
+    expect(stamps, '並べ替えの ack が返らない').not.toBeNull();
+    expect(stamps?.updatedAt, '刻んだ時刻を返していない').toBeTruthy();
+
+    const row = (await request({ op: 'listEntryMetas', cid: 'c1' })).find((m) => m.lid === 'o1');
+    expect(row?.entry_order, '並びが変わっていない').toBe(42);
+    // ⚠ 対照群 ── 題名は触っていない(1 列だけ書く口である)
+    expect(row?.title, '題名まで書き換えている').toBe('t-o1');
+    /**
+     * 🔑 **主張はここ** ── 別の窓が書いた本文が**そのまま在る**。
+     * ⚠ 直す前はここが `doc('二稿')`(並べ替える側が読んだ古い本文)に戻っていた。
+     */
+    expect(await request({ op: 'getBody', cid: 'c1', lid: 'o1' })).toBe(doc('別の窓が書いた'));
+    // ⚠ 鎖も動かない(本文が変わっていないので、元から動いていなかった)
+    expect(await metasOf('o1'), '並べ替えで履歴が動いた').toHaveLength(before.length);
+    expect(before[0]!.id, '履歴の id が変わった(この版が別物になる)').toBe(
+      (await metasOf('o1'))[0]!.id,
+    );
+  });
+
+  /** ⚠ 消えたノートの並べ替えを「成功」と言わない(呼び側が理由を出せる)。 */
+  it('⚠ 行が無い並べ替えは null を返す (#178)', async () => {
+    expect(
+      await request({ op: 'reorderEntry', cid: 'c1', lid: 'no-such', entryOrder: 1 }),
+    ).toBeNull();
+  });
+
+  /**
    * 🔴 **読んだものと違っていたら、1 バイトも書かない**(#178、2026-08-22)。
    *
    * ⚠ 追記のための門である ── `getBody` → `appendBlock` → 書込 の間に

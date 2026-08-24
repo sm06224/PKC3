@@ -322,6 +322,12 @@ function setup(metas: EntryMeta[], relations: Relation[]) {
   });
   const parentCalls: Array<{ lid: string; parentLid: string | null; relationId: string }> = [];
   const persisted: Array<{ lid: string; entryOrder: number; parent?: unknown }> = [];
+  /**
+   * 🔴 **並べ替えは本文に触らない口を通る**(#178 の残り、2026-08-24)。
+   * ⚠ 直す前は `persistEntry`(= 本文ごと書き戻す)を通っていた ── 別のタブ /
+   *   窓が本文を書いていると、それを消していた(履歴にも残らない)。
+   */
+  const reordered: Array<{ lid: string; entryOrder: number }> = [];
   connectStoreEffects(d, {
     ...stubRevisionOps(),
     getBody: async () => '',
@@ -332,6 +338,10 @@ function setup(metas: EntryMeta[], relations: Relation[]) {
      *   だから fake も本文を持たない(触らないものは持たない)。
      */
     renameEntry: async () => stubStamps(),
+    reorderEntry: async (lid, entryOrder) => {
+      reordered.push({ lid, entryOrder });
+      return stubStamps();
+    },
     persistEntry: async (e, opts) => {
       persisted.push({ lid: e.lid, entryOrder: e.entryOrder, parent: opts?.parent });
       return { ...stubStamps(), ...(opts?.parent ? { parentWritten: true } : {}) };
@@ -380,6 +390,7 @@ function setup(metas: EntryMeta[], relations: Relation[]) {
     moveTo,
     parentCalls,
     persisted,
+    reordered,
     nudge,
     enter,
     toRoot,
@@ -647,17 +658,25 @@ describe('並べ替えの導線(画面)', () => {
   const METAS = [meta('n1', 1), meta('n2', 2), meta('n3', 3)];
 
   it('🔴 押すと一覧の並びが変わり、disk へ 2 件書く', async () => {
-    const { q, rows, nudge, persisted } = setup(METAS, []);
+    const { q, rows, nudge, reordered, persisted } = setup(METAS, []);
     q<HTMLElement>('tbody [data-pkc-entry="n1"]')!.click();
     await tick();
     nudge('down')!.click();
     await tick();
     expect(rows(), '画面の並びが変わっていない').toEqual(['n2', 'n1', 'n3']);
     // ⚠ **2 件**(交換なので片方だけ書くと disk の並びが壊れる)
-    expect(persisted.filter((p) => p.lid === 'n1' || p.lid === 'n2')).toEqual([
+    expect(reordered).toEqual([
       { lid: 'n1', entryOrder: 2 },
       { lid: 'n2', entryOrder: 1 },
     ]);
+    /**
+     * 🔴 **本文を書き戻していない**(#178 の残り、2026-08-24)。
+     * ⚠ ここが `persistEntry` を通っていた間、並べ替えは
+     *   「読んで → 本文ごと書き戻す」形だったので、その隙に別のタブ / 窓が
+     *   本文を書いていると**それを消していた**(しかも amend なので履歴にも残らない)。
+     * 🔑 触らなければ、衝突しうる状態そのものが消える。
+     */
+    expect(persisted, '並べ替えが本文を書き戻している').toEqual([]);
   });
 
   it('🔴 端では押せない(押して黙って断らない)', async () => {
@@ -957,6 +976,7 @@ describe('作成の居場所が worker まで届く(#258)', () => {
        *   だから fake も本文を持たない(触らないものは持たない)。
        */
       renameEntry: async () => stubStamps(),
+      reorderEntry: async () => stubStamps(),
       persistEntry: async () => stubStamps(),
       deleteEntry: async () => {},
       setEntryParent: async (lid, parentLid) => void parentCalls.push({ lid, parentLid }),

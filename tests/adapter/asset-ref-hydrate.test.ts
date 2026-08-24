@@ -63,6 +63,7 @@ function setup(bodies: Record<string, string>, lender: AssetLender) {
      *   だから fake も本文を持たない(触らないものは持たない)。
      */
     renameEntry: async () => stubStamps(),
+    reorderEntry: async () => stubStamps(),
     persistEntry: async () => stubStamps(),
     deleteEntry: async () => {},
     setEntryParent: async () => {},
@@ -201,6 +202,7 @@ describe('借りた URL の寿命(同一ノートの差し替え)', () => {
        *   だから fake も本文を持たない(触らないものは持たない)。
        */
       renameEntry: async () => stubStamps(),
+      reorderEntry: async () => stubStamps(),
       persistEntry: async () => stubStamps(),
       deleteEntry: async () => {},
     setEntryParent: async () => {},
@@ -268,6 +270,7 @@ describe('借りた URL の寿命(同一ノートの差し替え)', () => {
        *   だから fake も本文を持たない(触らないものは持たない)。
        */
       renameEntry: async () => stubStamps(),
+      reorderEntry: async () => stubStamps(),
       persistEntry: async () => stubStamps(),
       deleteEntry: async () => {},
     setEntryParent: async () => {},

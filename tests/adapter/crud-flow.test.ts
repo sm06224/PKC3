@@ -67,11 +67,16 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
   const persisted: EntryUpsert[] = [];
   /** 🔴 題名だけの書換(#178)。⚠ **本物の意味論を真似る** ── 本文に触らない。 */
   const renamed: Array<{ lid: string; title: string }> = [];
+  const reordered: Array<{ lid: string; entryOrder: number }> = [];
   connectStoreEffects(d, {
     ...stubRevisionOps(),
     getBody: async (lid) => store[lid] ?? null,
     renameEntry: async (lid, title) => {
       renamed.push({ lid, title });
+      return stubStamps();
+    },
+    reorderEntry: async (lid, entryOrder) => {
+      reordered.push({ lid, entryOrder });
       return stubStamps();
     },
     persistEntry: async (e) => {
@@ -157,6 +162,7 @@ describe('create (P3-7a)', () => {
        *   だから fake も本文を持たない(触らないものは持たない)。
        */
       renameEntry: async () => stubStamps(),
+      reorderEntry: async () => stubStamps(),
       persistEntry: async () => {
         if (failNext) {
           failNext = false;

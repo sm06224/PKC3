@@ -92,6 +92,13 @@ export interface StorePort {
    * @returns 行が消えていれば `null`
    */
   renameEntry(lid: string, title: string): Promise<EntryStamps | null>;
+  /**
+   * 🔴 **並びだけを書き換える**(#178 の残り、2026-08-24)。⚠ optional にしない ──
+   * 理由は上と同じで、配線を落としても tsc が黙ると
+   * 「並べ替えで別の窓の本文が消える」という**いちばん気づけない形**で戻ってくる。
+   * @returns 行が消えていれば `null`
+   */
+  reorderEntry(lid: string, entryOrder: number): Promise<EntryStamps | null>;
   persistEntry(
     entry: EntryUpsert,
     opts?: {
@@ -532,26 +539,26 @@ export function connectStoreEffects(
           enqueue(async () => {
             if (disposed) return;
             try {
-              const body = await store.getBody(row.lid);
+              /**
+               * 🔴 **本文に触らない**(#178 の残り、2026-08-24)。
+               *
+               * ⚠ 直す前は `getBody` → **本文ごと書き戻す**形だった ── 改名が
+               * 踏んでいたのと**同じ穴**である。読んでから書くまでの間に別のタブ /
+               * 窓が本文を書いていると、それを消す。しかも `checkpoint` を渡さない
+               * ので **amend** になり、**履歴にも残らない**
+               * (実測: `storage-worker.test.ts`「expectHash を渡さなければ…」)。
+               * 🔑 並べ替えは**本文を必要としていない** ── 触らなければ、
+               * 衝突しうる状態そのものが消える(検出ではなく消滅)。
+               */
+              const stamps = await store.reorderEntry(row.lid, row.entryOrder);
               if (disposed) return;
-              if (body === null) {
+              if (stamps === null) {
                 dispatcher.dispatch({
                   type: 'OP_FAILED',
                   error: `並べ替え: entry が見つかりません(${row.lid})`,
                 });
                 return;
               }
-              const ext = extractMeta(row.archetype, body);
-              const stamps = await store.persistEntry({
-                lid: row.lid,
-                title: row.title,
-                archetype: row.archetype,
-                body,
-                entryOrder: row.entryOrder,
-                status: ext.status,
-                date: ext.date,
-                archived: ext.archived,
-              });
               stamp(row.lid, stamps);
             } catch (e) {
               // ⚠ 画面は既に動かしている(楽観)── 失敗は必ず言う

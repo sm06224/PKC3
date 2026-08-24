@@ -50,6 +50,7 @@ function setup(bodies: Record<string, string>, lender: AssetLender) {
      *   だから fake も本文を持たない(触らないものは持たない)。
      */
     renameEntry: async () => stubStamps(),
+    reorderEntry: async () => stubStamps(),
     persistEntry: async () => stubStamps(),
     deleteEntry: async () => {},
     setEntryParent: async () => {},

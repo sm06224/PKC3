@@ -82,6 +82,13 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
      * 本文を書いていると消える(しかも履歴にも残らない)。
      */
     renameEntry: (lid, title) => client.request({ op: 'renameEntry', cid, lid, title }),
+    /**
+     * 🔴 **並びだけを書き換える**(#178 の残り)。⚠ 改名と**同じ理由** ──
+     * 直す前の並べ替えは `getBody` → 本文ごと書き戻す形で、読んでから書くまでの間に
+     * 別のタブ / 窓が書いていると**それを消していた**(履歴にも残らない)。
+     */
+    reorderEntry: (lid, entryOrder) =>
+      client.request({ op: 'reorderEntry', cid, lid, entryOrder }),
     persistEntry: (entry, opts) =>
       client.request({
         op: 'upsertEntry',

@@ -202,6 +202,25 @@ describe("'changed' の放送", () => {
     expect(seen, '改名が他タブへ届かない(一覧に古い題名が残る)').toEqual([['z']]);
   });
 
+  /**
+   * 🔴 **並べ替えも他タブへ届く**(#178 の残り、2026-08-24)。
+   * ⚠ 改名と**同じ形で生き延びた** ── `reorderEntry` を `MUTATING_OPS` から
+   *   外す変異(R5)が、足す前は誰にも殺されなかった。
+   */
+  it('🔴 並べ替えは他タブへ放送される(一覧に古い並びを残さない) (#178)', async () => {
+    const { host, follower } = await connectPair();
+    const seen: Array<string[] | null> = [];
+    follower.onChanged((_cid, lids) => seen.push(lids));
+    await host.localClient().request({
+      op: 'reorderEntry',
+      cid: 'c1',
+      lid: 'z',
+      entryOrder: 7,
+    });
+    await drain();
+    expect(seen, '並べ替えが他タブへ届かない(一覧に古い並びが残る)').toEqual([['z']]);
+  });
+
   it('follower の書込 → 他の follower と holder 自身に届く。発信者には届かない', async () => {
     const { hub, host, follower } = await connectPair();
     const f2 = await ProxyStoreClient.connect({ makeChannel: hub.make, tabId: 'f2' });
