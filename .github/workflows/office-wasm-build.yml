@@ -375,7 +375,12 @@ jobs:
           # 🔴 7 → 8(2026-08-23)。`patch-lo-ime-trace.py`(#156 段③ の計装)。
           #    ⚠ **既定では 1 バイトも書き換えない**(`PKC3_IME_TRACE=1` の回だけ)が、
           #    錨の検査は毎回する ── 門の下に隠すと上流の変形に誰も気づけない
-          test "$n" -eq 8
+          # 🔴 8 → 9(2026-08-24)。`patch-lo-ime-update.py`(#156 の**直し**)。
+          #    段③ の計装で (b) が確定した ── LO は `WA_InputMethodEnabled` を
+          #    立てているのに Qt が受付可否を取り直さない。直しは LO 側の 1 行
+          #    (`QGuiApplication::inputMethod()->update(Qt::ImEnabled)`)で、
+          #    ⚠ **こちらは既定で当たる**(計装と違って配る一式にも入る)
+          test "$n" -eq 9
 
       # 🔴 **Qt と LO の「握手」を、リンクの 16 分前に確かめる**(2026-08-10)。
       #    LO は Qt の embind シンボルを名指しで export する。無いと

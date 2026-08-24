@@ -81,6 +81,22 @@ function serve() {
 
 /** 制御文字や非 ASCII の混入で JSON を汚さない(console は外の文字列である)。 */
 const safeLine = (s) => (/[^\x20-\x7e]/.test(s) ? null : s.slice(0, 140));
+/**
+ * 🔴 **例外は「行ごと」に濾す**(2026-08-24)。
+ *
+ * ⚠ 直す前は `safeLine(String(e))` を 1 回掛けていたので、**例外の文言に
+ *   非 ASCII が 1 文字でも混ざると全部捨てて `'error'` だけが残った** ──
+ *   自分のハーネスの誤りを、自分で直せない形である(実際 1 回転溶かした)。
+ * 🔑 規律(**非 ASCII の行は丸ごと捨てる**)はそのままに、**行単位**で当てる ──
+ *   Playwright の例外は 1 行目が ASCII の要約で、本文が混じるのは call log の側である。
+ */
+const safeErr = (e) => {
+  for (const line of String(e).split('\n')) {
+    const t = safeLine(line.trim());
+    if (t !== null && t !== '') return t;
+  }
+  return 'error';
+};
 
 const server = await serve();
 const base = `http://127.0.0.1:${server.address().port}`;
@@ -144,13 +160,52 @@ const IME_TRACE = `(() => {
     const lo = globalThis.__lo;
     if (!lo || !lo.FS) return null;
     const raw = lo.FS.readFile('/tmp/pkc3-ime.log', { encoding: 'utf8' });
-    return String(raw).split('\n').filter((l) => l.length > 0);
+    // ⚠ **ここで '\\n' と書いてはいけない** ── この原文は template literal の中に
+    //   在るので、escape は**組み立てる側で解決されて実改行になる**
+    //   (= 開いた ' が閉じないまま改行 = SyntaxError)。2026-08-24 に踏んだ。
+    return String(raw).split(String.fromCharCode(10)).filter((l) => l.length > 0);
   } catch (e) {
     return String(e).indexOf('ENOENT') >= 0 || String(e).indexOf('no such file') >= 0
       ? null
       : ['ERR ' + String(e).slice(0, 80)];
   }
 })()`;
+/**
+ * 版面(いちばん大きい canvas)の位置。⚠ Qt 6 の canvas は **shadow root の中**なので
+ * 潜って拾う(`host.html` が「1 日溶かした罠」と書いている当のもの)。
+ * ⚠ **2 つの門で同じものを使う** ── 別々に書くと、片方だけ直す事故が起きる。
+ * ⚠ ここは template literal なので**逆引用符も escape も書かない**(下の検査を参照)。
+ */
+const CANVAS_BOX = `(() => {
+  let best = null;
+  const walk = (n) => { for (const el of n.querySelectorAll('*')) {
+    if (el.tagName === 'CANVAS' && el.width > 0) {
+      const r = el.getBoundingClientRect();
+      if (!best || r.width > best.w) best = { x: r.x, y: r.y, w: r.width, h: r.height };
+    }
+    if (el.shadowRoot) walk(el.shadowRoot); } };
+  walk(document);
+  return best;
+})()`;
+/**
+ * 🔴 **渡す原文を、走らせる前に構文として検める**(2026-08-24 に踏んだ)。
+ *
+ * ⚠ `IME_TRACE` は**書いた日から一度も成立していなかった** ── 原文の中に
+ *   `'\n'` と書いたが、これらは template literal の中に在るので**組み立てる側で
+ *   実改行に解決され**、開いた `'` が閉じないまま改行していた。
+ * ⚠ 症状は「IME ブロックが 1 つのエラーで畳まれる」だけで、**どの一手で落ちたかが
+ *   出ない** ── 押す・打つ・`Ctrl+A` の対照群は 1 度も走っていなかったのに、
+ *   出力は「測ったが取れなかった」と見分けが付かなかった。
+ * 🔑 だから**名前を付けて先に落とす** ── 原文が壊れているのか、相手の頁で
+ *   取れなかったのかを、出力だけで区別できるようにする。
+ */
+for (const [name, src] of Object.entries({ IME_DEEP, IME_TRACE, CANVAS_BOX })) {
+  try {
+    new Function(`return ${src}`);
+  } catch (e) {
+    throw new Error(`evaluate の原文 ${name} が構文として成立していない`, { cause: e });
+  }
+}
 const docBytes = NO_DOC ? 0 : (await readFile(DOC)).length;
 const result = { doc: { bytes: docBytes }, events: [], console: [], imeConsole: [], samples: [] };
 const profile = `${tmpdir()}/pkc3-open-doc-${process.pid}`;
@@ -354,22 +409,7 @@ try {
    * 「ここは文字を入れる場所だ」と言うときだけなので、caret が要る。
    * ⚠ **既定では何もしない**(`PKC3_IME=1` を渡した回だけ)── 既存の使い方を変えない。
    */
-  /**
-   * 版面(いちばん大きい canvas)の位置。⚠ Qt 6 の canvas は **shadow root の中**なので
-   * 潜って拾う(`host.html` が「1 日溶かした罠」と書いている当のもの)。
-   * ⚠ **2 つの門で同じものを使う** ── 別々に書くと、片方だけ直す事故が起きる。
-   */
-  const canvasBox = () => page.evaluate(`(() => {
-    let best = null;
-    const walk = (n) => { for (const el of n.querySelectorAll('*')) {
-      if (el.tagName === 'CANVAS' && el.width > 0) {
-        const r = el.getBoundingClientRect();
-        if (!best || r.width > best.w) best = { x: r.x, y: r.y, w: r.width, h: r.height };
-      }
-      if (el.shadowRoot) walk(el.shadowRoot); } };
-    walk(document);
-    return best;
-  })()`);
+  const canvasBox = () => page.evaluate(CANVAS_BOX);
 
   /**
    * 🔴 **版面の絵を「集合」で採る**(CLAUDE.md §4、2026-08-13 の教訓)。
@@ -457,7 +497,7 @@ try {
       // 🔑 最後にまとめて読む(console の取りこぼしに左右されない本命の出口)
       result.ime.trace = await page.evaluate(IME_TRACE);
     } catch (e) {
-      result.ime = { err: safeLine(String(e)) ?? 'error' };
+      result.ime = { err: safeErr(e) };
     }
   }
 
@@ -519,14 +559,14 @@ try {
         };
       }
     } catch (e) {
-      result.redraw = { err: safeLine(String(e)) ?? 'error' };
+      result.redraw = { err: safeErr(e) };
     }
   }
   if (SHOT) {
     try { await page.screenshot({ path: SHOT }); } catch { /* 固まっていたら撮れない */ }
   }
 } catch (e) {
-  result.error = safeLine(String(e)) ?? 'error(非 ASCII のため伏せた)';
+  result.error = safeErr(e);
 } finally {
   const text = JSON.stringify(result, null, 1);
   if (OUT) await writeFile(OUT, text);
