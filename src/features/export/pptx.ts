@@ -66,6 +66,12 @@ const FRAME = {
   /** 扉スライドの題名 / 副題。 */
   coverTitle: { x: inch(0.9), y: inch(2.4), w: inch(11.5), h: inch(1.6) },
   coverSubtitle: { x: inch(0.9), y: inch(4.1), w: inch(11.5), h: inch(0.9) },
+  /**
+   * 🔴 **扉に落ちた本文の置き場**(#187、2026-08-24 に足した)。
+   * ⚠ これが無かった間、`# 章` の直後に書いた本文と画像は
+   * **生成物から黙って消えていた**(下の `slideXml` の注意)。
+   */
+  coverBody: { x: inch(0.9), y: inch(5.2), w: inch(11.5), h: inch(1.5) },
   /** 本文スライドの題名帯と本文。 */
   title: { x: inch(0.6), y: inch(0.4), w: inch(12.1), h: inch(0.9) },
   body: { x: inch(0.6), y: inch(1.5), w: inch(12.1), h: inch(5.1) },
@@ -531,6 +537,21 @@ function slideXml(s: SlideDraft): { xml: string; rels: SlideRel[] } {
   const linkOf = (r: ExportRun): string | undefined =>
     r.href === undefined || r.href === '' ? undefined : relFor('hyperlink', r.href);
   const shapes: string[] = [];
+  /**
+   * 箱(表・画像)を置く。⚠ **扉でも本文でも同じ手** ── 2 か所に書くと片方だけ直す。
+   * @param first 図形の id の始まり。⚠ 重複した id は PowerPoint が拒む
+   */
+  const putBoxes = (rects: readonly Rect[], first: number): void => {
+    s.boxes.forEach((b, i) => {
+      const rect = rects[i]!;
+      if (b.kind === 'table') shapes.push(tableXml(first + i, rect, b.rows));
+      else {
+        shapes.push(picXml(
+          first + i, fit(rect, b.widthPx, b.heightPx), relFor('image', b.media), b.alt,
+        ));
+      }
+    });
+  };
   if (s.kind === 'section') {
     shapes.push(textBox(2, '題名', FRAME.coverTitle,
       lineXml({ runs: [{ text: s.title, bold: true }], bullet: null }, SZ.coverTitle), 'ctr'));
@@ -538,6 +559,22 @@ function slideXml(s: SlideDraft): { xml: string; rels: SlideRel[] } {
       shapes.push(textBox(3, '副題', FRAME.coverSubtitle,
         lineXml({ runs: [{ text: s.subtitle }], bullet: null }, SZ.coverSubtitle), 'ctr'));
     }
+    /**
+     * 🔴 **扉に落ちた本文と箱も出す**(2026-08-24)。
+     *
+     * ⚠ **ここが無い間、`# 章` の直後に書いた本文・表・画像は生成物から
+     *   黙って消えていた。** 切り分けの側(`splitIntoSlides`)は正しく
+     *   扉の `lines` / `boxes` に入れていたが、**描く側が見ていなかった**。
+     * ⚠ そして test は**下書き**(`slides[0].lines`)を見ていたので緑のままだった
+     *   ── 「扉に落ちた段落は扉の本文になる(捨てない)」と書いてあったのに、
+     *   出力では捨てていた(CLAUDE.md §4「観測点の選び方」)。
+     */
+    const lay = layout(FRAME.coverBody, s.lines.length, s.boxes);
+    if (lay.text !== null) {
+      shapes.push(textBox(4, '本文', lay.text,
+        s.lines.map((l) => lineXml(l, SZ.body, linkOf)).join(''), 't'));
+    }
+    putBoxes(lay.boxes, 5);
   } else {
     if (s.title !== '') {
       shapes.push(textBox(2, '題名', FRAME.title,
@@ -549,16 +586,8 @@ function slideXml(s: SlideDraft): { xml: string; rels: SlideRel[] } {
       shapes.push(textBox(3, '本文', lay.text,
         s.lines.map((l) => lineXml(l, SZ.body, linkOf)).join(''), 't'));
     }
-    s.boxes.forEach((b, i) => {
-      const rect = lay.boxes[i]!;
-      // ⚠ id は 4 から(2 = 題名 / 3 = 本文)── 重複した id は PowerPoint が拒む
-      if (b.kind === 'table') shapes.push(tableXml(4 + i, rect, b.rows));
-      else {
-        shapes.push(picXml(
-          4 + i, fit(rect, b.widthPx, b.heightPx), relFor('image', b.media), b.alt,
-        ));
-      }
-    });
+    // ⚠ id は 4 から(2 = 題名 / 3 = 本文)── 重複した id は PowerPoint が拒む
+    putBoxes(lay.boxes, 4);
   }
   const xml = `${XML_HEAD}<p:sld ${NS_P}><p:cSld><p:spTree>`
     + '<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>'
