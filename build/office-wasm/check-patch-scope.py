@@ -84,6 +84,7 @@ def depth_at(text: str, pos: int) -> int:
 
 # 🔑 対照群 ── 元 file の既知の file scope 位置(深さ 0 のはず)
 CONTROLS = [
+    ("vcl/qt5/QtInstance.cxx", "bool QtInstance::DoYield("),
     ("vcl/source/app/scheduler.cxx", "Scheduler::IdlesLockGuard::IdlesLockGuard()"),
     ("vcl/source/app/svapp.cxx", "void Application::Execute()"),
     ("sfx2/source/doc/docfile.cxx", "void SfxMedium::SetError("),
@@ -101,6 +102,7 @@ SPECS = [
         [
             ("vcl/source/app/scheduler.cxx", "Scheduler::IdlesLockGuard::IdlesLockGuard()"),
             ("vcl/source/app/svapp.cxx", "void Application::Execute()"),
+            ("vcl/qt5/QtInstance.cxx", "bool QtInstance::DoYield("),
         ],
     ),
     (

@@ -55,6 +55,44 @@
 | `execute:doexec a=<返り値>` | `DoExecute()` が**返ってきた**。⚠ **出ないこと自体が答え**(中で回り続けている) |
 | `execute:loop` | vcl 側の待ちループが回った(先頭 5 回まで) |
 | `execute:set` | そのループが条件を立てた(先頭 5 回まで) |
+| `yield:enter a=<Qt スレッドか> b=<待つか>` | `QtInstance::DoYield` に入った(先頭 5 回まで) |
+| `yield:proxy` | 枝 B ── 主スレッドへ proxy して promise を待つ |
+| `yield:wait` / `yield:woke` | 枝 C ── `m_aWaitingYieldCond` で待つ / 起きた |
+| `yield:ret a=<返り値>` | `DoYield` が返った(先頭 5 回まで) |
+
+## 🔴 3 巡目の結果と、4 巡目で割ること
+
+3 巡目(run 32742692542)の実測 ── **読み②が確定**した:
+
+| | 画像入り `.docx` | 対照群 `.odt` |
+|---|---|---|
+| `execute:call` / `execute:doexec` | 1 / `a=0` | 1 / `a=0` |
+| `execute:loop` | 🔴 **1 回だけ** | **5 回** |
+| `execute:set` | 🔴 **0 件** | **5 件**(loop と交互) |
+
+⇒ vcl の待ちループには**入っている**が、最初の `Application::Yield()` から
+**戻ってこない**。だから条件を立てる者が居ない。
+
+🔑 **手元の stack とも噛み合う**(`PKC3_STACKS=1`、対照群つき):
+
+| | 詰まった `.docx` | 対照群 `.odt`(開く) |
+|---|---|---|
+| ブラウザ主スレッド | `alive`(**暇**) | `alive`(暇) |
+| 止まっている worker | **2 本** | **1 本** |
+
+⚠ **主スレッドは塞がっていない。** そして **1 本は正常な回でも止まっている**
+── LO の main が `DoYield` で待つのは**普通のこと**である。
+🔑 だから問いは「main が待つこと」ではなく、
+**`IdlesLockGuard` が投げた `Application::PostUserEvent({})` がなぜ main を
+起こさないのか**である。
+
+4 巡目はそれを枝で割る:
+
+| 出るもの | 直す場所 |
+|---|---|
+| `yield:proxy` が出て `yield:ret` が出ない | 枝 B ── 主スレッドへの proxy が返らない |
+| `yield:wait` が出て `yield:woke` が出ない | 枝 C ── `m_aWaitingYieldCond` を誰も set しない |
+| `yield:enter a=1` しか出ない | Qt スレッド自身で回っている(前提が違う) |
 
 ## 🔴 2 巡目の結果と、3 巡目で割ること
 
@@ -211,14 +249,97 @@ APP_REPLACE = """    int nExitCode = 0;
 #   ⚠ patch は「当たった」と報告するので、**生成された C++ を目視するまで気づけない**
 #   (焼いて 2 時間後に赤で分かる形だった)。
 # 🔑 だから錨を **2 段**に分ける ── ヘルパーは**関数定義の直前**、本体は中。
+QT_SRC = "vcl/qt5/QtInstance.cxx"
+# 🔴 **4 巡目は `DoYield()` の枝を割る**(2026-08-24)。
+#    3 巡目で「vcl の待ちループには入っているが `Application::Yield()` から戻ってこない」
+#    ところまで確定した(`execute:loop` が 1 回で止まり `execute:set` が 0 件 /
+#    対照群は 5 往復)。⚠ `QtInstance::DoYield` は**呼ぶスレッドで 3 つに分かれる**:
+#      A. `qApp->thread()` 自身 → `ImplYield()` を回し、event があれば
+#         `m_aWaitingYieldCond.set()` する(= **他の枝を起こす唯一の場所**)
+#      B. emscripten の eventHandlerThread → 主スレッドへ proxy して promise を待つ
+#      C. それ以外 → `ImplYieldSignal` を投げ、event が無ければ
+#         `m_aWaitingYieldCond.wait()` で**待つ**
+#    🔑 B と C は**どちらも「主スレッドが動くこと」に依存する**ので、どの枝に居るかで
+#    直す場所が変わる。⚠ 割らずに直しは焼かない。
+#    🔑 手元で撮った stack とも噛み合う ── 詰まった回は **worker が 2 本**止まって
+#    おり(片方は #199 の `IdlesLockGuard`)、**ブラウザの主スレッドは暇**だった
+#    (`Debugger.pause` が頁の `alive` で止まった = wasm を実行していない)。
+QT_ENTER_ANCHOR = """bool QtInstance::DoYield(bool bWait, bool bHandleAllCurrentEvents)
+{
+    bool bWasEvent = false;
+"""
+QT_ENTER_REPLACE = """bool QtInstance::DoYield(bool bWait, bool bHandleAllCurrentEvents)
+{
+    {
+        // ⚠ 高頻度なので自前の上限を持つ(共有の 300 を食い潰さない)
+        static int nPkc3Yield = 0;
+        if (nPkc3Yield < 5)
+        {
+            ++nPkc3Yield;
+            pkc3_idles_trace("yield:enter",
+                             qApp->thread() == QThread::currentThread() ? 1 : 0,
+                             bWait ? 1 : 0, nPkc3Yield);
+        }
+    }
+    bool bWasEvent = false;
+"""
+QT_PROXY_ANCHOR = """    else if (pthread_self() == m_emscriptenThreadingData->eventHandlerThread)
+    {
+        SolarMutexReleaser release;
+"""
+QT_PROXY_REPLACE = """    else if (pthread_self() == m_emscriptenThreadingData->eventHandlerThread)
+    {
+        // 🔑 枝 B ── 主スレッドへ proxy して promise を待つ。**返らなければここ**
+        pkc3_idles_trace("yield:proxy", -1, -1, -1);
+        SolarMutexReleaser release;
+"""
+QT_WAIT_ANCHOR = """        if (!bWasEvent && bWait)
+        {
+            m_aWaitingYieldCond.reset();
+            SolarMutexReleaser aReleaser;
+            m_aWaitingYieldCond.wait();
+            bWasEvent = true;
+        }
+    }
+    return bWasEvent;
+}
+"""
+QT_WAIT_REPLACE = """        if (!bWasEvent && bWait)
+        {
+            // 🔑 枝 C ── `m_aWaitingYieldCond` は枝 A でしか set されない。
+            //    ⚠ `yield:wait` が出て `yield:woke` が出なければ、**ここで止まっている**
+            pkc3_idles_trace("yield:wait", -1, -1, -1);
+            m_aWaitingYieldCond.reset();
+            SolarMutexReleaser aReleaser;
+            m_aWaitingYieldCond.wait();
+            pkc3_idles_trace("yield:woke", -1, -1, -1);
+            bWasEvent = true;
+        }
+    }
+    {
+        static int nPkc3Ret = 0;
+        if (nPkc3Ret < 5)
+        {
+            ++nPkc3Ret;
+            pkc3_idles_trace("yield:ret", bWasEvent ? 1 : 0, -1, nPkc3Ret);
+        }
+    }
+    return bWasEvent;
+}
+"""
+
 HELPER_TARGETS = (
     (SCHED_SRC, "Scheduler::IdlesLockGuard::IdlesLockGuard()\n{\n"),
     (APP_SRC, "void Application::Execute()\n{\n"),
+    (QT_SRC, "bool QtInstance::DoYield(bool bWait, bool bHandleAllCurrentEvents)\n{\n"),
 )
 # ⚠ ヘルパーは TU ごとに 1 つ要る ── 当てる先が 2 file なので 2 つ入る。
 TARGETS = (
     (SCHED_SRC, SCHED_ANCHOR, SCHED_REPLACE),
     (APP_SRC, APP_ANCHOR, APP_REPLACE),
+    (QT_SRC, QT_ENTER_ANCHOR, QT_ENTER_REPLACE),
+    (QT_SRC, QT_PROXY_ANCHOR, QT_PROXY_REPLACE),
+    (QT_SRC, QT_WAIT_ANCHOR, QT_WAIT_REPLACE),
 )
 
 
@@ -262,7 +383,10 @@ def main() -> int:
             return 1
 
     if not on:
-        print("skip: PKC3_IDLES_TRACE!=1(錨は 2 件とも在ることを確かめた)")
+        print(
+            f"skip: PKC3_IDLES_TRACE!=1"
+            f"(錨は {len(HELPER_TARGETS)} + {len(TARGETS)} 件とも在ることを確かめた)"
+        )
         return 0
 
     # ⚠ **ヘルパーを先に**(本体の置換より前)── 順が逆でも結果は同じだが、
