@@ -470,12 +470,31 @@ try {
   const shotPath = process.env.PKC3_SHOT ?? '';
   if (shotPath) await page.screenshot({ path: shotPath }).catch(() => {});
 
-  if (process.env.PKC3_ACCEPT === '1') {
-    await page.keyboard.press('Enter');
+  /**
+   * 🔴 **`Enter` はこの小窓に効かない**(2026-08-24 実測)。押した直後の絵を撮ったら、
+   * 焦点が **「次回から表示しない」のチェック**に載っており、`Enter` では
+   * どのボタンも押されない ── 27 秒待っても窓は 2 枚のまま、byte も動かなかった。
+   * ⚠ ここで「答えたのに保存できない」と読むと、**存在しない層を追う**。
+   * 🔑 だから **押す鍵を渡せる**ようにする ── 小窓のボタンには加速鍵が字で出ている
+   *   (「Word 2007 形式を使用する(E)」= `Alt+e` / 「ODF 形式を使用する(D)」= `Alt+d`)。
+   *   `PKC3_ACCEPT=1` は従来どおり `Enter`(対照群として残す)。
+   */
+  const acceptKey = process.env.PKC3_ACCEPT === '1' ? 'Enter' : (process.env.PKC3_ACCEPT ?? '');
+  if (acceptKey) {
+    result.acceptKey = acceptKey;
+    await page.keyboard.press(acceptKey);
     await page.waitForTimeout(12000);
     result.steps.push(await snap('Enter の 12 秒後'));
     await page.waitForTimeout(13000);
     result.steps.push(await snap('Enter の 27 秒後'));
+    /**
+     * 🔴 **返事の後をもう一度読む**(2026-08-24)。⚠ 上の `saveTrace` は
+     * Enter を打つ**前**に読んでいるので、「訊かれて止まっている」までしか写らない ──
+     * **答えた後に本当に書けたか**(`medium:commit a=1`)はこちらにしか出ない。
+     * 🔑 2 つを別の field に分けて持つ(片方だけ見て「保存できた」と読まないため)。
+     */
+    result.saveTraceAfterAccept = await page.evaluate(SAVE_TRACE);
+    result.tmpAfterAccept = await page.evaluate(TMPDIR);
   }
 
 } catch (e) {
