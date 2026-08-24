@@ -55,7 +55,14 @@ export const SETTINGS_COMMANDS: readonly CollectionCommand[] = [
   {
     action: 'export-markdown',
     label: 'Markdown',
-    title: 'Markdown ファイルとして保存します',
+    /**
+     * 🔴 **何のための形かを書く**(#180 の C-2、2026-08-24)。
+     * ⚠ 直す前は「Markdown ファイルとして保存します」だけで、**押す理由**が
+     *   書いていなかった ── user は「他の道具へ渡せる」ことに辿り着けない。
+     * 🔑 #346(PDF)と**同じ形の欠け**である:道は在るのに**道しるべ**が無い。
+     */
+    title:
+      '1 ノート = 1 つの .md にして zip で保存します。PKC3 を捨てても読める形で、Pandoc など他の道具にもそのまま渡せます',
   },
   {
     action: 'purge-orphan-assets',
