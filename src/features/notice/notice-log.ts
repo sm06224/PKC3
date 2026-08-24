@@ -90,6 +90,15 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-24-paste-permalink',
+    title: 'ノートへのリンクを貼ると、押せるリンクになります',
+    items: [
+      'ノートの場所を指す文字をコピーして本文に貼ると、これまでは黒い文字のまま残っていました。',
+      '貼った時点で、そのノートの題名が付いたリンクになります。押すとそのノートが開きます。',
+      '別の入れ物のノート宛と、こちらに無いノート宛は、これまでどおりそのままです。在りもしない題名を書かないためです。',
+    ],
+  },
+  {
     id: '2026-08-24-pptx-export',
     title: 'ノートを PowerPoint(.pptx)で書き出せるようになりました',
     items: [
@@ -282,21 +291,11 @@ export const NOTICES: readonly Notice[] = [
       'ブラウザの「このページにこれ以上ダイアログを表示させない」を選ぶと確認が出せなくなり、ボタンが効かなくなる問題がありました。これも直っています。',
     ],
   },
-  {
-    id: '2026-08-21-auto-pair-skip',
-    title: '括弧を閉じると二重になっていたのを直しました',
-    items: [
-      '1 面編集で [ ( 「 などを打つと閉じが自動で入りますが、そのあと自分で閉じを打つと二重になっていました。いまは、すでにある閉じを通り抜けます。',
-      'とくに tags: [あ, い] と打つと tags: [あ, い]] になり、そのタグが「い]」という別のタグとして黙って保存されていました。警告も出ていませんでした。',
-      '- [ ] やること と打つと行末に ] が余るのも、同じ理由でした。どちらも直っています。',
-      '対になる 9 とおり(バッククォート [ ( { 「 『 (全角) 【 二重引用符)すべてで直りました。文字を選んでから打つと囲む、はこれまでどおりです。',
-    ],
-  },
 ];
 
 /**
  * ⚠ **落としたぶんの原本は CHANGELOG に在る**(上限 20 件を超えたので、古いほうから
  *   `2026-08-16-office-save-to-pkc` / `2026-08-17-office-save-same-note`(2026-08-19)、
  *   `2026-08-19-dual-pane-app`(2026-08-22)、
- *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search`(2026-08-24)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
+ *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip`(2026-08-24)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
  */

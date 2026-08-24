@@ -454,6 +454,75 @@ export function formatViewDeepLink(
   return `${baseUrl}${PKC_FRAGMENT_PREFIX}${parts.join('&')}`;
 }
 
+/**
+ * 🔴 **貼り付けた素のパーマリンクを、内部リンクの markdown にする**(#251)。
+ *
+ * ## なぜ要るか ── 描くときの降ろしだけでは届かない形がある
+ *
+ * PKC3 は `pkc://<自分>/entry/<lid>` を**描くときに**内部リンクへ降ろす
+ * (`markdown-render.ts`)。⚠ ただしそれが効くのは **markdown がリンクとして
+ * 読んだとき**だけである ── 実測:
+ *
+ * | 本文 | 描いた結果 |
+ * |---|---|
+ * | `[章](pkc://c1/entry/n1)` | ✅ 内部リンク |
+ * | `<pkc://c1/entry/n1>` | ✅ 内部リンク |
+ * | 🔴 `pkc://c1/entry/n1`(素) | ❌ **ただの文字** |
+ *
+ * 🔑 そして **「素」が user のいちばんやる形**である(パーマリンクをコピーして
+ * 本文へ貼る)。PKC2 の `maybeHandlePkcPermalinkPaste` が拾っていたのもここだけ。
+ *
+ * ## 触らない条件(⚠ 迷ったら触らない ── 貼った字は user の物である)
+ *
+ * - **クリップボードが 1 本のパーマリンクだけでない**とき(前後に文があるなど)
+ *   ── 散文を書き換えない
+ * - **別のコンテナ宛**のとき ── それは「持ち運べる参照」であって内部リンクではない
+ * - **題名を引けない lid** のとき ── 在りもしないノートの題名を書かない
+ * - `entry` 以外(`asset`)のとき
+ *
+ * @param plain クリップボードの平文
+ * @param ctx `containerId` = いまの入れ物 / `titleOf` = lid → 題名(無ければ `null`)
+ * @returns 差し込む markdown。触らないなら `null`
+ */
+export function convertPastedPermalink(
+  plain: string,
+  ctx: {
+    readonly containerId: string | null;
+    readonly titleOf: (lid: string) => string | null;
+  },
+): string | null {
+  if (ctx.containerId === null) return null;
+  const raw = plain.trim();
+  /**
+   * ⚠ **空白が 1 つでも在れば触らない。**
+   *
+   * 「前後に文が付いた形」は `parsePortablePkcReference` が既に落とす
+   * (`TOKEN_RE` に空白が無い)ので、**ここが本当に効くのは断片のほう**である
+   * ── `pkc://c1/entry/n1#log/a b` は**断片だけ綴りを検めない**ので parse は通り、
+   * 素直に組むと `[題名](entry:n1#log/a b)` という**壊れたリンク**になる
+   * (markdown の宛先に空白は置けない)。
+   * ⚠ この行は変異試験 P3 が **SURVIVED** で教えてくれた ── 1 稿目の test は
+   *   parse 側が落とす形しか見ておらず、**この行が守っている当の形を見ていなかった**。
+   */
+  if (raw === '' || /\s/.test(raw)) return null;
+  const ref = parsePortablePkcReference(raw);
+  if (ref === null || ref.kind !== 'entry') return null;
+  if (ref.containerId !== ctx.containerId) return null;
+  const title = ctx.titleOf(ref.targetId);
+  if (title === null || title === '') return null;
+  const fragment = ref.fragment ?? '';
+  return `[${escapeLinkText(title)}](entry:${ref.targetId}${fragment})`;
+}
+
+/**
+ * リンクの見出しに入れてよい形へ逃がす。
+ * ⚠ `[` `]` を逃がさないと、題名に括弧が在るノートで**リンクが途中で切れる**
+ * (`[買い物 [済]](entry:x)` は `買い物 [済` までしかリンクにならない)。
+ */
+function escapeLinkText(text: string): string {
+  return text.replace(/([\\[\]])/g, '\\$1');
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Deprecated aliases (pre-correction names, kept for back-compat)
 // ─────────────────────────────────────────────────────────────────
