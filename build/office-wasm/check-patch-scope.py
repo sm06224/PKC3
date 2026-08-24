@@ -110,6 +110,8 @@ SPECS = [
         [
             ("sfx2/source/doc/docfile.cxx", "void SfxMedium::SetError("),
             ("sfx2/source/doc/objstor.cxx", "bool SfxObjectShell::SaveTo_Impl"),
+            ("sfx2/source/doc/objmisc.cxx", "void SfxObjectShell::SetError("),
+            ("sfx2/source/doc/objserv.cxx", "void SfxObjectShell::ExecFile_Impl("),
         ],
     ),
     (
@@ -178,6 +180,13 @@ for env, script, fn, pairs in SPECS:
             print(f"🔴 {script}: {rel} にヘルパーが入っていない(検査が空振り)")
             fail = 1
             continue
+        # 🔴 **重複定義も見る**(2026-08-24 に踏んだ)── 1 稿目は `t.find()` で
+        #    **最初の 1 件**しか見ておらず、ヘルパーが 2 回入っていても素通りした
+        #    (文字列手術で組み立てたため実際に 2 回入り、**再定義エラー**になっていた)。
+        n_def = len(re.findall(rf"^void {fn}\(", t, re.M))
+        if n_def != 1:
+            print(f"  🔴 {script}: {rel} ヘルパーの定義が {n_def} 件(1 でなければ再定義)")
+            fail = 1
         got = depth_at(t, idx)
         ok = got == want
         print(

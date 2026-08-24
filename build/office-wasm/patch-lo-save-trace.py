@@ -59,12 +59,19 @@ from pathlib import Path
 
 # ⚠ libc だけを使う。embind / DOM / Qt の API をここから呼んではいけない
 #    (LO の文脈から `emscripten::val` を触ると `invalid handle` で abort する ── 2026-08-15)。
-HELPER = """
+# 🔴 **文字列手術で組み立てない**(2026-08-24 に踏んだ)。
+# ⚠ 1 稿目は `HELPER.replace("}\n}\n", ...)` で msg 版を作ったが、`HELPER` の中に
+#   その形が**複数ある**(内側の `if (pLog) {}` と関数の閉じと namespace の閉じ)ので
+#   Python の `str.replace` が**全部**に当たり、`pkc3_save_msg` が **2 回定義**された
+#   ── **再定義エラーでコンパイル不能**。⚠ 検査は最初の 1 件しか見ないので素通りした。
+# 🔑 だから**部品から組む**。同じ形が何回出ようと関係ない。
+HELPER_OPEN = """
 // ── PKC3 #225 の計装(挙動は変えない。`PKC3_SAVE_TRACE=1` の回だけ入る)──
 #include <cstdio>
 namespace
 {
-void pkc3_save_trace(const char* what, int a, int b, int c)
+"""
+HELPER_TRACE_FN = """void pkc3_save_trace(const char* what, int a, int b, int c)
 {
     static int nSeq = 0;
     if (nSeq >= 400)
@@ -83,8 +90,40 @@ void pkc3_save_trace(const char* what, int a, int b, int c)
         std::fclose(pLog);
     }
 }
+"""
+# 🔴 **message を出すのは、使う TU にだけ**(呼ばない file で `-Wunused-function` を踏む)。
+# ⚠ **`OUStringToOString` を使わない** ── `objserv.cxx` に用例が 0 件で、include が
+#   届いているか確かめられなかった。`OUString::toUtf8()` は `rtl/ustring.hxx` の
+#   メンバなので**必ず在る**(推測で API を渡さない)。
+# ⚠ 非 ASCII は `?` へ落とす ── log に本文らしきものを出さない。
+HELPER_MSG_FN = """void pkc3_save_msg(const char* what, const OUString& rMsg)
+{
+    const OString aUtf8 = rMsg.toUtf8();
+    char safe[224];
+    const char* p = aUtf8.getStr();
+    std::size_t k = 0;
+    for (; k + 1 < sizeof safe && p[k] != '\\0'; ++k)
+    {
+        const unsigned char u = static_cast<unsigned char>(p[k]);
+        safe[k] = (u >= 0x20 && u < 0x7f) ? p[k] : '?';
+    }
+    safe[k] = '\\0';
+    char line[320];
+    std::snprintf(line, sizeof line, "PKC3-SAVE msg %s [%s]\\n", what, safe);
+    std::fputs(line, stderr);
+    std::fflush(stderr);
+    std::FILE* pLog = std::fopen("/tmp/pkc3-save.log", "a");
+    if (pLog)
+    {
+        std::fputs(line, pLog);
+        std::fclose(pLog);
+    }
 }
 """
+HELPER_CLOSE = """}
+"""
+HELPER = HELPER_OPEN + HELPER_TRACE_FN + HELPER_CLOSE
+HELPER_MSG = HELPER_OPEN + HELPER_TRACE_FN + HELPER_MSG_FN + HELPER_CLOSE
 
 # ── ① error が立つ瞬間(すべての error が通る 1 つの漏斗)────────────────
 MEDIUM_SRC = "sfx2/source/doc/docfile.cxx"
@@ -153,6 +192,65 @@ COMMIT_REPLACE = """        const OUString sName( rMedium.GetName( ) );
         const OUString sNewName( rMedium.GetName( ) );
 """
 
+ENTRY_ANCHOR = """{
+    SAL_INFO( "sfx.doc", "saving \\"" << rMedium.GetName() << "\\"" );
+
+    UpdateDocInfoForSave();
+"""
+ENTRY_REPLACE = """{
+    SAL_INFO( "sfx.doc", "saving \\"" << rMedium.GetName() << "\\"" );
+    // 🔴 **そもそも呼ばれたか**(#225 の 2 巡目)── 1 巡目は alien の枝も
+    //    `SfxMedium::SetError` も 0 件だったので、**ここへ来ているのかが未確定**だった。
+    pkc3_save_trace("saveto:enter", -1, -1, -1);
+
+    UpdateDocInfoForSave();
+"""
+
+# ── ④ shell 側の error の漏斗(medium ではない)────────────────────────
+SHELL_SRC = "sfx2/source/doc/objmisc.cxx"
+SHELL_ANCHOR = """void SfxObjectShell::SetError(const ErrCodeMsg& lErr)
+{
+    if (pImpl->lErr == ERRCODE_NONE || (pImpl->lErr.IsWarning() && lErr.IsError()))
+    {
+        pImpl->lErr=lErr;
+    }
+}
+"""
+SHELL_REPLACE = (
+    HELPER
+    + """
+void SfxObjectShell::SetError(const ErrCodeMsg& lErr)
+{
+    // 🔴 1 巡目で `SfxMedium::SetError` は 0 件だった ── **shell 側の漏斗**を見る
+    pkc3_save_trace("shell:error", static_cast<int>(static_cast<sal_uInt32>(lErr.GetCode())),
+                    (pImpl->lErr == ERRCODE_NONE
+                     || (pImpl->lErr.IsWarning() && lErr.IsError()))
+                        ? 1
+                        : 0,
+                    static_cast<int>(static_cast<sal_uInt32>(pImpl->lErr.GetCode())));
+    if (pImpl->lErr == ERRCODE_NONE || (pImpl->lErr.IsWarning() && lErr.IsError()))
+    {
+        pImpl->lErr=lErr;
+    }
+}
+"""
+)
+
+# ── ⑤ 例外で来ているか(**message が読める唯一の場所**)────────────────
+SERV_SRC = "sfx2/source/doc/objserv.cxx"
+SERV_ANCHOR = """            catch( Exception& e )
+            {
+                nErrorCode = { ERRCODE_IO_GENERAL, e.Message };
+            }
+"""
+SERV_REPLACE = """            catch( Exception& e )
+            {
+                // 🔴 **ここに来ているなら message が読める**(#225 の 2 巡目)
+                pkc3_save_msg("serv:catch", e.Message);
+                nErrorCode = { ERRCODE_IO_GENERAL, e.Message };
+            }
+"""
+
 # 🔴 **ヘルパーは file scope へ入れる。関数の中に入れてはいけない**(2026-08-24 に踏んだ)。
 #
 # ⚠ `objstor.cxx` の錨は `SaveTo_Impl` の**中**に在るので、`HELPER + 本体` を 1 つの錨に
@@ -164,13 +262,18 @@ COMMIT_REPLACE = """        const OUString sName( rMedium.GetName( ) );
 # ⚠ `docfile.cxx` の錨は関数まるごとなので、そちらはこの表に入れない
 #   (`MEDIUM_REPLACE` が既に HELPER を持っている = file scope)。
 HELPER_TARGETS = (
-    (STORE_SRC, "bool SfxObjectShell::SaveTo_Impl\n(\n"),
+    (STORE_SRC, "bool SfxObjectShell::SaveTo_Impl\n(\n", HELPER),
+    # ⚠ objserv だけ msg 版(例外の message を読むのはここだけ)
+    (SERV_SRC, "void SfxObjectShell::ExecFile_Impl(", HELPER_MSG),
 )
 # ⚠ **同じ file の中では、ヘルパーを入れる方を先に当てる**(後の置換はヘルパーを持たない)。
 TARGETS = (
     (MEDIUM_SRC, MEDIUM_ANCHOR, MEDIUM_REPLACE, "medium:error"),
+    (STORE_SRC, ENTRY_ANCHOR, ENTRY_REPLACE, "saveto:enter"),
     (STORE_SRC, EXPORT_ANCHOR, EXPORT_REPLACE, "alien:export"),
     (STORE_SRC, COMMIT_ANCHOR, COMMIT_REPLACE, "medium:commit"),
+    (SHELL_SRC, SHELL_ANCHOR, SHELL_REPLACE, "shell:error"),
+    (SERV_SRC, SERV_ANCHOR, SERV_REPLACE, "serv:catch"),
 )
 
 
@@ -186,7 +289,7 @@ def main() -> int:
     #    だから読み込みを 1 度にして、in-memory で順に当てる。
     texts: dict[str, str] = {}
     # ⚠ ヘルパーの当て先も**同じ厳しさ**で見る(外れると「呼ぶ側だけ在る」= リンク不能)
-    for src, anchor in HELPER_TARGETS:
+    for src, anchor, _h in HELPER_TARGETS:
         path = root / src
         if not path.exists():
             print(f"ERROR: {src} が無い({path})", file=sys.stderr)
@@ -216,12 +319,12 @@ def main() -> int:
             return 1
 
     if not on:
-        print("skip: PKC3_SAVE_TRACE!=1(錨は 3 件とも在ることを確かめた)")
+        print(f"skip: PKC3_SAVE_TRACE!=1(錨 {len(TARGETS)} 件 + ヘルパー {len(HELPER_TARGETS)} 件を確かめた)")
         return 0
 
     # ⚠ **ヘルパーを先に**(本体の置換より前)── 「呼ぶ側だけ在る」中間状態を作らない
-    for src, anchor in HELPER_TARGETS:
-        texts[src] = texts[src].replace(anchor, HELPER + "\n" + anchor, 1)
+    for src, anchor, helper in HELPER_TARGETS:
+        texts[src] = texts[src].replace(anchor, helper + "\n" + anchor, 1)
     for src, anchor, replace, _mark in TARGETS:
         texts[src] = texts[src].replace(anchor, replace, 1)
     for src, text in texts.items():

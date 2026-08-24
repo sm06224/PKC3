@@ -49,7 +49,7 @@
 
 | 出る行 | 何が分かるか |
 |---|---|
-| `idles:wait a=<IsUseSystemEventLoop> b=<IsMainThread>` | 待ちに入った。⚠ **前提を assert ではなく実測で出す** |
+| `idles:wait a=<IsUseSystemEventLoop> b=<IsMainThread> c=<IsInExecute>` | 待ちに入った。🔴 **c=0 なら、条件を立てる者がまだ走っていない**(= 待っても無駄が確定) |
 | `idles:woke` | 待ちが返った(出なければ、そこで永久に止まっている) |
 | `execute:set` | `Application::Execute()` のループが条件を立てた |
 
@@ -71,7 +71,7 @@ HELPER = """
 #include <cstdio>
 namespace
 {
-void pkc3_idles_trace(const char* what, int a, int b)
+void pkc3_idles_trace(const char* what, int a, int b, int c)
 {
     static int nSeq = 0;
     // ⚠ 上限を置く ── `execute:set` は毎ループ走るので、置かないと log が膨らむ
@@ -79,7 +79,7 @@ void pkc3_idles_trace(const char* what, int a, int b)
         return;
     ++nSeq;
     char line[160];
-    std::snprintf(line, sizeof line, "PKC3-IDLES %d %s a=%d b=%d\\n", nSeq, what, a, b);
+    std::snprintf(line, sizeof line, "PKC3-IDLES %d %s a=%d b=%d c=%d\\n", nSeq, what, a, b, c);
     std::fputs(line, stderr);
     std::fflush(stderr);
     std::FILE* pLog = std::fopen("/tmp/pkc3-idles.log", "a");
@@ -106,14 +106,21 @@ SCHED_REPLACE = """        pSVData->m_inExecuteCondtion.reset();
         Application::PostUserEvent({});
         // 🔑 **前提を実測で出す**(#199)── a は `IsUseSystemEventLoop()`。
         //    ⚠ ここを「true のはず」と決めつけた直しを 1 度焼いて no-op だった。
+        // 🔴 **c が本命**(2026-08-24 の 2 巡目)── `Application::IsInExecute()` は
+        //    「`Application::Execute()` がスタックに在るか」(`svdata.hxx:174` の
+        //    `mbInAppExecute`、公開の accessor は `svapp.hxx:571`)。
+        //    ⚠ **c=0 なら、待っている条件を立てる者がまだ走っていない**ことが確定する
+        //    ── 1 巡目で `execute:set` が 0 件だった理由が、これで名前で言える。
+        //    🔑 前回は述語を**決め打ちして**焼き 1 回を無駄にした。今度は**測ってから**書く。
         pkc3_idles_trace("idles:wait", Application::IsUseSystemEventLoop() ? 1 : 0,
-                         Application::IsMainThread() ? 1 : 0);
+                         Application::IsMainThread() ? 1 : 0,
+                         Application::IsInExecute() ? 1 : 0);
         {
             SolarMutexReleaser releaser;
             pSVData->m_inExecuteCondtion.wait();
         }
         // ⚠ この行が**出なければ**、待ちはそこで永久に止まっている
-        pkc3_idles_trace("idles:woke", -1, -1);
+        pkc3_idles_trace("idles:woke", -1, -1, -1);
 """
 
 APP_SRC = "vcl/source/app/svapp.cxx"
@@ -126,7 +133,7 @@ APP_REPLACE = """            Application::Yield();
             pSVData->m_inExecuteCondtion.set();
             // 🔑 **立てた回数を数える**(#199)── 0 件なら、メインスレッドは
             //    このループに一度も到達していない(= 直す場所はそちら側)。
-            pkc3_idles_trace("execute:set", -1, -1);
+            pkc3_idles_trace("execute:set", -1, -1, -1);
 """
 
 # 🔴 **ヘルパーは file scope へ入れる。関数の中に入れてはいけない**(2026-08-24 に踏んだ)。
