@@ -90,6 +90,17 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-24-office-save-formats',
+    title: 'Word や Excel の形式のまま、Office から保存できるようになりました',
+    items: [
+      'Office で Word や Excel の形式を編集して保存を押すと「一般的な I/O エラー」で失敗し、編集した内容はそこで失われていました。保存できるようになりました。',
+      '.docx .xlsx .pptx と、古い .doc .xls .ppt、それに .rtf の 7 つで確かめました。ODF(.odt .ods .odp .odg)はこれまでどおりです。',
+      '保存を押すと、その形式のままにするか ODF にするかを Office が訊いてきます。どちらかを選ぶと書き込まれます。',
+      'Office のひとそろいを入れ直すと効きます。設定 → Office 表示 の「取得して入れる」を押してください。',
+      '入れ直すまでは、これまでどおり開いた時点で「保存できません」の断りが出ます。',
+    ],
+  },
+  {
     id: '2026-08-24-dual-new-note',
     title: '2 ペインで整理しながら、その場でノートを作れます',
     items: [
@@ -281,22 +292,11 @@ export const NOTICES: readonly Notice[] = [
       '1 面編集では、本文のすぐ上の札にも理由が出ます。これまでは読めなくなると札ごと消えていました。',
     ],
   },
-  {
-    id: '2026-08-22-calendar-and-fixes',
-    title: 'カレンダーの日のセルと、いくつかの取りこぼしを直しました',
-    items: [
-      'カレンダーで予定が増えると、その週だけ背が高くなり、下の週がずれていました。同じ所を 2 回押すと別の日に付いてしまう原因です。週の高さはもう変わりません。',
-      '予定が 2 件以上ある日は、日の数字の右に件数が出ます。セルに入り切らない分はセルの中でスクロールできます。印刷すると、その日の予定は全部そのまま紙に出ます。',
-      'フォルダタブと 2 ペインで行を掴んで動かしている最中に、表が作り直されて掴んでいたものが外れることがありました。日付が入っただけでは作り直さなくなりました。',
-      '文書の情報を書いたノートで、本文のチェックの印を押すと、押した項目とは別の行が書き換わっていました。押した項目の行が変わります。',
-      '編集中にゴミ箱のボタンを押しても何も起きないことがありました。ゴミ箱は編集中でも開けます。戻す・復元・空にするは、理由を出して断ります。',
-    ],
-  },
 ];
 
 /**
  * ⚠ **落としたぶんの原本は CHANGELOG に在る**(上限 20 件を超えたので、古いほうから
  *   `2026-08-16-office-save-to-pkc` / `2026-08-17-office-save-same-note`(2026-08-19)、
  *   `2026-08-19-dual-pane-app`(2026-08-22)、
- *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
+ *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
  */
