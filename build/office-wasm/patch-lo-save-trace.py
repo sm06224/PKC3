@@ -123,8 +123,7 @@ EXPORT_ANCHOR = """        // it's a "SaveAs" in an alien format
             bOk = ConvertTo( rMedium );
 """
 EXPORT_REPLACE = (
-    HELPER
-    + """
+    """
         // it's a "SaveAs" in an alien format
         // ⚠ **どちらの枝を通ったかも採る**(b)── ExportTo と ConvertTo は別の層である
         const bool bPkc3StarOne
@@ -154,6 +153,19 @@ COMMIT_REPLACE = """        const OUString sName( rMedium.GetName( ) );
         const OUString sNewName( rMedium.GetName( ) );
 """
 
+# 🔴 **ヘルパーは file scope へ入れる。関数の中に入れてはいけない**(2026-08-24 に踏んだ)。
+#
+# ⚠ `objstor.cxx` の錨は `SaveTo_Impl` の**中**に在るので、`HELPER + 本体` を 1 つの錨に
+#   当てると、名前空間スコープの関数定義が関数本体の内側へ入り **コンパイル不能**になる。
+#   ⚠ patch は「当たった」と報告するので、**生成された C++ を検めるまで気づけない**
+#   (焼いて 2 時間後に赤で分かる形だった)。
+# 🔑 錨を **2 段**に分ける ── ヘルパーは**関数定義の直前**、本体は中。
+# 🔑 検算は `build/office-wasm/check-patch-scope.py`(錨を変えたら必ず走らせる)。
+# ⚠ `docfile.cxx` の錨は関数まるごとなので、そちらはこの表に入れない
+#   (`MEDIUM_REPLACE` が既に HELPER を持っている = file scope)。
+HELPER_TARGETS = (
+    (STORE_SRC, "bool SfxObjectShell::SaveTo_Impl\n(\n"),
+)
 # ⚠ **同じ file の中では、ヘルパーを入れる方を先に当てる**(後の置換はヘルパーを持たない)。
 TARGETS = (
     (MEDIUM_SRC, MEDIUM_ANCHOR, MEDIUM_REPLACE, "medium:error"),
@@ -173,6 +185,16 @@ def main() -> int:
     # ⚠ 同じ file を 2 回触るので、**検査は「当てた後の姿」で数える**必要がある ──
     #    だから読み込みを 1 度にして、in-memory で順に当てる。
     texts: dict[str, str] = {}
+    # ⚠ ヘルパーの当て先も**同じ厳しさ**で見る(外れると「呼ぶ側だけ在る」= リンク不能)
+    for src, anchor in HELPER_TARGETS:
+        path = root / src
+        if not path.exists():
+            print(f"ERROR: {src} が無い({path})", file=sys.stderr)
+            return 1
+        hits = path.read_text(encoding="utf-8").count(anchor)
+        if hits != 1:
+            print(f"ERROR: ヘルパーの錨が {hits} 件({src})── 上流が形を変えた", file=sys.stderr)
+            return 1
     for src, anchor, _replace, _mark in TARGETS:
         path = root / src
         if not path.exists():
@@ -197,6 +219,9 @@ def main() -> int:
         print("skip: PKC3_SAVE_TRACE!=1(錨は 3 件とも在ることを確かめた)")
         return 0
 
+    # ⚠ **ヘルパーを先に**(本体の置換より前)── 「呼ぶ側だけ在る」中間状態を作らない
+    for src, anchor in HELPER_TARGETS:
+        texts[src] = texts[src].replace(anchor, HELPER + "\n" + anchor, 1)
     for src, anchor, replace, _mark in TARGETS:
         texts[src] = texts[src].replace(anchor, replace, 1)
     for src, text in texts.items():
