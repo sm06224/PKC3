@@ -1,13 +1,13 @@
 /// <reference lib="webworker" />
 /**
- * Word(.docx)の組み立てを回す**ワーカーの口**(#187 段④)。
+ * OOXML(`.docx` / `.pptx`)の組み立てを回す**ワーカーの口**(#187 段④・段⑤)。
  *
- * 🔴 **この file は worker からしか読まれない。** 中身(`assembleDocx`)は
- * `docx-assemble.ts` に在り、主スレッドの落とし所もそちらを直に呼ぶ ──
+ * 🔴 **この file は worker からしか読まれない。** 中身(`assembleOoxml`)は
+ * `ooxml-assemble.ts` に在り、主スレッドの落とし所もそちらを直に呼ぶ ──
  * ここを主スレッドから import すると、`self.onmessage` を差した瞬間に
  * **window の message を横取りする**(実際に一度そう書いて test で捕まえた)。
  */
-import { assembleDocx, type DocxJob, type DocxJobResponse } from './docx-assemble';
+import { assembleOoxml, type OoxmlJob, type OoxmlJobResponse } from './ooxml-assemble';
 
 /**
  * 🔴 **`WorkerLease` が包む形**(`{ id, payload }`)。
@@ -17,19 +17,19 @@ import { assembleDocx, type DocxJob, type DocxJobResponse } from './docx-assembl
  */
 interface Incoming {
   id: number;
-  payload: DocxJob;
+  payload: OoxmlJob;
 }
 
 // ⚠ `self.onmessage` に**代入**する(`addEventListener` にしない)── この repo の
 //   worker の test はこの形を前提に実物を dynamic import している。
 const ctx = self as unknown as {
   onmessage: ((ev: MessageEvent<Incoming>) => void) | null;
-  postMessage: (msg: DocxJobResponse) => void;
+  postMessage: (msg: OoxmlJobResponse) => void;
 };
 
 ctx.onmessage = (ev: MessageEvent<Incoming>): void => {
   const { id, payload } = ev.data;
-  assembleDocx(payload)
+  assembleOoxml(payload)
     .then((result) => {
       ctx.postMessage({ id, ok: true, result });
     })

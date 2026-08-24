@@ -90,6 +90,16 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-24-pptx-export',
+    title: 'ノートを PowerPoint(.pptx)で書き出せるようになりました',
+    items: [
+      '右の情報ペインに「PowerPoint」が増えました。いま選んでいるノート 1 件が、そのままスライドになります。',
+      '大見出しが扉のスライド、中見出しと小見出し、それに区切り線でスライドが切れます。PKC2 と同じ切れ方です。',
+      '表は格子のまま、画像と図は縦横比そのままで入ります。入りきらない文字は PowerPoint 側が縮めます。',
+      '書き出した file は取り込み直せません。戻せる形が要るときは、これまでどおり「バックアップ」を使ってください。',
+    ],
+  },
+  {
     id: '2026-08-23-office-format-notice',
     title: 'Office で保存できない形式を、開いた時点でお知らせします',
     items: [
@@ -282,21 +292,11 @@ export const NOTICES: readonly Notice[] = [
       '対になる 9 とおり(バッククォート [ ( { 「 『 (全角) 【 二重引用符)すべてで直りました。文字を選んでから打つと囲む、はこれまでどおりです。',
     ],
   },
-  {
-    id: '2026-08-20-boot-and-search',
-    title: '起動できなくなる不具合を直しました(本文の検索も効くようになりました)',
-    items: [
-      '「起動に失敗しました」と出てアプリが開かなくなることがありました。直りました。開けなかった間も、書いたものは無事です。',
-      '原因は本文検索の索引を作り直す順番でした。毎回おなじところで止まり、その手前まで全部やり直すので、中身には手が付いていません。',
-      '前から使っている方は、本文の検索が効いていませんでした。次に開いたときに索引を作り直すので、そのまま本文で探せるようになります。',
-      '索引が傷んでいるときは作り直します。作り直しても直らないときは索引ごと作り直すので、これで起動できなくなることはありません。',
-    ],
-  },
 ];
 
 /**
  * ⚠ **落としたぶんの原本は CHANGELOG に在る**(上限 20 件を超えたので、古いほうから
  *   `2026-08-16-office-save-to-pkc` / `2026-08-17-office-save-same-note`(2026-08-19)、
  *   `2026-08-19-dual-pane-app`(2026-08-22)、
- *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
+ *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search`(2026-08-24)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
  */

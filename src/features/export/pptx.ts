@@ -329,6 +329,12 @@ const MEDIA_TYPES: Record<string, string> = {
   gif: 'image/gif',
   svg: 'image/svg+xml',
   webp: 'image/webp',
+  /**
+   * 🔴 **図はベクタ(EMF)で入る**(#238。#187 段⑤ で pptx にも回ってきた)。
+   * ⚠ これを落とすと `application/octet-stream` で宣言され、PowerPoint は
+   *   種類が分からず**図を出さない**(docx 側は `image/x-emf` で宣言済み)。
+   */
+  emf: 'image/x-emf',
 };
 
 /** 使った画像の拡張子(小文字・重複なし)。 */

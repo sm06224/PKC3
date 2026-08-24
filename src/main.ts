@@ -123,6 +123,7 @@ import {
   exportEntry,
   type ExportDeps,
   exportEntryDocx,
+  exportEntryPptx,
   type ExportKind,
 } from '@adapter/ui/actions/export-archive';
 import { createAssetGate } from '@adapter/ui/actions/asset-gate';
@@ -801,7 +802,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 形式が増えても読み出し口は 1 つ(source)で共有する。
    */
   const runExport = (
-    kind: ExportKind | { entryLid: string; as?: 'archive' | 'docx' },
+    kind: ExportKind | { entryLid: string; as?: 'archive' | 'docx' | 'pptx' },
   ): Promise<void> =>
     withAssetGate(async () => {
       const deps: ExportDeps = {
@@ -901,8 +902,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       // 1 ノートだけの書出しも**同じ実行部・同じ形式**を通る(P6f)──
       // 別経路にすると「1 件書出しだけ壊れている」が起きる
       if (typeof kind === 'object') {
-        // ⚠ 1 ノートの出口は 2 つ ── バックアップ(取り込み直せる)と Word(片道)
+        // ⚠ 1 ノートの出口は 3 つ ── バックアップ(取り込み直せる)/ Word / PowerPoint
+        //    (後ろの 2 つは片道)
         if (kind.as === 'docx') await exportEntryDocx(dispatcher, deps, kind.entryLid);
+        else if (kind.as === 'pptx') await exportEntryPptx(dispatcher, deps, kind.entryLid);
         else await exportEntry(dispatcher, deps, kind.entryLid);
       }
       else await exportArchive(dispatcher, deps, kind);
@@ -1804,6 +1807,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * ── 画像は段②で入るので、そのとき掃除と競らないように今から内側に置く。
      */
     exportEntryDocx: (lid) => void runExport({ entryLid: lid, as: 'docx' }),
+    /**
+     * 🔴 このノートを PowerPoint で書き出す(#187 段⑤)。⚠ Word と**同じ道**を通る
+     * ── 本文の読み方も画像の入れ方も同じで、違うのは組み立て器だけである。
+     */
+    exportEntryPptx: (lid) => void runExport({ entryLid: lid, as: 'pptx' }),
     /**
      * 🔑 紙に出す(#187)。⚠ **ここは配線だけ** ── 待つ / 断る / 面を戻すの
      *   判断は `print-note.ts` に在る(`main.ts` は test から 1 度も実行されない)。

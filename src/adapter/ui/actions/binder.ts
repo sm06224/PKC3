@@ -370,6 +370,8 @@ export interface BinderServices {
   exportMarkdown?(): void;
   /** このノートを Word(.docx)で書き出す(#187 段①)。 */
   exportEntryDocx?(lid: string): void;
+  /** このノートを PowerPoint(.pptx)で書き出す(#187 段⑤)。 */
+  exportEntryPptx?(lid: string): void;
   /** 紙に出す(#187)── 中央の面に開いてからブラウザの印刷を呼ぶ。 */
   printNote?(lid: string): void;
   /** このノートだけをアーカイブとして書き出す(P6f)。 */
@@ -2054,6 +2056,12 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry')
       ?? dispatcher.getState().selectedLid;
     if (lid) services.exportEntryDocx?.(lid);
+  },
+  'export-entry-pptx': (dispatcher, target, services) => {
+    // ⚠ 解決規則は隣の 3 つ(`export-entry` / `-docx` / `-pdf`)と**同じ**にする
+    const lid = target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry')
+      ?? dispatcher.getState().selectedLid;
+    if (lid) services.exportEntryPptx?.(lid);
   },
   'export-entry': (dispatcher, target, services) => {
     // ⚠ 解決規則は `delete-entry` と**同じ**にする(review M-3)── 隣に並べる
