@@ -198,3 +198,88 @@ describe('骨格(zip に並べる部品)', () => {
     expect(slide).not.toContain('a<b & c>');
   });
 });
+
+/**
+ * 🔴 **段②:番号付きの箇条書きと、リンク**。
+ *
+ * ⚠ どちらも「落ちても file は開ける」ので、**test が無いと静かに消える**種類である
+ * (PKC2 の画像がまさにそれだった)。
+ */
+describe('段②:箇条書きの種類とリンク', () => {
+  it('🔴 番号付きは番号として出る(点に化けない)', () => {
+    const r = buildPptx([
+      { kind: 'li', ordered: true, depth: 0, runs: [{ text: '一つ目' }] },
+      { kind: 'li', ordered: false, depth: 0, runs: [{ text: '点' }] },
+    ], { title: 'T' });
+    const slide = partOf(r, 'ppt/slides/slide1.xml');
+    expect(slide, '番号付きが番号になっていない').toContain('<a:buAutoNum type="arabicPeriod"/>');
+    expect(slide, '点の指定が無い').toContain('<a:buChar');
+  });
+
+  it('🔴 箇条書きでない行には点を付けない', () => {
+    const r = buildPptx([p('ただの段落')], { title: 'T' });
+    expect(partOf(r, 'ppt/slides/slide1.xml')).toContain('<a:buNone/>');
+  });
+
+  it('🔴 リンクは、その slide の rels に実体を持つ', () => {
+    const r = buildPptx(
+      [{ kind: 'p', runs: [{ text: '参照', href: 'https://example.com/a' }] }],
+      { title: 'T' },
+    );
+    const slide = partOf(r, 'ppt/slides/slide1.xml');
+    const m = /<a:hlinkClick r:id="(rId\d+)"\/>/.exec(slide);
+    expect(m, 'リンクが書かれていない').not.toBeNull();
+    const rels = partOf(r, 'ppt/slides/_rels/slide1.xml.rels');
+    // ⚠ **id が在るだけでは足りない** ── 型紙(rId1)に当たっていないこと(段① の P7 と同じ罠)
+    const rel = new RegExp(`<Relationship Id="${m![1]}" Type="([^"]+)" Target="([^"]+)"([^/]*)/>`).exec(rels);
+    expect(rel, `rels に ${m![1]} が無い`).not.toBeNull();
+    expect(rel![1], 'リンクを指していない').toMatch(/\/hyperlink$/);
+    expect(rel![2]).toBe('https://example.com/a');
+    // 🔴 外部リンクは External でないと PowerPoint が file ごと拒む
+    expect(rel![3], 'TargetMode="External" が無い').toContain('TargetMode="External"');
+    expect(r.counts.links).toBe(1);
+  });
+
+  it('同じ URL は 1 つに畳む(rels を無駄に増やさない)', () => {
+    const r = buildPptx([
+      { kind: 'p', runs: [{ text: 'A', href: 'https://e.example/x' }] },
+      { kind: 'p', runs: [{ text: 'B', href: 'https://e.example/x' }] },
+    ], { title: 'T' });
+    expect(r.counts.links).toBe(1);
+  });
+
+  it('🔴 リンクの URL も escape される(rels を壊さない)', () => {
+    const r = buildPptx(
+      [{ kind: 'p', runs: [{ text: 'X', href: 'https://e.example/?a=1&b="2"' }] }],
+      { title: 'T' },
+    );
+    const rels = partOf(r, 'ppt/slides/_rels/slide1.xml.rels');
+    expect(rels).toContain('a=1&amp;b=&quot;2&quot;');
+    expect(rels).not.toContain('b="2"');
+  });
+
+  it('🔴 走りの装飾が属性として出る(太字 / 傾き / 取消)', () => {
+    const r = buildPptx([{
+      kind: 'p',
+      runs: [{ text: 'B', bold: true }, { text: 'I', italic: true }, { text: 'S', strike: true }],
+    }], { title: 'T' });
+    const slide = partOf(r, 'ppt/slides/slide1.xml');
+    expect(slide).toContain('b="1"');
+    expect(slide).toContain('i="1"');
+    // ⚠ **取消だけは属性でしか確かめていない** ── LibreOffice の PNG 書き出しでは
+    //    線が出なかった(実測 2026-08-24)。DrawingML の綴りは `sngStrike` で正しく、
+    //    PowerPoint 実機での見え方は実機の検証に回す
+    expect(slide, '取消の綴りが違う').toContain('strike="sngStrike"');
+  });
+
+  it('等幅(コード)は書体が指定される', () => {
+    const r = buildPptx([{ kind: 'code', text: 'x' }], { title: 'T' });
+    expect(partOf(r, 'ppt/slides/slide1.xml')).toContain('<a:latin typeface="Consolas"/>');
+  });
+
+  it('URL の無いリンクは素の文字として出る(消さない)', () => {
+    const r = buildPptx([{ kind: 'p', runs: [{ text: '素', href: '' }] }], { title: 'T' });
+    expect(partOf(r, 'ppt/slides/slide1.xml')).toContain('<a:t>素</a:t>');
+    expect(r.counts.links).toBe(0);
+  });
+});
