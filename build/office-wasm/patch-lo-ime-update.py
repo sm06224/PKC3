@@ -62,13 +62,29 @@
 `patch-*.py` を glob の順で回すので **`trace` < `update`** で正しい順に当たる(実測済み)。
 🔑 逆順になっても**黙って通らず、大声で落ちる**(不良物を焼かない)。
 
-## 🔑 効いたことをどう確かめるか
+## 🔴 効いたかどうかは、**まだ確かめられていない**(2026-08-24 に判明)
 
-Qt 側の診断属性(`qtbase-patch-ime-panel.py` が書く `data-pkc-ime`)が
-`accept0` → **`accept1`** になること。手順は `build/office-wasm/open-doc-probe.mjs`
-に `PKC3_IME=1` を渡す(⚠ **対照群 `landed` / `caretInBody` が両方真の回だけ読む**)。
+⚠ **初稿はここに「`accept0` → `accept1` になることで確かめる」と書いていたが、
+その手順は最初から盲だった。** 焼いて回したら `accept0` のままだったが、
+**それを「直っていない」と読んではいけない** ── 理由:
 
-⚠ **`accept1` になっても、そこから先(候補窓が出るか)は実 IME でしか確かめられない。**
+診断属性 `data-pkc-ime` を書いているのは `QWasmInputContext::updateInputElement()` の
+中だけである(`qtbase-patch-ime-panel.py` の hunk ②)。そして **`update()` から
+`updateInputElement()` を呼ぶ hunk ① は 2026-08-16 に外してある**
+(文書を開くと固まる退行の原因だった)。だからこの直しが
+`QInputMethod::update(Qt::ImEnabled)` を呼んでも、**DOM の属性は書き換わらない**。
+
+⇒ `accept0` が意味するのは「`updateInputElement()` が最後に走った時点では偽だった」
+であって「いまも偽である」ではない。**(a) 走っていない / (b) 走ったが偽** を
+この計器では分けられない。⚠ CLAUDE.md §4「計器が古い値を返す」そのものである。
+
+🔑 **次に作る計器**(#156 のコメントに残した):
+`QWasmInputContext::update()` の中で `inputMethodAccepted()` の値と**呼ばれた回数**を
+素の C++ の変数に書き、`EMSCRIPTEN_KEEPALIVE` の関数で JS から読む
+(DOM も embind も触らないので、外した hunk ① の abort とは無関係)。
+⚠ **回数が要る** ── 0 なら (a)、非 0 で偽なら (b) と分かれる。
+
+⚠ そこから先(実 IME で候補窓が出るか)は、どのみち実機でしか確かめられない。
 """
 
 import sys

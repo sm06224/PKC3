@@ -204,6 +204,26 @@ void QtFrame::SetInputContext(SalInputContext* pContext)
                    m_pQWidget->testAttribute(Qt::WA_InputMethodEnabled) ? 1 : 0,
                    m_pQWidget->hasFocus() ? 1 : 0);
     m_pQWidget->setAttribute(Qt::WA_InputMethodEnabled);
+    // 🔴 **立てた後を読む**(#156、2026-08-24)。⚠ ここが要る理由:
+    //    診断属性 `data-pkc-ime` は `QWasmInputContext::updateInputElement()` の中でしか
+    //    書かれず、そこを呼ぶ hunk は 2026-08-16 に外してある。だから DOM の `accept0` は
+    //    **古い値**であって、「いまも偽」の証拠にならない(2 つの読みが分けられない):
+    //      (a) 直しの後に updateInputElement() が一度も走っていない
+    //      (b) 走ったが inputMethodAccepted() がまだ偽
+    // 🔑 ここは **DOM を通らない**ので、その曖昧さが消える ── b=1 なら
+    //    setInputMethodAccepted(true) は済んでいる(= (a) が答え)。
+    // ⚠ 直しの patch(`patch-lo-ime-update.py`)は上の setAttribute 行を錨にして
+    //    その**直後**へ update(ImEnabled) を挿すので、この読み出しは**必ず直しの後**に来る
+    //    (glob の順で trace < update。逆順なら update 側が「錨 0 件」で大声で落ちる)。
+    // ⚠ 新しい型を持ち込まない ── `queryFocusObject` は QInputMethod の公開メソッドで、
+    //    QInputMethodQueryEvent を自分で組むのと同じことを内部でやる(include を足さずに済む)。
+    {
+        QObject* pFocus = QGuiApplication::focusObject();
+        const bool bEnabled
+            = QGuiApplication::inputMethod()->queryFocusObject(Qt::ImEnabled, QVariant()).toBool();
+        pkc3_ime_trace("frame:after", pFocus ? 1 : 0, bEnabled ? 1 : 0,
+                       pFocus == static_cast<QObject*>(m_pQWidget) ? 1 : 0);
+    }
 }
 """
 )

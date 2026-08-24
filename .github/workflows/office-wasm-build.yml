@@ -77,6 +77,28 @@ on:
         description: '調査用: IME の配管に計装を当てる(#156。別 tag へ出る)'
         type: boolean
         default: false
+      save_trace:
+        # 🔴 **調査用**(#225)。保存の配管に計装を当てて焼く ──
+        #    非 ODF(alien)の保存が **書き出しフィルタの中**で落ちているのか、
+        #    **行き先へ移す段**で落ちているのかを割る(`build/office-wasm/patch-lo-save-trace.py`)。
+        #    ⚠ ここまでに分かっているのは「ODF 3/3 が通り、非 ODF 5/5 が落ちる」
+        #    (3 モジュールとも)まで。⚠ `SAL_WARN` は焼かれておらず、`--convert-to` は
+        #    対照群ごと動かず、`/tmp` の走査も答えにならなかった ── **既存の口が全部死んでいる**。
+        #    🔑 出口は libc だけ(stderr + `/tmp/pkc3-save.log`)── LO の文脈から
+        #    embind / DOM を触ると `invalid handle` で abort する(2026-08-16 に実証)。
+        description: '調査用: 保存の配管に計装を当てる(#225。別 tag へ出る)'
+        type: boolean
+        default: false
+      idles_trace:
+        # 🔴 **調査用**(#199)。`Scheduler::IdlesLockGuard` の待ちが**なぜ返らないか**を測る
+        #    (`build/office-wasm/patch-lo-idles-trace.py`)。
+        #    ⚠ ここは 1 度「直し」を焼いて **no-op だった**場所である ──
+        #    `IsUseSystemEventLoop()` が真だと決めつけたが、JSPI を有効にしている
+        #    こちらの焼きでは **false** で、guard が常に真だった。
+        #    🔑 だから今度は**前提そのものを log に出す**(a=IsUseSystemEventLoop)。
+        description: '調査用: idle 錠の待ちに計装を当てる(#199。別 tag へ出る)'
+        type: boolean
+        default: false
 
 # ⚠ 既定の 6 時間で足りない可能性が高い。足りなければ段を分けて artifact で繋ぐ
 jobs:
@@ -362,6 +384,16 @@ jobs:
           else
             export PKC3_IME_TRACE=0
           fi
+          if [ "${{ inputs.save_trace }}" = "true" ]; then
+            export PKC3_SAVE_TRACE=1
+          else
+            export PKC3_SAVE_TRACE=0
+          fi
+          if [ "${{ inputs.idles_trace }}" = "true" ]; then
+            export PKC3_IDLES_TRACE=1
+          else
+            export PKC3_IDLES_TRACE=0
+          fi
           for p in "$GITHUB_WORKSPACE"/build/office-wasm/patch-*.py; do
             python3 "$p" ~/lo-core
             n=$((n + 1))
@@ -380,7 +412,38 @@ jobs:
           #    立てているのに Qt が受付可否を取り直さない。直しは LO 側の 1 行
           #    (`QGuiApplication::inputMethod()->update(Qt::ImEnabled)`)で、
           #    ⚠ **こちらは既定で当たる**(計装と違って配る一式にも入る)
-          test "$n" -eq 9
+          # 🔴 9 → 10(2026-08-24)。`patch-lo-idles-trace.py`(#199 の**計装**)。
+          #    名前入りの一式で stack を撮り、画像入り docx が
+          #    `GraphicImport` → `SwXShape::dispose()` → `DelLayoutFormat` →
+          #    `Scheduler::IdlesLockGuard` の ctor で**永久に待つ**ことは確定した。
+          #    ⚠ **ただし機構の説明は外した。** 同じ枠に「直し」を置いて焼いたが
+          #    **no-op だった** ── `IsUseSystemEventLoop()` が真だと決めつけたのに、
+          #    `--enable-emscripten-jspi` を渡すこちらの焼きでは
+          #    `#elif !HAVE_EMSCRIPTEN_JSPI` が効かず **false** だったためである
+          #    (run 32712089791 で実測。対照群の `.odt` は開くので読める回)。
+          #    🔑 だから直しを取り下げ、**前提そのものを log に出す計装**へ置き換えた。
+          #    ⚠ **既定では 1 バイトも書き換えない**
+          # 🔴 10 → 11(2026-08-24)。`patch-lo-save-trace.py`(#225 の**計装**)。
+          #    ⚠ **既定では 1 バイトも書き換えない**(`PKC3_SAVE_TRACE=1` の回だけ)が、
+          #    錨の検査は毎回する ── 門の下に隠すと上流の変形に誰も気づけない
+          # 🔴 11 → 12(2026-08-24)。`patch-lo-uifiles.py`(#225 の**直し**)。
+          #    非 ODF の保存が落ちていたのは、**「この形式のままにしますか」の
+          #    ダイアログの `.ui` が一式に入っていない**ためだった(計装が例外の
+          #    message を拾って確定 ── `cui/ui/querydialog.ui`)。
+          #    🔴 **1 稿目は「上流に在る」を数え方から間違えてビルドを止めた**
+          #    (run 32734107620。`gb_Deliver_deliver: file does not exist in
+          #    instdir` で make ごと停止)── `<mod>/uiconfig/**` の**実在**で
+          #    数えたが、instdir へ配られるのは `<mod>/UIConfig_*.mk` が
+          #    `gb_UIConfig_add_uifiles` で**登録したものだけ**である
+          #    (`fileextcheckdialog` は `ifeq ($(OS),WNT)` の中 = Windows 限定)。
+          #    🔑 いまは**登録を読む** ── 第 1 引数がそのまま cfg 上の綴りなので、
+          #    モジュール名の対応表(推測)も要らない。実測で欠けは **37 件**。
+          #    🔑 **件数を焼き込まない** ── patch 自身が毎回登録と突き合わせ、
+          #    差分を埋め、**埋め残しがあれば名前を挙げて落ちる**(tripwire)。
+          #    ⚠ **こちらも既定で当たる**(配る一式に入る)。
+          #    検査は `tests/office-uifiles-patch.test.ts`(実物の木に当てて、
+          #    **どれを足しどれを足さなかったか**を名指しで見る)
+          test "$n" -eq 12
 
       # 🔴 **Qt と LO の「握手」を、リンクの 16 分前に確かめる**(2026-08-10)。
       #    LO は Qt の embind シンボルを名指しで export する。無いと
@@ -646,6 +709,8 @@ jobs:
           if [ "${{ inputs.safe_heap }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-safeheap"; fi
           if [ "${{ inputs.profiling_funcs }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-names"; fi
           if [ "${{ inputs.ime_trace }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-imetrace"; fi
+          if [ "${{ inputs.save_trace }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-savetrace"; fi
+          if [ "${{ inputs.idles_trace }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-idlestrace"; fi
           printf '%s\n' "{
             \"version\": \"lo-${sha:0:12}-run${GITHUB_RUN_ID}${SAFE_SUFFIX}\",
             \"lo_sha\": \"${sha}\",
@@ -656,6 +721,8 @@ jobs:
             \"safe_heap\": \"${{ inputs.safe_heap }}\",
             \"profiling_funcs\": \"${{ inputs.profiling_funcs }}\",
             \"ime_trace\": \"${{ inputs.ime_trace }}\",
+            \"save_trace\": \"${{ inputs.save_trace }}\",
+            \"idles_trace\": \"${{ inputs.idles_trace }}\",
             \"built_at\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
           }" > build-info.json
           cat build-info.json

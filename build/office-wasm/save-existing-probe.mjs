@@ -184,6 +184,55 @@ const TMPDIR = `(() => {
   } catch (e) { return { err: String(e).slice(0, 80) }; }
 })()`;
 
+/**
+ * 🔴 **保存の配管の計装を読む**(#225。`patch-lo-save-trace.py` が書く)。
+ *
+ * ⚠ LO 側の文脈から DOM は触れないので、計装は **libc だけ**で
+ *   `/tmp/pkc3-save.log` へ追記している ── ここはその file を読むだけ。
+ * 🔑 返り値で 3 つを見分ける:
+ *     `null`   = 計装の入っていない一式(= この焼きでは測っていない)
+ *     `[]`     = 計装は在るが **1 行も出ていない**(呼ばれていない)
+ *     `[...]`  = 出た行
+ * ⚠ **ここで '\n' と書いてはいけない** ── この原文は template literal の中に在るので、
+ *   escape は**組み立てる側で解決されて実改行になる**(= 開いた ' が閉じないまま改行 =
+ *   SyntaxError)。2026-08-24 に `open-doc-probe.mjs` で踏んだ。
+ */
+const SAVE_TRACE = `(() => {
+  try {
+    const lo = window.__lo;
+    if (!lo || !lo.FS) return null;
+    const raw = lo.FS.readFile('/tmp/pkc3-save.log', { encoding: 'utf8' });
+    return String(raw).split(String.fromCharCode(10)).filter((l) => l.length > 0);
+  } catch (e) {
+    // ⚠ **大文字小文字を潰してから見る**(2026-08-24 に踏んだ)── 実際に飛ぶのは
+    //    ErrnoError: No such file or directory で、小文字の 'no such file' とは一致しない。
+    //    🔑 ここを外すと「計装が入っていない(null)」が「読もうとして落ちた(ERR)」に化け、
+    //    **対照群の意味が逆に読める**(実際 #199 の対照群で 1 度読み違えた)。
+    //    ⚠⚠ この注釈に**逆引用符を書かない** ── ここは template literal の中である。
+    const msg = String(e).toLowerCase();
+    return msg.indexOf('enoent') >= 0 || msg.indexOf('no such file') >= 0
+      ? null
+      : ['ERR ' + String(e).slice(0, 80)];
+  }
+})()`;
+
+/**
+ * 🔴 **渡す原文を、走らせる前に構文として検める**(2026-08-24)。
+ *
+ * ⚠ `open-doc-probe.mjs` の `IME_TRACE` は**書いた日から一度も成立していなかった** ──
+ *   原文の中の `'\n'` が template literal の外側で実改行に解決され、開いた `'` が
+ *   閉じないまま改行していた。⚠ 症状は「その節が 1 つのエラーで畳まれる」だけで、
+ *   **原文が壊れているのか、相手の頁で取れなかったのか**が出力から区別できない。
+ * 🔑 だから**名前を付けて先に落とす**。
+ */
+for (const [name, src] of Object.entries({ TMPDIR, SAVE_TRACE })) {
+  try {
+    new Function(`return ${src}`);
+  } catch (e) {
+    throw new Error(`evaluate の原文 ${name} が構文として成立していない`, { cause: e });
+  }
+}
+
 /** 窓の題名 ── ⚠ **数ではなく個体**で見る(増減が相殺する。2026-08-14 の教訓)。 */
 const WINDOWS = `(() => {
   const out = [];
@@ -392,6 +441,9 @@ try {
   result.saveChangedScreen = turned(last, result.afterSaveFrames);
   await page.waitForTimeout(13000);
   result.steps.push(await snap('Ctrl+S の 27 秒後'));
+  // 🔑 **計装はまとめて最後に読む**(console の取りこぼしに左右されない本命の出口)。
+  //    ⚠ 出口を 2 か所に散らさない ── 2026-08-10 の「診断を 3 か所に置いて 3 回転捨てた」
+  result.saveTrace = await page.evaluate(SAVE_TRACE);
 
   /**
    * 🔴 **出た小窓が「待っている」のか「落ちた」のかを分ける**(#225)。
@@ -418,12 +470,31 @@ try {
   const shotPath = process.env.PKC3_SHOT ?? '';
   if (shotPath) await page.screenshot({ path: shotPath }).catch(() => {});
 
-  if (process.env.PKC3_ACCEPT === '1') {
-    await page.keyboard.press('Enter');
+  /**
+   * 🔴 **`Enter` はこの小窓に効かない**(2026-08-24 実測)。押した直後の絵を撮ったら、
+   * 焦点が **「次回から表示しない」のチェック**に載っており、`Enter` では
+   * どのボタンも押されない ── 27 秒待っても窓は 2 枚のまま、byte も動かなかった。
+   * ⚠ ここで「答えたのに保存できない」と読むと、**存在しない層を追う**。
+   * 🔑 だから **押す鍵を渡せる**ようにする ── 小窓のボタンには加速鍵が字で出ている
+   *   (「Word 2007 形式を使用する(E)」= `Alt+e` / 「ODF 形式を使用する(D)」= `Alt+d`)。
+   *   `PKC3_ACCEPT=1` は従来どおり `Enter`(対照群として残す)。
+   */
+  const acceptKey = process.env.PKC3_ACCEPT === '1' ? 'Enter' : (process.env.PKC3_ACCEPT ?? '');
+  if (acceptKey) {
+    result.acceptKey = acceptKey;
+    await page.keyboard.press(acceptKey);
     await page.waitForTimeout(12000);
     result.steps.push(await snap('Enter の 12 秒後'));
     await page.waitForTimeout(13000);
     result.steps.push(await snap('Enter の 27 秒後'));
+    /**
+     * 🔴 **返事の後をもう一度読む**(2026-08-24)。⚠ 上の `saveTrace` は
+     * Enter を打つ**前**に読んでいるので、「訊かれて止まっている」までしか写らない ──
+     * **答えた後に本当に書けたか**(`medium:commit a=1`)はこちらにしか出ない。
+     * 🔑 2 つを別の field に分けて持つ(片方だけ見て「保存できた」と読まないため)。
+     */
+    result.saveTraceAfterAccept = await page.evaluate(SAVE_TRACE);
+    result.tmpAfterAccept = await page.evaluate(TMPDIR);
   }
 
 } catch (e) {
