@@ -243,3 +243,64 @@ describe('`data:` / `blob:` を資産へ逃がす', () => {
     expect(e.defaultPrevented, '逃がせないのに既定を止めた').toBe(false);
   });
 });
+
+/**
+ * 🔴 **素で貼ったパーマリンクを内部リンクにする**(#251)。
+ *
+ * ⚠ ここが見るのは**配線**である ── 判定そのものは
+ * `tests/features/paste-permalink.test.ts` が決定的に見ている。
+ */
+describe('パーマリンクの貼付', () => {
+  /** ノートを 1 件持つ器を立てて、`ta` へ貼る。 */
+  function withNote(over: Partial<BinderServices> = {}) {
+    const s = setup(over);
+    s.dispatcher.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
+    s.dispatcher.dispatch({
+      type: 'CREATE_ENTRY',
+      lid: 'n1',
+      archetype: 'text',
+      title: '会議のメモ',
+    });
+    return s;
+  }
+
+  it('🔴 素の `pkc://…/entry/<lid>` が題名つきの内部リンクになる', () => {
+    const { ta } = withNote();
+    const e = pasteEvent({ 'text/plain': 'pkc://c1/entry/n1' });
+    ta.dispatchEvent(e);
+    expect(e.defaultPrevented, '既定を止めていない').toBe(true);
+    expect(ta.value).toBe('[会議のメモ](entry:n1)');
+  });
+
+  /**
+   * 🔴 **HTML の変換より先に見る。**
+   * ⚠ パーマリンクをコピーすると `text/html` に `<a href="pkc://…">` が入ることが
+   *   あり、そちらが先に当たると**外部リンクの形**で差さる(押しても面が動かない)。
+   */
+  it('🔴 HTML にも同じリンクが載っているとき、内部リンクの側が勝つ', () => {
+    const { ta } = withNote();
+    ta.dispatchEvent(
+      pasteEvent({
+        'text/html': '<a href="pkc://c1/entry/n1">会議のメモ</a>',
+        'text/plain': 'pkc://c1/entry/n1',
+      }),
+    );
+    expect(ta.value, '外部リンクの形で差さっている').toBe('[会議のメモ](entry:n1)');
+    expect(ta.value).not.toContain('pkc://');
+  });
+
+  it('🔴 知らないノート宛は横取りしない(既定の貼付に任せる)', () => {
+    const { ta } = withNote();
+    const e = pasteEvent({ 'text/plain': 'pkc://c1/entry/zzz' });
+    ta.dispatchEvent(e);
+    // ⚠ 既定を止めていない = ブラウザがそのまま貼る(happy-dom では値は変わらない)
+    expect(e.defaultPrevented, '横取りしている').toBe(false);
+  });
+
+  it('🔴 本文の欄でなければ何もしない(探す欄に貼っても書き換えない)', () => {
+    const { outside } = withNote();
+    const e = pasteEvent({ 'text/plain': 'pkc://c1/entry/n1' });
+    outside.dispatchEvent(e);
+    expect(e.defaultPrevented, '本文以外で横取りしている').toBe(false);
+  });
+});

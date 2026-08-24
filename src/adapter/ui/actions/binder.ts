@@ -29,6 +29,7 @@ import { findTodayNote, todayNoteTitle } from '@features/schedule/today-note';
 import { isImageAssetMime } from '@features/asset/asset-ref-format';
 import { adoptableUrls, rewriteAdopted } from '@features/asset/inline-url-adopt';
 import { convertPastedHtml } from '@features/markdown/html-to-markdown';
+import { convertPastedPermalink } from '@features/link/permalink';
 import { resolveMime } from './attach';
 import { applyFormat, type FormatOp } from '@features/markdown/text-ops';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
@@ -2701,7 +2702,20 @@ export function bindActions(
     if (!isBodyInput(target)) return false;
     const html = ce.clipboardData?.getData('text/html') ?? '';
     const plain = ce.clipboardData?.getData('text/plain') ?? '';
-    const converted = convertPastedHtml({ html, plain });
+    /**
+     * 🔴 **素で貼ったパーマリンクを内部リンクにする**(#251)。
+     *
+     * ⚠ **HTML の変換より先に見る** ── パーマリンクをコピーすると
+     *   `text/html` に `<a href="pkc://…">` が入ることがあり、そちらが先に
+     *   当たると**外部リンクの形**(`[…](pkc://…)`)で差さってしまう。
+     * 🔑 判定そのものは `features/link/permalink.ts` の 1 本(ここは配線だけ)。
+     */
+    const st = dispatcher.getState();
+    const permalink = convertPastedPermalink(plain, {
+      containerId: st.cid,
+      titleOf: (lid) => st.entryMetas.get(lid)?.title ?? null,
+    });
+    const converted = permalink ?? convertPastedHtml({ html, plain });
     const text = converted ?? plain;
     if (text === '') return false;
 
