@@ -71,6 +71,7 @@ function setup(bodies: Record<string, string>, port: Partial<StorePort> = {}) {
      *   だから fake も本文を持たない(触らないものは持たない)。
      */
     renameEntry: async () => stubStamps(),
+    reorderEntry: async () => stubStamps(),
     persistEntry: async (e, opts) => {
       // checkpoint = 「変更前の disk body を履歴に刻む」意思(実記録は worker)
       log.push(`persist:${e.lid}:${e.body}${opts?.checkpoint ? ':cp' : ''}`);
@@ -412,6 +413,7 @@ describe('ゴミ箱からの復元: 居場所と並びが戻る', () => {
        *   だから fake も本文を持たない(触らないものは持たない)。
        */
       renameEntry: async () => stubStamps(),
+      reorderEntry: async () => stubStamps(),
       persistEntry: async () => stubStamps(),
       deleteEntry: async () => {},
       setEntryParent: async () => {},

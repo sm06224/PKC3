@@ -167,6 +167,18 @@ export type StorageRequest =
    *   そのままで正しい ── だからここでも触らない。
    */
   | { op: 'renameEntry'; cid: string; lid: string; title: string }
+  /**
+   * 🔴 **並びだけを書き換える**(#178 の残り、2026-08-24)。
+   *
+   * ⚠ **改名とまったく同じ理由で要る。** 直す前の並べ替えは
+   * `getBody` → **本文ごと書き戻す**形だったので、読んでから書くまでの間に
+   * 別のタブ / 窓が本文を書いていると、それを消していた ── しかも
+   * `checkpoint` を渡さないので **amend** になり、**履歴にも残らない**
+   * (`storage-worker.test.ts` の「expectHash を渡さなければ…」が実測している)。
+   * 🔑 **本文に触らなければ、衝突は起こりようがない**(検出ではなく消滅)。
+   * ⚠ 抽出列(status / date / archived)も本文由来なので触らない。
+   */
+  | { op: 'reorderEntry'; cid: string; lid: string; entryOrder: number }
   | { op: 'bulkUpsertEntries'; cid: string; entries: EntryUpsert[] }
   | { op: 'deleteEntry'; cid: string; lid: string }
   | { op: 'listRelations'; cid: string }
@@ -457,6 +469,8 @@ export interface ResultMap {
   upsertEntry: EntryStamps;
   /** ⚠ 行が無ければ `null`(消えたノートの改名 ack を握り潰さない)。 */
   renameEntry: EntryStamps | null;
+  /** ⚠ 行が無ければ `null`(消えたノートの並べ替えを「成功」と言わない)。 */
+  reorderEntry: EntryStamps | null;
   bulkUpsertEntries: null;
   deleteEntry: null;
   listRelations: RelationRow[];

@@ -54,6 +54,7 @@ function setup(bodies: Record<string, string>) {
      *   だから fake も本文を持たない(触らないものは持たない)。
      */
     renameEntry: async () => stubStamps(),
+    reorderEntry: async () => stubStamps(),
     persistEntry: async (e) => {
       persisted.push(e);
       return stubStamps();
@@ -187,6 +188,7 @@ describe('editor flow (P3-5)', () => {
        *   だから fake も本文を持たない(触らないものは持たない)。
        */
       renameEntry: async () => stubStamps(),
+      reorderEntry: async () => stubStamps(),
       persistEntry: async (e) => {
         if (failNext) throw new Error('disk full');
         persisted.push(e.body);

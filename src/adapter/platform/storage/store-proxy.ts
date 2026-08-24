@@ -63,6 +63,8 @@ const MUTATING_OPS: ReadonlySet<StorageRequest['op']> = new Set([
   'upsertEntry',
   // ⚠ **足し忘れると、他タブの一覧に古い題名が残る**(#178)
   'renameEntry',
+  // ⚠ 同じ理由 ── 足し忘れると、他タブの一覧が**古い並び**のままになる
+  'reorderEntry',
   'bulkUpsertEntries',
   'deleteEntry',
   'setEntryParent',
@@ -85,7 +87,9 @@ function changedLids(req: StorageRequest): string[] | null {
     case 'deleteEntry':
     case 'setEntryParent':
     case 'renameEntry':
-      // ⚠ 改名(#178)も**その 1 行だけ**が当たり先である ── 本文にも辺にも触らない。
+    case 'reorderEntry':
+      // ⚠ 改名 / 並べ替え(#178)も**その 1 行だけ**が当たり先である
+      //    ── 本文にも辺にも触らない。
       //    ⚠ 注記を `case` の間に置かない(`no-fallthrough` の目印を隠して lint が落ちる)
       return [req.lid];
     case 'bulkUpsertEntries':

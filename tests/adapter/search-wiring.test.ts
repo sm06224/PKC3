@@ -60,6 +60,7 @@ function setup(hitsFor: (q: string) => string[] = () => []) {
      *   だから fake も本文を持たない(触らないものは持たない)。
      */
     renameEntry: async () => stubStamps(),
+    reorderEntry: async () => stubStamps(),
     persistEntry: async () => stubStamps(),
     searchEntries,
   });
@@ -140,6 +141,7 @@ describe('全文検索の配線(#181)', () => {
        *   だから fake も本文を持たない(触らないものは持たない)。
        */
       renameEntry: async () => stubStamps(),
+      reorderEntry: async () => stubStamps(),
       persistEntry: async () => stubStamps(),
       searchEntries: async () => {
         throw new Error('db down');

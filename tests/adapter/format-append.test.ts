@@ -69,6 +69,7 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
      *   だから fake も本文を持たない(触らないものは持たない)。
      */
     renameEntry: async () => stubStamps(),
+    reorderEntry: async () => stubStamps(),
     persistEntry: async (e) => {
       persisted.push(e);
       return stubStamps();

@@ -58,6 +58,7 @@ function setup(services: {
      *   だから fake も本文を持たない(触らないものは持たない)。
      */
     renameEntry: async () => stubStamps(),
+    reorderEntry: async () => stubStamps(),
     persistEntry: async () => stubStamps(),
   });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a')], relations: [] });

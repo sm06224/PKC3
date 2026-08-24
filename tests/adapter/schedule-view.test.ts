@@ -71,6 +71,7 @@ function setup(
     deleteEntry: async () => {},
     setEntryParent: async () => {},
     renameEntry: async () => stubStamps(),
+    reorderEntry: async () => stubStamps(),
     persistEntry: async (e) => {
       persisted.push(e);
       store[e.lid] = e.body;
@@ -412,6 +413,7 @@ describe('右の列から、ノート 1 件に日付を付ける(段④)', () =>
       deleteEntry: async () => {},
       setEntryParent: async () => {},
       renameEntry: async () => stubStamps(),
+      reorderEntry: async () => stubStamps(),
       persistEntry: async (e) => {
         persisted.push(e);
         store[e.lid] = e.body;

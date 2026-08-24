@@ -20,7 +20,7 @@ import {
  * 切ると user は「無い」と読む。上限そのものは「一覧に出して意味がある量」で決めた。
  */
 const SEARCH_LIMIT = 200;
-import type { EntryUpsert } from './schema';
+import type { EntryStamps, EntryUpsert } from './schema';
 import { contentHash64Hex } from './content-hash';
 import { scanAssetRefsInto } from '@features/asset/asset-ref-scan';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
@@ -989,6 +989,42 @@ function mintContainerId(): string {
   return `c-${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`;
 }
 
+/**
+ * 🔴 **本文に触らずに 1 列だけ書き換える**(#178。改名 / 並べ替えが使う)。
+ *
+ * 🔑 **本文を書き戻さなければ、タブ間の衝突は起こりようがない** ── 検出ではなく
+ * 消滅である(読んでから書くまでの窓が無い)。
+ * ⚠ **鎖は触らないのが正しい** ── `upsertEntry` も
+ * `if (old && old.body !== req.entry.body)` で本文が変わったときだけ鎖を維持する。
+ * ここでは常に偽なので、**元から鎖は動いていなかった**(この口はその等価物である)。
+ * ⚠ 抽出列(status / date / archived)も本文由来なので触らない。
+ * ⚠ **列名は呼び側のリテラルだけ**を受ける(user の値が SQL に入る口を作らない)。
+ */
+function updateEntryColumn(
+  cid: string,
+  lid: string,
+  column: 'title' | 'entry_order',
+  value: string | number,
+): EntryStamps | null {
+  const database = need();
+  database.exec({
+    sql: `UPDATE entries SET ${column} = ?, updated_at = datetime('now')
+            WHERE cid = ? AND lid = ?`,
+    bind: [value, cid, lid],
+  });
+  // ⚠ **書いた行が無ければ null** ── 消えたノートの書き換えを「成功」と言わない
+  if (database.changes() === 0) return null;
+  // 🔑 刻んだ時刻を返す(`upsertEntry` と同じ約束 ── P9 段①)
+  const stamped = database.selectObjects(
+    'SELECT created_at, updated_at FROM entries WHERE cid = ? AND lid = ?',
+    [cid, lid],
+  )[0] as { created_at: string | null; updated_at: string | null } | undefined;
+  return {
+    createdAt: stamped?.created_at ?? null,
+    updatedAt: stamped?.updated_at ?? null,
+  };
+}
+
 const handlers: Handlers = {
   init: (req) => init(req.dbName, req.journalMode),
   openContainer: (req) => {
@@ -1294,25 +1330,12 @@ const handlers: Handlers = {
    * 改名では常に偽なので、**元から鎖は動いていなかった**(この op はその等価物である)。
    * ⚠ 抽出列(status / date / archived)も本文由来なので触らない。
    */
-  renameEntry: (req) => {
-    const database = need();
-    database.exec({
-      sql: `UPDATE entries SET title = ?, updated_at = datetime('now')
-              WHERE cid = ? AND lid = ?`,
-      bind: [req.title, req.cid, req.lid],
-    });
-    // ⚠ **書いた行が無ければ null** ── 消えたノートの改名を「成功」と言わない
-    if (database.changes() === 0) return null;
-    // 🔑 刻んだ時刻を返す(`upsertEntry` と同じ約束 ── P9 段①)
-    const stamped = database.selectObjects(
-      'SELECT created_at, updated_at FROM entries WHERE cid = ? AND lid = ?',
-      [req.cid, req.lid],
-    )[0] as { created_at: string | null; updated_at: string | null } | undefined;
-    return {
-      createdAt: stamped?.created_at ?? null,
-      updatedAt: stamped?.updated_at ?? null,
-    };
-  },
+  renameEntry: (req) => updateEntryColumn(req.cid, req.lid, 'title', req.title),
+  /**
+   * 🔴 **並びだけを書き換える**(#178 の残り、2026-08-24)。改名と**同じ理由**で、
+   * 本文には 1 バイトも触らない(protocol の注記)。
+   */
+  reorderEntry: (req) => updateEntryColumn(req.cid, req.lid, 'entry_order', req.entryOrder),
   bulkUpsertEntries: (req) => {
     // 1 tx に束ねる ── journal 増幅対策(計器 1 で実測した ~120 倍の主因が
     // upsert 毎の暗黙 tx であることの検証と対策を兼ねる)

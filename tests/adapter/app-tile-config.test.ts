@@ -64,6 +64,7 @@ function setup(
      *   だから fake も本文を持たない(触らないものは持たない)。
      */
     renameEntry: async () => stubStamps(),
+    reorderEntry: async () => stubStamps(),
     persistEntry: async (e) => {
       counter.writes += 1;
       bodies[e.lid] = e.body;
