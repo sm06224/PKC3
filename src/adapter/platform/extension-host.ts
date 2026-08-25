@@ -32,11 +32,13 @@
 
 import {
   EXT_READY_FLAG,
+  deliveredMessage,
   parseExtRequest,
   portHandoffMessage,
   projectionMessage,
 } from '@features/extension/ext-wire';
 import { buildProjection } from '@features/extension/ext-projection';
+import type { ExtDeliveredEntry } from '@features/extension/ext-delivery';
 import type { EntryMeta } from '@core/model/entry-meta';
 
 export interface ExtHostDeps {
@@ -70,6 +72,17 @@ export interface ExtHostDeps {
 export interface ExtHostLink {
   /** 見取り図を押し直す(一覧が変わったとき)。⚠ 港が無ければ何もしない。 */
   push: () => void;
+  /**
+   * 🔴 **user が押した 1 件を渡す**(#195 / C-5 段②)。
+   *
+   * ⚠ **返り値を捨てない** ── 港がまだ繋がっていない(アプリが読み込み中 /
+   *   時間切れ)ことは普通に起きる。⚠ そこで黙って握り潰すと、user から見て
+   *   「**押したのに何も起きない**」になる ── 呼び側が帯で言えるように
+   *   `false` を返す(CLAUDE.md「押しても無言、を作らない」)。
+   *
+   * @returns 渡せたか。`false` = 港が無い(まだ繋がっていない / もう閉じた)
+   */
+  deliver: (entry: ExtDeliveredEntry) => boolean;
   /** 手を切る(窓が閉じた / 許可が外れた)。 */
   close: () => void;
   /** ⚠ test 用 ── 港が繋がったか。 */
@@ -153,6 +166,22 @@ export function connectExtension(deps: ExtHostDeps): ExtHostLink {
 
   return {
     push: send,
+    /**
+     * ⚠ **`send` と同じ港を使うが、別の関数にする** ── 見取り図は
+     *   「一覧が変わったら勝手に押す」物、実体は「user が押したときだけ」の物で、
+     *   **起こす条件が違う**。1 つにまとめると、次に触る人が
+     *   「一覧が変わったら実体も押す」と書いてしまう(段② の要点が消える)。
+     */
+    deliver: (entry: ExtDeliveredEntry): boolean => {
+      if (port === null) return false;
+      try {
+        port.postMessage(deliveredMessage(entry));
+        return true;
+      } catch {
+        // 港が既に閉じている ── 渡せなかったことを呼び側に返す(黙らない)
+        return false;
+      }
+    },
     connected: () => port !== null,
     close: () => {
       closed = true;

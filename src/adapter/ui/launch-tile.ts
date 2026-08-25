@@ -100,7 +100,16 @@ export interface LaunchDeps {
      *   外殻は合わない港を**黙って捨てる**ので、別々に作ると繋がらない。
      *   だから引数に取る(呼び側が 1 つの値を 2 か所へ配る形にする)。
      */
-    connect: (win: Window, nonce: string) => { close: () => void };
+    connect: (
+      win: Window,
+      nonce: string,
+      /**
+       * 🔴 **どのアプリの窓か**(#195 / C-5 段②)。⚠ 台帳に載せるのに要る ──
+       *   段② の「このアプリへ送る」は、**開いている窓を名前で選ぶ**ので、
+       *   ここで名乗らないと一覧に出せない(`extension-links.ts`)。
+       */
+      app: { readonly appId: string; readonly title: string },
+    ) => { close: () => void };
     /** 🔴 起動ごとの合図(偽の港を掴まないための鍵)。⚠ 使い回さない。 */
     nonce: () => string;
   };
@@ -266,7 +275,9 @@ export async function launchTile(
       // ⚠ 港を渡すのは**遷移の後**(外殻が印を立てるのを待つ形なので、順は問わないが
       //    「外殻を入れてから」のほうが読み手に自然である)
       const link =
-        extNonce === null || deps.ext === undefined ? null : deps.ext.connect(win, extNonce);
+        extNonce === null || deps.ext === undefined
+          ? null
+          : deps.ext.connect(win, extNonce, { appId: tile.lid, title: tile.title });
       try {
         win.location.replace(url);
         // 🔑 **寿命の終端で捨てる**(user 指示 2026-07-27)。初版は 1 秒後に
