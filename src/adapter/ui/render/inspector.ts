@@ -333,6 +333,35 @@ export class InspectorRenderer {
      *   `backlinks` を `back.lid !== meta.lid` で見ているのと**同じ作法**に揃える。
      *   ⚠ 揃えないと、片方だけ将来の変更に耐える非対称が残る(§7)。
      */
+    /**
+     * 🔴 **送り先は「開いている窓」1 枚ごとに 1 つ**(同じアプリを 2 枚開いたら 2 つ)。
+     * ⚠ 題名が同じ 2 行は見分けにくいが、**送り先が消えるよりはよい** ──
+     *   消えるほうは「押せない」ではなく「**押しても違う窓に届く**」形で壊れる。
+     */
+    const sendBox = this.rows.get('inspector-ext-send');
+    if (sendBox) {
+      sendBox.textContent = '';
+      /**
+       * ⚠ **`<dt>` と `<dd>` を対で畳む** ── `<dd>` だけ畳むと、
+       *   見出し(「このアプリへ送る」)が中身なしで残る。
+       */
+      const empty = state.openExtensions.length === 0;
+      sendBox.hidden = empty;
+      const dt = sendBox.previousElementSibling;
+      if (dt instanceof HTMLElement) dt.hidden = empty;
+      for (const app of state.openExtensions) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.setAttribute('data-pkc-action', 'deliver-to-extension');
+        b.setAttribute('data-pkc-ext-link', app.id);
+        b.setAttribute('data-pkc-field', 'inspector-ext-send-app');
+        // ⚠ 何が渡るかを**具体**で書く(「連携します」では判断できない)
+        b.title = `「${meta.title}」の本文を「${app.title}」へ送ります`;
+        b.textContent = app.title;
+        sendBox.append(b);
+      }
+    }
+
     const mapBox = this.rows.get('inspector-relation-map');
     if (mapBox) {
       const linkEdges: { fromLid: string; toLid: string; kind: string }[] = [];
@@ -541,6 +570,20 @@ export class InspectorRenderer {
      * ⚠ **中央の面は奪わない**(#300 で user が叱った型)。
      */
     row('つながり', 'inspector-relation-map');
+    /**
+     * 🔴 **開いている拡張へ、いま見ているノートを送る**(#195 / C-5 段②-b)。
+     *
+     * ⚠ **1 つも開いていないときは行ごと出さない** ── 「送り先がありません」を
+     *   常設すると、user は**押せない物**を毎回読むことになる(#300 で叱られた
+     *   「主の作業領域を邪魔する」の小さい版)。
+     * 🔑 置き場が右の列なのは規則どおり(`browse.ts` の表:右 = 選んでいるもの)
+     *   ── 送るのは**いま選んでいる 1 件**なので、選択に自動で追従する。
+     *
+     * ⚠ **器はここで 1 度だけ組む**(この file の作法)。1 つも開いていないときは
+     *   **行ごと畳む** ── 「送り先がありません」を常設すると、user は
+     *   **押せない物**を毎回読むことになる。畳みは `paintExtSend` が決める。
+     */
+    row('このアプリへ送る', 'inspector-ext-send');
     if (shape === 'entry+link') row('元ファイル', 'inspector-linked-file');
     this.region.append(dl);
 

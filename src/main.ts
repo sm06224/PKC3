@@ -1117,6 +1117,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     wasReady = ready;
   });
 
+  /**
+   * 🔴 **開いている拡張の窓を state へ写す**(#195 / C-5 段②-b)。
+   *
+   * ⚠ 台帳(`extension-links.ts`)が正本で、state はその**写し**である ──
+   *   ここで足し引きを計算しない(2 か所で数えない、§7)。
+   * 🔑 「いつ変わったか」は台帳が知らせる ── ここは**渡すだけ**にしてある
+   *   (`main.ts` は原文 pin の test しか無い層なので、判断を置かない)。
+   */
+  appExtLinks.subscribe(() => {
+    dispatcher.dispatch({ type: 'SET_OPEN_EXTENSIONS', open: appExtLinks.list() });
+  });
+
   const importDeps: ImportDeps = {
       // ⚠ 生存 entry だけでは足りない ── ゴミ箱の lid(entries に居ないが
       // revisions を持つ)と衝突すると、その item がゴミ箱から消え、
@@ -1426,6 +1438,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * 渡す ── 2 本目の待ち方を作らない(CLAUDE.md §7)。
      */
     settle: () => storeEffects?.settled() ?? null,
+    /**
+     * 🔴 **開いている拡張へ渡す**(#195 / C-5 段②-b)。⚠ ここは**渡すだけ** ──
+     *   台帳も封筒も `extension-links.ts` / `ext-wire.ts` が持つ。
+     */
+    deliverToExtension: (linkId, entry) => appExtLinks.deliver(linkId, entry),
     downloadAsset: async (assetKey, name) => {
       try {
         const lent = await blobs.lendObjectUrl(cid, assetKey);

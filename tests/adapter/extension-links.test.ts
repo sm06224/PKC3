@@ -86,6 +86,53 @@ describe('開いている拡張の台帳(#195 / C-5 段②)', () => {
     expect(r.deliver('ext-999', entry('n1'))).toBe(false);
   });
 
+  /**
+   * 🔴 **一覧が変わったら知らせる**(#195 / C-5 段②-b)。
+   *
+   * ⚠ 知らせが片方(開いたときだけ / 閉じたときだけ)しか出ないと、
+   *   画面の一覧が**片道でしか直らない** ── だから**両方**を 1 つの it で見る。
+   */
+  it('🔴 開いたときも閉じたときも知らせる', () => {
+    const r = createExtLinkRegistry();
+    const beats: number[] = [];
+    r.subscribe(() => beats.push(r.list().length));
+    const t = r.track({ appId: 'x', title: 'ア' }, fakeLink());
+    t.close();
+    expect(beats, '開いた / 閉じたのどちらかで黙っている').toEqual([1, 0]);
+  });
+
+  /** ⚠ 2 回閉じても 2 回知らせない(描き直しを無駄に起こさない)。 */
+  it('2 回閉じても知らせは 1 回', () => {
+    const r = createExtLinkRegistry();
+    const t = r.track({ appId: 'x', title: 'ア' }, fakeLink());
+    let n = 0;
+    r.subscribe(() => { n += 1; });
+    t.close();
+    t.close();
+    expect(n).toBe(1);
+  });
+
+  /** ⚠ 購読を解いたら届かない(閉じた面へ描き続けない)。 */
+  it('購読を解くと届かなくなる', () => {
+    const r = createExtLinkRegistry();
+    let n = 0;
+    const off = r.subscribe(() => { n += 1; });
+    r.track({ appId: 'x', title: 'ア' }, fakeLink());
+    off();
+    r.track({ appId: 'y', title: 'イ' }, fakeLink());
+    expect(n).toBe(1);
+  });
+
+  /** ⚠ 1 人が投げても残りへ届く(購読者どうしを巻き添えにしない)。 */
+  it('購読者の 1 人が投げても、残りへ届く', () => {
+    const r = createExtLinkRegistry();
+    let reached = 0;
+    r.subscribe(() => { throw new Error('壊れた購読者'); });
+    r.subscribe(() => { reached += 1; });
+    expect(() => r.track({ appId: 'x', title: 'ア' }, fakeLink())).not.toThrow();
+    expect(reached, '前の購読者の事故に巻き込まれている').toBe(1);
+  });
+
   /** ⚠ 閉じた後に送ろうとしても落ちず、`false` が返る。 */
   it('閉じた後に送っても落ちず false', () => {
     const r = createExtLinkRegistry();

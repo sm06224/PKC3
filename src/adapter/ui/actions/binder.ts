@@ -13,6 +13,7 @@
  * 切り替える(その時に計測してから)。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
+import { deliveredEntryOf, type ExtDeliveredEntry } from '@features/extension/ext-delivery';
 import { isViewMode, nextViewMode, type AppState, type ViewMode } from '@adapter/state/app-state';
 import type { EntryMeta } from '@core/model/entry-meta';
 import { filerRows, operationTargets, visibleSelection } from '@features/relation/filer-list';
@@ -256,6 +257,14 @@ export interface BinderServices {
    * ⚠ **省略可**(`undefined` / `null`)── 無い環境では今までどおり同期に始まる。
    */
   settle?(): Promise<void> | null;
+  /**
+   * 🔴 **開いている拡張へ実体を 1 件渡す**(#195 / C-5 段②-b)。
+   *
+   * ⚠ **省略可** ── 無い環境(test の fake / 旧い配線)では「この版では送れません」と
+   *   断るだけで、他は壊れない(`readBodies` と同じ規律)。
+   * @returns 渡せたか。⚠ `false` = その窓がもう無い / 港が繋がっていない
+   */
+  deliverToExtension?(linkId: string, entry: ExtDeliveredEntry): boolean;
   downloadAsset?(assetKey: string, name: string): void;
   /**
    * 🔴 **貼る用に画像を持ち歩ける形へ**(#193)。`blob:` → `data:` の対応を返す。
@@ -2197,6 +2206,58 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'SHOW_HISTORY' });
   },
   'hide-history': (dispatcher) => dispatcher.dispatch({ type: 'HIDE_HISTORY' }),
+  /**
+   * 🔴 **いま見ているノートを、開いている拡張へ 1 件渡す**(#195 / C-5 段②-b)。
+   *
+   * ⚠ **user のジェスチャでしか流れない** ── 拡張から取りに行く口は作っていない
+   *   (`ext-wire.ts` の `parseExtRequest` は `hello` しか受けない)。
+   *
+   * 🔴 **本文は「飛んでいる書込が着いてから」読む**(CLAUDE.md §7、2026-08-17 の実測)。
+   * ⚠ 書込は effect 層の chain に直列化されるが、**読みはその外**に在る ──
+   *   待たずに読むと、保存した直後に押したとき**保存前の本文**が渡る
+   *   (書き出しが同じ穴で 11/12 を踏んだ)。🔑 待つ口は既に 1 本ある(`settle`)。
+   *
+   * ⚠ **押しても無言、を作らない** ── 渡せなかったこと(窓が閉じた / まだ繋がって
+   *   いない)は `false` で返るので、必ず声に出す。
+   */
+  'deliver-to-extension': (dispatcher, target, services) => {
+    const linkId = target.getAttribute('data-pkc-ext-link');
+    if (!linkId) return;
+    const send = services.deliverToExtension;
+    const read = services.readBodies;
+    if (!send || !read) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版では送れません' });
+      return;
+    }
+    const st = dispatcher.getState();
+    const lid = st.selectedLid;
+    const meta = lid === null ? undefined : st.entryMetas.get(lid);
+    if (lid === null || meta === undefined) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '送るノートを選んでください' });
+      return;
+    }
+    const app = st.openExtensions.find((o) => o.id === linkId);
+    void Promise.resolve(services.settle?.() ?? null)
+      .then(() => read([lid]))
+      .then((bodies) => {
+        const body = bodies.get(lid);
+        if (body === undefined) {
+          dispatcher.dispatch({ type: 'OP_FAILED', error: '本文を読めませんでした' });
+          return;
+        }
+        const ok = send(linkId, deliveredEntryOf(meta, body));
+        const where = app?.title ?? 'アプリ';
+        if (ok) services.showStatus?.(`「${meta.title}」を「${where}」へ送りました`);
+        else
+          dispatcher.dispatch({
+            type: 'OP_FAILED',
+            error: `「${where}」へ送れませんでした(窓が閉じているかもしれません)`,
+          });
+      })
+      .catch(() => {
+        dispatcher.dispatch({ type: 'OP_FAILED', error: '送れませんでした' });
+      });
+  },
   'restore-revision': (dispatcher, target) => {
     // 前進変異(復元前に現状が履歴に積まれる)なので confirm は要らない ──
     // 「復元の取り消し」も履歴から戻れる
