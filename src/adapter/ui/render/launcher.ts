@@ -22,6 +22,54 @@ export class LauncherRenderer {
 
   constructor(private readonly region: HTMLElement) {}
 
+  /**
+   * 🔴 **器は 1 度だけ組む**(#401 ①)。
+   *
+   * ⚠ `render` は一覧を毎回捨てて組み直すので、足す欄をそこに置くと
+   *   **打ちかけのアドレスが消える**(タイルの読み直しが走った瞬間に)。
+   * 🔑 置換の帯・関係を作る帯と同じ作法 ── **打ちかけを守る器は別にする**。
+   *
+   * @returns 一覧を入れる器(こちらは毎回捨ててよい)
+   */
+  private ensureFrame(): HTMLElement {
+    const found = this.region.querySelector<HTMLElement>('[data-pkc-field="launcher-list"]');
+    if (found) return found;
+
+    /**
+     * 🔴 **よく開くサイトをアプリ一覧に足す**(#401 ①)。
+     *
+     * ⚠ PKC3 は URL タイルを**表示も起動もできる**のに(`tiles.ts` が
+     *   `attachment.launcher_url` を読む)、**作る口が 1 つも無かった** ──
+     *   PKC2 では既定 ON で届いていた導線である。
+     * ⚠ 起動の扱いは既存のタイルと**同じ門**を通る(ここで別経路を作らない)。
+     */
+    const add = document.createElement('div');
+    add.setAttribute('data-pkc-region', 'launcher-add');
+    const name = document.createElement('input');
+    name.type = 'text';
+    name.setAttribute('data-pkc-field', 'launcher-add-name');
+    name.placeholder = '名前';
+    name.setAttribute('aria-label', '足すリンクの名前');
+    const url = document.createElement('input');
+    url.type = 'text';
+    url.setAttribute('data-pkc-field', 'launcher-add-url');
+    url.placeholder = 'https://…';
+    url.setAttribute('aria-label', '足すリンクのアドレス');
+    const go = document.createElement('button');
+    go.type = 'button';
+    go.setAttribute('data-pkc-action', 'add-url-tile');
+    go.setAttribute('data-pkc-field', 'launcher-add-go');
+    // ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)
+    go.title = 'この一覧にリンクを 1 つ足します(押すと別の窓で開けるようになります)';
+    go.textContent = 'リンクを足す';
+    add.append(name, url, go);
+
+    const list = document.createElement('div');
+    list.setAttribute('data-pkc-field', 'launcher-list');
+    this.region.append(add, list);
+    return list;
+  }
+
   render(state: AppState): void {
     // ⚠ 選択も指紋に入れる ── 押した印が出ないと、いま何を触ったのか残らない
     if (
@@ -33,13 +81,14 @@ export class LauncherRenderer {
     this.lastTiles = state.launcherTiles;
     this.lastQuery = state.filterQuery;
     this.lastSelected = state.selectedLid;
-    this.region.textContent = '';
+    const list = this.ensureFrame();
+    list.textContent = '';
 
     if (state.launcherTiles === null) {
       const loading = document.createElement('p');
       loading.setAttribute('data-pkc-field', 'launcher-loading');
       loading.textContent = '読み込んでいます…';
-      this.region.append(loading);
+      list.append(loading);
       return;
     }
 
@@ -58,9 +107,10 @@ export class LauncherRenderer {
           ? // 🔴 **行き止まりにしない**(P8 段⑭)。かつては「PKC2 で登録したものが
             //    出ます」とだけ書いていた ── PKC3 だけの user には**実行できない
             //    指示**で、しかも当時は実際に登録する導線が無かった
-            'アプリがありません。HTML のファイルを添付して、その画面の「アプリとして登録」を押すと、ここに並びます'
+            // ⚠ **行き止まりにしない**(P8 段⑭)── いまは道が 2 本ある
+            'アプリがありません。HTML のファイルを添付して、その画面の「アプリとして登録」を押すか、上の欄によく開くサイトのアドレスを入れてください'
           : '絞り込みに一致するものがありません';
-      this.region.append(empty);
+      list.append(empty);
       return;
     }
 
@@ -77,7 +127,7 @@ export class LauncherRenderer {
     const lead = document.createElement('p');
     lead.setAttribute('data-pkc-field', 'launcher-lead');
     lead.textContent = 'アプリは別の窓で開きます';
-    this.region.append(lead);
+    list.append(lead);
 
     let group: string | null = null;
     let grid: HTMLElement | null = null;
@@ -90,12 +140,12 @@ export class LauncherRenderer {
         //    書いていたが、画面はそんな情報(頻度)を持っていない ── 名乗った
         //    ぶんだけ嘘になる。名前の付いた群だけが見出しを持つ
         if (group === '') {
-          this.region.append(grid);
+          list.append(grid);
         } else {
           const head = document.createElement('h3');
           head.setAttribute('data-pkc-field', 'launcher-group');
           head.textContent = group;
-          this.region.append(head, grid);
+          list.append(head, grid);
         }
       }
       grid?.append(this.tile(tile, state.selectedLid));
