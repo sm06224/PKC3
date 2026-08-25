@@ -419,6 +419,26 @@ describe('日付を入れる道具(user 指示 2026-08-23)', () => {
     );
   });
 
+  /**
+   * 🔴 **画面から降りた欄に書き込まない**(2026-08-25 に判明)。
+   *
+   * ⚠ この門(`formatTarget` を押された後に**引き直す**)は 2026-08-23 から
+   *   在ったが、**どの test も通していなかった** ── 雛形の一覧(#196 段②-b)で
+   *   同じ変異が生き延び、対称の反対側を疑って見つけた
+   *   (CLAUDE.md「A を直したと書いた瞬間に B はどうかを grep する」)。
+   * ⚠ 引き直さないと、**画面に無い節点へ字を書き `input` まで撃つ** ──
+   *   本文は画面に出ないのに state だけ動く、いちばん気づけない食い違いになる。
+   */
+  it('🔴 編集をやめた後に「入れる」を押しても、画面から降りた欄に書き込まない', async () => {
+    const s = await openPicker();
+    const before = s.ta.value;
+    s.d.dispatch({ type: 'CANCEL_EDIT' });
+    await tick();
+    expect(s.ta.isConnected, '前提が崩れている(欄がまだ画面に在る)').toBe(false);
+    await answerDialog('ok');
+    expect(s.ta.value, '画面に無い欄へ書き込んでいる').toBe(before);
+  });
+
   /** ⚠ 閲覧中は帯そのものが無いので、押す口も無い(dead click を作らない)。 */
   it('閲覧中は日付のボタンが出ていない', async () => {
     const s = setup([meta('a')], { a: 'x' });

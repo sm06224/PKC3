@@ -79,3 +79,53 @@ test('🔴 短縮語が当たらない Tab は、これまでどおり次へ移�
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **雛形を一覧から選んで入れる**(#196 / B-2 段②-b)。
+ *
+ * 🔴 **unit では原理的に届かない層**:`<dialog>.showModal()` は焦点をさらうが、
+ * **happy-dom は選択位置を保ってしまう** ── つまり「caret を控えていない実装」でも
+ * unit は緑になる。⚠ `insert-date` が 2026-08-23 に実機でこれを踏み、
+ * **日付が本文の先頭に入った**。だから caret の復帰は**ここでしか見られない**。
+ */
+test('🔴 雛形を一覧から選ぶと、caret の位置に入る (#196)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+
+  // ① 雛形を 1 件作る
+  await createEntry(page, 'snippet');
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await expect(ta, '雛形が編集の形で開いていない').toBeVisible();
+  await ta.fill('---\nabbr: addr\n---\n〒100-0000');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  // ② 普通のノートを作り、**行の途中**に caret を置く
+  await createEntry(page, 'text');
+  await ta.fill('まえ\nうしろ');
+  await ta.evaluate((el) => {
+    (el as HTMLTextAreaElement).setSelectionRange(3, 3);
+  });
+
+  // ③ 帯の「雛形」を押す(マウスだけの道)
+  await clickReal(page, '[data-pkc-action="insert-snippet"]');
+  const rows = page.locator('[data-pkc-field="pick-snippet"]');
+  await expect(rows.first(), '雛形の一覧が出ていない').toBeVisible();
+  // 🔑 短縮語も一緒に出る(ここで覚えれば、次からは Tab で呼べる)
+  await expect(rows.first()).toContainText('addr');
+  // 🔴 組み込みの雛形も並ぶ(自分の雛形が 0 件でも空にならない、の実体)
+  await expect(page.locator('[data-pkc-field="pick-snippet"]', { hasText: '表' })).toHaveCount(1);
+
+  // ④ 🔴 押した行が **caret の位置**に入る(先頭に飛ばない)
+  await rows.first().click();
+  await expect(ta, 'caret の位置に入っていない(器が選択位置を返さない)').toHaveValue(
+    'まえ\n〒100-0000うしろ',
+  );
+
+  // ⑤ 保存しても残る(画面だけ変わって本文が元のまま、を作らない)
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await expect(ta, '保存した本文に残っていない').toHaveValue('まえ\n〒100-0000うしろ');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

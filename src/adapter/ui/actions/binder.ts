@@ -35,6 +35,7 @@ import { resolveMime } from './attach';
 import { applyFormat, type FormatOp } from '@features/markdown/text-ops';
 import { insertSnippet, nextSnippetSlot } from '@features/snippet/snippet-expand';
 import { abbrBeforeCaret } from '@features/snippet/snippet-table';
+import { snippetMenu, snippetMenuNote } from '@features/snippet/snippet-menu';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
 import { isEntrySort, NATURAL_DESC } from '@features/filter/entry-sort';
 import { isPaneId, PANES } from '@features/pane-visibility';
@@ -60,6 +61,7 @@ import { cleanForClipboard } from '@features/export/clipboard-html';
 import {
   confirmInApp,
   pickDateInApp,
+  pickSnippetInApp,
   isAppDialogOpen,
   type ConfirmOptions,
 } from '@adapter/ui/render/app-dialog';
@@ -1570,6 +1572,43 @@ const ACTIONS: Record<string, ActionHandler> = {
       insertText(ta, insertionForLineDate(ta.value.slice(0, at.start), picked.date, picked.time));
     });
   },
+  /**
+   * 🔴 **雛形を一覧から入れる**(#196 / B-2 段②-b)。
+   *
+   * ⚠ 短縮語 + `Tab`(上の `keydown`)は**覚えている人の近道**であって入口ではない。
+   *   覚えていない人にはここが唯一の道なので、**一覧は必ず 1 行以上出す**
+   *   ── 組み込みの雛形を混ぜてあるのはそのためである(`snippet-menu.ts`)。
+   * ⚠ **caret を先に控える**(`insert-date` が 2026-08-23 に実機で踏んだ罠)──
+   *   `<dialog>` は焦点を借りて返すが、**選択位置までは返さない**。
+   * ⚠ 挿す仕事は**既にある 1 本ずつ**へ渡す(`applyFormat` / `insertSnippet`)──
+   *   ここで組み立てると、帯のボタンと一覧で結果が食い違う(CLAUDE.md §7)。
+   */
+  'insert-snippet': (dispatcher, _target, _services, root) => {
+    const opened = formatTarget(root);
+    if (opened === null) return;
+    const at = { start: opened.selectionStart, end: opened.selectionEnd };
+    const scan = dispatcher.getState().snippetScan;
+    // ⚠ **開いた時点の一覧**を握る ── 選んでいる間に集め直されても、
+    //   user が見て押した物をそのまま入れる
+    const items = scan?.items ?? [];
+    void pickSnippetInApp(root, snippetMenu(items), snippetMenuNote(scan)).then((picked) => {
+      if (picked === null) return;
+      // ⚠ 欄は引き直す(開いている間に面が組み直されると、最初の節点は繋がっていない)
+      const ta = formatTarget(root);
+      if (ta === null) return;
+      ta.focus();
+      // ⚠ 範囲外は `setSelectionRange` が丸める(短くなっていても落ちない)
+      ta.setSelectionRange(at.start, at.end);
+      const sel = { text: ta.value, start: ta.selectionStart, end: ta.selectionEnd };
+      if (picked.kind === 'format') {
+        writeBack(ta, applyFormat(sel, picked.op));
+        return;
+      }
+      const item = items.find((s) => s.lid === picked.lid);
+      if (item === undefined) return;
+      writeBack(ta, insertSnippet(sel, item.body, new Date()));
+    });
+  },
   'format-text': (_dispatcher, target, _services, root) => {
     const op = target.getAttribute('data-pkc-format') as FormatOp | null;
     // ⚠ live の 1 面では活性の行(`row-source`)に効く(`formatTarget` の注記)
@@ -2253,6 +2292,7 @@ const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
   'toggle-replace': '[data-pkc-action="toggle-replace"]',
   // ⚠ 近道は**ボタンをそのまま押す** ── 帯が無い(閲覧中の)面では何も起きない
   'insert-date': '[data-pkc-action="insert-date"]',
+  'insert-snippet': '[data-pkc-action="insert-snippet"]',
   'toggle-sidebar': '[data-pkc-action="toggle-pane"][data-pkc-pane="sidebar"]',
   'toggle-inspector': '[data-pkc-action="toggle-pane"][data-pkc-pane="inspector"]',
   'view-query': '[data-pkc-action="set-view"][data-pkc-view="query"]',

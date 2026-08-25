@@ -63,6 +63,27 @@ export function buildFormatBar(): HTMLElement {
   insertDate.append(insertDateLabel);
   bar.append(insertDate);
 
+  /**
+   * 🔴 **雛形を一覧から入れる**(#196 / B-2 段②-b)。
+   *
+   * ⚠ 短縮語 + `Tab` は**覚えている人の近道**であって、入口ではない ── 覚えて
+   *   いない人には、これが無いと**自分で作った雛形を呼ぶ道が 1 つも無い**。
+   * ⚠ 日付と同じくここに置く(本文を打っている場所に在る / 押せる形)。
+   *   ⚠ `FORMAT_OPS` には入れない ── あちらは**その場で字を変える**表で、
+   *     こちらは**先に聞く**(日付ボタンと同じ理由)。
+   */
+  const insertSnippet = document.createElement('button');
+  insertSnippet.type = 'button';
+  insertSnippet.setAttribute('data-pkc-action', 'insert-snippet');
+  insertSnippet.setAttribute(HINT_BASE, '雛形を入れる');
+  insertSnippet.setAttribute(HINT_COMMAND, 'insert-snippet');
+  insertSnippet.title = hintTitle('雛形を入れる', 'insert-snippet');
+  const insertSnippetLabel = document.createElement('span');
+  insertSnippetLabel.setAttribute('data-pkc-field', 'label');
+  insertSnippetLabel.textContent = '雛形';
+  insertSnippet.append(insertSnippetLabel);
+  bar.append(insertSnippet);
+
   const toggleReplace = document.createElement('button');
   toggleReplace.type = 'button';
   toggleReplace.setAttribute('data-pkc-action', 'toggle-replace');

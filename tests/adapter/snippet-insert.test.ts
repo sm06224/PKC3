@@ -21,6 +21,9 @@ import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import { snippetItemOf, SNIPPET_ARCHETYPE } from '../../src/features/snippet/snippet-table';
 import { archetypeLabel } from '../../src/adapter/ui/render/sidebar';
+import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
+import { openDialog } from './dialog-helper';
+import { afterEach } from 'vitest';
 
 function meta(lid: string, archetype = 'text'): EntryMeta {
   return {
@@ -262,5 +265,157 @@ describe('雛形が作れる(#196 / B-2)', () => {
 
   it('種別の名前が内部語のままになっていない', () => {
     expect(archetypeLabel(SNIPPET_ARCHETYPE)).toBe('雛形');
+  });
+});
+
+/**
+ * 🔴 **雛形を一覧から入れる**(#196 / B-2 段②-b)。
+ *
+ * ⚠ 短縮語 + `Tab` は**覚えている人の近道**である ── 覚えていない人には、
+ *   ここが**唯一の入口**になる。だから見るのは「開くか」ではなく
+ *   **「押したものが caret の位置に入るか」**まで。
+ */
+describe('雛形を一覧から入れる(#196 / B-2 段②-b)', () => {
+  afterEach(() => {
+    resetAppDialogForTest();
+  });
+
+  /**
+   * 編集に入って本文と caret を作り、「雛形」を押して一覧を開く。
+   *
+   * ⚠ **本文と caret は押す前に作る** ── 器はモーダルなので、開いている間に
+   *   user が本文を打つことはできない。だから控えるのは**押した時点**の位置である
+   *   (1 稿目は開いた後に caret を作って落ち、**test の前提のほうが間違っていた**)。
+   */
+  async function openMenu(
+    snippets: Record<string, { title: string; body: string }> = {},
+    at: { body: string; caret: number } = { body: '', caret: 0 },
+  ): Promise<{
+    d: Dispatcher;
+    q: <T extends HTMLElement>(s: string) => T | null;
+    ta: HTMLTextAreaElement;
+  }> {
+    const { d, q } = setup('', snippets);
+    const ta = await edit(d, q);
+    ta.value = at.body;
+    ta.setSelectionRange(at.caret, at.caret);
+    q('[data-pkc-action="insert-snippet"]')!.click();
+    await tick();
+    return { d, q, ta };
+  }
+
+  const rows = (): HTMLButtonElement[] => [
+    ...(openDialog()?.querySelectorAll<HTMLButtonElement>('[data-pkc-field="pick-snippet"]') ?? []),
+  ];
+
+  /** ⚠ 閲覧中は帯そのものが無い(押せる口を出さない = dead click を作らない)。 */
+  it('閲覧中は「雛形」のボタンが出ていない', async () => {
+    const { d, q } = setup('x');
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    expect(q('[data-pkc-action="insert-snippet"]'), '閲覧中に押せる口が出ている').toBeNull();
+  });
+
+  it('🔴 押すと一覧が開き、自分の雛形と組み込みが並ぶ', async () => {
+    await openMenu({ s1: { title: '住所', body: '---\nabbr: addr\n---\n〒100' } });
+    expect(openDialog(), '雛形の窓が開いていない').not.toBeNull();
+    const labels = rows().map((b) => b.textContent);
+    // 🔑 短縮語も一緒に出す ── ここで覚えれば、次からは `Tab` で呼べる
+    expect(labels[0]).toBe('住所(addr)');
+    // 🔴 組み込みが後ろに居る(自分の雛形が 0 件でも空にならない、の実体)
+    expect(labels, '組み込みの雛形が並んでいない').toContain('表');
+  });
+
+  /**
+   * 🔴 **caret の位置に入る**(`insert-date` が 2026-08-23 に実機で踏んだ罠)。
+   * ⚠ `<dialog>` は焦点を借りて返すが、**選択位置までは返さない** ── 控えていないと
+   *   本文の**先頭**に入る。
+   */
+  it('🔴 行を押すと caret の位置に入り、state もそろって変わる', async () => {
+    const { d, ta } = await openMenu(
+      { s1: { title: '住所', body: '---\nabbr: addr\n---\n〒100' } },
+      // 「まえ\n」の直後で押す(本文の先頭ではない)
+      { body: 'まえ\nうしろ', caret: 3 },
+    );
+    rows()[0]!.click();
+    await tick();
+    expect(ta.value, '本文の先頭に入っている(caret を控えていない)').toBe('まえ\n〒100うしろ');
+    // 🔴 state ── 繋がっていないと**保存した瞬間に消える**
+    expect(d.getState().openBody?.body).toBe('まえ\n〒100うしろ');
+  });
+
+  it('🔴 組み込みの行を押すと、その雛形が入る', async () => {
+    const { ta } = await openMenu();
+    const table = rows().find((b) => b.textContent === '表')!;
+    table.click();
+    await tick();
+    expect(ta.value, '表の雛形が入っていない').toContain('|---|---|');
+  });
+
+  it('🔴 やめたら本文は 1 バイトも変わらない', async () => {
+    const { ta } = await openMenu(
+      { s1: { title: '住所', body: '---\nabbr: addr\n---\n〒100' } },
+      { body: 'そのまま', caret: 4 },
+    );
+    openDialog()!.querySelector<HTMLButtonElement>('[data-pkc-field="dialog-cancel"]')!.click();
+    await tick();
+    expect(ta.value).toBe('そのまま');
+  });
+
+  /**
+   * 🔴 **押した行の本文が入る**(1 行目のを入れない)。
+   * ⚠ 雛形が 1 件しかない fixture だけだと、`items[0]` を返す実装でも緑になる
+   *   (CLAUDE.md §2「fixture のゼロ件の次元は測っていない次元」の**1 件版**)。
+   */
+  it('🔴 2 件目を押したら 2 件目が入る', async () => {
+    const { ta } = await openMenu({
+      s1: { title: '住所', body: '---\nabbr: addr\n---\n〒100' },
+      s2: { title: '署名', body: '---\nabbr: sig\n---\n山田太郎' },
+    });
+    const list = rows();
+    expect(list.length, '前提が崩れている(2 件並んでいない)').toBeGreaterThan(1);
+    expect(list[1]!.textContent).toBe('署名(sig)');
+    list[1]!.click();
+    await tick();
+    expect(ta.value, '1 件目が入っている').toBe('山田太郎');
+  });
+
+  /**
+   * 🔴 **受ける側のボタンを出さない** ── 押した行がそのまま答えなので、
+   * 「入れる」を出すと**押しても何も起きないボタン**になる(dead click)。
+   */
+  it('🔴 一覧では「入れる」を出さない(押しても何も起きないボタンを作らない)', async () => {
+    await openMenu();
+    const ok = openDialog()!.querySelector<HTMLButtonElement>('[data-pkc-field="dialog-ok"]')!;
+    expect(ok.hidden, '押しても何も起きない「入れる」が出ている').toBe(true);
+  });
+
+  /**
+   * 🔴 **画面から降りた欄に書き込まない**(2026-08-25、変異試験 M4 が生き延びて判明)。
+   *
+   * ⚠ 一覧を開いている間に編集が終わる(別のタブが閉じさせる / やめる)ことがある。
+   *   最初に掴んだ欄をそのまま使うと、**画面に無い節点へ字を書き、`input` まで
+   *   撃つ** ── 本文は画面に出ないのに state だけ動く、という
+   *   **いちばん気づけない食い違い**になる。
+   * 🔑 だから押された後に**引き直す**。無ければ何もしない。
+   */
+  it('🔴 編集をやめた後に押しても、画面から降りた欄に書き込まない', async () => {
+    const { d, ta } = await openMenu(
+      { s1: { title: '住所', body: '---\nabbr: addr\n---\n〒100' } },
+      { body: 'もとのまま', caret: 5 },
+    );
+    d.dispatch({ type: 'CANCEL_EDIT' });
+    await tick();
+    expect(ta.isConnected, '前提が崩れている(欄がまだ画面に在る)').toBe(false);
+    rows()[0]!.click();
+    await tick();
+    expect(ta.value, '画面に無い欄へ書き込んでいる').toBe('もとのまま');
+  });
+
+  /** 🔴 雛形が 1 件も無い人に、**作り方**を出す(ここが唯一の入口だから)。 */
+  it('🔴 雛形が無いときは、作り方を出す', async () => {
+    await openMenu();
+    const note = openDialog()?.querySelector('[data-pkc-field="pick-snippet-note"]')?.textContent;
+    expect(note, '作り方の案内が出ていない').toContain('作成');
   });
 });
