@@ -58,7 +58,8 @@ import {
 /** 相手の候補に出す上限。⚠ 超えたぶんは**件数を書く**(黙って切らない)。 */
 export const RELATION_CANDIDATE_MAX = 200;
 import { getAncestorFolders } from '@features/relation/tree';
-import { renderRelationMap } from './relation-map';
+import { BODY_LINK_KIND, renderRelationMap } from './relation-map';
+import { bodyLinkTargets } from '@features/entry-ref/body-links';
 
 /** 素性の行(`data-pkc-field` → 値を入れる `<dd>`)。 */
 type Rows = Map<string, HTMLElement>;
@@ -301,21 +302,64 @@ export class InspectorRenderer {
       }
     }
     /**
-     * 🔴 **つながりの図**(#186)。⚠ 出すのは**関係**だけ(本文のリンクは別の段)。
+     * 🔴 **つながりの図**(#186)。関係(4 種)に加えて、**本文が張っているリンク**も
+     * 出す(段③)。
      * ⚠ **点 1 つを図と呼ばない** ── 相手が居なければ行ごと畳む
      *   (「無し」は上の「関係」が既に言っている ── 同じことを 2 回言わない)。
+     *
+     * ## 🔑 本文のリンクは「新しい問い合わせを 1 つも足さずに」出せる
+     *
+     * | 向き | どこから取るか | 費用 |
+     * |---|---|---|
+     * | 出ていく | `state.openBody`(いま開いている本文) | **0**(既に手元にある) |
+     * | 入ってくる | `state.backlinks`(#348 で引いている) | **0**(上の「参照元」行と同じ物) |
+     *
+     * ⚠ **中心の分だけ**である。2 手先のノートが張っているリンクは出ない ──
+     *   出すには「N 件の本文を舐める」worker の op が要り、選択のたびに走る。
+     *   🔑 **測ってから足す**(founding の「効果が小さいから棄却」ではなく、
+     *   「費用を測っていないものを既定にしない」の側)。
+     * ⚠ だから図の中で**破線が中心からしか出ていない**のは、そういう仕様である
+     *   (「2 手先はリンクを持っていない」ではない)。
+     *
+     * ⚠ **自己リンクを弾く行は書かない**(2026-08-25、変異試験 L9 が SURVIVED で
+     *   教えた)── `buildNeighbourhood` が自己辺を落とすので **no-op** だった。
+     *   凡例も `n.edges`(落とした後)を数えるので、件数も嘘にならない。
+     *
+     * 🔑 **`openBody` の持ち主は見る。** ⚠ ただし「選び替えた直後に前の本文が残る」
+     *   からではない ── `SELECT_ENTRY` は `openBody: null` にするので、
+     *   **いまの実装ではその状態にならない**(変異試験 L8 が SURVIVED で教えた)。
+     *   見る理由は**すぐ上の参照元と同じ**である:この面は
+     *   「state がどう作られたか」を知らずに正しくあるべきで、
+     *   `backlinks` を `back.lid !== meta.lid` で見ているのと**同じ作法**に揃える。
+     *   ⚠ 揃えないと、片方だけ将来の変更に耐える非対称が残る(§7)。
      */
     const mapBox = this.rows.get('inspector-relation-map');
     if (mapBox) {
+      const linkEdges: { fromLid: string; toLid: string; kind: string }[] = [];
+      const openBody = state.openBody?.lid === meta.lid ? state.openBody.body : null;
+      if (openBody !== null) {
+        for (const to of bodyLinkTargets(openBody, state.cid)) {
+          linkEdges.push({ fromLid: meta.lid, toLid: to, kind: BODY_LINK_KIND });
+        }
+      }
+      const backForMap = state.backlinks;
+      if (backForMap && backForMap.lid === meta.lid) {
+        for (const from of backForMap.lids) {
+          linkEdges.push({ fromLid: from, toLid: meta.lid, kind: BODY_LINK_KIND });
+        }
+      }
       const drawn = renderRelationMap(mapBox, {
         center: meta.lid,
         depth: 2,
         // ⚠ **居場所(親子)は出さない** ── 上の「関係」行と同じ判断である。
         //    入れると図がフォルダの木になり、「つながり」を見に来た user が
         //    見たい物(意味の関係)が埋もれる。
-        edges: state.relations
-          .filter((r) => r.kind !== STRUCTURAL)
-          .map((r) => ({ fromLid: r.fromLid, toLid: r.toLid, kind: r.kind })),
+        edges: [
+          ...state.relations
+            .filter((r) => r.kind !== STRUCTURAL)
+            .map((r) => ({ fromLid: r.fromLid, toLid: r.toLid, kind: r.kind })),
+          ...linkEdges,
+        ],
         titles: new Map([...state.entryMetas].map(([lid, m]) => [lid, m.title])),
       });
       // ⚠ `<dt>` は `<dd>` の直前 ── 値だけ畳むと**見出しだけ残る**

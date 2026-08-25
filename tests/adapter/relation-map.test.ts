@@ -6,7 +6,7 @@
  * ③相手が居なければ**行ごと畳む** ④切ったら**言う** ⑤辺は**装飾**(押すのは節点だけ)。
  */
 import { describe, expect, it } from 'vitest';
-import { renderRelationMap } from '../../src/adapter/ui/render/relation-map';
+import { BODY_LINK_KIND, renderRelationMap } from '../../src/adapter/ui/render/relation-map';
 
 const titles = (...lids: string[]): Map<string, string> =>
   new Map(lids.map((l) => [l, `題:${l}`]));
@@ -111,6 +111,37 @@ describe('つながりの図', () => {
     expect(legend?.textContent, '内訳が無い').toContain('関連');
     expect(legend?.textContent).toContain('出典');
     expect(legend?.textContent, '内部の綴りが漏れている').not.toContain('semantic');
+  });
+
+  /**
+   * 🔴 **本文のリンクは、関係と見分けが付かなければならない**(段③)。
+   *
+   * ⚠ 見分けが付かないと「張った覚えのない関係がある」と読まれる。
+   * 🔑 分けるのは**破線**であって色ではない ── 色だけで意味を分けると
+   *   無彩色のテーマと色覚の違いで読めなくなる。
+   */
+  it('🔴 本文のリンクは破線で、凡例も user の言葉で出る', () => {
+    const el = box();
+    renderRelationMap(el, {
+      center: 'a',
+      depth: 1,
+      edges: [
+        { fromLid: 'a', toLid: 'b', kind: 'semantic' },
+        { fromLid: 'a', toLid: 'c', kind: BODY_LINK_KIND },
+      ],
+      titles: titles('a', 'b', 'c'),
+    });
+    const lines = [...el.querySelectorAll('[data-pkc-field="relation-map-edge"]')];
+    expect(lines).toHaveLength(2);
+    const byKind = new Map(
+      lines.map((l) => [l.getAttribute('data-pkc-relation-kind'), l.getAttribute('stroke-dasharray')]),
+    );
+    expect(byKind.get(BODY_LINK_KIND), '本文のリンクが実線で描かれている').toBeTruthy();
+    // 対照群 ── 関係は実線のまま(「全部破線」で通る実装を許さない)
+    expect(byKind.get('semantic'), '関係まで破線になっている').toBe(null);
+    const legend = el.querySelector('[data-pkc-field="relation-map-legend"]');
+    expect(legend?.textContent, '凡例に本文のリンクが無い').toContain('本文のリンク');
+    expect(legend?.textContent, '内部の綴りが漏れている').not.toContain(BODY_LINK_KIND);
   });
 
   it('組み直しで前の図が残らない', () => {

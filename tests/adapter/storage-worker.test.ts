@@ -1575,6 +1575,66 @@ describe('バックリンク (#348)', () => {
     expect((await request({ op: 'findBacklinks', cid: 'c1', lid: 'bl-t3' })).lids).toEqual([]);
   });
 
+  /**
+   * 🔴 **前置きが重なる lid を取り違えない**(2026-08-25 に見つけた過剰報告)。
+   *
+   * ⚠ `LIKE '%entry:bl-p1%'` は **`entry:bl-p1x` の中にも当たる** ── 参照して
+   *   いないノートが参照元として並ぶ。⚠ 過剰報告なので、出た物を誰も検算しない。
+   * 🔑 いまは `bodyLinksTo`(出ていく側と**同じ文法**)が合否を決める。
+   */
+  it('🔴 前置きが重なる lid を取り違えない', async () => {
+    await write('bl-p1', '短いほう\n');
+    await write('bl-p1x', '長いほう\n');
+    await write('bl-to-long', link('bl-p1x'));
+    expect(
+      (await request({ op: 'findBacklinks', cid: 'c1', lid: 'bl-p1' })).lids,
+      'entry:bl-p1x を entry:bl-p1 と読んでいる',
+    ).toEqual([]);
+    // 対照群 ── 本物は当たる(「常に空」で通る実装を許さない)
+    expect((await request({ op: 'findBacklinks', cid: 'c1', lid: 'bl-p1x' })).lids).toEqual([
+      'bl-to-long',
+    ]);
+  });
+
+  /**
+   * ⚠ **偽物が候補を埋めても、本物が漏れない**。
+   * 🔑 SQL 側で `limit + 1` 件に切っていると、偽物が先に並んだときに
+   *   **本物が候補から落ちる** ── 誤差が取りこぼし側へ倒れる。
+   */
+  it('🔴 偽物の候補が先に並んでも、本物が漏れない', async () => {
+    await write('bl-q1', '的\n');
+    // ⚠ `entry_order` は書いた順なので、偽物 3 件が先に並ぶ
+    for (let i = 0; i < 3; i += 1) await write(`bl-fake-${i}`, link('bl-q1x'));
+    await write('bl-real', link('bl-q1'));
+    const r = await request({ op: 'findBacklinks', cid: 'c1', lid: 'bl-q1', limit: 2 });
+    expect(r.lids, '偽物に押し出されて本物が漏れている').toEqual(['bl-real']);
+    expect(r.truncated).toBe(false);
+  });
+
+  /**
+   * 🔴 **`pkc://<この容れ物>/entry/<lid>` も参照元である**(#379)。
+   *
+   * 描画側はこの形を `entry:` と**同じ扱い**にしている(押せば飛ぶ)。
+   * ⚠ ここが片方しか見ないと「リンクは効くのに参照元から消える」。
+   * ⚠ しかも **LIKE の絞り込みにも足さないと候補に挙がらない** ──
+   *   合否の文法だけ直しても届かない(この test はその繋ぎまで見る)。
+   */
+  it('🔴 pkc:// の自分あても参照元に出る', async () => {
+    await write('bl-p2', '的\n');
+    await write('bl-portable', '[その先](pkc://c1/entry/bl-p2)\n');
+    expect(
+      (await request({ op: 'findBacklinks', cid: 'c1', lid: 'bl-p2' })).lids,
+      'pkc:// の自分あてが参照元から漏れている',
+    ).toEqual(['bl-portable']);
+  });
+
+  /** ⚠ **別の容れ物あては拾わない**(この器に相手が居ない ── 押しても飛べない)。 */
+  it('⚠ 別の容れ物あての pkc:// は参照元にしない', async () => {
+    await write('bl-p3', '的\n');
+    await write('bl-foreign', '[よそ](pkc://c9/entry/bl-p3)\n');
+    expect((await request({ op: 'findBacklinks', cid: 'c1', lid: 'bl-p3' })).lids).toEqual([]);
+  });
+
   /** 🔴 **切ったら言う**(黙って切ると user は「これで全部」と読む)。 */
   it('🔴 上限を超えたら、切ったと言う', async () => {
     await write('bl-hot', '人気のノート\n');

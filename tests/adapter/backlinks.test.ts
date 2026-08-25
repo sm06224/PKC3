@@ -80,6 +80,114 @@ describe('バックリンクの要求 (#348)', () => {
   });
 });
 
+/**
+ * 🔴 **図に本文のリンクが載っているか**(#186 段③)。
+ *
+ * ⚠ **部品だけでなく繋ぎを見る** ── `relation-map.ts` が破線を描けることは
+ * `relation-map.test.ts` が見ているが、**情報ペインがそれを渡していなければ**
+ * user には 1 本も出ない(2026-08-24 に `titleFromBody` で踏んだ型)。
+ * 🔑 だからここでは **`InspectorRenderer` を通して**見る。
+ */
+describe('つながりの図に本文のリンクが載る (#186 段③)', () => {
+  function paint(s: AppState): HTMLElement {
+    const region = document.createElement('div');
+    document.body.append(region);
+    new InspectorRenderer(region).render(s);
+    return region;
+  }
+  const edges = (r: HTMLElement): string[] =>
+    [...r.querySelectorAll('[data-pkc-field="relation-map-edge"]')].map(
+      (l) => l.getAttribute('data-pkc-relation-kind') ?? '',
+    );
+
+  /** 出ていく側 ── いま開いている本文の `entry:` から。**新しい問い合わせは 0**。 */
+  it('🔴 いま開いている本文が指している先が、辺になる', () => {
+    let s = reduce(booted(['a', 'b']), { type: 'SELECT_ENTRY', lid: 'a' }).state;
+    s = reduce(s, { type: 'BODY_LOADED', lid: 'a', body: '[b へ](entry:b)\n' }).state;
+    s = reduce(s, { type: 'BACKLINKS_LOADED', lid: 'a', lids: [], truncated: false }).state;
+    expect(edges(paint(s)), '本文のリンクが図に載っていない').toEqual(['body-link']);
+  });
+
+  /** 入ってくる側 ── 参照元の一覧(#348)から。こちらも**新しい問い合わせは 0**。 */
+  it('🔴 参照元も辺になる(向きは相手 → 自分)', () => {
+    let s = reduce(booted(['a', 'b']), { type: 'SELECT_ENTRY', lid: 'a' }).state;
+    s = reduce(s, { type: 'BODY_LOADED', lid: 'a', body: '本文だけ\n' }).state;
+    s = reduce(s, { type: 'BACKLINKS_LOADED', lid: 'a', lids: ['b'], truncated: false }).state;
+    const r = paint(s);
+    expect(edges(r)).toEqual(['body-link']);
+    // ⚠ 節点は 2 つ(中心 + 相手)── 図として成立していることまで見る
+    expect(r.querySelectorAll('[data-pkc-field="relation-map-node"]')).toHaveLength(1);
+  });
+
+  /**
+   * 🔴 **pkc:// の自分あても辺になる**(#379)。
+   * ⚠ 情報ペインが `state.cid` を渡していなければ、`bodyLinkTargets` を直しても
+   *   **1 本も出ない** ── 部品ではなく**繋ぎ**を見る。
+   */
+  it('🔴 pkc:// の自分あても辺になる', () => {
+    let s = reduce(booted(['a', 'b']), { type: 'SELECT_ENTRY', lid: 'a' }).state;
+    s = reduce(s, { type: 'BODY_LOADED', lid: 'a', body: '[b へ](pkc://c1/entry/b)\n' }).state;
+    s = reduce(s, { type: 'BACKLINKS_LOADED', lid: 'a', lids: [], truncated: false }).state;
+    expect(edges(paint(s)), 'cid が渡っていない(pkc:// が辺にならない)').toEqual(['body-link']);
+  });
+
+  /**
+   * ⚠ **対照群** ── リンクが無ければ 1 本も出ない(「常に 1 本引く」実装を許さない)。
+   * 🔑 そして**行ごと畳む**(点 1 つを図と呼ばない)。
+   */
+  it('⚠ リンクが無ければ図そのものを出さない', () => {
+    let s = reduce(booted(['a', 'b']), { type: 'SELECT_ENTRY', lid: 'a' }).state;
+    s = reduce(s, { type: 'BODY_LOADED', lid: 'a', body: 'ただの本文\n' }).state;
+    s = reduce(s, { type: 'BACKLINKS_LOADED', lid: 'a', lids: [], truncated: false }).state;
+    const r = paint(s);
+    expect(edges(r)).toEqual([]);
+    expect(r.querySelector('[data-pkc-field="relation-map"]')).toBe(null);
+  });
+
+  /**
+   * ⚠ 自分自身へのリンクで、点 1 つの図を作らない。
+   * 🔑 落としているのは**情報ペインではなく `buildNeighbourhood`**(自己辺の除去)。
+   *   ⚠ 2026-08-25 に情報ペイン側にも同じ判定を書いていたが、変異試験 L9 が
+   *   SURVIVED で **no-op** だと教えたので消した ── ここが見るのは
+   *   「どこで落としたか」ではなく「**画面にどう出るか**」である。
+   */
+  it('⚠ 自分へのリンクだけでは図にならない', () => {
+    let s = reduce(booted(['a', 'b']), { type: 'SELECT_ENTRY', lid: 'a' }).state;
+    s = reduce(s, { type: 'BODY_LOADED', lid: 'a', body: '[自分](entry:a)\n' }).state;
+    s = reduce(s, { type: 'BACKLINKS_LOADED', lid: 'a', lids: [], truncated: false }).state;
+    expect(edges(paint(s))).toEqual([]);
+    expect(paint(s).querySelector('[data-pkc-field="relation-map"]')).toBe(null);
+  });
+
+  /**
+   * 🔴 **開いている本文が別のノートのものなら使わない。**
+   *
+   * ⚠ **いまの reducer ではこの state にならない**(`SELECT_ENTRY` が
+   *   `openBody: null` にする)── 実際、`reduce` で組んだ筋では変異が生き延びた。
+   * 🔑 だから **state を直に組んで**、そのガードだけが答えを決める場面で見る。
+   *   ⚠ これは「起きない場面の test」ではなく、**この面が reducer の不変条件に
+   *   寄りかからない**ことの pin である(すぐ上の参照元が
+   *   `back.lid !== meta.lid` を見ているのと同じ作法。片方だけ守ると
+   *   非対称が残る ── §7)。
+   */
+  it('🔴 別のノートの本文を、いまのノートのリンクとして出さない', () => {
+    let s = reduce(booted(['a', 'b', 'c']), { type: 'SELECT_ENTRY', lid: 'b' }).state;
+    s = reduce(s, { type: 'BACKLINKS_LOADED', lid: 'b', lids: [], truncated: false }).state;
+    // ⚠ 手で崩す ── `a` の本文を持ったまま `b` を選んでいる状態
+    const crossed: AppState = {
+      ...s,
+      openBody: { lid: 'a', body: '[c へ](entry:c)\n', baseline: '', persisted: '', diskAhead: false },
+    };
+    expect(edges(paint(crossed)), '前のノートの本文からリンクを作っている').toEqual([]);
+    // 対照群 ── 持ち主が合っていれば、ちゃんと辺になる(「常に空」で通る実装を許さない)
+    const owned: AppState = {
+      ...s,
+      openBody: { lid: 'b', body: '[c へ](entry:c)\n', baseline: '', persisted: '', diskAhead: false },
+    };
+    expect(edges(paint(owned))).toEqual(['body-link']);
+  });
+});
+
 describe('バックリンクの表示 (#348)', () => {
   function paint(s: AppState): HTMLElement {
     const region = document.createElement('div');

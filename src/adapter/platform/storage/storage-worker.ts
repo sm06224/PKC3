@@ -28,6 +28,7 @@ import { extractMeta } from '@features/flavor';
 import { readVersions, totalHistoryBytes } from '@features/flavor/attachment-versions';
 import { planSaveBack } from '@features/asset/asset-replace-plan';
 import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
+import { bodyLinkNeedles, bodyLinksTo } from '@features/entry-ref/body-links';
 import { planSearch, toLikePattern } from '@features/filter/search-query';
 import { countTaskCandidates } from '@features/markdown/task-count';
 import {
@@ -1278,15 +1279,48 @@ const handlers: Handlers = {
    */
   findBacklinks: (req) => {
     const limit = Math.max(1, Math.min(req.limit ?? SEARCH_LIMIT, SEARCH_LIMIT));
+    /**
+     * 🔴 **LIKE は候補を絞るだけ。合否は文法で決める**(2026-08-25)。
+     *
+     * ⚠ `LIKE '%entry:n1%'` は **`entry:n12` の中にも当たる** ── 参照していない
+     *   ノートが参照元として並ぶ(過剰報告)。CLAUDE.md §1「file 名で見分ける
+     *   ときは、path の頭と尻を両方留める」の同じ型である。
+     * 🔑 だから **`bodyLinksTo` を通す** ── 出ていく側(つながりの図)と
+     *   **同じ 1 つの文法**で答える(§7「判定を 1 か所へ寄せる」)。
+     * ⚠ 索引は持たない(持つと保存のたびの維持が要る)ので、LIKE で粗く削ってから
+     *   本文を読む形にしてある ── **全件を JS へ積まない**。
+     */
+    /**
+     * ⚠ **同じ容れ物を指す字面は 2 つある**(#379)── `entry:<lid>` と
+     * `pkc://<cid>/entry/<lid>`。⚠ 片方だけで絞ると、**もう片方は候補にすら
+     * 挙がらない**(取りこぼし側へ倒れる)。字面は `bodyLinkNeedles` が持つ。
+     */
+    const needles = bodyLinkNeedles(req.lid, req.cid);
+    const where = needles.map((_, i) => `body LIKE ?${i + 3} ESCAPE '\\'`).join(' OR ');
     const rows = need().selectObjects(
-      `SELECT lid FROM entries
-        WHERE cid = ?1 AND lid <> ?2 AND archived = 0 AND body LIKE ?3 ESCAPE '\\'
-        ORDER BY entry_order, lid LIMIT ?4`,
-      [req.cid, req.lid, toLikePattern(`entry:${req.lid}`), limit + 1],
-    ) as Array<{ lid: string }>;
-    // 🔑 **1 件多く取って切れたか判る**(`searchEntries` と同じ作法)
-    const truncated = rows.length > limit;
-    return { lids: rows.slice(0, limit).map((r) => r.lid), truncated };
+      `SELECT lid, body FROM entries
+        WHERE cid = ?1 AND lid <> ?2 AND archived = 0 AND (${where})
+        ORDER BY entry_order, lid`,
+      [req.cid, req.lid, ...needles.map((n) => toLikePattern(n))],
+    ) as Array<{ lid: string; body: string }>;
+    /**
+     * ⚠ **SQL 側で件数を切らない。** LIKE は過剰に当たるので、`limit + 1` 件だけ
+     * 取ると「候補が偽物ばかりで本物が漏れる」── 誤差が**取りこぼし側**へ倒れる。
+     * 🔑 候補の数は「本文に `entry:<lid>` という並びを literal で含むノート」なので、
+     *   実質は参照元の数である(前置が重なる lid はまず無い)。
+     */
+    const hit: string[] = [];
+    let truncated = false;
+    for (const r of rows) {
+      if (!bodyLinksTo(r.body, req.lid, req.cid)) continue;
+      // 🔑 **1 件多く取って切れたか判る**(`searchEntries` と同じ作法)
+      if (hit.length >= limit) {
+        truncated = true;
+        break;
+      }
+      hit.push(r.lid);
+    }
+    return { lids: hit, truncated };
   },
   /**
    * 🔴 **frontmatter で束ねる**(#184)。舐めるのは worker、返すのは**束ねた結果**だけ。

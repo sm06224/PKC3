@@ -121,6 +121,12 @@ const SURVEY = `(() => {
 const key = (w) => `${w.x},${w.y},${w.w},${w.h}`;
 
 /** 見えている停止面だけを数える(hidden の常在文言に空振りしない)。 */
+/** 停止の面に出ている文言(空なら出ていない)。⚠ 非 ASCII も含めてそのまま採る。 */
+const MSG_TEXT = () => {
+  const msg = document.getElementById('msg');
+  return !msg || msg.hidden ? '' : (msg.textContent ?? '').slice(0, 400);
+};
+
 const CRASHED = () => {
   const msg = document.getElementById('msg');
   if (!msg || msg.hidden) return false;
@@ -313,6 +319,14 @@ async function main() {
       await shoot('03-after-sidebar.png');
       result.sidebar.crashed = await page.evaluate(CRASHED);
       result.sidebar.oob = oob();
+      /**
+       * 🔑 **止まったなら、何と出て止まったかを残す。**
+       * ⚠ 2026-08-25 に `crashed: true` / `oob: false` が出て、
+       *   **停止の理由がどこにも無かった** ── console にも出ないので
+       *   「同じ #167 か、上流が変わって別物か」が判別できなかった。
+       *   §「回すものの粒度」の③「落ちたとき原因が名前で分かるか」である。
+       */
+      result.sidebar.msg = await page.evaluate(MSG_TEXT);
       const after = await page.evaluate(SURVEY);
       result.sidebar.windowsAfter = after.length;
       /**
