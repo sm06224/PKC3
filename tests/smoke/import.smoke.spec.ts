@@ -127,19 +127,54 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
   // ここで 1 部目が**上書きされて消える**(4 件にならない)
   await page.setInputFiles('[data-pkc-field="import-input"]', FILE());
   /**
-   * ⚠ **待ちを長くしてある(assert は変えていない)**。2026-08-25 に CI で 1 度
-   * 落ちた ── 既定の 5 秒の間に **14 回 poll して 2 件のまま**だった。
-   * つまり「描画が遅れた」ではなく、**2 度目の取り込みが 5 秒で終わっていない**。
-   * 🔑 この 1 手は HTML の解析 + gzip の展開 + hash(ワーカー)+ sqlite と IDB への
-   *   書込 + 一覧の引き直しで、しかも**1 部目が既に入っている状態**から走る。
-   *   遅い runner では素直に超える。
-   * ⚠ 見る物(**4 件**・lid が 4 つとも別)は 1 つも緩めていない ── 変えたのは
-   *   待てる時間だけである(CLAUDE.md「test を緩める前にアプリを疑う」に対しては、
-   *   落ちた commit が `src/` に**どこからも import されない file を 1 本足しただけ**
-   *   だったこと、手元では 2 つのブラウザとも通ること、同じ spec が次の走りで
-   *   通ったことを根拠に「製品の穴ではない」と判じている)。
+   * 🔴 **落ちたとき、理由が分かる形にする**(2026-08-25)。
+   *
+   * ## ⚠ 私はここで 1 度間違えた ── その記録
+   *
+   * CI で落ちたとき「**2 度目の取り込みが 5 秒で終わっていない**」と読んで
+   * **待ちを 20 秒へ伸ばした**。⚠ しかし**次の走りも同じ所で落ちた**:
+   *
+   * ```
+   * Expected: 4  Received: 2  Timeout: 20000ms
+   * 44 x locator resolved to 2 elements
+   * ```
+   *
+   * 🔑 **20 秒・44 回 poll して、ずっと 2 のまま**である ── 増える途中ですらない。
+   * ⚠ そして**最初の log も「14 回 poll して 2 件のまま」**だった。
+   *   つまり**最初から「遅い」ではなかった**のに、待ちを伸ばした
+   *   (CLAUDE.md「**flake に見える前にアプリを疑う**」を踏んだ)。
+   *
+   * ## だから、待ちではなく**診断**を足す
+   *
+   * 手元では **14 走**(素の 6 + CPU を 2 倍に張った 4 + 別ブラウザ 4)**全部通る**。
+   * ⚠ **再現しない原因を書いてはいけない**(CLAUDE.md §4)ので、機構は書かない。
+   * 🔑 代わりに、落ちた回が**自分で理由を持ってくる**ようにする ──
+   *   出ている lid / 画面の状態 / ジョブ表 / ページのエラーを添えて落ちる。
+   *   ⚠ 次の赤が「2 だった」で終わらないことが、この形の目的である。
    */
-  await expect(rows).toHaveCount(4, { timeout: 20_000 });
+  try {
+    await expect(rows).toHaveCount(4);
+  } catch (e) {
+    const snap = await page.evaluate(() => ({
+      entries: [...document.querySelectorAll('[data-pkc-region="entry-list"] [data-pkc-entry]')]
+        .map((el) => el.getAttribute('data-pkc-entry')),
+      status: (
+        document.querySelector('[data-pkc-region="status"]')?.textContent ?? ''
+      )
+        .replace(/\s+/g, ' ')
+        .slice(0, 200),
+      lanes: [...document.querySelectorAll('[data-pkc-lane]')].map((l) =>
+        (l.textContent ?? '').replace(/\s+/g, ' ').slice(0, 120),
+      ),
+      dialogOpen: document.querySelectorAll('dialog[open]').length,
+    }));
+    throw new Error(
+      `2 度目の取込で件数が増えていない。${JSON.stringify(snap)} / `
+        + `pageErrors=${JSON.stringify(errors)}`,
+      // ⚠ 元の失敗を**捨てない**(どこで落ちたかが消える)
+      { cause: e },
+    );
+  }
   const orders = await page.locator('[data-pkc-entry]').evaluateAll((els) =>
     els.map((e) => e.getAttribute('data-pkc-entry')),
   );
