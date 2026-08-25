@@ -823,6 +823,90 @@ export function connectStoreEffects(
           }
         });
         break;
+      /**
+       * 🔴 **選んだ全部にタグを足す / 外す**(#402 ①)。
+       *
+       * ⚠ **書換の規則は 1 本**(`applyBodyRewrite` の `kind: 'tag'`)── ここで
+       *   frontmatter を組み直さない(§7)。ここが持つのは**繰り返しと数え上げ**だけ。
+       * ⚠ **1 件ずつ `expectHash` で守る**(#178 と同じ)── 読んでから書くまでに
+       *   別の窓が書いていたら、その 1 件だけ飛ばして数に出す。**当て直さない**
+       *   (行番号ではなくタグなので当て直しても壊れないが、user が押した後に
+       *   本文が変わったなら、黙って上書きするより言うほうが正しい)。
+       * ⚠ **1 通だけ言う** ── 12 件のうち 3 件が既に付いていただけで赤い帯が
+       *   3 回出るのは、押した人から見て「失敗した」にしか見えない。
+       */
+      case 'REQUEST_BULK_TAG':
+        enqueue(async () => {
+          if (disposed) return;
+          let wrote = 0;
+          let skipped = 0;
+          let failed = 0;
+          for (const t of ev.targets) {
+            if (disposed) return;
+            try {
+              const body = await store.getBody(t.lid);
+              if (body === null) {
+                failed++;
+                continue;
+              }
+              const newBody = applyBodyRewrite(body, {
+                kind: 'tag',
+                tag: ev.tag,
+                mode: ev.mode,
+              });
+              // ⚠ **`null` は失敗ではない** ── 「既に付いている / 元から無い」も
+              //    ここへ来る。数だけ分けて、赤い帯にしない
+              if (newBody === null) {
+                skipped++;
+                continue;
+              }
+              const ext = extractMeta(t.archetype, newBody);
+              const stamps = await store.persistEntry(
+                {
+                  lid: t.lid,
+                  title: t.title,
+                  archetype: t.archetype,
+                  body: newBody,
+                  entryOrder: t.entryOrder,
+                  status: ext.status,
+                  date: ext.date,
+                  archived: ext.archived,
+                },
+                { expectHash: contentHash64Hex(body) },
+              );
+              if (stamps.conflict === true) {
+                failed++;
+                continue;
+              }
+              wrote++;
+              stamp(t.lid, stamps);
+              if (!disposed)
+                dispatcher.dispatch({
+                  type: 'BODY_REWRITTEN',
+                  lid: t.lid,
+                  body: newBody,
+                  rewrite: { kind: 'tag', tag: ev.tag, mode: ev.mode },
+                  status: ext.status,
+                  date: ext.date,
+                  archived: ext.archived,
+                });
+            } catch {
+              failed++;
+            }
+          }
+          if (disposed) return;
+          /**
+           * ⚠ **何が起きたかを全部言う** ── 「12 件に付けました」だけだと、
+           *   3 件が既に付いていたことも 1 件が失敗したことも消える。
+           */
+          const verb = ev.mode === 'add' ? '付けました' : '外しました';
+          const parts = [`${wrote} 件に${verb}`];
+          if (skipped > 0)
+            parts.push(ev.mode === 'add' ? `${skipped} 件は既に付いていました` : `${skipped} 件は付いていませんでした`);
+          if (failed > 0) parts.push(`${failed} 件は書けませんでした(別の窓が書き替えた可能性があります)`);
+          dispatcher.dispatch({ type: 'OP_NOTICE', message: parts.join(' / ') });
+        });
+        break;
       case 'REQUEST_REVISION_LIST':
         enqueue(async () => {
           if (disposed) return;

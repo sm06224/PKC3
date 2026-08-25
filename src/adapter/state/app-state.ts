@@ -358,6 +358,15 @@ export interface AppState {
    *   履歴を開くだけで本文が N 本 heap に載る(常駐ゼロの規律に反する)。
    */
   revisionPreview: { lid: string; revId: string; body: string } | null;
+  /**
+   * 🔴 **一時の知らせ**(#402 ①)。`null` = 何も出していない。
+   *
+   * ⚠ **`error` と別に持つ** ── 一括タグの結果は「3 件は既に付いていました」の
+   *   ように**成功の内訳**であって、赤い帯に出す物ではない
+   *   (`main.ts` が「エラー > 一時の知らせ」の順で組んでいるのと同じ考え)。
+   * ⚠ 出す寿命は**次の知らせまで** ── 消す口を別に作らない。
+   */
+  notice: string | null;
   /** ゴミ箱 panel(filer)。開いた時点のスナップショット + 明示更新。 */
   trashPanel: { items: readonly TrashItem[] } | null;
   /**
@@ -590,6 +599,7 @@ export const initialState: AppState = {
   showUndatedTasks: false,
   revisionPanel: null,
   revisionPreview: null,
+  notice: null,
   trashPanel: null,
   linkedFiles: new Map(),
   writeLock: null,
@@ -872,6 +882,17 @@ export type UserAction =
   | { type: 'SET_ENTRY_PARENT'; lid: string; parentLid: string | null; relationId: string }
   /** 同じ親の下で隣と入れ替える(2026-08-06。user 報告 2-10)。 */
   | { type: 'MOVE_ENTRY_ORDER'; lid: string; direction: 'up' | 'down' }
+  /**
+   * 🔴 **選んだ全部にタグを付ける / 外す**(#402 ①)。
+   * ⚠ 相手は**いま表に出ている印**だけ(`delete-selected` と同じ規則 ── 画面に
+   *   無いものを触らない)。呼び側がその集合を渡す。
+   */
+  | { type: 'BULK_TAG'; lids: readonly string[]; tag: string; mode: 'add' | 'remove' }
+  /**
+   * 🔴 **一時の知らせ**(#402 ①)。⚠ `OP_FAILED` と混ぜない ── あちらは赤い帯で、
+   *   こちらは成功の内訳である(「3 件は既に付いていました」を失敗にしない)。
+   */
+  | { type: 'OP_NOTICE'; message: string }
   | { type: 'SHOW_HISTORY' }
   /** 🔴 **その版の中身を見る**(#398 段②)。⚠ 復元ではない ── 1 バイトも書かない。 */
   | { type: 'PREVIEW_REVISION'; revId: string }
@@ -1180,6 +1201,26 @@ export type DomainEvent =
   /** 関係の永続化(#185)。⚠ 1 件ずつ ── 作る操作も消す操作も 1 度に 1 つである。 */
   | { type: 'REQUEST_RELATION_UPSERT'; id: string; fromLid: string; toLid: string; kind: string }
   | { type: 'REQUEST_RELATION_DELETE'; id: string }
+  | {
+      /**
+       * 🔴 **選んだ全部にタグを 1 つ足す / 外す**(#402 ①)。
+       *
+       * ⚠ **meta は発火時に捕まえる**(C-1 規律)── 走っている間に一覧が
+       *   変わっても、書く相手は押した時の 12 件のままである。
+       * ⚠ 1 件ずつ `REQUEST_BODY_REWRITE` を撃たない ── 撃つと
+       *   「既に付いている」件が**1 件ずつ失敗として出る**(12 件のうち 3 件が
+       *   既に付いていただけで、赤い帯が 3 回出る)。ここは**まとめて 1 通**言う。
+       */
+      type: 'REQUEST_BULK_TAG';
+      tag: string;
+      mode: 'add' | 'remove';
+      targets: readonly {
+        lid: string;
+        title: string;
+        archetype: string;
+        entryOrder: number;
+      }[];
+    }
   | { type: 'REQUEST_REVISION_LIST'; lid: string }
   /** その版の本文を読む(#398 段②)。⚠ **読むだけ**(書込は 1 バイトも無い)。 */
   | { type: 'REQUEST_REVISION_BODY'; lid: string; revId: string }
@@ -2894,6 +2935,35 @@ function reduceCore(
         events: [{ type: 'REQUEST_RELATION_DELETE', id: action.id }],
       };
     }
+    /**
+     * 🔴 **選んだ全部にタグを付ける / 外す**(#402 ①)。
+     *
+     * > user の物語: フォルダで 12 件選んだ。全部に `#請求済` を付けたい。
+     * > いま一括でできるのは「ゴミ箱へ」だけで、**12 回開いて 12 回書く**。
+     *
+     * ⚠ ready 限定(編集中の裏書換を作らない ── `TOGGLE_TASK` と同じ)。
+     * ⚠ **居ない lid は落とす**(消えたノートへ書きに行かない)。
+     * ⚠ 空の相手・空のタグでは**何も撃たない**(押して無反応にならないよう、
+     *   帯の側がそもそも押せない形にしてある)。
+     */
+    case 'BULK_TAG': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      if (action.tag.trim() === '') return { state, events: [] };
+      const targets = action.lids
+        .map((lid) => state.entryMetas.get(lid))
+        .filter((m): m is EntryMeta => m !== undefined)
+        .map((m) => ({
+          lid: m.lid,
+          title: m.title,
+          archetype: m.archetype,
+          entryOrder: m.entryOrder,
+        }));
+      if (targets.length === 0) return { state, events: [] };
+      return {
+        state,
+        events: [{ type: 'REQUEST_BULK_TAG', tag: action.tag, mode: action.mode, targets }],
+      };
+    }
     case 'SHOW_HISTORY': {
       // ready + 選択ありのみ。一覧は要求時に引く(boot で revisions に触れない)
       if (state.phase !== 'ready' || !state.selectedLid)
@@ -3277,6 +3347,10 @@ function reduceCore(
         },
         events: [],
       };
+    case 'OP_NOTICE':
+      // ⚠ **`error` を触らない** ── 知らせが出たからといって、出ているエラーを
+      //    消してよい理由は無い(`main.ts` が別の行として組んでいる)
+      return { state: { ...state, notice: action.message }, events: [] };
     case 'OP_FAILED':
       // 非致命: 通知のみ。phase は動かさない(kanban 等の操作性を殺さない)
       return { state: { ...state, error: action.error }, events: [] };

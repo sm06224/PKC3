@@ -2857,6 +2857,29 @@ select:focus-visible {
   font-size: 12px;
 }
 
+/* ── 予定: その日に足す(#402 ②)───────────────────────
+ * 🔴 **印は CSS で置く**(#396 と同じ理由)── `textContent` に入れると
+ * 見出しの字に混ざり、読み上げ・写し・test の突き合わせが汚れる。 */
+[data-pkc-field='schedule-quick-here']::before {
+  content: '+';
+}
+[data-pkc-field='schedule-group-label'] {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+}
+[data-pkc-field='schedule-quick'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+  margin-top: var(--s1);
+}
+[data-pkc-field='schedule-quick-text'] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 /* ── 履歴: 版のちがい(#398)───────────────────────────
  * 🔴 **差分は行が縦に積まれる**ので、その行だけ `flex-direction` を縦にする。
  * ⚠ 上の規則(横並び)を打ち消さないと、差分の器が題名の**右**へ並んで潰れる。 */

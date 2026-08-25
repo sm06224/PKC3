@@ -53,7 +53,7 @@ export class ScheduleRenderer {
   private readonly cards = new Map<string, HTMLElement>();
   private readonly cardData = new Map<string, AgendaItem>();
   /** 束の器(日付 → 節)。⚠ **使い回す**(捨てると掴んでいる札が消える)。 */
-  private readonly sections = new Map<string, { section: HTMLElement; host: HTMLElement; head: HTMLElement }>();
+  private readonly sections = new Map<string, { section: HTMLElement; host: HTMLElement; head: HTMLElement; label: HTMLElement }>();
   private frame: {
     month: HTMLElement;
     grid: HTMLElement;
@@ -363,7 +363,12 @@ export class ScheduleRenderer {
         this.sections.set(key, node);
       }
       const label = `${g.label}(${g.cards.length})`;
-      if (node.head.textContent !== label) node.head.textContent = label;
+      /**
+       * ⚠ **見出しの字だけを差し替える**(#402 ②)── `head.textContent` に
+       *   代入すると、隣に置いた `+` が**毎回の描き直しで消える**
+       *   (「押せる物が黙って居なくなる」の典型)。
+       */
+      if (node.label.textContent !== label) node.label.textContent = label;
       if (g.overdue) node.section.setAttribute('data-pkc-overdue', '');
       else node.section.removeAttribute('data-pkc-overdue');
       if (cursor === node.section) cursor = node.section.nextSibling;
@@ -372,7 +377,12 @@ export class ScheduleRenderer {
     }
   }
 
-  private createSection(key: string): { section: HTMLElement; host: HTMLElement; head: HTMLElement } {
+  private createSection(key: string): {
+    section: HTMLElement;
+    host: HTMLElement;
+    head: HTMLElement;
+    label: HTMLElement;
+  } {
     const section = document.createElement('section');
     section.setAttribute('data-pkc-region', 'schedule-group');
     /**
@@ -382,10 +392,38 @@ export class ScheduleRenderer {
     section.setAttribute(DROP_DATE, key);
     const head = document.createElement('h3');
     head.setAttribute('data-pkc-field', 'schedule-group-label');
+    // ⚠ 字は**別の器**に持つ(上の注記 ── `+` を巻き添えにしない)
+    const label = document.createElement('span');
+    label.setAttribute('data-pkc-field', 'schedule-group-text');
+    head.append(label);
+    /**
+     * 🔴 **その日に足す口**(#402 ②)。⚠ ここは**欄を出さない** ── 上の
+     *   1 つの欄に日付を入れて焦点を移すだけである(打ちかけを束ごと失わない)。
+     * ⚠ 「日付なし」の束(`key === ''`)には出さない ── 日付を決めずに足す口は
+     *   上の欄が既に持っている(日付を空のまま押せばよい)。
+     */
+    if (key !== '') {
+      const plus = document.createElement('button');
+      plus.type = 'button';
+      plus.setAttribute('data-pkc-action', 'schedule-quick-here');
+      plus.setAttribute('data-pkc-quick-date', key);
+      plus.setAttribute('data-pkc-field', 'schedule-quick-here');
+      /**
+       * 🔴 **印は字で置かない**(#396 で踏んだのと同じ罠。既存の test が拾った)。
+       *
+       * ⚠ `textContent = '+'` にすると、**見出しの `textContent` に混ざる**
+       *   ── 読み上げ・写し・test の突き合わせが全部汚れる(束の名前が
+       *   `今日(1)+` になった)。
+       * 🔑 印は **CSS の `::before`**、名前は `aria-label` に置く。
+       */
+      plus.setAttribute('aria-label', 'この日のやることを足す');
+      plus.title = 'この日のやることを足します(上の欄に日付が入ります)';
+      head.append(plus);
+    }
     const host = document.createElement('div');
     host.setAttribute('data-pkc-region', 'schedule-cards');
     section.append(head, host);
-    return { section, host, head };
+    return { section, host, head, label };
   }
 
   private paintCards(host: HTMLElement, g: AgendaGroup, state: AppState): void {
@@ -434,6 +472,37 @@ export class ScheduleRenderer {
     todayBtn.setAttribute('data-pkc-action', 'schedule-today');
     todayBtn.textContent = '今月';
     bar.append(nav('‹', -1), month, nav('›', 1), todayBtn);
+    /**
+     * 🔴 **予定の面から、その場でやることを足す**(#402 ②)。
+     *
+     * > user の物語: 予定タブで今週を眺めている。「木曜に見積を出す」を足したい。
+     * > いまは**足す口が無い** ── ノートを開く(または作る)→ 本文に
+     * > `- [ ] 見積を出す @2026-08-28` と手で書く → 予定タブへ戻る。
+     *
+     * 🔴 **正本は本文のまま**(user 指示 2026-08-23「面は映すだけにしない ──
+     *   **双方向**」)。面が別のデータを持つのではなく、**面から本文へ書く**。
+     * ⚠ **入力欄は 1 つだけ**にする ── 日付の束ごとに欄を置くと、打ちかけが
+     *   どこに在るか分からなくなる(束は描き直しで作り直される)。
+     *   束の脇の `+` は、**この欄の日付を埋めて焦点を移す**だけである。
+     */
+    const quick = document.createElement('div');
+    quick.setAttribute('data-pkc-field', 'schedule-quick');
+    const qText = document.createElement('input');
+    qText.type = 'text';
+    qText.setAttribute('data-pkc-field', 'schedule-quick-text');
+    qText.placeholder = 'やること';
+    qText.setAttribute('aria-label', '足すやること');
+    const qDate = document.createElement('input');
+    qDate.type = 'date';
+    qDate.setAttribute('data-pkc-field', 'schedule-quick-date');
+    qDate.setAttribute('aria-label', 'いつのやること');
+    const qAdd = document.createElement('button');
+    qAdd.type = 'button';
+    qAdd.setAttribute('data-pkc-action', 'schedule-quick-add');
+    qAdd.textContent = '足す';
+    // ⚠ **どこへ書くかを先に言う**(押してから「どこへ入った?」と思わせない)
+    qAdd.title = '今日のノートの末尾に、チェック項目として書きます';
+    quick.append(qText, qDate, qAdd);
     const grid = document.createElement('div');
     grid.setAttribute('data-pkc-field', 'schedule-grid');
     const note = document.createElement('p');
@@ -458,7 +527,7 @@ export class ScheduleRenderer {
     toggles.append(undated, done, archived);
     const groups = document.createElement('div');
     groups.setAttribute('data-pkc-region', 'schedule-groups');
-    this.region.append(bar, grid, note, toggles, groups);
+    this.region.append(bar, quick, grid, note, toggles, groups);
     this.frame = { month, grid, note, undated, done, archived, groups };
     return this.frame;
   }

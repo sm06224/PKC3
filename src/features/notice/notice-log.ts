@@ -90,6 +90,17 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-25-cross-pane',
+    title: '面をまたいで作業が続くようになりました',
+    items: [
+      'フォルダタブで 2 件以上選ぶと、帯からまとめてタグを付けられます。外すのも同じ帯からできます。',
+      '結果は「3 件に付けました / 1 件は既に付いていました」と 1 通で出ます。既に付いているものは書き直しません。',
+      '予定タブの上に「やること」の欄が増えました。打って足すと、今日のノートの末尾にチェック項目として書かれます。',
+      '日付の束の見出しの + を押すと、その日が日付欄に入ります。画面は切り替わらないので、予定を眺めたまま足せます。',
+      '左の列で掴んだまま、上のタブの上で少し止めると面が変わります。手を離さずにフォルダの行を予定の日へ持っていけます。',
+    ],
+  },
+  {
     id: '2026-08-25-revision-diff',
     title: '履歴で、戻す前に中身を見られるようになりました',
     items: [
@@ -281,20 +292,11 @@ export const NOTICES: readonly Notice[] = [
       '書き出した file は取り込み直せません。戻せる形が要るときは、これまでどおり「バックアップ」を使ってください。',
     ],
   },
-  {
-    id: '2026-08-23-office-format-notice',
-    title: 'Office で保存できない形式を、開いた時点でお知らせします',
-    items: [
-      'Word や Excel の形式(.docx など)を Office で開いて編集し、保存を押すと「一般的な I/O エラー」で失敗していました。編集した内容はそこで失われます。',
-      '開いた時点で画面の下に断りを出し、上の帯にも「保存できません」と印を付けるようにしました。押してから気づくことがなくなります。',
-      'ODF 形式(.odt / .ods / .odp)はこれまでどおり保存できます。実際に測って、保存できる形式だけを「できる」と言っています。',
-    ],
-  },
 ];
 
 /**
  * ⚠ **落としたぶんの原本は CHANGELOG に在る**(上限 20 件を超えたので、古いほうから
  *   `2026-08-16-office-save-to-pkc` / `2026-08-17-office-save-same-note`(2026-08-19)、
  *   `2026-08-19-dual-pane-app`(2026-08-22)、
- *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart`(2026-08-25)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
+ *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice`(2026-08-25)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
  */

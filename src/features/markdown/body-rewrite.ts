@@ -17,9 +17,25 @@ import { formatLineDate, insertionForLineDate, readLineDate } from '../schedule/
 import { isScheduleDate } from '../schedule/schedule-date';
 import type { RepeatUnit } from '../schedule/repeat';
 import { removeInsertedLines } from './append-target';
+import { readTags, withTag } from '../flavor/tags';
 
 /** 何をするか。⚠ **やり直せる形で持つ**(未達 commit との合流に要る)。 */
 export type BodyRewrite =
+  | {
+      /**
+       * 🔴 **タグを 1 つ足す / 外す**(#402 ①)。
+       *
+       * > user の物語: フォルダで 12 件選んだ。全部に `#請求済` を付けたい。
+       *
+       * ⚠ **本文を読んでから書く**必要があるので、面が自分で組まずにここへ寄せる
+       *   ── 書込は `REQUEST_BODY_REWRITE` の 1 本を通る(§7)。
+       * 🔴 **双方向**(user 指示 2026-08-23)── `add` があるなら `remove` も要る。
+       *   付けるだけだと、12 件に間違えて付けたものを 12 回開いて消すことになる。
+       */
+      kind: 'tag';
+      tag: string;
+      mode: 'add' | 'remove';
+    }
   | {
       /**
        * 🔴 **追記を取り消す**(#395 段①。user 指示 2026-08-23
@@ -125,6 +141,19 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
   }
   if (rewrite.kind === 'line-date') return rewriteLineDate(body, rewrite);
   if (rewrite.kind === 'undo-append') return removeInsertedLines(body, rewrite.lines);
+  if (rewrite.kind === 'tag') {
+    /**
+     * ⚠ **読む規則も書く規則も既存の 1 本**(`readTags` / `withTag` /
+     *   `spliceFrontmatterKeys`)── ここで 2 本目を書かない。
+     * ⚠ 変わらないとき(既に在る / 元から無い)は `null` ── 呼び側が
+     *   「書かない」を選べる(同じ本文を書き直して更新日時だけ動かさない)。
+     */
+    const next = withTag(readTags(body), rewrite.tag, rewrite.mode);
+    if (next === null) return null;
+    // ⚠ 空になったら **鍵ごと消す**(`tags: []` を残さない ── 読み手が
+    //    「空のタグが 1 つ在る」と読む形を作らない)
+    return spliceFrontmatterKeys(body, { tags: next.length === 0 ? undefined : next });
+  }
   if (rewrite.kind === 'repeat-done') return materializeRepeat(body, rewrite);
   const lines = body.split('\n');
   const line = lines[rewrite.line];

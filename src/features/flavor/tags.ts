@@ -27,6 +27,46 @@ function normalize(raw: string): string {
   return raw.trim().replace(/\s+/g, ' ');
 }
 
+/**
+ * 🔴 **正規化した形を外にも出す**(#402 ①)。
+ * ⚠ 一括の入力欄から来る字は `  請求済  ` のような形をしている ── 呼び側が
+ *   自前で `trim` すると、**読む側(`readTags`)と規則が 2 つ**になる(§7)。
+ */
+export function normalizeTag(raw: string): string {
+  return normalize(raw);
+}
+
+/**
+ * 🔴 **タグを 1 つ足した / 外した形を返す**(#402 ①)。
+ *
+ * > user の物語: フォルダで 12 件選んだ。全部に `#請求済` を付けたい。
+ * > いま一括でできるのは「ゴミ箱へ」だけで、**12 回開いて 12 回書く**。
+ *
+ * ⚠ **突き合わせは大小無視**(`sameTag`)── `#請求済` と `#請求済` が
+ *   2 つ並ぶのを防ぐ。⚠ **並べ替えない**(`readTags` と同じ ── 書いた順は user の物)。
+ * ⚠ 上限(`MAX_TAGS` / `MAX_TAG_CHARS`)を**ここでも守る** ── 一括は
+ *   1 度に 12 件書くので、破る形を作ると 12 件まとめて壊れる。
+ *
+ * @returns 変わらないときは `null`(呼び側が「書かない」を選べる)
+ */
+export function withTag(
+  tags: readonly string[],
+  tag: string,
+  mode: 'add' | 'remove',
+): string[] | null {
+  const t = normalize(tag);
+  if (t === '' || [...t].length > MAX_TAG_CHARS) return null;
+  const has = tags.some((x) => sameTag(x, t));
+  if (mode === 'add') {
+    if (has) return null;
+    // ⚠ 上限に当たったら**足さない**(黙って古い方を落とさない)
+    if (tags.length >= MAX_TAGS) return null;
+    return [...tags, t];
+  }
+  if (!has) return null;
+  return tags.filter((x) => !sameTag(x, t));
+}
+
 /** 同じタグか(表示は原文、突き合わせは大小無視)。 */
 export function sameTag(a: string, b: string): boolean {
   return a.toLowerCase() === b.toLowerCase();

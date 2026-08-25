@@ -635,6 +635,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   let errorLine = '';
   let noticeLine = '';
+  /** ⚠ 同じ知らせで何度も塗り直さない(state は毎回流れてくる)。 */
+  let noticeShown: string | null = null;
   const paint = () => {
     // ⚠ アプリの窓では常設バッジを畳む(上の理由)── `paint` は面が変わるたび
     //    走るので、`onHold` が旗を倒した次の描画から消える
@@ -753,6 +755,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   dispatcher.onState((state) => {
     // ⚠ **エラーの行だけ**を触る ── 一時の知らせを巻き添えにしない
     errorLine = state.error ? `⚠ エラー: ${state.error}` : '';
+    /**
+     * 🔴 **state から来る一時の知らせ**(#402 ①)。
+     * ⚠ effect の中(一括タグ)は `showStatus` を持たないので、state を通す ──
+     *   ⚠ **`showStatus` と同じ行に載せる**(2 本目の行を作ると、優先順位の
+     *   規則がここで割れる)。
+     */
+    if (state.notice !== null && state.notice !== noticeShown) {
+      noticeShown = state.notice;
+      showStatus(state.notice);
+      return; // `showStatus` が `paint` を呼ぶ
+    }
     paint();
   });
 
