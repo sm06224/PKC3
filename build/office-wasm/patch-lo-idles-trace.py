@@ -184,71 +184,65 @@ SCHED_ANCHOR = """        pSVData->m_inExecuteCondtion.reset();
         SolarMutexReleaser releaser;
         pSVData->m_inExecuteCondtion.wait();
 """
-SCHED_REPLACE = """        pSVData->m_inExecuteCondtion.reset();
+SCHED_REPLACE = """        // 🔴 **9 巡目(2026-08-25)── そもそも待たなくてよい場合を先に外す。**
+        //
+        // 8 巡目で輪が完全に見えた:メインは proxy した user event の Link の
+        // 戻りを待ち、その Link(docx の取込)がここで「メインが Execute へ戻る
+        // こと」を待つ ── **互いに相手の前進を待っている**。時限で片側を切ったら
+        // 開いたが、⚠ **代償を測ったら大きすぎた**(自作の画像 20 枚の .docx で
+        // `idles:wait` が **17 回**、全部 timeout、開くまで **51 秒**。1 枚なら 11 秒)。
+        //
+        // 🔑 **待ちが 1 度も成功していない**のが手がかりだった ── この筋では
+        //   条件は原理的に立たない。では**何のために待っているのか**を上流の
+        //   コメントで読み直すと「**走っているアイドルが無いことを保証するため**」
+        //   である(すぐ上)。
+        // 🔑 ところが `mpSchedulerStack` は **いま実行中のタスクのスタック**
+        //   (`scheduler.cxx:531` で push、`:646` で pop ── タスクの呼び出しを
+        //   挟んでいる)。**空なら、走っているタスクは 1 つも無い** ── つまり
+        //   **欲しい保証は既に成り立っている**。
+        // ⚠ 上流が待つ理由は「入れ子」である ── アイドルの中から `Yield` が呼ばれ、
+        //   そのアイドルが SolarMutex を放して待っていると、こちらが mutex を
+        //   持ててしまう。**その場合はスタックが空でない**ので、ここで見分けられる。
+        // ⚠ 読むのは SolarMutex を持っている間である(`SolarMutexReleaser` より前)。
+        if (rSchedCtx.mpSchedulerStack == nullptr)
+        {
+            // 🔑 **待たない。** ⚠ 起こす必要も無いので `PostUserEvent` も撃たない
+            //    (誰も聞いていない放送を増やさない)。
+            pkc3_idles_trace("idles:skip", -1, -1, rSchedCtx.mnIdlesLockCount);
+        }
+        else
+        {
+        pSVData->m_inExecuteCondtion.reset();
         // Put an empty event to the application's queue, to make sure that it loops through the
         // code that sets the condition, even when there's no other events in the queue
         Application::PostUserEvent({});
         // 🔑 **前提を実測で出す**(#199)── a は `IsUseSystemEventLoop()`。
         //    ⚠ ここを「true のはず」と決めつけた直しを 1 度焼いて no-op だった。
-        // 🔴 **c が本命**(2026-08-24 の 2 巡目)── `Application::IsInExecute()` は
-        //    「`Application::Execute()` がスタックに在るか」(`svdata.hxx:174` の
-        //    `mbInAppExecute`、公開の accessor は `svapp.hxx:571`)。
-        //    ⚠ **c=0 なら、待っている条件を立てる者がまだ走っていない**ことが確定する
-        //    ── 1 巡目で `execute:set` が 0 件だった理由が、これで名前で言える。
-        //    🔑 前回は述語を**決め打ちして**焼き 1 回を無駄にした。今度は**測ってから**書く。
         pkc3_idles_trace("idles:wait", Application::IsUseSystemEventLoop() ? 1 : 0,
                          Application::IsMainThread() ? 1 : 0,
                          Application::IsInExecute() ? 1 : 0);
-        // 🔴 **6 巡目(2026-08-24)── 2 つの「メインスレッド」判定を並べる。**
-        //    ⚠ `Application::IsMainThread()`(`svapp.cxx:522`)は **osl の id**
-        //    (`mnMainThreadId` = `InitVCL` を走らせたスレッド)で判定するが、
-        //    `DoYield` が枝 A を選ぶのは **Qt の** thread(`QtInstance::IsMainThread()`,
-        //    `QtInstance.cxx:538` = `qApp->thread() == QThread::currentThread()`)である。
-        //    🔑 **この 2 つが食い違っていれば、import は自分で自分を待っている**
-        //    (= 直すのは述語であって握手ではない)。⚠ 一致していれば本当に別スレッドで、
-        //    そのときは握手そのものを作り直す ── **直し方が正反対なので、測ってから書く**。
-        //    ⚠ `mpDefInst` 経由で呼ぶ(`SalInstance::IsMainThread()` は virtual で、
-        //    Qt 版がその実体である)。
+        // 🔴 **2 つの「メインスレッド」判定を並べる**(6 巡目)── `osl` の id と
+        //    `QtInstance` の `qApp->thread()` は**別の述語**である。
         pkc3_idles_trace("idles:who", Application::IsMainThread() ? 1 : 0,
                          pSVData->mpDefInst->IsMainThread() ? 1 : 0,
                          rSchedCtx.mnIdlesLockCount);
         {
             SolarMutexReleaser releaser;
-            // 🔴 **8 巡目(2026-08-25)── 待ちに時限を付ける。ここだけが挙動を変える。**
-            //
-            // 7 巡目で構図が確定した:メインスレッドは `ProcessEvent(SalEvent::UserEvent)`
-            // に入ったきり返らず(`disp:ev` 1 件 / `disp:done` **0 件**。対照群 `.odt` は
-            // **10 / 10** で全部返る)、だから `Application::Execute()` の
-            // `while` が 2 周目に入らず(`execute:set` **0 件**)、ここが待っている
-            // 条件は**永久に立たない**。
-            //
-            // 🔑 上流のコメント(すぐ上)が待ちの目的を書いている ──
-            //   「メインが Execute へ戻るまで待てば、走っているアイドルが無いと言える」。
-            //   ⚠ **メインが user event の中で止まると、その前提ごと成立しない。**
-            //
-            // 🔑 **時限で失うのは 1 つだけ** ── 「既に走っているアイドルが
-            //   終わったこと」の保証である。「これからアイドルを遅らせる」ほうは
-            //   `mnIdlesLockCount` が**待ちの前に**増えており(すぐ上の
-            //   `osl_atomic_increment`)、その数の唯一の用途は
-            //   `scheduler.cxx` の `bDelayInvoking` なので、時限では失われない。
-            //
-            // 🔑 **道具は LO 自身のものを使う** ── `osl::Condition::wait` は
-            //   `const TimeValue*` を取る overload を持つ(`include/osl/conditn.hxx`)。
-            //   ⚠ `TimeValue` は `conditn.hxx` が `osl/time.h` を include するので
-            //   **ここでは追加の include が要らない**(`svdata.hxx` が
-            //   `osl::Condition` を宣言している = この型はもう見えている)。
-            //   ⚠ libc の `nanosleep` で回す形も書けるが、`<ctime>` が POSIX の
-            //   宣言を出すかは toolchain 次第で、**焼いてみるまで分からない** ──
-            //   確かめられない依存を足さない(2026-08-14 の `pthread_t` と同じ型)。
-            // ⚠ **値を決めつけない** ── 立ったのか諦めたのかを印に出す。
+            // 🔴 **時限は短い**(9 巡目)。待ちの目的は「走っているアイドルが
+            //    終わるのを待つ」で、**本当に終わるならループ 1 周(ミリ秒未満)**
+            //    である。⚠ 8 巡目の 2 秒は**桁を 4 つ取りすぎ**で、立たない筋では
+            //    まるごと損になっていた(20 枚で 32 秒)。100ms でも 100 倍の余裕がある。
+            // ⚠ `Condition::wait(TimeValue)` を使うのは、この計装が libc だけで
+            //    書かれているから ── `TimeValue` は `conditn.hxx` が `osl/time.h` を
+            //    include するので追加の include が要らない。
             TimeValue aPkc3Timeout;
-            aPkc3Timeout.Seconds = 2;
-            aPkc3Timeout.Nanosec = 0;
+            aPkc3Timeout.Seconds = 0;
+            aPkc3Timeout.Nanosec = 100 * 1000 * 1000;
             const osl::Condition::Result ePkc3Res
                 = pSVData->m_inExecuteCondtion.wait(&aPkc3Timeout);
-            // ⚠ この行が**出なければ**、待ちはそこで永久に止まっている
-            //    (`a=0` = `result_ok` / `a=2` = `result_timeout`)
+            // ⚠ `a=0` = `result_ok` / `a=2` = `result_timeout`
             pkc3_idles_trace("idles:woke", static_cast<int>(ePkc3Res), -1, -1);
+        }
         }
 """
 
