@@ -140,6 +140,7 @@ import { MERMAID_KIND } from '@adapter/ui/render/mermaid-hydrate';
 import { CHART_KIND } from '@adapter/ui/render/chart-raster';
 import { SameOriginGate } from '@adapter/platform/same-origin-grants';
 import { appExtensionGrants } from '@adapter/platform/extension-grants';
+import { appExtLinks } from '@adapter/platform/extension-links';
 import { connectExtension } from '@adapter/platform/extension-host';
 import {
   announceOpenedWindow,
@@ -1724,13 +1725,25 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
                     '設定でいつでも取り消せます)。\n\n開きますか?',
                   { okLabel: '目次を見せて開く' },
                 ),
-              connect: (win, nonce) =>
-                connectExtension({
-                  win,
-                  // 🔴 外殻に焼いたものと**同じ合図**(別々に作ると外殻が港を捨てる)
-                  nonce,
-                  metas: () => dispatcher.getState().entryMetas.values(),
-                }),
+              /**
+               * 🔴 **繋いだら台帳に載せる**(#195 / C-5 段②)。⚠ 段① まで、港は
+               *   `launchTile` のローカル変数で足りていた ── 段② は**外から**
+               *   (情報ペインの「このアプリへ送る」)起こすので、
+               *   「いまどの窓が開いているか」を引ける場所が要る。
+               * 🔑 `track()` は**外すことまで込みの link** を返すので、
+               *   `launchTile` は今までどおり `close()` を呼ぶだけでよい
+               *   (外し忘れようがない = 幽霊が残らない)。
+               */
+              connect: (win, nonce, app) =>
+                appExtLinks.track(
+                  app,
+                  connectExtension({
+                    win,
+                    // 🔴 外殻に焼いたものと**同じ合図**(別々に作ると外殻が港を捨てる)
+                    nonce,
+                    metas: () => dispatcher.getState().entryMetas.values(),
+                  }),
+                ),
               nonce: () => crypto.randomUUID(),
             },
           },

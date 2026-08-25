@@ -3,15 +3,21 @@
  *
  * 設計は `docs/development/pkc-extension-host-design-2026-08.md`。
  *
- * ## 段① で通るのは 2 語だけ
+ * ## 段②までで通るのは 3 語だけ
  *
  * | 種別 | 向き | 中身 |
  * |---|---|---|
  * | `hello` | 拡張 → ホスト | 挨拶。ホストは見取り図を返す |
  * | `projection` | ホスト → 拡張 | 見取り図(`ext-projection.ts`)。中身が変わったら押し直す |
+ * | `entry` | ホスト → 拡張 | 🔴 **実体 1 件**(`ext-delivery.ts`)。**user が押したときだけ**流れる |
  *
- * 🚫 **書き戻しも実体の受け渡しも段① には無い。** 語彙を先に広げない ── PKC2 は
- * write op が 9 種まで育ち、さらに DSL まで生えた(`docs/spec/pkc-message-api-v2.md`)。
+ * 🔴 **拡張 → ホストは、段② を足した後も `hello` 1 語のままである。**
+ * ⚠ ここが段② の要点である ── 実体が流れるようになっても、**始めるのは user** で
+ * あって拡張ではない。`get` のような取りに行く口を 1 つ足した瞬間、user のジェスチャは
+ * 「この 1 件を見せる」から「**以後ぜんぶ読んでよい**」に変わってしまう。
+ *
+ * 🚫 **書き戻しは段③。** 語彙を先に広げない ── PKC2 は write op が 9 種まで育ち、
+ * さらに DSL まで生えた(`docs/spec/pkc-message-api-v2.md`)。
  * ⚠ 知らない種別は**黙って捨てず**、捨てたことを呼び側に返す(無言の失敗を作らない)。
  *
  * ## ⚠ 封筒は「拡張が名乗るもの」ではない
@@ -23,6 +29,7 @@
  * 🔑 **pure module**。窓も DOM も知らない。
  */
 import type { ExtProjection } from './ext-projection';
+import type { ExtDeliveredEntry } from './ext-delivery';
 
 /** 港をやり取りするときの合図。⚠ 外殻の inline script と**同じ綴り**でなければ死ぬ。 */
 export const EXT_PORT_TAG = 'pkc3.ext.port';
@@ -34,7 +41,10 @@ export const EXT_READY_FLAG = '__pkcExtReady';
 export type ExtRequest = { readonly t: 'hello' };
 
 /** ホスト → 拡張。 */
-export type ExtResponse = { readonly t: 'projection'; readonly projection: ExtProjection };
+export type ExtResponse =
+  | { readonly t: 'projection'; readonly projection: ExtProjection }
+  /** 🔴 段②: user が情報ペインで押した 1 件。⚠ 押されない限り 1 通も流れない。 */
+  | { readonly t: 'entry'; readonly entry: ExtDeliveredEntry };
 
 /** 受け取った物の判定。⚠ **なぜ捨てたか**を必ず持たせる(無言で捨てない)。 */
 export type ExtParsed =
@@ -44,16 +54,28 @@ export type ExtParsed =
 /**
  * 拡張から来た `data` を 1 つの依頼に narrow する。
  *
- * ⚠ 段① は `hello` しか受けない ── 知らない種別は**名前を添えて**断る
+ * ⚠ 段②を足した後も `hello` しか受けない ── 知らない種別は**名前を添えて**断る
  *   (拡張の作者が「送ったのに何も起きない」で詰まるのが、いちばん困る形である)。
+ *
+ * 🔴 **取りに行こうとした相手には、無いのが意図であることまで言う。**
+ * ⚠ ただ「知らない種別です」と返すと、拡張の作者は**綴りを間違えた**と読んで
+ *   探し続ける ── 「無い」ことと「**わざと無い**」ことは別の情報である。
  */
 export function parseExtRequest(data: unknown): ExtParsed {
   if (!data || typeof data !== 'object' || Array.isArray(data))
     return { ok: false, why: '封筒が object ではありません' };
   const t = (data as { t?: unknown }).t;
   if (typeof t !== 'string') return { ok: false, why: 't がありません' };
-  if (t !== 'hello') return { ok: false, why: `知らない種別です: ${t}` };
-  return { ok: true, request: { t: 'hello' } };
+  if (t === 'hello') return { ok: true, request: { t: 'hello' } };
+  if (PULL_ATTEMPTS.has(t))
+    return {
+      ok: false,
+      why:
+        `「${t}」は在りません(意図的です)。` +
+        '実体は user が情報ペインの「このアプリへ送る」で 1 件ずつ渡します ── ' +
+        '拡張から取りに行く口はありません。',
+    };
+  return { ok: false, why: `知らない種別です: ${t}` };
 }
 
 /**
@@ -74,7 +96,37 @@ export function portHandoffMessage(nonce: string): {
   return { tag: EXT_PORT_TAG, nonce };
 }
 
+/**
+ * 🔴 **「取りに行く」つもりで投げられそうな綴り**(段②)。
+ *
+ * ⚠ 網羅ではない ── 網羅しようとすると、次に流行った綴りが漏れて
+ *   **漏れた側だけ不親切**になる。ここに在るのは「よく試される綴り」で、
+ *   外れても普通の「知らない種別です」に落ちるだけである(害が無い側)。
+ */
+const PULL_ATTEMPTS: ReadonlySet<string> = new Set([
+  'get',
+  'getEntry',
+  'fetch',
+  'read',
+  'readEntry',
+  'body',
+  'getBody',
+  'entry',
+  'deliver',
+  'request',
+]);
+
 /** 見取り図の返事を組む。⚠ 組み立ての口はここ 1 つ(§7)。 */
 export function projectionMessage(projection: ExtProjection): ExtResponse {
   return { t: 'projection', projection };
+}
+
+/**
+ * 🔴 **実体 1 件の封筒**(段②)。⚠ 組み立ての口はここ 1 つ(§7)。
+ *
+ * ⚠ 段① で踏んだ穴(封筒を 2 か所で組んで綴りがずれ、受け側が**黙って捨てた**)を
+ *   繰り返さないため、段② の封筒も**必ずここを通す**。
+ */
+export function deliveredMessage(entry: ExtDeliveredEntry): ExtResponse {
+  return { t: 'entry', entry };
 }

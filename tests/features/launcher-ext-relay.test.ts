@@ -18,6 +18,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { buildLauncherAppShell } from '../../src/features/launcher/app-shell';
 import { EXT_PORT_TAG, EXT_READY_FLAG } from '../../src/features/extension/ext-wire';
 import { connectExtension } from '../../src/adapter/platform/extension-host';
+import { deliveredEntryOf } from '../../src/features/extension/ext-delivery';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 
 /** 外殻の script だけを取り出して走らせる(器は自分で組む)。 */
@@ -187,6 +188,91 @@ describe('外殻の拡張中継 (#195 / C-5 段①)', () => {
     fromApp(frame, { t: 'hello' });
     for (let i = 0; i < 20 && toApp.length < 2; i += 1) await tick();
     expect(toApp, '`hello` が本物のホストへ通っていない').toHaveLength(2);
+    link.close();
+  });
+
+  /**
+   * 🔴 **段② も、本物どうしで 1 本通す**(#195 / C-5 段②)。
+   *
+   * ⚠ 段① で踏んだ穴(封筒を 2 か所で組んで綴りがずれ、外殻が**黙って捨てた**)は、
+   *   **語を足すたびに繰り返せる** ── `deliveredMessage` を新しく足した以上、
+   *   その封筒が外殻を通ることを**実物どうし**で見る必要がある。
+   * 🔑 中継役(外殻の script)は**そのまま流す通り道**なので、段② で 1 行も
+   *   変えていない ── ⚠ それを**確かめる**のがこの test である
+   *   (「変えなくても通るはず」は推測であって、観測ではない)。
+   * 🔑 観測点は**アプリ役に届いた本文**(港が繋がったか、ではない)。
+   */
+  it('🔴 本物のホストが渡す実体 1 件が、本物の外殻を通ってアプリまで届く', async () => {
+    const nonce = 'n-deliver';
+    const { toApp } = runShell({ nonce });
+    const meta: EntryMeta = {
+      lid: 'n1',
+      title: '渡すノート',
+      archetype: 'text',
+      createdAt: null,
+      updatedAt: null,
+      entryOrder: 1,
+      status: null,
+      date: null,
+      archived: false,
+      bodyChars: 5,
+    };
+    const win = {
+      [EXT_READY_FLAG]: 1,
+      postMessage(data: unknown, _origin: string, transfer?: readonly MessagePort[]) {
+        window.dispatchEvent(
+          Object.assign(new MessageEvent('message', { data }), { ports: transfer ?? [] }),
+        );
+      },
+    };
+    const link = connectExtension({
+      win: win as unknown as Window,
+      metas: () => [meta],
+      nonce,
+      pollMs: 0,
+    });
+    // ⚠ **対照群を先に置く** ── 見取り図が届いていない回は、以降の判定が無意味である
+    for (let i = 0; i < 20 && toApp.length === 0; i += 1) await tick();
+    expect(toApp, '見取り図すら届いていない(前提が崩れた)').toHaveLength(1);
+
+    expect(link.deliver(deliveredEntryOf(meta, '本文だよ')), '港が無い').toBe(true);
+    for (let i = 0; i < 20 && toApp.length < 2; i += 1) await tick();
+    expect(toApp, '実体がアプリまで届いていない(外殻が捨てた可能性)').toHaveLength(2);
+
+    const sent = toApp[1] as { tag: string; body: { t: string; entry: { body: string; title: string } } };
+    expect(sent.tag, '外殻の合図が違う').toBe(EXT_PORT_TAG);
+    expect(sent.body.t).toBe('entry');
+    expect(sent.body.entry.title).toBe('渡すノート');
+    expect(sent.body.entry.body, '本文が乗っていない').toBe('本文だよ');
+    link.close();
+  });
+
+  /**
+   * 🔴 **繋がる前に押したら、押せなかったと分かる**(黙って握り潰さない)。
+   * ⚠ これが `true` を返すと、user は「送った」と思ったまま何も起きない。
+   */
+  it('🔴 港が繋がる前の `deliver` は false を返す', () => {
+    const meta: EntryMeta = {
+      lid: 'n1',
+      title: 'まだ',
+      archetype: 'text',
+      createdAt: null,
+      updatedAt: null,
+      entryOrder: 1,
+      status: null,
+      date: null,
+      archived: false,
+      bodyChars: 0,
+    };
+    // ⚠ 印を立てない窓 ── 港は永久に渡らない
+    const link = connectExtension({
+      win: { postMessage: () => undefined } as unknown as Window,
+      metas: () => [meta],
+      nonce: 'n-never',
+      pollMs: 0,
+      timeoutMs: 0,
+    });
+    expect(link.deliver(deliveredEntryOf(meta, 'x'))).toBe(false);
     link.close();
   });
 
