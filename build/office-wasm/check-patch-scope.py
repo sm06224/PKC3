@@ -109,6 +109,11 @@ SPECS = [
                 "vcl/source/app/salusereventlist.cxx",
                 "bool SalUserEventList::DispatchUserEvents(",
             ),
+            # 🔴 8 巡目(2026-08-25)── user event の Link を呼ぶ所。
+            (
+                "vcl/source/window/winproc.cxx",
+                "static void ImplHandleUserEvent( ImplSVEvent* pSVEvent )",
+            ),
         ],
     ),
     (
