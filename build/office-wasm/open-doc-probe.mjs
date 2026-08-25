@@ -131,6 +131,88 @@ const STACKS = process.env.PKC3_STACKS === '1';
  * ⚠ `PKC3_IME` とは**同時に使わない**(どちらも版面を押して打つので混ざる)。
  */
 const REDRAW = process.env.PKC3_REDRAW === '1';
+
+/**
+ * 🔴 **打った字が「保存した中身」に入っているか**(#154 の次の一手 ①、2026-08-25)。
+ *
+ * ⚠ 版面の絵が変わったかは「**打った字が出た**」ではない ── 選択の色でも
+ * モードの変化でも変わる。だから**保存して中身を見る**:
+ *
+ * | 結果 | 読み方 |
+ * |---|---|
+ * | 入っている | **入力は LO に届いている** ── 残るのは描画の話 |
+ * | 入っていない | **そもそも届いていない** ── 描画ではなく入力の話 |
+ *
+ * 🔴 **中身は 1 バイトも外へ出さない**(機密資料の取り扱い 3)。
+ * 返すのは「**こちらが打った字が在るか**」の真偽と、読めた大きさだけである ──
+ * だから user の資料に対して回しても、中身を持ち出さない。
+ *
+ * ⚠ ODF は zip なので、`content.xml` を**箱の中で伸長してから**探す
+ * (deflate されるので生バイト検索では当たらない)。
+ * ⚠ 探すのは**空白を落とした形**でも見る ── ODF は書いた字を
+ * `<text:s/>` などで割ることがあるので、素の一致だけだと取りこぼす。
+ */
+const TYPED_IN_SAVED = (needle) => `(async () => {
+  const lo = window.__lo;
+  if (!lo || !lo.FS) return { err: 'no FS' };
+  let name = null;
+  try {
+    for (const n of lo.FS.readdir('/work')) {
+      if (n === '.' || n === '..') continue;
+      name = n;
+    }
+  } catch (e) { return { err: String(e).slice(0, 80) }; }
+  if (name === null) return { err: 'empty /work' };
+  let bytes;
+  try { bytes = lo.FS.readFile('/work/' + name); }
+  catch (e) { return { err: String(e).slice(0, 80) }; }
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  // EOCD を末尾から探す(コメント無しなら末尾 22 バイト)
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= 0 && i > bytes.length - 66000; i -= 1) {
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) return { err: 'no eocd', size: bytes.length };
+  let off = dv.getUint32(eocd + 16, true);
+  const count = dv.getUint16(eocd + 10, true);
+  let hit = null;
+  for (let k = 0; k < count; k += 1) {
+    if (dv.getUint32(off, true) !== 0x02014b50) break;
+    const method = dv.getUint16(off + 10, true);
+    const csize = dv.getUint32(off + 20, true);
+    const nlen = dv.getUint16(off + 28, true);
+    const elen = dv.getUint16(off + 30, true);
+    const clen = dv.getUint16(off + 32, true);
+    const lho = dv.getUint32(off + 42, true);
+    const nm = new TextDecoder().decode(bytes.subarray(off + 46, off + 46 + nlen));
+    if (nm === 'content.xml') hit = { method: method, csize: csize, lho: lho };
+    off += 46 + nlen + elen + clen;
+  }
+  if (hit === null) return { err: 'no content.xml', size: bytes.length };
+  const lnlen = dv.getUint16(hit.lho + 26, true);
+  const lelen = dv.getUint16(hit.lho + 28, true);
+  const start = hit.lho + 30 + lnlen + lelen;
+  const raw = bytes.subarray(start, start + hit.csize);
+  let xml;
+  try {
+    if (hit.method === 0) {
+      xml = new TextDecoder().decode(raw);
+    } else {
+      const ds = new DecompressionStream('deflate-raw');
+      const buf = await new Response(new Blob([raw]).stream().pipeThrough(ds)).arrayBuffer();
+      xml = new TextDecoder().decode(new Uint8Array(buf));
+    }
+  } catch (e) { return { err: 'inflate: ' + String(e).slice(0, 60), size: bytes.length }; }
+  const needle = ${JSON.stringify(needle)};
+  const bare = needle.split(' ').join('');
+  const stripped = xml.split(' ').join('');
+  return {
+    size: bytes.length,
+    xmlChars: xml.length,
+    // 🔑 返すのは真偽だけ ── 中身は出さない
+    found: xml.indexOf(needle) >= 0 || stripped.indexOf(bare) >= 0,
+  };
+})()`;
 /**
  * 編集可能要素と、パッチが書く診断(`obj1-win1-panel1-accept0` の形)。
  * ⚠ 読み方は `ime-probe.mjs` と**同じ 1 つ**にする(2 か所で別々に決めない)。
@@ -696,9 +778,48 @@ try {
       result.redraw = { clicked: false };
       if (box) {
         const clip = { x: box.x, y: box.y, width: box.w, height: box.h };
-        // ⚠ 版面の**中ほど**を押す(端は枠や定規に当たる)
-        await page.mouse.click(box.x + box.w * 0.4, box.y + box.h * 0.35);
+        /**
+         * ⚠ 版面の**中ほど**を押す(端は枠や定規に当たる)。
+         *
+         * 🔴 **入り方はアプリで違う**(2026-08-25 に踏んだ)。Writer は 1 回押せば
+         * 本文にカーソルが入るが、**Impress は 1 回では枠を選ぶだけ**で、
+         * 字を打つには**ダブルクリック**が要る。
+         * ⚠ ここを揃えると「Impress には入力が届かない」という**存在しない結論**が出る
+         * ── 届いていないのは LO ではなく**この probe の入り方**である。
+         * 🔑 だから回数を外から選べるようにし、**結果に何回押したかを併記する**
+         *   (どの入り方で測ったか分からない数字は読めない)。
+         */
+        const entry = process.env.PKC3_REDRAW_ENTRY ?? 'click';
+        if (entry === 'tab') {
+          /**
+           * 🔑 **位置に依らない入り方。** 押す座標に枠が無ければ、
+           * どれだけ押しても字は入らない ── それは LO の話ではなく
+           * **こちらの座標の話**である。Impress は `Tab` で枠を順に選び、
+           * `F2` で中へ入れるので、**版面のどこに枠があっても届く**。
+           */
+          await page.keyboard.press('Escape');
+          await page.waitForTimeout(500);
+          await page.keyboard.press('Tab');
+          await page.waitForTimeout(800);
+          await page.keyboard.press('F2');
+        } else {
+          /**
+           * ⚠ **押す所は器の比で決まる ── アプリで意味が違う**(2026-08-25 に踏んだ)。
+           * Writer は版面が器のほとんどを占めるので 0.4 / 0.35 で本文に当たるが、
+           * **Impress は左にスライド一覧、右にサイドバーが在る**ので、同じ比が
+           * **枠の外**に落ちる。⚠ そこで打っても字が入らないのは当たり前で、
+           * それを「Impress には届かない」と読むと**存在しない結論**になる。
+           * 🔑 だから外から選べるようにし、**結果に押した比を併記する**。
+           */
+          const fx = Number(process.env.PKC3_REDRAW_X ?? '0.4');
+          const fy = Number(process.env.PKC3_REDRAW_Y ?? '0.35');
+          result.redraw.at = { x: fx, y: fy };
+          await page.mouse.click(box.x + box.w * fx, box.y + box.h * fy, {
+            clickCount: entry === 'dblclick' ? 2 : 1,
+          });
+        }
         result.redraw.clicked = true;
+        result.redraw.entry = entry;
         await page.waitForTimeout(3000);
         const before = await framesOf(clip);
         // ⚠ 1 文字では足りない ── 見えていても気づけない。**目に見える量**を打つ
@@ -719,6 +840,22 @@ try {
          */
         await page.waitForTimeout(2500);
         const idle = await framesOf(clip);
+        /**
+         * 🔴 **保存して、打った字が中身に入っているかを見る**(#154 の次の一手 ①)。
+         *
+         * ⚠ 対の 2 本(`.odt` / `.odp`)は**どちらも ODF** なので、非 ODF の
+         *   「形式を保ちますか」ダイアログは出ない ── 1 度の実験で 2 つを
+         *   主張しないための選び方である(#225 で測ってある)。
+         * ⚠ `Escape` の**後**に保存する ── 実機の症状は「Escape でいっぺんに
+         *   現れる」なので、その一手を挟んだ後の状態を保存の対象にする。
+         */
+        await page.keyboard.press('Control+s');
+        await page.waitForTimeout(6000);
+        try {
+          result.redraw.saved = await page.evaluate(TYPED_IN_SAVED('HELLO 12345'));
+        } catch (e) {
+          result.redraw.saved = { err: safeErr(e) };
+        }
         result.redraw.landedWhileTyping = swapped(before, typed);
         result.redraw.revealedAfterEscape = swapped(typed, escaped);
         result.redraw.idleChanged = swapped(escaped, idle);
