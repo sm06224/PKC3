@@ -842,3 +842,63 @@ test('🔴 実打鍵で括弧を閉じても二重にならない (#299 / cowork
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **読む面を Alt クリックすると、その塊が開いた状態で編集に入る**(#395 段③)。
+ *
+ * ⚠ **unit では 1 度も走らない層である** ── 予約(`RowSwap.openAt`)を果たすのは
+ *   ワーカーの描き直しが着いた後(`update` → `openPending`)で、happy-dom には
+ *   その往復が無い。unit が見ているのは `editOpenAt` が state に載るところまでで、
+ *   **押した塊が本当に開くか**はここでしか確かめられない
+ *   (CLAUDE.md §2「本命の分岐を、unit は 1 度も通らないことがある」)。
+ */
+test('🔴 読む面を Alt クリックすると、押した段落が開いて編集に入る (#395 段③)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoLive(page);
+  await openLive(page, '# 題\n\n最初の段落です。\n\n2 つめの段落です。\n');
+  // 読む面へ戻す(ここからが本題)
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  const read = page.locator('[data-pkc-field="detail-body"]');
+  await expect(read.locator('p').nth(1)).toContainText('2 つめの段落です。');
+
+  // 🔴 2 つめの段落を Alt クリック
+  const box = await read.locator('p').nth(1).boundingBox();
+  expect(box, '押す所が見えていない').not.toBeNull();
+  await page.keyboard.down('Alt');
+  await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await page.keyboard.up('Alt');
+
+  // ① 編集に入っている
+  const live = page.locator('[data-pkc-region="editor-live"]');
+  await expect(live, '編集に入っていない').toBeVisible();
+  // ② 🔴 **押した段落が開いている**(先頭の段落ではない ── ここが本題)
+  const row = live.locator('[data-pkc-field="row-source"]');
+  await expect(row, '押した塊が開いていない').toHaveValue('2 つめの段落です。', {
+    timeout: 8000,
+  });
+  // ③ 周りは描画のまま(1 面の性質は保たれている)
+  await expect(live.locator('h1')).toHaveText('題');
+  expect(errors).toEqual([]);
+});
+
+/**
+ * ⚠ **素のクリックでは入らない**(browse-first の裁定 2026-08-18 を変えない)。
+ * 🔑 上の test と**対で置く** ── 片方だけだと「Alt が効いた」のか
+ *   「何を押しても編集に入る」のかが区別できない(対照群)。
+ */
+test('🔴 素のクリックでは編集に入らない (#395 段③ の対照群)', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoLive(page);
+  await openLive(page, '# 題\n\n最初の段落です。\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  const read = page.locator('[data-pkc-field="detail-body"]');
+  await expect(read.locator('p').first()).toContainText('最初の段落です。');
+  await clickReal(page, '[data-pkc-field="detail-body"] p');
+  await expect(
+    page.locator('[data-pkc-region="editor-live"]'),
+    '素のクリックで編集に入った',
+  ).toHaveCount(0);
+});

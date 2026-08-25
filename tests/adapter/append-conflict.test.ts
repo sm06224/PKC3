@@ -104,7 +104,7 @@ describe('追記が別の窓の書込を消さない(#178)', () => {
         disk['a'] = '# 見出し\n\n最初の本文\n\n別の窓が書いた行\n';
       },
     });
-    b.d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'a', text: '追記した行', heading: null });
+    b.d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'a', text: '追記した行', heading: null, target: null });
     await tick(30);
 
     // ① 2 回試している(1 回目は断られ、2 回目が通る)
@@ -120,7 +120,7 @@ describe('追記が別の窓の書込を消さない(#178)', () => {
   /** ⚠ **対照群** ── 重なっていなければ 1 回で通る(やり直しが常時走らない)。 */
   it('⚠ 重なっていなければ 1 回で書く', async () => {
     const b = bench('# 見出し\n\n最初の本文\n');
-    b.d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'a', text: '追記した行', heading: null });
+    b.d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'a', text: '追記した行', heading: null, target: null });
     await tick(30);
     expect(b.attempts.map((a) => a.conflict), '重なっていないのにやり直した').toEqual([false]);
     expect(b.reads.length, '要らない読み直しをしている').toBe(1);
@@ -158,7 +158,7 @@ describe('追記が別の窓の書込を消さない(#178)', () => {
     });
     connectStoreEffects(d, port);
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a')], relations: [] });
-    d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'a', text: '追記', heading: null });
+    d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'a', text: '追記', heading: null, target: null });
     await tick(30);
 
     expect(n, 'やり直しが 1 回で止まっていない(無限に回る)').toBe(2);

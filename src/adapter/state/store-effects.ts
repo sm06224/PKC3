@@ -12,6 +12,11 @@ import { PersistOnce, type PersistState } from '@adapter/platform/storage-persis
 // 🔴 追記の楽観検査(#178)── 「読んだ本文」を worker と突き合わせるための指紋
 import { contentHash64Hex } from '@adapter/platform/storage/content-hash';
 import { appendBlock } from '@features/markdown/text-ops';
+import {
+  appendIntoSection,
+  insertedLines,
+  resolveAppendAt,
+} from '@features/markdown/append-target';
 import { applyBodyRewrite } from '@features/markdown/body-rewrite';
 import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
 import { buildTiles, withBuiltinTiles, type TileSource } from '@features/launcher/tiles';
@@ -1076,8 +1081,27 @@ export function connectStoreEffects(
              */
             const tryAppend = async (
               base: string,
-            ): Promise<{ stamps: EntryStamps; newBody: string; ext: FlavorExtract } | 'empty'> => {
-              const newBody = appendBlock(base, ev.heading, ev.text);
+            ): Promise<
+              | { stamps: EntryStamps; newBody: string; ext: FlavorExtract; base: string }
+              | 'empty'
+              | 'missing'
+            > => {
+              /**
+               * 🔴 **入り先は、そのつど本文から解く**(#395 段①)。
+               *
+               * ⚠ 上のとおりこの関数は**足し直しでもう一度呼ばれる** ── 行番号を
+               *   握っていると、別の窓が上に足したときに**違う節へ入る**。
+               *   だから印(slug)から毎回解き直す。
+               * 🔴 **解けなければ末尾へ落とさない** ── user が「決定事項」を選んだのに
+               *   黙って文末へ入るのが、この機構でいちばん悪い負け方である。
+               */
+              const newBody =
+                ev.target === null
+                  ? appendBlock(base, ev.heading, ev.text)
+                  : resolveAppendAt(base, ev.target) === null
+                    ? null
+                    : appendIntoSection(base, ev.target, ev.heading, ev.text);
+              if (newBody === null) return 'missing';
               if (newBody === base) return 'empty';
               const ext = extractMeta(ev.archetype, newBody);
               const stamps = await store.persistEntry(
@@ -1093,24 +1117,31 @@ export function connectStoreEffects(
                 },
                 { expectHash: contentHash64Hex(base) },
               );
-              return { stamps, newBody, ext };
+              return { stamps, newBody, ext, base };
             };
 
+            // ⚠ **理由を分けて言う**(「入りませんでした」だけでは押し直すしかない)
+            const refuse = (r: 'empty' | 'missing'): void =>
+              fail(
+                r === 'empty'
+                  ? '追記する内容がありません'
+                  : '選んだ入り先の見出しが本文に見つかりません(見出しが変わった可能性があります)。入り先を選び直してください',
+              );
             let attempt = await tryAppend(body);
-            if (attempt === 'empty') return fail('追記する内容がありません');
+            if (attempt === 'empty' || attempt === 'missing') return refuse(attempt);
             if (attempt.stamps.conflict === true) {
               // ⚠ **読み直してから**足し直す(古い基底で再送しない)
               const fresh = await store.getBody(ev.lid);
               if (disposed) return;
               if (fresh === null) return fail(`追記できません(ノートが見つかりません: ${ev.lid})`);
               attempt = await tryAppend(fresh);
-              if (attempt === 'empty') return fail('追記する内容がありません');
+              if (attempt === 'empty' || attempt === 'missing') return refuse(attempt);
               if (attempt.stamps.conflict === true)
                 return fail(
                   '別の窓がこのノートを書き替えたため、追記できませんでした(もう一度押してください)',
                 );
             }
-            const { stamps, newBody, ext } = attempt;
+            const { stamps, newBody, ext, base } = attempt;
             if (disposed) return;
             dispatcher.dispatch({
               type: 'ENTRY_APPENDED',
@@ -1120,6 +1151,15 @@ export function connectStoreEffects(
               status: ext.status,
               date: ext.date,
               archived: ext.archived,
+              /**
+               * 🔴 **足した行を「結果から」取り出す**(#395 段①、取り消しのため)。
+               *
+               * ⚠ 挿し込みの規則(前後に空行を足す作法)を**ここで書き写さない** ──
+               *   写すと規則が 2 か所になり、片方だけ古くなる(§7)。
+               * ⚠ `base` は**実際に書き込みの基底になった本文**である ── 足し直しが
+               *   起きた回は読み直した側で、そこから導かないと取り消しが空振りする。
+               */
+              inserted: insertedLines(base, newBody),
             });
             stamp(ev.lid, stamps);
           } catch (e) {

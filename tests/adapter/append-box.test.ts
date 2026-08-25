@@ -275,7 +275,7 @@ describe('🔴 競合ロック(P8 段⑧、user 指示 2026-08-03)', () => {
     expect(s.q('[data-pkc-action="commit-edit"]')).not.toBeNull();
 
     // backstop: 直に投げても通らない
-    s.d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'log', text: 'x', heading: null });
+    s.d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'log', text: 'x', heading: null, target: null });
     await tick();
     expect(s.persisted, '編集中に裏で書けてしまった').toHaveLength(0);
   });
@@ -344,7 +344,7 @@ describe('🔴 競合ロック(P8 段⑧、user 指示 2026-08-03)', () => {
     type(s.q, '1 通目');
     s.q('[data-pkc-action="append-entry"]')!.click();
     await tick();
-    s.d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'log', text: '2 通目', heading: null });
+    s.d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'log', text: '2 通目', heading: null, target: null });
     gate.pass();
     await tick();
     expect(s.persisted).toHaveLength(1);

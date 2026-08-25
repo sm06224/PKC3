@@ -90,6 +90,26 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-25-append-into-section',
+    title: '追記を、節の中へ入れられるようになりました',
+    items: [
+      '本文の下の追記欄に「入り先」が増えました。既定は末尾で、これまでと同じです。',
+      '開くとそのノートの見出しが並びます。選ぶと、その見出しの節の終わりに入ります ── 本文を開かずに書けます。',
+      '選んだ入り先は、続けて追記してもそのままです。同じ節へ何度でも足せます。',
+      '追記が通ると「元に戻す」が出ます。直前に足した内容だけを、本文を開かずに取り除けます。',
+      '押すまでの間にその見出しが消えていたら、足さずに理由を出します。黙って末尾へ入ることはありません。',
+    ],
+  },
+  {
+    id: '2026-08-25-alt-click-edit',
+    title: '本文を Alt クリックすると、その行から編集に入ります',
+    items: [
+      '読んでいて「この 1 行だけ直したい」というときの近道です。押した行が開いた状態で編集に入ります。',
+      'これまでは「編集」を押してから、もう一度その行を探して押す必要がありました。',
+      '素のクリックはこれまでどおり何も起きません。リンクやボタンの上でも効きません。',
+    ],
+  },
+  {
     id: '2026-08-25-folder-export',
     title: 'フォルダごと書き出せるようになりました',
     items: [
@@ -268,31 +288,11 @@ export const NOTICES: readonly Notice[] = [
       '保存していない文書があると、開き直したときに失われます。帯にもそう書いてあるので、先に保存してから押してください。',
     ],
   },
-  {
-    id: '2026-08-23-backlinks',
-    title: '右の列に「参照元」が増えました',
-    items: [
-      'これまで、あるノートへリンクを張ることはできても、逆から辿ることはできませんでした。書けば書くほど、書いたことが見つからなくなります。',
-      '右の情報ペインに「参照元」が増えました。本文からこのノートへリンクしているノートが並び、押すとそこへ移れます。',
-      '上の「関係」とは別物です。あちらは手で張った関係、こちらは本文のリンクから自動で拾ったものなので、消すボタンはありません。',
-      '本文は出たままです。変わるのは右の列だけです。',
-    ],
-  },
-  {
-    id: '2026-08-23-today-note',
-    title: '左の列に「今日」が増えました',
-    items: [
-      '思いついたことを書きとめたいときに、まず「どこに書くか」を決めるのが面倒でした。',
-      '「+ ノート」の隣に「今日」が増えました。押すと、今日の日付を題名にしたノートが開きます。まだ無い日は、その場で作ります。',
-      'その日に何度押しても、開くのは同じ 1 件です。ただのノートなので、いつもどおり書けます。',
-      '予定の面には出ません。予定にしたいときは、これまでどおり本文に @2026-08-25 のように書いてください。',
-    ],
-  },
 ];
 
 /**
  * ⚠ **落としたぶんの原本は CHANGELOG に在る**(上限 20 件を超えたので、古いほうから
  *   `2026-08-16-office-save-to-pkc` / `2026-08-17-office-save-same-note`(2026-08-19)、
  *   `2026-08-19-dual-pane-app`(2026-08-22)、
- *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes`(2026-08-25)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
+ *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note`(2026-08-25)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
  */

@@ -473,6 +473,25 @@ export interface AppState {
    */
   writeLock: { lid: string } | null;
   /**
+   * 🔴 **直前の追記**(#395 段①。user 指示 2026-08-23「**片道の操作を作らない**」)。
+   *
+   * 追記は本文を開かずに足せるので、**外すのも本文を開かずにできる**必要がある。
+   * ⚠ 持つのは**足した行そのもの**で、行番号ではない(取り消すまでに別の窓が
+   *   上へ足していれば番号はずれる)。
+   * ⚠ **1 手だけ**持つ ── 積むと「どれが消えるのか」が user から見えなくなる。
+   */
+  lastAppend: { lid: string; lines: readonly string[] } | null;
+  /**
+   * 🔴 **編集に入った瞬間に開く行**(#395 段③)。`null` = どこも開かない(既定)。
+   *
+   * > 読んでいる本文の「この行」を直したい ── 修飾キー + クリックで入る。
+   *
+   * ⚠ 座標は**frontmatter を外した側**(ライブエディタと読む面が同じ基準を使う)。
+   * ⚠ `START_EDIT` のたびに**必ず入れ替わる** ── 残しておくと、次に普通に
+   *   「編集」を押したときに**前に押した行が勝手に開く**。
+   */
+  editOpenAt: number | null;
+  /**
    * タイル設定の書込が飛んでいる数(P8 段⑯)。
    *
    * 🔴 `writeLock` を借りると、**連続した設定変更が無言で落ちる**(登録 →
@@ -552,6 +571,8 @@ export const initialState: AppState = {
   trashPanel: null,
   linkedFiles: new Map(),
   writeLock: null,
+  lastAppend: null,
+  editOpenAt: null,
   tileWrite: null,
   lockGen: 0,
   error: null,
@@ -640,7 +661,14 @@ export type UserAction =
    * ⚠ `body === null` は失敗(書けなかった)── **ロックは必ず解く**。
    */
   | { type: 'APP_TILE_SAVED'; lid: string; gen: number; body: string | null }
-  | { type: 'START_EDIT' }
+  | {
+      type: 'START_EDIT';
+      /**
+       * 🔴 **入った瞬間に開く行**(#395 段③)。省略 = どこも開かない(これまでどおり)。
+       * ⚠ 座標は**frontmatter を外した側** ── 読む面の `data-pkc-source-line` と同じ基準。
+       */
+      atLine?: number;
+    }
   | { type: 'UPDATE_OPEN_BODY'; body: string }
   | { type: 'COMMIT_EDIT' }
   | { type: 'CANCEL_EDIT' }
@@ -683,7 +711,22 @@ export type UserAction =
    * ⚠ `heading` は binder が作って渡す(reducer は純粋のまま ── `Date` を呼ばない)。
    * ノートは `null`(見出しを勝手に足さない)。
    */
-  | { type: 'APPEND_TO_ENTRY'; lid: string; text: string; heading: string | null }
+  | {
+      /**
+       * 🔴 **直前の追記を取り消す**(#395 段①。user 指示 2026-08-23
+       * 「**片道の操作を作らない**」)。
+       * ⚠ 独自の書込経路を作らない ── `REQUEST_BODY_REWRITE` を通る(§7)。
+       */
+      type: 'UNDO_APPEND';
+    }
+  | {
+      type: 'APPEND_TO_ENTRY';
+      lid: string;
+      text: string;
+      heading: string | null;
+      /** 入り先の印(#395 段①)。`null` = 末尾。 */
+      target: string | null;
+    }
   /**
    * ランチャーのタイル設定(P8 段⑭)。
    *
@@ -945,6 +988,13 @@ export type SystemCommand =
       status: string | null;
       date: string | null;
       archived: boolean;
+      /**
+       * 🔴 **足した行そのもの**(#395 段①、取り消しのため)。
+       *
+       * ⚠ **行番号ではない** ── 取り消すまでの間に別の窓が上へ足していれば
+       *   番号はずれる。⚠ 純粋な挿入でなければ `null`(取り消しを出さない)。
+       */
+      inserted: readonly string[] | null;
     }
   | {
       /** 追記が失敗した。⚠ **ロックは必ず解く**(失敗で握ったままにしない)。 */
@@ -1073,6 +1123,14 @@ export type DomainEvent =
       entryOrder: number;
       heading: string | null;
       text: string;
+      /**
+       * 🔴 **入り先の印**(#395 段①)。`null` = 末尾(これまでと同じ)。
+       *
+       * ⚠ **行番号ではなく印**である ── effect は disk から読み直すので、
+       *   行番号を渡すと**別の窓の書込のあとで違う場所へ入る**。
+       * ⚠ 解けなければ effect が**断る**(末尾へ落とさない)。
+       */
+      target: string | null;
     }
   | { type: 'REQUEST_DELETE'; lid: string }
   | {
@@ -1756,7 +1814,17 @@ function reduceCore(
       // ⚠ 編集がロックを握ることは**書かない** ── `phase === 'editing'` が既に
       // それを表している(`bodyLockOf`)。ここで別の field に写すと 2 つ目の真実
       return {
-        state: { ...state, phase: 'editing', revisionPanel: null },
+        state: {
+          ...state,
+          phase: 'editing',
+          revisionPanel: null,
+          /**
+           * 🔴 **押した行を持って編集へ入る**(#395 段③)。
+           * ⚠ **毎回入れ替える**(`?? null`)── 前回の値を残すと、普通に
+           *   「編集」を押しただけで**前に押した行が開く**。
+           */
+          editOpenAt: action.atLine ?? null,
+        },
         /**
          * 🔴 **編集に入るたびに雛形を集め直す**(#196 / B-2)。
          *
@@ -1973,6 +2041,7 @@ function reduceCore(
             entryOrder: meta.entryOrder,
             heading: action.heading,
             text: action.text,
+            target: action.target,
           },
         ],
       };
@@ -2049,8 +2118,46 @@ function reduceCore(
            *   板から「やること」を足す口を作ると、これが正面の欠陥になる。
            */
           taskScan: refreshTaskCards(state.taskScan, action.lid, action.body),
+          /**
+           * 🔴 **直前の 1 手だけ覚える**(#395 段①)── 「元に戻す」の材料。
+           * ⚠ 純粋な挿入でなかった回は `null` に落とす ── 前の追記の材料を
+           *   **残したままにしない**(古い材料で消すと、別の所が消える)。
+           */
+          lastAppend:
+            action.inserted === null
+              ? null
+              : { lid: action.lid, lines: action.inserted },
         },
         events: [],
+      };
+    }
+    /**
+     * 🔴 **直前の追記を取り消す**(#395 段①)。
+     *
+     * ⚠ **消すのは「足した行そのもの」**で、行番号ではない ── 取り消すまでの間に
+     *   別の窓が上へ足していれば番号はずれる。見つからなければ
+     *   `applyBodyRewrite` が `null` を返して effect が断る(黙って別の所を消さない)。
+     * ⚠ **1 手で使い切る**(`lastAppend` を落とす)── 2 度押しで、同じ字の
+     *   別の行まで消えるのを止める。
+     */
+    case 'UNDO_APPEND': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      const last = state.lastAppend;
+      if (!last) return { state, events: [] };
+      const meta = state.entryMetas.get(last.lid);
+      if (!meta) return { state: { ...state, lastAppend: null }, events: [] };
+      return {
+        state: { ...state, lastAppend: null },
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            rewrite: { kind: 'undo-append', lines: last.lines },
+          },
+        ],
       };
     }
     case 'APPEND_FAILED': {

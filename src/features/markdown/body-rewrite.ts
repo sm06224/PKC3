@@ -16,9 +16,24 @@ import { spliceFrontmatterKeys, type FrontmatterValue } from './frontmatter';
 import { formatLineDate, insertionForLineDate, readLineDate } from '../schedule/line-date';
 import { isScheduleDate } from '../schedule/schedule-date';
 import type { RepeatUnit } from '../schedule/repeat';
+import { removeInsertedLines } from './append-target';
 
 /** 何をするか。⚠ **やり直せる形で持つ**(未達 commit との合流に要る)。 */
 export type BodyRewrite =
+  | {
+      /**
+       * 🔴 **追記を取り消す**(#395 段①。user 指示 2026-08-23
+       * 「**片道の操作を作らない**」)。
+       *
+       * ⚠ **行番号を持たない** ── 追記のあとに別の窓が上へ足していれば番号はずれる。
+       *   持つのは**足した行そのもの**で、それが在る所だけを消す
+       *   (`removeInsertedLines`)。
+       * ⚠ 見つからなければ `applyBodyRewrite` が `null` を返す = **断る**
+       *   ── 「取り消したつもりで別の行が消えた」を作らない。
+       */
+      kind: 'undo-append';
+      lines: readonly string[];
+    }
   | {
       kind: 'frontmatter';
       /** ⚠ `undefined` はその鍵を**消す**(`spliceFrontmatterKeys` の作法)。 */
@@ -109,6 +124,7 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
     return next === body ? null : next;
   }
   if (rewrite.kind === 'line-date') return rewriteLineDate(body, rewrite);
+  if (rewrite.kind === 'undo-append') return removeInsertedLines(body, rewrite.lines);
   if (rewrite.kind === 'repeat-done') return materializeRepeat(body, rewrite);
   const lines = body.split('\n');
   const line = lines[rewrite.line];

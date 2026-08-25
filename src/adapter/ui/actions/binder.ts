@@ -608,6 +608,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'start-edit',
   'commit-edit',
   'append-entry',
+  // ⚠ 追記と**同じ経路**(`REQUEST_BODY_REWRITE`)を撃つので、同じ門をくぐらせる
+  'undo-append',
   'toggle-todo',
   /**
    * 🔴 **本文を書く点では `toggle-todo` と同じ**(2026-08-19 のレビュー W-4)。
@@ -1661,6 +1663,13 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 日時見出しは**ここで作る**(reducer は純粋のまま ── `Date` を呼ばない)。
    * ⚠ 欄は**空にしない** ── 通ったときだけ描画側が空にする(失敗で打鍵が消えない)。
    */
+  /**
+   * 🔴 **直前の追記を外す**(#395 段①)。
+   * ⚠ 独自の書込経路を持たない ── reducer が `REQUEST_BODY_REWRITE` を出す(§7)。
+   */
+  'undo-append': (dispatcher) => {
+    dispatcher.dispatch({ type: 'UNDO_APPEND' });
+  },
   'append-entry': (dispatcher, _target, _services, root) => {
     const s = dispatcher.getState();
     const lid = s.selectedLid;
@@ -1672,11 +1681,19 @@ const ACTIONS: Record<string, ActionHandler> = {
     // 同じ判定を持っており、3 か所(binder / reducer / `appendBlock`)が互いに
     // 救い合って**どれ 1 つ消しても test が緑**だった。判定は下 2 つに寄せる:
     // reducer =「ロックも取らずに断る」、`appendBlock` =「本文を変えない」
+    /**
+     * 🔴 **入り先**(#395 段①)。空 = 末尾(これまでと同じ)。
+     * ⚠ ここでは**印をそのまま渡す** ── 行番号に直さない。effect は disk から
+     *   読み直すので、行番号は読み直した先で別の場所を指す。
+     */
+    const target =
+      root.querySelector<HTMLSelectElement>('[data-pkc-field="append-target"]')?.value ?? '';
     dispatcher.dispatch({
       type: 'APPEND_TO_ENTRY',
       lid,
       text,
       heading: appendHeadingFor(archetype!, new Date()),
+      target: target === '' ? null : target,
     });
   },
   /**
@@ -2619,6 +2636,50 @@ export function bindActions(
     }
   };
   const onClick = (ev: Event) => {
+    /**
+     * 🔴 **読んでいる本文の「この行」から編集に入る**(#395 段③。PKC2 の
+     * `action-binder.ts:1329-1412` に在った動線 ── 2026-07-03 の user request)。
+     *
+     * > user の物語: 長い議事録を読んでいて、この 1 行だけ直したい。
+     * > いまは「編集」を押してから、もう一度その行を探して押す(2 手)。
+     *
+     * 🔴 **早期 return より前に置く**(2 稿目。test が拾った)── 下の 1 行は
+     *   `[data-pkc-action]` の中でなければ降りるが、**本文の段落は action を
+     *   持たない**。後ろに置くと、この動線は**1 度も走らない**。
+     * ⚠ **素のクリックの意味は変えない** ── PKC3 は browse-first(「開く = 閲覧」は
+     *   2026-08-18 の裁定)。修飾キーを押しているときだけである。
+     * ⚠ **`Alt` だけ**(`Ctrl` / `Meta` / `Shift` が一緒なら降りる)── `Ctrl+Alt` は
+     *   **AltGr** であり、その組で奪うと**記号が打てない配列の人**のクリックを壊す
+     *   (binder の他の 2 か所と同じ理由)。`Ctrl` / `Meta` 単独はリンクの
+     *   「新しいタブで開く」を奪う。
+     * ⚠ **押せる物の上では降りる** ── リンク・ボタン・チェックの印は、その場に
+     *   自分の意味を持っている(奪うと、その動線が 1 つ死ぬ)。
+     * 🔑 行は読む面の刻印(`data-pkc-source-line`)から引く ── **新しい逆引きを
+     *   作らない**(`copy-source.ts` と同じ印を読む。§7)。
+     * ⚠ 刻印が引けなければ**何もしない** ── 当てずっぽうで編集に入らない。
+     */
+    const alt = ev as MouseEvent;
+    if (alt.altKey && !alt.ctrlKey && !alt.metaKey && !alt.shiftKey) {
+      const hit = ev.target as HTMLElement | null;
+      const bodyHost = hit?.closest('[data-pkc-field="detail-body"]') ?? null;
+      const mark = hit?.closest('[data-pkc-source-line]') ?? null;
+      const own = hit?.closest('a[href], button, [data-pkc-action]') ?? null;
+      if (
+        bodyHost !== null &&
+        mark !== null &&
+        root.contains(bodyHost) &&
+        bodyHost.contains(mark) &&
+        (own === null || !bodyHost.contains(own)) &&
+        dispatcher.getState().phase === 'ready'
+      ) {
+        const line = Number(mark.getAttribute('data-pkc-source-line'));
+        if (Number.isInteger(line) && line >= 0) {
+          ev.preventDefault();
+          dispatcher.dispatch({ type: 'START_EDIT', atLine: line });
+          return;
+        }
+      }
+    }
     const el = (ev.target as HTMLElement | null)?.closest<HTMLElement>(
       '[data-pkc-action]',
     );

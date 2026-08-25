@@ -274,7 +274,7 @@ describe('タイル設定を書く(P8 段⑭)', () => {
     //    (実際それで変異が生き残った)。止まったことを直接見る
     const seen: string[] = [];
     const off = h.d.onEvent((e) => seen.push(e.type));
-    h.d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'a1', text: 'x', heading: null });
+    h.d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'a1', text: 'x', heading: null, target: null });
     expect(h.d.getState().writeLock, 'writeLock が立っていない(前提が崩れた)').not.toBeNull();
     h.d.dispatch({ type: 'SET_APP_TILE', lid: 'a1', registered: true });
     expect(seen.filter((t) => t === 'REQUEST_TILE_UPDATE'), '書込中なのに受け付けた').toEqual([]);

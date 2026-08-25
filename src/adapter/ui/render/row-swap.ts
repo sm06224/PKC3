@@ -484,6 +484,21 @@ export class RowSwap {
     if (idx !== null) this.activateLine(idx, p.caret);
   }
 
+  /**
+   * 🔴 **開いた瞬間に、その行の塊を活性にする**(#395 段③)。
+   *
+   * > user の物語: 読んでいる本文の「この行」を直したい。
+   *
+   * ⚠ **すぐには開かない** ── 呼ばれる時点ではまだ分割が組まれていない
+   *   (`update` が来ていない)。既にある予約の仕組みに載せて、**最初の描き直しで
+   *   果たす**(`openPending`)。⚠ 行の持ち主が居なければ何も起きない
+   *   ── そこは正しい(当てずっぽうで別の塊を開かない)。
+   * @param line 原文の行(0 始まり・**frontmatter を外した側**の座標)
+   */
+  openAt(line: number): void {
+    this.pendingOpen = { kind: 'line', line, caret: 'end' };
+  }
+
   /** 添字の塊を、caret を端に置いて開く(矢印キーと予約の共通口)。 */
   private activateLine(blockIndex: number, caretAt: 'start' | 'end'): boolean {
     return this.activate(blockIndex, this.unitElement(blockIndex) ?? this.host, 0, 0, caretAt);

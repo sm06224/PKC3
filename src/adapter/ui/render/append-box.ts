@@ -18,6 +18,7 @@
 import type { AppState } from '@adapter/state/app-state';
 import { bodyLockOf } from '@adapter/state/app-state';
 import { isAppendable } from '@features/flavor/append-spec';
+import { listAppendTargets } from '@features/markdown/append-target';
 import { iconButton } from './icons';
 import { hintTitle } from './shortcut-hint';
 
@@ -51,6 +52,12 @@ export class AppendBoxRenderer {
   private readonly region: HTMLElement;
   private readonly form: HTMLElement;
   private readonly input: HTMLTextAreaElement;
+  /** 入り先の選択(#395 段①)。⚠ 器は 1 度だけ組み、中身だけ差し替える。 */
+  private readonly target: HTMLSelectElement;
+  /** 直前の追記を外す(#395 段①)。⚠ 追記が通ったときだけ出す。 */
+  private readonly undo: HTMLButtonElement;
+  /** いま並べている入り先の指紋。⚠ 同じなら触らない(選んだ物が飛ばない)。 */
+  private targetSig: string | null = null;
   private readonly lockBar: HTMLElement;
   private readonly lockText: HTMLElement;
   private readonly resolve: HTMLElement;
@@ -72,7 +79,30 @@ export class AppendBoxRenderer {
     // ⚠ placeholder は `title` ではないので、`applyShortcutHints` の対象外 ──
     //    ここは組み立てた字をそのまま入れる(割当を変えたら次の描画で追いつく)
     this.input.placeholder = hintTitle('追記する内容', 'append-send');
-    this.form.append(this.input, iconButton('append-entry', '追記'));
+    /**
+     * 🔴 **入り先を選ぶ**(#395 段①)。
+     *
+     * > user の物語: 長い議事録の「決定事項」の節に 1 行だけ足したい。
+     *
+     * ⚠ **既定は「末尾」**(これまでと同じ)── 選ばなければ挙動は 1 ミリも変わらない。
+     * ⚠ 見出しが 1 つも無いノートでは**畳む**(選べる物が「末尾」だけの選択肢は、
+     *   押せるのに意味が無い)。
+     */
+    this.target = document.createElement('select');
+    this.target.setAttribute('data-pkc-field', 'append-target');
+    this.target.setAttribute('aria-label', '追記の入り先');
+    this.target.title = '追記を入れる場所です。既定は本文の末尾で、見出しを選ぶとその節の終わりに入ります';
+    /**
+     * 🔴 **足したものを、本文を開かずに外せる**(#395 段①。user 指示 2026-08-23
+     * 「**片道の操作を作らない**」)。
+     *
+     * ⚠ 追記は**本文を開かずに足せる**ので、外すのも開かずにできなければ
+     *   「間違えて足したら本文まで開く」になる ── それは動線を 1 つ失うのと同じ。
+     * ⚠ 追記が通ったときだけ出す(何も足していないのに押せる口を出さない)。
+     */
+    this.undo = iconButton('undo-append', '元に戻す');
+    this.undo.title = '直前に追記した内容を、本文から取り除きます';
+    this.form.append(this.target, this.input, iconButton('append-entry', '追記'), this.undo);
 
     this.lockBar = document.createElement('div');
     this.lockBar.setAttribute('data-pkc-field', 'append-lock');
@@ -130,6 +160,32 @@ export class AppendBoxRenderer {
     } else if (mode.kind === 'writing' && this.last !== 'writing') {
       this.persistedAtWrite = state.openBody?.persisted ?? null;
     }
+    /**
+     * 🔴 **入り先の一覧は、下の早期 return より前で更新する**(#395 段①)。
+     *
+     * ⚠ 下の 1 行は「種類が同じなら DOM を触らない」だが、**本文は種類を変えずに
+     *   変わる**(追記した / 別の窓が書いた / 編集を保存した)── 後ろに置くと
+     *   **見出しを足しても一覧に出てこない**(押しても選べない、無言の穴)。
+     */
+    /**
+     * ⚠ **本文が読めていない間は一覧に触らない**(2 稿目。test が拾った)。
+     *
+     * 1 稿目は `mode.kind === 'ready'` 以外で `null` を渡して**一覧を捨てて**いた ──
+     * 追記は `ready → writing → ready` と動くので、**押すたびに選んだ入り先が
+     * 「末尾」へ戻って**いた。⚠ この機構の主な使い方は「同じ節へ続けて足す」なので、
+     * それができないのは機能が半分死んでいるのと同じである。
+     * 🔑 すぐ上の「隠れている間は `lastLid` を動かさない」と**同じ作法**にする ──
+     *   消す理由が無いものを、面や状態の切り替わりで捨てない。
+     */
+    this.paintTargets(state.openBody?.lid === this.lastLid ? state.openBody.body : null);
+    /**
+     * ⚠ **これも早期 return より前** ── 追記が通っても種類は `ready` のままなので、
+     *   後ろに置くと「足したのに『元に戻す』が出てこない」(無言の穴)。
+     * ⚠ **このノートの追記のときだけ**出す ── 別のノートを選んでいるときに出すと、
+     *   押した人は「いま見ているノートが戻る」と読む。
+     */
+    const canUndo = mode.kind === 'ready' && state.lastAppend?.lid === mode.lid;
+    if (this.undo.hidden !== !canUndo) this.undo.hidden = !canUndo;
     if (mode.kind === this.last) return; // 種類が同じなら DOM を触らない
     this.last = mode.kind;
     this.region.hidden = mode.kind === 'hidden';
@@ -143,6 +199,44 @@ export class AppendBoxRenderer {
     } else if (mode.kind === 'writing') {
       this.lockText.textContent = '追記を書き込んでいます…(返ってこないときは強制解放)';
     }
+  }
+
+  /**
+   * 入り先の一覧を本文から作り直す(#395 段①)。
+   *
+   * ⚠ **指紋が同じなら触らない** ── `<select>` を組み直すと**選んでいた物が
+   *   「末尾」へ戻る**。追記のたびに本文は変わるので、ここを毎回組み直すと
+   *   「連続して同じ節へ足す」ができなくなる(この機構の主な使い方である)。
+   * ⚠ 見出しが消えたときは**選択が「末尾」へ落ちる** ── そこは正しい
+   *   (存在しない印を握ったままにすると、押した瞬間に断られる)。
+   */
+  private paintTargets(body: string | null): void {
+    // ⚠ 読めていない(`null`)= **触らない**。空の一覧に組み直さない
+    if (body === null) return;
+    const heads = listAppendTargets(body);
+    const sig = heads.map((h) => `${h.level}:${h.slug}:${h.text}`).join('\u0001');
+    if (sig === this.targetSig) return;
+    this.targetSig = sig;
+    // 🔑 選んでいた物を覚えておいて、まだ在れば戻す
+    const keep = this.target.value;
+    this.target.textContent = '';
+    const end = document.createElement('option');
+    end.value = '';
+    end.textContent = '末尾';
+    this.target.append(end);
+    for (const h of heads) {
+      const opt = document.createElement('option');
+      opt.value = h.slug;
+      // ⚠ 深さは**字下げ**で見せる(level を数字で出しても user には読めない)
+      opt.textContent = `${'\u3000'.repeat(h.level - 1)}${h.text}`;
+      this.target.append(opt);
+    }
+    if (keep !== '' && heads.some((h) => h.slug === keep)) this.target.value = keep;
+    /**
+     * ⚠ **見出しが 1 つも無いノートでは畳む** ── 「末尾」しか無い選択肢は、
+     *   押せるのに選ぶ物が無い(業務画面の作法「押しても何も起きないを作らない」)。
+     */
+    this.target.hidden = heads.length === 0;
   }
 
   /** 追記が通ったら欄を空にして、続けて打てるようにする(連続追記)。 */

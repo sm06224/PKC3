@@ -860,7 +860,7 @@ export class DetailRenderer {
       currentContainerId: selfContainerId(state),
     };
     if (liveEditorEnabled()) {
-      this.renderLiveEditor(open.body, previewOpts);
+      this.renderLiveEditor(open.body, previewOpts, state.editOpenAt);
       return;
     }
     const split = document.createElement('div');
@@ -968,6 +968,11 @@ export class DetailRenderer {
       allowExternalImages: boolean;
       currentContainerId: string;
     },
+    /**
+     * 🔴 **入った瞬間に開く行**(#395 段③)。`null` = どこも開かない(既定)。
+     * ⚠ 座標は frontmatter を外した側(`RowSwap` と同じ基準)。
+     */
+    openAt: number | null,
   ): void {
     const pane = document.createElement('div');
     pane.setAttribute('data-pkc-region', 'editor-live');
@@ -1220,6 +1225,16 @@ export class DetailRenderer {
         this.pruneLends();
       },
     });
+    /**
+     * 🔴 **押した行を開いた状態で編集に入る**(#395 段③)。
+     *
+     * ⚠ **ここで予約する**(`new RowSwap` の直後・最初の `follow.flush()` の前)──
+     *   分割はまだ組まれていないので、開くのは最初の描き直しのときである。
+     * ⚠ 行の持ち主が居なければ何も起きない ── 修飾クリックの座標が
+     *   刻印の無い所(脚注の区切りなど)だったとき、**別の塊を当てずっぽうで
+     *   開かない**ほうが正しい(押した所と違う所が開くと user は混乱する)。
+     */
+    if (openAt !== null) swap.openAt(openAt);
     editAll.addEventListener('click', () => {
       if (!swap.activateAll()) note.textContent = 'この本文は全文編集に開けません';
     });
