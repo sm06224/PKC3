@@ -28,6 +28,7 @@ describe('task-cards(札 = 本文のチェック項目)', () => {
     date: null,
     time: null,
     until: null,
+    repeat: null,
   });
 
   /**
@@ -162,6 +163,7 @@ describe('replaceTaskCards は、変わっていないなら据え置く(2026-08
     date: null,
     time: null,
     until: null,
+    repeat: null,
   });
   /** ⚠ 項目が **0 行目と 5 行目**に来る本文(下の `card(…, 0/5, …)` と揃える)。 */
   const body = (doneSecond: boolean, first = 'あ', second = 'う'): string =>
@@ -185,6 +187,22 @@ describe('replaceTaskCards は、変わっていないなら据え置く(2026-08
     const next = replaceTaskCards(before, 'a', '- [ ] 出張 @2026-08-25..2026-08-30\n');
     expect(next, '期間が変わったのに据え置いた(画面の期間が古いまま残る)').not.toBe(before);
     expect(next[0]).toMatchObject({ date: '2026-08-25', until: '2026-08-30' });
+  });
+
+  /**
+   * 🔴 **刻みだけが変わっても据え置かない**(#344 段②)── 期間とまったく同じ穴。
+   * ⚠ 見落とすと、`毎週` を `毎月` に直した(あるいは消した)瞬間に
+   *   **札が古い刻みのまま**残る ── 字も日付も同じなので、誰も気づけない。
+   */
+  it('🔴 刻みだけが変わっても、据え置かない', () => {
+    const before = taskCardsOf('a', '- [ ] ゴミ出し @2026-08-25 毎週\n');
+    expect(before[0], '前提が崩れている ── 刻みが読めていない').toMatchObject({
+      date: '2026-08-25',
+      repeat: 'week',
+    });
+    const next = replaceTaskCards(before, 'a', '- [ ] ゴミ出し @2026-08-25 毎月\n');
+    expect(next, '刻みが変わったのに据え置いた(古い刻みのまま残る)').not.toBe(before);
+    expect(next[0]).toMatchObject({ date: '2026-08-25', repeat: 'month' });
   });
 
   /** ⚠ 対照群 ── 本当に同じなら据え置く(上が「常に作り直す」で通らないように)。 */

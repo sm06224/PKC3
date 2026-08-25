@@ -8,8 +8,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   expandRepeat,
+  materializedDates,
   occurrenceAt,
+  readRepeatTail,
   REPEAT_MAX_OCCURRENCES,
+  repeatMateKey,
   repeatUnitOf,
 } from '../../src/features/schedule/repeat';
 
@@ -201,5 +204,76 @@ describe('窓の中へ展開する', () => {
     });
     expect(r.days).toHaveLength(REPEAT_MAX_OCCURRENCES);
     expect(r.truncated).toBe(true);
+  });
+});
+
+/**
+ * 🔴 **記法の尻の語を読む**(#344 段②)。
+ *
+ * ⚠ ここが見るのは「**日付の走査を広げていない**」ことでもある ── 尻だけ別に
+ *   読むので、日付・期間・時刻の読み方は 1 バイトも変わっていない
+ *   (それを確かめるのは `line-date.test.ts` の対照群)。
+ */
+describe('尻の刻みを読む(readRepeatTail)', () => {
+  it('空白ありでも無しでも読む(日本語には語の切れ目が無い)', () => {
+    expect(readRepeatTail(' 毎週')).toEqual({ unit: 'week', length: 3 });
+    expect(readRepeatTail('毎週')).toEqual({ unit: 'week', length: 2 });
+    expect(readRepeatTail('\t毎日')).toEqual({ unit: 'day', length: 3 });
+  });
+
+  it('先頭に無ければ読まない(散文の「毎週」を記法にしない)', () => {
+    expect(readRepeatTail(' の資料を毎週送る')).toBe(null);
+    expect(readRepeatTail('')).toBe(null);
+  });
+
+  it('知らない語は読まない(網に当たっても表が正本)', () => {
+    expect(readRepeatTail(' 毎時')).toBe(null);
+  });
+});
+
+/**
+ * 🔴 **済んだ回の実体を束ねる**(#344 段②)。
+ *
+ * ⚠ ここを外すと **済ませた回がもう一度出る**(押しても「同じ行が既に在る」で
+ *   何も起きないので、user からは壊れて見える)。
+ */
+describe('済んだ回の実体(materializedDates)', () => {
+  const card = (
+    lid: string,
+    text: string,
+    date: string | null,
+    repeat: 'week' | null = null,
+  ) => ({ lid, text, date, repeat });
+
+  it('同じノートの同じ字の、繰り返しでない行が実体になる', () => {
+    const m = materializedDates([
+      card('a', 'ゴミ出し', '2026-08-31', 'week'),
+      card('a', 'ゴミ出し', '2026-08-31'),
+      card('a', 'ゴミ出し', '2026-09-07'),
+    ]);
+    expect([...(m.get(repeatMateKey('a', 'ゴミ出し')) ?? [])].sort()).toEqual([
+      '2026-08-31',
+      '2026-09-07',
+    ]);
+  });
+
+  it('🔴 字が違えば別物(隣の項目の実体を横取りしない)', () => {
+    const m = materializedDates([card('a', '掃除', '2026-08-31')]);
+    expect(m.get(repeatMateKey('a', 'ゴミ出し'))).toBeUndefined();
+  });
+
+  it('🔴 ノートが違えば別物(別のノートの実体を横取りしない)', () => {
+    const m = materializedDates([card('b', 'ゴミ出し', '2026-08-31')]);
+    expect(m.get(repeatMateKey('a', 'ゴミ出し'))).toBeUndefined();
+  });
+
+  it('⚠ 規則の行そのものは実体ではない(自分で自分を消さない)', () => {
+    const m = materializedDates([card('a', 'ゴミ出し', '2026-08-31', 'week')]);
+    expect(m.get(repeatMateKey('a', 'ゴミ出し'))).toBeUndefined();
+  });
+
+  it('日付の無い行は数えない', () => {
+    const m = materializedDates([card('a', 'ゴミ出し', null)]);
+    expect(m.get(repeatMateKey('a', 'ゴミ出し'))).toBeUndefined();
   });
 });

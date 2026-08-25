@@ -58,6 +58,34 @@ export function repeatUnitOf(word: string): RepeatUnit | null {
 }
 
 /**
+ * 🔴 **記法の尻に付く刻みの語を読む**(#344 段②)。
+ *
+ * ⚠ **走査の網(`AT_DATE`)を広げない。** 網を広げると、いま通っている
+ *   日付・期間・時刻の読み方まで一緒に変わる ── 変えたのは尻だけなので、
+ *   **尻だけを別に見る**(read は増やすが、既存の読みは 1 バイトも動かない)。
+ * ⚠ 空白は**無くてもよい**(`@2026-08-31毎週`)── 日本語には語の切れ目に
+ *   空白が無いので、求めると**日本語で書く人だけ書けない**(`line-date.ts` の
+ *   「`@` の前に境目を求めない」と同じ理由)。
+ *
+ * @param rest 日付(期間・時刻を含む)の**直後**から行末まで
+ */
+const REPEAT_TAIL = /^[ \t]*(毎[日週月年])/;
+
+export interface RepeatTail {
+  readonly unit: RepeatUnit;
+  /** 語までの長さ(前の空白を含む)。⚠ **記法の範囲を伸ばす**のに使う。 */
+  readonly length: number;
+}
+
+export function readRepeatTail(rest: string): RepeatTail | null {
+  const m = REPEAT_TAIL.exec(rest);
+  if (m === null) return null;
+  const unit = repeatUnitOf(m[1]!);
+  // ⚠ 網に当たったのに表に無い語は**読まない**(表が正本 ── §7)
+  return unit === null ? null : { unit, length: m[0].length };
+}
+
+/**
  * 展開の上限。⚠ **これ以上は読めない**(束が増えすぎて面が固まる)。
  * 🔑 数で持つ ── 「多すぎたら間引く」を散文の規律にしない。
  */
@@ -156,4 +184,39 @@ export function expandRepeat(input: {
     days.push(at);
   }
   return { days, truncated };
+}
+
+/**
+ * 🔴 **繰り返しの行と「済んだ回の実体」を結ぶ鍵**(#344 段②)。
+ *
+ * ⚠ 済んだ回は**同じノートの、同じ字の、繰り返しでない行**として本文に増える
+ *   (`- [x] ゴミ出し @2026-08-31`)。だから結び目は **lid と字**である。
+ * 🔑 **鍵の作り方をここ 1 か所に置く**(CLAUDE.md §7)── 束ねる側
+ *   (`agenda.ts`)と作る側で別々に組むと、片方だけ字の正規化を変えた日に
+ *   **済んだはずの回がもう一度出る**(しかも原因が結果から遠い)。
+ * ⚠ 区切りは改行 ── lid にも字にも現れない(字は行 1 本ぶんなので)。
+ */
+export function repeatMateKey(lid: string, text: string): string {
+  return `${lid}\n${text}`;
+}
+
+/** `repeatMateKey` → その字で**実体になっている日**の集合。 */
+export function materializedDates(
+  cards: readonly {
+    readonly lid: string;
+    readonly text: string;
+    readonly date: string | null;
+    readonly repeat: RepeatUnit | null;
+  }[],
+): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  for (const c of cards) {
+    // ⚠ 繰り返しの行そのものは実体ではない(規則の行である)
+    if (c.repeat !== null || c.date === null) continue;
+    const key = repeatMateKey(c.lid, c.text);
+    const set = out.get(key);
+    if (set === undefined) out.set(key, new Set([c.date]));
+    else set.add(c.date);
+  }
+  return out;
 }

@@ -14,7 +14,7 @@ const card = (
   time: string | null = null,
   text = 'x',
   until: string | null = null,
-) => itemOfCard({ lid, line, text, done: false, date, time, until });
+) => itemOfCard({ lid, line, text, done: false, date, time, until, repeat: null });
 
 /** ノート 1 件が丸ごと予定(frontmatter の `date:`)。 */
 const noteMeta = (lid: string, date: string | null, title = 'n-' + lid): EntryMeta => ({
@@ -276,5 +276,142 @@ describe('期間(#344 段①)', () => {
       ['2026-08-24', false],
       ['2026-08-25', false],
     ]);
+  });
+});
+
+/**
+ * 🔴 **繰り返しを窓へ展開する**(#344 段②)。
+ *
+ * ⚠ ここが見るのは「**どの日に出るか**」だけ ── 押したとき本文がどうなるかは
+ *   `body-rewrite.test.ts`、画面に本当に枚数ぶん出るかは
+ *   `tests/adapter/schedule-view.test.ts` が見る。
+ */
+describe('繰り返し(#344 段②)', () => {
+  const every = (
+    date: string,
+    unit: 'day' | 'week' | 'month' | 'year',
+    until: string | null = null,
+    text = 'ゴミ出し',
+    lid = 'a',
+  ) => itemOfCard({ lid, line: 0, text, done: false, date, time: null, until, repeat: unit });
+
+  const days = (groups: { date: string | null }[]): (string | null)[] =>
+    groups.map((g) => g.date);
+
+  it('🔴 今日から先の窓に、刻みぶんの束ができる', () => {
+    // 8/23(日)から毎週 → 8/23 / 8/30 / 9/6 …
+    const g = buildAgenda([every('2026-08-23', 'week')], TODAY, false, { horizonDays: 15 });
+    expect(days(g)).toEqual(['2026-08-23', '2026-08-30', '2026-09-06']);
+  });
+
+  /**
+   * 🔴 **過ぎた回は出さない** ── 出すと `@2020-01-06 毎週` が
+   * **期限切れを 340 個**並べる(1 行の記法で面が読めなくなる)。
+   */
+  it('🔴 過ぎた回は出さない(開始が昔でも、次の回から)', () => {
+    const g = buildAgenda([every('2026-08-02', 'week')], TODAY, false, { horizonDays: 10 });
+    expect(days(g)).toEqual(['2026-08-23', '2026-08-30']);
+  });
+
+  /**
+   * 🔴 **開始の回は窓の外でも必ず出す** ── 出さないと
+   * `@2027-06-01 毎年` が**繰り返しにした瞬間に画面から消える**(動線を 1 つ削る)。
+   */
+  it('🔴 開始が窓より先でも、その回は出る', () => {
+    const g = buildAgenda([every('2027-06-01', 'year')], TODAY, false, { horizonDays: 15 });
+    expect(days(g)).toEqual(['2027-06-01']);
+  });
+
+  it('🔴 `..` の終わりで止まる(終了条件の記法を作らない)', () => {
+    const g = buildAgenda([every('2026-08-23', 'week', '2026-09-01')], TODAY, false, {
+      horizonDays: 30,
+    });
+    expect(days(g)).toEqual(['2026-08-23', '2026-08-30']);
+  });
+
+  it('終わりが過ぎていれば 1 つも出ない(終わった繰り返し)', () => {
+    const g = buildAgenda([every('2026-01-05', 'week', '2026-03-30')], TODAY, false, {
+      horizonDays: 30,
+    });
+    expect(days(g)).toEqual([]);
+  });
+
+  /**
+   * 🔴 **済んだ回は出さない**(例外日の記法を作らない代わり)。
+   * ⚠ `skip` は**絞り込む前**の札から作る ── 渡し忘れると済ませた回がもう一度出る。
+   */
+  it('🔴 実体の行が在る日は飛ばす', () => {
+    const g = buildAgenda(
+      [every('2026-08-23', 'week'), card('a', 1, '2026-08-30', null, 'ゴミ出し')],
+      TODAY,
+      false,
+      {
+        horizonDays: 15,
+        skip: new Map([['a\nゴミ出し', new Set(['2026-08-30'])]]),
+      },
+    );
+    // 🔑 8/30 は**実体の 1 枚だけ**(繰り返しの回は出ない = 2 枚にならない)
+    expect(days(g)).toEqual(['2026-08-23', '2026-08-30', '2026-09-06']);
+    expect(g[1]?.cards).toHaveLength(1);
+    expect(g[1]?.cards[0]?.repeat).toBe(null);
+  });
+
+  it('⚠ 対照群 ── 飛ばさなければ、その日は 2 枚になる', () => {
+    const g = buildAgenda(
+      [every('2026-08-23', 'week'), card('a', 1, '2026-08-30', null, 'ゴミ出し')],
+      TODAY,
+      false,
+      { horizonDays: 15 },
+    );
+    expect(g[1]?.cards).toHaveLength(2);
+  });
+
+  /**
+   * 🔴 **回の札は、鍵が日ごとに違う** ── 同じ鍵だと描画側の再利用表が
+   * 1 枚の DOM を日から日へ動かし、**最後の日にしか出ない**(期間と同じ罠)。
+   */
+  it('🔴 回ごとに鍵が違う', () => {
+    const g = buildAgenda([every('2026-08-23', 'week')], TODAY, false, { horizonDays: 15 });
+    const keys = g.flatMap((x) => x.cards.map((c) => c.key));
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  /**
+   * 🔴 **回の札は「その日 1 日ぶん」** ── `until` を持ったままだと、
+   * 札に `〜12/31` と出て**繰り返しの終わりを期間の終わりと読ませる**。
+   */
+  it('🔴 回の札は期間ではない(until が落ちる / 刻みは残る)', () => {
+    const g = buildAgenda([every('2026-08-23', 'week', '2026-09-30')], TODAY, false, {
+      horizonDays: 15,
+    });
+    const c = g[0]!.cards[0]!;
+    expect(c.until).toBe(null);
+    // 🔑 刻みは残す ── 押したとき / 掴んだときに「規則から出た回」だと分かる必要がある
+    expect(c.repeat).toBe('week');
+    expect(c.date).toBe('2026-08-23');
+  });
+
+  /**
+   * 🔴 **回の札はいつも未チェック** ── 済んだかどうかは**その回**の属性である
+   * (規則の行の印は「この繰り返しはもう終わり」であって「今日のぶんが済んだ」ではない)。
+   */
+  it('🔴 回の札は未チェックで出る', () => {
+    const rule = itemOfCard({
+      lid: 'a',
+      line: 0,
+      text: 'ゴミ出し',
+      done: true,
+      date: '2026-08-23',
+      time: null,
+      until: null,
+      repeat: 'week',
+    });
+    const g = buildAgenda([rule], TODAY, false, { horizonDays: 8 });
+    expect(g.flatMap((x) => x.cards).every((c) => !c.done)).toBe(true);
+  });
+
+  it('⚠ 対照群 ── 刻みが無ければ 1 日にしか出ない(既存の札は変わらない)', () => {
+    const g = buildAgenda([card('a', 0, '2026-08-23')], TODAY, false, { horizonDays: 30 });
+    expect(days(g)).toEqual(['2026-08-23']);
   });
 });

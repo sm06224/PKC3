@@ -1687,6 +1687,21 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してからチェックしてください' });
       return;
     }
+    /**
+     * 🔴 **繰り返しの回は、規則の行の印を押さない**(#344 段②)。
+     *
+     * ⚠ 押すと「この繰り返しは終わり」の意味になり、**以後の回が全部消える** ──
+     *   user は「今日のぶんが済んだ」と言いたかっただけである。
+     * 🔑 その日ぶんの行を本文に増やす(`MATERIALIZE_REPEAT`)。
+     * ⚠ どの回かは**札に焼いた日**から引く ── 行番号は 1 本しか無いので、
+     *   それだけでは「どの日を押したか」が決まらない。
+     */
+    const rep = target.closest<HTMLElement>('[data-pkc-task-repeat]');
+    const on = rep?.getAttribute('data-pkc-task-date') ?? '';
+    if (rep !== null && on !== '') {
+      dispatcher.dispatch({ type: 'MATERIALIZE_REPEAT', lid, line, date: on });
+      return;
+    }
     dispatcher.dispatch({ type: 'TOGGLE_TASK', lid, line });
   },
   'calendar-nav': (dispatcher, target) => {
@@ -2895,8 +2910,27 @@ export function bindActions(
       clearDropTarget();
       if (drop === null) return;
       e.preventDefault();
-      const [lid, rawLine, grabbedOn] = (de.dataTransfer.getData(PKC_TASK_DRAG) || '').split(' ');
+      const [lid, rawLine, grabbedOn, every] = (
+        de.dataTransfer.getData(PKC_TASK_DRAG) || ''
+      ).split(' ');
       if (lid === undefined || lid === '') return;
+      /**
+       * 🔴 **繰り返しの回は日を動かせない ── 黙って何もしないのではなく、断る**
+       *   (#344 段②)。
+       *
+       * ⚠ 動かす意味が **2 通り**ある(「規則ごとずらす」/「この回だけずらす」)ので、
+       *   どちらかを勝手に選ぶと**もう片方を頼んだ user のデータが壊れる**。
+       * ⚠ 「この回だけ」は**例外日の記法**が要る ── 記法を増やさずに済ませたのが
+       *   この設計の要なので(`repeat.ts` の頭)、そこは開けない。
+       * 🔑 だから**どこを直せばよいかまで言う**(本文の `@… 毎週` を直す)。
+       */
+      if (every !== undefined && every !== '') {
+        dispatcher.dispatch({
+          type: 'OP_FAILED',
+          error: '繰り返しの予定は掴んで動かせません。本文の「@日付 毎週」を書き直してください',
+        });
+        return;
+      }
       const date = drop.date === '' ? null : drop.date;
       /**
        * 🔴 **単位が 2 つある**(段④)── 行番号が空なら
@@ -3033,9 +3067,16 @@ export function bindActions(
        */
       // 🔑 読み口は `dateTargetOf` 1 つ(落とす側と同じ) ── 属性名を 2 か所に書かない
       const from = dateTargetOf(taskCard)?.date ?? '';
+      /**
+       * 🔴 **繰り返しの回かどうかも載せる**(#344 段②)── 落とす側が**断る**ために要る。
+       * ⚠ ここで掴ませない(`return` する)と、下の**ノートを移す**経路へ落ちて
+       *   **予定の札を掴んだのにノートが動く**。掴ませたうえで、落としたときに
+       *   理由を出すほうが動線として正しい(「押せるのに何も起きない」を作らない)。
+       */
+      const every = taskCard.getAttribute('data-pkc-task-repeat') ?? '';
       if (lid !== null && line !== null && line !== undefined) {
         dragFromSide = null;
-        de.dataTransfer.setData(PKC_TASK_DRAG, `${lid} ${line} ${from}`);
+        de.dataTransfer.setData(PKC_TASK_DRAG, `${lid} ${line} ${from} ${every}`);
         de.dataTransfer.effectAllowed = 'move';
         return;
       }

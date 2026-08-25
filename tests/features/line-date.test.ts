@@ -344,3 +344,113 @@ describe('期間 ── 開始と終わり(#344 段①)', () => {
     );
   });
 });
+
+/**
+ * 🔴 **刻み**(`@2026-08-31 毎週`)── #344 段②。
+ *
+ * ⚠ いちばん大事なのは**対照群**である ── 尻を別に読む形にしたので、
+ *   「日付・期間・時刻の読みが 1 バイトも変わっていない」ことを一緒に見る
+ *   (変わっていたら、既に配ってある本文の意味が静かに変わる)。
+ */
+describe('刻み(#344 段②)', () => {
+  it('日付の後ろの語を読む', () => {
+    expect(readLineDate('ゴミ出し @2026-08-31 毎週')).toMatchObject({
+      date: '2026-08-31',
+      until: null,
+      time: null,
+      repeat: 'week',
+    });
+  });
+
+  it('4 つの刻みが読める', () => {
+    for (const [word, unit] of [
+      ['毎日', 'day'],
+      ['毎週', 'week'],
+      ['毎月', 'month'],
+      ['毎年', 'year'],
+    ] as const)
+      expect(readLineDate(`x @2026-08-31 ${word}`)?.repeat).toBe(unit);
+  });
+
+  it('🔴 期間の後ろにも書ける(終わりは `..` が兼ねる)', () => {
+    expect(readLineDate('朝会 @2026-08-31..2026-12-31 毎週')).toMatchObject({
+      date: '2026-08-31',
+      until: '2026-12-31',
+      repeat: 'week',
+    });
+  });
+
+  it('🔴 時刻の後ろにも書ける(毎週の会議はいちばん自然な形)', () => {
+    expect(readLineDate('朝会 @2026-08-31 09:30 毎週')).toMatchObject({
+      date: '2026-08-31',
+      time: '09:30',
+      repeat: 'week',
+    });
+  });
+
+  it('空白が無くても読む(日本語には語の切れ目が無い)', () => {
+    expect(readLineDate('ゴミ出し @2026-08-31毎週')?.repeat).toBe('week');
+  });
+
+  /**
+   * 🔴 **記法の範囲が語まで伸びる** ── 伸びないと、札の字に `毎週` が残り、
+   * 日付を書き換えたときに**古い語が本文に居残る**。
+   */
+  it('🔴 札の字から語ごと外れる', () => {
+    expect(stripLineDate('ゴミ出し @2026-08-31 毎週')).toBe('ゴミ出し');
+    expect(stripLineDate('朝会 @2026-08-31 09:30 毎週')).toBe('朝会');
+    expect(stripLineDate('朝会 @2026-08-31..2026-12-31 毎週')).toBe('朝会');
+  });
+
+  it('⚠ 対照群 ── 刻みを書かなければ `null`(既存の本文の意味は変わらない)', () => {
+    expect(readLineDate('見積を送る @2026-08-25')?.repeat).toBe(null);
+    expect(readLineDate('打ち合わせ @2026-08-25 14:00')?.repeat).toBe(null);
+    expect(readLineDate('出張 @2026-08-25..2026-08-28')?.repeat).toBe(null);
+    // 🔑 範囲も伸びない(字の切り出しが変わっていない)
+    expect(stripLineDate('見積を送る @2026-08-25')).toBe('見積を送る');
+  });
+
+  it('⚠ 散文の「毎週」は食べない(日付の直後だけ)', () => {
+    expect(readLineDate('@2026-08-25 の資料を毎週送る')?.repeat).toBe(null);
+    expect(stripLineDate('@2026-08-25 の資料を毎週送る')).toBe('の資料を毎週送る');
+  });
+
+  /**
+   * ⚠ 時刻として**読めなかった**字が間に挟まる回は、刻みを付けない ──
+   * 間の字を勝手に飛ばすと、**user が書いていない予定が毎週立つ**。
+   */
+  it('⚠ 読めない字が挟まったら刻みは付かない', () => {
+    const at = readLineDate('x @2026-08-25 10:000円 毎週');
+    expect(at?.date).toBe('2026-08-25');
+    expect(at?.repeat).toBe(null);
+  });
+
+  it('書きは尻に付ける(空白 1 つ)', () => {
+    expect(formatLineDate('2026-08-31', null, null, 'week')).toBe('@2026-08-31 毎週');
+    expect(formatLineDate('2026-08-31', '09:30', null, 'week')).toBe('@2026-08-31 09:30 毎週');
+    expect(formatLineDate('2026-08-31', null, '2026-12-31', 'week')).toBe(
+      '@2026-08-31..2026-12-31 毎週',
+    );
+    // ⚠ 対照群 ── 渡さなければ 1 文字も増えない
+    expect(formatLineDate('2026-08-31')).toBe('@2026-08-31');
+    expect(formatLineDate('2026-08-31', null, null, null)).toBe('@2026-08-31');
+  });
+
+  it('🔴 書いたものが、そのまま読み返せる(往復)', () => {
+    for (const unit of ['day', 'week', 'month', 'year'] as const) {
+      const text = `x ${formatLineDate('2026-08-31', '09:30', null, unit)}`;
+      expect(readLineDate(text), text).toMatchObject({
+        date: '2026-08-31',
+        time: '09:30',
+        repeat: unit,
+      });
+      expect(stripLineDate(text)).toBe('x');
+    }
+  });
+
+  it('挿す形にも刻みが載る', () => {
+    expect(insertionForLineDate('ゴミ出し', '2026-08-31', null, null, 'week')).toBe(
+      ' @2026-08-31 毎週',
+    );
+  });
+});

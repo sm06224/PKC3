@@ -204,3 +204,61 @@ test('🔴 期間の札を掴んでずらすと、長さを保ったまま本文
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **繰り返し ── 1 行の記法が先の日にも札を出し、押すと本文が増える**(#344 段②)。
+ *
+ * 🔴 unit(`tests/adapter/schedule-view.test.ts`)は同じ繋がりを happy-dom で見ている。
+ * **ここが見るのは実ブラウザの印**である ── `toggle-task` は `input[type=checkbox]` で、
+ * ブラウザは押した瞬間に**自前で印を反転する**。⚠ その既定の動きと、こちらの
+ * 「本文へ行を増やす」が噛み合わないと、**画面だけ済んで本文が変わらない**形になる
+ * (合成 click では踏めない)。
+ *
+ * ⚠ 日付は**今日から数える** ── 固定の日を書くと、窓(今日から 2 か月)の外へ出た
+ *   日に**理由の分からない赤**になる。
+ */
+test('🔴 毎週の予定が先の日にも出て、押すとその日ぶんの行が本文に増える', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+
+  const at = new Date();
+  const key = (d: Date): string =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const today = key(at);
+  const next = key(new Date(at.getFullYear(), at.getMonth(), at.getDate() + 7));
+
+  await createEntry(page, 'text');
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await ta.fill(`- [ ] ゴミ出し @${today} 毎週`);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  await clickReal(page, '[data-pkc-browse="schedule"]');
+  const pane = page.locator('[data-pkc-browse-pane="schedule"]');
+  const cardsOn = (date: string) =>
+    pane.locator(
+      `[data-pkc-region="schedule-group"][data-pkc-drop-date="${date}"] [data-pkc-region="schedule-cards"] > [data-pkc-entry]`,
+    );
+
+  // ① 1 行なのに、今日と 7 日後の**両方**に出る
+  await expect(cardsOn(today), '今日の札が無い').toHaveCount(1);
+  await expect(cardsOn(next), '7 日後の札が無い(繰り返しが展開されていない)').toHaveCount(1);
+  await expect(cardsOn(next), '札に刻みが出ていない').toContainText('毎週');
+
+  // ② 7 日後のぶんを済ませる
+  const box = cardsOn(next).locator('[data-pkc-action="toggle-task"]');
+  await box.click();
+
+  // ③ 🔴 **本文にその日ぶんの行が増えた**(規則の行はそのまま)
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await expect(ta, '本文が増えていない(画面だけ済んだ形)').toHaveValue(
+    `- [ ] ゴミ出し @${today} 毎週\n- [x] ゴミ出し @${next}`,
+  );
+  await clickReal(page, '[data-pkc-action="cancel-edit"]');
+
+  // ④ その日の札は畳まれ(済んだ扱い)、次の回は残っている
+  await expect(cardsOn(next), '済ませた回が残っている').toHaveCount(0);
+  await expect(cardsOn(today), '他の回まで消えた').toHaveCount(1);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
