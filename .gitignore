@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# 可搬単一 HTML の実験用(#400 段①②)── 配り物ではないので追跡しない
+dist-portable/
 coverage/
 *.local
 .bench-profile/
