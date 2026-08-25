@@ -65,8 +65,80 @@ import {
 
 let db: Database | null = null;
 let initResult: InitResult | null = null;
+/**
+ * 🔑 **init が建てた sqlite の口を持っておく**(#400 段③)── 画像の出し入れが要る。
+ * ⚠ **`init` の中の局所変数のままにしない** ── `exportImage` から届かないので、
+ *   もう 1 度 `sqlite3InitModule()` を呼ぶ形になり、**WASM が二重に建つ**。
+ */
+let sqliteApi: { capi: Record<string, unknown>; wasm: Record<string, unknown> } | null = null;
 
-async function init(dbName: string, journalMode?: JournalMode): Promise<InitResult> {
+/**
+ * 🔴 **画像を `:memory:` の DB へ流し込む**(#400 段③)。
+ *
+ * ⚠ **schema を当てる前に呼ぶこと。** `sqlite3_deserialize` は DB を**丸ごと**
+ * 差し替えるので、先に表を作っても消える。あとから `applySchema` を通すことで、
+ * **古い版の画像でも移行が走る**(OPFS の DB と同じ経路に合流する)。
+ *
+ * ## 🔴 領域の持ち主を取り違えない
+ *
+ * `FREEONCLOSE`(1)を渡すと、**sqlite が閉じるときに `sqlite3_free` する** ──
+ * だから領域は `sqlite3_malloc` 由来でなければならない(`allocFromTypedArray` が
+ * それ)。⚠ そして **rc が 0 でない回は所有権が移らない**ので、
+ * こちらで解放する。⚠ 逆に成功した回に解放すると **二重解放**になる。
+ *
+ * `RESIZEABLE`(2)が無いと、**画像より 1 バイトも大きくできない DB** になる
+ * (= 復元した瞬間から書けない)。⚠ これは「開ける」ので、**書くまで気づけない**。
+ */
+function deserializeInto(
+  sqlite3: { capi: Record<string, (...a: never[]) => unknown>; wasm: Record<string, (...a: never[]) => unknown> },
+  database: Database,
+  image: Uint8Array,
+): number {
+  const { capi, wasm } = sqlite3;
+  const alloc = wasm.allocFromTypedArray as unknown as (a: Uint8Array) => number;
+  const free = wasm.dealloc as unknown as ((p: number) => void) | undefined;
+  const deserialize = capi.sqlite3_deserialize as unknown as (
+    db: unknown,
+    schema: string,
+    p: number,
+    szDb: bigint,
+    szBuf: bigint,
+    flags: number,
+  ) => number;
+  const p = alloc(image);
+  const n = BigInt(image.byteLength);
+  const FREEONCLOSE = 1;
+  const RESIZEABLE = 2;
+  const rc = deserialize(
+    (database as unknown as { pointer: unknown }).pointer,
+    'main',
+    p,
+    n,
+    n,
+    FREEONCLOSE | RESIZEABLE,
+  );
+  if (rc !== 0) {
+    free?.(p); // ⚠ 失敗した回は所有権が移っていない
+    throw new Error(`DB 画像を読み込めませんでした(sqlite3_deserialize rc=${rc})`);
+  }
+  return image.byteLength;
+}
+
+async function init(
+  dbName: string,
+  journalMode?: JournalMode,
+  opts?: { memory?: boolean; image?: Uint8Array },
+): Promise<InitResult> {
+  /**
+   * 🔴 **画像は `memory: true` と一緒でなければ受けない**(#400 段③)。
+   *
+   * ⚠ 判定を「開いた後の `vfs`」に置くと、**OPFS が取れない環境では素通りする**
+   * (node がまさにそれ ── 門が 1 度も通らないまま緑になる。CLAUDE.md §2)。
+   * 🔑 だから**頼まれた形そのもの**で断る ── これはどの環境でも同じように鳴る。
+   */
+  if (opts?.image !== undefined && opts.memory !== true)
+    throw new Error('DB 画像は memory: true と一緒に渡してください');
+
   // 冪等(review #4): 二重 init で WASM を二重化しない・旧 db を leak しない
   if (initResult) return initResult;
 
@@ -111,6 +183,7 @@ async function init(dbName: string, journalMode?: JournalMode): Promise<InitResu
     disable: { vfs: { opfs: true, 'opfs-wl': true } },
   };
   const sqlite3 = await sqlite3InitModule();
+  sqliteApi = sqlite3 as unknown as { capi: Record<string, unknown>; wasm: Record<string, unknown> };
   const meta = {
     libVersion: sqlite3.version.libVersion,
     crossOriginIsolated: globalThis.crossOriginIsolated === true,
@@ -120,13 +193,60 @@ async function init(dbName: string, journalMode?: JournalMode): Promise<InitResu
   let opened: Database;
   let vfs: InitResult['vfs'] = 'opfs-sahpool';
   let fallbackReason: string | undefined;
-  try {
-    const poolUtil = await sqlite3.installOpfsSAHPoolVfs({ name: dbName });
-    opened = new poolUtil.OpfsSAHPoolDb(`/${dbName}.db`);
-  } catch (e) {
+  if (opts?.memory === true) {
+    /**
+     * 🔴 **頼まれて `:memory:` にした回は「落ちた」と言わない**(#400 段③)。
+     *
+     * 可搬単一 HTML は **OPFS を試さない** ── `file://` では原理的に取れず
+     * (opaque origin)、`https://` に置いたときも**その origin の本体の DB を
+     * 開いてしまう**ので、どちらでも試す理由が無い。
+     * ⚠ ここで `fallbackReason` を載せると、状態行に `⚠ SecurityError …` と
+     * 出る ── **選んだ形を事故として告げる**ことになる。
+     */
     vfs = 'memory';
-    fallbackReason = String(e);
     opened = new sqlite3.oo1.DB(':memory:');
+  } else {
+    try {
+      const poolUtil = await sqlite3.installOpfsSAHPoolVfs({ name: dbName });
+      opened = new poolUtil.OpfsSAHPoolDb(`/${dbName}.db`);
+    } catch (e) {
+      vfs = 'memory';
+      fallbackReason = String(e);
+      opened = new sqlite3.oo1.DB(':memory:');
+    }
+  }
+
+  /**
+   * 🔴 **画像は `:memory:` にしか当てない。**
+   *
+   * ⚠ OPFS の接続に `deserialize` すると、その接続は**メモリ上の DB に化ける** ──
+   * 開けるし読めるが、**書いたものが OPFS へ 1 バイトも届かない**。
+   * 症状は「保存したのに次の起動で消えている」で、**当日は絶対に気づけない**。
+   */
+  let restoredBytes: number | undefined;
+  if (opts?.image !== undefined && opts.image.byteLength > 0) {
+    if (vfs !== 'memory') {
+      opened.close();
+      throw new Error('DB 画像は :memory: にしか流し込めません(memory: true と一緒に渡すこと)');
+    }
+    try {
+      restoredBytes = deserializeInto(
+        sqlite3 as unknown as Parameters<typeof deserializeInto>[0],
+        opened,
+        opts.image,
+      );
+      /**
+       * 🔴 **`sqlite3_deserialize` は中身を見ない** ── でたらめな bytes でも
+       * `rc = 0` を返す。壊れていることが分かるのは**最初に読んだとき**で、
+       * そのままだと `applySchema` の中から `SQLITE_NOTADB` が飛ぶ ──
+       * ⚠ user には「file is not a database」としか出ず、**どの画像の話か分からない**。
+       * 🔑 ここで 1 回読んで、**画像の話として**言い直す。
+       */
+      opened.selectValue('SELECT count(*) FROM sqlite_schema');
+    } catch (e) {
+      opened.close();
+      throw new Error(`DB 画像を読み込めませんでした(${String(e)})`, { cause: e });
+    }
   }
 
   // schema 適用の失敗は fallback ではなく error(review #1b ── open 済み接続は閉じる)
@@ -147,7 +267,8 @@ async function init(dbName: string, journalMode?: JournalMode): Promise<InitResu
 
   db = opened;
   const base = { ...meta, vfs, journalMode: actualJournalMode };
-  initResult = fallbackReason ? { ...base, fallbackReason } : base;
+  const withReason = fallbackReason ? { ...base, fallbackReason } : base;
+  initResult = restoredBytes === undefined ? withReason : { ...withReason, restoredBytes };
   return initResult;
 }
 
@@ -1167,7 +1288,21 @@ function updateEntryColumn(
 }
 
 const handlers: Handlers = {
-  init: (req) => init(req.dbName, req.journalMode),
+  init: (req) => init(req.dbName, req.journalMode, { memory: req.memory, image: req.image }),
+  /**
+   * 🔴 **いまの DB を 1 枚の画像にする**(#400 段③)。
+   *
+   * ⚠ **`:memory:` のときだけ**。OPFS の DB は器そのものが永続しているので、
+   * 画像を出す理由が無い ── 出せてしまうと「どちらが正本か」が 2 つになる。
+   */
+  exportImage: () => {
+    if (initResult?.vfs !== 'memory')
+      throw new Error('DB 画像を出せるのは :memory: のときだけです');
+    const api = sqliteApi;
+    if (api === null) throw new Error('sqlite が初期化されていません');
+    const exportDb = api.capi.sqlite3_js_db_export as unknown as (p: unknown) => Uint8Array;
+    return { image: exportDb((need() as unknown as { pointer: unknown }).pointer) };
+  },
   openContainer: (req) => {
     need().exec({
       sql: `INSERT INTO containers (cid, title, created_at, updated_at, schema_version)
@@ -2158,6 +2293,7 @@ const handlers: Handlers = {
     db?.close();
     db = null;
     initResult = null;
+    sqliteApi = null;
     return null;
   },
 };

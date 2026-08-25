@@ -14,6 +14,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+// @ts-expect-error -- build script(型定義を持たない .mjs)を実際に走らせて見る
+import { bundleTagCount, externalRefs, shellOf } from '../../build/portable/shell-scan.mjs';
 
 const FOLD = readFileSync('build/portable/fold.mjs', 'utf-8');
 const CONFIG = readFileSync('build/portable.config.ts', 'utf-8');
@@ -37,11 +39,7 @@ describe('🔴 下限の門(縮む方向の壊れを止める)', () => {
     expect(FOLD, '外部参照の検査が無い').toContain('外部参照が残っている');
   });
 
-  it('🔴 見るのは器だけ(埋め込んだ JS の中の文字列に当たらない)', () => {
-    // ⚠ ここを外すと、`` `src="${e}"` `` のような組み立てに当たって必ず落ちる
-    expect(FOLD, 'script の中身を抜いていない').toContain('<script');
-    expect(FOLD, 'style の中身を抜いていない').toContain('<style');
-    expect(FOLD, '中身を抜く置換になっていない').toContain("'<script></script>'");
+  it('抜きすぎの空振り防止が在る', () => {
     expect(FOLD, '抜きすぎの空振り防止が無い').toContain('検査そのものが空振りしている');
   });
 
@@ -80,6 +78,63 @@ describe('🔴 当たらなかったら落とす(黙って畳まない)', () => 
 
   it('worker が 1 件も見つからなければ落とす', () => {
     expect(FOLD).toContain('worker が 1 件も見つからない');
+  });
+});
+
+/**
+ * 🔴 **器の走査は、原文 pin ではなく走らせて見る**(2026-08-25)。
+ *
+ * ⚠ この 2 つの壊れ方は、**字面では両方とも「在る」**ので原文 pin では捕まらない:
+ * ① 埋め込んだ JS の中の `` `src="..."` `` に当たって必ず落ちる
+ * ② 印を `</head>` の前に差したつもりが、**JS の中の `</head>`** に当たる
+ *   (実際にアプリを真っ白にした)
+ */
+describe('🔴 器の走査(実際に走らせる)', () => {
+  const app = 'var t=`<a src="x.js" href="y.css"></a></head>`;';
+  const folded =
+    `<html><head><script type="application/json" data-pkc-bundle>{"id":"pkcb-template"}</script>` +
+    `<script type="module">${app}</script><style>a{}</style></head>` +
+    `<body><div data-pkc-slot="root"></div></body></html>`;
+
+  it('🔴 埋め込んだ JS の中の `src="..."` を外部参照と数えない', () => {
+    expect(externalRefs(shellOf(folded))).toEqual([]);
+  });
+
+  it('⚠ 空振り防止 ── 本物の外部参照は数える', () => {
+    const bad = folded.replace('<body>', '<body><script src="a.js"></script>');
+    expect(externalRefs(shellOf(bad))).toEqual(['src="a.js"']);
+    /**
+     * `<link href>` も同じ(器に残った css)。
+     * ⚠ **差し込む錨に `</head>` を使わない** ── この fixture の JS の中にも
+     *   `</head>` が在るので、そちらに当たって**器には 1 件も足されない**
+     *   (この test を書いていて実際に踏んだ ── 罠は fixture にも出る)。
+     */
+    const bad2 = folded.replace('</style></head>', '</style><link rel="stylesheet" href="b.css"></head>');
+    expect(externalRefs(shellOf(bad2))).toEqual(['href="b.css"']);
+  });
+
+  it('`data:` と `#` は外部ではない', () => {
+    const ok = folded.replace('<body>', '<body><img src="data:image/png;base64,AA"><a href="#x">');
+    expect(externalRefs(shellOf(ok))).toEqual([]);
+  });
+
+  it('🔴 器に在る印は 1 件と数える', () => {
+    expect(bundleTagCount(shellOf(folded))).toBe(1);
+  });
+
+  it('🔴 JS の中に差し込まれた印は数えない(アプリを真っ白にした形)', () => {
+    const inside = folded.replace(
+      '<script type="module">',
+      '<script type="module">var u=`<script data-pkc-bundle></scr`+`ipt></head>`;',
+    );
+    // ⚠ 器には**もとの 1 件だけ**。JS の中の 1 件は数えない
+    expect(bundleTagCount(shellOf(inside))).toBe(1);
+    // 器の印を消したら 0 になる(この数えが空振りでない証拠)
+    expect(bundleTagCount(shellOf(inside.replace(' data-pkc-bundle', '')))).toBe(0);
+  });
+
+  it('⚠ 器を抜きすぎていない(印の受け口が残る)', () => {
+    expect(shellOf(folded)).toContain('data-pkc-slot="root"');
   });
 });
 
