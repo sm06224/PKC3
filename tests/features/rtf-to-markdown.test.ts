@@ -352,3 +352,156 @@ describe('実物に近い一式', () => {
     );
   });
 });
+
+/**
+ * 🔴 **コード**(user 指示 2026-08-25 の 2 通目:
+ * 「**最近の生成AIチャットがrtfのコピペを使い始めてる / そのニーズがあるから
+ * 要望してる**」)。
+ *
+ * ⚠ 1 稿目は「RTF に**コードという印が無い**ので入れない」と doc に書いていた ──
+ * それは**相手を取り違えていた**(ワードパッドの文書を想定していた)。
+ * 生成 AI の回答で**いちばん要るのはコード**である。
+ *
+ * 🔑 そして印は**在った** ── `\fonttbl` の `\fmodern`(等幅の族)/ `\fprq1`
+ * (固定ピッチ)は **RTF 自身の宣言**である。⚠ フォント**名**の表で当てない
+ * (次に出る名前で負ける ── CLAUDE.md §8「登録を読む。推測の表を作らない」)。
+ */
+describe('コード ── 等幅の宣言を読む', () => {
+  /** `\f2` を等幅と宣言した頭(生成 AI の窓が書く形)。 */
+  const MONO_HEAD =
+    String.raw`{\rtf1\ansi\ansicpg1252\deff0` +
+    String.raw`{\fonttbl{\f0\fswiss\fcharset0 Helvetica;}{\f2\fmodern\fprq1\fcharset0 Menlo;}}` +
+    String.raw`\uc1 `;
+  const mono = (body: string, plain = ''): string | null =>
+    convertPastedRtf({ rtf: MONO_HEAD + body + '}', plain });
+
+  it('🔴 段落が丸ごと等幅なら、コードの囲みにする', () => {
+    expect(
+      mono(String.raw`\pard\f0 説明です\par\pard\f2 const a = 1;\par`),
+    ).toBe('説明です\n\n```\nconst a = 1;\n```');
+  });
+
+  it('🔴 続いた行は 1 つの囲みにまとめる(1 行ごとに囲まない)', () => {
+    expect(
+      mono(
+        String.raw`\pard\f0 手順\par` +
+          // ⚠ RTF では裸の `{` は**グループの開始** ── 実物は `\{` と書く
+          String.raw`\pard\f2 function f() \{\par\pard\f2   return 1;\par\pard\f2 \}\par`,
+      ),
+    ).toBe('手順\n\n```\nfunction f() {\n  return 1;\n}\n```');
+  });
+
+  it('🔴 コードの中は escape しない(字面そのものである)', () => {
+    // ⚠ `escapeInline` を通すと `\*` や `\_` が混ざり、貼った先で**別のコード**になる
+    expect(mono(String.raw`\pard\f0 例\par\pard\f2 a *= b_c[0];\par`)).toBe(
+      '例\n\n```\na *= b_c[0];\n```',
+    );
+  });
+
+  it('⚠ 行内コードの中に backtick が在れば、囲みを長くする', () => {
+    /**
+     * ⚠ 1 稿目は**塊の経路しか通していなかった**(変異試験 C9 が SURVIVED)──
+     *   行内は「囲みを長くする」を 1 度も走らせていなかった(CLAUDE.md §2)。
+     */
+    const tick = '`';
+    const out = mono(
+      String.raw`\pard\f0 例は \f2 a` + tick + String.raw`b\f0  です\par`,
+    )!;
+    expect(out).toBe('例は ``a`b`` です');
+  });
+
+  it('🔴 文の途中の等幅は行内コードにする', () => {
+    expect(mono(String.raw`\pard\f0 変数 \f2 count\f0  を見る\par\pard\f0 \b !\b0\par`)).toBe(
+      '変数 `count` を見る\n\n**!**',
+    );
+  });
+
+  it('⚠ 中に backtick が在れば、囲みを長くする(途中で閉じない)', () => {
+    /**
+     * ⚠ **backtick を template literal の中に書かない**(1 稿目は構文誤りで
+     *   file ごと読めなくなった)── 組み立てて渡す。
+     */
+    const tick3 = '`'.repeat(3);
+    const line = 'md = "' + tick3 + ' code ' + tick3 + '";';
+    const out = mono(String.raw`\pard\f0 例\par\pard\f2 ` + line + String.raw`\par`)!;
+    expect(out).toContain('`'.repeat(4) + '\n' + line + '\n' + '`'.repeat(4));
+  });
+
+  it('🔴 対比が無ければ囲まない(文書を丸ごと等幅で書いただけ)', () => {
+    /**
+     * ⚠ ここが無いと、Courier で書いた文書を貼ると**全部がコードブロック**になる。
+     * 🔑 「普通の段落が 1 つも無い」= ここがコードだという**対比が無い**。
+     */
+    expect(mono(String.raw`\pard\f2 これは普通の文です\par\pard\f2 二行目\par`, '')).toBeNull();
+    // ⚠ 空振り防止 ── 普通の段落が 1 つ在れば囲む
+    expect(mono(String.raw`\pard\f0 説明\par\pard\f2 これは普通の文です\par`)).toContain('```');
+  });
+
+  it('⚠ 等幅と宣言していないフォントはコードにしない', () => {
+    expect(mono(String.raw`\pard\f0 ただの文\par\pard\f0 二行目\par`, '')).toBeNull();
+  });
+
+  it('🔴 `\\fmodern`(等幅の族)だけでも等幅と読む', () => {
+    /**
+     * ⚠ 上の fixture は `\fmodern\fprq1` の**両方**を書いていたので、
+     *   片方を外しても**もう片方が救っていた**(変異試験 C1 が SURVIVED)。
+     * 🔑 宣言を 1 つずつ書いた fixture を、**両方の向き**で持つ。
+     */
+    const head = String.raw`{\rtf1\ansi{\fonttbl{\f0\fswiss Helvetica;}{\f5\fmodern Menlo;}}\uc1 `;
+    expect(
+      convertPastedRtf({
+        rtf: head + String.raw`\pard\f0 説明\par\pard\f5 y = 2;\par}`,
+        plain: '',
+      }),
+    ).toBe('説明\n\n```\ny = 2;\n```');
+  });
+
+  it('🔴 `\\fprq1`(固定ピッチ)だけでも等幅と読む', () => {
+    const head =
+      String.raw`{\rtf1\ansi{\fonttbl{\f0\fswiss Helvetica;}{\f3\fnil\fprq1 Consolas;}}\uc1 `;
+    expect(
+      convertPastedRtf({
+        rtf: head + String.raw`\pard\f0 説明\par\pard\f3 x = 1;\par}`,
+        plain: '',
+      }),
+    ).toBe('説明\n\n```\nx = 1;\n```');
+  });
+
+  it('⚠ フォントの宣言は 1 件ごとに切れる(前の宣言を持ち越さない)', () => {
+    /**
+     * ⚠ `\f2` が等幅、`\f4` は等幅でない ── 持ち越すと `\f4` までコードになる。
+     * 🔑 **対比を作る**(飾りの付いた段落を混ぜる)── 全部が等幅に見える形だと
+     *   「対比が無ければ囲まない」の規則が救ってしまい、持ち越しを外しても
+     *   結果が同じになる(変異試験 C3 が SURVIVED で教えた)。
+     */
+    const head =
+      String.raw`{\rtf1\ansi{\fonttbl{\f2\fmodern Menlo;}{\f4\fswiss Helvetica;}}\uc1 `;
+    const out = convertPastedRtf({
+      rtf: head + String.raw`\pard\f4 \b 見出しっぽい\b0\par\pard\f4 ただの文\par}`,
+      plain: '',
+    })!;
+    expect(out, '前提が崩れた(何も返っていない)').not.toBeNull();
+    expect(out, '等幅でないフォントまでコードになっている').not.toContain('```');
+    expect(out).toBe('**見出しっぽい**\n\nただの文');
+  });
+
+  it('コードは「得るものが在る」に数える(コードだけの貼付でも介入する)', () => {
+    expect(mono(String.raw`\pard\f0 x\par\pard\f2 const a = 1;\par`)).toContain('```');
+  });
+});
+
+describe('見出し ── `\\outlinelevel` も読む', () => {
+  it('🔴 スタイルシートが無くても `\\outlinelevel0` は見出し 1 になる', () => {
+    /**
+     * ⚠ スタイルシートを持たない出し手(生成 AI の窓など)は、こちらしか
+     *   書かないことがある ── 片方だけ読むと**見出しが丸ごと段落に潰れる**。
+     */
+    expect(conv(String.raw`\pard\outlinelevel0 題\par\pard\outlinelevel1 小題\par`)).toBe(
+      '# 題\n\n## 小題',
+    );
+  });
+
+  it('⚠ 本文の `\\outlinelevel9` は見出しにしない', () => {
+    expect(conv(String.raw`\pard\outlinelevel9 本文\par\b !\b0\par`)).toBe('本文\n\n**!**');
+  });
+});

@@ -314,3 +314,52 @@ test('🔴 HTML も載っているときは HTML が勝つ(RTF に押しのけ�
   await expect(row, 'RTF が HTML を押しのけている').toHaveValue(/## HTML の見出し/);
   await expect(row).not.toHaveValue(/RTF の見出し/);
 });
+
+/**
+ * 🔴 **生成 AI チャットの回答を、コードごと貼る**
+ * (user 指示 2026-08-25「**最近の生成AIチャットがrtfのコピペを使い始めてる /
+ * そのニーズがあるから要望してる**」)。
+ *
+ * ⚠ **unit では届かない層**:確定したあとに**本当にコードとして描かれるか**。
+ *   字が入っただけで終わらせない(``` が本文に在っても、囲みが閉じていなければ
+ *   画面はコードにならない)。
+ */
+test('🔴 生成 AI の回答(RTF)を貼ると、説明とコードが分かれて描かれる', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await openLiveRow(page);
+
+  /** ⚠ `\f2` を **`\fmodern`(等幅の族)と宣言**した頭 ── 名前で当てていない。 */
+  const RTF =
+    String.raw`{\rtf1\ansi\ansicpg1252\deff0` +
+    String.raw`{\fonttbl{\f0\fswiss\fcharset0 Helvetica;}{\f2\fmodern\fprq1\fcharset0 Menlo;}}\uc1 ` +
+    String.raw`\pard\outlinelevel0\f0 まとめ\par` +
+    String.raw`\pard\f0 次のように書きます\par` +
+    String.raw`\pard\f2 function f() \{\par\pard\f2   return 1;\par\pard\f2 \}\par` +
+    String.raw`\pard\f0 変数 \f2 count\f0  を見てください\par}`;
+
+  const prevented = await pasteText(page, ROW, {
+    rtf: RTF,
+    plain: 'まとめ 次のように書きます function f() { return 1; } 変数 count を見てください',
+  });
+  expect(prevented, '既定の貼付を止めていない(RTF が届いていない)').toBe(true);
+
+  const row = page.locator(ROW);
+  await expect(row, '見出しになっていない').toHaveValue(/# まとめ/);
+  // 🔴 続いた 3 行が**1 つの囲み**になっている(1 行ごとに囲んでいない)
+  await expect(row, 'コードが 1 つの囲みになっていない').toHaveValue(
+    /```\nfunction f\(\) \{\n {2}return 1;\n\}\n```/,
+  );
+  await expect(row, '行内コードになっていない').toHaveValue(/`count`/);
+
+  // 🔴 **確定すると本当にコードとして描かれる**
+  await page.keyboard.press('Tab');
+  const live = page.locator('[data-pkc-region="editor-live"]');
+  await expect(live.locator('pre code'), 'コードとして描かれていない').toContainText('return 1;');
+  await expect(live.locator('h1'), '見出しとして描かれていない').toContainText('まとめ');
+  // ⚠ 行内コードは `pre` の外に在る(塊と行内を取り違えていない)
+  await expect(live.locator('p code'), '行内コードとして描かれていない').toContainText('count');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

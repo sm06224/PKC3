@@ -3,6 +3,16 @@
  * (user 指示 2026-08-25「**HTML貼付のほか、最近はリッチタイプテキストも増えてる /
  * 対応して欲しい**」)。
  *
+ * ## 🔴 相手は「生成 AI チャット」である(user 指示 2026-08-25、2 通目)
+ *
+ * > 「**最近の生成AIチャットがrtfのコピペを使い始めてる /
+ * > そのニーズがあるから要望してる / これはお願いじゃなくて命令です**」
+ *
+ * ⚠ 1 稿目はここを**ワードパッド / テキストエディット**だと思って書いた ──
+ * だから「**コードは入らない**」と doc にまで書いていた。
+ * 🔴 **生成 AI の回答でいちばん要るのはコードである。** 相手を取り違えると、
+ * 落とすものの判断がまるごとずれる ── だから user の言葉をここへ引いておく。
+ *
  * ## 🔑 HTML の**代わり**ではなく、HTML が無いときの道である
  *
  * Word / Excel / Google ドキュメント / LibreOffice は、コピーすると
@@ -39,10 +49,21 @@
  * - 画像(`\pngblip` / `\jpegblip`)は `data:` URL にして出す ── 資産へ逃がすのは
  *   呼び側(`inline-url-adopt.ts`)の仕事で、ここは純関数のまま保つ
  *
+ * ## 🔑 コードは「宣言」を読んで出す(推測しない)
+ *
+ * RTF に「ここはコード」という語は無いが、**`\fonttbl` にはある** ──
+ * `\fmodern`(等幅の族)/ `\fprq1`(固定ピッチ)は **RTF 自身の宣言**である。
+ * ⚠ フォント**名**の表(`Menlo` / `Consolas` / …)で当てない ── 次に出る名前で負ける
+ * (CLAUDE.md §8「登録を読む。推測の表を作らない」)。
+ *
+ * 🔴 そのうえで **対比が無ければ囲まない** ── 文書を丸ごと Courier で書いた人も
+ * 宣言に当たるので、**普通の段落が 1 つも無いときは**コードにしない。
+ *
  * ## ⚠ 出せないもの(黙って化けさせないために書く)
  *
- * - **コード** ── RTF に「コード」は無い。等幅フォントで推測すると、ふつうの
- *   文まで backtick で包んでしまうので**やらない**
+ * - **コードの言語**(``` の後ろの `ts` など)── RTF は言語を持たない。
+ *   ⚠ `text/html` が在れば `<code class="language-ts">` から取れるので、
+ *   そちらが先に通る(この module は HTML が無いときの道である)
  * - **`\wmetafile`(WMF / EMF)の画像** ── ブラウザで描けないので落とす
  * - **`\'hh` の非 ASCII** ── cp1252 として読む。⚠ 近年の出し手は非 ASCII を
  *   `\uN` で書く(`\'hh` は取りこぼし用の `?` として付く)ので実害は無いが、
@@ -75,6 +96,12 @@ interface Run {
   i: boolean;
   u: boolean;
   strike: boolean;
+  /**
+   * 🔴 **等幅で書かれているか = コードか**(user 指示 2026-08-25 の 2 通目)。
+   * ⚠ フォント**名**から当てているのではない ── `\fonttbl` の
+   *   **`\fmodern`(等幅の族)/ `\fprq1`(固定ピッチ)という宣言**を読んでいる。
+   */
+  mono: boolean;
   /** リンクの宛先(`\field` の中だけ)。 */
   href: string | null;
 }
@@ -86,10 +113,12 @@ interface Fmt {
   u: boolean;
   strike: boolean;
   hidden: boolean;
+  /** いま効いているフォント番号(`\fN`)。等幅かは `\fonttbl` の宣言が決める。 */
+  font: number;
 }
 
 /** いま何を読んでいるか。`skip` の中身は 1 文字も出さない。 */
-type Dest = 'body' | 'skip' | 'stylesheet' | 'listtext' | 'fldinst' | 'pict';
+type Dest = 'body' | 'skip' | 'stylesheet' | 'fonttbl' | 'listtext' | 'fldinst' | 'pict';
 
 interface Frame {
   fmt: Fmt;
@@ -100,7 +129,7 @@ interface Frame {
 
 /** 中身を 1 文字も出さない destination(見出しの素になる `stylesheet` は別扱い)。 */
 const SKIP_DEST = new Set([
-  'fonttbl', 'colortbl', 'info', 'header', 'footer', 'headerl', 'headerr',
+  'colortbl', 'info', 'header', 'footer', 'headerl', 'headerr',
   'footerl', 'footerr', 'footnote', 'endnote', 'annotation', 'xe', 'tc', 'tcn',
   'themedata', 'colorschememapping', 'datastore', 'latentstyles', 'rsidtbl',
   'generator', 'listtable', 'listoverridetable', 'pntxta', 'pntxtb', 'objdata',
@@ -133,7 +162,7 @@ const SYMBOLS: Record<string, string> = {
   tab: '\t',
 };
 
-const freshFmt = (): Fmt => ({ b: false, i: false, u: false, strike: false, hidden: false });
+const freshFmt = (): Fmt => ({ b: false, i: false, u: false, strike: false, hidden: false, font: -1 });
 
 /**
  * 飾りを markdown にする。
@@ -148,6 +177,17 @@ function renderRun(r: Run): string {
   const tail = /\s*$/.exec(r.text)![0];
   const core = r.text.slice(lead.length, r.text.length - tail.length);
   if (core === '') return r.text;
+  /**
+   * 🔴 **コードは escape しない**(中身は字面そのものである)。
+   * ⚠ 中に backtick が在るときは**囲みを長くする**(GFM の規約)── 3 個の
+   *   backtick を含む行を 1 個で囲むと、そこで閉じて**後ろが全部コードから出る**。
+   */
+  if (r.mono) {
+    const longest = Math.max(0, ...[...core.matchAll(/`+/g)].map((m) => m[0].length));
+    const fence = '`'.repeat(longest + 1);
+    const pad = core.startsWith('`') || core.endsWith('`') ? ' ' : '';
+    return lead + fence + pad + core + pad + fence + tail;
+  }
   let out = escapeInline(core);
   /**
    * ⚠ **下線は `:` を含む文字には掛けられない**(記法が閉じられない)。
@@ -165,7 +205,12 @@ function renderRun(r: Run): string {
 }
 
 const sameFmt = (a: Run, b: Run): boolean =>
-  a.b === b.b && a.i === b.i && a.u === b.u && a.strike === b.strike && a.href === b.href;
+  a.b === b.b &&
+  a.i === b.i &&
+  a.u === b.u &&
+  a.strike === b.strike &&
+  a.mono === b.mono &&
+  a.href === b.href;
 
 function renderRuns(runs: Run[]): string {
   const merged: Run[] = [];
@@ -190,6 +235,18 @@ interface Para {
   inTable: boolean;
 }
 
+/**
+ * 出来上がった塊。
+ *
+ * 🔑 **種類を持たせる理由**は「対比が無ければコードにしない」を決めるためである
+ * ── 全部が等幅の文書(素の文書を Courier で書いただけ)を**丸ごとコード**に
+ * してしまわないよう、**最後にまとめて**判定する。
+ */
+interface OutBlock {
+  text: string;
+  kind: 'text' | 'code';
+}
+
 const freshPara = (): Para => ({
   runs: [],
   listLevel: null,
@@ -197,6 +254,12 @@ const freshPara = (): Para => ({
   heading: 0,
   inTable: false,
 });
+
+/** 実のある文字が全部等幅なら、その段落はコードの行である。 */
+function paraIsCode(runs: readonly Run[]): boolean {
+  const real = runs.filter((r) => r.text.trim() !== '');
+  return real.length > 0 && real.every((r) => r.mono);
+}
 
 /**
  * 🔴 **RTF を PKC-Markdown にする唯一の判定**。`null` = 介入しない(既定の貼付)。
@@ -220,7 +283,16 @@ export function parseRtf(rtf: string): string | null {
   const stack: Frame[] = [{ fmt: freshFmt(), dest: 'body', uc: 1 }];
   const top = (): Frame => stack[stack.length - 1]!;
 
-  const blocks: string[] = [];
+  const blocks: OutBlock[] = [];
+  /**
+   * 🔴 **等幅と宣言されたフォント番号**(`\fonttbl` から読む)。
+   * ⚠ 名前で当てない ── `\fmodern`(等幅の族)/ `\fprq1`(固定ピッチ)は
+   *   RTF 自身の宣言である(CLAUDE.md §8「登録を読む。推測の表を作らない」)。
+   */
+  const monoFonts = new Set<number>();
+  /** `\fonttbl` の 1 件を組み立てる途中の値。 */
+  let fontId = -1;
+  let fontMono = false;
   let para = freshPara();
   /** 表の行を溜める(`\row` ごとに 1 行)。 */
   let tableRows: { cells: string[]; head: boolean }[] = [];
@@ -257,7 +329,7 @@ export function parseRtf(rtf: string): string | null {
     }
     const t = gfmTable(tableRows);
     if (t !== null) {
-      blocks.push(t);
+      blocks.push({ text: t, kind: 'text' });
       worth = true;
     }
     tableRows = [];
@@ -274,16 +346,34 @@ export function parseRtf(rtf: string): string | null {
     }
     if (tableRows.length > 0 || tableCells.length > 0) flushTable();
     const text = paraText();
+    /**
+     * 🔴 **コードの行は、飾りを付けずに素のまま出す**(中身は字面である)。
+     * ⚠ `paraText()` を通すと `escapeInline` が掛かって `\*` などが混じる。
+     */
+    if (paraIsCode(para.runs) && para.heading === 0 && para.listLevel === null) {
+      blocks.push({ text: para.runs.map((r) => r.text).join('').replace(/\s+$/, ''), kind: 'code' });
+      para = freshPara();
+      return;
+    }
     if (text !== '') {
+      /**
+       * ⚠ **行内コードも「得るもの」に数える**(test が拾った)── 数えないと
+       *   `変数 count を見る` のような貼付が**平文のまま**になる。
+       * 🔑 **ここで数える**のが肝である ── 書込の時点(`push`)で数えると、
+       *   **丸ごと等幅の文書**(対比が無いので囲まない)まで「得るものが在る」に
+       *   なってしまう。この枝に来ているということは、その段落は
+       *   **等幅だけではない** = 行内コードが本当に出る、ということである。
+       */
+      if (para.runs.some((r) => r.mono && r.text.trim() !== '')) worth = true;
       if (para.heading > 0) {
-        blocks.push('#'.repeat(para.heading) + ' ' + text);
+        blocks.push({ text: '#'.repeat(para.heading) + ' ' + text, kind: 'text' });
         worth = true;
       } else if (para.listLevel !== null) {
         const indent = '  '.repeat(Math.min(para.listLevel, 6));
-        blocks.push(indent + (para.ordered ? '1.' : '-') + ' ' + text);
+        blocks.push({ text: indent + (para.ordered ? '1.' : '-') + ' ' + text, kind: 'text' });
         worth = true;
       } else {
-        blocks.push(text);
+        blocks.push({ text, kind: 'text' });
       }
     }
     para = freshPara();
@@ -305,6 +395,7 @@ export function parseRtf(rtf: string): string | null {
       i: f.fmt.i,
       u: f.fmt.u,
       strike: f.fmt.strike,
+      mono: monoFonts.has(f.fmt.font),
       href: linkHref,
     });
   };
@@ -388,6 +479,33 @@ export function parseRtf(rtf: string): string | null {
       case 'stylesheet':
         f.dest = 'stylesheet';
         return;
+      case 'fonttbl':
+        f.dest = 'fonttbl';
+        return;
+      case 'f':
+        if (arg === null) return;
+        if (f.dest === 'fonttbl') fontId = arg;
+        else f.fmt.font = arg;
+        return;
+      /**
+       * 🔴 **等幅かは RTF 自身が宣言している** ── `\fmodern` は「等幅の族」、
+       * `\fprq1` は「固定ピッチ」。⚠ フォント**名**で当てない
+       * (`Menlo` / `SFMono` / `Cascadia` … を並べた表は、次に出る名前で負ける)。
+       */
+      case 'fmodern':
+        if (f.dest === 'fonttbl') fontMono = true;
+        return;
+      case 'fprq':
+        if (f.dest === 'fonttbl' && arg === 1) fontMono = true;
+        return;
+      /**
+       * 🔴 **見出しのもう 1 つの宣言**(`\outlinelevel0` = 見出し 1)。
+       * ⚠ スタイルシートを持たない出し手(生成 AI の窓など)は、こちらしか
+       *   書かないことがある ── 片方だけ読むと**見出しが丸ごと段落に潰れる**。
+       */
+      case 'outlinelevel':
+        if (arg !== null && arg >= 0 && arg <= 8) para.heading = Math.min(6, arg + 1);
+        return;
       case 'listtext':
       case 'pntext':
         f.dest = 'listtext';
@@ -431,7 +549,16 @@ export function parseRtf(rtf: string): string | null {
 
     if (c === '}') {
       const closing = top();
-      if (closing.dest === 'stylesheet') {
+      if (closing.dest === 'fonttbl') {
+        /**
+         * ⚠ **1 件ごとに必ず捨てる**(stylesheet で 1 度踏んだのと同じ形)──
+         *   捨てないと、前の font の宣言が次へ持ち越される。
+         */
+        if (fontId >= 0 && fontMono) monoFonts.add(fontId);
+        fontId = -1;
+        fontMono = false;
+        buf = '';
+      } else if (closing.dest === 'stylesheet') {
         /**
          * ⚠ **`bufStyle` が 0 でも溜めを捨てる**(1 稿目で踏んだ)。
          * `{\stylesheet{\s0 Normal;}{\s1 heading 1;}}` の 1 つ目は
@@ -473,6 +600,7 @@ export function parseRtf(rtf: string): string | null {
             i: false,
             u: false,
             strike: false,
+            mono: false,
             href: null,
           });
           worth = true;
@@ -557,9 +685,61 @@ export function parseRtf(rtf: string): string | null {
   endPara();
   if (tableRows.length > 0 || tableCells.length > 0) flushTable();
 
-  const text = blocks.join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
-  if (text === '' || !worth) return null;
+  const assembled = assemble(blocks);
+  const text = assembled.text.replace(/\n{3,}/g, '\n\n').trim();
+  if (text === '' || !(worth || assembled.fenced)) return null;
   return restoreImages(text);
+}
+
+/**
+ * 塊を 1 本の markdown にする。
+ *
+ * ## 🔴 対比が無ければコードにしない
+ *
+ * `\fmodern` の宣言は「このフォントは等幅である」としか言っていない ──
+ * **文書を丸ごと Courier で書いた人**もそこに当たる。全部が等幅なら
+ * 「ここがコード」という**対比が無い**ので、⚠ 丸ごと囲むと**文書全体が
+ * コードブロックになる**。だから**普通の段落が 1 つも無いときは囲まない**。
+ *
+ * ## 🔑 続いたコードの行は 1 つの囲みにする
+ *
+ * RTF はコードの各行を**別の段落**として書くので、行ごとに囲むと
+ * **1 行ごとのコードブロックが並ぶ**(貼った先で読めない)。
+ */
+function assemble(blocks: readonly OutBlock[]): { text: string; fenced: boolean } {
+  const hasText = blocks.some((b) => b.kind === 'text');
+  const out: string[] = [];
+  let fenced = false;
+  let run: string[] = [];
+  const flush = (): void => {
+    if (run.length === 0) return;
+    if (hasText) {
+      /**
+       * ⚠ 中身に backtick の並びが在れば、囲みを**それより長く**する
+       * (GFM の規約 ── 短いと途中で閉じて、後ろが全部コードから出る)。
+       */
+      const longest = Math.max(
+        2,
+        ...run.flatMap((l) => [...l.matchAll(/`+/g)].map((m) => m[0].length)),
+      );
+      const fence = '`'.repeat(longest + 1);
+      out.push(fence + '\n' + run.join('\n') + '\n' + fence);
+      fenced = true;
+    } else {
+      // 対比が無い ── ただの段落として出す
+      out.push(...run);
+    }
+    run = [];
+  };
+  for (const b of blocks) {
+    if (b.kind === 'code') run.push(b.text);
+    else {
+      flush();
+      out.push(b.text);
+    }
+  }
+  flush();
+  return { text: out.join('\n\n'), fenced };
 }
 
 /**
