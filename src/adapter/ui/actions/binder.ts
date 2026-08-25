@@ -37,6 +37,7 @@ import { formatLineDate } from '@features/schedule/line-date';
 import { isImageAssetMime } from '@features/asset/asset-ref-format';
 import { adoptableUrls, rewriteAdopted } from '@features/asset/inline-url-adopt';
 import { convertPastedHtml } from '@features/markdown/html-to-markdown';
+import { convertPastedRtf } from '@features/markdown/rtf-to-markdown';
 import { convertPastedPermalink } from '@features/link/permalink';
 import { resolveMime } from './attach';
 import { applyFormat, type FormatOp } from '@features/markdown/text-ops';
@@ -3341,6 +3342,18 @@ export function bindActions(
     const html = ce.clipboardData?.getData('text/html') ?? '';
     const plain = ce.clipboardData?.getData('text/plain') ?? '';
     /**
+     * 🔴 **リッチテキスト(RTF)**(user 指示 2026-08-25「HTML貼付のほか、
+     * 最近はリッチタイプテキストも増えてる」)。
+     *
+     * ⚠ **HTML の代わりではない。** Word / Excel / Google ドキュメントは
+     *   `text/html` と `text/rtf` の**両方**を載せるので、そこは HTML のほうが
+     *   必ず忠実である ── だから RTF は**下の三項でいちばん後ろ**に置く。
+     * 🔑 RTF しか載らない出し手(WordPad / TextEdit のリッチテキスト書類 /
+     *   一部のネイティブ製アプリ)から貼ったとき、**いままで平文に潰れていた**
+     *   のを拾うためのものである。
+     */
+    const rtf = ce.clipboardData?.getData('text/rtf') ?? '';
+    /**
      * 🔴 **素で貼ったパーマリンクを内部リンクにする**(#251)。
      *
      * ⚠ **HTML の変換より先に見る** ── パーマリンクをコピーすると
@@ -3353,7 +3366,8 @@ export function bindActions(
       containerId: st.cid,
       titleOf: (lid) => st.entryMetas.get(lid)?.title ?? null,
     });
-    const converted = permalink ?? convertPastedHtml({ html, plain });
+    const converted =
+      permalink ?? convertPastedHtml({ html, plain }) ?? convertPastedRtf({ rtf, plain });
     const text = converted ?? plain;
     if (text === '') return false;
 

@@ -90,6 +90,17 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-25-rich-text-paste',
+    title: 'ワードパッドやテキストエディットから貼っても、書式が残るようになりました',
+    items: [
+      '書式付きの文書アプリからコピーした文字を本文に貼ると、見出し・箇条書き・表・リンク・太字などが記法に戻って入ります。',
+      'これまでも Word や Google ドキュメントからは形のまま入っていましたが、ワードパッドやテキストエディットからはただの文字に潰れていました。',
+      '貼り込まれた PNG / JPEG の画像は、添付として取り込みます。',
+      '下線は :文字:underline: の形で入ります。',
+      'コードだけは入りません。リッチテキストには「ここはコード」という印が無く、フォントから推測するとふつうの文まで包んでしまうためです。',
+    ],
+  },
+  {
     id: '2026-08-25-portable-html',
     title: 'PKC3 ごと 1 つのファイルに入れて、持ち歩けるようになりました',
     items: [
@@ -286,21 +297,11 @@ export const NOTICES: readonly Notice[] = [
       '区切りは 〜 でも書けます。期間には時刻を付けられません。書いた時刻はそのまま行に残ります。',
     ],
   },
-  {
-    id: '2026-08-24-markdown-to-pandoc',
-    title: 'Markdown の書き出しが、何のための形か分かるようになりました',
-    items: [
-      '設定の「Markdown」は、1 ノート = 1 つの .md にして zip で保存します。これまで画面には「Markdown ファイルとして保存します」としか出ておらず、何に使えるかが分かりませんでした。',
-      '展開したフォルダは、Pandoc など他の道具にそのまま渡せます。EPUB や LaTeX など、アプリの中に口が無い形式はこの道です。',
-      'Word や PowerPoint や PDF は、これまでどおりアプリの中の口から出せます。そちらは値の置き換えや改頁も効きます。',
-      '書き出しの中身は前と同じです。変わったのは画面の説明とマニュアルだけです。',
-    ],
-  },
 ];
 
 /**
  * ⚠ **落としたぶんの原本は CHANGELOG に在る**(上限 20 件を超えたので、古いほうから
  *   `2026-08-16-office-save-to-pkc` / `2026-08-17-office-save-same-note`(2026-08-19)、
  *   `2026-08-19-dual-pane-app`(2026-08-22)、
- *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice` / `2026-08-24-pptx-export` / `2026-08-24-paste-permalink`(2026-08-25)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
+ *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice` / `2026-08-24-pptx-export` / `2026-08-24-paste-permalink` / `2026-08-24-markdown-to-pandoc`(2026-08-25)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
  */

@@ -304,3 +304,83 @@ describe('パーマリンクの貼付', () => {
     expect(e.defaultPrevented, '本文以外で横取りしている').toBe(false);
   });
 });
+
+/**
+ * 🔴 **リッチテキスト(RTF)の貼付**(user 指示 2026-08-25)。
+ *
+ * ⚠ ここが見るのは**順番**である ── 変換そのものは
+ * `tests/features/rtf-to-markdown.test.ts`。
+ * 🔑 順番を外すと user から見える壊れ方は「Word から貼ると**見出しが消える**」
+ *   (RTF が HTML を押しのけた)なので、そこを名指しで pin する。
+ */
+describe('リッチテキスト(RTF)の貼付', () => {
+  const RTF =
+    String.raw`{\rtf1\ansi\deff0{\fonttbl{\f0 Calibri;}}` +
+    String.raw`{\stylesheet{\s1 heading 1;}}` +
+    String.raw`\pard\s1 RTF の見出し\par\pard \b 太字\b0 です\par}`;
+
+  it('🔴 `text/html` が無ければ RTF を使う(いままで平文に潰れていた)', () => {
+    const { ta } = setup();
+    const e = pasteEvent({ 'text/rtf': RTF, 'text/plain': 'RTF の見出し\n太字です' });
+    ta.dispatchEvent(e);
+    expect(e.defaultPrevented, '既定の貼付を止めていない').toBe(true);
+    expect(ta.value).toBe('# RTF の見出し\n\n**太字**です');
+  });
+
+  it('🔴 `text/html` が在るときは HTML が勝つ(RTF に押しのけさせない)', () => {
+    // ⚠ Word / Excel / Google ドキュメントは**両方**を載せる ── HTML のほうが忠実
+    const { ta } = setup();
+    ta.dispatchEvent(
+      pasteEvent({
+        'text/html': '<h2>HTML の見出し</h2>',
+        'text/rtf': RTF,
+        'text/plain': 'HTML の見出し',
+      }),
+    );
+    expect(ta.value, 'RTF が HTML を押しのけている').toBe('## HTML の見出し');
+  });
+
+  it('⚠ HTML が「変換して得るものが無い」ときは RTF に回る', () => {
+    const { ta } = setup();
+    ta.dispatchEvent(
+      pasteEvent({
+        // 構造も飾りもリンクも無い HTML ── `convertPastedHtml` は `null` を返す
+        'text/html': '<p>ただの段落</p>',
+        'text/rtf': RTF,
+        'text/plain': 'ただの段落',
+      }),
+    );
+    expect(ta.value).toBe('# RTF の見出し\n\n**太字**です');
+  });
+
+  it('🔴 本文の欄でなければ触らない(題名や検索欄に markdown を組み立てない)', () => {
+    const { outside } = setup();
+    const e = pasteEvent({ 'text/rtf': RTF, 'text/plain': 'RTF の見出し' });
+    outside.dispatchEvent(e);
+    expect(e.defaultPrevented, '本文の欄でないのに既定を止めている').toBe(false);
+  });
+
+  it('⚠ 変換して得るものが無い RTF なら既定に委ねる', () => {
+    const { ta } = setup();
+    const plainRtf = String.raw`{\rtf1\ansi\deff0 ただの一行です\par}`;
+    const e = pasteEvent({ 'text/rtf': plainRtf, 'text/plain': 'ただの一行です' });
+    ta.dispatchEvent(e);
+    expect(e.defaultPrevented, '得るものが無いのに既定を止めている').toBe(false);
+    expect(ta.value).toBe('');
+  });
+
+  it('🔴 RTF の中の画像も、資産へ逃がす経路に乗る', async () => {
+    const { ta, asked } = setup();
+    const PNG_HEX =
+      '89504e470d0a1a0a0000000d4948445200000001000000010806000000' +
+      '1f15c4890000000a49444154789c630001000005000' +
+      '10d0a2db40000000049454e44ae426082';
+    const withPict =
+      String.raw`{\rtf1\ansi\deff0 {\pict\pngblip\picw16\pich16 ` + PNG_HEX + '}' + String.raw`\par}`;
+    ta.dispatchEvent(pasteEvent({ 'text/rtf': withPict, 'text/plain': '' }));
+    await Promise.resolve();
+    await Promise.resolve();
+    // 🔑 `data:` を資産へ逃がすのは呼び側の仕事 ── そこへ届いていることを見る
+    expect(asked.flat().some((u) => u.startsWith('data:image/png'))).toBe(true);
+  });
+});

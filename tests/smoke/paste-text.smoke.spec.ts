@@ -34,7 +34,7 @@ const PNG_1X1_B64 =
 async function pasteText(
   page: Page,
   selector: string,
-  data: { html?: string; plain: string },
+  data: { html?: string; rtf?: string; plain: string },
 ): Promise<boolean> {
   return await page.evaluate(
     ({ selector, data }) => {
@@ -42,6 +42,7 @@ async function pasteText(
       if (!el) throw new Error(`要素が無い: ${selector}`);
       const dt = new DataTransfer();
       if (data.html !== undefined) dt.setData('text/html', data.html);
+      if (data.rtf !== undefined) dt.setData('text/rtf', data.rtf);
       dt.setData('text/plain', data.plain);
       if (el instanceof HTMLElement) el.focus();
       const ev = new ClipboardEvent('paste', {
@@ -245,3 +246,71 @@ test('🔴 ページ中の図を貼ると、資産になって画像として出
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
+
+
+/**
+ * 🔴 **リッチテキスト(RTF)の貼付**(user 指示 2026-08-25)。
+ *
+ * 🔴 **unit(happy-dom)では届かない層だけ**を見る:
+ * ① **本物の `DataTransfer` に `text/rtf` を載せて本当に取り出せるか**
+ *    ── fake の `getData` は「こちらが渡した形」しか試していない
+ * ② **`execCommand('insertText')` の経路**(happy-dom に無いので unit は必ず fallback)
+ * ③ **確定すると本当にその形で描かれるか**(字が入っただけで終わらせない)
+ */
+test('🔴 リッチテキスト(RTF)を貼ると、形のまま入って描かれる', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await openLiveRow(page);
+
+  /** WordPad / TextEdit が書く形(⚠ `text/html` は**載せない**のがこの出し手の特徴)。 */
+  const RTF =
+    String.raw`{\rtf1\ansi\ansicpg1252\deff0{\fonttbl{\f0 Calibri;}}` +
+    String.raw`{\*\generator Riched20 10.0.19041;}{\stylesheet{\s0 Normal;}{\s1 heading 1;}}` +
+    String.raw`\viewkind4\uc1 \pard\s1 手順\par` +
+    String.raw`\pard\ls1\ilvl0{\listtext\'b7\tab}\b 牛乳\b0 を買う\par` +
+    String.raw`\pard\ls1\ilvl1{\listtext\'b7\tab}\i 低脂肪\i0\par` +
+    String.raw`\pard\trowd\trhdr\intbl 名\cell 数\cell\row` +
+    String.raw`\trowd\intbl 卵\cell 6\cell\row` +
+    String.raw`\pard 詳しくは{\field{\*\fldinst{HYPERLINK "https://e.com/a"}}{\fldrslt こちら}}\par}`;
+
+  const prevented = await pasteText(page, ROW, {
+    rtf: RTF,
+    plain: '手順 牛乳を買う 低脂肪 名 数 卵 6 詳しくはこちら',
+  });
+  expect(prevented, '既定の貼付を止めていない(RTF が届いていない)').toBe(true);
+
+  const row = page.locator(ROW);
+  await expect(row, 'RTF が markdown に戻っていない').toHaveValue(/# 手順/);
+  await expect(row, '強調が落ちた').toHaveValue(/\*\*牛乳\*\*/);
+  await expect(row, '入れ子の箇条書きが平らになった').toHaveValue(/- \*\*牛乳\*\*を買う\n\n {2}- \*低脂肪\*/);
+  await expect(row, '表が入っていない').toHaveValue(/\| 名 \| 数 \|/);
+  await expect(row, 'リンクが入っていない').toHaveValue(/\[こちら\]\(https:\/\/e\.com\/a\)/);
+
+  // 🔴 **確定すると本当にその形で描かれる**
+  await page.keyboard.press('Tab');
+  const live = page.locator('[data-pkc-region="editor-live"]');
+  await expect(live.locator('h1'), '見出しとして描かれていない').toContainText('手順');
+  await expect(live.locator('table td').first(), '表として描かれていない').toContainText('卵');
+  await expect(live.locator('ul ul li'), '入れ子の箇条書きが描かれていない').toContainText('低脂肪');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+test('🔴 HTML も載っているときは HTML が勝つ(RTF に押しのけさせない)', async ({ page }) => {
+  // ⚠ Word / Excel / Google ドキュメントは**両方**を載せる ── HTML のほうが忠実
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await openLiveRow(page);
+
+  await pasteText(page, ROW, {
+    html: '<h2>HTML の見出し</h2>',
+    rtf:
+      String.raw`{\rtf1\ansi\deff0{\stylesheet{\s1 heading 1;}}` +
+      String.raw`\pard\s1 RTF の見出し\par}`,
+    plain: 'HTML の見出し',
+  });
+  const row = page.locator(ROW);
+  await expect(row, 'RTF が HTML を押しのけている').toHaveValue(/## HTML の見出し/);
+  await expect(row).not.toHaveValue(/RTF の見出し/);
+});
