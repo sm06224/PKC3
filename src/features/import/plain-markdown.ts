@@ -38,6 +38,11 @@ const ACCEPTED_ARCHETYPES: ReadonlySet<string> = new Set([
   'textlog',
   'form',
   'spreadsheet',
+  // 🔴 **雛形も受ける**(#196 / B-2、2026-08-25)。⚠ 受けないと、書き出した雛形を
+  //    取り込み直したとき**普通のノートに化ける** ── 「取り込みが何も足さずに通る」は
+  //    archetype に置いた理由そのものなので、ここを落とすとその理由が嘘になる。
+  //    ⚠ 単一 md で完結する(bytes を持たない)ので `attachment` の理由は当たらない。
+  'snippet',
   'folder',
   'generic',
   'opaque',
