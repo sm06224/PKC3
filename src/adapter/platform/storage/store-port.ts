@@ -145,6 +145,8 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
     },
     listRevisionMetas: (entryLid) =>
       client.request({ op: 'listRevisionMetas', cid, entryLid }),
+    revisionDiffStats: (entryLid) =>
+      client.request({ op: 'revisionDiffStats', cid, entryLid }),
     getRevision: (revId) => client.request({ op: 'getRevision', cid, id: revId }),
     listTrash: () => client.request({ op: 'listTrash', cid }),
     /**

@@ -2857,6 +2857,69 @@ select:focus-visible {
   font-size: 12px;
 }
 
+/* ── 履歴: 版のちがい(#398)───────────────────────────
+ * 🔴 **差分は行が縦に積まれる**ので、その行だけ `flex-direction` を縦にする。
+ * ⚠ 上の規則(横並び)を打ち消さないと、差分の器が題名の**右**へ並んで潰れる。 */
+[data-pkc-field='history-panel'] li:has([data-pkc-field='revision-diff']) {
+  display: block;
+}
+/* 版を開くボタン ── 行の大半を占める(押す的を広く取る) */
+[data-pkc-field='history-panel'] [data-pkc-field='revision-open'] {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: start;
+  background: none;
+  border: 1px solid transparent;
+}
+[data-pkc-field='history-panel'] [data-pkc-field='revision-open']:hover {
+  border-color: var(--border);
+}
+/* ⚠ **地は無彩色、色は情報にだけ**(founding)── ここは「増減」という情報 */
+[data-pkc-field='revision-delta'] {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  white-space: nowrap;
+}
+[data-pkc-field='revision-diff'] {
+  margin-top: var(--s2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: var(--s2);
+}
+[data-pkc-field='revision-diff'] > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+}
+[data-pkc-field='revision-diff'] ul {
+  /* ⚠ 差分は**等幅**で読む(桁が揃わないと足し引きが追えない) */
+  font-family: var(--mono, ui-monospace, monospace);
+  gap: 0;
+  max-height: 40vh;
+  overflow: auto;
+}
+[data-pkc-field='revision-diff'] li {
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* ⚠ 色は**印(+ / −)の補助**である ── 印は字で置いてあるので、
+ *    色が見えなくても足し引きは読める(色だけに意味を持たせない) */
+[data-pkc-diff='add'] {
+  color: var(--ok, #1a7f37);
+}
+[data-pkc-diff='del'] {
+  color: var(--danger, #a40e26);
+}
+[data-pkc-diff='gap'] {
+  color: var(--muted);
+  font-style: italic;
+}
+
 /* 🔑 **長い題名を畳む規則は 1 か所にまとめる**(P8 段㉒)。
  * 一覧・ランチャー・表・パンくず ── 面ごとに書くと、次に増えた面でまた抜ける
  * (実際、段⑱ は表だけ直してパンくずを取りこぼした)。 */

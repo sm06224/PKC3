@@ -11,6 +11,7 @@ import type { StorePort } from '../../src/adapter/state/store-effects';
 type RevisionOps = Pick<
   StorePort,
   | 'listRevisionMetas'
+  | 'revisionDiffStats'
   | 'getRevision'
   | 'listTrash'
   | 'purgeTrash'
@@ -22,6 +23,8 @@ type RevisionOps = Pick<
 export function stubRevisionOps(): RevisionOps {
   return {
     listRevisionMetas: async () => [],
+    // ⚠ 増減の数を観測する test は自前で上書きする(既定は「1 件も無い」)
+    revisionDiffStats: async () => [],
     getRevision: async () => null,
     listTrash: async () => [],
     purgeTrash: async () => ({ purged: 0 }),

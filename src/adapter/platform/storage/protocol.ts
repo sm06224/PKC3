@@ -281,6 +281,23 @@ export type StorageRequest =
   | { op: 'revisionCounts'; cid: string }
   | { op: 'getRevision'; cid: string; id: string }
   | { op: 'listRevisionMetas'; cid: string; entryLid: string }
+  | {
+      /**
+       * 🔴 **版ごとの増減行数**(#398 段①)。
+       *
+       * > user の物語: 履歴に同じ題名が並び、**どれが目当ての版か押すまで分からない**。
+       *
+       * 🔴 **本文は 1 バイトも境界を越えない** ── 数だけを返す。
+       *   `listRevisionMetas` が「snapshot 列を読まない」規律で作られているのと
+       *   同じ向きで、ここは**worker の中で数えて数字だけ返す**。
+       * ⚠ 全文で持っている版(`kind: 'full'`)は、**1 つ新しい版と比べられない**
+       *   ので `null` を返す ── 0 と潰さない(0 は「変わっていない」、
+       *   `null` は「**数えられない**」で意味が違う)。
+       */
+      op: 'revisionDiffStats';
+      cid: string;
+      entryLid: string;
+    }
   /** revisions が存在する entry_lid の集合(= 生存 + ゴミ箱)。取込の lid 衝突判定用。 */
   | { op: 'listRevisionLids'; cid: string }
   | { op: 'listTrash'; cid: string }
@@ -395,6 +412,20 @@ export interface RevisionMetaRow {
    * なる(出さないと、全文で積む実装に退化しても test が気づけない)。
    */
   kind: string | null;
+}
+
+/**
+ * 🔴 **版 1 つの増減行数**(#398 段①)。
+ *
+ * ⚠ 向きは「**この版 → 1 つ新しい版**」(= user が読む向き)。
+ *   保存形は逆向きパッチなので、worker の中で**裏返してから**数える。
+ * ⚠ `added` / `removed` が `null` = **数えられない**(全文で持っている版)。
+ *   0 と潰さない ── 0 は「変わっていない」で、意味が違う。
+ */
+export interface RevisionDiffStat {
+  id: string;
+  added: number | null;
+  removed: number | null;
 }
 
 /** getRevision の本文(P5 で JSON 包みを廃止 ── body 原文 + 列)。 */
@@ -542,6 +573,7 @@ export interface ResultMap {
   revisionCounts: RevisionCountRow[];
   getRevision: RevisionBody | null;
   listRevisionMetas: RevisionMetaRow[];
+  revisionDiffStats: RevisionDiffStat[];
   listRevisionLids: string[];
   listTrash: RevisionMetaRow[];
   purgeTrash: { purged: number };

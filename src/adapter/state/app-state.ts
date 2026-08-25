@@ -229,6 +229,18 @@ export interface RevisionItem {
   revOrder: number;
   createdAt: string | null;
   title: string | null;
+  /**
+   * 🔴 **この版と、1 つ新しい版の違い**(#398 段①)。
+   *
+   * > user の物語: 履歴に同じ題名が並び、**どれが目当ての版か押すまで分からない**。
+   *
+   * ⚠ 向きは **user が読む向き**(この版 → 1 つ新しい版)。裏返しは worker の中で
+   *   済ませてある ── ここで数え直さない(§7)。
+   * ⚠ `null` = **数えられない**(全文で持っている版)。0 と潰さない ──
+   *   0 は「変わっていない」で意味が違う。
+   */
+  added: number | null;
+  removed: number | null;
 }
 
 /** ゴミ箱一覧の 1 行(= entries に居ない entry_lid の最新 revision)。 */
@@ -337,6 +349,15 @@ export interface AppState {
   /** 選択 entry の履歴 panel(P5b)。開いた時点のスナップショット ── 選択遷移 /
    *  編集開始 / view 切替で畳む。boot で revisions に触れない原則の受け皿。 */
   revisionPanel: { lid: string; items: readonly RevisionItem[] } | null;
+  /**
+   * 🔴 **戻す前に中身を見る**(#398 段②)。`null` = 見ていない。
+   *
+   * ⚠ **読み取り専用**である ── 「見ている版を編集できる」を作ると、
+   *   保存したのがどちらなのか user から見えなくなる。
+   * ⚠ 本文を持つのは**開いている 1 件だけ** ── 一覧の全件を持つと、
+   *   履歴を開くだけで本文が N 本 heap に載る(常駐ゼロの規律に反する)。
+   */
+  revisionPreview: { lid: string; revId: string; body: string } | null;
   /** ゴミ箱 panel(filer)。開いた時点のスナップショット + 明示更新。 */
   trashPanel: { items: readonly TrashItem[] } | null;
   /**
@@ -568,6 +589,7 @@ export const initialState: AppState = {
   showDoneTasks: false,
   showUndatedTasks: false,
   revisionPanel: null,
+  revisionPreview: null,
   trashPanel: null,
   linkedFiles: new Map(),
   writeLock: null,
@@ -851,6 +873,10 @@ export type UserAction =
   /** 同じ親の下で隣と入れ替える(2026-08-06。user 報告 2-10)。 */
   | { type: 'MOVE_ENTRY_ORDER'; lid: string; direction: 'up' | 'down' }
   | { type: 'SHOW_HISTORY' }
+  /** 🔴 **その版の中身を見る**(#398 段②)。⚠ 復元ではない ── 1 バイトも書かない。 */
+  | { type: 'PREVIEW_REVISION'; revId: string }
+  | { type: 'HIDE_REVISION_PREVIEW' }
+  | { type: 'REVISION_PREVIEW_LOADED'; lid: string; revId: string; body: string }
   | { type: 'HIDE_HISTORY' }
   | { type: 'RESTORE_REVISION'; revId: string }
   | { type: 'SHOW_TRASH' }
@@ -1155,6 +1181,8 @@ export type DomainEvent =
   | { type: 'REQUEST_RELATION_UPSERT'; id: string; fromLid: string; toLid: string; kind: string }
   | { type: 'REQUEST_RELATION_DELETE'; id: string }
   | { type: 'REQUEST_REVISION_LIST'; lid: string }
+  /** その版の本文を読む(#398 段②)。⚠ **読むだけ**(書込は 1 バイトも無い)。 */
+  | { type: 'REQUEST_REVISION_BODY'; lid: string; revId: string }
   | {
       /** 履歴からの復元(前進変異): effect が「現状を addRevision → revision
        *  内容で persist」の順に行う。meta snapshot は発火時捕獲。 */
@@ -1439,6 +1467,8 @@ function reduceCore(
           openBody: null,
           error: null,
           revisionPanel: null, // panel は選択に従属(P5b)
+          // ⚠ 見ていた版も畳む(#398 段②)── 一覧が畳まれたら差分は孤児になる
+          revisionPreview: null,
         },
         events: [{ type: 'REQUEST_BODY', lid: action.lid }],
       };
@@ -1622,6 +1652,8 @@ function reduceCore(
           ...state,
           viewMode: action.mode,
           revisionPanel: null,
+          // ⚠ 見ていた版も畳む(#398 段②)── 一覧が畳まれたら差分は孤児になる
+          revisionPreview: null,
           trashPanel: null,
         },
         // 🔑 ランチャーを開いたら**そのとき**タイルを要求する(P7b 段⑩)。
@@ -1818,6 +1850,8 @@ function reduceCore(
           ...state,
           phase: 'editing',
           revisionPanel: null,
+          // ⚠ 見ていた版も畳む(#398 段②)── 一覧が畳まれたら差分は孤児になる
+          revisionPreview: null,
           /**
            * 🔴 **押した行を持って編集へ入る**(#395 段③)。
            * ⚠ **毎回入れ替える**(`?? null`)── 前回の値を残すと、普通に
@@ -2030,7 +2064,7 @@ function reduceCore(
       if (!meta) return { state, events: [] };
       if (action.text.trim() === '') return { state, events: [] }; // 空の追記は作らない
       return {
-        state: { ...state, writeLock: { lid: action.lid }, revisionPanel: null },
+        state: { ...state, writeLock: { lid: action.lid }, revisionPanel: null, revisionPreview: null },
         events: [
           {
             type: 'REQUEST_APPEND',
@@ -2869,8 +2903,40 @@ function reduceCore(
         events: [{ type: 'REQUEST_REVISION_LIST', lid: state.selectedLid }],
       };
     }
+    /**
+     * 🔴 **戻す前に中身を見る**(#398 段②)。
+     * ⚠ **押した版が既に開いていたら畳む**(同じ物をもう一度押したら閉じる)──
+     *   開きっぱなしにすると、閉じる道が「別の版を押す」しか無くなる
+     *   (user 指示 2026-08-23「置けるなら外せる」の面版)。
+     */
+    case 'PREVIEW_REVISION': {
+      if (state.phase !== 'ready' || !state.selectedLid) return { state, events: [] };
+      if (state.revisionPreview?.revId === action.revId)
+        return { state: { ...state, revisionPreview: null }, events: [] };
+      return {
+        state,
+        events: [
+          { type: 'REQUEST_REVISION_BODY', lid: state.selectedLid, revId: action.revId },
+        ],
+      };
+    }
+    case 'HIDE_REVISION_PREVIEW':
+      return { state: { ...state, revisionPreview: null }, events: [] };
+    case 'REVISION_PREVIEW_LOADED': {
+      // ⚠ 遅れて着いた分が別のノートのものなら捨てる(`BODY_LOADED` と同型)
+      if (state.selectedLid !== action.lid) return { state, events: [] };
+      return {
+        state: {
+          ...state,
+          revisionPreview: { lid: action.lid, revId: action.revId, body: action.body },
+        },
+        events: [],
+      };
+    }
     case 'HIDE_HISTORY':
-      return { state: { ...state, revisionPanel: null }, events: [] };
+      // ⚠ **見ていた版も一緒に畳む** ── 一覧を閉じたのに差分だけ残ると、
+      //    どの版の物か分からない孤児になる
+      return { state: { ...state, revisionPanel: null, revisionPreview: null }, events: [] };
     case 'REVISION_LIST_LOADED': {
       // 遅延到着が現選択と食い違うなら捨てる(stale 反映防止 ── BODY_LOADED と同型)
       if (state.selectedLid !== action.lid) return { state, events: [] };
@@ -2888,7 +2954,7 @@ function reduceCore(
       // panel は畳む(復元で履歴が 1 件伸びるので開き直しが正)。meta snapshot は
       // 発火時捕獲(C-1 規律)
       return {
-        state: { ...state, revisionPanel: null },
+        state: { ...state, revisionPanel: null, revisionPreview: null },
         events: [
           {
             type: 'REQUEST_RESTORE',
@@ -3175,6 +3241,8 @@ function reduceCore(
           relations,
           trashPanel,
           revisionPanel: null,
+          // ⚠ 見ていた版も畳む(#398 段②)── 一覧が畳まれたら差分は孤児になる
+          revisionPreview: null,
           selectedLid: action.meta.lid,
           openBody: {
             lid: action.meta.lid,
@@ -3345,6 +3413,8 @@ function removeEntryFromState(
       selectionAnchor: state.selectionAnchor === lid ? null : state.selectionAnchor,
       // 削除で履歴・ゴミ箱の断面は古くなる ── 畳んで開き直しに任せる(P5b)
       revisionPanel: null,
+      // ⚠ 見ていた版も畳む(#398 段②)── 一覧が畳まれたら差分は孤児になる
+      revisionPreview: null,
       trashPanel: null,
       // ⚠ 元ファイルの紐づけも外す ── 消したノートに「書き戻す」を出したままだと、
       //    戻せなくなった器を指す導線が残る(復元したら開き直しで紐づく)

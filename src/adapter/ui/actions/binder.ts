@@ -2447,6 +2447,20 @@ const ACTIONS: Record<string, ActionHandler> = {
         dispatcher.dispatch({ type: 'OP_FAILED', error: '送れませんでした' });
       });
   },
+  /**
+   * 🔴 **戻す前に中身を見る**(#398 段②)。⚠ **1 バイトも書かない** ──
+   *   だから `BODY_WRITE_ACTIONS` にも確認にも載せない(読むだけの操作である)。
+   * ⚠ もう一度押すと畳む(reducer が持つ ── ここに 2 つ目の判定を置かない)。
+   */
+  'preview-revision': (dispatcher, target) => {
+    const revId = target
+      .closest('[data-pkc-rev-id]')
+      ?.getAttribute('data-pkc-rev-id');
+    if (revId) dispatcher.dispatch({ type: 'PREVIEW_REVISION', revId });
+  },
+  'hide-revision-preview': (dispatcher) => {
+    dispatcher.dispatch({ type: 'HIDE_REVISION_PREVIEW' });
+  },
   'restore-revision': (dispatcher, target) => {
     // 前進変異(復元前に現状が履歴に積まれる)なので confirm は要らない ──
     // 「復元の取り消し」も履歴から戻れる

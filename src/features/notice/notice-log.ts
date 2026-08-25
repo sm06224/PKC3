@@ -90,6 +90,17 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-25-revision-diff',
+    title: '履歴で、戻す前に中身を見られるようになりました',
+    items: [
+      'これまで履歴に押せるのは「復元」だけで、どれが目当ての版か押すまで分かりませんでした。題名は普通どの版も同じです。',
+      '行に「+12 −3」と、1 つ新しい版とのちがいが出ます。まるごと持っている版は数が出ません(0 とは書きません)。',
+      '行そのものを押すと、その版といまの本文のちがいが下に開きます。読むだけで、1 バイトも書きません。',
+      '変わっていない所は「⋯ 変わっていない N 行」と畳まれるので、長いノートでもちがいが埋もれません。',
+      'もう一度押すか「閉じる」で畳みます。履歴を閉じると一緒に畳まれます。',
+    ],
+  },
+  {
     id: '2026-08-25-append-into-section',
     title: '追記を、節の中へ入れられるようになりました',
     items: [
@@ -279,20 +290,11 @@ export const NOTICES: readonly Notice[] = [
       'ODF 形式(.odt / .ods / .odp)はこれまでどおり保存できます。実際に測って、保存できる形式だけを「できる」と言っています。',
     ],
   },
-  {
-    id: '2026-08-23-office-restart',
-    title: 'Office で表示言語を変えたとき、開き直す道ができました',
-    items: [
-      'Office の中で表示言語を変えると「すぐに再起動」というボタンが出ますが、押しても何も起きませんでした。ブラウザの中の Office は自分では再起動できないためです。',
-      '設定が変わったことをこちらで見つけて、画面の下に「開き直す」を出すようにしました。押すと窓を開き直し、変えた言語で立ち上がります。',
-      '保存していない文書があると、開き直したときに失われます。帯にもそう書いてあるので、先に保存してから押してください。',
-    ],
-  },
 ];
 
 /**
  * ⚠ **落としたぶんの原本は CHANGELOG に在る**(上限 20 件を超えたので、古いほうから
  *   `2026-08-16-office-save-to-pkc` / `2026-08-17-office-save-same-note`(2026-08-19)、
  *   `2026-08-19-dual-pane-app`(2026-08-22)、
- *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note`(2026-08-25)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
+ *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart`(2026-08-25)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
  */

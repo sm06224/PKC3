@@ -182,6 +182,13 @@ export interface StorePort {
       archetype: string | null;
     }>
   >;
+  /**
+   * 🔴 **版ごとの増減行数**(#398 段①)。⚠ **本文は返らない**(数だけ)。
+   * ⚠ `null` = 数えられない(全文で持っている版)。0 と潰さない。
+   */
+  revisionDiffStats(
+    entryLid: string,
+  ): Promise<Array<{ id: string; added: number | null; removed: number | null }>>;
   getRevision(revId: string): Promise<{
     body: string;
     title: string | null;
@@ -820,8 +827,21 @@ export function connectStoreEffects(
         enqueue(async () => {
           if (disposed) return;
           try {
-            const rows = await store.listRevisionMetas(ev.lid);
+            /**
+             * 🔴 **一覧と増減を一緒に引く**(#398 段①)。
+             *
+             * ⚠ **本文は 1 バイトも越えない** ── 増減は worker の中で数えて
+             *   数字だけ返る(`revisionDiffStats`)。
+             * ⚠ **数が引けなくても一覧は出す** ── 増減は手がかりであって、
+             *   無いなら無いで履歴は開けなければならない(片方の失敗で
+             *   もう片方まで殺さない)。
+             */
+            const [rows, stats] = await Promise.all([
+              store.listRevisionMetas(ev.lid),
+              store.revisionDiffStats(ev.lid).catch(() => []),
+            ]);
             if (disposed) return;
+            const statOf = new Map(stats.map((x) => [x.id, x]));
             dispatcher.dispatch({
               type: 'REVISION_LIST_LOADED',
               lid: ev.lid,
@@ -830,6 +850,9 @@ export function connectStoreEffects(
                 revOrder: r.rev_order,
                 createdAt: r.created_at,
                 title: r.title,
+                // ⚠ 引けなかった版は `null`(0 と潰さない ── 意味が違う)
+                added: statOf.get(r.id)?.added ?? null,
+                removed: statOf.get(r.id)?.removed ?? null,
               })),
             });
           } catch (e) {
@@ -837,6 +860,43 @@ export function connectStoreEffects(
               dispatcher.dispatch({
                 type: 'OP_FAILED',
                 error: `履歴の取得に失敗しました: ${String(e)}`,
+              });
+          }
+        });
+        break;
+      /**
+       * 🔴 **戻す前に中身を見る**(#398 段②)。⚠ **読むだけ**(1 バイトも書かない)。
+       *
+       * 🔑 **`enqueue` に載せる** ── 書込と**同じ 1 本の chain** なので、
+       *   履歴を開く直前の保存を追い越さない(CLAUDE.md §7、2026-08-17 の実測
+       *   「読みは書込の chain の外に居て、11/12 で古い本文を掴んだ」)。
+       *   ⚠ **2 本目の待ち口を作らない** ── ここに独自の `settled()` を足すと、
+       *   待つ規則が 2 か所になる。
+       */
+      case 'REQUEST_REVISION_BODY':
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            const rev = await store.getRevision(ev.revId);
+            if (disposed) return;
+            if (rev === null) {
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: 'その版の本文を読めませんでした(履歴が整理された可能性があります)',
+              });
+              return;
+            }
+            dispatcher.dispatch({
+              type: 'REVISION_PREVIEW_LOADED',
+              lid: ev.lid,
+              revId: ev.revId,
+              body: rev.body,
+            });
+          } catch (e) {
+            if (!disposed)
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: `版の読み出しに失敗しました: ${String(e)}`,
               });
           }
         });

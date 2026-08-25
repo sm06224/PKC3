@@ -32,6 +32,7 @@ function hydrateFigures(root: ParentNode | readonly ParentNode[]): MermaidScope[
 }
 import { applyBlocks, EMPTY_VIEW, type BlockView } from './apply-blocks';
 import { RowSwap } from './row-swap';
+import { diffCounts, diffRows, type DiffRow } from '@features/revision/diff-view';
 import type { RenderedWithRanges } from '@adapter/platform/render/markdown-client';
 import {
   EMPTY_JOURNAL,
@@ -146,6 +147,8 @@ export class DetailRenderer {
   private lastPhase: AppPhase | null = null;
   /** 履歴 panel の断面(参照比較 ── P5b で view 指紋に加わった次元)。 */
   private lastPanel: AppState['revisionPanel'] = null;
+  /** 見ている版(#398 段②)。⚠ **指紋の一部**(上の注記)。 */
+  private lastPreview: AppState['revisionPreview'] = null;
   /** この render pass が貸し出した ObjectURL の dispose 群。**表示の寿命の
    *  終わり(次の render / 選択遷移)で必ず全部呼ぶ**(生成物のライフサイクル
    *  終端での即破棄 ── user 指示 2026-07-27 不可侵)。 */
@@ -353,14 +356,25 @@ export class DetailRenderer {
       return;
     }
     const body = state.openBody?.body ?? null;
-    // 指紋は (selectedLid, body, phase, revisionPanel 参照)。title 次元は
-    // 含めていない ── title 編集が入る段階で entryMetas 参照を指紋に足すこと
+    /**
+     * 指紋は (selectedLid, body, phase, revisionPanel 参照, **revisionPreview 参照**)。
+     * title 次元は含めていない ── title 編集が入る段階で entryMetas 参照を足すこと。
+     *
+     * 🔴 **`revisionPreview` を足したのは、押しても画面が変わらなかったから**
+     * (#398 段②、test が拾った)。⚠ 版を押すと state は変わるが `revisionPanel` の
+     * 参照は**同じまま**なので、ここで早期 return して**差分が一度も描かれなかった**
+     * ── この repo が何度も踏んでいる型である(「フォルダを移したのに前の居場所を
+     * 出したまま」/ `refreshTaskCards` の 3 か所目)。
+     * 🔑 **下流(`renderPanel`)にも同じ指紋を置いてある** ── どちらか一方だけでは
+     *   止まる(上で止まるか、下で止まるか、が違うだけ)。
+     */
     if (
       this.mode !== 'editor' &&
       state.selectedLid === this.lastSelected &&
       body === this.lastBody &&
       state.phase === this.lastPhase &&
-      state.revisionPanel === this.lastPanel
+      state.revisionPanel === this.lastPanel &&
+      state.revisionPreview === this.lastPreview
     )
       return;
     this.renderView(state, body);
@@ -379,6 +393,7 @@ export class DetailRenderer {
     this.lastBody = body;
     this.lastPhase = state.phase;
     this.lastPanel = state.revisionPanel;
+    this.lastPreview = state.revisionPreview;
 
     const lid = state.selectedLid;
     if (!lid) {
@@ -782,11 +797,28 @@ export class DetailRenderer {
       state.phase === 'ready' && state.revisionPanel && state.revisionPanel.lid === lid
         ? state.revisionPanel
         : null;
-    if (shown === this.shownPanel) return;
+    /**
+     * 🔴 **見ている版も指紋に入れる**(#398 段②)。
+     *
+     * ⚠ `revisionPanel` の参照だけを見ていると、**版を押しても画面が
+     *   1 ドットも変わらない** ── 一覧の object は変わらないからである
+     *   (「フォルダを移したのに前の居場所を出したまま」と同じ型)。
+     */
+    const preview =
+      shown && state.revisionPreview?.lid === lid ? state.revisionPreview : null;
+    if (shown === this.shownPanel && preview === this.shownPreview) return;
     this.shownPanel = shown;
+    this.shownPreview = preview;
     slot.textContent = '';
-    if (shown) slot.append(renderHistoryPanel(shown.items));
+    if (shown) {
+      slot.append(
+        renderHistoryPanel(shown.items, preview, state.openBody?.persisted ?? null),
+      );
+    }
   }
+
+  /** いま出している差分(#398 段②)。⚠ 指紋の一部(上の注記)。 */
+  private shownPreview: AppState['revisionPreview'] = null;
 
   private renderEditor(state: AppState): void {
     const open = state.openBody!;
@@ -1783,9 +1815,83 @@ export class DetailRenderer {
   }
 }
 
+/**
+ * その版と 1 つ新しい版のちがいを短く出す(#398 段①)。
+ *
+ * > user の物語: 履歴に**同じ題名が 3 つ**並び、日時しか手がかりが無い。
+ *
+ * ⚠ **数えられない版では何も出さない**(全文で持っている版)── `0` と書くと
+ *   「変わっていない」という**嘘**になる。`null` と `0` を潰さない。
+ */
+function diffBadge(added: number | null, removed: number | null): HTMLElement | null {
+  if (added === null || removed === null) return null;
+  const span = document.createElement('span');
+  span.setAttribute('data-pkc-field', 'revision-delta');
+  span.textContent = `+${added} −${removed}`;
+  // ⚠ **何との比較かを書く**(数字だけだと、今の本文との差だと読まれる)
+  span.title = '1 つ新しい版とくらべて、行がこれだけ増えて / 減っています';
+  return span;
+}
+
+/** 差分の 1 行(#398 段②)。⚠ **読むだけ**の器 ── 押せる物を置かない。 */
+function diffLineEl(row: DiffRow): HTMLElement {
+  const li = document.createElement('li');
+  li.setAttribute('data-pkc-diff', row.kind);
+  if (row.kind === 'gap') {
+    li.textContent = `⋯ 変わっていない ${row.skipped ?? 0} 行`;
+    return li;
+  }
+  // ⚠ 印は**字で置く**(色だけにしない ── 色が見えない人に届かない)
+  const mark = row.kind === 'add' ? '+' : row.kind === 'del' ? '−' : ' ';
+  li.textContent = `${mark} ${row.text}`;
+  return li;
+}
+
+/**
+ * 🔴 **戻す前に中身を見る**(#398 段②)。
+ *
+ * ⚠ **読み取り専用**である ── ここに編集の口を作ると、保存したのがどちらの
+ *   本文なのか user から見えなくなる。
+ * ⚠ 比べる相手は **disk で確認できている本文**(`persisted`)── 画面の draft と
+ *   比べると「保存していない字」がちがいとして出る。
+ */
+function renderRevisionDiff(revBody: string, currentBody: string): HTMLElement {
+  const box = document.createElement('div');
+  box.setAttribute('data-pkc-field', 'revision-diff');
+  const head = document.createElement('div');
+  const counts = diffCounts(revBody, currentBody);
+  const label = document.createElement('span');
+  label.setAttribute('data-pkc-field', 'revision-diff-summary');
+  label.textContent =
+    counts.added === 0 && counts.removed === 0
+      ? 'いまの本文と同じです'
+      : `いまの本文とのちがい: +${counts.added} −${counts.removed}`;
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.setAttribute('data-pkc-action', 'hide-revision-preview');
+  close.textContent = '閉じる';
+  head.append(label, close);
+  box.append(head);
+  const list = document.createElement('ul');
+  for (const row of diffRows(revBody, currentBody)) list.append(diffLineEl(row));
+  box.append(list);
+  return box;
+}
+
 /** 履歴 panel(P5b)。開いた時点のスナップショット ── 復元・選択遷移で畳まれる。 */
 function renderHistoryPanel(
-  items: readonly { id: string; revOrder: number; createdAt: string | null; title: string | null }[],
+  items: readonly {
+    id: string;
+    revOrder: number;
+    createdAt: string | null;
+    title: string | null;
+    added: number | null;
+    removed: number | null;
+  }[],
+  /** 開いている版(#398 段②)。⚠ その行の下にだけ差分を置く。 */
+  preview: { revId: string; body: string } | null,
+  /** 比べる相手 ── **disk で確認できている本文**(draft ではない)。 */
+  currentBody: string | null,
 ): HTMLElement {
   const panel = document.createElement('div');
   panel.setAttribute('data-pkc-field', 'history-panel');
@@ -1802,14 +1908,38 @@ function renderHistoryPanel(
   for (const item of items) {
     const li = document.createElement('li');
     li.setAttribute('data-pkc-rev-order', String(item.revOrder));
+    /**
+     * 🔴 **行そのものを押すと中身が出る**(#398 段②)。
+     *
+     * ⚠ 復元ボタンとは**別の口**にする ── 同じ物にすると「見るつもりが戻った」
+     *   が起きる(戻せはするが、履歴に 1 件積まれて手がかりがさらに埋まる)。
+     * ⚠ `<button>` にする ── `<li>` に click を付けると**キーボードで押せない**。
+     */
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.setAttribute('data-pkc-action', 'preview-revision');
+    open.setAttribute('data-pkc-rev-id', item.id);
+    open.setAttribute('data-pkc-field', 'revision-open');
+    open.setAttribute(
+      'aria-expanded',
+      preview?.revId === item.id ? 'true' : 'false',
+    );
+    open.title = 'この版の中身を、いまの本文とくらべて見ます(戻しません)';
     const text = document.createElement('span');
     text.textContent = `#${item.revOrder} ${item.createdAt ?? ''} ${item.title ?? '(無題)'}`;
+    open.append(text);
+    const badge = diffBadge(item.added, item.removed);
+    if (badge) open.append(badge);
     const restore = document.createElement('button');
     restore.type = 'button';
     restore.setAttribute('data-pkc-action', 'restore-revision');
     restore.setAttribute('data-pkc-rev-id', item.id);
     restore.textContent = '復元';
-    li.append(text, restore);
+    li.append(open, restore);
+    // ⚠ **その行の下に置く** ── 一覧の外に出すと、どの版の差分か分からなくなる
+    if (preview?.revId === item.id && currentBody !== null) {
+      li.append(renderRevisionDiff(preview.body, currentBody));
+    }
     list.append(li);
   }
   panel.append(list);

@@ -1861,6 +1861,46 @@ const handlers: Handlers = {
       contentHash: r.content_hash,
     })),
 
+  /**
+   * 🔴 **版ごとの増減行数**(#398 段①)。
+   *
+   * ⚠ **本文は 1 バイトも返さない** ── `snapshot` はここで読んで**数だけ**にする
+   *   (`listRevisionMetas` が snapshot を読まない規律と同じ向き)。
+   * 🔴 **向きを裏返す。** 保存形は「1 つ新しい版 → この版」の**逆向き**パッチなので、
+   *   ops の意味は user が読む向きと**反対**である:
+   *   - 逆向きで**消す**行 = 新しい側に在って此処に無い = 🔑 user から見て**足された**
+   *   - 逆向きで**入れる**行 = 此処に在って新しい側に無い = 🔑 user から見て**消された**
+   *   ⚠ ここを取り違えると、画面の `+` と `-` が**そっくり入れ替わる**
+   *     ── しかも数字は出るので、誰も気づけない(CLAUDE.md §4「出た値は本物、
+   *     測っている対象だけが違う」の向き違い版)。
+   * ⚠ 全文で持っている版は**比べる相手が居ない**ので `null`(0 と潰さない)。
+   * ⚠ 壊れたパッチでも**落ちない** ── その行だけ `null` にする(履歴の一覧が
+   *   1 件の壊れで丸ごと開けなくなるほうが実害が大きい)。
+   */
+  revisionDiffStats: (req) => {
+    const rows = need().selectObjects(
+      `SELECT id, kind, snapshot FROM revisions
+        WHERE cid = ? AND entry_lid = ? ORDER BY rev_order DESC`,
+      [req.cid, req.entryLid],
+    ) as unknown as { id: string; kind: string | null; snapshot: string }[];
+    return rows.map((r) => {
+      if (r.kind !== 'patch') return { id: r.id, added: null, removed: null };
+      try {
+        const { ops } = parseLinePatch(r.snapshot);
+        let back = 0;
+        let ins = 0;
+        for (const op of ops) {
+          if (typeof op === 'number') {
+            if (op < 0) back += -op;
+          } else ins += op.length;
+        }
+        // 🔑 裏返す(上の注記)── 逆向きの「消す」が、user から見た「足された」
+        return { id: r.id, added: back, removed: ins };
+      } catch {
+        return { id: r.id, added: null, removed: null };
+      }
+    });
+  },
   listRevisionMetas: (req) =>
     // snapshot 列を読まない ── 一覧は meta だけ、本文は getRevision で 1 行ずつ
     need().selectObjects(
