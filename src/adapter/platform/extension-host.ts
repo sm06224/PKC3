@@ -30,7 +30,12 @@
  * **黙って無駄が積もる**)。`close()` で購読も港も捨てる。
  */
 
-import { EXT_PORT_TAG, EXT_READY_FLAG, parseExtRequest, projectionMessage } from '@features/extension/ext-wire';
+import {
+  EXT_READY_FLAG,
+  parseExtRequest,
+  portHandoffMessage,
+  projectionMessage,
+} from '@features/extension/ext-wire';
 import { buildProjection } from '@features/extension/ext-projection';
 import type { EntryMeta } from '@core/model/entry-meta';
 
@@ -39,6 +44,16 @@ export interface ExtHostDeps {
   readonly win: Window;
   /** いまの一覧を返す。⚠ **呼ぶたびに読む**(古い写しを抱えない)。 */
   readonly metas: () => Iterable<EntryMeta>;
+  /**
+   * 🔴 **この起動の合図**(外殻に焼いたものと**同じ値**)。
+   *
+   * ⚠ **合わなければ、外殻は港を黙って捨てる** ── 2026-08-25 に踏んだ:
+   *   ここが省略可能だったので、呼び側は渡さず、外殻は `m.nonce !== NONCE` で
+   *   本物の港を落としていた。⚠ それでも**両側の unit は緑**だった
+   *   (互いに相手を模した stub と話していたので)。
+   * 🔑 だから**必須**にする ── 渡し忘れは tsc が止める。
+   */
+  readonly nonce: string;
   /** 印を待つ間隔(ms)。⚠ 測定では 28〜60ms で立った。 */
   readonly pollMs?: number;
   /** 諦めるまで(ms)。⚠ 諦めたことは `onGiveUp` で言う(無言で終わらない)。 */
@@ -117,7 +132,18 @@ export function connectExtension(deps: ExtHostDeps): ExtHostLink {
     };
     port.start?.();
     try {
-      deps.win.postMessage({ tag: EXT_PORT_TAG }, '*', [channel.port2]);
+      deps.win.postMessage(portHandoffMessage(deps.nonce), '*', [channel.port2]);
+      /**
+       * 🔴 **繋いだ時点で押す**(2026-08-25、実ブラウザの smoke が拾った)。
+       *
+       * ⚠ 直す前は `hello` を待っていた ── ところが**アプリの `hello` は港より
+       *   先に投げられる**(アプリは `srcdoc` が読み込まれた瞬間に走るが、港は
+       *   本体タブが印を読んでから渡す)。外殻は港が無い間の言葉を捨てるので、
+       *   **1 回しか挨拶しないアプリには永久に何も届かなかった**。
+       * 🔑 だから**押す側から始める**。`hello` は「もう一度ください」として残す
+       *   ── 遅れて読み込まれたアプリは、そちらで拾える(両方の競争に勝つ)。
+       */
+      send();
     } catch {
       // 窓が閉じた直後など ── 繋がらなかっただけ
       port = null;

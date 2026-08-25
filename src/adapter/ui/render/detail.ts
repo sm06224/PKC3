@@ -63,6 +63,10 @@ import { assetPreviewKind, canOpenAssetWindow } from '@features/asset/asset-prev
 import type { AppState, AppPhase } from '@adapter/state/app-state';
 import { appEditorMode } from './editor-mode';
 import { appKeymap, type KeymapStore } from './keymap';
+import {
+  appExtensionGrants,
+  type ExtensionGrants,
+} from '@adapter/platform/extension-grants';
 import { HINT_BASE, HINT_COMMAND, hintTitle } from './shortcut-hint';
 
 /** 添付表示のための asset 面(main が AssetBlobStore を cid 束縛で注入)。 */
@@ -257,6 +261,11 @@ export class DetailRenderer {
      * ⚠ 既定はアプリ共有の 1 個 ── test は自分で `new` して渡す。
      */
     private readonly keymap: KeymapStore = appKeymap,
+    /**
+     * 🔴 **拡張の許可**(#195 / C-5 段①)── 「目次を見せて起動」を出すかどうか。
+     * ⚠ 既定はアプリ共有の 1 個 ── test は自分で `new` して渡す。
+     */
+    private readonly extensionGrants: ExtensionGrants = appExtensionGrants,
   ) {
     this.region = region;
     this.assets = assets;
@@ -1452,6 +1461,29 @@ export class DetailRenderer {
         rawRun.title =
           'PKC3 と同じ場所で開きます。IndexedDB や cookie を使うアプリが動きますが、このアプリは PKC3 の中身にも手が届きます';
         info.append(rawRun);
+        /**
+         * 🔴 **目次を見せて起動**(#195 / C-5 段①)。
+         *
+         * ⚠ **まだ許していないときだけ出す** ── 許してあれば普通の「起動」で口が
+         *   開くので、同じことをする 2 つ目のボタンを残さない(押す場所が定まらなくなる)。
+         * 🔑 代わりに、許してあることは**「起動」の説明**で言う ── ボタンが黙って
+         *   消えるだけだと、user は口が開いていることを知る手がかりを失う。
+         * ⚠ 取り消しは**設定の面**に在る(ここには置かない ── 詳細画面は
+         *   「このノートで何ができるか」の場所であって、台帳の管理の場所ではない)。
+         */
+        if (this.extensionGrants.isGranted(meta.assetKey)) {
+          run.title =
+            '囲いの中で開きます(PKC3 の中身には触れません)。このアプリにはノートの目次を見せます ── 取り消しは設定から';
+        } else {
+          const extRun = iconButton(
+            'launch-asset-extension',
+            '目次を見せて起動',
+            'launch-asset-extension',
+          );
+          extRun.title =
+            'ノートの題名・種類・日付の一覧だけを見せて開きます。本文と添付は渡りません';
+          info.append(extRun);
+        }
       }
       /**
        * 🔴 **Office の入口**(#88 / O3-c)。⚠ 出るのは「押せるボタン」か

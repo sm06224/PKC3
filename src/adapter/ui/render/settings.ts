@@ -11,6 +11,7 @@
  * 押す導線そのものは畳まない(操作の帯に「設定」を置く)。
  */
 import { SameOriginGrants } from '@adapter/platform/same-origin-grants';
+import { ExtensionGrants } from '@adapter/platform/extension-grants';
 import type { AppState } from '@adapter/state/app-state';
 import type { PersistState } from '@adapter/platform/storage-persist';
 import { THEMES } from './theme';
@@ -69,9 +70,12 @@ export class SettingsRenderer {
     private readonly openInEdit: OpenInEditStore = appOpenInEdit,
     /** 素のまま起動の許可(#301)。⚠ test は自分で `new` して渡す。 */
     private readonly sameOriginGrants: SameOriginGrants = new SameOriginGrants(),
+    /** 目次を見せる許可(#195 / C-5 段①)。⚠ test は自分で `new` して渡す。 */
+    private readonly extensionGrants: ExtensionGrants = new ExtensionGrants(),
   ) {}
 
   private sameOriginList: HTMLElement | null = null;
+  private extensionList: HTMLElement | null = null;
 
   render(state: AppState): void {
     if (this.built) {
@@ -82,6 +86,7 @@ export class SettingsRenderer {
       this.syncOpenInEdit();
       this.syncExternalImages();
       this.syncSameOrigin(state);
+      this.syncExtensions(state);
       this.syncPersist(state);
       this.syncNotices();
       // 🔴 **隠れている間に来た変化をここで拾う**(2026-08-05、user 報告)。
@@ -297,6 +302,7 @@ export class SettingsRenderer {
     body.append(this.keymapPanel.root);
     body.append(this.buildExternalImages());
     body.append(this.buildSameOrigin());
+    body.append(this.buildExtensions());
     /**
      * 🔴 **Office 一式**(#88 / O6-a)。⚠ 「表示」の節に混ぜない ── 見た目の
      * 好みではなく、**この端末に 77MB を置くかどうか**という別の判断である。
@@ -311,6 +317,7 @@ export class SettingsRenderer {
     this.syncEditorMode();
     this.syncOpenInEdit();
     this.syncSameOrigin(state);
+    this.syncExtensions(state);
     this.syncPersist(state);
     this.syncExternalImages();
     this.syncNotices();
@@ -384,6 +391,62 @@ export class SettingsRenderer {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.setAttribute('data-pkc-action', 'revoke-same-origin');
+      btn.setAttribute('data-pkc-asset-key', key);
+      btn.textContent = '取り消す';
+      li.append(name, btn);
+      list.append(li);
+    }
+  }
+
+  /**
+   * 🔴 **目次を見せる許可の一覧**(#195 / C-5 段①)。
+   *
+   * ⚠ 素のまま起動の隣に、**別の一覧として**置く ── 台帳が別なので、片方を
+   *   消してももう片方は残る。1 つの一覧に混ぜると「どちらを取り消したのか」が
+   *   user から見えなくなる。
+   * 🔑 ここが**取り消しの唯一の出口**である ── 許可は期限なしで憶えるので、
+   *   出口が無いと二度と外せない。
+   */
+  private buildExtensions(): HTMLElement {
+    const wrap = document.createElement('section');
+    wrap.setAttribute('data-pkc-region', 'settings-extensions');
+    const h = document.createElement('h3');
+    h.textContent = '目次を見せているアプリ';
+    const note = document.createElement('p');
+    note.setAttribute('data-pkc-field', 'settings-note');
+    // ⚠ **見えるものを書く**(「projection を渡す」では判断できない)
+    note.textContent =
+      'ここに載っているアプリは、ノートの題名・種類・日付・印の一覧を読めます。' +
+      '本文と添付は渡りません。' +
+      '中身が 1 バイトでも変われば許可は外れ、次に開くときまた聞きます。';
+    this.extensionList = document.createElement('ul');
+    this.extensionList.setAttribute('data-pkc-field', 'extension-list');
+    wrap.append(h, note, this.extensionList);
+    return wrap;
+  }
+
+  /** ⚠ **毎回組み直す**(許可はこの面の外で増える ── `syncSameOrigin` と同じ理由)。 */
+  private syncExtensions(state: AppState): void {
+    const list = this.extensionList;
+    if (!list) return;
+    const keys = this.extensionGrants.list();
+    list.textContent = '';
+    if (keys.length === 0) {
+      const li = document.createElement('li');
+      li.textContent = 'まだ目次を見せているアプリはありません';
+      list.append(li);
+      return;
+    }
+    for (const key of keys) {
+      const li = document.createElement('li');
+      li.setAttribute('data-pkc-asset-key', key);
+      const name = document.createElement('span');
+      // ⚠ 題名は**いま並んでいるタイル**から引く(`syncSameOrigin` と同じ作法)
+      const tile = state.launcherTiles?.find((t) => t.assetKey === key);
+      name.textContent = tile?.title ?? `(一覧に無いアプリ ${key.slice(4, 12)}…)`;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.setAttribute('data-pkc-action', 'revoke-extension');
       btn.setAttribute('data-pkc-asset-key', key);
       btn.textContent = '取り消す';
       li.append(name, btn);

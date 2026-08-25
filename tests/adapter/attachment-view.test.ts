@@ -10,6 +10,7 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer, type AssetLender } from '../../src/adapter/ui/render/detail';
+import { ExtensionGrants } from '../../src/adapter/platform/extension-grants';
 import { attachmentBody } from '../../src/features/flavor/attachment-flavor';
 import { stubRevisionOps } from '../helpers/revision-stub';
 
@@ -35,12 +36,28 @@ beforeEach(() => {
   document.body.textContent = '';
 });
 
-function setup(bodies: Record<string, string>, lender: AssetLender) {
+function setup(
+  bodies: Record<string, string>,
+  lender: AssetLender,
+  /** 🔴 目次を見せる許可(#195)。⚠ 差さないと**実物の localStorage** を読むので、
+   *   test どうしが互いの許可を見てしまう。 */
+  extensionGrants?: ExtensionGrants,
+) {
   const root = document.createElement('div');
   document.body.append(root);
   const d = new Dispatcher();
   const regions = buildShell(root);
-  const detail = new DetailRenderer(regions.detail, lender);
+  // ⚠ 位置引数 ── `region, assets, markdown, onBodyChange, externalImages, keymap,
+  //   extensionGrants` の 7 番目
+  const detail = new DetailRenderer(
+    regions.detail,
+    lender,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    extensionGrants ?? new ExtensionGrants(null),
+  );
   d.onState((s) => detail.render(s));
   connectStoreEffects(d, {
     ...stubRevisionOps(),
@@ -342,12 +359,62 @@ describe('添付の詳細から起動する(P10)', () => {
     expect(run!.querySelector('[data-pkc-icon] svg path')).not.toBeNull();
   });
 
+  /**
+   * 🔴 **目次を見せて起動**(#195 / C-5 段①-b)。
+   * ⚠ **まだ許していないときだけ**出す ── 許してあれば普通の「起動」で口が開くので、
+   *   同じことをする 2 つ目のボタンを残さない(押す場所が定まらなくなる)。
+   */
+  it('🔴 まだ許していなければ「目次を見せて起動」が出る', async () => {
+    const { d, q } = setup({ a1: htmlBody, a2: '# text' }, noLender);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    await tick(20);
+    const ext = q('[data-pkc-action="launch-asset-extension"]');
+    expect(ext, '「目次を見せて起動」が無い').not.toBeNull();
+    // ⚠ **何が見えるか**が読めること(「連携します」では判断できない)
+    expect(ext!.getAttribute('title')).toContain('題名・種類・日付');
+    expect(ext!.getAttribute('title')).toContain('本文と添付は渡りません');
+  });
+
+  /**
+   * 🔴 **許してあれば出さず、代わりに「起動」の説明で言う。**
+   * ⚠ 黙って消えるだけだと、user は口が開いていることを知る手がかりを失う。
+   */
+  it('🔴 許してあれば出さず、「起動」の説明で口が開くと言う', async () => {
+    const map = new Map<string, string>();
+    const grants = new ExtensionGrants({
+      getItem: (k: string) => map.get(k) ?? null,
+      setItem: (k: string, v: string) => void map.set(k, v),
+      removeItem: (k: string) => void map.delete(k),
+    });
+    const key = `ast-${'c'.repeat(64)}`;
+    // ⚠ 憶えられるのは**内容ハッシュの鍵**だけ ── fixture もその形にする
+    expect(grants.grant(key), '前提が崩れている(許可を憶えられない鍵)').toBe(true);
+    const body = attachmentBody({
+      name: 'ツール.html',
+      mime: 'text/html',
+      size: 120,
+      assetKey: key,
+    });
+    const { d, q } = setup({ a1: body, a2: '# text' }, noLender, grants);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    await tick(20);
+    expect(
+      q('[data-pkc-action="launch-asset-extension"]'),
+      '許してあるのに 2 つ目のボタンが残っている',
+    ).toBeNull();
+    expect(
+      q('[data-pkc-action="launch-asset"]')!.getAttribute('title'),
+      '口が開くことを 1 行も言っていない',
+    ).toContain('目次');
+  });
+
   it('🔴 HTML でない添付には出さない', async () => {
     const { d, q } = setup({ a1: pdfBody, a2: '# text' }, noLender);
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
     await tick(20);
     expect(q('[data-pkc-action="launch-asset"]'), 'PDF に「起動」が出ている').toBeNull();
     expect(q('[data-pkc-action="launch-asset-raw"]')).toBeNull();
+    expect(q('[data-pkc-action="launch-asset-extension"]')).toBeNull();
   });
 });
 

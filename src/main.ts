@@ -139,6 +139,8 @@ import { renderToSvg, readPalette } from '@adapter/ui/render/mermaid-raster';
 import { MERMAID_KIND } from '@adapter/ui/render/mermaid-hydrate';
 import { CHART_KIND } from '@adapter/ui/render/chart-raster';
 import { SameOriginGate } from '@adapter/platform/same-origin-grants';
+import { appExtensionGrants } from '@adapter/platform/extension-grants';
+import { connectExtension } from '@adapter/platform/extension-host';
 import {
   announceOpenedWindow,
   connectViewDeepLink,
@@ -1535,6 +1537,25 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       center.render(dispatcher.getState());
       showStatus('素のまま起動の許可を取り消しました');
     },
+    /**
+     * 🔴 **目次を見せる許可を取り消す**(#195 / C-5 段①)。
+     * ⚠ `revokeSameOrigin` と**同じ倒し方**にする ── 許可は state に持たないので、
+     *   自分で描き直さないと一覧が消えず「効いていない」に見える。
+     */
+    revokeExtension: (assetKey) => {
+      appExtensionGrants.revoke(assetKey);
+      /**
+       * 🔴 **詳細の指紋も崩す**(2026-08-25、許す側で踏んで、反対側も疑って直した)。
+       * ⚠ 取り消しは設定の面から押すので、その場の描き直しは設定の一覧に効く ──
+       *   ところが**詳細の面は `hidden` で常駐**しており、指紋(selectedLid /
+       *   body / phase / revisionPanel)は取り消しで 1 つも動かない。
+       *   だから戻ってきたとき「目次を見せて起動」が**出ないまま**になる
+       *   (許可は外れているのに、押す口が消えている)。
+       */
+      center.invalidateDetail();
+      center.render(dispatcher.getState());
+      showStatus('目次を見せる許可を取り消しました');
+    },
     openTile: (lid) => {
       const tile = dispatcher.getState().launcherTiles?.find((t) => t.lid === lid);
       if (!tile) return;
@@ -1670,8 +1691,50 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
               sameOriginGate.remember(seen);
               return true;
             },
+            /**
+             * 🔴 **拡張の口**(#195 / C-5 段①)。⚠ 台帳と港の機構は
+             *   `extension-grants.ts` / `extension-host.ts` に在る ── ここは配線だけ。
+             * ⚠ 見取り図は**呼ばれるたびに常駐の集約から読む**(写しを抱えない)。
+             */
+            ext: {
+              granted: (assetKey) => appExtensionGrants.isGranted(assetKey ?? null),
+              /**
+               * 🔴 **憶えたら、その場で描き直す**(`revokeExtension` と同じ倒し方)。
+               * ⚠ 許可は state に持たないので、描き直さないと
+               *   **「目次を見せて起動」のボタンが残ったまま**になる ── user から見ると
+               *   「押したのに何も変わらない / まだ許していないのか?」である
+               *   (取り消し側では踏まずに、こちらだけ落としていた)。
+               */
+              grant: (assetKey) => {
+                const ok = appExtensionGrants.grant(assetKey ?? null);
+                // 🔴 **指紋を崩してから描く**(外部画像の同意と同じ倒し方)。
+                //    ⚠ 詳細の指紋は state しか見ていないので、`render` を呼ぶだけでは
+                //      **早期 return で何も起きない**(CLAUDE.md §2)。
+                center.invalidateDetail();
+                center.render(dispatcher.getState());
+                return ok;
+              },
+              confirm: async (title) =>
+                // ⚠ 何が見えるかを**具体**で書く(「連携します」では判断できない)
+                ask(
+                  `「${title}」に、ノートの**目次**を見せて開きます。\n\n` +
+                    '見えるのは、ノートの題名・種類・日付・印の一覧だけです。\n' +
+                    '本文と添付は渡りません。\n\n' +
+                    'この中身は次回から聞きません(中身が変わったらまた聞きます。' +
+                    '設定でいつでも取り消せます)。\n\n開きますか?',
+                  { okLabel: '目次を見せて開く' },
+                ),
+              connect: (win, nonce) =>
+                connectExtension({
+                  win,
+                  // 🔴 外殻に焼いたものと**同じ合図**(別々に作ると外殻が港を捨てる)
+                  nonce,
+                  metas: () => dispatcher.getState().entryMetas.values(),
+                }),
+              nonce: () => crypto.randomUUID(),
+            },
           },
-          { sameOrigin: launchOpts.sameOrigin },
+          { sameOrigin: launchOpts.sameOrigin, extension: launchOpts.extension },
         );
       })();
     },
