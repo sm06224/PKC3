@@ -16,6 +16,7 @@ import { replaceTaskCards, type TaskScan } from '@features/schedule/task-cards';
 import type { SnippetScan } from '@features/snippet/snippet-table';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import type { PersistState } from '@adapter/platform/storage-persist';
+import type { OpenExtension } from '@adapter/platform/extension-links';
 import type { LauncherTile } from '@features/launcher/tiles';
 import type {
   GroupResult as QueryGroups,
@@ -281,6 +282,22 @@ export interface AppState {
   selection: readonly string[];
   /** 範囲選択(`Shift`)の起点。⚠ 押すたびに更新する ── 起点が古いと範囲が飛ぶ。 */
   selectionAnchor: string | null;
+  /**
+   * 🔴 **いま開いている拡張の窓**(#195 / C-5 段②-b)。
+   *
+   * ⚠ **なぜ state に載せるのか** ── 台帳の実体は
+   * `adapter/platform/extension-links.ts`(常駐の singleton)に在り、
+   * 「送る」だけならそこを直に読めば足りる。**しかしそれでは画面が変わらない。**
+   * 🔴 2026-08-25(#393)に実際に踏んだ: 許可を憶えても、詳細の指紋は
+   * **state しか見ていない**ので `render` が早期 return し、
+   * user から見ると「押したのに何も起きない」になった。
+   * 🔑 だから**窓が開いた / 閉じたことを state へ写す** ── 指紋が動けば、
+   * 描き直しの仕掛けを別に足さなくてよい(`invalidate` の呼び忘れが起きない)。
+   *
+   * ⚠ ここに入るのは**名札だけ**(id / appId / 題名)である ── 窓そのものも港も
+   * 入れない(state は素のデータに保つ)。実際に送るのは台帳の側。
+   */
+  openExtensions: readonly OpenExtension[];
   /** 直近 CREATE_ENTRY で作られ、まだ一度も commit / rename されていない lid。
    *  「未編集のまま cancel」で掃除する(PKC2 の空 entry 堆積の対策 ── P3-7a)。 */
   freshLid: string | null;
@@ -508,6 +525,7 @@ export const initialState: AppState = {
   dual: initialDual,
   selection: [],
   selectionAnchor: null,
+  openExtensions: [],
   freshLid: null,
   viewMode: 'detail',
   filterQuery: '',
@@ -542,6 +560,12 @@ export const initialState: AppState = {
 export type UserAction =
   | { type: 'SELECT_ENTRY'; lid: string }
   | { type: 'SET_VIEW_MODE'; mode: ViewMode }
+  /**
+   * 🔴 **開いている拡張の窓が変わった**(#195 / C-5 段②-b)。
+   * ⚠ 台帳(`extension-links.ts`)が正本で、これはその**写し**である ──
+   *   ここで足し引きの計算をしない(2 か所で数えない、§7)。
+   */
+  | { type: 'SET_OPEN_EXTENSIONS'; open: readonly OpenExtension[] }
   | { type: 'SET_ENTRY_FILTER'; query: string }
   /** 本文の当たりが SQL から返った(#181)。⚠ `query` は**どの問い合わせの答えか**。 */
   | { type: 'SET_SEARCH_HITS'; query: string; lids: string[] }
@@ -1474,6 +1498,12 @@ function reduceCore(
         },
         events: [],
       };
+    case 'SET_OPEN_EXTENSIONS':
+      /**
+       * ⚠ **写すだけ**(選択も面も動かさない)── 窓が開いた / 閉じたことは
+       *   user が「いま何を見ているか」を変える出来事ではない。
+       */
+      return { state: { ...state, openExtensions: action.open }, events: [] };
     case 'SET_VIEW_MODE':
       // selection は消さない(PKC2 規約)。panel は view に従属するので畳む
       /**

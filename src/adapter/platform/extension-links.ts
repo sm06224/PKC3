@@ -53,18 +53,44 @@ export interface ExtLinkRegistry {
    * @returns 渡せたか。⚠ `false` = その id がもう無い / 港が繋がっていない
    */
   deliver: (id: string, entry: ExtDeliveredEntry) => boolean;
+  /**
+   * 🔴 **一覧が変わったら知らせる**(#195 / C-5 段②-b)。
+   *
+   * ⚠ **「いつ変わったか」の判断をここに置く理由**: 呼び側は `main.ts` で、
+   *   そこは**原文を `readFileSync` で読む test しか無い層**である
+   *   (CLAUDE.md「どの test からも実行されない file に、判断を書かない」)。
+   *   ⚠ 「track の後と close の後で dispatch する」を向こうに書くと、
+   *   **片方を書き忘れても誰も気づかない**(閉じても一覧に残る = 幽霊)。
+   * 🔑 だから**足し引きの当事者がそのまま知らせる** ── 呼び側は 1 行で済む。
+   *
+   * @returns 購読を解く関数
+   */
+  subscribe: (fn: () => void) => () => void;
 }
 
 export function createExtLinkRegistry(): ExtLinkRegistry {
   /** ⚠ **挿入順を保つ**ので `Map`(一覧の並びが開いた順になる)。 */
   const open = new Map<string, { app: OpenExtension; link: ExtHostLink }>();
+  const watchers = new Set<() => void>();
   let serial = 0;
+
+  /** ⚠ 1 人が投げても残りへ届ける(購読者どうしを巻き添えにしない)。 */
+  const changed = (): void => {
+    for (const fn of [...watchers]) {
+      try {
+        fn();
+      } catch {
+        // 購読側の事故 ── 台帳の一貫性とは無関係なので握る
+      }
+    }
+  };
 
   return {
     track: (app, link) => {
       serial += 1;
       const id = `ext-${serial}`;
       open.set(id, { app: { id, appId: app.appId, title: app.title }, link });
+      changed();
       return {
         push: link.push,
         deliver: link.deliver,
@@ -72,13 +98,19 @@ export function createExtLinkRegistry(): ExtLinkRegistry {
         close: () => {
           // 🔑 **先に外してから閉じる** ── 逆順にすると、`close()` が投げたときに
           //    台帳へ幽霊が残る(閉じた窓が一覧に出続ける)
-          open.delete(id);
+          const had = open.delete(id);
           link.close();
+          // ⚠ **2 回閉じても 2 回知らせない**(既に外れていたら黙る)
+          if (had) changed();
         },
       };
     },
     list: () => [...open.values()].map((v) => v.app),
     deliver: (id, entry) => open.get(id)?.link.deliver(entry) ?? false,
+    subscribe: (fn) => {
+      watchers.add(fn);
+      return () => watchers.delete(fn);
+    },
   };
 }
 

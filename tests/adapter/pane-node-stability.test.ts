@@ -64,6 +64,8 @@ function stateOf(metas: EntryMeta[], over: Partial<AppState> = {}): AppState {
     scopeLid: null,
     selection: [],
     selectionAnchor: null,
+    // #195 段②-b: 開いている拡張。⚠ 上と同じ理由で**明示で置く**
+    openExtensions: [],
     ...over,
   } as unknown as AppState;
 }
