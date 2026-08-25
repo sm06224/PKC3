@@ -323,7 +323,14 @@ QT_IMPL_REPLACE = """bool QtInstance::ImplYield(bool bWait, bool bHandleAllCurre
         if (nPkc3Impl < 5)
         {
             ++nPkc3Impl;
-            pkc3_idles_trace("yield:impl", bWait ? 1 : 0, -1, nPkc3Impl);
+            // 🔴 **7 巡目(2026-08-24)── b に入れ子の深さを載せる。**
+            //    直しの候補は「待たれている条件をここで立てる」だが、⚠ **入れ子の
+            //    yield(タスクの中から呼ばれた yield)で立てると `IdlesLockGuard` の
+            //    保証(アイドルが実行中でないこと)を壊す**。だから述語には深さが要る。
+            //    ⚠ **値を決めつけない** ── まず出す。
+            pkc3_idles_trace("yield:impl", bWait ? 1 : 0,
+                             static_cast<int>(ImplGetSVData()->maAppData.mnDispatchLevel),
+                             nPkc3Impl);
         }
     }
     // Re-acquire the guard for user events when called via Q_EMIT ImplYieldSignal
@@ -427,6 +434,40 @@ QT_WAIT_REPLACE = """        if (!bWasEvent && bWait)
 }
 """
 
+
+EVL_SRC = "vcl/source/app/salusereventlist.cxx"
+# 🔴 **7 巡目 ── メインスレッドが「どの event の中」で止まっているかを名指しさせる。**
+#
+# 6 巡目で、壊れた回はメインスレッドが `DispatchUserEvents` から**返らない**ことが
+# 確定した(対照群 `.odt` は 5 回返る)。⚠ ここは `ProcessEvent()` を回す場所で、
+# **アイドルもタスクもこの中で走る** ── つまり「どれかの event の中」で止まっている。
+# 🔑 入る直前と出た直後に印を置けば、**対応する `disp:done` が無い `disp:ev`** が
+# 犯人を名指しする。⚠ `a` は `SalEvent` の値(enum class なので int へ落とす)。
+EVL_ANCHOR = """            auto process = [&aEvent, this] () noexcept { ProcessEvent(aEvent); };
+            process();
+"""
+EVL_REPLACE = """            auto process = [&aEvent, this] () noexcept { ProcessEvent(aEvent); };
+            {
+                static int nPkc3Ev = 0;
+                if (nPkc3Ev < 20)
+                {
+                    ++nPkc3Ev;
+                    pkc3_idles_trace("disp:ev", static_cast<int>(aEvent.m_nEvent), -1, nPkc3Ev);
+                }
+            }
+            process();
+            {
+                // ⚠ **出口の印が肝** ── 入口だけだと「入った」しか分からず、
+                //    どれが返っていないかが読めない。
+                static int nPkc3Done = 0;
+                if (nPkc3Done < 20)
+                {
+                    ++nPkc3Done;
+                    pkc3_idles_trace("disp:done", static_cast<int>(aEvent.m_nEvent), -1, nPkc3Done);
+                }
+            }
+"""
+
 HELPER_TARGETS = (
     (SCHED_SRC, "Scheduler::IdlesLockGuard::IdlesLockGuard()\n{\n"),
     (APP_SRC, "void Application::Execute()\n{\n"),
@@ -434,6 +475,7 @@ HELPER_TARGETS = (
     #    ⚠ ヘルパーを `DoYield` の直前へ入れると、`ImplYield` から呼べない
     #    (宣言より前で使うことになる)。**先に在るほうへ入れる。**
     (QT_SRC, "bool QtInstance::ImplYield(bool bWait, bool bHandleAllCurrentEvents)\n{\n"),
+    (EVL_SRC, "bool SalUserEventList::DispatchUserEvents( bool bHandleAllCurrentEvents )\n{\n"),
 )
 # ⚠ ヘルパーは TU ごとに 1 つ要る ── 当てる先が 2 file なので 2 つ入る。
 TARGETS = (
@@ -444,6 +486,7 @@ TARGETS = (
     (QT_SRC, QT_WAIT_ANCHOR, QT_WAIT_REPLACE),
     (QT_SRC, QT_IMPL_ANCHOR, QT_IMPL_REPLACE),
     (QT_SRC, QT_PROC_ANCHOR, QT_PROC_REPLACE),
+    (EVL_SRC, EVL_ANCHOR, EVL_REPLACE),
 )
 
 

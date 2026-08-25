@@ -32,6 +32,38 @@ function run(): { code: number; out: string } {
   }
 }
 
+/**
+ * 🔴 **当てる file を増やしたら、スコープ検査(`check-patch-scope.py`)にも足す。**
+ * ⚠ `SPECS` は手書きの一覧なので、⚠ **足し忘れると新しい file だけ検査の外**になる
+ * (7 巡目で `salusereventlist.cxx` を足したとき、実際に一度そうなった)。
+ * 🔑 patch 側の `HELPER_TARGETS` と `SPECS` を**集合で**突き合わせる ── 件数ではなく集合。
+ */
+describe('ヘルパーの当て先は、スコープ検査にも全部載っている', () => {
+  it('🔴 patch の HELPER_TARGETS と check-patch-scope の SPECS が一致する', () => {
+    const out = execFileSync(
+      'python3',
+      [
+        '-c',
+        [
+          'import importlib.util,sys,re,json',
+          'sys.dont_write_bytecode=True',
+          "sp=importlib.util.spec_from_file_location('p','build/office-wasm/patch-lo-idles-trace.py')",
+          'm=importlib.util.module_from_spec(sp); sp.loader.exec_module(m)',
+          "s=open('build/office-wasm/check-patch-scope.py').read()",
+          'b=s[s.index(chr(34)+"PKC3_IDLES_TRACE"+chr(34)):s.index(chr(34)+"PKC3_SAVE_TRACE"+chr(34))]',
+          'print(json.dumps({"patch":sorted(t[0] for t in m.HELPER_TARGETS),'
+            + '"specs":sorted(set(re.findall(chr(34)+"(vcl/[^"+chr(34)+"]+[.]cxx)"+chr(34), b)))}))',
+        ].join('\n'),
+      ],
+      { encoding: 'utf-8' },
+    );
+    const { patch, specs } = JSON.parse(out) as { patch: string[]; specs: string[] };
+    // ⚠ 空振り防止 ── 0 対 0 でも「一致」は真になる
+    expect(patch.length, 'HELPER_TARGETS を読めていない').toBeGreaterThanOrEqual(3);
+    expect(specs).toEqual(patch);
+  });
+});
+
 describe('計装のヘルパーは g++ で通る', () => {
   it('🔴 3 本とも、pthread_t が「整数」でも「pointer」でも通り、走らせて 1 行出る', () => {
     const r = run();
