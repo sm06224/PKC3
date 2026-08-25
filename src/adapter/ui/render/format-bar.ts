@@ -84,6 +84,25 @@ export function buildFormatBar(): HTMLElement {
   insertSnippet.append(insertSnippetLabel);
   bar.append(insertSnippet);
 
+  /**
+   * 🔴 **番号を振り直す**(#396)。
+   *
+   * ⚠ PKC2 は frontmatter で**常時かかる設定**にしていたが、PKC3 は
+   *   **押したときだけ**にする ── ライブエディタは行ごとに欄を出すので、
+   *   1 行打つたびに全文の番号を書き換えると**触っていない行が勝手に変わる**
+   *   (しかも別の窓が書いていたら、それを踏む)。
+   */
+  const renumber = document.createElement('button');
+  renumber.type = 'button';
+  renumber.setAttribute('data-pkc-action', 'renumber-lists');
+  // ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)
+  renumber.title = '番号付きリストの番号を、上から順に振り直します';
+  const renumberLabel = document.createElement('span');
+  renumberLabel.setAttribute('data-pkc-field', 'label');
+  renumberLabel.textContent = '番号';
+  renumber.append(renumberLabel);
+  bar.append(renumber);
+
   const toggleReplace = document.createElement('button');
   toggleReplace.type = 'button';
   toggleReplace.setAttribute('data-pkc-action', 'toggle-replace');

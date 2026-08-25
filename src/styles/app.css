@@ -3773,3 +3773,23 @@ select:focus-visible {
     display: none;
   }
 }
+
+/**
+ * 🔴 見出しの畳み(#396)。⚠ 印は **CSS で出す** ── ボタンに字を入れると
+ * `h1.textContent` に混ざり、写し・読み上げ・アンカー・目次が全部汚れる。
+ */
+[data-pkc-field='heading-fold'] {
+  background: none;
+  border: 0;
+  cursor: pointer;
+  color: var(--muted, inherit);
+  font: inherit;
+  padding: 0 0.35em 0 0;
+  line-height: 1;
+}
+[data-pkc-field='heading-fold']::before {
+  content: '▾';
+}
+[data-pkc-field='heading-fold'][aria-expanded='false']::before {
+  content: '▸';
+}
