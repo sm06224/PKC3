@@ -363,3 +363,60 @@ test('🔴 生成 AI の回答(RTF)を貼ると、説明とコードが分かれ
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **無言でない ── 読み取る形を切り替えられる**(user 指示 2026-08-25、3 通目)。
+ *
+ * > 「**無言でHTMLペーストを取得する以外のスイッチ経路を用意するなど、
+ * > 実用とデバッグを兼用する工夫をしなさい / そのために設定やフラグはあるんだから!**」
+ *
+ * 🔴 **unit では届かない層**:設定画面で選んだ値が、**保存を経て**貼付まで届くか。
+ *   ⚠ 途中のどこか(画面 → 保存 → 配線)が切れていても、片端の unit は緑になる
+ *   (CLAUDE.md §7「A と B が合意していることは、A の test にも B の test にも書けない」)。
+ */
+test('🔴 設定で「リッチテキストを優先」にすると、貼付の結果が変わる', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+
+  const RTF =
+    String.raw`{\rtf1\ansi\deff0{\stylesheet{\s1 heading 1;}}` +
+    String.raw`\pard\s1 リッチの見出し\par}`;
+  const both = { html: '<h2>HTML の見出し</h2>', rtf: RTF, plain: '見出し' };
+
+  // ① 既定(自動)では、ウェブページの形が勝つ ── 🔑 **対照群**
+  await openLiveRow(page);
+  await pasteText(page, ROW, both);
+  await expect(page.locator(ROW), '既定でウェブページの形が勝っていない').toHaveValue(
+    /## HTML の見出し/,
+  );
+
+  // ② 設定を切り替える(user と同じ手順 ── 設定の面を開いて選ぶ)
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  const select = page.locator('[data-pkc-field="paste-source-select"]');
+  await expect(select, '設定に貼付の切替が無い').toBeVisible();
+  await select.selectOption('rtf');
+
+  /**
+   * ③ 🔴 **再読込を挟む** ── 保存を経ていることまで見る。
+   * ⚠ 挟まないと「この session の変数に入っただけ」でも通ってしまう。
+   */
+  await page.reload();
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+  await openLiveRow(page);
+  await pasteText(page, ROW, both);
+  await expect(page.locator(ROW), '設定が貼付まで届いていない').toHaveValue(
+    /# リッチの見出し/,
+  );
+
+  // ④ 設定の面に戻ると、選んだ値が映っている(古い値を見せない)
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await expect(
+    page.locator('[data-pkc-field="paste-source-select"]'),
+    '設定画面が古い値を見せている',
+  ).toHaveValue('rtf');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

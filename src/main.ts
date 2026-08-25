@@ -16,7 +16,7 @@ import { startEmbedBridge } from '@adapter/transport/embed-bridge';
 import { startCapture } from '@adapter/transport/capture-bridge';
 import { EmbedOriginsStore } from '@adapter/transport/embed-origins';
 import { appFlags } from '@adapter/platform/flag-store';
-import { FLAG_CAPTURE, FLAG_EMBED } from '@features/flags';
+import { FLAG_CAPTURE, FLAG_EMBED, FLAG_PASTE_INSPECT } from '@features/flags';
 import { appBrowseMode, isBrowseMode } from '@adapter/ui/render/browse-mode';
 import { StoreClient } from '@adapter/platform/storage/store-client';
 import { openAssetWindow } from '@adapter/platform/asset-window';
@@ -70,6 +70,8 @@ import {
 } from '@adapter/ui/render/page-format';
 import { isPageFormat } from '@features/page-format';
 import { appExternalImages } from '@adapter/ui/render/external-images';
+import { appPasteSource } from '@adapter/ui/render/paste-source';
+import { isPasteSource } from '@features/markdown/paste-source';
 import { launchTile } from '@adapter/ui/launch-tile';
 import { collectExistingLids } from '@features/import/existing-lids';
 import { appOfficePack } from '@adapter/ui/render/office-entry-view';
@@ -2059,6 +2061,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       center.render(dispatcher.getState());
     },
     /**
+     * 🔴 **貼付で読み取る形**(user 指示 2026-08-25)。
+     * ⚠ 知らない値は**捨てる**(判定は `isPasteSource` の 1 か所)── 画面を
+     *   描き直す必要は無い(次に貼るときから効く)が、**設定画面の値は映す**。
+     */
+    setPasteSource: (id) => {
+      if (!isPasteSource(id)) return;
+      if (!appPasteSource.set(id)) return;
+      center.render(dispatcher.getState());
+    },
+    /**
      * 🚩 フラグ(P11。user 指示 2026-08-07)。⚠ **設定ではない** ──
      * 開発者・パワーユーザー向けで、`foldWhen` の条件が来たら畳まれる。
      * ⚠ 保存は localStorage(裁定 Q6)。state には持たせない。
@@ -2148,6 +2160,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * 🔴 **可搬単一 HTML**(#400 段④)。⚠ 「閲覧用 HTML」とは別の口である ──
      *   あちらは読むだけ、こちらは**アプリごと 1 枚**(続きが書ける)。
      */
+    /**
+     * 🔴 **貼付でどの形を読むか / 何が届いたかを出すか**(user 指示 2026-08-25)。
+     * 🔑 **設定と flag は対**である ── 判定そのものは
+     *   `features/markdown/paste-source.ts` の 1 か所に在り、ここは配線だけ。
+     */
+    pasteSource: () => appPasteSource.get(),
+    pasteInspect: () => appFlags.isOn(FLAG_PASTE_INSPECT.name),
     exportPortable: () =>
       void withAssetGate(async () => {
         await exportPortable(dispatcher, {

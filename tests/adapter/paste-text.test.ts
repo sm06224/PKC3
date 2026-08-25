@@ -384,3 +384,87 @@ describe('リッチテキスト(RTF)の貼付', () => {
     expect(asked.flat().some((u) => u.startsWith('data:image/png'))).toBe(true);
   });
 });
+
+/**
+ * 🔴 **切替の配線**(user 指示 2026-08-25)── 設定とフラグが**対**で効く。
+ *
+ * ⚠ 判定そのものは `tests/features/paste-source.test.ts`。
+ * ここが見るのは「**設定が本当に届いているか**」「**フラグが本当に出すか**」である。
+ */
+describe('貼付の切替(設定)と診断(フラグ)', () => {
+  const HTML = '<h2>HTML の見出し</h2>';
+  const RTF =
+    String.raw`{\rtf1\ansi\deff0{\stylesheet{\s1 heading 1;}}` +
+    String.raw`\pard\s1 RTF の見出し\par}`;
+  const both = { 'text/html': HTML, 'text/rtf': RTF, 'text/plain': '見出し' };
+
+  it('既定(自動)ではウェブページの形が勝つ', () => {
+    const { ta } = setup();
+    ta.dispatchEvent(pasteEvent(both));
+    expect(ta.value).toBe('## HTML の見出し');
+  });
+
+  it('🔴 「リッチテキストを優先」にすると、そちらが勝つ', () => {
+    const { ta } = setup({ pasteSource: () => 'rtf' });
+    ta.dispatchEvent(pasteEvent(both));
+    expect(ta.value, '設定が届いていない').toBe('# RTF の見出し');
+  });
+
+  it('🔴 「ウェブページの形だけ」にすると、リッチテキストは読まない', () => {
+    const { ta } = setup({ pasteSource: () => 'html' });
+    const e = pasteEvent({ 'text/rtf': RTF, 'text/plain': '見出し' });
+    ta.dispatchEvent(e);
+    expect(e.defaultPrevented, 'リッチテキストを読んでいる').toBe(false);
+    expect(ta.value).toBe('');
+  });
+
+  it('🔴 「変換しない」にすると、何も横取りしない', () => {
+    const { ta } = setup({ pasteSource: () => 'plain' });
+    const e = pasteEvent(both);
+    ta.dispatchEvent(e);
+    expect(e.defaultPrevented, '「変換しない」なのに既定を止めている').toBe(false);
+    expect(ta.value).toBe('');
+  });
+
+  it('⚠ 設定を渡さなければ、いままでどおり(自動)', () => {
+    const { ta } = setup();
+    ta.dispatchEvent(pasteEvent({ 'text/rtf': RTF, 'text/plain': '見出し' }));
+    expect(ta.value).toBe('# RTF の見出し');
+  });
+
+  it('🔴 フラグが切なら、診断を出さない(ふだんは黙っている)', () => {
+    const { ta, dispatcher } = setup();
+    const seen: string[] = [];
+    dispatcher.onState((st) => {
+      if (st.notice) seen.push(st.notice);
+    });
+    ta.dispatchEvent(pasteEvent(both));
+    expect(seen).toEqual([]);
+  });
+
+  it('🔴 フラグが入なら、何が届いてどれを使ったかを出す', () => {
+    const { ta, dispatcher } = setup({ pasteInspect: () => true });
+    const seen: string[] = [];
+    dispatcher.onState((st) => {
+      if (st.notice && !seen.includes(st.notice)) seen.push(st.notice);
+    });
+    ta.dispatchEvent(pasteEvent(both));
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toContain('ウェブページの形を使いました');
+    // 🔴 **中身は出さない**(貼った文字が画面とお知らせの履歴に残らない)
+    expect(seen[0], '貼った中身が出ている').not.toContain('見出し');
+  });
+
+  it('🔴 横取りしなかった回こそ出す(「何も起きない」の理由が要る)', () => {
+    const { ta, dispatcher } = setup({ pasteSource: () => 'plain', pasteInspect: () => true });
+    const seen: string[] = [];
+    dispatcher.onState((st) => {
+      if (st.notice && !seen.includes(st.notice)) seen.push(st.notice);
+    });
+    const e = pasteEvent(both);
+    ta.dispatchEvent(e);
+    expect(e.defaultPrevented).toBe(false);
+    expect(seen, '止めたときに何も言っていない').toHaveLength(1);
+    expect(seen[0]).toContain('変換しない');
+  });
+});

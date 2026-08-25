@@ -22,6 +22,8 @@ import { appEditorMode, EditorModeStore } from './editor-mode';
 import { appOpenInEdit, OpenInEditStore } from './open-in-edit';
 import { EXTERNAL_IMAGE_MODES } from '@features/markdown/external-images';
 import { appExternalImages, ExternalImagePolicy } from './external-images';
+import { PASTE_SOURCES } from '@features/markdown/paste-source';
+import { appPasteSource, PasteSourceStore } from './paste-source';
 import { appJobMonitor, type JobMonitor } from '@adapter/platform/job-monitor';
 import { appNoticeStore, type NoticeStore } from '@adapter/platform/notice-store';
 import { ScrollMemory } from './scroll-memory';
@@ -72,6 +74,12 @@ export class SettingsRenderer {
     private readonly sameOriginGrants: SameOriginGrants = new SameOriginGrants(),
     /** 目次を見せる許可(#195 / C-5 段①)。⚠ test は自分で `new` して渡す。 */
     private readonly extensionGrants: ExtensionGrants = new ExtensionGrants(),
+    /**
+     * 🔴 **貼付で読み取る形**(user 指示 2026-08-25)。
+     * ⚠ **末尾に足す** ── 途中に入れると、位置引数で渡している test が
+     *   **静かに別の物を受け取る**(1 稿目で実際に 12 件落とした)。
+     */
+    private readonly pasteSource: PasteSourceStore = appPasteSource,
   ) {}
 
   private sameOriginList: HTMLElement | null = null;
@@ -85,6 +93,7 @@ export class SettingsRenderer {
       this.syncEditorMode();
       this.syncOpenInEdit();
       this.syncExternalImages();
+      this.syncPasteSource();
       this.syncSameOrigin(state);
       this.syncExtensions(state);
       this.syncPersist(state);
@@ -301,6 +310,7 @@ export class SettingsRenderer {
     this.keymapPanel = buildKeymapPanel();
     body.append(this.keymapPanel.root);
     body.append(this.buildExternalImages());
+    body.append(this.buildPasteSource());
     body.append(this.buildSameOrigin());
     body.append(this.buildExtensions());
     /**
@@ -320,6 +330,7 @@ export class SettingsRenderer {
     this.syncExtensions(state);
     this.syncPersist(state);
     this.syncExternalImages();
+    this.syncPasteSource();
     this.syncNotices();
     this.refresh();
     void state;
@@ -490,6 +501,51 @@ export class SettingsRenderer {
   }
 
   /**
+   * 🔴 **貼付でどの形を読むか**(user 指示 2026-08-25)。
+   *
+   * > 「**無言でHTMLペーストを取得する以外のスイッチ経路を用意するなど、
+   * > 実用とデバッグを兼用する工夫をしなさい / そのために設定やフラグはあるんだから!**」
+   *
+   * 🔑 **診断のフラグ(`paste.inspect`)と対**である ── そちらを点けると
+   * 「何が届いて、どれを使ったか」が画面に出るので、**どれに切り替えればよいかが分かる**。
+   */
+  private buildPasteSource(): HTMLElement {
+    const wrap = document.createElement('section');
+    wrap.setAttribute('data-pkc-region', 'settings-paste-source');
+    const h = document.createElement('h3');
+    h.textContent = '貼り付け';
+    wrap.append(h);
+
+    const dl = document.createElement('dl');
+    const dt = document.createElement('dt');
+    dt.textContent = '読み取る形';
+    const dd = document.createElement('dd');
+    const select = document.createElement('select');
+    select.setAttribute('data-pkc-action', 'set-paste-source');
+    select.setAttribute('data-pkc-field', 'paste-source-select');
+    select.setAttribute('aria-label', '貼り付けで読み取る形');
+    for (const m of PASTE_SOURCES) {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = m.label;
+      opt.title = m.hint;
+      select.append(opt);
+    }
+    dd.append(select);
+    const note = document.createElement('p');
+    note.setAttribute('data-pkc-field', 'settings-note');
+    note.textContent =
+      'コピーすると、同じ内容が複数の形(ウェブページの形 / リッチテキスト / ただの文字)で' +
+      '持ち回られます。どれが正確かは相手のアプリによって違うので、崩れるときは切り替えてください。' +
+      'フラグの「貼り付けたとき、何が届いてどれを使ったかを画面に出す」を点けると、' +
+      '実際に何が届いたかが見えます(中身は出しません)。';
+    dd.append(note);
+    dl.append(dt, dd);
+    wrap.append(dl);
+    return wrap;
+  }
+
+  /**
    * 🔑 **ジョブの可視化**(P8 段⑩。user 指示 2026-08-03「ジョブスケジューラーは
    * 可視化機構とセットでお願いします / ログもみたい」)。
    *
@@ -653,6 +709,18 @@ export class SettingsRenderer {
       '[data-pkc-field="external-images-select"]',
     );
     const cur = this.externalImages.getMode();
+    if (select && select.value !== cur) select.value = cur;
+  }
+
+  /**
+   * ⚠ 画面の値を**いまの設定に合わせる**(器は 1 度しか組まない ── 映さないと
+   * 古い値が見える。CLAUDE.md §7「設定画面の値の同期」)。
+   */
+  private syncPasteSource(): void {
+    const select = this.region.querySelector<HTMLSelectElement>(
+      '[data-pkc-field="paste-source-select"]',
+    );
+    const cur = this.pasteSource.get();
     if (select && select.value !== cur) select.value = cur;
   }
 
