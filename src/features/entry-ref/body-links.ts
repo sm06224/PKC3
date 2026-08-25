@@ -27,18 +27,22 @@
  */
 
 /**
- * ⚠ **`pkc://<自分>/entry/<lid>` の形は、まだ拾っていない**(#379)。
+ * 🔴 **同じ容れ物のノートを指す形は 2 つある**(#379)。
  *
- * 描画側(`markdown-render.ts`)は**その形を `entry:` と同じ扱い**にしており
- * (押せば飛ぶ)、書き出して取り込み直すと**別の容れ物のものが自分あてになる**。
- * つまり「リンクは効くのに参照元から消える」形の穴が残っている。
- * 🔑 直す場所はここ 1 つで済む(出ていく側も入ってくる側もこの file を通る)が、
- * **cid を受け取る形**にする必要があるので #379 で別に扱う。
+ * | 形 | いつ本文に入るか |
+ * |---|---|
+ * | `entry:<lid>` | ふつうに書いたとき / 貼り付けが降ろしたとき |
+ * | **`pkc://<この容れ物>/entry/<lid>`** | 手で書いたとき / 🔑 **書き出して取り込み直したとき**(別の容れ物のものが「自分あて」に変わる) |
+ *
+ * 描画側(`markdown-render.ts:711-737`)は 2 つ目を**明示的に 1 つ目と同じ扱い**に
+ * している(押せば飛ぶ)。⚠ こちらが 1 つ目しか見ないと、
+ * **「リンクは効くのに参照元から消える」**という、移行のたびに静かに減る穴になる。
  */
 
 /**
- * lid に使える文字。⚠ `entry-ref.ts` の `TOKEN_RE`(`[A-Za-z0-9_-]+`)と**同じ**
- * ── ずらすと、あちらが解けるリンクをこちらが拾えなくなる。
+ * lid に使える文字。⚠ `entry-ref.ts` / `permalink.ts` の `TOKEN_RE`
+ * (`[A-Za-z0-9_-]+`)と**同じ** ── ずらすと、あちらが解けるリンクを
+ * こちらが拾えなくなる。
  */
 const LID_CHARS = 'A-Za-z0-9_\\-';
 
@@ -46,20 +50,35 @@ const LID_CHARS = 'A-Za-z0-9_\\-';
 const LINK_RE = new RegExp(`entry:([${LID_CHARS}]+)`, 'g');
 
 /**
+ * ⚠ **cid は正規表現に埋める**ので、lid の文字だけで組まれていることを確かめる
+ * (`permalink.ts` の `TOKEN_RE` が保証しているが、**保証を当てにして書かない**
+ * ── 別経路で入った cid が記号を含むと、正規表現ごと壊れる)。
+ */
+const TOKEN_ONLY = new RegExp(`^[${LID_CHARS}]+$`);
+
+/**
  * 本文が指しているノートの lid(重複を畳み、**出てきた順**)。
  *
  * ⚠ `#fragment` は落とす ── 章へのリンクでも、繋がっている先はノートである。
  * ⚠ 自分自身は**落とさない**(判断は呼び側 ── 図は落とすが、数えたい向きもある)。
+ *
+ * @param cid いまの容れ物の id。渡すと `pkc://<cid>/entry/<lid>` も拾う。
+ *   ⚠ 渡さなければ `entry:` だけ ── **他の容れ物あては拾わない**
+ *   (あちらはこの容れ物に居ないので、辺を引く相手が居ない)。
  */
-export function bodyLinkTargets(body: string): string[] {
+export function bodyLinkTargets(body: string, cid?: string | null): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
-  LINK_RE.lastIndex = 0;
-  for (let m = LINK_RE.exec(body); m !== null; m = LINK_RE.exec(body)) {
-    const lid = m[1]!;
-    if (seen.has(lid)) continue;
+  const take = (lid: string): void => {
+    if (seen.has(lid)) return;
     seen.add(lid);
     out.push(lid);
+  };
+  LINK_RE.lastIndex = 0;
+  for (let m = LINK_RE.exec(body); m !== null; m = LINK_RE.exec(body)) take(m[1]!);
+  if (cid !== undefined && cid !== null && TOKEN_ONLY.test(cid)) {
+    const portable = new RegExp(`pkc://${cid}/entry/([${LID_CHARS}]+)`, 'g');
+    for (let m = portable.exec(body); m !== null; m = portable.exec(body)) take(m[1]!);
   }
   return out;
 }
@@ -71,6 +90,22 @@ export function bodyLinkTargets(body: string): string[] {
  * CLAUDE.md「期待値を実装と同じ文法の別の綴りで組むと、同じ盲点を共有する」の逆で、
  * ここは**実装どうし**なので、むしろ 1 つに寄せるのが正しい)。
  */
-export function bodyLinksTo(body: string, lid: string): boolean {
-  return bodyLinkTargets(body).includes(lid);
+export function bodyLinksTo(body: string, lid: string, cid?: string | null): boolean {
+  return bodyLinkTargets(body, cid).includes(lid);
+}
+
+/**
+ * 本文の中で `lid` を指しうる**字面**(SQL の LIKE で粗く削るのに使う)。
+ *
+ * ⚠ **これは合否ではない。** LIKE は過剰に当たるので、当たった候補を
+ * `bodyLinksTo` に通して初めて答えが決まる(§7「判定を 1 か所へ寄せる」)。
+ * 🔑 ここに形を足したら **`bodyLinkTargets` にも足す** ── 片方だけだと、
+ * 候補にすら挙がらないか(取りこぼし)、挙がっても弾かれるか(無駄)になる。
+ */
+export function bodyLinkNeedles(lid: string, cid?: string | null): string[] {
+  const out = [`entry:${lid}`];
+  if (cid !== undefined && cid !== null && TOKEN_ONLY.test(cid)) {
+    out.push(`pkc://${cid}/entry/${lid}`);
+  }
+  return out;
 }

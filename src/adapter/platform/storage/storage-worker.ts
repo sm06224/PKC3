@@ -28,7 +28,7 @@ import { extractMeta } from '@features/flavor';
 import { readVersions, totalHistoryBytes } from '@features/flavor/attachment-versions';
 import { planSaveBack } from '@features/asset/asset-replace-plan';
 import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
-import { bodyLinksTo } from '@features/entry-ref/body-links';
+import { bodyLinkNeedles, bodyLinksTo } from '@features/entry-ref/body-links';
 import { planSearch, toLikePattern } from '@features/filter/search-query';
 import { countTaskCandidates } from '@features/markdown/task-count';
 import {
@@ -1290,11 +1290,18 @@ const handlers: Handlers = {
      * ⚠ 索引は持たない(持つと保存のたびの維持が要る)ので、LIKE で粗く削ってから
      *   本文を読む形にしてある ── **全件を JS へ積まない**。
      */
+    /**
+     * ⚠ **同じ容れ物を指す字面は 2 つある**(#379)── `entry:<lid>` と
+     * `pkc://<cid>/entry/<lid>`。⚠ 片方だけで絞ると、**もう片方は候補にすら
+     * 挙がらない**(取りこぼし側へ倒れる)。字面は `bodyLinkNeedles` が持つ。
+     */
+    const needles = bodyLinkNeedles(req.lid, req.cid);
+    const where = needles.map((_, i) => `body LIKE ?${i + 3} ESCAPE '\\'`).join(' OR ');
     const rows = need().selectObjects(
       `SELECT lid, body FROM entries
-        WHERE cid = ?1 AND lid <> ?2 AND archived = 0 AND body LIKE ?3 ESCAPE '\\'
+        WHERE cid = ?1 AND lid <> ?2 AND archived = 0 AND (${where})
         ORDER BY entry_order, lid`,
-      [req.cid, req.lid, toLikePattern(`entry:${req.lid}`)],
+      [req.cid, req.lid, ...needles.map((n) => toLikePattern(n))],
     ) as Array<{ lid: string; body: string }>;
     /**
      * ⚠ **SQL 側で件数を切らない。** LIKE は過剰に当たるので、`limit + 1` 件だけ
@@ -1305,7 +1312,7 @@ const handlers: Handlers = {
     const hit: string[] = [];
     let truncated = false;
     for (const r of rows) {
-      if (!bodyLinksTo(r.body, req.lid)) continue;
+      if (!bodyLinksTo(r.body, req.lid, req.cid)) continue;
       // 🔑 **1 件多く取って切れたか判る**(`searchEntries` と同じ作法)
       if (hit.length >= limit) {
         truncated = true;

@@ -120,6 +120,18 @@ describe('つながりの図に本文のリンクが載る (#186 段③)', () =>
   });
 
   /**
+   * 🔴 **pkc:// の自分あても辺になる**(#379)。
+   * ⚠ 情報ペインが `state.cid` を渡していなければ、`bodyLinkTargets` を直しても
+   *   **1 本も出ない** ── 部品ではなく**繋ぎ**を見る。
+   */
+  it('🔴 pkc:// の自分あても辺になる', () => {
+    let s = reduce(booted(['a', 'b']), { type: 'SELECT_ENTRY', lid: 'a' }).state;
+    s = reduce(s, { type: 'BODY_LOADED', lid: 'a', body: '[b へ](pkc://c1/entry/b)\n' }).state;
+    s = reduce(s, { type: 'BACKLINKS_LOADED', lid: 'a', lids: [], truncated: false }).state;
+    expect(edges(paint(s)), 'cid が渡っていない(pkc:// が辺にならない)').toEqual(['body-link']);
+  });
+
+  /**
    * ⚠ **対照群** ── リンクが無ければ 1 本も出ない(「常に 1 本引く」実装を許さない)。
    * 🔑 そして**行ごと畳む**(点 1 つを図と呼ばない)。
    */

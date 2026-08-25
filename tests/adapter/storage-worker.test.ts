@@ -1611,6 +1611,30 @@ describe('バックリンク (#348)', () => {
     expect(r.truncated).toBe(false);
   });
 
+  /**
+   * 🔴 **`pkc://<この容れ物>/entry/<lid>` も参照元である**(#379)。
+   *
+   * 描画側はこの形を `entry:` と**同じ扱い**にしている(押せば飛ぶ)。
+   * ⚠ ここが片方しか見ないと「リンクは効くのに参照元から消える」。
+   * ⚠ しかも **LIKE の絞り込みにも足さないと候補に挙がらない** ──
+   *   合否の文法だけ直しても届かない(この test はその繋ぎまで見る)。
+   */
+  it('🔴 pkc:// の自分あても参照元に出る', async () => {
+    await write('bl-p2', '的\n');
+    await write('bl-portable', '[その先](pkc://c1/entry/bl-p2)\n');
+    expect(
+      (await request({ op: 'findBacklinks', cid: 'c1', lid: 'bl-p2' })).lids,
+      'pkc:// の自分あてが参照元から漏れている',
+    ).toEqual(['bl-portable']);
+  });
+
+  /** ⚠ **別の容れ物あては拾わない**(この器に相手が居ない ── 押しても飛べない)。 */
+  it('⚠ 別の容れ物あての pkc:// は参照元にしない', async () => {
+    await write('bl-p3', '的\n');
+    await write('bl-foreign', '[よそ](pkc://c9/entry/bl-p3)\n');
+    expect((await request({ op: 'findBacklinks', cid: 'c1', lid: 'bl-p3' })).lids).toEqual([]);
+  });
+
   /** 🔴 **切ったら言う**(黙って切ると user は「これで全部」と読む)。 */
   it('🔴 上限を超えたら、切ったと言う', async () => {
     await write('bl-hot', '人気のノート\n');

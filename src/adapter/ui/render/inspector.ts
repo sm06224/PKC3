@@ -338,7 +338,7 @@ export class InspectorRenderer {
       const linkEdges: { fromLid: string; toLid: string; kind: string }[] = [];
       const openBody = state.openBody?.lid === meta.lid ? state.openBody.body : null;
       if (openBody !== null) {
-        for (const to of bodyLinkTargets(openBody)) {
+        for (const to of bodyLinkTargets(openBody, state.cid)) {
           linkEdges.push({ fromLid: meta.lid, toLid: to, kind: BODY_LINK_KIND });
         }
       }
