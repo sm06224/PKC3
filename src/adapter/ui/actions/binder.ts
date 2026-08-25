@@ -425,6 +425,11 @@ export interface BinderServices {
   exportHtml?(): void;
   /** md ZIP の書出し(P6d 段④)。 */
   exportMarkdown?(): void;
+  /**
+   * 🔴 **可搬単一 HTML**(#400 段④)── アプリごと 1 枚に焼く。
+   * ⚠ 「閲覧用 HTML」とは別物である(あちらは読むだけ、こちらは**続きが書ける**)。
+   */
+  exportPortable?(): void;
   /** このノートを Word(.docx)で書き出す(#187 段①)。 */
   exportEntryDocx?(lid: string): void;
   /** このノートを PowerPoint(.pptx)で書き出す(#187 段⑤)。 */
@@ -2452,6 +2457,9 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'export-markdown': (_dispatcher, _target, services) => {
     services.exportMarkdown?.();
+  },
+  'export-portable': (_dispatcher, _target, services) => {
+    services.exportPortable?.();
   },
   'export-entry-pdf': (dispatcher, target, services) => {
     // ⚠ 解決規則は隣の 2 つと**同じ**にする(片方だけ `selectedLid` 固定だと

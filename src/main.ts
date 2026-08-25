@@ -28,6 +28,14 @@ import {
   REVISION_KEEP_LATEST,
 } from '@adapter/platform/storage/store-port';
 import { acquireWriterLease } from '@adapter/platform/storage/writer-lease';
+import { bundleChannelName, bundleLockName } from '@features/portable/bundle';
+import { resolvePortableStart, type PortableStart } from '@adapter/platform/portable-boot';
+import { restoreEmbeddedAssets } from '@adapter/platform/portable-assets';
+import { exportPortable } from '@adapter/ui/actions/export-portable';
+import {
+  connectPortablePersist,
+  type PortablePersist,
+} from '@adapter/platform/storage/portable-persist';
 import { ProxyStoreClient, StoreProxyHost } from '@adapter/platform/storage/store-proxy';
 import type { StoreClientLike, TabSync } from '@adapter/platform/storage/store-proxy';
 import type { InitResult } from '@adapter/platform/storage/protocol';
@@ -209,18 +217,37 @@ export interface AppHandle {
  * fallback を受け入れず、新しい worker で短い backoff 再試行する
  * (install 失敗は worker 内で per-name cache されるため、worker ごと作り直す)。
  */
-async function initStorage(promoted: boolean): Promise<{
+async function initStorage(
+  promoted: boolean,
+  portable: PortableStart | null,
+): Promise<{
   client: StoreClient;
   init: InitResult;
 }> {
+  /**
+   * 🔴 **可搬単一 HTML は OPFS を試さない**(#400 段③)。
+   *
+   * `file://` では原理的に取れず(opaque origin)、`https://` に置いたときは
+   * **その origin の本体の DB を開いてしまう** ── どちらでも試す理由が無い。
+   * ⚠ そして `memory` は fallback ではなく**選んだ形**なので、以下の
+   * 「memory なら失敗」の再試行にも入れてはならない(入れると必ず起動に失敗する)。
+   */
+  const req = portable
+    ? ({
+        op: 'init' as const,
+        dbName: portable.dbName,
+        memory: true,
+        ...(portable.image ? { image: portable.image } : {}),
+      })
+    : ({ op: 'init' as const, dbName: DB_NAME });
   let client = new StoreClient();
-  let init = await client.request({ op: 'init', dbName: DB_NAME });
-  if (promoted && init.vfs === 'memory') {
+  let init = await client.request(req);
+  if (promoted && portable === null && init.vfs === 'memory') {
     for (const delayMs of [200, 500, 1000]) {
       client.terminate();
       await new Promise((r) => setTimeout(r, delayMs));
       client = new StoreClient();
-      init = await client.request({ op: 'init', dbName: DB_NAME });
+      init = await client.request(req);
       if (init.vfs !== 'memory') break;
     }
     if (init.vfs === 'memory') {
@@ -312,8 +339,62 @@ function makeViewWindowToken(): string {
 
 /** boot(設計メモ §1): lease → worker init(または #177 の proxy 接続)→ メタ一覧 → SYS_BOOTED。 */
 export async function startApp(root: HTMLElement): Promise<AppHandle> {
-  const lease = acquireWriterLease();
+  /**
+   * 🔴 **可搬単一 HTML かどうかを、いちばん先に決める**(#400 段③)。
+   *
+   * ⚠ 鍵の名前・放送路の名前・器の名前が**全部これで決まる**ので、lease を
+   *   取る前でなければならない。⚠ `file://` では鍵も放送路も scheme 全体で
+   *   1 個なので、名前を切らないと**別のバンドルのタブと繋がる**(実測)。
+   * ⚠ 素の PKC3 では `null` ── 以下の既定値がそのまま効き、経路は変わらない。
+   */
+  const portable = await resolvePortableStart(document);
+  const lease = acquireWriterLease(
+    portable ? bundleLockName(portable.bundle.id) : undefined,
+  );
+  const proxyDeps = portable ? { channel: bundleChannelName(portable.bundle.id) } : {};
   bootLease = lease;
+
+  /**
+   * 🔴 **可搬単一 HTML の保存**(#400 段③)。
+   *
+   * 🔑 **holder になったタブだけが armed される** ── 実 worker を持っているのは
+   * holder だけなので、器へ書けるのも holder だけである。follower の書込も
+   * holder が実行するので、`onMutation` は 1 か所で足りる(CLAUDE.md §7)。
+   * ⚠ **昇格した回も arm する** ── 忘れると、本体タブが閉じた後に続きを書いた
+   *   ぶんが**丸ごと保存されない**(閉じるまで誰も気づけない)。
+   */
+  let persist: PortablePersist | null = null;
+  let persistState = '';
+  /** ⚠ `paint` はずっと後で組まれるので、繋がるまでは何もしない口にしておく。 */
+  let repaintStatus: () => void = () => undefined;
+  const armPersist = (real: StoreClient): void => {
+    if (portable === null || persist !== null) return;
+    persist = connectPortablePersist({
+      exportImage: async () => (await real.request({ op: 'exportImage' })).image,
+      write: ({ savedAt, image }) =>
+        portable.store.write({ exportedAt: portable.bundle.exportedAt, savedAt, image }),
+      onState: (st) => {
+        persistState =
+          st.kind === 'error'
+            ? `⚠ この端末に保存できませんでした(${st.why})`
+            : st.kind === 'pending'
+              ? '⏳ 保存待ち'
+              : '';
+        repaintStatus();
+      },
+    });
+    /**
+     * 🔴 **閉じる前に流す。** ⚠ `beforeunload` だけに頼らない ── モバイルでは
+     *   飛ばないことがある。`visibilitychange`(hidden)が唯一ほぼ確実な合図で、
+     *   `pagehide` がその次点である。
+     */
+    const flush = (): void => void persist?.flush().catch(() => undefined);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flush();
+    });
+    window.addEventListener('pagehide', flush);
+  };
+  const persistHook = portable ? { onMutation: (): void => persist?.touch() } : {};
   const immediateHeld = await lease.immediate;
 
   /**
@@ -336,13 +417,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
 
   if (immediateHeld) {
     writerHolder = true;
-    const real = await initStorage(false);
-    const host = new StoreProxyHost({ client: real.client, init: real.init });
+    const real = await initStorage(false, portable);
+    armPersist(real.client);
+    const host = new StoreProxyHost({ client: real.client, init: real.init, ...proxyDeps, ...persistHook });
     client = host.localClient();
     init = real.init;
     sync = host;
   } else {
-    followerConn = await ProxyStoreClient.connect();
+    followerConn = await ProxyStoreClient.connect({ ...proxyDeps });
     if (followerConn?.initResult) {
       client = followerConn;
       init = followerConn.initResult;
@@ -364,7 +446,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       while (!held) {
         await Promise.race([heldP, new Promise((r) => setTimeout(r, 2000))]);
         if (held) break;
-        const again = await ProxyStoreClient.connect({ handshakeTimeoutMs: 800 });
+        const again = await ProxyStoreClient.connect({ ...proxyDeps, handshakeTimeoutMs: 800 });
         if (held) {
           again?.terminate();
           break;
@@ -381,8 +463,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       } else {
         followerConn = null;
         await heldP;
-        const real = await initStorage(true);
-        const host = new StoreProxyHost({ client: real.client, init: real.init });
+        const real = await initStorage(true, portable);
+        armPersist(real.client);
+        const host = new StoreProxyHost({ client: real.client, init: real.init, ...proxyDeps, ...persistHook });
         client = host.localClient();
         init = real.init;
         sync = host;
@@ -499,6 +582,21 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   let browseMode: BrowseMode = appBrowseMode.get();
   // assets: bytes は IDB Blob(sqlite には meta のみ)。表示は lend/dispose 規律
   const blobs = new AssetBlobStore();
+  /**
+   * 🔴 **可搬単一 HTML に焼かれた添付を器へ戻す**(#400 段④)。
+   *
+   * ⚠ DB 画像が持っているのは添付の**目録の行**だけである(bytes は IDB Blob)──
+   *   戻さないと、配られた 1 枚は**画像が全部欠けた状態**で開く。
+   * ⚠ 判断と 1 件ずつ流す規律は `portable-assets.ts` が持つ(この file は
+   *   どの test からも実行されない ── CLAUDE.md §2)。
+   * 🔑 2 回目の起動では器に在るので飛ばす(節点だけ外す)。
+   */
+  let portableAssetNote = '';
+  if (portable !== null) {
+    const r = await restoreEmbeddedAssets(document, cid, blobs);
+    if (r.failed > 0)
+      portableAssetNote = `⚠ 添付 ${r.failed} 件を読み込めませんでした(その分は画像が出ません)`;
+  }
   /**
    * 🔴 **Office(LibreOffice wasm)の別窓**(#88 / O3-c)。
    *
@@ -643,14 +741,26 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // ⚠ アプリの窓では常設バッジを畳む(上の理由)── `paint` は面が変わるたび
     //    走るので、`onHold` が旗を倒した次の描画から消える
     const sync = heldViewWindow === null ? syncLine : '';
-    const parts = [statusBase, sync, noticeLine, errorLine].filter((t) => t !== '');
+    /**
+     * 🔴 **可搬単一 HTML の保存の状態**(#400 段③)。⚠ ふだんは空文字なので
+     *   場所を取らない ── 出るのは「長く書けていない」か「書けなかった」ときだけ。
+     */
+    const parts = [statusBase, sync, portableAssetNote, persistState, noticeLine, errorLine]
+      .filter((t) => t !== '');
     const text = parts.join(' — ');
     if (text === statusShown) return;
     statusShown = text;
     regions.status.textContent = text;
     regions.status.hidden = text === '';
   };
-  if (syncLine !== '') paint();
+  /** 🔑 ここで初めて `paint` に繋がる(それまでの `onState` は落としてよい)。 */
+  repaintStatus = paint;
+  /**
+   * ⚠ 起動のときに添付が読めなかったことは、**黙らせない**(#400 段④)。
+   * 🔑 保存の状態(`persistState`)とは**別の欄**にする ── 同じ変数に載せると、
+   *   次の保存で「画像が出ない理由」が画面から消える。
+   */
+  if (syncLine !== '' || persistState !== '' || portableAssetNote !== '') paint();
   /** 一時の知らせ(コピーした / 取り込んだ)。⚠ 状態変化では消えない。 */
   const showStatus = (text: string) => {
     noticeLine = text;
@@ -824,11 +934,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     void lease.whenHeld.then(async () => {
       try {
         await conn.promote(async () => {
-          const r = await initStorage(true);
+          const r = await initStorage(true, portable);
+          // ⚠ 昇格でも arm する(忘れると、続きを書いたぶんが丸ごと保存されない)
+          armPersist(r.client);
           const host = new StoreProxyHost({
             client: r.client,
             init: r.init,
             heldLocks: conn.heldEditLocks(),
+            ...proxyDeps,
+            ...persistHook,
           });
           promotedHost = host;
           // 🔑 promote はここが返した client を**以後の全要求 + バッファ吐き出し**に
@@ -2030,6 +2144,43 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     exportArchive: () => void runExport('archive'),
     exportHtml: () => void runExport('html'),
     exportMarkdown: () => void runExport('markdown'),
+    /**
+     * 🔴 **可搬単一 HTML**(#400 段④)。⚠ 「閲覧用 HTML」とは別の口である ──
+     *   あちらは読むだけ、こちらは**アプリごと 1 枚**(続きが書ける)。
+     */
+    exportPortable: () =>
+      void withAssetGate(async () => {
+        await exportPortable(dispatcher, {
+          title: CONTAINER_TITLE,
+          /**
+           * ⚠ **雛形は同じ origin から取る** ── 押したときだけ取りに行く
+           *   (SW の precache には載せない。載せると全 user が 6.5MB を先に落とす)。
+           */
+          fetchTemplate: async () => {
+            const res = await fetch(new URL('portable-template.html', document.baseURI));
+            if (!res.ok)
+              throw new Error(
+                `アプリの雛形を取れませんでした(HTTP ${res.status})── ` +
+                  'この配り方には雛形が同梱されていない可能性があります',
+              );
+            return res.text();
+          },
+          exportImage: async () => (await client.request({ op: 'exportImage' })).image,
+          listAssets: async () =>
+            (await client.request({ op: 'listAssetMetas', cid })).map((m) => ({
+              key: m.key,
+              mime: m.mime ?? 'application/octet-stream',
+            })),
+          getAsset: (key) => blobs.get(cid, key),
+          download: downloadBlob,
+          notify: (message) => showStatus(message),
+          report: (notes) => showNotices(regions.notices, '書出し時の注意', notes),
+          settle: async () => {
+            await storeEffects?.settled();
+          },
+          insideBundle: () => portable !== null,
+        });
+      }),
     exportEntry: (lid) => void runExport({ entryLid: lid }),
     /** 🔴 このフォルダと配下をまとめて書き出す(#399 ①)。 */
     exportFolder: (lid) => void runExport({ entryLid: lid, as: 'folder' }),

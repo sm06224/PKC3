@@ -568,3 +568,49 @@ describe('PR gate の形(2026-08-18)', () => {
     }
   });
 });
+
+/**
+ * 🔴 **可搬単一 HTML の雛形は「検品の後」に足す**(#400 段④)。
+ *
+ * ⚠ `dist` の中に混ぜると 2 つ壊れる:
+ * ① `check-dist.mjs` の主張(配る量・生成物の顔ぶれ)が **6.5 MB ぶんずれる**
+ * ② 🔴 **SW の precache に載る** ── manifest は build 時に作られるので、
+ *    build の後に置けば載らないが、build の中に入れると**全 user が 6.5 MB を
+ *    先に落とす**(設計 doc が名指しで戒めている)。
+ *
+ * 🔑 だから見るのは「在るか」ではなく **順番**である。
+ * ⚠ そして**両方の配り先**を見る ── 片方だけだと
+ *   「dev では書き出せるのに本番では 404」という、いちばん気づけない形になる。
+ */
+describe('#400 段④ ── 雛形を置く順番', () => {
+  const cases = [
+    { file: 'pages.yml', check: 'check-dist.mjs dev' },
+    { file: 'release.yml', check: 'check-dist.mjs product' },
+  ] as const;
+
+  for (const c of cases) {
+    it(`${c.file}: 検品の後に雛形を焼いて置く`, () => {
+      const text = readFileSync(join(DIR, c.file), 'utf-8');
+      const at = text.indexOf(c.check);
+      const build = text.indexOf('npm run build:portable');
+      const copy = text.indexOf('dist-portable/pkc3.html');
+      // 空振り防止 ── 3 つとも実在する(消えたら 0 件ではなく -1 で落ちる)
+      expect(at, `${c.check} が無い`).toBeGreaterThanOrEqual(0);
+      expect(build, '雛形を焼く step が無い').toBeGreaterThanOrEqual(0);
+      expect(copy, '雛形を置く行が無い').toBeGreaterThanOrEqual(0);
+      expect(build, '🔴 検品の前に雛形を焼いている').toBeGreaterThan(at);
+      expect(copy, '焼く前に置こうとしている').toBeGreaterThan(build);
+    });
+  }
+
+  it('🔴 置き先の名前は、アプリが取りに行く名前と同じ', () => {
+    // ⚠ 名前が食い違うと、押しても **404 で「書き出せません」**になる ──
+    //   しかも CI は緑のままなので、user の報告でしか分からない
+    const app = readFileSync('src/main.ts', 'utf-8');
+    expect(app, 'アプリが雛形を取りに行っていない').toContain("'portable-template.html'");
+    for (const f of ['pages.yml', 'release.yml'])
+      expect(readFileSync(join(DIR, f), 'utf-8'), `${f} が別の名前で置いている`).toContain(
+        'portable-template.html',
+      );
+  });
+});

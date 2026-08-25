@@ -90,6 +90,18 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-25-portable-html',
+    title: 'PKC3 ごと 1 つのファイルに入れて、持ち歩けるようになりました',
+    items: [
+      '設定の「書き出しと片づけ」に「持ち歩ける 1 枚」が増えました。アプリと、いまの中身と、添付が 1 つの .html になります。',
+      'USB に入れて別のパソコンへ持っていき、ダブルクリックで開けます。サーバもインターネットも要りません。',
+      'その 1 枚の中で、そのまま書けます。閲覧用 HTML は読むだけですが、こちらは続きを書ける PKC3 です。',
+      '書いた内容は、開いたパソコンのブラウザの中に残ります。同じ 1 枚をもう一度開けば続きが出ます。',
+      '1 枚ごとに別の入れ物です。2 枚に書いても中身は混ざりませんが、片方に書いたことはもう片方には出ません。',
+      '配られた 1 枚から、さらに持ち歩ける 1 枚は書き出せません。押すとその旨が出ます。',
+    ],
+  },
+  {
     id: '2026-08-25-ext-write-back',
     title: 'アプリへ渡したノートを、アプリから書き戻せるようになりました',
     items: [
@@ -284,20 +296,11 @@ export const NOTICES: readonly Notice[] = [
       '書き出しの中身は前と同じです。変わったのは画面の説明とマニュアルだけです。',
     ],
   },
-  {
-    id: '2026-08-24-paste-permalink',
-    title: 'ノートへのリンクを貼ると、押せるリンクになります',
-    items: [
-      'ノートの場所を指す文字をコピーして本文に貼ると、これまでは黒い文字のまま残っていました。',
-      '貼った時点で、そのノートの題名が付いたリンクになります。押すとそのノートが開きます。',
-      '別の入れ物のノート宛と、こちらに無いノート宛は、これまでどおりそのままです。在りもしない題名を書かないためです。',
-    ],
-  },
 ];
 
 /**
  * ⚠ **落としたぶんの原本は CHANGELOG に在る**(上限 20 件を超えたので、古いほうから
  *   `2026-08-16-office-save-to-pkc` / `2026-08-17-office-save-same-note`(2026-08-19)、
  *   `2026-08-19-dual-pane-app`(2026-08-22)、
- *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice` / `2026-08-24-pptx-export`(2026-08-25)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
+ *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice` / `2026-08-24-pptx-export` / `2026-08-24-paste-permalink`(2026-08-25)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
  */

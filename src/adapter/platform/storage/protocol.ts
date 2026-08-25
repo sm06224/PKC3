@@ -11,7 +11,33 @@ import type { TaskScan } from '@features/schedule/task-cards';
 import type { SnippetScan } from '@features/snippet/snippet-table';
 
 export type StorageRequest =
-  | { op: 'init'; dbName: string; journalMode?: JournalMode }
+  /**
+   * 🔴 **`memory` と `image` は可搬単一 HTML のためだけに在る**(#400 段③)。
+   *
+   * - `memory: true` ── **OPFS を試さない**。⚠ これは fallback ではないので
+   *   `fallbackReason` は載らない(載せると、選んだ形を「落ちた」と告げてしまう)。
+   * - `image` ── 器から読んだ、または焼き込まれた DB 画像。**schema を当てる前に**
+   *   deserialize する(古い版の画像でも、そのあと移行が走る)。
+   *
+   * ⚠ 素の PKC3(`https://` 配信)はどちらも渡さない ── **渡さない限り、
+   * この op の振る舞いは 1 バイトも変わらない**。`tests/adapter/storage-worker-image.test.ts`
+   * が「既定は `opfs-sahpool` を試す」を pin している。
+   */
+  | {
+      op: 'init';
+      dbName: string;
+      journalMode?: JournalMode;
+      memory?: boolean;
+      image?: Uint8Array;
+    }
+  /**
+   * 🔴 **いまの DB を 1 枚の画像にする**(#400 段③)。
+   *
+   * ⚠ 出した画像は **wasm heap に丸ごと割り当てられる**(設計 doc §3 の実測:
+   * 33MB の画像を出した走りで heap が 81MB まで伸び、**縮まない**)── だから
+   * 呼び側は**束ねて遅らせる**(`portable-persist.ts`)。
+   */
+  | { op: 'exportImage' }
   | { op: 'openContainer'; cid: string; title?: string }
   /**
    * 🔴 **この端末のコンテナ id を決める**(#260)。
@@ -471,6 +497,15 @@ export interface InitResult {
   journalMode: string;
   /** memory fallback したときだけ入る、落ちた理由(観測可能性 ── review #1)。 */
   fallbackReason?: string;
+  /**
+   * 🔴 **画像を実際に流し込んだバイト数**(#400 段③)。渡さなかった回は載らない。
+   *
+   * ⚠ **これが無いと「復元した」を test から見分けられない** ── 画像を渡しても
+   * 黙って捨てる変異が、**行が読めるという理由で緑のまま**通ってしまう
+   * (器が空でも、配られた画像でも、schema を当てれば同じ形の DB になる)。
+   * 🔑 だから**渡した量ではなく、当てた量**をここに載せる。
+   */
+  restoredBytes?: number;
 }
 
 export interface CountsResult {
@@ -487,6 +522,11 @@ export type RequestFor<Op extends StorageRequest['op']> = Extract<
 
 export interface ResultMap {
   init: InitResult;
+  /**
+   * DB 画像。⚠ **`bytes` が 0 のことがある**(まだ 1 行も無い DB)── 呼び側は
+   * 器へ書かない(空を書くと、次の起動が「記録がある」と読んで中身ごと空になる)。
+   */
+  exportImage: { image: Uint8Array };
   openContainer: null;
   /**
    * この端末のコンテナ id。`created` は**採番した回だけ** true

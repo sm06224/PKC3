@@ -110,8 +110,13 @@ function frontmatterAssets(body: string): {
   return { skip, refs };
 }
 
-/** Blob を **3 バイト境界**で base64 にして 1 チャンクずつ渡す(配列に貯めない)。 */
-async function* base64Chunks(blob: Blob): AsyncGenerator<string> {
+/**
+ * Blob を **3 バイト境界**で base64 にして 1 チャンクずつ渡す(配列に貯めない)。
+ *
+ * 🔑 **可搬単一 HTML(#400 段④)も同じ規則を使う** ── `export` にしてあるのは
+ * そのため。⚠ もう 1 本書くと、3 の倍数で区切る規則が 2 か所になる(CLAUDE.md §7)。
+ */
+export async function* base64Chunks(blob: Blob): AsyncGenerator<string> {
   for (let off = 0; off < blob.size; off += B64_CHUNK) {
     const slice = blob.slice(off, Math.min(off + B64_CHUNK, blob.size));
     const bytes = new Uint8Array(await slice.arrayBuffer());

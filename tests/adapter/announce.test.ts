@@ -535,6 +535,7 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
+    ['2026-08-25-portable-html', '180eeb6a'],
     ['2026-08-25-ext-write-back', '48c94382'],
     ['2026-08-25-cross-pane', '9c451647'],
     ['2026-08-25-revision-diff', 'be0ff2ca'],
@@ -554,7 +555,8 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-08-24-dual-new-note', '6186a385'],
     ['2026-08-24-schedule-range', 'ac1e1758'],
     ['2026-08-24-markdown-to-pandoc', '1d6edb9b'],
-    ['2026-08-24-paste-permalink', '504c61d2'],
+    // ⚠ 上限 20 を超えたので 2026-08-25 に落とした(原本は CHANGELOG)
+    // ['2026-08-24-paste-permalink', '504c61d2'],
     // ⚠ 上限 20 を超えたので 2026-08-25 に落とした(原本は CHANGELOG)
     // ['2026-08-24-pptx-export', '599e9b36'],
     // ⚠ 上限 20 を超えたので 2026-08-25 に落とした(原本は CHANGELOG)

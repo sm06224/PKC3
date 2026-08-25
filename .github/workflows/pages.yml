@@ -39,6 +39,14 @@ jobs:
           node scripts/check-dist.mjs dev
           mkdir -p _site/dev
           cp -r dist/. _site/dev/
+      - name: 可搬単一 HTML の雛形(#400 段④)
+        run: |
+          # 🔴 **`dist` の検品の「後」に置く** ── 雛形はアプリの一部ではなく、
+          # 「押したときだけ取りに行く別の成果物」である。dist に混ぜると
+          # ① size cap の主張が変わる ② **SW の precache に載る**(生成は build 時
+          # なので、後から置けば載らない)── ②は全 user に 6.5MB を先に落とさせる。
+          VITE_PKC_KIND=dev npm run build:portable
+          cp dist-portable/pkc3.html _site/dev/portable-template.html
       - name: Deploy product (release の成果物そのもの / 初回 release まで placeholder)
         env:
           GH_TOKEN: ${{ github.token }}

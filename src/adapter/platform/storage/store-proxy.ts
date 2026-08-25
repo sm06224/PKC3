@@ -164,12 +164,22 @@ interface CommonDeps {
   readonly makeChannel?: (name: string) => Broadcaster;
   readonly now?: () => number;
   readonly tabId?: string;
+  /**
+   * 🔴 **放送路の名前**(#400 段③)。既定は `STORE_PROXY_CHANNEL`。
+   *
+   * ⚠ 可搬単一 HTML は `file://` で開かれ、そこでは **origin が全部 `file://` に
+   * 潰れる**(2026-08-25 実測)── 名前が同じだと、**別のバンドルのタブ**が
+   * 互いを holder と見なし、**片方のノートがもう片方の DB に書かれる**。
+   * 🔑 だから可搬のときだけ、バンドル固有の名前を渡す。
+   */
+  readonly channel?: string;
 }
 
 function openChannel(deps: CommonDeps): Broadcaster {
+  const name = deps.channel ?? STORE_PROXY_CHANNEL;
   return deps.makeChannel
-    ? deps.makeChannel(STORE_PROXY_CHANNEL)
-    : (new BroadcastChannel(STORE_PROXY_CHANNEL) as unknown as Broadcaster);
+    ? deps.makeChannel(name)
+    : (new BroadcastChannel(name) as unknown as Broadcaster);
 }
 
 /* ------------------------------------------------------------------ holder */
@@ -185,6 +195,15 @@ export interface StoreProxyHostDeps extends CommonDeps {
    * こちらの編集中ノートを取ってしまわないように。
    */
   readonly heldLocks?: ReadonlyArray<{ cid: string; lid: string }>;
+  /**
+   * 🔴 **DB が変わった**(#400 段③ ── 可搬単一 HTML の保存が聞く)。
+   *
+   * 🔑 **holder しか呼ばれない**のが要点である ── 実 worker を持っているのは
+   * holder だけなので、器へ書けるのも holder だけ。follower の書込も
+   * ここを通る(holder が代わりに実行する)ので、**聞く場所は 1 つで足りる**。
+   * ⚠ 「mutation か」の判定を呼び側にもう 1 つ作らない(CLAUDE.md §7)。
+   */
+  readonly onMutation?: () => void;
 }
 
 /**
@@ -201,6 +220,7 @@ export class StoreProxyHost implements TabSync {
   /** lockKey → { tab, seenAt } ── seenAt は edit-ping で更新、TTL 超えは掃除。 */
   private readonly locks = new Map<string, { tab: string; seenAt: number }>();
   private readonly changedListeners = new Set<(cid: string, lids: string[] | null) => void>();
+  private readonly onMutation: (() => void) | null;
   private closed = false;
 
   constructor(deps: StoreProxyHostDeps) {
@@ -208,6 +228,7 @@ export class StoreProxyHost implements TabSync {
     this.init = deps.init;
     this.id = deps.tabId ?? makeTabId();
     this.now = deps.now ?? ((): number => Date.now());
+    this.onMutation = deps.onMutation ?? null;
     for (const l of deps.heldLocks ?? [])
       this.locks.set(lockKey(l.cid, l.lid), { tab: this.id, seenAt: this.now() });
     this.ch = openChannel(deps);
@@ -230,7 +251,7 @@ export class StoreProxyHost implements TabSync {
         req: RequestFor<Op>,
       ): Promise<ResultMap[Op]> => {
         const result = await this.real.request(req);
-        if (MUTATING_OPS.has(req.op)) this.broadcastChanged(this.id, req);
+        if (MUTATING_OPS.has(req.op)) this.afterMutation(this.id, req);
         return result;
       },
       terminate: () => {
@@ -296,6 +317,17 @@ export class StoreProxyHost implements TabSync {
     return true;
   }
 
+  /**
+   * 書込が 1 件通った後の始末。
+   *
+   * 🔑 **`MUTATING_OPS` を数える場所を増やさないための 1 か所**である ──
+   * 自タブの書込(`localClient`)も follower の書込も、必ずここを通る。
+   */
+  private afterMutation(origin: string, req: StorageRequest): void {
+    this.onMutation?.();
+    this.broadcastChanged(origin, req);
+  }
+
   private broadcastChanged(origin: string, req: StorageRequest): void {
     if (!('cid' in req)) return;
     this.ch.postMessage({
@@ -329,7 +361,7 @@ export class StoreProxyHost implements TabSync {
           const result = await this.real.request(req as RequestFor<StorageRequest['op']>);
           this.ch.postMessage({ kind: 'res', to: from, id, ok: true, result } satisfies ProxyWire);
           if (MUTATING_OPS.has(req.op)) {
-            this.broadcastChanged(from, req);
+            this.afterMutation(from, req);
             // 🔑 holder 自身のアプリにも知らせる ── follower の書込は holder の
             //    dispatcher を通らないので、放送(自分には届かない)とは別に直接呼ぶ
             if ('cid' in req)
