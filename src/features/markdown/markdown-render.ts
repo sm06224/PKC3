@@ -785,19 +785,27 @@ md.renderer.rules.link_open = function (tokens, idx, options, env, self) {
 // would otherwise emit `<img src="entry:...">` and the browser would
 // try to load it as a real image (404'ing and cluttering the console).
 // Instead, the image rule below detects the `entry:` scheme and emits
-// an inert `<div class="pkc-transclusion-placeholder">` that the
-// adapter-layer expander (`adapter/ui/transclusion.ts`) later replaces
-// with the actual embed HTML.
+// an inert `<div class="pkc-transclusion-placeholder">`.
+//
+// 🔴 **展開する側は、まだ在りません**(#397 ②、2026-08-25 に訂正)。
+// ⚠ ここには「adapter-layer expander (`adapter/ui/transclusion.ts`) later replaces
+//    with the actual embed HTML」と**現在形で、file 名まで名指しして**書いてありましたが、
+//    **その file は存在しません**(`grep -rn "pkc-transclusion-placeholder"` の hit は
+//    この file 自身と `styles/app.css` の空状態の見た目だけ)。
+// 🔴 「未実装」より悪い形でした ── 次に読む人は「在るもの」として設計します。
+// 🔑 いまの実物の挙動: **空の器が残る**(本文には何も出ない)。
+//    ⚠ この記法は `docs/manual.md` に 1 度も出てこないので、踏む user はほぼ居ません。
+//    展開する側を作るかどうかは #397 ② で決めます(作るなら循環参照の門が要る)。
 //
 // Why a `<div>` (not a `<span>`): the expanded content is block-level
 // (day-grouped articles for TEXTLOG, paragraphs for TEXT). markdown-it
 // emits the image inside a `<p>`, so the browser's HTML parser will
 // auto-close the paragraph when it encounters the div, leaving an
-// empty `<p></p>` behind. The expander deletes these empties after
-// substitution.
+// empty `<p></p>` behind. ⚠ **いまは誰も掃除しません**(展開する側が無いので)──
+// 展開する側を作るときに、その空 `<p>` を消すところまで含めてください。
 //
 // The raw `entry:` href is preserved in `data-pkc-embed-ref` verbatim
-// so the expander can re-parse it via `parseEntryRef` (same grammar
+// so a future expander can re-parse it via `parseEntryRef` (same grammar
 // as `navigate-entry-ref`). The `alt` text is preserved in
 // `data-pkc-embed-alt` and is used by the fallback path (broken /
 // unsupported refs) as visible placeholder text.

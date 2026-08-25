@@ -399,6 +399,24 @@ export function buildShell(root: HTMLElement): ShellRegions {
     input.placeholder = label;
     replaceBar.append(input);
   }
+  /**
+   * 🔴 **大文字と小文字を区別する**(#397 ①)。
+   *
+   * ⚠ 純関数(`body-replace.ts`)も action の型も reducer も**最初から対応していた**
+   *   のに、**画面から渡す口だけが無かった** ── `caseSensitive?` が optional
+   *   だったので、渡し忘れても tsc が黙る(CLAUDE.md「待ちの口は optional に
+   *   しない ── 配線を落としても tsc が黙る」の同型)。
+   * ⚠ 既定は**区別しない**(いままでの挙動)── 既定を変えると、
+   *   これまで当たっていた語が黙って当たらなくなる。
+   */
+  const caseLabel = document.createElement('label');
+  caseLabel.setAttribute('data-pkc-field', 'replace-case-label');
+  const caseBox = document.createElement('input');
+  caseBox.type = 'checkbox';
+  caseBox.setAttribute('data-pkc-field', 'replace-case');
+  caseBox.title = 'これを入れると、大文字と小文字が違う語は置き換えません';
+  caseLabel.append(caseBox, document.createTextNode('大小を区別'));
+  replaceBar.append(caseLabel);
   const runReplace = iconButton('replace-all', '全部置換');
   runReplace.title = '編集中の本文で、探す語を全部置き換えます';
   replaceBar.append(runReplace);

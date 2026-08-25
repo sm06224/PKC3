@@ -967,7 +967,13 @@ const ACTIONS: Record<string, ActionHandler> = {
     const find = root.querySelector<HTMLInputElement>('[data-pkc-field="replace-find"]')?.value ?? '';
     const replace =
       root.querySelector<HTMLInputElement>('[data-pkc-field="replace-with"]')?.value ?? '';
-    dispatcher.dispatch({ type: 'REPLACE_IN_BODY', find, replace });
+    /**
+     * 🔴 **大小の区別を渡す**(#397 ①)。⚠ 直す前はここが無く、
+     *   純関数も reducer も対応しているのに**画面からは常に「区別しない」**だった。
+     */
+    const caseSensitive =
+      root.querySelector<HTMLInputElement>('[data-pkc-field="replace-case"]')?.checked === true;
+    dispatcher.dispatch({ type: 'REPLACE_IN_BODY', find, replace, caseSensitive });
   },
   /**
    * 🔴 **関係を足す**(#185)。⚠ 相手は**題名で指す**(lid は user に見えない)。
