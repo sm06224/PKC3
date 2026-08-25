@@ -122,7 +122,12 @@ from pathlib import Path
 # ⚠ libc だけを使う。embind / DOM / Qt の API をここから呼んではいけない
 #    (LO の文脈から `emscripten::val` を触ると `invalid handle` で abort する ── 2026-08-15)。
 HELPER = """
-// ── PKC3 #199 の計装(挙動は変えない。`PKC3_IDLES_TRACE=1` の回だけ入る)──
+// ── PKC3 #199 の計装(`PKC3_IDLES_TRACE=1` の回だけ入る)──
+// ⚠ **7 巡目までは印だけだった。8 巡目から 1 か所だけ挙動を変える** ──
+//    `IdlesLockGuard` の待ちに時限を付けた(`scheduler.cxx`)。
+//    ⚠ ここに「挙動は変えない」と書いたままにすると、次に読む人が
+//    **無害だと思って焼く**(CLAUDE.md「これが無いと壊れると書いたら、
+//    外して壊れるのを見る」の裏返し ── 書いた字が実態と合っていること)。
 #include <cstdio>
 #include <cstring>
 #include <pthread.h>
@@ -209,10 +214,42 @@ SCHED_REPLACE = """        pSVData->m_inExecuteCondtion.reset();
                          rSchedCtx.mnIdlesLockCount);
         {
             SolarMutexReleaser releaser;
-            pSVData->m_inExecuteCondtion.wait();
+            // 🔴 **8 巡目(2026-08-25)── 待ちに時限を付ける。ここだけが挙動を変える。**
+            //
+            // 7 巡目で構図が確定した:メインスレッドは `ProcessEvent(SalEvent::UserEvent)`
+            // に入ったきり返らず(`disp:ev` 1 件 / `disp:done` **0 件**。対照群 `.odt` は
+            // **10 / 10** で全部返る)、だから `Application::Execute()` の
+            // `while` が 2 周目に入らず(`execute:set` **0 件**)、ここが待っている
+            // 条件は**永久に立たない**。
+            //
+            // 🔑 上流のコメント(すぐ上)が待ちの目的を書いている ──
+            //   「メインが Execute へ戻るまで待てば、走っているアイドルが無いと言える」。
+            //   ⚠ **メインが user event の中で止まると、その前提ごと成立しない。**
+            //
+            // 🔑 **時限で失うのは 1 つだけ** ── 「既に走っているアイドルが
+            //   終わったこと」の保証である。「これからアイドルを遅らせる」ほうは
+            //   `mnIdlesLockCount` が**待ちの前に**増えており(すぐ上の
+            //   `osl_atomic_increment`)、その数の唯一の用途は
+            //   `scheduler.cxx` の `bDelayInvoking` なので、時限では失われない。
+            //
+            // 🔑 **道具は LO 自身のものを使う** ── `osl::Condition::wait` は
+            //   `const TimeValue*` を取る overload を持つ(`include/osl/conditn.hxx`)。
+            //   ⚠ `TimeValue` は `conditn.hxx` が `osl/time.h` を include するので
+            //   **ここでは追加の include が要らない**(`svdata.hxx` が
+            //   `osl::Condition` を宣言している = この型はもう見えている)。
+            //   ⚠ libc の `nanosleep` で回す形も書けるが、`<ctime>` が POSIX の
+            //   宣言を出すかは toolchain 次第で、**焼いてみるまで分からない** ──
+            //   確かめられない依存を足さない(2026-08-14 の `pthread_t` と同じ型)。
+            // ⚠ **値を決めつけない** ── 立ったのか諦めたのかを印に出す。
+            TimeValue aPkc3Timeout;
+            aPkc3Timeout.Seconds = 2;
+            aPkc3Timeout.Nanosec = 0;
+            const osl::Condition::Result ePkc3Res
+                = pSVData->m_inExecuteCondtion.wait(&aPkc3Timeout);
+            // ⚠ この行が**出なければ**、待ちはそこで永久に止まっている
+            //    (`a=0` = `result_ok` / `a=2` = `result_timeout`)
+            pkc3_idles_trace("idles:woke", static_cast<int>(ePkc3Res), -1, -1);
         }
-        // ⚠ この行が**出なければ**、待ちはそこで永久に止まっている
-        pkc3_idles_trace("idles:woke", -1, -1, -1);
 """
 
 APP_SRC = "vcl/source/app/svapp.cxx"
@@ -468,6 +505,43 @@ EVL_REPLACE = """            auto process = [&aEvent, this] () noexcept { Proces
             }
 """
 
+WIN_SRC = "vcl/source/window/winproc.cxx"
+# 🔴 **8 巡目 ── メインスレッドが user event の「どこで」止まるかを分ける。**
+#
+# 7 巡目で `disp:ev a=19`(= `SalEvent::UserEvent`。焼いた版の `salwtype.hxx` を
+# 機械で数えて確定)に入ったきり返らないことが出た。⚠ しかし `disp:ev` と
+# `disp:done` の**間**は見えていない ── `ProcessEvent` → `CallCallback` →
+# `ImplHandleUserEvent` → **登録された Link** と続くので、どこで止まったかで
+# 直す場所が変わる。
+# 🔑 Link の呼び出しを挟めば **2 つに割れる**:
+#     `uev:in` が出ない → 止まっているのは Link より**手前**(vcl の配線)
+#     `uev:in` が出て `uev:out` が出ない → 止まっているのは **Link の中**
+# ⚠ **これは printf だけ** ── 挙動は 1 バイトも変えない(挙動を変えるのは
+#   `SCHED_REPLACE` の時限 1 つだけ。2026-08-14 に 1 度の実験で 2 つを主張して
+#   「どちらが効いたか読めない」を踏んだので、そこは分けてある)。
+WIN_ANCHOR = """        if ( pSVEvent->mbCall )
+        {
+            pSVEvent->maLink.Call( pSVEvent->mpData );
+        }
+"""
+WIN_REPLACE = """        if ( pSVEvent->mbCall )
+        {
+            static int nPkc3Uev = 0;
+            const bool bPkc3Mark = nPkc3Uev < 20;
+            if (bPkc3Mark)
+            {
+                ++nPkc3Uev;
+                pkc3_idles_trace("uev:in", 1, -1, nPkc3Uev);
+            }
+            pSVEvent->maLink.Call( pSVEvent->mpData );
+            // ⚠ **出口の印が肝**(`disp:done` と同じ理由)── 入口だけでは
+            //    「入った」しか分からず、返っていないことが読めない。
+            if (bPkc3Mark)
+                pkc3_idles_trace("uev:out", 1, -1, nPkc3Uev);
+        }
+"""
+
+
 HELPER_TARGETS = (
     (SCHED_SRC, "Scheduler::IdlesLockGuard::IdlesLockGuard()\n{\n"),
     (APP_SRC, "void Application::Execute()\n{\n"),
@@ -476,6 +550,7 @@ HELPER_TARGETS = (
     #    (宣言より前で使うことになる)。**先に在るほうへ入れる。**
     (QT_SRC, "bool QtInstance::ImplYield(bool bWait, bool bHandleAllCurrentEvents)\n{\n"),
     (EVL_SRC, "bool SalUserEventList::DispatchUserEvents( bool bHandleAllCurrentEvents )\n{\n"),
+    (WIN_SRC, "static void ImplHandleUserEvent( ImplSVEvent* pSVEvent )\n{\n"),
 )
 # ⚠ ヘルパーは TU ごとに 1 つ要る ── 当てる先が 2 file なので 2 つ入る。
 TARGETS = (
@@ -487,6 +562,7 @@ TARGETS = (
     (QT_SRC, QT_IMPL_ANCHOR, QT_IMPL_REPLACE),
     (QT_SRC, QT_PROC_ANCHOR, QT_PROC_REPLACE),
     (EVL_SRC, EVL_ANCHOR, EVL_REPLACE),
+    (WIN_SRC, WIN_ANCHOR, WIN_REPLACE),
 )
 
 

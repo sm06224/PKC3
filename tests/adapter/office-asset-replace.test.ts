@@ -1,14 +1,29 @@
 /** @vitest-environment happy-dom */
 /**
- * 🔴 **Office の保存でノートの添付が差し替わる**(#205 段 C)。
+ * 🔴 **Office の保存を書き戻す ── effect 層の受け持ち**(#205 段 C / #178 / #212)。
  *
- * ⚠ 観測点は「dispatch した」で止めない ── **disk に何が書かれたか**まで見る
- * (`planSaveBack` は 2026-08-16 まで**呼び出し元 0 件**のまま全 test 緑だった)。
- * 見るのは 3 つ:
+ * ## ⚠ 2026-08-25 に、この file の受け持ちが変わった
  *
- * 1. 添付ノートの `attachment.asset_key` が新しい key になった
- * 2. **旧版が台帳(`attachment.history`)に積まれた**
- * 3. **別のノートに書かれた `asset:` 参照も**書き換わった(参照はどこにでも書ける)
+ * 直す前は effect 層が `listBodies` で**全ノートの本文を主スレッドへ運び**、
+ * `planSaveBack` を掛け、`persistEntry` を**1 件ずつ**呼んでいた ── 読んでから
+ * 書くまでの間に別のタブ / 窓が書くと**それを消し**、`checkpoint` を渡していない
+ * ので **amend** = **履歴にも残らない**(#178 で改名 / 並べ替えを直したのと
+ * まったく同じ形)。
+ * 🔑 走査ごと worker の 1 tx(`op: 'replaceAssetRefs'`)へ移したので、
+ * **衝突しうる状態そのものが消えた**。
+ *
+ * ⚠ だから**「何が書かれたか」はここでは見ない** ── それは
+ * `tests/adapter/storage-worker.test.ts` が**本物の SQL の上で**見る。
+ * ここで fake に同じ段取りを書き直すと、**fake を検めているだけ**になる
+ * (CLAUDE.md §3「stub が実装より正しいとバグが隠れる」)。
+ *
+ * ここが持つ主張は 4 つ:
+ *
+ * 1. **1 往復で頼む**(本文を主スレッドへ運ばない ── `listBodies` / `persistEntry` を
+ *    この経路で呼ばない)
+ * 2. 断りの理由(`problem`)を **user の言葉**に直す
+ * 3. 書けた本文を**画面へ差し替える**(次に開き直すまで古い、を作らない)
+ * 4. **おかしなことだけ言う**(`unchanged` は黙る / `stale` と `overBudget` は出す)
  */
 import { stubStamps } from '../helpers/store-stamps';
 import { describe, expect, it } from 'vitest';
@@ -16,8 +31,6 @@ import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { stubRevisionOps } from '../helpers/revision-stub';
-import { parseFrontmatter } from '../../src/features/markdown/frontmatter';
-import { readAttachmentMeta } from '../../src/features/flavor/attachment-flavor';
 
 const tick = (ms = 20): Promise<unknown> => new Promise((r) => setTimeout(r, ms));
 
@@ -39,283 +52,214 @@ function meta(lid: string, archetype: string): EntryMeta {
 const DOC = [
   '---',
   'attachment.name: 報告書.odt',
-  'attachment.mime: application/vnd.oasis.opendocument.text',
-  'attachment.size: 100',
   'attachment.asset_key: ast-old',
   '---',
   '説明',
   '',
 ].join('\n');
 
-function setup(bodies: Record<string, string>, metas: EntryMeta[]): {
+type Reply = Awaited<ReturnType<Parameters<typeof connectStoreEffects>[1]['replaceAssetRefs']>>;
+
+const OK: Reply = {
+  problem: null,
+  unchanged: false,
+  wrote: [{ lid: 'a1', body: DOC.replace('ast-old', 'ast-new'), stamps: stubStamps() }],
+  stale: [],
+  overBudget: false,
+};
+
+function setup(
+  metas: EntryMeta[],
+  reply: Reply | (() => Promise<Reply>) = OK,
+): {
   d: Dispatcher;
-  bodies: Record<string, string>;
-  writes: string[];
-  /** 走査(`listBodies`)からだけ隠す lid ── 頁が切れた状態を作る。 */
-  hideFromScan: Set<string>;
-  /** カーソルが前へ進まない状態にする。 */
-  stick(): void;
+  /** この経路が呼んだ口(⚠ 本文を主スレッドへ運んでいないことを見る)。 */
+  calls: string[];
+  asked: Array<{ targetLid: string; newKey: string }>;
 } {
-  const store = { ...bodies };
-  const writes: string[] = [];
-  const hideFromScan = new Set<string>();
-  let stuckCursor = false;
+  const calls: string[] = [];
+  const asked: Array<{ targetLid: string; newKey: string }> = [];
   const d = new Dispatcher();
   connectStoreEffects(d, {
     ...stubRevisionOps(),
-    getBody: async (lid) => store[lid] ?? null,
-    getBodies: async (lids) =>
-      lids.filter((l) => store[l] !== undefined).map((l) => ({ lid: l, body: store[l]! })),
-    // ⚠ **全文の走査**はここを通る(差し替えは参照を全ノートで直す)
-    listBodies: async () =>
-      stuckCursor
-        ? // ⚠ **前へ進まないカーソル**(壊れた worker / 実装ミス)を模す
-          {
-            rows: Object.entries(store).map(([lid, body]) => ({ lid, body })),
-            done: false,
-            next: { entryOrder: 0, lid: 'a1' },
-          }
-        : {
-            rows: Object.entries(store)
-              .filter(([lid]) => !hideFromScan.has(lid))
-              .map(([lid, body]) => ({ lid, body })),
-            done: true,
-          },
-    /**
-     * ⚠ **題名だけの口**(#178)── 本物は本文に触らない。
-     *   だから fake も本文を持たない(触らないものは持たない)。
-     */
+    getBody: async () => DOC,
+    getBodies: async () => {
+      calls.push('getBodies');
+      return [];
+    },
+    listBodies: async () => {
+      calls.push('listBodies');
+      return { rows: [], done: true };
+    },
     renameEntry: async () => stubStamps(),
     reorderEntry: async () => stubStamps(),
-    persistEntry: async (e) => {
-      writes.push(e.lid);
-      store[e.lid] = e.body;
+    replaceAssetRefs: async (input) => {
+      calls.push('replaceAssetRefs');
+      asked.push({ targetLid: input.targetLid, newKey: input.newKey });
+      return typeof reply === 'function' ? await reply() : reply;
+    },
+    persistEntry: async () => {
+      calls.push('persistEntry');
       return stubStamps();
     },
     deleteEntry: async () => {},
     setEntryParent: async () => {},
   });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas, relations: [] });
-  return {
-    d,
-    bodies: store,
-    writes,
-    hideFromScan,
-    stick: () => {
-      stuckCursor = true;
-    },
-  };
+  return { d, calls, asked };
 }
 
-const saved = (
-  lid: string,
-  key = 'ast-new',
-  /** 差し替え後の綴りと中身の種類(#214)。⚠ 既定は**別の拡張子**にする ── 元と
-   *  同じにすると「書き戻していない」変異が素通りする。 */
-  name = '報告.docx',
-  mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-): Parameters<Dispatcher['dispatch']>[0] => ({
+const saved = (lid: string, key = 'ast-new'): Parameters<Dispatcher['dispatch']>[0] => ({
   type: 'OFFICE_ASSET_SAVED',
   lid,
   newKey: key,
   newHash: 'h'.repeat(64),
   newBytes: 4242,
-  newName: name,
-  newMime: mime,
+  newName: '報告.docx',
+  newMime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   savedAt: '2026-08-16T00:00:00.000Z',
 });
 
-describe('Office の保存でノートの添付が差し替わる', () => {
-  it('🔴 添付ノートの key / 大きさ / hash が新しくなる', async () => {
-    const h = setup({ a1: DOC }, [meta('a1', 'attachment')]);
-    h.d.dispatch(saved('a1'));
-    await tick();
-    const fm = parseFrontmatter(h.bodies.a1!).meta;
-    expect(fm['attachment.asset_key'], 'key が古いまま').toBe('ast-new');
-    expect(fm['attachment.size']).toBe(4242);
-    expect(fm['attachment.hash']).toBe('h'.repeat(64));
-  });
-
-  it('🔴 綴りと中身の種類も新しくなる(#214)── 読み手 5 面が同じ場所を見る', async () => {
-    /**
-     * 🔴 直す前は key / size / hash / history の 4 つしか書き戻しておらず、
-     * `.odt` を `.docx` で上書き保存しても frontmatter は**古い綴りのまま**残った。
-     * ⚠ いちばん効くのは **「Office で開く」** ── LO は**拡張子で filter を選ぶ**ので、
-     * `報告.odt` という名前で docx を渡すと開けない。
-     * 🔑 読み手は `readAttachmentMeta` 1 か所に寄っているので、**そこから見る**
-     * (frontmatter の生の key を数えるだけだと、読み手が別 key を見ていても緑になる)。
-     */
-    const h = setup({ a1: DOC }, [meta('a1', 'attachment')]);
-    // 空振り防止 ── 差し替え前は**古い綴り**であること
-    const before = readAttachmentMeta(h.bodies.a1!);
-    expect(before.name, '前提が崩れている(既に新しい綴り)').not.toBe('報告.docx');
-    h.d.dispatch(saved('a1'));
-    await tick();
-    const after = readAttachmentMeta(h.bodies.a1!);
-    expect(after.name, '綴りが古いまま(ダウンロード名 / Office の filter が狂う)').toBe(
-      '報告.docx',
-    );
-    expect(after.mime, '中身の種類が古いまま').toBe(
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    );
-  });
-
-  it('🔴 旧版が台帳に積まれる(戻せなくならない)', async () => {
-    const h = setup({ a1: DOC }, [meta('a1', 'attachment')]);
-    h.d.dispatch(saved('a1'));
-    await tick();
-    const hist = parseFrontmatter(h.bodies.a1!).meta['attachment.history'];
-    expect(Array.isArray(hist), '台帳が配列で入っていない').toBe(true);
-    // 1 版 = `savedAt|kind|assetKey|bytes|label`
-    expect(String((hist as unknown[])[0])).toContain('ast-old');
-    expect(String((hist as unknown[])[0])).toContain('2026-08-16T00:00:00.000Z');
-  });
-
-  it('🔴 別のノートに書かれた参照も書き換わる(参照はどこにでも書ける)', async () => {
-    const h = setup(
-      { a1: DOC, n1: 'これを見て [報告書](asset:ast-old) ね\n', n2: '無関係\n' },
-      [meta('a1', 'attachment'), meta('n1', 'text'), meta('n2', 'text')],
-    );
-    h.d.dispatch(saved('a1'));
-    await tick();
-    expect(h.bodies.n1, '他ノートの参照が旧 key のまま(GC で切れる)').toContain('asset:ast-new');
-    expect(h.bodies.n1).not.toContain('ast-old');
-    // ⚠ 触っていないノートは**書き直さない**(全件を書き戻さない)
-    expect(h.writes, '無関係なノートまで書いた').not.toContain('n2');
-  });
-
+describe('Office の保存を書き戻す(effect 層の受け持ち)', () => {
   /**
-   * 🔴 **全文の走査が添付ノート自身を返さなくても、差し替えは通る**
-   * (変異試験で生き残って判明)。⚠ `planSaveBack` は
-   * **`bodies` に target が入っていないと frontmatter の差し替えを 1 件も返さない**
-   * ── 走査の頁が途中で切れただけで「保存したのに key が古いまま」になる。
+   * 🔴 **これが #178 / #212 の当の保証** ── 本文を主スレッドへ 1 バイトも運ばない。
+   * ⚠ 昔の段取り(`listBodies` → `persistEntry`)へ戻すと、この test が落ちる。
    */
-  it('🔴 走査が添付ノート自身を落としても、key は差し替わる', async () => {
-    const h = setup({ a1: DOC }, [meta('a1', 'attachment')]);
-    // 走査だけが a1 を返さない状態を作る(getBody は返す = disk には在る)
-    h.hideFromScan.add('a1');
+  it('🔴 1 往復で頼む(本文を主スレッドへ運ばない)', async () => {
+    const h = setup([meta('a1', 'attachment')]);
     h.d.dispatch(saved('a1'));
     await tick();
-    expect(parseFrontmatter(h.bodies.a1!).meta['attachment.asset_key'], 'key が古いまま').toBe(
-      'ast-new',
+    expect(h.calls, '頼んでいない').toContain('replaceAssetRefs');
+    expect(h.calls, '本文を主スレッドへ運んでいる(#212 が戻っている)').not.toContain('listBodies');
+    expect(h.calls, '主スレッドから 1 件ずつ書いている(#178 の穴が戻っている)').not.toContain(
+      'persistEntry',
     );
-  });
-
-  it('中身が同じ(key が変わらない)なら 1 バイトも書かない / 苦情も出さない', async () => {
-    const h = setup({ a1: DOC }, [meta('a1', 'attachment')]);
-    h.d.dispatch(saved('a1', 'ast-old'));
-    await tick();
-    expect(h.writes, '版だけ積んで中身は同じ、を作った').toEqual([]);
-    // ⚠ **異常ではない**(「取り込みました」は呼び側が出す)── 苦情を出すと
-    //    user は保存が失敗したと思う
-    expect(h.d.getState().error, '変わっていないだけなのに苦情を出した').toBe(null);
-  });
-
-  it('🔴 編集中は何も起きない(棚に残して撃ち直す側と対)', async () => {
-    const h = setup({ a1: DOC }, [meta('a1', 'attachment')]);
-    h.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
-    h.d.dispatch({ type: 'BODY_LOADED', lid: 'a1', body: DOC });
-    h.d.dispatch({ type: 'START_EDIT' });
-    await tick();
-    // 空振り防止 ── 本当に編集に入っているか(入っていなければこの test は無意味)
-    expect(h.d.getState().phase, '編集に入れていない').toBe('editing');
-    const before = h.writes.length;
-    h.d.dispatch(saved('a1'));
-    await tick();
-    expect(h.writes.length, '編集中に書き戻した').toBe(before);
-  });
-
-  /**
-   * 🔴 **添付でないノートへは、書かないだけでなく「何も起きない」**
-   * (変異試験で生き残って判明)。⚠ 「書かない」だけを見ると、reducer の門を
-   * 外しても effect 側が空振りして緑になる ── そのとき user には
-   * **身に覚えのない苦情**が出る(「書き戻せません」)。
-   */
-  it('🔴 添付でないノート / 知らない lid では、書かないし苦情も出ない', async () => {
-    const h = setup({ a1: DOC, t1: 'ただの文\n' }, [meta('a1', 'attachment'), meta('t1', 'text')]);
-    h.d.dispatch(saved('t1'));
-    await tick();
-    expect(h.writes).toEqual([]);
-    expect(h.d.getState().error, '添付でないノートで苦情が出た').toBe(null);
-    h.d.dispatch(saved('nope'));
-    await tick();
-    expect(h.writes).toEqual([]);
-    expect(h.d.getState().error, '知らない lid で苦情が出た').toBe(null);
-  });
-
-  /**
-   * 🔴 **書き換え漏れは件数を出す**(2026-08-16、着地前レビュー R12)。
-   * ⚠ 逃がし文字入りの参照(`asset:ast\-old`)は**狭い規則が当たらない**ので
-   * 旧 key を指したまま残る ── 黙って「取り込みました」と言うと、GC が実体を
-   * 消した時点で**切れた参照だけが残る**。`asset-ref-rewrite.ts` が
-   * 「呼び側は数え直して user に出す」と明記している当の保証である。
-   */
-  it('🔴 書き換えられなかった参照は、件数を出す(黙って「差し替えました」と言わない)', async () => {
-    const h = setup(
-      { a1: DOC, n1: 'これ [報告書](asset:ast\\-old) ね\n' },
-      [meta('a1', 'attachment'), meta('n1', 'text')],
-    );
-    h.d.dispatch(saved('a1'));
-    await tick();
-    expect(h.d.getState().error, '旧い参照が残ったのに黙っている').toContain(
-      '旧い参照が残りました: 1 件',
-    );
+    expect(h.asked, '何に差し替えるかが伝わっていない').toEqual([
+      { targetLid: 'a1', newKey: 'ast-new' },
+    ]);
   });
 
   it('🔴 開いている本文は、その場で差し替わる(次に開き直すまで古い、を作らない)', async () => {
-    const h = setup({ a1: DOC }, [meta('a1', 'attachment')]);
+    const h = setup([meta('a1', 'attachment')]);
     h.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
     h.d.dispatch({ type: 'BODY_LOADED', lid: 'a1', body: DOC });
     h.d.dispatch(saved('a1'));
     await tick();
     expect(h.d.getState().openBody?.body, '画面の本文が古いまま').toContain('ast-new');
   });
-});
 
-/**
- * 🔴 **レビュー後に足した門**(2026-08-16、着地前レビュー R5 / R8)。
- * ⚠ どちらも 1 巡目の変異試験で**生き延びた** ── 「直した」だけでは守られない。
- */
-describe('レビューで足した門', () => {
-  /**
-   * 🔴 **版の 200MB は容れ物全体で見る**(R5)。⚠ `otherBytes` を渡さないと
-   * 上限が**この添付の中だけ**で閉じ、30MB × 5 世代 のノートが 10 件で 1.5GB に
-   * なっても `overBudget` すら立たない(誰も気づけない)。
-   */
-  it('🔴 他の添付が使っている分を数える(数えないと上限が効かない)', async () => {
-    // 別の添付ノートが、既に上限ちょうど(200MiB)ぶんの版を持っている。
-    // ⚠ **上限は `200 * 1024 * 1024`**(= 209,715,200)── 「200MB」を
-    //    200,000,000 と読むと**この test は何も見ずに緑になる**(実際 1 度そうなった)
-    const other = [
-      '---',
-      'attachment.name: b.odt',
-      'attachment.asset_key: ast-b',
-      // ⚠ 時刻に `:` が入るので**引用する**(この repo のミニ YAML の規約)
-      'attachment.history: ["2026-01-01T00:00:00.000Z|auto|ast-b0|209715200|"]',
-      '---',
-      '',
-    ].join('\n');
-    const h = setup({ a1: DOC, a2: other }, [meta('a1', 'attachment'), meta('a2', 'attachment')]);
-    h.d.dispatch(saved('a1'));
+  it('中身が同じ(key が変わらない)なら黙って終える', async () => {
+    const h = setup([meta('a1', 'attachment')], {
+      problem: null,
+      unchanged: true,
+      wrote: [],
+      stale: [],
+      overBudget: false,
+    });
+    h.d.dispatch(saved('a1', 'ast-old'));
     await tick();
-    const hist = parseFrontmatter(h.bodies.a1!).meta['attachment.history'];
-    // ⚠ 全体で 200MB を超えるので、**この保存の版は残らない**
-    expect(hist, '他の添付の分を数えていない ── 上限が全体で効いていない').toBeUndefined();
-    // ⚠ 他所の版は**巻き添えにしない**(数えるが落とさない)
-    expect(String(h.bodies.a2)).toContain('ast-b0');
+    // ⚠ **異常ではない**(「取り込みました」は呼び側が出す)── 苦情を出すと
+    //    user は保存が失敗したと思う
+    expect(h.d.getState().error, '変わっていないだけなのに苦情を出した').toBe(null);
   });
 
   /**
-   * 🔴 **前へ進まないカーソルで無限に回らない**(R8)。⚠ この鎖は単一 queue なので、
-   * 回り続けると**以降の store effect が 1 件も走らなくなる**(保存も永続化も止まる)
-   * ── 画面は生きているので user は気づけない。他の全走査 3 か所と同じ形。
+   * 🔴 **断りの理由は user の言葉に直す。**
+   * ⚠ worker は名前(`missing-entry` / `missing-asset`)で返す ── そのまま画面に
+   * 出すと user には読めない。⚠ **2 つを見分ける**(片方だけ pin すると、
+   * 両方を同じ文へ潰す変異が生き延びる)。
    */
-  it('🔴 前へ進まないカーソルで無限に回らない(止まって理由を出す)', async () => {
-    const h = setup({ a1: DOC }, [meta('a1', 'attachment')]);
-    h.stick();
+  it('🔴 断りの理由を、見分けのつく言葉にする', async () => {
+    const h1 = setup([meta('a1', 'attachment')], {
+      problem: 'missing-entry',
+      unchanged: false,
+      wrote: [],
+      stale: [],
+      overBudget: false,
+    });
+    h1.d.dispatch(saved('a1'));
+    await tick();
+    expect(h1.d.getState().error).toContain('ノートが見つかりません');
+
+    const h2 = setup([meta('a1', 'attachment')], {
+      problem: 'missing-asset',
+      unchanged: false,
+      wrote: [],
+      stale: [],
+      overBudget: false,
+    });
+    h2.d.dispatch(saved('a1'));
+    await tick();
+    expect(h2.d.getState().error).toContain('添付の実体が分かりません');
+  });
+
+  /**
+   * 🔴 **書き換え漏れは件数を出す**(2026-08-16、着地前レビュー R12)。
+   * ⚠ 黙って「取り込みました」と言うと、GC が実体を消した時点で
+   * **切れた参照だけが残る**。
+   */
+  it('🔴 旧い参照が残った / 上限を超えたときは、黙らない', async () => {
+    const h = setup([meta('a1', 'attachment')], {
+      problem: null,
+      unchanged: false,
+      wrote: [{ lid: 'a1', body: DOC, stamps: stubStamps() }],
+      stale: ['n1', 'n2'],
+      overBudget: true,
+    });
     h.d.dispatch(saved('a1'));
-    await tick(60);
-    expect(h.d.getState().error, '止まったのに理由が出ない').toContain('書き戻せませんでした');
-    expect(h.writes, '壊れた走査の結果で書いた').toEqual([]);
+    await tick();
+    const err = h.d.getState().error ?? '';
+    expect(err, '旧い参照が残ったのに黙っている').toContain('旧い参照が残りました: 2 件');
+    expect(err, '上限を超えたのに黙っている').toContain('版の保管上限を超えています');
+  });
+
+  it('🔴 1 件も書けなかったら、そう言う', async () => {
+    const h = setup([meta('a1', 'attachment')], {
+      problem: null,
+      unchanged: false,
+      wrote: [],
+      stale: [],
+      overBudget: false,
+    });
+    h.d.dispatch(saved('a1'));
+    await tick();
+    expect(h.d.getState().error).toContain('ノートを 1 件も更新できませんでした');
+  });
+
+  it('🔴 worker が落ちたら理由を出す(黙って無かったことにしない)', async () => {
+    const h = setup([meta('a1', 'attachment')], () => Promise.reject(new Error('壊れた')));
+    h.d.dispatch(saved('a1'));
+    await tick();
+    expect(h.d.getState().error, '落ちたのに理由が出ない').toContain('書き戻せませんでした');
+  });
+
+  it('🔴 編集中は何も起きない(棚に残して撃ち直す側と対)', async () => {
+    const h = setup([meta('a1', 'attachment')]);
+    h.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    h.d.dispatch({ type: 'BODY_LOADED', lid: 'a1', body: DOC });
+    h.d.dispatch({ type: 'START_EDIT' });
+    await tick();
+    // 空振り防止 ── 本当に編集に入っているか(入っていなければこの test は無意味)
+    expect(h.d.getState().phase, '編集に入れていない').toBe('editing');
+    h.d.dispatch(saved('a1'));
+    await tick();
+    expect(h.calls, '編集中に書き戻した').not.toContain('replaceAssetRefs');
+  });
+
+  /**
+   * 🔴 **添付でないノート / 知らない lid では、頼みもしないし苦情も出ない。**
+   * ⚠ 「頼まない」だけを見ると、reducer の門を外しても worker が
+   * `missing-asset` を返して**身に覚えのない苦情**が出る ── 両方を見る。
+   */
+  it('🔴 添付でないノート / 知らない lid では、頼まないし苦情も出ない', async () => {
+    const h = setup([meta('a1', 'attachment'), meta('t1', 'text')]);
+    h.d.dispatch(saved('t1'));
+    await tick();
+    expect(h.calls, '添付でないノートで頼んだ').not.toContain('replaceAssetRefs');
+    expect(h.d.getState().error, '添付でないノートで苦情が出た').toBe(null);
+    h.d.dispatch(saved('nope'));
+    await tick();
+    expect(h.calls, '知らない lid で頼んだ').not.toContain('replaceAssetRefs');
+    expect(h.d.getState().error, '知らない lid で苦情が出た').toBe(null);
   });
 });

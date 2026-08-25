@@ -158,6 +158,21 @@ export const FLAG_ASSET_INLINE = defineFlag('asset.inline', {
   needsRestart: true,
 });
 
+/**
+ * PKC3 を **iframe に入れた親からの依頼を受ける**(#189 / C-4)。
+ *
+ * 🔴 **外向きの口なので既定で開けない。** 立てても、`pkc3.embed-origins` に
+ * 許した origin を書くまで**全部拒否**(fail-closed)である ── 立てただけでは
+ * 誰にも書かせない。
+ * ⚠ **起動時に 1 度だけ読まれる**(受け口を張るかどうか)ので再起動が要る。
+ */
+export const FLAG_EMBED = defineFlag('transport.embed', {
+  default: false,
+  foldWhen: '埋め込みの相手(Bookmarklet / 拡張)が出荷され、許可の管理が設定に載ったら',
+  summary: 'PKC3 を他の頁に埋め込んだとき、その親からの依頼を受ける(既定は受けない)',
+  needsRestart: true,
+});
+
 // 🔴 `editor.live` は 2026-08-14 に**退役**した(user 裁定 2026-08-08
 //    「既定でONかつ設定で2ペイン編集はできるようにする」)。foldWhen
 //    「既定 ON にできたら」が成就し、設定 `pkc3.editor-mode` へ昇格(既定 live)。

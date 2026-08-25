@@ -75,6 +75,8 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
       renamed.push({ lid, title });
       return stubStamps();
     },
+    replaceAssetRefs: () =>
+      Promise.reject(new Error('この test では添付の差し替えを使わない')),
     reorderEntry: async (lid, entryOrder) => {
       reordered.push({ lid, entryOrder });
       return stubStamps();
@@ -162,6 +164,8 @@ describe('create (P3-7a)', () => {
        *   だから fake も本文を持たない(触らないものは持たない)。
        */
       renameEntry: async () => stubStamps(),
+      replaceAssetRefs: () =>
+        Promise.reject(new Error('この test では添付の差し替えを使わない')),
       reorderEntry: async () => stubStamps(),
       persistEntry: async () => {
         if (failNext) {

@@ -338,6 +338,8 @@ function setup(metas: EntryMeta[], relations: Relation[]) {
      *   だから fake も本文を持たない(触らないものは持たない)。
      */
     renameEntry: async () => stubStamps(),
+    replaceAssetRefs: () =>
+      Promise.reject(new Error('この test では添付の差し替えを使わない')),
     reorderEntry: async (lid, entryOrder) => {
       reordered.push({ lid, entryOrder });
       return stubStamps();
@@ -976,6 +978,8 @@ describe('作成の居場所が worker まで届く(#258)', () => {
        *   だから fake も本文を持たない(触らないものは持たない)。
        */
       renameEntry: async () => stubStamps(),
+      replaceAssetRefs: () =>
+        Promise.reject(new Error('この test では添付の差し替えを使わない')),
       reorderEntry: async () => stubStamps(),
       persistEntry: async () => stubStamps(),
       deleteEntry: async () => {},

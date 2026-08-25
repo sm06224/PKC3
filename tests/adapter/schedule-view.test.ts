@@ -71,6 +71,8 @@ function setup(
     deleteEntry: async () => {},
     setEntryParent: async () => {},
     renameEntry: async () => stubStamps(),
+    replaceAssetRefs: () =>
+      Promise.reject(new Error('この test では添付の差し替えを使わない')),
     reorderEntry: async () => stubStamps(),
     persistEntry: async (e) => {
       persisted.push(e);
@@ -413,6 +415,8 @@ describe('右の列から、ノート 1 件に日付を付ける(段④)', () =>
       deleteEntry: async () => {},
       setEntryParent: async () => {},
       renameEntry: async () => stubStamps(),
+      replaceAssetRefs: () =>
+        Promise.reject(new Error('この test では添付の差し替えを使わない')),
       reorderEntry: async () => stubStamps(),
       persistEntry: async (e) => {
         persisted.push(e);
