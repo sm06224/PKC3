@@ -443,7 +443,17 @@ jobs:
           #    ⚠ **こちらも既定で当たる**(配る一式に入る)。
           #    検査は `tests/office-uifiles-patch.test.ts`(実物の木に当てて、
           #    **どれを足しどれを足さなかったか**を名指しで見る)
-          test "$n" -eq 12
+          # 🔴 12 → 13(2026-08-25)。`patch-lo-idles-deadlock.py`(#199 の**直し**)。
+          #    9 巡分の計装で輪が確定した ── メインは proxy した user event の Link の
+          #    戻りを待ち、その Link(docx の取込)は `IdlesLockGuard` でメインが
+          #    `Application::Execute` へ戻るのを待つ。互いに相手の前進を待っていた。
+          #    🔑 直しは 2 つ:①走っているタスクが無ければ待たない
+          #    (`mpSchedulerStack == nullptr` ── 欲しい保証は既に成り立っている)
+          #    ②待つ場合も 100ms で切る。⚠ **こちらは既定で当たる**(配る一式に入る)。
+          #    実測(自作の対照群):画像 20 枚の .docx が **51 秒 → 10 秒**。
+          #    ⚠ 計装(`patch-lo-idles-trace.py`)からは**同じ行を外した** ──
+          #    2 つの patch が同じ行を触ると、当てる順で錨が壊れる。
+          test "$n" -eq 13
 
       # 🔴 **Qt と LO の「握手」を、リンクの 16 分前に確かめる**(2026-08-10)。
       #    LO は Qt の embind シンボルを名指しで export する。無いと

@@ -123,11 +123,8 @@ from pathlib import Path
 #    (LO の文脈から `emscripten::val` を触ると `invalid handle` で abort する ── 2026-08-15)。
 HELPER = """
 // ── PKC3 #199 の計装(`PKC3_IDLES_TRACE=1` の回だけ入る)──
-// ⚠ **7 巡目までは印だけだった。8 巡目から 1 か所だけ挙動を変える** ──
-//    `IdlesLockGuard` の待ちに時限を付けた(`scheduler.cxx`)。
-//    ⚠ ここに「挙動は変えない」と書いたままにすると、次に読む人が
-//    **無害だと思って焼く**(CLAUDE.md「これが無いと壊れると書いたら、
-//    外して壊れるのを見る」の裏返し ── 書いた字が実態と合っていること)。
+// ⚠ **この一式は挙動を変えない**(2026-08-25 に戻した)── 8 巡目で
+//    ここに置いた時限は、9 巡目の後に `patch-lo-idles-deadlock.py` へ出した。
 #include <cstdio>
 #include <cstring>
 #include <pthread.h>
@@ -176,75 +173,15 @@ void pkc3_idles_trace(const char* what, int a, int b, int c)
 }
 """
 
-SCHED_SRC = "vcl/source/app/scheduler.cxx"
-SCHED_ANCHOR = """        pSVData->m_inExecuteCondtion.reset();
-        // Put an empty event to the application's queue, to make sure that it loops through the
-        // code that sets the condition, even when there's no other events in the queue
-        Application::PostUserEvent({});
-        SolarMutexReleaser releaser;
-        pSVData->m_inExecuteCondtion.wait();
-"""
-SCHED_REPLACE = """        // 🔴 **9 巡目(2026-08-25)── そもそも待たなくてよい場合を先に外す。**
-        //
-        // 8 巡目で輪が完全に見えた:メインは proxy した user event の Link の
-        // 戻りを待ち、その Link(docx の取込)がここで「メインが Execute へ戻る
-        // こと」を待つ ── **互いに相手の前進を待っている**。時限で片側を切ったら
-        // 開いたが、⚠ **代償を測ったら大きすぎた**(自作の画像 20 枚の .docx で
-        // `idles:wait` が **17 回**、全部 timeout、開くまで **51 秒**。1 枚なら 11 秒)。
-        //
-        // 🔑 **待ちが 1 度も成功していない**のが手がかりだった ── この筋では
-        //   条件は原理的に立たない。では**何のために待っているのか**を上流の
-        //   コメントで読み直すと「**走っているアイドルが無いことを保証するため**」
-        //   である(すぐ上)。
-        // 🔑 ところが `mpSchedulerStack` は **いま実行中のタスクのスタック**
-        //   (`scheduler.cxx:531` で push、`:646` で pop ── タスクの呼び出しを
-        //   挟んでいる)。**空なら、走っているタスクは 1 つも無い** ── つまり
-        //   **欲しい保証は既に成り立っている**。
-        // ⚠ 上流が待つ理由は「入れ子」である ── アイドルの中から `Yield` が呼ばれ、
-        //   そのアイドルが SolarMutex を放して待っていると、こちらが mutex を
-        //   持ててしまう。**その場合はスタックが空でない**ので、ここで見分けられる。
-        // ⚠ 読むのは SolarMutex を持っている間である(`SolarMutexReleaser` より前)。
-        if (rSchedCtx.mpSchedulerStack == nullptr)
-        {
-            // 🔑 **待たない。** ⚠ 起こす必要も無いので `PostUserEvent` も撃たない
-            //    (誰も聞いていない放送を増やさない)。
-            pkc3_idles_trace("idles:skip", -1, -1, rSchedCtx.mnIdlesLockCount);
-        }
-        else
-        {
-        pSVData->m_inExecuteCondtion.reset();
-        // Put an empty event to the application's queue, to make sure that it loops through the
-        // code that sets the condition, even when there's no other events in the queue
-        Application::PostUserEvent({});
-        // 🔑 **前提を実測で出す**(#199)── a は `IsUseSystemEventLoop()`。
-        //    ⚠ ここを「true のはず」と決めつけた直しを 1 度焼いて no-op だった。
-        pkc3_idles_trace("idles:wait", Application::IsUseSystemEventLoop() ? 1 : 0,
-                         Application::IsMainThread() ? 1 : 0,
-                         Application::IsInExecute() ? 1 : 0);
-        // 🔴 **2 つの「メインスレッド」判定を並べる**(6 巡目)── `osl` の id と
-        //    `QtInstance` の `qApp->thread()` は**別の述語**である。
-        pkc3_idles_trace("idles:who", Application::IsMainThread() ? 1 : 0,
-                         pSVData->mpDefInst->IsMainThread() ? 1 : 0,
-                         rSchedCtx.mnIdlesLockCount);
-        {
-            SolarMutexReleaser releaser;
-            // 🔴 **時限は短い**(9 巡目)。待ちの目的は「走っているアイドルが
-            //    終わるのを待つ」で、**本当に終わるならループ 1 周(ミリ秒未満)**
-            //    である。⚠ 8 巡目の 2 秒は**桁を 4 つ取りすぎ**で、立たない筋では
-            //    まるごと損になっていた(20 枚で 32 秒)。100ms でも 100 倍の余裕がある。
-            // ⚠ `Condition::wait(TimeValue)` を使うのは、この計装が libc だけで
-            //    書かれているから ── `TimeValue` は `conditn.hxx` が `osl/time.h` を
-            //    include するので追加の include が要らない。
-            TimeValue aPkc3Timeout;
-            aPkc3Timeout.Seconds = 0;
-            aPkc3Timeout.Nanosec = 100 * 1000 * 1000;
-            const osl::Condition::Result ePkc3Res
-                = pSVData->m_inExecuteCondtion.wait(&aPkc3Timeout);
-            // ⚠ `a=0` = `result_ok` / `a=2` = `result_timeout`
-            pkc3_idles_trace("idles:woke", static_cast<int>(ePkc3Res), -1, -1);
-        }
-        }
-"""
+# 🔴 **`scheduler.cxx` はこの計装から外した**(2026-08-25、9 巡目の後)。
+#
+# 9 巡目で直しが確定したので、`IdlesLockGuard` の中身は
+# **`patch-lo-idles-deadlock.py`(配る一式に入る直し)**が持つ。
+# ⚠ **同じ行を 2 つの patch が触らない** ── 触ると当てる順で錨が壊れ、
+#   「どちらが効いたか」も読めなくなる(1 度の実験で 2 つを主張しない、の構造版)。
+# ⚠ ここに在った印(`idles:wait` / `idles:who` / `idles:woke` / `idles:skip`)は
+#   **役目を終えた**。次に `IdlesLockGuard` を疑う日が来たら、直しの patch の側へ
+#   一時的に足すこと(計装と直しが同じ行に同居する形には戻さない)。
 
 APP_SRC = "vcl/source/app/svapp.cxx"
 # 🔴 **3 巡目は `DoExecute()` の前後を割る**(2026-08-24)。
@@ -510,9 +447,8 @@ WIN_SRC = "vcl/source/window/winproc.cxx"
 # 🔑 Link の呼び出しを挟めば **2 つに割れる**:
 #     `uev:in` が出ない → 止まっているのは Link より**手前**(vcl の配線)
 #     `uev:in` が出て `uev:out` が出ない → 止まっているのは **Link の中**
-# ⚠ **これは printf だけ** ── 挙動は 1 バイトも変えない(挙動を変えるのは
-#   `SCHED_REPLACE` の時限 1 つだけ。2026-08-14 に 1 度の実験で 2 つを主張して
-#   「どちらが効いたか読めない」を踏んだので、そこは分けてある)。
+# ⚠ **この file はもう printf だけ**(2026-08-25)── 挙動を変える所は
+#   `patch-lo-idles-deadlock.py` へ**出した**。同じ行を 2 つの patch が触らない。
 WIN_ANCHOR = """        if ( pSVEvent->mbCall )
         {
             pSVEvent->maLink.Call( pSVEvent->mpData );
@@ -537,7 +473,6 @@ WIN_REPLACE = """        if ( pSVEvent->mbCall )
 
 
 HELPER_TARGETS = (
-    (SCHED_SRC, "Scheduler::IdlesLockGuard::IdlesLockGuard()\n{\n"),
     (APP_SRC, "void Application::Execute()\n{\n"),
     # 🔴 **`ImplYield` は `DoYield` より前に在る**(454 行 vs 475 行)。
     #    ⚠ ヘルパーを `DoYield` の直前へ入れると、`ImplYield` から呼べない
@@ -548,7 +483,6 @@ HELPER_TARGETS = (
 )
 # ⚠ ヘルパーは TU ごとに 1 つ要る ── 当てる先が 2 file なので 2 つ入る。
 TARGETS = (
-    (SCHED_SRC, SCHED_ANCHOR, SCHED_REPLACE),
     (APP_SRC, APP_ANCHOR, APP_REPLACE),
     (QT_SRC, QT_ENTER_ANCHOR, QT_ENTER_REPLACE),
     (QT_SRC, QT_PROXY_ANCHOR, QT_PROXY_REPLACE),

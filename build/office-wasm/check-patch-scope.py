@@ -100,7 +100,6 @@ SPECS = [
         "patch-lo-idles-trace.py",
         "pkc3_idles_trace",
         [
-            ("vcl/source/app/scheduler.cxx", "Scheduler::IdlesLockGuard::IdlesLockGuard()"),
             ("vcl/source/app/svapp.cxx", "void Application::Execute()"),
             ("vcl/qt5/QtInstance.cxx", "bool QtInstance::ImplYield("),
             # 🔴 7 巡目(2026-08-24)── user event を配る所。⚠ ここを SPECS に
