@@ -125,6 +125,17 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
   // ── 同じファイルをもう一度取り込む(review mutation M23 / M24 / H-2)──
   // 既存 lid・既存 relation id・entryOrder のどれか 1 つでも見ていなければ、
   // ここで 1 部目が**上書きされて消える**(4 件にならない)
+  /**
+   * 🔑 **2 度目の前の状態を採っておく**(#382)。
+   * ⚠ 画面の状態行は 1 度目の取込でも「取込完了: 2 件」と出るので、
+   *   落ちた回に**同じ文言**を見ても「2 度目が走った」とは言えない
+   *   ── 前後で比べて初めて「動いたか / 動いていないか」が読める。
+   */
+  const statusBefore = await page.evaluate(
+    () => (document.querySelector('[data-pkc-region="status"]')?.textContent ?? '')
+      .replace(/\s+/g, ' ')
+      .slice(0, 200),
+  );
   await page.setInputFiles('[data-pkc-field="import-input"]', FILE());
   /**
    * 🔴 **落ちたとき、理由が分かる形にする**(2026-08-25)。
@@ -170,6 +181,7 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
     }));
     throw new Error(
       `2 度目の取込で件数が増えていない。${JSON.stringify(snap)} / `
+        + `statusBefore=${JSON.stringify(statusBefore)} / `
         + `pageErrors=${JSON.stringify(errors)}`,
       // ⚠ 元の失敗を**捨てない**(どこで落ちたかが消える)
       { cause: e },
