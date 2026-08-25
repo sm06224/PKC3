@@ -103,6 +103,12 @@ SPECS = [
             ("vcl/source/app/scheduler.cxx", "Scheduler::IdlesLockGuard::IdlesLockGuard()"),
             ("vcl/source/app/svapp.cxx", "void Application::Execute()"),
             ("vcl/qt5/QtInstance.cxx", "bool QtInstance::ImplYield("),
+            # 🔴 7 巡目(2026-08-24)── user event を配る所。⚠ ここを SPECS に
+            #    足し忘れると、**新しく当てた file だけ検査の外**になる。
+            (
+                "vcl/source/app/salusereventlist.cxx",
+                "bool SalUserEventList::DispatchUserEvents(",
+            ),
         ],
     ),
     (
