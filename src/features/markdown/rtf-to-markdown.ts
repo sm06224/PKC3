@@ -49,15 +49,34 @@
  * - 画像(`\pngblip` / `\jpegblip`)は `data:` URL にして出す ── 資産へ逃がすのは
  *   呼び側(`inline-url-adopt.ts`)の仕事で、ここは純関数のまま保つ
  *
- * ## 🔑 コードは「宣言」を読んで出す(推測しない)
+ * ## 🔑 コードは 3 つの印で決める(実物を読んで決めた)
  *
- * RTF に「ここはコード」という語は無いが、**`\fonttbl` にはある** ──
- * `\fmodern`(等幅の族)/ `\fprq1`(固定ピッチ)は **RTF 自身の宣言**である。
- * ⚠ フォント**名**の表(`Menlo` / `Consolas` / …)で当てない ── 次に出る名前で負ける
- * (CLAUDE.md §8「登録を読む。推測の表を作らない」)。
+ * ⚠ **1 稿目は「宣言(`\fmodern` / `\fprq1`)だけを読む。名前の表は次に出る名前で
+ * 負ける」と書いていた** ── その方針は**実物で外れた**(2026-08-25)。
+ * LibreOffice が書いた RTF を通したら、コードが **1 つも囲まれなかった**:
+ * `Courier New` を **`\fnil\fprq0`**(等幅とも固定ピッチとも宣言しない)で書くからである。
+ *
+ * 🔑 だから印を 3 つ持つ ── **強い順**に:
+ *
+ * 1. 🔴 **スタイルの名前**(`Preformatted Text` / `Source Text`)── いちばん強い。
+ *    名前が付いた宣言であり、フォントに依らない
+ * 2. **フォントの宣言**(`\fmodern` / `\fprq1`)── 新しい名前に強い
+ * 3. **フォントの名前と代替名**(`Courier` / `mono` …)── 宣言し忘れに強い。
+ *    ⚠ 実物は代替名に `{\*\falt monospace}` と**書いていた**
  *
  * 🔴 そのうえで **対比が無ければ囲まない** ── 文書を丸ごと Courier で書いた人も
- * 宣言に当たるので、**普通の段落が 1 つも無いときは**コードにしない。
+ * 印に当たるので、**普通の段落が 1 つも無いときは**コードにしない。
+ *
+ * ## 🔴 実物で分かった「もう 1 組の飾り」
+ *
+ * RTF は西欧の文字と**複合文字(CJK など)**で別の属性を持つ ── 実物は
+ * `<b>太字</b>` を **`\ab`** で書いた(`\b` ではない)。⚠ 片方しか読まないと
+ * **日本語の太字が丸ごと落ちる**。`\ai` / `\aul` / `\astrike` も同じ。
+ *
+ * ⚠ そして `\plain` は**フォントも戻す** ── 戻さないと、コードの段落で立った
+ * 等幅が後ろへ持ち越され、**表もふつうの文も丸ごとコードになる**(実際になった)。
+ *
+ * 🔑 これらは全部 `tests/features/rtf-real-specimen.test.ts` が実物で pin している。
  *
  * ## ⚠ 出せないもの(黙って化けさせないために書く)
  *
@@ -97,9 +116,10 @@ interface Run {
   u: boolean;
   strike: boolean;
   /**
-   * 🔴 **等幅で書かれているか = コードか**(user 指示 2026-08-25 の 2 通目)。
-   * ⚠ フォント**名**から当てているのではない ── `\fonttbl` の
-   *   **`\fmodern`(等幅の族)/ `\fprq1`(固定ピッチ)という宣言**を読んでいる。
+   * 🔴 **等幅で書かれている / コードだと名乗っているか**(user 指示 2026-08-25 の 2 通目)。
+   * 🔑 印は 3 つ ── ①スタイルの名前(`Source Text`)②`\fonttbl` の宣言
+   *   (`\fmodern` / `\fprq1`)③フォントの名前と代替名(`Courier` / `mono`)。
+   * ⚠ ②だけでは足りない ── 実物の `Courier New` は `\fnil\fprq0` で出る。
    */
   mono: boolean;
   /** リンクの宛先(`\field` の中だけ)。 */
@@ -113,8 +133,14 @@ interface Fmt {
   u: boolean;
   strike: boolean;
   hidden: boolean;
-  /** いま効いているフォント番号(`\fN`)。等幅かは `\fonttbl` の宣言が決める。 */
+  /** いま効いているフォント番号(`\fN`)。等幅かは `\fonttbl` が決める。 */
   font: number;
+  /**
+   * いま効いている**文字スタイル**番号(`\csN`)。
+   * 🔑 実物の LibreOffice は行内コードを `\cs18`(名前は `Source Text`)で書く ──
+   *   フォントより**強い印**である(名前が付いた宣言だから)。
+   */
+  charStyle: number;
 }
 
 /** いま何を読んでいるか。`skip` の中身は 1 文字も出さない。 */
@@ -148,6 +174,28 @@ const CP1252_HIGH = [
   0x017e, 0x0178,
 ];
 
+/**
+ * 🔴 **等幅らしい名前**(実物を読んで足した。2026-08-25)。
+ *
+ * ⚠ 1 稿目は「宣言(`\fmodern` / `\fprq1`)だけを読む。名前の表は次に出る名前で
+ *   負ける」と書いた ── **その宣言だけでは足りないことが実物で分かった**:
+ *   LibreOffice が書いた RTF の `Courier New` は **`\fnil\fprq0`**(等幅とも
+ *   固定ピッチとも宣言していない)で出る。⚠ いちばん多いコードのフォントである。
+ * 🔑 だから**両方**見る ── 宣言は新しい名前に強く、名前は宣言し忘れに強い。
+ * 🔑 `{\*\falt monospace}`(代替名)も読む ── 実物はそこに `monospace` と書いていた。
+ */
+const MONO_NAME_RE = /mono|courier|consol|menlo|monaco|cascadia|terminal|fixedsys|lucida console/i;
+
+/**
+ * 🔴 **コードだと名乗っているスタイル名**(実物のスタイルシートから)。
+ * LibreOffice: `Preformatted Text`(塊)/ `Source Text`(行内)。
+ * Word: `HTML Preformatted` / `Plain Text` は**入れない**(ただの本文に使われる)。
+ */
+const CODE_STYLE_RE = /preformatted|source text|^code$|ソース|プログラム/i;
+
+/** 🔴 **表の見出しだと名乗っているスタイル名**(実物: `Table Heading`)。 */
+const TABLE_HEAD_STYLE_RE = /table (heading|header)|表の見出し/i;
+
 /** 記号を出す制御語(`\bullet` など)。 */
 const SYMBOLS: Record<string, string> = {
   bullet: '•',
@@ -162,7 +210,15 @@ const SYMBOLS: Record<string, string> = {
   tab: '\t',
 };
 
-const freshFmt = (): Fmt => ({ b: false, i: false, u: false, strike: false, hidden: false, font: -1 });
+const freshFmt = (): Fmt => ({
+  b: false,
+  i: false,
+  u: false,
+  strike: false,
+  hidden: false,
+  font: -1,
+  charStyle: -1,
+});
 
 /**
  * 飾りを markdown にする。
@@ -192,8 +248,11 @@ function renderRun(r: Run): string {
   /**
    * ⚠ **下線は `:` を含む文字には掛けられない**(記法が閉じられない)。
    * 🔑 そのときは**飾りだけ落とす** ── 文字を落とすほうがずっと悪い。
+   * 🔴 **リンクの中では下線を出さない**(実物を読んで直した)── 産み手は
+   *   リンクのスタイルに下線を持たせるので、そのまま出すと
+   *   `[:字:underline:](url)` になる。⚠ リンクは**それ自体が下線**である。
    */
-  if (r.u && !core.includes(':')) out = ':' + out + ':underline:';
+  if (r.u && r.href === null && !core.includes(':')) out = ':' + out + ':underline:';
   if (r.strike) out = '~~' + out + '~~';
   if (r.b) out = '**' + out + '**';
   if (r.i) out = '*' + out + '*';
@@ -233,6 +292,11 @@ interface Para {
   heading: number;
   /** 表の中か。 */
   inTable: boolean;
+  /**
+   * 🔴 **スタイルが「コード」と名乗っている**段落か(実物: `Preformatted Text`)。
+   * ⚠ フォントより強い印である ── 名前が付いた宣言だから。
+   */
+  styledCode: boolean;
 }
 
 /**
@@ -253,6 +317,7 @@ const freshPara = (): Para => ({
   ordered: false,
   heading: 0,
   inTable: false,
+  styledCode: false,
 });
 
 /** 実のある文字が全部等幅なら、その段落はコードの行である。 */
@@ -300,6 +365,13 @@ export function parseRtf(rtf: string): string | null {
   let rowIsHeader = false;
   /** スタイル番号 → 見出しの段。 */
   const headingStyles = new Map<number, number>();
+  /** 🔴 **コードだと名乗っている**スタイル(段落 / 文字)。実物の名前から拾う。 */
+  const codeParaStyles = new Set<number>();
+  const codeCharStyles = new Set<number>();
+  /** 🔴 **表の見出しだと名乗っている**段落スタイル(実物: `Table Heading`)。 */
+  const tableHeadStyles = new Set<number>();
+  /** いま読んでいるスタイル定義が文字スタイル(`\csN`)か。 */
+  let bufIsChar = false;
   /** `\field` の宛先(`\fldinst` が拾って、続く `\fldrslt` の文字に付く)。 */
   let pendingHref: string | null = null;
   let linkHref: string | null = null;
@@ -350,7 +422,11 @@ export function parseRtf(rtf: string): string | null {
      * 🔴 **コードの行は、飾りを付けずに素のまま出す**(中身は字面である)。
      * ⚠ `paraText()` を通すと `escapeInline` が掛かって `\*` などが混じる。
      */
-    if (paraIsCode(para.runs) && para.heading === 0 && para.listLevel === null) {
+    if (
+      (para.styledCode || paraIsCode(para.runs)) &&
+      para.heading === 0 &&
+      para.listLevel === null
+    ) {
       blocks.push({ text: para.runs.map((r) => r.text).join('').replace(/\s+$/, ''), kind: 'code' });
       para = freshPara();
       return;
@@ -366,7 +442,16 @@ export function parseRtf(rtf: string): string | null {
        */
       if (para.runs.some((r) => r.mono && r.text.trim() !== '')) worth = true;
       if (para.heading > 0) {
-        blocks.push({ text: '#'.repeat(para.heading) + ' ' + text, kind: 'text' });
+        /**
+         * 🔴 **見出しの中の飾りは落とす**(実物を読んで直した)── 産み手は
+         * 見出しのスタイルに太字を持たせるので、そのまま出すと `# **題**` になる。
+         * ⚠ 見出しは**それ自体が強調**であり、二重に掛けるのは記法として誤りである。
+         * 🔑 行内コードとリンクは残す(そちらは飾りではなく**中身の種類**)。
+         */
+        const bare = renderRuns(
+          para.runs.map((r) => ({ ...r, b: false, i: false, u: false, strike: false })),
+        ).replace(/\s+$/, '');
+        blocks.push({ text: '#'.repeat(para.heading) + ' ' + bare, kind: 'text' });
         worth = true;
       } else if (para.listLevel !== null) {
         const indent = '  '.repeat(Math.min(para.listLevel, 6));
@@ -395,7 +480,7 @@ export function parseRtf(rtf: string): string | null {
       i: f.fmt.i,
       u: f.fmt.u,
       strike: f.fmt.strike,
-      mono: monoFonts.has(f.fmt.font),
+      mono: monoFonts.has(f.fmt.font) || codeCharStyles.has(f.fmt.charStyle),
       href: linkHref,
     });
   };
@@ -408,25 +493,53 @@ export function parseRtf(rtf: string): string | null {
         para.heading = 0;
         return;
       case 'plain':
+        /**
+         * ⚠ **フォントと文字スタイルも戻す**(実物を読んで直した)── 戻さないと、
+         *   コードの段落で立った等幅が**そのあとの段落へ持ち越され**、表のセルや
+         *   ふつうの文まで丸ごとコードになる(実際にそうなっていた)。
+         */
         f.fmt.b = false;
         f.fmt.i = false;
         f.fmt.u = false;
         f.fmt.strike = false;
+        f.fmt.font = -1;
+        f.fmt.charStyle = -1;
         return;
+      /**
+       * 🔴 **`\ab` / `\ai` / `\aul` / `\astrike` は「もう 1 組の」飾りである。**
+       *
+       * RTF は西欧の文字と**複合文字(CJK など)**で別の属性を持つ ── 実物の
+       * LibreOffice は `<b>太字</b>` を **`\ab`** で書いた(`\b` ではない)。
+       * ⚠ 片方しか読まないと、**日本語の太字が丸ごと落ちる**(実際に落ちていた)。
+       * 🔑 LibreOffice 自身に RTF → HTML で戻させて `<b>太字</b>` に戻ることを
+       *   確かめてある(こちらの読みではなく、産み手の観測)。
+       */
       case 'b':
+      case 'ab':
         f.fmt.b = arg !== 0;
         return;
       case 'i':
+      case 'ai':
         f.fmt.i = arg !== 0;
         return;
       case 'strike':
+      case 'astrike':
         f.fmt.strike = arg !== 0;
         return;
       case 'ul':
+      case 'aul':
         f.fmt.u = arg !== 0;
         return;
       case 'ulnone':
+      case 'aulnone':
         f.fmt.u = false;
+        return;
+      case 'cs':
+        if (arg === null) return;
+        if (f.dest === 'stylesheet') {
+          bufStyle = arg;
+          bufIsChar = true;
+        } else f.fmt.charStyle = arg;
         return;
       case 'v':
         f.fmt.hidden = arg !== 0;
@@ -448,10 +561,18 @@ export function parseRtf(rtf: string): string | null {
         return;
       case 's':
         if (arg === null) return;
-        if (f.dest === 'stylesheet') bufStyle = arg;
-        else {
+        if (f.dest === 'stylesheet') {
+          bufStyle = arg;
+          bufIsChar = false;
+          return;
+        }
+        {
           const h = headingStyles.get(arg);
           if (h !== undefined) para.heading = h;
+          // 🔴 **名前で名乗っているコードの段落**(実物: `Preformatted Text`)
+          if (codeParaStyles.has(arg)) para.styledCode = true;
+          // 🔴 **名前で名乗っている表の見出し**(実物: `Table Heading`。`\trhdr` は無かった)
+          if (tableHeadStyles.has(arg)) rowIsHeader = true;
         }
         return;
       case 'ilvl':
@@ -466,10 +587,25 @@ export function parseRtf(rtf: string): string | null {
       case 'trhdr':
         rowIsHeader = true;
         return;
-      case 'cell':
-        tableCells.push(paraText());
+      case 'cell': {
+        /**
+         * 🔴 **見出しの行のセルからは飾りを落とす**(実物を読んで直した)──
+         * 産み手は見出しのスタイルに太字を持たせるので、そのまま出すと
+         * `| **名** |` になる。⚠ GFM の見出し行は**それ自体が強調**である。
+         * 🔑 落とすのは**行ごと太字のとき**だけ ── 一部だけ強調したセルは残す。
+         */
+        const allBold =
+          rowIsHeader &&
+          para.runs.some((r) => r.text.trim() !== '') &&
+          para.runs.every((r) => r.b || r.text.trim() === '');
+        tableCells.push(
+          allBold
+            ? renderRuns(para.runs.map((r) => ({ ...r, b: false }))).replace(/\s+$/, '')
+            : paraText(),
+        );
         para = { ...freshPara(), inTable: true };
         return;
+      }
       case 'row':
         tableRows.push({ cells: tableCells, head: rowIsHeader });
         tableCells = [];
@@ -554,7 +690,13 @@ export function parseRtf(rtf: string): string | null {
          * ⚠ **1 件ごとに必ず捨てる**(stylesheet で 1 度踏んだのと同じ形)──
          *   捨てないと、前の font の宣言が次へ持ち越される。
          */
-        if (fontId >= 0 && fontMono) monoFonts.add(fontId);
+        /**
+         * 🔴 **宣言と名前の両方で判る**(実物を読んで足した)── LibreOffice の
+         * `Courier New` は `\fnil\fprq0` で出るので、宣言だけでは取りこぼす。
+         * ⚠ `buf` には代替名(`{\*\falt monospace}`)も入っている ── そこにこそ
+         *   `monospace` と書いてあった。
+         */
+        if (fontId >= 0 && (fontMono || MONO_NAME_RE.test(buf))) monoFonts.add(fontId);
         fontId = -1;
         fontMono = false;
         buf = '';
@@ -569,10 +711,19 @@ export function parseRtf(rtf: string): string | null {
         if (bufStyle > 0) {
           const name = buf.replace(/;[\s\S]*$/, '').trim();
           const m = /^(?:heading|見出し)\s*([1-9])/i.exec(name);
-          if (m) headingStyles.set(bufStyle, Math.min(6, Number(m[1])));
+          if (m && !bufIsChar) headingStyles.set(bufStyle, Math.min(6, Number(m[1])));
+          /**
+           * 🔴 **名前で拾う**(実物のスタイルシートを読んで足した)── RTF は
+           * 「ここはコード」と言わないが、**スタイルには名前が付いている**。
+           * ⚠ 文字スタイル(`\csN`)と段落スタイル(`\sN`)は**別の番号空間**である ──
+           *   混ぜると `\s18` の段落が行内コードになる。
+           */
+          if (CODE_STYLE_RE.test(name)) (bufIsChar ? codeCharStyles : codeParaStyles).add(bufStyle);
+          if (!bufIsChar && TABLE_HEAD_STYLE_RE.test(name)) tableHeadStyles.add(bufStyle);
         }
         buf = '';
         bufStyle = 0;
+        bufIsChar = false;
       } else if (closing.dest === 'listtext') {
         // 🔑 リストの印は**中身**で決まる(`1.` なら番号付き)
         para.ordered = /\d[.)]/.test(buf);
@@ -652,9 +803,15 @@ export function parseRtf(rtf: string): string | null {
         continue;
       }
       if (next === '*') {
-        // `{\*\word …}` ── 知らない destination は中身ごと捨てる
+        /**
+         * `{\*\word …}` ── 知らない destination は中身ごと捨てる。
+         * ⚠ **ただし表の中は別**(実物を読んで直した)── スタイルシートの
+         *   `{\*\cs18 … Source Text;}` と、フォント表の `{\*\falt monospace}` は
+         *   **定義そのもの**である。捨てると、行内コードも等幅も 1 件も拾えない。
+         */
         const m = /^\\\*\\([a-zA-Z]+)/.exec(rtf.slice(i));
-        if (!m || !KEEP_STARRED.has(m[1]!)) top().dest = 'skip';
+        const inTable = top().dest === 'stylesheet' || top().dest === 'fonttbl';
+        if (!inTable && (!m || !KEEP_STARRED.has(m[1]!))) top().dest = 'skip';
         i += 2;
         continue;
       }
