@@ -131,6 +131,20 @@ export class InspectorRenderer {
     this.setRow('inspector-title', meta.title);
     this.setRow('inspector-kind', archetypeLabel(meta.archetype));
     /**
+     * ⚠ **持っていないノートでは行ごと畳む**(`<dt>` と `<dd>` を対で)。
+     * 🔑 値は**そのまま出す**(知らない状態を黙って捨てない ── `relationLabel` と同じ向き)。
+     */
+    const statusBox = this.rows.get('inspector-status');
+    if (statusBox) {
+      const label =
+        meta.status === 'open' ? '未完了' : meta.status === 'done' ? '完了' : meta.status;
+      statusBox.textContent = label ?? '';
+      const none = meta.status === null || meta.status === '';
+      statusBox.hidden = none;
+      const dt = statusBox.previousElementSibling;
+      if (dt instanceof HTMLElement) dt.hidden = none;
+    }
+    /**
      * 🔴 **どこに居るかを出す**(2026-08-06。user 報告 minor「一覧タブから
      * 所属フォルダを知る手段が無い」)。
      *
@@ -523,6 +537,17 @@ export class InspectorRenderer {
     };
     row('題名', 'inspector-title');
     row('種類', 'inspector-kind');
+    /**
+     * 🔴 **状態**(#397 ③)。⚠ `todo` フレーバーが frontmatter から
+     *   `status` を**抽出して `entryMetas` に載せていた**のに、
+     *   **それを読む画面が 1 つも無かった**(`grep -rn "\.status\b"` が
+     *   一覧・情報ペイン・絞り込みで 0 件)── 取り込んだ todo の完了 / 未完了が
+     *   **どこにも出ていなかった**。
+     * ⚠ 封印(`features/sealed.ts`)が止めているのは **todo の新規作成**であって、
+     *   **既に status を持っているノートの表示**ではない。データは実在する。
+     * ⚠ 持っていないノートでは**行ごと畳む**(全ノートに「無し」を出さない)。
+     */
+    row('状態', 'inspector-status');
     row('居場所', 'inspector-folder');
     row('作成', 'inspector-created');
     row('更新', 'inspector-updated');
