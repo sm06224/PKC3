@@ -84,7 +84,7 @@ function tx<T>(
  * 🔑 だから**形が違うものは投げる**(呼び側が断って、user に見せる)。
  * ⚠ 例外は「record そのものが無い」場合だけで、それは `undefined` で返す。
  */
-function decode(raw: unknown): StoredImage | null {
+export function decodeStoredImage(raw: unknown): StoredImage | null {
   if (raw === undefined || raw === null) return null;
   const r = raw as RawRecord;
   const image = r.image;
@@ -108,6 +108,20 @@ function decode(raw: unknown): StoredImage | null {
 }
 
 /**
+ * 🔴 **空を書かない。** 画像を出す側が落ちた回に 0 バイトを put すると、
+ * 次の起動は「器に記録がある」と読んで**中身ごと空で開く**。
+ * ⚠ `chooseImage` にも同じ門があるが、**書く前に止めるほうが強い**
+ * (検出より、起こらなくするほう ── CLAUDE.md §7)。
+ *
+ * 🔑 **取り出してある**(変異試験 M18 が SURVIVED で教えた)── happy-dom に
+ * IndexedDB は無いので、器の中に置いたままだと**どの unit からも走らない**。
+ * IDB の配管そのものは `file://` の smoke が通す(そちらが正しい層である)。
+ */
+export function assertWritableImage(image: Uint8Array): void {
+  if (image.byteLength <= 0) throw new Error('空の画像は器へ書きません');
+}
+
+/**
  * 1 つのバンドルの器。
  *
  * ⚠ **器の名前は `bundleDbName` からしか作らない** ── `file://` では
@@ -127,7 +141,7 @@ export class DbImageStore {
   /** @returns 無ければ `null`。⚠ 形が壊れていたら**投げる**(無いことにしない)。 */
   async read(): Promise<StoredImage | null> {
     const raw = await tx<unknown>(await this.need(), 'readonly', (s) => s.get(KEY));
-    return decode(raw);
+    return decodeStoredImage(raw);
   }
 
   /** 目録だけ読む。⚠ 判定(`chooseImage`)に bytes は要らない。 */
@@ -143,13 +157,7 @@ export class DbImageStore {
     savedAt: number;
     image: Uint8Array;
   }): Promise<void> {
-    /**
-     * 🔴 **空を書かない。** 画像を出す側が落ちた回に 0 バイトを put すると、
-     * 次の起動は「器に記録がある」と読んで**中身ごと空で開く**。
-     * ⚠ `chooseImage` にも同じ門があるが、**書く前に止めるほうが強い**
-     * (検出より、起こらなくするほう ── CLAUDE.md §7)。
-     */
-    if (rec.image.byteLength <= 0) throw new Error('空の画像は器へ書きません');
+    assertWritableImage(rec.image);
     await tx(await this.need(), 'readwrite', (s) =>
       s.put({ bundleId: this.bundleId, ...rec }, KEY),
     );

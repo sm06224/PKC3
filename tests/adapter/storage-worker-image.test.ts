@@ -193,6 +193,17 @@ describe('#400 段③ ── 画像の出し入れ', () => {
 
   it('init していない worker は画像を出さない', async () => {
     const w = await spawn();
-    await expect(w.request({ op: 'exportImage' })).rejects.toThrow(/:memory:/);
+    await expect(w.request({ op: 'exportImage' })).rejects.toThrow(/初期化されていません/);
+  }, 30_000);
+
+  it('🔴 OPFS を試した(= 素の)worker からも画像は出せる ── 書き出しが使う', async () => {
+    // ⚠ 1 稿目は `:memory:` に限っていたので、**書き出し(段④)から呼べなかった**。
+    //   node に OPFS は無いが、見たいのは「**memory を頼まなくても出せる**」こと
+    const w = await spawn();
+    const init = await w.request({ op: 'init', dbName: 'plain-export' });
+    expect(init.fallbackReason, 'memory を頼んでいない前提が崩れた').toBeTruthy();
+    await seed(w, '素の経路\n');
+    const { image } = await w.request({ op: 'exportImage' });
+    expect(image.byteLength).toBeGreaterThan(1000);
   }, 30_000);
 });

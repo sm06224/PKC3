@@ -1290,14 +1290,15 @@ function updateEntryColumn(
 const handlers: Handlers = {
   init: (req) => init(req.dbName, req.journalMode, { memory: req.memory, image: req.image }),
   /**
-   * 🔴 **いまの DB を 1 枚の画像にする**(#400 段③)。
+   * 🔴 **いまの DB を 1 枚の画像にする**(#400 段③④)。
    *
-   * ⚠ **`:memory:` のときだけ**。OPFS の DB は器そのものが永続しているので、
-   * 画像を出す理由が無い ── 出せてしまうと「どちらが正本か」が 2 つになる。
+   * 🔑 **VFS を問わない**(2 稿目で広げた)── 1 稿目は `:memory:` に限っていたが、
+   * それだと**書き出し(段④)が使えない**。ふだんの PKC3 は OPFS なので、
+   * そこから画像を出せなければ「持ち歩ける 1 枚」を焼けない。
+   * ⚠ 画像は**正本ではなく、配る 1 枚の中身**である ── 出したところで
+   *   「どちらが正本か」は増えない(器はここに在り続ける)。
    */
   exportImage: () => {
-    if (initResult?.vfs !== 'memory')
-      throw new Error('DB 画像を出せるのは :memory: のときだけです');
     const api = sqliteApi;
     if (api === null) throw new Error('sqlite が初期化されていません');
     const exportDb = api.capi.sqlite3_js_db_export as unknown as (p: unknown) => Uint8Array;

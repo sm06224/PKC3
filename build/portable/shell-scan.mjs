@@ -39,3 +39,15 @@ export function externalRefs(shell) {
 export function bundleTagCount(shell) {
   return [...shell.matchAll(/data-pkc-bundle/g)].length;
 }
+
+/**
+ * 🔴 **印は「頭」に置く**(#400 段④)。
+ *
+ * 書き出し側(`src/features/export/portable-bundle.ts`)は、雛形の**先頭
+ * この長さぶん**だけを見て印を差し替える ── ⚠ 全体を見ると、畳んだ JS の中の
+ * **同じ綴り**(書き出しのコードが持っている文字列)に当たる。
+ * 🔑 だから `fold.mjs` は `<head>` の**直後**に置き、ここに収まることを確かめる。
+ * ⚠ 2 つの値が食い違わないことは `tests/build/portable-fold.test.ts` が
+ *   **両方を import して等値で**見る(片方だけ変えられない)。
+ */
+export const PORTABLE_HEAD_SCAN = 4096;

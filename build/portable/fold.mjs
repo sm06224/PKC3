@@ -25,7 +25,12 @@
 import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
 import { Buffer } from 'node:buffer';
 import { join } from 'node:path';
-import { bundleTagCount, externalRefs, shellOf } from './shell-scan.mjs';
+import {
+  bundleTagCount,
+  externalRefs,
+  shellOf,
+  PORTABLE_HEAD_SCAN,
+} from './shell-scan.mjs';
 
 const DIR = process.argv[2] ?? 'dist-portable';
 const OUT = process.argv[3] ?? join(DIR, 'pkc3.html');
@@ -137,11 +142,15 @@ html = html
   // ⚠ 外の file を指す物は落とす(`file://` では 404 になるだけ)
   .replace(/\s*<link rel="manifest"[^>]*>/, '')
   .replace(/\s*<link rel="icon"[^>]*>/, '')
-  // 🔴 **可搬バンドルの印**(#400 段③)。⚠ これが無いと、畳んだ HTML は
-  //    `file://` で開いても**器を持たない**(再読込で消える)
-  .replace('</head>', () => `${BUNDLE_TAG}</head>`);
+  /**
+   * 🔴 **可搬バンドルの印**(#400 段③④)。⚠ これが無いと、畳んだ HTML は
+   *   `file://` で開いても**器を持たない**(再読込で消える)。
+   * 🔴 **`<head>` の直後に置く** ── 書き出し(段④)は雛形の**先頭だけ**を見て
+   *   印を差し替えるからである(全体を見ると、畳んだ JS の中の同じ綴りに当たる)。
+   */
+  .replace('<head>', () => `<head>${BUNDLE_TAG}`);
 if (!html.includes(BUNDLE_TAG))
-  throw new Error('可搬バンドルの印を差し込めなかった(</head> に当たらない)');
+  throw new Error('可搬バンドルの印を差し込めなかった(<head> に当たらない)');
 
 html = html
   .replace(/<script type="module"[^>]*><\/script>/, () => `<script type="module">${app}</script>`)
@@ -177,6 +186,14 @@ for (const mark of ['data-pkc-slot="root"', 'createObjectURL']) {
 const tags = bundleTagCount(shell);
 if (tags !== 1)
   throw new Error(`可搬バンドルの印が器に ${tags} 件(1 件でなければならない)`);
+/**
+ * 🔴 **印が「頭」に在ること**(段④ の差し替えが見る範囲に収まっている)。
+ * ⚠ ここが外れると、書き出しは**印を 1 件も見つけられずに落ちる** ──
+ *   落ちるだけましだが、原因が畳む側に在ることが分からない。
+ */
+const tagAt = html.indexOf(BUNDLE_TAG);
+if (tagAt < 0 || tagAt >= PORTABLE_HEAD_SCAN)
+  throw new Error(`印の位置が ${tagAt} バイト目(頭 ${PORTABLE_HEAD_SCAN} バイト以内でなければならない)`);
 
 /**
  * 🔴 **wasm は「字面」では探せない**(2 稿目。1 稿目は落ちて分かった)。

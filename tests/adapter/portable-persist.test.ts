@@ -235,4 +235,30 @@ describe('#400 段③ ── 見え方', () => {
     await h.advance(IDLE_MS * 4);
     expect(h.writes).toHaveLength(0);
   });
+
+  it('🔴 dispose の**後に来た**編集も動かさない', async () => {
+    /**
+     * ⚠ 上の test は `dispose` が**予約を畳む**ことしか見ていない
+     *   (変異試験 M16b が SURVIVED で教えた)── `touch` が後から来る形は
+     *   1 度も通っていなかった。
+     * 🔑 分岐を書いたら、**分岐の数だけ通す**(CLAUDE.md §2)。
+     */
+    const h = harness();
+    h.p.dispose();
+    h.p.touch();
+    await h.advance(IDLE_MS * 4);
+    expect(h.writes).toHaveLength(0);
+    expect(h.exports, '画像まで出しに行っている').toHaveLength(0);
+  });
+
+  it('🔴 dispose の後に flush が来ても書かない(閉じる合図の受け口は残っている)', async () => {
+    // ⚠ `visibilitychange` の listener は畳んだ後も document に残るので、
+    //    **この形は実際に起きる**
+    const h = harness();
+    h.p.touch();
+    h.p.dispose();
+    await h.p.flush();
+    expect(h.writes).toHaveLength(0);
+    expect(h.exports).toHaveLength(0);
+  });
 });

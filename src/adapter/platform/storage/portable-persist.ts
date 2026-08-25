@@ -93,7 +93,14 @@ export function connectPortablePersist(deps: PortablePersistDeps): PortablePersi
 
   const arm = (): void => {
     disarm();
-    if (disposed || !dirty) return;
+    /**
+     * ⚠ **ここで `disposed` を見ない**(変異試験 M16 / M16b が 2 度 SURVIVED で
+     *   教えた)── 「畳んだ後は書かない」の門を `touch` / `arm` / `flush` /
+     *   `drain` の **4 か所**に置いていたので、**どれを外しても他が救う** =
+     *   1 つも効いていることを確かめられなかった(CLAUDE.md §1 の論理式版)。
+     * 🔑 門は `touch` の 1 つに寄せ、`dispose` が溜まっているぶんを捨てる。
+     */
+    if (!dirty) return;
     const waited = now() - dirtySince;
     const delay = Math.max(0, Math.min(IDLE_MS, MAX_WAIT_MS - waited));
     if (waited >= PENDING_NOTICE_MS) setState({ kind: 'pending' });
@@ -109,7 +116,7 @@ export function connectPortablePersist(deps: PortablePersistDeps): PortablePersi
    *    ── しかも落ちるのは**最後の 1 編集**なので、いちばん惜しい所が消える。
    */
   async function drain(): Promise<void> {
-    while (dirty && !disposed) {
+    while (dirty) {
       dirty = false;
       setState({ kind: 'saving' });
       let image: Uint8Array;
@@ -150,7 +157,7 @@ export function connectPortablePersist(deps: PortablePersistDeps): PortablePersi
      *   まだ書かれていない。だから「溜まっているか / 走っているか」が両方
      *   落ち着くまで回す。
      */
-    while ((dirty || running !== null) && !disposed) {
+    while (dirty || running !== null) {
       if (running === null) {
         const p = drain().finally(() => {
           if (running === p) running = null;
@@ -164,6 +171,7 @@ export function connectPortablePersist(deps: PortablePersistDeps): PortablePersi
 
   return {
     touch(): void {
+      /** 🔴 **畳んだ後は書かない、の唯一の門**(下の `dispose` と対になる)。 */
       if (disposed) return;
       if (!dirty) {
         dirty = true;
@@ -175,6 +183,13 @@ export function connectPortablePersist(deps: PortablePersistDeps): PortablePersi
     state: () => state,
     dispose(): void {
       disposed = true;
+      /**
+       * 🔴 **溜まっているぶんを捨てる。** ⚠ 残すと、畳んだ後に誰かが `flush` を
+       *   呼んだとき(閉じる合図の listener は残っている)に**書きに行く**。
+       * ⚠ **飛んでいる保存は止めない** ── そちらは user のデータなので、
+       *   始まっているなら書き切らせるほうが正しい。
+       */
+      dirty = false;
       disarm();
     },
   };

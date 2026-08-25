@@ -30,6 +30,8 @@ import {
 import { acquireWriterLease } from '@adapter/platform/storage/writer-lease';
 import { bundleChannelName, bundleLockName } from '@features/portable/bundle';
 import { resolvePortableStart, type PortableStart } from '@adapter/platform/portable-boot';
+import { restoreEmbeddedAssets } from '@adapter/platform/portable-assets';
+import { exportPortable } from '@adapter/ui/actions/export-portable';
 import {
   connectPortablePersist,
   type PortablePersist,
@@ -581,6 +583,21 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   // assets: bytes は IDB Blob(sqlite には meta のみ)。表示は lend/dispose 規律
   const blobs = new AssetBlobStore();
   /**
+   * 🔴 **可搬単一 HTML に焼かれた添付を器へ戻す**(#400 段④)。
+   *
+   * ⚠ DB 画像が持っているのは添付の**目録の行**だけである(bytes は IDB Blob)──
+   *   戻さないと、配られた 1 枚は**画像が全部欠けた状態**で開く。
+   * ⚠ 判断と 1 件ずつ流す規律は `portable-assets.ts` が持つ(この file は
+   *   どの test からも実行されない ── CLAUDE.md §2)。
+   * 🔑 2 回目の起動では器に在るので飛ばす(節点だけ外す)。
+   */
+  let portableAssetNote = '';
+  if (portable !== null) {
+    const r = await restoreEmbeddedAssets(document, cid, blobs);
+    if (r.failed > 0)
+      portableAssetNote = `⚠ 添付 ${r.failed} 件を読み込めませんでした(その分は画像が出ません)`;
+  }
+  /**
    * 🔴 **Office(LibreOffice wasm)の別窓**(#88 / O3-c)。
    *
    * ⚠ ここは**道具を渡すだけ** ── 「開けるか / 開けないならなぜか」の判断は
@@ -728,9 +745,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * 🔴 **可搬単一 HTML の保存の状態**(#400 段③)。⚠ ふだんは空文字なので
      *   場所を取らない ── 出るのは「長く書けていない」か「書けなかった」ときだけ。
      */
-    const parts = [statusBase, sync, persistState, noticeLine, errorLine].filter(
-      (t) => t !== '',
-    );
+    const parts = [statusBase, sync, portableAssetNote, persistState, noticeLine, errorLine]
+      .filter((t) => t !== '');
     const text = parts.join(' — ');
     if (text === statusShown) return;
     statusShown = text;
@@ -739,7 +755,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   };
   /** 🔑 ここで初めて `paint` に繋がる(それまでの `onState` は落としてよい)。 */
   repaintStatus = paint;
-  if (syncLine !== '' || persistState !== '') paint();
+  /**
+   * ⚠ 起動のときに添付が読めなかったことは、**黙らせない**(#400 段④)。
+   * 🔑 保存の状態(`persistState`)とは**別の欄**にする ── 同じ変数に載せると、
+   *   次の保存で「画像が出ない理由」が画面から消える。
+   */
+  if (syncLine !== '' || persistState !== '' || portableAssetNote !== '') paint();
   /** 一時の知らせ(コピーした / 取り込んだ)。⚠ 状態変化では消えない。 */
   const showStatus = (text: string) => {
     noticeLine = text;
@@ -2123,6 +2144,43 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     exportArchive: () => void runExport('archive'),
     exportHtml: () => void runExport('html'),
     exportMarkdown: () => void runExport('markdown'),
+    /**
+     * 🔴 **可搬単一 HTML**(#400 段④)。⚠ 「閲覧用 HTML」とは別の口である ──
+     *   あちらは読むだけ、こちらは**アプリごと 1 枚**(続きが書ける)。
+     */
+    exportPortable: () =>
+      void withAssetGate(async () => {
+        await exportPortable(dispatcher, {
+          title: CONTAINER_TITLE,
+          /**
+           * ⚠ **雛形は同じ origin から取る** ── 押したときだけ取りに行く
+           *   (SW の precache には載せない。載せると全 user が 6.5MB を先に落とす)。
+           */
+          fetchTemplate: async () => {
+            const res = await fetch(new URL('portable-template.html', document.baseURI));
+            if (!res.ok)
+              throw new Error(
+                `アプリの雛形を取れませんでした(HTTP ${res.status})── ` +
+                  'この配り方には雛形が同梱されていない可能性があります',
+              );
+            return res.text();
+          },
+          exportImage: async () => (await client.request({ op: 'exportImage' })).image,
+          listAssets: async () =>
+            (await client.request({ op: 'listAssetMetas', cid })).map((m) => ({
+              key: m.key,
+              mime: m.mime ?? 'application/octet-stream',
+            })),
+          getAsset: (key) => blobs.get(cid, key),
+          download: downloadBlob,
+          notify: (message) => showStatus(message),
+          report: (notes) => showNotices(regions.notices, '書出し時の注意', notes),
+          settle: async () => {
+            await storeEffects?.settled();
+          },
+          insideBundle: () => portable !== null,
+        });
+      }),
     exportEntry: (lid) => void runExport({ entryLid: lid }),
     /** 🔴 このフォルダと配下をまとめて書き出す(#399 ①)。 */
     exportFolder: (lid) => void runExport({ entryLid: lid, as: 'folder' }),

@@ -323,7 +323,14 @@ describe('マニュアルと実装の突合', () => {
       (b) => b.querySelector('[data-pkc-field="label"]')?.textContent ?? b.textContent ?? '',
     );
     // ⚠ **等値**で見る(包含だと足したものが素通りする)
-    expect(labels).toEqual(['閲覧用 HTML', 'Markdown', '使っていない添付を消す']);
+    expect(labels).toEqual([
+      '閲覧用 HTML',
+      // 🔴 可搬単一 HTML(#400 段④)── **読むだけの隣**に置く。同じ「HTML 1 枚」
+      //    なので、離すと user が違いに気づけない
+      '持ち歩ける 1 枚',
+      'Markdown',
+      '使っていない添付を消す',
+    ]);
     for (const label of labels) {
       expect(MANUAL, `マニュアルに「${label}」の説明が無い`).toContain(`**${label}**`);
     }
@@ -1075,6 +1082,7 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
     'Office で表示言語を変えたとき、開き直す道ができました',
     'Office で保存できない形式を、開いた時点でお知らせします',
     'ノートを PowerPoint(.pptx)で書き出せるようになりました',
+    'ノートへのリンクを貼ると、押せるリンクになります',
   ];
 
   it('🔴 アプリから落ちた分が、1 件残らず CHANGELOG に在る', () => {

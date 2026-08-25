@@ -89,6 +89,14 @@ jobs:
         run: node scripts/check-dist.mjs product
       - name: SBOM (CycloneDX)
         run: npm sbom --sbom-format=cyclonedx --omit=dev > pkc3-sbom.cdx.json
+      - name: 可搬単一 HTML の雛形(#400 段④)
+        run: |
+          # 🔴 **検品の「後」に足す**(`pages.yml` と同じ理由)── 雛形は
+          # アプリの一部ではなく、押したときだけ取りに行く別の成果物である。
+          # ⚠ ここで足さないと、本番の PKC3 から「持ち歩ける 1 枚」を押しても
+          #   **雛形が 404 になって書き出せない**(dev だけ動く形を作らない)。
+          VITE_PKC_KIND=product npm run build:portable
+          cp dist-portable/pkc3.html dist/portable-template.html
       - name: Archive dist
         run: (cd dist && zip -r ../pkc3-dist.zip .)
       # 🔴 **配る物そのもの**に attestation を付ける(P7 段⑦ / 段⑧)。

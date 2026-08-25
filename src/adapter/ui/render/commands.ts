@@ -53,6 +53,18 @@ export const COLLECTION_COMMANDS: readonly CollectionCommand[] = [
 export const SETTINGS_COMMANDS: readonly CollectionCommand[] = [
   { action: 'export-html', label: '閲覧用 HTML', title: '読むだけの 1 枚にまとめます' },
   {
+    action: 'export-portable',
+    label: '持ち歩ける 1 枚',
+    /**
+     * 🔴 **「閲覧用 HTML」との違いを、題名ではなく説明で言い切る**(#400 段④)。
+     * ⚠ どちらも「HTML 1 枚」なので、**何が違うか**を書かないと選べない ──
+     *   隣の `Markdown` が「押す理由が書いていなかった」で直された(#180 C-2)
+     *   のと同じ形を、最初から作らない。
+     */
+    title:
+      'PKC3 ごと 1 つの .html にまとめます。ダブルクリックで開いて、そのまま読み書きできます(添付も入ります)',
+  },
+  {
     action: 'export-markdown',
     label: 'Markdown',
     /**

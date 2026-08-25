@@ -182,6 +182,7 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'import-file': 'arrow-in',
   'export-archive': 'archive',
   'export-html': 'globe',
+  'export-portable': 'archive',
   'export-markdown': 'page',
   'export-entry-docx': 'page',
   'export-entry-pdf': 'printer',
