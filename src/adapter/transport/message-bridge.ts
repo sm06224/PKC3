@@ -145,8 +145,15 @@ export function attachMessageBridge(options: BridgeOptions): () => void {
       .then(
         (result) => reply(okResponse(parsed.request.id, result ?? null)),
         (e: unknown) => {
+          /**
+           * 🔑 **捌き手が符号を持たせて投げたら、それを使う。**
+           * ⚠ 引数の誤り(`INVALID_PARAMS`)を `INTERNAL_ERROR` に畳むと、
+           * 相手は「こちらのせい」と読んで**直しようが無くなる** ──
+           * 「送り手が直せる誤り」と「こちらが壊れた」は別の事情である。
+           */
+          const given = (e as { rpcCode?: unknown } | null)?.rpcCode;
           const err: RpcError = {
-            code: RPC.INTERNAL_ERROR,
+            code: typeof given === 'number' ? given : RPC.INTERNAL_ERROR,
             message: e instanceof Error ? e.message : '内部で失敗しました',
           };
           reject(err.message, origin);
