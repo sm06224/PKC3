@@ -90,6 +90,16 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-25-relation-map',
+    title: 'つながりが図で見えるようになりました',
+    items: [
+      '右の情報ペインの関係の下に「つながり」の欄が出ます。いま選んでいるノートを真ん中に、つながっている相手が円く並びます。',
+      '相手を押すと、そのノートへ移れます。出るのは 2 手先(相手の相手)までです。',
+      '下に線の種類と本数が出ます。つながりが多いときは途中で切り、切ったことを書きます。',
+      'つながりが 1 つも無いノートでは、この欄ごと出ません。居場所(フォルダの親子)は図に出しません。',
+    ],
+  },
+  {
     id: '2026-08-25-bookmark-capture',
     title: '見ている頁を、ブックマーク 1 つで取り込めるようになりました',
     items: [
@@ -282,21 +292,11 @@ export const NOTICES: readonly Notice[] = [
       '外のサイトの画像を書くときの説明にコード片を入れると、その中身だけが消えていました。画像を読み込む前に読む字なので、そのまま残ります。',
     ],
   },
-  {
-    id: '2026-08-22-pane-flow',
-    title: 'アプリの面を開いても、書きかけと読んでいた場所が消えなくなりました',
-    items: [
-      'ノートの下の追記欄に打っている途中でカレンダーやヘルプを開くと、打った字が黙って消えていました。面を開いて戻っても、そのまま残ります。',
-      '長いノートを下まで読んでから面を開いて戻ると、先頭に戻っていました。読んでいた場所に戻ります。',
-      '開いた面の上に「× 閉じる」が出るようになりました。これまでは同じタイルをもう一度押すか Alt+1 を知っているしか閉じる道がありませんでした。',
-      '編集中にカレンダーややることの板を押すと、何も起きず理由も出ませんでした。いまは画面の下に理由が出ます。',
-    ],
-  },
 ];
 
 /**
  * ⚠ **落としたぶんの原本は CHANGELOG に在る**(上限 20 件を超えたので、古いほうから
  *   `2026-08-16-office-save-to-pkc` / `2026-08-17-office-save-same-note`(2026-08-19)、
  *   `2026-08-19-dual-pane-app`(2026-08-22)、
- *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair`(2026-08-25)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
+ *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow`(2026-08-25)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
  */
