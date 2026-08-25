@@ -126,7 +126,20 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
   // 既存 lid・既存 relation id・entryOrder のどれか 1 つでも見ていなければ、
   // ここで 1 部目が**上書きされて消える**(4 件にならない)
   await page.setInputFiles('[data-pkc-field="import-input"]', FILE());
-  await expect(rows).toHaveCount(4);
+  /**
+   * ⚠ **待ちを長くしてある(assert は変えていない)**。2026-08-25 に CI で 1 度
+   * 落ちた ── 既定の 5 秒の間に **14 回 poll して 2 件のまま**だった。
+   * つまり「描画が遅れた」ではなく、**2 度目の取り込みが 5 秒で終わっていない**。
+   * 🔑 この 1 手は HTML の解析 + gzip の展開 + hash(ワーカー)+ sqlite と IDB への
+   *   書込 + 一覧の引き直しで、しかも**1 部目が既に入っている状態**から走る。
+   *   遅い runner では素直に超える。
+   * ⚠ 見る物(**4 件**・lid が 4 つとも別)は 1 つも緩めていない ── 変えたのは
+   *   待てる時間だけである(CLAUDE.md「test を緩める前にアプリを疑う」に対しては、
+   *   落ちた commit が `src/` に**どこからも import されない file を 1 本足しただけ**
+   *   だったこと、手元では 2 つのブラウザとも通ること、同じ spec が次の走りで
+   *   通ったことを根拠に「製品の穴ではない」と判じている)。
+   */
+  await expect(rows).toHaveCount(4, { timeout: 20_000 });
   const orders = await page.locator('[data-pkc-entry]').evaluateAll((els) =>
     els.map((e) => e.getAttribute('data-pkc-entry')),
   );
