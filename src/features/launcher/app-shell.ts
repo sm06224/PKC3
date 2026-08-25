@@ -76,6 +76,7 @@ import {
   appStoragePrefix,
 } from './app-storage-shim';
 import { buildAnchorShim } from './app-anchor-shim';
+import { EXT_PORT_TAG, EXT_READY_FLAG } from '@features/extension/ext-wire';
 import { buildCapabilityShim } from './app-sandbox-shim';
 
 /**
@@ -220,6 +221,20 @@ export interface AppShellOptions {
    * ⚠ そのぶん**名前空間も無い** ── アプリの保存は PKC3 の localStorage に直接入る。
    */
   sameOrigin?: boolean;
+  /**
+   * 🔴 **拡張として口を開ける**(#195 / C-5 段①)。渡すと外殻が
+   * **印を立て、港を受け取り、アプリとの間を中継する**。
+   *
+   * ⚠ **許可された起動のときだけ渡す** ── 判定は呼び側(`ExtensionGrants`)。
+   *   ここで判定を書くと、同じ問いに答える口が 2 つになる(CLAUDE.md §7)。
+   *
+   * 🔴 **`nonce` は偽の港を掴まないための鍵**である。中のアプリも外殻へ
+   *   `postMessage` を投げられる ── nonce が無いと、アプリが**自分の港**を
+   *   「ホストの港です」と渡せてしまう(本物が後から来ても、先に掴んだ方が勝つ)。
+   *   ⚠ アプリは opaque origin なので**外殻の script を読めない** ── だから
+   *   焼き込んだ nonce は漏れない。**起動ごとに作り直す**(使い回さない)。
+   */
+  extension?: { nonce: string };
 }
 
 /**
@@ -282,7 +297,15 @@ export function buildLauncherAppShell(
     // ⚠ `<base>` は prelude と同じく**中に**焼く(外殻の base ではアプリに効かない)
     ` srcdoc="${escapeForSrcdoc(insertBase(inner, opts.base))}"></iframe>`;
 
-  if (!lends) return `${head}${frame}</body></html>`;
+  /**
+   * 🔴 **中継は保存の貸し借りと無関係に焼く**(2026-08-25、#195 で踏んだ)。
+   * ⚠ 初稿は下の 1 か所にだけ足したので、**保存領域を貸さない起動**
+   *   (素のまま / `appId` 無し)では中継が**黙って入らなかった** ──
+   *   本体タブは印を待ち続け、user から見ると「拡張が繋がらない」だけになる。
+   * 🔑 だから**先に組んで、両方の出口で使う**(出口が 2 つある file の作法)。
+   */
+  const ext = extensionScript(opts.extension);
+  if (!lends) return `${head}${frame}${ext}</body></html>`;
 
   // 外殻の script。**アプリ origin なので本物の localStorage が使える**。
   // 🔴 受信ハンドラの中で**同期に**書く ── 実測で、IDB や debounce に逃がすと
@@ -345,7 +368,57 @@ export function buildLauncherAppShell(
     '});' +
     '})()</script>';
 
-  return `${head}${frame}${shellScript}</body></html>`;
+  return `${head}${frame}${shellScript}${ext}</body></html>`;
+}
+
+/**
+ * 🔴 **拡張の中継**(#195 / C-5 段①)。⚠ 許された起動でだけ焼く。
+ *
+ * ## 3 つの決まり(どれも外せない)
+ *
+ * 1. 🔴 **印は、聴き始めた後に立てる。** 本体タブは印を読んでから港を渡すので、
+ *    先に立てると**まだ聴いていないのに渡される**(実測で決めた形 ── doc §4)
+ * 2. 🔴 **港は `nonce` が合ったときだけ、1 度だけ掴む。** 中のアプリも外殻へ
+ *    投げられるので、合図だけで信じると**偽の港**を掴む。⚠ 2 本目を握らない
+ *    (後から本物が来ても差し替えない ── 差し替えを許すと横取りの窓ができる)
+ * 3. 🔴 **アプリからの物は `event.source` の同一性だけで見分ける**
+ *    (`event.origin` は両方向に嘘をつく ── 保存の中継と同じ実測に基づく)
+ *
+ * ⚠ 残る危険は**横取りではなく妨害**である ── アプリが本物より先に偽の港を
+ *   渡せた場合、外殻はそれを掴んで本物を捨てる。そのとき流れるのは
+ *   **アプリ自身の言葉だけ**で、ホストのデータは 1 バイトも動かない
+ *   (本体タブは `hello` を受け取らないので何も返さない)。
+ */
+function extensionScript(ext: { nonce: string } | undefined): string {
+  if (ext === undefined) return '';
+  const tag = inlineJson(EXT_PORT_TAG);
+  const nonce = inlineJson(ext.nonce);
+  const flag = EXT_READY_FLAG;
+  return (
+    '<script>(function(){' +
+    `var TAG=${tag},NONCE=${nonce};` +
+    'var frame=document.querySelector("iframe");' +
+    'var port=null;' +
+    'window.addEventListener("message",function(e){' +
+    // ① アプリからの言葉 ── 港が在れば本体タブへ流す
+    'if(frame&&e.source===frame.contentWindow){' +
+    'var d=e.data;if(!d||d.tag!==TAG)return;' +
+    'if(port)try{port.postMessage(d.body);}catch(err){}' +
+    'return;}' +
+    // ② 本体タブからの港 ── nonce が合ったときだけ、1 度だけ掴む
+    'var m=e.data;if(!m||m.tag!==TAG||m.nonce!==NONCE)return;' +
+    'if(port)return;' +
+    'var p=e.ports&&e.ports[0];if(!p)return;' +
+    'port=p;' +
+    'port.onmessage=function(ev){' +
+    'if(!frame||!frame.contentWindow)return;' +
+    'try{frame.contentWindow.postMessage({tag:TAG,body:ev.data},"*");}catch(err){}};' +
+    'try{port.start();}catch(err){}' +
+    '});' +
+    // 🔴 **聴き始めてから印を立てる**(順序が命)
+    `window.${flag}=1;` +
+    '})()</script>'
+  );
 }
 
 /**
