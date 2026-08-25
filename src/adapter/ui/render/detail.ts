@@ -20,6 +20,7 @@ import {
 } from '@features/markdown/frontmatter';
 import { hydrateMermaid, type MermaidScope } from './mermaid-hydrate';
 import { hydrateChart } from './chart-raster';
+import { applyHeadingFold } from './heading-fold';
 
 /**
  * 🔴 **図とグラフは同じ面に出る**(#188)── 器を埋める呼び出しを 1 つに束ねる。
@@ -589,6 +590,13 @@ export class DetailRenderer {
         //    次に何かが挿入されるまで返らない。同じ穴を隣同士で片方だけ塞いでいた。
         pruneScopes(this.mermaidScopes);
         this.pruneLends();
+        /**
+         * 🔴 **見出しの畳み**(#396)。⚠ **描画のたびに呼ぶ** ── 塊が差し替わると
+         *   押す口が消えるので(`applyBlocks` は描画 HTML どうしを比べるため、
+         *   ここで足す口は差分に影響しない)。
+         * ⚠ 節点は 1 つも動かさない(入れ子にするとライブエディタが死ぬ)。
+         */
+        applyHeadingFold(host);
         // ⚠ 帯は**本文が入ってから**組む(数えるものが DOM に無いと 0 件になる)
         this.renderExternalImageBar(lid, host);
         this.restoreScroll();

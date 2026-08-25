@@ -668,6 +668,18 @@ export class InspectorRenderer {
      *   「PDF として保存」を選ぶ。⚠ だから文言に「保存します」と書かない。
      */
     btn('export-entry-pdf', 'PDF');
+    /**
+     * 🔴 **素の Markdown で写す**(#396)。
+     *
+     * > user 明示要望(PKC2 に記録):「方言記法されたエントリから
+     * > ベーシックなマークダウンだけを取り出す機能」
+     *
+     * ⚠ PKC2 では**押せる口がどこにも無かった**(拡張の RPC の option だけ)──
+     *   実装は在ったが**届いていなかった**。ここが PKC3 の動線である。
+     * ⚠ 隣の 4 つと違い、**file は落ちない**(clipboard へ写す)── 他のツールへ
+     *   そのまま貼るための物だからである。
+     */
+    btn('copy-plain-markdown', '素の Markdown');
     if (shape === 'entry+link') btn('write-back-file', '書き戻す');
     btn('show-history', '履歴');
     btn('delete-entry', '削除');

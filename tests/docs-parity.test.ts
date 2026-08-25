@@ -382,9 +382,12 @@ describe('マニュアルと実装の突合', () => {
      *   混ぜると「押したら何が起きるか」が表から読めなくなる。
      * ⚠ 等値で pin したままにする ── 増えたら**ここが落ちる**のが正しい
      *   (黙って増える帯にしない)。この等値は 2026-08-25 に実際に
-     *   「1 つ増えた」を捕まえた。
+     *   「1 つ増えた」を **2 度**捕まえた(雛形 / **番号**)。
+     * ⚠ **番号**(#396)も `FORMAT_OPS` には入れない ── あちらは
+     *   「その場で字を変える純関数」の表だが、こちらは**本文全体**を
+     *   書き換える 1 手であって、選択に当てる書式ではない。
      */
-    expect(labels).toEqual([...FORMAT_OPS.map((o) => o.label), '日付', '雛形', '置換']);
+    expect(labels).toEqual([...FORMAT_OPS.map((o) => o.label), '日付', '雛形', '番号', '置換']);
     expect(labels.length).toBeGreaterThan(0);
     for (const label of labels) {
       expect(MANUAL, `マニュアルに書式「${label}」の説明が無い`).toContain(`**${label}**`);

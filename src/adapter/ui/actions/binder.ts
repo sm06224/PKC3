@@ -15,6 +15,10 @@
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { deliveredEntryOf, type ExtDeliveredEntry } from '@features/extension/ext-delivery';
 import { isLaunchableUrl } from '@features/launcher/tiles';
+import { toggleHeadingFold } from '../render/heading-fold';
+import { quoteOnEnter } from '@features/markdown/quote-assist';
+import { renumberLists } from '@features/markdown/list-renumber';
+import { stripDialect } from '@features/markdown/strip-dialect';
 import { isViewMode, nextViewMode, type AppState, type ViewMode } from '@adapter/state/app-state';
 import type { EntryMeta } from '@core/model/entry-meta';
 import { filerRows, operationTargets, visibleSelection } from '@features/relation/filer-list';
@@ -1930,6 +1934,70 @@ const ACTIONS: Record<string, ActionHandler> = {
     void done.then(reset, reset);
   },
   /**
+   * 🔴 **番号付きリストの番号を振り直す**(#396)。
+   *
+   * ⚠ **押したときだけ**かける ── PKC2 は frontmatter で常時かけていたが、
+   *   PKC3 のライブエディタは行ごとに欄を出すので、常時かけると
+   *   **触っていない行が勝手に変わる**。
+   * ⚠ 効く先は書式パネルと同じ 1 か所(`formatTarget`)── 2 列でも live でも動く。
+   * ⚠ **`value` 直代入をしない** ── Ctrl+Z の履歴を捨てるので `setRangeText`。
+   */
+  'renumber-lists': (dispatcher, target, services) => {
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const ta = formatTarget(root);
+    if (ta === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集中に押してください' });
+      return;
+    }
+    const next = renumberLists(ta.value);
+    // ⚠ **変わらなかったことを言う** ── 押して無反応にしない
+    if (next === ta.value) {
+      services.showStatus?.('番号はもう揃っています');
+      return;
+    }
+    ta.setRangeText(next, 0, ta.value.length, 'end');
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    services.showStatus?.('番号を振り直しました');
+  },
+  /**
+   * 🔴 **素の Markdown で写す**(#396)。
+   *
+   * > user 明示要望(PKC2 に記録):「方言記法されたエントリから
+   * > ベーシックなマークダウンだけを取り出す機能」
+   *
+   * ⚠ PKC2 は**押せる口を持っていなかった**(拡張の RPC の option だけ)。
+   * ⚠ file は落ちない(clipboard へ写す)── 他のツールへ貼るための物である。
+   * 🔑 落とし方は `features/markdown/strip-dialect.ts` の 1 か所。
+   */
+  'copy-plain-markdown': (dispatcher, target, services) => {
+    const st = dispatcher.getState();
+    const lid = st.selectedLid;
+    // ⚠ 本文は**開いているノートの物**でなければならない(別のノートを写さない)
+    const body = st.openBody?.lid === lid ? st.openBody.body : null;
+    if (lid === null || body === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '本文を開いてから押してください' });
+      return;
+    }
+    const plain = stripDialect(body);
+    if (services.copyText === undefined) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版では写せません' });
+      return;
+    }
+    services.copyText(plain);
+    services.showStatus?.('素の Markdown として写しました');
+    void target;
+  },
+  /**
+   * 🔴 **見出しで畳む**(#396)。⚠ 規則も器への当て方も
+   *   `render/heading-fold.ts` に在る ── ここは**渡すだけ**。
+   * ⚠ 本文の中身は 1 バイトも変わらない(見え方だけ)ので、
+   *   `BODY_WRITE_ACTIONS` には**載せない**(取り込み中でも畳んでよい)。
+   */
+  'toggle-heading-fold': (_dispatcher, target) => {
+    const heading = target.closest('h1,h2,h3,h4,h5,h6');
+    if (heading !== null) toggleHeadingFold(heading);
+  },
+  /**
    * 🔴 **よく開くサイトをアプリ一覧に足す**(#401 ①)。
    *
    * ⚠ PKC3 は URL タイルを**表示も起動もできた**のに(`tiles.ts` が
@@ -2740,6 +2808,41 @@ export function bindActions(
     // ⚠ **追記欄より先に置く** ── 変換確定の Enter で送ってしまうと、
     // 日本語で書く人は「打ち終わる前に飛ぶ」を毎回踏む
     if (ke.isComposing) return;
+    /**
+     * 🔴 **引用(`>`)を書き続けられるようにする**(#396)。
+     *
+     * ⚠ **IME ガードの直後**に置く ── 変換確定の Enter で引用を継ぎ足したら、
+     *   日本語で書く人は毎回踏む。
+     * ⚠ 修飾キーが付いた Enter は**別の意味**(確定 / 送信)なので触らない。
+     * 🔑 規則は `features/markdown/quote-assist.ts` の 1 か所 ── ここは当てるだけ。
+     * 🔑 **2 列の全文欄でも、ライブの行の欄でも効く**(どちらも Enter は
+     *   その欄の中で改行する)。
+     */
+    if (
+      ke.key === 'Enter' &&
+      !ke.shiftKey &&
+      !ke.ctrlKey &&
+      !ke.altKey &&
+      !ke.metaKey &&
+      (field === 'editor-body' || field === 'row-source') &&
+      ke.target instanceof HTMLTextAreaElement
+    ) {
+      const ta = ke.target;
+      const r = quoteOnEnter(ta.value, ta.selectionStart);
+      if (r.kind === 'continue') {
+        ev.preventDefault();
+        // ⚠ `setRangeText` を使う ── `value` 直代入は Ctrl+Z の履歴を捨てる
+        ta.setRangeText(r.insert, ta.selectionStart, ta.selectionEnd, 'end');
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        return;
+      }
+      if (r.kind === 'exit') {
+        ev.preventDefault();
+        ta.setRangeText(r.text, r.from, r.to, 'end');
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        return;
+      }
+    }
     /**
      * 🔴 **`role="link"` のものは Enter / Space で押せる**(2026-08-08)。
      *
