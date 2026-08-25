@@ -13,9 +13,10 @@ import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibilit
 import { appKeymap } from '@adapter/ui/render/keymap';
 import { wireShortcutHints } from '@adapter/ui/render/shortcut-hint';
 import { startEmbedBridge } from '@adapter/transport/embed-bridge';
+import { startCapture } from '@adapter/transport/capture-bridge';
 import { EmbedOriginsStore } from '@adapter/transport/embed-origins';
 import { appFlags } from '@adapter/platform/flag-store';
-import { FLAG_EMBED } from '@features/flags';
+import { FLAG_CAPTURE, FLAG_EMBED } from '@features/flags';
 import { appBrowseMode, isBrowseMode } from '@adapter/ui/render/browse-mode';
 import { StoreClient } from '@adapter/platform/storage/store-client';
 import { openAssetWindow } from '@adapter/platform/asset-window';
@@ -142,6 +143,7 @@ import {
   announceOpenedWindow,
   connectViewDeepLink,
   currentBaseUrl,
+  windowDeepLinkTarget,
 } from '@adapter/platform/deep-link';
 import { openView } from '@adapter/ui/render/open-view';
 import { noteRemoteChange } from '@adapter/state/remote-change';
@@ -647,33 +649,65 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     paint();
   };
   /**
-   * 🔴 **PKC3 を iframe に入れた親からの依頼を受ける**(#189 / C-4 段①)。
-   * ⚠ **既定では張らない** ── flag `transport.embed` が立っているときだけ。
-   * 🔑 判断は `startEmbedBridge()` に在る(ここは呼ぶだけ)── この file は
-   * 原文を読む test しか無いので、条件をここに書くと取り違えが緑のまま通る。
+   * 🔴 **外からの依頼を受ける口**(#189 / C-4 と #194 / C-3)。
+   *
+   * 門は 2 つあり、**開き方が違う**:
+   *
+   * | 門 | 誰から | いつ | 何ができるか |
+   * |---|---|---|---|
+   * | 許可リスト(C-4) | user が名指しで許した origin | flag `transport.embed` が立っている間ずっと | `hello` / `ping` / `createEntry` |
+   * | 取り込みの合図(C-3) | **この窓を開いた相手** | `#pkc?capture=1` で開かれた**その起動の 60 秒**、**1 通だけ** | `createEntry` だけ |
+   *
+   * 🔑 判断は `startEmbedBridge()` / `startCapture()` に在る(ここは呼ぶだけ)──
+   * この file は原文を読む test しか無いので、条件をここに書くと取り違えが緑のまま通る。
    */
+  const capture = appFlags.isOn(FLAG_CAPTURE.name)
+    ? startCapture({
+        // 🔑 **アドレスを読むのは `deep-link.ts` だけ**(`tests/features/flags.test.ts` の
+        //    全数検査 ── ここで `location.hash` を読むと「クエリの抜け穴」に数えられる)。
+        hash: windowDeepLinkTarget().hash,
+        opener: typeof window === 'object' ? window.opener : null,
+      })
+    : null;
   startEmbedBridge({
-    enabled: appFlags.isOn(FLAG_EMBED.name),
-    origins: () => new EmbedOriginsStore().list(),
+    // ⚠ **合図で来たときは flag に依らず張る** ── flag は「iframe の親から受けるか」
+    //    の切替であって、user が自分でブックマークを押した動線とは別物である。
+    enabled: appFlags.isOn(FLAG_EMBED.name) || capture !== null,
+    origins: () =>
+      // 🔑 **flag が下りていれば許可リストは空**(= 全部拒否)── 合図の門だけ開く
+      appFlags.isOn(FLAG_EMBED.name) ? new EmbedOriginsStore().list() : [],
+    ...(capture === null ? {} : { capture }),
     /**
      * 🔴 **外から増えたことを、黙って起こさない**(段②)。
      * ⚠ 一覧に 1 件増えるだけだと、user は「自分が作ったか」が分からない ──
      * どこから来たかまで帯に出す。
-     * 🔑 `edit: false` ── 取り込みで**編集の面へ飛ばさない**(いまの作業を退かさない)。
      */
-    createEntry: (input, origin) => {
+    createEntry: (input, origin, via) => {
       const lid = generateLid();
+      /**
+       * 🔴 **見せ方を門で変える**(#194)。
+       *
+       * ⚠ 許可リストの相手(`'origin'`)は **user が作業している最中**に送ってくる ──
+       * `edit: false` で、**いまの作業を退かさない**(#300 で user が叱った型)。
+       * 🔑 合図の相手(`'capture'`)は違う ── その窓は**たったいま取り込みのために
+       * 開かれた**ので、退かす作業が無い。しかも送り主の身元は確かめていないので、
+       * **黙って積まずに目の前へ出す**(見て、要らなければ捨てられる)。
+       */
       dispatcher.dispatch({
         type: 'CREATE_ENTRY',
         archetype: 'text',
         lid,
         title: input.title,
         body: input.body,
-        edit: false,
+        edit: via === 'capture',
         parentLid: null,
         relationId: generateLid(),
       });
-      showStatus(`${origin} から 1 件取り込みました:${input.title}`);
+      showStatus(
+        via === 'capture'
+          ? `${origin} から取り込みました。保存すると残ります:${input.title}`
+          : `${origin} から 1 件取り込みました:${input.title}`,
+      );
       return lid;
     },
   });

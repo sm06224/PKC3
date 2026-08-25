@@ -58,6 +58,7 @@ import {
 /** 相手の候補に出す上限。⚠ 超えたぶんは**件数を書く**(黙って切らない)。 */
 export const RELATION_CANDIDATE_MAX = 200;
 import { getAncestorFolders } from '@features/relation/tree';
+import { renderRelationMap } from './relation-map';
 
 /** 素性の行(`data-pkc-field` → 値を入れる `<dd>`)。 */
 type Rows = Map<string, HTMLElement>;
@@ -300,6 +301,29 @@ export class InspectorRenderer {
       }
     }
     /**
+     * 🔴 **つながりの図**(#186)。⚠ 出すのは**関係**だけ(本文のリンクは別の段)。
+     * ⚠ **点 1 つを図と呼ばない** ── 相手が居なければ行ごと畳む
+     *   (「無し」は上の「関係」が既に言っている ── 同じことを 2 回言わない)。
+     */
+    const mapBox = this.rows.get('inspector-relation-map');
+    if (mapBox) {
+      const drawn = renderRelationMap(mapBox, {
+        center: meta.lid,
+        depth: 2,
+        // ⚠ **居場所(親子)は出さない** ── 上の「関係」行と同じ判断である。
+        //    入れると図がフォルダの木になり、「つながり」を見に来た user が
+        //    見たい物(意味の関係)が埋もれる。
+        edges: state.relations
+          .filter((r) => r.kind !== STRUCTURAL)
+          .map((r) => ({ fromLid: r.fromLid, toLid: r.toLid, kind: r.kind })),
+        titles: new Map([...state.entryMetas].map(([lid, m]) => [lid, m.title])),
+      });
+      // ⚠ `<dt>` は `<dd>` の直前 ── 値だけ畳むと**見出しだけ残る**
+      const dt = mapBox.previousElementSibling;
+      mapBox.hidden = drawn === 0;
+      if (dt instanceof HTMLElement) dt.hidden = drawn === 0;
+    }
+    /**
      * 相手の候補。⚠ **出し切れないときは件数を書く**(黙って切らない)。
      * ⚠ 自分自身は候補から外す(張れないものを見せない)。
      */
@@ -463,6 +487,16 @@ export class InspectorRenderer {
      *   (`browse.ts` の表:右 = 選んでいるもの)。
      */
     row('参照元', 'inspector-backlinks');
+    /**
+     * 🔴 **つながりの図**(#186 / 台帳 #180 の A-6)。
+     *
+     * ⚠ 上の「関係」は**一覧**、ここは**形**である ── 一覧では
+     * 「どれとどれが繋がっているか」(相手同士の関係)が読めない。
+     * 🔑 **右の列に置く**のは規則どおり(`browse.ts` の表:右 = 選んでいるもの)
+     * ── 選択に自動で追従するので、別窓に出すときの同期の仕掛けが要らない。
+     * ⚠ **中央の面は奪わない**(#300 で user が叱った型)。
+     */
+    row('つながり', 'inspector-relation-map');
     if (shape === 'entry+link') row('元ファイル', 'inspector-linked-file');
     this.region.append(dl);
 

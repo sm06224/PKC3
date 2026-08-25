@@ -17,6 +17,7 @@
  * 外向きの口なので、**既定で開けない**。
  */
 
+import { accepts, type CaptureGrant } from './capture-grant';
 import {
   MAX_PER_MINUTE,
   MAX_ROUGH_SIZE,
@@ -31,8 +32,21 @@ import {
   type RpcRequest,
 } from './protocol';
 
+/**
+ * どの門を通ってきたか。
+ *
+ * 🔴 **捌き手はこれで返す中身を変える**(#194)── `'capture'` は
+ * **許可リストの外**から、その起動 1 回だけ通した相手である。⚠ 身元が確かめられて
+ * いないので、**返事に中身を載せない**(`lid` を返すと読み出しの口になる)。
+ */
+export type Via = 'origin' | 'capture';
+
 /** 依頼 1 件を捌く。⚠ 例外を投げてよい(こちらが `internal error` に畳む)。 */
-export type Handler = (request: RpcRequest, origin: string) => Promise<unknown> | unknown;
+export type Handler = (
+  request: RpcRequest,
+  origin: string,
+  via: Via,
+) => Promise<unknown> | unknown;
 
 export interface BridgeOptions {
   /**
@@ -46,6 +60,22 @@ export interface BridgeOptions {
   onReject?: (why: string, origin: string) => void;
   /** 差し替え可能な時計(test 用。⚠ 既定は `Date.now`)。 */
   now?: () => number;
+  /**
+   * 🔴 **許可リストの外から、その起動 1 回だけ受ける口**(#194 / C-3)。
+   *
+   * ⚠ Bookmarklet は**読んでいる頁の上**で走るので、相手の origin は事前に
+   * 列挙できない ── だから「**この窓を開いた相手**から、**いま出した合図**を
+   * 添えた **1 通だけ**」を通す(理由は `capture-grant.ts`)。
+   * ⚠ 渡さなければ、この門は**存在しない**(既定は許可リストだけ)。
+   */
+  capture?: {
+    /** 送り主がこの窓を開いた相手か(既定の呼び側は `window.opener` を見る)。 */
+    isOpener: (source: Window) => boolean;
+    /** いま効いている合図(出していなければ `null`)。 */
+    grant: () => CaptureGrant | null;
+    /** 1 通受けたら焼き捨てる。 */
+    burn: () => void;
+  };
   /** 張り先(既定は `globalThis` の window)。 */
   target?: Window;
 }
@@ -105,7 +135,17 @@ export function attachMessageBridge(options: BridgeOptions): () => void {
       }
     };
 
-    if (!originAllowed(origin, allowList())) {
+    /**
+     * 🔴 **門は 2 つ。** ①許可リスト(C-4)②取り込みの合図(#194 / C-3)。
+     * ⚠ ②は**この窓を開いた相手**に限る ── そうでなければ「合図が生きている間、
+     * 誰でも 1 通送れる」になり、合図が窓を守っていないことになる。
+     * 🔑 ②で入った封筒は**中身まで見てから**改めて断る(下の `accepts`)──
+     * 合図そのものが本文に載っているので、ここでは判定しきれない。
+     */
+    const byOrigin = originAllowed(origin, allowList());
+    const viaCapture =
+      !byOrigin && options.capture !== undefined && options.capture.isOpener(source);
+    if (!byOrigin && !viaCapture) {
       reject('許していない origin', origin);
       // 🔑 **中身を見る前に断る。** 許していない相手の封筒を解釈しない
       reply(errResponse(null, { code: RPC.FORBIDDEN_ORIGIN, message: '許可されていない origin です' }));
@@ -128,6 +168,21 @@ export function attachMessageBridge(options: BridgeOptions): () => void {
       reply(errResponse(parsed.id, parsed.error));
       return;
     }
+    if (viaCapture) {
+      // ⚠ **3 つすべて**を見る(生きている / method が 1 つだけ / 合図が一致)
+      if (!accepts(options.capture!.grant(), now(), parsed.request.method, parsed.request.params)) {
+        reject('取り込みの合図が合わない', origin);
+        reply(
+          errResponse(parsed.request.id, {
+            code: RPC.FORBIDDEN_ORIGIN,
+            message: '取り込みの合図がありません',
+          }),
+        );
+        return;
+      }
+      // 🔴 **受けると決めた時点で焼き捨てる**(捌き手が落ちても再利用させない)
+      options.capture!.burn();
+    }
     const fn = options.handlers[parsed.request.method];
     if (!fn) {
       reject(`捌き手が居ない: ${parsed.request.method}`, origin);
@@ -141,7 +196,7 @@ export function attachMessageBridge(options: BridgeOptions): () => void {
     }
     // ⚠ 同期でも非同期でも同じ扱いにする(`await` を落とすと静かに空が返る)
     void Promise.resolve()
-      .then(() => fn(parsed.request, origin))
+      .then(() => fn(parsed.request, origin, viaCapture ? 'capture' : 'origin'))
       .then(
         (result) => reply(okResponse(parsed.request.id, result ?? null)),
         (e: unknown) => {

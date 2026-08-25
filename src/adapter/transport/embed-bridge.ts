@@ -11,7 +11,7 @@
  */
 
 import { METHODS, RPC } from './protocol';
-import { attachMessageBridge, type BridgeOptions } from './message-bridge';
+import { attachMessageBridge, type BridgeOptions, type Via } from './message-bridge';
 import { parseCreateEntryParams, type CreateEntryInput } from './create-entry-params';
 
 export interface EmbedDeps {
@@ -23,10 +23,12 @@ export interface EmbedDeps {
    * 🔑 呼び手(boot)は**帯に出す**ところまでやる ── 外から増えたことが
    * **黙って起きない**ようにするのは、この口の動線そのものである。
    */
-  createEntry?: (input: CreateEntryInput, origin: string) => Promise<string> | string;
+  createEntry?: (input: CreateEntryInput, origin: string, via: Via) => Promise<string> | string;
   /** 許す origin(呼ぶたびに読む ── 設定を変えたら張り直さずに効く)。 */
   origins: () => readonly string[];
   onReject?: BridgeOptions['onReject'];
+  /** 🔴 取り込みの合図(#194)。⚠ 渡さなければその門は**存在しない**。 */
+  capture?: BridgeOptions['capture'];
   target?: Window;
 }
 
@@ -63,7 +65,11 @@ export function startEmbedBridge(deps: EmbedDeps): (() => void) | null {
       ...(deps.createEntry === undefined
         ? {}
         : {
-            'pkc.createEntry': async (request: { params?: Record<string, unknown> }, origin: string) => {
+            'pkc.createEntry': async (
+              request: { params?: Record<string, unknown> },
+              origin: string,
+              via: Via,
+            ) => {
               const parsed = parseCreateEntryParams(request.params);
               if (!parsed.ok) {
                 // ⚠ 引数の誤りは**内部の失敗ではない** ── 相手が直せるように
@@ -71,12 +77,23 @@ export function startEmbedBridge(deps: EmbedDeps): (() => void) | null {
                 //    `INTERNAL_ERROR` に畳むので、符号を持たせて投げる)
                 throw Object.assign(new Error(parsed.message), { rpcCode: RPC.INVALID_PARAMS });
               }
-              const lid = await deps.createEntry!(parsed.input, origin);
-              return { lid, title: parsed.input.title };
+              const lid = await deps.createEntry!(parsed.input, origin, via);
+              /**
+               * 🔴 **合図で通した相手には `lid` を返さない**(#194)。
+               *
+               * ⚠ 許可リストの相手(`'origin'`)は user が**名指しで許した**ので、
+               * 作った物の id を返してよい(貼り戻す動線が作れる)。
+               * ⚠ 合図で通した相手(`'capture'`)は**身元を確かめていない** ──
+               * id を返すと、そこから**読み出しの口**が生える(いまは無くても、
+               * 次に `pkc.getEntry` を足した人が「id は既に渡している」と考える)。
+               * 🔑 **返すのは「受け取った」という事実だけ**にする。
+               */
+              return via === 'capture' ? { ok: true } : { lid, title: parsed.input.title };
             },
           }),
     },
     ...(deps.onReject === undefined ? {} : { onReject: deps.onReject }),
+    ...(deps.capture === undefined ? {} : { capture: deps.capture }),
     ...(deps.target === undefined ? {} : { target: deps.target }),
   });
 }

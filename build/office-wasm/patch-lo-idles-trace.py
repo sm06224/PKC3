@@ -123,11 +123,8 @@ from pathlib import Path
 #    (LO の文脈から `emscripten::val` を触ると `invalid handle` で abort する ── 2026-08-15)。
 HELPER = """
 // ── PKC3 #199 の計装(`PKC3_IDLES_TRACE=1` の回だけ入る)──
-// ⚠ **7 巡目までは印だけだった。8 巡目から 1 か所だけ挙動を変える** ──
-//    `IdlesLockGuard` の待ちに時限を付けた(`scheduler.cxx`)。
-//    ⚠ ここに「挙動は変えない」と書いたままにすると、次に読む人が
-//    **無害だと思って焼く**(CLAUDE.md「これが無いと壊れると書いたら、
-//    外して壊れるのを見る」の裏返し ── 書いた字が実態と合っていること)。
+// ⚠ **この一式は挙動を変えない**(2026-08-25 に戻した)── 8 巡目で
+//    ここに置いた時限は、9 巡目の後に `patch-lo-idles-deadlock.py` へ出した。
 #include <cstdio>
 #include <cstring>
 #include <pthread.h>
@@ -176,81 +173,15 @@ void pkc3_idles_trace(const char* what, int a, int b, int c)
 }
 """
 
-SCHED_SRC = "vcl/source/app/scheduler.cxx"
-SCHED_ANCHOR = """        pSVData->m_inExecuteCondtion.reset();
-        // Put an empty event to the application's queue, to make sure that it loops through the
-        // code that sets the condition, even when there's no other events in the queue
-        Application::PostUserEvent({});
-        SolarMutexReleaser releaser;
-        pSVData->m_inExecuteCondtion.wait();
-"""
-SCHED_REPLACE = """        pSVData->m_inExecuteCondtion.reset();
-        // Put an empty event to the application's queue, to make sure that it loops through the
-        // code that sets the condition, even when there's no other events in the queue
-        Application::PostUserEvent({});
-        // 🔑 **前提を実測で出す**(#199)── a は `IsUseSystemEventLoop()`。
-        //    ⚠ ここを「true のはず」と決めつけた直しを 1 度焼いて no-op だった。
-        // 🔴 **c が本命**(2026-08-24 の 2 巡目)── `Application::IsInExecute()` は
-        //    「`Application::Execute()` がスタックに在るか」(`svdata.hxx:174` の
-        //    `mbInAppExecute`、公開の accessor は `svapp.hxx:571`)。
-        //    ⚠ **c=0 なら、待っている条件を立てる者がまだ走っていない**ことが確定する
-        //    ── 1 巡目で `execute:set` が 0 件だった理由が、これで名前で言える。
-        //    🔑 前回は述語を**決め打ちして**焼き 1 回を無駄にした。今度は**測ってから**書く。
-        pkc3_idles_trace("idles:wait", Application::IsUseSystemEventLoop() ? 1 : 0,
-                         Application::IsMainThread() ? 1 : 0,
-                         Application::IsInExecute() ? 1 : 0);
-        // 🔴 **6 巡目(2026-08-24)── 2 つの「メインスレッド」判定を並べる。**
-        //    ⚠ `Application::IsMainThread()`(`svapp.cxx:522`)は **osl の id**
-        //    (`mnMainThreadId` = `InitVCL` を走らせたスレッド)で判定するが、
-        //    `DoYield` が枝 A を選ぶのは **Qt の** thread(`QtInstance::IsMainThread()`,
-        //    `QtInstance.cxx:538` = `qApp->thread() == QThread::currentThread()`)である。
-        //    🔑 **この 2 つが食い違っていれば、import は自分で自分を待っている**
-        //    (= 直すのは述語であって握手ではない)。⚠ 一致していれば本当に別スレッドで、
-        //    そのときは握手そのものを作り直す ── **直し方が正反対なので、測ってから書く**。
-        //    ⚠ `mpDefInst` 経由で呼ぶ(`SalInstance::IsMainThread()` は virtual で、
-        //    Qt 版がその実体である)。
-        pkc3_idles_trace("idles:who", Application::IsMainThread() ? 1 : 0,
-                         pSVData->mpDefInst->IsMainThread() ? 1 : 0,
-                         rSchedCtx.mnIdlesLockCount);
-        {
-            SolarMutexReleaser releaser;
-            // 🔴 **8 巡目(2026-08-25)── 待ちに時限を付ける。ここだけが挙動を変える。**
-            //
-            // 7 巡目で構図が確定した:メインスレッドは `ProcessEvent(SalEvent::UserEvent)`
-            // に入ったきり返らず(`disp:ev` 1 件 / `disp:done` **0 件**。対照群 `.odt` は
-            // **10 / 10** で全部返る)、だから `Application::Execute()` の
-            // `while` が 2 周目に入らず(`execute:set` **0 件**)、ここが待っている
-            // 条件は**永久に立たない**。
-            //
-            // 🔑 上流のコメント(すぐ上)が待ちの目的を書いている ──
-            //   「メインが Execute へ戻るまで待てば、走っているアイドルが無いと言える」。
-            //   ⚠ **メインが user event の中で止まると、その前提ごと成立しない。**
-            //
-            // 🔑 **時限で失うのは 1 つだけ** ── 「既に走っているアイドルが
-            //   終わったこと」の保証である。「これからアイドルを遅らせる」ほうは
-            //   `mnIdlesLockCount` が**待ちの前に**増えており(すぐ上の
-            //   `osl_atomic_increment`)、その数の唯一の用途は
-            //   `scheduler.cxx` の `bDelayInvoking` なので、時限では失われない。
-            //
-            // 🔑 **道具は LO 自身のものを使う** ── `osl::Condition::wait` は
-            //   `const TimeValue*` を取る overload を持つ(`include/osl/conditn.hxx`)。
-            //   ⚠ `TimeValue` は `conditn.hxx` が `osl/time.h` を include するので
-            //   **ここでは追加の include が要らない**(`svdata.hxx` が
-            //   `osl::Condition` を宣言している = この型はもう見えている)。
-            //   ⚠ libc の `nanosleep` で回す形も書けるが、`<ctime>` が POSIX の
-            //   宣言を出すかは toolchain 次第で、**焼いてみるまで分からない** ──
-            //   確かめられない依存を足さない(2026-08-14 の `pthread_t` と同じ型)。
-            // ⚠ **値を決めつけない** ── 立ったのか諦めたのかを印に出す。
-            TimeValue aPkc3Timeout;
-            aPkc3Timeout.Seconds = 2;
-            aPkc3Timeout.Nanosec = 0;
-            const osl::Condition::Result ePkc3Res
-                = pSVData->m_inExecuteCondtion.wait(&aPkc3Timeout);
-            // ⚠ この行が**出なければ**、待ちはそこで永久に止まっている
-            //    (`a=0` = `result_ok` / `a=2` = `result_timeout`)
-            pkc3_idles_trace("idles:woke", static_cast<int>(ePkc3Res), -1, -1);
-        }
-"""
+# 🔴 **`scheduler.cxx` はこの計装から外した**(2026-08-25、9 巡目の後)。
+#
+# 9 巡目で直しが確定したので、`IdlesLockGuard` の中身は
+# **`patch-lo-idles-deadlock.py`(配る一式に入る直し)**が持つ。
+# ⚠ **同じ行を 2 つの patch が触らない** ── 触ると当てる順で錨が壊れ、
+#   「どちらが効いたか」も読めなくなる(1 度の実験で 2 つを主張しない、の構造版)。
+# ⚠ ここに在った印(`idles:wait` / `idles:who` / `idles:woke` / `idles:skip`)は
+#   **役目を終えた**。次に `IdlesLockGuard` を疑う日が来たら、直しの patch の側へ
+#   一時的に足すこと(計装と直しが同じ行に同居する形には戻さない)。
 
 APP_SRC = "vcl/source/app/svapp.cxx"
 # 🔴 **3 巡目は `DoExecute()` の前後を割る**(2026-08-24)。
@@ -516,9 +447,8 @@ WIN_SRC = "vcl/source/window/winproc.cxx"
 # 🔑 Link の呼び出しを挟めば **2 つに割れる**:
 #     `uev:in` が出ない → 止まっているのは Link より**手前**(vcl の配線)
 #     `uev:in` が出て `uev:out` が出ない → 止まっているのは **Link の中**
-# ⚠ **これは printf だけ** ── 挙動は 1 バイトも変えない(挙動を変えるのは
-#   `SCHED_REPLACE` の時限 1 つだけ。2026-08-14 に 1 度の実験で 2 つを主張して
-#   「どちらが効いたか読めない」を踏んだので、そこは分けてある)。
+# ⚠ **この file はもう printf だけ**(2026-08-25)── 挙動を変える所は
+#   `patch-lo-idles-deadlock.py` へ**出した**。同じ行を 2 つの patch が触らない。
 WIN_ANCHOR = """        if ( pSVEvent->mbCall )
         {
             pSVEvent->maLink.Call( pSVEvent->mpData );
@@ -543,7 +473,6 @@ WIN_REPLACE = """        if ( pSVEvent->mbCall )
 
 
 HELPER_TARGETS = (
-    (SCHED_SRC, "Scheduler::IdlesLockGuard::IdlesLockGuard()\n{\n"),
     (APP_SRC, "void Application::Execute()\n{\n"),
     # 🔴 **`ImplYield` は `DoYield` より前に在る**(454 行 vs 475 行)。
     #    ⚠ ヘルパーを `DoYield` の直前へ入れると、`ImplYield` から呼べない
@@ -554,7 +483,6 @@ HELPER_TARGETS = (
 )
 # ⚠ ヘルパーは TU ごとに 1 つ要る ── 当てる先が 2 file なので 2 つ入る。
 TARGETS = (
-    (SCHED_SRC, SCHED_ANCHOR, SCHED_REPLACE),
     (APP_SRC, APP_ANCHOR, APP_REPLACE),
     (QT_SRC, QT_ENTER_ANCHOR, QT_ENTER_REPLACE),
     (QT_SRC, QT_PROXY_ANCHOR, QT_PROXY_REPLACE),
