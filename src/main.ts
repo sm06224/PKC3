@@ -12,6 +12,10 @@ import { appOpenInEdit } from '@adapter/ui/render/open-in-edit';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { appKeymap } from '@adapter/ui/render/keymap';
 import { wireShortcutHints } from '@adapter/ui/render/shortcut-hint';
+import { startEmbedBridge } from '@adapter/transport/embed-bridge';
+import { EmbedOriginsStore } from '@adapter/transport/embed-origins';
+import { appFlags } from '@adapter/platform/flag-store';
+import { FLAG_EMBED } from '@features/flags';
 import { appBrowseMode, isBrowseMode } from '@adapter/ui/render/browse-mode';
 import { StoreClient } from '@adapter/platform/storage/store-client';
 import { openAssetWindow } from '@adapter/platform/asset-window';
@@ -473,6 +477,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * (別タブで変えたときも `watchOtherTabs` 経由でここへ来る)。
    */
   wireShortcutHints(root);
+
+  /**
+   * 🔴 **PKC3 を iframe に入れた親からの依頼を受ける**(#189 / C-4 段①)。
+   * ⚠ **既定では張らない** ── flag `transport.embed` が立っているときだけ。
+   * 🔑 判断は `startEmbedBridge()` に在る(ここは呼ぶだけ)── この file は
+   * 原文を読む test しか無いので、条件をここに書くと取り違えが緑のまま通る。
+   */
+  startEmbedBridge({
+    enabled: appFlags.isOn(FLAG_EMBED.name),
+    origins: () => new EmbedOriginsStore().list(),
+  });
   // ⚠ 配色の選択欄は**設定の画面**に在る(段⑨c で移した)。合わせるのは
   //    `SettingsRenderer.syncTheme()` の仕事 ── ここに 2 本目を置かない
   //    (P8 段㉕:帯を探す死んだ同期が残っており、常に空振りしていた)
