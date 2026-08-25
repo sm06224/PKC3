@@ -16,8 +16,18 @@
 import { test, expect } from '@playwright/test';
 import { collectPageErrors } from './helpers';
 
-/** 記事の頁の代わり(同一 origin に置く ── 中身は空でよい)。 */
-const ARTICLE = '/?pkc-article=1';
+/**
+ * 記事の頁の代わり。
+ *
+ * ⚠ **クエリを足さない**(`?pkc-article=1` のような目印を付けたら
+ * `tests/features/flags.test.ts` の全数検査が落とした ── smoke の URL も
+ * 「flag 以外のクエリで開くな」の対象である。**検査が効いている**)。
+ * 🔑 ここで要るのは「**同一 context の、別の頁**」だけなので、素の `/` でよい。
+ * ⚠ **別 origin の記事**(本来の姿)は unit が見ている ──
+ * `capture.test.ts` は `https://news.test` から、**許可リストが空のまま**
+ * 通ることを確かめている(= 通したのは合図の門である)。
+ */
+const ARTICLE = '/';
 
 test('ブックマークで開いた窓が、合図つきの 1 通だけを受けて編集の形で出す', async ({
   page,
@@ -46,7 +56,7 @@ test('ブックマークで開いた窓が、合図つきの 1 通だけを受�
    *   ここが緑でも user の手元では動かない。
    */
   const opened = await page.evaluate(async () => {
-    const base = location.href.split('?')[0]!;
+    const base = location.href.split('#')[0]!.split('?')[0]!;
     const w = window.open(base + '#pkc?capture=1');
     if (w === null) return { ok: false, why: 'ポップアップが開けない' };
     const grant = await new Promise<string | null>((resolve) => {
