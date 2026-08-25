@@ -79,8 +79,13 @@ export function buildNeighbourhood(input: {
   /** lid → その lid に触れる辺(向きは無視)。 */
   const touching = new Map<string, GraphEdge[]>();
   for (const e of edges) {
-    // ⚠ **自己辺は落とす** ── 環に置きようが無く、線も点にしかならない
-    if (e.fromLid === e.toLid) continue;
+    /**
+     * ⚠ **自己辺をここで落とす必要は無い**(2026-08-25、変異試験 G7 が SURVIVED で
+     * 教えた)── 落とす行を書いていたが、辿る先は `ringOf` に既に居る中心なので
+     * **どのみち弾かれる = no-op** だった。
+     * 🔑 CLAUDE.md「『これが無いと壊れる』と書く前に、外して壊れるのを見る」──
+     * 見たら壊れなかったので**消した**。落とすのは下の `inside`(そちらは効く)。
+     */
     // ⚠ 片端でも消えていれば辿らない(消えたノートへ線を引かない)
     if (!titles.has(e.fromLid) || !titles.has(e.toLid)) continue;
     for (const lid of [e.fromLid, e.toLid]) {
