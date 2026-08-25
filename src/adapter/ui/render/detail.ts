@@ -478,7 +478,7 @@ export class DetailRenderer {
       this.bodyKind = 'attachment';
       this.bodyView = EMPTY_VIEW;
       this.bodyHost!.textContent = '';
-      this.renderAttachment(body, fm.body, lid, selfContainerId(state));
+      this.renderAttachment(body, fm.body, lid, selfContainerId(state), meta.title);
       this.restoreScroll();
       return;
     }
@@ -1378,6 +1378,8 @@ export class DetailRenderer {
     /** ⚠ 同じ理由でコンテナ id も要る(Issue #100 段①)── 説明に書いた
      *  `pkc://<自分>/entry/<lid>` が、ここだけ押せないと一貫性が崩れる。 */
     currentContainerId: string,
+    /** ⚠ **ノートの題名**(添付の file 名 `meta.name` とは別物)。改名の欄に出す。 */
+    entryTitle: string,
   ): void {
     const host = this.bodyHost ?? this.region;
     const meta = readAttachmentMeta(rawBody);
@@ -1507,6 +1509,24 @@ export class DetailRenderer {
     //    🔴 PKC3 の中からタイルを作る手段が**1 つも無かった** ── タイルの元データは
     //    この添付の frontmatter に在るのに、書けるのは PKC2 の取込だけだった。
     //    ⚠ 置き場所は「操作は対象の隣」── その添付の画面に置く
+    /**
+     * 🔴 **名前を、その添付の画面から変える**(#401 ②)。
+     *
+     * ⚠ 改名の機構は在ったのに(`RENAME_ENTRY_TITLE`)、**ここに口が無かった** ──
+     *   一覧へ戻って `F2` を押すか、編集画面を開くしかなく、情報ペインの原則
+     *   「**操作は対象の隣**」(`inspector.ts:9-13`)と自己矛盾していた。
+     * ⚠ **新しい改名の規則を作らない** ── 既存の action を撃つだけ。
+     */
+    const rename = document.createElement('input');
+    rename.type = 'text';
+    rename.setAttribute('data-pkc-action', 'rename-attachment');
+    rename.setAttribute('data-pkc-field', 'attachment-rename');
+    rename.setAttribute('aria-label', 'この添付の名前');
+    rename.value = entryTitle;
+    // ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)
+    rename.title = '名前を変えて、この欄の外を押すと変わります';
+    host.append(rename);
+
     if (isAppMime(meta.mime)) host.append(appTileControls(rawBody));
 
     const previewHost = document.createElement('div');

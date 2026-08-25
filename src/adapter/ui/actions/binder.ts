@@ -14,6 +14,7 @@
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { deliveredEntryOf, type ExtDeliveredEntry } from '@features/extension/ext-delivery';
+import { isLaunchableUrl } from '@features/launcher/tiles';
 import { isViewMode, nextViewMode, type AppState, type ViewMode } from '@adapter/state/app-state';
 import type { EntryMeta } from '@core/model/entry-meta';
 import { filerRows, operationTargets, visibleSelection } from '@features/relation/filer-list';
@@ -630,6 +631,17 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'set-entry-date',
   'clear-entry-date',
   'toggle-app-tile',
+  /**
+   * 🔴 **リンクを足すのも「作る」である**(#401 ①)。⚠ `create-entry` と同じ理由で
+   *   載せる ── 取り込みが entry を総入れ替えしている裏で新しい行を挿させない。
+   * 🔑 「押しうるか」ではなく「**撃ちうるか**」で判断する(`open-today` と同じ)。
+   */
+  'add-url-tile',
+  /**
+   * 🔴 **改名も disk への書込**(#401 ②)── 本文は書かないが、題名の行を書き戻す。
+   * ⚠ `move-entry` を載せた理由(「本文は書かないが disk への書込」)と同じである。
+   */
+  'rename-attachment',
   /**
    * 🔴 **作るのも disk への書込である**(2026-08-19、機械検査が見つけた 4 件)。
    * ⚠ `move-entry` を入れた理由(「本文は書かないが disk への書込」)と同じなのに、
@@ -1918,6 +1930,82 @@ const ACTIONS: Record<string, ActionHandler> = {
     void done.then(reset, reset);
   },
   /**
+   * 🔴 **よく開くサイトをアプリ一覧に足す**(#401 ①)。
+   *
+   * ⚠ PKC3 は URL タイルを**表示も起動もできた**のに(`tiles.ts` が
+   *   `attachment.launcher_url` を読む)、**作る口が 1 つも無かった** ──
+   *   PKC2 では flag 既定 ON で全 user に届いていた導線である。
+   *
+   * 🔑 **1 回の `CREATE_ENTRY` で作る** ── 作ってから設定を書く 2 段にすると、
+   *   間に別の書込が挟まったときに片方だけ残る(`SET_APP_TILE` が
+   *   「読んで書き戻す」操作なのと同じ理由)。`body` に frontmatter を
+   *   最初から入れておけば、その窓が無い。
+   * ⚠ archetype は **`attachment`** でなければならない ── 一覧の材料を集める
+   *   `attachmentEntries` がその型で絞っている(別の型で作ると**永久に出ない**)。
+   * ⚠ **`edit: false`** ── 足した直後に本文の編集へ落ちると、user は
+   *   「リンクを足したのに知らない画面が出た」になる。
+   */
+  'add-url-tile': (dispatcher, target, services) => {
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const nameEl = root.querySelector<HTMLInputElement>('[data-pkc-field="launcher-add-name"]');
+    const urlEl = root.querySelector<HTMLInputElement>('[data-pkc-field="launcher-add-url"]');
+    const url = (urlEl?.value ?? '').trim();
+    const name = (nameEl?.value ?? '').trim();
+    // ⚠ **押して無反応にしない** ── 断るときは必ず理由を言う
+    if (url === '') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'アドレスを入れてください' });
+      return;
+    }
+    /**
+     * 🔴 **開ける形だけ受ける**(`http` / `https`)。
+     * ⚠ 判定は `tiles.ts` の 1 つを使う ── ここに 2 つ目の規則を書くと、
+     *   片方だけ直る形になる(§7)。`javascript:` 等はあちらが弾く。
+     */
+    if (!isLaunchableUrl(url)) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: 'http:// か https:// で始まるアドレスを入れてください',
+      });
+      return;
+    }
+    // ⚠ 名前を省いたらアドレスをそのまま名前にする(無題のタイルを作らない)
+    const title = name === '' ? url : name;
+    dispatcher.dispatch({
+      type: 'CREATE_ENTRY',
+      lid: generateLid(),
+      title,
+      archetype: 'attachment',
+      body: `---\nattachment.launcher_url: ${url}\n---\n`,
+      edit: false,
+    });
+    // 🔑 **足したものがその場で出る** ── 読み直さないと、user は「押しても
+    //    何も起きない」と読む(次に開いたときに出ても遅い)
+    dispatcher.dispatch({ type: 'REFRESH_LAUNCHER_TILES' });
+    if (nameEl) nameEl.value = '';
+    if (urlEl) urlEl.value = '';
+    services.showStatus?.(`「${title}」を足しました`);
+  },
+  /**
+   * 🔴 **添付の名前を、その添付の画面から変える**(#401 ②)。
+   *
+   * ⚠ 改名の機構は在ったのに(`RENAME_ENTRY_TITLE`)、**添付の詳細面に口が
+   *   無かった** ── 一覧へ戻って `F2` を押すか、編集画面を開くしかなかった。
+   *   情報ペインの原則「**操作は対象の隣**」と自己矛盾していた。
+   * ⚠ **新しい改名の規則を作らない** ── 既存の 1 つを撃つだけ
+   *   (`binder.ts` の別の 2 か所と同じ action)。
+   */
+  'rename-attachment': (dispatcher, target) => {
+    const lid = dispatcher.getState().selectedLid;
+    if (!lid || !(target instanceof HTMLInputElement)) return;
+    const title = target.value.trim();
+    // ⚠ 空にはしない(無題の添付を作らない)── 元の字へ戻す
+    if (title === '') {
+      target.value = dispatcher.getState().entryMetas.get(lid)?.title ?? '';
+      return;
+    }
+    dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title });
+  },
+  /**
    * ランチャーのタイル設定(P8 段⑭)。
    * ⚠ 対象は**いま選んでいるノート** ── この 3 つは添付の画面にしか出ない
    */
@@ -2609,7 +2697,14 @@ export function bindActions(
       run(changeAction, el);
       return;
     }
-    if (changeAction === 'toggle-app-tile') {
+    /**
+     * ⚠ **ここは許可リストである。**`data-pkc-action` を付けただけでは
+     *   change では呼ばれない ── 登録し忘れると、**在るのに誰も呼ばない**
+     *   無言の dead click になる(#401 ② を書いていて実際に踏んだ)。
+     * 🔑 `repo-hygiene` の「受け手のいない action が無い」は**逆向き**しか見ない
+     *   (handler が在るので緑になる)── だから足すときは必ずここも見る。
+     */
+    if (changeAction === 'toggle-app-tile' || changeAction === 'rename-attachment') {
       run(changeAction, el);
       return;
     }
