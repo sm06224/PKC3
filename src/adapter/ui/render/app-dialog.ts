@@ -34,6 +34,8 @@
  */
 
 /** 押した結果。⚠ `Escape` と「やめる」は**同じ**(取り消し)。 */
+import type { SnippetChoice } from '@features/snippet/snippet-menu';
+
 export type DialogAnswer = 'ok' | 'cancel';
 
 export interface ConfirmOptions {
@@ -375,6 +377,77 @@ export function pickDateInApp(
     if (answer !== 'ok') return null;
     // ⚠ 日付が空なら**入れない**(空の記法を本文へ挿すと、読めない字が残る)
     return date.value === '' ? null : { date: date.value, time: time.value === '' ? null : time.value };
+  });
+}
+
+/**
+ * 🔴 **雛形を一覧から選ぶ**(#196 / B-2 段②-b)。
+ *
+ * ⚠ **押した行がそのまま答え**である ── 「選ぶ → 入れる」の 2 段にしない。
+ *   選ぶ以外にこの器ですることが無いので、確定のボタンを置くと**必ず 2 回押させる**
+ *   だけになる(`pickDateInApp` が 2 段なのは、日付を選んだ後に**時刻を足せる**からで、
+ *   ここには足す物が無い)。だから受ける側のボタンは**隠す**。
+ * ⚠ ただし閉じ方は器の 1 本を通す(`f.ok.click()`)── `Escape` / 「やめる」/ 行、
+ *   どれで閉じても**焦点を返す後始末が 1 か所**で走る(CLAUDE.md §10 ③)。
+ *
+ * @param note 一覧の上に出す 1 行(切ったときの断り等)。空なら出さない
+ * @returns 選んだ行。`Escape` / 「やめる」なら `null`
+ */
+export function pickSnippetInApp(
+  host: HTMLElement,
+  choices: readonly SnippetChoice[],
+  note: string,
+): Promise<SnippetChoice | null> {
+  return enqueue(async () => {
+    const f = ensureFrame(host);
+    f.title.textContent = '雛形を入れる';
+    f.body.textContent = '';
+    if (note !== '') {
+      const line = document.createElement('p');
+      line.setAttribute('data-pkc-field', 'pick-snippet-note');
+      line.textContent = note;
+      f.body.append(line);
+    }
+
+    let chosen: SnippetChoice | null = null;
+    const rows: HTMLButtonElement[] = [];
+    for (const [index, choice] of choices.entries()) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.setAttribute('data-pkc-field', 'pick-snippet');
+      btn.setAttribute('data-pkc-snippet-index', String(index));
+      /**
+       * ⚠ 字は「**題名**(短縮語)」── 短縮語を書いてある雛形は、ここで
+       *   **覚え直せる**(次からは `Tab` で呼べる)。組み込みには短縮語が無いので
+       *   題名だけ。
+       */
+      btn.textContent =
+        choice.kind === 'snippet' && choice.abbr !== ''
+          ? `${choice.title}(${choice.abbr})`
+          : choice.title;
+      btn.addEventListener('click', () => {
+        chosen = choice;
+        // ⚠ 隠してあっても `click()` は届く(閉じ口を 1 本に保つための呼び方)
+        f.ok.click();
+      });
+      rows.push(btn);
+      f.body.append(btn);
+    }
+
+    f.ok.textContent = '入れる';
+    f.ok.removeAttribute('data-pkc-danger');
+    // 🔑 受ける側は**隠す**(上の docstring)── 消さずに隠す(器を捨てない)
+    f.ok.hidden = true;
+    f.cancel.textContent = 'やめる';
+    f.cancel.hidden = false;
+
+    const answered = open(f, 'cancel');
+    // 🔑 焦点は**先頭の行**へ ── 開いた直後にやることは「選ぶ」だからである
+    rows[0]?.focus();
+    const answer = await answered;
+    // ⚠ 隠したままにしない ── 器は使い回すので、次の確認で受ける側が消える
+    f.ok.hidden = false;
+    return answer === 'ok' ? chosen : null;
   });
 }
 

@@ -796,6 +796,8 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
     expect(ids).toEqual([
       // ⚠ 2026-08-23 に足した(日付の道具 ── 編集中の本文へ挿す)
       'insert-date',
+      // ⚠ 2026-08-25 に足した(雛形の一覧 ── 同じく編集中の本文へ挿す)
+      'insert-snippet',
       'toggle-replace',
       'open-settings',
       'open-flags',

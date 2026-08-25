@@ -14,6 +14,7 @@ import {
   confirmInApp,
   DIALOG_REGION,
   pickDateInApp,
+  pickSnippetInApp,
   resetAppDialogForTest,
 } from '../../src/adapter/ui/render/app-dialog';
 
@@ -332,5 +333,66 @@ describe('日付を入れる道具の返り値(2026-08-23)', () => {
     field('pick-date').value = '';
     okBtn().click();
     expect(await p).toBeNull();
+  });
+});
+
+/**
+ * 🔴 **雛形の一覧**(#196 / B-2 段②-b)── 器としての約束だけを見る
+ * (何が並ぶかは `tests/features/snippet-menu.test.ts`、繋がりは
+ *  `tests/adapter/snippet-insert.test.ts`)。
+ */
+describe('雛形の一覧(#196 / B-2 段②-b)', () => {
+  let host: HTMLElement;
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    resetAppDialogForTest();
+    host = document.createElement('div');
+    document.body.append(host);
+  });
+
+  const CHOICES = [
+    { kind: 'format', op: 'table', title: '表' },
+    { kind: 'format', op: 'link', title: 'リンク' },
+  ] as const;
+
+  it('🔴 押した行がそのまま答え(確定をもう 1 回押させない)', async () => {
+    const picked = pickSnippetInApp(host, CHOICES, '');
+    q<HTMLButtonElement>('[data-pkc-field="pick-snippet"][data-pkc-snippet-index="1"]').click();
+    await expect(picked).resolves.toEqual(CHOICES[1]);
+  });
+
+  it('🔴 やめたら `null`(何も選ばなかったことが伝わる)', async () => {
+    const picked = pickSnippetInApp(host, CHOICES, '');
+    cancelBtn().click();
+    await expect(picked).resolves.toBeNull();
+  });
+
+  /**
+   * 🔴 **借りた器は元に戻す**(CLAUDE.md §10 ③「後始末をしていたか」)。
+   * ⚠ 一覧では「入れる」を隠す(押しても何も起きないボタンを作らないため)が、
+   *   器は使い回すので、**戻さないと次の確認から「はい」が消える** ──
+   *   削除の確認が「やめる」しか出ない形になり、user は操作を進められない。
+   */
+  it('🔴 閉じたあと、次の確認に「はい」が戻っている', async () => {
+    const picked = pickSnippetInApp(host, CHOICES, '');
+    expect(okBtn().hidden, '一覧に「入れる」が出ている(dead click)').toBe(true);
+    cancelBtn().click();
+    await picked;
+    const answer = confirmInApp(host, '消しますか');
+    expect(okBtn().hidden, '次の確認から「はい」が消えている').toBe(false);
+    okBtn().click();
+    await expect(answer).resolves.toBe('ok');
+  });
+
+  it('⚠ 断りの 1 行は、渡したときだけ出す', async () => {
+    const withNote = pickSnippetInApp(host, CHOICES, 'まだ雛形がありません');
+    expect(q('[data-pkc-field="pick-snippet-note"]')?.textContent).toBe('まだ雛形がありません');
+    cancelBtn().click();
+    await withNote;
+    const without = pickSnippetInApp(host, CHOICES, '');
+    expect(q('[data-pkc-field="pick-snippet-note"]'), '空でも 1 行出している').toBeNull();
+    cancelBtn().click();
+    await without;
   });
 });

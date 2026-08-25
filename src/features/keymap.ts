@@ -119,6 +119,20 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     whileTyping: true,
     note: '編集中だけ効きます(本文の caret の位置に入ります)',
   },
+  /**
+   * 🔴 **雛形を入れる**(#196 / B-2 段②-b)。
+   * ⚠ 近道であって**主の口ではない** ── 主は書式の帯のボタン。
+   * ⚠ `Mod+/` は「`/` で雛形」という市井の記憶に乗せてある ── ただし
+   *   **打鍵に追随して出る形は採らない**(理由は `features/snippet/snippet-menu.ts`)。
+   */
+  {
+    id: 'insert-snippet',
+    label: '雛形を入れる',
+    contexts: ['global'],
+    defaults: ['Mod+Slash'],
+    whileTyping: true,
+    note: '編集中だけ効きます(本文の caret の位置に入ります)',
+  },
   {
     id: 'toggle-replace',
     label: '置換の帯を開く / 閉じる',
