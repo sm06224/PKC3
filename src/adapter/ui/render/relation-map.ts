@@ -28,6 +28,20 @@ import { relationLabel } from '@features/relation/kinds';
 /** 図の器の比(高さ / 幅)。⚠ 正方に近いほうが環が潰れない。 */
 const ASPECT = 0.82;
 
+/**
+ * 🔴 **本文が張っているリンクの辺**(#186 段③)。
+ *
+ * ⚠ 関係(`RELATION_KINDS`)とは**別の系統**である ── 関係は user が明示的に
+ * 張ったもの、こちらは**本文に `entry:` と書いた結果**。同じ図に出すが、
+ * 見分けが付かないと「張った覚えのない関係がある」と読まれる。
+ */
+export const BODY_LINK_KIND = 'body-link';
+
+/** 凡例の名前。⚠ 知らない種類はそのまま出す(黙って消さない ── `relationLabel` と同じ向き)。 */
+function edgeLabel(kind: string): string {
+  return kind === BODY_LINK_KIND ? '本文のリンク' : relationLabel(kind);
+}
+
 export interface RelationMapInput {
   readonly center: string;
   readonly depth: number;
@@ -88,6 +102,12 @@ export function renderRelationMap(box: HTMLElement, input: RelationMapInput): nu
     line.setAttribute('stroke', 'currentColor');
     line.setAttribute('stroke-width', '0.6');
     line.setAttribute('opacity', '0.45');
+    /**
+     * 🔑 **本文のリンクは破線**にする ── 色で分けない。
+     * ⚠ 色だけで意味を分けると、色覚の違いと**無彩色のテーマ**で読めなくなる
+     *   (「地は無彩色、色は情報にだけ使う」= 色数を増やす向きへ倒さない)。
+     */
+    if (e.kind === BODY_LINK_KIND) line.setAttribute('stroke-dasharray', '2 1.5');
     line.setAttribute('data-pkc-field', 'relation-map-edge');
     line.setAttribute('data-pkc-relation-kind', e.kind);
     svg.append(line);
@@ -140,7 +160,7 @@ export function renderRelationMap(box: HTMLElement, input: RelationMapInput): nu
     const legend = document.createElement('p');
     legend.setAttribute('data-pkc-field', 'relation-map-legend');
     legend.textContent = [...kinds]
-      .map(([kind, count]) => `${relationLabel(kind)} ${count}`)
+      .map(([kind, count]) => `${edgeLabel(kind)} ${count}`)
       .join(' / ');
     box.append(legend);
   }
