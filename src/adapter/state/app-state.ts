@@ -955,10 +955,15 @@ export type DomainEvent =
   /**
    * 🔴 **添付の実体を差し替える**(#205)。計画は `planSaveBack`(純関数)が立てる。
    *
-   * ⚠ **全ノートの素性を運ぶ。** 参照(`asset:`)は**どのノートにも書ける**ので、
-   * 書き換え先は 1 件に閉じない ── そして effect 層は実行時に state を見ない
-   * (この file 冒頭の宣言)ので、event が持って行くしかない。
-   * ⚠ 本文は運ばない(常駐していない)── effect が `listBodies` で読む。
+   * 🔑 **運ぶのは「何に差し替えたか」だけ**(2026-08-25)── 参照(`asset:`)は
+   * どのノートにも書けるので書き換え先は 1 件に閉じないが、**探すのも書くのも
+   * worker が同じ tx の中でやる**ようになった(`op: 'replaceAssetRefs'`)。
+   * ⚠ 直す前はここが全ノートの素性を運び、effect が `listBodies` で本文を読み、
+   * 1 件ずつ `persistEntry` していた ── **読んでから書くまでの間に別のタブ /
+   * 窓が書くと、それを消していた**(`checkpoint` を渡さないので履歴にも残らない。
+   * #178 で改名 / 並べ替えを直したのとまったく同じ形)。
+   * ⚠ **旧 key もここでは運ばない** ── 呼び側が読むと「読んだ時点の値」になり、
+   * 隙間がまた開く(worker が tx の中で読む)。
    */
   | {
       type: 'REQUEST_ASSET_REPLACE';
@@ -970,7 +975,6 @@ export type DomainEvent =
       newName: string;
       newMime: string;
       savedAt: string;
-      entries: Array<{ lid: string; title: string; archetype: string; entryOrder: number }>;
     }
   | {
       type: 'REQUEST_LAUNCHER_TILES';
@@ -1587,13 +1591,10 @@ function reduceCore(
             newName: action.newName,
             newMime: action.newMime,
             savedAt: action.savedAt,
-            // ⚠ **全ノート**を運ぶ ── 参照はどのノートにも書ける
-            entries: state.order.flatMap((lid) => {
-              const m = state.entryMetas.get(lid);
-              return m
-                ? [{ lid, title: m.title, archetype: m.archetype, entryOrder: m.entryOrder }]
-                : [];
-            }),
+            // 🔑 **ノートの一覧はもう運ばない**(2026-08-25)── 走査ごと
+            //    worker の 1 tx へ移したので、題名も並びも **worker が自分で読む**。
+            //    ⚠ 運び続けると「受け手のいない payload」になる(5,000 件の meta を
+            //    毎回作って捨てることになるうえ、次に読む人が「効く」と思う)。
           },
         ],
       };

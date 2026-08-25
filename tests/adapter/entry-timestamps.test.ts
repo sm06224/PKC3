@@ -343,7 +343,16 @@ describe('② 書込のたびに state の meta が更新される', () => {
       [...src.matchAll(/await store\.persistEntry\(/g)].length +
       [...src.matchAll(/await store\.renameEntry\(/g)].length +
       // ⚠ 並べ替えも本文を書き戻すのをやめた(#178 の残り、2026-08-24)
-      [...src.matchAll(/await store\.reorderEntry\(/g)].length;
+      [...src.matchAll(/await store\.reorderEntry\(/g)].length +
+      /**
+       * ⚠ **添付の差し替えも行を書く**(#205 / #178 / #212、2026-08-25)── 走査ごと
+       * worker の 1 tx へ移したので、主スレッドからは `persistEntry` を呼ばなくなった。
+       * 🔑 **1 往復で N 件書く**ので、刻みは返ってきた行を回して 1 か所で打つ ──
+       * この表の数え方(1 経路 = 1 刻み)はそのまま成り立つ。
+       * ⚠ ここへ足し忘れると「経路が 1 つ消えた」ように見えて、**刻みの側が
+       * 余っているのか、書込が減ったのか区別が付かない**。
+       */
+      [...src.matchAll(/await store\.replaceAssetRefs\(/g)].length;
     const stamps = [...src.matchAll(/^\s*stamp\(/gm)].length;
     expect(writes, '書込経路が 1 つも見つからない(scan が壊れている)').toBeGreaterThanOrEqual(7);
     expect(

@@ -180,6 +180,44 @@ export type StorageRequest =
    */
   | { op: 'reorderEntry'; cid: string; lid: string; entryOrder: number }
   | { op: 'bulkUpsertEntries'; cid: string; entries: EntryUpsert[] }
+  | {
+      /**
+       * 🔴 **添付の実体を差し替え、参照を書き換える**(#205 / #178 の残り、2026-08-25)。
+       *
+       * ⚠ **なぜ 1 op なのか。** 直す前は主スレッドが `listBodies` で**全ノートの本文**を
+       * 読み、`planSaveBack` を掛け、`upsertEntry` を**1 件ずつ**呼んでいた ──
+       * 読んでから書くまでの間に別のタブ / 窓が書くと**それを消し**、`checkpoint` を
+       * 渡していないので **amend** = **履歴にも残らない**(改名 / 並べ替えで塞いだ穴と
+       * まったく同じ形。#178)。
+       * 🔑 **走査と書込を同じ `BEGIN IMMEDIATE` に閉じ込めれば、衝突は起こりようがない**
+       * ── 検出ではなく消滅である。
+       *
+       * 🔑 **旧 key はここで読む。** 呼び側から渡すと「呼び側が読んだ時点の値」に
+       * なり、隙間がまた開く(#178 で `getBody` → 比べる形を捨てたのと同じ理由)。
+       *
+       * ⚠ 副産物として **#212** も消える ── 全ノートの走査が主スレッドから出るので、
+       * user が字を打っている最中に飛び込まなくなる(不可侵指示 2026-08-03
+       * 「基本的に重い処理はワーカーにしてください」)。
+       */
+      op: 'replaceAssetRefs';
+      cid: string;
+      /** 保存した添付ノート。 */
+      targetLid: string;
+      newKey: string;
+      newHash: string | null;
+      newBytes: number;
+      /** 差し替え後の綴りと中身の種類(#214)。⚠ frontmatter に書き戻す。 */
+      newName: string;
+      newMime: string;
+      /** ISO 8601。⚠ **呼び側が渡す**(判断は純関数なので時計を持たない)。 */
+      savedAt: string;
+      /**
+       * ⚠ **上限の knob は置いていない。** `planSaveBack` の既定をそのまま使う ──
+       * 直す前の呼び側も渡していなかったので、これは挙動の据え置きである。
+       * 🔑 **誰も渡さない field を宣言しない**(PKC2 が `date` を宣言して
+       * 一度も読まなかったのと同じ型 ── 在ると次に読む人が「効く」と思う)。
+       */
+    }
   | { op: 'deleteEntry'; cid: string; lid: string }
   | { op: 'listRelations'; cid: string }
   | { op: 'bulkUpsertRelations'; cid: string; relations: RelationUpsert[] }
@@ -467,6 +505,23 @@ export interface ResultMap {
    * optional にすると writer が代入を落としても tsc が黙り、全件で無効化される)
    */
   upsertEntry: EntryStamps;
+  /**
+   * 🔴 添付の差し替えの結果(#205 / #178 の残り)。
+   *
+   * 🔑 **書けた本文を返す** ── 呼び側は画面に開いている本文を差し替える
+   * 必要がある(返さないと、次に開き直すまで古い情報が出る)。
+   * ⚠ `problem` は **null が正常** ── 「添付ノートが無い」「実体が分からない」は
+   *   例外ではなく**断りの理由**なので、投げずに名前で返す。
+   */
+  replaceAssetRefs: {
+    problem: 'missing-entry' | 'missing-asset' | null;
+    /** 中身が同じ = 何もしなかった(異常ではない)。 */
+    unchanged: boolean;
+    wrote: Array<{ lid: string; body: string; stamps: EntryStamps }>;
+    /** 旧 key を指したまま残った lid(⚠ 0 でなければ呼び側が件数を出す)。 */
+    stale: string[];
+    overBudget: boolean;
+  };
   /** ⚠ 行が無ければ `null`(消えたノートの改名 ack を握り潰さない)。 */
   renameEntry: EntryStamps | null;
   /** ⚠ 行が無ければ `null`(消えたノートの並べ替えを「成功」と言わない)。 */

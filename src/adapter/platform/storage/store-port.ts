@@ -89,6 +89,24 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
      */
     reorderEntry: (lid, entryOrder) =>
       client.request({ op: 'reorderEntry', cid, lid, entryOrder }),
+    /**
+     * 🔴 **添付の実体を差し替え、参照を書き換える**(#205 / #178 の残り / #212)。
+     * ⚠ 改名 / 並べ替えと**同じ理由** ── 直す前は主スレッドが全本文を読んでから
+     * 1 件ずつ書いており、その間に別のタブ / 窓が書くと消していた(履歴にも残らない)。
+     * 🔑 走査ごと worker の 1 tx へ入れたので、衝突しうる状態が消えた。
+     */
+    replaceAssetRefs: (input) =>
+      client.request({
+        op: 'replaceAssetRefs',
+        cid,
+        targetLid: input.targetLid,
+        newKey: input.newKey,
+        newHash: input.newHash,
+        newBytes: input.newBytes,
+        newName: input.newName,
+        newMime: input.newMime,
+        savedAt: input.savedAt,
+      }),
     persistEntry: (entry, opts) =>
       client.request({
         op: 'upsertEntry',

@@ -14,6 +14,7 @@ import type {
 } from '../../src/adapter/platform/storage/protocol';
 import { TASK_LIMITS } from '../../src/features/schedule/task-cards';
 import { contentHash64Hex } from '../../src/adapter/platform/storage/content-hash';
+import { parseFrontmatter } from '../../src/features/markdown/frontmatter';
 
 type Op = StorageRequest['op'];
 
@@ -1607,5 +1608,264 @@ describe('大きさの列(2026-08-19)', () => {
   it('🔴 空のノートは 0(未計算ではない)', async () => {
     await request({ op: 'upsertEntry', cid: 'c1', entry: entry('size-empty', '') });
     expect(await charsOf('size-empty')).toBe(0);
+  });
+});
+
+/**
+ * 🔴 **添付の差し替え ── 走査も書込も 1 tx**(#205 / #178 の残り / #212、2026-08-25)。
+ *
+ * ⚠ **ここに在るのが要点である。** 直す前、この仕事は effect 層が
+ * `listBodies` → `planSaveBack` → `persistEntry` を**1 件ずつ**回す形で持っており、
+ * 読んでから書くまでの間に別のタブ / 窓が書くと**それを消していた**
+ * (`checkpoint` を渡さないので **amend** = 履歴にも残らない)。
+ * 🔑 worker の同じ `BEGIN IMMEDIATE` に閉じ込めた結果、**衝突しうる状態が消えた**
+ * ので、test も「本物の SQL の上で」書ける ── fake の上で書いても、
+ * それは fake を検めているだけである(CLAUDE.md §3)。
+ */
+describe('添付の差し替え(#205 / #178 / #212)', () => {
+  const doc = (key: string, extra: string[] = []): string =>
+    [
+      '---',
+      'attachment.name: 報告書.odt',
+      'attachment.mime: application/vnd.oasis.opendocument.text',
+      'attachment.size: 100',
+      `attachment.asset_key: ${key}`,
+      ...extra,
+      '---',
+      '説明',
+      '',
+    ].join('\n');
+
+  const replace = (targetLid: string, newKey = 'ast-new') =>
+    request({
+      op: 'replaceAssetRefs',
+      cid: 'c1',
+      targetLid,
+      newKey,
+      newHash: 'h'.repeat(64),
+      newBytes: 4242,
+      newName: '報告.docx',
+      newMime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      savedAt: '2026-08-16T00:00:00.000Z',
+    });
+
+  const bodyOf = async (lid: string): Promise<string | null> =>
+    request({ op: 'getBody', cid: 'c1', lid });
+
+  it('🔴 key / 大きさ / hash / 綴り / 種類 が新しくなる(#214 ── 読み手 5 面が同じ所を見る)', async () => {
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('ar-a1', doc('ast-old'), { archetype: 'attachment' }),
+    });
+    const r = await replace('ar-a1');
+    expect(r.problem, '断られた').toBe(null);
+    expect(r.unchanged).toBe(false);
+    const fm = parseFrontmatter((await bodyOf('ar-a1'))!).meta;
+    expect(fm['attachment.asset_key'], 'key が古いまま').toBe('ast-new');
+    expect(fm['attachment.size']).toBe(4242);
+    expect(fm['attachment.hash']).toBe('h'.repeat(64));
+    // ⚠ 綴りが古いと **Office が拡張子で filter を選ぶ**ので開けない文書ができる
+    expect(fm['attachment.name'], '綴りが古いまま').toBe('報告.docx');
+    expect(String(fm['attachment.mime'])).toContain('wordprocessingml');
+  });
+
+  it('🔴 旧版が台帳に積まれる(戻せなくならない)', async () => {
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('ar-h1', doc('ast-old'), { archetype: 'attachment' }),
+    });
+    await replace('ar-h1');
+    const hist = parseFrontmatter((await bodyOf('ar-h1'))!).meta['attachment.history'];
+    expect(Array.isArray(hist), '台帳が配列で入っていない').toBe(true);
+    expect(String((hist as unknown[])[0])).toContain('ast-old');
+    expect(String((hist as unknown[])[0])).toContain('2026-08-16T00:00:00.000Z');
+  });
+
+  it('🔴 別のノートに書かれた参照も書き換わる / 無関係なノートは触らない', async () => {
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('ar-b1', doc('ast-b'), { archetype: 'attachment' }),
+    });
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('ar-b2', 'これを見て [報告書](asset:ast-b) ね\n'),
+    });
+    await request({ op: 'upsertEntry', cid: 'c1', entry: entry('ar-b3', '無関係\n') });
+    const r = await replace('ar-b1', 'ast-b-new');
+    expect(await bodyOf('ar-b2'), '他ノートの参照が旧 key のまま(GC で切れる)').toContain(
+      'asset:ast-b-new',
+    );
+    // ⚠ 触っていないノートは**書き直さない**(全件を書き戻すと履歴が荒れる)
+    expect(
+      r.wrote.map((w) => w.lid),
+      '無関係なノートまで書いた',
+    ).not.toContain('ar-b3');
+  });
+
+  it('🔴 書き換えられなかった参照は名指しで返る(黙って「差し替えました」と言わない)', async () => {
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('ar-s1', doc('ast-s'), { archetype: 'attachment' }),
+    });
+    // ⚠ 逃がし文字入りは**狭い規則が当たらない**ので旧 key を指したまま残る
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('ar-s2', 'これ [報告書](asset:ast\\-s) ね\n'),
+    });
+    const r = await replace('ar-s1', 'ast-s-new');
+    expect(r.stale, '旧い参照が残ったのに黙っている').toContain('ar-s2');
+  });
+
+  it('中身が同じ(key が変わらない)なら 1 バイトも書かない', async () => {
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('ar-u1', doc('ast-u'), { archetype: 'attachment' }),
+    });
+    const before = await bodyOf('ar-u1');
+    const r = await replace('ar-u1', 'ast-u');
+    expect(r.unchanged, '版だけ積んで中身は同じ、を作った').toBe(true);
+    expect(r.wrote).toEqual([]);
+    expect(await bodyOf('ar-u1'), '何も変わらないはずなのに書いた').toBe(before);
+  });
+
+  /**
+   * 🔴 **版の上限は容れ物全体で見る**(2026-08-16 の R5)。⚠ `otherBytes` を渡さないと
+   * 上限が**この添付の中だけ**で閉じ、30MB × 5 世代 のノートが 10 件で 1.5GB に
+   * なっても `overBudget` すら立たない(誰も気づけない)。
+   * ⚠ 上限は `200 * 1024 * 1024` = 209,715,200 ── 「200MB」を 200,000,000 と
+   * 読むと**この test は何も見ずに緑になる**(実際 1 度そうなった)。
+   */
+  it('🔴 他の添付が使っている分を数える(数えないと上限が効かない)', async () => {
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('ar-o1', doc('ast-o'), { archetype: 'attachment' }),
+    });
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry(
+        'ar-o2',
+        [
+          '---',
+          'attachment.name: b.odt',
+          'attachment.asset_key: ast-ob',
+          // ⚠ 時刻に `:` が入るので**引用する**(この repo のミニ YAML の規約)
+          'attachment.history: ["2026-01-01T00:00:00.000Z|auto|ast-ob0|209715200|"]',
+          '---',
+          '',
+        ].join('\n'),
+        { archetype: 'attachment' },
+      ),
+    });
+    await replace('ar-o1', 'ast-o-new');
+    const hist = parseFrontmatter((await bodyOf('ar-o1'))!).meta['attachment.history'];
+    expect(hist, '他の添付の分を数えていない ── 上限が全体で効いていない').toBeUndefined();
+    // ⚠ 他所の版は**巻き添えにしない**(数えるが落とさない)
+    expect(String(await bodyOf('ar-o2'))).toContain('ast-ob0');
+  });
+
+  /**
+   * 🔴 **参照を持つノートの抽出列は、そのノート自身の flavor で出す**
+   * (2026-08-25、変異試験 M8 が SURVIVED で教えた)。
+   *
+   * ⚠ 参照(`asset:`)は**どのノートにも書ける**ので、書き換え先には
+   * **やること(`todo`)のノートも混じる**。抽出列(status / date / archived)を
+   * `text` で出すと `status` が `null` に落ち、そのノートは
+   * **カンバンからも予定の面からも黙って消える**(本文は無傷なので、
+   * 開けば在る ── いちばん気づけない形である)。
+   * 🔑 空振り防止に**差し替えの前後で比べる** ── 前が既に null なら何も見ていない。
+   */
+  it('🔴 参照を持つ「やること」の札が、差し替えで消えない', async () => {
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('ar-t1', doc('ast-t'), { archetype: 'attachment' }),
+    });
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry(
+        'ar-t2',
+        [
+          '---',
+          'status: open',
+          'date: 2026-09-01',
+          // 🔴 **`archived` が効く鍵である**(2026-08-25、変異試験 M8 の 2 稿目)。
+          //    ⚠ `status` / `date` は `text` の flavor も同じ鍵から読むので、
+          //    **archetype を取り違えても同じ値が出る** ── 1 稿目の test は
+          //    それで空振りしていた(差が出ない次元だけを見ていた)。
+          //    🔑 `archived` は **todo だけが読む**(`text` は常に false)ので、
+          //    ここが「そのノート自身の flavor で出しているか」を分ける。
+          'archived: true',
+          '---',
+          '[報告書](asset:ast-t)',
+          '',
+        ].join('\n'),
+        { archetype: 'todo', status: 'open', date: '2026-09-01', archived: true },
+      ),
+    });
+    const before = (await request({ op: 'listEntryMetas', cid: 'c1' })).find(
+      (m) => m.lid === 'ar-t2',
+    );
+    expect(before?.status, '前提が崩れている(差し替える前から札が無い)').toBe('open');
+    expect(before?.date).toBe('2026-09-01');
+    expect(before?.archived, '前提が崩れている(片付けた印が入っていない)').toBe(1);
+
+    await replace('ar-t1', 'ast-t-new');
+    const after = (await request({ op: 'listEntryMetas', cid: 'c1' })).find(
+      (m) => m.lid === 'ar-t2',
+    );
+    expect(after?.status, 'やることの札が消えた(カンバンから見えなくなる)').toBe('open');
+    expect(after?.date, '予定の日付が消えた(カレンダーから見えなくなる)').toBe('2026-09-01');
+    expect(after?.archived, '片付けた印が消えた ── 済ませた札がカンバンへ戻ってくる').toBe(1);
+    // ⚠ 参照そのものは書き換わっていること(空振り防止)
+    expect(await bodyOf('ar-t2')).toContain('asset:ast-t-new');
+  });
+
+  it('🔴 添付ノートが無い / 実体が分からないときは、投げずに理由を名前で返す', async () => {
+    expect((await replace('ar-nope')).problem, '知らない lid で名前が返らない').toBe(
+      'missing-entry',
+    );
+    await request({ op: 'upsertEntry', cid: 'c1', entry: entry('ar-plain', 'ただの文\n') });
+    expect((await replace('ar-plain')).problem, '実体の無いノートで名前が返らない').toBe(
+      'missing-asset',
+    );
+  });
+
+  /**
+   * 🔴 **これが #178 の当の保証** ── 書込は `upsertEntry` と**同じ 1 本**
+   * (`writeEntryRow`)を通るので、鎖の維持も刻印も同じ作法になる。
+   * ⚠ 差し替えは `checkpoint` を渡さない = **amend**(版を積むと Office の保存の
+   * たびに履歴が 1 件伸びる)ので、**履歴の件数が増えないこと**を見る。
+   */
+  it('🔴 書込は upsertEntry と同じ 1 本を通る(amend ── 履歴は伸びない)', async () => {
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('ar-c1', doc('ast-c'), { archetype: 'attachment' }),
+    });
+    // 版を 1 件作っておく(空振り防止 ── 0 件のままだと「伸びない」が自明に真)
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('ar-c1', doc('ast-c') + '追記\n', { archetype: 'attachment' }),
+      checkpoint: true,
+    });
+    const before = (await request({ op: 'listRevisionMetas', cid: 'c1', entryLid: 'ar-c1' })).length;
+    expect(before, '前提が崩れている(版が 1 件も無い)').toBeGreaterThan(0);
+    await replace('ar-c1', 'ast-c-new');
+    const after = (await request({ op: 'listRevisionMetas', cid: 'c1', entryLid: 'ar-c1' })).length;
+    expect(after, 'Office の保存のたびに履歴が伸びている').toBe(before);
+    // ⚠ 刻印は返る(呼び側が `stamp` に使う ── 返さないと次の boot まで時刻が出ない)
+    const r = await request({ op: 'listEntryMetas', cid: 'c1' });
+    expect(r.find((m) => m.lid === 'ar-c1')?.updated_at, '刻印が入っていない').toBeTruthy();
   });
 });

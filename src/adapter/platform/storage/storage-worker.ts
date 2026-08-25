@@ -24,6 +24,10 @@ import type { EntryStamps, EntryUpsert } from './schema';
 import { contentHash64Hex } from './content-hash';
 import { scanAssetRefsInto } from '@features/asset/asset-ref-scan';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
+import { extractMeta } from '@features/flavor';
+import { readVersions, totalHistoryBytes } from '@features/flavor/attachment-versions';
+import { planSaveBack } from '@features/asset/asset-replace-plan';
+import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
 import { planSearch, toLikePattern } from '@features/filter/search-query';
 import { countTaskCandidates } from '@features/markdown/task-count';
 import {
@@ -1000,6 +1004,98 @@ function mintContainerId(): string {
  * ⚠ 抽出列(status / date / archived)も本文由来なので触らない。
  * ⚠ **列名は呼び側のリテラルだけ**を受ける(user の値が SQL に入る口を作らない)。
  */
+/**
+ * 🔴 **本文を 1 件書く(tx は呼び側が張る)**。
+ *
+ * 🔑 **取り出した理由**(#178、2026-08-25)── 書込の作法(読んだものと違えば
+ * 書かない / 鎖を維持する / 居場所を張る / 刻んだ時刻を返す)を **1 か所**に
+ * 置くため。⚠ 同じ判定が 2 か所に生えると、**片方だけ壊しても検査に届かない**
+ * (CLAUDE.md §7 ── `anyEditing` で実際に踏んだ型)。
+ *
+ * ⚠ **`BEGIN` / `COMMIT` はここでは打たない。** 呼び側が張った tx の中で走る
+ * ことが要点である ── `replaceAssetRefs` は **走査と書込を 1 tx に閉じ込める**
+ * ために存在するので、ここで tx を張ると**その保証が消える**。
+ */
+function writeEntryRow(
+  database: Database,
+  cid: string,
+  entry: EntryUpsert,
+  opts: {
+    checkpoint?: boolean;
+    keepLatest?: number;
+    expectHash?: string;
+    parent?: { parentLid: string | null; relationId: string };
+  },
+): { stamps: EntryStamps; conflict: boolean } {
+  const old = database.selectObjects(
+    'SELECT title, archetype, body FROM entries WHERE cid = ? AND lid = ?',
+    [cid, entry.lid],
+  )[0] as { title: string; archetype: string; body: string } | undefined;
+  /**
+   * 🔴 **読んだものと違っていたら、1 バイトも書かない**(#178、2026-08-22)。
+   *
+   * ⚠ **追記のためにある** ── `getBody` → `appendBlock` → 書込 の間に
+   * 別のタブ / 窓が書くと、その版を消す(`checkpoint` を渡さないので
+   * **履歴にも残らない** = どこからも戻せない)。
+   * 🔑 **同じ tx の中で比べる**のが要点である ── ここで読んだ `old.body` は
+   * 「まさにこれから上書きする値」なので、比較と書込の間に隙間が無い
+   * (呼び側で `getBody` して比べる形にすると、その隙間がまた開く)。
+   * ⚠ hash は**頼まれたときだけ**計算する(全書込に負荷を足さない)。
+   * ⚠ 行が無いときは比べない ── 消えていたら普通に作る(追記側が先に弾く)。
+   */
+  if (opts.expectHash !== undefined && old && contentHash64Hex(old.body) !== opts.expectHash) {
+    return { stamps: { createdAt: null, updatedAt: null }, conflict: true };
+  }
+  if (old && old.body !== entry.body) {
+    // 🔒 **履歴より本文が上位**(review P5c F1 ── データ喪失方向で実証済み):
+    // 鎖が既に壊れていると amend の materialize が throw し、tx ごと巻き戻って
+    // **本文の保存が失敗する**。しかも toggle 系は永久に通らなくなる。
+    // 鎖の維持に失敗しても body の書込は続行する ── 壊れた鎖は読み側の
+    // 可視エラー(revision restore failed)で既に扱えている
+    try {
+      maintainChain(
+        database,
+        cid,
+        entry.lid,
+        old.body,
+        entry.body,
+        old.title,
+        old.archetype,
+        opts.checkpoint === true,
+        opts.keepLatest ?? DEFAULT_REVISION_KEEP,
+      );
+    } catch {
+      /* 履歴の維持失敗は本文の保存を巻き添えにしない */
+    }
+  }
+  database.exec({ sql: UPSERT_SQL, bind: bindUpsert(cid, entry) });
+  /**
+   * 🔴 **同じ tx で居場所も張る**(#258)。
+   * ⚠ 順序に **FK の制約は無い**(`schema.ts` の relations に FK は無い)── 行を先に
+   *   書くのは**読み手の期待**と 2 手だった頃の並びに合わせるためで、入れ替えても
+   *   DB は壊れない(「これが無いと壊れる」と書かない ── CLAUDE.md §1)。
+   */
+  if (opts.parent) writeParent(database, cid, entry.lid, opts.parent.parentLid, opts.parent.relationId);
+  // 🔑 **刻んだ時刻を返す**(P9 段①)。`datetime('now')` を打つのはここだけなので、
+  // 返さないと主スレッドは**次の boot まで作成・更新の時刻を知らない**
+  // (実際に情報列が終日「—」になっていた)。⚠ 同 tx 内で読む ──
+  // COMMIT の後に読むと、別タブの書込が割り込んだ値を返しうる。
+  // ⚠ 主スレッド側で時刻を作らない(DB に無い値を画面に出すことになる)
+  const stamped = database.selectObjects(
+    'SELECT created_at, updated_at FROM entries WHERE cid = ? AND lid = ?',
+    [cid, entry.lid],
+  )[0] as { created_at: string | null; updated_at: string | null } | undefined;
+  return {
+    stamps: {
+      createdAt: stamped?.created_at ?? null,
+      updatedAt: stamped?.updated_at ?? null,
+      // ⚠ **書いたときだけ名乗る**(旧 worker は名乗らない = 呼び側が 2 手へ落ちる)
+      ...(opts.parent ? { parentWritten: true } : {}),
+    },
+    conflict: false,
+  };
+}
+
 function updateEntryColumn(
   cid: string,
   lid: string,
@@ -1240,73 +1336,18 @@ const handlers: Handlers = {
     const database = need();
     database.exec('BEGIN IMMEDIATE');
     try {
-      const old = database.selectObjects(
-        'SELECT title, archetype, body FROM entries WHERE cid = ? AND lid = ?',
-        [req.cid, req.entry.lid],
-      )[0] as { title: string; archetype: string; body: string } | undefined;
-      /**
-       * 🔴 **読んだものと違っていたら、1 バイトも書かない**(#178、2026-08-22)。
-       *
-       * ⚠ **追記のためにある** ── `getBody` → `appendBlock` → 書込 の間に
-       * 別のタブ / 窓が書くと、その版を消す(`checkpoint` を渡さないので
-       * **履歴にも残らない** = どこからも戻せない)。
-       * 🔑 **同じ tx の中で比べる**のが要点である ── ここで読んだ `old.body` は
-       * 「まさにこれから上書きする値」なので、比較と書込の間に隙間が無い
-       * (呼び側で `getBody` して比べる形にすると、その隙間がまた開く)。
-       * ⚠ hash は**頼まれたときだけ**計算する(全書込に負荷を足さない)。
-       * ⚠ 行が無いときは比べない ── 消えていたら普通に作る(追記側が先に弾く)。
-       */
-      if (req.expectHash !== undefined && old && contentHash64Hex(old.body) !== req.expectHash) {
+      const written = writeEntryRow(database, req.cid, req.entry, {
+        ...(req.checkpoint === undefined ? {} : { checkpoint: req.checkpoint }),
+        ...(req.keepLatest === undefined ? {} : { keepLatest: req.keepLatest }),
+        ...(req.expectHash === undefined ? {} : { expectHash: req.expectHash }),
+        ...(req.parent === undefined ? {} : { parent: req.parent }),
+      });
+      if (written.conflict) {
         database.exec('ROLLBACK'); // ⚠ 何も書いていないことを明示して閉じる
         return { createdAt: null, updatedAt: null, conflict: true };
       }
-      if (old && old.body !== req.entry.body) {
-        // 🔒 **履歴より本文が上位**(review P5c F1 ── データ喪失方向で実証済み):
-        // 鎖が既に壊れていると amend の materialize が throw し、tx ごと巻き戻って
-        // **本文の保存が失敗する**。しかも toggle 系は永久に通らなくなる。
-        // 鎖の維持に失敗しても body の書込は続行する ── 壊れた鎖は読み側の
-        // 可視エラー(revision restore failed)で既に扱えている
-        try {
-          maintainChain(
-            database,
-            req.cid,
-            req.entry.lid,
-            old.body,
-            req.entry.body,
-            old.title,
-            old.archetype,
-            req.checkpoint === true,
-            req.keepLatest ?? DEFAULT_REVISION_KEEP,
-          );
-        } catch {
-          /* 履歴の維持失敗は本文の保存を巻き添えにしない */
-        }
-      }
-      database.exec({ sql: UPSERT_SQL, bind: bindUpsert(req.cid, req.entry) });
-      /**
-       * 🔴 **同じ tx で居場所も張る**(#258)。
-       * ⚠ 順序に **FK の制約は無い**(`schema.ts` の relations に FK は無い)── 行を先に
-       *   書くのは**読み手の期待**と 2 手だった頃の並びに合わせるためで、入れ替えても
-       *   DB は壊れない(「これが無いと壊れる」と書かない ── CLAUDE.md §1)。
-       */
-      if (req.parent)
-        writeParent(database, req.cid, req.entry.lid, req.parent.parentLid, req.parent.relationId);
-      // 🔑 **刻んだ時刻を返す**(P9 段①)。`datetime('now')` を打つのはここだけなので、
-      // 返さないと主スレッドは**次の boot まで作成・更新の時刻を知らない**
-      // (実際に情報列が終日「—」になっていた)。⚠ 同 tx 内で読む ──
-      // COMMIT の後に読むと、別タブの書込が割り込んだ値を返しうる。
-      // ⚠ 主スレッド側で時刻を作らない(DB に無い値を画面に出すことになる)
-      const stamped = database.selectObjects(
-        'SELECT created_at, updated_at FROM entries WHERE cid = ? AND lid = ?',
-        [req.cid, req.entry.lid],
-      )[0] as { created_at: string | null; updated_at: string | null } | undefined;
       database.exec('COMMIT');
-      return {
-        createdAt: stamped?.created_at ?? null,
-        updatedAt: stamped?.updated_at ?? null,
-        // ⚠ **書いたときだけ名乗る**(旧 worker は名乗らない = 呼び側が 2 手へ落ちる)
-        ...(req.parent ? { parentWritten: true } : {}),
-      };
+      return written.stamps;
     } catch (err) {
       try {
         database.exec('ROLLBACK');
@@ -1336,6 +1377,131 @@ const handlers: Handlers = {
    * 本文には 1 バイトも触らない(protocol の注記)。
    */
   reorderEntry: (req) => updateEntryColumn(req.cid, req.lid, 'entry_order', req.entryOrder),
+  /**
+   * 🔴 **添付の実体を差し替え、参照を書き換える(走査も書込も 1 tx)**
+   * (#205 / #178 の残り / #212、2026-08-25)。
+   *
+   * ## なぜ worker へ移したか
+   *
+   * 直す前は主スレッドが `listBodies` で**全ノートの本文**を読み、`planSaveBack` を
+   * 掛け、`upsertEntry` を**1 件ずつ**呼んでいた。⚠ 読んでから書くまでの間に
+   * 別のタブ / 窓が書くと**それを消し**、`checkpoint` を渡していないので **amend**
+   * = **履歴にも残らない**(改名 / 並べ替えで塞いだ穴と**まったく同じ形**)。
+   * 🔑 **走査と書込を同じ `BEGIN IMMEDIATE` に閉じ込めれば、衝突は起こりようがない**
+   * ── 検出(`expectHash` で断る / やり直す)ではなく**消滅**である。
+   * 🔑 だから `oldKey` も**ここで読む** ── 呼び側から渡すと「呼び側が読んだ
+   *   時点の値」になり、隙間がまた開く。
+   *
+   * ⚠ 副産物として **#212** も消える(全ノートの走査が主スレッドから出る ──
+   *   5,000 件で 36.7ms を、user が字を打っている最中に踏まなくなる)。
+   *   ⚠ ただし**速くなったとは書かない** ── 測っていない。動いたのは**場所**である。
+   *
+   * ## ⚠ 例外を投げずに `problem` で返すもの
+   *
+   * 「添付ノートが見つからない」「添付の実体が分からない」は**断りの理由**であって
+   * こちらの故障ではない ── 投げると呼び側が `String(e)` を画面に出すことになる。
+   */
+  replaceAssetRefs: (req) => {
+    const database = need();
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      const target = database.selectObjects(
+        'SELECT body FROM entries WHERE cid = ? AND lid = ?',
+        [req.cid, req.targetLid],
+      )[0] as { body: string } | undefined;
+      if (!target) {
+        database.exec('ROLLBACK');
+        return { problem: 'missing-entry', unchanged: false, wrote: [], stale: [], overBudget: false };
+      }
+      const meta = readAttachmentMeta(target.body);
+      const oldKey = meta.assetKey;
+      if (oldKey === null) {
+        database.exec('ROLLBACK');
+        return { problem: 'missing-asset', unchanged: false, wrote: [], stale: [], overBudget: false };
+      }
+
+      // ⚠ **全ノートを舐める** ── 参照(`asset:`)はどのノートにも書けるので、
+      //    範囲を狭めると**書き換え漏れ**が出る(旧 key を指したまま残り、GC が
+      //    実体を消した時点で切れる)。🔑 同じ tx の中なので、読んだ後に
+      //    誰かが書き込むことはない。
+      const rows = database.selectObjects(
+        'SELECT lid, title, archetype, body, entry_order FROM entries WHERE cid = ? ORDER BY entry_order, lid',
+        [req.cid],
+      ) as Array<{ lid: string; title: string; archetype: string; body: string; entry_order: number }>;
+      const bodies = new Map<string, string>();
+      const metas = new Map<string, { title: string; archetype: string; entryOrder: number }>();
+      for (const r of rows) {
+        bodies.set(r.lid, r.body);
+        metas.set(r.lid, { title: r.title, archetype: r.archetype, entryOrder: r.entry_order });
+      }
+
+      const plan = planSaveBack({
+        targetLid: req.targetLid,
+        oldKey,
+        newKey: req.newKey,
+        newHash: req.newHash,
+        newBytes: req.newBytes,
+        newName: req.newName,
+        newMime: req.newMime,
+        oldBytes: meta.size ?? 0,
+        savedAt: req.savedAt,
+        bodies,
+        // 🔴 **他の添付が既に使っている分を数える**(渡さないと上限が
+        //    この添付の中だけで閉じ、全体では超える)。数えるが**落とさない**。
+        otherBytes: totalHistoryBytes(
+          [...bodies].filter(([lid]) => lid !== req.targetLid).map(([, body]) => readVersions(body)),
+        ),
+      });
+      if (plan.unchanged) {
+        database.exec('ROLLBACK'); // ⚠ 何も書いていないことを明示して閉じる
+        return { problem: null, unchanged: true, wrote: [], stale: [], overBudget: false };
+      }
+
+      const wrote: Array<{ lid: string; body: string; stamps: EntryStamps }> = [];
+      for (const edit of plan.edits) {
+        const m = metas.get(edit.lid);
+        if (!m) continue; // 走査の間に消えた(同 tx なので起きないが、型の穴は塞ぐ)
+        const base = edit.nextText ?? bodies.get(edit.lid) ?? '';
+        const next = edit.frontmatter ? spliceFrontmatterKeys(base, edit.frontmatter) : base;
+        const ext = extractMeta(m.archetype, next);
+        // 🔑 **書込は `writeEntryRow` の 1 本を通す** ── 鎖の維持も刻印も
+        //    `upsertEntry` と同じ作法になる(判定を 2 か所に生やさない)。
+        // ⚠ `expectHash` は渡さない ── **同じ tx で読んだ値をそのまま書く**ので、
+        //    比べる隙間が無い(比べる相手が自分自身になる)。
+        const w = writeEntryRow(
+          database,
+          req.cid,
+          {
+            lid: edit.lid,
+            title: m.title,
+            archetype: m.archetype,
+            body: next,
+            entryOrder: m.entryOrder,
+            status: ext.status,
+            date: ext.date,
+            archived: ext.archived,
+          },
+          {},
+        );
+        wrote.push({ lid: edit.lid, body: next, stamps: w.stamps });
+      }
+      database.exec('COMMIT');
+      return {
+        problem: null,
+        unchanged: false,
+        wrote,
+        stale: [...plan.stale],
+        overBudget: plan.overBudget,
+      };
+    } catch (err) {
+      try {
+        database.exec('ROLLBACK');
+      } catch {
+        /* rollback 失敗は元エラーを優先 */
+      }
+      throw err;
+    }
+  },
   bulkUpsertEntries: (req) => {
     // 1 tx に束ねる ── journal 増幅対策(計器 1 で実測した ~120 倍の主因が
     // upsert 毎の暗黙 tx であることの検証と対策を兼ねる)
