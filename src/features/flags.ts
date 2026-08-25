@@ -173,6 +173,25 @@ export const FLAG_EMBED = defineFlag('transport.embed', {
   needsRestart: true,
 });
 
+/**
+ * 🔴 **ブックマークから 1 件取り込むのを受ける**(#194 / C-3)。
+ *
+ * ⚠ `transport.embed` と**分ける** ── あちらは「許した origin から、いつでも、
+ * 何度でも」だが、こちらは「**自分を開いた相手から、その起動の 1 通だけ**」で、
+ * 動線も危なさも別物である。片方が欲しい user に、もう片方まで入れさせない。
+ *
+ * ⚠ **既定は切**。この門は**許可リストの外**から入るので(読んでいる記事の origin は
+ * 事前に列挙できない)、開けると「PKC3 を `#pkc?capture=1` で開いた頁は、
+ * ノートを 1 件置ける」ことになる。⚠ 置かれた物は**編集の形で目の前に出る**ので
+ * 見て捨てられるが、**user が知らないうちに開く既定にはしない**。
+ */
+export const FLAG_CAPTURE = defineFlag('transport.capture', {
+  default: false,
+  foldWhen: 'ブックマークの登録がヘルプから 1 手でできるようになり、実機で誤爆が無いと分かったら',
+  summary: 'ブックマークで見ている頁を取り込めるようにする(既定は取り込まない)',
+  needsRestart: true,
+});
+
 // 🔴 `editor.live` は 2026-08-14 に**退役**した(user 裁定 2026-08-08
 //    「既定でONかつ設定で2ペイン編集はできるようにする」)。foldWhen
 //    「既定 ON にできたら」が成就し、設定 `pkc3.editor-mode` へ昇格(既定 live)。

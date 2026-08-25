@@ -311,6 +311,21 @@ export function parseViewDeepLink(raw: string): string | null {
 }
 
 /**
+ * 🔴 **「取り込みに来た」という合図**(#194 / C-3、2026-08-25)。
+ *
+ * Bookmarklet は `…#pkc?capture=1` で PKC3 を開く。⚠ **中身は 1 バイトも運ばない** ──
+ * 記事の本文をアドレスに載せると、①長さの上限(2,000〜8,000 字)に当たる
+ * ②**ブラウザの履歴に本文が残る**。PKC2 は `?pkc-snapshot=<base64>` で運んでいたが、
+ * PKC3 は**クエリを抜け穴にしない**(不可侵指示 2026-08-07)し、上の 2 つも避けたい。
+ * 🔑 だから断片は**合図だけ**にして、中身は `postMessage` で受ける。
+ *
+ * ⚠ 値は見ない(`capture` が在るかだけ)── 外から来た字を判定に使わない。
+ */
+export function isCaptureDeepLink(raw: string): boolean {
+  return hashParams(raw)?.has('capture') === true;
+}
+
+/**
  * 断片の `#pkc?` から先を読む。⚠ **綴りの検査はしない**(呼び側の仕事)。
  * @returns 断片が `#pkc?` を持たなければ `null`
  */
