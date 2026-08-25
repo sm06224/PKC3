@@ -616,14 +616,14 @@
     + "var ch=new BroadcastChannel(" + JSON.stringify(CLIP_CHANNEL) + ");"
     + "var seq=0;var waiting={};"
     + "ch.onmessage=function(e){var d=e.data;if(!d||!d.reply||!waiting[d.id])return;"
-    + "var w=waiting[d.id];delete waiting[d.id];w();};"
+    + "var w=waiting[d.id];delete waiting[d.id];w(d);};"
     + "self.ClipboardItem=function ClipboardItem(items,opts){this.items=items||{};"
     + "this.presentationStyle=(opts&&opts.presentationStyle)||'unspecified';"
     + "this.types=Object.keys(this.items);};"
     + "self.ClipboardItem.prototype.getType=function(t){return Promise.resolve(this.items[t]);};"
     // ⚠ **絶対に reject しない**(下の注記)。失敗しても resolve する
     + "var send=function(parts){return new Promise(function(done){var id=++seq;"
-    + "waiting[id]=done;"
+    + "waiting[id]=function(){done()};"
     + "try{ch.postMessage({clip:'write',id:id,parts:parts})}catch(e){delete waiting[id];done();return}"
     + "setTimeout(function(){if(waiting[id]){delete waiting[id];done()}},5000);});};"
     + "var toParts=function(items){return Promise.all((items||[]).map(function(it){"
@@ -632,14 +632,43 @@
     + ":Promise.resolve(new TextEncoder().encode(String(v)).buffer))"
     + ".then(function(buf){return {type:t,buf:buf}});}));}))"
     + ".then(function(g){var f=[];g.forEach(function(a){a.forEach(function(x){f.push(x)})});return f});};"
+    + "var clipErr=function(m){var e=new Error('クリップボードを読めませんでした: '+(m||'理由不明'));"
+    + "e.name='NotAllowedError';return e;};"
+    + "var ask=function(kind){return new Promise(function(ok,ng){var id=++seq;"
+    + "waiting[id]=function(d){if(d&&d.parts)ok(d.parts);else ng(clipErr(d&&d.error));};"
+    + "try{ch.postMessage({clip:'read',id:id,kind:kind})}"
+    + "catch(e){delete waiting[id];ng(clipErr('本体の窓へ放送できません'));return}"
+    + "setTimeout(function(){if(waiting[id]){delete waiting[id];"
+    + "ng(clipErr('本体の窓が 5 秒返しませんでした'))}},5000);});};"
     + "if(self.navigator&&!self.navigator.clipboard){"
     + "Object.defineProperty(self.navigator,'clipboard',{configurable:true,value:{"
     + "write:function(items){return toParts(items).then(send,function(){})},"
     + "writeText:function(s){return send([{type:'text/plain',"
     + "buf:new TextEncoder().encode(String(s)).buffer}])},"
-    // ⚠ 読む側は LO が**一度も呼ばない**(実測)。呼ばれても落ちないようにだけしておく
-    + "read:function(){return Promise.resolve([])},"
-    + "readText:function(){return Promise.resolve('')}}});}"
+    /**
+     * 🔴 **読む側は、本物の `navigator.clipboard` と同じ意味論にする**(#121)。
+     *
+     * ⚠ 直す前は `read()` が `[]`、`readText()` が空文字を**黙って返していた**。
+     *   これはこの repo が繰り返し戒めている「無言の失敗」そのもので、
+     *   上流が読み始めた瞬間に**空を貼る**側へ倒れる(選択を消しかねない)。
+     *
+     * 🔑 **本物は拒む。** 実の `navigator.clipboard.readText()` は、許可が無ければ
+     *   `NotAllowedError` で **reject する** ── 空文字には絶対にならない。
+     *   だから shim も拒む(CLAUDE.md §3「stub は本物の意味論を真似る」の
+     *   **製品コード版**。本物と違う意味論の shim は、上流を騙す)。
+     *
+     * ⚠ 書く側(`write`)の「絶対に reject しない」はここには及ばない ──
+     *   あちらは**実物の LO で測って決めた規則**である。読む側は
+     *   **LO が一度も呼んでいない**ので測れない。測れないものは、
+     *   **本物に揃える**のが唯一の足場である。
+     */
+    + "read:function(){return ask('read').then(function(parts){var o={};"
+    + "parts.forEach(function(p){o[p.type]=new Blob([p.buf],{type:p.type})});"
+    + "return [new self.ClipboardItem(o)]})},"
+    + "readText:function(){return ask('readText').then(function(parts){"
+    + "for(var i=0;i<parts.length;i+=1){if(parts[i].type==='text/plain')"
+    + "return new TextDecoder().decode(parts[i].buf)}"
+    + "throw clipErr('text/plain がありません')})}}});}"
     + "})();\n";
 
   /**
@@ -660,11 +689,64 @@
    * 貼り付けは LO / Qt 側が別の経路(worker に無い `document`)を見ているので、
    * ここでは直せない。⚠ 「クリップボードを直した」と言わないこと。
    */
+  /**
+   * 🔴 **worker からの読み出し要求に、本物のクリップボードで答える**(#121)。
+   *
+   * ⚠ **今日これを呼ぶ者は居ない。** 実物の LO は貼り付けのとき `read()` も
+   *   `readText()` も 1 度も呼ばない(2026-08-12 実測 / 2026-08-23 に
+   *   `soffice.wasm` の字面でも裏を取った ── 出るのは `qtClipboardBeforeInput` /
+   *   `qtClipboardInput` = **DOM の paste event 経路**だけ)。
+   *   だから **これは「貼り付けが直った」ではない**。直るのは上流が
+   *   `navigator.clipboard.read()` を呼ぶようになったときで、そのとき**ここが要る**。
+   *
+   * 🔑 **呼ばれること自体が報せである。** 今日は 0 回のはずなので、1 回でも
+   *   来たら上流が変わった合図 ── だから `console.warn` に残す。
+   * 🔑 読めなかったときは**画面に出す**(`setStatus`)。これが #121 の主眼で、
+   *   直す前は worker が空を受け取って**誰にも何も起きなかった**。
+   */
+  function serveRead(ch, d) {
+    var reply = function (msg) {
+      msg.reply = true;
+      msg.id = d.id;
+      try { ch.postMessage(msg); } catch (e) { /* 閉じた */ }
+    };
+    var refuse = function (e) {
+      var why = String((e && (e.name || e.message)) || '理由不明');
+      console.warn('クリップボードを読めませんでした', e);
+      setStatus('貼り付け:クリップボードを読めませんでした(' + why + ')');
+      reply({ error: why });
+    };
+    console.warn('#121 worker がクリップボードの読み出しを求めました', d.kind);
+    try {
+      if (d.kind === 'readText') {
+        navigator.clipboard.readText().then(function (t) {
+          reply({ parts: [{ type: 'text/plain', buf: new TextEncoder().encode(t).buffer }] });
+        }, refuse);
+        return;
+      }
+      navigator.clipboard.read().then(function (items) {
+        var jobs = [];
+        (items || []).forEach(function (it) {
+          (it.types || []).forEach(function (t) {
+            jobs.push(it.getType(t).then(function (blob) {
+              return blob.arrayBuffer().then(function (buf) { return { type: t, buf: buf }; });
+            }));
+          });
+        });
+        Promise.all(jobs).then(function (parts) { reply({ parts: parts }); }, refuse);
+      }, refuse);
+    } catch (e) {
+      refuse(e);
+    }
+  }
+
   function serveClipboard() {
     var ch = new BroadcastChannel(CLIP_CHANNEL);
     ch.onmessage = function (ev) {
       var d = ev && ev.data;
-      if (!d || d.reply || d.clip !== 'write' || !Array.isArray(d.parts)) return;
+      if (!d || d.reply) return;
+      if (d.clip === 'read') { serveRead(ch, d); return; }
+      if (d.clip !== 'write' || !Array.isArray(d.parts)) return;
       var payload = {};
       for (var i = 0; i < d.parts.length; i += 1) {
         payload[d.parts[i].type] = new Blob([d.parts[i].buf], { type: d.parts[i].type });

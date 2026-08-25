@@ -353,6 +353,14 @@ async function seedFakePack(
       'self.soffice_entry = function () {};',
       "if (typeof window === 'undefined') {",
       '  self.onmessage = function (ev) {',
+      '    if (ev.data && ev.data.readText) {',
+      '      // 🔑 貼り付け側。**空を返さない**ことを見るので、拒まれたら名前を返す',
+      '      navigator.clipboard.readText().then(',
+      "        function (t) { self.postMessage({ read: 'ok:' + t }); },",
+      "        function (e) { self.postMessage({ read: 'rejected:' + String(e && e.name) }); },",
+      '      );',
+      '      return;',
+      '    }',
       '    if (ev.data && ev.data.copy) {',
       '      // 🔑 LO と**同じ形**で呼ぶ(実測: text/plain の Blob 1 件)',
       "      var item = new ClipboardItem({ 'text/plain': new Blob([ev.data.copy], { type: 'text/plain' }) });",
@@ -749,6 +757,99 @@ test('🔴 worker のコピーが system clipboard に載る', async ({ browser 
     await expect
       .poll(async () => page.evaluate(() => navigator.clipboard.readText()), { timeout: 10_000 })
       .toBe(text);
+  } finally {
+    await ctx.close();
+  }
+});
+
+/**
+ * 🔴 **worker の貼り付け要求に、こちらが本物のクリップボードで答える**(#121)。
+ *
+ * ⚠ **これは「貼り付けが直った」ではない。** 実物の LO は貼り付けのとき
+ * `read()` も `readText()` も 1 度も呼ばない(実測)── 呼ぶようになったときに
+ * 通る道を用意し、**通らないときは黙らない**ことを見る test である。
+ *
+ * 🔑 観測点は **worker が受け取った物**。host 側の Promise が解決しただけでは
+ * 足りない ── 直す前の shim は**橋が無くても空文字で解決していた**。
+ */
+test('🔴 worker の貼り付け要求が system clipboard まで届く', async ({ browser }) => {
+  const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
+  const page = await ctx.newPage();
+  try {
+    await page.goto('/office/host.html');
+    await seedFakePack(page);
+    await page.reload();
+    await expect(page.locator('#status')).toContainText('表示中', { timeout: 15_000 });
+
+    const text = `貼る-${String(Date.now())}`;
+    await page.evaluate((t) => navigator.clipboard.writeText(t), text);
+
+    const got = await page.evaluate(async () => {
+      const url = (window as unknown as { __selfUrl?: string }).__selfUrl;
+      if (!url) throw new Error('__selfUrl が無い');
+      const w = new Worker(url);
+      const r = await new Promise<string>((res, rej) => {
+        const t = setTimeout(() => rej(new Error('worker が返事をしない')), 15_000);
+        w.onmessage = (e): void => {
+          clearTimeout(t);
+          res(String((e.data as { read?: string }).read));
+        };
+        w.postMessage({ readText: true });
+      });
+      w.terminate();
+      return r;
+    });
+    expect(got, 'worker まで本物のクリップボードが届いていない').toBe(`ok:${text}`);
+  } finally {
+    await ctx.close();
+  }
+});
+
+/**
+ * 🔴 **読めなかったら、黙らない**(#121 の主眼)。
+ *
+ * 直す前の shim は `readText()` が**空文字で解決**していた。つまり user から見ると
+ * 「貼り付けを押したのに何も起きない」で、こちらの計器も 1 つも鳴らない。
+ * ここでは host 側の読み出しを塞いで、**worker が拒まれること**と
+ * **窓に理由が出ること**の 2 つを見る。
+ */
+test('🔴 クリップボードを読めないとき、worker は拒まれ、窓に理由が出る', async ({ browser }) => {
+  const ctx = await browser.newContext({ permissions: ['clipboard-write'] });
+  const page = await ctx.newPage();
+  try {
+    await page.goto('/office/host.html');
+    await seedFakePack(page);
+    await page.reload();
+    await expect(page.locator('#status')).toContainText('表示中', { timeout: 15_000 });
+
+    // 実機で許可が降りていない形を作る(headless では許可が既定で通ってしまう)
+    await page.evaluate(() => {
+      Object.defineProperty(navigator.clipboard, 'readText', {
+        configurable: true,
+        value: () => Promise.reject(new DOMException('塞いだ', 'NotAllowedError')),
+      });
+    });
+
+    const got = await page.evaluate(async () => {
+      const url = (window as unknown as { __selfUrl?: string }).__selfUrl;
+      if (!url) throw new Error('__selfUrl が無い');
+      const w = new Worker(url);
+      const r = await new Promise<string>((res, rej) => {
+        const t = setTimeout(() => rej(new Error('worker が返事をしない')), 15_000);
+        w.onmessage = (e): void => {
+          clearTimeout(t);
+          res(String((e.data as { read?: string }).read));
+        };
+        w.postMessage({ readText: true });
+      });
+      w.terminate();
+      return r;
+    });
+    // 🔴 空文字で解決していたら、ここは `ok:` になる
+    expect(got, '読めないのに解決している(空を貼る側へ倒れている)').toBe(
+      'rejected:NotAllowedError',
+    );
+    await expect(page.locator('#status')).toContainText('読めませんでした');
   } finally {
     await ctx.close();
   }
