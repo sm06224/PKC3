@@ -40,103 +40,20 @@
  *   入れると、書き出した md を配った相手の許可まで書き換わる。
  */
 
-import { isContentKey } from '@adapter/platform/storage/asset-key';
+import { AssetGrants } from '@adapter/platform/asset-grants';
 
 const KEY = 'pkc3.same-origin-grants';
 
-type Store = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
-
-function readStorage(): Store | null {
-  try {
-    return typeof localStorage !== 'undefined' ? localStorage : null;
-  } catch {
-    // プライベートモード等 ── 憶えられないだけで、起動そのものは動く
-    return null;
-  }
-}
-
 /**
- * 許可の台帳。
+ * 素のまま起動の許可。
  *
- * ⚠ **毎回読む**(憶えておいて差分で更新、をしない)。呼ばれるのは
- *   「アプリを起動する瞬間」だけなので、`KeymapStore` が打鍵ごとの
- *   `getItem` を避けるために持っている cache の理屈はここには効かない。
- *   毎回読めば**別のタブでの取り消しがそのまま効く**(同期の仕掛けが要らない)。
+ * 🔑 **機構は `asset-grants.ts` に在る**(2026-08-25 に寄せた)── 拡張の許可(#195)が
+ * 同じ形を必要としたので、**同じ判定を 2 か所に生やさない**ためである(CLAUDE.md §7)。
+ * ここに残すのは「**この許可は何か**」だけ。
  */
-export class SameOriginGrants {
-  constructor(private readonly storage: Store | null = readStorage()) {}
-
-  /**
-   * 憶えている許可の一覧(内容ハッシュの鍵)。
-   * ⚠ **読むときに検める** ── 壊れた値・採番 key・配列でないものは黙って捨てる
-   *   (アプリが書き換えられる置き場なので、読み側で必ず絞る)。
-   */
-  list(): readonly string[] {
-    const raw = this.storage?.getItem(KEY);
-    if (raw === null || raw === undefined) return [];
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return [];
-      return parsed.filter((k): k is string => typeof k === 'string' && isContentKey(k));
-    } catch {
-      return [];
-    }
-  }
-
-  /**
-   * この中身は許可済みか。⚠ 鍵が無い / 採番 key なら常に偽(= また聞く)。
-   * ⚠ `null` も受ける ── 添付の frontmatter 側は `string | null` で持っているので、
-   *   呼び側 2 か所で `?? undefined` を書かせない(同じ変換を 2 か所に生やさない)。
-   *
-   * ⚠ **ここの `isContentKey` を外す変異は生き延びる**(2026-08-21 の変異試験 N2)──
-   *   `list()` が読むときに落とし、`grant()` が書くときにも落とすので、
-   *   **採番 key は一覧に入りようがない**。つまり**等価変異**であって、test の穴ではない。
-   * 🔑 それでも残すのは 2 つの理由による: ① 保存を読まずに返る(fail closed の早道)
-   *   ② `list()` の絞りを性能都合で外した日に、ここが最後の砦として残る。
-   */
-  isGranted(assetKey: string | null | undefined): boolean {
-    if (assetKey === null || assetKey === undefined || !isContentKey(assetKey)) return false;
-    return this.list().includes(assetKey);
-  }
-
-  /**
-   * 許可を憶える。**戻り値は「憶えたか」** ── 呼び側が user に言い分けられるように。
-   * ⚠ 採番 key は憶えない(中身を指していないので「同じハッシュ」を名乗れない)。
-   */
-  grant(assetKey: string | null | undefined): boolean {
-    if (
-      assetKey === null ||
-      assetKey === undefined ||
-      !isContentKey(assetKey) ||
-      this.storage === null
-    )
-      return false;
-    const next = this.list();
-    if (next.includes(assetKey)) return true;
-    this.write([...next, assetKey]);
-    return true;
-  }
-
-  /** 許可を外す。⚠ 次に開くときはまた聞く。 */
-  revoke(assetKey: string): void {
-    const next = this.list().filter((k) => k !== assetKey);
-    this.write(next);
-  }
-
-  /** 全部外す。 */
-  revokeAll(): void {
-    this.write([]);
-  }
-
-  private write(keys: readonly string[]): void {
-    if (this.storage === null) return;
-    try {
-      // ⚠ 空になったら**鍵ごと消す**(要らない行を残さない ── KeymapStore と同じ作法)
-      if (keys.length === 0) this.storage.removeItem(KEY);
-      else this.storage.setItem(KEY, JSON.stringify(keys));
-    } catch {
-      // 容量超過等 ── 憶えられないだけ。次回また聞くので安全側に落ちる
-    }
+export class SameOriginGrants extends AssetGrants {
+  constructor(storage?: ConstructorParameters<typeof AssetGrants>[1]) {
+    super(KEY, ...(storage === undefined ? [] : ([storage] as const)));
   }
 }
 
