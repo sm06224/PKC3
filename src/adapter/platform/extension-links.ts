@@ -95,6 +95,8 @@ export function createExtLinkRegistry(): ExtLinkRegistry {
         push: link.push,
         deliver: link.deliver,
         connected: link.connected,
+        // 🔑 **素通しする**(渡した覚えは link が持つ ── 台帳は写しを持たない)
+        delivered: link.delivered,
         close: () => {
           // 🔑 **先に外してから閉じる** ── 逆順にすると、`close()` が投げたときに
           //    台帳へ幽霊が残る(閉じた窓が一覧に出続ける)

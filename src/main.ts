@@ -110,6 +110,8 @@ import {
 } from '@adapter/platform/launched-files';
 import { whenPhaseReady } from '@adapter/state/wait-for-ready';
 import { reloadSnapshot } from '@adapter/state/reload-snapshot';
+import type { ExtWriteOp } from '@features/extension/ext-write';
+import { applyExtWriteOps } from '@adapter/state/ext-write-apply';
 import { selectWhenPresent } from '@adapter/state/select-when-present';
 import {
   attachFiles,
@@ -888,6 +890,36 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 「meta はあるが bytes が無い」を掴んで欠けた書出しができる。
    * 形式が増えても読み出し口は 1 つ(source)で共有する。
    */
+  /**
+   * 🔴 **拡張からの書き戻しを当てる**(#195 / C-5 段③)。
+   *
+   * ⚠ **判断は `ext-write-apply.ts` に在る** ── `main.ts` は
+   *   **どの test からも実行されない**(原文を読む test しか無い)ので、
+   *   ここに判断を書くと「全 test 緑のまま取り違える」形になる
+   *   (CLAUDE.md §2「取り出せば test できる」)。ここは**繋ぐだけ**。
+   */
+  const applyExtWrite = (
+    ops: readonly ExtWriteOp[],
+  ): Promise<{ ok: true; wrote: number } | { ok: false; why: string }> =>
+    applyExtWriteOps(ops, {
+      // 🔑 chain に載せる(2 本目の待ち口を作らない)
+      run: (job) => (storeEffects ? storeEffects.run(job) : job()),
+      phase: () => dispatcher.getState().phase,
+      metaOf: (lid) => dispatcher.getState().entryMetas.get(lid) ?? null,
+      getBody: async (lid) => (await client.request({ op: 'getBody', cid, lid })) ?? null,
+      write: (entry, expectHash) =>
+        client.request({
+          op: 'upsertEntry',
+          cid,
+          entry,
+          // 🔴 別のアプリが書いた本文 ── 戻せる形にする
+          checkpoint: true,
+          keepLatest: REVISION_KEEP_LATEST,
+          expectHash,
+        }),
+      refresh: () => reloadSnapshot(dispatcher, cid, loadSnapshot, { deferNotice: null }),
+    });
+
   const runExport = (
     kind: ExportKind | { entryLid: string; as?: 'archive' | 'docx' | 'pptx' | 'folder' },
   ): Promise<void> =>
@@ -1792,6 +1824,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
                     // 🔴 外殻に焼いたものと**同じ合図**(別々に作ると外殻が港を捨てる)
                     nonce,
                     metas: () => dispatcher.getState().entryMetas.values(),
+                    onWrite: (ops) => applyExtWrite(ops),
                   }),
                 ),
               nonce: () => crypto.randomUUID(),

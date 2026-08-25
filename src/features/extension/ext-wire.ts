@@ -38,13 +38,32 @@ export const EXT_PORT_TAG = 'pkc3.ext.port';
 export const EXT_READY_FLAG = '__pkcExtReady';
 
 /** 拡張 → ホスト。 */
-export type ExtRequest = { readonly t: 'hello' };
+export type ExtRequest =
+  | { readonly t: 'hello' }
+  /**
+   * 🔴 **書き戻し**(段③)。⚠ 中身の検めは `ext-write.ts` が持つ ──
+   *   ここは**種別を見分ける**だけである(渡した覚えの照合には集合が要り、
+   *   それは封筒の知らない情報である)。
+   */
+  | { readonly t: 'write'; readonly raw: unknown };
 
 /** ホスト → 拡張。 */
 export type ExtResponse =
   | { readonly t: 'projection'; readonly projection: ExtProjection }
   /** 🔴 段②: user が情報ペインで押した 1 件。⚠ 押されない限り 1 通も流れない。 */
-  | { readonly t: 'entry'; readonly entry: ExtDeliveredEntry };
+  | { readonly t: 'entry'; readonly entry: ExtDeliveredEntry }
+  /**
+   * 🔴 段③: 書き戻しの返事。⚠ **必ず返す** ── 返さないと、拡張の作者は
+   *   「書けたのか / 断られたのか」を**永久に知れない**(いちばん困る形)。
+   */
+  | {
+      readonly t: 'write-result';
+      readonly ok: boolean;
+      /** 断ったときの理由。⚠ 通ったときは `undefined`。 */
+      readonly why?: string;
+      /** 通ったときに書いた件数。⚠ 断ったときは `0`。 */
+      readonly wrote: number;
+    };
 
 /** 受け取った物の判定。⚠ **なぜ捨てたか**を必ず持たせる(無言で捨てない)。 */
 export type ExtParsed =
@@ -67,6 +86,8 @@ export function parseExtRequest(data: unknown): ExtParsed {
   const t = (data as { t?: unknown }).t;
   if (typeof t !== 'string') return { ok: false, why: 't がありません' };
   if (t === 'hello') return { ok: true, request: { t: 'hello' } };
+  // 🔴 段③: 書き戻し。⚠ 中身は `ext-write.ts` が検める(上の注記)
+  if (t === 'write') return { ok: true, request: { t: 'write', raw: data } };
   if (PULL_ATTEMPTS.has(t))
     return {
       ok: false,
@@ -103,6 +124,12 @@ export function portHandoffMessage(nonce: string): {
  *   **漏れた側だけ不親切**になる。ここに在るのは「よく試される綴り」で、
  *   外れても普通の「知らない種別です」に落ちるだけである(害が無い側)。
  */
+/**
+ * ⚠ **`write` はここに入れない**(段③ で受けるようになった)── 入れると
+ *   「在りません(意図的です)」と断り続ける。⚠ 上の `parseExtRequest` は
+ *   `write` を**先に**見るので順序でも守られているが、両方で守る
+ *   (片方だけ直る形を残さない)。
+ */
 const PULL_ATTEMPTS: ReadonlySet<string> = new Set([
   'get',
   'getEntry',
@@ -129,4 +156,18 @@ export function projectionMessage(projection: ExtProjection): ExtResponse {
  */
 export function deliveredMessage(entry: ExtDeliveredEntry): ExtResponse {
   return { t: 'entry', entry };
+}
+
+/**
+ * 🔴 **書き戻しの返事**(段③)。⚠ 組み立ての口はここ 1 つ(§7)。
+ *
+ * ⚠ **断ったときも `wrote` を載せる**(必ず `0`)── 形を揃えておかないと、
+ *   受け側が `ok` を見ずに `wrote` を読んで「1 件書けた」と誤解する道が残る。
+ */
+export function writeResultMessage(
+  result: { ok: true; wrote: number } | { ok: false; why: string },
+): ExtResponse {
+  return result.ok
+    ? { t: 'write-result', ok: true, wrote: result.wrote }
+    : { t: 'write-result', ok: false, why: result.why, wrote: 0 };
 }

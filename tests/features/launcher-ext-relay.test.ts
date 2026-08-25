@@ -21,6 +21,14 @@ import { connectExtension } from '../../src/adapter/platform/extension-host';
 import { deliveredEntryOf } from '../../src/features/extension/ext-delivery';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 
+/**
+ * ⚠ **書き戻しを受けない繋ぎ方**(#195 段③)。`onWrite` は必須なので、
+ *   書かせたくない test は**断りを返す関数**を書く ── 書かされること自体が
+ *   「この test では書かせない」の明示になる(optional だと落としても黙る)。
+ */
+const NO_WRITE = (): Promise<{ ok: false; why: string }> =>
+  Promise.resolve({ ok: false as const, why: 'この test では書き戻さない' });
+
 /** 外殻の script だけを取り出して走らせる(器は自分で組む)。 */
 function runShell(opts: { nonce?: string } = {}) {
   const html = buildLauncherAppShell(
@@ -107,6 +115,32 @@ describe('外殻の拡張中継 (#195 / C-5 段①)', () => {
   });
 
   /**
+   * 🔴 **書き戻しも同じ道を通る**(#195 / C-5 段③)。
+   *
+   * ⚠ 中継は**素通し**なので shell を 1 行も変えていない ── だからこそ
+   *   ここで pin する。「変えていないから通るはず」は主張であって観測ではない
+   *   (段① で `nonce` を渡し忘れて外殻が港を黙って捨てた、と同じ形を作らない)。
+   */
+  it('🔴 書き戻しの依頼と返事が、両方向とも中継を通る (段③)', async () => {
+    const { frame, toApp } = runShell({ nonce: 'n1' });
+    const { host, got } = hand('n1');
+    await tick();
+    // ① アプリ → ホスト(書き戻しの依頼)
+    fromApp(frame, { t: 'write', ops: [{ op: 'setBody', lid: 'a', body: 'なおした' }] });
+    await tick();
+    expect(got, '書き戻しの依頼がホストへ届いていない').toEqual([
+      { t: 'write', ops: [{ op: 'setBody', lid: 'a', body: 'なおした' }] },
+    ]);
+    // ② ホスト → アプリ(返事)
+    host.postMessage({ t: 'write-result', ok: true, wrote: 1 });
+    await tick();
+    expect(toApp.at(-1), '返事がアプリへ届いていない').toEqual({
+      tag: EXT_PORT_TAG,
+      body: { t: 'write-result', ok: true, wrote: 1 },
+    });
+  });
+
+  /**
    * 🔴 **`nonce` が合わない港は掴まない。**
    * ⚠ 中のアプリも外殻へ投げられるので、合図だけで信じると**偽の港**を掴む。
    */
@@ -176,6 +210,7 @@ describe('外殻の拡張中継 (#195 / C-5 段①)', () => {
       metas: () => [meta],
       nonce,
       pollMs: 0,
+      onWrite: NO_WRITE,
     });
     for (let i = 0; i < 20 && toApp.length === 0; i += 1) await tick();
     expect(toApp, 'アプリまで届いていない(外殻が港を捨てた可能性)').toHaveLength(1);
@@ -230,6 +265,7 @@ describe('外殻の拡張中継 (#195 / C-5 段①)', () => {
       metas: () => [meta],
       nonce,
       pollMs: 0,
+      onWrite: NO_WRITE,
     });
     // ⚠ **対照群を先に置く** ── 見取り図が届いていない回は、以降の判定が無意味である
     for (let i = 0; i < 20 && toApp.length === 0; i += 1) await tick();
@@ -270,6 +306,7 @@ describe('外殻の拡張中継 (#195 / C-5 段①)', () => {
       metas: () => [meta],
       nonce: 'n-never',
       pollMs: 0,
+      onWrite: NO_WRITE,
       timeoutMs: 0,
     });
     expect(link.deliver(deliveredEntryOf(meta, 'x'))).toBe(false);

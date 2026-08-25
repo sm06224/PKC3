@@ -11,8 +11,16 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
-import { connectExtension } from '../../src/adapter/platform/extension-host';
+import { connectExtension, type ExtHostDeps } from '../../src/adapter/platform/extension-host';
 import { EXT_PORT_TAG, EXT_READY_FLAG } from '../../src/features/extension/ext-wire';
+
+/**
+ * ⚠ **書き戻しを受けない繋ぎ方**(#195 段③)。`onWrite` は必須なので、
+ *   書かせたくない test は**断りを返す関数**を書く ── 書かされること自体が
+ *   「この test では書かせない」の明示になる(optional だと落としても黙る)。
+ */
+const NO_WRITE = (): Promise<{ ok: false; why: string }> =>
+  Promise.resolve({ ok: false as const, why: 'この test では書き戻さない' });
 
 /** この test の中で使う合図。⚠ 外殻役はこれと合わない港を**捨てる**(本物と同じ)。 */
 const NONCE = 'n-test';
@@ -93,13 +101,14 @@ describe('拡張へ港を渡す (#195 / C-5 段①)', () => {
       win: win as unknown as Window,
       metas: () => [meta('a')],
       nonce: NONCE,
+      onWrite: NO_WRITE,
       pollMs: 0,
     });
     for (let i = 0; i < 5; i += 1) await tick();
     expect(win.port, '印が立つ前に渡している').toBeNull();
     expect(link.connected()).toBe(false);
     // ⚠ 対照群 ── 印を立てれば渡る(「そもそも渡らない」実装と区別する)
-    await connected(win, { win: win as unknown as Window, metas: () => [], nonce: NONCE });
+    await connected(win, { win: win as unknown as Window, metas: () => [], nonce: NONCE, onWrite: NO_WRITE });
     expect(win.port, '印を立てても渡らない').not.toBeNull();
     expect(win.tags, '合図の綴りが違う').toEqual([EXT_PORT_TAG]);
     link.close();
@@ -119,6 +128,7 @@ describe('拡張へ港を渡す (#195 / C-5 段①)', () => {
       win: win as unknown as Window,
       metas: () => [meta('a')],
       nonce: NONCE,
+      onWrite: NO_WRITE,
       pollMs: 0,
     });
     (win as Record<string, unknown>)[EXT_READY_FLAG] = 1;
@@ -146,9 +156,10 @@ describe('拡張へ港を渡す (#195 / C-5 段①)', () => {
       win: win as unknown as Window,
       metas: () => [meta('a')],
       nonce: NONCE,
+      onWrite: NO_WRITE,
       pollMs: 0,
     });
-    await connected(win, { win: win as unknown as Window, metas: () => [], nonce: NONCE });
+    await connected(win, { win: win as unknown as Window, metas: () => [], nonce: NONCE, onWrite: NO_WRITE });
     expect(win.dropped, '合図が合わずに捨てられている').toEqual([]);
     expect(win.port, '港が渡っていない').not.toBeNull();
     link.close();
@@ -159,6 +170,7 @@ describe('拡張へ港を渡す (#195 / C-5 段①)', () => {
       win: other as unknown as Window,
       metas: () => [meta('a')],
       nonce: 'n-ちがう',
+      onWrite: NO_WRITE,
       pollMs: 0,
     });
     (other as Record<string, unknown>)[EXT_READY_FLAG] = 1;
@@ -174,9 +186,10 @@ describe('拡張へ港を渡す (#195 / C-5 段①)', () => {
       win: win as unknown as Window,
       metas: () => [meta('a'), meta('b')],
       nonce: NONCE,
+      onWrite: NO_WRITE,
       pollMs: 0,
     });
-    await connected(win, { win: win as unknown as Window, metas: () => [], nonce: NONCE });
+    await connected(win, { win: win as unknown as Window, metas: () => [], nonce: NONCE, onWrite: NO_WRITE });
     // ⚠ 繋いだ時点の押し出しが 1 件在る ── `hello` の返事は**その次**である
     for (let i = 0; i < 20 && win.got.length === 0; i += 1) await tick();
     expect(win.got, '前提が崩れている(繋いだ時点で押していない)').toHaveLength(1);
@@ -201,10 +214,11 @@ describe('拡張へ港を渡す (#195 / C-5 段①)', () => {
       win: win as unknown as Window,
       metas: () => [],
       nonce: NONCE,
+      onWrite: NO_WRITE,
       pollMs: 0,
       onReject,
     });
-    await connected(win, { win: win as unknown as Window, metas: () => [], nonce: NONCE });
+    await connected(win, { win: win as unknown as Window, metas: () => [], nonce: NONCE, onWrite: NO_WRITE });
     for (let i = 0; i < 20 && win.got.length === 0; i += 1) await tick();
     const before = win.got.length; // ⚠ 繋いだ時点の押し出し(1 件)
     win.port!.postMessage({ t: 'updateBody', lid: 'a', body: 'x' });
@@ -223,9 +237,10 @@ describe('拡張へ港を渡す (#195 / C-5 段①)', () => {
       win: win as unknown as Window,
       metas: () => [meta('a')],
       nonce: NONCE,
+      onWrite: NO_WRITE,
       pollMs: 0,
     });
-    await connected(win, { win: win as unknown as Window, metas: () => [], nonce: NONCE });
+    await connected(win, { win: win as unknown as Window, metas: () => [], nonce: NONCE, onWrite: NO_WRITE });
     // ⚠ 対照群 ── 切る前は届く(「そもそも押していない」実装と区別する)
     link.push();
     for (let i = 0; i < 20 && win.got.length < 2; i += 1) await tick();
@@ -246,6 +261,7 @@ describe('拡張へ港を渡す (#195 / C-5 段①)', () => {
       win: win as unknown as Window,
       metas: () => [],
       nonce: NONCE,
+      onWrite: NO_WRITE,
       pollMs: 0,
       timeoutMs: 0,
       onGiveUp,
@@ -253,5 +269,177 @@ describe('拡張へ港を渡す (#195 / C-5 段①)', () => {
     for (let i = 0; i < 10 && onGiveUp.mock.calls.length === 0; i += 1) await tick();
     expect(onGiveUp, '諦めたのに黙っている').toHaveBeenCalled();
     expect(win.port, '諦めたのに渡している').toBeNull();
+  });
+});
+
+/**
+ * 🔴 **書き戻し**(#195 / C-5 段③)。
+ *
+ * 語彙そのものの検めは `tests/features/ext-write.test.ts` が見ている。
+ * ⚠ ここが見るのは**繋がり**である ── 港から来た依頼が、
+ * 「渡した覚え」と突き合わされ、当てる係へ渡り、**返事が港へ戻る**か。
+ *
+ * 🔑 **返事は必ず戻す** ── 戻さないと、拡張の作者は「書けたのか断られたのか」を
+ *   永久に知れない(この機構でいちばん困る形)。
+ */
+describe('拡張からの書き戻し (#195 / C-5 段③)', () => {
+  /** 港へ投げて、返ってきた物を集める。 */
+  async function linked(opts?: { onWrite?: ExtHostDeps['onWrite'] }) {
+    const win = fakeWin();
+    const back: unknown[] = [];
+    const calls: unknown[][] = [];
+    const link = connectExtension({
+      win: win as unknown as Window,
+      metas: () => [meta('a')],
+      nonce: NONCE,
+      onWrite: async (ops) => {
+        calls.push([...ops]);
+        return opts?.onWrite ? opts.onWrite(ops) : { ok: true as const, wrote: ops.length };
+      },
+      pollMs: 0,
+    });
+    await connected(win, {
+      win: win as unknown as Window,
+      metas: () => [],
+      nonce: NONCE,
+      onWrite: NO_WRITE,
+    });
+    win.port!.onmessage = (e: MessageEvent) => void back.push(e.data);
+    win.port!.start?.();
+    const say = (data: unknown): void => win.port!.postMessage(data);
+    return { win, link, back, calls, say };
+  }
+
+  it('🔴 渡した 1 件は書き戻せて、返事が港へ戻る', async () => {
+    const r = await linked();
+    r.link.deliver({
+      lid: 'a',
+      title: 't',
+      archetype: 'text',
+      date: null,
+      status: null,
+      archived: false,
+      createdAt: null,
+      updatedAt: null,
+      body: 'もとの本文',
+      assetRefsApprox: 0,
+    });
+    r.say({ t: 'write', ops: [{ op: 'setBody', lid: 'a', body: 'なおした本文' }] });
+    for (let i = 0; i < 20; i += 1) await tick();
+    expect(r.calls, '当てる係へ渡っていない').toEqual([
+      [{ op: 'setBody', lid: 'a', body: 'なおした本文' }],
+    ]);
+    expect(r.back.at(-1), '返事が戻っていない').toEqual({
+      t: 'write-result',
+      ok: true,
+      wrote: 1,
+    });
+  });
+
+  it('🔴 渡していない lid は、当てる係まで行かずに断られる', async () => {
+    const r = await linked();
+    // ⚠ **渡していない**(`deliver` を呼んでいない)
+    r.say({ t: 'write', ops: [{ op: 'setBody', lid: 'a', body: 'x' }] });
+    for (let i = 0; i < 20; i += 1) await tick();
+    expect(r.calls, '検めを抜けて当てる係まで行った').toEqual([]);
+    const last = r.back.at(-1) as { ok: boolean; why: string; wrote: number };
+    expect(last.ok).toBe(false);
+    expect(last.why).toContain('渡されていません');
+    // ⚠ 断ったときも形は同じ(`wrote` を読んで誤解する道を残さない)
+    expect(last.wrote).toBe(0);
+  });
+
+  it('🔴 当てる係が断ったら、その理由がそのまま戻る', async () => {
+    const r = await linked({
+      onWrite: async () => ({ ok: false as const, why: 'PKC3 が編集中です' }),
+    });
+    r.link.deliver({
+      lid: 'a',
+      title: 't',
+      archetype: 'text',
+      date: null,
+      status: null,
+      archived: false,
+      createdAt: null,
+      updatedAt: null,
+      body: 'もとの本文',
+      assetRefsApprox: 0,
+    });
+    r.say({ t: 'write', ops: [{ op: 'setBody', lid: 'a', body: 'x' }] });
+    for (let i = 0; i < 20; i += 1) await tick();
+    expect(r.back.at(-1)).toEqual({
+      t: 'write-result',
+      ok: false,
+      why: 'PKC3 が編集中です',
+      wrote: 0,
+    });
+  });
+
+  it('🔴 当てる係が落ちても、返事は戻る(無言で終わらない)', async () => {
+    const r = await linked({
+      onWrite: () => Promise.reject(new Error('disk full')),
+    });
+    r.link.deliver({
+      lid: 'a',
+      title: 't',
+      archetype: 'text',
+      date: null,
+      status: null,
+      archived: false,
+      createdAt: null,
+      updatedAt: null,
+      body: 'もとの本文',
+      assetRefsApprox: 0,
+    });
+    r.say({ t: 'write', ops: [{ op: 'setBody', lid: 'a', body: 'x' }] });
+    for (let i = 0; i < 20; i += 1) await tick();
+    const last = r.back.at(-1) as { ok: boolean; why: string };
+    expect(last.ok).toBe(false);
+    expect(last.why, '理由が落ちている').toContain('disk full');
+  });
+
+  it('🔑 渡した分だけ書ける(渡す前は空、渡すと増える)', async () => {
+    const r = await linked();
+    expect([...r.link.delivered()], '渡す前から書ける集合が在る').toEqual([]);
+    r.link.deliver({
+      lid: 'a',
+      title: 't',
+      archetype: 'text',
+      date: null,
+      status: null,
+      archived: false,
+      createdAt: null,
+      updatedAt: null,
+      body: 'b',
+      assetRefsApprox: 0,
+    });
+    expect([...r.link.delivered()]).toEqual(['a']);
+  });
+
+  it('⚠ 書き戻しは見取り図を押し直さない(`hello` とは別の口)', async () => {
+    const r = await linked();
+    r.link.deliver({
+      lid: 'a',
+      title: 't',
+      archetype: 'text',
+      date: null,
+      status: null,
+      archived: false,
+      createdAt: null,
+      updatedAt: null,
+      body: 'b',
+      assetRefsApprox: 0,
+    });
+    /**
+     * ⚠ **先に届き切らせてから数える**(2 稿目)。港は非同期なので、`deliver` の
+     *   直後に数えると見取り図も実体もまだ届いておらず、後から数えた差に
+     *   混ざる ── 1 稿目はそれで落ちた(test の側の誤り)。
+     */
+    for (let i = 0; i < 20; i += 1) await tick();
+    const before = r.back.length;
+    r.say({ t: 'write', ops: [{ op: 'setBody', lid: 'a', body: 'x' }] });
+    for (let i = 0; i < 20; i += 1) await tick();
+    const added = r.back.slice(before) as { t: string }[];
+    expect(added.map((m) => m.t), '見取り図まで押し直した').toEqual(['write-result']);
   });
 });

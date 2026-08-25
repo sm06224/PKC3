@@ -36,7 +36,9 @@ import {
   parseExtRequest,
   portHandoffMessage,
   projectionMessage,
+  writeResultMessage,
 } from '@features/extension/ext-wire';
+import { parseExtWrite, type ExtWriteOp } from '@features/extension/ext-write';
 import { buildProjection } from '@features/extension/ext-projection';
 import type { ExtDeliveredEntry } from '@features/extension/ext-delivery';
 import type { EntryMeta } from '@core/model/entry-meta';
@@ -60,6 +62,18 @@ export interface ExtHostDeps {
   readonly pollMs?: number;
   /** 諦めるまで(ms)。⚠ 諦めたことは `onGiveUp` で言う(無言で終わらない)。 */
   readonly timeoutMs?: number;
+  /**
+   * 🔴 **書き戻しを実際に当てる係**(#195 / C-5 段③)。
+   *
+   * ⚠ **optional にしない** ── 渡し忘れると「拡張が書いたつもりで何も起きない」
+   *   という**いちばん気づけない形**になる。書かせない繋ぎ方をしたい呼び側は、
+   *   **断りを返す関数**を書く(書かされること自体が「書かせない」の明示になる)。
+   * ⚠ ここが検めるのは**語彙と渡した覚え**まで。**本文が古くないか**(別の窓が
+   *   書き替えていないか)は当てる側にしか分からないので、そちらで見る。
+   */
+  readonly onWrite: (
+    ops: readonly ExtWriteOp[],
+  ) => Promise<{ ok: true; wrote: number } | { ok: false; why: string }>;
   /** 断ったこと・諦めたことを数えるため。 */
   readonly onReject?: (why: string) => void;
   /** 印が立たないまま時間切れ。 */
@@ -83,6 +97,12 @@ export interface ExtHostLink {
    * @returns 渡せたか。`false` = 港が無い(まだ繋がっていない / もう閉じた)
    */
   deliver: (entry: ExtDeliveredEntry) => boolean;
+  /**
+   * ⚠ test 用 ── user がこの拡張へ渡した lid(書き戻せる集合)。
+   * 🔑 **`deliver` が呼ばれた分だけ**増える ── 「取りに行く口は作らない」と
+   *   同じ 1 つの原理で、user のジェスチャがこの集合を作る。
+   */
+  delivered: () => ReadonlySet<string>;
   /** 手を切る(窓が閉じた / 許可が外れた)。 */
   close: () => void;
   /** ⚠ test 用 ── 港が繋がったか。 */
@@ -106,6 +126,14 @@ export function connectExtension(deps: ExtHostDeps): ExtHostLink {
   const sleep = deps.sleep ?? wait;
   let port: MessagePort | null = null;
   let closed = false;
+  /**
+   * 🔴 **user がこの拡張へ渡した lid**(段③ の書き戻せる集合)。
+   *
+   * ⚠ **link ごとに持つ** ── 別のアプリへ渡した物を、こちらが書けてはいけない。
+   * ⚠ **閉じたら消える**(link の寿命 = 集合の寿命)── 窓を開き直したら、
+   *   user はもう一度渡すことになる。それが正しい(ジェスチャが許可である)。
+   */
+  const delivered = new Set<string>();
 
   const send = (): void => {
     if (port === null) return;
@@ -139,6 +167,40 @@ export function connectExtension(deps: ExtHostDeps): ExtHostLink {
       // ⚠ **黙って捨てない**(理由を数えられる形にする)
       if (!parsed.ok) {
         deps.onReject?.(parsed.why);
+        return;
+      }
+      /**
+       * 🔴 **書き戻し**(段③)。⚠ **必ず返事をする** ── 通っても断っても、
+       *   拡張の作者が「どうなったか」を知れる形にする。
+       * ⚠ **渡した覚えの集合**をここで渡す(封筒は知らない情報である)。
+       */
+      if (parsed.request.t === 'write') {
+        const checked = parseExtWrite(parsed.request.raw, delivered);
+        if (!checked.ok) {
+          deps.onReject?.(checked.why);
+          port?.postMessage(writeResultMessage({ ok: false, why: checked.why }));
+          return;
+        }
+        void deps.onWrite(checked.ops).then(
+          (r) => {
+            if (!r.ok) deps.onReject?.(r.why);
+            // ⚠ 返事の途中で窓が閉じることがある ── 落とさない
+            try {
+              port?.postMessage(writeResultMessage(r));
+            } catch {
+              /* 港が閉じた ── 返す相手が居ない */
+            }
+          },
+          (e: unknown) => {
+            const why = `書き戻しに失敗しました: ${e instanceof Error ? e.message : String(e)}`;
+            deps.onReject?.(why);
+            try {
+              port?.postMessage(writeResultMessage({ ok: false, why }));
+            } catch {
+              /* 同上 */
+            }
+          },
+        );
         return;
       }
       send();
@@ -176,6 +238,8 @@ export function connectExtension(deps: ExtHostDeps): ExtHostLink {
       if (port === null) return false;
       try {
         port.postMessage(deliveredMessage(entry));
+        // 🔑 **渡せた分だけ**書き戻せるようになる(渡す前に増やさない)
+        delivered.add(entry.lid);
         return true;
       } catch {
         // 港が既に閉じている ── 渡せなかったことを呼び側に返す(黙らない)
@@ -183,6 +247,7 @@ export function connectExtension(deps: ExtHostDeps): ExtHostLink {
       }
     },
     connected: () => port !== null,
+    delivered: () => delivered,
     close: () => {
       closed = true;
       if (port !== null) {

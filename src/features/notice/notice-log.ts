@@ -90,6 +90,17 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-25-ext-write-back',
+    title: 'アプリへ渡したノートを、アプリから書き戻せるようになりました',
+    items: [
+      'ノートを選んで、右の情報ペインの「このアプリへ送る」で 1 件だけ渡せます。渡るのは押した 1 件の本文だけです。',
+      '渡したノートは、そのアプリが直して返せます。フォームや表のアプリで直した結果が本文に入ります。',
+      '書き戻せるのは、あなたが渡した物だけです。渡していないノートは、アプリが名前を知っていても書けません。',
+      '1 件でもおかしな依頼が混ざっていたら全部断ります。半分だけ書かれることはありません。',
+      '書き戻しは履歴に残るので、いつでも戻せます。PKC3 で編集中は書き戻せません。',
+    ],
+  },
+  {
     id: '2026-08-25-cross-pane',
     title: '面をまたいで作業が続くようになりました',
     items: [
@@ -282,21 +293,11 @@ export const NOTICES: readonly Notice[] = [
       '別の入れ物のノート宛と、こちらに無いノート宛は、これまでどおりそのままです。在りもしない題名を書かないためです。',
     ],
   },
-  {
-    id: '2026-08-24-pptx-export',
-    title: 'ノートを PowerPoint(.pptx)で書き出せるようになりました',
-    items: [
-      '右の情報ペインに「PowerPoint」が増えました。いま選んでいるノート 1 件が、そのままスライドになります。',
-      '大見出しが扉のスライド、中見出しと小見出し、それに区切り線でスライドが切れます。PKC2 と同じ切れ方です。',
-      '表は格子のまま、画像と図は縦横比そのままで入ります。入りきらない文字は PowerPoint 側が縮めます。',
-      '書き出した file は取り込み直せません。戻せる形が要るときは、これまでどおり「バックアップ」を使ってください。',
-    ],
-  },
 ];
 
 /**
  * ⚠ **落としたぶんの原本は CHANGELOG に在る**(上限 20 件を超えたので、古いほうから
  *   `2026-08-16-office-save-to-pkc` / `2026-08-17-office-save-same-note`(2026-08-19)、
  *   `2026-08-19-dual-pane-app`(2026-08-22)、
- *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice`(2026-08-25)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
+ *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice` / `2026-08-24-pptx-export`(2026-08-25)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
  */

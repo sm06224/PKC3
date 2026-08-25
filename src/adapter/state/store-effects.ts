@@ -226,6 +226,20 @@ export interface StoreEffects {
    * 拾うが、上限を置く ── 書き続ける相手(自動保存)で永久に待たない。
    */
   settled(): Promise<void>;
+  /**
+   * 🔴 **同じ 1 本の chain に、外からの仕事を載せる**(#195 / C-5 段③)。
+   *
+   * ⚠ **2 本目の待ち口を作らないため**に在る ── 拡張からの書き戻しは
+   *   「読んで、古くないか検めて、書く」で、その途中に**アプリ自身の書込が
+   *   割り込むと基底が変わる**。`settled()` で待ってから外で走らせても、
+   *   待ち終わった直後に新しい書込が積まれれば同じことである
+   *   (CLAUDE.md §7「読みは書込を追い越す」の裏返し)。
+   * 🔑 だから**載せる**。載せれば順序は chain が保証する。
+   *
+   * ⚠ **失敗は呼び側へ返す**(chain は止めない)── ここで throw を飲むと、
+   *   拡張は「書けたのか断られたのか」を永久に知れない。
+   */
+  run<T>(job: () => Promise<T>): Promise<T>;
 }
 
 /** `settled()` が待つ最大の巡回数(積まれ続ける相手で永久に待たないための上限)。 */
@@ -1411,6 +1425,21 @@ export function connectStoreEffects(
    * 変数なので、待った後にもう一度見て「増えていない」ことまで確かめる。
    * ⚠ chain は `then(op, op)` で失敗しても続くので、ここで reject は起きない。
    */
+  /**
+   * 🔴 **chain に載せて、結果を返す**(上の注記)。
+   * ⚠ chain 自身は `then(op, op)` で**失敗しても続く**ので、ここで投げた仕事が
+   *   後続を巻き添えにすることは無い。
+   */
+  dispose.run = <T,>(job: () => Promise<T>): Promise<T> => {
+    const out = queue.then(job, job);
+    // ⚠ chain へ戻すのは**失敗を握った版**(呼び側は下の `out` で受け取る)
+    queue = out.then(
+      () => undefined,
+      () => undefined,
+    );
+    return out;
+  };
+
   dispose.settled = async (): Promise<void> => {
     for (let round = 0; round < SETTLE_ROUNDS_MAX; round += 1) {
       const tail = queue;
