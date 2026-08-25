@@ -8,6 +8,7 @@ import type {
   KeyResult as QueryKeyResult,
 } from '@features/query/group-by';
 import type { TaskScan } from '@features/schedule/task-cards';
+import type { SnippetScan } from '@features/snippet/snippet-table';
 
 export type StorageRequest =
   | { op: 'init'; dbName: string; journalMode?: JournalMode }
@@ -52,6 +53,8 @@ export type StorageRequest =
    *   (無害 ── 札が出ないだけ)。
    */
   | { op: 'taskScan'; cid: string }
+  /** 🔴 雛形を集める(#196 / B-2)。⚠ 候補は archetype で絞るので普通のノートは読まない。 */
+  | { op: 'snippetScan'; cid: string }
   | { op: 'getBody'; cid: string; lid: string }
   /**
    * 指定した lid の本文だけを **1 往復で** 取る(P7b review L-7)。
@@ -470,6 +473,7 @@ export interface ResultMap {
   listEntryMetas: EntryMetaRow[];
   /** カンバンの札(ノートの並び → 行番号 順)。⚠ 切ったときは `truncated`。 */
   taskScan: TaskScan;
+  snippetScan: SnippetScan;
   getBody: string | null;
   /** 読めたものだけ(要求順)。⚠ 無い lid は**黙って落ちる**。 */
   getBodies: Array<{ lid: string; body: string }>;

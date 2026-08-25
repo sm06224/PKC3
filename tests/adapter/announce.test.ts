@@ -535,6 +535,7 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
+    ['2026-08-25-snippets', '298252b9'],
     ['2026-08-25-repeating-tasks', 'fe23fa35'],
     ['2026-08-25-relation-map-body-links', '56115b8d'],
     ['2026-08-25-relation-map', '8be8a90f'],
@@ -545,7 +546,6 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-08-24-markdown-to-pandoc', '1d6edb9b'],
     ['2026-08-24-paste-permalink', '504c61d2'],
     ['2026-08-24-pptx-export', '599e9b36'],
-    ['2026-08-22-window-overlap', '9f7186e0'],
     ['2026-08-23-office-format-notice', '723cb8d3'],
     ['2026-08-23-office-restart', '15a9d3e7'],
     ['2026-08-23-backlinks', '488a34d5'],

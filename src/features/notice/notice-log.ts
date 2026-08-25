@@ -90,6 +90,18 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-25-snippets',
+    title: '自分の雛形を作って、短縮語で呼び出せるようになりました',
+    items: [
+      '左上の作成ボタンから「雛形」を選ぶと、雛形のノートが作れます。よく打つ住所・署名・議事録の型などを入れておいてください。',
+      '雛形の先頭に abbr: addr のように短縮語を書いておくと、本文を書いている途中で addr と打って Tab を押すだけで中身が入ります。',
+      '雛形の中に ${宛名} のように書いた所は、挿したあと選ばれた状態になります。打てばそのまま置き換わり、Tab で次の場所へ移れます。',
+      '${date} は挿した日、${time} は時刻、${datetime} は両方、${cursor} は挿したあとカーソルが来る場所になります。',
+      '短縮語が当たらないときの Tab は、これまでどおり次の欄へ移ります。書きかけの邪魔はしません。',
+      '⚠ 雛形の外(普通のノート)に ${date} と書いても、これまでどおりそのまま表示されます。展開されるのは雛形を挿すときだけです。',
+    ],
+  },
+  {
     id: '2026-08-25-repeating-tasks',
     title: '毎日・毎週・毎月・毎年の予定が書けるようになりました',
     items: [
@@ -279,20 +291,11 @@ export const NOTICES: readonly Notice[] = [
       '日付は手で打たなくてかまいません。編集中に書式の帯の「日付」を押すと、今日・明日・今週末・来週から選べます(Ctrl と ; でも開きます)。',
     ],
   },
-  {
-    id: '2026-08-22-window-overlap',
-    title: '別の窓の変更と重なったとき、黙って上書きしなくなりました',
-    items: [
-      '本文を書いている間に、別の窓(カレンダーややることの板)が同じノートを書き替えることがあります。これまでは保存すると黙って上書きし、画面には何も出ませんでした。',
-      'これからは、重なったときだけ画面の下に理由が出ます。こちらで打った字はそのまま保存されます。',
-      '上書きされた別の窓の版は履歴に残します。右の情報から履歴を開くと、その版に戻せます。',
-    ],
-  },
 ];
 
 /**
  * ⚠ **落としたぶんの原本は CHANGELOG に在る**(上限 20 件を超えたので、古いほうから
  *   `2026-08-16-office-save-to-pkc` / `2026-08-17-office-save-same-note`(2026-08-19)、
  *   `2026-08-19-dual-pane-app`(2026-08-22)、
- *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows`(2026-08-25)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
+ *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap`(2026-08-25)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
  */

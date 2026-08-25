@@ -13,6 +13,10 @@ import type {
   StorageResponse,
 } from '../../src/adapter/platform/storage/protocol';
 import { TASK_LIMITS } from '../../src/features/schedule/task-cards';
+import {
+  SNIPPET_ARCHETYPE,
+  SNIPPET_LIMITS,
+} from '../../src/features/snippet/snippet-table';
 import { contentHash64Hex } from '../../src/adapter/platform/storage/content-hash';
 import { parseFrontmatter } from '../../src/features/markdown/frontmatter';
 
@@ -1927,5 +1931,70 @@ describe('添付の差し替え(#205 / #178 / #212)', () => {
     // ⚠ 刻印は返る(呼び側が `stamp` に使う ── 返さないと次の boot まで時刻が出ない)
     const r = await request({ op: 'listEntryMetas', cid: 'c1' });
     expect(r.find((m) => m.lid === 'ar-c1')?.updated_at, '刻印が入っていない').toBeTruthy();
+  });
+});
+
+/**
+ * 🔴 **雛形を集める**(#196 / B-2 段②)。
+ *
+ * ⚠ **この describe を書くまで、この SQL は 1 度も走っていなかった** ── 画面側の
+ *   unit は fake の `snippetScan` を差すので、`archetype = ?` を外す変異が
+ *   **生き延びた**(2026-08-25、W1 が SURVIVED)。CLAUDE.md §2
+ *   「生き延びたら assert を足す前に『通っているか』を疑う」。
+ *
+ * 🔑 守る主張:
+ * 1. 🔴 **雛形だけ**が返る ── 普通のノートに `abbr:` と書いても雛形にならない
+ *    (⚠ ここが崩れると、**全ノートの本文が主スレッドへ流れる**)
+ * 2. 挿すのは **frontmatter を除いた残り**(`abbr:` の行まで挿さない)
+ * 3. 🔴 **切ったことを言う**(黙って切ると user は「無い」と読む)
+ *
+ * ⚠ fixture の `abbr:` は**字のまま書く** ── 実装の定数を引くと、綴りを取り違える
+ *   変異を test 側が一緒に間違える(CLAUDE.md §1「別の綴りではなく別の観測から作る」)。
+ */
+describe('雛形を集める (#196 / B-2)', () => {
+  const snipBody = '---\nabbr: addr\n---\n〒100-0000 千代田区\n';
+
+  it('🔴 雛形だけが返る(同じ本文でも、普通のノートは雛形にならない)', async () => {
+    await request({ op: 'openContainer', cid: 'c-snip', title: 'x' });
+    await request({
+      op: 'upsertEntry',
+      cid: 'c-snip',
+      entry: entry('sn-1', snipBody, { archetype: SNIPPET_ARCHETYPE, title: '住所' }),
+    });
+    // ⚠ 対照群 ── **本文まで同じ**普通のノート(違うのは archetype 1 つだけ)
+    await request({ op: 'upsertEntry', cid: 'c-snip', entry: entry('tx-1', snipBody) });
+    const scan = await request({ op: 'snippetScan', cid: 'c-snip' });
+    expect(
+      scan.items.map((i) => i.lid),
+      '雛形でないノートまで集めている(本文が主スレッドへ流れる)',
+    ).toEqual(['sn-1']);
+    expect(scan.total, '数えるほうも雛形で絞れていない').toBe(1);
+    expect(scan.truncated).toBe(false);
+    expect(scan.items[0]?.abbr, '短縮語が読めていない').toBe('addr');
+    expect(scan.items[0]?.title, '題名が載っていない(`/` の一覧で選べない)').toBe('住所');
+    expect(scan.items[0]?.body, 'frontmatter まで挿そうとしている').toBe('〒100-0000 千代田区\n');
+  });
+
+  /**
+   * ⚠ **上限を跨ぐ件数で試す**(CLAUDE.md §2)── 届かない量だけを見ていると、
+   *   `truncated` を常に `false` にする変異が**生き延びる**。
+   * 🔑 件数は **`SNIPPET_LIMITS` から導く**(直書きしない)。
+   */
+  it('🔴 上限を超えたら、切ったと言う(黙って落とさない)', async () => {
+    await request({ op: 'openContainer', cid: 'c-snip-many', title: 'x' });
+    const entries = Array.from({ length: SNIPPET_LIMITS.notes + 5 }, (_, i) =>
+      entry(`sn-${String(i).padStart(4, '0')}`, `---\nabbr: a${i}\n---\n雛形 ${i}\n`, {
+        archetype: SNIPPET_ARCHETYPE,
+        entryOrder: i,
+      }),
+    );
+    await request({ op: 'bulkUpsertEntries', cid: 'c-snip-many', entries });
+    const scan = await request({ op: 'snippetScan', cid: 'c-snip-many' });
+    expect(scan.total, '候補の総数が上限を超えていない(前提が崩れた)').toBe(
+      SNIPPET_LIMITS.notes + 5,
+    );
+    expect(scan.truncated, '切ったのに黙っている').toBe(true);
+    // ⚠ 切っても**読んだ分は返る**(0 件にして「無い」と見せない)
+    expect(scan.items.length, '切ったら何も返さなくなった').toBe(SNIPPET_LIMITS.notes);
   });
 });

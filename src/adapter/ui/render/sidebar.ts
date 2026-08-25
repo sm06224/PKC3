@@ -257,6 +257,8 @@ export function archetypeLabel(archetype: string): string {
       return 'フォルダ';
     case 'attachment':
       return '添付';
+    case 'snippet':
+      return '雛形';
     case 'todo':
       return 'Todo';
     case 'form':

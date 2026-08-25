@@ -241,9 +241,12 @@ describe('いま見ているフォルダの中に作る(reducer)', () => {
      * ⚠ 「2 つの要求を 1 回の enqueue にまとめる」では直らない(`await` で窓が開く)。
      */
     // ⚠ #348 で **選択が動いた 1 か所**から参照元も引く ── 作成は選択も動かす。
-    //    等値のまま**両方**書く(緩めると、余計な event が増えても気づけない)
+    //    #196 で **雛形集め**も乗った(作成から入った編集でも短縮語を効かせるため)。
+    //    等値のまま**全部**書く(緩めると、余計な event が増えても気づけない ──
+    //    実際この等値が 2026-08-25 に「1 つ増えた」を 3 件とも捕まえた)
     expect((r.events as Array<{ type: string }>).map((e) => e.type)).toEqual([
       'PERSIST_ENTRY',
+      'REQUEST_SNIPPET_SCAN',
       'REQUEST_BACKLINKS',
     ]);
     expect(
@@ -262,9 +265,12 @@ describe('いま見ているフォルダの中に作る(reducer)', () => {
     });
     expect(r.state.relations).toEqual([]);
     // ⚠ #348 で **選択が動いた 1 か所**から参照元も引く ── 作成は選択も動かす。
-    //    等値のまま**両方**書く(緩めると、余計な event が増えても気づけない)
+    //    #196 で **雛形集め**も乗った(作成から入った編集でも短縮語を効かせるため)。
+    //    等値のまま**全部**書く(緩めると、余計な event が増えても気づけない ──
+    //    実際この等値が 2026-08-25 に「1 つ増えた」を 3 件とも捕まえた)
     expect((r.events as Array<{ type: string }>).map((e) => e.type)).toEqual([
       'PERSIST_ENTRY',
+      'REQUEST_SNIPPET_SCAN',
       'REQUEST_BACKLINKS',
     ]);
     // ⚠ 親が無いときは **`parent` を載せない**(載せると「ルートへ出す」= 辺を消す指示になる)
@@ -285,9 +291,12 @@ describe('いま見ているフォルダの中に作る(reducer)', () => {
     expect(r.state.entryMetas.has('new3')).toBe(true);
     expect(r.state.relations).toEqual([]);
     // ⚠ #348 で **選択が動いた 1 か所**から参照元も引く ── 作成は選択も動かす。
-    //    等値のまま**両方**書く(緩めると、余計な event が増えても気づけない)
+    //    #196 で **雛形集め**も乗った(作成から入った編集でも短縮語を効かせるため)。
+    //    等値のまま**全部**書く(緩めると、余計な event が増えても気づけない ──
+    //    実際この等値が 2026-08-25 に「1 つ増えた」を 3 件とも捕まえた)
     expect((r.events as Array<{ type: string }>).map((e) => e.type)).toEqual([
       'PERSIST_ENTRY',
+      'REQUEST_SNIPPET_SCAN',
       'REQUEST_BACKLINKS',
     ]);
     // ⚠ 親が無いときは **`parent` を載せない**(載せると「ルートへ出す」= 辺を消す指示になる)

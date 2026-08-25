@@ -20,6 +20,7 @@ import type {
   KeyResult as QueryKeys,
 } from '@features/query/group-by';
 import type { TaskScan } from '@features/schedule/task-cards';
+import type { SnippetScan } from '@features/snippet/snippet-table';
 import type { Relation } from '@core/model/entry-meta';
 import type { Dispatcher } from './dispatcher';
 
@@ -55,6 +56,11 @@ export interface StorePort {
    * ⚠ 返るのは**項目だけ**で、本文は 1 バイトも渡らない(worker の中で舐める)。
    */
   taskScan?(): Promise<TaskScan>;
+  /**
+   * 🔴 **雛形を集める**(#196 / B-2)。⚠ **省略可** ── 持たない配線では
+   * 雛形の機能が丸ごと畳まれる(壊れるのではなく、`/` にも `Tab` にも出ない)。
+   */
+  snippetScan?(): Promise<SnippetScan>;
   /**
    * 指定した lid の本文を **1 往復で** 取る(P7b review L-7)。
    * ⚠ 無い lid は結果に出ない ── 呼び側は「読めたものだけ」を受け取る。
@@ -392,6 +398,29 @@ export function connectStoreEffects(
           () => {
             if (disposed) return;
             dispatcher.dispatch({ type: 'TASK_SCAN_FAILED' });
+          },
+        );
+        break;
+      }
+      /**
+       * 🔴 **雛形を集める**(#196 / B-2)。⚠ 予定(`REQUEST_TASK_SCAN`)と**同じ形**だが、
+       *   失敗の出し方だけ違う ── 雛形は**入力の補助**なので、出せないときは
+       *   `null` を渡して**静かに畳む**(打っている最中に帯を出さない)。
+       */
+      case 'REQUEST_SNIPPET_SCAN': {
+        const askSnippets = store.snippetScan;
+        if (!askSnippets) {
+          dispatcher.dispatch({ type: 'SET_SNIPPET_SCAN', scan: null });
+          break;
+        }
+        void askSnippets().then(
+          (scan) => {
+            if (disposed) return;
+            dispatcher.dispatch({ type: 'SET_SNIPPET_SCAN', scan });
+          },
+          () => {
+            if (disposed) return;
+            dispatcher.dispatch({ type: 'SET_SNIPPET_SCAN', scan: null });
           },
         );
         break;
