@@ -297,7 +297,9 @@ describe('本文の面: 再描画で操作の node が差し替わらない', ()
     const d = new DetailRenderer(region);
     const panel = {
       lid: 'e1',
-      items: [{ id: 'r1', revOrder: 1, createdAt: '2026-08-06 01:02:03', title: 'v1' }],
+      items: [
+        { id: 'r1', revOrder: 1, createdAt: '2026-08-06 01:02:03', title: 'v1', added: 2, removed: 1 },
+      ],
     };
     let s = bodyState({ revisionPanel: panel } as Partial<AppState>);
     d.render(s);
@@ -337,7 +339,9 @@ describe('本文の面: 再描画で操作の node が差し替わらない', ()
       ...s,
       revisionPanel: {
         lid: 'e1',
-        items: [{ id: 'r9', revOrder: 2, createdAt: '2026-08-07 00:00:00', title: 'v2' }],
+        items: [
+          { id: 'r9', revOrder: 2, createdAt: '2026-08-07 00:00:00', title: 'v2', added: 0, removed: 0 },
+        ],
       },
     } as AppState;
     d.render(s);

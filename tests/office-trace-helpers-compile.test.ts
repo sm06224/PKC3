@@ -20,6 +20,22 @@ import { execFileSync } from 'node:child_process';
 
 const SCRIPT = 'build/office-wasm/check-trace-helpers-compile.py';
 
+/**
+ * 🔴 **コンパイラを叩く test の時間の予算**(2026-08-25、CI が赤くなって学んだ)。
+ *
+ * この検査は **g++ を 6 回**(3 本 × 整数 / pointer)走らせ、できた実行体まで
+ * 走らせる。手元では **0.6 秒**だが、CI の共有 runner では 308 file の unit と
+ * **並走する**ので、vitest の既定(5 秒)を超えて時間切れになった
+ * (run 32885660105)。
+ *
+ * ⚠ **判定は 1 つも緩めていない** ── 変えたのは**壁時計の予算だけ**である。
+ *   ⚠ 「遅いから諦める」ではないので、上限は**本当に止まったら落ちる**大きさに
+ *   留める(60 秒 ── 手元の 100 倍)。
+ * ⚠ **`npm test` を速くしたいなら、ここを削るのではなく焼きを速くする** ──
+ *   この 0.6 秒は 15〜30 分の焼きを 1 本落とさないために払っている。
+ */
+const COMPILE_MS = 60_000;
+
 function run(): { code: number; out: string } {
   try {
     return {
@@ -73,7 +89,7 @@ describe('計装のヘルパーは g++ で通る', () => {
     expect(r.out).toContain('patch-lo-idles-trace.py / 整数');
     expect(r.out).toContain('patch-lo-idles-trace.py / pointer');
     expect(r.code, r.out).toBe(0);
-  });
+  }, COMPILE_MS);
 
   /**
    * 🔴 **2 つの形が「本当に別物」であることを、値で見る。**
@@ -90,7 +106,7 @@ describe('計装のヘルパーは g++ で通る', () => {
     );
     expect(got, `2 つの形の t= を拾えていない:\n${r.out}`).toHaveLength(2);
     expect(Object.fromEntries(got)).toEqual({ 整数: '4321', pointer: '4660' });
-  });
+  }, COMPILE_MS);
 
   /**
    * 🔴 **門が本当に鳴ることを、対照群で見る。**
@@ -106,5 +122,5 @@ describe('計装のヘルパーは g++ で通る', () => {
     );
     // ⚠ 逆側も要る ── 良い形まで落としていたら「厳しすぎる」であって検査ではない
     expect(r.out, '良い形を落としている').toContain('(対照群)良い形 / 整数');
-  });
+  }, COMPILE_MS);
 });

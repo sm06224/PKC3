@@ -229,6 +229,18 @@ export interface RevisionItem {
   revOrder: number;
   createdAt: string | null;
   title: string | null;
+  /**
+   * 🔴 **この版と、1 つ新しい版の違い**(#398 段①)。
+   *
+   * > user の物語: 履歴に同じ題名が並び、**どれが目当ての版か押すまで分からない**。
+   *
+   * ⚠ 向きは **user が読む向き**(この版 → 1 つ新しい版)。裏返しは worker の中で
+   *   済ませてある ── ここで数え直さない(§7)。
+   * ⚠ `null` = **数えられない**(全文で持っている版)。0 と潰さない ──
+   *   0 は「変わっていない」で意味が違う。
+   */
+  added: number | null;
+  removed: number | null;
 }
 
 /** ゴミ箱一覧の 1 行(= entries に居ない entry_lid の最新 revision)。 */
@@ -337,6 +349,24 @@ export interface AppState {
   /** 選択 entry の履歴 panel(P5b)。開いた時点のスナップショット ── 選択遷移 /
    *  編集開始 / view 切替で畳む。boot で revisions に触れない原則の受け皿。 */
   revisionPanel: { lid: string; items: readonly RevisionItem[] } | null;
+  /**
+   * 🔴 **戻す前に中身を見る**(#398 段②)。`null` = 見ていない。
+   *
+   * ⚠ **読み取り専用**である ── 「見ている版を編集できる」を作ると、
+   *   保存したのがどちらなのか user から見えなくなる。
+   * ⚠ 本文を持つのは**開いている 1 件だけ** ── 一覧の全件を持つと、
+   *   履歴を開くだけで本文が N 本 heap に載る(常駐ゼロの規律に反する)。
+   */
+  revisionPreview: { lid: string; revId: string; body: string } | null;
+  /**
+   * 🔴 **一時の知らせ**(#402 ①)。`null` = 何も出していない。
+   *
+   * ⚠ **`error` と別に持つ** ── 一括タグの結果は「3 件は既に付いていました」の
+   *   ように**成功の内訳**であって、赤い帯に出す物ではない
+   *   (`main.ts` が「エラー > 一時の知らせ」の順で組んでいるのと同じ考え)。
+   * ⚠ 出す寿命は**次の知らせまで** ── 消す口を別に作らない。
+   */
+  notice: string | null;
   /** ゴミ箱 panel(filer)。開いた時点のスナップショット + 明示更新。 */
   trashPanel: { items: readonly TrashItem[] } | null;
   /**
@@ -473,6 +503,25 @@ export interface AppState {
    */
   writeLock: { lid: string } | null;
   /**
+   * 🔴 **直前の追記**(#395 段①。user 指示 2026-08-23「**片道の操作を作らない**」)。
+   *
+   * 追記は本文を開かずに足せるので、**外すのも本文を開かずにできる**必要がある。
+   * ⚠ 持つのは**足した行そのもの**で、行番号ではない(取り消すまでに別の窓が
+   *   上へ足していれば番号はずれる)。
+   * ⚠ **1 手だけ**持つ ── 積むと「どれが消えるのか」が user から見えなくなる。
+   */
+  lastAppend: { lid: string; lines: readonly string[] } | null;
+  /**
+   * 🔴 **編集に入った瞬間に開く行**(#395 段③)。`null` = どこも開かない(既定)。
+   *
+   * > 読んでいる本文の「この行」を直したい ── 修飾キー + クリックで入る。
+   *
+   * ⚠ 座標は**frontmatter を外した側**(ライブエディタと読む面が同じ基準を使う)。
+   * ⚠ `START_EDIT` のたびに**必ず入れ替わる** ── 残しておくと、次に普通に
+   *   「編集」を押したときに**前に押した行が勝手に開く**。
+   */
+  editOpenAt: number | null;
+  /**
    * タイル設定の書込が飛んでいる数(P8 段⑯)。
    *
    * 🔴 `writeLock` を借りると、**連続した設定変更が無言で落ちる**(登録 →
@@ -549,9 +598,13 @@ export const initialState: AppState = {
   showDoneTasks: false,
   showUndatedTasks: false,
   revisionPanel: null,
+  revisionPreview: null,
+  notice: null,
   trashPanel: null,
   linkedFiles: new Map(),
   writeLock: null,
+  lastAppend: null,
+  editOpenAt: null,
   tileWrite: null,
   lockGen: 0,
   error: null,
@@ -640,7 +693,14 @@ export type UserAction =
    * ⚠ `body === null` は失敗(書けなかった)── **ロックは必ず解く**。
    */
   | { type: 'APP_TILE_SAVED'; lid: string; gen: number; body: string | null }
-  | { type: 'START_EDIT' }
+  | {
+      type: 'START_EDIT';
+      /**
+       * 🔴 **入った瞬間に開く行**(#395 段③)。省略 = どこも開かない(これまでどおり)。
+       * ⚠ 座標は**frontmatter を外した側** ── 読む面の `data-pkc-source-line` と同じ基準。
+       */
+      atLine?: number;
+    }
   | { type: 'UPDATE_OPEN_BODY'; body: string }
   | { type: 'COMMIT_EDIT' }
   | { type: 'CANCEL_EDIT' }
@@ -683,7 +743,22 @@ export type UserAction =
    * ⚠ `heading` は binder が作って渡す(reducer は純粋のまま ── `Date` を呼ばない)。
    * ノートは `null`(見出しを勝手に足さない)。
    */
-  | { type: 'APPEND_TO_ENTRY'; lid: string; text: string; heading: string | null }
+  | {
+      /**
+       * 🔴 **直前の追記を取り消す**(#395 段①。user 指示 2026-08-23
+       * 「**片道の操作を作らない**」)。
+       * ⚠ 独自の書込経路を作らない ── `REQUEST_BODY_REWRITE` を通る(§7)。
+       */
+      type: 'UNDO_APPEND';
+    }
+  | {
+      type: 'APPEND_TO_ENTRY';
+      lid: string;
+      text: string;
+      heading: string | null;
+      /** 入り先の印(#395 段①)。`null` = 末尾。 */
+      target: string | null;
+    }
   /**
    * ランチャーのタイル設定(P8 段⑭)。
    *
@@ -807,7 +882,22 @@ export type UserAction =
   | { type: 'SET_ENTRY_PARENT'; lid: string; parentLid: string | null; relationId: string }
   /** 同じ親の下で隣と入れ替える(2026-08-06。user 報告 2-10)。 */
   | { type: 'MOVE_ENTRY_ORDER'; lid: string; direction: 'up' | 'down' }
+  /**
+   * 🔴 **選んだ全部にタグを付ける / 外す**(#402 ①)。
+   * ⚠ 相手は**いま表に出ている印**だけ(`delete-selected` と同じ規則 ── 画面に
+   *   無いものを触らない)。呼び側がその集合を渡す。
+   */
+  | { type: 'BULK_TAG'; lids: readonly string[]; tag: string; mode: 'add' | 'remove' }
+  /**
+   * 🔴 **一時の知らせ**(#402 ①)。⚠ `OP_FAILED` と混ぜない ── あちらは赤い帯で、
+   *   こちらは成功の内訳である(「3 件は既に付いていました」を失敗にしない)。
+   */
+  | { type: 'OP_NOTICE'; message: string }
   | { type: 'SHOW_HISTORY' }
+  /** 🔴 **その版の中身を見る**(#398 段②)。⚠ 復元ではない ── 1 バイトも書かない。 */
+  | { type: 'PREVIEW_REVISION'; revId: string }
+  | { type: 'HIDE_REVISION_PREVIEW' }
+  | { type: 'REVISION_PREVIEW_LOADED'; lid: string; revId: string; body: string }
   | { type: 'HIDE_HISTORY' }
   | { type: 'RESTORE_REVISION'; revId: string }
   | { type: 'SHOW_TRASH' }
@@ -945,6 +1035,13 @@ export type SystemCommand =
       status: string | null;
       date: string | null;
       archived: boolean;
+      /**
+       * 🔴 **足した行そのもの**(#395 段①、取り消しのため)。
+       *
+       * ⚠ **行番号ではない** ── 取り消すまでの間に別の窓が上へ足していれば
+       *   番号はずれる。⚠ 純粋な挿入でなければ `null`(取り消しを出さない)。
+       */
+      inserted: readonly string[] | null;
     }
   | {
       /** 追記が失敗した。⚠ **ロックは必ず解く**(失敗で握ったままにしない)。 */
@@ -1073,6 +1170,14 @@ export type DomainEvent =
       entryOrder: number;
       heading: string | null;
       text: string;
+      /**
+       * 🔴 **入り先の印**(#395 段①)。`null` = 末尾(これまでと同じ)。
+       *
+       * ⚠ **行番号ではなく印**である ── effect は disk から読み直すので、
+       *   行番号を渡すと**別の窓の書込のあとで違う場所へ入る**。
+       * ⚠ 解けなければ effect が**断る**(末尾へ落とさない)。
+       */
+      target: string | null;
     }
   | { type: 'REQUEST_DELETE'; lid: string }
   | {
@@ -1096,7 +1201,29 @@ export type DomainEvent =
   /** 関係の永続化(#185)。⚠ 1 件ずつ ── 作る操作も消す操作も 1 度に 1 つである。 */
   | { type: 'REQUEST_RELATION_UPSERT'; id: string; fromLid: string; toLid: string; kind: string }
   | { type: 'REQUEST_RELATION_DELETE'; id: string }
+  | {
+      /**
+       * 🔴 **選んだ全部にタグを 1 つ足す / 外す**(#402 ①)。
+       *
+       * ⚠ **meta は発火時に捕まえる**(C-1 規律)── 走っている間に一覧が
+       *   変わっても、書く相手は押した時の 12 件のままである。
+       * ⚠ 1 件ずつ `REQUEST_BODY_REWRITE` を撃たない ── 撃つと
+       *   「既に付いている」件が**1 件ずつ失敗として出る**(12 件のうち 3 件が
+       *   既に付いていただけで、赤い帯が 3 回出る)。ここは**まとめて 1 通**言う。
+       */
+      type: 'REQUEST_BULK_TAG';
+      tag: string;
+      mode: 'add' | 'remove';
+      targets: readonly {
+        lid: string;
+        title: string;
+        archetype: string;
+        entryOrder: number;
+      }[];
+    }
   | { type: 'REQUEST_REVISION_LIST'; lid: string }
+  /** その版の本文を読む(#398 段②)。⚠ **読むだけ**(書込は 1 バイトも無い)。 */
+  | { type: 'REQUEST_REVISION_BODY'; lid: string; revId: string }
   | {
       /** 履歴からの復元(前進変異): effect が「現状を addRevision → revision
        *  内容で persist」の順に行う。meta snapshot は発火時捕獲。 */
@@ -1381,6 +1508,8 @@ function reduceCore(
           openBody: null,
           error: null,
           revisionPanel: null, // panel は選択に従属(P5b)
+          // ⚠ 見ていた版も畳む(#398 段②)── 一覧が畳まれたら差分は孤児になる
+          revisionPreview: null,
         },
         events: [{ type: 'REQUEST_BODY', lid: action.lid }],
       };
@@ -1564,6 +1693,8 @@ function reduceCore(
           ...state,
           viewMode: action.mode,
           revisionPanel: null,
+          // ⚠ 見ていた版も畳む(#398 段②)── 一覧が畳まれたら差分は孤児になる
+          revisionPreview: null,
           trashPanel: null,
         },
         // 🔑 ランチャーを開いたら**そのとき**タイルを要求する(P7b 段⑩)。
@@ -1756,7 +1887,19 @@ function reduceCore(
       // ⚠ 編集がロックを握ることは**書かない** ── `phase === 'editing'` が既に
       // それを表している(`bodyLockOf`)。ここで別の field に写すと 2 つ目の真実
       return {
-        state: { ...state, phase: 'editing', revisionPanel: null },
+        state: {
+          ...state,
+          phase: 'editing',
+          revisionPanel: null,
+          // ⚠ 見ていた版も畳む(#398 段②)── 一覧が畳まれたら差分は孤児になる
+          revisionPreview: null,
+          /**
+           * 🔴 **押した行を持って編集へ入る**(#395 段③)。
+           * ⚠ **毎回入れ替える**(`?? null`)── 前回の値を残すと、普通に
+           *   「編集」を押しただけで**前に押した行が開く**。
+           */
+          editOpenAt: action.atLine ?? null,
+        },
         /**
          * 🔴 **編集に入るたびに雛形を集め直す**(#196 / B-2)。
          *
@@ -1962,7 +2105,7 @@ function reduceCore(
       if (!meta) return { state, events: [] };
       if (action.text.trim() === '') return { state, events: [] }; // 空の追記は作らない
       return {
-        state: { ...state, writeLock: { lid: action.lid }, revisionPanel: null },
+        state: { ...state, writeLock: { lid: action.lid }, revisionPanel: null, revisionPreview: null },
         events: [
           {
             type: 'REQUEST_APPEND',
@@ -1973,6 +2116,7 @@ function reduceCore(
             entryOrder: meta.entryOrder,
             heading: action.heading,
             text: action.text,
+            target: action.target,
           },
         ],
       };
@@ -2049,8 +2193,46 @@ function reduceCore(
            *   板から「やること」を足す口を作ると、これが正面の欠陥になる。
            */
           taskScan: refreshTaskCards(state.taskScan, action.lid, action.body),
+          /**
+           * 🔴 **直前の 1 手だけ覚える**(#395 段①)── 「元に戻す」の材料。
+           * ⚠ 純粋な挿入でなかった回は `null` に落とす ── 前の追記の材料を
+           *   **残したままにしない**(古い材料で消すと、別の所が消える)。
+           */
+          lastAppend:
+            action.inserted === null
+              ? null
+              : { lid: action.lid, lines: action.inserted },
         },
         events: [],
+      };
+    }
+    /**
+     * 🔴 **直前の追記を取り消す**(#395 段①)。
+     *
+     * ⚠ **消すのは「足した行そのもの」**で、行番号ではない ── 取り消すまでの間に
+     *   別の窓が上へ足していれば番号はずれる。見つからなければ
+     *   `applyBodyRewrite` が `null` を返して effect が断る(黙って別の所を消さない)。
+     * ⚠ **1 手で使い切る**(`lastAppend` を落とす)── 2 度押しで、同じ字の
+     *   別の行まで消えるのを止める。
+     */
+    case 'UNDO_APPEND': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      const last = state.lastAppend;
+      if (!last) return { state, events: [] };
+      const meta = state.entryMetas.get(last.lid);
+      if (!meta) return { state: { ...state, lastAppend: null }, events: [] };
+      return {
+        state: { ...state, lastAppend: null },
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            rewrite: { kind: 'undo-append', lines: last.lines },
+          },
+        ],
       };
     }
     case 'APPEND_FAILED': {
@@ -2753,6 +2935,35 @@ function reduceCore(
         events: [{ type: 'REQUEST_RELATION_DELETE', id: action.id }],
       };
     }
+    /**
+     * 🔴 **選んだ全部にタグを付ける / 外す**(#402 ①)。
+     *
+     * > user の物語: フォルダで 12 件選んだ。全部に `#請求済` を付けたい。
+     * > いま一括でできるのは「ゴミ箱へ」だけで、**12 回開いて 12 回書く**。
+     *
+     * ⚠ ready 限定(編集中の裏書換を作らない ── `TOGGLE_TASK` と同じ)。
+     * ⚠ **居ない lid は落とす**(消えたノートへ書きに行かない)。
+     * ⚠ 空の相手・空のタグでは**何も撃たない**(押して無反応にならないよう、
+     *   帯の側がそもそも押せない形にしてある)。
+     */
+    case 'BULK_TAG': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      if (action.tag.trim() === '') return { state, events: [] };
+      const targets = action.lids
+        .map((lid) => state.entryMetas.get(lid))
+        .filter((m): m is EntryMeta => m !== undefined)
+        .map((m) => ({
+          lid: m.lid,
+          title: m.title,
+          archetype: m.archetype,
+          entryOrder: m.entryOrder,
+        }));
+      if (targets.length === 0) return { state, events: [] };
+      return {
+        state,
+        events: [{ type: 'REQUEST_BULK_TAG', tag: action.tag, mode: action.mode, targets }],
+      };
+    }
     case 'SHOW_HISTORY': {
       // ready + 選択ありのみ。一覧は要求時に引く(boot で revisions に触れない)
       if (state.phase !== 'ready' || !state.selectedLid)
@@ -2762,8 +2973,40 @@ function reduceCore(
         events: [{ type: 'REQUEST_REVISION_LIST', lid: state.selectedLid }],
       };
     }
+    /**
+     * 🔴 **戻す前に中身を見る**(#398 段②)。
+     * ⚠ **押した版が既に開いていたら畳む**(同じ物をもう一度押したら閉じる)──
+     *   開きっぱなしにすると、閉じる道が「別の版を押す」しか無くなる
+     *   (user 指示 2026-08-23「置けるなら外せる」の面版)。
+     */
+    case 'PREVIEW_REVISION': {
+      if (state.phase !== 'ready' || !state.selectedLid) return { state, events: [] };
+      if (state.revisionPreview?.revId === action.revId)
+        return { state: { ...state, revisionPreview: null }, events: [] };
+      return {
+        state,
+        events: [
+          { type: 'REQUEST_REVISION_BODY', lid: state.selectedLid, revId: action.revId },
+        ],
+      };
+    }
+    case 'HIDE_REVISION_PREVIEW':
+      return { state: { ...state, revisionPreview: null }, events: [] };
+    case 'REVISION_PREVIEW_LOADED': {
+      // ⚠ 遅れて着いた分が別のノートのものなら捨てる(`BODY_LOADED` と同型)
+      if (state.selectedLid !== action.lid) return { state, events: [] };
+      return {
+        state: {
+          ...state,
+          revisionPreview: { lid: action.lid, revId: action.revId, body: action.body },
+        },
+        events: [],
+      };
+    }
     case 'HIDE_HISTORY':
-      return { state: { ...state, revisionPanel: null }, events: [] };
+      // ⚠ **見ていた版も一緒に畳む** ── 一覧を閉じたのに差分だけ残ると、
+      //    どの版の物か分からない孤児になる
+      return { state: { ...state, revisionPanel: null, revisionPreview: null }, events: [] };
     case 'REVISION_LIST_LOADED': {
       // 遅延到着が現選択と食い違うなら捨てる(stale 反映防止 ── BODY_LOADED と同型)
       if (state.selectedLid !== action.lid) return { state, events: [] };
@@ -2781,7 +3024,7 @@ function reduceCore(
       // panel は畳む(復元で履歴が 1 件伸びるので開き直しが正)。meta snapshot は
       // 発火時捕獲(C-1 規律)
       return {
-        state: { ...state, revisionPanel: null },
+        state: { ...state, revisionPanel: null, revisionPreview: null },
         events: [
           {
             type: 'REQUEST_RESTORE',
@@ -3068,6 +3311,8 @@ function reduceCore(
           relations,
           trashPanel,
           revisionPanel: null,
+          // ⚠ 見ていた版も畳む(#398 段②)── 一覧が畳まれたら差分は孤児になる
+          revisionPreview: null,
           selectedLid: action.meta.lid,
           openBody: {
             lid: action.meta.lid,
@@ -3102,6 +3347,10 @@ function reduceCore(
         },
         events: [],
       };
+    case 'OP_NOTICE':
+      // ⚠ **`error` を触らない** ── 知らせが出たからといって、出ているエラーを
+      //    消してよい理由は無い(`main.ts` が別の行として組んでいる)
+      return { state: { ...state, notice: action.message }, events: [] };
     case 'OP_FAILED':
       // 非致命: 通知のみ。phase は動かさない(kanban 等の操作性を殺さない)
       return { state: { ...state, error: action.error }, events: [] };
@@ -3238,6 +3487,8 @@ function removeEntryFromState(
       selectionAnchor: state.selectionAnchor === lid ? null : state.selectionAnchor,
       // 削除で履歴・ゴミ箱の断面は古くなる ── 畳んで開き直しに任せる(P5b)
       revisionPanel: null,
+      // ⚠ 見ていた版も畳む(#398 段②)── 一覧が畳まれたら差分は孤児になる
+      revisionPreview: null,
       trashPanel: null,
       // ⚠ 元ファイルの紐づけも外す ── 消したノートに「書き戻す」を出したままだと、
       //    戻せなくなった器を指す導線が残る(復元したら開き直しで紐づく)

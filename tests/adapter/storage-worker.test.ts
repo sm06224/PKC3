@@ -1998,3 +1998,89 @@ describe('雛形を集める (#196 / B-2)', () => {
     expect(scan.items.length, '切ったら何も返さなくなった').toBe(SNIPPET_LIMITS.notes);
   });
 });
+
+/**
+ * 🔴 **版ごとの増減行数**(#398 段①)。
+ *
+ * > user の物語: 履歴に**同じ題名が 3 つ**並び、日時しか手がかりが無い。
+ *
+ * ⚠ ここでいちばん危ないのは **向き**である ── 保存形は「1 つ新しい版 → この版」の
+ *   **逆向き**パッチなので、裏返し忘れると `+` と `−` が**そっくり入れ替わる**。
+ *   🔴 **しかも数字は出る**ので、画面を見ても誰も気づけない
+ *   (CLAUDE.md §4「出た値は本物、測っている対象だけが違う」の向き違い版)。
+ * 🔑 だから **足した数と消した数を非対称にした本文**で見る ── 対称だと
+ *   裏返しても同じ数字になり、**空振りのまま合格する**。
+ */
+describe('#398 版ごとの増減行数', () => {
+  const statsOf = (lid: string) =>
+    request({ op: 'revisionDiffStats', cid: 'c1', entryLid: lid });
+
+  /** 200 行の土台(パッチ経路を通す大きさ)。 */
+  const base = (): string[] =>
+    Array.from({ length: 200 }, (_, i) => `行 ${i}`);
+
+  it('🔴 向きは「この版 → 1 つ新しい版」(裏返っていない)', async () => {
+    const old = base();
+    // 🔑 **非対称**にする ── 3 行足して 1 行消す(裏返すと 1 / 3 になる)
+    const next = [...old.slice(0, 100), '足1', '足2', '足3', ...old.slice(101)];
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('d1', old.join('\n') + '\n'),
+      checkpoint: false,
+    });
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('d1', next.join('\n') + '\n'),
+      checkpoint: true,
+    });
+    const metas = await metasOf('d1');
+    expect(metas, '履歴が伸びていない(前提が崩れた)').toHaveLength(1);
+    expect(metas[0]!.kind, 'パッチで持っていない(前提が崩れた)').toBe('patch');
+    const stats = await statsOf('d1');
+    expect(stats.map((s) => s.id)).toEqual([metas[0]!.id]);
+    // 🔴 古い版から見て **3 行足されて 1 行消えた**
+    expect(
+      { added: stats[0]!.added, removed: stats[0]!.removed },
+      '+ と − が入れ替わっている',
+    ).toEqual({ added: 3, removed: 1 });
+  });
+
+  it('🔴 本文は 1 バイトも返らない(数だけ)', async () => {
+    const stats = await statsOf('d1');
+    // ⚠ 形そのものを pin する ── 将来 snapshot を足す変更を止める
+    expect(Object.keys(stats[0]!).sort()).toEqual(['added', 'id', 'removed']);
+  });
+
+  it('🔴 全文で持っている版は null(0 と潰さない ── 意味が違う)', async () => {
+    // 小さい本文は `encodeReverse` が全文を選ぶ
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('d2', 'あ\n'),
+      checkpoint: false,
+    });
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('d2', 'い\n'),
+      checkpoint: true,
+    });
+    const metas = await metasOf('d2');
+    expect(metas[0]!.kind, '全文で持っていない(前提が崩れた)').toBe('full');
+    const stats = await statsOf('d2');
+    expect(stats[0]!.added, '数えられないのに 0 と言っている').toBeNull();
+    expect(stats[0]!.removed).toBeNull();
+  });
+
+  it('履歴が無ければ空(在ることにしない)', async () => {
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('d3', 'ひとつ\n'),
+      checkpoint: false,
+    });
+    expect(await statsOf('d3')).toEqual([]);
+  });
+});

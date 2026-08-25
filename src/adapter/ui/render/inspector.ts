@@ -445,6 +445,14 @@ export class InspectorRenderer {
      * ⚠ 理由を `title` に書く ── 押せない理由が分からないほうが困る。
      */
     const editing = state.phase !== 'ready';
+    /**
+     * 🔴 **フォルダ書き出しはフォルダのときだけ**(#399 ①)。
+     * ⚠ 出しっぱなしにすると、ノートで押したとき `folderSource` が投げて
+     *   「書き出しに失敗しました」と出る ── **押せるのに必ず失敗する**のは、
+     *   押せない(畳んである)より悪い。
+     */
+    const folderBtn = this.buttons.get('export-folder');
+    if (folderBtn) folderBtn.hidden = meta.archetype !== 'folder';
     for (const [action, b] of this.buttons) {
       const why = ACTION_TITLES[action] ?? '';
       const title = action === 'write-back-file' ? whyWriteBack(link) : why;
@@ -654,6 +662,15 @@ export class InspectorRenderer {
     // ⚠ 文言は**実際に落ちるもの**に合わせる(P8 段⑱)── ここは可逆な
     //    アーカイブで、Markdown ではない(マニュアル §5 の表と同じ材料)
     btn('export-entry', '書き出す');
+    /**
+     * 🔴 **このフォルダごと書き出す**(#399 ①)。
+     *
+     * ⚠ **フォルダのときだけ出す**(`render` で `hidden` を付け外しする)──
+     *   形(`Shape`)を増やすと `entry+link` との掛け算になり、組み直しが増える。
+     * ⚠ **消さずに畳む**のは、隣の並びを動かさないためである(業務画面の作法
+     *   「同じものが常に同じ場所にある」)。
+     */
+    btn('export-folder', 'フォルダを書き出す');
     // 🔴 **Word で出す**(#187 段①)。⚠ 隣の「書き出す」と**別の物**である ──
     //    あちらは取り込み直せるバックアップ、こちらは片道の Word 文書
     btn('export-entry-docx', 'Word');
@@ -693,6 +710,10 @@ export class InspectorRenderer {
  */
 const ACTION_TITLES: Record<string, string> = {
   'export-entry': 'このノートだけをバックアップ形式(.pkc3.zip)で保存します。取り込み直せます',
+  // ⚠ **画面で起きることで書く**(user 指示 2026-08-21)── 「配下を再帰収集」ではなく
+  //    「中に入っているものごと」。⚠ **外へ繋がる関連が落ちる**ことも先に言う
+  'export-folder':
+    'このフォルダと、中に入っているものをまとめてバックアップ形式(.pkc3.zip)で保存します。取り込み直せます(外へ繋がる関係は入りません)',
   // 🔴 **実装に合わせる**(2026-08-18)。直す前は「この版では画像は入りません」と
   //    書いてあったが、画像も図もグラフも**入る**(`features/export/docx.ts` の VML /
   //    `svg-emf.ts` のベクタ)。マニュアル(§5)もお知らせ 2 件も「入る」と言っており、

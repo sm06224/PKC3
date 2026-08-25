@@ -12,6 +12,11 @@ import { PersistOnce, type PersistState } from '@adapter/platform/storage-persis
 // 🔴 追記の楽観検査(#178)── 「読んだ本文」を worker と突き合わせるための指紋
 import { contentHash64Hex } from '@adapter/platform/storage/content-hash';
 import { appendBlock } from '@features/markdown/text-ops';
+import {
+  appendIntoSection,
+  insertedLines,
+  resolveAppendAt,
+} from '@features/markdown/append-target';
 import { applyBodyRewrite } from '@features/markdown/body-rewrite';
 import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
 import { buildTiles, withBuiltinTiles, type TileSource } from '@features/launcher/tiles';
@@ -177,6 +182,13 @@ export interface StorePort {
       archetype: string | null;
     }>
   >;
+  /**
+   * 🔴 **版ごとの増減行数**(#398 段①)。⚠ **本文は返らない**(数だけ)。
+   * ⚠ `null` = 数えられない(全文で持っている版)。0 と潰さない。
+   */
+  revisionDiffStats(
+    entryLid: string,
+  ): Promise<Array<{ id: string; added: number | null; removed: number | null }>>;
   getRevision(revId: string): Promise<{
     body: string;
     title: string | null;
@@ -214,6 +226,20 @@ export interface StoreEffects {
    * 拾うが、上限を置く ── 書き続ける相手(自動保存)で永久に待たない。
    */
   settled(): Promise<void>;
+  /**
+   * 🔴 **同じ 1 本の chain に、外からの仕事を載せる**(#195 / C-5 段③)。
+   *
+   * ⚠ **2 本目の待ち口を作らないため**に在る ── 拡張からの書き戻しは
+   *   「読んで、古くないか検めて、書く」で、その途中に**アプリ自身の書込が
+   *   割り込むと基底が変わる**。`settled()` で待ってから外で走らせても、
+   *   待ち終わった直後に新しい書込が積まれれば同じことである
+   *   (CLAUDE.md §7「読みは書込を追い越す」の裏返し)。
+   * 🔑 だから**載せる**。載せれば順序は chain が保証する。
+   *
+   * ⚠ **失敗は呼び側へ返す**(chain は止めない)── ここで throw を飲むと、
+   *   拡張は「書けたのか断られたのか」を永久に知れない。
+   */
+  run<T>(job: () => Promise<T>): Promise<T>;
 }
 
 /** `settled()` が待つ最大の巡回数(積まれ続ける相手で永久に待たないための上限)。 */
@@ -811,12 +837,109 @@ export function connectStoreEffects(
           }
         });
         break;
+      /**
+       * 🔴 **選んだ全部にタグを足す / 外す**(#402 ①)。
+       *
+       * ⚠ **書換の規則は 1 本**(`applyBodyRewrite` の `kind: 'tag'`)── ここで
+       *   frontmatter を組み直さない(§7)。ここが持つのは**繰り返しと数え上げ**だけ。
+       * ⚠ **1 件ずつ `expectHash` で守る**(#178 と同じ)── 読んでから書くまでに
+       *   別の窓が書いていたら、その 1 件だけ飛ばして数に出す。**当て直さない**
+       *   (行番号ではなくタグなので当て直しても壊れないが、user が押した後に
+       *   本文が変わったなら、黙って上書きするより言うほうが正しい)。
+       * ⚠ **1 通だけ言う** ── 12 件のうち 3 件が既に付いていただけで赤い帯が
+       *   3 回出るのは、押した人から見て「失敗した」にしか見えない。
+       */
+      case 'REQUEST_BULK_TAG':
+        enqueue(async () => {
+          if (disposed) return;
+          let wrote = 0;
+          let skipped = 0;
+          let failed = 0;
+          for (const t of ev.targets) {
+            if (disposed) return;
+            try {
+              const body = await store.getBody(t.lid);
+              if (body === null) {
+                failed++;
+                continue;
+              }
+              const newBody = applyBodyRewrite(body, {
+                kind: 'tag',
+                tag: ev.tag,
+                mode: ev.mode,
+              });
+              // ⚠ **`null` は失敗ではない** ── 「既に付いている / 元から無い」も
+              //    ここへ来る。数だけ分けて、赤い帯にしない
+              if (newBody === null) {
+                skipped++;
+                continue;
+              }
+              const ext = extractMeta(t.archetype, newBody);
+              const stamps = await store.persistEntry(
+                {
+                  lid: t.lid,
+                  title: t.title,
+                  archetype: t.archetype,
+                  body: newBody,
+                  entryOrder: t.entryOrder,
+                  status: ext.status,
+                  date: ext.date,
+                  archived: ext.archived,
+                },
+                { expectHash: contentHash64Hex(body) },
+              );
+              if (stamps.conflict === true) {
+                failed++;
+                continue;
+              }
+              wrote++;
+              stamp(t.lid, stamps);
+              if (!disposed)
+                dispatcher.dispatch({
+                  type: 'BODY_REWRITTEN',
+                  lid: t.lid,
+                  body: newBody,
+                  rewrite: { kind: 'tag', tag: ev.tag, mode: ev.mode },
+                  status: ext.status,
+                  date: ext.date,
+                  archived: ext.archived,
+                });
+            } catch {
+              failed++;
+            }
+          }
+          if (disposed) return;
+          /**
+           * ⚠ **何が起きたかを全部言う** ── 「12 件に付けました」だけだと、
+           *   3 件が既に付いていたことも 1 件が失敗したことも消える。
+           */
+          const verb = ev.mode === 'add' ? '付けました' : '外しました';
+          const parts = [`${wrote} 件に${verb}`];
+          if (skipped > 0)
+            parts.push(ev.mode === 'add' ? `${skipped} 件は既に付いていました` : `${skipped} 件は付いていませんでした`);
+          if (failed > 0) parts.push(`${failed} 件は書けませんでした(別の窓が書き替えた可能性があります)`);
+          dispatcher.dispatch({ type: 'OP_NOTICE', message: parts.join(' / ') });
+        });
+        break;
       case 'REQUEST_REVISION_LIST':
         enqueue(async () => {
           if (disposed) return;
           try {
-            const rows = await store.listRevisionMetas(ev.lid);
+            /**
+             * 🔴 **一覧と増減を一緒に引く**(#398 段①)。
+             *
+             * ⚠ **本文は 1 バイトも越えない** ── 増減は worker の中で数えて
+             *   数字だけ返る(`revisionDiffStats`)。
+             * ⚠ **数が引けなくても一覧は出す** ── 増減は手がかりであって、
+             *   無いなら無いで履歴は開けなければならない(片方の失敗で
+             *   もう片方まで殺さない)。
+             */
+            const [rows, stats] = await Promise.all([
+              store.listRevisionMetas(ev.lid),
+              store.revisionDiffStats(ev.lid).catch(() => []),
+            ]);
             if (disposed) return;
+            const statOf = new Map(stats.map((x) => [x.id, x]));
             dispatcher.dispatch({
               type: 'REVISION_LIST_LOADED',
               lid: ev.lid,
@@ -825,6 +948,9 @@ export function connectStoreEffects(
                 revOrder: r.rev_order,
                 createdAt: r.created_at,
                 title: r.title,
+                // ⚠ 引けなかった版は `null`(0 と潰さない ── 意味が違う)
+                added: statOf.get(r.id)?.added ?? null,
+                removed: statOf.get(r.id)?.removed ?? null,
               })),
             });
           } catch (e) {
@@ -832,6 +958,43 @@ export function connectStoreEffects(
               dispatcher.dispatch({
                 type: 'OP_FAILED',
                 error: `履歴の取得に失敗しました: ${String(e)}`,
+              });
+          }
+        });
+        break;
+      /**
+       * 🔴 **戻す前に中身を見る**(#398 段②)。⚠ **読むだけ**(1 バイトも書かない)。
+       *
+       * 🔑 **`enqueue` に載せる** ── 書込と**同じ 1 本の chain** なので、
+       *   履歴を開く直前の保存を追い越さない(CLAUDE.md §7、2026-08-17 の実測
+       *   「読みは書込の chain の外に居て、11/12 で古い本文を掴んだ」)。
+       *   ⚠ **2 本目の待ち口を作らない** ── ここに独自の `settled()` を足すと、
+       *   待つ規則が 2 か所になる。
+       */
+      case 'REQUEST_REVISION_BODY':
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            const rev = await store.getRevision(ev.revId);
+            if (disposed) return;
+            if (rev === null) {
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: 'その版の本文を読めませんでした(履歴が整理された可能性があります)',
+              });
+              return;
+            }
+            dispatcher.dispatch({
+              type: 'REVISION_PREVIEW_LOADED',
+              lid: ev.lid,
+              revId: ev.revId,
+              body: rev.body,
+            });
+          } catch (e) {
+            if (!disposed)
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: `版の読み出しに失敗しました: ${String(e)}`,
               });
           }
         });
@@ -1076,8 +1239,27 @@ export function connectStoreEffects(
              */
             const tryAppend = async (
               base: string,
-            ): Promise<{ stamps: EntryStamps; newBody: string; ext: FlavorExtract } | 'empty'> => {
-              const newBody = appendBlock(base, ev.heading, ev.text);
+            ): Promise<
+              | { stamps: EntryStamps; newBody: string; ext: FlavorExtract; base: string }
+              | 'empty'
+              | 'missing'
+            > => {
+              /**
+               * 🔴 **入り先は、そのつど本文から解く**(#395 段①)。
+               *
+               * ⚠ 上のとおりこの関数は**足し直しでもう一度呼ばれる** ── 行番号を
+               *   握っていると、別の窓が上に足したときに**違う節へ入る**。
+               *   だから印(slug)から毎回解き直す。
+               * 🔴 **解けなければ末尾へ落とさない** ── user が「決定事項」を選んだのに
+               *   黙って文末へ入るのが、この機構でいちばん悪い負け方である。
+               */
+              const newBody =
+                ev.target === null
+                  ? appendBlock(base, ev.heading, ev.text)
+                  : resolveAppendAt(base, ev.target) === null
+                    ? null
+                    : appendIntoSection(base, ev.target, ev.heading, ev.text);
+              if (newBody === null) return 'missing';
               if (newBody === base) return 'empty';
               const ext = extractMeta(ev.archetype, newBody);
               const stamps = await store.persistEntry(
@@ -1093,24 +1275,31 @@ export function connectStoreEffects(
                 },
                 { expectHash: contentHash64Hex(base) },
               );
-              return { stamps, newBody, ext };
+              return { stamps, newBody, ext, base };
             };
 
+            // ⚠ **理由を分けて言う**(「入りませんでした」だけでは押し直すしかない)
+            const refuse = (r: 'empty' | 'missing'): void =>
+              fail(
+                r === 'empty'
+                  ? '追記する内容がありません'
+                  : '選んだ入り先の見出しが本文に見つかりません(見出しが変わった可能性があります)。入り先を選び直してください',
+              );
             let attempt = await tryAppend(body);
-            if (attempt === 'empty') return fail('追記する内容がありません');
+            if (attempt === 'empty' || attempt === 'missing') return refuse(attempt);
             if (attempt.stamps.conflict === true) {
               // ⚠ **読み直してから**足し直す(古い基底で再送しない)
               const fresh = await store.getBody(ev.lid);
               if (disposed) return;
               if (fresh === null) return fail(`追記できません(ノートが見つかりません: ${ev.lid})`);
               attempt = await tryAppend(fresh);
-              if (attempt === 'empty') return fail('追記する内容がありません');
+              if (attempt === 'empty' || attempt === 'missing') return refuse(attempt);
               if (attempt.stamps.conflict === true)
                 return fail(
                   '別の窓がこのノートを書き替えたため、追記できませんでした(もう一度押してください)',
                 );
             }
-            const { stamps, newBody, ext } = attempt;
+            const { stamps, newBody, ext, base } = attempt;
             if (disposed) return;
             dispatcher.dispatch({
               type: 'ENTRY_APPENDED',
@@ -1120,6 +1309,15 @@ export function connectStoreEffects(
               status: ext.status,
               date: ext.date,
               archived: ext.archived,
+              /**
+               * 🔴 **足した行を「結果から」取り出す**(#395 段①、取り消しのため)。
+               *
+               * ⚠ 挿し込みの規則(前後に空行を足す作法)を**ここで書き写さない** ──
+               *   写すと規則が 2 か所になり、片方だけ古くなる(§7)。
+               * ⚠ `base` は**実際に書き込みの基底になった本文**である ── 足し直しが
+               *   起きた回は読み直した側で、そこから導かないと取り消しが空振りする。
+               */
+              inserted: insertedLines(base, newBody),
             });
             stamp(ev.lid, stamps);
           } catch (e) {
@@ -1227,6 +1425,21 @@ export function connectStoreEffects(
    * 変数なので、待った後にもう一度見て「増えていない」ことまで確かめる。
    * ⚠ chain は `then(op, op)` で失敗しても続くので、ここで reject は起きない。
    */
+  /**
+   * 🔴 **chain に載せて、結果を返す**(上の注記)。
+   * ⚠ chain 自身は `then(op, op)` で**失敗しても続く**ので、ここで投げた仕事が
+   *   後続を巻き添えにすることは無い。
+   */
+  dispose.run = <T,>(job: () => Promise<T>): Promise<T> => {
+    const out = queue.then(job, job);
+    // ⚠ chain へ戻すのは**失敗を握った版**(呼び側は下の `out` で受け取る)
+    queue = out.then(
+      () => undefined,
+      () => undefined,
+    );
+    return out;
+  };
+
   dispose.settled = async (): Promise<void> => {
     for (let round = 0; round < SETTLE_ROUNDS_MAX; round += 1) {
       const tail = queue;

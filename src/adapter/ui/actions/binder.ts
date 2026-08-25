@@ -33,6 +33,7 @@ import {
   shortcutDate,
 } from '@features/schedule/date-shortcuts';
 import { findTodayNote, todayNoteTitle } from '@features/schedule/today-note';
+import { formatLineDate } from '@features/schedule/line-date';
 import { isImageAssetMime } from '@features/asset/asset-ref-format';
 import { adoptableUrls, rewriteAdopted } from '@features/asset/inline-url-adopt';
 import { convertPastedHtml } from '@features/markdown/html-to-markdown';
@@ -43,6 +44,7 @@ import { insertSnippet, nextSnippetSlot } from '@features/snippet/snippet-expand
 import { abbrBeforeCaret } from '@features/snippet/snippet-table';
 import { snippetMenu, snippetMenuNote } from '@features/snippet/snippet-menu';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
+import { normalizeTag } from '@features/flavor/tags';
 import { isEntrySort, NATURAL_DESC } from '@features/filter/entry-sort';
 import { isPaneId, PANES } from '@features/pane-visibility';
 import { STRUCTURAL, isRelationKind } from '@features/relation/kinds';
@@ -431,6 +433,8 @@ export interface BinderServices {
   printNote?(lid: string): void;
   /** このノートだけをアーカイブとして書き出す(P6f)。 */
   exportEntry?(lid: string): void;
+  /** 🔴 **このフォルダと配下**をアーカイブとして書き出す(#399 ①)。 */
+  exportFolder?(lid: string): void;
   /**
    * 図 1 枚をベクタ(`.svg`)で書き出す(P8 段⑦)。
    * ⚠ 画面に置くのは PNG、書き出すのは SVG(user 指示 2026-08-03)。
@@ -602,10 +606,48 @@ const DUAL_KEY_ACTION: Readonly<Record<string, string>> = {
   'dual-new-note': 'dual-mknote',
 };
 
+/**
+ * 🔴 **選んだ全部にタグを足す / 外す**(#402 ①)。
+ * ⚠ 2 つのボタンで**同じ関数**を通す ── 片方だけ相手の集合の採り方が変わる、
+ *   という形を作らない(§7)。
+ */
+function runBulkTag(
+  dispatcher: Dispatcher,
+  root: HTMLElement,
+  mode: 'add' | 'remove',
+): void {
+  const field = root.querySelector<HTMLInputElement>('[data-pkc-field="bulk-tag"]');
+  const tag = normalizeTag(field?.value ?? '');
+  if (tag === '') {
+    // ⚠ **無言で終わらせない**(帯は出ているのに何も起きない dead click になる)
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: '付け外しするタグを入力してください',
+    });
+    return;
+  }
+  const st = dispatcher.getState();
+  // ⚠ 相手は**いま表に出ている印**だけ(`delete-selected` と同じ規則)
+  const rows = new Set(visibleFilerRows(st).map((r) => r.lid));
+  const lids = st.selection.filter((lid) => rows.has(lid));
+  if (lids.length === 0) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: '選んでいるものがありません' });
+    return;
+  }
+  dispatcher.dispatch({ type: 'BULK_TAG', lids, tag, mode });
+  // 🔑 通したら欄を空にする(次の 1 つを打てる)── ⚠ 断ったときは残す
+  if (field) field.value = '';
+}
+
 const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'start-edit',
   'commit-edit',
   'append-entry',
+  // ⚠ 選んだ全部の本文を書く(#402 ①)── 取込・書出しの最中に走らせない
+  'bulk-tag-add',
+  'bulk-tag-remove',
+  // ⚠ 追記と**同じ経路**(`REQUEST_BODY_REWRITE`)を撃つので、同じ門をくぐらせる
+  'undo-append',
   'toggle-todo',
   /**
    * 🔴 **本文を書く点では `toggle-todo` と同じ**(2026-08-19 のレビュー W-4)。
@@ -623,6 +665,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
    *   (機械検査は `tests/repo-hygiene.test.ts`)。
    */
   'open-today',
+  // ⚠ 今日のノートの本文を書く(#402 ②)── 取込・書出しの最中に走らせない
+  'schedule-quick-add',
   /**
    * 🔴 **ノート 1 件の日付も disk への書込**(#292 段④)── frontmatter を書く。
    * ⚠ 取り込みが entry を総入れ替えしている裏で frontmatter を書かせない、が理由。
@@ -1134,6 +1178,73 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ **入れ先(フォルダ)は見ない** ── その日の入れ物は 1 つなので、
    *   いま開いているフォルダによって別の物ができると読みが壊れる。
    */
+  /**
+   * 🔴 **その日の束から足す**(#402 ②)。⚠ **書かない** ── 上の 1 つの欄に
+   *   日付を入れて焦点を移すだけである(打ちかけを束ごと失わないため)。
+   */
+  'schedule-quick-here': (_dispatcher, target, _services, root) => {
+    const date = target.getAttribute('data-pkc-quick-date') ?? '';
+    const dateEl = root.querySelector<HTMLInputElement>('[data-pkc-field="schedule-quick-date"]');
+    const textEl = root.querySelector<HTMLInputElement>('[data-pkc-field="schedule-quick-text"]');
+    if (dateEl) dateEl.value = date;
+    textEl?.focus();
+  },
+  /**
+   * 🔴 **予定の面から、その場でやることを足す**(#402 ②)。
+   *
+   * > user の物語: 予定タブで今週を眺めている。「木曜に見積を出す」を足したい。
+   *
+   * 🔑 **新しい入れ物を作らない** ── 行き先は「**今日のノート**」で、
+   *   その決め方は `open-today` と**同じ 1 本**(`todayNoteTitle` / `findTodayNote`)。
+   * 🔑 **書込も新しい経路を作らない** ── 既存の追記(`APPEND_TO_ENTRY`)を通る。
+   *   ⚠ ノートがまだ無ければ**先に作る** ── 作成の書込と追記の読みは
+   *   effect の**同じ 1 本の chain** に載るので、順序は保たれる。
+   * ⚠ 面は切り替えない ── user は予定を眺めたまま足したいのであって、
+   *   本文へ飛ばされたいわけではない(#300「補助が主の作業領域を奪わない」)。
+   */
+  'schedule-quick-add': (dispatcher, _target, services, root) => {
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから足してください' });
+      return;
+    }
+    const textEl = root.querySelector<HTMLInputElement>('[data-pkc-field="schedule-quick-text"]');
+    const text = (textEl?.value ?? '').trim();
+    if (text === '') {
+      // ⚠ **無言で終わらせない**(欄は出ているのに何も起きない dead click になる)
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'やることを入力してください' });
+      return;
+    }
+    const date =
+      root.querySelector<HTMLInputElement>('[data-pkc-field="schedule-quick-date"]')?.value ?? '';
+    // 🔑 日付の書き方は `line-date.ts` の 1 本(`@2026-08-28`)── ここで綴らない
+    const line = `- [ ] ${text}${date === '' ? '' : ` ${formatLineDate(date)}`}`;
+    const title = todayNoteTitle(new Date());
+    let lid = findTodayNote(st.entryMetas.values(), title)?.lid ?? null;
+    if (lid === null) {
+      lid = generateLid();
+      dispatcher.dispatch({
+        type: 'CREATE_ENTRY',
+        archetype: 'text',
+        lid,
+        title,
+        parentLid: null,
+        relationId: generateLid(),
+        // ⚠ **編集に入らない**(予定を眺めたまま足したいので、面を奪わない)
+        edit: false,
+      });
+    }
+    dispatcher.dispatch({
+      type: 'APPEND_TO_ENTRY',
+      lid,
+      text: line,
+      heading: null,
+      // ⚠ 末尾へ足す(入り先の選択は本文の面の話 ── ここでは選ばせない)
+      target: null,
+    });
+    if (textEl) textEl.value = '';
+    void services;
+  },
   'open-today': (dispatcher, _target, services) => {
     const st = dispatcher.getState();
     if (st.phase !== 'ready') return;
@@ -1205,6 +1316,17 @@ const ACTIONS: Record<string, ActionHandler> = {
    * (押した場所が違っても、同じ理由なら同じ言い方 ── CLAUDE.md「文言は押した
    * 場所と対で pin する」)。⚠ 完全削除は一括で撃たせない(戻せない操作は 1 件ずつ)。
    */
+  /**
+   * 🔴 **まとめてタグを付ける / 外す**(#402 ①)。
+   *
+   * ⚠ **相手は `delete-selected` と同じ規則**(いま表に出ている印だけ)──
+   *   揃えないと「3 件を選んでいます」と出して 5 件に書く形になる。
+   * ⚠ 空のタグでは撃たない ── 押しても何も起きない代わりに**理由を出す**。
+   */
+  'bulk-tag-add': (dispatcher, _target, _services, root) =>
+    runBulkTag(dispatcher, root, 'add'),
+  'bulk-tag-remove': (dispatcher, _target, _services, root) =>
+    runBulkTag(dispatcher, root, 'remove'),
   'delete-selected': (dispatcher, _target, services, root) => {
     const st = dispatcher.getState();
     // ⚠ 押した場所は**左の列**なので、相手も左の列の集合(2 ペインの印を巻き込まない)
@@ -1659,6 +1781,13 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 日時見出しは**ここで作る**(reducer は純粋のまま ── `Date` を呼ばない)。
    * ⚠ 欄は**空にしない** ── 通ったときだけ描画側が空にする(失敗で打鍵が消えない)。
    */
+  /**
+   * 🔴 **直前の追記を外す**(#395 段①)。
+   * ⚠ 独自の書込経路を持たない ── reducer が `REQUEST_BODY_REWRITE` を出す(§7)。
+   */
+  'undo-append': (dispatcher) => {
+    dispatcher.dispatch({ type: 'UNDO_APPEND' });
+  },
   'append-entry': (dispatcher, _target, _services, root) => {
     const s = dispatcher.getState();
     const lid = s.selectedLid;
@@ -1670,11 +1799,19 @@ const ACTIONS: Record<string, ActionHandler> = {
     // 同じ判定を持っており、3 か所(binder / reducer / `appendBlock`)が互いに
     // 救い合って**どれ 1 つ消しても test が緑**だった。判定は下 2 つに寄せる:
     // reducer =「ロックも取らずに断る」、`appendBlock` =「本文を変えない」
+    /**
+     * 🔴 **入り先**(#395 段①)。空 = 末尾(これまでと同じ)。
+     * ⚠ ここでは**印をそのまま渡す** ── 行番号に直さない。effect は disk から
+     *   読み直すので、行番号は読み直した先で別の場所を指す。
+     */
+    const target =
+      root.querySelector<HTMLSelectElement>('[data-pkc-field="append-target"]')?.value ?? '';
     dispatcher.dispatch({
       type: 'APPEND_TO_ENTRY',
       lid,
       text,
       heading: appendHeadingFor(archetype!, new Date()),
+      target: target === '' ? null : target,
     });
   },
   /**
@@ -2345,6 +2482,14 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.getState().selectedLid;
     if (lid) services.exportEntry?.(lid);
   },
+  'export-folder': (dispatcher, target, services) => {
+    // ⚠ 解決規則は隣の `export-entry` / `delete-entry` と**同じ**にする ── 揃えないと
+    //    「A を書き出して B を削除する」が成立する(review M-3 と同じ形)
+    const lid =
+      target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ??
+      dispatcher.getState().selectedLid;
+    if (lid) services.exportFolder?.(lid);
+  },
   'purge-orphan-assets': (_dispatcher, _target, services) => {
     services.purgeOrphanAssets?.();
   },
@@ -2419,6 +2564,20 @@ const ACTIONS: Record<string, ActionHandler> = {
       .catch(() => {
         dispatcher.dispatch({ type: 'OP_FAILED', error: '送れませんでした' });
       });
+  },
+  /**
+   * 🔴 **戻す前に中身を見る**(#398 段②)。⚠ **1 バイトも書かない** ──
+   *   だから `BODY_WRITE_ACTIONS` にも確認にも載せない(読むだけの操作である)。
+   * ⚠ もう一度押すと畳む(reducer が持つ ── ここに 2 つ目の判定を置かない)。
+   */
+  'preview-revision': (dispatcher, target) => {
+    const revId = target
+      .closest('[data-pkc-rev-id]')
+      ?.getAttribute('data-pkc-rev-id');
+    if (revId) dispatcher.dispatch({ type: 'PREVIEW_REVISION', revId });
+  },
+  'hide-revision-preview': (dispatcher) => {
+    dispatcher.dispatch({ type: 'HIDE_REVISION_PREVIEW' });
   },
   'restore-revision': (dispatcher, target) => {
     // 前進変異(復元前に現状が履歴に積まれる)なので confirm は要らない ──
@@ -2609,6 +2768,50 @@ export function bindActions(
     }
   };
   const onClick = (ev: Event) => {
+    /**
+     * 🔴 **読んでいる本文の「この行」から編集に入る**(#395 段③。PKC2 の
+     * `action-binder.ts:1329-1412` に在った動線 ── 2026-07-03 の user request)。
+     *
+     * > user の物語: 長い議事録を読んでいて、この 1 行だけ直したい。
+     * > いまは「編集」を押してから、もう一度その行を探して押す(2 手)。
+     *
+     * 🔴 **早期 return より前に置く**(2 稿目。test が拾った)── 下の 1 行は
+     *   `[data-pkc-action]` の中でなければ降りるが、**本文の段落は action を
+     *   持たない**。後ろに置くと、この動線は**1 度も走らない**。
+     * ⚠ **素のクリックの意味は変えない** ── PKC3 は browse-first(「開く = 閲覧」は
+     *   2026-08-18 の裁定)。修飾キーを押しているときだけである。
+     * ⚠ **`Alt` だけ**(`Ctrl` / `Meta` / `Shift` が一緒なら降りる)── `Ctrl+Alt` は
+     *   **AltGr** であり、その組で奪うと**記号が打てない配列の人**のクリックを壊す
+     *   (binder の他の 2 か所と同じ理由)。`Ctrl` / `Meta` 単独はリンクの
+     *   「新しいタブで開く」を奪う。
+     * ⚠ **押せる物の上では降りる** ── リンク・ボタン・チェックの印は、その場に
+     *   自分の意味を持っている(奪うと、その動線が 1 つ死ぬ)。
+     * 🔑 行は読む面の刻印(`data-pkc-source-line`)から引く ── **新しい逆引きを
+     *   作らない**(`copy-source.ts` と同じ印を読む。§7)。
+     * ⚠ 刻印が引けなければ**何もしない** ── 当てずっぽうで編集に入らない。
+     */
+    const alt = ev as MouseEvent;
+    if (alt.altKey && !alt.ctrlKey && !alt.metaKey && !alt.shiftKey) {
+      const hit = ev.target as HTMLElement | null;
+      const bodyHost = hit?.closest('[data-pkc-field="detail-body"]') ?? null;
+      const mark = hit?.closest('[data-pkc-source-line]') ?? null;
+      const own = hit?.closest('a[href], button, [data-pkc-action]') ?? null;
+      if (
+        bodyHost !== null &&
+        mark !== null &&
+        root.contains(bodyHost) &&
+        bodyHost.contains(mark) &&
+        (own === null || !bodyHost.contains(own)) &&
+        dispatcher.getState().phase === 'ready'
+      ) {
+        const line = Number(mark.getAttribute('data-pkc-source-line'));
+        if (Number.isInteger(line) && line >= 0) {
+          ev.preventDefault();
+          dispatcher.dispatch({ type: 'START_EDIT', atLine: line });
+          return;
+        }
+      }
+    }
     const el = (ev.target as HTMLElement | null)?.closest<HTMLElement>(
       '[data-pkc-action]',
     );
@@ -3219,8 +3422,61 @@ export function bindActions(
    * ⚠ そして止めないと、ブラウザが**その file へ画面ごと遷移する** ──
    *   編集中の本文が消えるので、受け取れなくても**止めるほうが安全**である。
    */
+  /**
+   * 🔴 **掴んだまま、別の面へ持っていく**(#402 ③)。
+   *
+   * > user の物語: フォルダタブで行を掴んだ。予定タブの日付へ落としたい。
+   * > いまは**タブを押すのに一度手を離すしかない** ── 離すと掴んだ状態が消える。
+   *
+   * PKC2 は `handleViewSwitchDragEnter`(`action-binder.ts:7788-7830`)で
+   * **600ms 止めたら面を変える**を持っていた。⚠ ただし PKC2 は面ごと差し替える
+   * 作りで、PKC3 の左の列は**同じホストの中で `hidden` を入れ替える排他 pane**
+   * である ── つまり切り替えた瞬間、**掴んでいた元の要素が `hidden` になる**。
+   *
+   * 🔑 **だから先に測った**(2026-08-25、実 Chromium):
+   * 掴んだ最中に元の面を `hidden` にしても、**行き先の `dragover` も `drop` も
+   * 生きていた**(`hidden` が本当に当たっていることも同じ回で確かめた ──
+   * 当たっていなければ「面を変えた」を 1 度も試していないことになる)。
+   * ⚠ この実測が無ければ「持ち物を state に載せる」別機構が要るところだった。
+   */
+  let hoverTab: { mode: string; timer: ReturnType<typeof setTimeout> } | null = null;
+  const cancelTabHover = (): void => {
+    if (hoverTab === null) return;
+    clearTimeout(hoverTab.timer);
+    hoverTab = null;
+  };
+  /** ⚠ **止めた時間**で決める(通り過ぎただけで面が変わると、落とす先を見失う)。 */
+  const TAB_HOVER_MS = 600;
   const onDragOver = (e: Event): void => {
     const de = e as DragEvent;
+    /**
+     * 🔴 **タブの上で止まったら面を変える**(#402 ③)。
+     * ⚠ **落とし先にはしない**(`preventDefault` を呼ばない)── タブへ落とすと
+     *   「タブに入れた」に見えるが、そんな入れ物は無い。ここは**通り道**である。
+     * ⚠ PKC の荷物のときだけ ── OS からの file を運んでいるときに面が変わると、
+     *   落とすつもりだった所が消える。
+     */
+    const tab = (de.target as HTMLElement | null)?.closest<HTMLElement>('[data-pkc-browse]');
+    const carrying =
+      de.dataTransfer?.types?.includes(PKC_DRAG) === true ||
+      de.dataTransfer?.types?.includes(PKC_TASK_DRAG) === true;
+    if (tab !== null && tab !== undefined && root.contains(tab) && carrying) {
+      const mode = tab.getAttribute('data-pkc-browse') ?? '';
+      if (hoverTab?.mode !== mode) {
+        cancelTabHover();
+        hoverTab = {
+          mode,
+          timer: setTimeout(() => {
+            hoverTab = null;
+            services.setBrowse?.(mode);
+          }, TAB_HOVER_MS),
+        };
+      }
+      // ⚠ 光っている落とし先は消す(タブの上に居る間は「そこへ入る」ではない)
+      clearDropTarget();
+      return;
+    }
+    cancelTabHover();
     // 🔴 **予定の札**(双方向)── 落とし先は日の升目 / 束の見出し
     if (de.dataTransfer?.types?.includes(PKC_TASK_DRAG) === true) {
       const drop = dateTargetOf(de.target);
@@ -3474,7 +3730,12 @@ export function bindActions(
     de.dataTransfer.setData(PKC_DRAG, lids.join(' '));
     de.dataTransfer.effectAllowed = 'move';
   };
-  const onDragEnd = (): void => clearDropTarget();
+  const onDragEnd = (): void => {
+    // ⚠ **待っている面の切替も畳む**(#402 ③)── 離した後に面が変わると、
+    //    user から見て「勝手に画面が動いた」になる
+    cancelTabHover();
+    clearDropTarget();
+  };
   /**
    * 予定の落とし先(日の升目 / 束の見出し)。`null` = 落とせない場所。
    * ⚠ **空文字は「日付なし」**(属性が無いのとは別物)── だから `null` で表す。

@@ -129,7 +129,26 @@ export class FilerRenderer {
       clear.type = 'button';
       clear.setAttribute('data-pkc-action', 'clear-selection');
       clear.textContent = '選択を解除';
-      bulk.append(count, del, clear);
+      /**
+       * 🔴 **まとめてタグを付ける / 外す**(#402 ①)。
+       *
+       * > user の物語: フォルダで 12 件選んだ。全部に `#請求済` を付けたい。
+       * > いま一括でできるのは「ゴミ箱へ」だけで、**12 回開いて 12 回書く**。
+       *
+       * 🔴 **双方向にする**(user 指示 2026-08-23「置けるなら外せる」)──
+       *   「付ける」だけ作ると、12 件に間違えて付けたものを **12 回開いて消す**
+       *   ことになる。⚠ **同じ欄の隣に置く**(外すために別の場所を探させない)。
+       */
+      const tag = document.createElement('input');
+      tag.type = 'text';
+      tag.setAttribute('data-pkc-field', 'bulk-tag');
+      tag.placeholder = 'タグ';
+      tag.setAttribute('aria-label', 'まとめて付け外しするタグ');
+      const add = iconButton('bulk-tag-add', 'タグを付ける');
+      add.title = `選んでいる ${marks.length} 件の本文に、このタグを足します`;
+      const off = iconButton('bulk-tag-remove', 'タグを外す');
+      off.title = `選んでいる ${marks.length} 件の本文から、このタグを消します`;
+      bulk.append(count, del, tag, add, off, clear);
       host.append(bulk);
     }
 

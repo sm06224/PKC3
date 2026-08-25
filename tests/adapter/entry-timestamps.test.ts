@@ -277,7 +277,7 @@ describe('② 書込のたびに state の meta が更新される', () => {
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', 1)], relations: [] });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
     await tick();
-    d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'a', text: '追記', heading: null });
+    d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'a', text: '追記', heading: null, target: null });
     await tick();
 
     expect(s.writes, '追記が書込に到達していない(前提が崩れている)').toBeGreaterThan(0);

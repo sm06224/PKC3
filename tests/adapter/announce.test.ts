@@ -535,6 +535,14 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
+    ['2026-08-25-ext-write-back', '48c94382'],
+    ['2026-08-25-cross-pane', '9c451647'],
+    ['2026-08-25-revision-diff', 'be0ff2ca'],
+    ['2026-08-25-append-into-section', '48d585f8'],
+    ['2026-08-25-alt-click-edit', '5f9eead7'],
+    ['2026-08-25-folder-export', '2672228f'],
+    ['2026-08-25-import-duplicate', '97a60d4b'],
+    ['2026-08-25-writing-assist', '8838349c'],
     ['2026-08-25-app-projection', '922e28e3'],
     ['2026-08-25-snippet-menu', 'eaf7c29c'],
     ['2026-08-25-snippets', '298252b9'],
@@ -547,14 +555,22 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-08-24-schedule-range', 'ac1e1758'],
     ['2026-08-24-markdown-to-pandoc', '1d6edb9b'],
     ['2026-08-24-paste-permalink', '504c61d2'],
-    ['2026-08-24-pptx-export', '599e9b36'],
-    ['2026-08-23-office-format-notice', '723cb8d3'],
-    ['2026-08-23-office-restart', '15a9d3e7'],
-    ['2026-08-23-backlinks', '488a34d5'],
-    ['2026-08-23-today-note', '517786c6'],
-    ['2026-08-23-persist-state', 'fe7a402e'],
-    ['2026-08-23-print-pdf', 'f0d2f97d'],
-    ['2026-08-23-repair-window-writes', '55dddffc'],
+    // ⚠ 上限 20 を超えたので 2026-08-25 に落とした(原本は CHANGELOG)
+    // ['2026-08-24-pptx-export', '599e9b36'],
+    // ⚠ 上限 20 を超えたので 2026-08-25 に落とした(原本は CHANGELOG)
+    // ['2026-08-23-office-format-notice', '723cb8d3'],
+    // ⚠ 上限 20 を超えたので 2026-08-25 に落とした(原本は CHANGELOG)
+    // ['2026-08-23-office-restart', '15a9d3e7'],
+    // ⚠ 上限 20 を超えたので 2026-08-25 に落とした(原本は CHANGELOG)
+    // ['2026-08-23-backlinks', '488a34d5'],
+    // ⚠ 上限 20 を超えたので 2026-08-25 に落とした(原本は CHANGELOG)
+    // ['2026-08-23-today-note', '517786c6'],
+    // ⚠ 上限 20 を超えたので 2026-08-25 に落とした(原本は CHANGELOG)
+    // ['2026-08-23-persist-state', 'fe7a402e'],
+    // ⚠ 上限 20 を超えたので 2026-08-25 に落とした(原本は CHANGELOG)
+    // ['2026-08-23-print-pdf', 'f0d2f97d'],
+    // ⚠ 上限 20 を超えたので 2026-08-25 に落とした(原本は CHANGELOG)
+    // ['2026-08-23-repair-window-writes', '55dddffc'],
     // ⚠ 上限 20 を超えたので 2026-08-25 に落とした(原本は CHANGELOG)
     // ['2026-08-22-link-detection', '2f5ff0ab'],
     // ⚠ 上限 20 を超えたので 2026-08-24 に落とした(原本は CHANGELOG)

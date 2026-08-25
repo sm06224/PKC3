@@ -20,6 +20,7 @@ import { htmlToDocxBlocks } from '@adapter/platform/export/html-blocks';
 import { DEFAULT_PAGE_FORMAT, type PageFormat } from '@features/page-format';
 import { writeMarkdownZip } from '@features/export/pkc3-markdown-zip';
 import { singleEntrySource } from '@features/export/single-entry-source';
+import { folderSource } from '@features/export/folder-source';
 import { parseFrontmatter, extractVars } from '@features/markdown/frontmatter';
 import { extractHeadingNumberConfig } from '@features/markdown/document-globals';
 import { safeName } from '@features/export/file-name';
@@ -128,6 +129,40 @@ export async function exportEntry(
     const { source, warnings } = await singleEntrySource(deps.source, lid);
     const n = await exportArchive(dispatcher, { ...deps, source }, 'archive', warnings);
     return n;
+  } catch (e) {
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: `書き出しに失敗しました: ${e instanceof Error ? e.message : String(e)}`,
+    });
+    return null;
+  }
+}
+
+/**
+ * 🔴 **このフォルダとその配下だけ**をアーカイブとして書き出す(#399 ①)。
+ *
+ * > user の物語: 「案件A」フォルダの中身だけを相手に渡したい。
+ *
+ * ⚠ **`exportEntry` と同じ骨組み**にしてある ── 断る条件も、`settle()` の位置も、
+ *   最後に呼ぶ `exportArchive` も同じ。隣り合う 2 つの操作が別の作法で書かれていると、
+ *   片方だけ直る形になる(§7)。
+ * 🔑 違うのは絞り込みの関数だけ(`singleEntrySource` / `folderSource`)。
+ */
+export async function exportFolder(
+  dispatcher: Dispatcher,
+  deps: ExportDeps,
+  lid: string,
+): Promise<number | null> {
+  // ⚠ **読みの前**に断る(`exportEntry` と同じ理由 ── 30MB 読んでから断らない)
+  if (dispatcher.getState().phase !== 'ready') {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから書き出してください' });
+    return null;
+  }
+  try {
+    // 🔴 直前の保存が disk に着いてから読む(読みは書込の chain の外に居る)
+    await deps.settle();
+    const { source, warnings } = await folderSource(deps.source, lid);
+    return await exportArchive(dispatcher, { ...deps, source }, 'archive', warnings);
   } catch (e) {
     dispatcher.dispatch({
       type: 'OP_FAILED',

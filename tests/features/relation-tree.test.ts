@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { EntryMeta, Relation } from '../../src/core/model/entry-meta';
 import {
+  collectSubtreeLids,
   getStructuralChildren,
   getRootEntries,
   getAncestorFolders,
@@ -108,5 +109,45 @@ describe('relation tree(P3-7b 最小核)', () => {
     expect(resolveFilerScope('b', metas, relations)?.lid).toBe('f2');
     expect(resolveFilerScope('c', metas, relations)).toBeNull();
     expect(resolveFilerScope(null, metas, relations)).toBeNull();
+  });
+});
+
+/**
+ * 🔴 **フォルダごと持ち出すための部分木**(#399 ①)。
+ *
+ * 見るのは「深い階層まで届くか」「**外が混ざらないか**」「環で止まるか」の 3 点。
+ * ⚠ 混ざる側の誤りは**渡してはいけない物を渡す**という実害になるので、
+ *   毎回「外のノート」を置いた状態で見る。
+ */
+describe('collectSubtreeLids — フォルダ 1 つとその配下', () => {
+  it('🔑 root 自身を含み、深い階層まで届く', () => {
+    // f1 ── a, f2 ── b。c は外。
+    expect([...collectSubtreeLids('f1', metas, relations)].sort()).toEqual(['a', 'b', 'f1', 'f2']);
+  });
+
+  it('🔴 外のノートが混ざらない(c は別の根)', () => {
+    expect(collectSubtreeLids('f1', metas, relations).has('c')).toBe(false);
+  });
+
+  it('葉を指すと自分 1 件だけ(子を持たないので)', () => {
+    expect([...collectSubtreeLids('b', metas, relations)]).toEqual(['b']);
+  });
+
+  it('⚠ 居ない lid では空 ── 在ることにしない(呼び側が断れる)', () => {
+    expect(collectSubtreeLids('ghost', metas, relations).size).toBe(0);
+  });
+
+  it('⚠ 環があっても止まる(木の不変量は relation を編集する側が守る)', () => {
+    const m = new Map(
+      [meta('f1', 1, 'folder'), meta('f2', 2, 'folder')].map((x) => [x.lid, x]),
+    );
+    const cyc = [rel('c1', 'f1', 'f2'), rel('c2', 'f2', 'f1')];
+    // ⚠ 正準親は entryOrder 最小 = f1 が f2 の親、f1 は親を持たない
+    expect([...collectSubtreeLids('f1', m, cyc)].sort()).toEqual(['f1', 'f2']);
+  });
+
+  it('⚠ 非 folder の親は親と見なさない(木の規則は 1 本 ── ここで作り直さない)', () => {
+    const m = new Map([meta('t1', 1), meta('t2', 2)].map((x) => [x.lid, x]));
+    expect([...collectSubtreeLids('t1', m, [rel('x', 't1', 't2')])]).toEqual(['t1']);
   });
 });

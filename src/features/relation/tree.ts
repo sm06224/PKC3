@@ -67,6 +67,47 @@ export function getStructuralChildren(
   return out.sort(byOrder);
 }
 
+/**
+ * 🔴 **フォルダ 1 つとその配下ぜんぶ**の lid(#399 ①)。
+ *
+ * ⚠ **root 自身を含む**(名前が「descendant」ではなく「subtree」なのはそのため)。
+ *   含めないと、書き出したアーカイブに**フォルダの器が入らない** ── 取り込み直すと
+ *   中身だけが平置きで戻り、user から見て「フォルダごと渡した」ことにならない。
+ *
+ * 🔑 **正準親の解決は 1 度だけ**(`resolveCanonicalParents`)── 階層ごとに
+ *   `getStructuralChildren` を呼ぶと、深さ × relations 件で舐め直すことになる。
+ * ⚠ 訪問済み guard を持つ(`getAncestorFolders` と同じ理由 ── 木の不変量は
+ *   relation を編集する側が守る。読み手は防御だけする)。
+ */
+export function collectSubtreeLids(
+  rootLid: string,
+  metas: ReadonlyMap<string, EntryMeta>,
+  relations: readonly Relation[],
+): Set<string> {
+  const parentOf = resolveCanonicalParents(metas, relations);
+  const childrenOf = new Map<string, string[]>();
+  for (const [child, parent] of parentOf) {
+    const list = childrenOf.get(parent);
+    if (list) list.push(child);
+    else childrenOf.set(parent, [child]);
+  }
+  const out = new Set<string>();
+  // ⚠ **実在しない lid では空を返す**(在ることにしない ── 呼び側が断れる)
+  if (!metas.has(rootLid)) return out;
+  out.add(rootLid);
+  const queue = [rootLid];
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    for (const child of childrenOf.get(cur) ?? []) {
+      // 訪問済み = 環(または既に別の道で入った)── 2 度足さない
+      if (out.has(child) || !metas.has(child)) continue;
+      out.add(child);
+      queue.push(child);
+    }
+  }
+  return out;
+}
+
 /** 正準親を持たない entry(= root 直下、entryOrder 順)。 */
 export function getRootEntries(
   metas: ReadonlyMap<string, EntryMeta>,

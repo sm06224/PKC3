@@ -110,6 +110,8 @@ import {
 } from '@adapter/platform/launched-files';
 import { whenPhaseReady } from '@adapter/state/wait-for-ready';
 import { reloadSnapshot } from '@adapter/state/reload-snapshot';
+import type { ExtWriteOp } from '@features/extension/ext-write';
+import { applyExtWriteOps } from '@adapter/state/ext-write-apply';
 import { selectWhenPresent } from '@adapter/state/select-when-present';
 import {
   attachFiles,
@@ -126,6 +128,7 @@ import type { ImportDeps } from '@adapter/ui/actions/import-pkc2';
 import {
   exportArchive,
   exportEntry,
+  exportFolder,
   type ExportDeps,
   exportEntryDocx,
   exportEntryPptx,
@@ -634,6 +637,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   let errorLine = '';
   let noticeLine = '';
+  /** ⚠ 同じ知らせで何度も塗り直さない(state は毎回流れてくる)。 */
+  let noticeShown: string | null = null;
   const paint = () => {
     // ⚠ アプリの窓では常設バッジを畳む(上の理由)── `paint` は面が変わるたび
     //    走るので、`onHold` が旗を倒した次の描画から消える
@@ -752,6 +757,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   dispatcher.onState((state) => {
     // ⚠ **エラーの行だけ**を触る ── 一時の知らせを巻き添えにしない
     errorLine = state.error ? `⚠ エラー: ${state.error}` : '';
+    /**
+     * 🔴 **state から来る一時の知らせ**(#402 ①)。
+     * ⚠ effect の中(一括タグ)は `showStatus` を持たないので、state を通す ──
+     *   ⚠ **`showStatus` と同じ行に載せる**(2 本目の行を作ると、優先順位の
+     *   規則がここで割れる)。
+     */
+    if (state.notice !== null && state.notice !== noticeShown) {
+      noticeShown = state.notice;
+      showStatus(state.notice);
+      return; // `showStatus` が `paint` を呼ぶ
+    }
     paint();
   });
 
@@ -874,8 +890,38 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 「meta はあるが bytes が無い」を掴んで欠けた書出しができる。
    * 形式が増えても読み出し口は 1 つ(source)で共有する。
    */
+  /**
+   * 🔴 **拡張からの書き戻しを当てる**(#195 / C-5 段③)。
+   *
+   * ⚠ **判断は `ext-write-apply.ts` に在る** ── `main.ts` は
+   *   **どの test からも実行されない**(原文を読む test しか無い)ので、
+   *   ここに判断を書くと「全 test 緑のまま取り違える」形になる
+   *   (CLAUDE.md §2「取り出せば test できる」)。ここは**繋ぐだけ**。
+   */
+  const applyExtWrite = (
+    ops: readonly ExtWriteOp[],
+  ): Promise<{ ok: true; wrote: number } | { ok: false; why: string }> =>
+    applyExtWriteOps(ops, {
+      // 🔑 chain に載せる(2 本目の待ち口を作らない)
+      run: (job) => (storeEffects ? storeEffects.run(job) : job()),
+      phase: () => dispatcher.getState().phase,
+      metaOf: (lid) => dispatcher.getState().entryMetas.get(lid) ?? null,
+      getBody: async (lid) => (await client.request({ op: 'getBody', cid, lid })) ?? null,
+      write: (entry, expectHash) =>
+        client.request({
+          op: 'upsertEntry',
+          cid,
+          entry,
+          // 🔴 別のアプリが書いた本文 ── 戻せる形にする
+          checkpoint: true,
+          keepLatest: REVISION_KEEP_LATEST,
+          expectHash,
+        }),
+      refresh: () => reloadSnapshot(dispatcher, cid, loadSnapshot, { deferNotice: null }),
+    });
+
   const runExport = (
-    kind: ExportKind | { entryLid: string; as?: 'archive' | 'docx' | 'pptx' },
+    kind: ExportKind | { entryLid: string; as?: 'archive' | 'docx' | 'pptx' | 'folder' },
   ): Promise<void> =>
     withAssetGate(async () => {
       const deps: ExportDeps = {
@@ -979,6 +1025,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         //    (後ろの 2 つは片道)
         if (kind.as === 'docx') await exportEntryDocx(dispatcher, deps, kind.entryLid);
         else if (kind.as === 'pptx') await exportEntryPptx(dispatcher, deps, kind.entryLid);
+        // 🔴 **フォルダごと**(#399 ①)── 同じ `deps`・同じ形式(.pkc3.zip)を通る。
+        //    ⚠ 別経路にすると「フォルダ書出しだけ壊れている」が起きる(P6f と同じ理由)
+        else if (kind.as === 'folder') await exportFolder(dispatcher, deps, kind.entryLid);
         else await exportEntry(dispatcher, deps, kind.entryLid);
       }
       else await exportArchive(dispatcher, deps, kind);
@@ -1147,6 +1196,22 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             (await client.request({ op: 'listEntryMetas', cid })).map((m) => m.lid),
           revisionLids: () => client.request({ op: 'listRevisionLids', cid }),
         }),
+      /**
+       * 🔴 **重なりを数えるための頭**(#399 ②)。⚠ 本文は入れない ──
+       *   常駐の集約が既に持っている値なので**ただで使える**。
+       */
+      existingHeads: () =>
+        [...dispatcher.getState().entryMetas.values()].map((m) => ({
+          lid: m.lid,
+          bodyChars: m.bodyChars,
+        })),
+      /** 🔴 絞った lid の本文だけ読む(#399 ②)。⚠ 全件は読まない。 */
+      readBodies: async (lids) =>
+        new Map(
+          (await client.request({ op: 'getBodies', cid, lids: [...lids] })).map(
+            (r) => [r.lid, r.body] as const,
+          ),
+        ),
       existingRelationIds: () =>
         new Set(dispatcher.getState().relations.map((r) => r.id)),
       orderBase: () => {
@@ -1759,6 +1824,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
                     // 🔴 外殻に焼いたものと**同じ合図**(別々に作ると外殻が港を捨てる)
                     nonce,
                     metas: () => dispatcher.getState().entryMetas.values(),
+                    onWrite: (ops) => applyExtWrite(ops),
                   }),
                 ),
               nonce: () => crypto.randomUUID(),
@@ -1965,6 +2031,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     exportHtml: () => void runExport('html'),
     exportMarkdown: () => void runExport('markdown'),
     exportEntry: (lid) => void runExport({ entryLid: lid }),
+    /** 🔴 このフォルダと配下をまとめて書き出す(#399 ①)。 */
+    exportFolder: (lid) => void runExport({ entryLid: lid, as: 'folder' }),
     /**
      * 🔴 このノートを Word で書き出す(#187 段①)。⚠ **asset gate の内側**で回す
      * ── 画像は段②で入るので、そのとき掃除と競らないように今から内側に置く。

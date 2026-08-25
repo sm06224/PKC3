@@ -33,6 +33,8 @@ function fakeLink(): ExtHostLink & { got: ExtDeliveredEntry[]; closed: boolean }
     close: () => {
       l.closed = true;
     },
+    // ⚠ 台帳は写しを持たない ── 渡した覚えは link が持つ(#195 段③)
+    delivered: () => new Set(got.map((e) => e.lid)),
   };
   return l;
 }

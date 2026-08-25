@@ -11,6 +11,11 @@
  * 「溜めない」だけでは不十分で、実測で asset 実体の 3.2 倍が常駐していた)。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
+import {
+  duplicateNote,
+  findDuplicates,
+  narrowByLength,
+} from '@features/import/duplicate-scan';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import type { EncodedChainInput } from '@adapter/platform/storage/protocol';
 import { sniffMagic, detectPkc2Format } from '@features/import/detect-format';
@@ -49,6 +54,15 @@ export interface ImportDeps {
    * 消え、取り込んだ entry が他人の履歴を背負う(review H-1)。
    */
   existingLids(): Promise<ReadonlySet<string>>;
+  /**
+   * 🔴 **既に在るノートの頭**(#399 ②)。⚠ **省略可** ── 無い配線では
+   *   重なりを数えないだけで、取込そのものは今までどおり動く。
+   * 🔑 本文は入れない ── 全件読むのは高いので、**文字数で先に絞る**
+   *   (`features/import/duplicate-scan.ts`)。
+   */
+  existingHeads?(): readonly { lid: string; bodyChars: number | null }[];
+  /** 🔴 絞った lid の本文だけ読む(#399 ②)。⚠ **省略可**。 */
+  readBodies?(lids: readonly string[]): Promise<ReadonlyMap<string, string>>;
   /** 既存 relation id 集合(upsert が後勝ちで潰すため、衝突は再採番する)。 */
   existingRelationIds(): ReadonlySet<string>;
   /** 既存 entryOrder の最大値。 */
@@ -572,6 +586,28 @@ export async function importPkc2File(
         archived: ext.archived,
       };
     });
+
+    /**
+     * 🔴 **同じものを 2 回取り込んだことに気づけるようにする**(#399 ②)。
+     *
+     * ⚠ **取込は止めない** ── 止める側へ倒すと「**黙って取り込まれない**」に
+     *   なり、いまより悪い(増えたのは見えるが、入らなかったのは見えない)。
+     *   選ばせるのは段②である。
+     * 🔑 全件は読まない ── **文字数で絞って**から、当たった分だけ読む。
+     * ⚠ 数えられなくても取込は続ける(口が無い配線 / 読めなかった)。
+     */
+    if (deps.existingHeads !== undefined && deps.readBodies !== undefined) {
+      try {
+        const incoming = rows.map((r) => ({ lid: r.lid, title: r.title, body: r.body }));
+        const lids = narrowByLength(incoming, deps.existingHeads());
+        if (lids.length > 0) {
+          const note = duplicateNote(findDuplicates(incoming, await deps.readBodies(lids)));
+          if (note !== null) result.warnings.push(note);
+        }
+      } catch {
+        // ⚠ 数えられなかっただけ ── 取込を止める理由にはならない
+      }
+    }
 
     // ── entries / relations は bulk(1 行ずつ書かない ── journal 増幅の教訓)
     deps.notify?.(`取込中…(${rows.length} 件を書き込んでいます)`);
