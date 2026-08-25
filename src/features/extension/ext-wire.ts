@@ -56,6 +56,24 @@ export function parseExtRequest(data: unknown): ExtParsed {
   return { ok: true, request: { t: 'hello' } };
 }
 
+/**
+ * 🔴 **港を渡す封筒**(#195 / C-5 段①)。
+ *
+ * ⚠ **ここが 1 か所である理由**(2026-08-25 に踏んだ):外殻の inline script は
+ *   `m.tag !== TAG || m.nonce !== NONCE` で港を検める。ホスト側がこれを
+ *   別の綴りで組んでいると、**外殻は本物の港を黙って捨てる** ── そして
+ *   どちらの unit も相手を模した stub と話しているので、**両方とも緑のまま**
+ *   通る(CLAUDE.md §7「同じ問いに答える口が 2 つある」の実例)。
+ * 🔑 組む口をここへ寄せ、**本物どうしを繋ぐ test**(`launcher-ext-relay`)で
+ *   綴りの一致を見る。
+ */
+export function portHandoffMessage(nonce: string): {
+  readonly tag: typeof EXT_PORT_TAG;
+  readonly nonce: string;
+} {
+  return { tag: EXT_PORT_TAG, nonce };
+}
+
 /** 見取り図の返事を組む。⚠ 組み立ての口はここ 1 つ(§7)。 */
 export function projectionMessage(projection: ExtProjection): ExtResponse {
   return { t: 'projection', projection };

@@ -78,12 +78,44 @@ export interface LaunchDeps {
    */
   /** ⚠ **非同期**(#299 段③)── 確認はアプリ自身のダイアログになった。 */
   confirmSameOrigin?: (title: string) => Promise<boolean>;
+  /**
+   * 🔴 **拡張として口を開ける**(#195 / C-5 段①)。
+   *
+   * ⚠ **台帳をここへ import しない** ── この file は「開く手順」だけを持つ。
+   *   許可の置き場・鍵の取り方は `extension-grants.ts` の仕事で、ここが知ると
+   *   同じ判定が 2 か所になる(CLAUDE.md §7)。
+   * ⚠ 渡さなければ**口は開かない**(拡張の機構ごと存在しない)。
+   */
+  ext?: {
+    /** もう許してあるか。🔑 許してあれば**普通の起動でも口が開く**。 */
+    granted: (assetKey: string | undefined) => boolean;
+    /** 許可を憶える。⚠ 憶えられなければ `false`(呼び側が user に言える)。 */
+    grant: (assetKey: string | undefined) => boolean;
+    /** 開く前に聞く。⚠ `false` なら**開かない**(fail closed)。 */
+    confirm: (title: string) => Promise<boolean>;
+    /**
+     * 港を渡して受け答えを始める。⚠ 窓が閉じたら `close()` する。
+     *
+     * 🔴 **合図は外殻に焼いたものと同じ値を渡す**(2026-08-25 に踏んだ)──
+     *   外殻は合わない港を**黙って捨てる**ので、別々に作ると繋がらない。
+     *   だから引数に取る(呼び側が 1 つの値を 2 か所へ配る形にする)。
+     */
+    connect: (win: Window, nonce: string) => { close: () => void };
+    /** 🔴 起動ごとの合図(偽の港を掴まないための鍵)。⚠ 使い回さない。 */
+    nonce: () => string;
+  };
 }
 
 /** 起動の仕方。既定は囲いの中。 */
 export interface LaunchOptions {
   /** 🔴 素のまま(同一オリジン)= PKC3 の保存領域に届く。詳細画面の導線のみ。 */
   sameOrigin?: boolean;
+  /**
+   * 🔴 **目次を見せて起動**(#195 / C-5 段①)。詳細画面の導線のみ。
+   * ⚠ **まだ許していないときに押される**ボタンなので、ここで聞いて憶える。
+   *   既に許してあるなら普通の起動でも口が開くので、この旗は要らない。
+   */
+  extension?: boolean;
 }
 
 /**
@@ -111,6 +143,33 @@ export async function launchTile(
   //    後にすると、断ったのに空のタブが残る
   if (raw && deps.confirmSameOrigin !== undefined && !(await deps.confirmSameOrigin(tile.title)))
     return;
+  /**
+   * 🔴 **拡張の口**(#195 / C-5 段①)。
+   *
+   * 🔑 **既に許してあれば、普通の起動でも開く** ── そうしないと、憶えた許可が
+   *   「特別なボタンを毎回探す」ことになり、憶えた意味が無くなる。
+   * ⚠ 聞くのも `window.open` より前(素のままと同じ理由 ── 断ったのに
+   *   空のタブが残る形を作らない)。
+   */
+  let extOn = deps.ext !== undefined && deps.ext.granted(tile.assetKey);
+  if (opts.extension === true && deps.ext !== undefined && !extOn) {
+    if (!(await deps.ext.confirm(tile.title))) return;
+    // ⚠ 憶えられなくても**開く**(この起動の間は口が開く)── 次に開くときは
+    //   また聞かれるだけで、user の操作が無かったことにはならない
+    deps.ext.grant(tile.assetKey);
+    extOn = true;
+  }
+  /**
+   * 🔴 **合図は 1 回だけ作って、2 か所へ配る**(2026-08-25 に踏んだ)。
+   *
+   * ⚠ 初稿は外殻を組むときに `deps.ext.nonce()` を呼び、港を渡すときは
+   *   **何も渡していなかった** ── 外殻は `m.nonce !== NONCE` で本物の港を
+   *   黙って捨てるので、アプリには 1 バイトも届かない。⚠ それでも
+   *   **両側の unit は緑**だった(互いに相手を模した stub と話していたので)。
+   * 🔑 だから `null` = 口を開けない、文字列 = **その値を外殻にも港にも使う**、
+   *   という 1 つの変数にする(2 つの `if` に分けない ── §7)。
+   */
+  const extNonce = extOn && deps.ext !== undefined ? deps.ext.nonce() : null;
   if (tile.kind === 'dual') {
     // 🔑 組み込み(#241 / #300 段③)── **別窓で開く**。
     //    ⚠ カレンダー / やることの板は #292 段⑤ でここから外れた
@@ -194,6 +253,8 @@ export async function launchTile(
             // ⚠ 階層 URL でないと `new URL(相対, base)` が落ちる(実測)
             base: launcherAppBase(deps.baseUrl),
             sameOrigin: raw,
+            // 🔴 口を開けるときだけ中継を焼く(許していないアプリには入れない)
+            ...(extNonce === null ? {} : { extension: { nonce: extNonce } }),
           }),
         ],
         { type: 'text/html' },
@@ -202,6 +263,10 @@ export async function launchTile(
       // 🔑 **作ったら必ず返す**(P8 段㉔)── `createUrl` の後に投げると、
       //    直す前は `revokeUrl` を通らずに漏れていた。`finally` へ寄せて
       //    「作る場所と返す場所」を 1 対にする(`download.ts` と同じ倒し方)
+      // ⚠ 港を渡すのは**遷移の後**(外殻が印を立てるのを待つ形なので、順は問わないが
+      //    「外殻を入れてから」のほうが読み手に自然である)
+      const link =
+        extNonce === null || deps.ext === undefined ? null : deps.ext.connect(win, extNonce);
       try {
         win.location.replace(url);
         // 🔑 **寿命の終端で捨てる**(user 指示 2026-07-27)。初版は 1 秒後に
@@ -210,6 +275,9 @@ export async function launchTile(
         await deps.whenClosed(win);
       } finally {
         deps.revokeUrl(url);
+        // 🔴 **窓が閉じたら手を切る** ── 残すと、閉じた窓へ押し続ける
+        //    (例外は握り潰されるので**黙って無駄が積もる**)
+        link?.close();
       }
     } catch (e) {
       win.close();

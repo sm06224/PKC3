@@ -1136,3 +1136,83 @@ test('🔴 組み込みタイルを押すと別窓が開き、本文の面は残
    */
   expect(errors).toEqual([]);
 });
+
+/**
+ * 🔴 **目次を見せて起動 ── 拡張がノートの一覧を読める**(#195 / C-5 段①)。
+ *
+ * 🔴 **unit では原理的に届かない層が 3 つ**:
+ * ① **本物の別窓**(`window.open` → `opener = null` → blob へ遷移)
+ * ② **本物の `MessagePort` の受け渡し**(印を読んでから 1 回だけ渡す ── 実測で決めた形)
+ * ③ **隔離した iframe の中**からの `postMessage`(opaque origin をまたぐ)
+ *
+ * ⚠ 観測点は「港が繋がったか」ではなく、**アプリの画面に題名が出たか**にする ──
+ *   繋がっただけで中身が届かない実装が緑にならないように。
+ */
+test('🔴 目次を見せて起動すると、アプリがノートの一覧を読める (#195)', async ({ page, context }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await gotoApp(page);
+
+  // ノートを 1 件作っておく(見取り図に載る中身)
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('見取り図に出るノート');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  /**
+   * 拡張役のアプリ。⚠ **外殻とだけ**話す(`parent` へ投げ、`parent` から受ける)──
+   * 本体タブの窓は触れない(`opener` は切られている)。
+   */
+  const EXT_APP =
+    `<!doctype html><title>目次</title><body><p id="app">読み込み中…</p><scr` +
+    `ipt>
+  var TAG = 'pkc3.ext.port';
+  window.addEventListener('message', function (e) {
+    var d = e.data;
+    if (!d || d.tag !== TAG || !d.body || d.body.t !== 'projection') return;
+    var titles = d.body.projection.entries.map(function (x) { return x.title; });
+    document.getElementById('app').textContent =
+      titles.join(' / ') + ' [本文=' + ('body' in (d.body.projection.entries[0] || {})) + ']';
+  });
+  parent.postMessage({ tag: TAG, body: { t: 'hello' } }, '*');
+</scr` + `ipt></body></html>`;
+
+  await clickReal(page, '[data-pkc-action="attach-file"]');
+  await page.locator('[data-pkc-field="attach-input"]').setInputFiles({
+    name: 'toc.html',
+    mimeType: 'text/html',
+    buffer: Buffer.from(EXT_APP, 'utf-8'),
+  });
+  const extBtn = page.locator('[data-pkc-action="launch-asset-extension"]');
+  await expect(extBtn, '「目次を見せて起動」が詳細画面に無い').toBeVisible({ timeout: 15000 });
+
+  const tab = context.waitForEvent('page');
+  await clickReal(page, '[data-pkc-action="launch-asset-extension"]');
+  // ⚠ 確認は**開く前**に出る(断ったら空のタブが残らない)
+  await answerAppDialog(page, 'ok');
+  const app = await tab;
+
+  const frame = app.frameLocator('[data-pkc-field="launcher-app"]');
+  await expect(frame.locator('#app'), '見取り図が届いていない').toContainText(
+    '見取り図に出るノート',
+    { timeout: 20000 },
+  );
+  // 🔴 **本文は 1 バイトも来ていない**(列そのものが無い)
+  await expect(frame.locator('#app')).toContainText('[本文=false]');
+  await app.close();
+
+  /**
+   * 🔑 **一度許したら、次からは普通の「起動」でも見える。**
+   * ⚠ ここが繋がっていないと、憶えた許可が死に札になる。
+   */
+  await expect(extBtn, '許したのにボタンが残っている').toHaveCount(0);
+  const again = context.waitForEvent('page');
+  await clickReal(page, '[data-pkc-action="launch-asset"]');
+  const app2 = await again;
+  await expect(
+    app2.frameLocator('[data-pkc-field="launcher-app"]').locator('#app'),
+    '許してあるのに普通の起動で目次が届かない',
+  ).toContainText('見取り図に出るノート', { timeout: 20000 });
+  await app2.close();
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

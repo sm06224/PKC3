@@ -312,7 +312,7 @@ export interface BinderServices {
    * 一覧に並べることは別の話)。
    * ⚠ `sameOrigin` は詳細画面の別のボタンからのみ true になる。
    */
-  launchAsset?(lid: string, opts: { sameOrigin: boolean }): void;
+  launchAsset?(lid: string, opts: { sameOrigin?: boolean; extension?: boolean }): void;
   /**
    * 🔴 **添付を Office の別窓で開く**(#88 / O3-c。user 裁定 2026-08-10)。
    *
@@ -342,6 +342,8 @@ export interface BinderServices {
   setExternalImages?(mode: string): void;
   /** 素のまま起動の許可を 1 件外す(#301)。⚠ 鍵は**中身のハッシュ**。 */
   revokeSameOrigin?(assetKey: string): void;
+  /** 目次を見せる許可を取り消す(#195)。 */
+  revokeExtension?(assetKey: string): void;
   /**
    * 紙面(2026-08-08、user 裁定「A4 と A3、フル HD と 4:3 の縦横」)。
    * ⚠ **flag ではない**(正規設定)── 散文の読み幅と、印刷の紙が決まる。
@@ -2006,6 +2008,14 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (lid) services.launchAsset?.(lid, { sameOrigin: true });
   },
   /**
+   * 🔴 **目次を見せて起動**(#195 / C-5 段①)。⚠ ボタンは**まだ許していないとき
+   * だけ**出る(許してあれば普通の「起動」で口が開く ── `detail.ts`)。
+   */
+  'launch-asset-extension': (dispatcher, _target, services) => {
+    const lid = dispatcher.getState().selectedLid;
+    if (lid) services.launchAsset?.(lid, { extension: true });
+  },
+  /**
    * 🔴 **Office の別窓で開く**(#88 / O3-c)。
    *
    * ⚠ **同期のうちに渡しきる。** 窓は user gesture の中でしか開けないので、
@@ -2056,6 +2066,14 @@ const ACTIONS: Record<string, ActionHandler> = {
   'revoke-same-origin': (_dispatcher, target, services) => {
     const key = target.getAttribute('data-pkc-asset-key');
     if (key !== null && key !== '') services.revokeSameOrigin?.(key);
+  },
+  /**
+   * 🔴 **目次を見せる許可を取り消す**(#195 / C-5 段①)。
+   * ⚠ 許可は**期限なし**で憶えるので、外す出口がここに無いと二度と外せない。
+   */
+  'revoke-extension': (_dispatcher, target, services) => {
+    const key = target.getAttribute('data-pkc-asset-key');
+    if (key !== null && key !== '') services.revokeExtension?.(key);
   },
   'set-external-images': (_dispatcher, target, services) => {
     // ⚠ `set-theme` と同じ受け方(`<select>` でもボタンでも通す)

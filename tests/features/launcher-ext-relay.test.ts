@@ -17,6 +17,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { buildLauncherAppShell } from '../../src/features/launcher/app-shell';
 import { EXT_PORT_TAG, EXT_READY_FLAG } from '../../src/features/extension/ext-wire';
+import { connectExtension } from '../../src/adapter/platform/extension-host';
+import type { EntryMeta } from '../../src/core/model/entry-meta';
 
 /** 外殻の script だけを取り出して走らせる(器は自分で組む)。 */
 function runShell(opts: { nonce?: string } = {}) {
@@ -130,6 +132,62 @@ describe('外殻の拡張中継 (#195 / C-5 段①)', () => {
     await tick();
     expect(first.got, '1 本目が繋がっていない(前提が崩れた)').toEqual([{ t: 'hello' }]);
     expect(second.got, '2 本目に差し替わっている').toEqual([]);
+  });
+
+  /**
+   * 🔴 **本物のホストと本物の外殻を繋ぐ**(2026-08-25、smoke が拾った欠陥の回帰)。
+   *
+   * ⚠ **この test が無かったせいで、繋がらない実装が両側とも緑だった。**
+   *   ホストは `{ tag }` だけを投げ、外殻は `m.nonce !== NONCE` でそれを
+   *   **黙って捨てて**いた ── ところが `extension-host.test.ts` の外殻役は
+   *   何でも掴む stub、`launcher-ext-relay` のホスト役は手で封筒を組む形だったので、
+   *   **どちらの unit も相手の綴りを 1 度も見ていなかった**(CLAUDE.md §7)。
+   * 🔑 だからここでは**どちらも実物**にする ── 窓役は「投げられた物をそのまま
+   *   外殻へ流す」だけの通り道で、封筒を 1 バイトも作らない。
+   * 🔑 観測点は**アプリ役に届いた見取り図**(港が繋がったか、ではない)。
+   */
+  it('🔴 本物のホストが渡す港を、本物の外殻が掴んでアプリまで届く', async () => {
+    const nonce = 'n-cross';
+    const { frame, toApp } = runShell({ nonce });
+    const meta: EntryMeta = {
+      lid: 'a',
+      title: '見取り図に出るノート',
+      archetype: 'text',
+      createdAt: null,
+      updatedAt: null,
+      entryOrder: 1,
+      status: null,
+      date: null,
+      archived: false,
+      bodyChars: 99,
+    };
+    /** 外殻の窓役 ── **通り道でしかない**(封筒はホストが組んだ物をそのまま流す)。 */
+    const win = {
+      [EXT_READY_FLAG]: 1,
+      postMessage(data: unknown, _origin: string, transfer?: readonly MessagePort[]) {
+        window.dispatchEvent(
+          Object.assign(new MessageEvent('message', { data }), { ports: transfer ?? [] }),
+        );
+      },
+    };
+    const link = connectExtension({
+      win: win as unknown as Window,
+      metas: () => [meta],
+      nonce,
+      pollMs: 0,
+    });
+    for (let i = 0; i < 20 && toApp.length === 0; i += 1) await tick();
+    expect(toApp, 'アプリまで届いていない(外殻が港を捨てた可能性)').toHaveLength(1);
+    const body = (toApp[0] as { tag: string; body: { t: string; projection: { entries: { title: string }[] } } });
+    expect(body.tag).toBe(EXT_PORT_TAG);
+    expect(body.body.t).toBe('projection');
+    expect(body.body.projection.entries.map((e) => e.title)).toEqual(['見取り図に出るノート']);
+
+    // ⚠ 対照群 ── アプリの `hello` も本物のホストまで通り、押し直される
+    fromApp(frame, { t: 'hello' });
+    for (let i = 0; i < 20 && toApp.length < 2; i += 1) await tick();
+    expect(toApp, '`hello` が本物のホストへ通っていない').toHaveLength(2);
+    link.close();
   });
 
   /** ⚠ 港が来る前のアプリの言葉は**捨てる**(溜めない ── 段① は溜める理由が無い)。 */

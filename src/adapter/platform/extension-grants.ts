@@ -45,3 +45,12 @@ export class ExtensionGrants extends AssetGrants {
 
 /** test / 設定の面が場所を名指しできるように出す。 */
 export const EXTENSION_GRANTS_KEY = KEY;
+
+/**
+ * アプリ共有の 1 個。
+ * ⚠ 面ごとに `new` すると、片方で取り消しても片方が古い答えを返す ── ではなく、
+ *   **毎回 localStorage を読む**作りなのでどちらでも同じ結果になる。それでも
+ *   1 個に寄せるのは「どれが正本か」を読み手に迷わせないためである。
+ * ⚠ test は自分で `new ExtensionGrants(fakeStorage)` を渡す。
+ */
+export const appExtensionGrants = new ExtensionGrants();

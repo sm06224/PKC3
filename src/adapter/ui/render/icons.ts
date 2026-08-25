@@ -204,6 +204,8 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'launch-asset': 'play',
   /** 素のまま起動(同一オリジン)── 地球で「外の決まりで動く」を示す。 */
   'launch-asset-raw': 'globe',
+  /** 目次を見せて起動(#195)── 見せるのは**一覧**なので箇条書きの図案。 */
+  'launch-asset-extension': 'list',
   /** Office で開く(#88 / O3-c)── 開くのは**文書**なので紙の図案。 */
   'open-office': 'page',
   /** 元の md へ書き戻す(2026-08-05)。⚠ **外へ出す**向きなので書出しと同じ図案。 */
