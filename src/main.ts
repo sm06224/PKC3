@@ -126,6 +126,7 @@ import type { ImportDeps } from '@adapter/ui/actions/import-pkc2';
 import {
   exportArchive,
   exportEntry,
+  exportFolder,
   type ExportDeps,
   exportEntryDocx,
   exportEntryPptx,
@@ -875,7 +876,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 形式が増えても読み出し口は 1 つ(source)で共有する。
    */
   const runExport = (
-    kind: ExportKind | { entryLid: string; as?: 'archive' | 'docx' | 'pptx' },
+    kind: ExportKind | { entryLid: string; as?: 'archive' | 'docx' | 'pptx' | 'folder' },
   ): Promise<void> =>
     withAssetGate(async () => {
       const deps: ExportDeps = {
@@ -979,6 +980,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         //    (後ろの 2 つは片道)
         if (kind.as === 'docx') await exportEntryDocx(dispatcher, deps, kind.entryLid);
         else if (kind.as === 'pptx') await exportEntryPptx(dispatcher, deps, kind.entryLid);
+        // 🔴 **フォルダごと**(#399 ①)── 同じ `deps`・同じ形式(.pkc3.zip)を通る。
+        //    ⚠ 別経路にすると「フォルダ書出しだけ壊れている」が起きる(P6f と同じ理由)
+        else if (kind.as === 'folder') await exportFolder(dispatcher, deps, kind.entryLid);
         else await exportEntry(dispatcher, deps, kind.entryLid);
       }
       else await exportArchive(dispatcher, deps, kind);
@@ -1147,6 +1151,22 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             (await client.request({ op: 'listEntryMetas', cid })).map((m) => m.lid),
           revisionLids: () => client.request({ op: 'listRevisionLids', cid }),
         }),
+      /**
+       * 🔴 **重なりを数えるための頭**(#399 ②)。⚠ 本文は入れない ──
+       *   常駐の集約が既に持っている値なので**ただで使える**。
+       */
+      existingHeads: () =>
+        [...dispatcher.getState().entryMetas.values()].map((m) => ({
+          lid: m.lid,
+          bodyChars: m.bodyChars,
+        })),
+      /** 🔴 絞った lid の本文だけ読む(#399 ②)。⚠ 全件は読まない。 */
+      readBodies: async (lids) =>
+        new Map(
+          (await client.request({ op: 'getBodies', cid, lids: [...lids] })).map(
+            (r) => [r.lid, r.body] as const,
+          ),
+        ),
       existingRelationIds: () =>
         new Set(dispatcher.getState().relations.map((r) => r.id)),
       orderBase: () => {
@@ -1965,6 +1985,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     exportHtml: () => void runExport('html'),
     exportMarkdown: () => void runExport('markdown'),
     exportEntry: (lid) => void runExport({ entryLid: lid }),
+    /** 🔴 このフォルダと配下をまとめて書き出す(#399 ①)。 */
+    exportFolder: (lid) => void runExport({ entryLid: lid, as: 'folder' }),
     /**
      * 🔴 このノートを Word で書き出す(#187 段①)。⚠ **asset gate の内側**で回す
      * ── 画像は段②で入るので、そのとき掃除と競らないように今から内側に置く。

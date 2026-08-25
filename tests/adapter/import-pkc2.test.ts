@@ -62,6 +62,11 @@ interface HarnessOptions {
   onBulkEntries?(d: Dispatcher): void;
   /** 履歴の書込を失敗させる(段の取り違えを検出する)。 */
   failRevisions?: boolean;
+  /**
+   * 🔴 既に在るノートの本文(#399 ②)。⚠ **渡さない harness では数えない** ──
+   *   口が無い配線でも取込が壊れないことを、既存 41 件がそのまま見ている。
+   */
+  existingBodies?: ReadonlyMap<string, string>;
 }
 
 function harness(opts: HarnessOptions = {}) {
@@ -92,6 +97,17 @@ function harness(opts: HarnessOptions = {}) {
     existingLids: async () =>
       new Set([...d.getState().entryMetas.keys(), ...(opts.existingLids ?? [])]),
     existingRelationIds: () => new Set(d.getState().relations.map((r) => r.id)),
+    // 🔴 重なりの検出(#399 ②)。⚠ 渡さない harness では**数えないだけ**
+    ...(opts.existingBodies === undefined
+      ? {}
+      : {
+          existingHeads: () =>
+            [...opts.existingBodies!].map(([lid, body]) => ({ lid, bodyChars: body.length })),
+          readBodies: async (lids: readonly string[]) =>
+            new Map(
+              [...opts.existingBodies!].filter(([lid]) => lids.includes(lid)),
+            ),
+        }),
     orderBase: () => opts.orderBase ?? 0,
     genLid: () => `gen-lid-${++n}`,
     genAssetKey: () => `ast-gen-${++n}`,
@@ -1409,5 +1425,52 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(e.body).toContain('朝の記録');
     expect(e.body).toContain('夜の記録');
     expect(e.body).toContain('★'); // important は見出しの印になる
+  });
+});
+
+describe('同じものを 2 回取り込んだと気づく (#399 ②)', () => {
+  const body = '# 買い物\n\n- 牛乳';
+
+  /**
+   * 🔴 **取込は止めない。言うだけ。**
+   * ⚠ 止める側へ倒すと「**黙って取り込まれない**」になり、いまより悪い
+   *   (増えたのは見えるが、入らなかったのは見えない)。
+   */
+  it('🔴 中身が同じなら注意を出す ── ただし取込は止めない', async () => {
+    const { d, deps, written, reportedNotes } = harness({
+      existingBodies: new Map([['old-1', body]]),
+    });
+    const file = htmlFile({
+      container: { meta: {}, entries: [{ lid: 'n1', title: '買い物', body, archetype: 'text' }] },
+    });
+    await importPkc2File(d, deps, file);
+    expect(reportedNotes().join('\n'), '重なりを黙っている').toContain('同じ内容のノートが 1 件');
+    expect(reportedNotes().join('\n')).toContain('「買い物」');
+    // 🔑 **止めていない** ── 書き込まれていることまで見る
+    expect(written, '注意を出すために取込を止めている').toHaveLength(1);
+  });
+
+  /** ⚠ 対照群 ── 中身が違えば黙る(何にでも出す実装を殺す)。 */
+  it('中身が違えば黙る', async () => {
+    const { d, deps, written, reportedNotes } = harness({
+      existingBodies: new Map([['old-1', '# ぜんぜん違う本文です']]),
+    });
+    const file = htmlFile({
+      container: { meta: {}, entries: [{ lid: 'n1', title: '買い物', body, archetype: 'text' }] },
+    });
+    await importPkc2File(d, deps, file);
+    expect(reportedNotes().join('\n')).not.toContain('同じ内容');
+    expect(written).toHaveLength(1);
+  });
+
+  /** ⚠ 口が無い配線(旧い版)では、数えないだけで取込は今までどおり。 */
+  it('口が無い配線でも取込は壊れない', async () => {
+    const { d, deps, written, reportedNotes } = harness();
+    const file = htmlFile({
+      container: { meta: {}, entries: [{ lid: 'n1', title: '買い物', body, archetype: 'text' }] },
+    });
+    await importPkc2File(d, deps, file);
+    expect(written).toHaveLength(1);
+    expect(reportedNotes().join('\n')).not.toContain('同じ内容');
   });
 });

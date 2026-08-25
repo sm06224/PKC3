@@ -431,6 +431,8 @@ export interface BinderServices {
   printNote?(lid: string): void;
   /** このノートだけをアーカイブとして書き出す(P6f)。 */
   exportEntry?(lid: string): void;
+  /** 🔴 **このフォルダと配下**をアーカイブとして書き出す(#399 ①)。 */
+  exportFolder?(lid: string): void;
   /**
    * 図 1 枚をベクタ(`.svg`)で書き出す(P8 段⑦)。
    * ⚠ 画面に置くのは PNG、書き出すのは SVG(user 指示 2026-08-03)。
@@ -2344,6 +2346,14 @@ const ACTIONS: Record<string, ActionHandler> = {
       target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ??
       dispatcher.getState().selectedLid;
     if (lid) services.exportEntry?.(lid);
+  },
+  'export-folder': (dispatcher, target, services) => {
+    // ⚠ 解決規則は隣の `export-entry` / `delete-entry` と**同じ**にする ── 揃えないと
+    //    「A を書き出して B を削除する」が成立する(review M-3 と同じ形)
+    const lid =
+      target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ??
+      dispatcher.getState().selectedLid;
+    if (lid) services.exportFolder?.(lid);
   },
   'purge-orphan-assets': (_dispatcher, _target, services) => {
     services.purgeOrphanAssets?.();
