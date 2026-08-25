@@ -37,6 +37,13 @@ import { formatLineDate } from '@features/schedule/line-date';
 import { isImageAssetMime } from '@features/asset/asset-ref-format';
 import { adoptableUrls, rewriteAdopted } from '@features/asset/inline-url-adopt';
 import { convertPastedHtml } from '@features/markdown/html-to-markdown';
+import { convertPastedRtf } from '@features/markdown/rtf-to-markdown';
+import {
+  choosePaste,
+  describePaste,
+  DEFAULT_PASTE_SOURCE,
+  type PasteSource,
+} from '@features/markdown/paste-source';
 import { convertPastedPermalink } from '@features/link/permalink';
 import { resolveMime } from './attach';
 import { applyFormat, type FormatOp } from '@features/markdown/text-ops';
@@ -430,6 +437,19 @@ export interface BinderServices {
    * ⚠ 「閲覧用 HTML」とは別物である(あちらは読むだけ、こちらは**続きが書ける**)。
    */
   exportPortable?(): void;
+  /**
+   * 🔴 **貼付でどの形を読むか**(user 指示 2026-08-25)── 設定の 4 択。
+   * ⚠ 渡されなければ `auto`(いままでどおり)。
+   */
+  pasteSource?(): PasteSource;
+  /**
+   * 🔴 **何が届いてどれを使ったかを出すか**(flag `paste.inspect`)。
+   * 🔑 設定(上)と**対**である ── これが見えるから、user はどれに切り替えれば
+   *   よいか分かる。⚠ 渡されなければ出さない。
+   */
+  pasteInspect?(): boolean;
+  /** 設定を変える(設定画面の選択)。⚠ 知らない値は呼び側が捨てる。 */
+  setPasteSource?(id: string): void;
   /** このノートを Word(.docx)で書き出す(#187 段①)。 */
   exportEntryDocx?(lid: string): void;
   /** このノートを PowerPoint(.pptx)で書き出す(#187 段⑤)。 */
@@ -2388,6 +2408,14 @@ const ACTIONS: Record<string, ActionHandler> = {
     const key = target.getAttribute('data-pkc-asset-key');
     if (key !== null && key !== '') services.revokeExtension?.(key);
   },
+  'set-paste-source': (_dispatcher, target, services) => {
+    // ⚠ `set-external-images` と同じ受け方(`<select>` でもボタンでも通す)
+    const id =
+      target instanceof HTMLSelectElement
+        ? target.value
+        : target.getAttribute('data-pkc-paste-source-value');
+    if (id) services.setPasteSource?.(id);
+  },
   'set-external-images': (_dispatcher, target, services) => {
     // ⚠ `set-theme` と同じ受け方(`<select>` でもボタンでも通す)
     const mode =
@@ -3341,6 +3369,18 @@ export function bindActions(
     const html = ce.clipboardData?.getData('text/html') ?? '';
     const plain = ce.clipboardData?.getData('text/plain') ?? '';
     /**
+     * 🔴 **リッチテキスト(RTF)**(user 指示 2026-08-25「HTML貼付のほか、
+     * 最近はリッチタイプテキストも増えてる」)。
+     *
+     * ⚠ **HTML の代わりではない。** Word / Excel / Google ドキュメントは
+     *   `text/html` と `text/rtf` の**両方**を載せるので、そこは HTML のほうが
+     *   必ず忠実である ── だから RTF は**下の三項でいちばん後ろ**に置く。
+     * 🔑 RTF しか載らない出し手(WordPad / TextEdit のリッチテキスト書類 /
+     *   一部のネイティブ製アプリ)から貼ったとき、**いままで平文に潰れていた**
+     *   のを拾うためのものである。
+     */
+    const rtf = ce.clipboardData?.getData('text/rtf') ?? '';
+    /**
      * 🔴 **素で貼ったパーマリンクを内部リンクにする**(#251)。
      *
      * ⚠ **HTML の変換より先に見る** ── パーマリンクをコピーすると
@@ -3353,7 +3393,29 @@ export function bindActions(
       containerId: st.cid,
       titleOf: (lid) => st.entryMetas.get(lid)?.title ?? null,
     });
-    const converted = permalink ?? convertPastedHtml({ html, plain });
+    /**
+     * 🔴 **どれを読むかは設定が決める**(user 指示 2026-08-25)。
+     * ⚠ **順番をここに書かない** ── 判定は `choosePaste` の 1 か所である
+     *   (呼び側で条件を足すと「経路ごとに挙動が違う」形になる。CLAUDE.md §7)。
+     * 🔑 変換の口は**遅延**で渡す ── 設定が「変換しない」のとき 1MB の HTML を
+     *   解析しない(押した瞬間に止まらないための作法)。
+     */
+    const chosen = choosePaste({
+      source: services.pasteSource?.() ?? DEFAULT_PASTE_SOURCE,
+      sizes: { html: html.length, rtf: rtf.length, plain: plain.length },
+      convert: {
+        permalink: () => permalink,
+        html: () => convertPastedHtml({ html, plain }),
+        rtf: () => convertPastedRtf({ rtf, plain }),
+      },
+    });
+    /**
+     * ⚠ **止めたときも出す** ── 「何も起きなかった」ときこそ理由が要る
+     *   (それがこの flag の存在理由である)。
+     */
+    if (services.pasteInspect?.() === true)
+      dispatcher.dispatch({ type: 'OP_NOTICE', message: describePaste(chosen.attempt) });
+    const converted = chosen.text;
     const text = converted ?? plain;
     if (text === '') return false;
 

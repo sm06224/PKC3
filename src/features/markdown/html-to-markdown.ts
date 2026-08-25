@@ -78,7 +78,7 @@ const collapse = (s: string): string => s.replace(/\s+/g, ' ');
  * ⚠ `_` は**語中では強調にならない**ので、語中は escape しない
  * (`snake_case` が `snake\_case` になると原文が読めなくなる)。
  */
-function escapeInline(s: string): string {
+export function escapeInline(s: string): string {
   return s
     .replace(/[\\`*[\]]/g, '\\$&')
     .replace(/(^|\s)_/g, '$1\\_')
@@ -86,7 +86,7 @@ function escapeInline(s: string): string {
 }
 
 /** 出せない宛先(貼った先で**押すと危ない**もの)。 */
-function isSafeHref(href: string): boolean {
+export function isSafeHref(href: string): boolean {
   const t = href.trim().toLowerCase();
   if (t === '') return false;
   return !(
@@ -359,6 +359,26 @@ function cellText(el: Element): string {
   return tidy(inlineChildren(el)).replace(/\n+/g, ' ').replace(/\|/g, '\\|');
 }
 
+/**
+ * 行の集合を GFM の表にする(空なら `null`)。
+ *
+ * 🔑 **HTML 貼付と RTF 貼付が同じ規則を使う**ためにここに在る(CLAUDE.md §7)──
+ * 別々に書くと、片方だけ「見出しが無い表で 1 行消える」形に戻る。
+ * 🔴 **見出し行が無い表には空の見出しを足す** ── 先頭行を格上げすると**データが
+ * 1 行消える**。⚠ 幅はいちばん広い行に合わせる(足りない分は空セル)。
+ */
+export function gfmTable(rows: { cells: string[]; head: boolean }[]): string | null {
+  if (rows.length === 0) return null;
+  const width = Math.max(...rows.map((r) => r.cells.length));
+  const line = (cells: string[]): string =>
+    `| ${Array.from({ length: width }, (_, i) => cells[i] ?? '').join(' | ')} |`;
+  const body = [...rows];
+  const head = body[0]!.head ? body.shift()!.cells : Array.from({ length: width }, () => '');
+  const out = [line(head), `| ${Array.from({ length: width }, () => '---').join(' | ')} |`];
+  for (const r of body) out.push(line(r.cells));
+  return out.join('\n');
+}
+
 function tableBlocks(el: Element): Block[] {
   const rows: { cells: string[]; head: boolean }[] = [];
   // ⚠ **自分の行だけ**を拾う(着地前レビュー D)── `querySelectorAll` は子孫すべてを
@@ -371,21 +391,15 @@ function tableBlocks(el: Element): Block[] {
     if (cells.length === 0) continue;
     rows.push({ cells: cells.map(cellText), head: cells.every((c) => tagOf(c) === 'th') });
   }
-  if (rows.length === 0) return [];
-  const width = Math.max(...rows.map((r) => r.cells.length));
-  const line = (cells: string[]): string =>
-    `| ${Array.from({ length: width }, (_, i) => cells[i] ?? '').join(' | ')} |`;
-  // 🔴 **見出し行が無い表には空の見出しを足す** ── 先頭行を格上げすると 1 行消える
-  const head = rows[0]!.head ? rows.shift()!.cells : Array.from({ length: width }, () => '');
-  const out = [line(head), `| ${Array.from({ length: width }, () => '---').join(' | ')} |`];
-  for (const r of rows) out.push(line(r.cells));
+  const table = gfmTable(rows);
+  if (table === null) return [];
   const caption = el.querySelector('caption');
   const blocks: Block[] = [];
   if (caption) {
     const c = paragraph(inlineChildren(caption));
     if (c) blocks.push(c);
   }
-  blocks.push({ text: out.join('\n'), tight: false });
+  blocks.push({ text: table, tight: false });
   return blocks;
 }
 
