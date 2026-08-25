@@ -13,6 +13,7 @@ import { resolveCanonicalParents, reorderSibling } from '@features/relation/tree
 import { extractMeta, seedBodyFor } from '@features/flavor';
 import { applyBodyRewrite, type BodyRewrite } from '@features/markdown/body-rewrite';
 import { replaceTaskCards, type TaskScan } from '@features/schedule/task-cards';
+import type { SnippetScan } from '@features/snippet/snippet-table';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import type { PersistState } from '@adapter/platform/storage-persist';
 import type { LauncherTile } from '@features/launcher/tiles';
@@ -396,6 +397,14 @@ export interface AppState {
    */
   taskScan: TaskScan | null;
   /**
+   * 🔴 **雛形の表**(#196 / B-2)。⚠ `null` = **まだ集めていない / 集められなかった**。
+   *
+   * ⚠ ここだけは**本文を持つ** ── `Tab` を押してから字が出るまでに往復を
+   *   挟まないためである。運ぶのは **user が雛形として作った物だけ**で、
+   *   `SNIPPET_LIMITS` の上限が付く(`features/snippet/snippet-table.ts`)。
+   */
+  snippetScan: SnippetScan | null;
+  /**
    * 🔴 **集められなかった**(集計の `queryFailed` と同じ理由)。⚠ `taskScan === null`
    * は「まだ」であって「駄目だった」ではない ── 区別しないと、盤面が
    * 「集めています…」を出したまま**永久に止まって見える**。
@@ -513,6 +522,7 @@ export const initialState: AppState = {
   queryFailed: false,
   taskScan: null,
   taskScanFailed: false,
+  snippetScan: null,
   persistState: 'unknown',
   backlinks: null,
   launcherTiles: null,
@@ -564,6 +574,8 @@ export type UserAction =
   | { type: 'REFRESH_QUERY' }
   /** カンバンの札が集まった(#277 段②-b)。 */
   | { type: 'SET_TASK_SCAN'; scan: TaskScan }
+  /** 🔴 雛形を集め終えた(#196 / B-2)。⚠ `null` は失敗 ── **帯は出さず静かに畳む**。 */
+  | { type: 'SET_SNIPPET_SCAN'; scan: SnippetScan | null }
   /** 札が集められなかった(#277 段②-b)。⚠ 「まだ」と区別する ── 文言が違う。 */
   | { type: 'TASK_SCAN_FAILED' }
   /**
@@ -598,6 +610,7 @@ export type UserAction =
    *   (読み直しの間に空白を出さない)。
    */
   | { type: 'REFRESH_TASK_SCAN' }
+  | { type: 'REFRESH_SNIPPET_SCAN' }
   /**
    * タイル設定を書き戻した ack(P8 段⑭)。⚠ **開いている body も差し替える**。
    * ⚠ `body === null` は失敗(書けなかった)── **ロックは必ず解く**。
@@ -945,6 +958,7 @@ export type DomainEvent =
    * 本文は常駐していないし、主スレッドへ運んでもいけない(不可侵指示 2026-07-27)。
    */
   | { type: 'REQUEST_TASK_SCAN' }
+  | { type: 'REQUEST_SNIPPET_SCAN' }
   /** ⚠ **どれを読むかを載せる** ── effect 層は実行時に state を見ない(review L-6)。 */
   | {
       type: 'REQUEST_TILE_UPDATE';
@@ -1262,6 +1276,9 @@ function reduceCore(
            */
           taskScan: null,
           taskScanFailed: false,
+          // 🔴 **雛形も捨てる**(同じ理由)── 残すと**消えたノートの雛形**が
+          //    `/` に並び、押すと本文が入らない(押しても何も起きない導線)
+          snippetScan: null,
         },
         events: [
           ...(keepLid === null
@@ -1435,6 +1452,17 @@ function reduceCore(
       return { state: { ...state, taskScan: action.scan, taskScanFailed: false }, events: [] };
     case 'TASK_SCAN_FAILED':
       return { state: { ...state, taskScanFailed: true }, events: [] };
+    /**
+     * 🔴 **雛形は「集められなかった」を帯に出さない**(#196 / B-2)。
+     *
+     * ⚠ 予定(`taskScanFailed`)と作法が違うのはわざとである ── 予定は**面そのもの**
+     *   なので「集めています…」で止まると壊れて見えるが、雛形は**入力の補助**なので、
+     *   出せないときは**静かに畳む**のが正しい(打っている最中に帯が出るほうが邪魔)。
+     * 🔑 だから失敗も `null` で表す ── `Tab` も `/` もただ何も出さず、
+     *   **既定の `Tab`(焦点移動)は生きたまま**である。
+     */
+    case 'SET_SNIPPET_SCAN':
+      return { state: { ...state, snippetScan: action.scan }, events: [] };
     case 'SET_SEARCH_HITS':
       // ⚠ **遅れて返った古い結果を捨てる**(打鍵は結果より速い)
       if (action.query !== state.filterQuery) return { state, events: [] };
@@ -1533,6 +1561,8 @@ function reduceCore(
       };
     case 'REFRESH_TASK_SCAN':
       return { state, events: [{ type: 'REQUEST_TASK_SCAN' }] };
+    case 'REFRESH_SNIPPET_SCAN':
+      return { state, events: [{ type: 'REQUEST_SNIPPET_SCAN' }] };
     case 'REFRESH_LAUNCHER_TILES':
       // ⚠ **毎回要求する**。ただし前回のタイルは消さない(古い並びを出したまま
       //    読み直し、届いたら差し替える ── 「読み込んでいます…」を挟まない)
@@ -1695,7 +1725,21 @@ function reduceCore(
         return { state, events: [] };
       // ⚠ 編集がロックを握ることは**書かない** ── `phase === 'editing'` が既に
       // それを表している(`bodyLockOf`)。ここで別の field に写すと 2 つ目の真実
-      return { state: { ...state, phase: 'editing', revisionPanel: null }, events: [] };
+      return {
+        state: { ...state, phase: 'editing', revisionPanel: null },
+        /**
+         * 🔴 **編集に入るたびに雛形を集め直す**(#196 / B-2)。
+         *
+         * ⚠ 「一度集めたら使い回す」にしない ── **さっき直した雛形が次の編集で
+         *   古いまま**になる(自分で作った物が効かないのは、いちばん困る形)。
+         * 🔑 実費は「archetype で絞った ≤200 行を worker で読む」1 往復で、
+         *   しかも**押した瞬間ではなく編集を開いた瞬間**に走るので、`Tab` の
+         *   反応には乗らない。
+         * ⚠ 頼むのは配線ではなくここ ── `main.ts` に書くと、どの test からも
+         *   実行されない場所に判断が沈む(CLAUDE.md §2)。
+         */
+        events: [{ type: 'REQUEST_SNIPPET_SCAN' }],
+      };
     }
     /**
      * 🔴 **本文の置換**(#191)。⚠ 編集中だけ ── 読んでいるだけの面から本文を
@@ -2463,6 +2507,16 @@ function reduceCore(
               ? {}
               : { parent: { parentLid, relationId: action.relationId as string } }),
           },
+          /**
+           * 🔴 **作って即編集の経路でも雛形を集める**(#196 / B-2)。
+           *
+           * ⚠ 2026-08-25 に**実ブラウザの smoke が拾った** ── `START_EDIT` にだけ
+           *   置いていたので、**作成から入った編集では短縮語が 1 つも当たらなかった**。
+           *   unit は「編集」を押す経路しか通しておらず、**この経路は 1 度も
+           *   走っていなかった**(CLAUDE.md §2)。
+           * 🔑 「編集に入る」は 2 経路ある ── 片方だけに置くと、もう片方が黙って死ぬ。
+           */
+          ...(wantsEdit ? [{ type: 'REQUEST_SNIPPET_SCAN' as const }] : []),
         ],
       };
     }

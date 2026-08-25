@@ -29,6 +29,13 @@ import { readVersions, totalHistoryBytes } from '@features/flavor/attachment-ver
 import { planSaveBack } from '@features/asset/asset-replace-plan';
 import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
 import { bodyLinkNeedles, bodyLinksTo } from '@features/entry-ref/body-links';
+import {
+  SNIPPET_ARCHETYPE,
+  SNIPPET_LIMITS,
+  snippetItemOf,
+  type SnippetItem,
+  type SnippetScan,
+} from '@features/snippet/snippet-table';
 import { planSearch, toLikePattern } from '@features/filter/search-query';
 import { countTaskCandidates } from '@features/markdown/task-count';
 import {
@@ -542,6 +549,43 @@ function runTaskScan(cid: string): TaskScan {
     if (rows.length < TASK_SCAN_CHUNK) break;
   }
   return { cards, totalNotes, scannedNotes, truncated };
+}
+
+/**
+ * 🔴 **雛形を集める**(#196 / B-2 段②)。
+ *
+ * ⚠ `runTaskScan` と**同じ形**にしてある(CLAUDE.md §7)── 違うのは
+ *   「どれを候補にするか」だけで、走査の作法(上限 / 切ったら言う)は共通である。
+ *
+ * 🔑 **本文ごと運ぶ**のは、`Tab` を押してから字が出るまでに往復を挟まないため。
+ * ⚠ 「全件の本文を主スレッドへ運ばない」(不可侵指示 2026-07-27)とは別物である:
+ *   運ぶのは **user が雛形として作ったものだけ**で、`SNIPPET_LIMITS` で上限が付く。
+ * ⚠ 候補は `archetype` で絞るので、**本文を読むのは雛形だけ**である
+ *   (普通のノートは 1 バイトも読まない)。
+ */
+function runSnippetScan(cid: string): SnippetScan {
+  const database = need();
+  const total = Number(
+    database.selectValue('SELECT count(*) FROM entries WHERE cid = ? AND archetype = ?', [
+      cid,
+      SNIPPET_ARCHETYPE,
+    ]) ?? 0,
+  );
+  const rows = database.selectObjects(
+    `SELECT lid, title, body FROM entries WHERE cid = ? AND archetype = ?
+       ORDER BY entry_order, lid LIMIT ?`,
+    [cid, SNIPPET_ARCHETYPE, SNIPPET_LIMITS.notes],
+  ) as unknown as Array<{ lid: string; title: string; body: string | null }>;
+  const items: SnippetItem[] = [];
+  for (const row of rows) {
+    // 🔑 「本文 → 表の 1 行」は `snippetItemOf` 1 本(§7)── ここで組み直さない
+    const item = snippetItemOf(row.lid, row.title, row.body ?? '');
+    if (item !== null) items.push(item);
+  }
+  // ⚠ **切ったら必ず言う** ── 黙って切ると user は「無い」と読む。
+  //   ⚠ 上限で切った分だけを数える(長すぎて載らなかった雛形は別の理由なので、
+  //     ここでは `truncated` にしない ── 画面には「載らなかった」と別に出す)
+  return { items, total, truncated: total > SNIPPET_LIMITS.notes };
 }
 
 /**
@@ -1178,6 +1222,7 @@ const handlers: Handlers = {
       [req.cid],
     ) as unknown as ResultMap['listEntryMetas'],
   taskScan: (req) => runTaskScan(req.cid),
+  snippetScan: (req) => runSnippetScan(req.cid),
   getBody: (req) => {
     const rows = need().selectObjects(
       'SELECT body FROM entries WHERE cid = ? AND lid = ?',

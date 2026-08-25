@@ -102,6 +102,8 @@ const CREATE_BUTTONS: readonly { archetype: string; label: string }[] = [
   { archetype: 'textlog', label: 'ログ' },
   { archetype: 'spreadsheet', label: '表' },
   { archetype: 'folder', label: 'フォルダ' },
+  // 🔴 **雛形**(#196 / B-2)── 作れないと user は自分の雛形を持てない
+  { archetype: 'snippet', label: '雛形' },
   { archetype: 'todo', label: 'Todo' },
 ] as const;
 

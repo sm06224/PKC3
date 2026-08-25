@@ -33,6 +33,8 @@ import { convertPastedHtml } from '@features/markdown/html-to-markdown';
 import { convertPastedPermalink } from '@features/link/permalink';
 import { resolveMime } from './attach';
 import { applyFormat, type FormatOp } from '@features/markdown/text-ops';
+import { insertSnippet, nextSnippetSlot } from '@features/snippet/snippet-expand';
+import { abbrBeforeCaret } from '@features/snippet/snippet-table';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
 import { isEntrySort, NATURAL_DESC } from '@features/filter/entry-sort';
 import { isPaneId, PANES } from '@features/pane-visibility';
@@ -2575,6 +2577,42 @@ export function bindActions(
         ),
       );
       return;
+    }
+    /**
+     * 🔴 **雛形を `Tab` で挿す / 次の印へ移る**(#196 / B-2 段②)。
+     *
+     * ⚠ **短縮語が先、印が後**である ── 短縮語は**カーソルのすぐ手前**(user が
+     *   いま打った字)だが、印は本文のどこか先に在る。逆にすると、後ろに `${…}` が
+     *   残っているノートで短縮語を打った瞬間、**展開されずに遠くへ飛ぶ**。
+     * ⚠ **どちらも当たらなければ `preventDefault()` しない** ── textarea の `Tab` は
+     *   既定で焦点移動なので、常に握ると**編集欄から `Tab` で出られなくなる**
+     *   (キーボードだけで使う人の動線を 1 つ殺す)。
+     * ⚠ `isComposing` は上で弾き済み ── 変換中の `Tab` は確定に使われる。
+     */
+    if (field === 'editor-body' && ke.key === 'Tab' && !ke.shiftKey) {
+      const ta = ke.target as HTMLTextAreaElement;
+      const items = dispatcher.getState().snippetScan?.items ?? [];
+      const collapsed = ta.selectionStart === ta.selectionEnd;
+      const hit = collapsed ? abbrBeforeCaret(ta.value, ta.selectionStart, items) : null;
+      if (hit !== null) {
+        ke.preventDefault();
+        writeBack(
+          ta,
+          insertSnippet(
+            { text: ta.value, start: hit.start, end: ta.selectionEnd },
+            hit.item.body,
+            new Date(),
+          ),
+        );
+        return;
+      }
+      // ⚠ 次の印は**選択の終わりから**探す(いま選んでいる印をもう一度選ばない)
+      const slot = nextSnippetSlot(ta.value, ta.selectionEnd);
+      if (slot !== null) {
+        ke.preventDefault();
+        ta.setSelectionRange(slot.start, slot.end);
+        return;
+      }
     }
     if (field !== 'editor-body' && field !== 'editor-title') return;
     // PKC2 慣例: Ctrl/Cmd+S = 保存(ブラウザの保存ダイアログも抑止)、
