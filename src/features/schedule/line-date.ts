@@ -30,6 +30,13 @@
  * 「先頭 10 字が日付なら採用」と書くと、**`@2026-08-251` の前半だけを日付と読む**
  * ── user は 1 つの語を書いたのに、こちらが勝手に切って読むことになる。
  *
+ * ## 🔴 刻み(`毎週`)は**尻から別に読む**(#344 段②)
+ *
+ * `@2026-08-31 毎週` / `@2026-08-31..2026-12-31 毎週` / `@2026-08-31 14:00 毎週`。
+ * ⚠ **走査の網を広げていない** ── 日付・期間・時刻の読み方は 1 バイトも変えず、
+ * **読み終わった直後の字**だけを `readRepeatTail` に当てる(`repeat.ts`)。
+ * 🔑 そのぶん「網を広げたせいで既存の本文の読みが変わる」経路が無い。
+ *
  * ## ⚠ 形を決めるのはこの file ではない
  *
  * 「日付とは何か」は `schedule-date.ts` の `isScheduleDate` 1 つである
@@ -45,6 +52,7 @@
  * 🔑 **pure module**。DOM も DB も知らない。
  */
 import { isScheduleDate, isScheduleRange, isScheduleTime } from './schedule-date';
+import { REPEAT_WORDS, readRepeatTail, type RepeatUnit } from './repeat';
 
 /**
  * 走査の網。⚠ **判定はしない**(取るだけ)── 判定は `isScheduleDate` /
@@ -88,6 +96,16 @@ export interface LineDate {
    * **記法として食べない** ── その字は札にそのまま残る(黙って捨てない)。
    */
   readonly time: string | null;
+  /**
+   * 🔴 **刻み**(`@2026-08-31 毎週` の `毎週`)。繰り返しでなければ `null`(#344 段②)。
+   *
+   * ⚠ **終わりは `until` が兼ねる** ── 終了条件の記法を新しく作らない
+   *   (`repeat.ts` の頭)。つまり `@2026-08-31..2026-12-31 毎週` は
+   *   「8/31 から 12/31 まで、毎週」であって **4 か月の予定ではない**。
+   * ⚠ 時刻は**持てる**(`@2026-08-31 14:00 毎週`)── 毎週の会議はいちばん自然な形で、
+   *   期間と違って「その時刻がどの日のものか」が回ごとに決まる。
+   */
+  readonly repeat: RepeatUnit | null;
   /** 記法そのものの範囲(`@` から)。⚠ **時刻が読めなかったときは日付までで終わる**。 */
   readonly start: number;
   readonly end: number;
@@ -125,13 +143,16 @@ export function readLineDate(line: string): LineDate | null {
        */
       const sepAt = start + 1 + date.length;
       const sepLen = line.startsWith('..', sepAt) ? 2 : 1;
+      const base = sepAt + sepLen + rawUntil.length;
+      const tail = readRepeatTail(line.slice(base));
       return {
         date,
         until: rawUntil,
         // 🔴 期間に時刻は付けない(上の docstring)── 後ろの字は食べずに残す
         time: null,
+        repeat: tail === null ? null : tail.unit,
         start,
-        end: sepAt + sepLen + rawUntil.length,
+        end: tail === null ? base : base + tail.length,
       };
     }
     const rawTime = m[3];
@@ -139,12 +160,22 @@ export function readLineDate(line: string): LineDate | null {
     //    `10:000円` は時刻ではないが、日付は user がちゃんと書いている
     const time = rawTime !== undefined && isScheduleTime(rawTime) ? rawTime : null;
     const afterDate = start + 1 + date.length;
+    /**
+     * ⚠ 刻みは**日付(と時刻)の直後**からだけ拾う ── 行のどこかに「毎週」と
+     *   書いてあるだけでは拾わない(散文を記法に取り込まない)。
+     * ⚠ 時刻が**読めなかった**とき(`@2026-08-25 10:000円 毎週`)は、その字が
+     *   間に挟まるので刻みは付かない ── わざとである(間の字を勝手に飛ばして
+     *   繰り返しにすると、user が書いていない予定が毎週立つ)。
+     */
+    const base = time === null ? afterDate : afterDate + 1 + time.length;
+    const tail = readRepeatTail(line.slice(base));
     return {
       date,
       until: null,
       time,
+      repeat: tail === null ? null : tail.unit,
       start,
-      end: time === null ? afterDate : afterDate + 1 + time.length,
+      end: tail === null ? base : base + tail.length,
     };
   }
   return null;
@@ -178,9 +209,20 @@ export function formatLineDate(
   date: string,
   time?: string | null,
   until?: string | null,
+  repeat?: RepeatUnit | null,
 ): string {
-  if (until !== undefined && until !== null && until !== '') return `@${date}..${until}`;
-  return time !== undefined && time !== null && time !== '' ? `@${date} ${time}` : `@${date}`;
+  const head =
+    until !== undefined && until !== null && until !== ''
+      ? `@${date}..${until}`
+      : time !== undefined && time !== null && time !== ''
+        ? `@${date} ${time}`
+        : `@${date}`;
+  /**
+   * 🔴 **刻みは尻に付ける**(#344 段②)。⚠ 空白を 1 つ空ける ── 読みは
+   *   詰めても通る(`repeat.ts` の `REPEAT_TAIL`)が、**書きは整える**
+   *   (この file の頭「読みは緩く、書きは整える」)。
+   */
+  return repeat === undefined || repeat === null ? head : `${head} ${REPEAT_WORDS[repeat]}`;
 }
 
 /**
@@ -198,7 +240,8 @@ export function insertionForLineDate(
   date: string,
   time?: string | null,
   until?: string | null,
+  repeat?: RepeatUnit | null,
 ): string {
-  const text = formatLineDate(date, time, until);
+  const text = formatLineDate(date, time, until, repeat);
   return /\S$/.test(before) ? ` ${text}` : text;
 }

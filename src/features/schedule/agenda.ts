@@ -29,6 +29,7 @@ import type { EntryMeta } from '../../core/model/entry-meta';
  */
 import { storedDateParts } from '../datetime/stored-date';
 import { addDays } from '../datetime/date-math';
+import { expandRepeat, repeatMateKey, type RepeatUnit } from './repeat';
 
 /**
  * 🔴 **予定 1 件**。⚠ **単位は 2 つある**(2026-08-23、段④)──
@@ -72,6 +73,15 @@ export interface AgendaItem {
    *   非対称であることを承知で切っている(#344 に書いてある)。
    */
   readonly until: string | null;
+  /**
+   * 🔴 **刻み**(`@2026-08-31 毎週`)。繰り返しでなければ `null`(#344 段②)。
+   *
+   * ⚠ **束に入った札の `repeat` も `null` にならない** ── 出た 1 枚が
+   *   「規則から出た回」であることは、押したとき(実体の行を作る)と
+   *   掴んだとき(断る)に要る。🔑 代わりに**その回の `until` は `null`** にする
+   *   ── 束に入った時点で「その日 1 日ぶん」であって、期間ではないからである。
+   */
+  readonly repeat: RepeatUnit | null;
 }
 
 /** 行の札を予定にする。 */
@@ -85,6 +95,7 @@ export function itemOfCard(card: TaskCard): AgendaItem {
     date: card.date,
     time: card.time,
     until: card.until,
+    repeat: card.repeat,
   };
 }
 
@@ -103,6 +114,8 @@ export function itemOfNote(meta: EntryMeta): AgendaItem {
     time: null,
     // ⚠ frontmatter には期間の置き場が無い(#344 段②)── 常に `null`
     until: null,
+    // ⚠ 繰り返しも同じ ── ノート 1 件が丸ごと繰り返す形は作っていない
+    repeat: null,
   };
 }
 
@@ -171,6 +184,18 @@ function daysOfRange(from: string, until: string): string[] {
 }
 
 /**
+ * 🔴 **繰り返しを先まで出す日数**(#344 段②)。
+ *
+ * ⚠ 窓が無いと `毎日` が**永久に**束を作る。⚠ 逆に短すぎると、小さな月を
+ *   翌月へ送ったときに**点が消える**(下の一覧と食い違って見える)── だから
+ *   **2 か月ぶん**にして、月を 1 つ送っても必ず届くようにしてある。
+ * 🔑 これで `毎日` でも 1 本の行が作る札は 63 枚までで、
+ *   `REPEAT_MAX_OCCURRENCES`(200)には**構造上とどかない**
+ *   (= 上限で切ったことを画面に出す口は要らない)。
+ */
+export const AGENDA_REPEAT_HORIZON_DAYS = 62;
+
+/**
  * 札を日ごとの束にする。
  *
  * 🔑 **並びは「日付の昇順、日付なしは最後」**。⚠ 期限切れは昇順の自然な結果として
@@ -180,18 +205,58 @@ function daysOfRange(from: string, until: string): string[] {
  *
  * @param today `YYYY-MM-DD`。⚠ 呼び側が渡す(この module は時計を読まない)。
  * @param withUndated 日付なしの束を出すか(既定 `false` = 出さない)。
+ * @param repeat 繰り返しの展開に要るもの(#344 段②)。
+ *   `skip` は 🔴 **済んだ回の実体**(`materializedDates`)── ⚠ **絞り込みで
+ *   消えた札からも作る**こと(既定では済んだ札を隠すので、隠れた実体を
+ *   渡し忘れると**済ませた回がもう一度出る**)。
  */
 export function buildAgenda(
   cards: readonly AgendaItem[],
   today: string,
   withUndated = false,
+  repeat?: {
+    readonly skip?: ReadonlyMap<string, ReadonlySet<string>>;
+    readonly horizonDays?: number;
+  },
 ): AgendaGroup[] {
   const tomorrow = addDays(today, 1) ?? '';
   const byDate = new Map<string, AgendaItem[]>();
   const undated: AgendaItem[] = [];
+  const horizon = addDays(today, repeat?.horizonDays ?? AGENDA_REPEAT_HORIZON_DAYS) ?? today;
+  const put = (day: string, item: AgendaItem): void => {
+    const list = byDate.get(day);
+    if (list === undefined) byDate.set(day, [item]);
+    else list.push(item);
+  };
   for (const c of cards) {
     if (c.date === null) {
       undated.push(c);
+      continue;
+    }
+    /**
+     * 🔴 **繰り返しは「今日から先」に出す**(#344 段②)。
+     *
+     * ⚠ 過ぎた回は出さない ── 出すと `@2020-01-06 毎週` が
+     *   **期限切れを 340 個**並べる。🔑 過ぎた回で残っているのは
+     *   「押した回 = 本文の実体の行」だけで、それは**普通の札**として出る。
+     * ⚠ 窓の端は**開始の回まで必ず伸ばす** ── 伸ばさないと
+     *   `@2027-06-01 毎年` が**画面から消える**(繰り返しにした瞬間に
+     *   見えなくなる = 動線を 1 つ削る)。
+     * ⚠ 回の札は**いつも未チェック**にする ── 済んだかどうかは**その回**の
+     *   属性であって、規則の行の印ではない(規則の行に印を付けたら、それは
+     *   「この繰り返しはもう終わり」であって「今日のぶんが済んだ」ではない)。
+     */
+    if (c.repeat !== null) {
+      const ex = expandRepeat({
+        anchor: c.date,
+        unit: c.repeat,
+        until: c.until,
+        from: today,
+        to: horizon < c.date ? c.date : horizon,
+        skip: repeat?.skip?.get(repeatMateKey(c.lid, c.text)),
+      });
+      for (const day of ex.days)
+        put(day, { ...c, key: `${c.key} ${day}`, date: day, until: null, done: false });
       continue;
     }
     /**
@@ -200,12 +265,7 @@ export function buildAgenda(
      *   見つけて **1 枚の DOM を日から日へ動かし、最後の日にしか出ない**。
      */
     const days = c.until === null ? [c.date] : daysOfRange(c.date, c.until);
-    for (const day of days) {
-      const at: AgendaItem = days.length === 1 ? c : { ...c, key: `${c.key} ${day}` };
-      const list = byDate.get(day);
-      if (list === undefined) byDate.set(day, [at]);
-      else list.push(at);
-    }
+    for (const day of days) put(day, days.length === 1 ? c : { ...c, key: `${c.key} ${day}` });
   }
   const groups: AgendaGroup[] = [...byDate.keys()]
     .sort()

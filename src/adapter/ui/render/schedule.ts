@@ -38,6 +38,7 @@ import {
 } from '@features/schedule/agenda';
 import { getMonthGrid, dateKey } from '@features/schedule/month-grid';
 import { TASK_LIMITS, type TaskCard } from '@features/schedule/task-cards';
+import { materializedDates } from '@features/schedule/repeat';
 import { matchesEntry, normalizeQuery } from '@features/filter/title-filter';
 import { createTaskCard, patchTaskCard } from './task-card';
 
@@ -154,7 +155,18 @@ export class ScheduleRenderer {
       notes.push(itemOfNote(m));
     }
     const items = [...visible.map(itemOfCard), ...notes];
-    const groups = buildAgenda(items, today, state.showUndatedTasks);
+    /**
+     * 🔴 **済んだ回は「絞り込む前」の札から拾う**(#344 段②)。
+     *
+     * ⚠ `visible` から拾ってはいけない ── 既定では**済んだ札を隠す**ので、
+     *   実体の行(`- [x] ゴミ出し @2026-08-31`)は消えている。消えたまま渡すと
+     *   **済ませたはずの回がもう一度出る**(しかも押しても「同じ行が既に在る」で
+     *   何も起きないので、user から見ると**壊れて見える**)。
+     * ⚠ 片付けたノートの札も入れる ── 同じ理由(隠れているだけで実体は在る)。
+     */
+    const groups = buildAgenda(items, today, state.showUndatedTasks, {
+      skip: materializedDates(all),
+    });
 
     // 🔑 点は**束から**引く(下の docstring)── 期間の展開を 2 か所で決めない
     this.paintMonth(frame, state, today, groups);

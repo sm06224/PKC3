@@ -15,6 +15,7 @@
  */
 import type { AgendaItem } from '@features/schedule/agenda';
 import { formatListDate } from '@features/datetime/stored-date';
+import { REPEAT_WORDS } from '@features/schedule/repeat';
 
 /**
  * 札の器を作る(中身は `patchTaskCard` が入れる)。
@@ -127,7 +128,7 @@ export function patchTaskCard(
      */
     const till =
       data.until !== null && thisYear !== null ? `〜${formatListDate(data.until, thisYear)}` : '';
-    const label =
+    const head =
       till !== ''
         ? `${day}${till}`
         : data.time === null
@@ -135,6 +136,14 @@ export function patchTaskCard(
           : day === ''
             ? data.time
             : `${day} ${data.time}`;
+    /**
+     * 🔴 **刻みは、日付を出さない面でも出す**(#344 段②)── 期間の終わりと同じ理由。
+     * ⚠ 束の見出しに出ているのは**その日**であって、「これが毎週の回だ」ではない。
+     *   出さないと、user は**押したら何が起きるか**を予測できない
+     *   (押すと規則の行ではなく、その日ぶんの行が増える)。
+     */
+    const every = data.repeat === null ? '' : REPEAT_WORDS[data.repeat];
+    const label = every === '' ? head : head === '' ? every : `${head} ${every}`;
     if (when.textContent !== label) when.textContent = label;
     when.hidden = label === '';
   }
@@ -144,6 +153,23 @@ export function patchTaskCard(
    */
   if (data.until !== null) card.setAttribute('data-pkc-task-range', data.until);
   else card.removeAttribute('data-pkc-task-range');
+  /**
+   * 🔴 **繰り返しの回であることと、「どの回か」を札に焼く**(#344 段②)。
+   *
+   * ⚠ **行番号は焼かない**(2026-08-23 の罠)── 代わりに**日**を焼く。
+   *   押したとき(実体の行を作る)と掴んだとき(断る)に、
+   *   `lid` と行番号だけでは**どの回か決まらない**からである
+   *   (1 本の規則の行が、複数の日に札を出す)。
+   * ⚠ 名前は新しくする ── 既存の `[data-pkc-task-line]` を押す経路に当てない。
+   */
+  if (data.repeat !== null) {
+    card.setAttribute('data-pkc-task-repeat', data.repeat);
+    if (data.date !== null) card.setAttribute('data-pkc-task-date', data.date);
+    else card.removeAttribute('data-pkc-task-date');
+  } else {
+    card.removeAttribute('data-pkc-task-repeat');
+    card.removeAttribute('data-pkc-task-date');
+  }
   const text = card.querySelector('[data-pkc-field="text"]');
   // ⚠ 中身が空の項目もある(`- [ ]` だけの行)── 札は出すが、字は出ない
   if (text && text.textContent !== data.text) text.textContent = data.text;

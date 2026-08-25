@@ -635,6 +635,13 @@ export type UserAction =
    */
   | { type: 'TOGGLE_TASK'; lid: string; line: number }
   /**
+   * 🔴 **繰り返しの「その回」を済ませる**(#344 段②)。
+   * ⚠ `TOGGLE_TASK` と**単位が違う** ── 規則の行の印は動かさず、
+   *   **その日ぶんの行を 1 本増やす**(理由は `body-rewrite.ts` の `repeat-done`)。
+   * ⚠ `line` は**規則の行**、`date` は**押した回の日**である。
+   */
+  | { type: 'MATERIALIZE_REPEAT'; lid: string; line: number; date: string }
+  /**
    * 🔑 **追記**(P8 段⑧)。編集画面を開かずに末尾へ足す。
    * ⚠ `heading` は binder が作って渡す(reducer は純粋のまま ── `Date` を呼ばない)。
    * ノートは `null`(見出しを勝手に足さない)。
@@ -2028,6 +2035,30 @@ function reduceCore(
             archetype: meta.archetype,
             entryOrder: meta.entryOrder,
             rewrite: { kind: 'task', line: action.line },
+          },
+        ],
+      };
+    }
+    /**
+     * 🔴 **繰り返しの回を済ませる**(#344 段②)。⚠ `TOGGLE_TASK` と**同じ形** ──
+     *   書換は 1 本(`REQUEST_BODY_REWRITE`)を通る(§7)。何をするかの判断は
+     *   `body-rewrite.ts` が持ち、ここは**単位を選ぶだけ**である。
+     */
+    case 'MATERIALIZE_REPEAT': {
+      // ready 限定(編集中の裏書換を作らない)。未知 lid は no-op
+      if (state.phase !== 'ready') return { state, events: [] };
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            rewrite: { kind: 'repeat-done', line: action.line, date: action.date },
           },
         ],
       };

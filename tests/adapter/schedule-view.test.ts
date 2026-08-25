@@ -597,3 +597,120 @@ describe('期間(#344 段①)', () => {
     expect(store[TRIP]).toBe('- [ ] 出張\n- [ ] 体裁\n');
   });
 });
+
+/**
+ * 🔴 **繰り返し**(`@2026-08-31 毎週`)── #344 段②。
+ *
+ * ⚠ ここが見るのは**繋がり**である ── 押した 1 手が本文の字まで届くか。
+ *   規則そのものは `tests/features/{repeat,agenda,body-rewrite}.test.ts`。
+ * ⚠ 観測点は**保存された本文**にする(「札が消えた」で止めない ──
+ *   それだと画面だけ動いて本文は元のまま、が緑で通る)。
+ */
+describe('繰り返し(#344 段②)', () => {
+  const BIN = 'e1';
+  // ⚠ TODAY は 2026-08-23(日)── 毎週なので 8/23 / 8/30 / 9/6 … に出る
+  const body = '- [ ] ゴミ出し @2026-08-23 毎週\n';
+
+  it('🔴 1 行の記法が、先の日にも札として出る', () => {
+    const { root } = setup({ [BIN]: body });
+    for (const day of ['2026-08-23', '2026-08-30', '2026-09-06'])
+      expect(cardsOf(root, day), `${day} に札が無い`).toHaveLength(1);
+    // ⚠ 空振り防止 ── 刻みの合わない日には出ない(「全部の日に出す」でも緑にならない)
+    expect(cardsOf(root, '2026-08-24')).toHaveLength(0);
+  });
+
+  it('札に「毎週」が出る(押したら何が起きるか予測できる形にする)', () => {
+    const { root } = setup({ [BIN]: body });
+    const card = cardsOf(root, '2026-08-30')[0]!;
+    expect(card.getAttribute('data-pkc-task-repeat')).toBe('week');
+    expect(card.getAttribute('data-pkc-task-date')).toBe('2026-08-30');
+    expect(card.querySelector('[data-pkc-field="when"]')?.textContent).toBe('毎週');
+  });
+
+  /**
+   * 🔴 **押すと、規則の行ではなく「その日ぶんの行」が増える**。
+   * ⚠ 規則の行の印を押してしまうと**以後の回が全部消える**ので、
+   *   ここは「本文がどう変わったか」を丸ごと見る。
+   */
+  it('🔴 回の印を押すと、その日ぶんの行が本文に増える', async () => {
+    const { root, store } = setup({ [BIN]: body });
+    cardsOf(root, '2026-08-30')[0]!
+      .querySelector<HTMLElement>('[data-pkc-action="toggle-task"]')!
+      .click();
+    await tick(20);
+    expect(store[BIN]).toBe('- [ ] ゴミ出し @2026-08-23 毎週\n- [x] ゴミ出し @2026-08-30\n');
+  });
+
+  /**
+   * 🔴 **済ませた回は、もう一度出ない**(例外日の記法を作らない代わり)。
+   * ⚠ 既定では済んだ札を隠すので、**隠れた実体**を渡し忘れると
+   *   その日に繰り返しの回が戻ってくる ── そこを見る。
+   */
+  it('🔴 済ませた日には、繰り返しの回が戻ってこない', async () => {
+    const { root, store } = setup({ [BIN]: body });
+    cardsOf(root, '2026-08-30')[0]!
+      .querySelector<HTMLElement>('[data-pkc-action="toggle-task"]')!
+      .click();
+    await tick(20);
+    expect(store[BIN], '前提が崩れている(本文が書き替わっていない)').toContain('@2026-08-30');
+    // 🔑 済んだ札は既定で隠れるので、その日は **0 枚**(繰り返しの回が湧かない)
+    expect(cardsOf(root, '2026-08-30')).toHaveLength(0);
+    // ⚠ 対照群 ── 他の回は出たまま(全部消えた、ではない)
+    expect(cardsOf(root, '2026-09-06')).toHaveLength(1);
+  });
+
+  it('🔴 済ませた回は「済んだ予定も出す」で戻り、押せば外れる(片道にしない)', async () => {
+    const { root, q, store } = setup({ [BIN]: body });
+    cardsOf(root, '2026-08-30')[0]!
+      .querySelector<HTMLElement>('[data-pkc-action="toggle-task"]')!
+      .click();
+    await tick(20);
+    q<HTMLElement>('[data-pkc-action="toggle-show-done"]')!.click();
+    await tick();
+    const back = cardsOf(root, '2026-08-30');
+    expect(back, '済んだ回が戻っていない').toHaveLength(1);
+    expect(back[0]!.getAttribute('data-pkc-task-repeat'), '実体の行が繰り返しに見えている').toBe(
+      null,
+    );
+    back[0]!.querySelector<HTMLElement>('[data-pkc-action="toggle-task"]')!.click();
+    await tick(20);
+    expect(store[BIN]).toBe('- [ ] ゴミ出し @2026-08-23 毎週\n- [ ] ゴミ出し @2026-08-30\n');
+  });
+
+  /**
+   * 🔴 **規則の行そのものにチェックを付けると、繰り返しが終わる**。
+   * ⚠ マニュアルにそう書いたので、**書いたことが本当か**をここで見る
+   *   (CLAUDE.md「『これが無いと壊れる』と書く前に、外して壊れるのを見る」の向き)。
+   */
+  it('🔴 規則の行に印が付いていたら、回は 1 つも出ない(繰り返しの終わり)', () => {
+    const { root } = setup({ [BIN]: '- [x] ゴミ出し @2026-08-23 毎週\n' });
+    for (const day of ['2026-08-23', '2026-08-30', '2026-09-06'])
+      expect(cardsOf(root, day), `${day} に札が残っている`).toHaveLength(0);
+  });
+
+  /**
+   * 🔴 **掴んで動かせないことを、断りで伝える**(黙って何もしない、にしない)。
+   * ⚠ 「規則ごとずらす」と「この回だけずらす」の 2 通りが在るので、
+   *   勝手にどちらかを選ぶと**もう片方を頼んだ user の本文が壊れる**。
+   */
+  it('🔴 回を掴んで落とすと、理由を出して本文は変えない', async () => {
+    const { root, q, d, store } = setup({ [BIN]: body });
+    dragTo(cardsOf(root, '2026-08-30')[0]!, q('[data-pkc-drop-date="2026-08-27"]')!);
+    await tick(20);
+    expect(store[BIN], '本文が書き替わっている').toBe(body);
+    // ⚠ 断りは**言葉で**出す ── 黙って何もしないと、user は壊れたと読む
+    expect(d.getState().error).toContain('繰り返しの予定は掴んで動かせません');
+  });
+
+  /**
+   * ⚠ 対照群 ── **同じ操作**が、繰り返しでない札では通る
+   * (「予定の面では掴めない」を直したつもりで、全部塞いでいないこと)。
+   */
+  it('⚠ 対照群 ── 繰り返しでない札は、これまでどおり動く', async () => {
+    const { root, q, d, store } = setup({ [BIN]: '- [ ] 見積 @2026-08-30\n' });
+    dragTo(cardsOf(root, '2026-08-30')[0]!, q('[data-pkc-drop-date="2026-08-27"]')!);
+    await tick(20);
+    expect(store[BIN]).toBe('- [ ] 見積 @2026-08-27\n');
+    expect(d.getState().error, '断っていないのに理由が出ている').toBe(null);
+  });
+});

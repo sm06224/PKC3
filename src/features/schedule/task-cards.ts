@@ -32,6 +32,7 @@
  */
 import { listTaskItems, type TaskItem } from '@features/markdown/task-count';
 import { readLineDate, stripLineDate } from '@features/schedule/line-date';
+import type { RepeatUnit } from '@features/schedule/repeat';
 
 /**
  * 札 1 枚。⚠ **題名は持たない** ── 主スレッドの `entryMetas` に在るので、
@@ -56,6 +57,14 @@ export interface TaskCard extends TaskItem {
    * ⚠ 期間に時刻は無い(`time` は必ず `null`)── 理由は `line-date.ts`。
    */
   readonly until: string | null;
+  /**
+   * 🔴 **刻み**(`@2026-08-31 毎週`)。繰り返しでなければ `null`(#344 段②)。
+   * ⚠ **札 1 枚が「その日の回」になるのは束ねる側**(`buildAgenda`)である ──
+   *   ここは**規則の行**をそのまま運ぶ(展開は窓を知っている側の仕事)。
+   * ⚠ このとき `until` は**期間の終わりではなく繰り返しの終わり**を意味する
+   *   (`repeat.ts` の頭 ── 終了条件の記法を新しく作らない)。
+   */
+  readonly repeat: RepeatUnit | null;
 }
 
 /**
@@ -139,6 +148,7 @@ export function taskCardsOf(lid: string, body: string): TaskCard[] {
       date: when === null ? null : when.date,
       time: when === null ? null : when.time,
       until: when === null ? null : when.until,
+      repeat: when === null ? null : when.repeat,
     };
   });
 }
@@ -201,7 +211,10 @@ function sameCards(a: readonly TaskCard[], b: readonly TaskCard[]): boolean {
       x.time !== y.time ||
       // ⚠ **期間も見る**(#344)── 見ないと、`..` の終わりだけを書き換えたときに
       //    「同じ」と判定され、**画面の期間が古いまま**残る(日付・時刻と同じ穴)
-      x.until !== y.until
+      x.until !== y.until ||
+      // ⚠ **刻みも見る**(#344 段②)── 見ないと「毎週」を消した瞬間に
+      //    **札が繰り返しのまま**残る(消したのに毎週出続ける = 同じ穴)
+      x.repeat !== y.repeat
     )
       return false;
   }
