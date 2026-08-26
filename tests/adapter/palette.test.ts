@@ -14,7 +14,7 @@ import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { Dispatchable } from '../../src/adapter/state/app-state';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
-import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { bindActions, formatTargetOf } from '../../src/adapter/ui/actions/binder';
 import { DIALOG_REGION, resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 import { NOT_READY_PREFIX } from '../../src/features/palette/palette-rows';
 
@@ -272,5 +272,152 @@ describe('操作を名前で探す(#425 段①)', () => {
       await tick();
       expect(sent, '変換中の Enter で実行された').toEqual([]);
     });
+  });
+});
+
+/**
+ * 🔴 **編集中の記法を、パレットから入れる**(#425 段②-b)。
+ *
+ * ⚠ 段②-a で 4 つの記法を鍵にだけ配線したので、パレットには**出るが押せなかった**
+ *   (「いまは押せません」)。⚠ しかも器は modal な `<dialog>` なので、
+ *   **開いた瞬間に編集欄から焦点が外れる** ── だから「いま押せるか」を
+ *   **打つたびに**見ると、常に「押せません」になる。
+ * 🔑 **開いた瞬間の欄を控える**のが直しである。
+ */
+describe('編集中の記法をパレットから入れる(#425 段②-b)', () => {
+  /** 本文の欄を 1 つ作って焦点を当て、範囲を選ぶ。 */
+  function editing(root: HTMLElement, text: string, start: number, end: number) {
+    const ta = document.createElement('textarea');
+    ta.setAttribute('data-pkc-field', 'editor-body');
+    ta.value = text;
+    root.append(ta);
+    ta.focus();
+    ta.setSelectionRange(start, end);
+    return ta;
+  }
+
+  it('🔴 本文の欄に居るときは、記法が「押せる」と出る', async () => {
+    const { root } = setup();
+    editing(root, 'あいうえお', 1, 4);
+    root.querySelector<HTMLElement>('[data-pkc-action="open-palette"]')!.click();
+    await tick();
+    expect(rowOf('format-ruby'), 'ルビの行が出ていない').toBeDefined();
+    expect(whyOf('format-ruby'), '本文の欄に居るのに「押せません」と出ている').not.toContain(
+      NOT_READY_PREFIX,
+    );
+  });
+
+  /**
+   * ⚠ **対照群** ── 欄に居なければ、これまでどおり「押せません」と出る
+   *   (理由つき)。置かないと「常に押せる」実装でも緑になる。
+   */
+  it('⚠ 本文の欄に居なければ、これまでどおり理由が出る', async () => {
+    const { root } = setup();
+    root.querySelector<HTMLElement>('[data-pkc-action="open-palette"]')!.click();
+    await tick();
+    expect(whyOf('format-ruby'), '押せない理由が出ていない').toContain(NOT_READY_PREFIX);
+  });
+
+  /**
+   * 🔴 **選んだら、控えた欄の選んだ範囲に入る**(段②-b の本体)。
+   * ⚠ 器が閉じるとき焦点はこの欄へ返る(`app-dialog` の後始末)── その上で当てる。
+   */
+  it('🔴 選ぶと、控えた欄の選んだ範囲へ記法が入る', async () => {
+    const { root } = setup();
+    const ta = editing(root, 'あいうえお', 1, 4);
+    root.querySelector<HTMLElement>('[data-pkc-action="open-palette"]')!.click();
+    await tick();
+    rowOf('format-highlight')!.click();
+    await tick();
+    await tick();
+    expect(ta.value, '選んだ範囲に入っていない').toBe('あ==いうえ==お');
+  });
+
+  /**
+   * 🔴 **控えた欄が消えていたら、当てずに理由を出す**。
+   * ⚠ 当てにいくと、別の要素は**選択範囲が先頭**なので
+   *   **user が選んでいない所に記法が入る**(本文が静かに壊れる向き)。
+   */
+  it('🔴 欄が消えていたら、当てずに理由を出す(間違った所へ書かない)', async () => {
+    const { root, sent } = setup();
+    const ta = editing(root, 'あいうえお', 1, 4);
+    root.querySelector<HTMLElement>('[data-pkc-action="open-palette"]')!.click();
+    await tick();
+    ta.remove(); // 待っている間に面ごと組み直された形
+    sent.length = 0;
+    rowOf('format-highlight')!.click();
+    await tick();
+    await tick();
+    const failed = sent.find((a) => a.type === 'OP_FAILED');
+    expect(failed, '無言で終えた').toBeDefined();
+    /**
+     * ⚠ **中身まで見る**(2026-08-26 の変異試験 P5 が SURVIVED で教えた)──
+     *   `error: ''` にしても「OP_FAILED が在る」は真なので、**画面には何も出ないのに緑**
+     *   になる。🔑 帯は空文字を出さないので、**それは無言と同じ**である。
+     */
+    const msg = failed?.type === 'OP_FAILED' ? failed.error : '';
+    expect(msg, '断り文が空(画面には何も出ない)').not.toBe('');
+    expect(msg, 'なぜ入らなかったのかが書いていない').toContain('欄');
+    expect(ta.value, '消えた欄へ書き込んだ').toBe('あいうえお');
+  });
+
+  /**
+   * 🔑 **鍵とパレットで同じ形が入る**(§7)── 当て方を写していないことを、
+   *   **出た字を突き合わせて**見る。⚠ 綴りを引き写す test にしない。
+   */
+  it('🔴 鍵で入れた形と、パレットで入れた形が一致する', async () => {
+    const a = setup();
+    const ta1 = editing(a.root, 'あいうえお', 1, 4);
+    a.root.querySelector<HTMLElement>('[data-pkc-action="open-palette"]')!.click();
+    await tick();
+    rowOf('format-ruby')!.click();
+    await tick();
+    await tick();
+    const viaPalette = ta1.value;
+
+    const b = setup();
+    const ta2 = editing(b.root, 'あいうえお', 1, 4);
+    ta2.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        bubbles: true,
+        cancelable: true,
+        key: 'R',
+        code: 'KeyR',
+        altKey: true,
+        shiftKey: true,
+      }),
+    );
+    expect(ta2.value, '鍵で入っていない(前提が崩れている)').not.toBe('あいうえお');
+    expect(viaPalette, '鍵とパレットで入る形が違う').toBe(ta2.value);
+  });
+});
+
+/**
+ * 🔴 **記法を当てられる欄は、名前で決める**(#425 段②-b)。
+ *
+ * ⚠ 「`<textarea>` なら何でも」にすると、**継ぎ足しの欄**(`append-input`)まで
+ *   相手になる ── 鍵の側は相手にしないので、**パレットと鍵で答えが違う**形になる
+ *   (§7)。変異試験 P6 が SURVIVED で教えた。
+ */
+describe('記法を当てられる欄(#425 段②-b)', () => {
+  const ta = (field: string): HTMLTextAreaElement => {
+    const el = document.createElement('textarea');
+    el.setAttribute('data-pkc-field', field);
+    return el;
+  };
+
+  it('🔴 本文の欄(2 列 / 1 面)だけが相手になる', () => {
+    expect(formatTargetOf(ta('editor-body')), '2 列の本文が相手にならない').not.toBeNull();
+    expect(formatTargetOf(ta('row-source')), '1 面の行が相手にならない').not.toBeNull();
+  });
+
+  it('🔴 それ以外の欄は相手にしない(鍵の側と答えを揃える)', () => {
+    expect(formatTargetOf(ta('append-input')), '継ぎ足しの欄まで相手にした').toBeNull();
+    expect(formatTargetOf(ta('entry-filter')), '絞り込みの欄まで相手にした').toBeNull();
+    const input = document.createElement('input');
+    input.setAttribute('data-pkc-field', 'editor-title');
+    expect(formatTargetOf(input), '題名の欄まで相手にした').toBeNull();
+    expect(formatTargetOf(null)).toBeNull();
+    expect(formatTargetOf(document.createElement('div'))).toBeNull();
   });
 });

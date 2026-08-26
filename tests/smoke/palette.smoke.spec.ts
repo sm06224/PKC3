@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { clickReal, collectPageErrors, gotoApp } from './helpers';
+import { clickReal, collectPageErrors, createEntry, gotoApp, useSplitEditor } from './helpers';
 
 /**
  * 🔴 **操作を名前で探す**(#425 段①)。
@@ -83,6 +83,65 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
     page.locator('[data-pkc-region="detail"]'),
     '閉じた後に鍵が死んでいる(焦点が返っていない)',
   ).toBeVisible();
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **編集中の記法をパレットから入れる**(#425 段②-b)。
+ *
+ * 🔴 **unit では原理的に届かない層**:
+ * 1. 器は本物の **`<dialog showModal()`** ── **開いた瞬間に編集欄から焦点が外れ**、
+ *    閉じるときに**返る**。この往復が本当に起きるかは実機でしか見えない
+ * 2. 🔑 **選択範囲が焦点を失っている間も残るか** ── 残らなければ
+ *    「選んだ所ではない所」に記法が入る。⚠ **推測せず、ここで測る**
+ *    (2026-08-26 の実測: 開く前 1-4 → 開いている間 1-4 → 閉じた後 1-4)
+ */
+test('🔴 選んでからパレットで記法を入れると、選んだ範囲に入る (#425 段②-b)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await useSplitEditor(page);
+  await gotoApp(page);
+
+  await createEntry(page, 'text');
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await ta.fill('あいうえお');
+  await ta.click();
+  // 「いうえ」を選ぶ
+  await ta.evaluate((el) => {
+    (el as HTMLTextAreaElement).setSelectionRange(1, 4);
+  });
+
+  const dialog = page.locator('[data-pkc-region="app-dialog"]');
+  const filter = page.locator('[data-pkc-field="palette-filter"]');
+
+  await page.keyboard.press('Control+Shift+P');
+  await expect(dialog, '編集中に開けない').toBeVisible();
+
+  // 🔴 **「押せません」と出ないこと** ── 段②-a まではここで止まっていた
+  await filter.fill('ハイライト');
+  const first = page.locator('[data-pkc-field="palette-row"]').first();
+  await expect(first, '一覧に出ていない').toBeVisible();
+  await expect(
+    first.locator('[data-pkc-field="palette-why"]'),
+    '本文の欄に居るのに「押せません」と出ている',
+  ).not.toContainText('いまは押せません');
+
+  await page.keyboard.press('Enter');
+  await expect(dialog, '選んでも閉じない').toBeHidden();
+
+  // 🔴 **選んだ範囲に入っている**(先頭でも末尾でもない)
+  await expect(ta, '選んだ範囲に入っていない').toHaveValue('あ==いうえ==お');
+
+  /**
+   * 🔑 **続けて打てる** ── 焦点が返っていなければ、次の字は本文に入らない。
+   * ⚠ 「入った」だけを見て終えると、**打てなくなっているのに緑**になる
+   *   (CLAUDE.md §10 ── 器が「ついでに」返していた性質)。
+   */
+  await page.keyboard.type('か');
+  await expect(ta, '閉じた後に焦点が返っていない').toHaveValue(/か/);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
