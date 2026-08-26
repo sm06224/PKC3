@@ -36,7 +36,8 @@ import {
   pushSelection,
   type SelectionHistory,
 } from '@features/nav/selection-history';
-import { filerRows, rangeInRows } from '@features/relation/filer-list';
+import { filerRows, rangeInRows, smartLidsOf } from '@features/relation/filer-list';
+import { SMART_ARCHETYPE } from '@features/smart/smart-spec';
 import {
   initialDual,
   paneOf,
@@ -60,6 +61,24 @@ import {
   type DualSide,
   type DualState,
 } from '@features/relation/dual-pane';
+
+/**
+ * 🔴 **スマートフォルダ 1 つぶんの当たり**(#421 段①)。
+ * ⚠ `total` は**上限で切る前**の数 ── 黙って切ると user は「これで全部」と読む。
+ * ⚠ `failed` は「この版では集められない」(旧い worker が残っている端末)。
+ */
+export interface SmartHitState {
+  readonly lids: readonly string[];
+  readonly total: number;
+  readonly failed: boolean;
+  /**
+   * 🔑 **集めたときに効いていた条件**。⚠ 画面に「何で絞っているか」を出すために
+   *   持つ ── 本文をもう一度読みに行かないで済む(reducer も描く側も本文を持たない)。
+   * ⚠ **書き込みの判断には使わない**(本文を直に書き換えられると古くなる)──
+   *   落としたときのタグは effect が**その場で本文から読む**。
+   */
+  readonly tags: readonly string[];
+}
 
 export type AppPhase = 'initializing' | 'ready' | 'editing' | 'error';
 /**
@@ -223,15 +242,37 @@ function dualPreviewTarget(state: AppState, dual: DualState): string | null {
  *   「読み直すか」を書くと、**ある経路だけ前の行の本文を映し続ける**
  *   (CLAUDE.md §7「同じ判定が複数の場所にある」)。
  */
+/**
+ * 🔴 **その場所がスマートフォルダなら、集め直しを頼む**(#421 段①)。
+ *
+ * ⚠ 判定はここ 1 か所 ── 左の列も 2 ペインの左右も、場所が変わる経路は
+ *   いくつもある。呼び手ごとに書くと**ある経路だけ集め直さない**
+ *   (症状は「押したのに前の並びのまま」という、いちばん気づけない形)。
+ */
+function smartScanFor(state: AppState, lid: string | null): DomainEvent[] {
+  if (lid === null) return [];
+  if (state.entryMetas.get(lid)?.archetype !== SMART_ARCHETYPE) return [];
+  return [{ type: 'REQUEST_SMART_SCAN', lid }];
+}
+
 function withDual(state: AppState, dual: DualState): ReduceResult {
   /**
    * ⚠ **何も変わらないなら state ごと同じものを返す** ── 新しい object を返すと、
    *   「押しても何も変わらない」場面で**面が毎回組み直る**(この面の門は
    *   `state.dual` の参照 1 本で変化を見ているので、参照が変われば必ず描き直す)。
    */
+  /**
+   * ⚠ **場所が変わった側だけ**集め直しを頼む(#421 段①)── 毎回頼むと、
+   *   カーソルを 1 行送るたびに全件走査が走る。
+   */
+  const scans: DomainEvent[] = [];
+  for (const side of ['left', 'right'] as const) {
+    const to = paneScope(paneOf(dual, side));
+    if (to !== paneScope(paneOf(state.dual, side))) scans.push(...smartScanFor(state, to));
+  }
   const done = (next: DualState, events: DomainEvent[] = []): ReduceResult => ({
     state: next === state.dual ? state : { ...state, dual: next },
-    events,
+    events: [...scans, ...events],
   });
   const target = dualPreviewTarget(state, dual);
   if (!dual.previewOn || target === null)
@@ -474,6 +515,16 @@ export interface AppState {
    * ⚠ 束ねる key(`queryKey`)は**端末の設定**として覚える(ペインの開閉と同じ流儀)──
    * container には書かない。「どの列で見ていたか」は文書の性質ではなく作業の都合である。
    */
+  /**
+   * 🔴 **スマートフォルダの当たり**(#421 段①)。lid → 集めた結果。
+   *
+   * ⚠ **表 1 つで左の列も 2 ペインも読む** ── 同じスマートフォルダを 3 か所で
+   *   開きうるので、面ごとに持つと**同じ問いに答える口が 3 つ**になる(§7)。
+   *   鍵をスマートフォルダの lid にしておけば、走査は 1 回で済む。
+   * ⚠ **入っていない = まだ集めていない**(0 件ではない)── 画面は
+   *   「集めています…」と出す。⚠ `failed` は「この版では集められない」。
+   */
+  smartHits: ReadonlyMap<string, SmartHitState>;
   queryKey: string | null;
   queryKeys: QueryKeys | null;
   queryGroups: QueryGroups | null;
@@ -632,6 +683,7 @@ export const initialState: AppState = {
   entrySortDesc: NATURAL_DESC[DEFAULT_ENTRY_SORT],
   searchHitsQuery: '',
   queryKey: null,
+  smartHits: new Map<string, SmartHitState>(),
   queryKeys: null,
   queryGroups: null,
   queryFailed: false,
@@ -997,7 +1049,32 @@ export type UserAction =
   /** 🔴 **下見の出し入れ**(#273 残件)。 */
   | { type: 'DUAL_SET_PREVIEW'; on: boolean }
   /** 下見の本文が届いた。⚠ **lid つき**(追い越しを捨てるため)。 */
-  | { type: 'DUAL_PREVIEW_LOADED'; lid: string; body: string };
+  | { type: 'DUAL_PREVIEW_LOADED'; lid: string; body: string }
+  /** 🔴 **スマートフォルダの当たりが届いた**(#421 段①)。 */
+  | {
+      type: 'SMART_SCANNED';
+      lid: string;
+      lids: readonly string[];
+      total: number;
+      tags: readonly string[];
+    }
+  | { type: 'SMART_SCAN_FAILED'; lid: string }
+  /**
+   * 🔴 **スマートフォルダへ入れる / から外す**(#421 段①。user 裁定 2026-08-26)。
+   * ⚠ **条件のタグを本文へ書く**のが実体である ── 入れ物に「入れた」のではなく、
+   *   条件に合う形へ本文が変わるから、次に集めたときに当たる。
+   */
+  | { type: 'SMART_TAGS'; smartLid: string; lids: readonly string[]; mode: 'add' | 'remove' }
+  /**
+   * 🔴 **スマートフォルダの条件そのものを足す / 外す**(#421 段①)。
+   * ⚠ 書くのは**その入れ物の本文の frontmatter**(`smart-tags:`)である。
+   */
+  | { type: 'SMART_COND'; lid: string; tag: string; mode: 'add' | 'remove' }
+  /**
+   * 🔴 **集め直す**(#421 段①)。⚠ 条件やタグを書き換えた**後**に撃つ ──
+   * 書込と同じ列に並ぶので、古い本文で集めることはない。
+   */
+  | { type: 'SMART_RESCAN'; lid: string };
 
 export type SystemCommand =
   | { type: 'SYS_BOOTED'; cid: string; metas: EntryMeta[]; relations: Relation[] }
@@ -1129,6 +1206,39 @@ export type DomainEvent =
    *   別経路で読むと、並んでいる書込を追い越す(2026-08-17 に踏んだ形)。
    */
   | { type: 'REQUEST_DUAL_PREVIEW'; lid: string }
+  /**
+   * 🔴 **スマートフォルダの中身を集める**(#421 段①)。
+   *
+   * ⚠ **条件は載せない** ── reducer は**本文を持っていない**
+   *   (`entryMetas` は「body の不在は意図的」と宣言している)。だから条件を
+   *   読むのは effect 層である:`getBody` → `readSmartSpec` → `smartScan`。
+   * 🔑 読む口は `readSmartSpec` **1 本**なので、§7 は破れない。
+   * ⚠ **開くたびに頼む** ── 鮮度は「開いた時点」である。憶えて使い回すと、
+   *   別の面でタグを付けた直後に**古い並び**が出る。
+   */
+  | { type: 'REQUEST_SMART_SCAN'; lid: string }
+  /**
+   * 🔴 **スマートフォルダの条件のタグを、選んだノートへ足す / 外す**(#421 段①)。
+   * ⚠ 条件は effect が**その場で本文から読む** ── 憶えている値で書くと、
+   *   本文を直に書き換えた直後に**違うタグ**を付ける。
+   */
+  /**
+   * 🔴 **スマートフォルダの条件を本文へ書く**(#421 段①)。
+   * ⚠ 行の材料(題名・種別・並び)を**ここで確定して運ぶ** ── effect が実行時に
+   *   引き直すと、その間の改名を踏む(`PERSIST_ENTRY` と同じ規律)。
+   */
+  | {
+      type: 'REQUEST_SMART_COND';
+      target: { lid: string; title: string; archetype: string; entryOrder: number };
+      tag: string;
+      mode: 'add' | 'remove';
+    }
+  | {
+      type: 'REQUEST_SMART_TAGS';
+      smartLid: string;
+      lids: readonly string[];
+      mode: 'add' | 'remove';
+    }
   /** 🔴 このノートを参照しているノートを引く(#348)。 */
   | { type: 'REQUEST_BACKLINKS'; lid: string }
   /**
@@ -2617,6 +2727,7 @@ function reduceCore(
        * 規則は `filerRows` 1 か所(描く側と同じ関数)。
        */
       const rows = filerRows(state.scopeLid, state.entryMetas, state.relations, {
+        smartLids: smartLidsOf(state.scopeLid, state.smartHits),
         filterQuery: state.filterQuery,
         searchHits: state.searchHits,
         sort: state.entrySort,
@@ -2631,6 +2742,7 @@ function reduceCore(
       if (state.phase !== 'ready') return { state, events: [] };
       // ⚠ 規則は `filerRows` 1 か所(描く側・範囲選択と同じ答えになる)
       const rows = filerRows(state.scopeLid, state.entryMetas, state.relations, {
+        smartLids: smartLidsOf(state.scopeLid, state.smartHits),
         filterQuery: state.filterQuery,
         searchHits: state.searchHits,
         sort: state.entrySort,
@@ -2665,7 +2777,8 @@ function reduceCore(
        */
       return {
         state: { ...state, scopeLid: action.lid, selection: [], selectionAnchor: null },
-        events: [],
+        // 🔑 入った先がスマートフォルダなら集め直す(判定は `smartScanFor` 1 か所)
+        events: smartScanFor(state, action.lid),
       };
     }
     case 'DESELECT_ENTRY': {
@@ -3209,6 +3322,7 @@ function reduceCore(
        * ⚠ ここで並びを組み直すと、目で見た範囲と選ばれる範囲が食い違う。
        */
       const rows = filerRows(paneScope(pane), state.entryMetas, state.relations, {
+        smartLids: smartLidsOf(paneScope(pane), state.smartHits),
         // 🔑 **絞り込みの規則は 1 本**(`paneFilterOptions`)── 描く側と同じものを見る
         ...paneFilterOptions(pane, state.filterQuery, state.searchHits),
         sort: state.entrySort,
@@ -3323,6 +3437,84 @@ function reduceCore(
        */
       return withDual(state, { ...state.dual, previewOn: action.on, preview: null });
     }
+    /**
+     * 🔴 **スマートフォルダの当たりが届いた**(#421 段①)。
+     * ⚠ **lid で入れ物を分ける** ── 同じ表に複数のスマートフォルダの結果が
+     *   入る(左と右で別々のものを開ける)ので、上書きにすると片方が消える。
+     */
+    case 'SMART_SCANNED': {
+      const next = new Map(state.smartHits);
+      next.set(action.lid, {
+        lids: [...action.lids],
+        total: action.total,
+        failed: false,
+        tags: [...action.tags],
+      });
+      return { state: { ...state, smartHits: next }, events: [] };
+    }
+    /**
+     * ⚠ **黙って空にしない** ── 「集められない」と「0 件」は別の話である
+     *   (旧い worker が service worker のキャッシュに残っている端末で起きる)。
+     */
+    case 'SMART_SCAN_FAILED': {
+      const next = new Map(state.smartHits);
+      // ⚠ 条件は**そのまま残す**(集められなかっただけで、条件は在る)
+      next.set(action.lid, {
+        lids: [],
+        total: 0,
+        failed: true,
+        tags: state.smartHits.get(action.lid)?.tags ?? [],
+      });
+      return { state: { ...state, smartHits: next }, events: [] };
+    }
+    /**
+     * 🔴 **落としたら条件のタグが付く / 外すと外れる**(#421 段①)。
+     *
+     * ⚠ **条件はここで読めない**(reducer は本文を持たない)ので、読むのは effect。
+     * 🔑 書くのは**既にある口**(`BULK_TAG` → `REQUEST_BULK_TAG`)── タグを本文へ
+     *   書く規則を 2 つ作らない(§7)。
+     */
+    case 'SMART_TAGS': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      const lids = action.lids.filter((lid) => state.entryMetas.has(lid));
+      if (lids.length === 0) return { state, events: [] };
+      if (!state.entryMetas.has(action.smartLid)) return { state, events: [] };
+      return {
+        state,
+        events: [
+          { type: 'REQUEST_SMART_TAGS', smartLid: action.smartLid, lids, mode: action.mode },
+        ],
+      };
+    }
+    /**
+     * 🔴 **条件を書き換える**(#421 段①)。書き終えたら**集め直す** ── そこまでが
+     * 1 つの操作である(条件だけ変わって並びが古いままだと、user は「効いていない」
+     * と読む)。⚠ 集め直しは effect が書込の後に頼む(順番が要る)。
+     */
+    case 'SMART_COND': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      if (action.tag.trim() === '') return { state, events: [] };
+      const meta = state.entryMetas.get(action.lid);
+      if (meta === undefined || meta.archetype !== SMART_ARCHETYPE) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_SMART_COND',
+            target: {
+              lid: meta.lid,
+              title: meta.title,
+              archetype: meta.archetype,
+              entryOrder: meta.entryOrder,
+            },
+            tag: action.tag,
+            mode: action.mode,
+          },
+        ],
+      };
+    }
+    case 'SMART_RESCAN':
+      return { state, events: smartScanFor(state, action.lid) };
     case 'DUAL_PREVIEW_LOADED': {
       /**
        * ⚠ **追い越しを捨てる**(#273 残件)── 読みは非同期なので、送った先の行を

@@ -90,6 +90,18 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-26-smart-folder',
+    title: 'スマートフォルダ ── 条件に合うノートが自動で集まります',
+    items: [
+      '「新規」の種類に スマート が増えました。作ってフォルダタブで 2 回押すと中へ入れます。',
+      '一覧の上に出る条件の帯で、タグを入れて「条件に足す」を押すと、そのタグが付いたノートが、どのフォルダに在っても集まります。',
+      'ノートは動きません。散らばったまま、1 か所から見えるようになります(同じノートが複数のスマートフォルダに出ます)。',
+      'ノートを掴んでスマートフォルダの行に落とすと、そのノートに条件のタグが付きます。中で選んで「ここから外す」を押すと外れます。',
+      '条件を 2 つ以上足すと、全部付いているノートだけが集まります。条件が空のうちは何も集めません。',
+      '条件は本文の先頭に smart-tags: の形で書かれます。書き出しや取り込みに一緒に付いていきます。',
+    ],
+  },
+  {
     id: '2026-08-25-dual-place-tools',
     title: '2 ペインで整理するとき、場所を扱う道具が増えました',
     items: [
@@ -290,20 +302,11 @@ export const NOTICES: readonly Notice[] = [
       '入れ直すまでは、これまでどおり開いた時点で「保存できません」の断りが出ます。',
     ],
   },
-  {
-    id: '2026-08-24-dual-new-note',
-    title: '2 ペインで整理しながら、その場でノートを作れます',
-    items: [
-      '2 ペインで整理の画面に「ノート」が増えました。いま開いている場所に、新しいノートを作ります。鍵は Shift + F4 です。',
-      'これまではフォルダしか作れず、1 枚メモを置くために左の一覧へ戻って作り、開き直して移す必要がありました。',
-      '作っても本文の面へは移りません。その場に出るので、整理を続けられます。名前は F2 でその場で打ち替えられます。',
-    ],
-  },
 ];
 
 /**
  * ⚠ **落としたぶんの原本は CHANGELOG に在る**(上限 20 件を超えたので、古いほうから
  *   `2026-08-16-office-save-to-pkc` / `2026-08-17-office-save-same-note`(2026-08-19)、
  *   `2026-08-19-dual-pane-app`(2026-08-22)、
- *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice` / `2026-08-24-pptx-export` / `2026-08-24-paste-permalink` / `2026-08-24-markdown-to-pandoc` / `2026-08-24-schedule-range`(2026-08-25)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
+ *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice` / `2026-08-24-pptx-export` / `2026-08-24-paste-permalink` / `2026-08-24-markdown-to-pandoc` / `2026-08-24-schedule-range`(2026-08-25)、`2026-08-24-dual-new-note`(2026-08-26)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
  */

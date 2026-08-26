@@ -21,6 +21,7 @@ import type { EntryMeta, Relation } from '@core/model/entry-meta';
 
 // ⚠ 正本は `kinds.ts` ── ここで文字列を書き直さない(#185 で 3 か所から寄せた)
 import { STRUCTURAL } from './kinds';
+import { SMART_ARCHETYPE } from '@features/smart/smart-spec';
 
 /** child lid → 正準親 lid。規約外の辺(非 folder 親 / 不在親 / 自己辺)は無視。 */
 export function resolveCanonicalParents(
@@ -149,6 +150,18 @@ export function getAncestorFolders(
  * folder、無ければ null(= root)。PKC2 resolveFilerScope と同じ意味論。
  * subset profile(表示レンズ、curation 用)を導入する場合はこの解決点が seam。
  */
+/**
+ * 🔴 **押して「中へ入れる」入れ物か**(#421 段①)。⚠ 判定はここ 1 か所 ──
+ * 入る口は **3 つ**(左の列の 2 クリック / `Enter` / 2 ペインの `Enter`)あり、
+ * 書き忘れた口だけ**押しても何も起きない**(この repo が何度も直した dead click)。
+ *
+ * ⚠ **「親になれるか」とは別の問い**である ── スマートフォルダは中へ入れるが、
+ *   **手で子を入れることはできない**(中身は条件で決まる)。だから
+ *   「作る先」「移す先」の判定にこれを使ってはいけない。
+ */
+export const canEnterScope = (archetype: string | undefined): boolean =>
+  archetype === 'folder' || archetype === SMART_ARCHETYPE;
+
 export function resolveFilerScope(
   selectedLid: string | null,
   metas: ReadonlyMap<string, EntryMeta>,

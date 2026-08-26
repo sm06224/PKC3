@@ -130,6 +130,16 @@ export type StorageRequest =
    */
   | { op: 'queryScan'; cid: string; key?: string }
   /**
+   * 🔴 **スマートフォルダの中身を集める**(#421 段①)。
+   *
+   * ⚠ **走査は集計と同じ型** ── 本文の**先頭だけ**を 500 件ずつ舐め、
+   * 主スレッドへ返すのは **lid だけ**である(不可侵指示「ゼロコピー」)。
+   * ⚠ **条件は worker では解釈しない** ── 当て方の規則は
+   * `features/smart/smart-spec.ts` が 1 か所で持つ(worker は渡すだけ)。
+   * ⚠ `lid` は**そのスマートフォルダ自身** ── 自分を当たりに含めないために要る。
+   */
+  | { op: 'smartScan'; cid: string; lid: string; tags: readonly string[] }
+  /**
    * 本文を **まとめて** 取る(P6d ── 書出し用)。
    *
    * ⚠ `getBody` を N 回呼ぶと 5000 entry の書出しが 5000 往復になる。
@@ -563,6 +573,11 @@ export interface ResultMap {
    * ⚠ `groups` は key を渡していないとき `null`(0 組ではない)。
    */
   queryScan: { keys: QueryKeyResult; groups: QueryGroupResult | null };
+  /**
+   * スマートフォルダの当たり(#421 段①)。
+   * ⚠ `total` は**上限で切る前**の数 ── 黙って切ると user は「これで全部」と読む。
+   */
+  smartScan: { lids: string[]; total: number };
   /**
    * `done` = これ以上ない。`rows` は `entry_order, lid` 順(並びの正本)。
    * `next` = 続きのカーソル(呼び出し側はこれをそのまま渡す ── 自分で組まない)。

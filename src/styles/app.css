@@ -561,6 +561,12 @@ select:focus-visible {
 [data-pkc-chip='folder'] {
   color: color-mix(in oklab, var(--fg) 20%, #c39312);
 }
+/* 🔴 **スマートフォルダ**(#421 段①)── フォルダと**同系だが別の色**にする。
+ * ⚠ 同じ色だと、消せない / 移せない / 中身が勝手に変わる入れ物が
+ *   ふつうのフォルダに見える(user は「壊れている」と読む)。 */
+[data-pkc-chip='smart'] {
+  color: color-mix(in oklab, var(--fg) 20%, #c26a12);
+}
 [data-pkc-chip='attachment'] {
   color: color-mix(in oklab, var(--fg) 25%, #7a5ac2);
 }

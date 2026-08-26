@@ -45,6 +45,7 @@ import {
   type TaskScan,
 } from '@features/schedule/task-cards';
 import { createQueryScan, FRONTMATTER_SCAN_CHARS } from '@features/query/group-by';
+import { createSmartScan } from '@features/smart/smart-spec';
 import {
   applyLinePatch,
   diffLines,
@@ -566,6 +567,43 @@ function runQueryScan(cid: string, key: string | null): {
     if (rows.length < QUERY_SCAN_CHUNK) break;
   }
   return scan.finish();
+}
+
+/**
+ * 🔴 **スマートフォルダの中身を 1 回の走査で集める**(#421 段①)。
+ *
+ * ⚠ **集計(`runQueryScan`)と同じ型**である ── 読むのは本文の**先頭だけ**、
+ *   窓は features 側が cap から導く(`FRONTMATTER_SCAN_CHARS`)。
+ * ⚠ **当て方はここに書かない** ── AND / 大小無視 / 上限 / 自分を除く の規則は
+ *   `features/smart/smart-spec.ts` が 1 か所で持つ(worker は流すだけ)。
+ */
+function runSmartScan(cid: string, lid: string, tags: readonly string[]): {
+  lids: string[];
+  total: number;
+} {
+  const database = need();
+  const scan = createSmartScan({ tags }, lid);
+  let after: { entryOrder: number; lid: string } | undefined;
+  for (;;) {
+    const rows = database.selectObjects(
+      after === undefined
+        ? `SELECT lid, entry_order, substr(body, 1, ?) AS head FROM entries WHERE cid = ?
+             ORDER BY entry_order, lid LIMIT ?`
+        : `SELECT lid, entry_order, substr(body, 1, ?) AS head FROM entries
+            WHERE cid = ? AND (entry_order > ? OR (entry_order = ? AND lid > ?))
+            ORDER BY entry_order, lid LIMIT ?`,
+      after === undefined
+        ? [FRONTMATTER_SCAN_CHARS, cid, QUERY_SCAN_CHUNK]
+        : [FRONTMATTER_SCAN_CHARS, cid, after.entryOrder, after.entryOrder, after.lid, QUERY_SCAN_CHUNK],
+    ) as unknown as Array<{ lid: string; entry_order: number; head: string | null }>;
+    if (rows.length === 0) break;
+    scan.feed(rows.map((r) => ({ lid: r.lid, head: r.head ?? '' })));
+    const last = rows[rows.length - 1]!;
+    after = { entryOrder: last.entry_order, lid: last.lid };
+    if (rows.length < QUERY_SCAN_CHUNK) break;
+  }
+  const out = scan.finish();
+  return { lids: [...out.lids], total: out.total };
 }
 
 /**
@@ -1509,6 +1547,7 @@ const handlers: Handlers = {
    */
   queryScan: (req) =>
     runQueryScan(req.cid, req.key ?? null) as ResultMap['queryScan'],
+  smartScan: (req) => runSmartScan(req.cid, req.lid, req.tags),
   listBodies: (req) => {
     // 🔴 **カーソルは ORDER BY と同じ複合キー**。`entry_order > ?` だけだと
     // 境界の順序値を共有する行が全部飛ぶ(entry_order に UNIQUE は無い)。

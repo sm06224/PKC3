@@ -102,6 +102,11 @@ const CREATE_BUTTONS: readonly { archetype: string; label: string }[] = [
   { archetype: 'textlog', label: 'ログ' },
   { archetype: 'spreadsheet', label: '表' },
   { archetype: 'folder', label: 'フォルダ' },
+  /**
+   * 🔴 **条件に合うノートが自動で集まる入れ物**(#421 段①。user 要望 2026-08-26)。
+   * ⚠ フォルダの**隣**に置く ── 探すときに 2 か所を見ないで済む。
+   */
+  { archetype: 'smart', label: 'スマート' },
   // 🔴 **雛形**(#196 / B-2)── 作れないと user は自分の雛形を持てない
   { archetype: 'snippet', label: '雛形' },
   { archetype: 'todo', label: 'Todo' },

@@ -28,6 +28,7 @@ import { openableViewNames } from '../src/adapter/platform/deep-link';
 import { NOTICES, NOTICE_KEEP_MAX } from '../src/features/notice/notice-log';
 import { MAX_TABS } from '../src/features/relation/dual-pane';
 import { RELATION_KINDS } from '../src/features/relation/kinds';
+import { MAX_SMART_TAGS, smartCondError } from '../src/features/smart/smart-spec';
 import { MARKDOWN_EXTENSIONS } from '../src/features/import/plain-markdown';
 import { REVISION_KEEP_LATEST } from '../src/adapter/platform/storage/store-port';
 import { THEMES } from '../src/adapter/ui/render/theme';
@@ -103,7 +104,7 @@ const EXPECTED_LABELS = {
    * 種類の一覧(分割ボタンの ▼ の中)。⚠ **等値**で見る ── 封印中のものが
    * 混ざったら落ちる(封印の pin と二重に効く)。
    */
-  'pick-create-kind': ['ノート', 'ログ', '表', 'フォルダ', '雛形'],
+  'pick-create-kind': ['ノート', 'ログ', '表', 'フォルダ', 'スマート', '雛形'],
   // ⚠ **アプリ全体**のものだけ(P8 段⑤。P10 で上の帯は撤去され、左の列の下へ)
   //    フラグは P11 で追加 ── 設定(user 開放)とは**別の面**にする(user 裁定 2026-08-07)
   // ⚠ 集計(#184)は**一番上** ── 日々使う面を、困ったときに見る面より手前に置く
@@ -123,7 +124,7 @@ const EXPECTED_LABELS = {
  * ボタンだけ見ていると、種類の改名がマニュアルとずれても気づかない。
  */
 const EXPECTED_OPTIONS = {
-  'create-kind': ['ノート', 'ログ', '表', 'フォルダ', '雛形'],
+  'create-kind': ['ノート', 'ログ', '表', 'フォルダ', 'スマート', '雛形'],
 } as const;
 
 describe('マニュアルと実装の突合', () => {
@@ -998,6 +999,8 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    // ⚠ 上限 20 を超えたので 2026-08-26 に落とした(原本は CHANGELOG)
+    '2 ペインで整理しながら、その場でノートを作れます',
     // ⚠ 上限 20 を超えたので 2026-08-25 に落とした(原本は CHANGELOG)
     '何日かにまたがる予定を書けるようになりました',
     // ⚠ 上限 20 を超えたので 2026-08-25 に落とした(原本は CHANGELOG)
@@ -1165,5 +1168,28 @@ describe('近道の押し先が画面に在る', () => {
     for (const m of rows) {
       expect(m[2], `${m[1]} の呼び名がマニュアルと食い違う`).toBe(viewModeLabel(m[1] as ViewMode));
     }
+  });
+
+  /**
+   * 🔴 **数はコードから引く**(#421 段①。CLAUDE.md §7)。
+   *
+   * ⚠ マニュアルに「8 つまで」と**書き写した**時点で、同じ値が 2 か所に在る ──
+   *   `MAX_SMART_TAGS` を動かしても doc は黙って古いままで、user は
+   *   **在りもしない上限**を読むことになる。
+   * 🔑 見るのは**断り文そのもの**(`smartCondError`)── 製品が画面に出す字と
+   *   マニュアルが約束する数を、同じ 1 か所から引かせる。
+   */
+  it('🔴 マニュアルの「条件は N つまで」が、実装の上限と一致する', () => {
+    const manual = readFileSync('docs/manual.md', 'utf-8');
+    const at = manual.indexOf('### スマートフォルダ');
+    expect(at, 'マニュアルにスマートフォルダの節が無い').toBeGreaterThan(-1);
+    const section = manual.slice(at, manual.indexOf('\n### ', at + 1));
+    const m = /条件は \*\*(\d+) つまで\*\*/.exec(section);
+    expect(m, 'マニュアルが条件の上限を書いていない').not.toBeNull();
+    expect(m?.[1], 'マニュアルの上限が実装と食い違う').toBe(String(MAX_SMART_TAGS));
+    // 🔑 画面に出る断り文も同じ数から作る(user が読む字と doc を割らない)
+    expect(smartCondError('limit'), '断り文が上限を言っていない').toContain(
+      String(MAX_SMART_TAGS),
+    );
   });
 });

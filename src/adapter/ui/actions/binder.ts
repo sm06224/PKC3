@@ -21,7 +21,12 @@ import { renumberLists } from '@features/markdown/list-renumber';
 import { stripDialect } from '@features/markdown/strip-dialect';
 import { isViewMode, nextViewMode, type AppState, type ViewMode } from '@adapter/state/app-state';
 import type { EntryMeta } from '@core/model/entry-meta';
-import { filerRows, operationTargets, visibleSelection } from '@features/relation/filer-list';
+import {
+  filerRows,
+  operationTargets,
+  smartLidsOf,
+  visibleSelection,
+} from '@features/relation/filer-list';
 import { archetypeLabel } from '@adapter/ui/render/sidebar';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
 import { insertText } from '@adapter/ui/render/row-swap';
@@ -55,7 +60,7 @@ import { normalizeTag } from '@features/flavor/tags';
 import { isEntrySort, NATURAL_DESC } from '@features/filter/entry-sort';
 import { isPaneId, PANES } from '@features/pane-visibility';
 import { STRUCTURAL, isRelationKind } from '@features/relation/kinds';
-import { getAncestorFolders } from '@features/relation/tree';
+import { canEnterScope, getAncestorFolders } from '@features/relation/tree';
 import { planCopy } from '@features/relation/copy-plan';
 import {
   otherSide,
@@ -114,6 +119,7 @@ export function generateLid(): string {
  */
 const visibleFilerRows = (st: AppState): EntryMeta[] =>
   filerRows(st.scopeLid, st.entryMetas, st.relations, {
+    smartLids: smartLidsOf(st.scopeLid, st.smartHits),
     filterQuery: st.filterQuery,
     searchHits: st.searchHits,
     sort: st.entrySort,
@@ -161,6 +167,7 @@ const dualSide = (target: HTMLElement): DualSide | null => {
 const dualPaneRows = (st: AppState, side: DualSide): EntryMeta[] => {
   const pane = paneOf(st.dual, side);
   return filerRows(paneScope(pane), st.entryMetas, st.relations, {
+    smartLids: smartLidsOf(paneScope(pane), st.smartHits),
     ...paneFilterOptions(pane, st.filterQuery, st.searchHits),
     sort: st.entrySort,
     sortDesc: st.entrySortDesc,
@@ -716,6 +723,10 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   // ⚠ 選んだ全部の本文を書く(#402 ①)── 取込・書出しの最中に走らせない
   'bulk-tag-add',
   'bulk-tag-remove',
+  // 🔑 スマートフォルダの条件と出し入れも**本文を書く**(#421 段①)
+  'smart-cond-add',
+  'smart-cond-remove',
+  'smart-evict',
   // ⚠ 追記と**同じ経路**(`REQUEST_BODY_REWRITE`)を撃つので、同じ門をくぐらせる
   'undo-append',
   'toggle-todo',
@@ -1393,6 +1404,52 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   揃えないと「3 件を選んでいます」と出して 5 件に書く形になる。
    * ⚠ 空のタグでは撃たない ── 押しても何も起きない代わりに**理由を出す**。
    */
+  /**
+   * 🔴 **スマートフォルダの条件を足す / 外す**(#421 段①)。
+   *
+   * ⚠ 書くのは**その入れ物の本文の frontmatter** ── 条件は本文が正本である
+   *   (端末の保存に置くと、書き出しにも別の端末にも乗らない)。
+   * 🔑 書き換えは `REQUEST_SMART_COND` 1 本 ── 足すも外すも同じ口を通る(§7)。
+   */
+  'smart-cond-add': (dispatcher, _target, _services, root) => {
+    const st = dispatcher.getState();
+    const lid = st.scopeLid;
+    if (lid === null) return;
+    const field = root.querySelector<HTMLInputElement>('[data-pkc-field="smart-cond"]');
+    const tag = normalizeTag(field?.value ?? '');
+    if (tag === '') {
+      // ⚠ **無言で終わらせない**(帯は出ているのに何も起きない dead click になる)
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '集める条件にするタグを入力してください' });
+      return;
+    }
+    dispatcher.dispatch({ type: 'SMART_COND', lid, tag, mode: 'add' });
+    // 🔑 通したら欄を空にする(次の 1 つを打てる)── ⚠ 断ったときは残す
+    if (field) field.value = '';
+  },
+  'smart-cond-remove': (dispatcher, target) => {
+    const lid = dispatcher.getState().scopeLid;
+    const tag = target.getAttribute('data-pkc-tag') ?? '';
+    if (lid === null || tag === '') return;
+    dispatcher.dispatch({ type: 'SMART_COND', lid, tag, mode: 'remove' });
+  },
+  /**
+   * 🔴 **選んだものを、このスマートフォルダから外す**(user 指示 2026-08-23)。
+   * ⚠ 実体は「条件のタグを本文から消す」── 入れ物から出すのではない。
+   */
+  'smart-evict': (dispatcher, _target, _services, root) => {
+    const st = dispatcher.getState();
+    const smartLid = st.scopeLid;
+    if (smartLid === null) return;
+    // ⚠ 相手は**いま表に出ている印**だけ(`delete-selected` / `bulk-tag` と同じ規則)
+    const rows = new Set(visibleFilerRows(st).map((r) => r.lid));
+    const lids = st.selection.filter((lid) => rows.has(lid));
+    if (lids.length === 0) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '外すものを選んでください' });
+      return;
+    }
+    void root;
+    dispatcher.dispatch({ type: 'SMART_TAGS', smartLid, lids, mode: 'remove' });
+  },
   'bulk-tag-add': (dispatcher, _target, _services, root) =>
     runBulkTag(dispatcher, root, 'add'),
   'bulk-tag-remove': (dispatcher, _target, _services, root) =>
@@ -3792,6 +3849,20 @@ export function bindActions(
        *      ── 立て直さないと、落とした直後の `↑` `↓` が**無言で死ぬ**
        * 🔑 どちらも**既に在る関数を呼ぶだけ**。新しい規則を作らない。
        */
+      /**
+       * 🔴 **スマートフォルダへ落としたら、移すのではなく「条件のタグが付く」**
+       *   (#421 段①。user 裁定 2026-08-26「落とすとタグが付く。出すと外れる」)。
+       *
+       * ⚠ 印を `folder` と分けてあるのは**落ちた結果が違う**からである ──
+       *   ここで見分けないと、条件で集まる入れ物へ**構造の親子**を作ってしまう
+       *   (中身が 2 種類になり、「消したのに残る」が起きる)。
+       * ⚠ 条件は effect が本文から読む ── 憶えている値では書かない。
+       */
+      if (drop.el.getAttribute('data-pkc-drop') === 'smart' && drop.lid !== null) {
+        if (lids.length > 0)
+          dispatcher.dispatch({ type: 'SMART_TAGS', smartLid: drop.lid, lids, mode: 'add' });
+        return;
+      }
       const before = dispatcher.getState().relations;
       const from = dragFromSide;
       moveDropped(lids, drop.lid);
@@ -3961,7 +4032,8 @@ export function bindActions(
     const again = lastRowClick.key === key && now - lastRowClick.at <= DOUBLE_MS;
     lastRowClick = { key, at: now };
     if (!again) return;
-    if (dispatcher.getState().entryMetas.get(lid)?.archetype !== 'folder') return;
+    // 🔑 「中へ入れるか」の判定は `canEnterScope` 1 か所(スマートフォルダも入れる)
+    if (!canEnterScope(dispatcher.getState().entryMetas.get(lid)?.archetype)) return;
     lastRowClick = { key: '', at: 0 }; // 3 回目を「もう一度」と数えない
     // ⚠ **入る先はその面の現在地** ── 2 ペインで `SET_SCOPE` を撃つと、
     //    押していない左の列が動いて、押した側は 1 ミリも動かない
@@ -4547,8 +4619,8 @@ export function bindActions(
     if (cmd === 'filer-open') {
       const lid = dualCursor(st, side) ?? paneOf(st.dual, side).selection[0] ?? null;
       if (lid === null) return false;
-      // フォルダなら中へ(2 クリックと同じ ── 規則は `DUAL_SET_SCOPE` 1 か所)
-      if (st.entryMetas.get(lid)?.archetype === 'folder') {
+      // 入れ物なら中へ(2 クリックと同じ ── 規則は `DUAL_SET_SCOPE` 1 か所)
+      if (canEnterScope(st.entryMetas.get(lid)?.archetype)) {
         dispatcher.dispatch({ type: 'DUAL_SET_SCOPE', side, lid });
         carryDualFocus(side);
         return true;
@@ -4656,8 +4728,8 @@ export function bindActions(
       // ⚠ 焦点が先、印は次 ── 理由は `focusedRowLid` の注記
       const lid = focusedRowLid() ?? st.selectedLid;
       if (lid === null) return false;
-      // フォルダなら中へ(2 クリックと同じ)。⚠ 規則は 1 か所 ── `SET_SCOPE` を撃つ
-      if (st.entryMetas.get(lid)?.archetype === 'folder') {
+      // 入れ物なら中へ(2 クリックと同じ)。⚠ 規則は 1 か所 ── `SET_SCOPE` を撃つ
+      if (canEnterScope(st.entryMetas.get(lid)?.archetype)) {
         dispatcher.dispatch({ type: 'SET_SCOPE', lid });
         return true;
       }

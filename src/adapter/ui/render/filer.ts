@@ -24,7 +24,8 @@ import {
   listMoveTargets,
   listSiblings,
 } from '@features/relation/tree';
-import { filerRows } from '@features/relation/filer-list';
+import { filerRows, smartLidsOf } from '@features/relation/filer-list';
+import { SMART_ARCHETYPE } from '@features/smart/smart-spec';
 import { normalizeQuery } from '@features/filter/title-filter';
 // 🔑 種別の呼び名は **1 本**(P8 段⑲)── かつてここだけ独自表を持ち、
 //    同じノートがフォルダ画面では「シート」、他の全画面では「表」と出ていた
@@ -61,6 +62,8 @@ export class FilerRenderer {
   /** ⚠ 向きも指紋(2 ペイン側で実際に踏んだ ── 同型なのでこちらも入れる)。 */
   private lastSortDesc: boolean | null = null;
   private lastHits: AppState['searchHits'] = null;
+  /** 🔴 当たりは state の別の場所で変わる(#421 段①)── 指紋に入れる。 */
+  private lastSmartHits: AppState['smartHits'] | null = null;
   /** ゴミ箱 panel の断面(参照比較 ── P5b で指紋に加わった次元)。 */
   private lastTrash: AppState['trashPanel'] = null;
   /** 居場所を変える帯の器(中身は選択が変わるたびに差し替える)。 */
@@ -96,10 +99,83 @@ export class FilerRenderer {
     this.lastMarks = state.selection.join(' ');
   }
 
+  /**
+   * 🔴 **スマートフォルダの帯**(#421 段①)── 何で絞っているか / いくつ当たったか /
+   * 条件を足す・外す口。
+   *
+   * ⚠ **条件が効いている場所に条件を出す** ── 右の列(情報)に置くと、
+   *   中に入った瞬間に「選んでいるもの」は**子のノート**になり、条件が消える。
+   * ⚠ **「0 件」と「まだ集めていない」と「集められない」を区別する** ──
+   *   潰すと user は「壊れている」か「条件が悪い」かを見分けられない。
+   */
+  private renderSmartBar(host: HTMLElement, state: AppState, scope: EntryMeta): void {
+    const bar = document.createElement('div');
+    bar.setAttribute('data-pkc-field', 'smart-bar');
+    const hit = state.smartHits.get(scope.lid) ?? null;
+
+    const label = document.createElement('span');
+    label.setAttribute('data-pkc-field', 'smart-why');
+    if (hit === null) label.textContent = '集めています…';
+    else if (hit.failed) label.textContent = 'この版では集められません';
+    else if (hit.tags.length === 0) label.textContent = '条件を選んでください(まだ何も集めません)';
+    else {
+      // ⚠ **上限で切ったことを言う** ── 黙って切ると「これで全部」と読まれる
+      const shown = hit.lids.length;
+      const more = hit.total > shown ? `(${hit.total} 件中 ${shown} 件を出しています)` : '';
+      label.textContent = `${hit.total} 件${more}`;
+    }
+    bar.append(label);
+
+    // 🔴 条件のタグ ── **1 つずつ外せる**(置けるなら外せる)
+    for (const tag of hit?.tags ?? []) {
+      const chip = document.createElement('span');
+      chip.setAttribute('data-pkc-region', 'smart-cond');
+      const name = document.createElement('span');
+      name.textContent = tag;
+      const off = document.createElement('button');
+      off.type = 'button';
+      off.setAttribute('data-pkc-action', 'smart-cond-remove');
+      off.setAttribute('data-pkc-tag', tag);
+      off.textContent = '×';
+      off.title = `条件から「${tag}」を外す`;
+      off.setAttribute('aria-label', off.title);
+      chip.append(name, off);
+      bar.append(chip);
+    }
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.setAttribute('data-pkc-field', 'smart-cond');
+    input.placeholder = 'タグ';
+    input.setAttribute('aria-label', '集める条件にするタグ');
+    const add = iconButton('smart-cond-add', '条件に足す');
+    add.title = 'このタグが付いたノートを集めます(複数の条件は「全部付いている」で絞ります)';
+    bar.append(input, add);
+
+    /**
+     * 🔴 **中で選んだものを、ここから外せる**(user 指示 2026-08-23「置けるなら外せる」)。
+     * ⚠ 落として入れられるのに外せないと、間違えて入れた物を**本文まで開かないと
+     *   戻せない**(動線を 1 つ失う)。⚠ 実体は「条件のタグを本文から消す」である。
+     */
+    const marks = state.selection.filter((lid) => this.rows.has(lid));
+    if (marks.length > 0) {
+      const evict = document.createElement('button');
+      evict.type = 'button';
+      evict.setAttribute('data-pkc-action', 'smart-evict');
+      evict.textContent = 'ここから外す';
+      evict.title = `選んでいる ${marks.length} 件から、この条件のタグを消します`;
+      bar.append(evict);
+    }
+    host.append(bar);
+  }
+
   private renderMoveBar(state: AppState, scope: EntryMeta | null): void {
     const host = this.moveBar;
     if (!host) return;
     host.textContent = '';
+    // 🔑 いま居るのがスマートフォルダなら、いちばん上に条件の帯を出す
+    if (scope !== null && scope.archetype === SMART_ARCHETYPE)
+      this.renderSmartBar(host, state, scope);
 
     /**
      * 🔴 **まとめて操作する帯**(#240 段③。user 指示 2026-08-17「まとめて消せない」)。
@@ -329,6 +405,12 @@ export class FilerRenderer {
       state.entrySort !== this.lastSort ||
       state.entrySortDesc !== this.lastSortDesc ||
       state.searchHits !== this.lastHits ||
+      /**
+       * 🔴 **当たりが届いたら組み直す**(#421 段①)。⚠ 入れないと、集め終わって
+       *   結果が来ても**「集めています…」のまま凍る**(state は変わっているのに
+       *   この門が全部 false になる)。
+       */
+      state.smartHits !== this.lastSmartHits ||
       (state.entryMetas !== this.lastMetas && this.metaSignature(state) !== this.lastSignature);
     const selectionChanged = state.selectedLid !== this.lastSelected;
     // ⚠ 現在地は選択と**別に**変わる(#240 段①)── 指紋に入れないと、
@@ -410,6 +492,7 @@ export class FilerRenderer {
     this.lastSort = state.entrySort;
     this.lastSortDesc = state.entrySortDesc;
     this.lastHits = state.searchHits;
+    this.lastSmartHits = state.smartHits;
     this.lastMarks = state.selection.join(' ');
     this.lastDates = this.dateSignature(state);
 
@@ -424,6 +507,7 @@ export class FilerRenderer {
      */
     const q = normalizeQuery(state.filterQuery);
     const list = filerRows(scopeLid, state.entryMetas, state.relations, {
+      smartLids: smartLidsOf(scopeLid, state.smartHits),
       filterQuery: state.filterQuery,
       searchHits: state.searchHits,
       sort: state.entrySort,
@@ -552,6 +636,12 @@ export class FilerRenderer {
        */
       tr.tabIndex = -1;
       if (m.archetype === 'folder') tr.setAttribute('data-pkc-drop', 'folder');
+      /**
+       * 🔴 **スマートフォルダにも落とせる**(#421 段①。user 裁定 2026-08-26)。
+       * ⚠ 印は `folder` と**別の値**にする ── 落ちた結果が違う(移すのではなく、
+       *   **条件のタグが本文に付く**)ので、同じ印にすると受け手が見分けられない。
+       */
+      else if (m.archetype === SMART_ARCHETYPE) tr.setAttribute('data-pkc-drop', 'smart');
       if (m.lid === state.selectedLid) tr.setAttribute('data-pkc-selected', '');
       // ⚠ **開いている**(`selected`)と**印を付けた**(`marked`)は別の印である
       if (state.selection.includes(m.lid)) tr.setAttribute('data-pkc-marked', '');
