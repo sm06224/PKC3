@@ -90,6 +90,17 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-26-command-palette',
+    title: '操作を名前で探せるようになりました',
+    items: [
+      '左下の「操作を探す」を押すか、Ctrl+Shift+P（Mac は ⌘+Shift+P）で開きます。やりたいことの名前を打つと絞り込まれ、Enter でいちばん上が走ります。',
+      '説明の中の言葉でも当たります。名前をうろ覚えでも、たどり着けます。',
+      'いま押せない操作も隠さずに出して、なぜ押せないかを並べます（「ノートを選んでいるときだけ効きます」など）。',
+      '各行には割り当たっている鍵も出るので、次からはその鍵で直接呼べます。',
+      '編集の途中でも開けます。この鍵は文字を打たないので、本文に記号は入りません。',
+    ],
+  },
+  {
     id: '2026-08-26-copy-entry-ref',
     title: 'ノートから別のノートへ、リンクを張れるようになりました',
     items: [
@@ -293,19 +304,11 @@ export const NOTICES: readonly Notice[] = [
       '⚠ 日付のすぐ後ろに 毎週 などと書いてある本文は、これから予定として読まれます。そのつもりでない行は、日付から離して書いてください。',
     ],
   },
-  {
-    id: '2026-08-25-relation-map-body-links',
-    title: 'つながりの図に、本文のリンクも出るようになりました',
-    items: [
-      '本文に書いたノートへのリンクが、つながりの図に破線で出ます。相手から自分への参照も同じ破線で出ます。',
-      '破線は真ん中のノートの分だけです。実線の関係のほうは、これまでどおり 2 手先まで出ます。',
-    ],
-  },
 ];
 
 /**
  * ⚠ **落としたぶんの原本は CHANGELOG に在る**(上限 20 件を超えたので、古いほうから
  *   `2026-08-16-office-save-to-pkc` / `2026-08-17-office-save-same-note`(2026-08-19)、
  *   `2026-08-19-dual-pane-app`(2026-08-22)、
- *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice` / `2026-08-24-pptx-export` / `2026-08-24-paste-permalink` / `2026-08-24-markdown-to-pandoc` / `2026-08-24-schedule-range`(2026-08-25)、`2026-08-24-dual-new-note` / `2026-08-24-office-save-formats` / `2026-08-25-relation-map` / `2026-08-25-bookmark-capture`(2026-08-26)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
+ *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice` / `2026-08-24-pptx-export` / `2026-08-24-paste-permalink` / `2026-08-24-markdown-to-pandoc` / `2026-08-24-schedule-range`(2026-08-25)、`2026-08-24-dual-new-note` / `2026-08-24-office-save-formats` / `2026-08-25-relation-map` / `2026-08-25-bookmark-capture` / `2026-08-25-relation-map-body-links`(2026-08-26)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
  */

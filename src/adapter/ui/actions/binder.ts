@@ -73,7 +73,8 @@ import {
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
 import { appOpenInEdit, OpenInEditStore } from '@adapter/ui/render/open-in-edit';
-import { chordOf, findCommand, typesCharacter } from '@features/keymap';
+import { chordOf, findCommand, isMac, typesCharacter, KEY_COMMANDS } from '@features/keymap';
+import { paletteRows } from '@features/palette/palette-rows';
 import { appQueryKey } from '@adapter/ui/render/query-key-store';
 import { openView } from '@adapter/ui/render/open-view';
 import {
@@ -88,6 +89,7 @@ import { cleanForClipboard } from '@features/export/clipboard-html';
 import {
   confirmInApp,
   pickDateInApp,
+  pickCommandInApp,
   pickSnippetInApp,
   isAppDialogOpen,
   type ConfirmOptions,
@@ -1014,6 +1016,138 @@ function deleteFrom(
     );
 }
 
+/** 何もしない口。⚠ 打鍵ではないので「既定を止める」相手がいない。 */
+const noop = (): void => {};
+
+export function runGlobalCommand(
+  cmd: string,
+  root: HTMLElement,
+  dispatcher: Dispatcher,
+  keymap: KeymapStore,
+  prevent: () => void,
+  dry = false,
+): boolean {
+  if (cmd === 'view-detail') {
+    // ⚠ 本文の面には押しボタンが無い(既定の面なので)── ここだけ dispatch する
+    if (dispatcher.getState().viewMode === 'detail') return false;
+    if (dry) return true;
+    prevent();
+    dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
+    return true;
+  }
+  if (cmd === 'toggle-focus-mode') {
+    /**
+     * 🔑 **両側を一度に畳む / 戻す**(PKC2 のフォーカスモード相当)。
+     * ⚠ 押しボタン 2 つを続けて押す実装にしない ── 片方だけ畳まれている状態から
+     *   押すと**入れ替わる**だけで、user が期待する「集中」にならない。
+     */
+    if (dry) return true;
+    const next = appPanes.getHidden().length === PANES.length ? [] : [...PANES];
+    prevent();
+    applyPaneVisibility(root, appPanes.setHidden(next));
+    return true;
+  }
+  if (cmd === 'focus-search') {
+    const input = root.querySelector<HTMLInputElement>('[data-pkc-field="entry-filter"]');
+    if (!input) return false; // 欄が無い面では何も起きない(ブラウザの検索に譲る)
+    if (dry) return true;
+    prevent();
+    input.focus();
+    input.select();
+    return true;
+  }
+  /**
+   * 🔴 **押しボタンを持たない面は、ここで直に投げる**(2026-08-19 に実測で判明)。
+   *
+   * ⚠ 2 ペインは #241 の訂正で**上の帯から外して組み込みタイルへ移した**が、
+   *   近道の側は「`set-view` のボタンを探して押す」ままだったので、
+   *   **`Alt+6` は 1 度も効いていなかった**(押す先が無く、`preventDefault` すら
+   *   しないので無反応)。⚠ しかもお知らせ・マニュアル・`shell.ts` のコメントは
+   *   **3 つとも「効きます」と言っていた** ── 画面と doc が揃って嘘をついていた形。
+   * 🔑 `view-detail` が既に同じ理由で直に投げている(本文の面にもボタンは無い)。
+   *   規則は 1 つ:**ボタンが在るならボタンを押し、無い面は直に投げる**。
+   */
+  if (cmd === 'view-dual') {
+    if (dry) return true;
+    prevent();
+    dispatcher.dispatch({
+      type: 'SET_VIEW_MODE',
+      mode: nextViewMode(dispatcher.getState().viewMode, 'dual'),
+    });
+    return true;
+  }
+  if (cmd === 'open-palette') {
+    if (dry) return true;
+    prevent();
+    openPaletteFor(root, dispatcher, keymap);
+    return true;
+  }
+  const sel = SHORTCUT_BUTTON[cmd];
+  if (sel === undefined) return false;
+  const btn = root.querySelector<HTMLElement>(sel);
+  if (btn === null) return false;
+  /**
+   * 🔴 **「押せるか」は `disabled` まで見る**(#425 段①)。
+   *
+   * ⚠ 鍵の側は**器が在れば既定を止める** ── `nav-back` は履歴が無いと
+   *   ボタンが `disabled` になるが、そこで `Alt+←` を素通しすると
+   *   **ブラウザが前のページへ戻ってアプリから出てしまう**。
+   * 🔑 一覧の側(`dry`)は逆で、**押しても何も起きないものを「押せる」と
+   *   言ってはいけない** ── だからここだけ答えが分かれる(意図的である)。
+   */
+  if (dry) return !(btn instanceof HTMLButtonElement && btn.disabled);
+  prevent();
+  btn.click();
+  return true;
+}
+
+/**
+ * 🔴 **操作を名前で探す面を開く**(#425 段①)。
+ *
+ * ⚠ **一覧は開いた瞬間に固めない** ── `paletteRows` は打つたびに呼ばれ、
+ *   「いま押せるか」もそのときの画面(`runGlobal(..., dry)`)で決まる。
+ * ⚠ **自分自身は並べない** ── パレットからパレットを開く行に意味は無い。
+ */
+export function openPaletteFor(
+  root: HTMLElement,
+  dispatcher: Dispatcher,
+  keymap: KeymapStore,
+): void {
+  const rows = (query: string) => {
+    const ready = new Set<string>();
+    for (const c of KEY_COMMANDS) {
+      /**
+       * ⚠ **この門は「いま」何も止めていない**(2026-08-26 の変異試験 M9 が
+       *   SURVIVED で教えた)── 全域でない命令は `runGlobalCommand` の
+       *   どの枝にも当たらず、どのみち `false` が返る。
+       * 🔑 **不変条件のほうを pin してある**:`SHORTCUT_BUTTON` と特例に
+       *   載るのは全域の命令だけ ── `tests/adapter/keymap-binding.test.ts` の
+       *   「全域でない命令が受け手の表に在る」が見る(壊すと落ちるのを実測済み)。
+       * ⚠ だからここを消す変異が生き延びても **test の穴ではない** ──
+       *   残してあるのは、表に全域でない命令が紛れた日に
+       *   **この面が「押せる」と嘘をつかない**ためである
+       *   (CLAUDE.md「『これが無いと壊れる』とは書かない」)。
+       */
+      if (!c.contexts.includes('global')) continue;
+      if (runGlobalCommand(c.id, root, dispatcher, keymap, noop, true)) ready.add(c.id);
+    }
+    /**
+     * ⚠ **自分自身は並べない** ── パレットからパレットを開く行に意味は無い。
+     * 🔑 外すのは**ここ 1 か所** ── `ready` の側でも外すと、片方を消しても
+     *   もう片方が救うので、**どちらが効いているか分からなくなる**(§1)。
+     */
+    return paletteRows(query, keymap.getBindings(), ready, isMac()).filter(
+      (r) => r.id !== 'open-palette',
+    );
+  };
+  void pickCommandInApp(root, rows).then((picked) => {
+    if (picked === null) return;
+    // ⚠ 既定を止める口は要らない(打鍵ではないので) ── 実行だけする
+    runGlobalCommand(picked, root, dispatcher, keymap, noop);
+  });
+}
+
+
 const ACTIONS: Record<string, ActionHandler> = {
   /**
    * 🔴 **本文のリンクで別のノートへ飛ぶ**(2026-08-08。user 裁定「任せます」)。
@@ -1169,6 +1303,16 @@ const ACTIONS: Record<string, ActionHandler> = {
     const id = target.getAttribute('data-pkc-relation');
     if (id) dispatcher.dispatch({ type: 'REMOVE_RELATION', id });
   },
+  /**
+   * 🔴 **操作を名前で探す**(#425 段①)。
+   *
+   * ⚠ 鍵(`Ctrl+Shift+P`)と**同じ 1 本**を通す ── 別に書くと、
+   *   「ボタンからは効くが鍵からは効かない」が静かに生まれる(CLAUDE.md §7)。
+   * ⚠ ここは**共有の割当**(`appKeymap`)を読む。test が差した割当は鍵の側にだけ
+   *   効くが、割当は**鍵の字を出すためだけ**に使うので**動きは変わらない**。
+   */
+  'open-palette': (dispatcher, _target, _services, root) =>
+    openPaletteFor(root, dispatcher, appKeymap),
   'nav-back': (dispatcher) => dispatcher.dispatch({ type: 'NAV_HISTORY', dir: 'back' }),
   'nav-forward': (dispatcher) => dispatcher.dispatch({ type: 'NAV_HISTORY', dir: 'forward' }),
   /** 一覧の並び順(#183)。⚠ 妥当性の判定は `isEntrySort` 1 か所。 */
@@ -2899,6 +3043,21 @@ const PKC_DRAG = 'application/x-pkc-lids';
 const PKC_TASK_DRAG = 'application/x-pkc-task';
 
 const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
+  /**
+   * 🔴 **戻る / 進むは、押しボタンを通す**(2026-08-26 に特例からここへ移した)。
+   *
+   * ⚠ 直す前は `cmd === 'nav-back'` の特例で `NAV_HISTORY` を直に投げていたが、
+   *   ボタンの受け手(`ACTIONS['nav-back']`)が**同じ action を投げている**ので、
+   *   同じ問いに答える口が 2 つ在った(CLAUDE.md §7)。
+   * 🔑 寄せると**「いま押せるか」が正しく出る**ようになる ── 履歴が無い間
+   *   ボタンは `disabled` なので、操作を名前で探す面(#425 段①)が
+   *   「いまは押せません」と言える。特例のままだと**常に押せる**と嘘をつく。
+   * ⚠ **鍵の側の振る舞いは 1 ドットも変わらない** ── 器は在る(`disabled` でも)
+   *   ので既定は止まり、`click()` は無反応。履歴が無いときに `Alt+←` で
+   *   **ブラウザが前のページへ戻る**、という事故は起きないままである。
+   */
+  'nav-back': '[data-pkc-action="nav-back"]',
+  'nav-forward': '[data-pkc-action="nav-forward"]',
   'create-entry': '[data-pkc-field="create-run"]',
   'edit-entry': '[data-pkc-action="start-edit"]',
   'toggle-replace': '[data-pkc-action="toggle-replace"]',
@@ -4123,6 +4282,23 @@ export function bindActions(
   root.addEventListener('input', onInput);
   root.addEventListener('change', onChange);
   /**
+   * 🔴 **全域のコマンドを実行する ── または「いま実行できるか」だけ答える**(#425 段①)。
+   *
+   * ## 🔑 なぜ 1 つの関数なのか(CLAUDE.md §7)
+   *
+   * 鍵の側(`onShortcut`)と、操作を名前で探す面(パレット)は
+   * **同じことを聞いている** ── 「この命令は、いま、何かするのか」。
+   * ⚠ 判定を 2 か所に書くと「**押せると出ているのに押しても何も起きない**」が
+   *   静かに生まれる(パレットの一覧は正しく、実行だけが落ちる形)。
+   * 🔑 だから**門は 1 組**にして、`dry` で「撃つか / 答えるだけか」を切り替える。
+   *   ⚠ 変異でどれか 1 つの門を壊すと、**鍵と一覧の両方**が同時に狂う = 気づける。
+   *
+   * @param prevent ブラウザの既定を止める口。⚠ **撃つ直前に呼ぶ**(順番を保つ ──
+   *   後にすると、続きが例外を投げたときだけ既定が止まらない形になる)
+   * @param dry `true` なら**何もせず**「できるか」だけ返す
+   * @returns 何かした(または `dry` で「できる」)なら `true`
+   */
+  /**
    * 🔑 **画面全体の近道**(P10)。いまは `Ctrl/Cmd+N` = いま選んでいる種類で作る
    * (user 指示「追加ボタンと ctrl+n の対象を更新」)。
    *
@@ -4286,62 +4462,7 @@ export function bindActions(
     const chord = chordOf(ke);
     if (typing && !(findCommand(cmd)?.whileTyping === true && chord !== null && !typesCharacter(chord)))
       return;
-    if (cmd === 'nav-back' || cmd === 'nav-forward') {
-      ke.preventDefault();
-      dispatcher.dispatch({ type: 'NAV_HISTORY', dir: cmd === 'nav-back' ? 'back' : 'forward' });
-      return;
-    }
-    if (cmd === 'view-detail') {
-      // ⚠ 本文の面には押しボタンが無い(既定の面なので)── ここだけ dispatch する
-      if (dispatcher.getState().viewMode === 'detail') return;
-      ke.preventDefault();
-      dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
-      return;
-    }
-    if (cmd === 'toggle-focus-mode') {
-      /**
-       * 🔑 **両側を一度に畳む / 戻す**(PKC2 のフォーカスモード相当)。
-       * ⚠ 押しボタン 2 つを続けて押す実装にしない ── 片方だけ畳まれている状態から
-       *   押すと**入れ替わる**だけで、user が期待する「集中」にならない。
-       */
-      const next = appPanes.getHidden().length === PANES.length ? [] : [...PANES];
-      ke.preventDefault();
-      applyPaneVisibility(root, appPanes.setHidden(next));
-      return;
-    }
-    if (cmd === 'focus-search') {
-      const input = root.querySelector<HTMLInputElement>('[data-pkc-field="entry-filter"]');
-      if (!input) return; // 欄が無い面では何も起きない(ブラウザの検索に譲る)
-      ke.preventDefault();
-      input.focus();
-      input.select();
-      return;
-    }
-    /**
-     * 🔴 **押しボタンを持たない面は、ここで直に投げる**(2026-08-19 に実測で判明)。
-     *
-     * ⚠ 2 ペインは #241 の訂正で**上の帯から外して組み込みタイルへ移した**が、
-     *   近道の側は「`set-view` のボタンを探して押す」ままだったので、
-     *   **`Alt+6` は 1 度も効いていなかった**(押す先が無く、`preventDefault` すら
-     *   しないので無反応)。⚠ しかもお知らせ・マニュアル・`shell.ts` のコメントは
-     *   **3 つとも「効きます」と言っていた** ── 画面と doc が揃って嘘をついていた形。
-     * 🔑 `view-detail` が既に同じ理由で直に投げている(本文の面にもボタンは無い)。
-     *   規則は 1 つ:**ボタンが在るならボタンを押し、無い面は直に投げる**。
-     */
-    if (cmd === 'view-dual') {
-      ke.preventDefault();
-      dispatcher.dispatch({
-        type: 'SET_VIEW_MODE',
-        mode: nextViewMode(dispatcher.getState().viewMode, 'dual'),
-      });
-      return;
-    }
-    const sel = SHORTCUT_BUTTON[cmd];
-    if (sel === undefined) return;
-    const btn = root.querySelector<HTMLElement>(sel);
-    if (!btn) return;
-    ke.preventDefault();
-    btn.click();
+    if (runGlobalCommand(cmd, root, dispatcher, keymap, () => ke.preventDefault())) return;
   };
   /**
    * 🔴 **整理の面の鍵**(user 裁定 2026-08-18)。⚠ **既にある動線を呼ぶだけ**にする ──

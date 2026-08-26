@@ -85,6 +85,14 @@ const ICON_PATHS: Readonly<Record<string, readonly IconPath[]>> = {
     'M9.4 9.4a2.7 2.7 0 115.2 1c0 1.8-2.6 2.1-2.6 3.9',
     { d: 'M10.6 17.4a1.4 1.4 0 102.8 0 1.4 1.4 0 00-2.8 0z', fill: 'solid' },
   ],
+  /**
+   * 操作を名前で探す ── 虫めがね(#425 段①)。
+   * ⚠ **隣の「集計」が `list`** なので、そこと輪郭で区別が付く形にする
+   *   (同じ図案が並ぶと、どちらを押すのか分からない)。
+   * ⚠ 柄は 1 本、輪は中空のまま ── 13px でも「まる + 柄」は読める
+   *   (中空を塗ると `dot` と融ける)。
+   */
+  search: ['M10.5 3.8a6.2 6.2 0 100 12.4 6.2 6.2 0 000-12.4z', 'M15.2 15.2L20.5 20.5'],
   /** 取り込む ── 受け皿へ下向き。 */
   'arrow-in': ['M12 3.5v9', { d: 'M7.5 11l4.5 5 4.5-5z', fill: 'solid' }, 'M4 18v2.5h16V18'],
   /** 書き出す ── 受け皿から上向き。 */
@@ -188,6 +196,7 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'set-view:settings': 'settings',
   'set-view:flags': 'flag',
   'set-view:help': 'help',
+  'open-palette': 'search',
   'import-file': 'arrow-in',
   'export-archive': 'archive',
   'export-html': 'globe',

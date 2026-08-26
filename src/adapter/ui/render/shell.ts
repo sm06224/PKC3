@@ -324,6 +324,27 @@ export function buildShell(root: HTMLElement): ShellRegions {
     btn.title = title;
     collectionBar.append(btn);
   }
+  /**
+   * 🔴 **操作を名前で探す**(#425 段①)。
+   *
+   * ⚠ **ボタンを先に置く**(不可侵指示「マウスだけで完結し、キーボードは近道」)──
+   *   鍵(`Ctrl/⌘+Shift+P`)だけにすると**画面のどこにも無い機能**になる
+   *   (`nav-back` / `nav-forward` を足したときと同じ理由。上の記録)。
+   * ⚠ 置き場は**設定・フラグ・ヘルプの隣** ── どれも「アプリ全体の操作」であり、
+   *   `COLLECTION_COMMANDS`(取り込む / バックアップ = **書き出しと片づけ**)とは
+   *   役割が違う。⚠ あちらの表に混ぜると、
+   *   `tests/adapter/collection-commands.test.ts` が守っている
+   *   「書き出しと片づけの全数」の意味が濁る。
+   * ⚠ 鍵の綴りは `applyShortcutHints` が組み立てる(直書きしない ── mac では
+   *   `⌘`、user が割当を変えれば説明だけが嘘になる)。
+   */
+  {
+    const btn = iconButton('open-palette', '操作を探す');
+    btn.setAttribute(HINT_BASE, 'できる操作を名前で絞り込んで、その場で実行します');
+    btn.setAttribute(HINT_COMMAND, 'open-palette');
+    btn.title = hintTitle('できる操作を名前で絞り込んで、その場で実行します', 'open-palette');
+    collectionBar.append(btn);
+  }
   // 🔑 **設定はここ**(P10)。上の帯を撤去したので、アプリ全体の操作が並ぶ
   // この場所へ移した。⚠ 一覧の操作と**区切って**置く(役割が違う)
   for (const { view, label } of VIEW_BUTTONS) {

@@ -756,10 +756,17 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
      *   **その選択子が画面に当たるか**を見ていなかった(§1「名前が在るかの検査は、
      *   中身が空でも通る」)。当たるかどうかは `tests/docs-parity.test.ts` が見る。
      */
+    /**
+     * ⚠ **`nav-back` / `nav-forward` は 2026-08-26 にここから外した** ── 特例で
+     *   直に `NAV_HISTORY` を投げるのをやめ、`SHORTCUT_BUTTON` の**ボタンを押す**
+     *   形へ寄せた(受け手が同じ action を投げていたので、口が 2 つ在った)。
+     * 🔑 寄せた理由は「押せるか」を正しく出すため ── 履歴が無い間ボタンは
+     *   `disabled` なので、操作を名前で探す面が「いまは押せません」と言える。
+     */
     const special = [
-      'nav-back',
-      'nav-forward',
       'view-detail',
+      // ⚠ 2026-08-26 に足した(#425 段① ── 押しボタンは在るが、開く先が器なので特例)
+      'open-palette',
       'view-dual',
       'toggle-focus-mode',
       'focus-search',
@@ -772,6 +779,28 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
     expect(
       globals.filter((id) => !covered.has(id)),
       '受け手のいない全域コマンドが在る(押しても何も起きない近道)',
+    ).toEqual([]);
+
+    /**
+     * 🔴 **逆向きも見る**(2026-08-26、#425 段①。変異試験 M9 が教えた)。
+     *
+     * ⚠ 上は「全域の命令に受け手が在るか」しか見ていない ── **その逆**
+     *   (受け手の表に、全域でない命令が紛れていないか)は誰も見ていなかった。
+     * 🔑 これは操作を名前で探す面の**前提**である:あの面は全域から開くので、
+     *   `runGlobalCommand` が「押せる」と答えてよいのは**全域の命令だけ**。
+     *   全域でないものが表に載ると、**その面にいないのに「押せる」と出る**。
+     * ⚠ `openPaletteFor` にはその門(`contexts.includes('global')`)が在るが、
+     *   **この不変条件が保たれている限り門は何も止めない**(実測で等価変異)──
+     *   だから門ではなく**ここで pin する**(CLAUDE.md「これが無いと壊れる、と
+     *   書く前に外して壊れるのを見る」)。
+     */
+    const byId = new Map(KEY_COMMANDS.map((c) => [c.id, c]));
+    const notGlobal = [...byButton, ...special].filter(
+      (id) => !(byId.get(id)?.contexts.includes('global') ?? false),
+    );
+    expect(
+      notGlobal,
+      '全域でない命令が受け手の表に在る(その面にいないのに「押せる」と出る)',
     ).toEqual([]);
   });
 
@@ -801,6 +830,8 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
       'toggle-replace',
       'open-settings',
       'open-flags',
+      // ⚠ 2026-08-26 に足した(#425 段① ── **編集中こそ**操作を名前で呼びたい)
+      'open-palette',
       'open-help',
       'view-dual',
       'toggle-sidebar',

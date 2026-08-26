@@ -34,6 +34,7 @@
  */
 
 /** 押した結果。⚠ `Escape` と「やめる」は**同じ**(取り消し)。 */
+import type { PaletteRow } from '@features/palette/palette-rows';
 import type { SnippetChoice } from '@features/snippet/snippet-menu';
 
 export type DialogAnswer = 'ok' | 'cancel';
@@ -444,6 +445,143 @@ export function pickSnippetInApp(
     const answered = open(f, 'cancel');
     // 🔑 焦点は**先頭の行**へ ── 開いた直後にやることは「選ぶ」だからである
     rows[0]?.focus();
+    const answer = await answered;
+    // ⚠ 隠したままにしない ── 器は使い回すので、次の確認で受ける側が消える
+    f.ok.hidden = false;
+    return answer === 'ok' ? chosen : null;
+  });
+}
+
+/**
+ * 🔴 **操作を名前で探して実行する**(#425 段①)。
+ *
+ * ⚠ **押した行がそのまま答え**(`pickSnippetInApp` と同じ)── 選ぶ以外に
+ *   この器ですることが無いので、確定のボタンを置くと必ず 2 回押させるだけになる。
+ * ⚠ **押せない行も出す。ただし `disabled` にして理由を並べる** ── 隠すと
+ *   「無い」と読まれ、出したまま無反応にすると dead click になる(#425 の規律)。
+ * ⚠ 閉じ方は器の 1 本を通す(`f.ok.click()`)── `Escape` / 「やめる」/ 行、
+ *   どれで閉じても**焦点を返す後始末が 1 か所**で走る(CLAUDE.md §10 ③)。
+ *
+ * @param rows 探し語を受けて一覧を返す関数。⚠ **打つたびに呼ぶ**ので、
+ *   「いま押せるか」も**そのときの画面**で決まる(開いた瞬間で固めない)
+ * @returns 選んだコマンドの id。`Escape` / 「やめる」なら `null`
+ */
+export function pickCommandInApp(
+  host: HTMLElement,
+  rows: (query: string) => readonly PaletteRow[],
+): Promise<string | null> {
+  return enqueue(async () => {
+    const f = ensureFrame(host);
+    f.title.textContent = '操作を名前で探す';
+    f.body.textContent = '';
+
+    const input = document.createElement('input');
+    /**
+     * 🔴 **`search` にしない**(2026-08-26。実ブラウザの smoke が拾った)。
+     *
+     * ⚠ Chromium の `type="search"` は、字が入っているとき **`Escape` を食べて
+     *   欄を空にする** ── その打鍵は `<dialog>` まで届かないので、
+     *   **`Escape` を押しても器が閉じない**。⚠ しかも画面上は「一覧が元に戻る」
+     *   だけなので、user には**押しても閉じない**としか見えない。
+     * 🔑 一覧の絞り込み(`entry-filter`)は `search` のままでよい ── あちらは
+     *   面に居座る欄なので「Esc で消す」が正しい。**ここは 1 回きりの器**で、
+     *   `Escape` は「やめる」の意味である(CLAUDE.md §10 ── native の
+     *   `<dialog>` が**ついでにやっていた性質**を、欄が黙って奪っていた)。
+     */
+    input.type = 'text';
+    input.setAttribute('data-pkc-field', 'palette-filter');
+    input.placeholder = '操作の名前';
+    // ⚠ `placeholder` は名前ではない ── 値を入れると読み上げから消える
+    input.setAttribute('aria-label', '操作の名前で絞り込む');
+    const list = document.createElement('div');
+    list.setAttribute('data-pkc-field', 'palette-list');
+    f.body.append(input, list);
+
+    let chosen: string | null = null;
+    /** いま並んでいる**押せる**行(Enter が拾う先)。 */
+    let firstReady: HTMLButtonElement | null = null;
+
+    const draw = (): void => {
+      list.textContent = '';
+      firstReady = null;
+      const found = rows(input.value);
+      if (found.length === 0) {
+        const none = document.createElement('p');
+        none.setAttribute('data-pkc-field', 'palette-empty');
+        // ⚠ 空を黙って出さない ── 「打ち間違いか、そもそも無いのか」が分かる字にする
+        none.textContent = 'その名前の操作はありません。別の言い方で探してみてください。';
+        list.append(none);
+        return;
+      }
+      for (const r of found) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.setAttribute('data-pkc-field', 'palette-row');
+        btn.setAttribute('data-pkc-command', r.id);
+        const name = document.createElement('span');
+        name.setAttribute('data-pkc-field', 'palette-label');
+        name.textContent = r.label;
+        btn.append(name);
+        if (r.keys.length > 0) {
+          const keys = document.createElement('span');
+          keys.setAttribute('data-pkc-field', 'palette-keys');
+          // 🔑 割当も出す ──「次はこれで呼べる」が伝わる(#425 段①)
+          keys.textContent = r.keys.join(' / ');
+          btn.append(keys);
+        }
+        if (r.why !== '') {
+          const why = document.createElement('span');
+          why.setAttribute('data-pkc-field', 'palette-why');
+          why.textContent = r.why;
+          btn.append(why);
+        }
+        if (!r.ready) {
+          // ⚠ 押せないことを**器に言わせる** ── 見た目だけ薄くすると押せてしまう
+          btn.disabled = true;
+        } else if (firstReady === null) {
+          /**
+           * ⚠ **`else if` を `if` にする変異は生き延びる**(2026-08-26 の M15)──
+           *   `paletteRows` が**押せるものを先に並べる**ので、押せる行が 1 つでも
+           *   あれば先頭が押せる行であり、無ければ `.click()` が `disabled` で
+           *   不発になる。つまり**いまは等価**である。
+           * 🔑 それでも `else` を残すのは、**並び替えを外した日に静かに壊れない**
+           *   ようにするため ── ここは「先頭」ではなく「**押せる先頭**」を
+           *   拾うと決めた場所である(依存を 1 つ減らす)。
+           */
+          firstReady = btn;
+        }
+        btn.addEventListener('click', () => {
+          chosen = r.id;
+          f.ok.click();
+        });
+        list.append(btn);
+      }
+    };
+
+    input.addEventListener('input', draw);
+    input.addEventListener('keydown', (ev: KeyboardEvent) => {
+      /**
+       * ⚠ **打っている最中の Enter は「1 番上の押せる行」** ── 一覧へ焦点を
+       *   移してから押させると、絞り込んで即実行という本来の速さが消える。
+       * ⚠ `isComposing` の間は拾わない ── 変換確定の Enter で実行してしまう。
+       */
+      if (ev.key !== 'Enter' || ev.isComposing) return;
+      if (firstReady === null) return;
+      ev.preventDefault();
+      firstReady.click();
+    });
+    draw();
+
+    f.ok.textContent = '実行';
+    f.ok.removeAttribute('data-pkc-danger');
+    // 🔑 受ける側は**隠す**(押した行がそのまま答え)── 消さずに隠す(器を捨てない)
+    f.ok.hidden = true;
+    f.cancel.textContent = 'やめる';
+    f.cancel.hidden = false;
+
+    const answered = open(f, 'cancel');
+    // 🔑 焦点は**探す欄**へ ── 開いた直後にやることは「名前を打つ」だからである
+    input.focus();
     const answer = await answered;
     // ⚠ 隠したままにしない ── 器は使い回すので、次の確認で受ける側が消える
     f.ok.hidden = false;
