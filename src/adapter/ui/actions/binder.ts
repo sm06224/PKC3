@@ -1179,6 +1179,17 @@ export function openPaletteFor(
   dispatcher: Dispatcher,
   keymap: KeymapStore,
 ): void {
+  /**
+   * 🔴 **開いた瞬間の欄を控える**(#425 段②-b)。
+   *
+   * ⚠ **打つたびに走る `rows` の中で見てはいけない** ── そのときの焦点は
+   *   **器の中の探す欄**なので、見ると**常に「押せません」**になる。
+   * 🔑 器は閉じるときに**この欄へ焦点を返す**(`app-dialog` の後始末)。
+   *   ⚠ **選択範囲も残る**(2026-08-26 に実ブラウザで実測:
+   *   開く前 1-4 → 開いている間 1-4(焦点なし)→ 閉じた後 1-4(焦点あり))
+   *   ── 推測ではなく測った値である。
+   */
+  const target = formatTargetOf(root.ownerDocument.activeElement);
   const rows = (query: string) => {
     const ready = new Set<string>();
     for (const c of KEY_COMMANDS) {
@@ -1194,6 +1205,16 @@ export function openPaletteFor(
        *   **この面が「押せる」と嘘をつかない**ためである
        *   (CLAUDE.md「『これが無いと壊れる』とは書かない」)。
        */
+      /**
+       * 🔴 **記法は、開いたとき本文の欄に居たなら押せる**(#425 段②-b)。
+       * ⚠ 全域の命令ではないので下の門を通らない ── ここで先に拾う。
+       * 🔑 判定は `applyFormatTo` と**同じ表**(`FORMAT_OF`)を見る ──
+       *   別の一覧を持つと「出るのに押せない」が静かに生まれる(§7)。
+       */
+      if (target !== null && FORMAT_OF[c.id] !== undefined) {
+        ready.add(c.id);
+        continue;
+      }
       if (!c.contexts.includes('global')) continue;
       if (runGlobalCommand(c.id, root, dispatcher, keymap, noop, true)) ready.add(c.id);
     }
@@ -1209,7 +1230,37 @@ export function openPaletteFor(
   void pickCommandInApp(root, rows).then((picked) => {
     if (picked === null) return;
     // ⚠ 既定を止める口は要らない(打鍵ではないので) ── 実行だけする
-    runGlobalCommand(picked, root, dispatcher, keymap, noop);
+    /**
+     * ⚠ **この 2 行は「正しさ」を守っていない ── 意図を書くための門である**
+     *   (2026-08-26、変異試験 P7 / P9 が SURVIVED で教えた)。
+     *   ① 全域で当たった命令は `FORMAT_OF` に載っていないので、`return` を外しても
+     *      下は素通りする ② 記法でない命令を下へ渡しても `applyFormatTo` が
+     *      `false` を返して何もしない ── **どちらも答えは 1 バイトも変わらない**。
+     * ⚠ そのうえ**押せない行は `disabled`**(`app-dialog`)なので、
+     *   記法でない命令がここへ来ること自体が起きない。
+     * 🔑 **だから変異試験では生き延びるのが正しい。** 残してあるのは
+     *   「**全域が先、記法は後**」という順番を字面で見せるためである
+     *   (CLAUDE.md「これが無いと壊れる、と書く前に外して壊れるのを見る」)。
+     */
+    if (runGlobalCommand(picked, root, dispatcher, keymap, noop)) return;
+    if (FORMAT_OF[picked] === undefined) return;
+    /**
+     * 🔴 **記法を、開いたときの欄へ当てる**(#425 段②-b)。
+     *
+     * ⚠ **控えた欄が消えていたら、当てずに理由を出す** ── 待っている間に面ごと
+     *   組み直されると別の要素になっており、そこへ当てると**選択範囲は先頭**なので
+     *   **user が選んでいない所に記法が入る**(本文が静かに壊れる向き)。
+     * 🔑 「無言で捨てない」と「間違った所へ書かない」は両立する ── 断り文を出す。
+     */
+    if (target === null) return;
+    if (!target.isConnected) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '書き込む欄が変わったので入れませんでした(もう一度選んでから実行してください)',
+      });
+      return;
+    }
+    applyFormatTo(target, picked);
   });
 }
 
@@ -3343,6 +3394,42 @@ const FORMAT_OF: Readonly<Record<string, FormatOp>> = {
   'format-strike': 'strike',
 };
 
+/**
+ * 🔴 **記法を欄へ当てる、唯一の口**(#425 段②-b。CLAUDE.md §7)。
+ *
+ * ⚠ 直す前は**同じ 3 行が 2 か所に写して**あった(2 列の `editor-body` と
+ *   1 面の `row-source`)── そこへパレットからの経路を足すと **3 か所**になる。
+ *   片方だけ直すと「鍵で入る形」と「パレットで入る形」が静かに食い違う。
+ *
+ * @returns その命令が記法でなければ `false`(呼び側は既定を止めない)
+ */
+export function applyFormatTo(ta: HTMLTextAreaElement, cmd: string): boolean {
+  const op = FORMAT_OF[cmd];
+  /**
+   * ⚠ **ここへ記法でない命令は来ない**(呼び側 3 つとも先に `FORMAT_OF` を見る)──
+   *   2026-08-26 の変異試験 P8 が SURVIVED で教えた。⚠ 返り値を `true` に変えても
+   *   落ちる test は無い。🔑 残してあるのは**この関数の約束**(記法でなければ
+   *   何もせず false)を字面で示すためで、守っている test は無い。
+   */
+  if (op === undefined) return false;
+  writeBack(
+    ta,
+    applyFormat({ text: ta.value, start: ta.selectionStart, end: ta.selectionEnd }, op),
+  );
+  return true;
+}
+
+/**
+ * 🔴 **記法を当てられる欄か**(#425 段②-b)。
+ * ⚠ **欄の名前で見る**(面ではなく)── 2 列の本文と 1 面の行は別の面に在るが、
+ *   どちらも記法を受ける。⚠ 題名は受けない(題名に太字を入れても意味が無い)。
+ */
+export function formatTargetOf(el: unknown): HTMLTextAreaElement | null {
+  if (!(el instanceof HTMLTextAreaElement)) return null;
+  const f = el.getAttribute('data-pkc-field');
+  return f === 'editor-body' || f === 'row-source' ? el : null;
+}
+
 function isEditorBody(el: EventTarget | null): el is HTMLTextAreaElement {
   return (
     el instanceof HTMLTextAreaElement &&
@@ -3766,17 +3853,10 @@ export function bindActions(
      */
     if (field === 'row-source') {
       const rowCmd = keymap.match(ke, 'row');
-      const rowOp = rowCmd === null ? undefined : FORMAT_OF[rowCmd];
-      if (rowOp === undefined) return;
+      if (rowCmd === null || FORMAT_OF[rowCmd] === undefined) return;
       ke.preventDefault();
-      const ta = ke.target as HTMLTextAreaElement;
-      writeBack(
-        ta,
-        applyFormat(
-          { text: ta.value, start: ta.selectionStart, end: ta.selectionEnd },
-          rowOp,
-        ),
-      );
+      // 🔑 当て方は `applyFormatTo` 1 か所(§7 ── パレットも同じ口を通る)
+      applyFormatTo(ke.target as HTMLTextAreaElement, rowCmd);
       return;
     }
     /**
@@ -3830,18 +3910,12 @@ export function bindActions(
       if (refuseWhileBusy('commit-edit', dispatcher, services)) return;
       renameFromEditorInput(dispatcher, root);
       dispatcher.dispatch({ type: 'COMMIT_EDIT' });
-    } else if (field === 'editor-body' && op !== undefined) {
+    } else if (field === 'editor-body' && op !== undefined && cmd !== null) {
       // 🔑 **キーボードは近道**(業務画面の作法 ── user 指示 2026-08-03)。
       // 本文だけ。題名に太字を入れても意味が無い。⚠ `isComposing` は上で弾き済み
       ke.preventDefault();
-      const ta = ke.target as HTMLTextAreaElement;
-      writeBack(
-        ta,
-        applyFormat(
-          { text: ta.value, start: ta.selectionStart, end: ta.selectionEnd },
-          op,
-        ),
-      );
+      // 🔑 当て方は `applyFormatTo` 1 か所(§7 ── パレットも同じ口を通る)
+      applyFormatTo(ke.target as HTMLTextAreaElement, cmd);
     } else if (cmd === 'cancel-edit') {
       ke.preventDefault();
       cancelFromEditor(dispatcher, root);
