@@ -11,7 +11,14 @@ import {
   matchesTitle,
   normalizeQuery,
   visibleOrder,
+  entryFilterOf,
+  NO_KINDS,
 } from '../../src/features/filter/title-filter';
+
+/** 絞り込みが見る相手。⚠ 種類は既定を 'text' にする(種類の検査は別の describe)。 */
+const tgt = (lid: string, title: string, archetype = 'text') => ({ lid, title, archetype });
+const filterOf = (q: string, hits: ReadonlySet<string> | null = null) =>
+  entryFilterOf(q, hits, NO_KINDS);
 
 describe('絞り込みの規則', () => {
   it('空の絞り込みは全部通す', () => {
@@ -27,13 +34,15 @@ describe('絞り込みの規則', () => {
 
   it('並びは**元のまま**(絞り込みで順番が入れ替わらない)', () => {
     const titles: Record<string, string> = { a: 'りんご', b: 'ひみつ', c: 'りんご園' };
-    expect(visibleOrder(['a', 'b', 'c'], (l) => titles[l], 'りんご')).toEqual(['a', 'c']);
+    expect(
+      visibleOrder(['a', 'b', 'c'], (l) => tgt(l, titles[l]!), filterOf('りんご')),
+    ).toEqual(['a', 'c']);
   });
 
   it('題名の取れない lid は落ちる(一覧に無いものを混ぜない)', () => {
-    expect(visibleOrder(['a', 'zz'], (l) => (l === 'a' ? 'x' : undefined), '')).toEqual([
-      'a',
-    ]);
+    expect(
+      visibleOrder(['a', 'zz'], (l) => (l === 'a' ? tgt('a', 'x') : undefined), filterOf('')),
+    ).toEqual(['a']);
   });
 });
 
@@ -47,16 +56,20 @@ describe('本文の当たりも「見えている」に数える', () => {
   const hits = new Set(['b']);
 
   it('題名が当たらなくても、本文が当たれば見えている', () => {
-    expect(visibleOrder(['a', 'b', 'c'], (l) => titles[l], 'りんご', hits)).toEqual(['a', 'b']);
+    expect(
+      visibleOrder(['a', 'b', 'c'], (l) => tgt(l, titles[l]!), filterOf('りんご', hits)),
+    ).toEqual(['a', 'b']);
   });
 
   it('🔴 一覧の規則(matchesEntry)と答えが一致する', () => {
-    const q = normalizeQuery('りんご');
-    const byList = ['a', 'b', 'c'].filter((l) => matchesEntry(l, titles[l]!, q, hits));
-    expect(visibleOrder(['a', 'b', 'c'], (l) => titles[l], 'りんご', hits)).toEqual(byList);
+    const f = filterOf('りんご', hits);
+    const byList = ['a', 'b', 'c'].filter((l) => matchesEntry(tgt(l, titles[l]!), f));
+    expect(visibleOrder(['a', 'b', 'c'], (l) => tgt(l, titles[l]!), f)).toEqual(byList);
   });
 
   it('当たりがまだ返っていない(null)なら題名だけ', () => {
-    expect(visibleOrder(['a', 'b'], (l) => titles[l], 'りんご', null)).toEqual(['a']);
+    expect(visibleOrder(['a', 'b'], (l) => tgt(l, titles[l]!), filterOf('りんご'))).toEqual([
+      'a',
+    ]);
   });
 });

@@ -22,7 +22,8 @@ import type {
   GroupResult as QueryGroups,
   KeyResult as QueryKeys,
 } from '@features/query/group-by';
-import { visibleOrder } from '@features/filter/title-filter';
+import { NO_KINDS, entryFilterOf, visibleOrder } from '@features/filter/title-filter';
+import { toggleKind } from '@features/filter/kind-filter';
 import { STRUCTURAL, type RelationKind } from '@features/relation/kinds';
 import { replaceAll } from '@features/markdown/body-replace';
 import {
@@ -486,6 +487,15 @@ export interface AppState {
    */
   filterQuery: string;
   /**
+   * 🔴 **種類の絞り(#411)。空 = 絞らない。**
+   *
+   * ⚠ **`filterQuery` と別に持つ**(語に混ぜない)── 混ぜると「語を消したのに
+   *   絞りが残る / 札を外したのに語が消える」という、どちらが効いているのか
+   *   user に読めない画面になる。⚠ 空集合を「1 件も出さない」と読まないこと
+   *   (規則は `matchesEntry` 1 か所に在る)。
+   */
+  kindFilter: ReadonlySet<string>;
+  /**
    * 🔴 **本文が当たった lid**(#181 全文検索)。⚠ `null` = **まだ返っていない**
    * であって「0 件」ではない ── 打った直後は題名の結果だけが出て、SQL が返ると
    * **増える**(減る向きに倒すと、打鍵のたびに行が消えてちらつく)。
@@ -687,6 +697,7 @@ export const initialState: AppState = {
   freshLid: null,
   viewMode: 'detail',
   filterQuery: '',
+  kindFilter: NO_KINDS,
   searchHits: null,
   selectionHistory: EMPTY_HISTORY,
   entrySort: DEFAULT_ENTRY_SORT,
@@ -1052,6 +1063,8 @@ export type UserAction =
   | { type: 'DUAL_RENAME_BEGIN'; side: DualSide; lid: string }
   | { type: 'DUAL_RENAME_END' }
   /** 🔴 **このペインだけの絞り込み**(#273 残件)。 */
+  | { type: 'TOGGLE_KIND_FILTER'; archetype: string }
+  | { type: 'CLEAR_KIND_FILTER' }
   | { type: 'DUAL_SET_FILTER'; side: DualSide; filter: string }
   /** 🔴 **1 つ前 / 次の場所へ**(#273 残件。タブごとの履歴)。 */
   | { type: 'DUAL_BACK'; side: DualSide }
@@ -1770,6 +1783,20 @@ function reduceCore(
         state: { ...state, filterQuery: action.query, searchHits: null, searchHitsQuery: '' },
         events: [{ type: 'REQUEST_SEARCH', query: action.query }],
       };
+    /**
+     * 🔴 **種類の札を押した / もう一度押した**(#411)。
+     * ⚠ 選択は消さない(`SET_ENTRY_FILTER` と同じ規約)── 絞って消えた行を
+     *   選んでいても、外せば戻ってくる。
+     * ⚠ **本文の当たり(`searchHits`)は捨てない** ── 語は変わっていないので、
+     *   捨てると当たりが返るまで**本文だけ当たっていた行が消える**(ちらつく)。
+     */
+    case 'TOGGLE_KIND_FILTER': {
+      const kinds = toggleKind(state.kindFilter, action.archetype);
+      return { state: { ...state, kindFilter: kinds }, events: [] };
+    }
+    case 'CLEAR_KIND_FILTER':
+      if (state.kindFilter.size === 0) return { state, events: [] };
+      return { state: { ...state, kindFilter: NO_KINDS }, events: [] };
     case 'SET_ENTRY_SORT': {
       // ⚠ 選択は消さない ── 並び替えただけで開いているノートが変わると驚く
       const desc = action.desc ?? NATURAL_DESC[action.sort];
@@ -2793,6 +2820,7 @@ function reduceCore(
         searchHits: state.searchHits,
         sort: state.entrySort,
         sortDesc: state.entrySortDesc,
+        kinds: state.kindFilter,
       });
       const range = rangeInRows(rows, state.selectionAnchor, action.lid);
       if (range.length === 0) return { state, events: [] };
@@ -2808,6 +2836,7 @@ function reduceCore(
         searchHits: state.searchHits,
         sort: state.entrySort,
         sortDesc: state.entrySortDesc,
+        kinds: state.kindFilter,
       }).map((m) => m.lid);
       if (rows.length === 0) return { state, events: [] };
       return {
@@ -2927,6 +2956,14 @@ function reduceCore(
           // 新規未編集 cancel の掃除で entry ごと消える)。
           // ⚠ 欄の文字も消える ── 書き戻しは sidebar が持つ
           filterQuery: '',
+          /**
+           * 🔴 **種類の絞りも外す**(#411)── **同じ事故が軸を変えて戻ってくる**。
+           * 「添付だけ」を出しているときに「ノート」を作ると、作った物は
+           * 札に弾かれて**一生一覧に出ない**。user は「効かなかった」と思って
+           * Esc を押し、新規未編集 cancel の掃除で **entry ごと消える**
+           * (review M-2 で `filterQuery` について実証済みの経路そのもの)。
+           */
+          kindFilter: NO_KINDS,
           freshLid: wantsEdit ? action.lid : null, // 非編集作成は fresh 掃除の対象外
           error: null,
           openBody: {
@@ -3388,6 +3425,7 @@ function reduceCore(
         ...paneFilterOptions(pane, state.filterQuery, state.searchHits),
         sort: state.entrySort,
         sortDesc: state.entrySortDesc,
+        kinds: state.kindFilter,
       });
       let next: DualPaneState;
       if (action.mode === 'range') {
@@ -3836,11 +3874,12 @@ function removeEntryFromState(
     // ⚠ 規則は `visibleOrder` に 1 本化 ── 一覧と後継が別々の答えを出さない
     // ⚠ **本文の当たりも渡す**(2026-08-15)── 渡さないと、本文だけが当たっている
     //    ノートを消したとき `indexOf` が -1 になり、選択が黙って null へ飛ぶ
+    // ⚠ **種類の絞りも渡す**(#411)── 渡さないと、添付だけを出しているときに
+    //    ノートを消すと**画面に出ていないノート**が次に選ばれる(同じ事故の軸違い)
     const before = visibleOrder(
       state.order,
-      (l) => state.entryMetas.get(l)?.title,
-      state.filterQuery,
-      state.searchHits,
+      (l) => state.entryMetas.get(l),
+      entryFilterOf(state.filterQuery, state.searchHits, state.kindFilter),
     );
     const vIdx = before.indexOf(lid);
     const after = before.filter((l) => l !== lid);

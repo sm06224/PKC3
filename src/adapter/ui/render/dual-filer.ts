@@ -263,6 +263,7 @@ export class DualFilerRenderer {
   private lastMetas: AppState['entryMetas'] | null = null;
   private lastRelations: AppState['relations'] | null = null;
   private lastFilter: string | null = null;
+  private lastKinds: ReadonlySet<string> | null = null;
   private lastSort: AppState['entrySort'] | null = null;
   /**
    * 🔴 **向きも門の材料**(2026-08-19、足したその日に test が捕まえた)。
@@ -310,6 +311,8 @@ export class DualFilerRenderer {
       state.entryMetas === this.lastMetas &&
       state.relations === this.lastRelations &&
       state.filterQuery === this.lastFilter &&
+      // 🔴 **種類の絞りも指紋**(#411)── 上と同じ理由
+      state.kindFilter === this.lastKinds &&
       state.entrySort === this.lastSort &&
       state.entrySortDesc === this.lastSortDesc &&
       state.searchHits === this.lastHits &&
@@ -320,6 +323,7 @@ export class DualFilerRenderer {
     this.lastMetas = state.entryMetas;
     this.lastRelations = state.relations;
     this.lastFilter = state.filterQuery;
+    this.lastKinds = state.kindFilter;
     this.lastSort = state.entrySort;
     this.lastSortDesc = state.entrySortDesc;
     this.lastHits = state.searchHits;
@@ -333,6 +337,7 @@ export class DualFilerRenderer {
         ...paneFilterOptions(pane, state.filterQuery, state.searchHits),
         sort: state.entrySort,
         sortDesc: state.entrySortDesc,
+        kinds: state.kindFilter,
       });
       this.renderPane(frame.panes[side], side, state, pane, rows, bookmarks);
     }

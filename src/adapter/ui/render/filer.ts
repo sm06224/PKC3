@@ -64,6 +64,7 @@ export class FilerRenderer {
   private lastMarks = '';
   /** ⚠ 絞り込みも指紋の一部(review M-3 ── 絞り込み中にファイラだけ全件出ていた)。 */
   private lastFilter: string | null = null;
+  private lastKinds: ReadonlySet<string> | null = null;
   /** ⚠ 並び順と本文検索の当たりも指紋(着地前レビュー 3 ── 入れないと死んだ操作子になる)。 */
   private lastSort: AppState['entrySort'] | null = null;
   /** ⚠ 向きも指紋(2 ペイン側で実際に踏んだ ── 同型なのでこちらも入れる)。 */
@@ -548,6 +549,9 @@ export class FilerRenderer {
       (datesChanged && sortedByDate) ||
       state.relations !== this.lastRelations ||
       state.filterQuery !== this.lastFilter ||
+      // 🔴 **種類の絞りも指紋**(#411)── 入れないと**札を押しても描き直さない**
+      //    (`filerRows` へ渡しているのに指紋に入れ忘れた、の再演。実ブラウザが拾った)
+      state.kindFilter !== this.lastKinds ||
       state.entrySort !== this.lastSort ||
       state.entrySortDesc !== this.lastSortDesc ||
       state.searchHits !== this.lastHits ||
@@ -635,6 +639,7 @@ export class FilerRenderer {
     this.lastScopeLid = scopeLid;
     this.lastTrash = state.trashPanel;
     this.lastFilter = state.filterQuery;
+    this.lastKinds = state.kindFilter;
     this.lastSort = state.entrySort;
     this.lastSortDesc = state.entrySortDesc;
     this.lastHits = state.searchHits;
@@ -658,6 +663,7 @@ export class FilerRenderer {
       searchHits: state.searchHits,
       sort: state.entrySort,
       sortDesc: state.entrySortDesc,
+      kinds: state.kindFilter,
     });
 
     /**

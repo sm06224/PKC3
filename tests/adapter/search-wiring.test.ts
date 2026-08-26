@@ -20,7 +20,7 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { SidebarRenderer } from '../../src/adapter/ui/render/sidebar';
 import { stubStamps } from '../helpers/store-stamps';
 import { stubRevisionOps } from '../helpers/revision-stub';
-import { matchesEntry } from '../../src/features/filter/title-filter';
+import { matchesEntry, NO_KINDS } from '../../src/features/filter/title-filter';
 
 function meta(lid: string, title: string): EntryMeta {
   return {
@@ -189,9 +189,15 @@ describe('全文検索の配線(#181)', () => {
   });
 
   it('matchesEntry: 本文の当たりが null(未応答)でも題名は効く', () => {
-    expect(matchesEntry('n1', '会議メモ', '会議', null)).toBe(true);
-    expect(matchesEntry('n2', '買い物', '会議', null)).toBe(false);
-    expect(matchesEntry('n2', '買い物', '会議', new Set(['n2']))).toBe(true);
+    const t = (lid: string, title: string) => ({ lid, title, archetype: 'text' });
+    const f = (hits: ReadonlySet<string> | null) => ({
+      query: '会議',
+      bodyHits: hits,
+      kinds: NO_KINDS,
+    });
+    expect(matchesEntry(t('n1', '会議メモ'), f(null))).toBe(true);
+    expect(matchesEntry(t('n2', '買い物'), f(null))).toBe(false);
+    expect(matchesEntry(t('n2', '買い物'), f(new Set(['n2'])))).toBe(true);
   });
 });
 

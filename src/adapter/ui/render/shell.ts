@@ -225,6 +225,19 @@ export function buildShell(root: HTMLElement): ShellRegions {
   findBar.append(sort);
 
   /**
+   * 🔴 **種類で絞る札**(#411 / 台帳 #180)。中身は state から描く
+   * (`SidebarPresenter`)── ここは**器だけ**置く。
+   *
+   * ⚠ **探す欄の下**に置く(同じ「一覧の絞り方」なので離さない)。⚠ そして
+   *   **タブの外**に置く ── 中に入れると、面を変えたときに札が消えて
+   *   「絞りが解けた」ように見える(実際は効いたままなので、いちばん混乱する形)。
+   */
+  const kindBar = document.createElement('div');
+  kindBar.setAttribute('data-pkc-region', 'kind-bar');
+  // ⚠ 何も出ていないときは畳む(空の帯が 1 行ぶん場所を取らないように)
+  kindBar.hidden = true;
+
+  /**
    * 🔴 **分割ボタンにする**(P10、user 指示 2026-08-05
    * 「プルダウン式の新規作成ボタンは使いにくいからマルチメニューに畳んでください。
    *  ▼ を押下した際に種別を選択して、追加ボタンと ctrl+n の対象を更新、
@@ -373,7 +386,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   browseHost.setAttribute('data-pkc-region', 'browse-host');
   browseHost.append(list);
   // ⚠ 一覧は createBar の**外**(下)── 中に入れると 1 行に混ざって折り返す
-  sidebar.append(tabs, findBar, createBar, menu, browseHost, collectionBar);
+  sidebar.append(tabs, findBar, kindBar, createBar, menu, browseHost, collectionBar);
 
   // ── 中央(いま開いているもの)────────────────────────
   // 🔑 本文と**追記欄は別の器**にする(P8 段⑧)。本文は書き換わるたびに作り直すので、

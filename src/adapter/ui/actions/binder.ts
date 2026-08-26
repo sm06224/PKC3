@@ -128,6 +128,7 @@ const visibleFilerRows = (st: AppState): EntryMeta[] =>
     searchHits: st.searchHits,
     sort: st.entrySort,
     sortDesc: st.entrySortDesc,
+    kinds: st.kindFilter,
   });
 
 /** その entry が**既にそこに居る**か(動かす必要が無い)。 */
@@ -175,6 +176,7 @@ const dualPaneRows = (st: AppState, side: DualSide): EntryMeta[] => {
     ...paneFilterOptions(pane, st.filterQuery, st.searchHits),
     sort: st.entrySort,
     sortDesc: st.entrySortDesc,
+    kinds: st.kindFilter,
   });
 };
 
@@ -1317,6 +1319,19 @@ const ACTIONS: Record<string, ActionHandler> = {
   'nav-back': (dispatcher) => dispatcher.dispatch({ type: 'NAV_HISTORY', dir: 'back' }),
   'nav-forward': (dispatcher) => dispatcher.dispatch({ type: 'NAV_HISTORY', dir: 'forward' }),
   /** 一覧の並び順(#183)。⚠ 妥当性の判定は `isEntrySort` 1 か所。 */
+  /**
+   * 🔴 **種類で絞る札**(#411)。もう一度押すと外れる。
+   * ⚠ 綴りは**札が持っている**(`data-pkc-kind`)── ここで推測しない。
+   *   無い場合は**何もしない**(未知の押下で絞りを壊さない)。
+   */
+  'toggle-kind-filter': (dispatcher, target) => {
+    const kind = target.closest('[data-pkc-kind]')?.getAttribute('data-pkc-kind');
+    if (kind === null || kind === undefined || kind === '') return;
+    dispatcher.dispatch({ type: 'TOGGLE_KIND_FILTER', archetype: kind });
+  },
+  'clear-kind-filter': (dispatcher) => {
+    dispatcher.dispatch({ type: 'CLEAR_KIND_FILTER' });
+  },
   'set-entry-sort': (dispatcher, target) => {
     const v = (target as HTMLSelectElement).value;
     if (isEntrySort(v)) dispatcher.dispatch({ type: 'SET_ENTRY_SORT', sort: v });

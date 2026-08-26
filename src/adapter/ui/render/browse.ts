@@ -103,7 +103,10 @@ export class BrowseRouter {
   render(state: AppState, mode: BrowseMode): void {
     // 🔑 面 = 探し方 × 「絞り込み中かどうか」。⚠ 絞り込んだ結果は先頭からが正しく、
     //    戻したときに元の位置へ帰るのが欲しい振る舞い
-    const key = `${mode}|${state.filterQuery === '' ? '' : 'q'}`;
+    // ⚠ **種類の絞りも「絞り込み中」に数える**(#411)── 数えないと、札を押した
+    //    ときだけスクロールが前の位置のまま残る(語で絞ったときと振る舞いが違う)
+    const filtering = state.filterQuery !== '' || state.kindFilter.size > 0;
+    const key = `${mode}|${filtering ? 'q' : ''}`;
     // ① 🔴 **中身を書き換える前に**退避する ── 描いた後だと、縮んで 0 に
     //    丸められた値を保存してしまう(実測でそう外した)
     this.scroll.park();

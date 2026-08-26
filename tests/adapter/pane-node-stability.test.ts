@@ -28,6 +28,7 @@
  * 2 晩踏んだが、症状は retry で消せてしまう ── 原因の側に門を置く。
  */
 import { beforeEach, describe, expect, it } from 'vitest';
+import { NO_KINDS } from '../../src/features/filter/title-filter';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { AppState } from '../../src/adapter/state/app-state';
 import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
@@ -59,6 +60,8 @@ function stateOf(metas: EntryMeta[], over: Partial<AppState> = {}): AppState {
     linkedFiles: new Map(),
     trashPanel: null,
     filterQuery: '',
+    // #411: 種類の絞り。⚠ 上と同じ理由で**明示で置く**(空 = 絞らない)
+    kindFilter: NO_KINDS,
     // #240 段②: 印(複数選択)。⚠ `as unknown as AppState` で作っているので
     //    足りない field は**実行時に落ちる**まで気づけない ── 明示で置く
     scopeLid: null,
