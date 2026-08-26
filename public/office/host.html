@@ -1274,8 +1274,29 @@
     screenEl.hidden = false;
     var t0 = Date.now();
     try {
+      /**
+       * 🔴 **入力の経路を console に出す**(#433 の計測。PKC 側の flag
+       * `office.inputLog` から `input-log=1` で渡ってくる)。
+       *
+       * ⚠ **既定では 1 バイトも足さない** ── log は速度にも効くし、
+       *   何より user の console を汚す。
+       * 🔑 焼き直しは要らない ── 配っている wasm に `qt.qpa.wasm.inputcontext` の
+       *   log は既に入っており(実測)、`soffice.js` は `Module["ENV"]` を輸出して
+       *   いる(`ENV.MAX_CONCURRENCY` を立てる前例が上流の loader に在る)。
+       * ⚠ 出るのは**経路の名前**だけで、打った字は出ない
+       *   (`processKey as KeyEvent` / `inputType : deleteContentBackward`)。
+       */
+      var preRun = [];
+      if (params.has('input-log')) {
+        preRun.push(function (mod) {
+          // ⚠ 引数で来ないビルドもあるので、両方から拾う(片方に賭けない)
+          var env = (mod && mod.ENV) || (window.__lo && window.__lo.ENV) || null;
+          if (env) env.QT_LOGGING_RULES = 'qt.qpa.wasm.inputcontext.debug=true';
+        });
+      }
       var inst = window.__lo = await window.qtLoad({
         noInitialRun: true,
+        preRun: preRun,
         locateFile: function (path) {
           return path === 'soffice.data.js.metadata' ? metaUrl : path;
         },
