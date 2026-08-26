@@ -16,6 +16,10 @@ import {
   readPlainMarkdown,
   titleFromFileName,
 } from '../../src/features/import/plain-markdown';
+import {
+  OFFICE_LAUNCH_EXTS,
+  isOfficeLaunchFile,
+} from '../../src/features/office/office-launch';
 
 describe('🔴 manifest の宣言と受理器の parity', () => {
   // ⚠ cwd に依存させない(相対 path だと root 以外から vitest を起動すると壊れる)
@@ -32,16 +36,42 @@ describe('🔴 manifest の宣言と受理器の parity', () => {
     expect(declared.length).toBeGreaterThan(0);
   });
 
-  it('manifest が宣言する拡張子は、受理器が**実際に受ける**', () => {
+  /**
+   * 🔴 **宣言した拡張子は、必ず「どちらか」の受理器が受ける**(#432 で 2 系統になった)。
+   *
+   * ⚠ 2026-08-26 まで受理器は markdown の 1 つだけで、この検査は
+   *   「宣言 = markdown」と等値で pin していた。⚠ Office の関連付けを足したので
+   *   **宣言 = markdown ∪ Office** になる ── ここを直さないと、
+   *   「.docx を markdown 受理器が受けろ」という**成り立たない条件**になる。
+   */
+  it('manifest が宣言する拡張子は、どちらかの受理器が**実際に受ける**', () => {
     for (const ext of declared) {
-      expect(isMarkdownFileName(`note${ext}`), `${ext} を受けない`).toBe(true);
+      const md = isMarkdownFileName(`note${ext}`);
+      const office = isOfficeLaunchFile(`note${ext}`);
+      expect(md || office, `${ext} をどちらの受理器も受けない`).toBe(true);
     }
   });
 
   it('受理器が受ける拡張子は、manifest が**宣言している**(逆向き)', () => {
     // ⚠ 片側だけだと「宣言していないものを勝手に受ける」が通る ──
     // それは file_handlers から開けないのに受理器だけが対応している状態
-    expect([...MARKDOWN_EXTENSIONS].sort()).toEqual([...declared].sort());
+    expect([...MARKDOWN_EXTENSIONS, ...OFFICE_LAUNCH_EXTS].sort()).toEqual(
+      [...declared].sort(),
+    );
+  });
+
+  /**
+   * 🔴 **2 つの受理器は重ならない**(#432)。
+   *
+   * ⚠ 重なると**振り分けが曖昧**になる ── 同じファイルが「markdown として
+   *   取り込まれる」のか「Office で開く」のかが、**呼ぶ順番で決まってしまう**。
+   *   それは読んでも分からない壊れ方である。
+   */
+  it('🔴 markdown と Office の受理器は、1 つも重ならない', () => {
+    const both = [...MARKDOWN_EXTENSIONS].filter((e) => OFFICE_LAUNCH_EXTS.includes(e));
+    expect(both, `両方が受ける拡張子がある(振り分けが曖昧になる): ${both.join(', ')}`).toEqual(
+      [],
+    );
   });
 });
 

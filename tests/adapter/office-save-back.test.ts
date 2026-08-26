@@ -101,6 +101,9 @@ function harness(over: Partial<SaveBackDeps> = {}): {
     isHolder: () => true,
     canWrite: () => true,
     readAttachment: async () => ({ assetKey: 'ast-old' }),
+    // ⚠ 既定は「手元のファイルではない」── #432 の分岐を素通りさせる
+    //   (手元のファイルの経路は `local-office-files.test.ts` と下の describe が見る)
+    writeLocal: async () => null,
     createNote: async (save) => {
       created.push(save.name);
       return 'new-lid';
@@ -556,6 +559,53 @@ describe('holder の門(main.ts の配線)', () => {
     ).toContain('adopt: (key, lid) => { officeWindow.adoptSave(key, lid); }');
   });
 
+  /**
+   * 🔴 **手元のファイルへ書き戻す口が、実際に配線されている**(#432 段②)。
+   *
+   * ⚠ ここを見ないと、「手元のファイルを直したのに **PKC のノートが増える**」
+   *   という、user がいちばん気づきにくい形で壊れる。
+   */
+  it('🔴 手元のファイルの行き先が窓の合言葉から引かれている', () => {
+    expect(code, '手元のファイルへ戻す口が配線されていない').toContain('writeLocal:');
+    expect(
+      code,
+      '合言葉を見分けずに書いている(ノートの lid でも書き戻しに行く)',
+    ).toContain('localOffice.nameOf(token)');
+    expect(code).toContain('localOffice.writeBack(token, bytes)');
+  });
+
+  it('🔴 OS から来た Office 文書は、markdown の取り込みへ落ちない', () => {
+    // ⚠ 落ちると `import-file.ts` が濾して**黙って捨てる** ── user から見ると
+    //   「ダブルクリックしたのに『開けるファイルがありませんでした』」になる
+    expect(code, '振り分けていない ── OS から開いても誰も受け取らない').toContain(
+      'isOfficeLaunchFile(i.file.name)',
+    );
+    // ⚠ **取り除く側**も在ること(片方だけだと二重に処理される)
+    expect(code, 'Office へ回した物を取り込みからも外していない').toContain(
+      'items.filter((i) => !isOfficeLaunchFile(i.file.name))',
+    );
+  });
+
+  it('🔴 起動の受け口では窓を開かない(ポップアップ遮断で消える)', () => {
+    /**
+     * ⚠ `launchQueue` は **user の操作ではない**ので、そこから `window.open` を
+     *   呼ぶと遮断される。控えて、user が押したときに渡す形でなければならない。
+     */
+    const intake = code.slice(code.indexOf('importLaunchFiles: async (items)'));
+    const body = intake.slice(0, intake.indexOf('presentUpdate:'));
+    expect(body, '起動の受け口で窓を開いている(遮断されて消える)').not.toContain(
+      'officeWindow.open(',
+    );
+    expect(body, '控えていない').toContain('localOffice.stage(');
+  });
+
+  it('🔴 タイルを押したときに控えを渡している(user の操作の中なので遮断されない)', () => {
+    const tile = code.slice(code.indexOf('const openOfficeTile'));
+    const body = tile.slice(0, tile.indexOf('watchOfficeHang'));
+    expect(body, '控えを取り出していない').toContain('localOffice.take()');
+    expect(body, '控えを渡していない').toContain('provideDocument(staged.name, staged.bytes, staged.token)');
+  });
+
   it('🔴 boot で取れたときと、昇格したときの**両方**で真になる', () => {
     // ⚠ 片方だけだと、もう片方の経路で保存が永久に届かない
     const assigns = code.match(/writerHolder = true;/g) ?? [];
@@ -566,5 +616,66 @@ describe('holder の門(main.ts の配線)', () => {
       promoted.slice(0, promoted.indexOf('}')),
       '昇格の分岐で holder になっていない',
     ).toContain('writerHolder = true;');
+  });
+});
+
+/**
+ * 🔴 **手元のファイルから開いた回は、元のファイルへ戻す**(#432 段②)。
+ *
+ * ⚠ ここが効かないと「**手元のファイルを直したのに PKC のノートが増える**」に
+ *   なる ── user は直したつもりで、元のファイルは古いまま残る(どちらが新しいか
+ *   分からなくなる、いちばん取り返しがつかない形)。
+ */
+describe('手元のファイルへの書き戻し(#432)', () => {
+  it('🔴 手元の合言葉なら、ノートを作らず元のファイルへ書く', async () => {
+    const wrote: { token: string; n: number }[] = [];
+    const h = harness({
+      writeLocal: async (token, bytes) => {
+        wrote.push({ token, n: bytes.length });
+        return true;
+      },
+    });
+    h.stage.put({ key: 'k1', name: '報告書.docx', token: 'local:1' });
+    expect(await h.sb.receive('k1')).toBe('replaced');
+    expect(wrote, '元のファイルへ書いていない').toHaveLength(1);
+    expect(wrote[0]!.token).toBe('local:1');
+    expect(h.created, '🔴 ノートを増やしている').toEqual([]);
+    expect(h.replaced, '添付を差し替えている').toEqual([]);
+    expect(h.notices.join(' ')).toContain('元のファイルへ保存しました');
+    expect(h.stage.keys(), '棚から片付いていない').toEqual([]);
+  });
+
+  it('🔴 書けなかったら**棚に残す**(user の編集を捨てない)', async () => {
+    const h = harness({ writeLocal: async () => false });
+    h.stage.put({ key: 'k1', name: '報告書.docx', token: 'local:1' });
+    expect(await h.sb.receive('k1')).toBe('deferred');
+    expect(h.fails.join(' '), '黙って落としている').toContain('元のファイルへ保存できません');
+    expect(h.stage.keys().length, '棚から消した ── 次の起動で取り込み直せない').toBeGreaterThan(0);
+    expect(h.created, '書けなかったのにノートを作った').toEqual([]);
+  });
+
+  /**
+   * ⚠ **対照群**。手元のファイルでない保存は、これまでどおり PKC のノートへ入る
+   *   ── 置かないと「全部書き戻しへ落ちている」と区別がつかない。
+   */
+  it('⚠ 手元のファイルでなければ、これまでどおりノートへ取り込む', async () => {
+    const h = harness({ writeLocal: async () => null });
+    h.stage.put({ key: 'k1', name: 'a.odt', token: 'lid-1' });
+    expect(await h.sb.receive('k1')).toBe('replaced');
+    // ⚠ `replaced` に積まれるのは **lid**(名前ではない ── ここで 1 度外した)
+    expect(h.replaced, 'ノートへの取り込みが走っていない').toEqual(['lid-1']);
+  });
+
+  it('⚠ 合言葉が無い保存は、書き戻しを 1 度も呼ばない', async () => {
+    let asked = 0;
+    const h = harness({
+      writeLocal: async () => {
+        asked += 1;
+        return null;
+      },
+    });
+    h.stage.put({ key: 'k1', name: 'a.odt' });
+    await h.sb.receive('k1');
+    expect(asked, '合言葉が無いのに書き戻しを引いた').toBe(0);
   });
 });
