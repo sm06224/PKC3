@@ -12,22 +12,18 @@
  * - ラベルは `[` `]` `\` を escape し、改行は 1 行に潰す(`]` 1 個でリンクが死ぬ)
  * - 宛先に空白 / 括弧 / `<` `>` が混じるなら `<…>` で囲む(裸だとリンクが切れる)
  */
-
-/** markdown のリンクラベルに入れて安全な形にする。 */
-export function escapeAssetLabel(s: string): string {
-  // ⚠ 改行が入ると markdown-it が段落を割ってリンクが死ぬ ── 1 行に潰す
-  return s.replace(/\s*\n\s*/g, ' ').replace(/[[\]\\]/g, '\\$&');
-}
+import {
+  escapeLinkLabel,
+  escapeLinkTarget,
+  formatMarkdownLink,
+} from '../markdown/link-format';
 
 /**
- * リンク宛先として安全な形にする。裸で書けない字が混じるときだけ `<…>` で囲む。
- * ⚠ `asset:` の key は不透明な文字列(PKC2 由来は規則が違う)ので、
- * 「うちの key なら安全」を前提にしない。
+ * 🔑 **規則の実体は `features/markdown/link-format.ts` へ移した**(#427 段①)──
+ *   添付固有ではないからである(`html-to-markdown.ts` が `<a>` / `<img>` の変換で
+ *   そのまま使っていた)。⚠ ここは**旧名の再輸出だけ** ── 規則を 2 本にしない(§7)。
  */
-export function escapeAssetTarget(target: string): string {
-  if (/^[^\s()<>]+$/.test(target)) return target;
-  return `<${target.replace(/[<>\\]/g, '\\$&').replace(/\s*\n\s*/g, ' ')}>`;
-}
+export { escapeLinkLabel as escapeAssetLabel, escapeLinkTarget as escapeAssetTarget };
 
 /** `mime` が画像か(`!` を付けるか)の判定。**この 1 本だけを使う**。 */
 export function isImageAssetMime(mime: string | undefined | null): boolean {
@@ -42,6 +38,5 @@ export function isImageAssetMime(mime: string | undefined | null): boolean {
  * @param image 画像として置くか(`isImageAssetMime` の結果を渡す)
  */
 export function formatAssetRef(label: string, target: string, image: boolean): string {
-  const text = label.trim() === '' ? target : label;
-  return `${image ? '!' : ''}[${escapeAssetLabel(text)}](${escapeAssetTarget(target)})`;
+  return formatMarkdownLink(label, target, image);
 }

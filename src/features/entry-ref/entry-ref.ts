@@ -35,7 +35,8 @@ export type ParsedEntryRef =
   | { kind: 'legacy'; lid: string; logId: string }
   | { kind: 'invalid'; raw: string };
 
-const SCHEME = 'entry:';
+/** ⚠ **綴りはここ 1 か所**(#427 段①で書く側も同じものを引くようにした)。 */
+export const SCHEME = 'entry:';
 const TOKEN_RE = /^[A-Za-z0-9_-]+$/;
 const SLUG_RE = /^[A-Za-z0-9-]+$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;

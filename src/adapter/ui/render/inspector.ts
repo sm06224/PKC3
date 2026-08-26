@@ -41,6 +41,7 @@ import type { AppState } from '@adapter/state/app-state';
 import type { EntryMeta } from '@core/model/entry-meta';
 import { ScrollMemory } from './scroll-memory';
 import { archetypeLabel } from './sidebar';
+import { formatEntryLink } from '@features/entry-ref/entry-ref-format';
 import { iconButton } from './icons';
 // ⚠ 日付の切り方は `features/datetime/stored-date` が正本(一覧の行と共有)。
 //    ここで独自に parse していた頃は、一覧に日付を出すときに規則が 2 つに増えた
@@ -130,6 +131,16 @@ export class InspectorRenderer {
 
     this.setRow('inspector-title', meta.title);
     this.setRow('inspector-kind', archetypeLabel(meta.archetype));
+    /**
+     * 🔑 **貼れる 1 行を、押される前に載せておく**(#427 段①)── 押した時に
+     *   組み立てると、押してから選択が移った場合に**別のノートの参照**が入る
+     *   (`view-asset` が同じ理由で「押した要素から運ぶ」形にしてある)。
+     */
+    const refBtn = this.buttons.get('copy-entry-ref');
+    if (refBtn) {
+      refBtn.setAttribute('data-pkc-entry-ref', formatEntryLink(meta.title, meta.lid));
+      refBtn.title = '本文に貼ると、このノートへのリンクになります';
+    }
     /**
      * ⚠ **持っていないノートでは行ごと畳む**(`<dt>` と `<dd>` を対で)。
      * 🔑 値は**そのまま出す**(知らない状態を黙って捨てない ── `relationLabel` と同じ向き)。
@@ -661,6 +672,17 @@ export class InspectorRenderer {
     };
     // ⚠ 文言は**実際に落ちるもの**に合わせる(P8 段⑱)── ここは可逆な
     //    アーカイブで、Markdown ではない(マニュアル §5 の表と同じ材料)
+    /**
+     * 🔴 **このノートの参照をコピー**(#427 段①)。
+     *
+     * ⚠ 直す前は **PKC3 の中で新しくリンクを張る道が無かった** ── マニュアルは
+     *   `[題名](entry:<lid>)` と案内しているのに、**`<lid>` を知る手段が画面に
+     *   1 つも無い**(この面は id を出さないし、`copy-` の action 7 つのうち
+     *   ノート自身の参照を出すものが 1 つも無かった)。
+     * 🔑 **添付の「参照をコピー」と同じ形**にする ── 貼れる 1 行を
+     *   `data-pkc-entry-ref` に載せ、binder はそれを渡すだけ(組み立て直さない)。
+     */
+    btn('copy-entry-ref', '参照をコピー');
     btn('export-entry', '書き出す');
     /**
      * 🔴 **このフォルダごと書き出す**(#399 ①)。

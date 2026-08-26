@@ -81,7 +81,7 @@ import {
   type CloseViewWindowResult,
 } from '@adapter/platform/view-window';
 import { parseLinkTarget } from '@features/entry-ref/link-target';
-import { handleCopyMdBlock } from './copy-md-block';
+import { flashCopied, handleCopyMdBlock } from './copy-md-block';
 import { finishCopy, selectedMarkdown } from './copy-source';
 import { copyMarkdownAndHtml, copyPlainText } from '@adapter/platform/clipboard';
 import { cleanForClipboard } from '@features/export/clipboard-html';
@@ -2411,6 +2411,19 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 添付の参照(`asset:<key>`)をコピーする(P8 段⑱)。
    * ⚠ 本文に貼れる形そのものを渡す ── key だけ渡すと user が書式を覚える必要がある
    */
+  /**
+   * 🔴 **このノートの参照をコピー**(#427 段①)。⚠ 添付(`copy-asset-ref`)と
+   *   **同じ作法** ── 貼れる 1 行は押した要素が持っている(`data-pkc-entry-ref`)。
+   *   ここで組み立て直すと、規則が 2 か所になる(§7)。
+   */
+  'copy-entry-ref': (_dispatcher, target, services) => {
+    const ref = target
+      .closest<HTMLElement>('[data-pkc-entry-ref]')
+      ?.getAttribute('data-pkc-entry-ref');
+    if (ref === null || ref === undefined) return;
+    services.copyText?.(ref);
+    flashCopied(target);
+  },
   'copy-asset-ref': (_dispatcher, target, services) => {
     // ⚠ 渡すのは**貼れる 1 行**(`![名前](asset:key)`)── 裸の `asset:key` を
     //    渡していた頃は、貼っても markdown としてはただの文字列だった(段⑱)。
@@ -2418,7 +2431,17 @@ const ACTIONS: Record<string, ActionHandler> = {
     const ref = target
       .closest<HTMLElement>('[data-pkc-asset-ref]')
       ?.getAttribute('data-pkc-asset-ref');
-    if (ref) services.copyText?.(ref);
+    if (!ref) return;
+    services.copyText?.(ref);
+    /**
+     * 🔴 **押した手応えを出す**(#427 段①で気づいた ── 対称の反対側)。
+     * ⚠ 直す前は**この 2 つだけ合図が無かった** ── 本文のコピー
+     * (`copy-md-block` / `copy-source`)は光るのに、参照のコピーは**無音**で、
+     * user から見て押せたのか分からない。⚠ 合図の形を 2 つ作らないために
+     * `flashCopied` は共用してある(その docstring がそう書いている)のに、
+     * **呼び忘れ**でここだけ外れていた。
+     */
+    flashCopied(target);
   },
   'download-asset': (dispatcher, target, services) => {
     const key = target.getAttribute('data-pkc-asset-key');
