@@ -28,6 +28,23 @@ export type LinkKind = 'inline' | 'reference' | 'html';
 
 export interface LinkSite {
   kind: LinkKind;
+  /**
+   * 🔴 **画像として書かれているか**(#264 段⓪)。
+   *
+   * ⚠ **これを持たないと、「取り込む」がリンクまで取りに行く** ── user が単に
+   *   貼っただけの web ページの URL まで**第三者へ通信する**ことになる
+   *   (#264 が「自動で取り込む」を棄却した理由②を、押した瞬間にリンクの数だけやる)。
+   * ⚠ 「fetch して MIME で捨てる」は解にならない ── **通信そのもの**が問題なので、
+   *   **行く前に**絞る必要がある。
+   *
+   * 決まり方は形ごとに違う:
+   * - `![x](y)` … 対応する `[` の 1 つ前が(エスケープされていない)`!`
+   * - `<img src="…">` … **タグ名**で決まる(`src` を持つのは `img` / `video` など)
+   * - 🔴 `[label]: dest` … **定義行では決まらない。常に `false`** ──
+   *   `!` が付くのは**使う側**である。⚠ 定義だけを見て「画像だ」と決めると、
+   *   **同じ定義をリンクとしても使っているノート**で取りに行ってしまう。
+   */
+  image: boolean;
   /** 置換対象の開始 index(text 内)。 */
   start: number;
   /** 置換対象の終端 index(排他)。 */
@@ -65,6 +82,27 @@ const BLANK_LINE = /(?:\r\n|[\r\n])[ \t]*(?:\r\n|[\r\n])/g;
 const HTML_ATTR = /\b(?:src|href)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi;
 /** HTML タグとして読む窓。⚠ 迷子の `<` で遠くまで slice しない。 */
 const TAG_WINDOW = 4096;
+/**
+ * 🔴 **画像として読むタグ**(#264 段⓪)。⚠ `<a href>` は入れない。
+ * ⚠ 足すときは「**その `src` は絵か**」を問う ── `<script src>` や `<iframe src>` は
+ *   絵ではないので入れない(取り込んでも意味が無く、通信だけ増える)。
+ */
+const IMAGE_TAG = /^<\s*(?:img|image|picture|source|video|audio)\b/i;
+
+/**
+ * 対応する `[` の 1 つ前が `!` か(#264 段⓪)。
+ * ⚠ **`!` 自身のエスケープを見る** ── `\![x](y)` は**リンク**である。
+ */
+function isImageOpen(text: string, open: number): boolean {
+  if (open <= 0 || text[open - 1] !== '!') return false;
+  let k = open - 2;
+  let c = 0;
+  while (k >= 0 && text[k] === '\\') {
+    c++;
+    k--;
+  }
+  return c % 2 === 0;
+}
 
 /** 閉じ fence の正規表現(形ごとにコンパイルを使い回す)。 */
 const closeCache = new Map<string, RegExp>();
@@ -118,6 +156,16 @@ export function scanLinks(text: string): LinkScan {
     return c % 2 === 1;
   };
 
+  /**
+   * 🔴 **開いている `[` の位置**(いちばん内側が末尾。#264 段⓪)。
+   *
+   * ⚠ **`]` から後ろ向きに対応する `[` を探さない** ── ラベルの中の `[]` を
+   *   釣り合わせる必要があり、リンク 1 本ごとに O(n) = 走査全体が **O(n²)** になる。
+   * 🔑 この file は**まさにその理由で書き直された**(冒頭の実測: 3MB の md が 74.8 秒)。
+   *   前へ進みながら積めば、**1 パスのまま**で対応が取れる。
+   */
+  const opens: number[] = [];
+
   while (i < n) {
     const ch = text[i]!;
 
@@ -170,6 +218,12 @@ export function scanLinks(text: string): LinkScan {
         const destStart = i + m[0].length - dest.length - (m[1] !== undefined ? 1 : 0);
         sites.push({
           kind: 'reference',
+          /**
+           * 🔴 **定義行では画像かどうか決まらない**(#264 段⓪)── `!` が付くのは
+           *   **使う側**(`![x][label]`)である。⚠ ここで `true` にすると、
+           *   **同じ定義をリンクとしても使っているノート**で取りに行ってしまう。
+           */
+          image: false,
           start: i,
           end: i + m[0].length,
           dest,
@@ -181,23 +235,47 @@ export function scanLinks(text: string): LinkScan {
       }
     }
 
+    /**
+     * ── 開き `[` を積む(#264 段⓪)。⚠ **`continue` しない** ── 下の判定は
+     *   `[` に当たらないので、末尾の `i++` に任せて構造を変えない。
+     * ⚠ 参照形式の定義行は上で丸ごと食べているので、ここへは来ない。
+     */
+    if (ch === '[' && !escaped()) opens.push(i);
+
     // ── インラインリンク / 画像
-    if (ch === ']' && text[i + 1] === '(' && !escaped()) {
-      const m = at(INLINE_LINK, text, i);
-      if (m) {
-        const dest = m[1] ?? m[2] ?? '';
-        // 宛先の位置: `](` + 空白 + (`<`)
-        const lead = /^\]\(\s*<?/.exec(m[0])![0].length;
-        sites.push({
-          kind: 'inline',
-          start: i,
-          end: i + m[0].length,
-          dest,
-          destStart: i + lead,
-          destEnd: i + lead + dest.length,
-        });
-        i += m[0].length;
-        continue;
+    if (ch === ']' && !escaped()) {
+      /**
+       * **リンクにならない `]` でも降ろす**(#264 段⓪)。
+       *
+       * ⚠ **1 稿目のここには「降ろさないと後ろのリンクが別の `[` と対応する」と
+       *   書いていたが、誤りだった**(変異試験 L1 が SURVIVED で教えた)──
+       *   積みは **LIFO** で、リンクの `[` は**必ず最後に積まれる**ので、
+       *   置き去りの `[` は下に沈んだまま**誰にも降ろされない**。
+       *   🔑 つまり**答えは 1 ビットも変わらない**。
+       * 🔑 それでも降ろすのは**積みを伸ばさない**ためである ── 降ろさないと
+       *   `]` の数だけ配列が伸びる(角括弧を多用する文書で無駄に太る)。
+       *   ⚠ 守っている test は無い(CLAUDE.md「これが無いと壊れる、と書く前に
+       *   外して壊れるのを見る」── 外しても壊れなかったので、そう書いてある)。
+       */
+      const open = opens.pop() ?? -1;
+      if (text[i + 1] === '(') {
+        const m = at(INLINE_LINK, text, i);
+        if (m) {
+          const dest = m[1] ?? m[2] ?? '';
+          // 宛先の位置: `](` + 空白 + (`<`)
+          const lead = /^\]\(\s*<?/.exec(m[0])![0].length;
+          sites.push({
+            kind: 'inline',
+            image: isImageOpen(text, open),
+            start: i,
+            end: i + m[0].length,
+            dest,
+            destStart: i + lead,
+            destEnd: i + lead + dest.length,
+          });
+          i += m[0].length;
+          continue;
+        }
       }
     }
 
@@ -207,6 +285,8 @@ export function scanLinks(text: string): LinkScan {
       // ⚠ 迷子の `<` で遠くまで slice しない
       if (close !== -1 && close - i <= TAG_WINDOW) {
         const tag = text.slice(i, close + 1);
+        // 🔴 HTML は**タグ名**で決まる(#264 段⓪)── `src` を持つのは `img` / `video` など
+        const isImageTag = IMAGE_TAG.test(tag);
         HTML_ATTR.lastIndex = 0;
         for (let am = HTML_ATTR.exec(tag); am; am = HTML_ATTR.exec(tag)) {
           const dest = am[1] ?? am[2] ?? am[3] ?? '';
@@ -214,6 +294,12 @@ export function scanLinks(text: string): LinkScan {
           const destStart = i + am.index + am[0].length - dest.length - (am[3] ? 0 : 1);
           sites.push({
             kind: 'html',
+            /**
+             * ⚠ **属性ではなくタグで見る** ── `<a href>` と `<img src>` は
+             *   同じ `HTML_ATTR` に当たるので、属性名で分けると
+             *   `<video src>` / `<source src>` を取りこぼす。
+             */
+            image: isImageTag,
             start: i + am.index,
             end: i + am.index + am[0].length,
             dest,
