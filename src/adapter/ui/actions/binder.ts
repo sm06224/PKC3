@@ -29,6 +29,15 @@ import {
 } from '@features/relation/filer-list';
 import { archetypeLabel } from '@adapter/ui/render/sidebar';
 import { SMART_FIELDS, type SmartField } from '@features/smart/smart-spec';
+import {
+  buildSettingsFile as buildSettingsFileData,
+  canApplySettings,
+  planSettingsImport,
+  settingsChangeText,
+  settingsFileName,
+  settingsPlanNote,
+} from '@features/settings/settings-file';
+import { downloadBlob } from '@adapter/platform/download';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
 import { insertText } from '@adapter/ui/render/row-swap';
 import {
@@ -1081,6 +1090,53 @@ function paintPlan(root: HTMLElement, dispatcher: Dispatcher, text: string): voi
   }
   prev.hidden = plan.ops.length === 0;
   apply.disabled = !canApplyPlan(plan);
+}
+
+/**
+ * 🔴 **読み込んだ設定の下見を描く**(#414)。
+ *
+ * ⚠ **当てない。見せるだけ** ── 当てるのは user が「当てる」を押してからである。
+ * ⚠ **値そのものは出さない** ── 鍵の割当も紙面も JSON なので、出しても読めない。
+ * 🔑 判定も文言も `features/settings/settings-file.ts` が持つ ── ここは描くだけ。
+ */
+let settingsPlanText: string | null = null;
+
+function paintSettingsPlan(root: HTMLElement, text: string | null): void {
+  settingsPlanText = text;
+  const summary = root.querySelector<HTMLElement>('[data-pkc-field="settings-file-summary"]');
+  const list = root.querySelector<HTMLElement>('[data-pkc-field="settings-file-changes"]');
+  const apply = root.querySelector<HTMLButtonElement>('[data-pkc-field="settings-file-apply"]');
+  if (summary === null || list === null || apply === null) return;
+  if (text === null) {
+    summary.hidden = true;
+    list.hidden = true;
+    list.textContent = '';
+    apply.disabled = true;
+    return;
+  }
+  const plan = planSettingsImport(text, readSetting);
+  summary.textContent = settingsPlanNote(plan);
+  summary.hidden = false;
+  list.textContent = '';
+  for (const c of plan.changes) {
+    const li = document.createElement('li');
+    li.textContent = settingsChangeText(c);
+    list.append(li);
+  }
+  list.hidden = plan.changes.length === 0;
+  apply.disabled = !canApplySettings(plan);
+}
+
+/**
+ * 端末側の 1 件を読む。⚠ **読めない環境(プライベートモード等)でも落ちない**
+ *   ── 「設定していない」に落ちる(このリポジトリの他の store と同じ作法)。
+ */
+function readSetting(key: string): string | null {
+  try {
+    return typeof localStorage === 'undefined' ? null : localStorage.getItem(key);
+  } catch {
+    return null;
+  }
 }
 
 const noop = (): void => {};
@@ -2777,6 +2833,66 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   **門が器の側にしか無い**状態にしない。
    * ⚠ `@名前` → lid の解決は `resolvePlanTarget` **1 か所**を通す(下見と同じ答え)。
    */
+  /**
+   * 🔴 **設定だけを書き出す**(#414)。
+   * ⚠ **ノートは入らない** ── バックアップ(`.pkc3.zip`)とは別物である。
+   * 🔑 何を入れるかは `buildSettingsFile` が持つ ── ここは落とすだけ。
+   */
+  'export-settings': (dispatcher, _target, _services, root) => {
+    void root;
+    const file = buildSettingsFileData(readSetting);
+    if (file.entries.length === 0) {
+      // ⚠ **無言で空の file を落とさない** ── 押した user は「入った」と読む
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '持ち出せる設定がまだありません(見た目や鍵の割当を変えると入ります)',
+      });
+      return;
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    downloadBlob(
+      settingsFileName(today),
+      new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' }),
+    );
+  },
+  /**
+   * 🔴 **当てる**(#414)── ⚠ **下見に出したのと同じ物**を当てる。
+   * 🔑 だから `settingsPlanText` を読み直して組み直す ── 別に憶えた配列を当てると、
+   *   「見た通りに動かない」が静かに生まれる(§7)。
+   */
+  'apply-settings': (dispatcher, _target, _services, root) => {
+    if (settingsPlanText === null) return;
+    const plan = planSettingsImport(settingsPlanText, readSetting);
+    /**
+     * ⚠ **この行は「正しさ」を守っていない ── 二重の門である**(2026-08-26、
+     *   変異試験 S9 が SURVIVED で教えた)。当てられないときボタンは
+     *   **`disabled`**(`paintSettingsPlan`)なので、そもそもここへ来ない。
+     * 🔑 残してあるのは、押し口が増えた日(近道・パレット)に
+     *   **この口が単独で正しくある**ためで、守っている test は無い
+     *   (CLAUDE.md「これが無いと壊れる、と書く前に外して壊れるのを見る」)。
+     */
+    if (!canApplySettings(plan)) return;
+    let wrote = 0;
+    for (const c of plan.changes) {
+      try {
+        localStorage.setItem(c.key, c.to);
+        wrote += 1;
+      } catch {
+        // ⚠ 1 件書けなくても残りは当てる(全部捨てるほうが害が大きい)
+      }
+    }
+    paintSettingsPlan(root, null);
+    const input = root.querySelector<HTMLInputElement>('[data-pkc-field="settings-file-input"]');
+    if (input !== null) input.value = '';
+    /**
+     * 🔴 **読み直しが要ることを言う** ── 鍵の割当も紙面も**起動時に読む**ので、
+     *   当てただけでは画面が変わらない。⚠ 言わないと「効かなかった」と読まれる。
+     */
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: `設定を ${String(wrote)} 件入れました(画面に出るのは読み直してからです)`,
+    });
+  },
   'apply-plan': (dispatcher, _target, services, root) => {
     const ta = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="plan-input"]');
     if (ta === null) return;
@@ -3742,6 +3858,26 @@ export function bindActions(
       return;
     }
     const field = el.getAttribute('data-pkc-field');
+    /**
+     * 🔴 **設定ファイルを選んだら、下見を出す**(#414)── ⚠ **当てない**。
+     * ⚠ 読み込みは非同期なので、`change` の中で待つ(押し口は別に在る)。
+     */
+    if (field === 'settings-file-input') {
+      const f = el.files?.[0] ?? null;
+      if (f === null) {
+        paintSettingsPlan(root, null);
+        return;
+      }
+      void f.text().then(
+        (text) => {
+          paintSettingsPlan(root, text);
+        },
+        () => {
+          dispatcher.dispatch({ type: 'OP_FAILED', error: '設定ファイルを読めませんでした' });
+        },
+      );
+      return;
+    }
     if (field === 'attach-input') {
       const files = el.files ? [...el.files] : [];
       el.value = ''; // 同じファイルの再選択でも change が発火するように

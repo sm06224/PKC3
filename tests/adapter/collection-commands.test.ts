@@ -67,6 +67,13 @@ describe('ノート全体の操作の置き場(#239)', () => {
       // 🔴 何が容量を食っているか(#415)── 片づけの**手前**なので同じ面に置く
       'storage-profile',
       'apply-plan',
+      /**
+       * 🔴 **設定だけの持ち出し**(#414)── ⚠ **バックアップとは別物**である
+       *   (あちらはノートごと移る)。だから `SETTINGS_COMMANDS`(左下から
+       *   逃がした操作)には入れず、この面の中に別の塊として置いてある。
+       */
+      'export-settings',
+      'apply-settings',
     ]);
     // ⚠ 畳んでいないこと(2026-08-03「主要な導線を畳まない」は生きている)
     expect(el.querySelectorAll('details')).toHaveLength(0);
