@@ -12,14 +12,18 @@
  * (→ `binder.ts`)。抑止が無いと、押すたびに編集欄が focus を失って画面が
  * ちらつく ── 選択位置そのものは focus を失っても残るので、壊れはしない。
  */
-import { FORMAT_OPS } from '@features/markdown/text-ops';
+import { BAR_FORMAT_OPS } from '@features/markdown/text-ops';
 import { HINT_BASE, HINT_COMMAND, hintTitle } from './shortcut-hint';
 
 /** 書式パネルを組む。⚠ 押した所は `data-pkc-format` で分かる(binder が読む)。 */
 export function buildFormatBar(): HTMLElement {
   const bar = document.createElement('div');
   bar.setAttribute('data-pkc-region', 'format-bar');
-  for (const { op, label } of FORMAT_OPS) {
+  /**
+   * ⚠ **帯に出すものだけ**(#425 段②-a)── 絞る規則は `BAR_FORMAT_OPS` が持つ。
+   *   ここで `filter` を書くと、表と描き手の 2 か所に規則が生える(§7)。
+   */
+  for (const { op, label } of BAR_FORMAT_OPS) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.setAttribute('data-pkc-action', 'format-text');

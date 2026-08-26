@@ -90,6 +90,17 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-26-off-bar-formats',
+    title: 'ハイライト・ルビ・圏点・打ち消しを、鍵で入れられるようになりました',
+    items: [
+      '書けはしたのに、押して入れる口がありませんでした。書式の帯は横に長いのでボタンは増やさず、近道キーを用意しました。',
+      'Alt+Shift+H = ハイライト、Alt+Shift+R = ルビ、Alt+Shift+E = 圏点、Alt+Shift+X = 打ち消しです。選んでから押してください。',
+      'もう一度押すと外れます（太字と同じです）。',
+      'ルビは押すと読みの位置にカーソルが入るので、そのまま読みを打てます。',
+      '鍵は設定のショートカットで好きなものに変えられます。名前を忘れたら「操作を探す」で「ルビ」と打つと出ます。',
+    ],
+  },
+  {
     id: '2026-08-26-command-palette',
     title: '操作を名前で探せるようになりました',
     items: [
@@ -292,23 +303,11 @@ export const NOTICES: readonly Notice[] = [
       '⚠ 雛形の外(普通のノート)に ${date} と書いても、これまでどおりそのまま表示されます。展開されるのは雛形を挿すときだけです。',
     ],
   },
-  {
-    id: '2026-08-25-repeating-tasks',
-    title: '毎日・毎週・毎月・毎年の予定が書けるようになりました',
-    items: [
-      '日付のうしろに 毎日 / 毎週 / 毎月 / 毎年 と書くと、予定タブのその先の日にも札が出ます。例:- [ ] ゴミ出し @2026-08-31 毎週。曜日は書かなくてかまいません(開始した日の曜日になります)。',
-      'いつまで繰り返すかは、これまでの期間の書き方をそのまま使います。@2026-08-31..2026-12-31 毎週 と書くと 12/31 までです。',
-      'その日のぶんが済んだら、札の印を押してください。規則の行はそのままで、その日ぶんの行が本文に増えます。押した回だけが済んだことになるので、次の回はそのまま出ます。',
-      '繰り返しの札は掴んで日を動かせません。落とすと理由が画面の下に出ます。日を変えるときは本文の @日付 毎週 を書き直してください。',
-      '過ぎた回は出ません。先のぶんは 2 か月ぶんまで出ます。詳しくはヘルプのマニュアル、予定の「繰り返す予定」に書いてあります。',
-      '⚠ 日付のすぐ後ろに 毎週 などと書いてある本文は、これから予定として読まれます。そのつもりでない行は、日付から離して書いてください。',
-    ],
-  },
 ];
 
 /**
  * ⚠ **落としたぶんの原本は CHANGELOG に在る**(上限 20 件を超えたので、古いほうから
  *   `2026-08-16-office-save-to-pkc` / `2026-08-17-office-save-same-note`(2026-08-19)、
  *   `2026-08-19-dual-pane-app`(2026-08-22)、
- *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice` / `2026-08-24-pptx-export` / `2026-08-24-paste-permalink` / `2026-08-24-markdown-to-pandoc` / `2026-08-24-schedule-range`(2026-08-25)、`2026-08-24-dual-new-note` / `2026-08-24-office-save-formats` / `2026-08-25-relation-map` / `2026-08-25-bookmark-capture` / `2026-08-25-relation-map-body-links`(2026-08-26)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
+ *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice` / `2026-08-24-pptx-export` / `2026-08-24-paste-permalink` / `2026-08-24-markdown-to-pandoc` / `2026-08-24-schedule-range`(2026-08-25)、`2026-08-24-dual-new-note` / `2026-08-24-office-save-formats` / `2026-08-25-relation-map` / `2026-08-25-bookmark-capture` / `2026-08-25-relation-map-body-links` / `2026-08-25-repeating-tasks`(2026-08-26)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
  */
