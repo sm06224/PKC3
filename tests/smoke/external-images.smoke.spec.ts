@@ -182,3 +182,97 @@ test('箱の中の外部画像は CSP で止まり、帯が出る', async ({ pag
   //    そのうえで、応答は 1 度も返っていない = bytes は外へ出ていない
   expect(responses, `箱の要求に応答が返っている(外へ出た): ${responses.join(', ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **押して手元へ取り込む**(#264 段①+②)。
+ *
+ * 🔑 **unit では届かない 3 つ**を実ブラウザで見る:
+ *
+ * 1. **本当に読めるか** ── happy-dom に `fetch` の実体は無い。unit が見ているのは
+ *    「呼ばれたか」までで、**bytes が資産になったか**は 1 行も見ていない
+ * 2. **本文が disk まで書き換わるか** ── 書換は worker(sqlite)を通る。
+ *    unit は `REQUEST_BODY_REWRITE` が出るところまでしか通さない
+ * 3. 🔴 **取り込んだあとは、同意しなくても絵が出るか** ── これが user の得る物である
+ *    (`asset:` は「外」ではないので、既定の「常に確認」でもそのまま描かれる)
+ */
+test('🔴 押すと外の画像が手元の添付になり、同意なしで絵が出る(#264 段①)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+  const url = externalUrl(page);
+
+  await writeNote(page, `![外の絵](${url})`);
+
+  // ① ボタンが出て、枚数が出ている(押す前に規模が分かる)
+  const btn = page.locator('[data-pkc-action="adopt-external-images"]');
+  await expect(btn).toBeVisible();
+  await expect(btn).toContainText('1 枚');
+
+  // ⚠ この時点ではまだ外を指している(空振り防止 ── 元から `asset:` ではない)
+  const img = page.locator('[data-pkc-field="detail-body"] img.pkc-external-img');
+  await expect(img).toBeAttached();
+  expect(await img.getAttribute('data-pkc-external-src')).toBe(url);
+
+  await clickReal(page, '[data-pkc-action="adopt-external-images"]');
+
+  /**
+   * ② 本文が `asset:` へ書き換わり、**絵として出る**。
+   * ⚠ 観測点は `pkc-external-img` **ではない** ── 取り込めばその印は付かない
+   *   (上の test が同じ罠で 1 度外している)。
+   */
+  const after = page.locator('[data-pkc-field="detail-body"] img');
+  await expect
+    .poll(async () => after.getAttribute('src'), { timeout: 10_000 })
+    .toMatch(/^blob:|^data:/);
+  await expect
+    .poll(async () => after.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0), {
+      timeout: 10_000,
+    })
+    .toBe(true);
+
+  // ③ 取り込む物が無くなったので、ボタンは畳まれる(押しても何も起きない物を残さない)
+  await expect(btn).toBeHidden();
+  // ④ 確認の帯も要らなくなる(「外」ではなくなったので聞くことが無い)
+  await expect(page.locator('[data-pkc-field="external-image-bar"]')).toHaveCount(0);
+
+  expect(errors).toEqual([]);
+});
+
+/**
+ * 🔴 **404 はここでは測れない ── 測ったのは unit である**(#264 段②)。
+ *
+ * ⚠ **2 通り試して 2 通りとも駄目だった**ので、次に読む人が同じ回転をしないよう
+ *   経路を数え上げて残す:
+ * 1. `vite preview` は**在らない path にも SPA の index.html を 200 で返す**
+ *    (実測: `/nope.png` → `200 text/html`)── server からは 404 を出せない
+ * 2. `page.route(url, …)` で相手を演じても**当たらない** ── PKC3 は
+ *    service worker を登録しており、`sw.js` が `fetch` を `respondWith` で
+ *    受けるので、要求は playwright の route を通らない
+ *    (config で `serviceWorkers: 'block'` にすれば通るが、それは
+ *    **他の全 spec が見ている物**を変える)。
+ * 🔑 だから 404 → `HttpStatusError` → 「置き場所が 404 を返しました」は
+ *   `tests/adapter/adopt-urls.test.ts` が `fetch` を差して見ている
+ *   (変異試験 M10 / M11 で殺せることを確認済み)。
+ *   ⚠ **「測れなかった」の後に書いてよいのは、どこで測ったかだけ**である。
+ */
+
+/**
+ * 🔴 **画像でないものは「読み込めませんでした」に畳まない**(#264 段②)。
+ *
+ * ⚠ ここは `page.route` を使わない ── `vite preview` の SPA fallback が
+ *   **そのまま「画像でない 200」を返す**ので、これは**演じていない実物**である
+ *   (user が web ページの URL を `![](…)` に書いた形と同じ)。
+ */
+test('🔴 画像でなければ「画像ではありません」と言う(読めているのに嘘をつかない)', async ({ page }) => {
+  await gotoApp(page);
+  const url = new URL('/pkc3-not-an-image-264', page.url()).href;
+
+  await writeNote(page, `![外の絵](${url})`);
+  await clickReal(page, '[data-pkc-action="adopt-external-images"]');
+
+  const status = page.locator('[data-pkc-region="status"]');
+  await expect(status).toContainText('画像ではありません', { timeout: 10_000 });
+  // 🔴 **読めている**のだから「読み込めませんでした」は嘘である
+  await expect(status, '読めていたのに「読めない」と言った').not.toContainText(
+    '読み込めませんでした',
+  );
+});

@@ -56,7 +56,17 @@ import {
 import { findTodayNote, todayNoteTitle } from '@features/schedule/today-note';
 import { formatLineDate } from '@features/schedule/line-date';
 import { isImageAssetMime } from '@features/asset/asset-ref-format';
-import { adoptableUrls, rewriteAdopted } from '@features/asset/inline-url-adopt';
+import {
+  adoptableUrls,
+  externalImageUrls,
+  rewriteAdopted,
+} from '@features/asset/inline-url-adopt';
+import {
+  ADOPTED_IMAGE_PREFIX,
+  PASTED_IMAGE_PREFIX,
+  describeAdoptFailures,
+  type AdoptOutcome,
+} from './adopt-urls';
 import { convertPastedHtml } from '@features/markdown/html-to-markdown';
 import { convertPastedRtf } from '@features/markdown/rtf-to-markdown';
 import {
@@ -370,11 +380,14 @@ export interface BinderServices {
    * ⚠ 無い配線では**押しても何も起きない**ので、器は「調べています…」で止めない。
    */
   storageProfile?(): Promise<StorageProfileResult>;
-  adoptPastedUrls?(urls: readonly string[]): Promise<{
-    readonly adopted: ReadonlyMap<string, string>;
-    /** 置けなかった理由(空き容量など)。⚠ **呼び側が 1 本の文言に組み立てる**。 */
-    readonly problems: readonly string[];
-  }>;
+  /**
+   * 🔴 **本文の画像を資産にする**(貼付 = #251 / 押して取り込む = #264 段①)。
+   * ⚠ `namePrefix` は**名乗り** ── 置けなかったときの断り文に名前が出るので、
+   *   どちらの操作で失敗したのかが読める形にする。
+   * ⚠ 入らなかったものは**理由つき**で返る(#264 段②)── 文言に組むのは
+   *   `describeAdoptFailures` の 1 本(呼び側で綴り直さない)。
+   */
+  adoptUrls?(urls: readonly string[], namePrefix: string): Promise<AdoptOutcome>;
   /**
    * 🔴 **添付を別の窓で見る**(#192 で画像、2026-08-15 に PDF を追加)。
    * ⚠ 実体は adapter/platform 側(ObjectURL の寿命が絡むので、binder は**呼ぶだけ**)。
@@ -777,6 +790,13 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'apply-plan',
   // ⚠ 追記と**同じ経路**(`REQUEST_BODY_REWRITE`)を撃つので、同じ門をくぐらせる
   'undo-append',
+  /**
+   * 🔴 **外部の画像を取り込むのも本文を書く**(#264 段①)── 同じ
+   *   `REQUEST_BODY_REWRITE` を撃つので、同じ門をくぐらせる。
+   * ⚠ こちらは**押してから書くまでに通信を挟む** ── その間に取り込みが始まっても
+   *   困らないよう、少なくとも**押す時点**では止める(検査は `tests/repo-hygiene.test.ts`)。
+   */
+  'adopt-external-images',
   'toggle-todo',
   /**
    * 🔴 **本文を書く点では `toggle-todo` と同じ**(2026-08-19 のレビュー W-4)。
@@ -2994,6 +3014,73 @@ const ACTIONS: Record<string, ActionHandler> = {
     services.copyText?.(ref);
     flashCopied(target);
   },
+  /**
+   * 🔴 **本文の外部画像を、押して手元へ取り込む**(#264 段①+②)。
+   *
+   * > #264 の判断(2026-08-18):PKC は**ポータブルナレッジコンテナ**なので、
+   * > 持ち出したら中身が消えるのは芯に反する ── だから取り込みたい。
+   * > ただし**貼付のたびに自動で**はやらない(①相手が CORS を許していなければ
+   * > 読めないので「取り込みました」が嘘になる ②貼った瞬間に第三者へ通信する)。
+   *
+   * ⚠ **押すことが同意である。** だから確認の窓は重ねない ── 代わりに
+   *   **押す前に**枚数と「外へ通信する」ことをボタンの文言と説明に書いてある
+   *   (`inspector.ts` の `paintAdoptImages`)。
+   * 🔴 **本文は載せない** ── 対応(`url → asset:`)だけを reducer へ渡し、
+   *   effect が **disk から読み直して**当てる(`REQUEST_BODY_REWRITE` の作法)。
+   *   画面の本文を基底にすると、取りに行っている間の別窓の書込を巻き戻す。
+   * ⚠ **入らなかったものは理由を言う**(段②)── 黙って元のままにしない。
+   */
+  'adopt-external-images': (dispatcher, target, services) => {
+    const lid = target.getAttribute('data-pkc-entry');
+    const adopt = services.adoptUrls;
+    if (lid === null || adopt === undefined) return;
+    const st = dispatcher.getState();
+    const ob = st.openBody;
+    /**
+     * ⚠ **本文が手元に無いときは断る** ── ここで worker へ読みに行くと、
+     *   「押した瞬間に読み込みが走る」経路がもう 1 本増える(§7)。
+     *   ボタンは本文が読めているときしか出ないので、通常は起きない。
+     */
+    if (!ob || ob.lid !== lid) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '本文が読めていないため取り込めません(ノートを開き直してください)',
+      });
+      return;
+    }
+    const urls = externalImageUrls(ob.body);
+    if (urls.length === 0) return;
+    /**
+     * 🔴 **押した合図を先に出す**(通信は数秒かかる)。
+     * ⚠ これは `adoptUrls` が **`queued`(断らずに待つ)**を使うための条件でもある ──
+     *   `asset-gate.ts` は「user のクリック起点の操作は**断る**側が正しい
+     *   (待たされるより『いま整理中です』と言われた方が分かる)」と書いているが、
+     *   その禁止の目的は**説明の無い待ち**を作らないことである。ここは
+     *   この一報が出ているので待たされる理由が画面に在り、しかも待てば成功する
+     *   (断ると user はもう一度押し直すことになる)。
+     */
+    services.showStatus?.(`外部の画像 ${urls.length} 枚を取りに行っています…`);
+    void adopt(urls, ADOPTED_IMAGE_PREFIX).then(({ adopted, failures }) => {
+      if (adopted.size > 0) {
+        dispatcher.dispatch({
+          type: 'ADOPT_EXTERNAL_IMAGES',
+          lid,
+          adopted: Object.fromEntries(adopted),
+        });
+        services.showStatus?.(`外部の画像 ${adopted.size} 枚を手元に取り込みました`);
+      }
+      /**
+       * 🔴 **理由は必ず出す**(段②)。⚠ `state.error` は **1 枠**なので、
+       *   成功の一報は `showStatus`(別の行)へ出し、こちらと**取り合わない**。
+       */
+      if (failures.length > 0) {
+        dispatcher.dispatch({
+          type: 'OP_FAILED',
+          error: `外部の画像 ${describeAdoptFailures(failures)}(元の URL のまま残しています)`,
+        });
+      }
+    });
+  },
   'copy-asset-ref': (_dispatcher, target, services) => {
     // ⚠ 渡すのは**貼れる 1 行**(`![名前](asset:key)`)── 裸の `asset:key` を
     //    渡していた頃は、貼っても markdown としてはただの文字列だった(段⑱)。
@@ -4268,7 +4355,7 @@ export function bindActions(
     const text = converted ?? plain;
     if (text === '') return false;
 
-    const adopt = services.adoptPastedUrls;
+    const adopt = services.adoptUrls;
     const urls = adopt ? adoptableUrls(text) : [];
     // 変換もせず、逃がすものも無い ── **何も足せない**ので既定に任せる
     if (converted === null && urls.length === 0) return false;
@@ -4281,7 +4368,7 @@ export function bindActions(
     const from = target;
     const openedLid = dispatcher.getState().openBody?.lid ?? null;
     // ⚠ `urls` は `adopt` が在るときしか埋まらない(上の三項)── `pasteImages!` と同じ形
-    void adopt!(urls).then(({ adopted, problems }) => {
+    void adopt!(urls, PASTED_IMAGE_PREFIX).then(({ adopted, failures }) => {
       const r = rewriteAdopted(text, adopted);
       const into = insertTargetAfterAwait(from, openedLid);
       if (!into) {
@@ -4298,19 +4385,17 @@ export function bindActions(
       /**
        * 🔴 **断りは 1 本にまとめる**(検算で判明)。`state.error` は **1 枠**なので、
        * 理由(空き容量)を先に出しても、件数の総括で**上書きされて消える**。
-       * ⚠ 理由が在るならそちらを出す ── 件数は「何件残ったか」しか言わないが、
-       *   理由は **user が直せる**(容量を空ける)。
+       *
+       * ⚠ **理由は入らなかった側が持っている**(#264 段②)── 直す前はここで
+       *   `r.failed` を数えて「**読み込めませんでした**」と綴っていたが、
+       *   **読めていたのに画像でなかった**ものまで同じ字になっていた
+       *   (user は「読めない」と言われて再読込を試み、永久に直らない)。
+       * ⚠ 元の参照は**消していない** ── そこまで言う。
        */
-      if (problems.length > 0) {
+      if (failures.length > 0) {
         dispatcher.dispatch({
           type: 'OP_FAILED',
-          error: `貼り付けた画像を保存できませんでした: ${problems[0]!}`,
-        });
-      } else if (r.failed > 0) {
-        // ⚠ 読めなかった宛先は**元のまま残している** ── 消していないことまで言う
-        dispatcher.dispatch({
-          type: 'OP_FAILED',
-          error: `貼り付けた画像 ${r.failed} 件を読み込めませんでした(元の参照のまま残しています)`,
+          error: `貼り付けた画像 ${describeAdoptFailures(failures)}(元の参照のまま残しています)`,
         });
       }
     });

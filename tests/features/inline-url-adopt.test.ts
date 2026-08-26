@@ -9,8 +9,11 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  acceptsExternalImage,
   adoptableUrls,
+  externalImageUrls,
   isAdoptableUrl,
+  isExternalImageUrl,
   rewriteAdopted,
 } from '../../src/features/asset/inline-url-adopt';
 
@@ -82,5 +85,68 @@ describe('宛先を差し替える', () => {
   it('HTML の src も差し替える', () => {
     const r = rewriteAdopted('<img src="blob:1">', new Map([['blob:1', 'asset:k9']]));
     expect(r.text).toBe('<img src="asset:k9">');
+  });
+});
+
+describe('外部の画像を拾う(#264 段①)', () => {
+  it('🔴 画像だけ拾う ── リンクは拾わない(押した瞬間に外へ飛ぶ数が変わる)', () => {
+    const text = '![ず](https://e.com/a.png)\n[記事](https://e.com/b.html)';
+    expect(externalImageUrls(text)).toEqual(['https://e.com/a.png']);
+  });
+
+  it('🔴 同じ URL の画像とリンクが並んでも、拾うのは 1 回・**書き換わるのは画像だけ**', () => {
+    const url = 'https://e.com/same.png';
+    const text = `![ず](${url})\n[記事](${url})`;
+    expect(externalImageUrls(text)).toEqual([url]);
+    const r = rewriteAdopted(text, new Map([[url, 'asset:k1']]), acceptsExternalImage);
+    // ⚠ リンクのほうまで書き換わると、押していないのに**添付のダウンロード導線に化ける**
+    expect(r.text).toBe(`![ず](asset:k1)\n[記事](${url})`);
+    expect(r.adopted).toBe(1);
+  });
+
+  it('HTML の `<img src>` も画像として拾う', () => {
+    expect(externalImageUrls('<img src="https://e.com/a.png">')).toEqual([
+      'https://e.com/a.png',
+    ]);
+  });
+
+  it('🔴 参照形式の**定義行**は拾わない(`!` は使う側に付く ── 段⓪ の注記)', () => {
+    // ⚠ 定義を「画像だ」と決めると、同じ定義をリンクとしても使うノートで外へ飛ぶ
+    expect(externalImageUrls('[a]: https://e.com/a.png\n\n![ず][a]')).toEqual([]);
+  });
+
+  it('`data:` / `blob:` / `asset:` は外へ取りに行かない', () => {
+    const text = `![あ](${DATA})\n![い](blob:https://e.com/1)\n![う](asset:k1)`;
+    expect(externalImageUrls(text)).toEqual([]);
+  });
+
+  it('コードフェンスの中は拾わない', () => {
+    expect(externalImageUrls('```\n![ず](https://e.com/a.png)\n```')).toEqual([]);
+  });
+
+  it('同じ URL は 1 回だけ・出てくる順', () => {
+    const text = '![あ](https://e.com/b.png)\n![い](https://e.com/a.png)\n![う](https://e.com/b.png)';
+    expect(externalImageUrls(text)).toEqual(['https://e.com/b.png', 'https://e.com/a.png']);
+  });
+
+  it('判定は scheme だけを見る', () => {
+    expect(isExternalImageUrl('HTTPS://e.com/a.png')).toBe(true);
+    expect(isExternalImageUrl(' http://e.com/a.png ')).toBe(true);
+    expect(isExternalImageUrl('//e.com/a.png')).toBe(false);
+    expect(isExternalImageUrl('asset:k1')).toBe(false);
+  });
+
+  it('🔴 既定の述語は貼付のまま ── 外部画像を巻き込まない', () => {
+    const text = `![あ](${DATA})\n![い](https://e.com/a.png)`;
+    const r = rewriteAdopted(
+      text,
+      new Map([
+        [DATA, 'asset:k1'],
+        ['https://e.com/a.png', 'asset:k2'],
+      ]),
+    );
+    // 対応表に在っても、既定は `data:` / `blob:` しか触らない
+    expect(r.text).toBe('![あ](asset:k1)\n![い](https://e.com/a.png)');
+    expect(r.adopted).toBe(1);
   });
 });

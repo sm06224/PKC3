@@ -1044,3 +1044,51 @@ describe('カンバンの札(#277 段②-b)', () => {
     expect(reopened.events).toContainEqual({ type: 'REQUEST_TASK_SCAN' });
   });
 });
+
+/**
+ * 🔴 **取り込んだ外部画像を本文へ当てる**(#264 段①)。
+ *
+ * ⚠ ここが守るのは**撃つ / 撃たない**の判断だけである(何をどう書き換えるかは
+ *   `body-rewrite.test.ts`、押してからここへ届くまでは
+ *   `adopt-external-images-wiring.test.ts`)。
+ */
+describe('外部画像の取り込みを本文へ当てる(#264 段①)', () => {
+  const IMG = 'https://e.com/a.png';
+  const ask = (s: AppState, adopted: Record<string, string>, lid = 'a') =>
+    reduce(s, { type: 'ADOPT_EXTERNAL_IMAGES', lid, adopted });
+
+  it('書換要求を 1 本撃つ(独自の書込経路を作らない)', () => {
+    const out = ask(booted(), { [IMG]: 'asset:k1' });
+    expect(out.events).toEqual([
+      {
+        type: 'REQUEST_BODY_REWRITE',
+        lid: 'a',
+        title: 't-a',
+        archetype: 'text',
+        entryOrder: 2,
+        rewrite: { kind: 'adopt-images', adopted: { [IMG]: 'asset:k1' } },
+      },
+    ]);
+  });
+
+  /**
+   * 🔴 **1 枚も入っていないなら撃たない。**
+   * ⚠ 撃つと effect が `applyBodyRewrite` の `null` を受けて
+   *   「**本文が変わっているため反映できませんでした(開き直してください)**」と出す
+   *   ── 原因(相手が読ませてくれない)と**無関係な直し方**を user に指示することになる。
+   */
+  it('🔴 対応が空なら撃たない(嘘の理由を出させない)', () => {
+    expect(ask(booted(), {}).events, '空でも撃った').toEqual([]);
+  });
+
+  it('編集中は撃たない(裏で本文を書き換えない)', () => {
+    let s = loadedA();
+    s = reduce(s, { type: 'START_EDIT' }).state;
+    expect(s.phase).toBe('editing');
+    expect(ask(s, { [IMG]: 'asset:k1' }).events).toEqual([]);
+  });
+
+  it('知らない lid では撃たない', () => {
+    expect(ask(booted(), { [IMG]: 'asset:k1' }, 'zzz').events).toEqual([]);
+  });
+});

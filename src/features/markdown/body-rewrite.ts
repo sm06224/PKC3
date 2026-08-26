@@ -18,6 +18,7 @@ import { isScheduleDate } from '../schedule/schedule-date';
 import type { RepeatUnit } from '../schedule/repeat';
 import { removeInsertedLines } from './append-target';
 import { readTags, withTag } from '../flavor/tags';
+import { acceptsExternalImage, rewriteAdopted } from '../asset/inline-url-adopt';
 
 /** 何をするか。⚠ **やり直せる形で持つ**(未達 commit との合流に要る)。 */
 export type BodyRewrite =
@@ -107,6 +108,22 @@ export type BodyRewrite =
       line: number;
       /** どの回か(`YYYY-MM-DD`)。⚠ 規則の行の日付ではない。 */
       date: string;
+    }
+  | {
+      /**
+       * 🔴 **外部の画像を手元の添付へ差し替える**(#264 段①)。
+       *
+       * ⚠ **行番号を持たない** ── 取りに行っている間に別の窓が行を足していれば
+       *   番号はずれる。持つのは **`url → asset:<key>` の対応**で、
+       *   `link-scan` が**いま disk に在る本文**から同じ宛先を探して当てる。
+       * 🔴 **当てるのは画像だけ**(`acceptsExternalImage`)── 同じ URL を
+       *   `[記事](https://…)` とリンクでも書いていたら、そちらは**触らない**
+       *   (押していないのに、リンクが添付のダウンロード導線に化ける)。
+       * ⚠ 1 件も当たらなければ `null` = **断る**(effect が「本文が変わっている」と言う)。
+       */
+      kind: 'adopt-images';
+      /** ⚠ `Map` ではなく素の record ── event に載るので、比べやすい形にする。 */
+      adopted: Readonly<Record<string, string>>;
     };
 
 /**
@@ -155,6 +172,15 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
     return spliceFrontmatterKeys(body, { tags: next.length === 0 ? undefined : next });
   }
   if (rewrite.kind === 'repeat-done') return materializeRepeat(body, rewrite);
+  if (rewrite.kind === 'adopt-images') {
+    /**
+     * ⚠ **規則を書き直さない** ── 拾う側(`externalImageUrls`)と当てる側は
+     *   `acceptsExternalImage` の 1 本を共有する(§7「判定を増やさない」)。
+     * ⚠ 変わらなければ `null` ── 同じ本文を書き直して更新日時だけ動かさない。
+     */
+    const next = rewriteAdopted(body, new Map(Object.entries(rewrite.adopted)), acceptsExternalImage);
+    return next.text === body ? null : next.text;
+  }
   const lines = body.split('\n');
   const line = lines[rewrite.line];
   if (line === undefined) return null;

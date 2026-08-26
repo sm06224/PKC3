@@ -860,6 +860,17 @@ export type UserAction =
    */
   | { type: 'MATERIALIZE_REPEAT'; lid: string; line: number; date: string }
   /**
+   * 🔴 **外部の画像を手元へ取り込んだ結果を本文へ当てる**(#264 段①)。
+   *
+   * ⚠ **取りに行くのは binder(adapter)** ── ここに届くのは
+   *   「読めたものの `url → asset:<key>`」だけである(reducer は fetch しない)。
+   * ⚠ `TOGGLE_TASK` と**同じ形**:書換は 1 本(`REQUEST_BODY_REWRITE`)を通り、
+   *   面が独自の書込経路を持たない(§7)。
+   * ⚠ 空の対応では**撃たない**(binder 側で弾く)── 撃つと effect が
+   *   「本文が変わっている」という**嘘の理由**を出す。
+   */
+  | { type: 'ADOPT_EXTERNAL_IMAGES'; lid: string; adopted: Readonly<Record<string, string>> }
+  /**
    * 🔑 **追記**(P8 段⑧)。編集画面を開かずに末尾へ足す。
    * ⚠ `heading` は binder が作って渡す(reducer は純粋のまま ── `Date` を呼ばない)。
    * ノートは `null`(見出しを勝手に足さない)。
@@ -2532,6 +2543,32 @@ function reduceCore(
               //    「期間を外す」という**頼んでいない指示**になる)
               ...(action.until === undefined ? {} : { until: action.until }),
             },
+          },
+        ],
+      };
+    }
+    /**
+     * 🔴 **取り込んだ外部画像を本文へ当てる**(#264 段①)。⚠ `TOGGLE_TASK` と
+     *   **同じ形** ── 書換は 1 本(`REQUEST_BODY_REWRITE`)を通る(§7)。
+     * ⚠ **対応が空なら撃たない** ── 1 枚も読めなかったとき、effect の
+     *   「本文が変わっているため反映できませんでした(開き直してください)」が出て、
+     *   **原因と無関係な直し方**を user に指示することになる(理由は binder が言う)。
+     */
+    case 'ADOPT_EXTERNAL_IMAGES': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] };
+      if (Object.keys(action.adopted).length === 0) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            rewrite: { kind: 'adopt-images', adopted: action.adopted },
           },
         ],
       };

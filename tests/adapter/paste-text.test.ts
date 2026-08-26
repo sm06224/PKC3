@@ -34,9 +34,9 @@ function setup(over: Partial<BinderServices> = {}) {
   document.body.append(root);
   const asked: (readonly string[])[] = [];
   const services: BinderServices = {
-    adoptPastedUrls: async (urls) => {
+    adoptUrls: async (urls) => {
       asked.push(urls);
-      return { adopted: new Map(urls.map((u, i) => [u, `asset:k${i + 1}`])), problems: [] };
+      return { adopted: new Map(urls.map((u, i) => [u, `asset:k${i + 1}`])), failures: [] };
     },
     ...over,
   };
@@ -171,7 +171,17 @@ describe('`data:` / `blob:` を資産へ逃がす', () => {
 
   it('🔴 読めなかった分は**元のまま残し**、件数を言う(黙って消さない)', async () => {
     const { ta, errors } = setup({
-      adoptPastedUrls: async () => ({ adopted: new Map(), problems: [] }),
+      adoptUrls: async (urls) => ({
+        adopted: new Map(),
+        // 🔴 **理由を返す**(#264 段②)── 直す前は `r.failed` を数えて
+        //    「読み込めませんでした」と綴っていたので、**読めていたのに画像で
+        //    なかった**ものまで同じ字になっていた
+        failures: urls.map((url) => ({
+          url,
+          why: '読み込めませんでした(置き場所が許可していないか、届きませんでした)',
+          fixable: false,
+        })),
+      }),
     });
     ta.dispatchEvent(pasteEvent({ 'text/plain': `![ず](${DATA})` }));
     await vi.waitFor(() => expect(errors).toHaveLength(1));
@@ -184,9 +194,13 @@ describe('`data:` / `blob:` を資産へ逃がす', () => {
     //   「N 件を読み込めませんでした」に**上書きされて消えて**いた ── user は
     //   直せる原因(空き容量)を知らないまま、同じ操作を繰り返す
     const { ta, errors } = setup({
-      adoptPastedUrls: async () => ({
+      adoptUrls: async (urls) => ({
         adopted: new Map(),
-        problems: ['添付を保存する空き容量が不足しています: 貼付画像-x.png'],
+        failures: urls.map((url) => ({
+          url,
+          why: '添付を保存する空き容量が不足しています: 貼付画像-x.png',
+          fixable: true,
+        })),
       }),
     });
     ta.dispatchEvent(pasteEvent({ 'text/plain': `![ず](${DATA})` }));
@@ -229,7 +243,7 @@ describe('`data:` / `blob:` を資産へ逃がす', () => {
   });
 
   it('⚠ 資産にする口が無い環境でも貼付は成立する(変換だけ効く)', () => {
-    const { ta } = setup({ adoptPastedUrls: undefined });
+    const { ta } = setup({ adoptUrls: undefined });
     const e = pasteEvent({ 'text/html': '<h2>題</h2>', 'text/plain': '題' });
     ta.dispatchEvent(e);
     expect(e.defaultPrevented).toBe(true);
@@ -237,7 +251,7 @@ describe('`data:` / `blob:` を資産へ逃がす', () => {
   });
 
   it('⚠ 資産にする口が無ければ `data:` の平文は**既定のまま**(勝手に止めない)', () => {
-    const { ta } = setup({ adoptPastedUrls: undefined });
+    const { ta } = setup({ adoptUrls: undefined });
     const e = pasteEvent({ 'text/plain': `![ず](${DATA})` });
     ta.dispatchEvent(e);
     expect(e.defaultPrevented, '逃がせないのに既定を止めた').toBe(false);

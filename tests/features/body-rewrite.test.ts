@@ -349,3 +349,56 @@ describe('日付の書換と刻み(#344 段②)', () => {
     ).toBe('- [ ] ゴミ出し\n');
   });
 });
+
+describe('取り込んだ外部画像を当てる(#264 段①)', () => {
+  const IMG = 'https://e.com/a.png';
+
+  it('画像の宛先だけを差し替える', () => {
+    expect(
+      applyBodyRewrite(`# 題\n\n![ず](${IMG})\n`, {
+        kind: 'adopt-images',
+        adopted: { [IMG]: 'asset:k1' },
+      }),
+    ).toBe('# 題\n\n![ず](asset:k1)\n');
+  });
+
+  it('🔴 同じ URL の**リンク**は触らない(押していないのに導線が化けない)', () => {
+    expect(
+      applyBodyRewrite(`![ず](${IMG})\n[記事](${IMG})\n`, {
+        kind: 'adopt-images',
+        adopted: { [IMG]: 'asset:k1' },
+      }),
+    ).toBe(`![ず](asset:k1)\n[記事](${IMG})\n`);
+  });
+
+  /**
+   * 🔴 **番号ではなく宛先で当てる**(取りに行っている間に別の窓が行を足しうる)。
+   * ⚠ 行番号で当てる `kind: 'task'` と**作法が違う**理由がここに在る。
+   */
+  it('🔴 取りに行っている間に行が増えていても、宛先で当たる', () => {
+    expect(
+      applyBodyRewrite(`# 題\n\n別の窓が足した行\n\n![ず](${IMG})\n`, {
+        kind: 'adopt-images',
+        adopted: { [IMG]: 'asset:k1' },
+      }),
+    ).toBe('# 題\n\n別の窓が足した行\n\n![ず](asset:k1)\n');
+  });
+
+  it('🔴 その宛先がもう本文に無ければ `null` ── 当てずっぽうで別の所を書かない', () => {
+    expect(
+      applyBodyRewrite('# 題\n\n(別の窓が画像ごと消した)\n', {
+        kind: 'adopt-images',
+        adopted: { [IMG]: 'asset:k1' },
+      }),
+    ).toBeNull();
+  });
+
+  it('コードフェンスの中は書き換えない(あれは**書いてある字**である)', () => {
+    expect(
+      applyBodyRewrite('```\n![ず](https://e.com/a.png)\n```\n', {
+        kind: 'adopt-images',
+        adopted: { [IMG]: 'asset:k1' },
+      }),
+    ).toBeNull();
+  });
+});

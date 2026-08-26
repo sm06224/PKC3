@@ -49,6 +49,7 @@ import { formatStoredDate } from '@features/datetime/stored-date';
 // 居場所の解決は `features/relation/tree` が正本(ファイラの帯・パンくずと共有)
 import { readTags } from '@features/flavor/tags';
 import { frontmatterProblem } from '@features/markdown/frontmatter';
+import { externalImageUrls } from '@features/asset/inline-url-adopt';
 import {
   CREATABLE_KINDS,
   RELATION_LABELS,
@@ -95,6 +96,18 @@ export class InspectorRenderer {
   private readonly scroll: ScrollMemory;
   /** いま出しているノート。⚠ **切り替わったときだけ**スクロールを触る。 */
   private shownLid: string | null = null;
+  /**
+   * 🔴 **外部画像の枚数を憶えておく**(#264 段①)。
+   *
+   * ⚠ この面は**状態が動くたびに render する**(指紋を持たないのが意図 ──
+   *   file 冒頭)。`scanLinks` は本文を 1 文字ずつ読む状態機械なので、
+   *   **実測: 10KB=0.57ms / 100KB=1.37ms / 1MB=15.9ms**(node 実測 20 回平均)
+   *   ── 大きいノートを開いている間、保存の ack が届くたびに 16ms 払うことになる。
+   * 🔑 憶えるのは**本文そのもの**である ── `openBody` の器は
+   *   `{...ob, persisted}` で作り直されるが、`body` の文字列は同じ物が渡る。
+   *   ⚠ lid で憶えると、同じノートを書き換えたときに古い枚数が残る。
+   */
+  private imgCount: { body: string; count: number } | null = null;
 
   constructor(private readonly region: HTMLElement) {
     this.scroll = new ScrollMemory(region);
@@ -464,6 +477,7 @@ export class InspectorRenderer {
      */
     const folderBtn = this.buttons.get('export-folder');
     if (folderBtn) folderBtn.hidden = meta.archetype !== 'folder';
+    this.paintAdoptImages(state, meta.lid);
     for (const [action, b] of this.buttons) {
       const why = ACTION_TITLES[action] ?? '';
       const title = action === 'write-back-file' ? whyWriteBack(link) : why;
@@ -485,6 +499,45 @@ export class InspectorRenderer {
       this.shownLid = lid;
       this.scroll.use(meta.lid);
     }
+  }
+
+  /**
+   * 🔴 **外部の画像を取り込むボタンを塗る**(#264 段①)。
+   *
+   * ⚠ **本文が手元に在るときだけ**数える(`openBody`)── 一覧を眺めているだけの
+   *   ときは 0 枚に見えるので**畳む**。⚠ 「0 枚」と書いて出すと、本当に 0 枚の
+   *   ノートと**見分けが付かない**(嘘の断定 ── タグ行と同じ罠)。
+   *   ⚠ **`null` を `''` に替えても振る舞いは同じ**である(変異試験 M19 が
+   *   SURVIVED で教えた ── どちらも 0 枚 = 畳む)。**等価な変異**なので test を
+   *   足して殺すことはできない ── 上の 2 行が守っているのは
+   *   「**持ち主を見る**」ことであって、`null` という綴りではない。
+   * ⚠ **枚数を文言に入れる** ── 押すとその数だけ外へ通信するので、規模を先に見せる。
+   *   ⚠ 数えるのは**宛先の数**である(同じ URL が 2 回出ても 1)。
+   */
+  private paintAdoptImages(state: AppState, lid: string): void {
+    const b = this.buttons.get('adopt-external-images');
+    if (!b) return;
+    const body = state.openBody?.lid === lid ? state.openBody.body : null;
+    let count = 0;
+    if (body === null) {
+      // ⚠ **憶えたものを手放す**(不可侵指示 2026-07-27「ライフサイクル終端での
+      //   速やかな破棄」)── 本文を閉じたあとも文字列を握っていると、
+      //   1 件ぶんの本文が常駐したままになる。
+      //   ⚠ **この 1 行は画面を 1 ドットも変えない** ── 外しても畳みも枚数も
+      //   同じなので、test では守れない(守っているのは常駐メモリだけである)。
+      this.imgCount = null;
+    } else {
+      if (this.imgCount?.body !== body) {
+        this.imgCount = { body, count: externalImageUrls(body).length };
+      }
+      count = this.imgCount.count;
+    }
+    b.hidden = count === 0;
+    if (count === 0) return;
+    // ⚠ 字を入れるのは**札の span** ── ボタン自身に入れると図案ごと消える
+    //    (`iconButton` が `data-pkc-field="label"` で作っている)
+    const label = b.querySelector<HTMLElement>('[data-pkc-field="label"]');
+    if (label) setText(label, `外部の画像を取り込む(${count} 枚)`);
   }
 
   /** 値を入れる。⚠ 器に無い field を書こうとしたら形の宣言が漏れている。 */
@@ -683,6 +736,15 @@ export class InspectorRenderer {
      *   `data-pkc-entry-ref` に載せ、binder はそれを渡すだけ(組み立て直さない)。
      */
     btn('copy-entry-ref', '参照をコピー');
+    /**
+     * 🔴 **外部の画像を手元へ取り込む**(#264 段①)。
+     *
+     * ⚠ **1 枚も無いときは畳む**(`paintAdoptImages`)── `export-folder` と同じ作法。
+     *   常設すると「押しても何も起きない物」を毎回読ませることになる。
+     * ⚠ **文言に枚数を入れる** ── 押すと**その枚数ぶん外へ通信する**ので、
+     *   押す前に規模が分かる形にする(#264 の棄却理由②)。
+     */
+    btn('adopt-external-images', '外部の画像を取り込む');
     btn('export-entry', '書き出す');
     /**
      * 🔴 **このフォルダごと書き出す**(#399 ①)。
@@ -750,6 +812,10 @@ const ACTION_TITLES: Record<string, string> = {
   //    押すと**ブラウザの印刷画面**が開く。PDF にするかはそこで user が選ぶ
   'export-entry-pdf':
     'このノートを紙の形に組んで、ブラウザの印刷画面を開きます。そこで「PDF として保存」を選べます(紙の大きさは設定で変えられます)',
+  // 🔴 **押すと外へ通信する**ことを先に言う(user 指示 2026-08-21「画面で何が起きるかで書く」)
+  //    ⚠ 「取り込みます」だけだと、**押した瞬間に相手のサーバーへ要求が飛ぶ**ことが読めない
+  'adopt-external-images':
+    '本文の外部の画像を、その置き場所から読んでこのノートの添付にします。押すとその置き場所へ通信します。読めたものだけ本文が添付を指すように変わります(読めなかったものは元の URL のまま残り、理由が出ます)',
   'show-history': '過去の版を一覧します',
   'delete-entry': 'ゴミ箱へ移します(フォルダ画面から戻せます)',
 };
