@@ -68,6 +68,27 @@ export function buildFormatBar(): HTMLElement {
   bar.append(insertDate);
 
   /**
+   * 🔴 **ノートへのリンクを入れる**(#427 段②)。
+   *
+   * ⚠ 段① の「参照をコピー」は**相手を開きに行ってから戻る**ので、書いている手が
+   *   止まる。ここに在れば、打っている場所から題名で選べる。
+   * ⚠ `[[` で出す形は採らない ── 理由は `features/entry-ref/entry-pick.ts` の冒頭
+   *   (`insert-date` が `@` を、`insert-snippet` が `/` を退けたのと同じ芯)。
+   * ⚠ `FORMAT_OPS` には入れない ── こちらは**先に聞く**(日付・雛形と同じ理由)。
+   */
+  const insertEntryLink = document.createElement('button');
+  insertEntryLink.type = 'button';
+  insertEntryLink.setAttribute('data-pkc-action', 'insert-entry-link');
+  insertEntryLink.setAttribute(HINT_BASE, 'ノートへのリンク');
+  insertEntryLink.setAttribute(HINT_COMMAND, 'insert-entry-link');
+  insertEntryLink.title = hintTitle('ノートへのリンク', 'insert-entry-link');
+  const insertEntryLinkLabel = document.createElement('span');
+  insertEntryLinkLabel.setAttribute('data-pkc-field', 'label');
+  insertEntryLinkLabel.textContent = 'ノート';
+  insertEntryLink.append(insertEntryLinkLabel);
+  bar.append(insertEntryLink);
+
+  /**
    * 🔴 **雛形を一覧から入れる**(#196 / B-2 段②-b)。
    *
    * ⚠ 短縮語 + `Tab` は**覚えている人の近道**であって、入口ではない ── 覚えて

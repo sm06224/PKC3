@@ -535,6 +535,8 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
+    ['2026-08-26-kind-filter', '5ba5364f'],
+    ['2026-08-26-insert-entry-link', '1cefc027'],
     ['2026-08-26-shrink-photos', '6b7a9a56'],
     ['2026-08-26-export-structure', 'e621e18f'],
     ['2026-08-26-off-bar-formats', '9e28b39f'],
@@ -553,8 +555,10 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-08-25-alt-click-edit', '5f9eead7'],
     ['2026-08-25-folder-export', '2672228f'],
     ['2026-08-25-import-duplicate', '97a60d4b'],
-    ['2026-08-25-writing-assist', '8838349c'],
-    ['2026-08-25-app-projection', '922e28e3'],
+    // ⚠ 上限 20 を超えたので 2026-08-26 に落とした(原本は CHANGELOG)
+    // ['2026-08-25-writing-assist', '8838349c'],
+    // ⚠ 上限 20 を超えたので 2026-08-26 に落とした(原本は CHANGELOG)
+    // ['2026-08-25-app-projection', '922e28e3'],
     // ⚠ 上限 20 を超えたので 2026-08-26 に落とした(原本は CHANGELOG)
     // ['2026-08-24-dual-new-note', '6186a385'],
     // ⚠ 上限 20 を超えたので 2026-08-25 に落とした(原本は CHANGELOG)

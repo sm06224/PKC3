@@ -367,7 +367,14 @@ describe('経路ごとの割り当て直し', () => {
     for (const chord of ['Tab', 'Shift+Tab', 'Mod+Enter', 'Mod+S']) {
       store.removeBinding('row-commit', chord);
     }
-    expect(store.addBinding('row-commit', 'Mod+Shift+K')).toBeNull();
+    /**
+     * ⚠ **どこにも割り当てられていない鍵**を使う(この it が見たいのは
+     *   「割り当て直しが効くか」であって、鍵そのものではない)。
+     * ⚠ 2026-08-26 に `Mod+Shift+K` から移した ── `insert-entry-link`(#427 段②)が
+     *   その鍵を取ったので、**この行が本物の衝突として落ちた**(検査は正しく働いた)。
+     * 🔑 だから**製品が取りそうにない**鍵にする ── 既定に採る理由が無い組み合わせ。
+     */
+    expect(store.addBinding('row-commit', 'Mod+Alt+F9')).toBeNull();
     const host = document.createElement('div');
     document.body.append(host);
     const swap = new RowSwap(host, { commit: () => {}, onInserted: () => {} }, store);
@@ -385,7 +392,7 @@ describe('経路ごとの割り当て直し', () => {
       host.querySelector('[data-pkc-field="row-source"]'),
       '外した既定(Tab)でまだ閉じる',
     ).not.toBeNull();
-    key({ key: 'K', code: 'KeyK', ctrlKey: true, shiftKey: true });
+    key({ key: 'F9', code: 'F9', ctrlKey: true, altKey: true });
     expect(
       host.querySelector('[data-pkc-field="row-source"]'),
       '割り当てた鍵で閉じない',
@@ -825,6 +832,8 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
     expect(ids).toEqual([
       // ⚠ 2026-08-23 に足した(日付の道具 ── 編集中の本文へ挿す)
       'insert-date',
+      // ⚠ 2026-08-26 に足した(#427 段② ── 題名で選んでリンクを本文へ挿す)
+      'insert-entry-link',
       // ⚠ 2026-08-25 に足した(雛形の一覧 ── 同じく編集中の本文へ挿す)
       'insert-snippet',
       'toggle-replace',

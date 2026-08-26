@@ -35,6 +35,7 @@
 
 /** 押した結果。⚠ `Escape` と「やめる」は**同じ**(取り消し)。 */
 import type { PaletteRow } from '@features/palette/palette-rows';
+import type { EntryPickRow } from '@features/entry-ref/entry-pick';
 import type { SnippetChoice } from '@features/snippet/snippet-menu';
 
 export type DialogAnswer = 'ok' | 'cancel';
@@ -584,6 +585,99 @@ export function pickCommandInApp(
     input.focus();
     const answer = await answered;
     // ⚠ 隠したままにしない ── 器は使い回すので、次の確認で受ける側が消える
+    f.ok.hidden = false;
+    return answer === 'ok' ? chosen : null;
+  });
+}
+
+/**
+ * 🔴 **貼りたいノートを題名で探して選ぶ**(#427 段②)。
+ *
+ * ⚠ 形は `pickCommandInApp` と**同じ**にしてある(探す欄 + 一覧、押した行が答え、
+ *   `Enter` は先頭)── user に 2 通りの探し方を覚えさせない。
+ * ⚠ `type="search"` にしない理由は `pickCommandInApp` の注記と同じ
+ *   (Chromium が `Escape` を食べ、器が閉じなくなる)。
+ *
+ * @param rows 探し語を受けて「一覧」と「下に出す 1 行」を返す関数。
+ *   ⚠ **打つたびに呼ぶ**(開いた瞬間で固めない)
+ * @returns 選んだノートの lid。`Escape` / 「やめる」なら `null`
+ */
+export function pickEntryInApp(
+  host: HTMLElement,
+  rows: (query: string) => { readonly items: readonly EntryPickRow[]; readonly note: string },
+): Promise<string | null> {
+  return enqueue(async () => {
+    const f = ensureFrame(host);
+    f.title.textContent = 'ノートへのリンクを入れる';
+    f.body.textContent = '';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.setAttribute('data-pkc-field', 'entry-pick-filter');
+    input.placeholder = 'ノートの題名';
+    input.setAttribute('aria-label', 'ノートの題名で絞り込む');
+    const list = document.createElement('div');
+    list.setAttribute('data-pkc-field', 'entry-pick-list');
+    const note = document.createElement('p');
+    note.setAttribute('data-pkc-field', 'entry-pick-note');
+    f.body.append(input, list, note);
+
+    let chosen: string | null = null;
+    let firstRow: HTMLButtonElement | null = null;
+
+    const draw = (): void => {
+      list.textContent = '';
+      firstRow = null;
+      const { items, note: line } = rows(input.value);
+      // ⚠ 切ったこと・0 件であることを**必ず字で出す**(黙って空にしない)
+      note.textContent = line;
+      note.hidden = line === '';
+      for (const r of items) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.setAttribute('data-pkc-field', 'entry-pick-row');
+        btn.setAttribute('data-pkc-lid', r.lid);
+        const name = document.createElement('span');
+        name.setAttribute('data-pkc-field', 'entry-pick-title');
+        /**
+         * ⚠ **題名が空のノートも出す** ── 出さないと「作ったのに選べない」に
+         *   なる。字が無いと押す所が消えるので、代わりの字を置く。
+         */
+        name.textContent = r.title === '' ? '(題名なし)' : r.title;
+        const kind = document.createElement('span');
+        kind.setAttribute('data-pkc-field', 'entry-pick-kind');
+        // 🔑 種類も出す ── 同じ題名が並んだときに、どちらか見分けられる
+        kind.textContent = r.kind;
+        btn.append(name, kind);
+        btn.addEventListener('click', () => {
+          chosen = r.lid;
+          f.ok.click();
+        });
+        if (firstRow === null) firstRow = btn;
+        list.append(btn);
+      }
+    };
+
+    input.addEventListener('input', draw);
+    input.addEventListener('keydown', (ev: KeyboardEvent) => {
+      // ⚠ `isComposing` の間は拾わない ── 変換確定の Enter で選んでしまう
+      if (ev.key !== 'Enter' || ev.isComposing) return;
+      if (firstRow === null) return;
+      ev.preventDefault();
+      firstRow.click();
+    });
+    draw();
+
+    f.ok.textContent = '入れる';
+    f.ok.removeAttribute('data-pkc-danger');
+    f.ok.hidden = true;
+    f.cancel.textContent = 'やめる';
+    f.cancel.hidden = false;
+
+    const answered = open(f, 'cancel');
+    // 🔑 焦点は**探す欄**へ ── 開いた直後にやることは「題名を打つ」
+    input.focus();
+    const answer = await answered;
     f.ok.hidden = false;
     return answer === 'ok' ? chosen : null;
   });
