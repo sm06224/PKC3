@@ -90,6 +90,18 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-25-dual-place-tools',
+    title: '2 ペインで整理するとき、場所を扱う道具が増えました',
+    items: [
+      '現在地の左に「◀ ▶」が付きました。そのタブが 1 つ前に見ていた場所へ戻れます(Alt + ← / Alt + →)。',
+      '現在地の右に「名前で絞る」欄が付きました。左右のペインで別々の語を打てます。欄で ↓ を押すと、そのまま行へ降りられます。',
+      'その右の「☆」で、いまの場所を留められます。留めた場所は現在地の下に並び、押すとそこへ移ります(×で外せます)。',
+      '下の操作行に「F9 下見」が増えました。押すと、指している行の中身がペインの下に数行出ます。',
+      '件数の行に本文の文字数の合計が出るようになりました。「選んだぶん / 全体」です。',
+      '留めた場所と下見の出し入れは、この端末に憶えます(ノートの中には入りません)。',
+    ],
+  },
+  {
     id: '2026-08-25-rich-text-paste',
     title: 'リッチテキストで貼っても、書式もコードも残るようになりました',
     items: [
@@ -287,22 +299,11 @@ export const NOTICES: readonly Notice[] = [
       '作っても本文の面へは移りません。その場に出るので、整理を続けられます。名前は F2 でその場で打ち替えられます。',
     ],
   },
-  {
-    id: '2026-08-24-schedule-range',
-    title: '何日かにまたがる予定を書けるようになりました',
-    items: [
-      'チェックリストの行に、日付を 2 つ .. でつないで書きます。たとえば 大阪出張 @2026-08-25..2026-08-28 です。',
-      'その予定は、8/25 から 8/28 まで 4 日すべての束に出ます。これまでは開始の日にしか出ず、途中の日を見に来ても載っていませんでした。',
-      '札を掴んで別の日へ落とすと、期間ごとずれます。掴んだ日が落とした日に来るので、長さは変わりません。',
-      '札の右に、いつまでの予定かが出ます。日付なしへ落とすと、期間ごと外れます。',
-      '区切りは 〜 でも書けます。期間には時刻を付けられません。書いた時刻はそのまま行に残ります。',
-    ],
-  },
 ];
 
 /**
  * ⚠ **落としたぶんの原本は CHANGELOG に在る**(上限 20 件を超えたので、古いほうから
  *   `2026-08-16-office-save-to-pkc` / `2026-08-17-office-save-same-note`(2026-08-19)、
  *   `2026-08-19-dual-pane-app`(2026-08-22)、
- *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice` / `2026-08-24-pptx-export` / `2026-08-24-paste-permalink` / `2026-08-24-markdown-to-pandoc`(2026-08-25)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
+ *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice` / `2026-08-24-pptx-export` / `2026-08-24-paste-permalink` / `2026-08-24-markdown-to-pandoc` / `2026-08-24-schedule-range`(2026-08-25)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
  */

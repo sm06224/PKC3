@@ -396,7 +396,13 @@ founding の「**ブラウザだけで完結する / 依存を持たない**」�
   §6 の「変更は main / shared dispatcher 経由で一本化」は、PKC3 の
   `store-proxy.ts`(holder / follower)が**既に実現している**
 - [`docs/vision/pkc-message-externalization.md`](https://github.com/sm06224/PKC2/blob/main/docs/vision/pkc-message-externalization.md)
-  ── **D-1**。PKC3 では #189 / #195 に対応
+  ── **D-1**。⚠ **2026-08-25 訂正** ── ここは長く「PKC3 では #189 / #195 に対応」と
+  書いていたが、**対応付けが違う**(#403 で検算した)。#189 は「PKC3 が iframe に
+  **入れられる側**」、#195 は「PKC3 が**ホストになる側**」で、どちらも D-1 が
+  言っている **user 対 user のエントリ受け渡し**とは別物である。
+  🔑 **D-1 の実体は、アーカイブの import / export**(P6c / P6f)のほうである ──
+  「1 個のファイルを渡して、相手が読み込む」がそれに当たる。
+  ⚠ 可搬単一 HTML(#400)も同じ系列にある
 - [`docs/vision/webrtc-p2p-collaboration.md`](https://github.com/sm06224/PKC2/blob/main/docs/vision/webrtc-p2p-collaboration.md)
   ── **D-3**
 - [`docs/vision/pkc-application-scope-vision.md`](https://github.com/sm06224/PKC2/blob/main/docs/vision/pkc-application-scope-vision.md)

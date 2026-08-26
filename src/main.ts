@@ -71,6 +71,7 @@ import {
 import { isPageFormat } from '@features/page-format';
 import { appExternalImages } from '@adapter/ui/render/external-images';
 import { appPasteSource } from '@adapter/ui/render/paste-source';
+import { appDualPrefs } from '@adapter/ui/render/dual-prefs';
 import { isPasteSource } from '@features/markdown/paste-source';
 import { launchTile } from '@adapter/ui/launch-tile';
 import { collectExistingLids } from '@features/import/existing-lids';
@@ -2071,6 +2072,23 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       center.render(dispatcher.getState());
     },
     /**
+     * 🔴 **2 ペインの「留めた場所」**(#273 残件)。⚠ **端末の保存**である ──
+     *   だから state を動かさない。⚠ 保存だけでは画面が変わらない
+     *   (帯は state ではなく保存を読む)ので、**描き直しまでが 1 組**である
+     *   (CLAUDE.md §7「設定画面の値の同期」と同じ形)。
+     */
+    toggleDualBookmark: (lid) => {
+      appDualPrefs.toggleBookmark(lid);
+      center.render(dispatcher.getState());
+    },
+    /**
+     * 🔴 **下見を憶える**(#273 残件)。⚠ 効かせるのは reducer(`DUAL_SET_PREVIEW`)
+     *   で、ここは**憶えるだけ** ── 描き直しは state が動いた分で起きる。
+     */
+    rememberDualPreview: (on) => {
+      appDualPrefs.setPreview(on);
+    },
+    /**
      * 🚩 フラグ(P11。user 指示 2026-08-07)。⚠ **設定ではない** ──
      * 開発者・パワーユーザー向けで、`foldWhen` の条件が来たら畳まれる。
      * ⚠ 保存は localStorage(裁定 Q6)。state には持たせない。
@@ -2421,6 +2439,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   if (resolved.legacy) {
     dispatcher.dispatch({ type: 'OP_FAILED', error: LEGACY_HOST_NOTICE });
+  }
+  /**
+   * 🔑 **前に点けた下見は、次に開いても点いている**(#273 残件)。
+   *
+   * ⚠ 憶えているのは端末側(`DualPrefsStore`)、効かせるのは state である ──
+   *   起動で 1 度だけ写す。⚠ 写さないと「点けたのに次は消えている」になる。
+   * ⚠ `SYS_BOOTED` の**後**に出す(前だと boot が state を組み直して消える)。
+   */
+  if (appDualPrefs.isPreviewOn()) {
+    dispatcher.dispatch({ type: 'DUAL_SET_PREVIEW', on: true });
   }
   /**
    * 🔑 **覚えている探し方が「予定」なら、起動でそのまま集める**(#292 段⑤)。

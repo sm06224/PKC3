@@ -57,7 +57,13 @@ import { isPaneId, PANES } from '@features/pane-visibility';
 import { STRUCTURAL, isRelationKind } from '@features/relation/kinds';
 import { getAncestorFolders } from '@features/relation/tree';
 import { planCopy } from '@features/relation/copy-plan';
-import { otherSide, paneOf, paneScope, type DualSide } from '@features/relation/dual-pane';
+import {
+  otherSide,
+  paneFilterOptions,
+  paneOf,
+  paneScope,
+  type DualSide,
+} from '@features/relation/dual-pane';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
 import { appOpenInEdit, OpenInEditStore } from '@adapter/ui/render/open-in-edit';
@@ -140,6 +146,25 @@ const alreadyThere = (st: AppState, lid: string, parentLid: string | null): bool
 const dualSide = (target: HTMLElement): DualSide | null => {
   const raw = target.closest('[data-pkc-side]')?.getAttribute('data-pkc-side');
   return raw === 'left' || raw === 'right' ? raw : null;
+};
+
+/**
+ * 🔴 **そのペインに出ている行 ── 引く口はここ 1 つ**(#273 残件)。
+ *
+ * ⚠ 直す前は**同じ式が 6 か所**に書き写されていた(写す / 移す / ゴミ箱 / 落とす /
+ *   鍵の行送り / 描く側)。ペインごとの絞り込みを足したとき、**1 か所でも
+ *   書き替え忘れると、そこだけ別の並びで数える** ── 症状は「目で見た範囲と
+ *   選ばれる範囲が違う」という、いちばん気づけない形になる(CLAUDE.md §7)。
+ * 🔑 絞り込みの規則そのものは `paneFilterOptions`(features 層)が持つ ──
+ *   reducer も描く側も**同じ関数**を通る。
+ */
+const dualPaneRows = (st: AppState, side: DualSide): EntryMeta[] => {
+  const pane = paneOf(st.dual, side);
+  return filerRows(paneScope(pane), st.entryMetas, st.relations, {
+    ...paneFilterOptions(pane, st.filterQuery, st.searchHits),
+    sort: st.entrySort,
+    sortDesc: st.entrySortDesc,
+  });
 };
 
 /**
@@ -450,6 +475,18 @@ export interface BinderServices {
   pasteInspect?(): boolean;
   /** 設定を変える(設定画面の選択)。⚠ 知らない値は呼び側が捨てる。 */
   setPasteSource?(id: string): void;
+  /**
+   * 🔴 **2 ペインの「留めた場所」を足す / 外す**(#273 残件)。
+   * ⚠ **端末の保存**である(container に入れない)── だから state ではなく
+   *   services を通す(`setFlag` / `setPasteSource` と同じ作法)。
+   */
+  toggleDualBookmark?(lid: string): void;
+  /**
+   * 🔴 **2 ペインの下見を憶える**(#273 残件)。
+   * ⚠ **効かせるのは reducer**(`DUAL_SET_PREVIEW`)で、ここは**憶えるだけ**である
+   *   ── 分けてあるのは、下見の要否を毎回の描画で読むと storage を叩くからである。
+   */
+  rememberDualPreview?(on: boolean): void;
   /** このノートを Word(.docx)で書き出す(#187 段①)。 */
   exportEntryDocx?(lid: string): void;
   /** このノートを PowerPoint(.pptx)で書き出す(#187 段⑤)。 */
@@ -629,6 +666,14 @@ const DUAL_KEY_ACTION: Readonly<Record<string, string>> = {
   'dual-move-to-other': 'dual-move',
   'dual-new-folder': 'dual-mkdir',
   'dual-new-note': 'dual-mknote',
+  /**
+   * 🔴 **鍵も押しボタンと同じ実体を通す**(#273 残件)── 断り方も憶え方も
+   * 1 か所である。⚠ `nav-back` / `nav-forward` は**全域にも在る id** で、
+   * この面に居るときだけ「このタブの 1 つ前」を意味する(`keymap.ts` の注記)。
+   */
+  'nav-back': 'dual-back',
+  'nav-forward': 'dual-forward',
+  'dual-preview': 'dual-preview-toggle',
 };
 
 /**
@@ -1445,6 +1490,56 @@ const ACTIONS: Record<string, ActionHandler> = {
       desc: st.entrySort === want ? !st.entrySortDesc : NATURAL_DESC[want],
     });
   },
+  /**
+   * 🔴 **1 つ前 / 次の場所へ**(#273 残件)。
+   * ⚠ 押せないときは reducer が何もしない ── ボタン側も `disabled` にしてある
+   *   ので、ここは**素直に投げるだけ**でよい(判定を 2 か所に書かない)。
+   */
+  'dual-back': (dispatcher, target) => {
+    const side = dualSide(target) ?? dispatcher.getState().dual.focus;
+    dispatcher.dispatch({ type: 'DUAL_BACK', side });
+  },
+  'dual-forward': (dispatcher, target) => {
+    const side = dualSide(target) ?? dispatcher.getState().dual.focus;
+    dispatcher.dispatch({ type: 'DUAL_FORWARD', side });
+  },
+  /**
+   * 🔴 **いまの場所を留める / 外す**(#273 残件)。⚠ **同じ口が二役** ──
+   *   留める口と外す口を分けると、押し間違いで**同じ場所が 2 度並ぶ**。
+   */
+  'dual-bookmark': (dispatcher, target, services) => {
+    const side = dualSide(target) ?? dispatcher.getState().dual.focus;
+    const scope = paneScope(paneOf(dispatcher.getState().dual, side));
+    // ⚠ ルートは留めない(パンくずの左端から 1 押しで行ける)
+    if (scope === null) return;
+    services.toggleDualBookmark?.(scope);
+  },
+  /** 留めた場所へ移る。⚠ **消えた場所は reducer が弾く**(空の表を出さない)。 */
+  'dual-bookmark-open': (dispatcher, target) => {
+    const lid = target.getAttribute('data-pkc-entry');
+    if (lid === null || lid === '') return;
+    const side = dualSide(target) ?? dispatcher.getState().dual.focus;
+    dispatcher.dispatch({ type: 'DUAL_SET_SCOPE', side, lid });
+  },
+  /**
+   * 🔴 **留めを外す**(user 指示 2026-08-23「なんで双方向にする発想がでねぇんだよ!」)
+   * ── 置けるなら外せる。⚠ **消えた場所からも外せる**(そうしないと永久に残る)。
+   */
+  'dual-bookmark-remove': (_dispatcher, target, services) => {
+    const lid = target.getAttribute('data-pkc-entry');
+    if (lid === null || lid === '') return;
+    services.toggleDualBookmark?.(lid);
+  },
+  /**
+   * 🔴 **下見を出す / しまう**(#273 残件)。
+   * ⚠ **効かせる(state)と憶える(端末)を両方やる** ── 片方だけだと
+   *   「点けたのに次に開くと消えている」か「点いたままなのに何も出ない」になる。
+   */
+  'dual-preview-toggle': (dispatcher, _target, services) => {
+    const on = !dispatcher.getState().dual.previewOn;
+    dispatcher.dispatch({ type: 'DUAL_SET_PREVIEW', on });
+    services.rememberDualPreview?.(on);
+  },
   'dual-mkdir': (dispatcher, target) => dualCreate(dispatcher, target, 'folder'),
   /**
    * 🔴 **いま開いている場所にノートを作る**(#273)。
@@ -1470,12 +1565,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから写してください' });
       return;
     }
-    const rows = filerRows(paneScope(paneOf(st.dual, side)), st.entryMetas, st.relations, {
-      filterQuery: st.filterQuery,
-      searchHits: st.searchHits,
-      sort: st.entrySort,
-      sortDesc: st.entrySortDesc,
-    });
+    const rows = dualPaneRows(st, side);
     // ⚠ 相手は**いま表に出ている印**、無ければ**カーソルの行**(移す・消すと同じ規則)
     const lids = operationTargets(
       rows,
@@ -1538,12 +1628,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher,
       services,
       root,
-      filerRows(paneScope(paneOf(st.dual, side)), st.entryMetas, st.relations, {
-        filterQuery: st.filterQuery,
-        searchHits: st.searchHits,
-        sort: st.entrySort,
-        sortDesc: st.entrySortDesc,
-      }),
+      dualPaneRows(st, side),
       paneOf(st.dual, side).selection,
       paneOf(st.dual, side).cursor,
     );
@@ -1561,12 +1646,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const st = dispatcher.getState();
     const from = st.dual.focus;
     const pane = paneOf(st.dual, from);
-    const rows = filerRows(paneScope(pane), st.entryMetas, st.relations, {
-      filterQuery: st.filterQuery,
-      searchHits: st.searchHits,
-      sort: st.entrySort,
-      sortDesc: st.entrySortDesc,
-    });
+    const rows = dualPaneRows(st, from);
     const lids = operationTargets(rows, pane.selection, pane.cursor);
     if (lids.length === 0) {
       dispatcher.dispatch({
@@ -2984,6 +3064,19 @@ export function bindActions(
       el.getAttribute('data-pkc-field') === 'entry-filter'
     ) {
       dispatcher.dispatch({ type: 'SET_ENTRY_FILTER', query: el.value });
+      return;
+    }
+    /**
+     * 🔴 **そのペインだけの絞り込み**(#273 残件)。
+     * ⚠ **打つそばから効かせる**(`change` を待たない)── 器の絞り込みと
+     *   同じ手触りにする。⚠ 器のほうと**別の口**なのは、絞る相手が違うからである。
+     */
+    if (
+      el instanceof HTMLInputElement &&
+      el.getAttribute('data-pkc-field') === 'dual-filter'
+    ) {
+      const side = dualSide(el);
+      if (side !== null) dispatcher.dispatch({ type: 'DUAL_SET_FILTER', side, filter: el.value });
     }
   };
   const onChange = (ev: Event) => {
@@ -3788,12 +3881,7 @@ export function bindActions(
       side === null
         ? visibleSelection(visibleFilerRows(st), st.selection)
         : visibleSelection(
-            filerRows(paneScope(paneOf(st.dual, side)), st.entryMetas, st.relations, {
-              filterQuery: st.filterQuery,
-              searchHits: st.searchHits,
-              sort: st.entrySort,
-              sortDesc: st.entrySortDesc,
-            }),
+            dualPaneRows(st, side),
             paneOf(st.dual, side).selection,
           );
     const lids = marked.includes(lid) ? marked : [lid];
@@ -4009,6 +4097,33 @@ export function bindActions(
       if (ke.key === 'Escape') {
         ke.preventDefault();
         dispatcher.dispatch({ type: 'DUAL_RENAME_END' });
+        return;
+      }
+      return;
+    }
+    /**
+     * 🔴 **絞り込みの欄から、そのまま行へ降りられる**(#273 残件)。
+     *
+     * ⚠ これが無いと「打って絞る → マウスで行を押す」になり、**キーボードだけで
+     *   完結しない**(不可侵指示「マウスだけで完結し、キーボードは近道」の裏側 ──
+     *   近道が途中で切れている)。
+     * ⚠ それ以外の鍵は**入力へ通す**(打てなくなる)。
+     */
+    if (dualHost && el instanceof HTMLInputElement && el.matches('[data-pkc-field="dual-filter"]')) {
+      const fside = dualHost.getAttribute('data-pkc-side');
+      if (fside !== 'left' && fside !== 'right') return;
+      if (ke.key === 'Escape') {
+        ke.preventDefault();
+        // 🔑 **欄も空にする**(state だけ空にすると、打った字が残って見える)
+        el.value = '';
+        dispatcher.dispatch({ type: 'DUAL_SET_FILTER', side: fside, filter: '' });
+        return;
+      }
+      if (ke.key === 'ArrowDown' || ke.key === 'Enter') {
+        const first = dualRows(dispatcher.getState(), fside)[0]?.lid ?? null;
+        if (first === null) return;
+        ke.preventDefault();
+        moveDualCursor(fside, first);
         return;
       }
       return;
@@ -4232,13 +4347,7 @@ export function bindActions(
    * 🔑 並びは `filerRows` **1 か所**から採る ── 描く側(`dual-filer.ts`)・
    *   範囲選択(reducer)と同じ答えでないと、目で見た順と食い違う。
    */
-  const dualRows = (st: AppState, side: DualSide): EntryMeta[] =>
-    filerRows(paneScope(paneOf(st.dual, side)), st.entryMetas, st.relations, {
-      filterQuery: st.filterQuery,
-      searchHits: st.searchHits,
-      sort: st.entrySort,
-      sortDesc: st.entrySortDesc,
-    });
+  const dualRows = (st: AppState, side: DualSide): EntryMeta[] => dualPaneRows(st, side);
 
   const dualRowEl = (side: DualSide, lid: string): HTMLElement | null =>
     Array.from(

@@ -299,6 +299,8 @@ describe('2 ペインの面(描画)', () => {
       //    (隣り合わせると、押し間違いで**別の種類**ができる)
       ['dual-mknote', 'Shift + F4', 'ノート'],
       ['dual-delete', 'F8', 'ゴミ箱'],
+      // 🔴 **下見**(#273 残件)── 開かずに中身を確かめる(印は要らない)
+      ['dual-preview-toggle', 'F9', '下見'],
     ]);
   });
 
@@ -351,10 +353,20 @@ describe('2 ペインの面(描画)', () => {
      *   例外なくこの形。直す前は「5 件(1 件を選んでいます)」で、選んでいない
      *   ときだけ全体が出る非対称な形だった。
      */
-    expect(foot().textContent).toBe('5 件中 1 件を選択(ここが元)');
+    /**
+     * 🔴 **合計も対で出す**(#273 残件)── 古典 4 実装はどれも
+     *   「選んだぶん / 全体」を情報行に出す。⚠ この fixture は `bodyChars` が
+     *   全部 `null`(数えていない)なので **`—`** が出るのが正しい ──
+     *   `0` と出すと「空だ」と読まれる。
+     */
+    expect(foot().textContent).toBe('5 件中 1 件を選択 · — / —(ここが元)');
     // 絞り込みで a が消える ── 印は state に残るが、画面には出ていない
     s = reduce(s, { type: 'SET_ENTRY_FILTER', query: 'はこ' }).state;
     r.render(s);
+    /**
+     * ⚠ **フォルダしか残っていないので、合計は出さない** ── 出すと `0` になり、
+     *   「中身が空だ」と読まれる(フォルダは本文を持たないだけである)。
+     */
     expect(foot().textContent, '画面に無い印を数えている').toBe('2 件(ここが元)');
   });
 
@@ -544,10 +556,15 @@ describe('2 ペインの面(描画)', () => {
      */
     expect(keyOf('dual-delete'), '別名(Delete)を拾っている ── 関数キーを優先する').toBe('F8');
     // 割り当て直したら、書いてある字も変わる(画面が嘘をつかない)
-    expect(store.addBinding('dual-move-to-other', 'F9')).toBeNull();
+    /**
+     * ⚠ **空いている鍵で試す** ── `F9` は 2026-08-25 に `dual-preview` が取った。
+     *   🔑 落ちたら、まず**この行の鍵が誰かに取られていないか**を見ること
+     *   (`tests/features/keymap.test.ts` の同じ注記と対である)。
+     */
+    expect(store.addBinding('dual-move-to-other', 'F10')).toBeNull();
     store.removeBinding('dual-move-to-other', 'F6');
     r.render(booted());
-    expect(keyOf('dual-move'), '割当を変えても画面の字が変わらない').toBe('F9');
+    expect(keyOf('dual-move'), '割当を変えても画面の字が変わらない').toBe('F10');
   });
 
   it('印は属性の付け替えで塗る(表を組み直さない)', () => {
