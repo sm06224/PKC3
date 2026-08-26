@@ -1176,6 +1176,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     //    `blob.arrayBuffer()` が最大 64MB をメインの heap に載せる
     //    ── 実測 32MB でメインが 241ms 止まっていた
     hashBlob: async (blob) => (await assets.hash(blob)).hash,
+    /**
+     * 🔴 **大きな画像を縮める口**(#412)。⚠ 復号と再符号化はハッシュより重い ──
+     *   同じワーカー(アイドルで kill される)へ出す。
+     */
+    shrinkImage: (blob, mime) => assets.shrink(blob, mime),
+    /**
+     * 🔴 **聞く口**(#412)。⚠ 写真は user のもので、縮めるのは**不可逆**である ──
+     *   だから**必ず聞く**。⚠ この口を渡さなければ縮まらない(黙って縮める道が無い)。
+     */
+    askShrink: async (question) =>
+      (await confirmInApp(root, question, { okLabel: '縮める', cancelLabel: 'そのまま' })) === 'ok',
   };
 
   /**

@@ -28,6 +28,9 @@ import {
   hashAsset,
   type AssetHashJob,
   type HashResult,
+  shrinkImage,
+  type AssetShrinkJob,
+  type ShrinkResult,
 } from './asset-codec';
 import { appFlags } from '../flag-store';
 import { FLAG_ASSET_INLINE } from '@features/flags';
@@ -97,6 +100,21 @@ export class AssetClient {
     };
     if (!this.lease) return hashAsset(job);
     return this.lease.run<HashResult>(job);
+  }
+
+  /**
+   * 🔴 **画像を縮める**(#412)。
+   *
+   * ⚠ 復号と再符号化は**重い** ── ハッシュと同じ理由でワーカーへ出す。
+   * ⚠ **Blob は参照で渡る**ので transfer は要らない(返りも同じ)。
+   * 🔑 ワーカーが使えない環境では**その場で回す** ── そこには
+   *   `createImageBitmap` も無いので `why: 'no-api'` が返り、**縮めない**
+   *   (元のまま取り込まれる = 安全側)。
+   */
+  shrink(blob: Blob, mime: string): Promise<ShrinkResult> {
+    const job: AssetShrinkJob = { blob, mime, shrink: true };
+    if (!this.lease) return shrinkImage(job);
+    return this.lease.run<ShrinkResult>(job);
   }
 
   /**
