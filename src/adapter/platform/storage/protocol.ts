@@ -155,6 +155,8 @@ export type StorageRequest =
       updatedFrom: string | null;
       createdFrom: string | null;
       dated: boolean | null;
+      /** 題名か本文にこの語(#421 段③)。⚠ 引き方は `planSearch` が 1 か所で持つ。 */
+      text: string | null;
     }
   /**
    * 本文を **まとめて** 取る(P6d ── 書出し用)。

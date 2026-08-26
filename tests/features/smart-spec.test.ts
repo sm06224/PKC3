@@ -22,8 +22,11 @@ import {
   SMART_DATED_KEY,
   SMART_FIELDS,
   SMART_KIND_KEY,
+  SMART_TEXT_KEY,
   SMART_UPDATED_KEY,
-  hasColumnCond,
+  MAX_SMART_TEXT_CHARS,
+  needsRescan,
+  smartWriteError,
   readSmartSpec,
   smartCondError,
   smartCutoff,
@@ -281,11 +284,11 @@ describe('列で引く条件(#421 段②)', () => {
    *   手で継ぎ足すと嘘になる ── 呼び側はこれで見分ける。
    */
   it('🔴 列の条件を持っているかが分かる', () => {
-    expect(hasColumnCond({ ...EMPTY_SMART, tags: ['請求'] }), 'タグを列と読んだ').toBe(false);
-    expect(hasColumnCond({ ...EMPTY_SMART, kind: 'text' })).toBe(true);
-    expect(hasColumnCond({ ...EMPTY_SMART, updatedDays: 7 })).toBe(true);
-    expect(hasColumnCond({ ...EMPTY_SMART, createdDays: 7 })).toBe(true);
-    expect(hasColumnCond({ ...EMPTY_SMART, dated: true })).toBe(true);
+    expect(needsRescan({ ...EMPTY_SMART, tags: ['請求'] }), 'タグを列と読んだ').toBe(false);
+    expect(needsRescan({ ...EMPTY_SMART, kind: 'text' })).toBe(true);
+    expect(needsRescan({ ...EMPTY_SMART, updatedDays: 7 })).toBe(true);
+    expect(needsRescan({ ...EMPTY_SMART, createdDays: 7 })).toBe(true);
+    expect(needsRescan({ ...EMPTY_SMART, dated: true })).toBe(true);
   });
 
   it('🔴 決める / 外すが本文へ往復する(説明文は無傷)', () => {
@@ -336,5 +339,132 @@ describe('列で引く条件(#421 段②)', () => {
     expect(q.updatedFrom).toBe('2026-08-19T00:00:00.000Z');
     expect(q.createdFrom, '指定していないほうにも境目が付いた').toBeNull();
     expect(q.kind).toBe('text');
+  });
+});
+
+/**
+ * 🔴 **語で絞る**(#421 段③)。
+ *
+ * 守る主張:
+ * 1. 本文の `smart-text:` が条件として読め、画面へ往復する
+ * 2. **当てるのはここではない** ── worker の SQL 1 か所である(§7)。
+ *    だから `needsRescan` が true を返し、reducer はその場で当て直さない
+ * 3. 読めない語は**条件にしない**(黙って切り詰めない)
+ */
+describe('語で絞る(#421 段③)', () => {
+  const withText = (v: string): string => `---\n${SMART_TEXT_KEY}: ${v}\n---\n説明\n`;
+
+  it('🔴 本文に書いた語が、条件として読める', () => {
+    expect(readSmartSpec(withText('請求書')).text).toBe('請求書');
+  });
+
+  /**
+   * ⚠ **1 行に潰す** ── 索引は行を跨がないので、改行を含む語は探しようがない。
+   * 🔑 潰すのは**読む側**である(書く側も同じ関数を通る ── `withSmartField`)。
+   */
+  it('🔴 前後の空白と連続する空白は 1 つに潰れる', () => {
+    expect(readSmartSpec(withText('"  請求  書  "')).text).toBe('請求 書');
+  });
+
+  it('🔴 空の語は条件にしない(「全部集まる」にしない)', () => {
+    expect(readSmartSpec(withText('"   "')).text).toBeNull();
+    expect(readSmartSpec('本文だけ\n').text, '書いていないのに条件が付いた').toBeNull();
+  });
+
+  /**
+   * 🔴 **長すぎる語は黙って切り詰めない。** 切り詰めると
+   * 「書いた語と集まる語が違う」という、画面に理由の出ない形になる。
+   */
+  it('🔴 上限を超える語は条件にならない', () => {
+    const ok = 'あ'.repeat(MAX_SMART_TEXT_CHARS);
+    const over = 'あ'.repeat(MAX_SMART_TEXT_CHARS + 1);
+    expect(readSmartSpec(withText(ok)).text, '上限ちょうどが落ちた').toBe(ok);
+    expect(readSmartSpec(withText(over)), '上限超えを受けた').toEqual(
+      expect.objectContaining({ text: null }),
+    );
+    expect(withSmartField(EMPTY_SMART, 'text', over)).toEqual({ ok: false, reason: 'invalid' });
+  });
+
+  it('🔴 画面から打った語が、本文へ書かれて往復する', () => {
+    const out = withSmartField(EMPTY_SMART, 'text', ' 請求  書 ');
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.spec.text).toBe('請求 書');
+    const body = writeSmartSpec('説明\n', out.spec);
+    expect(readSmartSpec(body).text, '書いたものが読めない').toBe('請求 書');
+    expect(smartFieldValue(out.spec, 'text'), '画面へ戻らない').toBe('請求 書');
+    // ⚠ 外したら key ごと消える(`smart-text: ""` を残すと「条件が在るのに当たらない」)
+    const off = withSmartField(out.spec, 'text', '');
+    expect(off.ok).toBe(true);
+    if (off.ok) expect(writeSmartSpec(body, off.spec)).not.toContain(SMART_TEXT_KEY);
+  });
+
+  it('🔴 語も worker へ渡る', () => {
+    const q = smartQueryOf({ ...EMPTY_SMART, text: '請求書' }, Date.parse('2026-08-26T00:00:00Z'));
+    expect(q.text).toBe('請求書');
+  });
+
+  it('🔴 語だけでも「条件が在る」と数える(空は空、のまま)', () => {
+    expect(isSmartEmpty({ ...EMPTY_SMART, text: '請求書' }), '語を条件と数えていない').toBe(false);
+    expect(isSmartEmpty(EMPTY_SMART)).toBe(true);
+  });
+
+  /**
+   * 🔴 **その場で当て直させない**(§7)── 当てるのは FTS5 / LIKE = SQL 1 か所である。
+   * ⚠ ここが false を返すと、reducer が `body.includes(語)` 相当の**2 つ目の規則**を
+   *   持つことになり、帯の並びと探す欄の結果が静かに食い違う。
+   */
+  it('🔴 語の条件を持つ入れ物は、集め直しが要る', () => {
+    expect(needsRescan({ ...EMPTY_SMART, text: '請求書' }), '語をその場で当てにいく').toBe(true);
+    // 対照群 ── タグだけならその場で当て直せる
+    expect(needsRescan({ ...EMPTY_SMART, tags: ['請求'] })).toBe(false);
+  });
+});
+
+/**
+ * 🔴 **落として入れられるか / ここから外せるか**(#421 段②の穴)。
+ *
+ * ⚠ 直す前は「条件が 1 つも無い」ときしか断っておらず、**タグを 1 つも持たない
+ *   入れ物**へ落とすと**無言で何も起きなかった**(2026-08-26 に対照群つきで実測)。
+ */
+describe('書けない条件しか無いなら、理由を出す(#421 段②の穴)', () => {
+  it('🔴 タグ以外の条件だけの入れ物は、落とすのを断る', () => {
+    for (const spec of [
+      { ...EMPTY_SMART, updatedDays: 30 },
+      { ...EMPTY_SMART, kind: 'text' },
+      { ...EMPTY_SMART, createdDays: 7 },
+      { ...EMPTY_SMART, dated: true },
+      { ...EMPTY_SMART, text: '請求書' },
+    ]) {
+      const msg = smartWriteError(spec, 'add');
+      expect(msg, `${JSON.stringify(spec)} を無言で通した`).not.toBeNull();
+      // ⚠ **次にすることまで書く** ── 「できません」だけでは user は止まる
+      expect(msg, '直し方が書いていない').toContain('タグ');
+    }
+  });
+
+  /**
+   * ⚠ **押した動作の言葉で書く** ── 「落とした」と「外した」では次にすることが違う。
+   */
+  it('🔴 落とすときと外すときで、断り文が違う', () => {
+    const spec = { ...EMPTY_SMART, updatedDays: 30 };
+    const add = smartWriteError(spec, 'add');
+    const remove = smartWriteError(spec, 'remove');
+    expect(add).not.toBe(remove);
+    expect(add, '落とした話になっていない').toContain('入れる');
+    expect(remove, '外した話になっていない').toContain('外す');
+  });
+
+  it('🔴 条件が 1 つも無いときは、そう書く(別の理由)', () => {
+    expect(smartWriteError(EMPTY_SMART, 'add'), '条件が空の断りが出ない').toContain('条件がありません');
+  });
+
+  /**
+   * 🔑 **対照群** ── タグの条件が 1 つでもあれば通す。
+   * ⚠ 置かないと「常に断る」実装でもこの describe は全部緑になる。
+   */
+  it('🔴 タグの条件があれば通す', () => {
+    expect(smartWriteError({ ...EMPTY_SMART, tags: ['請求'] }, 'add')).toBeNull();
+    expect(smartWriteError({ ...EMPTY_SMART, tags: ['請求'], updatedDays: 30 }, 'remove')).toBeNull();
   });
 });

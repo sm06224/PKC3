@@ -237,3 +237,64 @@ test('🔴 種類で絞ると、その種類だけが集まる (#421 段②)', a
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **語で絞る**(#421 段③)。
+ *
+ * 🔴 **unit では届かない層が 2 つ**:
+ *   ① 語を当てるのは **worker の SQL**(FTS5 の trigram / LIKE)── fake は
+ *      「当たり」を作って返すだけなので、索引が本当に効いているかは実物でしか出ない
+ *   ② 打つ欄は **`change`**(Enter / 欄から出る)で来る ── 実キーの操作でしか通らない。
+ *      ⚠ 直前まで binder は `<select>` しか受けておらず、`<input>` から来た値を
+ *      **`''`(= 条件を外す)へ落としていた** ── その取り違えはここでしか鳴らない。
+ */
+test('🔴 語で絞ると、その語があるノートだけが集まる (#421 段③)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await useSplitEditor(page);
+  await gotoApp(page);
+
+  await makeNote(page, '請求のひかえ', '請求書をまとめた本文です\n');
+  await makeNote(page, '買い物のメモ', '牛乳と卵を買う\n');
+
+  await createEntry(page, 'smart');
+  const title = page.locator('[data-pkc-field="editor-title"]');
+  if (await title.count()) await title.fill('請求まわり');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  await page.locator(SMART_ROW).first().dblclick();
+  await expect(page.locator(WHY)).toContainText('条件を選んでください');
+
+  // 🔴 語を打って Enter(実キーの change)
+  const word = page.locator('[data-pkc-field="smart-text"]');
+  await word.fill('請求書');
+  await word.press('Enter');
+  await expect(page.locator(ROWS), '語で絞れていない').toHaveCount(1);
+  await expect(page.locator(ROWS).first()).toContainText('請求のひかえ');
+
+  /**
+   * ⚠ **対照群** ── 別の語に変えると集まるものが入れ替わる。
+   *   ⚠ 件数だけ見ると、**常に 1 件返す**実装でも通ってしまう。
+   */
+  await word.fill('牛乳');
+  await word.press('Enter');
+  await expect(page.locator(ROWS)).toHaveCount(1);
+  await expect(page.locator(ROWS).first(), '語を変えても中身が同じ').toContainText(
+    '買い物のメモ',
+  );
+
+  // 🔑 開き直しても効く(条件は本文に在る)
+  await page.reload();
+  await page.locator(SMART_ROW).first().dblclick();
+  await expect(page.locator('[data-pkc-field="smart-text"]'), '条件が残っていない').toHaveValue(
+    '牛乳',
+  );
+  await expect(page.locator(ROWS)).toHaveCount(1);
+
+  // 🔴 **空にして Enter で外れる**(片道の操作を作らない)
+  await page.locator('[data-pkc-field="smart-text"]').fill('');
+  await page.locator('[data-pkc-field="smart-text"]').press('Enter');
+  await expect(page.locator(WHY), '条件が外れていない').toContainText('条件を選んでください');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

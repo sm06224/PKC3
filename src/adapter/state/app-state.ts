@@ -41,7 +41,7 @@ import { filerRows, rangeInRows, smartLidsOf } from '@features/relation/filer-li
 import {
   EMPTY_SMART,
   SMART_ARCHETYPE,
-  hasColumnCond,
+  needsRescan,
   matchesSmartTags,
   type SmartField,
   type SmartSpec,
@@ -86,7 +86,7 @@ export interface SmartHitState {
    * ⚠ **書き込みの判断には使わない**(本文を直に書き換えられると古くなる)──
    *   落としたときのタグは effect が**その場で本文から読む**。
    * ⚠ 段② から**条件ぜんぶ**を持つ(タグだけではない)── その場で落とせるかの
-   *   判定(`hasColumnCond`)にも要る。
+   *   判定(`needsRescan`)にも要る。
    */
   readonly spec: SmartSpec;
 }
@@ -4023,12 +4023,14 @@ function refreshSmartHits(
     if (hit.failed) continue;
     if (hit.total > hit.lids.length) continue;
     /**
-     * 🔴 **列の条件を持つ入れ物は、手で継ぎ足さない**(#421 段②)。
+     * 🔴 **その場で当て直せない条件を持つ入れ物は、手で継ぎ足さない**(#421 段②③)。
      * ⚠ 「更新が N 日以内」は**保存した瞬間に変わる**し、`archetype` /
      *   `created_at` / `date` も本文からは決まらない ── ここで当てると嘘になる。
+     * ⚠ **語の条件も同じ**(段③)── 当てるのは FTS5 / LIKE = **SQL 1 か所**なので、
+     *   ここで `body.includes(語)` と書くと帯の並びと探す欄の結果が食い違う(§7)。
      * 🔑 そちらは effect が worker へ**集め直しを頼む**(`smartRescanFor`)。
      */
-    if (hasColumnCond(hit.spec)) continue;
+    if (needsRescan(hit.spec)) continue;
     const at = hit.lids.indexOf(lid);
     const should = matchesSmartTags(hit.spec, tags);
     if (should === (at >= 0)) continue;

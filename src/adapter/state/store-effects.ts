@@ -23,7 +23,8 @@ import {
   EMPTY_SMART,
   isSmartEmpty,
   readSmartSpec,
-  hasColumnCond,
+  needsRescan,
+  smartWriteError,
   smartCondError,
   smartQueryOf,
   withSmartField,
@@ -351,6 +352,7 @@ export function connectStoreEffects(
    * ⚠ タグだけの入れ物は reducer が**その場で**当て直せる(新しい本文が在る)が、
    *   **「更新が N 日以内」は保存した瞬間に変わる**し、`archetype` / `created_at` /
    *   `date` は本文からは決まらない ── 手で継ぎ足すと嘘になる。
+   * ⚠ **語の条件も同じ**(段③)── 当てるのは SQL 1 か所である(§7)。
    * 🔑 **ここは「行を書いた」唯一の口である**(`stamp`)── 書く経路の数と
    *   刻む数が一致することを `tests/adapter/entry-timestamps.test.ts` が機械で見ている。
    *   だから 1 か所で足りる(経路ごとに書かない ── §7)。
@@ -362,7 +364,7 @@ export function connectStoreEffects(
 
   const rescanColumnSmarts = (): void => {
     for (const [smartLid, hit] of dispatcher.getState().smartHits) {
-      if (hit.failed || !hasColumnCond(hit.spec)) continue;
+      if (hit.failed || !needsRescan(hit.spec)) continue;
       dispatcher.dispatch({ type: 'SMART_RESCAN', lid: smartLid });
     }
   };
@@ -510,11 +512,18 @@ export function connectStoreEffects(
             const body = await store.getBody(smartLid);
             if (disposed) return;
             const spec = body === null ? EMPTY_SMART : readSmartSpec(body);
-            if (isSmartEmpty(spec)) {
-              dispatcher.dispatch({
-                type: 'OP_FAILED',
-                error: 'このスマートフォルダにはまだ条件がありません(先にタグを選んでください)',
-              });
+            /**
+             * 🔴 **書けない条件しか無いなら、理由を出して止まる**(#421 段②の穴)。
+             * ⚠ 直す前は「条件が 1 つも無い」ときしか断っておらず、
+             *   **タグを 1 つも持たない入れ物**(「更新が 30 日以内」だけ、など)へ
+             *   落とすと**付けるタグが 0 個 = 無言で何も起きなかった**
+             *   (2026-08-26 に対照群つきで実測)。
+             * 🔑 判定と文言は `smartWriteError` が 1 か所で持つ ── 落とす口と
+             *   「ここから外す」口の両方がここを通るので、書き分けない(§7)。
+             */
+            const refusal = smartWriteError(spec, mode);
+            if (refusal !== null) {
+              dispatcher.dispatch({ type: 'OP_FAILED', error: refusal });
               return;
             }
             for (const tag of spec.tags) dispatcher.dispatch({ type: 'BULK_TAG', lids, tag, mode });
