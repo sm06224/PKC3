@@ -902,3 +902,54 @@ test('🔴 素のクリックでは編集に入らない (#395 段③ の対照�
     '素のクリックで編集に入った',
   ).toHaveCount(0);
 });
+
+/**
+ * 🔴 **表の 1 行を開いても、表は画面に残る**(#423。user 報告 2026-08-26
+ * 「インライン編集で複数行のブロックが1行しか表示されないバグあり / 表とかで起きてる」)。
+ *
+ * 🔴 **unit では届かない層**:器を `<table>` の中へ入れるのは**HTML の parser の
+ *   話**である ── `<div>` を入れると実ブラウザは表の外へ追い出すので、
+ *   欄がどこにも居なくなる。happy-dom はそこまで真似ない。
+ *   そして「表の中の `<textarea>` に本当に打てて、確定がその行だけを変える」かは
+ *   実機でしか分からない。
+ */
+test('🔴 表の行を開いても表は残り、その行だけを直せる (#423)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoLive(page);
+  await openLive(page, '# 表\n\n| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n');
+
+  const live = page.locator('[data-pkc-region="editor-live"]');
+  await expect(live.locator('table'), '表が描かれていない').toHaveCount(1);
+  const rowsBefore = await live.locator('tr').count();
+  expect(rowsBefore, '前提: 表に複数の行が在る').toBeGreaterThan(1);
+
+  // 2 行目(`| 3 | 4 |`)のセルを押す
+  await live.locator('tbody tr', { hasText: '3' }).first().locator('td').first().click();
+  const box = live.locator('[data-pkc-field="row-source"]');
+  await expect(box, '行が開かない').toBeVisible();
+  await expect(box).toHaveValue('| 3 | 4 |');
+
+  /**
+   * 🔴 **ここが本題** ── 直す前は、押した瞬間に表が丸ごと消えて
+   *   1 行の欄だけになっていた。
+   */
+  await expect(live.locator('table'), '表ごと消えた').toHaveCount(1);
+  await expect(live.locator('tr'), '表の行が消えた').toHaveCount(rowsBefore);
+  // 🔑 欄は**表の中**に居る(実ブラウザの parser が外へ出していない)
+  await expect(
+    live.locator('table [data-pkc-row-slot]'),
+    '欄が表の外へ出ている(器が表の文法に合っていない)',
+  ).toHaveCount(1);
+  // ⚠ 触っていない行の字は見えたまま
+  await expect(live.locator('table')).toContainText('1');
+
+  // 打てて、確定するとその行だけが変わる
+  await box.fill('| 30 | 40 |');
+  await page.keyboard.press('Tab');
+  await expect(live.locator('[data-pkc-field="row-source"]')).toHaveCount(0);
+  await expect(live.locator('table')).toContainText('30');
+  await expect(live.locator('table'), '触っていない行まで変わった').toContainText('1');
+  await expect(live.locator('tr')).toHaveCount(rowsBefore);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

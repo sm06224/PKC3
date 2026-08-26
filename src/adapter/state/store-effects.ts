@@ -19,6 +19,14 @@ import {
 } from '@features/markdown/append-target';
 import { applyBodyRewrite } from '@features/markdown/body-rewrite';
 import { clipPreview } from '@features/relation/dual-pane';
+import {
+  EMPTY_SMART,
+  isSmartEmpty,
+  readSmartSpec,
+  smartCondError,
+  withSmartTag,
+  writeSmartSpec,
+} from '@features/smart/smart-spec';
 import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
 import { buildTiles, withBuiltinTiles, type TileSource } from '@features/launcher/tiles';
 import type {
@@ -56,6 +64,13 @@ export interface StorePort {
    * ⚠ 目録と表は **1 回の走査**で返る(`key` が `null` なら表は `null`)。
    */
   queryScan?(key: string | null): Promise<{ keys: QueryKeys; groups: QueryGroups | null }>;
+  /**
+   * 🔴 **スマートフォルダの中身**(#421 段①)。⚠ **省略可** ── 持たない環境
+   * (test の fake / service worker に残った旧い worker)では、その入れ物が
+   * 「この版では集められません」と断るだけで、他は壊れない。
+   * ⚠ 返るのは **lid と件数**だけで、本文は 1 バイトも渡らない。
+   */
+  smartScan?(lid: string, tags: readonly string[]): Promise<{ lids: string[]; total: number }>;
   /**
    * カンバンの札(#277 段②-b)。⚠ **省略可** ── 持たない環境(test の fake /
    * service worker に残った旧い worker)では面が「集められません」と断る。
@@ -379,6 +394,165 @@ export function connectStoreEffects(
             /* ⚠ 失敗しても黙る(付随情報なので、user の操作は止まっていない) */
           },
         );
+        break;
+      }
+      /**
+       * 🔴 **スマートフォルダの中身を集める**(#421 段①)。
+       *
+       * 🔑 **条件はここで読む** ── reducer は本文を持っていないので、
+       *   `getBody` → `readSmartSpec` → `smartScan` の 3 手になる。
+       *   ⚠ 読む口は `readSmartSpec` **1 本**(§7)。
+       * 🔑 **同じ `enqueue` の列に並べる** ── 列の外で `getBody` を呼ぶと、
+       *   並んでいる書込を追い越して**保存前の条件**で集める(2026-08-17 の形)。
+       * ⚠ 集められない版では**黙らない** ── 面が「集めています…」のまま
+       *   永久に止まって見えるのが最悪である(`REQUEST_QUERY_SCAN` と同じ規律)。
+       */
+      /**
+       * 🔴 **スマートフォルダの条件のタグを、選んだノートへ足す / 外す**(#421 段①)。
+       *
+       * 🔑 **条件はその場で本文から読む** ── 憶えている値(`smartHits.tags`)で
+       *   書くと、本文を直に書き換えた直後に**違うタグ**を付ける。
+       * 🔑 **書くのは既にある口**(`BULK_TAG`)── タグを本文へ書く規則を
+       *   2 つ作らない(§7)。条件が 2 つなら 2 回撃つ。
+       * ⚠ 条件が 1 つも無いときは**断る** ── 黙って何もしないと、落とした user は
+       *   「入ったはずなのに出てこない」を見る。
+       */
+      case 'REQUEST_SMART_TAGS': {
+        const smartLid = ev.smartLid;
+        const lids = [...ev.lids];
+        const mode = ev.mode;
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            const body = await store.getBody(smartLid);
+            if (disposed) return;
+            const spec = body === null ? EMPTY_SMART : readSmartSpec(body);
+            if (isSmartEmpty(spec)) {
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: 'このスマートフォルダにはまだ条件がありません(先にタグを選んでください)',
+              });
+              return;
+            }
+            for (const tag of spec.tags) dispatcher.dispatch({ type: 'BULK_TAG', lids, tag, mode });
+            /**
+             * 🔑 **書いた後に集め直す** ── 同じ `enqueue` の列に並ぶので、
+             *   上の書込が終わってから走る(古い本文で集めることはない)。
+             * ⚠ 集め直さないと、落とした user は「入れたのに出てこない」を見る。
+             */
+            dispatcher.dispatch({ type: 'SMART_RESCAN', lid: smartLid });
+          } catch {
+            if (!disposed)
+              dispatcher.dispatch({ type: 'OP_FAILED', error: 'タグを書き換えられませんでした' });
+          }
+        });
+        break;
+      }
+      /**
+       * 🔴 **スマートフォルダの条件を本文へ書く**(#421 段①)。
+       *
+       * 🔑 書き終えたら**その場で集め直す** ── 条件だけ変わって並びが古いままだと、
+       *   user は「効いていない」と読む。⚠ 順番が要るので、同じ `enqueue` の中で続ける。
+       * ⚠ 書き換えは**原文 splice**(`writeSmartSpec`)── 説明文も他の key も無傷。
+       * ⚠ 変わらないとき(既に在る / 元から無い)は**書かない**が、黙って終える
+       *   (赤い帯にしない ── `REQUEST_BULK_TAG` と同じ扱い)。
+       */
+      case 'REQUEST_SMART_COND': {
+        const t = ev.target;
+        const tag = ev.tag;
+        const mode = ev.mode;
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            const body = await store.getBody(t.lid);
+            if (disposed || body === null) return;
+            const res = withSmartTag(readSmartSpec(body), tag, mode);
+            if (!res.ok) {
+              /**
+               * ⚠ **黙って捨てない** ── 上限に当たった / タグとして受けられない
+               *   ときは、押した user に**なぜ**を出す(`smartCondError`)。
+               * 🔑 「押しても同じ」(既に在る / 元から無い)だけは黙ってよい ──
+               *   ただし**集め直しはする**(user は押しているので、いまの当たりを出す)。
+               */
+              const why = smartCondError(res.reason);
+              if (why !== null) dispatcher.dispatch({ type: 'OP_FAILED', error: why });
+              else dispatcher.dispatch({ type: 'SMART_RESCAN', lid: t.lid });
+              return;
+            }
+            const newBody = writeSmartSpec(body, res.spec);
+            const ext = extractMeta(t.archetype, newBody);
+            const stamps = await store.persistEntry(
+              {
+                lid: t.lid,
+                title: t.title,
+                archetype: t.archetype,
+                body: newBody,
+                entryOrder: t.entryOrder,
+                status: ext.status,
+                date: ext.date,
+                archived: ext.archived,
+              },
+              { expectHash: contentHash64Hex(body) },
+            );
+            if (disposed) return;
+            // ⚠ **刻みを流す** ── 流さないと、条件を直しても一覧の「更新」が古いまま
+            //   (`tests/adapter/entry-timestamps.test.ts` が経路の数で機械的に見る)
+            stamp(t.lid, stamps);
+            dispatcher.dispatch({ type: 'SMART_RESCAN', lid: t.lid });
+          } catch {
+            if (!disposed)
+              dispatcher.dispatch({ type: 'OP_FAILED', error: '条件を書き換えられませんでした' });
+          }
+        });
+        break;
+      }
+      case 'REQUEST_SMART_SCAN': {
+        const ask = store.smartScan;
+        if (!ask) {
+          dispatcher.dispatch({ type: 'SMART_SCAN_FAILED', lid: ev.lid });
+          break;
+        }
+        const lid = ev.lid;
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            const body = await store.getBody(lid);
+            if (disposed) return;
+            // ⚠ 入れ物ごと消えていた ── 集められないのではなく、頼む相手がいない
+            if (body === null) {
+              dispatcher.dispatch({ type: 'SMART_SCAN_FAILED', lid });
+              return;
+            }
+            const spec = readSmartSpec(body);
+            /**
+             * 🔴 **条件が 0 件なら worker を呼ばない**(変異試験 S5 が教えた)。
+             *
+             * ⚠ 呼ぶと **entries を 500 件ずつ全部舐めて 0 件が返る** ──
+             *   `matchesSmart` が空を false にするので当たりようがない走査である。
+             * ⚠ そしてこれは**作った直後のスマートフォルダの姿**である
+             *   (条件はまだ空)── つまり「作って開く」たびに全件走査が走る。
+             * 🔑 画面は変わらない ── 空の当たりを置けば帯が
+             *   「条件を選んでください」を出す(`renderSmartBar`)。
+             */
+            if (isSmartEmpty(spec)) {
+              dispatcher.dispatch({ type: 'SMART_SCANNED', lid, lids: [], total: 0, tags: [] });
+              return;
+            }
+            const out = await ask(lid, spec.tags);
+            if (disposed) return;
+            // 🔑 **効いていた条件も返す** ── 画面が「何で絞っているか」を出すのに要る
+            //    (reducer も描く側も本文を持たないので、ここでしか渡せない)
+            dispatcher.dispatch({
+              type: 'SMART_SCANNED',
+              lid,
+              lids: out.lids,
+              total: out.total,
+              tags: spec.tags,
+            });
+          } catch {
+            if (!disposed) dispatcher.dispatch({ type: 'SMART_SCAN_FAILED', lid });
+          }
+        });
         break;
       }
       case 'REQUEST_QUERY_SCAN': {

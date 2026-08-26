@@ -123,6 +123,15 @@ const ICON_PATHS: Readonly<Record<string, readonly IconPath[]>> = {
   list: [{ d: 'M4 5h2v2H4z', fill: 'solid' }, 'M9 6h11', { d: 'M4 11h2v2H4z', fill: 'solid' }, 'M9 12h11', { d: 'M4 17h2v2H4z', fill: 'solid' }, 'M9 18h11'],
   /** フォルダ。⚠ タブの段差を 4 単位に(2.5 単位では消える) */
   folder: ['M3 6.5h6.5l2.5 4H21V19.5H3z'],
+  /**
+   * 🔴 **スマートフォルダ**(#421 段①)── フォルダに**星**を重ねる。
+   * ⚠ フォルダと**見分けが付く**ことが要件である(消せない / 移せない / 中身が
+   *   勝手に変わる、が全部違うので、同じ絵にすると「壊れている」と読まれる)。
+   */
+  'folder-smart': [
+    'M3 6.5h6.5l2.5 4H21V19.5H3z',
+    { d: 'M12 12l1.2 2.5 2.8.4-2 2 .5 2.7-2.5-1.3-2.5 1.3.5-2.7-2-2 2.8-.4z', fill: 'solid' },
+  ],
   /** アプリ ── 4 枚の板。⚠ 塗る(中空だと 16px で泥になる) */
   apps: [
     { d: 'M4 4h6.5v6.5H4z', fill: 'solid' },
@@ -245,6 +254,7 @@ export const ARCHETYPE_ICONS: Readonly<Record<string, IconName>> = {
   textlog: 'timeline',
   spreadsheet: 'grid',
   folder: 'folder',
+  smart: 'folder-smart',
   attachment: 'clip',
   todo: 'check-box',
   form: 'form',

@@ -16,7 +16,7 @@
  * ⑤ **導出物は開かない** ── 原文の行が無いので、差し替えると本文が壊れる
  */
 import { describe, expect, it, vi } from 'vitest';
-import { RowSwap } from '../../src/adapter/ui/render/row-swap';
+import { RowSwap, blockWithSubSlot } from '../../src/adapter/ui/render/row-swap';
 import { renderMarkdownWithRanges } from '../../src/features/markdown/source-ranges';
 
 const DOC = [
@@ -162,6 +162,107 @@ describe('RowSwap — 行を原文の入力欄に差し替える', () => {
     expect(r.swap.activeRange).toEqual({ start: 10, end: 10 });
   });
 
+  /**
+   * 🔴 **開いている間、表 / 箇条書きの残りは画面に居る**
+   * (#423。user 報告 2026-08-26「複数行のブロックが1行しか表示されない / 表とかで起きてる」)。
+   *
+   * ⚠ 直す前は**編集する範囲だけ**を行へ絞り、**差し替える相手は塊のまま**だった
+   *   ── 押した瞬間に `tr` が 0 個・`table` が 0 個になり、
+   *   3 行の表が**1 行の欄だけ**に化けていた。
+   * 🔑 上の 2 つの test は `value` と `activeRange` を見ている(= **範囲**は正しかった)。
+   *   ここが見るのは**周りが残っているか**である ── 観測点が塊の外にしか無かったので、
+   *   12 日ぶん緑のまま出荷されていた(CLAUDE.md §1 の「狭すぎる観測点」)。
+   */
+  it('🔴 表の行を開いても、表の残りは画面に居る(塊ごと消さない) (#423)', () => {
+    const r = rig();
+    const before = r.host.querySelectorAll('tr').length;
+    expect(before, '前提: 表に複数の行が在る').toBeGreaterThan(1);
+    click(findByText(r.host, 'tr', '3'));
+    expect(r.host.querySelectorAll('table'), '表ごと消えた').toHaveLength(1);
+    expect(r.host.querySelectorAll('tr'), '表の行が消えた').toHaveLength(before);
+    // 🔑 欄は**表の中**に居る(外へ飛び出していない)
+    const slot = r.host.querySelector('[data-pkc-row-slot]')!;
+    expect(slot.tagName.toLowerCase(), '表の中に div を入れると parser が外へ出す').toBe('td');
+    expect(slot.closest('table'), '欄が表の外に出ている').not.toBeNull();
+    expect(slot.getAttribute('colspan'), '列数に合わせていない').toBe('2');
+    // ⚠ 触っていない行の字は残っている(押した行だけが欄になった)
+    expect(r.host.textContent).toContain('1');
+    expect(box(r.host)!.value).toBe('| 3 | 4 |');
+  });
+
+  it('🔴 箇条書きの項目を開いても、他の項目は画面に居る (#423)', () => {
+    const r = rig();
+    const before = r.host.querySelectorAll('li').length;
+    expect(before, '前提: 項目が複数ある').toBeGreaterThan(1);
+    click(findByText(r.host, 'li', '二つめ'));
+    expect(r.host.querySelectorAll('li'), '項目が消えた').toHaveLength(before);
+    const slot = r.host.querySelector('[data-pkc-row-slot]')!;
+    expect(slot.tagName.toLowerCase()).toBe('li');
+    expect(r.host.textContent, '触っていない項目が消えた').toContain('一つめ');
+  });
+
+  /**
+   * ⚠ **対照群** ── 下位要素を持たない塊(段落 / コード)は、いまどおり**塊ごと**
+   * 入力欄になる。⚠ これが無いと「常に下位要素だけ差し替える」変異を見分けられない。
+   */
+  it('⚠ 下位要素を持たない塊は、いまどおり塊ごと入力欄になる (#423 の対照群)', () => {
+    const r = rig();
+    click(findByText(r.host, 'p', '最初の段落。'));
+    const slot = r.host.querySelector('[data-pkc-row-slot]')!;
+    expect(slot.tagName.toLowerCase(), '塊ごとの器が div でない').toBe('div');
+  });
+
+  /**
+   * 🔴 **打鍵で描き直っても、表は消えない**(#423 の 2 つ目の口)。
+   *
+   * ⚠ `update()` は**別に**スロットを組み直すので、そちらを直し忘れると
+   *   「押した瞬間は正しいが、次の描き直しで表が消える」という**もっと気づけない**
+   *   形になる(CLAUDE.md §7「同じ判定が複数の場所にある」)。
+   */
+  it('🔴 開いたまま描き直しても、表の残りは消えない (#423)', () => {
+    const r = rig();
+    const before = r.host.querySelectorAll('tr').length;
+    click(findByText(r.host, 'tr', '3'));
+    const rowOf = (): number => {
+      const slot = r.host.querySelector('[data-pkc-row-slot]')!;
+      return [...r.host.querySelectorAll('tr')].indexOf(slot.closest('tr')!);
+    };
+    // 前提: 押したのは 3 行目(見出し + 1 行目 + **2 行目**)
+    expect(rowOf(), '前提: 押した行に欄が出ていない').toBe(2);
+    r.render(r.body()); // ⚠ 本文は同一(打鍵前の描き直し)
+    expect(r.host.querySelectorAll('table'), '描き直しで表が消えた').toHaveLength(1);
+    expect(r.host.querySelectorAll('tr')).toHaveLength(before);
+    expect(box(r.host), '入力欄が居なくなった').not.toBeNull();
+    /**
+     * 🔑 **欄は押した行に居続ける** ── 数だけ見ると、欄が**別の行へ移っても**
+     *   同じ数になる(見出し行が欄に化けても `tr` は 3 個のまま)。
+     */
+    expect(rowOf(), '描き直しで欄が別の行へ移った').toBe(2);
+  });
+
+  it('🔴 箇条書きも、描き直しで欄が別の項目へ移らない (#423)', () => {
+    const r = rig();
+    click(findByText(r.host, 'li', '二つめ'));
+    const itemOf = (): number => {
+      const slot = r.host.querySelector('[data-pkc-row-slot]')!;
+      return [...r.host.querySelectorAll('li')].findIndex((li) => li === slot);
+    };
+    expect(itemOf(), '前提: 押した項目に欄が出ていない').toBe(1);
+    r.render(r.body());
+    expect(itemOf(), '描き直しで欄が別の項目へ移った').toBe(1);
+    expect(box(r.host)!.value).toBe('- 二つめ');
+  });
+
+  it('🔑 閉じたら表は元どおりに戻る(穴を残さない) (#423)', () => {
+    const r = rig();
+    const before = r.host.querySelectorAll('tr').length;
+    click(findByText(r.host, 'tr', '3'));
+    box(r.host)!.blur();
+    expect(r.host.querySelector('[data-pkc-row-slot]'), '器が残っている').toBeNull();
+    expect(r.host.querySelectorAll('tr')).toHaveLength(before);
+    expect(r.host.textContent).toContain('3');
+  });
+
   it('🔑 末尾の空行は編集範囲に入れない(消すと塊の切れ目が消えるので)', () => {
     // `- 二つめ` は list_item の範囲が後ろの空行(11)まで伸びている
     const r = rig();
@@ -172,6 +273,50 @@ describe('RowSwap — 行を原文の入力欄に差し替える', () => {
     box(r.host)!.blur();
     expect(r.body().split('\n')[11]).toBe('');
     expect(r.host.querySelectorAll('li')).toHaveLength(2);
+  });
+
+  /**
+   * 🔴 **器を組む所を直接見る**(#423)。
+   *
+   * ⚠ 「見つからなければ塊ごとへ落ちる」枝は、面から押す経路では**一度も通らない**
+   *   (`resolveSubUnit` が実際に見つけた要素の添字を渡すので、必ず解決する)。
+   *   変異試験 U5 が SURVIVED で教えたので、**関数を直接呼んで**通す ──
+   *   通らない枝に判断を書いたまま置かない(CLAUDE.md §2)。
+   */
+  describe('器を組む(#423)', () => {
+    const TABLE = '<table><tbody><tr><td>1</td><td>2</td></tr><tr><td>3</td><td>4</td></tr></tbody></table>';
+    it('表の行は tr/td の器になり、列数に合わせる', () => {
+      const html = blockWithSubSlot(TABLE, 'tr', 1)!;
+      const tpl = document.createElement('template');
+      tpl.innerHTML = html;
+      const slot = tpl.content.querySelector('[data-pkc-row-slot]')!;
+      expect(slot.tagName.toLowerCase()).toBe('td');
+      expect(slot.getAttribute('colspan')).toBe('2');
+      // ⚠ 触っていない行は残っている
+      expect(tpl.content.querySelectorAll('tr')).toHaveLength(2);
+      expect(tpl.content.textContent).toContain('1');
+      expect(tpl.content.textContent, '押した行の字が残っている').not.toContain('3');
+    });
+
+    it('箇条書きの項目は li の器になる', () => {
+      const html = blockWithSubSlot('<ul><li>あ</li><li>い</li></ul>', 'li', 0)!;
+      const tpl = document.createElement('template');
+      tpl.innerHTML = html;
+      const slot = tpl.content.querySelector('[data-pkc-row-slot]')!;
+      expect(slot.tagName.toLowerCase()).toBe('li');
+      expect(tpl.content.querySelectorAll('li')).toHaveLength(2);
+      expect(tpl.content.textContent).toContain('い');
+    });
+
+    /**
+     * 🔴 **見つからなければ `null`** ── 呼び側が「塊ごと」へ落ちる合図である。
+     * ⚠ ここで元の HTML を返すと、**器がどこにも無い**まま差し替えたことになり、
+     *   `open()` が欄を置けずに `false` を返す = **押しても何も起きない**。
+     */
+    it('🔴 その添字の下位要素が無ければ null(塊ごとへ落ちる合図)', () => {
+      expect(blockWithSubSlot(TABLE, 'tr', 9), '無い行で器を組んでいる').toBeNull();
+      expect(blockWithSubSlot('<p>ただの段落</p>', 'li', 0)).toBeNull();
+    });
   });
 
   it('リンクや押せるものは奪わない(押せるものは押せたまま)', () => {

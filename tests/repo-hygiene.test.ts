@@ -668,6 +668,34 @@ describe('新しい本文が state に入る所は、札の組み直しを通る
     const fn = STATE.slice(from, STATE.indexOf('\n}\n', from));
     expect(fn, 'buildPersist が札を組み直していない').toContain('refreshTaskCards');
   });
+
+  /**
+   * 🔴 **同じ全数走査を、スマートフォルダの当たりにも当てる**
+   * (user 要望 2026-08-26「文書側でタグつけしたら勝手にフォルダに落ちる」)。
+   *
+   * ⚠ 札(`refreshTaskCards`)とまったく同じ構造の穴である ── 新しい本文が
+   *   state に入る口は 6 つ在り、**1 つでも通し忘れると、その経路でタグを付けた
+   *   ときだけ入れ物が古いまま**になる(user から見ると「付けたのに出てこない」)。
+   * 🔑 だから**同じ census を 2 本立てる** ── 片方だけだと、次に口を足した人が
+   *   札は直して当たりを忘れる(逆も同じ)。
+   */
+  it('🔴 拾った case が全部 refreshSmartHits を通っている', () => {
+    const missing = [...bodyIntoStateCases()]
+      .filter(([name]) => EXEMPT[name] === undefined)
+      .filter(([, body]) => !body.includes('refreshSmartHits'))
+      .map(([name]) => name);
+    expect(
+      missing,
+      `新しい本文を state へ入れているのに、開いているスマートフォルダを直していない case がある(タグを付けても出てこない): ${missing.join(' / ')}`,
+    ).toEqual([]);
+  });
+
+  it('🔴 buildPersist も、開いているスマートフォルダを直す', () => {
+    const from = STATE.indexOf('function buildPersist(');
+    expect(from, 'buildPersist を読めていない').toBeGreaterThan(0);
+    const fn = STATE.slice(from, STATE.indexOf('\n}\n', from));
+    expect(fn, 'buildPersist が入れ物の当たりを直していない').toContain('refreshSmartHits');
+  });
 });
 
 /**

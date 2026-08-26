@@ -67,6 +67,12 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
      */
     queryScan: (key) => client.request({ op: 'queryScan', cid, ...(key === null ? {} : { key }) }),
     /**
+     * スマートフォルダの当たり(#421 段①)。⚠ ここも**渡すだけ** ── 当て方
+     * (AND / 大小無視 / 上限 / 自分を除く)の規則は
+     * `features/smart/smart-spec.ts` が 1 か所で持つ。
+     */
+    smartScan: (lid, tags) => client.request({ op: 'smartScan', cid, lid, tags }),
+    /**
      * 予定の札(#277 段②-b / #292 段⑤)。⚠ ここも**頼むだけ** ── 絞り込み(抽出列)も
      * 上限も worker と `features/schedule/task-cards.ts` が持つ。
      */

@@ -14,6 +14,7 @@ import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import { getRootEntries, getStructuralChildren } from './tree';
 import { matchesEntry, normalizeQuery } from '@features/filter/title-filter';
 import { sortOrder, type EntrySort } from '@features/filter/entry-sort';
+import { SMART_ARCHETYPE } from '@features/smart/smart-spec';
 
 export interface FilerListOptions {
   /** 絞り込みの語(**生の入力**。正規化はここでやる ── 呼び手ごとに書かない)。 */
@@ -27,7 +28,26 @@ export interface FilerListOptions {
    * 選ばれる範囲が食い違う、いちばん気づけない形)。
    */
   readonly sortDesc: boolean;
+  /**
+   * 🔴 **スマートフォルダの当たり**(#421 段①)。`undefined` / `null` = まだ届いていない。
+   *
+   * ⚠ **現在地がスマートフォルダのときだけ見る** ── ふつうのフォルダに渡しても
+   *   無視する(呼び手が場所ごとに分岐を書かなくて済む)。
+   * ⚠ **まだ届いていないときは 0 件を返す** ── 「集めています…」と出すのは
+   *   描く側の仕事である(0 件と「まだ」の区別は state が持っている)。
+   */
+  readonly smartLids?: readonly string[] | null;
 }
+
+/**
+ * 🔴 **その場所の当たりを引く口は 1 つ**(#421 段①)。スマートフォルダでなければ
+ * `null`(= 見ない)。⚠ 呼び手ごとに `smartHits.get(...)` を書くと、書き忘れた
+ * 面だけ**空のスマートフォルダ**に見える(§7)。
+ */
+export const smartLidsOf = (
+  scopeLid: string | null,
+  smartHits: ReadonlyMap<string, { readonly lids: readonly string[] }>,
+): readonly string[] | null => (scopeLid === null ? null : (smartHits.get(scopeLid)?.lids ?? null));
 
 /**
  * いま見ているフォルダに出る行(絞り込み済み・並べ替え済み)。
@@ -39,10 +59,20 @@ export function filerRows(
   relations: readonly Relation[],
   opts: FilerListOptions,
 ): EntryMeta[] {
+  /**
+   * 🔴 **スマートフォルダの中身は「条件で当たったもの」**(#421 段①)。
+   * ⚠ 手で入れた子は**見ない** ── そもそも入れられない(入れ物の中身が
+   *   2 種類になると「消したのに残る」が起きる)。
+   * ⚠ 消えた lid は落とす(当たりを集めた後にゴミ箱へ入れられることがある)。
+   */
   const base =
-    scopeLid === null
-      ? getRootEntries(entryMetas, relations)
-      : getStructuralChildren(scopeLid, entryMetas, relations);
+    scopeLid !== null && entryMetas.get(scopeLid)?.archetype === SMART_ARCHETYPE
+      ? (opts.smartLids ?? [])
+          .map((lid) => entryMetas.get(lid))
+          .filter((m): m is EntryMeta => m !== undefined)
+      : scopeLid === null
+        ? getRootEntries(entryMetas, relations)
+        : getStructuralChildren(scopeLid, entryMetas, relations);
   const q = normalizeQuery(opts.filterQuery);
   const shown = base.filter((m) => matchesEntry(m.lid, m.title, q, opts.searchHits));
   // ⚠ 並べ替えは lid の列で行う(規則は `sortOrder` 1 か所)── ここで比較を書き直さない

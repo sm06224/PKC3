@@ -36,7 +36,9 @@ import {
   pushSelection,
   type SelectionHistory,
 } from '@features/nav/selection-history';
-import { filerRows, rangeInRows } from '@features/relation/filer-list';
+import { filerRows, rangeInRows, smartLidsOf } from '@features/relation/filer-list';
+import { SMART_ARCHETYPE, matchesSmart } from '@features/smart/smart-spec';
+import { readTags } from '@features/flavor/tags';
 import {
   initialDual,
   paneOf,
@@ -60,6 +62,24 @@ import {
   type DualSide,
   type DualState,
 } from '@features/relation/dual-pane';
+
+/**
+ * 🔴 **スマートフォルダ 1 つぶんの当たり**(#421 段①)。
+ * ⚠ `total` は**上限で切る前**の数 ── 黙って切ると user は「これで全部」と読む。
+ * ⚠ `failed` は「この版では集められない」(旧い worker が残っている端末)。
+ */
+export interface SmartHitState {
+  readonly lids: readonly string[];
+  readonly total: number;
+  readonly failed: boolean;
+  /**
+   * 🔑 **集めたときに効いていた条件**。⚠ 画面に「何で絞っているか」を出すために
+   *   持つ ── 本文をもう一度読みに行かないで済む(reducer も描く側も本文を持たない)。
+   * ⚠ **書き込みの判断には使わない**(本文を直に書き換えられると古くなる)──
+   *   落としたときのタグは effect が**その場で本文から読む**。
+   */
+  readonly tags: readonly string[];
+}
 
 export type AppPhase = 'initializing' | 'ready' | 'editing' | 'error';
 /**
@@ -223,15 +243,37 @@ function dualPreviewTarget(state: AppState, dual: DualState): string | null {
  *   「読み直すか」を書くと、**ある経路だけ前の行の本文を映し続ける**
  *   (CLAUDE.md §7「同じ判定が複数の場所にある」)。
  */
+/**
+ * 🔴 **その場所がスマートフォルダなら、集め直しを頼む**(#421 段①)。
+ *
+ * ⚠ 判定はここ 1 か所 ── 左の列も 2 ペインの左右も、場所が変わる経路は
+ *   いくつもある。呼び手ごとに書くと**ある経路だけ集め直さない**
+ *   (症状は「押したのに前の並びのまま」という、いちばん気づけない形)。
+ */
+function smartScanFor(state: AppState, lid: string | null): DomainEvent[] {
+  if (lid === null) return [];
+  if (state.entryMetas.get(lid)?.archetype !== SMART_ARCHETYPE) return [];
+  return [{ type: 'REQUEST_SMART_SCAN', lid }];
+}
+
 function withDual(state: AppState, dual: DualState): ReduceResult {
   /**
    * ⚠ **何も変わらないなら state ごと同じものを返す** ── 新しい object を返すと、
    *   「押しても何も変わらない」場面で**面が毎回組み直る**(この面の門は
    *   `state.dual` の参照 1 本で変化を見ているので、参照が変われば必ず描き直す)。
    */
+  /**
+   * ⚠ **場所が変わった側だけ**集め直しを頼む(#421 段①)── 毎回頼むと、
+   *   カーソルを 1 行送るたびに全件走査が走る。
+   */
+  const scans: DomainEvent[] = [];
+  for (const side of ['left', 'right'] as const) {
+    const to = paneScope(paneOf(dual, side));
+    if (to !== paneScope(paneOf(state.dual, side))) scans.push(...smartScanFor(state, to));
+  }
   const done = (next: DualState, events: DomainEvent[] = []): ReduceResult => ({
     state: next === state.dual ? state : { ...state, dual: next },
-    events,
+    events: [...scans, ...events],
   });
   const target = dualPreviewTarget(state, dual);
   if (!dual.previewOn || target === null)
@@ -474,6 +516,16 @@ export interface AppState {
    * ⚠ 束ねる key(`queryKey`)は**端末の設定**として覚える(ペインの開閉と同じ流儀)──
    * container には書かない。「どの列で見ていたか」は文書の性質ではなく作業の都合である。
    */
+  /**
+   * 🔴 **スマートフォルダの当たり**(#421 段①)。lid → 集めた結果。
+   *
+   * ⚠ **表 1 つで左の列も 2 ペインも読む** ── 同じスマートフォルダを 3 か所で
+   *   開きうるので、面ごとに持つと**同じ問いに答える口が 3 つ**になる(§7)。
+   *   鍵をスマートフォルダの lid にしておけば、走査は 1 回で済む。
+   * ⚠ **入っていない = まだ集めていない**(0 件ではない)── 画面は
+   *   「集めています…」と出す。⚠ `failed` は「この版では集められない」。
+   */
+  smartHits: ReadonlyMap<string, SmartHitState>;
   queryKey: string | null;
   queryKeys: QueryKeys | null;
   queryGroups: QueryGroups | null;
@@ -632,6 +684,7 @@ export const initialState: AppState = {
   entrySortDesc: NATURAL_DESC[DEFAULT_ENTRY_SORT],
   searchHitsQuery: '',
   queryKey: null,
+  smartHits: new Map<string, SmartHitState>(),
   queryKeys: null,
   queryGroups: null,
   queryFailed: false,
@@ -997,7 +1050,32 @@ export type UserAction =
   /** 🔴 **下見の出し入れ**(#273 残件)。 */
   | { type: 'DUAL_SET_PREVIEW'; on: boolean }
   /** 下見の本文が届いた。⚠ **lid つき**(追い越しを捨てるため)。 */
-  | { type: 'DUAL_PREVIEW_LOADED'; lid: string; body: string };
+  | { type: 'DUAL_PREVIEW_LOADED'; lid: string; body: string }
+  /** 🔴 **スマートフォルダの当たりが届いた**(#421 段①)。 */
+  | {
+      type: 'SMART_SCANNED';
+      lid: string;
+      lids: readonly string[];
+      total: number;
+      tags: readonly string[];
+    }
+  | { type: 'SMART_SCAN_FAILED'; lid: string }
+  /**
+   * 🔴 **スマートフォルダへ入れる / から外す**(#421 段①。user 裁定 2026-08-26)。
+   * ⚠ **条件のタグを本文へ書く**のが実体である ── 入れ物に「入れた」のではなく、
+   *   条件に合う形へ本文が変わるから、次に集めたときに当たる。
+   */
+  | { type: 'SMART_TAGS'; smartLid: string; lids: readonly string[]; mode: 'add' | 'remove' }
+  /**
+   * 🔴 **スマートフォルダの条件そのものを足す / 外す**(#421 段①)。
+   * ⚠ 書くのは**その入れ物の本文の frontmatter**(`smart-tags:`)である。
+   */
+  | { type: 'SMART_COND'; lid: string; tag: string; mode: 'add' | 'remove' }
+  /**
+   * 🔴 **集め直す**(#421 段①)。⚠ 条件やタグを書き換えた**後**に撃つ ──
+   * 書込と同じ列に並ぶので、古い本文で集めることはない。
+   */
+  | { type: 'SMART_RESCAN'; lid: string };
 
 export type SystemCommand =
   | { type: 'SYS_BOOTED'; cid: string; metas: EntryMeta[]; relations: Relation[] }
@@ -1129,6 +1207,39 @@ export type DomainEvent =
    *   別経路で読むと、並んでいる書込を追い越す(2026-08-17 に踏んだ形)。
    */
   | { type: 'REQUEST_DUAL_PREVIEW'; lid: string }
+  /**
+   * 🔴 **スマートフォルダの中身を集める**(#421 段①)。
+   *
+   * ⚠ **条件は載せない** ── reducer は**本文を持っていない**
+   *   (`entryMetas` は「body の不在は意図的」と宣言している)。だから条件を
+   *   読むのは effect 層である:`getBody` → `readSmartSpec` → `smartScan`。
+   * 🔑 読む口は `readSmartSpec` **1 本**なので、§7 は破れない。
+   * ⚠ **開くたびに頼む** ── 鮮度は「開いた時点」である。憶えて使い回すと、
+   *   別の面でタグを付けた直後に**古い並び**が出る。
+   */
+  | { type: 'REQUEST_SMART_SCAN'; lid: string }
+  /**
+   * 🔴 **スマートフォルダの条件のタグを、選んだノートへ足す / 外す**(#421 段①)。
+   * ⚠ 条件は effect が**その場で本文から読む** ── 憶えている値で書くと、
+   *   本文を直に書き換えた直後に**違うタグ**を付ける。
+   */
+  /**
+   * 🔴 **スマートフォルダの条件を本文へ書く**(#421 段①)。
+   * ⚠ 行の材料(題名・種別・並び)を**ここで確定して運ぶ** ── effect が実行時に
+   *   引き直すと、その間の改名を踏む(`PERSIST_ENTRY` と同じ規律)。
+   */
+  | {
+      type: 'REQUEST_SMART_COND';
+      target: { lid: string; title: string; archetype: string; entryOrder: number };
+      tag: string;
+      mode: 'add' | 'remove';
+    }
+  | {
+      type: 'REQUEST_SMART_TAGS';
+      smartLid: string;
+      lids: readonly string[];
+      mode: 'add' | 'remove';
+    }
   /** 🔴 このノートを参照しているノートを引く(#348)。 */
   | { type: 'REQUEST_BACKLINKS'; lid: string }
   /**
@@ -1605,6 +1716,13 @@ function reduceCore(
            * 🔑 板を開いていなければ即 `null` で返るので、実費はほぼ無い。
            */
           taskScan: refreshTaskCards(state.taskScan, action.lid, action.body),
+          // 🔑 タグが変われば、開いている入れ物の中身も変わる(#421 / user 要望 2026-08-26)
+          smartHits: refreshSmartHits(
+            state.smartHits,
+            action.lid,
+            action.body,
+            state.entryMetas,
+          ),
         },
         events: [],
       };
@@ -1888,6 +2006,13 @@ function reduceCore(
           },
           // ⚠ 名前のとおり**本文が入れ替わる**所 ── 札も組み直す(上と同じ理由)
           taskScan: refreshTaskCards(state.taskScan, action.lid, action.body),
+          // 🔑 タグが変われば、開いている入れ物の中身も変わる(#421 / user 要望 2026-08-26)
+          smartHits: refreshSmartHits(
+            state.smartHits,
+            action.lid,
+            action.body,
+            state.entryMetas,
+          ),
         },
         events: [],
       };
@@ -2061,7 +2186,7 @@ function reduceCore(
         };
       }
       // 抽出はイベント発火時(= この reduce)に同期で行い、行全体を確定して運ぶ
-      const { entryMetas, entry, taskScan } = buildPersist(state, meta, body);
+      const { entryMetas, entry, taskScan, smartHits } = buildPersist(state, meta, body);
       // 変更前(baseline)を履歴に積むかどうか(P5c: 実際の記録は worker が
       // 同 tx で行う ── ここは「刻むか / 頭を張り替えるだけか」の意思決定)。
       // 新規作成の初回 commit は積まない ──「flavor seed へ戻す」だけの復元先は
@@ -2089,6 +2214,7 @@ function reduceCore(
           ...next,
           entryMetas,
           taskScan,
+          smartHits,
           ...(diskAhead
             ? {
                 error:
@@ -2097,7 +2223,17 @@ function reduceCore(
               }
             : {}),
         },
-        events: [{ type: 'PERSIST_ENTRY', entry, checkpoint }],
+        /**
+         * 🔑 **保存したのが入れ物自身なら、条件が変わったかもしれない**
+         *   (本文の `smart-tags:` は手で書ける ── マニュアルにもそう書いてある)。
+         * ⚠ 上の `refreshSmartHits` は**自分自身を触らない**(自分は集めないので
+         *   正しい)ので、条件の変更はここでしか拾えない。
+         * ⚠ 入れ物でなければ `smartScanFor` が空を返す ── 普通の保存で走査は走らない。
+         */
+        events: [
+          { type: 'PERSIST_ENTRY', entry, checkpoint },
+          ...smartScanFor(state, lid),
+        ],
       };
     }
     case 'RETRY_PERSIST': {
@@ -2109,7 +2245,7 @@ function reduceCore(
       if (baseline === persisted || diskAhead) return { state, events: [] };
       const meta = state.entryMetas.get(lid);
       if (!meta) return { state, events: [] };
-      const { entryMetas, entry, taskScan } = buildPersist(state, meta, baseline);
+      const { entryMetas, entry, taskScan, smartHits } = buildPersist(state, meta, baseline);
       // 再送でも刻む意思は同じ(worker 側の hash skip が重複を防ぐので二重に
       // 積まれることはない ── 初回 persist が失敗していれば disk はまだ前の内容)
       const checkpoint =
@@ -2121,6 +2257,7 @@ function reduceCore(
           error: null,
           entryMetas,
           taskScan,
+          smartHits,
           openBody: { lid, body: baseline, baseline, persisted, diskAhead: false },
         },
         events: [{ type: 'PERSIST_ENTRY', entry, checkpoint }],
@@ -2261,6 +2398,13 @@ function reduceCore(
            *   板から「やること」を足す口を作ると、これが正面の欠陥になる。
            */
           taskScan: refreshTaskCards(state.taskScan, action.lid, action.body),
+          // 🔑 タグが変われば、開いている入れ物の中身も変わる(#421 / user 要望 2026-08-26)
+          smartHits: refreshSmartHits(
+            state.smartHits,
+            action.lid,
+            action.body,
+            state.entryMetas,
+          ),
           /**
            * 🔴 **直前の 1 手だけ覚える**(#395 段①)── 「元に戻す」の材料。
            * ⚠ 純粋な挿入でなかった回は `null` に落とす ── 前の追記の材料を
@@ -2490,7 +2634,13 @@ function reduceCore(
        * ⚠ 盤面を一度も開いていなければ `null` のまま(何もしない)。
        */
       const taskScan = refreshTaskCards(state.taskScan, action.lid, action.body);
-      return { state: { ...state, entryMetas, openBody, taskScan }, events: [] };
+      /**
+       * 🔑 **タグを付けたら、開いている入れ物にその場で落ちる**(user 要望 2026-08-26)。
+       * ⚠ ここは**まとめてタグを付ける**経路でもある(`REQUEST_BULK_TAG` が 1 件ずつ
+       *   ack を撃つ)── worker に頼み直す形だと 100 件で 100 回の全件走査になる。
+       */
+      const smartHits = refreshSmartHits(state.smartHits, action.lid, action.body, entryMetas);
+      return { state: { ...state, entryMetas, openBody, taskScan, smartHits }, events: [] };
     }
     case 'SET_CALENDAR_MONTH': {
       // 月送りの正規化(binder は 0 や 13 を送ってよい)
@@ -2617,6 +2767,7 @@ function reduceCore(
        * 規則は `filerRows` 1 か所(描く側と同じ関数)。
        */
       const rows = filerRows(state.scopeLid, state.entryMetas, state.relations, {
+        smartLids: smartLidsOf(state.scopeLid, state.smartHits),
         filterQuery: state.filterQuery,
         searchHits: state.searchHits,
         sort: state.entrySort,
@@ -2631,6 +2782,7 @@ function reduceCore(
       if (state.phase !== 'ready') return { state, events: [] };
       // ⚠ 規則は `filerRows` 1 か所(描く側・範囲選択と同じ答えになる)
       const rows = filerRows(state.scopeLid, state.entryMetas, state.relations, {
+        smartLids: smartLidsOf(state.scopeLid, state.smartHits),
         filterQuery: state.filterQuery,
         searchHits: state.searchHits,
         sort: state.entrySort,
@@ -2665,7 +2817,8 @@ function reduceCore(
        */
       return {
         state: { ...state, scopeLid: action.lid, selection: [], selectionAnchor: null },
-        events: [],
+        // 🔑 入った先がスマートフォルダなら集め直す(判定は `smartScanFor` 1 か所)
+        events: smartScanFor(state, action.lid),
       };
     }
     case 'DESELECT_ENTRY': {
@@ -3209,6 +3362,7 @@ function reduceCore(
        * ⚠ ここで並びを組み直すと、目で見た範囲と選ばれる範囲が食い違う。
        */
       const rows = filerRows(paneScope(pane), state.entryMetas, state.relations, {
+        smartLids: smartLidsOf(paneScope(pane), state.smartHits),
         // 🔑 **絞り込みの規則は 1 本**(`paneFilterOptions`)── 描く側と同じものを見る
         ...paneFilterOptions(pane, state.filterQuery, state.searchHits),
         sort: state.entrySort,
@@ -3323,6 +3477,84 @@ function reduceCore(
        */
       return withDual(state, { ...state.dual, previewOn: action.on, preview: null });
     }
+    /**
+     * 🔴 **スマートフォルダの当たりが届いた**(#421 段①)。
+     * ⚠ **lid で入れ物を分ける** ── 同じ表に複数のスマートフォルダの結果が
+     *   入る(左と右で別々のものを開ける)ので、上書きにすると片方が消える。
+     */
+    case 'SMART_SCANNED': {
+      const next = new Map(state.smartHits);
+      next.set(action.lid, {
+        lids: [...action.lids],
+        total: action.total,
+        failed: false,
+        tags: [...action.tags],
+      });
+      return { state: { ...state, smartHits: next }, events: [] };
+    }
+    /**
+     * ⚠ **黙って空にしない** ── 「集められない」と「0 件」は別の話である
+     *   (旧い worker が service worker のキャッシュに残っている端末で起きる)。
+     */
+    case 'SMART_SCAN_FAILED': {
+      const next = new Map(state.smartHits);
+      // ⚠ 条件は**そのまま残す**(集められなかっただけで、条件は在る)
+      next.set(action.lid, {
+        lids: [],
+        total: 0,
+        failed: true,
+        tags: state.smartHits.get(action.lid)?.tags ?? [],
+      });
+      return { state: { ...state, smartHits: next }, events: [] };
+    }
+    /**
+     * 🔴 **落としたら条件のタグが付く / 外すと外れる**(#421 段①)。
+     *
+     * ⚠ **条件はここで読めない**(reducer は本文を持たない)ので、読むのは effect。
+     * 🔑 書くのは**既にある口**(`BULK_TAG` → `REQUEST_BULK_TAG`)── タグを本文へ
+     *   書く規則を 2 つ作らない(§7)。
+     */
+    case 'SMART_TAGS': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      const lids = action.lids.filter((lid) => state.entryMetas.has(lid));
+      if (lids.length === 0) return { state, events: [] };
+      if (!state.entryMetas.has(action.smartLid)) return { state, events: [] };
+      return {
+        state,
+        events: [
+          { type: 'REQUEST_SMART_TAGS', smartLid: action.smartLid, lids, mode: action.mode },
+        ],
+      };
+    }
+    /**
+     * 🔴 **条件を書き換える**(#421 段①)。書き終えたら**集め直す** ── そこまでが
+     * 1 つの操作である(条件だけ変わって並びが古いままだと、user は「効いていない」
+     * と読む)。⚠ 集め直しは effect が書込の後に頼む(順番が要る)。
+     */
+    case 'SMART_COND': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      if (action.tag.trim() === '') return { state, events: [] };
+      const meta = state.entryMetas.get(action.lid);
+      if (meta === undefined || meta.archetype !== SMART_ARCHETYPE) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_SMART_COND',
+            target: {
+              lid: meta.lid,
+              title: meta.title,
+              archetype: meta.archetype,
+              entryOrder: meta.entryOrder,
+            },
+            tag: action.tag,
+            mode: action.mode,
+          },
+        ],
+      };
+    }
+    case 'SMART_RESCAN':
+      return { state, events: smartScanFor(state, action.lid) };
     case 'DUAL_PREVIEW_LOADED': {
       /**
        * ⚠ **追い越しを捨てる**(#273 残件)── 読みは非同期なので、送った先の行を
@@ -3437,6 +3669,13 @@ function reduceCore(
            *   ので、こちらは通さない ── そもそも編集中に板は開けない。
            */
           taskScan: refreshTaskCards(state.taskScan, action.meta.lid, action.body),
+          // 🔑 タグが変われば、開いている入れ物の中身も変わる(#421 / user 要望 2026-08-26)
+          smartHits: refreshSmartHits(
+            state.smartHits,
+            action.meta.lid,
+            action.body,
+            state.entryMetas,
+          ),
           error: null,
         },
         events: [],
@@ -3657,6 +3896,72 @@ function dropLink(
  *   `openBody` に新しい本文を入れる case を足した人は、通し忘れるとその場で落ちる。
  * ⚠ 板を一度も開いていなければ `null` のまま何もしない。
  */
+/**
+ * 🔴 **タグを付けたら、開いているスマートフォルダにその場で落ちる**
+ * (user 要望 2026-08-26「文書側でタグつけしたら勝手にフォルダに落ちるもやってください」)。
+ *
+ * ⚠ 直す前は、集め直しが走るのは **①入れ物へ入ったとき ②落としたとき
+ *   ③条件を変えたとき**の 3 つだけだった ── **情報ペインでタグを付けても、
+ *   本文の frontmatter に `tags:` を書いて保存しても、開いている入れ物は
+ *   古い並びのまま**である(user から見ると「付けたのに出てこない」)。
+ *
+ * 🔑 **worker に頼み直さない。** ここには**新しい本文**が在るので、
+ *   「この 1 件が当たるか」は**その場で**決まる ── 板の札を組み直す
+ *   `refreshTaskCards` と同じ形である。往復しないので**押した手応えが消えない**し、
+ *   まとめて 100 件にタグを付けても全件走査は 1 度も走らない。
+ * 🔑 当てる規則は `matchesSmart` **1 本**(§7)── worker と同じ関数を通る。
+ *   ここに独自の判定を書くと、開いている間と開き直した後で並びが変わる。
+ *
+ * ⚠ **触らない場合が 3 つある**(どれも「手で継ぎ足すと嘘になる」形):
+ *   ① **その入れ物自身**の本文が変わった(自分は集めない ── 条件のほうが
+ *      変わったのなら `COMMIT_EDIT` が集め直しを頼む)
+ *   ② **集められない版**(`failed`)── 触ると「集まったふり」になる
+ *   ③ **上限で切れている**一覧(`total > lids.length`)── 1 件外しても
+ *      **次の 1 件が分からない**ので、数と中身が食い違う。次に開くまで待つ
+ *
+ * ⚠ 並べる順は **worker と同じ**(`entry_order`、同値なら lid)── 揃えないと、
+ *   付けた瞬間だけ末尾に出て、開き直すと別の場所へ跳ぶ。
+ */
+function refreshSmartHits(
+  smartHits: ReadonlyMap<string, SmartHitState>,
+  lid: string,
+  body: string,
+  entryMetas: ReadonlyMap<string, EntryMeta>,
+): ReadonlyMap<string, SmartHitState> {
+  /**
+   * ⚠ **「1 つも開いていないなら即返す」を書かない**(変異試験 T7 が教えた)──
+   *   下の `next ?? smartHits` が**同じ参照を返す**ので、外しても結果は変わらない。
+   *   同じ答えを出す口を 2 つ置くと、片方を壊しても鳴らなくなる(§7)。
+   */
+  const tags = readTags(body);
+  const orderOf = (l: string): number =>
+    entryMetas.get(l)?.entryOrder ?? Number.MAX_SAFE_INTEGER;
+  let next: Map<string, SmartHitState> | null = null;
+  for (const [smartLid, hit] of smartHits) {
+    if (smartLid === lid) continue;
+    if (hit.failed) continue;
+    if (hit.total > hit.lids.length) continue;
+    const at = hit.lids.indexOf(lid);
+    const should = matchesSmart({ tags: hit.tags }, tags);
+    if (should === (at >= 0)) continue;
+    let lids: string[];
+    if (should) {
+      const o = orderOf(lid);
+      const i = hit.lids.findIndex((x) => {
+        const xo = orderOf(x);
+        return xo > o || (xo === o && x > lid);
+      });
+      lids = [...hit.lids];
+      lids.splice(i < 0 ? lids.length : i, 0, lid);
+    } else {
+      lids = [...hit.lids.slice(0, at), ...hit.lids.slice(at + 1)];
+    }
+    next ??= new Map(smartHits);
+    next.set(smartLid, { ...hit, lids, total: lids.length });
+  }
+  return next ?? smartHits;
+}
+
 function refreshTaskCards(
   scan: TaskScan | null,
   lid: string,
@@ -3676,6 +3981,8 @@ function buildPersist(
   entry: EntryUpsert;
   /** ⚠ 板を開いていなければ `null`(呼び側はそのまま state へ入れてよい)。 */
   taskScan: TaskScan | null;
+  /** ⚠ 入れ物を 1 つも開いていなければ、渡された map がそのまま返る。 */
+  smartHits: ReadonlyMap<string, SmartHitState>;
 } {
   const ext = extractMeta(meta.archetype, body);
   const changed =
@@ -3689,6 +3996,11 @@ function buildPersist(
     entryMetas,
     // 🔑 本文が変われば札の行番号もずれる ── ここで組み直す(上の docstring)
     taskScan: refreshTaskCards(state.taskScan, meta.lid, body),
+    /**
+     * 🔑 **本文に `tags:` を書いて保存した回**も、開いている入れ物へ落とす
+     *   (user 要望 2026-08-26)── 情報ペインから付けた回だけ直しても片手落ちである。
+     */
+    smartHits: refreshSmartHits(state.smartHits, meta.lid, body, entryMetas),
     entry: {
       lid: meta.lid,
       title: meta.title,

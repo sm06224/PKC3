@@ -16,6 +16,7 @@ import { attachmentFlavor } from './attachment-flavor';
 import { spreadsheetFlavor } from './spreadsheet-flavor';
 import { textFlavor } from './text-flavor';
 import { snippetFlavor } from './snippet-flavor';
+import { smartFlavor } from './smart-flavor';
 
 const REGISTRY: ReadonlyMap<string, FlavorSpec> = new Map(
   [
@@ -25,6 +26,7 @@ const REGISTRY: ReadonlyMap<string, FlavorSpec> = new Map(
     attachmentFlavor,
     spreadsheetFlavor,
     snippetFlavor,
+    smartFlavor,
     textFlavor,
   ].map((f) => [f.archetype, f]),
 );

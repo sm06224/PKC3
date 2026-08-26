@@ -35,7 +35,8 @@ import {
   paneScope,
 } from '@features/relation/dual-pane';
 import { MAX_BOOKMARKS, isBookmarked } from '@features/relation/dual-bookmarks';
-import { filerRows } from '@features/relation/filer-list';
+import { filerRows, smartLidsOf } from '@features/relation/filer-list';
+import { SMART_ARCHETYPE } from '@features/smart/smart-spec';
 import { normalizeQuery } from '@features/filter/title-filter';
 import { getAncestorFolders } from '@features/relation/tree';
 import { formatListDate } from '@features/datetime/stored-date';
@@ -327,6 +328,7 @@ export class DualFilerRenderer {
     for (const side of SIDES) {
       const pane = paneOf(state.dual, side);
       const rows = filerRows(paneScope(pane), state.entryMetas, state.relations, {
+        smartLids: smartLidsOf(paneScope(pane), state.smartHits),
         // 🔑 **絞り込みの規則は 1 本**(reducer / binder と同じ `paneFilterOptions`)
         ...paneFilterOptions(pane, state.filterQuery, state.searchHits),
         sort: state.entrySort,
@@ -972,6 +974,12 @@ export class DualFilerRenderer {
       tr.setAttribute('draggable', 'true');
       // ⚠ フォルダは**落とし先**にもなる(その中へ入れる)
       if (m.archetype === 'folder') tr.setAttribute('data-pkc-drop', 'folder');
+      /**
+       * 🔴 **スマートフォルダにも落とせる**(#421 段①。user 裁定 2026-08-26)。
+       * ⚠ 印は `folder` と**別の値**にする ── 落ちた結果が違う(移すのではなく、
+       *   **条件のタグが本文に付く**)ので、同じ印にすると受け手が見分けられない。
+       */
+      else if (m.archetype === SMART_ARCHETYPE) tr.setAttribute('data-pkc-drop', 'smart');
       const name = document.createElement('td');
       if (m.lid === renaming) {
         /**
