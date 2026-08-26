@@ -8,6 +8,7 @@
  *   再生成は新規 lid のみ
  * - **選択変更は属性 patch のみ**(2 行の data-pkc-selected を付け替える)
  */
+import { archetypeLabel } from '@features/flavor/archetype-label';
 import type { EntryMeta } from '@core/model/entry-meta';
 import { canNavBack, canNavForward, type AppState } from '@adapter/state/app-state';
 import { matchesEntry, normalizeQuery } from '@features/filter/title-filter';
@@ -243,32 +244,14 @@ export class SidebarRenderer {
 }
 
 /**
- * 種別の**名前**(user に見せる語)。⚠ 内部語(archetype / entry)は出さない。
+ * 種別の**名前**(user に見せる語)。
+ *
+ * 🔑 **実体は `features/flavor/archetype-label.ts` へ移した**(#421 段②)──
+ *   スマートフォルダの条件(「種類が〇〇」)が同じ一覧を要るが、条件は
+ *   pure module が読むので adapter を import できない(層の規約)。
+ * ⚠ ここは**再輸出だけ**(呼び側の import は変えない ── 一覧を 2 つ作らない §7)。
  */
-export function archetypeLabel(archetype: string): string {
-  switch (archetype) {
-    case 'text':
-      return 'ノート';
-    case 'textlog':
-      return 'ログ';
-    case 'spreadsheet':
-      return '表';
-    case 'folder':
-      return 'フォルダ';
-    case 'smart':
-      return 'スマートフォルダ';
-    case 'attachment':
-      return '添付';
-    case 'snippet':
-      return '雛形';
-    case 'todo':
-      return 'Todo';
-    case 'form':
-      return 'フォーム';
-    default:
-      return archetype;
-  }
-}
+export { archetypeLabel };
 
 /**
  * チップに入れる図案(user 指示 2026-08-03「アイコンや絵文字を使ってください」)。

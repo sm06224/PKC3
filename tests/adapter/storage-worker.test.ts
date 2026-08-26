@@ -2084,3 +2084,89 @@ describe('#398 版ごとの増減行数', () => {
     expect(await statsOf('d3')).toEqual([]);
   });
 });
+
+/**
+ * 🔴 **スマートフォルダの走査**(#421 段②)── **列で絞る所は本物の SQL でしか見えない**。
+ *
+ * ⚠ unit の fake は「当たり」を作って返すだけなので、`WHERE archetype = ?` の
+ *   綴りが違っても気づけない。ここは**実物の sqlite** に当てる。
+ */
+describe('スマートフォルダの走査(#421 段②)', () => {
+  const CID = 'c-smart';
+  const put = (
+    lid: string,
+    over: Record<string, unknown>,
+    body = '---\ntags: [請求]\n---\n本文\n',
+  ) =>
+    request({
+      op: 'upsertEntry',
+      cid: CID,
+      entry: { ...entry(lid, body), ...over },
+      checkpoint: false,
+    });
+
+  const scan = (q: Partial<Parameters<typeof smartQ>[0]> = {}) => smartQ({ ...q });
+  const smartQ = (q: {
+    tags?: readonly string[];
+    kind?: string | null;
+    updatedFrom?: string | null;
+    createdFrom?: string | null;
+    dated?: boolean | null;
+  }) =>
+    request({
+      op: 'smartScan',
+      cid: CID,
+      lid: 'self',
+      tags: q.tags ?? [],
+      kind: q.kind ?? null,
+      updatedFrom: q.updatedFrom ?? null,
+      createdFrom: q.createdFrom ?? null,
+      dated: q.dated ?? null,
+    });
+
+  beforeAll(async () => {
+    await request({ op: 'openContainer', cid: CID, title: 'smart' });
+    await put('n-text', { archetype: 'text', entryOrder: 1 });
+    await put('n-attach', { archetype: 'attachment', entryOrder: 2 });
+    // 日付が列に在る行 / 無い行
+    await put('n-dated', { archetype: 'text', entryOrder: 3, date: '2026-08-26' });
+  }, 30_000);
+
+  it('🔴 種類で絞れる(その種類だけが返る)', async () => {
+    const only = await scan({ kind: 'attachment' });
+    expect(only.lids, '種類で絞れていない').toEqual(['n-attach']);
+    // ⚠ **対照群** ── 指定しなければ全部返る(空振り防止)
+    const all = await scan({ tags: ['請求'] });
+    expect(all.lids.length, '対照群が空(前提が崩れている)').toBeGreaterThan(1);
+  });
+
+  it('🔴 日付の有無で絞れる(向きを持つ)', async () => {
+    expect((await scan({ dated: true })).lids).toEqual(['n-dated']);
+    const none = await scan({ dated: false });
+    expect(none.lids, '「書いていない」が「書いてある」と同じ答えになった').not.toContain(
+      'n-dated',
+    );
+    expect(none.lids.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * 🔴 **境目の向き**が効いている(未来を境目にすれば 0 件、過去なら全部)。
+   * ⚠ `>=` を `<=` に取り違えると、「最近直したもの」が**古いものだけ**になる。
+   */
+  it('🔴 更新が N 日以内で絞れる(境目の向き)', async () => {
+    const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    expect((await scan({ updatedFrom: future })).lids, '未来より新しい行が在る').toEqual([]);
+    const past = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const recent = await scan({ updatedFrom: past });
+    expect(recent.lids.length, 'いま書いた行が当たっていない').toBeGreaterThan(0);
+    // ⚠ 作成のほうも同じ向きで効く(片方だけ直す取り違えを見る)
+    expect((await scan({ createdFrom: future })).lids).toEqual([]);
+    expect((await scan({ createdFrom: past })).lids.length).toBeGreaterThan(0);
+  });
+
+  it('🔴 列とタグは AND で効く', async () => {
+    await put('n-notag', { archetype: 'attachment', entryOrder: 4 }, 'タグの無い本文\n');
+    const got = await scan({ kind: 'attachment', tags: ['請求'] });
+    expect(got.lids, 'タグを見ていない').toEqual(['n-attach']);
+  });
+});

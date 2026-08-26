@@ -182,3 +182,58 @@ test('🔴 中でタグを外すと、集め直しを待たずに行が消える
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **タグ以外の条件で絞る**(#421 段②)。
+ *
+ * 🔴 **unit では届かない層**:列の条件は **worker の SQL** が当てる ──
+ *   unit の fake は「当たり」を作って返すだけなので、`WHERE archetype = ?` が
+ *   本当に効いているかは**実物の sqlite** でしか分からない。
+ *   そして `<select>` は **change** で来るので、実キーの操作でしか通らない。
+ */
+test('🔴 種類で絞ると、その種類だけが集まる (#421 段②)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await useSplitEditor(page);
+  await gotoApp(page);
+
+  await makeNote(page, 'ふつうのノート', 'ただの本文\n');
+  // フォルダを 1 つ作る(種類が違うもの)
+  await createEntry(page, 'folder');
+  const ft = page.locator('[data-pkc-field="editor-title"]');
+  if (await ft.count()) await ft.fill('はこ');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  await createEntry(page, 'smart');
+  const title = page.locator('[data-pkc-field="editor-title"]');
+  if (await title.count()) await title.fill('フォルダぜんぶ');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  await page.locator(SMART_ROW).first().dblclick();
+  await expect(page.locator(WHY)).toContainText('条件を選んでください');
+
+  // 🔴 種類を選ぶ(実キーの change)
+  await page.locator('[data-pkc-field="smart-kind"]').selectOption('folder');
+  await expect(page.locator(ROWS), 'フォルダだけが集まっていない').toHaveCount(1);
+  await expect(page.locator(ROWS).first()).toContainText('はこ');
+
+  /**
+   * ⚠ **対照群** ── 種類を「ノート」に変えると、集まるものが入れ替わる
+   *   (SQL が当たっている証拠。⚠ 件数だけ見ると、常に全部返っていても 1 件になりうる)。
+   */
+  await page.locator('[data-pkc-field="smart-kind"]').selectOption('text');
+  await expect(page.locator(ROWS)).toHaveCount(1);
+  await expect(page.locator(ROWS).first(), '種類を変えても中身が同じ').toContainText(
+    'ふつうのノート',
+  );
+
+  // 🔑 開き直しても効く(条件は本文に在る)
+  await page.reload();
+  await page.locator(SMART_ROW).first().dblclick();
+  await expect(page.locator('[data-pkc-field="smart-kind"]'), '条件が残っていない').toHaveValue(
+    'text',
+  );
+  await expect(page.locator(ROWS)).toHaveCount(1);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

@@ -35,7 +35,12 @@
  *
  * ⚠ **pure module**。browser API も DB も知らない。
  */
-import { parseFrontmatter, spliceFrontmatterKeys } from '../markdown/frontmatter';
+import {
+  parseFrontmatter,
+  spliceFrontmatterKeys,
+  type FrontmatterValue,
+} from '../markdown/frontmatter';
+import { isKnownArchetype } from '../flavor/archetype-label';
 import { MAX_TAG_CHARS, normalizeTag, readTags, sameTag } from '../flavor/tags';
 
 /**
@@ -46,6 +51,31 @@ export const SMART_ARCHETYPE = 'smart';
 
 /** 条件を書く frontmatter の key。⚠ 段②で増えるものも `smart-` で始める。 */
 export const SMART_TAGS_KEY = 'smart-tags';
+
+/**
+ * 🔴 **列で引ける条件の key**(#421 段②)。
+ *
+ * 🔑 **entries 表の列**をそのまま使うので、走査が要らない ── worker が
+ *   **SQL で絞ってから**、タグの分だけ本文の先頭を舐める(走査の口は 1 本のまま)。
+ *
+ * ⚠ **起票時の 6 条件のうち 2 つは作れない**(2026-08-26 に実装を読んで判明):
+ *   ①「チェック項目がある」── `task_total` は**多めに数えた候補数**で、
+ *     `task-count.ts` 自身が「表示に使わないこと」と宣言している。
+ *     ⚠ 一覧に並べると**項目 0 件のノートが混ざる**うえ、走査は先頭しか読まないので
+ *     その場で確定もできない
+ *   ②「未処理がある」── 🔴 **列が無い**(候補数であって未処理数ではない)
+ *   🔑 どちらも**列を足す段**が要るので、別に立てる。
+ */
+export const SMART_KIND_KEY = 'smart-kind';
+export const SMART_UPDATED_KEY = 'smart-updated';
+export const SMART_CREATED_KEY = 'smart-created';
+export const SMART_DATED_KEY = 'smart-dated';
+
+/**
+ * 「N 日以内」の上限。⚠ **手違いの検出**である(3650 = 10 年)── これより長い
+ * 指定は「全部」と変わらないので、条件として受けない。
+ */
+export const MAX_SMART_DAYS = 3650;
 
 /**
  * 1 つのスマートフォルダが持てる条件タグの数。
@@ -60,16 +90,56 @@ export const MAX_SMART_TAGS = 8;
  */
 export const SMART_LIMIT = 500;
 
-/** 条件。⚠ 段①は**タグだけ**(段②で種類・日付・語が増える)。 */
+/**
+ * 条件。🔑 **全部 AND** ── 書いた条件を**全部**満たすノートだけ当たる。
+ * ⚠ 段③(語で絞る)で増えるものも、ここへ平らに足す。
+ */
 export interface SmartSpec {
   /** 🔑 **AND** ── 全部付いているノートだけ当たる。 */
   readonly tags: readonly string[];
+  /** 種類(`text` / `folder` …)。⚠ 作った時に決まり、本文の書換では変わらない。 */
+  readonly kind: string | null;
+  /** 更新が N 日以内。`null` = 見ない。 */
+  readonly updatedDays: number | null;
+  /** 作成が N 日以内。`null` = 見ない。 */
+  readonly createdDays: number | null;
+  /**
+   * 先頭に日付(frontmatter の `date:`)を書いてあるか。`null` = 見ない。
+   * ⚠ **本文の行に書く `@2026-08-25` は入らない** ── 列に写るのは frontmatter だけ
+   *   (`readScheduleDate`)。画面の字もそう書く(「付いているのに集まらない」を作らない)。
+   */
+  readonly dated: boolean | null;
 }
 
-export const EMPTY_SMART: SmartSpec = { tags: [] };
+export const EMPTY_SMART: SmartSpec = {
+  tags: [],
+  kind: null,
+  updatedDays: null,
+  createdDays: null,
+  dated: null,
+};
 
 /** 条件が 1 つも無いか。⚠ **空は「全部」ではなく「何も」**である(上の注記)。 */
-export const isSmartEmpty = (spec: SmartSpec): boolean => spec.tags.length === 0;
+export const isSmartEmpty = (spec: SmartSpec): boolean =>
+  spec.tags.length === 0 &&
+  spec.kind === null &&
+  spec.updatedDays === null &&
+  spec.createdDays === null &&
+  spec.dated === null;
+
+/**
+ * 🔴 **列で引く条件を 1 つでも持っているか**(#421 段②)。
+ *
+ * 🔑 呼び側はこれで**その場で落とせるか**を決める ── タグだけの入れ物は
+ *   新しい本文から手で判定できるが、⚠ **列の条件は本文を書いた瞬間に変わる**
+ *   (`updated_at` は保存のたびに動く)ので、手で継ぎ足すと嘘になる。
+ *   そちらは worker に集め直しを頼む。
+ */
+export const hasColumnCond = (spec: SmartSpec): boolean =>
+  spec.kind !== null ||
+  spec.updatedDays !== null ||
+  spec.createdDays !== null ||
+  spec.dated !== null;
 
 /**
  * 本文から条件を読む。
@@ -83,8 +153,17 @@ export const isSmartEmpty = (spec: SmartSpec): boolean => spec.tags.length === 0
  */
 export function readSmartSpec(body: string): SmartSpec {
   const { meta } = parseFrontmatter(body);
-  const raw = meta[SMART_TAGS_KEY];
-  if (raw === undefined || raw === null) return EMPTY_SMART;
+  return {
+    tags: readSmartTags(meta[SMART_TAGS_KEY]),
+    kind: readKind(meta[SMART_KIND_KEY]),
+    updatedDays: readDays(meta[SMART_UPDATED_KEY]),
+    createdDays: readDays(meta[SMART_CREATED_KEY]),
+    dated: readFlag(meta[SMART_DATED_KEY]),
+  };
+}
+
+function readSmartTags(raw: FrontmatterValue | undefined): readonly string[] {
+  if (raw === undefined || raw === null) return [];
   /**
    * ⚠ **空の要素は `null` で来る**(frontmatter の parser がそう返す)── そのまま
    *   `String()` すると **`"null"` という名前のタグ**が条件になる(`readTags` が
@@ -101,7 +180,45 @@ export function readSmartSpec(body: string): SmartSpec {
     out.push(t);
     if (out.length >= MAX_SMART_TAGS) break;
   }
-  return { tags: out };
+  return out;
+}
+
+/**
+ * 種類を読む。⚠ **知らない綴りは条件にしない** ── 受けると
+ * 「書いたのに 1 件も集まらない」だけの入れ物ができ、理由が画面に出ない。
+ */
+function readKind(raw: FrontmatterValue | undefined): string | null {
+  if (typeof raw !== 'string') return null;
+  const v = raw.trim();
+  return v !== '' && isKnownArchetype(v) ? v : null;
+}
+
+/**
+ * 「N 日以内」を読む。受ける形は **`30d`** と **`30`** の両方
+ * (記法を減らさない ── user がどちらで書いても通す)。
+ * ⚠ 0 以下・上限超え・数でないものは**条件にしない**。
+ */
+function readDays(raw: FrontmatterValue | undefined): number | null {
+  if (typeof raw === 'number') return normalizeDays(raw);
+  if (typeof raw !== 'string') return null;
+  const m = /^\s*(\d+)\s*d?\s*$/i.exec(raw);
+  return m === null ? null : normalizeDays(Number(m[1]));
+}
+
+const normalizeDays = (n: number): number | null =>
+  Number.isInteger(n) && n >= 1 && n <= MAX_SMART_DAYS ? n : null;
+
+/**
+ * 有無の条件を読む。受ける形は `true` / `false`(と `yes` / `no`)。
+ * ⚠ 読めない綴りは `null`(= 見ない)── 黙って `true` に倒さない。
+ */
+function readFlag(raw: FrontmatterValue | undefined): boolean | null {
+  if (typeof raw === 'boolean') return raw;
+  if (typeof raw !== 'string') return null;
+  const v = raw.trim().toLowerCase();
+  if (v === 'true' || v === 'yes') return true;
+  if (v === 'false' || v === 'no') return false;
+  return null;
 }
 
 /**
@@ -130,10 +247,68 @@ export function withSmartTag(
     if (has) return { ok: false, reason: 'unchanged' };
     // ⚠ 上限に当たったら**足さない**(黙って古い方を落とさない ── `withTag` と同じ)
     if (spec.tags.length >= MAX_SMART_TAGS) return { ok: false, reason: 'limit' };
-    return { ok: true, spec: { tags: [...spec.tags, t] } };
+    return { ok: true, spec: { ...spec, tags: [...spec.tags, t] } };
   }
   if (!has) return { ok: false, reason: 'unchanged' };
-  return { ok: true, spec: { tags: spec.tags.filter((x) => !sameTag(x, t)) } };
+  return { ok: true, spec: { ...spec, tags: spec.tags.filter((x) => !sameTag(x, t)) } };
+}
+
+/**
+ * 🔴 **列で引く条件の名前**(#421 段②)。⚠ **綴りを直書きしない**
+ * (画面・reducer・effect の 3 か所に散ると、1 つ直し忘れが静かに効く)。
+ */
+export type SmartField = 'kind' | 'updated' | 'created' | 'dated';
+
+export const SMART_FIELDS: readonly SmartField[] = ['kind', 'updated', 'created', 'dated'];
+
+/**
+ * 列で引く条件を 1 つ決める / 外す。
+ *
+ * @param value 画面から来た生の値。**空文字 = 指定しない**(条件を外す)
+ * @returns 変わらないときは `unchanged`、受けられない値は `invalid`
+ *
+ * ⚠ **判定はここ 1 か所**(§7)── `readSmartSpec` と同じ規則を通すので、
+ *   「画面から選べるのに本文からは読めない」食い違いが起きない。
+ */
+export function withSmartField(
+  spec: SmartSpec,
+  field: SmartField,
+  value: string,
+): SmartCondResult {
+  const raw = value.trim();
+  const cleared = raw === '';
+  if (field === 'kind') {
+    const next = cleared ? null : readKind(raw);
+    if (!cleared && next === null) return { ok: false, reason: 'invalid' };
+    return next === spec.kind ? { ok: false, reason: 'unchanged' } : { ok: true, spec: { ...spec, kind: next } };
+  }
+  if (field === 'dated') {
+    const next = cleared ? null : readFlag(raw);
+    if (!cleared && next === null) return { ok: false, reason: 'invalid' };
+    return next === spec.dated
+      ? { ok: false, reason: 'unchanged' }
+      : { ok: true, spec: { ...spec, dated: next } };
+  }
+  const next = cleared ? null : readDays(raw);
+  if (!cleared && next === null) return { ok: false, reason: 'invalid' };
+  const now = field === 'updated' ? spec.updatedDays : spec.createdDays;
+  if (next === now) return { ok: false, reason: 'unchanged' };
+  return {
+    ok: true,
+    spec:
+      field === 'updated' ? { ...spec, updatedDays: next } : { ...spec, createdDays: next },
+  };
+}
+
+/**
+ * その条件の**いまの値**を、画面の `<select>` に入れる形で返す。
+ * ⚠ 読む側と書く側で綴りが食い違わないよう、**ここ 1 か所**で決める。
+ */
+export function smartFieldValue(spec: SmartSpec, field: SmartField): string {
+  if (field === 'kind') return spec.kind ?? '';
+  if (field === 'dated') return spec.dated === null ? '' : spec.dated ? 'true' : 'false';
+  const days = field === 'updated' ? spec.updatedDays : spec.createdDays;
+  return days === null ? '' : `${String(days)}d`;
 }
 
 /**
@@ -154,16 +329,70 @@ export function smartCondError(reason: 'unchanged' | 'limit' | 'invalid'): strin
 export function writeSmartSpec(body: string, spec: SmartSpec): string {
   return spliceFrontmatterKeys(body, {
     [SMART_TAGS_KEY]: spec.tags.length === 0 ? undefined : [...spec.tags],
+    [SMART_KIND_KEY]: spec.kind ?? undefined,
+    // ⚠ 書き戻す形は **`30d`** に揃える(読むほうは `30` も受ける)
+    [SMART_UPDATED_KEY]: spec.updatedDays === null ? undefined : `${String(spec.updatedDays)}d`,
+    [SMART_CREATED_KEY]: spec.createdDays === null ? undefined : `${String(spec.createdDays)}d`,
+    [SMART_DATED_KEY]: spec.dated === null ? undefined : spec.dated,
   });
 }
 
 /**
- * そのノートが条件に当たるか。
+ * 🔴 **条件の「タグの分だけ」を当てる**(#421 段②で名前を直した)。
+ *
+ * ⚠ **名前を主張に合わせてある** ── 列の条件(種類 / 更新 / 作成 / 日付)は
+ *   ここでは見ない。見るのは **SQL の側 1 か所**である(条件どうしは重ならないので、
+ *   同じ問いに 2 か所が答えることにはならない)。
+ * ⚠ 旧名 `matchesSmart` のままにすると、次に列の条件を足す人が
+ *   「ここが全部答えている」と読む ── それが CLAUDE.md の
+ *   「計器の名前が、計器の見ている範囲より広い」型である。
+ *
  * 🔑 **AND**(条件のタグを全部持っている)。⚠ 突き合わせは大小無視(`sameTag`)。
+ * ⚠ 条件が 1 つも無ければ `false`(空は「全部」ではなく「何も」)。
  */
-export function matchesSmart(spec: SmartSpec, tags: readonly string[]): boolean {
+export function matchesSmartTags(spec: SmartSpec, tags: readonly string[]): boolean {
   if (isSmartEmpty(spec)) return false; // ⚠ 空は「何も集めない」
   return spec.tags.every((want) => tags.some((have) => sameTag(have, want)));
+}
+
+/**
+ * 🔴 **「N 日以内」を境目の時刻に直す**(#421 段②)。
+ *
+ * 🔑 **時計を worker に持ち込まない** ── 境目をここで作って渡せば、worker は
+ *   `>= ?` を撃つだけになり、**test が時刻を決められる**(worker の中で
+ *   `Date.now()` を読むと、走らせるたびに答えが変わる)。
+ * ⚠ 比べる相手は entries の `created_at` / `updated_at`(ISO 文字列)なので、
+ *   こちらも ISO で返す ── 文字列の大小比較がそのまま時刻の大小になる。
+ */
+export function smartCutoff(days: number | null, nowMs: number): string | null {
+  if (days === null) return null;
+  return new Date(nowMs - days * 24 * 60 * 60 * 1000).toISOString();
+}
+
+/**
+ * 🔴 **worker へ渡す形**(#421 段②)。条件を**そのまま**送らないのは、
+ * 「N 日以内」が**時計に依る**からである(上の `smartCutoff`)。
+ */
+export interface SmartQuery {
+  readonly tags: readonly string[];
+  readonly kind: string | null;
+  readonly updatedFrom: string | null;
+  readonly createdFrom: string | null;
+  readonly dated: boolean | null;
+}
+
+/**
+ * 条件 → worker へ渡す形。⚠ **直し方はここ 1 か所**(§7)── 呼び手ごとに
+ * 組み立てると、ある経路だけ境目の日数が違う、が静かに起きる。
+ */
+export function smartQueryOf(spec: SmartSpec, nowMs: number): SmartQuery {
+  return {
+    tags: [...spec.tags],
+    kind: spec.kind,
+    updatedFrom: smartCutoff(spec.updatedDays, nowMs),
+    createdFrom: smartCutoff(spec.createdDays, nowMs),
+    dated: spec.dated,
+  };
 }
 
 /** 走査の結果。⚠ `total` は**上限で切る前**の数。 */
@@ -195,7 +424,7 @@ export function createSmartScan(spec: SmartSpec, selfLid: string): SmartScan {
     feed(rows) {
       /**
        * ⚠ **空のときの早期 return をここに置かない**(§7)。
-       *   「条件が空 → 何も集めない」は `matchesSmart` が答えているので、
+       *   「条件が空 → 何も集めない」は `matchesSmartTags` が答えているので、
        *   ここに書いても**出る答えは 1 バイトも変わらない**
        *   (変異試験 S5 が SURVIVED で教えた ── 消しても誰も困らない行だった)。
        * 🔑 **走査そのものを止めるのは、ここではなく呼び側である** ──
@@ -211,7 +440,7 @@ export function createSmartScan(spec: SmartSpec, selfLid: string): SmartScan {
          * ⚠ **タグの読み方は `readTags` 1 本**(§7)── ここに独自の読み方を
          *   書くと、一覧に出る札と「当たるかどうか」が静かに食い違う。
          */
-        if (!matchesSmart(spec, readTags(row.head))) continue;
+        if (!matchesSmartTags(spec, readTags(row.head))) continue;
         total += 1;
         // ⚠ 上限を超えたぶんは lid を持たないが、**数は数え続ける**
         if (lids.length < SMART_LIMIT) lids.push(row.lid);

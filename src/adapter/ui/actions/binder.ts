@@ -28,6 +28,7 @@ import {
   visibleSelection,
 } from '@features/relation/filer-list';
 import { archetypeLabel } from '@adapter/ui/render/sidebar';
+import { SMART_FIELDS, type SmartField } from '@features/smart/smart-spec';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
 import { insertText } from '@adapter/ui/render/row-swap';
 import { insertionForLineDate } from '@features/schedule/line-date';
@@ -726,6 +727,7 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   // 🔑 スマートフォルダの条件と出し入れも**本文を書く**(#421 段①)
   'smart-cond-add',
   'smart-cond-remove',
+  'smart-field',
   'smart-evict',
   // ⚠ 追記と**同じ経路**(`REQUEST_BODY_REWRITE`)を撃つので、同じ門をくぐらせる
   'undo-append',
@@ -1425,6 +1427,20 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'SMART_COND', lid, tag, mode: 'add' });
     // 🔑 通したら欄を空にする(次の 1 つを打てる)── ⚠ 断ったときは残す
     if (field) field.value = '';
+  },
+  /**
+   * 🔴 **列で引く条件を選ぶ**(#421 段②)。⚠ `<select>` なので **change** で来る
+   *   ── binder の `onChange` が `data-pkc-action` を見て呼ぶ。
+   * ⚠ **どの条件か**は要素が持つ(`data-pkc-smart-field`)── action を
+   *   4 つに割ると、足すたびに 4 か所へ書くことになる(§7)。
+   */
+  'smart-field': (dispatcher, target) => {
+    const lid = dispatcher.getState().scopeLid;
+    if (lid === null) return;
+    const field = target.getAttribute('data-pkc-smart-field') ?? '';
+    if (!(SMART_FIELDS as readonly string[]).includes(field)) return;
+    const value = target instanceof HTMLSelectElement ? target.value : '';
+    dispatcher.dispatch({ type: 'SMART_FIELD', lid, field: field as SmartField, value });
   },
   'smart-cond-remove': (dispatcher, target) => {
     const lid = dispatcher.getState().scopeLid;
