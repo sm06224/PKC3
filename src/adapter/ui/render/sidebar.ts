@@ -11,7 +11,13 @@
 import { archetypeLabel } from '@features/flavor/archetype-label';
 import type { EntryMeta } from '@core/model/entry-meta';
 import { canNavBack, canNavForward, type AppState } from '@adapter/state/app-state';
-import { matchesEntry, normalizeQuery } from '@features/filter/title-filter';
+import {
+  NO_KINDS,
+  entryFilterOf,
+  matchesEntry,
+  type FilterTarget,
+} from '@features/filter/title-filter';
+import { kindCounts, type KindCount } from '@features/filter/kind-filter';
 import { sortOrder } from '@features/filter/entry-sort';
 import { ARCHETYPE_ICONS, iconSpan, setIcon, type IconName } from './icons';
 import { formatListDate, formatStoredDate } from '@features/datetime/stored-date';
@@ -49,6 +55,11 @@ export class SidebarRenderer {
   private readonly navBack: HTMLButtonElement | null;
   private readonly navForward: HTMLButtonElement | null;
   private lastHistory: AppState['selectionHistory'] | null = null;
+  /** 種類の札(#411)。⚠ **器だけ** shell が持ち、中身はここが描く。 */
+  private readonly kindBar: HTMLElement | null;
+  private lastKinds: ReadonlySet<string> | null = null;
+  /** 前回描いた札の姿。⚠ **数まで含めて**比べる(数だけ変わる回がある)。 */
+  private lastKindShape = '';
 
   constructor(sidebarRegion: HTMLElement) {
     const list = sidebarRegion.querySelector<HTMLElement>(
@@ -65,6 +76,7 @@ export class SidebarRenderer {
     this.navForward = sidebarRegion.querySelector<HTMLButtonElement>(
       '[data-pkc-action="nav-forward"]',
     );
+    this.kindBar = sidebarRegion.querySelector<HTMLElement>('[data-pkc-region="kind-bar"]');
   }
 
   render(state: AppState): void {
@@ -74,6 +86,9 @@ export class SidebarRenderer {
       state.entryMetas !== this.lastMetas ||
       state.order !== this.lastOrder ||
       state.filterQuery !== this.lastFilter ||
+      // 🔴 **種類の絞りも指紋**(#411)── 入れないと**札を押しても行が減らない**
+      //    (上の 2 つとまったく同じ罠。ここで 3 度目なので、足す軸は必ずここへ書く)
+      state.kindFilter !== this.lastKinds ||
       // 🔴 **本文の当たりも指紋の一部**(#181)。入れないと、SQL が返っても
       //    画面が変わらない ── state だけ正しくて**行が増えない**
       //    (絞り込みを指紋に入れ忘れた 2026-08 の再演。今回は test が捕まえた)
@@ -97,6 +112,7 @@ export class SidebarRenderer {
       this.filterInput.value = state.filterQuery;
 
     if (listChanged) this.reconcileRows(state);
+    if (listChanged) this.paintKindBar(state);
     if (listChanged || selectionChanged) this.patchSelection(state.selectedLid);
     if (historyChanged) {
       if (this.navBack) this.navBack.disabled = !canNavBack(state);
@@ -110,7 +126,85 @@ export class SidebarRenderer {
     this.lastSortDesc = state.entrySortDesc;
     this.lastOrder = state.order;
     this.lastFilter = state.filterQuery;
+    this.lastKinds = state.kindFilter;
     this.lastSelected = state.selectedLid;
+  }
+
+  /**
+   * 🔴 **種類で絞る札**(#411)。
+   *
+   * ## 数える母集団 ── 「種類で絞る**前**、語で絞った**後**」
+   *
+   * ⚠ 種類でも絞った後を数えると、**選んだ札だけが残って他が消える** ──
+   *   戻す口が画面から無くなる。だから `kinds` を空にした条件で数える。
+   *
+   * ## 🔴 「解除」は絞っている間ずっと出す
+   *
+   * ⚠ 札はその場に居る種類しか出さないので、**押した札そのものが消える**場面が
+   *   ある(フォルダの中へ入る / 語を変える)。そのとき「0 件です」とだけ出た
+   *   画面になり、user には**絞りが効いていることすら見えない**。
+   * 🔑 だから解除は札の在り方に依らず、`kindFilter` が空でない限り必ず置く
+   *   ── 面ごとに出す条件を書くと、書き忘れた面で user が閉じ込められる。
+   */
+  private paintKindBar(state: AppState): void {
+    const bar = this.kindBar;
+    if (!bar) return;
+    /**
+     * ⚠ 語だけで絞った集合を数える(`kinds` は空で渡す ── 上の ⚠)。
+     * ⚠ **`state.order` を回す**(`entryMetas` の並びではない)── 一覧に出る
+     *   のは `order` に居るものだけなので、`entryMetas` を数えると
+     *   **画面に無いものまで札の数に入る**。
+     */
+    const counted = entryFilterOf(state.filterQuery, state.searchHits, NO_KINDS);
+    const present: FilterTarget[] = [];
+    for (const lid of state.order) {
+      const meta = state.entryMetas.get(lid);
+      if (meta !== undefined && matchesEntry(meta, counted)) present.push(meta);
+    }
+    const kinds = kindCounts(present);
+    /**
+     * ⚠ **種類が 1 つしか無いなら札を出さない** ── 押しても何も変わらない札は
+     *   dead click である(「絞れる」と言っておいて絞れない)。
+     * ⚠ ただし**絞っている最中は必ず出す** ── 絞った結果 1 種類になった瞬間に
+     *   帯ごと消えると、解除できなくなる。
+     */
+    const show = kinds.length > 1 || state.kindFilter.size > 0;
+    const shape = show
+      ? `${kinds.map((k) => `${k.archetype}:${k.count}`).join('|')}#${[...state.kindFilter].sort().join(',')}`
+      : '';
+    if (shape === this.lastKindShape) return; // 姿が同じ ── DOM に触れない
+    this.lastKindShape = shape;
+    bar.hidden = !show;
+    bar.textContent = '';
+    if (!show) return;
+    for (const k of kinds) bar.append(this.kindChip(k, state.kindFilter.has(k.archetype)));
+    if (state.kindFilter.size > 0) {
+      const off = document.createElement('button');
+      off.type = 'button';
+      off.setAttribute('data-pkc-action', 'clear-kind-filter');
+      off.setAttribute('data-pkc-field', 'kind-clear');
+      off.textContent = '解除';
+      off.title = '種類の絞りを外して全部出します';
+      bar.append(off);
+    }
+  }
+
+  private kindChip(kind: KindCount, on: boolean): HTMLButtonElement {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.setAttribute('data-pkc-action', 'toggle-kind-filter');
+    btn.setAttribute('data-pkc-kind', kind.archetype);
+    /**
+     * 🔴 **押されているかを読み上げにも出す**(`aria-pressed`)── 色だけで
+     *   表すと、色を見分けられない人には**どれで絞っているか分からない**。
+     */
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    // ⚠ 件数まで出す ── 押す前に何件になるか分かる(押してから驚かない)
+    btn.textContent = `${kind.label} ${kind.count}`;
+    btn.title = on
+      ? `${kind.label}の絞りを外します`
+      : `${kind.label}だけにします(${kind.count} 件)`;
+    return btn;
   }
 
   private reconcileRows(state: AppState): void {
@@ -127,7 +221,7 @@ export class SidebarRenderer {
      * 消していて、**先に取った `cursor` が消えたノードを指す**ため以降の
      * 挿入位置が壊れた(絞り込んでも行が減らない ── smoke で実際に踏んだ)。
      */
-    const q = normalizeQuery(state.filterQuery);
+    const filter = entryFilterOf(state.filterQuery, state.searchHits, state.kindFilter);
     const visible: string[] = [];
     const wanted = new Set<string>();
     // 一覧に**存在する** lid(絞り込み前)── 行キャッシュの掃除はこちらで判定する
@@ -137,7 +231,7 @@ export class SidebarRenderer {
       const meta = state.entryMetas.get(lid);
       if (!meta) continue;
       alive.add(lid);
-      if (!matchesEntry(lid, meta.title, q, state.searchHits)) continue;
+      if (!matchesEntry(meta, filter)) continue;
       wanted.add(lid);
       visible.push(lid);
     }

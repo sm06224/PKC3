@@ -17,6 +17,7 @@
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { attachmentBody } from '@features/flavor/attachment-flavor';
 import { identifyAsset, assetKeyFromHash } from '@adapter/platform/storage/asset-key';
+import { shrinkPlan, shrinkQuestion } from '@features/asset/image-shrink';
 import { generateLid } from './binder';
 
 export interface AttachDeps {
@@ -44,6 +45,22 @@ export interface AttachDeps {
    *   だから attach 側は**この口だけ**を見る。
    */
   hashBlob?(blob: Blob): Promise<string | null>;
+  /**
+   * 🔴 **画像を縮める口**(#412)。⚠ 復号と再符号化は重いのでワーカーへ。
+   * ⚠ **渡さなければ縮めない**(元のまま入る = 安全側)。
+   */
+  shrinkImage?(blob: Blob, mime: string): Promise<{
+    width: number;
+    height: number;
+    shrunk: { blob: Blob; width: number; height: number } | null;
+  }>;
+  /**
+   * 🔴 **user に聞く口**(#412)。⚠ **渡さなければ縮めない**。
+   *
+   * 🔴 写真は user のものであり、縮めるのは**不可逆**である ──
+   *   だから**黙って縮める道を作らない**。口が無ければ、聞けないので縮めない。
+   */
+  askShrink?(question: string): Promise<boolean>;
 }
 
 
@@ -217,6 +234,40 @@ export async function attachOne(
   return { lid, assetKey, mime, hash };
 }
 
+/**
+ * 🔴 **大きな画像なら、縮めるか聞く**(#412)。
+ *
+ * ⚠ **縮めてから、本当の数字で聞く** ── 見積もりを見せない
+ *   (「約 1.4MB」と言って 3MB になったら、それは嘘である)。
+ * ⚠ 断られたら縮めたほうを**その場で捨てる**(参照を持たないので、
+ *   関数を抜けた時点で回収される ── 2026-07-27 の不可侵指示と同じ向き)。
+ * 🔴 **口が 1 つでも無ければ、何もしない** ── 黙って縮める道を作らない。
+ *
+ * @returns 取り込む item(縮めたなら差し替わっている)
+ */
+export async function maybeShrink(deps: AttachDeps, item: AttachItem): Promise<AttachItem> {
+  if (!deps.shrinkImage || !deps.askShrink) return item;
+  const mime = resolveMime(item.name, item.type);
+  // ⚠ 触る形式かどうかは**純関数が決める** ── ここで綴りを書き直さない
+  if (shrinkPlan(mime, item.size, Number.MAX_SAFE_INTEGER, 1) === null) return item;
+  let out;
+  try {
+    out = await deps.shrinkImage(item.blob, mime);
+  } catch {
+    // ⚠ 縮めるのに失敗しても取込は続ける(元のまま入る)
+    return item;
+  }
+  if (out.shrunk === null) return item;
+  const ok = await deps.askShrink(
+    shrinkQuestion(
+      { width: out.width, height: out.height, bytes: item.size },
+      { width: out.shrunk.width, height: out.shrunk.height, bytes: out.shrunk.blob.size },
+    ),
+  );
+  if (!ok) return item;
+  return { ...item, size: out.shrunk.blob.size, blob: out.shrunk.blob };
+}
+
 /** 取込本体。file ごとに独立に成否を扱う(1 個の失敗が batch を殺さない)。 */
 export async function attachFiles(
   dispatcher: Dispatcher,
@@ -242,12 +293,13 @@ export async function attachFiles(
 
   for (const file of files) {
     try {
-      await attachOne(
-        dispatcher,
-        deps,
-        { name: file.name, type: file.type, size: file.size, blob: file },
-        known,
-      );
+      const item = await maybeShrink(deps, {
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        blob: file,
+      });
+      await attachOne(dispatcher, deps, item, known);
     } catch (e) {
       dispatcher.dispatch({
         type: 'OP_FAILED',

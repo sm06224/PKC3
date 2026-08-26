@@ -12,7 +12,7 @@
  */
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import { getRootEntries, getStructuralChildren } from './tree';
-import { matchesEntry, normalizeQuery } from '@features/filter/title-filter';
+import { entryFilterOf, matchesEntry } from '@features/filter/title-filter';
 import { sortOrder, type EntrySort } from '@features/filter/entry-sort';
 import { SMART_ARCHETYPE } from '@features/smart/smart-spec';
 
@@ -28,6 +28,12 @@ export interface FilerListOptions {
    * 選ばれる範囲が食い違う、いちばん気づけない形)。
    */
   readonly sortDesc: boolean;
+  /**
+   * 🔴 **種類の絞り(#411)。空 = 絞らない。**
+   * ⚠ **省略可にしない** ── `sortDesc` と同じ理由である。渡し忘れた面だけ
+   *   絞りが黙って外れ、「面を変えたら全部出た」という形で user に届く。
+   */
+  readonly kinds: ReadonlySet<string>;
   /**
    * 🔴 **スマートフォルダの当たり**(#421 段①)。`undefined` / `null` = まだ届いていない。
    *
@@ -73,8 +79,8 @@ export function filerRows(
       : scopeLid === null
         ? getRootEntries(entryMetas, relations)
         : getStructuralChildren(scopeLid, entryMetas, relations);
-  const q = normalizeQuery(opts.filterQuery);
-  const shown = base.filter((m) => matchesEntry(m.lid, m.title, q, opts.searchHits));
+  const filter = entryFilterOf(opts.filterQuery, opts.searchHits, opts.kinds);
+  const shown = base.filter((m) => matchesEntry(m, filter));
   // ⚠ 並べ替えは lid の列で行う(規則は `sortOrder` 1 か所)── ここで比較を書き直さない
   const byLid = new Map(shown.map((m) => [m.lid, m]));
   return sortOrder(

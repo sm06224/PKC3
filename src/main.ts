@@ -16,7 +16,12 @@ import { startEmbedBridge } from '@adapter/transport/embed-bridge';
 import { startCapture } from '@adapter/transport/capture-bridge';
 import { EmbedOriginsStore } from '@adapter/transport/embed-origins';
 import { appFlags } from '@adapter/platform/flag-store';
-import { FLAG_CAPTURE, FLAG_EMBED, FLAG_PASTE_INSPECT } from '@features/flags';
+import {
+  FLAG_CAPTURE,
+  FLAG_EMBED,
+  FLAG_OFFICE_INPUT_LOG,
+  FLAG_PASTE_INSPECT,
+} from '@features/flags';
 import { appBrowseMode, isBrowseMode } from '@adapter/ui/render/browse-mode';
 import { StoreClient } from '@adapter/platform/storage/store-client';
 import { openAssetWindow } from '@adapter/platform/asset-window';
@@ -621,7 +626,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   //    2 個作っても放送は両方に届く(同名の別 instance には配られる)ので**動いてしまう** ──
   //    だから壊れ方は静かである:BroadcastChannel が 1 本余計に開きっぱなしになり、
   //    「窓が開いているか」の控えが 2 か所に分かれる。**同じ窓の状態は 1 か所で持つ**
-  const officeWindow = new OfficeWindow();
+  const officeWindow = new OfficeWindow({
+    // 🔴 #433 の計測(flag `office.inputLog`)── 窓を開くたびに読み直す
+    //    (フラグ画面で切り替えたら、次に開く窓から効く)
+    inputLog: () => appFlags.isOn(FLAG_OFFICE_INPUT_LOG.name),
+  });
   const officeOpener = createOfficeOpener({
     officeWindow,
     isPackInstalled: () => appOfficePack.isInstalled(),
@@ -1176,6 +1185,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     //    `blob.arrayBuffer()` が最大 64MB をメインの heap に載せる
     //    ── 実測 32MB でメインが 241ms 止まっていた
     hashBlob: async (blob) => (await assets.hash(blob)).hash,
+    /**
+     * 🔴 **大きな画像を縮める口**(#412)。⚠ 復号と再符号化はハッシュより重い ──
+     *   同じワーカー(アイドルで kill される)へ出す。
+     */
+    shrinkImage: (blob, mime) => assets.shrink(blob, mime),
+    /**
+     * 🔴 **聞く口**(#412)。⚠ 写真は user のもので、縮めるのは**不可逆**である ──
+     *   だから**必ず聞く**。⚠ この口を渡さなければ縮まらない(黙って縮める道が無い)。
+     */
+    askShrink: async (question) =>
+      (await confirmInApp(root, question, { okLabel: '縮める', cancelLabel: 'そのまま' })) === 'ok',
   };
 
   /**

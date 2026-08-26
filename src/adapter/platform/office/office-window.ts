@@ -140,6 +140,12 @@ export interface OfficeWindowDeps {
   readonly makeChannel?: (name: string) => Broadcaster;
   readonly now?: () => number;
   readonly baseUrl?: string;
+  /**
+   * 🔴 **入力の経路を console に出すか**(#433 の計測。flag `office.inputLog`)。
+   * ⚠ **関数で渡す** ── flag はフラグ画面から変わるので、値で渡すと
+   *   「切り替えたのに次の窓でも出ない」になる。
+   */
+  readonly inputLog?: () => boolean;
 }
 
 export class OfficeWindow {
@@ -147,6 +153,7 @@ export class OfficeWindow {
   private readonly openWindow: (url: string) => void;
   private readonly now: () => number;
   private readonly baseUrl: string;
+  private readonly inputLog: () => boolean;
   private lastAliveAt = 0;
   private pendingDoc: { name: string; bytes: Uint8Array; token: string } | null = null;
   /** 窓が先に「ちょうだい」と言ってきたが、まだ bytes が無い状態。 */
@@ -163,6 +170,9 @@ export class OfficeWindow {
       ? deps.makeChannel(OFFICE_CHANNEL)
       : (new BroadcastChannel(OFFICE_CHANNEL) as unknown as Broadcaster);
     this.ch.onmessage = (ev: MessageEvent): void => { this.receive(ev.data); };
+    // ⚠ **関数で受ける**(値で受けない)── flag はフラグ画面から変わりうるので、
+    //   構築時に固めると「切り替えたのに次の窓でも出ない」になる
+    this.inputLog = deps.inputLog ?? ((): boolean => false);
   }
 
   onEvent(fn: (ev: OfficeWindowEvent) => void): () => void {
@@ -275,6 +285,15 @@ export class OfficeWindow {
     if (opts.name) q.push(`name=${encodeURIComponent(opts.name)}`);
     // ⚠ 窓側は `await-doc` が在るときだけ文書を待つ。無いと無駄に待つ
     if (opts.bytes !== undefined || opts.expectDocument === true) q.push('await-doc=1');
+    /**
+     * 🔴 **#433 の計測**(flag `office.inputLog`)── 窓側が `preRun` で
+     * `QT_LOGGING_RULES` を立てる。⚠ 既定では 1 文字も足さない。
+     *
+     * 🔑 **判定はここ 1 か所**(§7)── 窓を開く口は 2 つある
+     * (添付から開く / Start Center を開く)ので、呼び手ごとに渡す形にすると
+     * **片方だけ log が出ない**という、いちばん読み違えやすい形になる。
+     */
+    if (this.inputLog()) q.push('input-log=1');
     const base = new URL(OFFICE_HOST_PATH, this.baseUrl).href;
     return q.length > 0 ? `${base}?${q.join('&')}` : base;
   }

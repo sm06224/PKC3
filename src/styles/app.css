@@ -448,6 +448,41 @@ select:focus-visible {
   flex: 1;
   min-width: 0;
 }
+
+/* 🔴 **種類で絞る札**(#411)。⚠ 地は無彩色、色は**押されている札にだけ**使う
+ * (CLAUDE.md「地は無彩色、色は情報にだけ使う」)。⚠ 札が増えても帯が伸びない
+ * ように**折り返す** ── 横スクロールにすると、隠れた札に user が気づけない。 */
+[data-pkc-region='kind-bar'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px 4px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+[data-pkc-region='kind-bar'] button {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 11px;
+  line-height: 1.6;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+[data-pkc-region='kind-bar'] button:hover {
+  border-color: var(--accent);
+}
+/* ⚠ 押されている札は**枠と地の両方**で示す ── 枠だけだと、隣に並んだときに
+ * どれが選ばれているのか一目で読めない。 */
+[data-pkc-region='kind-bar'] button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+[data-pkc-field='kind-clear'] {
+  margin-inline-start: auto;
+}
 /* 🔑 **分割ボタン**(P10、user 指示「▼ を押下した際に種別を選択して、
  * 追加ボタンと ctrl+n の対象を更新、+〇〇みたいにボタンを変更すればいい」)。
  * ⚠ 本体が幅を取り、▼ は必要な分だけ。⚠ 一覧は**下に出す**(押した物の下)。 */

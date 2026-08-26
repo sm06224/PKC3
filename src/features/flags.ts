@@ -207,6 +207,34 @@ export const FLAG_CAPTURE = defineFlag('transport.capture', {
  * 画面に出した文字はお知らせの履歴に残る)。
  * ⚠ 起動前に効いている必要は無い(貼るたびに読む)。
  */
+/**
+ * 🔴 **Office の窓で、入力の経路を console に出す**(#433 の計測)。
+ *
+ * ## なぜ要るか
+ *
+ * user 報告「**Backspace 1 回で 2 文字消える**(日本語入力中に気づいた)」の原因は、
+ * Qt 6.9 の source を読むところまでは絞れたが、**最後の 1 環が読みだけでは決まらない**
+ * ── keydown 側(`processKeyForInputContext`)が「受理した」を返しているかどうかで、
+ * 直す場所が**別の file になる**(#433 のコメントに表が在る)。
+ *
+ * 🔑 **焼き直しは要らない。** 配っている wasm には `qt.qpa.wasm.inputcontext` の
+ *   log が既に入っており(実測)、`soffice.js` は `Module["ENV"]` を輸出している。
+ *   `preRun` で `QT_LOGGING_RULES` を立てるだけで、
+ *   `processKey as KeyEvent` と `inputType : deleteContentBackward` が出る。
+ *
+ * ⚠ **これは切替なので flag である**(不可侵指示 2026-08-07)── 「計測用だから
+ *   枠を食わない」は禁じ手。⚠ 窓を開ける前に効いている必要があるので、
+ *   `needsRestart` を立てる(Office の窓を**開き直す**と効く)。
+ * ⚠ 出るのは**経路の名前だけ**で、打った字は出さない(本文は私物である)。
+ */
+export const FLAG_OFFICE_INPUT_LOG = defineFlag('office.inputLog', {
+  default: false,
+  foldWhen:
+    '#433 の原因が確定し、直しが配られたら(= どの経路が受理を返していないか分かったら)',
+  summary: 'Office の窓で、キー入力がどの経路を通ったかを console に出す(打った字は出さない)',
+  needsRestart: true,
+});
+
 export const FLAG_PASTE_INSPECT = defineFlag('paste.inspect', {
   default: false,
   foldWhen:

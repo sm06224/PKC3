@@ -35,6 +35,7 @@
  */
 export { HASH_MAX_BYTES as WORKER_HASH_MAX_BYTES } from '@adapter/platform/storage/asset-key';
 import { HASH_MAX_BYTES } from '@adapter/platform/storage/asset-key';
+import { shrinkPlan, worthShrinking } from '@features/asset/image-shrink';
 
 export interface AssetJob {
   /** 生バイト(gzip されているかは `gzipped` が言う)。**transfer で渡す**。 */
@@ -149,7 +150,87 @@ export async function hashAsset(job: AssetHashJob): Promise<HashResult> {
   };
 }
 
-/** 依頼の見分け。⚠ 判定は**ここ 1 か所**(worker と client の 2 か所に書かない)。 */
-export function isHashJob(job: AssetJob | AssetHashJob): job is AssetHashJob {
-  return 'blob' in job;
+/**
+ * 🔴 **画像を縮める依頼**(#412)。
+ *
+ * ⚠ **重い処理はワーカーへ**(user 指示 2026-08-03)── 復号と再符号化は
+ *   メインで回すと目に見えて固まる(ハッシュを出したときと同じ理由)。
+ * 🔑 **Blob は構造化複製で参照として渡る**ので transfer は要らない ──
+ *   materialize するのはワーカーの中だけである。
+ */
+export interface AssetShrinkJob {
+  blob: Blob;
+  mime: string;
+  /** ⚠ **判別子**。`AssetHashJob` も `blob` を持つので、これで見分ける。 */
+  shrink: true;
+}
+
+export interface ShrinkResult {
+  /** 元の画素数。⚠ **読めなかったら 0**(呼び側は縮めない)。 */
+  readonly width: number;
+  readonly height: number;
+  /** 縮めた結果。⚠ **縮めなかった / 採らなかったときは `null`**。 */
+  readonly shrunk: { blob: Blob; width: number; height: number } | null;
+  /** 縮めなかった理由(診断用。⚠ user には出さない)。 */
+  readonly why: 'ok' | 'no-plan' | 'no-api' | 'not-worth' | 'failed';
+}
+
+/**
+ * 画像を縮める(worker の受け口が使う形)。⚠ **worker の外からも呼べる**。
+ *
+ * 🔴 **判断は純関数(`shrinkPlan`)に任せる** ── ここは画素を触るだけ。
+ * ⚠ `createImageBitmap` / `OffscreenCanvas` が無い環境(unit の happy-dom)では
+ *   **`no-api` で素通りする** ── 縮めないので、元のまま取り込まれる(安全側)。
+ */
+export async function shrinkImage(job: AssetShrinkJob): Promise<ShrinkResult> {
+  const g = globalThis as unknown as {
+    createImageBitmap?: (b: Blob) => Promise<ImageBitmap>;
+    OffscreenCanvas?: new (w: number, h: number) => OffscreenCanvas;
+  };
+  if (!g.createImageBitmap || !g.OffscreenCanvas)
+    return { width: 0, height: 0, shrunk: null, why: 'no-api' };
+  let bmp: ImageBitmap | null = null;
+  try {
+    bmp = await g.createImageBitmap(job.blob);
+    const { width, height } = bmp;
+    const plan = shrinkPlan(job.mime, job.blob.size, width, height);
+    if (plan === null) return { width, height, shrunk: null, why: 'no-plan' };
+    const canvas = new g.OffscreenCanvas(plan.width, plan.height);
+    const ctx = canvas.getContext('2d');
+    if (ctx === null) return { width, height, shrunk: null, why: 'failed' };
+    (ctx as OffscreenCanvasRenderingContext2D).drawImage(bmp, 0, 0, plan.width, plan.height);
+    const out = await canvas.convertToBlob({ type: plan.mime, quality: plan.quality });
+    // 🔴 **十分小さくなっていなければ捨てる**(増えることがある)
+    if (!worthShrinking(job.blob.size, out.size))
+      return { width, height, shrunk: null, why: 'not-worth' };
+    return {
+      width,
+      height,
+      shrunk: { blob: out, width: plan.width, height: plan.height },
+      why: 'ok',
+    };
+  } catch {
+    // ⚠ 壊れた画像で落ちても、取込は続ける(元のまま入る)
+    return { width: 0, height: 0, shrunk: null, why: 'failed' };
+  } finally {
+    // 🔑 **画素は寿命の終端で捨てる**(2026-07-27 の不可侵指示)
+    bmp?.close();
+  }
+}
+
+/**
+ * 依頼の見分け。⚠ 判定は**ここ 1 か所**(worker と client の 2 か所に書かない)。
+ *
+ * 🔴 **順番に依存させない**(2026-08-26)── `AssetShrinkJob` も `blob` を持つので、
+ *   `isHashJob` を先に評価すると**縮める依頼がハッシュへ落ちる**。
+ *   判別子(`shrink`)で明示的に分ける。
+ */
+export function isShrinkJob(
+  job: AssetJob | AssetHashJob | AssetShrinkJob,
+): job is AssetShrinkJob {
+  return 'shrink' in job;
+}
+
+export function isHashJob(job: AssetJob | AssetHashJob | AssetShrinkJob): job is AssetHashJob {
+  return 'blob' in job && !isShrinkJob(job);
 }

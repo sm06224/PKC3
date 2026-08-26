@@ -39,7 +39,7 @@ import {
 import { getMonthGrid, dateKey } from '@features/schedule/month-grid';
 import { TASK_LIMITS, type TaskCard } from '@features/schedule/task-cards';
 import { materializedDates } from '@features/schedule/repeat';
-import { matchesEntry, normalizeQuery } from '@features/filter/title-filter';
+import { entryFilterOf, matchesEntry, type EntryFilter } from '@features/filter/title-filter';
 import { createTaskCard, patchTaskCard } from './task-card';
 
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'] as const;
@@ -82,6 +82,7 @@ export class ScheduleRenderer {
     failed: boolean;
     metas: AppState['entryMetas'];
     filter: string;
+    kindFilter: AppState['kindFilter'];
     hits: AppState['searchHits'];
     showArchived: boolean;
     showDone: boolean;
@@ -106,6 +107,10 @@ export class ScheduleRenderer {
       failed: state.taskScanFailed,
       metas: state.entryMetas,
       filter: state.filterQuery,
+      // 🔴 **種類の絞りも指紋**(#411)── 入れないと札を押しても描き直さない
+      // ⚠ 鍵は `kindFilter`(`filerRows` へ渡す `kinds:` と**綴りを分ける**)──
+      //   同じ綴りだと、指紋を見張る test が options の行に満たされる
+      kindFilter: state.kindFilter,
       hits: state.searchHits,
       showArchived: state.showArchived,
       showDone: state.showDoneTasks,
@@ -125,7 +130,13 @@ export class ScheduleRenderer {
     this.last = next;
 
     const frame = this.ensureFrame();
-    const q = normalizeQuery(state.filterQuery);
+    /**
+     * ⚠ **種類の絞りもこの面に効かせる**(#411)── 効かせないと、札を押した
+     *   まま予定タブへ移ったときに**そこだけ全部出る**。user からは
+     *   「絞りが勝手に解けた」としか見えない(CLAUDE.md §7)。
+     * 🔑 札の相手は**行が載っているノート**である(予定の行そのものに種類は無い)。
+     */
+    const filter = entryFilterOf(state.filterQuery, state.searchHits, state.kindFilter);
     const all = state.taskScan?.cards ?? [];
     /**
      * 🔑 **絞り込みは全部の面に同じ規則で効かせる**(判定は `matchesEntry` 1 か所)。
@@ -137,7 +148,7 @@ export class ScheduleRenderer {
       if (m.archived && !state.showArchived) return false;
       // ⚠ 済んだ行は畳む(板の「完了」と同じ旗)── 予定の面は列が無いので**外す**
       if (c.done && !state.showDoneTasks) return false;
-      return matchesEntry(m.lid, m.title, q, state.searchHits);
+      return matchesEntry(m, filter);
     });
     const dated = visible.filter((c) => c.date !== null);
     /**
@@ -151,7 +162,7 @@ export class ScheduleRenderer {
       const m = state.entryMetas.get(lid);
       if (m === undefined || m.date === null) continue;
       if (m.archived && !state.showArchived) continue;
-      if (!matchesEntry(m.lid, m.title, q, state.searchHits)) continue;
+      if (!matchesEntry(m, filter)) continue;
       notes.push(itemOfNote(m));
     }
     const items = [...visible.map(itemOfCard), ...notes];
@@ -177,7 +188,7 @@ export class ScheduleRenderer {
       groups.length,
     );
     this.paintUndatedToggle(frame.undated, state, visible.length - dated.length);
-    this.paintDoneToggle(frame.done, state, all, q);
+    this.paintDoneToggle(frame.done, state, all, filter);
     this.paintArchivedToggle(frame.archived, state, all);
     this.paintGroups(frame.groups, groups, state);
   }
@@ -289,7 +300,7 @@ export class ScheduleRenderer {
     btn: HTMLButtonElement,
     state: AppState,
     all: readonly TaskCard[],
-    q: string,
+    filter: EntryFilter,
   ): void {
     // ⚠ 数えるのは**この面に出る条件を満たしたうえで済んでいる**もの
     const hidden = all.filter((c) => {
@@ -298,7 +309,7 @@ export class ScheduleRenderer {
       if (m === undefined) return false;
       if (m.archived && !state.showArchived) return false;
       if (c.date === null && !state.showUndatedTasks) return false;
-      return matchesEntry(m.lid, m.title, q, state.searchHits);
+      return matchesEntry(m, filter);
     }).length;
     const show = hidden > 0 || state.showDoneTasks;
     btn.hidden = !show;

@@ -146,6 +146,20 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     note: '編集中だけ効きます(本文の caret の位置に入ります)',
   },
   /**
+   * 🔴 **ノートへのリンクを入れる**(#427 段②)。
+   * ⚠ 近道であって**主の口ではない** ── 主は書式の帯のボタン(マウスだけで完結する)。
+   * ⚠ `Mod+Shift+K` は `Mod+K`(リンク)の**隣**に置いた ── 用が近いので覚えやすい。
+   *   ⚠ `[[` で出す形は採らない(理由は `features/entry-ref/entry-pick.ts` の冒頭)。
+   */
+  {
+    id: 'insert-entry-link',
+    label: 'ノートへのリンク',
+    contexts: ['global'],
+    defaults: ['Mod+Shift+K'],
+    whileTyping: true,
+    note: '編集中だけ効きます(題名で探して、caret の位置にリンクが入ります)',
+  },
+  /**
    * 🔴 **雛形を入れる**(#196 / B-2 段②-b)。
    * ⚠ 近道であって**主の口ではない** ── 主は書式の帯のボタン。
    * ⚠ `Mod+/` は「`/` で雛形」という市井の記憶に乗せてある ── ただし

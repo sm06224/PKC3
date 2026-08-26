@@ -27,6 +27,8 @@ const ALL_ACTIONS = [
   'export-markdown',
   // 🔴 可搬単一 HTML(#400 段④)── 「閲覧用 HTML」とは別の口である
   'export-portable',
+  // 🔴 構成をテキストでコピー(#429 段①)── AI に整理を頼むための材料
+  'export-structure',
   'import-file',
   'purge-orphan-assets',
 ] as const;

@@ -329,3 +329,109 @@ test('🔴 画像の別の窓は img で開く(PDF の箱にならない)', asyn
   await popup.close();
   expect(errors).toEqual([]);
 });
+
+/**
+ * 🔴 **大きな画像は、縮めるか聞く**(#412)。
+ *
+ * 🔴 **unit では原理的に届かない層**が 3 つ:
+ *  ① `createImageBitmap` / `OffscreenCanvas` は happy-dom に**無い** ──
+ *     実際に画素が縮むかは実ブラウザでしか見えない
+ *  ② **ワーカーの中**で走る(アイドルで kill される)── 配線ごと通す
+ *  ③ 縮めた結果が**本当に小さいか**は、再符号化してみないと分からない
+ *     (純関数は「縮める狙い」しか持っていない)
+ */
+test('🔴 大きな画像は縮めるか聞き、断れば原寸のまま入る (#412)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  /**
+   * ⚠ **既定の 30 秒では足りない**(1 稿目はここで時間切れになり、
+   *   `setInputFiles` に辿り着く前に落ちた)── 660 万画素の生成 + JPEG 符号化
+   *   + ワーカーでの再符号化が要る。
+   */
+  test.setTimeout(120_000);
+  await gotoApp(page);
+
+  /**
+   * ⚠ **その場で作る**(fixture を repo に置かない)── ノイズを描かないと
+   *   圧縮で潰れて 1.5MB を下回り、「聞く場面」にならない。
+   * 🔑 画素は **`Uint32Array` で 1 回書き**(1 稿目は 1 画素につき 4 回書いて
+   *   遅すぎた)。⚠ `data` は `Uint8ClampedArray` なので、buffer を借りて被せる。
+   */
+  const big = await page.evaluate(async () => {
+    const c = document.createElement('canvas');
+    c.width = 3000;
+    c.height = 2200;
+    const g = c.getContext('2d')!;
+    const img = g.createImageData(c.width, c.height);
+    const words = new Uint32Array(img.data.buffer);
+    // ⚠ 隣り合う画素が相関しないよう、乗算で散らす(圧縮に効く)
+    for (let i = 0; i < words.length; i += 1) words[i] = 0xff000000 | (i * 2654435761) >>> 8;
+    g.putImageData(img, 0, 0);
+    const blob: Blob = await new Promise((ok) => c.toBlob((b) => ok(b!), 'image/jpeg', 0.95)!);
+    const buf = new Uint8Array(await blob.arrayBuffer());
+    return { size: blob.size, bytes: Array.from(buf) };
+  });
+  // ⚠ **前提を assert する** ── 1.5MB を下回っていたら、以降は「聞かない」が正しく
+  //   なってしまい、この spec は何も見ていないことになる
+  expect(big.size, '作った画像が小さすぎて、聞く場面にならない').toBeGreaterThan(1_500_000);
+
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: 'おおきな写真.jpg',
+    mimeType: 'image/jpeg',
+    buffer: Buffer.from(big.bytes),
+  });
+
+  // ① 🔴 **聞かれる** ── 本当の数字が両方出る
+  const dialog = page.locator('[data-pkc-region="app-dialog"]');
+  await expect(dialog, '大きな画像なのに聞かれない').toBeVisible({ timeout: 30_000 });
+  const body = page.locator('[data-pkc-field="dialog-body"]');
+  await expect(body, '元の画素数が出ていない').toContainText('3000×2200');
+  await expect(body, '戻せないことを言っていない').toContainText('戻りません');
+
+  /**
+   * ② **断る → 原寸のまま入る**。
+   * 🔑 **本文に書かれた大きさ**で見る(添付の本文は `name / mime / size` を持つ)──
+   *   「取り込まれた」だけでは、縮んだか原寸かが分からない。
+   */
+  await clickReal(page, '[data-pkc-field="dialog-cancel"]');
+  await expect(dialog).toBeHidden();
+  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  await expect(rows, '断ったら取り込まれなかった').toHaveCount(1);
+  /**
+   * 🔑 **user に見える字で測る**(`detail.ts:1951` が `2.4 MB` の形で出す)。
+   * ⚠ 1 稿目は frontmatter の生の数字を探したが、**frontmatter は画面に出ない**
+   *   ので 0 件だった ── 見ているつもりで何も見ていなかった(§4)。
+   */
+  const sizeOf = async (): Promise<number> => {
+    const t = (await page.locator('[data-pkc-region="detail"]').textContent()) ?? '';
+    const m = /([\d.]+)\s*(KB|MB)/.exec(t);
+    expect(m, `大きさが画面に出ていない: ${t.slice(0, 120)}`).not.toBeNull();
+    return Number(m![1]) * (m![2] === 'MB' ? 1024 * 1024 : 1024);
+  };
+  const keptSize = await sizeOf();
+  expect(keptSize, '原寸で入っていない(本文に元の大きさが出ない)').toBeGreaterThan(1_500_000);
+
+  /**
+   * ③ 🔴 **受けたら本当に縮む** ── ここが本題である。
+   * ⚠ ①②だけだと「聞くだけ聞いて、縮める処理は壊れていても緑」になる
+   *   (CLAUDE.md §1 の空振り)。
+   * ⚠ **同じ bytes は同じ key に落ちる**ので、2 枚目は別の画像にする必要は無い ──
+   *   縮めたほうは**別の bytes** になるから、別の資産として入る。
+   */
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: 'もう一枚.jpg',
+    mimeType: 'image/jpeg',
+    buffer: Buffer.from(big.bytes),
+  });
+  await expect(dialog, '2 枚目で聞かれない').toBeVisible({ timeout: 30_000 });
+  await clickReal(page, '[data-pkc-field="dialog-ok"]');
+  await expect(dialog).toBeHidden();
+  await expect(rows, '縮めたものが取り込まれていない').toHaveCount(2);
+  const shrunkSize = await sizeOf();
+  expect(shrunkSize, '受けたのに縮んでいない').toBeLessThan(keptSize);
+  // 🔑 **十分小さい**(採用の閾値 85% を満たしている)
+  expect(shrunkSize, '縮み方が足りない(採らないはずのものを採っている)').toBeLessThan(
+    keptSize * 0.85,
+  );
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

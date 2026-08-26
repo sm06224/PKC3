@@ -31,6 +31,12 @@ import { archetypeLabel } from '@adapter/ui/render/sidebar';
 import { SMART_FIELDS, type SmartField } from '@features/smart/smart-spec';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
 import { insertText } from '@adapter/ui/render/row-swap';
+import {
+  entryPickNote,
+  entryPickRows,
+  entryPickTotal,
+} from '@features/entry-ref/entry-pick';
+import { formatEntryLink } from '@features/entry-ref/entry-ref-format';
 import { insertionForLineDate } from '@features/schedule/line-date';
 import { addDays, daysBetween } from '@features/datetime/date-math';
 import {
@@ -75,6 +81,7 @@ import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
 import { appOpenInEdit, OpenInEditStore } from '@adapter/ui/render/open-in-edit';
 import { chordOf, findCommand, isMac, typesCharacter, KEY_COMMANDS } from '@features/keymap';
 import { paletteRows } from '@features/palette/palette-rows';
+import { structureText } from '@features/structure/structure-text';
 import { appQueryKey } from '@adapter/ui/render/query-key-store';
 import { openView } from '@adapter/ui/render/open-view';
 import {
@@ -90,6 +97,7 @@ import {
   confirmInApp,
   pickDateInApp,
   pickCommandInApp,
+  pickEntryInApp,
   pickSnippetInApp,
   isAppDialogOpen,
   type ConfirmOptions,
@@ -127,6 +135,7 @@ const visibleFilerRows = (st: AppState): EntryMeta[] =>
     searchHits: st.searchHits,
     sort: st.entrySort,
     sortDesc: st.entrySortDesc,
+    kinds: st.kindFilter,
   });
 
 /** その entry が**既にそこに居る**か(動かす必要が無い)。 */
@@ -174,6 +183,7 @@ const dualPaneRows = (st: AppState, side: DualSide): EntryMeta[] => {
     ...paneFilterOptions(pane, st.filterQuery, st.searchHits),
     sort: st.entrySort,
     sortDesc: st.entrySortDesc,
+    kinds: st.kindFilter,
   });
 };
 
@@ -1316,6 +1326,19 @@ const ACTIONS: Record<string, ActionHandler> = {
   'nav-back': (dispatcher) => dispatcher.dispatch({ type: 'NAV_HISTORY', dir: 'back' }),
   'nav-forward': (dispatcher) => dispatcher.dispatch({ type: 'NAV_HISTORY', dir: 'forward' }),
   /** 一覧の並び順(#183)。⚠ 妥当性の判定は `isEntrySort` 1 か所。 */
+  /**
+   * 🔴 **種類で絞る札**(#411)。もう一度押すと外れる。
+   * ⚠ 綴りは**札が持っている**(`data-pkc-kind`)── ここで推測しない。
+   *   無い場合は**何もしない**(未知の押下で絞りを壊さない)。
+   */
+  'toggle-kind-filter': (dispatcher, target) => {
+    const kind = target.closest('[data-pkc-kind]')?.getAttribute('data-pkc-kind');
+    if (kind === null || kind === undefined || kind === '') return;
+    dispatcher.dispatch({ type: 'TOGGLE_KIND_FILTER', archetype: kind });
+  },
+  'clear-kind-filter': (dispatcher) => {
+    dispatcher.dispatch({ type: 'CLEAR_KIND_FILTER' });
+  },
   'set-entry-sort': (dispatcher, target) => {
     const v = (target as HTMLSelectElement).value;
     if (isEntrySort(v)) dispatcher.dispatch({ type: 'SET_ENTRY_SORT', sort: v });
@@ -2050,6 +2073,54 @@ const ACTIONS: Record<string, ActionHandler> = {
     });
   },
   /**
+   * 🔴 **ノートへのリンクを入れる**(#427 段②)。
+   *
+   * ## なぜ帯のボタンなのか(起票の「`[[` で小窓」を採らなかった)
+   *
+   * ⚠ この repo は**同じ判断を 2 度している** ── `insert-date` が `@` を、
+   *   `insert-snippet` が `/` を、どちらも「打鍵に追随する浮き物」として退けた。
+   *   芯の理由は不可侵指示「**マウスだけで完結し、キーボードは近道**」である。
+   * ⚠ そのうえ `[[` は PKC3 では**空いていない**(`[[ruby:…]]` / `[[em:…]]`)──
+   *   採ると**ルビを打つたびに小窓が出る**。
+   * 🔑 失う動線は無い:帯のボタンでも「書きながら選ぶ」は成立する
+   *   (caret はそのままで、選んだ物がその場に入る)。
+   *
+   * ⚠ **caret を先に控える**(`insert-date` が 2026-08-23 に実機で踏んだ罠)。
+   *   🔑 ⚠ **この器では等価だった**(2026-08-26 実測)── Chromium は閉じるときに
+   *     textarea の選択位置を戻すので、外しても同じ所に入る(変異は SURVIVED)。
+   *     ⚠ **観測点が死んでいるのではない**(`setSelectionRange(0, 0)` は KILLED)。
+   *     `insert-date` は器も焦点の経路も違うところで実際に踏んでいるので、
+   *     **安い保険として残す** ── 「効いている」とは書かない。
+   * ⚠ 組み立ては `formatEntryLink` 1 本(§7 ── 段① の「参照をコピー」と同じ字)。
+   * ⚠ 挿すのは `insertText` ── **`Ctrl+Z` で戻せる**形にする。
+   */
+  'insert-entry-link': (dispatcher, _target, _services, root) => {
+    const opened = formatTarget(root);
+    if (opened === null) return;
+    const at = { start: opened.selectionStart, end: opened.selectionEnd };
+    /**
+     * ⚠ **開いた時点の state を握らない** ── 打つたびに引き直す
+     *   (選んでいる間に別のタブがノートを増やしても、そのまま出る)。
+     * 🔑 自分自身を外すのは `entryPickRows` の仕事(判定を 2 か所に置かない)。
+     */
+    void pickEntryInApp(root, (query) => {
+      const st = dispatcher.getState();
+      const self = st.selectedLid;
+      const items = entryPickRows(st.entryMetas, st.order, query, self);
+      return { items, note: entryPickNote(items.length, entryPickTotal(st.entryMetas, st.order, query, self)) };
+    }).then((lid) => {
+      if (lid === null) return;
+      // ⚠ 欄は引き直す(開いている間に面が組み直されると、最初の節点は繋がっていない)
+      const ta = formatTarget(root);
+      if (ta === null) return;
+      const title = dispatcher.getState().entryMetas.get(lid)?.title ?? '';
+      ta.focus();
+      // ⚠ 範囲外は `setSelectionRange` が丸める(短くなっていても落ちない)
+      ta.setSelectionRange(at.start, at.end);
+      insertText(ta, formatEntryLink(title, lid));
+    });
+  },
+  /**
    * 🔴 **雛形を一覧から入れる**(#196 / B-2 段②-b)。
    *
    * ⚠ 短縮語 + `Tab`(上の `keydown`)は**覚えている人の近道**であって入口ではない。
@@ -2560,6 +2631,30 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   **同じ作法** ── 貼れる 1 行は押した要素が持っている(`data-pkc-entry-ref`)。
    *   ここで組み立て直すと、規則が 2 か所になる(§7)。
    */
+  /**
+   * 🔴 **構成をテキストでコピー**(#429 段①)。
+   *
+   * ⚠ 組み立ては**純関数**(`structureText`)── ここでは字を組まない。
+   * 🔑 **何件出したかを知らせる** ── 黙ってコピーすると、user は
+   *   「押せたのか / 空だったのか」を見分けられない(コピーの合図と同じ理由)。
+   * ⚠ **ノートが 1 件も無いときは断る** ── 説明だけの紙を渡しても使えない。
+   */
+  'export-structure': (dispatcher, target, services) => {
+    const st = dispatcher.getState();
+    // ⚠ `entryMetas` は既に lid → meta の Map ── 組み直さない
+    const out = structureText(st.entryMetas, st.relations);
+    if (out.total === 0) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'ノートがまだありません' });
+      return;
+    }
+    services.copyText?.(out.text);
+    flashCopied(target);
+    services.showStatus?.(
+      out.shown === out.total
+        ? `構成 ${out.total} 件をコピーしました`
+        : `構成 ${out.total} 件のうち ${out.shown} 件をコピーしました`,
+    );
+  },
   'copy-entry-ref': (_dispatcher, target, services) => {
     const ref = target
       .closest<HTMLElement>('[data-pkc-entry-ref]')
@@ -3063,6 +3158,7 @@ const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
   'toggle-replace': '[data-pkc-action="toggle-replace"]',
   // ⚠ 近道は**ボタンをそのまま押す** ── 帯が無い(閲覧中の)面では何も起きない
   'insert-date': '[data-pkc-action="insert-date"]',
+  'insert-entry-link': '[data-pkc-action="insert-entry-link"]',
   'insert-snippet': '[data-pkc-action="insert-snippet"]',
   'toggle-sidebar': '[data-pkc-action="toggle-pane"][data-pkc-pane="sidebar"]',
   'toggle-inspector': '[data-pkc-action="toggle-pane"][data-pkc-pane="inspector"]',
