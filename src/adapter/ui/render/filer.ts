@@ -25,7 +25,14 @@ import {
   listSiblings,
 } from '@features/relation/tree';
 import { filerRows, smartLidsOf } from '@features/relation/filer-list';
-import { SMART_ARCHETYPE } from '@features/smart/smart-spec';
+import {
+  SMART_ARCHETYPE,
+  SMART_FIELDS,
+  isSmartEmpty,
+  smartFieldValue,
+  type SmartField,
+} from '@features/smart/smart-spec';
+import { ARCHETYPE_LABELS } from '@features/flavor/archetype-label';
 import { normalizeQuery } from '@features/filter/title-filter';
 // 🔑 種別の呼び名は **1 本**(P8 段⑲)── かつてここだけ独自表を持ち、
 //    同じノートがフォルダ画面では「シート」、他の全画面では「表」と出ていた
@@ -114,6 +121,52 @@ export class FilerRenderer {
    * ⚠ **「0 件」と「まだ集めていない」と「集められない」を区別する** ──
    *   潰すと user は「壊れている」か「条件が悪い」かを見分けられない。
    */
+  /**
+   * 🔴 **列で引く条件の選択肢**(#421 段②)。⚠ 一覧はここ 1 か所 ──
+   *   画面に出す語と `smart-spec` が読む綴りが食い違うと、
+   *   **選べるのに 1 件も集まらない**入れ物ができる(理由は画面に出ない)。
+   * ⚠ 日数は**よく使う候補だけ**を出す ── 任意の日数は本文に直接書けば効く
+   *   (`smart-updated: 45d`)。マニュアルにそう書く。
+   */
+  private static readonly SMART_FIELD_UI: Readonly<
+    Record<SmartField, { label: string; options: readonly (readonly [string, string])[] }>
+  > = {
+    kind: {
+      label: '種類',
+      options: [['', '指定しない'], ...ARCHETYPE_LABELS.map((p) => [p[0], p[1]] as const)],
+    },
+    updated: {
+      label: '更新',
+      options: [
+        ['', '指定しない'],
+        ['7d', '7 日以内'],
+        ['30d', '30 日以内'],
+        ['90d', '90 日以内'],
+        ['365d', '1 年以内'],
+      ],
+    },
+    created: {
+      label: '作成',
+      options: [
+        ['', '指定しない'],
+        ['7d', '7 日以内'],
+        ['30d', '30 日以内'],
+        ['90d', '90 日以内'],
+        ['365d', '1 年以内'],
+      ],
+    },
+    dated: {
+      label: '日付',
+      // ⚠ **「日付が付いている」と書かない** ── 列に入るのは先頭の `date:` だけで、
+      //   本文の行に書く `@2026-08-25` は入らない(「付いているのに集まらない」を作らない)
+      options: [
+        ['', '指定しない'],
+        ['true', '先頭に書いてある'],
+        ['false', '書いていない'],
+      ],
+    },
+  };
+
   private renderSmartBar(host: HTMLElement, state: AppState, scope: EntryMeta): void {
     const bar = document.createElement('div');
     bar.setAttribute('data-pkc-field', 'smart-bar');
@@ -123,7 +176,8 @@ export class FilerRenderer {
     label.setAttribute('data-pkc-field', 'smart-why');
     if (hit === null) label.textContent = '集めています…';
     else if (hit.failed) label.textContent = 'この版では集められません';
-    else if (hit.tags.length === 0) label.textContent = '条件を選んでください(まだ何も集めません)';
+    else if (isSmartEmpty(hit.spec))
+      label.textContent = '条件を選んでください(まだ何も集めません)';
     else {
       // ⚠ **上限で切ったことを言う** ── 黙って切ると「これで全部」と読まれる
       const shown = hit.lids.length;
@@ -133,7 +187,7 @@ export class FilerRenderer {
     bar.append(label);
 
     // 🔴 条件のタグ ── **1 つずつ外せる**(置けるなら外せる)
-    for (const tag of hit?.tags ?? []) {
+    for (const tag of hit?.spec.tags ?? []) {
       const chip = document.createElement('span');
       chip.setAttribute('data-pkc-region', 'smart-cond');
       const name = document.createElement('span');
@@ -147,6 +201,33 @@ export class FilerRenderer {
       off.setAttribute('aria-label', off.title);
       chip.append(name, off);
       bar.append(chip);
+    }
+
+    /**
+     * 🔴 **列で引く条件**(#421 段②)── 走査が要らないので、選べばすぐ集まる。
+     * ⚠ **札にしないで `<select>` のまま出す** ── 選択肢そのものが
+     *   「いま何で絞っているか」を出しているので、札を別に出すと同じ情報が 2 か所になる。
+     */
+    for (const field of SMART_FIELDS) {
+      const ui = FilerRenderer.SMART_FIELD_UI[field];
+      const wrap = document.createElement('label');
+      wrap.setAttribute('data-pkc-region', 'smart-field');
+      const name = document.createElement('span');
+      name.textContent = ui.label;
+      const sel = document.createElement('select');
+      sel.setAttribute('data-pkc-field', `smart-${field}`);
+      sel.setAttribute('data-pkc-action', 'smart-field');
+      sel.setAttribute('data-pkc-smart-field', field);
+      sel.setAttribute('aria-label', `${ui.label}で絞る`);
+      for (const [value, text] of ui.options) {
+        const opt = document.createElement('option');
+        opt.value = value;
+        opt.textContent = text;
+        sel.append(opt);
+      }
+      sel.value = hit === null ? '' : smartFieldValue(hit.spec, field);
+      wrap.append(name, sel);
+      bar.append(wrap);
     }
 
     const input = document.createElement('input');

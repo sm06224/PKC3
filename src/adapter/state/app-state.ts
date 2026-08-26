@@ -37,7 +37,14 @@ import {
   type SelectionHistory,
 } from '@features/nav/selection-history';
 import { filerRows, rangeInRows, smartLidsOf } from '@features/relation/filer-list';
-import { SMART_ARCHETYPE, matchesSmart } from '@features/smart/smart-spec';
+import {
+  EMPTY_SMART,
+  SMART_ARCHETYPE,
+  hasColumnCond,
+  matchesSmartTags,
+  type SmartField,
+  type SmartSpec,
+} from '@features/smart/smart-spec';
 import { readTags } from '@features/flavor/tags';
 import {
   initialDual,
@@ -77,8 +84,10 @@ export interface SmartHitState {
    *   持つ ── 本文をもう一度読みに行かないで済む(reducer も描く側も本文を持たない)。
    * ⚠ **書き込みの判断には使わない**(本文を直に書き換えられると古くなる)──
    *   落としたときのタグは effect が**その場で本文から読む**。
+   * ⚠ 段② から**条件ぜんぶ**を持つ(タグだけではない)── その場で落とせるかの
+   *   判定(`hasColumnCond`)にも要る。
    */
-  readonly tags: readonly string[];
+  readonly spec: SmartSpec;
 }
 
 export type AppPhase = 'initializing' | 'ready' | 'editing' | 'error';
@@ -1057,7 +1066,7 @@ export type UserAction =
       lid: string;
       lids: readonly string[];
       total: number;
-      tags: readonly string[];
+      spec: SmartSpec;
     }
   | { type: 'SMART_SCAN_FAILED'; lid: string }
   /**
@@ -1075,6 +1084,11 @@ export type UserAction =
    * 🔴 **集め直す**(#421 段①)。⚠ 条件やタグを書き換えた**後**に撃つ ──
    * 書込と同じ列に並ぶので、古い本文で集めることはない。
    */
+  /**
+   * 🔴 **列で引く条件を決める / 外す**(#421 段②)。
+   * ⚠ 口は**この 1 つ**(種類 / 更新 / 作成 / 日付でそれぞれ作らない ── §7)。
+   */
+  | { type: 'SMART_FIELD'; lid: string; field: SmartField; value: string }
   | { type: 'SMART_RESCAN'; lid: string };
 
 export type SystemCommand =
@@ -1233,6 +1247,13 @@ export type DomainEvent =
       target: { lid: string; title: string; archetype: string; entryOrder: number };
       tag: string;
       mode: 'add' | 'remove';
+    }
+  /** 🔴 **列で引く条件を本文へ書く**(#421 段②)。 */
+  | {
+      type: 'REQUEST_SMART_FIELD';
+      target: { lid: string; title: string; archetype: string; entryOrder: number };
+      field: SmartField;
+      value: string;
     }
   | {
       type: 'REQUEST_SMART_TAGS';
@@ -3488,7 +3509,7 @@ function reduceCore(
         lids: [...action.lids],
         total: action.total,
         failed: false,
-        tags: [...action.tags],
+        spec: action.spec,
       });
       return { state: { ...state, smartHits: next }, events: [] };
     }
@@ -3503,7 +3524,7 @@ function reduceCore(
         lids: [],
         total: 0,
         failed: true,
-        tags: state.smartHits.get(action.lid)?.tags ?? [],
+        spec: state.smartHits.get(action.lid)?.spec ?? EMPTY_SMART,
       });
       return { state: { ...state, smartHits: next }, events: [] };
     }
@@ -3549,6 +3570,27 @@ function reduceCore(
             },
             tag: action.tag,
             mode: action.mode,
+          },
+        ],
+      };
+    }
+    case 'SMART_FIELD': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      const meta = state.entryMetas.get(action.lid);
+      if (meta === undefined || meta.archetype !== SMART_ARCHETYPE) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_SMART_FIELD',
+            target: {
+              lid: meta.lid,
+              title: meta.title,
+              archetype: meta.archetype,
+              entryOrder: meta.entryOrder,
+            },
+            field: action.field,
+            value: action.value,
           },
         ],
       };
@@ -3941,8 +3983,15 @@ function refreshSmartHits(
     if (smartLid === lid) continue;
     if (hit.failed) continue;
     if (hit.total > hit.lids.length) continue;
+    /**
+     * 🔴 **列の条件を持つ入れ物は、手で継ぎ足さない**(#421 段②)。
+     * ⚠ 「更新が N 日以内」は**保存した瞬間に変わる**し、`archetype` /
+     *   `created_at` / `date` も本文からは決まらない ── ここで当てると嘘になる。
+     * 🔑 そちらは effect が worker へ**集め直しを頼む**(`smartRescanFor`)。
+     */
+    if (hasColumnCond(hit.spec)) continue;
     const at = hit.lids.indexOf(lid);
-    const should = matchesSmart({ tags: hit.tags }, tags);
+    const should = matchesSmartTags(hit.spec, tags);
     if (should === (at >= 0)) continue;
     let lids: string[];
     if (should) {

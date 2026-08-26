@@ -23,9 +23,15 @@ import {
   EMPTY_SMART,
   isSmartEmpty,
   readSmartSpec,
+  hasColumnCond,
   smartCondError,
+  smartQueryOf,
+  withSmartField,
   withSmartTag,
   writeSmartSpec,
+  type SmartCondResult,
+  type SmartQuery,
+  type SmartSpec,
 } from '@features/smart/smart-spec';
 import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
 import { buildTiles, withBuiltinTiles, type TileSource } from '@features/launcher/tiles';
@@ -70,7 +76,7 @@ export interface StorePort {
    * 「この版では集められません」と断るだけで、他は壊れない。
    * ⚠ 返るのは **lid と件数**だけで、本文は 1 バイトも渡らない。
    */
-  smartScan?(lid: string, tags: readonly string[]): Promise<{ lids: string[]; total: number }>;
+  smartScan?(lid: string, query: SmartQuery): Promise<{ lids: string[]; total: number }>;
   /**
    * カンバンの札(#277 段②-b)。⚠ **省略可** ── 持たない環境(test の fake /
    * service worker に残った旧い worker)では面が「集められません」と断る。
@@ -339,6 +345,82 @@ export function connectStoreEffects(
    */
   void persistOnce.probe().then(tellPersist);
 
+  /**
+   * 🔴 **列の条件を持つスマートフォルダは、行を書くたびに集め直す**(#421 段②)。
+   *
+   * ⚠ タグだけの入れ物は reducer が**その場で**当て直せる(新しい本文が在る)が、
+   *   **「更新が N 日以内」は保存した瞬間に変わる**し、`archetype` / `created_at` /
+   *   `date` は本文からは決まらない ── 手で継ぎ足すと嘘になる。
+   * 🔑 **ここは「行を書いた」唯一の口である**(`stamp`)── 書く経路の数と
+   *   刻む数が一致することを `tests/adapter/entry-timestamps.test.ts` が機械で見ている。
+   *   だから 1 か所で足りる(経路ごとに書かない ── §7)。
+   * ⚠ 頼みは `REQUEST_SMART_SCAN` 側で**列の中で 1 つに畳む** ── まとめて 100 件に
+   *   タグを付けた回に、全件走査が 100 回走らないように。
+   */
+  /** 走査を頼んだが、まだ走り出していない入れ物(`REQUEST_SMART_SCAN` の畳み込み)。 */
+  const queuedScans = new Set<string>();
+
+  const rescanColumnSmarts = (): void => {
+    for (const [smartLid, hit] of dispatcher.getState().smartHits) {
+      if (hit.failed || !hasColumnCond(hit.spec)) continue;
+      dispatcher.dispatch({ type: 'SMART_RESCAN', lid: smartLid });
+    }
+  };
+
+  /**
+   * 🔴 **スマートフォルダの条件を本文へ書く、唯一の道**(#421 段①②)。
+   *
+   * 🔑 タグ(`REQUEST_SMART_COND`)も列の条件(`REQUEST_SMART_FIELD`)も**ここ**を通る
+   *   ── 道を 2 本作ると、片方だけ `expectHash` を落とす / 片方だけ刻みを流さない、
+   *   が静かに起きる(§7)。
+   * ⚠ 書き換えは**原文 splice**(`writeSmartSpec`)── 説明文も他の key も無傷。
+   * ⚠ 変わらないとき(既に在る / 元から無い)は**書かないが集め直す**
+   *   ── user は押しているので、いまの当たりを出す。
+   * ⚠ 受けられなかったときは**なぜ**を出す(黙って捨てない)。
+   */
+  const writeSmartCond = (
+    t: { lid: string; title: string; archetype: string; entryOrder: number },
+    apply: (spec: SmartSpec) => SmartCondResult,
+  ): void => {
+    enqueue(async () => {
+      if (disposed) return;
+      try {
+        const body = await store.getBody(t.lid);
+        if (disposed || body === null) return;
+        const res = apply(readSmartSpec(body));
+        if (!res.ok) {
+          const why = smartCondError(res.reason);
+          if (why !== null) dispatcher.dispatch({ type: 'OP_FAILED', error: why });
+          else dispatcher.dispatch({ type: 'SMART_RESCAN', lid: t.lid });
+          return;
+        }
+        const newBody = writeSmartSpec(body, res.spec);
+        const ext = extractMeta(t.archetype, newBody);
+        const stamps = await store.persistEntry(
+          {
+            lid: t.lid,
+            title: t.title,
+            archetype: t.archetype,
+            body: newBody,
+            entryOrder: t.entryOrder,
+            status: ext.status,
+            date: ext.date,
+            archived: ext.archived,
+          },
+          { expectHash: contentHash64Hex(body) },
+        );
+        if (disposed) return;
+        // ⚠ **刻みを流す** ── 流さないと、条件を直しても一覧の「更新」が古いまま
+        //   (`tests/adapter/entry-timestamps.test.ts` が経路の数で機械的に見る)
+        stamp(t.lid, stamps);
+        dispatcher.dispatch({ type: 'SMART_RESCAN', lid: t.lid });
+      } catch {
+        if (!disposed)
+          dispatcher.dispatch({ type: 'OP_FAILED', error: '条件を書き換えられませんでした' });
+      }
+    });
+  };
+
   const stamp = (lid: string, s: EntryStamps): void => {
     if (disposed) return;
     void persistOnce.ensure().then(tellPersist);
@@ -348,6 +430,7 @@ export function connectStoreEffects(
       createdAt: s.createdAt,
       updatedAt: s.updatedAt,
     });
+    rescanColumnSmarts();
   };
 
   const unsubscribe = dispatcher.onEvent((ev) => {
@@ -461,49 +544,19 @@ export function connectStoreEffects(
         const t = ev.target;
         const tag = ev.tag;
         const mode = ev.mode;
-        enqueue(async () => {
-          if (disposed) return;
-          try {
-            const body = await store.getBody(t.lid);
-            if (disposed || body === null) return;
-            const res = withSmartTag(readSmartSpec(body), tag, mode);
-            if (!res.ok) {
-              /**
-               * ⚠ **黙って捨てない** ── 上限に当たった / タグとして受けられない
-               *   ときは、押した user に**なぜ**を出す(`smartCondError`)。
-               * 🔑 「押しても同じ」(既に在る / 元から無い)だけは黙ってよい ──
-               *   ただし**集め直しはする**(user は押しているので、いまの当たりを出す)。
-               */
-              const why = smartCondError(res.reason);
-              if (why !== null) dispatcher.dispatch({ type: 'OP_FAILED', error: why });
-              else dispatcher.dispatch({ type: 'SMART_RESCAN', lid: t.lid });
-              return;
-            }
-            const newBody = writeSmartSpec(body, res.spec);
-            const ext = extractMeta(t.archetype, newBody);
-            const stamps = await store.persistEntry(
-              {
-                lid: t.lid,
-                title: t.title,
-                archetype: t.archetype,
-                body: newBody,
-                entryOrder: t.entryOrder,
-                status: ext.status,
-                date: ext.date,
-                archived: ext.archived,
-              },
-              { expectHash: contentHash64Hex(body) },
-            );
-            if (disposed) return;
-            // ⚠ **刻みを流す** ── 流さないと、条件を直しても一覧の「更新」が古いまま
-            //   (`tests/adapter/entry-timestamps.test.ts` が経路の数で機械的に見る)
-            stamp(t.lid, stamps);
-            dispatcher.dispatch({ type: 'SMART_RESCAN', lid: t.lid });
-          } catch {
-            if (!disposed)
-              dispatcher.dispatch({ type: 'OP_FAILED', error: '条件を書き換えられませんでした' });
-          }
-        });
+        writeSmartCond(t, (spec) => withSmartTag(spec, tag, mode));
+        break;
+      }
+      /**
+       * 🔴 **列で引く条件を書く**(#421 段②)── タグと**同じ書込の道**を通す。
+       * ⚠ 道を 2 本作ると、片方だけ `expectHash` を落とす / 片方だけ刻みを流さない、
+       *   が静かに起きる(§7)。
+       */
+      case 'REQUEST_SMART_FIELD': {
+        const t = ev.target;
+        const field = ev.field;
+        const value = ev.value;
+        writeSmartCond(t, (spec) => withSmartField(spec, field, value));
         break;
       }
       case 'REQUEST_SMART_SCAN': {
@@ -513,7 +566,17 @@ export function connectStoreEffects(
           break;
         }
         const lid = ev.lid;
+        /**
+         * 🔴 **同じ入れ物の走査が列に居るなら、積み増さない**(#421 段②)。
+         * ⚠ まとめて 100 件にタグを付けると、書くたびに集め直しが飛ぶ ──
+         *   畳まないと**全件走査が 100 回**走る。
+         * 🔑 走り出したら外す(下)── 走っている最中に届いた書込は
+         *   **その走査が読み逃している**ので、次の 1 本を積む必要がある。
+         */
+        if (queuedScans.has(lid)) break;
+        queuedScans.add(lid);
         enqueue(async () => {
+          queuedScans.delete(lid);
           if (disposed) return;
           try {
             const body = await store.getBody(lid);
@@ -535,10 +598,20 @@ export function connectStoreEffects(
              *   「条件を選んでください」を出す(`renderSmartBar`)。
              */
             if (isSmartEmpty(spec)) {
-              dispatcher.dispatch({ type: 'SMART_SCANNED', lid, lids: [], total: 0, tags: [] });
+              dispatcher.dispatch({
+                type: 'SMART_SCANNED',
+                lid,
+                lids: [],
+                total: 0,
+                spec: EMPTY_SMART,
+              });
               return;
             }
-            const out = await ask(lid, spec.tags);
+            /**
+             * ⚠ **境目の時刻はここで作る**(#421 段②)── worker に時計を持ち込むと、
+             *   走らせるたびに答えが変わって test が書けない。
+             */
+            const out = await ask(lid, smartQueryOf(spec, Date.now()));
             if (disposed) return;
             // 🔑 **効いていた条件も返す** ── 画面が「何で絞っているか」を出すのに要る
             //    (reducer も描く側も本文を持たないので、ここでしか渡せない)
@@ -547,7 +620,7 @@ export function connectStoreEffects(
               lid,
               lids: out.lids,
               total: out.total,
-              tags: spec.tags,
+              spec,
             });
           } catch {
             if (!disposed) dispatcher.dispatch({ type: 'SMART_SCAN_FAILED', lid });

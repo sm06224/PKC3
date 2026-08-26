@@ -90,6 +90,17 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-26-smart-columns',
+    title: 'スマートフォルダが、タグ以外でも絞れるようになりました',
+    items: [
+      '条件の帯に「種類」「更新」「作成」「日付」の選び口が増えました。選んだ瞬間に効きます。',
+      '種類はノート・フォルダ・添付・表など、更新と作成は 7 日 / 30 日 / 90 日 / 1 年以内から選べます。',
+      'タグと合わせて全部 AND です。たとえば「種類が添付」+「更新が 30 日以内」なら、その両方に当てはまるものだけが集まります。',
+      '「日付」が見るのは、ノートの先頭に書いた date: だけです。本文の行に書いた @2026-08-25 は、この条件では集まりません（予定のタブには出ます）。',
+      '日数は好きな数にできます。ノートの先頭に smart-updated: 45d のように書けば、その日数で効きます。',
+    ],
+  },
+  {
     id: '2026-08-26-live-row-context',
     title: '表や箇条書きの 1 行を直すとき、まわりが消えなくなりました',
     items: [
@@ -281,16 +292,6 @@ export const NOTICES: readonly Notice[] = [
     ],
   },
   {
-    id: '2026-08-25-relation-map',
-    title: 'つながりが図で見えるようになりました',
-    items: [
-      '右の情報ペインの関係の下に「つながり」の欄が出ます。いま選んでいるノートを真ん中に、つながっている相手が円く並びます。',
-      '相手を押すと、そのノートへ移れます。出るのは 2 手先(相手の相手)までです。',
-      '下に線の種類と本数が出ます。つながりが多いときは途中で切り、切ったことを書きます。',
-      'つながりが 1 つも無いノートでは、この欄ごと出ません。居場所(フォルダの親子)は図に出しません。',
-    ],
-  },
-  {
     id: '2026-08-25-bookmark-capture',
     title: '見ている頁を、ブックマーク 1 つで取り込めるようになりました',
     items: [
@@ -306,5 +307,5 @@ export const NOTICES: readonly Notice[] = [
  * ⚠ **落としたぶんの原本は CHANGELOG に在る**(上限 20 件を超えたので、古いほうから
  *   `2026-08-16-office-save-to-pkc` / `2026-08-17-office-save-same-note`(2026-08-19)、
  *   `2026-08-19-dual-pane-app`(2026-08-22)、
- *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice` / `2026-08-24-pptx-export` / `2026-08-24-paste-permalink` / `2026-08-24-markdown-to-pandoc` / `2026-08-24-schedule-range`(2026-08-25)、`2026-08-24-dual-new-note` / `2026-08-24-office-save-formats`(2026-08-26)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
+ *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice` / `2026-08-24-pptx-export` / `2026-08-24-paste-permalink` / `2026-08-24-markdown-to-pandoc` / `2026-08-24-schedule-range`(2026-08-25)、`2026-08-24-dual-new-note` / `2026-08-24-office-save-formats` / `2026-08-25-relation-map`(2026-08-26)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
  */

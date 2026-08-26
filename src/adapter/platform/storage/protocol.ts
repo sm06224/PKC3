@@ -138,7 +138,21 @@ export type StorageRequest =
    * `features/smart/smart-spec.ts` が 1 か所で持つ(worker は渡すだけ)。
    * ⚠ `lid` は**そのスマートフォルダ自身** ── 自分を当たりに含めないために要る。
    */
-  | { op: 'smartScan'; cid: string; lid: string; tags: readonly string[] }
+  /**
+   * 🔴 **スマートフォルダの走査**(#421)。
+   * ⚠ **境目の時刻は呼び側が作って渡す**(`updatedFrom` / `createdFrom`)──
+   *   worker に時計を持ち込むと、走らせるたびに答えが変わって test が書けない。
+   */
+  | {
+      op: 'smartScan';
+      cid: string;
+      lid: string;
+      tags: readonly string[];
+      kind: string | null;
+      updatedFrom: string | null;
+      createdFrom: string | null;
+      dated: boolean | null;
+    }
   /**
    * 本文を **まとめて** 取る(P6d ── 書出し用)。
    *

@@ -577,24 +577,89 @@ function runQueryScan(cid: string, key: string | null): {
  * ⚠ **当て方はここに書かない** ── AND / 大小無視 / 上限 / 自分を除く の規則は
  *   `features/smart/smart-spec.ts` が 1 か所で持つ(worker は流すだけ)。
  */
-function runSmartScan(cid: string, lid: string, tags: readonly string[]): {
-  lids: string[];
-  total: number;
-} {
+/**
+ * 🔴 **スマートフォルダの走査**(#421)。
+ *
+ * 🔑 **列で絞ってから、タグの分だけ本文の先頭を舐める**(段②)──
+ *   種類 / 更新 / 作成 / 日付は **entries の列**に在るので、SQL が先に落とす。
+ *   ⚠ 走査の口は**この 1 本のまま**(集計と同じ型 ── §7)。
+ *
+ * ⚠ **条件どうしは重ならない** ── 列の 4 つは SQL が、タグは
+ *   `matchesSmartTags` が答える。だから「同じ問いに 2 か所が答える」形にはならない。
+ * ⚠ **境目の時刻は受け取る**(`updatedFrom` / `createdFrom`)── ここで
+ *   `Date.now()` を読むと、走らせるたびに答えが変わって test が書けない。
+ */
+function runSmartScan(
+  cid: string,
+  lid: string,
+  q: {
+    tags: readonly string[];
+    kind: string | null;
+    updatedFrom: string | null;
+    createdFrom: string | null;
+    dated: boolean | null;
+  },
+): { lids: string[]; total: number } {
   const database = need();
-  const scan = createSmartScan({ tags }, lid);
+  const scan = createSmartScan(
+    {
+      tags: q.tags,
+      /**
+       * ⚠ **列の条件は「在る」ことだけ伝える** ── 当てるのは SQL なので、
+       *   ここへ実際の値を渡す必要は無い。`isSmartEmpty` が
+       *   「条件が 1 つも無い」を正しく答えられるようにするために渡す。
+       */
+      kind: q.kind,
+      updatedDays: q.updatedFrom === null ? null : 1,
+      createdDays: q.createdFrom === null ? null : 1,
+      dated: q.dated,
+    },
+    lid,
+  );
+  /** 列の条件 ── SQL の `AND …` と、その値。 */
+  const conds: string[] = [];
+  const args: (string | number)[] = [];
+  if (q.kind !== null) {
+    conds.push('archetype = ?');
+    args.push(q.kind);
+  }
+  /**
+   * ⚠ **`IS NOT NULL` を足さない** ── SQL の比較は三値論理なので、
+   *   `NULL >= ?` は真にならない。⚠ 足すと「これが無いと NULL が当たる」と
+   *   読める**消しても同じ行**が残り、変異試験で殺せなくなる。
+   *   🔑 時刻を持たない行(旧ビルド / 取り込みが作った行)は、この比較だけで落ちる。
+   */
+  if (q.updatedFrom !== null) {
+    conds.push('updated_at >= ?');
+    args.push(q.updatedFrom);
+  }
+  if (q.createdFrom !== null) {
+    conds.push('created_at >= ?');
+    args.push(q.createdFrom);
+  }
+  if (q.dated !== null) conds.push(q.dated ? 'date IS NOT NULL' : 'date IS NULL');
+  const where = conds.length === 0 ? '' : ` AND ${conds.join(' AND ')}`;
   let after: { entryOrder: number; lid: string } | undefined;
   for (;;) {
     const rows = database.selectObjects(
       after === undefined
-        ? `SELECT lid, entry_order, substr(body, 1, ?) AS head FROM entries WHERE cid = ?
+        ? `SELECT lid, entry_order, substr(body, 1, ?) AS head FROM entries
+             WHERE cid = ?${where}
              ORDER BY entry_order, lid LIMIT ?`
         : `SELECT lid, entry_order, substr(body, 1, ?) AS head FROM entries
-            WHERE cid = ? AND (entry_order > ? OR (entry_order = ? AND lid > ?))
+            WHERE cid = ? AND (entry_order > ? OR (entry_order = ? AND lid > ?))${where}
             ORDER BY entry_order, lid LIMIT ?`,
       after === undefined
-        ? [FRONTMATTER_SCAN_CHARS, cid, QUERY_SCAN_CHUNK]
-        : [FRONTMATTER_SCAN_CHARS, cid, after.entryOrder, after.entryOrder, after.lid, QUERY_SCAN_CHUNK],
+        ? [FRONTMATTER_SCAN_CHARS, cid, ...args, QUERY_SCAN_CHUNK]
+        : [
+            FRONTMATTER_SCAN_CHARS,
+            cid,
+            after.entryOrder,
+            after.entryOrder,
+            after.lid,
+            ...args,
+            QUERY_SCAN_CHUNK,
+          ],
     ) as unknown as Array<{ lid: string; entry_order: number; head: string | null }>;
     if (rows.length === 0) break;
     scan.feed(rows.map((r) => ({ lid: r.lid, head: r.head ?? '' })));
@@ -1547,7 +1612,7 @@ const handlers: Handlers = {
    */
   queryScan: (req) =>
     runQueryScan(req.cid, req.key ?? null) as ResultMap['queryScan'],
-  smartScan: (req) => runSmartScan(req.cid, req.lid, req.tags),
+  smartScan: (req) => runSmartScan(req.cid, req.lid, req),
   listBodies: (req) => {
     // 🔴 **カーソルは ORDER BY と同じ複合キー**。`entry_order > ?` だけだと
     // 境界の順序値を共有する行が全部飛ぶ(entry_order に UNIQUE は無い)。

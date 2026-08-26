@@ -71,7 +71,11 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
      * (AND / 大小無視 / 上限 / 自分を除く)の規則は
      * `features/smart/smart-spec.ts` が 1 か所で持つ。
      */
-    smartScan: (lid, tags) => client.request({ op: 'smartScan', cid, lid, tags }),
+    smartScan: async (lid, q) =>
+      (await client.request({ op: 'smartScan', cid, lid, ...q })) as {
+        lids: string[];
+        total: number;
+      },
     /**
      * 予定の札(#277 段②-b / #292 段⑤)。⚠ ここも**頼むだけ** ── 絞り込み(抽出列)も
      * 上限も worker と `features/schedule/task-cards.ts` が持つ。

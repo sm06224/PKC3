@@ -20,11 +20,21 @@ import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import { stubStamps } from '../helpers/store-stamps';
 import {
+  EMPTY_SMART,
   MAX_SMART_TAGS,
   readSmartSpec,
+  SMART_FIELDS,
+  SMART_KIND_KEY,
   SMART_TAGS_KEY,
+  SMART_UPDATED_KEY,
+  withSmartField,
 } from '../../src/features/smart/smart-spec';
 import { readTags } from '../../src/features/flavor/tags';
+import { extractSchedule } from '../../src/features/schedule/schedule-keys';
+import type { SmartQuery } from '../../src/features/smart/smart-spec';
+
+/** 走査に渡された条件の記録(`lid` + 条件ぜんぶ)。 */
+type SmartQuery0 = SmartQuery & { lid: string };
 
 function meta(lid: string, order: number, title: string, archetype = 'text'): EntryMeta {
   return {
@@ -85,8 +95,8 @@ describe('開いたら集めに行く(#421 段①)', () => {
    */
   it('🔴 当たりはスマートフォルダごとに持つ', () => {
     let s = booted();
-    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: ['a'], total: 1, tags: ['請求'] }).state;
-    s = reduce(s, { type: 'SMART_SCANNED', lid: 'f1', lids: ['b'], total: 1, tags: ['x'] }).state;
+    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: ['a'], total: 1, spec: { ...EMPTY_SMART, tags: ['請求'] } }).state;
+    s = reduce(s, { type: 'SMART_SCANNED', lid: 'f1', lids: ['b'], total: 1, spec: { ...EMPTY_SMART, tags: ['x'] } }).state;
     expect(s.smartHits.get('s1')?.lids).toEqual(['a']);
     expect(s.smartHits.get('f1')?.lids, '上書きされた').toEqual(['b']);
   });
@@ -101,11 +111,11 @@ describe('開いたら集めに行く(#421 段①)', () => {
       lid: 's1',
       lids: ['a'],
       total: 1,
-      tags: ['請求'],
+      spec: { ...EMPTY_SMART, tags: ['請求'] },
     }).state;
     s = reduce(s, { type: 'SMART_SCAN_FAILED', lid: 's1' }).state;
     expect(s.smartHits.get('s1')?.failed).toBe(true);
-    expect(s.smartHits.get('s1')?.tags, '条件まで消えた').toEqual(['請求']);
+    expect(s.smartHits.get('s1')?.spec.tags, '条件まで消えた').toEqual(['請求']);
   });
 });
 
@@ -146,7 +156,7 @@ describe('中身は条件で決まる(#421 段①)', () => {
     const r = mount();
     let s = reduce(booted(), { type: 'SET_SCOPE', lid: 's1' }).state;
     r.render(s);
-    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: ['a', 'b'], total: 2, tags: ['請求'] })
+    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: ['a', 'b'], total: 2, spec: { ...EMPTY_SMART, tags: ['請求'] } })
       .state;
     r.render(s);
     // 🔑 **b は「はこ」の中に在る**が、条件で当たったので出る(場所を動かさない)
@@ -157,7 +167,7 @@ describe('中身は条件で決まる(#421 段①)', () => {
   it('🔴 条件が空なら「条件を選んでください」と出す(全部は集めない)', () => {
     const r = mount();
     let s = reduce(booted(), { type: 'SET_SCOPE', lid: 's1' }).state;
-    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: [], total: 0, tags: [] }).state;
+    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: [], total: 0, spec: EMPTY_SMART }).state;
     r.render(s);
     expect(why()).toContain('条件を選んでください');
     expect(rows(), '条件が無いのに集めている').toEqual([]);
@@ -182,7 +192,7 @@ describe('中身は条件で決まる(#421 段①)', () => {
     expect(field(), '条件の欄が出ていない').not.toBeNull();
     field().value = '請求'; // user が打った
     // ここで初回の走査が返る(条件は空なので 0 件)
-    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: [], total: 0, tags: [] }).state;
+    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: [], total: 0, spec: EMPTY_SMART }).state;
     r.render(s);
     expect(field().value, '打った字が消えた(押しても何も起きない)').toBe('請求');
   });
@@ -196,7 +206,7 @@ describe('中身は条件で決まる(#421 段①)', () => {
     let s = reduce(booted(), { type: 'SET_SCOPE', lid: 's1' }).state;
     s = reduce(s, { type: 'TOGGLE_SELECT', lid: 'a' }).state;
     s = reduce(s, { type: 'TOGGLE_SELECT', lid: 'b' }).state;
-    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: ['a', 'b'], total: 2, tags: ['請求'] })
+    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: ['a', 'b'], total: 2, spec: { ...EMPTY_SMART, tags: ['請求'] } })
       .state;
     r.render(s);
     const field = (): HTMLInputElement =>
@@ -204,7 +214,7 @@ describe('中身は条件で決まる(#421 段①)', () => {
     expect(field(), '前提: まとめての帯が出ていない').not.toBeNull();
     field().value = '家事';
     // 当たりが届き直す(別の窓がタグを付けた等)
-    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: ['a', 'b'], total: 2, tags: ['請求'] })
+    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: ['a', 'b'], total: 2, spec: { ...EMPTY_SMART, tags: ['請求'] } })
       .state;
     r.render(s);
     expect(field().value, '打った字が消えた').toBe('家事');
@@ -218,7 +228,7 @@ describe('中身は条件で決まる(#421 段①)', () => {
   it('⚠ 行を選び直しただけでも、打ちかけの字は消えない', () => {
     const r = mount();
     let s = reduce(booted(), { type: 'SET_SCOPE', lid: 's1' }).state;
-    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: ['a', 'b'], total: 2, tags: ['請求'] })
+    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: ['a', 'b'], total: 2, spec: { ...EMPTY_SMART, tags: ['請求'] } })
       .state;
     r.render(s);
     const field = (): HTMLInputElement =>
@@ -237,26 +247,96 @@ describe('中身は条件で決まる(#421 段①)', () => {
   it('🔴 欄を空にしたら、組み直しで字が甦らない', () => {
     const r = mount();
     let s = reduce(booted(), { type: 'SET_SCOPE', lid: 's1' }).state;
-    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: ['a'], total: 1, tags: ['請求'] }).state;
+    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: ['a'], total: 1, spec: { ...EMPTY_SMART, tags: ['請求'] } }).state;
     r.render(s);
     const field = (): HTMLInputElement =>
       region.querySelector<HTMLInputElement>('[data-pkc-field="smart-cond"]')!;
     field().value = '家事';
-    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: ['a', 'b'], total: 2, tags: ['請求'] })
+    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: ['a', 'b'], total: 2, spec: { ...EMPTY_SMART, tags: ['請求'] } })
       .state;
     r.render(s);
     expect(field().value, '前提: 一度は運ばれている').toBe('家事');
     // user が消した
     field().value = '';
-    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: ['a'], total: 1, tags: ['請求'] }).state;
+    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: ['a'], total: 1, spec: { ...EMPTY_SMART, tags: ['請求'] } }).state;
     r.render(s);
     expect(field().value, '消した字が甦った(欄を空にできない)').toBe('');
+  });
+
+  /**
+   * 🔴 **列で引く条件は `<select>` そのものが状態を出す**(#421 段②)。
+   * ⚠ 札を別に出すと、同じ情報が 2 か所になる(片方だけ古くなる)。
+   */
+  it('🔴 いま効いている列の条件が、選択肢に映っている', () => {
+    const r = mount();
+    let s = reduce(booted(), { type: 'SET_SCOPE', lid: 's1' }).state;
+    s = reduce(s, {
+      type: 'SMART_SCANNED',
+      lid: 's1',
+      lids: [],
+      total: 0,
+      spec: { ...EMPTY_SMART, kind: 'attachment', updatedDays: 30, dated: false },
+    }).state;
+    r.render(s);
+    const val = (f: string): string =>
+      region.querySelector<HTMLSelectElement>(`[data-pkc-field="smart-${f}"]`)?.value ?? '?';
+    expect(val('kind'), '種類が映っていない').toBe('attachment');
+    expect(val('updated'), '更新が映っていない').toBe('30d');
+    expect(val('created'), '指定していないのに値が入っている').toBe('');
+    expect(val('dated'), '日付が映っていない').toBe('false');
+  });
+
+  /**
+   * ⚠ **選択肢の語が、読める綴りと同じ** ── 食い違うと「選べるのに 1 件も
+   * 集まらない」入れ物ができる(理由は画面のどこにも出ない)。
+   */
+  it('🔴 選択肢の値が、そのまま条件として読める', () => {
+    const r = mount();
+    r.render(reduce(booted(), { type: 'SET_SCOPE', lid: 's1' }).state);
+    for (const field of SMART_FIELDS) {
+      const sel = region.querySelector<HTMLSelectElement>(`[data-pkc-field="smart-${field}"]`);
+      expect(sel, `${field} の選択肢が出ていない`).not.toBeNull();
+      const values = [...sel!.options].map((o) => o.value).filter((v) => v !== '');
+      expect(values.length, `${field} に選べる値が無い`).toBeGreaterThan(0);
+      for (const v of values) {
+        expect(
+          withSmartField(EMPTY_SMART, field, v).ok,
+          `${field} の選択肢「${v}」が条件として読めない`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('🔴 選ぶと、その条件を書きに行く', () => {
+    let s = reduce(booted(), { type: 'SET_SCOPE', lid: 's1' }).state;
+    s = reduce(s, {
+      type: 'SMART_SCANNED',
+      lid: 's1',
+      lids: [],
+      total: 0,
+      spec: EMPTY_SMART,
+    }).state;
+    const out = reduce(s, { type: 'SMART_FIELD', lid: 's1', field: 'kind', value: 'folder' });
+    expect(out.events, '書きに行っていない').toEqual([
+      {
+        type: 'REQUEST_SMART_FIELD',
+        target: { lid: 's1', title: '請求ぜんぶ', archetype: 'smart', entryOrder: 1 },
+        field: 'kind',
+        value: 'folder',
+      },
+    ]);
+  });
+
+  it('⚠ スマートフォルダでないものに、列の条件を書かない', () => {
+    expect(
+      reduce(booted(), { type: 'SMART_FIELD', lid: 'f1', field: 'kind', value: 'text' }).events,
+    ).toEqual([]);
   });
 
   it('⚠ 上限で切ったことを画面に出す(「これで全部」と嘘をつかない)', () => {
     const r = mount();
     let s = reduce(booted(), { type: 'SET_SCOPE', lid: 's1' }).state;
-    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: ['a'], total: 9, tags: ['請求'] }).state;
+    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: ['a'], total: 9, spec: { ...EMPTY_SMART, tags: ['請求'] } }).state;
     r.render(s);
     expect(why(), '切ったことが読めない').toContain('9 件中 1 件');
   });
@@ -264,7 +344,7 @@ describe('中身は条件で決まる(#421 段①)', () => {
   it('🔴 条件が札で出て、1 つずつ外せる', () => {
     const r = mount();
     let s = reduce(booted(), { type: 'SET_SCOPE', lid: 's1' }).state;
-    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: [], total: 0, tags: ['請求'] }).state;
+    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: [], total: 0, spec: { ...EMPTY_SMART, tags: ['請求'] } }).state;
     r.render(s);
     const off = region.querySelector<HTMLElement>(
       '[data-pkc-action="smart-cond-remove"][data-pkc-tag="請求"]',
@@ -282,7 +362,7 @@ describe('中身は条件で決まる(#421 段①)', () => {
 describe('双方向 ── 落とすと付く / 外すと消える(#421 段①)', () => {
   it('🔴 「ここから外す」は、選んでいるものについて撃つ', () => {
     let s = reduce(booted(), { type: 'SET_SCOPE', lid: 's1' }).state;
-    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: ['a'], total: 1, tags: ['請求'] }).state;
+    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: ['a'], total: 1, spec: { ...EMPTY_SMART, tags: ['請求'] } }).state;
     const out = reduce(s, { type: 'SMART_TAGS', smartLid: 's1', lids: ['a'], mode: 'remove' });
     expect(out.events).toEqual([
       { type: 'REQUEST_SMART_TAGS', smartLid: 's1', lids: ['a'], mode: 'remove' },
@@ -330,7 +410,7 @@ describe('タグを付けたら勝手に落ちる(user 要望 2026-08-26)', () =
     tags: string[],
     lids: string[],
   ): AppState =>
-    reduce(state, { type: 'SMART_SCANNED', lid: smartLid, lids, total: lids.length, tags })
+    reduce(state, { type: 'SMART_SCANNED', lid: smartLid, lids, total: lids.length, spec: { ...EMPTY_SMART, tags } })
       .state;
 
   const rewritten = (state: AppState, lid: string, body: string): AppState =>
@@ -404,7 +484,7 @@ describe('タグを付けたら勝手に落ちる(user 要望 2026-08-26)', () =
       lid: 's1',
       lids: ['a'],
       total: 9, // 上限で切れている
-      tags: ['請求'],
+      spec: { ...EMPTY_SMART, tags: ['請求'] },
     }).state;
     st = rewritten(st, 'b', '---\ntags: [請求]\n---\nい\n');
     expect(st.smartHits.get('s1')?.lids, '切れている一覧に継ぎ足した').toEqual(['a']);
@@ -424,7 +504,7 @@ describe('タグを付けたら勝手に落ちる(user 要望 2026-08-26)', () =
   it('⚠ 集められない版では触らない(集まったふりをしない)', () => {
     let st = withHit(booted(), 's1', ['請求'], []); // 一度は集められた = 条件が在る
     st = reduce(st, { type: 'SMART_SCAN_FAILED', lid: 's1' }).state;
-    expect(st.smartHits.get('s1')?.tags, '前提: 条件は残っている').toEqual(['請求']);
+    expect(st.smartHits.get('s1')?.spec.tags, '前提: 条件は残っている').toEqual(['請求']);
     st = rewritten(st, 'a', '---\ntags: [請求]\n---\nあ\n');
     expect(st.smartHits.get('s1')?.failed).toBe(true);
     expect(st.smartHits.get('s1')?.lids, '集められない版に行が並んだ').toEqual([]);
@@ -435,6 +515,39 @@ describe('タグを付けたら勝手に落ちる(user 要望 2026-08-26)', () =
     const s0 = booted();
     const s1 = rewritten(s0, 'a', '---\ntags: [請求]\n---\nあ\n');
     expect(s1.smartHits, '開いていないのに表が組み直された').toBe(s0.smartHits);
+  });
+
+  /**
+   * 🔴 **列の条件を持つ入れ物は、その場で継ぎ足さない**(#421 段②。変異試験 P8)。
+   *
+   * ⚠ 継ぎ足すと嘘になる ── 種類 / 作成 / 日付は本文からは決まらないし、
+   *   「更新が N 日以内」は**保存した瞬間に変わる**。
+   * 🔑 **reducer だけで見る**(effect を通さない)── 通すと集め直しが後から
+   *   上書きしてしまい、**間違った継ぎ足しが画面に出ていた時間**が見えない
+   *   (変異試験 P8 が SURVIVED でそれを教えた)。
+   */
+  it('🔴 列の条件を持つ入れ物は、行を書いてもその場では変えない', () => {
+    const s0 = withHit(booted(), 's1', ['請求'], []);
+    // 種類の条件を足す(タグはそのまま)
+    const withKind = reduce(s0, {
+      type: 'SMART_SCANNED',
+      lid: 's1',
+      lids: [],
+      total: 0,
+      spec: { ...EMPTY_SMART, tags: ['請求'], kind: 'text' },
+    }).state;
+    const s1 = rewritten(withKind, 'a', '---\ntags: [請求]\n---\nあ\n');
+    expect(
+      s1.smartHits.get('s1')?.lids,
+      '列の条件を持つのに、その場で継ぎ足した(集め直しが来るまで嘘の行が出る)',
+    ).toEqual([]);
+  });
+
+  /** ⚠ **対照群** ── タグだけなら、その場で落ちる(門が効きすぎていない)。 */
+  it('⚠ タグだけの入れ物は、これまでどおりその場で落ちる', () => {
+    const s0 = withHit(booted(), 's1', ['請求'], []);
+    const s1 = rewritten(s0, 'a', '---\ntags: [請求]\n---\nあ\n');
+    expect(s1.smartHits.get('s1')?.lids).toEqual(['a']);
   });
 
   /**
@@ -496,41 +609,64 @@ describe('タグを付けたら勝手に落ちる(user 要望 2026-08-26)', () =
  * 🔴 **配線**(#421 段①)── reducer と面の test は、どちらも
  * 「A と B が合意していること」を見られない(CLAUDE.md §7)。実物を繋ぐ。
  */
-describe('配線(effect 層まで)', () => {
-  const tick = (ms = 10): Promise<void> => new Promise((r) => setTimeout(r, ms));
+const tick = (ms = 10): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-  function setup(disk: Record<string, string>) {
-    const d = new Dispatcher();
-    const scans: { lid: string; tags: readonly string[] }[] = [];
-    const errors: string[] = [];
-    d.onState((s) => {
-      if (s.error !== null && !errors.includes(s.error)) errors.push(s.error);
-    });
-    connectStoreEffects(d, {
-      ...stubRevisionOps(),
-      getBody: async (lid) => disk[lid] ?? null,
-      deleteEntry: async () => {},
-      setEntryParent: async () => {},
-      renameEntry: async () => stubStamps(),
-      replaceAssetRefs: () => Promise.reject(new Error('この test では使わない')),
-      reorderEntry: async () => stubStamps(),
-      persistEntry: async (e) => {
-        disk[e.lid] = e.body;
-        return stubStamps();
-      },
-      smartScan: async (lid, tags) => {
-        scans.push({ lid, tags: [...tags] });
-        // ⚠ **本物と同じ意味論**(§3)── 条件が空なら 1 件も返さない
-        if (tags.length === 0) return { lids: [], total: 0 };
-        const lids = Object.entries(disk)
-          .filter(([l, body]) => l !== lid && tags.every((t) => readTags(body).includes(t)))
-          .map(([l]) => l);
-        return { lids, total: lids.length };
-      },
-    });
-    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: METAS, relations: RELS });
-    return { d, scans, errors, disk };
-  }
+/** 行の時刻(worker が持つもの)。⚠ 書いていない行は「一度も保存していない」扱い。 */
+function setup(disk: Record<string, string>, times: Record<string, string> = {}) {
+  const d = new Dispatcher();
+  const scans: SmartQuery0[] = [];
+  const errors: string[] = [];
+  d.onState((s) => {
+    if (s.error !== null && !errors.includes(s.error)) errors.push(s.error);
+  });
+  connectStoreEffects(d, {
+    ...stubRevisionOps(),
+    getBody: async (lid) => disk[lid] ?? null,
+    deleteEntry: async () => {},
+    setEntryParent: async () => {},
+    renameEntry: async () => stubStamps(),
+    replaceAssetRefs: () => Promise.reject(new Error('この test では使わない')),
+    reorderEntry: async () => stubStamps(),
+    persistEntry: async (e) => {
+      disk[e.lid] = e.body;
+      return stubStamps();
+    },
+    /**
+     * 🔴 **本物と同じ意味論**(§3)── stub を本物より甘くしない。
+     * ⚠ 甘くすると、列の条件を落とす取り違えが**両方緑のまま**通る。
+     *   ここは worker の SQL と同じ規則で落とす:
+     *   種類は `archetype = ?` / 時刻は **`IS NOT NULL AND >= ?`**
+     *   (一度も保存していない行は「N 日以内」ではない)/ 日付は `date` 列の有無。
+     */
+    smartScan: async (lid, q) => {
+      scans.push({ lid, ...q, tags: [...q.tags] });
+      if (q.tags.length === 0 && q.kind === null && q.updatedFrom === null &&
+          q.createdFrom === null && q.dated === null)
+        return { lids: [], total: 0 };
+      const lids = Object.entries(disk)
+        .filter(([l, body]) => {
+          if (l === lid) return false;
+          if (!q.tags.every((t) => readTags(body).includes(t))) return false;
+          const kind = METAS.find((m) => m.lid === l)?.archetype ?? 'text';
+          if (q.kind !== null && kind !== q.kind) return false;
+          const at = times[l];
+          if (q.updatedFrom !== null && (at === undefined || at < q.updatedFrom)) return false;
+          if (q.createdFrom !== null && (at === undefined || at < q.createdFrom)) return false;
+          if (q.dated !== null) {
+            const hasDate = extractSchedule(body).date !== null;
+            if (hasDate !== q.dated) return false;
+          }
+          return true;
+        })
+        .map(([l]) => l);
+      return { lids, total: lids.length };
+    },
+  });
+  d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: METAS, relations: RELS });
+  return { d, scans, errors, disk };
+}
+
+describe('配線(effect 層まで)', () => {
 
   it('🔴 開くと、本文から条件を読んで集め、条件も一緒に返る', async () => {
     const s = setup({
@@ -540,11 +676,14 @@ describe('配線(effect 層まで)', () => {
     });
     s.d.dispatch({ type: 'SET_SCOPE', lid: 's1' });
     await tick();
-    expect(s.scans, '条件を読んで渡していない').toEqual([{ lid: 's1', tags: ['請求'] }]);
+    expect(
+      s.scans.map((q) => ({ lid: q.lid, tags: q.tags })),
+      '条件を読んで渡していない',
+    ).toEqual([{ lid: 's1', tags: ['請求'] }]);
     const hit = s.d.getState().smartHits.get('s1');
     expect(hit?.lids).toEqual(['a']);
     // 🔑 効いていた条件も届く(画面が「何で絞っているか」を出すのに要る)
-    expect(hit?.tags, '条件が届いていない').toEqual(['請求']);
+    expect(hit?.spec.tags, '条件が届いていない').toEqual(['請求']);
   });
 
   /**
@@ -569,7 +708,7 @@ describe('配線(effect 層まで)', () => {
     const hit = s.d.getState().smartHits.get('s1');
     expect(hit, '当たりが置かれていない ── 帯が「集めています…」で止まる').not.toBeUndefined();
     expect(hit?.failed, '集められない扱いにしてはいけない').toBe(false);
-    expect(hit?.tags, '条件は空である').toEqual([]);
+    expect(hit?.spec.tags, '条件は空である').toEqual([]);
     expect(hit?.lids).toEqual([]);
   });
 
@@ -578,7 +717,9 @@ describe('配線(effect 層まで)', () => {
     const s = setup({ s1: `---\n${SMART_TAGS_KEY}: [請求]\n---\n説明\n` });
     s.d.dispatch({ type: 'SET_SCOPE', lid: 's1' });
     await tick();
-    expect(s.scans).toEqual([{ lid: 's1', tags: ['請求'] }]);
+    expect(s.scans.map((q) => ({ lid: q.lid, tags: q.tags }))).toEqual([
+      { lid: 's1', tags: ['請求'] },
+    ]);
   });
 
   it('🔴 条件を足すと本文に書かれ、その場で集め直す', async () => {
@@ -591,7 +732,12 @@ describe('配線(effect 層まで)', () => {
     expect(readSmartSpec(s.disk.s1!).tags, '条件が本文に書かれていない').toEqual(['請求']);
     expect(s.disk.s1, '説明文が壊れた').toContain('説明の文');
     // 🔑 書いた後に集め直す ── 条件だけ変わって並びが古いままにしない
-    expect(s.scans.at(-1), '集め直していない').toEqual({ lid: 's1', tags: ['請求'] });
+    expect(
+      s.scans.at(-1) === undefined
+        ? null
+        : { lid: s.scans.at(-1)!.lid, tags: s.scans.at(-1)!.tags },
+      '集め直していない',
+    ).toEqual({ lid: 's1', tags: ['請求'] });
     expect(s.d.getState().smartHits.get('s1')?.lids).toEqual(['a']);
   });
 
@@ -612,7 +758,12 @@ describe('配線(effect 層まで)', () => {
     s.d.dispatch({ type: 'SMART_COND', lid: 's1', tag: '請求', mode: 'add' });
     await tick(30);
     expect(s.disk.s1, '同じ条件で本文を書き換えている').toBe(before);
-    expect(s.scans.at(-1), '集め直していない').toEqual({ lid: 's1', tags: ['請求'] });
+    expect(
+      s.scans.at(-1) === undefined
+        ? null
+        : { lid: s.scans.at(-1)!.lid, tags: s.scans.at(-1)!.tags },
+      '集め直していない',
+    ).toEqual({ lid: 's1', tags: ['請求'] });
     expect(s.errors, '黙ってよい場面で赤い帯を出している').toEqual([]);
   });
 
@@ -749,5 +900,105 @@ describe('押し口の配線(#421 段①)', () => {
       '[data-pkc-region="filer-table"] [data-pkc-entry="f1"]',
     );
     expect(folder?.getAttribute('data-pkc-drop'), 'フォルダと同じ印になっている').toBe('folder');
+  });
+});
+
+/**
+ * 🔴 **列で引く条件**(#421 段②)── 走査が要らない分の配線。
+ */
+describe('列で引く条件(#421 段②)', () => {
+  it('🔴 選ぶと本文に書かれ、その場で集め直す', async () => {
+    const s = setup({ s1: '---\ntitle: 添付ぜんぶ\n---\n説明の文\n' });
+    s.d.dispatch({ type: 'SMART_FIELD', lid: 's1', field: 'kind', value: 'attachment' });
+    await tick(30);
+    expect(readSmartSpec(s.disk.s1!).kind, '条件が本文に書かれていない').toBe('attachment');
+    expect(s.disk.s1, '説明文が壊れた').toContain('説明の文');
+    expect(s.scans.at(-1)?.kind, '条件を渡していない').toBe('attachment');
+  });
+
+  it('🔴 「指定しない」で外れる(片道にしない)', async () => {
+    const s = setup({ s1: `---\n${SMART_KIND_KEY}: attachment\n---\n説明\n` });
+    s.d.dispatch({ type: 'SMART_FIELD', lid: 's1', field: 'kind', value: '' });
+    await tick(30);
+    expect(readSmartSpec(s.disk.s1!).kind, '外れていない').toBeNull();
+  });
+
+  it('🔴 受けられない値は書かず、理由を出す(黙って捨てない)', async () => {
+    const s = setup({ s1: '---\ntitle: 名前\n---\n説明\n' });
+    const before = s.disk.s1;
+    s.d.dispatch({ type: 'SMART_FIELD', lid: 's1', field: 'updated', value: 'あした' });
+    await tick();
+    expect(s.disk.s1, '受けられない値を書いた').toBe(before);
+    expect(s.errors.length, '理由が出ていない').toBeGreaterThan(0);
+  });
+
+  /**
+   * 🔴 **境目の時刻は主スレッドで作って渡す**(worker に時計を持ち込まない)。
+   * ⚠ 渡し忘れると、worker は「指定なし」と読んで**全件当ててしまう**。
+   */
+  it('🔴 「N 日以内」は境目の時刻になって worker へ渡る', async () => {
+    const s = setup({ s1: `---\n${SMART_UPDATED_KEY}: 7d\n---\n説明\n` });
+    s.d.dispatch({ type: 'SET_SCOPE', lid: 's1' });
+    await tick();
+    const q = s.scans.at(-1);
+    expect(q?.updatedFrom, '境目が渡っていない').not.toBeNull();
+    // ⚠ 7 日前あたり(走らせた時刻に依るので、範囲で見る)
+    const from = Date.parse(q?.updatedFrom ?? '');
+    const days = (Date.now() - from) / 86_400_000;
+    expect(days).toBeGreaterThan(6.9);
+    expect(days).toBeLessThan(7.1);
+    expect(q?.createdFrom, '指定していないほうにも境目が付いた').toBeNull();
+  });
+
+  /**
+   * 🔴 **列の条件を持つ入れ物は、行を書いたら worker に集め直しを頼む**。
+   * ⚠ その場で当て直すと嘘になる(`updated_at` は保存のたびに変わる)。
+   */
+  it('🔴 行を書くと、列の条件を持つ入れ物は集め直される', async () => {
+    const s = setup(
+      { s1: `---\n${SMART_KIND_KEY}: text\n---\n説明\n`, a: 'あ\n' },
+      { a: new Date().toISOString() },
+    );
+    s.d.dispatch({ type: 'SET_SCOPE', lid: 's1' });
+    await tick();
+    const before = s.scans.length;
+    // 別のノートにタグを付ける(= 行を書く)
+    s.d.dispatch({ type: 'BULK_TAG', lids: ['a'], tag: '請求', mode: 'add' });
+    await tick(50);
+    expect(s.scans.length, '書いたのに集め直していない').toBeGreaterThan(before);
+  });
+
+  /** ⚠ **対照群** ── タグだけの入れ物は、その場で当て直すので走査を頼まない。 */
+  it('⚠ タグだけの入れ物は、行を書いても走査を頼まない', async () => {
+    const s = setup({ s1: `---\n${SMART_TAGS_KEY}: [請求]\n---\n説明\n`, a: 'あ\n' });
+    s.d.dispatch({ type: 'SET_SCOPE', lid: 's1' });
+    await tick();
+    const before = s.scans.length;
+    s.d.dispatch({ type: 'BULK_TAG', lids: ['a'], tag: '請求', mode: 'add' });
+    await tick(50);
+    expect(s.scans.length, 'その場で当て直せるのに走査を頼んだ').toBe(before);
+    expect(s.d.getState().smartHits.get('s1')?.lids, 'その場で落ちていない').toEqual(['a']);
+  });
+
+  /**
+   * 🔴 **まとめて書いても、走査は積み上がらない**(#421 段② の畳み込み)。
+   * ⚠ 畳まないと、100 件にタグを付けた回に**全件走査が 100 回**走る。
+   */
+  it('🔴 まとめて書いても、集め直しは列の中で 1 つに畳まれる', async () => {
+    const s = setup(
+      {
+        s1: `---\n${SMART_KIND_KEY}: text\n---\n説明\n`,
+        a: 'あ\n',
+        b: 'い\n',
+      },
+      { a: new Date().toISOString(), b: new Date().toISOString() },
+    );
+    s.d.dispatch({ type: 'SET_SCOPE', lid: 's1' });
+    await tick();
+    const before = s.scans.length;
+    s.d.dispatch({ type: 'BULK_TAG', lids: ['a', 'b'], tag: '請求', mode: 'add' });
+    await tick(60);
+    // ⚠ **2 件書いたのに走査は 1 回**(0 では困る ── 集め直しは起きなければならない)
+    expect(s.scans.length - before, '走査が積み上がっている').toBe(1);
   });
 });
