@@ -82,6 +82,12 @@ import { appOpenInEdit, OpenInEditStore } from '@adapter/ui/render/open-in-edit'
 import { chordOf, findCommand, isMac, typesCharacter, KEY_COMMANDS } from '@features/keymap';
 import { paletteRows } from '@features/palette/palette-rows';
 import { structureText } from '@features/structure/structure-text';
+import {
+  canApplyPlan,
+  parsePlan,
+  planPreview,
+  resolvePlanTarget,
+} from '@features/structure/structure-plan';
 import { appQueryKey } from '@adapter/ui/render/query-key-store';
 import { openView } from '@adapter/ui/render/open-view';
 import {
@@ -741,6 +747,12 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'smart-cond-remove',
   'smart-field',
   'smart-evict',
+  /**
+   * 🔴 **整理案を当てる**(#429 段③)── 作る / 移す / 改名を**まとめて**撃つ。
+   * ⚠ 取り込み・書き出しの最中に走らせない ── entry を総入れ替えしている裏で
+   *   構成を動かすと、どちらが勝ったのか誰にも分からなくなる。
+   */
+  'apply-plan',
   // ⚠ 追記と**同じ経路**(`REQUEST_BODY_REWRITE`)を撃つので、同じ門をくぐらせる
   'undo-append',
   'toggle-todo',
@@ -1027,6 +1039,37 @@ function deleteFrom(
 }
 
 /** 何もしない口。⚠ 打鍵ではないので「既定を止める」相手がいない。 */
+/**
+ * 🔴 **整理案の下見を描く**(#429 段③)。
+ *
+ * ⚠ **判定・文言は `structure-plan.ts`** ── ここは並べるだけ。
+ * ⚠ 空の枠を出さない(誤りも下見も無いときは畳む)。
+ */
+function paintPlan(root: HTMLElement, dispatcher: Dispatcher, text: string): void {
+  const errs = root.querySelector<HTMLElement>('[data-pkc-field="plan-errors"]');
+  const prev = root.querySelector<HTMLElement>('[data-pkc-field="plan-preview"]');
+  const apply = root.querySelector<HTMLButtonElement>('[data-pkc-field="plan-apply"]');
+  if (errs === null || prev === null || apply === null) return;
+  const plan = parsePlan(text, dispatcher.getState().entryMetas);
+  errs.textContent = '';
+  for (const e of plan.errors) {
+    const li = document.createElement('li');
+    // ⚠ 行番号を**必ず**出す ── 出さないと user はどこを直すのか分からない
+    li.textContent = `${e.line} 行目: ${e.message}`;
+    errs.append(li);
+  }
+  errs.hidden = plan.errors.length === 0;
+  prev.textContent = '';
+  for (const l of planPreview(plan.ops, dispatcher.getState().entryMetas)) {
+    const li = document.createElement('li');
+    li.setAttribute('data-pkc-plan-kind', l.kind);
+    li.textContent = l.text;
+    prev.append(li);
+  }
+  prev.hidden = plan.ops.length === 0;
+  apply.disabled = !canApplyPlan(plan);
+}
+
 const noop = (): void => {};
 
 export function runGlobalCommand(
@@ -2655,6 +2698,59 @@ const ACTIONS: Record<string, ActionHandler> = {
         : `構成 ${out.total} 件のうち ${out.shown} 件をコピーしました`,
     );
   },
+  /**
+   * 🔴 **整理案を当てる**(#429 段③)。
+   *
+   * ⚠ **押せるのは誤りが 0 行のときだけ**(器の `disabled`)だが、ここでも
+   *   もう一度検める ── 鍵やパレットから撃たれる道が将来できたときに、
+   *   **門が器の側にしか無い**状態にしない。
+   * ⚠ `@名前` → lid の解決は `resolvePlanTarget` **1 か所**を通す(下見と同じ答え)。
+   */
+  'apply-plan': (dispatcher, _target, services, root) => {
+    const ta = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="plan-input"]');
+    if (ta === null) return;
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから当ててください' });
+      return;
+    }
+    const plan = parsePlan(ta.value, st.entryMetas);
+    if (!canApplyPlan(plan)) return;
+    /** この案で作ったフォルダ(`@名前` → いま作った lid)。 */
+    const made = new Map<string, string>();
+    for (const op of plan.ops) {
+      if (op.kind === 'rename') {
+        dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid: op.lid, title: op.title });
+        continue;
+      }
+      const parentLid = resolvePlanTarget(op.parent, made);
+      if (op.kind === 'mkdir') {
+        const lid = generateLid();
+        dispatcher.dispatch({
+          type: 'CREATE_ENTRY',
+          archetype: 'folder',
+          lid,
+          title: op.title,
+          parentLid,
+          relationId: generateLid(),
+          // ⚠ **編集に入らない** ── 入ると 2 件目以降が撃てなくなる
+          edit: false,
+        });
+        if (op.alias !== null) made.set(op.alias, lid);
+        continue;
+      }
+      dispatcher.dispatch({
+        type: 'SET_ENTRY_PARENT',
+        lid: op.lid,
+        parentLid,
+        relationId: generateLid(),
+      });
+    }
+    // 🔑 当てたら欄を空にする ── 残すと「もう一度押せる」ように見える(二重適用)
+    ta.value = '';
+    paintPlan(root, dispatcher, '');
+    services.showStatus?.(`整理案を当てました(${plan.ops.length} 件)`);
+  },
   'copy-entry-ref': (_dispatcher, target, services) => {
     const ref = target
       .closest<HTMLElement>('[data-pkc-entry-ref]')
@@ -3412,9 +3508,23 @@ export function bindActions(
       dispatcher.dispatch({ type: 'UPDATE_OPEN_BODY', body: ev.target.value });
       return;
     }
+    const el = ev.target;
+    /**
+     * 🔴 **整理案は、貼るたびに下見を描き直す**(#429 段③)。
+     *
+     * ⚠ **state に写さない** ── 案は「まだ当てていない下書き」であって、
+     *   アプリの状態ではない(写すと、面を切り替えただけで別のタブへ飛ぶ)。
+     * ⚠ 判定も文言も `structure-plan.ts` が持つ ── ここは描き直しを頼むだけ。
+     */
+    if (
+      el instanceof HTMLTextAreaElement &&
+      el.getAttribute('data-pkc-field') === 'plan-input'
+    ) {
+      paintPlan(root, dispatcher, el.value);
+      return;
+    }
     // 🔑 一覧の絞り込み(P7b 段⑨c)。⚠ **state に写す** ── renderer は
     // DOM から値を読まない、というこのリポジトリの規約
-    const el = ev.target;
     if (
       el instanceof HTMLInputElement &&
       el.getAttribute('data-pkc-field') === 'entry-filter'
