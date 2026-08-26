@@ -181,6 +181,15 @@ export const SCHEMA_DDL: readonly string[] = [
      PRIMARY KEY (scope, k)
    )`,
   `CREATE TABLE IF NOT EXISTS flags (k TEXT PRIMARY KEY, v TEXT)`,
+  /**
+   * ⚠ **まだ誰も使っていない**(2026-08-25 に確認 ── `grep -rn "workspace" src` の
+   * 一致は**この行だけ**)。読み書きするコードは 1 行も無い。
+   *
+   * 🔴 **座席だけ取ってある状態は、次に読む人に「在る」と誤解させる** ── だから
+   * ここに書いておく。⚠ 落とさないのは、**表を消すと既に配った DB との差**が
+   * 生まれるからである(空の表 1 つは害にならない)。
+   * 🔑 使う日が来たら、まず #403(動線の台帳)の該当行を起票してから始める。
+   */
   `CREATE TABLE IF NOT EXISTS workspaces (
      id TEXT PRIMARY KEY,
      name TEXT NOT NULL DEFAULT '',

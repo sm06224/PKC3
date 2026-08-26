@@ -369,19 +369,48 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     whileTyping: true,
     note: 'PKC2 のフォーカスモードと同じ手',
   },
+  /**
+   * 🔴 **「戻る」は、居る場所で意味が変わる**(#273 残件)。
+   *
+   * ⚠ **鍵を 2 つに割らない** ── 2 ペインの面だけ別の鍵にすると、user は
+   *   「ここでは Alt+← が効かない」を憶えることになる(PKC2 が `Ctrl+N` だけ
+   *   別名にして踏んだ形と同じ ── CLAUDE.md「入口は多く、判定は 1 か所」)。
+   * 🔑 だから **id は 1 つのまま、文脈を足す**:
+   *   - ふつうの面 … **選んだノート**を 1 つ前へ(`selection-history`)
+   *   - 2 ペインの面 … **そのタブが見ていた場所**を 1 つ前へ
+   * ⚠ 古典 4 実装(Total Commander / Double Commander / FAR / Krusader)も
+   *   ここは `Alt+←/→` で一致している。
+   */
   {
     id: 'nav-back',
-    label: '選択を戻る',
-    contexts: ['global'],
+    label: '戻る',
+    contexts: ['global', 'dual'],
     defaults: ['Alt+ArrowLeft'],
     whileTyping: true,
+    note: '2 ペインの面では、そのタブが 1 つ前に見ていた場所へ戻ります',
   },
   {
     id: 'nav-forward',
-    label: '選択を進む',
-    contexts: ['global'],
+    label: '進む',
+    contexts: ['global', 'dual'],
     defaults: ['Alt+ArrowRight'],
     whileTyping: true,
+    note: '2 ペインの面では、戻る前に見ていた場所へ進みます',
+  },
+  /**
+   * 🔴 **下見(選んだ行の中身を、その場で見る)**(#273 残件)。
+   *
+   * ⚠ 古典は `Ctrl+Q`(Total Commander / Krusader の Quick View)だが、
+   *   **`Mod+Q` はブラウザが持っていく**ので当てられない(`REFUSED`)。
+   * 🔑 だから **`F9`** ── この面の他の操作(F5 写す / F6 移す / F7 フォルダ /
+   *   F8 ゴミ箱)と同じ**機能鍵の並び**に載る。⚠ 文字は 1 つも打たない。
+   */
+  {
+    id: 'dual-preview',
+    label: '下見を出す / しまう',
+    contexts: ['dual'],
+    defaults: ['F9'],
+    note: '本文を読みに行くので、要るときだけ出してください',
   },
   // ── 2 列の編集(原文の欄 / 題名の欄)
   {

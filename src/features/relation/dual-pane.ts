@@ -18,10 +18,51 @@
  * ⚠ **pure module**。browser API も dispatch も触らない。
  */
 
-/** 1 枚のタブ = 1 つの場所。⚠ `null` はルート。 */
+/**
+ * 1 枚のタブ = 1 つの場所。⚠ `null` はルート。
+ *
+ * 🔴 **行った先の履歴もタブが持つ**(#273 残件)。⚠ **ペインではなくタブ**である ──
+ * ペインに持たせると、タブを切り替えてから「戻る」を押したときに
+ * **別のタブで見ていた場所へ飛ぶ**(user は「このタブの 1 つ前」を期待している)。
+ * 🔑 ブラウザのタブと同じ意味論にする、が判断の根拠である。
+ */
 export interface DualTab {
   readonly scopeLid: string | null;
+  /** 手前に見ていた場所(新しいものが末尾)。 */
+  readonly past: readonly (string | null)[];
+  /** 「戻る」で退けた場所(次に「進む」で戻ってくるものが末尾)。 */
+  readonly future: readonly (string | null)[];
 }
+
+/**
+ * 1 枚のタブが憶える履歴の上限。
+ * ⚠ 上限は**手違いの検出**ではなく**常駐メモリ**のためである(不可侵指示
+ * 「効くのは定常」)── フォルダを往復するだけで際限なく伸びる配列を作らない。
+ */
+export const MAX_HISTORY = 50;
+
+/**
+ * 🔴 **下見に載せる文字数の上限**(#273 残件)。
+ *
+ * ⚠ **読んだ側で切る**(state に入る前に)── 切らずに持つと、10 万字のノートに
+ *   カーソルを合わせただけで**その 10 万字が常駐する**(不可侵指示「効くのは定常」)。
+ * ⚠ 下見は「これで合っているか」を見るためのもので、読むためのものではない。
+ */
+export const PREVIEW_CHARS = 2000;
+
+/** 下見に載せる分だけ切る。⚠ 切ったことが分かる形にする(黙って途中で終わらせない)。 */
+export function clipPreview(body: string): string {
+  return body.length <= PREVIEW_CHARS ? body : `${body.slice(0, PREVIEW_CHARS)}…`;
+}
+
+/** 場所を 1 つ足す(古いほうから捨てる)。 */
+const pushHistory = (
+  list: readonly (string | null)[],
+  lid: string | null,
+): readonly (string | null)[] => [...list, lid].slice(-MAX_HISTORY);
+
+/** タブを 1 枚新しく作る(履歴は持たない ── そのタブはまだどこへも行っていない)。 */
+const freshTab = (scopeLid: string | null): DualTab => ({ scopeLid, past: [], future: [] });
 
 /** 片側のペイン。タブを複数持ち、そのうち 1 枚が開いている。 */
 export interface DualPaneState {
@@ -45,6 +86,19 @@ export interface DualPaneState {
    * ⚠ 場所が変わったら外す(印・起点と同じ規則)。
    */
   readonly cursor: string | null;
+  /**
+   * 🔴 **このペインだけの絞り込み**(#273 残件)。`''` = 絞っていない。
+   *
+   * ⚠ 直す前は器ぜんぶに 1 本(`state.filterQuery`)だったので、**左右で別の絞りが
+   *   できなかった** ── 2 ペインは「別の場所を 2 つ同時に見る」面なのに、
+   *   探すときだけ 1 つに戻っていた。
+   * 🔑 **打ってある側だけがこの語で絞る。** 空のペインはこれまでどおり
+   *   器の絞り込みに従う(挙動を黙って変えない)。
+   * ⚠ **題名だけで絞る**(本文の全文検索は使わない)── `searchHits` は
+   *   **器の語で引いた結果**なので、別の語と混ぜると
+   *   「打った語に当たっていないものが出る」という読めない形になる。
+   */
+  readonly filter: string;
 }
 
 export type DualSide = 'left' | 'right';
@@ -62,6 +116,18 @@ export interface DualState {
    * (打っている最中に別タブの保存が届くだけで入力が飛ぶ)。
    */
   readonly renaming: { readonly side: DualSide; readonly lid: string } | null;
+  /**
+   * 🔴 **下見を出すか**(#273 残件)。⚠ 既定は **off** ── 下見は**本文を読む**ので、
+   *   出しっぱなしにすると行を送るたびに storage を叩く。
+   * 🔑 憶えるのは端末側(`DualPrefsStore`)。ここは**いま効いている値**である。
+   */
+  readonly previewOn: boolean;
+  /**
+   * いま下見に映しているもの。`null` = まだ読めていない / 相手がいない。
+   * ⚠ **lid を必ず持つ** ── 持たないと、送った先の本文が**前の行のまま**出ていても
+   *   見分けられない(読みは非同期なので、追い越しは必ず起きる)。
+   */
+  readonly preview: { readonly lid: string; readonly body: string } | null;
 }
 
 /** ⚠ タブは**必ず 1 枚以上**(0 枚のペインは「場所が無い」= 何も描けない)。 */
@@ -74,11 +140,12 @@ export const MIN_TABS = 1;
 export const MAX_TABS = 12;
 
 const emptyPane = (): DualPaneState => ({
-  tabs: [{ scopeLid: null }],
+  tabs: [freshTab(null)],
   active: 0,
   selection: [],
   anchor: null,
   cursor: null,
+  filter: '',
 });
 
 /** 起動時の姿 ── 左右ともルートを 1 枚ずつ、焦点は左。 */
@@ -87,6 +154,8 @@ export const initialDual: DualState = {
   right: emptyPane(),
   focus: 'left',
   renaming: null,
+  previewOn: false,
+  preview: null,
 };
 
 /** 開いているタブの場所。⚠ 添字が壊れていてもルートに落ちる(描けない状態を作らない)。 */
@@ -109,15 +178,81 @@ export const paneOf = (state: DualState, side: DualSide): DualPaneState =>
   side === 'left' ? state.left : state.right;
 
 /**
+ * 🔴 **そのペインの行を引くときの絞り込み条件**(#273 残件)。**規則はここ 1 本**。
+ *
+ * ⚠ 描く側と**範囲選択**(`Shift`)は同じ並びを見なければならない ── 別々に組むと
+ *   「目で見た範囲と選ばれる範囲が違う」という、いちばん気づけない食い違いになる
+ *   (`filer-list.ts` の冒頭がまさにこれを戒めている)。
+ * 🔑 **ペインに打ってあればそれだけで絞る。** 空なら器の絞り込みに従う
+ *   (これまでの挙動を黙って変えない)。
+ * ⚠ ペインの語では **`searchHits` を渡さない** ── あれは**器の語で引いた結果**で
+ *   あって、別の語に付けると「打った語に当たっていないものが出る」ことになる。
+ */
+export function paneFilterOptions(
+  pane: DualPaneState,
+  appQuery: string,
+  searchHits: ReadonlySet<string> | null,
+): { filterQuery: string; searchHits: ReadonlySet<string> | null } {
+  return pane.filter !== ''
+    ? { filterQuery: pane.filter, searchHits: null }
+    : { filterQuery: appQuery, searchHits };
+}
+
+/**
  * 開いているタブの場所を変える(= そのペインだけ移動する)。
  * ⚠ **印は外す** ── 場所が変われば、そこに見えていないものが選ばれたままになる
  * (#240 の着地前レビュー 2 と同じ理由。起点も一緒に外す)。
  */
 export function withScope(pane: DualPaneState, lid: string | null): DualPaneState {
-  if (paneScope(pane) === lid) return pane;
-  const tabs = pane.tabs.map((t, i) => (i === pane.active ? { scopeLid: lid } : t));
+  const from = paneScope(pane);
+  if (from === lid) return pane;
+  /**
+   * 🔴 **手前の場所を憶える**(#273 残件)。⚠ **「進む」は捨てる** ── 戻ってから
+   *   別の所へ入ったら、退けてあった枝はもう辿れない(ブラウザと同じ意味論)。
+   */
+  const tabs = pane.tabs.map((t, i) =>
+    i === pane.active ? { scopeLid: lid, past: pushHistory(t.past, from), future: [] } : t,
+  );
   return { ...pane, tabs, selection: [], anchor: null, cursor: null };
 }
+
+/** このペインだけの絞り込みを差し替える。⚠ **印は外す**(見えていないものが選ばれたままになる)。 */
+export function withFilter(pane: DualPaneState, filter: string): DualPaneState {
+  if (pane.filter === filter) return pane;
+  return { ...pane, filter, selection: [], anchor: null, cursor: null };
+}
+
+/** 開いているタブ。⚠ 添字が壊れていても 1 枚目に落ちる(描けない状態を作らない)。 */
+const activeTab = (pane: DualPaneState): DualTab => pane.tabs[pane.active] ?? freshTab(null);
+
+export const canGoBack = (pane: DualPaneState): boolean => activeTab(pane).past.length > 0;
+export const canGoForward = (pane: DualPaneState): boolean => activeTab(pane).future.length > 0;
+
+/**
+ * 🔴 **1 つ前の場所へ戻る / 進む**(#273 残件)。
+ *
+ * ⚠ **`withScope` を通さない** ── 通すと「戻る」自体が履歴に積まれ、
+ *   戻るたびに枝が伸びて**二度と抜けられなくなる**。
+ * ⚠ 印・起点・カーソルは `withScope` と**同じ規則**で外す(場所が変われば
+ *   そこに見えていないものが選ばれたままになる)。
+ */
+function withStep(pane: DualPaneState, dir: 'back' | 'forward'): DualPaneState {
+  const cur = activeTab(pane);
+  const from = dir === 'back' ? cur.past : cur.future;
+  if (from.length === 0) return pane;
+  const to = from[from.length - 1]!;
+  const rest = from.slice(0, -1);
+  const keep = pushHistory(dir === 'back' ? cur.future : cur.past, cur.scopeLid);
+  const next: DualTab =
+    dir === 'back'
+      ? { scopeLid: to, past: rest, future: keep }
+      : { scopeLid: to, past: keep, future: rest };
+  const tabs = pane.tabs.map((t, i) => (i === pane.active ? next : t));
+  return { ...pane, tabs, selection: [], anchor: null, cursor: null };
+}
+
+export const withBack = (pane: DualPaneState): DualPaneState => withStep(pane, 'back');
+export const withForward = (pane: DualPaneState): DualPaneState => withStep(pane, 'forward');
 
 /**
  * 添字が使えるか。
@@ -135,9 +270,11 @@ export const isTabIndex = (pane: DualPaneState, index: number): boolean =>
 export function withTabAdded(pane: DualPaneState): DualPaneState {
   if (pane.tabs.length >= MAX_TABS) return pane;
   const at = pane.active + 1;
+  // ⚠ **新しいタブは履歴を持たない** ── 複製した瞬間に「戻る」が押せると、
+  //   user は「まだどこへも行っていないのに戻れる」を見ることになる
   const tabs = [
     ...pane.tabs.slice(0, at),
-    { scopeLid: paneScope(pane) },
+    freshTab(paneScope(pane)),
     ...pane.tabs.slice(at),
   ];
   return { ...pane, tabs, active: at, selection: [], anchor: null };
@@ -202,8 +339,22 @@ export function pruneDual(
   state: DualState,
   alive: (lid: string) => boolean,
 ): DualState {
+  /**
+   * 🔴 **履歴からも消えた場所を落とす**(#273 残件)。⚠ 残すと「戻る」が
+   *   **もう無いフォルダ**へ入ろうとする ── `DUAL_SET_SCOPE` は実在しない lid を
+   *   はじくので、症状は「押しても何も起きない」という無言の dead click になる。
+   */
+  const pruneList = (
+    list: readonly (string | null)[],
+  ): readonly (string | null)[] => list.filter((lid) => lid === null || alive(lid));
+
   const prune = (p: DualPaneState): DualPaneState => {
-    const dead = p.tabs.some((t) => t.scopeLid !== null && !alive(t.scopeLid));
+    const dead = p.tabs.some(
+      (t) =>
+        (t.scopeLid !== null && !alive(t.scopeLid)) ||
+        pruneList(t.past).length !== t.past.length ||
+        pruneList(t.future).length !== t.future.length,
+    );
     /**
      * 🔴 **見ている場所が変わったら、印も外す** ── `withScope` と**同じ規則**である
      * (2026-08-18 の着地前 test が突いた)。⚠ 片方だけ直すと、ルートへ戻ったのに
@@ -233,7 +384,11 @@ export function pruneDual(
     )
       return p;
     const tabs = dead
-      ? p.tabs.map((t) => (t.scopeLid !== null && !alive(t.scopeLid) ? { scopeLid: null } : t))
+      ? p.tabs.map((t) => ({
+          scopeLid: t.scopeLid !== null && !alive(t.scopeLid) ? null : t.scopeLid,
+          past: pruneList(t.past),
+          future: pruneList(t.future),
+        }))
       : p.tabs;
     return { ...p, tabs, selection, anchor, cursor };
   };

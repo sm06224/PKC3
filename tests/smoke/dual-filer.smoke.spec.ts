@@ -1,5 +1,13 @@
 import { test, expect, type Page } from '@playwright/test';
-import { answerAppDialog, clickReal, collectPageErrors, createEntry, gotoApp, openViewPane } from './helpers';
+import {
+  answerAppDialog,
+  clickReal,
+  collectPageErrors,
+  createEntry,
+  gotoApp,
+  openViewPane,
+  useSplitEditor,
+} from './helpers';
 
 /**
  * 2 ペインタブファイラ(#241 段⑥-a)。
@@ -494,7 +502,8 @@ test('🔴 操作行は下端の全幅・等分割で、名前の列がいちば
    *   足すときは「この幅で字が読めるか」を必ず測り直すこと。
    * 🔑 6 本目は「ノート」(#273、2026-08-24)。
    */
-  expect(widths.length, 'ボタンが 6 つ出ていない').toBe(6);
+  // 🔑 7 本目は「下見」(#273 残件、2026-08-25)
+  expect(widths.length, 'ボタンが 7 つ出ていない').toBe(7);
   expect(
     Math.max(...widths) - Math.min(...widths),
     `ボタンの幅が揃っていない(等分割になっていない): ${widths.join(' / ')}`,
@@ -705,6 +714,119 @@ test('🔴 乗せただけの行が、印を付けた行と同じ色に見えな
   // ③ 印の行は、乗せても印の色のまま(hover が印の地を塗り直さない)
   await rows.first().hover();
   expect(await bgOf(rows.first()), '乗せている間だけ印が薄く見える').toBe(marked);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **道具の帯が実際に働く**(#273 残件)── 絞る / 戻る / 留める / 下見。
+ *
+ * ⚠ **unit では届かない層だけ**を見る:
+ * 1. **帯が 1 行に収まっている**(折り返すと表の頭が上下に動く ── CSS は
+ *    happy-dom では読めない)
+ * 2. **下見が本当に storage を読んで、画面に出る**(worker 往復は実ブラウザだけ)
+ * 3. **留めが読み込み直しても残る**(localStorage の往復)
+ */
+test('🔴 ペインごとに絞れて、絞った欄から行へ降りられる (#273)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  for (const t of ['あいうえ', 'かきくけ']) {
+    await createEntry(page, 'text');
+    const title = page.locator('[data-pkc-field="editor-title"]');
+    if (await title.count()) await title.fill(t);
+    await clickReal(page, '[data-pkc-action="commit-edit"]');
+  }
+  await openDual(page);
+  await expect(page.locator(ROWS('left'))).toHaveCount(2);
+
+  const box = page.locator(`${PANE('left')} [data-pkc-field="dual-filter"]`);
+  await expect(box, '絞りの欄が出ていない').toBeVisible();
+  /**
+   * ⚠ **帯が 1 行に収まっている** ── 折り返すと、場所によって表の頭の高さが
+   *   変わる(不可侵指示「同じものが常に同じ場所にある」)。
+   */
+  const head = await page.locator(`${PANE('left')} [data-pkc-region="dual-head"]`).boundingBox();
+  expect(head!.height, '道具の帯が折り返している').toBeLessThan(48);
+
+  await box.fill('あいう');
+  await expect(page.locator(ROWS('left')), '絞りが効いていない').toHaveCount(1);
+  await expect(page.locator(ROWS('right')), '反対のペインまで絞られた').toHaveCount(2);
+
+  /**
+   * 🔴 **欄から行へ降りられる** ── これが無いと「打って絞る → マウスで押す」に
+   *   なり、キーボードだけで完結しない。
+   */
+  await box.press('ArrowDown');
+  await expect(
+    page.locator(`${PANE('left')} [data-pkc-entry][data-pkc-cursor]`),
+    '欄から行へ降りられない',
+  ).toHaveCount(1);
+
+  // Escape で絞りが解ける(欄の字も消える)
+  await box.click();
+  await box.press('Escape');
+  await expect(box).toHaveValue('');
+  await expect(page.locator(ROWS('left'))).toHaveCount(2);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+test('🔴 下見に本文が出て、留めた場所は読み込み直しても残る (#273)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  /**
+   * ⚠ **2 列の編集で本文を入れる** ── 既定は 1 面のライブエディタで、
+   *   `editor-body` の欄は出ない(ここで見たいのは下見であって編集の仕方ではない)。
+   */
+  await useSplitEditor(page);
+  await gotoApp(page);
+  await makeFolder(page, 'とめる場所');
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-body"]').fill('したみの ほんぶん');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await openDual(page);
+
+  /**
+   * ① 🔴 **下見** ── 押して、行を指して、**本文が出る**まで見る。
+   * ⚠ 「器が出た」で止めない ── 本文は worker を往復して届くので、
+   *   そこまで見ないと「読みに行っていない」と見分けが付かない。
+   */
+  const preview = page.locator(`${PANE('left')} [data-pkc-region="dual-preview"]`);
+  await expect(preview, '押す前から出ている').toBeHidden();
+  await clickReal(page, '[data-pkc-action="dual-preview-toggle"]');
+  await expect(preview).toBeVisible();
+  // ノートの行(フォルダではないほう)を指す
+  await page.locator(`${ROWS('left')}`).filter({ hasNotText: 'とめる場所' }).first().click();
+  await expect(preview, '本文が届いていない').toContainText('したみの ほんぶん');
+
+  /**
+   * ② 🔴 **留める** ── フォルダへ入って留め、読み込み直しても帯に残る。
+   * ⚠ ルートでは留められない(1 押しで戻れる所を帯に並べない)。
+   */
+  const pin = page.locator(`${PANE('left')} [data-pkc-action="dual-bookmark"]`);
+  await expect(pin, 'ルートで留められてしまう').toBeDisabled();
+  await page.locator(ROWS('left')).filter({ hasText: 'とめる場所' }).first().dblclick();
+  await expect(pin, 'フォルダへ入っても留められない').toBeEnabled();
+  await pin.click();
+  const bar = page.locator(`${PANE('left')} [data-pkc-region="dual-bookmarks"]`);
+  await expect(bar).toContainText('とめる場所');
+
+  // ③ 🔴 戻るが効く(入った先から 1 つ前へ)
+  await clickReal(page, `${PANE('left')} [data-pkc-action="dual-back"]`);
+  await expect(bar, '留めが消えた').toContainText('とめる場所');
+
+  // ④ 読み込み直しても、留めと下見の出し入れが残っている
+  await page.reload();
+  await openDual(page);
+  await expect(
+    page.locator(`${PANE('left')} [data-pkc-region="dual-bookmarks"]`),
+    '留めが端末に残っていない',
+  ).toContainText('とめる場所');
+  await expect(
+    page.locator(`${PANE('left')} [data-pkc-region="dual-preview"]`),
+    '下見の出し入れが憶えられていない',
+  ).toBeVisible();
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

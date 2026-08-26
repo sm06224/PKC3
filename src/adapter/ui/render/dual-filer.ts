@@ -26,13 +26,22 @@
 import type { EntryMeta } from '@core/model/entry-meta';
 import type { AppState } from '@adapter/state/app-state';
 import type { DualPaneState, DualSide } from '@features/relation/dual-pane';
-import { MAX_TABS, paneOf, paneScope } from '@features/relation/dual-pane';
+import {
+  MAX_TABS,
+  canGoBack,
+  canGoForward,
+  paneFilterOptions,
+  paneOf,
+  paneScope,
+} from '@features/relation/dual-pane';
+import { MAX_BOOKMARKS, isBookmarked } from '@features/relation/dual-bookmarks';
 import { filerRows } from '@features/relation/filer-list';
 import { normalizeQuery } from '@features/filter/title-filter';
 import { getAncestorFolders } from '@features/relation/tree';
 import { formatListDate } from '@features/datetime/stored-date';
 import { chordLabel, findCommand } from '@features/keymap';
 import { appKeymap, type KeymapStore } from './keymap';
+import { appDualPrefs, DualPrefsStore } from './dual-prefs';
 import { ARCHETYPE_ICONS, iconSpan } from './icons';
 
 /**
@@ -160,6 +169,17 @@ const COMMAND_ITEMS: readonly {
     hint: (from) => `${from}で選んだものを、ゴミ箱へ入れます(あとで戻せます)`,
     empty: 'ゴミ箱へ入れるものを選んでから押してください',
   },
+  /**
+   * 🔴 **下見**(#273 残件)── 開かずに中身を確かめる。
+   * ⚠ **印は要らない**(`empty: null`)── 相手はカーソルの行である。
+   */
+  {
+    action: 'dual-preview-toggle',
+    command: 'dual-preview',
+    label: '下見',
+    hint: (from) => `${from}のペインで指している行の中身を、その場で数行だけ出します`,
+    empty: null,
+  },
 ];
 
 const otherSideLabel = (side: DualSide): string =>
@@ -170,8 +190,18 @@ interface PaneFrame {
   root: HTMLElement;
   tabs: HTMLElement;
   crumbs: HTMLElement;
+  /** 🔴 **戻る / 進む / 留める / 絞る**の帯(#273 残件)。 */
+  head: HTMLElement;
+  back: HTMLButtonElement;
+  forward: HTMLButtonElement;
+  pin: HTMLButtonElement;
+  filter: HTMLInputElement;
+  /** 留めた場所の帯。⚠ 1 件も無ければ**器ごと畳む**(空の枠を出さない)。 */
+  marksBar: HTMLElement;
   table: HTMLElement;
   foot: HTMLElement;
+  /** 🔴 **下見**(#273 残件)。⚠ 出していないときは `hidden`。 */
+  preview: HTMLElement;
   rows: Map<string, HTMLElement>;
   /**
    * 表の指紋 ── 変わったときだけ組み直す。
@@ -200,6 +230,10 @@ interface PaneFrame {
    *   なる(絞り込みで消えた印がそのまま数に入る)。**同じ問いに 3 つ目の口を作らない。**
    */
   shownMarks: number;
+  /** 留めた場所の帯の指紋(内容で見る ── 端末の保存から毎回読み直すので)。 */
+  marksBarKey: string;
+  /** 下見の指紋(`lid` + 本文)。⚠ **lid も入れる** ── 同じ本文の別の行がある。 */
+  previewKey: string;
 }
 
 /**
@@ -236,16 +270,28 @@ export class DualFilerRenderer {
    */
   private lastSortDesc: boolean | null = null;
   private lastHits: AppState['searchHits'] = null;
+  /**
+   * 🔴 **留めた場所は state の外に在る**(端末の保存)。
+   * ⚠ だから**指紋に入れないと門を通れない** ── 留めても帯が変わらない
+   *   (CLAUDE.md §7「設定画面の値の同期」と同じ形)。
+   */
+  private lastBookmarks = '';
 
   constructor(
     region: HTMLElement,
     /** ⚠ 差し替えられるようにしておく(test が保存を持たない store を渡す)。 */
     private readonly keymap: KeymapStore = appKeymap,
+    private readonly prefs: DualPrefsStore = appDualPrefs,
   ) {
     this.region = region;
   }
 
   render(state: AppState): void {
+    /**
+     * ⚠ **端末の保存は毎回読む**(state に居ないので)── 読み値そのものを
+     *   下の門の材料にする(`appPanes` と同じ作法)。
+     */
+    const bookmarks = this.prefs.getBookmarks();
     /**
      * 🔴 **入力が 1 つも変わっていないなら描かない**(着地前レビュー R4)。
      *
@@ -265,7 +311,8 @@ export class DualFilerRenderer {
       state.filterQuery === this.lastFilter &&
       state.entrySort === this.lastSort &&
       state.entrySortDesc === this.lastSortDesc &&
-      state.searchHits === this.lastHits
+      state.searchHits === this.lastHits &&
+      bookmarks.join(SEP) === this.lastBookmarks
     )
       return;
     this.lastDual = state.dual;
@@ -275,16 +322,17 @@ export class DualFilerRenderer {
     this.lastSort = state.entrySort;
     this.lastSortDesc = state.entrySortDesc;
     this.lastHits = state.searchHits;
+    this.lastBookmarks = bookmarks.join(SEP);
     const frame = this.ensureFrame();
     for (const side of SIDES) {
       const pane = paneOf(state.dual, side);
       const rows = filerRows(paneScope(pane), state.entryMetas, state.relations, {
-        filterQuery: state.filterQuery,
-        searchHits: state.searchHits,
+        // 🔑 **絞り込みの規則は 1 本**(reducer / binder と同じ `paneFilterOptions`)
+        ...paneFilterOptions(pane, state.filterQuery, state.searchHits),
         sort: state.entrySort,
         sortDesc: state.entrySortDesc,
       });
-      this.renderPane(frame.panes[side], side, state, pane, rows);
+      this.renderPane(frame.panes[side], side, state, pane, rows, bookmarks);
     }
     /**
      * 🔴 **焦点の側は「移す向き」そのもの**なので、必ず画面に出す
@@ -364,24 +412,207 @@ export class DualFilerRenderer {
     const crumbs = document.createElement('nav');
     crumbs.setAttribute('data-pkc-region', 'dual-crumbs');
     crumbs.setAttribute('aria-label', `${SIDE_LABEL[side]}のペインの現在地`);
+
+    /**
+     * 🔴 **道具の帯**(#273 残件)── 戻る / 進む / 留める / 絞る。
+     *
+     * ⚠ **並びは固定**(不可侵指示「同じものが常に同じ場所にある」)── 焦点が
+     *   変わっても位置は動かない。⚠ **現在地の隣**に置く ── 場所を扱う道具なので、
+     *   場所の字から離すと user は操作行(F キー)のほうを探す。
+     */
+    const head = document.createElement('div');
+    head.setAttribute('data-pkc-region', 'dual-head');
+    const mkBtn = (action: string, label: string, title: string): HTMLButtonElement => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.setAttribute('data-pkc-action', action);
+      b.textContent = label;
+      b.title = title;
+      b.setAttribute('aria-label', title);
+      return b;
+    };
+    const back = mkBtn('dual-back', '◀', '1 つ前に見ていた場所へ戻る');
+    const forward = mkBtn('dual-forward', '▶', '戻る前に見ていた場所へ進む');
+    const pin = mkBtn('dual-bookmark', '☆', 'いまの場所を留める');
+    const filter = document.createElement('input');
+    filter.type = 'search';
+    filter.setAttribute('data-pkc-field', 'dual-filter');
+    filter.placeholder = '名前で絞る';
+    filter.title = `${SIDE_LABEL[side]}のペインだけを名前で絞ります`;
+    filter.setAttribute('aria-label', filter.title);
+    head.append(back, forward, crumbs, filter, pin);
+
+    /**
+     * 🔴 **留めた場所の帯**(#273 残件)。⚠ 1 件も無ければ `hidden` ──
+     *   空の枠を出すと、押す物が無い帯が版面を食う。
+     */
+    const marksBar = document.createElement('div');
+    marksBar.setAttribute('data-pkc-region', 'dual-bookmarks');
+    marksBar.setAttribute('aria-label', '留めた場所');
+    marksBar.hidden = true;
+
     const table = document.createElement('div');
     table.setAttribute('data-pkc-region', 'dual-table');
     const foot = document.createElement('div');
     foot.setAttribute('data-pkc-field', 'dual-count');
-    root.append(tabs, crumbs, table, foot);
+    /**
+     * 🔴 **下見**(#273 残件)── カーソルの行の中身を、この場で数行だけ出す。
+     * ⚠ **本文の面ではない** ── 原文をそのまま出す(描画に回すと、図や表の
+     *   焼き直しが行を送るたびに走る)。
+     */
+    const preview = document.createElement('pre');
+    preview.setAttribute('data-pkc-region', 'dual-preview');
+    preview.hidden = true;
+
+    root.append(tabs, head, marksBar, table, preview, foot);
     return {
       root,
       tabs,
       crumbs,
+      head,
+      back,
+      forward,
+      pin,
+      filter,
+      marksBar,
       table,
       foot,
+      preview,
       rows: new Map(),
       signature: null,
       dates: null,
       marks: '',
       cursor: '',
       shownMarks: 0,
+      marksBarKey: '',
+      previewKey: '',
     };
+  }
+
+  /**
+   * 🔴 **道具の帯を、いまの姿に合わせる**(#273 残件)。
+   *
+   * ⚠ **押せないものは `disabled` にする** ── 押しても何も起きないボタンを
+   *   出すのは、この repo が繰り返し直してきた「無言の dead click」である。
+   * ⚠ 絞り込みの欄は**state から書く**(DOM から読まない、が規約)── ただし
+   *   **打っている最中は触らない**(caret が末尾へ飛ぶ)。
+   */
+  private renderHead(
+    frame: PaneFrame,
+    side: DualSide,
+    state: AppState,
+    pane: DualPaneState,
+    bookmarks: readonly string[],
+  ): void {
+    frame.head.setAttribute('data-pkc-side', side);
+    frame.back.disabled = !canGoBack(pane);
+    frame.forward.disabled = !canGoForward(pane);
+
+    const scope = paneScope(pane);
+    const pinned = isBookmarked(bookmarks, scope);
+    /**
+     * ⚠ **ルートは留めない** ── パンくずの左端が常にルートなので、1 押しで
+     *   行ける所を帯に並べても枠を食うだけである。
+     * ⚠ 満杯のときは**断る理由を字に出す**(押しても増えない理由が見えないと、
+     *   user は「壊れている」と読む)。
+     */
+    const full = !pinned && bookmarks.length >= MAX_BOOKMARKS;
+    frame.pin.disabled = scope === null || full;
+    frame.pin.textContent = pinned ? '★' : '☆';
+    frame.pin.title =
+      scope === null
+        ? 'ルートは留められません(パンくずの左端からいつでも戻れます)'
+        : full
+          ? `留めた場所は ${String(MAX_BOOKMARKS)} 件までです(どれか外してください)`
+          : pinned
+            ? 'この場所の留めを外す'
+            : 'いまの場所を留める';
+    frame.pin.setAttribute('aria-pressed', pinned ? 'true' : 'false');
+    frame.pin.setAttribute('aria-label', frame.pin.title);
+
+    // ⚠ 打っている最中は書き戻さない(caret が末尾へ飛ぶ)
+    if (document.activeElement !== frame.filter && frame.filter.value !== pane.filter)
+      frame.filter.value = pane.filter;
+  }
+
+  /**
+   * 🔴 **留めた場所の帯**(#273 残件)。
+   *
+   * ⚠ **消えたフォルダも出す** ── 出さないと帯から消えて見えるのに留めは残り、
+   *   **外しようがなくなる**(#301 の「題名が引けないものも出す」と同じ規律)。
+   * 🔴 **置けるなら外せる**(user 指示 2026-08-23)── 1 件ごとに外す口を添える。
+   */
+  private renderBookmarks(
+    frame: PaneFrame,
+    side: DualSide,
+    state: AppState,
+    bookmarks: readonly string[],
+  ): void {
+    const key = bookmarks
+      .map((lid) => `${lid}${SEP}${state.entryMetas.get(lid)?.title ?? ''}`)
+      .join(SEP);
+    if (key === frame.marksBarKey) return;
+    frame.marksBarKey = key;
+    frame.marksBar.textContent = '';
+    frame.marksBar.hidden = bookmarks.length === 0;
+    if (bookmarks.length === 0) return;
+    for (const lid of bookmarks) {
+      const wrap = document.createElement('span');
+      wrap.setAttribute('data-pkc-region', 'dual-bookmark');
+      const go = document.createElement('button');
+      go.type = 'button';
+      go.setAttribute('data-pkc-action', 'dual-bookmark-open');
+      go.setAttribute('data-pkc-side', side);
+      go.setAttribute('data-pkc-entry', lid);
+      const title = state.entryMetas.get(lid)?.title ?? null;
+      go.textContent = title ?? `(消えた場所 ${lid.slice(0, 8)})`;
+      go.disabled = title === null;
+      go.title = title === null ? 'この場所はもうありません' : `${title} へ移動`;
+      const off = document.createElement('button');
+      off.type = 'button';
+      off.setAttribute('data-pkc-action', 'dual-bookmark-remove');
+      off.setAttribute('data-pkc-entry', lid);
+      off.textContent = '×';
+      off.title = '留めを外す';
+      off.setAttribute('aria-label', `${title ?? 'この場所'}の留めを外す`);
+      wrap.append(go, off);
+      frame.marksBar.append(wrap);
+    }
+  }
+
+  /**
+   * 🔴 **下見**(#273 残件)── カーソルの行の中身を、この場で数行だけ出す。
+   *
+   * ⚠ **出していないときは中身も捨てる** ── 残すと、次に点けた瞬間に
+   *   前の行の本文が一瞬出る。
+   * ⚠ 読み終わるまでは「読んでいます」と出す ── 空欄のままだと
+   *   「中身が空のノート」と見分けがつかない。
+   */
+  private renderPreview(frame: PaneFrame, side: DualSide, state: AppState): void {
+    /**
+     * ⚠ **器は左右とも出す** ── 焦点のある側にだけ出すと、反対のペインを押した
+     *   瞬間に**両側の表の高さが入れ替わる**(業務画面の作法「同じものが常に
+     *   同じ場所にある」に反する。#270 の「掴む手の下で行が動く」と同じ害)。
+     * 🔑 中身が入るのは**元になっている側**だけ ── 読みに行くのは 1 本である。
+     */
+    const on = state.dual.previewOn;
+    const here = state.dual.focus === side;
+    const preview = here ? state.dual.preview : null;
+    const target = here ? paneOf(state.dual, side).cursor : null;
+    const key = !on ? '' : `${here ? 'h' : '-'}${target ?? ''}${SEP}${preview?.body ?? ''}`;
+    if (key === frame.previewKey) return;
+    frame.previewKey = key;
+    frame.preview.hidden = !on;
+    if (!on) {
+      frame.preview.textContent = '';
+      return;
+    }
+    if (!here) frame.preview.textContent = 'こちらのペインを押すと、この側の中身が出ます';
+    else if (target === null) frame.preview.textContent = '行を選ぶと、ここに中身が出ます';
+    else if (preview === null || preview.lid !== target)
+      frame.preview.textContent = '読んでいます…';
+    else if (preview.body === '') frame.preview.textContent = '(空のノートです)';
+    else frame.preview.textContent = preview.body;
   }
 
   private renderPane(
@@ -390,9 +621,12 @@ export class DualFilerRenderer {
     state: AppState,
     pane: DualPaneState,
     rows: readonly EntryMeta[],
+    bookmarks: readonly string[],
   ): void {
     this.renderTabs(frame.tabs, side, state, pane);
     this.renderCrumbs(frame.crumbs, side, state, pane);
+    this.renderHead(frame, side, state, pane, bookmarks);
+    this.renderBookmarks(frame, side, state, bookmarks);
     /**
      * ⚠ **落とし先の行き先を、いまの場所に追随させる**(#273 段⑤)。
      * `''` = ルート。⚠ 書き忘れると、フォルダの中を開いていても**ルートへ**落ちる。
@@ -414,7 +648,9 @@ export class DualFilerRenderer {
      * **0 件 → 0 件**(空のフォルダで語を打った / 語を消した)で指紋が動かず、
      * 空の理由の文言が**古いまま残る**(行が 0 件だと指紋は空文字になる)。
      */
-    const filtered = normalizeQuery(state.filterQuery) !== '';
+    const filtered =
+      normalizeQuery(paneFilterOptions(pane, state.filterQuery, state.searchHits).filterQuery) !==
+      '';
     /**
      * ⚠ **打ち替え中の行も指紋に入れる**(#273 段④)── 入れないと、
      * 打ち始め / やめるで行を組み直さないので、**入力欄が出ない / 消えない**。
@@ -502,8 +738,57 @@ export class DualFilerRenderer {
      *   外した代わりに、ここが受ける。
      */
     const here = side === state.dual.focus ? '(ここが元)' : '';
-    const text = shown > 0 ? `${rows.length} 件中 ${shown} 件を選択${here}` : `${rows.length} 件${here}`;
+    /**
+     * 🔴 **合計も出す**(#273 残件)── 古典 4 実装はどれも
+     * 「選んだぶん / 全体」を情報行に出す。⚠ **量を判断に使う**面なので、
+     * 「何件あるか」だけでは移す前の見当が付かない。
+     *
+     * ⚠ **数えるのは表に出ている行だけ**(印と同じ規則)── 絞り込みで消えた行を
+     *   足すと、画面の合計と数字が食い違う。
+     * ⚠ **まだ数えていない行(`null`)は足さない** ── 0 として足すと
+     *   「少なく見える」側へ静かに倒れる。数え漏れが在ることは `+` で出す。
+     * ⚠ フォルダは `bodyChars` を持たないので、そもそも `null` 側に落ちる。
+     */
+    interface Sum {
+      chars: number;
+      /** 数えていない行が在る(旧ビルドが書いた行)。 */
+      partial: boolean;
+      /** 本文を持ちうる行が 1 つでも在るか。⚠ フォルダだけなら **出さない**。 */
+      hasBody: boolean;
+    }
+    const sumOf = (list: readonly EntryMeta[]): Sum => {
+      let chars = 0;
+      let partial = false;
+      let hasBody = false;
+      for (const m of list) {
+        // ⚠ フォルダは本文を持たない ── 「数え漏れ」にも「合計」にも数えない
+        if (m.archetype === 'folder') continue;
+        hasBody = true;
+        if (m.bodyChars === null) partial = true;
+        else chars += m.bodyChars;
+      }
+      return { chars, partial, hasBody };
+    };
+    const total = sumOf(rows);
+    const marked = sumOf(rows.filter((m) => pane.selection.includes(m.lid)));
+    /**
+     * ⚠ **1 件も数えられていないなら「—」** ── `0` と出すと「空だ」と読まれる
+     *   (`formatBodyChars(null)` が同じ意味で使っている字に揃える)。
+     */
+    const size = (v: Sum): string =>
+      v.partial && v.chars === 0 ? '—' : `${formatBodyChars(v.chars)}${v.partial ? '+' : ''}`;
+    /**
+     * ⚠ **フォルダしか無い場所では合計を出さない** ── 出すと「0」になり、
+     *   中身が空だと読まれる(フォルダは本文を持たないだけである)。
+     */
+    const totalPart = total.hasBody ? ` · ${size(total)}` : '';
+    const markedPart = marked.hasBody && total.hasBody ? ` · ${size(marked)} / ${size(total)}` : '';
+    const text =
+      shown > 0
+        ? `${rows.length} 件中 ${shown} 件を選択${markedPart === '' ? totalPart : markedPart}${here}`
+        : `${rows.length} 件${totalPart}${here}`;
     if (frame.foot.textContent !== text) frame.foot.textContent = text;
+    this.renderPreview(frame, side, state);
   }
 
   private renderTabs(host: HTMLElement, side: DualSide, state: AppState, pane: DualPaneState): void {
@@ -765,7 +1050,11 @@ export class DualFilerRenderer {
      *   変えて戻ってきたときに**古い鍵が出たまま**になる(画面が嘘をつく)。
      */
     const keys = COMMAND_ITEMS.map((it) => barKey(it.command, this.keymap));
-    const sig = [from, String(count), ...keys].join(SEP);
+    /**
+     * ⚠ **下見の出し入れも指紋に入れる**(#273 残件)── 入れないと、押しても
+     *   `aria-pressed` が古いまま残り、**点いているのに消えて見える**。
+     */
+    const sig = [from, String(count), state.dual.previewOn ? 'p' : '-', ...keys].join(SEP);
     if (sig === this.lastCommands) return;
     this.lastCommands = sig;
     const to = otherSideLabel(from);
@@ -790,6 +1079,9 @@ export class DualFilerRenderer {
         it.empty !== null && count === 0
           ? it.empty
           : `${it.hint(SIDE_LABEL[from], to)}${it.empty !== null ? `(いま ${count} 件)` : ''}`;
+      // 🔑 出し入れの口は**押している状態**を出す(点いているか、字だけでは読めない)
+      if (it.action === 'dual-preview-toggle')
+        b.setAttribute('aria-pressed', state.dual.previewOn ? 'true' : 'false');
       host.append(b);
     });
   }

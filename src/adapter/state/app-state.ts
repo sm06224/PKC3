@@ -46,6 +46,12 @@ import {
   withScope as withPaneScope,
   withSelection as withPaneSelection,
   withCursor,
+  withFilter as withPaneFilter,
+  withBack as withPaneBack,
+  withForward as withPaneForward,
+  canGoBack as paneCanGoBack,
+  canGoForward as paneCanGoForward,
+  paneFilterOptions,
   isTabIndex,
   withTabActive,
   withTabAdded,
@@ -194,9 +200,51 @@ export function nextViewMode(current: ViewMode, want: ViewMode): ViewMode {
  * ⚠ マニュアルは「押したほうのペインに枠が付き」と言い切っており、
  * 同じ節で「押しても何も起きないボタンは置きません」とまで書いている。
  */
+/**
+ * 🔴 **下見に映すべきもの**(#273 残件)── 焦点のあるペインのカーソルの行。
+ *
+ * ⚠ **フォルダは映さない** ── フォルダに本文は無いので、読みに行っても空が返る
+ *   (「読めなかった」と「空だった」が見分けられなくなる)。
+ * 🔑 判定はここ 1 か所 ── 呼び手ごとに書くと、ある経路だけ古い行を映し続ける。
+ */
+function dualPreviewTarget(state: AppState, dual: DualState): string | null {
+  const lid = paneOf(dual, dual.focus).cursor;
+  if (lid === null) return null;
+  const meta = state.entryMetas.get(lid);
+  if (meta === undefined || meta.archetype === 'folder') return null;
+  return lid;
+}
+
+/**
+ * 🔴 **2 ペインの state を差し替える唯一の出口**(#273 残件)。
+ *
+ * ⚠ 下見の読み直しを**ここ 1 か所**で決める ── `DUAL_SET_CURSOR` / `DUAL_SELECT` /
+ *   `DUAL_FOCUS` / 場所の移動と、カーソルが動く経路は複数ある。呼び手ごとに
+ *   「読み直すか」を書くと、**ある経路だけ前の行の本文を映し続ける**
+ *   (CLAUDE.md §7「同じ判定が複数の場所にある」)。
+ */
+function withDual(state: AppState, dual: DualState): ReduceResult {
+  /**
+   * ⚠ **何も変わらないなら state ごと同じものを返す** ── 新しい object を返すと、
+   *   「押しても何も変わらない」場面で**面が毎回組み直る**(この面の門は
+   *   `state.dual` の参照 1 本で変化を見ているので、参照が変われば必ず描き直す)。
+   */
+  const done = (next: DualState, events: DomainEvent[] = []): ReduceResult => ({
+    state: next === state.dual ? state : { ...state, dual: next },
+    events,
+  });
+  const target = dualPreviewTarget(state, dual);
+  if (!dual.previewOn || target === null)
+    return done(dual.preview === null ? dual : { ...dual, preview: null });
+  if (dual.preview?.lid === target) return done(dual);
+  return done(dual.preview === null ? dual : { ...dual, preview: null }, [
+    { type: 'REQUEST_DUAL_PREVIEW', lid: target },
+  ]);
+}
+
 function withDualFocus(state: AppState, side: DualSide): ReduceResult {
-  if (state.dual.focus === side) return { state, events: [] };
-  return { state: { ...state, dual: { ...state.dual, focus: side } }, events: [] };
+  if (state.dual.focus === side) return withDual(state, state.dual);
+  return withDual(state, { ...state.dual, focus: side });
 }
 
 /**
@@ -940,7 +988,16 @@ export type UserAction =
    * ⚠ 確定は既存の `RENAME_ENTRY_TITLE` を撃つ ── 改名の規則を 2 つ作らない。
    */
   | { type: 'DUAL_RENAME_BEGIN'; side: DualSide; lid: string }
-  | { type: 'DUAL_RENAME_END' };
+  | { type: 'DUAL_RENAME_END' }
+  /** 🔴 **このペインだけの絞り込み**(#273 残件)。 */
+  | { type: 'DUAL_SET_FILTER'; side: DualSide; filter: string }
+  /** 🔴 **1 つ前 / 次の場所へ**(#273 残件。タブごとの履歴)。 */
+  | { type: 'DUAL_BACK'; side: DualSide }
+  | { type: 'DUAL_FORWARD'; side: DualSide }
+  /** 🔴 **下見の出し入れ**(#273 残件)。 */
+  | { type: 'DUAL_SET_PREVIEW'; on: boolean }
+  /** 下見の本文が届いた。⚠ **lid つき**(追い越しを捨てるため)。 */
+  | { type: 'DUAL_PREVIEW_LOADED'; lid: string; body: string };
 
 export type SystemCommand =
   | { type: 'SYS_BOOTED'; cid: string; metas: EntryMeta[]; relations: Relation[] }
@@ -1061,6 +1118,17 @@ export type Dispatchable = UserAction | SystemCommand;
  */
 export type DomainEvent =
   | { type: 'REQUEST_BODY'; lid: string }
+  /**
+   * 🔴 **2 ペインの下見の本文を読む**(#273 残件)。
+   *
+   * ⚠ `REQUEST_BODY` と分けてある理由は「行き先が違う」からである ──
+   *   あちらは**開いているノート**(`openBody`)を作る口で、こちらは
+   *   **カーソルの行を映すだけ**の口である。同じ event に相乗りさせると、
+   *   下見のために送った本文が**編集中の下書きを踏む**。
+   * 🔑 ただし**読む口は 1 本**(`store.getBody`)で、**同じ直列の列**に並べる ──
+   *   別経路で読むと、並んでいる書込を追い越す(2026-08-17 に踏んだ形)。
+   */
+  | { type: 'REQUEST_DUAL_PREVIEW'; lid: string }
   /** 🔴 このノートを参照しているノートを引く(#348)。 */
   | { type: 'REQUEST_BACKLINKS'; lid: string }
   /**
@@ -3118,10 +3186,8 @@ function reduceCore(
      * 🔑 **断りが要るのは「実際に動かす操作」だけ** ── そちらは `moveEntries` /
      *   `DELETE_ENTRIES` が既に**声に出して**断っている(判定を増やさない)。
      */
-    case 'DUAL_FOCUS': {
-      if (state.dual.focus === action.side) return { state, events: [] };
-      return { state: { ...state, dual: { ...state.dual, focus: action.side } }, events: [] };
-    }
+    case 'DUAL_FOCUS':
+      return withDualFocus(state, action.side);
     case 'DUAL_SET_SCOPE': {
       // ⚠ 実在しない lid へは入らない(消えたフォルダの中身として空の表を出さない)
       if (action.lid !== null && !state.entryMetas.has(action.lid))
@@ -3130,10 +3196,10 @@ function reduceCore(
       if (pane === paneOf(state.dual, action.side)) return withDualFocus(state, action.side);
       // 🔑 場所を触った側へ焦点も移す(移す向きは「焦点のある側から」なので、
       //    触った側が元にならないと user の意図と逆へ流れる)
-      return {
-        state: { ...state, dual: { ...withPane(state.dual, action.side, pane), focus: action.side } },
-        events: [],
-      };
+      return withDual(state, {
+        ...withPane(state.dual, action.side, pane),
+        focus: action.side,
+      });
     }
     case 'DUAL_SELECT': {
       if (!state.entryMetas.has(action.lid)) return { state, events: [] };
@@ -3143,8 +3209,8 @@ function reduceCore(
        * ⚠ ここで並びを組み直すと、目で見た範囲と選ばれる範囲が食い違う。
        */
       const rows = filerRows(paneScope(pane), state.entryMetas, state.relations, {
-        filterQuery: state.filterQuery,
-        searchHits: state.searchHits,
+        // 🔑 **絞り込みの規則は 1 本**(`paneFilterOptions`)── 描く側と同じものを見る
+        ...paneFilterOptions(pane, state.filterQuery, state.searchHits),
         sort: state.entrySort,
         sortDesc: state.entrySortDesc,
       });
@@ -3165,62 +3231,49 @@ function reduceCore(
       } else {
         next = withPaneSelection(pane, [action.lid], action.lid, action.lid);
       }
-      return {
-        state: { ...state, dual: { ...withPane(state.dual, action.side, next), focus: action.side } },
-        events: [],
-      };
+      return withDual(state, {
+        ...withPane(state.dual, action.side, next),
+        focus: action.side,
+      });
     }
     case 'DUAL_SET_CURSOR': {
       if (!state.entryMetas.has(action.lid)) return { state, events: [] };
       const pane = paneOf(state.dual, action.side);
       if (pane.cursor === action.lid && state.dual.focus === action.side)
-        return { state, events: [] };
-      return {
-        state: {
-          ...state,
-          dual: {
-            ...withPane(state.dual, action.side, withCursor(pane, action.lid)),
-            // ⚠ 動かした側が「元」になる(押した側が焦点、と同じ規則)
-            focus: action.side,
-          },
-        },
-        events: [],
-      };
+        return withDual(state, state.dual);
+      return withDual(state, {
+        ...withPane(state.dual, action.side, withCursor(pane, action.lid)),
+        // ⚠ 動かした側が「元」になる(押した側が焦点、と同じ規則)
+        focus: action.side,
+      });
     }
     case 'DUAL_TAB_ADD': {
       const pane = withTabAdded(paneOf(state.dual, action.side));
       if (pane === paneOf(state.dual, action.side)) return { state, events: [] };
-      return {
-        state: { ...state, dual: { ...withPane(state.dual, action.side, pane), focus: action.side } },
-        events: [],
-      };
+      return withDual(state, {
+        ...withPane(state.dual, action.side, pane),
+        focus: action.side,
+      });
     }
     case 'DUAL_TAB_CLOSE': {
       const pane = withTabClosed(paneOf(state.dual, action.side), action.index);
       if (pane === paneOf(state.dual, action.side)) return { state, events: [] };
-      return {
-        state: { ...state, dual: { ...withPane(state.dual, action.side, pane), focus: action.side } },
-        events: [],
-      };
+      return withDual(state, {
+        ...withPane(state.dual, action.side, pane),
+        focus: action.side,
+      });
     }
     case 'DUAL_CLEAR_SELECTION': {
       const pane = paneOf(state.dual, action.side);
       if (pane.selection.length === 0 && pane.anchor === null) return { state, events: [] };
-      return {
-        state: {
-          ...state,
-          /**
-           * ⚠ **カーソルは残す**(2026-08-19)── ここは「移した直後に印を外す」
-           *   ための入口なので、カーソルまで消すと**次の 1 打鍵が先頭へ飛ぶ**。
-           */
-          dual: withPane(
-            state.dual,
-            action.side,
-            withPaneSelection(pane, [], null, pane.cursor),
-          ),
-        },
-        events: [],
-      };
+      return withDual(
+        state,
+        /**
+         * ⚠ **カーソルは残す**(2026-08-19)── ここは「移した直後に印を外す」
+         *   ための入口なので、カーソルまで消すと**次の 1 打鍵が先頭へ飛ぶ**。
+         */
+        withPane(state.dual, action.side, withPaneSelection(pane, [], null, pane.cursor)),
+      );
     }
     case 'DUAL_RENAME_BEGIN': {
       // ⚠ 実在しない行の名前は打てない(消えた行の入力欄を出さない)
@@ -3238,6 +3291,56 @@ function reduceCore(
       if (state.dual.renaming === null) return { state, events: [] };
       return { state: { ...state, dual: { ...state.dual, renaming: null } }, events: [] };
     }
+    case 'DUAL_SET_FILTER': {
+      const pane = withPaneFilter(paneOf(state.dual, action.side), action.filter);
+      if (pane === paneOf(state.dual, action.side)) return { state, events: [] };
+      // 🔑 打った側へ焦点も移す(他の押し方と揃える)
+      return withDual(state, {
+        ...withPane(state.dual, action.side, pane),
+        focus: action.side,
+      });
+    }
+    case 'DUAL_BACK':
+    case 'DUAL_FORWARD': {
+      const cur = paneOf(state.dual, action.side);
+      /**
+       * ⚠ **押せないときは何もしない**(焦点も動かさない)── 端で押したときに
+       *   焦点だけ動くと、「戻ったのに場所が同じ」に見える。
+       */
+      const can = action.type === 'DUAL_BACK' ? paneCanGoBack(cur) : paneCanGoForward(cur);
+      if (!can) return { state, events: [] };
+      const pane = action.type === 'DUAL_BACK' ? withPaneBack(cur) : withPaneForward(cur);
+      return withDual(state, {
+        ...withPane(state.dual, action.side, pane),
+        focus: action.side,
+      });
+    }
+    case 'DUAL_SET_PREVIEW': {
+      if (state.dual.previewOn === action.on) return { state, events: [] };
+      /**
+       * ⚠ **切ったら中身も捨てる** ── 残すと、次に点けた瞬間に
+       *   **前に見ていた行の本文**が一瞬出る(いま指している行のものではない)。
+       */
+      return withDual(state, { ...state.dual, previewOn: action.on, preview: null });
+    }
+    case 'DUAL_PREVIEW_LOADED': {
+      /**
+       * ⚠ **追い越しを捨てる**(#273 残件)── 読みは非同期なので、送った先の行を
+       *   通り過ぎた後で届くことが普通に起きる。いま指している行のものでなければ
+       *   **黙って捨てる**(古い本文を映すほうがずっと悪い)。
+       */
+      if (!state.dual.previewOn) return { state, events: [] };
+      if (dualPreviewTarget(state, state.dual) !== action.lid) return { state, events: [] };
+      if (state.dual.preview?.lid === action.lid && state.dual.preview.body === action.body)
+        return { state, events: [] };
+      return {
+        state: {
+          ...state,
+          dual: { ...state.dual, preview: { lid: action.lid, body: action.body } },
+        },
+        events: [],
+      };
+    }
     case 'DUAL_TAB_ACTIVATE': {
       const cur = paneOf(state.dual, action.side);
       // ⚠ **実在するタブを押したときだけ**焦点を移す ── 存在しない添字で
@@ -3245,10 +3348,10 @@ function reduceCore(
       if (!isTabIndex(cur, action.index)) return { state, events: [] };
       const pane = withTabActive(cur, action.index);
       if (pane === cur) return withDualFocus(state, action.side);
-      return {
-        state: { ...state, dual: { ...withPane(state.dual, action.side, pane), focus: action.side } },
-        events: [],
-      };
+      return withDual(state, {
+        ...withPane(state.dual, action.side, pane),
+        focus: action.side,
+      });
     }
     case 'ENTRY_RESTORED': {
       // 🔒 編集中の着弾(review P5b F1 ── 反例実験で draft 全損と editor

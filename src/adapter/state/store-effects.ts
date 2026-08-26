@@ -18,6 +18,7 @@ import {
   resolveAppendAt,
 } from '@features/markdown/append-target';
 import { applyBodyRewrite } from '@features/markdown/body-rewrite';
+import { clipPreview } from '@features/relation/dual-pane';
 import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
 import { buildTiles, withBuiltinTiles, type TileSource } from '@features/launcher/tiles';
 import type {
@@ -475,6 +476,32 @@ export function connectStoreEffects(
                 lid: ev.lid,
                 error: String(e),
               });
+          }
+        });
+        break;
+      /**
+       * 🔴 **2 ペインの下見の本文を読む**(#273 残件)。
+       *
+       * 🔑 **同じ `enqueue` の列に並べる** ── `getBody` を列の外で呼ぶと、
+       *   並んでいる書込を追い越して**保存前の本文**を映す(2026-08-17 に踏んだ形)。
+       * ⚠ **ここで切る**(`clipPreview`)── 切らずに state へ渡すと、
+       *   カーソルを合わせただけで長い本文がそのまま常駐する。
+       * ⚠ **読めなかったら黙って終える** ── 下見は補助なので、失敗を帯に出すと
+       *   フォルダを送るたびに赤い字が出ることになる(user は何もできない)。
+       */
+      case 'REQUEST_DUAL_PREVIEW':
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            const body = await store.getBody(ev.lid);
+            if (disposed || body === null) return;
+            dispatcher.dispatch({
+              type: 'DUAL_PREVIEW_LOADED',
+              lid: ev.lid,
+              body: clipPreview(body),
+            });
+          } catch {
+            // 下見が出ないだけ ── 画面は行の一覧のまま使える
           }
         });
         break;

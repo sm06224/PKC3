@@ -3186,6 +3186,101 @@ select:focus-visible {
   margin-right: var(--s1);
   color: var(--border);
 }
+/* 🔴 **道具の帯**(#273 残件)── 戻る / 進む / 現在地 / 絞る / 留める。
+ *
+ * ⚠ **1 行に収める** ── 折り返すと「現在地」の高さが場所によって変わり、
+ *   表の頭が上下に動く(業務画面の作法「同じものが常に同じ場所にある」)。
+ * 🔑 だから**伸びるのはパンくずだけ**にして、他は固定幅で置く。 */
+[data-pkc-region='dual-head'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+  padding: var(--s1) var(--s2);
+  min-width: 0;
+}
+[data-pkc-region='dual-head'] [data-pkc-region='dual-crumbs'] {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  /* ⚠ 長い経路で帯を押し広げない(絞る欄と留めるが画面外へ出る) */
+  overflow: hidden;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+[data-pkc-region='dual-head'] button {
+  flex: none;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 3px;
+  padding: 0 var(--s1);
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--muted);
+}
+[data-pkc-region='dual-head'] button:disabled {
+  opacity: 0.4;
+}
+[data-pkc-region='dual-head'] [data-pkc-field='dual-filter'] {
+  flex: none;
+  width: 8rem;
+  min-width: 0;
+  font-size: 12px;
+  padding: 0 var(--s1);
+  line-height: 20px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface);
+  color: inherit;
+}
+/* 🔴 **留めた場所の帯**(#273 残件)。⚠ 1 件も無ければ器ごと消える(`hidden`)。 */
+[data-pkc-region='dual-bookmarks'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s1);
+  padding: 0 var(--s2) var(--s1);
+  font-size: 12px;
+}
+[data-pkc-region='dual-bookmark'] {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface);
+}
+[data-pkc-region='dual-bookmark'] button {
+  border: none;
+  background: none;
+  font-size: 12px;
+  padding: 0 var(--s1);
+  color: inherit;
+  line-height: 18px;
+}
+[data-pkc-region='dual-bookmark'] button:disabled {
+  opacity: 0.4;
+}
+[data-pkc-region='dual-bookmark'] [data-pkc-action='dual-bookmark-remove'] {
+  color: var(--muted);
+  border-left: 1px solid var(--border);
+}
+/* 🔴 **下見**(#273 残件)── 原文をそのまま出す。
+ *
+ * ⚠ **高さを固定する** ── 中身の長さで面の割り付けが変わると、行を送るたびに
+ *   表の高さが伸び縮みして**掴もうとしている行が動く**(#270 と同じ害)。 */
+[data-pkc-region='dual-preview'] {
+  flex: none;
+  height: 8rem;
+  overflow: auto;
+  margin: 0;
+  padding: var(--s1) var(--s2);
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--muted);
+}
 /* ⚠ **表だけがスクロールする** ── 面ごと流れると、タブとパンくずが
  *   上へ消えて「いま何処に居るか」が読めなくなる。 */
 [data-pkc-region='dual-table'] {
