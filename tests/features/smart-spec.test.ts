@@ -22,8 +22,11 @@ import {
   SMART_DATED_KEY,
   SMART_FIELDS,
   SMART_KIND_KEY,
+  SMART_TASKS_KEY,
+  SMART_OPEN_TASKS_KEY,
   SMART_TEXT_KEY,
   SMART_UPDATED_KEY,
+  matchesSmartTasks,
   MAX_SMART_TEXT_CHARS,
   needsRescan,
   smartWriteError,
@@ -168,7 +171,7 @@ describe('当てる(#421 段①)', () => {
 });
 
 describe('走査(#421 段①)', () => {
-  const run = (spec: SmartSpec, rows: { lid: string; head: string }[], self = 'self') => {
+  const run = (spec: SmartSpec, rows: { lid: string; body: string }[], self = 'self') => {
     const scan = createSmartScan(spec, self);
     scan.feed(rows);
     return scan.finish();
@@ -176,9 +179,9 @@ describe('走査(#421 段①)', () => {
 
   it('🔴 条件に当たったものだけ集める', () => {
     const out = run({ ...EMPTY_SMART, tags: ['請求'] }, [
-      { lid: 'a', head: withTags('請求') },
-      { lid: 'b', head: withTags('家事') },
-      { lid: 'c', head: withTags('請求', '未処理') },
+      { lid: 'a', body: withTags('請求') },
+      { lid: 'b', body: withTags('家事') },
+      { lid: 'c', body: withTags('請求', '未処理') },
     ]);
     expect(out.lids).toEqual(['a', 'c']);
     expect(out.total).toBe(2);
@@ -190,14 +193,14 @@ describe('走査(#421 段①)', () => {
    */
   it('🔴 自分自身は当たらない', () => {
     const out = run({ ...EMPTY_SMART, tags: ['請求'] }, [
-      { lid: 'self', head: withTags('請求') },
-      { lid: 'a', head: withTags('請求') },
+      { lid: 'self', body: withTags('請求') },
+      { lid: 'a', body: withTags('請求') },
     ]);
     expect(out.lids, '自分が中に並んでいる').toEqual(['a']);
   });
 
   it('⚠ 条件が空なら 1 件も集めない(走査ごと素通り)', () => {
-    const out = run({ ...EMPTY_SMART, tags: [] }, [{ lid: 'a', head: withTags('請求') }]);
+    const out = run({ ...EMPTY_SMART, tags: [] }, [{ lid: 'a', body: withTags('請求') }]);
     expect(out.lids).toEqual([]);
     expect(out.total).toBe(0);
   });
@@ -208,7 +211,7 @@ describe('走査(#421 段①)', () => {
   it('🔴 上限を超えても、総数は正しく返る', () => {
     const rows = Array.from({ length: SMART_LIMIT + 25 }, (_, i) => ({
       lid: `n${String(i)}`,
-      head: withTags('請求'),
+      body: withTags('請求'),
     }));
     const out = run({ ...EMPTY_SMART, tags: ['請求'] }, rows);
     expect(out.lids, '上限を超えて lid を持っている').toHaveLength(SMART_LIMIT);
@@ -217,9 +220,9 @@ describe('走査(#421 段①)', () => {
 
   it('⚠ 何回に分けて食わせても答えは同じ(worker は 500 件ずつ渡す)', () => {
     const rows = [
-      { lid: 'a', head: withTags('請求') },
-      { lid: 'b', head: withTags('家事') },
-      { lid: 'c', head: withTags('請求') },
+      { lid: 'a', body: withTags('請求') },
+      { lid: 'b', body: withTags('家事') },
+      { lid: 'c', body: withTags('請求') },
     ];
     const scan = createSmartScan({ ...EMPTY_SMART, tags: ['請求'] }, 'self');
     scan.feed(rows.slice(0, 2));
@@ -404,6 +407,22 @@ describe('語で絞る(#421 段③)', () => {
     expect(q.text).toBe('請求書');
   });
 
+  /**
+   * 🔴 **渡し忘れは「絞ったのに全部集まる」になる**(変異試験 N13)。
+   * ⚠ 条件ごとに 1 つずつ見る ── まとめて `toEqual` すると、
+   *   どれを落としたのか落ちたときに読めない。
+   */
+  it('🔴 チェックの条件も worker へ渡る', () => {
+    const now = Date.parse('2026-08-26T00:00:00Z');
+    const q = smartQueryOf({ ...EMPTY_SMART, tasks: true, openTasks: false }, now);
+    expect(q.tasks, '「項目がある」が渡っていない').toBe(true);
+    expect(q.openTasks, '「未処理」が渡っていない').toBe(false);
+    // ⚠ 対照群 ── 指定していないものは null のまま(勝手に true に倒さない)
+    const none = smartQueryOf(EMPTY_SMART, now);
+    expect(none.tasks).toBeNull();
+    expect(none.openTasks).toBeNull();
+  });
+
   it('🔴 語だけでも「条件が在る」と数える(空は空、のまま)', () => {
     expect(isSmartEmpty({ ...EMPTY_SMART, text: '請求書' }), '語を条件と数えていない').toBe(false);
     expect(isSmartEmpty(EMPTY_SMART)).toBe(true);
@@ -466,5 +485,133 @@ describe('書けない条件しか無いなら、理由を出す(#421 段②の�
   it('🔴 タグの条件があれば通す', () => {
     expect(smartWriteError({ ...EMPTY_SMART, tags: ['請求'] }, 'add')).toBeNull();
     expect(smartWriteError({ ...EMPTY_SMART, tags: ['請求'], updatedDays: 30 }, 'remove')).toBeNull();
+  });
+});
+
+/**
+ * 🔴 **チェック項目で絞る**(#421 段④)。
+ *
+ * ⚠ **起票時の「列を足す段」は誤りだった** ── カンバンと同じ
+ *   「列で候補に縮めてから、候補の本文を丸ごと読んで確定する」で足りる。
+ *   🔑 だからここで守るのは **確定の規則**と、**丸ごと要ると宣言していること**である。
+ */
+describe('チェック項目で絞る(#421 段④)', () => {
+  const withTasks = (v: string): string => `---\n${SMART_TASKS_KEY}: ${v}\n---\n説明\n`;
+
+  it('🔴 本文に書いた条件が読める(両方向)', () => {
+    expect(readSmartSpec(withTasks('true')).tasks).toBe(true);
+    expect(readSmartSpec(withTasks('false')).tasks).toBe(false);
+    expect(readSmartSpec('本文だけ\n').tasks, '書いていないのに条件が付いた').toBeNull();
+    expect(
+      readSmartSpec(`---\n${SMART_OPEN_TASKS_KEY}: true\n---\n`).openTasks,
+      '未処理の条件が読めない',
+    ).toBe(true);
+  });
+
+  /**
+   * 🔴 **確定は `countTaskCandidates` 1 本**(§7)── 数え方をここに書き直さない。
+   * ⚠ **両方向を見る** ── 片方だけだと「常に true を返す」実装で緑になる。
+   */
+  it('🔴 「項目がある」を本文で確定する', () => {
+    const has = { ...EMPTY_SMART, tasks: true };
+    expect(matchesSmartTasks(has, '買い物\n- [ ] 牛乳\n')).toBe(true);
+    expect(matchesSmartTasks(has, 'ただの本文\n'), '項目の無い本文を通した').toBe(false);
+    const none = { ...EMPTY_SMART, tasks: false };
+    expect(matchesSmartTasks(none, 'ただの本文\n')).toBe(true);
+    expect(matchesSmartTasks(none, '- [x] 済み\n'), '項目のある本文を通した').toBe(false);
+  });
+
+  /**
+   * 🔴 **未処理は `total - done`** ── ⚠ 列が無いので、**本文を読まないと
+   *   原理的に答えが出ない**(段④ で列を足さずに済んだ理由の裏返し)。
+   */
+  it('🔴 「未処理がある」を本文で確定する', () => {
+    const open = { ...EMPTY_SMART, openTasks: true };
+    expect(matchesSmartTasks(open, '- [ ] まだ\n- [x] 済み\n')).toBe(true);
+    expect(matchesSmartTasks(open, '- [x] 済み\n- [x] 済み\n'), '全部済みを通した').toBe(false);
+    expect(matchesSmartTasks(open, 'ただの本文\n'), '項目が無い本文を通した').toBe(false);
+    const done = { ...EMPTY_SMART, openTasks: false };
+    expect(done && matchesSmartTasks(done, '- [x] 済み\n')).toBe(true);
+    expect(matchesSmartTasks(done, '- [ ] まだ\n'), '未処理のある本文を通した').toBe(false);
+  });
+
+  it('🔴 2 つの条件は AND で効く', () => {
+    const both = { ...EMPTY_SMART, tasks: true, openTasks: false };
+    expect(matchesSmartTasks(both, '- [x] 済み\n'), '両方満たすのに落ちた').toBe(true);
+    expect(matchesSmartTasks(both, '- [ ] まだ\n'), '未処理を見ていない').toBe(false);
+    expect(matchesSmartTasks(both, 'ただの本文\n'), '項目の有無を見ていない').toBe(false);
+  });
+
+  /**
+   * 🔑 **対照群** ── 条件が無ければ**何でも通す**(ここで落とすと、
+   *   タグだけの入れ物が 1 件も集まらなくなる)。
+   */
+  it('⚠ チェックの条件が無ければ、本文を見ない', () => {
+    expect(matchesSmartTasks(EMPTY_SMART, 'ただの本文\n')).toBe(true);
+    expect(matchesSmartTasks({ ...EMPTY_SMART, tags: ['請求'] }, 'ただの本文\n')).toBe(true);
+  });
+
+  /**
+   * 🔴 **「丸ごと要る」は走査が宣言する**(#421 段④)。
+   *
+   * ⚠ worker が自前で「チェックの条件が在るなら丸ごと」と判断すると、
+   *   条件を 1 つ足したときに**片方だけ直し忘れる**(§7)。
+   * ⚠ **対照群を置く** ── 置かないと「常に true」でも緑になり、
+   *   タグだけの入れ物でも全件の本文が heap に載る。
+   */
+  it('🔴 チェックの条件を持つときだけ、本文を丸ごと要ると言う', () => {
+    expect(createSmartScan({ ...EMPTY_SMART, tasks: true }, 'self').needsFullBody).toBe(true);
+    expect(createSmartScan({ ...EMPTY_SMART, openTasks: false }, 'self').needsFullBody).toBe(true);
+    // ⚠ 対照群 ── ほかの条件では先頭だけでよい
+    for (const spec of [
+      { ...EMPTY_SMART, tags: ['請求'] },
+      { ...EMPTY_SMART, kind: 'text' },
+      { ...EMPTY_SMART, updatedDays: 30 },
+      { ...EMPTY_SMART, text: '請求書' },
+    ])
+      expect(
+        createSmartScan(spec, 'self').needsFullBody,
+        `${JSON.stringify(spec)} で丸ごと要ると言った`,
+      ).toBe(false);
+  });
+
+  /**
+   * 🔴 **SQL が通した行を、走査が本文で落とす**(段④ の要)。
+   * ⚠ worker の test では書けない ── 列を書くのも確定するのも同じ関数なので、
+   *   「多めの列」を作る道が製品側に無い。ここなら**直に食わせられる**。
+   */
+  it('🔴 食わせた行でも、本文に項目が無ければ落とす', () => {
+    const scan = createSmartScan({ ...EMPTY_SMART, tasks: true }, 'self');
+    scan.feed([
+      { lid: 'a', body: '買い物\n- [ ] 牛乳\n' },
+      { lid: 'b', body: '項目はひとつも無い\n' },
+    ]);
+    const hit = scan.finish();
+    expect(hit.lids, '本文に項目の無い行を通した').toEqual(['a']);
+    expect(hit.total, '数のほうだけ通した').toBe(1);
+  });
+
+  it('🔴 画面から選べて、本文へ書かれて往復する', () => {
+    for (const field of ['tasks', 'openTasks'] as const) {
+      const out = withSmartField(EMPTY_SMART, field, 'true');
+      expect(out.ok, `${field} が選べない`).toBe(true);
+      if (!out.ok) continue;
+      const body = writeSmartSpec('説明\n', out.spec);
+      expect(readSmartSpec(body)[field], `${field} が往復していない`).toBe(true);
+      expect(smartFieldValue(out.spec, field), `${field} が画面へ戻らない`).toBe('true');
+      // ⚠ 外したら key ごと消える
+      const off = withSmartField(out.spec, field, '');
+      expect(off.ok).toBe(true);
+      if (off.ok) expect(readSmartSpec(writeSmartSpec(body, off.spec))[field]).toBeNull();
+    }
+  });
+
+  it('🔴 チェックの条件だけでも「条件が在る」と数え、集め直しが要る', () => {
+    expect(isSmartEmpty({ ...EMPTY_SMART, tasks: true })).toBe(false);
+    expect(isSmartEmpty({ ...EMPTY_SMART, openTasks: false })).toBe(false);
+    expect(needsRescan({ ...EMPTY_SMART, tasks: true }), 'その場で当てにいく').toBe(true);
+    expect(needsRescan({ ...EMPTY_SMART, openTasks: true })).toBe(true);
+    // 対照群 ── タグだけならその場で当て直せる
+    expect(needsRescan({ ...EMPTY_SMART, tags: ['請求'] })).toBe(false);
   });
 });

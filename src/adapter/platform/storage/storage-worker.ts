@@ -599,6 +599,8 @@ function runSmartScan(
     createdFrom: string | null;
     dated: boolean | null;
     text: string | null;
+    tasks: boolean | null;
+    openTasks: boolean | null;
   },
 ): { lids: string[]; total: number } {
   const database = need();
@@ -615,6 +617,13 @@ function runSmartScan(
       createdDays: q.createdFrom === null ? null : 1,
       dated: q.dated,
       text: q.text,
+      /**
+       * ⚠ **チェック項目だけは「在る」ではなく実際の値を渡す**(#421 段④)──
+       *   ここは SQL では当てられない(`task_total` は多め)ので、
+       *   `createSmartScan` が**本文を読んで確定する**。値が要る。
+       */
+      tasks: q.tasks,
+      openTasks: q.openTasks,
     },
     lid,
   );
@@ -641,6 +650,23 @@ function runSmartScan(
   }
   if (q.dated !== null) conds.push(q.dated ? 'date IS NOT NULL' : 'date IS NULL');
   /**
+   * 🔴 **チェック項目は「候補へ縮める」だけ**(#421 段④)── 確定は本文を読む側。
+   *
+   * 🔑 **縮め方はカンバンと同じ 1 か所**(`TASK_CANDIDATE_COND`)── ⚠ 書き写さない。
+   *   写した 1 稿目は **NULL の行を外す変異が生き延びた**(変異試験 N11)──
+   *   worker の test には NULL の行を作る道が無いからである(§2「弱いのではなく
+   *   走っていない」)。⚠ **NULL = まだ数えていない行**を外すと、旧ビルドが作った
+   *   ノートが**永久に集まらない**。共有にすれば
+   *   `tests/adapter/schema-migration.test.ts`(実 DB に NULL の行を直に挿す)が
+   *   この綴りを守る。
+   * ⚠ **`tasks: false`(項目が無い)では縮められない** ── `task_total` は多めなので
+   *   「> 0」でも実際は 0 件でありうる。縮めると**当たるはずのノートが落ちる**ので、
+   *   その向きでは**全件を本文で確かめる**(正しさを速さと交換しない)。
+   * ⚠ `openTasks` も同じ ── 未処理が在る側だけ候補で縮められる。
+   */
+  const taskNarrow = q.tasks === true || q.openTasks === true;
+  if (taskNarrow) conds.push(TASK_CANDIDATE_COND);
+  /**
    * 🔴 **語で絞る**(#421 段③)── 引き方は **`planSearch` 1 か所**である
    *   (3 文字以上は FTS5 の trigram、2 文字以下は LIKE)。
    *
@@ -664,33 +690,50 @@ function runSmartScan(
     }
   }
   const where = conds.length === 0 ? '' : ` AND ${conds.join(' AND ')}`;
+  /**
+   * 🔴 **本文を丸ごと読むかは、走査の側が決める**(#421 段④)。
+   *
+   * ⚠ ここで「チェック項目の条件が在るなら丸ごと」と自前で判断しない ──
+   *   条件を 1 つ足したときに**片方だけ直し忘れる**(§7)。
+   * 🔑 **塊の大きさも一緒に変える** ── 丸ごと読むと heap に載る量が桁で違うので、
+   *   カンバンと同じ 100 件ずつにする(`TASK_SCAN_CHUNK`)。先頭だけなら 500 件。
+   * ⚠ **この行と上の候補で縮める行は「正しさ」を守っていない ── 費用の門である**
+   *   (2026-08-26、変異試験 N9 / N10 が SURVIVED で教えた)。どちらを外しても
+   *   **答えは 1 バイトも変わらない**(確定は本文を読む側が全部やる)── 変わるのは
+   *   **読む量**だけである。🔑 **だから変異試験では生き延びるのが正しい。**
+   *   守っている test は無い(CLAUDE.md「これが無いと壊れる、と書く前に外して
+   *   壊れるのを見る」── 外しても壊れなかったので、そう書いてある)。
+   */
+  const full = scan.needsFullBody;
+  const chunk = full ? TASK_SCAN_CHUNK : QUERY_SCAN_CHUNK;
+  // ⚠ 先頭だけのときは `substr` に文字数を渡すので、束縛の数が 1 つ増える
+  const col = full ? 'body' : 'substr(body, 1, ?) AS head';
+  const head = full ? [] : [FRONTMATTER_SCAN_CHARS];
   let after: { entryOrder: number; lid: string } | undefined;
   for (;;) {
     const rows = database.selectObjects(
       after === undefined
-        ? `SELECT lid, entry_order, substr(body, 1, ?) AS head FROM entries
+        ? `SELECT lid, entry_order, ${col} FROM entries
              WHERE cid = ?${where}
              ORDER BY entry_order, lid LIMIT ?`
-        : `SELECT lid, entry_order, substr(body, 1, ?) AS head FROM entries
+        : `SELECT lid, entry_order, ${col} FROM entries
             WHERE cid = ? AND (entry_order > ? OR (entry_order = ? AND lid > ?))${where}
             ORDER BY entry_order, lid LIMIT ?`,
       after === undefined
-        ? [FRONTMATTER_SCAN_CHARS, cid, ...args, QUERY_SCAN_CHUNK]
-        : [
-            FRONTMATTER_SCAN_CHARS,
-            cid,
-            after.entryOrder,
-            after.entryOrder,
-            after.lid,
-            ...args,
-            QUERY_SCAN_CHUNK,
-          ],
-    ) as unknown as Array<{ lid: string; entry_order: number; head: string | null }>;
+        ? [...head, cid, ...args, chunk]
+        : [...head, cid, after.entryOrder, after.entryOrder, after.lid, ...args, chunk],
+    ) as unknown as Array<{
+      lid: string;
+      entry_order: number;
+      head?: string | null;
+      body?: string | null;
+    }>;
     if (rows.length === 0) break;
-    scan.feed(rows.map((r) => ({ lid: r.lid, head: r.head ?? '' })));
+    // ⚠ 塊ごとに捨てる ── 候補が 5000 件あっても heap に載るのは 1 塊ぶん
+    scan.feed(rows.map((r) => ({ lid: r.lid, body: (full ? r.body : r.head) ?? '' })));
     const last = rows[rows.length - 1]!;
     after = { entryOrder: last.entry_order, lid: last.lid };
-    if (rows.length < QUERY_SCAN_CHUNK) break;
+    if (rows.length < chunk) break;
   }
   const out = scan.finish();
   return { lids: [...out.lids], total: out.total };
@@ -719,7 +762,9 @@ function runSmartScan(
  *   なく走っていない」)。`tests/adapter/schema-migration.test.ts` が
  *   **実 DB に NULL の行を直に挿して**この節を当てる。
  */
-export const TASK_CANDIDATE_WHERE = 'cid = ? AND (task_total IS NULL OR task_total > 0)';
+export const TASK_CANDIDATE_COND = '(task_total IS NULL OR task_total > 0)';
+
+export const TASK_CANDIDATE_WHERE = `cid = ? AND ${TASK_CANDIDATE_COND}`;
 
 /**
  * 走査で 1 度に読むノートの数。⚠ **本文を丸ごと**読むので、先頭だけ読む

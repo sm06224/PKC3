@@ -28,6 +28,7 @@ import {
   SMART_TAGS_KEY,
   SMART_TEXT_KEY,
   SMART_UPDATED_KEY,
+  matchesSmartTasks,
   smartFieldValue,
   withSmartField,
 } from '../../src/features/smart/smart-spec';
@@ -668,7 +669,8 @@ function setup(disk: Record<string, string>, times: Record<string, string> = {})
     smartScan: async (lid, q) => {
       scans.push({ lid, ...q, tags: [...q.tags] });
       if (q.tags.length === 0 && q.kind === null && q.updatedFrom === null &&
-          q.createdFrom === null && q.dated === null && q.text === null)
+          q.createdFrom === null && q.dated === null && q.text === null &&
+          q.tasks === null && q.openTasks === null)
         return { lids: [], total: 0 };
       const lids = Object.entries(disk)
         .filter(([l, body]) => {
@@ -692,6 +694,13 @@ function setup(disk: Record<string, string>, times: Record<string, string> = {})
             const title = METAS.find((m) => m.lid === l)?.title ?? '';
             if (!body.includes(q.text) && !title.includes(q.text)) return false;
           }
+          /**
+           * 🔴 **チェック項目は本文で確定する**(段④)── 本物と**同じ関数**を通す。
+           * ⚠ ここを甘く(常に true に)すると、条件を渡し忘れた取り違えが
+           *   **両方緑のまま**通る(§3「stub を本物より甘くしない」)。
+           */
+          if (!matchesSmartTasks({ ...EMPTY_SMART, tasks: q.tasks, openTasks: q.openTasks }, body))
+            return false;
           return true;
         })
         .map(([l]) => l);
