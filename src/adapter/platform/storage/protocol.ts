@@ -157,6 +157,10 @@ export type StorageRequest =
       dated: boolean | null;
       /** 題名か本文にこの語(#421 段③)。⚠ 引き方は `planSearch` が 1 か所で持つ。 */
       text: string | null;
+      /** チェック項目がある / 無い(#421 段④)。⚠ 確定は本文を読む側が持つ。 */
+      tasks: boolean | null;
+      /** 未処理のチェック項目がある / 無い(#421 段④)。 */
+      openTasks: boolean | null;
     }
   /**
    * 本文を **まとめて** 取る(P6d ── 書出し用)。

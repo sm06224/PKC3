@@ -41,6 +41,7 @@ import {
   type FrontmatterValue,
 } from '../markdown/frontmatter';
 import { isKnownArchetype } from '../flavor/archetype-label';
+import { countTaskCandidates } from '../markdown/task-count';
 import { MAX_TAG_CHARS, normalizeTag, readTags, sameTag } from '../flavor/tags';
 
 /**
@@ -83,6 +84,27 @@ export const SMART_DATED_KEY = 'smart-dated';
  *   持っていても答えを出せない。`needsRescan` が true を返すのはそのためである。
  */
 export const SMART_TEXT_KEY = 'smart-text';
+
+/**
+ * 🔴 **チェック項目で絞る**(#421 段④)。
+ *
+ * ⚠ **起票時は「列を足す段」として立てたが、列は要らなかった**(2026-08-26 に検算)。
+ *   段② でこう書いていた ── 「`task_total` は**多めに数えた候補数**なので、
+ *   一覧に並べると**項目 0 件のノートが混ざる**。走査は本文の先頭しか読まないので
+ *   **その場で確定もできない**」。⚠ **後半が誤りだった。**
+ *
+ * 🔑 **カンバンがまさにそれをやっている**(`runTaskScan`):
+ *   ① `task_total` で**候補**に縮める(索引が在る)
+ *   ② 候補の本文を**丸ごと、100 件ずつ**読んで確定する
+ *   ③ 塊ごとに捨てる(heap に載るのは 100 件ぶんだけ)
+ *   ⚠ `task-count.ts` 自身が「多く数えるのは無害 ── 本文を読んで項目 0 件と分かる
+ *   だけ」と宣言しているとおりで、**正確さは候補の本文を読んで取り戻す**設計である。
+ *
+ * ⚠ だからここは**列ではなく走査**の話になる ── `SmartScan.needsFullBody` が
+ *   「この条件は本文を丸ごと要る」を worker へ伝える(worker が勝手に決めない)。
+ */
+export const SMART_TASKS_KEY = 'smart-tasks';
+export const SMART_OPEN_TASKS_KEY = 'smart-open-tasks';
 
 /**
  * 語の長さの上限。⚠ **手違いの検出**である ── 本文を丸ごと貼られると、
@@ -133,6 +155,18 @@ export interface SmartSpec {
    * ⚠ **当てるのは worker の SQL だけ** ── 上の `SMART_TEXT_KEY` の注記を読むこと。
    */
   readonly text: string | null;
+  /**
+   * チェック項目が 1 つ以上あるか。`null` = 見ない(#421 段④)。
+   * ⚠ **`task_total` の値をそのまま信じない** ── あれは多めなので、
+   *   確定は本文を読んで `countTaskCandidates` で取り直す。
+   */
+  readonly tasks: boolean | null;
+  /**
+   * **未処理**のチェック項目が 1 つ以上あるか。`null` = 見ない(#421 段④)。
+   * 🔑 `total - done > 0`。`countTaskCandidates` は `done` を既に返しているので、
+   *   新しい数え方は要らない。
+   */
+  readonly openTasks: boolean | null;
 }
 
 export const EMPTY_SMART: SmartSpec = {
@@ -142,6 +176,8 @@ export const EMPTY_SMART: SmartSpec = {
   createdDays: null,
   dated: null,
   text: null,
+  tasks: null,
+  openTasks: null,
 };
 
 /** 条件が 1 つも無いか。⚠ **空は「全部」ではなく「何も」**である(上の注記)。 */
@@ -151,7 +187,9 @@ export const isSmartEmpty = (spec: SmartSpec): boolean =>
   spec.updatedDays === null &&
   spec.createdDays === null &&
   spec.dated === null &&
-  spec.text === null;
+  spec.text === null &&
+  spec.tasks === null &&
+  spec.openTasks === null;
 
 /**
  * 🔴 **その場では当て直せない条件を持っているか**(#421 段②③)。
@@ -176,7 +214,14 @@ export const needsRescan = (spec: SmartSpec): boolean =>
   spec.updatedDays !== null ||
   spec.createdDays !== null ||
   spec.dated !== null ||
-  spec.text !== null;
+  spec.text !== null ||
+  /**
+   * ⚠ **チェック項目の条件も、その場では当て直せない**(段④)── 本文を書けば
+   *   項目の数は変わるが、判定は `countTaskCandidates` = **走査の側**が持つ。
+   *   ここで数え直すと、同じ問いに答える口が 2 つになる(§7)。
+   */
+  spec.tasks !== null ||
+  spec.openTasks !== null;
 
 /**
  * 本文から条件を読む。
@@ -197,6 +242,8 @@ export function readSmartSpec(body: string): SmartSpec {
     createdDays: readDays(meta[SMART_CREATED_KEY]),
     dated: readFlag(meta[SMART_DATED_KEY]),
     text: readText(meta[SMART_TEXT_KEY]),
+    tasks: readFlag(meta[SMART_TASKS_KEY]),
+    openTasks: readFlag(meta[SMART_OPEN_TASKS_KEY]),
   };
 }
 
@@ -312,7 +359,14 @@ export function withSmartTag(
  * 🔴 **列で引く条件の名前**(#421 段②)。⚠ **綴りを直書きしない**
  * (画面・reducer・effect の 3 か所に散ると、1 つ直し忘れが静かに効く)。
  */
-export type SmartField = 'kind' | 'updated' | 'created' | 'dated' | 'text';
+export type SmartField =
+  | 'kind'
+  | 'updated'
+  | 'created'
+  | 'dated'
+  | 'text'
+  | 'tasks'
+  | 'openTasks';
 
 export const SMART_FIELDS: readonly SmartField[] = [
   'kind',
@@ -320,6 +374,8 @@ export const SMART_FIELDS: readonly SmartField[] = [
   'created',
   'dated',
   'text',
+  'tasks',
+  'openTasks',
 ];
 
 /**
@@ -354,12 +410,24 @@ export function withSmartField(
     if (!cleared && next === null) return { ok: false, reason: 'invalid' };
     return next === spec.kind ? { ok: false, reason: 'unchanged' } : { ok: true, spec: { ...spec, kind: next } };
   }
-  if (field === 'dated') {
+  /**
+   * ⚠ 有無の条件は 3 つ(日付 / チェック項目 / 未処理)── **読み方は 1 本**
+   *   (`readFlag`)。field ごとに書き分けると、綴りが片方だけずれる(§7)。
+   */
+  if (field === 'dated' || field === 'tasks' || field === 'openTasks') {
     const next = cleared ? null : readFlag(raw);
     if (!cleared && next === null) return { ok: false, reason: 'invalid' };
-    return next === spec.dated
-      ? { ok: false, reason: 'unchanged' }
-      : { ok: true, spec: { ...spec, dated: next } };
+    const now = field === 'dated' ? spec.dated : field === 'tasks' ? spec.tasks : spec.openTasks;
+    if (next === now) return { ok: false, reason: 'unchanged' };
+    return {
+      ok: true,
+      spec:
+        field === 'dated'
+          ? { ...spec, dated: next }
+          : field === 'tasks'
+            ? { ...spec, tasks: next }
+            : { ...spec, openTasks: next },
+    };
   }
   const next = cleared ? null : readDays(raw);
   if (!cleared && next === null) return { ok: false, reason: 'invalid' };
@@ -379,7 +447,10 @@ export function withSmartField(
 export function smartFieldValue(spec: SmartSpec, field: SmartField): string {
   if (field === 'text') return spec.text ?? '';
   if (field === 'kind') return spec.kind ?? '';
-  if (field === 'dated') return spec.dated === null ? '' : spec.dated ? 'true' : 'false';
+  if (field === 'dated' || field === 'tasks' || field === 'openTasks') {
+    const v = field === 'dated' ? spec.dated : field === 'tasks' ? spec.tasks : spec.openTasks;
+    return v === null ? '' : v ? 'true' : 'false';
+  }
   const days = field === 'updated' ? spec.updatedDays : spec.createdDays;
   return days === null ? '' : `${String(days)}d`;
 }
@@ -441,6 +512,8 @@ export function writeSmartSpec(body: string, spec: SmartSpec): string {
     [SMART_CREATED_KEY]: spec.createdDays === null ? undefined : `${String(spec.createdDays)}d`,
     [SMART_DATED_KEY]: spec.dated === null ? undefined : spec.dated,
     [SMART_TEXT_KEY]: spec.text ?? undefined,
+    [SMART_TASKS_KEY]: spec.tasks ?? undefined,
+    [SMART_OPEN_TASKS_KEY]: spec.openTasks ?? undefined,
   });
 }
 
@@ -488,6 +561,10 @@ export interface SmartQuery {
   readonly dated: boolean | null;
   /** 題名か本文にこの語(#421 段③)。⚠ 引き方は `planSearch` が 1 か所で持つ。 */
   readonly text: string | null;
+  /** チェック項目がある / 無い(#421 段④)。⚠ 確定は本文を読む側が持つ。 */
+  readonly tasks: boolean | null;
+  /** 未処理のチェック項目がある / 無い(#421 段④)。 */
+  readonly openTasks: boolean | null;
 }
 
 /**
@@ -502,6 +579,8 @@ export function smartQueryOf(spec: SmartSpec, nowMs: number): SmartQuery {
     createdFrom: smartCutoff(spec.createdDays, nowMs),
     dated: spec.dated,
     text: spec.text,
+    tasks: spec.tasks,
+    openTasks: spec.openTasks,
   };
 }
 
@@ -512,9 +591,61 @@ export interface SmartHit {
 }
 
 export interface SmartScan {
-  /** 本文の**先頭だけ**の列を食わせる(呼ぶのは storage worker)。 */
-  feed(rows: readonly { lid: string; head: string }[]): void;
+  /**
+   * 🔴 **この走査は本文を丸ごと要るか**(#421 段④)。
+   *
+   * 🔑 **決めるのはここ、読むのは worker** ── worker が「チェック項目の条件が
+   *   在るなら丸ごと」と自前で判断すると、**同じ問いに答える口が 2 つ**になり、
+   *   条件を 1 つ足したときに片方だけ直し忘れる(§7)。
+   * ⚠ 忘れると**静かに間違える** ── 先頭しか渡されないと、本文の後ろにある
+   *   チェック項目が見えず、**当たるはずのノートが黙って落ちる**。
+   *   `tests/adapter/storage-worker.test.ts` が「本文の**末尾**に項目を置いた
+   *   ノートが当たること」で機械的に見ている。
+   */
+  readonly needsFullBody: boolean;
+  /**
+   * ノートの本文を食わせる(呼ぶのは storage worker)。
+   * ⚠ `needsFullBody` が false のときは**先頭だけ**でよい / true のときは**丸ごと**。
+   */
+  feed(rows: readonly { lid: string; body: string }[]): void;
   finish(): SmartHit;
+}
+
+/**
+ * 🔴 **チェック項目の条件を持つか**(#421 段④)。
+ * ⚠ **`needsFullBody` の正本はここ 1 か所** ── 呼び側が独自に判定しない。
+ */
+export const hasTaskCond = (spec: SmartSpec): boolean =>
+  spec.tasks !== null || spec.openTasks !== null;
+
+/**
+ * 🔴 **チェック項目の条件を、本文を読んで確定する**(#421 段④)。
+ *
+ * ⚠ **`task_total` の値をそのまま信じてはいけない** ── あれは
+ *   `task-count.ts` が宣言しているとおり**多めに数えた候補数**で、
+ *   一覧にそのまま並べると**項目が 1 つも無いノートが混ざる**。
+ * 🔑 だから候補の本文を読んで `countTaskCandidates` で取り直す ──
+ *   **数え方は 1 か所のまま**(カンバンと同じ関数)。
+ *
+ * @param body ノートの本文(⚠ **丸ごと**。先頭だけだと後ろの項目が見えない)
+ */
+export function matchesSmartTasks(spec: SmartSpec, body: string): boolean {
+  /**
+   * ⚠ **この行は「正しさ」を守っていない ── 費用の門である**(2026-08-26、変異試験
+   *   N3 が SURVIVED で教えた)。条件が無ければ下の 2 つの `if` はどちらも
+   *   素通りするので、**外しても答えは 1 バイトも変わらない**。
+   * 🔑 それでも残すのは、**外すと本文を毎行数えることになる**からである ──
+   *   タグだけの入れ物でも 1 塊 500 行ぶんの本文を `countTaskCandidates` に
+   *   通してしまう(答えは同じ、仕事だけ増える)。
+   * ⚠ **だから変異試験では生き延びるのが正しい。** 守っている test は無い
+   *   (CLAUDE.md「これが無いと壊れる、と書く前に外して壊れるのを見る」──
+   *   外しても壊れなかったので、そう書いてある)。
+   */
+  if (!hasTaskCond(spec)) return true;
+  const { total, done } = countTaskCandidates(body);
+  if (spec.tasks !== null && total > 0 !== spec.tasks) return false;
+  if (spec.openTasks !== null && total - done > 0 !== spec.openTasks) return false;
+  return true;
 }
 
 /**
@@ -531,6 +662,11 @@ export function createSmartScan(spec: SmartSpec, selfLid: string): SmartScan {
   const lids: string[] = [];
   let total = 0;
   return {
+    /**
+     * 🔑 **本文を丸ごと要るのは、チェック項目の条件を持つときだけ**(段④)。
+     * ⚠ 常に丸ごと読ませない ── タグだけの入れ物でも全件の本文が heap に載る。
+     */
+    needsFullBody: hasTaskCond(spec),
     feed(rows) {
       /**
        * ⚠ **空のときの早期 return をここに置かない**(§7)。
@@ -550,7 +686,14 @@ export function createSmartScan(spec: SmartSpec, selfLid: string): SmartScan {
          * ⚠ **タグの読み方は `readTags` 1 本**(§7)── ここに独自の読み方を
          *   書くと、一覧に出る札と「当たるかどうか」が静かに食い違う。
          */
-        if (!matchesSmartTags(spec, readTags(row.head))) continue;
+        if (!matchesSmartTags(spec, readTags(row.body))) continue;
+        /**
+         * 🔴 **チェック項目は本文を読んで確定する**(段④)── `task_total` は
+         *   多めなので、SQL が縮めた候補をここで正確な数に取り直す。
+         * ⚠ 順番が要る:**先にタグで落としてから**読む(タグで落ちるノートの
+         *   本文を数えるのは、そのぶん丸損である)。
+         */
+        if (!matchesSmartTasks(spec, row.body)) continue;
         total += 1;
         // ⚠ 上限を超えたぶんは lid を持たないが、**数は数え続ける**
         if (lids.length < SMART_LIMIT) lids.push(row.lid);

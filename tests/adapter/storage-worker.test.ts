@@ -19,6 +19,7 @@ import {
 } from '../../src/features/snippet/snippet-table';
 import { contentHash64Hex } from '../../src/adapter/platform/storage/content-hash';
 import { parseFrontmatter } from '../../src/features/markdown/frontmatter';
+import { FRONTMATTER_SCAN_CHARS } from '../../src/features/query/group-by';
 
 type Op = StorageRequest['op'];
 
@@ -2113,6 +2114,8 @@ describe('スマートフォルダの走査(#421 段②)', () => {
     createdFrom?: string | null;
     dated?: boolean | null;
     text?: string | null;
+    tasks?: boolean | null;
+    openTasks?: boolean | null;
   }) =>
     request({
       op: 'smartScan',
@@ -2124,6 +2127,8 @@ describe('スマートフォルダの走査(#421 段②)', () => {
       createdFrom: q.createdFrom ?? null,
       dated: q.dated ?? null,
       text: q.text ?? null,
+      tasks: q.tasks ?? null,
+      openTasks: q.openTasks ?? null,
     });
 
   beforeAll(async () => {
@@ -2237,6 +2242,70 @@ describe('スマートフォルダの走査(#421 段②)', () => {
     expect(wild.total, '数のほうだけ全件になっている').toBe(1);
     expect((await scan({ text: '0X' })).lids, '当たらない語で当たった').toEqual([]);
   });
+
+  /**
+   * 🔴 **チェック項目で絞る**(#421 段④)── ここが**本物の SQL でしか見えない**所である。
+   *
+   * ⚠ `task_total` は **`task-count.ts` が「多め」と宣言している候補数**なので、
+   *   SQL は**候補へ縮めるだけ**で、確定は本文を読む側(`matchesSmartTasks`)が持つ。
+   */
+  it('🔴 チェック項目のある / 無いで絞れる', async () => {
+    await put('n-task', { archetype: 'text', entryOrder: 10 }, '買い物\n- [ ] 牛乳\n');
+    await put('n-plain', { archetype: 'text', entryOrder: 11 }, 'ただの本文です\n');
+    const has = await scan({ tasks: true });
+    expect(has.lids, 'チェック項目で絞れていない').toEqual(['n-task']);
+    // ⚠ **逆向きも見る** ── 片方だけだと「常に true を返す」実装で緑になる
+    const none = await scan({ tasks: false });
+    expect(none.lids, '「項目が無い」に項目のあるノートが混ざった').not.toContain('n-task');
+    expect(none.lids, '「項目が無い」が空(前提が崩れている)').toContain('n-plain');
+  });
+
+  it('🔴 未処理のある / 無いで絞れる', async () => {
+    await put('n-open', { archetype: 'text', entryOrder: 12 }, '仕事\n- [ ] まだ\n- [x] 済み\n');
+    await put('n-done', { archetype: 'text', entryOrder: 13 }, '仕事\n- [x] 済み\n- [x] 済み\n');
+    expect((await scan({ openTasks: true })).lids, '未処理で絞れていない').toEqual([
+      'n-task',
+      'n-open',
+    ]);
+    const allDone = await scan({ openTasks: false });
+    expect(allDone.lids, '未処理のあるノートが混ざった').not.toContain('n-open');
+    expect(allDone.lids, '全部済んだノートが出ない').toContain('n-done');
+  });
+
+  /**
+   * 🔴 **これが `needsFullBody` を守る検査である**(#421 段④)。
+   *
+   * ⚠ 走査は既定で**本文の先頭 `FRONTMATTER_SCAN_CHARS` 文字**しか読まない。
+   *   チェック項目の条件では**丸ごと**読まないと、**本文の後ろにある項目が見えず、
+   *   当たるはずのノートが黙って落ちる** ── 数が減るだけなので**誰も気づけない**。
+   * 🔑 だから**窓より後ろに項目を置いた**ノートを 1 件作って当てる。
+   * ⚠ 対照群に「窓の中に項目があるノート」を置く ── 置かないと、
+   *   走査そのものが死んでも「0 件」で見分けが付かない。
+   */
+  it('🔴 本文の先頭の窓より後ろにあるチェック項目でも当たる', async () => {
+    const pad = 'あ'.repeat(FRONTMATTER_SCAN_CHARS + 500);
+    await put('n-far', { archetype: 'text', entryOrder: 14 }, `${pad}\n- [ ] 窓の外の項目\n`);
+    const got = await scan({ tasks: true });
+    expect(got.lids, '窓より後ろの項目が見えていない(丸ごと読んでいない)').toContain('n-far');
+    // ⚠ **対照群** ── 窓の中に項目があるノートも一緒に当たっている
+    expect(got.lids, '走査そのものが死んでいる').toContain('n-task');
+  });
+
+  /**
+   * 🔴 **SQL が通したノートを、走査が本文で落としているか**(#421 段④)。
+   *
+   * ⚠ **ここを worker の test で書こうとして 1 度失敗した**(記録):
+   *   `task_total` に嘘の数を直に書いて「多めでも落ちる」を見ようとしたが、
+   *   **`execSql` という op は存在しない** ── `.catch(() => undefined)` が
+   *   その失敗を飲み込み、**assert は別の理由で通っていた**(§1 の空振り)。
+   * 🔑 そして調べたら、**その test は主張そのものが成り立たなかった**:
+   *   列を書くのも確定するのも**同じ `countTaskCandidates`** なので、
+   *   列と本文は**常に一致する**(食い違うのは旧ビルドが据え置いた行だけ)。
+   * 🔑 だから確定が効いていることは **features 側**で見る
+   *   (`createSmartScan` が、食わせた行を本文で落とすこと)。
+   *   ⚠ **`openTasks` には列が無い**ので、そちらは本文を読まないと**原理的に答えが出ない**
+   *   ── 上の「未処理のある / 無いで絞れる」がその証拠になっている。
+   */
 
   it('🔴 語と列は AND で効く', async () => {
     const got = await scan({ text: '請求書', kind: 'attachment' });
