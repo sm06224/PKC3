@@ -198,6 +198,8 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'set-view:help': 'help',
   'open-palette': 'search',
   'import-file': 'arrow-in',
+  /** 外部の画像を手元へ取り込む(#264 段①)── **入ってくる**向きなので取込と同じ図案。 */
+  'adopt-external-images': 'arrow-in',
   'export-archive': 'archive',
   'export-html': 'globe',
   'export-portable': 'archive',

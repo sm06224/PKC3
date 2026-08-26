@@ -90,6 +90,18 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-26-adopt-external-images',
+    title: '本文の外部の画像を、手元に取り込めるようになりました',
+    items: [
+      'ウェブページから貼った画像は相手のサイトを指したままなので、そこから消えると見えなくなります。右の列の「外部の画像を取り込む」を押すと、このノートの添付になります。',
+      'ボタンには枚数が出ます。押すとその枚数ぶん、画像の置き場所へ通信します。だから自動ではやりません。',
+      '本文に外部の画像が無いノートでは、ボタンごと出ません。',
+      '読めなかったものは元の URL のまま残り、理由が画面の下に出ます。置き場所が 404 を返した / 相手が読み取りを許していない、などです。',
+      '同じ URL をリンクとしても書いている場合、リンクのほうは変わりません。',
+      '貼り付けの断りも、理由を言うようにしました。これまでは読めていても「読み込めませんでした」と出ることがありました。',
+    ],
+  },
+  {
     id: '2026-08-26-settings-file',
     title: '設定だけを別の端末へ持っていけるようになりました',
     items: [
@@ -295,23 +307,11 @@ export const NOTICES: readonly Notice[] = [
       'うまく入らないときは、設定の「貼り付け」で読み取る形を切り替えられます。フラグを点けると、何が届いてどれを使ったかも見えます(中身は出しません)。',
     ],
   },
-  {
-    id: '2026-08-25-portable-html',
-    title: 'PKC3 ごと 1 つのファイルに入れて、持ち歩けるようになりました',
-    items: [
-      '設定の「書き出しと片づけ」に「持ち歩ける 1 枚」が増えました。アプリと、いまの中身と、添付が 1 つの .html になります。',
-      'USB に入れて別のパソコンへ持っていき、ダブルクリックで開けます。サーバもインターネットも要りません。',
-      'その 1 枚の中で、そのまま書けます。閲覧用 HTML は読むだけですが、こちらは続きを書ける PKC3 です。',
-      '書いた内容は、開いたパソコンのブラウザの中に残ります。同じ 1 枚をもう一度開けば続きが出ます。',
-      '1 枚ごとに別の入れ物です。2 枚に書いても中身は混ざりませんが、片方に書いたことはもう片方には出ません。',
-      '配られた 1 枚から、さらに持ち歩ける 1 枚は書き出せません。押すとその旨が出ます。',
-    ],
-  },
 ];
 
 /**
  * ⚠ **落としたぶんの原本は CHANGELOG に在る**(上限 20 件を超えたので、古いほうから
  *   `2026-08-16-office-save-to-pkc` / `2026-08-17-office-save-same-note`(2026-08-19)、
  *   `2026-08-19-dual-pane-app`(2026-08-22)、
- *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice` / `2026-08-24-pptx-export` / `2026-08-24-paste-permalink` / `2026-08-24-markdown-to-pandoc` / `2026-08-24-schedule-range`(2026-08-25)、`2026-08-24-dual-new-note` / `2026-08-24-office-save-formats` / `2026-08-25-relation-map` / `2026-08-25-bookmark-capture` / `2026-08-25-relation-map-body-links` / `2026-08-25-repeating-tasks` / `2026-08-25-snippets` / `2026-08-25-snippet-menu` / `2026-08-25-append-into-section` / `2026-08-25-revision-diff` / `2026-08-25-cross-pane` / `2026-08-25-ext-write-back`(2026-08-26)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
+ *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice` / `2026-08-24-pptx-export` / `2026-08-24-paste-permalink` / `2026-08-24-markdown-to-pandoc` / `2026-08-24-schedule-range`(2026-08-25)、`2026-08-24-dual-new-note` / `2026-08-24-office-save-formats` / `2026-08-25-relation-map` / `2026-08-25-bookmark-capture` / `2026-08-25-relation-map-body-links` / `2026-08-25-repeating-tasks` / `2026-08-25-snippets` / `2026-08-25-snippet-menu` / `2026-08-25-append-into-section` / `2026-08-25-revision-diff` / `2026-08-25-cross-pane` / `2026-08-25-ext-write-back`(2026-08-26)、`2026-08-25-portable-html`(2026-08-26)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
  */
