@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, collectPageErrors } from './helpers';
+import { gotoApp, clickReal, collectPageErrors, useSplitEditor } from './helpers';
 
 /**
  * ショートカットキーと、その割り当て直し(#256。user 指示 2026-08-18)。
@@ -141,6 +141,59 @@ test('🔴 近道はブラウザの既定を止める(保存ダイアログ / �
   expect(prevented('n'), 'Ctrl+N をアプリが受けて止めていない').toBe(true);
   expect(prevented('3'), 'Alt+3 をアプリが受けて止めていない').toBe(true);
   expect(prevented('f9'), '割り当てていない鍵まで止めている').toBe(false);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **帯に出していない記法の鍵**(#425 段②-a)。
+ *
+ * 🔴 **unit では届かない層**:`Alt+Shift+<字>` の `code`(`KeyH` 等)が
+ *   実ブラウザで本当に届くか。⚠ unit は `code` を**自分で書いて**渡している。
+ * ⚠ そして **mac では `Alt+字` が記号を打つ** ── 既定を止められているか
+ *   (本文に `˙` が混ざらないか)も、ここでしか見えない。
+ */
+test('🔴 帯に無い記法が、鍵で本文に入る (#425)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  /**
+   * ⚠ **既定は 1 面編集**(live)── 全文の欄(`editor-body`)を使うので、
+   *   設定で 2 列を明示する(`copy-body.smoke.spec.ts` と同じ作法)。
+   * 🔑 命令は `contexts: ['editor', 'row']` を名乗っているので、
+   *   ここで見ているのは **`editor` の側**である。
+   */
+  await useSplitEditor(page);
+  await gotoApp(page);
+
+  await page.keyboard.press('Control+n');
+  const body = page.locator('[data-pkc-field="editor-body"]');
+  await expect(body, '編集に入っていない').toBeVisible({ timeout: 15_000 });
+  await body.fill('あいう');
+  // 全部選んでから押す(選んだ範囲に効く)
+  await body.selectText();
+  await page.keyboard.press('Alt+Shift+H');
+  await expect(body, 'Alt+Shift+H でハイライトが入らない').toHaveValue('==あいう==');
+
+  // ⚠ **もう一度で外れる**(トグル)── 押しっぱなしで二重に囲まれない
+  await body.selectText();
+  await page.keyboard.press('Alt+Shift+H');
+  await expect(body, 'もう一度押しても外れない').toHaveValue('あいう');
+
+  // 🔑 別の 1 つも通す(表の配線が 1 本だけ生きている、を防ぐ)
+  await body.selectText();
+  await page.keyboard.press('Alt+Shift+X');
+  await expect(body, 'Alt+Shift+X で打ち消しが入らない').toHaveValue('~~あいう~~');
+
+  /**
+   * ⚠ **帯には出ていない**こと ── 出したら「横に長くしない」という前提が崩れる。
+   * 🔑 空振り防止に、帯そのものは在ることを先に見る。
+   */
+  const bar = page.locator('[data-pkc-action="format-text"]');
+  await expect(bar.first(), '書式の帯が出ていない').toBeVisible();
+  await expect(
+    page.locator('[data-pkc-action="format-text"][data-pkc-format="highlight"]'),
+    'ハイライトが帯に出てしまっている',
+  ).toHaveCount(0);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

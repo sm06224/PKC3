@@ -36,7 +36,7 @@ import { PAGE_FORMATS } from '../src/features/page-format';
 import { EDITOR_MODES } from '../src/features/editor-mode';
 import { SEALED_ARCHETYPES, SEALED_VIEWS } from '../src/features/sealed';
 import { buildFormatBar } from '../src/adapter/ui/render/format-bar';
-import { FORMAT_OPS } from '../src/features/markdown/text-ops';
+import { BAR_FORMAT_OPS, FORMAT_OPS } from '../src/features/markdown/text-ops';
 import { APPENDABLE_ARCHETYPES } from '../src/features/flavor/append-spec';
 import { buildOfficePackPanel } from '../src/adapter/ui/render/office-pack-panel';
 import { OfficePackState } from '../src/adapter/ui/render/office-entry-view';
@@ -377,6 +377,8 @@ describe('マニュアルと実装の突合', () => {
     // 分からない)── 表に足してボタンを出し忘れる / 出したのに表から漏れる、
     // どちらも落ちる
     const bar = buildFormatBar();
+    // ⚠ 突き合わせ先は **`BAR_FORMAT_OPS`**(#425 段②-a)── 帯に出さない 4 つは
+    //    `tests/adapter/format-append.test.ts` の「鍵から引ける」が守る
     const labels = [...bar.querySelectorAll('button')].map(
       (b) => b.querySelector('[data-pkc-field="label"]')?.textContent ?? '',
     );
@@ -395,10 +397,21 @@ describe('マニュアルと実装の突合', () => {
      *   「その場で字を変える純関数」の表だが、こちらは**本文全体**を
      *   書き換える 1 手であって、選択に当てる書式ではない。
      */
-    expect(labels).toEqual([...FORMAT_OPS.map((o) => o.label), '日付', '雛形', '番号', '置換']);
+    expect(labels).toEqual([...BAR_FORMAT_OPS.map((o) => o.label), '日付', '雛形', '番号', '置換']);
     expect(labels.length).toBeGreaterThan(0);
     for (const label of labels) {
       expect(MANUAL, `マニュアルに書式「${label}」の説明が無い`).toContain(`**${label}**`);
+    }
+    /**
+     * 🔴 **帯に出さない記法も、マニュアルには載っている**(#425 段②-a)。
+     * ⚠ 上の輪は**帯のボタン**しか回らないので、`onBar: false` を付けた瞬間に
+     *   マニュアルの検査から**黙って外れる** ── そこを塞ぐ。
+     */
+    const offBar = FORMAT_OPS.filter((o) => o.onBar === false);
+    expect(offBar.length, '帯に出さない記法が 1 つも無い(空振り)').toBeGreaterThan(0);
+    for (const { label } of offBar) {
+      expect(MANUAL, `マニュアルに「${label}」の説明が無い(帯に出ないので余計に要る)`)
+        .toContain(`**${label}**`);
     }
   });
 
@@ -999,6 +1012,8 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    // ⚠ 上限 20 を超えたので 2026-08-26 に落とした(原本は CHANGELOG)
+    '毎日・毎週・毎月・毎年の予定が書けるようになりました',
     // ⚠ 上限 20 を超えたので 2026-08-26 に落とした(原本は CHANGELOG)
     'つながりの図に、本文のリンクも出るようになりました',
     // ⚠ 上限 20 を超えたので 2026-08-26 に落とした(原本は CHANGELOG)

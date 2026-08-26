@@ -230,6 +230,23 @@ export function appendBlock(base: string, heading: string | null, text: string):
   return `${appendAt(base, heading).text}${body}\n`;
 }
 
+/**
+ * 🔴 **ルビを入れる**(#425 段②-a)。`[[ruby:漢字|かんじ]]` の形。
+ *
+ * ⚠ **選んだ字を base にする** ── 「読みを付けたい語を選んでから押す」が自然な順で、
+ *   そのとき caret は**読みの側**へ置く(次に打つのは読みだから)。
+ * ⚠ 選んでいなければ **base の位置**へ置く(帯の他のボタンと同じ作法)。
+ */
+export function insertRuby(sel: TextSelection): TextSelection {
+  const { text, start, end } = sel;
+  const base = text.slice(start, end);
+  const body = `[[ruby:${base}|]]`;
+  const next = text.slice(0, start) + body + text.slice(end);
+  // 読みの位置 = `[[ruby:` + base + `|` の直後
+  const caret = base === '' ? start + '[[ruby:'.length : start + body.length - 2;
+  return { text: next, start: caret, end: caret };
+}
+
 /** 書式パネルが持つ操作。⚠ ここに足す = ボタンが増える(表が正本)。 */
 export type FormatOp =
   | LinePrefix
@@ -239,14 +256,24 @@ export type FormatOp =
   | 'link'
   | 'table'
   | 'mermaid'
-  | 'codeblock';
+  | 'codeblock'
+  /**
+   * 🔴 **帯に出さない 4 つ**(#425 段②-a)── 描き手は前から持っているのに、
+   * **押して入れる口が 1 つも無かった**記法である(`markdown-render.ts:894-896`)。
+   * ⚠ 帯は既に 14 個で横に長いので**並びは増やさない** ── 入口は
+   *   **鍵**(既定 `Alt+Shift+…`)と、設定のショートカット画面での付け替え。
+   */
+  | 'highlight'
+  | 'ruby'
+  | 'emdot'
+  | 'strike';
 
 /**
  * 書式パネルの中身(**並び順もここが正本**)。
  * ⚠ 文言は「何になるか」で書く ── 「H1」ではなく「見出し1」。
  * 図案は付けない:14 個も絵文字が並ぶと、かえって読めなくなる(高さは CSS が揃える)。
  */
-export const FORMAT_OPS: readonly { op: FormatOp; label: string }[] = [
+export const FORMAT_OPS: readonly { op: FormatOp; label: string; onBar?: false }[] = [
   { op: 'h1', label: '見出し1' },
   { op: 'h2', label: '見出し2' },
   { op: 'h3', label: '見出し3' },
@@ -261,7 +288,21 @@ export const FORMAT_OPS: readonly { op: FormatOp; label: string }[] = [
   { op: 'table', label: '表' },
   { op: 'mermaid', label: '図' },
   { op: 'codeblock', label: 'コード塊' },
+  /**
+   * 🔴 **帯には出さない**(`onBar: false`)。⚠ **表は 1 つのまま**にしてある ──
+   * 「書式の操作は何があるか」と「帯に何を並べるか」を別の表に分けると、
+   * 片方だけ増えて食い違う(CLAUDE.md §7)。帯を描く側がこの印で絞る。
+   * 🔑 名前はパレットとショートカット画面に出るので、**知る口はある**。
+   */
+  { op: 'highlight', label: 'ハイライト', onBar: false },
+  { op: 'ruby', label: 'ルビ', onBar: false },
+  { op: 'emdot', label: '圏点', onBar: false },
+  { op: 'strike', label: '打ち消し', onBar: false },
 ] as const;
+
+/** 帯に並べるもの。⚠ **絞るのはここ 1 か所**(描く側が自分で絞らない)。 */
+export const BAR_FORMAT_OPS: readonly { op: FormatOp; label: string }[] =
+  FORMAT_OPS.filter((f) => f.onBar !== false);
 
 const LINE_OPS: ReadonlySet<string> = new Set(Object.keys(LINE_MARKS));
 
@@ -283,6 +324,25 @@ export function applyFormat(sel: TextSelection, op: FormatOp): TextSelection {
       return insertBlock(sel, MERMAID_BLOCK);
     case 'codeblock':
       return insertBlock(sel, CODE_BLOCK);
+    /**
+     * ⚠ **綴りは描き手から引いた**(`markdown-render.ts:894` / `:1001`)──
+     * 圏点は**新形の `^^`** を使う(`[[em:…]]` は同じ意味の古い形で、
+     * 描き手は両方読むが、**入れるのは新しいほうだけ**にする)。
+     */
+    case 'highlight':
+      return toggleWrap(sel, '==');
+    case 'emdot':
+      return toggleWrap(sel, '^^');
+    case 'strike':
+      return toggleWrap(sel, '~~');
+    /**
+     * 🔴 **ルビだけは対称ではない**(`[[ruby:base|reading]]`)ので、
+     *   囲むのではなく**組み立てて、読みの位置に caret を置く**。
+     * ⚠ 選んでいなければ base も空 ── そのときは **base の位置**に置く
+     *   (打ち始められる所へ置く、が書式の帯の既定の作法)。
+     */
+    case 'ruby':
+      return insertRuby(sel);
     default:
       return sel;
   }

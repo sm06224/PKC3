@@ -485,6 +485,46 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['editor', 'row'],
     defaults: ['Mod+I'],
   },
+  /**
+   * 🔴 **帯に出していない記法の入口**(#425 段②-a)。
+   *
+   * ⚠ 描き手は前から読めるのに、**押して入れる口が 1 つも無かった**
+   *   ── 綴りを覚えている人しか使えない状態だった。
+   * ⚠ **書式の帯には出さない**(既に 14 個で横に長い)。入口はこの鍵と、
+   *   設定のショートカット画面での**付け替え**である。
+   * 🔑 既定を **`Alt+Shift+…`** にしたのは、**いま 1 つも使っていない空き**だから
+   *   ── ブラウザも取らない(`Mod+Shift+R` は再読込、`Mod+P` は印刷で `REFUSED`)。
+   * ⚠ `contexts` は書式の近道と同じ 3 つ ── 2 列の編集でも 1 面の行の欄でも
+   *   同じ意味で効く。
+   */
+  {
+    id: 'format-highlight',
+    label: 'ハイライト',
+    contexts: ['editor', 'row'],
+    defaults: ['Alt+Shift+H'],
+    note: '選んだ字を == で囲みます(色を付けたいときは ==[red]…== と書けます)',
+  },
+  {
+    id: 'format-ruby',
+    label: 'ルビ',
+    contexts: ['editor', 'row'],
+    defaults: ['Alt+Shift+R'],
+    note: '選んだ字にふりがなを付けます([[ruby:漢字|かんじ]] の形)',
+  },
+  {
+    id: 'format-emdot',
+    label: '圏点',
+    contexts: ['editor', 'row'],
+    defaults: ['Alt+Shift+E'],
+    note: '選んだ字の上に点を打ちます(^^ で囲みます)',
+  },
+  {
+    id: 'format-strike',
+    label: '打ち消し',
+    contexts: ['editor', 'row'],
+    defaults: ['Alt+Shift+X'],
+    note: '選んだ字に取り消し線を引きます(~~ で囲みます)',
+  },
   {
     id: 'format-link',
     label: 'リンク',

@@ -3076,6 +3076,11 @@ const FORMAT_OF: Readonly<Record<string, FormatOp>> = {
   'format-bold': 'bold',
   'format-italic': 'italic',
   'format-link': 'link',
+  // 🔴 帯に出していない 4 つ(#425 段②-a)── 鍵だけが入口である
+  'format-highlight': 'highlight',
+  'format-ruby': 'ruby',
+  'format-emdot': 'emdot',
+  'format-strike': 'strike',
 };
 
 function isEditorBody(el: EventTarget | null): el is HTMLTextAreaElement {

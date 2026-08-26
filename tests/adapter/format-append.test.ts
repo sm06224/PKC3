@@ -12,6 +12,7 @@
  * ⚠ 観測点を textarea の `value` だけにしない ── それだと「書き戻したが state に
  * 届いていない」実装が緑で通り、**保存すると書式が消える**。
  */
+import { readFileSync } from 'node:fs';
 import { stubStamps } from '../helpers/store-stamps';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
@@ -21,7 +22,7 @@ import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
-import { FORMAT_OPS } from '../../src/features/markdown/text-ops';
+import { BAR_FORMAT_OPS, FORMAT_OPS } from '../../src/features/markdown/text-ops';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 import { answerDialog, openDialog } from './dialog-helper';
@@ -127,12 +128,41 @@ describe('書式パネル(P8 段⑥)', () => {
     await tick();
     q('[data-pkc-action="start-edit"]')!.click();
     const buttons = [...root.querySelectorAll('[data-pkc-action="format-text"]')];
+    /**
+     * ⚠ **帯に出す表**と突き合わせる(#425 段②-a で `onBar: false` を足した)──
+     *   ハイライト / ルビ / 圏点 / 打ち消しは**帯に出さない**(既に横に長い)。
+     * 🔑 出さない 4 つが**どこからも引けない**まま増えないことは、
+     *   下の「鍵から必ず引ける」が守る。
+     */
     expect(buttons.map((b) => b.getAttribute('data-pkc-format'))).toEqual(
-      FORMAT_OPS.map((o) => o.op),
+      BAR_FORMAT_OPS.map((o) => o.op),
     );
     expect(buttons.map((b) => b.querySelector('[data-pkc-field="label"]')?.textContent)).toEqual(
-      FORMAT_OPS.map((o) => o.label),
+      BAR_FORMAT_OPS.map((o) => o.label),
     );
+  });
+
+  /**
+   * 🔴 **帯に出さない記法は、鍵から必ず引ける**(#425 段②-a)。
+   *
+   * ⚠ これが無いと、`onBar: false` を付けるだけで
+   *   **どこからも押せない記法**が静かに増える(「書けるのに入れる口が無い」を
+   *   直すために足した仕掛けが、同じ穴を作る側に回る)。
+   * 🔑 だから **`FORMAT_OPS` の全数**を、帯か `FORMAT_OF`(鍵)のどちらかで
+   *   受けていることを見る。
+   */
+  it('🔴 帯に出さない記法は、鍵から引ける(届かない記法を作らない)', () => {
+    const onBar = new Set(BAR_FORMAT_OPS.map((o) => o.op));
+    const byKey = new Set(
+      [...readFileSync('src/adapter/ui/actions/binder.ts', 'utf-8').matchAll(
+        /'(format-[a-z]+)': '([a-z]+)',/g,
+      )].map((m) => m[2]!),
+    );
+    expect(byKey.size, '鍵の表を読めていない(空振り)').toBeGreaterThan(2);
+    const unreachable = FORMAT_OPS.map((o) => o.op).filter(
+      (op) => !onBar.has(op) && !byKey.has(op),
+    );
+    expect(unreachable, 'どこからも押せない記法が在る').toEqual([]);
   });
 
   it('🔴 押しても編集欄から focus を奪わない', async () => {
