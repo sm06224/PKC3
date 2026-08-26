@@ -211,7 +211,28 @@ try {
   const commitToViewMs = Date.now() - t0;
 
   const post = await page.evaluate(async (list) => {
-    await new Promise((r) => setTimeout(r, 300)); // persist 完了待ち
+    /**
+     * 🔴 **ack を「待つ」── 固定の 300ms で 1 回覗かない**(#439、2026-08-26)。
+     *
+     * ⚠ 直す前はここが `setTimeout(300)` の 1 回サンプルだった。確定させているのは
+     *   **200KB の本文**なので、runner が混んでいれば worker の ack は 300ms では
+     *   返らない ── 夜の検査で `persistedAck: false` だけが落ちたのがそれである
+     *   (2026-08-22 の #338 でも同じ step が落ちている = 間欠)。
+     * 🔑 **主張は 1 つも下げない** ── `persisted === body` は**必ず真になること**を
+     *   要求したまま、非同期の値を 1 回だけ覗くのをやめる。
+     * 🔑 **待った時間を出す**(`persistedAckMs`)── 出さないと、次に落ちたとき
+     *   「遅かったのか、返らなかったのか」が読めない。
+     */
+    const ackT0 = Date.now();
+    let persistedAckMs = null;
+    for (let i = 0; i < 200; i++) {
+      const st = window.__APP__.dispatcher.getState();
+      if (st.openBody != null && st.openBody.persisted === st.openBody.body) {
+        persistedAckMs = Date.now() - ackT0;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
     // 🔴 器ごと作り直されたら「行は同一」が嘘の緑になる ── 毎回引き直す(#221)
     const listNow = document.querySelector(list);
     const listSameNode = listNow === window.__LIST_BEFORE__;
@@ -230,6 +251,8 @@ try {
       // ⚠ `?.` だけだと **openBody が無い回に `undefined === undefined` で真**になる
       //    (保存後に本文を失う退行が緑で通る。2026-08-17 のレビュー ⚠-8)
       persistedAck: s.openBody != null && s.openBody.persisted === s.openBody.body,
+      /** 🔴 **待った時間**。`null` = 上限(10 秒)まで待っても返らなかった。 */
+      persistedAckMs,
       phase: s.phase,
       storageVfs: window.__APP__.storageVfs,
       // 診断 ── 一覧の外に居る `data-pkc-entry` の数(#221 で赤かった当の理由)

@@ -9,11 +9,65 @@
     <script type="module">
       import { StoreClient } from '/src/adapter/platform/storage/store-client.ts';
 
+      /**
+       * 🔴 **この頁が何度目の実行か**(#439、2026-08-26)。
+       *
+       * ⚠ 夜の検査で `counts` が **関係を書く 3 行手前で `relations: 3`** を返していた
+       *   ── つまり DB が空でない状態で始まっていた。原因は手元で再現しなかったが、
+       *   **同じ頁が 2 度走れば必ずそうなる**(dev server の再読込など)。
+       * 🔑 数えておけば、次に落ちたとき**原因が名前で分かる**(CLAUDE.md
+       *   「落ちたとき原因が名前で分かるか」)。
+       */
+      function runCount() {
+        try {
+          const n = Number(sessionStorage.getItem('pkc3-store-probe-runs') ?? '0') + 1;
+          sessionStorage.setItem('pkc3-store-probe-runs', String(n));
+          return n;
+        } catch {
+          return 1; // 読めない環境では 1 と名乗る(検定を勝手に落とさない)
+        }
+      }
+
       async function run() {
         const store = new StoreClient();
         const steps = {};
-        steps.init = await store.request({ op: 'init', dbName: 'pkc3-store-probe' });
+        steps.runCount = runCount();
+        /**
+         * 🔴 **走りごとに別の DB にする**(#439)。
+         *
+         * ⚠ 固定名だと、同じ頁が 2 度走った / profile が使い回された回に
+         *   **前の走りの中身の上で検定する**ことになり、
+         *   `orphanCleanOk` / `chainOk` / `restored` が**同時に**外れて、
+         *   読み手には「store が 3 か所壊れた」に見える(実際は前提が 1 つ崩れただけ)。
+         * ⚠ `Date.now()` だけでは足りない ── 同じミリ秒に 2 度走りうる。
+         */
+        const dbName =
+          'pkc3-store-probe-' +
+          Date.now().toString(36) +
+          '-' +
+          Math.random().toString(36).slice(2, 8);
+        steps.init = await store.request({ op: 'init', dbName });
         await store.request({ op: 'openContainer', cid: 'c1', title: 'probe' });
+        /**
+         * 🔴 **前提を先に検める**(CLAUDE.md「一致を主張する検査は、前提を検算してから
+         * 比べる」)。⚠ 崩れていたら「一致しなかった」ではなく
+         * **「前提が崩れている」**と読める形で落とす。
+         */
+        steps.beforeAnyWrite = await store.request({ op: 'counts', cid: 'c1' });
+        steps.freshDb =
+          steps.beforeAnyWrite.entries === 0 &&
+          steps.beforeAnyWrite.relations === 0 &&
+          steps.beforeAnyWrite.revisions === 0 &&
+          steps.beforeAnyWrite.assets === 0;
+        if (!steps.freshDb) {
+          steps.error =
+            '前提が崩れている: 書く前の DB が空でない(' +
+            JSON.stringify(steps.beforeAnyWrite) +
+            ' / この頁は ' +
+            steps.runCount +
+            ' 回目の実行)。以降の検定は読まないこと';
+          return { ok: false, steps };
+        }
         await store.request({
           op: 'upsertEntry',
           cid: 'c1',
@@ -214,6 +268,7 @@
         // 何も守らない ── probe は「印字」ではなく「検定」)
         return {
           ok:
+            steps.freshDb === true &&
             steps.metaHasNoBody === true &&
             steps.orphanCleanOk === true &&
             steps.trashOk === true &&
