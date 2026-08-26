@@ -26,29 +26,19 @@ import {
   chordLabel,
   chordOf,
   chordToString,
+  CONTEXT_LABELS,
   KEY_COMMANDS,
   type KeyCommand,
   type KeyContext,
 } from '@features/keymap';
 import { appKeymap, type KeymapStore } from './keymap';
 
-/** 文脈の見出し。⚠ user は「文脈」とは呼ばない ── **どこで効くか**で書く。 */
-/** 文脈の見出し。⚠ test が「名乗った文脈の下に出ているか」を全数で突き合わせる。 */
-export const CONTEXT_LABELS: Readonly<Record<KeyContext, string>> = {
-  global: '画面のどこでも',
-  editor: '2 列の編集(原文・題名の欄)',
-  append: '継ぎ足しの欄',
-  row: '1 面の編集(開いている行の欄)',
-  live: '1 面の編集(面そのもの)',
-  /**
-   * ⚠ **2 ペインでも効く**(2026-08-20)── 開く / ゴミ箱 / 行送りは両方の面で
-   *   同じ意味なので `filer` 1 つのままにしてある(user に同じ操作を 2 回
-   *   割り当て直させない)。見出しがどちらか一方だけを名乗ると**嘘になる**。
-   */
-  filer: 'フォルダの表と 2 ペイン(行に焦点があるとき)',
-  /** ⚠ こちらは**2 ペインにしか存在しない操作**だけ(反対側へ写す / 移す など)。 */
-  dual: '2 ペインだけの操作(そのペインに焦点があるとき)',
-};
+/**
+ * ⚠ **実体は `@features/keymap`**(2026-08-26 に移した)── 操作を名前で探す面
+ * (#425 段①)も同じ字で「なぜ押せないか」を言うので、純関数側が正本である。
+ * 🔑 ここは**再輸出だけ** ── 既存の読み手(test)の import を切らないため。
+ */
+export { CONTEXT_LABELS };
 
 /** 並びの順。⚠ `KEY_COMMANDS` の並びを尊重しつつ、文脈ごとに固める。 */
 /**

@@ -50,6 +50,32 @@ export type KeyContext =
   | 'filer'
   | 'dual';
 
+/**
+ * 🔴 **どこで効くかの見出し**(2026-08-26 に adapter からここへ移した)。
+ *
+ * ⚠ user は「文脈」とは呼ばない ── **どこで効くか**で書く。
+ * 🔑 **features 層に置く理由**:設定画面(`keymap-panel.ts`)だけでなく、
+ *   操作を名前で探す面(#425 段①)も「なぜ押せないか」をこの字で言う ──
+ *   adapter に置いたままだと、純関数側が**同じ字を書き直す**ことになる
+ *   (CLAUDE.md §7「同じ問いに答える口を 2 つ作らない」)。
+ */
+/** 文脈の見出し。⚠ test が「名乗った文脈の下に出ているか」を全数で突き合わせる。 */
+export const CONTEXT_LABELS: Readonly<Record<KeyContext, string>> = {
+  global: '画面のどこでも',
+  editor: '2 列の編集(原文・題名の欄)',
+  append: '継ぎ足しの欄',
+  row: '1 面の編集(開いている行の欄)',
+  live: '1 面の編集(面そのもの)',
+  /**
+   * ⚠ **2 ペインでも効く**(2026-08-20)── 開く / ゴミ箱 / 行送りは両方の面で
+   *   同じ意味なので `filer` 1 つのままにしてある(user に同じ操作を 2 回
+   *   割り当て直させない)。見出しがどちらか一方だけを名乗ると**嘘になる**。
+   */
+  filer: 'フォルダの表と 2 ペイン(行に焦点があるとき)',
+  /** ⚠ こちらは**2 ペインにしか存在しない操作**だけ(反対側へ写す / 移す など)。 */
+  dual: '2 ペインだけの操作(そのペインに焦点があるとき)',
+};
+
 export interface KeyCommand {
   readonly id: string;
   /** 設定画面・ヘルプに出る名前。⚠ 変えたらマニュアルも直す。 */
@@ -318,6 +344,26 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     defaults: ['Alt+4', 'F12'],
     whileTyping: true,
     note: 'PKC2 の F12(Flags Inspector)と同じ手',
+  },
+  /**
+   * 🔴 **操作を名前で探して実行する**(#425 段①)。
+   *
+   * ⚠ **一覧を新しく作らない** ── 出るのは**この表そのもの**である。
+   *   パレット専用の配列を別に持つと、鍵の一覧・ヘルプ・パレットで**別の答え**が
+   *   出る(PKC2 がまさにそれで 2 件ズレた ── `keymap-panel.ts` 冒頭の記録)。
+   * ⚠ 既定は **PKC2 と同じ `Ctrl+Shift+P`**(user 指示 2026-08-18
+   *   「既定は PKC2 の操作感に寄せること」)。`Mod+P`(印刷)は `REFUSED` なので使わない。
+   * ⚠ `whileTyping` にしてある ── **編集中こそ呼びたい**(書式や雛形を名前で入れる)。
+   *   `Mod+Shift+P` は文字を打たないので `typesCharacter` が false になり、
+   *   本文に記号が入る事故は起きない。
+   */
+  {
+    id: 'open-palette',
+    label: '操作を名前で探す',
+    contexts: ['global'],
+    defaults: ['Mod+Shift+P'],
+    whileTyping: true,
+    note: 'できる操作を名前で絞り込んで、その場で実行します(PKC2 の Ctrl+Shift+P と同じ手)',
   },
   {
     id: 'open-help',
