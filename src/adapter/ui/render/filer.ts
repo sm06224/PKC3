@@ -68,6 +68,12 @@ export class FilerRenderer {
   private lastTrash: AppState['trashPanel'] = null;
   /** 居場所を変える帯の器(中身は選択が変わるたびに差し替える)。 */
   private moveBar: HTMLElement | null = null;
+  /** 帯の組み直しをまたいで運ぶ、打ちかけの字と焦点(`captureBarInputs`)。 */
+  private keptBar: {
+    values: ReadonlyMap<string, string>;
+    focused: string | null;
+    caret: number | null;
+  } | null = null;
 
   constructor(region: HTMLElement) {
     this.region = region;
@@ -169,9 +175,66 @@ export class FilerRenderer {
     host.append(bar);
   }
 
+  /**
+   * 🔴 **打ちかけの字を、帯の組み直しで捨てない**(2026-08-26。CI の smoke が
+   * 2 本落ちて判明 ── 手元では 3/3 緑だった)。
+   *
+   * この帯は**丸ごと組み直る**(当たりが届いた / 印が変わった)ので、素で消すと
+   * **入力欄ごと**捨てることになる。⚠ 「集めています…」の間に条件を打った user は、
+   * 走査が返った瞬間に字を失い、**押しても「タグを入力してください」が出るだけ**になる。
+   * ⚠ **速い機械では出ない** ── 走査が返るのが打つより先だからである。
+   *   だから直す前の症状は「CI だけ落ちる」という**環境差の顔**をしていた。
+   *
+   * 🔑 **欄ごとに直さない**(§7)── まとめて付けるタグの欄も同じ穴を持つので、
+   *   「この帯の入力欄は、組み直しても中身と焦点を保つ」を 1 か所で決める。
+   * ⚠ 捕まえるのは**中身が在るときだけ** ── 面を丸ごと組み直す経路では、
+   *   ここは**新しい空の器**に対しても呼ばれる(そこで上書きすると、
+   *   直前に捕まえた字を空で潰してしまう)。
+   */
+  private captureBarInputs(): void {
+    const host = this.moveBar;
+    if (host === null) return;
+    const values = new Map<string, string>();
+    let focused: string | null = null;
+    let caret: number | null = null;
+    for (const el of host.querySelectorAll<HTMLInputElement>('input[data-pkc-field]')) {
+      const name = el.getAttribute('data-pkc-field') ?? '';
+      if (name === '' || el.value === '') continue;
+      values.set(name, el.value);
+      if (el.ownerDocument.activeElement === el) {
+        focused = name;
+        caret = el.selectionStart;
+      }
+    }
+    if (values.size > 0) this.keptBar = { values, focused, caret };
+  }
+
+  /**
+   * 捕まえた字と焦点を、組み直した欄へ戻す。
+   * ⚠ 焦点を当て直すのは**元から焦点が在った欄だけ** ── 無条件に当てると、
+   *   別の所を触っている user から焦点を奪う。
+   * ⚠ 戻したら**忘れる** ── 持ち越すと、別の場所へ移った後で古い字が甦る。
+   */
+  private restoreBarInputs(host: HTMLElement): void {
+    const kept = this.keptBar;
+    this.keptBar = null;
+    if (kept === null) return;
+    for (const el of host.querySelectorAll<HTMLInputElement>('input[data-pkc-field]')) {
+      const was = kept.values.get(el.getAttribute('data-pkc-field') ?? '');
+      if (was === undefined) continue;
+      el.value = was;
+      if (el.getAttribute('data-pkc-field') === kept.focused) {
+        el.focus();
+        if (kept.caret !== null) el.setSelectionRange(kept.caret, kept.caret);
+      }
+    }
+  }
+
   private renderMoveBar(state: AppState, scope: EntryMeta | null): void {
     const host = this.moveBar;
     if (!host) return;
+    // 🔑 打ちかけの字は組み直しをまたいで運ぶ(`captureBarInputs` の docstring)
+    this.captureBarInputs();
     host.textContent = '';
     // 🔑 いま居るのがスマートフォルダなら、いちばん上に条件の帯を出す
     if (scope !== null && scope.archetype === SMART_ARCHETYPE)
@@ -227,6 +290,8 @@ export class FilerRenderer {
       bulk.append(count, del, tag, add, off, clear);
       host.append(bulk);
     }
+
+    this.restoreBarInputs(host);
 
     const moving = state.selectedLid ? (state.entryMetas.get(state.selectedLid) ?? null) : null;
     if (!moving) {
@@ -535,6 +600,9 @@ export class FilerRenderer {
       focusedBefore = activeNow.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? '';
     }
 
+    // 🔑 **面ごと組み直す前に**打ちかけの字を捕まえる(器ごと作り直すので、
+    //    `renderMoveBar` の中では**もう読めない**)
+    this.captureBarInputs();
     this.region.textContent = '';
     this.rows.clear();
 

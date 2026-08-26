@@ -87,7 +87,15 @@ test('🔴 落とすと条件のタグが付き、「ここから外す」で外
   await page.locator(SMART_ROW).first().dblclick();
   await page.locator('[data-pkc-field="smart-cond"]').fill('請求');
   await clickReal(page, '[data-pkc-action="smart-cond-add"]');
-  await expect(page.locator(WHY)).toContainText('条件');
+  /**
+   * ⚠ **「条件」で見ない** ── 「条件を選んでください」にも含まれるので、
+   *   条件が 1 つも入っていなくても通る(自分で書いた空振りだった)。
+   *   🔑 **札が出たこと**で見る(条件が実際に本文へ書かれた証拠)。
+   */
+  await expect(
+    page.locator('[data-pkc-region="smart-cond"]'),
+    '条件が入っていない',
+  ).toHaveCount(1);
   // ルートへ戻る(パンくずの左端)
   await clickReal(
     page,

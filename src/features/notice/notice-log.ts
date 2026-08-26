@@ -90,6 +90,15 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-26-live-row-context',
+    title: '表や箇条書きの 1 行を直すとき、まわりが消えなくなりました',
+    items: [
+      '1 面で編集しているとき、表の行や箇条書きの項目を押すと、表や箇条書きが丸ごと画面から消えて、1 行の入力欄だけになっていました。',
+      '押した行(項目)だけが原文になり、まわりの行は描かれたまま並びます。どの行を直しているのかが見えます。',
+      '直す範囲はこれまでどおり押した 1 行だけです。まわりの行は変わりません。',
+    ],
+  },
+  {
     id: '2026-08-26-smart-folder',
     title: 'スマートフォルダ ── 条件に合うノートが自動で集まります',
     items: [
@@ -291,22 +300,11 @@ export const NOTICES: readonly Notice[] = [
       '取り込んだものは編集の形で出るので、見てから保存できます。要らなければ捨ててください。元の記事のタブは退きません。',
     ],
   },
-  {
-    id: '2026-08-24-office-save-formats',
-    title: 'Word や Excel の形式のまま、Office から保存できるようになりました',
-    items: [
-      'Office で Word や Excel の形式を編集して保存を押すと「一般的な I/O エラー」で失敗し、編集した内容はそこで失われていました。保存できるようになりました。',
-      '.docx .xlsx .pptx と、古い .doc .xls .ppt、それに .rtf の 7 つで確かめました。ODF(.odt .ods .odp .odg)はこれまでどおりです。',
-      '保存を押すと、その形式のままにするか ODF にするかを Office が訊いてきます。どちらかを選ぶと書き込まれます。',
-      'Office のひとそろいを入れ直すと効きます。設定 → Office 表示 の「取得して入れる」を押してください。',
-      '入れ直すまでは、これまでどおり開いた時点で「保存できません」の断りが出ます。',
-    ],
-  },
 ];
 
 /**
  * ⚠ **落としたぶんの原本は CHANGELOG に在る**(上限 20 件を超えたので、古いほうから
  *   `2026-08-16-office-save-to-pkc` / `2026-08-17-office-save-same-note`(2026-08-19)、
  *   `2026-08-19-dual-pane-app`(2026-08-22)、
- *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice` / `2026-08-24-pptx-export` / `2026-08-24-paste-permalink` / `2026-08-24-markdown-to-pandoc` / `2026-08-24-schedule-range`(2026-08-25)、`2026-08-24-dual-new-note`(2026-08-26)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
+ *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice` / `2026-08-24-pptx-export` / `2026-08-24-paste-permalink` / `2026-08-24-markdown-to-pandoc` / `2026-08-24-schedule-range`(2026-08-25)、`2026-08-24-dual-new-note` / `2026-08-24-office-save-formats`(2026-08-26)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
  */

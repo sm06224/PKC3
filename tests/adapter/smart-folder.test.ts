@@ -163,6 +163,96 @@ describe('中身は条件で決まる(#421 段①)', () => {
     expect(rows(), '条件が無いのに集めている').toEqual([]);
   });
 
+  /**
+   * 🔴 **集めている最中に打った条件が、走査の返りで消えない**
+   * (CI の smoke が 2 本落ちて判明。2026-08-26)。
+   *
+   * ⚠ 帯は当たりが届くたびに**丸ごと組み直る**ので、直す前は打ちかけの字が
+   *   **入っていた欄ごと捨てられていた** ── 押しても
+   *   「集める条件にするタグを入力してください」が出るだけで、何も起きない。
+   * ⚠ **速い機械では出ない** ── 走査が返るのが打つより先だからである
+   *   (手元では 3/3 緑、CI では 2/3 赤)。だから**時間ではなく順番**で見る。
+   */
+  it('🔴 集めている最中に打った条件が、走査の返りで消えない', () => {
+    const r = mount();
+    let s = reduce(booted(), { type: 'SET_SCOPE', lid: 's1' }).state;
+    r.render(s); // まだ集めていない(「集めています…」)
+    const field = (): HTMLInputElement =>
+      region.querySelector<HTMLInputElement>('[data-pkc-field="smart-cond"]')!;
+    expect(field(), '条件の欄が出ていない').not.toBeNull();
+    field().value = '請求'; // user が打った
+    // ここで初回の走査が返る(条件は空なので 0 件)
+    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: [], total: 0, tags: [] }).state;
+    r.render(s);
+    expect(field().value, '打った字が消えた(押しても何も起きない)').toBe('請求');
+  });
+
+  /**
+   * ⚠ **同じ穴は「まとめて付けるタグ」の欄にも在る** ── 直しは帯ぜんぶに
+   *   掛けたので、こちらも守られていることを見る(§7 の「1 か所で直した」の裏取り)。
+   */
+  it('⚠ まとめて付けるタグの欄も、組み直しで字が消えない', () => {
+    const r = mount();
+    let s = reduce(booted(), { type: 'SET_SCOPE', lid: 's1' }).state;
+    s = reduce(s, { type: 'TOGGLE_SELECT', lid: 'a' }).state;
+    s = reduce(s, { type: 'TOGGLE_SELECT', lid: 'b' }).state;
+    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: ['a', 'b'], total: 2, tags: ['請求'] })
+      .state;
+    r.render(s);
+    const field = (): HTMLInputElement =>
+      region.querySelector<HTMLInputElement>('[data-pkc-field="bulk-tag"]')!;
+    expect(field(), '前提: まとめての帯が出ていない').not.toBeNull();
+    field().value = '家事';
+    // 当たりが届き直す(別の窓がタグを付けた等)
+    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: ['a', 'b'], total: 2, tags: ['請求'] })
+      .state;
+    r.render(s);
+    expect(field().value, '打った字が消えた').toBe('家事');
+  });
+
+  /**
+   * ⚠ **行を選び直しただけでも帯は組み直る**(この面は選択の変化を
+   *   「属性 patch だけ」で済ませるが、帯は毎回作り直す)── 変異試験 B1 が
+   *   SURVIVED で教えた、**もう 1 つの組み直しの口**である。
+   */
+  it('⚠ 行を選び直しただけでも、打ちかけの字は消えない', () => {
+    const r = mount();
+    let s = reduce(booted(), { type: 'SET_SCOPE', lid: 's1' }).state;
+    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: ['a', 'b'], total: 2, tags: ['請求'] })
+      .state;
+    r.render(s);
+    const field = (): HTMLInputElement =>
+      region.querySelector<HTMLInputElement>('[data-pkc-field="smart-cond"]')!;
+    field().value = '家事';
+    // 行に印を付けるだけ(一覧も場所も変わらない = 速い経路)
+    s = reduce(s, { type: 'TOGGLE_SELECT', lid: 'a' }).state;
+    r.render(s);
+    expect(field().value, '選び直しただけで字が消えた').toBe('家事');
+  });
+
+  /**
+   * 🔴 **戻したら忘れる**(変異試験 B5)。⚠ 覚えたままにすると、
+   *   user が欄を**空にしても、次の組み直しで字が甦る** ── 消せない欄になる。
+   */
+  it('🔴 欄を空にしたら、組み直しで字が甦らない', () => {
+    const r = mount();
+    let s = reduce(booted(), { type: 'SET_SCOPE', lid: 's1' }).state;
+    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: ['a'], total: 1, tags: ['請求'] }).state;
+    r.render(s);
+    const field = (): HTMLInputElement =>
+      region.querySelector<HTMLInputElement>('[data-pkc-field="smart-cond"]')!;
+    field().value = '家事';
+    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: ['a', 'b'], total: 2, tags: ['請求'] })
+      .state;
+    r.render(s);
+    expect(field().value, '前提: 一度は運ばれている').toBe('家事');
+    // user が消した
+    field().value = '';
+    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: ['a'], total: 1, tags: ['請求'] }).state;
+    r.render(s);
+    expect(field().value, '消した字が甦った(欄を空にできない)').toBe('');
+  });
+
   it('⚠ 上限で切ったことを画面に出す(「これで全部」と嘘をつかない)', () => {
     const r = mount();
     let s = reduce(booted(), { type: 'SET_SCOPE', lid: 's1' }).state;

@@ -909,6 +909,15 @@ select:focus-visible {
 [data-pkc-row-slot] {
   display: block;
 }
+/* 🔴 **表 / 箇条書きの中に置く器は、入れ物の文法のまま**(#423)。
+ * ⚠ `display: block` を table-cell や list-item に被せると、行が版から外れて
+ *   表が崩れる ── 押した行だけ表の外に飛び出して見える。 */
+td[data-pkc-row-slot] {
+  display: table-cell;
+}
+li[data-pkc-row-slot] {
+  display: list-item;
+}
 /* 🔑 生の行は**等幅**にする ── そこだけ原文であることが字で分かる。
  * ⚠ 枠は 1px の accent(焦点の輪は別に付くので二重にしない) */
 [data-pkc-field='row-source'] {

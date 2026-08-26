@@ -48,6 +48,45 @@ import { appKeymap, type KeymapStore } from './keymap';
 const SLOT_HTML = '<div data-pkc-row-slot="1"></div>';
 
 /**
+ * 🔴 **下位要素(表の行 / 箇条書きの項目)だけを差し替えた塊の HTML**
+ * (#423。user 報告 2026-08-26「複数行のブロックが1行しか表示されない / 表とかで起きてる」)。
+ *
+ * ⚠ 直す前は**編集する範囲だけ**を行へ絞り、**差し替える相手は塊のまま**だった
+ *   ── 3 行の表を押すと**表が丸ごと画面から消えて** 1 行の欄だけが残る
+ *   (実測: 押した直後の `tr` は 0 個)。意図した動きの**半分だけ**が実装されていた。
+ *
+ * 🔑 **入れ物の文法に合う要素で差し替える** ── `<div>` を `<table>` の中へ入れると
+ *   HTML の parser が外へ追い出す(表が崩れ、欄がどこにも居なくなる)。
+ *   だから行は `<tr><td colspan=N>`、項目は `<li>` にする。
+ * ⚠ **`colspan` は元の行の列数**にする ── 揃えないと欄がセル 1 つぶんに縮む。
+ *
+ * @returns 差し替えられなければ `null`(呼び側は塊ごとの差し替えへ落ちる ── 安全側)
+ */
+export function blockWithSubSlot(html: string, selector: string, k: number): string | null {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html;
+  const el = tpl.content.querySelectorAll(selector)[k];
+  if (el === undefined) return null;
+  const doc = tpl.ownerDocument;
+  let slot: Element;
+  if (selector === 'tr') {
+    const tr = doc.createElement('tr');
+    const td = doc.createElement('td');
+    // ⚠ 列数は**元の行**から採る(見出し行と本体行で違うことがある)
+    td.setAttribute('colspan', String(Math.max(1, el.children.length)));
+    td.setAttribute('data-pkc-row-slot', '1');
+    tr.append(td);
+    slot = tr;
+  } else {
+    const li = doc.createElement(selector);
+    li.setAttribute('data-pkc-row-slot', '1');
+    slot = li;
+  }
+  el.replaceWith(slot);
+  return tpl.innerHTML;
+}
+
+/**
  * スロットに**読み幅の上限を掛ける**印(`app.css` と 1 対 1)。
  * ⚠ SLOT_HTML には焼き込まない ── 付けるかどうかは置き換える塊で決まる
  * (`proseSpan`)。定数側に入れると表・コードの編集欄まで散文の幅になる。
@@ -150,6 +189,12 @@ interface Active {
   /** 置き換えた塊が**読み幅の上限を持っていたか**(`proseSpan`)。描き直しで
    *  スロットが作り直されたときに付け直す。 */
   prose: boolean;
+  /**
+   * 🔴 **塊の中の何番目を開いているか**(#423)。`null` なら塊ごと。
+   * ⚠ 描き直しのたびに**同じ形へ組み直す**のに要る ── 覚えていないと、
+   *   打鍵で描き直った瞬間に表が丸ごと消える(元の症状に戻る)。
+   */
+  sub: { selector: string; k: number } | null;
   textarea: HTMLTextAreaElement;
   /** 変換中(封印中)か。⚠ **boolean 1 個**(深さを数えない ── 設計 §5 契約 1)。 */
   composing: boolean;
@@ -295,7 +340,15 @@ export class RowSwap {
     //    閉じたときに残りの塊が戻らない(本文が画面から消える)
     a.originalHtml = blocks.slice(idx, idx + a.blockCount).join('') || a.originalHtml;
     const withSlot = [...blocks];
-    withSlot.splice(idx, a.blockCount, SLOT_HTML);
+    /**
+     * 🔴 **開いた時と同じ形へ組み直す**(#423)── 下位要素を開いているなら、
+     *   ここでも下位要素だけを差し替える。⚠ 忘れると、**打鍵で描き直った瞬間に
+     *   表が丸ごと消える**(直す前の症状がそのまま戻る)。
+     * ⚠ 本文が同一のときしかここへ来ない(上のガード)ので、`k` はそのまま効く。
+     */
+    const subHtml =
+      a.sub === null ? null : blockWithSubSlot(blocks[idx] ?? '', a.sub.selector, a.sub.k);
+    withSlot.splice(idx, a.blockCount, subHtml ?? SLOT_HTML);
     /**
      * 🔴 **pin で守って当てる**(S4)。
      *
@@ -556,7 +609,15 @@ export class RowSwap {
         : this.caretOffset(sub?.element ?? this.unitElement(blockIndex), source, clientX, clientY);
 
     const withSlot = [...this.view.blocks];
-    withSlot[blockIndex] = SLOT_HTML;
+    /**
+     * 🔴 **下位要素を絞ったなら、差し替えるのも下位要素だけ**(#423)。
+     * ⚠ 塊ごと差し替えると、表 / 箇条書きの**残りが画面から消える** ──
+     *   user 報告「複数行のブロックが1行しか表示されない / 表とかで起きてる」。
+     * ⚠ 組めなかったときは塊ごとへ落ちる(安全側 ── 欄がどこにも居ない形を作らない)。
+     */
+    const subHtml =
+      sub === null ? null : blockWithSubSlot(this.view.blocks[blockIndex] ?? '', sub.selector, sub.k);
+    withSlot[blockIndex] = subHtml ?? SLOT_HTML;
     return this.open({
       blockIndex,
       blockCount: 1,
@@ -567,6 +628,7 @@ export class RowSwap {
       withSlot,
       caret,
       prose: this.proseSpan(blockIndex, blockIndex),
+      sub: subHtml === null || sub === null ? null : { selector: sub.selector, k: sub.k },
     });
   }
 
@@ -759,6 +821,8 @@ export class RowSwap {
     caret: number;
     /** 置き換えた塊に読み幅の上限が在ったか(`proseSpan`)。 */
     prose: boolean;
+    /** 塊の中の何番目を開いているか(#423)。`null` = 塊ごと。 */
+    sub?: { selector: string; k: number } | null;
   }): boolean {
     // 実際に開けたなら予約は用済み(古い予約が後から焦点を奪わないように)
     this.pendingOpen = null;
@@ -786,6 +850,7 @@ export class RowSwap {
       originalHtml: o.originalHtml,
       slot,
       prose: o.prose,
+      sub: o.sub ?? null,
       textarea: ta,
       composing: false,
       pendingCommit: false,
@@ -814,7 +879,7 @@ export class RowSwap {
     blockStart: number,
     blockEnd: number,
     target: Node,
-  ): { start: number; end: number; element: Element } | null {
+  ): { start: number; end: number; element: Element; selector: string; k: number } | null {
     const root = this.unitElement(blockIndex);
     if (root === null) return null;
     const el = target instanceof Element ? target : target.parentElement;
@@ -831,7 +896,7 @@ export class RowSwap {
       );
       const r = within[k];
       if (r === undefined) continue;
-      return { start: r.start, end: r.end, element: hit };
+      return { start: r.start, end: r.end, element: hit, selector: u.selector, k };
     }
     return null;
   }
