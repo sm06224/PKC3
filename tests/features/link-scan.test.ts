@@ -179,3 +179,88 @@ describe('宛先だけを差し替える', () => {
     expect(rewriteLinkDests(text, scanLinks(text).sites, () => undefined)).toBe(text);
   });
 });
+
+/**
+ * 🔴 **画像として書かれているか**(#264 段⓪)。
+ *
+ * ⚠ **これを持たないと「取り込む」がリンクまで取りに行く** ── user が単に貼った
+ *   web ページの URL まで第三者へ通信することになる。⚠ 「fetch してから MIME で
+ *   捨てる」は解にならない(**通信そのもの**が問題なので、行く前に絞る)。
+ */
+describe('画像として書かれているか(#264 段⓪)', () => {
+  const img = (text: string): boolean[] => scanLinks(text).sites.map((x) => x.image);
+
+  it('🔴 `![x](y)` は画像、`[x](y)` はリンク', () => {
+    expect(img('![絵](a.png)')).toEqual([true]);
+    expect(img('[記事](https://example.com)')).toEqual([false]);
+    // ⚠ **同じ行に並べても取り違えない**
+    expect(img('[記事](a) と ![絵](b)')).toEqual([false, true]);
+  });
+
+  /** ⚠ `\!` はリンク ── `!` 自身のエスケープを見ていないと取り違える。 */
+  it('🔴 エスケープした `!` はリンクのまま', () => {
+    expect(img('\\![x](y)')).toEqual([false]);
+    // ⚠ **対照群** ── `\\` が 2 つなら `!` は生きている(画像)
+    expect(img('\\\\![x](y)')).toEqual([true]);
+  });
+
+  /**
+   * 🔴 **散らばった角括弧に釣られない**。
+   * ⚠ 1 稿目はこれを「リンクにならない `]` でも降ろすこと」の検査だと書いていたが、
+   *   **それは守っていない**(変異試験 L1 が SURVIVED で教えた ── 積みは LIFO なので、
+   *   置き去りの `[` は下に沈んだまま誰にも降ろされない)。
+   * 🔑 ここが守っているのは「**前に角括弧が在っても、画像の判定が変わらない**」
+   *   ことである ── `!` を見ない実装(L3)はここで落ちる。
+   */
+  it('🔴 ただの角括弧のあとでも、画像を取り違えない', () => {
+    expect(img('[ただの角括弧] のあとの ![絵](x.png)')).toEqual([true]);
+    expect(img('[脚注] と [記事](a) と ![絵](b)')).toEqual([false, true]);
+  });
+
+  /** ⚠ 入れ子のラベル ── 内側が対応する。 */
+  it('🔴 入れ子でも、内側の `[` と対応する', () => {
+    // 内側の `![絵](x)` は画像 / 外側は `[…](y)` でリンク
+    expect(img('[前 ![絵](x) 後](y)')).toEqual([true, false]);
+  });
+
+  /**
+   * 🔴 **定義行では決まらない**(#264 段⓪)── `!` が付くのは**使う側**である。
+   * ⚠ ここで `true` にすると、**同じ定義をリンクとしても使っているノート**で
+   *   取りに行ってしまう。
+   */
+  it('🔴 参照形式の定義行は、常にリンク扱い', () => {
+    expect(img('[label]: https://example.com/a.png')).toEqual([false]);
+  });
+
+  /** 🔴 HTML は**タグ名**で決まる ── 属性名で分けると `<video src>` を取りこぼす。 */
+  it('🔴 HTML は、タグ名で決まる', () => {
+    expect(img('<img src="a.png">')).toEqual([true]);
+    expect(img('<a href="https://example.com">x</a>')).toEqual([false]);
+    expect(img('<video src="a.mp4">')).toEqual([true]);
+    expect(img('<source src="a.webm">')).toEqual([true]);
+    // ⚠ 絵ではないものは入れない(取り込んでも意味が無く、通信だけ増える)
+    expect(img('<iframe src="https://example.com">')).toEqual([false]);
+    expect(img('<script src="a.js">')).toEqual([false]);
+  });
+
+  /** ⚠ コードの中は拾わない(既存の規則が画像でも効いていること)。 */
+  it('⚠ コードの中の `![x](y)` は拾わない', () => {
+    expect(scanLinks('`![絵](x.png)`').sites).toEqual([]);
+    expect(scanLinks('```\n![絵](x.png)\n```\n').sites).toEqual([]);
+  });
+
+  /**
+   * 🔑 **1 パスのままであること**(#264 段⓪ の理由)。
+   * ⚠ 「`]` から後ろ向きに `[` を探す」形だと O(n²) になり、この file が
+   *   書き直された当の穴を掘り直すことになる ── **大きい入力で確かめる**。
+   */
+  it('🔴 角括弧が大量に在っても、走査が実用の時間で終わる', () => {
+    const text = `${'[x] '.repeat(20_000)}![絵](a.png)`;
+    const t0 = Date.now();
+    const out = scanLinks(text);
+    const ms = Date.now() - t0;
+    expect(out.sites.map((x) => x.image), '最後の画像が拾えていない').toEqual([true]);
+    // ⚠ 上限は**手違いの検出**(O(n²) なら桁で超える ── 実測は 1 桁 ms)
+    expect(ms, `走査が遅い(${String(ms)}ms)`).toBeLessThan(2_000);
+  });
+});
