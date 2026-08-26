@@ -75,6 +75,7 @@ import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
 import { appOpenInEdit, OpenInEditStore } from '@adapter/ui/render/open-in-edit';
 import { chordOf, findCommand, isMac, typesCharacter, KEY_COMMANDS } from '@features/keymap';
 import { paletteRows } from '@features/palette/palette-rows';
+import { structureText } from '@features/structure/structure-text';
 import { appQueryKey } from '@adapter/ui/render/query-key-store';
 import { openView } from '@adapter/ui/render/open-view';
 import {
@@ -2560,6 +2561,30 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   **同じ作法** ── 貼れる 1 行は押した要素が持っている(`data-pkc-entry-ref`)。
    *   ここで組み立て直すと、規則が 2 か所になる(§7)。
    */
+  /**
+   * 🔴 **構成をテキストでコピー**(#429 段①)。
+   *
+   * ⚠ 組み立ては**純関数**(`structureText`)── ここでは字を組まない。
+   * 🔑 **何件出したかを知らせる** ── 黙ってコピーすると、user は
+   *   「押せたのか / 空だったのか」を見分けられない(コピーの合図と同じ理由)。
+   * ⚠ **ノートが 1 件も無いときは断る** ── 説明だけの紙を渡しても使えない。
+   */
+  'export-structure': (dispatcher, target, services) => {
+    const st = dispatcher.getState();
+    // ⚠ `entryMetas` は既に lid → meta の Map ── 組み直さない
+    const out = structureText(st.entryMetas, st.relations);
+    if (out.total === 0) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'ノートがまだありません' });
+      return;
+    }
+    services.copyText?.(out.text);
+    flashCopied(target);
+    services.showStatus?.(
+      out.shown === out.total
+        ? `構成 ${out.total} 件をコピーしました`
+        : `構成 ${out.total} 件のうち ${out.shown} 件をコピーしました`,
+    );
+  },
   'copy-entry-ref': (_dispatcher, target, services) => {
     const ref = target
       .closest<HTMLElement>('[data-pkc-entry-ref]')

@@ -76,6 +76,18 @@ export const SETTINGS_COMMANDS: readonly CollectionCommand[] = [
     title:
       '1 ノート = 1 つの .md にして zip で保存します。PKC3 を捨てても読める形で、Pandoc など他の道具にもそのまま渡せます',
   },
+  /**
+   * 🔴 **構成をテキストでコピー**(#429 段①)── AI に整理を頼むための材料。
+   * ⚠ **「押す前に考える」側**なので設定へ置く(左下は「よく押す / 押せないと詰まる」)。
+   * 🔑 書き出しの仲間である ── 出すのは file ではなくクリップボードだが、
+   *   「PKC3 の外へ渡す形にする」という用事は `export-markdown` と同じ。
+   */
+  {
+    action: 'export-structure',
+    label: '構成をコピー',
+    title:
+      'ノートとフォルダの並びを、整理コマンドの書き方つきでクリップボードに入れます。AI に貼って「整理案を考えて」と頼めます',
+  },
   {
     action: 'purge-orphan-assets',
     label: '使っていない添付を消す',

@@ -277,7 +277,13 @@ test('🔴 主要な導線が畳まれず、その場で押せる', async ({ pag
    * 素通りさせる(押す口が消えて受け手だけ残る形は、こちらの検査に 1 つも鳴らない)。
    */
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
-  for (const action of ['export-html', 'export-markdown', 'purge-orphan-assets']) {
+  // ⚠ **`export-structure` を足した**(#429 段①)── 逃がした先で見えて押せること
+  for (const action of [
+    'export-html',
+    'export-markdown',
+    'export-structure',
+    'purge-orphan-assets',
+  ]) {
     await expect(
       page.locator(`[data-pkc-action="${action}"]`),
       `${action} が設定の面でも見えていない`,

@@ -175,3 +175,40 @@ test('🔴 参照をコピーして別のノートに貼ると、押してその
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **構成をコピー**(#429 段①)。
+ *
+ * 🔴 **unit では届かない層**:`navigator.clipboard` は happy-dom では差し替え物
+ *   なので、「**本当にクリップボードへ入ったか**」は実ブラウザでしか見えない。
+ */
+test('🔴 構成をコピーすると、貼れる 1 枚が本当に入る (#429)', async ({ page, context }) => {
+  const errors = collectPageErrors(page);
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await gotoApp(page);
+
+  // ① ノートを 1 件作る(空だと断られる ── それは別の検査)
+  await createEntry(page, 'text');
+  const title = page.locator('[data-pkc-field="editor-title"]');
+  if (await title.count()) await title.fill('会議メモ');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+  // ② 設定の面へ移って押す
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await copyAndWait(page, 'export-structure');
+
+  // ③ 🔴 **貼れる 1 枚**が入っている ── 木 + コマンドの書き方の両方
+  const text = await page.evaluate(() => navigator.clipboard.readText());
+  expect(text, '題名が入っていない').toContain('会議メモ');
+  expect(text, 'コマンドの書き方が入っていない').toContain('mv ');
+  expect(text, 'mkdir の説明が入っていない').toContain('mkdir ');
+  expect(text, 'rename の説明が入っていない').toContain('rename ');
+  /**
+   * ⚠ **lid の字種を決め打ちしない**(1 稿目はハイフンを許さず落ちた ──
+   *   実物は `mta73ihn-0001` の形)。🔑 見たいのは
+   *   「**題名の左に、空白 2 つで区切られた識別子が在る**」ことだけである。
+   */
+  expect(text, 'lid が入っていない(mv が書けない)').toMatch(/\n\S{6,}\s{2}会議メモ/);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
