@@ -26,7 +26,9 @@ import {
   SMART_FIELDS,
   SMART_KIND_KEY,
   SMART_TAGS_KEY,
+  SMART_TEXT_KEY,
   SMART_UPDATED_KEY,
+  smartFieldValue,
   withSmartField,
 } from '../../src/features/smart/smart-spec';
 import { readTags } from '../../src/features/flavor/tags';
@@ -287,24 +289,49 @@ describe('中身は条件で決まる(#421 段①)', () => {
   });
 
   /**
-   * ⚠ **選択肢の語が、読める綴りと同じ** ── 食い違うと「選べるのに 1 件も
-   * 集まらない」入れ物ができる(理由は画面のどこにも出ない)。
+   * ⚠ **画面に出る語が、読める綴りと同じ** ── 食い違うと「選べる(打てる)のに
+   * 1 件も集まらない」入れ物ができる(理由は画面のどこにも出ない)。
+   *
+   * 🔴 **どちらの器かは DOM から決める**(#421 段③ で「語」が `<input>` になった)。
+   * ⚠ 一覧を test 側にもう 1 つ持つと、`SMART_FIELD_UI` を直したとき
+   *   **こちらだけ古いまま緑**になる(§7)。
+   * ⚠ **空振り防止**: 選ぶ器と打つ器が**両方 1 つ以上あった**ことを見る ──
+   *   見ないと、全部が `<input>` に化けても選択肢の検査は**素通り**する。
    */
-  it('🔴 選択肢の値が、そのまま条件として読める', () => {
+  it('🔴 画面に出る値が、そのまま条件として読める(選ぶ器も打つ器も)', () => {
     const r = mount();
     r.render(reduce(booted(), { type: 'SET_SCOPE', lid: 's1' }).state);
+    let selects = 0;
+    let inputs = 0;
     for (const field of SMART_FIELDS) {
-      const sel = region.querySelector<HTMLSelectElement>(`[data-pkc-field="smart-${field}"]`);
-      expect(sel, `${field} の選択肢が出ていない`).not.toBeNull();
-      const values = [...sel!.options].map((o) => o.value).filter((v) => v !== '');
-      expect(values.length, `${field} に選べる値が無い`).toBeGreaterThan(0);
-      for (const v of values) {
-        expect(
-          withSmartField(EMPTY_SMART, field, v).ok,
-          `${field} の選択肢「${v}」が条件として読めない`,
-        ).toBe(true);
+      const el = region.querySelector<HTMLElement>(`[data-pkc-field="smart-${field}"]`);
+      expect(el, `${field} の口が出ていない`).not.toBeNull();
+      if (el instanceof HTMLSelectElement) {
+        selects += 1;
+        const values = [...el.options].map((o) => o.value).filter((v) => v !== '');
+        expect(values.length, `${field} に選べる値が無い`).toBeGreaterThan(0);
+        for (const v of values) {
+          expect(
+            withSmartField(EMPTY_SMART, field, v).ok,
+            `${field} の選択肢「${v}」が条件として読めない`,
+          ).toBe(true);
+        }
+        continue;
       }
+      expect(el, `${field} は選ぶ器でも打つ器でもない`).toBeInstanceOf(HTMLInputElement);
+      inputs += 1;
+      /**
+       * ⚠ 打つ器は**中身が user 次第**なので、選択肢のかわりに
+       *   「**打てば条件になり、その値がそのまま画面へ戻る**」を見る。
+       */
+      const typed = '請求書';
+      const out = withSmartField(EMPTY_SMART, field, typed);
+      expect(out.ok, `${field} に打った語が条件として読めない`).toBe(true);
+      if (out.ok)
+        expect(smartFieldValue(out.spec, field), `${field} が画面へ戻らない`).toBe(typed);
     }
+    expect(selects, '選ぶ器が 1 つも無い(検査が素通りする)').toBeGreaterThan(0);
+    expect(inputs, '打つ器が 1 つも無い(検査が素通りする)').toBeGreaterThan(0);
   });
 
   it('🔴 選ぶと、その条件を書きに行く', () => {
@@ -641,7 +668,7 @@ function setup(disk: Record<string, string>, times: Record<string, string> = {})
     smartScan: async (lid, q) => {
       scans.push({ lid, ...q, tags: [...q.tags] });
       if (q.tags.length === 0 && q.kind === null && q.updatedFrom === null &&
-          q.createdFrom === null && q.dated === null)
+          q.createdFrom === null && q.dated === null && q.text === null)
         return { lids: [], total: 0 };
       const lids = Object.entries(disk)
         .filter(([l, body]) => {
@@ -655,6 +682,15 @@ function setup(disk: Record<string, string>, times: Record<string, string> = {})
           if (q.dated !== null) {
             const hasDate = extractSchedule(body).date !== null;
             if (hasDate !== q.dated) return false;
+          }
+          /**
+           * 🔴 **語**(段③)── 本物は題名も見る(`title LIKE` / FTS の索引)ので、
+           *   ここでも題名を混ぜる。⚠ **本物より甘くしない**(§3)── 語を無視すると、
+           *   「語の条件を渡し忘れた」取り違えが**両方緑のまま**通る。
+           */
+          if (q.text !== null) {
+            const title = METAS.find((m) => m.lid === l)?.title ?? '';
+            if (!body.includes(q.text) && !title.includes(q.text)) return false;
           }
           return true;
         })
@@ -816,6 +852,85 @@ describe('配線(effect 層まで)', () => {
     await tick(30);
     expect(s.errors.join(' '), '無言で捨てた').toContain('条件');
     expect(s.disk.a, '本文が書き換わった').toBe('あ\n');
+  });
+
+  /**
+   * 🔴 **タグ以外の条件しか無い入れ物へ落としたら、理由を出して断る**
+   *   (#421 段②の穴。2026-08-26 に対照群つきで実測)。
+   *
+   * ⚠ 直す前は**無言で何も起きなかった** ── 落とす動線は「条件のタグを本文へ付ける」
+   *   ことで実現しているので、タグが 0 個だと**付けるものが無いまま集め直しへ進む**。
+   *   実測: `smart-updated: 30d` だけの入れ物へ落とすと、**本文も断り文も 0 バイト**。
+   * 🔑 **対照群を同じ it に置く** ── 置かないと「常に断る」実装でも緑になる。
+   */
+  it('🔴 タグ以外の条件しか無い入れ物へ落とすと、理由が出て本文は変わらない', async () => {
+    const s = setup({
+      s1: `---\n${SMART_UPDATED_KEY}: 30d\n---\n説明\n`,
+      a: 'あ の本文\n',
+      // 対照群 ── タグの条件を持つ入れ物なら通る
+      s2: `---\n${SMART_TAGS_KEY}: [請求]\n---\n説明\n`,
+      b: 'い の本文\n',
+    });
+    s.d.dispatch({ type: 'SMART_TAGS', smartLid: 's1', lids: ['a'], mode: 'add' });
+    await tick(40);
+    expect(s.disk.a, '書けない条件なのに本文が変わった').toBe('あ の本文\n');
+    expect(s.errors.join(' '), '無言で捨てた').toContain('タグ');
+
+    s.d.dispatch({ type: 'SMART_TAGS', smartLid: 's2', lids: ['b'], mode: 'add' });
+    await tick(40);
+    expect(readTags(s.disk.b!), '対照群が通っていない(前提が崩れている)').toEqual(['請求']);
+  });
+
+  /**
+   * ⚠ **「ここから外す」も同じ穴を持つ** ── そちらは断り文の中身が違う
+   *   (落とすなら「タグを足せば入れられる」、外すなら「中身が決める」)。
+   */
+  it('🔴 タグ以外の条件しか無い入れ物では、「ここから外す」も理由が出る', async () => {
+    const s = setup({
+      s1: `---\n${SMART_KIND_KEY}: text\n---\n説明\n`,
+      a: '---\ntags: [請求]\n---\nあ\n',
+    });
+    s.d.dispatch({ type: 'SMART_TAGS', smartLid: 's1', lids: ['a'], mode: 'remove' });
+    await tick(40);
+    expect(readTags(s.disk.a!), '関係ないタグを消した').toEqual(['請求']);
+    expect(s.errors.join(' '), '無言で終えた').toContain('外す');
+  });
+
+  /**
+   * 🔴 **語の条件は worker へ渡る**(#421 段③)── 渡し忘れると
+   *   「語で絞ったのに全部集まる」になる。
+   */
+  it('🔴 語の条件が、そのまま走査へ渡る', async () => {
+    const s = setup({
+      s1: `---\n${SMART_TEXT_KEY}: 請求書\n---\n説明\n`,
+      a: '請求書の下書き\n',
+      b: '関係のない本文\n',
+    });
+    s.d.dispatch({ type: 'SET_SCOPE', lid: 's1' });
+    await tick(40);
+    expect(s.scans.at(-1)?.text, '語が走査へ渡っていない').toBe('請求書');
+    expect(s.d.getState().smartHits.get('s1')?.lids, '語で絞れていない').toEqual(['a']);
+  });
+
+  /**
+   * 🔴 **語の条件を持つ入れ物は、本文を書いても手で継ぎ足さない**(§7)。
+   * ⚠ 当てるのは SQL 1 か所である ── reducer がその場で当てると、
+   *   帯の並びと探す欄の結果が静かに食い違う。
+   */
+  it('🔴 語の条件を持つ入れ物は、本文が変わったら走査を頼み直す', async () => {
+    const s = setup({
+      s1: `---\n${SMART_TEXT_KEY}: 請求書\n---\n説明\n`,
+      a: '関係のない本文\n',
+    });
+    s.d.dispatch({ type: 'SET_SCOPE', lid: 's1' });
+    await tick(40);
+    const before = s.scans.length;
+    // ⚠ 行を書く経路は 1 本(`stamp`)なので、どれで書いても同じ所を通る
+    s.d.dispatch({ type: 'BULK_TAG', lids: ['a'], tag: '請求', mode: 'add' });
+    await tick(60);
+    // 🔑 **前提を assert する** ── 書けていない回は「頼み直さない」と見分けが付かない
+    expect(readTags(s.disk.a!), '前提が崩れている(そもそも書けていない)').toEqual(['請求']);
+    expect(s.scans.length, '本文が変わったのに頼み直していない').toBeGreaterThan(before);
   });
 
   /**

@@ -598,6 +598,7 @@ function runSmartScan(
     updatedFrom: string | null;
     createdFrom: string | null;
     dated: boolean | null;
+    text: string | null;
   },
 ): { lids: string[]; total: number } {
   const database = need();
@@ -613,6 +614,7 @@ function runSmartScan(
       updatedDays: q.updatedFrom === null ? null : 1,
       createdDays: q.createdFrom === null ? null : 1,
       dated: q.dated,
+      text: q.text,
     },
     lid,
   );
@@ -638,6 +640,29 @@ function runSmartScan(
     args.push(q.createdFrom);
   }
   if (q.dated !== null) conds.push(q.dated ? 'date IS NOT NULL' : 'date IS NULL');
+  /**
+   * 🔴 **語で絞る**(#421 段③)── 引き方は **`planSearch` 1 か所**である
+   *   (3 文字以上は FTS5 の trigram、2 文字以下は LIKE)。
+   *
+   * 🔑 **探す欄と同じ規則を通す**(§7)── ここに独自の当て方を書くと、
+   *   同じ語で「探した結果」と「集まった結果」が違う、が静かに起きる。
+   * ⚠ `entries_fts` は **external content**(`content='entries'`)なので、
+   *   `rowid` は `entries` の rowid とそのまま対応する ── join を書かずに
+   *   `rowid IN (…)` で足りる。
+   * ⚠ `plan.kind === 'none'`(空)は `readSmartSpec` が既に `null` に落としている
+   *   ので、ここへは来ない ── 来ても条件を足さないだけで、当たりが広がるだけである。
+   */
+  if (q.text !== null) {
+    const plan = planSearch(q.text);
+    if (plan.kind === 'fts') {
+      conds.push('rowid IN (SELECT rowid FROM entries_fts WHERE entries_fts MATCH ?)');
+      args.push(plan.match);
+    } else if (plan.kind === 'like') {
+      // ⚠ **`ESCAPE` を宣言する**(`searchEntries` と同じ ── `%` `_` を素で通さない)
+      conds.push("(title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\')");
+      args.push(plan.pattern, plan.pattern);
+    }
+  }
   const where = conds.length === 0 ? '' : ` AND ${conds.join(' AND ')}`;
   let after: { entryOrder: number; lid: string } | undefined;
   for (;;) {

@@ -2112,6 +2112,7 @@ describe('スマートフォルダの走査(#421 段②)', () => {
     updatedFrom?: string | null;
     createdFrom?: string | null;
     dated?: boolean | null;
+    text?: string | null;
   }) =>
     request({
       op: 'smartScan',
@@ -2122,6 +2123,7 @@ describe('スマートフォルダの走査(#421 段②)', () => {
       updatedFrom: q.updatedFrom ?? null,
       createdFrom: q.createdFrom ?? null,
       dated: q.dated ?? null,
+      text: q.text ?? null,
     });
 
   beforeAll(async () => {
@@ -2168,6 +2170,80 @@ describe('スマートフォルダの走査(#421 段②)', () => {
     await put('n-notag', { archetype: 'attachment', entryOrder: 4 }, 'タグの無い本文\n');
     const got = await scan({ kind: 'attachment', tags: ['請求'] });
     expect(got.lids, 'タグを見ていない').toEqual(['n-attach']);
+  });
+
+  /**
+   * 🔴 **語で絞る**(#421 段③)── ここも**本物の SQL でしか見えない**。
+   *
+   * ⚠ 引き方は 2 通りある(`planSearch`)ので、**2 通りとも実際に走らせる**
+   *   ── CLAUDE.md §2「分岐を書いたら、分岐の数だけ実際に走らせた記録を持つ」。
+   *   3 文字以上 = FTS5 の trigram / 2 文字以下 = LIKE。
+   * ⚠ **同じ語で 2 通りを比べない** ── 比べると「どちらの道を通ったか」が
+   *   見分けられない(どちらが答えても同じ結果になるので)。
+   */
+  it('🔴 語で絞れる ── 3 文字以上(索引の道)', async () => {
+    await put('n-word', { archetype: 'text', entryOrder: 5 }, '請求書の下書きです\n');
+    const got = await scan({ text: '請求書' });
+    expect(got.lids, '語で絞れていない').toEqual(['n-word']);
+    // ⚠ **対照群** ── 誰も書いていない語では 0 件(「常に全部返す」を殺す)
+    expect((await scan({ text: 'あるはずのない語' })).lids, '当たらない語で当たった').toEqual([]);
+  });
+
+  it('🔴 語で絞れる ── 2 文字以下(総当たりの道)', async () => {
+    await put('n-2char', { archetype: 'text', entryOrder: 6 }, 'これは葡萄の話\n');
+    const got = await scan({ text: '葡萄' });
+    expect(got.lids, '2 文字が引けていない(trigram は 2 文字に当たらない)').toEqual(['n-2char']);
+    expect((await scan({ text: '柘榴' })).lids).toEqual([]);
+  });
+
+  /**
+   * 🔴 **題名も見る** ── ⚠ **道が 2 本あるので 2 本とも見る**(§2)。
+   *   索引の道は `entries_fts(title, body)`、総当たりの道は `title LIKE`。
+   * ⚠ 3 文字の語だけで見ていると、**総当たりの道の `title` を落とす変異が
+   *   生き延びる**(変異試験 M10 が SURVIVED で教えた ── 3 文字は索引の道しか
+   *   通らないので、LIKE 側の題名は 1 度も実行されていなかった)。
+   */
+  it('🔴 題名にある語でも当たる ── 索引の道(3 文字以上)', async () => {
+    await put('n-title', { archetype: 'text', entryOrder: 7, title: '見積書のひな形' }, '中身\n');
+    expect((await scan({ text: '見積書' })).lids, '題名を見ていない').toContain('n-title');
+  });
+
+  it('🔴 題名にある語でも当たる ── 総当たりの道(2 文字以下)', async () => {
+    await put('n-t2', { archetype: 'text', entryOrder: 8, title: '柊の記録' }, '中身だけ\n');
+    expect((await scan({ text: '柊' })).lids, '総当たりの道が題名を見ていない').toEqual(['n-t2']);
+  });
+
+  /**
+   * 🔴 **`%` `_` を素で通さない**(`ESCAPE` の宣言が効いているか)。
+   *
+   * ⚠ **「0 件になること」では見分けられない**(変異試験 M11 が SURVIVED で教えた)
+   *   ── `ESCAPE` を落としても `\` は素の文字になるだけで、`\` を含む本文が
+   *   無ければ**どちらでも 0 件**である。
+   * 🔑 だから**当たるほうで見る**: `%` を含む本文を置き、`0%` で引く。
+   *   宣言が在れば「`0` のあとに文字どおりの `%`」に当たり、
+   *   落とすと `%0\%%` が「`0` のあとに `\`」を探して**当たらなくなる**。
+   */
+  it('🔴 2 文字以下の道で、記号が文字どおりに当たる', async () => {
+    await put('n-pct', { archetype: 'text', entryOrder: 9 }, '割引は 100%引きです\n');
+    expect((await scan({ text: '0%' })).lids, '記号が文字どおりに当たっていない').toEqual([
+      'n-pct',
+    ]);
+    /**
+     * ⚠ **対照群** ── `%` 1 文字で引いても、**`%` を実際に書いてある 1 件だけ**である
+     *   (ワイルドカードとして働いていたら、この時点で全件が並ぶ)。
+     */
+    const wild = await scan({ text: '%' });
+    expect(wild.lids, '「%」が全件に当たった').toEqual(['n-pct']);
+    expect(wild.total, '数のほうだけ全件になっている').toBe(1);
+    expect((await scan({ text: '0X' })).lids, '当たらない語で当たった').toEqual([]);
+  });
+
+  it('🔴 語と列は AND で効く', async () => {
+    const got = await scan({ text: '請求書', kind: 'attachment' });
+    expect(got.lids, '種類を見ていない').toEqual([]);
+    expect((await scan({ text: '請求書', kind: 'text' })).lids, '語のほうを見ていない').toEqual([
+      'n-word',
+    ]);
   });
 });
 

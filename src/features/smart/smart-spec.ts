@@ -72,6 +72,25 @@ export const SMART_CREATED_KEY = 'smart-created';
 export const SMART_DATED_KEY = 'smart-dated';
 
 /**
+ * 🔴 **語で絞る**(#421 段③)。⚠ 当てるのは**既存の全文検索と同じ規則**である
+ *   (`planSearch` ── 3 文字以上は FTS5 の trigram、2 文字以下は LIKE)。
+ *
+ * 🔑 **同じ問いに答える口を 2 つ作らない**(§7)── ここで独自に
+ *   `body.includes(語)` と書くと、**帯で絞った結果と探す欄の結果が食い違う**
+ *   (大小・正規化・区切りの扱いが別物になる)。だから当てるのは **SQL 1 か所**で、
+ *   画面側は 1 文字も当てない。
+ * ⚠ そのぶん**その場で当て直せない** ── タグと違って、reducer は新しい本文を
+ *   持っていても答えを出せない。`needsRescan` が true を返すのはそのためである。
+ */
+export const SMART_TEXT_KEY = 'smart-text';
+
+/**
+ * 語の長さの上限。⚠ **手違いの検出**である ── 本文を丸ごと貼られると、
+ * それが**その入れ物の frontmatter に書き込まれる**(条件は本文が正本なので)。
+ */
+export const MAX_SMART_TEXT_CHARS = 100;
+
+/**
  * 「N 日以内」の上限。⚠ **手違いの検出**である(3650 = 10 年)── これより長い
  * 指定は「全部」と変わらないので、条件として受けない。
  */
@@ -109,6 +128,11 @@ export interface SmartSpec {
    *   (`readScheduleDate`)。画面の字もそう書く(「付いているのに集まらない」を作らない)。
    */
   readonly dated: boolean | null;
+  /**
+   * 題名か本文にこの語があるか。`null` = 見ない(#421 段③)。
+   * ⚠ **当てるのは worker の SQL だけ** ── 上の `SMART_TEXT_KEY` の注記を読むこと。
+   */
+  readonly text: string | null;
 }
 
 export const EMPTY_SMART: SmartSpec = {
@@ -117,6 +141,7 @@ export const EMPTY_SMART: SmartSpec = {
   updatedDays: null,
   createdDays: null,
   dated: null,
+  text: null,
 };
 
 /** 条件が 1 つも無いか。⚠ **空は「全部」ではなく「何も」**である(上の注記)。 */
@@ -125,21 +150,33 @@ export const isSmartEmpty = (spec: SmartSpec): boolean =>
   spec.kind === null &&
   spec.updatedDays === null &&
   spec.createdDays === null &&
-  spec.dated === null;
+  spec.dated === null &&
+  spec.text === null;
 
 /**
- * 🔴 **列で引く条件を 1 つでも持っているか**(#421 段②)。
+ * 🔴 **その場では当て直せない条件を持っているか**(#421 段②③)。
  *
- * 🔑 呼び側はこれで**その場で落とせるか**を決める ── タグだけの入れ物は
- *   新しい本文から手で判定できるが、⚠ **列の条件は本文を書いた瞬間に変わる**
- *   (`updated_at` は保存のたびに動く)ので、手で継ぎ足すと嘘になる。
- *   そちらは worker に集め直しを頼む。
+ * 🔑 呼び側はこれで「**新しい本文を見て手で継ぎ足してよいか**」を決める。
+ *   タグだけの入れ物は本文から答えが出るが、次の 2 つは出ない:
+ *   - **列の条件**(種類 / 更新 / 作成 / 日付)── `updated_at` は保存のたびに動くし、
+ *     `archetype` / `created_at` / `date` は本文からは決まらない
+ *   - 🔴 **語の条件**(段③)── 当てるのは **FTS5 / LIKE = SQL 1 か所**である。
+ *     ⚠ ここで `body.includes(語)` と書けば手で判定できてしまうが、それは
+ *     **同じ問いに答える口を 2 つ作る**ことで、帯の並びと探す欄の結果が静かに
+ *     食い違う(§7)
+ *   どちらも worker に集め直しを頼む。
+ *
+ * ⚠ **名前を `hasColumnCond` から変えた**(段③)── 語の条件は列ではないのに
+ *   ここが true を返す必要がある。名前を「列」のままにすると、次に読む人が
+ *   「列だけを見ている」と読み、語の条件を**その場で当てる**枝を書き足す
+ *   ── CLAUDE.md §4「計器の名前が、計器の見ている範囲と違う」型である。
  */
-export const hasColumnCond = (spec: SmartSpec): boolean =>
+export const needsRescan = (spec: SmartSpec): boolean =>
   spec.kind !== null ||
   spec.updatedDays !== null ||
   spec.createdDays !== null ||
-  spec.dated !== null;
+  spec.dated !== null ||
+  spec.text !== null;
 
 /**
  * 本文から条件を読む。
@@ -159,8 +196,26 @@ export function readSmartSpec(body: string): SmartSpec {
     updatedDays: readDays(meta[SMART_UPDATED_KEY]),
     createdDays: readDays(meta[SMART_CREATED_KEY]),
     dated: readFlag(meta[SMART_DATED_KEY]),
+    text: readText(meta[SMART_TEXT_KEY]),
   };
 }
+
+/**
+ * 語を読む。⚠ **1 行に潰す** ── 改行やタブを跨いだ語は探せない(索引は行を跨がない)
+ * し、frontmatter に書き戻すと読みにくい形になる。
+ * ⚠ 空・長すぎるものは**条件にしない**(黙って切り詰めない ── 切り詰めると
+ *   「書いた語と集まる語が違う」という、画面に理由の出ない形になる)。
+ */
+function readText(raw: FrontmatterValue | undefined): string | null {
+  if (typeof raw === 'number' || typeof raw === 'boolean') return normalizeText(String(raw));
+  if (typeof raw !== 'string') return null;
+  return normalizeText(raw);
+}
+
+const normalizeText = (raw: string): string | null => {
+  const v = raw.replace(/\s+/gu, ' ').trim();
+  return v === '' || [...v].length > MAX_SMART_TEXT_CHARS ? null : v;
+};
 
 function readSmartTags(raw: FrontmatterValue | undefined): readonly string[] {
   if (raw === undefined || raw === null) return [];
@@ -257,9 +312,15 @@ export function withSmartTag(
  * 🔴 **列で引く条件の名前**(#421 段②)。⚠ **綴りを直書きしない**
  * (画面・reducer・effect の 3 か所に散ると、1 つ直し忘れが静かに効く)。
  */
-export type SmartField = 'kind' | 'updated' | 'created' | 'dated';
+export type SmartField = 'kind' | 'updated' | 'created' | 'dated' | 'text';
 
-export const SMART_FIELDS: readonly SmartField[] = ['kind', 'updated', 'created', 'dated'];
+export const SMART_FIELDS: readonly SmartField[] = [
+  'kind',
+  'updated',
+  'created',
+  'dated',
+  'text',
+];
 
 /**
  * 列で引く条件を 1 つ決める / 外す。
@@ -277,6 +338,17 @@ export function withSmartField(
 ): SmartCondResult {
   const raw = value.trim();
   const cleared = raw === '';
+  /**
+   * 🔴 **語**(#421 段③)。⚠ 読む規則は `readSmartSpec` と**同じ関数**を通す ──
+   *   「画面から入れられるのに本文からは読めない」食い違いを作らない。
+   */
+  if (field === 'text') {
+    const next = cleared ? null : normalizeText(raw);
+    if (!cleared && next === null) return { ok: false, reason: 'invalid' };
+    return next === spec.text
+      ? { ok: false, reason: 'unchanged' }
+      : { ok: true, spec: { ...spec, text: next } };
+  }
   if (field === 'kind') {
     const next = cleared ? null : readKind(raw);
     if (!cleared && next === null) return { ok: false, reason: 'invalid' };
@@ -305,6 +377,7 @@ export function withSmartField(
  * ⚠ 読む側と書く側で綴りが食い違わないよう、**ここ 1 か所**で決める。
  */
 export function smartFieldValue(spec: SmartSpec, field: SmartField): string {
+  if (field === 'text') return spec.text ?? '';
   if (field === 'kind') return spec.kind ?? '';
   if (field === 'dated') return spec.dated === null ? '' : spec.dated ? 'true' : 'false';
   const days = field === 'updated' ? spec.updatedDays : spec.createdDays;
@@ -322,6 +395,39 @@ export function smartCondError(reason: 'unchanged' | 'limit' | 'invalid'): strin
 }
 
 /**
+ * 🔴 **落として入れられるか / ここから外せるか**(#421 段②の穴。2026-08-26 に実測)。
+ *
+ * ## 何が起きていたか
+ *
+ * 落とす動線(`SMART_TAGS`)は「**条件のタグを本文に付ける**」ことで実現している。
+ * ⚠ ところが段② で**タグを 1 つも持たない入れ物**(「更新が 30 日以内」だけ、など)が
+ * 作れるようになり、そこへ落とすと **付けるタグが 0 個 = 何も起きない**まま
+ * 集め直しへ進んでいた ── **画面には何も出ない**。
+ *
+ * 🔑 実測(対照群つき): タグの条件を持つ入れ物へ落とすと本文に `tags: [請求]` が
+ *   付いたのに対し、`smart-updated: 30d` だけの入れ物では**本文も断り文も 0 バイト**。
+ *   ⚠ user から見ると「掴んで落としたのに、入らないし理由も無い」である。
+ *
+ * ## なぜ「付けられない」のか(user へ出す理由の中身)
+ *
+ * 種類 / 更新 / 作成 / 日付 / 語は、**落とした側の本文を書き換えても満たせない**
+ * (更新時刻は保存が決める / 種類は作った時に決まる / 語は本文そのもの)。
+ * 🔑 だから**断る** ── 起票時の ⚠「書き換えられない条件では、落とすのを断る。
+ * 断り文になぜを出す」がここに当たる。
+ *
+ * @returns 通してよいときは `null`
+ */
+export function smartWriteError(spec: SmartSpec, mode: 'add' | 'remove'): string | null {
+  if (isSmartEmpty(spec))
+    return 'このスマートフォルダにはまだ条件がありません(先にタグを選んでください)';
+  if (spec.tags.length > 0) return null;
+  // ⚠ **押した動作の言葉で書く** ── 「落とした」と「外した」では、次にすることが違う
+  return mode === 'add'
+    ? 'この入れ物はタグ以外の条件で集めています(落として入れることはできません)── 条件にタグを足すと入れられます'
+    : 'この入れ物はタグ以外の条件で集めています(ここから外すことはできません)── 集まるかどうかはノートの中身が決めます';
+}
+
+/**
  * 条件を本文へ書き戻す(**原文 splice** ── 説明文も他の key も無傷)。
  * ⚠ 空になったら **key ごと消す**(`smart-tags: []` を残すと、次に読んだとき
  *   「条件が在るのに当たらない」に見える)。
@@ -334,6 +440,7 @@ export function writeSmartSpec(body: string, spec: SmartSpec): string {
     [SMART_UPDATED_KEY]: spec.updatedDays === null ? undefined : `${String(spec.updatedDays)}d`,
     [SMART_CREATED_KEY]: spec.createdDays === null ? undefined : `${String(spec.createdDays)}d`,
     [SMART_DATED_KEY]: spec.dated === null ? undefined : spec.dated,
+    [SMART_TEXT_KEY]: spec.text ?? undefined,
   });
 }
 
@@ -379,6 +486,8 @@ export interface SmartQuery {
   readonly updatedFrom: string | null;
   readonly createdFrom: string | null;
   readonly dated: boolean | null;
+  /** 題名か本文にこの語(#421 段③)。⚠ 引き方は `planSearch` が 1 か所で持つ。 */
+  readonly text: string | null;
 }
 
 /**
@@ -392,6 +501,7 @@ export function smartQueryOf(spec: SmartSpec, nowMs: number): SmartQuery {
     updatedFrom: smartCutoff(spec.updatedDays, nowMs),
     createdFrom: smartCutoff(spec.createdDays, nowMs),
     dated: spec.dated,
+    text: spec.text,
   };
 }
 

@@ -130,7 +130,19 @@ export class FilerRenderer {
    *   (`smart-updated: 45d`)。マニュアルにそう書く。
    */
   private static readonly SMART_FIELD_UI: Readonly<
-    Record<SmartField, { label: string; options: readonly (readonly [string, string])[] }>
+    Record<
+      SmartField,
+      {
+        label: string;
+        /**
+         * 🔴 **`null` = 選ぶのではなく打つ**(#421 段③ の「語」)。
+         * ⚠ 選択肢を空配列にしない ── 空の `<select>` は**選べない口**として
+         *   画面に出てしまい、押しても何も起きない(dead click)。
+         */
+        options: readonly (readonly [string, string])[] | null;
+        placeholder?: string;
+      }
+    >
   > = {
     kind: {
       label: '種類',
@@ -155,6 +167,18 @@ export class FilerRenderer {
         ['90d', '90 日以内'],
         ['365d', '1 年以内'],
       ],
+    },
+    /**
+     * 🔴 **語で絞る**(#421 段③)。⚠ 当てるのは**探す欄と同じ規則**
+     *   (`planSearch` ── 3 文字以上は索引、2 文字以下は総当たり)なので、
+     *   「探して出るのに集まらない」は起きない。
+     * ⚠ **`change` で撃つ**(Enter / 欄から出たとき)── 1 文字ごとに撃つと、
+     *   打っている最中の語が**その入れ物の本文へ何度も書かれる**。
+     */
+    text: {
+      label: '語',
+      options: null,
+      placeholder: '題名か本文にある語',
     },
     dated: {
       label: '日付',
@@ -215,19 +239,33 @@ export class FilerRenderer {
       wrap.setAttribute('data-pkc-region', 'smart-field');
       const name = document.createElement('span');
       name.textContent = ui.label;
-      const sel = document.createElement('select');
-      sel.setAttribute('data-pkc-field', `smart-${field}`);
-      sel.setAttribute('data-pkc-action', 'smart-field');
-      sel.setAttribute('data-pkc-smart-field', field);
-      sel.setAttribute('aria-label', `${ui.label}で絞る`);
-      for (const [value, text] of ui.options) {
-        const opt = document.createElement('option');
-        opt.value = value;
-        opt.textContent = text;
-        sel.append(opt);
+      /**
+       * ⚠ **打つ欄も同じ `smart-field` の口を通す**(§7)── action を分けると、
+       *   書込の道が 2 本になり、片方だけ集め直しを落とす、が静かに起きる。
+       * 🔑 打ちかけの字は `captureBarInputs` が組み直しをまたいで運ぶ
+       *   ── `input[data-pkc-field]` を拾うので、この欄も**そのまま守られる**。
+       */
+      const el =
+        ui.options === null
+          ? document.createElement('input')
+          : document.createElement('select');
+      el.setAttribute('data-pkc-field', `smart-${field}`);
+      el.setAttribute('data-pkc-action', 'smart-field');
+      el.setAttribute('data-pkc-smart-field', field);
+      el.setAttribute('aria-label', `${ui.label}で絞る`);
+      if (el instanceof HTMLInputElement) {
+        el.type = 'text';
+        if (ui.placeholder !== undefined) el.placeholder = ui.placeholder;
+      } else if (ui.options !== null) {
+        for (const [value, text] of ui.options) {
+          const opt = document.createElement('option');
+          opt.value = value;
+          opt.textContent = text;
+          el.append(opt);
+        }
       }
-      sel.value = hit === null ? '' : smartFieldValue(hit.spec, field);
-      wrap.append(name, sel);
+      el.value = hit === null ? '' : smartFieldValue(hit.spec, field);
+      wrap.append(name, el);
       bar.append(wrap);
     }
 

@@ -1662,7 +1662,14 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (lid === null) return;
     const field = target.getAttribute('data-pkc-smart-field') ?? '';
     if (!(SMART_FIELDS as readonly string[]).includes(field)) return;
-    const value = target instanceof HTMLSelectElement ? target.value : '';
+    /**
+     * ⚠ **打つ欄(語 ── 段③)も同じ口を通る**ので、`<input>` も受ける。
+     * 🔑 `''` は「指定しない」= 条件を外す、という意味である(`withSmartField`)。
+     */
+    const value =
+      target instanceof HTMLSelectElement || target instanceof HTMLInputElement
+        ? target.value
+        : '';
     dispatcher.dispatch({ type: 'SMART_FIELD', lid, field: field as SmartField, value });
   },
   'smart-cond-remove': (dispatcher, target) => {
@@ -3631,7 +3638,19 @@ export function bindActions(
      * 🔑 `repo-hygiene` の「受け手のいない action が無い」は**逆向き**しか見ない
      *   (handler が在るので緑になる)── だから足すときは必ずここも見る。
      */
-    if (changeAction === 'toggle-app-tile' || changeAction === 'rename-attachment') {
+    /**
+     * ⚠ **`smart-field` を足したのは、まさにこの罠を踏んだから**(#421 段③)。
+     *   語の条件を `<input>` にしたところ、`<select>` の 4 つと**同じ action**を
+     *   付けたのに **change では 1 度も呼ばれなかった** ── 打っても
+     *   「条件を選んでください」のまま(無言の dead click)。
+     * 🔑 上の注記どおり **unit も `repo-hygiene` も鳴らない** ── 拾ったのは
+     *   実ブラウザの smoke だけである(`smart-folder.smoke.spec.ts` の段③)。
+     */
+    if (
+      changeAction === 'toggle-app-tile' ||
+      changeAction === 'rename-attachment' ||
+      changeAction === 'smart-field'
+    ) {
       run(changeAction, el);
       return;
     }
