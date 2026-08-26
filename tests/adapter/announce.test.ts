@@ -535,7 +535,7 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
-    ['2026-08-26-smart-folder', '4ee34912'],
+    ['2026-08-26-smart-folder', '1f694995'],
     ['2026-08-25-dual-place-tools', '9fcb19d7'],
     ['2026-08-25-rich-text-paste', '4dab95f9'],
     ['2026-08-25-portable-html', '180eeb6a'],

@@ -37,7 +37,8 @@ import {
   type SelectionHistory,
 } from '@features/nav/selection-history';
 import { filerRows, rangeInRows, smartLidsOf } from '@features/relation/filer-list';
-import { SMART_ARCHETYPE } from '@features/smart/smart-spec';
+import { SMART_ARCHETYPE, matchesSmart } from '@features/smart/smart-spec';
+import { readTags } from '@features/flavor/tags';
 import {
   initialDual,
   paneOf,
@@ -1715,6 +1716,13 @@ function reduceCore(
            * 🔑 板を開いていなければ即 `null` で返るので、実費はほぼ無い。
            */
           taskScan: refreshTaskCards(state.taskScan, action.lid, action.body),
+          // 🔑 タグが変われば、開いている入れ物の中身も変わる(#421 / user 要望 2026-08-26)
+          smartHits: refreshSmartHits(
+            state.smartHits,
+            action.lid,
+            action.body,
+            state.entryMetas,
+          ),
         },
         events: [],
       };
@@ -1998,6 +2006,13 @@ function reduceCore(
           },
           // ⚠ 名前のとおり**本文が入れ替わる**所 ── 札も組み直す(上と同じ理由)
           taskScan: refreshTaskCards(state.taskScan, action.lid, action.body),
+          // 🔑 タグが変われば、開いている入れ物の中身も変わる(#421 / user 要望 2026-08-26)
+          smartHits: refreshSmartHits(
+            state.smartHits,
+            action.lid,
+            action.body,
+            state.entryMetas,
+          ),
         },
         events: [],
       };
@@ -2171,7 +2186,7 @@ function reduceCore(
         };
       }
       // 抽出はイベント発火時(= この reduce)に同期で行い、行全体を確定して運ぶ
-      const { entryMetas, entry, taskScan } = buildPersist(state, meta, body);
+      const { entryMetas, entry, taskScan, smartHits } = buildPersist(state, meta, body);
       // 変更前(baseline)を履歴に積むかどうか(P5c: 実際の記録は worker が
       // 同 tx で行う ── ここは「刻むか / 頭を張り替えるだけか」の意思決定)。
       // 新規作成の初回 commit は積まない ──「flavor seed へ戻す」だけの復元先は
@@ -2199,6 +2214,7 @@ function reduceCore(
           ...next,
           entryMetas,
           taskScan,
+          smartHits,
           ...(diskAhead
             ? {
                 error:
@@ -2207,7 +2223,17 @@ function reduceCore(
               }
             : {}),
         },
-        events: [{ type: 'PERSIST_ENTRY', entry, checkpoint }],
+        /**
+         * 🔑 **保存したのが入れ物自身なら、条件が変わったかもしれない**
+         *   (本文の `smart-tags:` は手で書ける ── マニュアルにもそう書いてある)。
+         * ⚠ 上の `refreshSmartHits` は**自分自身を触らない**(自分は集めないので
+         *   正しい)ので、条件の変更はここでしか拾えない。
+         * ⚠ 入れ物でなければ `smartScanFor` が空を返す ── 普通の保存で走査は走らない。
+         */
+        events: [
+          { type: 'PERSIST_ENTRY', entry, checkpoint },
+          ...smartScanFor(state, lid),
+        ],
       };
     }
     case 'RETRY_PERSIST': {
@@ -2219,7 +2245,7 @@ function reduceCore(
       if (baseline === persisted || diskAhead) return { state, events: [] };
       const meta = state.entryMetas.get(lid);
       if (!meta) return { state, events: [] };
-      const { entryMetas, entry, taskScan } = buildPersist(state, meta, baseline);
+      const { entryMetas, entry, taskScan, smartHits } = buildPersist(state, meta, baseline);
       // 再送でも刻む意思は同じ(worker 側の hash skip が重複を防ぐので二重に
       // 積まれることはない ── 初回 persist が失敗していれば disk はまだ前の内容)
       const checkpoint =
@@ -2231,6 +2257,7 @@ function reduceCore(
           error: null,
           entryMetas,
           taskScan,
+          smartHits,
           openBody: { lid, body: baseline, baseline, persisted, diskAhead: false },
         },
         events: [{ type: 'PERSIST_ENTRY', entry, checkpoint }],
@@ -2371,6 +2398,13 @@ function reduceCore(
            *   板から「やること」を足す口を作ると、これが正面の欠陥になる。
            */
           taskScan: refreshTaskCards(state.taskScan, action.lid, action.body),
+          // 🔑 タグが変われば、開いている入れ物の中身も変わる(#421 / user 要望 2026-08-26)
+          smartHits: refreshSmartHits(
+            state.smartHits,
+            action.lid,
+            action.body,
+            state.entryMetas,
+          ),
           /**
            * 🔴 **直前の 1 手だけ覚える**(#395 段①)── 「元に戻す」の材料。
            * ⚠ 純粋な挿入でなかった回は `null` に落とす ── 前の追記の材料を
@@ -2600,7 +2634,13 @@ function reduceCore(
        * ⚠ 盤面を一度も開いていなければ `null` のまま(何もしない)。
        */
       const taskScan = refreshTaskCards(state.taskScan, action.lid, action.body);
-      return { state: { ...state, entryMetas, openBody, taskScan }, events: [] };
+      /**
+       * 🔑 **タグを付けたら、開いている入れ物にその場で落ちる**(user 要望 2026-08-26)。
+       * ⚠ ここは**まとめてタグを付ける**経路でもある(`REQUEST_BULK_TAG` が 1 件ずつ
+       *   ack を撃つ)── worker に頼み直す形だと 100 件で 100 回の全件走査になる。
+       */
+      const smartHits = refreshSmartHits(state.smartHits, action.lid, action.body, entryMetas);
+      return { state: { ...state, entryMetas, openBody, taskScan, smartHits }, events: [] };
     }
     case 'SET_CALENDAR_MONTH': {
       // 月送りの正規化(binder は 0 や 13 を送ってよい)
@@ -3629,6 +3669,13 @@ function reduceCore(
            *   ので、こちらは通さない ── そもそも編集中に板は開けない。
            */
           taskScan: refreshTaskCards(state.taskScan, action.meta.lid, action.body),
+          // 🔑 タグが変われば、開いている入れ物の中身も変わる(#421 / user 要望 2026-08-26)
+          smartHits: refreshSmartHits(
+            state.smartHits,
+            action.meta.lid,
+            action.body,
+            state.entryMetas,
+          ),
           error: null,
         },
         events: [],
@@ -3849,6 +3896,72 @@ function dropLink(
  *   `openBody` に新しい本文を入れる case を足した人は、通し忘れるとその場で落ちる。
  * ⚠ 板を一度も開いていなければ `null` のまま何もしない。
  */
+/**
+ * 🔴 **タグを付けたら、開いているスマートフォルダにその場で落ちる**
+ * (user 要望 2026-08-26「文書側でタグつけしたら勝手にフォルダに落ちるもやってください」)。
+ *
+ * ⚠ 直す前は、集め直しが走るのは **①入れ物へ入ったとき ②落としたとき
+ *   ③条件を変えたとき**の 3 つだけだった ── **情報ペインでタグを付けても、
+ *   本文の frontmatter に `tags:` を書いて保存しても、開いている入れ物は
+ *   古い並びのまま**である(user から見ると「付けたのに出てこない」)。
+ *
+ * 🔑 **worker に頼み直さない。** ここには**新しい本文**が在るので、
+ *   「この 1 件が当たるか」は**その場で**決まる ── 板の札を組み直す
+ *   `refreshTaskCards` と同じ形である。往復しないので**押した手応えが消えない**し、
+ *   まとめて 100 件にタグを付けても全件走査は 1 度も走らない。
+ * 🔑 当てる規則は `matchesSmart` **1 本**(§7)── worker と同じ関数を通る。
+ *   ここに独自の判定を書くと、開いている間と開き直した後で並びが変わる。
+ *
+ * ⚠ **触らない場合が 3 つある**(どれも「手で継ぎ足すと嘘になる」形):
+ *   ① **その入れ物自身**の本文が変わった(自分は集めない ── 条件のほうが
+ *      変わったのなら `COMMIT_EDIT` が集め直しを頼む)
+ *   ② **集められない版**(`failed`)── 触ると「集まったふり」になる
+ *   ③ **上限で切れている**一覧(`total > lids.length`)── 1 件外しても
+ *      **次の 1 件が分からない**ので、数と中身が食い違う。次に開くまで待つ
+ *
+ * ⚠ 並べる順は **worker と同じ**(`entry_order`、同値なら lid)── 揃えないと、
+ *   付けた瞬間だけ末尾に出て、開き直すと別の場所へ跳ぶ。
+ */
+function refreshSmartHits(
+  smartHits: ReadonlyMap<string, SmartHitState>,
+  lid: string,
+  body: string,
+  entryMetas: ReadonlyMap<string, EntryMeta>,
+): ReadonlyMap<string, SmartHitState> {
+  /**
+   * ⚠ **「1 つも開いていないなら即返す」を書かない**(変異試験 T7 が教えた)──
+   *   下の `next ?? smartHits` が**同じ参照を返す**ので、外しても結果は変わらない。
+   *   同じ答えを出す口を 2 つ置くと、片方を壊しても鳴らなくなる(§7)。
+   */
+  const tags = readTags(body);
+  const orderOf = (l: string): number =>
+    entryMetas.get(l)?.entryOrder ?? Number.MAX_SAFE_INTEGER;
+  let next: Map<string, SmartHitState> | null = null;
+  for (const [smartLid, hit] of smartHits) {
+    if (smartLid === lid) continue;
+    if (hit.failed) continue;
+    if (hit.total > hit.lids.length) continue;
+    const at = hit.lids.indexOf(lid);
+    const should = matchesSmart({ tags: hit.tags }, tags);
+    if (should === (at >= 0)) continue;
+    let lids: string[];
+    if (should) {
+      const o = orderOf(lid);
+      const i = hit.lids.findIndex((x) => {
+        const xo = orderOf(x);
+        return xo > o || (xo === o && x > lid);
+      });
+      lids = [...hit.lids];
+      lids.splice(i < 0 ? lids.length : i, 0, lid);
+    } else {
+      lids = [...hit.lids.slice(0, at), ...hit.lids.slice(at + 1)];
+    }
+    next ??= new Map(smartHits);
+    next.set(smartLid, { ...hit, lids, total: lids.length });
+  }
+  return next ?? smartHits;
+}
+
 function refreshTaskCards(
   scan: TaskScan | null,
   lid: string,
@@ -3868,6 +3981,8 @@ function buildPersist(
   entry: EntryUpsert;
   /** ⚠ 板を開いていなければ `null`(呼び側はそのまま state へ入れてよい)。 */
   taskScan: TaskScan | null;
+  /** ⚠ 入れ物を 1 つも開いていなければ、渡された map がそのまま返る。 */
+  smartHits: ReadonlyMap<string, SmartHitState>;
 } {
   const ext = extractMeta(meta.archetype, body);
   const changed =
@@ -3881,6 +3996,11 @@ function buildPersist(
     entryMetas,
     // 🔑 本文が変われば札の行番号もずれる ── ここで組み直す(上の docstring)
     taskScan: refreshTaskCards(state.taskScan, meta.lid, body),
+    /**
+     * 🔑 **本文に `tags:` を書いて保存した回**も、開いている入れ物へ落とす
+     *   (user 要望 2026-08-26)── 情報ペインから付けた回だけ直しても片手落ちである。
+     */
+    smartHits: refreshSmartHits(state.smartHits, meta.lid, body, entryMetas),
     entry: {
       lid: meta.lid,
       title: meta.title,

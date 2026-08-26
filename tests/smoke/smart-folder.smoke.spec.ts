@@ -118,3 +118,59 @@ test('🔴 落とすと条件のタグが付き、「ここから外す」で外
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **文書側でタグを付け外ししたら、開いている入れ物がその場で変わる**
+ * (user 要望 2026-08-26「文書側でタグつけしたら勝手にフォルダに落ちるもやってください」)。
+ *
+ * 🔴 **unit では届かない層**:まとめてタグを外す経路は **worker に集め直しを
+ *   頼まない**(頼むと 100 件で 100 回の全件走査になる)。だから
+ *   「行が消えること」は**画面が当たりの表から組み直されている**証拠であって、
+ *   走査が返ってきた証拠ではない ── そこが本当に繋がっているかを実機で見る。
+ */
+test('🔴 中でタグを外すと、集め直しを待たずに行が消える (#421 / user 要望 2026-08-26)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await useSplitEditor(page);
+  await gotoApp(page);
+
+  await makeNote(page, '見積書', '---\ntags: [請求]\n---\n見積の中身\n');
+  await makeNote(page, '請求書', '---\ntags: [請求]\n---\n請求の中身\n');
+
+  await createEntry(page, 'smart');
+  const title = page.locator('[data-pkc-field="editor-title"]');
+  if (await title.count()) await title.fill('請求ぜんぶ');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  await page.locator(SMART_ROW).first().dblclick();
+  await page.locator('[data-pkc-field="smart-cond"]').fill('請求');
+  await clickReal(page, '[data-pkc-action="smart-cond-add"]');
+  await expect(page.locator(ROWS), '2 件とも集まっていない').toHaveCount(2);
+
+  // 2 件に印を付ける(実キーの修飾つきクリック)
+  const rows = page.locator(ROWS);
+  await rows.nth(0).click();
+  await rows.nth(1).click({ modifiers: ['ControlOrMeta'] });
+  await expect(page.locator('[data-pkc-field="filer-bulk"]')).toContainText('2 件');
+
+  /**
+   * 🔴 **「まとめてタグを外す」は集め直しを頼まない口である** ── ここで行が
+   *   消えるなら、当たりの表がその場で組み直されている。
+   */
+  await page.locator('[data-pkc-field="bulk-tag"]').fill('請求');
+  await clickReal(page, '[data-pkc-action="bulk-tag-remove"]');
+  await expect(page.locator(ROWS), '外したのに行が残っている').toHaveCount(0);
+  await expect(page.locator(WHY), '件数が古いまま').toContainText('0 件');
+
+  /**
+   * ⚠ **対照群** ── 画面だけの嘘ではなく、**本文が本当に変わっている**。
+   *   開き直しても 0 件のままなら、走査もそう読んでいる。
+   */
+  await page.reload();
+  await page.locator(SMART_ROW).first().dblclick();
+  await expect(page.locator(WHY), '本文は変わっていなかった').toContainText('0 件');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

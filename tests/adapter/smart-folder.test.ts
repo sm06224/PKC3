@@ -55,6 +55,8 @@ const METAS = [
   meta('f1', 2, 'はこ', 'folder'),
   meta('a', 3, 'あ'),
   meta('b', 4, 'い'),
+  // ⚠ 2 つ目の入れ物 ── 「絞った入れ物」と「広い入れ物」に**同時に**出る話に要る
+  meta('s2', 5, '2026年ぜんぶ', 'smart'),
 ];
 const RELS = [rel('r1', 'f1', 'b')];
 
@@ -218,6 +220,185 @@ describe('双方向 ── 落とすと付く / 外すと消える(#421 段①)'
   it('⚠ スマートフォルダでないものには条件を書かない', () => {
     expect(reduce(booted(), { type: 'SMART_COND', lid: 'f1', tag: '請求', mode: 'add' }).events)
       .toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **文書側でタグを付けたら、開いている入れ物にその場で落ちる**
+ * (user 要望 2026-08-26)。
+ *
+ * > 文書側でタグつけしたら勝手にフォルダに落ちるもやってください
+ * > 複数のタグつけにも対応してください
+ * > つまり2026年と8月と26日という別々のタグをつけると複数タグ指定で
+ * > 2026年8月26日の文書を見るフォルダと2026年のタグで見るフォルダでも見れるみたいな
+ */
+describe('タグを付けたら勝手に落ちる(user 要望 2026-08-26)', () => {
+  /** 当たりを手で置く(worker が返した直後の姿)。 */
+  const withHit = (
+    state: AppState,
+    smartLid: string,
+    tags: string[],
+    lids: string[],
+  ): AppState =>
+    reduce(state, { type: 'SMART_SCANNED', lid: smartLid, lids, total: lids.length, tags })
+      .state;
+
+  const rewritten = (state: AppState, lid: string, body: string): AppState =>
+    reduce(state, {
+      type: 'BODY_REWRITTEN',
+      lid,
+      body,
+      rewrite: { kind: 'tag', tag: '請求', mode: 'add' },
+      status: null,
+      date: null,
+      archived: false,
+    }).state;
+
+  it('🔴 タグを付けた瞬間に並ぶ(worker に頼み直さない)', () => {
+    const s0 = withHit(booted(), 's1', ['請求'], []);
+    const s1 = rewritten(s0, 'a', '---\ntags: [請求]\n---\nあ\n');
+    expect(s1.smartHits.get('s1')?.lids, '付けたのに出てこない').toEqual(['a']);
+    expect(s1.smartHits.get('s1')?.total).toBe(1);
+  });
+
+  it('🔴 タグを外した瞬間に消える(片道にしない)', () => {
+    const s0 = withHit(booted(), 's1', ['請求'], ['a']);
+    const s1 = rewritten(s0, 'a', 'あ の本文だけ\n');
+    expect(s1.smartHits.get('s1')?.lids, '外したのに残っている').toEqual([]);
+    expect(s1.smartHits.get('s1')?.total).toBe(0);
+  });
+
+  /**
+   * 🔴 **user の物語そのもの** ── 別々のタグを 3 つ付けると、
+   * 「2026年 8月 26日」の入れ物にも「2026年」の入れ物にも**同時に**出る。
+   */
+  it('🔴 タグを 3 つ付けると、絞った入れ物にも広い入れ物にも同時に出る', () => {
+    let st = booted();
+    st = withHit(st, 's1', ['2026年', '8月', '26日'], []);
+    st = withHit(st, 's2', ['2026年'], []);
+    st = rewritten(st, 'a', '---\ntags: [2026年, 8月, 26日]\n---\nあ\n');
+    expect(st.smartHits.get('s1')?.lids, '全部付いているのに出ない').toEqual(['a']);
+    expect(st.smartHits.get('s2')?.lids, '広いほうに出ない').toEqual(['a']);
+  });
+
+  it('⚠ 条件を 1 つでも欠くと、絞ったほうには出ない(広いほうには出る)', () => {
+    let st = booted();
+    st = withHit(st, 's1', ['2026年', '8月', '26日'], []);
+    st = withHit(st, 's2', ['2026年'], []);
+    st = rewritten(st, 'a', '---\ntags: [2026年, 8月]\n---\nあ\n');
+    expect(st.smartHits.get('s1')?.lids, '欠けているのに出た').toEqual([]);
+    expect(st.smartHits.get('s2')?.lids, '広いほうに出ない').toEqual(['a']);
+  });
+
+  /** 🔑 並ぶ順は worker と同じ(`entry_order`)── 付けた瞬間だけ末尾に出ない。 */
+  it('🔴 割り込む位置が worker と同じ(付けた瞬間だけ末尾に出ない)', () => {
+    const s0 = withHit(booted(), 's1', ['請求'], ['b']); // b は entryOrder 4
+    const s1 = rewritten(s0, 'a', '---\ntags: [請求]\n---\nあ\n'); // a は 3
+    expect(s1.smartHits.get('s1')?.lids, '順が worker と違う').toEqual(['a', 'b']);
+  });
+
+  it('⚠ その入れ物自身の本文が変わっても、自分は集めない', () => {
+    const s0 = withHit(booted(), 's1', ['請求'], []);
+    const s1 = rewritten(s0, 's1', '---\ntags: [請求]\nsmart-tags: [請求]\n---\n説明\n');
+    expect(s1.smartHits.get('s1')?.lids, '自分自身が中に並んだ').toEqual([]);
+  });
+
+  /**
+   * ⚠ **切れている一覧は手で継ぎ足さない** ── 1 件外しても「次の 1 件」が
+   * 分からないので、数と中身が食い違う(次に開くまで待つ)。
+   */
+  it('⚠ 上限で切れている一覧は触らない(数と中身を食い違わせない)', () => {
+    let st = booted();
+    st = reduce(st, {
+      type: 'SMART_SCANNED',
+      lid: 's1',
+      lids: ['a'],
+      total: 9, // 上限で切れている
+      tags: ['請求'],
+    }).state;
+    st = rewritten(st, 'b', '---\ntags: [請求]\n---\nい\n');
+    expect(st.smartHits.get('s1')?.lids, '切れている一覧に継ぎ足した').toEqual(['a']);
+    expect(st.smartHits.get('s1')?.total).toBe(9);
+  });
+
+  /**
+   * ⚠ **集められない版では触らない**(集まったふりをしない)。
+   *
+   * 🔴 **条件を先に立ててから失敗させる**(変異試験 T4 が SURVIVED で教えた)。
+   *   `SMART_SCAN_FAILED` は**条件をそのまま残す**ので、失敗した入れ物は
+   *   「条件は在るのに中身が空」という姿になる ── そこへ手で継ぎ足すと、
+   *   帯は「この版では集められません」なのに**行だけ並ぶ**。
+   * ⚠ 条件が空のまま失敗させると、`matchesSmart` が常に false を返して
+   *   **この門を通らずに済んでしまう**(門を消しても落ちない)。
+   */
+  it('⚠ 集められない版では触らない(集まったふりをしない)', () => {
+    let st = withHit(booted(), 's1', ['請求'], []); // 一度は集められた = 条件が在る
+    st = reduce(st, { type: 'SMART_SCAN_FAILED', lid: 's1' }).state;
+    expect(st.smartHits.get('s1')?.tags, '前提: 条件は残っている').toEqual(['請求']);
+    st = rewritten(st, 'a', '---\ntags: [請求]\n---\nあ\n');
+    expect(st.smartHits.get('s1')?.failed).toBe(true);
+    expect(st.smartHits.get('s1')?.lids, '集められない版に行が並んだ').toEqual([]);
+  });
+
+  /** ⚠ 入れ物を 1 つも開いていなければ、何もしない(実費 0)。 */
+  it('⚠ 入れ物を開いていなければ、当たりの表は同じものが返る', () => {
+    const s0 = booted();
+    const s1 = rewritten(s0, 'a', '---\ntags: [請求]\n---\nあ\n');
+    expect(s1.smartHits, '開いていないのに表が組み直された').toBe(s0.smartHits);
+  });
+
+  /**
+   * 🔴 **本文に `tags:` を直接書いて保存した回も落ちる**(情報ペインだけ直すのは片手落ち)。
+   * ⚠ こちらは `COMMIT_EDIT`(`buildPersist` 経由)── 別の口である。
+   */
+  it('🔴 本文を編集して保存した回も、その場で落ちる', () => {
+    let st = withHit(booted(), 's1', ['請求'], []);
+    st = reduce(st, { type: 'SELECT_ENTRY', lid: 'a' }).state;
+    st = reduce(st, {
+      type: 'BODY_LOADED',
+      lid: 'a',
+      body: 'あ の本文\n',
+    }).state;
+    st = reduce(st, { type: 'START_EDIT' }).state;
+    st = reduce(st, {
+      type: 'UPDATE_OPEN_BODY',
+      body: '---\ntags: [請求]\n---\nあ の本文\n',
+    }).state;
+    const out = reduce(st, { type: 'COMMIT_EDIT' });
+    expect(out.state.smartHits.get('s1')?.lids, '保存しても落ちてこない').toEqual(['a']);
+  });
+
+  /**
+   * 🔴 **入れ物自身を保存したら、条件が変わったかもしれないので集め直す**
+   * ── `refreshSmartHits` は自分自身を触らないので、ここでしか拾えない。
+   */
+  it('🔴 入れ物の本文を保存すると、集め直しを頼む', () => {
+    let st = withHit(booted(), 's1', ['請求'], []);
+    st = reduce(st, { type: 'SELECT_ENTRY', lid: 's1' }).state;
+    st = reduce(st, { type: 'BODY_LOADED', lid: 's1', body: '説明\n' }).state;
+    st = reduce(st, { type: 'START_EDIT' }).state;
+    st = reduce(st, {
+      type: 'UPDATE_OPEN_BODY',
+      body: `---\n${SMART_TAGS_KEY}: [家事]\n---\n説明\n`,
+    }).state;
+    const out = reduce(st, { type: 'COMMIT_EDIT' });
+    expect(out.events, '条件を変えたのに集め直さない').toContainEqual({
+      type: 'REQUEST_SMART_SCAN',
+      lid: 's1',
+    });
+  });
+
+  /** ⚠ **対照群** ── 普通のノートを保存しただけでは走査を頼まない。 */
+  it('⚠ 普通のノートの保存では、走査を頼まない', () => {
+    let st = reduce(booted(), { type: 'SELECT_ENTRY', lid: 'a' }).state;
+    st = reduce(st, { type: 'BODY_LOADED', lid: 'a', body: 'あ\n' }).state;
+    st = reduce(st, { type: 'START_EDIT' }).state;
+    st = reduce(st, { type: 'UPDATE_OPEN_BODY', body: 'あ い\n' }).state;
+    const out = reduce(st, { type: 'COMMIT_EDIT' });
+    expect(
+      out.events.filter((e) => e.type === 'REQUEST_SMART_SCAN'),
+      '普通の保存で全件走査が走っている',
+    ).toEqual([]);
   });
 });
 
