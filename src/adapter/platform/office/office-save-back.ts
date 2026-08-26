@@ -87,6 +87,17 @@ export interface SaveBackDeps {
    * 取りこぼしを「古い鍵が生きているはず」に頼らない。
    */
   readonly adopt: (key: string, lid: string) => void;
+  /**
+   * 🔴 **手元のファイルへ書き戻す**(#432 段②)。合言葉が「手元のファイル」の
+   * 名前空間なら、PKC のノートではなく**元のファイル**が行き先である。
+   *
+   * @returns `null` = この保存は手元のファイルではない(いつもの取り込みへ) /
+   *   `true` = 書き戻した / `false` = 書き戻せなかった(**user に伝える**)
+   * ⚠ **optional にしない** ── 配線を落としても tsc が黙ると、
+   *   「手元のファイルを直したのに PKC のノートが増える」という、
+   *   user がいちばん気づきにくい形で壊れる(CLAUDE.md §7 の待ちの口と同じ理由)。
+   */
+  readonly writeLocal: (token: string, bytes: Uint8Array<ArrayBuffer>) => Promise<boolean | null>;
   /** user への一言(「取り込みました」)。 */
   readonly notify: (message: string) => void;
   /** 異常の報告(取り込めなかった)。 */
@@ -203,6 +214,28 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
     if (!deps.canWrite()) {
       deferred = true;
       return 'deferred';
+    }
+
+    /**
+     * 🔴 **手元のファイルから開いた回は、元のファイルへ戻す**(#432 段②)。
+     *
+     * ⚠ **PKC の合言葉を解く前**に見る ── 後ろに置くと `readAttachment` が
+     *   `local:1` を lid として引きに行き、見つからないので**新しい添付ノートを作る**
+     *   (= 手元のファイルを直したのにノートが増える、という user がいちばん
+     *   気づきにくい壊れ方になる)。
+     * ⚠ 書けなかったら**棚から捨てない** ── 捨てると user の編集が消える。
+     *   残しておけば、次の起動でもう一度取り込みを試せる。
+     */
+    const local = save.token === undefined ? null : await deps.writeLocal(save.token, bytes);
+    if (local !== null) {
+      if (!local) {
+        deps.fail(`元のファイルへ保存できませんでした(${save.name})`);
+        deferred = true;
+        return 'deferred';
+      }
+      await discardStaged(dir, save.key);
+      deps.notify(`元のファイルへ保存しました: ${save.name}`);
+      return 'replaced';
     }
 
     // 合言葉があれば差し替え、無ければ新規(#205 §2 の 2 行そのもの)。

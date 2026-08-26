@@ -82,6 +82,12 @@ import { launchTile } from '@adapter/ui/launch-tile';
 import { collectExistingLids } from '@features/import/existing-lids';
 import { appOfficePack } from '@adapter/ui/render/office-entry-view';
 import { applyPackResult } from '@adapter/ui/render/office-pack-panel';
+import { LocalOfficeFiles } from '@adapter/platform/office/local-office-files';
+import {
+  cannotWriteBackNotice,
+  isOfficeLaunchFile,
+  localOpenNotice,
+} from '@features/office/office-launch';
 import { OfficeWindow } from '@adapter/platform/office/office-window';
 import { createOfficeOpener } from '@adapter/platform/office/office-open';
 import { watchOfficeHang } from '@adapter/platform/office/office-hang-watch';
@@ -626,6 +632,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   //    2 個作っても放送は両方に届く(同名の別 instance には配られる)ので**動いてしまう** ──
   //    だから壊れ方は静かである:BroadcastChannel が 1 本余計に開きっぱなしになり、
   //    「窓が開いているか」の控えが 2 か所に分かれる。**同じ窓の状態は 1 か所で持つ**
+  /**
+   * 🔴 **手元のファイルを Office で開く控え**(#432)。⚠ **session 限り** ──
+   * 判断も寿命も `local-office-files.ts` が持つ(ここは配線だけ)。
+   */
+  const localOffice = new LocalOfficeFiles();
   const officeWindow = new OfficeWindow({
     // 🔴 #433 の計測(flag `office.inputLog`)── 窓を開くたびに読み直す
     //    (フラグ画面で切り替えたら、次に開く窓から効く)
@@ -847,6 +858,27 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   noopener の別窓は最前面に来たか分からない)。一言を出す。
    */
   const openOfficeTile = () => {
+    /**
+     * 🔴 **控えてある手元のファイルが在れば、それを開く**(#432)。
+     *
+     * ⚠ OS からの起動(`launchQueue`)は user の操作ではないので、そこから窓を
+     *   開くと**ポップアップ遮断で消える**。⚠ 確認ダイアログを挟んでも駄目である
+     *   (`<dialog>` の `close` は別の回で起きる)。
+     * 🔑 **ここは user が押した中**なので遮断されない ── だから「受け取ったら
+     *   控える / 押されたら渡す」の 2 段にしてある。
+     * ⚠ **`take()` は 1 度きり** ── 2 度目に同じファイルが開かないようにする。
+     */
+    const staged = localOffice.take();
+    if (staged !== null) {
+      const r = officeWindow.open({ name: staged.name, expectDocument: true });
+      officeWindow.provideDocument(staged.name, staged.bytes, staged.token);
+      showStatus(
+        r.kind === 'already-open'
+          ? `${staged.name} を開いています(Office のタブをご覧ください)`
+          : localOpenNotice(staged.name),
+      );
+      return;
+    }
     const r = officeWindow.open({});
     if (r.kind === 'already-open')
       showStatus('Office は既に開いています(そのタブをご覧ください)');
@@ -1207,6 +1239,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // ⚠ **呼ぶたびに読む** ── 昇格でこのタブが本体になることがある(#177)
     isHolder: () => writerHolder,
     canWrite: () => dispatcher.getState().phase === 'ready',
+    // 🔴 #432 段②: 手元のファイルから開いた回は、元のファイルへ戻す
+    //    ⚠ 判断(合言葉が手元のものか / 書けたか)は `local-office-files.ts` が持つ
+    writeLocal: (token, bytes) =>
+      localOffice.nameOf(token) === null
+        ? Promise.resolve(null)
+        : localOffice.writeBack(token, bytes),
     readAttachment: async (lid) => {
       const meta = dispatcher.getState().entryMetas.get(lid);
       if (meta?.archetype !== 'attachment') return null;
@@ -1499,6 +1537,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     attachFiles: (files) => void withAssetGate(() => attachFiles(dispatcher, attachDeps, files)),
     // 🔑 一時の知らせ(「3 件を『はこ』へ入れました」)── **エラーの行とは別**
     showStatus,
+    /**
+     * 🔴 **何が容量を食っているか**(#415)── 数えるのは worker。
+     * ⚠ 返るのは**数字だけ**(本文も bytes も境界を越えない)。
+     * ⚠ 器が無い(cid が無い)ときは空を返す ── 押しても「調べています…」で止めない。
+     */
+    storageProfile: async () => {
+      const cid = dispatcher.getState().cid;
+      if (cid === null) return { rows: [], totalAssetBytes: 0, orphanBytes: 0 };
+      return client.request({ op: 'storageProfile', cid });
+    },
     /**
      * 🔴 **スクショの貼付**(#250。user 指示 2026-08-18
      * 「PKC3 でスクショ貼付の導線がない。PKC2 と同様以上に実装してください」)。
@@ -2504,6 +2552,32 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * ⚠ 取込の**本体は binder と同じ** `runImport`(2 経路にしない)
      */
     importLaunchFiles: async (items) => {
+      /**
+       * 🔴 **Office の文書は Office へ回す**(#432)。⚠ 回さないと、OS が
+       *   PKC3 を起動するのに**誰も受け取らない** ── `import-file.ts` が
+       *   markdown 以外を濾すので、user には「開けるファイルがありませんでした」
+       *   としか出ない(関連付けを奪ったうえで何もしない、いちばん失礼な形)。
+       * ⚠ 振り分けの規則は `office-launch.ts`(manifest と集合で突き合わせてある)。
+       * ⚠ ここで窓は開かない ── OS からの起動は user の操作ではないので
+       *   **ポップアップ遮断で消える**。控えて、押されたときに渡す。
+       */
+      const office = items.filter((i) => isOfficeLaunchFile(i.file.name));
+      for (const i of office) {
+        const buf = new Uint8Array(await i.file.arrayBuffer());
+        localOffice.stage(i.handle, i.file.name, buf);
+      }
+      if (office.length > 0) {
+        const last = office[office.length - 1]!;
+        const writable = typeof last.handle.createWritable === 'function';
+        await whenPhaseReady(dispatcher, () => {});
+        showStatus(
+          writable
+            ? `${last.file.name} を開けます ── アプリの「Office」を押してください`
+            : cannotWriteBackNotice(last.file.name),
+        );
+      }
+      items = items.filter((i) => !isOfficeLaunchFile(i.file.name));
+      if (items.length === 0) return;
       await whenPhaseReady(dispatcher, () =>
         showStatus('編集を終えると、開いたファイルを取り込みます'),
       );

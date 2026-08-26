@@ -2,6 +2,9 @@
  * storage worker ⇄ main thread の message 契約(設計 doc §4.4)。
  * メインスレッドは query/command を投げるだけで、sqlite は worker 内に閉じる。
  */
+import type {
+  StorageProfileResult,
+} from '@features/storage/storage-profile';
 import type { EntryMetaRow, EntryStamps, EntryUpsert } from './schema';
 import type {
   GroupResult as QueryGroupResult,
@@ -356,6 +359,14 @@ export type StorageRequest =
   | { op: 'listAssetMetas'; cid: string }
   | { op: 'deleteAssetMeta'; cid: string; key: string }
   | { op: 'scanAssetRefs'; cid: string; candidates: string[] }
+  /**
+   * 🔴 **何が容量を食っているか**(#415)。
+   *
+   * ⚠ **bytes を境界の外へ出さない**(`revisionDiffStats` と同じ形)── 返すのは
+   *   lid ごとの**数字だけ**である。⚠ 本文も Blob も worker の中から出ない。
+   * 🔑 添付の大きさは `assets` の列に既に在る(`AssetBlobStore` を読まない)。
+   */
+  | { op: 'storageProfile'; cid: string }
   | { op: 'counts'; cid: string }
   | { op: 'close' };
 
@@ -650,6 +661,7 @@ export interface ResultMap {
   listAssetMetas: AssetMetaRow[];
   deleteAssetMeta: null;
   scanAssetRefs: { referenced: string[] };
+  storageProfile: StorageProfileResult;
   counts: CountsResult;
   close: null;
 }

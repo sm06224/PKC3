@@ -24,6 +24,7 @@ import {
   MARKDOWN_EXTENSIONS,
   isMarkdownFileName,
 } from '../../src/features/import/plain-markdown';
+import { OFFICE_LAUNCH_EXTS } from '../../src/features/office/office-launch';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { whenPhaseReady } from '../../src/adapter/state/wait-for-ready';
 import { createAssetGate } from '../../src/adapter/ui/actions/asset-gate';
@@ -417,19 +418,60 @@ describe('🔴 宣言と実体の parity ── manifest が言う拡張子が�
     expect(manifest.launch_handler?.client_mode).toBe('focus-existing');
   });
 
-  it('🔴 宣言された拡張子は、受け口を通って**entry になる**', async () => {
+  /**
+   * 🔴 **markdown として宣言した拡張子は、受け口を通って entry になる**。
+   *
+   * ⚠ 2026-08-26 に **Office の関連付けを足した**(#432)ので、宣言は 2 系統に
+   *   なった ── ここで見るのは **markdown の側だけ**である。Office の側は
+   *   entry を作らない(**元のファイルへ書き戻す**のが正しい振る舞い)ので、
+   *   同じ物差しを当てると「成り立たない条件」になる。
+   */
+  const mdDeclared = declared.filter((ext) => !OFFICE_LAUNCH_EXTS.includes(ext));
+
+  it('🔴 markdown として宣言された拡張子は、受け口を通って**entry になる**', async () => {
+    expect(mdDeclared.length, '空振り ── markdown の宣言が 1 つも無い').toBeGreaterThan(0);
     const app = wiredApp();
     const f = fakeTarget();
     armLaunchQueue(f.target, app.importLaunchFiles);
-    f.fire({ files: declared.map((ext) => handleFor(md(`note${ext}`))) });
+    f.fire({ files: mdDeclared.map((ext) => handleFor(md(`note${ext}`))) });
     await settle();
-    expect(app.written.map((e) => e.title)).toEqual(declared.map(() => '中身'));
-    for (const ext of declared) {
+    expect(app.written.map((e) => e.title)).toEqual(mdDeclared.map(() => '中身'));
+    for (const ext of mdDeclared) {
       expect(isMarkdownFileName(`note${ext}`), `${ext} が md として受けられない`).toBe(true);
     }
   });
 
-  it('受け口が扱う拡張子の集合は、受理器と manifest の 3 者で一致する', () => {
-    expect([...MARKDOWN_EXTENSIONS].sort()).toEqual([...declared].sort());
+  /**
+   * 🔴 **Office として宣言した拡張子は、markdown の取り込みでノートを作らない**(#432)。
+   *
+   * ⚠ **この it が守っているのは `import-file.ts` の濾し**であって、
+   *   `main.ts` の振り分けではない(この harness は `importLaunchFiles` を
+   *   **書き写している**ので、振り分けはここを通らない)。
+   *   🔑 振り分けそのものは `office-save-back.test.ts` の原文 pin が見る。
+   * ⚠ それでも要る:濾しが外れると、Office の文書が**中身を読めないまま
+   *   ノートになる**ので、関連付けを足したこちらが害の出口になる。
+   * ⚠ 対照群は上の it(markdown は entry になる)である ── 片方だけだと
+   *   「受け口が丸ごと死んでいる」と区別がつかない。
+   */
+  it('🔴 Office として宣言された拡張子は、markdown の取り込みで**ノートにならない**', async () => {
+    expect(
+      OFFICE_LAUNCH_EXTS.length,
+      '空振り ── Office の宣言が 1 つも無い',
+    ).toBeGreaterThan(0);
+    const app = wiredApp();
+    const f = fakeTarget();
+    armLaunchQueue(f.target, app.importLaunchFiles);
+    f.fire({ files: OFFICE_LAUNCH_EXTS.map((ext) => handleFor(md(`report${ext}`))) });
+    await settle();
+    expect(
+      app.written,
+      'Office の文書が markdown の取り込みへ落ちた(中身を読めないままノートになる)',
+    ).toEqual([]);
+  });
+
+  it('受け口が扱う拡張子の集合は、受理器 2 系統と manifest の 3 者で一致する', () => {
+    expect([...MARKDOWN_EXTENSIONS, ...OFFICE_LAUNCH_EXTS].sort()).toEqual(
+      [...declared].sort(),
+    );
   });
 });

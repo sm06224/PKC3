@@ -56,3 +56,24 @@ export function scanAssetRefsInto(
   }
   return remaining.size > 0;
 }
+
+/**
+ * 🔴 **その本文が参照している key を、候補から外さずに数え上げる**(#415)。
+ *
+ * ⚠ `scanAssetRefsInto` は keep-set 用なので**見つけた key を候補から外す** ──
+ *   「どのノートがどれを参照しているか」を数えるには使えない(2 件目以降が
+ *   1 件も当たらなくなる)。
+ * 🔑 **照合の規則はこの file 1 つ**(冒頭の 🔴)なので、規則を写さずにここへ足す。
+ *   ⚠ 別の場所で `text.includes(key)` と書き直すと、escape 済みの参照を
+ *   片方だけが落とす ── それが P6f で実際に起きた壊れ方である。
+ */
+export function assetRefsIn(text: string, keys: Iterable<string>): string[] {
+  const norm =
+    text.includes('\\') || text.includes('&#') ? unescapeForScan(unescapeForScan(text)) : null;
+  const out: string[] = [];
+  for (const key of keys) {
+    if (key === '') continue;
+    if (text.includes(key) || (norm !== null && norm.includes(key))) out.push(key);
+  }
+  return out;
+}

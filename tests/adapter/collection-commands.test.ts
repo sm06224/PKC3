@@ -56,7 +56,18 @@ describe('ノート全体の操作の置き場(#239)', () => {
     const buttons = [...el.querySelectorAll('button[data-pkc-action]')].map((b) =>
       b.getAttribute('data-pkc-action'),
     );
-    expect(buttons).toEqual(SETTINGS_COMMANDS.map((c) => c.action));
+    /**
+     * ⚠ **等値のまま**にする(黙って増えた口を見逃さない)。
+     * 🔴 2026-08-26 に `apply-plan` が 1 つ増えた(#429 段③)── これは
+     *   「逃がした操作」ではなく**「構成をコピー」の後半**なので
+     *   `SETTINGS_COMMANDS` には入れず、この面の中に別の塊として置いてある。
+     */
+    expect(buttons).toEqual([
+      ...SETTINGS_COMMANDS.map((c) => c.action),
+      // 🔴 何が容量を食っているか(#415)── 片づけの**手前**なので同じ面に置く
+      'storage-profile',
+      'apply-plan',
+    ]);
     // ⚠ 畳んでいないこと(2026-08-03「主要な導線を畳まない」は生きている)
     expect(el.querySelectorAll('details')).toHaveLength(0);
     // ⚠ 説明の title も落とさない ── 元に戻せない操作が 1 つ混ざっている
