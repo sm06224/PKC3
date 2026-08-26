@@ -127,6 +127,7 @@ export function buildSettingsCommands(): HTMLElement {
     row.append(btn);
   }
   wrap.append(row);
+  wrap.append(buildStorageProfile());
   wrap.append(buildPlanApply());
   return wrap;
 }
@@ -196,5 +197,47 @@ function buildPlanApply(): HTMLElement {
    */
   apply.disabled = true;
   box.append(apply);
+  return box;
+}
+
+
+/**
+ * 🔴 **何が容量を食っているか**(#415)。
+ *
+ * ⚠ 片づける口(「使っていない添付を消す」)は在るのに、**どれが重いか**が
+ *   分からなかった ── 1 件ずつ開けば大きさは出るが、300 件は開けない。
+ * ⚠ **畳まない**(`<details>` を使わない)── user 指示 2026-08-03。
+ * 🔑 数えるのは worker の中。ここが受け取るのは**数字だけ**である。
+ */
+function buildStorageProfile(): HTMLElement {
+  const box = document.createElement('section');
+  box.setAttribute('data-pkc-region', 'storage-profile');
+  const h = document.createElement('h4');
+  h.textContent = '何が容量を食っているか';
+  box.append(h);
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.setAttribute('data-pkc-action', 'storage-profile');
+  btn.setAttribute('data-pkc-field', 'storage-profile-run');
+  btn.textContent = '調べる';
+  btn.title = '添付の重い順にノートを並べます。押すとそのノートへ飛べます';
+  box.append(btn);
+
+  /** 合計の言い方。⚠ 空のときは畳む(空の枠を出さない)。 */
+  const sum = document.createElement('p');
+  sum.setAttribute('data-pkc-field', 'storage-profile-summary');
+  sum.hidden = true;
+  box.append(sum);
+
+  const list = document.createElement('ul');
+  list.setAttribute('data-pkc-field', 'storage-profile-list');
+  list.hidden = true;
+  box.append(list);
+
+  const note = document.createElement('p');
+  note.setAttribute('data-pkc-field', 'storage-profile-shared');
+  note.hidden = true;
+  box.append(note);
   return box;
 }

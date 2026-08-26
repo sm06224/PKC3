@@ -2170,3 +2170,99 @@ describe('スマートフォルダの走査(#421 段②)', () => {
     expect(got.lids, 'タグを見ていない').toEqual(['n-attach']);
   });
 });
+
+/**
+ * 🔴 **何が容量を食っているか**(#415)。
+ *
+ * ⚠ **実物の worker で通す** ── 「worker の中だから unit では届かない」は誤りで、
+ *   ここは `self` / `postMessage` を差して実物を読み込んでいる(この file の作法)。
+ * ⚠ 見るのは 4 つ:①添付の大きさが**そのノートに付く** ②**共有**を数える
+ * ③**孤児**を分けて数える ④総量は**重複を数えない**。
+ */
+describe('容量の内訳(#415)', () => {
+  const CID = 'c-prof';
+
+  const put = (key: string, size: number) =>
+    request({
+      op: 'putAssetMeta',
+      cid: CID,
+      meta: { key, mime: 'image/png', size, hash: null },
+    });
+
+  const note = (lid: string, body: string) =>
+    request({
+      op: 'upsertEntry',
+      cid: CID,
+      entry: entry(lid, body),
+      checkpoint: false,
+    });
+
+  const profile = () => request({ op: 'storageProfile', cid: CID });
+  const rowOf = async (lid: string) => (await profile()).rows.find((r) => r.lid === lid);
+
+  it('🔴 参照している添付の大きさが、そのノートに付く', async () => {
+    await put('ast-big', 4_000_000);
+    await note('p1', '![](asset:ast-big)');
+    expect((await rowOf('p1'))?.assetBytes).toBe(4_000_000);
+  });
+
+  it('参照していないノートは 0', async () => {
+    await note('p2', 'ただの本文');
+    expect((await rowOf('p2'))?.assetBytes).toBe(0);
+  });
+
+  it('本文の文字数も返す(数え直さない)', async () => {
+    await note('p3', '12345');
+    expect((await rowOf('p3'))?.bodyChars).toBe(5);
+  });
+
+  it('🔴 **共有している添付は、両方に満額で数える**(按分しない)', async () => {
+    /**
+     * ⚠ 按分すると「1.4MB の写真が 0.7MB と 0.7MB」に見えて、
+     *   消してもその分しか減らないと誤解される。
+     */
+    await put('ast-share', 1_000_000);
+    await note('s1', '![](asset:ast-share)');
+    await note('s2', '![](asset:ast-share)');
+    expect((await rowOf('s1'))?.assetBytes).toBe(1_000_000);
+    expect((await rowOf('s2'))?.assetBytes).toBe(1_000_000);
+  });
+
+  it('🔴 **共有していることを数で返す**(「合わない」と読まれないため)', async () => {
+    expect((await rowOf('s1'))?.sharedAssets).toBe(1);
+    // ⚠ 対照群 ── 1 本からしか参照されていないものは共有に数えない
+    expect((await rowOf('p1'))?.sharedAssets, '共有していないのに数えた').toBe(0);
+  });
+
+  it('🔴 総量は**重複を数えない**(器の実際の使用量に近いほう)', async () => {
+    const p = await profile();
+    // big 4,000,000 + share 1,000,000 ── share は 2 本から参照されているが 1 回だけ
+    expect(p.totalAssetBytes).toBe(5_000_000);
+  });
+
+  it('🔴 どこからも参照されていない添付は、**孤児として分けて**数える', async () => {
+    await put('ast-orphan', 250_000);
+    const p = await profile();
+    expect(p.orphanBytes, '孤児を数えていない ── 片づけで消せる分が見えない').toBe(250_000);
+    expect(p.totalAssetBytes, '総量にも入っている').toBe(5_250_000);
+    // ⚠ 孤児はどの行にも付かない
+    for (const r of p.rows) expect(r.assetBytes).not.toBe(250_000);
+  });
+
+  it('⚠ escape された参照も拾う(照合の正本と同じ規則)', async () => {
+    /**
+     * ⚠ `text.includes(key)` と書き直すと escape 済みの参照を落とす ──
+     *   P6f で実際に起きた壊れ方(`asset-ref-scan.ts` の冒頭)。
+     */
+    await put('ast-esc', 300_000);
+    await note('e1', '[x](asset:ast\\-esc)');
+    expect((await rowOf('e1'))?.assetBytes, 'escape 済みの参照を落とした').toBe(300_000);
+  });
+
+  it('⚠ 添付が 1 つも無い器でも落ちない', async () => {
+    const p = await request({ op: 'storageProfile', cid: 'c-empty' });
+    expect(p.rows).toEqual([]);
+    expect(p.totalAssetBytes).toBe(0);
+    expect(p.orphanBytes).toBe(0);
+  });
+});

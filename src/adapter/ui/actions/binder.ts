@@ -83,6 +83,13 @@ import { chordOf, findCommand, isMac, typesCharacter, KEY_COMMANDS } from '@feat
 import { paletteRows } from '@features/palette/palette-rows';
 import { structureText } from '@features/structure/structure-text';
 import {
+  profileLineText,
+  profileLines,
+  profileSummary,
+  sharedNote,
+  type StorageProfileResult,
+} from '@features/storage/storage-profile';
+import {
   canApplyPlan,
   parsePlan,
   planPreview,
@@ -348,6 +355,12 @@ export interface BinderServices {
    * 成功の一報を `OP_FAILED` に載せない(載せると赤い意味の欄に出る)。
    */
   showStatus?(text: string): void;
+  /**
+   * 🔴 **何が容量を食っているか**(#415)── worker に数えさせる。
+   * ⚠ **数字だけ**返ってくる(本文も bytes も境界を越えない)。
+   * ⚠ 無い配線では**押しても何も起きない**ので、器は「調べています…」で止めない。
+   */
+  storageProfile?(): Promise<StorageProfileResult>;
   adoptPastedUrls?(urls: readonly string[]): Promise<{
     readonly adopted: ReadonlyMap<string, string>;
     /** 置けなかった理由(空き容量など)。⚠ **呼び側が 1 本の文言に組み立てる**。 */
@@ -2750,6 +2763,54 @@ const ACTIONS: Record<string, ActionHandler> = {
     ta.value = '';
     paintPlan(root, dispatcher, '');
     services.showStatus?.(`整理案を当てました(${plan.ops.length} 件)`);
+  },
+  /**
+   * 🔴 **何が容量を食っているか**(#415)。
+   *
+   * ⚠ 数えるのは worker ── ここは**受け取って並べるだけ**である
+   *   (並べ方も文言も `features/storage/storage-profile.ts` が持つ)。
+   * ⚠ **押せない配線では断る** ── 「調べています…」のまま止めない。
+   */
+  'storage-profile': (dispatcher, _target, services, root) => {
+    const list = root.querySelector<HTMLElement>('[data-pkc-field="storage-profile-list"]');
+    const sum = root.querySelector<HTMLElement>('[data-pkc-field="storage-profile-summary"]');
+    const shared = root.querySelector<HTMLElement>('[data-pkc-field="storage-profile-shared"]');
+    if (list === null || sum === null || shared === null) return;
+    if (services.storageProfile === undefined) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この環境では容量を数えられません' });
+      return;
+    }
+    sum.textContent = '調べています…';
+    sum.hidden = false;
+    void services.storageProfile().then(
+      (result) => {
+        const lines = profileLines(result, dispatcher.getState().entryMetas);
+        sum.textContent = profileSummary(result);
+        list.textContent = '';
+        for (const l of lines) {
+          const li = document.createElement('li');
+          const b = document.createElement('button');
+          b.type = 'button';
+          // 🔑 押すとそのノートへ飛ぶ ── 見えても辿り着けないと 1 件ずつ探すことになる
+          b.setAttribute('data-pkc-action', 'select-entry');
+          b.setAttribute('data-pkc-entry', l.lid);
+          b.textContent = profileLineText(l);
+          li.append(b);
+          list.append(li);
+        }
+        list.hidden = lines.length === 0;
+        const note = sharedNote(lines);
+        shared.textContent = note;
+        shared.hidden = note === '';
+        if (lines.length === 0) sum.textContent = `${profileSummary(result)} 重いノートはありません。`;
+      },
+      () => {
+        // ⚠ 黙って止めない ── 「調べています…」のまま残すのがいちばん困る
+        sum.textContent = '';
+        sum.hidden = true;
+        dispatcher.dispatch({ type: 'OP_FAILED', error: '容量を数えられませんでした' });
+      },
+    );
   },
   'copy-entry-ref': (_dispatcher, target, services) => {
     const ref = target

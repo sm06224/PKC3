@@ -1538,6 +1538,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // 🔑 一時の知らせ(「3 件を『はこ』へ入れました」)── **エラーの行とは別**
     showStatus,
     /**
+     * 🔴 **何が容量を食っているか**(#415)── 数えるのは worker。
+     * ⚠ 返るのは**数字だけ**(本文も bytes も境界を越えない)。
+     * ⚠ 器が無い(cid が無い)ときは空を返す ── 押しても「調べています…」で止めない。
+     */
+    storageProfile: async () => {
+      const cid = dispatcher.getState().cid;
+      if (cid === null) return { rows: [], totalAssetBytes: 0, orphanBytes: 0 };
+      return client.request({ op: 'storageProfile', cid });
+    },
+    /**
      * 🔴 **スクショの貼付**(#250。user 指示 2026-08-18
      * 「PKC3 でスクショ貼付の導線がない。PKC2 と同様以上に実装してください」)。
      *

@@ -22,7 +22,7 @@ import {
 const SEARCH_LIMIT = 200;
 import type { EntryStamps, EntryUpsert } from './schema';
 import { contentHash64Hex } from './content-hash';
-import { scanAssetRefsInto } from '@features/asset/asset-ref-scan';
+import { assetRefsIn, scanAssetRefsInto } from '@features/asset/asset-ref-scan';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { extractMeta } from '@features/flavor';
 import { readVersions, totalHistoryBytes } from '@features/flavor/attachment-versions';
@@ -2331,6 +2331,71 @@ const handlers: Handlers = {
       bind: [req.cid, req.key],
     });
     return null;
+  },
+  /**
+   * 🔴 **何が容量を食っているか**(#415)。
+   *
+   * ⚠ **数字だけ返す**(`revisionDiffStats` と同じ形)── 本文も bytes も
+   *   worker の外へ出ない。添付の大きさは `assets` の列に在るので
+   *   `AssetBlobStore` は 1 度も触らない。
+   * ⚠ 本文は**行ごとに callback で見て保持しない**(全 body の同時 materialize は
+   *   500MB 級で OOM ── `scanAssetRefs` と同じ理由)。
+   * 🔑 照合は `assetRefsIn`(規則の正本は `features/asset/asset-ref-scan.ts`)。
+   *
+   * ⚠ **共有している添付は、参照している全部のノートに満額で数える** ──
+   *   按分すると「1.4MB の写真が 0.7MB と 0.7MB」に見えて、消しても
+   *   その分しか減らないと誤解される。⚠ そのぶん行の合計は器の総量を超えうるので、
+   *   `totalAssetBytes`(重複を数えない)と `sharedAssets` を併せて返す。
+   */
+  storageProfile: (req) => {
+    const size = new Map<string, number>();
+    need().exec({
+      sql: 'SELECT key, size FROM assets WHERE cid = ?',
+      bind: [req.cid],
+      rowMode: 'object',
+      callback: (row: unknown) => {
+        const r = row as { key?: unknown; size?: unknown };
+        const key = typeof r.key === 'string' ? r.key : '';
+        // ⚠ `size` は NULL がありうる(`listAssetMetas` の注記)── 0 として数える
+        if (key !== '') size.set(key, typeof r.size === 'number' ? r.size : 0);
+      },
+    });
+    const keys = [...size.keys()];
+    /** 何本のノートから参照されているか(共有の判定)。 */
+    const refCount = new Map<string, number>();
+    const rows: { lid: string; assetBytes: number; bodyChars: number; keys: string[] }[] = [];
+    need().exec({
+      sql: 'SELECT lid, body, body_chars FROM entries WHERE cid = ?',
+      bind: [req.cid],
+      rowMode: 'object',
+      callback: (row: unknown) => {
+        const r = row as { lid?: unknown; body?: unknown; body_chars?: unknown };
+        const lid = typeof r.lid === 'string' ? r.lid : '';
+        if (lid === '') return;
+        const body = typeof r.body === 'string' ? r.body : '';
+        const hit = keys.length === 0 ? [] : assetRefsIn(body, keys);
+        for (const k of hit) refCount.set(k, (refCount.get(k) ?? 0) + 1);
+        rows.push({
+          lid,
+          assetBytes: hit.reduce((n, k) => n + (size.get(k) ?? 0), 0),
+          // ⚠ `null`(まだ数えていない)は 0 として出す ── 画面は「重い順」を見るだけ
+          bodyChars: typeof r.body_chars === 'number' ? r.body_chars : 0,
+          keys: hit,
+        });
+      },
+    });
+    let orphanBytes = 0;
+    for (const [k, n] of size) if ((refCount.get(k) ?? 0) === 0) orphanBytes += n;
+    return {
+      rows: rows.map((r) => ({
+        lid: r.lid,
+        assetBytes: r.assetBytes,
+        bodyChars: r.bodyChars,
+        sharedAssets: r.keys.filter((k) => (refCount.get(k) ?? 0) > 1).length,
+      })),
+      totalAssetBytes: [...size.values()].reduce((a, b) => a + b, 0),
+      orphanBytes,
+    } as ResultMap['storageProfile'];
   },
   scanAssetRefs: (req) => {
     // asset GC(P4b)の keep-set: 候補 key が**どこかの body に substring として
