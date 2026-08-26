@@ -22,6 +22,14 @@ python3 /tmp/mut-<主題>.py            # 全件
 python3 /tmp/mut-<主題>.py M1 M3      # id を指定
 ```
 
+🔴 **smoke の絞り(`SMOKE_GREP`)は spec の path で書く。**
+⚠ あれは playwright の**位置引数**なので、**空白で割られて file 名の部分一致**に
+なる ── 2026-08-27(#444)に test の**題名**(`"添付から読んだ mermaid"`)を書いたら
+`mermaid.smoke.spec.ts` に当たり、**狙っていない spec が緑で通って SURVIVED** と出た
+(手で当て直したら KILLED だった)。
+🔑 ハーネスは**走った test の件数を結果行に出す** ── 0 件は `NOT-APPLIED` で止まるが、
+「**別の spec が走った**」は**数を見るしかない**。狙った数と合っているか毎回見る。
+
 🔴 **その場の shell に書かない。** shell の引用で python が SyntaxError になり、
 **変異が当たらないまま「生存」と読んだ**ことがある(2026-08-04)。
 テンプレートは置換前に「元の文字列がちょうど 1 件あること」を assert し、

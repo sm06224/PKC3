@@ -52,8 +52,18 @@ for _sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
 
 # unit を回すときのコマンド(絞ると速い。広げると取りこぼしが減る)
 UNIT_CMD = "npx vitest run tests/"
-# smoke を回すときの grep(playwright の位置引数)
-SMOKE_GREP = "your-spec-name"
+# smoke を回すときの絞り。
+# 🔴 **これは playwright の「位置引数」= spec の path の絞りである**(2026-08-27、
+#    #444 で溶かした)。⚠ **test の題名を書いてはいけない** ── 位置引数は
+#    **空白で割られて file 名の部分一致**になるので、`"添付から読んだ mermaid"` は
+#    `mermaid.smoke.spec.ts` に当たり、**狙っていない spec が緑で通って SURVIVED**
+#    と出た(手で当て直したら KILLED だった)。
+# 🔑 **spec の path をそのまま書く**(`tests/smoke/attach.smoke.spec.ts`)。
+#    題名で絞りたいなら `-g '…'` を含めて書く。
+# ⚠ 走った件数は結果行に出る ── **狙った数と合っているか毎回見る**
+#    (0 件は下の `ran_count` が NOT-APPLIED として止めるが、
+#    「別の spec が走った」は数を見るしかない)。
+SMOKE_GREP = "tests/smoke/your-spec.smoke.spec.ts"
 # smoke の変異が生成物に届いたかを確かめる目印。
 # ⚠ **変異で消える / 現れる字面**にする。無関係な字面だと空振りを検出できない
 # 🔴 **CSS の目印を「コメント」にしない**(2026-08-14 実測)── minify が消すので
@@ -113,6 +123,26 @@ def dist_assets() -> str:
     return "\n".join(p.read_text(encoding="utf-8", errors="replace") for p in files)
 
 
+def ran_count(out: str) -> int:
+    """走った test の件数を読む。**読めなければ -1**(= 判定を止めない)。
+
+    🔴 **0 件で緑になるのを止めるため**に在る(2026-08-27、#444)。playwright も
+    vitest も「絞りに 1 件も当たらなかった」を **exit 0** で返すので、
+    件数を見ないと**空振りが SURVIVED に化ける**。
+    ⚠ 読めない書式のときは `-1` を返して**素通りさせる** ── 判定できないことを
+    理由に、走った回まで捨てない。
+    """
+    import re as _re
+    m = _re.findall(r"(\d+)\s+(?:passed|failed|flaky|skipped)", out)
+    if m:
+        return sum(int(x) for x in m)
+    # vitest の「Tests  N passed」/ playwright の「Running N tests」も拾う
+    m2 = _re.search(r"Running (\d+) tests?", out)
+    if m2:
+        return int(m2.group(1))
+    return -1
+
+
 def first_reason(out: str) -> str:
     for line in out.splitlines():
         if "×" in line or "Error:" in line or "error TS" in line:
@@ -164,8 +194,20 @@ def main() -> int:
                 )
             else:
                 r = run(UNIT_CMD)
+            ran = ran_count(r.stdout + r.stderr)
+            ran_note = "" if ran < 0 else f"(走った test {ran} 件)"
+            if ran == 0:
+                # 🔴 **1 件も走らなかった回を「生き延びた」と読まない**
+                #    (2026-08-27、#444 で実際に踏んだ)。`SMOKE_GREP` は
+                #    playwright の**位置引数**(= spec の path 絞り)なので、
+                #    そこへ test の**題名**を書くと **0 件一致 → exit 0** になり、
+                #    ハーネスは「SURVIVED」と出す ── 手で当て直したら KILLED だった。
+                #    ⚠ 「走らなかった」は 3 値の**外**である(CLAUDE.md §3)。
+                results.append((mid, "NOT-APPLIED", "test が 1 件も走っていない(絞りが 0 件一致)"))
+                continue
             verdict = "SURVIVED" if r.returncode == 0 else "KILLED"
-            results.append((mid, verdict, first_reason(r.stdout + r.stderr)))
+            # ⚠ **件数を必ず出す** ── 「別の spec が走っていた」は数でしか見えない
+            results.append((mid, verdict, (first_reason(r.stdout + r.stderr) + " " + ran_note).strip()))
         except TimedOut as e:
             # ⚠ 3 値の**外** ── 「殺せた」とも「生き延びた」とも書かない
             results.append((mid, "TIMEOUT", str(e)))

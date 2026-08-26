@@ -1039,6 +1039,8 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    // ⚠ 上限 20 を超えたので 2026-08-27 に落とした(原本は CHANGELOG)
+    'リッチテキストで貼っても、書式もコードも残るようになりました',
     // ⚠ 上限 20 を超えたので 2026-08-26 に落とした(原本は CHANGELOG)
     'PKC3 ごと 1 つのファイルに入れて、持ち歩けるようになりました',
     // ⚠ 上限 20 を超えたので 2026-08-26 に落とした(原本は CHANGELOG)

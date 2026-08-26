@@ -39,6 +39,7 @@ import {
   EXTERNAL_IMAGE_CLASS,
   isExternalImageSrc,
 } from './external-images';
+import { takeFenceAsset, type FenceAssetParse } from './fence-asset';
 import { parsePortablePkcReference } from '../link/permalink';
 import {
   inferQ8ValueOnlyKey,
@@ -419,6 +420,50 @@ function buildRenderableBlockHtml(
     `</div>`;
 }
 
+/**
+ * 🔴 **中身を添付から取る囲みの器**(#444 段①)。
+ *
+ * ⚠ **ここでは読まない。** 添付は IDB に在り、markdown の描画は同期である ──
+ *   器だけ置いて、adapter の hydrator が埋める(mermaid と同じ形)。
+ * 🔴 **誰も埋めなかったときに読める字にする** ── 書き出した HTML には hydrator が
+ *   居ないので、ここが空だと「持ち出したら中身が消える」になる(PKC の芯に反する)。
+ *   だから **「この囲みの中身は添付(asset:…)に在ります」** と、鍵ごと出しておく。
+ * ⚠ 囲みの中に書いた字は**控え**として残す ── 添付が読めたら hydrator が捨てる。
+ */
+function buildFenceAssetHtml(
+  /** ⚠ `none` は呼ばない(呼び側が弾く)── 型で示して分岐を 2 か所に置かない。 */
+  parse: Exclude<FenceAssetParse, { kind: 'none' }>,
+  /** 見出しの先頭語(`csv` / `csv-render` / `js` …)。⚠ 分解は hydrator 側でやる。 */
+  langWord: string,
+  body: string,
+  sourceLineAttrs: string,
+): string {
+  if (parse.kind === 'invalid') {
+    // ⚠ **黙って普通の囲みに落とさない** ── user は `asset:` と書いたのだから、
+    //   効かなかった理由が要る(#264 段② と同じ向き)
+    return (
+      `<div class="pkc-md-block" data-pkc-md-block-kind="code"${sourceLineAttrs}>` +
+      `<p data-pkc-fence-asset-error>この囲みは添付を指していますが読めません: ` +
+      `${md.utils.escapeHtml(parse.why)}</p>` +
+      `</div>`
+    );
+  }
+  const info = parse.rest === '' ? langWord : `${langWord} ${parse.rest}`;
+  const fallback =
+    body === ''
+      ? ''
+      : `<pre data-pkc-fence-asset-fallback><code>${md.utils.escapeHtml(body)}</code></pre>`;
+  return (
+    `<div class="pkc-md-block" data-pkc-md-block-kind="code"` +
+    ` data-pkc-fence-asset-key="${escapeHtmlAttr(parse.key)}"` +
+    ` data-pkc-fence-asset-info="${escapeHtmlAttr(info)}"${sourceLineAttrs}>` +
+    `<p data-pkc-fence-asset-pending>この囲みの中身は添付(asset:` +
+    `${md.utils.escapeHtml(parse.key)})に在ります</p>` +
+    fallback +
+    `</div>`
+  );
+}
+
 md.renderer.rules.fence = function (tokens, idx, options, env, self) {
   const token = tokens[idx]!;
   // 領域 10-1 PR 2 hotfix: tagSourceLines puts data-pkc-source-line
@@ -427,9 +472,41 @@ md.renderer.rules.fence = function (tokens, idx, options, env, self) {
   // the wrapper div so the active-block lookup can find the fence.
   const sourceLineAttrs = collectSourceLineAttrs(token);
   const info = (token.info ?? '').trim();
+  /**
+   * 🔴 **中身を添付から取る囲み**(#444 段①)── **どの言語でも**効く。
+   * ⚠ 読むのは**先頭語より後ろ**である(先頭語は言語 + 表示の指定)。
+   * ⚠ ここは `parseRenderableFence` の**手前**に置く ── 素のコード囲み
+   *   (` ```js `)は registry の外なので、後ろに置くと届かない。
+   */
+  const firstWord = info.split(/\s+/)[0] ?? '';
+  const fenceAsset = takeFenceAsset(info.slice(firstWord.length));
+  if (fenceAsset.kind !== 'none') {
+    return buildFenceAssetHtml(fenceAsset, firstWord, token.content ?? '', sourceLineAttrs);
+  }
   const fence = parseRenderableFence(info);
   if (fence) {
     const content = token.content ?? '';
+    return renderRenderableFence(fence, content, sourceLineAttrs, env);
+  }
+  const fenceHtml = defaultFence(tokens, idx, options, env, self);
+  return wrapWithCopyButton(fenceHtml, 'code', sourceLineAttrs);
+};
+
+/**
+ * 🔴 **registry の囲み 1 つを描く**(#444 段①で `fence` rule から取り出した)。
+ *
+ * ⚠ **取り出した理由は 1 つだけ**:中身を**外から渡せる**ようにするため
+ *   ── 添付から取った字を、本文に書いてあったのと**同じ経路**で描く
+ *   (CLAUDE.md §7「判定を増やさない」── 描き方の規則を 2 本にしない)。
+ * ⚠ 中身以外は 1 バイトも変えていない。
+ */
+function renderRenderableFence(
+  fence: RenderableFence,
+  content: string,
+  sourceLineAttrs: string,
+  env: unknown,
+): string {
+  {
     if (fence.mode === 'norender') {
       return wrapWithCopyButton(renderFenceSourceHtml(content, fence.lang), 'code', sourceLineAttrs);
     }
@@ -481,9 +558,48 @@ md.renderer.rules.fence = function (tokens, idx, options, env, self) {
     // csv 系 parse 失敗:従来どおり user のソースを可視で残す。
     return wrapWithCopyButton(renderFenceSourceHtml(content, fence.lang), 'code', sourceLineAttrs);
   }
-  const fenceHtml = defaultFence(tokens, idx, options, env, self);
-  return wrapWithCopyButton(fenceHtml, 'code', sourceLineAttrs);
-};
+}
+
+/**
+ * 🔴 **添付から取った中身で囲みを描く**(#444 段①)── adapter の hydrator が呼ぶ。
+ *
+ * ⚠ **registry の外(素のコード囲み)もここで描く** ── 本文の rule は
+ *   markdown-it の `defaultFence` を通すが、そこは token を要るので単独では
+ *   呼べない。⚠ **同じ見た目になること**は
+ *   `tests/features/fence-asset.test.ts` の parity 検査が pin する
+ *   (書き写しである以上、片方だけ古くなるのを機械で止める)。
+ * ⚠ `env` は**使い捨て**にする ── 文書の env を渡すと脚注が混ざる
+ *   (2026-08-06 の事故。上の `cellEnv` の註記と同じ理由)。
+ */
+export function renderFenceFromAsset(
+  info: string,
+  content: string,
+  /**
+   * 🔴 **1 回の埋め込みでは 1 つの object を使い回す**(着地前の自己レビューで判明)。
+   *
+   * ⚠ `-both`(既定)の切替 id は「**同じ(言語, 中身)の中で何番目か**」から作る。
+   *   その数を憶えているのは**この object** なので、囲みごとに新しい object を渡すと
+   *   常に「0 番目」になり、**同じ囲みを 2 つ書くと id が衝突する**
+   *   ── 片方の `‹/›` を押すともう片方が開く。
+   * 🔑 本文の経路(`renderMarkdown`)は 1 回の描画で env を 1 つ作って共有している ──
+   *   ここもそれに揃える(規則を 2 つにしない)。
+   */
+  env: { currentContainerId?: string; allowExternalImages?: boolean } = {},
+): string {
+  const fence = parseRenderableFence(info);
+  if (fence) return renderRenderableFence(fence, content, '', env);
+  const lang = (info.trim().split(/\s+/)[0] ?? '').toLowerCase();
+  const cls = lang === '' ? '' : ` class="language-${escapeHtmlAttr(lang)}"`;
+  /**
+   * ⚠ **末尾の改行まで真似る** ── markdown-it の既定の `fence` renderer は
+   *   `</pre>` のあとに `\n` を出す。parity 検査(`tests/features/fence-asset.test.ts`)が
+   *   **この 1 バイトの差で落ちて教えた**(書き写しは必ずどこかがずれる)。
+   */
+  return wrapWithCopyButton(
+    `<pre><code${cls}>${highlightCode(content, lang)}</code></pre>\n`,
+    'code',
+  );
+}
 
 // PR #196: table copy button overlay. Wraps the entire <table>…</table>
 // in a `<div class="pkc-md-block">` carrying the copy button. The
