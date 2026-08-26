@@ -129,7 +129,85 @@ export function buildSettingsCommands(): HTMLElement {
   wrap.append(row);
   wrap.append(buildStorageProfile());
   wrap.append(buildPlanApply());
+  wrap.append(buildSettingsFile());
   return wrap;
+}
+
+/**
+ * 🔴 **設定だけを別の端末へ持っていく**(#414)。
+ *
+ * ⚠ **バックアップ(`.pkc3.zip`)とは別物である** ── あちらは**データごと**移るので、
+ *   移した先のノートが混ざる。ここで運ぶのは**見た目と使い勝手だけ**である。
+ * ⚠ **畳まない**(`<details>` を使わない ── user 指示 2026-08-03)。
+ * 🔑 **何を運ぶか / 運ばないかは `features/settings/settings-file.ts` が 1 か所で持つ**
+ *   ── ここは押し口と下見の器だけで、判断を 1 つも持たない(§7)。
+ */
+function buildSettingsFile(): HTMLElement {
+  const box = document.createElement('section');
+  box.setAttribute('data-pkc-region', 'settings-file');
+  const h = document.createElement('h4');
+  h.textContent = '設定の持ち出し';
+  h.title = '見た目・鍵の割当・紙面などを、別の端末へ持っていきます(ノートは移りません)';
+  box.append(h);
+
+  const note = document.createElement('p');
+  note.setAttribute('data-pkc-field', 'settings-file-note');
+  note.textContent =
+    '見た目・面の畳み方・編集の仕方・紙面・鍵の割当などを 1 つのファイルにします。ノートは入りません。許可とフラグとお知らせの既読は、その端末のものなので運びません。';
+  box.append(note);
+
+  const row = document.createElement('div');
+  row.setAttribute('data-pkc-field', 'settings-file-row');
+  const out = iconButton('export-settings', '設定を書き出す');
+  out.title = 'いまの設定を 1 つのファイルにして落とします';
+  row.append(out);
+
+  /**
+   * ⚠ **読み込みは「選ぶ」だけ** ── 選んだ時点では**当てない**。
+   *   何が変わるかを下に出してから、user が押す(取り消せない形を作らない)。
+   */
+  const pick = document.createElement('label');
+  pick.setAttribute('data-pkc-field', 'settings-file-pick');
+  const pickText = document.createElement('span');
+  pickText.textContent = '設定を読み込む';
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'application/json,.json';
+  input.setAttribute('data-pkc-field', 'settings-file-input');
+  input.setAttribute('aria-label', '設定ファイルを選ぶ');
+  pick.append(pickText, input);
+  row.append(pick);
+  box.append(row);
+
+  /** 下見のまとめ。⚠ 空のときは畳む(空の枠を出さない)。 */
+  const summary = document.createElement('p');
+  summary.setAttribute('data-pkc-field', 'settings-file-summary');
+  summary.hidden = true;
+  box.append(summary);
+
+  /** 何が変わるか。⚠ **値そのものは出さない**(鍵の割当も紙面も JSON で読めない)。 */
+  const list = document.createElement('ul');
+  list.setAttribute('data-pkc-field', 'settings-file-changes');
+  list.hidden = true;
+  box.append(list);
+
+  const apply = document.createElement('button');
+  apply.type = 'button';
+  apply.setAttribute('data-pkc-action', 'apply-settings');
+  apply.setAttribute('data-pkc-field', 'settings-file-apply');
+  /**
+   * ⚠ **「当てる」にしない** ── 同じ面に整理案の「当てる」が既に在り、
+   *   **同じ字のボタンが 2 つ**並ぶと user はどちらか見分けられない
+   *   (`docs-parity` の等値 pin が教えた ── 検査が正しい)。
+   */
+  apply.textContent = '設定を当てる';
+  /**
+   * 🔴 **変わるものが 1 件も無ければ押せない**(#414)。
+   * ⚠ 既定は `disabled` ── 選ぶ前から押せる形にしない(dead click を作らない)。
+   */
+  apply.disabled = true;
+  box.append(apply);
+  return box;
 }
 
 /**
