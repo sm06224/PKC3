@@ -126,3 +126,52 @@ test('🔴 本文を Markdown でも書式付きでもコピーでき、選択�
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * 🔴 **ノートの参照をコピーする**(#427 段①)。
+ *
+ * 🔴 **unit では届かない層**:`navigator.clipboard` は happy-dom では差し替え物なので、
+ *   「**本当にクリップボードへ入ったか**」は実ブラウザでしか見えない。
+ *   そして**貼って押すと本当にそのノートが開くか**は、記法の読み手まで通す必要がある。
+ */
+test('🔴 参照をコピーして別のノートに貼ると、押してそのノートへ移れる (#427)', async ({
+  page,
+  context,
+}) => {
+  const errors = collectPageErrors(page);
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await gotoApp(page);
+
+  // ① リンク先のノートを作る
+  await createEntry(page, 'text');
+  const title = page.locator('[data-pkc-field="editor-title"]');
+  if (await title.count()) await title.fill('先週の議事録');
+  await page.locator('[data-pkc-field="editor-body"]').fill('先週の中身\n');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+  // ② その参照をコピー(#427 段① で足した口)
+  await copyAndWait(page, 'copy-entry-ref');
+  const ref = await page.evaluate(() => navigator.clipboard.readText());
+  expect(ref, '貼れる 1 行になっていない').toMatch(/^\[先週の議事録\]\(entry:.+\)$/);
+
+  // ③ 別のノートに貼る
+  await createEntry(page, 'text');
+  const t2 = page.locator('[data-pkc-field="editor-title"]');
+  if (await t2.count()) await t2.fill('今週の会議');
+  await page.locator('[data-pkc-field="editor-body"]').fill(`続き: ${ref}\n`);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+  /**
+   * ④ 🔴 **押すとそのノートが開く** ── ここまで通して初めて
+   *   「リンクを張れた」と言える(貼れる形になっただけでは足りない)。
+   */
+  const link = page.locator('[data-pkc-field="detail-body"] a', { hasText: '先週の議事録' });
+  await expect(link, '貼ったものがリンクになっていない').toHaveCount(1);
+  await link.click();
+  await expect(
+    page.locator('[data-pkc-field="detail-body"]'),
+    '押しても相手のノートが開かない',
+  ).toContainText('先週の中身', { timeout: 15_000 });
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
