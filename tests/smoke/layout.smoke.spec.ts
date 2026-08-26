@@ -1287,6 +1287,32 @@ test('🔴 フォルダに入れる → 読み込み直しても中に居る', a
 
   // ── いま見ているフォルダの中に作る
   await expect(page.locator('[data-pkc-field="filer-create-target"]')).toBeVisible();
+  /**
+   * 🔴 **窓を「時間」ではなく「因果」で切る**(2026-08-26。CI で赤くなって判明)。
+   *
+   * ⚠ 直す前は、ここで `__ops` を空にしてすぐ作成へ進んでいた ── ところが
+   *   **さっきの「移す」の書込(`setEntryParent`)は、画面が更新された後も
+   *   まだ飛んでいる**(楽観更新なので UI は先に進む)。遅い runner では
+   *   それが**空にした後**に届き、「作成が 2 手に割れている」と誤って読む。
+   *   実測(CI): `["upsertEntry","getBody","setEntryParent",…,"upsertEntry+parent",…]`
+   *   ── 🔑 **`upsertEntry+parent` は在った**ので、製品は正しく 1 本で書いている。
+   * 🔑 だから**その 1 本が出たのを見てから**空にする ── 以後に現れる
+   *   `setEntryParent` は、**作成のものだけ**だと言い切れる。
+   * ⚠ これは test を緩めていない ── 窓が狭くなるので**強くなっている**
+   *   (⚠ 併せて「移すが 1 本の書込を出した」ことの空振り防止にもなる)。
+   */
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () =>
+            (window as unknown as { __ops: string[] }).__ops.filter(
+              (o) => o === 'setEntryParent',
+            ).length,
+        ),
+      { message: '「移す」の書込が記録されていない(この窓は何も見ていない)' },
+    )
+    .toBeGreaterThan(0);
   await page.evaluate(() => ((window as unknown as { __ops: string[] }).__ops.length = 0));
   const createdLid = await make('text', '# フォルダの中で作った\n');
 
