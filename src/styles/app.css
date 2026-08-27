@@ -1367,21 +1367,71 @@ li[data-pkc-row-slot] {
 .pkc-md-rendered[data-pkc-prose] > [data-pkc-row-slot][data-pkc-row-prose] {
   max-width: var(--read-w);
 }
+/**
+ * 🔴 **見出しは「見出しに見える」ことが先**(user 報告 2026-08-27)。
+ *
+ * > 見出し行が見づらいんだよね。特に見出しのレベルが高いと文字が小さくなるから
+ * > 文と一緒の大きさに見える。
+ *
+ * ⚠ **測ったら user の言うとおりだった** ── 大きさを書いていたのは **h1〜h3 だけ**で、
+ * h4 は本文と同じ 1em、**h5 は 0.83em / h6 は 0.67em と本文より小さい**(UA 既定)。
+ * さらに間隔の規則も **h1〜h4 までしか無く**、h5 / h6 は前後の余白まで失っていた ──
+ * つまり深い見出しは「小さくて詰まった太字の行」で、本文と区別が付かない。
+ *
+ * 🔑 直しは 2 つ:
+ * ① **本文より小さくしない**(h4〜h6 は 1em で止める)── 段は大きさではなく
+ *    **左の帯の濃さ**で示す。大きさだけで 6 段を作ると、下の段は必ず本文に埋もれる
+ * ② **左端に細いインデックスカラーを敷く**(user 提案「Word みたいな?」)──
+ *    段に依らず**全部の見出しに出る**ので、「これは見出しである」が一目で分かる
+ *
+ * ⚠ 帯は**見出しそのもの**に敷く(畳みのボタンではない)── 配下が無い見出しには
+ *   ボタンが出ない(`heading-fold.ts`「押せない口を作らない」)ので、ボタンに
+ *   敷くと**帯の出る見出しと出ない見出しができる**。
+ * 🔑 `position: relative` は畳みのボタンの置き場(下の `absolute`)である。
+ */
 .pkc-md-rendered h1,
 .pkc-md-rendered h2,
 .pkc-md-rendered h3,
-.pkc-md-rendered h4 {
+.pkc-md-rendered h4,
+.pkc-md-rendered h5,
+.pkc-md-rendered h6 {
+  position: relative;
   margin: var(--s5) 0 var(--s2);
   line-height: 1.3;
+  padding-inline-start: 0.85em;
+  border-inline-start: 3px solid var(--accent);
+}
+/* 🔑 上の 2 段は区切りも引く(節の切れ目)。⚠ 深い段には引かない ──
+ *    全部に引くと線だらけになり、切れ目の意味が消える。 */
+.pkc-md-rendered h1,
+.pkc-md-rendered h2 {
+  padding-block-end: 0.2em;
+  border-block-end: 1px solid color-mix(in srgb, var(--fg) 12%, transparent);
 }
 .pkc-md-rendered h1 {
   font-size: 1.35em;
 }
 .pkc-md-rendered h2 {
   font-size: 1.2em;
+  border-inline-start-color: color-mix(in srgb, var(--accent) 82%, transparent);
 }
 .pkc-md-rendered h3 {
   font-size: 1.08em;
+  border-inline-start-color: color-mix(in srgb, var(--accent) 64%, transparent);
+}
+/* 🔴 **ここから下は本文と同じ大きさで止める**(UA 既定の 0.83 / 0.67em を打ち消す)。
+ *    ⚠ この 3 行が無いと、**見出しが本文より小さくなる** ── user 報告の本体である。 */
+.pkc-md-rendered h4 {
+  font-size: 1em;
+  border-inline-start-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+.pkc-md-rendered h5 {
+  font-size: 1em;
+  border-inline-start-color: color-mix(in srgb, var(--accent) 38%, transparent);
+}
+.pkc-md-rendered h6 {
+  font-size: 1em;
+  border-inline-start-color: color-mix(in srgb, var(--accent) 28%, transparent);
 }
 .pkc-md-rendered ol,
 .pkc-md-rendered ul {
@@ -4500,17 +4550,44 @@ li[data-pkc-row-slot] {
  * `h1.textContent` に混ざり、写し・読み上げ・アンカー・目次が全部汚れる。
  */
 [data-pkc-field='heading-fold'] {
+  position: absolute;
+  inset-inline-start: 0;
+  top: 0;
+  width: 0.85em;
   background: none;
   border: 0;
   cursor: pointer;
   color: var(--muted, inherit);
   font: inherit;
-  padding: 0 0.35em 0 0;
-  line-height: 1;
+  padding: 0;
+  line-height: inherit;
+  opacity: 0;
+  transition: opacity 0.12s;
 }
 [data-pkc-field='heading-fold']::before {
   content: '▾';
 }
 [data-pkc-field='heading-fold'][aria-expanded='false']::before {
   content: '▸';
+}
+/* 🔴 **既定では出さない**(user 報告 2026-08-27「いっそのこと見出し行の
+ *    折りたたみ記号を廃止して」)── 開いているだけの見出しにも記号が並ぶと、
+ *    **行が混んで見出しの字が読みにくくなる**。それが元の訴えである。
+ *
+ * ⚠ **ただし廃止はしない。** 見出しをそのまま押すと**編集に入る**
+ *    (`row-swap.ts`)ので、この口を消すと**畳む動線が 1 つも無くなる**
+ *    (CLAUDE.md「記法を減らすことは、user の動線を減らすことである」)。
+ * 🔑 だから「消す」ではなく「**要るときだけ出す**」。出す場面は 3 つ:
+ *    ① 見出しに触れている間 ② 鍵で選んだとき ③ 🔴 **畳んでいる間は必ず**
+ * ⚠ ③ は**触れていなくても出す** ── 戻し道を画面に残すための門である。
+ *    ここを `:hover` だけにすると、畳んだ見出しが**ただの短い見出しに見え**、
+ *    中身を失ったと誤解させる(CLAUDE.md「片道の操作を作らない」)。 */
+/* ⚠ **`.pkc-md-rendered` を前置きしない。** 畳みの口は**器の部品**であって
+ *    本文の記法ではない ── 前置きすると書き出しへ焼く抜き出しの対象になり、
+ *    `data-pkc-field` を焼かない門(`tests/build/body-css.test.ts`)に当たる。
+ *    ⚠ 素の `:hover >` で足りる:畳みの口の**直上**が触れられたときだけ当たる。 */
+:hover > [data-pkc-field='heading-fold'],
+[data-pkc-field='heading-fold']:focus-visible,
+[data-pkc-field='heading-fold'][aria-expanded='false'] {
+  opacity: 1;
 }
