@@ -6,6 +6,7 @@
  *   当たり前の性質を**実ブラウザでしか確かめられない**形になる。
  */
 import { assetStamp } from './pasted-image-name';
+import { elapsedText } from '../elapsed-text';
 
 /** 何を録ったか。⚠ `media-capture.ts` の `CaptureKind` と同じ綴り(値は 2 つ)。 */
 export type CaptureTextKind = 'audio' | 'screen';
@@ -42,20 +43,10 @@ export function captureFileName(kind: CaptureTextKind, at: Date, mime: string): 
   return `${CAPTURE_LABEL[kind]}-${assetStamp(at)}.${ext}`;
 }
 
-/** 2 桁に揃える。 */
-const two = (n: number): string => String(n).padStart(2, '0');
-
 /**
- * 経過(`0:07` / `12:34` / `1:02:03`)。
- * ⚠ 1 時間を超えたら**時を出す** ── 出さないと「62:03」になって読めない。
+ * ⚠ ここに在った `captureElapsed` は **`features/elapsed-text.ts` へ出した**(#279)──
+ *   タイマーが同じ形を 2 本目に書くところだった(#454 と同じ型)。
  */
-export function captureElapsed(ms: number): string {
-  const all = Math.max(0, Math.floor(ms / 1000));
-  const h = Math.floor(all / 3600);
-  const m = Math.floor((all % 3600) / 60);
-  const s = all % 60;
-  return h > 0 ? `${h}:${two(m)}:${two(s)}` : `${m}:${two(s)}`;
-}
 
 /**
  * 帯の 1 行(`録音中 0:07(約 12KB)`)。
@@ -64,5 +55,5 @@ export function captureElapsed(ms: number): string {
  *   まだ切られていない分は入っていない。丸めた数を断定で書かない。
  */
 export function captureBarLine(kind: CaptureTextKind, elapsedMs: number, bytes: string): string {
-  return `${CAPTURE_LABEL[kind]}中 ${captureElapsed(elapsedMs)}(約 ${bytes})`;
+  return `${CAPTURE_LABEL[kind]}中 ${elapsedText(elapsedMs)}(約 ${bytes})`;
 }

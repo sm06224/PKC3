@@ -90,6 +90,18 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-27-work-timer',
+    title: '作業時間を計って、ノートに残せるようになりました',
+    items: [
+      '左の列の「画面」の隣に「計る」が増えました。押すと、いま開いているノートの作業時間を計り始めます。',
+      '計っている間は画面の下に帯が出て、何を計っているかと経った時間が出ます。別のノートを開いて押せば、何本でも同時に計れます。',
+      '「止める」を押すと、そのノートの本文の末尾に「作業 2026-08-27 06:40–07:03(23:11)」の 1 行が入ります。「捨てる」なら何も残しません。',
+      '別のタブを見ている間も時間は正しく進みます(刻みを数えず、始めた時刻との差で出しています)。',
+      '編集している最中に止めたときは、その瞬間の時間で預かって、編集を終えると本文に入れます。',
+      'ページを読み直すと計測は消えます。開いている間だけ動く道具です。',
+    ],
+  },
+  {
     id: '2026-08-27-group-task',
     title: 'スマートフォルダに期日と状態が書けるようになりました',
     items: [
@@ -301,22 +313,11 @@ export const NOTICES: readonly Notice[] = [
       'ノートが非常に多いときは上から 2000 件までにします。切ったときは、その旨がコピーした紙の中に書かれます。',
     ],
   },
-  {
-    id: '2026-08-26-off-bar-formats',
-    title: 'ハイライト・ルビ・圏点・打ち消しを、鍵で入れられるようになりました',
-    items: [
-      '書けはしたのに、押して入れる口がありませんでした。書式の帯は横に長いのでボタンは増やさず、近道キーを用意しました。',
-      'Alt+Shift+H = ハイライト、Alt+Shift+R = ルビ、Alt+Shift+E = 圏点、Alt+Shift+X = 打ち消しです。選んでから押してください。',
-      'もう一度押すと外れます（太字と同じです）。',
-      'ルビは押すと読みの位置にカーソルが入るので、そのまま読みを打てます。',
-      '鍵は設定のショートカットで好きなものに変えられます。名前を忘れたら「操作を探す」で「ルビ」と打つと出ます。',
-    ],
-  },
 ];
 
 /**
  * ⚠ **落としたぶんの原本は CHANGELOG に在る**(上限 20 件を超えたので、古いほうから
  *   `2026-08-16-office-save-to-pkc` / `2026-08-17-office-save-same-note`(2026-08-19)、
  *   `2026-08-19-dual-pane-app`(2026-08-22)、
- *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice` / `2026-08-24-pptx-export` / `2026-08-24-paste-permalink` / `2026-08-24-markdown-to-pandoc` / `2026-08-24-schedule-range`(2026-08-25)、`2026-08-24-dual-new-note` / `2026-08-24-office-save-formats` / `2026-08-25-relation-map` / `2026-08-25-bookmark-capture` / `2026-08-25-relation-map-body-links` / `2026-08-25-repeating-tasks` / `2026-08-25-snippets` / `2026-08-25-snippet-menu` / `2026-08-25-append-into-section` / `2026-08-25-revision-diff` / `2026-08-25-cross-pane` / `2026-08-25-ext-write-back`(2026-08-26)、`2026-08-25-portable-html`(2026-08-26)、`2026-08-25-rich-text-paste`(2026-08-27)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
+ *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice` / `2026-08-24-pptx-export` / `2026-08-24-paste-permalink` / `2026-08-24-markdown-to-pandoc` / `2026-08-24-schedule-range`(2026-08-25)、`2026-08-24-dual-new-note` / `2026-08-24-office-save-formats` / `2026-08-25-relation-map` / `2026-08-25-bookmark-capture` / `2026-08-25-relation-map-body-links` / `2026-08-25-repeating-tasks` / `2026-08-25-snippets` / `2026-08-25-snippet-menu` / `2026-08-25-append-into-section` / `2026-08-25-revision-diff` / `2026-08-25-cross-pane` / `2026-08-25-ext-write-back`(2026-08-26)、`2026-08-25-portable-html`(2026-08-26)、`2026-08-25-rich-text-paste`(2026-08-27)、`2026-08-26-off-bar-formats`(2026-08-27)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
  */
