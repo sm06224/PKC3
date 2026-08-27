@@ -181,6 +181,42 @@ export async function clickReal(page: Page, target: Target): Promise<void> {
 }
 
 /**
+ * 🔴 **塊を開くクリック = Ctrl(⌘)+クリック**(#495。user 裁定 2026-08-27)。
+ *
+ * > 「見出しを押したら編集とかは、**Ctrl+クリックで、その地点から編集**にすれば
+ * > 良いと思う。**見出しにこだわる必要はない**」
+ *
+ * ⚠ **`clickReal` と同じ検出力**(dead click / occlusion / 座標)を使う ──
+ *   規則を 2 本書くと、片方だけ緩んで気づかない(`expectReachable` と同じ理由)。
+ * 🔑 `ControlOrMeta` は Playwright が**走っている OS で畳んでくれる**修飾キー
+ *   ── 実装側の `ctrlKey || metaKey`(`Chord.mod`)と同じ向きである。
+ */
+export async function modClickReal(page: Page, target: Target): Promise<void> {
+  await withRerenderRetry(page, async () => {
+    const { x, y } = await reachableOnce(page, target);
+    await page.keyboard.down('ControlOrMeta');
+    try {
+      await page.mouse.click(x, y);
+    } finally {
+      await page.keyboard.up('ControlOrMeta');
+    }
+  });
+}
+
+/** 🔴 **追記の入り先を指すクリック = Alt+クリック**(#495)。 */
+export async function altClickReal(page: Page, target: Target): Promise<void> {
+  await withRerenderRetry(page, async () => {
+    const { x, y } = await reachableOnce(page, target);
+    await page.keyboard.down('Alt');
+    try {
+      await page.mouse.click(x, y);
+    } finally {
+      await page.keyboard.up('Alt');
+    }
+  });
+}
+
+/**
  * 「その座標で実際に見えていて、最前面である」ことだけを確かめる(押さない)。
  *
  * 🔑 `<select>` のように**押すと OS の一覧が開いてしまう**部品は、これで届くことを

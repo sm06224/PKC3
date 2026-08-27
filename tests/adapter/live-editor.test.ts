@@ -184,7 +184,7 @@ describe('ライブエディタ(1 面)の配線', () => {
     await settle();
     const live = r.root.querySelector('[data-pkc-region="editor-live"]')!;
     const p = [...live.querySelectorAll('p')].find((e) => e.textContent === '最初の段落。')!;
-    p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, ctrlKey: true }));
     const ta = live.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')!;
     expect(ta.value).toBe('最初の段落。');
     ta.value = '書き換えた。';
@@ -201,7 +201,7 @@ describe('ライブエディタ(1 面)の配線', () => {
     await settle();
     const live = r.root.querySelector('[data-pkc-region="editor-live"]')!;
     const p = [...live.querySelectorAll('p')].find((e) => e.textContent === '最初の段落。')!;
-    p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, ctrlKey: true }));
     live.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')!.blur();
     expect(r.bodies).toEqual([]);
     // ⚠ それでも穴は残っていない
@@ -280,7 +280,7 @@ describe('ライブエディタ(1 面)の配線', () => {
     const live = r.root.querySelector('[data-pkc-region="editor-live"]')!;
     const open = (text: string): HTMLTextAreaElement => {
       const p = [...live.querySelectorAll('p')].find((e) => e.textContent === text)!;
-      p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+      p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, ctrlKey: true }));
       return live.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')!;
     };
     // 2 か所を順に書き換える(= 塊を跨ぐ)
@@ -318,7 +318,7 @@ describe('ライブエディタ(1 面)の配線', () => {
     await settle();
     const live = r.root.querySelector('[data-pkc-region="editor-live"]')!;
     const p = [...live.querySelectorAll('p')].find((e) => e.textContent === '最初の段落。')!;
-    p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, ctrlKey: true }));
     const ta = live.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')!;
     ta.value = '打ちかけ';
     const ev = new KeyboardEvent('keydown', {
@@ -394,7 +394,7 @@ describe('ライブエディタ(1 面)の配線', () => {
     await settle();
     const live = r.root.querySelector('[data-pkc-region="editor-live"]')!;
     const p = [...live.querySelectorAll('p')].find((e) => e.textContent === '最初の段落。')!;
-    p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, ctrlKey: true }));
     const ta = live.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')!;
     const ev = new KeyboardEvent('keydown', {
       key: 'a',
@@ -488,7 +488,7 @@ describe('ライブエディタ(1 面)の配線', () => {
     await settle();
     const live = r.root.querySelector<HTMLElement>('[data-pkc-region="editor-live"]')!;
     const p0 = [...live.querySelectorAll('p')].find((e) => e.textContent === '普通の段落。')!;
-    p0.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    p0.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, ctrlKey: true }));
     const row = live.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')!;
     // 確定すると journal に 1 件入り、その本文は分割できないので退避へ落ちる
     row.value = [':::figure{id="あ い"}', '', '中身', '', ':::'].join('\n');
@@ -544,7 +544,7 @@ describe('ライブエディタ(1 面)の配線', () => {
     off.mockRestore();
     expect(r.root.querySelector('[data-pkc-region="editor-live"]')).toBeNull();
     // 🔴 外れた面の中をクリックしても、入力欄は生えない(listener が残っていない)
-    p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, ctrlKey: true }));
     expect(live.querySelector('[data-pkc-field="row-source"]')).toBeNull();
     expect(r.bodies).toEqual([]);
   });
@@ -701,7 +701,7 @@ describe('文書の情報(frontmatter)の扱い(#284)', () => {
     await settle();
     const live = r.root.querySelector('[data-pkc-region="editor-live"]')!;
     const p = [...live.querySelectorAll('p')].find((e) => e.textContent === '最初の段落。')!;
-    p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, ctrlKey: true }));
     const ta = live.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')!;
     expect(ta.value, '開いた行が原文とずれている').toBe('最初の段落。');
     ta.value = '書き換えた。';
@@ -718,7 +718,7 @@ describe('文書の情報(frontmatter)の扱い(#284)', () => {
     await settle();
     const live = r.root.querySelector('[data-pkc-region="editor-live"]')!;
     const h = live.querySelector('h1')!;
-    h.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    h.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, ctrlKey: true }));
     const ta = live.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')!;
     expect(ta.value, '境目の行がずれている').toBe('# 題');
     ta.value = '# 新しい題';

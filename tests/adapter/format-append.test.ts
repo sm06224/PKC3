@@ -238,7 +238,7 @@ describe('書式パネル ── live の 1 面(2026-08-08)', () => {
     await tick(30); // 描画は follower(microtask)── 1 拍待つ
     const live = root.querySelector('[data-pkc-region="editor-live"]')!;
     const p = [...live.querySelectorAll('p')].find((e) => e.textContent === text)!;
-    p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, ctrlKey: true }));
     return root.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')!;
   }
 

@@ -452,10 +452,29 @@ export class RowSwap {
     return null;
   }
 
+  /**
+   * 🔴 **塊を開くのは Ctrl(⌘)+クリック**(#495。user 裁定 2026-08-27)。
+   *
+   * > 「見出しを押したら編集とかは、**Ctrl+クリックで、その地点から編集**にすれば
+   * > 良いと思う。**見出しにこだわる必要はない**」
+   * > (直前の指摘)「正直**見出し全体クリック判定はあまり良い挙動じゃない**と思う」
+   *
+   * ⚠ 直す前は**素の左クリックで塊が開いて**いた ── 押し所が塊の幅いっぱいなので、
+   *   字を選ぶ / 見出しの畳みを押す / ただ読む、が**全部「編集に入る」に化けて**いた
+   *   (#486 が畳みのボタンを `<button>` にせざるを得なかったのもこれが理由)。
+   * 🔑 素のクリックは**読む・選ぶ・畳む**に返す。開くのは修飾キーを押したときだけ。
+   * ⚠ **Ctrl と ⌘ を畳む** ── `features/keymap.ts` の `Chord.mod` と同じ規則
+   *   (分けると「mac だけ効かない近道」が生まれる)。
+   * ⚠ **`Alt` が一緒なら降りる** ── `Ctrl+Alt` は AltGr であり、`Alt` 単独は
+   *   読む面の「追記の入り先」(`binder.ts`)である。
+   * ⚠ **本文の下の余白だけは素のクリックのまま** ── そこが**空のノートの唯一の
+   *   入口**で、塞ぐと 1 文字も打てなくなる(下の `belowLastBlock` の注記)。
+   */
   private handleClick(ev: MouseEvent): void {
     if (ev.defaultPrevented || ev.button !== 0) return;
-    // ⚠ Shift だけは受ける(S6 の範囲選択)── 他の修飾キーはアプリの操作
-    if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    // ⚠ Alt は読む面の「追記の入り先」── この面では受けない(二重に効かせない)
+    if (ev.altKey) return;
+    const mod = ev.metaKey || ev.ctrlKey;
     const target = ev.target;
     if (!(target instanceof Node)) return;
     // Shift は `mousedown` で処理済み(ここで二度やらない)
@@ -491,6 +510,12 @@ export class RowSwap {
       if (this.belowLastBlock(ev.clientY) && !this.awaitingUpdate) this.appendRow();
       return;
     }
+    /**
+     * 🔴 **素のクリックでは開かない**(#495)── ここから下は「開く」の話である。
+     * ⚠ 断り文も出さない ── 読むために押した人へ毎回お知らせを出すと、
+     *   お知らせの行が**読む邪魔**になる(押した本人は断られたつもりが無い)。
+     */
+    if (!mod) return;
     if (this.starts[blockIndex] === undefined || this.starts[blockIndex]! < 0) {
       // 導出物(脚注の区切りなど)── 原文の行が無いので開かない
       this.cb.notify?.('ここは自動で作られる部分なので、直接は編集できません');

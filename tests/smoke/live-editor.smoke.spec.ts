@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { clickReal, createEntry, collectPageErrors } from './helpers';
+import { clickReal, modClickReal, createEntry, collectPageErrors } from './helpers';
 
 /**
  * 🔴 **1 面のライブエディタ**(2026-08-05。ライブエディタ S5。
@@ -60,7 +60,7 @@ test('🔴 1 面で、クリックした行だけが原文になる(周りは描
   await expect(page.locator('[data-pkc-field="editor-body"]')).toHaveCount(0);
 
   // ② 段落をクリックすると、その塊だけが原文の入力欄になる
-  await clickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
+  await modClickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
   const row = live.locator('[data-pkc-field="row-source"]');
   await expect(row).toHaveValue('最初の段落です。');
   // 周りは描画のまま
@@ -118,7 +118,7 @@ test('🔴 ② 本物の日本語入力で確定できる(1 回だけ・文字�
   await openLive(page, '# 題\n\nもとの段落。\n');
 
   const live = page.locator('[data-pkc-region="editor-live"]');
-  await clickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
+  await modClickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
   const row = live.locator('[data-pkc-field="row-source"]');
   await expect(row).toBeFocused();
   await row.fill('');
@@ -168,7 +168,7 @@ test('🔴 打鍵ではレンダリングが 1 回も走らない(確定のと�
   await openLive(page, '# 題\n\nもとの段落。\n\nもう 1 つ。\n');
 
   const live = page.locator('[data-pkc-region="editor-live"]');
-  await clickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
+  await modClickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
   const row = live.locator('[data-pkc-field="row-source"]');
   await expect(row).toBeFocused();
   // ⚠ caret は**クリックした所**に入る(= 塊の中央 → 行末)。打った文字が
@@ -223,7 +223,7 @@ test('🔴 表の 1 行だけを差し替えられる(表ごとにならない)'
 
   const live = page.locator('[data-pkc-region="editor-live"]');
   await expect(live.locator('tbody tr')).toHaveCount(2);
-  await clickReal(page, '[data-pkc-region="editor-live"] tbody tr:nth-of-type(2)');
+  await modClickReal(page, '[data-pkc-region="editor-live"] tbody tr:nth-of-type(2)');
   const row = live.locator('[data-pkc-field="row-source"]');
   await expect(row).toHaveValue('| みかん | 2 |');
 
@@ -243,7 +243,7 @@ test('🔴 行頭で ``` を打ち切ると閉じが入る + それが Ctrl+Z �
   await openLive(page, '# 題\n\nもとの段落。\n');
 
   const live = page.locator('[data-pkc-region="editor-live"]');
-  await clickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
+  await modClickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
   const row = live.locator('[data-pkc-field="row-source"]');
   await expect(row).toBeFocused();
   await row.fill('');
@@ -278,7 +278,7 @@ test('🔴 閉じていない ``` は色が変わり、確定すると理由が�
   await openLive(page, '# 題\n\nもとの段落。\n');
 
   const live = page.locator('[data-pkc-region="editor-live"]');
-  await clickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
+  await modClickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
   const row = live.locator('[data-pkc-field="row-source"]');
   await expect(row).toBeFocused();
   // ⚠ **貼り付け相当**(`fill`)で入れる ── 打鍵だと auto pair が閉じてしまうので、
@@ -312,13 +312,13 @@ test('🔴 塊を跨ぐ Ctrl+Z が実機で効く(行の中は OS の取り消�
   const row = live.locator('[data-pkc-field="row-source"]');
 
   // ① 1 か所目を書き換えて確定
-  await clickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
+  await modClickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
   await row.fill('1 回目。');
   await page.keyboard.press('Tab');
   await expect(live).toContainText('1 回目。');
 
   // ② 2 か所目を書き換えて確定(= 塊を跨いだ)
-  await clickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(2)');
+  await modClickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(2)');
   await row.fill('2 回目。');
   await page.keyboard.press('Tab');
   await expect(live).toContainText('2 回目。');
@@ -351,7 +351,7 @@ test('🔴 行の中の Ctrl+Z は打鍵単位で戻る(履歴の取り消しが
   await openLive(page, '# 題\n\nもとの段落。\n');
 
   const live = page.locator('[data-pkc-region="editor-live"]');
-  await clickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
+  await modClickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
   const row = live.locator('[data-pkc-field="row-source"]');
   await expect(row).toBeFocused();
   await row.fill('');
@@ -402,7 +402,7 @@ test('🔴 Shift+クリックで 2 つの塊を 1 つの入力欄にできる(S6
   await openLive(page, '# 題\n\n1 つめ。\n\n2 つめ。\n\n3 つめ。\n');
 
   const live = page.locator('[data-pkc-region="editor-live"]');
-  await clickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
+  await modClickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
   const row = live.locator('[data-pkc-field="row-source"]');
   await expect(row).toHaveValue('1 つめ。');
 
@@ -544,7 +544,7 @@ test('🔴 Alt+↓ で次の塊が開き、素の ↓ は箱の中の移動の�
   await openLive(page, '# 題\n\n最初の段落です。\n\n次の段落です。\n');
 
   const live = page.locator('[data-pkc-region="editor-live"]');
-  await clickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
+  await modClickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
   const row = live.locator('[data-pkc-field="row-source"]');
   await expect(row).toHaveValue('最初の段落です。');
 
@@ -607,7 +607,7 @@ test('🔴 長い 1 段落は折り返したぶんだけ箱が伸びる(先頭�
   const long = `あ${'長い段落の本文です。'.repeat(30)}ん`; // 改行を 1 つも持たない
   await openLive(page, `# 題\n\n${long}\n`);
 
-  await clickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
+  await modClickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
   const row = page.locator('[data-pkc-region="editor-live"] [data-pkc-field="row-source"]');
   await expect(row).toHaveValue(long);
 
@@ -794,7 +794,7 @@ test('🔴 実打鍵で括弧を閉じても二重にならない (#299 / cowork
   await openLive(page, '# 題\n\nもとの段落。\n');
 
   const live = page.locator('[data-pkc-region="editor-live"]');
-  await clickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
+  await modClickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
   const row = live.locator('[data-pkc-field="row-source"]');
   await expect(row).toBeFocused();
 

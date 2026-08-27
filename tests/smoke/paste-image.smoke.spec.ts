@@ -14,7 +14,7 @@
  *   **確定後に `<img>` が実寸を持つ**ところまで見る(§4「届いた証拠」)。
  */
 import { test, expect, type Page } from '@playwright/test';
-import { clickReal, createEntry, collectPageErrors, expectImageRendered, gotoApp, useSplitEditor, useListBrowse } from './helpers';
+import { clickReal, modClickReal, createEntry, collectPageErrors, expectImageRendered, gotoApp, useSplitEditor, useListBrowse } from './helpers';
 
 // 1x1 PNG(67 bytes)── attach.smoke.spec.ts と同じ絵
 const PNG_1X1_B64 =
@@ -291,7 +291,7 @@ test('🔴 画像の行を開いて閉じても、画像は消えず URL も積�
     // ⚠ **repo の実クリック**を使う(`locator.click` は同じ座標でも
     //   「viewport の外」と断ることがあり、10 回中 9 回落ちた ── 版面は
     //   1440x900、絵は (286,178) 64x64 で、明らかに中に在る)
-    await clickReal(page, '[data-pkc-region="editor-live"] img[data-pkc-asset-key]');
+    await modClickReal(page, '[data-pkc-region="editor-live"] img[data-pkc-asset-key]');
     // 前提: その塊が原文の入力欄に化けた(この次元を測れている)
     await expect(
       live.locator('[data-pkc-field="row-source"]'),
