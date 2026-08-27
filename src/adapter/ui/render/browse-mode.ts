@@ -29,6 +29,27 @@ export type BrowseMode = (typeof BROWSE_MODES)[number];
 /** 🔴 既定 = フォルダ(#240 段⑤)。 */
 export const DEFAULT_BROWSE_MODE: BrowseMode = 'filer';
 
+/**
+ * 🔴 **種類の絞り(`kindFilter`)が実際に効く探し方**(#478)。
+ *
+ * ⚠ **一覧に無い面では、押しても何も起きない**のに**絞りだけ入る** ──
+ *   その面では何も変わらないので user は気づかず、
+ *   あとで一覧へ行くと**ノートが消えている**。
+ *
+ * 🔑 中身は**実装を読んで決めた**(推測ではない):
+ *   `kindFilter` を読んでいるのは `filer.ts` / `dual-filer.ts`(一覧・フォルダ)と
+ *   `schedule.ts:139`(予定)だけで、`contacts.ts` / `launcher.ts` は **0 件**。
+ * ⚠ **面が `kindFilter` を読むようになったら、ここへ足す**
+ *   ── 足さないと「効くのに札が出ない」になる(逆向きの穴)。
+ *   `tests/adapter/kind-bar.test.ts` が両方向を突き合わせる。
+ */
+export const KIND_FILTER_MODES: readonly BrowseMode[] = ['list', 'filer', 'schedule'];
+
+/** その探し方で種類の絞りが効くか。 */
+export function kindFilterApplies(mode: BrowseMode): boolean {
+  return KIND_FILTER_MODES.includes(mode);
+}
+
 export function isBrowseMode(v: string): v is BrowseMode {
   return (BROWSE_MODES as readonly string[]).includes(v);
 }

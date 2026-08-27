@@ -31,6 +31,7 @@ import { ContactsRenderer } from './contacts';
 // 🔑 型と既定は `browse-mode.ts` が持つ(#240 段⑤)── 既定が 4 か所に散っていた
 export type { BrowseMode } from './browse-mode';
 import { DEFAULT_BROWSE_MODE, type BrowseMode } from './browse-mode';
+import { KindBarRenderer } from './kind-bar';
 
 /**
  * タブ。⚠ 文言は「探し方」を表す(「詳細」のような場所の名前にしない)。
@@ -58,6 +59,11 @@ export const BROWSE_TABS: readonly { mode: BrowseMode; label: string }[] = [
 export class BrowseRouter {
   private readonly panes: Record<BrowseMode, HTMLElement>;
   private readonly list: SidebarRenderer;
+  /**
+   * 🔴 **種類の札は面ではなく器が描く**(#478)── 帯は左の列(shell)に在り、
+   *   面をまたいで居座るので、**開いている面に関係なく毎回**描き直す。
+   */
+  private readonly kindBar: KindBarRenderer;
   private readonly filer: FilerRenderer;
   private readonly launcher: LauncherRenderer;
   private readonly schedule: ScheduleRenderer;
@@ -104,6 +110,7 @@ export class BrowseRouter {
     if (initial !== 'list') this.panes.list.hidden = true;
     this.scroll = new ScrollMemory(host);
     this.list = new SidebarRenderer(sidebar);
+    this.kindBar = new KindBarRenderer(sidebar);
     this.filer = new FilerRenderer(this.panes.filer);
     this.launcher = new LauncherRenderer(this.panes.launcher);
     this.schedule = new ScheduleRenderer(this.panes.schedule, now);
@@ -125,6 +132,9 @@ export class BrowseRouter {
       this.panes[mode].hidden = false;
       this.last = mode;
     }
+    // 🔴 **札の帯は面に関係なく描く**(#478)── 面の中の renderer に持たせると、
+    //    その面を開いていない間は**古い DOM のまま**になり、押しても嘘をつく。
+    this.kindBar.render(state, mode);
     // ⚠ 非 active な面には render を呼ばない(裏で毎 state 仕事をしない)
     if (mode === 'list') this.list.render(state);
     else if (mode === 'filer') this.filer.render(state);
