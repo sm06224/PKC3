@@ -41,6 +41,7 @@ import { APPENDABLE_ARCHETYPES } from '../src/features/flavor/append-spec';
 import { buildOfficePackPanel } from '../src/adapter/ui/render/office-pack-panel';
 import { OfficePackState } from '../src/adapter/ui/render/office-entry-view';
 import { codeOnly } from './helpers/code-only';
+import { ENTRY_ACTION_LABELS } from '../src/features/entry-actions';
 
 /** src 配下の TS を全部集める(「無い」ことの主張を file 単位で逃さない)。 */
 function srcFiles(dir = 'src', out: string[] = []): string[] {
@@ -371,8 +372,25 @@ describe('マニュアルと実装の突合', () => {
     }
     expect(detail, '復元が消えた').toContain("textContent = '復元'");
     const inspector = readFileSync('src/adapter/ui/render/inspector.ts', 'utf-8');
+    /**
+     * ⚠ **字の在り処が変わった**(2026-08-27、#426 段①)── これらは
+     * 右クリックのメニューにも出るので、**`features/entry-actions.ts` が字の正本**に
+     * なった(情報ペインはそこから引く)。
+     * 🔑 **見たいこと自体は変わっていない**:「情報ペインにこのボタンが在り、
+     *   同じ字がマニュアルにも在る」。⚠ だから**正本の側で字を確かめ**、
+     *   情報ペインは**その操作を出していること**で見る。
+     */
+    const ACTION_OF: Record<string, string> = {
+      書き出す: 'export-entry',
+      履歴: 'show-history',
+      削除: 'delete-entry',
+    };
     for (const label of ['書き出す', '履歴', '削除']) {
-      expect(inspector, `情報ペインから「${label}」が消えた`).toContain(`'${label}'`);
+      const action = ACTION_OF[label]!;
+      expect(ENTRY_ACTION_LABELS[action], `字の正本から「${label}」が消えた`).toBe(label);
+      expect(inspector, `情報ペインから「${label}」が消えた`).toContain(
+        `ENTRY_ACTION_LABELS['${action}']`,
+      );
     }
     // ⚠ **2 か所に同じボタンを出さない**(押す場所が定まらなくなる)
     for (const label of ['削除', '履歴']) {
@@ -782,10 +800,37 @@ describe('移行ガイドと実装の突合', () => {
  * 「メニュー」は `<details>` を外した段①で消えた語なので、機械的に止められる。
  */
 describe('導線の置き場所(P8 段⑱)', () => {
-  it('🔴 マニュアルが「メニュー」を名乗らない(畳む UI は段① で外した)', () => {
-    // ⚠ 代替物で満たせない条件にする ── 「メニュー」という語そのものを禁じる
-    const lines = MANUAL.split('\n').filter((l) => l.includes('メニュー'));
+  it('🔴 マニュアルが、存在しない「メニュー」を名乗らない', () => {
+    /**
+     * 🔴 **禁止の目的は「画面に無い物を案内しない」であって、語の抹殺ではない**
+     *   (2026-08-27、#426 段① で前提が変わった)。
+     *
+     * ⚠ 直す前はこの検査が **「メニュー」という語そのもの**を禁じていた ──
+     *   `<details>` を外した段① の時点では、画面にメニューが**1 つも無かった**ので
+     *   それで正しかった。
+     * 🔴 **いまは在る**:右クリックのメニュー(#426 段①)と、ブラウザ既定のメニュー。
+     *   ⚠ 語ごと禁じたままにすると、**実在する動線を書けなくなる**
+     *   ── それは「記法を減らすと動線が減る」と同じ向きである。
+     *
+     * 🔑 だから**在る物を等値で pin する**(`KNOWN_DEAD` と同じ作法)──
+     *   ⚠ 新しく「メニュー」と書いたら**必ず落ちる**ので、
+     *   書いた人は「それは本当に画面に在るか」を 1 度必ず問うことになる。
+     */
+    const ALLOWED_SUBSTRINGS: readonly string[] = [
+      // #426 段①:行を右クリックすると出る(実在する)
+      '右クリック',
+      // ⚠ ブラウザ既定のメニュー ── 奪っていないことを案内する行
+      'ブラウザのメニュー',
+    ];
+    const lines = MANUAL.split('\n')
+      .filter((l) => l.includes('メニュー'))
+      .filter((l) => !ALLOWED_SUBSTRINGS.some((ok) => l.includes(ok)));
     expect(lines, `存在しない「メニュー」を案内している:\n${lines.join('\n')}`).toEqual([]);
+    // ⚠ 空振り防止 ── 許した語が**実際にマニュアルに在る**こと
+    //   (在らないなら、この許しは死んでいる = 次に語ごと禁じ直すべき)
+    for (const ok of ALLOWED_SUBSTRINGS) {
+      expect(MANUAL, `許した「${ok}」がマニュアルに無い(許しが死んでいる)`).toContain(ok);
+    }
   });
 
   it('🔴 マニュアルが「上の帯」に書き出し・取込を置いていない', () => {
@@ -1033,6 +1078,8 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    // ⚠ 上限 20 を超えたので 2026-08-27 に落とした(原本は CHANGELOG)
+    'サイドバーで、種類を選んで絞れるようになりました',
     // ⚠ 上限 20 を超えたので 2026-08-27 に落とした(原本は CHANGELOG)
     '書きながら、別のノートへのリンクを選んで入れられるようになりました',
     // ⚠ 上限 20 を超えたので 2026-08-27 に落とした(原本は CHANGELOG)

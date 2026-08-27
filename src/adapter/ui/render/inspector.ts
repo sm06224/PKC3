@@ -62,6 +62,7 @@ export const RELATION_CANDIDATE_MAX = 200;
 import { getAncestorFolders } from '@features/relation/tree';
 import { BODY_LINK_KIND, renderRelationMap } from './relation-map';
 import { bodyLinkTargets } from '@features/entry-ref/body-links';
+import { ENTRY_ACTION_LABELS } from '@features/entry-actions';
 
 /** 素性の行(`data-pkc-field` → 値を入れる `<dd>`)。 */
 type Rows = Map<string, HTMLElement>;
@@ -735,7 +736,7 @@ export class InspectorRenderer {
      * 🔑 **添付の「参照をコピー」と同じ形**にする ── 貼れる 1 行を
      *   `data-pkc-entry-ref` に載せ、binder はそれを渡すだけ(組み立て直さない)。
      */
-    btn('copy-entry-ref', '参照をコピー');
+    btn('copy-entry-ref', ENTRY_ACTION_LABELS['copy-entry-ref']!);
     /**
      * 🔴 **外部の画像を手元へ取り込む**(#264 段①)。
      *
@@ -745,7 +746,7 @@ export class InspectorRenderer {
      *   押す前に規模が分かる形にする(#264 の棄却理由②)。
      */
     btn('adopt-external-images', '外部の画像を取り込む');
-    btn('export-entry', '書き出す');
+    btn('export-entry', ENTRY_ACTION_LABELS['export-entry']!);
     /**
      * 🔴 **このフォルダごと書き出す**(#399 ①)。
      *
@@ -780,10 +781,10 @@ export class InspectorRenderer {
      * ⚠ 隣の 4 つと違い、**file は落ちない**(clipboard へ写す)── 他のツールへ
      *   そのまま貼るための物だからである。
      */
-    btn('copy-plain-markdown', '素の Markdown');
+    btn('copy-plain-markdown', ENTRY_ACTION_LABELS['copy-plain-markdown']!);
     if (shape === 'entry+link') btn('write-back-file', '書き戻す');
-    btn('show-history', '履歴');
-    btn('delete-entry', '削除');
+    btn('show-history', ENTRY_ACTION_LABELS['show-history']!);
+    btn('delete-entry', ENTRY_ACTION_LABELS['delete-entry']!);
     this.region.append(actions);
   }
 }

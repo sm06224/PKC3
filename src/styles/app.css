@@ -372,6 +372,44 @@ select:focus-visible {
 
 
 
+/**
+ * 🔴 **右クリックのメニュー**(#426 段①)。
+ *
+ * ⚠ **地は無彩色**(founding「地は無彩色、色は情報にだけ使う」)。
+ * ⚠ 位置は script が `left` / `top` に入れる ── **CSS では決めない**
+ *   (押した場所に出す物なので、器の側では知りようがない)。
+ * ⚠ `position: fixed` ── 面の中でスクロールしても**付いて回らない**
+ *   (回ると、押した行から離れた所に浮いたまま残る)。
+ *   🔑 そもそもスクロールしたら閉じる(`binder.ts`)ので、これは保険である。
+ */
+[data-pkc-region='context-menu'] {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  min-width: 10rem;
+  padding: 2px;
+  gap: 1px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 25%);
+}
+[data-pkc-region='context-menu'] button {
+  justify-content: flex-start;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  /* 🔑 **語より細くしない**(#468 / #476 と同じ規則)── 名前が切れると
+   *    「何ができるか」を出す面としての意味が無くなる。 */
+  min-width: max-content;
+}
+[data-pkc-region='context-menu'] button:hover,
+[data-pkc-region='context-menu'] button:focus-visible {
+  background: var(--accent-dim);
+  color: var(--accent-dim-fg);
+}
+
 /* ── 左の列: 探し方のタブ ───────────────────────────
  * 🔑 **その列が扱うものの操作は、その列が持つ**(P8 段⑤)── 上の帯と左で
  * 同じものが出ていた「かぶり」の解消。フォルダもアプリも「探し方」なのでここ。 */
