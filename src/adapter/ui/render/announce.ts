@@ -28,7 +28,12 @@ import type { NoticeStore } from '@adapter/platform/notice-store';
 export interface Announce {
   /** 未読が在れば出す。⚠ **無ければ行の高さを 0 に保つ**(空の枠を残さない)。 */
   present(): void;
-  /** 読んだことにして閉じる。 */
+  /**
+   * 🔴 **いま出ている 1 件を読んだことにして、次を出す**(#475、2026-08-27)。
+   * ⚠ `dismiss` と分ける ── **帯は畳まない**。畳むのは残り 0 件になったときだけ。
+   */
+  next(): void;
+  /** 残っている未読をまとめて読んだことにして、帯を畳む。 */
   dismiss(): void;
   /** 今後出さない(設定から戻せる)。⚠ **戻せない導線は作らない**。 */
   mute(): void;
@@ -55,76 +60,150 @@ export function createAnnounce(
     shown = [];
   };
 
+  /**
+   * 🔴 **出すのは 1 件だけ**(#475、2026-08-27 の実機検証レポート #16)。
+   *
+   * > 「230px の箱の中に **10 件が縦に積まれ、中でスクロール**します。1 件読むのに
+   * > 箱の中を繰る形で、**箱が大きいのに一度に 1 件しか読めません**。畳むだけでは
+   * > 「読ませたい」目的も果たせていない状態です」
+   *
+   * ⚠ 初回起動の user は**未読が登記表の全数**(最大 10 件)なので、
+   *   積むと必ず 30vh の上限に当たる ── **大きいのに読めない**という、
+   *   場所と目的を同時に損なう形だった。
+   * 🔑 だから**新しい 1 件だけ**を出し、「次へ」で送る。
+   *   残りは見出しの件数で分かり、**まとめて読む道はヘルプに在る**
+   *   (帯の案内文がその場に書いてある)。
+   */
+  const paint = (): void => {
+    if (!store.enabled()) return clear();
+    const unread = unreadNotices(all, store.seenIds());
+    if (unread.length === 0) return clear();
+    /** ⚠ **既読にする対象は「出した時点の未読の集合」のまま** ── 「閉じる」と
+     *  「今後は出さない」は *残り全部* を読んだことにする出口なので、
+     *  画面に出ている 1 件だけでは足りない。送る(`next`)ときだけ先頭を使う。 */
+    shown = unread;
+    const current = unread[0]!;
+    region.textContent = '';
+    region.hidden = false;
+
+    /**
+     * 🔴 **閉じるは見出しの行に置く**(#151、2026-08-14 の実機報告)。
+     *
+     * ⚠ 以前は本文・案内文のあとに置いていたが、面は `max-height: 30vh` で
+     * **中を流す**ので、お知らせが 2 件も在れば**箱の中で見切れて**いた ──
+     * user からは「閉じ方が分からない帯が画面の 1/3 を占領している」に見える。
+     * 🔑 高さを切ってよいのは**読むもの**だけで、**閉じる導線を切ってはいけない**
+     * (`app.css` の「幅が足りないなら場所を変えるのであって、操作を無くして
+     * よい理由にはならない」と同じ。あれの縦版である)。
+     * ⚠ 「今後は出さない」は末尾のままでよい ── 常に見えている必要があるのは
+     * **その場を畳む手**だけである。
+     */
+    const head = document.createElement('div');
+    head.setAttribute('data-pkc-field', 'announce-title');
+    const label = document.createElement('span');
+    /** ⚠ **残りの件数を出す**(1 件ずつ出す以上、これが唯一の手掛かりである)。 */
+    label.textContent = unread.length === 1 ? 'お知らせ' : `お知らせ(残り ${unread.length} 件)`;
+
+    /**
+     * 🔴 **「次へ」は 2 件以上のときだけ**。⚠ 1 件しか無いのに出すと、
+     *   押しても何も起きない(= 無言の dead click)。
+     * 🔑 **「閉じる」の意味を変えない** ── 今日までと同じく *帯が消える* である。
+     *   読み進める手を「閉じる」に兼ねさせると、押しても消えない帯になる。
+     */
+    if (unread.length > 1) {
+      const next = document.createElement('button');
+      next.type = 'button';
+      next.setAttribute('data-pkc-action', 'next-announce');
+      next.textContent = '次へ';
+      next.title = 'この 1 件を読んだことにして、次のお知らせを出します';
+      head.append(label, next);
+    } else {
+      head.append(label);
+    }
+
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.setAttribute('data-pkc-action', 'dismiss-announce');
+    close.textContent = '閉じる';
+    /** ⚠ **押す前に結果が分かるようにする** ── 残りごと既読になることを書く。 */
+    close.title =
+      unread.length === 1
+        ? '読んだことにして閉じます'
+        : `残り ${unread.length} 件を読んだことにして閉じます(ヘルプからいつでも読めます)`;
+    head.append(close);
+    region.append(head);
+
+    const body = document.createElement('div');
+    body.setAttribute('data-pkc-field', 'announce-body');
+    const sec = document.createElement('section');
+    sec.setAttribute('data-pkc-announce', current.id);
+    const t = document.createElement('h3');
+    // ⚠ 日付は id から引く(field を二重に持たない)
+    t.textContent = `${noticeDate(current.id)} ${current.title}`;
+    const ul = document.createElement('ul');
+    for (const line of current.items) {
+      const li = document.createElement('li');
+      // ⚠ **素のテキスト**(記法は書かない決まり ── test が守る)
+      li.textContent = line;
+      ul.append(li);
+    }
+    sec.append(t, ul);
+    body.append(sec);
+    region.append(body);
+
+    /**
+     * 🔴 **案内文と「今後は出さない」を 1 行に畳む**(#475、2026-08-27)。
+     *
+     * ⚠ どちらも**読むものではなく、在り処を示すもの**なのに、縦に 2 行 +
+     *   余白を取っていた(実測 16px + 26px + 余白 ≒ 帯の 1/5)。
+     * 🔑 **読むもの(お知らせ本文)に縦を譲る** ── 場所を取ってよいのは
+     *   読ませたい物だけである。
+     * ⚠ **どちらも消さない** ── 「あとから読める」を書かないと
+     *   「閉じたら二度と読めない」と思わせ、「今後は出さない」を帯から外すと
+     *   止める手が設定の中だけになる(動線を 1 つ失う)。
+     */
+    const foot = document.createElement('div');
+    foot.setAttribute('data-pkc-field', 'announce-foot');
+
+    const where = document.createElement('p');
+    where.setAttribute('data-pkc-field', 'announce-where');
+    where.textContent = '過去のお知らせは、左の列の「ヘルプ」からいつでも読めます。';
+
+    const mute = document.createElement('button');
+    mute.type = 'button';
+    mute.setAttribute('data-pkc-action', 'mute-announce');
+    mute.textContent = '今後は出さない';
+    /** ⚠ **戻し道をその場に書く**(押した後に探させない)。 */
+    mute.title = '設定の「表示」からいつでも戻せます';
+
+    foot.append(where, mute);
+    region.append(foot);
+  };
+
   return {
-    present() {
-      if (!store.enabled()) return clear();
-      const unread = unreadNotices(all, store.seenIds());
-      if (unread.length === 0) return clear();
-      shown = unread;
-      region.textContent = '';
-      region.hidden = false;
+    present: paint,
 
-      /**
-       * 🔴 **閉じるは見出しの行に置く**(#151、2026-08-14 の実機報告)。
-       *
-       * ⚠ 以前は本文・案内文のあとに置いていたが、面は `max-height: 30vh` で
-       * **中を流す**ので、お知らせが 2 件も在れば**箱の中で見切れて**いた ──
-       * user からは「閉じ方が分からない帯が画面の 1/3 を占領している」に見える。
-       * 🔑 高さを切ってよいのは**読むもの**だけで、**閉じる導線を切ってはいけない**
-       * (`app.css` の「幅が足りないなら場所を変えるのであって、操作を無くして
-       * よい理由にはならない」と同じ。あれの縦版である)。
-       * ⚠ 「今後は出さない」は末尾のままでよい ── 常に見えている必要があるのは
-       * **その場を畳む手**だけである。
-       */
-      const head = document.createElement('div');
-      head.setAttribute('data-pkc-field', 'announce-title');
-      const label = document.createElement('span');
-      label.textContent = unread.length === 1 ? 'お知らせ' : `お知らせ(${unread.length} 件)`;
-      const close = document.createElement('button');
-      close.type = 'button';
-      close.setAttribute('data-pkc-action', 'dismiss-announce');
-      close.textContent = '閉じる';
-      head.append(label, close);
-      region.append(head);
-
-      const body = document.createElement('div');
-      body.setAttribute('data-pkc-field', 'announce-body');
-      for (const nt of unread) {
-        const sec = document.createElement('section');
-        sec.setAttribute('data-pkc-announce', nt.id);
-        const t = document.createElement('h3');
-        // ⚠ 日付は id から引く(field を二重に持たない)
-        t.textContent = `${noticeDate(nt.id)} ${nt.title}`;
-        const ul = document.createElement('ul');
-        for (const line of nt.items) {
-          const li = document.createElement('li');
-          // ⚠ **素のテキスト**(記法は書かない決まり ── test が守る)
-          li.textContent = line;
-          ul.append(li);
-        }
-        sec.append(t, ul);
-        body.append(sec);
-      }
-      region.append(body);
-
-      /**
-       * ⚠ **あとから読める**ことをその場に書く ── 「閉じたら二度と読めない」と
-       * 思わせない(実際はヘルプに残る)。
-       */
-      const where = document.createElement('p');
-      where.setAttribute('data-pkc-field', 'announce-where');
-      where.textContent = '過去のお知らせは、左の列の「ヘルプ」からいつでも読めます。';
-      region.append(where);
-
-      const acts = document.createElement('p');
-      const mute = document.createElement('button');
-      mute.type = 'button';
-      mute.setAttribute('data-pkc-action', 'mute-announce');
-      mute.textContent = '今後は出さない';
-      /** ⚠ **戻し道をその場に書く**(押した後に探させない)。 */
-      mute.title = '設定の「表示」からいつでも戻せます';
-      acts.append(mute);
-      region.append(acts);
+    /**
+     * 🔴 **焦点を返す**(CLAUDE.md §10「置き換えの作法」)。
+     *
+     * ⚠ 送るたびに帯を描き直すので、**押したボタンごと消える** ── 何もしないと
+     *   焦点が `<body>` へ落ち、鍵で読み進めている user は **2 件目で止まる**。
+     * 🔑 描き直した後に、同じ場所のボタンへ焦点を戻す ── 最後の 1 件では
+     *   「次へ」が消えるので、そのときは「閉じる」が受ける
+     *   (`querySelector` の選択子リストは**文書順で最初**を返すので、
+     *   「次へ」が在る限りそちらに当たる)。
+     */
+    next() {
+      const current = shown[0];
+      if (!current) return;
+      const had = region.contains(document.activeElement);
+      store.markSeen([current.id]);
+      paint();
+      if (!had) return;
+      const back = region.querySelector(
+        '[data-pkc-action="next-announce"], [data-pkc-action="dismiss-announce"]',
+      );
+      if (back instanceof HTMLElement) back.focus();
     },
 
     dismiss() {
@@ -160,6 +239,8 @@ export function createAnnounce(
  */
 export interface AnnounceServices {
   dismissAnnounce(): void;
+  /** 🔴 いま出ている 1 件を読んだことにして、次を出す(#475)。 */
+  nextAnnounce(): void;
   muteAnnounce(): void;
   setNoticesEnabled(on: boolean): void;
 }
@@ -173,6 +254,8 @@ export function announceServices(
   return {
     // ⚠ 閉じたのは**読んだから** ── 既読にする
     dismissAnnounce: () => announce.dismiss(),
+    /** ⚠ **畳まない** ── 送るだけ(残りが 0 件になったら `present` が畳む)。 */
+    nextAnnounce: () => announce.next(),
     muteAnnounce: () => {
       announce.mute();
       onChanged();
