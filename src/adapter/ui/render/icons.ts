@@ -177,6 +177,17 @@ const ICON_PATHS: Readonly<Record<string, readonly IconPath[]>> = {
   calendar: ['M4 6.5h16V20H4z', 'M4 10.5h16', 'M8.5 3.5v4', 'M15.5 3.5v4'],
   /** 種類が分からないもの。 */
   dot: [{ d: 'M9.5 12a2.5 2.5 0 105 0 2.5 2.5 0 00-5 0z', fill: 'solid' }],
+  /** マイク(録音 ── #413)。 */
+  mic: [
+    { d: 'M9.5 4.5a2.5 2.5 0 015 0v6a2.5 2.5 0 01-5 0z', fill: 'soft' },
+    'M6 10.5a6 6 0 0012 0',
+    'M12 16.5V20',
+    'M9 20h6',
+  ],
+  /** 画面(画面収録 ── #413)。 */
+  monitor: [{ d: 'M3.5 5h17v10h-17z', fill: 'soft' }, 'M9 19h6', 'M12 15v4'],
+  /** 収録を止める(四角 ── 世界共通の「停止」)。 */
+  stop: [{ d: 'M7 7h10v10H7z', fill: 'solid' }],
 };
 
 export type IconName = keyof typeof ICON_PATHS;
@@ -209,6 +220,11 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'purge-orphan-assets': 'broom',
   'create-entry': 'plus',
   'attach-file': 'clip',
+  /** 録音・画面収録(#413)。⚠ 止めるのは**四角**(世界共通の停止)。 */
+  'start-audio-capture': 'mic',
+  'start-screen-capture': 'monitor',
+  'stop-capture': 'stop',
+  'discard-capture': 'trash',
   'start-edit': 'pencil',
   'commit-edit': 'check',
   'cancel-edit': 'close',

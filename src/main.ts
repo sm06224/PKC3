@@ -59,7 +59,7 @@ import {
   isUnknownOpError,
   resolveContainerCompat,
 } from '@adapter/platform/storage/resolve-container-compat';
-import { buildShell } from '@adapter/ui/render/shell';
+import { buildShell, paintCaptureBar } from '@adapter/ui/render/shell';
 import { showNotices, clearNotices } from '@adapter/ui/render/notices';
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
 import { createAnnounce, announceServices } from '@adapter/ui/render/announce';
@@ -119,6 +119,7 @@ import { CenterRouter } from '@adapter/ui/render/center';
 import { AppendBoxRenderer } from '@adapter/ui/render/append-box';
 import { formatSize } from '@adapter/ui/render/detail';
 import { bindActions, generateLid, type BinderServices } from '@adapter/ui/actions/binder';
+import { createCaptureService } from '@adapter/ui/actions/capture';
 import {
   armLaunchQueue,
   type LaunchTarget,
@@ -1533,8 +1534,31 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   const sameOriginGate = new SameOriginGate();
 
+  /**
+   * 🔴 **録音・画面収録**(#413)。段取りは `capture.ts` が持ち、ここは口を渡すだけ。
+   *
+   * ⚠ 取り込みは **`queued`**(断る側ではない)── 収録は**取り直せない**ので、
+   *   整理(未参照 GC)と重なったら**待たせる**(Office の保存と同じ判断)。
+   */
+  const captureService = createCaptureService({
+    dispatcher,
+    attach: async (item) => {
+      let out: Awaited<ReturnType<typeof attachOne>> = null;
+      await withAssetGate.queued(async () => {
+        out = await attachOne(dispatcher, attachDeps, item);
+      });
+      return out;
+    },
+    onChange: (line) => paintCaptureBar(root, line),
+    notify: showStatus,
+  });
+
   const services: BinderServices = {
     attachFiles: (files) => void withAssetGate(() => attachFiles(dispatcher, attachDeps, files)),
+    // 🔴 録音・画面収録(#413)── 押す口は左の列の「添付」の隣に在る
+    startCapture: (kind) => void captureService.start(kind),
+    stopCapture: () => captureService.stop(),
+    discardCapture: () => captureService.discard(),
     // 🔑 一時の知らせ(「3 件を『はこ』へ入れました」)── **エラーの行とは別**
     showStatus,
     /**

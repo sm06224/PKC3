@@ -113,6 +113,22 @@ const CREATE_BUTTONS: readonly { archetype: string; label: string }[] = [
 ] as const;
 
 
+/**
+ * 🔴 **収録中の帯を出す / 畳む**(#413)。
+ *
+ * ⚠ **器は常設で、`hidden` と字だけ**を触る ── 1 秒ごとに組み直すと、
+ *   押している最中の「止める」が指の下から消える。
+ * ⚠ 器が無ければ**何もしない** ── `buildShell` より先に呼ばれても落ちない
+ *   (器を作る側と描く側は別の file なので、順番はここでは保証できない)。
+ */
+export function paintCaptureBar(root: HTMLElement, line: string | null): void {
+  const bar = root.querySelector<HTMLElement>('[data-pkc-region="capture-bar"]');
+  if (bar === null) return;
+  bar.hidden = line === null;
+  const text = bar.querySelector<HTMLElement>('[data-pkc-field="capture-status"]');
+  if (text !== null) text.textContent = line ?? '';
+}
+
 export function buildShell(root: HTMLElement): ShellRegions {
   root.textContent = '';
   const shell = document.createElement('div');
@@ -320,7 +336,23 @@ export function buildShell(root: HTMLElement): ShellRegions {
 
   const attach = iconButton('attach-file', '添付');
   attach.title = 'ファイルを取り込んで添付にします';
-  createBar.append(kind, create, pick, today, attach);
+  /**
+   * 🔴 **録音・画面収録**(#413。user 要望 2026-07-16
+   * 「録音と画面収録を…これで、会議メモをうまく残せるはず」)。
+   *
+   * ⚠ **「添付」の隣に置く** ── 押す動機が同じ(いま何かを残したい)なので、
+   *   探す場所も同じであるべき。
+   * 🔴 **画面に出す**(鍵だけにしない)── PKC2 は**コマンドパレットだけ**に
+   *   置いており、PKC3 にはそれが無い。⚠ 「画面のどこにも出ていない」は
+   *   「届いていない」である(#180 の教訓 3)。
+   */
+  const rec = iconButton('start-audio-capture', '録音');
+  rec.setAttribute('data-pkc-field', 'start-audio-capture');
+  rec.title = 'マイクで録って、いま開いているノートに入れます';
+  const screen = iconButton('start-screen-capture', '画面');
+  screen.setAttribute('data-pkc-field', 'start-screen-capture');
+  screen.title = '画面を録って、いま開いているノートに入れます';
+  createBar.append(kind, create, pick, today, attach, rec, screen);
 
   const attachInput = document.createElement('input');
   attachInput.type = 'file';
@@ -497,6 +529,30 @@ export function buildShell(root: HTMLElement): ShellRegions {
   status.setAttribute('data-pkc-region', 'status');
   status.hidden = true;
 
+  /**
+   * 🔴 **収録中の帯**(#413)── 経過 + 概算の大きさ + 止める / 捨てる。
+   *
+   * ⚠ **shell の行に置く**(サイドバーの中ではない)── 押す口は「添付」の隣に
+   *   在るが、**止める口はサイドバーを畳んでも消えてはいけない**。畳んだ瞬間に
+   *   止められなくなると、マイクが回り続ける(user 指示 2026-08-22
+   *   「その場その場で user が動線をどう捉えるか」)。
+   * ⚠ **常設で置いて、収録中だけ出す**(`hidden` の付け外し)── 器を作り直すと、
+   *   1 秒ごとの更新で押している最中の「止める」が指の下から消える。
+   * ⚠ 捨てる口を**必ず対で**置く(user 指示 2026-08-23「片道の操作を作らない」)。
+   */
+  const capture = document.createElement('section');
+  capture.setAttribute('data-pkc-region', 'capture-bar');
+  capture.hidden = true;
+  const captureText = document.createElement('span');
+  captureText.setAttribute('data-pkc-field', 'capture-status');
+  const stopBtn = iconButton('stop-capture', '止める');
+  stopBtn.setAttribute('data-pkc-field', 'stop-capture');
+  stopBtn.title = '収録を止めて、いま開いているノートに入れます';
+  const dropBtn = iconButton('discard-capture', '捨てる');
+  dropBtn.setAttribute('data-pkc-field', 'discard-capture');
+  dropBtn.title = '収録を捨てます(残しません)';
+  capture.append(captureText, stopBtn, dropBtn);
+
   // 既定は空(= 何も出さない)。注意が出たときだけ中身が入る
   const notices = document.createElement('section');
   notices.setAttribute('data-pkc-region', 'notices');
@@ -522,6 +578,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
     center,
     grips.inspector!,
     inspector,
+    capture,
     announce,
     update,
     notices,
