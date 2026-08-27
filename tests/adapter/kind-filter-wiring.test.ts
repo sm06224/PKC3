@@ -11,6 +11,8 @@ import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { SidebarRenderer } from '../../src/adapter/ui/render/sidebar';
+import { KindBarRenderer } from '../../src/adapter/ui/render/kind-bar';
+import type { BrowseMode } from '../../src/adapter/ui/render/browse-mode';
 
 function meta(lid: string, order: number, over: Partial<EntryMeta> = {}): EntryMeta {
   return {
@@ -121,12 +123,30 @@ describe('消したあとの後継', () => {
 });
 
 describe('サイドバーの札', () => {
+  /**
+   * ⚠ **札を描く renderer が変わった**(2026-08-27、#478)── 帯は左の列に在って
+   *   面をまたぐので、**面の中(`SidebarRenderer`)から器の側(`KindBarRenderer`)へ
+   *   移した**(移す前は一覧以外のタブで 1 度も描き直されず、押しても嘘をついた)。
+   * 🔑 **見たいことは 1 つも変えていない** ── 下の assert はそのままで、
+   *   **駆動する相手だけ**を差し替えている。
+   * ⚠ `sidebar.render` も併せて呼ぶ ── 行(`entry-list`)は今もそちらが描くので、
+   *   「札を押すと行が減る」を見る test はその両方が要る。
+   */
   const mount = () => {
     const root = document.createElement('div');
     document.body.append(root);
     buildShell(root);
     const region = root.querySelector<HTMLElement>('[data-pkc-region="sidebar"]')!;
-    return { root, sidebar: new SidebarRenderer(region), region };
+    const list = new SidebarRenderer(region);
+    const bar = new KindBarRenderer(region);
+    // ⚠ 既定は一覧(札が出る面)── 面ごとの出し分けは `kind-bar.test.ts` が見る
+    const sidebar = {
+      render: (state: AppState, mode: BrowseMode = 'list'): void => {
+        list.render(state);
+        bar.render(state, mode);
+      },
+    };
+    return { root, sidebar, region };
   };
   const chips = (region: HTMLElement) =>
     [...region.querySelectorAll('[data-pkc-action="toggle-kind-filter"]')].map(
