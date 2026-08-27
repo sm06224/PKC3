@@ -568,3 +568,68 @@ test('🔴 添付の HTML が、本文に書いたのと同じ箱で描かれる
   expect(await box.getAttribute('srcdoc')).toContain('添付から来た字');
   await expect(page.locator('[data-pkc-fence-asset-key]')).toHaveCount(0);
 });
+
+/**
+ * 🔴 **書き出したファイルにも中身が入る**(#444 段②)。
+ *
+ * 🔑 **unit では届かない所を見る** ── ここで測るのは
+ *   「**配ったファイルを単体で開いたときに、添付の中身が読めるか**」である。
+ *   unit は書き出しの中の文字列までしか見られないが、user が受け取るのは
+ *   **アプリも IDB も無い環境で開いた 1 枚**である(hydrator は居ない)。
+ * ⚠ 対照群を同じ test に置く ── 器のままなら「中身は添付に在ります」が出る。
+ */
+test('🔴 書き出した HTML を単体で開いても、囲みの中身が入っている(#444 段②)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: 'uriage.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from('しなもの,かず\nりんご,120\nみかん,80\n', 'utf8'),
+  });
+  const assetKey = await page
+    .locator('[data-pkc-action="download-asset"]')
+    .first()
+    .getAttribute('data-pkc-asset-key');
+  expect(assetKey, '添付の鍵が取れない(この先は測れない)').toBeTruthy();
+
+  await createEntry(page, 'text');
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await expect(ta).toBeVisible();
+  await ta.click();
+  await page.keyboard.type('```csv asset:' + assetKey + '\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  // ⚠ 前提 ── 画面では表になっている(ここが崩れたら以降は何も測れない)
+  await expect(page.locator('[data-pkc-field="detail-body"] table')).toBeVisible({
+    timeout: 10_000,
+  });
+
+  // ⚠ 配った 1 枚は**1 件ずつ**見せるので、どのノートを開くかを名前で決める
+  //    ── 添付そのものもノートなので、既定で開くのは csv のほうである
+  const noteTitle = (await page.locator('[data-pkc-field="detail-title"]').innerText()).trim();
+  expect(noteTitle, '書いたノートの題名が読めない(この先は測れない)').not.toBe('');
+
+  const dl = page.waitForEvent('download');
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await clickReal(page, '[data-pkc-action="export-html"]');
+  const file = join(tmpdir(), `pkc3-fence-asset-${process.pid}.html`);
+  await (await dl).saveAs(file);
+
+  // ── アプリも IDB も無い所で開く(user が受け取るのはこの 1 枚である)
+  const viewer = await page.context().newPage();
+  await viewer.goto(`file://${file}`);
+  await viewer.locator('nav button', { hasText: noteTitle }).first().click();
+  const table = viewer.locator('#body table');
+  await expect(table, '配った 1 枚に表が入っていない').toBeVisible({ timeout: 10_000 });
+  await expect(table).toContainText('りんご');
+  await expect(table).toContainText('120');
+  // 🔑 対照群 ── 焼き込めていなければ、この字が残る
+  await expect(viewer.locator('#body')).not.toContainText('中身は添付');
+  const box = (await table.boundingBox())!;
+  expect(box.height, '配った表の高さが無い').toBeGreaterThan(20);
+  await viewer.close();
+
+  expect(errors).toEqual([]);
+});

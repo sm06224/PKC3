@@ -10,7 +10,11 @@
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { writeArchive, type ArchiveSource } from '@features/export/pkc3-archive';
-import type { RenderMarkdownOptions } from '@features/markdown/markdown-render';
+import {
+  collectFenceAssetKeys,
+  type RenderMarkdownOptions,
+} from '@features/markdown/markdown-render';
+import { readFenceAssets } from '@features/asset/fence-asset-read';
 import { writePortableHtml } from '@features/export/pkc3-html';
 import { buildOoxmlFile } from '@adapter/platform/export/ooxml-client';
 import type { OoxmlMedia } from '@adapter/platform/export/ooxml-assemble';
@@ -342,9 +346,22 @@ async function collectOfficeBlocks(
    *   frontmatter が見えない。
    */
   const skip = body.length - parseFrontmatter(body).body.length;
+  /**
+   * 🔴 **囲みが指している添付を、字として焼き込む**(#444 段②)。
+   *
+   * ⚠ ここは**画面の DOM を読んでいない** ── 上のとおり**もう一度描いて**から
+   *   塊に畳むので、画面で hydrator が埋めた字はここには来ない。渡さないと
+   *   Word / PowerPoint だけ「この囲みの中身は添付に在ります」が残る。
+   * ⚠ 読めなかったものは束に入らない ── 器のまま理由が出る(黙って空にしない)。
+   */
+  const fenceAssets = await readFenceAssets(
+    (k) => deps.source.getAssetBlob(k),
+    collectFenceAssetKeys(body.slice(skip)),
+  );
   const html = await renderBody(body.slice(skip), {
     vars: extractVars(body),
     headingNumber: extractHeadingNumberConfig(body),
+    ...(Object.keys(fenceAssets).length > 0 ? { fenceAssets } : {}),
     /**
      * 🔴 **`:::if{format=docx}` / `:::if{format=pptx}` を生かす**(#187 段⑤)。
      * ⚠ ここを渡すまで、この記法は**受理はするが永久に不可視**だった

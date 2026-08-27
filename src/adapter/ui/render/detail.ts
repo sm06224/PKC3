@@ -20,10 +20,7 @@ import {
 } from '@features/markdown/frontmatter';
 import { hydrateMermaid, type MermaidScope } from './mermaid-hydrate';
 import { hydrateChart } from './chart-raster';
-import {
-  MAX_FENCE_ASSET_BYTES,
-  formatBytes,
-} from '@features/markdown/fence-asset';
+import { readFenceAssetText } from '@features/asset/fence-asset-read';
 import { applyHeadingFold } from './heading-fold';
 
 /**
@@ -1792,37 +1789,20 @@ export class DetailRenderer {
               for (const h of mine) fail(h, '添付を読む口がありません');
               return;
             }
-            let blob: Blob | null;
-            try {
-              blob = await assets.getBlob(key);
-            } catch {
-              blob = null;
-            }
-            if (token !== this.hydrateToken) return;
-            if (!blob) {
-              for (const h of mine) fail(h, 'その添付が見つかりません');
-              return;
-            }
             /**
-             * ⚠ **大きすぎるものは読まない**(不可侵指示 2026-08-03「効くのは定常」)。
-             * 50MB の字を毎回運ぶと、開くたびにその分を払うことになる。
-             * ⚠ **黙って切らない** ── 大きさを言う。
+             * 🔑 **読み方は書き出しと同じ 1 本**(#444 段②で寄せた)──
+             *   上限も断り文も `features/asset/fence-asset-read.ts` が持つ。
+             * ⚠ 直す前はここに同じ判定が並んでおり、**書き出し側にだけ上限が
+             *   無い**という食い違いを作れる形だった(CLAUDE.md §7)。
              */
-            if (blob.size > MAX_FENCE_ASSET_BYTES) {
-              for (const h of mine)
-                fail(
-                  h,
-                  `大きすぎます(${formatBytes(blob.size)} / 上限 ${formatBytes(MAX_FENCE_ASSET_BYTES)})`,
-                );
-              return;
-            }
-            try {
-              text = await blob.text();
-            } catch {
-              for (const h of mine) fail(h, '字として読めません');
-              return;
-            }
+            const got = await readFenceAssetText((k) => assets.getBlob(k), key);
+            // ⚠ 待っている間にノートが変わっていたら**何も触らない**(器も断り文も)
             if (token !== this.hydrateToken) return;
+            if (!got.ok) {
+              for (const h of mine) fail(h, got.why);
+              return;
+            }
+            text = got.text;
             this.fenceTexts.set(key, text);
           }
           for (const h of mine) {

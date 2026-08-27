@@ -813,3 +813,71 @@ describe('PowerPoint の出口(#187 段⑤)', () => {
     expect(text, '共通の本文が落ちている').toContain('いつも出る文');
   });
 });
+
+/**
+ * 🔴 **Word / PowerPoint も、囲みが指す添付を焼き込む**(#444 段②)。
+ *
+ * ⚠ ここは**画面の DOM を読んでいない** ── `export-archive.ts` は
+ *   その場で**もう一度描いて**から塊に畳む。渡さないと、配った .docx にだけ
+ *   「この囲みの中身は添付に在ります」が残る(持ち出したら中身が消える)。
+ */
+describe('Word の書き出しでも、囲みが指す添付が入る(#444 段②)', () => {
+  const ASSET = 'ヤギ座標系の覚書';
+
+  function withAsset(): ArchiveSource {
+    return source({
+      listBodies: async () => ({
+        rows: [{ lid: 'n1', body: '```js asset:ast-j\n控え\n```' }],
+        done: true,
+      }),
+      getBody: async () => '```js asset:ast-j\n控え\n```',
+      listAssetMetas: async () => [
+        { key: 'ast-j', mime: 'text/plain', size: ASSET.length, hash: null },
+      ],
+      getAssetBlob: async (key) =>
+        key === 'ast-j'
+          ? new Blob([new TextEncoder().encode(ASSET) as unknown as BlobPart])
+          : null,
+    });
+  }
+
+  /** ⚠ 描くのは**本物**(`renderMarkdown`)── stub だと配線を 1 行も検めない。 */
+  function catching(src: ArchiveSource) {
+    const got: Blob[] = [];
+    return {
+      got,
+      d: {
+        ...deps(src),
+        download: (_name: string, blob: Blob) => got.push(blob),
+        renderBody: async (text: string, opts?: RenderMarkdownOptions) =>
+          renderMarkdown(text, opts),
+      } as unknown as ExportDeps & { files: string[] },
+    };
+  }
+
+  it('🔴 添付の字が .docx に入り、控えの字は入らない', async () => {
+    const { d, got } = catching(withAsset());
+    const { dispatcher } = fakeDispatcher('ready');
+    expect(await exportEntryDocx(dispatcher, d, 'n1')).toBe(true);
+    const xml = await got[0]!.text();
+    expect(xml, '添付の中身が届いていない').toContain(ASSET);
+    expect(xml, '控えの字を配っている(添付を読んでいない)').not.toContain('控え');
+  });
+
+  it('⚠ 添付が読めなければ、その場に理由が出る(黙って空にしない)', async () => {
+    const { d, got } = catching(
+      source({
+        listBodies: async () => ({
+          rows: [{ lid: 'n1', body: '```js asset:ast-gone\n控え\n```' }],
+          done: true,
+        }),
+        getBody: async () => '```js asset:ast-gone\n控え\n```',
+      }),
+    );
+    const { dispatcher } = fakeDispatcher('ready');
+    expect(await exportEntryDocx(dispatcher, d, 'n1')).toBe(true);
+    const xml = await got[0]!.text();
+    // 🔑 対照群 ── 上の test の「入る」は「いつでも入る」ではない
+    expect(xml).toContain('この囲みの中身は添付');
+  });
+});

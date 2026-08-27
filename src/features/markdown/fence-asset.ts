@@ -79,3 +79,16 @@ export function formatBytes(n: number): string {
   if (n < 1024 * 1024) return `${Math.round(n / 1024)}KB`;
   return `${(n / (1024 * 1024)).toFixed(1)}MB`;
 }
+
+/**
+ * 🔴 **添付の字を「本文に書いてあったのと同じ形」に揃える**(#444 段②)。
+ *
+ * ⚠ markdown-it の囲みの中身は**必ず改行で終わる**(空の囲みだけが例外)。
+ * 揃えないと、同じ添付でも**画面と書き出しで最後の 1 バイトがずれる** ──
+ * 素のコード囲みは中身をそのまま `<code>` に流すので、実際に見た目に出る。
+ * 🔑 揃える場所は**ここ 1 つ**にする ── 画面(`renderFenceFromAsset`)と
+ *   書き出し(`fenceAssets`)の両方がこれを通る(CLAUDE.md §7)。
+ */
+export function asFenceContent(text: string): string {
+  return text === '' || text.endsWith('\n') ? text : `${text}\n`;
+}

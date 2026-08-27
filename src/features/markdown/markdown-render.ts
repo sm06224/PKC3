@@ -39,7 +39,12 @@ import {
   EXTERNAL_IMAGE_CLASS,
   isExternalImageSrc,
 } from './external-images';
-import { takeFenceAsset, type FenceAssetParse } from './fence-asset';
+import {
+  takeFenceAsset,
+  asFenceContent,
+  FENCE_ASSET_PREFIX,
+  type FenceAssetParse,
+} from './fence-asset';
 import { parsePortablePkcReference } from '../link/permalink';
 import {
   inferQ8ValueOnlyKey,
@@ -433,8 +438,11 @@ function buildRenderableBlockHtml(
 function buildFenceAssetHtml(
   /** ⚠ `none` は呼ばない(呼び側が弾く)── 型で示して分岐を 2 か所に置かない。 */
   parse: Exclude<FenceAssetParse, { kind: 'none' }>,
-  /** 見出しの先頭語(`csv` / `csv-render` / `js` …)。⚠ 分解は hydrator 側でやる。 */
-  langWord: string,
+  /**
+   * `asset:` の語を抜いた残りの見出し(`csv` / `csv-render noheader` / `js` / 空)。
+   * ⚠ 分解は hydrator 側でやる ── ここは**そのまま預ける**だけである。
+   */
+  withoutAsset: string,
   body: string,
   sourceLineAttrs: string,
 ): string {
@@ -448,7 +456,7 @@ function buildFenceAssetHtml(
       `</div>`
     );
   }
-  const info = parse.rest === '' ? langWord : `${langWord} ${parse.rest}`;
+  const info = withoutAsset;
   const fallback =
     body === ''
       ? ''
@@ -462,6 +470,56 @@ function buildFenceAssetHtml(
     fallback +
     `</div>`
   );
+}
+
+/**
+ * 🔴 **囲みの見出しを 1 か所だけで読む**(#444 段②で取り出した)。
+ *
+ * 🔑 **読み手を 2 つにしない**(CLAUDE.md §7)── 描く側(`fence` rule)と
+ *   **鍵を数え上げる側**(`collectFenceAssetKeys`)が同じ見出しを別の綴りで
+ *   読むと、片方だけが古くなっても誰も気づかない。
+ */
+function fenceAssetOfInfo(info: string): { parse: FenceAssetParse; withoutAsset: string } {
+  const parse = takeFenceAsset(info);
+  /**
+   * ⚠ **`asset:` の語を抜いた残り**が、そのまま「ふつうの見出し」である。
+   *
+   * 🔴 直す前は**先頭語を言語だと決め打って**その後ろだけ読んでいたので、
+   *   言語を書かない ` ```asset:鍵 ` が**記法として読まれず**、
+   *   `class="language-asset:鍵"` の素のコード囲みに静かに落ちていた
+   *   (段② の一致検査が 1 件落ちて教えた)。
+   * 🔑 語順に依らないという 段① の約束を、先頭語でも守る形である。
+   */
+  return { parse, withoutAsset: parse.kind === 'one' ? parse.rest : info };
+}
+
+/**
+ * 🔴 **本文が指している添付の鍵を数え上げる**(#444 段②)。
+ *
+ * 書き出し側が「どの添付を字として読むか」を決めるために使う。
+ * ⚠ 戻るのは **`kind: 'one'` だけ**── 書き方が使えない囲みは読まない
+ *   (描く側がその場で理由を出す)。
+ * ⚠ **重複は畳む**(同じ鍵を 2 つの囲みが指しても読みは 1 回)。
+ * ⚠ fence の判定は markdown-it 自身にさせる ── 自前の正規表現で数えると
+ *   引用の中・リストの中・`~~~` の囲みを取りこぼす。
+ * ⚠ **読むのは前処理の前の原文である。** だから数えは描画と 1:1 ではない ──
+ *   `%%%…%%%` の中の囲みも数える(**多く読む**側)/ `{{vars.x}}` の展開で
+ *   初めて現れる囲みは数えない(**焼かれずに器が残る**側)。
+ *   🔑 どちらも**黙って空にはならない** ── 多い側は上限つきの読みが 1 回増えるだけ、
+ *   少ない側は「この囲みの中身は添付に在ります」が残って**何が入っていないか読める**。
+ */
+export function collectFenceAssetKeys(text: string): string[] {
+  if (!text.includes(FENCE_ASSET_PREFIX)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const token of md.parse(text, {})) {
+    if (token.type !== 'fence') continue;
+    const { parse } = fenceAssetOfInfo((token.info ?? '').trim());
+    if (parse.kind !== 'one' || seen.has(parse.key)) continue;
+    seen.add(parse.key);
+    out.push(parse.key);
+  }
+  return out;
 }
 
 md.renderer.rules.fence = function (tokens, idx, options, env, self) {
@@ -478,15 +536,59 @@ md.renderer.rules.fence = function (tokens, idx, options, env, self) {
    * ⚠ ここは `parseRenderableFence` の**手前**に置く ── 素のコード囲み
    *   (` ```js `)は registry の外なので、後ろに置くと届かない。
    */
-  const firstWord = info.split(/\s+/)[0] ?? '';
-  const fenceAsset = takeFenceAsset(info.slice(firstWord.length));
+  const { parse: fenceAsset, withoutAsset } = fenceAssetOfInfo(info);
+  /**
+   * 🔴 **字が手元にあるなら、その場で描く**(#444 段②)。
+   *
+   * 書き出し(閲覧用 HTML / Word)には hydrator が居ないので、器だけ置くと
+   * 「持ち出したら中身が消える」になる ── 呼び手が `fenceAssets` を渡していれば
+   * **本文に書いてあったのと同じ道**で描く。
+   * 🔑 だから**中身を差し替えて落とし込む**だけにする ── 描き方の規則を
+   *   ここへ書き写さない(写した瞬間、本文の囲みと見た目がずれうる)。
+   * ⚠ 渡されていない(アプリの画面)ときはこれまでどおり器を置く ──
+   *   添付の読みは非同期で、markdown の描画は同期である。
+   */
+  let content = token.content ?? '';
+  let effectiveInfo = info;
   if (fenceAsset.kind !== 'none') {
-    return buildFenceAssetHtml(fenceAsset, firstWord, token.content ?? '', sourceLineAttrs);
+    const lent =
+      fenceAsset.kind === 'one'
+        ? (env as { fenceAssets?: Readonly<Record<string, string>> } | undefined)?.fenceAssets?.[
+            fenceAsset.key
+          ]
+        : undefined;
+    if (fenceAsset.kind !== 'one' || lent === undefined) {
+      return buildFenceAssetHtml(fenceAsset, withoutAsset, content, sourceLineAttrs);
+    }
+    content = asFenceContent(lent);
+    effectiveInfo = withoutAsset;
   }
-  const fence = parseRenderableFence(info);
+  const fence = parseRenderableFence(effectiveInfo);
   if (fence) {
-    const content = token.content ?? '';
     return renderRenderableFence(fence, content, sourceLineAttrs, env);
+  }
+  /**
+   * ⚠ 素のコード囲みは `defaultFence` が token を読むので、**写しを渡す**
+   *   (別の描き方をここへ書き写さない ── 段① の parity 検査と同じ理由)。
+   * 🔑 **本物は 1 バイトも書き換えない。** 書き換えて戻す形も試したが、
+   *   「戻す」を**誰も見ていない**(外から観測できない)── 変異試験で
+   *   「戻さない」変異が生き延びて分かった。⚠ 観測できない後始末に頼るより、
+   *   **書き換えないほうが強い**(CLAUDE.md「『これが無いと壊れる』と書く前に、
+   *   外して壊れるのを見る」)。
+   * ⚠ `defaultFence` が読むのは `tokens[idx]` の `info` / `content` / `attrs` /
+   *   `attrIndex` だけなので、写し 1 つの配列で足りる(上流の実装を読んで確かめた)。
+   */
+  if (content !== (token.content ?? '') || effectiveInfo !== info) {
+    const surrogate = Object.assign(
+      Object.create(Object.getPrototypeOf(token) as object) as typeof token,
+      token,
+      { content, info: effectiveInfo },
+    );
+    return wrapWithCopyButton(
+      defaultFence([surrogate], 0, options, env, self),
+      'code',
+      sourceLineAttrs,
+    );
   }
   const fenceHtml = defaultFence(tokens, idx, options, env, self);
   return wrapWithCopyButton(fenceHtml, 'code', sourceLineAttrs);
@@ -586,6 +688,7 @@ export function renderFenceFromAsset(
    */
   env: { currentContainerId?: string; allowExternalImages?: boolean } = {},
 ): string {
+  content = asFenceContent(content);
   const fence = parseRenderableFence(info);
   if (fence) return renderRenderableFence(fence, content, '', env);
   const lang = (info.trim().split(/\s+/)[0] ?? '').toLowerCase();
@@ -1887,6 +1990,20 @@ md.core.ruler.after('inline', 'pkc-task-list', function (state) {
  */
 export interface RenderMarkdownOptions {
   readonly currentContainerId?: string;
+  /**
+   * 🔴 **囲みの中身を添付から取ったもの**(#444 段②。鍵 → 字)。
+   *
+   * 🔑 **書き出しのためにある** ── 配った HTML / Word には hydrator が居ないので、
+   *   渡さないと「持ち出したら中身が消える」になる。渡せば、本文に書いてあったのと
+   *   **同じ道**で描かれる。
+   * ⚠ **アプリの画面は渡さない** ── 添付の読みは非同期で、この描画は同期である
+   *   (画面は器を置いて `hydrateAssetRefs` が埋める)。
+   * ⚠ **素の object にする**(関数を渡さない)── 描画は markdown ワーカーへ
+   *   `postMessage` で渡ることがあり、関数は clone できずにそこで落ちる。
+   * ⚠ 載せるのは**本文が指している鍵だけ**(`collectFenceAssetKeys`)── 全添付を
+   *   字にして渡すと、ゼロコピーの積み上げ(不可侵指示 2026-07-27)が崩れる。
+   */
+  readonly fenceAssets?: Readonly<Record<string, string>>;
   /**
    * 🔴 **チェックの印を押せる形で出すか**(#277。既定 `false` = 押せない)。
    *
@@ -4899,7 +5016,10 @@ export function renderMarkdown(
     interactiveTasks: boolean;
     taskLineOffset: number;
     lineMap?: number[];
+    fenceAssets?: Readonly<Record<string, string>>;
   } = {
+    // 🔴 添付から取った字(#444 段②)。⚠ 渡されないのが既定 = 器を置く
+    ...(opts.fenceAssets !== undefined ? { fenceAssets: opts.fenceAssets } : {}),
     currentContainerId: opts.currentContainerId ?? '',
     // ⚠ 既定は**塞ぐ側**(`external-images.ts` の向きに従う)
     allowExternalImages: opts.allowExternalImages === true,

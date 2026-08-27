@@ -77,6 +77,42 @@ describe('markdown worker', () => {
     expect(mine.result).toBe(renderMarkdown(text, { currentContainerId: 'c1' }));
   });
 
+  /**
+   * 🔴 **囲みの中身(添付)も落とさない**(#444 段②)。
+   *
+   * 書き出しは `renderBody` 経由で**ワーカーへ行くことがある** ── ここが素通しで
+   * ないと、**ワーカーが立っている環境でだけ**配った HTML / Word の中身が消える
+   * (しかも速い環境ほど壊れる、いちばん気づけない形)。
+   */
+  it('🔴 opts の fenceAssets を落とさない(焼き込みが worker でも同じ)', () => {
+    const text = '```js asset:ast-j\n控え\n```\n';
+    const baked = send(1, text, { fenceAssets: { 'ast-j': 'const x = 1;' } }) as {
+      result: string;
+    };
+    const held = send(2, text) as { result: string };
+    // ⚠ **違いが出ること**を先に確かめる ── 同じなら opts を見ていない実装でも通る
+    expect(baked.result).not.toBe(held.result);
+    expect(held.result).toContain('data-pkc-fence-asset-pending');
+    expect(baked.result).toBe(
+      renderMarkdown(text, { fenceAssets: { 'ast-j': 'const x = 1;' } }),
+    );
+  });
+
+  /**
+   * 🔴 **渡す形が「複製できる物」であることを、実際の複製で見る**(#444 段②)。
+   *
+   * ⚠ 型の上で通ることは根拠にならない ── 最初の設計は
+   * `resolveFenceAsset: (key) => string | null` という**関数**で、
+   * これは `postMessage` の構造化複製を**通らない**(そこで落ちる)。
+   * 🔑 上の test の器(`ctx`)は複製をしないので、**この 1 件だけが**その門である。
+   */
+  it('🔴 fenceAssets は構造化複製を通る(関数に戻したら落ちる)', () => {
+    const opts = { fenceAssets: { 'ast-j': 'const x = 1;' } };
+    expect(structuredClone(opts)).toEqual(opts);
+    // ⚠ 対照群 ── 複製できない形なら、この検査は本当に落ちる
+    expect(() => structuredClone({ resolve: () => 'x' })).toThrow();
+  });
+
   it('🔴 落ちても応答を返す(呼び側が永久に待たない)', () => {
     // 循環参照の opts を渡して内部で投げさせる ── どう投げるかではなく
     // **必ず何か返る**ことが観測点
