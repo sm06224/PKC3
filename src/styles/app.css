@@ -805,10 +805,33 @@ select:focus-visible {
   background: var(--surface);
   padding: var(--s2) var(--s3);
 }
+/**
+ * 🔴 **入り先は上の行、打つ欄と押す物は下の行**(#496)。
+ * ⚠ 横 1 列に戻すと、見出しの長い `<select>` が打つ欄を押しのける
+ *   (実測 64px → 765px)。
+ */
 [data-pkc-field='append-form'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+[data-pkc-field='append-row'] {
   display: flex;
   gap: var(--s2);
   align-items: flex-end;
+}
+/**
+ * 🔴 **入り先の幅は器に固定する**(#496。user 報告「選択リストが見出しサイズに
+ * 合わせて横幅を変えるため使えない」)。
+ * ⚠ 規則が無いと `<select>` は UA 既定の**内容依存幅**になる ── いちばん長い
+ *   見出しの字がそのまま幅になり、ノートごとに変わる。
+ * ⚠ `min-width: 0` を併せて置く ── flex の子は既定で内容より縮まないので、
+ *   これが無いと `width: 100%` を書いても**器からはみ出す**。
+ */
+[data-pkc-field='append-target'] {
+  width: 100%;
+  min-width: 0;
+  text-overflow: ellipsis;
 }
 [data-pkc-field='append-input'] {
   flex: 1;
