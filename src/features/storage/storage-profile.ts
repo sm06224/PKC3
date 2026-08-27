@@ -15,6 +15,7 @@
  * ⚠ **pure module**。browser API を持たない。
  */
 import type { EntryMeta } from '@core/model/entry-meta';
+import { humanBytes } from '../human-bytes';
 
 /**
  * 🔴 **容量の内訳**(#415)。⚠ **数字だけ** ── 本文も bytes も worker の外へ出ない。
@@ -59,22 +60,9 @@ export interface ProfileLine {
 }
 
 /**
- * 人が読む大きさ。⚠ 1024 で割る(`formatSize` と同じ向き)。
- *
- * ⚠ **これは 3 本目である**(#454)── `features/asset/human-bytes.ts` の
- *   `humanBytes` と**形が違う**(`512 B` / `2.0 KB` ⇔ `512B` / `2KB`)ので、
- *   同じ添付の大きさが**画面によって違う形**で出る。
- * 🔑 どちらへ寄せるかは **user に見える変化**なので #454 で出してある ──
- *   ⚠ **勝手に寄せない**(寄せた瞬間にこの面の見た目が変わる)。
- *   ⚠ 逆に、**新しく 4 本目を書かない**:大きさを出したくなったら
- *   `humanBytes` を使うか、この 2 本のどちらかを呼ぶ。
+ * ⚠ ここに在った `formatBytes` は**同じ量を出す 3 本目**だった(#454)──
+ *   `humanBytes` へ寄せた。この面の形(`512 B` / `2.0 KB`)は変わっていない。
  */
-export function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  const kb = n / 1024;
-  if (kb < 1024) return `${kb.toFixed(1)} KB`;
-  return `${(kb / 1024).toFixed(1)} MB`;
-}
 
 /**
  * **重い順**に並べる。
@@ -124,10 +112,10 @@ export function profileLines(
  *   **ここが何を数えているか**を 1 行で言う。
  */
 export function profileSummary(result: StorageProfileResult): string {
-  const head = `添付はぜんぶで ${formatBytes(result.totalAssetBytes)} です`;
+  const head = `添付はぜんぶで ${humanBytes(result.totalAssetBytes)} です`;
   const orphan =
     result.orphanBytes > 0
-      ? `。うち ${formatBytes(result.orphanBytes)} は、どのノートからも使われていません(「使っていない添付を消す」で片づけられます)`
+      ? `。うち ${humanBytes(result.orphanBytes)} は、どのノートからも使われていません(「使っていない添付を消す」で片づけられます)`
       : '';
   return `${head}${orphan}。⚠ ブラウザが言う使用量とは数え方が違います(こちらは添付の合計だけです)。`;
 }
@@ -144,4 +132,4 @@ export function sharedNote(lines: readonly ProfileLine[]): string {
 
 /** 1 行の見せ方。⚠ 画面が字を組み直さないよう、ここで完成させる。 */
 export const profileLineText = (l: ProfileLine): string =>
-  `${formatBytes(l.assetBytes)}  ${l.title}${l.shared ? '(共有)' : ''}`;
+  `${humanBytes(l.assetBytes)}  ${l.title}${l.shared ? '(共有)' : ''}`;

@@ -76,6 +76,7 @@ import {
   type ExtensionGrants,
 } from '@adapter/platform/extension-grants';
 import { HINT_BASE, HINT_COMMAND, hintTitle } from './shortcut-hint';
+import { humanBytes } from '@features/human-bytes';
 
 /** 添付表示のための asset 面(main が AssetBlobStore を cid 束縛で注入)。 */
 export interface AssetLender {
@@ -1469,7 +1470,7 @@ export class DetailRenderer {
     info.setAttribute('data-pkc-field', 'attachment-info');
     const label = document.createElement('span');
     label.textContent = `${meta.name || '(無名)'} — ${meta.mime}${
-      meta.size !== null ? ` — ${formatSize(meta.size)}` : ''
+      meta.size !== null ? ` — ${humanBytes(meta.size)}` : ''
     }`;
     info.append(label);
     if (meta.assetKey) {
@@ -2193,12 +2194,6 @@ function renderHistoryPanel(
   }
   panel.append(list);
   return panel;
-}
-
-export function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 

@@ -12,6 +12,7 @@
  * 候補 = sqlite assets 表 ∪ IDB blob keys の**和集合**。どちらか片側にしか
  * 無い dangling(meta だけ / bytes だけ)も同じ purge で回収される。
  */
+import { humanBytes } from '@features/human-bytes';
 export interface AssetGcPorts {
   /** sqlite assets 表(meta)。 */
   listMetas(): Promise<Array<{ key: string; size: number | null }>>;
@@ -157,7 +158,6 @@ export interface PurgeFlowDeps {
    */
   ask(message: string): Promise<boolean>;
   tell(message: string): Promise<void>;
-  formatSize(bytes: number): string;
 }
 
 /**
@@ -178,7 +178,7 @@ export async function runExplicitPurge(deps: PurgeFlowDeps): Promise<void> {
   }
   const ok = await deps.ask(
     `どの entry からも参照されていない添付データ ${first.keys.length + first.strays.length} 件` +
-      `(${deps.formatSize(first.knownBytes)})を削除します。よろしいですか?`,
+      `(${humanBytes(first.knownBytes)})を削除します。よろしいですか?`,
   );
   if (!ok) return;
   const ready = await deps.isReady();

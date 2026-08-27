@@ -97,7 +97,7 @@ describe('packStatusText', () => {
   it('🔴 版・大きさ・日付・出所を出す(どれも腐りやすいので実体から出す)', () => {
     const t = packStatusText(META);
     expect(t).toContain('lo-wasm-dev');
-    expect(t).toContain('80MB');
+    expect(t).toContain('80.0 MB');
     expect(t).toContain('2026-08-11');
     expect(t).toContain('配布元から');
   });

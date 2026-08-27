@@ -134,7 +134,6 @@ describe('runExplicitPurge (P4b)', () => {
       isReady: async () => ({ ok: true, reason: '' }),
       ask: () => Promise.resolve(true),
       tell: async (m) => void alerts.push(m),
-      formatSize: (n) => `${n}B`,
       ...over,
     };
     return { deps, calls, alerts };
@@ -191,7 +190,6 @@ describe('runExplicitPurge (P4b)', () => {
       isReady: async () => ({ ok: true, reason: '' }),
       ask: () => Promise.resolve(true),
       tell: async (m) => void alerts.push(m),
-      formatSize: (n) => `${n}B`,
     });
     // 消してよいのは「両方の走査で orphan」だった k-orphan-blob だけ
     expect(calls.filter((c) => c.startsWith('blob:'))).toEqual(['blob:k-orphan-blob']);
@@ -232,7 +230,6 @@ describe('整理はタブ間の編集も見る(#253)', () => {
       }),
       ask: () => Promise.resolve(true),
       tell: async (m) => void alerts.push(m),
-      formatSize: (n) => `${n}B`,
     });
     expect(calls.filter((c) => c.startsWith('blob:')), '編集中なのに消した').toHaveLength(0);
     expect(alerts[0]).toContain('他のタブで編集中です');
@@ -251,7 +248,6 @@ describe('整理はタブ間の編集も見る(#253)', () => {
       }),
       ask: () => Promise.resolve(true),
       tell: async (m) => void alerts.push(m),
-      formatSize: (n) => `${n}B`,
     });
     expect(alerts[0], '「編集中」と言い切っている').not.toContain('他のタブで編集中です');
     expect(alerts[0]).toContain('確かめられません');
@@ -338,7 +334,6 @@ describe('器の無い bytes(#260)', () => {
         return true;
       },
       tell: async (m) => void messages.push(m),
-      formatSize: (n) => `${n}B`,
     });
     expect(messages[0], '残骸を数えていない').toContain('2 件');
     expect(messages.join(' '), '残骸だけだと「ありません」で止まる').not.toContain(

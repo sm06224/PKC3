@@ -40,6 +40,7 @@ import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-form
 import { createWarnCollector } from './warn-cap';
 import { scanAssetRefsInto } from '@features/asset/asset-ref-scan';
 import { readVersions } from '@features/flavor/attachment-versions';
+import { humanBytes } from '@features/human-bytes';
 
 export const MD_FORMAT = 'pkc3-markdown';
 export const MD_VERSION = 1;
@@ -446,7 +447,7 @@ export async function writeMarkdownZip(
     // 🔑 **黙って大きくしない**(#213、裁定 A)。⚠ 「減らせる」とは言わない ──
     //    控えを落とすと、この zip から戻しても履歴が消える(別の話である)
     warnings.push(
-      `添付の控え(過去の版)${historyCount} 件・約 ${Math.round(historyBytes / 1024 / 1024)}MB を含みます`,
+      `添付の控え(過去の版)${historyCount} 件・約 ${humanBytes(historyBytes)} を含みます`,
     );
   }
   const skipped = assetMetas.length - used.size;

@@ -9,7 +9,6 @@ import { describe, it, expect } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import {
   PROFILE_TOP,
-  formatBytes,
   profileLineText,
   profileLines,
   profileSummary,
@@ -101,13 +100,9 @@ describe('並べ方', () => {
 });
 
 describe('大きさの見せ方', () => {
-  it.each([
-    [512, '512 B'],
-    [2048, '2.0 KB'],
-    [5 * 1024 * 1024, '5.0 MB'],
-  ])('%i → %s', (n, expected) => {
-    expect(formatBytes(n)).toBe(expected);
-  });
+  // ⚠ **形そのもの**(`512 B` / `2.0 KB`)は `tests/features/human-bytes.test.ts` が
+  //    見る(#454 で 1 本に寄せた)── ここで二重に pin すると、寄せ先を直したとき
+  //    **2 か所を直す羽目になる**(それが 4 本に増えた道筋である)。
 
   it('行は「大きさ → 題名」の順(目で追うのは大きさ)', () => {
     const [l] = profileLines(result([row('a', 5_000_000)]), metas);

@@ -32,6 +32,7 @@ import {
 import type { PackBuild } from './office-pack';
 import type { OfficePackStore } from './office-pack-store';
 import { requestPersist as requestPersistState } from '@adapter/platform/storage-persist';
+import { humanBytes } from '@features/human-bytes';
 
 export type PackResult =
   | { readonly ok: true; readonly meta: OfficePackMeta | null; readonly message: string }
@@ -90,10 +91,6 @@ function toMessage(e: unknown, what: string): string {
     return `${what}に失敗しました: この端末の保存容量が足りません(約 77MB 要ります)。`;
   }
   return `${what}に失敗しました: ${raw.slice(0, 160)}`;
-}
-
-function sizeText(bytes: number): string {
-  return `${Math.round((bytes / (1024 * 1024)) * 10) / 10}MB`;
 }
 
 export class OfficePackInstaller {
@@ -209,7 +206,7 @@ export class OfficePackInstaller {
         meta,
         // ⚠ **黙って消えうることを黙っていない。** 拒否されたことを伝えないと、
         //    後日消えたときに user は原因を名指しできない
-        message: `Office 一式を配備しました(${sizeText(meta.totalBytes)})`
+        message: `Office 一式を配備しました(${humanBytes(meta.totalBytes)})`
           + (persisted
             ? ''
             : '。この端末では保存の永続化が許可されなかったため、容量が足りなくなると消えることがあります'),

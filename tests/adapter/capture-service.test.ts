@@ -264,7 +264,7 @@ describe('録音を止めると、開いていたノートに入る(#413)', () =
     b.live()!.advance(65_000);
     b.live()!.grow(2048);
     b.beat();
-    expect(b.lines.at(-1), '1 秒ごとに書き替わっていない').toBe('録音中 1:05(約 2KB)');
+    expect(b.lines.at(-1), '1 秒ごとに書き替わっていない').toBe('録音中 1:05(約 2.0 KB)');
     b.service.stop();
     await tick();
     expect(b.service.line(), '止めたのに帯が残っている').toBeNull();
@@ -481,7 +481,7 @@ describe('🔴 黙って終わらない(#413)', () => {
     b.live()!.end('too-large');
     await tick();
     // 🔴 **理由と結果は同じ 1 行**(別々に出すと、後の 1 行が前の 1 行を消す)
-    expect(b.notices.at(-1), '上限で止まった理由が出ていない').toMatch(/^録音が上限\(250\.0MB\)に達したので止めました。/);
+    expect(b.notices.at(-1), '上限で止まった理由が出ていない').toMatch(/^録音が上限\(250\.0 MB\)に達したので止めました。/);
     expect(b.notices.at(-1), '結果が同じ行に載っていない').toMatch(/本文に入れました$/);
     expect(b.d.getState().error, '知らせをエラーの行に出した').toBeNull();
     // 🔴 **落ちて全損だけは繰り返さない** ── 添付にも本文にも入っている
