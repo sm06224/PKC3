@@ -231,6 +231,93 @@ test('🔴 上の帯は無く、設定は左の列から押せる', async ({ pag
  * **950px 以上の画面**で確保できるので、そこまでは 1 段のままである。
  */
 const TAB_SWEEP = [1920, 1440, 1366, 1280, 1024, 950, 901, 860, 720] as const;
+/**
+ * 🔴 **左の列のボタンは、どの幅でも名前が器に収まっている**(2026-08-27)。
+ *
+ * ## なぜ「タブだけ」では足りなかったか
+ *
+ * 直前にタブ(`browse-tabs`)の同じ欠陥を直したが、⚠ **その 1 つ下の帯で
+ * 同じことが起きていた** ── cowork の実機レポート #16 が見つけた:
+ *
+ * > 🔴 user がいちばん使う「ノートを作る」ボタンの名前が、1366px で既に読めません。
+ * > タブは直りましたが、その 1 つ下の帯で同じことが起きています。
+ *
+ * 実測すると「+ ノート」は **55px 要るのに器は 1920px でも 43px**、
+ * 1024px では **28px** ── **8 幅すべてで切れていた**。
+ * ⚠ しかも**中央の案内文が「左上の『+ ノート』で作るか」とその名前を指していた**。
+ *
+ * 🔑 だからこの検査は**帯を名指ししない** ── 左の列の**ボタン全部**を見る。
+ *   ⚠ 帯ごとに検査を書くと、**次に足した帯だけ誰も見ない**
+ *   (CLAUDE.md「A を直した瞬間に B はどうかを grep する」の、機械化である)。
+ */
+test('🔴 左の列のボタンは、どの幅でも名前が器からはみ出さない', async ({ page }) => {
+  const seen: { w: number; n: number }[] = [];
+  for (const w of TAB_SWEEP) {
+    await page.setViewportSize({ width: w, height: 800 });
+    await gotoApp(page);
+    const m = await page.evaluate(() => {
+      const side = document.querySelector('[data-pkc-region="sidebar"]')!;
+      const out: { where: string; label: string; outside: number; clip: number }[] = [];
+      for (const btn of side.querySelectorAll('button')) {
+        // ⚠ 畳まれている物は測らない(器が 0 なので必ず「はみ出し」に見える)
+        const box = btn.getBoundingClientRect();
+        if (box.width === 0 || box.height === 0) continue;
+        const lab = btn.querySelector('[data-pkc-field="label"]') ?? btn;
+        const text = (lab.textContent ?? '').trim();
+        // 🔑 **図案だけのボタンは対象外**(名前を持たないので「収まる」が言えない)
+        if (text === '') continue;
+        const lr = lab.getBoundingClientRect();
+        out.push({
+          where: btn.closest('[data-pkc-region]')?.getAttribute('data-pkc-region') ?? '?',
+          label: text,
+          // ⚠ **左右の大きいほう** ── 語は中央寄せなので両側へ出る
+          outside: Math.round(Math.max(lr.right - box.right, box.left - lr.left)),
+          clip: btn.scrollWidth - btn.clientWidth,
+        });
+      }
+      return out;
+    });
+
+    // ⚠ 空振り防止 ── ボタンを 1 つも拾えていないのに「はみ出し 0」を作らない
+    expect(m.length, `w=${w}: 左の列で名前つきのボタンを 1 つも拾えていない`).toBeGreaterThanOrEqual(
+      8,
+    );
+    for (const b of m) {
+      expect(
+        b.outside,
+        `w=${w}: [${b.where}] 「${b.label}」が器から ${b.outside}px 出ている`,
+      ).toBeLessThanOrEqual(0);
+      expect(
+        b.clip,
+        `w=${w}: [${b.where}] 「${b.label}」が ${b.clip}px 切れている(読めない)`,
+      ).toBeLessThanOrEqual(0);
+    }
+    /**
+     * ⚠ **段を増やして解決していないこと**も見る(2026-08-27、変異試験 C2)。
+     *
+     * 上の「はみ出さない」だけだと、**詰めを元(左右 8px)へ戻す変異が生き延びる**
+     * ── 潰れはしないが**段が増える**からで、それは user の
+     * 「画面が混み合っている」と正面から逆である。
+     * ⚠ 実測(2026-08-27):詰めが 2px か 8px かで **950px が 2 段か 3 段か**が分かれた。
+     * ⚠ 1024px 以上でだけ見る ── それ未満は実測していない幅が混じる。
+     */
+    if (w >= 1024) {
+      const rows = await page.evaluate(() => {
+        const h = document.querySelector('[data-pkc-region="create-bar"]')!;
+        return new Set(
+          [...h.querySelectorAll('button')]
+            .filter((b) => b.getBoundingClientRect().width > 0)
+            .map((b) => Math.round(b.getBoundingClientRect().top)),
+        ).size;
+      });
+      expect(rows, `w=${w}: 「作る」帯が ${rows} 段になっている(2 段までにする)`).toBeLessThanOrEqual(2);
+    }
+    seen.push({ w, n: m.length });
+  }
+  // ⚠ どの幅でも同じ数を見ていること(幅で数が変わるなら、どこかが畳まれている)
+  expect(new Set(seen.map((s) => s.n)).size, `幅で拾えた数が違う: ${JSON.stringify(seen)}`).toBe(1);
+});
+
 /** 🔑 1 段に要る幅(実測 209px)に **21px 以上の余り**が出る画面の幅。 */
 const TAB_ONE_ROW_FROM = 1280;
 
