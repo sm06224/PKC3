@@ -62,7 +62,12 @@ import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { isAppMime } from '@features/launcher/tiles';
 import { buildOfficeEntry } from './office-entry-view';
 import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
-import { assetPreviewKind, canOpenAssetWindow } from '@features/asset/asset-preview-kind';
+import {
+  assetPreviewKind,
+  canOpenAssetWindow,
+  BODY_MEDIA_FIELD,
+  BODY_MEDIA_CLASS,
+} from '@features/asset/asset-preview-kind';
 import type { AppState, AppPhase } from '@adapter/state/app-state';
 import { appEditorMode } from './editor-mode';
 import { appKeymap, type KeymapStore } from './keymap';
@@ -1675,6 +1680,8 @@ export class DetailRenderer {
   ): Promise<void> {
     // 🔴 **囲みの中身も添付から来る**(#444 段①)── 同じ lender・同じ世代で埋める
     void this.hydrateFenceAssets(rootEls, token, env);
+    // 🔴 **本文に書いた音・動画は、その場で聞ける**(#413 段②)── 同上
+    void this.hydrateMediaRefs(rootEls, token);
     if (!this.assets) return;
     const assets = this.assets;
     const roots: readonly Element[] = Array.isArray(rootEls)
@@ -1733,6 +1740,105 @@ export class DetailRenderer {
         } catch {
           if (token === this.hydrateToken)
             for (const img of imgs) img.setAttribute('data-pkc-asset-missing', '');
+        }
+      }),
+    );
+  }
+
+  /**
+   * 🔴 **本文に書いた音・動画を、その場で聞ける / 見られるようにする**(#413 段②)。
+   *
+   * > user 要望 2026-07-16(PKC2 #922):
+   * > 「録音と画面収録を**マルチメディアで埋め込め**るようにする」
+   *
+   * ⚠ **収録に限らない** ── 手で添付した音・動画にも効く(PKC2 のマニュアルも
+   *   「手動で添付した音声・動画ファイルも同様に埋め込めます」と書いている)。
+   *
+   * ## なぜ「リンクの隣」なのか
+   *
+   * `markdown-render.ts` は `[名前](asset:鍵)` を **`href` を剥がした `<a>`**
+   * (保存の導線)にする。⚠ **その `<a>` は残す** ── 器を置き換えると
+   * **保存する道が消える**(片道の操作を作らない、user 指示 2026-08-23)。
+   * だから**隣に置く**:字は「何のファイルか」、器は「その場で聞く」を持つ。
+   *
+   * ⚠ **種類は中身の MIME で決める**(名前の拡張子ではない)── 判定は
+   *   `assetPreviewKind` の 1 本(添付の面と同じ関数 ── §7)。
+   * ⚠ 音・動画**以外**は何もしない(PDF は添付の面で見る / それ以外は保存)。
+   * ⚠ 読めない添付でも**黙って壊さない** ── リンクはそのまま残る。
+   */
+  private async hydrateMediaRefs(
+    rootEls: HTMLElement | readonly Element[],
+    token: number,
+  ): Promise<void> {
+    const assets = this.assets;
+    if (!assets) return;
+    const roots: readonly Element[] = Array.isArray(rootEls)
+      ? (rootEls as readonly Element[])
+      : [rootEls as Element];
+    /** 鍵ごとに集める。⚠ 同じ添付を 2 回書いても、借りるのは 1 本。 */
+    const byKey = new Map<string, HTMLAnchorElement[]>();
+    const collect = (a: HTMLAnchorElement): void => {
+      const key = a.getAttribute('data-pkc-asset-key') ?? '';
+      if (key === '') return;
+      const group = byKey.get(key);
+      if (group) group.push(a);
+      else byKey.set(key, [a]);
+    };
+    for (const r of roots) {
+      if (r instanceof HTMLAnchorElement && r.hasAttribute('data-pkc-asset-key')) collect(r);
+      for (const a of r.querySelectorAll<HTMLAnchorElement>('a[data-pkc-asset-key]')) collect(a);
+    }
+    if (byKey.size === 0) return;
+    await Promise.all(
+      [...byKey].map(async ([key, links]) => {
+        try {
+          /**
+           * ⚠ **先に種類だけ見る** ── `lend` は ObjectURL を作るので、
+           *   音・動画でないものにまで作らせない(2026-07-27「即破棄」の向き)。
+           */
+          const blob = await assets.getBlob(key);
+          if (token !== this.hydrateToken) return;
+          const kind = assetPreviewKind(blob?.type);
+          if (kind !== 'audio' && kind !== 'video') return;
+          const lent = await assets.lend(key);
+          if (!lent) return;
+          // ⚠ 借りている間に別のノートへ移っていたら、**借りた瞬間に返す**
+          if (token !== this.hydrateToken) {
+            lent.dispose();
+            return;
+          }
+          const placed: Element[] = [];
+          for (const a of links) {
+            if (!a.isConnected) continue;
+            /**
+             * ⚠ **同じリンクへ 2 枚目を置かない**。
+             * 🔑 これは**将来のための tripwire** である ── いまの呼び側は
+             *   **組み立て直した DOM にしか**この関数を通さないので、
+             *   **外しても壊れない**(変異試験 R3 が SURVIVED で教えた)。
+             *   承知のうえで残す:呼び側が増えて二重に通った日に、
+             *   症状は「再生機が 2 枚並ぶ」という**見れば分かる形**ではなく、
+             *   **借りた URL が 1 本ずつ迷子になる**形で出るからである。
+             */
+            if (a.nextElementSibling?.getAttribute('data-pkc-field') === BODY_MEDIA_FIELD) continue;
+            const el = document.createElement(kind);
+            // ⚠ **印は 2 つ** ── 探すのは `data-pkc-field`、飾るのは class
+            el.setAttribute('data-pkc-field', BODY_MEDIA_FIELD);
+            el.className = BODY_MEDIA_CLASS;
+            el.controls = true;
+            /** ⚠ **中身は開くまで読まない**(長い収録を開くたびに丸ごと運ばない)。 */
+            el.preload = 'metadata';
+            el.src = lent.url;
+            a.after(el);
+            placed.push(el);
+          }
+          // ⚠ 1 枚も置けなかった回は**その場で返す**(誰も見ていない URL を残さない)
+          if (placed.length === 0) {
+            lent.dispose();
+            return;
+          }
+          this.lends.push({ key, url: lent.url, dispose: lent.dispose, els: placed });
+        } catch {
+          /* 読めない添付 ── リンク(保存の導線)はそのまま残す */
         }
       }),
     );

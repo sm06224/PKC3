@@ -40,6 +40,11 @@ import {
   globalsToDataAttrs,
 } from '../markdown/document-globals';
 import { scanAssetRefsInto } from '@features/asset/asset-ref-scan';
+import {
+  assetPreviewKind,
+  BODY_MEDIA_FIELD,
+  BODY_MEDIA_CLASS,
+} from '@features/asset/asset-preview-kind';
 import { readFenceAssets } from '@features/asset/fence-asset-read';
 import { collectFenceAssetKeys } from '../markdown/markdown-render';
 import {
@@ -349,10 +354,12 @@ try{
   var d=JSON.parse(el.textContent);
   document.title=d.title||'PKC3';
   document.getElementById('t').textContent=(d.title||'PKC3')+' ('+d.entries.length+' 件)';
-  var mimes={},names={};
+  var mimes={},names={},kinds={};
   d.assets.forEach(function(a){
     mimes[a.key]=a.mime||'application/octet-stream';
     if(a.name)names[a.key]=a.name;
+    /* 🔴 見せ方は**書き出す側が決めた答え**(#413 段②)── ここでは判定しない */
+    if(a.kind)kinds[a.key]=a.kind;
   });
   var has=function(k){return Object.prototype.hasOwnProperty.call(d.assetData,k)};
   // ⚠ **開いた添付だけ**復号する(起動時に全部やると、本文 1 行を読みたいだけでも
@@ -375,11 +382,22 @@ try{
   //    ⚠ 出せないブラウザに空白を残さないよう、**中にダウンロードの導線**を置く。
   function view(key,alt,sink){
     var name=names[key]||alt||key;
-    var mime=mimes[key]||'';
-    if(mime.indexOf('image/')===0){
+    var kind=kinds[key]||'';
+    if(kind==='image'){
       var im=document.createElement('img');im.src=urlFor(key,sink);im.alt=name;return im;
     }
-    if(mime==='application/pdf'){
+    /* 🔴 **音・動画はその場で聞ける / 見られる**(#413 段②)。
+       ⚠ URL は 1 本しか作らない(下の保存の導線にも同じ物を渡す ── PDF と同じ規律)。
+       ⚠ **保存の導線を消さない** ── 器を置き換えると、落とす道が無くなる。 */
+    if(kind==='audio'||kind==='video'){
+      var mu=urlFor(key,sink);
+      var wrap=document.createElement('div');
+      var med=document.createElement(kind);
+      med.setAttribute('data-pkc-field','${BODY_MEDIA_FIELD}');med.className='${BODY_MEDIA_CLASS}';
+      med.controls=true;med.preload='metadata';med.src=mu;
+      wrap.appendChild(med);wrap.appendChild(dl(key,name,sink,mu));return wrap;
+    }
+    if(kind==='pdf'){
       // ⚠ **URL は 1 本しか作らない** ── fallback の a にも同じ URL を渡す。
       //    直す前は object と a で urlFor() を 2 回呼んでおり、PDF 1 件につき
       //    atob → Uint8Array → Blob が **2 組**できていた(全体を印刷では全 entry ぶん
@@ -463,7 +481,18 @@ try{
       }
       seen[k]=1;
       if(el.tagName==='IMG'){el.src=urlFor(k,sink);if(!el.alt)el.alt=names[k]||k;return}
-      el.href=urlFor(k,sink);el.download=names[k]||k;
+      var au=urlFor(k,sink);
+      el.href=au;el.download=names[k]||k;
+      /* 🔴 **本文に書いた音・動画は、その場で聞ける**(#413 段②)。
+         ⚠ リンクは**残す**(字は「何のファイルか」、器は「その場で聞く」)。
+         ⚠ 同じ URL を使う ── 1 つの添付に 2 本作らない。 */
+      var mk=kinds[k]||'';
+      if(mk==='audio'||mk==='video'){
+        var m2=document.createElement(mk);
+        m2.setAttribute('data-pkc-field','${BODY_MEDIA_FIELD}');m2.className='${BODY_MEDIA_CLASS}';
+        m2.controls=true;m2.preload='metadata';m2.src=au;
+        if(el.parentNode)el.parentNode.insertBefore(m2,el.nextSibling);
+      }
     });
     // 🔴 **押しても何も起きない操作子は取り除く**(F-1)。描画はアプリと同じ関数なので、
     //    コード・表・図の見出しに付く「コピー」ボタン(data-pkc-action="copy-md-block")が
@@ -847,11 +876,23 @@ export async function writePortableHtml(
   parts.push('],"assets":[');
   assetMetas.forEach((a, i) => {
     const name = nameOf.get(a.key);
+    const mime = a.mime ?? 'application/octet-stream';
+    /**
+     * 🔴 **見せ方は書き出す側で決める**(#413 段②)。
+     *
+     * ⚠ 閲覧側(この下の `viewer`)は**別の実行系**なので import できない ──
+     *   そこで判定を書くと、`assetPreviewKind` と**同じ規則が 2 か所**になる(§7)。
+     *   だから**答えを焼いて渡す**。閲覧側は switch するだけにする。
+     * ⚠ 元にしているのは添付の目録の MIME(この file が画像・PDF の判定で
+     *   既に使っている物と同じ)── ここで別の出所に変えない。
+     */
+    const kind = assetPreviewKind(mime);
     const meta = {
       key: a.key,
-      mime: a.mime ?? 'application/octet-stream',
+      mime,
       size: a.size ?? 0,
       ...(name ? { name } : {}),
+      ...(kind ? { kind } : {}),
     };
     parts.push(i === 0 ? j(meta) : `,${j(meta)}`);
   });

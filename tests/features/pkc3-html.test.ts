@@ -698,6 +698,77 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
     expect(a.getAttribute('href')).toMatch(/^blob:/);
   });
 
+  /**
+   * 🔴 **音・動画は配った先でも、その場で聞ける / 見られる**(#413 段②)。
+   *
+   * ⚠ **アプリだけ直すと「画面では聞けるのに、渡した相手は聞けない」**になる ──
+   *   同じ値を複数の描画経路へ渡すものは、経路ごとに pin する(CLAUDE.md §7)。
+   * ⚠ 種類の判定は**書き出す側**が焼いた答え(`kind`)である ── 閲覧側は
+   *   別の実行系なので、そこで判定を書くと規則が 2 か所になる。
+   */
+  const wav = { key: 'ast-a', mime: 'audio/webm', bytes: enc.encode('AUDIOBYTES') };
+
+  it('🔴 添付 entry の音は、再生機と保存の導線の両方が出る (#413 段②)', async () => {
+    const body =
+      '---\nattachment.name: rec.webm\nattachment.mime: audio/webm\nattachment.asset_key: ast-a\n---\n';
+    await run(
+      (
+        await writePortableHtml(
+          source({ entries: [{ lid: 'a1', title: 'rec.webm', body }], assets: [wav] }),
+          NOW,
+        )
+      ).blob,
+    );
+    const med = document.querySelectorAll('#body [data-pkc-field="body-media"]');
+    expect(med, '配った HTML で再生機が出ていない').toHaveLength(1);
+    expect(med[0]!.tagName, '音なのに音の器ではない').toBe('AUDIO');
+    expect(med[0]!.getAttribute('src'), '中身を差していない').toMatch(/^blob:/);
+    // ⚠ **飾りの印**(本文 CSS は class で当たる ── 器の印では焼かれない)
+    expect(med[0]!.className, '飾りの印が付いていない').toBe('pkc-body-media');
+    // 🔴 **保存の道を消していない**(器で置き換えない)
+    const a = document.querySelector('#body a') as HTMLAnchorElement;
+    expect(a.getAttribute('download'), '保存の導線が消えた').toBe('rec.webm');
+    // ⚠ **URL は 1 本**(PDF と同じ規律 ── 1 つの添付に 2 本作らない)
+    expect(a.getAttribute('href'), '再生機と別の URL を作っている').toBe(
+      med[0]!.getAttribute('src'),
+    );
+  });
+
+  it('🔴 本文の `[名前](asset:鍵)` の隣にも再生機が出る (#413 段②)', async () => {
+    await run(
+      (
+        await writePortableHtml(
+          source({ entries: [{ lid: 'n1', body: '会議:\n\n[rec.webm](asset:ast-a)\n' }], assets: [wav] }),
+          NOW,
+        )
+      ).blob,
+    );
+    const link = document.querySelector('#body a[data-pkc-asset-key]') as HTMLAnchorElement;
+    expect(link, 'リンクが消えた').not.toBeNull();
+    const med = link.nextElementSibling;
+    expect(med?.getAttribute('data-pkc-field'), 'リンクの隣に再生機が無い').toBe('body-media');
+    expect(med!.getAttribute('src'), 'リンクと別の URL を作っている').toBe(link.getAttribute('href'));
+  });
+
+  it('⚠ 対照群 ── 音・動画でない添付には再生機を置かない (#413 段②)', async () => {
+    await run(
+      (
+        await writePortableHtml(
+          source({
+            entries: [{ lid: 'n1', body: '[memo.bin](asset:ast-b)\n' }],
+            assets: [{ key: 'ast-b', mime: 'application/octet-stream', bytes: enc.encode('BIN') }],
+          }),
+          NOW,
+        )
+      ).blob,
+    );
+    expect(
+      document.querySelectorAll('#body [data-pkc-field="body-media"]'),
+      '音でも動画でもないものに再生機を置いた',
+    ).toHaveLength(0);
+    expect(document.querySelector('#body a[download]'), '保存の導線まで消えた').not.toBeNull();
+  });
+
   it('本文中の `![](asset:key)` も画像になる(markdown 経由の参照)', async () => {
     await run(
       (

@@ -13,6 +13,9 @@ import { chromiumLaunch } from './playwright.config';
  * ② **本物の `getUserMedia`** ── 許可・track・停止まで通す
  * ③ **止めたあとに画面が何を出しているか** ── 添付が選択を奪ったまま終わると
  *    「会議メモを書いていたのに、止めたら別の物が開いている」になる
+ * ④ **本当に鳴らせる形か**(段②)── happy-dom の `<audio>` は中身を読まないので、
+ *    「器が出た」までしか言えない。実ブラウザで `readyState` を見て初めて
+ *    「**その場で聞ける**」が言える
  *
  * ⚠ **音だけ**を通す。画面収録(`getDisplayMedia`)は headless で
  *   共有元を選べないので、ここでは回さない ── ⚠ 「回していない」であって
@@ -28,7 +31,7 @@ test.use({
   },
 });
 
-test('🔴 録音を止めると、開いていたノートの本文に入る (#413)', async ({ page }) => {
+test('🔴 録音を止めると本文に入り、その場で聞ける (#413 段①②)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
@@ -72,6 +75,27 @@ test('🔴 録音を止めると、開いていたノートの本文に入る (#
     page.locator('[data-pkc-region="filer-table"] tbody tr', { hasText: '録音-' }),
     '添付が作られていない',
   ).toHaveCount(1);
+
+  /**
+   * 🔴 **④ その場で聞ける**(#413 段②)。
+   *
+   * ⚠ ここは**実ブラウザでしか見られない**層である ── happy-dom の `<audio>` は
+   *   中身を読まないので、「本当に鳴らせる形か」は unit では原理的に届かない。
+   * 🔑 観測点は **`readyState`**(メタデータまで読めたか)── `src` が付いている
+   *   だけなら、壊れた blob URL でも真になる(CLAUDE.md §4「放っておいても
+   *   変わる観測点を使わない」の逆側:**中身に依存する点**を採る)。
+   */
+  const media = detail.locator('[data-pkc-field="body-media"]');
+  await expect(media, '本文にその場で聞ける器が出ていない').toHaveCount(1);
+  await expect(media, '音なのに音の器ではない').toHaveJSProperty('tagName', 'AUDIO');
+  await expect
+    .poll(
+      () => media.evaluate((el: HTMLMediaElement) => el.readyState),
+      { message: '器は出たが、中身を読めていない(URL が死んでいる)' },
+    )
+    .toBeGreaterThanOrEqual(1);
+  // ⚠ **保存の道は残っている**(器を置き換えていない)
+  await expect(ref, '再生機を置いたらリンクが消えた').toHaveCount(1);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
