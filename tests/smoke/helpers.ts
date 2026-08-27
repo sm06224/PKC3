@@ -5,7 +5,7 @@
  *   確認してから実マウスで行う(happy-dom では検証できない層 ── visual parity 規約)
  * - pageerror / console.error は各 spec の最後に 0 件を assert する
  */
-import { expect, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { firstAppFrame } from './page-errors';
 
 export async function gotoApp(page: Page): Promise<void> {
@@ -173,9 +173,9 @@ async function withRerenderRetry<T>(page: Page, run: () => Promise<T>): Promise<
  * 実クリック: 中心座標の最前面要素が target(またはその子孫)であることを
  * 確認してから page.mouse.click。dead click / occlusion / zero-height を検出する。
  */
-export async function clickReal(page: Page, selector: string): Promise<void> {
+export async function clickReal(page: Page, target: Target): Promise<void> {
   await withRerenderRetry(page, async () => {
-    const { x, y } = await reachableOnce(page, selector);
+    const { x, y } = await reachableOnce(page, target);
     await page.mouse.click(x, y);
   });
 }
@@ -191,31 +191,53 @@ export async function clickReal(page: Page, selector: string): Promise<void> {
  */
 export async function expectReachable(
   page: Page,
-  selector: string,
+  target: Target,
 ): Promise<{ x: number; y: number }> {
-  return withRerenderRetry(page, () => reachableOnce(page, selector));
+  return withRerenderRetry(page, () => reachableOnce(page, target));
 }
 
-async function reachableOnce(page: Page, selector: string): Promise<{ x: number; y: number }> {
-  const el = page.locator(selector).first();
+/**
+ * 押したい相手 ── **選択子でも Locator でもよい**(2026-08-27、#419)。
+ *
+ * 🔴 **選択子を文字列で組み立てさせない**ため。行の相手は `data-pkc-entry="<lid>"` で
+ *   識別するが、**lid には引用符が入りうる**(実際に `shell.ts` の選択子の組み立てが
+ *   それで壊れた)── 組み立てた選択子は**壊れるか、別の行に当たる**。
+ * 🔑 Locator を受ければ、**そもそも選択子を組み立てる必要が無い**
+ *   (`.last()` や `.nth(i)` をそのまま渡せる)。
+ */
+export type Target = string | Locator;
+
+const asLocator = (page: Page, t: Target): Locator =>
+  typeof t === 'string' ? page.locator(t).first() : t;
+
+const nameOf = (t: Target): string => (typeof t === 'string' ? t : String(t));
+
+async function reachableOnce(page: Page, target: Target): Promise<{ x: number; y: number }> {
+  const el = asLocator(page, target);
+  const name = nameOf(target);
   await expect(el).toBeVisible();
   await el.scrollIntoViewIfNeeded(); // fold 下の要素を「覆われている」と誤診しない
   const box = await el.boundingBox();
-  expect(box, `${selector} に boundingBox が無い(画面に出ていない)`).not.toBeNull();
+  expect(box, `${name} に boundingBox が無い(画面に出ていない)`).not.toBeNull();
   const x = box!.x + box!.width / 2;
   const y = box!.y + box!.height / 2;
   // 判定は「target 自身か、その子孫がヒット」のみ。祖先ヒットを許すと
   // pointer-events:none 等の dead click が素通りする(binder は ev.target から
   // closest するため、祖先ヒットでは target のハンドラに届かない ── review #2)
-  const hit = await page.evaluate(
-    ({ px, py, sel }) => {
+  /**
+   * ⚠ **要素そのものを渡す**(`document.querySelector(sel)` で引き直さない)。
+   *   引き直すと ①選択子の組み立てが壊れる相手を扱えない ②`.last()` を測ったのに
+   *   **`querySelector` は先頭を返す**ので、**別の要素で当たり判定していた**
+   *   (箱は最後の行・判定は最初の行、という食い違いが原理的に起こりうる)。
+   */
+  const hit = await el.evaluate(
+    (node, { px, py }) => {
       const at = document.elementFromPoint(px, py);
-      const target = document.querySelector(sel);
-      return !!(at && target && (at === target || target.contains(at)));
+      return !!(at && (at === node || node.contains(at)));
     },
-    { px: x, py: y, sel: selector },
+    { px: x, py: y },
   );
-  expect(hit, `${selector} の中心 (${x},${y}) が別要素に覆われている / 届かない`).toBe(true);
+  expect(hit, `${name} の中心 (${x},${y}) が別要素に覆われている / 届かない`).toBe(true);
   return { x, y };
 }
 

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, useListBrowse } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, expectReachable, useSplitEditor, useListBrowse } from './helpers';
 import { peek, withStateOnFail } from './state-dump';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
@@ -216,8 +216,28 @@ test('🔴 編集中に一覧の行を押すと、理由が画面に出る', asy
   const status = page.locator('[data-pkc-region="status"]');
   expect(await status.isVisible(), '編集に入った時点で既に理由が出ている').toBe(false);
 
-  // ⚠ **clickReal は使わない** ── 断られる操作なので「押した結果」を待たない
-  await page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').last().click();
+  /**
+   * ⚠ **`clickReal` は使わない** ── 断られる操作なので「押した結果」を待たない。
+   *
+   * 🔴 **ただし occlusion の検出だけは借りる**(2026-08-27、#419)。
+   *   ⚠ 「押した結果を待つ」ことと「その座標に本当に届くか」は**別のことである**
+   *   のに、旧稿は `clickReal` ごと避けたので**両方を捨てていた**。
+   *   ⚠ #419 の本文は「**検出を外している唯一の押し方**」と書いているが、
+   *   **これは誤り**である ── 生の `.click()` は smoke 全体に **88 か所**ある
+   *   (2026-08-27 に数えた)。⚠ 多くは textarea に焦点を置くためのもので
+   *   occlusion が問題になる形ではないが、**「唯一」ではない**。
+   * ⚠ #419 は**フル走行で 2 回**落ちており(2026-08-25 / 2026-08-27)、
+   *   2 回とも残ったのは「無言で断った」だけ ── **押せていないのか / 断り文が
+   *   別の字なのか**が割れていない。`expectReachable` を通しておけば、
+   *   次に落ちたとき**どちらなのかが文言で分かる**。
+   * 🔑 **押した結果は待たない**(そこは旧稿のまま)── 足したのは
+   *   「その座標に届くか」の 1 点だけである。
+   * ⚠ 「待ちが増えていない」とは書かない ── `.click()` 自身も
+   *   actionability を待つので、**測らずに比べられない**。
+   */
+  const row = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').last();
+  const { x, y } = await expectReachable(page, row);
+  await page.mouse.click(x, y);
 
   /**
    * 🔴 理由が**見える**。
