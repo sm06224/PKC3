@@ -464,3 +464,86 @@ describe('升に原文を焼く(#418 段①)', () => {
     );
   });
 });
+
+/**
+ * 🔴 **式は描くときだけ評価する**(#418 段②)。
+ *
+ * 🔑 正本は本文 ── 結果を本文へ書き戻さない(書き戻すと**式が消える**)。
+ * ⚠ 押したときに出るのは**式のほう**である(段① の `data-pkc-cell-raw`)。
+ */
+describe('表の升の式(#418 段②)', () => {
+  const cellsOf = (html: string): string[] => {
+    const host = document.createElement('div');
+    host.innerHTML = html;
+    return [...host.querySelectorAll('th, td')].map((c) => c.textContent ?? '');
+  };
+  const rawOf = (html: string): string[] =>
+    [...html.matchAll(/data-pkc-cell-raw="([^"]*)"/g)].map((m) => m[1]!);
+
+  it('🔴 升には結果が出る', () => {
+    const out = renderMarkdown('```csv\n2,3,=A1*B1\n```');
+    expect(cellsOf(out)).toEqual(['2', '3', '6']);
+  });
+
+  it('🔴 押すと式が出る(結果ではない)', () => {
+    const out = renderMarkdown('```csv\n2,3,=A1*B1\n```', { interactiveCells: true });
+    expect(rawOf(out)[2], '押したら結果が入ってしまう').toBe('=A1*B1');
+  });
+
+  it('🔴 本文は 1 バイトも変わらない(結果を書き戻さない)', () => {
+    const body = '```csv\n2,3,=A1*B1\n```';
+    renderMarkdown(body, { interactiveCells: true });
+    // ⚠ 描画は本文を触らない ── 触ったら次に開いたとき式が消えている
+    expect(body).toBe('```csv\n2,3,=A1*B1\n```');
+    // 🔑 打ち直しも式から始まる(端どうしが噛み合う)
+    expect(applyBodyRewrite(body, { kind: 'csv-cell', line: 1, col: 2, value: '=A1+B1' })).toBe(
+      '```csv\n2,3,=A1+B1\n```',
+    );
+  });
+
+  it('🔴 書き出し・印刷でも同じ結果が出る(面で見え方を変えない)', () => {
+    // ⚠ 押せる面だけ計算すると、配った HTML と画面で数字が食い違う
+    const withCells = renderMarkdown('```csv\n2,3,=A1*B1\n```', { interactiveCells: true });
+    expect(cellsOf(withCells).map((c) => c.replace(/[＋×]/g, ''))).toEqual(['2', '3', '6']);
+  });
+
+  it("🔴 `'` で始めれば字のまま出る(`=` を書く道を失わない)", () => {
+    const out = renderMarkdown("```csv\n'=A1,ふつう\n```");
+    expect(cellsOf(out)).toEqual(['=A1', 'ふつう']);
+  });
+
+  it('⚠ 誤った式は升に理由が出る(表全体は消えない)', () => {
+    const out = renderMarkdown('```csv\n=1/0,=NOPE(),2\n```');
+    expect(cellsOf(out)).toEqual(['#DIV/0!', '#NAME?', '2']);
+  });
+
+  it('⚠ 升の中の装飾は式の後でも効く(描き方の規則を分けない)', () => {
+    const out = renderMarkdown("```csv\n'**太字**,x\n```");
+    expect(out, '式にしたら装飾が効かなくなった').toContain('<strong>太字</strong>');
+  });
+});
+
+/**
+ * 🔴 **誤りの理由は升に添える**(#418 段②の 2 稿目)。
+ *
+ * ⚠ #426 と同じ向き ── 「効かないなら**なぜ効かないか**を出す」。
+ */
+describe('式の誤りの理由を升に出す(#418 段②)', () => {
+  it('🔴 指せば理由が読める', () => {
+    const out = renderMarkdown('```csv\n=VLOOKUP(1),2\n```');
+    expect(out, '理由が升に付いていない').toMatch(/<th[^>]*title="[^"]*VLOOKUP/);
+  });
+  it('⚠ 正しい式の升には 1 バイトも足さない(goldens を動かさない)', () => {
+    // ⚠ **升だけを見る** ── 塊にはコピーと切替の `title` が元から在る
+    //    (1 稿目は `not.toContain('title=')` と広く書いて、それに満たされて落ちた)
+    const ok = renderMarkdown('```csv\n=1+1,2\n```');
+    expect(ok, '前提: 式が計算されていない').toContain('<th>2</th>');
+    expect(ok.match(/<t[hd][^>]*title=/), '正しい升に理由が付いた').toBeNull();
+  });
+  it('⚠ 理由の中の `"` で属性が壊れない', () => {
+    const out = renderMarkdown('```csv\n=A"\n```');
+    expect(out).toContain('#ERR!');
+    // 空振り防止 ── 属性として読める形のまま
+    expect(out.match(/title="[^"]*"/)).not.toBeNull();
+  });
+});
