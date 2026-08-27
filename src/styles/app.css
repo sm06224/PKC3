@@ -4256,6 +4256,69 @@ li[data-pkc-row-slot] {
   padding: var(--s1) var(--s2);
 }
 
+/* ── 器の中の「探して選ぶ」一覧(#474)────────────────────────
+ * 🔴 **行は道具のボタンではなく、読む行である。**
+ *
+ * ⚠ 直す前は**規則が 1 つも無かった**ので、`button` の既定
+ * (`white-space: nowrap` / 高さを `--row-h` に固定 / `justify-content: center`)を
+ * そのまま受けていた ── あれは user 指示 2026-08-03「ボタンサイズ揃え」のための
+ * 規則で、**帯に並ぶ道具**を想定している。
+ * 実測(1280x900、51 行): 器 486px に対し行が **1124px** ── **638px はみ出し**、
+ * 横スクロールバーが出ていた(cowork の実機報告 #16 は 632px。ほぼ一致)。
+ *
+ * 🔴 **横に流さない。折り返す。** 横スクロールは**隠れた字に user が気づけない**
+ *   (縦に流すのは可 ── 一覧は縦に読むものなので、在ることが分かる)。
+ * ⚠ **同じ形が 2 つある**ので規則も 1 つにする ── 操作のパレットと、
+ *   ノートを選ぶ器(`entry-pick-row`。**題名は user が書くので、いくらでも長い**)。
+ *   片方だけ直すと、もう片方が同じ症状で残る。 */
+[data-pkc-field='palette-row'],
+[data-pkc-field='entry-pick-row'] {
+  /* 🔑 器いっぱいの行にする(`inline-flex` のままだと中身なりに伸びる) */
+  display: flex;
+  width: 100%;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: flex-start;
+  text-align: start;
+  /* ⚠ 高さの固定を**3 つとも**解く ── `height` だけ戻すと `max-height` が残り、
+   *   折り返した 2 行目が切れる(器の既定は 3 つ書いてある)。 */
+  height: auto;
+  min-height: var(--row-h);
+  max-height: none;
+  /* 🔴 ここが本体 ── 折り返させる。`anywhere` は「切れ目の無い長い語」への保険 */
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+  padding: var(--s2) var(--s3);
+  gap: var(--s1) var(--s3);
+}
+/* 名前は左、割当は右端。⚠ 押せない理由は**次の行へ落とす**(`flex-basis: 100%`)──
+ * 名前と同じ行に混ぜると、読み手には 1 つの長い名前に見える。 */
+[data-pkc-field='palette-keys'] {
+  margin-inline-start: auto;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+[data-pkc-field='palette-why'],
+[data-pkc-field='entry-pick-kind'] {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 11px;
+}
+/* 🔴 **一覧だけを縦に流す**(器ごと流さない)。
+ * ⚠ 器ごと流していたので、下の行を見に行くと**探す欄が画面から出て**いた
+ *   (実測: 器 868px / 中身 1437px)。折り返すと行が高くなるぶん、ここは効く。
+ * 🔑 #151 と同じ形である ── **高さを切ってよいのは読むものだけで、
+ *   操作する手(探す欄・やめる/入れる)を切ってはいけない**。 */
+[data-pkc-field='palette-list'],
+[data-pkc-field='entry-pick-list'] {
+  display: block;
+  max-height: 50vh;
+  overflow-y: auto;
+  margin-top: var(--s2);
+}
+
 /* 🔴 **危険色は受けボタンだけ**。⚠ 地に色を敷かない(情報にだけ使う)。 */
 [data-pkc-field='dialog-ok'][data-pkc-danger] {
   border-color: var(--danger, #b3261e);
