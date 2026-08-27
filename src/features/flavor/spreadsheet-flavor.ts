@@ -3,17 +3,14 @@
  * グラフ・書式定義)。grid editor(P3-7)は fence 内容を編集する。
  */
 import { serializeFrontmatter, type FrontmatterValue } from '../markdown/frontmatter';
+/**
+ * 🔑 **逃げの規則は 1 つ**(#418 段①で寄せた)── ここには PKC2 由来の
+ *   同じ関数が別に書かれていた。⚠ 2 本あると、**片方だけ直しても誰も気づかない**
+ *   (CLAUDE.md §7「同じ問いに答える口を 2 つ作らない」)。
+ */
+import { csvEscapeField } from '../markdown/csv-table';
 import { type FlavorSpec } from './flavor-spec';
 import { extractSchedule } from '../schedule/schedule-keys';
-
-/** PKC2 spreadsheet-body.ts の csvEscapeField と同一規則。 */
-function csvEscapeField(field: string): string {
-  if (field === '') return '';
-  if (/[",\n\r]/.test(field)) {
-    return `"${field.replace(/"/g, '""')}"`;
-  }
-  return field;
-}
 
 interface Pkc2Spreadsheet {
   rows: string[][];
@@ -89,7 +86,7 @@ export const spreadsheetFlavor: FlavorSpec = {
     // `csv-render` = レンダリング面のみ(ソーストグル無し)── シートは表が本体。
     // noheader は csv fence の既存オプション規約(csv-table.ts)をそのまま使う
     const info = sheet.noHeader ? 'csv-render noheader' : 'csv-render';
-    const csv = sheet.rows.map((r) => r.map(csvEscapeField).join(',')).join('\n');
+    const csv = sheet.rows.map((r) => r.map((c) => csvEscapeField(c, ',')).join(',')).join('\n');
     // fence 長は内容の最長 backtick run + 1(最低 3)── セルに ``` があっても
     // fence が閉じない(review #2: fence 破壊でシートデータが fence 外に漏れ、
     // grid editor の再保存で欠落する S3 経路を塞ぐ)

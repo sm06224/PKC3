@@ -129,8 +129,20 @@ function emitted(): { classes: Set<string>; attrs: Set<string>; empty: string[] 
   const attrs = new Set<string>();
   const empty: string[] = [];
   const host = document.createElement('div');
+  /**
+   * 🔴 **押せる面の姿も数える**(#418 段①で足した)。
+   *
+   * ⚠ 素の `renderMarkdown` だけを見ていると、**押せる面にしか出ない印**
+   *   (表の行・列の口)が「誰も出さない規則」に見え、逆に**規則を消しても
+   *   気づけない**。読む面は `interactiveTasks` / `interactiveCells` を
+   *   渡して描くので、corpus もその姿を通す。
+   */
+  const MODES: ReadonlyArray<Record<string, boolean>> = [
+    {},
+    { interactiveTasks: true, interactiveCells: true },
+  ];
   for (const [name, src] of CORPUS) {
-    const html = renderMarkdown(src);
+    const html = MODES.map((m) => renderMarkdown(src, m)).join('');
     host.innerHTML = html;
     // ⚠ 何も生まなかった入力は**この検査の穴**(記法が消えたことに気づけない)
     if (host.children.length === 0 && !RENDERS_NOTHING.has(name)) empty.push(name);
@@ -163,6 +175,18 @@ function styled(): { classes: Set<string>; attrs: Set<string> } {
  * 規則を持たなくてよいもの。**理由を書かずに足さない** ── ここが
  * 「例外を足せば通る」抜け道になると、この検査は何も守らなくなる。
  */
+/**
+ * 🔴 **markdown の外で作られる印**(#418 段①)── CSS は在るが、描画物には出ない。
+ *
+ * ⚠ 素通しにすると「誰も出さない規則」の検査に**穴が開く**ので、
+ *   **出している file を名指しさせる**:その file から消えたら、この検査が落ちる。
+ * 🔑 つまり免除ではなく、**別の場所を見る**という指示である。
+ */
+const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
+  // 表のセルを押したときに binder が差し込む入力欄(#418 段①)
+  'pkc-csv-cell-input': 'src/adapter/ui/actions/binder.ts',
+};
+
 const NO_STYLE_NEEDED: Readonly<Record<string, string>> = {
   'pkc-md-rendered': '本文の器。中の要素に当てる起点で、自身は素のまま',
   'pkc-mermaid-placeholder': '器。状態は data-pkc-mermaid-state で見る',
@@ -257,9 +281,30 @@ describe('markdown の描画物と CSS', () => {
     // ⚠ 直したつもりで直っていないことの証拠になる(`.pkc-toc` がそれだった ──
     //    renderer が出すのは `pkc-toc-formal` / `pkc-toc-preview` なので当たらない)
     const orphan = [...styled().classes]
-      .filter((c) => !out.classes.has(c) && !c.startsWith('pkc-tok-') && !(c in NO_STYLE_NEEDED))
+      .filter(
+        (c) =>
+          !out.classes.has(c) &&
+          !c.startsWith('pkc-tok-') &&
+          !(c in NO_STYLE_NEEDED) &&
+          !(c in STYLED_ELSEWHERE),
+      )
       .sort();
     expect(orphan, `誰も出さない規則(${orphan.length} 件): ${orphan.join(', ')}`).toEqual([]);
+  });
+
+  /**
+   * 🔴 **逃がした印は、本当に誰かが出しているか**(#418 段①)。
+   *
+   * ⚠ 上の検査から外した印は、**外した理由ごと腐る** ── 出す側を消しても
+   *   規則だけが残り、しかも検査は緑のままになる。名指しした file を実際に読む。
+   */
+  it('🔴 markdown の外で作る印は、その file が本当に出している', () => {
+    for (const [cls, file] of Object.entries(STYLED_ELSEWHERE)) {
+      const src = readFileSync(file, 'utf8');
+      expect(src.includes(cls), `${cls} を出す所が ${file} に無い`).toBe(true);
+      // ⚠ 空振り防止 ── CSS 側にも本当に在ることを見る(片方だけの検査にしない)
+      expect(CSS, `${cls} の規則が CSS に無い`).toContain(cls);
+    }
   });
 
   /**

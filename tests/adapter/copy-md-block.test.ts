@@ -1,5 +1,6 @@
 /** @vitest-environment happy-dom */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import {
   findMdBlockCopySource,
   stripTableChromeForCopy,
@@ -43,6 +44,25 @@ describe('extractMdBlockPlainText / stripTableChromeForCopy', () => {
       '<table><tr><th>a\tb</th><th>c</th></tr><tr><td>1\n2</td><td>3</td></tr></table>',
     );
     expect(extractMdBlockPlainText(table)).toBe('a b\tc\n1 2\t3');
+  });
+
+  /**
+   * 🔴 **押せる表をコピーしても、口の印が混ざらない**(#418 段①)。
+   *
+   * ⚠ **本物の描画から作る** ── 手で組んだ fixture だと、
+   *   「ボタンに字を入れない」という当の規律を検めていない
+   *   (1 稿目は手で `＋` を入れて組んでいたので、何も守っていなかった)。
+   */
+  it('🔴 押せる表をコピーしても、行・列の口が混ざらない(#418 段①)', () => {
+    const host = el(
+      `<div>${renderMarkdown('```csv\n名前,数\nあ,1\n```', { interactiveCells: true })}</div>`,
+    );
+    const table = host.querySelector('table')!;
+    // 空振り防止 ── 口が本当に出ている(出ていなければ何も守っていない)
+    expect(table.querySelectorAll('.pkc-csv-shape').length, '口が出ていない').toBeGreaterThan(0);
+    expect(extractMdBlockPlainText(stripTableChromeForCopy(table)), '口の印が混ざった').toBe(
+      '名前\t数\nあ\t1',
+    );
   });
 
   it('table chrome(行番号 / 並べ替え / 絞り込み)は clone から除去、表示 DOM は無傷', () => {

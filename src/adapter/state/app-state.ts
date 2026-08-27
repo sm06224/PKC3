@@ -853,6 +853,25 @@ export type UserAction =
    */
   | { type: 'TOGGLE_TASK'; lid: string; line: number }
   /**
+   * 🔴 **表のセルを 1 つ書き換える**(#418 段①)。
+   * ⚠ `TOGGLE_TASK` と**同じ形**:書換は 1 本(`REQUEST_BODY_REWRITE`)を通り、
+   *   面が独自の書込経路を持たない(§7)。何をするかの判断は `body-rewrite.ts`。
+   * ⚠ `line` は**原文の行番号**、`col` はその行の何番目のセルか。
+   *   区切り字は**渡さない** ── 囲みの見出しから決まる(呼び手に決めさせない)。
+   */
+  | { type: 'SET_CSV_CELL'; lid: string; line: number; col: number; value: string }
+  /**
+   * 🔴 **表の行・列を足す / 消す**(#418 段①)。⚠ `SET_CSV_CELL` と同じ形。
+   */
+  | {
+      type: 'SET_CSV_SHAPE';
+      lid: string;
+      line: number;
+      col: number;
+      what: 'row' | 'col';
+      mode: 'add' | 'remove';
+    }
+  /**
    * 🔴 **繰り返しの「その回」を済ませる**(#344 段②)。
    * ⚠ `TOGGLE_TASK` と**単位が違う** ── 規則の行の印は動かさず、
    *   **その日ぶんの行を 1 本増やす**(理由は `body-rewrite.ts` の `repeat-done`)。
@@ -2569,6 +2588,61 @@ function reduceCore(
             archetype: meta.archetype,
             entryOrder: meta.entryOrder,
             rewrite: { kind: 'adopt-images', adopted: action.adopted },
+          },
+        ],
+      };
+    }
+    /**
+     * 🔴 **表のセルを書き換える**(#418 段①)。⚠ `TOGGLE_TASK` と**同じ形**。
+     */
+    case 'SET_CSV_CELL': {
+      // ready 限定(編集中の裏書換を作らない)。未知 lid は no-op
+      if (state.phase !== 'ready') return { state, events: [] };
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            rewrite: {
+              kind: 'csv-cell',
+              line: action.line,
+              col: action.col,
+              value: action.value,
+            },
+          },
+        ],
+      };
+    }
+    /**
+     * 🔴 **表の行・列を足す / 消す**(#418 段①)。⚠ `SET_CSV_CELL` と同じ形。
+     */
+    case 'SET_CSV_SHAPE': {
+      // ready 限定(編集中の裏書換を作らない)。未知 lid は no-op
+      if (state.phase !== 'ready') return { state, events: [] };
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            rewrite: {
+              kind: 'csv-shape',
+              line: action.line,
+              col: action.col,
+              what: action.what,
+              mode: action.mode,
+            },
           },
         ],
       };

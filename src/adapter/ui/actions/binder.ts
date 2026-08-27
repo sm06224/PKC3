@@ -807,6 +807,14 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
    */
   'toggle-task',
   /**
+   * 🔴 **表のセルを打つのも本文を書く**(#418 段①)── `toggle-task` と同じ
+   *   `REQUEST_BODY_REWRITE` を撃つので、同じ門をくぐらせる。
+   * ⚠ 押した時点では欄を開くだけだが、**確定で書く** ── 門は入口に置く。
+   */
+  'edit-cell',
+  // ⚠ 行・列の足し引きも同じ `REQUEST_BODY_REWRITE` を撃つ(#418 段①)
+  'shape-cell',
+  /**
    * 🔴 **今日のノートは「作る」ことがある**(#348、2026-08-23)。
    * ⚠ 既に在れば選ぶだけだが、**無ければ `CREATE_ENTRY` を撃つ** ──
    *   取り込みが entry を総入れ替えしている裏で作らせない。
@@ -2475,6 +2483,132 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 押せるのは**読む面**だけ(描画側が `interactiveTasks` を渡した所)。
    * ⚠ 指すのは**原文の行番号** ── 索引だと数え方のずれで別の行を書き換える。
    */
+  /**
+   * 🔴 **表のセルを押したら、そのセルが入力欄になる**(#418 段①)。
+   *
+   * > user の物語: 「表」を作って A1 に「品名」と打ちたい。押すと**表が消えて
+   * > CSV の原文**が出て、どのカンマが A1 かを目で数えることになっていた。
+   *
+   * ⚠ 開くのは**そのセルだけ** ── 周りは表のまま(囲い丸ごとの欄を開かない)。
+   * 🔑 確定は `SET_CSV_CELL` → `REQUEST_BODY_REWRITE` の 1 本(§7)。
+   * 🔴 **双方向**(user 指示 2026-08-23)── 字を消して確定すれば**セルが空になる**。
+   * ⚠ `Escape` は**取り消し**(押す前の字に戻す)── 片道にしない。
+   */
+  'edit-cell': (dispatcher, target) => {
+    const line = Number(target.getAttribute('data-pkc-cell-line'));
+    const col = Number(target.getAttribute('data-pkc-cell-col'));
+    if (!Number.isInteger(line) || line < 0 || !Number.isInteger(col) || col < 0) return;
+    const st = dispatcher.getState();
+    /**
+     * ⚠ **どのノートのセルかは、押した所から引く**(`toggle-task` と同じ理由)──
+     *   本文の面は `data-pkc-entry` を持たないので、そのときだけ
+     *   「いま開いているノート」へ落ちる。
+     */
+    const fromDom = target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
+    const lid = fromDom ?? st.openBody?.lid ?? st.selectedLid;
+    if (lid === null || lid === undefined) return;
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから表を打ってください' });
+      return;
+    }
+    // ⚠ 2 度押しで欄を作り直さない(打ちかけの字を捨てない)
+    if (target.querySelector('[data-pkc-field="cell-input"]') !== null) return;
+    /**
+     * 🔴 **字を選んでいる最中は開かない**(CLAUDE.md §10)。
+     *
+     * ⚠ 押せるようにする前、升は**ただの字**だった ── ドラッグで選んで
+     *   コピーできた。⚠ ドラッグの終わりにも `click` は飛ぶので、無条件に開くと
+     *   **選んだ字がその瞬間に消える**(`row-swap.ts` が同じ罠を踏んでいる)。
+     * 🔑 だから**選択が潰れている(= ただ押した)ときだけ**開く。
+     *   ⚠ 1 つの升の中を選んでコピーする道は残る ── 開いた欄は
+     *   `select()` 済みなので、押す → コピー → `Escape` でも取れる。
+     */
+    const sel = target.ownerDocument.getSelection();
+    if (sel !== null && !sel.isCollapsed && sel.toString() !== '') return;
+    /**
+     * 🔴 **原文は描いた側から受け取る**(升の字を読み取らない)。
+     *
+     * ⚠ 升の中身は **inline の markdown として描かれる**(`**太字**` →
+     *   `<strong>太字</strong>`)うえ、**行・列のボタンも入っている** ──
+     *   `textContent` を原文として読むと `**` が落ち、`＋×` が混ざる
+     *   (2 稿目で実測して直した。1 稿目は本当にそうなっていた)。
+     */
+    const before = target.getAttribute('data-pkc-cell-raw') ?? '';
+    const input = target.ownerDocument.createElement('input');
+    input.type = 'text';
+    input.value = before;
+    input.setAttribute('data-pkc-field', 'cell-input');
+    /**
+     * ⚠ **見た目は class で当てる** ── `data-pkc-field` は**動作の鍵**であって、
+     *   書き出す本文 CSS には 1 件も混ぜない(`tests/build/body-css.test.ts` が
+     *   器の規則の混入を止めている ── 実際にここで落ちて教わった)。
+     */
+    input.className = 'pkc-csv-cell-input';
+    input.setAttribute('aria-label', '表のセル');
+    /**
+     * ⚠ **確定は 1 回だけ**(`Enter` のあとに `blur` も来る)── 二重に撃つと、
+     *   2 回目は「同じ字」で `null` になって黙って落ちるだけだが、
+     *   **撃った回数だけ本文を読み直す**ので無駄が積む。
+     */
+    let settled = false;
+    /**
+     * ⚠ **描いてあったものをそのまま戻す** ── 升には描画済みの markdown と
+     *   行・列のボタンが入っている。字だけ書き戻すと**ボタンが消える**。
+     */
+    const savedHtml = target.innerHTML;
+    const restore = (): void => {
+      input.remove();
+      target.innerHTML = savedHtml;
+    };
+    const commit = (): void => {
+      if (settled) return;
+      settled = true;
+      const value = input.value;
+      restore();
+      if (value === before) return; // 変わっていなければ撃たない
+      dispatcher.dispatch({ type: 'SET_CSV_CELL', lid, line, col, value });
+    };
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        commit();
+      } else if (ev.key === 'Escape') {
+        ev.preventDefault();
+        settled = true;
+        restore();
+      }
+    });
+    input.addEventListener('blur', commit);
+    target.replaceChildren(input);
+    input.focus();
+    input.select();
+  },
+  /**
+   * 🔴 **表の行・列を足す / 消す**(#418 段①)。
+   *
+   * 🔑 打てるだけでは動線が元に戻る ── 5 列で足りなくなった瞬間に
+   *   CSV の原文へ帰ることになる。⚠ 足せるなら**消せる**
+   *   (user 指示 2026-08-23「片道の操作を作らない」)。
+   * ⚠ 何をするかの判断は `body-rewrite.ts`(最後の 1 行 / 1 列は消さない、等)──
+   *   ここは**押した所を渡すだけ**である。
+   */
+  'shape-cell': (dispatcher, target) => {
+    const line = Number(target.getAttribute('data-pkc-cell-line'));
+    const col = Number(target.getAttribute('data-pkc-cell-col'));
+    const what = target.getAttribute('data-pkc-cell-what');
+    const mode = target.getAttribute('data-pkc-cell-mode');
+    if (!Number.isInteger(line) || line < 0 || !Number.isInteger(col) || col < 0) return;
+    if ((what !== 'row' && what !== 'col') || (mode !== 'add' && mode !== 'remove')) return;
+    const st = dispatcher.getState();
+    const fromDom = target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
+    const lid = fromDom ?? st.openBody?.lid ?? st.selectedLid;
+    if (lid === null || lid === undefined) return;
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから表を触ってください' });
+      return;
+    }
+    dispatcher.dispatch({ type: 'SET_CSV_SHAPE', lid, line, col, what, mode });
+  },
   'toggle-task': (dispatcher, target) => {
     const raw = target.getAttribute('data-pkc-task-line');
     const line = Number(raw);

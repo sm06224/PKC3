@@ -1806,6 +1806,63 @@ li[data-pkc-row-slot] {
 .pkc-md-rendered .pkc-md-rendered-csv {
   width: 100%;
 }
+
+/* ── 🔴 **表のセルを押して打てる**(#418 段①)。
+ *    ⚠ 出るのは押せる面だけ(`interactiveCells` を渡した面)なので、
+ *    書き出した HTML・印刷では**この規則に当たる要素が 1 つも無い**。 */
+.pkc-md-rendered .pkc-md-rendered-csv [data-pkc-action='edit-cell'] {
+  cursor: text;
+  position: relative;
+}
+/* ⚠ **升の中いっぱいに開く** ── 小さい欄が升の中に浮くと、どの升を
+ *    打っているのか分からなくなる(隣の升と重なって見える) */
+.pkc-md-rendered .pkc-csv-cell-input {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+}
+/* ⚠ **行と列の口は、触るまで出さない** ── 常に出ていると升が字で埋まる。
+ *    🔑 ただし**焦点でも出す**(`:focus-within`)── 出さないと
+ *    キーボードだけの user から**永久に見えない**(#425 と同じ向き) */
+.pkc-md-rendered .pkc-csv-shape {
+  visibility: hidden;
+  margin-left: 2px;
+  padding: 0 3px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.pkc-md-rendered .pkc-md-rendered-csv tr:hover .pkc-csv-shape,
+.pkc-md-rendered .pkc-md-rendered-csv td:focus-within .pkc-csv-shape,
+.pkc-md-rendered .pkc-md-rendered-csv th:focus-within .pkc-csv-shape,
+.pkc-md-rendered .pkc-csv-shape:focus {
+  visibility: visible;
+}
+.pkc-md-rendered .pkc-csv-shape:hover {
+  color: var(--fg);
+  border-color: var(--accent);
+}
+/* 🔴 **印は CSS で出す。ボタンに字を入れない** ── 升の中に置くので、
+ *    字を入れると `textContent` に混ざり、コピーした TSV に `＋×` が入る
+ *    (実際に入っていた)。⚠ 意味は `aria-label` / `title` が持つ。
+ *    🔑 見出しの畳みの印(この file の下のほう)と同じ作法である。 */
+.pkc-md-rendered .pkc-csv-shape[data-pkc-cell-mode='add']::before {
+  content: '＋';
+}
+.pkc-md-rendered .pkc-csv-shape[data-pkc-cell-mode='remove']::before {
+  content: '×';
+}
 .pkc-md-rendered .pkc-html-render {
   display: block;
   width: 100%;
@@ -3931,6 +3988,9 @@ li[data-pkc-row-slot] {
   [data-pkc-field='detail-bar-slot'],
   [data-pkc-field='detail-notice-slot'],
   .pkc-md-copy-btn,
+  /* ⚠ 表の「行・列を足す / 消す」も紙には要らない(#418 段①)── 画面では
+   *    触るまで隠しているが、`visibility` は場所を取るので升の幅が変わる */
+  .pkc-csv-shape,
   .pkc-render-toggle {
     display: none;
   }
