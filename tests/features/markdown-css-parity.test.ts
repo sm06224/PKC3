@@ -185,6 +185,17 @@ function styled(): { classes: Set<string>; attrs: Set<string> } {
 const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
   // 表のセルを押したときに binder が差し込む入力欄(#418 段①)
   'pkc-csv-cell-input': 'src/adapter/ui/actions/binder.ts',
+  /**
+   * 本文の `[名前](asset:鍵)` の隣に置く再生機(#413 段②)。
+   * ⚠ `renderMarkdown` はリンクまでしか作らない ── 中身(音か動画か)は
+   *   添付を読むまで分からないので、器は**描いた後に**差し込まれる。
+   * ⚠ **名指しするのは名前を持つ file** ── 器を作るのは `detail.ts` と
+   *   `export/pkc3-html.ts` の 2 つで、どちらも**この定数**を読む(綴りを 2 つに
+   *   割らないため)。⚠ だからこの検査は「字面が在るか」までしか言えない ──
+   *   **本当に付いているか**は `tests/adapter/body-media.test.ts` と
+   *   `tests/features/pkc3-html.test.ts` が実物で見る(弱いと自覚して使う)。
+   */
+  'pkc-body-media': 'src/features/asset/asset-preview-kind.ts',
 };
 
 const NO_STYLE_NEEDED: Readonly<Record<string, string>> = {

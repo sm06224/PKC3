@@ -2099,6 +2099,31 @@ li[data-pkc-row-slot] {
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
+
+/* 🔴 **本文の中の再生機**(#413 段②)。⚠ 添付の面(`attachment-media`)とは
+ * **別の名前**にしている ── あちらは「その添付だけを見る面」、こちらは
+ * 「本文の中に混ざる 1 つの部品」で、大きさの決まり方が違う。
+ * ⚠ **行の中に居る**(`[名前](asset:鍵)` の隣)ので、自分で行を作る。
+ * ⚠ 音は高さが決まっている ── 幅だけ本文に合わせる。動画は縦横比を保つ。
+ * 🔴 **`.pkc-md-rendered` を起点にする**(`build/body-css.ts`)── ここを起点に
+ *   しないと**書き出した HTML に焼かれない**。同じ器が配った先にも出るので、
+ *   見た目の定義は 1 本でなければならない(§7)。
+ * 🔴 **見た目は class、探すのは `data-pkc-field`**(2026-08-27)── 焼き込みの検品は
+ *   `data-pkc-field` を**1 件も通さない**(あれは器の印である)。器の名前で
+ *   飾ると、書き出した HTML から**この規則だけが静かに落ちる**。 */
+.pkc-md-rendered .pkc-body-media {
+  display: block;
+  width: 100%;
+  max-width: 32rem;
+  margin: var(--s2) 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.pkc-md-rendered video.pkc-body-media {
+  height: auto;
+  background: #000;
+}
+/* ⚠ 紙に出さないのは file 末尾の `@media print` に置く(この節は画面だけ)。 */
 /* 🔴 **PDF は寸法を自分で持たない**(2026-08-15、user 報告「PDF ビューアが動作しない」)。
  * ⚠ 上の規則は `img` / `video` / `audio` / `object` の **4 種で共用**していた。
  *   `<img>` は固有寸法を持つので `max-width` だけで足りるが、**`<object>` は
@@ -3204,13 +3229,6 @@ li[data-pkc-row-slot] {
   white-space: nowrap;
   color: var(--fg);
 }
-/* ⚠ 紙には出さない(画面だけの帯である)。 */
-@media print {
-  [data-pkc-region='capture-bar'] {
-    display: none;
-  }
-}
-
 [data-pkc-region='status'] {
   display: flex;
   align-items: center;
@@ -4028,7 +4046,20 @@ li[data-pkc-row-slot] {
   /* ⚠ 表の「行・列を足す / 消す」も紙には要らない(#418 段①)── 画面では
    *    触るまで隠しているが、`visibility` は場所を取るので升の幅が変わる */
   .pkc-csv-shape,
+  /* ⚠ 収録中の帯も紙には要らない(#413)── 押せる物が無い。
+   * 🔴 **印刷の節はここ 1 つ**(file の末尾)── 途中に `@media print` を作ると、
+   *    「最初の `@media` まで」で切って画面の規則を読む検査の**範囲が縮む**
+   *    (2026-08-27 に実際に `announce` の検査を落とした)。 */
+  [data-pkc-region='capture-bar'],
   .pkc-render-toggle {
+    display: none;
+  }
+  /* 🔴 **本文の中の再生機は別の規則にする**(#413 段②)。
+   * ⚠ 上の一覧に混ぜると、**書き出す HTML へ焼かれない** ── 焼く判定は
+   *   「**全ての節**が `.pkc-md-rendered` で始まるか」なので、器の名前と
+   *   同居した瞬間に規則ごと落ちる(2026-08-27 に実際に落として気づいた)。
+   * ⚠ 消しても**名前のリンクは残る**ので、紙から情報は落ちない。 */
+  .pkc-md-rendered .pkc-body-media {
     display: none;
   }
   /* ③ 切ってはいけない箱を切らない / 見出しを行末に独り残さない

@@ -9,6 +9,25 @@
  * ⚠ **pure module**。browser API を使わない(要素を作るのは adapter)。
  */
 
+/**
+ * 🔴 **本文の中に置く再生機の印**(#413 段②)。
+ *
+ * ⚠ **名前をここに置く**のは、置く側が **2 つ**あるからである ──
+ *   アプリの本文(`detail.ts`)と、配る HTML(`export/pkc3-html.ts`)。
+ *   綴りが割れると、片方だけを見る検査が**もう片方の壊れを見逃す**(§7)。
+ */
+export const BODY_MEDIA_FIELD = 'body-media';
+
+/**
+ * 🔴 **同じ器の「見た目の名前」**(#413 段②)。
+ *
+ * ⚠ **印が 2 つ在るのには理由がある** ── 探すのは `data-pkc-field`(規約)、
+ *   飾るのは class である。書き出し HTML へ焼く本文 CSS の検品は
+ *   `data-pkc-field` を**1 件も通さない**(あれは器の印)ので、
+ *   器の名前で飾ると**配った HTML からその規則だけが静かに落ちる**。
+ */
+export const BODY_MEDIA_CLASS = 'pkc-body-media';
+
 /** 添付の見せ方。`null` = 画面には出せない(ダウンロードで開いてもらう)。 */
 export type AssetPreviewKind = 'text' | 'image' | 'video' | 'audio' | 'pdf' | null;
 
