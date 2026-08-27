@@ -59,7 +59,7 @@ import {
   isUnknownOpError,
   resolveContainerCompat,
 } from '@adapter/platform/storage/resolve-container-compat';
-import { buildShell, paintCaptureBar } from '@adapter/ui/render/shell';
+import { buildShell, paintCaptureBar, paintTimerBar } from '@adapter/ui/render/shell';
 import { showNotices, clearNotices } from '@adapter/ui/render/notices';
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
 import { createAnnounce, announceServices } from '@adapter/ui/render/announce';
@@ -119,6 +119,7 @@ import { CenterRouter } from '@adapter/ui/render/center';
 import { AppendBoxRenderer } from '@adapter/ui/render/append-box';
 import { bindActions, generateLid, type BinderServices } from '@adapter/ui/actions/binder';
 import { createCaptureService } from '@adapter/ui/actions/capture';
+import { createTimerService } from '@adapter/ui/actions/timer';
 import {
   armLaunchQueue,
   type LaunchTarget,
@@ -1552,12 +1553,27 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     notify: showStatus,
   });
 
+  /**
+   * 🔴 **タイマー**(#279)。段取りは `timer.ts` が持ち、ここは口を渡すだけ。
+   * ⚠ 帯は**走っている間だけ**描き直される(`timer.ts` が刻みを張り外しする)──
+   *   ここで `setInterval` を張らない(常駐を作らない ── 不可侵指示 2026-08-03)。
+   */
+  const timerService = createTimerService({
+    dispatcher,
+    onChange: (runs) => paintTimerBar(root, runs, Date.now()),
+    notify: showStatus,
+  });
+
   const services: BinderServices = {
     attachFiles: (files) => void withAssetGate(() => attachFiles(dispatcher, attachDeps, files)),
     // 🔴 録音・画面収録(#413)── 押す口は左の列の「添付」の隣に在る
     startCapture: (kind) => void captureService.start(kind),
     stopCapture: () => captureService.stop(),
     discardCapture: () => captureService.discard(),
+    // 🔴 タイマー(#279)── 押す口は左の列の「画面」の隣に在る
+    startTimer: () => timerService.start(),
+    stopTimer: (lid) => timerService.stop(lid),
+    discardTimer: (lid) => timerService.discard(lid),
     // 🔑 一時の知らせ(「3 件を『はこ』へ入れました」)── **エラーの行とは別**
     showStatus,
     /**

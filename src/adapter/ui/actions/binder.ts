@@ -370,6 +370,15 @@ export interface BinderServices {
   stopCapture?(): void;
   discardCapture?(): void;
   /**
+   * 🔴 **タイマー**(#279。user 指示 2026-08-19「…タイマー…は組み込みアプリで
+   * リリースしたい」)。⚠ **省略可**(収録と同じ規律)。
+   * ⚠ 止める / 捨てるは**どの計測か**を渡す ── 複数同時に走るので、
+   *   「いま走っているもの」では決まらない。
+   */
+  startTimer?(): void;
+  stopTimer?(lid: string): void;
+  discardTimer?(lid: string): void;
+  /**
    * 🔴 **貼る用に画像を持ち歩ける形へ**(#193)。`blob:` → `data:` の対応を返す。
    * ⚠ **省略可** ── 無ければ画像は文字に置き換わる(壊れた画像を貼らせない)。
    */
@@ -960,6 +969,14 @@ function refuseNoCapture(dispatcher: Dispatcher): void {
   dispatcher.dispatch({
     type: 'OP_FAILED',
     error: 'この版では録音・画面収録ができません',
+  });
+}
+
+/** 🔴 同じ理由でタイマーも断る(#279)── 押して無音にしない。 */
+function refuseNoTimer(dispatcher: Dispatcher): void {
+  dispatcher.dispatch({
+    type: 'OP_FAILED',
+    error: 'この版では作業時間を計れません',
   });
 }
 
@@ -2813,6 +2830,24 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'stop-capture': (_dispatcher, _target, services) => services.stopCapture?.(),
   'discard-capture': (_dispatcher, _target, services) => services.discardCapture?.(),
+  /**
+   * 🔴 **タイマー**(#279)。
+   * ⚠ **`BODY_WRITE_ACTIONS` には載せない**(収録と同じ理由)── 忙しい間に
+   *   「止める」を断ると、⚠ **断られている間も経過が伸びて、記録が実際より
+   *   長くなる**。書けない回は `timer.ts` が**預かって、編集を終えたら書く**。
+   */
+  'start-timer': (dispatcher, _target, services) => {
+    if (!services.startTimer) return refuseNoTimer(dispatcher);
+    services.startTimer();
+  },
+  'stop-timer': (_dispatcher, target, services) => {
+    const lid = target.getAttribute('data-pkc-timer');
+    if (lid !== null) services.stopTimer?.(lid);
+  },
+  'discard-timer': (_dispatcher, target, services) => {
+    const lid = target.getAttribute('data-pkc-timer');
+    if (lid !== null) services.discardTimer?.(lid);
+  },
   /**
    * 図を保存する(P8 段⑦)。⚠ 画面は PNG だが、**書き出すのはベクタ**
    * (user 指示 2026-08-03「SVG は書き出しのときだけ」)。

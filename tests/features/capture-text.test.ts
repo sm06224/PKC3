@@ -9,7 +9,6 @@ import { describe, expect, it } from 'vitest';
 import {
   CAPTURE_LABEL,
   captureBarLine,
-  captureElapsed,
   captureFileName,
 } from '../../src/features/asset/capture-text';
 import { pastedImageName } from '../../src/features/asset/pasted-image-name';
@@ -48,17 +47,8 @@ describe('収録の名前(#413)', () => {
 });
 
 describe('帯の 1 行(#413)', () => {
-  it('🔴 1 時間を超えたら時を出す(62:03 と書かない)', () => {
-    expect(captureElapsed(0)).toBe('0:00');
-    expect(captureElapsed(7_400)).toBe('0:07');
-    expect(captureElapsed(65_000)).toBe('1:05');
-    expect(captureElapsed(59 * 60_000 + 59_000)).toBe('59:59');
-    expect(captureElapsed(3_723_000)).toBe('1:02:03');
-  });
-
-  it('⚠ 負の経過でも壊れない(時計が戻っても帯は出る)', () => {
-    expect(captureElapsed(-5_000)).toBe('0:00');
-  });
+  // ⚠ **経過の形そのもの**(`1:02:03`)は `tests/features/elapsed-text.test.ts` が
+  //    見る(#279 で `features/elapsed-text.ts` へ出した)── 2 か所で pin しない。
 
   it('🔴 何を録っているか・どれだけ経ったか・どれだけ積んだかが 1 行で読める', () => {
     expect(captureBarLine('audio', 65_000, '2KB')).toBe('録音中 1:05(約 2KB)');

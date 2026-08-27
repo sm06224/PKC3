@@ -15,6 +15,11 @@ import { COLLECTION_COMMANDS } from './commands';
 import { BROWSE_ICONS, iconButton, iconSpan } from './icons';
 import { PANES, PANE_LABELS } from '@features/pane-visibility';
 import { BROWSE_TABS } from './browse';
+import {
+  timerBarLabel,
+  timerEntryText,
+  type TimerRun,
+} from '@features/timer/timer-run';
 
 export interface ShellRegions {
   /** 左の列の中身(探し方で切り替わる)。 */
@@ -127,6 +132,63 @@ export function paintCaptureBar(root: HTMLElement, line: string | null): void {
   bar.hidden = line === null;
   const text = bar.querySelector<HTMLElement>('[data-pkc-field="capture-status"]');
   if (text !== null) text.textContent = line ?? '';
+}
+
+/**
+ * 🔴 **タイマーの帯を描き直す**(#279)。
+ *
+ * ⚠ **行は lid で使い回す** ── 1 秒ごとに作り直すと、押している最中の
+ *   「止める」が**指の下から消える**(収録の帯が器を常設にしているのと同じ理由。
+ *   あちらは 1 行なので `hidden` だけで足りたが、こちらは**本数が変わる**)。
+ * ⚠ 器が無ければ**何もしない**(`buildShell` より先に呼ばれても落ちない)。
+ */
+export function paintTimerBar(
+  root: HTMLElement,
+  runs: readonly TimerRun[],
+  nowMs: number,
+): void {
+  const bar = root.querySelector<HTMLElement>('[data-pkc-region="timer-bar"]');
+  if (bar === null) return;
+  bar.hidden = runs.length === 0;
+  const label = bar.querySelector<HTMLElement>('[data-pkc-field="timer-label"]');
+  if (label !== null) label.textContent = runs.length === 0 ? '' : timerBarLabel(runs.length);
+  const list = bar.querySelector<HTMLElement>('[data-pkc-field="timer-list"]');
+  if (list === null) return;
+
+  const alive = new Set(runs.map((r) => r.lid));
+  for (const li of [...list.children]) {
+    if (!alive.has(li.getAttribute('data-pkc-timer') ?? '')) li.remove();
+  }
+  for (const run of runs) {
+    let li = list.querySelector<HTMLElement>(`[data-pkc-timer="${cssEscape(run.lid)}"]`);
+    if (li === null) {
+      li = document.createElement('li');
+      li.setAttribute('data-pkc-timer', run.lid);
+      const text = document.createElement('span');
+      text.setAttribute('data-pkc-field', 'timer-entry');
+      const stop = iconButton('stop-timer', '止める');
+      stop.setAttribute('data-pkc-timer', run.lid);
+      stop.title = '計るのをやめて、そのノートの本文に作業時間を書きます';
+      const drop = iconButton('discard-timer', '捨てる');
+      drop.setAttribute('data-pkc-timer', run.lid);
+      drop.title = '計るのをやめます(本文には書きません)';
+      li.append(text, stop, drop);
+      list.append(li);
+    }
+    const text = li.querySelector<HTMLElement>('[data-pkc-field="timer-entry"]');
+    if (text !== null) text.textContent = timerEntryText(run, nowMs);
+  }
+}
+
+/**
+ * 選択子に入れる lid を安全にする。
+ * ⚠ lid は生成物なので普通は英数字だが、**取込で来た lid は何が入っているか
+ *   分からない** ── そのまま選択子に混ぜると、`"` 1 文字で
+ *   `querySelector` が例外を投げて**帯ごと描けなくなる**。
+ */
+function cssEscape(value: string): string {
+  const esc = (CSS as { escape?: (v: string) => string } | undefined)?.escape;
+  return esc ? esc(value) : value.replace(/["\\]/g, '\\$&');
 }
 
 export function buildShell(root: HTMLElement): ShellRegions {
@@ -352,7 +414,18 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const screen = iconButton('start-screen-capture', '画面');
   screen.setAttribute('data-pkc-field', 'start-screen-capture');
   screen.title = '画面を録って、いま開いているノートに入れます';
-  createBar.append(kind, create, pick, today, attach, rec, screen);
+  /**
+   * 🔴 **タイマー**(#279。user 指示 2026-08-19「…タイマー…は組み込みアプリで
+   * リリースしたい」)。
+   *
+   * ⚠ **録音の隣に置く** ── 押す動機が同じ(いまやっていることを残したい)。
+   * ⚠ **中央の面(アプリの一覧)にしない** ── 見るために本文を退かすことになる
+   *   (#300 / #292 段⑤ の見分け方「閉じたとき user が失うものは何か」)。
+   */
+  const timer = iconButton('start-timer', '計る');
+  timer.setAttribute('data-pkc-field', 'start-timer');
+  timer.title = 'いま開いているノートの作業時間を計ります(止めると本文に入ります)';
+  createBar.append(kind, create, pick, today, attach, rec, screen, timer);
 
   const attachInput = document.createElement('input');
   attachInput.type = 'file';
@@ -553,6 +626,21 @@ export function buildShell(root: HTMLElement): ShellRegions {
   dropBtn.title = '収録を捨てます(残しません)';
   capture.append(captureText, stopBtn, dropBtn);
 
+  /**
+   * 🔴 **タイマーの帯**(#279)。⚠ 収録の帯(上)と**同じ場所・同じ形**にする。
+   * ⚠ **常設で置いて、走っている間だけ出す** ── 行そのものを作り直すと、
+   *   1 秒ごとの更新で押している最中の「止める」が指の下から消える。
+   * ⚠ 「捨てる」を**必ず対で**置く(user 指示 2026-08-23「片道の操作を作らない」)。
+   */
+  const timers = document.createElement('section');
+  timers.setAttribute('data-pkc-region', 'timer-bar');
+  timers.hidden = true;
+  const timerLabel = document.createElement('span');
+  timerLabel.setAttribute('data-pkc-field', 'timer-label');
+  const timerList = document.createElement('ul');
+  timerList.setAttribute('data-pkc-field', 'timer-list');
+  timers.append(timerLabel, timerList);
+
   // 既定は空(= 何も出さない)。注意が出たときだけ中身が入る
   const notices = document.createElement('section');
   notices.setAttribute('data-pkc-region', 'notices');
@@ -579,6 +667,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
     grips.inspector!,
     inspector,
     capture,
+    timers,
     announce,
     update,
     notices,

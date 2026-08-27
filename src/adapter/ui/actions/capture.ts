@@ -34,6 +34,7 @@ import {
   type CaptureKind,
 } from '@adapter/platform/media-capture';
 import type { AttachItem, AttachedOne } from './attach';
+import { createWritableQueue } from './writable-queue';
 
 /**
  * 🔴 **ここまで積んだら自動で止める**(それまでの分は残す)。
@@ -102,9 +103,10 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
    *   **収録が丸ごと消えて、しかも何も言わない**(PKC2 の全損と同じ結果になる)。
    * 🔑 だから `Blob` のまま預かって、**編集が終わった瞬間に取り込む**。
    *   ⚠ bytes は heap の外なので、預かっても常駐は増えない。
+   * 🔑 **預かりの仕掛けは `writable-queue.ts` の 1 本**(#279 で共有にした)──
+   *   タイマーが同じ物を 2 本目に書くところだった(§7)。
    */
-  const pending: Array<{ blob: Blob; kind: CaptureKind; why: string }> = [];
-  let unwatch: (() => void) | null = null;
+  const queue = createWritableQueue(deps.dispatcher);
   /** 始めようとしている最中(許可を待っている)。⚠ **2 本目を防ぐ**。 */
   let starting = false;
   /** 片付けの最中。⚠ 「止める」と自動停止が重なっても 1 回しか片付けない。 */
@@ -206,34 +208,8 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
    *   以後の全 dispatch でここを通る(常駐を作らない)。
    */
   const hold = (blob: Blob, kind: CaptureKind, why: string): void => {
-    // ⚠ **積む**(1 枠にしない)── 編集の最中に 2 本目を録って、それも強制的に
-    //    終わることがある。1 枠だと**先に預かったほうが黙って消える**。
-    pending.push({ blob, kind, why });
+    queue.push(() => ingest(blob, kind, why));
     deps.notify(`${why}${CAPTURE_LABEL[kind]}を預かりました(編集を終えると、開いているノートに入れます)`);
-    // ⚠ 見張りは**1 本だけ**(2 本張ると、同じ収録を 2 回取り込む)
-    if (unwatch !== null) return;
-    unwatch = deps.dispatcher.onState((s) => {
-      if (s.phase !== 'ready') return;
-      unwatch?.();
-      unwatch = null;
-      // ⚠ **取り出してから**回す ── 残したまま回すと、次の state で二重に取り込む
-      const taken = pending.splice(0, pending.length);
-      /**
-       * 🔴 **その場で取り込まない**(2026-08-27、test が撃って判明)。
-       *
-       * ⚠ `Dispatcher` は**listener の中からの dispatch をキューに積む**
-       *   (`draining` の間は自分の `pending` へ回す)。だからここで `attach` を
-       *   呼ぶと、その中の `CREATE_ENTRY` は**まだ state に入っていない** ──
-       *   `attachOne` は「作れたか」を `entryMetas` で確かめるので、
-       *   **作れているのに「作れなかった」と読む**(添付だけ増えて、
-       *   本文には入らず、user には「取り込めませんでした」と出る)。
-       * 🔑 1 段ずらして、drain が終わってから取り込む。
-       */
-      queueMicrotask(async () => {
-        // ⚠ **順に**(並べると、選択を戻す dispatch が互いを追い越す)
-        for (const p of taken) await ingest(p.blob, p.kind, p.why);
-      });
-    });
   };
 
   /**

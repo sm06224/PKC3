@@ -74,6 +74,7 @@ body {
   grid-template-areas:
     'sidebar  gripl detail   gripr inspector'
     'capture  capture  capture  capture  capture'
+    'timers   timers   timers   timers   timers'
     'announce announce announce announce announce'
     'update   update   update   update   update'
     'notices  notices  notices  notices  notices'
@@ -114,6 +115,7 @@ body {
   grid-template-areas:
     'gripl detail   gripr inspector'
     'capture capture capture capture'
+    'timers   timers   timers   timers'
     'announce announce announce announce'
     'update   update   update   update'
     'notices  notices  notices  notices'
@@ -124,6 +126,7 @@ body {
   grid-template-areas:
     'sidebar  gripl detail gripr'
     'capture  capture  capture  capture'
+    'timers   timers   timers   timers'
     'announce announce announce announce'
     'update   update   update   update'
     'notices  notices  notices  notices'
@@ -134,6 +137,7 @@ body {
   grid-template-areas:
     'gripl detail gripr'
     'capture capture capture'
+    'timers   timers   timers'
     'announce announce announce'
     'update   update   update'
     'notices  notices  notices'
@@ -239,6 +243,9 @@ button[data-pkc-glyph]:disabled {
  * 消えない場所に置く(止める口が消えると、マイクが回り続ける)。 */
 [data-pkc-region='capture-bar'] {
   grid-area: capture;
+}
+[data-pkc-region='timer-bar'] {
+  grid-area: timers;
 }
 
 /* ── 部品 ─────────────────────────────────────────── */
@@ -438,8 +445,23 @@ select:focus-visible {
   background: var(--surface);
 }
 [data-pkc-region='find-bar'],
+/* 🔴 **押す口が増えても、潰れない・はみ出さない**(#279 で実測)。
+ *
+ * ⚠ `flex-wrap` が無いと flex は**縮めて**収めようとするが、縮みには床
+ *   (min-content)が在るので、**縮んだうえに はみ出す**。実測(1440px /
+ *   左の列 259px / ボタン 7 個 = 自然幅の合計 365px):
+ *     - 折り返し無し … 器は 259px のまま高さ 27px、**「+ ノート」が 16px** に
+ *       潰れ(62px → 16px。字が読めない)、それでも合計 319px で**はみ出す**
+ *       ── いちばん奥のボタンは中央の面に覆われて**押せない**
+ *     - 折り返し有り … 高さ 54px(2 行)。**どのボタンも自然幅のまま**
+ * ⚠ 潰れるのは**いちばん左** ── つまり「+ ノート」という**主要な口**から
+ *   読めなくなる(後から足した「録音」「画面」は 62px のまま残る)。
+ * 🔑 折り返す(横スクロールにしない)── 隠れた口に user は気づけない
+ *   (同じ判断を `kind-bar` が先にしている)。
+ * ⚠ 代わりに**左の列が 27px 高くなる**。ここは承知のうえで払っている。 */
 [data-pkc-region='create-bar'] {
   display: flex;
+  flex-wrap: wrap;
   gap: 1px;
   align-items: stretch;
   padding: 0;
@@ -3221,6 +3243,39 @@ li[data-pkc-row-slot] {
   background: var(--surface);
   font-size: 12px;
 }
+/* 🔴 **タイマーの帯**(#279)。⚠ 収録の帯と**同じ見た目**にする ──
+ * どちらも「いま走っている物と、その止め方」を出す行なので、
+ * 別々の見た目にすると user は 2 種類の物として覚え直すことになる。 */
+[data-pkc-region='timer-bar'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 2px var(--s3);
+  background: var(--surface);
+  font-size: 12px;
+}
+/* ⚠ **横に並べて、あふれたら横に流す** ── 縦に積むと、3 本計った瞬間に
+ * 本文が 3 行ぶん押し下がる(補助が主の領域を奪わない ── #300)。 */
+[data-pkc-field='timer-list'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-x: auto;
+}
+[data-pkc-field='timer-list'] > li {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+  white-space: nowrap;
+}
+[data-pkc-field='timer-label'] {
+  color: var(--muted);
+}
 [data-pkc-field='capture-status'] {
   flex: 1;
   min-width: 0;
@@ -4051,6 +4106,7 @@ li[data-pkc-row-slot] {
    *    「最初の `@media` まで」で切って画面の規則を読む検査の**範囲が縮む**
    *    (2026-08-27 に実際に `announce` の検査を落とした)。 */
   [data-pkc-region='capture-bar'],
+  [data-pkc-region='timer-bar'],
   .pkc-render-toggle {
     display: none;
   }
