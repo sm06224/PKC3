@@ -18,7 +18,7 @@
  * 終端は正確に取れないときだけ**その刻印の行末**まで含める ── 手前へ縮めると
  * 選択した中身が欠ける。
  */
-import { parseFrontmatter } from '@features/markdown/frontmatter';
+import { bodyBelowFrontmatter } from '@features/markdown/frontmatter';
 import { mapVisibleToSource } from '@features/markdown/source-ranges';
 import { flashCopied } from './copy-md-block';
 
@@ -112,8 +112,15 @@ function resolvePoint(body: string, p: AnchorPoint, side: 'start' | 'end'): numb
 export function selectedMarkdown(host: HTMLElement, fullBody: string): string | null {
   const pts = endpoints(host);
   if (pts === null) return null;
-  // 🔴 描画は frontmatter を剥いだ側 ── 行番号の基準を合わせる(冒頭の注記)
-  const body = parseFrontmatter(fullBody).body;
+  /**
+   * 🔴 **描く側と同じ切り方にする**(2026-08-28。全量 smoke が拾った)。
+   *
+   * ⚠ 直す前は `parseFrontmatter().body` だったが、あちらは**閉じの直後の空行を
+   *   1 行余分に食べる** ── 描く側を `bodyBelowFrontmatter` に揃えた時点で、
+   *   ここだけ**基準が 1 つずれた**(`align: left` の本文で実際に落ちた)。
+   * 🔑 切り方は 1 本(`frontmatterLineCount` の注記が指示している形)。
+   */
+  const body = bodyBelowFrontmatter(fullBody);
   const s = resolvePoint(body, pts.start, 'start');
   const e = resolvePoint(body, pts.end, 'end');
   if (e <= s) return null;

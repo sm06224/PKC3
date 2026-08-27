@@ -1004,6 +1004,15 @@ export class DetailRenderer {
         preview.textContent = `プレビューを描けませんでした: ${String(e).slice(0, 120)}`;
       },
     );
+    /**
+     * ⚠ **ここは `parseFrontmatter` のままでよい**(2026-08-28 に読む面を
+     *   `bodyBelowFrontmatter` へ揃えたとき、対称の反対側として検めた)。
+     *   2 ペインのプレビューの刻印は**送りの同期**にしか使われず、原文へ書き戻す
+     *   側(`taskLineOffset` / `editOpenAt` / 追記の入り先)は 1 つも通らない
+     *   ── だから基準がずれても書き換わる行は無い。
+     * 🔑 揃えるなら**送りの同期の写像ごと**直す必要があるので、ここでは触らない
+     *   (直す理由が出たら、そのときに 1 本の切り方へ寄せる)。
+     */
     // 編集に入った直後は待たせない(**その場で 1 回**)
     follow.push(parseFrontmatter(ta.value).body, previewOpts);
     follow.flush();
