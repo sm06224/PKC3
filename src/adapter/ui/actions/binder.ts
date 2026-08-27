@@ -1261,11 +1261,27 @@ export function openPaletteFor(
    * ⚠ **打つたびに走る `rows` の中で見てはいけない** ── そのときの焦点は
    *   **器の中の探す欄**なので、見ると**常に「押せません」**になる。
    * 🔑 器は閉じるときに**この欄へ焦点を返す**(`app-dialog` の後始末)。
-   *   ⚠ **選択範囲も残る**(2026-08-26 に実ブラウザで実測:
-   *   開く前 1-4 → 開いている間 1-4(焦点なし)→ 閉じた後 1-4(焦点あり))
-   *   ── 推測ではなく測った値である。
    */
   const target = formatTargetOf(root.ownerDocument.activeElement);
+  /**
+   * 🔴 **選択範囲は「開いたとき」に控える**(2026-08-27、実ブラウザで実測)。
+   *
+   * ⚠ **ここには「選択範囲も残る(2026-08-26 に実測)」と書いてあったが、
+   *   測った時機が違った** ── 落ち着いた後を測っていたので残って見えていた。
+   * 🔴 実際の event の並びはこうである(`blur` / `focus` を控えて実測):
+   *
+   *   `blur 1,4` → **`focus 0,0`** → その後 `1,4` に戻る
+   *
+   *   つまり**焦点が返ってくる瞬間の選択は `0,0`** で、当てるのがその瞬間に
+   *   間に合うかどうかで結果が分かれる ── 実測で **4 回中 1〜3 回**、
+   *   `あ==いうえ==お` ではなく **`====あいうえお`**(先頭に入って本文がずれる)に
+   *   なっていた。⚠ user が選んでいない所へ記法が入る = **本文が静かに壊れる**向き。
+   * 🔑 だから**読む時機に依存しない形**にする ── 開いた時点の範囲を控え、
+   *   `applyFormatTo` へ渡す。⚠ 開いている間この欄は焦点を持たないので、
+   *   その間に範囲が動くことは無い。
+   */
+  const range =
+    target === null ? null : { start: target.selectionStart, end: target.selectionEnd };
   const rows = (query: string) => {
     const ready = new Set<string>();
     for (const c of KEY_COMMANDS) {
@@ -1336,7 +1352,7 @@ export function openPaletteFor(
       });
       return;
     }
-    applyFormatTo(target, picked);
+    applyFormatTo(target, picked, range ?? undefined);
   });
 }
 
@@ -3606,7 +3622,19 @@ const FORMAT_OF: Readonly<Record<string, FormatOp>> = {
  *
  * @returns その命令が記法でなければ `false`(呼び側は既定を止めない)
  */
-export function applyFormatTo(ta: HTMLTextAreaElement, cmd: string): boolean {
+export function applyFormatTo(
+  ta: HTMLTextAreaElement,
+  cmd: string,
+  /**
+   * 🔴 **当てる範囲を外から渡す**(2026-08-27、実測で判明した競合の直し)。
+   *
+   * ⚠ 渡さなければ**いまの選択**を読む(鍵で入れる経路はこちら ── 焦点は
+   *   ずっとこの欄に在るので、読む時機の問題が無い)。
+   * ⚠ **焦点が返ってくる経路(パレット)は必ず渡す** ── 理由は
+   *   `openCommandPalette` の註記(焦点が返る瞬間の選択は `0,0` である)。
+   */
+  range?: { readonly start: number; readonly end: number },
+): boolean {
   const op = FORMAT_OF[cmd];
   /**
    * ⚠ **ここへ記法でない命令は来ない**(呼び側 3 つとも先に `FORMAT_OF` を見る)──
@@ -3617,7 +3645,14 @@ export function applyFormatTo(ta: HTMLTextAreaElement, cmd: string): boolean {
   if (op === undefined) return false;
   writeBack(
     ta,
-    applyFormat({ text: ta.value, start: ta.selectionStart, end: ta.selectionEnd }, op),
+    applyFormat(
+      {
+        text: ta.value,
+        start: range?.start ?? ta.selectionStart,
+        end: range?.end ?? ta.selectionEnd,
+      },
+      op,
+    ),
   );
   return true;
 }
