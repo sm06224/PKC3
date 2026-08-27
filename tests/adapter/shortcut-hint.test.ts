@@ -20,6 +20,7 @@ import {
   wireShortcutHints,
 } from '../../src/adapter/ui/render/shortcut-hint';
 import { buildShell } from '../../src/adapter/ui/render/shell';
+import { codeOnly } from '../helpers/code-only';
 
 /** その test だけの保存(共有の localStorage を汚さない)。 */
 function memStore(): KeymapStore {
@@ -149,8 +150,6 @@ describe('ショートカットの説明', () => {
    *   旧い綴りが入っているので、file 全体で見ると必ず落ちる(CLAUDE.md §1)。
    */
   it('🔴 title / placeholder に鍵の綴りを直書きしていない', () => {
-    const codeOnly = (t: string): string =>
-      t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
     const files = [
       'src/adapter/ui/render/shell.ts',
       'src/adapter/ui/render/format-bar.ts',
@@ -176,8 +175,6 @@ describe('編集の面の名前(読み上げ)', () => {
    *   編集の面が全部「編集」とだけ読まれる。
    */
   it('🔴 原文・題名・追記・行の欄がすべて名乗る', () => {
-    const codeOnly = (t: string): string =>
-      t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
     /** field 名 → その直後に `aria-label` が続くこと。 */
     const want: readonly [string, string][] = [
       ['src/adapter/ui/render/detail.ts', 'editor-title'],

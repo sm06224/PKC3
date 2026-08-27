@@ -25,6 +25,7 @@ import { MarkdownClient } from '../../src/adapter/platform/render/markdown-clien
 import { HelpRenderer } from '../../src/adapter/ui/render/help';
 import { attachmentBody } from '../../src/features/flavor/attachment-flavor';
 import { parseRules } from '../../build/body-css';
+import { codeOnly as stripComments } from '../helpers/code-only';
 
 /** `max-width: var(--read-w)` を持つ**本文の**規則の選択子(app.css の実物)。 */
 const READ_WIDTH_RULES = ((): {
@@ -87,12 +88,6 @@ function installReadWidthCss(extra = ''): void {
  * 注記を落とす。⚠ **「在る」ことを主張する検査**でだけ使う ── 注釈が検査を
  * 満たすと、実装を消しても緑になる(`docs-parity` の `codeOnly` と同じ理由)。
  */
-function stripComments(src: string): string {
-  return src
-    .split('\n')
-    .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
-    .join('\n');
-}
 
 function meta(lid: string, over: Partial<EntryMeta> = {}): EntryMeta {
   return {

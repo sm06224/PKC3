@@ -25,6 +25,7 @@ import {
   resolveFlags,
 } from '../../src/features/flags';
 import { FlagStore, flagsFromUrl } from '../../src/adapter/platform/flag-store';
+import { codeOnly } from '../helpers/code-only';
 
 // ⚠ test 用の宣言(名前が衝突しないよう前置きを付ける)
 const ON = defineFlag('test.defaultOn', {
@@ -253,11 +254,6 @@ describe('🔴 クエリパラメータの抜け穴を作らない', () => {
    * 注記の 1 行だけで「読んでいる」を満たしていた)。
    * 🔑 落とす規則は**ここ 1 か所**(CLAUDE.md §7)。
    */
-  const codeOnly = (text: string): string =>
-    text
-      .split('\n')
-      .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
-      .join('\n');
 
   it('🔴 クエリパラメータを読むのは flag の解決とパーマリンクだけ', () => {
     const offenders: string[] = [];

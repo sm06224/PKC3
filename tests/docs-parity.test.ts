@@ -40,6 +40,7 @@ import { BAR_FORMAT_OPS, FORMAT_OPS } from '../src/features/markdown/text-ops';
 import { APPENDABLE_ARCHETYPES } from '../src/features/flavor/append-spec';
 import { buildOfficePackPanel } from '../src/adapter/ui/render/office-pack-panel';
 import { OfficePackState } from '../src/adapter/ui/render/office-entry-view';
+import { codeOnly } from './helpers/code-only';
 
 /** src 配下の TS を全部集める(「無い」ことの主張を file 単位で逃さない)。 */
 function srcFiles(dir = 'src', out: string[] = []): string[] {
@@ -57,12 +58,6 @@ function srcFiles(dir = 'src', out: string[] = []): string[] {
  * ⚠ 逆に「**無い**」ことを主張する検査(drag&drop)には掛けない ── そちらは
  * 広く拾うほうが安全側(コメントで誤検知して落ちるのは、見逃すよりずっとよい)。
  */
-function codeOnly(src: string): string {
-  return src
-    .split('\n')
-    .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
-    .join('\n');
-}
 
 const MANUAL = readFileSync('docs/manual.md', 'utf-8');
 
@@ -957,8 +952,6 @@ describe('情報ペインの説明が実装と合っている(2026-08-18)', () =
    * 解説コメントに旧文言(「この版では画像は入りません」)が入っているので、
    * file 全体を見ると**直したのに必ず落ちる**。CLAUDE.md §1「見るのは実行する行」。
    */
-  const codeOnly = (text: string): string =>
-    text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
   const TITLES = codeOnly(readFileSync('src/adapter/ui/render/inspector.ts', 'utf8'));
 
   it('🔴 Word の説明が「入らない」と言っていない(実装は入れている)', () => {

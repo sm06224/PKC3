@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { codeOnly as stripComments } from './helpers/code-only';
 
 /**
  * 追跡対象のテキスト file を集める(生成物・依存は見ない)。
@@ -723,11 +724,6 @@ describe('🔴 native のダイアログを使わない(#299)', () => {
    * ⚠ 逆に「**在る**」ことの主張ではないので、拾い漏らすほうが危険 ──
    *   だから**呼び出しの形**(`(`)まで含めて狭く当てる。
    */
-  const stripComments = (src: string): string =>
-    src
-      .split('\n')
-      .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
-      .join('\n');
 
   const tsFiles = (dir: string, out: string[] = []): string[] => {
     for (const name of readdirSync(dir)) {
