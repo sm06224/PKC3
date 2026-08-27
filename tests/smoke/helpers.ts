@@ -6,6 +6,7 @@
  * - pageerror / console.error は各 spec の最後に 0 件を assert する
  */
 import { expect, type Page } from '@playwright/test';
+import { firstAppFrame } from './page-errors';
 
 export async function gotoApp(page: Page): Promise<void> {
   await page.goto('/');
@@ -82,7 +83,21 @@ const KNOWN_CONSOLE_NOISE: readonly string[] = [
 
 export function collectPageErrors(page: Page): string[] {
   const errors: string[] = [];
-  page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+  /**
+   * 🔴 **例外に「どこから / いつ」を 1 行だけ添える**(#387)。
+   *
+   * ⚠ `toEqual([])` は「**何か例外が出た**」としか言わない ── #387 は
+   *   **2 度観測しても原因に 1 歩も近づいていない**(2026-08-25 / 2026-08-27。
+   *   どちらも同じ 1 行だけが残った)。
+   * ⚠ 「流れの途中で出た」のと「最後の assert が済んだ後に出た」のは
+   *   **別の話**なのに、いまの赤はどちらも同じに見える ── だから経過も添える。
+   * ⚠ 添えるのは **`pageerror` だけ** ── console 側は `KNOWN_CONSOLE_NOISE` が
+   *   **等値**で名指ししているので、飾ると外れなくなる。
+   */
+  const t0 = Date.now();
+  page.on('pageerror', (e) =>
+    errors.push(`pageerror: ${e.message}${firstAppFrame(e.stack)} (+${Date.now() - t0}ms)`),
+  );
   page.on('console', (msg) => {
     if (msg.type() !== 'error') return;
     const line = `console.error: ${msg.text()}`;
