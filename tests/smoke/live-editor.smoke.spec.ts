@@ -87,8 +87,14 @@ test('🔴 ① 行の途中をクリックすると、原文の**その位置**�
   const live = page.locator('[data-pkc-region="editor-live"]');
   const p = live.locator('p').first();
   const box = (await p.boundingBox())!;
-  // 行の**右寄り**(「さしすせそ」の辺り)を突く
+  /**
+   * 行の**右寄り**(「さしすせそ」の辺り)を突く。
+   * ⚠ 開くのは **Ctrl(⌘)+クリック**(#495)── `mouse.click` は `modifiers` を
+   *   受け取らないので、キーを自分で押す(下の Shift の注記と同じ理由)。
+   */
+  await page.keyboard.down('ControlOrMeta');
   await page.mouse.click(box.x + box.width * 0.85, box.y + box.height / 2);
+  await page.keyboard.up('ControlOrMeta');
 
   const row = live.locator('[data-pkc-field="row-source"]');
   await expect(row).toHaveValue('あいうえお**かきくけこ**さしすせそ');
@@ -672,20 +678,20 @@ test('🔴 表・コードの行を押しても編集欄が縮まない(段落�
   expect(tableW, '表が散文より広くない(この窓では違いが出ない)').toBeGreaterThan(proseW + 100);
 
   // 表を押す → 編集欄は表の幅(縮まない)
-  await live.locator('table td, table th').first().click();
+  await live.locator('table td, table th').first().click({ modifiers: ['ControlOrMeta'] });
   await expect(live.locator('[data-pkc-field="row-source"]')).toBeVisible();
   expect(await box(), '表の編集欄が散文の幅へ縮んだ').toBeGreaterThan(proseW + 100);
 
   // コード fence も同じ
   await page.keyboard.press('Escape');
-  await live.locator('pre').first().click();
+  await live.locator('pre').first().click({ modifiers: ['ControlOrMeta'] });
   await expect(live.locator('[data-pkc-field="row-source"]')).toBeVisible();
   expect(await box(), 'コードの編集欄が散文の幅へ縮んだ').toBeGreaterThan(proseW + 100);
   expect(codeW, 'コードが散文より広くない').toBeGreaterThan(proseW + 100);
 
   // 段落は散文の幅のまま(= 押した行だけ全幅へ跳ねない)
   await page.keyboard.press('Escape');
-  await live.locator('p').first().click();
+  await live.locator('p').first().click({ modifiers: ['ControlOrMeta'] });
   await expect(live.locator('[data-pkc-field="row-source"]')).toBeVisible();
   expect(await box(), '段落の編集欄が全幅へ跳ねた').toBeLessThan(proseW + 20);
 
@@ -744,7 +750,7 @@ test('🔴 文書の情報は札に出て、本文の編集で消えない (#284
    * ③ 🔴 **実マウスで段落を押して書き換えても、情報の行を潰さない。**
    * ⚠ ここが 1 行ずれていると、`---` の行が段落として開く。
    */
-  await live.locator('p', { hasText: '最初の段落です。' }).click();
+  await live.locator('p', { hasText: '最初の段落です。' }).click({ modifiers: ['ControlOrMeta'] });
   const row = live.locator('[data-pkc-field="row-source"]');
   await expect(row, '押した行が原文とずれている').toHaveValue('最初の段落です。');
   await row.fill('書き換えました。');
@@ -844,7 +850,8 @@ test('🔴 実打鍵で括弧を閉じても二重にならない (#299 / cowork
 });
 
 /**
- * 🔴 **読む面を Alt クリックすると、その塊が開いた状態で編集に入る**(#395 段③)。
+ * 🔴 **読む面を Ctrl(⌘)クリックすると、その塊が開いた状態で編集に入る**
+ * (#395 段③。⚠ 割当は #495 で `Alt` → `Ctrl` へ移した)。
  *
  * ⚠ **unit では 1 度も走らない層である** ── 予約(`RowSwap.openAt`)を果たすのは
  *   ワーカーの描き直しが着いた後(`update` → `openPending`)で、happy-dom には
@@ -852,7 +859,7 @@ test('🔴 実打鍵で括弧を閉じても二重にならない (#299 / cowork
  *   **押した塊が本当に開くか**はここでしか確かめられない
  *   (CLAUDE.md §2「本命の分岐を、unit は 1 度も通らないことがある」)。
  */
-test('🔴 読む面を Alt クリックすると、押した段落が開いて編集に入る (#395 段③)', async ({
+test('🔴 読む面を Ctrl クリックすると、押した段落が開いて編集に入る (#395 段③)', async ({
   page,
 }) => {
   const errors = collectPageErrors(page);
@@ -864,12 +871,12 @@ test('🔴 読む面を Alt クリックすると、押した段落が開いて�
   const read = page.locator('[data-pkc-field="detail-body"]');
   await expect(read.locator('p').nth(1)).toContainText('2 つめの段落です。');
 
-  // 🔴 2 つめの段落を Alt クリック
+  // 🔴 2 つめの段落を Ctrl(⌘)クリック(#495 で割当が移った)
   const box = await read.locator('p').nth(1).boundingBox();
   expect(box, '押す所が見えていない').not.toBeNull();
-  await page.keyboard.down('Alt');
+  await page.keyboard.down('ControlOrMeta');
   await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
-  await page.keyboard.up('Alt');
+  await page.keyboard.up('ControlOrMeta');
 
   // ① 編集に入っている
   const live = page.locator('[data-pkc-region="editor-live"]');
@@ -924,7 +931,12 @@ test('🔴 表の行を開いても表は残り、その行だけを直せる (#
   expect(rowsBefore, '前提: 表に複数の行が在る').toBeGreaterThan(1);
 
   // 2 行目(`| 3 | 4 |`)のセルを押す
-  await live.locator('tbody tr', { hasText: '3' }).first().locator('td').first().click();
+  await live
+    .locator('tbody tr', { hasText: '3' })
+    .first()
+    .locator('td')
+    .first()
+    .click({ modifiers: ['ControlOrMeta'] });
   const box = live.locator('[data-pkc-field="row-source"]');
   await expect(box, '行が開かない').toBeVisible();
   await expect(box).toHaveValue('| 3 | 4 |');
