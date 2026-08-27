@@ -202,53 +202,115 @@ test('🔴 上の帯は無く、設定は左の列から押せる', async ({ pag
 
 
 /**
- * P8 段⑱: 🔴 **狭い列でも探し方のタブが重ならない**。
+ * P8 段⑱ →(2026-08-27 全面改稿)🔴 **どの幅でも、タブの語が隣に重ならない**。
  *
- * 左の列は 900px を切ると 180px まで縮む。タブに図案と語を両方載せると
- * 入りきらず、**互いに重なって語が読めなくなる**(段⑱ 以前の実際の姿)。
- * ⚠ 「畳まない」(user 指示)ので**タブは全部出したまま**、図案だけ落とす。
+ * ## 🔴 旧稿は「安全な側の 1 幅」だけを見ていた
  *
- * 🔑 **枚数は `BROWSE_TABS` から引く**(2026-08-23)── 直書きだと、タブを足した
- *   日に「3 つ在る」が嘘になる。⚠ ただし**「減っていないこと」も見たい**ので、
- *   下限として 4 枚を別に pin する(表ごと空にする変異を素通りさせない)。
+ * 旧稿は **900px の 1 点**で測っていた。⚠ ところが当時の CSS は
+ * `@media (max-width: 900px)` で**図案を落としていた**ので、900px は
+ * **はみ出しが起こりえない唯一の幅**だった ── 901px 以上は誰も見ていない。
+ *
+ * タブが 5 枚になった日(#278 段①)に幅を掃いたら、**901〜1920px の全部**で
+ * 語が隣へはみ出していた:1366px で「フォルダ」が左右へ **12px ずつ**、
+ * 1920px でも **2px**。⚠ **この spec は緑のまま**だった。
+ *
+ * 🔑 だから **①幅を掃く** ②**掃いた範囲が両方の姿をまたいだか**を test 自身に
+ *   確かめさせる ── またいでいなければ、また片側しか見ていない。
+ *   (CLAUDE.md §2「分岐を書いたら、分岐の数だけ実際に走らせた記録を持つ」)
+ *
+ * ## ⚠ 見るのは「箱」ではなく「語」、しかも**左右とも**
+ *
+ * タブは折り返すので**箱どうしは重ならない**。溢れるのは中身のほうで、
+ * `overflow: visible` なので**隠れずに隣へ出る**(だから「見えなくなる」ではなく
+ * 「**重なって読めなくなる**」)。⚠ 語は中央寄せなので**左右どちらへも出る** ──
+ * 旧稿は右端しか見ておらず、左へ出るぶんは原理的に見えなかった。
+ *
+ * ## 実測(2026-08-27、両方のバイナリで一致)
+ *
+ * 5 枚を 1 段に並べるのに要るのは **209px**。左の列はその幅を
+ * **950px 以上の画面**で確保できるので、そこまでは 1 段のままである。
  */
-test('🔴 狭い列でも探し方のタブが重ならない(全部出たまま)', async ({ page }) => {
-  await page.setViewportSize({ width: 900, height: 800 });
-  await gotoApp(page);
-  const m = await page.evaluate(() => {
-    const host = document.querySelector('[data-pkc-region="browse-tabs"]')!;
-    const tabs = [...host.querySelectorAll('[data-pkc-browse]')].map((b) => {
-      const r = b.getBoundingClientRect();
-      const label = b.querySelector('[data-pkc-field="label"]')!;
+const TAB_SWEEP = [1920, 1440, 1366, 1280, 1024, 950, 901, 860, 720] as const;
+/** 🔑 1 段に要る幅(実測 209px)に **21px 以上の余り**が出る画面の幅。 */
+const TAB_ONE_ROW_FROM = 1280;
+
+test('🔴 どの幅でも探し方のタブの語が隣に重ならない', async ({ page }) => {
+  const seen: { w: number; rows: number; worst: number }[] = [];
+  for (const w of TAB_SWEEP) {
+    await page.setViewportSize({ width: w, height: 800 });
+    await gotoApp(page);
+    const m = await page.evaluate(() => {
+      const host = document.querySelector('[data-pkc-region="browse-tabs"]')!;
+      const tabs = [...host.querySelectorAll('[data-pkc-browse]')].map((b) => {
+        const box = b.getBoundingClientRect();
+        const label = b.querySelector('[data-pkc-field="label"]')!;
+        const lab = label.getBoundingClientRect();
+        return {
+          label: (label.textContent ?? '').trim(),
+          // ⚠ **左右の大きいほう** ── 語は中央寄せなので両側へ出る
+          outside: Math.round(Math.max(lab.right - box.right, box.left - lab.left)),
+          top: Math.round(box.top),
+        };
+      });
       return {
-        right: Math.round(r.right),
-        // ⚠ タブは `flex: 1; min-width: 0` なので**箱は重ならない** ── 溢れるのは
-        //    中身のほう。だから見るのは箱の位置ではなく「**語が自分の箱に
-        //    収まっているか**」である(箱の重なりで書くと何も守らない)
-        labelRight: Math.round(label.getBoundingClientRect().right),
-        overflow: b.scrollWidth - b.clientWidth,
-        label: (label.textContent ?? '').trim(),
+        tabs,
+        hostW: host.clientWidth,
+        scrollW: host.scrollWidth,
+        // 段数 = 上端の種類の数(折り返すと増える)
+        rows: new Set(tabs.map((t) => t.top)).size,
       };
     });
-    return { tabs, hostW: host.clientWidth, scrollW: host.scrollWidth };
-  });
-  // ① 全部在る(畳んでいない)。⚠ 枚数は正本(`BROWSE_TABS`)から引く
-  expect(m.tabs.length, 'タブが減っている(畳んだ形に戻っている)').toBe(BROWSE_TABS.length);
-  // ⚠ 空振り防止:表ごと空にする変異を素通りさせない(2026-08-23 時点で 4 枚)
-  expect(BROWSE_TABS.length, 'タブの表が縮んでいる').toBeGreaterThanOrEqual(4);
-  expect(m.tabs.every((t) => t.label !== ''), '語が消えている(図案だけでは分からない)').toBe(true);
-  // ② 語が自分の箱から溢れて隣に被っていない
-  for (const t of m.tabs) {
+
+    // ① 全部在る(畳んでいない ── user 指示「畳まない」)
+    expect(m.tabs.length, `w=${w}: タブが減っている(畳んだ形に戻っている)`).toBe(
+      BROWSE_TABS.length,
+    );
     expect(
-      t.labelRight,
-      `「${t.label}」が隣のタブに被っている(語の右端 ${t.labelRight} / 箱の右端 ${t.right})`,
-    ).toBeLessThanOrEqual(t.right);
-    expect(t.overflow, `「${t.label}」の中身が箱に入っていない(+${t.overflow}px)`).toBeLessThanOrEqual(0);
+      m.tabs.every((t) => t.label !== ''),
+      `w=${w}: 語が消えている(図案だけでは何のタブか分からない)`,
+    ).toBe(true);
+
+    // ② 🔴 語が自分の箱から出ていない(**左右とも**)
+    for (const t of m.tabs) {
+      expect(
+        t.outside,
+        `w=${w}: 「${t.label}」が箱から ${t.outside}px 出て隣のタブに重なっている`,
+      ).toBeLessThanOrEqual(0);
+    }
+
+    // ③ 列から横へ溢れていない(溢れると端のタブが見えない)
+    expect(m.scrollW, `w=${w}: タブが列から溢れている(${m.scrollW} / 列 ${m.hostW})`).toBeLessThanOrEqual(m.hostW + 1);
+
+    // ④ 🔴 **段を増やして解決しない** ── 折り返しは最後の手段であって、
+    //    段が増えるのは user の「画面が混み合っている」と正面から逆である。
+    //    ⚠ 直す前は 900px 以下で **3 段**だった(`flex: 1 1 45%` が 2 枚ずつを強制)
+    expect(m.rows, `w=${w}: タブが ${m.rows} 段になっている(2 段までにする)`).toBeLessThanOrEqual(2);
+    if (w >= TAB_ONE_ROW_FROM) {
+      // ⚠ ここが落ちたら、**図案を戻したか、タブを 1 枚足した**かである
+      //    ── どちらも「1 段に要る 209px」を超えさせる
+      expect(m.rows, `w=${w}: 広い画面なのにタブが ${m.rows} 段ある`).toBe(1);
+    }
+
+    seen.push({ w, rows: m.rows, worst: Math.max(...m.tabs.map((t) => t.outside)) });
   }
-  // ③ 列から溢れていない(溢れると 3 つ目が見えない)
-  expect(m.scrollW, `タブが列から溢れている(${m.scrollW} / 列 ${m.hostW})`).toBeLessThanOrEqual(
-    m.hostW + 1,
-  );
+
+  // ⑤ 🔴 **空振り防止 ── これが旧稿に無かったもの。**
+  //    掃いた範囲が「1 段の姿」と「折り返した姿」の**両方**をまたいでいること。
+  //    ⚠ またいでいなければ、幅を並べても**同じ 1 つの姿**を何度も見ているだけで、
+  //      旧稿(900px 1 点)と強さが変わらない。
+  const oneRow = seen.filter((s) => s.rows === 1);
+  const wrapped = seen.filter((s) => s.rows > 1);
+  expect(
+    oneRow.length,
+    `1 段の幅を 1 つも見ていない: ${JSON.stringify(seen)}`,
+  ).toBeGreaterThan(0);
+  expect(
+    wrapped.length,
+    `折り返した幅を 1 つも見ていない(掃いた範囲が狭すぎる): ${JSON.stringify(seen)}`,
+  ).toBeGreaterThan(0);
+
+  // ⑥ 表ごと空にする変異を素通りさせない(2026-08-27 時点で 5 枚)
+  expect(BROWSE_TABS.length, 'タブの表が縮んでいる').toBeGreaterThanOrEqual(5);
 });
 
 /**
