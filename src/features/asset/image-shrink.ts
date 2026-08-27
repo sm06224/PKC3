@@ -24,6 +24,7 @@
  * 断られたら縮めたほうを**その場で捨てる**(2026-07-27 の不可侵指示:
  * 生成物はライフサイクル終端で即破棄)。
  */
+import { humanBytes } from './human-bytes';
 
 /** 縮める相手にする形式。⚠ **これ以外は触らない**(SVG は画素ではない / GIF は動く)。 */
 export const SHRINKABLE: ReadonlySet<string> = new Set([
@@ -109,12 +110,12 @@ export function worthShrinking(before: number, after: number): boolean {
   return after < before * SHRINK_MIN_GAIN;
 }
 
-/** 人に見せる大きさ(「12.0MB」)。⚠ 画面と test で書き直さないよう 1 か所に置く。 */
-export function humanBytes(n: number): string {
-  if (n < 1024) return `${n}B`;
-  if (n < 1024 * 1024) return `${Math.round(n / 1024)}KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)}MB`;
-}
+/**
+ * 人に見せる大きさ(「12.0MB」)。
+ * 🔑 **実体は `human-bytes.ts` の 1 本**(#454。2026-08-27 に寄せた)──
+ *   ここに書き直すと、同じ関数が 2 本に戻る。
+ */
+export { humanBytes } from './human-bytes';
 
 /**
  * 聞く文言。⚠ **本当の数字で書く**(見積もりを見せない)。

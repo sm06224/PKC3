@@ -9,7 +9,8 @@
  * ⚠ ここは bytes を触るので `core` には置けない。⚠ 逆に DOM は 1 行も触らない
  *   ので adapter にも置かない ── 入口は「鍵 → Blob」の口 1 つだけである。
  */
-import { MAX_FENCE_ASSET_BYTES, formatBytes } from '../markdown/fence-asset';
+import { MAX_FENCE_ASSET_BYTES } from '../markdown/fence-asset';
+import { humanBytes } from './human-bytes';
 
 /** 添付 1 件の読み。⚠ 失敗は**理由つき**で返す(黙って空にしない)。 */
 export type FenceAssetRead =
@@ -37,7 +38,7 @@ export async function readFenceAssetText(
   if (blob.size > MAX_FENCE_ASSET_BYTES) {
     return {
       ok: false,
-      why: `大きすぎます(${formatBytes(blob.size)} / 上限 ${formatBytes(MAX_FENCE_ASSET_BYTES)})`,
+      why: `大きすぎます(${humanBytes(blob.size)} / 上限 ${humanBytes(MAX_FENCE_ASSET_BYTES)})`,
     };
   }
   try {
