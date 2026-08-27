@@ -110,3 +110,82 @@ test('🔴 題名で選ぶと caret の位置にリンクが入り、押すと�
 
   expect(errors, `page error: ${errors.join(' / ')}`).toHaveLength(0);
 });
+
+/**
+ * 🔴 **長い題名でも、器から横へ溢れない**(#474)。
+ *
+ * ⚠ この器はパレット(`palette-row`)と**同じ形**で組まれており、同じ欠陥を
+ *   共有していた ── 行に規則が無く、`button` の既定(`white-space: nowrap`)を
+ *   受けていた。パレット側だけ直すと、こちらは同じ症状で残る
+ *   (CLAUDE.md「片側を直したら、対称の反対側を必ず疑う」)。
+ * 🔴 **そしてこちらの方が起きやすい** ── 題名は **user が書く**ので、
+ *   長さに上限が無い(パレットの説明はこちらが書いた 51 本しか無い)。
+ */
+test('🔴 長い題名のノートでも、選ぶ器が横に溢れない (#474)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await useSplitEditor(page);
+  await gotoApp(page);
+
+  const LONG =
+    'とても長い題名のノート ── 先週の会議の議事録と、そこで決まったことのまとめ、' +
+    'および次回へ持ち越した論点の一覧(担当と期日つき)';
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill(LONG);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-body"]').fill('ここに入れる');
+  await clickReal(page, '[data-pkc-action="insert-entry-link"]');
+
+  const list = page.locator('[data-pkc-field="entry-pick-list"]');
+  await expect(list, '選ぶ器が開いていない').toBeVisible({ timeout: 10_000 });
+
+  const m = await page.evaluate(() => {
+    const l = document.querySelector('[data-pkc-field="entry-pick-list"]')!;
+    const dlg = document.querySelector('[data-pkc-region="app-dialog"]')!;
+    const rows = [...document.querySelectorAll('[data-pkc-field="entry-pick-row"]')];
+    const oneLine = parseFloat(
+      getComputedStyle(document.documentElement).getPropertyValue('--row-h'),
+    );
+    return {
+      listScrollW: l.scrollWidth,
+      listClientW: l.clientWidth,
+      dlgScrollW: dlg.scrollWidth,
+      dlgClientW: dlg.clientWidth,
+      rowCount: rows.length,
+      wrapped: rows.filter((r) => r.getBoundingClientRect().height > oneLine + 4).length,
+      clipped: rows.filter((r) => r.scrollHeight > r.clientHeight + 1).length,
+      widest: Math.max(...rows.map((r) => Math.round(r.getBoundingClientRect().width))),
+      narrowest: Math.min(...rows.map((r) => Math.round(r.getBoundingClientRect().width))),
+    };
+  });
+
+  // ⚠ 空振り防止 ── 候補が在って、器より長い題名が在ること
+  expect(m.rowCount, '候補が 1 つも無い').toBeGreaterThan(0);
+  /** 🔑 門は「長い題名が在るか」で採る(理由はパレット側の同じ門に書いた)──
+   *  「折り返せているか」で採ると、直しを消す変異を**この門が飲み込む**。 */
+  expect(
+    m.wrapped + m.clipped + (m.listScrollW > m.listClientW + 1 ? 1 : 0),
+    '器より長い題名が無い ── 溢れも折り返しも起き得ないので検査にならない',
+  ).toBeGreaterThan(0);
+
+  expect(
+    m.listScrollW,
+    `一覧が横に溢れている(${m.listScrollW} > ${m.listClientW})── 題名の後ろが読めない`,
+  ).toBeLessThanOrEqual(m.listClientW + 1);
+  expect(m.dlgScrollW, `器が横に溢れている(${m.dlgScrollW} > ${m.dlgClientW})`).toBeLessThanOrEqual(
+    m.dlgClientW + 1,
+  );
+  expect(m.widest, `行が一覧より広い(${m.widest} > ${m.listClientW})`).toBeLessThanOrEqual(
+    m.listClientW + 1,
+  );
+  // 🔴 縦に切れていない / 行の幅が揃っている(理由はパレット側の同じ検査に書いた)
+  expect(m.clipped, `${m.clipped} 行が縦に切れている(題名の 2 行目が読めない)`).toBe(0);
+  expect(
+    m.narrowest,
+    `行の幅が揃っていない(いちばん狭い行 ${m.narrowest} / 一覧 ${m.listClientW})`,
+  ).toBeGreaterThanOrEqual(m.listClientW - 1);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toHaveLength(0);
+});
