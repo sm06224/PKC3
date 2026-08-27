@@ -193,13 +193,28 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
       deps.notify(`${why}「${name}」を添付にしました(開いているのは追記できない種類なので本文には入れていません)`);
       return;
     }
-    const after = deps.dispatcher.getState();
-    if (after.phase !== 'ready' || after.writeLock !== null) {
-      deps.notify(`${why}「${name}」を添付にしました(いま本文を書けないので、本文には入れていません)`);
-      return;
-    }
-    deps.dispatcher.dispatch({ type: 'APPEND_TO_ENTRY', lid: into, text: ref, heading: null, target: null });
-    deps.notify(`${why}「${name}」を本文に入れました`);
+    /**
+     * 🔴 **書けないなら、捨てずに預かる**。
+     *
+     * ⚠ ここは `deps.attach()` を **await した後**である ── 待っている間に state は
+     *   動くので、**直前まで書けたのに戻ってきたら書けない**ことがある。
+     *   そこで捨てると「**録れているのに本文へ入らない**」が起きる(添付だけ残る)。
+     * ⚠ しかも `writeLock` は**一瞬しか立たない** ── effect 層が `ENTRY_APPENDED` を
+     *   返せば解ける。**数ミリ秒待てば書ける物を、捨てていた**。
+     *
+     * 🔑 `writable-queue` はまさにこのために在る(docstring:「書けないから失敗では
+     *   なく、**書けるようになるまで預かる**」)。`finish()` の手前の判定は
+     *   **既に預けて**おり、ここだけが捨てていた ── 片側だけ直っていない形である。
+     * 🔑 判定は `queue.push` の中の `canWriteBody` **1 か所**に任せる ──
+     *   ここで `phase` を数え直さない(その戒めは `writable-queue.ts` に書いてある)。
+     */
+    const held = queue.push(() => {
+      deps.dispatcher.dispatch({ type: 'APPEND_TO_ENTRY', lid: into, text: ref, heading: null, target: null });
+      deps.notify(`${why}「${name}」を本文に入れました`);
+    });
+    // ⚠ **預かった回も黙らない**(いつ入るのかを言う)
+    if (held)
+      deps.notify(`${why}「${name}」を添付にしました(いま本文を書けないので、書けるようになったら入れます)`);
   };
 
   /**
