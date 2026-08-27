@@ -368,3 +368,59 @@ test('🔴 「未処理がある」で、やり残しのあるノートだけが
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **どのスマートフォルダに集まっているかが、ノート側から分かる**(#283 P1
+ * 「所属の札」)。
+ *
+ * ## なぜ実ブラウザで見るのか
+ *
+ * unit は「`smartHits` に居れば札を描く」までしか言えない。⚠ ここで見たいのは
+ * **その `smartHits` が本当に埋まるのか**(worker が実際に舐めた結果で埋まるか)と、
+ * **押したら本当にその入れ物が開くか**の 2 つで、どちらも fake では通らない層である。
+ *
+ * ## user の物語
+ *
+ * 「見積書」を開いている ── ⚠ **このノートがどこに集まっているかは、
+ * タグを見ても分からない**(入れ物は条件を複数持てる)。
+ * 右の列に **集まり先** が出て、押すとその入れ物が開く。
+ */
+test('🔴 ノートから「どの入れ物に集まっているか」が分かり、押すとそこへ飛ぶ (#283 P1)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await useSplitEditor(page);
+  await gotoApp(page);
+
+  await makeNote(page, '見積書', '---\ntags: [請求]\n---\n見積の中身\n');
+
+  // ② 入れ物を作って、中へ入って条件を足す(⚠ ここで初めて worker が舐める)
+  await createEntry(page, 'smart');
+  const title = page.locator('[data-pkc-field="editor-title"]');
+  if (await title.count()) await title.fill('請求ぜんぶ');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await page.locator(SMART_ROW).first().dblclick();
+  await page.locator('[data-pkc-field="smart-cond"]').fill('請求');
+  await clickReal(page, '[data-pkc-action="smart-cond-add"]');
+  // ⚠ 空振り防止 ── 集まっていなければ、以下は「集めていないから出ない」と
+  //    区別が付かない(この検査が何も見ていない形になる)
+  await expect(page.locator(ROWS), '入れ物が集めていない(前提が崩れている)').toHaveCount(1);
+
+  // ③ 集まったノートを選ぶ(入れ物の中の行をそのまま押す)
+  await page.locator(ROWS).first().click();
+
+  // 🔴 本体 ── 右の列に「集まり先」の札が出る
+  const chips = page.locator('[data-pkc-field="inspector-smart-hit"]');
+  await expect(chips, '集まり先の札が出ていない').toHaveCount(1);
+  await expect(chips.first()).toHaveText('請求ぜんぶ');
+
+  // 🔴 押すと、その入れ物が開く(札が飛べること自体が動線である)
+  await clickReal(page, '[data-pkc-field="inspector-smart-hit"]');
+  await expect(
+    page.locator('[data-pkc-field="inspector-title"]'),
+    '押しても入れ物へ飛ばない',
+  ).toHaveText('請求ぜんぶ');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
