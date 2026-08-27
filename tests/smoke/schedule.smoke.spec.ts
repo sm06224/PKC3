@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
+import { peek, withStateOnFail } from './state-dump';
 
 test.beforeEach(async ({ page }) => {
   await useSplitEditor(page);
@@ -44,7 +45,26 @@ test('🔴 予定のタブで札を掴んで日へ落とすと、本文の日付
 
   // ② 日付を書いた行だけが札になっている
   const card = pane.locator('[data-pkc-region="schedule-cards"] > [data-pkc-entry]');
-  await expect(card, '札の枚数が違う(日付の無い行まで出ている)').toHaveCount(1);
+  /**
+   * 🔴 **落ちた回が理由を持ってくる形にする**(#410)。
+   *
+   * ⚠ フル走行で **1 回だけ**「札が 5 秒で 1 枚も出なかった」で落ちている ──
+   *   そのとき `toHaveCount` が言うのは「**0 だった**」だけで、
+   *   **本文が着いていないのか / 束が別の日に出ているのか / 面が違うのか**が
+   *   1 つも残らない。⚠ **待ちは伸ばさない**(緩めずに、残る情報だけ増やす)。
+   */
+  await withStateOnFail(
+    page,
+    '札の枚数が違う(日付の無い行まで出ている / 1 枚も出ていない)',
+    async () => ({
+      cards: await peek(pane.locator('[data-pkc-region="schedule-cards"] > [data-pkc-entry]')),
+      groups: await peek(pane.locator('[data-pkc-region="schedule-cards"]')),
+      pane: await peek(pane),
+    }),
+    async () => {
+      await expect(card).toHaveCount(1);
+    },
+  );
   await expect(card, '記法が札の字に残っている').toContainText('見積を送る');
 
   // ③ 🔴 **本物の drag** ── 8/25 の札を掴んで 8/28 の升目へ落とす
