@@ -73,12 +73,13 @@ export function takeFenceAsset(rest: string): FenceAssetParse {
  */
 export const MAX_FENCE_ASSET_BYTES = 2 * 1024 * 1024;
 
-/** 画面に出す大きさ(「2.0MB」)。⚠ 桁を揃えるより**読めること**を優先する。 */
-export function formatBytes(n: number): string {
-  if (n < 1024) return `${n}B`;
-  if (n < 1024 * 1024) return `${Math.round(n / 1024)}KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)}MB`;
-}
+/**
+ * 画面に出す大きさ(「2.0MB」)。
+ * 🔑 **実体は `features/asset/human-bytes.ts` の 1 本**(#454。2026-08-27 に寄せた)。
+ * ⚠ ここに在った `formatBytes` は**同じ実装の 2 本目**だった ── 名前も 1 つにする
+ *   (2 つ名前が在ると、片方だけ直しても誰も気づかない)。
+ */
+export { humanBytes } from '../asset/human-bytes';
 
 /**
  * 🔴 **添付の字を「本文に書いてあったのと同じ形」に揃える**(#444 段②)。

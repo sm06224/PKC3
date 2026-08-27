@@ -58,7 +58,17 @@ export interface ProfileLine {
   readonly shared: boolean;
 }
 
-/** 人が読む大きさ。⚠ 1024 で割る(`formatSize` と同じ向き)。 */
+/**
+ * 人が読む大きさ。⚠ 1024 で割る(`formatSize` と同じ向き)。
+ *
+ * ⚠ **これは 3 本目である**(#454)── `features/asset/human-bytes.ts` の
+ *   `humanBytes` と**形が違う**(`512 B` / `2.0 KB` ⇔ `512B` / `2KB`)ので、
+ *   同じ添付の大きさが**画面によって違う形**で出る。
+ * 🔑 どちらへ寄せるかは **user に見える変化**なので #454 で出してある ──
+ *   ⚠ **勝手に寄せない**(寄せた瞬間にこの面の見た目が変わる)。
+ *   ⚠ 逆に、**新しく 4 本目を書かない**:大きさを出したくなったら
+ *   `humanBytes` を使うか、この 2 本のどちらかを呼ぶ。
+ */
 export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   const kb = n / 1024;

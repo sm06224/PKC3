@@ -10,11 +10,11 @@
  * 4. 🔴 **描き方の規則は 1 本** ── 添付から取った字も、本文に書いた字と
  *    **同じ HTML** になる(parity)
  */
+import { humanBytes } from '../../src/features/asset/human-bytes';
 import { describe, expect, it } from 'vitest';
 import {
   FENCE_ASSET_PREFIX,
   MAX_FENCE_ASSET_BYTES,
-  formatBytes,
   takeFenceAsset,
 } from '../../src/features/markdown/fence-asset';
 import type { SourceRange } from '../../src/features/markdown/markdown-render';
@@ -62,9 +62,9 @@ describe('見出しから添付を読む', () => {
   });
 
   it('大きさは読める字になる', () => {
-    expect(formatBytes(512)).toBe('512B');
-    expect(formatBytes(2048)).toBe('2KB');
-    expect(formatBytes(MAX_FENCE_ASSET_BYTES)).toBe('2.0MB');
+    expect(humanBytes(512)).toBe('512B');
+    expect(humanBytes(2048)).toBe('2KB');
+    expect(humanBytes(MAX_FENCE_ASSET_BYTES)).toBe('2.0MB');
   });
 });
 
