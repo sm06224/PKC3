@@ -36,6 +36,22 @@
  * (CLAUDE.md §7)。
  */
 
+import { PASTE_HTML_MAX } from './html-to-markdown';
+import { PASTE_RTF_MAX } from './rtf-to-markdown';
+
+/**
+ * 🔴 **読まずに落とす大きさ**(#487)。
+ *
+ * ⚠ **値は変換器から取り込む。書き写さない** ── 書き写すと、上限を動かしたときに
+ *   **理由だけが古くなる**(CLAUDE.md §7「同じ値が複数の場所にある」)。
+ * 🔑 この file は今まで import を 1 つも持たなかったが、入れるのは**数値 2 つだけ**で、
+ *   変換の実装には触れない(変換は今までどおり `convert` で注入する)。
+ */
+const CAP: Record<'html' | 'rtf', number> = {
+  html: PASTE_HTML_MAX,
+  rtf: PASTE_RTF_MAX,
+};
+
 /**
  * 設定の 4 択。⚠ **flag ではない**(flag 枠 15 とは別)── これは user の判断である。
  * ⚠ 並びは「おまかせ → 明示 → 何もしない」。既定は先頭の `auto`。
@@ -179,9 +195,15 @@ export function choosePaste(args: {
       skipped.push({ kind: 'html', why: '届いていません' });
       return done('plain', null);
     }
+    /** ⚠ 上限は**呼ぶ前に**見る ── `null` には「大きすぎ」と「中身が空」が混ざる。 */
+    if (sizes.html > CAP.html) {
+      skipped.push({ kind: 'html', why: '大きすぎて囲みにできませんでした' });
+      return done('plain', null);
+    }
     const fence = convert.htmlFence();
     if (fence !== null) return done('html-fence', fence);
-    skipped.push({ kind: 'html', why: '大きすぎて囲みにできませんでした' });
+    // ⚠ ここまで来る `null` は「`<meta charset>` を外したら空だった」だけである
+    skipped.push({ kind: 'html', why: '中身が空でした' });
     return done('plain', null);
   }
 
@@ -200,6 +222,18 @@ export function choosePaste(args: {
   for (const kind of order) {
     if (sizes[kind] === 0) {
       skipped.push({ kind, why: '届いていません' });
+      continue;
+    }
+    /**
+     * 🔴 **「大きすぎて読まなかった」を、そう書く**(#487)。
+     *
+     * ⚠ 下の「得るものがありませんでした」に混ぜると**理由が嘘になる** ──
+     *   上限を超えた貼付は「中身が薄い」のではなく、**1 バイトも読んでいない**。
+     * ⚠ しかも**長い生成 AI の返答こそ**この設定が相手にするものなので、
+     *   いちばん当たりやすい所で嘘をつくことになる。
+     */
+    if (sizes[kind] > CAP[kind]) {
+      skipped.push({ kind, why: '大きすぎて読めませんでした' });
       continue;
     }
     const text = convert[kind]();

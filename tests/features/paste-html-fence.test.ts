@@ -120,12 +120,34 @@ describe('設定「ウェブページの形をそのまま」', () => {
     expect(r.attempt.skipped.map((s) => `${s.kind}:${s.why}`)).toContain('html:届いていません');
   });
 
-  it('⚠ 大きすぎたときも理由が残る', () => {
-    const r = run({ htmlFence: null });
+  /**
+   * 🔴 **「大きすぎ」と「中身が空」を混ぜない**(#487)。
+   *
+   * ⚠ 1 稿目のこの test は `htmlFence: null` を**上限の内側の大きさ**で作りながら
+   *   「大きすぎ」と出ることを期待していた ── **不正確な実装をそのまま留めていた**。
+   *   `null` の理由は 2 つある(上限超過 / `<meta charset>` を外したら空)ので、
+   *   **大きさを与えないと、どちらの話なのか決まらない**。
+   */
+  it('⚠ 大きすぎたときは、そう書く', () => {
+    const r = run({ htmlFence: '```html\n<p>a</p>\n```' }, {
+      html: 1024 * 1024 + 1,
+      rtf: 0,
+      plain: 50,
+    });
     expect(r.attempt.used).toBe('plain');
     expect(r.attempt.skipped.some((s) => s.kind === 'html' && s.why.includes('大きすぎて'))).toBe(
       true,
     );
+    // 🔴 読んでいないなら、囲みを組もうともしていないはず
+    expect(r.called, '上限を超えたのに囲みを組もうとしている').not.toContain('htmlFence');
+  });
+
+  it('⚠ 上限の内側で空だったときは「空」と書く(大きすぎ とは書かない)', () => {
+    const r = run({ htmlFence: null }, { html: 100, rtf: 0, plain: 50 });
+    expect(r.attempt.used).toBe('plain');
+    const why = r.attempt.skipped.find((s) => s.kind === 'html')?.why ?? '';
+    expect(why).toContain('空');
+    expect(why, '読んでいないと誤解させる字が混ざっている').not.toContain('大きすぎ');
   });
 
   /** ⚠ RTF は囲みにできない ── **見送った理由を書く**(黙って落とさない)。 */
