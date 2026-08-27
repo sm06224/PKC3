@@ -75,6 +75,7 @@ body {
     'sidebar  gripl detail   gripr inspector'
     'capture  capture  capture  capture  capture'
     'timers   timers   timers   timers   timers'
+    'alarms   alarms   alarms   alarms   alarms'
     'announce announce announce announce announce'
     'update   update   update   update   update'
     'notices  notices  notices  notices  notices'
@@ -116,6 +117,7 @@ body {
     'gripl detail   gripr inspector'
     'capture capture capture capture'
     'timers   timers   timers   timers'
+    'alarms   alarms   alarms   alarms'
     'announce announce announce announce'
     'update   update   update   update'
     'notices  notices  notices  notices'
@@ -127,6 +129,7 @@ body {
     'sidebar  gripl detail gripr'
     'capture  capture  capture  capture'
     'timers   timers   timers   timers'
+    'alarms   alarms   alarms   alarms'
     'announce announce announce announce'
     'update   update   update   update'
     'notices  notices  notices  notices'
@@ -138,6 +141,7 @@ body {
     'gripl detail gripr'
     'capture capture capture'
     'timers   timers   timers'
+    'alarms   alarms   alarms'
     'announce announce announce'
     'update   update   update'
     'notices  notices  notices'
@@ -246,6 +250,9 @@ button[data-pkc-glyph]:disabled {
 }
 [data-pkc-region='timer-bar'] {
   grid-area: timers;
+}
+[data-pkc-region='alarm-bar'] {
+  grid-area: alarms;
 }
 
 /* ── 部品 ─────────────────────────────────────────── */
@@ -3276,6 +3283,40 @@ li[data-pkc-row-slot] {
 [data-pkc-field='timer-label'] {
   color: var(--muted);
 }
+/* 🔴 **鳴っている予定の帯**(#280)。⚠ タイマーの帯と**同じ形**にする ──
+ * どちらも「いま起きていること + その片付け方」を出す行である。
+ * ⚠ ただし**字は濃くする** ── 知らせは「見つけてもらう」必要がある。
+ * ⚠ 地の色は変えない(CLAUDE.md「地は無彩色」)── 目立たせるのは字のほうで、
+ * 地に色を敷くと、鳴っていない間もそこが目に入る。 */
+[data-pkc-region='alarm-bar'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 2px var(--s3);
+  background: var(--surface);
+  font-size: 12px;
+}
+[data-pkc-field='alarm-list'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-x: auto;
+}
+[data-pkc-field='alarm-list'] > li {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+  white-space: nowrap;
+}
+[data-pkc-field='alarm-label'] {
+  color: var(--fg);
+  font-weight: 600;
+}
 [data-pkc-field='capture-status'] {
   flex: 1;
   min-width: 0;
@@ -4107,6 +4148,7 @@ li[data-pkc-row-slot] {
    *    (2026-08-27 に実際に `announce` の検査を落とした)。 */
   [data-pkc-region='capture-bar'],
   [data-pkc-region='timer-bar'],
+  [data-pkc-region='alarm-bar'],
   .pkc-render-toggle {
     display: none;
   }
