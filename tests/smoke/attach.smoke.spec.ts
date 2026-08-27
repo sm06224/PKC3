@@ -435,3 +435,136 @@ test('🔴 大きな画像は縮めるか聞き、断れば原寸のまま入る
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **囲みの中身を添付から取る**(#444 段①。user 裁定 2026-08-26
+ * 「**HTML に限らずにフェンス内にアセットを呼び込むようにすればいいのでは?**」)。
+ *
+ * 🔑 **unit では届かない 2 つ**を実ブラウザで見る:
+ * 1. **本当に IDB から字が読めるか** ── happy-dom の `Blob` は本物ではないし、
+ *    unit の lender は差し替えた fake である
+ * 2. **描かれた表が本当に画面に出るか**(高さを持つか)── 器のまま残っていても
+ *    DOM 上は「置き換わった」ように見えることがある
+ */
+test('🔴 囲みの中身を添付から取る ── csv の添付が表になる(#444 段①)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: 'uriage.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from('しなもの,かず\nりんご,120\nみかん,80\n', 'utf8'),
+  });
+  const assetKey = await page
+    .locator('[data-pkc-action="download-asset"]')
+    .first()
+    .getAttribute('data-pkc-asset-key');
+  expect(assetKey, '添付の鍵が取れない(この先は測れない)').toBeTruthy();
+
+  await createEntry(page, 'text');
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await expect(ta).toBeVisible();
+  await ta.click();
+  await page.keyboard.type('```csv asset:' + assetKey + '\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  // ① 器が表に置き換わり、**添付の字**が出る
+  const table = page.locator('[data-pkc-field="detail-body"] table');
+  await expect(table).toBeVisible({ timeout: 10_000 });
+  await expect(table).toContainText('りんご');
+  await expect(table).toContainText('120');
+  // ② 器は消えている(二重に残さない)
+  await expect(page.locator('[data-pkc-fence-asset-key]')).toHaveCount(0);
+  // ③ 高さを持っている(0 だと「出ている」が嘘になる)
+  const box = (await table.boundingBox())!;
+  expect(box.height, '表の高さが無い').toBeGreaterThan(20);
+
+  expect(errors).toEqual([]);
+});
+
+/** 🔴 **見つからない添付では理由が出る**(黙って器のままにしない)。 */
+test('🔴 添付が無ければ、その場に理由が出る(#444 段①)', async ({ page }) => {
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await ta.click();
+  await page.keyboard.type('```csv asset:ast-nosuchkey\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  const err = page.locator('[data-pkc-fence-asset-error]');
+  await expect(err).toBeVisible({ timeout: 10_000 });
+  await expect(err).toContainText('見つかりません');
+  // ⚠ 「中身は添付に在ります」のまま止まっていない(直っていることまで見る)
+  await expect(page.locator('[data-pkc-fence-asset-pending]')).toHaveCount(0);
+});
+
+/**
+ * 🔴 **添付から読んだ図も、器のまま残らない**(#444 段①)。
+ *
+ * ⚠ この file が 1 度踏んだ形である ── 差し替えた所で `hydrateFigures` を
+ *   呼ばないと、**mermaid の器が空のまま**残る(「本文なら描けるのに、
+ *   添付から読むと描けない」という一貫性の穴)。
+ * 🔑 図は **PNG の `<img>` 1 枚**で出る(不可侵指示 2026-08-03)ので、
+ *   そこまで見る。
+ */
+test('🔴 添付から読んだ mermaid が、絵として出る(#444 段①)', async ({ page }) => {
+  await gotoApp(page);
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: 'zu.mmd',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('graph TD;\n  A[はじめ] --> B[おわり];\n', 'utf8'),
+  });
+  const assetKey = await page
+    .locator('[data-pkc-action="download-asset"]')
+    .first()
+    .getAttribute('data-pkc-asset-key');
+  expect(assetKey, '添付の鍵が取れない(この先は測れない)').toBeTruthy();
+
+  await createEntry(page, 'text');
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await ta.click();
+  await page.keyboard.type('```mermaid asset:' + assetKey + '\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  // 🔴 器が残っていない = 差し替わった
+  await expect(page.locator('[data-pkc-fence-asset-key]')).toHaveCount(0);
+  // 🔴 そして**絵として**出ている(器が空のまま残っていない)
+  await expectImageRendered(page, '[data-pkc-field="detail-body"] .pkc-mermaid-placeholder img');
+});
+
+/**
+ * 🔴 **添付の HTML が、いつもの箱で描かれる**(#444 段①)。
+ *
+ * > user 裁定 2026-08-26「**PKC 内にすでに存在する HTML なら問題ないのでは?**」
+ *
+ * 🔑 見るのは「**同じ箱に入る**」こと ── 本文に書いた HTML と同じく
+ *   `sandbox="allow-scripts"`(`allow-same-origin` は付けない)の iframe になる。
+ * ⚠ 箱の中は同一オリジンではないので中身は覗かない ── **`srcdoc` に入った字**で見る
+ *   (親の DOM から読める唯一の観測点)。
+ */
+test('🔴 添付の HTML が、本文に書いたのと同じ箱で描かれる(#444 段①)', async ({ page }) => {
+  await gotoApp(page);
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: 'card.html',
+    mimeType: 'text/html',
+    buffer: Buffer.from('<p id="pkc-mark">添付から来た字</p>', 'utf8'),
+  });
+  const assetKey = await page
+    .locator('[data-pkc-action="download-asset"]')
+    .first()
+    .getAttribute('data-pkc-asset-key');
+  expect(assetKey, '添付の鍵が取れない(この先は測れない)').toBeTruthy();
+
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-body"]').click();
+  await page.keyboard.type('```html asset:' + assetKey + '\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  const box = page.locator('[data-pkc-field="detail-body"] iframe[data-pkc-html-render-id]');
+  await expect(box).toBeAttached({ timeout: 10_000 });
+  // 🔴 **同じ箱**である(`allow-same-origin` を持たない)
+  expect(await box.getAttribute('sandbox')).toBe('allow-scripts');
+  // 🔴 添付の字が箱に入っている
+  expect(await box.getAttribute('srcdoc')).toContain('添付から来た字');
+  await expect(page.locator('[data-pkc-fence-asset-key]')).toHaveCount(0);
+});
