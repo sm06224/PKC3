@@ -311,6 +311,56 @@ export class InspectorRenderer {
      * ⚠ 相手は**押せる**(辿れないと、一覧しても行き止まりになる ── 関係と同じ)。
      * ⚠ **切ったら言う**(黙って切ると user は「これで全部」と読む)。
      */
+    /**
+     * 🔴 **どのスマートフォルダに集まっているか**(#283 P1「所属の札」)。
+     *
+     * ⚠ `smart-tags` は**入れ物の本文**に在るので、これを本当に全数で答えるには
+     *   入れ物の数だけ `getBody` が要る ── **選ぶたびに** N 本読むことになる。
+     * 🔑 だから**既に集めた結果**(`state.smartHits`)から引く ── あれは
+     *   入れ物ごとに「集めた lid の一覧」を持っているので、**この場で同期に**
+     *   「自分が入っているか」が言える(I/O ゼロ)。
+     *
+     * 🔴 **だから「無し」とは絶対に書かない。**
+     * ⚠ `smartHits` に居ない入れ物は「集めていない」のではなく
+     *   「**まだ集めていない**」だけである ── 「無し」と書くと、
+     *   実際には集まっているのに**無いと嘘をつく**。
+     * 🔑 分かっているものだけ出し、1 つも無ければ**行ごと畳む**
+     *   (すぐ上の「タグ」が「読めていないときは行ごと空」で守っている作法と同じ。
+     *   「状態」の行も持たないノートでは畳んでいる)。
+     * ⚠ **押すと入れ物へ飛ぶ** ── 「参照元」と同じ `select-entry` を通す
+     *   (開く口を増やさない)。
+     */
+    const smartBox = this.rows.get('inspector-smart');
+    if (smartBox) {
+      smartBox.textContent = '';
+      /** ⚠ 部分的な state(test / 古い保存)では `undefined` になりうる。 */
+      const hits = state.smartHits;
+      const inside =
+        hits === undefined
+          ? []
+          : [...hits.entries()]
+              // ⚠ **自分自身は出さない**(入れ物が自分を集めていても、飛ぶ先にならない)
+              .filter(([smartLid, hit]) => smartLid !== meta.lid && hit.lids.includes(meta.lid))
+              .map(([smartLid]) => ({
+                lid: smartLid,
+                title: state.entryMetas.get(smartLid)?.title ?? '(見つかりません)',
+              }))
+              // 🔑 **並びを決める**(Map の順は集めた順なので、画面が理由なく動く)
+              .sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : 0));
+      for (const { lid, title } of inside) {
+        const go = document.createElement('button');
+        go.type = 'button';
+        go.setAttribute('data-pkc-action', 'select-entry');
+        go.setAttribute('data-pkc-entry', lid);
+        go.setAttribute('data-pkc-field', 'inspector-smart-hit');
+        go.textContent = title;
+        smartBox.append(go);
+      }
+      /** ⚠ **行ごと畳む**(`<dt>` も一緒に ── 値だけ消すと空の見出しが残る)。 */
+      smartBox.hidden = inside.length === 0;
+      const dt = smartBox.previousElementSibling;
+      if (dt instanceof HTMLElement) dt.hidden = inside.length === 0;
+    }
     const backBox = this.rows.get('inspector-backlinks');
     if (backBox) {
       backBox.textContent = '';
@@ -642,6 +692,17 @@ export class InspectorRenderer {
      * `setRow`(textContent 差し替え)ではなく専用の器を持つ。
      */
     row('タグ', 'inspector-tags');
+    /**
+     * 🔴 **どのスマートフォルダに集まっているか**(#283 P1「所属の札」)。
+     *
+     * ⚠ **タグの札とは別物**である ── タグの札は「その語で探す」、こちらは
+     *   「**このノートが実際に並んでいる入れ物**」へ飛ぶ。
+     * 🔑 **user には自力で計算できない** ── 入れ物は条件を複数持てる
+     *   (`smart-tags: [請求, 未処理]`)ので、自分のタグを見ても
+     *   「どこに集まっているか」は分からない。
+     * ⚠ 値は押せる札なので `setRow` ではなく専用の器を持つ。
+     */
+    row('集まり先', 'inspector-smart');
     /**
      * 🔴 **関係**(#185 / 台帳 #180 の A-7)。⚠ 親子(居場所)は上の「居場所」行が
      * 既に出しているので、ここは**それ以外**(関連 / 分類 / 時系列 / 出典)を出す。
