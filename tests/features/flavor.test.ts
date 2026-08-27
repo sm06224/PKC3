@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { extractMeta, getFlavor, NO_EXTRACT } from '../../src/features/flavor';
+import {
+  extractMeta,
+  getFlavor,
+  NO_EXTRACT,
+  registeredArchetypes,
+} from '../../src/features/flavor';
 import { todoFlavor } from '../../src/features/flavor/todo-flavor';
 import { textlogFlavor } from '../../src/features/flavor/textlog-flavor';
 import { formFlavor, readFormFields } from '../../src/features/flavor/form-flavor';
@@ -344,29 +349,68 @@ describe('frontmatter round-trip hardening (P3-4 review)', () => {
  */
 describe('frontmatter の日付は、アーキタイプによらず効く(2026-08-20)', () => {
   /**
-   * ⚠ **一覧を直書きしない** ── registry から引く。⚠ `getFlavor` は未知を text へ
-   *   落とすので、`extractMeta` に未知の名前を渡しても意味が無い(fallback を測るだけ)。
-   *   だから**実装が登録している archetype そのもの**を数え上げる。
+   * 🔴 **本当に registry から引く**(2026-08-27 に直した)。
+   *
+   * ⚠ ここは「一覧を直書きしない ── registry から引く」と**書いてあった**のに、
+   *   実際は `['text','todo','textlog','spreadsheet','attachment','form']` という
+   *   **手書きの 6 件**だった ── だから後から足した 2 つ(`snippet` / `smart`)は
+   *   **この検査を 1 度も通っておらず**、2 つとも `NO_EXTRACT` を返していた
+   *   (= `date:` と書いても予定の面に出ない)。
+   * 🔑 宣言ではなく**数え上げ**にする(CLAUDE.md「宣言が在るぶん、次に読む人は
+   *   数え直さない」)── フレーバーを足した瞬間に母集団へ入る。
    */
-  const ARCHETYPES = ['text', 'todo', 'textlog', 'spreadsheet', 'attachment', 'form'] as const;
+  const ARCHETYPES = registeredArchetypes();
 
-  it('⚠ 前提: 数え上げた archetype が registry に実在する(空振り防止)', () => {
+  it('⚠ 前提: 数え上げが空振りしていない(registry を読めている)', () => {
+    // ⚠ 下限を置く ── `registeredArchetypes` が空を返す変異を止める
+    expect(ARCHETYPES.length, 'registry を読めていない').toBeGreaterThanOrEqual(8);
     for (const a of ARCHETYPES) {
       expect(getFlavor(a).archetype, `${a} が registry に無い(fallback へ落ちている)`).toBe(a);
     }
+    // ⚠ **後から足した 2 つ**が母集団に居ることを名指しで見る(手書きへ戻したら落ちる)
+    for (const late of ['snippet', 'smart']) {
+      expect(ARCHETYPES, `${late} が母集団に居ない`).toContain(late);
+    }
+  });
+
+  /**
+   * 🔴 **例外は 1 つだけ ── `snippet`(雛形)**。
+   *
+   * ⚠ **免除ではなく「別の場所が持っている決定」**である ──
+   *   `tests/features/snippet-table.test.ts` が**対照群つきで**
+   *   「抽出列を 1 つも書かない(予定の面に湧かない)」を pin している。
+   * ⚠ ここに名前を書くのは、**例外が 1 つであることを目に見えるようにする**ため。
+   *   増やすときは、増やした理由を**その場に書く**(黙って足せる一覧にしない)。
+   * 🔑 `smart`(スマートフォルダ)は 2026-08-27 に**例外から外した** ──
+   *   #283「エントリやエントリグループをタスクとして扱えるようにするんです」
+   *   (user 指示 2026-08-19)が根拠である。
+   */
+  const NO_SCHEDULE = ['snippet'];
+  const SCHEDULED = ARCHETYPES.filter((a) => !NO_SCHEDULE.includes(a));
+
+  it('⚠ 前提: 例外を除いても母集団が残っている(空振り防止)', () => {
+    expect(SCHEDULED.length, '例外で母集団を空にしている').toBeGreaterThanOrEqual(7);
+    expect(SCHEDULED, 'スマートフォルダが例外に落ちている(#283)').toContain('smart');
   });
 
   it('🔴 全フレーバーが frontmatter の date を列へ写す', () => {
     const body = '---\ndate: 2026-08-20\n---\n本文\n';
-    for (const a of ARCHETYPES) {
+    for (const a of SCHEDULED) {
       expect(extractMeta(a, body).date, `${a} が date を落としている`).toBe('2026-08-20');
+    }
+    // ⚠ **例外の側も見る** ── 例外が「いつのまにか全部」にならないように
+    for (const a of NO_SCHEDULE) {
+      expect(extractMeta(a, body).date, `${a} は写さない約束が変わった`).toBeNull();
     }
   });
 
   it('🔴 全フレーバーが frontmatter の status を列へ写す', () => {
     const body = '---\nstatus: done\n---\n本文\n';
-    for (const a of ARCHETYPES) {
+    for (const a of SCHEDULED) {
       expect(extractMeta(a, body).status, `${a} が status を落としている`).toBe('done');
+    }
+    for (const a of NO_SCHEDULE) {
+      expect(extractMeta(a, body).status, `${a} は写さない約束が変わった`).toBeNull();
     }
   });
 
