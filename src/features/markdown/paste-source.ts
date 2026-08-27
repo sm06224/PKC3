@@ -57,6 +57,11 @@ export const PASTE_SOURCES = [
     hint: 'ウェブページの形より先にリッチテキストを読みます。生成 AI の貼付が崩れるときに',
   },
   {
+    id: 'html-fence',
+    label: 'ウェブページの形をそのまま(html の囲み)',
+    hint: '見た目のまま残します。色や段組が消えては困るときに(あとで直すには HTML を触ります)',
+  },
+  {
     id: 'plain',
     label: '変換しない',
     hint: 'コピーした文字をそのまま貼ります',
@@ -75,7 +80,7 @@ export function isPasteSource(v: string): v is PasteSource {
 }
 
 /** 実際に使った形。 */
-export type PasteUsed = 'permalink' | 'html' | 'rtf' | 'plain';
+export type PasteUsed = 'permalink' | 'html' | 'html-fence' | 'rtf' | 'plain';
 
 /** 見送った形と、その理由(⚠ **デバッグの本体**はここである)。 */
 export interface PasteSkip {
@@ -96,6 +101,7 @@ export interface PasteAttempt {
 const LABEL: Record<PasteUsed, string> = {
   permalink: 'ノートへのリンク',
   html: 'ウェブページの形',
+  'html-fence': 'ウェブページの形(html の囲み)',
   rtf: 'リッチテキスト',
   plain: 'そのままの文字',
 };
@@ -124,6 +130,8 @@ export function describePaste(a: PasteAttempt): string {
 export interface PasteConverters {
   readonly permalink: () => string | null;
   readonly html: () => string | null;
+  /** 🔴 変換せず ` ```html ` の囲みにする(user 要望 2026-08-27)。 */
+  readonly htmlFence: () => string | null;
   readonly rtf: () => string | null;
 }
 
@@ -161,10 +169,28 @@ export function choosePaste(args: {
   if (permalink !== null) return done('permalink', permalink);
 
   /**
+   * 🔴 **そのまま囲みにする**(user 要望 2026-08-27)。⚠ **変換を試さない** ──
+   * この設定を選んだ user は「変換すると落ちるものが在る」と言っている。
+   * ⚠ RTF も見送る(囲みにできるのは HTML だけ)── **理由は残す**。
+   */
+  if (source === 'html-fence') {
+    if (sizes.rtf > 0) skipped.push({ kind: 'rtf', why: '囲みにできるのは HTML だけです' });
+    if (sizes.html === 0) {
+      skipped.push({ kind: 'html', why: '届いていません' });
+      return done('plain', null);
+    }
+    const fence = convert.htmlFence();
+    if (fence !== null) return done('html-fence', fence);
+    skipped.push({ kind: 'html', why: '大きすぎて囲みにできませんでした' });
+    return done('plain', null);
+  }
+
+  /**
    * 🔑 **順番は設定が決める。** `auto` / `html` は HTML が先、`rtf` は RTF が先。
    * ⚠ 「HTML だけ」は RTF を**見送った理由まで**残す(黙って落とすと、
    *   フラグを点けても「なぜ使われなかったか」が分からない)。
    */
+  // ⚠ `html-fence` は上で返しているので、ここへは来ない
   const order: ReadonlyArray<'html' | 'rtf'> =
     source === 'rtf' ? ['rtf', 'html'] : source === 'html' ? ['html'] : ['html', 'rtf'];
 

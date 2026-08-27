@@ -22,7 +22,12 @@ import {
 /** 呼ばれた口を数える(⚠ **遅延**であることの観測点)。 */
 function run(
   source: PasteSource,
-  have: { html?: string | null; rtf?: string | null; permalink?: string | null },
+  have: {
+    html?: string | null;
+    htmlFence?: string | null;
+    rtf?: string | null;
+    permalink?: string | null;
+  },
   sizes = { html: 100, rtf: 200, plain: 50 },
 ) {
   const called: string[] = [];
@@ -37,6 +42,10 @@ function run(
       html: () => {
         called.push('html');
         return have.html ?? null;
+      },
+      htmlFence: () => {
+        called.push('htmlFence');
+        return have.htmlFence ?? null;
       },
       rtf: () => {
         called.push('rtf');

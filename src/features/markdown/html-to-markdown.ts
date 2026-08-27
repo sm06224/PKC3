@@ -524,6 +524,49 @@ export function markdownFromBody(body: Element | null): string | null {
   return text === '' ? null : text;
 }
 
+/**
+ * 🔴 **クリップボードの `text/html` を、そのまま ` ```html ` の囲みにする**
+ * (user 要望 2026-08-27)。
+ *
+ * > 「コピーしたクリップボードを解析すると **utf-8 の html の格納と文字列としての
+ * > 格納の 2 種類**がありました / **html のフェンスとしてそれを貼付できれば良い**
+ * > のだと思います」
+ *
+ * ## なぜ「変換」と別の口なのか
+ *
+ * `convertPastedHtml` は HTML を **PKC-Markdown へ戻す** ── 実測では
+ * コードフェンス・入れ子リスト・表・太字とも正しく戻る。⚠ しかし戻せるのは
+ * **markdown に在る形だけ**で、色・段組・SVG・凝ったレイアウトは**落ちる**。
+ * 🔑 ` ```html ` の囲みは**まさにそれを受けるために在る面**である
+ * (`html-sandbox.ts` の冒頭:「AI が吐く複雑 layout / SVG / interactive widget を
+ * 受けるための面」)── sandbox iframe + CSP で隔離して描かれる。
+ *
+ * ⚠ **既定にはしない。** 囲みにすると、あとで直すのが「HTML を編集する」ことになる
+ * (誤字 1 つでもタグの中を触る)。設定で選んだときだけ通る。
+ *
+ * ## ⚠ 囲みの長さは中身で決める
+ *
+ * HTML の中に ``` が入っていることがある(AI の返答が markdown の説明を
+ * 含む場合など)── 3 本で囲むと**そこで囲みが終わる**。中身の最長連を数えて、
+ * それより 1 本長い囲みを使う。
+ *
+ * ## ⚠ 先頭の `<meta charset>` は落とす
+ *
+ * Chromium はクリップボードの HTML に `<meta charset='utf-8'>` を**必ず前置する**。
+ * 箱は `srcdoc` で描くので**この 1 行は効かない**うえ、本文に残ると読みにくい。
+ * 🔑 落とすのは**先頭の 1 つだけ**(本文の途中に在るものは user の中身である)。
+ */
+export function pastedHtmlFence(html: string): string | null {
+  if (html === '' || html.length > PASTE_HTML_MAX) return null;
+  const body = html.replace(/^\s*<meta[^>]*charset[^>]*>\s*/i, '').trim();
+  if (body === '') return null;
+  /** 中身の ``` の最長連(0 なら 3 本でよい)。 */
+  let longest = 0;
+  for (const m of body.matchAll(/`+/g)) longest = Math.max(longest, m[0].length);
+  const fence = '`'.repeat(Math.max(3, longest + 1));
+  return `${fence}html\n${body}\n${fence}`;
+}
+
 const defaultParse: HtmlParse = (html) => new DOMParser().parseFromString(html, 'text/html');
 
 /**
