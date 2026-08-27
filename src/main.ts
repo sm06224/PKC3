@@ -2291,6 +2291,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       // 🔑 予定も同じ流儀(#292 段③)── 開いたときに集める。⚠ 前の束は消さない
       if (mode === 'schedule') dispatcher.dispatch({ type: 'REFRESH_TASK_SCAN' });
       /**
+       * 🔑 連絡先も同じ流儀(#278 段①)── **開いたときに集める**。
+       * ⚠ boot では集めない ── 「`tel:` を持つ」は抽出列に無いので**全件の
+       *   本文を読む**ことになり、連絡先を使わない user に負わせることになる。
+       * ⚠ 前の一覧は消さない(読み直しの間に空白を出さない)。
+       */
+      if (mode === 'contacts') dispatcher.dispatch({ type: 'REFRESH_CONTACT_SCAN' });
+      /**
        * 🔴 **面を畳むのは「わきの面」だけ**(2026-08-20。user 指示
        * 「カレンダーを利用するための導線が不足している」の調査で判明)。
        *

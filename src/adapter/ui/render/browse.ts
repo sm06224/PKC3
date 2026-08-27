@@ -26,6 +26,7 @@ import { ScrollMemory } from './scroll-memory';
 import { FilerRenderer } from './filer';
 import { LauncherRenderer } from './launcher';
 import { ScheduleRenderer } from './schedule';
+import { ContactsRenderer } from './contacts';
 
 // 🔑 型と既定は `browse-mode.ts` が持つ(#240 段⑤)── 既定が 4 か所に散っていた
 export type { BrowseMode } from './browse-mode';
@@ -46,6 +47,12 @@ export const BROWSE_TABS: readonly { mode: BrowseMode; label: string }[] = [
    *   予定はノート全体を横断して見るもので、**中央(本文)を退かす理由が無い**。
    */
   { mode: 'schedule', label: '予定' },
+  /**
+   * 🔴 **連絡先**(#278 段①。user 指示 2026-08-19)。
+   * ⚠ ここに置くのは、上の表が「**左 = ノート全体**」と決めているからである ──
+   *   連絡先は**ノート**なので、閉じても失う物が無い(#292 段⑤ の見分け方)。
+   */
+  { mode: 'contacts', label: '連絡先' },
 ] as const;
 
 export class BrowseRouter {
@@ -54,6 +61,7 @@ export class BrowseRouter {
   private readonly filer: FilerRenderer;
   private readonly launcher: LauncherRenderer;
   private readonly schedule: ScheduleRenderer;
+  private readonly contacts: ContactsRenderer;
   /**
    * 🔑 **面ごとに位置を覚える**(P8 段⑫。user 指示「サイドバーも同じ、
    * スクロールが発生するすべての画面が対象だよ」)。3 つの面が**同じ器**を
@@ -89,6 +97,7 @@ export class BrowseRouter {
       filer: pane('filer'),
       launcher: pane('launcher'),
       schedule: pane('schedule'),
+      contacts: pane('contacts'),
     };
     // ⚠ 一覧は既存の region を使い回すので、`pane()` の hidden 制御を通らない ──
     //    初期が一覧でないときは**ここで隠す**(隠し忘れると 2 面が重なって出る)
@@ -98,6 +107,7 @@ export class BrowseRouter {
     this.filer = new FilerRenderer(this.panes.filer);
     this.launcher = new LauncherRenderer(this.panes.launcher);
     this.schedule = new ScheduleRenderer(this.panes.schedule, now);
+    this.contacts = new ContactsRenderer(this.panes.contacts);
   }
 
   render(state: AppState, mode: BrowseMode): void {
@@ -119,6 +129,7 @@ export class BrowseRouter {
     if (mode === 'list') this.list.render(state);
     else if (mode === 'filer') this.filer.render(state);
     else if (mode === 'schedule') this.schedule.render(state);
+    else if (mode === 'contacts') this.contacts.render(state);
     else this.launcher.render(state);
     // 🔑 **中身を入れ終わってから**位置を合わせる(空の器に書いても丸められる)。
     // ⚠ 面 = 探し方 × 「絞り込み中かどうか」── 絞り込んだ結果は先頭からが正しく、

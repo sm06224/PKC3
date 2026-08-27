@@ -11,14 +11,26 @@
  * ⚠ 既定を**ここ 1 か所**に置く(直す前は `main.ts` に 2 か所、`browse.ts` に 2 か所
  * 散っており、変えるときに必ず取りこぼす形だった)。
  */
-export type BrowseMode = 'list' | 'filer' | 'launcher' | 'schedule';
+/**
+ * 🔴 **探し方の全数はこの 1 本**(2026-08-27、#278 段①)。
+ *
+ * ⚠ 直す前は**型と判定が別々に書かれて**おり、判定のほうは
+ *   `v === 'list' || … || v === 'schedule'` という手書きの連なりだった。
+ *   ⚠ file 自身が「**探し方を足したらここも足す**」と注意していたのに、
+ *   連絡先を足したとき**実際に足し忘れた** ── そして
+ *   🔴 **黙って壊れる**:タブは出る・押せる・器も在るのに、
+ *   `isBrowseMode` が弾くので**面が切り替わらない**(押しても何も起きない)。
+ * 🔑 だから**一覧から型も判定も導く** ── 足し忘れようがない形にする(§7)。
+ */
+export const BROWSE_MODES = ['list', 'filer', 'launcher', 'schedule', 'contacts'] as const;
+
+export type BrowseMode = (typeof BROWSE_MODES)[number];
 
 /** 🔴 既定 = フォルダ(#240 段⑤)。 */
 export const DEFAULT_BROWSE_MODE: BrowseMode = 'filer';
 
 export function isBrowseMode(v: string): v is BrowseMode {
-  // ⚠ 探し方を足したらここも足す(判定はこの 1 か所 ── `main.ts` に書き下さない)
-  return v === 'list' || v === 'filer' || v === 'launcher' || v === 'schedule';
+  return (BROWSE_MODES as readonly string[]).includes(v);
 }
 
 const KEY = 'pkc3.browse';

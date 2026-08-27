@@ -1316,6 +1316,75 @@ describe('作成と居場所(#258)', () => {
 
 
 /**
+ * 🔴 **連絡先を集める**(#278 段①)。
+ *
+ * 🔑 守る主張:
+ * 1. **電話かメールを持つノートだけ**が連絡先になる(所属だけでは並ばない)
+ * 2. 🔴 **題名が名前**(`name:` の鍵を作らない ── 名前の出どころを 2 つにしない)
+ * 3. 🔴 **消したら連絡先からも消える**(片道にしない)
+ * 4. 🔴 **本文は worker から出ない** ── 返るのは連絡の手段だけである
+ *    (不可侵指示 2026-07-27)
+ * 5. ⚠ **ゴミ箱を除く条件は書かない** ── PKC3 のゴミ箱は
+ *    「`entries` に居ない」ことであって列ではない(捨てた時点で消える)
+ */
+describe('連絡先を集める (#278 段①)', () => {
+  const fm = (lines: string, tail = '# 本文\n') => `---\n${lines}\n---\n\n${tail}`;
+
+  it('🔴 電話かメールを持つノートだけが並ぶ(所属だけでは並ばない)', async () => {
+    await request({
+      op: 'upsertEntry',
+      cid: 'c-ct',
+      entry: entry('ct-1', fm('tel: 090-1234-5678'), { title: '山田太郎' }),
+    });
+    await request({
+      op: 'upsertEntry',
+      cid: 'c-ct',
+      entry: entry('ct-2', fm('org: 例の会社'), { title: '打合せメモ' }),
+    });
+    await request({
+      op: 'upsertEntry',
+      cid: 'c-ct',
+      entry: entry('ct-3', '# ただの本文\n', { title: 'ふつう' }),
+    });
+    const scan = await request({ op: 'contactScan', cid: 'c-ct' });
+    expect(scan.cards.map((c) => c.lid), '所属だけ / 連絡先でないノートまで並んだ').toEqual([
+      'ct-1',
+    ]);
+    // 🔴 **題名が名前**
+    expect(scan.cards[0]?.name).toBe('山田太郎');
+    expect(scan.cards[0]?.tels).toEqual(['090-1234-5678']);
+  });
+
+  it('🔴 本文は 1 バイトも返らない(舐めるのは worker の中だけ)', async () => {
+    await request({
+      op: 'upsertEntry',
+      cid: 'c-ct2',
+      entry: entry('ct-b', fm('email: t@example.com', '# 秘密の議事録\n\nここは出てはいけない\n')),
+    });
+    const scan = await request({ op: 'contactScan', cid: 'c-ct2' });
+    expect(JSON.stringify(scan), '本文が worker の外へ出ている').not.toContain('出てはいけない');
+  });
+
+  it('🔴 連絡の手段を消すと、連絡先からも消える(片道にしない)', async () => {
+    await request({
+      op: 'upsertEntry',
+      cid: 'c-ct3',
+      entry: entry('ct-c', fm('tel: 03-1111-2222'), { title: '青木' }),
+    });
+    expect((await request({ op: 'contactScan', cid: 'c-ct3' })).cards).toHaveLength(1);
+    await request({
+      op: 'upsertEntry',
+      cid: 'c-ct3',
+      entry: entry('ct-c', '# もう連絡先ではない\n', { title: '青木' }),
+    });
+    expect(
+      (await request({ op: 'contactScan', cid: 'c-ct3' })).cards,
+      '連絡の手段を消したのに残っている',
+    ).toHaveLength(0);
+  });
+});
+
+/**
  * 🔴 **チェック項目の候補を列に持つ**(#277 段②。user 裁定 2026-08-19「推薦 A」)。
  *
  * カンバンは「チェック項目を持つノート」だけを集める。全ノートの本文を読むと
