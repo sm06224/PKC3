@@ -40,6 +40,8 @@ import {
   globalsToDataAttrs,
 } from '../markdown/document-globals';
 import { scanAssetRefsInto } from '@features/asset/asset-ref-scan';
+import { readFenceAssets } from '@features/asset/fence-asset-read';
+import { collectFenceAssetKeys } from '../markdown/markdown-render';
 import {
   DEFAULT_PAGE_FORMAT,
   pageFormatCss,
@@ -776,10 +778,31 @@ export async function writePortableHtml(
        * 取る ── 読み飛ばした本文からでは frontmatter が見えない。
        */
       const globals = extractDocumentGlobals(r.body);
+      /**
+       * 🔴 **囲みが指している添付を、字として焼き込む**(#444 段②)。
+       *
+       * ⚠ 配った HTML には hydrator が居ない ── 渡さないと器のまま
+       *   「この囲みの中身は添付に在ります」だけが残り、**持ち出したら中身が消える**。
+       * ⚠ 読むのは**この本文が指している鍵だけ**(全添付を字にしない ──
+       *   不可侵指示 2026-07-27 の「ゼロコピー・速やかな破棄」)。
+       * ⚠ 読めなかったもの(無い / 大きすぎる / 字でない)は**渡さない** ──
+       *   描く側が器のまま理由を出すので、黙って空になることはない。
+       */
+      const fenceAssets = await readFenceAssets(
+        (k) => src.getAssetBlob(k),
+        collectFenceAssetKeys(r.body.slice(skip)),
+        (k, why) =>
+          warn.add(
+            'fence-asset',
+            '囲みが指す添付の注意',
+            `囲みが指している添付を焼き込めませんでした(${k}): ${why}`,
+          ),
+      );
       const html = await render(r.body.slice(skip), {
         vars: extractVars(r.body),
         headingNumber: extractHeadingNumberConfig(r.body),
         allowExternalImages,
+        ...(Object.keys(fenceAssets).length > 0 ? { fenceAssets } : {}),
       });
       /**
        * 🔴 **書字方向などの文書属性も一緒に配る**(同 2-7)。画面では

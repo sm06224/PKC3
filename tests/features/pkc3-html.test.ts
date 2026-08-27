@@ -17,6 +17,7 @@ import type { ArchiveSource } from '../../src/features/export/pkc3-archive';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { DOCUMENT_GLOBAL_ATTRS } from '../../src/features/markdown/document-globals';
 import { WARN_CAP } from '../../src/features/export/warn-cap';
+import { MAX_FENCE_ASSET_BYTES } from '../../src/features/markdown/fence-asset';
 import { readFileSync } from 'node:fs';
 import { extractBodyCss } from '../../build/body-css';
 
@@ -1633,5 +1634,94 @@ describe('可搬 HTML — 本文の CSS を app.css から焼く', () => {
       // ⚠ 印は `data-pkc-prose`(2 巡目レビューで訂正。field ではない)
       expect(box.hasAttribute('data-pkc-prose'), '紙の器に読み幅が当たらない').toBe(true);
     }
+  });
+});
+
+/**
+ * 🔴 **囲みが指している添付は、書き出しのときに焼き込む**(#444 段②)。
+ *
+ * ⚠ 配った HTML には hydrator が居ない ── 焼かなければ器のまま
+ *   「この囲みの中身は添付に在ります」だけが残り、**持ち出したら中身が消える**。
+ *   PKC の芯(自己完結して持ち出せる)に正面から反する。
+ */
+describe('囲みが指す添付を焼き込む(#444 段②)', () => {
+  const bytes = (t: string): Uint8Array => new TextEncoder().encode(t);
+
+  /**
+   * 🔑 比べる相手は **本文に直接書いたときの描画** ── 実装の綴りを写した
+   *   期待値ではなく、**もう 1 本の実際の経路**の出力である(CLAUDE.md §1
+   *   「期待値は別の綴りではなく別の観測から作る」)。
+   * ⚠ 焼き込みが**言語を選ばない**ことを見たいので、表・図・素のコードで回す。
+   */
+  for (const c of [
+    { info: 'csv', text: 'あ,い\n1,2' },
+    { info: 'mermaid', text: 'graph TD;A-->B;' },
+    { info: 'js', text: 'const x = 1;' },
+  ]) {
+    it(`🔴 「${c.info}」の添付が、本文に書いたのと同じ形で配る HTML に入る`, async () => {
+      const out = await writePortableHtml(
+        source({
+          entries: [{ lid: 'e1', body: `\`\`\`${c.info} asset:ast-t\n控え\n\`\`\`` }],
+          assets: [{ key: 'ast-t', mime: 'text/plain', bytes: bytes(c.text) }],
+        }),
+        NOW,
+      );
+      const got = (await dataOf(out.blob)).entries[0]!.html;
+      expect(got, '器のまま配っている(中身が消えた)').not.toContain(
+        'data-pkc-fence-asset-pending',
+      );
+      expect(got, '控えの字を配っている(添付を読んでいない)').not.toContain('控え');
+      expect(got).toBe(renderMarkdown(`\`\`\`${c.info}\n${c.text}\n\`\`\``));
+    });
+  }
+
+  it('⚠ 読めない添付は器のまま残り、注意にも出る(黙って空にしない)', async () => {
+    const out = await writePortableHtml(
+      source({ entries: [{ lid: 'e1', body: '```csv asset:ast-gone\n控え\n```' }] }),
+      NOW,
+    );
+    const html = await out.blob.text();
+    expect(html, '中身が無いのに器まで消えた').toContain('data-pkc-fence-asset-pending');
+    expect(out.warnings.some((w) => w.includes('ast-gone'))).toBe(true);
+  });
+
+  it('🔴 上限を超える添付は読まない(定常の話 ── 不可侵指示 2026-08-03)', async () => {
+    const big = new Uint8Array(MAX_FENCE_ASSET_BYTES + 1);
+    big.fill(65);
+    const out = await writePortableHtml(
+      source({
+        entries: [{ lid: 'e1', body: '```js asset:ast-big\n控え\n```' }],
+        assets: [{ key: 'ast-big', mime: 'text/plain', bytes: big }],
+      }),
+      NOW,
+    );
+    const html = await out.blob.text();
+    expect(html).toContain('data-pkc-fence-asset-pending');
+    expect(out.warnings.some((w) => w.includes('大きすぎます'))).toBe(true);
+    // ⚠ 空振り防止 ── 上限を外せば読めた大きさである(1 バイト超えているだけ)
+    expect(big.length).toBe(MAX_FENCE_ASSET_BYTES + 1);
+  });
+
+  it('⚠ 囲みが指していない添付は字にしない(全添付を読まない)', async () => {
+    const reads: string[] = [];
+    const src = source({
+      entries: [{ lid: 'e1', body: '```csv asset:ast-t\n控え\n```\n\n![](asset:ast-img)' }],
+      assets: [
+        { key: 'ast-t', mime: 'text/csv', bytes: bytes('あ,い') },
+        { key: 'ast-img', mime: 'image/png', bytes: bytes('PNG') },
+      ],
+    });
+    const spy: ArchiveSource = {
+      ...src,
+      getAssetBlob: async (k) => {
+        reads.push(k);
+        return src.getAssetBlob(k);
+      },
+    };
+    const out = await writePortableHtml(spy, NOW);
+    await out.blob.text();
+    // 🔑 画像の bytes は**配るために**読まれる ── ここで見たいのは
+    //    「**字にするための読み**が囲みの鍵だけか」なので、その 1 回目を見る
+    expect(reads[0], '囲みが指していない添付を先に字にしている').toBe('ast-t');
   });
 });
