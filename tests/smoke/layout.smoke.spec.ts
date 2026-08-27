@@ -319,6 +319,73 @@ test('🔴 左の列のボタンは、どの幅でも名前が器からはみ出
 });
 
 /** 🔑 1 段に要る幅(実測 209px)に **21px 以上の余り**が出る画面の幅。 */
+/**
+ * 🔴 **まとめ操作の帯は 2 段に収まり、一覧へ高さを譲る**(#475、2026-08-27)。
+ *
+ * ## なぜ実ブラウザで見るのか
+ *
+ * 段数は**折り返しの結果**なので、happy-dom では 1 文字も測れない。
+ *
+ * ## 何が起きていた
+ *
+ * 7 個のボタンの合計が **544px** で、器は 230px(1280px の窓)── **3 段**になり、
+ * 帯が **81px** を取っていた。図案を消して余白を詰めると合計 **362px** で **2 段**、
+ * 一覧が **704 → 731px**(+27)。
+ *
+ * ## 🔴 いちばん大事なのは「**ボタンを消していない**」ほう
+ *
+ * ⚠ cowork の実機レポートは、同じ 81px を空ける手として
+ * 「**6 つをパレットへ寄せる**」を挙げていた ── だが数えると
+ * **集計 / 設定 / フラグ / ヘルプ の 4 つは既にパレットに在る**ので、
+ * それは「寄せる」ではなく「**1 クリックの口を 6 つ消す**」ことだった。
+ * 🔑 だからこの検査は**段数と一緒に「7 個が在ること」を見る** ──
+ *   段数だけ見ると、**消して 2 段にする**変更が緑で通る。
+ */
+test('🔴 まとめ操作の帯は 2 段に収まり、ボタンは 1 つも消えていない (#475)', async ({
+  page,
+}) => {
+  /** 帯に在るはずの 7 つ。⚠ **等値で pin する** ── 「7 個ある」だけだと、
+   *  1 つ消して 1 つ足す変更が素通りする。 */
+  const WANT = ['取り込む', 'バックアップ', '操作を探す', '集計', '設定', 'フラグ', 'ヘルプ'];
+  const seen: { w: number; rows: number }[] = [];
+  for (const w of [1440, 1280, 1024, 950]) {
+    await page.setViewportSize({ width: w, height: 800 });
+    await gotoApp(page);
+    const m = await page.evaluate(() => {
+      const bar = document.querySelector('[data-pkc-region="collection-bar"]');
+      if (!bar) return null;
+      const btns = [...bar.querySelectorAll('button')].filter(
+        (b) => b.getBoundingClientRect().width > 0,
+      );
+      return {
+        labels: btns.map((b) => (b.textContent ?? '').trim()),
+        rows: new Set(btns.map((b) => Math.round(b.getBoundingClientRect().top))).size,
+        barH: Math.round(bar.getBoundingClientRect().height),
+        listH: Math.round(
+          document.querySelector('[data-pkc-region="browse-host"]')?.getBoundingClientRect()
+            .height ?? 0,
+        ),
+      };
+    });
+    expect(m, `w=${w}: まとめ操作の帯が無い`).not.toBeNull();
+
+    // 🔴 **消えていない**(段数より先に見る ── 消して 2 段にする変更をここで殺す)
+    expect(
+      m!.labels,
+      `w=${w}: まとめ操作のボタンが変わっている(消した / 足した)`,
+    ).toEqual(WANT);
+
+    // 🔴 2 段まで(3 段だと帯が 81px を取り、一覧がそのぶん縮む)
+    expect(
+      m!.rows,
+      `w=${w}: まとめ操作の帯が ${m!.rows} 段ある(帯 ${m!.barH}px / 一覧 ${m!.listH}px)`,
+    ).toBeLessThanOrEqual(2);
+    seen.push({ w, rows: m!.rows });
+  }
+  // ⚠ 空振り防止 ── 幅を 1 つも回していない形で「全部 2 段以下」と言わない
+  expect(seen.length, '幅を 1 つも測っていない').toBe(4);
+});
+
 const TAB_ONE_ROW_FROM = 1280;
 
 test('🔴 どの幅でも探し方のタブの語が隣に重ならない', async ({ page }) => {

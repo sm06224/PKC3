@@ -90,6 +90,16 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-27-collection-bar',
+    title: '左の列の下の帯が 3 段から 2 段になり、一覧が広がりました',
+    items: [
+      '取り込む・バックアップ・操作を探す・集計・設定・フラグ・ヘルプ の帯が、幅の狭い画面で 3 段に折り返して場所を取っていました。',
+      '図案を出さず、字の左右の余白を詰めることで 2 段に収まるようにしました。一覧に使える高さが 27px 増えます。',
+      'ボタンは 7 つとも残っています。減らしていません。',
+      '押す的が細くなりすぎないよう、幅の下限を置いています。',
+    ],
+  },
+  {
     id: '2026-08-27-palette-wrap',
     title: '「操作を探す」の説明が、切れずに読めるようになりました',
     items: [
@@ -302,22 +312,11 @@ export const NOTICES: readonly Notice[] = [
       '条件は本文に書かれるので、書き出しにも別の端末にも一緒に付いていきます。',
     ],
   },
-  {
-    id: '2026-08-26-smart-text',
-    title: 'スマートフォルダを、語でも絞れるようになりました',
-    items: [
-      '条件の帯に「語」の欄が増えました。打って Enter を押すと、題名か本文にその語があるノートだけが集まります。',
-      '探す欄と同じ探し方です。探して出てくるものは、ここでも集まります。',
-      '外すときは、欄を空にして Enter を押してください。',
-      '落として入れられるのは、条件にタグがあるときだけです。種類や更新日や語しか条件に無い入れ物へ落とすと、理由が出るようになりました。',
-      'これまでは、そのとき何も起きず、理由も出ませんでした。条件にタグを 1 つ足せば、落として入れられます。',
-    ],
-  },
 ];
 
 /**
  * ⚠ **落としたぶんの原本は CHANGELOG に在る**(上限 20 件を超えたので、古いほうから
  *   `2026-08-16-office-save-to-pkc` / `2026-08-17-office-save-same-note`(2026-08-19)、
  *   `2026-08-19-dual-pane-app`(2026-08-22)、
- *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice` / `2026-08-24-pptx-export` / `2026-08-24-paste-permalink` / `2026-08-24-markdown-to-pandoc` / `2026-08-24-schedule-range`(2026-08-25)、`2026-08-24-dual-new-note` / `2026-08-24-office-save-formats` / `2026-08-25-relation-map` / `2026-08-25-bookmark-capture` / `2026-08-25-relation-map-body-links` / `2026-08-25-repeating-tasks` / `2026-08-25-snippets` / `2026-08-25-snippet-menu` / `2026-08-25-append-into-section` / `2026-08-25-revision-diff` / `2026-08-25-cross-pane` / `2026-08-25-ext-write-back`(2026-08-26)、`2026-08-25-portable-html`(2026-08-26)、`2026-08-25-rich-text-paste`(2026-08-27)、`2026-08-26-off-bar-formats` / `2026-08-26-export-structure` / `2026-08-26-shrink-photos` / `2026-08-26-apply-plan` / `2026-08-26-storage-profile`(2026-08-27)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
+ *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice` / `2026-08-24-pptx-export` / `2026-08-24-paste-permalink` / `2026-08-24-markdown-to-pandoc` / `2026-08-24-schedule-range`(2026-08-25)、`2026-08-24-dual-new-note` / `2026-08-24-office-save-formats` / `2026-08-25-relation-map` / `2026-08-25-bookmark-capture` / `2026-08-25-relation-map-body-links` / `2026-08-25-repeating-tasks` / `2026-08-25-snippets` / `2026-08-25-snippet-menu` / `2026-08-25-append-into-section` / `2026-08-25-revision-diff` / `2026-08-25-cross-pane` / `2026-08-25-ext-write-back`(2026-08-26)、`2026-08-25-portable-html`(2026-08-26)、`2026-08-25-rich-text-paste`(2026-08-27)、`2026-08-26-off-bar-formats` / `2026-08-26-export-structure` / `2026-08-26-shrink-photos` / `2026-08-26-apply-plan` / `2026-08-26-storage-profile` / `2026-08-26-smart-text`(2026-08-27)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
  */
