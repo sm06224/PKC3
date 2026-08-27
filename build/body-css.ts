@@ -377,6 +377,38 @@ export const MAX_RULES = 250;
  *
  * @returns 見つかった問題(空なら合格)。build を止めるのは呼び手の仕事。
  */
+/**
+ * 🔴 **定義の無い `var(--x)` を数え上げる**(#465)。
+ *
+ * ⚠ CSS は**知らない変数を使った宣言を丸ごと捨てる**。しかも
+ *   **先行する規則へ fall back しない**ので、枠も色も**1 ドットも出ない**まま
+ *   `npm test` も `lint` も `build` も全部通る ── **どこにも何も出ない**。
+ *
+ * 🔑 **既定値つき(`var(--x, 何か)`)は数えない。** 壊れないうえ、意図した書き方である
+ *   (実例: `--pkc-blank-count` は本文の描画が `style="--pkc-blank-count: N"` で
+ *   その場で入れるので、CSS 側に定義が無いのが正しい ── 既定値がその受け皿)。
+ *   ⚠ ここで落とすと、書き手は「既定値を消す」か「検査を緩める」かを選ばされる。
+ *
+ * ⚠ **注釈を剥いでから読む**(CLAUDE.md §1「範囲が広すぎて無関係な散文に満たされる」)
+ *   ── 剥がないと、①注釈に書いた `var(--x)` が未定義として挙がり
+ *   ②注釈に書いた `--x: …` が定義として数えられる(**両方向に**間違える)。
+ *
+ * 🔑 **判定はこの 1 か所**(CLAUDE.md §7)── 焼いた CSS(`auditBodyCss`)と
+ *   原本の CSS(`tests/features/css-vars.test.ts`)の**両方がここを呼ぶ**。
+ *   ⚠ 片側にもう 1 つ正規表現を書くと、次に直したとき片方だけ直る。
+ */
+export function undefinedVars(css: string): string[] {
+  const bare = stripComments(css);
+  const defined = new Set([...bare.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]!));
+  return [
+    ...new Set(
+      [...bare.matchAll(/var\(\s*(--[\w-]+)\s*\)/g)] // 既定値つきは当たらない(`,` が入る)
+        .map((m) => m[1]!)
+        .filter((v) => !defined.has(v)),
+    ),
+  ].sort();
+}
+
 export function auditBodyCss(out: BodyCss): string[] {
   const bad: string[] = [];
   const css = out.css;
@@ -387,14 +419,8 @@ export function auditBodyCss(out: BodyCss): string[] {
     );
   }
   // 🔴 未定義の `var()` は宣言ごと無効になり、**先行する規則へ fall back しない**
-  const defined = new Set([...css.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]!));
-  const undef = [
-    ...new Set(
-      [...css.matchAll(/var\(\s*(--[\w-]+)\s*\)/g)] // 既定値つきは壊れないので数えない
-        .map((m) => m[1]!)
-        .filter((v) => !defined.has(v)),
-    ),
-  ].sort();
+  const defined = new Set([...stripComments(css).matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]!));
+  const undef = undefinedVars(css);
   if (undef.length > 0) {
     bad.push(`焼いた CSS が定義の無い var を参照しています(宣言ごと無効): ${undef.join(', ')}`);
   }
