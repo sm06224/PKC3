@@ -15,6 +15,7 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { answerAppDialog, gotoApp, collectPageErrors, clickReal, expectImageRendered, useSplitEditor, useListBrowse } from './helpers';
+import { peek, withStateOnFail } from './state-dump';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -163,30 +164,20 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
    *   出ている lid / 画面の状態 / ジョブ表 / ページのエラーを添えて落ちる。
    *   ⚠ 次の赤が「2 だった」で終わらないことが、この形の目的である。
    */
-  try {
-    await expect(rows).toHaveCount(4);
-  } catch (e) {
-    const snap = await page.evaluate(() => ({
-      entries: [...document.querySelectorAll('[data-pkc-region="entry-list"] [data-pkc-entry]')]
-        .map((el) => el.getAttribute('data-pkc-entry')),
-      status: (
-        document.querySelector('[data-pkc-region="status"]')?.textContent ?? ''
-      )
-        .replace(/\s+/g, ' ')
-        .slice(0, 200),
-      lanes: [...document.querySelectorAll('[data-pkc-lane]')].map((l) =>
-        (l.textContent ?? '').replace(/\s+/g, ' ').slice(0, 120),
-      ),
-      dialogOpen: document.querySelectorAll('dialog[open]').length,
-    }));
-    throw new Error(
-      `2 度目の取込で件数が増えていない。${JSON.stringify(snap)} / `
-        + `statusBefore=${JSON.stringify(statusBefore)} / `
-        + `pageErrors=${JSON.stringify(errors)}`,
-      // ⚠ 元の失敗を**捨てない**(どこで落ちたかが消える)
-      { cause: e },
-    );
-  }
+  // 🔑 **状態の採り方は `state-dump.ts` の 1 本**(2026-08-27 に寄せた)──
+  //    ここに手で書いていたので、#410 / #419 が 3 本目・4 本目を生やすところだった
+  await withStateOnFail(
+    page,
+    '2 度目の取込で件数が増えていない',
+    async () => ({
+      lanes: await peek(page.locator('[data-pkc-lane]')),
+      statusBefore,
+      pageErrors: errors,
+    }),
+    async () => {
+      await expect(rows).toHaveCount(4);
+    },
+  );
   const orders = await page.locator('[data-pkc-entry]').evaluateAll((els) =>
     els.map((e) => e.getAttribute('data-pkc-entry')),
   );

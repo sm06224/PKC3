@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, useListBrowse } from './helpers';
+import { peek, withStateOnFail } from './state-dump';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -218,8 +219,26 @@ test('🔴 編集中に一覧の行を押すと、理由が画面に出る', asy
   // ⚠ **clickReal は使わない** ── 断られる操作なので「押した結果」を待たない
   await page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').last().click();
 
-  // 🔴 理由が**見える**
-  await expect(status, '無言で断った(押しても何も起きない)').toBeVisible();
+  /**
+   * 🔴 理由が**見える**。
+   *
+   * ⚠ フル走行で **1 回だけ**ここが落ちている(#419)── そのとき残るのは
+   *   「見えなかった」だけで、**押せていないのか / 断り文が別の字なのか /
+   *   そもそも編集に入っていないのか**が分からない。
+   * ⚠ **待ちは伸ばさない**。落ちたときに残る情報だけを増やす。
+   */
+  await withStateOnFail(
+    page,
+    '無言で断った(押しても何も起きない)',
+    async () => ({
+      rows: await peek(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')),
+      statusText: await peek(status, 1),
+      pageErrors: errors,
+    }),
+    async () => {
+      await expect(status).toBeVisible();
+    },
+  );
   await expect(status).toContainText('編集');
   // ⚠ 押した場所に合った呼び名(行を押したのに「リンク先」と言わない)
   await expect(status).not.toContainText('リンク先');
