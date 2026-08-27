@@ -10,6 +10,8 @@
  * 5. **上限で切っても、数は数え続ける**(「これで全部」と嘘をつかない)
  */
 import { describe, expect, it } from 'vitest';
+import { extractMeta } from '../../src/features/flavor';
+import { SMART_ARCHETYPE } from '../../src/features/smart/smart-spec';
 import {
   EMPTY_SMART,
   MAX_SMART_TAGS,
@@ -613,5 +615,47 @@ describe('チェック項目で絞る(#421 段④)', () => {
     expect(needsRescan({ ...EMPTY_SMART, openTasks: true })).toBe(true);
     // 対照群 ── タグだけならその場で当て直せる
     expect(needsRescan({ ...EMPTY_SMART, tags: ['請求'] })).toBe(false);
+  });
+});
+
+/**
+ * 🔴 **グループ(= スマートフォルダ)を「タスク」として扱える**(#283 の (B)、2026-08-27)。
+ *
+ * > user 指示 2026-08-19「**エントリやエントリグループをタスクとして扱えるように
+ * > するんです**」
+ *
+ * 🔑 設計上「**グループ = 表紙を持つタグ**」(`docs/development/group-and-task-model-2026-08.md`
+ * §9 Q2)なので、**スマートフォルダの表紙に期日と状態が付けば**この要望は満たされる。
+ *
+ * ⚠ 直す前は `smartFlavor.extract` が `NO_EXTRACT` を返しており、
+ *   `date:` と書いても**列に入らず、予定の面に出ず、理由もどこにも出なかった**。
+ */
+describe('スマートフォルダは期日と状態を持てる(#283 の (B))', () => {
+  const body = (extra: string): string =>
+    `---\n${SMART_TAGS_KEY}: [請求]\n${extra}---\n月末にまとめて処理するぶん。\n`;
+
+  it('🔴 期日と状態が列へ入る(予定の面が読むのはこの列)', () => {
+    const e = extractMeta(SMART_ARCHETYPE, body('date: 2026-09-30\nstatus: doing\n'));
+    expect(e.date, '期日が列に入っていない').toBe('2026-09-30');
+    expect(e.status, '状態が列に入っていない').toBe('doing');
+    // ⚠ 対照群 ── 書いていなければ既定を作らない
+    const none = extractMeta(SMART_ARCHETYPE, body(''));
+    expect(none.date, '書いていないのに期日が付いた').toBeNull();
+    expect(none.status, '書いていないのに状態が付いた').toBeNull();
+  });
+
+  it('⚠ 条件は壊れない ── 期日を足しても `smart-tags` はそのまま読める', () => {
+    const withDate = body('date: 2026-09-30\n');
+    expect(readSmartSpec(withDate).tags, '期日を足したら条件が読めなくなった').toEqual(['請求']);
+    // 🔴 **逆向きも見る** ── 条件を書き換えても期日は残る(splice が鍵ごとに効く)
+    const next = writeSmartSpec(withDate, { ...EMPTY_SMART, tags: ['請求', '未払'] });
+    expect(readSmartSpec(next).tags, '条件が書き換わっていない').toEqual(['請求', '未払']);
+    expect(extractMeta(SMART_ARCHETYPE, next).date, '条件を触ったら期日が消えた').toBe(
+      '2026-09-30',
+    );
+  });
+
+  it('⚠ 片付けの列は写さない(書いただけでノートが消えない)', () => {
+    expect(extractMeta(SMART_ARCHETYPE, body('archived: true\n')).archived).toBe(false);
   });
 });

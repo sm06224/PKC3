@@ -31,6 +31,20 @@ const REGISTRY: ReadonlyMap<string, FlavorSpec> = new Map(
   ].map((f) => [f.archetype, f]),
 );
 
+/**
+ * 🔴 **登録されている archetype を数え上げる**(2026-08-27)。
+ *
+ * ⚠ **test が「全数」を名乗るために要る。** `tests/features/flavor.test.ts` は
+ *   「フレーバーを足した人が `NO_EXTRACT` を返したら、その場で落ちる」と
+ *   宣言していたのに、⚠ **一覧を手で書いていた** ── だから後から足した 2 つ
+ *   (`snippet` / `smart`)は**その検査を 1 度も通っていなかった**
+ *   (CLAUDE.md「宣言が在るぶん、次に読む人は数え直さない」)。
+ * 🔑 数え上げをここから出せば、**足した瞬間に検査の母集団に入る**。
+ */
+export function registeredArchetypes(): readonly string[] {
+  return [...REGISTRY.keys()];
+}
+
 /** 未知 / 個別登録の無い archetype(folder / generic / opaque 含む)は text fallback。 */
 export function getFlavor(archetype: string): FlavorSpec {
   return REGISTRY.get(archetype) ?? textFlavor;
