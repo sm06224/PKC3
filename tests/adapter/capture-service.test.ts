@@ -317,18 +317,55 @@ describe('🔴 ③ 入れられない回は黙らない(#413)', () => {
     expect(b.attached.length, '収録ごと捨てた').toBe(1);
   });
 
-  it('書込が飛んでいるとき(本文だけ入らない)', async () => {
+  /**
+   * 🔴 **書込が飛んでいる間は「預かる」。捨てない。**
+   *
+   * ⚠ 直す前はここで**捨てて**いた ── 添付だけ残り、本文には永久に入らない。
+   *   `writeLock` は**一瞬しか立たない**(effect 層が `ENTRY_APPENDED` を返せば解ける)
+   *   ので、**数ミリ秒待てば書ける物を捨てて**いたことになる。
+   *
+   * ⚠ **この test は 1 稿目では捨てても預かっても通っていた** ── 台が
+   *   `keepLock: true` で**錠を永久に握る**ので、どちらでも「追記は飛ばない」
+   *   「理由を言う」が成り立つ。🔑 だから**錠を解いて、入ることまで見る**
+   *   (CLAUDE.md §1「空振りを直したら、今度は何に救われていないかを問う」)。
+   */
+  it('🔴 書込が飛んでいる間は預かり、書けるようになったら入る', async () => {
     const b = bench({ keepLock: true });
     await b.service.start('audio');
-    // ⚠ 追記を 1 本撃つと `writeLock` が立つ(effect を繋いでいないので解けない)
+    // ⚠ 追記を 1 本撃つと `writeLock` が立つ(台が ack を返さないので解けない)
     b.d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'a', text: '先の追記', heading: null, target: null });
     expect(b.d.getState().writeLock, '書込中になっていない(前提が崩れている)').not.toBeNull();
     const before = appends(b.events).length;
     b.service.stop();
     await tick();
+
+    // ① まだ入らない(書けないので)── ⚠ ただし**捨ててはいない**
     expect(appends(b.events).length, '書込中なのに重ねて撃った').toBe(before);
     expect(b.notices.join(''), '理由を言っていない').toMatch(/本文を書けない/);
     expect(b.attached.length, '収録ごと捨てた').toBe(1);
+
+    /**
+     * ② 🔴 **錠を解くと入る** ── ここが「捨てた」と「預かった」を分ける唯一の観測点。
+     * ⚠ 台は ack を返さないので、**こちらで返す**(実物の effect 層と同じ形)。
+     */
+    const req = b.events.find((e) => e.type === 'REQUEST_APPEND');
+    expect(req, '追記の要求が出ていない(前提が崩れている)').toBeDefined();
+    const { lid, gen } = req as Extract<DomainEvent, { type: 'REQUEST_APPEND' }>;
+    b.d.dispatch({
+      type: 'ENTRY_APPENDED',
+      lid,
+      gen,
+      body: '本文',
+      status: null,
+      date: null,
+      archived: false,
+      inserted: null,
+    });
+    await tick();
+
+    const landed = appends(b.events).filter((a) => a.text.includes('録音-'));
+    expect(landed, '錠が解けても本文に入らない(預からずに捨てている)').toHaveLength(1);
+    expect(b.notices.join(''), '入れたことを言っていない').toMatch(/本文に入れました/);
   });
 
   it('⚠ 添付にできなかった回も、黙らない', async () => {
