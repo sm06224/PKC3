@@ -358,6 +358,18 @@ export interface BinderServices {
   deliverToExtension?(linkId: string, entry: ExtDeliveredEntry): boolean;
   downloadAsset?(assetKey: string, name: string): void;
   /**
+   * 🔴 **録音・画面収録**(#413。user 要望 2026-07-16「録音と画面収録を…
+   * これで、会議メモをうまく残せるはず」)。
+   *
+   * ⚠ **省略可** ── 無い配線では「この版では収録できません」と断るだけで、
+   *   他は壊れない(`readBodies` と同じ規律)。
+   * ⚠ 断る / 知らせるのは**受け側の仕事**(ここは撃つだけ)── binder は
+   *   `data-pkc-action` を UserAction に変えるだけで、段取りは持たない。
+   */
+  startCapture?(kind: 'audio' | 'screen'): void;
+  stopCapture?(): void;
+  discardCapture?(): void;
+  /**
    * 🔴 **貼る用に画像を持ち歩ける形へ**(#193)。`blob:` → `data:` の対応を返す。
    * ⚠ **省略可** ── 無ければ画像は文字に置き換わる(壊れた画像を貼らせない)。
    */
@@ -938,6 +950,17 @@ function refuseWhileBusy(
     error: '書き出し / 取込が実行中です。完了してから操作してください',
   });
   return true;
+}
+
+/**
+ * 🔴 **配線が無い版でも黙らない**(#413)。⚠ ボタンは画面に在るので、
+ * 押して何も起きないと「壊れている」と読まれる。
+ */
+function refuseNoCapture(dispatcher: Dispatcher): void {
+  dispatcher.dispatch({
+    type: 'OP_FAILED',
+    error: 'この版では録音・画面収録ができません',
+  });
 }
 
 /** 並べ替えの 2 つの向きで同じことをする(規則を 2 か所に書かない)。 */
@@ -2770,6 +2793,26 @@ const ACTIONS: Record<string, ActionHandler> = {
       ?.querySelector<HTMLInputElement>('[data-pkc-field="attach-input"]')
       ?.click();
   },
+  /**
+   * 🔴 **録音・画面収録**(#413)。⚠ 段取り(帯 / 添付 / 本文への参照)は
+   *   `capture.ts` が持つ ── ここは撃つだけ。
+   *
+   * ⚠ **`BODY_WRITE_ACTIONS` には載せない。** 止めると本文へ参照が入るので
+   *   一見この門に載るべきに見えるが、⚠ **忙しい間に「止める」を断ると
+   *   マイクが回り続ける** ── 収録は取り直せないので、止められないほうが害が
+   *   大きい。⚠ 本文へ入れられない回は `capture.ts` が**理由を出して**畳む
+   *   (黙って落とす経路は作っていない)。
+   */
+  'start-audio-capture': (dispatcher, _target, services) => {
+    if (!services.startCapture) return refuseNoCapture(dispatcher);
+    services.startCapture('audio');
+  },
+  'start-screen-capture': (dispatcher, _target, services) => {
+    if (!services.startCapture) return refuseNoCapture(dispatcher);
+    services.startCapture('screen');
+  },
+  'stop-capture': (_dispatcher, _target, services) => services.stopCapture?.(),
+  'discard-capture': (_dispatcher, _target, services) => services.discardCapture?.(),
   /**
    * 図を保存する(P8 段⑦)。⚠ 画面は PNG だが、**書き出すのはベクタ**
    * (user 指示 2026-08-03「SVG は書き出しのときだけ」)。

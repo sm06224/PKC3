@@ -48,6 +48,15 @@ const PLAIN_PORT = Number(process.env.PKC3_PLAIN_PORT ?? PORT + 1);
 const bundled = process.env.PKC3_CHROMIUM ?? '/opt/pw-browsers/chromium';
 const executablePath = existsSync(bundled) ? bundled : undefined;
 
+/**
+ * 🔴 **どのバイナリで走るかの判定は、この 1 か所**(#413)。
+ *
+ * ⚠ `test.use({ launchOptions })` は**丸ごと差し替わる** ── 起動引数を足したい
+ *   spec が自前で path を書くと、**そちらだけ別のブラウザ**で走る(CLAUDE.md §5 が
+ *   まさにその事故である)。だから spec はこれを読んで混ぜる。
+ */
+export const chromiumLaunch = executablePath ? { executablePath } : {};
+
 export default defineConfig({
   testDir: '.',
   testMatch: '**/*.smoke.spec.ts',

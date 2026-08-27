@@ -68,9 +68,12 @@ body {
    * ⚠ 下の帯(status)は**残す** ── エラーの唯一の出口だから。ただし
    * 既定は `hidden` なので、言うことが無いときは行の高さが 0 になる */
   /* ⚠ お知らせ(P11)も**自分の行**。相乗りさせない理由は `shell.ts` に書いた */
-  grid-template-rows: 1fr auto auto auto auto;
+  /* ⚠ **行の数は area の行と合わせる**(#413 で 1 行増えた)── 足りない分は
+   * 暗黙の行になって同じ `auto` に落ちるが、読み手が数を検算できなくなる */
+  grid-template-rows: 1fr auto auto auto auto auto;
   grid-template-areas:
     'sidebar  gripl detail   gripr inspector'
+    'capture  capture  capture  capture  capture'
     'announce announce announce announce announce'
     'update   update   update   update   update'
     'notices  notices  notices  notices  notices'
@@ -110,6 +113,7 @@ body {
   grid-template-columns: 8px minmax(0, 1fr) 8px minmax(220px, 15vw);
   grid-template-areas:
     'gripl detail   gripr inspector'
+    'capture capture capture capture'
     'announce announce announce announce'
     'update   update   update   update'
     'notices  notices  notices  notices'
@@ -119,6 +123,7 @@ body {
   grid-template-columns: minmax(200px, 18vw) 8px minmax(0, 1fr) 8px;
   grid-template-areas:
     'sidebar  gripl detail gripr'
+    'capture  capture  capture  capture'
     'announce announce announce announce'
     'update   update   update   update'
     'notices  notices  notices  notices'
@@ -128,6 +133,7 @@ body {
   grid-template-columns: 8px minmax(0, 1fr) 8px;
   grid-template-areas:
     'gripl detail gripr'
+    'capture capture capture'
     'announce announce announce'
     'update   update   update'
     'notices  notices  notices'
@@ -227,6 +233,12 @@ button[data-pkc-glyph]:disabled {
 }
 [data-pkc-region='status'] {
   grid-area: status;
+}
+
+/* 🔴 **収録中の帯**(#413)。⚠ 面の下・お知らせの上 ── サイドバーを畳んでも
+ * 消えない場所に置く(止める口が消えると、マイクが回り続ける)。 */
+[data-pkc-region='capture-bar'] {
+  grid-area: capture;
 }
 
 /* ── 部品 ─────────────────────────────────────────── */
@@ -3174,6 +3186,31 @@ li[data-pkc-row-slot] {
   color: var(--muted);
   font-size: 11px;
 }
+/* 🔴 **収録中だけ出る帯**(#413)。⚠ 地は無彩色のまま ── 色は情報にだけ使う
+ * (user 指示 2026-08-03)。「録っている」ことは**字と場所**で分かる。 */
+[data-pkc-region='capture-bar'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 2px var(--s3);
+  background: var(--surface);
+  font-size: 12px;
+}
+[data-pkc-field='capture-status'] {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+}
+/* ⚠ 紙には出さない(画面だけの帯である)。 */
+@media print {
+  [data-pkc-region='capture-bar'] {
+    display: none;
+  }
+}
+
 [data-pkc-region='status'] {
   display: flex;
   align-items: center;
