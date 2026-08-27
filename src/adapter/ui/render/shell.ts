@@ -20,6 +20,11 @@ import {
   timerEntryText,
   type TimerRun,
 } from '@features/timer/timer-run';
+import {
+  alarmBarLabel,
+  alarmEntryText,
+  type AlarmDue,
+} from '@features/alarm/alarm-due';
 
 export interface ShellRegions {
   /** 左の列の中身(探し方で切り替わる)。 */
@@ -160,7 +165,7 @@ export function paintTimerBar(
     if (!alive.has(li.getAttribute('data-pkc-timer') ?? '')) li.remove();
   }
   for (const run of runs) {
-    let li = list.querySelector<HTMLElement>(`[data-pkc-timer="${cssEscape(run.lid)}"]`);
+    let li = childByAttr(list, 'data-pkc-timer', run.lid);
     if (li === null) {
       li = document.createElement('li');
       li.setAttribute('data-pkc-timer', run.lid);
@@ -181,14 +186,63 @@ export function paintTimerBar(
 }
 
 /**
- * 選択子に入れる lid を安全にする。
- * ⚠ lid は生成物なので普通は英数字だが、**取込で来た lid は何が入っているか
- *   分からない** ── そのまま選択子に混ぜると、`"` 1 文字で
- *   `querySelector` が例外を投げて**帯ごと描けなくなる**。
+ * 🔴 **属性の値で行を引く**(選択子を組み立てない)。
+ *
+ * ⚠ 1 稿目は `[data-pkc-timer="…"]` という**選択子を文字列で組んで**いた。
+ *   lid や鍵は普通は英数字だが、**取込で来た lid は何が入っているか分からない**
+ *   ── 引用符が 1 文字混じると `querySelector` が例外を投げ、
+ *   **帯ごと描けなくなる**(#280 の test が実際に落として教えた)。
+ * ⚠ `CSS.escape` で逃がすのも解ではない ── あれは**識別子**用であって、
+ *   引用符の中の文字列用ではない。**選択子を組まなければ、逃がす必要も無い**。
  */
-function cssEscape(value: string): string {
-  const esc = (CSS as { escape?: (v: string) => string } | undefined)?.escape;
-  return esc ? esc(value) : value.replace(/["\\]/g, '\\$&');
+function childByAttr(list: HTMLElement, attr: string, value: string): HTMLElement | null {
+  for (const el of list.children) {
+    if (el.getAttribute(attr) === value) return el as HTMLElement;
+  }
+  return null;
+}
+
+/**
+ * 🔴 **鳴っている予定の帯を描き直す**(#280)。
+ *
+ * ⚠ **行は鍵で使い回す**(タイマーの帯と同じ理由)── 作り直すと、
+ *   押している最中に「開く」が指の下から消える。
+ * ⚠ **タイマーと同じ行にしない** ── 3 本計っていると、鳴った知らせが
+ *   横へ押し出されて**見えなくなる**(知らせは押し出されてはいけない)。
+ */
+export function paintAlarmBar(root: HTMLElement, due: readonly AlarmDue[]): void {
+  const bar = root.querySelector<HTMLElement>('[data-pkc-region="alarm-bar"]');
+  if (bar === null) return;
+  bar.hidden = due.length === 0;
+  const label = bar.querySelector<HTMLElement>('[data-pkc-field="alarm-label"]');
+  if (label !== null) label.textContent = due.length === 0 ? '' : alarmBarLabel(due.length);
+  const list = bar.querySelector<HTMLElement>('[data-pkc-field="alarm-list"]');
+  if (list === null) return;
+
+  const alive = new Set(due.map((d) => d.key));
+  for (const li of [...list.children]) {
+    if (!alive.has(li.getAttribute('data-pkc-alarm') ?? '')) li.remove();
+  }
+  for (const d of due) {
+    let li = childByAttr(list, 'data-pkc-alarm', d.key);
+    if (li === null) {
+      li = document.createElement('li');
+      li.setAttribute('data-pkc-alarm', d.key);
+      const text = document.createElement('span');
+      text.setAttribute('data-pkc-field', 'alarm-entry');
+      const open = iconButton('open-alarm', '開く');
+      open.setAttribute('data-pkc-alarm', d.key);
+      open.setAttribute('data-pkc-entry', d.lid);
+      open.title = 'その予定を書いたノートを開きます';
+      const close = iconButton('dismiss-alarm', '閉じる');
+      close.setAttribute('data-pkc-alarm', d.key);
+      close.title = 'この知らせを片付けます(本文は変わりません)';
+      li.append(text, open, close);
+      list.append(li);
+    }
+    const text = li.querySelector<HTMLElement>('[data-pkc-field="alarm-entry"]');
+    if (text !== null) text.textContent = alarmEntryText(d);
+  }
 }
 
 export function buildShell(root: HTMLElement): ShellRegions {
@@ -641,6 +695,20 @@ export function buildShell(root: HTMLElement): ShellRegions {
   timerList.setAttribute('data-pkc-field', 'timer-list');
   timers.append(timerLabel, timerList);
 
+  /**
+   * 🔴 **鳴っている予定の帯**(#280)。⚠ タイマーの帯の**すぐ下**に置く ──
+   *   どちらも「いま起きていること」なので、探す場所を分けない。
+   * ⚠ 「開く」と「閉じる」を**対で**置く(片道の操作を作らない)。
+   */
+  const alarms = document.createElement('section');
+  alarms.setAttribute('data-pkc-region', 'alarm-bar');
+  alarms.hidden = true;
+  const alarmLabel = document.createElement('span');
+  alarmLabel.setAttribute('data-pkc-field', 'alarm-label');
+  const alarmList = document.createElement('ul');
+  alarmList.setAttribute('data-pkc-field', 'alarm-list');
+  alarms.append(alarmLabel, alarmList);
+
   // 既定は空(= 何も出さない)。注意が出たときだけ中身が入る
   const notices = document.createElement('section');
   notices.setAttribute('data-pkc-region', 'notices');
@@ -668,6 +736,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
     inspector,
     capture,
     timers,
+    alarms,
     announce,
     update,
     notices,

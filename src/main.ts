@@ -59,7 +59,7 @@ import {
   isUnknownOpError,
   resolveContainerCompat,
 } from '@adapter/platform/storage/resolve-container-compat';
-import { buildShell, paintCaptureBar, paintTimerBar } from '@adapter/ui/render/shell';
+import { buildShell, paintAlarmBar, paintCaptureBar, paintTimerBar } from '@adapter/ui/render/shell';
 import { showNotices, clearNotices } from '@adapter/ui/render/notices';
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
 import { createAnnounce, announceServices } from '@adapter/ui/render/announce';
@@ -120,6 +120,9 @@ import { AppendBoxRenderer } from '@adapter/ui/render/append-box';
 import { bindActions, generateLid, type BinderServices } from '@adapter/ui/actions/binder';
 import { createCaptureService } from '@adapter/ui/actions/capture';
 import { createTimerService } from '@adapter/ui/actions/timer';
+import { createAlarmService } from '@adapter/ui/actions/alarm';
+import { createChime } from '@adapter/platform/chime';
+import { appAlarmEnabled } from '@adapter/ui/render/alarm-enabled';
 import {
   armLaunchQueue,
   type LaunchTarget,
@@ -1564,6 +1567,25 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     notify: showStatus,
   });
 
+  /**
+   * 🔴 **アラート**(#280)。段取りは `alarm.ts` が持ち、ここは口を渡すだけ。
+   *
+   * ⚠ **設定が入のときだけ、起動時に予定を数える** ── 予定の札は
+   *   「予定」の面を開いた user にしか集まらない(`app-state.ts` の方針)。
+   *   その全走査を、知らせを使わない user に負わせない。
+   * ⚠ 見張り自体は常に張る(刻みの中で設定を毎回引く)── 設定を入にした
+   *   その場から効かせるため。数えるのは `REFRESH_TASK_SCAN` の側である。
+   */
+  const alarmChime = createChime();
+  const alarmService = createAlarmService({
+    dispatcher,
+    onChange: (due) => paintAlarmBar(root, due),
+    chime: alarmChime,
+    enabled: () => appAlarmEnabled.enabled(),
+  });
+  alarmService.start();
+  if (appAlarmEnabled.enabled()) dispatcher.dispatch({ type: 'REFRESH_TASK_SCAN' });
+
   const services: BinderServices = {
     attachFiles: (files) => void withAssetGate(() => attachFiles(dispatcher, attachDeps, files)),
     // 🔴 録音・画面収録(#413)── 押す口は左の列の「添付」の隣に在る
@@ -1574,6 +1596,37 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     startTimer: () => timerService.start(),
     stopTimer: (lid) => timerService.stop(lid),
     discardTimer: (lid) => timerService.discard(lid),
+    // 🔴 アラート(#280)── 鳴った知らせを片付ける
+    dismissAlarm: (key) => alarmService.dismiss(key),
+    /**
+     * 🔴 **入にしたその場から効かせる**(#280)── 入にした user が
+     *   「読み込み直すまで鳴らない」に気づく手段は無い。
+     * ⚠ 切にしたら**鳴っている知らせも畳む** ── 切ったのに残っていると、
+     *   「切れていない」と読まれる。
+     */
+    setAlarmEnabled: (on) => {
+      appAlarmEnabled.setEnabled(on);
+      if (!on) {
+        alarmService.dismissAll();
+        return;
+      }
+      dispatcher.dispatch({ type: 'REFRESH_TASK_SCAN' });
+      /**
+       * 🔴 **入にしたその場で 1 度鳴らす**(#280)。理由は 3 つとも user のためである:
+       * ① **どんな音か分かる** ── 初めて鳴るのが本番だと、何の音か分からない
+       * ② 🔴 **鳴らせるかがその場で分かる** ── ブラウザは「user が触っていない
+       *    ページ」の音を止める。⚠ ここは**押した直後**なので必ず通り、
+       *    以後の知らせも鳴るようになる(押さずに入れる道が無い形にしてある)
+       * ③ **鳴らせなかったときに、そう言える**(下)
+       */
+      void alarmChime.play().then((rang) => {
+        showStatus(
+          rang
+            ? '予定の時刻に、この音で知らせます(PKC を開いている間だけです)'
+            : 'この端末では音を出せませんでした ── 時間になったら画面の下の帯でお知らせします',
+        );
+      });
+    },
     // 🔑 一時の知らせ(「3 件を『はこ』へ入れました」)── **エラーの行とは別**
     showStatus,
     /**

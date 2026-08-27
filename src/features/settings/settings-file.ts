@@ -46,6 +46,7 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
   { key: 'pkc3.dual-preview', label: '2 ペインの下見' },
   { key: 'pkc3.paste-source', label: '貼り付けの判定' },
   { key: 'pkc3.query-key', label: '集計の束ね方' },
+  { key: 'pkc3.alarm', label: '予定の時刻に知らせるか' },
 ];
 
 /**

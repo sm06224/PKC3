@@ -20,6 +20,7 @@ import { currentPageFormat } from './page-format';
 import { EDITOR_MODES } from '@features/editor-mode';
 import { appEditorMode, EditorModeStore } from './editor-mode';
 import { appOpenInEdit, OpenInEditStore } from './open-in-edit';
+import { appAlarmEnabled, AlarmEnabledStore } from './alarm-enabled';
 import { EXTERNAL_IMAGE_MODES } from '@features/markdown/external-images';
 import { appExternalImages, ExternalImagePolicy } from './external-images';
 import { PASTE_SOURCES } from '@features/markdown/paste-source';
@@ -80,6 +81,14 @@ export class SettingsRenderer {
      *   **静かに別の物を受け取る**(1 稿目で実際に 12 件落とした)。
      */
     private readonly pasteSource: PasteSourceStore = appPasteSource,
+    /**
+     * 🔴 **予定の時刻に知らせるか**(#280)。
+     * ⚠ **末尾に足す**(すぐ上の戒めのとおり)── 途中に入れると、位置引数で
+     *   渡している test が**静かに別の物を受け取る**。⚠ 1 稿目で実際に
+     *   途中へ入れて 2 件落とした(型が違ったので tsc が拾ったが、
+     *   **同じ型どうしなら黙って通る**)。
+     */
+    private readonly alarmEnabled: AlarmEnabledStore = appAlarmEnabled,
   ) {}
 
   private sameOriginList: HTMLElement | null = null;
@@ -92,6 +101,7 @@ export class SettingsRenderer {
       this.syncPageFormat();
       this.syncEditorMode();
       this.syncOpenInEdit();
+      this.syncAlarmEnabled();
       this.syncExternalImages();
       this.syncPasteSource();
       this.syncSameOrigin(state);
@@ -266,6 +276,34 @@ export class SettingsRenderer {
     dl.append(ot, od);
 
     /**
+     * 🔴 **予定の時刻に知らせるか**(#280。user 指示 2026-08-19「アラートは
+     * 組み込みアプリでリリースしたい」)。
+     * ⚠ **既定は切** ── 音は割り込みであり、入にすると起動のたびに予定を数える。
+     * ⚠ **できないことを先に書く**(#280 の本文)── 「開いている間だけ」を
+     *   曖昧にすると、user は**鳴る前提で予定を任せて失う**。
+     */
+    const at = document.createElement('dt');
+    at.textContent = '予定の知らせ';
+    const ad = document.createElement('dd');
+    const alabel = document.createElement('label');
+    const acheck = document.createElement('input');
+    acheck.type = 'checkbox';
+    acheck.setAttribute('data-pkc-action', 'set-alarm-enabled');
+    acheck.setAttribute('data-pkc-field', 'alarm-enabled');
+    alabel.append(acheck, document.createTextNode(' 予定の時刻になったら音で知らせる'));
+    ad.append(alabel);
+    const anote = document.createElement('p');
+    anote.setAttribute('data-pkc-field', 'settings-note');
+    anote.textContent =
+      '本文の行に時刻まで書いた予定(- [ ] 打ち合わせ @2026-08-27 14:00)が対象です。' +
+      '時間になると短い音が鳴り、画面の下に帯が出ます。押すとそのノートを開きます。' +
+      'PKC を開いている間だけ鳴ります ── 閉じている間は鳴りません(ブラウザでは' +
+      '閉じたページを時刻で起こすことができないためです)。' +
+      'ここを入れると、起動したときに予定を数えます(切のままなら数えません)。';
+    ad.append(anote);
+    dl.append(at, ad);
+
+    /**
      * 📣 **お知らせを出すか**(P11 段⑤)。
      *
      * 🔑 **ここが「今後は出さない」の戻し道である。** 帯にしか導線が無いと、
@@ -326,6 +364,7 @@ export class SettingsRenderer {
     this.syncPageFormat();
     this.syncEditorMode();
     this.syncOpenInEdit();
+    this.syncAlarmEnabled();
     this.syncSameOrigin(state);
     this.syncExtensions(state);
     this.syncPersist(state);
@@ -748,6 +787,11 @@ export class SettingsRenderer {
   private syncOpenInEdit(): void {
     const box = this.region.querySelector<HTMLInputElement>('[data-pkc-field="open-in-edit"]');
     if (box) box.checked = this.openInEdit.enabled();
+  }
+
+  private syncAlarmEnabled(): void {
+    const box = this.region.querySelector<HTMLInputElement>('[data-pkc-field="alarm-enabled"]');
+    if (box) box.checked = this.alarmEnabled.enabled();
   }
 
   private syncNotices(): void {

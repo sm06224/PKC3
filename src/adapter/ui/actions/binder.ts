@@ -379,6 +379,13 @@ export interface BinderServices {
   stopTimer?(lid: string): void;
   discardTimer?(lid: string): void;
   /**
+   * 🔴 **アラート**(#280)。⚠ **省略可**(収録・タイマーと同じ規律)。
+   * ⚠ 片付けるのは**どの知らせか**を渡す(複数同時に鳴りうる)。
+   */
+  dismissAlarm?(key: string): void;
+  /** 🔴 予定の知らせを入 / 切にする(#280)。⚠ 入にした瞬間に予定を数え直す。 */
+  setAlarmEnabled?(on: boolean): void;
+  /**
    * 🔴 **貼る用に画像を持ち歩ける形へ**(#193)。`blob:` → `data:` の対応を返す。
    * ⚠ **省略可** ── 無ければ画像は文字に置き換わる(壊れた画像を貼らせない)。
    */
@@ -2849,6 +2856,23 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (lid !== null) services.discardTimer?.(lid);
   },
   /**
+   * 🔴 **鳴った予定を開く**(#280)。⚠ **開いたら片付ける** ── 開いたのに
+   *   帯に残っていると、user は「押しても消えない」と読む。
+   * ⚠ 選択は既存の `SELECT_ENTRY` を通す(開く経路を 2 本にしない)。
+   */
+  'open-alarm': (dispatcher, target, services) => {
+    const key = target.getAttribute('data-pkc-alarm');
+    const lid = target.getAttribute('data-pkc-entry');
+    if (lid !== null && dispatcher.getState().entryMetas.has(lid)) {
+      dispatcher.dispatch({ type: 'SELECT_ENTRY', lid });
+    }
+    if (key !== null) services.dismissAlarm?.(key);
+  },
+  'dismiss-alarm': (_dispatcher, target, services) => {
+    const key = target.getAttribute('data-pkc-alarm');
+    if (key !== null) services.dismissAlarm?.(key);
+  },
+  /**
    * 図を保存する(P8 段⑦)。⚠ 画面は PNG だが、**書き出すのはベクタ**
    * (user 指示 2026-08-03「SVG は書き出しのときだけ」)。
    * ⚠ 「何枚目か」は**描いた側の並び**から数える ── 器に番号を焼き込むと、
@@ -3527,6 +3551,10 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'set-open-in-edit': (_dispatcher, target, services) => {
     if (target instanceof HTMLInputElement) services.setOpenInEdit?.(target.checked);
+  },
+  'set-alarm-enabled': (_dispatcher, target, services) => {
+    // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
+    if (target instanceof HTMLInputElement) services.setAlarmEnabled?.(target.checked);
   },
   'set-notices-enabled': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
