@@ -1367,21 +1367,87 @@ li[data-pkc-row-slot] {
 .pkc-md-rendered[data-pkc-prose] > [data-pkc-row-slot][data-pkc-row-prose] {
   max-width: var(--read-w);
 }
+/**
+ * 🔴 **見出しは「見出しに見える」ことが先**(user 報告 2026-08-27)。
+ *
+ * > 見出し行が見づらいんだよね。特に見出しのレベルが高いと文字が小さくなるから
+ * > 文と一緒の大きさに見える。
+ *
+ * ⚠ **測ったら user の言うとおりだった** ── 大きさを書いていたのは **h1〜h3 だけ**で、
+ * h4 は本文と同じ 1em、**h5 は 0.83em / h6 は 0.67em と本文より小さい**(UA 既定)。
+ * さらに間隔の規則も **h1〜h4 までしか無く**、h5 / h6 は前後の余白まで失っていた ──
+ * つまり深い見出しは「小さくて詰まった太字の行」で、本文と区別が付かない。
+ *
+ * 🔑 直しは 2 つ:
+ * ① **本文より小さくしない**(h4〜h6 は 1em で止める)── 段は大きさではなく
+ *    **左の帯の濃さ**で示す。大きさだけで 6 段を作ると、下の段は必ず本文に埋もれる
+ * ② **左端に細いインデックスカラーを敷く**(user 提案「Word みたいな?」)──
+ *    段に依らず**全部の見出しに出る**ので、「これは見出しである」が一目で分かる
+ *
+ * 🔴 **帯そのものが畳みのボタンである**(user 指摘 2026-08-27
+ * 「記号がないと押せないの? 行頭インデックスカラーをボタンにできないの?
+ * 正直見出し全体クリック判定はあまり良い挙動じゃないと思う」)。
+ * 🔑 記号を出す必要は無い ── **押せる物を置けばよい**。押し所は帯の幅だけなので、
+ *   見出しの字を押したときの振る舞い(編集に入る)と**取り合わない**。
+ *
+ * ⚠ **色は 1 か所で決める**(`--pkc-heading-bar`)── 帯を描くのは
+ *   ①見出しの `border`(全部の見出しに出る)②ボタンの `::before`(畳める見出し
+ *   だけ、①の上に重なる)の 2 か所である。⚠ **配下が無い見出しにはボタンが出ない**
+ *   (`heading-fold.ts`「押せない口を作らない」)ので、①が無いと
+ *   **帯の出る見出しと出ない見出しができる**。値を変数 1 つに寄せて食い違いを防ぐ。
+ * 🔑 `position: relative` は畳みのボタンの置き場(下の `absolute`)である。
+ */
 .pkc-md-rendered h1,
 .pkc-md-rendered h2,
 .pkc-md-rendered h3,
-.pkc-md-rendered h4 {
+.pkc-md-rendered h4,
+.pkc-md-rendered h5,
+.pkc-md-rendered h6 {
+  position: relative;
   margin: var(--s5) 0 var(--s2);
   line-height: 1.3;
+  padding-inline-start: 0.85em;
+  /* 🔑 既定は h1 の濃さ。h2 以降が変数を上書きする。
+   * ⚠ **使う所は既定値つきで書く**(`var(--x, …)`)── ここは書き出しへ焼かれる
+   *   規則で、焼いた CSS の検査は「参照するトークンが **tokens.css に在るか**」を
+   *   見る。この変数は tokens.css ではなく**見出しの規則自身**が定義するので、
+   *   既定値を書かないと「定義が無い」で build が止まる(実際に止めた)。
+   *   ⚠ 既定値は逃げではない ── 書き出し先でも `--accent` は在るので、
+   *   **どちらの経路でも同じ色になる**。 */
+  --pkc-heading-bar: var(--accent);
+  border-inline-start: 3px solid var(--pkc-heading-bar, var(--accent));
+}
+/* 🔑 上の 2 段は区切りも引く(節の切れ目)。⚠ 深い段には引かない ──
+ *    全部に引くと線だらけになり、切れ目の意味が消える。 */
+.pkc-md-rendered h1,
+.pkc-md-rendered h2 {
+  padding-block-end: 0.2em;
+  border-block-end: 1px solid color-mix(in srgb, var(--fg) 12%, transparent);
 }
 .pkc-md-rendered h1 {
   font-size: 1.35em;
 }
 .pkc-md-rendered h2 {
   font-size: 1.2em;
+  --pkc-heading-bar: color-mix(in srgb, var(--accent) 82%, transparent);
 }
 .pkc-md-rendered h3 {
   font-size: 1.08em;
+  --pkc-heading-bar: color-mix(in srgb, var(--accent) 64%, transparent);
+}
+/* 🔴 **ここから下は本文と同じ大きさで止める**(UA 既定の 0.83 / 0.67em を打ち消す)。
+ *    ⚠ この 3 行が無いと、**見出しが本文より小さくなる** ── user 報告の本体である。 */
+.pkc-md-rendered h4 {
+  font-size: 1em;
+  --pkc-heading-bar: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+.pkc-md-rendered h5 {
+  font-size: 1em;
+  --pkc-heading-bar: color-mix(in srgb, var(--accent) 38%, transparent);
+}
+.pkc-md-rendered h6 {
+  font-size: 1em;
+  --pkc-heading-bar: color-mix(in srgb, var(--accent) 28%, transparent);
 }
 .pkc-md-rendered ol,
 .pkc-md-rendered ul {
@@ -4500,17 +4566,56 @@ li[data-pkc-row-slot] {
  * `h1.textContent` に混ざり、写し・読み上げ・アンカー・目次が全部汚れる。
  */
 [data-pkc-field='heading-fold'] {
+  /* 🔑 **押し所は帯の上**。`inset-inline-start: -3px` で見出しの border に重ね、
+   *    幅は「帯 + 内側の余白」= 押しやすい大きさにする(見えるのは帯だけ)。
+   * ⚠ 高さは見出しいっぱい(`top/bottom: 0`)── 1 行の見出しでも掴みやすい。 */
+  position: absolute;
+  inset-inline-start: -3px;
+  top: 0;
+  bottom: 0;
+  width: calc(0.85em + 3px);
   background: none;
   border: 0;
-  cursor: pointer;
-  color: var(--muted, inherit);
+  padding: 0;
   font: inherit;
-  padding: 0 0.35em 0 0;
-  line-height: 1;
+  cursor: pointer;
 }
+/* 🔴 **ボタンが帯を描く**(見出しの border の上に、同じ色で重なる)。
+ *    ⚠ 色は `--pkc-heading-bar` を親の見出しから継ぐ ── 2 か所で別の色にしない。 */
 [data-pkc-field='heading-fold']::before {
-  content: '▾';
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: 3px;
+  background: var(--pkc-heading-bar, var(--accent));
+  transition:
+    width 0.12s,
+    background-color 0.12s;
 }
+/* 🔴 **触れた・鍵で選んだときは帯が太く濃くなる** ── これが「押せる」の合図である。
+ *    🔑 記号は要らない(user 指摘 2026-08-27「記号がないと押せないの?」)──
+ *    ふだんの画面から記号が消え、見出しの字が読みやすくなる。 */
+[data-pkc-field='heading-fold']:hover::before,
+[data-pkc-field='heading-fold']:focus-visible::before {
+  width: 5px;
+  background: var(--accent);
+}
+/* 🔴 **畳んでいる間だけ、記号を出す**(触れていなくても)。
+ * ⚠ ここを消すと、畳んだ見出しが**ただの短い見出しに見え**、
+ *   畳んだ事実も開き直す口も画面から消える(片道の操作になる)。
+ * 🔑 記号は `::after` で出す ── ボタンに字を入れると `h1.textContent` に混ざり、
+ *   写し・読み上げ・アンカー・目次が全部汚れる。 */
 [data-pkc-field='heading-fold'][aria-expanded='false']::before {
+  width: 5px;
+  background: var(--accent);
+}
+[data-pkc-field='heading-fold'][aria-expanded='false']::after {
   content: '▸';
+  position: absolute;
+  inset-inline-start: 6px;
+  top: 0;
+  color: var(--muted, inherit);
+  font-size: 0.8em;
+  line-height: 1.6;
 }
