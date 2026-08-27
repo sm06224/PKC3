@@ -199,3 +199,29 @@ export function removeInsertedLines(body: string, run: readonly string[]): strin
   }
   return null;
 }
+
+/**
+ * 🔴 **その行が居る節を引く**(#495。Alt+クリックで追記の入り先を指す)。
+ *
+ * > user 裁定 2026-08-27「**センターペインの追記位置指定は Alt+クリックにしましょう**」
+ *
+ * 押した所から**いちばん近い上の見出し**を返す ── 深い見出しの中で押したら
+ * その深い見出しが返る(`resolveAppendAt` が「次の同格以上の見出しの直前」まで
+ * を節と数えるので、**選んだ節の末尾**は押した所を含む節の末尾になる)。
+ *
+ * @param line **原文の**行番号(0 起点)。⚠ 描く面は frontmatter を剥がした側を
+ *   見ているので、呼び側が `frontmatterLineCount` を足してから渡す ──
+ *   ずらす値は 1 か所(`detail.ts` の `fmLines` と同じ規律)。
+ * @returns その節の見出し。⚠ **上に見出しが 1 つも無ければ `null`**
+ *   ── 呼び側は**入り先を変えない**(「末尾」へ落とすと、上のほうを押したのに
+ *   文書のいちばん下へ入る = いちばん静かな取り違えになる)。
+ */
+export function sectionAt(body: string, line: number): AppendTarget | null {
+  let hit: HeadingAt | null = null;
+  for (const h of scanHeadings(body)) {
+    if (h.line > line) break;
+    hit = h;
+  }
+  if (hit === null) return null;
+  return { slug: hit.slug, text: hit.text, level: hit.level };
+}

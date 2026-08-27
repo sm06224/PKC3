@@ -189,7 +189,7 @@ describe('読み幅が効く面(アプリ 4 面)', () => {
 
     // 🔴 押した行だけ跳ねない ── 段落を押した器には**散文の印**が付く
     const p = [...live!.querySelectorAll('p')].find((e) => e.textContent === '生にする段落。')!;
-    p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, ctrlKey: true }));
     const slot = live!.querySelector<HTMLElement>('[data-pkc-row-slot]');
     expect(slot, '行を押しても生の器が出ていない(この検査は空振り)').not.toBeNull();
     expect(
@@ -222,7 +222,7 @@ describe('読み幅が効く面(アプリ 4 面)', () => {
       '表に読み幅が掛かっている(allow-list が壊れている)',
     ).toBe('');
 
-    table!.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    table!.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, ctrlKey: true }));
     const slot = live!.querySelector<HTMLElement>('[data-pkc-row-slot]');
     expect(slot, '表を押しても生の器が出ていない(この検査は空振り)').not.toBeNull();
     expect(
@@ -244,7 +244,7 @@ describe('読み幅が効く面(アプリ 4 面)', () => {
     const fig = live!.querySelector<HTMLElement>('[data-pkc-mermaid-src]');
     expect(fig, '図の器が描かれていない(この検査は空振り)').not.toBeNull();
 
-    fig!.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    fig!.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, ctrlKey: true }));
     const slot = live!.querySelector<HTMLElement>('[data-pkc-row-slot]');
     expect(slot, '図を押しても生の器が出ていない(この検査は空振り)').not.toBeNull();
     // ⚠ 空振り防止 ── **図の原文が開いた**こと(別の塊が開いたのでは意味がない)
@@ -283,7 +283,7 @@ describe('読み幅が効く面(アプリ 4 面)', () => {
       '無関係な上限が器に効いていない(この検査は空振り)',
     ).toBe('100%');
 
-    block!.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    block!.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, ctrlKey: true }));
     const slot = live!.querySelector<HTMLElement>('[data-pkc-row-slot]');
     expect(slot, '押しても生の器が出ていない(この検査は空振り)').not.toBeNull();
     expect(

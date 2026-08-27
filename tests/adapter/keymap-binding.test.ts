@@ -381,7 +381,7 @@ describe('経路ごとの割り当て直し', () => {
     const text = '最初の段落。';
     const { html, ranges } = renderMarkdownWithRanges(text);
     expect(swap.update(text, html, ranges).ok, '前提: 塊が組めていない').toBe(true);
-    host.querySelector('p')!.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    host.querySelector('p')!.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, ctrlKey: true }));
     const ta = host.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]');
     expect(ta, '前提: 行が開いていない').not.toBeNull();
     const key = (init: KeyboardEventInit & { code: string }) =>

@@ -105,6 +105,31 @@ export function frontmatterLineCount(body: string): number {
 }
 
 /**
+ * 🔴 **描く本文** = 原文から frontmatter の**物理行だけ**を落としたもの(#495 の
+ * 着地前レビューで判明。2026-08-28)。
+ *
+ * ## なぜ `parseFrontmatter().body` を描いてはいけないか
+ *
+ * ⚠ あちらは**閉じの直後の空行を 1 行余分に食べる**(すぐ上の注記)。描く側が
+ *   それを使い、行を書き戻す側が `frontmatterLineCount` を使っていたので、
+ *   🔴 **閉じの `---` の直後が空行のノートで、画面の刻印と原文の行が 1 つずれて
+ *   いた**(実測: `count=3` / 実際に剥がれた行数 `4`)。
+ *
+ * 帰結は 3 つとも**無言**である:
+ * - **チェックの印を押すと、1 行上の項目の印が動く**(`taskLineOffset`)
+ * - `Ctrl`+クリックで編集に入っても、**どの行も開かない**(空行を指すため)
+ * - `Alt`+クリックの追記の入り先が、**1 つ前の節**になる
+ *
+ * 🔑 `frontmatterLineCount` の注記が既に「**切るのも呼び側で
+ *   `split('\n').slice(n)` に統一する**」と書いていた ── その 1 行をここに
+ *   関数として置き、描く側が必ずこれを通るようにする(§7)。
+ */
+export function bodyBelowFrontmatter(body: string): string {
+  const n = frontmatterLineCount(body);
+  return n === 0 ? body : body.split('\n').slice(n).join('\n');
+}
+
+/**
  * 閉じの `---` が無いとき、**frontmatter として読める行が先頭から何行続くか**を返す
  * (#284 / #318)。`0` なら「ただの水平線で始まる普通の文書」。
  *

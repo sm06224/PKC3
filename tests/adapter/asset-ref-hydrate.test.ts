@@ -502,7 +502,7 @@ describe('1 面で行を閉じたあとの asset hydrate(#250)', () => {
     await waitFor(() => (img()?.getAttribute('src') ?? '') !== '', '前提: src が差されない');
 
     // 画像の塊そのものを押して開く(= その塊が原文の入力欄に化ける)
-    img()!.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    img()!.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, ctrlKey: true }));
     const ta = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]');
     expect(ta, '前提: 画像の行が開かない(この次元を測れていない)').not.toBeNull();
 

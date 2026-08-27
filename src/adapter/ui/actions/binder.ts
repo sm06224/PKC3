@@ -39,7 +39,10 @@ import {
 } from '@features/settings/settings-file';
 import { downloadBlob } from '@adapter/platform/download';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
-import { insertText } from '@adapter/ui/render/row-swap';
+import { insertText, OWN_MEANING } from '@adapter/ui/render/row-swap';
+import { sectionAt } from '@features/markdown/append-target';
+import { appendModeOf } from '@adapter/ui/render/append-box';
+import { frontmatterLineCount } from '@features/markdown/frontmatter';
 import {
   entryPickNote,
   entryPickRows,
@@ -1046,6 +1049,130 @@ function navigateToLink(dispatcher: Dispatcher, raw: string | null): void {
  * @param what 断り文に入れる呼び名(「リンク先」/「ノート」)
  * @returns 開いたら true
  */
+/**
+ * 🔴 **読む面で押した所の原文の行**(#395 段③ / #495 が共有する 1 か所)。
+ *
+ * 🔑 行は読む面の刻印(`data-pkc-source-line`)から引く ── **新しい逆引きを
+ *   作らない**(`copy-source.ts` と同じ印を読む。§7)。
+ * ⚠ **押せる物の上では降りる** ── リンク・ボタン・チェックの印は、その場に
+ *   自分の意味を持っている(奪うと、その動線が 1 つ死ぬ)。とくに `Ctrl` / `⌘` は
+ *   リンクの「新しいタブで開く」なので、ここを緩めると既定を丸ごと奪う。
+ * ⚠ **`ready` のときだけ** ── `START_EDIT` も追記欄も `ready` 以外では動かない
+ *   (`appendModeOf` の門と同じ)。ここで揃えておけば、呼び側は 2 本目の門を持たない。
+ * ⚠ 刻印が引けなければ `null` ── **当てずっぽうで別の行を扱わない**。
+ *
+ * @returns frontmatter を**剥がした側**の行番号(`RowSwap` / `editOpenAt` と同じ基準)
+ */
+function bodySourceLineAt(
+  dispatcher: Dispatcher,
+  target: EventTarget | null,
+): number | null {
+  const hit = target instanceof Element ? target : null;
+  /**
+   * 🔴 **刻印から読む面を引く**(2026-08-28。変異試験 M7 が SURVIVED で教えた)。
+   *
+   * ⚠ 直す前は `bodyHost` も `mark` も**押した所から別々に** `closest` していて、
+   *   そのうえで「読む面が刻印を含むか」を検めていた ── どちらも押した所の
+   *   祖先なので**近いほうが必ず遠いほうの子孫**であり、その検査が偽になるのは
+   *   「刻印が読む面を包んでいる」ときだけ = **実在しない形**だった
+   *   (だから外しても test が 1 つも落ちない)。
+   * 🔑 **検出するより、起こらなくする**(CLAUDE.md §7)── 刻印を先に引いて、
+   *   そこから読む面へ登れば、包含は**組み立てから成り立つ**ので検査が要らない。
+   */
+  const mark = hit?.closest('[data-pkc-source-line]') ?? null;
+  const bodyHost = mark?.closest('[data-pkc-field="detail-body"]') ?? null;
+  // 🔑 一覧は `row-swap.ts` の `OWN_MEANING` **1 本**(2 か所に別の綴りを生やさない)
+  const own = hit?.closest(OWN_MEANING) ?? null;
+  /**
+   * ⚠ **`root.contains(bodyHost)` は置かない**(2026-08-28。着地前レビュー H)。
+   *   この handler は `root` に張ってあるので、`root` の外の click はそもそも
+   *   届かない ── 外しても test が 1 本も落ちない**死んだ門**だった。
+   *   🔑 検出するより起こらなくする(上の `mark` → `bodyHost` と同じ向き)。
+   */
+  if (
+    bodyHost === null ||
+    mark === null ||
+    (own !== null && bodyHost.contains(own)) ||
+    dispatcher.getState().phase !== 'ready'
+  ) {
+    return null;
+  }
+  const line = Number(mark.getAttribute('data-pkc-source-line'));
+  return Number.isInteger(line) && line >= 0 ? line : null;
+}
+
+/**
+ * 🔴 **押した所の節を、追記の入り先にする**(#495。user 裁定 2026-08-27)。
+ *
+ * > 「センターペインの**追記位置指定は Alt+クリック**にしましょう」
+ *
+ * 🔑 **入り先の正本は `<select>` そのもの**(`append-entry` がここから読む)──
+ *   state に 2 本目の持ち場を作らない(§7)。押した結果は**その `<select>` が
+ *   変わって見える**ことで user に届く。
+ * ⚠ **黙って何も起きないを作らない** ── 選べないときは理由を出す。
+ * ⚠ **上に見出しが無いときは入り先を変えない** ── 「末尾」へ落とすと、
+ *   文書の上のほうを押したのに**いちばん下へ入る**(いちばん静かな取り違え)。
+ */
+function pickAppendTarget(dispatcher: Dispatcher, root: HTMLElement, line: number): void {
+  const st = dispatcher.getState();
+  /**
+   * 🔴 **追記欄が画面に出ている面でだけ受ける**(2 稿目。user 目線レビュー F)。
+   *
+   * ⚠ `<select>` は `AppendBoxRenderer` が**器を 1 度だけ組む**ので、追記できない
+   *   ノート(添付・フォルダ)でも `querySelector` は**畳まれた物を掴む** ──
+   *   しかも中身は**さっきまで見ていた別のノートの見出し**のままなので、
+   *   1 稿目は「『はじめに』は追記の入り先に選べません」という
+   *   **追記欄が 1 つも見えていない画面で、追記についての断り文**を出していた。
+   * 🔑 判定は `appendModeOf` **1 か所**を引く(2 本目の規則を書かない。§7)。
+   * ⚠ ここは**黙って降りてよい** ── 読むだけの面なので、押した人は
+   *   「追記の入り先を選んだ」つもりが無い。
+   */
+  if (appendModeOf(st).kind !== 'ready') return;
+  const lid = st.selectedLid;
+  const sel = root.querySelector<HTMLSelectElement>('[data-pkc-field="append-target"]');
+  /**
+   * ⚠ **この `lid` 一致は門ではない**(2026-08-28。着地前レビュー M7 を検算して判明)。
+   *   上の `appendModeOf` が既に `openBody?.lid === lid` を要求しているので、
+   *   ここが偽になる形は作れない ── **型を絞るための書き方**として残している。
+   *   🔑 だから「これが無いと別のノートの本文で節を引く」とは**書かない**
+   *   (CLAUDE.md「これが無いと壊れる、と書く前に外して壊れるのを見る」)。
+   */
+  const body = lid !== null && st.openBody?.lid === lid ? st.openBody.body : null;
+  if (sel === null || body === null) {
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: 'このノートには追記の欄が無いので、入り先は選べません',
+    });
+    return;
+  }
+  /**
+   * ⚠ **原文の行へ戻す** ── 描く面は frontmatter を剥がした側を見ているが、
+   *   見出しを数える側(`sectionAt`)は原文で数える。ずらす値は
+   *   `frontmatterLineCount` 1 つ(`detail.ts` の `fmLines` と同じ規律)。
+   */
+  const sec = sectionAt(body, line + frontmatterLineCount(body));
+  if (sec === null) {
+    dispatcher.dispatch({
+      type: 'OP_NOTICE',
+      message: 'ここより上に見出しが無いので、入り先は変えていません',
+    });
+    return;
+  }
+  // ⚠ 一覧に無い印は選べない(見出しが 1 つも無いノートでは `<select>` は畳んである)
+  if (!Array.from(sel.options).some((o) => o.value === sec.slug)) {
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: `「${sec.text}」は追記の入り先に選べません`,
+    });
+    return;
+  }
+  sel.value = sec.slug;
+  dispatcher.dispatch({
+    type: 'OP_NOTICE',
+    message: `追記の入り先を「${sec.text}」にしました`,
+  });
+}
+
 function selectEntryOrExplain(dispatcher: Dispatcher, lid: string, what: string): boolean {
   const state = dispatcher.getState();
   if (state.phase === 'editing') {
@@ -3980,8 +4107,7 @@ export function bindActions(
   };
   const onClick = (ev: Event) => {
     /**
-     * 🔴 **読んでいる本文の「この行」から編集に入る**(#395 段③。PKC2 の
-     * `action-binder.ts:1329-1412` に在った動線 ── 2026-07-03 の user request)。
+     * 🔴 **読んでいる本文を、押した所から扱う 2 つの道**(#395 段③ / #495)。
      *
      * > user の物語: 長い議事録を読んでいて、この 1 行だけ直したい。
      * > いまは「編集」を押してから、もう一度その行を探して押す(2 手)。
@@ -3991,36 +4117,33 @@ export function bindActions(
      *   持たない**。後ろに置くと、この動線は**1 度も走らない**。
      * ⚠ **素のクリックの意味は変えない** ── PKC3 は browse-first(「開く = 閲覧」は
      *   2026-08-18 の裁定)。修飾キーを押しているときだけである。
-     * ⚠ **`Alt` だけ**(`Ctrl` / `Meta` / `Shift` が一緒なら降りる)── `Ctrl+Alt` は
-     *   **AltGr** であり、その組で奪うと**記号が打てない配列の人**のクリックを壊す
-     *   (binder の他の 2 か所と同じ理由)。`Ctrl` / `Meta` 単独はリンクの
-     *   「新しいタブで開く」を奪う。
-     * ⚠ **押せる物の上では降りる** ── リンク・ボタン・チェックの印は、その場に
-     *   自分の意味を持っている(奪うと、その動線が 1 つ死ぬ)。
-     * 🔑 行は読む面の刻印(`data-pkc-source-line`)から引く ── **新しい逆引きを
-     *   作らない**(`copy-source.ts` と同じ印を読む。§7)。
-     * ⚠ 刻印が引けなければ**何もしない** ── 当てずっぽうで編集に入らない。
      */
-    const alt = ev as MouseEvent;
-    if (alt.altKey && !alt.ctrlKey && !alt.metaKey && !alt.shiftKey) {
-      const hit = ev.target as HTMLElement | null;
-      const bodyHost = hit?.closest('[data-pkc-field="detail-body"]') ?? null;
-      const mark = hit?.closest('[data-pkc-source-line]') ?? null;
-      const own = hit?.closest('a[href], button, [data-pkc-action]') ?? null;
-      if (
-        bodyHost !== null &&
-        mark !== null &&
-        root.contains(bodyHost) &&
-        bodyHost.contains(mark) &&
-        (own === null || !bodyHost.contains(own)) &&
-        dispatcher.getState().phase === 'ready'
-      ) {
-        const line = Number(mark.getAttribute('data-pkc-source-line'));
-        if (Number.isInteger(line) && line >= 0) {
-          ev.preventDefault();
-          dispatcher.dispatch({ type: 'START_EDIT', atLine: line });
-          return;
-        }
+    const me2 = ev as MouseEvent;
+    /**
+     * 🔴 **Ctrl(⌘)は「その地点から編集」/ Alt は「追記の入り先」**(#495。
+     * user 裁定 2026-08-27)。
+     *
+     * > 「見出しを押したら編集とかは、**Ctrl+クリックで、その地点から編集**にすれば
+     * > 良いと思う。**見出しにこだわる必要はない**」
+     * > 「センターペインの**追記位置指定は Alt+クリック**にしましょう、さっき指定した
+     * > **Ctrl+クリックをデフォのその場からの編集 IN 導線**に変更してください」
+     *
+     * ⚠ **Ctrl と ⌘ を畳む**のは `features/keymap.ts` の `Chord.mod` と**同じ規則**
+     *   ── 分けると「mac だけ効かない近道」が必ず生まれる(正本の注記)。
+     *   mac の `Ctrl+クリック` はブラウザが `contextmenu` にするので、
+     *   そちらは `⌘` が受け持つ(この分岐へは来ない)。
+     * ⚠ **`Ctrl+Alt` は AltGr** ── どちらの分岐も相手の修飾キーを**外す**
+     *   (その組で奪うと、記号が打てない配列の人のクリックを壊す)。
+     */
+    const modOnly = (me2.ctrlKey || me2.metaKey) && !me2.altKey && !me2.shiftKey;
+    const altOnly = me2.altKey && !me2.ctrlKey && !me2.metaKey && !me2.shiftKey;
+    if (modOnly || altOnly) {
+      const line = bodySourceLineAt(dispatcher, ev.target);
+      if (line !== null) {
+        ev.preventDefault();
+        if (modOnly) dispatcher.dispatch({ type: 'START_EDIT', atLine: line });
+        else pickAppendTarget(dispatcher, root, line);
+        return;
       }
     }
     const el = (ev.target as HTMLElement | null)?.closest<HTMLElement>(

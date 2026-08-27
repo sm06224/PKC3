@@ -105,8 +105,42 @@ function findByText(host: HTMLElement, selector: string, text: string): Element 
   return hit;
 }
 
+/**
+ * 🔴 **素のクリック**(#495 以後は「読む・選ぶ・畳む」であって、開く操作ではない)。
+ * ⚠ 塊を開きたい test は `openClick` を使う ── 名前で見分かるようにしてある。
+ */
 function click(el: Element): void {
   el.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+}
+
+/**
+ * 🔴 **塊を開くクリック = Ctrl(⌘)+クリック**(#495。user 裁定 2026-08-27)。
+ * ⚠ `ctrlKey` で書く ── 実装は `ctrlKey || metaKey` を畳んでいる(`Chord.mod` と
+ *   同じ規則)ので、⌘ 側は別の test が受け持つ。
+ */
+function openClick(el: Element): void {
+  el.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, ctrlKey: true }));
+}
+
+/**
+ * 🔴 **「字を選んでいる」状態を作って、その中で走らせる**(#495 の選択ガード)。
+ *
+ * ⚠ **本物の意味論を真似る**(CLAUDE.md §3)── 実装が見るのは
+ *   `isCollapsed === false` と `toString() !== ''` の 2 つなので、両方を持たせる。
+ * ⚠ happy-dom の `Selection` は範囲を張っても `toString()` が空のことがあるので、
+ *   **`getSelection` を差し替える**。⚠ グローバルを丸ごと壊さない ── 
+ *   `document.getSelection` **1 つだけ**を差し、`finally` で必ず戻す
+ *   (戻さないと、以後の test が全部「選択中」になって**素通りする**)。
+ */
+function withSelection(text: string, run: () => void): void {
+  const orig = document.getSelection.bind(document);
+  document.getSelection = (): Selection =>
+    ({ isCollapsed: false, toString: () => text }) as unknown as Selection;
+  try {
+    run();
+  } finally {
+    document.getSelection = orig;
+  }
 }
 
 /** Shift+押下(範囲を広げる実際の引き金)。⚠ `click` ではない。 */
@@ -129,7 +163,7 @@ describe('RowSwap — 行を原文の入力欄に差し替える', () => {
   it('段落をクリックすると、その塊だけが原文の入力欄になる', () => {
     const r = rig();
     const p = findByText(r.host, 'p', '最初の段落。');
-    click(p);
+    openClick(p);
     const ta = box(r.host);
     expect(ta).not.toBeNull();
     expect(ta!.value).toBe('最初の段落。');
@@ -138,11 +172,74 @@ describe('RowSwap — 行を原文の入力欄に差し替える', () => {
     expect(findByText(r.host, 'h1', '題').isConnected).toBe(true);
   });
 
+  /**
+   * 🔴 **字を選んでいる最中は開かない**(#495。user 指摘「見出し全体クリック判定は
+   * あまり良い挙動じゃない」の実害の側)。
+   *
+   * ⚠ ドラッグの終わりにも `click` は飛ぶので、無条件に開くと**選んだ字が
+   *   その瞬間に消えて編集に入る**。🔑 規則は `binder.ts` の表の升と同じ 1 つ。
+   * ⚠ **対照群を同じ it に置く** ── 置かないと「別の理由で開かなかった」を
+   *   次に見抜けない(選択の仕込みが効いていなくても緑になる)。
+   */
+  it('🔴 字を選んでいる最中の素のクリックでは開かない', () => {
+    const r = rig();
+    withSelection('最初の', () => {
+      click(findByText(r.host, 'p', '最初の段落。'));
+      expect(box(r.host), '選んでいる最中に開いた(選んだ字が消える)').toBeNull();
+      expect(r.notes, '断り文を出した(選んだ人は断られたつもりが無い)').toEqual([]);
+    });
+    // 対照群 ── 選択が無ければ**素のクリックで開く**(マウスだけの道は残す)
+    click(findByText(r.host, 'p', '最初の段落。'));
+    expect(box(r.host), '素のクリックで開かない(マウスだけの道が消えている)').not.toBeNull();
+  });
+
+  /**
+   * ⚠ **中身が空の選択では止めない** ── 焦点が動いただけで `isCollapsed` が
+   * false になる環境があり、そこで止めると**押しても開かない**に戻る。
+   */
+  it('🔴 中身が空の選択では、素のクリックで開く', () => {
+    const r = rig();
+    withSelection('', () => {
+      click(findByText(r.host, 'p', '最初の段落。'));
+      expect(box(r.host), '空の選択で止めた(押しても開かないに戻る)').not.toBeNull();
+    });
+  });
+
+  /**
+   * 🔑 **Ctrl(⌘)を押していれば、選んでいても開く** ── そちらは「ここを編集する」
+   * というはっきりした意思表示なので、ガードで止めない。
+   * ⚠ **選んでいる状態で見る** ── 選んでいなければ素のクリックでも開くので、
+   *   選択が無い場面で試しても**修飾キーが効いた証拠にならない**(空振り)。
+   */
+  it('🔑 選んでいても Ctrl / ⌘ + クリックなら開く', () => {
+    for (const mods of [{ ctrlKey: true }, { metaKey: true }]) {
+      const r = rig();
+      withSelection('最初の', () => {
+        findByText(r.host, 'p', '最初の段落。').dispatchEvent(
+          new MouseEvent('click', { bubbles: true, button: 0, ...mods }),
+        );
+        expect(box(r.host)?.value, `ガードで止めた: ${JSON.stringify(mods)}`).toBe('最初の段落。');
+      });
+    }
+  });
+
+  it('🔴 Alt が一緒のときは開かない(AltGr と、読む面の追記の入り先)', () => {
+    const r = rig();
+    const p = findByText(r.host, 'p', '最初の段落。');
+    for (const mods of [{ ctrlKey: true, altKey: true }, { altKey: true }]) {
+      p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, ...mods }));
+      expect(box(r.host), `開いてしまった: ${JSON.stringify(mods)}`).toBeNull();
+    }
+    // 対照群 ── Ctrl だけなら開く
+    openClick(p);
+    expect(box(r.host), '対照群: Ctrl+クリックで開かない').not.toBeNull();
+  });
+
   it('🔑 触っていない塊は同じ実体のまま残る(丸ごと作り直していない)', () => {
     const r = rig();
     const h1 = findByText(r.host, 'h1', '題');
     const last = findByText(r.host, 'p', '最後の段落。');
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     expect(findByText(r.host, 'h1', '題')).toBe(h1);
     expect(findByText(r.host, 'p', '最後の段落。')).toBe(last);
   });
@@ -150,14 +247,14 @@ describe('RowSwap — 行を原文の入力欄に差し替える', () => {
   it('表の行をクリックすると、その 1 行だけが入力欄になる(表ごとではない)', () => {
     const r = rig();
     const tr = findByText(r.host, 'tr', '3');
-    click(tr);
+    openClick(tr);
     expect(box(r.host)!.value).toBe('| 3 | 4 |');
     expect(r.swap.activeRange).toEqual({ start: 7, end: 7 });
   });
 
   it('箇条書きの項目をクリックすると、その 1 項目だけが入力欄になる', () => {
     const r = rig();
-    click(findByText(r.host, 'li', '二つめ'));
+    openClick(findByText(r.host, 'li', '二つめ'));
     expect(box(r.host)!.value).toBe('- 二つめ');
     expect(r.swap.activeRange).toEqual({ start: 10, end: 10 });
   });
@@ -177,7 +274,7 @@ describe('RowSwap — 行を原文の入力欄に差し替える', () => {
     const r = rig();
     const before = r.host.querySelectorAll('tr').length;
     expect(before, '前提: 表に複数の行が在る').toBeGreaterThan(1);
-    click(findByText(r.host, 'tr', '3'));
+    openClick(findByText(r.host, 'tr', '3'));
     expect(r.host.querySelectorAll('table'), '表ごと消えた').toHaveLength(1);
     expect(r.host.querySelectorAll('tr'), '表の行が消えた').toHaveLength(before);
     // 🔑 欄は**表の中**に居る(外へ飛び出していない)
@@ -194,7 +291,7 @@ describe('RowSwap — 行を原文の入力欄に差し替える', () => {
     const r = rig();
     const before = r.host.querySelectorAll('li').length;
     expect(before, '前提: 項目が複数ある').toBeGreaterThan(1);
-    click(findByText(r.host, 'li', '二つめ'));
+    openClick(findByText(r.host, 'li', '二つめ'));
     expect(r.host.querySelectorAll('li'), '項目が消えた').toHaveLength(before);
     const slot = r.host.querySelector('[data-pkc-row-slot]')!;
     expect(slot.tagName.toLowerCase()).toBe('li');
@@ -207,7 +304,7 @@ describe('RowSwap — 行を原文の入力欄に差し替える', () => {
    */
   it('⚠ 下位要素を持たない塊は、いまどおり塊ごと入力欄になる (#423 の対照群)', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const slot = r.host.querySelector('[data-pkc-row-slot]')!;
     expect(slot.tagName.toLowerCase(), '塊ごとの器が div でない').toBe('div');
   });
@@ -222,7 +319,7 @@ describe('RowSwap — 行を原文の入力欄に差し替える', () => {
   it('🔴 開いたまま描き直しても、表の残りは消えない (#423)', () => {
     const r = rig();
     const before = r.host.querySelectorAll('tr').length;
-    click(findByText(r.host, 'tr', '3'));
+    openClick(findByText(r.host, 'tr', '3'));
     const rowOf = (): number => {
       const slot = r.host.querySelector('[data-pkc-row-slot]')!;
       return [...r.host.querySelectorAll('tr')].indexOf(slot.closest('tr')!);
@@ -242,7 +339,7 @@ describe('RowSwap — 行を原文の入力欄に差し替える', () => {
 
   it('🔴 箇条書きも、描き直しで欄が別の項目へ移らない (#423)', () => {
     const r = rig();
-    click(findByText(r.host, 'li', '二つめ'));
+    openClick(findByText(r.host, 'li', '二つめ'));
     const itemOf = (): number => {
       const slot = r.host.querySelector('[data-pkc-row-slot]')!;
       return [...r.host.querySelectorAll('li')].findIndex((li) => li === slot);
@@ -256,7 +353,7 @@ describe('RowSwap — 行を原文の入力欄に差し替える', () => {
   it('🔑 閉じたら表は元どおりに戻る(穴を残さない) (#423)', () => {
     const r = rig();
     const before = r.host.querySelectorAll('tr').length;
-    click(findByText(r.host, 'tr', '3'));
+    openClick(findByText(r.host, 'tr', '3'));
     box(r.host)!.blur();
     expect(r.host.querySelector('[data-pkc-row-slot]'), '器が残っている').toBeNull();
     expect(r.host.querySelectorAll('tr')).toHaveLength(before);
@@ -266,7 +363,7 @@ describe('RowSwap — 行を原文の入力欄に差し替える', () => {
   it('🔑 末尾の空行は編集範囲に入れない(消すと塊の切れ目が消えるので)', () => {
     // `- 二つめ` は list_item の範囲が後ろの空行(11)まで伸びている
     const r = rig();
-    click(findByText(r.host, 'li', '二つめ'));
+    openClick(findByText(r.host, 'li', '二つめ'));
     expect(r.swap.activeRange).toEqual({ start: 10, end: 10 });
     expect(box(r.host)!.value).toBe('- 二つめ');
     // 確定しても、後ろの空行はそのまま残っている(合体していない)
@@ -321,7 +418,7 @@ describe('RowSwap — 行を原文の入力欄に差し替える', () => {
 
   it('リンクや押せるものは奪わない(押せるものは押せたまま)', () => {
     const r = rig('本文に [リンク](#anchor) が在る。');
-    click(findByText(r.host, 'a', 'リンク'));
+    openClick(findByText(r.host, 'a', 'リンク'));
     expect(box(r.host)).toBeNull();
     expect(r.swap.isActive).toBe(false);
   });
@@ -330,7 +427,7 @@ describe('RowSwap — 行を原文の入力欄に差し替える', () => {
     const r = rig(['本文[^a]', '', '[^a]: 注', ''].join('\n'));
     const hr = r.host.querySelector('hr');
     expect(hr).not.toBeNull();
-    click(hr!);
+    openClick(hr!);
     expect(box(r.host)).toBeNull();
     expect(r.notes.join('/')).toContain('自動で作られる');
   });
@@ -372,10 +469,25 @@ describe('RowSwap — 末尾に書き足す(空のノートの入口)', () => {
     expect(r.host.querySelector('[data-pkc-row-slot]')).toBeNull();
   });
 
+  /**
+   * 🔴 **`Alt` は余白でも受けない**(着地前レビュー M9)。
+   * ⚠ `Alt` は読む面の「追記の入り先」なので、指したつもりで**末尾に空の行が
+   *   開く**と、user は「入り先を選んだら本文が変わった」と読む。
+   * ⚠ この門を余白の枝の**後ろ**へ移す変異が、これが無いと素通りする。
+   */
+  it('🔴 Alt を押しながら余白を押しても、行は開かない', () => {
+    const r = rig();
+    r.host.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, altKey: true }));
+    expect(box(r.host), 'Alt+余白で行が開いた').toBeNull();
+    // 対照群 ── Alt を離せば開く(空のノートの入口は塞いでいない)
+    click(r.host);
+    expect(box(r.host)).not.toBeNull();
+  });
+
   it('🔴 確定のためのクリック(余白)で、新しい行が開いてしまわない', () => {
     // ⚠ 描き直しを**溜める** rig ── 実機の窓(確定 → 描き直しが届く前)を作る
     const r = rig(DOC, true);
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     ta.value = '書き換えた。';
     /**
@@ -394,7 +506,7 @@ describe('RowSwap — 末尾に書き足す(空のノートの入口)', () => {
 
   it('描き直しが届いた**後**の余白クリックでは、ちゃんと行が開く', () => {
     const r = rig(DOC, true);
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     ta.value = '書き換えた。';
     ta.dispatchEvent(new Event('blur'));
@@ -407,7 +519,7 @@ describe('RowSwap — 末尾に書き足す(空のノートの入口)', () => {
 describe('RowSwap — 確定と取り消し', () => {
   it('焦点が外れたら 1 回だけ確定し、本文の該当行だけが変わる', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     ta.value = '書き換えた段落。';
     ta.blur();
@@ -420,7 +532,7 @@ describe('RowSwap — 確定と取り消し', () => {
 
   it('② Escape は確定せず、**描画が戻る**(穴が残らない)', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     ta.value = '捨てられる文字';
     ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
@@ -432,7 +544,7 @@ describe('RowSwap — 確定と取り消し', () => {
 
   it('② 変えずに確定しても描画が戻る(`commit` が描き直さない経路)', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     box(r.host)!.blur();
     // 本文は変わらないので `commit` は描き直しを起こさない ── それでも穴は無い
     expect(r.body()).toBe(DOC);
@@ -446,7 +558,7 @@ describe('RowSwap — 確定と取り消し', () => {
       new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }),
     ]) {
       const r = rig();
-      click(findByText(r.host, 'p', '最初の段落。'));
+      openClick(findByText(r.host, 'p', '最初の段落。'));
       const ta = box(r.host)!;
       ta.value = 'かえた';
       ta.dispatchEvent(ev);
@@ -456,7 +568,7 @@ describe('RowSwap — 確定と取り消し', () => {
 
   it('🔴 確定で入力欄を外した瞬間の `blur` で、二重に確定しない(再入)', () => {
     const r = rig(DOC, true);
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     ta.value = 'かえた';
     /**
@@ -480,10 +592,10 @@ describe('RowSwap — 確定と取り消し', () => {
 
   it('別の行をクリックすると、前の行が確定してから開く', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     ta.value = 'ひとつめを書き換え';
-    click(findByText(r.host, 'p', '最後の段落。'));
+    openClick(findByText(r.host, 'p', '最後の段落。'));
     expect(r.commits).toEqual([{ start: 2, end: 2, text: 'ひとつめを書き換え' }]);
     expect(box(r.host)!.value).toBe('最後の段落。');
   });
@@ -538,7 +650,7 @@ describe('RowSwap — 範囲差し替え(S6)', () => {
    */
   it('🔴 折り返して溢れたぶんだけ箱を伸ばす(改行の数で決めない)', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     expect(ta.value.includes('\n'), '前提: 改行を持たない塊で見ていない').toBe(false);
     expect(Number(ta.rows), '版面が測れない環境では改行の数のまま').toBe(1);
@@ -567,7 +679,7 @@ describe('RowSwap — 範囲差し替え(S6)', () => {
 
   it('🔴 折り返しても上限は超えない(超えたら箱の中で scroll)', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     const real = window.getComputedStyle.bind(window);
     vi.spyOn(window, 'getComputedStyle').mockImplementation((el, pseudo) =>
@@ -621,7 +733,7 @@ describe('RowSwap — 範囲差し替え(S6)', () => {
    */
   it('🔴 行の高さが読めない版面では、折り返しを数えない', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     const real = window.getComputedStyle.bind(window);
     vi.spyOn(window, 'getComputedStyle').mockImplementation((el, pseudo) =>
@@ -651,7 +763,7 @@ describe('RowSwap — 範囲差し替え(S6)', () => {
 
   it('Shift+クリックで範囲を広げる(2 つの塊が 1 つの入力欄になる)', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     expect(r.swap.activeRange).toEqual({ start: 2, end: 2 });
     // 表まで広げる
     const tr = findByText(r.host, 'tr', '3');
@@ -670,7 +782,7 @@ describe('RowSwap — 範囲差し替え(S6)', () => {
 
   it('🔴 打ち替えた後は広げない(古い行番号で範囲を作らない)', () => {
     const r = rig(DOC, true);
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     ta.value = '打ち替えた。';
     const tr = findByText(r.host, 'tr', '3');
@@ -713,7 +825,7 @@ describe('RowSwap — 範囲差し替え(S6)', () => {
 
   it('🔴 範囲を後ろへ広げてから手前へ広げても、後ろ端が落ちない', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     shiftDown(findByText(r.host, 'tr', '3')); // 2..7 へ広げた
     expect(r.swap.activeRange).toEqual({ start: 2, end: 7 });
     // 手前(見出し)へ広げる ── 後ろ端 7 は保たれるべき
@@ -736,7 +848,7 @@ describe('RowSwap — 範囲差し替え(S6)', () => {
 describe('RowSwap — 日本語入力の契約', () => {
   it('③ 封印中は描画を当てない(ノードを動かさない)。解けたら保留の 1 件が流れる', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     ta.dispatchEvent(new Event('compositionstart'));
     expect(r.swap.isComposing).toBe(true);
@@ -755,7 +867,7 @@ describe('RowSwap — 日本語入力の契約', () => {
 
   it('③ 封印中に**外から本文が変わった**ら、解けた時点で閉じる(継ぎ足さない)', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     ta.dispatchEvent(new Event('compositionstart'));
     const other = DOC.replace('# 題', '# 題(外から変えた)');
@@ -773,7 +885,7 @@ describe('RowSwap — 日本語入力の契約', () => {
 
   it('③ `compositionend` は確定ではない(変換の取り消しでも出る)', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     ta.dispatchEvent(new Event('compositionstart'));
     ta.dispatchEvent(new Event('compositionend'));
@@ -783,7 +895,7 @@ describe('RowSwap — 日本語入力の契約', () => {
 
   it('③ 変換中の `blur` は同期で確定せず、`compositionend` の後に 1 回だけ確定する', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     ta.dispatchEvent(new Event('compositionstart'));
     ta.value = 'にほんご';
@@ -795,7 +907,7 @@ describe('RowSwap — 日本語入力の契約', () => {
 
   it('③ 変換中のキーは全部 IME のもの ── **奪わない**(既定を止めない)', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     ta.dispatchEvent(new Event('compositionstart'));
     for (const key of ['Escape', 'Tab', 'Enter']) {
@@ -820,7 +932,7 @@ describe('RowSwap — 日本語入力の契約', () => {
 
   it('③ 変換中に auto pair の記号を打っても、IME から奪わない', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     ta.value = '';
     ta.dispatchEvent(new Event('compositionstart'));
@@ -837,7 +949,7 @@ describe('RowSwap — 日本語入力の契約', () => {
 
   it('③ 安全弁: 変換中なのに焦点が外れていたら封印を解く(永久固着の防止)', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     ta.dispatchEvent(new Event('compositionstart'));
     expect(r.swap.isComposing).toBe(true);
@@ -853,7 +965,7 @@ describe('RowSwap — 日本語入力の契約', () => {
 describe('RowSwap — 外から描画が届いたとき', () => {
   it('④ 同じ本文の描き直しでは、活性の入力欄が同じ実体で残る(pin が効いている)', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     const h1 = findByText(r.host, 'h1', '題');
     const last = findByText(r.host, 'p', '最後の段落。');
@@ -868,7 +980,7 @@ describe('RowSwap — 外から描画が届いたとき', () => {
 
   it('④ 🔴 外から本文が差し替わったら、編集していた行を閉じて理由を出す', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最後の段落。'));
+    openClick(findByText(r.host, 'p', '最後の段落。'));
     const ta = box(r.host)!;
     ta.value = '打ちかけの文字';
     // 行がずれる本文が外から届く(取り込み・別タブの保存など)
@@ -897,7 +1009,7 @@ describe('RowSwap — 外から描画が届いたとき', () => {
 describe('RowSwap — 開放終端 と auto pair', () => {
   it('打っている最中に閉じていない ``` を見つけて印を付ける', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     const slot = r.host.querySelector('[data-pkc-row-slot]')!;
     expect(slot.hasAttribute('data-pkc-open-end')).toBe(false);
@@ -912,7 +1024,7 @@ describe('RowSwap — 開放終端 と auto pair', () => {
 
   it('閉じないまま確定したら**確定はする**が、理由を出す(移動できない罠にしない)', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     ta.value = '```js';
     ta.blur();
@@ -922,7 +1034,7 @@ describe('RowSwap — 開放終端 と auto pair', () => {
 
   it('行内の閉じ待ち(`**`)にも印を付ける ── ただしブロックとは別の値', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     const slot = r.host.querySelector('[data-pkc-row-slot]')!;
     ta.value = '**太字を打ちかけ';
@@ -932,7 +1044,7 @@ describe('RowSwap — 開放終端 と auto pair', () => {
 
   it('🔴 auto pair: 行頭で ``` を打ち切ると閉じが次の行に入り、開放終端が消える', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     const slot = r.host.querySelector('[data-pkc-row-slot]')!;
     // 行頭に 2 つ在る状態(1・2 つ目は補わないのでブラウザが打った形)
@@ -953,7 +1065,7 @@ describe('RowSwap — 開放終端 と auto pair', () => {
 
   it('🔴 auto pair が無ければ ``` は閉じ待ちになる(上の test が空振りでない証拠)', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     const slot = r.host.querySelector('[data-pkc-row-slot]')!;
     // 補完を通さずに `` ``` `` だけを置く(= 昔の挙動)
@@ -964,7 +1076,7 @@ describe('RowSwap — 開放終端 と auto pair', () => {
 
   it('auto pair: 対の記号を打つと閉じが入り、caret は中に置かれる', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     ta.value = '';
     ta.setSelectionRange(0, 0);
@@ -987,7 +1099,7 @@ describe('RowSwap — 開放終端 と auto pair', () => {
    */
   it('🔴 auto pair: 閉じを打つと通り抜ける(挿さない・本文が増えない)', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     ta.value = '';
     ta.setSelectionRange(0, 0);
@@ -1007,7 +1119,7 @@ describe('RowSwap — 開放終端 と auto pair', () => {
 
   it('auto pair: 選択があるときは**囲む**(選択が消えない)', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     ta.value = 'ここ';
     ta.setSelectionRange(0, 2);
@@ -1043,7 +1155,7 @@ describe('RowSwap — Alt+カーソルキーで隣の塊へ(2026-08-15 user 再�
 
   it('🔴 最終行の Alt+↓ で確定し、次の塊が開く(caret は先頭)', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     ta.value = '書き換えた。'; // 行数は変わらない
     ta.setSelectionRange(ta.value.length, ta.value.length);
@@ -1059,7 +1171,7 @@ describe('RowSwap — Alt+カーソルキーで隣の塊へ(2026-08-15 user 再�
 
   it('🔴 先頭行の Alt+↑ で前の塊が開く(caret は末尾)', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最後の段落。'));
+    openClick(findByText(r.host, 'p', '最後の段落。'));
     const ta = box(r.host)!;
     ta.setSelectionRange(0, 0);
     const ev = arrow(ta, 'ArrowUp');
@@ -1073,7 +1185,7 @@ describe('RowSwap — Alt+カーソルキーで隣の塊へ(2026-08-15 user 再�
 
   it('🔴 素の ↑↓ は箱の中の移動のまま(改行を持たない塊でも飛ばない ── 2026-08-15 の暴発)', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     /**
      * ⚠ **この塊の原文は改行を 1 つも持たない。** 旧実装は「改行が無い側に居る」を
@@ -1092,7 +1204,7 @@ describe('RowSwap — Alt+カーソルキーで隣の塊へ(2026-08-15 user 再�
 
   it('🔴 Alt+↓ は箱の途中でも移る / Shift・Ctrl・Meta の併せ押しは奪わない', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最後の段落。'));
+    openClick(findByText(r.host, 'p', '最後の段落。'));
     arrow(box(r.host)!, 'ArrowUp'); // 箇条書き(2 行)を開く
     const list = box(r.host)!;
     expect(list.value).toBe('- 一つめ\n- 二つめ');
@@ -1109,7 +1221,7 @@ describe('RowSwap — Alt+カーソルキーで隣の塊へ(2026-08-15 user 再�
 
   it('末尾の塊の Alt+↓ は末尾に書き足す(余白クリックと同じ意味論)', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最後の段落。'));
+    openClick(findByText(r.host, 'p', '最後の段落。'));
     const ta = box(r.host)!;
     ta.setSelectionRange(ta.value.length, ta.value.length);
     expect(arrow(ta, 'ArrowDown').defaultPrevented).toBe(true);
@@ -1123,7 +1235,7 @@ describe('RowSwap — Alt+カーソルキーで隣の塊へ(2026-08-15 user 再�
 
   it('導出物(脚注の区切り)は飛ばして、その先の塊を開く', () => {
     const r = rig(['本文[^a]', '', 'おわり', '', '[^a]: 注', ''].join('\n'));
-    click(findByText(r.host, 'p', 'おわり'));
+    openClick(findByText(r.host, 'p', 'おわり'));
     const ta = box(r.host)!;
     ta.setSelectionRange(ta.value.length, ta.value.length);
     expect(arrow(ta, 'ArrowDown').defaultPrevented).toBe(true);
@@ -1134,7 +1246,7 @@ describe('RowSwap — Alt+カーソルキーで隣の塊へ(2026-08-15 user 再�
 
   it('🔴 行数が変わる確定でも ↓ で移れる(予約 → 着弾後に・正しい行で開く)', () => {
     const r = rig(DOC, true);
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     ta.value = '1 行目。\n2 行目を足した。'; // +1 行
     ta.setSelectionRange(ta.value.length, ta.value.length);
@@ -1154,13 +1266,13 @@ describe('RowSwap — Alt+カーソルキーで隣の塊へ(2026-08-15 user 再�
 
   it('🔴 行数が変わる確定の直後のクリックが dead click にならない(既知欠陥の修理)', () => {
     const r = rig(DOC, true);
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     ta.value = '1 行目。\n2 行目を足した。'; // +1 行
     ta.dispatchEvent(new Event('blur'));
     // 着弾前に別の塊をクリック ── 直す前は古い座標のまま開き、着弾の
     // `closeQuietly` に「外から本文が変わった」という嘘の理由で閉じられていた
-    click(findByText(r.host, 'p', '最後の段落。'));
+    openClick(findByText(r.host, 'p', '最後の段落。'));
     expect(box(r.host), '古い座標のまま開いている').toBeNull();
     r.flush();
     const opened = box(r.host)!;
@@ -1171,10 +1283,10 @@ describe('RowSwap — Alt+カーソルキーで隣の塊へ(2026-08-15 user 再�
 
   it('予約は「次に実際に開いた操作」で消える(古い予約が後から焦点を奪わない)', () => {
     const r = rig(DOC, true);
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     box(r.host)!.value = '1 行目。\n2 行目を足した。';
     box(r.host)!.dispatchEvent(new Event('blur'));
-    click(findByText(r.host, 'p', '最後の段落。')); // 予約になる
+    openClick(findByText(r.host, 'p', '最後の段落。')); // 予約になる
     r.flush(); // 予約が果たされて「最後の段落。」が開く
     const opened = box(r.host)!;
     expect(opened.value).toBe('最後の段落。');
@@ -1186,10 +1298,10 @@ describe('RowSwap — Alt+カーソルキーで隣の塊へ(2026-08-15 user 再�
 
   it('予約より後に**別の開く操作が通ったら**、予約は上書きされる(奪い合いにしない)', () => {
     const r = rig(DOC, true);
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     box(r.host)!.value = '1 行目。\n2 行目を足した。';
     box(r.host)!.dispatchEvent(new Event('blur'));
-    click(findByText(r.host, 'p', '最後の段落。')); // 予約になる
+    openClick(findByText(r.host, 'p', '最後の段落。')); // 予約になる
     // その後に Ctrl+A ── これが user の最新の意思なので、こちらが勝つ
     expect(r.swap.activateAll()).toBe(true);
     /**
@@ -1217,7 +1329,7 @@ describe('RowSwap — Alt+カーソルキーで隣の塊へ(2026-08-15 user 再�
    */
   it('🔴 行数が変わる確定の直後に全文を開いて確定しても、本文が壊れない', () => {
     const r = rig('A\n\nB\n\nC', true);
-    click(findByText(r.host, 'p', 'A'));
+    openClick(findByText(r.host, 'p', 'A'));
     box(r.host)!.value = 'A1\nA2';
     box(r.host)!.dispatchEvent(new Event('blur'));
     expect(r.body(), '前提: 確定が本文に届いている').toBe('A1\nA2\n\nB\n\nC');
@@ -1238,7 +1350,7 @@ describe('RowSwap — Alt+カーソルキーで隣の塊へ(2026-08-15 user 再�
 describe('RowSwap — Ctrl+S(2026-08-08)', () => {
   it('🔴 Ctrl+S は行を確定し、ブラウザの保存ダイアログを止める', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     ta.value = '保存した。';
     const ev = new KeyboardEvent('keydown', {
@@ -1255,7 +1367,7 @@ describe('RowSwap — Ctrl+S(2026-08-08)', () => {
 
   it('Cmd+S(mac)でも同じ', () => {
     const r = rig();
-    click(findByText(r.host, 'p', '最初の段落。'));
+    openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     ta.value = 'かえた';
     const ev = new KeyboardEvent('keydown', {
@@ -1287,7 +1399,7 @@ describe('RowSwap — 開閉で入り直した要素を外へ渡す(#250)', () =
   it('🔴 行を**開いた**ときに渡る', () => {
     const r = rig(IMG);
     const before = r.inserted.length;
-    click(findByText(r.host, 'p', '上の段落'));
+    openClick(findByText(r.host, 'p', '上の段落'));
     expect(r.host.querySelector('[data-pkc-field="row-source"]'), '前提: 行が開いていない')
       .not.toBeNull();
     expect(r.inserted.length, '開いたのに何も渡っていない').toBeGreaterThan(before);
@@ -1300,7 +1412,7 @@ describe('RowSwap — 開閉で入り直した要素を外へ渡す(#250)', () =
     // 画像の塊そのものを押して開く ── 閉じるとこの塊が作り直される
     const img = r.host.querySelector('img[data-pkc-asset-key]');
     expect(img, '前提: 画像が描かれていない').not.toBeNull();
-    click(img!);
+    openClick(img!);
     const ta = r.host.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]');
     expect(ta, '前提: 画像の行が開かない').not.toBeNull();
     const before = r.inserted.length;
@@ -1348,7 +1460,7 @@ describe('RowSwap — 組めない本文', () => {
  * user 報告「編集しようとして選択すると勝手にスクロールしてフォーカスが外れる」の
  * 隣で実測して見つけた)。
  *
- * 実機の順序は `mousedown → blur(= 確定) → click(次を開く)` で、**描き直しは
+ * 実機の順序は `mousedown → blur(= 確定) → openClick(次を開く)` で、**描き直しは
  * worker 越しに後から届く**。直す前はその着弾で `closeQuietly` が
  * **開いたばかりの入力欄を remove** していた(実機実測: 入力欄 0 件 / 焦点が本文へ /
  * 打った文字は行方不明)。IME なら**確定済みの日本語**が同じ枝で消える。
@@ -1370,11 +1482,11 @@ describe('確定 → 着弾の窓(非同期の描き直し)', () => {
 
   it('🔴 確定の直後に別の塊を開いても、着弾で入力欄が閉じられない', () => {
     const r = rig(DOC, true);
-    click(findByText(r.host, 'p', '最初の段落'));
+    openClick(findByText(r.host, 'p', '最初の段落'));
     box(r.host)!.value = '打ち替えた段落。';
     commitByBlur(r);
     // 着弾前に別の塊を開く(実機の `mousedown → blur → click` と同じ順序)
-    click(findByText(r.host, 'p', '最後の段落'));
+    openClick(findByText(r.host, 'p', '最後の段落'));
     expect(box(r.host), '別の塊が開けない(前提が崩れている = 何も検査していない)').not.toBeNull();
     box(r.host)!.value = '打ちかけの文字';
     // ここで worker の結果が着弾する
@@ -1396,7 +1508,7 @@ describe('確定 → 着弾の窓(非同期の描き直し)', () => {
    */
   it('🔴 行数が変わる確定は理由を出して閉じる(黙って壊さない)', () => {
     const r = rig(DOC, true);
-    click(findByText(r.host, 'p', '最初の段落'));
+    openClick(findByText(r.host, 'p', '最初の段落'));
     box(r.host)!.value = '1 行目。\n2 行目を足した。'; // +1 行
     commitByBlur(r);
     r.flush();
@@ -1425,7 +1537,7 @@ describe('確定 → 着弾の窓(非同期の描き直し)', () => {
    */
   it('⚠ 開いている最中に外から本文が変わったら、理由を出して閉じられる', () => {
     const r = rig(DOC);
-    click(findByText(r.host, 'p', '最初の段落'));
+    openClick(findByText(r.host, 'p', '最初の段落'));
     expect(box(r.host), '前提: 入力欄が開いている').not.toBeNull();
     /**
      * 外から本文が差し替わる(取り込み / 別タブ)。⚠ **この test は 2026-08-08 に

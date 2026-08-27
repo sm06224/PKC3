@@ -16,6 +16,7 @@ import {
   listAppendTargets,
   removeInsertedLines,
   resolveAppendAt,
+  sectionAt,
 } from '../../src/features/markdown/append-target';
 
 const DOC = [
@@ -209,5 +210,70 @@ describe('取り消し', () => {
 
   it('空の並びは null(何も指していない材料で消さない)', () => {
     expect(removeInsertedLines(DOC, [])).toBeNull();
+  });
+});
+
+/**
+ * 🔴 **押した行が居る節**(#495。Alt+クリックで入り先を指す)。
+ *
+ * > user 裁定 2026-08-27「センターペインの**追記位置指定は Alt+クリック**にしましょう」
+ *
+ * 見るのは 3 点:
+ * ① いちばん近い**上の**見出しが返るか(深い節の中で親を返さない)
+ * ② 🔴 **上に見出しが無ければ `null`**(「末尾」へ落とさない ── 押した所と
+ *    関係ない場所へ入るのが、この機構でいちばん静かな負け方である)
+ * ③ 印が `listAppendTargets` と**同じ綴り**か(食い違うと `<select>` に無い印を選ぶ)
+ */
+describe('押した行の節を引く(sectionAt)', () => {
+  it('その行を含む節が返る', () => {
+    expect(sectionAt(DOC, 7)?.text, '「- A を採用する」の行').toBe('決定事項');
+    expect(sectionAt(DOC, 11)?.text, '「来週。」の行').toBe('次回');
+  });
+
+  it('🔑 見出しそのものの行も、その節に数える', () => {
+    expect(sectionAt(DOC, 4)?.text).toBe('決定事項');
+  });
+
+  it('🔴 いちばん近い上の見出しを返す(親へ繰り上げない)', () => {
+    const body = ['# 親', '', '## 子', '', 'ここ', ''].join('\n');
+    expect(sectionAt(body, 4)?.text).toBe('子');
+    // 対照群 ── 子より上なら親が返る
+    expect(sectionAt(body, 1)?.text).toBe('親');
+  });
+
+  it('🔴 上に見出しが無ければ null(末尾へ落とさない)', () => {
+    const body = ['まえがき', '', '# 本題', '', 'a', ''].join('\n');
+    expect(sectionAt(body, 0), 'まえがきの行で節を返した').toBeNull();
+    // 対照群 ── 見出しの下なら返る
+    expect(sectionAt(body, 4)?.text).toBe('本題');
+  });
+
+  it('見出しが 1 つも無い本文では、どこを押しても null', () => {
+    expect(sectionAt('ただの本文。\n\nもう 1 行。', 2)).toBeNull();
+  });
+
+  /**
+   * 🔴 **`<select>` に並ぶ印と同じ綴りであること** ── 食い違うと、押しても
+   *   「一覧に無い」で断られる(実装が別の綴りを作っていても、片方の test だけ
+   *   見ていたら分からない。CLAUDE.md §7)。
+   */
+  it('🔴 印は listAppendTargets と同じ綴り(2 つ目の命名規則を作らない)', () => {
+    const body = ['# 決定事項', '', 'a', '', '# 決定事項', '', 'b', ''].join('\n');
+    const slugs = listAppendTargets(body).map((t) => t.slug);
+    expect(slugs).toHaveLength(2);
+    expect(slugs[0]).not.toBe(slugs[1]); // 同じ字でも別の印(取り違えない)
+    expect(sectionAt(body, 2)?.slug).toBe(slugs[0]);
+    expect(sectionAt(body, 6)?.slug).toBe(slugs[1]);
+  });
+
+  /**
+   * ⚠ **frontmatter を跨いでも数え方が変わらない** ── 呼び側は原文の行を渡す
+   *   契約なので、ここが剥がした側で数えていると**節が 1 つ上へずれる**。
+   */
+  it('🔴 frontmatter が在っても、原文の行番号で引ける', () => {
+    const body = ['---', 'title: x', '---', '# 本題', '', 'ここ', ''].join('\n');
+    expect(sectionAt(body, 5)?.text).toBe('本題');
+    // 対照群 ── frontmatter の中の行は、まだどの節にも入らない
+    expect(sectionAt(body, 1)).toBeNull();
   });
 });
