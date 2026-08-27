@@ -67,7 +67,7 @@ import {
   describeAdoptFailures,
   type AdoptOutcome,
 } from './adopt-urls';
-import { convertPastedHtml } from '@features/markdown/html-to-markdown';
+import { convertPastedHtml, pastedHtmlFence } from '@features/markdown/html-to-markdown';
 import { convertPastedRtf } from '@features/markdown/rtf-to-markdown';
 import {
   choosePaste,
@@ -4627,6 +4627,8 @@ export function bindActions(
       convert: {
         permalink: () => permalink,
         html: () => convertPastedHtml({ html, plain }),
+        /** ⚠ 変換せず囲みにする(設定「ウェブページの形をそのまま」)。 */
+        htmlFence: () => pastedHtmlFence(html),
         rtf: () => convertPastedRtf({ rtf, plain }),
       },
     });
