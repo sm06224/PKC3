@@ -79,7 +79,7 @@ test('🔴 深い見出しも本文より小さくならず、左端の帯で見
  *   そこが効いていないと、畳んだ見出しが**ただの短い見出しに見え**、
  *   開き直す口も画面から消える(片道の操作になる)。
  */
-test('🔴 畳みの印はふだん出ず、触れたときと畳んでいる間だけ出る', async ({ page }) => {
+test('🔴 帯そのものが畳みのボタン ── 記号は畳んでいる間だけ', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
@@ -95,8 +95,7 @@ test('🔴 畳みの印はふだん出ず、触れたときと畳んでいる間
   const pane = page.locator('[data-pkc-view-pane="detail"] .pkc-md-rendered');
   /**
    * 🔑 **畳むのは h2 のほう**。h1 を畳むと**配下ごと隠れる**ので、
-   *   h1 が対照群として使えなくなる(1 稿目はそれで詰まった)。
-   *   h2 を畳めば h1 は見えたまま残り、**触れる相手**として使える。
+   *   h1 が対照群として使えなくなる。h2 を畳めば h1 は見えたまま残る。
    */
   const h1 = pane.locator('h1').first();
   const h2 = pane.locator('h2').first();
@@ -105,46 +104,71 @@ test('🔴 畳みの印はふだん出ず、触れたときと畳んでいる間
   await expect(mark1, 'h1 の畳む口が出ていない(前提が崩れた)').toHaveCount(1);
   await expect(mark2, 'h2 の畳む口が出ていない(前提が崩れた)').toHaveCount(1);
 
-  const op = async (m: typeof mark1): Promise<number> =>
-    Number(await m.evaluate((el) => getComputedStyle(el).opacity));
+  /** 帯の太さ(px)。⚠ 帯は `::before` が描く。 */
+  const barPx = async (m: typeof mark1): Promise<number> =>
+    Number(
+      (await m.evaluate((el) => getComputedStyle(el, '::before').width)).replace('px', ''),
+    );
+  /** 記号(`::after`)。出ていなければ `'none'`。 */
+  const glyph = async (m: typeof mark1): Promise<string> =>
+    await m.evaluate((el) => getComputedStyle(el, '::after').content);
 
-  // ① 何も畳んでいない・触れていないときは**出ない**(行を混ませない)
+  // ① 🔴 **ふだんは記号を出さない** ── 出ているのは帯だけ
   await pane.locator('p').first().hover();
-  expect(await op(mark2), 'ふだんから畳みの印が出ている(行が混む)').toBe(0);
+  expect(await glyph(mark2), 'ふだんから記号が出ている(行が混む)').toBe('none');
+  expect(await barPx(mark2), '帯が出ていない').toBeGreaterThan(0);
 
-  // ② 見出しに触れると出る
-  // ⚠ **待って読む** ── 0.12 秒かけて濃くなるので、触れた直後に 1 度読むと
-  //   途中の値(0.0x)が返る。1 度だけ読む test は**必ず落ちる**(実際に落ちた)
-  await h2.hover();
-  await expect.poll(() => op(mark2), { message: '見出しに触れても畳みの印が出ない' }).toBe(1);
+  /**
+   * ② 🔴 **押し所は帯の幅だけ**(user 指摘 2026-08-27
+   *   「正直見出し全体クリック判定はあまり良い挙動じゃないと思う」)。
+   * ⚠ 押し所が見出し全体だと、字を読むつもりで押した user が**中身を失う**。
+   */
+  const markBox = (await mark2.boundingBox())!;
+  const headBox = (await h2.boundingBox())!;
+  expect(markBox.width, '畳む口が広すぎる(見出し全体が押し所になっている)').toBeLessThan(32);
+  expect(
+    headBox.width / markBox.width,
+    '見出しに対して畳む口が広すぎる',
+  ).toBeGreaterThan(5);
 
-  // ③ 🔴 畳んだら、**触れていなくても**出たままになる
+  // ③ 触れると帯が太くなる ── これが「押せる」の合図(記号は出さない)
+  const thin = await barPx(mark2);
+  await mark2.hover();
+  await expect
+    .poll(() => barPx(mark2), { message: '触れても帯が太くならない(押せる合図が無い)' })
+    .toBeGreaterThan(thin);
+  expect(await glyph(mark2), '触れただけで記号が出ている').toBe('none');
+
+  // ④ 🔴 畳んだら、**触れていなくても**記号が出たままになる
   await mark2.click();
   const folded = pane.locator('p').last();
   await expect(folded, '押しても配下が畳まれていない(前提が崩れた)').toBeHidden();
 
   /**
-   * 🔴 **対照群で「薄れ終わった」を確かめてから読む**(2026-08-27 に踏んだ)。
-   *
-   * ⚠ 1 稿目は「隅へ退避 → `expect.poll` で 1 を待つ」と書いたが、
-   *   `poll` は**最初の一読で当たれば通る** ── 薄れ始めの 1 をそのまま採るので、
-   *   **門を外す変異が生き延びた**(SURVIVED)。時間で待つのも同じ穴である。
-   * 🔑 だから**畳んでいない h1 に触れ、そちらが 1 になるまで待つ** ──
-   *   これが 1 になった時点で「pointer は h2 を離れ、遷移は走り切った」が
-   *   **観測できている**。そのうえで h2 の印を読む。
+   * 🔴 **対照群で「遷移が走り切った」を確かめてから読む**(2026-08-27 に踏んだ)。
+   * ⚠ `expect.poll` は**最初の一読で当たれば通る**ので、薄れ/太りの途中の値を
+   *   そのまま採る ── 時間で待つのも同じ穴である。
+   * 🔑 **畳んでいない h1 の帯**に触れ、そちらが太くなるまで待つ ── その時点で
+   *   「pointer は h2 を離れ、遷移は走り切った」が**観測できている**。
    */
-  await h1.hover();
+  await mark1.hover();
   await expect
-    .poll(() => op(mark1), { message: '対照群(h1)が濃くならない ── 前提が崩れた' })
-    .toBe(1);
+    .poll(() => barPx(mark1), { message: '対照群(h1)の帯が太くならない ── 前提が崩れた' })
+    .toBeGreaterThan(thin);
   expect(
-    await op(mark2),
-    '畳んでいるのに印が消えた(畳んだ事実も開き直す口も見えない)',
-  ).toBe(1);
+    await glyph(mark2),
+    '畳んでいるのに記号が消えた(畳んだ事実も開き直す口も見えない)',
+  ).toContain('▸');
 
-  // ④ もう一度押すと開く(片道にしない)
-  await mark2.click();
-  await expect(folded, '開き直せない').toBeVisible();
+  /**
+   * ⑤ 🔴 **見出しの字を押しても畳まない** ── 押し所は帯だけである。
+   * ⚠ ここが畳みになっていると、読むつもりで押した user が中身を失う。
+   */
+  await h1.click({ position: { x: headBox.width / 2, y: 8 } });
+  await expect(
+    pane.locator('p').first(),
+    '見出しの字を押したら畳まれた(押し所が広すぎる)',
+  ).toBeVisible();
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
