@@ -122,6 +122,27 @@ function openClick(el: Element): void {
   el.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, ctrlKey: true }));
 }
 
+/**
+ * 🔴 **「字を選んでいる」状態を作って、その中で走らせる**(#495 の選択ガード)。
+ *
+ * ⚠ **本物の意味論を真似る**(CLAUDE.md §3)── 実装が見るのは
+ *   `isCollapsed === false` と `toString() !== ''` の 2 つなので、両方を持たせる。
+ * ⚠ happy-dom の `Selection` は範囲を張っても `toString()` が空のことがあるので、
+ *   **`getSelection` を差し替える**。⚠ グローバルを丸ごと壊さない ── 
+ *   `document.getSelection` **1 つだけ**を差し、`finally` で必ず戻す
+ *   (戻さないと、以後の test が全部「選択中」になって**素通りする**)。
+ */
+function withSelection(text: string, run: () => void): void {
+  const orig = document.getSelection.bind(document);
+  document.getSelection = (): Selection =>
+    ({ isCollapsed: false, toString: () => text }) as unknown as Selection;
+  try {
+    run();
+  } finally {
+    document.getSelection = orig;
+  }
+}
+
 /** Shift+押下(範囲を広げる実際の引き金)。⚠ `click` ではない。 */
 function shiftDown(el: Element): boolean {
   const ev = new MouseEvent('mousedown', {
@@ -152,39 +173,57 @@ describe('RowSwap — 行を原文の入力欄に差し替える', () => {
   });
 
   /**
-   * 🔴 **素のクリックでは開かない**(#495。user 裁定 2026-08-27)。
+   * 🔴 **字を選んでいる最中は開かない**(#495。user 指摘「見出し全体クリック判定は
+   * あまり良い挙動じゃない」の実害の側)。
    *
-   * > 「見出しを押したら編集とかは、**Ctrl+クリックで、その地点から編集**にすれば
-   * > 良いと思う。**見出しにこだわる必要はない**」
-   *
+   * ⚠ ドラッグの終わりにも `click` は飛ぶので、無条件に開くと**選んだ字が
+   *   その瞬間に消えて編集に入る**。🔑 規則は `binder.ts` の表の升と同じ 1 つ。
    * ⚠ **対照群を同じ it に置く** ── 置かないと「別の理由で開かなかった」を
-   *   次に見抜けない(fixture が壊れていても緑になる)。
+   *   次に見抜けない(選択の仕込みが効いていなくても緑になる)。
    */
-  it('🔴 素のクリックでは開かない(読む・選ぶ・畳むに返す)', () => {
+  it('🔴 字を選んでいる最中の素のクリックでは開かない', () => {
     const r = rig();
-    const p = findByText(r.host, 'p', '最初の段落。');
-    click(p);
-    expect(box(r.host), '素のクリックで開いた').toBeNull();
-    expect(r.swap.isActive).toBe(false);
-    // ⚠ 断り文も出さない(読むために押した人へお知らせを出さない)
-    expect(r.notes).toEqual([]);
-    // 対照群 ── 同じ塊を Ctrl+クリックすれば開く
-    openClick(p);
-    expect(box(r.host), '対照群: Ctrl+クリックで開かない').not.toBeNull();
-  });
-
-  it('🔑 ⌘+クリックでも開く(mac だけ効かない近道を作らない)', () => {
-    const r = rig();
-    const p = findByText(r.host, 'p', '最初の段落。');
-    p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, metaKey: true }));
-    expect(box(r.host)!.value).toBe('最初の段落。');
+    withSelection('最初の', () => {
+      click(findByText(r.host, 'p', '最初の段落。'));
+      expect(box(r.host), '選んでいる最中に開いた(選んだ字が消える)').toBeNull();
+      expect(r.notes, '断り文を出した(選んだ人は断られたつもりが無い)').toEqual([]);
+    });
+    // 対照群 ── 選択が無ければ**素のクリックで開く**(マウスだけの道は残す)
+    click(findByText(r.host, 'p', '最初の段落。'));
+    expect(box(r.host), '素のクリックで開かない(マウスだけの道が消えている)').not.toBeNull();
   });
 
   /**
-   * ⚠ **`Ctrl+Alt` は AltGr** ── その組で奪うと、記号が打てない配列の人の
-   * クリックを壊す。`Alt` 単独は読む面の「追記の入り先」(`binder.ts`)である。
+   * ⚠ **中身が空の選択では止めない** ── 焦点が動いただけで `isCollapsed` が
+   * false になる環境があり、そこで止めると**押しても開かない**に戻る。
    */
-  it('🔴 Ctrl+Alt(AltGr)と Alt 単独では開かない', () => {
+  it('🔴 中身が空の選択では、素のクリックで開く', () => {
+    const r = rig();
+    withSelection('', () => {
+      click(findByText(r.host, 'p', '最初の段落。'));
+      expect(box(r.host), '空の選択で止めた(押しても開かないに戻る)').not.toBeNull();
+    });
+  });
+
+  /**
+   * 🔑 **Ctrl(⌘)を押していれば、選んでいても開く** ── そちらは「ここを編集する」
+   * というはっきりした意思表示なので、ガードで止めない。
+   * ⚠ **選んでいる状態で見る** ── 選んでいなければ素のクリックでも開くので、
+   *   選択が無い場面で試しても**修飾キーが効いた証拠にならない**(空振り)。
+   */
+  it('🔑 選んでいても Ctrl / ⌘ + クリックなら開く', () => {
+    for (const mods of [{ ctrlKey: true }, { metaKey: true }]) {
+      const r = rig();
+      withSelection('最初の', () => {
+        findByText(r.host, 'p', '最初の段落。').dispatchEvent(
+          new MouseEvent('click', { bubbles: true, button: 0, ...mods }),
+        );
+        expect(box(r.host)?.value, `ガードで止めた: ${JSON.stringify(mods)}`).toBe('最初の段落。');
+      });
+    }
+  });
+
+  it('🔴 Alt が一緒のときは開かない(AltGr と、読む面の追記の入り先)', () => {
     const r = rig();
     const p = findByText(r.host, 'p', '最初の段落。');
     for (const mods of [{ ctrlKey: true, altKey: true }, { altKey: true }]) {
@@ -428,6 +467,21 @@ describe('RowSwap — 末尾に書き足す(空のノートの入口)', () => {
     expect(r.body()).toBe(DOC);
     expect(r.commits).toEqual([]);
     expect(r.host.querySelector('[data-pkc-row-slot]')).toBeNull();
+  });
+
+  /**
+   * 🔴 **`Alt` は余白でも受けない**(着地前レビュー M9)。
+   * ⚠ `Alt` は読む面の「追記の入り先」なので、指したつもりで**末尾に空の行が
+   *   開く**と、user は「入り先を選んだら本文が変わった」と読む。
+   * ⚠ この門を余白の枝の**後ろ**へ移す変異が、これが無いと素通りする。
+   */
+  it('🔴 Alt を押しながら余白を押しても、行は開かない', () => {
+    const r = rig();
+    r.host.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, altKey: true }));
+    expect(box(r.host), 'Alt+余白で行が開いた').toBeNull();
+    // 対照群 ── Alt を離せば開く(空のノートの入口は塞いでいない)
+    click(r.host);
+    expect(box(r.host)).not.toBeNull();
   });
 
   it('🔴 確定のためのクリック(余白)で、新しい行が開いてしまわない', () => {

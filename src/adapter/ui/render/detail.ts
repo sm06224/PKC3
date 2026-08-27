@@ -14,6 +14,7 @@
 import { renderFenceFromAsset, renderMarkdown } from '@features/markdown/markdown-render';
 import {
   frontmatterLineCount,
+  bodyBelowFrontmatter,
   frontmatterProblem,
   parseFrontmatter,
   extractVars,
@@ -497,7 +498,18 @@ export class DetailRenderer {
     this.renderBar(state, true);
     this.renderPanel(state, lid);
 
-    const fm = parseFrontmatter(body);
+    /**
+     * 🔴 **描くのは「物理行だけ落とした本文」**(2026-08-28。着地前レビュー A)。
+     *
+     * ⚠ `fm.body` を描いてはいけない ── あちらは**閉じの直後の空行を 1 行余分に
+     *   食べる**ので、この面が焼く `data-pkc-source-line` と、書き戻す側が使う
+     *   `frontmatterLineCount` のずらしが**1 行ずれる**。
+     *   実害は 3 つとも無言だった:チェックの印が 1 行上の項目を書き換える /
+     *   `Ctrl`+クリックがどの行も開かない / 追記の入り先が 1 つ前の節になる。
+     * 🔑 切り方は `bodyBelowFrontmatter` **1 か所**(`frontmatterLineCount` の
+     *   注記が指示している形)。
+     */
+    const shown = bodyBelowFrontmatter(body);
     const meta = state.entryMetas.get(lid);
     if (meta?.archetype === 'attachment') {
       // 添付は器ごと作り直す(preview / blob の貸し借りが絡むので差分にしない)
@@ -512,7 +524,7 @@ export class DetailRenderer {
       this.bodyKind = 'attachment';
       this.bodyView = EMPTY_VIEW;
       this.bodyHost!.textContent = '';
-      this.renderAttachment(body, fm.body, lid, selfContainerId(state), meta.title);
+      this.renderAttachment(body, shown, lid, selfContainerId(state), meta.title);
       this.restoreScroll();
       return;
     }
@@ -645,9 +657,9 @@ export class DetailRenderer {
         this.restoreScroll();
       };
       void this.markdown
-        .render(fm.body, opts)
+        .render(shown, opts)
         .then(paint)
-        .catch(() => paint(renderMarkdown(fm.body, opts)));
+        .catch(() => paint(renderMarkdown(shown, opts)));
     }
   }
 

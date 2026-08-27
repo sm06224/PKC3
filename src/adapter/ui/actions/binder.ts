@@ -39,8 +39,9 @@ import {
 } from '@features/settings/settings-file';
 import { downloadBlob } from '@adapter/platform/download';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
-import { insertText } from '@adapter/ui/render/row-swap';
+import { insertText, OWN_MEANING } from '@adapter/ui/render/row-swap';
 import { sectionAt } from '@features/markdown/append-target';
+import { appendModeOf } from '@adapter/ui/render/append-box';
 import { frontmatterLineCount } from '@features/markdown/frontmatter';
 import {
   entryPickNote,
@@ -1064,7 +1065,6 @@ function navigateToLink(dispatcher: Dispatcher, raw: string | null): void {
  */
 function bodySourceLineAt(
   dispatcher: Dispatcher,
-  root: HTMLElement,
   target: EventTarget | null,
 ): number | null {
   const hit = target instanceof Element ? target : null;
@@ -1081,11 +1081,17 @@ function bodySourceLineAt(
    */
   const mark = hit?.closest('[data-pkc-source-line]') ?? null;
   const bodyHost = mark?.closest('[data-pkc-field="detail-body"]') ?? null;
-  const own = hit?.closest('a[href], button, input, [data-pkc-action]') ?? null;
+  // 🔑 一覧は `row-swap.ts` の `OWN_MEANING` **1 本**(2 か所に別の綴りを生やさない)
+  const own = hit?.closest(OWN_MEANING) ?? null;
+  /**
+   * ⚠ **`root.contains(bodyHost)` は置かない**(2026-08-28。着地前レビュー H)。
+   *   この handler は `root` に張ってあるので、`root` の外の click はそもそも
+   *   届かない ── 外しても test が 1 本も落ちない**死んだ門**だった。
+   *   🔑 検出するより起こらなくする(上の `mark` → `bodyHost` と同じ向き)。
+   */
   if (
     bodyHost === null ||
     mark === null ||
-    !root.contains(bodyHost) ||
     (own !== null && bodyHost.contains(own)) ||
     dispatcher.getState().phase !== 'ready'
   ) {
@@ -1109,8 +1115,28 @@ function bodySourceLineAt(
  */
 function pickAppendTarget(dispatcher: Dispatcher, root: HTMLElement, line: number): void {
   const st = dispatcher.getState();
+  /**
+   * 🔴 **追記欄が画面に出ている面でだけ受ける**(2 稿目。user 目線レビュー F)。
+   *
+   * ⚠ `<select>` は `AppendBoxRenderer` が**器を 1 度だけ組む**ので、追記できない
+   *   ノート(添付・フォルダ)でも `querySelector` は**畳まれた物を掴む** ──
+   *   しかも中身は**さっきまで見ていた別のノートの見出し**のままなので、
+   *   1 稿目は「『はじめに』は追記の入り先に選べません」という
+   *   **追記欄が 1 つも見えていない画面で、追記についての断り文**を出していた。
+   * 🔑 判定は `appendModeOf` **1 か所**を引く(2 本目の規則を書かない。§7)。
+   * ⚠ ここは**黙って降りてよい** ── 読むだけの面なので、押した人は
+   *   「追記の入り先を選んだ」つもりが無い。
+   */
+  if (appendModeOf(st).kind !== 'ready') return;
   const lid = st.selectedLid;
   const sel = root.querySelector<HTMLSelectElement>('[data-pkc-field="append-target"]');
+  /**
+   * ⚠ **この `lid` 一致は門ではない**(2026-08-28。着地前レビュー M7 を検算して判明)。
+   *   上の `appendModeOf` が既に `openBody?.lid === lid` を要求しているので、
+   *   ここが偽になる形は作れない ── **型を絞るための書き方**として残している。
+   *   🔑 だから「これが無いと別のノートの本文で節を引く」とは**書かない**
+   *   (CLAUDE.md「これが無いと壊れる、と書く前に外して壊れるのを見る」)。
+   */
   const body = lid !== null && st.openBody?.lid === lid ? st.openBody.body : null;
   if (sel === null || body === null) {
     dispatcher.dispatch({
@@ -4112,7 +4138,7 @@ export function bindActions(
     const modOnly = (me2.ctrlKey || me2.metaKey) && !me2.altKey && !me2.shiftKey;
     const altOnly = me2.altKey && !me2.ctrlKey && !me2.metaKey && !me2.shiftKey;
     if (modOnly || altOnly) {
-      const line = bodySourceLineAt(dispatcher, root, ev.target);
+      const line = bodySourceLineAt(dispatcher, ev.target);
       if (line !== null) {
         ev.preventDefault();
         if (modOnly) dispatcher.dispatch({ type: 'START_EDIT', atLine: line });

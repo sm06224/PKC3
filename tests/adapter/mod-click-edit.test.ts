@@ -82,6 +82,19 @@ const BODY = [
   '<p data-pkc-source-line="0">a</p>',
   '<p data-pkc-source-line="2" id="mid">b</p>',
   '<p data-pkc-source-line="4"><a href="https://example.com" id="lnk">c</a></p>',
+  /**
+   * 🔴 **本文の中に実在する「押せる物」**(2026-08-28。着地前レビュー M4)。
+   * ⚠ 直す前の fixture はリンク 1 種しか持っておらず、門から
+   *   `button` / `input` / `[data-pkc-action]` を落とす変異が**素通り**していた
+   *   ── 実害はチェックの印(`toggle-task`)と表の升(`edit-cell`)の
+   *   `Ctrl`+クリックを奪うこと。
+   * ⚠ 綴りは**製品が焼くもの**に合わせる(`markdown-render.ts` / `csv-table.ts`)。
+   */
+  '<p data-pkc-source-line="6">' +
+    '<input type="checkbox" id="chk" data-pkc-action="toggle-task" data-pkc-task-line="6">' +
+    '<button id="btn" data-pkc-action="edit-cell">升</button>' +
+    '<summary id="sum">畳み</summary>' +
+    '</p>',
 ].join('');
 
 describe('#495 Ctrl(⌘)+クリックで、その行から編集に入る', () => {
@@ -130,6 +143,71 @@ describe('#495 Ctrl(⌘)+クリックで、その行から編集に入る', () =
     const r = rig(BODY);
     r.click('#lnk', { ctrlKey: true });
     expect(r.state().phase, 'リンクのクリックを奪った').toBe('ready');
+  });
+
+  /**
+   * 🔴 **本文の中の「押せる物」も奪わない**(着地前レビュー M4 / E)。
+   * ⚠ リンクだけを見ていると、`button` / `input` / `[data-pkc-action]` /
+   *   `summary` を門から落とす変異が素通りする ── 実害はチェックの印と
+   *   表の升の `Ctrl`+クリックを奪うことである。
+   */
+  it('🔴 チェックの印・升のボタン・畳みの見出しの上でも奪わない', () => {
+    for (const id of ['#chk', '#btn', '#sum']) {
+      const r = rig(BODY);
+      r.click(id, { ctrlKey: true });
+      expect(r.state().phase, `${id} のクリックを奪った`).toBe('ready');
+    }
+    // 対照群 ── ただの段落なら入る(門が固まっているのではない)
+    const r = rig(BODY);
+    r.click('#mid', { ctrlKey: true });
+    expect(r.state().phase).toBe('editing');
+  });
+
+  /**
+   * 🔴 **既定を止める**(着地前レビュー M8)。⚠ 止めないと、`Ctrl`+クリックの
+   * ブラウザ既定(新しいタブ / 選択)がこちらの動線と**同時に走る**。
+   */
+  it('🔴 受けたときは既定を止める(2 つが同時に走らない)', () => {
+    const r = rig(BODY);
+    const el = r.root.querySelector('#mid')!;
+    const ev = new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true });
+    el.dispatchEvent(ev);
+    expect(ev.defaultPrevented, '既定を止めていない').toBe(true);
+    // 対照群 ── 受けなかったときは止めない(押せる物の既定を奪わない)
+    const ev2 = new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true });
+    r.root.querySelector('#lnk')!.dispatchEvent(ev2);
+    expect(ev2.defaultPrevented, 'リンクの既定まで止めた').toBe(false);
+  });
+
+  /**
+   * 🔴 **何も起きないなら、ブラウザの既定も奪わない**(着地前レビュー M7 を
+   * 検算して確定させた形)。
+   *
+   * ⚠ `phase` が `ready` でないとき、`START_EDIT` は reducer が捨て、入り先は
+   *   `appendModeOf` が止める ── **状態は動かない**。⚠ そこで `preventDefault`
+   *   だけ走ると、**字を選ぶ / 新しいタブで開くが消えるのに、代わりに何も
+   *   起きない**(CLAUDE.md §10「奪ったのに代わりが無い」)。
+   * 🔑 だから門は `bodySourceLineAt` の中に置き、**受けなかったことを
+   *   `defaultPrevented` で見る**(状態を見るだけでは、この差が出ない)。
+   */
+  it('🔴 ready でない間は、既定を奪わない(奪って何も起きないを作らない)', () => {
+    const r = rig(BODY);
+    r.d.dispatch({ type: 'START_EDIT' });
+    expect(r.state().phase, '前提: editing になっていない').toBe('editing');
+    const el = r.root.querySelector('#mid')!;
+    for (const mods of [{ ctrlKey: true }, { altKey: true }]) {
+      const ev = new MouseEvent('click', { bubbles: true, cancelable: true, ...mods });
+      el.dispatchEvent(ev);
+      expect(
+        ev.defaultPrevented,
+        `何も起きないのに既定を奪った: ${JSON.stringify(mods)}`,
+      ).toBe(false);
+    }
+    // 対照群 ── 編集をやめれば受けて、そのときは止める
+    r.d.dispatch({ type: 'CANCEL_EDIT' });
+    const ok = new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true });
+    el.dispatchEvent(ok);
+    expect(ok.defaultPrevented, '対照群: 受けたのに止めていない').toBe(true);
   });
 
   it('🔴 刻印が無い所では何もしない ── 当てずっぽうで別の行を開かない', () => {
@@ -207,6 +285,50 @@ describe('#495 Alt+クリックで、追記の入り先を指す', () => {
     expect(r.state().notice ?? '', '理由が出ていない').toContain('見出しが無い');
   });
 
+  /**
+   * ⚠ **`Alt+Shift` は字の範囲を広げる操作** ── 奪うと `preventDefault` で
+   * 選択が伸びない(旧 `alt-click-edit.test.ts` に在った門。書き換えで落ちていた)。
+   */
+  it('🔴 Alt+Shift では入り先を動かさない(範囲を広げる操作を奪わない)', () => {
+    const r = rig(SECT_HTML, SECT_BODY, SLUGS);
+    r.click('#pb', { altKey: true, shiftKey: true });
+    expect(r.target.value, '選択を広げる操作を奪った').toBe('');
+    // 対照群 ── Shift を離せば動く
+    r.click('#pb', { altKey: true });
+    expect(r.target.value).toBe('決定事項');
+  });
+
+  /**
+   * 🔴 **一覧に無い印は選ばない**(着地前レビュー G / M3)。
+   * ⚠ `<select>` に無い値を代入すると `selectedIndex = -1` → `value` は `''`
+   *   (= 末尾)に落ちる。それでも「入り先を『X』にしました」と出ると、
+   *   **追記は末尾へ入るのに user は X へ入ったと思う**。
+   */
+  it('🔴 一覧に無い節は選ばず、理由を出す(黙って末尾へ落とさない)', () => {
+    // ⚠ 一覧には「上の節」しか無いのに、押すのは「決定事項」の中
+    const r = rig(SECT_HTML, SECT_BODY, ['上の節']);
+    r.click('#pb', { altKey: true });
+    expect(r.target.value, '一覧に無い印で末尾へ落ちた').toBe('');
+    expect(r.state().error ?? '', '理由が出ていない').toContain('決定事項');
+    expect(r.state().notice ?? '', '選べたと知らせた').not.toContain('にしました');
+  });
+
+  /**
+   * ⚠ **`ready` のときだけ**(着地前レビュー I)。`START_EDIT` は reducer が
+   * 二重に守るが、**追記の入り先の側は守り手がここしか居ない**。
+   */
+  it('🔴 編集中は、入り先の動線も走らない', () => {
+    const r = rig(SECT_HTML, SECT_BODY, SLUGS);
+    r.d.dispatch({ type: 'START_EDIT' });
+    expect(r.state().phase, '前提: editing になっていない').toBe('editing');
+    r.click('#pb', { altKey: true });
+    expect(r.target.value, '編集中に入り先が動いた').toBe('');
+    // 対照群 ── 編集をやめれば動く(門が固まっているのではない)
+    r.d.dispatch({ type: 'CANCEL_EDIT' });
+    r.click('#pb', { altKey: true });
+    expect(r.target.value).toBe('決定事項');
+  });
+
   it('🔴 素のクリックでは入り先は動かない', () => {
     const r = rig(SECT_HTML, SECT_BODY, SLUGS);
     r.click('#pb');
@@ -227,6 +349,44 @@ describe('#495 Alt+クリックで、追記の入り先を指す', () => {
     const r = rig(SECT_HTML + BODY, SECT_BODY, SLUGS);
     r.click('#lnk', { altKey: true });
     expect(r.target.value).toBe('');
+  });
+
+  /**
+   * 🔴 **追記欄が画面に出ていない面では、黙って降りる**(user 目線レビュー F)。
+   *
+   * ⚠ `<select>` は器を 1 度だけ組むので、追記できないノート(添付・フォルダ)でも
+   *   `querySelector` は**畳まれた物を掴む** ── 1 稿目はそこで
+   *   「『◯◯』は追記の入り先に選べません」という、**追記欄が 1 つも見えていない
+   *   画面で、追記についての断り文**を出していた。
+   * ⚠ **対照群を同じ it に置く** ── 種類を戻せば動くこと(門が固まっていないこと)。
+   */
+  it('🔴 追記できない種類のノートでは、断り文も出さず入り先も動かさない', () => {
+    const r = rig(SECT_HTML, SECT_BODY, SLUGS);
+    // 添付は `APPENDABLE_ARCHETYPES` の外 ── 追記欄そのものが出ない
+    r.d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [{ ...meta('n1'), archetype: 'attachment' }],
+      relations: [],
+    });
+    r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    r.d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: SECT_BODY });
+    r.click('#pb', { altKey: true });
+    expect(r.target.value, '出ていない欄の入り先を動かした').toBe('');
+    expect(r.state().error ?? '', '見えていない物についての断り文が出た').toBe('');
+    expect(r.state().notice ?? '', '見えていない物についての知らせが出た').toBe('');
+
+    // 対照群 ── 追記できる種類へ戻せば効く
+    r.d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('n1')],
+      relations: [],
+    });
+    r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    r.d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: SECT_BODY });
+    r.click('#pb', { altKey: true });
+    expect(r.target.value, '対照群: 追記できる種類でも動かない').toBe('決定事項');
   });
 
   /**
@@ -255,11 +415,35 @@ describe('#495 Alt+クリックで、追記の入り先を指す', () => {
    *   **frontmatter の行数だけ上**の節が選ばれる(user から見て「隣の節に入った」)。
    * ⚠ frontmatter を持たない fixture では**この差が出ない**ので、ここだけ持たせる。
    */
+  /**
+   * 🔴 **ずらしは「ちょうど」でなければならない**(着地前レビュー M1)。
+   *
+   * ⚠ 上の test だけでは **`+1` の変異が素通りする** ── 見出しの下が空行だと、
+   *   1 行ずれても同じ見出しに着地するからである。
+   * 🔑 **空行を 1 つも持たない本文**にすると、1 行のずれが**隣の節**を指す。
+   */
+  it('🔴 ずらしが 1 行でも狂うと、隣の節になる(空行の無い本文で見る)', () => {
+    // 行: 0 `# 上` / 1 `a` / 2 `## 下` / 3 `b`
+    const body = ['# 上', 'a', '## 下', 'b'].join('\n');
+    const html = [
+      '<h1 data-pkc-source-line="0">上</h1>',
+      '<p data-pkc-source-line="1" id="pa">a</p>',
+      '<h2 data-pkc-source-line="2">下</h2>',
+      '<p data-pkc-source-line="3" id="pb">b</p>',
+    ].join('');
+    const r = rig(html, body, ['上', '下']);
+    r.click('#pa', { altKey: true });
+    // ⚠ `+1` なら「下」、`-1` なら解けずに理由が出る
+    expect(r.target.value, 'ずらしが 1 行狂っている').toBe('上');
+    r.click('#pb', { altKey: true });
+    expect(r.target.value).toBe('下');
+  });
+
   it('🔴 文書の情報(frontmatter)が在っても、押した所の節が選ばれる', () => {
     const body = ['---', 'title: x', 'tags: a', '---', ...SECT_BODY.split('\n')].join('\n');
     const r = rig(SECT_HTML, body, SLUGS);
     r.click('#pb', { altKey: true });
-    // ⚠ ずらしを落とすと「出席」(1 つ上の節)になる
+    // ⚠ ずらしを落とすと「上の節」(1 つ前の節)になる
     expect(r.target.value, '節が上へずれた(情報の行数を足していない)').toBe('決定事項');
   });
 });

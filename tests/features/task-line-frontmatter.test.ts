@@ -30,16 +30,25 @@
 import { describe, expect, it } from 'vitest';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { frontmatterLineCount } from '../../src/features/markdown/frontmatter';
-import { parseFrontmatter } from '../../src/features/markdown/frontmatter';
+import { parseFrontmatter, bodyBelowFrontmatter } from '../../src/features/markdown/frontmatter';
 
 /** 焼かれた `data-pkc-task-line` を出た順に読む。 */
 const lines = (html: string): number[] =>
   [...html.matchAll(/data-pkc-task-line="(\d+)"/g)].map((m) => Number(m[1]));
 
-/** 読む面と同じ描き方(剥がして描き、ずらしを渡す)。 */
+/**
+ * 読む面と同じ描き方(剥がして描き、ずらしを渡す)。
+ *
+ * 🔴 **`parseFrontmatter().body` で模してはいけない**(2026-08-28。#495 の
+ * 着地前レビューが拾った)。⚠ 1 稿目はそちらで模しており、**製品と同じ盲点を
+ * 共有していた** ── `parseFrontmatter` は閉じの直後の空行を 1 行余分に食べるので、
+ * ずらし(`frontmatterLineCount`)と**1 行ずれる**。しかも fixture が
+ * 「閉じの直後が本文」の 1 形しか無かったので、**その次元をゼロ件で持っていた**
+ * (CLAUDE.md §2「ゼロ件の次元は測っていない次元」)。
+ * 🔑 製品が使う `bodyBelowFrontmatter` をそのまま通す。
+ */
 function renderReadSurface(body: string): string {
-  const fm = parseFrontmatter(body);
-  return renderMarkdown(fm.body, {
+  return renderMarkdown(bodyBelowFrontmatter(body), {
     interactiveTasks: true,
     taskLineOffset: frontmatterLineCount(body),
   });
@@ -47,6 +56,11 @@ function renderReadSurface(body: string): string {
 
 const FM = '---\ntags: [買い物]\nstatus: open\n---\n';
 const DOC = '# 題\n\n- [ ] あ\n- [ ] い\n- [ ] う\n';
+/**
+ * 🔴 **閉じの `---` の直後が空行**(欠けていた次元)。⚠ ここが「ふつうの書き方」
+ * である ── PKC 自身が書き出す frontmatter もこの形になる。
+ */
+const FM_BLANK = '---\ntags: [買い物]\nstatus: open\n---\n\n';
 
 describe('チェックの印の行番号は、原文の行を指す(N1)', () => {
   /**
@@ -81,6 +95,36 @@ describe('チェックの印の行番号は、原文の行を指す(N1)', () => 
    * ⚠ ずらしを渡さないと、指す先は**frontmatter の中**になる ── つまり
    *   押すと `tags:` の行が `- [x] …` に書き換わる。
    */
+  /**
+   * 🔴 **閉じの直後が空行でも、押した項目の行を指す**(2026-08-28。着地前レビュー A)。
+   *
+   * ⚠ 直す前の症状は**「い」を押すと「あ」の印が動く** ── 1 行上の別の項目を
+   *   書き換える、無言のデータ破壊だった。
+   * 🔑 空振り防止に、まず**この fixture でずれが起きうる**ことを確かめる
+   *   (`frontmatterLineCount` と `parseFrontmatter` の差が 1 であること)。
+   */
+  it('🔴 閉じの直後が空行でも、押した項目の原文の行を指す', () => {
+    const body = FM_BLANK + DOC;
+    // 前提 ── この形は 2 つの数え方が食い違う(食い違わないなら何も測っていない)
+    const stripped = parseFrontmatter(body).body.split('\n').length;
+    expect(
+      body.split('\n').length - stripped,
+      '前提が崩れている: この fixture では 2 つの数え方が一致してしまう',
+    ).toBe(frontmatterLineCount(body) + 1);
+
+    const raw = body.split('\n');
+    for (const line of lines(renderReadSurface(body))) {
+      expect(raw[line], `行 ${line} がチェック項目を指していない: ${JSON.stringify(raw[line])}`)
+        .toMatch(/^- \[ \] /);
+    }
+    // 🔴 順番も一致する(「い」を押して「あ」が動く、を止める)
+    expect(lines(renderReadSurface(body)).map((l) => raw[l])).toEqual([
+      '- [ ] あ',
+      '- [ ] い',
+      '- [ ] う',
+    ]);
+  });
+
   it('🔴 ずらしを渡さないと frontmatter の中を指す(直す前の症状)', () => {
     const body = FM + DOC;
     const bad = lines(renderMarkdown(parseFrontmatter(body).body, { interactiveTasks: true }));
@@ -125,5 +169,30 @@ describe('読む面が、ずらしを実際に渡している', () => {
       /taskLineOffset:\s*frontmatterLineCount\(body\)/,
     );
     expect(code, 'ずらしの計算が 2 本目に増えている').not.toMatch(/taskLineOffset:\s*\d/);
+  });
+
+  /**
+   * 🔴 **描く本文の切り方も、同じ 1 本であること**(2026-08-28。着地前レビュー A)。
+   *
+   * ⚠ ずらしを渡していても、**描く側が別の切り方**なら 1 行ずれる ──
+   *   `parseFrontmatter().body` は閉じの直後の空行を 1 行余分に食べる。
+   *   実害は無言だった(チェックの印が 1 行上の項目を書き換える)。
+   * ⚠ **原文で pin する** ── この経路はワーカー越しで、unit から結果を
+   *   観測できない(渡す本文を取り違えても tsc は黙る)。
+   * 🔑 実ブラウザ側は `tests/smoke/mod-click.smoke.spec.ts` の
+   *   「文書の情報が在っても、押した塊が開く」が見る。
+   */
+  it('🔴 読む面が描くのは bodyBelowFrontmatter の本文である', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync('src/adapter/ui/render/detail.ts', 'utf-8');
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    expect(code, '切り方が bodyBelowFrontmatter を通っていない').toMatch(
+      /const shown = bodyBelowFrontmatter\(body\);/,
+    );
+    // 🔴 描く先に渡しているのが `shown` であること(組み立てただけで使わない、を止める)
+    expect(code, '描く本文に shown を渡していない').toMatch(/\.render\(shown,\s*opts\)/);
+    expect(code, '描く本文が 2 本目の切り方に戻っている').not.toMatch(
+      /render\w*\(\s*fm\.body/,
+    );
   });
 });

@@ -43,13 +43,13 @@ import {
 const DOC = '# 議事録\n\n## 出席\n\n3 名でした。\n\n## 決定事項\n\nA を採用する。';
 
 /** ノートを 1 件作り、`DOC` を入れて**読む面**まで出す。 */
-async function makeNote(page: Page): Promise<void> {
+async function makeNote(page: Page, body: string = DOC): Promise<void> {
   await createEntry(page, 'text');
   const live = page.locator('[data-pkc-region="editor-live"]');
   await expect(live).toBeVisible();
   // ⚠ 空のノートの入口は**余白の素クリック**のまま(塞ぐと 1 文字も打てない)
   await clickReal(page, '[data-pkc-region="editor-live"]');
-  await live.locator('[data-pkc-field="row-source"]').fill(DOC);
+  await live.locator('[data-pkc-field="row-source"]').fill(body);
   await page.keyboard.press('Tab');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await expect(page.locator('[data-pkc-field="detail-body"] h2')).toHaveText([
@@ -146,7 +146,19 @@ test('🔴 読む面: Alt+クリックで、追記の入り先がその節にな
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
-test('🔴 1 面: 素のクリックでは塊が開かない(Ctrl+クリックで開く)', async ({ page }) => {
+/**
+ * 🔴 **1 面編集: ドラッグで字を選んでも、選択が消えて編集に化けない**(#495)。
+ *
+ * ⚠ **これが user の実害だった** ── 「見出し全体クリック判定はあまり良い挙動
+ *   じゃないと思う」。ドラッグの終わりにも `click` は飛ぶので、無条件に開くと
+ *   **選んだ字がその瞬間に消える**。
+ * 🔴 **unit では原理的に届かない** ── happy-dom は本物のドラッグ選択を作らない
+ *   (unit は `getSelection` を差した形でしか見られない)。実際に**マウスを
+ *   引きずって**、選択が残ることを見るのはここだけである。
+ * 🔑 **素のクリックで開く道は残す**(user 指示 2026-08-03「マウスだけで完結し、
+ *   キーボードは近道」)── 消すと、この面で塊を開く手が `Ctrl` しか無くなる。
+ */
+test('🔴 1 面: ドラッグで字を選んでも開かない / ただ押せば開く', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
@@ -156,20 +168,87 @@ test('🔴 1 面: 素のクリックでは塊が開かない(Ctrl+クリック�
   await clickReal(page, '[data-pkc-action="start-edit"]');
   const live = page.locator('[data-pkc-region="editor-live"]');
   await expect(live).toBeVisible();
-  await expect(live.locator('[data-pkc-field="row-source"]')).toHaveCount(0);
+  const row = live.locator('[data-pkc-field="row-source"]');
+  await expect(row).toHaveCount(0);
 
   const para = live.locator('p', { hasText: 'A を採用する。' });
+  const box = (await para.boundingBox())!;
 
-  // ① 🔴 素のクリック ── 開かない(読む・選ぶ・畳むに返した)
+  // ① 🔴 ドラッグで字を選ぶ ── 開かず、**選択が残っている**
+  await page.mouse.move(box.x + 6, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.6, box.y + box.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await expect(row, 'ドラッグ選択の終わりに塊が開いた').toHaveCount(0);
+  const picked = await page.evaluate(() => String(document.getSelection() ?? ''));
+  expect(picked, '選んだ字が消えた(この PR が直そうとした当の症状)').not.toBe('');
+
+  /**
+   * ② 🔑 **選んだ直後の 1 回目は、選択を捨てるための 1 回**(実測で分かった)。
+   *
+   * 📏 Chrome は**選択の内側**を押したとき、選択を畳むのを `click` の**後**まで
+   *   遅らせる(選択そのものを掴んで運ぶ操作があるため)── 実測すると
+   *   `click` の時点でまだ `" を採用する。"` が選ばれている。
+   * 🔑 だから 1 回目は開かない(これが正しい ── 掴もうとしただけかもしれない)。
+   *   **2 回目で開く** ── マウスだけの道はここに残っている。
+   */
   await clickReal(page, para);
-  await expect(
-    live.locator('[data-pkc-field="row-source"]'),
-    '素のクリックで塊が開いた',
-  ).toHaveCount(0);
+  await expect(row, '選択の内側の 1 回目で開いた').toHaveCount(0);
+  await clickReal(page, para);
+  await expect(row, '2 回目でも開かない(マウスだけの道が消えた)').toHaveValue(
+    'A を採用する。',
+  );
+  await page.keyboard.press('Escape');
+  await expect(row).toHaveCount(0);
 
-  // ② 対照群 ── Ctrl+クリックなら開く
+  // ③ 対照群 ── Ctrl+クリックでも開く(読む面と同じ手が 1 面でも効く)
   await modClickReal(page, para);
-  await expect(live.locator('[data-pkc-field="row-source"]')).toHaveValue('A を採用する。');
+  await expect(row).toHaveValue('A を採用する。');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **文書の情報(frontmatter)が在っても、押した所が開く**(2026-08-28。
+ * 着地前レビュー A ── **既存の無言のずれ**を、この PR の看板機能が踏んでいた)。
+ *
+ * ⚠ 読む面は本文を**剥がして**描き、書き戻す側は `frontmatterLineCount` で
+ *   **ずらして**いたが、`parseFrontmatter` は**閉じの直後の空行を 1 行余分に
+ *   食べる** ── 実測 `count=3` / 実際に剥がれた行数 `4`。
+ * 🔴 帰結は 3 つとも無言だった:チェックの印が 1 行上の項目を書き換える /
+ *   `Ctrl`+クリックがどの行も開かない / 追記の入り先が 1 つ前の節になる。
+ * 🔑 **閉じの直後が空行**の fixture が、その次元を埋める(unit の fixture は
+ *   閉じの直後が本文で、**この次元をゼロ件で持っていた** ── CLAUDE.md §2)。
+ */
+test('🔴 文書の情報が在っても、押した塊が開く / 入り先がその節になる (#495)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  // ⚠ 閉じの `---` の直後に**空行**を置く(ここが欠けていた次元)
+  await makeNote(page, '---\ntags: [会議]\n---\n\n' + DOC);
+
+  const body = page.locator('[data-pkc-field="detail-body"]');
+  await expect(body.locator('h2'), '情報の行が本文として描かれている').toHaveText([
+    '出席',
+    '決定事項',
+  ]);
+
+  // ① 🔴 Alt+クリック ── **押した所の節**(1 つ前の節ではない)
+  const target = page.locator('[data-pkc-field="append-target"]');
+  await altClickReal(page, body.locator('p', { hasText: 'A を採用する。' }));
+  await expect(
+    target.locator('option:checked'),
+    '入り先が 1 つ前の節になった(情報の行数のずれ)',
+  ).toHaveText(/決定事項/);
+
+  // ② 🔴 Ctrl+クリック ── **押した塊が開く**(空行を指して無反応にならない)
+  await modClickReal(page, body.locator('p', { hasText: 'A を採用する。' }));
+  await expect(
+    page.locator('[data-pkc-region="editor-live"] [data-pkc-field="row-source"]'),
+    '押した塊が開いていない(情報の行数のずれで空行を指した)',
+  ).toHaveValue('A を採用する。');
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

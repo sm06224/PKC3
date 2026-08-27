@@ -44,6 +44,19 @@ import { autoPairFor } from '@features/markdown/text-ops';
 import { spliceLines } from '@features/markdown/edit-journal';
 import { appKeymap, type KeymapStore } from './keymap';
 
+/**
+ * 🔴 **その場に自分の意味を持っている物**(2026-08-28。着地前レビュー E)。
+ *
+ * 押されたらこちらは降りる ── 奪うと、その動線が 1 つ死ぬ。
+ * ⚠ **読む面(`binder.ts`)と同じ 1 本を使う** ── 直す前は 2 か所に別の綴りが
+ *   生えており、`summary` / `label` が**読む面の側だけ抜けていた**。
+ *   実害:畳んだ `:::details` の見出し(`<summary>`)を読む面で `Ctrl`+クリック
+ *   すると**開閉が奪われて編集に入る**のに、1 面編集では開閉する ──
+ *   **同じ字を押したのに面で結果が違う**(§7)。
+ * ⚠ 安全側(広いほう)へ寄せる ── 迷ったら「奪わない」。
+ */
+export const OWN_MEANING = 'a,button,input,summary,label,[data-pkc-action]';
+
 /** 活性塊の代わりに置く定数。⚠ **中身が固定**なので差分の対象から自然に外れる。 */
 const SLOT_HTML = '<div data-pkc-row-slot="1"></div>';
 
@@ -441,6 +454,15 @@ export class RowSwap {
     return clientY > bottom;
   }
 
+  /**
+   * いま**字を選んでいる**か(= ドラッグの終わりの `click` か)。
+   * 🔑 規則は `binder.ts` の表の升と**同じ 1 つ**(選択が潰れていて中身が空でない)。
+   */
+  private hasSelection(target: Node): boolean {
+    const sel = target.ownerDocument?.getSelection() ?? null;
+    return sel !== null && !sel.isCollapsed && sel.toString() !== '';
+  }
+
   /** クリックされたノードから、それを含む塊の添字を引く。 */
   private blockIndexForNode(node: Node): number | null {
     let cur: Node | null = node;
@@ -453,22 +475,34 @@ export class RowSwap {
   }
 
   /**
-   * 🔴 **塊を開くのは Ctrl(⌘)+クリック**(#495。user 裁定 2026-08-27)。
+   * 🔴 **字を選んでいる最中は開かない**(#495。user 裁定 2026-08-27 の実害の側)。
    *
-   * > 「見出しを押したら編集とかは、**Ctrl+クリックで、その地点から編集**にすれば
-   * > 良いと思う。**見出しにこだわる必要はない**」
    * > (直前の指摘)「正直**見出し全体クリック判定はあまり良い挙動じゃない**と思う」
    *
-   * ⚠ 直す前は**素の左クリックで塊が開いて**いた ── 押し所が塊の幅いっぱいなので、
-   *   字を選ぶ / 見出しの畳みを押す / ただ読む、が**全部「編集に入る」に化けて**いた
-   *   (#486 が畳みのボタンを `<button>` にせざるを得なかったのもこれが理由)。
-   * 🔑 素のクリックは**読む・選ぶ・畳む**に返す。開くのは修飾キーを押したときだけ。
-   * ⚠ **Ctrl と ⌘ を畳む** ── `features/keymap.ts` の `Chord.mod` と同じ規則
-   *   (分けると「mac だけ効かない近道」が生まれる)。
+   * ⚠ 直す前は**押し所が塊の幅いっぱい**で、しかも無条件に開いていた ──
+   *   ドラッグの終わりにも `click` は飛ぶので、**字を選ぼうとしただけで
+   *   選択がその瞬間に消えて編集に入る**。
+   * 🔑 直し方は**この repo が既に持っている規則**を引く ── `binder.ts` の表の升は
+   *   同じ罠を「**選択が潰れている(= ただ押した)ときだけ開く**」で解いており、
+   *   ⚠ そのコメントは「**`row-swap.ts` が同じ罠を踏んでいる**」と**こちらを名指し
+   *   していた**。規則を 2 本書かず、同じ形をここへ持ってくる(§7)。
+   *
+   * ## ⚠ **素のクリックを殺してはいけない**(2 稿目。user 目線レビュー A)
+   *
+   * 1 稿目は `if (!mod) return;` と書いて**素のクリックで一切開かない**ようにした。
+   * ⚠ ところがこの面は**「編集」を押した後の面**であり、そこで塊を開く口を
+   *   数え上げると **`Ctrl` を使わない道が 1 本も残らなかった**:
+   *   `Alt+↓` は `contexts: ['row']` = **既に行が開いているときだけ**、
+   *   「全文を編集」は**文書ごと生の markdown**、余白は**末尾に新しい行**。
+   * 🔴 user 指示 2026-08-03「**マウスだけで完結し、キーボードは近道**」に対して、
+   *   鍵が**近道ではなく唯一路**になっていた。
+   * 🔑 #495 が直せと言っているのは「**押しただけで編集に化ける**」ことであって、
+   *   「押しても開かないようにする」ことではない ── 選択ガードで実害だけが消える。
+   *
    * ⚠ **`Alt` が一緒なら降りる** ── `Ctrl+Alt` は AltGr であり、`Alt` 単独は
    *   読む面の「追記の入り先」(`binder.ts`)である。
-   * ⚠ **本文の下の余白だけは素のクリックのまま** ── そこが**空のノートの唯一の
-   *   入口**で、塞ぐと 1 文字も打てなくなる(下の `belowLastBlock` の注記)。
+   * ⚠ **Ctrl(⌘)を押していれば選択があっても開く** ── そちらは「ここを編集する」
+   *   という**はっきりした意思表示**なので、ガードで止めない。
    */
   private handleClick(ev: MouseEvent): void {
     if (ev.defaultPrevented || ev.button !== 0) return;
@@ -482,7 +516,7 @@ export class RowSwap {
     // 既に活性なら、その中のクリックは素通り(textarea 自身の操作)
     if (this.active?.slot.contains(target) === true) return;
     // ⚠ リンク・トグル・コピーボタンは奪わない(押せるものは押せたまま)
-    if (target instanceof Element && target.closest('a,button,input,summary,label') !== null) return;
+    if (target instanceof Element && target.closest(OWN_MEANING) !== null) return;
     const blockIndex = this.blockIndexForNode(target);
     if (blockIndex === null) {
       /**
@@ -511,11 +545,11 @@ export class RowSwap {
       return;
     }
     /**
-     * 🔴 **素のクリックでは開かない**(#495)── ここから下は「開く」の話である。
-     * ⚠ 断り文も出さない ── 読むために押した人へ毎回お知らせを出すと、
-     *   お知らせの行が**読む邪魔**になる(押した本人は断られたつもりが無い)。
+     * 🔴 **選んでいる最中は開かない**(#495。上の docstring)。
+     * ⚠ 断り文は出さない ── 字を選んだ人は「断られた」つもりが無い。
+     * ⚠ `toString()` まで見る ── 潰れていない選択でも**中身が空**のことがある。
      */
-    if (!mod) return;
+    if (!mod && this.hasSelection(target)) return;
     if (this.starts[blockIndex] === undefined || this.starts[blockIndex]! < 0) {
       // 導出物(脚注の区切りなど)── 原文の行が無いので開かない
       this.cb.notify?.('ここは自動で作られる部分なので、直接は編集できません');

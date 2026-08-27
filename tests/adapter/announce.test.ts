@@ -671,7 +671,9 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
-    ['2026-08-28-modifier-click', '086ee9b3'],
+    // ⚠ 配る前(まだ open な PR の中)に文面を直した ── 既読の user が居ないので
+    //    新しい entry ではなく**この表を直す**(検査の文言どおり)
+    ['2026-08-28-modifier-click', '95225dff'],
     ['2026-08-27-capture-hold', '3afd708c'],
     ['2026-08-27-heading-look', '160e73cd'],
     ['2026-08-27-paste-html-fence', '4e93ab87'],
