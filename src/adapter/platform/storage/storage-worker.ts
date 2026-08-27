@@ -44,6 +44,12 @@ import {
   taskCardsOf,
   type TaskScan,
 } from '@features/schedule/task-cards';
+import {
+  CONTACT_LIMITS,
+  contactOf,
+  type ContactCard,
+  type ContactScan,
+} from '@features/contact/contact-card';
 import { createQueryScan, FRONTMATTER_SCAN_CHARS } from '@features/query/group-by';
 import { createSmartScan } from '@features/smart/smart-spec';
 import {
@@ -771,6 +777,78 @@ export const TASK_CANDIDATE_WHERE = `cid = ? AND ${TASK_CANDIDATE_COND}`;
  * `QUERY_SCAN_CHUNK`(500)より小さくする ── 一度に heap へ載る量が桁で違う。
  */
 const TASK_SCAN_CHUNK = 100;
+
+/**
+ * 走査で 1 度に読むノートの数(連絡先)。⚠ **frontmatter しか要らない**が、
+ * `entries.body` は本文を丸ごと持つので、読む量は予定と同じ ── だから同じ塊にする。
+ */
+const CONTACT_SCAN_CHUNK = 100;
+
+/**
+ * 🔴 **連絡先を集める**(#278 段①)。
+ *
+ * 🔑 **予定(`runTaskScan`)と同じ形**にしてある ── 塊で読み、塊ごとに捨て、
+ *   切ったら `truncated` を返す。⚠ 新しい走査の作法を作らない(§7)。
+ * 🔑 **本文は worker から出さない** ── 返るのは連絡の手段だけである
+ *   (不可侵指示 2026-07-27「速やかな破棄」)。
+ * ⚠ **候補を列で絞れない** ── 「`tel:` を持つ」は抽出列に無いので、
+ *   予定のような `WHERE` が書けず、**本文を読むまで分からない**。
+ *   だから絞りは `contactOf` が返す `null` で行う(読む量は減らない)。
+ *   🔑 その代わり、この走査は**タブを開いた人にだけ**走る(呼び側の規律)。
+ */
+function runContactScan(cid: string): ContactScan {
+  const database = need();
+  /**
+   * ⚠ **ゴミ箱を除く条件は要らない** ── PKC3 のゴミ箱は
+   *   「**`entries` に居ない `entry_lid` の最新 revision**」というビューであって、
+   *   列ではない(`listTrash` の docstring)。捨てた時点で `entries` から消える。
+   * ⚠ 1 稿目は `trashed_at IS NULL` と書いており(**そんな列は無い**)、
+   *   worker の test が `no such column` で落として教えた。
+   */
+  const totalNotes = Number(
+    database.selectValue('SELECT count(*) FROM entries WHERE cid = ?', [cid]) ?? 0,
+  );
+  const cards: ContactCard[] = [];
+  let scannedNotes = 0;
+  let truncated = false;
+  let stop = false;
+  let after: { entryOrder: number; lid: string } | undefined;
+  while (!stop) {
+    const rows = database.selectObjects(
+      after === undefined
+        ? `SELECT lid, title, entry_order, body FROM entries
+             WHERE cid = ?
+             ORDER BY entry_order, lid LIMIT ?`
+        : `SELECT lid, title, entry_order, body FROM entries
+             WHERE cid = ?
+             AND (entry_order > ? OR (entry_order = ? AND lid > ?))
+            ORDER BY entry_order, lid LIMIT ?`,
+      after === undefined
+        ? [cid, CONTACT_SCAN_CHUNK]
+        : [cid, after.entryOrder, after.entryOrder, after.lid, CONTACT_SCAN_CHUNK],
+    ) as unknown as Array<{
+      lid: string;
+      title: string | null;
+      entry_order: number;
+      body: string | null;
+    }>;
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      // ⚠ **切ったら必ず `truncated`** ── 黙って切ると user は「無い」と読む
+      if (scannedNotes >= CONTACT_LIMITS.notes || cards.length >= CONTACT_LIMITS.cards) {
+        truncated = true;
+        stop = true;
+        break;
+      }
+      scannedNotes += 1;
+      const card = contactOf(row.lid, row.title ?? '', row.body ?? '');
+      if (card !== null) cards.push(card);
+      after = { entryOrder: row.entry_order, lid: row.lid };
+    }
+    if (rows.length < CONTACT_SCAN_CHUNK) break;
+  }
+  return { cards, totalNotes, scannedNotes, truncated };
+}
 
 /**
  * 🔴 **カンバンの札を集める**(#277 段②-b)。
@@ -1531,6 +1609,7 @@ const handlers: Handlers = {
       [req.cid],
     ) as unknown as ResultMap['listEntryMetas'],
   taskScan: (req) => runTaskScan(req.cid),
+  contactScan: (req) => runContactScan(req.cid),
   snippetScan: (req) => runSnippetScan(req.cid),
   getBody: (req) => {
     const rows = need().selectObjects(

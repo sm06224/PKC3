@@ -178,6 +178,14 @@ const ICON_PATHS: Readonly<Record<string, readonly IconPath[]>> = {
   /** 種類が分からないもの。 */
   dot: [{ d: 'M9.5 12a2.5 2.5 0 105 0 2.5 2.5 0 00-5 0z', fill: 'solid' }],
   /** マイク(録音 ── #413)。 */
+  /**
+   * 人(連絡先 ── #278 段①)。⚠ **顔を描かない** ── 小さく潰れると
+   * 目鼻が滲んで「汚れ」に見える。頭と肩の 2 画で足りる。
+   */
+  person: [
+    { d: 'M12 4.5a3.2 3.2 0 110 6.4 3.2 3.2 0 010-6.4z', fill: 'soft' },
+    'M5 19.5a7 7 0 0114 0',
+  ],
   mic: [
     { d: 'M9.5 4.5a2.5 2.5 0 015 0v6a2.5 2.5 0 01-5 0z', fill: 'soft' },
     'M6 10.5a6 6 0 0012 0',
@@ -293,6 +301,7 @@ export const BROWSE_ICONS: Readonly<Record<string, IconName>> = {
   filer: 'folder',
   launcher: 'apps',
   schedule: 'calendar',
+  contacts: 'person',
 };
 
 /** 図案 1 つを作る。⚠ 呼び側は**そのまま append する**(文字列にしない)。 */

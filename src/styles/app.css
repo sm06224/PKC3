@@ -2427,6 +2427,74 @@ li[data-pkc-row-slot] {
   width: 13px;
 }
 
+/* ══ 連絡先(#278 段①、2026-08-27)══════════════════════════════
+ * 🔴 **左の列に置く**(#292 段⑤ の見分け方 ── 閉じても失う物が無い = ノートの見方)。
+ * ⚠ 幅は `minmax(200px, 18vw)` なので、**名前と宛先を縦に積む** ──
+ *   横に並べると 200px で電話番号が切れる。 */
+[data-pkc-browse-pane='contacts'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s2);
+  min-height: 0;
+  overflow: auto;
+}
+[data-pkc-field='contacts-note'] {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+[data-pkc-field='contacts-list'] {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: var(--border);
+}
+[data-pkc-field='contacts-list'] > li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--s2);
+  background: var(--surface);
+}
+/* ⚠ 名前は**行いっぱいの押せる場所**にする ── 字だけを的にすると、
+ * 200px の列では狙いにくい(マウスだけで完結する ── 不可侵指示 2026-08-03)。 */
+[data-pkc-field='contact-name'] {
+  justify-content: flex-start;
+  width: 100%;
+  height: auto;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--fg);
+  font-weight: 600;
+  text-align: left;
+}
+[data-pkc-field='contact-ways'] {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 12px;
+}
+/* ⚠ 押せる宛先と、押せない字を**見た目で分ける** ── 分けないと
+ * 「押したのに何も起きない」に見える(押せないほうは色を落とす)。 */
+[data-pkc-field='contact-tel'],
+[data-pkc-field='contact-mail'] {
+  /* ⚠ **本文のリンクと同じ色**(`--accent`)── 1 稿目は在りもしない
+   * `--link` と書いており、**未定義の変数は宣言ごと無効**になるので
+   * 押せる宛先と押せない字が**同じ見た目**になっていた(黙って壊れる形)。 */
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+[data-pkc-field='contact-tel-plain'],
+[data-pkc-field='contact-mail-plain'] {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
 /* ══ 予定(#292 段③、2026-08-23)══════════════════════════════════
  * 🔴 **左の列に置く**(user 指示「もう一つ PKC が開いて混乱する」)── 中央は
  *   本文のまま。⚠ 幅は `minmax(200px, 18vw)` = 1920 で 345px / 下限 200px。
@@ -3923,7 +3991,10 @@ li[data-pkc-row-slot] {
   display: inline-flex;
   align-items: center;
   gap: var(--s1);
-  border: 1px solid var(--line);
+  /* ⚠ 1 稿目は在りもしない `--line` を使っており、**未定義の変数は宣言ごと
+   * 無効**になるので、この枠は**1 度も出ていなかった**(#278 の作業中に
+   * 全数走査して見つけた。同じ穴を自分でも 1 つ作りかけた)。 */
+  border: 1px solid var(--border);
   border-radius: 3px;
   padding: 0 var(--s1);
 }

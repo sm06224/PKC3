@@ -11,6 +11,7 @@ import type {
   KeyResult as QueryKeyResult,
 } from '@features/query/group-by';
 import type { TaskScan } from '@features/schedule/task-cards';
+import type { ContactScan } from '@features/contact/contact-card';
 import type { SnippetScan } from '@features/snippet/snippet-table';
 
 export type StorageRequest =
@@ -82,6 +83,12 @@ export type StorageRequest =
    *   (無害 ── 札が出ないだけ)。
    */
   | { op: 'taskScan'; cid: string }
+  /**
+   * 🔴 **連絡先を集める**(#278 段①)。⚠ 予定(`taskScan`)と**同じ形**。
+   * ⚠ 候補を列で絞れない(「`tel:` を持つ」は抽出列に無い)ので**全件を読む** ──
+   *   だから**タブを開いた人にだけ**走らせる(呼び側の規律)。
+   */
+  | { op: 'contactScan'; cid: string }
   /** 🔴 雛形を集める(#196 / B-2)。⚠ 候補は archetype で絞るので普通のノートは読まない。 */
   | { op: 'snippetScan'; cid: string }
   | { op: 'getBody'; cid: string; lid: string }
@@ -585,6 +592,8 @@ export interface ResultMap {
   listEntryMetas: EntryMetaRow[];
   /** カンバンの札(ノートの並び → 行番号 順)。⚠ 切ったときは `truncated`。 */
   taskScan: TaskScan;
+  /** 連絡先(題名順は描画側)。⚠ 切ったときは `truncated`。 */
+  contactScan: ContactScan;
   snippetScan: SnippetScan;
   getBody: string | null;
   /** 読めたものだけ(要求順)。⚠ 無い lid は**黙って落ちる**。 */

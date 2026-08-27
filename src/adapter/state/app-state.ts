@@ -13,6 +13,7 @@ import { resolveCanonicalParents, reorderSibling } from '@features/relation/tree
 import { extractMeta, seedBodyFor } from '@features/flavor';
 import { applyBodyRewrite, type BodyRewrite } from '@features/markdown/body-rewrite';
 import { replaceTaskCards, type TaskScan } from '@features/schedule/task-cards';
+import type { ContactScan } from '@features/contact/contact-card';
 import type { SnippetScan } from '@features/snippet/snippet-table';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import type { PersistState } from '@adapter/platform/storage-persist';
@@ -577,6 +578,17 @@ export interface AppState {
    */
   taskScanFailed: boolean;
   /**
+   * 🔴 **連絡先**(#278 段①)。⚠ `null` = **まだ集めていない**(0 件ではない)。
+   *
+   * ⚠ 中身は**連絡の手段だけ**で、本文は 1 バイトも入らない(舐めるのは worker)。
+   * ⚠ **タブを開くまで集めない** ── 「`tel:` を持つ」は抽出列に無いので
+   *   候補を絞れず、**全件の本文を読む**ことになる。予定と同じ規律で、
+   *   使う人にだけ払わせる。
+   */
+  contactScan: ContactScan | null;
+  /** 🔴 **集められなかった**(`taskScanFailed` と同じ理由 ── 「まだ」と区別する)。 */
+  contactScanFailed: boolean;
+  /**
    * 🔴 **保存が「消えない扱い」か**(#347、user 裁定 2026-08-23)。
    *
    * ⚠ 出すのは**設定の面だけ**である ── 帯にもダイアログにもしない
@@ -710,6 +722,8 @@ export const initialState: AppState = {
   queryFailed: false,
   taskScan: null,
   taskScanFailed: false,
+  contactScan: null,
+  contactScanFailed: false,
   snippetScan: null,
   persistState: 'unknown',
   backlinks: null,
@@ -772,6 +786,8 @@ export type UserAction =
   | { type: 'REFRESH_QUERY' }
   /** カンバンの札が集まった(#277 段②-b)。 */
   | { type: 'SET_TASK_SCAN'; scan: TaskScan }
+  | { type: 'SET_CONTACT_SCAN'; scan: ContactScan }
+  | { type: 'CONTACT_SCAN_FAILED' }
   /** 🔴 雛形を集め終えた(#196 / B-2)。⚠ `null` は失敗 ── **帯は出さず静かに畳む**。 */
   | { type: 'SET_SNIPPET_SCAN'; scan: SnippetScan | null }
   /** 札が集められなかった(#277 段②-b)。⚠ 「まだ」と区別する ── 文言が違う。 */
@@ -808,6 +824,7 @@ export type UserAction =
    *   (読み直しの間に空白を出さない)。
    */
   | { type: 'REFRESH_TASK_SCAN' }
+  | { type: 'REFRESH_CONTACT_SCAN' }
   | { type: 'REFRESH_SNIPPET_SCAN' }
   /**
    * タイル設定を書き戻した ack(P8 段⑭)。⚠ **開いている body も差し替える**。
@@ -1322,6 +1339,7 @@ export type DomainEvent =
    * 本文は常駐していないし、主スレッドへ運んでもいけない(不可侵指示 2026-07-27)。
    */
   | { type: 'REQUEST_TASK_SCAN' }
+  | { type: 'REQUEST_CONTACT_SCAN' }
   | { type: 'REQUEST_SNIPPET_SCAN' }
   /** ⚠ **どれを読むかを載せる** ── effect 層は実行時に state を見ない(review L-6)。 */
   | {
@@ -1869,6 +1887,13 @@ function reduceCore(
       return { state: { ...state, taskScan: action.scan, taskScanFailed: false }, events: [] };
     case 'TASK_SCAN_FAILED':
       return { state: { ...state, taskScanFailed: true }, events: [] };
+    case 'SET_CONTACT_SCAN':
+      return {
+        state: { ...state, contactScan: action.scan, contactScanFailed: false },
+        events: [],
+      };
+    case 'CONTACT_SCAN_FAILED':
+      return { state: { ...state, contactScanFailed: true }, events: [] };
     /**
      * 🔴 **雛形は「集められなかった」を帯に出さない**(#196 / B-2)。
      *
@@ -1986,6 +2011,12 @@ function reduceCore(
       };
     case 'REFRESH_TASK_SCAN':
       return { state, events: [{ type: 'REQUEST_TASK_SCAN' }] };
+    /**
+     * 🔴 **連絡先を集め直す**(#278 段①)。⚠ **毎回要求する**が、前の一覧は
+     *   消さない ── 消すと、集め直すたびに一覧が空になって**行が飛ぶ**。
+     */
+    case 'REFRESH_CONTACT_SCAN':
+      return { state, events: [{ type: 'REQUEST_CONTACT_SCAN' }] };
     case 'REFRESH_SNIPPET_SCAN':
       return { state, events: [{ type: 'REQUEST_SNIPPET_SCAN' }] };
     case 'REFRESH_LAUNCHER_TILES':

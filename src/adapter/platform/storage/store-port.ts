@@ -81,6 +81,7 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
      * 上限も worker と `features/schedule/task-cards.ts` が持つ。
      */
     taskScan: () => client.request({ op: 'taskScan', cid }),
+    contactScan: () => client.request({ op: 'contactScan', cid }),
     snippetScan: () => client.request({ op: 'snippetScan', cid }),
     getBodies: (lids) => client.request({ op: 'getBodies', cid, lids }),
     listBodies: (after, maxBytes) =>

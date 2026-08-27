@@ -41,6 +41,7 @@ import type {
   KeyResult as QueryKeys,
 } from '@features/query/group-by';
 import type { TaskScan } from '@features/schedule/task-cards';
+import type { ContactScan } from '@features/contact/contact-card';
 import type { SnippetScan } from '@features/snippet/snippet-table';
 import type { Relation } from '@core/model/entry-meta';
 import type { Dispatcher } from './dispatcher';
@@ -84,6 +85,12 @@ export interface StorePort {
    * ⚠ 返るのは**項目だけ**で、本文は 1 バイトも渡らない(worker の中で舐める)。
    */
   taskScan?(): Promise<TaskScan>;
+  /**
+   * 🔴 **連絡先**(#278 段①)。⚠ **省略可** ── 持たない配線では面が
+   * 「集められません」と断る(予定と同じ規律)。
+   * ⚠ 返るのは**連絡の手段だけ**で、本文は 1 バイトも渡らない。
+   */
+  contactScan?(): Promise<ContactScan>;
   /**
    * 🔴 **雛形を集める**(#196 / B-2)。⚠ **省略可** ── 持たない配線では
    * 雛形の機能が丸ごと畳まれる(壊れるのではなく、`/` にも `Tab` にも出ない)。
@@ -681,6 +688,29 @@ export function connectStoreEffects(
           () => {
             if (disposed) return;
             dispatcher.dispatch({ type: 'TASK_SCAN_FAILED' });
+          },
+        );
+        break;
+      }
+      /**
+       * 🔴 **連絡先を集める**(#278 段①)。⚠ 予定(`REQUEST_TASK_SCAN`)と**同じ形**
+       *   ── 持っていないことは**画面へ伝える**(黙って break すると
+       *   「集めています…」で永久に止まって見える)。
+       */
+      case 'REQUEST_CONTACT_SCAN': {
+        const ask = store.contactScan;
+        if (!ask) {
+          dispatcher.dispatch({ type: 'CONTACT_SCAN_FAILED' });
+          break;
+        }
+        void ask().then(
+          (scan) => {
+            if (disposed) return;
+            dispatcher.dispatch({ type: 'SET_CONTACT_SCAN', scan });
+          },
+          () => {
+            if (disposed) return;
+            dispatcher.dispatch({ type: 'CONTACT_SCAN_FAILED' });
           },
         );
         break;
