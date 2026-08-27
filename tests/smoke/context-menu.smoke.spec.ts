@@ -154,6 +154,19 @@ test('🔴 編集中に行を右クリックしても出ない ── 理由は�
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
   await clickReal(page, '[data-pkc-action="start-edit"]');
+  /**
+   * 🔴 **編集に入り切るのを待つ**(2026-08-27。フル走で 2 回再現した)。
+   *
+   * ⚠ `clickReal` は**押すだけ**で、面の入れ替えは非同期である。待たずに次の
+   *   右クリックへ進むと、**まだ編集中でない**ので**メニューは正しく出る** ──
+   *   落ちるのは製品ではなく、この test が**前提を確かめていない**からである。
+   * ⚠ 直下の `status.isVisible()` は**待たない一読**なので、前提の代わりにならない
+   *   (編集に入っていても入っていなくても false で通る)。
+   */
+  await expect(
+    page.locator('[data-pkc-field="editor-body"]'),
+    '編集に入っていない(前提が崩れた)',
+  ).toBeVisible();
   const status = page.locator('[data-pkc-region="status"]');
   expect(await status.isVisible(), '前提: 編集に入った時点で既に理由が出ている').toBe(false);
 
