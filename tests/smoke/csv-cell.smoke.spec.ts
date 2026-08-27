@@ -97,3 +97,50 @@ test('🔴 行と列を足せて、消せる ── 5 列で足りなくなっ�
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * 🔴 **升に式を打つと、結果が出る**(#418 段②)。
+ *
+ * 🔑 **unit では届かない 2 つ**を実ブラウザで見る:
+ * 1. **打った式が disk まで届き、開き直しても結果が出るか**(= 本文に式が残っている)
+ * 2. **押すと式のほうが出るか**(結果を掴んでいたら、打ち直すたびに式が消える)
+ */
+test('🔴 升に式を打つと結果が出て、押すと式が出る(#418 段②)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  await createEntry(page, 'spreadsheet');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  const cells = page.locator(CELL);
+  await expect(cells.first()).toBeVisible({ timeout: 10_000 });
+
+  // A1 = 2 / B1 = 3 / C1 = =A1*B1
+  for (const [i, text] of [
+    [0, '2'],
+    [1, '3'],
+    [2, '=A1*B1'],
+  ] as const) {
+    await cells.nth(i).click();
+    await page.keyboard.type(text);
+    await page.keyboard.press('Enter');
+    // ⚠ 1 打ちごとに描き直しを待つ ── 待たずに次を押すと古い升を掴む
+    await expect(cells.nth(i)).not.toHaveText('', { timeout: 10_000 });
+  }
+
+  // 🔴 升には**結果**が出る
+  await expect(cells.nth(2), '式が計算されていない').toHaveText(/6/, { timeout: 10_000 });
+
+  // 🔴 押すと**式**が出る(結果ではない)
+  await cells.nth(2).click();
+  await expect(page.locator('[data-pkc-field="cell-input"]')).toHaveValue('=A1*B1');
+  await page.keyboard.press('Escape');
+
+  // 🔴 読み込み直しても残る(本文に式が入っている証拠)
+  await page.reload();
+  await page.locator('[data-pkc-region="filer-table"] tbody tr').first().click();
+  await expect(page.locator(CELL).nth(2), '読み直したら消えた').toHaveText(/6/, {
+    timeout: 15_000,
+  });
+
+  expect(errors).toEqual([]);
+});

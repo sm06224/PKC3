@@ -42,6 +42,8 @@
  *     rendering (preserves the user's source visually).
  */
 
+import { displayCell } from './csv-formula';
+
 const HEADER_OFF_FLAG = 'noheader';
 
 export type CsvFenceLang = 'csv' | 'tsv' | 'psv';
@@ -278,8 +280,38 @@ export function rowsToHtml(
   const width = rows.reduce((max, r) => Math.max(max, r.length), 0);
   const pad = (r: string[]): string[] =>
     r.length === width ? r : r.concat(Array(width - r.length).fill(''));
-  const renderCell = (cell: string): string =>
-    inlineRender ? inlineRender(cell) : escapeHtml(cell);
+  /**
+   * 🔴 **式は描くときだけ評価する**(#418 段②)。
+   *
+   * 🔑 **正本は本文** ── 結果を本文へ書き戻さない(書き戻すと**式が消える**)。
+   * ⚠ 押したときに出るのは**式のほう**である ── 原文は段① の
+   *   `data-pkc-cell-raw` が持っているので、ここで結果に差し替えても
+   *   打ち直しは式から始まる。
+   * ⚠ 評価の入力は**升の原文**(`rows`)であって、描いた字ではない。
+   */
+  const renderCell = (cell: string): { html: string; why?: string } => {
+    const shown = displayCell(cell, rows);
+    return {
+      html: inlineRender ? inlineRender(shown.text) : escapeHtml(shown.text),
+      ...(shown.why !== undefined ? { why: shown.why } : {}),
+    };
+  };
+
+  /**
+   * 🔴 **誤りの理由を升に添える**(#418 段②)。
+   *
+   * ⚠ `#NAME?` の 5 文字だけでは**どの関数が駄目なのか**が分からない ──
+   *   `title` に理由を置けば、指せば読める(#426 と同じ向き:
+   *   「効かないなら**なぜ効かないか**を出す」)。
+   * ⚠ 誤りのないときは 1 バイトも足さない(goldens が動かない)。
+   */
+  const cellHtml = (cell: string): { body: string; title: string } => {
+    const r = renderCell(cell);
+    return {
+      body: r.html,
+      title: r.why === undefined ? '' : ` title="${escapeHtml(r.why)}"`,
+    };
+  };
 
   /**
    * 🔴 **押す口はここで焼く**(#418 段①)。
@@ -347,8 +379,9 @@ export function rowsToHtml(
   if (withHeader && rows.length > 0) {
     parts.push('<thead><tr>');
     pad(rows[0]!).forEach((cell, col) => {
+      const c = cellHtml(cell);
       parts.push(
-        `<th${cellAttrs(0, col, cell)}>${renderCell(cell)}` +
+        `<th${cellAttrs(0, col, cell)}${c.title}>${c.body}` +
           shapeBtn(0, col, 'col', 'add', 'この列の右に列を足す') +
           shapeBtn(0, col, 'col', 'remove', 'この列を消す') +
           `</th>`,
@@ -376,7 +409,8 @@ export function rowsToHtml(
             ? shapeBtn(i, col, 'row', 'add', 'この行の下に行を足す') +
               shapeBtn(i, col, 'row', 'remove', 'この行を消す')
             : '';
-        parts.push(`<td${cellAttrs(i, col, cell)}>${renderCell(cell)}${rowBtns}${colBtns}</td>`);
+        const c = cellHtml(cell);
+        parts.push(`<td${cellAttrs(i, col, cell)}${c.title}>${c.body}${rowBtns}${colBtns}</td>`);
       });
       parts.push('</tr>');
     }
