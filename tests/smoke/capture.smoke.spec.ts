@@ -117,6 +117,61 @@ test('ブックマークで開いた窓が、合図つきの 1 通だけを受�
   // 🔑 **どこから来たかが帯に出る**(外から増えたことを黙って起こさない)
   await expect(pkc!.locator('[data-pkc-region="status"]')).toContainText('取り込みました');
 
-  expect(errors, '記事の頁で例外').toEqual([]);
-  expect(errorsPkc, 'PKC3 で例外').toEqual([]);
+  /**
+   * 🔴 **落ちた回に「その瞬間の状態」を残す**(#387)。
+   *
+   * ⚠ `toEqual([])` は「**何か例外が出た**」としか言わない ── #387 は
+   *   **3 度観測して原因に 1 歩も近づいていない**(2026-08-25 / 2026-08-27 × 2。
+   *   どれも `Failed to execute 'open' on 'Window'` の 1 行だけが残った)。
+   *
+   * 🔑 **#452 の診断はこの件には効かない ── そう doc に書いてある。**
+   *   `page-errors.ts` の `firstAppFrame` が名指しできるのは **URL を持つ script**
+   *   だけで、この例外の投げ元は**この spec の `page.evaluate`**(上の
+   *   `window.open`)である。実際、採れた行に `@ path:line` は付いていない。
+   *   ⚠ **時刻 `(+Nms)` は効いている** ── `+137ms` から「最後の assert の後ではなく
+   *   序盤で出た」ことは読めた。だから足すのは**時刻ではなく状態**である。
+   *
+   * ⚠ **緑の回でも計算する**(数十 ms)── 落ちてから採りに行くことはできない。
+   * ⚠ **窓を数えるだけにしない。** いちばん知りたいのは
+   *   **記事の頁がまだ同じ頁に居るか**である ── 「callback is no longer runnable」は
+   *   実行文脈が入れ替わったときの文言なので、`page` が別の URL へ移っていれば
+   *   そこが読める(⚠ ただし**そう決めつけない** ── 移っていないことも同じだけ
+   *   情報である。判定は次の赤に委ねる)。
+   */
+  const diag = async (): Promise<string> => {
+    const pages = context.pages();
+    const where = pages
+      .map((p) => {
+        const u = p.url();
+        const tag = p === page ? '記事' : p === pkc ? 'PKC' : '他';
+        try {
+          const parsed = new URL(u);
+          return `${tag}=${parsed.pathname}${parsed.search}${parsed.hash}`;
+        } catch {
+          return `${tag}=${u}`;
+        }
+      })
+      .join(' ');
+    let band = '(読めない)';
+    try {
+      band = (
+        (await pkc!.locator('[data-pkc-region="status"]').textContent({ timeout: 1_000 })) ?? ''
+      )
+        .trim()
+        .slice(0, 60);
+    } catch {
+      /* 窓が閉じた / 読めない ── それ自体が手掛かりなので既定の字を残す */
+    }
+    const grant = 'grant' in opened ? opened.grant : undefined;
+    return (
+      `窓 ${pages.length} 枚 [${where}]` +
+      ` / 合図 ${typeof grant === 'string' ? `有り(${grant.length} 字)` : '無し'}` +
+      ` / 返事 ${JSON.stringify('reply' in opened ? opened.reply : null)}` +
+      ` / 帯「${band}」`
+    );
+  };
+  const state = await diag();
+
+  expect(errors, `記事の頁で例外 ── ${state}`).toEqual([]);
+  expect(errorsPkc, `PKC3 で例外 ── ${state}`).toEqual([]);
 });

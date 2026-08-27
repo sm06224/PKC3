@@ -70,6 +70,14 @@ SMOKE_GREP = "tests/smoke/your-spec.smoke.spec.ts"
 #    dist に 1 つも残らず、**当たっているのに永久に NOT-APPLIED** になる
 #    (出荷 css のコメントは 0 件、custom property は残る)。印は `--mut-a: 1` のような
 #    **custom property** を足して、それを探す。
+# 🔴 **探す字は「dist に落ちる字」にする**(2026-08-27、#474 で 2 件とも偽の NOT-APPLIED):
+#    ① `--mut-x: 1` と書くと **minify が空白を落として `--mut-x:1`** になる
+#       → 探すのは **名前まで**(`--mut-x`)。値と空白を入れない
+#    ② **選択子**に印を埋めると `--` が付かない(`[data-pkc-field=mut-x-none]`)
+#       → 選択子を書き換える変異では、同じ規則に **`--mut-x: 1;` を宣言として足す**
+#    ⚠ 印が出ないと言われたら、まず `grep -o -- '--mut-x[^;]*' dist/assets/*.css` を
+#       **自分の手で打って実際の字を見る**(1 回で分かる)。飛ばすと
+#       「当たらない変異だ」で片づけ、**その変異は二度と回されない**。
 # ⚠ **規則ごと消す変異にも印を残す** ── 消すだけだと「当たったこと」を dist から
 #    確かめられない。消した規則の代わりに `--mut-x: 1` を置くと、当たりが見える。
 DIST_MARKER = "put-a-string-that-the-mutation-changes-here"
