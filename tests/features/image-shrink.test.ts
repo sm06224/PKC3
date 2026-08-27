@@ -8,7 +8,6 @@ import { describe, expect, it } from 'vitest';
 import {
   SHRINK_MAX_EDGE,
   SHRINK_MIN_BYTES,
-  humanBytes,
   shrinkPlan,
   shrinkQuestion,
   worthShrinking,
@@ -98,20 +97,10 @@ describe('縮める判断(#412)', () => {
       );
       expect(q).toContain('4000×3000');
       expect(q).toContain('2048×1536');
-      expect(q).toContain('12.0MB');
-      expect(q).toContain('1.4MB');
+      expect(q).toContain('12.0 MB');
+      expect(q).toContain('1.4 MB');
       // 🔴 **戻せないことを言う**(不可逆な操作なので)
       expect(q, '戻せないことを言っていない').toContain('戻りません');
-    });
-  });
-
-  describe('大きさの字', () => {
-    it.each([
-      [500, '500B'],
-      [2048, '2KB'],
-      [12 * 1024 * 1024, '12.0MB'],
-    ])('%i → %s', (n, want) => {
-      expect(humanBytes(n)).toBe(want);
     });
   });
 });

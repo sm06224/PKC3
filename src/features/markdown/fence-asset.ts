@@ -74,12 +74,10 @@ export function takeFenceAsset(rest: string): FenceAssetParse {
 export const MAX_FENCE_ASSET_BYTES = 2 * 1024 * 1024;
 
 /**
- * 画面に出す大きさ(「2.0MB」)。
- * 🔑 **実体は `features/asset/human-bytes.ts` の 1 本**(#454。2026-08-27 に寄せた)。
- * ⚠ ここに在った `formatBytes` は**同じ実装の 2 本目**だった ── 名前も 1 つにする
- *   (2 つ名前が在ると、片方だけ直しても誰も気づかない)。
+ * ⚠ 大きさを出したくなったら **`features/human-bytes.ts` の `humanBytes`** を呼ぶ。
+ *   ここに在った `formatBytes` は**同じ実装の 2 本目**だった(#454)── 再輸出も
+ *   置かない(**輸出の口が 2 つ在ると、片方だけ直しても誰も気づかない**)。
  */
-export { humanBytes } from '../asset/human-bytes';
 
 /**
  * 🔴 **添付の字を「本文に書いてあったのと同じ形」に揃える**(#444 段②)。

@@ -119,7 +119,7 @@ describe('#444 段① 囲みの中身を添付から取る', () => {
     await waitFor(() => r.q('[data-pkc-fence-asset-error]') !== null, '理由が出ない');
     const why = r.q('[data-pkc-fence-asset-error]')!.textContent ?? '';
     expect(why).toContain('大きすぎます');
-    expect(why, '上限が読めない').toContain('2.0MB');
+    expect(why, '上限が読めない').toContain('2.0 MB');
     expect(read, '上限を超えているのに読んだ').toBe(0);
   });
 

@@ -28,17 +28,17 @@ import {
 } from '@adapter/platform/office/office-pack-update';
 import { appOfficePack, type OfficePackState } from './office-entry-view';
 import { readOfficeCapability, missingCapabilities } from '@features/office/office-entry';
+import { humanBytes } from '@features/human-bytes';
 
 /** 「入っている」を 1 行で言う。⚠ 版・大きさ・日付は**腐りやすい数字**なので実体から出す。 */
 export function packStatusText(meta: OfficePackMeta | null): string {
   if (meta === null) return '入っていません';
-  const mb = Math.round((meta.totalBytes / (1024 * 1024)) * 10) / 10;
   const at = new Date(meta.installedAt);
   const date = Number.isNaN(at.getTime())
     ? '日時不明'
     : `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`;
   const from = meta.source === 'url' ? '配布元から' : 'ファイルから';
-  return `入っています ── ${meta.version} / ${mb}MB / ${date} に${from}設置`;
+  return `入っています ── ${meta.version} / ${humanBytes(meta.totalBytes)} / ${date} に${from}設置`;
 }
 
 /**

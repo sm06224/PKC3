@@ -23,7 +23,7 @@
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { formatAssetRef } from '@features/asset/asset-ref-format';
-import { humanBytes } from '@features/asset/image-shrink';
+import { humanBytes } from '@features/human-bytes';
 import { captureBarLine, captureFileName, CAPTURE_LABEL } from '@features/asset/capture-text';
 import { isAppendable } from '@features/flavor/append-spec';
 import {

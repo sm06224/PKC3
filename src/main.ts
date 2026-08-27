@@ -117,7 +117,6 @@ import { InspectorRenderer } from '@adapter/ui/render/inspector';
 import { BrowseRouter, type BrowseMode } from '@adapter/ui/render/browse';
 import { CenterRouter } from '@adapter/ui/render/center';
 import { AppendBoxRenderer } from '@adapter/ui/render/append-box';
-import { formatSize } from '@adapter/ui/render/detail';
 import { bindActions, generateLid, type BinderServices } from '@adapter/ui/actions/binder';
 import { createCaptureService } from '@adapter/ui/actions/capture';
 import {
@@ -2455,7 +2454,6 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             //    その間に別の確認が開いていることがある(器が順番に出す)
             ask: (msg) => ask(msg, { okLabel: '整理する', danger: true }),
             tell,
-            formatSize,
           });
         } catch (e) {
           dispatcher.dispatch({

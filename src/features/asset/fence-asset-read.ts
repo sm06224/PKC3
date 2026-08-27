@@ -10,7 +10,7 @@
  *   ので adapter にも置かない ── 入口は「鍵 → Blob」の口 1 つだけである。
  */
 import { MAX_FENCE_ASSET_BYTES } from '../markdown/fence-asset';
-import { humanBytes } from './human-bytes';
+import { humanBytes } from '../human-bytes';
 
 /** 添付 1 件の読み。⚠ 失敗は**理由つき**で返す(黙って空にしない)。 */
 export type FenceAssetRead =
