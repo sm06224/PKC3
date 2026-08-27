@@ -3391,9 +3391,32 @@ li[data-pkc-row-slot] {
 [data-pkc-region='announce'] ul {
   margin: 0;
   padding-left: 1.2em;
+  /* 🔴 **幅を使って、縦を返す**(#475、2026-08-27 の実機検証レポート #16)。
+   * ⚠ 帯は版面の全幅(実測 1280px)を持つのに、項目は**1 列しか使っていなかった** ──
+   *   6 項目 = 113px が、そのまま帯の高さになっていた(実測 268px のうち 113px)。
+   *   同じレポートが「中央の面 890px が空いている」と言っているのと同じ無駄である。
+   * 🔑 **段は幅で決める**(`column-width`)── `@media` で幅を決めると、
+   *   #468 と同じ罠(器の幅ではなく画面の幅で切り替わる)を踏む。
+   *   狭い版面では段が 1 つに落ちるので、これだけで両端が成り立つ。
+   * ⚠ `break-inside` が無いと、折り返した項目が段をまたいで割れる。 */
+  column-width: 26em;
+  column-gap: var(--s4);
+}
+[data-pkc-region='announce'] li {
+  break-inside: avoid;
+}
+/* 🔴 **案内文と「今後は出さない」は 1 行**(#475)。⚠ 縦に積むと、読むもの
+ * (お知らせ本文)から縦を奪う ── 実測で帯の 1/5 を在り処の案内が取っていた。
+ * ⚠ 狭い版面では折り返させる(押せない場所へ追い出さない)。 */
+[data-pkc-field='announce-foot'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s3);
+  margin-top: var(--s2);
 }
 [data-pkc-field='announce-where'] {
-  margin: var(--s3) 0 var(--s2);
+  margin: 0;
   color: var(--muted);
   font-size: 11px;
 }

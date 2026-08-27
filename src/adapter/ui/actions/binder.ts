@@ -532,6 +532,7 @@ export interface BinderServices {
    *   ── 設定から戻せる(戻せない導線は作らない)。
    */
   dismissAnnounce?(): void;
+  nextAnnounce?(): void;
   muteAnnounce?(): void;
   /**
    * お知らせを出すかの設定(P11 段⑤)。⚠ **flag ではない**(正規設定)──
@@ -3565,6 +3566,9 @@ const ACTIONS: Record<string, ActionHandler> = {
   'set-notices-enabled': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
     if (target instanceof HTMLInputElement) services.setNoticesEnabled?.(target.checked);
+  },
+  'next-announce': (_dispatcher, _target, services) => {
+    services.nextAnnounce?.();
   },
   'dismiss-announce': (_dispatcher, _target, services) => {
     services.dismissAnnounce?.();

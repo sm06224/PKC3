@@ -54,16 +54,134 @@ beforeEach(() => {
 });
 
 describe('お知らせの帯', () => {
-  it('未読が在れば出て、新しい順に並ぶ', () => {
-    createAnnounce(region, new NoticeStore(memory()), NOTES).present();
-    expect(region.hidden, '出ていない').toBe(false);
-    const ids = [...region.querySelectorAll('[data-pkc-announce]')].map((e) =>
-      e.getAttribute('data-pkc-announce'),
+  /** 画面に出ている お知らせの id(0 件なら空)。 */
+  const onScreen = (): string[] =>
+    [...region.querySelectorAll('[data-pkc-announce]')].map(
+      (e) => e.getAttribute('data-pkc-announce') ?? '',
     );
-    expect(ids).toEqual(['2026-08-08-b', '2026-01-01-a']);
+
+  /**
+   * 🔴 **出すのは 1 件だけ**(#475、2026-08-27 の実機検証レポート #16)。
+   *
+   * ⚠ 直す前は未読を**全部積んで**いた ── 初回起動の user は未読が登記表の全数
+   * (最大 10 件)なので、必ず `max-height: 30vh` に当たり、
+   * 「**箱が大きいのに一度に 1 件しか読めない**」形だった。
+   *
+   * 🔑 ここで見るのは 3 つ:**1 件だけ出る / 新しい順 / 送ると次が出る**。
+   * ⚠ 「1 件だけ」だけを見ると、**常に同じ 1 件を出し続ける**実装で通る ──
+   *   送った先が**別の id** であることまで見る。
+   */
+  it('🔴 出るのは 1 件だけ ── 新しい順に、送ると次が出る', () => {
+    const a = createAnnounce(region, new NoticeStore(memory()), NOTES);
+    a.present();
+    expect(region.hidden, '出ていない').toBe(false);
+    expect(onScreen(), '1 件ずつではない(積んでいる)').toEqual(['2026-08-08-b']);
     expect(region.textContent, '本文が出ていない').toContain('あたらしい話');
     // ⚠ 閉じたら二度と読めない、と思わせない
     expect(region.textContent, 'あとから読める場所を書いていない').toContain('ヘルプ');
+
+    a.next();
+    expect(onScreen(), '送っても次が出ない').toEqual(['2026-01-01-a']);
+    expect(region.textContent, '次の本文が出ていない').toContain('ふるい話');
+    // 🔑 **送っただけでは畳まない**(畳むのは「閉じる」と、残り 0 件のときだけ)
+    expect(region.hidden, '送っただけで帯が消えた').toBe(false);
+  });
+
+  /**
+   * 🔴 **送るのは「その 1 件だけ」を既読にする。**
+   * ⚠ ここを `shown` 全部にすると、1 回押しただけで残り全部が消える ──
+   *   user は 1 件しか読んでいないのに、9 件が黙って既読になる。
+   */
+  it('🔴 送ると、いま出ている 1 件だけが既読になる', () => {
+    const store = new NoticeStore(memory());
+    const a = createAnnounce(region, store, NOTES);
+    a.present();
+    a.next();
+    expect(store.seenIds(), '読んでいない分まで既読にした').toEqual(['2026-08-08-b']);
+  });
+
+  /** 🔴 最後の 1 件を送ったら畳む(空の枠を残さない)。 */
+  it('🔴 最後の 1 件を送ると、帯が畳まれる', () => {
+    const store = new NoticeStore(memory());
+    const a = createAnnounce(region, store, NOTES);
+    a.present();
+    a.next();
+    // ⚠ 空振り防止 ── ここで既に畳まれていたら、下の assert は自明に通る
+    expect(region.hidden, '2 件目が出ていない(前提が崩れている)').toBe(false);
+    a.next();
+    expect(region.hidden, '最後まで送っても帯が残っている').toBe(true);
+    expect([...store.seenIds()].sort(), '全部を読んだのに既読になっていない').toEqual(
+      NOTES.map((n) => n.id).sort(),
+    );
+  });
+
+  /**
+   * 🔴 **押せない導線を作らない。** 残り 1 件で「次へ」を出すと、
+   * 押しても何も起きない(= 無言の dead click)。
+   */
+  it('⚠ 残り 1 件のときは「次へ」を出さない', () => {
+    const a = createAnnounce(region, new NoticeStore(memory()), NOTES);
+    a.present();
+    // ⚠ 空振り防止 ── 2 件のときは在ること(無ければ下は自明に通る)
+    expect(
+      region.querySelector('[data-pkc-action="next-announce"]'),
+      '2 件あるのに「次へ」が無い',
+    ).not.toBeNull();
+    a.next();
+    expect(
+      region.querySelector('[data-pkc-action="next-announce"]'),
+      '残り 1 件なのに「次へ」が出ている(押しても何も起きない)',
+    ).toBeNull();
+    expect(
+      region.querySelector('[data-pkc-action="dismiss-announce"]'),
+      '閉じる導線まで消えた',
+    ).not.toBeNull();
+  });
+
+  /**
+   * 🔴 **送った後も焦点が帯に残る**(CLAUDE.md §10「閉じたら焦点を返す」)。
+   *
+   * ⚠ 送るたびに帯を描き直す = **押したボタンごと消える**ので、何もしないと
+   *   焦点が `<body>` へ落ちる ── 鍵で読み進める user は **2 件目で止まる**。
+   * ⚠ 対照群を同じ it に置く(帯の外に焦点が在るなら**奪わない**)──
+   *   置かないと「常に focus する」実装が通り、作業中の入力欄から焦点を盗む。
+   */
+  it('🔴 送っても焦点が帯に残る(鍵で読み進められる)', () => {
+    const a = createAnnounce(region, new NoticeStore(memory()), NOTES);
+    a.present();
+    const next = region.querySelector<HTMLElement>('[data-pkc-action="next-announce"]')!;
+    next.focus();
+    expect(document.activeElement, '前提: 「次へ」に焦点が無い').toBe(next);
+    a.next();
+    expect(
+      region.contains(document.activeElement),
+      '送ったら焦点が帯の外へ落ちた(鍵で次が押せない)',
+    ).toBe(true);
+
+    // 🔑 対照群 ── 帯の外に焦点が在るときは奪わない
+    const outside = document.createElement('input');
+    document.body.append(outside);
+    const a2 = createAnnounce(region, new NoticeStore(memory()), NOTES);
+    a2.present();
+    outside.focus();
+    expect(document.activeElement, '前提: 外に焦点が無い').toBe(outside);
+    a2.next();
+    expect(document.activeElement, '作業中の欄から焦点を奪った').toBe(outside);
+  });
+
+  /**
+   * 🔴 **残りの件数が減る。** 1 件ずつ出す以上、「あと何件あるか」は
+   * 見出しの数字が**唯一の手掛かり**である。
+   * ⚠ 「2 件と出る」だけでは、**数が動かない**実装(常に総数を出す)が通る。
+   */
+  it('🔴 見出しの残り件数が、送るたびに減る', () => {
+    const head = (): string =>
+      region.querySelector('[data-pkc-field="announce-title"]')?.textContent ?? '';
+    const a = createAnnounce(region, new NoticeStore(memory()), NOTES);
+    a.present();
+    expect(head(), '残り件数が出ていない').toContain('残り 2 件');
+    a.next();
+    expect(head(), '残り 1 件でまだ件数を出している').not.toContain('2 件');
   });
 
   it('⚠ 未読が 0 件なら**行の高さを 0 に保つ**(空の枠を残さない)', () => {
@@ -230,7 +348,7 @@ describe('お知らせの帯', () => {
  * しか見ないので、**名前を消す変異は殺せるが、中身を空にする変異は殺せない**。
  */
 describe('🔴 帯と設定のボタンが、受け手まで届く', () => {
-  it('閉じる / 今後は出さない / 設定の切替が、それぞれの受け手を呼ぶ', () => {
+  it('次へ / 閉じる / 今後は出さない / 設定の切替が、それぞれの受け手を呼ぶ', () => {
     const root = document.createElement('div');
     document.body.append(root);
     const band = document.createElement('section');
@@ -245,10 +363,13 @@ describe('🔴 帯と設定のボタンが、受け手まで届く', () => {
     const calls: string[] = [];
     const stop = bindActions(root, {} as unknown as Dispatcher, {
       dismissAnnounce: () => calls.push('dismiss'),
+      nextAnnounce: () => calls.push('next'),
       muteAnnounce: () => calls.push('mute'),
       setNoticesEnabled: (on) => calls.push(`set:${String(on)}`),
     });
 
+    // ⚠ 「次へ」は 2 件以上のときだけ出る ── NOTES は 2 件なので在る
+    root.querySelector<HTMLElement>('[data-pkc-action="next-announce"]')!.click();
     root.querySelector<HTMLElement>('[data-pkc-action="dismiss-announce"]')!.click();
     root.querySelector<HTMLElement>('[data-pkc-action="mute-announce"]')!.click();
     const box = root.querySelector<HTMLInputElement>('[data-pkc-field="notices-enabled"]')!;
@@ -256,6 +377,7 @@ describe('🔴 帯と設定のボタンが、受け手まで届く', () => {
     box.checked = false;
     box.click(); // click は checked を反転させる → true
     expect(calls, '受け手が呼ばれていない / 値が反転している').toEqual([
+      'next',
       'dismiss',
       'mute',
       'set:true',
@@ -312,6 +434,20 @@ describe('🔴 お知らせの配線(main.ts から取り出した分)', () => {
     a.present();
     announceServices(a, store).dismissAnnounce();
     expect(store.seenIds(), '閉じても既読にならない').toHaveLength(2);
+  });
+
+  /**
+   * 🔴 **「次へ」は畳まない**(#475)。⚠ `dismiss` にすり替える変異は、
+   *   「既読になった」しか見ない test では殺せない ── **帯が残ること**と
+   *   **残りが既読になっていないこと**を対で見る。
+   */
+  it('🔴 「次へ」は 1 件だけ進める(閉じるにすり替わっていない)', () => {
+    const store = new NoticeStore(memory());
+    const a = createAnnounce(region, store, NOTES);
+    a.present();
+    announceServices(a, store).nextAnnounce();
+    expect(region.hidden, '送っただけで帯が畳まれた').toBe(false);
+    expect(store.seenIds(), '残りまで既読にした').toEqual(['2026-08-08-b']);
   });
 
   it('🔴 「今後は出さない」の後に、画面を映し直す', () => {
@@ -535,6 +671,7 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
+    ['2026-08-27-announce-one', 'ae4e7c46'],
     ['2026-08-27-kind-bar-fix', '838f7da7'],
     ['2026-08-27-context-menu', '7c81f33e'],
     ['2026-08-27-browse-tab-fit', 'd6612fc1'],
@@ -554,7 +691,6 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-08-26-smart-tasks', '2eefb44e'],
     ['2026-08-26-smart-text', '88c9f9c7'],
     ['2026-08-26-storage-profile', '343e5856'],
-    ['2026-08-26-apply-plan', 'b13ee892'],
     // ⚠ 上限 20 を超えたので 2026-08-27 に落とした(原本は CHANGELOG)
     // ['2026-08-26-open-local-office', '7a758d43'],
     // ⚠ 上限 20 を超えたので 2026-08-27 に落とした(原本は CHANGELOG)

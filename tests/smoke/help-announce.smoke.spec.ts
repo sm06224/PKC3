@@ -136,6 +136,118 @@ test('🔴 お知らせの帯が出て、閉じると次から出ない', async 
 });
 
 /**
+ * 🔴 **お知らせは 1 件ずつ出て、「次へ」で送れる**(#475、実機検証レポート #16)。
+ *
+ * ## なぜ実ブラウザで見るのか
+ *
+ * unit は「1 件だけ描いた / 送ると id が変わった」までしか言えない。⚠ #475 の実害は
+ * **帯が場所を取るのに読めない**ことだったので、見るべきは
+ * ①**中でスクロールせずに 1 件が丸ごと見えるか** ②**送る手が押せるか**の 2 つで、
+ * どちらも高さと重なりの話 ── 描いてみないと分からない。
+ *
+ * ⚠ **空振り防止を 2 つ置く** ── 未読が 2 件以上あること(1 件なら「次へ」は
+ * 出ない = 何も測っていない)と、**送る前と後で id が変わる**こと。
+ */
+test('🔴 お知らせは 1 件ずつ出て、「次へ」で送れる', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await gotoApp(page);
+
+  const band = page.locator('[data-pkc-region="announce"]');
+  await expect(band, '起動時にお知らせが出ていない').toBeVisible({ timeout: 10_000 });
+
+  const shown = (): Promise<string[]> =>
+    page.$$eval('[data-pkc-announce]', (els) =>
+      els.map((e) => e.getAttribute('data-pkc-announce') ?? ''),
+    );
+
+  // 🔴 **積んでいない** ── 出ているのは 1 件だけ
+  const first = await shown();
+  expect(first, '1 件ずつではない(積んでいる)').toHaveLength(1);
+
+  /**
+   * 🔴 **その 1 件が、中でスクロールせずに丸ごと見える**(#475 の主張そのもの)。
+   * ⚠ 直す前は 55 項目(10 件ぶん)が 144px の箱で流れていた ── 箱が大きいのに
+   *   一度に 1 件しか読めない形だった。
+   */
+  const fit = await page
+    .locator('[data-pkc-field="announce-body"]')
+    .evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight }));
+  expect(
+    fit.scroll,
+    `1 件が箱に収まっていない(${fit.scroll} > ${fit.client})── 中を繰らせている`,
+  ).toBeLessThanOrEqual(fit.client + 1);
+
+  /**
+   * 🔴 **帯そのものも、逃げ場を要らなくなっている。** ⚠ 直す前は 30vh の上限に
+   *   当たっていた(実測 270px = 上限ぴったり)── 上限に当たる = **切り詰めている**
+   *   ということなので、`scrollHeight === clientHeight` を見れば
+   *   「収まっている」を版面の高さに依らず言える(px の閾値を置かない)。
+   */
+  const band0 = await band.evaluate((el) => ({
+    scroll: el.scrollHeight,
+    client: el.clientHeight,
+  }));
+  expect(
+    band0.scroll,
+    `帯が上限に当たっている(${band0.scroll} > ${band0.client})── 中を繰らせている`,
+  ).toBeLessThanOrEqual(band0.client + 1);
+
+  /**
+   * 🔴 **帯の幅を使う**(#475)。⚠ 項目が 1 列だと、1280px の帯で 1 行 90 字ほどに
+   *   なり、**読みにくいうえ縦を食う**。段に割ってあることを、
+   *   **項目の x が揃っていない**ことで見る(`column-width` は器の幅で決まるので、
+   *   閾値ではなく「2 列以上になっているか」で採るのが正しい)。
+   * ⚠ 空振り防止 ── 項目が 2 つ以上あること。
+   */
+  const cols = await page.$$eval('[data-pkc-announce] li', (els) =>
+    els.map((e) => Math.round(e.getBoundingClientRect().left)),
+  );
+  expect(cols.length, '項目が 1 つしかない(段の検査にならない)').toBeGreaterThan(1);
+  expect(new Set(cols).size, '項目が 1 列に並んでいる(帯の幅を使っていない)').toBeGreaterThan(1);
+
+  /**
+   * 🔴 **案内文と「今後は出さない」は 1 行**(#475)。⚠ 縦に積むと、読むもの
+   *   から縦を奪う(実測で 26px + 余白)。**同じ行に在る**ことを中心の y で見る。
+   */
+  const footRow = await page.evaluate(() => {
+    const w = document.querySelector('[data-pkc-field="announce-where"]');
+    const m = document.querySelector('[data-pkc-action="mute-announce"]');
+    if (!w || !m) return null;
+    const a = w.getBoundingClientRect();
+    const b = m.getBoundingClientRect();
+    return Math.abs((a.top + a.bottom) / 2 - (b.top + b.bottom) / 2);
+  });
+  expect(footRow, '案内文か「今後は出さない」が無い').not.toBeNull();
+  expect(footRow!, '案内文と「今後は出さない」が別の行に在る(読むものから縦を奪う)')
+    .toBeLessThanOrEqual(2);
+
+  // ⚠ 空振り防止 ── 2 件以上なければ「次へ」は出ない = 以下を測っていない
+  const next = page.locator('[data-pkc-action="next-announce"]');
+  await expect(next, '未読が 1 件しか無い(「次へ」の検査になっていない)').toBeVisible();
+
+  await clickReal(page, '[data-pkc-action="next-announce"]');
+  const second = await shown();
+  expect(second, '送ったのに次が出ない').toHaveLength(1);
+  expect(second[0], '送っても同じお知らせが出ている').not.toBe(first[0]);
+  // 🔑 **送っただけでは畳まない**(畳むのは「閉じる」と、残り 0 件のときだけ)
+  await expect(band, '送っただけで帯が消えた').toBeVisible();
+
+  /**
+   * 🔴 **送った 1 件だけが既読になる。** ⚠ 読み込み直して、送った分が出直さず、
+   *   まだ読んでいない分は残っていることを見る ── 「送る = 全部既読」の
+   *   すり替えは、画面だけ見ていると分からない。
+   */
+  await page.reload();
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
+  await expect(band, '読み込み直したら未読が消えた').toBeVisible({ timeout: 10_000 });
+  const after = await shown();
+  expect(after[0], '送ったお知らせが出直している').not.toBe(first[0]);
+
+  expect(errors).toEqual([]);
+});
+
+/**
  * 🔴 **お知らせが溢れていても、「閉じる」はその場で押せる**(#151)。
  *
  * ## なぜ実ブラウザで見るのか
@@ -156,7 +268,15 @@ test('🔴 お知らせの帯が出て、閉じると次から出ない', async 
  */
 test('🔴 お知らせが溢れていても、閉じるはスクロールせずに押せる', async ({ page }) => {
   const errors = collectPageErrors(page);
-  await page.setViewportSize({ width: 1280, height: 900 });
+  /**
+   * ⚠ **低い版面で見る**(#475、2026-08-27)。帯は**1 件ずつ**出すようになったので、
+   *   1280x900 では 1 件が丸ごと収まり(実測 band 199 / body 123 = client 123)、
+   *   **溢れが起きない** ── そこで測ると下の空振り防止で止まる。
+   * 🔑 溢れは**器の高さ**で起こす(30vh)。実測の分かれ目は 620px で、
+   *   520px なら body 123 に対し器は 80 ── 確実に溢れる。
+   * ⚠ **溢れ得ない版面で測らない**のが要点であって、値そのものは目的ではない。
+   */
+  await page.setViewportSize({ width: 1280, height: 520 });
   await gotoApp(page);
 
   const band = page.locator('[data-pkc-region="announce"]');
@@ -247,7 +367,8 @@ test('🔴 お知らせが溢れていても、閉じるはスクロールせず
  */
 test('🔴 お知らせの中を送っても、閉じるはそこから動かない', async ({ page }) => {
   const errors = collectPageErrors(page);
-  await page.setViewportSize({ width: 1280, height: 900 });
+  // ⚠ 上と同じ理由で低い版面(1 件ずつになったので 900px では溢れない)
+  await page.setViewportSize({ width: 1280, height: 520 });
   await gotoApp(page);
 
   const band = page.locator('[data-pkc-region="announce"]');
@@ -297,7 +418,16 @@ test('🔴 お知らせの中を送っても、閉じるはそこから動かな
  */
 test('🔴 低い画面でも、お知らせの帯が画面ごとスクロールさせない', async ({ page }) => {
   const errors = collectPageErrors(page);
-  await page.setViewportSize({ width: 1280, height: 260 });
+  /**
+   * ⚠ **入りきらなくなる高さは 260 → 240 へ下がった**(#475、2026-08-27)。
+   *   案内文と「今後は出さない」を 1 行に畳んだぶん、帯が要る最小の高さが
+   *   26px 減ったためである(実測: H=260 では `scrollH 78 = clientH 78` で
+   *   **溢れない** ── そこで測ると下の空振り防止が正しく止める)。
+   * 🔑 分かれ目のすぐ隣(240、溢れ 4px)は脆いので **220** で見る
+   *   (実測 `scrollH 76 > clientH 66`、かつ「今後は出さない」は
+   *   帯の下端より下 = 逃げ場が無いと**到達できない**)。
+   */
+  await page.setViewportSize({ width: 1280, height: 220 });
   await gotoApp(page);
   await expect(page.locator('[data-pkc-region="announce"]')).toBeVisible({ timeout: 10_000 });
 
