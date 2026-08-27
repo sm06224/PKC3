@@ -189,11 +189,34 @@ test('🔴 期間の札を掴んでずらすと、長さを保ったまま本文
   const pane = page.locator('[data-pkc-browse-pane="schedule"]');
   await expect(pane, '予定の面が出ていない').toBeVisible();
 
-  // ① 4 日ぶんの札に展開されている(1 枚を日から日へ動かしていない)
-  await expect(
-    pane.locator('[data-pkc-region="schedule-cards"] > [data-pkc-entry]'),
+  /**
+   * ① 4 日ぶんの札に展開されている(1 枚を日から日へ動かしていない)。
+   *
+   * ⚠ **フル走行で 1 回だけ「0 枚」で落ちている**(#410、2026-08-25)。
+   *   そのとき残ったのは `Received: 0` だけで、**走査が届いていないのか /
+   *   届いたが 0 件なのか**が 1 つも分からなかった。
+   * 🔑 **状態の 1 行(`schedule-note`)を添える** ── 面はこの 4 つを
+   *   書き分けているので(「集めています…」/「集められませんでした」/
+   *   「まだありません」/「絞り込みに当てはまりません」)、
+   *   **その字が落ちた回の答えになる**。
+   * ⚠ **待ちは伸ばさない**(緩めずに、残る情報だけ増やす)。
+   */
+  await withStateOnFail(
+    page,
     '期間が日数ぶんの札になっていない',
-  ).toHaveCount(4);
+    async () => ({
+      // 🔑 これが「集めています…」なら走査が遅れた、空なら届いて 0 件だった
+      note: await peek(pane.locator('[data-pkc-field="schedule-note"]'), 1),
+      cards: await peek(pane.locator('[data-pkc-region="schedule-cards"] > [data-pkc-entry]')),
+      groups: await peek(pane.locator('[data-pkc-region="schedule-group"]')),
+      pageErrors: errors,
+    }),
+    async () => {
+      await expect(
+        pane.locator('[data-pkc-region="schedule-cards"] > [data-pkc-entry]'),
+      ).toHaveCount(4);
+    },
+  );
   // ⚠ 札は「いつまでか」を出す(束の見出しには終わりが出ないため)
   await expect(
     pane.locator('[data-pkc-region="schedule-cards"] > [data-pkc-task-range]').first(),
