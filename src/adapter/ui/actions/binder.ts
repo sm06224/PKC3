@@ -100,6 +100,12 @@ import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
 import { appOpenInEdit, OpenInEditStore } from '@adapter/ui/render/open-in-edit';
 import { chordOf, findCommand, isMac, typesCharacter, KEY_COMMANDS } from '@features/keymap';
 import { paletteRows } from '@features/palette/palette-rows';
+import { ENTRY_MENU_ACTIONS } from '@features/entry-actions';
+import {
+  closeContextMenu,
+  contextMenuOpen,
+  openContextMenu,
+} from '../render/context-menu';
 import { structureText } from '@features/structure/structure-text';
 import {
   profileLineText,
@@ -5119,7 +5125,99 @@ export function bindActions(
      */
     if (dual !== null) carryDualFocus(dual);
   };
+  /**
+   * 🔴 **右クリックで、その行にできることを出す**(#426 段①)。
+   *
+   * ## ⚠ 先に**選んでから**出す(これを外すと別のノートを消す)
+   *
+   * `delete-entry` などは「押した行」ではなく **`state` が持つ選んでいるノート**に
+   * 効く(`binder.ts` の handler は `target` から lid を読まない)。
+   * 🔴 だから**右クリックした行を先に選ぶ**。⚠ そして
+   * **選べなかったら行の操作は出さない** ── 出すと
+   * **さっきまで選んでいた別のノートに効く**(編集中は選択が断られるので、
+   * これは実際に起きる)。
+   * 🔑 断る判定と理由は `selectEntryOrExplain` **1 か所**が持っている ──
+   *   ここで書き写さない(§7)。理由は既に画面へ出ているので、黙って閉じてよい。
+   *
+   * ## ⚠ ブラウザ既定を奪う場面を最小にする(CLAUDE.md §10)
+   *
+   * **選択範囲 / リンク / 図**の上では**奪わない** ── そこで既定を消すと
+   * 「コピー」「画像を保存」が**代わりも無いまま消える**。
+   */
+  const onContextMenu = (ev: MouseEvent): void => {
+    const target = ev.target;
+    if (!(target instanceof Element)) return;
+
+    /**
+     * ⚠ 既定を残す場面 ── ここで返すと、ブラウザのメニューがそのまま出る。
+     *
+     * 🔴 **いまこの 1 行は、実は何も止めていない**(2026-08-27、変異試験 N2 が
+     *   SURVIVED で教えた)── 段① が出すのは**行の上だけ**で、本文のリンクや図は
+     *   `[data-pkc-entry]` の外なので、**下の行の判定がどのみち返す**。
+     * ⚠ だから「これが無いと既定を奪う」とは**書かない**
+     *   (CLAUDE.md「これが無いと壊れる、と書く前に外して壊れるのを見る」)。
+     * 🔑 **残してあるのは段②のため** ── 押した物ごとにメニューを出すようになると、
+     *   本文の上でも受けることになり、**そのとき初めてこの門が効く**。
+     *   ⚠ 消すと、段② を書く人が**同じ穴を作り直す**(「コピー」「画像を保存」が
+     *   代わりも無いまま消える)。
+     */
+    if (target.closest('a[href], img, input, textarea, [contenteditable="true"]') !== null) return;
+    const sel = root.ownerDocument.getSelection();
+    if (sel !== null && !sel.isCollapsed && sel.rangeCount > 0) {
+      // ⚠ **選択範囲の中で押したときだけ**残す(別の場所の選択は関係ない)
+      const range = sel.getRangeAt(0);
+      if (range.intersectsNode(target)) return;
+    }
+
+    const row = target.closest('[data-pkc-entry]');
+    const lid = row?.getAttribute('data-pkc-entry') ?? null;
+    // ⚠ 段① は**行の上だけ** ── 地の上では既定を出す(奪って何も出さない、を作らない)
+    if (row === null || lid === null || lid === '') return;
+
+    ev.preventDefault();
+    // 🔴 選べなければ出さない(理由は `selectEntryOrExplain` が画面へ出している)
+    if (!selectEntryOrExplain(dispatcher, lid, 'ノート')) {
+      closeContextMenu(root);
+      return;
+    }
+    openContextMenu(
+      root,
+      { x: ev.clientX, y: ev.clientY },
+      ENTRY_MENU_ACTIONS,
+      root.ownerDocument.activeElement,
+    );
+  };
+  /**
+   * ⚠ **触った瞬間に閉じる。ただし、押した物の実行より後で。**
+   *
+   * 🔴 **`queueMicrotask` では駄目だった**(2026-08-27、実ブラウザで踏んだ)。
+   * ⚠ microtask の checkpoint は「全部の listener が終わった後」ではなく
+   *   **listener 1 本ごと**に走る ── だから
+   *   `onCloseMenu` → **メニューが DOM から消える** → `onClick`(委譲)
+   *   の順になり、委譲の `if (!el || !root.contains(el)) return;` に当たって
+   *   **押しても何も起きなかった**(理由も出ない = 無言の dead click)。
+   * ⚠ 症状は「メニューは閉じるのに操作だけ起きない」で、
+   *   **閉じるほうは動いているので、配線が切れているように見えない**。
+   *
+   * 🔑 だから**登録の順で解く** ── この listener は `onClick` の**後**に
+   *   登録してあるので、同じ泡立ちの中で**委譲が先、片づけが後**になる。
+   *   ⚠ 遅らせる必要はもう無いので、**その場で閉じる**(1 拍置くと、
+   *   閉じるまでの間に押せてしまう窓が開く)。
+   * ⚠ **登録の順が意味を持つ**ので、下の `addEventListener` を並べ替えないこと。
+   */
+  const onCloseMenu = (): void => {
+    closeContextMenu(root);
+  };
+  const onMenuKey = (ev: KeyboardEvent): void => {
+    if (ev.key === 'Escape' && contextMenuOpen(root)) closeContextMenu(root);
+  };
+  root.addEventListener('contextmenu', onContextMenu);
   root.addEventListener('click', onClick);
+  // 🔴 **`onClick` より後に登録する**(上の docstring)── 先に登録すると
+  //    メニューが消えてから委譲が走り、押しても無言になる。
+  root.addEventListener('click', onCloseMenu);
+  root.addEventListener('scroll', onCloseMenu, true);
+  root.ownerDocument.addEventListener('keydown', onMenuKey);
   root.addEventListener('paste', onPaste);
   /**
    * 🔴 **`dragenter` でも受理を宣言する**(2026-08-21、cowork #15)。
@@ -5801,6 +5899,11 @@ export function bindActions(
   root.addEventListener('keydown', onKeydown);
   return () => {
     root.removeEventListener('click', onClick);
+    root.removeEventListener('contextmenu', onContextMenu);
+    root.removeEventListener('click', onCloseMenu);
+    root.removeEventListener('scroll', onCloseMenu, true);
+    root.ownerDocument.removeEventListener('keydown', onMenuKey);
+    closeContextMenu(root);
     root.removeEventListener('mousedown', onMousedown);
     root.removeEventListener('input', onInput);
     root.removeEventListener('change', onChange);
