@@ -563,6 +563,16 @@ export class DetailRenderer {
          */
         interactiveTasks: true,
         /**
+         * 🔴 **表のセルを押して打てるようにする**(#418 段①)。
+         *
+         * > user の物語:「表」を作って A1 に「品名」と打ちたい。押すと
+         * > **CSV の原文**が出て、どのカンマが A1 かを目で数えることになっていた。
+         *
+         * ⚠ **この面だけ**である(理由は上の `interactiveTasks` と同じ)──
+         *   書き出した HTML・印刷には受け手(`edit-cell`)が居ない。
+         */
+        interactiveCells: true,
+        /**
          * 🔴 **押した行を原文の行で焼く**(N1)。この面は `fm.body`(frontmatter を
          * 剥がした本文)を描くが、受け手(`body-rewrite.ts`)は**原文**を splice する。
          * ⚠ 渡さないと、**frontmatter の行数だけ上の別の行**が書き換わる ──

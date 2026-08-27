@@ -19,6 +19,9 @@ import type { RepeatUnit } from '../schedule/repeat';
 import { removeInsertedLines } from './append-target';
 import { readTags, withTag } from '../flavor/tags';
 import { acceptsExternalImage, rewriteAdopted } from '../asset/inline-url-adopt';
+import { DELIMITER, csvEscapeField, parseCsv, type CsvPositions } from './csv-table';
+import { parseRenderableFence } from './markdown-render';
+import { scanContainers } from './source-blocks';
 
 /** 何をするか。⚠ **やり直せる形で持つ**(未達 commit との合流に要る)。 */
 export type BodyRewrite =
@@ -60,6 +63,42 @@ export type BodyRewrite =
       /** チェックの印を反転する。`line` は**原文の行番号**(0 始まり)。 */
       kind: 'task';
       line: number;
+    }
+  | {
+      /**
+       * 🔴 **表のセルを 1 つ書き換える**(#418 段①)。
+       *
+       * > user の物語: 「表」を作って A1 に「品名」と打ちたい。押したら
+       * > **CSV の原文**が出て、どのカンマが A1 かを目で数えることになっていた。
+       *
+       * ⚠ `line` は**原文の行番号**(0 始まり)、`col` はその行の中の**何番目のセルか**。
+       * 🔑 **書き換えるのはそのセルの範囲だけ** ── 行を組み直すと
+       *   `"a"` が `a` になるなど、**触っていないセルの字が黙って変わる**
+       *   (`kind: 'task'` が「印の 1 文字だけ」を書き換えるのと同じ作法)。
+       * 🔴 **双方向**(user 指示 2026-08-23)── 空の字を渡せば**セルを空にできる**。
+       *   打てるだけだと、間違えて打った字を原文まで開かないと戻せない。
+       */
+      kind: 'csv-cell';
+      line: number;
+      col: number;
+      value: string;
+    }
+  | {
+      /**
+       * 🔴 **表の行・列を足す / 消す**(#418 段①)。
+       *
+       * 🔑 **打てるだけでは動線が元に戻る** ── 5 列で足りなくなった瞬間に
+       *   CSV の原文へ帰ることになる。⚠ そして user 指示 2026-08-23
+       *   「**片道の操作を作らない**」に従い、足せるなら**消せる**。
+       * ⚠ `line` / `col` は**押した所**(行を足すならその行の下、列を足すならその列の右)。
+       * ⚠ **最後の 1 行 / 1 列は消さない** ── 消すと表そのものが消えて、
+       *   user は CSV の原文に放り出される(戻す口が無くなる)。
+       */
+      kind: 'csv-shape';
+      line: number;
+      col: number;
+      what: 'row' | 'col';
+      mode: 'add' | 'remove';
     }
   | {
       /**
@@ -172,6 +211,8 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
     return spliceFrontmatterKeys(body, { tags: next.length === 0 ? undefined : next });
   }
   if (rewrite.kind === 'repeat-done') return materializeRepeat(body, rewrite);
+  if (rewrite.kind === 'csv-cell') return rewriteCsvCell(body, rewrite);
+  if (rewrite.kind === 'csv-shape') return rewriteCsvShape(body, rewrite);
   if (rewrite.kind === 'adopt-images') {
     /**
      * ⚠ **規則を書き直さない** ── 拾う側(`externalImageUrls`)と当てる側は
@@ -313,4 +354,157 @@ function materializeRepeat(
 /** その行がチェック項目か(呼び側の事前判定用)。 */
 export function isTaskLine(body: string, line: number): boolean {
   return TASK_LINE.test(body.split('\n')[line] ?? '');
+}
+
+
+/**
+ * 🔴 **表のセルを 1 つ書き換える**(#418 段①)。
+ *
+ * 🔑 **その行だけを読み直して、そのセルの範囲だけを差し替える。**
+ *   行を組み直さないので、触っていないセルは 1 バイトも動かない。
+ *
+ * ⚠ **断る条件**(`null` を返す ── `kind: 'task'` と同じ作法で、
+ *   当てずっぽうで別の行を書き換えない):
+ *   - その行が無い
+ *   - その行が**表の行として読めない**(空行など)
+ *   - その行が**次の行へ続いている**(引用が閉じていない = またがる行)
+ *   - **そのセルが無い**(列が足りない)── 黙って足さない。列を増やすのは別の操作である
+ *   - 書き換えても**同じ字**になる(呼び側が「書かない」を選べる)
+ */
+function rewriteCsvCell(
+  body: string,
+  rewrite: { line: number; col: number; value: string },
+): string | null {
+  const lines = body.split('\n');
+  const line = lines[rewrite.line];
+  if (line === undefined) return null;
+  const table = csvTableAt(body, rewrite.line);
+  if (table === null) return null;
+  const { delimiter } = table;
+  const out: CsvPositions = { rowLines: [], cellSpans: [] };
+  const rows = parseCsv(line, delimiter, out);
+  /**
+   * ⚠ **1 行を渡して、閉じた 1 行が返ること**を検める。
+   *   返らない / 2 行になる / **引用が閉じていない**形は、
+   *   「この行だけでは表の行として決まらない」= **次の行へまたがっている**
+   *   ということである(`\"あ` がそれ)── そこへ書くと次の行まで巻き込む。
+   */
+  if (rows === null || rows.length !== 1 || out.unterminated === true) return null;
+  const spans = out.cellSpans?.[0];
+  const cells = rows[0]!;
+  if (spans === undefined || spans.length !== cells.length) return null;
+  const span = spans[rewrite.col];
+  if (span === undefined) return null;
+  const next = csvEscapeField(rewrite.value, delimiter);
+  if (line.slice(span.start, span.end) === next) return null;
+  lines[rewrite.line] = line.slice(0, span.start) + next + line.slice(span.end);
+  return lines.join('\n');
+}
+
+/**
+ * 🔴 **その行を含む表の囲みを引く**(#418 段①)。表の中でなければ `null`。
+ *
+ * ⚠ **どんな行も CSV の 1 行として読めてしまう** ── だから「この行が csv の
+ *   囲みの**中身**に在るか」を先に確かめないと、**囲みの見出しの行**
+ *   (` ```csv-render noheader `)そのものを書き換えられる
+ *   (実際、最初に書いたときは書き換えられた)。
+ * 🔑 囲みの切り方も見出しの読み方も**既に在るもの**を通す(§7)──
+ *   `scanContainers` と `parseRenderableFence`。ここに 2 本目を書かない。
+ * ⚠ 区切り字も**呼び手に決めさせない** ── tsv / psv の表をカンマで
+ *   組み直して壊す道を残さない。
+ */
+function csvTableAt(
+  body: string,
+  line: number,
+): { first: number; last: number; delimiter: string } | null {
+  const fence = scanContainers(body).find(
+    (c) => c.kind === 'fence' && line > c.start && line < c.end,
+  );
+  if (fence === undefined) return null;
+  const parsed = parseRenderableFence(fence.name);
+  if (parsed === null) return null;
+  const delimiter = (DELIMITER as Record<string, string | undefined>)[parsed.lang];
+  if (delimiter === undefined) return null;
+  // ⚠ 中身は**見出しの次から閉じの手前まで**(閉じが無い囲みは末尾まで)
+  return { first: fence.start + 1, last: fence.end - 1, delimiter };
+}
+
+/**
+ * 🔴 **表の行・列を足す / 消す**(#418 段①)。
+ *
+ * 🔑 **触る所だけを触る** ── 行を足すのは 1 行の挿入、列は各行の
+ *   **そのセルの範囲**の surgery で済ませる。組み直すと、触っていないセルの
+ *   `\"a\"` が `a` になるなど**字面が黙って変わる**。
+ * ⚠ **またがっている行が 1 つでもあれば、列の操作は丸ごと断る** ──
+ *   半分だけ当てると、表の形が行ごとに食い違う(いちばん直しにくい壊れ方)。
+ */
+function rewriteCsvShape(
+  body: string,
+  rewrite: { line: number; col: number; what: 'row' | 'col'; mode: 'add' | 'remove' },
+): string | null {
+  const table = csvTableAt(body, rewrite.line);
+  if (table === null) return null;
+  const lines = body.split('\n');
+  /** 表の中身の行(空行は行として数えない ── 描かれていないので押されない)。 */
+  const rows: number[] = [];
+  for (let i = table.first; i <= table.last && i < lines.length; i += 1) {
+    if ((lines[i] ?? '').trim() !== '') rows.push(i);
+  }
+  if (!rows.includes(rewrite.line)) return null;
+
+  if (rewrite.what === 'row') {
+    if (rewrite.mode === 'remove') {
+      // ⚠ **最後の 1 行は消さない**(表ごと消えて CSV の原文に放り出される)
+      if (rows.length <= 1) return null;
+      lines.splice(rewrite.line, 1);
+      return lines.join('\n');
+    }
+    // 足すのは**押した行の下**。⚠ 幅は押した行に揃える(でこぼこにしない)
+    const cells = cellsOf(lines[rewrite.line]!, table.delimiter);
+    if (cells === null) return null;
+    lines.splice(rewrite.line + 1, 0, table.delimiter.repeat(cells.length - 1));
+    return lines.join('\n');
+  }
+
+  // ── 列は**全部の行**を触る。まず全行が読めることを確かめてから当てる
+  const parsed: Array<{ at: number; spans: Array<{ start: number; end: number }> }> = [];
+  for (const at of rows) {
+    const spans = cellsOf(lines[at]!, table.delimiter);
+    if (spans === null) return null;
+    if (spans[rewrite.col] === undefined) return null;
+    parsed.push({ at, spans });
+  }
+  if (rewrite.mode === 'remove' && parsed.some((r) => r.spans.length <= 1)) return null;
+  for (const { at, spans } of parsed) {
+    const line = lines[at]!;
+    const span = spans[rewrite.col]!;
+    if (rewrite.mode === 'add') {
+      // 押した列の**右**へ空のセルを 1 つ
+      lines[at] = line.slice(0, span.end) + table.delimiter + line.slice(span.end);
+    } else {
+      // ⚠ 区切り字も 1 つ連れて消す ── 最後の列なら**左側**の区切り字を消す
+      const cut =
+        rewrite.col + 1 < spans.length
+          ? { start: span.start, end: spans[rewrite.col + 1]!.start }
+          : { start: spans[rewrite.col - 1]!.end, end: span.end };
+      lines[at] = line.slice(0, cut.start) + line.slice(cut.end);
+    }
+  }
+  return lines.join('\n');
+}
+
+/**
+ * その 1 行のセルの範囲。⚠ **1 行として閉じていなければ `null`**
+ * (次の行へまたがっている ── そこへ書くと次の行まで巻き込む)。
+ */
+function cellsOf(
+  line: string,
+  delimiter: string,
+): Array<{ start: number; end: number }> | null {
+  const out: CsvPositions = { cellSpans: [] };
+  const rows = parseCsv(line, delimiter, out);
+  if (rows === null || rows.length !== 1 || out.unterminated === true) return null;
+  const spans = out.cellSpans?.[0];
+  if (spans === undefined || spans.length !== rows[0]!.length) return null;
+  return spans;
 }

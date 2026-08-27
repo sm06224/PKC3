@@ -338,6 +338,11 @@ function buildRenderableSlotHtml(
   occurrence: number,
   /** 箱の CSP の `img-src` を開けるか。⚠ **既定は塞ぐ側**(`external-images.ts`)。 */
   allowExternalImages: boolean,
+  /**
+   * 🔴 **囲みの中身が原文の何行目から始まるか**(#418 段①)。
+   * `undefined` = セルを押せないまま(既定)。csv 系だけが使う。
+   */
+  firstContentLine: number | undefined,
 ): string | null {
   switch (fence.lang) {
     case 'html':
@@ -367,7 +372,7 @@ function buildRenderableSlotHtml(
       // csv / tsv / psv:suffix を剥がした info を渡す(`noheader` 等の
       // オプションは rest 経由で温存)。
       const info = fence.rest ? `${fence.lang} ${fence.rest}` : fence.lang;
-      return renderCsvFence(content, info, inlineRender);
+      return renderCsvFence(content, info, inlineRender, firstContentLine);
     }
   }
 }
@@ -565,7 +570,30 @@ md.renderer.rules.fence = function (tokens, idx, options, env, self) {
   }
   const fence = parseRenderableFence(effectiveInfo);
   if (fence) {
-    return renderRenderableFence(fence, content, sourceLineAttrs, env);
+    /**
+     * 🔴 **表のセルを押せるようにする**(#418 段①)。
+     *
+     * ⚠ 焼くのは**原文の行番号**なので、`toggle-task` と**同じ 3 段**を通す:
+     *   ① token の `map[0]`(前処理後の行)② `env.lineMap` で原文へ逆引き
+     *   ③ `taskLineOffset`(剥がした frontmatter のぶん)を足す。
+     * ⚠ **中身の 1 行目は囲みの見出しの次**なので `+ 1`。
+     * ⚠ 添付から焼いた囲み(#444)は**原文にその字が無い**ので押させない ──
+     *   押せても、書き戻す先が本文に存在しない。
+     */
+    let firstContentLine: number | undefined;
+    if (
+      (env as { interactiveCells?: boolean } | undefined)?.interactiveCells === true &&
+      content === (token.content ?? '')
+    ) {
+      const outLine = token.map?.[0];
+      if (typeof outLine === 'number') {
+        const map = (env as { lineMap?: number[] } | undefined)?.lineMap;
+        const raw = map ? (map[outLine] ?? outLine) : outLine;
+        const offset = (env as { taskLineOffset?: number } | undefined)?.taskLineOffset ?? 0;
+        firstContentLine = raw + offset + 1;
+      }
+    }
+    return renderRenderableFence(fence, content, sourceLineAttrs, env, firstContentLine);
   }
   /**
    * ⚠ 素のコード囲みは `defaultFence` が token を読むので、**写しを渡す**
@@ -607,6 +635,12 @@ function renderRenderableFence(
   content: string,
   sourceLineAttrs: string,
   env: unknown,
+  /**
+   * 🔴 **囲みの中身が原文の何行目から始まるか**(#418 段①)。
+   * ⚠ `undefined` = 押せない ── **受け手が居る面だけ**が渡す
+   *   (`interactiveTasks` と同じ作法。書き出し・印刷では押させない)。
+   */
+  firstContentLine?: number,
 ): string {
   {
     if (fence.mode === 'norender') {
@@ -653,6 +687,7 @@ function renderRenderableFence(
       inlineRender,
       occurrence,
       (env as { allowExternalImages?: boolean } | undefined)?.allowExternalImages === true,
+      firstContentLine,
     );
     if (slot !== null) {
       return buildRenderableBlockHtml(fence, slot, content, sourceLineAttrs, occurrence);
@@ -2004,6 +2039,15 @@ export interface RenderMarkdownOptions {
    *   字にして渡すと、ゼロコピーの積み上げ(不可侵指示 2026-07-27)が崩れる。
    */
   readonly fenceAssets?: Readonly<Record<string, string>>;
+  /**
+   * 🔴 **表のセルを押して打てる形で出すか**(#418 段①。既定 `false`)。
+   *
+   * ⚠ **受け手(`edit-cell`)が居る面だけ** `true` にする ── `interactiveTasks` と
+   *   同じ理由で、押せるのに本文が変わらないと「打ったのに消えた」になる。
+   *   書き出した HTML・印刷・可搬 1 枚は受け手が居ないので**押せないまま**。
+   * ⚠ 渡さなければ属性は 1 つも出ない = goldens は 1 バイトも動かない。
+   */
+  readonly interactiveCells?: boolean;
   /**
    * 🔴 **チェックの印を押せる形で出すか**(#277。既定 `false` = 押せない)。
    *
@@ -5014,6 +5058,7 @@ export function renderMarkdown(
     currentContainerId: string;
     allowExternalImages: boolean;
     interactiveTasks: boolean;
+    interactiveCells: boolean;
     taskLineOffset: number;
     lineMap?: number[];
     fenceAssets?: Readonly<Record<string, string>>;
@@ -5025,6 +5070,8 @@ export function renderMarkdown(
     allowExternalImages: opts.allowExternalImages === true,
     // 🔴 チェックの印を押せる形で出すか(#277)。既定は押せない
     interactiveTasks: opts.interactiveTasks === true,
+    // 🔴 表のセルを押せる形で出すか(#418 段①)。既定は押せない
+    interactiveCells: opts.interactiveCells === true,
     // 🔴 剥がして描く面だけがずらす(既定 0)。理由は上の option の注記
     taskLineOffset: Number.isInteger(opts.taskLineOffset) ? (opts.taskLineOffset as number) : 0,
   };
