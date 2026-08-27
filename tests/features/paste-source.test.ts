@@ -200,3 +200,87 @@ describe('診断の 1 行', () => {
     );
   });
 });
+
+/**
+ * 🔴 **「大きすぎて読まなかった」を、そう書く**(#487)。
+ *
+ * ⚠ 直す前は上限超過も「変換しても得るものがありませんでした」と出ていた ──
+ *   **理由が嘘**である(中身は 1 バイトも読んでいない)。
+ * ⚠ しかも**長い生成 AI の返答こそ**この設定が相手にするものなので、
+ *   いちばん当たりやすい所で嘘をついていた。
+ *
+ * 🔑 ここが守るのは 2 つ:
+ * ① **理由が実態と合っている**(読まなかったのか、読んで空だったのか)
+ * ② 🔴 **上限を超えたら変換器を呼ばない**(呼んでいたら「読んでいない」が嘘になる)
+ */
+describe('🔴 大きすぎて読まなかった、と書く (#487)', () => {
+  const HTML_CAP = 1024 * 1024;
+  const RTF_CAP = 4 * 1024 * 1024;
+
+  /** その形の見送りの理由。 */
+  const why = (out: ReturnType<typeof run>, kind: string): string | undefined =>
+    out.attempt.skipped.find((s) => s.kind === kind)?.why;
+
+  it('🔴 上限を 1 バイト超えた HTML は「大きすぎて」と書き、変換器を呼ばない', () => {
+    const out = run('auto', { html: '# 変換できた' }, { html: HTML_CAP + 1, rtf: 0, plain: 5 });
+    expect(why(out, 'html'), '理由が「大きすぎて」になっていない').toContain('大きすぎて');
+    // 🔴 **空振り防止 + 主張の本体** ── 呼んでいたら「読んでいない」が嘘になる
+    expect(out.called, '上限を超えたのに変換器を呼んでいる').not.toContain('html');
+    expect(out.attempt.used).toBe('plain');
+  });
+
+  /**
+   * 🔴 **境界の突合**(CLAUDE.md §7「規則を 1 つに寄せ、parity test を置く」)。
+   * ⚠ 上限の比較は**変換器の中**と `choosePaste` の 2 か所にある ── 値は import で
+   *   1 つに寄せたが、**不等号の向きがずれたら理由が 1 バイト分だけ嘘になる**。
+   * 🔑 だから `= 上限`(読む)と `上限 + 1`(読まない)の**両側**を留める。
+   */
+  it('🔴 ちょうど上限なら読む ── 境界が変換器と揃っている', () => {
+    const out = run('auto', { html: '# 変換できた' }, { html: HTML_CAP, rtf: 0, plain: 5 });
+    expect(out.called, 'ちょうど上限なのに変換器を呼んでいない').toContain('html');
+    expect(out.attempt.used).toBe('html');
+  });
+
+  it('⚠ 上限の内側で変換できなかったときは、これまでどおり「得るものが…」', () => {
+    const out = run('auto', { html: null }, { html: 100, rtf: 0, plain: 5 });
+    expect(why(out, 'html')).toContain('得るもの');
+    expect(why(out, 'html'), '読んでいないと誤解させる字が混ざっている').not.toContain('大きすぎ');
+    expect(out.called, '変換を試していない(前提が崩れた)').toContain('html');
+  });
+
+  it('🔴 リッチテキストも同じ ── 上限を超えたら呼ばない', () => {
+    const out = run('rtf', { rtf: '# 変換できた' }, { html: 0, rtf: RTF_CAP + 1, plain: 5 });
+    expect(why(out, 'rtf')).toContain('大きすぎて');
+    expect(out.called, '上限を超えたのに変換器を呼んでいる').not.toContain('rtf');
+  });
+
+  /**
+   * 🔴 **2 つの上限が別物であることを、ここだけが確かめる**(変異試験 N4 が教えた)。
+   *
+   * ⚠ 1 稿目は RTF の試験を `RTF_CAP + 1`(= 4MB 超)で書いていたが、それは
+   *   **HTML の上限(1MB)も超えている** ── だから `rtf` の上限に `html` の上限を
+   *   当てる変異が**生き延びた**(どちらの値でも「大きすぎ」になる)。
+   * 🔑 効くのは**2 つの上限の間**だけである:1MB を超え、4MB の内側。
+   */
+  it('🔴 リッチテキストの上限は HTML より大きい ── 2MB は読む', () => {
+    const out = run('rtf', { rtf: '# 変換できた' }, { html: 0, rtf: 2 * 1024 * 1024, plain: 5 });
+    expect(out.called, 'RTF の上限に HTML の上限を当てている').toContain('rtf');
+    expect(out.attempt.used).toBe('rtf');
+  });
+
+  it('🔴 囲みも、上限と「中身が空」を混ぜない', () => {
+    const big = run('html-fence', { htmlFence: '```html\nx\n```' }, {
+      html: HTML_CAP + 1,
+      rtf: 0,
+      plain: 5,
+    });
+    expect(why(big, 'html')).toContain('大きすぎて');
+    expect(big.called, '上限を超えたのに囲みを組もうとしている').not.toContain('htmlFence');
+
+    // ⚠ 上限の内側で `null` = 「`<meta charset>` を外したら空だった」だけ
+    const empty = run('html-fence', { htmlFence: null }, { html: 100, rtf: 0, plain: 5 });
+    expect(why(empty, 'html')).toContain('空');
+    expect(why(empty, 'html'), '読んでいないと誤解させる字が混ざっている').not.toContain('大きすぎ');
+    expect(empty.called).toContain('htmlFence');
+  });
+});
