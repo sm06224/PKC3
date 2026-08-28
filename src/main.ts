@@ -9,6 +9,12 @@ import { connectStoreEffects, type StoreEffects } from '@adapter/state/store-eff
 import { tileSelectsEntry } from '@features/launcher/tiles';
 import { appEditorMode } from '@adapter/ui/render/editor-mode';
 import { applyTextScale, initialTextScale } from '@adapter/ui/render/text-scale';
+import {
+  applyReadColumns,
+  initialReadColumns,
+  installColumnFit,
+  installColumnWheel,
+} from '@adapter/ui/render/read-columns';
 import { appOpenInEdit } from '@adapter/ui/render/open-in-edit';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { appKeymap } from '@adapter/ui/render/keymap';
@@ -570,7 +576,24 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   user が選んだときだけ。
    */
   applyTextScale(document.documentElement, initialTextScale());
+  /**
+   * 🔴 **段組みも枠より先**(#505 段①。理由は上と同じ)。
+   * ⚠ **保存しない**(当てるだけ)── 保存は user が選んだときだけ。
+   */
+  applyReadColumns(document.documentElement, initialReadColumns());
   const regions = buildShell(root);
+  /**
+   * 🔴 **縦のホイールを横送りへ読み替える**(#505)。⚠ これが無いと段組みは
+   *   マウスだけでは読めない(実測: 縦ホイールで 1px も動かない)。
+   * 🔑 器ごとではなく **shell に 1 本**(本文の器は開くたびに作り直される)。
+   */
+  installColumnWheel(root);
+  /**
+   * 🔴 **段の高さを px で入れ、器の変化に追随させる**(#505)。
+   * ⚠ **これが無いと本文が黙って消える** ── flex が決めた高さでは段が増えず、
+   *   溢れた分を `overflow-y: hidden` が刈る(実測 87px 見えなくなった)。
+   */
+  installColumnFit(root);
   /**
    * 🔴 **畳んだペインを起動時に戻す**(#197)。⚠ これをやらないと「覚える」が
    * 成立せず、user 指示「同じものが常に同じ場所にある」に反する ── 畳んで閉じ、

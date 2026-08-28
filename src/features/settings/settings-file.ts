@@ -43,6 +43,7 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
   { key: 'pkc3.page-format', label: '紙面' },
   // ⚠ 別の端末でも**同じ意味**になる(見づらいと感じる大きさは人に付く)── 移す
   { key: 'pkc3.text-scale', label: '文字の大きさ' },
+  { key: 'pkc3.read-columns', label: '本文の段組み' },
   { key: 'pkc3.keymap', label: '鍵の割当' },
   { key: 'pkc3.browse', label: '探し方のタブ' },
   { key: 'pkc3.dual-preview', label: '2 ペインの下見' },
