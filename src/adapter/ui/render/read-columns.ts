@@ -39,6 +39,14 @@ export const READ_COLUMNS_VAR = '--pkc-read-cols';
  */
 export const COLUMNS_ON_ATTR = 'data-pkc-columns-on';
 
+/**
+ * 🔴 **段の高さを CSS へ渡す変数**(#527)。⚠ **パーセントでは効かない**ので px で渡す
+ * (多段組の中では高さのパーセントが解決できない ── 実測)。
+ * ⚠ 予備の値を書かない `var()` は**宣言ごと捨てられる**ので、当てる側は必ず既定を書く
+ * (`app.css` の `var(--pkc-col-h, none)`)。
+ */
+export const COLUMN_H_VAR = '--pkc-col-h';
+
 function readStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
   try {
     return typeof localStorage !== 'undefined' ? localStorage : null;
@@ -134,6 +142,9 @@ export function fitColumnHeight(root: ParentNode, doc: Document = document): num
     // ⚠ 読む面が居なくても、印は**居る面から**外す
     (pane ?? anyPane)?.removeAttribute(COLUMNS_ON_ATTR);
     host?.style.removeProperty('height');
+    // ⚠ **高さの変数も外す**(#527)── 残すと、段組みを切った後の縦送りの面でも
+    //    図が段の高さに縮む(印だけ外して変数を残す = DOM が嘘をつく形)
+    host?.style.removeProperty(COLUMN_H_VAR);
     return null;
   };
   // ⚠ 切るときは**印も高さも外す** ── どちらかが残ると、縦送りの面が刈られる
@@ -189,6 +200,24 @@ export function fitColumnHeight(root: ParentNode, doc: Document = document): num
   const next = `${avail}px`;
   // ⚠ 同じ値なら書かない ── 書くと ResizeObserver がまた鳴って回り続ける
   if (host.style.height !== next) host.style.height = next;
+  /**
+   * 🔴 **段の高さを CSS へ下ろす**(#527。2026-08-28)。
+   *
+   * ⚠ これが無いと、**縦に長い図と写真が段からはみ出して消える** ── 実測で
+   *   3 段のとき図の **82%**(2345px)が刈られ、user には**戻す手段が 1 本も無い**
+   *   (縦のホイールは横送りへ読み替えられ、`overflow-y: hidden` なので
+   *   スクロールバーも出ず、器の外は `elementFromPoint` にも当たらない)。
+   * 🔑 これは `:108-121` が 1 度直した「**画面から本文が消えて誰も気づかない**」と
+   *   **同じ穴の別経路**である。
+   *
+   * ⚠ **パーセントでは効かない**(実測)── 多段組の中では高さのパーセントが
+   *   解決できないので、**px で下ろす**必要がある。
+   * 🔑 ついでに「図を保存」が別の段へ落ちる件も直る ── 実測すると、離れ始める
+   *   境目は**ちょうど図が段より高くなったとき**(522px)で、根が同じである。
+   *   ⚠ `break-inside: avoid` は効かない(段より高い箱は指示しても割られる)。
+   */
+  if (host.style.getPropertyValue(COLUMN_H_VAR) !== next)
+    host.style.setProperty(COLUMN_H_VAR, next);
   return avail;
 }
 

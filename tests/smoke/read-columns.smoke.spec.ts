@@ -524,3 +524,108 @@ test('🔴 サイドの面を畳んでも、段組みが器いっぱいに組み
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * 🔴 **段組みで、縦に長い図と写真が段からはみ出さない**(#527。user 指示 2026-08-28)。
+ *
+ * > 「**段組時に縦に長い図をレンダリングすると画面外にはみ出る**」
+ *
+ * 🔴 直す前の実測(2560×1000 / 3 段 / 30 節点の `graph TD`):
+ *   図の高さ 2867px に対し器は 522px ── **2345px がはみ出し、見えているのは 18.2%**。
+ *   縦に長い写真も **17.4%** しか見えていなかった。
+ * ⚠ そして **user には戻す手段が 1 本も無い** ── 縦のホイールは横送りへ
+ *   読み替えられ(`installColumnWheel`)、`overflow-y: hidden` なので
+ *   スクロールバーも出ず、器の外は `elementFromPoint` にも当たらない。
+ * 🔑 `read-columns.ts:108-121` が 1 度直した「**画面から本文が消えて誰も
+ *   気づかない**」と**同じ穴の別経路**である。
+ *
+ * ⚠ **この spec の既存の fixture は図も画像も 0 件**だった ── だから
+ *   `:183-185` の「縦へはみ出していない」という不変量が**破れているのに鳴らなかった**
+ *   (CLAUDE.md「fixture のゼロ件の次元は、測っていない次元」)。
+ */
+const TALL_FIGURE =
+  '```mermaid\ngraph TD\n' +
+  Array.from({ length: 28 }, (_, i) => `  N${i}["節点 ${i}"]-->N${i + 1}["節点 ${i + 1}"]`).join(
+    '\n',
+  ) +
+  '\n```\n';
+
+test('🔴 段組みで縦に長い図が段に収まり、押し所も同じ段に残る (#527)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 2560, height: 1000 });
+  await gotoApp(page);
+
+  await createEntry(page, 'text');
+  const live = page.locator('[data-pkc-region="editor-live"]');
+  await clickReal(page, '[data-pkc-region="editor-live"]');
+  /**
+   * ⚠ **図の前に本文を置く**(1 稿目で踏んだ)── 図だけだと**段の頭から始まる**ので、
+   *   「段をまたいで割れる」場面が 1 度も起きない。実際、この行が無いと
+   *   `break-inside: avoid` を外す変異が**生き延びた**(= 何も守っていなかった)。
+   * 🔑 段の途中から始まる高さにする ── 段は約 620px なので、その半分ほど埋める。
+   */
+  const LEAD = Array.from({ length: 6 }, (_, i) => `前置きの段落 ${i}。段の途中から図が始まるようにする。`).join(
+    '\n\n',
+  );
+  await live
+    .locator('[data-pkc-field="row-source"]')
+    .fill(`# 縦に長い図\n\n${LEAD}\n\n${TALL_FIGURE}`);
+  await page.keyboard.press('Tab');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  const fig = page.locator('[data-pkc-field="detail-body"] [data-pkc-mermaid-src]');
+  await expect(fig).toHaveAttribute('data-pkc-mermaid-state', 'ready', { timeout: 40_000 });
+
+  /** 図の幾何。⚠ **器の内側の底**と比べる(器そのものの底ではない ── padding がある)。 */
+  const shape = async (): Promise<{
+    natural: number;
+    shown: number;
+    over: number;
+    frags: number;
+    sameColumn: boolean;
+  }> =>
+    page.evaluate(() => {
+      const host = document.querySelector('[data-pkc-field="detail-body"]') as HTMLElement;
+      const box = host.querySelector('[data-pkc-mermaid-src]') as HTMLElement;
+      const img = box.querySelector('img') as HTMLImageElement;
+      const save = box.querySelector('[data-pkc-field="diagram-save"]');
+      const hb = host.getBoundingClientRect();
+      const ib = img.getBoundingClientRect();
+      const sb = save?.getBoundingClientRect() ?? null;
+      const inner = hb.bottom - (Number.parseFloat(getComputedStyle(host).paddingBottom) || 0);
+      return {
+        natural: img.naturalHeight,
+        shown: Math.round(ib.height),
+        over: Math.round(ib.bottom - inner),
+        // 🔑 段をまたいで割れると断片が 2 つになる
+        frags: box.getClientRects().length,
+        // 押し所が図と同じ段に在るか(段の幅より近ければ同じ段)
+        sameColumn: sb === null ? false : Math.abs(sb.x - ib.x) < 200,
+      };
+    });
+
+  // ① 🔴 **空振り防止** ── この図が**本当に縦に長い**(短ければ以下は自明に通る)
+  const one = await shape();
+  expect(one.natural, '図が縦に長くない(この次元を測れていない)').toBeGreaterThan(1500);
+  expect(one.over, '1 段でもはみ出している(段組み固有でない = 別の話)').toBeLessThanOrEqual(0);
+
+  // ② 3 段にする
+  await setColumns(page, '3');
+  await expect(fig).toHaveAttribute('data-pkc-mermaid-state', 'ready', { timeout: 40_000 });
+  await expect
+    .poll(async () => (await readGeom(page)).on, { timeout: 5_000 })
+    .toBe(true);
+
+  const three = await shape();
+  // ③ 🔴 **はみ出していない**(直す前は +2345px、見えているのは 18.2% だった)
+  expect(three.over, `段からはみ出している(${three.over}px。user には戻す手段が無い)`).toBeLessThanOrEqual(
+    0,
+  );
+  // ④ ⚠ **小さくなって見えている**(器ごと消えて「はみ出し 0」になる実装を落とす)
+  expect(three.shown, '図が消えている').toBeGreaterThan(50);
+  expect(three.shown, '段の高さに収まっていない').toBeLessThan(one.shown);
+  // ⑤ 🔴 **段をまたいで割れていない** ── 割れると押し所が別の段へ落ちる
+  expect(three.frags, '図の器が段をまたいで割れている').toBe(1);
+  expect(three.sameColumn, '「図を保存」が図と別の段に落ちている').toBe(true);
+
+  expect(errors).toEqual([]);
+});

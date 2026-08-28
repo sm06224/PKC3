@@ -1160,6 +1160,39 @@ select:focus-visible {
   min-width: 7rem;
   padding-top: 22px;
 }
+/* 🔴 **段組みのときは、図と写真を段の高さに収める**(#527。2026-08-28)
+ *
+ * ⚠ 直す前、縦に長い図は段からはみ出して**消えていた** ── 実測で 3 段のとき
+ *   図の **82%**(2345px)、写真の **83%**(2478px)が刈られ、user には
+ *   **戻す手段が 1 本も無かった**(縦のホイールは横送りへ読み替えられ、
+ *   `overflow-y: hidden` なのでスクロールバーも出ず、器の外は当たらない)。
+ *   🔑 `read-columns.ts:108-121` が 1 度直した「画面から本文が消えて誰も
+ *   気づかない」と**同じ穴の別経路**である。
+ *
+ * 🔑 **これで「図を保存」が別の段へ落ちる件も一緒に直る** ── 実測すると
+ *   離れ始める境目は**ちょうど図が段より高くなったとき**で、根が同じだった。
+ *   ⚠ `break-inside: avoid` では直らない(段より高い箱は指示しても割られる)。
+ *
+ * ⚠ **段組みのときだけ**当てる(`[data-pkc-columns-on]` の中)── 1 段で読む
+ *   user の見え方は 1 バイトも変わらない。
+ * ⚠ 予備の値 `none` を必ず書く ── 定義の無い `var()` は**宣言ごと捨てられる**
+ *   (#465 / #466 で実際に出荷した穴)。
+ * ⚠ **当てるのは中身(`img`)だけでよい**。器(`[data-pkc-mermaid-src]`)は
+ *   `display: table` なので中身に合わせて縮み、段に収まる。
+ * 🔑 器に `max-height` と `break-inside: avoid` を書いた稿もあったが、
+ *   **どちらも外した** ── 変異試験(R1 / R4)が 2 度とも SURVIVED で
+ *   「無くても通る」と教えたためである(CLAUDE.md「これが無いと壊れると書く前に、
+ *   外して壊れるのを見る」)。⚠ 割れないことは smoke の `frags === 1` が見張る。 */
+/* ⚠ **`.pkc-md-rendered` は `detail-body` **自身**の class である**
+ *   (`detail.ts:562`)── 子孫として書くと**1 つも当たらない**。1 稿目で踏んだ:
+ *   図(`[data-pkc-mermaid-src] img`)だけ効いて、本文に貼った写真は素通りしていた。
+ *   🔑 器そのものを起点にする。 */
+[data-pkc-view-pane='detail'][data-pkc-columns-on] [data-pkc-field='detail-body'] img {
+  max-height: calc(var(--pkc-col-h, 100vh) - 30px);
+  /* ⚠ 高さを縮めたら幅も比で縮める(潰れた絵にしない) */
+  width: auto;
+  object-fit: contain;
+}
 [data-pkc-field='diagram-save'] {
   position: absolute;
   top: 0;

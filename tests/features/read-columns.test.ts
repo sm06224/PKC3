@@ -143,6 +143,52 @@ describe('CSS(2 本で 1 組)', () => {
   });
 
   /**
+   * 🔴 **段組みのときは、図と写真が段の高さに収まる**(#527。2026-08-28)。
+   *
+   * ⚠ 直す前は、縦に長い図が段からはみ出して**消えていた** ── 実測で 3 段のとき
+   *   図の **82%**(2345px)、写真の **83%**(2478px)が刈られ、user には
+   *   **戻す手段が 1 本も無かった**(縦のホイールは横送りへ読み替えられ、
+   *   `overflow-y: hidden` なのでスクロールバーも出ない)。
+   *
+   * ⚠ ここが見るのは **CSS の配線**だけ ── 実際に収まるところは
+   *   `tests/smoke/read-columns.smoke.spec.ts` が幾何で見る。
+   * 🔑 **`.pkc-md-rendered` を子孫に書かない**(1 稿目で踏んだ)── あれは
+   *   `detail-body` **自身**の class(`detail.ts:562`)なので、子孫として書くと
+   *   **1 つも当たらず、本文に貼った写真だけが素通り**する。
+   */
+  it('🔴 段組みのとき、図と本文の画像に段の高さの上限が当たる (#527)', () => {
+    const css = codeOnly();
+    // ⚠ 器そのものには何も書かない ── `display: table` は中身に合わせて縮むので
+    //    `max-height` も `break-inside: avoid` も **no-op** だった
+    //    (変異試験 R1 / R4 が 2 度とも SURVIVED で教えた)。
+    //    割れないことは smoke の `frags === 1` が見張る。
+    // ① 本文の画像と図。⚠ **器そのものを起点にする**(`.pkc-md-rendered` を子孫に書かない)
+    expect(css, '本文の画像に高さの上限が届いていない').toMatch(
+      /\[data-pkc-columns-on\]\s*\[data-pkc-field='detail-body'\]\s*img\s*\{[^}]*max-height:\s*[^;]*--pkc-col-h/,
+    );
+    // ② 🔴 **予備の値を必ず書く** ── 定義の無い `var()` は**宣言ごと捨てられる**
+    //    (#465 / #466 で実際に出荷した穴)
+    for (const m of css.matchAll(/var\(--pkc-col-h([^)]*)\)/g))
+      expect(m[1], `予備の値の無い var(--pkc-col-h) が在る: ${m[0]}`).toMatch(/^\s*,/);
+  });
+
+  /**
+   * 🔴 **段の高さを CSS へ下ろす配線が在る**(#527)。
+   *
+   * ⚠ **パーセントでは効かない**(実測)── 多段組の中では高さのパーセントが
+   *   解決できないので、px で渡す必要がある。だから「JS が書く」ことが要る。
+   * ⚠ **切るときは外す**ことまで見る ── 印だけ外して変数が残ると、
+   *   段組みを切った後の縦送りの面でも図が縮む(DOM が嘘をつく形)。
+   */
+  it('🔴 段の高さを CSS 変数で下ろし、切るときは外す (#527)', () => {
+    const rc = readFileSync('src/adapter/ui/render/read-columns.ts', 'utf8');
+    expect(rc, '段の高さを CSS へ下ろしていない').toContain('setProperty(COLUMN_H_VAR');
+    expect(rc, '段組みを切るときに変数を外していない').toContain('removeProperty(COLUMN_H_VAR)');
+    // 空振り防止 ── 変数名が CSS と一致している
+    expect(rc, '変数名が CSS と食い違っている').toContain("COLUMN_H_VAR = '--pkc-col-h'");
+  });
+
+  /**
    * 🔴 **段の境目に線が在る**(#525。2026-08-28)。
    *
    * ⚠ 直す前、この 1 行を守る検査は **repo 全体で 0 件**だった ── 消しても
