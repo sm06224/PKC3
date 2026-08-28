@@ -24,6 +24,23 @@
  *   node build/office-wasm/open-doc-probe.mjs <pack ディレクトリ> <文書|none> [出力.json] [秒]
  *   PKC3_SHOT=/path/shot.png  を付けると最後に 1 枚撮る
  *
+ * 門(⚠ **既定では何もしない**。付けた回だけ走る):
+ *   PKC3_REDRAW=1        打鍵が版面に出るか + 保存した中身に入るか(#154)
+ *     PKC3_REDRAW_ENTRY=click|dblclick|tab   PKC3_REDRAW_X / _Y  押す比
+ *   PKC3_PASTE=1         コピーと貼り付けが効くか(#121)
+ *     PKC3_PASTE_VIA=keys|menu               近道キー / `編集` メニュー
+ *     PKC3_MENU_SHOT=/path.png               🔑 コピーの**後**の `編集` を撮る
+ *                                            (`形式を選択して貼り付け` の灰色 = #121 の肝)
+ *     PKC3_PRE_PASTE_SHOT=/path.png          貼る直前(選択が畳めたか)
+ *   PKC3_MENU_OPEN=<キー> メニューを 1 つ開いて撮るだけ(例 `Alt+i`)
+ *     PKC3_MENU_ITEM=<キー>                  項目まで選ぶ(⚠ **日本語 UI の近道キー**)
+ *     PKC3_MENU_SHOT=/path.png
+ *   PKC3_IME=1 / PKC3_STACKS=1 / PKC3_POKE / PKC3_PTHREAD / PKC3_DIST
+ *
+ * ⚠ **近道キーは日本語 UI の綴りで指定する** ── `コピー(Y)` / `貼り付け(P)` /
+ *   `画像(I)` のように、英語の頭文字とは違う。英語のつもりで書くと**別の項目を叩いて**
+ *   「効かなかった」に見える。
+ *
  * ⚠ `dist/` を配るので **先に `npm run build`** すること。
  */
 
@@ -131,6 +148,19 @@ const STACKS = process.env.PKC3_STACKS === '1';
  * ⚠ `PKC3_IME` とは**同時に使わない**(どちらも版面を押して打つので混ざる)。
  */
 const REDRAW = process.env.PKC3_REDRAW === '1';
+const PASTE = process.env.PKC3_PASTE === '1';
+/** ⚠ `qt-window` は shadow root の中にも生えるので、**潜って**数える。 */
+const COUNT_QT_WINDOWS = () => {
+  let n = 0;
+  const walk = (node) => {
+    for (const el of node.querySelectorAll('*')) {
+      if (el.classList && el.classList.contains('qt-window')) n += 1;
+      if (el.shadowRoot) walk(el.shadowRoot);
+    }
+  };
+  walk(document);
+  return n;
+};
 
 /**
  * 🔴 **打った字が「保存した中身」に入っているか**(#154 の次の一手 ①、2026-08-25)。
@@ -206,11 +236,22 @@ const TYPED_IN_SAVED = (needle) => `(async () => {
   const needle = ${JSON.stringify(needle)};
   const bare = needle.split(' ').join('');
   const stripped = xml.split(' ').join('');
+  // 🔑 **件数も返す**(#121 の貼り付け ── 「在るか」では 1 回と 2 回が割れない)。
+  //    ⚠ 空白を落とした形のほうが多く当たることがあるので、多いほうを採る。
+  const tally = (hay, pin) => {
+    if (pin.length === 0) return 0;
+    let n = 0;
+    for (let i = hay.indexOf(pin); i >= 0; i = hay.indexOf(pin, i + pin.length)) n += 1;
+    return n;
+  };
+  const n1 = tally(xml, needle);
+  const n2 = tally(stripped, bare);
   return {
     size: bytes.length,
     xmlChars: xml.length,
-    // 🔑 返すのは真偽だけ ── 中身は出さない
-    found: xml.indexOf(needle) >= 0 || stripped.indexOf(bare) >= 0,
+    // 🔑 返すのは真偽と件数だけ ── 中身は出さない
+    found: n1 > 0 || n2 > 0,
+    count: n1 > n2 ? n1 : n2,
   };
 })()`;
 /**
@@ -868,6 +909,199 @@ try {
       }
     } catch (e) {
       result.redraw = { err: safeErr(e) };
+    }
+  }
+  /**
+   * 🔴 **メニューを 1 つ開いて 1 枚撮る**(`PKC3_MENU_OPEN=<キー>` の回だけ)。
+   *
+   * 🔑 上流の一式を上げたときに「**その面が変わったか**」を見るための、いちばん安い口である
+   *   (#146 のファイル選択のように、**構造の話なので普通は変わらない**ものを、
+   *   それでも 1 度は見ておくため)。
+   * ⚠ 項目まで選ぶなら `PKC3_MENU_ITEM=<キー>` を足す ── **日本語 UI の近道キー**で
+   *   指定する(`コピー(Y)` のように、英語の頭文字とは違う)。
+   * ⚠ **開いたことを数で残す**(`windows`)── 開いていない回の絵を読まないため。
+   */
+  if (process.env.PKC3_MENU_OPEN && result.opened) {
+    const tour = {};
+    result.menuTour = tour;
+    try {
+      const box = await canvasBox();
+      if (box) {
+        await page.mouse.click(box.x + box.w * 0.4, box.y + box.h * 0.35);
+        await page.waitForTimeout(2000);
+        tour.before = await page.evaluate(COUNT_QT_WINDOWS);
+        await page.keyboard.press(process.env.PKC3_MENU_OPEN);
+        await page.waitForTimeout(2500);
+        tour.opened = await page.evaluate(COUNT_QT_WINDOWS);
+        if (process.env.PKC3_MENU_ITEM) {
+          await page.keyboard.press(process.env.PKC3_MENU_ITEM);
+          await page.waitForTimeout(6000);
+          tour.afterItem = await page.evaluate(COUNT_QT_WINDOWS);
+        }
+        if (process.env.PKC3_MENU_SHOT) {
+          await page.screenshot({ path: process.env.PKC3_MENU_SHOT });
+          tour.shot = process.env.PKC3_MENU_SHOT;
+        }
+      }
+    } catch (e) {
+      tour.err = safeErr(e);
+    }
+  }
+  /**
+   * 🔴 **コピーと貼り付けが効くか**(#121、`PKC3_PASTE=1` の回だけ)。
+   *
+   * ⚠ 実機の報告は「右クリック → Copy → 右クリック → Paste で**何も起きない**」で、
+   *   Edit メニューの `Paste Special` が**グレーアウト** = LO の中のクリップボードが
+   *   空、というものだった。⚠ だが「効かない」の原因候補は 3 つあり
+   *   (主スレッド閉塞 / 権限 / 実装が無い)、**どれも版面の見た目では割れない**。
+   *
+   * 🔑 だから観測点は**保存した中身の件数**にする(`TYPED_IN_SAVED` を件数付きにした)──
+   *   1 回打った字が、貼った後に **2 回**在れば貼れている。
+   *
+   * ⚠ **順番に意味がある。** 全選択したまま貼ると、貼れても**選択を置き換える**ので
+   *   件数が 1 のまま = 「効かなかった」と区別できない。だから `End` で選択を畳んでから貼る。
+   *
+   * 読み方(⚠ **対照群が崩れた回は 1 つも読まない**):
+   *
+   * | 観測 | 読み方 |
+   * |---|---|
+   * | `typed.count !== 1` / `typed.size === base.size` | 🔴 **判定不能** ── 入力か保存が届いていない |
+   * | `copied.count === 0` | 🔴 `Ctrl+C` が**文字として入って選択を潰した**(近道が LO に届いていない) |
+   * | `pasted.count === 2` | ✅ **貼れた** |
+   * | `pasted.count === 1` | コピーか貼り付けのどちらかが効いていない |
+   * | `hungAt` が非 null | 🔴 **主スレッドが返ってこない**(候補 1 の裏取り) |
+   */
+  if (PASTE && result.opened) {
+    const NEEDLE = 'ZULU9';
+    const paste = { clicked: false, hungAt: null };
+    result.paste = paste;
+    /** ⚠ 保存が走らなかった回を「入っていない」と読まないための読み口。 */
+    const readSaved = async (label) => {
+      try {
+        return await page.evaluate(TYPED_IN_SAVED(NEEDLE));
+      } catch (e) {
+        paste.hungAt = paste.hungAt ?? label;
+        return { err: safeErr(e) };
+      }
+    };
+    /** ⚠ 保存の後は長めに待つ ── 落ちたのではなく**遅い**だけのことがある。 */
+    const save = async () => {
+      await page.keyboard.press('Control+s');
+      await page.waitForTimeout(6000);
+    };
+    try {
+      const box = await canvasBox();
+      if (box) {
+        const fx = Number(process.env.PKC3_REDRAW_X ?? '0.4');
+        const fy = Number(process.env.PKC3_REDRAW_Y ?? '0.35');
+        paste.at = { x: fx, y: fy };
+        await page.mouse.click(box.x + box.w * fx, box.y + box.h * fy);
+        paste.clicked = true;
+        await page.waitForTimeout(2500);
+        // 🔑 **基準** ── 打つ前の大きさ。保存が走ったかを、これとの差で見る
+        paste.base = await readSaved('base');
+        await page.keyboard.type(NEEDLE, { delay: 120 });
+        await page.waitForTimeout(1500);
+        await save();
+        // 🔑 **対照群** ── ここが 1 でなければ、以降は全部読めない
+        paste.typed = await readSaved('typed');
+        await page.keyboard.press('Control+a');
+        await page.waitForTimeout(800);
+        /**
+         * 🔴 **コピーの出し方を選べるようにする**(#121 の手順は**メニュー**である)。
+         *
+         * ⚠ 実機の報告は「右クリック → Copy」で、`Ctrl+C` ではない ── そして
+         *   `編集` メニューの `貼り付け(特殊)` が**グレーアウト**していた、が肝の観測だった。
+         *   ⚠ **近道とメニューは別の経路**なので、片方で測って両方を語れない
+         *   (2026-08-25 の「同じ手順で回したは、同じ物を触ったではない」と同じ形)。
+         * 🔑 `PKC3_PASTE_VIA=menu` で**メニューの近道キー**(`Alt+E` = `編集(E)`)から出す ──
+         *   座標を当てずに済むので、器の大きさが変わっても指す先がずれない。
+         * ⚠ **開いたことを別に数える**(`menuWindows`)── 開いていない回を
+         *   「コピーが効かなかった」と読まないため。
+         */
+        const via = process.env.PKC3_PASTE_VIA ?? 'keys';
+        paste.via = via;
+        const countWindows = () => page.evaluate(COUNT_QT_WINDOWS);
+        /**
+         * 🔑 **項目は近道キーで選ぶ**(座標を当てない)。実測した `編集` メニューの綴りは
+         *   `コピー(Y)` / `貼り付け(P)` である ── 日本語 UI なので `C` / `V` ではない。
+         *   ⚠ ここを英語のつもりで書くと、**別の項目を叩いて**「効かなかった」に見える。
+         */
+        const menuPick = async (accel) => {
+          const before = await countWindows();
+          await page.keyboard.press('Alt+e');
+          await page.waitForTimeout(2500);
+          const opened = await countWindows();
+          await page.keyboard.press(accel);
+          await page.waitForTimeout(2000);
+          return { before, opened, picked: accel };
+        };
+        if (via === 'menu') {
+          paste.menuCopy = await menuPick('y');
+          await page.waitForTimeout(1500);
+          /**
+           * 🔴 **#121 の肝の観測点** ── コピーの**後**に `編集` を開き直して、
+           *   `形式を選択して貼り付け` が**灰色のままか**を見る。
+           * ⚠ 実機では灰色 = 「LO の中のクリップボードが空」だった。
+           *   コピーの前は灰色で**当たり前**なので、**後**で見ないと何も言えない。
+           */
+          if (process.env.PKC3_MENU_SHOT) {
+            await page.keyboard.press('Alt+e');
+            await page.waitForTimeout(2500);
+            await page.screenshot({ path: process.env.PKC3_MENU_SHOT });
+            await page.keyboard.press('Escape');
+            await page.waitForTimeout(1200);
+          }
+        } else {
+          await page.keyboard.press('Control+c');
+        }
+        await page.waitForTimeout(2500);
+        await save();
+        // 🔑 0 なら Ctrl+C が文字として入っている(選択を潰した)
+        paste.copied = await readSaved('copied');
+        // ⚠ 選択を畳んでから貼る ── 選んだまま貼ると件数が動かない
+        /**
+         * 🔴 **選択を確実に畳む**(2026-08-28 に踏んだ)。
+         *
+         * ⚠ `End` 1 つでは畳めない回がある ── メニューを閉じた直後は、その一手が
+         *   メニュー側に食われることがある。畳めていないまま貼ると、貼れていても
+         *   **同じ字を同じ字で置き換える**ので件数が動かない = 「貼れていない」に見える
+         *   (実測: 件数 1 のまま、大きさだけ +32 バイト動いた)。
+         * 🔑 `ArrowRight`(選択を右端へ畳む)→ `Control+End`(文末へ)の 2 手にし、
+         *   **貼る直前の版面を 1 枚撮る**(`PKC3_PRE_PASTE_SHOT`)── 状態表示に
+         *   `選択中` が残っていれば、その回の件数は読まない。
+         */
+        await page.keyboard.press('ArrowRight');
+        await page.waitForTimeout(600);
+        await page.keyboard.press('Control+End');
+        await page.waitForTimeout(900);
+        if (process.env.PKC3_PRE_PASTE_SHOT) {
+          await page.screenshot({ path: process.env.PKC3_PRE_PASTE_SHOT });
+        }
+        if (via === 'menu') {
+          paste.menuPaste = await menuPick('p');
+        } else {
+          await page.keyboard.press('Control+v');
+        }
+        await page.waitForTimeout(2500);
+        await save();
+        paste.pasted = await readSaved('pasted');
+        const t = paste.typed?.count ?? null;
+        const c = paste.copied?.count ?? null;
+        const v = paste.pasted?.count ?? null;
+        paste.controlLanded = t === 1 && paste.base?.size !== paste.typed?.size;
+        paste.verdict = !paste.controlLanded
+          ? '判定不能(打鍵か保存が届いていない)'
+          : c === 0
+            ? 'Ctrl+C が文字として入った'
+            : v === 2
+              ? '貼れた'
+              : v === 1
+                ? '貼れていない'
+                : '読めない件数: ' + String(v);
+      }
+    } catch (e) {
+      paste.err = safeErr(e);
     }
   }
   /**
