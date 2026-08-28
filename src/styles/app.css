@@ -35,7 +35,16 @@ body {
   background: var(--bg);
   color: var(--fg);
   font-family: var(--font);
-  font-size: 13px;
+  /**
+   * 🔴 **文字の大きさは user が決める**(#504。user 指示 2026-08-28
+   * 「正直変更はユーザーに委ねて欲しい」)。
+   * ⚠ **既定値は現行そのまま**(`13px`)── 選ばなければ 1 バイトも変わらない。
+   * ⚠ 値の正本は `features/text-scale.ts` の表。ここに 2 本目の数字を置かない。
+   * 🔑 `html` ではなく `body` に当てる ── 読み幅(`--read-w`)は `rem` なので、
+   *   `html` を動かすと**段の幅まで動く**(字を大きくしても 1 行の字数が
+   *   変わらない = 大きくした意味が薄い)。`body` なら段はそのまま字だけ動く。
+   */
+  font-size: var(--pkc-text-size, 13px);
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
 }
