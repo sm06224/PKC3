@@ -38,6 +38,8 @@
  * ⚠ **pure module**。browser API を使わない(保存と DOM は adapter 側)。
  */
 
+import { DEFAULT_TEXT_SCALE, textScaleSpec } from './text-scale';
+
 /** 段組み 1 つ。⚠ **値の正本はこの表 1 枚**(`app.css` に段数を書かない)。 */
 export interface ReadColumnsSpec {
   readonly id: ReadColumns;
@@ -63,17 +65,54 @@ export const READ_COLUMN_CHOICES: readonly ReadColumnsSpec[] = [
 export const DEFAULT_READ_COLUMNS: ReadColumns = '1';
 
 /**
- * 🔴 **1 段の下限(px)**。これを 2 段ぶん置けない器では、**段組みそのものを止める**。
+ * 🔴 **1 段の下限 ── 本文が標準(13px)のときの px**。
+ *   これを 2 段ぶん置けない器では、**段組みそのものを止める**。
  *
  * ⚠ 読み幅の上限(`--read-w` の既定 42rem = 672px)とは**別物**である ──
  *   あちらは「広がりすぎない」上限、こちらは「狭まりすぎない」下限。
  * 🔑 448px は本文 13px で**全角 約 34 文字** ── 日本語の可読幅 35〜50 文字
  *   (`app.css` の読み幅の節)の下端である。これより狭い段は作らせない。
  *
- * ⚠ **px で持つ**(`rem` ではない)── JS が「2 段置けるか」を数えるので、
- *   単位の変換を 2 か所に持たない(CLAUDE.md §7)。
+ * 🔴 **これは固定値ではなく「標準のときの値」である**(#509。user 指示 2026-08-28
+ *   「ここにユーザーによるフォントサイズ変更やブラウザの拡大率変更などが載って
+ *   くれば、ユーザーは好みで見ることができるようになるはず」)。
+ *   ⚠ 固定 px のままだと、**文字を大きくしても段は狭いまま**で、
+ *   同じ 448px に入る字数が減る ── 特大(17px)では **26 文字**しか入らず、
+ *   「大きくして読みやすくした」つもりが**読みにくくなる**向きだった。
+ *   🔑 いまは `readColumnMinPx()` が本文の大きさを掛ける。
  */
 export const READ_COLUMN_MIN_PX = 448;
+
+/**
+ * 🔴 **上の 448px が「全角 約 34 文字」になる本文の大きさ(px)**。
+ *
+ * ⚠ **13 を直に書かない** ── `text-scale.ts` の既定(標準)から引く。
+ *   2 か所に同じ数字を置くと、片方だけ動いたときに**下限が静かにずれる**
+ *   (CLAUDE.md §7)。⚠ CSS 側のリテラルとの一致は
+ *   `tests/features/read-columns.test.ts` が突合する。
+ */
+export const READ_COLUMN_BASE_FONT_PX = Number.parseFloat(
+  textScaleSpec(DEFAULT_TEXT_SCALE).size,
+);
+
+/**
+ * 🔴 **その文字の大きさでの、1 段の下限(px)**(#509)。
+ *
+ * 🔑 意味は「**全角 約 34 文字ぶん**」であって px ではない ── だから本文が
+ *   大きくなれば下限も一緒に大きくなる。実測(2026-08-28、実ブラウザ):
+ *   本文の器の `font-size` は text-scale とぴったり一致し(12 / 13 / 15 / 17)、
+ *   その器の `1em` も同じ値になる ── だから CSS 側は `1em` を掛ければよい。
+ *
+ * ⚠ **ブラウザの拡大率はここに載せなくてよい** ── 拡大は CSS px ごと拡大するので、
+ *   下限も本文も**同じ比**で大きくなり、器だけが CSS px で狭くなる
+ *   (= 拡大したら段が減る、という素直な振る舞いになる)。
+ *
+ * @param fontPx 本文の器の `font-size`(px)。⚠ 採寸できない環境では標準へ落ちる
+ */
+export function readColumnMinPx(fontPx: number): number {
+  if (!Number.isFinite(fontPx) || fontPx <= 0) return READ_COLUMN_MIN_PX;
+  return (READ_COLUMN_MIN_PX / READ_COLUMN_BASE_FONT_PX) * fontPx;
+}
 
 /** 段と段のすき間(px)。⚠ `--s5`(1rem = 16px)と同じ。 */
 export const READ_COLUMN_GAP_PX = 16;
@@ -86,15 +125,20 @@ export const READ_COLUMN_GAP_PX = 16;
  *   いきなり**横スクロールで 1 段ずつめくる**画面になる。それは「畳む」ではない。
  * 🔑 だから**2 段置けないなら段組みごと止める**(= ふつうの縦送りに戻す)。
  *
+ * 🔴 **文字の大きさを必ず渡す**(#509)。⚠ 既定値を持たせない ── 渡し忘れても
+ *   tsc が黙る形にすると、**大きくしたのに畳む境目だけ標準のまま**という
+ *   いちばん気づけない壊れ方になる(CLAUDE.md「待ちの口は optional にしない」)。
+ *
  * @param paneWidth 本文の器の幅(px)
  * @param count 選ばれている段数
+ * @param fontPx 本文の器の `font-size`(px)
  */
-export function columnsFit(paneWidth: number, count: number): boolean {
+export function columnsFit(paneWidth: number, count: number, fontPx: number): boolean {
   if (count <= 1) return false;
   // ⚠ 判定は**常に 2 段ぶん**で行う ── 3 段を選んでいても、2 段置けるなら
   //   段組みは成り立つ(CSS が 2 段へ落とす)。3 段ぶんで判定すると、
   //   2 段で読めるはずの器が丸ごと縦送りへ落ちる
-  return paneWidth >= READ_COLUMN_MIN_PX * 2 + READ_COLUMN_GAP_PX;
+  return paneWidth >= readColumnMinPx(fontPx) * 2 + READ_COLUMN_GAP_PX;
 }
 
 export function isReadColumns(v: unknown): v is ReadColumns {

@@ -39,6 +39,10 @@ async function readGeom(page: Page): Promise<{
   on: boolean;
   columnCount: string;
   inlineH: string;
+  /** CSS が決めた段の下限(`column-width`)。⚠ #509 はここが動くかの話である。 */
+  columnWidth: string;
+  /** 本文の器の `font-size`(px)。⚠ 段の下限はこれに載る。 */
+  fontPx: number;
 }> {
   return page.evaluate(() => {
     const pane = document.querySelector('[data-pkc-view-pane="detail"]');
@@ -46,7 +50,10 @@ async function readGeom(page: Page): Promise<{
     const body = document.querySelector('[data-pkc-field="detail-body"]') as HTMLElement | null;
     // ⚠ **編集中は本文の器ごと居ない** ── 採寸できないことを 0 で表す(落とさない)
     if (body === null) {
-      return { cW: 0, sW: 0, cH: 0, sH: 0, lefts: 0, scrollLeft: 0, on, columnCount: '(無い)', inlineH: '' };
+      return {
+        cW: 0, sW: 0, cH: 0, sH: 0, lefts: 0, scrollLeft: 0, on,
+        columnCount: '(無い)', inlineH: '', columnWidth: '(無い)', fontPx: 0,
+      };
     }
     /**
      * 🔴 **見えている段だけ数える**(#505 で 1 度外した観測点)。
@@ -69,6 +76,8 @@ async function readGeom(page: Page): Promise<{
       on,
       columnCount: getComputedStyle(body).columnCount,
       inlineH: body.style.height,
+      columnWidth: getComputedStyle(body).columnWidth,
+      fontPx: Number.parseFloat(getComputedStyle(body).fontSize),
     };
   });
 }
@@ -96,6 +105,26 @@ async function setColumns(page: Page, value: string): Promise<void> {
       timeout: 10_000,
     })
     .toBe(value !== '1');
+}
+
+/**
+ * 文字の大きさを user と同じ手順で変える(設定画面 → 本文へ戻る)。
+ * ⚠ `setColumns` と同じ形にする(2 本目の作法を作らない)。
+ */
+async function setTextScale(page: Page, value: string): Promise<void> {
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  const select = page.locator('[data-pkc-field="text-scale-select"]');
+  await expectReachable(page, select);
+  await select.selectOption(value);
+  await page.locator('[data-pkc-region="filer-table"] tbody tr').first().click();
+  await expect(page.locator('[data-pkc-field="detail-body"]')).toBeVisible();
+  // ⚠ 当たったことを**画面から**確かめる(選んだ = 効いた、にしない)
+  await expect
+    .poll(async () => (await readGeom(page)).fontPx, {
+      message: `文字の大きさ(${value})が本文に届かない`,
+      timeout: 10_000,
+    })
+    .toBe(Number.parseFloat({ small: '12px', standard: '13px', large: '15px', xlarge: '17px' }[value] ?? '13px'));
 }
 
 async function writeNote(page: Page): Promise<void> {
@@ -275,6 +304,156 @@ test('🔴 狭い画面では自動で 1 段に戻り、編集に入ると段組
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await expect
     .poll(async () => (await readGeom(page)).on, { message: '戻っても段に戻らない', timeout: 5_000 })
+    .toBe(true);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+/**
+ * 🔴 **文字の大きさが段組みに載る**(#509。user 指示 2026-08-28)。
+ *
+ * > 「**ここにユーザーによるフォントサイズ変更やブラウザの拡大率変更などが載って
+ * > くれば、ユーザーは好みで見ることができるようになるはず**」
+ *
+ * 🔴 **unit では原理的に届かない** ── happy-dom は採寸しないので `column-width` も
+ *   `font-size` も読めない。ここでしか「CSS が本当にその幅にした」は見られない。
+ *
+ * ⚠ 直す前は段の下限が**固定 448px** だったので、文字を大きくしても段は狭いまま
+ *   だった(特大で **26 文字**。可読幅の下端 34 を大きく下回る)。
+ */
+test('🔴 文字を大きくすると段も広がり、狭い器では畳む (#509)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 2560, height: 900 });
+  await gotoApp(page);
+  await writeNote(page);
+  await setColumns(page, '2');
+
+  /**
+   * 🔑 **見るのは px ではなく「1 段に入る全角の字数」**。
+   * ⚠ px で pin すると、文字の大きさを 1 段階足しただけで落ちる検査になる ──
+   *   守りたいのは**字数が保たれること**である。
+   */
+  const std = await readGeom(page);
+  expect(std.on, '前提が崩れている(広い画面で段組みにならない)').toBe(true);
+  expect(std.fontPx, '既定の本文が 13px でない(前提が違う)').toBe(13);
+  const stdChars = Number.parseFloat(std.columnWidth) / std.fontPx;
+  // 空振り防止 ── `column-width` が `auto` なら NaN になる
+  expect(stdChars, '段の下限が読めない(auto のまま)').toBeGreaterThan(30);
+
+  await setTextScale(page, 'xlarge');
+  const big = await readGeom(page);
+  expect(big.on, '特大にしたら段組みが消えた(広い画面なのに)').toBe(true);
+  /**
+   * 🔴 **これが #509 の本題** ── 下限が px 固定なら、ここは
+   *   `448 / 17 = 26.4` に落ちる。⚠ 対照群は上の標準(約 34.5)である。
+   */
+  expect(
+    Number.parseFloat(big.columnWidth) / big.fontPx,
+    '文字を大きくしたのに、1 段に入る字数が減った(下限が px 固定のまま)',
+  ).toBeCloseTo(stdChars, 1);
+
+  /**
+   * 🔴 **畳む境目も一緒に動く**。⚠ ここが動かないと、**標準なら 2 段になる幅**で
+   *   段 1 本しか置けず、**横スクロールで 1 段ずつめくる**画面になる
+   *   (#505 が潰したはずの症状が、文字を大きくした user にだけ戻る)。
+   * 🔑 器 ≒ 912px = 標準のちょうど境目(実測 2026-08-28)。
+   */
+  await page.setViewportSize({ width: 1424, height: 900 });
+  await expect
+    .poll(async () => (await readGeom(page)).on, {
+      message: '特大なのに、標準の境目の幅で段組みを続けている',
+      timeout: 5_000,
+    })
+    .toBe(false);
+  const folded = await readGeom(page);
+  expect(folded.sW, '畳んだのに横送りが残っている').toBeLessThanOrEqual(folded.cW + 1);
+
+  /**
+   * ⚠ **対照群 / 片道でないこと** ── 同じ幅のまま標準へ戻せば、段組みは戻る。
+   *   これが無いと「特大では常に畳む」だけの検査になり、境目を見ていない。
+   */
+  await setTextScale(page, 'standard');
+  await expect
+    .poll(async () => (await readGeom(page)).on, {
+      message: '標準へ戻したのに段組みが戻らない(片道になっている)',
+      timeout: 5_000,
+    })
+    .toBe(true);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+/**
+ * 🔴 **面を出入りせずに設定を変えても、段組みの判定が古びない**(#509)。
+ *
+ * ⚠ **これは user の手順ではない**(いまは設定画面を経由するしかない)。
+ *   ここで直に属性を書くのは、`applyTextScale` / `applyReadColumns` が当てるのと
+ *   **同じ形**である(2 本目の当て先を作っていない)。
+ * 🔑 **設定画面を経由してはいけない** ── 戻るときに面が出入りして
+ *   `ResizeObserver` が**偶然**測り直すので、配線を外しても緑になる
+ *   (1 稿目はそう書いていて、変異試験 M5 / M6 が **2 件とも SURVIVED** で教えた)。
+ *
+ * 🔑 **何をどこまで守っているか**(計装して数えた。2026-08-28):
+ *   - **段数**(`data-pkc-read-columns`)── 根の属性の見張りを外すと、
+ *     選んだ瞬間に**印がそもそも付かない**(`RO` も `inner` も鳴らない)。
+ *     ✅ ここは殺せる
+ *   - ⚠ **文字の大きさ** ── 見張りから外しても、**いまは `RO` が拾う**
+ *     (面の高さが中身に追随しているため。段組み中は `flex: 1 1 0` で
+ *     追随しない**はず**なので、これは設計が効き切っていない偶然である)。
+ *     🔴 **この test はその 1 行を殺せない** ── だから「配線を守っている」とは
+ *     書かない。守っているのは**結果**(畳む / 戻る)である
+ */
+test('🔴 面を出入りせずに設定を変えても、段組みが古びない (#509)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  // 🔑 器 ≒ 912px = 標準のちょうど境目(実測 2026-08-28)
+  await page.setViewportSize({ width: 1424, height: 900 });
+  await gotoApp(page);
+  await writeNote(page);
+
+  /** ⚠ `applyReadColumns` / `applyTextScale` と同じ形(属性 + CSS 変数)。 */
+  const put = async (attr: string, value: string, cssVar: string, cssValue: string) => {
+    await page.evaluate(
+      ([a, v, k, cv]) => {
+        document.documentElement.setAttribute(a!, v!);
+        document.documentElement.style.setProperty(k!, cv!);
+      },
+      [attr, value, cssVar, cssValue],
+    );
+  };
+
+  // ⚠ **空振り防止 / 対照群** ── 選ぶ前は 1 段(縦送り)である
+  expect((await readGeom(page)).on, '選んでいないのに段組みの印が付いている').toBe(false);
+
+  // 🔴 段数を「面を出入りせずに」選ぶ ── 見張りが無ければ、ここで印が付かない
+  await put('data-pkc-read-columns', '2', '--pkc-read-cols', '2');
+  await expect
+    .poll(async () => (await readGeom(page)).on, {
+      message: '段数を選んでも、面を出入りするまで効かない(入力の見張りが無い)',
+      timeout: 5_000,
+    })
+    .toBe(true);
+
+  /**
+   * ⚠ **対照群** ── 同じ大きさを書き直しても畳まないこと。
+   *   これが無いと「属性を書けば必ず畳む」だけの検査になり、境目を見ていない。
+   */
+  await put('data-pkc-text-scale', 'standard', '--pkc-text-size', '13px');
+  await page.waitForTimeout(300);
+  expect((await readGeom(page)).on, '同じ大きさを書き直しただけで畳んだ').toBe(true);
+
+  await put('data-pkc-text-scale', 'xlarge', '--pkc-text-size', '17px');
+  await expect
+    .poll(async () => (await readGeom(page)).on, {
+      message: '面を出入りしていないと、文字を大きくしても測り直さない',
+      timeout: 5_000,
+    })
+    .toBe(false);
+
+  // ⚠ 片道でないこと ── 戻せば段組みも戻る
+  await put('data-pkc-text-scale', 'standard', '--pkc-text-size', '13px');
+  await expect
+    .poll(async () => (await readGeom(page)).on, {
+      message: '戻したのに段組みが戻らない',
+      timeout: 5_000,
+    })
     .toBe(true);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);

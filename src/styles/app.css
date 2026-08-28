@@ -945,7 +945,32 @@ select:focus-visible {
    * 🔑 だから `flex: 0 0 auto` で flex を降ろし、**高さの出どころを 1 つ**にする。
    */
   flex: 0 0 auto;
-  columns: 448px var(--pkc-read-cols, 1);
+  /**
+   * 🔴 **段の下限は「全角 約 34 文字」であって px ではない**(#509。user 指示
+   * 2026-08-28「ここにユーザーによるフォントサイズ変更やブラウザの拡大率変更などが
+   * 載ってくれば、ユーザーは好みで見ることができるようになるはず」)。
+   *
+   * ⚠ 固定 448px だったので、**文字だけ大きくしても段は狭いまま**だった ──
+   *   同じ 448px に入る字数が減り、特大(17px)では **26 文字**(可読幅 35〜50 の
+   *   下端 34 を大きく下回る)。「大きくして読みやすくした」つもりが逆に働く。
+   *
+   * 🔑 `1em` は**この器の `font-size`** = `body` の `font-size`
+   *   (= `--pkc-text-size`)である。実測(2026-08-28、実ブラウザ 4 段階)で
+   *   `[data-pkc-field='detail-body']` の `font-size` と `1em` は
+   *   **12 / 13 / 15 / 17 とぴったり一致**した ── 器の中でも正しく解決する。
+   * ⚠ `rem` ではない ── `html` は動かさない設計(`text-scale.ts`)なので、
+   *   `rem` にすると**文字の大きさが 1 ドットも載らない**(16px のまま)。
+   *
+   * ⚠ **448 と 13 は `features/read-columns.ts` の定数**
+   *   (`READ_COLUMN_MIN_PX` / `READ_COLUMN_BASE_FONT_PX`)。
+   *   `tests/features/read-columns.test.ts` が突合する ── 片方だけ動かさない。
+   * 🔑 標準(13px)では `calc(1em * 448 / 13)` = **448px** ちょうどなので、
+   *   選ばない user の見え方は 1 バイトも変わらない。
+   *
+   * ⚠ すき間は**大きさに載せない** ── これは字ではなく間隔で、`--s5`(1rem)と
+   *   同じ 16px である(`rem` はこの設計では動かない)。
+   */
+  columns: calc(1em * 448 / 13) var(--pkc-read-cols, 1);
   column-gap: 16px;
   column-rule: 1px solid var(--border);
   overflow-x: auto;

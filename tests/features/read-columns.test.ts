@@ -20,11 +20,14 @@ import {
   isReadColumns,
   READ_COLUMN_CHOICES,
   columnsFit,
+  READ_COLUMN_BASE_FONT_PX,
   READ_COLUMN_GAP_PX,
   READ_COLUMN_MIN_PX,
+  readColumnMinPx,
   readColumnsSpec,
   wheelToInline,
 } from '../../src/features/read-columns';
+import { TEXT_SCALES } from '../../src/features/text-scale';
 import {
   applyReadColumns,
   chooseReadColumns,
@@ -152,9 +155,17 @@ describe('CSS(2 本で 1 組)', () => {
     const m = /\[data-pkc-field='detail-body'\]\s*\{([^}]*)\}/.exec(codeOnly());
     expect(m, '段組みの規則を読めない(空振り)').not.toBeNull();
     const rule = m![1]!;
-    const cols = /columns:\s*([^\s]+)\s+var\(--pkc-read-cols,\s*([^)]+)\);/.exec(rule);
+    const cols = /columns:\s*(.+?)\s+var\(--pkc-read-cols,\s*([^)]+)\);/.exec(rule);
     expect(cols, 'columns が「最小幅 + 段数の変数」の形になっていない').not.toBeNull();
-    expect(cols![1]!.trim(), '最小幅が TS の定数とずれている').toBe(`${READ_COLUMN_MIN_PX}px`);
+    /**
+     * 🔴 **下限は px ではなく `em` で書いてある**(#509)── 文字を大きくすると
+     *   段も広がる。⚠ ここを `448px` に戻すと、**特大で 26 文字しか入らない**段が
+     *   できる(可読幅の下端 34 を大きく下回る)。
+     * ⚠ 2 つの数字は**どちらも TS の定数**である ── 片方だけ動かさない。
+     */
+    expect(cols![1]!.trim(), '最小幅が TS の定数とずれている').toBe(
+      `calc(1em * ${READ_COLUMN_MIN_PX} / ${READ_COLUMN_BASE_FONT_PX})`,
+    );
     // ⚠ 予備は 1(= 段組みしない)── JS が動かない回に段へ流れないこと
     expect(cols![2]!.trim(), '段数の予備は 1 であるべき').toBe('1');
     const gap = /column-gap:\s*([^;]+);/.exec(rule);
@@ -190,8 +201,10 @@ describe('CSS(2 本で 1 組)', () => {
 describe('器に収まるか', () => {
   it('🔴 2 段ぶん置けない器では成り立たない(縦送りへ戻す)', () => {
     const need = READ_COLUMN_MIN_PX * 2 + READ_COLUMN_GAP_PX;
-    expect(columnsFit(need, 2), '足りているのに止めた').toBe(true);
-    expect(columnsFit(need - 1, 2), '足りないのに段組みを続けた').toBe(false);
+    expect(columnsFit(need, 2, READ_COLUMN_BASE_FONT_PX), '足りているのに止めた').toBe(true);
+    expect(columnsFit(need - 1, 2, READ_COLUMN_BASE_FONT_PX), '足りないのに段組みを続けた').toBe(
+      false,
+    );
   });
 
   /**
@@ -200,13 +213,73 @@ describe('器に収まるか', () => {
    */
   it('🔴 3 段を選んでいても、2 段置ければ成り立つ', () => {
     const two = READ_COLUMN_MIN_PX * 2 + READ_COLUMN_GAP_PX;
-    expect(columnsFit(two, 3), '2 段置けるのに止めた').toBe(true);
-    expect(columnsFit(two, 4)).toBe(true);
+    expect(columnsFit(two, 3, READ_COLUMN_BASE_FONT_PX), '2 段置けるのに止めた').toBe(true);
+    expect(columnsFit(two, 4, READ_COLUMN_BASE_FONT_PX)).toBe(true);
   });
 
   it('1 段のときは、どれだけ広くても段組みではない', () => {
-    expect(columnsFit(99_999, 1)).toBe(false);
-    expect(columnsFit(99_999, 0)).toBe(false);
+    expect(columnsFit(99_999, 1, READ_COLUMN_BASE_FONT_PX)).toBe(false);
+    expect(columnsFit(99_999, 0, READ_COLUMN_BASE_FONT_PX)).toBe(false);
+  });
+});
+
+/**
+ * 🔴 **文字の大きさが、段の下限に載っている**(#509。user 指示 2026-08-28
+ * 「ここにユーザーによるフォントサイズ変更やブラウザの拡大率変更などが載って
+ * くれば、ユーザーは好みで見ることができるようになるはず」)。
+ *
+ * ⚠ 直す前は `READ_COLUMN_MIN_PX` が**固定 448px** だったので、文字を大きくしても
+ *   段は狭いままだった ── 同じ 448px に入る字数が減り、特大(17px)では
+ *   **26 文字**(可読幅 35〜50 の下端 34 を大きく下回る)。
+ * 🔑 「大きくして読みやすくした」つもりが**読みにくくなる**向きの壊れ方である。
+ */
+describe('文字の大きさが段の下限に載る', () => {
+  /** `features/text-scale.ts` の 4 段階。⚠ 表を写さずそこから引く。 */
+  function sizes(): number[] {
+    return TEXT_SCALES.map((s) => Number.parseFloat(s.size));
+  }
+
+  it('🔴 標準では、これまでと 1 バイトも変わらない(既定の見え方を動かさない)', () => {
+    expect(readColumnMinPx(READ_COLUMN_BASE_FONT_PX)).toBe(READ_COLUMN_MIN_PX);
+  });
+
+  /**
+   * 🔴 **これが本題** ── どの大きさでも「全角 約 34 文字」が保たれる。
+   * ⚠ 対照群として**下限を固定 px にした場合**も並べる ── 並べないと
+   *   「載っている」と「たまたま近い」を見分けられない。
+   */
+  it('🔴 どの大きさでも、1 段に入る全角の字数が変わらない', () => {
+    const chars = sizes().map((px) => readColumnMinPx(px) / px);
+    // 空振り防止 ── 4 段階を実際に見ている
+    expect(chars.length, '文字の大きさの表が空').toBe(4);
+    for (const c of chars) expect(c).toBeCloseTo(READ_COLUMN_MIN_PX / READ_COLUMN_BASE_FONT_PX, 6);
+    // 🔴 対照群:固定 px だと**大きくするほど字数が減る**(これが #509 の症状)
+    const fixed = sizes().map((px) => READ_COLUMN_MIN_PX / px);
+    expect(fixed[0]!, '対照群が動いていない(この test が何も見ていない)').toBeGreaterThan(
+      fixed[3]!,
+    );
+    expect(fixed[3]!, '特大で 34 文字を下回らない ── 症状が再現していない').toBeLessThan(34);
+  });
+
+  /**
+   * 🔴 **畳む境目も一緒に動く**(ここが動かないと、CSS と JS が食い違う)。
+   * ⚠ 特大で 912px(標準の境目)の器は、**畳まなければならない** ──
+   *   586px の段は 1 本しか置けないので、続けると**横送りだけが残る**。
+   */
+  it('🔴 大きくすると、畳む境目も広がる', () => {
+    const std = READ_COLUMN_MIN_PX * 2 + READ_COLUMN_GAP_PX;
+    const big = Number.parseFloat(TEXT_SCALES[3]!.size);
+    expect(columnsFit(std, 2, READ_COLUMN_BASE_FONT_PX), '標準では成り立つはず').toBe(true);
+    expect(columnsFit(std, 2, big), '特大なのに標準の境目で段組みを続けた').toBe(false);
+    // 対照群 ── 広げれば特大でも成り立つ(「常に false」で通していない)
+    const need = readColumnMinPx(big) * 2 + READ_COLUMN_GAP_PX;
+    expect(columnsFit(need, 2, big), '足りているのに止めた').toBe(true);
+  });
+
+  it('採寸できない値は標準へ落ちる(0 幅の段を作らない)', () => {
+    for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(readColumnMinPx(bad), `${bad} で下限が壊れた`).toBe(READ_COLUMN_MIN_PX);
+    }
   });
 });
 
