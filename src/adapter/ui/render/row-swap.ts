@@ -40,6 +40,11 @@ import {
 } from '@features/markdown/source-ranges';
 import { findOpenEnds, scanContainers } from '@features/markdown/source-blocks';
 import { autoPairFor } from '@features/markdown/text-ops';
+import {
+  NO_BOUNDARY_STEP,
+  stepAtBoundary,
+  type BoundaryStep,
+} from '@features/boundary-step';
 // ⚠ 継ぎ足しの規則は **1 本**(`detail.ts` の commit と同じ関数を使う)
 import { spliceLines } from '@features/markdown/edit-journal';
 import { appKeymap, type KeymapStore } from './keymap';
@@ -225,6 +230,13 @@ export class RowSwap {
   private starts: readonly number[] = [];
   private ends: readonly number[] = [];
   private active: Active | null = null;
+  /**
+   * 🔴 **境界で同じ向きに 2 回**(#524)の数え(規則は
+   * `features/boundary-step.ts`。ここは数えを持つだけ)。
+   * ⚠ 別のことをしたら捨てる ── 向きが変わる / 端から離れる / 別のキー / 打鍵 /
+   *   開き直し。⚠ **時間では切らない**(ゆっくり押す人が移動できなくなる)。
+   */
+  private boundaryStep: BoundaryStep = NO_BOUNDARY_STEP;
   /**
    * 🔴 **確定を外へ渡して、その結果の描き直しをまだ受けていない**。
    *
@@ -492,7 +504,8 @@ export class RowSwap {
    * 1 稿目は `if (!mod) return;` と書いて**素のクリックで一切開かない**ようにした。
    * ⚠ ところがこの面は**「編集」を押した後の面**であり、そこで塊を開く口を
    *   数え上げると **`Ctrl` を使わない道が 1 本も残らなかった**:
-   *   `Alt+↓` は `contexts: ['row']` = **既に行が開いているときだけ**、
+   *   塊の移動(いまは端で ↑↓ を 2 回。当時は `Alt+↓`)は
+   *   **既に行が開いているときだけ**、
    *   「全文を編集」は**文書ごと生の markdown**、余白は**末尾に新しい行**。
    * 🔴 user 指示 2026-08-03「**マウスだけで完結し、キーボードは近道**」に対して、
    *   鍵が**近道ではなく唯一路**になっていた。
@@ -1021,6 +1034,8 @@ export class RowSwap {
      * **属性だけ**(高さと色)なので、封印中に呼ばれても composition は壊れない。
      */
     ta.addEventListener('input', () => {
+      // ⚠ 打ったら数え直す ── 字を入れてから ↑ 1 回で飛ぶのは事故である
+      this.boundaryStep = NO_BOUNDARY_STEP;
       this.syncActiveBox();
     });
     ta.addEventListener('keydown', (ev) => {
@@ -1046,10 +1061,24 @@ export class RowSwap {
        * 撃たない(それは編集の面ごと閉じる別の操作である)。
        * 🔑 いまは `row-commit` の別名として **1 か所(keymap の表)**に在る。
        */
-      if (cmd === 'row-next' || cmd === 'row-prev') {
-        this.arrowMove(ev as KeyboardEvent, cmd === 'row-next');
+      /**
+       * 🔴 **素の ↑ / ↓ を境界で 2 回**(#524。user 指示 2026-08-28)。
+       *
+       * ⚠ **押す前には端に居るか分からない**(折り返しが在るので、論理行では
+       *   数えられない ── 長い 1 段落は視覚的に何行にもなる)。
+       * 🔑 だから**既定に任せてから見る**:`↑` を押した後 caret がちょうど
+       *   `0` に居れば「端の行から押した」、`↓` の後ちょうど末尾なら「最終行から
+       *   押した」である ── どちらもブラウザ既定の振る舞いで、測らずに分かる。
+       * ⚠ 既定を止めない(`preventDefault` しない)ので、1 回目は**ふつうに
+       *   端へ動くだけ**である。移るのは 2 回目。
+       */
+      const dir = ke.key === 'ArrowUp' ? 'up' : ke.key === 'ArrowDown' ? 'down' : null;
+      if (dir !== null && !ke.altKey && !ke.ctrlKey && !ke.metaKey && !ke.shiftKey) {
+        this.scheduleBoundaryStep(dir);
         return;
       }
+      // ⚠ ↑↓ 以外を打ったら数え直す(§「別のことをしたら捨てる」)
+      this.boundaryStep = NO_BOUNDARY_STEP;
       this.autoPair(ke);
     });
     /**
@@ -1112,26 +1141,63 @@ export class RowSwap {
   }
 
   /**
-   * 🔴 **Alt+カーソルキーで隣の塊へ**(2026-08-15。user 指示「上下方向キー押下で
-   * 次のブロックに飛んでしまうため、Alt+方向キーのように操作の暴発を防ぐ動線が欲しい」)。
+   * 🔴 **隣の塊を開く**(#524。user 指示 2026-08-28「**Alt+上下でのテキストボックス
+   * 移動を廃止、代わりに…境界では 2 回同じ方向の上下どちらかのカーソルを押すことで
+   * 次のテキストボックスに移動する**」)。
    *
-   * ⚠ **2026-08-08 の「カーソルキーで下に行く」を、user の再裁定で置き換えた。**
-   * 旧実装は「改行が無い側に居るか」で端を判定していたが、原文は**折り返して**
-   * 表示されるので、長い 1 段落は**箱のどこに居ても端**だった ── 素の ↓ が
-   * 必ず隣へ飛ぶ(= user の言う暴発)。⚠ 高さを直しても**この判定は直らない**
-   * (視覚の端と改行の端が別物である以上、素のキーで両立できない)。
-   * 🔑 だから**修飾キーで意図を明示させる**:素の ↑↓ は箱の中だけを動き、
-   * `Alt+↑↓` が塊の移動になる ── 選択の戻る進む(`Alt+←→`)と同じ流儀に揃う。
+   * ## ⚠ この動線は 3 度書き直している ── 前 2 回の失敗が判定の形を決めた
    *
-   * ⚠ Alt が付いている以上、**箱の中の位置は問わない**(端に居なくても移る)。
-   * Shift / Ctrl / Meta との併せ押しは奪わない(選択の拡張・OS の割り当て)。
+   * | 版 | 端の判定 | 何が起きたか |
+   * |---|---|---|
+   * | 2026-08-08 | **改行の有無** | 🔴 折り返した長い 1 段落は**箱のどこに居ても端**なので、素の ↓ が必ず隣へ飛んだ(user 報告の暴発) |
+   * | 2026-08-15 | ─(`Alt` を要る形へ逃げた) | 暴発は止まったが、**鍵を覚えないと移れない** |
+   * | 2026-08-28(いま) | **既定の後の caret 位置** | 折り返しでも正しく端が分かる。暴発は**2 回という数**で防ぐ |
+   *
+   * 🔑 **判定を変えたから、修飾キーが要らなくなった** ── ブラウザ既定は `↑` を
+   * 端の行で押すと caret を `0` へ、`↓` を最終行で押すと末尾へ動かす。
+   * だから**既定に任せてから caret を見れば**、折り返しがあっても端が分かる
+   * (改行では分からなかった)。数え方は `features/boundary-step.ts`、
+   * 見る所は `scheduleBoundaryStep`。
+   *
+   * ⚠ Shift / Ctrl / Meta / Alt との併せ押しは奪わない(選択の拡張・OS の割り当て)。
    * 確定してから隣の**編集できる塊**(導出物 = `starts < 0` は飛ばす)を開く:
    * ↓ は次の塊の先頭へ、↑ は前の塊の末尾へ。末尾の塊で ↓ は末尾に書き足す
    * (余白クリックと同じ意味論 = `appendRow`)。
    * ⚠ 行数が変わる確定の座標ずれは `activate` / `appendRow` の予約が持つ ──
    * ここに 2 本目の座標計算を書かない。
    */
-  private arrowMove(ke: KeyboardEvent, down: boolean): void {
+  /**
+   * 🔴 **既定が動いた後で「端に居たか」を見て数える**(#524)。
+   *
+   * ⚠ `keydown` の時点では分からない ── 折り返しが在るので、論理行では
+   *   端かどうか判定できない(長い 1 段落は視覚的に何行にもなる)。
+   * 🔑 ブラウザ既定は **`↑` を端の行で押すと caret を先頭(`0`)へ**、
+   *   **`↓` を最終行で押すと末尾へ**動かす ── だから既定の後の caret 位置が
+   *   そのまま「端の行から押したか」の答えになる。**測らずに分かる**。
+   * ⚠ `keyup` では見ない ── **押しっぱなしの自動連打では `keyup` が来ない**。
+   * ⚠ 読むときに**同じ入力欄がまだ活性か**を確かめる(この 1 tick の間に
+   *   確定・開き直しが起きうる ── 別の欄で数えを進めない)。
+   */
+  private scheduleBoundaryStep(dir: 'up' | 'down'): void {
+    const a = this.active;
+    if (a === null) return;
+    const ta = a.textarea;
+    setTimeout(() => {
+      if (this.active === null || this.active.textarea !== ta) return;
+      // ⚠ 選んでいる最中は数えない(Shift 無しでも drag 中はありうる)
+      if (ta.selectionStart !== ta.selectionEnd) {
+        this.boundaryStep = NO_BOUNDARY_STEP;
+        return;
+      }
+      const atBoundary =
+        dir === 'up' ? ta.selectionStart === 0 : ta.selectionStart === ta.value.length;
+      const r = stepAtBoundary(this.boundaryStep, dir, atBoundary);
+      this.boundaryStep = r.state;
+      if (r.move) this.moveToAdjacentBlock(dir === 'down');
+    }, 0);
+  }
+
+  private moveToAdjacentBlock(down: boolean): void {
     const a = this.active;
     if (a === null) return;
     const ta = a.textarea;
@@ -1155,7 +1221,8 @@ export class RowSwap {
     if (!down && next === null) return;
     // 何も打っていない書き足し行(範囲が空)で ↓ ── 開き直しても同じ行なので何もしない
     if (down && next === null && a.endLine < a.startLine && ta.value === a.source) return;
-    ke.preventDefault();
+    // ⚠ `preventDefault` は要らない ── 既定はもう走り終わっている(そして
+    //    端に居たので何も動かしていない)
     if (next === null) this.appendRow();
     else this.activateLine(next, down ? 'start' : 'end');
   }
