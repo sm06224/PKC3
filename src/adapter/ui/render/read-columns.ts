@@ -101,18 +101,42 @@ export function chooseReadColumns(target: HTMLElement, cols: ReadColumns): void 
   }
 }
 
-/** 段組みの本文が入る器(横送りの持ち主)。⚠ 読む面のものだけ。 */
+/**
+ * 段組みの本文が入る器(横送りの持ち主)。
+ *
+ * 🔴 **編集中も対象にする**(#523。user 指示 2026-08-28
+ * 「**段組のままでインライン編集がしたい**」)。
+ *
+ * ⚠ 直す前は `detail-mode="view"` だけを見ていた ── 編集へ入った瞬間に
+ *   印も段の高さも付かなくなるので、**段組みが丸ごとほどけた**。
+ *   ⚠ その判断はこちら側が下したもので(「user の字が『閲覧時に』だから」)、
+ *   今回の要望と正面から食い違っていた。
+ *
+ * 🔑 **1 面(live)だけが対象になるのは、この選択子の副作用ではなく構造である** ──
+ *   live は本文の中の塊 1 つを `<textarea>` に差し替えるので器が
+ *   `editor-live` 1 枚で済むが、2 ペインは `editor-split` を組んで
+ *   **全文 1 枚の `<textarea>`** を置くため、ここに 1 つも当たらない
+ *   (当たらなければ下の `off()` へ落ちて、これまでどおり段組みは切れる)。
+ * ⚠ だから 2 ペインを名指しで除外する条件は**書かない** ── 書くと
+ *   「同じ判定が 2 か所」になる(CLAUDE.md §7)。
+ */
 export function columnScroller(root: ParentNode): HTMLElement | null {
   return root.querySelector<HTMLElement>(
-    '[data-pkc-detail-mode="view"] [data-pkc-field="detail-body"]',
+    '[data-pkc-detail-mode="view"] [data-pkc-field="detail-body"],' +
+      '[data-pkc-detail-mode="editor"] [data-pkc-region="editor-live"]',
   );
 }
 
 /**
- * 読む面の器(段組みの親)。⚠ 読む面のものだけ。
+ * 段組みの親(器)。
+ * ⚠ 編集中も返す ── 実際に段組みにするかは、上の `columnScroller` が
+ *   本文の器を見つけられたかで決まる(2 ペインは見つからない)。
  */
 function viewPane(root: ParentNode): HTMLElement | null {
-  return root.querySelector<HTMLElement>('[data-pkc-view-pane="detail"][data-pkc-detail-mode="view"]');
+  return root.querySelector<HTMLElement>(
+    '[data-pkc-view-pane="detail"][data-pkc-detail-mode="view"],' +
+      '[data-pkc-view-pane="detail"][data-pkc-detail-mode="editor"]',
+  );
 }
 
 /**
@@ -403,6 +427,27 @@ export function installColumnWheel(root: HTMLElement, doc: Document = document):
     // ⚠ その器の中で起きたホイールだけ(右の情報ペインの送りを奪わない)
     const t = ev.target;
     if (!(t instanceof Node) || !host.contains(t)) return;
+    /**
+     * 🔴 **自分で縦に送れる物の上では、奪わない**(#523。2026-08-28)。
+     *
+     * ⚠ 編集中も段組みのままにした結果、**編集の箱がこの器の中に入った**。
+     *   箱は段の高さで頭打ちになり、超えた分は**箱の中で送る**形なのに、
+     *   ここが無条件に横送りへ読み替えると **箱の中を送る手段が消える** ──
+     *   打った字が箱の中で見えないまま、マウスでは届かない。
+     * ⚠ これは #527(図が段からはみ出して届かない)と**同じ形の穴**である
+     *   ── 直した当人が、隣に 1 つ作りかけていた。
+     * 🔑 判定は「**その物がまだその向きへ送れるか**」1 つ ── 送り切っていれば
+     *   これまでどおり横へ流す(端で止まって外側が動かなくなる形を作らない)。
+     * ⚠ `row-source` を名指ししない ── 名指しすると、器の中に別の
+     *   送れる物(将来の面)が入ったとき同じ穴が戻る。
+     */
+    for (let n: Node | null = t; n !== null && n !== host; n = n.parentNode) {
+      if (!(n instanceof HTMLElement)) continue;
+      const room = n.scrollHeight - n.clientHeight;
+      if (room <= 0) continue;
+      const down = ev.deltaY > 0;
+      if ((down && n.scrollTop < room) || (!down && n.scrollTop > 0)) return;
+    }
     // ⚠ **送り切っていたら既定に返す** ── 端で止めると、外側の面が送れなくなる
     const dx = wheelToInline(ev.deltaX, ev.deltaY);
     if (dx === 0) return;

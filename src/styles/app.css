@@ -965,7 +965,13 @@ select:focus-visible {
   flex: 1 1 0;
   min-height: 0;
 }
-[data-pkc-view-pane='detail'][data-pkc-columns-on] [data-pkc-field='detail-body'] {
+/* 🔴 **編集中(1 面)も段組みのまま**(#523。user 指示 2026-08-28
+ * 「段組のままでインライン編集がしたい」)。⚠ 器は `editor-live` で、
+ * 読む面の `detail-body` とは**別の要素**である ── だから選択子を足す。
+ * 🔑 2 ペインは `editor-split` を組むのでここに 1 つも当たらない
+ *   (= これまでどおり段組みは切れる)。名指しの除外は書かない。 */
+[data-pkc-view-pane='detail'][data-pkc-columns-on] [data-pkc-field='detail-body'],
+[data-pkc-view-pane='detail'][data-pkc-columns-on] [data-pkc-region='editor-live'] {
   /**
    * 🔴 **高さは JS が px で入れる**(`read-columns.ts` の `fitColumnHeight`)。
    *
@@ -1193,6 +1199,23 @@ select:focus-visible {
  *   (`detail.ts:562`)── 子孫として書くと**1 つも当たらない**。1 稿目で踏んだ:
  *   図(`[data-pkc-mermaid-src] img`)だけ効いて、本文に貼った写真は素通りしていた。
  *   🔑 器そのものを起点にする。 */
+/**
+ * 🔴 **編集の箱も段の高さで頭打ちにする**(#523)。
+ *
+ * ⚠ 実測(2026-08-28、器 600px / 3 段。箱を `rows` で伸ばす):
+ *   `rows=32`(高さ 713px)で **段の下へ 121px はみ出した**。
+ *   縦ホイールは横送りに読み替えられ `overflow-y: hidden` なので、
+ *   **はみ出した分に届く手段が 1 つも無い** ── つまり
+ *   **自分が打った字が見えなくなる**(#527 の図と同じ穴。こちらのほうが重い)。
+ * 🔑 だから #527 と**同じ規則**を使い回す ── 段の高さ(`--pkc-col-h`)を超えたら
+ *   **箱の中で送る**。箱は既に上限(`ROWS_CAP`)で同じ形を持っているので、
+ *   上限の決め方が 1 つ増えるだけである。
+ * ⚠ 予備の値を書かない `var()` は**宣言ごと捨てられる**ので必ず書く。
+ */
+[data-pkc-view-pane='detail'][data-pkc-columns-on] [data-pkc-field='row-source'] {
+  max-height: calc(var(--pkc-col-h, 100vh) - 16px);
+  overflow-y: auto;
+}
 [data-pkc-view-pane='detail'][data-pkc-columns-on] [data-pkc-field='detail-body'] img {
   max-height: calc(var(--pkc-col-h, 100vh) - 30px);
   /* ⚠ 高さを縮めたら幅も比で縮める(潰れた絵にしない) */
