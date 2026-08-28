@@ -2206,9 +2206,11 @@ li[data-pkc-row-slot] {
 .pkc-board-host {
   position: relative;
 }
+/* 付箋の見た目 ── ⚠ ここは**位置を持たない**。この選択子は編集の 2 面と
+ * 書き出した閲覧用 HTML にも当たるため、絶対配置をここに書くと、位置を当てる
+ * `place-board.ts` が居ない面で**付箋が左上に積み重なる**(レビュー実測
+ * 2026-08-28)。位置を当てられない面では、普通の枠として上から順に流れる。 */
 .pkc-md-rendered .pkc-format-block.pkc-place {
-  position: absolute;
-  margin: 0;
   box-sizing: border-box;
   min-width: 120px;
   min-height: 40px;
@@ -2216,6 +2218,14 @@ li[data-pkc-row-slot] {
   border: 1px solid var(--border);
   background: var(--surface);
   overflow: auto;
+}
+/* 位置 ── `place-board.ts` が印(`pkc-board-host`)を付けた面(読む面)だけ。
+ * ⚠ `max-width: none` ── 板の上では w= がそのまま効く(散文の読み幅
+ * `--read-w` = 672px の上限で黙って頭打ちにしない。UX レビュー所見 6)。 */
+.pkc-board-host .pkc-format-block.pkc-place {
+  position: absolute;
+  margin: 0;
+  max-width: none;
 }
 /* 掴む口 ── 印は CSS で出す(字を textContent に入れると写しが汚れる) */
 .pkc-place > [data-pkc-field='place-grip'] {

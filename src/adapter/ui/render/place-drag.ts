@@ -40,6 +40,9 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
   const onPointerDown = (e: PointerEvent): void => {
     swallowClick = false;
     if (e.button !== 0) return;
+    // ⚠ 2 本目の指では掴み直さない ── 前の掴みを restore せず捨てると、
+    //   1 枚目が動かした見た目のまま置き去りになる(レビュー 2026-08-28)
+    if (drag !== null) return;
     const grip = (e.target as Element | null)?.closest<HTMLElement>(
       '[data-pkc-field="place-grip"]',
     );
@@ -85,15 +88,23 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     swallowClick = true;
     const x = Math.max(0, Math.round(d.startX + (e.clientX - d.startClientX)));
     const y = Math.max(0, Math.round(d.startY + (e.clientY - d.startClientY)));
-    const ordinalRaw = d.block.getAttribute('data-pkc-place-ordinal');
-    const ordinal = Number(ordinalRaw);
-    const lid = dispatcher.getState().openBody?.lid ?? null;
-    if (ordinalRaw === null || !Number.isInteger(ordinal) || lid === null) {
-      // ⚠ 書けないなら見た目も戻す ── 画面と本文を食い違わせない
+    // 🔑 取りやめ(元の位置へ戻して離す)は**何も書かず、何も言わない** ──
+    //   dispatch すると「値が変わらない」が下流で競合の顔をする(UX レビュー所見 2)
+    if (x === d.startX && y === d.startY) {
       restore(d);
       return;
     }
-    dispatcher.dispatch({ type: 'MOVE_PLACE', lid, ordinal, x, y });
+    const lineRaw = d.block.getAttribute('data-pkc-place-line');
+    const line = Number(lineRaw);
+    const lid = dispatcher.getState().openBody?.lid ?? null;
+    /**
+     * ⚠ 見た目は**常に**いったん戻す ── 書けた場合は BODY_REWRITTEN の再描画が
+     * 正しい位置に置き直す。戻さないと、断られた drop(byte 不一致 / 行ずれ)で
+     * 画面と本文が次の無関係な再描画まで食い違う(レビュー所見 5)。
+     */
+    restore(d);
+    if (lineRaw === null || !Number.isInteger(line) || lid === null) return;
+    dispatcher.dispatch({ type: 'MOVE_PLACE', lid, line, x, y });
   };
 
   const onPointerCancel = (): void => {

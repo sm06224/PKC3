@@ -1048,7 +1048,7 @@ function navigateToLink(dispatcher: Dispatcher, raw: string | null): void {
     });
     return;
   }
-  if (!selectEntryOrExplain(dispatcher, t.lid, 'リンク先')) return;
+  if (!selectEntryOrExplain(dispatcher, t.lid, 'リンク先のノート')) return;
 }
 
 /**
@@ -1203,7 +1203,9 @@ function selectEntryOrExplain(dispatcher: Dispatcher, lid: string, what: string)
     return false;
   }
   if (!state.entryMetas.has(lid)) {
-    dispatcher.dispatch({ type: 'OP_FAILED', error: `${what}のノートが見つかりません` });
+    // ⚠ `${what}のノート` と書かない ── what='ノート' の呼び手で
+    //   「ノートのノートが見つかりません」になる(UX レビュー 2026-08-28)
+    dispatcher.dispatch({ type: 'OP_FAILED', error: `${what}が見つかりません` });
     return false;
   }
   dispatcher.dispatch({ type: 'SELECT_ENTRY', lid });

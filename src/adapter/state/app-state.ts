@@ -12,7 +12,7 @@ import { DEFAULT_ENTRY_SORT, NATURAL_DESC, type EntrySort } from '@features/filt
 import { resolveCanonicalParents, reorderSibling } from '@features/relation/tree';
 import { extractMeta, seedBodyFor } from '@features/flavor';
 import { applyBodyRewrite, type BodyRewrite } from '@features/markdown/body-rewrite';
-import { placeOpenLineAt } from '@features/markdown/place-notation';
+import { isPlaceOpen } from '@features/markdown/place-notation';
 import { replaceTaskCards, type TaskScan } from '@features/schedule/task-cards';
 import type { ContactScan } from '@features/contact/contact-card';
 import type { SnippetScan } from '@features/snippet/snippet-table';
@@ -865,11 +865,12 @@ export type UserAction =
    */
   | { type: 'SET_ENTRY_DATE'; lid: string; date: string | null }
   /**
-   * 🔴 **板の塊を動かす**(#283 P4-b)── いま開いているノートの `ordinal` 番目の
-   * `.pkc-place` 塊の x= / y= を書き換える。掴んだ時点の開き行は reducer が
+   * 🔴 **板の塊を動かす**(#283 P4-b)── いま開いているノートの `line` 行目
+   * (生の body の行番号 = 描画が焼いた `data-pkc-source-line` + frontmatter)の
+   * `.pkc-place` 開き行の x= / y= を書き換える。掴んだ時点の開き行は reducer が
    * `openBody` から捕える(呼び側に本文を持たせない)。
    */
-  | { type: 'MOVE_PLACE'; lid: string; ordinal: number; x: number; y: number }
+  | { type: 'MOVE_PLACE'; lid: string; line: number; x: number; y: number }
   /**
    * 🔴 **本文の 1 行の日付**(双方向。user 指示 2026-08-23)。
    * ⚠ `SET_ENTRY_DATE`(ノート 1 件が丸ごと予定)とは**単位が違う**。
@@ -2772,8 +2773,11 @@ function reduceCore(
       if (!state.openBody || state.openBody.lid !== action.lid) return { state, events: [] };
       if (!Number.isInteger(action.x) || !Number.isInteger(action.y)) return { state, events: [] };
       if (action.x < 0 || action.y < 0) return { state, events: [] };
-      const openLine = placeOpenLineAt(state.openBody.body, action.ordinal);
-      if (openLine === null) return { state, events: [] };
+      // 🔑 開き行は**この場で**捕捉する(描画が焼いた行番号 → 画面が見ている本文の字)。
+      //    disk 側とずれていれば movePlace が byte 一致で断る。
+      if (!Number.isInteger(action.line) || action.line < 0) return { state, events: [] };
+      const openLine = state.openBody.body.split('\n')[action.line];
+      if (openLine === undefined || !isPlaceOpen(openLine)) return { state, events: [] };
       return {
         state,
         events: [
@@ -2785,7 +2789,7 @@ function reduceCore(
             entryOrder: meta.entryOrder,
             rewrite: {
               kind: 'place-move',
-              ordinal: action.ordinal,
+              line: action.line,
               openLine,
               x: action.x,
               y: action.y,

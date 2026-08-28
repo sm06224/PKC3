@@ -664,7 +664,7 @@ export class DetailRenderer {
          * ⚠ 描画のたびに呼ぶ(冪等)── 塊が差し替わると掴む口と題名の札が
          *   消えるため(見出しの畳みと同じ理由)。
          */
-        applyPlaceLayout(host, (l) => state.entryMetas.get(l)?.title ?? null);
+        applyPlaceLayout(host, (l) => state.entryMetas.get(l)?.title ?? null, frontmatterLineCount(body));
         // ⚠ 帯は**本文が入ってから**組む(数えるものが DOM に無いと 0 件になる)
         this.renderExternalImageBar(lid, host);
         this.restoreScroll();

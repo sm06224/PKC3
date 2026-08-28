@@ -72,20 +72,26 @@ function ensureCard(
   const title = resolveTitle(lid);
   const shown = title ?? '(見つかりません)';
   if (btn.textContent !== shown) btn.textContent = shown;
+  // ⚠ いちばん多い原因(ID の貼り間違い)を先に言う ── 「消えた」から言うと、
+  //   user は消えていないノートを探しに行く(UX レビュー 2026-08-28)
   btn.title =
     title !== null
       ? '押すと、このノートを開きます'
-      : 'このノートが見つかりません(消されたか、題名が変わった後に lid が変わった形です)';
+      : 'ID が違うか、ノートが消されています。ID は entry: の後ろの英数字だけです(entry: や閉じ括弧は含めません)';
 }
 
 /**
  * 描画済みの本文に、板の配置を当てる。⚠ **描画のたびに呼ぶ**(冪等)。
  *
+ * @param lineOffset 描画の `data-pkc-source-line`(frontmatter を剥がした本文の
+ *   行番号)を**生の body の行番号**へ写す足し込み(= `frontmatterLineCount`。
+ *   `taskLineOffset` と同じ 1 つの値を detail が渡す)。
  * @returns 置いた塊の数(0 = 板ではない ── 器の印も外す)
  */
 export function applyPlaceLayout(
   host: HTMLElement,
   resolveTitle: (lid: string) => string | null,
+  lineOffset: number,
 ): number {
   const blocks = [...host.querySelectorAll<HTMLElement>(PLACE_SELECTOR)];
   if (blocks.length === 0) {
@@ -95,7 +101,7 @@ export function applyPlaceLayout(
   }
   host.classList.add('pkc-board-host');
   let bottom = 0;
-  blocks.forEach((el, i) => {
+  for (const el of blocks) {
     const x = intAttr(el, 'data-pkc-x') ?? 0;
     const y = intAttr(el, 'data-pkc-y') ?? 0;
     const w = intAttr(el, 'data-pkc-w');
@@ -110,15 +116,32 @@ export function applyPlaceLayout(
     if (z !== null) el.style.zIndex = String(z);
     else el.style.removeProperty('z-index');
     /**
-     * 🔑 **何番目の塊か**を焼く ── 掴んで離したとき、この番号で本文の開き行を指す
-     * (DOM の並び = 原文の並び。`place-notation.ts` の数え方と対)。
+     * 🔑 **開き行の行番号**(生の body 基準)を焼く ── 掴んで離したとき、
+     * この行番号で本文の開き行を指す。描画が焼いた `data-pkc-source-line` に
+     * frontmatter ぶんを足す(`data-pkc-task-line` と同じ座標系)。
+     * ⚠ 数え直しの第 2 の規則を持たない ── 初版の「N 番目」方式は、描画と
+     *   別に数えたせいで**掴んだ付箋と別の行に書いた**(レビュー実測 2026-08-28)。
      */
-    el.setAttribute('data-pkc-place-ordinal', String(i));
+    const src = intAttr(el, 'data-pkc-source-line');
+    if (src !== null) el.setAttribute('data-pkc-place-line', String(src + lineOffset));
+    else el.removeAttribute('data-pkc-place-line');
+    /**
+     * 🔴 塊の `data-pkc-entry`(`entry=` の kv がそのまま焼かれた物)は
+     * **名前を替えて外す** ── binder の `toggle-task` / `edit-cell` は lid を
+     * `closest('[data-pkc-entry]')` で引くので、札の中にチェックリストを書くと
+     * **押した印が別ノートの同じ行番号に書かれる**(レビュー実測 2026-08-28)。
+     * 札のボタン自身の `data-pkc-entry` は残す(押す動線はそちらが受ける)。
+     */
+    const rawEntry = el.getAttribute('data-pkc-entry');
+    if (rawEntry !== null) {
+      el.setAttribute('data-pkc-place-entry', rawEntry);
+      el.removeAttribute('data-pkc-entry');
+    }
     ensureGrip(el);
-    const lid = el.getAttribute('data-pkc-entry');
+    const lid = el.getAttribute('data-pkc-place-entry');
     if (lid !== null && lid !== '') ensureCard(el, lid, resolveTitle);
     bottom = Math.max(bottom, y + (h ?? 160));
-  });
+  }
   // ⚠ いちばん下の塊まで scroll で届く高さを器に持たせる(絶対配置は流れに乗らない)
   host.style.minHeight = `${bottom + 40}px`;
   return blocks.length;

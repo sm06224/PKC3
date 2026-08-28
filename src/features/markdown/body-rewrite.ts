@@ -67,16 +67,16 @@ export type BodyRewrite =
     }
   | {
       /**
-       * 🔴 **板の塊を動かす**(#283 P4-b)── `.pkc-place` の `:::format{…}` 開き行の
+       * 🔴 **板の塊を動かす**(#283 P4-b)── `.pkc-place` の format 開き行の
        * x= / y= だけを書き換える。
        *
-       * ⚠ 行番号ではなく **N 番目 + 開き行そのもの**で指す ── 本文の面の描画は
-       *   source-line の印を持たないため。disk 側で byte 一致しなければ書かない
-       *   (`undo-append` の「足した行そのものを持つ」と同じ作法)。
-       *   規則の実体は `place-notation.ts`(pure)。
+       * ⚠ `line` は**原文の行番号**(0 始まり。描画が焼く `data-pkc-source-line` +
+       *   frontmatter ぶん ── `task` と同じ座標系)。掴んだ時点の**開き行そのもの**を
+       *   添え、disk 側で byte 一致しなければ書かない(`undo-append` の
+       *   「足した行そのものを持つ」と同じ作法)。規則の実体は `place-notation.ts`(pure)。
        */
       kind: 'place-move';
-      ordinal: number;
+      line: number;
       openLine: string;
       x: number;
       y: number;
