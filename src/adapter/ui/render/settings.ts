@@ -19,7 +19,9 @@ import { PAGE_FORMATS } from '@features/page-format';
 import { currentPageFormat } from './page-format';
 import { EDITOR_MODES } from '@features/editor-mode';
 import { TEXT_SCALES } from '@features/text-scale';
+import { READ_COLUMN_CHOICES } from '@features/read-columns';
 import { currentTextScale } from './text-scale';
+import { currentReadColumns } from './read-columns';
 import { appEditorMode, EditorModeStore } from './editor-mode';
 import { appOpenInEdit, OpenInEditStore } from './open-in-edit';
 import { appAlarmEnabled, AlarmEnabledStore } from './alarm-enabled';
@@ -102,6 +104,7 @@ export class SettingsRenderer {
       this.syncTheme();
       this.syncPageFormat();
       this.syncTextScale();
+      this.syncReadColumns();
       this.syncEditorMode();
       this.syncOpenInEdit();
       this.syncAlarmEnabled();
@@ -225,6 +228,37 @@ export class SettingsRenderer {
       tselect.append(opt);
     }
     td.append(tselect);
+
+    /**
+     * 🔴 **本文の段組み**(#505 段①。user 指示 2026-08-28)。
+     *
+     * ⚠ ここ「表示」に置く ── 紙面・文字の大きさと同じ「見え方の好み」である。
+     * ⚠ **既定は 1 段 = 現行そのまま** ── 選ばなければ見え方は変わらない。
+     */
+    const ct = document.createElement('dt');
+    ct.textContent = '本文の段組み';
+    const cd = document.createElement('dd');
+    const cselect = document.createElement('select');
+    cselect.setAttribute('data-pkc-action', 'set-read-columns');
+    cselect.setAttribute('data-pkc-field', 'read-columns-select');
+    cselect.setAttribute('aria-label', '本文の段組み');
+    for (const c of READ_COLUMN_CHOICES) {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = c.label;
+      cselect.append(opt);
+    }
+    cd.append(cselect);
+    const cnote = document.createElement('p');
+    cnote.setAttribute('data-pkc-field', 'settings-note');
+    // ⚠ **何が変わって、何に気をつけるか**を書く(押した後に探させない)
+    cnote.textContent =
+      '横に広い画面で、本文を新聞のように段へ流します。' +
+      '送りが横向きになり、マウスホイールはそのまま横へ送れます。' +
+      '画面の幅が足りないときは自動で 1 段に戻ります。' +
+      '表と図は段の幅まで縮むので、広く見たいときは段を減らしてください。' +
+      '編集に入っている間は 1 段に戻ります。';
+
     const tnote = document.createElement('p');
     tnote.setAttribute('data-pkc-field', 'settings-note');
     // ⚠ **何が動いて、何が動かないか**を書く(押した後に探させない)
@@ -234,6 +268,8 @@ export class SettingsRenderer {
       'この端末だけの設定で、ノートの中身には入りません。';
     td.append(tnote);
     dl.append(tt, td);
+    cd.append(cnote);
+    dl.append(ct, cd);
 
     /**
      * ✏️ **編集の仕方**(#104 第 2 弾。user 裁定 2026-08-08「既定でONかつ
@@ -398,6 +434,7 @@ export class SettingsRenderer {
     this.syncTheme();
     this.syncPageFormat();
     this.syncTextScale();
+    this.syncReadColumns();
     this.syncEditorMode();
     this.syncOpenInEdit();
     this.syncAlarmEnabled();
@@ -861,6 +898,19 @@ export class SettingsRenderer {
       '[data-pkc-field="text-scale-select"]',
     );
     const cur = currentTextScale(document.documentElement);
+    if (select && select.value !== cur) select.value = cur;
+  }
+
+  /**
+   * ⚠ 画面の値を**いまの段数に合わせる**(#505)。器は 1 度しか組まないので、
+   *   映さないと**別の面へ行って戻ると古い値が見える**(§7)。
+   * ⚠ 正本は DOM(`applyReadColumns` が当てた属性)── 保存を読み直さない。
+   */
+  private syncReadColumns(): void {
+    const select = this.region.querySelector<HTMLSelectElement>(
+      '[data-pkc-field="read-columns-select"]',
+    );
+    const cur = currentReadColumns(document.documentElement);
     if (select && select.value !== cur) select.value = cur;
   }
 

@@ -671,6 +671,7 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
+    ['2026-08-28-read-columns', '5b5d0baf'],
     ['2026-08-28-text-scale', '784a1aae'],
     // ⚠ 配る前(まだ open な PR の中)に文面を直した ── 既読の user が居ないので
     //    新しい entry ではなく**この表を直す**(検査の文言どおり)
@@ -696,7 +697,8 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-08-27-csv-formula', 'd4391bb4'],
     ['2026-08-27-csv-cell-edit', '1feaf54d'],
     ['2026-08-27-fence-asset-export', '5640b17c'],
-    ['2026-08-27-fence-from-asset', '1542cced'],
+    // ⚠ 上限 20 を超えたので 2026-08-28 に落とした(原本は CHANGELOG)
+    // ['2026-08-27-fence-from-asset', '1542cced'],
     // ⚠ 上限 20 を超えたので 2026-08-27 に落とした(原本は CHANGELOG)
     // ['2026-08-26-adopt-external-images', '397dd437'],
     // ⚠ 上限 20 を超えたので 2026-08-27 に落とした(原本は CHANGELOG)

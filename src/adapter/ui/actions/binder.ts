@@ -43,6 +43,8 @@ import { insertText, OWN_MEANING } from '@adapter/ui/render/row-swap';
 import { sectionAt } from '@features/markdown/append-target';
 import { isTextScale } from '@features/text-scale';
 import { chooseTextScale } from '@adapter/ui/render/text-scale';
+import { isReadColumns } from '@features/read-columns';
+import { chooseReadColumns } from '@adapter/ui/render/read-columns';
 import { appendModeOf } from '@adapter/ui/render/append-box';
 import { frontmatterLineCount } from '@features/markdown/frontmatter';
 import {
@@ -3672,6 +3674,17 @@ const ACTIONS: Record<string, ActionHandler> = {
         ? target.value
         : target.getAttribute('data-pkc-text-scale-value');
     if (v !== null && isTextScale(v)) chooseTextScale(document.documentElement, v);
+  },
+  /**
+   * 🔴 **本文の段組み**(#505 段①)。⚠ 当てる先は `text-scale` と同じ
+   *   `document.documentElement` ── CSS が `:root[...]` で読む。
+   */
+  'set-read-columns': (_dispatcher, target) => {
+    const v =
+      target instanceof HTMLSelectElement
+        ? target.value
+        : target.getAttribute('data-pkc-read-columns-value');
+    if (v !== null && isReadColumns(v)) chooseReadColumns(document.documentElement, v);
   },
   'set-flag': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)

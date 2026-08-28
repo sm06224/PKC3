@@ -888,6 +888,71 @@ select:focus-visible {
 [data-pkc-region='detail'] > [data-pkc-view-pane='detail'][data-pkc-detail-mode='view'] {
   flex: 1 0 auto;
 }
+
+/**
+ * 🔴 **読む面の段組み送り**(#505 段①。user 指示 2026-08-28
+ * 「ウルトラワイドモニター用に…一つの縦に長いドキュメントを分割ウィンドウ全体で
+ * スクロールしながら見るオプションが欲しい」)。
+ *
+ * 🔴 **効いているかを決めるのは JS**(`read-columns.ts` の `fitColumnHeight`)。
+ *   CSS が見るのは器に付く `[data-pkc-columns-on]` であって、user の選択
+ *   (`:root[data-pkc-read-columns]`)では**ない** ── 選んでいても器が狭ければ
+ *   効かないからである。⚠ 2 つを混同すると、狭い画面で
+ *   **横スクロールで 1 段ずつめくる**画面になる(実測 1100px でそうなった)。
+ * 🔑 **1 段のときは 1 本も効かない** ── 印が付かないので、選ばない user の
+ *   見え方は 1 バイトも変わらない(2026-08-28 の裁定)。
+ * 🔑 **編集中も効かない** ── `[data-pkc-detail-mode='view']` で絞ってある。
+ *   user の字が「**閲覧時に**」なので、編集へ入れば自動でほどける。
+ *
+ * ⚠ **2 本で 1 組**である。1 本でも欠けると横送りにならない:
+ *   ① 面を**器の高さで止める**(既定は `flex: 1 0 auto` = 中身の高さまで伸びる)
+ *   ② 本文の器を**横スクローラ**にして段を流す
+ *
+ * ⚠ かつてここに「外のスクロール箱の `overflow: hidden`」を 3 本目として置いていたが、
+ *   **変異試験 M7 が SURVIVED で no-op だと教えた**(2026-08-28)。①で面が
+ *   `flex: 1 1 0` になると器は伸びないので、実測でも `scrollHeight === clientHeight`
+ *   (653 = 653)── 縦に溢れる物そのものが無い。CLAUDE.md「『これが無いと壊れる』と
+ *   書く前に、外して壊れるのを見る」に従って**消した**。
+ *
+ * ⚠ **変数にするのは「本当に動く物」だけ** ── 段数だけである。
+ *   🔴 最小幅とすき間も 1 度は変数で渡していたが、**変異試験 M9 / M14 が
+ *   SURVIVED** で教えた:予備の値が同じなので、**渡さなくても何も変わらない**
+ *   (= 同じ数字を 2 か所に置いていただけ)。だからリテラルへ戻した。
+ *   🔑 この 2 つが `features/read-columns.ts` の定数と一致することは
+ *   `tests/features/read-columns.test.ts` が突合する(片方だけ動くのを止める)。
+ * ⚠ 段数の予備の値は**必ず書く** ── 定義の無い `var()` は**宣言ごと捨てられる**ので、
+ *   書かないと段組みが 1 ドットも出ない(#465 / #466 で実際に出荷した穴)。
+ */
+[data-pkc-region='detail'] > [data-pkc-view-pane='detail'][data-pkc-detail-mode='view'][data-pkc-columns-on] {
+  flex: 1 1 0;
+  min-height: 0;
+}
+[data-pkc-view-pane='detail'][data-pkc-columns-on] [data-pkc-field='detail-body'] {
+  /**
+   * 🔴 **高さは JS が px で入れる**(`read-columns.ts` の `fitColumnHeight`)。
+   *
+   * ⚠ **flex に決めさせてはいけない**(実測 2026-08-28)── flex が決めた高さは
+   *   段組みにとって「未確定」なので、ブラウザは**段を増やさずに縦へ溢れさせる**。
+   *   `overflow-y: hidden` と合わさって、**本文が黙って消える**:
+   *
+   *   | 高さの決め方 | 横へ送れるか | 下へのはみ出し |
+   *   |---|---|---|
+   *   | `flex: 1 1 auto` | 🔴 送れない | 🔴 **87px 見えない** |
+   *   | `flex: 1 1 0` | 🔴 送れない | 🔴 **87px 見えない** |
+   *   | `height: 0` + `flex-grow: 1` | 送れるが 🔴 **段が 42 本に爆発** | |
+   *   | **明示 px**(これ) | ✅ 送れる | ✅ 無し |
+   *
+   * 🔑 だから `flex: 0 0 auto` で flex を降ろし、**高さの出どころを 1 つ**にする。
+   */
+  flex: 0 0 auto;
+  columns: 448px var(--pkc-read-cols, 1);
+  column-gap: 16px;
+  column-rule: 1px solid var(--border);
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* ⚠ 端まで送ったときに、後ろの面まで一緒に動かない */
+  overscroll-behavior-x: contain;
+}
 [data-pkc-view-pane='detail'] {
   display: flex;
   flex-direction: column;

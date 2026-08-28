@@ -243,13 +243,16 @@ export class DetailRenderer {
    * 編集へ入る直前の scroll。⚠ 編集の面は別物なので骨組みごと作り直すが、
    * **戻ってきたら元の位置へ戻す** ── 保存しただけで先頭へ飛ぶのも同じ no-op。
    */
-  private parkedScroll: { lid: string; top: number } | null = null;
+  private parkedScroll: { lid: string; top: number; left: number } | null = null;
   /**
    * 骨組みを組み直した直後に戻したい位置。
    * ⚠ **本文を入れてから**戻す ── 空の器に `scrollTop` を代入しても
    * 「まだ scrollHeight が足りない」ので **0 に丸められる**(実際にそう外した)。
+   * 🔴 **段組みのときは横**(`left`)である(#505)── 送りの向きが変わるので、
+   *   縦だけ覚えていると**段組みで開き直すたびに先頭へ飛ぶ**
+   *   (いまの縦送りでは覚えているので、覚えないのは**動線を 1 つ失う**ことになる)。
    */
-  private pendingScroll: number | null = null;
+  private pendingScroll: { top: number; left: number } | null = null;
   /**
    * 読む面の描画の世代(2026-08-06。user 報告 2-8)。ワーカーへ逃がしたので
    * **古い結果を載せない**ための弁別が要る(選択を素早く動かすと逆順で届く)。
@@ -469,7 +472,10 @@ export class DetailRenderer {
       this.bodyView = EMPTY_VIEW;
       // ⚠ 別のノートへ移ったときだけ先頭から(そこは飛んで正しい)。
       //    編集から戻ったときは**元の位置へ**。実際に戻すのは本文を入れた後
-      this.pendingScroll = this.parkedScroll?.lid === lid ? this.parkedScroll.top : 0;
+      this.pendingScroll =
+        this.parkedScroll?.lid === lid
+          ? { top: this.parkedScroll.top, left: this.parkedScroll.left }
+          : { top: 0, left: 0 };
       this.parkedScroll = null;
     }
     this.titleEl!.textContent = state.entryMetas.get(lid)?.title ?? '';
@@ -677,8 +683,10 @@ export class DetailRenderer {
   /** 骨組みを組み直したときの位置戻し。⚠ **本文が入ってから**呼ぶ。 */
   private restoreScroll(): void {
     if (this.pendingScroll === null) return;
-    this.scroller.scrollTop = this.pendingScroll;
+    const { top, left } = this.pendingScroll;
     this.pendingScroll = null;
+    this.scroller.scrollTop = top;
+    if (this.bodyHost !== null) this.bodyHost.scrollLeft = left;
   }
 
   /**
@@ -868,7 +876,12 @@ export class DetailRenderer {
 
     // ⚠ 編集へ入る前の位置を覚える ── 保存して戻ったときに先頭へ飛ばさない
     if (this.skeletonLid !== null)
-      this.parkedScroll = { lid: this.skeletonLid, top: this.scroller.scrollTop };
+      this.parkedScroll = {
+        lid: this.skeletonLid,
+        top: this.scroller.scrollTop,
+        // 🔴 段組みでは送りが横 ── ここを落とすと、編集から戻ると先頭へ飛ぶ(#505)
+        left: this.bodyHost?.scrollLeft ?? 0,
+      };
     this.disposeLends();
     this.region.textContent = '';
     this.dropSkeleton();

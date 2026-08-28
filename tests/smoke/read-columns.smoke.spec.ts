@@ -1,0 +1,281 @@
+import { test, expect, type Page } from '@playwright/test';
+import { gotoApp, clickReal, createEntry, collectPageErrors, expectReachable } from './helpers';
+
+/**
+ * 🔴 **読む面の段組み送り**(#505 段①。user 指示 2026-08-28)。
+ *
+ * > 「**ウルトラワイドモニター用に閲覧時にセンターペインを任意分割して…
+ * > 一つの縦に長いドキュメントを分割ウィンドウ全体でスクロールしながら見る
+ * > オプションが欲しい**」
+ *
+ * 🔴 **unit では原理的に届かない層**(happy-dom は採寸しないので全部 0):
+ * ① **本文が本当に段へ流れるか** ── 段の左端が 2 つ以上に分かれること
+ * ② **送りが縦から横へ変わるか** ── `scrollWidth > clientWidth` になること
+ * ③ 🔴 **縦のホイールで横へ送れるか** ── 実測でこれが**効かない**ことが分かり、
+ *    読み替えを実装に入れた。⚠ 効かなければ**マウスだけで読めない**
+ *    (不可侵指示 2026-08-03)
+ * ④ **狭い画面で 1 段へ畳むか** ── `columns: <最小幅> <段数>` に任せてある
+ * ⑤ **編集に入ると解けるか** ── selector が持っている(JS を書いていない)
+ */
+
+/** ⚠ 段が 2 本以上できるだけの長さが要る(短いと①②が空振りする)。 */
+const BODY = [
+  '# 議事録',
+  '',
+  ...Array.from(
+    { length: 40 },
+    (_, i) => `第 ${i + 1} 段落。横幅を使って読むための本文です。段組みにしたとき、次の段の上へ続くかを見ます。\n`,
+  ),
+].join('\n');
+
+/** 本文の器の採寸と、段の左端の数。 */
+async function readGeom(page: Page): Promise<{
+  cW: number;
+  sW: number;
+  cH: number;
+  sH: number;
+  lefts: number;
+  scrollLeft: number;
+  on: boolean;
+  columnCount: string;
+  inlineH: string;
+}> {
+  return page.evaluate(() => {
+    const pane = document.querySelector('[data-pkc-view-pane="detail"]');
+    const on = pane?.hasAttribute('data-pkc-columns-on') ?? false;
+    const body = document.querySelector('[data-pkc-field="detail-body"]') as HTMLElement | null;
+    // ⚠ **編集中は本文の器ごと居ない** ── 採寸できないことを 0 で表す(落とさない)
+    if (body === null) {
+      return { cW: 0, sW: 0, cH: 0, sH: 0, lefts: 0, scrollLeft: 0, on, columnCount: '(無い)', inlineH: '' };
+    }
+    /**
+     * 🔴 **見えている段だけ数える**(#505 で 1 度外した観測点)。
+     * ⚠ 溢れた段は画面の右外に並ぶので、素直に数えると狭い画面でも「5 段」に
+     *   見える ── user が見ているのは**器の中に入っている段**である。
+     */
+    const bb = body.getBoundingClientRect();
+    const lefts = new Set(
+      [...body.children]
+        .map((k) => Math.round(k.getBoundingClientRect().left))
+        .filter((x) => x >= Math.round(bb.left) - 1 && x < Math.round(bb.right)),
+    );
+    return {
+      cW: body.clientWidth,
+      sW: body.scrollWidth,
+      cH: body.clientHeight,
+      sH: body.scrollHeight,
+      lefts: lefts.size,
+      scrollLeft: Math.round(body.scrollLeft),
+      on,
+      columnCount: getComputedStyle(body).columnCount,
+      inlineH: body.style.height,
+    };
+  });
+}
+
+async function setColumns(page: Page, value: string): Promise<void> {
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  const select = page.locator('[data-pkc-field="read-columns-select"]');
+  // 🔑 押さずに「届くこと」だけ確かめる(`<select>` は押すと OS の一覧が開く)
+  await expectReachable(page, select);
+  await select.selectOption(value);
+  // ⚠ 本文へ戻る道は**一覧の行を押す**(`set-view` に `detail` は無い)
+  await page.locator('[data-pkc-region="filer-table"] tbody tr').first().click();
+  await expect(page.locator('[data-pkc-field="detail-body"]')).toBeVisible();
+  /**
+   * ⚠ **`toBeVisible()` では早すぎる。**
+   *
+   * 本文の器は**骨組みと一緒に**作られるので、markdown が届く前から「見えて」いる。
+   * 段の高さが決まるのは**本文が入った直後**(markdown はワーカー越しに後から来る)
+   * なので、ここで待たないと**まだ 1 段のところを測る**ことになる。
+   * 🔑 待つのは印(`data-pkc-columns-on`)── user から見た「段になった」瞬間である。
+   */
+  await expect
+    .poll(async () => (await readGeom(page)).on, {
+      message: `段組み(${value})にならない`,
+      timeout: 10_000,
+    })
+    .toBe(value !== '1');
+}
+
+async function writeNote(page: Page): Promise<void> {
+  await createEntry(page, 'text');
+  const live = page.locator('[data-pkc-region="editor-live"]');
+  await clickReal(page, '[data-pkc-region="editor-live"]');
+  await live.locator('[data-pkc-field="row-source"]').fill(BODY);
+  await page.keyboard.press('Tab');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-field="detail-body"] p').first()).toBeVisible();
+}
+
+test('🔴 段組みにすると本文が段へ流れ、縦のホイールで横へ送れる (#505 段①)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 2560, height: 900 }); // ウルトラワイド相当
+  await gotoApp(page);
+  await writeNote(page);
+
+  /**
+   * ⚠ **空振り防止 / 対照群** ── 既定は 1 段で、**縦に送る**。
+   * ここが最初から段組みだと、以下は「変わった」を見ていない。
+   */
+  const before = await readGeom(page);
+  expect(before.lefts, '既定なのに段が分かれている').toBe(1);
+  expect(before.sW, '既定なのに横へ送れる').toBeLessThanOrEqual(before.cW + 1);
+  /**
+   * 🔴 **既定では段組みの CSS が 1 本も当たっていない**(変異試験 M12 が教えた)。
+   * ⚠ 「段が 1 つに見える」だけでは足りない ── `columns: 448px 1` が当たっていても
+   *   段は 1 つに見えるので、**印を見ずに当てる**変異が生き延びる。
+   */
+  expect(before.on, '選んでいないのに段組みの印が付いている').toBe(false);
+  expect(before.columnCount, '既定なのに段組みの CSS が当たっている').toBe('auto');
+  expect(before.inlineH, '既定なのに高さを固定している').toBe('');
+
+  await setColumns(page, '2');
+
+  // ① 本文が段へ流れた
+  const after = await readGeom(page);
+  expect(after.lefts, '2 段にしたのに段が分かれていない').toBeGreaterThanOrEqual(2);
+  /**
+   * ② 送りが横になった。
+   * ⚠ **1 回読むだけで見る**(待たない)── 待つ形にすると、
+   *   「最初の採寸が間違っていて、見張りが後から直した」を**素通りさせる**。
+   *   実際そういう欠陥が在り、待つ test では 4 走中 2 走しか落ちなかった。
+   */
+  expect(after.sW, '横へ送れない(段が溢れていない)').toBeGreaterThan(after.cW);
+  /**
+   * 🔴 **本文が黙って消えていない**(#505 でいちばん危なかった所)。
+   *
+   * ⚠ 高さを flex に決めさせると、ブラウザは**段を増やさずに縦へ溢れさせ**、
+   *   `overflow-y: hidden` がそれを刈る ── 実測で **87px 見えなくなっていた**。
+   * 🔑 「縦にはみ出していない」= 溢れた分が段へ回っている、の 1 行不変量である。
+   */
+  expect(after.sH, '本文が縦へはみ出している(その分が画面から消えている)').toBeLessThanOrEqual(
+    after.cH + 1,
+  );
+
+  /**
+   * ③ 🔴 **縦のホイールで横へ送れる**。
+   * ⚠ ここが実装の要 ── 素の CSS では**1px も動かない**(実測 1727 → 1727)。
+   */
+  const box = await page.locator('[data-pkc-field="detail-body"]').boundingBox();
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await page.mouse.wheel(0, 600);
+  await expect
+    .poll(async () => (await readGeom(page)).scrollLeft, {
+      message: '縦のホイールで横へ送れない(マウスだけで読めない)',
+      timeout: 5_000,
+    })
+    .toBeGreaterThan(0);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+test('🔴 段組みで送った位置が、編集から戻っても残る (#505 段①)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 2560, height: 900 });
+  await gotoApp(page);
+  await writeNote(page);
+  await setColumns(page, '2');
+
+  /**
+   * 🔴 **送りの向きが変わっても、位置を憶えている**こと。
+   *
+   * ⚠ いまの縦送りでは `detail.ts` が `scrollTop` を憶えている ── 段組みで
+   *   **横だけ憶えない**と、編集して戻るたびに**先頭へ飛ぶ**。
+   *   それは user から見て「さっきまで読んでいた所が消える」であり、
+   *   動線を 1 つ失うのと同じである(user 指示 2026-08-22)。
+   */
+  const host = page.locator('[data-pkc-field="detail-body"]');
+  await host.evaluate((el) => {
+    el.scrollLeft = 900;
+  });
+  const sent = (await readGeom(page)).scrollLeft;
+  // ⚠ **空振り防止** ── そもそも送れていないなら、以下は何も見ていない
+  expect(sent, '送れていない(段が溢れていない)').toBeGreaterThan(0);
+
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await expect(page.locator('[data-pkc-region="editor-live"]')).toBeVisible();
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(host).toBeVisible();
+
+  await expect
+    .poll(async () => (await readGeom(page)).scrollLeft, {
+      message: '編集から戻ったら先頭へ飛んだ(読んでいた所が消える)',
+      timeout: 5_000,
+    })
+    .toBe(sent);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+test('🔴 狭い画面では自動で 1 段に戻り、編集に入ると段組みが解ける (#505 段①)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 2560, height: 900 });
+  await gotoApp(page);
+  await writeNote(page);
+  await setColumns(page, '3');
+
+  const wide = await readGeom(page);
+  expect(wide.lefts, '広い画面で 3 段にならない(前提が崩れている)').toBeGreaterThanOrEqual(2);
+  // ⚠ ここで「横へ送れる」は**前提にできない** ── 3 段だと本文が収まってしまい、
+  //   溢れないのが正しい(1 度そう書いて落とした)。見るのは段になったことだけ。
+
+  /**
+   * ④ 🔴 **狭くしたら 1 段へ畳む**(#505 の要件)。
+   * 🔑 数えているのは自前のコードではなく `columns: <最小幅> <段数>` である ──
+   *   最小幅を下回る段は作られない。
+   */
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await expect
+    .poll(async () => (await readGeom(page)).on, {
+      message: '狭い画面なのに段組みのまま',
+      timeout: 5_000,
+    })
+    .toBe(false);
+  /**
+   * 🔴 **畳んだら「ふつうの縦送り」へ戻っている**こと。
+   * ⚠ 段数が 1 になるだけでは足りない ── **横送りが残ると、ノート PC で
+   *   「横スクロールで 1 段ずつめくる」画面**になる(実測でそうなっていた)。
+   */
+  const narrow = await readGeom(page);
+  expect(narrow.lefts, '狭い画面なのに段が分かれている').toBe(1);
+  expect(narrow.sW, '狭い画面なのに横送りが残っている').toBeLessThanOrEqual(narrow.cW + 1);
+
+  // ⚠ 設定は**変えていない**(畳んだのは表示だけ)── 広げたら戻る
+  await page.setViewportSize({ width: 2560, height: 900 });
+  await expect
+    .poll(async () => (await readGeom(page)).on, {
+      message: '広げても段へ戻らない(設定が失われている)',
+      timeout: 5_000,
+    })
+    .toBe(true);
+  expect((await readGeom(page)).lefts, '広げたのに段が 1 つのまま').toBeGreaterThanOrEqual(2);
+
+  /**
+   * ⑤ 🔴 **編集に入ると解ける**(user の字が「閲覧時に」)。
+   * ⚠ JS を書いていない ── selector の `[data-pkc-detail-mode='view']` が持つ。
+   */
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await expect(page.locator('[data-pkc-region="editor-live"]')).toBeVisible();
+  /**
+   * ⚠ **「編集に入った」ではなく「段組みが解けた」を見る** ── 面の名前だけ見ると、
+   *   CSS の `view` 限定を外しても緑のままになる(空振り)。
+   */
+  await expect
+    .poll(async () => (await readGeom(page)).on, {
+      message: '編集に入っても段組みの印が残っている(DOM が嘘をつく)',
+      timeout: 5_000,
+    })
+    .toBe(false);
+  // 対照群 ── 読む面へ戻せば、また段になる
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect
+    .poll(async () => (await readGeom(page)).on, { message: '戻っても段に戻らない', timeout: 5_000 })
+    .toBe(true);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
