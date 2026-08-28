@@ -25,6 +25,7 @@
 import type { AppState } from '@adapter/state/app-state';
 import {
   contactLine,
+  displayWays,
   mailHref,
   telHref,
   visibleContacts,
@@ -84,7 +85,10 @@ export class ContactsRenderer {
     exp.setAttribute('data-pkc-action', 'export-vcards');
     exp.setAttribute('data-pkc-field', 'contacts-export');
     exp.textContent = `vCard で書き出す(${cards.length} 件)`;
-    exp.title = 'いま見えている連絡先を .vcf ファイル 1 つに書き出します(絞り込み中は絞った分だけ)';
+    exp.title =
+      'いま見えている連絡先を .vcf ファイル 1 つに書き出します(絞り込み中は絞った分だけ)。' +
+      '出るのは名前・所属・電話・メール・誕生日です。' +
+      '住所やメモなど、本文に書いた残りは出ません。';
     this.host.append(exp);
   }
 
@@ -117,10 +121,26 @@ export class ContactsRenderer {
     open.textContent = contactLine(card);
     li.append(open);
 
+    /**
+     * ⚠ **丸めるのはここだけ**(`displayWays`)。`ContactCard` は原値を持つ ──
+     *   書き出し(`buildVcf`)に画面の丸めが流れ込むと、**壊れた宛先を
+     *   在るものとして相手の端末が保存する**(CLAUDE.md §7)。
+     * ⚠ **切ったことは必ず言う** ── 黙って落とすと
+     *   「9 本目の電話は無い」と読まれる(`truncated` と同じ向き)。
+     */
     const ways = document.createElement('span');
     ways.setAttribute('data-pkc-field', 'contact-ways');
-    for (const tel of card.tels) ways.append(this.way(tel, telHref(tel), 'contact-tel'));
-    for (const mail of card.emails) ways.append(this.way(mail, mailHref(mail), 'contact-mail'));
+    const tels = displayWays(card.tels);
+    const mails = displayWays(card.emails);
+    for (const tel of tels.shown) ways.append(this.way(tel, telHref(tel), 'contact-tel'));
+    for (const mail of mails.shown) ways.append(this.way(mail, mailHref(mail), 'contact-mail'));
+    const hidden = tels.hidden + mails.hidden;
+    if (hidden > 0) {
+      const more = document.createElement('span');
+      more.setAttribute('data-pkc-field', 'contact-ways-more');
+      more.textContent = `ほか ${hidden} 件(ノートを開くと全部あります)`;
+      ways.append(more);
+    }
     li.append(ways);
     return li;
   }

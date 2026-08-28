@@ -36,6 +36,8 @@ export const CONTACT_KEYS = {
   email: 'email',
   /** 所属(会社・部署)。⚠ 有っても連絡先にはならない(下の `contactOf`)。 */
   org: 'org',
+  /** 誕生日。⚠ これも単体では連絡先にならない。 */
+  birthday: 'birthday',
 } as const;
 
 export interface ContactCard {
@@ -46,6 +48,13 @@ export interface ContactCard {
   readonly org: string;
   readonly tels: readonly string[];
   readonly emails: readonly string[];
+  /**
+   * 誕生日(書いていなければ空文字)。
+   * 🔑 **書き出しの往復を閉じるために載せる**(着地前レビュー 2026-08-28)──
+   *   取込は `birthday:` を書くのに、`ContactCard` に無いせいで
+   *   `buildVcf` が `BDAY:` を書けず、**往復すると誕生日が消えていた**。
+   */
+  readonly birthday: string;
 }
 
 /** 走査の結果。⚠ **切ったかどうかを一緒に運ぶ**(黙って切らない ── `TaskScan` と同じ)。 */
@@ -59,7 +68,11 @@ export interface ContactScan {
   readonly truncated: boolean;
 }
 
-/** 上限。⚠ **切ったことは `truncated` で必ず言う**。 */
+/**
+ * 上限。⚠ **切ったことは `truncated` で必ず言う**。
+ * ⚠ `each` / `chars` は **画面の上限**である(`displayWays` が使う)──
+ *   `ContactCard` の中身は丸めない(上の `displayWays` の注記)。
+ */
 export const CONTACT_LIMITS = {
   /** 舐めるノートの数。 */
   notes: 5000,
@@ -85,10 +98,31 @@ function values(v: FrontmatterValue | undefined): string[] {
     if (x === null || typeof x === 'boolean') continue;
     const s = String(x).trim();
     if (s === '') continue;
-    out.push(s.length <= CONTACT_LIMITS.chars ? s : `${s.slice(0, CONTACT_LIMITS.chars)}…`);
-    if (out.length >= CONTACT_LIMITS.each) break;
+    out.push(s);
   }
   return out;
+}
+
+/**
+ * 🔴 **画面に出す分だけ丸める**(#278 段③ の着地前レビュー 2026-08-28)。
+ *
+ * ⚠ 1 稿目はここの丸め(8 件 / 120 字 + `…`)を **`contactOf` の中**でやっていた。
+ *   その結果 `ContactCard` は「画面のために削った値」を持ち、⚠ **書き出し
+ *   (`buildVcf`)がそれをそのまま .vcf へ書いていた** ── 9 本目の電話は消え、
+ *   130 字のメールは `…` 付きで出る。受け取った端末は**壊れた宛先を在るものとして
+ *   保存する**(落ちるより悪い)。
+ * 🔑 CLAUDE.md §7「誤差の向きを決めて、両側に使い回さない」── 画面は
+ *   false-keep で丸めてよいが、**外へ出す file に同じ丸めを流用しない**。
+ * ⚠ だから丸めは**描画の仕事**にした。`ContactCard` は原値を持つ。
+ */
+export function displayWays(list: readonly string[]): {
+  readonly shown: readonly string[];
+  readonly hidden: number;
+} {
+  const shown = list
+    .slice(0, CONTACT_LIMITS.each)
+    .map((s) => (s.length <= CONTACT_LIMITS.chars ? s : `${s.slice(0, CONTACT_LIMITS.chars)}…`));
+  return { shown, hidden: Math.max(0, list.length - shown.length) };
 }
 
 /**
@@ -104,7 +138,8 @@ export function contactOf(lid: string, title: string, body: string): ContactCard
   const emails = values(meta[CONTACT_KEYS.email]);
   if (tels.length === 0 && emails.length === 0) return null;
   const org = values(meta[CONTACT_KEYS.org])[0] ?? '';
-  return { lid, name: title, org, tels, emails };
+  const birthday = values(meta[CONTACT_KEYS.birthday])[0] ?? '';
+  return { lid, name: title, org, tels, emails, birthday };
 }
 
 /**

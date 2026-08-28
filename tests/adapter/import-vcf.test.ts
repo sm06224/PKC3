@@ -97,6 +97,37 @@ describe('importVcfFiles ── 実行部', () => {
     expect(h.reported().join('')).toContain('名前の無いカード');
   });
 
+  /**
+   * 🔴 **「取り込んだ数」と「連絡先に並ぶ数」は別**(着地前レビュー 2026-08-28)。
+   *
+   * ⚠ 1 稿目は作ったノートの数を「連絡先 N 件」と出していた。ところが
+   *   連絡先の面に並ぶ条件は**電話かメールが 1 つ以上**なので、住所だけの
+   *   カードは**ノートにはなるが面には出ない** ── user は「2 件取り込んだのに
+   *   1 件しか無い。残りは消えた」と読む(実際はノートとして在る)。
+   * 🔑 数える規則は面と**同じ 1 つ**(`contactOf`)である ── ここでも
+   *   実物の読み手で検算する(§7)。
+   */
+  it('🔴 連絡先に並ばないカードは、数を分けて言い、在り処まで言う', async () => {
+    const h = harness();
+    const adrOnly = 'BEGIN:VCARD\r\nFN:住所だけ\r\nADR:;;東京都;;;;\r\nEND:VCARD';
+    await importVcfFiles(h.d, h.deps, [vcfFile(`${CARD}\r\n${adrOnly}`)]);
+    expect(h.written, '書けた数が違う').toHaveLength(2);
+    // 面に並ぶのは 1 件だけ ── 実物の読み手で確かめる(前提の検算)
+    expect(h.written.filter((r) => contactOf(r.lid, r.title, r.body) !== null)).toHaveLength(1);
+    const said = h.notices.join('');
+    expect(said, '取り込んだ数を言っていない').toContain('ノート 2 件');
+    expect(said, '面に並ぶ数を言っていない').toContain('連絡先に並ぶのは 1 件');
+    expect(h.reported().join(''), '出ない理由と在り処を言っていない').toContain(
+      '連絡先の一覧には出ません',
+    );
+  });
+
+  it('⚠ 対照群 ── 全部が連絡先なら今までどおり 1 つの数で言う', async () => {
+    const h = harness();
+    await importVcfFiles(h.d, h.deps, [vcfFile(CARD)]);
+    expect(h.notices.join('')).toBe('取込完了: 連絡先 1 件');
+  });
+
   it('🔴 1 枚も読めなければ断り、書込は 1 件も起きない', async () => {
     const h = harness();
     const got = await importVcfFiles(h.d, h.deps, [vcfFile('ただの文章')]);
@@ -168,8 +199,8 @@ describe('書き出し(binder の export-vcards)── §7: 画面と同じ 1 �
       type: 'SET_CONTACT_SCAN',
       scan: {
         cards: [
-          { lid: 'a', name: '山田', org: '', tels: ['090'], emails: [] },
-          { lid: 'b', name: '別人', org: '', tels: [], emails: ['b@x.jp'] },
+          { lid: 'a', name: '山田', org: '', tels: ['090'], emails: [], birthday: '' },
+          { lid: 'b', name: '別人', org: '', tels: [], emails: ['b@x.jp'], birthday: '' },
         ],
         totalNotes: 2,
         scannedNotes: 2,

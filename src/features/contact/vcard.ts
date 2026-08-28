@@ -14,8 +14,10 @@
  * 写真(PHOTO)や住所(ADR)など、frontmatter の鍵に写せない項目は
  * **本文の行として残す**(`- ADR: …`)── 取込で情報を黙って失うと、
  * user は元の .vcf を既に消していることがある(戻れない欠損になる)。
- * ⚠ ただし PHOTO(base64 画像)だけは**大きさで別扱い** ── 本文に数十 KB の
- * base64 を書くと編集不能なノートができるので、**落として注意で言う**。
+ * ⚠ ただし**符号化された中身**(写真 / 音 / 鍵 ── `ENCODING=B` か 2000 字超)は
+ * **落として注意で言う**。本文に数十 KB の base64 を書くと編集不能なノートになる。
+ * ⚠ 落とすのは**名前ではなく中身**で決める(`isEncodedBlob`)── `PHOTO` だけを
+ * 名指ししていた 1 稿目は、`LOGO` / `SOUND` / `KEY` を素通ししていた。
  *
  * ## ⚠ pure module
  *
@@ -108,6 +110,21 @@ function parseProp(line: string): VcfProp | null {
   const name = parts[0]!.replace(/^[^.]+\./, '').toUpperCase();
   const params = parts.slice(1).map((p) => p.toUpperCase());
   return { name, params, value: line.slice(colon + 1) };
+}
+
+/** 本文に置ける長さの上限 ── これを超える値は「符号化された中身」とみなす。 */
+const BLOB_CHARS = 2000;
+
+/**
+ * 符号化された中身(写真・音・鍵)か。
+ * ⚠ **パラメタと長さの両方**で見る ── `ENCODING` を書かない実装が在るので
+ *   名乗りだけに頼らない。逆に長い散文(NOTE)は `default` へ来ないので巻き込まない。
+ */
+function isEncodedBlob(params: readonly string[], value: string): boolean {
+  const enc = params.some(
+    (p) => p === 'ENCODING=B' || p === 'ENCODING=BASE64' || p === 'BASE64' || p === 'B',
+  );
+  return enc || value.length > BLOB_CHARS;
 }
 
 /**
@@ -221,13 +238,30 @@ export function parseVcf(text: string): VcfParseResult {
       case 'NOTE':
         if (decoded !== '') cur.notes.push(decoded);
         break;
-      case 'PHOTO':
-        // ⚠ base64 の画像を本文に書くと編集不能なノートができる ── 落として言う
-        warnings.push(`${cardNo()} 枚目: 写真(PHOTO)は取り込めません(本文には残しません)`);
-        break;
       default: {
-        // 🔴 写せない項目は本文の行として残す(黙って失わない)
         const label = prop.params.length > 0 ? `${prop.name};${prop.params.join(';')}` : prop.name;
+        /**
+         * 🔴 **中身で落とす。名前で落とさない**(着地前レビュー 2026-08-28)。
+         *
+         * ⚠ 1 稿目は `case 'PHOTO':` だけを落としていたが、base64 を運ぶのは
+         *   PHOTO だけではない ── `LOGO` / `SOUND` / `KEY`(vCard 3.0 の標準)や
+         *   `X-MS-CARDPICTURE` は `default` に落ちて、**40KB の 1 行**として
+         *   本文に入っていた(警告も 0 件)。docstring が言う「編集不能なノート」を
+         *   自分で作っていたことになる。
+         * 🔑 守るのは「PHOTO という綴り」ではなく「**巨大な中身**」である
+         *   (CLAUDE.md §1「guard を file 名指しで書かない」)。
+         * ⚠ URL の写真(`PHOTO;VALUE=uri:https://…`)は**残す** ── 短いし、
+         *   情報として意味がある。落とすのは符号化された中身だけ。
+         */
+        if (isEncodedBlob(prop.params, decoded)) {
+          warnings.push(
+            prop.name === 'PHOTO'
+              ? `${cardNo()} 枚目: 写真(PHOTO)は取り込めません(本文には残しません)`
+              : `${cardNo()} 枚目: ${prop.name} は大きすぎて取り込めません(本文には残しません)`,
+          );
+          break;
+        }
+        // 🔴 写せない項目は本文の行として残す(黙って失わない)
         cur.others.push(`- ${label}: ${decoded}`);
       }
     }
@@ -244,11 +278,27 @@ export function vcfNoteOf(card: VcfCard): { title: string; body: string } {
   if (card.emails.length > 0)
     meta[CONTACT_KEYS.email] = card.emails.length === 1 ? card.emails[0]! : [...card.emails];
   if (card.org !== '') meta[CONTACT_KEYS.org] = card.org;
-  if (card.birthday !== '') meta['birthday'] = card.birthday;
-  const parts: string[] = [serializeFrontmatter(meta)];
-  if (card.notes.length > 0) parts.push('', ...card.notes);
-  if (card.others.length > 0) parts.push('', ...card.others);
-  return { title: card.name, body: `${parts.join('\n')}\n` };
+  if (card.birthday !== '') meta[CONTACT_KEYS.birthday] = card.birthday;
+  const rest: string[] = [];
+  if (card.notes.length > 0) rest.push(...card.notes);
+  if (card.others.length > 0) {
+    if (rest.length > 0) rest.push('');
+    rest.push(...card.others);
+  }
+  /**
+   * ⚠ **鍵が 1 つも無いなら囲みを書かない**(着地前レビュー 2026-08-28)。
+   * 空の `---\n---` は `frontmatterLineCount` が **2** と数えるので、
+   * 情報ペインの札が「この文書の情報 (空)」を**永久に出す** ── #343 が
+   * 「user は何も書いていないのに、書いた物の入れ物を見せられる」として
+   * わざわざ畳んだ形を、こちらが作り直していた。
+   * ⚠ ただし**本文の 1 行目が `---` のときは空の囲みを残す** ── 外すと
+   * その行が開きと読まれ、本文が frontmatter に飲まれる。
+   */
+  const needsFence = Object.keys(meta).length > 0 || rest[0]?.startsWith('---') === true;
+  const parts = needsFence
+    ? [serializeFrontmatter(meta), ...(rest.length > 0 ? ['', ...rest] : [])]
+    : rest;
+  return { title: card.name, body: parts.length === 0 ? '' : `${parts.join('\n')}\n` };
 }
 
 /** 3.0 の値エスケープ(`\` `,` `;` と改行)。 */
@@ -269,6 +319,9 @@ export function buildVcf(cards: readonly ContactCard[]): string {
     lines.push(`N:${escapeValue(c.name)};;;;`);
     lines.push(`FN:${escapeValue(c.name)}`);
     if (c.org !== '') lines.push(`ORG:${escapeValue(c.org)}`);
+    // 🔑 取込が `birthday:` を書くので、**書き出しも書く**(往復を閉じる ──
+    //    無いと「取り込んで書き出したら誕生日が消えた」になる)
+    if (c.birthday !== '') lines.push(`BDAY:${escapeValue(c.birthday)}`);
     for (const t of c.tels) lines.push(`TEL;TYPE=voice:${escapeValue(t)}`);
     for (const e of c.emails) lines.push(`EMAIL;TYPE=internet:${escapeValue(e)}`);
     lines.push('END:VCARD');

@@ -9,6 +9,7 @@
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
+import { contactOf } from '@features/contact/contact-card';
 import { parseVcf, vcfNoteOf } from '@features/contact/vcard';
 import { extractMeta } from '@features/flavor';
 import type { MarkdownImportDeps } from './import-markdown';
@@ -80,11 +81,29 @@ export async function importVcfFiles(
   const last = rows[rows.length - 1];
   if (last) deps.focus?.(last.lid);
   deps.imported?.(rows.map((r) => r.lid));
+
+  /**
+   * 🔴 **「取り込んだ数」と「連絡先に並ぶ数」は別である**(着地前レビュー 2026-08-28)。
+   *
+   * ⚠ 1 稿目は作ったノートの数をそのまま「連絡先 N 件」と出していた。
+   *   ところが**連絡先の面に並ぶ条件は「電話かメールが 1 つ以上」**
+   *   (`contactOf`)なので、住所とメモだけのカードは**ノートにはなるが
+   *   面には出ない** ── user は「N 件取り込んだのに、連絡先に M 件しか無い。
+   *   残りは**消えた**」と読む(実際はノートとして在る)。
+   * 🔑 だから**両方の数を出し、出ない分の在り処を言う**。
+   * ⚠ 判定は面と**同じ 1 つ**(`contactOf`)を呼ぶ ── 数え方を 2 本持たない(§7)。
+   */
+  const listed = rows.filter((r) => contactOf(r.lid, r.title, r.body) !== null).length;
+  const hidden = rows.length - listed;
+  if (hidden > 0)
+    notes.push(
+      `電話もメールも無いカードが ${hidden} 件ありました(ノートにはなっていますが、連絡先の一覧には出ません)`,
+    );
   deps.report?.(notes);
-  deps.notify?.(
-    notes.length > 0
-      ? `取込完了: 連絡先 ${rows.length} 件 ⚠ 注意 ${notes.length} 件`
-      : `取込完了: 連絡先 ${rows.length} 件`,
-  );
+  const head =
+    hidden > 0
+      ? `取込完了: ノート ${rows.length} 件(うち連絡先に並ぶのは ${listed} 件)`
+      : `取込完了: 連絡先 ${rows.length} 件`;
+  deps.notify?.(notes.length > 0 ? `${head} ⚠ 注意 ${notes.length} 件` : head);
   return rows.length;
 }
