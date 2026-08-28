@@ -175,6 +175,121 @@ describe('目次を押すと本文へ飛ぶ(#493)', () => {
   it('🔴 本文が描かれていなければ理由を出す(無言にしない)', () => {
     const { root, d } = setup(BODY);
     links(root)[0]!.click();
+    // ⚠ 編集していないのに「編集中は…」と出さない(レビュー指摘 ── 文言は phase で分ける)
+    expect(d.getState().error ?? '', '押しても何も起きない').toContain('まだ出ていません');
+    expect(d.getState().error ?? '', '編集していないのに編集の断り文が出た').not.toContain(
+      '編集中',
+    );
+  });
+
+  it('🔴 編集中は「編集中だから」と言う(1 面の編集では本文が描かれていない)', () => {
+    const { root, d } = setup(BODY);
+    d.dispatch({ type: 'START_EDIT' });
+    links(root)[0]!.click();
     expect(d.getState().error ?? '', '押しても何も起きない').toContain('編集中');
+  });
+
+  /**
+   * 🔴 **畳んだ章の中の見出しへは、開いてから飛ぶ**(#514)。
+   *
+   * ⚠ 直す前は hit が**見つかる**(querySelectorAll は hidden も拾う)のに
+   *   display:none の要素への `scrollIntoView` が no-op ── 断りの分岐にも
+   *   入らず、**無言の dead click** だった。
+   */
+  it('🔴 畳んだ章の中の見出しへは、開いてから飛ぶ(#514)', () => {
+    const { root } = setup(BODY);
+    const slugs = extractHeadingsFromMarkdown(BODY).map((h) => h.slug);
+    const detail = root.querySelector<HTMLElement>('[data-pkc-region="detail"]')!;
+    // 実物の畳みと同じ形を作る: h1 が data-pkc-folded、配下の塊が hidden
+    const chapter = document.createElement('h1');
+    chapter.id = slugs[0]!;
+    chapter.setAttribute('data-pkc-folded', '');
+    chapter.scrollIntoView = vi.fn();
+    const para = document.createElement('p');
+    para.hidden = true;
+    const section = document.createElement('h2');
+    section.id = slugs[1]!;
+    section.hidden = true;
+    section.scrollIntoView = vi.fn();
+    detail.append(chapter, para, section);
+
+    links(root)[1]!.click();
+
+    expect(section.hidden, '開いていない(hidden のままでは飛べない)').toBe(false);
+    expect(section.scrollIntoView, '飛んでいない').toHaveBeenCalled();
+    expect(
+      chapter.hasAttribute('data-pkc-folded'),
+      '畳みの印が残っている(次の描画でまた隠れる)',
+    ).toBe(false);
+  });
+
+  /**
+   * 🔴 **本文以外の面を開いたままなら、本文の面へ戻ってから飛ぶ**(#514)。
+   *
+   * ⚠ 面は hidden で常駐する(center.ts)ので hit は見つかるが、
+   *   隠れた面の中では `scrollIntoView` が no-op ── 無言の dead click だった。
+   */
+  it('🔴 本文以外の面を開いたままなら、本文の面へ戻ってから飛ぶ(#514)', () => {
+    const { root, d } = setup(BODY);
+    const slugs = extractHeadingsFromMarkdown(BODY).map((h) => h.slug);
+    const planted = plantBody(root, slugs);
+    d.dispatch({ type: 'SET_VIEW_MODE', mode: 'settings' });
+
+    links(root)[0]!.click();
+
+    expect(d.getState().viewMode, '本文の面へ戻っていない').toBe('detail');
+    expect(planted[0]!.scrollIntoView, '飛んでいない').toHaveBeenCalled();
+  });
+
+  /**
+   * 🔴 **本文の面に居るときは、面の切替を撃たない**(レビュー指摘)。
+   * `SET_VIEW_MODE` は履歴・ゴミ箱の panel を畳む副作用を持つ ──
+   * 無条件に撃つと**目次を押しただけで履歴の一覧が閉じる**。
+   */
+  it('🔴 本文の面で押したときは面の切替を撃たない(履歴の一覧が閉じない)', () => {
+    const { root, d } = setup(BODY);
+    const slugs = extractHeadingsFromMarkdown(BODY).map((h) => h.slug);
+    const planted = plantBody(root, slugs);
+    // ⚠ SHOW_HISTORY は一覧の**要求**しか出さない(effect 層が引く)── ここは
+    //   effect を繋がない台なので、届いた形(REVISION_LIST_LOADED)を直接入れる
+    d.dispatch({ type: 'REVISION_LIST_LOADED', lid: 'n1', items: [] });
+    expect(d.getState().revisionPanel, '前提が崩れている(履歴が開いていない)').not.toBeNull();
+
+    links(root)[0]!.click();
+
+    expect(planted[0]!.scrollIntoView, '飛んでいない').toHaveBeenCalled();
+    expect(d.getState().revisionPanel, '目次を押しただけで履歴が閉じた').not.toBeNull();
+  });
+
+  /**
+   * 🔴 **囲み(`:::`)の中の見出しでも、外の畳みを開いて飛ぶ**(レビュー指摘)。
+   * ⚠ 畳みを管理する器は `detail-body-host` ── `hit.parentElement`(囲みの section)を
+   *   渡すと外の畳みに届かず、#514 の無言がそのまま残る。
+   */
+  it('🔴 囲みの中の見出しでも、外の畳みを開いて飛ぶ', () => {
+    const { root } = setup(BODY);
+    const slugs = extractHeadingsFromMarkdown(BODY).map((h) => h.slug);
+    const detail = root.querySelector<HTMLElement>('[data-pkc-region="detail"]')!;
+    // 実物と同じ器(detail-body-host)の中に、畳んだ章と、囲みに包まれた節を置く
+    const host = document.createElement('div');
+    host.setAttribute('data-pkc-field', 'detail-body-host');
+    const chapter = document.createElement('h1');
+    chapter.id = slugs[0]!;
+    chapter.setAttribute('data-pkc-folded', '');
+    chapter.scrollIntoView = vi.fn();
+    const wrap = document.createElement('section');
+    wrap.hidden = true; // 章の畳みが囲みごと隠している形
+    const section = document.createElement('h2');
+    section.id = slugs[1]!;
+    section.scrollIntoView = vi.fn();
+    wrap.append(section);
+    host.append(chapter, wrap);
+    detail.append(host);
+
+    links(root)[1]!.click();
+
+    expect(wrap.hidden, '囲みが開いていない(外の畳みに届いていない)').toBe(false);
+    expect(section.scrollIntoView, '飛んでいない').toHaveBeenCalled();
+    expect(chapter.hasAttribute('data-pkc-folded'), '畳みの印が残っている').toBe(false);
   });
 });

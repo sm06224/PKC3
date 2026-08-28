@@ -96,6 +96,13 @@ export class InspectorRenderer {
   private candidates: HTMLDataListElement | null = null;
   /** タグの候補(#494 段②)。⚠ 器は 1 度だけ組み、中身だけ差し替える。 */
   private tagCandidates: HTMLDataListElement | null = null;
+
+  /** 関係を足す帯の部品(#513: 編集中に押せなくするために持つ)。 */
+  private relAdd: {
+    target: HTMLInputElement;
+    kind: HTMLSelectElement;
+    add: HTMLButtonElement;
+  } | null = null;
   /** タグを打つ欄の器(#494)。⚠ 打てない状況では**畳む**(押せない物を出さない)。 */
   private tagForm: HTMLElement | null = null;
   /** 同じノートに戻ったら同じ位置へ(P8 段⑫。溢れるのは題名が長いときだけ)。 */
@@ -147,6 +154,15 @@ export class InspectorRenderer {
     // ── ここから下は**値の差し替えだけ**(器は触らない)
     const noteChanged = this.shownLid !== lid;
     if (noteChanged) this.scroll.park();
+
+    /**
+     * 🔴 **編集中に「押せるのに無言で捨てる」口を作らない**(#513)。
+     * 操作の帯(`this.buttons`)は下の loop が押せなくするが、日付・関係の×・
+     * 関係を足す帯は帯の loop の**対象外**で、reducer が `phase !== 'ready'` を
+     * 黙って捨てる ── 欄まで空になり**成功と同じ見た目**になっていた。
+     * 判定はここ 1 か所で採り、塗る先それぞれへ配る(§7: 同じ問いに 2 つ答えない)。
+     */
+    const editing = state.phase !== 'ready';
 
     this.setRow('inspector-title', meta.title);
     this.setRow('inspector-kind', archetypeLabel(meta.archetype));
@@ -400,7 +416,11 @@ export class InspectorRenderer {
           go.textContent = other?.title ?? '(見つかりません)';
           const del = iconButton('remove-relation', '消す');
           del.setAttribute('data-pkc-relation', r.id);
-          del.title = 'この関係を消します(ノートは消えません)';
+          // 🔴 編集中は押せなくする(#513)── reducer は黙って捨てるので、口の側で断る
+          del.disabled = editing;
+          del.title = editing
+            ? 'この関係を消します(編集中は使えません ── 確定するか取り消してください)'
+            : 'この関係を消します(ノートは消えません)';
           item.append(label, go, del);
           relBox.append(item);
         }
@@ -630,7 +650,8 @@ export class InspectorRenderer {
     }
     this.setRow('inspector-created', formatStoredDate(meta.createdAt));
     this.setRow('inspector-updated', formatStoredDate(meta.updatedAt));
-    this.paintDate(meta);
+    this.paintDate(meta, editing);
+    this.paintRelationAdd(editing);
     // 🔴 **どのファイルから来たか**を出す(2026-08-05)── 出さないと、書き戻しが
     //    「どこへ」書くのか分からない操作になる。⚠ 行の有無は形(= build 側)
     if (link !== null) this.setRow('inspector-linked-file', link);
@@ -643,8 +664,8 @@ export class InspectorRenderer {
      * ── 押しても画面が 1 ドットも変わらず、user には「壊れている」としか見えない。
      * ⚠ **消さずに、押せなくする**(業務画面の作法「同じものが常に同じ場所にある」)。
      * ⚠ 理由を `title` に書く ── 押せない理由が分からないほうが困る。
+     * (`editing` の判定は上で 1 度だけ採ってある ── #513)
      */
-    const editing = state.phase !== 'ready';
     /**
      * 🔴 **フォルダ書き出しはフォルダのときだけ**(#399 ①)。
      * ⚠ 出しっぱなしにすると、ノートで押したとき `folderSource` が投げて
@@ -729,7 +750,7 @@ export class InspectorRenderer {
    *   本文の frontmatter を開いて手で消すまで戻せない(片道を作らない)。
    * ⚠ 器は使い回す(押す寸前のボタンを作り直さない)。
    */
-  private paintDate(meta: EntryMeta): void {
+  private paintDate(meta: EntryMeta, editing: boolean): void {
     const dd = this.rows.get('inspector-date');
     if (!dd) return;
     let set = dd.querySelector<HTMLButtonElement>('[data-pkc-action="set-entry-date"]');
@@ -748,9 +769,36 @@ export class InspectorRenderer {
     // 🔑 日付の見せ方は `formatStoredDate` 1 本(一覧・情報列と同じ規則)
     const label = has ? formatStoredDate(meta.date) : '日付を付ける';
     if (set.textContent !== label) set.textContent = label;
-    set.title = has ? '日付を選び直します' : 'このノート 1 件を、その日の予定にします';
+    /**
+     * 🔴 編集中は押せなくする(#513)── 直す前はピッカーの全手順(開く → 選ぶ →
+     * 確定)を**完走させてから**reducer が黙って捨てていた。
+     */
+    set.disabled = editing;
+    const setBase = has ? '日付を選び直します' : 'このノート 1 件を、その日の予定にします';
+    set.title = editing ? `${setBase}(編集中は使えません ── 確定するか取り消してください)` : setBase;
     // ⚠ **押しても何も起きないボタンを出さない**(日付が無ければ外すものが無い)
-    if (clear) clear.hidden = !has;
+    if (clear) {
+      clear.hidden = !has;
+      clear.disabled = editing;
+      clear.title = editing
+        ? '日付を外します(編集中は使えません ── 確定するか取り消してください)'
+        : '日付を外します(ノートは消えません)';
+    }
+  }
+
+  /**
+   * 🔴 関係を足す帯も編集中は押せなくする(#513)。
+   * ⚠ この帯は操作の帯の loop(`this.buttons`)の**対象外**なので、個別に塗る ──
+   *   直す前は編集中も押せて、reducer が黙って捨て、**欄だけ空になっていた**。
+   */
+  private paintRelationAdd(editing: boolean): void {
+    const bar = this.relAdd;
+    if (!bar) return;
+    bar.target.disabled = editing;
+    bar.kind.disabled = editing;
+    bar.add.disabled = editing;
+    const base = '選んでいるノートから、相手のノートへ関係を張ります';
+    bar.add.title = editing ? `${base}(編集中は使えません ── 確定するか取り消してください)` : base;
   }
 
   /** 器を組む(形が変わったときだけ呼ばれる)。 */
@@ -758,6 +806,7 @@ export class InspectorRenderer {
     this.region.textContent = '';
     this.rows = new Map();
     this.buttons = new Map();
+    this.relAdd = null;
 
     const head = document.createElement('div');
     head.setAttribute('data-pkc-field', 'pane-title');
@@ -964,6 +1013,7 @@ export class InspectorRenderer {
     add.title = '選んでいるノートから、相手のノートへ関係を張ります';
     addBar.append(target, list, kind, add);
     this.region.append(addBar);
+    this.relAdd = { target, kind, add };
 
     // ⚠ **操作は対象の隣**(P8)。共通ツールバーに集約しない
     const actions = document.createElement('div');

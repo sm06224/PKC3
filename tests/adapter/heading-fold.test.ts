@@ -4,7 +4,11 @@
  * ⚠ 範囲の計算は `tests/features/heading-fold.test.ts`。**ここが見るのは器**である。
  */
 import { describe, expect, it } from 'vitest';
-import { applyHeadingFold, toggleHeadingFold } from '../../src/adapter/ui/render/heading-fold';
+import {
+  applyHeadingFold,
+  revealBlock,
+  toggleHeadingFold,
+} from '../../src/adapter/ui/render/heading-fold';
 
 function host(html: string): HTMLElement {
   const el = document.createElement('div');
@@ -110,5 +114,68 @@ describe('見出しの畳み(器) #396', () => {
     expect(applyHeadingFold(h)).toBe(0);
     expect(btns(h)).toHaveLength(0);
     expect((h.children[0] as HTMLElement).hidden).toBe(false);
+  });
+});
+
+/**
+ * 🔴 **目的の塊を覆っている畳みを開く**(#514 / `revealBlock`)。
+ *
+ * 目次から飛ぶ前に呼ぶ ── 畳んだ章の中の塊は `hidden` なので、
+ * そのまま `scrollIntoView` すると**無言の no-op**になる。
+ */
+describe('目的の塊を覆っている畳みを開く(#514)', () => {
+  it('🔴 畳んだ章の中の塊が、開いて見えるようになる', () => {
+    const h = host(DOC);
+    applyHeadingFold(h);
+    toggleHeadingFold(h.querySelector('h1')!);
+    const inner = h.querySelector<HTMLElement>('h2')!;
+    expect(inner.hidden, '前提が崩れている(畳めていない)').toBe(true);
+    expect(revealBlock(h, inner)).toBe(true);
+    expect(inner.hidden, '開いていない').toBe(false);
+    expect(
+      h.querySelector('h1')!.hasAttribute('data-pkc-folded'),
+      '畳みの印が残っている(次の描画でまた隠れる)',
+    ).toBe(false);
+  });
+
+  /**
+   * 🔑 **覆っている畳みだけ**を開く ── 目的の塊自身が畳んだ見出しなら、
+   * その中身は畳んだまま(頼まれたのは「そこまでの道」を開くことだけ)。
+   */
+  it('🔑 目的が畳んだ見出し自身なら、その中身は畳んだまま', () => {
+    const h = host(DOC);
+    applyHeadingFold(h);
+    toggleHeadingFold(h.querySelector('h2')!); // 節を畳む
+    toggleHeadingFold(h.querySelector('h1')!); // 章も畳む(節は章の中)
+    const inner = h.querySelector<HTMLElement>('h2')!;
+    expect(revealBlock(h, inner)).toBe(true);
+    expect(inner.hidden, '節そのものが見えていない').toBe(false);
+    expect(inner.hasAttribute('data-pkc-folded'), '節の畳みまで開いた').toBe(true);
+    const ps = [...h.querySelectorAll<HTMLElement>('p')];
+    expect(ps[0]!.hidden, '章の本文が見えていない').toBe(false);
+    expect(ps[1]!.hidden, '節の中身まで開いた').toBe(true);
+  });
+
+  it('覆われていなければ何もしない(false を返す)', () => {
+    const h = host(DOC);
+    applyHeadingFold(h);
+    expect(revealBlock(h, h.querySelector('h2')!)).toBe(false);
+    expect(revealBlock(h, document.createElement('p')), 'host の外の塊で true を返した').toBe(
+      false,
+    );
+  });
+
+  /**
+   * 🔴 **見出しの直後に見出しが続く形**(span の先頭に目的の塊が立つ)でも開く
+   * (レビュー指摘 ── `idx < s.from` の境界を `<=` に壊す変異が生き延びていた)。
+   */
+  it('🔴 見出しの直後の見出し(span の先頭)でも、覆っている畳みを開く', () => {
+    const h = host('<h1>章</h1><h2>節</h2><p>あ</p>');
+    applyHeadingFold(h);
+    toggleHeadingFold(h.querySelector('h1')!);
+    const inner = h.querySelector<HTMLElement>('h2')!;
+    expect(inner.hidden, '前提が崩れている(畳めていない)').toBe(true);
+    expect(revealBlock(h, inner)).toBe(true);
+    expect(inner.hidden, '開いていない').toBe(false);
   });
 });
