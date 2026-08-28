@@ -532,7 +532,31 @@ jobs:
           --disable-qt5
           --enable-qt6
           --disable-gen
-          --disable-scripting
+          # 🔴 **`--disable-scripting` を外した**(#431 段①。user 指示 2026-08-27
+          #    「いまだに動かないマクロ機能なども全部完璧で動かせるように」)。
+          #
+          # ⚠ これは**上流の既定**だった(`LibreOfficeWASM32.conf` の 4 行目)ので、
+          #    外すのは**上流と違う道を行く**ことである。だから ref(master)も
+          #    他の option も動かさない ── 変える主張は 1 つだけにする
+          #    (CLAUDE.md「1 度の実験が 2 つを主張していた」= #158 で 7 回転溶かした型)。
+          #
+          # 🔑 配った一式を数えた結果(#431):**登録も実体も 0 件**だった ──
+          #    `services.rdb` に `ScriptProviderForBasic` が無く、`soffice.wasm` に
+          #    `SbModule` / `SbiRuntime` が無い。⚠ 対話の口(`.ui`)だけ在るので、
+          #    **メニューは出るのに動かない**(無言の dead click)。
+          #
+          # 🔴 **下の 3 行は「他を変えないため」に足している**(2026-08-28、焼く前に
+          #    `configure.ac` を読んで判明)。⚠ `--disable-scripting` は
+          #    **Java / .NET / Python を道連れに切っていた**:
+          #      - `configure.ac:3836` java  → `DISABLE_SCRIPTING` なら `with_java=no`
+          #      - `configure.ac:5937` .NET  → 同上
+          #      - `configure.ac:10682` python → 同上(無いと cross では **system python**)
+          #    つまり外すだけだと**3 つが既定で有効になり**、wasm には無い物を探しに行く。
+          #    🔑 明示して切るのは**変数を増やす**のではなく、**scripting 以外を
+          #    これまでどおりに保つ**ためである。
+          --without-java
+          --without-dotnet
+          --disable-python
           --with-package-format=emscripten
           --enable-emscripten-jspi
           --disable-emscripten-proxy-to-pthread
@@ -598,6 +622,21 @@ jobs:
           #    ⚠ 既定のままだと Qt5 用の組み合わせで建ち、走らせるまで気づけない
           grep -q '^export ENABLE_EMSCRIPTEN_JSPI=TRUE' config_host.mk
           grep -q '^export ENABLE_EMSCRIPTEN_PROXY_TO_PTHREAD=$' config_host.mk
+          # 🔴 **マクロ(Basic)が構成に入ったことを確かめる**(#431 段①、2026-08-28)。
+          #
+          # ⚠ 見るのは `DISABLE_SCRIPTING` **ではない** ── その名前は
+          #    `config_host.mk.in` に **1 行も無い**(実物を引いて確かめた。
+          #    configure は `SCPDEFS` と `BUILD_TYPE` にしか書かない)。
+          #    🔑 実体は **`BUILD_TYPE` に `SCRIPTING` が入ること**である
+          #    (`configure.ac:3540-3542`)。
+          #    ⚠ 在らない変数を grep すると「常に一致しない」検査になる(#158 の
+          #    `WITH_LANG` と同じ型)ので、**在る変数だけを見る**。
+          grep -qE '^export BUILD_TYPE=.*\bSCRIPTING\b' config_host.mk
+          # 🔴 **道連れの 3 つが、これまでどおり切れていること**(変数を増やさない)。
+          #    ⚠ ここが立つと wasm に無い物を探しに行く ── 落ちるべき所で落とす。
+          grep -q '^export ENABLE_JAVA=$' config_host.mk
+          grep -q '^export DISABLE_PYTHON=TRUE' config_host.mk
+          grep -q '^ENABLE_DOTNET=$' config_host.mk
 
       # 🔴 **`| tail` を噛ませない**(2026-08-09 に踏んだ)。bash のパイプの終了コードは
       #    最後のコマンドのものなので、`make | tail` は **make が落ちても step が緑**になる。
