@@ -3439,7 +3439,15 @@ const ACTIONS: Record<string, ActionHandler> = {
       `連絡先-${today}.vcf`,
       new Blob([buildVcf(cards)], { type: 'text/vcard' }),
     );
-    dispatcher.dispatch({ type: 'OP_NOTICE', message: `連絡先 ${cards.length} 件を書き出しました` });
+    /**
+     * ⚠ **何が入っていないかを、押した後にも言う**(2 巡目の動線レビュー 2026-08-28)。
+     *   ボタンの説明(`title`)はマウスを乗せたときしか出ないので、触る画面や
+     *   字だけ見て押した user には届かない ── そのまま**元の .vcf を捨てる**恐れがある。
+     */
+    dispatcher.dispatch({
+      type: 'OP_NOTICE',
+      message: `連絡先 ${cards.length} 件を書き出しました(名前・所属・電話・メール・誕生日だけです)`,
+    });
   },
   /**
    * 🔴 **当てる**(#414)── ⚠ **下見に出したのと同じ物**を当てる。

@@ -1725,6 +1725,26 @@ function reduceCore(
           // 🔴 **雛形も捨てる**(同じ理由)── 残すと**消えたノートの雛形**が
           //    `/` に並び、押すと本文が入らない(押しても何も起きない導線)
           snippetScan: null,
+          /**
+           * 🔴 **連絡先も再読込で検め直す**(#278 段③ の動線レビュー 2026-08-28)。
+           *
+           * ⚠ ここは **`contactScan` だけが漏れていた** ── 集計・予定・雛形は
+           *   捨てて頼み直すのに、連絡先は表にも events にも居なかった。
+           *   帰結は 2 つで、どちらも user のデータに触る:
+           *   ① **取込はここを通る**ので、`.vcf` を 200 枚入れても一覧は
+           *      「連絡先はまだありません」のまま ── user は「入らなかった」と読み、
+           *      **同じ file をもう一度取り込んで 400 件になる**
+           *      (`reload-snapshot.ts` が「二重取込が実データとして残る」と書いている形)
+           *   ② ノートを消しても行が残り、押しても**何も起きない**
+           *      (`SELECT_ENTRY` は居ない lid を黙って捨てる)
+           * 🔑 直し方は**予定と同じにしない** ── あちらは丸ごと `null` にするが、
+           *   連絡先で同じことをすると**別タブが書くたびに一覧が空へ飛ぶ**
+           *   (`SYS_BOOTED` は 300ms 束ねで頻繁に飛ぶ。`REFRESH_CONTACT_SCAN` が
+           *   「消すと行が飛ぶ」とわざわざ書いているのはそのため)。
+           * 🔑 だから**消えた lid だけ落として頼み直す** ── この reducer が
+           *   `selection` に対して既にやっている形と同じである(`keepMarks`)。
+           */
+          contactScan: keepContacts(state, sameCid, metas),
         },
         events: [
           ...(keepLid === null
@@ -1750,6 +1770,15 @@ function reduceCore(
            *   実行されない(CLAUDE.md §2)。
            */
           ...(state.taskScan === null ? [] : [{ type: 'REQUEST_TASK_SCAN' as const }]),
+          /**
+           * 🔴 **連絡先も頼み直す**(上の `contactScan` と対)。
+           * ⚠ 落とすだけでは、**取り込んだ 200 件が 1 件も現れない** ──
+           *   集め直しの合図は「左のタブを連絡先へ切り替えたとき」1 か所しか
+           *   無いので、タブを開いたままの user には永久に届かない。
+           * ⚠ 一度も開いていない user には撃たない(全ノートの走査を、
+           *   連絡先を使わない user に負わせない ── 予定・集計と同じ流儀)。
+           */
+          ...(state.contactScan === null ? [] : [{ type: 'REQUEST_CONTACT_SCAN' as const }]),
         ],
       };
     }
@@ -4188,6 +4217,27 @@ function keepLinks(
     else dropped = true;
   }
   return dropped ? next : state.linkedFiles; // 変化が無いなら参照を保つ
+}
+
+/**
+ * 🔴 **消えたノートの連絡先を落とす**(#278 段③ の動線レビュー 2026-08-28)。
+ *
+ * ⚠ **丸ごと `null` にしない** ── `SYS_BOOTED` は別タブが書くたびに飛ぶので、
+ *   捨てると一覧が「集めています…」へ落ちて**行が飛ぶ**
+ *   (`REFRESH_CONTACT_SCAN` が「消さない」と書いている理由と同じ)。
+ * ⚠ 別 container(`cid` 違い)なら全部捨てる ── lid の偶然衝突を持ち越さない。
+ * ⚠ 変化が無いなら**同じ参照**を返す(描画の指紋を無駄に壊さない ── `keepLinks` と同じ作法)。
+ */
+function keepContacts(
+  state: AppState,
+  sameCid: boolean,
+  metas: ReadonlyMap<string, EntryMeta>,
+): ContactScan | null {
+  const scan = state.contactScan;
+  if (scan === null) return null;
+  if (!sameCid) return null;
+  const cards = scan.cards.filter((c) => metas.has(c.lid));
+  return cards.length === scan.cards.length ? scan : { ...scan, cards };
 }
 
 /** 紐づけを 1 件外す(⚠ 持っていないなら**同じ参照**を返す ── 断面指紋を壊さない)。 */

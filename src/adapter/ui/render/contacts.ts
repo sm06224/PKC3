@@ -52,7 +52,19 @@ export class ContactsRenderer {
      *   `0 件` の指紋と一致してしまい、**一覧が出ないまま**になる。
      */
     const print = [
-      scan === null ? 'pending' : state.contactScanFailed ? 'failed' : 'ok',
+      /**
+       * 🔴 **失敗を先に見る**(2 巡目の着地前レビュー 2026-08-28)。
+       *
+       * ⚠ 1 稿目は `scan === null` を先に見ていたので、**初回の走査が失敗した回**
+       *   (`CONTACT_SCAN_FAILED` は `contactScan` を触らないので `null` のまま)が
+       *   「まだ集めていない」と**同じ指紋**になり、下の早期 return で
+       *   **DOM が 1 バイトも書き換わらなかった** ── つまり
+       *   `noteText` が持っている「集められませんでした」は**一度も画面に出ない**。
+       *   user から見ると「集めています…」で**永久に止まる**。
+       * ⚠ 予定の面(`schedule.ts`)は `failed` を独立の項として持っており、
+       *   **そちらだけ正しかった**(= 設計判断ではなく取りこぼし)。
+       */
+      state.contactScanFailed ? 'failed' : scan === null ? 'pending' : 'ok',
       scan?.truncated === true ? 't' : '',
       query,
       cards
@@ -132,8 +144,9 @@ export class ContactsRenderer {
     ways.setAttribute('data-pkc-field', 'contact-ways');
     const tels = displayWays(card.tels);
     const mails = displayWays(card.emails);
-    for (const tel of tels.shown) ways.append(this.way(tel, telHref(tel), 'contact-tel'));
-    for (const mail of mails.shown) ways.append(this.way(mail, mailHref(mail), 'contact-mail'));
+    // 🔴 **字は丸めた物、押し先は原値**(`DisplayWay` の注記 ── 2 巡目のレビュー)
+    for (const t of tels.shown) ways.append(this.way(t.text, telHref(t.raw), 'contact-tel'));
+    for (const m of mails.shown) ways.append(this.way(m.text, mailHref(m.raw), 'contact-mail'));
     const hidden = tels.hidden + mails.hidden;
     if (hidden > 0) {
       const more = document.createElement('span');

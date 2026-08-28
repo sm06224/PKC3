@@ -16,6 +16,8 @@ import { importVcfFiles } from '../../src/adapter/ui/actions/import-vcf';
 import type { ImportDeps } from '../../src/adapter/ui/actions/import-pkc2';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
 import { contactOf } from '../../src/features/contact/contact-card';
+import { isVcfFileName } from '../../src/features/contact/vcard';
+import { readFileSync } from 'node:fs';
 
 /** ⚠ MIME は空が既定(md の取込と同じ理由 ── OS のピッカーは付けないことが多い)。 */
 const vcfFile = (body: string, name = '連絡先.vcf', type = ''): File =>
@@ -122,10 +124,51 @@ describe('importVcfFiles ── 実行部', () => {
     );
   });
 
-  it('⚠ 対照群 ── 全部が連絡先なら今までどおり 1 つの数で言う', async () => {
+  it('⚠ 対照群 ── 全部が連絡先なら 1 つの数で言う(ノートと連絡先を並べない)', async () => {
     const h = harness();
     await importVcfFiles(h.d, h.deps, [vcfFile(CARD)]);
-    expect(h.notices.join('')).toBe('取込完了: 連絡先 1 件');
+    const said = h.notices.join('');
+    expect(said).toContain('取込完了: 連絡先 1 件');
+    expect(said, '分ける必要が無いのに 2 つの数を並べた').not.toContain('ノート');
+  });
+
+  /**
+   * 🔴 **同じ注意を並べない**(2 巡目の動線レビュー 2026-08-28)。
+   * ⚠ スマホの .vcf はほぼ全件が写真つきなので、畳まないと注意欄が
+   *   **同一文の壁**になり、行動が要る注意がその中に埋もれる。
+   */
+  it('🔴 同じ理由の注意は 1 行に畳んで枚数で言う(壁を作らない)', async () => {
+    const h = harness();
+    const withPhoto = (n: string): string =>
+      `BEGIN:VCARD\r\nFN:${n}\r\nTEL:090\r\nPHOTO;ENCODING=B:QUJD\r\nEND:VCARD`;
+    const many = Array.from({ length: 12 }, (_, i) => withPhoto(`人${i}`)).join('\r\n');
+    await importVcfFiles(h.d, h.deps, [vcfFile(many)]);
+    const said = h.reported();
+    const photo = said.filter((w) => w.includes('写真'));
+    expect(photo, '12 枚ぶん並べた(壁になる)').toHaveLength(1);
+    expect(photo[0], '枚数を言っていない').toContain('(12 枚)');
+  });
+
+  it('⚠ 対照群 ── 理由が違う注意は畳まない(別の行のまま残る)', async () => {
+    const h = harness();
+    const v =
+      'BEGIN:VCARD\r\nFN:A\r\nTEL:090\r\nPHOTO;ENCODING=B:QUJD\r\nEND:VCARD\r\n' +
+      'BEGIN:VCARD\r\nTEL:091\r\nEND:VCARD';
+    await importVcfFiles(h.d, h.deps, [vcfFile(v)]);
+    const said = h.reported().join('\n');
+    expect(said).toContain('写真');
+    expect(said, '別の理由まで畳んだ').toContain('名前の無いカード');
+  });
+
+  it('🔴 名前の無いカードの番号は飛ばない(取り込んだ通し番号を使わない)', async () => {
+    const h = harness();
+    const named = 'BEGIN:VCARD\r\nFN:山田\r\nTEL:090\r\nEND:VCARD';
+    const anon = 'BEGIN:VCARD\r\nTEL:091\r\nEND:VCARD';
+    await importVcfFiles(h.d, h.deps, [vcfFile([named, anon, named, anon].join('\r\n'))]);
+    expect(
+      h.written.map((r) => r.title),
+      '番号が飛んで「1〜N はどこへ行った」と読める',
+    ).toEqual(['山田', '連絡先 1', '山田', '連絡先 2']);
   });
 
   it('🔴 1 枚も読めなければ断り、書込は 1 件も起きない', async () => {
@@ -167,6 +210,41 @@ describe('importVcfFiles ── 実行部', () => {
 });
 
 describe('振り分け(importFiles)', () => {
+  /**
+   * 🔴 **ピッカーが受ける綴りと、受理器が受ける綴りを揃える**
+   * (2 巡目の着地前レビュー 2026-08-28)。
+   *
+   * ⚠ `accept`(`shell.ts`)と `isVcfFileName`(`vcard.ts`)は**別々の宣言**である。
+   *   smoke は `.vcf` しか見ていないので、`accept` から `.vcard` を落としても緑 ──
+   *   つまり **user はピッカーで `.vcard` を選べなくなるのに、誰も鳴らない**(§7)。
+   */
+  /**
+   * 🔴 **入口が「受けられる物」を名乗る**(2 巡目の動線レビュー 2026-08-28)。
+   * ⚠ vCard を足したのに「取り込む」の説明が 1 文字も変わっておらず、
+   *   user は**対応していないと結論する**(「在るのに見つけられないのは、
+   *   こちらの動線の不備」── CLAUDE.md 2026-08-27)。
+   */
+  it('🔴 「取り込む」の説明が vCard を名乗る', async () => {
+    const { COLLECTION_COMMANDS } = await import('../../src/adapter/ui/render/commands');
+    const imp = COLLECTION_COMMANDS.find((c) => c.action === 'import-file');
+    expect(imp, '取り込むの口が消えた(空振り防止)').toBeDefined();
+    expect(imp!.title, '受けられるのに、入口が名乗っていない').toContain('.vcf');
+  });
+
+  it('🔴 ピッカーの accept と、受理する拡張子が食い違わない', () => {
+    const shell = readFileSync('src/adapter/ui/render/shell.ts', 'utf-8');
+    const m = /impInput\.accept =\s*'([^']+)'/.exec(shell);
+    expect(m, 'accept の宣言を読めていない(空振り防止)').not.toBeNull();
+    const exts = m![1]!.split(',').filter((x) => x.startsWith('.'));
+    // 受理器が vCard と認める拡張子は、全部ピッカーからも選べること
+    for (const ext of exts.filter((x) => isVcfFileName(`a${x}`)))
+      expect(exts, `${ext} を受けるのに選べない`).toContain(ext);
+    for (const ext of ['.vcf', '.vcard']) {
+      expect(isVcfFileName(`a${ext}`), `${ext} を受理器が受けない`).toBe(true);
+      expect(exts, `${ext} をピッカーで選べない`).toContain(ext);
+    }
+  });
+
   it('全部 .vcf なら vCard 経路に入る', async () => {
     const h = harness();
     const got = await importFiles(h.d, h.deps as unknown as ImportDeps, [vcfFile(CARD)]);
@@ -229,6 +307,16 @@ describe('書き出し(binder の export-vcards)── §7: 画面と同じ 1 �
       expect(blobText!).toContain('FN:山田');
       // 🔴 絞りの外の連絡先は入らない
       expect(blobText!, '絞ったのに全件が出た').not.toContain('別人');
+      /**
+       * 🔴 **押した後の帯が「全部出た」と読ませない**(2 巡目の動線レビュー 2026-08-28)。
+       * ⚠ 断りが在るのは**マウスを乗せたときだけ出るボタンの説明**だけだったので、
+       *   触る画面や字だけ見て押した user には届かない ── そのまま
+       *   **元の .vcf を捨てる**恐れがある(取り返しがつかない側)。
+       */
+      expect(
+        d.getState().notice ?? '',
+        '何が入っていないかを、押した後に言っていない',
+      ).toContain('名前・所属・電話・メール・誕生日だけ');
     } finally {
       URL.createObjectURL = orig;
       URL.revokeObjectURL = origRevoke;

@@ -32,7 +32,8 @@ const CARD_30 = [
 describe('parseVcf ── 読みは広く', () => {
   it('3.0 の 1 枚 ── FN / TEL×2 / EMAIL / ORG / BDAY / NOTE', () => {
     const { cards, warnings } = parseVcf(CARD_30);
-    expect(warnings).toEqual([]);
+    // ⚠ `TEL;TYPE=CELL` の種別は取り込めない ── **黙らずに言う**(2 巡目のレビュー)
+    expect(warnings).toEqual(['1 枚目: 電話・メールの種別(携帯 / 自宅 / FAX など)は取り込めません']);
     expect(cards).toHaveLength(1);
     const c = cards[0]!;
     expect(c.name).toBe('山田太郎');
@@ -93,8 +94,15 @@ describe('parseVcf ── 読みは広く', () => {
    *   「全部落とすようになっただけ」と区別が付かない。
    */
   it('🔴 base64 を運ぶ項目は名前を問わず落とす(LOGO / SOUND / KEY)', () => {
-    for (const name of ['LOGO', 'SOUND', 'KEY', 'X-MS-CARDPICTURE']) {
-      const v = `BEGIN:VCARD\r\nFN:山田\r\nTEL:090\r\n${name};ENCODING=B:QUJD\r\nEND:VCARD`;
+    // ⚠ **綴りも散らす**(2 巡目のレビュー)── 1 綴りだけだと、
+    //    `p === 'ENCODING=B'` へ縮める変異が生き延びる
+    for (const [name, enc] of [
+      ['LOGO', 'ENCODING=B'],
+      ['SOUND', 'ENCODING=BASE64'],
+      ['KEY', 'BASE64'],
+      ['X-MS-CARDPICTURE', 'B'],
+    ] as const) {
+      const v = `BEGIN:VCARD\r\nFN:山田\r\nTEL:090\r\n${name};${enc}:QUJD\r\nEND:VCARD`;
       const { cards, warnings } = parseVcf(v);
       expect(cards[0]!.others.join(''), `${name} が本文に残った`).not.toContain('QUJD');
       expect(warnings.join(''), `${name} を黙って落とした`).toContain(name);
@@ -120,11 +128,56 @@ describe('parseVcf ── 読みは広く', () => {
     expect(warnings, '落としていないのに注意を出した').toEqual([]);
   });
 
-  it('END の無いカードは捨てて、注意で言う', () => {
+  /**
+   * 🔴 **閉じが無くても、読めた分は捨てない**(2 巡目の着地前レビュー 2026-08-28)。
+   * ⚠ 直す前は「次が始まった」側で `cur` を丸ごと上書きしていたので、
+   *   `END:VCARD` を書かない書き出しでは**名前も電話も在るカードが 1 枚ごと消えた**。
+   * 🔑 この module の宣言は「対応しない項目も捨てない」── 閉じの書き忘れで
+   *   中身ごと捨てるのは、その宣言と正面から反する。
+   */
+  it('🔴 END が無いまま終わっても、読めた分は取り込んで注意で言う', () => {
     const broken = 'BEGIN:VCARD\r\nFN:途中\r\nTEL:090';
     const { cards, warnings } = parseVcf(broken);
-    expect(cards).toEqual([]);
+    expect(cards.map((c) => c.name), '読めた分まで捨てた').toEqual(['途中']);
+    expect(cards[0]!.tels).toEqual(['090']);
     expect(warnings.join('')).toContain('END:VCARD');
+  });
+
+  it('🔴 END が無いまま次が始まっても、前のカードが消えない', () => {
+    const two = 'BEGIN:VCARD\r\nFN:A\r\nTEL:090\r\nBEGIN:VCARD\r\nFN:B\r\nTEL:091\r\nEND:VCARD';
+    const { cards, warnings } = parseVcf(two);
+    expect(cards.map((c) => c.name), '前のカードが丸ごと消えた').toEqual(['A', 'B']);
+    expect(warnings.join(''), '黙って上書きした').toContain('END:VCARD が無いまま次が始まりました');
+  });
+
+  it('🔴 2.1 の QP は行末 = で折る(継続行が空白で始まらない形)', () => {
+    // 「山田太郎」= E5 B1 B1 / E7 94 B0 / E5 A4 AA / E9 83 8E
+    const folded =
+      'BEGIN:VCARD\r\nFN;ENCODING=QUOTED-PRINTABLE;CHARSET=UTF-8:=E5=B1=B1=E7=94=B0=E5=A4=AA=\r\n' +
+      '=E9=83=8E\r\nTEL:090\r\nEND:VCARD';
+    const { cards } = parseVcf(folded);
+    expect(cards[0]!.name, '折り返しの続きを捨てた(題名が途中で切れる)').toBe('山田太郎');
+  });
+
+  it('⚠ 対照群 ── QP と名乗っていない行末の = は継がない(base64 の詰め物を巻き込まない)', () => {
+    const v = 'BEGIN:VCARD\r\nFN:A\r\nTEL:090\r\nX-Y:QUJD=\r\nX-Z:next\r\nEND:VCARD';
+    const { cards } = parseVcf(v);
+    expect(cards[0]!.others.join('\n')).toContain('X-Z: next');
+  });
+
+  it('🔴 電話・メールの種別は取り込めないと言う(黙って消さない)', () => {
+    const v =
+      'BEGIN:VCARD\r\nFN:A\r\nTEL;TYPE=CELL:090\r\nTEL;TYPE=FAX:03-1\r\nEND:VCARD';
+    const { cards, warnings } = parseVcf(v);
+    expect(cards[0]!.tels, '値まで捨てた').toEqual(['090', '03-1']);
+    expect(warnings.filter((w) => w.includes('種別')), '1 枚で何度も言った').toHaveLength(1);
+  });
+
+  it('⚠ 対照群 ── PKC 自身の書き出し(TYPE=voice / internet)を読み直しても黙る', () => {
+    const back = parseVcf(
+      'BEGIN:VCARD\r\nFN:A\r\nTEL;TYPE=voice:090\r\nEMAIL;TYPE=internet:a@b.jp\r\nEND:VCARD',
+    );
+    expect(back.warnings, '自分の書き出しに嘘の狼を出した').toEqual([]);
   });
 });
 
@@ -236,6 +289,34 @@ describe('buildVcf ── 書き出し', () => {
 
   it('⚠ 誕生日が無ければ BDAY の行を書かない(空の行を作らない)', () => {
     expect(buildVcf([card()])).not.toContain('BDAY');
+  });
+
+  /**
+   * 🔴 **画面の丸めを書き出しへ持ち込まない**を、**書き出し側で**守る
+   * (2 巡目の着地前レビュー 2026-08-28)。
+   * ⚠ `contact-card.test.ts` の「原値を丸めない」は `contactOf` しか見ていないので、
+   *   `buildVcf` に `.slice(0, CONTACT_LIMITS.each)` を足す変異が**生き延びる** ──
+   *   1 巡目に見つけた欠陥がそのまま復活する。⚠ ここまで `buildVcf` を
+   *   **8 件を超える card で 1 度も呼んでいなかった**。
+   */
+  it('🔴 9 本目以降も .vcf に入る(画面の丸めを書き出しへ持ち込まない)', () => {
+    const tels = Array.from({ length: 30 }, (_, i) => `090-0000-${String(i).padStart(4, '0')}`);
+    const out = buildVcf([card({ tels, emails: [] })]);
+    expect((out.match(/\r\nTEL;/g) ?? []).length, '書き出しで切られた').toBe(30);
+    expect(out, '30 本目が落ちた').toContain('TEL;TYPE=voice:090-0000-0029');
+  });
+
+  /**
+   * 🔴 **宛先のエスケープ**(2 巡目の着地前レビュー 2026-08-28)。
+   * ⚠ ここまで `,` `;` `\` を含む**電話・メール**で往復を通していなかったので、
+   *   `escapeValue` を外す変異が**生き延びる** ── 自分の `parseVcf` は `TEL` を
+   *   分割しないので往復 test も緑になり、**壊れるのは相手の端末だけ**という
+   *   いちばん見えない形になる。
+   */
+  it('🔴 電話・メールの , ; \\ もエスケープする(壊れるのは相手の端末)', () => {
+    const out = buildVcf([card({ tels: ['03-1111-2222, 内線 5'], emails: ['a;b@example.com'] })]);
+    expect(out, '電話の , を素で書いた').toContain('TEL;TYPE=voice:03-1111-2222\\, 内線 5');
+    expect(out, 'メールの ; を素で書いた').toContain('EMAIL;TYPE=internet:a\\;b@example.com');
   });
 
   it('空なら空文字(空の VCARD を書かない)', () => {

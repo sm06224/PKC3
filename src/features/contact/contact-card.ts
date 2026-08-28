@@ -104,6 +104,26 @@ function values(v: FrontmatterValue | undefined): string[] {
 }
 
 /**
+ * 画面に出す 1 つの宛先。
+ * 🔴 **`text` は見せる字、`raw` は押し先を作る値。混ぜてはいけない**
+ * (2 巡目の着地前レビュー 2026-08-28)。
+ *
+ * ⚠ 1 稿目は丸めた字を 1 本返すだけだったので、描画が **`telHref(丸めた字)` /
+ *   `mailHref(丸めた字)`** を作っていた ── 120 字を超える宛先では、
+ *   字は正しく `…` で丸まっているのに**押すと別の宛先へ送る**。
+ *   しかも `…` は `[^\s@]` に当たるので `mailHref` の検査を**すり抜ける**
+ *   (= 押せない口にもならない、いちばん気づけない形)。
+ * 🔑 1 巡目の指摘は「丸めが**外へ出る成果物**に漏れている」だった ──
+ *   `href` も外へ出る成果物である(CLAUDE.md「1 巡目の修正は、2 巡目の対象」)。
+ */
+export interface DisplayWay {
+  /** 画面に出す字(長ければ `…` で切ってある)。 */
+  readonly text: string;
+  /** 🔴 **原値**。押し先(`tel:` / `mailto:`)は必ずこちらから作る。 */
+  readonly raw: string;
+}
+
+/**
  * 🔴 **画面に出す分だけ丸める**(#278 段③ の着地前レビュー 2026-08-28)。
  *
  * ⚠ 1 稿目はここの丸め(8 件 / 120 字 + `…`)を **`contactOf` の中**でやっていた。
@@ -116,12 +136,13 @@ function values(v: FrontmatterValue | undefined): string[] {
  * ⚠ だから丸めは**描画の仕事**にした。`ContactCard` は原値を持つ。
  */
 export function displayWays(list: readonly string[]): {
-  readonly shown: readonly string[];
+  readonly shown: readonly DisplayWay[];
   readonly hidden: number;
 } {
-  const shown = list
-    .slice(0, CONTACT_LIMITS.each)
-    .map((s) => (s.length <= CONTACT_LIMITS.chars ? s : `${s.slice(0, CONTACT_LIMITS.chars)}…`));
+  const shown = list.slice(0, CONTACT_LIMITS.each).map((raw) => ({
+    raw,
+    text: raw.length <= CONTACT_LIMITS.chars ? raw : `${raw.slice(0, CONTACT_LIMITS.chars)}…`,
+  }));
   return { shown, hidden: Math.max(0, list.length - shown.length) };
 }
 

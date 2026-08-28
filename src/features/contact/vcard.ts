@@ -14,6 +14,9 @@
  * 写真(PHOTO)や住所(ADR)など、frontmatter の鍵に写せない項目は
  * **本文の行として残す**(`- ADR: …`)── 取込で情報を黙って失うと、
  * user は元の .vcf を既に消していることがある(戻れない欠損になる)。
+ * ⚠ **例外が 1 つある: 電話・メールの種別**(`TEL;TYPE=CELL`)は残せない ──
+ * 値に混ぜると `buildVcf` が壊れた番号を書き出すためである。**だから言う**
+ * (2026-08-28。それまでは警告 0 件で消えていた)。
  * ⚠ ただし**符号化された中身**(写真 / 音 / 鍵 ── `ENCODING=B` か 2000 字超)は
  * **落として注意で言う**。本文に数十 KB の base64 を書くと編集不能なノートになる。
  * ⚠ 落とすのは**名前ではなく中身**で決める(`isEncodedBlob`)── `PHOTO` だけを
@@ -60,8 +63,14 @@ function unescapeValue(v: string): string {
 
 /** QUOTED-PRINTABLE(2.1)を解く。⚠ UTF-8 のバイト列として復号する。 */
 function decodeQp(v: string): string {
-  // 行末の `=`(ソフト改行)は折り返しの名残 ── 落とす
-  const joined = v.replace(/=\r?\n/g, '').replace(/=$/, '');
+  /**
+   * 行末の `=`(ソフト改行)は折り返しの名残 ── 落とす。
+   * ⚠ かつてここに `.replace(/=\r?\n/g, '')` も置いていたが、**no-op だった**
+   *   (値は `line.slice(colon + 1)` なので改行を含みえない)。折り返しは
+   *   `unfoldLines` が解く ── CLAUDE.md「『これが無いと壊れる』と書く前に、
+   *   外して壊れるのを見る」に従って消した(2026-08-28)。
+   */
+  const joined = v.replace(/=$/, '');
   const bytes: number[] = [];
   for (let i = 0; i < joined.length; i += 1) {
     const ch = joined[i]!;
@@ -87,13 +96,36 @@ interface VcfProp {
   readonly value: string;
 }
 
-/** 折り返し(行頭の空白 / タブは前の行の続き)を解いて、性質の行に割る。 */
+/**
+ * その行が **QUOTED-PRINTABLE と名乗っているか**(パラメタ部だけを見る)。
+ * ⚠ `[^:]*` は `:` を越えないので、**値の中の同じ字**には当たらない。
+ */
+const QP_HEAD = /^[^:]*;[^:]*ENCODING=QUOTED-PRINTABLE/i;
+
+/** 折り返し(行頭の空白 / タブは前の行の続き、または行末 `=`)を解いて、性質の行に割る。 */
 function unfoldLines(text: string): string[] {
   const raw = text.split(/\r\n|\n|\r/);
   const out: string[] = [];
   for (const line of raw) {
-    if ((line.startsWith(' ') || line.startsWith('\t')) && out.length > 0) {
-      out[out.length - 1] += line.slice(1);
+    const prev = out.length > 0 ? out[out.length - 1]! : null;
+    if ((line.startsWith(' ') || line.startsWith('\t')) && prev !== null) {
+      out[out.length - 1] = prev + line.slice(1);
+    } else if (prev !== null && prev.endsWith('=') && QP_HEAD.test(prev)) {
+      /**
+       * 🔴 **2.1 の QUOTED-PRINTABLE は「行末 `=`」で折る**(2 巡目の着地前
+       * レビュー 2026-08-28)── 継続行は**空白で始まらない**ので、上の枝では
+       * 拾えない。Android / 古い Outlook / ガラケーの書き出しの標準形である。
+       *
+       * ⚠ 直す前は、折られた行の続きが**別の性質の行**として読まれ、
+       *   `parseProp` が `:` を見つけられずに捨てていた ── 実測:
+       *   `FN;ENCODING=QUOTED-PRINTABLE:…=E5=A4=AA=` + `=E9=83=8E` は
+       *   **「山田太」**(「郎」が消える)。⚠ 警告は出るが
+       *   「読めない行を捨てました(=E9=83=8E)」なので、**名前が欠けたことと
+       *   結び付かない** ── user は題名が切れた理由を知りようがない。
+       * ⚠ **QP と名乗っている行だけ**を継ぐ ── そうしないと、base64 の
+       *   詰め物(`…QUJD=`)の次の行まで巻き込む。
+       */
+      out[out.length - 1] = prev.slice(0, -1) + line;
     } else if (line !== '') {
       out.push(line);
     }
@@ -158,6 +190,37 @@ function nameFromN(value: string): string {
   return [comps[0] ?? '', comps[1] ?? ''].filter(Boolean).join(' ').trim();
 }
 
+/** 読みかけの 1 枚。⚠ 型を書き出しておく(`finishCard` と 2 か所で組み立てない)。 */
+interface VcfDraft {
+  fn: string;
+  n: string;
+  org: string;
+  tels: string[];
+  emails: string[];
+  birthday: string;
+  notes: string[];
+  others: string[];
+  /** 種別を落としたことを**このカードで既に言ったか**(200 枚で 200 行にしない)。 */
+  typeSaid: boolean;
+}
+
+/**
+ * 読みかけを 1 枚にする。
+ * ⚠ **1 か所だけ**にする ── 閉じが在るときと無いときで作り方が違うと、
+ *   片方だけ field を足し忘れて**静かに欠ける**(CLAUDE.md §7)。
+ */
+function finishCard(cur: VcfDraft): VcfCard {
+  return {
+    name: cur.fn !== '' ? cur.fn : cur.n,
+    org: cur.org,
+    tels: cur.tels,
+    emails: cur.emails,
+    birthday: cur.birthday,
+    notes: cur.notes,
+    others: cur.others,
+  };
+}
+
 /**
  * .vcf の中身を読む。⚠ **壊れた行は黙って捨てず warnings に積む**。
  */
@@ -166,16 +229,7 @@ export function parseVcf(text: string): VcfParseResult {
   const cards: VcfCard[] = [];
   const lines = unfoldLines(text);
 
-  let cur: {
-    fn: string;
-    n: string;
-    org: string;
-    tels: string[];
-    emails: string[];
-    birthday: string;
-    notes: string[];
-    others: string[];
-  } | null = null;
+  let cur: VcfDraft | null = null;
   const cardNo = (): number => cards.length + 1;
 
   for (const line of lines) {
@@ -186,22 +240,25 @@ export function parseVcf(text: string): VcfParseResult {
       continue;
     }
     if (prop.name === 'BEGIN' && prop.value.trim().toUpperCase() === 'VCARD') {
-      if (cur !== null) warnings.push(`${cardNo()} 枚目: END:VCARD が無いまま次が始まりました`);
-      cur = { fn: '', n: '', org: '', tels: [], emails: [], birthday: '', notes: [], others: [] };
+      /**
+       * 🔴 **閉じが無くても、読めた分は捨てない**(2 巡目の着地前レビュー 2026-08-28)。
+       *
+       * ⚠ 直す前は `cur` を**丸ごと上書き**していたので、`END:VCARD` を書かない
+       *   書き出し(実在する)を読むと、**名前も電話も在るカードが 1 枚ごと消えた**。
+       *   しかも文言は「次が始まりました」だけで**捨てたと言っていない** ──
+       *   末尾の同型(下の `END が無いまま終わりました(捨てました)`)とも非対称だった。
+       * 🔑 この module の宣言は「**対応しない項目も捨てない**」である。
+       *   閉じの書き忘れで**中身ごと**捨てるのは、その宣言と正面から反する。
+       */
+      if (cur !== null) {
+        warnings.push(`${cardNo()} 枚目: END:VCARD が無いまま次が始まりました(読めた分は取り込みました)`);
+        cards.push(finishCard(cur));
+      }
+      cur = { fn: '', n: '', org: '', tels: [], emails: [], birthday: '', notes: [], others: [], typeSaid: false };
       continue;
     }
     if (prop.name === 'END' && prop.value.trim().toUpperCase() === 'VCARD') {
-      if (cur !== null) {
-        cards.push({
-          name: cur.fn !== '' ? cur.fn : cur.n,
-          org: cur.org,
-          tels: cur.tels,
-          emails: cur.emails,
-          birthday: cur.birthday,
-          notes: cur.notes,
-          others: cur.others,
-        });
-      }
+      if (cur !== null) cards.push(finishCard(cur));
       cur = null;
       continue;
     }
@@ -227,11 +284,32 @@ export function parseVcf(text: string): VcfParseResult {
           .join(' ');
         break;
       case 'TEL':
-        if (decoded !== '') cur.tels.push(decoded);
+      case 'EMAIL': {
+        /**
+         * 🔴 **種別(携帯 / 自宅 / FAX / 勤務先)は取り込めない ── 黙って落とさない**
+         * (2 巡目の着地前レビュー 2026-08-28)。
+         *
+         * ⚠ この module の宣言は「**対応しない項目も捨てない**」なのに、
+         *   `TYPE=` は値だけ拾って**警告 0 件で消えていた** ── スマホの 200 件を
+         *   取り込んで書き出すと、**自宅 / 携帯 / FAX の区別が全部消える**
+         *   (`buildVcf` は一律 `TYPE=voice` を書く)。user は失ったことに気づけない。
+         * ⚠ **値に混ぜて残さない**(`090-…(携帯)`)── `buildVcf` がそれを
+         *   そのまま `TEL:` に書き、**相手の端末に壊れた番号が保存される**。
+         * ⚠ PKC 自身の書き出しを読み直したときは黙る ── `TYPE=VOICE` /
+         *   `TYPE=INTERNET` はこちらが書いた綴りなので、言うと嘘の狼になる。
+         */
+        const types = prop.params.filter((p) => p.startsWith('TYPE='));
+        if (!cur.typeSaid && types.some((p) => p !== 'TYPE=VOICE' && p !== 'TYPE=INTERNET')) {
+          cur.typeSaid = true;
+          warnings.push(
+            `${cardNo()} 枚目: 電話・メールの種別(携帯 / 自宅 / FAX など)は取り込めません`,
+          );
+        }
+        if (decoded === '') break;
+        if (prop.name === 'TEL') cur.tels.push(decoded);
+        else cur.emails.push(decoded);
         break;
-      case 'EMAIL':
-        if (decoded !== '') cur.emails.push(decoded);
-        break;
+      }
       case 'BDAY':
         cur.birthday = decoded;
         break;
@@ -266,7 +344,11 @@ export function parseVcf(text: string): VcfParseResult {
       }
     }
   }
-  if (cur !== null) warnings.push(`${cardNo()} 枚目: END:VCARD が無いまま終わりました(捨てました)`);
+  if (cur !== null) {
+    // ⚠ 上と同じ ── 閉じが無いだけで中身を捨てない(非対称を作らない)
+    warnings.push(`${cardNo()} 枚目: END:VCARD が無いまま終わりました(読めた分は取り込みました)`);
+    cards.push(finishCard(cur));
+  }
   return { cards, warnings };
 }
 
