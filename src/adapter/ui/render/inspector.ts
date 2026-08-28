@@ -37,7 +37,7 @@
  * **毎回値を計算して、違うものだけ書く**なら、その族は原理的に発生しない。
  * ⚠ 器を組み直すのは**形が変わるときだけ**(選択の有無 / 「書き戻す」の有無)。
  */
-import type { AppState } from '@adapter/state/app-state';
+import { phaseDisabledNote, type AppState } from '@adapter/state/app-state';
 import type { EntryMeta } from '@core/model/entry-meta';
 import { ScrollMemory } from './scroll-memory';
 import { archetypeLabel } from './sidebar';
@@ -163,6 +163,14 @@ export class InspectorRenderer {
      * 判定はここ 1 か所で採り、塗る先それぞれへ配る(§7: 同じ問いに 2 つ答えない)。
      */
     const editing = state.phase !== 'ready';
+    /**
+     * 🔴 **理由は phase から導く**(#516)。
+     * ⚠ 直す前は一律「編集中は使えません」だったので、`phase === 'error'`
+     *   (保存に失敗したときの保護)でも同じ字が出ていた ── user は編集して
+     *   いないのに「確定するか取り消してください」と言われ、**存在しない編集を探す**。
+     * 🔑 字の出どころは `app-state.ts` の 1 か所(§7)。
+     */
+    const blockedNote = phaseDisabledNote(state.phase) ?? '';
 
     this.setRow('inspector-title', meta.title);
     this.setRow('inspector-kind', archetypeLabel(meta.archetype));
@@ -419,7 +427,7 @@ export class InspectorRenderer {
           // 🔴 編集中は押せなくする(#513)── reducer は黙って捨てるので、口の側で断る
           del.disabled = editing;
           del.title = editing
-            ? 'この関係を消します(編集中は使えません ── 確定するか取り消してください)'
+            ? `この関係を消します(${blockedNote})`
             : 'この関係を消します(ノートは消えません)';
           item.append(label, go, del);
           relBox.append(item);
@@ -650,8 +658,8 @@ export class InspectorRenderer {
     }
     this.setRow('inspector-created', formatStoredDate(meta.createdAt));
     this.setRow('inspector-updated', formatStoredDate(meta.updatedAt));
-    this.paintDate(meta, editing);
-    this.paintRelationAdd(editing);
+    this.paintDate(meta, editing, blockedNote);
+    this.paintRelationAdd(editing, blockedNote);
     // 🔴 **どのファイルから来たか**を出す(2026-08-05)── 出さないと、書き戻しが
     //    「どこへ」書くのか分からない操作になる。⚠ 行の有無は形(= build 側)
     if (link !== null) this.setRow('inspector-linked-file', link);
@@ -685,7 +693,7 @@ export class InspectorRenderer {
        */
       setAttr(b, 'data-pkc-entry', meta.lid);
       if (b.disabled !== editing) b.disabled = editing;
-      const shown = editing ? `${title}(編集中は使えません ── 確定するか取り消してください)` : title;
+      const shown = editing ? `${title}(${blockedNote})` : title;
       if (b.title !== shown) b.title = shown;
     }
 
@@ -750,7 +758,7 @@ export class InspectorRenderer {
    *   本文の frontmatter を開いて手で消すまで戻せない(片道を作らない)。
    * ⚠ 器は使い回す(押す寸前のボタンを作り直さない)。
    */
-  private paintDate(meta: EntryMeta, editing: boolean): void {
+  private paintDate(meta: EntryMeta, editing: boolean, blockedNote: string): void {
     const dd = this.rows.get('inspector-date');
     if (!dd) return;
     let set = dd.querySelector<HTMLButtonElement>('[data-pkc-action="set-entry-date"]');
@@ -775,13 +783,13 @@ export class InspectorRenderer {
      */
     set.disabled = editing;
     const setBase = has ? '日付を選び直します' : 'このノート 1 件を、その日の予定にします';
-    set.title = editing ? `${setBase}(編集中は使えません ── 確定するか取り消してください)` : setBase;
+    set.title = editing ? `${setBase}(${blockedNote})` : setBase;
     // ⚠ **押しても何も起きないボタンを出さない**(日付が無ければ外すものが無い)
     if (clear) {
       clear.hidden = !has;
       clear.disabled = editing;
       clear.title = editing
-        ? '日付を外します(編集中は使えません ── 確定するか取り消してください)'
+        ? `日付を外します(${blockedNote})`
         : '日付を外します(ノートは消えません)';
     }
   }
@@ -791,14 +799,14 @@ export class InspectorRenderer {
    * ⚠ この帯は操作の帯の loop(`this.buttons`)の**対象外**なので、個別に塗る ──
    *   直す前は編集中も押せて、reducer が黙って捨て、**欄だけ空になっていた**。
    */
-  private paintRelationAdd(editing: boolean): void {
+  private paintRelationAdd(editing: boolean, blockedNote: string): void {
     const bar = this.relAdd;
     if (!bar) return;
     bar.target.disabled = editing;
     bar.kind.disabled = editing;
     bar.add.disabled = editing;
     const base = '選んでいるノートから、相手のノートへ関係を張ります';
-    bar.add.title = editing ? `${base}(編集中は使えません ── 確定するか取り消してください)` : base;
+    bar.add.title = editing ? `${base}(${blockedNote})` : base;
   }
 
   /** 器を組む(形が変わったときだけ呼ばれる)。 */

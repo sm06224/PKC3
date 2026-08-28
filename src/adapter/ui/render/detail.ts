@@ -131,6 +131,12 @@ function selfContainerId(state: AppState): string {
   return state.cid ?? '';
 }
 
+/**
+ * 🔴 **「この lid の本文が描けた」印**(#517)。本文の器に付く。
+ * ⚠ 綴りを写さない ── 待つ側(`binder.ts` の目次)はここを引く(§7)。
+ */
+export const PAINTED_ATTR = 'data-pkc-painted';
+
 export class DetailRenderer {
   private readonly region: HTMLElement;
   private readonly assets: AssetLender | null;
@@ -621,6 +627,19 @@ export class DetailRenderer {
        */
       const token = ++this.viewToken;
       /**
+       * 🔴 **「この lid の本文が描けた」を DOM の印で外へ出す**(#517)。
+       *
+       * ⚠ 本文の描画は worker の promise 越し(下の `.then(paint)`)なので、
+       *   面を切り替えた**直後は見出しがまだ DOM に無い** ── 目次を押しても
+       *   「その見出しがまだ出ていません」と断られ、**1 回の押しでは届かない**。
+       * 🔑 だから **`binder` へ `DetailRenderer` を渡すのではなく、印を焼く** ──
+       *   このリポジトリは既に面の状態を `data-pkc-*` で外へ出す作法を持っている
+       *   (`data-pkc-columns-on` / `data-pkc-detail-mode`)。配線を増やさない。
+       * ⚠ **描き始める前に外す**(ここ)── 前の lid の印が残っていると、
+       *   待つ側が**古い本文を「描けた」と読む**。
+       */
+      this.bodyHost!.removeAttribute(PAINTED_ATTR);
+      /**
        * ⚠ 当てていいかの判定は **世代 + 器の同一性**の 2 つ。
        * `isConnected` は使わない ── 器が document に繋がる前に描く経路
        * (骨組みを組んでから親へ入れる / test)を黙って落とす。
@@ -668,6 +687,11 @@ export class DetailRenderer {
         // ⚠ 帯は**本文が入ってから**組む(数えるものが DOM に無いと 0 件になる)
         this.renderExternalImageBar(lid, host);
         this.restoreScroll();
+        /**
+         * 🔴 **描けた印**(#517)。⚠ **世代と器の門を通った後**に焼く ──
+         *   前に置くと、捨てるはずの古い結果が印を付けてしまう。
+         */
+        host.setAttribute(PAINTED_ATTR, lid);
       };
       void this.markdown
         .render(shown, opts)

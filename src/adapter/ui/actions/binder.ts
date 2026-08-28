@@ -130,6 +130,7 @@ import {
   resolvePlanTarget,
 } from '@features/structure/structure-plan';
 import { appQueryKey } from '@adapter/ui/render/query-key-store';
+import { PAINTED_ATTR } from '@adapter/ui/render/detail';
 import { openView } from '@adapter/ui/render/open-view';
 import {
   CLOSE_VIEW_WINDOW_REFUSED,
@@ -1577,6 +1578,117 @@ export function openPaletteFor(
 }
 
 
+/**
+ * 🔴 **「この lid の本文が描けた」を待つ**(#517)。
+ *
+ * ⚠ **期限つき**。印が来ない環境(器が無い / 描けない)で永久に待つ口を作らない。
+ * 🔑 **もう今の lid なら、待たずにその場で返る** ── よくある道
+ *   (detail に居て目次を押す)を 1ms も遅くしない。
+ * ⚠ 綴りは `detail.ts` の `PAINTED_ATTR` を引く(2 か所に書かない ── §7)。
+ */
+async function waitPainted(
+  detail: HTMLElement | null,
+  lid: string | null,
+  timeoutMs = 600,
+): Promise<void> {
+  if (detail === null || lid === null) return;
+  /**
+   * 🔴 **待つ物が在るときだけ待つ**。
+   *
+   * ⚠ 器(本文のホスト)が無い面では、描き直しは**起きない** ── そこで待つと
+   *   期限いっぱい(600ms)止まるだけで、user から見て**目次が重くなる**。
+   *   ⚠ 実際、素の fixture でこれを踏んだ(器を植えない test が全部 600ms 待った)。
+   * 🔑 器が在って**印が今の lid でない**ときだけが「描き直しの最中」である。
+   */
+  const bodyHost = (): HTMLElement | null =>
+    detail.querySelector<HTMLElement>(
+      '[data-pkc-field="detail-body-host"], [data-pkc-field="detail-body"]',
+    );
+  const painted = (): boolean => {
+    const host = bodyHost();
+    return host === null || host.getAttribute(PAINTED_ATTR) === lid;
+  };
+  if (painted()) return;
+  await new Promise<void>((resolve) => {
+    let done = false;
+    const finish = (): void => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      obs.disconnect();
+      resolve();
+    };
+    const obs = new MutationObserver(() => {
+      if (painted()) finish();
+    });
+    obs.observe(detail, { subtree: true, attributes: true, attributeFilter: [PAINTED_ATTR] });
+    const timer = setTimeout(finish, timeoutMs);
+    // ⚠ 待ち始めた直後に印が付く回を落とさない(observe の前に済んでいることがある)
+    if (painted()) finish();
+  });
+}
+
+/**
+ * 🔴 **目次の行から本文の見出しへ飛ぶ**(#514 / #517)。
+ *
+ * ⚠ **本文以外の面を開いたままなら、先に本文の面へ戻す**(#514)── 面は hidden で
+ *   常駐する(`center.ts`)ので見出しは hidden のまま**見つかる**が、
+ *   `display:none` の要素への `scrollIntoView` は**無言の no-op** になる。
+ * ⚠ **探すより前に戻す** ── 選択が変わっていた場合、面の切替は骨組みを作り直すので、
+ *   先に掴んだ要素は detached になり、また無言に戻る。
+ * ⚠ detail に居るときは撃たない ── `SET_VIEW_MODE` は履歴・ゴミ箱の panel を畳む
+ *   副作用を持つ(目次を押しただけで履歴が閉じる、を作らない)。
+ */
+async function tocJump(dispatcher: Dispatcher, target: HTMLElement, slug: string): Promise<void> {
+    if (dispatcher.getState().viewMode !== 'detail') {
+      dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
+    }
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const detail = root.querySelector<HTMLElement>('[data-pkc-region="detail"]');
+    /**
+     * 🔴 **描き直しの完了を待ってから探す**(#517)。
+     *
+     * ⚠ 本文の描画は worker の promise 越し(`detail.ts`)なので、面を戻した
+     *   直後は**見出しがまだ DOM に無い** ── 直す前は、そこで断り文を出して
+     *   **もう一度押させて**いた(1 回の押しで届かない = 動線を 1 つ失っている)。
+     * 🔑 待つのは「この lid の本文が描けた」印(`PAINTED_ATTR`)である。
+     * ⚠ **既に今の lid なら待たない**(下の `waitPainted` が同期で返る)──
+     *   よくある道(detail に居て目次を押す)を遅くしない。
+     * ⚠ 期限つきにする ── 印が来ない環境(描けない / 器が無い)で
+     *   **永久に待つ口を作らない**。期限切れなら、いままでどおり断り文を出す。
+     */
+    await waitPainted(detail, dispatcher.getState().selectedLid);
+    const hit = detail
+      ? [...detail.querySelectorAll<HTMLElement>('h1[id], h2[id], h3[id]')].find(
+          (h) => h.id === slug,
+        )
+      : undefined;
+    if (!hit) {
+      // ⚠ 文言は phase で分ける ── 編集していないのに「編集中は…」と出すと、
+      //   user は別のものを探す(選択を変えた直後の描き直し中はこちらに来る)
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error:
+          dispatcher.getState().phase !== 'ready'
+            ? '編集中は本文が表示されていないので移動できません(保存するか、2 ペインにしてください)'
+            : 'その見出しが本文の面にまだ出ていません(描き直しの途中かもしれません ── もう一度押してください)',
+      });
+      return;
+    }
+    /**
+     * 🔴 **畳んだ章の中なら、開いてから飛ぶ**(#514)── 覆っている畳みだけを開く。
+     * ⚠ host は**畳みを管理している器**(`detail-body-host` = `applyHeadingFold` が
+     *   受けるのと同じ器)で渡す ── `hit.parentElement` だと `:::` の囲みの中の
+     *   見出しで**別の器**を渡してしまい、外の畳みに届かない(レビュー指摘)。
+     *   器が無い環境(unit の素の fixture)では parentElement へ落とす。
+     */
+    const foldHost =
+      hit.closest<HTMLElement>('[data-pkc-field="detail-body-host"]') ?? hit.parentElement;
+    if (foldHost !== null) revealBlock(foldHost, hit);
+    hit.scrollIntoView({ block: 'start' });
+}
+
+
 const ACTIONS: Record<string, ActionHandler> = {
   /**
    * 🔴 **本文のリンクで別のノートへ飛ぶ**(2026-08-08。user 裁定「任せます」)。
@@ -1647,48 +1759,7 @@ const ACTIONS: Record<string, ActionHandler> = {
   'toc-jump': (dispatcher, target) => {
     const slug = target.getAttribute('data-pkc-toc-slug') ?? '';
     if (slug === '') return;
-    /**
-     * 🔴 **本文以外の面を開いたままなら、先に本文の面へ戻す**(#514)。
-     * 面は hidden で常駐する(center.ts)ので見出しは hidden のまま**見つかる**が、
-     * display:none の要素への `scrollIntoView` は**無言の no-op**になる。
-     * ⚠ **探すより前に戻す**(レビュー指摘)── 選択が変わっていた場合、面の切替は
-     *   骨組みを作り直すので、先に掴んだ要素は detached になり、また無言に戻る。
-     * ⚠ detail に居るときは撃たない ── `SET_VIEW_MODE` は履歴・ゴミ箱の panel を
-     *   畳む副作用を持つ(目次を押しただけで履歴が閉じる、を作らない)。
-     */
-    if (dispatcher.getState().viewMode !== 'detail') {
-      dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
-    }
-    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
-    const detail = root.querySelector<HTMLElement>('[data-pkc-region="detail"]');
-    const hit = detail
-      ? [...detail.querySelectorAll<HTMLElement>('h1[id], h2[id], h3[id]')].find(
-          (h) => h.id === slug,
-        )
-      : undefined;
-    if (!hit) {
-      // ⚠ 文言は phase で分ける ── 編集していないのに「編集中は…」と出すと、
-      //   user は別のものを探す(選択を変えた直後の描き直し中はこちらに来る)
-      dispatcher.dispatch({
-        type: 'OP_FAILED',
-        error:
-          dispatcher.getState().phase !== 'ready'
-            ? '編集中は本文が表示されていないので移動できません(保存するか、2 ペインにしてください)'
-            : 'その見出しが本文の面にまだ出ていません(描き直しの途中かもしれません ── もう一度押してください)',
-      });
-      return;
-    }
-    /**
-     * 🔴 **畳んだ章の中なら、開いてから飛ぶ**(#514)── 覆っている畳みだけを開く。
-     * ⚠ host は**畳みを管理している器**(`detail-body-host` = `applyHeadingFold` が
-     *   受けるのと同じ器)で渡す ── `hit.parentElement` だと `:::` の囲みの中の
-     *   見出しで**別の器**を渡してしまい、外の畳みに届かない(レビュー指摘)。
-     *   器が無い環境(unit の素の fixture)では parentElement へ落とす。
-     */
-    const foldHost =
-      hit.closest<HTMLElement>('[data-pkc-field="detail-body-host"]') ?? hit.parentElement;
-    if (foldHost !== null) revealBlock(foldHost, hit);
-    hit.scrollIntoView({ block: 'start' });
+    void tocJump(dispatcher, target, slug);
   },
   'filter-by-tag': (dispatcher, target) => {
     const tag = target.getAttribute('data-pkc-tag');
@@ -3036,13 +3107,16 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: picked.date });
     });
   },
-  /** 🔴 **置けるなら外せる**(片道を作らない)。 */
+  /**
+   * 🔴 **置けるなら外せる**(片道を作らない)。
+   * ⚠ **ここに phase の門を置かない**(#516 で外した)── `SET_ENTRY_DATE` の
+   *   reducer が声に出して断るようになったので、ここで先回りすると
+   *   **同じ断り文が 2 か所**になる(片方だけ直すと食い違う ── §7)。
+   * 🔑 上の `set-entry-date` に門が残っているのは**別の理由**である ──
+   *   あちらは**ピッカーを開く前に止める**ためで、reducer では間に合わない
+   *   (#513 の「全手順を完走させてから捨てる」を作り直さない)。
+   */
   'clear-entry-date': (dispatcher) => {
-    // 🔴 編集中は声に出して断る(#513)── reducer は黙って捨てる
-    if (dispatcher.getState().phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから日付を外してください' });
-      return;
-    }
     const lid = dispatcher.getState().selectedLid;
     if (lid === null) return;
     dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: null });
