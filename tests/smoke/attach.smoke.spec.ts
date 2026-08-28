@@ -326,7 +326,139 @@ test('🔴 画像の別の窓は img で開く(PDF の箱にならない)', asyn
   expect(shown.pdf, '画像なのに PDF の箱で開いた(空の枠になる)').toBe(false);
   expect(shown.img, '画像が入っていない').toBe(true);
   expect(shown.title).toBe('dot.png');
+  /**
+   * 🔴 **添付の窓にも拡大縮小が出る**(#527 の残り、2026-08-28)。
+   * ⚠ 開いた直後は**今までどおり収めて**出す(#192 からの見え方を変えない)。
+   *   ⚠ ここを実寸で開くと、大きな写真は**隅しか見えない**。
+   */
+  expect(
+    await popup.evaluate(() => document.body.getAttribute('data-pkc-fit')),
+    '添付の窓が収めて開いていない(見え方が変わった)',
+  ).toBe('contain');
+  await popup.locator('[data-pkc-field="asset-window-zoom"] button', { hasText: '等倍' }).click();
+  expect(
+    await popup.evaluate(() => document.body.getAttribute('data-pkc-fit')),
+    '添付の窓を実寸にできない(押しても何も起きない)',
+  ).toBeNull();
   await popup.close();
+  expect(errors).toEqual([]);
+});
+
+/**
+ * 🔴 **本文に貼った画像も、押すと別窓で大きく見られる**(#527、2026-08-28)。
+ *
+ * ⚠ 先に着地したのは**図(mermaid)だけ**で、user の頼みは
+ * 「対象は画像だけでなく**レンダリング結果全部**」だった ── 本文の画像は
+ * **押しても何も起きなかった**。
+ *
+ * ## 🔑 unit では原理的に見られない 3 つ
+ *
+ * 1. **別窓が本当に開くか**(happy-dom に窓は無い)
+ * 2. 🔴 **掴み送りが本当に送るか** ── 送りはブラウザの組版そのものなので、
+ *    happy-dom では「代入した値が読める」以上のことが言えない
+ * 3. **実寸が「縮む前の大きさ」か**(本文の画像は器の幅に合わせて縮めてある)
+ */
+test('🔴 本文に貼った画像を押すと、別窓で実寸で開き、掴んで送れる (#527)', async ({
+  page,
+  context,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 900, height: 700 });
+  await gotoApp(page);
+
+  /**
+   * ⚠ **その場で作る**(fixture を repo に置かない)。⚠ **1×1 では測れない** ──
+   *   この spec の主張は「縮む前の大きさで出る」「はみ出した所へ届く」なので、
+   *   **器より大きくできる**絵が要る。
+   */
+  const made = await page.evaluate(async () => {
+    const c = document.createElement('canvas');
+    c.width = 600;
+    c.height = 400;
+    const g = c.getContext('2d')!;
+    g.fillStyle = '#4477aa';
+    g.fillRect(0, 0, c.width, c.height);
+    g.fillStyle = '#ffffff';
+    g.fillRect(20, 20, 120, 80);
+    const blob: Blob = await new Promise((ok) => c.toBlob((b) => ok(b!), 'image/png')!);
+    return Array.from(new Uint8Array(await blob.arrayBuffer()));
+  });
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: 'しゃしん.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from(made),
+  });
+  const assetKey = await page
+    .locator('[data-pkc-action="download-asset"]')
+    .first()
+    .getAttribute('data-pkc-asset-key');
+  expect(assetKey, '前提: 添付の鍵が取れていない').toBeTruthy();
+
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-body"]').fill(`![しゃしん](asset:${assetKey})\n`);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  const img = page.locator('[data-pkc-field="detail-body"] img[data-pkc-asset-key]');
+  await expect(img).toHaveAttribute('src', /^blob:/, { timeout: 10_000 });
+  // ⚠ **押せることが画面に出ている**(印だけ付けても user は気づかない)
+  expect(await img.getAttribute('title'), '押せることが画面に出ていない').toContain('別の窓');
+
+  const [win] = await Promise.all([context.waitForEvent('page'), img.click()]);
+  await win.waitForSelector('[data-pkc-field="asset-window-image"]', { timeout: 10_000 });
+  const read = async () =>
+    win.evaluate(() => {
+      const i = document.querySelector('[data-pkc-field="asset-window-image"]') as HTMLImageElement;
+      // ⚠ 送り手は body(この窓は html を hidden にしている)
+      const box = document.body;
+      return {
+        natural: i.naturalWidth,
+        shown: Math.round(i.getBoundingClientRect().width),
+        fit: document.body.getAttribute('data-pkc-fit'),
+        left: Math.round(box.scrollLeft),
+        innerW: window.innerWidth,
+      };
+    });
+
+  // ① 🔴 **実寸で出ている**(器に合わせて縮めていない)
+  const first = await read();
+  expect(first.natural, '別窓の絵が読めていない(この検査は何も見ていない)').toBe(600);
+  expect(first.shown, `実寸で出ていない(実寸 ${first.natural} / 出ている ${first.shown})`).toBe(
+    first.natural,
+  );
+
+  // ② 窓からはみ出すまで大きくする(掴み送りが要る状態を作る)
+  const plus = win.locator('[data-pkc-field="asset-window-zoom"] button', { hasText: '＋' });
+  for (let i = 0; i < 4; i += 1) await plus.click();
+  const zoomed = await read();
+  expect(
+    zoomed.shown,
+    `前提: 窓(${zoomed.innerW}px)からはみ出していない(送る余地が無い)`,
+  ).toBeGreaterThan(zoomed.innerW);
+
+  /**
+   * ③ 🔴 **掴んで送れる**(#527「位置の掴み送り」)。
+   * ⚠ 端の細い棒だけに頼らせない ── 拡大した絵は「見たい所へ寄せる」が主な操作。
+   */
+  await win.mouse.move(400, 300);
+  await win.mouse.down();
+  await win.mouse.move(250, 300, { steps: 5 });
+  await win.mouse.up();
+  const panned = await read();
+  expect(panned.left, `掴んで動かしても送れない(${zoomed.left} → ${panned.left})`).toBeGreaterThan(
+    zoomed.left,
+  );
+
+  /**
+   * ④ 🔴 **収めるへ戻せる**(不可侵指示 2026-08-23「片道の操作を作らない」)。
+   * ⚠ 戻れないと、大きくしすぎたら**窓を開き直す**しか道が無い。
+   */
+  await win.locator('[data-pkc-field="asset-window-zoom"] button', { hasText: '収める' }).click();
+  const back = await read();
+  expect(back.fit, '収めるへ戻れない').toBe('contain');
+  expect(back.shown, `収めたのに窓(${back.innerW}px)からはみ出したまま`).toBeLessThanOrEqual(
+    back.innerW,
+  );
+  await win.close();
+
   expect(errors).toEqual([]);
 });
 

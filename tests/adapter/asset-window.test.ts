@@ -265,39 +265,181 @@ describe('図の別窓(実寸 + 拡大縮小 ── #527 案 A)', () => {
     return win;
   };
 
+  /**
+   * 🔴 **開いた直後の大きさ**(#527)。
+   *
+   * ⚠ **CSS の字面で見ない**(2026-08-28 に書き直した)── 収めると実寸は
+   *   **同じ 1 枚の CSS** を共有するようになったので、`object-fit:contain` が
+   *   在るかどうかは**どちらでも真**である(= 空振り、CLAUDE.md §1)。
+   *   見るのは**器に印が付いているか**(`body[data-pkc-fit]`)── これが
+   *   実際に規則を効かせている当のものである。
+   */
   it('🔴 既定は今までどおり「収めて見せる」(添付の見え方を変えない)', async () => {
-    const css = (await open()).document.querySelector('style')?.textContent ?? '';
-    expect(css, '既定なのに実寸になっている').toContain('object-fit:contain');
-    expect(css, '既定なのに上限が外れている').toContain('max-width:100%');
+    const doc = (await open()).document;
+    expect(doc.body.getAttribute('data-pkc-fit'), '既定なのに収める印が無い').toBe('contain');
+    const css = doc.querySelector('style')?.textContent ?? '';
+    expect(css, '収める規則そのものが無い').toContain(
+      'body[data-pkc-fit="contain"] img{max-width:100%;max-height:100%;object-fit:contain}',
+    );
   });
 
-  it('🔴 実寸のときは上限を当てない(縮めない)', async () => {
-    const css = (await open('natural')).document.querySelector('style')?.textContent ?? '';
-    expect(css, '実寸のはずが収める指定が残っている').not.toContain('object-fit:contain');
-    expect(css, '実寸のはずが上限で縮む').not.toContain('max-width:100%');
+  it('🔴 実寸のときは収める印を付けない(縮めない)', async () => {
+    const doc = (await open('natural')).document;
+    expect(doc.body.hasAttribute('data-pkc-fit'), '実寸のはずが収める印が付いている').toBe(false);
     /**
      * ⚠ **はみ出した分へ届くこと** ── 実寸は窓より大きいのが普通なので、
      *   送れないと「大きく見えるが端が見えない」になる
      *   (#527 / #523 で 2 度直した穴を、ここで作り直さない)。
      */
-    expect(css, 'はみ出した所へ届く手段が無い').toContain('overflow:auto');
+    expect(
+      doc.querySelector('style')?.textContent ?? '',
+      'はみ出した所へ届く手段が無い',
+    ).toContain('overflow:auto');
   });
 
-  it('🔴 実寸のときだけ拡大縮小の帯が出る', async () => {
-    const withFit = await open('natural');
-    const bar = withFit.document.querySelector('[data-pkc-field="asset-window-zoom"]');
-    expect(bar, '拡大縮小の帯が無い').not.toBeNull();
-    /**
-     * 🔴 **ボタンで完結する**(不可侵指示「マウスだけで完結し、キーボードは近道」)
-     * ── `Ctrl+ホイール` だけにすると**キーボードが要る**ことになる。
-     */
-    const labels = [...bar!.querySelectorAll('button')].map((b) => b.textContent);
-    expect(labels, 'マウスだけで拡大縮小できない').toEqual(['−', '＋', '等倍']);
-    // ⚠ 対照群 ── 既定では出ない(添付の窓に帯を増やさない)
+  /**
+   * 🔴 **拡大縮小はどちらの窓にも出る**(#527 の残り、2026-08-28)。
+   * ⚠ 1 稿目は実寸(図)のときだけ出していたので、**添付の写真を大きくする道が
+   *   無かった** ── user の頼みは「対象は画像だけでなくレンダリング結果全部」。
+   */
+  it('🔴 拡大縮小の帯は、収める窓にも実寸の窓にも出る', async () => {
+    for (const fit of [undefined, 'natural' as const]) {
+      const bar = (await open(fit)).document.querySelector('[data-pkc-field="asset-window-zoom"]');
+      expect(bar, `拡大縮小の帯が無い(fit=${String(fit)})`).not.toBeNull();
+      /**
+       * 🔴 **ボタンで完結する**(不可侵指示「マウスだけで完結し、キーボードは近道」)
+       * ── `Ctrl+ホイール` だけにすると**キーボードが要る**ことになる。
+       * 🔴 **帰り道がある**(不可侵指示 2026-08-23「片道の操作を作らない」)──
+       *   「収める」が無いと、実寸にしたあと**開き直すしか戻る道が無い**。
+       */
+      const labels = [...bar!.querySelectorAll('button')].map((b) => b.textContent);
+      expect(labels, `マウスだけで拡大縮小・往復できない(fit=${String(fit)})`).toEqual([
+        '−',
+        '＋',
+        '等倍',
+        '収める',
+      ]);
+    }
+  });
+
+  /**
+   * 🔴 **読み込みを待たずに、収める形で出す**(#527 の残り、2026-08-28)。
+   *
+   * ⚠ `load` を待って当てると、読み込みの間だけ**収める指定が無い状態**で描かれる
+   *   ── 大きな添付が一瞬**実寸で出てから縮む**(画面が跳ねる)。
+   * 🔴 **happy-dom では既定で殺せない**(実測)── あちらは `img.complete` が
+   *   **常に true** なので、「読み込み済みなら当てる」だけの実装でも通ってしまう
+   *   (変異試験 M9 が SURVIVED で教えた)。だから**実ブラウザと同じ意味論**
+   *   ── まだ読めていない絵は `complete === false` ── を器に持たせて測る
+   *   (CLAUDE.md §3「stub は本物の意味論を真似る」)。
+   */
+  it('🔴 まだ読めていない絵でも、開いた瞬間から収まっている', async () => {
+    const win = fakeWindow();
+    const doc = win.document;
+    const make = doc.createElement.bind(doc);
+    // ⚠ **本物に寄せる** ── 実ブラウザは `src` を差した直後 `complete === false`
+    doc.createElement = ((tag: string) => {
+      const el = make(tag);
+      if (tag === 'img') Object.defineProperty(el, 'complete', { value: false });
+      return el;
+    }) as typeof doc.createElement;
+    await openAssetWindow({
+      kind: 'image',
+      lent: { url: 'blob:z', dispose: vi.fn() },
+      title: 'おおきな写真.png',
+      open: () => win,
+      waitClose: () => new Promise(() => undefined),
+    });
+    const img = doc.querySelector<HTMLImageElement>('[data-pkc-field="asset-window-image"]')!;
+    expect(img.complete, '前提: まだ読めていない絵になっていない').toBe(false);
     expect(
-      (await open()).document.querySelector('[data-pkc-field="asset-window-zoom"]'),
-      '添付の窓にも帯が出ている',
-    ).toBeNull();
+      doc.body.getAttribute('data-pkc-fit'),
+      '読み込みを待っている間だけ実寸で出る(画面が跳ねる)',
+    ).toBe('contain');
+  });
+
+  /**
+   * 🔴 **収める ⇄ 実寸を往復できる**(#527 の残り)。
+   * ⚠ ここが**この節の主張**である ── 帯が在ることではなく、
+   *   **押した結果、器の印と幅の両方が入れ替わる**ことを見る。
+   */
+  it('🔴 収めて開いた窓を実寸にでき、収めるへ戻せる', async () => {
+    const win = await open();
+    const doc = win.document;
+    const img = doc.querySelector<HTMLImageElement>('[data-pkc-field="asset-window-image"]')!;
+    Object.defineProperty(img, 'naturalWidth', { value: 400, configurable: true });
+    img.dispatchEvent(new Event('load'));
+    // 開いた直後 ── 収めている(幅は CSS に任せる)
+    expect(doc.body.getAttribute('data-pkc-fit'), '開いた直後に収めていない').toBe('contain');
+    expect(img.style.width, '収めているのに幅を書いている').toBe('');
+
+    const press = (label: string): void => {
+      [...doc.querySelectorAll('button')]
+        .find((x) => x.textContent === label)
+        ?.dispatchEvent(new Event('click'));
+    };
+    press('等倍');
+    expect(doc.body.hasAttribute('data-pkc-fit'), '実寸にしたのに収める印が残っている').toBe(false);
+    expect(img.style.width, '等倍で実寸にならない').toBe('400px');
+    press('収める');
+    expect(doc.body.getAttribute('data-pkc-fit'), '収めるへ戻れない(片道の操作)').toBe('contain');
+    expect(img.style.width, '収めるへ戻したのに幅が残っている').toBe('');
+  });
+
+  /**
+   * 🔴 **収めている絵を ＋ で押すと、見えている大きさから 1 段動く**(#527 の残り)。
+   * ⚠ ここを `1 * 1.25` にすると、収まっていた大きな写真が押した瞬間に
+   *   **実寸より大きく跳ねる**(見ていた場所を見失う)。
+   */
+  it('🔴 収めているときの ＋ は「見えている大きさ」から動く', async () => {
+    const win = await open();
+    const img = win.document.querySelector<HTMLImageElement>(
+      '[data-pkc-field="asset-window-image"]',
+    )!;
+    Object.defineProperty(img, 'naturalWidth', { value: 400, configurable: true });
+    // ⚠ 実物では CSS が縮めた結果。happy-dom は組版しないので**手で入れる**
+    //   ── 入れないと見かけの倍率が 1 に落ち、この検査は何も見ていない
+    Object.defineProperty(img, 'clientWidth', { value: 200, configurable: true });
+    img.dispatchEvent(new Event('load'));
+    [...win.document.querySelectorAll('button')]
+      .find((x) => x.textContent === '＋')!
+      .dispatchEvent(new Event('click'));
+    expect(img.style.width, '見えている大きさから動いていない').toBe('250px');
+  });
+
+  /**
+   * 🔴 **掴んで送れる**(#527「位置の掴み送り」)。
+   * ⚠ 拡大した絵は窓に収まらないので、**見たい所へ寄せる**のが主な操作である
+   *   ── 端の細い棒だけに頼らせない。
+   */
+  it('🔴 絵を掴んで動かすと送れ、放すと止まる', async () => {
+    const win = await open('natural');
+    const doc = win.document;
+    const img = doc.querySelector<HTMLImageElement>('[data-pkc-field="asset-window-image"]')!;
+    // ⚠ 送り手は **`body`**(CSS が `html` を `hidden` にしている)── 2026-08-28 に
+    //   `scrollingElement` を動かして**実ブラウザで 1px も動かなかった**
+    const box = doc.body;
+    box.scrollLeft = 100;
+    box.scrollTop = 50;
+    const mouse = (type: string, x: number, y: number): void => {
+      const ev = new Event(type, { bubbles: true }) as Event & {
+        clientX: number;
+        clientY: number;
+        button: number;
+      };
+      Object.assign(ev, { clientX: x, clientY: y, button: 0 });
+      (type === 'mousedown' ? img : doc).dispatchEvent(ev);
+    };
+    mouse('mousedown', 300, 200);
+    mouse('mousemove', 280, 190);
+    // ⚠ **向きは「掴んだ物が指について来る」** ── 左へ 20 動かしたら、
+    //   見えている窓は右へ 20 送られる(絵が左へ動いて見える)
+    expect(box.scrollLeft, '掴んで動かしても送れない').toBe(120);
+    expect(box.scrollTop, '縦に送れない').toBe(60);
+    mouse('mouseup', 280, 190);
+    mouse('mousemove', 180, 90);
+    expect(box.scrollLeft, '放したのに送りが続いている').toBe(120);
+    expect(box.scrollTop, '放したのに縦の送りが続いている').toBe(60);
   });
 
   /**

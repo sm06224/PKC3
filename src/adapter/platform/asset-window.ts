@@ -48,16 +48,20 @@ export interface OpenAssetWindowDeps {
   /** 画像か PDF か。⚠ 窓の大きさと中の要素が変わる。 */
   kind: AssetWindowKind;
   /**
-   * 🔴 **画像の見せ方**(#527 案 A。user 指示 2026-08-28
+   * 🔴 **開いた直後の大きさ**(#527。user 指示 2026-08-28
    * 「**別ウィンドウで実寸で開いて拡大縮小できるようにしてほしい**」)。
    *
-   * | 値 | 何が起きるか | 誰が使うか |
+   * | 値 | 開いた直後 | 誰が使うか |
    * |---|---|---|
-   * | `'contain'`(既定) | 窓に**収まるまで縮める** | 添付の画像(#192。**1 バイトも変えない**) |
-   * | `'natural'` | **実寸で出し、拡大縮小できる** | 図(#527) |
+   * | `'contain'`(既定) | 窓に**収まるまで縮める** | 添付の一覧から押したとき(#192 の見え方のまま) |
+   * | `'natural'` | **実寸**(1:1) | 画面の絵を押したとき(図 / 本文の画像) |
    *
+   * 🔑 **拡大縮小はどちらでもできる**(2026-08-28 に揃えた)── 違うのは
+   *   **開いた直後の大きさだけ**である。⚠ 1 稿目は `'natural'` のときだけ
+   *   帯を出していたので、**添付の写真を大きくする道が無かった**。
    * ⚠ **既定を `'contain'` にしてある**のは、添付の見え方を変えないためである
-   *   ── あちらは「1 枚の絵を横に置く」用途で、収まっているのが正しい。
+   *   ── 大きな写真をいきなり実寸で出すと**隅しか見えない**。
+   *   帯の **等倍** を押せば実寸になる(そして **収める** で戻れる)。
    * ⚠ `'pdf'` には効かない(あちらは器いっぱいが正しい)。
    */
   fit?: 'contain' | 'natural';
@@ -89,7 +93,8 @@ const SIZE: Record<AssetWindowKind, { width: number; height: number }> = {
 };
 
 /**
- * 🔴 **実寸で出し、拡大縮小できるようにする**(#527 案 A)。
+ * 🔴 **拡大縮小と、掴み送り**(#527。user 指示 2026-08-28
+ * 「**別ウィンドウで実寸で開いて拡大縮小できるようにしてほしい**」)。
  *
  * ⚠ **`transform: scale()` を使わない** ── 拡大した分だけ**送れる**必要があるので、
  *   `width` を直に動かして**ブラウザの scroll に任せる**ほうが素直である
@@ -99,20 +104,62 @@ const SIZE: Record<AssetWindowKind, { width: number; height: number }> = {
  *   `Ctrl+ホイール` だけにすると**キーボードが要る**ことになる。
  * ⚠ **素のホイールは送りのまま**にする ── 実寸の図は窓より大きいのが普通なので、
  *   奪うと**見えない所へ届かなくなる**。拡大はボタンと `Ctrl+ホイール` から。
+ *
+ * ## 🔴 **収める ⇄ 実寸は往復できる**(2026-08-28、#527 の残り)
+ *
+ * 添付の窓は**収めて**開く(#192 からの見え方 ── 大きな写真をいきなり実寸で出すと
+ * **隅しか見えない**)。そこへ拡大縮小を足すので、**帰り道**が要る:
+ *
+ * | 押すと | 何が起きるか |
+ * |---|---|
+ * | **＋ / −** | いま見えている大きさから 1 段ずつ変わる(⚠ 収めていたなら**その見かけの倍率から**) |
+ * | **等倍** | **実寸**(1:1) |
+ * | **収める** | 窓に**収まるまで縮めた形**へ戻る |
+ *
+ * ⚠ **片道の操作を作らない**(不可侵指示 2026-08-23)── 「実寸にはできるが
+ *   収めるには開き直すしかない」だと、動線を 1 つ失う。
  */
-function addZoom(doc: Document, img: HTMLImageElement): void {
+function addZoom(doc: Document, img: HTMLImageElement, startFit: boolean): void {
   const bar = doc.createElement('div');
   bar.setAttribute('data-pkc-field', 'asset-window-zoom');
-  let z = 1;
+  /** 倍率。⚠ `null` = **収めている**(大きさは CSS が決める)。 */
+  let z: number | null = startFit ? null : 1;
+  const pct = doc.createElement('span');
+  pct.setAttribute('data-pkc-field', 'asset-window-zoom-pct');
   // ⚠ **`naturalWidth` は読み込み後にしか入らない**ので、当てるのは load の後
   const apply = (): void => {
+    if (z === null) {
+      // 収める ── 大きさの指定を**外す**(CSS の `max-width/height` に任せる)
+      img.style.width = '';
+      doc.body.setAttribute('data-pkc-fit', 'contain');
+      pct.textContent = '収める';
+      return;
+    }
+    doc.body.removeAttribute('data-pkc-fit');
     const w = img.naturalWidth;
     if (w > 0) img.style.width = `${Math.round(w * z)}px`;
     pct.textContent = `${Math.round(z * 100)}%`;
   };
+  /**
+   * いまの見かけの倍率。⚠ **収めているとき**に ＋ を押したら、
+   * `1.25 倍`(実寸より大きい)ではなく**見えている大きさの 1.25 倍**にする
+   * ── そうしないと、収まっていた絵が押した瞬間に**跳ねる**。
+   */
+  const shownRatio = (): number => {
+    const w = img.naturalWidth;
+    const shown = img.clientWidth;
+    return w > 0 && shown > 0 ? shown / w : 1;
+  };
+  const step = (factor: number): void => {
+    set((z ?? shownRatio()) * factor);
+  };
   const set = (next: number): void => {
     // ⚠ 上下限を置く ── 0 倍にすると**消えて戻せなくなる**
     z = Math.max(0.1, Math.min(8, next));
+    apply();
+  };
+  const fit = (): void => {
+    z = null;
     apply();
   };
   const button = (label: string, title: string, on: () => void): HTMLButtonElement => {
@@ -123,28 +170,75 @@ function addZoom(doc: Document, img: HTMLImageElement): void {
     b.addEventListener('click', on);
     return b;
   };
-  const pct = doc.createElement('span');
-  pct.setAttribute('data-pkc-field', 'asset-window-zoom-pct');
   bar.append(
-    button('−', '小さくする', () => set(z / 1.25)),
-    button('＋', '大きくする', () => set(z * 1.25)),
-    button('等倍', '実寸に戻す', () => set(1)),
+    button('−', '小さくする', () => step(1 / 1.25)),
+    button('＋', '大きくする', () => step(1.25)),
+    button('等倍', '実寸で見る', () => set(1)),
+    button('収める', '窓に収まる大きさへ戻す', fit),
     pct,
   );
   doc.body.append(bar);
-  // ⚠ 既に読み込み済み(cache)なら `load` は来ない ── 両方から当てる
+  /**
+   * ⚠ **その場で 1 度当てる** ── `load` を待って当てると、読み込みの間だけ
+   *   **収める指定が無い状態**で描かれる(大きな添付が一瞬**実寸で出てから縮む**)。
+   * ⚠ そのうえで `load` でも当てる ── `naturalWidth` は**読み込み後にしか入らない**
+   *   ので、実寸の幅はここでは書けない。
+   */
+  apply();
   img.addEventListener('load', apply);
-  if (img.complete) apply();
   // 🔑 近道は `Ctrl`(mac は `Command`)+ ホイール ── 素のホイールは送りのまま
   doc.addEventListener(
     'wheel',
     (ev) => {
       if (!ev.ctrlKey && !ev.metaKey) return;
       ev.preventDefault();
-      set(ev.deltaY < 0 ? z * 1.1 : z / 1.1);
+      step(ev.deltaY < 0 ? 1.1 : 1 / 1.1);
     },
     { passive: false },
   );
+  addPan(doc, img);
+}
+
+/**
+ * 🔴 **掴み送り**(#527 の「位置の掴み送り」)── 絵を掴んで動かすと送れる。
+ *
+ * ⚠ **scrollbar だけでは足りない** ── 拡大した絵を見るときは
+ *   「見たい所へ寄せる」が主な操作で、端の細い棒を掴ませるのは動線として弱い。
+ * ⚠ **native の画像ドラッグを止める**(`preventDefault`)── 止めないと
+ *   ブラウザが**画像そのものを掴んで運ぶ**動き(ghost)を始めて、送りにならない。
+ * 🔴 **送る先は `body`** ── この窓の CSS が `html` を `hidden`、`body` を `auto` に
+ *   しているので、はみ出した絵を抱えているのは `body` である。
+ *   ⚠ `document.scrollingElement`(= `html`)を動かすと**1px も動かない**
+ *   (2026-08-28、実ブラウザで踏んだ)。
+ * ⚠ 収めているときは送る余地が無いので、掴んでも**何も起きない**(害は無い)。
+ */
+function addPan(doc: Document, img: HTMLImageElement): void {
+  let from: { x: number; y: number; left: number; top: number } | null = null;
+  const box = (): Element => doc.body;
+  img.style.cursor = 'grab';
+  img.addEventListener('mousedown', (ev) => {
+    // ⚠ 左ボタンだけ(右押しは文脈メニュー、中押しは貼り付け ── 奪わない)
+    if (ev.button !== 0) return;
+    ev.preventDefault();
+    const el = box();
+    from = { x: ev.clientX, y: ev.clientY, left: el.scrollLeft, top: el.scrollTop };
+    img.style.cursor = 'grabbing';
+  });
+  doc.addEventListener('mousemove', (ev) => {
+    if (from === null) return;
+    const el = box();
+    el.scrollLeft = from.left - (ev.clientX - from.x);
+    el.scrollTop = from.top - (ev.clientY - from.y);
+  });
+  // ⚠ **窓の外で放しても終わる** ── `img` に付けると、外へ出て放したときに
+  //   掴んだままになり、次に触った瞬間に絵が飛ぶ
+  const release = (): void => {
+    if (from === null) return;
+    from = null;
+    img.style.cursor = 'grab';
+  };
+  doc.addEventListener('mouseup', release);
+  doc.addEventListener('mouseleave', release);
 }
 
 /** 窓の中身を組む。⚠ **`innerHTML` を使わない**(題名は user の文字である)。 */
@@ -161,24 +255,39 @@ function fill(
   // ⚠ 地は無彩色(user 指示「地は無彩色、色は情報にだけ使う」)
   style.textContent =
     kind === 'image'
-      ? natural
-        ? /**
-           * 🔴 **実寸で出す**(#527 案 A)── `max-width` を当てない。
-           * ⚠ はみ出した分は **`overflow:auto` で送れる**ようにする ──
-           *   送れないと「大きく見えるが端が見えない」になり、
-           *   #527 / #523 で 2 度直した穴をここで作り直すことになる。
-           */
-          'html,body{margin:0;height:100%;background:#1b1b1b;overflow:auto}' +
-          'img{display:block}' +
-          // 拡大縮小の帯 ── 常に手前・小さく(絵の邪魔をしない)
-          '[data-pkc-field="asset-window-zoom"]{position:fixed;top:8px;right:8px;' +
-          'display:flex;gap:4px;align-items:center;background:#000a;padding:4px 6px;' +
-          'border-radius:4px;font:12px system-ui,sans-serif;color:#ddd}' +
-          '[data-pkc-field="asset-window-zoom"] button{font:inherit;cursor:pointer;' +
-          'background:#333;color:#eee;border:1px solid #555;border-radius:3px;padding:2px 7px}'
-        : // 画像を器いっぱいに引き伸ばさない ── `contain` で原寸比を保つ
-          'html,body{margin:0;height:100%;background:#1b1b1b;display:grid;place-items:center}' +
-          'img{max-width:100%;max-height:100%;object-fit:contain}'
+      ? /**
+         * 🔴 **同じ 1 枚の CSS で「収める」と「実寸」の両方を持つ**(#527)。
+         *
+         * ⚠ 2026-08-28 の 1 稿目は**別々の CSS**にしていたので、収める ⇄ 実寸を
+         *   往復するには**窓を開き直す**しかなかった(= 片道の操作)。
+         *   いまは `body[data-pkc-fit="contain"]` の有無で切り替わる。
+         * ⚠ はみ出した分は **`overflow:auto` で送れる**ようにする ──
+         *   送れないと「大きく見えるが端が見えない」になり、
+         *   #527 / #523 で 2 度直した穴をここで作り直すことになる。
+         * ⚠ 収めているときは、絵が器を超えないので**棒は出ない**
+         *   (#192 からの見え方を変えない)。
+         */
+        /**
+         * 🔴 **送るのは `body` 1 つに決める**(2026-08-28、実ブラウザで測って判明)。
+         * ⚠ 1 稿目は `html` と `body` の**両方**を `overflow:auto` にしていたので、
+         *   はみ出した絵を実際に抱えるのは **`body`** のほうだった ── そこで
+         *   掴み送りが `document.scrollingElement`(= `html`)を動かしても
+         *   **1px も動かない**(実ブラウザの smoke が教えた。値は 0 → 0)。
+         * 🔑 `html` を `hidden` にして**送り手を 1 つ**にする ── どこを動かせば
+         *   よいかが**読まなくても決まる**(§7「同じ判定が 2 か所」を作らない)。
+         */
+        'html{margin:0;height:100%;overflow:hidden}' +
+        'body{margin:0;height:100%;background:#1b1b1b;overflow:auto}' +
+        'img{display:block}' +
+        // 収める ── 器いっぱいに引き伸ばさず、原寸比のまま真ん中へ
+        'body[data-pkc-fit="contain"]{display:grid;place-items:center;overflow:hidden}' +
+        'body[data-pkc-fit="contain"] img{max-width:100%;max-height:100%;object-fit:contain}' +
+        // 拡大縮小の帯 ── 常に手前・小さく(絵の邪魔をしない)
+        '[data-pkc-field="asset-window-zoom"]{position:fixed;top:8px;right:8px;' +
+        'display:flex;gap:4px;align-items:center;background:#000a;padding:4px 6px;' +
+        'border-radius:4px;font:12px system-ui,sans-serif;color:#ddd}' +
+        '[data-pkc-field="asset-window-zoom"] button{font:inherit;cursor:pointer;' +
+        'background:#333;color:#eee;border:1px solid #555;border-radius:3px;padding:2px 7px}'
       : // 🔴 PDF は**器いっぱい**にする(user 報告の症状は「小さすぎて読めない」だった)
         'html,body{margin:0;height:100%;background:#1b1b1b}' +
         'object{display:block;width:100%;height:100%;border:0}' +
@@ -191,7 +300,14 @@ function fill(
     img.alt = title;
     img.setAttribute('data-pkc-field', 'asset-window-image');
     doc.body.append(img);
-    if (natural) addZoom(doc, img);
+    /**
+     * 🔴 **拡大縮小は「収める」で開いた窓にも出す**(#527 の残り、2026-08-28)。
+     * ⚠ 1 稿目は実寸(図)のときだけ出していたので、**添付の写真は
+     *   大きくする道が無かった** ── user の頼み(「対象は画像だけでなく
+     *   レンダリング結果全部」)の半分しか満たしていない。
+     * ⚠ 開いた直後の見え方は**変えていない**(収める側は収めたまま出る)。
+     */
+    addZoom(doc, img, !natural);
     return;
   }
   const obj = doc.createElement('object');

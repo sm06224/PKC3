@@ -20,6 +20,7 @@ import {
   extractVars,
 } from '@features/markdown/frontmatter';
 import { hydrateMermaid, type MermaidScope } from './mermaid-hydrate';
+import { markViewBig } from './view-big';
 import { hydrateChart } from './chart-raster';
 import { readFenceAssetText } from '@features/asset/fence-asset-read';
 import { applyHeadingFold } from './heading-fold';
@@ -1795,6 +1796,25 @@ export class DetailRenderer {
     const roots: readonly Element[] = Array.isArray(rootEls)
       ? (rootEls as readonly Element[])
       : [rootEls as Element];
+    /**
+     * 🔴 **本文に貼った画像も、押すと別の窓で大きく見られる**(#527、2026-08-28)。
+     *
+     * ⚠ 図(mermaid)だけ先に着地させたので、**画像は押しても何も起きなかった** ──
+     *   user の頼みは「対象は画像だけでなく**レンダリング結果全部**」である。
+     * 🔑 **印は差す前に付ける** ── `src` が入るかどうか(添付が見つかるか)と
+     *   押し所であることは別の話で、`src` が無い絵は `binder` 側が弾く。
+     * ⚠ 判定(読む面か)は `markViewBig` **1 か所**が持つ ── ここに条件を
+     *   書き足すと、図と画像で**面ごとに違う動き**になる(§7)。
+     * ⚠ **外から取り寄せる画像には付けない** ── あちらは同意の機構が別にあり、
+     *   `fetch` し直すと**取り寄せが 1 回増える**(`data-pkc-asset-key` を持つ
+     *   = 手元の添付だけを対象にする)。
+     */
+    for (const r of roots) {
+      if (r instanceof HTMLImageElement && r.hasAttribute('data-pkc-asset-key'))
+        markViewBig(r);
+      for (const img of r.querySelectorAll<HTMLImageElement>('img[data-pkc-asset-key]'))
+        markViewBig(img);
+    }
     const byKey = new Map<string, HTMLImageElement[]>();
     const collect = (img: HTMLImageElement): void => {
       // ⚠ **既に差してあるものは借り直さない**(#250)── 同じ `<img>` に 2 回
