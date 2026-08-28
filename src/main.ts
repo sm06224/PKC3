@@ -19,6 +19,7 @@ import { appOpenInEdit } from '@adapter/ui/render/open-in-edit';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { appPaneSizes, applyPaneSizes } from '@adapter/ui/render/pane-size';
 import { installPaneResize } from '@adapter/ui/render/pane-resize';
+import { installPlaceDrag } from '@adapter/ui/render/place-drag';
 import { appKeymap } from '@adapter/ui/render/keymap';
 import { wireShortcutHints } from '@adapter/ui/render/shortcut-hint';
 import { startEmbedBridge } from '@adapter/transport/embed-bridge';
@@ -609,6 +610,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   applyPaneSizes(root, appPaneSizes.get());
   /** 🔴 掴んで大きさを変える配線(#497)。⚠ 外さない(アプリと同寿命)。 */
   installPaneResize(root);
+  /** 🔴 板の塊を掴んで動かす配線(#283 P4-b)。⚠ 外さない(アプリと同寿命)。 */
+  installPlaceDrag(root, dispatcher);
   /**
    * 🔴 **別のタブで変えたキー割当を、このタブにも効かせる**(#256)。
    * ⚠ これが無いと「2 枚目のタブで割り当て直したのに、1 枚目は再読込まで古いまま」に

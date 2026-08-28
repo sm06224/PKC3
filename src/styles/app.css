@@ -2197,6 +2197,67 @@ li[data-pkc-row-slot] {
   padding-left: 4em;
 }
 
+/**
+ * 🔴 自由配置の板(#283 P4)── `.pkc-place` の塊は絶対配置で置く。
+ * 位置(left / top / width / height / z-index)は `place-board.ts` が本文の
+ * 記法(x= y= w= h= z=)から当てる ── ここは**器の見た目だけ**。
+ * ⚠ 地は無彩色、色は情報にだけ(user 指示 2026-08-03「業務画面」)。
+ */
+.pkc-board-host {
+  position: relative;
+}
+.pkc-md-rendered .pkc-format-block.pkc-place {
+  position: absolute;
+  margin: 0;
+  box-sizing: border-box;
+  min-width: 120px;
+  min-height: 40px;
+  padding: 6px 8px 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  overflow: auto;
+}
+/* 掴む口 ── 印は CSS で出す(字を textContent に入れると写しが汚れる) */
+.pkc-place > [data-pkc-field='place-grip'] {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: grab;
+  /* ⚠ 掴んだ指の動きをブラウザのスクロールに食わせない(touch で効く) */
+  touch-action: none;
+}
+.pkc-place > [data-pkc-field='place-grip']::before {
+  content: '⠿';
+}
+.pkc-place > [data-pkc-field='place-grip']:hover,
+.pkc-place > [data-pkc-field='place-grip']:focus-visible {
+  color: var(--fg);
+}
+/* 題名の札(`entry=` の塊)── 押すとそのノートを開く */
+.pkc-place > [data-pkc-field='place-card'] {
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+  padding: 4px 6px;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  text-align: start;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.pkc-place > [data-pkc-field='place-card']:hover,
+.pkc-place > [data-pkc-field='place-card']:focus-visible {
+  background: var(--accent-dim);
+  color: var(--accent-dim-fg);
+}
+
 /* ── 強調の印(`==印==`)。地に色を敷く数少ない例外 ── **印そのものが情報**。
  * ⚠ `==印==` が出すのは **class を持たない `<mark>`**、`:文字:…:` が出すのが
  *    `.pkc-inline-mark` ── **両方**に当てないと片方だけ素のままになる
