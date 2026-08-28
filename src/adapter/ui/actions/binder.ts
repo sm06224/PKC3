@@ -15,7 +15,7 @@
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { deliveredEntryOf, type ExtDeliveredEntry } from '@features/extension/ext-delivery';
 import { isLaunchableUrl } from '@features/launcher/tiles';
-import { toggleHeadingFold } from '../render/heading-fold';
+import { revealBlock, toggleHeadingFold } from '../render/heading-fold';
 import { quoteOnEnter } from '@features/markdown/quote-assist';
 import { renumberLists } from '@features/markdown/list-renumber';
 import { stripDialect } from '@features/markdown/strip-dialect';
@@ -1643,6 +1643,18 @@ const ACTIONS: Record<string, ActionHandler> = {
   'toc-jump': (dispatcher, target) => {
     const slug = target.getAttribute('data-pkc-toc-slug') ?? '';
     if (slug === '') return;
+    /**
+     * 🔴 **本文以外の面を開いたままなら、先に本文の面へ戻す**(#514)。
+     * 面は hidden で常駐する(center.ts)ので見出しは hidden のまま**見つかる**が、
+     * display:none の要素への `scrollIntoView` は**無言の no-op**になる。
+     * ⚠ **探すより前に戻す**(レビュー指摘)── 選択が変わっていた場合、面の切替は
+     *   骨組みを作り直すので、先に掴んだ要素は detached になり、また無言に戻る。
+     * ⚠ detail に居るときは撃たない ── `SET_VIEW_MODE` は履歴・ゴミ箱の panel を
+     *   畳む副作用を持つ(目次を押しただけで履歴が閉じる、を作らない)。
+     */
+    if (dispatcher.getState().viewMode !== 'detail') {
+      dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
+    }
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
     const detail = root.querySelector<HTMLElement>('[data-pkc-region="detail"]');
     const hit = detail
@@ -1651,12 +1663,27 @@ const ACTIONS: Record<string, ActionHandler> = {
         )
       : undefined;
     if (!hit) {
+      // ⚠ 文言は phase で分ける ── 編集していないのに「編集中は…」と出すと、
+      //   user は別のものを探す(選択を変えた直後の描き直し中はこちらに来る)
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: '編集中は本文が表示されていないので移動できません(保存するか、2 ペインにしてください)',
+        error:
+          dispatcher.getState().phase !== 'ready'
+            ? '編集中は本文が表示されていないので移動できません(保存するか、2 ペインにしてください)'
+            : 'その見出しが本文の面にまだ出ていません(描き直しの途中かもしれません ── もう一度押してください)',
       });
       return;
     }
+    /**
+     * 🔴 **畳んだ章の中なら、開いてから飛ぶ**(#514)── 覆っている畳みだけを開く。
+     * ⚠ host は**畳みを管理している器**(`detail-body-host` = `applyHeadingFold` が
+     *   受けるのと同じ器)で渡す ── `hit.parentElement` だと `:::` の囲みの中の
+     *   見出しで**別の器**を渡してしまい、外の畳みに届かない(レビュー指摘)。
+     *   器が無い環境(unit の素の fixture)では parentElement へ落とす。
+     */
+    const foldHost =
+      hit.closest<HTMLElement>('[data-pkc-field="detail-body-host"]') ?? hit.parentElement;
+    if (foldHost !== null) revealBlock(foldHost, hit);
     hit.scrollIntoView({ block: 'start' });
   },
   'filter-by-tag': (dispatcher, target) => {
@@ -1714,6 +1741,15 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 判定(自分自身・重複・居場所)は **reducer 1 か所**。ここは解決だけ。
    */
   'add-relation': (dispatcher, target) => {
+    /**
+     * 🔴 **編集中は声に出して断る**(#513)── reducer は `phase !== 'ready'` で
+     * 黙って捨てるのに、末尾の欄クリアだけが走って**成功と同じ見た目**になっていた
+     * (user の打った字が消え、関係は増えず、理由も出ない)。
+     */
+    if (dispatcher.getState().phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから関係を足してください' });
+      return;
+    }
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
     const nameEl = root.querySelector<HTMLInputElement>('[data-pkc-field="relation-target"]');
     const kindEl = root.querySelector<HTMLSelectElement>('[data-pkc-field="relation-kind"]');
@@ -1756,6 +1792,11 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   /** 関係を消す(#185)。⚠ **id で消す**(押した札が持っている)。 */
   'remove-relation': (dispatcher, target) => {
+    // 🔴 編集中は声に出して断る(#513)── reducer は黙って捨てる
+    if (dispatcher.getState().phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから関係を消してください' });
+      return;
+    }
     const id = target.getAttribute('data-pkc-relation');
     if (id) dispatcher.dispatch({ type: 'REMOVE_RELATION', id });
   },
@@ -2973,6 +3014,14 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   主の道は予定の面で掴んで落とすこと。
    */
   'set-entry-date': (dispatcher, _target, _services, root) => {
+    /**
+     * 🔴 **編集中は声に出して断る**(#513)── 直す前はピッカーの全手順
+     * (開く → 選ぶ → 確定)を完走させてから reducer が黙って捨てていた。
+     */
+    if (dispatcher.getState().phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから日付を付けてください' });
+      return;
+    }
     const lid = dispatcher.getState().selectedLid;
     if (lid === null) return;
     void pickDateInApp(root, new Date(), DATE_SHORTCUTS, (id, now) =>
@@ -2985,6 +3034,11 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   /** 🔴 **置けるなら外せる**(片道を作らない)。 */
   'clear-entry-date': (dispatcher) => {
+    // 🔴 編集中は声に出して断る(#513)── reducer は黙って捨てる
+    if (dispatcher.getState().phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから日付を外してください' });
+      return;
+    }
     const lid = dispatcher.getState().selectedLid;
     if (lid === null) return;
     dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: null });

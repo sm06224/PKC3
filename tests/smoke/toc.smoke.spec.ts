@@ -108,3 +108,76 @@ test('🔴 見出しが無いノートでは目次の行が出ない (#493)', as
 
   expect(errors, 'pageerror が出た').toEqual([]);
 });
+
+/**
+ * 🔴 **畳んだ章の中の見出しへ、目次から開いて飛べる**(#514)。
+ *
+ * ⚠ 直す前は hit が見つかる(querySelectorAll は hidden も拾う)のに、
+ *   display:none の要素への `scrollIntoView` が no-op ── 断りの分岐にも入らず
+ *   **無言の dead click** だった。ここは実ブラウザでしか見えない
+ *   (happy-dom は「hidden へは送れない」を再現しない)。
+ */
+test('🔴 畳んだ章の中の見出しへ、目次から開いて飛べる (#514)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1400, height: 800 });
+  await gotoApp(page);
+
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', '畳むノート');
+  await page.fill('[data-pkc-field="editor-body"]', BODY);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+
+  // 最初の章を畳む → 途中の節(h2)が隠れる
+  await page
+    .locator('[data-pkc-region="detail"] h1 [data-pkc-action="toggle-heading-fold"]')
+    .first()
+    .click();
+  const target = page.locator('[data-pkc-region="detail"] h2[id]').first();
+  await expect(target, '前提が崩れている(畳めていない)').toBeHidden();
+
+  // 目次から「途中の節」を押す → 開いて、画面の上まで送られる
+  await clickReal(page, `${TOC} >> nth=1`);
+  await page.waitForTimeout(150);
+  await expect(target, '開いていない(無言の dead click のまま)').toBeVisible();
+  const box = await target.boundingBox();
+  expect(box, '見出しが画面に無い').not.toBeNull();
+  expect(box!.y, `見出しが画面の上に来ていない(y=${box!.y})`).toBeLessThan(300);
+
+  expect(errors, 'pageerror が出た').toEqual([]);
+});
+
+/**
+ * 🔴 **設定を開いたまま目次を押すと、本文の面へ戻って飛ぶ**(#514)。
+ * ⚠ 面は hidden で常駐するので、直す前は「見つかるのに送れない」無言だった。
+ */
+test('🔴 設定を開いたまま目次を押すと、本文へ戻って飛ぶ (#514)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1400, height: 800 });
+  await gotoApp(page);
+
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', '設定から戻るノート');
+  await page.fill('[data-pkc-field="editor-body"]', BODY);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await expect(
+    page.locator('[data-pkc-view-pane="settings"]'),
+    '前提が崩れている(設定が開いていない)',
+  ).toBeVisible();
+
+  await clickReal(page, `${TOC} >> nth=1`);
+  await page.waitForTimeout(150);
+  await expect(
+    page.locator('[data-pkc-view-pane="detail"]'),
+    '本文の面へ戻っていない',
+  ).toBeVisible();
+  const target = page.locator('[data-pkc-region="detail"] h2[id]').first();
+  await expect(target, '見出しが見えていない').toBeVisible();
+  const box = await target.boundingBox();
+  expect(box!.y, `見出しが画面の上に来ていない(y=${box!.y})`).toBeLessThan(300);
+
+  expect(errors, 'pageerror が出た').toEqual([]);
+});

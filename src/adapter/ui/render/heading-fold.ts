@@ -96,6 +96,39 @@ export function applyHeadingFold(host: HTMLElement): number {
 }
 
 /**
+ * 🔴 **目的の塊を覆っている畳みを開く**(#514)。
+ *
+ * 目次から飛ぶ前に呼ぶ ── 畳んだ章の中の塊は `hidden` なので、そのまま
+ * `scrollIntoView` すると**無言の no-op**になる(display:none の要素は box を持たない)。
+ * ⚠ **覆っている畳みだけ**を開く ── 目的の塊自身が畳んだ見出しなら、
+ *   その中身は畳んだまま(頼まれたのは「そこまでの道」を開くことだけである)。
+ *
+ * @returns 1 つでも開いたか(false = 元から覆われていない、または host の子孫でない)
+ */
+export function revealBlock(host: HTMLElement, target: Element): boolean {
+  // ⚠ target が塊の中の入れ子でも受ける ── host 直下の塊まで上がってから数える
+  let block: Element | null = target;
+  while (block !== null && block.parentElement !== host) block = block.parentElement;
+  if (block === null) return false;
+  const blocks = [...host.children];
+  const idx = blocks.indexOf(block);
+  if (idx < 0) return false;
+  const levels = blocks.map(headingLevel);
+  const spans = foldSpans(levels);
+  let opened = false;
+  for (const s of spans) {
+    if (idx < s.from || idx >= s.to) continue;
+    const heading = blocks[s.heading];
+    if (heading !== undefined && heading.hasAttribute(FOLDED)) {
+      heading.removeAttribute(FOLDED);
+      opened = true;
+    }
+  }
+  if (opened) applyHeadingFold(host);
+  return opened;
+}
+
+/**
  * 畳み方を反転して当て直す。
  *
  * 🔑 **印を反転するだけ** ── 見え方は `applyHeadingFold` が計算し直す。
