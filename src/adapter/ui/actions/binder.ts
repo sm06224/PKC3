@@ -598,6 +598,12 @@ export interface BinderServices {
   printNote?(lid: string): void;
   /** このノートだけをアーカイブとして書き出す(P6f)。 */
   exportEntry?(lid: string): void;
+  /**
+   * 🔴 **このノートを閲覧用 HTML(1 枚)で書き出す**(#491)。
+   * ⚠ 上の `exportEntry` と**別の物** ── あちらは取り込み直せる `.pkc3.zip`、
+   *   こちらは相手がブラウザで開くだけで読める片道の HTML である。
+   */
+  exportEntryHtml?(lid: string): void;
   /** 🔴 **このフォルダと配下**をアーカイブとして書き出す(#399 ①)。 */
   exportFolder?(lid: string): void;
   /**
@@ -3770,6 +3776,14 @@ const ACTIONS: Record<string, ActionHandler> = {
       target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ??
       dispatcher.getState().selectedLid;
     if (lid) services.exportEntry?.(lid);
+  },
+  'export-entry-html': (dispatcher, target, services) => {
+    // ⚠ 解決規則は隣の `export-entry` / `delete-entry` と**同じ**にする ── 揃えないと
+    //    「A を書き出して B を削除する」が成立する(review M-3 と同じ形)
+    const lid =
+      target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ??
+      dispatcher.getState().selectedLid;
+    if (lid) services.exportEntryHtml?.(lid);
   },
   'export-folder': (dispatcher, target, services) => {
     // ⚠ 解決規則は隣の `export-entry` / `delete-entry` と**同じ**にする ── 揃えないと

@@ -237,6 +237,8 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'commit-edit': 'check',
   'cancel-edit': 'close',
   'export-entry': 'arrow-out',
+  // 🔑 全体の「閲覧用 HTML」(`export-html`)と**同じ図案** ── 同じ形の物である
+  'export-entry-html': 'globe',
   'show-history': 'clock',
   'delete-entry': 'trash',
   // まとめてゴミ箱へ(#240 段③)── 1 件の削除と**同じ図案**(同じ意味だから)

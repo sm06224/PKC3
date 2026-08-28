@@ -809,6 +809,19 @@ export class InspectorRenderer {
     btn('adopt-external-images', '外部の画像を取り込む');
     btn('export-entry', ENTRY_ACTION_LABELS['export-entry']!);
     /**
+     * 🔴 **相手に渡せる 1 枚**(#491)。
+     *
+     * > user 報告 2026-08-27:「右クリックで気づきましたが、
+     * > **書き出しに閲覧配布用HTMLがないのは残念**ですね」
+     *
+     * ⚠ 在ったのは**設定 → 書き出しと片づけ**の「閲覧用 HTML」だけで、
+     *   それは**コレクション全部**を 1 枚にする物だった ── ノート 1 件を
+     *   渡す口は**どこにも無かった**。
+     * 🔑 隣の `書き出す` の真横に置く ── 「渡したい」と思った人が
+     *   最初に見るのはこの群れである。
+     */
+    btn('export-entry-html', ENTRY_ACTION_LABELS['export-entry-html']!);
+    /**
      * 🔴 **このフォルダごと書き出す**(#399 ①)。
      *
      * ⚠ **フォルダのときだけ出す**(`render` で `hidden` を付け外しする)──
@@ -856,6 +869,10 @@ export class InspectorRenderer {
  */
 const ACTION_TITLES: Record<string, string> = {
   'export-entry': 'このノートだけをバックアップ形式(.pkc3.zip)で保存します。取り込み直せます',
+  // 🔴 **`export-entry` との違いを説明で言い切る**(#400 段④ と同じ作法)──
+  //    どちらも「1 ノートを 1 file にする」ので、**何が違うか**を書かないと選べない
+  'export-entry-html':
+    'このノートを、ブラウザで開くだけで読める 1 枚の .html にします。PKC3 を持っていない相手にも渡せます。片道です(取り込み直せません)',
   // ⚠ **画面で起きることで書く**(user 指示 2026-08-21)── 「配下を再帰収集」ではなく
   //    「中に入っているものごと」。⚠ **外へ繋がる関連が落ちる**ことも先に言う
   'export-folder':

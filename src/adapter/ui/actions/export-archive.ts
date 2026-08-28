@@ -118,6 +118,15 @@ export async function exportEntry(
   dispatcher: Dispatcher,
   deps: ExportDeps,
   lid: string,
+  /**
+   * 🔴 **どの形で出すか**(#491)。⚠ **既定値を持たせない** ── 渡し忘れても
+   *   tsc が黙る形にすると、「閲覧用 HTML を押したのに `.pkc3.zip` が落ちる」
+   *   という、**押した人にしか見えない**取り違えになる
+   *   (CLAUDE.md「待ちの口は optional にしない」と同じ向き)。
+   * 🔑 絞り込み(`singleEntrySource`)も断る条件も `settle()` の位置も**同じ道**を
+   *   通る ── 別経路にすると「1 件の HTML だけ壊れている」が起きる(P6f の理由)。
+   */
+  kind: ExportKind,
 ): Promise<number | null> {
   // ⚠ **読みの前**に断る(review M-2)。`singleEntrySource` は store を舐めるので、
   // ガードが後ろにあると「30MB 読んでから編集中ですと言う」になる。
@@ -131,7 +140,7 @@ export async function exportEntry(
     // 🔴 直前の保存が disk に着いてから読む(読みは書込の chain の外に居る)
     await deps.settle();
     const { source, warnings } = await singleEntrySource(deps.source, lid);
-    const n = await exportArchive(dispatcher, { ...deps, source }, 'archive', warnings);
+    const n = await exportArchive(dispatcher, { ...deps, source }, kind, warnings);
     return n;
   } catch (e) {
     dispatcher.dispatch({
