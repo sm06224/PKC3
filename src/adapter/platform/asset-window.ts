@@ -48,6 +48,20 @@ export interface OpenAssetWindowDeps {
   /** 画像か PDF か。⚠ 窓の大きさと中の要素が変わる。 */
   kind: AssetWindowKind;
   /**
+   * 🔴 **画像の見せ方**(#527 案 A。user 指示 2026-08-28
+   * 「**別ウィンドウで実寸で開いて拡大縮小できるようにしてほしい**」)。
+   *
+   * | 値 | 何が起きるか | 誰が使うか |
+   * |---|---|---|
+   * | `'contain'`(既定) | 窓に**収まるまで縮める** | 添付の画像(#192。**1 バイトも変えない**) |
+   * | `'natural'` | **実寸で出し、拡大縮小できる** | 図(#527) |
+   *
+   * ⚠ **既定を `'contain'` にしてある**のは、添付の見え方を変えないためである
+   *   ── あちらは「1 枚の絵を横に置く」用途で、収まっているのが正しい。
+   * ⚠ `'pdf'` には効かない(あちらは器いっぱいが正しい)。
+   */
+  fit?: 'contain' | 'natural';
+  /**
    * 🔴 **窓の名前**(添付ごとに 1 枚)。2026-08-15 に flake で判明 ──
    * `'_blank'` だと、**閉じ切っていない前の窓を使い回す**ことがあり、
    * 一瞬だけ前の添付の中身が見える(実測: PDF の窓に画像を出す直前の状態が読めた)。
@@ -74,16 +88,97 @@ const SIZE: Record<AssetWindowKind, { width: number; height: number }> = {
   pdf: { width: 1000, height: 860 },
 };
 
+/**
+ * 🔴 **実寸で出し、拡大縮小できるようにする**(#527 案 A)。
+ *
+ * ⚠ **`transform: scale()` を使わない** ── 拡大した分だけ**送れる**必要があるので、
+ *   `width` を直に動かして**ブラウザの scroll に任せる**ほうが素直である
+ *   (`transform` だと器の大きさが変わらず、はみ出した所へ届かない ──
+ *   #527 と #523 で 2 度踏んだ「見えない所へ届く手段が無い」と同じ形になる)。
+ * 🔴 **ボタンを置く**(不可侵指示「マウスだけで完結し、キーボードは近道」)──
+ *   `Ctrl+ホイール` だけにすると**キーボードが要る**ことになる。
+ * ⚠ **素のホイールは送りのまま**にする ── 実寸の図は窓より大きいのが普通なので、
+ *   奪うと**見えない所へ届かなくなる**。拡大はボタンと `Ctrl+ホイール` から。
+ */
+function addZoom(doc: Document, img: HTMLImageElement): void {
+  const bar = doc.createElement('div');
+  bar.setAttribute('data-pkc-field', 'asset-window-zoom');
+  let z = 1;
+  // ⚠ **`naturalWidth` は読み込み後にしか入らない**ので、当てるのは load の後
+  const apply = (): void => {
+    const w = img.naturalWidth;
+    if (w > 0) img.style.width = `${Math.round(w * z)}px`;
+    pct.textContent = `${Math.round(z * 100)}%`;
+  };
+  const set = (next: number): void => {
+    // ⚠ 上下限を置く ── 0 倍にすると**消えて戻せなくなる**
+    z = Math.max(0.1, Math.min(8, next));
+    apply();
+  };
+  const button = (label: string, title: string, on: () => void): HTMLButtonElement => {
+    const b = doc.createElement('button');
+    b.type = 'button';
+    b.textContent = label;
+    b.title = title;
+    b.addEventListener('click', on);
+    return b;
+  };
+  const pct = doc.createElement('span');
+  pct.setAttribute('data-pkc-field', 'asset-window-zoom-pct');
+  bar.append(
+    button('−', '小さくする', () => set(z / 1.25)),
+    button('＋', '大きくする', () => set(z * 1.25)),
+    button('等倍', '実寸に戻す', () => set(1)),
+    pct,
+  );
+  doc.body.append(bar);
+  // ⚠ 既に読み込み済み(cache)なら `load` は来ない ── 両方から当てる
+  img.addEventListener('load', apply);
+  if (img.complete) apply();
+  // 🔑 近道は `Ctrl`(mac は `Command`)+ ホイール ── 素のホイールは送りのまま
+  doc.addEventListener(
+    'wheel',
+    (ev) => {
+      if (!ev.ctrlKey && !ev.metaKey) return;
+      ev.preventDefault();
+      set(ev.deltaY < 0 ? z * 1.1 : z / 1.1);
+    },
+    { passive: false },
+  );
+}
+
 /** 窓の中身を組む。⚠ **`innerHTML` を使わない**(題名は user の文字である)。 */
-function fill(doc: Document, url: string, title: string, kind: AssetWindowKind): void {
+function fill(
+  doc: Document,
+  url: string,
+  title: string,
+  kind: AssetWindowKind,
+  fit: 'contain' | 'natural' = 'contain',
+): void {
   doc.title = title;
+  const natural = kind === 'image' && fit === 'natural';
   const style = doc.createElement('style');
   // ⚠ 地は無彩色(user 指示「地は無彩色、色は情報にだけ使う」)
   style.textContent =
     kind === 'image'
-      ? // 画像を器いっぱいに引き伸ばさない ── `contain` で原寸比を保つ
-        'html,body{margin:0;height:100%;background:#1b1b1b;display:grid;place-items:center}' +
-        'img{max-width:100%;max-height:100%;object-fit:contain}'
+      ? natural
+        ? /**
+           * 🔴 **実寸で出す**(#527 案 A)── `max-width` を当てない。
+           * ⚠ はみ出した分は **`overflow:auto` で送れる**ようにする ──
+           *   送れないと「大きく見えるが端が見えない」になり、
+           *   #527 / #523 で 2 度直した穴をここで作り直すことになる。
+           */
+          'html,body{margin:0;height:100%;background:#1b1b1b;overflow:auto}' +
+          'img{display:block}' +
+          // 拡大縮小の帯 ── 常に手前・小さく(絵の邪魔をしない)
+          '[data-pkc-field="asset-window-zoom"]{position:fixed;top:8px;right:8px;' +
+          'display:flex;gap:4px;align-items:center;background:#000a;padding:4px 6px;' +
+          'border-radius:4px;font:12px system-ui,sans-serif;color:#ddd}' +
+          '[data-pkc-field="asset-window-zoom"] button{font:inherit;cursor:pointer;' +
+          'background:#333;color:#eee;border:1px solid #555;border-radius:3px;padding:2px 7px}'
+        : // 画像を器いっぱいに引き伸ばさない ── `contain` で原寸比を保つ
+          'html,body{margin:0;height:100%;background:#1b1b1b;display:grid;place-items:center}' +
+          'img{max-width:100%;max-height:100%;object-fit:contain}'
       : // 🔴 PDF は**器いっぱい**にする(user 報告の症状は「小さすぎて読めない」だった)
         'html,body{margin:0;height:100%;background:#1b1b1b}' +
         'object{display:block;width:100%;height:100%;border:0}' +
@@ -96,6 +191,7 @@ function fill(doc: Document, url: string, title: string, kind: AssetWindowKind):
     img.alt = title;
     img.setAttribute('data-pkc-field', 'asset-window-image');
     doc.body.append(img);
+    if (natural) addZoom(doc, img);
     return;
   }
   const obj = doc.createElement('object');
@@ -122,11 +218,20 @@ export async function openAssetWindow(
   deps: OpenAssetWindowDeps,
 ): Promise<AssetWindowHandle | null> {
   const { lent, title, kind } = deps;
+  const fit = deps.fit ?? 'contain';
   const waitClose = deps.waitClose ?? ((w) => waitForWindowClose(w));
-  const size = SIZE[kind];
-  // ⚠ PDF は PiP を使わない(狭すぎて頁が読めない ── file 冒頭の注記)
+  /**
+   * 🔴 **実寸で見るときは大きく開く**(#527 案 A)── 480×360 では
+   * 「大きく見る」ために開いたのに**縮めて見る**ことになる。
+   */
+  const size = kind === 'image' && fit === 'natural' ? SIZE.pdf : SIZE[kind];
+  /**
+   * ⚠ PDF は PiP を使わない(狭すぎて頁が読めない ── file 冒頭の注記)。
+   * 🔴 **実寸の画像も同じ理由で使わない**(#527 案 A)── PiP の窓は小さく作られる
+   *   ので、「大きく見る」という目的そのものと逆になる。
+   */
   const pip =
-    kind === 'image'
+    kind === 'image' && fit !== 'natural'
       ? (deps.requestPip ??
         (typeof globalThis !== 'undefined' &&
         (globalThis as { documentPictureInPicture?: { requestWindow?: unknown } })
@@ -173,7 +278,7 @@ export async function openAssetWindow(
    * 誰も revoke しないまま窓だけ残った(呼び側の `catch` も報告するだけ)。
    */
   try {
-    fill(win.document, lent.url, title, kind);
+    fill(win.document, lent.url, title, kind, fit);
   } catch (e) {
     lent.dispose();
     try {

@@ -612,7 +612,10 @@ const TALL_FIGURE =
   ) +
   '\n```\n';
 
-test('🔴 段組みで縦に長い図が段に収まり、押し所も同じ段に残る (#527)', async ({ page }) => {
+test('🔴 段組みで縦に長い図が段に収まり、押し所も同じ段に残る (#527)', async ({
+  page,
+  context,
+}) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 2560, height: 1000 });
   await gotoApp(page);
@@ -688,6 +691,32 @@ test('🔴 段組みで縦に長い図が段に収まり、押し所も同じ段
   // ⑤ 🔴 **段をまたいで割れていない** ── 割れると押し所が別の段へ落ちる
   expect(three.frags, '図の器が段をまたいで割れている').toBe(1);
   expect(three.sameColumn, '「図を保存」が図と別の段に落ちている').toBe(true);
+
+  /**
+   * ⑥ 🔴 **縮めた図を、実寸で見る道が在る**(#527 案 A)。
+   *
+   * ⚠ ③④ は「はみ出さないように**縮めた**」であって、**読めるようになった**とは
+   *   言っていない ── 縮めた分を取り戻す道が無ければ、user は
+   *   「切れない代わりに読めない」だけである。**そこがこの案 A の存在理由**である。
+   * 🔑 だから観測点は「別窓が開いた」ではなく
+   *   **別窓の実寸が、いま画面に出ている大きさより大きいこと** ── ここが等しければ、
+   *   「大きく見る」と言いながら同じ大きさを出していることになる。
+   */
+  const [win] = await Promise.all([
+    context.waitForEvent('page'),
+    page.locator('[data-pkc-field="detail-body"] [data-pkc-mermaid-src] img').click(),
+  ]);
+  await win.waitForLoadState('domcontentloaded');
+  const big = await win.evaluate(() => {
+    const i = document.querySelector('[data-pkc-field="asset-window-image"]') as HTMLImageElement;
+    return { natural: i?.naturalHeight ?? 0, shown: Math.round(i?.getBoundingClientRect().height ?? 0) };
+  });
+  expect(big.natural, '別窓の絵が読めていない(この検査は何も見ていない)').toBeGreaterThan(0);
+  expect(
+    big.shown,
+    `段で縮めた図を実寸で見られない(段では ${three.shown}px / 別窓では ${big.shown}px)`,
+  ).toBeGreaterThan(three.shown);
+  await win.close();
 
   expect(errors).toEqual([]);
 });

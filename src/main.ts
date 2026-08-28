@@ -1820,6 +1820,45 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       })();
     },
     /**
+     * 🔴 **図を別窓で実寸で見る**(#527 案 A。user 指示 2026-08-28
+     * 「**別ウィンドウで実寸で開いて拡大縮小できるようにしてほしい**」)。
+     *
+     * ⚠ **焼き直さない** ── 画面に出ている PNG の bytes をそのまま渡す
+     *   (不可侵指示「SVG は書き出しのときだけ」)。
+     * 🔴 **URL は貸し直す**(不可侵指示 2026-07-27「生成物は寿命終端で破棄」)──
+     *   画面の `<img>` が握っている ObjectURL を**そのまま渡さない**。
+     *   あちらは配色が変わった瞬間に revoke される(`mermaid-hydrate.ts`)ので、
+     *   渡すと **別窓の絵が突然消える**。⚠ だから bytes を取り直して
+     *   **別窓の寿命に紐づく URL** を作る(捨てるのは `openAssetWindow` が持つ)。
+     * ⚠ `windowName` は**図ごと**にしない ── 図に安定した id が無いので、
+     *   1 枚に固定して**開き直しは同じ窓へ**出す(積み上がらない)。
+     */
+    viewDiagram: (src, title) => {
+      void (async () => {
+        try {
+          // ⚠ `blob:` の取り直しは同一 origin でしか通らない ── 通らなければ断る
+          const png = await (await fetch(src)).blob();
+          const url = URL.createObjectURL(png);
+          const win = await openAssetWindow({
+            lent: { url, dispose: () => URL.revokeObjectURL(url) },
+            title,
+            kind: 'image',
+            // 🔴 実寸で出し、拡大縮小できるようにする(既定の `'contain'` は添付用)
+            fit: 'natural',
+            windowName: 'pkc3-diagram',
+          });
+          if (!win) {
+            dispatcher.dispatch({
+              type: 'OP_FAILED',
+              error: '別の窓を開けませんでした(ポップアップが止められています)',
+            });
+          }
+        } catch (e) {
+          dispatcher.dispatch({ type: 'OP_FAILED', error: `図を開けませんでした: ${String(e)}` });
+        }
+      })();
+    },
+    /**
      * 🔴 **写す(コピー)のために本文をまとめて読む**(#273 段③)。
      * ⚠ **1 往復**で読む(`getBody` を N 回呼ぶと、フォルダを写すたびに N 往復になる)。
      * ⚠ 読めなかった lid は**入れない** ── 呼び側が件数で「落とした」と言える。

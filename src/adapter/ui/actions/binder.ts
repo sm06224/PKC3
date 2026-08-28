@@ -445,6 +445,17 @@ export interface BinderServices {
    * ⚠ `mime` は**押した要素が運ぶ** ── 開く側で引き直さない。
    */
   viewAsset?(assetKey: string, name: string, mime: string): void;
+  /**
+   * 🔴 **図を別窓で実寸で見る**(#527 案 A。user 指示 2026-08-28
+   * 「**別ウィンドウで実寸で開いて拡大縮小できるようにしてほしい**」)。
+   *
+   * ⚠ `viewAsset` とは**別**である ── あちらは添付を鍵で引くが、こちらは
+   *   **もう画面に出ている PNG** をそのまま渡す(図は添付ではない)。
+   * ⚠ **焼き直さない**(不可侵指示「SVG は書き出しのときだけ」)── 渡すのは
+   *   既に焼いてある bytes である。
+   * ⚠ 実体は adapter/platform 側(ObjectURL の寿命が絡むので binder は**呼ぶだけ**)。
+   */
+  viewDiagram?(src: string, title: string): void;
   /** 未参照 asset の掃除(P4b)。確認・報告の UI も実体側の責務。 */
   purgeOrphanAssets?(): void;
   /** 注意の面を閉じる(P6c review H-2)。 */
@@ -3267,6 +3278,20 @@ const ACTIONS: Record<string, ActionHandler> = {
   'dismiss-alarm': (_dispatcher, target, services) => {
     const key = target.getAttribute('data-pkc-alarm');
     if (key !== null) services.dismissAlarm?.(key);
+  },
+  /**
+   * 🔴 **図を押したら、別窓で実寸で開く**(#527 案 A)。
+   *
+   * ⚠ **押し所は絵そのもの** ── ボタンを置くと図の数だけ常設の物が増える
+   *   (#501 と逆向き)。⚠ 押した絵の `src`(ObjectURL)を渡すだけで、
+   *   **焼き直さない**。
+   * ⚠ 題名は `alt` から採る ── 絵しか無い面で唯一の情報であり、
+   *   窓の題名として user に読める(`alt` は種類ごとに中身が書いてある)。
+   */
+  'view-diagram': (_dispatcher, target, services) => {
+    const img = target.closest<HTMLImageElement>('img[data-pkc-action="view-diagram"]');
+    if (!img || img.src === '') return;
+    services.viewDiagram?.(img.src, img.alt || '図');
   },
   /**
    * 図を保存する(P8 段⑦)。⚠ 画面は PNG だが、**書き出すのはベクタ**
