@@ -15,6 +15,7 @@ import {
   telHref,
 } from '../../src/features/contact/contact-card';
 import { sortOrder } from '../../src/features/filter/entry-sort';
+import { buildVcf } from '../../src/features/contact/vcard';
 
 const fm = (lines: string) => `---\n${lines}\n---\n\n# 本文\n`;
 
@@ -159,6 +160,7 @@ describe('並べ方と絞り込み(#278)', () => {
     orgParts: org === '' ? [] : org.split(' '),
     tels,
     emails,
+      overlong: false,
   });
 
   it('🔴 一覧の「題名順」と、同じ並びになる(面によって順が違わない)', () => {
@@ -207,3 +209,85 @@ describe('並べ方と絞り込み(#278)', () => {
     expect(contactLine(card('a', '山田', '例の会社'))).toBe('山田(例の会社)');
   });
 });
+/**
+ * 🔴 **worker → main を渡る量に門がある**(#536 ③、2026-08-28)。
+ *
+ * ## 実測が門の場所を決めた
+ *
+ * 2000 件 × 宛先 2 本で、**1 値の長さ**を変えたときに渡る量:
+ * 20 字 **0.27 MB** / 120 字 **0.65 MB** / 1,000 字 **4.01 MB** /
+ * 10,000 字 🔴 **38.34 MB**。
+ * ⚠ **件数の軸ではなかった** ── 2000 件でも 0.27〜0.73 MB である。
+ *
+ * 🔑 1,000 字は「本物の宛先なら絶対に超えない」値(メール 254 字 / E.164 15 桁)。
+ * ⚠ だから**本物の宛先は 1 つも失われない**。
+ */
+describe('渡る量の門(#536 ③)', () => {
+  const long = (n: number): string => `a${'x'.repeat(n - 1)}`;
+
+  it('🔴 長すぎる値は渡さず、外したことを憶える', () => {
+    const body = ['---', `tel: "${long(5000)}"`, '---', ''].join('\n');
+    const c = contactOf('l1', '長い人', body)!;
+    // 🔑 **切らずに外す** ── 途中で切った字を残すと、下流が壊れた宛先を「在るもの」として扱う
+    expect(c.tels, `外していない(${c.tels[0]?.length ?? 0} 字)`).toEqual([]);
+    expect(c.overlong, '外したのに憶えていない').toBe(true);
+  });
+
+  it('⚠ 対照群 ── 現実的な長さは 1 つも外さない', () => {
+    const body = ['---', 'tel: "090-1234-5678"', 'email: "taro@example.com"', '---', ''].join('\n');
+    const c = contactOf('l1', '普通の人', body)!;
+    expect(c.tels, '普通の電話を外した').toEqual(['090-1234-5678']);
+    expect(c.emails, '普通のメールを外した').toEqual(['taro@example.com']);
+    expect(c.overlong, '外していないのに印が立っている').toBe(false);
+  });
+
+  it('⚠ 境界 ── ちょうど 1,000 字は通し、1,001 字で外す', () => {
+    const at = contactOf('l1', 'ちょうど', ['---', `tel: "${long(1000)}"`, '---', ''].join('\n'))!;
+    expect(at.tels, `ちょうど ${CONTACT_LIMITS.wire} 字を外した`).toHaveLength(1);
+    expect(at.overlong, 'ちょうどで印が立っている').toBe(false);
+    const over = contactOf('l2', '1 字超', ['---', `tel: "${long(1001)}"`, '---', ''].join('\n'))!;
+    expect(over.tels, '1 字超えたのに通した').toEqual([]);
+    expect(over.overlong, '1 字超えたのに印が立たない').toBe(true);
+  });
+
+  it('🔴 外すのは長い値だけ ── 同じ人の本物の電話番号は残る', () => {
+    /*
+     * ⚠ **1 稿目はここで壊れていた**。card ごとに印を付けて `buildVcf` が
+     *   「その人の電話とメールを丸ごと書かない」形にしていたので、
+     *   落書き 1 つの巻き添えで**本物の 090 が .vcf から消えていた**。
+     *   ⚠ しかも「失う本物の宛先は 0 件」とコメントに書いてあった(嘘だった)。
+     */
+    const body = [
+      '---',
+      'tel:',
+      '  - "090-1234-5678"',
+      `  - "${long(4000)}"`,
+      'email: "taro@example.com"',
+      '---',
+      '',
+    ].join('\n');
+    const c = contactOf('l1', '混ざった人', body)!;
+    expect(c.tels, '🔴 本物の電話まで外した').toEqual(['090-1234-5678']);
+    expect(c.emails, '🔴 長い電話の巻き添えでメールまで外した').toEqual(['taro@example.com']);
+    expect(c.overlong, '外したのに憶えていない').toBe(true);
+
+    const vcf = buildVcf([c]);
+    expect(vcf, '🔴 本物の電話が .vcf から消えた').toContain('TEL;TYPE=voice:090-1234-5678');
+    expect(vcf, '🔴 本物のメールが .vcf から消えた').toContain(
+      'EMAIL;TYPE=internet:taro@example.com',
+    );
+    expect(vcf, '🔴 外したはずの長い値を書いている').not.toContain(long(4000));
+  });
+
+  it('⚠ 落書きしか無くても一覧からは消さない(書いたことは事実なので)', () => {
+    const body = ['---', `email: "${long(3000)}"`, '---', ''].join('\n');
+    const c = contactOf('l1', '長い人', body);
+    expect(c, '🔴 連絡先ごと消した ── user は「書いたのに出ない」と読む').not.toBeNull();
+    expect(c!.emails, '外していない').toEqual([]);
+    // 🔑 宛先が 1 つも無いので .vcf には名前だけが出る
+    const vcf = buildVcf([c!]);
+    expect(vcf, '名前まで落としている').toContain('FN:長い人');
+    expect(vcf, '🔴 外したはずの宛先を書いている').not.toContain('EMAIL');
+  });
+});
+

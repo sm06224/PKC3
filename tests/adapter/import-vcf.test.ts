@@ -331,7 +331,7 @@ describe('書き出し(binder の export-vcards)── §7: 画面と同じ 1 �
       type: 'SET_CONTACT_SCAN',
       scan: {
         cards: [
-          { lid: 'a', name: '山田', org: '', orgParts: [], tels: ['090'], emails: [], birthday: '' },
+          { lid: 'a', name: '山田', org: '', orgParts: [], tels: ['090'], emails: [], birthday: '', overlong: false },
           {
             lid: 'b',
             name: '別人',
@@ -340,6 +340,7 @@ describe('書き出し(binder の export-vcards)── §7: 画面と同じ 1 �
             tels: [],
             emails: ['b@x.jp'],
             birthday: '',
+            overlong: false,
           },
         ],
         totalNotes: 2,
@@ -391,7 +392,7 @@ describe('書き出し(binder の export-vcards)── §7: 画面と同じ 1 �
         type: 'SET_CONTACT_SCAN',
         scan: {
           cards: [
-            { lid: 'a', name: '山田', org: '', orgParts: [], tels: ['090'], emails: [], birthday: '' },
+            { lid: 'a', name: '山田', org: '', orgParts: [], tels: ['090'], emails: [], birthday: '', overlong: false },
           ],
           totalNotes: 9999,
           scannedNotes: 9999,
@@ -401,6 +402,47 @@ describe('書き出し(binder の export-vcards)── §7: 画面と同じ 1 �
       btn.click();
       await new Promise((r) => setTimeout(r, 10));
       expect(d.getState().notice ?? '', '切ったのに帯が黙っている').toContain('途中まで');
+
+      /**
+       * 🔴 **外した宛先は、件数で言う**(#536 ③、2026-08-28)。
+       *
+       * ⚠ 長すぎる値(1,000 字超)は **card に入る前に外れている**(`contactOf`)──
+       *   途中で切った宛先を相手の端末へ「在るもの」として保存させないためである。
+       * 🔴 **だが黙って外すと「静かに失う」そのもの**で、user は宛先の欠けた
+       *   連絡先を渡し、相手が連絡できないことに後で気づく。
+       * 🔑 **同じ人の本物の宛先は残る**(外れたのはその値だけ)── ここも一緒に見る。
+       */
+      d.dispatch({
+        type: 'SET_CONTACT_SCAN',
+        scan: {
+          cards: [
+            {
+              lid: 'a',
+              name: '山田',
+              org: '',
+              orgParts: [],
+              // 🔑 長い落書きは既に外れており、本物の 090 だけが残っている形
+              tels: ['090-1234-5678'],
+              emails: [],
+              birthday: '',
+              overlong: true,
+            },
+          ],
+          totalNotes: 1,
+          scannedNotes: 1,
+          truncated: false,
+        },
+      });
+      btn.click();
+      await new Promise((r) => setTimeout(r, 10));
+      expect(d.getState().notice ?? '', '宛先を外したのに黙っている').toContain(
+        '1 件で、長すぎる電話・メール',
+      );
+      // 🔴 **残った本物の宛先は書く**(巻き添えで消さない ── 1 稿目はここで壊れていた)
+      expect(blobText!, '🔴 本物の電話が .vcf から消えた').toContain(
+        'TEL;TYPE=voice:090-1234-5678',
+      );
+      expect(blobText!, '名前まで落としている').toContain('FN:山田');
     } finally {
       URL.createObjectURL = orig;
       URL.revokeObjectURL = origRevoke;
