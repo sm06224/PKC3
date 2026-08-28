@@ -218,6 +218,142 @@ describe('ヘルプの面', () => {
 });
 
 /**
+ * 🔴 **しばらく開かなければ、マニュアルの中身を手放す**(#531 H3、2026-08-28)。
+ *
+ * ## 実測(2026-08-28)が設計を決めた
+ *
+ * | | 節点 |
+ * |---|---|
+ * | ヘルプを開く前 | 310 |
+ * | 開いた後 | 6,884 |
+ * | 閉じた後(直す前) | **6,884 のまま** |
+ * | マニュアルの器だけ空に | 499(**6,385 節点・92.8% が返る**) |
+ *
+ * ⚠ しかし**入れ直しは 279 / 245 / 243 / 244 ms** 掛かる ── だから
+ *   「**閉じたら捨てる**」にはしない(開き直すたびにその時間を払う)。
+ *   user 指示 2026-08-03 は「メモリを食うのも、もっさりも嫌」で、**両方向**に効く。
+ * 🔑 計算のワーカーと同じ「**しばらく使われなければ手放す**」形にした。
+ *
+ * ⚠ **器は捨てない** ── 捨てると押される寸前のボタンが消える(2026-08-07 に
+ *   3 度踏んだ)。手放すのは**マニュアルの中身だけ**である。
+ */
+describe('ヘルプのマニュアルを、しばらく開かなければ手放す(#531 H3)', () => {
+  let region: HTMLElement;
+  beforeEach(() => {
+    document.body.textContent = '';
+    region = document.createElement('div');
+    document.body.append(region);
+  });
+
+  /** 手で進められる時計(⚠ 実時間を待つ test は書けない)。 */
+  function fakeTimers() {
+    const jobs: { fn: () => void; h: number }[] = [];
+    let next = 1;
+    return {
+      port: {
+        set: (fn: () => void) => {
+          const h = next++;
+          jobs.push({ fn, h });
+          return h;
+        },
+        clear: (h: unknown) => {
+          const i = jobs.findIndex((j) => j.h === h);
+          if (i >= 0) jobs.splice(i, 1);
+        },
+      },
+      /** 予約が何件待っているか(⚠ 「予約した」を数える対照群に使う)。 */
+      pending: () => jobs.length,
+      fire: () => {
+        const all = jobs.splice(0, jobs.length);
+        for (const j of all) j.fn();
+      },
+    };
+  }
+
+  const drawn = (): string => region.querySelector('[data-pkc-region="help-manual"]')!.innerHTML;
+
+  it('🔴 閉じて時間が経つと中身を手放し、開き直すと戻る', async () => {
+    const t = fakeTimers();
+    let renders = 0;
+    const r = new HelpRenderer(
+      region,
+      {
+        render: async () => {
+          renders += 1;
+          return '<p data-probe="manual">マニュアル本文</p>';
+        },
+      },
+      undefined,
+      undefined,
+      t.port,
+      1000,
+    );
+    r.render('c1');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(drawn(), '前提: マニュアルが描かれていない').toContain('data-probe="manual"');
+    const host = region.querySelector('[data-pkc-region="help-manual"]');
+
+    // ① 閉じただけでは**まだ捨てない**(入れ直しは 243〜279ms 掛かる)
+    r.onHidden();
+    expect(drawn(), '閉じた瞬間に捨てている(開き直すたびに待たされる)').toContain(
+      'data-probe="manual"',
+    );
+    expect(t.pending(), '手放す予約をしていない').toBe(1);
+
+    // ② しばらく開かないと手放す
+    t.fire();
+    expect(drawn(), '時間が経っても手放していない').not.toContain('data-probe="manual"');
+    expect(
+      region.querySelector('[data-pkc-region="help-manual"]'),
+      '🔴 器ごと捨てた(押される寸前のボタンが消える)',
+    ).toBe(host);
+
+    // ③ 開き直すと戻る(⚠ 空のまま出ると「壊れた」に見える)
+    r.render('c1');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(drawn(), '開き直しても戻らない').toContain('data-probe="manual"');
+    expect(renders, '描き直した回数が合わない').toBe(2);
+  });
+
+  it('🔴 すぐ開き直したら、描き直さない(待たされない)', async () => {
+    const t = fakeTimers();
+    let renders = 0;
+    const r = new HelpRenderer(
+      region,
+      {
+        render: async () => {
+          renders += 1;
+          return '<p data-probe="manual">マニュアル本文</p>';
+        },
+      },
+      undefined,
+      undefined,
+      t.port,
+      1000,
+    );
+    r.render('c1');
+    await Promise.resolve();
+    await Promise.resolve();
+    r.onHidden();
+    r.render('c1'); // すぐ戻ってきた
+    // 🔴 **予約が取り消されていること** ── 残っていると、読んでいる最中に消える
+    expect(t.pending(), '予約が残っている(読んでいる最中に中身が消える)').toBe(0);
+    t.fire(); // 満期が来ても、もう誰も居ない
+    expect(drawn(), 'すぐ戻ったのに手放した').toContain('data-probe="manual"');
+    expect(renders, '同じ中身をもう一度描いた(待たせている)').toBe(1);
+  });
+
+  it('⚠ 一度も描いていなければ、予約もしない', () => {
+    const t = fakeTimers();
+    const r = new HelpRenderer(region, null, undefined, undefined, t.port, 1000);
+    r.onHidden();
+    expect(t.pending(), '描いてもいないのに予約した').toBe(0);
+  });
+});
+
+/**
  * 🔴 **お知らせの登記表の決まり**(書式は `.claude/skills/notice-writing/SKILL.md`)。
  * ⚠ 散文の規律にしない ── PKC2 は 1 entry 22 項目・1 項目 200 字超の壁を作った。
  */

@@ -169,6 +169,13 @@ export class CenterRouter {
       this.scroll.park();
       this.panes[this.lastPane].hidden = true;
       this.panes[view].hidden = false;
+      /**
+       * 🔴 **ヘルプから出たことを伝える**(#531 H3)── あちらは
+       * **しばらく戻って来なければマニュアルの中身を手放す**(実測 6,385 節点が返る)。
+       * ⚠ **その場では捨てない**(入れ直しは 243〜279ms)。判定は `HelpRenderer` が持つ
+       *   ── ここは「出た」という事実だけを渡す(§7:2 か所で数えない)。
+       */
+      if (this.lastPane === 'help') this.help.onHidden();
       this.lastPane = view;
     }
     // 🔑 帯は**本文以外のとき**だけ出す(本文は「閉じる」対象ではない)

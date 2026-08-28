@@ -13,7 +13,7 @@
  *   ⚠ 札の側の主張は `schedule-view.test.ts` へ移した。
  */
 import { stubStamps } from '../helpers/store-stamps';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -21,6 +21,7 @@ import { VIEW_MODES, type ViewMode } from '../../src/adapter/state/app-state';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { CenterRouter } from '../../src/adapter/ui/render/center';
+import { HelpRenderer } from '../../src/adapter/ui/render/help';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { stubRevisionOps } from '../helpers/revision-stub';
 
@@ -372,3 +373,40 @@ describe('🔴 面の帯(user 目線レビュー U-3)', () => {
   });
 });
 
+
+/**
+ * 🔴 **ヘルプから出たことが、ヘルプの面に届いている**(#531 H3、2026-08-28)。
+ *
+ * ⚠ **この主張は、どちらの単体 test にも書けない** ── `HelpRenderer` の test は
+ *   「`onHidden()` を呼んだら手放す」を見るだけで、**誰も呼んでいなくても緑**である。
+ *   `CenterRouter` の test も、面が入れ替わったことしか見ていない。
+ *   🔑 だから**合意を見る場所を別に 1 つ置く**(CLAUDE.md §7、2026-08-25)。
+ *
+ * ⚠ 本体は**呼び抜けさせない**(`mockImplementation` で止める)── 呼び抜けると
+ *   5 分の予約が実時間で残る(`vi.spyOn` は既定で本体を呼ぶ ── CLAUDE.md の戒め)。
+ */
+describe('ヘルプから出たら、面に伝わる(#531 H3)', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('🔴 ヘルプ → 本文 で伝わり、別の面から出たときは伝わらない', async () => {
+    const spy = vi.spyOn(HelpRenderer.prototype, 'onHidden').mockImplementation(() => undefined);
+    const { d } = setup([meta('n1')], { n1: '本文' });
+
+    // ① ヘルプを開いて、出る
+    showView(d, 'help');
+    await tick();
+    expect(spy, '開いただけで「出た」と言っている').not.toHaveBeenCalled();
+    showView(d, 'detail');
+    await tick();
+    expect(spy, 'ヘルプから出たのに面へ伝わっていない(いつまでも抱えたまま)').toHaveBeenCalledTimes(1);
+
+    // ② 🔴 対照群 ── **別の面**から出たときに呼ばない(面を見分けている証拠)
+    showView(d, 'settings');
+    await tick();
+    showView(d, 'detail');
+    await tick();
+    expect(spy, '別の面から出たのにヘルプへ伝えている(面を見分けていない)').toHaveBeenCalledTimes(
+      1,
+    );
+  });
+});
