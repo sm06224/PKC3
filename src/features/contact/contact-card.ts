@@ -165,3 +165,15 @@ export function mailHref(email: string): string | null {
 export function contactLine(card: ContactCard): string {
   return card.org === '' ? card.name : `${card.name}(${card.org})`;
 }
+
+/**
+ * 🔴 **いま見えている連絡先**(絞り込み + 並び)── 描画と書き出しが**同じ 1 つ**を
+ * 呼ぶ(#278 段③)。⚠ 別々に filter を書くと「画面は 3 件なのに書き出しは 5 件」
+ * という**黙った食い違い**になる(§7 ── 個人情報の書き出しでは特に踏めない)。
+ */
+export function visibleContacts(
+  cards: readonly ContactCard[],
+  query: string,
+): ContactCard[] {
+  return sortContacts(cards.filter((c) => matchContact(c, query)));
+}

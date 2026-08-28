@@ -26,9 +26,8 @@ import type { AppState } from '@adapter/state/app-state';
 import {
   contactLine,
   mailHref,
-  matchContact,
-  sortContacts,
   telHref,
+  visibleContacts,
   type ContactCard,
 } from '@features/contact/contact-card';
 
@@ -45,8 +44,8 @@ export class ContactsRenderer {
   render(state: AppState): void {
     const scan = state.contactScan;
     const query = state.filterQuery;
-    const cards =
-      scan === null ? [] : sortContacts(scan.cards.filter((c) => matchContact(c, query)));
+    // 🔑 書き出し(binder の `export-vcards`)と**同じ 1 つ**の規則(§7)
+    const cards = scan === null ? [] : visibleContacts(scan.cards, query);
     /**
      * ⚠ **指紋に「集めていない」も入れる** ── 入れないと、集め終わった瞬間に
      *   `0 件` の指紋と一致してしまい、**一覧が出ないまま**になる。
@@ -73,6 +72,20 @@ export class ContactsRenderer {
     list.setAttribute('data-pkc-field', 'contacts-list');
     for (const card of cards) list.append(this.row(card));
     this.host.append(list);
+
+    /**
+     * 🔴 **vCard の書き出し**(#278 段③)── 押した 1 回だけ、**見えている分**を
+     * .vcf 1 つに書く。⚠ 個人情報なので**明示の 1 押し**でしか出ない(自動で
+     * どこかへ含めない ── issue の「既定は含めない側」)。文言に件数を出す ──
+     * 絞り込み中に「全部出た」と誤読させない。
+     */
+    const exp = document.createElement('button');
+    exp.type = 'button';
+    exp.setAttribute('data-pkc-action', 'export-vcards');
+    exp.setAttribute('data-pkc-field', 'contacts-export');
+    exp.textContent = `vCard で書き出す(${cards.length} 件)`;
+    exp.title = 'いま見えている連絡先を .vcf ファイル 1 つに書き出します(絞り込み中は絞った分だけ)';
+    this.host.append(exp);
   }
 
   /**

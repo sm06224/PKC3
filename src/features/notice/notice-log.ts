@@ -90,6 +90,16 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-28-vcard',
+    title: '連絡先を vCard で出し入れできるようになりました',
+    items: [
+      'スマホや他のアプリから書き出した .vcf ファイルを、左の列の下の「取り込む」から選ぶと、1 枚が 1 ノートになって連絡先タブに並びます。',
+      '連絡先タブの下の「vCard で書き出す」を押すと、いま見えている連絡先が .vcf ファイル 1 つになって落ちてきます。絞り込み中は絞った分だけです。',
+      '書き出されるのはこのボタンを押したときだけです。バックアップや他の書き出しに、連絡先が自動で混ざることはありません。',
+      '取り込みで写せない項目(住所など)は、ノートの本文に行として残ります。写真は取り込めません(そのときは注意が出ます)。',
+    ],
+  },
+  {
     id: '2026-08-28-place-board',
     title: '付箋を自由に置ける「板」が作れるようになりました',
     items: [
@@ -300,23 +310,11 @@ export const NOTICES: readonly Notice[] = [
       'タブを開いたときに集めます。開かない人には走りません。',
     ],
   },
-  {
-    id: '2026-08-27-work-timer',
-    title: '作業時間を計って、ノートに残せるようになりました',
-    items: [
-      '左の列の「画面」の隣に「計る」が増えました。押すと、いま開いているノートの作業時間を計り始めます。',
-      '計っている間は画面の下に帯が出て、何を計っているかと経った時間が出ます。別のノートを開いて押せば、何本でも同時に計れます。',
-      '「止める」を押すと、そのノートの本文の末尾に「作業 2026-08-27 06:40–07:03(23:11)」の 1 行が入ります。「捨てる」なら何も残しません。',
-      '別のタブを見ている間も時間は正しく進みます(刻みを数えず、始めた時刻との差で出しています)。',
-      '編集している最中に止めたときは、その瞬間の時間で預かって、編集を終えると本文に入れます。',
-      'ページを読み直すと計測は消えます。開いている間だけ動く道具です。',
-    ],
-  },
 ];
 
 /**
  * ⚠ **落としたぶんの原本は CHANGELOG に在る**(上限 20 件を超えたので、古いほうから
  *   `2026-08-16-office-save-to-pkc` / `2026-08-17-office-save-same-note`(2026-08-19)、
  *   `2026-08-19-dual-pane-app`(2026-08-22)、
- *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice` / `2026-08-24-pptx-export` / `2026-08-24-paste-permalink` / `2026-08-24-markdown-to-pandoc` / `2026-08-24-schedule-range`(2026-08-25)、`2026-08-24-dual-new-note` / `2026-08-24-office-save-formats` / `2026-08-25-relation-map` / `2026-08-25-bookmark-capture` / `2026-08-25-relation-map-body-links` / `2026-08-25-repeating-tasks` / `2026-08-25-snippets` / `2026-08-25-snippet-menu` / `2026-08-25-append-into-section` / `2026-08-25-revision-diff` / `2026-08-25-cross-pane` / `2026-08-25-ext-write-back`(2026-08-26)、`2026-08-25-portable-html`(2026-08-26)、`2026-08-25-rich-text-paste`(2026-08-27)、`2026-08-26-off-bar-formats` / `2026-08-26-export-structure` / `2026-08-26-shrink-photos` / `2026-08-26-apply-plan` / `2026-08-26-storage-profile` / `2026-08-26-smart-text` / `2026-08-26-smart-tasks` / `2026-08-26-palette-format` / `2026-08-26-settings-file` / `2026-08-26-adopt-external-images`(2026-08-27)、`2026-08-27-body-media` / `2026-08-27-browse-tab-fit` / `2026-08-27-capture-hold`(2026-08-28)、`2026-08-27-group-task`(2026-08-28)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
+ *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice` / `2026-08-24-pptx-export` / `2026-08-24-paste-permalink` / `2026-08-24-markdown-to-pandoc` / `2026-08-24-schedule-range`(2026-08-25)、`2026-08-24-dual-new-note` / `2026-08-24-office-save-formats` / `2026-08-25-relation-map` / `2026-08-25-bookmark-capture` / `2026-08-25-relation-map-body-links` / `2026-08-25-repeating-tasks` / `2026-08-25-snippets` / `2026-08-25-snippet-menu` / `2026-08-25-append-into-section` / `2026-08-25-revision-diff` / `2026-08-25-cross-pane` / `2026-08-25-ext-write-back`(2026-08-26)、`2026-08-25-portable-html`(2026-08-26)、`2026-08-25-rich-text-paste`(2026-08-27)、`2026-08-26-off-bar-formats` / `2026-08-26-export-structure` / `2026-08-26-shrink-photos` / `2026-08-26-apply-plan` / `2026-08-26-storage-profile` / `2026-08-26-smart-text` / `2026-08-26-smart-tasks` / `2026-08-26-palette-format` / `2026-08-26-settings-file` / `2026-08-26-adopt-external-images`(2026-08-27)、`2026-08-27-body-media` / `2026-08-27-browse-tab-fit` / `2026-08-27-capture-hold`(2026-08-28)、`2026-08-27-group-task`(2026-08-28)、`2026-08-27-work-timer`(2026-08-28)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
  */

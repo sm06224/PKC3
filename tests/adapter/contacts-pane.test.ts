@@ -179,3 +179,27 @@ describe('探し方の全数(#278 段①)', () => {
     expect(isBrowseMode('しらない'), '知らない値を通した').toBe(false);
   });
 });
+
+describe('vCard の書き出し(#278 段③)', () => {
+  it('🔴 ボタンは連絡先が見えているときだけ出て、件数を言う', () => {
+    const host = paint({
+      contactScan: scanOf([card('a', '山田', ['090']), card('b', '別人', [], ['b@x.jp'])]),
+    });
+    const btn = host.querySelector<HTMLButtonElement>('[data-pkc-field="contacts-export"]')!;
+    expect(btn, '書き出しの口が無い').not.toBeNull();
+    expect(btn.getAttribute('data-pkc-action')).toBe('export-vcards');
+    expect(btn.textContent).toBe('vCard で書き出す(2 件)');
+    // 0 件なら出さない(空の file を落とす口を見せない)
+    const empty = paint({ contactScan: scanOf([]) });
+    expect(empty.querySelector('[data-pkc-field="contacts-export"]')).toBeNull();
+  });
+
+  it('🔴 絞り込み中は絞った件数を言う(画面と書き出しは同じ 1 つの規則 ── §7)', () => {
+    const host = paint({
+      contactScan: scanOf([card('a', '山田', ['090']), card('b', '別人', [], ['b@x.jp'])]),
+      filterQuery: '山田',
+    });
+    const btn = host.querySelector<HTMLButtonElement>('[data-pkc-field="contacts-export"]')!;
+    expect(btn.textContent, '絞ったのに全件の数を言っている').toBe('vCard で書き出す(1 件)');
+  });
+});
