@@ -458,3 +458,69 @@ test('🔴 面を出入りせずに設定を変えても、段組みが古びな
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **サイドの面を畳んでも、段組みが正しく組み直る**(#525。user 報告 2026-08-28)。
+ *
+ * > 「**サイドのペインを隠すと段組レンダリングの境界線表示がおかしくなるので、
+ * > 再レンダリングのタイミングを再検討して欲しい**」
+ *
+ * ⚠ **この組み合わせを見る smoke は 1 件も無かった** ── この file の 5 本に
+ *   `toggle-pane` は 1 度も出てこない(CLAUDE.md「fixture のゼロ件の次元は、
+ *   測っていない次元」)。だから「畳んだら崩れる」を**誰も落とせなかった**。
+ *
+ * ⚠ 直す前は、畳んだことが段組みへ届く道が **`ResizeObserver` の偶然**しか
+ *   無かった(`applyPaneVisibility` は `fitColumnHeight` を 1 度も呼んでいない)。
+ *   実測した遅れは 1 フレームだが、**規約としては誰も面倒を見ていなかった**。
+ *
+ * 🔑 観測点は「線が見える」ではなく **段の幾何**にする ── 画素は配色で変わるが、
+ *   「器いっぱいに段が並び、縦に溢れていない」は配色に依らない。
+ */
+test('🔴 サイドの面を畳んでも、段組みが器いっぱいに組み直る (#525)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 2560, height: 1000 });
+  await gotoApp(page);
+  await writeNote(page);
+  await setColumns(page, '3');
+
+  const before = await readGeom(page);
+  // 空振り防止 ── 畳む前に**本当に段になっている**(なっていなければ以下は自明)
+  expect(before.on, '畳む前から段組みになっていない(この次元を測れていない)').toBe(true);
+  expect(before.lefts, '畳む前に段が分かれていない').toBeGreaterThanOrEqual(2);
+
+  // 🔴 一覧を畳む(user が実際に押す導線)
+  await clickReal(page, '[data-pkc-action="toggle-pane"][data-pkc-pane="sidebar"]');
+
+  /**
+   * ⚠ **「幅が広がったこと」を待ってから測る** ── 固定 sleep を積まない。
+   *   畳んだ瞬間と組み直った瞬間は最大 1 フレームずれる(実測 25ms)。
+   */
+  await expect
+    .poll(async () => (await readGeom(page)).cW, {
+      message: '畳んでも器が広がらない(畳む導線が効いていない)',
+      timeout: 5_000,
+    })
+    .toBeGreaterThan(before.cW);
+
+  const after = await readGeom(page);
+  // ① 段組みのまま(畳んだ拍子に解けていない)
+  expect(after.on, '畳んだら段組みが解けた').toBe(true);
+  expect(after.lefts, '畳んだら段が 1 本になった').toBeGreaterThanOrEqual(2);
+  // ② 🔴 **縦へ溢れていない**(溢れた分は `overflow-y: hidden` が刈る = 画面から消える)
+  expect(after.sH, '畳んだら本文が縦へはみ出した(その分が画面から消えている)').toBeLessThanOrEqual(
+    after.cH + 1,
+  );
+  // ③ 段の高さが器に合っている(古い高さを持ち越していない)
+  expect(after.inlineH, '段の高さが当たっていない').not.toBe('');
+
+  // 🔴 **戻せる**(片道だけ直っている実装を落とす)
+  await clickReal(page, '[data-pkc-action="toggle-pane"][data-pkc-pane="sidebar"]');
+  await expect
+    .poll(async () => (await readGeom(page)).cW, { timeout: 5_000 })
+    .toBeLessThan(after.cW);
+  const back = await readGeom(page);
+  expect(back.on, '戻したら段組みが解けた').toBe(true);
+  expect(back.sH, '戻したら本文が縦へはみ出した').toBeLessThanOrEqual(back.cH + 1);
+
+  expect(errors).toEqual([]);
+});

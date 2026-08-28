@@ -6,6 +6,7 @@
  * ⚠ 読めない環境(プライベートモード等)でも落ちない ── 全部見えている側に落ちる
  *   (畳まれた状態で復帰できないほうが害が大きい)。
  */
+import { fitColumnHeight } from './read-columns';
 import {
   decodeHidden,
   encodeHidden,
@@ -80,4 +81,24 @@ export function applyPaneVisibility(root: HTMLElement, hidden: readonly PaneId[]
     if (id === null) continue;
     btn.setAttribute('aria-pressed', hidden.includes(id as PaneId) ? 'false' : 'true');
   }
+  /**
+   * 🔴 **畳んだら段組みを採り直す**(#525。2026-08-28)。
+   *
+   * ⚠ 直す前、**ペインの開閉は段組みの引き金として名指しされていなかった** ──
+   *   `installColumnFit()` が見張るのは ①面の `ResizeObserver` ②③④⑤ 各種の
+   *   `MutationObserver` で、開閉は**①が偶然拾っていただけ**である
+   *   (面の幅が変わるから)。
+   * 🔑 同じ file の別の所(`read-columns.ts` の文字の大きさの節)が
+   *   「いま救っているのは**設計が効き切っていないという偶然**である」と
+   *   自ら書いている ── その形をここでも畳む。
+   *
+   * ⚠ **体感は変わらない。** 実測した遅れは **1 フレーム(25ms)**で、
+   *   観測 4 走とも同じだった ── 買うのは「偶然に頼らない」という規約だけである。
+   *   🔑 それでも積む(user 指示「効果が小さいからやらない、を結論にしない」)。
+   * ⚠ **呼び元を増やさない** ── 畳む口は 5 か所ある(`binder.ts` の toggle と
+   *   フォーカスモード / `pane-resize.ts` の下限割れ 2 か所 / `main.ts` の復元)。
+   *   そのどれかに書くと**判定が 5 か所に散る**(CLAUDE.md §7)ので、
+   *   **画面へ写す 1 か所**であるここに置く。
+   */
+  fitColumnHeight(root, root.ownerDocument);
 }
