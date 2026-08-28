@@ -556,6 +556,19 @@ export interface AppState {
    */
   queryFailed: boolean;
   /**
+   * 🔴 **いま使われているタグの一覧**(#494 段②)。打つ欄の候補に出す。
+   *
+   * ⚠ `null` = **まだ集めていない**(0 件ではない)── 欄に焦点が当たったときに
+   *   1 度だけ集める。⚠ **常に集めない** ── 全ノートの frontmatter を舐めるので、
+   *   使わない人に毎回払わせない。
+   * 🔑 集めるのは **集計(`queryScan`)と同じ口**(`key = 'tags'`)── タグを数える
+   *   走査を 2 本作らない(§7)。⚠ ただし**state は別に持つ** ── 集計の面と
+   *   共有すると、集計を別の key で開いた瞬間に候補が消える。
+   * ⚠ **タグを書いたら捨てる**(次の焦点で集め直す)── 付けたばかりのタグが
+   *   候補に出ないと、user は「効いていない」と読む。
+   */
+  tagSuggestions: readonly string[] | null;
+  /**
    * 🔴 **カンバンの札**(#277 段②-b)。⚠ `null` = **まだ集めていない**(0 件ではない)。
    *
    * ⚠ 中身は**項目だけ**で、本文は 1 バイトも入らない ── 舐めるのは worker で、
@@ -720,6 +733,7 @@ export const initialState: AppState = {
   queryKeys: null,
   queryGroups: null,
   queryFailed: false,
+  tagSuggestions: null,
   taskScan: null,
   taskScanFailed: false,
   contactScan: null,
@@ -1061,6 +1075,13 @@ export type UserAction =
    *   こちらは成功の内訳である(「3 件は既に付いていました」を失敗にしない)。
    */
   | { type: 'OP_NOTICE'; message: string }
+  /**
+   * 🔴 **タグの候補が要る**(#494 段②)。⚠ 欄に焦点が当たったときに撃つ ──
+   * 既に持っていれば reducer が**何もしない**(押すたびに全走査しない)。
+   */
+  | { type: 'ASK_TAG_SUGGESTIONS' }
+  /** 集まったタグ(#494 段②)。⚠ 空配列は「0 件だった」= 集め直さない。 */
+  | { type: 'SET_TAG_SUGGESTIONS'; tags: readonly string[] }
   | { type: 'SHOW_HISTORY' }
   /** 🔴 **その版の中身を見る**(#398 段②)。⚠ 復元ではない ── 1 バイトも書かない。 */
   | { type: 'PREVIEW_REVISION'; revId: string }
@@ -1334,6 +1355,11 @@ export type DomainEvent =
    * 頼むと DB の全件走査が 2 回走る(レビュー B-3)。
    */
   | { type: 'REQUEST_QUERY_SCAN'; key: string | null }
+  /**
+   * 🔴 **タグの候補を集めてもらう**(#494 段②)。⚠ 実体は `queryScan('tags')` ──
+   * effect が同じ口を呼ぶ(走査を 2 本作らない)。
+   */
+  | { type: 'REQUEST_TAG_SUGGESTIONS' }
   /**
    * カンバンの札を集める(#277 段②-b)。⚠ 集計と同じ理由で **worker の仕事** ──
    * 本文は常駐していないし、主スレッドへ運んでもいけない(不可侵指示 2026-07-27)。
@@ -2830,7 +2856,19 @@ function reduceCore(
        *   ack を撃つ)── worker に頼み直す形だと 100 件で 100 回の全件走査になる。
        */
       const smartHits = refreshSmartHits(state.smartHits, action.lid, action.body, entryMetas);
-      return { state: { ...state, entryMetas, openBody, taskScan, smartHits }, events: [] };
+      /**
+       * 🔴 **タグを書いたら候補を捨てる**(#494 段②)── 次に欄へ焦点が当たったら
+       * 集め直す。⚠ 捨てないと、**付けたばかりのタグが候補に出ない** ── user は
+       * 「効いていない」と読む(押した手応えが消える型)。
+       * ⚠ **その場で足すのではなく捨てる** ── 足すだけだと「外した最後の 1 件」が
+       *   候補に残り続ける(片側だけ追随する形。§7)。
+       */
+      const tagSuggestions =
+        action.rewrite.kind === 'tag' ? null : state.tagSuggestions;
+      return {
+        state: { ...state, entryMetas, openBody, taskScan, smartHits, tagSuggestions },
+        events: [],
+      };
     }
     case 'SET_CALENDAR_MONTH': {
       // 月送りの正規化(binder は 0 や 13 を送ってよい)
@@ -3915,6 +3953,25 @@ function reduceCore(
       // ⚠ **`error` を触らない** ── 知らせが出たからといって、出ているエラーを
       //    消してよい理由は無い(`main.ts` が別の行として組んでいる)
       return { state: { ...state, notice: action.message }, events: [] };
+    /**
+     * 🔴 **タグの候補が要る**(#494 段②)。
+     *
+     * ⚠ **既に持っていれば何もしない** ── 焦点が当たるたびに全ノートの
+     *   frontmatter を舐めると、打つ気になった瞬間に画面が重くなる。
+     * 🔑 捨てるのは**タグを書いたとき**だけ(下の `BODY_REWRITTEN`)── だから
+     *   「付けたばかりのタグが候補に出ない」は起きない。
+     */
+    case 'ASK_TAG_SUGGESTIONS': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      if (state.tagSuggestions !== null) return { state, events: [] };
+      return { state, events: [{ type: 'REQUEST_TAG_SUGGESTIONS' }] };
+    }
+    /**
+     * ⚠ **空配列も答えである**(0 件だった)── `null` に戻さない。戻すと
+     *   焦点が当たるたびに全走査が走る(#421 の `SMART_SCAN_FAILED` と同じ規律)。
+     */
+    case 'SET_TAG_SUGGESTIONS':
+      return { state: { ...state, tagSuggestions: action.tags }, events: [] };
     case 'OP_FAILED':
       // 非致命: 通知のみ。phase は動かさない(kanban 等の操作性を殺さない)
       return { state: { ...state, error: action.error }, events: [] };

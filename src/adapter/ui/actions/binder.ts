@@ -4605,11 +4605,15 @@ export function bindActions(
      *
      * ⚠ **これが無いと、user 指摘そのものが直らない** ── 「ここに打つ!って感じ」で
      *   打った後に**押すボタンを探させる**のでは、動線は 1 手も減っていない。
-     * ⚠ 変換中の Enter では撃たない(`isComposing`)── 日本語のタグを打つ人は毎回踏む。
+     * ⚠ **変換中の Enter では撃たない** ── 日本語のタグを打つ人は毎回踏む。
+     *   🔑 ただし `isComposing` は**この関数の入口で弾き済み**(上の `if (ke.isComposing) return;`)
+     *   ── ここで書き足すと **no-op** になる(変異試験 T2 が SURVIVED で教えた。
+     *   CLAUDE.md「『これが無いと壊れる』と書く前に、外して壊れるのを見る」)。
+     *   守りは `tests/adapter/inspector-tag-input.test.ts` が**振る舞いで**留めている。
      * ⚠ 欄の中だけ ── 画面全体の近道にしない(`append-input` と同じ作法)。
      */
     if (field === 'tag-add-input') {
-      if (ke.key === 'Enter' && !ke.isComposing && !ke.shiftKey && !ke.ctrlKey && !ke.metaKey) {
+      if (ke.key === 'Enter' && !ke.shiftKey && !ke.ctrlKey && !ke.metaKey) {
         ke.preventDefault();
         run('add-tag', ke.target as HTMLElement);
       }
@@ -6170,6 +6174,23 @@ export function bindActions(
     if ((side !== 'left' && side !== 'right') || lid === null) return;
     dispatcher.dispatch({ type: 'DUAL_SET_CURSOR', side, lid });
   };
+  /**
+   * 🔴 **タグの欄に焦点が当たったら、候補を集めてもらう**(#494 段②)。
+   *
+   * ⚠ **常に集めない** ── 全ノートの frontmatter を舐めるので、タグを打たない人に
+   *   毎回払わせない。⚠ **打つたびにも集めない** ── 既に持っていれば reducer が
+   *   何もしない(`ASK_TAG_SUGGESTIONS`)。
+   * 🔑 **2 つの欄が同じ候補を使う**(§7)── 情報ペインの「その場で打つ」と、
+   *   フォルダの面の「まとめて付ける」。別々に集めると、同じ画面で
+   *   **候補が食い違う**。
+   */
+  const onTagFocusIn = (ev: Event): void => {
+    const el = (ev.target as HTMLElement | null)?.closest<HTMLElement>('[data-pkc-field]');
+    const field = el?.getAttribute('data-pkc-field');
+    if (field !== 'tag-add-input' && field !== 'bulk-tag') return;
+    dispatcher.dispatch({ type: 'ASK_TAG_SUGGESTIONS' });
+  };
+  root.addEventListener('focusin', onTagFocusIn);
   root.addEventListener('focusin', onDualFocusIn);
   root.addEventListener('focusout', onRenameBlur);
   doc.addEventListener('keydown', onShortcut);
@@ -6184,6 +6205,7 @@ export function bindActions(
     root.removeEventListener('mousedown', onMousedown);
     root.removeEventListener('input', onInput);
     root.removeEventListener('change', onChange);
+    root.removeEventListener('focusin', onTagFocusIn);
     root.removeEventListener('focusin', onDualFocusIn);
     root.removeEventListener('focusout', onRenameBlur);
     doc.removeEventListener('keydown', onShortcut);

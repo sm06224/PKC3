@@ -380,9 +380,7 @@ describe('タグの札(#182)', () => {
   it('🔴 閉じが無い(確定)なら、行の字で「読めていません」と言う', () => {
     const { d, root } = withInspector();
     d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '---\ntags: [買い物]\n本文\n' });
-    const box = root.querySelector('[data-pkc-field="inspector-tag-chips"]');
-    const row = tagRow(root);
-    expect(box?.textContent, '確定している不具合まで黙った').toBe('読めていません');
+    expect(tagValue(root), '確定している不具合まで黙った').toBe('読めていません');
   });
 
   it('🔴 cap を超えた文書の情報でも「無し」と断定しない', () => {
@@ -406,7 +404,6 @@ describe('タグの札(#182)', () => {
     const { d, root } = withInspector();
     d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '---\ntags: [買い物]\n本文\n' });
     d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '---\ntags: [買い物]\n---\n本文\n' });
-    const box = root.querySelector('[data-pkc-field="inspector-tag-chips"]');
     const row = tagRow(root);
     expect(
       [...root.querySelectorAll('[data-pkc-action="filter-by-tag"]')].map((c) => c.textContent),

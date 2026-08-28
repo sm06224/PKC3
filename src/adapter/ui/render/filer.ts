@@ -423,6 +423,13 @@ export class FilerRenderer {
       const tag = document.createElement('input');
       tag.type = 'text';
       tag.setAttribute('data-pkc-field', 'bulk-tag');
+      /**
+       * 🔑 **候補は情報ペインと同じ 1 本を使う**(#494 段②、§7)── 同じ画面で
+       * 「その場で打つ」と「まとめて付ける」の候補が食い違うのを作らない。
+       * ⚠ その `<datalist>` が無い配線(情報ペインを組んでいない test 等)では、
+       *   **候補が出ないだけ**である(打つことは動く)。
+       */
+      tag.setAttribute('list', 'pkc-tag-candidates');
       tag.placeholder = 'タグ';
       tag.setAttribute('aria-label', 'まとめて付け外しするタグ');
       const add = iconButton('bulk-tag-add', 'タグを付ける');

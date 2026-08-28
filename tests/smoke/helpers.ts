@@ -266,14 +266,56 @@ async function reachableOnce(page: Page, target: Target): Promise<{ x: number; y
    *   **`querySelector` は先頭を返す**ので、**別の要素で当たり判定していた**
    *   (箱は最後の行・判定は最初の行、という食い違いが原理的に起こりうる)。
    */
-  const hit = await el.evaluate(
+  /**
+   * 🔴 **箱を測った後に面が作り直されると、古い座標で当て判定してしまう**
+   * (2026-08-28、#494 のフル smoke で実際に踏んだ)。
+   *
+   * ⚠ `boundingBox()` と `evaluate()` は**別々に locator を解決する** ── その間に
+   *   情報ペインが作り直されると(保存の直後に worker から更新時刻が遅れて届く
+   *   ── この file の `isRerenderRace` が書いているとおり)、`node` は**新しい要素**
+   *   なのに `x, y` は**古い箱**のものになる。すると
+   *   `elementFromPoint` は別の物を返し、**「覆われている」という嘘の診断**が出る。
+   * 🔑 だから `evaluate` の中で**その node 自身の箱も一緒に採る**。ずれていたら
+   *   「覆われている」ではなく**作り直された**と読み、`withRerenderRetry` に回す。
+   * ⚠ **検出力は 1 ミリも下げない** ── 箱が動いていないのに当たらない場合は、
+   *   これまでどおり落ちる(本物の occlusion / dead click はそちら)。
+   * ⚠ `boundingBox()` のほうを捨てて `getBoundingClientRect` 一本にはしない ──
+   *   あちらは iframe の中の要素でも**頁の座標**を返す(`evaluate` は frame の座標)。
+   */
+  const probe = await el.evaluate(
     (node, { px, py }) => {
       const at = document.elementFromPoint(px, py);
-      return !!(at && (at === node || node.contains(at)));
+      const r = (node as Element).getBoundingClientRect();
+      return {
+        hit: !!(at && (at === node || node.contains(at))),
+        box: { x: r.x, y: r.y, w: r.width, h: r.height },
+        at: at === null ? '(無し)' : `${at.tagName}${at.getAttribute('data-pkc-field') ?? ''}`,
+      };
     },
     { px: x, py: y },
   );
-  expect(hit, `${name} の中心 (${x},${y}) が別要素に覆われている / 届かない`).toBe(true);
+  /**
+   * ⚠ **大きさだけでなく位置も見る** ── 作り直しでいちばん多いのは
+   *   「同じ大きさの物が**隣へずれる**」形である(札が 1 枚増減しただけで起きる)。
+   *   大きさだけ比べると、その回を**本物の occlusion として落としてしまう**。
+   */
+  const moved =
+    Math.abs(probe.box.x - box!.x) > 1 ||
+    Math.abs(probe.box.y - box!.y) > 1 ||
+    Math.abs(probe.box.w - box!.width) > 1 ||
+    Math.abs(probe.box.h - box!.height) > 1;
+  if (!probe.hit && moved) {
+    // ⚠ 文言は `isRerenderRace` が拾う形にする(retry の合図)
+    throw new Error(
+      `${name}: 測った後に element is not stable` +
+        `(${box!.x},${box!.y} ${box!.width}x${box!.height} → ` +
+        `${probe.box.x},${probe.box.y} ${probe.box.w}x${probe.box.h})`,
+    );
+  }
+  expect(
+    probe.hit,
+    `${name} の中心 (${x},${y}) が別要素に覆われている / 届かない(そこに在るのは ${probe.at})`,
+  ).toBe(true);
   return { x, y };
 }
 

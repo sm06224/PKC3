@@ -40,6 +40,8 @@ import type {
   GroupResult as QueryGroups,
   KeyResult as QueryKeys,
 } from '@features/query/group-by';
+// ⚠ 「未設定」の綴りは features 側の 1 か所(`''`)── ここで書き写さない(§7)
+import { UNSET as QUERY_UNSET } from '@features/query/group-by';
 import type { TaskScan } from '@features/schedule/task-cards';
 import type { ContactScan } from '@features/contact/contact-card';
 import type { SnippetScan } from '@features/snippet/snippet-table';
@@ -666,6 +668,50 @@ export function connectStoreEffects(
           () => {
             if (disposed) return;
             dispatcher.dispatch({ type: 'QUERY_FAILED' });
+          },
+        );
+        break;
+      }
+      /**
+       * 🔴 **タグの候補を集める**(#494 段②)。
+       *
+       * 🔑 **口は集計と同じ**(`queryScan('tags')`)── タグを数える走査を 2 本
+       *   作らない(§7)。返るのは**値と件数だけ**で、本文は 1 バイトも渡らない。
+       * ⚠ 持っていない配線(古い worker が service worker に残っている端末)では
+       *   **候補が出ないだけ**にする ── 打つこと自体は動く(機能が減る側へ落ちる)。
+       *   そのとき `SET_TAG_SUGGESTIONS` に**空を渡す** ── 渡さないと `null` のまま
+       *   なので、焦点が当たるたびに頼み直して**毎回 reject を待つ**ことになる。
+       */
+      case 'REQUEST_TAG_SUGGESTIONS': {
+        const ask = store.queryScan;
+        if (!ask) {
+          dispatcher.dispatch({ type: 'SET_TAG_SUGGESTIONS', tags: [] });
+          break;
+        }
+        void ask('tags').then(
+          (out) => {
+            if (disposed) return;
+            /**
+             * ⚠ **「未設定」の組を捨てる** ── `createQueryScan` は tags を持たない
+             *   ノートを 1 つの組にまとめて返す。候補に出すと、押した瞬間に
+             *   その字がタグとして本文へ入る。
+             * 🔑 並びは `queryScan` が既に**件数の多い順**にしている ── ここで
+             *   並べ直さない(2 か所で並べると、集計の面と候補で順が食い違う)。
+             */
+            const tags = (out.groups?.groups ?? [])
+              .map((g) => g.value)
+              .filter((v) => v !== QUERY_UNSET);
+            /**
+             * ⚠ **切った件数を黙って捨てない** ── `queryScan` は組の数に上限を
+             *   持つ(`omittedGroups`)。候補が全部でないことは、下の
+             *   `<datalist>` の作り(打った字はそのまま通る)が吸収する ──
+             *   候補は**近道**であって、打てる語の一覧ではない。
+             */
+            dispatcher.dispatch({ type: 'SET_TAG_SUGGESTIONS', tags });
+          },
+          () => {
+            if (disposed) return;
+            dispatcher.dispatch({ type: 'SET_TAG_SUGGESTIONS', tags: [] });
           },
         );
         break;

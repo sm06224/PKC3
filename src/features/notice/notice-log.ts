@@ -90,6 +90,18 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-28-tag-input',
+    title: 'タグを、その場で打てるようになりました',
+    items: [
+      '右の情報ペインの「タグ」の行に、タグを打つ欄ができました。打って Enter で付きます。',
+      'これまでタグを付けるには、本文の先頭に tags: と書くか、フォルダの面で行に印を付ける必要がありました。',
+      '付いたタグには × が出ます。押すとそのタグだけ外れます(ノートも本文も消えません)。',
+      '欄に触ると、すでに使っているタグが候補に出ます。同じタグを打ち間違えて増やさずに済みます。',
+      '候補に無い新しいタグも、これまでどおりそのまま打てます。',
+      '編集中と、本文の先頭が読めていないときは、この欄は出ません(書ける状態のときだけ出ます)。',
+    ],
+  },
+  {
     id: '2026-08-28-pane-resize',
     title: 'ペインと追記欄の大きさを、自分で決められるようになりました',
     items: [
@@ -264,15 +276,6 @@ export const NOTICES: readonly Notice[] = [
     ],
   },
   {
-    id: '2026-08-27-browse-tab-fit',
-    title: '左の列のタブの字が、隣に重ならなくなりました',
-    items: [
-      'タブが 5 枚になってから、「フォルダ」などの字がボタンからはみ出して、隣のタブに重なっていました。字が箱に収まるようにしました。',
-      'タブの図案は出さなくなりました。5 枚を 1 行に並べると、図案の分だけ字が入らなくなるためです。',
-      '狭い画面では、入りきらなくなったところで折り返します。これまでは 3 段になっていましたが、2 段までになりました。',
-    ],
-  },
-  {
     id: '2026-08-27-contacts',
     title: '連絡先のタブができました',
     items: [
@@ -315,5 +318,5 @@ export const NOTICES: readonly Notice[] = [
  * ⚠ **落としたぶんの原本は CHANGELOG に在る**(上限 20 件を超えたので、古いほうから
  *   `2026-08-16-office-save-to-pkc` / `2026-08-17-office-save-same-note`(2026-08-19)、
  *   `2026-08-19-dual-pane-app`(2026-08-22)、
- *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice` / `2026-08-24-pptx-export` / `2026-08-24-paste-permalink` / `2026-08-24-markdown-to-pandoc` / `2026-08-24-schedule-range`(2026-08-25)、`2026-08-24-dual-new-note` / `2026-08-24-office-save-formats` / `2026-08-25-relation-map` / `2026-08-25-bookmark-capture` / `2026-08-25-relation-map-body-links` / `2026-08-25-repeating-tasks` / `2026-08-25-snippets` / `2026-08-25-snippet-menu` / `2026-08-25-append-into-section` / `2026-08-25-revision-diff` / `2026-08-25-cross-pane` / `2026-08-25-ext-write-back`(2026-08-26)、`2026-08-25-portable-html`(2026-08-26)、`2026-08-25-rich-text-paste`(2026-08-27)、`2026-08-26-off-bar-formats` / `2026-08-26-export-structure` / `2026-08-26-shrink-photos` / `2026-08-26-apply-plan` / `2026-08-26-storage-profile` / `2026-08-26-smart-text` / `2026-08-26-smart-tasks` / `2026-08-26-palette-format` / `2026-08-26-settings-file` / `2026-08-26-adopt-external-images`(2026-08-27)、`2026-08-27-body-media`(2026-08-28)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
+ *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice` / `2026-08-24-pptx-export` / `2026-08-24-paste-permalink` / `2026-08-24-markdown-to-pandoc` / `2026-08-24-schedule-range`(2026-08-25)、`2026-08-24-dual-new-note` / `2026-08-24-office-save-formats` / `2026-08-25-relation-map` / `2026-08-25-bookmark-capture` / `2026-08-25-relation-map-body-links` / `2026-08-25-repeating-tasks` / `2026-08-25-snippets` / `2026-08-25-snippet-menu` / `2026-08-25-append-into-section` / `2026-08-25-revision-diff` / `2026-08-25-cross-pane` / `2026-08-25-ext-write-back`(2026-08-26)、`2026-08-25-portable-html`(2026-08-26)、`2026-08-25-rich-text-paste`(2026-08-27)、`2026-08-26-off-bar-formats` / `2026-08-26-export-structure` / `2026-08-26-shrink-photos` / `2026-08-26-apply-plan` / `2026-08-26-storage-profile` / `2026-08-26-smart-text` / `2026-08-26-smart-tasks` / `2026-08-26-palette-format` / `2026-08-26-settings-file` / `2026-08-26-adopt-external-images`(2026-08-27)、`2026-08-27-body-media` / `2026-08-27-browse-tab-fit`(2026-08-28)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
  */

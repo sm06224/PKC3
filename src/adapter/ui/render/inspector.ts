@@ -569,6 +569,28 @@ export class InspectorRenderer {
         this.candidates.append(more);
       }
     }
+    /**
+     * 🔴 **いま使われているタグを候補に出す**(#494 段②)。
+     *
+     * > issue の求め:「**既にあるタグから選べる**(打ち間違いで別のタグを増やさない)」
+     *
+     * ⚠ **候補は近道であって、打てる語の一覧ではない** ── `<datalist>` は
+     *   打った字をそのまま通すので、新しいタグは今までどおり打てる。
+     * ⚠ **自分が既に持っているタグは外す** ── 押しても「既に付いています」に
+     *   なるだけで、候補の場所を食う。
+     * ⚠ 集めるのは**焦点が当たったとき**(`binder` が `ASK_TAG_SUGGESTIONS` を撃つ)
+     *   ── ここで頼むと、ノートを選び替えるたびに全走査が走る。
+     */
+    if (this.tagCandidates) {
+      const mine = new Set(tagBody === null ? [] : readTags(tagBody));
+      this.tagCandidates.textContent = '';
+      for (const t of state.tagSuggestions ?? []) {
+        if (mine.has(t)) continue;
+        const opt = document.createElement('option');
+        opt.value = t;
+        this.tagCandidates.append(opt);
+      }
+    }
     this.setRow('inspector-created', formatStoredDate(meta.createdAt));
     this.setRow('inspector-updated', formatStoredDate(meta.updatedAt));
     this.paintDate(meta);
