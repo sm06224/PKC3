@@ -18,6 +18,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { RowSwap, blockWithSubSlot } from '../../src/adapter/ui/render/row-swap';
 import { renderMarkdownWithRanges } from '../../src/features/markdown/source-ranges';
+import { KEY_COMMANDS } from '../../src/features/keymap';
 
 const DOC = [
   '# 題', //                       0
@@ -1131,36 +1132,49 @@ describe('RowSwap — 開放終端 と auto pair', () => {
 
 });
 
-describe('RowSwap — Alt+カーソルキーで隣の塊へ(2026-08-15 user 再裁定)', () => {
+describe('RowSwap — 端で同じ向きに 2 回押すと隣の塊へ(#524。user 指示 2026-08-28)', () => {
   /**
-   * ⚠ 既定で `altKey: true` を付ける ── **塊の移動は Alt が要る**
-   * (2026-08-15、user 指示「操作の暴発を防ぐ動線が欲しい」)。
-   * 素のキーを見る test は下の「素の ↑↓ は奪わない」に集めてある。
+   * 🔴 **2026-08-28 に主張を裏返した。**
+   *
+   * 以前は `Alt+↑ / Alt+↓` だった(2026-08-15、user 指示「操作の暴発を防ぐ動線が
+   * 欲しい」)。⚠ その前の素のキー版は **改行の有無**で端を判定していたので、
+   * 改行を持たない長い段落では**箱のどこに居ても隣へ飛んだ**(user 報告の暴発)。
+   *
+   * 🔑 いまは判定が違う ── **既定に任せてから caret の着地点を見る**。
+   * ブラウザは `↑` を端の行で押すと caret を `0` へ、`↓` を最終行で押すと末尾へ
+   * 動かすので、**折り返しが在っても正しく端が分かる**(改行では分からなかった)。
+   * ⚠ そして**暴発は 2 回という数で防ぐ** ── Alt を覚えなくてよくなった。
+   *
+   * ⚠ **happy-dom は ↑↓ で caret を動かさない。** だからこの file が測れるのは
+   *   「**端に居るとき**の数え方」だけである ── 🔴 **折り返しの途中で飛ばないこと**は
+   *   実ブラウザでしか測れないので `tests/smoke/row-edit.smoke.spec.ts` が見る
+   *   (CLAUDE.md §2「本命の分岐を unit は 1 度も通らないことがある」)。
    */
-  const arrow = (
+  const press = async (
     ta: HTMLTextAreaElement,
     key: 'ArrowDown' | 'ArrowUp',
     init: KeyboardEventInit = {},
-  ): KeyboardEvent => {
-    const ev = new KeyboardEvent('keydown', {
-      key,
-      bubbles: true,
-      cancelable: true,
-      altKey: true,
-      ...init,
-    });
+  ): Promise<KeyboardEvent> => {
+    const ev = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
     ta.dispatchEvent(ev);
+    // ⚠ 判定は**既定の後**なので 1 tick 待つ(実装が `setTimeout(0)` で見る)
+    await new Promise((r) => setTimeout(r, 0));
     return ev;
   };
 
-  it('🔴 最終行の Alt+↓ で確定し、次の塊が開く(caret は先頭)', () => {
+  it('🔴 最終行で ↓ を 2 回 ── 1 回目は移らず、2 回目で次の塊が開く(caret は先頭)', async () => {
     const r = rig();
     openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     ta.value = '書き換えた。'; // 行数は変わらない
     ta.setSelectionRange(ta.value.length, ta.value.length);
-    const ev = arrow(ta, 'ArrowDown');
-    expect(ev.defaultPrevented, '既定を止めていない(画面がスクロールする)').toBe(true);
+
+    // 🔴 **対照群 ── 1 回では移らない**(これが無いと「常に飛ぶ」実装でも通る)
+    await press(ta, 'ArrowDown');
+    expect(box(r.host), '1 回目で隣の塊へ飛んでいる').toBe(ta);
+    expect(r.commits, '1 回目で確定している').toEqual([]);
+
+    await press(ta, 'ArrowDown');
     // 確定は 1 回・次の塊(表)が開いている
     expect(r.commits).toEqual([{ start: 2, end: 2, text: '書き換えた。' }]);
     const next = box(r.host)!;
@@ -1169,13 +1183,14 @@ describe('RowSwap — Alt+カーソルキーで隣の塊へ(2026-08-15 user 再�
     expect(next.selectionStart, 'caret が先頭に無い').toBe(0);
   });
 
-  it('🔴 先頭行の Alt+↑ で前の塊が開く(caret は末尾)', () => {
+  it('🔴 先頭行で ↑ を 2 回 ── 前の塊が開く(caret は末尾)', async () => {
     const r = rig();
     openClick(findByText(r.host, 'p', '最後の段落。'));
     const ta = box(r.host)!;
     ta.setSelectionRange(0, 0);
-    const ev = arrow(ta, 'ArrowUp');
-    expect(ev.defaultPrevented).toBe(true);
+    await press(ta, 'ArrowUp');
+    expect(box(r.host), '1 回目で飛んでいる').toBe(ta);
+    await press(ta, 'ArrowUp');
     const prev = box(r.host)!;
     expect(prev.value).toBe('- 一つめ\n- 二つめ');
     expect(r.swap.activeRange).toEqual({ start: 9, end: 10 });
@@ -1183,74 +1198,132 @@ describe('RowSwap — Alt+カーソルキーで隣の塊へ(2026-08-15 user 再�
     expect(r.commits).toEqual([]); // 変えていないので確定は出ない
   });
 
-  it('🔴 素の ↑↓ は箱の中の移動のまま(改行を持たない塊でも飛ばない ── 2026-08-15 の暴発)', () => {
+  it('🔴 端に居ないうちは数えない(caret が端から離れていれば何回押しても移らない)', () => {
     const r = rig();
     openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
-    /**
-     * ⚠ **この塊の原文は改行を 1 つも持たない。** 旧実装は「改行が無い側に居る」を
-     * 端と読んだので、箱のどこに居ても素の ↑↓ が隣へ飛んだ(user 報告の暴発)。
-     * ⚠ 原文は**折り返して**表示されるので、視覚の途中でも改行の端でありうる ──
-     * 高さを直しても素のキーでは両立しない。だから Alt を要る形にした。
-     */
-    expect(ta.value.includes('\n'), '前提: 改行を持たない塊で見ていない').toBe(false);
+    // ⚠ 前提: この塊は 1 文字以上あり、**端でない位置**が存在する
+    expect(ta.value.length, '端でない位置が無い fixture').toBeGreaterThan(2);
+    return (async () => {
+      for (let i = 0; i < 4; i += 1) {
+        ta.setSelectionRange(1, 1); // 先頭でも末尾でもない
+        await press(ta, 'ArrowDown');
+        await press(ta, 'ArrowUp');
+      }
+      expect(box(r.host), '端に居ないのに飛んだ').toBe(ta);
+      expect(r.commits).toEqual([]);
+    })();
+  });
+
+  it('🔴 向きが変わると数え直す(↓ のあと ↑ 1 回では移らない)', async () => {
+    const r = rig();
+    openClick(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
     ta.setSelectionRange(ta.value.length, ta.value.length);
-    expect(arrow(ta, 'ArrowDown', { altKey: false }).defaultPrevented).toBe(false);
+    await press(ta, 'ArrowDown'); // 下向きに 1
     ta.setSelectionRange(0, 0);
-    expect(arrow(ta, 'ArrowUp', { altKey: false }).defaultPrevented).toBe(false);
-    expect(box(r.host), '素のキーで隣の塊へ飛んでいる').toBe(ta);
+    await press(ta, 'ArrowUp'); // 向きが変わる → 上向きに 1(2 ではない)
+    expect(box(r.host), '向きが変わったのに数えを引き継いだ').toBe(ta);
+    // もう 1 回 ↑ でようやく移る
+    await press(ta, 'ArrowUp');
+    expect(box(r.host)!.value, '2 回目で移っていない').not.toBe('最初の段落。');
+  });
+
+  it('🔴 間に別のキーや打鍵が入ると数え直す(字を入れてから 1 回で飛ばない)', async () => {
+    const r = rig();
+    openClick(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+
+    await press(ta, 'ArrowDown'); // 1
+    // 別のキー(→)を打つ
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+    await press(ta, 'ArrowDown'); // 数え直しなので 1
+    expect(box(r.host), '別のキーを挟んだのに数えが残った').toBe(ta);
+
+    // 打鍵でも数え直す
+    await press(ta, 'ArrowDown'); // 2 → 移りそう…ではなく、下で input を挟む
+    const ta2 = box(r.host);
+    expect(ta2, 'ここでは移っていてよい').not.toBe(ta);
+  });
+
+  it('🔴 打鍵(input)は数えを捨てる ── 字を入れた直後の 1 回で飛ばない', async () => {
+    const r = rig();
+    openClick(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+    await press(ta, 'ArrowDown'); // 1
+    ta.value += 'あ';
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    await press(ta, 'ArrowDown'); // 数え直しなので 1
+    expect(box(r.host), '打鍵のあと 1 回で飛んだ').toBe(ta);
+    expect(r.commits, '飛んでいないのに確定した').toEqual([]);
+  });
+
+  it('🔴 Shift / Ctrl / Meta / Alt の併せ押しは数えない(選択の拡張・OS の割り当て)', async () => {
+    const r = rig();
+    openClick(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+    for (const init of [{ shiftKey: true }, { ctrlKey: true }, { metaKey: true }, { altKey: true }]) {
+      await press(ta, 'ArrowDown', init);
+      await press(ta, 'ArrowDown', init);
+    }
+    expect(box(r.host), '併せ押しで隣の塊へ飛んでいる').toBe(ta);
     expect(r.commits).toEqual([]);
   });
 
-  it('🔴 Alt+↓ は箱の途中でも移る / Shift・Ctrl・Meta の併せ押しは奪わない', () => {
-    const r = rig();
-    openClick(findByText(r.host, 'p', '最後の段落。'));
-    arrow(box(r.host)!, 'ArrowUp'); // 箇条書き(2 行)を開く
-    const list = box(r.host)!;
-    expect(list.value).toBe('- 一つめ\n- 二つめ');
-    // 併せ押しは奪わない(選択の拡張・OS の割り当て)
-    list.setSelectionRange(0, 0);
-    expect(arrow(list, 'ArrowDown', { shiftKey: true }).defaultPrevented).toBe(false);
-    expect(arrow(list, 'ArrowDown', { ctrlKey: true }).defaultPrevented).toBe(false);
-    expect(arrow(list, 'ArrowDown', { metaKey: true }).defaultPrevented).toBe(false);
-    expect(box(r.host), '併せ押しで隣の塊へ飛んでいる').toBe(list);
-    // 🔴 Alt が付けば**最終行に居なくても**移る(caret は 1 行目の頭のまま)
-    expect(arrow(list, 'ArrowDown').defaultPrevented).toBe(true);
-    expect(box(r.host)!.value).toBe('最後の段落。');
+  /**
+   * 🔴 **`Alt+↑↓` は効かなくなった**(#524。user 指示「廃止」)。
+   * ⚠ **鍵の表からも消す** ── 残すと同じことをする道が 2 本になる(§7)。
+   * 🔑 ここは実装ではなく**表**を見る ── 実装だけ消して表に残ると、
+   *   鍵の一覧に「効かない鍵」が出続ける。
+   */
+  it('🔴 塊の移動の鍵(row-next / row-prev)は表から消えている', () => {
+    const ids = KEY_COMMANDS.map((c) => c.id);
+    expect(ids, 'row-next が残っている(Alt+↓ の 2 系統目)').not.toContain('row-next');
+    expect(ids, 'row-prev が残っている(Alt+↑ の 2 系統目)').not.toContain('row-prev');
+    // 空振り防止 ── 表そのものは生きている
+    expect(ids, '鍵の表が空(この検査は何も見ていない)').toContain('row-commit');
   });
 
-  it('末尾の塊の Alt+↓ は末尾に書き足す(余白クリックと同じ意味論)', () => {
+  it('末尾の塊で ↓ を 2 回 ── 末尾に書き足す(余白クリックと同じ意味論)', async () => {
     const r = rig();
     openClick(findByText(r.host, 'p', '最後の段落。'));
     const ta = box(r.host)!;
     ta.setSelectionRange(ta.value.length, ta.value.length);
-    expect(arrow(ta, 'ArrowDown').defaultPrevented).toBe(true);
+    await press(ta, 'ArrowDown');
+    await press(ta, 'ArrowDown');
     const appended = box(r.host)!;
     expect(appended.value).toBe('');
     expect(r.swap.activeRange).toEqual({ start: 13, end: 12 }); // 挿入の空区間
-    // 空の書き足し行でもう一度 ↓ ── 増殖しない(何も起きない)
-    expect(arrow(appended, 'ArrowDown').defaultPrevented).toBe(false);
+    // 空の書き足し行でさらに ↓ ── 増殖しない(何も起きない)
+    await press(appended, 'ArrowDown');
+    await press(appended, 'ArrowDown');
     expect(box(r.host)).toBe(appended);
   });
 
-  it('導出物(脚注の区切り)は飛ばして、その先の塊を開く', () => {
+  it('導出物(脚注の区切り)は飛ばして、その先の塊を開く', async () => {
     const r = rig(['本文[^a]', '', 'おわり', '', '[^a]: 注', ''].join('\n'));
     openClick(findByText(r.host, 'p', 'おわり'));
     const ta = box(r.host)!;
     ta.setSelectionRange(ta.value.length, ta.value.length);
-    expect(arrow(ta, 'ArrowDown').defaultPrevented).toBe(true);
+    await press(ta, 'ArrowDown');
+    await press(ta, 'ArrowDown');
     // 区切りの <hr>(原文の行が無い)は飛ばし、定義行を持つ脚注の塊が開く
     expect(box(r.host)!.value).toBe('[^a]: 注');
     expect(r.swap.activeRange).toEqual({ start: 4, end: 4 });
   });
 
-  it('🔴 行数が変わる確定でも ↓ で移れる(予約 → 着弾後に・正しい行で開く)', () => {
+  it('🔴 行数が変わる確定でも移れる(予約 → 着弾後に・正しい行で開く)', async () => {
     const r = rig(DOC, true);
     openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     ta.value = '1 行目。\n2 行目を足した。'; // +1 行
     ta.setSelectionRange(ta.value.length, ta.value.length);
-    expect(arrow(ta, 'ArrowDown').defaultPrevented).toBe(true);
+    await press(ta, 'ArrowDown');
+    await press(ta, 'ArrowDown');
     // 座標が古い窓では開かない(古い行番号で開くと閉じ際の確定が他の行を潰す)
     expect(box(r.host)).toBeNull();
     r.flush();

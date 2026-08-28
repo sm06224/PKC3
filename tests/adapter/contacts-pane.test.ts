@@ -21,6 +21,7 @@ const card = (lid: string, name: string, tels: string[] = [], emails: string[] =
   tels,
   emails,
   birthday: '',
+  orgParts: org === '' ? [] : org.split(' '),
 });
 
 const scanOf = (cards: ReturnType<typeof card>[], truncated = false): ContactScan => ({

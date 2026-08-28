@@ -124,4 +124,18 @@ describe('mermaid へ渡す設定', () => {
     expect(c.htmlLabels).toBe(false);
     expect(c.flowchart?.htmlLabels).toBe(false);
   });
+
+  /**
+   * 🔴 `journey` は上の 2 行を**読まない**(#528、2026-08-28 実測)── この図だけ
+   * `textPlacement` で描き分けており、既定の `'fo'` は `<foreignObject>` である。
+   *
+   * ⚠ これは**字面の pin なので弱い** ── 「設定が渡っているが絵は変わらない」を
+   * 原理的に見られない。焼けるところまでは
+   * `tests/smoke/mermaid.smoke.spec.ts` の「UML 4 種と journey」が見る。
+   * ここに置くのは、**消したことに 4 秒で気づける**ようにするためである。
+   */
+  it('🔴 journey は textPlacement で foreignObject を避ける (#528)', () => {
+    const c = configFor(DARK) as { journey?: { textPlacement?: string } };
+    expect(c.journey?.textPlacement).toBe('tspan');
+  });
 });

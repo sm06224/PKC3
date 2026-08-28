@@ -569,18 +569,18 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['row'],
     defaults: ['Escape'],
   },
-  {
-    id: 'row-next',
-    label: 'その行を確定して次の行を開く',
-    contexts: ['row'],
-    defaults: ['Alt+ArrowDown'],
-  },
-  {
-    id: 'row-prev',
-    label: 'その行を確定して前の行を開く',
-    contexts: ['row'],
-    defaults: ['Alt+ArrowUp'],
-  },
+  /**
+   * ⚠ **`row-next` / `row-prev`(`Alt+↓` / `Alt+↑`)は 2026-08-28 に外した**(#524)。
+   *
+   * > user 指示「**インライン編集のカーソル移動の Alt+上下でのテキストボックス移動を
+   * > 廃止、代わりにテキストボックス上端または下端の境界では 2 回同じ方向の上下
+   * > どちらかのカーソルを押すことで次のテキストボックスに移動するようにする**」
+   *
+   * 🔑 **動線は減っていない** ── 素の `↑` / `↓` を端で 2 回押せば移る
+   * (規則は `features/boundary-step.ts`、配線は `adapter/ui/render/row-swap.ts`)。
+   * ⚠ **表からも消す** ── 残すと**同じことをする道が 2 本**になり、
+   *   鍵の一覧にも出続ける(CLAUDE.md §7)。
+   */
   // ── 1 面(ライブ)の面そのもの
   {
     id: 'edit-all',

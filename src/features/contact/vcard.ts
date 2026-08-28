@@ -39,7 +39,8 @@ export function isVcfFileName(name: string): boolean {
 export interface VcfCard {
   /** FN(無ければ N の組み立て、それも無ければ空文字 ── 呼び手が番号名を振る)。 */
   readonly name: string;
-  readonly org: string;
+  /** 所属の内訳(会社 / 部署 …)。⚠ **繋がない** ── `;` の区切りが書き出しに要る。 */
+  readonly orgParts: readonly string[];
   readonly tels: readonly string[];
   readonly emails: readonly string[];
   /** BDAY(そのままの字)。 */
@@ -205,6 +206,70 @@ function splitUnescaped(v: string, sep: string): string[] {
 }
 
 /** N(family;given;…)から名前を組む ── 日本の並び(姓 名)で空白 1 つ。 */
+/**
+ * 🔴 **写せない項目を「読める字」で本文に書く**(#534 段③。2026-08-28)。
+ *
+ * ⚠ 直す前は `- ADR;TYPE=HOME: ;;東京都…;渋谷区;東京都;150-0001;日本` と、
+ *   **`.vcf` の生の綴りがそのまま**本文に出ていた。捨てない判断は正しかったが、
+ *   user が開いて見るのは**内部の書式**であって、住所ではない
+ *   (`pkc3-ux-reviewer` の型「画面に内部の名前がそのまま出ていたら欠陥」)。
+ * ⚠ **綴りを知らない項目は元の名前のまま出す** ── 対応表に無いものを
+ *   隠すと、そこだけ何の項目か分からなくなる(黙って失うのと同じ)。
+ */
+const OTHER_LABELS: Readonly<Record<string, string>> = {
+  ADR: '住所',
+  LABEL: '住所(表記)',
+  URL: 'ウェブ',
+  TITLE: '肩書き',
+  ROLE: '役割',
+  NICKNAME: '呼び名',
+  CATEGORIES: '分類',
+  GEO: '位置',
+  TZ: '時間帯',
+  IMPP: 'メッセージ',
+  RELATED: '関係',
+  LANG: '言語',
+};
+
+/** `TYPE=…` → 画面に出す字。⚠ 知らない綴りは**そのまま**出す(隠さない)。 */
+const TYPE_WORDS: Readonly<Record<string, string>> = {
+  HOME: '自宅',
+  WORK: '勤務先',
+  CELL: '携帯',
+  FAX: 'FAX',
+  PAGER: 'ポケベル',
+  VOICE: '電話',
+  INTERNET: 'メール',
+  PREF: '主',
+  POSTAL: '郵送',
+  PARCEL: '荷物',
+};
+
+/** 項目名 + 種別を、画面に出す 1 つの字にする(`住所(自宅)`)。 */
+function otherLabel(name: string, params: readonly string[]): string {
+  const base = OTHER_LABELS[name.toUpperCase()] ?? name;
+  const types = params
+    .filter((x) => x.toUpperCase().startsWith('TYPE='))
+    .flatMap((x) => x.slice('TYPE='.length).split(','))
+    .map((t) => t.trim().replace(/^"|"$/g, ''))
+    .filter(Boolean)
+    .map((t) => TYPE_WORDS[t.toUpperCase()] ?? t);
+  return types.length === 0 ? base : `${base}(${types.join(' / ')})`;
+}
+
+/**
+ * 構造を持つ値(`;` で区切る)を、読める 1 行にする。
+ * ⚠ **unescape の前に割る** ── 先に unescape すると `\;`(値の中の `;`)まで
+ *   区切りとして割れてしまう(`ORG` が同じ作法で書かれている)。
+ * ⚠ 空の欄は落とす ── vCard の住所は 7 欄あり、ふつう半分は空である。
+ */
+function readableParts(raw: string): string {
+  return splitUnescaped(raw, ';')
+    .map((x) => unescapeValue(x).trim())
+    .filter(Boolean)
+    .join(' ');
+}
+
 function nameFromN(value: string): string {
   const comps = splitUnescaped(value, ';').map((c) => unescapeValue(c).trim());
   return [comps[0] ?? '', comps[1] ?? ''].filter(Boolean).join(' ').trim();
@@ -214,7 +279,7 @@ function nameFromN(value: string): string {
 interface VcfDraft {
   fn: string;
   n: string;
-  org: string;
+  orgParts: string[];
   tels: string[];
   emails: string[];
   birthday: string;
@@ -239,7 +304,7 @@ function isEmptyCard(cur: VcfDraft): boolean {
   return (
     cur.fn === '' &&
     cur.n === '' &&
-    cur.org === '' &&
+    cur.orgParts.length === 0 &&
     cur.birthday === '' &&
     cur.tels.length === 0 &&
     cur.emails.length === 0 &&
@@ -256,7 +321,7 @@ function isEmptyCard(cur: VcfDraft): boolean {
 function finishCard(cur: VcfDraft): VcfCard {
   return {
     name: cur.fn !== '' ? cur.fn : cur.n,
-    org: cur.org,
+    orgParts: cur.orgParts,
     tels: cur.tels,
     emails: cur.emails,
     birthday: cur.birthday,
@@ -303,7 +368,7 @@ export function parseVcf(text: string): VcfParseResult {
           cards.push(finishCard(cur));
         }
       }
-      cur = { fn: '', n: '', org: '', tels: [], emails: [], birthday: '', notes: [], others: [], typeSaid: false, qpSaid: false };
+      cur = { fn: '', n: '', orgParts: [], tels: [], emails: [], birthday: '', notes: [], others: [], typeSaid: false, qpSaid: false };
       continue;
     }
     if (prop.name === 'END' && prop.value.trim().toUpperCase() === 'VCARD') {
@@ -338,10 +403,11 @@ export function parseVcf(text: string): VcfParseResult {
         cur.n = nameFromN(qpOut?.text ?? prop.value);
         break;
       case 'ORG':
-        cur.org = splitUnescaped(qpOut?.text ?? prop.value, ';')
-          .map((s) => unescapeValue(s).trim())
-          .filter(Boolean)
-          .join(' ');
+        // 🔴 **繋がずに持つ**(#534 段②)── `;` は会社と部署の区切りなので、
+        //    ここで空白に潰すと書き出しで部署が消える
+        cur.orgParts = splitUnescaped(qpOut?.text ?? prop.value, ';')
+          .map((x) => unescapeValue(x).trim())
+          .filter(Boolean);
         break;
       case 'TEL':
       case 'EMAIL': {
@@ -377,7 +443,7 @@ export function parseVcf(text: string): VcfParseResult {
         if (decoded !== '') cur.notes.push(decoded);
         break;
       default: {
-        const label = prop.params.length > 0 ? `${prop.name};${prop.params.join(';')}` : prop.name;
+        const label = otherLabel(prop.name, prop.params);
         /**
          * 🔴 **中身で落とす。名前で落とさない**(着地前レビュー 2026-08-28)。
          *
@@ -400,7 +466,9 @@ export function parseVcf(text: string): VcfParseResult {
           break;
         }
         // 🔴 写せない項目は本文の行として残す(黙って失わない)
-        cur.others.push(`- ${label}: ${decoded}`);
+        // ⚠ ただし**読める字**で ── 生の `;;東京都…;渋谷区;…` を出さない(#534 段③)
+        const shown = readableParts(qpOut?.text ?? prop.value);
+        if (shown !== '') cur.others.push(`- ${label}: ${shown}`);
       }
     }
   }
@@ -424,7 +492,9 @@ export function vcfNoteOf(card: VcfCard): { title: string; body: string } {
     meta[CONTACT_KEYS.tel] = card.tels.length === 1 ? card.tels[0]! : [...card.tels];
   if (card.emails.length > 0)
     meta[CONTACT_KEYS.email] = card.emails.length === 1 ? card.emails[0]! : [...card.emails];
-  if (card.org !== '') meta[CONTACT_KEYS.org] = card.org;
+  if (card.orgParts.length > 0)
+    meta[CONTACT_KEYS.org] =
+      card.orgParts.length === 1 ? card.orgParts[0]! : [...card.orgParts];
   if (card.birthday !== '') meta[CONTACT_KEYS.birthday] = card.birthday;
   const rest: string[] = [];
   if (card.notes.length > 0) rest.push(...card.notes);
@@ -465,7 +535,9 @@ export function buildVcf(cards: readonly ContactCard[]): string {
     lines.push('BEGIN:VCARD', 'VERSION:3.0');
     lines.push(`N:${escapeValue(c.name)};;;;`);
     lines.push(`FN:${escapeValue(c.name)}`);
-    if (c.org !== '') lines.push(`ORG:${escapeValue(c.org)}`);
+    // 🔴 内訳を `;` で繋ぎ直す(#534 段②)── 会社と部署の区切りを相手へ渡す
+    if (c.orgParts.length > 0)
+      lines.push(`ORG:${c.orgParts.map(escapeValue).join(';')}`);
     // 🔑 取込が `birthday:` を書くので、**書き出しも書く**(往復を閉じる ──
     //    無いと「取り込んで書き出したら誕生日が消えた」になる)
     if (c.birthday !== '') lines.push(`BDAY:${escapeValue(c.birthday)}`);

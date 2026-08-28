@@ -537,13 +537,19 @@ test('🔴 塊を跨ぐドラッグ選択で、版面が文末へ飛ばない(�
 });
 
 /**
- * 🔴 **カーソルキーで隣の塊へ**(2026-08-08。user 裁定「カーソルキーで下に行く」)。
+ * 🔴 **素のカーソルは箱の中の移動のまま ── 端に着くまでは奪わない**
+ * (2026-08-08 の user 裁定「カーソルキーで下に行く」から、#524 で書き直し)。
+ *
+ * ⚠ **2026-08-28 に主張を裏返した。** 以前は「`Alt+↓` で移る / 素の ↓ は
+ * 1 回でも移らない」だったが、user 指示で **`Alt+上下` は廃止**され、
+ * **素の ↑↓ を端で 2 回**に替わった。だからこの test の役目も変わる ──
+ * いま守るのは「**端に着くまでは 1 回も奪わない**」である
+ * (移る側は下の 2 本と `tests/adapter/row-swap.test.ts` が見る)。
  *
  * unit(happy-dom)では届かない層: 実ブラウザの textarea は ↓ の**既定動作**で
- * caret を動かす ── `preventDefault` の掛け漏れ・掛けすぎは実機でしか見えない
- * (行の途中の ↓ を奪うと、複数行の入力欄の中を移動できなくなる)。
+ * caret を動かす ── `preventDefault` の掛け漏れ・掛けすぎは実機でしか見えない。
  */
-test('🔴 Alt+↓ で次の塊が開き、素の ↓ は箱の中の移動のまま', async ({ page }) => {
+test('🔴 複数行の箱の中では、素の ↑↓ が行の移動のまま(奪っていない)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoLive(page);
@@ -553,34 +559,6 @@ test('🔴 Alt+↓ で次の塊が開き、素の ↓ は箱の中の移動の�
   await modClickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
   const row = live.locator('[data-pkc-field="row-source"]');
   await expect(row).toHaveValue('最初の段落です。');
-
-  /**
-   * 🔴 **素の ↓ で飛ばない**(2026-08-15、user 報告の暴発)。
-   * ⚠ 1 行の塊は「改行が無い側」に必ず居るので、**旧実装ではここで飛んでいた**。
-   */
-  await page.keyboard.press('End');
-  await page.keyboard.press('ArrowDown');
-  await expect(row, '素の ↓ で隣の塊へ飛んだ').toHaveValue('最初の段落です。');
-  await page.keyboard.press('Home');
-  await page.keyboard.press('ArrowUp');
-  await expect(row, '素の ↑ で隣の塊へ飛んだ').toHaveValue('最初の段落です。');
-
-  // Alt+↓ で確定し、次の塊が開く(caret 先頭)
-  await page.keyboard.press('End');
-  await page.keyboard.press('Alt+ArrowDown');
-  await expect(row, '次の塊が開いていない').toHaveValue('次の段落です。');
-  expect(
-    await row.evaluate((el) => (el as HTMLTextAreaElement).selectionStart),
-    'caret が先頭に無い',
-  ).toBe(0);
-
-  // Alt+↑ で前の塊に戻る(caret 末尾)
-  await page.keyboard.press('Alt+ArrowUp');
-  await expect(row).toHaveValue('最初の段落です。');
-  expect(
-    await row.evaluate((el) => (el as HTMLTextAreaElement).selectionStart),
-    'caret が末尾に無い',
-  ).toBe('最初の段落です。'.length);
 
   // 複数行にして先頭に caret ── 素の ↓ は**箱の中の移動**のまま(奪っていない)
   await row.fill('1 行目です。\n2 行目です。');
@@ -593,6 +571,13 @@ test('🔴 Alt+↓ で次の塊が開き、素の ↓ は箱の中の移動の�
   );
   const caret = await row.evaluate((el) => (el as HTMLTextAreaElement).selectionStart);
   expect(caret, '↓ の既定動作(次の行へ)が死んでいる').toBeGreaterThan(0);
+
+  /**
+   * 🔴 **1 行目に戻ってから ↑ 1 回では移らない**(#524 の対照群)。
+   * ⚠ ここが「端に着いた押下も数える」規則の要 ── 1 回目は**端へ着くだけ**である。
+   */
+  await page.keyboard.press('ArrowUp');
+  await expect(row, '↑ 1 回で前の塊へ飛んだ').toHaveValue('1 行目です。\n2 行目です。');
   expect(errors).toEqual([]);
 });
 
@@ -964,4 +949,118 @@ test('🔴 表の行を開いても表は残り、その行だけを直せる (#
   await expect(live.locator('tr')).toHaveCount(rowsBefore);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **端で同じ向きに 2 回押すと、隣の塊へ移る**(#524。user 指示 2026-08-28)。
+ *
+ * > 「**Alt+上下でのテキストボックス移動を廃止、代わりにテキストボックス上端または
+ * > 下端の境界では 2 回同じ方向の上下どちらかのカーソルを押すことで次のテキスト
+ * > ボックスに移動するようにする**」
+ *
+ * ⚠ **この test でしか測れない次元が 1 つある** ── **折り返し**である。
+ *
+ * 🔴 2026-08-15 に一度、素のカーソルで同じことをやって**壊した**:
+ *   端の判定を**改行の有無**で書いたので、改行を持たない長い段落では
+ *   **箱のどこに居ても隣へ飛んだ**(user 報告の暴発)。原文は折り返して表示される
+ *   ので、視覚の途中でも「改行の端」でありうる。
+ * ⚠ happy-dom は `↑↓` で caret を動かさないため、unit
+ *   (`tests/adapter/row-swap.test.ts`)は**端に居るときの数え方しか見られない**。
+ *   折り返しの途中で飛ばないことは、**実ブラウザでしか測れない**
+ *   (CLAUDE.md §2「本命の分岐を unit は 1 度も通らないことがある」)。
+ */
+test('🔴 折り返した長い段落の途中では、↓ を何回押しても隣へ飛ばない (#524)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  // ⚠ 狭くして**確実に折り返させる**(広い窓だと 1 行に収まって次元が消える)
+  await page.setViewportSize({ width: 900, height: 900 });
+  await gotoLive(page);
+  const LONG = `あいうえおかきくけこ${'さしすせそたちつてと'.repeat(24)}`;
+  await openLive(page, `# 題\n\n${LONG}\n\nつぎの段落。\n`);
+
+  const live = page.locator('[data-pkc-region="editor-live"]');
+  await modClickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
+  const row = live.locator('[data-pkc-field="row-source"]');
+  await expect(row).toBeFocused();
+
+  // 🔴 空振り防止 ── この段落が **改行を持たず、視覚的には何行にも折り返している**
+  const shape = await row.evaluate((el) => {
+    const ta = el as HTMLTextAreaElement;
+    const cs = getComputedStyle(ta);
+    return {
+      newlines: (ta.value.match(/\n/g) ?? []).length,
+      rows: ta.rows,
+      lineH: parseFloat(cs.lineHeight) || 0,
+      height: ta.clientHeight,
+    };
+  });
+  expect(shape.newlines, '前提: 改行を持つ塊で見ている(この次元を測れていない)').toBe(0);
+  expect(
+    Math.round(shape.height / Math.max(1, shape.lineH)),
+    '前提: 折り返していない(窓が広すぎる ── この次元を測れていない)',
+  ).toBeGreaterThan(2);
+
+  // 先頭に caret を置いて ↓ を 4 回 ── **折り返しの中を降りるだけ**で飛ばない
+  await row.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(0, 0));
+  for (let i = 0; i < 4; i += 1) await page.keyboard.press('ArrowDown');
+  await expect(
+    live.locator('[data-pkc-field="row-source"]'),
+    '折り返しの途中で隣の塊へ飛んだ(2026-08-15 の暴発の再来)',
+  ).toHaveCount(1);
+  await expect(row, '開いている塊が変わった').toHaveValue(LONG);
+
+  // ⚠ ここまで来ても caret は**まだ末尾ではない**(= 端に着いていない)
+  const midway = await row.evaluate((el) => {
+    const ta = el as HTMLTextAreaElement;
+    return { at: ta.selectionStart, len: ta.value.length };
+  });
+  expect(midway.at, '4 回で末尾まで着いてしまった(折り返しが足りない)').toBeLessThan(midway.len);
+
+  expect(errors).toEqual([]);
+});
+
+test('🔴 末尾まで降りてから ↓ をもう 2 回 ── そこで初めて次の塊が開く (#524)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoLive(page);
+  await openLive(page, '# 題\n\nみじかい段落。\n\nつぎの段落。\n');
+
+  const live = page.locator('[data-pkc-region="editor-live"]');
+  await modClickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
+  const row = live.locator('[data-pkc-field="row-source"]');
+  await expect(row).toBeFocused();
+  await row.evaluate((el) => {
+    const ta = el as HTMLTextAreaElement;
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+  });
+
+  // 🔴 **対照群 ── 1 回では移らない**(これが無いと「端で必ず飛ぶ」実装でも通る)
+  await page.keyboard.press('ArrowDown');
+  await expect(row, '1 回目で隣の塊へ飛んだ').toHaveValue('みじかい段落。');
+
+  // 2 回目で移る
+  await page.keyboard.press('ArrowDown');
+  await expect(
+    live.locator('[data-pkc-field="row-source"]'),
+    '2 回目でも移らない',
+  ).toHaveValue('つぎの段落。', { timeout: 4000 });
+  // 移った先の caret は**先頭**(下へ移ったのだから素直な向き)
+  expect(
+    await live
+      .locator('[data-pkc-field="row-source"]')
+      .evaluate((el) => (el as HTMLTextAreaElement).selectionStart),
+    'caret が先頭に無い',
+  ).toBe(0);
+
+  // 🔴 **`Alt+↓` はもう効かない**(2 系統目を残さない)
+  await page.keyboard.press('Alt+ArrowDown');
+  await expect(
+    live.locator('[data-pkc-field="row-source"]'),
+    'Alt+↓ がまだ効いている(道が 2 本ある)',
+  ).toHaveValue('つぎの段落。');
+
+  expect(errors).toEqual([]);
 });

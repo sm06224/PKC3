@@ -156,6 +156,7 @@ describe('並べ方と絞り込み(#278)', () => {
     lid,
     name,
     org,
+    orgParts: org === '' ? [] : org.split(' '),
     tels,
     emails,
   });

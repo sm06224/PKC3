@@ -29,6 +29,21 @@ const CARD_30 = [
   'END:VCARD',
 ].join('\r\n');
 
+/**
+ * 住所つきの 1 枚(#534 段③)。⚠ **空の欄を前に置く** ── vCard の `ADR` は 7 欄
+ * あり、ふつう先頭 2 つ(私書箱 / 建物名)は空である。生のまま出すと `;;` で始まる。
+ */
+const CARD_ADR = [
+  'BEGIN:VCARD',
+  'VERSION:3.0',
+  'FN:住所の人',
+  'TEL:03-0000-0000',
+  'ADR;TYPE=HOME:;;渋谷1-2-3;渋谷区;東京都;150-0001;日本',
+  'URL:https://example.com/',
+  'TITLE:営業課長',
+  'END:VCARD',
+].join('\r\n');
+
 describe('parseVcf ── 読みは広く', () => {
   it('3.0 の 1 枚 ── FN / TEL×2 / EMAIL / ORG / BDAY / NOTE', () => {
     const { cards, warnings } = parseVcf(CARD_30);
@@ -37,7 +52,8 @@ describe('parseVcf ── 読みは広く', () => {
     expect(cards).toHaveLength(1);
     const c = cards[0]!;
     expect(c.name).toBe('山田太郎');
-    expect(c.org).toBe('例の会社 営業部');
+    // 🔴 会社と部署を**繋がずに**持つ(#534 段②)── 繋ぐと書き出しで部署が消える
+    expect(c.orgParts).toEqual(['例の会社', '営業部']);
     expect(c.tels).toEqual(['090-1234-5678', '03-1111-2222']);
     expect(c.emails).toEqual(['taro@example.com']);
     expect(c.birthday).toBe('1990-01-02');
@@ -70,11 +86,44 @@ describe('parseVcf ── 読みは広く', () => {
     expect(cards.map((c) => c.name)).toEqual(['山田太郎', '別人']);
   });
 
-  it('🔴 写せない項目(ADR)は本文の行として残る ── 黙って失わない', () => {
+  /**
+   * ⚠ **2026-08-28(#534 段③)に主張を書き直した。** 以前は
+   * `ADR;TYPE=HOME: ;;東京都千代田区1-1;;;;` という**生の綴りを等値で pin** して
+   * いた ── 「失わない」は守れていたが、**user が読めない字を守っていた**。
+   * 🔑 主張は「残る」ではなく「**読める字で残る**」になったので、
+   *   `.vcf` の書式が 1 つも出ていないことも併せて見る
+   *   (CLAUDE.md §1「主張の向きを変えたら、検査も別物として書き直す」)。
+   */
+  it('🔴 写せない項目(ADR)は、読める字の行として残る ── 黙って失わない', () => {
     const withAdr =
       'BEGIN:VCARD\r\nFN:山田\r\nTEL:090\r\nADR;TYPE=HOME:;;東京都千代田区1-1;;;;\r\nEND:VCARD';
     const { cards } = parseVcf(withAdr);
-    expect(cards[0]!.others.join('\n')).toContain('ADR;TYPE=HOME: ;;東京都千代田区1-1;;;;');
+    const line = cards[0]!.others.join('\n');
+    expect(line, '中身が落ちた').toContain('東京都千代田区1-1');
+    expect(line, '種別が読める字になっていない').toContain('住所(自宅)');
+    expect(line, '生の項目名が残っている').not.toContain('ADR');
+    expect(line, '空の欄の ; が残っている').not.toContain(';');
+  });
+
+  /**
+   * ⚠ **空の欄しか無い項目は、行そのものを作らない**(#534 段③。変異試験 M6 が
+   * SURVIVED で教えた)。vCard の `ADR` は 7 欄あり、**全部空**の物が実在する
+   * (書き出す側が枠だけ書く)。空を落とさないと `- 住所(自宅):       ` という
+   * **中身の無い行**が本文に入り、user は「何か書いてあるはずの物が読めない」と読む。
+   *
+   * ⚠ 併せて**余分な空白**も見る ── 前後に空欄があると
+   * `- 住所(自宅):   渋谷1-2-3    ` になる(markdown では潰れて見えるので、
+   * 画面だけ見ていると気づけない)。
+   */
+  it('⚠ 中身が空の項目は行を作らない / 空欄ぶんの空白を残さない (#534)', () => {
+    const empty =
+      'BEGIN:VCARD\r\nFN:山田\r\nTEL:090\r\nADR;TYPE=HOME:;;;;;;\r\nEND:VCARD';
+    expect(parseVcf(empty).cards[0]!.others, '中身の無い行を作っている').toEqual([]);
+
+    const sparse =
+      'BEGIN:VCARD\r\nFN:山田\r\nTEL:090\r\nADR;TYPE=HOME:;;渋谷1-2-3;;;;\r\nEND:VCARD';
+    // ⚠ 等値で見る ── `toContain` だと前後の空白が残っていても通る
+    expect(parseVcf(sparse).cards[0]!.others).toEqual(['- 住所(自宅): 渋谷1-2-3']);
   });
 
   it('🔴 PHOTO は落として注意で言う(本文に base64 の山を作らない)', () => {
@@ -286,6 +335,7 @@ describe('buildVcf ── 書き出し', () => {
     lid: 'l1',
     name: '山田太郎',
     org: '例の会社',
+    orgParts: ['例の会社'],
     tels: ['090-1234-5678'],
     emails: ['taro@example.com'],
     birthday: '',
@@ -303,15 +353,16 @@ describe('buildVcf ── 書き出し', () => {
   });
 
   it('🔴 エスケープ ── 名前や所属の , ; \\ が壊れない(往復で検める)', () => {
-    const tricky = card({ name: 'A, B; C\\D', org: '会;社' });
+    const tricky = card({ name: 'A, B; C\\D', org: '会;社', orgParts: ['会;社'] });
     const back = parseVcf(buildVcf([tricky]));
     expect(back.cards[0]!.name).toBe('A, B; C\\D');
-    // ⚠ ORG は ; が部品の区切りなので、エスケープした ; は 1 語に戻る
-    expect(back.cards[0]!.org).toBe('会;社');
+    // ⚠ ORG は ; が部品の区切りなので、**エスケープした ; は 1 語のまま戻る**
+    //   (区切りの ; と、値の中の ; が混ざらない)
+    expect(back.cards[0]!.orgParts).toEqual(['会;社']);
   });
 
   it('往復 ── 書き出した物を自分の読み手が読み戻せる(複数枚)', () => {
-    const cards = [card(), card({ lid: 'l2', name: '別人', org: '', tels: [], emails: ['b@x.jp'] })];
+    const cards = [card(), card({ lid: 'l2', name: '別人', org: '', orgParts: [], tels: [], emails: ['b@x.jp'] })];
     const back = parseVcf(buildVcf(cards));
     expect(back.warnings).toEqual([]);
     expect(back.cards.map((c) => c.name)).toEqual(['山田太郎', '別人']);
@@ -330,6 +381,66 @@ describe('buildVcf ── 書き出し', () => {
     const out = buildVcf([read]);
     expect(out, '往復で誕生日が消えた').toContain('BDAY:1990-01-02\r\n');
     expect(parseVcf(out).cards[0]!.birthday).toBe('1990-01-02');
+  });
+
+  /**
+   * 🔴 **所属の内訳が往復で残る**(#534 段②)。
+   *
+   * ⚠ 直す前は `ORG:例の会社;営業部` → `org: 例の会社 営業部` と**空白に潰して**
+   *   いたので、書き出すと `ORG:例の会社 営業部` になり、**相手の端末で部署が消えて
+   *   会社名が長くなる**だけだった。⚠ こちらの画面では正しく見えるので、
+   *   **壊れるのは相手の端末だけ**という、いちばん見えない形である。
+   *
+   * ⚠ 観測点は「`;` が在るか」で止めない ── **部品ごと**に比べる。
+   *   `ORG:例の;会社営業部` のように**位置がずれても** `;` は 1 つ在る。
+   */
+  it('🔴 所属の内訳(会社 / 部署)が .vcf → ノート → .vcf で残る (#534)', () => {
+    const { cards } = parseVcf(CARD_30);
+    // 空振り防止: この fixture が**部品を 2 つ持つ**(1 つなら以下は自明に通る)
+    expect(cards[0]!.orgParts, 'fixture が内訳を持っていない ── この次元を測れていない').toEqual([
+      '例の会社',
+      '営業部',
+    ]);
+
+    const note = vcfNoteOf(cards[0]!);
+    // ノートの本文にも内訳のまま入る(ここで潰れたら往復は閉じない)
+    expect(note.body, 'ノートの時点で内訳が潰れている').toContain('org: [例の会社, 営業部]');
+
+    const read = contactOf('l1', note.title, note.body)!;
+    expect(read.orgParts).toEqual(['例の会社', '営業部']);
+    // ⚠ 画面に出すのは**繋いだ 1 つの字**(内訳は書き出しだけが使う)
+    expect(read.org, '画面に区切りの記号が出ている').toBe('例の会社 営業部');
+
+    const out = buildVcf([read]);
+    expect(out, '往復で部署が消えた').toContain('ORG:例の会社;営業部\r\n');
+    expect(parseVcf(out).cards[0]!.orgParts).toEqual(['例の会社', '営業部']);
+  });
+
+  /**
+   * 🔴 **写せない項目が「読める字」で本文に入る**(#534 段③)。
+   *
+   * ⚠ 直す前は `- ADR;TYPE=HOME: ;;東京都…;渋谷区;東京都;150-0001;日本` と、
+   *   **`.vcf` の生の綴りがそのまま**出ていた ── 捨てない判断は正しいが、
+   *   user が開いて見るのは**内部の書式**である。
+   * ⚠ 観測点を「`ADR` の字が無い」で止めない ── **中身が全部残っている**ことまで見る
+   *   (読みやすくするために user のデータを削ったら、本末転倒である)。
+   */
+  it('🔴 住所が生の vCard 構文ではなく、読める字で本文に入る (#534)', () => {
+    const { cards } = parseVcf(CARD_ADR);
+    const body = vcfNoteOf(cards[0]!).body;
+    // 空振り防止: この fixture が住所を持ち、しかも**空の欄で始まる**
+    expect(CARD_ADR, 'fixture に ADR が無い ── この次元を測れていない').toContain('ADR');
+    expect(CARD_ADR, 'fixture の住所に空の欄が無い ── ;; を測れていない').toContain(':;;');
+
+    expect(body, '生の項目名がそのまま出ている').not.toContain('ADR;TYPE');
+    expect(body, '空の欄が ;; のまま残っている').not.toContain(';;');
+    expect(body, '種別が英語のまま').toContain('住所(自宅)');
+    // ⚠ 中身は 1 つも落ちていない
+    for (const part of ['渋谷1-2-3', '渋谷区', '東京都', '150-0001', '日本'])
+      expect(body, `住所から「${part}」が落ちた`).toContain(part);
+    // ⚠ 種別の無い項目に空の括弧を付けない / 対応表に無い項目は元の名前で出す
+    expect(body, 'URL が読める字になっていない').toContain('- ウェブ: https://example.com/');
+    expect(body, '肩書きが落ちた').toContain('- 肩書き: 営業課長');
   });
 
   it('⚠ 誕生日が無ければ BDAY の行を書かない(空の行を作らない)', () => {

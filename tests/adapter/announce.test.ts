@@ -671,6 +671,8 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
+    ['2026-08-28-row-step', 'ffa53f95'],
+    ['2026-08-28-uml-diagrams', 'd33aee7d'],
     ['2026-08-28-vcard-followups', '901076e3'],
     ['2026-08-28-refuse-and-wait', '2ffd6f06'],
     ['2026-08-28-vcard', '66c7c19b'],
@@ -691,10 +693,12 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-08-27-paste-html-fence', '4e93ab87'],
     ['2026-08-27-smart-membership', '96188f3b'],
     ['2026-08-27-collection-bar', 'c3788e4b'],
-    ['2026-08-27-palette-wrap', 'e673e108'],
+    // ⚠ 上限 20 を超えたので 2026-08-28 に落とした(原本は CHANGELOG)
+    // ['2026-08-27-palette-wrap', 'e673e108'],
     // ⚠ 上限 20 を超えたので 2026-08-28 に落とした(原本は CHANGELOG)
     // ['2026-08-27-announce-one', 'ae4e7c46'],
-    ['2026-08-27-kind-bar-fix', '838f7da7'],
+    // ⚠ 上限 20 を超えたので 2026-08-28 に落とした(原本は CHANGELOG)
+    // ['2026-08-27-kind-bar-fix', '838f7da7'],
     // ⚠ 上限 20 を超えたので 2026-08-28 に落とした(原本は CHANGELOG)
     // ['2026-08-27-alarm', '9e03db35'],
     // ⚠ 上限 20 を超えたので 2026-08-28 に落とした(原本は CHANGELOG)
