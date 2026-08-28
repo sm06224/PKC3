@@ -44,8 +44,19 @@ export interface ContactCard {
   readonly lid: string;
   /** 🔑 **題名がそのまま名前**(上の docstring)。 */
   readonly name: string;
-  /** 所属。書いていなければ空文字。 */
+  /**
+   * 所属(画面に出す字)。書いていなければ空文字。
+   * 🔑 **`orgParts` から作る派生値**である ── 出どころは 1 つ(CLAUDE.md §7)。
+   */
   readonly org: string;
+  /**
+   * 所属の内訳(会社 / 部署 …)。
+   * 🔴 **書き出しの往復を閉じるために持つ**(#534 段②)── vCard の `ORG` は
+   * `;` で会社と部署を分ける。1 つの字に潰すと、書き出したとき
+   * `ORG:例の会社 営業部` になり、**相手の端末で部署が消える**。
+   * ⚠ 画面と絞り込みは `org`(空白で繋いだ字)を見る ── 内訳は書き出しだけが使う。
+   */
+  readonly orgParts: readonly string[];
   readonly tels: readonly string[];
   readonly emails: readonly string[];
   /**
@@ -158,9 +169,14 @@ export function contactOf(lid: string, title: string, body: string): ContactCard
   const tels = values(meta[CONTACT_KEYS.tel]);
   const emails = values(meta[CONTACT_KEYS.email]);
   if (tels.length === 0 && emails.length === 0) return null;
-  const org = values(meta[CONTACT_KEYS.org])[0] ?? '';
+  /**
+   * ⚠ `org:` は **1 つの字でも、並べて何個でも**書ける ── 取込は
+   * vCard の `ORG:会社;部署` を `org: [会社, 部署]` として書く(#534 段②)。
+   * 🔑 画面に出すのは空白で繋いだ 1 つの字 ── 内訳は `buildVcf` だけが使う。
+   */
+  const orgParts = values(meta[CONTACT_KEYS.org]);
   const birthday = values(meta[CONTACT_KEYS.birthday])[0] ?? '';
-  return { lid, name: title, org, tels, emails, birthday };
+  return { lid, name: title, org: orgParts.join(' '), orgParts, tels, emails, birthday };
 }
 
 /**

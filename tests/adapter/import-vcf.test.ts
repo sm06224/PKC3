@@ -331,8 +331,16 @@ describe('書き出し(binder の export-vcards)── §7: 画面と同じ 1 �
       type: 'SET_CONTACT_SCAN',
       scan: {
         cards: [
-          { lid: 'a', name: '山田', org: '', tels: ['090'], emails: [], birthday: '' },
-          { lid: 'b', name: '別人', org: '', tels: [], emails: ['b@x.jp'], birthday: '' },
+          { lid: 'a', name: '山田', org: '', orgParts: [], tels: ['090'], emails: [], birthday: '' },
+          {
+            lid: 'b',
+            name: '別人',
+            org: '',
+            orgParts: [],
+            tels: [],
+            emails: ['b@x.jp'],
+            birthday: '',
+          },
         ],
         totalNotes: 2,
         scannedNotes: 2,
@@ -382,7 +390,9 @@ describe('書き出し(binder の export-vcards)── §7: 画面と同じ 1 �
       d.dispatch({
         type: 'SET_CONTACT_SCAN',
         scan: {
-          cards: [{ lid: 'a', name: '山田', org: '', tels: ['090'], emails: [], birthday: '' }],
+          cards: [
+            { lid: 'a', name: '山田', org: '', orgParts: [], tels: ['090'], emails: [], birthday: '' },
+          ],
           totalNotes: 9999,
           scannedNotes: 9999,
           truncated: true,
