@@ -709,3 +709,68 @@ test('🔴 図を押すと別窓で実寸で開き、拡大縮小できる (#527
    */
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+/**
+ * 🔴 **拡大窓はベクタを開く**(user 報告 2026-08-28)。
+ *
+ * > 「別窓で開いた時、ラスタ化された方の画像が開くのは BAD!
+ * >  巨大な MerMaid を開いたらぽしょぽしょの図になってしまったよ」
+ *
+ * 🔑 **`WIDE_DIAGRAM` を使う** ── 器より大きい図でないと再現しない。
+ *   器に収まる小さい図は焼き幅が実寸で頭打ちになるので、raster でも粗く見えない
+ *   (= **ゼロ件の次元**になる。CLAUDE.md「fixture のゼロ件の次元は測っていない次元」)。
+ *
+ * 観測点は 2 つとも**直接**見る(粗さの代用品を見ない):
+ *
+ * | 見るもの | 何が分かるか |
+ * |---|---|
+ * | 窓の絵の blob の **MIME** | 🔑 **本当にベクタか**(`image/svg+xml`) |
+ * | 窓の絵の **`naturalWidth`** | **実寸で開いたか** ── 300px でも、焼いた幅でもない |
+ *
+ * ⚠ 2 つ目が要る理由: mermaid の SVG は `width="100%"` なので、素で渡すと
+ *   `<img>` の自然幅が **300px** になり、「粗い」を直して「**小さい**」を作る。
+ */
+test('🔴 図を押して開く別窓は、焼いた PNG ではなくベクタ (#527 / user 報告)', async ({
+  page,
+  context,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-body"]').fill(WIDE_DIAGRAM);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  const host = page.locator('[data-pkc-field="detail-body"] [data-pkc-mermaid-src]');
+  await expect(host).toHaveAttribute('data-pkc-mermaid-state', 'ready', { timeout: 30000 });
+
+  // ⚠ **前提の検算** ── 本文に置かれているのは焼いた PNG である(これが「元の姿」)
+  const body = await host.evaluate(async (h) => {
+    const i = h.querySelector('img')!;
+    return { natural: i.naturalWidth, type: (await (await fetch(i.src)).blob()).type };
+  });
+  expect(body.type, '前提が崩れている ── 本文が既に PNG ではない').toBe('image/png');
+
+  const img = host.locator('img');
+  const [win] = await Promise.all([context.waitForEvent('page'), img.click()]);
+  await win.waitForSelector('[data-pkc-field="asset-window-image"]', { timeout: 15_000 });
+  const shown = await win.evaluate(async () => {
+    const i = document.querySelector(
+      '[data-pkc-field="asset-window-image"]',
+    ) as HTMLImageElement;
+    if (!i.complete) await new Promise((ok) => i.addEventListener('load', ok, { once: true }));
+    return { natural: i.naturalWidth, type: (await (await fetch(i.src)).blob()).type };
+  });
+
+  // ① 🔴 **ベクタである**(これが user の報告そのもの)
+  expect(shown.type, `窓が焼いた画像を開いている(${shown.type})`).toBe('image/svg+xml');
+
+  // ② 🔴 **実寸で開いている** ── 300px(SVG の既定)でも、焼いた幅でもない
+  expect(shown.natural, '窓の絵が読めていない(この検査は何も見ていない)').toBeGreaterThan(0);
+  expect(shown.natural, '🔴 300px で開いている ── 実寸を書き込めていない').not.toBe(300);
+  expect(
+    shown.natural,
+    `焼いた幅のまま開いている(窓 ${shown.natural} / 本文 ${body.natural})`,
+  ).toBeGreaterThan(body.natural);
+
+  expect(errors, 'ページ例外が出ている').toEqual([]);
+});

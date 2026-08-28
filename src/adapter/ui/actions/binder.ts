@@ -457,7 +457,12 @@ export interface BinderServices {
    * ⚠ 名前を `viewDiagram` から変えた(2026-08-28)── 本文に貼った**写真**にも
    *   同じ道を使うので、「図」と呼ぶと**次に読む人が図だけだと思う**。
    */
-  viewBig?(src: string, title: string): void;
+  /**
+   * 絵を別の窓で大きく見せる。
+   * @param diagramSource 図なら**その原文**。⚠ 渡ったときは `src`(焼いた PNG)を
+   *   使わず、**原文からベクタを起こして**開く(user 報告 2026-08-28)。
+   */
+  viewBig?(src: string, title: string, diagramSource?: string): void;
   /** 未参照 asset の掃除(P4b)。確認・報告の UI も実体側の責務。 */
   purgeOrphanAssets?(): void;
   /** 注意の面を閉じる(P6c review H-2)。 */
@@ -3296,7 +3301,23 @@ const ACTIONS: Record<string, ActionHandler> = {
   'view-big': (_dispatcher, target, services) => {
     const img = target.closest<HTMLImageElement>('img[data-pkc-action="view-big"]');
     if (!img || img.src === '') return;
-    services.viewBig?.(img.src, img.alt || '図');
+    /**
+     * 🔴 **図は焼いた PNG ではなく、原文から起こしたベクタを開く**
+     * (user 報告 2026-08-28「**別窓で開いた時、ラスタ化された方の画像が開くのは BAD!
+     * 巨大な MerMaid を開いたらぽしょぽしょの図になってしまったよ**」)。
+     *
+     * ⚠ 画面の `<img>` は **本文の表示幅 × dpr** で焼いてある(`mermaid-hydrate.ts` の
+     *   `width: widthOf(p.host)`)── つまり**段に収めるために縮めた図ほど粗い**。
+     *   それを拡大窓で開けば、当然そのまま粗く見える。
+     * 🔑 user 指示 2026-08-03「PNG ラスタをキャッシュして GPU で表示」の**目的は
+     *   本文のスクロール追従**である ── 拡大窓は追従の話ではなく**見るための窓**なので、
+     *   ここでベクタを使うのは指示と衝突しない(むしろ「SVG は書き出しのときだけ」の
+     *   *書き出し* と同じ「原寸で見たい」側である)。
+     * ⚠ **添付の画像は原本がベクタではない**ので、これまでどおり `src` を開く。
+     */
+    const host = img.closest<HTMLElement>('[data-pkc-mermaid-src]');
+    const source = host?.getAttribute('data-pkc-mermaid-src') ?? '';
+    services.viewBig?.(img.src, img.alt || '図', source === '' ? undefined : source);
   },
   /**
    * 図を保存する(P8 段⑦)。⚠ 画面は PNG だが、**書き出すのはベクタ**

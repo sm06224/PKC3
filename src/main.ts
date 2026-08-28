@@ -175,7 +175,7 @@ import { createAssetGate } from '@adapter/ui/actions/asset-gate';
 import { generateAssetKey } from '@adapter/platform/storage/asset-key';
 import { downloadBlob, downloadUrl } from '@adapter/platform/download';
 import { diagramFileName } from '@features/export/file-name';
-import { renderToSvg, readPalette } from '@adapter/ui/render/mermaid-raster';
+import { renderToSvg, readPalette, svgWithIntrinsicSize } from '@adapter/ui/render/mermaid-raster';
 import { MERMAID_KIND } from '@adapter/ui/render/mermaid-hydrate';
 import { CHART_KIND } from '@adapter/ui/render/chart-raster';
 import { SameOriginGate } from '@adapter/platform/same-origin-grants';
@@ -1836,11 +1836,27 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   ⚠ 添付の窓(`viewAsset`)とは**別の名前**である ── 同じにすると、
      *   添付を見ながら図を開いたときに**添付の窓が図に置き換わる**。
      */
-    viewBig: (src, title) => {
+    viewBig: (src, title, diagramSource) => {
       void (async () => {
         try {
-          // ⚠ `blob:` の取り直しは同一 origin でしか通らない ── 通らなければ断る
-          const bytes = await (await fetch(src)).blob();
+          /**
+           * 🔴 **図は原文からベクタを起こす**(user 報告 2026-08-28
+           * 「ラスタ化された方の画像が開くのは BAD / ぽしょぽしょの図になってしまった」)。
+           *
+           * ⚠ 画面の `<img>` は**本文の表示幅 × dpr** で焼いた PNG なので、
+           *   拡大窓で開くと粗い ── とくに段に収めるため縮めた巨大な図ほど粗い。
+           * 🔑 ベクタなら**どこまで拡大しても鮮明**で、焼き直しも要らない。
+           * ⚠ **実寸を書き込んでから渡す**(`svgWithIntrinsicSize`)── mermaid の SVG は
+           *   `<img>` が読む自然幅が 300px なので、そのままだと「実寸」が 300px になる。
+           */
+          const bytes =
+            diagramSource === undefined
+              ? // ⚠ `blob:` の取り直しは同一 origin でしか通らない ── 通らなければ断る
+                await (await fetch(src)).blob()
+              : new Blob(
+                  [svgWithIntrinsicSize(await renderToSvg(diagramSource, readPalette()))],
+                  { type: 'image/svg+xml' },
+                );
           const url = URL.createObjectURL(bytes);
           const win = await openAssetWindow({
             lent: { url, dispose: () => URL.revokeObjectURL(url) },
