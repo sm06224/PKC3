@@ -36,6 +36,7 @@ import {
   chooseReadColumns,
   columnScroller,
   currentReadColumns,
+  fitColumnHeight,
   installColumnWheel,
   READ_COLUMNS_ATTR,
   READ_COLUMNS_VAR,
@@ -124,6 +125,28 @@ describe('CSS(2 本で 1 組)', () => {
   };
 
   /**
+   * 🔴 **選択子で規則を引く。字面で探さない**(2026-08-28、#523 で 3 本まとめて踏んだ)。
+   *
+   * ⚠ 直す前は `[data-pkc-field='detail-body'] {` を字面で探していたが、
+   *   #523 で `editor-live` を足して **`A,\nB {` の形**になった瞬間、
+   *   **3 本とも 1 つも拾えなくなった**(空振り防止が鳴って気づけた)。
+   *   CLAUDE.md §1「CSS は構文で拾う ── 選択子リストを `,` で割って
+   *   **丸ごと一致**を見る」の実体である。
+   * ⚠ 同じ選択子の規則が複数在ることは無い前提だが、在れば**最後**を採る
+   *   (CSS の解決順と同じ)。
+   */
+  const ruleFor = (selector: string): string | null => {
+    let found: string | null = null;
+    for (const r of codeOnly().matchAll(/([^{}]+)\{([^}]*)\}/g))
+      if (r[1]!.split(',').map((x) => x.trim()).includes(selector)) found = r[2]!;
+    return found;
+  };
+
+  /** 段組みの本体(読む面 / 編集の面が同じ規則を共有する)。 */
+  const COLUMNS_SEL =
+    "[data-pkc-view-pane='detail'][data-pkc-columns-on] [data-pkc-field='detail-body']";
+
+  /**
    * ⚠ かつてここに 3 本目「外のスクロール箱の `overflow: hidden`」の検査が在ったが、
    *   **変異試験 M7 が SURVIVED** で no-op だと分かったので、規則ごと消した
    *   (①で面が `flex: 1 1 0` になると器は伸びず、実測でも
@@ -136,13 +159,40 @@ describe('CSS(2 本で 1 組)', () => {
   });
 
   it('🔴 ② 本文の器を横スクローラにして段を流す', () => {
-    const css = codeOnly();
-    expect(css, '段組みになっていない').toMatch(
-      /\[data-pkc-field='detail-body'\]\s*\{[^}]*columns:\s*[^;]*var\(--pkc-read-cols/,
+    const rule = ruleFor(COLUMNS_SEL);
+    expect(rule, '段組みの規則を読めない(空振り)').not.toBeNull();
+    expect(rule!, '段組みになっていない').toMatch(/columns:\s*[^;]*var\(--pkc-read-cols/);
+    expect(rule!, '横に送れない').toMatch(/overflow-x:\s*auto/);
+  });
+
+  /**
+   * 🔴 **編集の面も同じ規則を共有する**(#523)。
+   * ⚠ **別の規則を書かない** ── 書くと段の幅・すき間・罫線が 2 か所になり、
+   *   片方だけ動いて「読んでいるときと打っているときで段が違う」が起きる(§7)。
+   */
+  it('🔴 編集の面(1 面)も、読む面と同じ段組みの規則に相乗りする (#523)', () => {
+    const live =
+      "[data-pkc-view-pane='detail'][data-pkc-columns-on] [data-pkc-region='editor-live']";
+    expect(ruleFor(live), '編集の面に段組みが当たっていない').not.toBeNull();
+    // 🔑 **同じ規則である**(別に書き起こしていない)
+    expect(ruleFor(live), '編集の面だけ別の規則になっている(2 か所に分かれた)').toBe(
+      ruleFor(COLUMNS_SEL),
     );
-    expect(css, '横に送れない').toMatch(
-      /\[data-pkc-field='detail-body'\]\s*\{[^}]*overflow-x:\s*auto/,
-    );
+  });
+
+  /**
+   * 🔴 **編集の箱を段の高さで頭打ちにする**(#523)。
+   * ⚠ 実測で `rows=32` のとき**段の下へ 121px** はみ出した ── 縦ホイールは
+   *   横送りに読み替えられ `overflow-y: hidden` なので、**打った字に届く手段が無い**。
+   */
+  it('🔴 編集の箱は段の高さで頭打ちになる (#523)', () => {
+    const box =
+      "[data-pkc-view-pane='detail'][data-pkc-columns-on] [data-pkc-field='row-source']";
+    const rule = ruleFor(box);
+    expect(rule, '編集の箱に上限が無い(打った字が段の外へ消える)').not.toBeNull();
+    expect(rule!, '上限が段の高さになっていない').toMatch(/max-height:\s*[^;]*--pkc-col-h/);
+    // ⚠ 上限に当たったら**箱の中で送る** ── 送れないと結局読めない
+    expect(rule!, '上限に当たった箱の中を送れない').toMatch(/overflow-y:\s*auto/);
   });
 
   /**
@@ -314,8 +364,10 @@ describe('CSS(2 本で 1 組)', () => {
    *   (CLAUDE.md 2026-08-28)。ここが守るのは「**線を引く宣言が在る**」だけ。
    */
   it('🔴 段の境目に罫線を引いている (#525)', () => {
-    expect(codeOnly(), '段の境目に線が無い(消しても誰も気づかない状態に戻っている)').toMatch(
-      /\[data-pkc-field='detail-body'\]\s*\{[^}]*column-rule:\s*[^;]+;/,
+    const rule = ruleFor(COLUMNS_SEL);
+    expect(rule, '段組みの規則を読めない(空振り)').not.toBeNull();
+    expect(rule!, '段の境目に線が無い(消しても誰も気づかない状態に戻っている)').toMatch(
+      /column-rule:\s*[^;]+;/,
     );
   });
 
@@ -350,10 +402,19 @@ describe('CSS(2 本で 1 組)', () => {
    *   ここで TS の定数と突合する。
    */
   it('🔴 段組みの寸法が、TS の定数と一致する(片方だけ動かさない)', () => {
-    const m = /\[data-pkc-field='detail-body'\]\s*\{([^}]*)\}/.exec(codeOnly());
-    expect(m, '段組みの規則を読めない(空振り)').not.toBeNull();
-    const rule = m![1]!;
-    const cols = /columns:\s*(.+?)\s+var\(--pkc-read-cols,\s*([^)]+)\);/.exec(rule);
+    /**
+     * 🔴 **選択子リストのまま拾う**(2026-08-28、#523 で踏んだ)。
+     *
+     * ⚠ 直す前は `[data-pkc-field='detail-body'] {` を字面で探していたが、
+     *   #523 で `editor-live` を足して **`A,\nB {` の形**になった瞬間、
+     *   **1 つも拾えなくなった**(空振り防止が鳴って気づけた)。
+     *   これは CLAUDE.md §1 の「CSS は構文で拾う ── 選択子リストを `,` で割って
+     *   丸ごと一致を見る」そのものである。
+     * 🔑 だから `選択子 { 宣言 }` を全部読み、**リストのどれかが一致する**規則を採る。
+     */
+    const rule = ruleFor(COLUMNS_SEL);
+    expect(rule, '段組みの規則を読めない(空振り)').not.toBeNull();
+    const cols = /columns:\s*(.+?)\s+var\(--pkc-read-cols,\s*([^)]+)\);/.exec(rule!);
     expect(cols, 'columns が「最小幅 + 段数の変数」の形になっていない').not.toBeNull();
     /**
      * 🔴 **下限は px ではなく `em` で書いてある**(#509)── 文字を大きくすると
@@ -366,7 +427,7 @@ describe('CSS(2 本で 1 組)', () => {
     );
     // ⚠ 予備は 1(= 段組みしない)── JS が動かない回に段へ流れないこと
     expect(cols![2]!.trim(), '段数の予備は 1 であるべき').toBe('1');
-    const gap = /column-gap:\s*([^;]+);/.exec(rule);
+    const gap = /column-gap:\s*([^;]+);/.exec(rule!);
     expect(gap, 'column-gap が無い').not.toBeNull();
     expect(gap![1]!.trim(), 'すき間が TS の定数とずれている').toBe(`${READ_COLUMN_GAP_PX}px`);
   });
@@ -576,13 +637,166 @@ describe('ホイールの読み替え', () => {
     expect(host.scrollLeft).toBe(0);
   });
 
-  it('編集に入っている面の器は掴まない(段組みは view だけ)', () => {
-    const { root, inner } = rig();
-    root.querySelector('[data-pkc-view-pane]')!.setAttribute('data-pkc-detail-mode', 'edit');
+  /**
+   * 🔴 **箱の中を送る手段を奪わない**(#523。2026-08-28)。
+   *
+   * ⚠ 編集中も段組みのままにした結果、**編集の箱が横送りの器の中に入った**。
+   *   箱は段の高さで頭打ちになり、超えた分は**箱の中で送る**形なのに、
+   *   ホイールの読み替えが無条件だと **箱の中を送る手段が消える**
+   *   ── 打った字が箱の中で見えないまま、マウスでは届かない。
+   * ⚠ これは #527(図が段からはみ出して届かない)と**同じ形の穴**である。
+   * 🔑 対照群を 3 つ置く:①送れる箱の上では奪わない ②**送り切っていれば奪う**
+   *   (端で止まって外側が動かない形を作らない)③箱の外では今までどおり奪う。
+   */
+  it('🔴 自分で縦に送れる箱の上では、横送りへ読み替えない (#523)', () => {
+    const { root, host } = rig();
+    applyReadColumns(document.documentElement, '2');
+    const off = installColumnWheel(root, document);
+
+    const box = document.createElement('textarea');
+    box.setAttribute('data-pkc-field', 'row-source');
+    host.append(box);
+    // happy-dom は採寸しない ── 「まだ 200px 送れる箱」を手で作る
+    Object.defineProperty(box, 'scrollHeight', { value: 500, configurable: true });
+    Object.defineProperty(box, 'clientHeight', { value: 300, configurable: true });
+    box.scrollTop = 0;
+
+    // ① まだ下へ送れる箱の上 ── 既定を止めない(箱が自分で送る)
+    expect(wheel(box, 300).defaultPrevented, '箱の中を送れない(打った字に届かない)').toBe(false);
+    expect(host.scrollLeft, '箱の上なのに段を横へ送った').toBe(0);
+
+    // ② 🔑 送り切ったら、これまでどおり横へ流す(端で詰まらせない)
+    box.scrollTop = 200;
+    expect(wheel(box, 300).defaultPrevented, '送り切った箱の上で横へ流れない').toBe(true);
+    expect(host.scrollLeft, '送り切ったのに段が動かない').toBeGreaterThan(0);
+
+    /**
+     * ②' 🔴 **上へ戻る側も同じ**(変異試験 W3 が SURVIVED で教えた)。
+     * ⚠ 直す前、この test は**下へ送る側しか見ていなかった** ── 上の枝を
+     *   丸ごと落とす変異が緑のまま通った。⚠ 上へ戻れないほうが実害は重い:
+     *   **打った字は箱の下に増えるので、読み返すのは必ず上向き**である。
+     */
+    /**
+     * ⚠ **器を左端から動かしておく**(変異試験 W3 が SURVIVED で教えた)。
+     *   1 稿目は `host.scrollLeft = 0` にしていたので、上の枝を丸ごと落とす変異でも
+     *   **器そのものの「左端では既定に返す」規則(`:436`)に救われて**緑だった
+     *   ── CLAUDE.md §1「救い手が変わっただけ」の形である。
+     */
+    host.scrollLeft = 100;
+    box.scrollTop = 200; // 下まで送った状態から、上へ戻る
+    expect(wheel(box, -300).defaultPrevented, '箱の中を上へ戻せない(打った字を読み返せない)').toBe(
+      false,
+    );
+    expect(host.scrollLeft, '上へ戻すつもりが段を横へ送った').toBe(100);
+    /**
+     * 🔑 上も送り切っていれば流す(対称)。
+     * ⚠ **器を左端から動かしておく** ── 器そのものが左端(`scrollLeft === 0`)だと、
+     *   もともと「送り切っていたら既定に返す」規則(`:436`)で抜けるので、
+     *   ここで見たい判定に**到達しない**(1 稿目はそれで落ちた ── 空振りの一種)。
+     */
+    host.scrollLeft = 100;
+    box.scrollTop = 0;
+    expect(wheel(box, -300).defaultPrevented, '上へ送り切った箱で横へ流れない').toBe(true);
+
+    // ③ 対照群 ── 箱の外(ふつうの本文)では今までどおり奪う
+    host.scrollLeft = 0;
+    const p = document.createElement('p');
+    host.append(p);
+    expect(wheel(p, 300).defaultPrevented, '本文の上で横送りにならない').toBe(true);
+
+    off();
+  });
+
+  /**
+   * 🔴 **編集中でも高さを当てる**(#523。変異試験 C2 が SURVIVED で教えた)。
+   *
+   * ⚠ `columnScroller` を編集へ開けただけでは足りない ── `fitColumnHeight` は
+   *   **器と面の両方**が要り、面を引く `viewPane` も同じだけ開ける必要がある。
+   *   片方だけ戻すと `pane === null` → `off()` へ落ちて、**印も高さも外れる**
+   *   (= 段組みが解ける)。
+   * ⚠ 直す前、この経路を見ている unit は 1 つも無かった ── `viewPane` を
+   *   読む面限定へ戻す変異が**緑のまま通った**。
+   * 🔑 happy-dom は採寸しないので、**面と器の矩形を手で置く**
+   *   (置かないと `before.height === 0` の早期 return に落ちて、これも空振りになる)。
+   */
+  it('🔴 編集中(1 面)でも段組みの印と高さが当たる (#523)', () => {
+    const root = document.createElement('div');
+    const pane = document.createElement('div');
+    pane.setAttribute('data-pkc-view-pane', 'detail');
+    pane.setAttribute('data-pkc-detail-mode', 'editor');
+    const live = document.createElement('div');
+    live.setAttribute('data-pkc-region', 'editor-live');
+    pane.append(live);
+    root.append(pane);
+    document.body.append(root);
+    const rect = (el: HTMLElement, top: number, bottom: number, width: number): void => {
+      Object.defineProperty(el, 'getBoundingClientRect', {
+        value: () => ({ top, bottom, left: 0, right: width, width, height: bottom - top }),
+        configurable: true,
+      });
+    };
+    rect(pane, 0, 600, 1400);
+    rect(live, 0, 600, 1400);
+    Object.defineProperty(live, 'clientWidth', { value: 1400, configurable: true });
+    applyReadColumns(document.documentElement, '2');
+
+    const h = fitColumnHeight(root, document);
+
+    expect(h, '編集中は高さが当たらない(段組みが解ける)').toBe(600);
+    expect(pane.hasAttribute('data-pkc-columns-on'), '編集中に段組みの印が付かない').toBe(true);
+    expect(live.style.height, '器に高さが入っていない').toBe('600px');
+    // 🔑 #527 の変数も同じ経路で下りる(図と箱の頭打ちがこれを読む)
+    expect(live.style.getPropertyValue('--pkc-col-h'), '段の高さが CSS へ下りていない').toBe(
+      '600px',
+    );
+
+    /**
+     * ⚠ **対照群** ── 2 ペイン(全文 1 枚)は器が無いので、これまでどおり切れる。
+     * 🔑 置かないと「編集中は常に段組み」に壊しても緑のままである。
+     */
+    live.remove();
+    const split = document.createElement('div');
+    split.setAttribute('data-pkc-region', 'editor-split');
+    pane.append(split);
+    expect(fitColumnHeight(root, document), '2 ペインでも段組みにしている').toBeNull();
+    expect(pane.hasAttribute('data-pkc-columns-on'), '2 ペインで印が残っている').toBe(false);
+
+    root.remove();
+  });
+
+  /**
+   * 🔴 **2 ペインの編集では掴まない / 1 面(live)では掴む**(#523、2026-08-28)。
+   *
+   * ⚠ **この検査は 2026-08-28 まで何も見ていなかった。** 元は
+   *   `detail-mode` に **`'edit'`** を入れていたが、製品が立てる値は
+   *   `'empty' | 'view' | 'editor'` の 3 つで **`'edit'` は存在しない**
+   *   ── どの選択子にも当たらないので、**中身をどう変えても緑**だった
+   *   (CLAUDE.md §1「主張そのものが成り立たない」)。
+   * 🔑 見るべきは mode の字ではなく**器が在るか**である:
+   *   2 ペインは `editor-split` に全文 1 枚の `<textarea>` を置くので
+   *   段組みの器が無く、live は `editor-live` 1 枚で済むので在る。
+   */
+  it('2 ペインの編集では器を掴まない / 1 面の編集では掴む (#523)', () => {
+    const { root, host, inner } = rig();
+    const pane = root.querySelector('[data-pkc-view-pane]')!;
+    pane.setAttribute('data-pkc-detail-mode', 'editor');
+    // 2 ペイン: 本文の器を外し、全文 1 枚の編集面に差し替える
+    host.remove();
+    const split = document.createElement('div');
+    split.setAttribute('data-pkc-region', 'editor-split');
+    pane.append(split);
     applyReadColumns(document.documentElement, '2');
     installColumnWheel(root, document);
-    expect(columnScroller(root)).toBeNull();
+    expect(columnScroller(root), '2 ペインの編集面を段組みの器として掴んでいる').toBeNull();
     expect(wheel(inner, 300).defaultPrevented).toBe(false);
+
+    // 🔑 対照群 ── 1 面(live)なら掴む。⚠ これが無いと
+    //    「編集中は常に掴まない」に壊しても緑のままである
+    split.remove();
+    const live = document.createElement('div');
+    live.setAttribute('data-pkc-region', 'editor-live');
+    pane.append(live);
+    expect(columnScroller(root), '1 面の編集面を段組みの器として掴めていない').toBe(live);
   });
 });
 

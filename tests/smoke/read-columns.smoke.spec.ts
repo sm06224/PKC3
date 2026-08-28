@@ -15,7 +15,8 @@ import { gotoApp, clickReal, createEntry, collectPageErrors, expectReachable } f
  *    読み替えを実装に入れた。⚠ 効かなければ**マウスだけで読めない**
  *    (不可侵指示 2026-08-03)
  * ④ **狭い画面で 1 段へ畳むか** ── `columns: <最小幅> <段数>` に任せてある
- * ⑤ **編集に入ると解けるか** ── selector が持っている(JS を書いていない)
+ * ⑤ 🔴 **編集に入っても段のままか**(#523、2026-08-28 に向きを裏返した)──
+ *    直す前は「解ける」を pin していたが、それはこちら側の判断だった
  */
 
 /** ⚠ 段が 2 本以上できるだけの長さが要る(短いと①②が空振りする)。 */
@@ -78,6 +79,61 @@ async function readGeom(page: Page): Promise<{
       inlineH: body.style.height,
       columnWidth: getComputedStyle(body).columnWidth,
       fontPx: Number.parseFloat(getComputedStyle(body).fontSize),
+    };
+  });
+}
+
+/**
+ * 🔴 **編集中の器を採る**(#523)。
+ *
+ * ⚠ `readGeom` は `detail-body` しか見ない ── 編集中はその器が居ないので
+ *   **全部 0 を返す**(「編集中は採寸できない」を表す設計だった)。
+ *   段組みのまま編集する以上、**器は `editor-live` に替わる**ので別に採る。
+ * 🔑 どちらの器かも返す ── 「段になった」と「どこが段になったか」は別の主張である。
+ */
+async function editGeom(page: Page): Promise<{
+  on: boolean;
+  host: string;
+  lefts: number;
+  /** 開いている箱の、器の下からのはみ出し(px)。⚠ 正なら**打った字が見えない**。 */
+  boxOver: number;
+  boxH: number;
+  /** 箱が器の中に見えているか(上下とも器の内側)。 */
+  boxInView: boolean;
+  boxCol: number;
+}> {
+  return page.evaluate(() => {
+    const pane = document.querySelector('[data-pkc-view-pane="detail"]');
+    const on = pane?.hasAttribute('data-pkc-columns-on') ?? false;
+    const live = document.querySelector('[data-pkc-region="editor-live"]') as HTMLElement | null;
+    const body = document.querySelector('[data-pkc-field="detail-body"]') as HTMLElement | null;
+    const host = live ?? body;
+    if (host === null)
+      return { on, host: '(無い)', lefts: 0, boxOver: 0, boxH: 0, boxInView: false, boxCol: -1 };
+    // ⚠ **見えている段だけ数える**(`readGeom` と同じ理由 ── 溢れた段は右外に並ぶ)
+    const hb = host.getBoundingClientRect();
+    const lefts = new Set(
+      [...host.children]
+        .map((k) => Math.round(k.getBoundingClientRect().left))
+        .filter((x) => x >= Math.round(hb.left) - 1 && x < Math.round(hb.right)),
+    );
+    const ta = document.querySelector('[data-pkc-field="row-source"]') as HTMLElement | null;
+    if (ta === null)
+      return {
+        on, host: live ? 'editor-live' : 'detail-body', lefts: lefts.size,
+        boxOver: 0, boxH: 0, boxInView: false, boxCol: -1,
+      };
+    const r = ta.getBoundingClientRect();
+    const colW = ta.offsetWidth + 16; // 段幅 + すき間(CSS の `column-gap`)
+    return {
+      on,
+      host: live ? 'editor-live' : 'detail-body',
+      lefts: lefts.size,
+      boxOver: Math.round(r.bottom - hb.bottom),
+      boxH: Math.round(r.height),
+      boxInView: r.top >= hb.top - 1 && r.bottom <= hb.bottom + 1
+        && r.left >= hb.left - 1 && r.right <= hb.right + 1,
+      boxCol: Math.round((r.left - hb.left + host.scrollLeft) / colW),
     };
   });
 }
@@ -239,7 +295,7 @@ test('🔴 段組みで送った位置が、編集から戻っても残る (#505
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
-test('🔴 狭い画面では自動で 1 段に戻り、編集に入ると段組みが解ける (#505 段①)', async ({
+test('🔴 狭い画面では自動で 1 段に戻り、編集に入っても段のまま (#505 段① / #523)', async ({
   page,
 }) => {
   const errors = collectPageErrors(page);
@@ -285,22 +341,28 @@ test('🔴 狭い画面では自動で 1 段に戻り、編集に入ると段組
   expect((await readGeom(page)).lefts, '広げたのに段が 1 つのまま').toBeGreaterThanOrEqual(2);
 
   /**
-   * ⑤ 🔴 **編集に入ると解ける**(user の字が「閲覧時に」)。
-   * ⚠ JS を書いていない ── selector の `[data-pkc-detail-mode='view']` が持つ。
+   * ⑤ 🔴 **編集に入っても解けない**(#523。user 指示 2026-08-28
+   * 「**段組のままでインライン編集がしたい**」)。
+   *
+   * ⚠ **2026-08-28 に向きを裏返した検査である。** ここは元々
+   *   「編集に入ると解ける」を pin していた ── その判断はこちら側が下したもので
+   *   (「user の字が『閲覧時に』だから」)、今回の要望と正面から食い違っていた。
+   * 🔑 **向きを裏返したら、空振り防止も置き直す**(CLAUDE.md §1)──
+   *   「印が残っている」だけでは、**印だけ残って段が 1 本**でも緑になる。
+   *   だから**段が実際に 2 本以上できていること**まで見る。
    */
   await clickReal(page, '[data-pkc-action="start-edit"]');
   await expect(page.locator('[data-pkc-region="editor-live"]')).toBeVisible();
-  /**
-   * ⚠ **「編集に入った」ではなく「段組みが解けた」を見る** ── 面の名前だけ見ると、
-   *   CSS の `view` 限定を外しても緑のままになる(空振り)。
-   */
   await expect
-    .poll(async () => (await readGeom(page)).on, {
-      message: '編集に入っても段組みの印が残っている(DOM が嘘をつく)',
+    .poll(async () => (await editGeom(page)).on, {
+      message: '編集に入ると段組みが解ける(#523 の要望と逆)',
       timeout: 5_000,
     })
-    .toBe(false);
-  // 対照群 ── 読む面へ戻せば、また段になる
+    .toBe(true);
+  const inEdit = await editGeom(page);
+  expect(inEdit.host, '段組みの器が編集の面になっていない').toBe('editor-live');
+  expect(inEdit.lefts, '印は在るのに段が 1 本しかない(空振り)').toBeGreaterThanOrEqual(2);
+  // 対照群 ── 読む面へ戻しても段のまま(戻す道が壊れていないこと)
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await expect
     .poll(async () => (await readGeom(page)).on, { message: '戻っても段に戻らない', timeout: 5_000 })
@@ -795,4 +857,132 @@ test('🔴 段の境界線を「はっきり」にすると、実際に濃くな
   expect(ratio(back.rule, back.bg), '戻せない').toBeCloseTo(thin, 1);
 
   expect(errors).toEqual([]);
+});
+
+/**
+ * 🔴 **段組みのままインライン編集する**(#523。user 指示 2026-08-28
+ * 「**段組のままでインライン編集がしたい**」)。
+ *
+ * ## 🔑 unit では原理的に見られない 3 つ
+ *
+ * happy-dom は採寸しないので、下は全部 0 になる:
+ *
+ * 1. **編集の器が本当に段へ流れるか**(段が 2 本以上できる)
+ * 2. 🔴 **打っても段が変わらないか** ── 自作の対照群で測ったところ、
+ *    段組みは前から順に詰めるので**箱より前の中身**だけが位置を決め、
+ *    箱が伸びて押されるのは**後ろ**である。だから箱自身は動かない
+ *    (実測 2026-08-28: 段の途中・上のほうで開いた場合 **0/6**)。
+ *    ⚠ 唯一の例外は「段の残りに入りきらなくなった瞬間」で、そのときだけ
+ *    **次の段のいちばん上**へ 1 回移る(以後は動かない)
+ * 3. 🔴 **箱が段からはみ出さないか** ── 同じ実測で `rows=32` のとき
+ *    **段の下へ 121px はみ出した**。縦ホイールは横送りに読み替えられ
+ *    `overflow-y: hidden` なので、**はみ出した分に届く手段が 1 つも無い**
+ *    = **自分が打った字が見えなくなる**(#527 の図と同じ穴。こちらのほうが重い)
+ */
+test('🔴 段組みのまま行を開いて打てて、箱が段からはみ出さない (#523)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1900, height: 800 });
+  await gotoApp(page);
+  await writeNote(page);
+  await setColumns(page, '3');
+
+  /**
+   * ① 行を開く。⚠ **user の動線どおりに押す** ── 読んでいる本文から編集へ入るのは
+   *   **Ctrl(mac は Command)+ クリック**である(2026-08-28 に変わった)。
+   *   素のクリックはリンクや升のためのもので、行は開かない。
+   */
+  await page.locator('[data-pkc-field="detail-body"] p').nth(3).click({ modifiers: ['ControlOrMeta'] });
+  const box = page.locator('[data-pkc-field="row-source"]');
+  await expect(box).toBeVisible();
+
+  const opened = await editGeom(page);
+  expect(opened.host, '編集に入ったら器が段組みから外れた').toBe('editor-live');
+  expect(opened.on, '編集に入ると段組みが解ける(#523 の要望と逆)').toBe(true);
+  expect(opened.lefts, '印は在るのに段が 1 本しかない(空振り)').toBeGreaterThanOrEqual(2);
+  expect(opened.boxInView, '開いた箱が器の外に居る(押した所に何も出ない)').toBe(true);
+
+  /**
+   * ② 🔴 **打っても段は彷徨わない ── 動くとしても 1 回だけ。**
+   *
+   * ⚠ **「1 度も動かない」と書いてはいけない**(2026-08-28 に 1 稿目でそう書いて落ちた)。
+   *   実測が言っているのは「動くのは**段の残りに入りきらなくなった瞬間の 1 回だけ**で、
+   *   行き先も**次の段のいちばん上**に決まっている」であって、0 回ではない。
+   * 🔑 **後条件は、確かめた事実の上にだけ書く**(CLAUDE.md §1)── だから
+   *   **変わった回数を数えて 1 以下**を見る。⚠ 「彷徨う」実装(打鍵ごとに流れ直る)は
+   *   この検査で落ちる。
+   * ⚠ 対照群として**箱が実際に伸びたこと**も見る ── 伸びていなければ
+   *   「動かなかった」は何も主張していない(空振り)。
+   */
+  await box.click();
+  const cols: number[] = [opened.boxCol];
+  for (let round = 0; round < 6; round++) {
+    for (let i = 0; i < 2; i++) await page.keyboard.type('\n打った行 ' + round + '-' + i);
+    const g = await editGeom(page);
+    cols.push(g.boxCol);
+    expect(g.boxInView, `打っている途中で箱が器の外へ出た(${round} 巡目)`).toBe(true);
+  }
+  const typed = await editGeom(page);
+  expect(typed.boxH, '打ったのに箱が伸びていない(この検査は何も見ていない)').toBeGreaterThan(
+    opened.boxH,
+  );
+  const moves = cols.filter((c, i) => i > 0 && c !== cols[i - 1]).length;
+  expect(moves, `打つたびに段が変わっている(${cols.join(' → ')})`).toBeLessThanOrEqual(1);
+
+  /**
+   * ③ 🔴 **たくさん打っても段からはみ出さない**(打った字が見えなくなる穴)。
+   * ⚠ 自作の対照群では `rows=32`(高さ 713px)で**段の下へ 121px** はみ出した。
+   *   それを大きく超える量を打つ。
+   */
+  for (let i = 0; i < 40; i++) await page.keyboard.type('\nさらに打った行 ' + i);
+  const grown = await editGeom(page);
+  expect(grown.boxOver, `箱が段の下へ ${grown.boxOver}px はみ出した(打った字が見えない)`).
+    toBeLessThanOrEqual(0);
+  expect(grown.boxInView, '打っているうちに箱が器の外へ出た').toBe(true);
+
+  /**
+   * ④ 🔴 **箱の中をホイールで戻せる**(#523。実装しながら自分で作りかけた穴)。
+   *
+   * ⚠ 段組みの器はホイールの縦を**横送りへ読み替える**。編集の箱がその器の中へ
+   *   入った以上、無条件に読み替えると **箱の中を送る手段が消える**
+   *   ── 打った字は箱の下に増えるので、**読み返すのは必ず上向き**である。
+   * 🔑 観測点は「箱の `scrollTop` が実際に動いたか」と
+   *   「**段は動いていない**か」の 2 つ ── 片方だけだと、
+   *   「両方動いた」を見抜けない。
+   */
+  /**
+   * ⚠ **段を左端から動かしておく**(変異試験 WS が SURVIVED で教えた)。
+   *   器そのものが左端(`scrollLeft === 0`)だと、逃がしを丸ごと外しても
+   *   **器の「送り切っていたら既定に返す」規則に救われて**箱が素で送れてしまう
+   *   ── CLAUDE.md §1「救い手が変わっただけ」の形である。
+   */
+  await page.evaluate(() => {
+    const host = document.querySelector('[data-pkc-region="editor-live"]') as HTMLElement;
+    host.scrollLeft = 120;
+  });
+  const before = await page.evaluate(() => {
+    const ta = document.querySelector('[data-pkc-field="row-source"]') as HTMLElement;
+    const host = document.querySelector('[data-pkc-region="editor-live"]') as HTMLElement;
+    return { top: ta.scrollTop, room: ta.scrollHeight - ta.clientHeight, left: host.scrollLeft };
+  });
+  expect(before.left, '段を左端から動かせていない(この検査は救い手に守られる)').toBeGreaterThan(0);
+  expect(before.top, '箱が下まで送られていない(上へ戻す余地が無い = 空振り)').toBeGreaterThan(0);
+  expect(before.room, '箱が段の高さに収まっていて、中を送る余地が無い(空振り)').toBeGreaterThan(0);
+  await box.hover();
+  await page.mouse.wheel(0, -400); // 上へ戻す
+  await expect
+    .poll(async () =>
+      page.evaluate(() => (document.querySelector('[data-pkc-field="row-source"]') as HTMLElement).scrollTop),
+    { message: '箱の中を上へ戻せない(打った字を読み返せない)', timeout: 3_000 })
+    .toBeLessThan(before.top);
+  const after = await page.evaluate(() =>
+    (document.querySelector('[data-pkc-region="editor-live"]') as HTMLElement).scrollLeft);
+  expect(after, '箱の中を送るつもりが、段まで横へ動いた').toBe(before.left);
+
+  // ⑤ 確定して読む面へ戻っても、段のまま
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect
+    .poll(async () => (await readGeom(page)).on, { message: '戻ると段が解ける', timeout: 5_000 })
+    .toBe(true);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
