@@ -96,7 +96,14 @@ export class ContactsRenderer {
     exp.type = 'button';
     exp.setAttribute('data-pkc-action', 'export-vcards');
     exp.setAttribute('data-pkc-field', 'contacts-export');
-    exp.textContent = `vCard で書き出す(${cards.length} 件)`;
+    /**
+     * ⚠ **途中までしか集めていないなら、ボタンの字でも言う**(#536 ①)──
+     *   件数だけ見せると「全部」と読まれる。
+     */
+    exp.textContent =
+      scan?.truncated === true
+        ? `vCard で書き出す(途中まで集めた ${cards.length} 件)`
+        : `vCard で書き出す(${cards.length} 件)`;
     exp.title =
       'いま見えている連絡先を .vcf ファイル 1 つに書き出します(絞り込み中は絞った分だけ)。' +
       '出るのは名前・所属・電話・メール・誕生日です。' +

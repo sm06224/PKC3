@@ -224,6 +224,60 @@ describe('振り分け(importFiles)', () => {
    *   user は**対応していないと結論する**(「在るのに見つけられないのは、
    *   こちらの動線の不備」── CLAUDE.md 2026-08-27)。
    */
+  /**
+   * 🔴 **選ばせる前に断る**(#535 ③)。
+   * ⚠ 直す前は picker を開き、user が file を選び終わった**後で**断っていた ──
+   *   選ぶ手間が丸ごと無駄になる。#513 で右ペインの日付ピッカーについて直したのと
+   *   **同じ形**である。
+   */
+  it('🔴 編集中は、ファイルを選ばせる前に断る(picker を開かない)', async () => {
+    const { bindActions } = await import('../../src/adapter/ui/actions/binder');
+    const { buildShell } = await import('../../src/adapter/ui/render/shell');
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    buildShell(root);
+    const d = new Dispatcher();
+    bindActions(root, d);
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [
+        {
+          lid: 'e1',
+          title: 'a',
+          archetype: 'text',
+          entryOrder: 1,
+          status: null,
+          date: null,
+          archived: false,
+          bodyChars: null,
+        } as never,
+      ],
+      relations: [],
+    });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'e1', body: '本文\n' });
+    d.dispatch({ type: 'START_EDIT' });
+
+    const input = root.querySelector<HTMLInputElement>('[data-pkc-field="import-input"]')!;
+    let opened = 0;
+    input.click = () => {
+      opened += 1;
+    };
+    const btn = document.createElement('button');
+    btn.setAttribute('data-pkc-action', 'import-file');
+    root.querySelector('[data-pkc-region="shell"]')!.append(btn);
+    btn.click();
+    expect(opened, '編集中なのにファイル選択を開いた(選ぶ手間が無駄になる)').toBe(0);
+    expect(d.getState().error ?? '', '黙って開かなかった').toContain('編集を終了してから');
+
+    // ⚠ 対照群 ── 編集を終えれば開く(片道にしない)
+    d.dispatch({ type: 'CANCEL_EDIT' });
+    btn.click();
+    expect(opened, '編集を終えたのに開かない').toBe(1);
+  });
+
   it('🔴 「取り込む」の説明が vCard を名乗る', async () => {
     const { COLLECTION_COMMANDS } = await import('../../src/adapter/ui/render/commands');
     const imp = COLLECTION_COMMANDS.find((c) => c.action === 'import-file');
@@ -317,6 +371,26 @@ describe('書き出し(binder の export-vcards)── §7: 画面と同じ 1 �
         d.getState().notice ?? '',
         '何が入っていないかを、押した後に言っていない',
       ).toContain('名前・所属・電話・メール・誕生日だけ');
+      // ⚠ 対照群 ── 切っていないので「途中まで」とは言わない
+      expect(d.getState().notice ?? '', '切っていないのに断りを出した').not.toContain('途中まで');
+
+      /**
+       * 🔴 **途中までしか集めていないなら、押した後の帯でも言う**(#536 ①)。
+       * ⚠ ボタンの字と帯は**別の読み手**である(字を見ずに押す人・帯だけ見る人)──
+       *   片方だけ言うと、もう片方は「全部出た」と読む。
+       */
+      d.dispatch({
+        type: 'SET_CONTACT_SCAN',
+        scan: {
+          cards: [{ lid: 'a', name: '山田', org: '', tels: ['090'], emails: [], birthday: '' }],
+          totalNotes: 9999,
+          scannedNotes: 9999,
+          truncated: true,
+        },
+      });
+      btn.click();
+      await new Promise((r) => setTimeout(r, 10));
+      expect(d.getState().notice ?? '', '切ったのに帯が黙っている').toContain('途中まで');
     } finally {
       URL.createObjectURL = orig;
       URL.revokeObjectURL = origRevoke;

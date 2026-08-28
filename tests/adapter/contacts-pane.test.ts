@@ -328,6 +328,26 @@ describe('vCard の書き出し(#278 段③)', () => {
     expect(title, '出ない物を言っていない').toMatch(/住所|メモ/);
   });
 
+  /**
+   * 🔴 **途中までしか集めていないことを、書き出しの側でも言う**(#536 ①)。
+   * ⚠ 面は「(多いので途中まで集めました)」と出すのに、**ボタンと帯は黙って**いた ──
+   *   「全部出た」と思って元の .vcf を捨てる側に効く。
+   */
+  it('🔴 途中までしか集めていないなら、ボタンの字でも言う', () => {
+    const host = paint({ contactScan: scanOf([card('a', '山田', ['090'])], true) });
+    expect(
+      host.querySelector('[data-pkc-field="contacts-export"]')!.textContent,
+      '切ったのに件数だけ言っている(全部と読まれる)',
+    ).toContain('途中まで集めた');
+  });
+
+  it('⚠ 対照群 ── 切っていなければ今までどおりの字(要らない断りを出さない)', () => {
+    const host = paint({ contactScan: scanOf([card('a', '山田', ['090'])]) });
+    expect(host.querySelector('[data-pkc-field="contacts-export"]')!.textContent).toBe(
+      'vCard で書き出す(1 件)',
+    );
+  });
+
   it('🔴 絞り込み中は絞った件数を言う(画面と書き出しは同じ 1 つの規則 ── §7)', () => {
     const host = paint({
       contactScan: scanOf([card('a', '山田', ['090']), card('b', '別人', [], ['b@x.jp'])]),

@@ -3518,9 +3518,16 @@ const ACTIONS: Record<string, ActionHandler> = {
      *   ボタンの説明(`title`)はマウスを乗せたときしか出ないので、触る画面や
      *   字だけ見て押した user には届かない ── そのまま**元の .vcf を捨てる**恐れがある。
      */
+    /**
+     * ⚠ **途中までしか集めていないことも言う**(#536 ①)── 走査は上限で切るので、
+     *   ノートが多い user では「見えている分」が全部ではない。⚠ しかも取り込んだ
+     *   連絡先は一覧の**最後尾**に付くので、**新しく取り込んだ分から順に切られる**。
+     *   言わないと「全部出た」と思って元の .vcf を捨てる。
+     */
+    const cut = st.contactScan?.truncated === true ? '(多いので途中まで集めた分です)' : '';
     dispatcher.dispatch({
       type: 'OP_NOTICE',
-      message: `連絡先 ${cards.length} 件を書き出しました(名前・所属・電話・メール・誕生日だけです)`,
+      message: `連絡先 ${cards.length} 件を書き出しました${cut}(名前・所属・電話・メール・誕生日だけです)`,
     });
   },
   /**
@@ -4083,7 +4090,22 @@ const ACTIONS: Record<string, ActionHandler> = {
   'purge-orphan-assets': (_dispatcher, _target, services) => {
     services.purgeOrphanAssets?.();
   },
-  'import-file': (_dispatcher, target) => {
+  'import-file': (dispatcher, target) => {
+    /**
+     * 🔴 **選ばせる前に断る**(#535 ③)。
+     *
+     * ⚠ 直す前は picker を開き、user が file を選び終わった**後で**
+     *   `importVcfFiles` / `importMarkdownFiles` が「編集を終了してから」と断っていた
+     *   ── **選ぶ手間が丸ごと無駄**になる。これは #513 で右ペインの日付ピッカーに
+     *   ついて直したのと**同じ形**である(そちらは「開く → 選ぶ → 確定」を完走させて
+     *   から捨てていた)。
+     * 🔑 重い手順(ピッカー・ダイアログ)を始めさせる口では、**始める前に**見る ──
+     *   reducer / 実行部の門は残す(そちらは別経路からの到達を守っている)。
+     */
+    if (dispatcher.getState().phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから取り込んでください' });
+      return;
+    }
     target
       .closest('[data-pkc-region="shell"]')
       ?.querySelector<HTMLInputElement>('[data-pkc-field="import-input"]')
