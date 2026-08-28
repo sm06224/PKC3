@@ -143,6 +143,44 @@ describe('CSS(2 本で 1 組)', () => {
   });
 
   /**
+   * 🔴 **段の境目に線が在る**(#525。2026-08-28)。
+   *
+   * ⚠ 直す前、この 1 行を守る検査は **repo 全体で 0 件**だった ── 消しても
+   *   `npm test` も smoke も 1 つも鳴らない。user は 2026-08-28 に
+   *   「**段組の境界線を見たい。今は境界がわかりにくい**」と報告しており、
+   *   **見えにくいのを直す前に、まず「在ること」を落とせるようにする**。
+   *
+   * ⚠ **濃さ・太さは pin しない** ── そこは見え方の選択で、user が決める所である
+   *   (CLAUDE.md 2026-08-28)。ここが守るのは「**線を引く宣言が在る**」だけ。
+   */
+  it('🔴 段の境目に罫線を引いている (#525)', () => {
+    expect(codeOnly(), '段の境目に線が無い(消しても誰も気づかない状態に戻っている)').toMatch(
+      /\[data-pkc-field='detail-body'\]\s*\{[^}]*column-rule:\s*[^;]+;/,
+    );
+  });
+
+  /**
+   * 🔴 **畳んだら段組みを採り直す**(#525)。
+   *
+   * ⚠ 直す前、ペインの開閉は段組みの引き金として**名指しされていなかった** ──
+   *   `installColumnFit()` の `ResizeObserver` が**偶然拾っていただけ**である。
+   * 🔑 ここは**配線が在ること**だけを見る(体感は 1 フレーム = 25ms しか変わらない)。
+   *   実際に段が組み直ることは `tests/smoke/read-columns.smoke.spec.ts` が見る。
+   * ⚠ **呼び元を数える** ── 畳む口は 5 か所あるので、そのどれかに書くと
+   *   判定が散る(CLAUDE.md §7)。**画面へ写す 1 か所**に在ることを pin する。
+   */
+  it('🔴 ペインを畳む口が、段組みを採り直す (#525)', () => {
+    const pv = readFileSync('src/adapter/ui/render/pane-visibility.ts', 'utf8');
+    expect(pv, '畳んでも段組みを採り直していない').toContain('fitColumnHeight(');
+    // ⚠ 空振り防止 ── 呼んでいるのが `applyPaneVisibility` の中であること
+    const fn = pv.slice(pv.indexOf('export function applyPaneVisibility'));
+    expect(
+      fn.slice(0, fn.indexOf('\n}')),
+      '採り直しが applyPaneVisibility の外に在る(呼び元 5 か所へ散る)',
+    ).toContain('fitColumnHeight(');
+  });
+
+  /**
    * 🔴 **寸法は変数で渡し、予備の値は TS の定数と一致させる**(#505)。
    *
    * ⚠ 予備の値を**書かない**のは駄目 ── 定義の無い `var()` は**宣言ごと捨てられる**
