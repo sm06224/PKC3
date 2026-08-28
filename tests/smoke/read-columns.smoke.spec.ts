@@ -629,3 +629,62 @@ test('🔴 段組みで縦に長い図が段に収まり、押し所も同じ段
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * 🔴 **読みながら段組みを切り替えられ、いま何段か言う**(#522 + #526)。
+ *
+ * > 「**段組表示を表示変更導線をセンターペインもしくはショートカット、
+ * > コンテキストメニューに用意したいくらいには気に入った**」(#522)
+ * > 「**段組表示設定の 2〜4 のどの数字を選んでもレンダリングは変わらなかった
+ * > それはバグ?**」(#526)
+ *
+ * 🔑 **2 つを 1 か所で解く** ── 答えは「バグではない。**器の幅で頭打ちになる**」で、
+ *   実測すると器が **928〜1390px のあいだは 2/3/4 が全部 2 段**になる。
+ *   **決まっていなかったのは user に言うことだけ**だったので、押した所で言う。
+ *
+ * ⚠ 観測点を「段数が変わった」で止めない ── **画面に字が出たか**まで見る
+ *   (変わらない幅では、字だけが唯一の答えになる)。
+ */
+test('🔴 Alt+C で段組みが回り、いま何段で出ているかを言う (#522 / #526)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  // ⚠ **わざと「頭打ちになる幅」で測る**(#526 が報告された形)── 広い画面だと
+  //    3 段と 4 段が別々に出てしまい、この次元を測れない
+  await page.setViewportSize({ width: 1500, height: 900 });
+  await gotoApp(page);
+  await writeNote(page);
+
+  const status = page.locator('[data-pkc-region="status"]');
+  const before = await readGeom(page);
+  expect(before.on, '最初から段組みになっている(既定は 1 段のはず)').toBe(false);
+
+  // ① 1 回押すと 2 段になり、**字が出る**
+  await page.keyboard.press('Alt+c');
+  await expect.poll(async () => (await readGeom(page)).on, { timeout: 5_000 }).toBe(true);
+  await expect(status, '押しても何も言わない').toContainText('本文の段組み: 2 段');
+  const two = await readGeom(page);
+  expect(two.lefts, '2 段になっていない').toBe(2);
+
+  // ② もう 1 回で 3 段。⚠ この器では **3 段を選んでも 2 段**のはず(#526 の形)
+  await page.keyboard.press('Alt+c');
+  await expect(status).toContainText('本文の段組み: 3 段');
+  const three = await readGeom(page);
+  // 🔴 **空振り防止** ── ここが「選んでも変わらない」場面であること自体を assert する
+  expect(
+    three.lefts,
+    `この器では 3 段が出てしまう(幅 ${three.cW}px)── #526 の場面を再現できていない`,
+  ).toBe(2);
+  // 🔴 **だから字で言う** ── 変わらない理由が画面に在る
+  await expect(
+    status,
+    '変わらないのに理由を言っていない(user が「バグ?」と思う形のまま)',
+  ).toContainText('いまの画面では 2 段で出ています');
+
+  // ③ 回って 1 段へ戻る(片道にしない)
+  await page.keyboard.press('Alt+c'); // 4 段
+  await expect(status).toContainText('本文の段組み: 4 段');
+  await page.keyboard.press('Alt+c'); // 1 段
+  await expect(status).toContainText('本文の段組み: 1 段');
+  await expect.poll(async () => (await readGeom(page)).on, { timeout: 5_000 }).toBe(false);
+
+  expect(errors).toEqual([]);
+});

@@ -19,7 +19,13 @@ import { PAGE_FORMATS } from '@features/page-format';
 import { currentPageFormat } from './page-format';
 import { EDITOR_MODES } from '@features/editor-mode';
 import { TEXT_SCALES } from '@features/text-scale';
-import { READ_COLUMN_CHOICES } from '@features/read-columns';
+import {
+  effectiveColumns,
+  minWidthForColumns,
+  READ_COLUMN_CHOICES,
+  readColumnsSpec,
+  type ReadColumns,
+} from '@features/read-columns';
 import { currentTextScale } from './text-scale';
 import { currentReadColumns } from './read-columns';
 import { appEditorMode, EditorModeStore } from './editor-mode';
@@ -249,6 +255,21 @@ export class SettingsRenderer {
       cselect.append(opt);
     }
     cd.append(cselect);
+    /**
+     * 🔴 **いま実際に何段になっているかを出す**(#526。user 報告 2026-08-28
+     * 「**2〜4 のどの数字を選んでもレンダリングは変わらなかった それはバグ?**」)。
+     *
+     * ⚠ 答えは「バグではない ── **器の幅で頭打ちになる**」で、**実装はそれを
+     *   知っていた**(`columnsFit` の注記が「CSS が 2 段へ落とす」と書いている)。
+     *   決まっていなかったのは **user に言うこと**だけだった。
+     * 🔑 実測すると、器が **928〜1390px のあいだは 2/3/4 が全部 2 段**になる
+     *   ── ごく普通の幅である。
+     * ⚠ **選択肢は減らさない** ── いま狭くても、広い画面で開けば効く。
+     */
+    const ceff = document.createElement('p');
+    ceff.setAttribute('data-pkc-field', 'read-columns-effective');
+    ceff.setAttribute('data-pkc-note', 'effective');
+    cd.append(ceff);
     const cnote = document.createElement('p');
     cnote.setAttribute('data-pkc-field', 'settings-note');
     // ⚠ **何が変わって、何に気をつけるか**を書く(押した後に探させない)
@@ -912,6 +933,45 @@ export class SettingsRenderer {
     );
     const cur = currentReadColumns(document.documentElement);
     if (select && select.value !== cur) select.value = cur;
+    this.syncColumnsEffective(cur);
+  }
+
+  /**
+   * 🔴 **「いま何段か」を画面の字にする**(#526)。
+   *
+   * ⚠ **器を実測して決める** ── 選んだ数ではなく、**CSS が実際に作る数**である。
+   *   採寸できない環境(happy-dom / 面が畳まれている)では**何も言わない**
+   *   ── 嘘を書くより黙るほうがよい。
+   */
+  private syncColumnsEffective(chosen: ReadColumns): void {
+    const el = this.region.querySelector<HTMLElement>('[data-pkc-field="read-columns-effective"]');
+    if (!el) return;
+    const host = document.querySelector<HTMLElement>('[data-pkc-field="detail-body"]');
+    const width = host?.getBoundingClientRect().width ?? 0;
+    const fontPx = host === null ? 0 : Number.parseFloat(getComputedStyle(host).fontSize);
+    const count = readColumnsSpec(chosen).count;
+    if (width <= 0 || !Number.isFinite(fontPx) || fontPx <= 0) {
+      el.textContent = '';
+      return;
+    }
+    const eff = effectiveColumns(width, count, fontPx);
+    if (count <= 1) {
+      el.textContent = '';
+      return;
+    }
+    if (eff === count) {
+      el.textContent = `いまの画面では ${eff} 段で出ています。`;
+      return;
+    }
+    if (eff <= 1) {
+      el.textContent =
+        `いまの画面は段組みに足りないので、ふつうの縦送りで出ています` +
+        `(${count} 段には ${Math.ceil(minWidthForColumns(2, fontPx))}px 以上の幅が要ります)。`;
+      return;
+    }
+    el.textContent =
+      `いまの画面では ${eff} 段で出ています` +
+      `(${count} 段には ${Math.ceil(minWidthForColumns(count, fontPx))}px 以上の幅が要ります)。`;
   }
 
   /**

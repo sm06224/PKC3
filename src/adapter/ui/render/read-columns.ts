@@ -10,6 +10,9 @@
  */
 import {
   columnsFit,
+  effectiveColumns,
+  minWidthForColumns,
+  nextReadColumns,
   READ_COLUMN_BASE_FONT_PX,
   DEFAULT_READ_COLUMNS,
   isReadColumns,
@@ -219,6 +222,56 @@ export function fitColumnHeight(root: ParentNode, doc: Document = document): num
   if (host.style.getPropertyValue(COLUMN_H_VAR) !== next)
     host.style.setProperty(COLUMN_H_VAR, next);
   return avail;
+}
+
+/**
+ * 🔴 **順ぐりに段数を変えて、いま何段になったかを言う**(#522 + #526)。
+ *
+ * 🔑 **2 つの user 報告を 1 か所で解く**:
+ *   - #522「**段組表示の切替導線をショートカットに用意したい**」
+ *   - #526「**2〜4 のどの数字を選んでもレンダリングは変わらなかった それはバグ?**」
+ *
+ * ⚠ 後者は**バグではない** ── CSS は `columns: <1 段の下限> <段数>` なので
+ *   ブラウザは**入る数だけ**作る。実測すると器が **928〜1390px のあいだは
+ *   2/3/4 が全部 2 段**になる。決まっていなかったのは **user に言うこと**だけだった。
+ * 🔑 だから**押した所で言う** ── 読みながら押す動線に、そのまま答えが載る。
+ *
+ * ⚠ **選んだ数は落とさない**(効かない段数へも回す)── いま狭くても、
+ *   広い画面で開けば効く。「効く数だけ回す」形にすると、
+ *   **狭い画面で選んだ設定が広い画面へ持って行けない**。
+ */
+export function cycleReadColumns(
+  root: ParentNode,
+  notify: (text: string) => void,
+  doc: Document = document,
+): void {
+  const cur = currentReadColumns(doc.documentElement);
+  const next = nextReadColumns(cur);
+  chooseReadColumns(doc.documentElement, next);
+  const spec = readColumnsSpec(next);
+  const host = columnScroller(root);
+  // ⚠ 採寸できないなら**数だけ言う**(嘘の「いま N 段」を出さない)
+  const width = host?.getBoundingClientRect().width ?? 0;
+  const fontPx = host === null ? 0 : Number.parseFloat(getComputedStyle(host).fontSize);
+  if (spec.count <= 1) {
+    notify('本文の段組み: 1 段');
+    return;
+  }
+  if (width <= 0 || !Number.isFinite(fontPx) || fontPx <= 0) {
+    notify(`本文の段組み: ${spec.count} 段`);
+    return;
+  }
+  const eff = effectiveColumns(width, spec.count, fontPx);
+  if (eff === spec.count) {
+    notify(`本文の段組み: ${spec.count} 段`);
+    return;
+  }
+  const need = Math.ceil(minWidthForColumns(eff <= 1 ? 2 : spec.count, fontPx));
+  notify(
+    eff <= 1
+      ? `本文の段組み: ${spec.count} 段 ── いまの画面は幅が足りないので 1 段で出ています(${need}px 以上が要ります)`
+      : `本文の段組み: ${spec.count} 段 ── いまの画面では ${eff} 段で出ています(${spec.count} 段には ${need}px 以上が要ります)`,
+  );
 }
 
 /**
