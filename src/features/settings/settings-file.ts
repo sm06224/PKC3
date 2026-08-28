@@ -51,6 +51,9 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
   // ⚠ 別の端末でも**同じ意味**になる(見づらいと感じる大きさは人に付く)── 移す
   { key: 'pkc3.text-scale', label: '文字の大きさ' },
   { key: 'pkc3.read-columns', label: '本文の段組み' },
+  // ⚠ 段組みと**対**(#525)── 片方だけ運ぶと「段組みは移ったのに線は既定」になる。
+  //    見分けにくいと感じる濃さは**人に付く**(文字の大きさと同じ考え方)
+  { key: 'pkc3.column-rule', label: '段の境界線' },
   { key: 'pkc3.keymap', label: '鍵の割当' },
   { key: 'pkc3.browse', label: '探し方のタブ' },
   { key: 'pkc3.dual-preview', label: '2 ペインの下見' },

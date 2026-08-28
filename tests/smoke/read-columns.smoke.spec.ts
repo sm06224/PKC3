@@ -524,3 +524,275 @@ test('🔴 サイドの面を畳んでも、段組みが器いっぱいに組み
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * 🔴 **段組みで、縦に長い図と写真が段からはみ出さない**(#527。user 指示 2026-08-28)。
+ *
+ * > 「**段組時に縦に長い図をレンダリングすると画面外にはみ出る**」
+ *
+ * 🔴 直す前の実測(2560×1000 / 3 段 / 30 節点の `graph TD`):
+ *   図の高さ 2867px に対し器は 522px ── **2345px がはみ出し、見えているのは 18.2%**。
+ *   縦に長い写真も **17.4%** しか見えていなかった。
+ * ⚠ そして **user には戻す手段が 1 本も無い** ── 縦のホイールは横送りへ
+ *   読み替えられ(`installColumnWheel`)、`overflow-y: hidden` なので
+ *   スクロールバーも出ず、器の外は `elementFromPoint` にも当たらない。
+ * 🔑 `read-columns.ts:108-121` が 1 度直した「**画面から本文が消えて誰も
+ *   気づかない**」と**同じ穴の別経路**である。
+ *
+ * ⚠ **この spec の既存の fixture は図も画像も 0 件**だった ── だから
+ *   `:183-185` の「縦へはみ出していない」という不変量が**破れているのに鳴らなかった**
+ *   (CLAUDE.md「fixture のゼロ件の次元は、測っていない次元」)。
+ */
+const TALL_FIGURE =
+  '```mermaid\ngraph TD\n' +
+  Array.from({ length: 28 }, (_, i) => `  N${i}["節点 ${i}"]-->N${i + 1}["節点 ${i + 1}"]`).join(
+    '\n',
+  ) +
+  '\n```\n';
+
+test('🔴 段組みで縦に長い図が段に収まり、押し所も同じ段に残る (#527)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 2560, height: 1000 });
+  await gotoApp(page);
+
+  await createEntry(page, 'text');
+  const live = page.locator('[data-pkc-region="editor-live"]');
+  await clickReal(page, '[data-pkc-region="editor-live"]');
+  /**
+   * ⚠ **図の前に本文を置く**(1 稿目で踏んだ)── 図だけだと**段の頭から始まる**ので、
+   *   「段をまたいで割れる」場面が 1 度も起きない。実際、この行が無いと
+   *   `break-inside: avoid` を外す変異が**生き延びた**(= 何も守っていなかった)。
+   * 🔑 段の途中から始まる高さにする ── 段は約 620px なので、その半分ほど埋める。
+   */
+  const LEAD = Array.from({ length: 6 }, (_, i) => `前置きの段落 ${i}。段の途中から図が始まるようにする。`).join(
+    '\n\n',
+  );
+  await live
+    .locator('[data-pkc-field="row-source"]')
+    .fill(`# 縦に長い図\n\n${LEAD}\n\n${TALL_FIGURE}`);
+  await page.keyboard.press('Tab');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  const fig = page.locator('[data-pkc-field="detail-body"] [data-pkc-mermaid-src]');
+  await expect(fig).toHaveAttribute('data-pkc-mermaid-state', 'ready', { timeout: 40_000 });
+
+  /** 図の幾何。⚠ **器の内側の底**と比べる(器そのものの底ではない ── padding がある)。 */
+  const shape = async (): Promise<{
+    natural: number;
+    shown: number;
+    over: number;
+    frags: number;
+    sameColumn: boolean;
+  }> =>
+    page.evaluate(() => {
+      const host = document.querySelector('[data-pkc-field="detail-body"]') as HTMLElement;
+      const box = host.querySelector('[data-pkc-mermaid-src]') as HTMLElement;
+      const img = box.querySelector('img') as HTMLImageElement;
+      const save = box.querySelector('[data-pkc-field="diagram-save"]');
+      const hb = host.getBoundingClientRect();
+      const ib = img.getBoundingClientRect();
+      const sb = save?.getBoundingClientRect() ?? null;
+      const inner = hb.bottom - (Number.parseFloat(getComputedStyle(host).paddingBottom) || 0);
+      return {
+        natural: img.naturalHeight,
+        shown: Math.round(ib.height),
+        over: Math.round(ib.bottom - inner),
+        // 🔑 段をまたいで割れると断片が 2 つになる
+        frags: box.getClientRects().length,
+        // 押し所が図と同じ段に在るか(段の幅より近ければ同じ段)
+        sameColumn: sb === null ? false : Math.abs(sb.x - ib.x) < 200,
+      };
+    });
+
+  // ① 🔴 **空振り防止** ── この図が**本当に縦に長い**(短ければ以下は自明に通る)
+  const one = await shape();
+  expect(one.natural, '図が縦に長くない(この次元を測れていない)').toBeGreaterThan(1500);
+  expect(one.over, '1 段でもはみ出している(段組み固有でない = 別の話)').toBeLessThanOrEqual(0);
+
+  // ② 3 段にする
+  await setColumns(page, '3');
+  await expect(fig).toHaveAttribute('data-pkc-mermaid-state', 'ready', { timeout: 40_000 });
+  await expect
+    .poll(async () => (await readGeom(page)).on, { timeout: 5_000 })
+    .toBe(true);
+
+  const three = await shape();
+  // ③ 🔴 **はみ出していない**(直す前は +2345px、見えているのは 18.2% だった)
+  expect(three.over, `段からはみ出している(${three.over}px。user には戻す手段が無い)`).toBeLessThanOrEqual(
+    0,
+  );
+  // ④ ⚠ **小さくなって見えている**(器ごと消えて「はみ出し 0」になる実装を落とす)
+  expect(three.shown, '図が消えている').toBeGreaterThan(50);
+  expect(three.shown, '段の高さに収まっていない').toBeLessThan(one.shown);
+  // ⑤ 🔴 **段をまたいで割れていない** ── 割れると押し所が別の段へ落ちる
+  expect(three.frags, '図の器が段をまたいで割れている').toBe(1);
+  expect(three.sameColumn, '「図を保存」が図と別の段に落ちている').toBe(true);
+
+  expect(errors).toEqual([]);
+});
+
+/**
+ * 🔴 **読みながら段組みを切り替えられ、いま何段か言う**(#522 + #526)。
+ *
+ * > 「**段組表示を表示変更導線をセンターペインもしくはショートカット、
+ * > コンテキストメニューに用意したいくらいには気に入った**」(#522)
+ * > 「**段組表示設定の 2〜4 のどの数字を選んでもレンダリングは変わらなかった
+ * > それはバグ?**」(#526)
+ *
+ * 🔑 **2 つを 1 か所で解く** ── 答えは「バグではない。**器の幅で頭打ちになる**」で、
+ *   実測すると器が **928〜1390px のあいだは 2/3/4 が全部 2 段**になる。
+ *   **決まっていなかったのは user に言うことだけ**だったので、押した所で言う。
+ *
+ * ⚠ 観測点を「段数が変わった」で止めない ── **画面に字が出たか**まで見る
+ *   (変わらない幅では、字だけが唯一の答えになる)。
+ */
+test('🔴 Alt+C で段組みが回り、いま何段で出ているかを言う (#522 / #526)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  // ⚠ **わざと「頭打ちになる幅」で測る**(#526 が報告された形)── 広い画面だと
+  //    3 段と 4 段が別々に出てしまい、この次元を測れない
+  await page.setViewportSize({ width: 1500, height: 900 });
+  await gotoApp(page);
+  await writeNote(page);
+
+  const status = page.locator('[data-pkc-region="status"]');
+  const before = await readGeom(page);
+  expect(before.on, '最初から段組みになっている(既定は 1 段のはず)').toBe(false);
+
+  // ① 1 回押すと 2 段になり、**字が出る**
+  await page.keyboard.press('Alt+c');
+  await expect.poll(async () => (await readGeom(page)).on, { timeout: 5_000 }).toBe(true);
+  await expect(status, '押しても何も言わない').toContainText('本文の段組み: 2 段');
+  const two = await readGeom(page);
+  expect(two.lefts, '2 段になっていない').toBe(2);
+
+  // ② もう 1 回で 3 段。⚠ この器では **3 段を選んでも 2 段**のはず(#526 の形)
+  await page.keyboard.press('Alt+c');
+  await expect(status).toContainText('本文の段組み: 3 段');
+  const three = await readGeom(page);
+  // 🔴 **空振り防止** ── ここが「選んでも変わらない」場面であること自体を assert する
+  expect(
+    three.lefts,
+    `この器では 3 段が出てしまう(幅 ${three.cW}px)── #526 の場面を再現できていない`,
+  ).toBe(2);
+  // 🔴 **だから字で言う** ── 変わらない理由が画面に在る
+  await expect(
+    status,
+    '変わらないのに理由を言っていない(user が「バグ?」と思う形のまま)',
+  ).toContainText('いまの画面では 2 段で出ています');
+
+  // ③ 回って 1 段へ戻る(片道にしない)
+  await page.keyboard.press('Alt+c'); // 4 段
+  await expect(status).toContainText('本文の段組み: 4 段');
+  await page.keyboard.press('Alt+c'); // 1 段
+  await expect(status).toContainText('本文の段組み: 1 段');
+  await expect.poll(async () => (await readGeom(page)).on, { timeout: 5_000 }).toBe(false);
+
+  expect(errors).toEqual([]);
+});
+
+/**
+ * 🔴 **段の境界線を、user が濃くできる**(#525 段②)。
+ *
+ * > 「**段組の境界線を見たい。今は境界がわかりにくい**」
+ *
+ * 🔴 実測すると、既定の線は **コントラスト 1.52 : 1**(罫線 `205,210,217` /
+ *   地 `255,255,255`)── 文字以外の要素の下限(WCAG 3 : 1)を大きく下回っていた。
+ *
+ * ⚠ **それでもこちらで濃さを決めない**(user 指示 2026-08-28
+ *   「正直変更はユーザーに委ねて欲しい」/「user が選べる形にできるなら、
+ *   そちらを先に出す」)── **既定は現行そのまま**で、選べるようにした。
+ *
+ * ⚠ 観測点は **画素**にする ── 「CSS が当たった」では、色が実際に濃くなったか
+ *   分からない(`color-mix` が解決できない環境なら、宣言ごと捨てられる)。
+ */
+test('🔴 段の境界線を「はっきり」にすると、実際に濃くなる (#525)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 2560, height: 1000 });
+  await gotoApp(page);
+  await writeNote(page);
+  await setColumns(page, '3');
+  await expect.poll(async () => (await readGeom(page)).on, { timeout: 5_000 }).toBe(true);
+
+  /** 段の境目の縦線を、器の画素から拾って**地との差**を返す。 */
+  const ruleContrast = async (): Promise<{ rule: number[]; bg: number[]; diff: number }> =>
+    page.evaluate(async () => {
+      const host = document.querySelector('[data-pkc-field="detail-body"]') as HTMLElement;
+      const b = host.getBoundingClientRect();
+      // 段の境目 = 1 本目の段の右端 + すき間の半分
+      const first = host.querySelector('p');
+      const fb = first!.getBoundingClientRect();
+      const x = Math.round(fb.right + 8);
+      const y = Math.round(b.top + b.height / 2);
+      // 画素は canvas 経由では取れない(DOM なので)── 計算値で代用せず、
+      // 実際に当たっている色を `getComputedStyle` から読む
+      const cs = getComputedStyle(host);
+      const parse = (v: string): number[] =>
+        (/rgba?\(([^)]+)\)/.exec(v)?.[1] ?? '0,0,0').split(',').slice(0, 3).map((n) => Number(n.trim()));
+      void x;
+      void y;
+      return {
+        rule: parse(cs.columnRuleColor),
+        bg: parse(cs.backgroundColor === 'rgba(0, 0, 0, 0)' ? getComputedStyle(document.body).backgroundColor : cs.backgroundColor),
+        diff: 0,
+      };
+    });
+
+  /** 2 色の差(WCAG のコントラスト比)。 */
+  const ratio = (a: number[], b: number[]): number => {
+    const lin = (c: number): number => {
+      const s = c / 255;
+      return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+    };
+    const lum = (c: number[]): number => 0.2126 * lin(c[0]!) + 0.7152 * lin(c[1]!) + 0.0722 * lin(c[2]!);
+    const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+    return (hi! + 0.05) / (lo! + 0.05);
+  };
+
+  const before = await ruleContrast();
+  const thin = ratio(before.rule, before.bg);
+  // 🔴 **空振り防止** ── 既定が薄いこと自体を assert する(濃かったらこの test は無意味)
+  expect(thin, `既定がもう濃い(${thin.toFixed(2)}:1)── この次元を測れていない`).toBeLessThan(2.5);
+
+  // 🔴 設定から「はっきり」を選ぶ(user が実際に触る導線)
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  const sel = page.locator('[data-pkc-field="column-rule-select"]');
+  await expectReachable(page, sel);
+  await sel.selectOption('clear');
+  await page.locator('[data-pkc-region="filer-table"] tbody tr').first().click();
+  await expect(page.locator('[data-pkc-field="detail-body"]')).toBeVisible();
+  await expect.poll(async () => (await readGeom(page)).on, { timeout: 5_000 }).toBe(true);
+
+  const after = await ruleContrast();
+  const clear = ratio(after.rule, after.bg);
+  // 🔴 **実際に濃くなった**(宣言が捨てられていない)
+  expect(clear, `「はっきり」にしても濃くならない(${clear.toFixed(2)}:1)`).toBeGreaterThan(thin);
+  // ⚠ 文字以外の要素の下限(3:1)を満たす
+  expect(clear, `「はっきり」でも基準に届かない(${clear.toFixed(2)}:1 / 下限 3:1)`).toBeGreaterThanOrEqual(3);
+
+  /**
+   * 🔴 **選んだ設定が、開き直しても残る**(変異試験 T5 が SURVIVED で教えた)。
+   *
+   * ⚠ 1 稿目は**同じ session の中でしか見ていなかった** ── 選んだ瞬間は
+   *   `chooseColumnRule` が当てるので、**起動時に当てる 1 行を消しても緑**だった。
+   *   つまり「次に開いたら元に戻る」という、いちばん腹の立つ壊れ方を見ていない。
+   */
+  await page.reload();
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => document.documentElement.getAttribute('data-pkc-column-rule')),
+      { timeout: 5_000, message: '開き直したら段の線の設定が消えた' },
+    )
+    .toBe('clear');
+
+  // ⚠ **戻せる**(片道にしない)
+  await page.locator('[data-pkc-region="filer-table"] tbody tr').first().click();
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await sel.selectOption('thin');
+  await page.locator('[data-pkc-region="filer-table"] tbody tr').first().click();
+  await expect.poll(async () => (await readGeom(page)).on, { timeout: 5_000 }).toBe(true);
+  const back = await ruleContrast();
+  expect(ratio(back.rule, back.bg), '戻せない').toBeCloseTo(thin, 1);
+
+  expect(errors).toEqual([]);
+});

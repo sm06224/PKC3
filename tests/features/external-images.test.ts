@@ -16,6 +16,9 @@ import {
   imgSrcDirective,
   isExternalImageMode,
   isExternalImageSrc,
+  SANDBOX_BLOCKED_LABELS,
+  sandboxBlockedKind,
+  sandboxBlockedNote,
 } from '../../src/features/markdown/external-images';
 import {
   buildHtmlSandboxIframe,
@@ -202,6 +205,87 @@ describe('申告の受け口(installHtmlSandboxBlockedReporter)', () => {
     document.body.textContent = '';
   });
 
+  /**
+   * 🔴 **画像 0 件の申告を捨てない**(#528 段③、2026-08-28 に踏んだ)。
+   *
+   * ⚠ 外部の script だけ止まった箱は `blocked: 0` で来る ── 直す前の受け口は
+   *   `blocked > 0` を要求していたので、**その申告を丸ごと捨てて**いた。
+   *   帯を組む側も、種別を畳む側も正しかったのに、**入口で消えていた**。
+   * 🔑 対照群を同じ it に置く(「種別も画像も無ければ捨てる」)── 置かないと、
+   *   「受けるようになった」のか「何でも受けるようになった」のか見分けられない。
+   */
+  it('画像 0 件でも、種別が在れば届く(無ければ捨てる)', () => {
+    const seen: Array<[number, readonly string[]]> = [];
+    const off = installHtmlSandboxBlockedReporter((_el, n, kinds) => seen.push([n, kinds]));
+    const a = box('pkc-html-render-aaa');
+    post(
+      {
+        type: HTML_SANDBOX_BLOCKED_MSG_TYPE,
+        id: 'pkc-html-render-aaa',
+        blocked: 0,
+        kinds: ['script-src-elem'],
+      },
+      a.win,
+    );
+    // 対照群: 画像も種別も無い申告は、これまでどおり捨てる
+    post(
+      { type: HTML_SANDBOX_BLOCKED_MSG_TYPE, id: 'pkc-html-render-aaa', blocked: 0, kinds: [] },
+      a.win,
+    );
+    expect(seen).toEqual([[0, ['script-src-elem']]]);
+    off();
+    document.body.textContent = '';
+  });
+
+  /**
+   * ⚠ 箱の中は **user が書いた HTML** なので、申告の形は信用しない
+   * (`postMessage` は箱の script からいくらでも撃てる)。
+   */
+  it('種別が文字列でなければ落とす', () => {
+    const seen: Array<readonly string[]> = [];
+    const off = installHtmlSandboxBlockedReporter((_el, _n, kinds) => seen.push(kinds));
+    const a = box('pkc-html-render-aaa');
+    post(
+      {
+        type: HTML_SANDBOX_BLOCKED_MSG_TYPE,
+        id: 'pkc-html-render-aaa',
+        blocked: 1,
+        kinds: ['script-src', 42, null, { toString: () => 'style-src' }],
+      },
+      a.win,
+    );
+    post(
+      {
+        type: HTML_SANDBOX_BLOCKED_MSG_TYPE,
+        id: 'pkc-html-render-aaa',
+        blocked: 1,
+        kinds: 'script-src',
+      },
+      a.win,
+    );
+    expect(seen).toEqual([['script-src'], []]);
+    off();
+    document.body.textContent = '';
+  });
+
+  /**
+   * 🔴 **箱の中の見張りが、画像以外も拾っていること**(#528 段③)。
+   * ⚠ 受け口だけ直しても、**送り手が数えていなければ 1 件も来ない** ──
+   *   両端のどちらかしか見ない test は、この食い違いを原理的に見られない
+   *   (CLAUDE.md §7「両端が相手を模した stub と話していると、綴りの食い違いが
+   *   両方緑のまま通る」)。ここでは**実物の srcdoc の字**を読む。
+   */
+  it('箱の中の見張りは、画像とそれ以外を別々に数えて送る', () => {
+    // ⚠ 戻り値は `<iframe …>` の**文字列**である(srcdoc は entity 化されて
+    //   埋まっている)── 引用符だけが `&quot;` になり、script の中の `'` は素のまま
+    const doc = buildHtmlSandboxIframe('<b>x</b>');
+    // 画像は件数、それ以外は種別の集合(URL は運ばない)
+    expect(doc).toContain("if(d.indexOf('img-src')===0)blocked++;else kinds[d]=1;");
+    expect(doc).toContain('kinds:Object.keys(kinds)');
+    // ⚠ 空振り防止 ── 見張りそのものが在ること
+    expect(doc).toContain("document.addEventListener('securitypolicyviolation'");
+  });
+
   it('teardown で聴かなくなる', () => {
     const seen: number[] = [];
     const off = installHtmlSandboxBlockedReporter((_el, n) => seen.push(n));
@@ -377,5 +461,140 @@ describe('箱の中の違反の見張り', () => {
     expect(doc, 'まとめる早期 return が無い(1 枚ごとに送ってしまう)').toContain(
       'if(timer)return',
     );
+  });
+});
+
+/**
+ * 🔴 **画像以外が止まったことを言う**(#528 段③、2026-08-28)。
+ *
+ * ⚠ 直す前、箱の見張りは **`img-src` の違反だけ**を数えていた ── CDN から
+ *   script / CSS を取る中身は**真っ白になり、理由が画面のどこにも無い**
+ *   (user は「PKC が壊れた」と読む)。
+ * 🔑 ここで作るのは**説明**であって、門ではない ── 種別が増えても
+ *   読み込みは 1 つも通らない。
+ */
+describe('箱が止めた「画像以外」の種別(#528 段③)', () => {
+  it('CSP の項目名を、user に見せる種別へ畳む', () => {
+    // ⚠ 実ブラウザが載せてくるのは `script-src-elem` のような**細かい名前**である
+    //   (`effectiveDirective`)。頭で見分ける ── 完全一致で書くと取りこぼす
+    expect(sandboxBlockedKind('script-src-elem')).toBe('script');
+    expect(sandboxBlockedKind('script-src-attr')).toBe('script');
+    expect(sandboxBlockedKind('style-src-elem')).toBe('style');
+    expect(sandboxBlockedKind('connect-src')).toBe('connect');
+    expect(sandboxBlockedKind('frame-src')).toBe('frame');
+    expect(sandboxBlockedKind('child-src')).toBe('frame');
+    // 知らない項目も捨てない(「そのほか」で言う)── 黙るのがいちばん悪い
+    expect(sandboxBlockedKind('font-src')).toBe('other');
+    expect(sandboxBlockedKind('media-src')).toBe('other');
+  });
+
+  /**
+   * 🔴 **`img-src` だけは別**(帯のほうが受け持つ)。
+   * ⚠ ここが `null` を返さなくなると、**同意で開けられるはずの画像**に
+   *   「開けられません」と書いた行が並ぶ ── user は同意する手を止める。
+   */
+  it('画像は種別に数えない(同意で開けられる別の話だから)', () => {
+    expect(sandboxBlockedKind('img-src')).toBeNull();
+    expect(sandboxBlockedKind('IMG-SRC')).toBeNull();
+  });
+
+  it('種別が 1 つも無ければ、行そのものを出さない', () => {
+    expect(sandboxBlockedNote([])).toBe('');
+  });
+
+  /**
+   * ⚠ **並びを固定する**(集合は順序を持たないので、書かないと出るたびに変わる)。
+   * 🔑 同じ状態が違う字に見えると、user は「また別のことが起きた」と読む。
+   */
+  it('並びは、来た順ではなく決めた順で出る', () => {
+    const a = sandboxBlockedNote(['connect', 'script']);
+    const b = sandboxBlockedNote(['script', 'connect']);
+    expect(a).toBe(b);
+    expect(a.indexOf(SANDBOX_BLOCKED_LABELS.script)).toBeLessThan(
+      a.indexOf(SANDBOX_BLOCKED_LABELS.connect),
+    );
+  });
+
+  it('同じ種別を何度渡しても 1 回しか出ない', () => {
+    const note = sandboxBlockedNote(['script', 'script', 'script']);
+    expect(note.split(SANDBOX_BLOCKED_LABELS.script).length - 1).toBe(1);
+  });
+
+  /**
+   * 🔑 **理由だけでなく、動かしたいときの道も書く**(CLAUDE.md「どこにあるかを書く
+   * ── 探させない」)。⚠ 道が実在することは `tests/features/launcher-tiles.test.ts`
+   * 側が持つ(`isAppMime` が `text/html` を受ける)。
+   */
+  it('止めた理由と、動かしたいときの道を書く', () => {
+    const note = sandboxBlockedNote(['script']);
+    expect(note).toContain(SANDBOX_BLOCKED_LABELS.script);
+    expect(note).toContain('止めました');
+    expect(note).toContain('アプリとして登録');
+  });
+});
+
+/**
+ * 🔴 **`svg` の囲みは、`html` と同じ箱で描く**(#528 段⑥、2026-08-28)。
+ *
+ * ⚠ 直す前の実測 ── SVG は**どう書いても字になった**:
+ *
+ * | 書き方 | iframe | 字として出る |
+ * |---|---|---|
+ * | 本文に生で書く | ✗ | ✅ |
+ * | ` ```svg ` の囲み | ✗ | ✅ |
+ * | ` ```html ` の囲み | ✅ | (原文表示) |
+ *
+ * つまり描けたのは「html に入れる」を**知っている人だけ**だった(UML と同じ落差)。
+ * 🔑 **新しい門は 1 つも開けない** ── 同じ箱・同じ CSP を通す。
+ */
+describe('svg の囲み(#528 段⑥)', () => {
+  const SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"></svg>';
+
+  it('🔴 箱に入る(字のままにならない)', () => {
+    const html = renderMarkdown('```svg\n' + SVG + '\n```\n', {});
+    expect(html, 'svg の囲みが箱にならない').toContain('data-pkc-html-render-id');
+  });
+
+  /**
+   * 🔴 **同じ箱・同じ CSP**(空振り防止も兼ねる)── 別の CSP を持ち始めたら、
+   *   外部取得の同意も、止めた理由の行も**もう 1 組**要ることになる。
+   */
+  it('🔴 CSP は html の囲みと 1 バイトも同じ', () => {
+    const asSvg = renderMarkdown('```svg\n' + SVG + '\n```\n', {});
+    const asHtml = renderMarkdown('```html\n' + SVG + '\n```\n', {});
+    expect(cspOf(asSvg)).toBe(cspOf(asHtml));
+  });
+
+  /**
+   * ⚠ **外部画像の同意は、svg でも同じように効く** ── 効かないと、
+   *   「svg なら外の絵を黙って取ってくる」抜け穴になる。
+   */
+  it('⚠ 外部画像の門は svg でも同じ', () => {
+    const svgClosed = imgSrcOf(renderMarkdown('```svg\n' + SVG + '\n```\n', {}));
+    const svgOpen = imgSrcOf(
+      renderMarkdown('```svg\n' + SVG + '\n```\n', { allowExternalImages: true }),
+    );
+    const htmlClosed = imgSrcOf(renderMarkdown('```html\n' + SVG + '\n```\n', {}));
+    const htmlOpen = imgSrcOf(
+      renderMarkdown('```html\n' + SVG + '\n```\n', { allowExternalImages: true }),
+    );
+    // 🔑 主張は**同じ門を通ること** ── 値そのものを打ち直すと、門が動いたとき
+    //    片方だけ直して両方が食い違う(CLAUDE.md §7)
+    expect(svgClosed).toBe(htmlClosed);
+    expect(svgOpen).toBe(htmlOpen);
+    // ⚠ 空振り防止 ── 同意の有無で**実際に値が動く**こと(2 つとも同じなら
+    //    「門が死んでいて、どちらも同じ」でも上は通る)
+    expect(svgClosed, '同意しても値が動かない(門が死んでいる)').not.toBe(svgOpen);
+  });
+
+  /**
+   * ⚠ **本文に生で書いた SVG は、今までどおり字のまま** ── 生 HTML を通すかは
+   *   別の判断であり、ここでは変えていない。⚠ この行が無いと、
+   *   「囲みを直したついでに生 HTML も通した」を誰も見ていないことになる。
+   */
+  it('⚠ 本文に生で書いた svg は、これまでどおり字のまま', () => {
+    const html = renderMarkdown(SVG + '\n', {});
+    expect(html).not.toContain('data-pkc-html-render-id');
+    expect(html, '生 HTML が通っている').toContain('&lt;svg');
   });
 });

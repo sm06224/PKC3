@@ -139,15 +139,28 @@ export function buildHtmlSandboxIframe(
    *   その箱の画像は**二度と同意できない**。
    * ⚠ CSP の `<meta>` より**後**に置く(前に置くと方針が効く前に script が走る)。
    */
+  /**
+   * 🔴 **画像以外も数える**(#528 段③。2026-08-28)。
+   *
+   * ⚠ 直す前、この見張りは **`img-src` の違反だけを数えて残りを捨てて**いた ──
+   *   外部の JavaScript / CSS / `fetch` が止まっても**どこにも 1 行も出ない**。
+   *   CDN を前提にした中身は**真っ白になって、理由が画面のどこにも無い**。
+   * 🔑 直すのは「動くようにする」ことではない ── **止めたことを言う**だけである
+   *   (門は 1 つも開けない)。
+   * ⚠ **URL は運ばない**(本文の秘密を含む)── 運ぶのは**種別と件数**だけ。
+   * ⚠ 種別の綴りは箱の中で畳まない ── 親側の `sandboxBlockedKind` が
+   *   1 か所で決める(§7)。ここは**生の項目名**をそのまま渡す。
+   */
   const violationScript =
     '<script>(function(){' +
     'var id=' + JSON.stringify(iframeId) + ';' +
-    'var blocked=0,timer=0;' +
+    'var blocked=0,timer=0,kinds={};' +
     "document.addEventListener('securitypolicyviolation',function(ev){" +
-    "if(ev.effectiveDirective!=='img-src'&&ev.violatedDirective!=='img-src')return;" +
-    'blocked++;if(timer)return;timer=setTimeout(function(){timer=0;' +
+    "var d=String(ev.effectiveDirective||ev.violatedDirective||'');" +
+    "if(d.indexOf('img-src')===0)blocked++;else kinds[d]=1;" +
+    'if(timer)return;timer=setTimeout(function(){timer=0;' +
     "try{window.parent.postMessage({type:'" + HTML_SANDBOX_BLOCKED_MSG_TYPE +
-    "',id:id,blocked:blocked},'*');}catch(e){}},50);});" +
+    "',id:id,blocked:blocked,kinds:Object.keys(kinds)},'*');}catch(e){}},50);});" +
     '})();</script>';
 
   // 完全 HTML doc(content を body に入れる)。`<!DOCTYPE>` は付けず simple HTML
@@ -238,11 +251,12 @@ export function installHtmlSandboxResizer(targetWindow: Window = window): () => 
  * 「B で画像が止まった」と言えてしまい、user は**在りもしない画像**の同意を
  * 求められる(そして同意すると A の画像が読める)。
  *
- * @param onBlocked 止まった箱と件数。⚠ 同じ箱から**何度も来る**(件数は累計)
+ * @param onBlocked 止まった箱・**画像の**件数・**画像以外の種別**(CSP の生の項目名)。
+ * ⚠ 同じ箱から**何度も来る**(件数は累計)
  * @returns teardown function
  */
 export function installHtmlSandboxBlockedReporter(
-  onBlocked: (iframe: HTMLIFrameElement, blocked: number) => void,
+  onBlocked: (iframe: HTMLIFrameElement, blocked: number, kinds: readonly string[]) => void,
   targetWindow: Window = window,
 ): () => void {
   const handler = (event: MessageEvent) => {
@@ -250,10 +264,19 @@ export function installHtmlSandboxBlockedReporter(
     if (!data || typeof data !== 'object') return;
     if (data.type !== HTML_SANDBOX_BLOCKED_MSG_TYPE) return;
     if (typeof data.id !== 'string') return;
-    if (typeof data.blocked !== 'number' || !(data.blocked > 0)) return;
+    if (typeof data.blocked !== 'number') return;
+    /**
+     * ⚠ **画像 0 件でも受ける**(#528 段③)── 外部の script だけ止まった箱は
+     *   `blocked === 0` で来る。1 稿目はここで `> 0` を要求していたので、
+     *   **画像が絡まない箱の申告を丸ごと捨てて**いた。
+     */
+    const kinds = Array.isArray(data.kinds)
+      ? data.kinds.filter((k: unknown): k is string => typeof k === 'string')
+      : [];
+    if (data.blocked <= 0 && kinds.length === 0) return;
     const iframe = resolveSandboxSender(targetWindow.document, event.source, data.id);
     if (!iframe) return;
-    onBlocked(iframe, data.blocked);
+    onBlocked(iframe, data.blocked, kinds);
   };
   targetWindow.addEventListener('message', handler);
   return () => {

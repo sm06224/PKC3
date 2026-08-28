@@ -184,6 +184,79 @@ test('箱の中の外部画像は CSP で止まり、帯が出る', async ({ pag
 });
 
 /**
+ * 🔴 **画像以外が止まったら、理由を言う**(#528 段③、2026-08-28)。
+ *
+ * ⚠ 直す前、箱の見張りは **`img-src` の違反だけ**を数えていた ── CDN から
+ *   script や CSS を取る中身は**真っ白になり、理由が画面のどこにも無い**。
+ *   user から見ると「PKC が壊れた」としか読めない。
+ *
+ * 🔑 **これは unit では原理的に見られない** ── happy-dom に CSP は無いので、
+ *   `securitypolicyviolation` は 1 度も発火しない。unit が見ているのは
+ *   「受け口が渡された種別をどう畳むか」までで、
+ *   **実ブラウザが本当にその event を上げるか**は 1 行も見ていない。
+ * 🔑 観測点は**アプリ自身の信号**(理由の行が出たこと)にする ──
+ *   `requestfailed` はブラウザのビルドで届く時期が違う(上の注記)。
+ * ⚠ 空振り防止に **応答が 1 度も返らない**ことも見る ── 行が出ただけでは
+ *   「止めた」の証拠にならない(門を開けていないことの側)。
+ */
+test('🔴 外部の script が止まったら、理由が本文の面に出る(#528 段③)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+  // ⚠ 箱は opaque origin(srcdoc + sandbox)なので、同じ host でも `'self'` に
+  //    当たらない = **外**である。`script-src 'unsafe-inline'` だけなので止まる
+  const url = new URL('/sw.js', page.url()).href;
+
+  const responses: number[] = [];
+  page.on('response', (r) => {
+    if (r.url() === url) responses.push(r.status());
+  });
+
+  await writeNote(page, '```html\n<script src=' + JSON.stringify(url) + '></script>\n```');
+
+  const iframe = page.locator('iframe[data-pkc-html-render-id]');
+  await expect(iframe).toBeAttached();
+
+  const note = page.locator('[data-pkc-field="sandbox-blocked-note"]');
+  await expect(note).toBeVisible({ timeout: 10_000 });
+  await expect(note).toContainText('外部のプログラム');
+  // 🔑 動かしたいときの道まで書いてある(理由だけ出して放り出さない)
+  await expect(note).toContainText('アプリとして登録');
+  // ⚠ 門は 1 つも開けていない ── 応答は 1 度も返らない
+  expect(responses, `止めたはずの script に応答が返っている: ${responses.join(', ')}`).toEqual([]);
+
+  /**
+   * 🔴 **「読み込まない」を押した後でも、理由は残る**(1 稿目はここで消えた)。
+   * ⚠ 外部の script は**同意で開けられない**ので、同意の帯と同じ出し分けに
+   *   してはいけない ── 一度断った user には二度と理由が出なくなる。
+   */
+  const deny = page.locator('[data-pkc-action="deny-external-images"]');
+  if (await deny.count()) await clickReal(page, '[data-pkc-action="deny-external-images"]');
+  await expect(note).toBeVisible();
+  await expect(note).toContainText('外部のプログラム');
+
+  /**
+   * 🔴 **ブラウザ側の証拠を、2 つ目の観測点として使う**。
+   *
+   * ⚠ CSP が止めると Chromium は `console.error` に「Refused to load the script…」を
+   *   出す ── これは**アプリの不具合ではなく、止まった証拠**である。だから
+   *   `collectPageErrors` の 0 件を要求すると、**正しく動いているときに必ず落ちる**
+   *   (実際 1 稿目はそう書いて落ちた)。
+   * 🔑 それでも**素通ししない** ── CSP の拒否**以外**が 0 件であることは見る。
+   *   ⚠ ここを丸ごと外すと、この test は本物の例外を 1 つも見なくなる。
+   * 🔑 そして「1 件以上あること」も見る ── アプリの信号(上の行)と**別の面**から
+   *   採った証拠なので、片方が空振りしてももう片方が残る。
+   *   ⚠ 2 つのブラウザ両方で出ることは実測済み(手元 chromium /
+   *      CI の chromium_headless_shell)。
+   */
+  const csp = errors.filter((e) => e.includes('Content Security Policy'));
+  const others = errors.filter((e) => !e.includes('Content Security Policy'));
+  expect(others, others.join('\n')).toEqual([]);
+  expect(csp.length, 'CSP が止めた記録が 1 件も無い(この検査は何も見ていない)').toBeGreaterThan(
+    0,
+  );
+});
+
+/**
  * 🔴 **押して手元へ取り込む**(#264 段①+②)。
  *
  * 🔑 **unit では届かない 3 つ**を実ブラウザで見る:

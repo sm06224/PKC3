@@ -53,7 +53,12 @@ import {
   buildExternalImageBar,
   ExternalImagePolicy,
 } from './external-images';
-import { EXTERNAL_IMAGE_ATTR } from '@features/markdown/external-images';
+import {
+  EXTERNAL_IMAGE_ATTR,
+  sandboxBlockedKind,
+  sandboxBlockedNote,
+  type SandboxBlockedKind,
+} from '@features/markdown/external-images';
 import { MarkdownClient } from '@adapter/platform/render/markdown-client';
 import {
   extractDocumentGlobals,
@@ -232,6 +237,12 @@ export class DetailRenderer {
   private shownPanel: AppState['revisionPanel'] = null;
   /** 外部画像の確認の帯(2026-08-06)。⚠ 本文の器の**外**。 */
   private noticeSlot: HTMLElement | null = null;
+  /**
+   * 🔴 **箱の中で止まった「画像以外」の種別**(#528 段③)。lid ごとに畳む。
+   * ⚠ **同意とは別物**(あちらは開けられる / こちらは開けられない)なので、
+   *   `externalImages` に混ぜない ── 混ぜると「答えたら消える」形に引き寄せられる。
+   */
+  private readonly blockedKinds = new Map<string, Set<SandboxBlockedKind>>();
   private bodyHost: HTMLElement | null = null;
   /**
    * 本文の出し方(markdown / 添付)。変わったら器ごと作り直す。
@@ -843,6 +854,22 @@ export class DetailRenderer {
     const slot = this.noticeSlot;
     if (!slot) return;
     slot.textContent = '';
+    /**
+     * 🔴 **画像以外が止まったことは、同意と関係なく言う**(#528 段③)。
+     *
+     * ⚠ 外部の JavaScript / CSS / `fetch` は **同意で開けられない** ──
+     *   だから「まだ答えていないか」(`unanswered`)で出し分けてはいけない。
+     *   1 稿目はこの下の早期 return の後ろに置いてしまい、**一度「読み込まない」を
+     *   押した user には二度と出なかった**。
+     * 🔑 出すのは**理由と、動かしたいときの道**だけ ── 門は 1 つも開けない。
+     */
+    const kinds = this.blockedKinds.get(lid);
+    if (kinds && kinds.size > 0) {
+      const note = document.createElement('p');
+      note.setAttribute('data-pkc-field', 'sandbox-blocked-note');
+      note.textContent = sandboxBlockedNote([...kinds]);
+      slot.append(note);
+    }
     if (!this.externalImages.unanswered(lid)) return;
     const images = host.querySelectorAll(`[${EXTERNAL_IMAGE_ATTR}]`).length;
     const boxes = this.externalImages.blockedBoxCount(lid);
@@ -854,8 +881,23 @@ export class DetailRenderer {
    * 箱が「画像を止めた」と申告してきた ── 帯を出し直す。
    * ⚠ **描き直さない**(帯だけ組む)── 箱を作り直すと中身が一度消える。
    */
-  noteBlockedBox(lid: string, blocked: number): void {
-    if (!this.externalImages.noteBlockedBox(lid, blocked)) return;
+  noteBlockedBox(lid: string, blocked: number, kinds: readonly string[]): void {
+    /**
+     * ⚠ **画像 0 件でも来る**(#528 段③)── 外部の script だけ止まった箱は
+     *   画像の申告を持たない。`noteBlockedBox` は「増えたか」で false を返すので、
+     *   **種別のほうを先に畳む**(そこで return すると理由が出ない)。
+     */
+    let grew = false;
+    for (const raw of kinds) {
+      const k = sandboxBlockedKind(raw);
+      if (k === null) continue;
+      const set = this.blockedKinds.get(lid) ?? new Set<SandboxBlockedKind>();
+      if (!set.has(k)) grew = true;
+      set.add(k);
+      this.blockedKinds.set(lid, set);
+    }
+    const imagesGrew = blocked > 0 && this.externalImages.noteBlockedBox(lid, blocked);
+    if (!grew && !imagesGrew) return;
     if (this.mode !== 'view' || this.skeletonLid !== lid || !this.bodyHost) return;
     this.renderExternalImageBar(lid, this.bodyHost);
   }

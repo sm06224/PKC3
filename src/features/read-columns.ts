@@ -141,6 +141,80 @@ export function columnsFit(paneWidth: number, count: number, fontPx: number): bo
   return paneWidth >= readColumnMinPx(fontPx) * 2 + READ_COLUMN_GAP_PX;
 }
 
+/**
+ * 🔴 **その器で、実際に何段になるか**(#526。user 報告 2026-08-28
+ * 「**段組表示設定の 2〜4 のどの数字を選んでもレンダリングは変わらなかった
+ * それはバグ?**」)。
+ *
+ * ## 答え ── バグではない。**器の幅で頭打ちになる**
+ *
+ * CSS は `columns: <1 段の下限> <段数>` なので、ブラウザは**入る数だけ**作る。
+ * 実測(標準の文字・すき間 16px):
+ *
+ * ```
+ * 器の幅 |  2 段を選ぶ |  3 段 |  4 段  ← 実際に組まれた段数
+ * -------+-------------+-------+-------
+ *    875 |           1 |     1 |     1
+ *    928 |           2 |     2 |     2   🔴 3 つとも同じ
+ *   1200 |           2 |     2 |     2   🔴 3 つとも同じ
+ *   1391 |           2 |     3 |     3
+ *   1856 |           2 |     3 |     4
+ * ```
+ *
+ * 🔴 **器が 928〜1390px のあいだは 2/3/4 が全部 2 段**になる ── ごく普通の幅である。
+ *
+ * ⚠ **実装はこれを知っていた** ── `columnsFit` の注記が「3 段を選んでいても、
+ *   2 段置けるなら段組みは成り立つ(**CSS が 2 段へ落とす**)」と書いている。
+ *   落ちることは織り込み済みで、**user に言わないことだけが決まっていなかった**。
+ *
+ * ⚠ **pure**。ここは「何段になるか」を答えるだけで、出すかどうかは呼び側が決める。
+ *
+ * @param paneWidth 本文の器の幅(px)
+ * @param count 選ばれている段数
+ * @param fontPx 本文の器の `font-size`(px)
+ * @returns 実際に組まれる段数。**1 なら段組みは掛かっていない**
+ */
+export function effectiveColumns(paneWidth: number, count: number, fontPx: number): number {
+  if (count <= 1) return 1;
+  /**
+   * ⚠ **`columnsFit` を呼んでいた稿があったが、外した**(変異試験 S2 が SURVIVED)。
+   * 🔑 下の式は `2 * 下限 + すき間` を下回ると**自然に 1 を返す** ── つまり
+   *   `columnsFit` と**同じ境目**であり、呼ぶのは no-op だった。
+   * ⚠ 「同じ境目である」ことは test が pin する(片方だけ動いたら落ちる)。
+   */
+  const min = readColumnMinPx(fontPx);
+  const fits = Math.floor((paneWidth + READ_COLUMN_GAP_PX) / (min + READ_COLUMN_GAP_PX));
+  return Math.max(1, Math.min(count, fits));
+}
+
+/**
+ * 🔴 **その段数が出るのに要る器の幅(px)**(#526)。
+ *
+ * 🔑 `effectiveColumns` の**逆**である ── あちらは「幅から段数」、こちらは
+ *   「段数から幅」。⚠ 2 か所に別々の式を書かない(§7)ので、**同じ 2 つの数**
+ *   (1 段の下限・すき間)だけから組む。
+ *
+ * ⚠ user に見せる数字なので**切り上げて渡す**のは呼び側の仕事にする
+ *   (ここは実数を返す ── 丸めを 2 か所でやらない)。
+ */
+export function minWidthForColumns(count: number, fontPx: number): number {
+  const n = Math.max(1, count);
+  return readColumnMinPx(fontPx) * n + READ_COLUMN_GAP_PX * (n - 1);
+}
+
+/**
+ * 🔴 **順ぐりに次の段数へ**(#522。user 指示 2026-08-28
+ * 「**段組表示を表示変更導線をセンターペインもしくはショートカット、
+ * コンテキストメニューに用意したいくらいには気に入った**」)。
+ *
+ * 🔑 表の**並び順**をそのまま使う ── 別の順番を書くと、設定画面の並びと
+ *   近道の順番が食い違う(CLAUDE.md §7)。
+ */
+export function nextReadColumns(current: ReadColumns): ReadColumns {
+  const i = READ_COLUMN_CHOICES.findIndex((c) => c.id === current);
+  return READ_COLUMN_CHOICES[(i + 1) % READ_COLUMN_CHOICES.length]!.id;
+}
+
 export function isReadColumns(v: unknown): v is ReadColumns {
   return typeof v === 'string' && READ_COLUMN_CHOICES.some((c) => c.id === v);
 }

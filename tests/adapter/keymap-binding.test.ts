@@ -777,6 +777,13 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
       'view-dual',
       'toggle-focus-mode',
       'focus-search',
+      /**
+       * ⚠ 2026-08-28 に足した(#522)── 段組みは**押しボタンを持たない**
+       * (常設の物を増やさない、が採った形)ので、特例で `runGlobalCommand` が受ける。
+       * 🔑 だから「押せるか」は常に真である ── 器の幅で効かない段数を選んでも、
+       *   **設定は残って広い画面で効く**ので、押せなくはしない(#526 の裁定と対)。
+       */
+      'cycle-read-columns',
     ];
     for (const id of special) {
       expect(src, `${id} の特例が消えた`).toContain(`cmd === '${id}'`);

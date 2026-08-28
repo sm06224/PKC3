@@ -46,7 +46,9 @@ import { sectionAt } from '@features/markdown/append-target';
 import { isTextScale } from '@features/text-scale';
 import { chooseTextScale } from '@adapter/ui/render/text-scale';
 import { isReadColumns } from '@features/read-columns';
-import { chooseReadColumns } from '@adapter/ui/render/read-columns';
+import { isColumnRule } from '@features/column-rule';
+import { chooseColumnRule } from '@adapter/ui/render/column-rule';
+import { chooseReadColumns, cycleReadColumns } from '@adapter/ui/render/read-columns';
 import { appendModeOf } from '@adapter/ui/render/append-box';
 import { frontmatterLineCount } from '@features/markdown/frontmatter';
 import {
@@ -86,7 +88,12 @@ import {
 } from '@features/markdown/paste-source';
 import { convertPastedPermalink } from '@features/link/permalink';
 import { resolveMime } from './attach';
-import { applyFormat, type FormatOp } from '@features/markdown/text-ops';
+import {
+  applyFormat,
+  DIAGRAM_TEMPLATES,
+  insertBlock,
+  type FormatOp,
+} from '@features/markdown/text-ops';
 import { insertSnippet, nextSnippetSlot } from '@features/snippet/snippet-expand';
 import { abbrBeforeCaret } from '@features/snippet/snippet-table';
 import { snippetMenu, snippetMenuNote } from '@features/snippet/snippet-menu';
@@ -1381,6 +1388,12 @@ export function runGlobalCommand(
   dispatcher: Dispatcher,
   keymap: KeymapStore,
   prevent: () => void,
+  /**
+   * 🔴 **画面へ 1 行出す口**(#522)。⚠ **optional にしない** ── 渡し忘れても
+   * tsc が黙る形にすると、戻ってくる症状は「**押しても何も言わない**」という、
+   * まさにこの変更が直そうとしているもの(CLAUDE.md「待ちの口は optional にしない」)。
+   */
+  notify: (text: string) => void,
   dry = false,
 ): boolean {
   if (cmd === 'view-detail') {
@@ -1389,6 +1402,12 @@ export function runGlobalCommand(
     if (dry) return true;
     prevent();
     dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
+    return true;
+  }
+  if (cmd === 'cycle-read-columns') {
+    if (dry) return true;
+    prevent();
+    cycleReadColumns(root, notify);
     return true;
   }
   if (cmd === 'toggle-focus-mode') {
@@ -1442,7 +1461,7 @@ export function runGlobalCommand(
   if (cmd === 'open-palette') {
     if (dry) return true;
     prevent();
-    openPaletteFor(root, dispatcher, keymap);
+    openPaletteFor(root, dispatcher, keymap, notify);
     return true;
   }
   const sel = SHORTCUT_BUTTON[cmd];
@@ -1475,6 +1494,8 @@ export function openPaletteFor(
   root: HTMLElement,
   dispatcher: Dispatcher,
   keymap: KeymapStore,
+  /** 🔴 画面へ 1 行出す口(#522)。⚠ optional にしない ── 落とすと「押しても何も言わない」に戻る。 */
+  notify: (text: string) => void,
 ): void {
   /**
    * 🔴 **開いた瞬間の欄を控える**(#425 段②-b)。
@@ -1529,7 +1550,7 @@ export function openPaletteFor(
         continue;
       }
       if (!c.contexts.includes('global')) continue;
-      if (runGlobalCommand(c.id, root, dispatcher, keymap, noop, true)) ready.add(c.id);
+      if (runGlobalCommand(c.id, root, dispatcher, keymap, noop, noop, true)) ready.add(c.id);
     }
     /**
      * ⚠ **自分自身は並べない** ── パレットからパレットを開く行に意味は無い。
@@ -1555,7 +1576,7 @@ export function openPaletteFor(
      *   「**全域が先、記法は後**」という順番を字面で見せるためである
      *   (CLAUDE.md「これが無いと壊れる、と書く前に外して壊れるのを見る」)。
      */
-    if (runGlobalCommand(picked, root, dispatcher, keymap, noop)) return;
+    if (runGlobalCommand(picked, root, dispatcher, keymap, noop, notify)) return;
     if (FORMAT_OF[picked] === undefined) return;
     /**
      * 🔴 **記法を、開いたときの欄へ当てる**(#425 段②-b)。
@@ -1883,8 +1904,8 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ ここは**共有の割当**(`appKeymap`)を読む。test が差した割当は鍵の側にだけ
    *   効くが、割当は**鍵の字を出すためだけ**に使うので**動きは変わらない**。
    */
-  'open-palette': (dispatcher, _target, _services, root) =>
-    openPaletteFor(root, dispatcher, appKeymap),
+  'open-palette': (dispatcher, _target, services, root) =>
+    openPaletteFor(root, dispatcher, appKeymap, (t) => services.showStatus?.(t)),
   'nav-back': (dispatcher) => dispatcher.dispatch({ type: 'NAV_HISTORY', dir: 'back' }),
   'nav-forward': (dispatcher) => dispatcher.dispatch({ type: 'NAV_HISTORY', dir: 'forward' }),
   /** 一覧の並び順(#183)。⚠ 妥当性の判定は `isEntrySort` 1 か所。 */
@@ -2759,6 +2780,17 @@ const ACTIONS: Record<string, ActionHandler> = {
       const sel = { text: ta.value, start: ta.selectionStart, end: ta.selectionEnd };
       if (picked.kind === 'format') {
         writeBack(ta, applyFormat(sel, picked.op));
+        return;
+      }
+      /**
+       * 🔴 **UML の雛形**(#528 段①)。⚠ ここでも**組み立てない** ── 表から
+       *   雛形を引いて、挿すのは既にある `insertBlock` に渡す(上の注記と同じ理由)。
+       * ⚠ 表から消えた id は**黙って落とす**(組み込みの `FormatOp` と同じ作法)──
+       *   無い物を挿そうとして欄を空で書き戻すほうが悪い。
+       */
+      if (picked.kind === 'diagram') {
+        const tpl = DIAGRAM_TEMPLATES.find((d) => d.id === picked.id);
+        if (tpl !== undefined) writeBack(ta, insertBlock(sel, tpl.block));
         return;
       }
       const item = items.find((s) => s.lid === picked.lid);
@@ -3951,6 +3983,17 @@ const ACTIONS: Record<string, ActionHandler> = {
         : target.getAttribute('data-pkc-read-columns-value');
     if (v !== null && isReadColumns(v)) chooseReadColumns(document.documentElement, v);
   },
+  /**
+   * 🔴 **段の境界線の濃さ**(#525)。⚠ 既定は現行そのままなので、
+   * 選ばない user の見え方は 1 バイトも変わらない。
+   */
+  'set-column-rule': (_dispatcher, target) => {
+    const v =
+      target instanceof HTMLSelectElement
+        ? target.value
+        : target.getAttribute('data-pkc-column-rule-value');
+    if (v !== null && isColumnRule(v)) chooseColumnRule(document.documentElement, v);
+  },
   'set-flag': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
     const name = target.getAttribute('data-pkc-flag');
@@ -4419,6 +4462,13 @@ export function bindActions(
    */
   openInEdit: OpenInEditStore = appOpenInEdit,
 ): () => void {
+  /**
+   * 🔴 **画面へ 1 行出す口**(#522)。⚠ **エラーの欄ではない** ──
+   * `main.ts` が優先順位(エラー > 一時の知らせ > 常設)を持っているので、
+   * 成功の一報を `OP_FAILED` に載せない(載せると赤い意味の欄に出る)。
+   * ⚠ 配線が無い環境(test)では黙る ── 押しても落ちない。
+   */
+  const tellUser = (text: string): void => services.showStatus?.(text);
   /**
    * action を 1 本の口から回す。⚠ **ここを通さない呼び方をしない** ──
    * 実行中(書出し / 取込)のガードはここに 1 回だけ置く(P8 段㉑)。
@@ -5919,7 +5969,8 @@ export function bindActions(
     const chord = chordOf(ke);
     if (typing && !(findCommand(cmd)?.whileTyping === true && chord !== null && !typesCharacter(chord)))
       return;
-    if (runGlobalCommand(cmd, root, dispatcher, keymap, () => ke.preventDefault())) return;
+    if (runGlobalCommand(cmd, root, dispatcher, keymap, () => ke.preventDefault(), tellUser))
+      return;
   };
   /**
    * 🔴 **整理の面の鍵**(user 裁定 2026-08-18)。⚠ **既にある動線を呼ぶだけ**にする ──

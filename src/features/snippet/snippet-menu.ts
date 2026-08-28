@@ -29,7 +29,7 @@
  *
  * 🔑 **pure module**。DOM も DB も知らない。
  */
-import { FORMAT_OPS, type FormatOp } from '@features/markdown/text-ops';
+import { DIAGRAM_TEMPLATES, FORMAT_OPS, type FormatOp } from '@features/markdown/text-ops';
 import { SNIPPET_LIMITS, type SnippetItem, type SnippetScan } from './snippet-table';
 
 /**
@@ -43,7 +43,13 @@ export const BUILTIN_SNIPPET_OPS: readonly FormatOp[] = ['table', 'mermaid', 'co
 /** 一覧の 1 行。⚠ **押した後に何を呼ぶか**が型で分かれている。 */
 export type SnippetChoice =
   | { readonly kind: 'snippet'; readonly lid: string; readonly title: string; readonly abbr: string }
-  | { readonly kind: 'format'; readonly op: FormatOp; readonly title: string };
+  | { readonly kind: 'format'; readonly op: FormatOp; readonly title: string }
+  /**
+   * 🔴 **UML の雛形**(#528 段①)。⚠ `format` に混ぜない ── あちらは
+   *   `applyFormat(op)` が挿し、こちらは `insertBlock(block)` が挿す。
+   *   1 つの kind にすると、押した側が「どちらを呼ぶか」を自分で当てることになる。
+   */
+  | { readonly kind: 'diagram'; readonly id: string; readonly title: string };
 
 /**
  * 一覧を組む。
@@ -67,7 +73,18 @@ export function snippetMenu(items: readonly SnippetItem[]): readonly SnippetChoi
     //   押しても `applyFormat` が `sel` をそのまま返す = 無言の dead click になる
     if (found !== undefined) builtin.push({ kind: 'format', op, title: found.label });
   }
-  return [...mine, ...builtin];
+  /**
+   * 🔴 **UML は組み込みの後ろ**(#528 段①)。
+   * ⚠ 「図」(フローチャート)のすぐ後に並ぶよう、`mermaid` を含む組み込みの
+   *   **後ろ**へ置く ── 図を探しに来た人が、隣で種類に気づく形にする。
+   * ⚠ 字は `DIAGRAM_TEMPLATES` から引く(**表が正本**)── ここで打ち直さない。
+   */
+  const diagrams: SnippetChoice[] = DIAGRAM_TEMPLATES.map((d) => ({
+    kind: 'diagram',
+    id: d.id,
+    title: d.label,
+  }));
+  return [...mine, ...builtin, ...diagrams];
 }
 
 /**

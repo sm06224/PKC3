@@ -10,6 +10,9 @@
  */
 import {
   columnsFit,
+  effectiveColumns,
+  minWidthForColumns,
+  nextReadColumns,
   READ_COLUMN_BASE_FONT_PX,
   DEFAULT_READ_COLUMNS,
   isReadColumns,
@@ -38,6 +41,14 @@ export const READ_COLUMNS_VAR = '--pkc-read-cols';
  *   選んでいても器が狭ければ効かない。CSS が見るのは**こちら**。
  */
 export const COLUMNS_ON_ATTR = 'data-pkc-columns-on';
+
+/**
+ * 🔴 **段の高さを CSS へ渡す変数**(#527)。⚠ **パーセントでは効かない**ので px で渡す
+ * (多段組の中では高さのパーセントが解決できない ── 実測)。
+ * ⚠ 予備の値を書かない `var()` は**宣言ごと捨てられる**ので、当てる側は必ず既定を書く
+ * (`app.css` の `var(--pkc-col-h, none)`)。
+ */
+export const COLUMN_H_VAR = '--pkc-col-h';
 
 function readStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
   try {
@@ -134,6 +145,9 @@ export function fitColumnHeight(root: ParentNode, doc: Document = document): num
     // ⚠ 読む面が居なくても、印は**居る面から**外す
     (pane ?? anyPane)?.removeAttribute(COLUMNS_ON_ATTR);
     host?.style.removeProperty('height');
+    // ⚠ **高さの変数も外す**(#527)── 残すと、段組みを切った後の縦送りの面でも
+    //    図が段の高さに縮む(印だけ外して変数を残す = DOM が嘘をつく形)
+    host?.style.removeProperty(COLUMN_H_VAR);
     return null;
   };
   // ⚠ 切るときは**印も高さも外す** ── どちらかが残ると、縦送りの面が刈られる
@@ -189,7 +203,75 @@ export function fitColumnHeight(root: ParentNode, doc: Document = document): num
   const next = `${avail}px`;
   // ⚠ 同じ値なら書かない ── 書くと ResizeObserver がまた鳴って回り続ける
   if (host.style.height !== next) host.style.height = next;
+  /**
+   * 🔴 **段の高さを CSS へ下ろす**(#527。2026-08-28)。
+   *
+   * ⚠ これが無いと、**縦に長い図と写真が段からはみ出して消える** ── 実測で
+   *   3 段のとき図の **82%**(2345px)が刈られ、user には**戻す手段が 1 本も無い**
+   *   (縦のホイールは横送りへ読み替えられ、`overflow-y: hidden` なので
+   *   スクロールバーも出ず、器の外は `elementFromPoint` にも当たらない)。
+   * 🔑 これは `:108-121` が 1 度直した「**画面から本文が消えて誰も気づかない**」と
+   *   **同じ穴の別経路**である。
+   *
+   * ⚠ **パーセントでは効かない**(実測)── 多段組の中では高さのパーセントが
+   *   解決できないので、**px で下ろす**必要がある。
+   * 🔑 ついでに「図を保存」が別の段へ落ちる件も直る ── 実測すると、離れ始める
+   *   境目は**ちょうど図が段より高くなったとき**(522px)で、根が同じである。
+   *   ⚠ `break-inside: avoid` は効かない(段より高い箱は指示しても割られる)。
+   */
+  if (host.style.getPropertyValue(COLUMN_H_VAR) !== next)
+    host.style.setProperty(COLUMN_H_VAR, next);
   return avail;
+}
+
+/**
+ * 🔴 **順ぐりに段数を変えて、いま何段になったかを言う**(#522 + #526)。
+ *
+ * 🔑 **2 つの user 報告を 1 か所で解く**:
+ *   - #522「**段組表示の切替導線をショートカットに用意したい**」
+ *   - #526「**2〜4 のどの数字を選んでもレンダリングは変わらなかった それはバグ?**」
+ *
+ * ⚠ 後者は**バグではない** ── CSS は `columns: <1 段の下限> <段数>` なので
+ *   ブラウザは**入る数だけ**作る。実測すると器が **928〜1390px のあいだは
+ *   2/3/4 が全部 2 段**になる。決まっていなかったのは **user に言うこと**だけだった。
+ * 🔑 だから**押した所で言う** ── 読みながら押す動線に、そのまま答えが載る。
+ *
+ * ⚠ **選んだ数は落とさない**(効かない段数へも回す)── いま狭くても、
+ *   広い画面で開けば効く。「効く数だけ回す」形にすると、
+ *   **狭い画面で選んだ設定が広い画面へ持って行けない**。
+ */
+export function cycleReadColumns(
+  root: ParentNode,
+  notify: (text: string) => void,
+  doc: Document = document,
+): void {
+  const cur = currentReadColumns(doc.documentElement);
+  const next = nextReadColumns(cur);
+  chooseReadColumns(doc.documentElement, next);
+  const spec = readColumnsSpec(next);
+  const host = columnScroller(root);
+  // ⚠ 採寸できないなら**数だけ言う**(嘘の「いま N 段」を出さない)
+  const width = host?.getBoundingClientRect().width ?? 0;
+  const fontPx = host === null ? 0 : Number.parseFloat(getComputedStyle(host).fontSize);
+  if (spec.count <= 1) {
+    notify('本文の段組み: 1 段');
+    return;
+  }
+  if (width <= 0 || !Number.isFinite(fontPx) || fontPx <= 0) {
+    notify(`本文の段組み: ${spec.count} 段`);
+    return;
+  }
+  const eff = effectiveColumns(width, spec.count, fontPx);
+  if (eff === spec.count) {
+    notify(`本文の段組み: ${spec.count} 段`);
+    return;
+  }
+  const need = Math.ceil(minWidthForColumns(eff <= 1 ? 2 : spec.count, fontPx));
+  notify(
+    eff <= 1
+      ? `本文の段組み: ${spec.count} 段 ── いまの画面は幅が足りないので 1 段で出ています(${need}px 以上が要ります)`
+      : `本文の段組み: ${spec.count} 段 ── いまの画面では ${eff} 段で出ています(${spec.count} 段には ${need}px 以上が要ります)`,
+  );
 }
 
 /**

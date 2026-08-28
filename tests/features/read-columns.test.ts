@@ -20,6 +20,9 @@ import {
   isReadColumns,
   READ_COLUMN_CHOICES,
   columnsFit,
+  effectiveColumns,
+  minWidthForColumns,
+  nextReadColumns,
   READ_COLUMN_BASE_FONT_PX,
   READ_COLUMN_GAP_PX,
   READ_COLUMN_MIN_PX,
@@ -140,6 +143,163 @@ describe('CSS(2 本で 1 組)', () => {
     expect(css, '横に送れない').toMatch(
       /\[data-pkc-field='detail-body'\]\s*\{[^}]*overflow-x:\s*auto/,
     );
+  });
+
+  /**
+   * 🔴 **実際に何段になるかを、実ブラウザの実測と突き合わせる**(#526)。
+   *
+   * user 報告「**2〜4 のどの数字を選んでもレンダリングは変わらなかった それはバグ?**」
+   * への答えは「**バグではない。器の幅で頭打ちになる**」である。
+   *
+   * ⚠ **この表は実測である** ── `app.css:1011-1013` の規則をそのまま写した器に
+   *   本文を流し、**段の左端が何種類あるか**を数えた(2026-08-28、実 Chromium)。
+   * 🔑 純関数がこの表と 1 行でも食い違ったら、**画面に出す数字が嘘になる**。
+   */
+  describe('実際に組まれる段数(#526)', () => {
+    /** [器の幅, 2 段を選ぶ, 3 段, 4 段] ── 実ブラウザで数えた値。 */
+    const MEASURED: readonly (readonly [number, number, number, number])[] = [
+      [875, 1, 1, 1],
+      [928, 2, 2, 2],
+      [1000, 2, 2, 2],
+      [1200, 2, 2, 2],
+      [1391, 2, 3, 3],
+      [1400, 2, 3, 3],
+      [1500, 2, 3, 3],
+      [1679, 2, 3, 3],
+      [1856, 2, 3, 4],
+      [1900, 2, 3, 4],
+      [2400, 2, 3, 4],
+    ];
+
+    it('🔴 実測の 11 通り × 3 段数と、1 つも食い違わない', () => {
+      const drift: string[] = [];
+      for (const [w, c2, c3, c4] of MEASURED) {
+        for (const [count, want] of [
+          [2, c2],
+          [3, c3],
+          [4, c4],
+        ] as const) {
+          const got = effectiveColumns(w, count, READ_COLUMN_BASE_FONT_PX);
+          if (got !== want) drift.push(`器 ${w}px で ${count} 段を選ぶ → 実測 ${want} / 計算 ${got}`);
+        }
+      }
+      expect(drift).toEqual([]);
+    });
+
+    it('🔴 「どれを選んでも同じ」になる幅が実在する(user が踏んだ形)', () => {
+      const fontPx = READ_COLUMN_BASE_FONT_PX;
+      const same = [2, 3, 4].map((n) => effectiveColumns(1200, n, fontPx));
+      expect(same, '1200px で 2/3/4 が同じにならない(報告の形を再現できていない)').toEqual([
+        2, 2, 2,
+      ]);
+    });
+
+    it('⚠ 1 段を選んだら 1 段(段組みは掛からない)', () => {
+      expect(effectiveColumns(2400, 1, READ_COLUMN_BASE_FONT_PX)).toBe(1);
+    });
+
+    it('🔴 文字を大きくすると、同じ器でも段が減る(#509 と地続き)', () => {
+      const big = READ_COLUMN_BASE_FONT_PX * 1.5;
+      expect(
+        effectiveColumns(1679, 3, big),
+        '文字を大きくしても段数が変わらない(下限に載っていない)',
+      ).toBeLessThan(effectiveColumns(1679, 3, READ_COLUMN_BASE_FONT_PX));
+    });
+
+    /**
+     * 🔴 **`columnsFit` と同じ境目である**(変異試験 S2 が教えた)。
+     *
+     * ⚠ 1 稿目は `effectiveColumns` の中で `columnsFit` を呼んでいたが、
+     *   **式が同じ境目を持っている**ので no-op だった(外した)。
+     * 🔑 だから**同じ答えであること自体**を pin する ── 片方の下限や
+     *   すき間だけを動かすと、ここで落ちる(CLAUDE.md §7)。
+     */
+    it('🔴 「段組みが掛かるか」の答えが、columnsFit と 1 つも食い違わない', () => {
+      const fontPx = READ_COLUMN_BASE_FONT_PX;
+      const drift: string[] = [];
+      for (let w = 300; w <= 3000; w += 1) {
+        for (const n of [2, 3, 4]) {
+          const byFormula = effectiveColumns(w, n, fontPx) >= 2;
+          const byFit = columnsFit(w, n, fontPx);
+          if (byFormula !== byFit) drift.push(`幅 ${w}px / ${n} 段: 式 ${byFormula} / columnsFit ${byFit}`);
+        }
+      }
+      expect(drift.slice(0, 5), '2 つの判定が食い違う幅がある').toEqual([]);
+    });
+
+    /**
+     * 🔴 **「N 段には W px 以上が要る」が本当である**(変異試験 S4 が教えた)。
+     *
+     * ⚠ 1 稿目は `minWidthForColumns` の値を**誰も見ていなかった** ── 画面の字に
+     *   しか出ないので、すき間 1 つぶんずらしても test は全部緑だった。
+     * 🔑 **往復で pin する** ── その幅ちょうどで N 段になり、**1px 足りないと
+     *   N 段にならない**。これなら式を書き換えても必ず落ちる。
+     */
+    it('🔴 「N 段に要る幅」ちょうどで N 段になり、1px 足りないとならない', () => {
+      const fontPx = READ_COLUMN_BASE_FONT_PX;
+      for (const n of [2, 3, 4]) {
+        const need = minWidthForColumns(n, fontPx);
+        expect(
+          effectiveColumns(Math.ceil(need), n, fontPx),
+          `${n} 段に要ると言った幅(${Math.ceil(need)}px)で ${n} 段にならない`,
+        ).toBe(n);
+        expect(
+          effectiveColumns(Math.floor(need) - 1, n, fontPx),
+          `${n} 段に要ると言った幅より狭いのに ${n} 段になる(数字が嘘)`,
+        ).toBeLessThan(n);
+      }
+    });
+
+    it('🔴 順ぐりは設定画面の並びと同じで、一周する', () => {
+      const seen = [nextReadColumns('1'), nextReadColumns('2'), nextReadColumns('3'), nextReadColumns('4')];
+      expect(seen, '並びが設定画面と違う / 一周しない').toEqual(['2', '3', '4', '1']);
+    });
+  });
+
+  /**
+   * 🔴 **段組みのときは、図と写真が段の高さに収まる**(#527。2026-08-28)。
+   *
+   * ⚠ 直す前は、縦に長い図が段からはみ出して**消えていた** ── 実測で 3 段のとき
+   *   図の **82%**(2345px)、写真の **83%**(2478px)が刈られ、user には
+   *   **戻す手段が 1 本も無かった**(縦のホイールは横送りへ読み替えられ、
+   *   `overflow-y: hidden` なのでスクロールバーも出ない)。
+   *
+   * ⚠ ここが見るのは **CSS の配線**だけ ── 実際に収まるところは
+   *   `tests/smoke/read-columns.smoke.spec.ts` が幾何で見る。
+   * 🔑 **`.pkc-md-rendered` を子孫に書かない**(1 稿目で踏んだ)── あれは
+   *   `detail-body` **自身**の class(`detail.ts:562`)なので、子孫として書くと
+   *   **1 つも当たらず、本文に貼った写真だけが素通り**する。
+   */
+  it('🔴 段組みのとき、図と本文の画像に段の高さの上限が当たる (#527)', () => {
+    const css = codeOnly();
+    // ⚠ 器そのものには何も書かない ── `display: table` は中身に合わせて縮むので
+    //    `max-height` も `break-inside: avoid` も **no-op** だった
+    //    (変異試験 R1 / R4 が 2 度とも SURVIVED で教えた)。
+    //    割れないことは smoke の `frags === 1` が見張る。
+    // ① 本文の画像と図。⚠ **器そのものを起点にする**(`.pkc-md-rendered` を子孫に書かない)
+    expect(css, '本文の画像に高さの上限が届いていない').toMatch(
+      /\[data-pkc-columns-on\]\s*\[data-pkc-field='detail-body'\]\s*img\s*\{[^}]*max-height:\s*[^;]*--pkc-col-h/,
+    );
+    // ② 🔴 **予備の値を必ず書く** ── 定義の無い `var()` は**宣言ごと捨てられる**
+    //    (#465 / #466 で実際に出荷した穴)
+    for (const m of css.matchAll(/var\(--pkc-col-h([^)]*)\)/g))
+      expect(m[1], `予備の値の無い var(--pkc-col-h) が在る: ${m[0]}`).toMatch(/^\s*,/);
+  });
+
+  /**
+   * 🔴 **段の高さを CSS へ下ろす配線が在る**(#527)。
+   *
+   * ⚠ **パーセントでは効かない**(実測)── 多段組の中では高さのパーセントが
+   *   解決できないので、px で渡す必要がある。だから「JS が書く」ことが要る。
+   * ⚠ **切るときは外す**ことまで見る ── 印だけ外して変数が残ると、
+   *   段組みを切った後の縦送りの面でも図が縮む(DOM が嘘をつく形)。
+   */
+  it('🔴 段の高さを CSS 変数で下ろし、切るときは外す (#527)', () => {
+    const rc = readFileSync('src/adapter/ui/render/read-columns.ts', 'utf8');
+    expect(rc, '段の高さを CSS へ下ろしていない').toContain('setProperty(COLUMN_H_VAR');
+    expect(rc, '段組みを切るときに変数を外していない').toContain('removeProperty(COLUMN_H_VAR)');
+    // 空振り防止 ── 変数名が CSS と一致している
+    expect(rc, '変数名が CSS と食い違っている').toContain("COLUMN_H_VAR = '--pkc-col-h'");
   });
 
   /**

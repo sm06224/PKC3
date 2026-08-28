@@ -113,6 +113,60 @@ export const EXTERNAL_IMAGE_CLASS = 'pkc-external-img';
  * ⚠ 中身(止められた URL)は運ばない ── 数だけでよく、URL は本文の秘密を含む。
  */
 export const HTML_SANDBOX_BLOCKED_MSG_TYPE = 'pkc-html-blocked-images';
+
+/**
+ * 🔴 **箱の中で止まったもののうち、画像以外の種別**(#528 段③。2026-08-28)。
+ *
+ * ⚠ 直す前、見張っていたのは **`img-src` だけ**だった ── 外部の JavaScript /
+ *   CSS / `fetch` が止まっても、**どこにも 1 行も出なかった**。
+ *   CDN を前提にした中身は**真っ白になって、理由が画面のどこにも無い**。
+ * 🔑 これは「動くようにする」話ではない ── **止めたことを言う**だけである
+ *   (門は 1 つも開けない)。
+ *
+ * ⚠ **URL は運ばない**(本文の秘密を含む)── 運ぶのは**種別と件数**だけ。
+ */
+export type SandboxBlockedKind = 'script' | 'style' | 'connect' | 'frame' | 'other';
+
+/** 種別 → 画面に出す字。⚠ 内部の名前(`script-src-elem`)を user に見せない。 */
+export const SANDBOX_BLOCKED_LABELS: Readonly<Record<SandboxBlockedKind, string>> = {
+  script: '外部のプログラム',
+  style: '外部の見た目(CSS)',
+  connect: '外部との通信',
+  frame: '入れ子の外部ページ',
+  other: 'そのほかの外部の読み込み',
+};
+
+/**
+ * CSP の項目名 → 種別。
+ * 🔑 **判定はここ 1 か所**(箱の中の script と親で同じ規則を使う)。
+ * ⚠ `img-src` はここに入れない ── あちらは**同意で開けられる**別の話である。
+ */
+export function sandboxBlockedKind(directive: string): SandboxBlockedKind | null {
+  const d = directive.toLowerCase();
+  if (d.startsWith('img-src')) return null;
+  if (d.startsWith('script-src')) return 'script';
+  if (d.startsWith('style-src')) return 'style';
+  if (d.startsWith('connect-src')) return 'connect';
+  if (d.startsWith('frame-src') || d.startsWith('child-src')) return 'frame';
+  return 'other';
+}
+
+/**
+ * 止まった種別を、user に読める 1 行にする。
+ * ⚠ **順番を固定する**(出るたびに並びが変わると、同じ状態が違う字に見える)。
+ */
+export function sandboxBlockedNote(kinds: readonly SandboxBlockedKind[]): string {
+  const order: readonly SandboxBlockedKind[] = ['script', 'style', 'connect', 'frame', 'other'];
+  const seen = order.filter((k) => kinds.includes(k));
+  if (seen.length === 0) return '';
+  const what = seen.map((k) => SANDBOX_BLOCKED_LABELS[k]).join('・');
+  return (
+    `この HTML は${what}を読み込もうとしましたが、止めました。` +
+    'この箱の中では外部から取ってこられません。' +
+    'どうしても動かしたいときは、HTML をファイルとして添付し、その画面の' +
+    '「アプリとして登録」を押してください(アプリは別の窓で開くので、外から取ってこられます)。'
+  );
+}
 // ⚠ 名前を `pkc-html-render-…` で始めない(2026-08-06 に踏んだ)── 箱の id が
 //    `pkc-html-render-<hash>` なので、id を拾う正規表現(goldens の正規化など)が
 //    **この語も id として拾う**。実際 golden の normalizer が

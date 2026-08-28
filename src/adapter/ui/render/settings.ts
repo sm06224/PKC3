@@ -19,7 +19,15 @@ import { PAGE_FORMATS } from '@features/page-format';
 import { currentPageFormat } from './page-format';
 import { EDITOR_MODES } from '@features/editor-mode';
 import { TEXT_SCALES } from '@features/text-scale';
-import { READ_COLUMN_CHOICES } from '@features/read-columns';
+import { COLUMN_RULES } from '@features/column-rule';
+import { currentColumnRule } from './column-rule';
+import {
+  effectiveColumns,
+  minWidthForColumns,
+  READ_COLUMN_CHOICES,
+  readColumnsSpec,
+  type ReadColumns,
+} from '@features/read-columns';
 import { currentTextScale } from './text-scale';
 import { currentReadColumns } from './read-columns';
 import { appEditorMode, EditorModeStore } from './editor-mode';
@@ -249,6 +257,21 @@ export class SettingsRenderer {
       cselect.append(opt);
     }
     cd.append(cselect);
+    /**
+     * 🔴 **いま実際に何段になっているかを出す**(#526。user 報告 2026-08-28
+     * 「**2〜4 のどの数字を選んでもレンダリングは変わらなかった それはバグ?**」)。
+     *
+     * ⚠ 答えは「バグではない ── **器の幅で頭打ちになる**」で、**実装はそれを
+     *   知っていた**(`columnsFit` の注記が「CSS が 2 段へ落とす」と書いている)。
+     *   決まっていなかったのは **user に言うこと**だけだった。
+     * 🔑 実測すると、器が **928〜1390px のあいだは 2/3/4 が全部 2 段**になる
+     *   ── ごく普通の幅である。
+     * ⚠ **選択肢は減らさない** ── いま狭くても、広い画面で開けば効く。
+     */
+    const ceff = document.createElement('p');
+    ceff.setAttribute('data-pkc-field', 'read-columns-effective');
+    ceff.setAttribute('data-pkc-note', 'effective');
+    cd.append(ceff);
     const cnote = document.createElement('p');
     cnote.setAttribute('data-pkc-field', 'settings-note');
     // ⚠ **何が変わって、何に気をつけるか**を書く(押した後に探させない)
@@ -258,6 +281,38 @@ export class SettingsRenderer {
       '画面の幅が足りないときは自動で 1 段に戻ります。' +
       '表と図は段の幅まで縮むので、広く見たいときは段を減らしてください。' +
       '編集に入っている間は 1 段に戻ります。';
+
+    /**
+     * 🔴 **段の境界線の濃さ**(#525。user 報告 2026-08-28
+     * 「**段組の境界線を見たい。今は境界がわかりにくい**」)。
+     *
+     * ⚠ 実測すると、明るいテーマで**コントラスト 1.52 : 1** ── 文字以外の要素の
+     *   下限(3 : 1)を大きく下回っていた。
+     * 🔑 それでも**こちらで濃さを決めない** ── user 指示 2026-08-28
+     *   「**user が選べる形にできるなら、そちらを先に出す**」に従い、
+     *   **既定は現行そのまま**にして選べるようにする(#504 と同じ作法)。
+     */
+    const rt = document.createElement('dt');
+    rt.textContent = '段の境界線';
+    const rd = document.createElement('dd');
+    const rselect = document.createElement('select');
+    rselect.setAttribute('data-pkc-action', 'set-column-rule');
+    rselect.setAttribute('data-pkc-field', 'column-rule-select');
+    rselect.setAttribute('aria-label', '段の境界線');
+    for (const c of COLUMN_RULES) {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = c.label;
+      rselect.append(opt);
+    }
+    rd.append(rselect);
+    const rnote = document.createElement('p');
+    rnote.setAttribute('data-pkc-field', 'settings-note');
+    rnote.textContent =
+      '段組みで読んでいるときの、段と段のあいだの線です。' +
+      '既定は細い線で、いまと同じ見え方です。' +
+      '見分けにくいときは「はっきり」にしてください。1 段で読んでいるときは関係ありません。';
+    rd.append(rnote);
 
     const tnote = document.createElement('p');
     tnote.setAttribute('data-pkc-field', 'settings-note');
@@ -270,6 +325,8 @@ export class SettingsRenderer {
     dl.append(tt, td);
     cd.append(cnote);
     dl.append(ct, cd);
+    // ⚠ 段組みの**すぐ下**に置く(効くのは段組みのときだけなので、離すと結び付かない)
+    dl.append(rt, rd);
 
     /**
      * ✏️ **編集の仕方**(#104 第 2 弾。user 裁定 2026-08-08「既定でONかつ
@@ -912,6 +969,52 @@ export class SettingsRenderer {
     );
     const cur = currentReadColumns(document.documentElement);
     if (select && select.value !== cur) select.value = cur;
+    this.syncColumnsEffective(cur);
+    // ⚠ 段の線も**同じ 1 か所**で映す ── 器は 1 度しか組まないので、映さないと
+    //    別の面へ行って戻ったとき古い値が見える(§7)
+    const rule = this.region.querySelector<HTMLSelectElement>(
+      '[data-pkc-field="column-rule-select"]',
+    );
+    const curRule = currentColumnRule(document.documentElement);
+    if (rule && rule.value !== curRule) rule.value = curRule;
+  }
+
+  /**
+   * 🔴 **「いま何段か」を画面の字にする**(#526)。
+   *
+   * ⚠ **器を実測して決める** ── 選んだ数ではなく、**CSS が実際に作る数**である。
+   *   採寸できない環境(happy-dom / 面が畳まれている)では**何も言わない**
+   *   ── 嘘を書くより黙るほうがよい。
+   */
+  private syncColumnsEffective(chosen: ReadColumns): void {
+    const el = this.region.querySelector<HTMLElement>('[data-pkc-field="read-columns-effective"]');
+    if (!el) return;
+    const host = document.querySelector<HTMLElement>('[data-pkc-field="detail-body"]');
+    const width = host?.getBoundingClientRect().width ?? 0;
+    const fontPx = host === null ? 0 : Number.parseFloat(getComputedStyle(host).fontSize);
+    const count = readColumnsSpec(chosen).count;
+    if (width <= 0 || !Number.isFinite(fontPx) || fontPx <= 0) {
+      el.textContent = '';
+      return;
+    }
+    const eff = effectiveColumns(width, count, fontPx);
+    if (count <= 1) {
+      el.textContent = '';
+      return;
+    }
+    if (eff === count) {
+      el.textContent = `いまの画面では ${eff} 段で出ています。`;
+      return;
+    }
+    if (eff <= 1) {
+      el.textContent =
+        `いまの画面は段組みに足りないので、ふつうの縦送りで出ています` +
+        `(${count} 段には ${Math.ceil(minWidthForColumns(2, fontPx))}px 以上の幅が要ります)。`;
+      return;
+    }
+    el.textContent =
+      `いまの画面では ${eff} 段で出ています` +
+      `(${count} 段には ${Math.ceil(minWidthForColumns(count, fontPx))}px 以上の幅が要ります)。`;
   }
 
   /**

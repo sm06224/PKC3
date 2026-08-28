@@ -570,3 +570,67 @@ test('🔴 UML 4 種と journey が、どれも PNG まで焼ける (#528)', asy
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * 🔴 **一覧から選んだ UML の雛形が、そのまま図になる**(#528 段①、2026-08-28)。
+ *
+ * ⚠ **unit では原理的に見られない** ── 雛形が「mermaid の文法として通るか」は
+ *   実際に描かせないと分からない。文字列を pin する test は
+ *   **通らない雛形でも緑**である(それは user が「赤い理由」だけを見る形になる)。
+ * 🔑 だから観測点は**描けたこと**(`data-pkc-mermaid-state="ready"` + PNG の img)。
+ * ⚠ 4 種を**全部**通す ── 1 種だけ通して「UML が描ける」と書くのは、
+ *   数えていない次元を数えたことにする言い方である(CLAUDE.md §2)。
+ */
+test('🔴 一覧から選んだ UML の雛形は、そのまま図になる(#528 段①)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+
+  const body = page.locator('[data-pkc-field="editor-body"]');
+  await body.click();
+
+  // 一覧を開く(帯の「雛形」)。⚠ 押し所は帯 ── 鍵に頼ると割り当て次第で空振りする
+  await clickReal(page, '[data-pkc-action="insert-snippet"]');
+  const rows = page.locator('[data-pkc-field="pick-snippet"]');
+  await expect(rows.first()).toBeVisible();
+
+  /**
+   * ⚠ **空振り防止** ── 4 つの UML が一覧に**実在する**ことを先に見る。
+   *   行が 0 件でも、下の「図になった」は最後の 1 種だけで真になりうる。
+   */
+  const titles = await rows.allTextContents();
+  for (const want of ['クラス図', 'シーケンス図', '状態遷移図', 'ER 図'])
+    expect(titles, `一覧に「${want}」が無い`).toContain(want);
+
+  // 4 種を順に入れる(1 度開いた一覧は 1 つ選ぶと閉じるので、毎回開き直す)
+  // ⚠ **2 度目以降に本文を click し直さない**(1 稿目はそれで落ちた)── click は
+  //    caret を押した所へ動かすので、**前に入れた囲みの途中**に次の囲みが刺さり、
+  //    4 つ入れたのに fence は 3 つになる。雛形の入口は caret を自分で握り直すので、
+  //    帯を押すだけでよい
+  for (const [i, label] of ['クラス図', 'シーケンス図', '状態遷移図', 'ER 図'].entries()) {
+    if (i > 0) {
+      await clickReal(page, '[data-pkc-action="insert-snippet"]');
+      await expect(page.locator('[data-pkc-field="pick-snippet"]').first()).toBeVisible();
+    }
+    await page.locator(`[data-pkc-field="pick-snippet"]`, { hasText: label }).first().click();
+    await expect(page.locator('[data-pkc-field="pick-snippet"]').first()).toBeHidden();
+  }
+
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  const hosts = page.locator('[data-pkc-field="detail-body"] [data-pkc-mermaid-src]');
+  await expect(hosts).toHaveCount(4);
+  for (let i = 0; i < 4; i++)
+    await expect(hosts.nth(i)).toHaveAttribute('data-pkc-mermaid-state', 'ready', {
+      timeout: 30000,
+    });
+
+  // 🔴 4 枚とも **PNG が実際に焼けている**(state だけ ready で中身が空、を落とす)
+  const widths = await hosts.evaluateAll((hs) =>
+    hs.map((h) => h.querySelector('img')?.naturalWidth ?? 0),
+  );
+  expect(widths.filter((w) => w > 0), `焼けていない図がある: ${widths.join(', ')}`).toHaveLength(4);
+
+  expect(errors, errors.join('\n')).toEqual([]);
+});
