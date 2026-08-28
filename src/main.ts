@@ -8,6 +8,7 @@ import { bindEditLockRelease } from '@adapter/state/edit-lock-release';
 import { connectStoreEffects, type StoreEffects } from '@adapter/state/store-effects';
 import { tileSelectsEntry } from '@features/launcher/tiles';
 import { appEditorMode } from '@adapter/ui/render/editor-mode';
+import { applyTextScale, initialTextScale } from '@adapter/ui/render/text-scale';
 import { appOpenInEdit } from '@adapter/ui/render/open-in-edit';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { appKeymap } from '@adapter/ui/render/keymap';
@@ -562,6 +563,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   // ⚠ ここでは**保存しない**(`applyPageFormat` は当てるだけ)── 保存するのは
   //    user が選んだときだけ(`theme.ts` の M-7 と同じ)
   applyPageFormat(document.documentElement, initialPageFormat());
+  /**
+   * 🔤 **文字の大きさも枠より先**(#504。理由は配色・紙面と同じ ── 後だと
+   *   一瞬だけ既定の大きさで組んでから跳ねる)。
+   * ⚠ ここでは**保存しない**(`applyTextScale` は当てるだけ)── 保存するのは
+   *   user が選んだときだけ。
+   */
+  applyTextScale(document.documentElement, initialTextScale());
   const regions = buildShell(root);
   /**
    * 🔴 **畳んだペインを起動時に戻す**(#197)。⚠ これをやらないと「覚える」が

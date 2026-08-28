@@ -18,6 +18,8 @@ import { THEMES } from './theme';
 import { PAGE_FORMATS } from '@features/page-format';
 import { currentPageFormat } from './page-format';
 import { EDITOR_MODES } from '@features/editor-mode';
+import { TEXT_SCALES } from '@features/text-scale';
+import { currentTextScale } from './text-scale';
 import { appEditorMode, EditorModeStore } from './editor-mode';
 import { appOpenInEdit, OpenInEditStore } from './open-in-edit';
 import { appAlarmEnabled, AlarmEnabledStore } from './alarm-enabled';
@@ -99,6 +101,7 @@ export class SettingsRenderer {
       // 配色は user 操作でしか変わらない ── 毎 state で組み直さない
       this.syncTheme();
       this.syncPageFormat();
+      this.syncTextScale();
       this.syncEditorMode();
       this.syncOpenInEdit();
       this.syncAlarmEnabled();
@@ -199,6 +202,38 @@ export class SettingsRenderer {
       '書き出した HTML には、書き出したときの紙面が焼かれます。';
     pd.append(pnote);
     dl.append(pt, pd);
+
+    /**
+     * 🔴 **文字の大きさ**(#504。user 指示 2026-08-28
+     * 「**正直変更はユーザーに委ねて欲しい**」)。
+     *
+     * ⚠ **flag ではない**(正規設定)── 15 枠は 1 つも使わない。
+     * ⚠ ここ「表示」に置く ── 紙面・編集の仕方と同じ「見え方の好み」である。
+     * ⚠ **既定は「標準」= 現行そのまま** ── 選ばなければ見え方は変わらない。
+     */
+    const tt = document.createElement('dt');
+    tt.textContent = '文字の大きさ';
+    const td = document.createElement('dd');
+    const tselect = document.createElement('select');
+    tselect.setAttribute('data-pkc-action', 'set-text-scale');
+    tselect.setAttribute('data-pkc-field', 'text-scale-select');
+    tselect.setAttribute('aria-label', '文字の大きさ');
+    for (const t of TEXT_SCALES) {
+      const opt = document.createElement('option');
+      opt.value = t.id;
+      opt.textContent = t.label;
+      tselect.append(opt);
+    }
+    td.append(tselect);
+    const tnote = document.createElement('p');
+    tnote.setAttribute('data-pkc-field', 'settings-note');
+    // ⚠ **何が動いて、何が動かないか**を書く(押した後に探させない)
+    tnote.textContent =
+      '本文と画面の字の大きさが変わります。押すとその場で効きます。' +
+      '読み幅(1 行の長さ)は動かないので、大きくすると 1 行に入る字が減ります。' +
+      'この端末だけの設定で、ノートの中身には入りません。';
+    td.append(tnote);
+    dl.append(tt, td);
 
     /**
      * ✏️ **編集の仕方**(#104 第 2 弾。user 裁定 2026-08-08「既定でONかつ
@@ -362,6 +397,7 @@ export class SettingsRenderer {
     this.region.append(body);
     this.syncTheme();
     this.syncPageFormat();
+    this.syncTextScale();
     this.syncEditorMode();
     this.syncOpenInEdit();
     this.syncAlarmEnabled();
@@ -812,6 +848,19 @@ export class SettingsRenderer {
     );
     // ⚠ 正本は DOM(`applyPageFormat` が当てた属性)── 保存を読み直さない
     const cur = currentPageFormat(document.documentElement);
+    if (select && select.value !== cur) select.value = cur;
+  }
+
+  /**
+   * ⚠ 画面の値を**いまの大きさに合わせる**(#504)。器は 1 度しか組まないので、
+   *   映さないと**別の面へ行って戻ると古い値が見える**(§7 の「設定画面の値の同期」)。
+   * ⚠ 正本は DOM(`applyTextScale` が当てた属性)── 保存を読み直さない。
+   */
+  private syncTextScale(): void {
+    const select = this.region.querySelector<HTMLSelectElement>(
+      '[data-pkc-field="text-scale-select"]',
+    );
+    const cur = currentTextScale(document.documentElement);
     if (select && select.value !== cur) select.value = cur;
   }
 

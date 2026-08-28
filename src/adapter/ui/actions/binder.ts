@@ -41,6 +41,8 @@ import { downloadBlob } from '@adapter/platform/download';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
 import { insertText, OWN_MEANING } from '@adapter/ui/render/row-swap';
 import { sectionAt } from '@features/markdown/append-target';
+import { isTextScale } from '@features/text-scale';
+import { chooseTextScale } from '@adapter/ui/render/text-scale';
 import { appendModeOf } from '@adapter/ui/render/append-box';
 import { frontmatterLineCount } from '@features/markdown/frontmatter';
 import {
@@ -3658,6 +3660,18 @@ const ACTIONS: Record<string, ActionHandler> = {
         ? target.value
         : target.getAttribute('data-pkc-editor-mode-value');
     if (mode) services.setEditorMode?.(mode);
+  },
+  /**
+   * 🔴 **文字の大きさ**(#504)。⚠ `set-theme` / `set-editor-mode` と**同じ受け方**
+   *   (`<select>` でもボタンでも通す)── 3 本目の作法を作らない。
+   * 🔑 当てるのは `documentElement`(`applyPageFormat` と同じ先)。
+   */
+  'set-text-scale': (_dispatcher, target) => {
+    const v =
+      target instanceof HTMLSelectElement
+        ? target.value
+        : target.getAttribute('data-pkc-text-scale-value');
+    if (v !== null && isTextScale(v)) chooseTextScale(document.documentElement, v);
   },
   'set-flag': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
