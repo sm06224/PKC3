@@ -1628,6 +1628,37 @@ const ACTIONS: Record<string, ActionHandler> = {
    * タグ絞り込み機構を作らない(#181 の全文検索が frontmatter ごと引く)。
    * ⚠ 欄の値も state 経由で同期される(renderer が書き戻す)。
    */
+  /**
+   * 🔴 **目次から本文の見出しへ飛ぶ**(#493)。
+   *
+   * ⚠ **`getElementById` を使わない** ── 同じ id は画面の別の面にも在りうる
+   *   (マニュアルもヘルプも同じ `makeSlugCounter` で id を刻む)。2026-08-08 に
+   *   「id の重複 0 件」という**守れない条件**を書いて踏んだのと同じ場所である。
+   *   🔑 **本文の面(`detail`)の中だけ**を見る。
+   * ⚠ **属性の選択子で探さない** ── 印は日本語なので `#見出し` は CSS の識別子
+   *   として不正になりうる。h1〜h3 を舐めて `id` を等値で比べる(escape が要らない)。
+   * ⚠ **見つからなければ理由を出す** ── 1 面の編集中は本文が描かれていないので
+   *   飛び先が無い。黙ると「押しても何も起きない」になる(#300 の型)。
+   */
+  'toc-jump': (dispatcher, target) => {
+    const slug = target.getAttribute('data-pkc-toc-slug') ?? '';
+    if (slug === '') return;
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const detail = root.querySelector<HTMLElement>('[data-pkc-region="detail"]');
+    const hit = detail
+      ? [...detail.querySelectorAll<HTMLElement>('h1[id], h2[id], h3[id]')].find(
+          (h) => h.id === slug,
+        )
+      : undefined;
+    if (!hit) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '編集中は本文が表示されていないので移動できません(保存するか、2 ペインにしてください)',
+      });
+      return;
+    }
+    hit.scrollIntoView({ block: 'start' });
+  },
   'filter-by-tag': (dispatcher, target) => {
     const tag = target.getAttribute('data-pkc-tag');
     if (tag) dispatcher.dispatch({ type: 'SET_ENTRY_FILTER', query: tag });

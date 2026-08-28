@@ -1462,6 +1462,37 @@ li[data-pkc-row-slot] {
   color: var(--danger);
 }
 /**
+ * 🔴 **目次の行**(#493)。⚠ **字下げは属性から**(字で空白を入れると読み上げが読む)。
+ * ⚠ 右の列は狭いので、長い見出しは**折り返す**(切ると何の見出しか分からない)。
+ */
+[data-pkc-field='inspector-toc-item'] {
+  padding-left: 0;
+}
+[data-pkc-field='inspector-toc-item'][data-pkc-toc-level='2'] {
+  padding-left: var(--s3);
+}
+[data-pkc-field='inspector-toc-item'][data-pkc-toc-level='3'] {
+  padding-left: var(--s5);
+}
+/* ⚠ 札ではなく**行**として読ませる ── 枠を持たせると目次が箱の列に見える */
+[data-pkc-field='inspector-toc-link'] {
+  border: none;
+  border-radius: 0;
+  background: none;
+  padding: 0;
+  height: auto;
+  min-height: 0;
+  text-align: left;
+  white-space: normal;
+  font-size: 12px;
+}
+[data-pkc-field='inspector-toc-link']:hover,
+[data-pkc-field='inspector-toc-link']:focus-visible {
+  background: var(--accent-dim);
+  color: var(--accent-dim-fg);
+}
+
+/**
  * 🔴 **タグの行**(#494。user 指摘「**直感的にここにタグを打つ!って感じの動作**」)。
  *
  * 🔑 **札と打つ欄を同じ行に並べる** ── 「打つ場所」を探させないための配置である。

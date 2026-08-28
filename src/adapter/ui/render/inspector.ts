@@ -48,6 +48,7 @@ import { iconButton } from './icons';
 import { formatStoredDate } from '@features/datetime/stored-date';
 // 居場所の解決は `features/relation/tree` が正本(ファイラの帯・パンくずと共有)
 import { readTags } from '@features/flavor/tags';
+import { extractHeadingsFromMarkdown } from '@features/markdown/markdown-toc';
 import { frontmatterProblem } from '@features/markdown/frontmatter';
 import { externalImageUrls } from '@features/asset/inline-url-adopt';
 import {
@@ -193,6 +194,42 @@ export class InspectorRenderer {
      * ⚠ 本文が読めていないとき(一覧を眺めているだけ)は**行ごと空** ── 嘘の
      *   「タグ無し」を出さない。
      */
+    /**
+     * 🔴 **目次を出す**(#493)。⚠ **本文が読めているときだけ** ── 一覧を眺めて
+     * いるだけの状態で「目次 —」を出しても意味が無い。
+     * ⚠ **見出しが 0 件なら行ごと畳む**(`<dt>` も一緒に)── PKC2 と同じ作法。
+     * 🔑 押すと**本文のその見出しへ飛ぶ**(飛び先の id は `markdown-render` が
+     *   同じ `makeSlugCounter` で刻んでいる ── 綴りを 2 か所で作らない)。
+     */
+    const tocBox = this.rows.get('inspector-toc');
+    if (tocBox) {
+      const body = state.openBody?.lid === meta.lid ? state.openBody.body : null;
+      const headings = body === null ? [] : extractHeadingsFromMarkdown(body);
+      tocBox.textContent = '';
+      // ⚠ `<dt>` は `<dd>` の直前 ── 値だけ畳むと**見出しだけ残る**(関係の図と同じ)
+      const dt = tocBox.previousElementSibling;
+      const empty = headings.length === 0;
+      tocBox.hidden = empty;
+      if (dt instanceof HTMLElement) dt.hidden = empty;
+      if (!empty) {
+        for (const h of headings) {
+          const item = document.createElement('div');
+          item.setAttribute('data-pkc-field', 'inspector-toc-item');
+          // ⚠ 深さは**属性**で出す(CSS が字下げする)── 空白を字で入れると
+          //    読み上げがその空白を読む
+          item.setAttribute('data-pkc-toc-level', String(h.level));
+          const go = document.createElement('button');
+          go.type = 'button';
+          go.setAttribute('data-pkc-action', 'toc-jump');
+          go.setAttribute('data-pkc-toc-slug', h.slug);
+          go.setAttribute('data-pkc-field', 'inspector-toc-link');
+          go.title = `本文の「${h.text}」へ移動します`;
+          go.textContent = h.text;
+          item.append(go);
+          tocBox.append(item);
+        }
+      }
+    }
     const tagBox = this.rows.get('inspector-tag-chips');
     const tagBody = state.openBody?.lid === meta.lid ? state.openBody.body : null;
     /**
@@ -797,6 +834,26 @@ export class InspectorRenderer {
      * ⚠ 値は押せるボタンなので `setRow` ではなく専用の器を持つ。
      */
     row('日付', 'inspector-date');
+    /**
+     * 🔴 **見出しから自動で作る目次**(#493)。
+     *
+     * > user 報告 2026-08-27:「**自動で見出しから生成された TOC が PKC2 にはあるけど、
+     * > PKC3 にはない**」
+     *
+     * ⚠ 「無い」のではなく「**手で `:::toc` と書かないと出ない**」だった ──
+     *   見出しの拾い出し(`extractHeadingsFromMarkdown`)も、h1〜h3 への id 刻みも
+     *   既に在り、**受け手だけが未実装**だった。実際 `markdown-render.ts` の
+     *   id を刻む節には「**right-pane の目次が飛べるように**」と書いてある。
+     *
+     * 🔑 **置き場は PKC2 が答えを持っていた** ── 好みで決めていない。
+     *   PKC2 は `renderer.ts:9056` で **meta ペイン(= 右の列)** に置き、
+     *   **見出しが 0 件なら丸ごと出さない**形だった(`docs/development/
+     *   table-of-contents-right-pane.md`)。user が既に知っている絵に揃える。
+     * ⚠ 右の列は混んでいる(#500)ので、**見出しを持たないノートでは行ごと畳む** ──
+     *   常設すると「押せない物」を毎回読ませることになる(#300 の小さい版)。
+     * ⚠ 値は押せる札なので `setRow` ではなく専用の器を持つ。
+     */
+    row('目次', 'inspector-toc');
     /**
      * 🔴 **タグ**(#182 / 台帳 #180 の A-2)。⚠ 値は文字ではなく**押せる札**なので、
      * `setRow`(textContent 差し替え)ではなく専用の器を持つ。
