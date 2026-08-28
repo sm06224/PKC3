@@ -1715,6 +1715,14 @@ export function connectStoreEffects(
               });
               return;
             }
+            /**
+             * 🔑 **1 byte も変わらないなら、書かず・言わない**(UX レビュー所見 2)。
+             * `place-move` は「値が同じ」を null(= 競合の顔)ではなく同じ body で
+             * 返す ── ここで静かに済ませないと、付箋を元の位置へ戻して離した
+             * 取りやめ操作に「開き直してください」という嘘の赤帯が出る。
+             * ⚠ どの rewrite でも同じ ── 同じ bytes の書き直しは更新日時だけ動かす。
+             */
+            if (newBody === body) return;
             const ext = extractMeta(ev.archetype, newBody);
             /**
              * 🔴 **読んでから書くまでの間に別の窓が書いていたら、1 バイトも書かない**

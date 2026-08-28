@@ -111,6 +111,9 @@ const CORPUS: ReadonlyArray<readonly [string, string]> = [
   ['カード埋め込み', '@[card](entry:abc)\n'],
   ['本文の取り込み', '![別のノート](entry:abc)\n'],
   ['format ブロック', ':::format{class=highlight indent=2 align=center}\n中身\n:::\n'],
+  // 🔴 板の塊(#283 P4)── `.pkc-place` は user が書く class だが、
+  //    位置の CSS(絶対配置)が誰にも当たらないと板ごと壊れるので corpus で数える
+  ['板(自由配置)', ':::format{.pkc-place x=40 y=40 w=320 h=200}\n付箋\n:::\n'],
   ['region ブロック', ':::frontmatter\nメタ\n:::\n\n:::body\n本体\n:::\n'],
   // ⚠ **AI が書きがちな崩れ形**(寛容 parse。PKC2005〜2008)も見た目を持つ ──
   //    崩れて入ってきた文書が素のまま出ると、user は「壊れた」と読む
@@ -196,6 +199,8 @@ const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
    *   `tests/features/pkc3-html.test.ts` が実物で見る(弱いと自覚して使う)。
    */
   'pkc-body-media': 'src/features/asset/asset-preview-kind.ts',
+  // 板の器の印(#283 P4)── 塊が 1 つでも在るとき adapter が host へ付ける
+  'pkc-board-host': 'src/adapter/ui/render/place-board.ts',
 };
 
 const NO_STYLE_NEEDED: Readonly<Record<string, string>> = {

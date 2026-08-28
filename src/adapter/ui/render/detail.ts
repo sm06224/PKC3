@@ -23,6 +23,7 @@ import { hydrateMermaid, type MermaidScope } from './mermaid-hydrate';
 import { hydrateChart } from './chart-raster';
 import { readFenceAssetText } from '@features/asset/fence-asset-read';
 import { applyHeadingFold } from './heading-fold';
+import { applyPlaceLayout } from './place-board';
 
 /**
  * 🔴 **図とグラフは同じ面に出る**(#188)── 器を埋める呼び出しを 1 つに束ねる。
@@ -658,6 +659,12 @@ export class DetailRenderer {
          * ⚠ 節点は 1 つも動かさない(入れ子にするとライブエディタが死ぬ)。
          */
         applyHeadingFold(host);
+        /**
+         * 🔴 **自由配置の板**(#283 P4)── `.pkc-place` の塊を、書いてある位置に置く。
+         * ⚠ 描画のたびに呼ぶ(冪等)── 塊が差し替わると掴む口と題名の札が
+         *   消えるため(見出しの畳みと同じ理由)。
+         */
+        applyPlaceLayout(host, (l) => state.entryMetas.get(l)?.title ?? null, frontmatterLineCount(body));
         // ⚠ 帯は**本文が入ってから**組む(数えるものが DOM に無いと 0 件になる)
         this.renderExternalImageBar(lid, host);
         this.restoreScroll();

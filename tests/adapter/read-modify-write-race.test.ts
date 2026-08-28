@@ -236,3 +236,40 @@ describe('読んで直して書き戻す経路が、別の窓の本文を消さ�
     expect(disk['b'], '断ったあと設定が二度と変えられない').toContain('registered_as_app');
   });
 });
+
+/**
+ * 🔑 **1 byte も変わらない書換は、書きも断りもしない**(UX レビュー所見 2、2026-08-28)。
+ *
+ * ⚠ `place-move` は「値が同じ」を **body そのもの**で返す(null = 競合、と区別)。
+ * 効果層がこれを静かに済ませないと、付箋を**元の位置へ戻して離した**取りやめ操作に
+ * 「本文が変わっているため反映できませんでした(開き直してください)」という
+ * **嘘の赤帯**が出る ── 何も壊していない user に、無関係な直し方を指示することになる。
+ */
+describe('変わらない書換は書かない・言わない(#283 P4)', () => {
+  const PLACE = ':::format{.pkc-place x=120 y=40}\n付箋\n:::';
+
+  it('🔑 同じ座標へ戻した drop ── 書かず、赤帯も出さず、成功とも言わない', async () => {
+    const disk: Record<string, string> = { a: PLACE };
+    boot(disk, [meta('a')]);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: PLACE });
+    d.dispatch({ type: 'MOVE_PLACE', lid: 'a', line: 0, x: 120, y: 40 });
+    await tick();
+    expect(errors, '取りやめに赤帯が出た').toEqual([]);
+    expect(sent, '書いていないのに書いたと言った').not.toContain('BODY_REWRITTEN');
+    expect(disk['a']).toBe(PLACE);
+  });
+
+  /** ⚠ 対照群 ── 座標が変わる drop はふつうに書けて、成功が届く。 */
+  it('⚠ 座標が変わる drop は書ける(門そのものが生きている)', async () => {
+    const disk: Record<string, string> = { a: PLACE };
+    boot(disk, [meta('a')]);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: PLACE });
+    d.dispatch({ type: 'MOVE_PLACE', lid: 'a', line: 0, x: 10, y: 20 });
+    await tick();
+    expect(disk['a']).toContain('x=10 y=20');
+    expect(sent).toContain('BODY_REWRITTEN');
+    expect(errors).toEqual([]);
+  });
+});

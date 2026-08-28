@@ -17,6 +17,7 @@ import { formatLineDate, insertionForLineDate, readLineDate } from '../schedule/
 import { isScheduleDate } from '../schedule/schedule-date';
 import type { RepeatUnit } from '../schedule/repeat';
 import { removeInsertedLines } from './append-target';
+import { movePlace } from './place-notation';
 import { readTags, withTag } from '../flavor/tags';
 import { acceptsExternalImage, rewriteAdopted } from '../asset/inline-url-adopt';
 import { DELIMITER, csvEscapeField, parseCsv, type CsvPositions } from './csv-table';
@@ -63,6 +64,22 @@ export type BodyRewrite =
       /** チェックの印を反転する。`line` は**原文の行番号**(0 始まり)。 */
       kind: 'task';
       line: number;
+    }
+  | {
+      /**
+       * 🔴 **板の塊を動かす**(#283 P4-b)── `.pkc-place` の format 開き行の
+       * x= / y= だけを書き換える。
+       *
+       * ⚠ `line` は**原文の行番号**(0 始まり。描画が焼く `data-pkc-source-line` +
+       *   frontmatter ぶん ── `task` と同じ座標系)。掴んだ時点の**開き行そのもの**を
+       *   添え、disk 側で byte 一致しなければ書かない(`undo-append` の
+       *   「足した行そのものを持つ」と同じ作法)。規則の実体は `place-notation.ts`(pure)。
+       */
+      kind: 'place-move';
+      line: number;
+      openLine: string;
+      x: number;
+      y: number;
     }
   | {
       /**
@@ -211,6 +228,7 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
     return spliceFrontmatterKeys(body, { tags: next.length === 0 ? undefined : next });
   }
   if (rewrite.kind === 'repeat-done') return materializeRepeat(body, rewrite);
+  if (rewrite.kind === 'place-move') return movePlace(body, rewrite);
   if (rewrite.kind === 'csv-cell') return rewriteCsvCell(body, rewrite);
   if (rewrite.kind === 'csv-shape') return rewriteCsvShape(body, rewrite);
   if (rewrite.kind === 'adopt-images') {
