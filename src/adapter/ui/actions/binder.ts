@@ -91,7 +91,7 @@ import { snippetMenu, snippetMenuNote } from '@features/snippet/snippet-menu';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
 import { normalizeTag } from '@features/flavor/tags';
 import { isEntrySort, NATURAL_DESC } from '@features/filter/entry-sort';
-import { isPaneId, PANES } from '@features/pane-visibility';
+import { COLUMN_PANES, isPaneId } from '@features/pane-visibility';
 import { STRUCTURAL, isRelationKind } from '@features/relation/kinds';
 import { canEnterScope, getAncestorFolders } from '@features/relation/tree';
 import { planCopy } from '@features/relation/copy-plan';
@@ -1387,9 +1387,16 @@ export function runGlobalCommand(
      * 🔑 **両側を一度に畳む / 戻す**(PKC2 のフォーカスモード相当)。
      * ⚠ 押しボタン 2 つを続けて押す実装にしない ── 片方だけ畳まれている状態から
      *   押すと**入れ替わる**だけで、user が期待する「集中」にならない。
+     * 🔴 **数えるのは列だけ**(#497 で追記欄も畳めるようになった)── `PANES` で
+     *   数えると、この鍵が**追記欄まで一緒に消す**ようになる(頼まれていない)。
      */
     if (dry) return true;
-    const next = appPanes.getHidden().length === PANES.length ? [] : [...PANES];
+    const hidden = appPanes.getHidden();
+    const columnsHidden = COLUMN_PANES.filter((p) => hidden.includes(p));
+    const next =
+      columnsHidden.length === COLUMN_PANES.length
+        ? hidden.filter((p) => !(COLUMN_PANES as readonly string[]).includes(p))
+        : [...hidden, ...COLUMN_PANES];
     prevent();
     applyPaneVisibility(root, appPanes.setHidden(next));
     return true;

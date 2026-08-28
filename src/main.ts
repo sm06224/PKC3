@@ -17,6 +17,8 @@ import {
 } from '@adapter/ui/render/read-columns';
 import { appOpenInEdit } from '@adapter/ui/render/open-in-edit';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
+import { appPaneSizes, applyPaneSizes } from '@adapter/ui/render/pane-size';
+import { installPaneResize } from '@adapter/ui/render/pane-resize';
 import { appKeymap } from '@adapter/ui/render/keymap';
 import { wireShortcutHints } from '@adapter/ui/render/shortcut-hint';
 import { startEmbedBridge } from '@adapter/transport/embed-bridge';
@@ -600,6 +602,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 開き直すと全部戻っている、という画面になる。
    */
   applyPaneVisibility(root, appPanes.getHidden());
+  /**
+   * 🔴 **決めた大きさも起動時に戻す**(#497)。⚠ 畳んだ状態と**対**である ──
+   * 片方だけ戻すと「畳んだのは覚えているのに幅は既定」という半端な画面になる。
+   */
+  applyPaneSizes(root, appPaneSizes.get());
+  /** 🔴 掴んで大きさを変える配線(#497)。⚠ 外さない(アプリと同寿命)。 */
+  installPaneResize(root);
   /**
    * 🔴 **別のタブで変えたキー割当を、このタブにも効かせる**(#256)。
    * ⚠ これが無いと「2 枚目のタブで割り当て直したのに、1 枚目は再読込まで古いまま」に

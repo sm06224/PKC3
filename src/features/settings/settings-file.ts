@@ -38,6 +38,13 @@ export interface SettingsEntry {
 export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: string }[] = [
   { key: 'pkc3.theme', label: '見た目' },
   { key: 'pkc3.panes', label: '面の畳み方' },
+  /**
+   * ⚠ **畳み方と対**(#497)── 片方だけ運ぶと「畳んだのは移ったのに幅は既定」に
+   * なる。⚠ px なので端末で意味が変わりそうに見えるが、値は
+   * `clamp(0px, Npx, 45vw)` として当たるので**狭い端末では自分で縮む**
+   * (`pkc3.text-scale` と同じ考え方 ── 使い方の好みは人に付く)。
+   */
+  { key: 'pkc3.pane-sizes', label: '面の大きさ' },
   { key: 'pkc3.editor-mode', label: '編集の仕方' },
   { key: 'pkc3.open-in-edit', label: '「開く」で編集に入るか' },
   { key: 'pkc3.page-format', label: '紙面' },

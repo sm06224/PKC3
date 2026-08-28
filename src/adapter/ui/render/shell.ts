@@ -13,7 +13,7 @@ import { SEALED_ARCHETYPES, SEALED_VIEWS } from '@features/sealed';
 import { HINT_BASE, HINT_COMMAND, hintTitle } from './shortcut-hint';
 import { COLLECTION_COMMANDS } from './commands';
 import { BROWSE_ICONS, iconButton, iconSpan } from './icons';
-import { PANES, PANE_LABELS } from '@features/pane-visibility';
+import { COLUMN_PANES, PANE_LABELS } from '@features/pane-visibility';
 import { BROWSE_TABS } from './browse';
 import {
   timerBarLabel,
@@ -564,7 +564,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
    * ⚠ user 指示「同じものが常に同じ場所にある」── 畳んだ状態は保存する。
    */
   const grips: Record<string, HTMLElement> = {};
-  for (const id of PANES) {
+  for (const id of COLUMN_PANES) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.setAttribute('data-pkc-region', 'pane-grip');
@@ -572,7 +572,9 @@ export function buildShell(root: HTMLElement): ShellRegions {
     btn.setAttribute('data-pkc-pane', id);
     btn.setAttribute('aria-pressed', 'true');
     btn.setAttribute('aria-label', `${PANE_LABELS[id]}の列`);
-    btn.title = `${PANE_LABELS[id]}の列を畳む・戻す`;
+    // 🔴 **帯は 2 つの仕事をする**(#497)── 押すと畳み、掴むと幅が変わる。
+    //    ⚠ 掴めることを字にも書く ── `cursor` だけだと、触りの端末には何も出ない。
+    btn.title = `${PANE_LABELS[id]}の列を畳む・戻す(掴むと幅、矢印キーでも動く)`;
     grips[id] = btn;
   }
   /**
@@ -639,7 +641,25 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const append = document.createElement('div');
   append.setAttribute('data-pkc-region', 'append');
   append.hidden = true;
-  center.append(replaceBar, detail, append);
+  /**
+   * 🔴 **追記欄の掴む帯**(#497)。user 指示 2026-08-27:「**追記メインで使う場合は
+   * わくを大きくしたいとか、閲覧メインで使う時は消したい**」。
+   *
+   * ⚠ **本文と追記欄の境目に置く** ── 追記欄の中に置くと、畳んだ瞬間に
+   *   帯ごと消えて**戻す口が無くなる**(2026-08-23「片道の操作を作らない」)。
+   * ⚠ 左右の帯と**同じ部品**(`pane-grip`)にする ── 別々に作ると、掴む所の
+   *   見た目も鍵の効き方も 3 か所でばらける(CLAUDE.md §7)。違うのは向きだけ。
+   */
+  const appendGrip = document.createElement('button');
+  appendGrip.type = 'button';
+  appendGrip.setAttribute('data-pkc-region', 'pane-grip');
+  appendGrip.setAttribute('data-pkc-axis', 'y');
+  appendGrip.setAttribute('data-pkc-action', 'toggle-pane');
+  appendGrip.setAttribute('data-pkc-pane', 'append');
+  appendGrip.setAttribute('aria-pressed', 'true');
+  appendGrip.setAttribute('aria-label', `${PANE_LABELS.append}`);
+  appendGrip.title = `${PANE_LABELS.append}を畳む・戻す(掴むと高さ、矢印キーでも動く)`;
+  center.append(replaceBar, detail, appendGrip, append);
 
   // ── 右(付随情報)────────────────────────────────
   const inspector = document.createElement('aside');

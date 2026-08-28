@@ -68,8 +68,13 @@ body {
    * ⚠ 下限 220px は残す ── 1100px 以下では 2 列に畳むので、そこまでの間の保険 */
   /* ⚠ 12px の列 2 本は**掴む帯**(ペインの開閉)── 中央の上に帯を置くと
    * 本文が毎回 34px 削られるので、縦の隙間へ移した(user 指示 2026-08-15) */
+  /* 🔴 **user が決めた幅を先に読む**(#497)── 触っていない面は第 2 引数(既定)。
+   * ⚠ 変数は `shell` の style 属性に置く(`adapter/ui/render/pane-size.ts`)。
+   * ⚠ 値は `clamp(0px, Npx, 45vw)` の形なので、**画面が狭くなれば自分で縮む**
+   *   ── JS が `resize` を聞き直さなくてよい。 */
   grid-template-columns:
-    minmax(200px, 18vw) 8px minmax(0, 1fr) 8px minmax(220px, 15vw);
+    var(--pkc-pane-sidebar, minmax(200px, 18vw)) 8px minmax(0, 1fr) 8px
+    var(--pkc-pane-inspector, minmax(220px, 15vw));
   /* ⚠ notices と update は**別の行**。同じ area に載せると、両方出たとき重なる */
   /* 🔴 **上の帯を撤去した**(P10、user 指示 2026-08-05)── 載っていたのは
    * 「PKC3」の文字と設定ボタンだけで、現在地を出すはずの区画は書き手が 1 つも
@@ -121,7 +126,7 @@ body {
  *   1px の共有境界だけが残って「畳んだのに線がある」見え方になる。
  * ⚠ 中央は**畳めない**(操作子の置き場であり、1 画面完結の本体である)。 */
 [data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'] {
-  grid-template-columns: 8px minmax(0, 1fr) 8px minmax(220px, 15vw);
+  grid-template-columns: 8px minmax(0, 1fr) 8px var(--pkc-pane-inspector, minmax(220px, 15vw));
   grid-template-areas:
     'gripl detail   gripr inspector'
     'capture capture capture capture'
@@ -133,7 +138,7 @@ body {
     'status   status   status   status';
 }
 [data-pkc-region='shell'][data-pkc-hidden-panes~='inspector'] {
-  grid-template-columns: minmax(200px, 18vw) 8px minmax(0, 1fr) 8px;
+  grid-template-columns: var(--pkc-pane-sidebar, minmax(200px, 18vw)) 8px minmax(0, 1fr) 8px;
   grid-template-areas:
     'sidebar  gripl detail gripr'
     'capture  capture  capture  capture'
@@ -160,6 +165,12 @@ body {
 [data-pkc-region='shell'][data-pkc-hidden-panes~='inspector'] [data-pkc-region='inspector'] {
   display: none;
 }
+/* 🔴 **追記欄を畳む**(#497。user 指示「閲覧メインで使う時は消したい」)。
+ * ⚠ 掴む帯(`[data-pkc-pane='append']`)は**残す** ── ここを一緒に消すと
+ *   戻す口が画面から無くなる(2026-08-23「片道の操作を作らない」)。 */
+[data-pkc-region='shell'][data-pkc-hidden-panes~='append'] [data-pkc-region='append'] {
+  display: none;
+}
 
 /**
  * 🔴 **列の境目の掴む帯**(2026-08-15、user 指示「センターペインの上を潰しすぎ」)。
@@ -178,10 +189,31 @@ body {
   align-self: stretch;
   background: var(--surface-2);
   color: var(--muted);
-  cursor: pointer;
+  /* 🔴 **掴めることを見せる**(#497)── 押すと畳み、掴むと幅が変わる。
+   * ⚠ `pointer` のままだと「掴める」が画面のどこにも出ない = 誰も気づかない。 */
+  cursor: col-resize;
+  /* ⚠ **これが無いと触りでは掴めない**(ブラウザがスクロールへ持っていく)。 */
+  touch-action: none;
   font-size: 10px;
   line-height: 1;
   writing-mode: vertical-rl;
+}
+/* 🔴 **横向きの帯**(追記欄の上、#497)。⚠ 縦帯の 3 つの上書きと**対**である ──
+ * 片方だけ直すと、こちらは 26px の点のままになる(縦帯で実測した罠の裏返し)。 */
+[data-pkc-region='pane-grip'][data-pkc-axis='y'] {
+  align-self: auto;
+  width: auto;
+  min-width: 0;
+  height: 8px;
+  writing-mode: horizontal-tb;
+  cursor: row-resize;
+}
+/* ⚠ **追記欄そのものが出ていない回は、帯も出さない** ── 開いているノートが
+ * 無いときに「畳む・戻す」だけが浮いていると、押しても何も起きない導線になる。
+ * 🔑 畳んだとき(上の `display:none`)は `hidden` が付かないので、帯は**残る**。 */
+[data-pkc-region='center']:has([data-pkc-region='append'][hidden])
+  [data-pkc-region='pane-grip'][data-pkc-axis='y'] {
+  display: none;
 }
 [data-pkc-region='pane-grip'][data-pkc-pane='sidebar'] {
   grid-area: gripl;
@@ -813,6 +845,12 @@ select:focus-visible {
   flex: none;
   background: var(--surface);
   padding: var(--s2) var(--s3);
+}
+/* 🔴 **user が決めた高さ**(#497。「追記メインで使う場合はわくを大きくしたい」)。
+ * ⚠ 高さを持たせるのは**打つ欄そのもの**であって器ではない ── 器に固定の高さを
+ *   与えると、中の行(入り先の選択・押す物)が押し出されて画面から消える。 */
+[data-pkc-field='append-input'] {
+  height: var(--pkc-pane-append, auto);
 }
 /**
  * 🔴 **入り先は上の行、打つ欄と押す物は下の行**(#496)。
@@ -4153,7 +4191,9 @@ li[data-pkc-row-slot] {
  * 幅が足りないなら**場所を変える**のであって、操作を無くしてよい理由にはならない。 */
 @media (max-width: 1100px) {
   [data-pkc-region='shell'] {
-    grid-template-columns: minmax(180px, 22vw) 8px minmax(0, 1fr);
+    /* ⚠ 一覧は**まだ列**なので、user が決めた幅はここでも効かせる(#497)。
+     * 🔑 情報のほうは下へ寝るので効かせない ── 寝た面に「幅」は無い。 */
+    grid-template-columns: var(--pkc-pane-sidebar, minmax(180px, 22vw)) 8px minmax(0, 1fr);
     grid-template-areas:
       'sidebar   gripl detail'
       'inspector inspector inspector'

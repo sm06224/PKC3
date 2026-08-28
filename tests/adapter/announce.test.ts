@@ -671,6 +671,7 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
+    ['2026-08-28-pane-resize', 'aa8d38bf'],
     ['2026-08-28-schedule-off-and-add', 'e2db86ac'],
     ['2026-08-28-export-entry-html', '0a4896a5'],
     ['2026-08-28-columns-text-size', 'e518064e'],
@@ -696,7 +697,6 @@ describe('お知らせの文面は固定(#220-7)', () => {
     // ['2026-08-27-alarm', '9e03db35'],
     ['2026-08-27-work-timer', 'dff641ac'],
     ['2026-08-27-group-task', 'fd542f57'],
-    ['2026-08-27-body-media', '85074b55'],
     // ⚠ 上限 20 を超えたので 2026-08-28 に落とした(原本は CHANGELOG)
     // ['2026-08-27-capture', 'a75acf51'],
     // ⚠ 上限 20 を超えたので 2026-08-28 に落とした(原本は CHANGELOG)
