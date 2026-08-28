@@ -714,3 +714,107 @@ describe('繰り返し(#344 段②)', () => {
     expect(d.getState().error, '断っていないのに理由が出ている').toBe(null);
   });
 });
+/**
+ * 🔴 **予定から外す押し口**(#498)。
+ *
+ * > user 指摘 2026-08-27:「**予定表に出てくる消せない予定がキモい。普通に考えて
+ * > 動線が直感的ではない。誰も使わないと思う**」
+ *
+ * ⚠ 直す前、外す道は「**掴んで『日付なし』へ落とす**」だけだった ── 発見できず、
+ *   しかも**繰り返しは掴むと断られる**ので、そもそも外せなかった。
+ *
+ * 🔑 観測点は**保存された本文**である ── 「札が消えた」だけを見ると、
+ *   画面だけ動いて本文が元のままでも緑になる(この file の頭の戒め)。
+ */
+describe('予定から外す(#498)', () => {
+  const off = (card: HTMLElement): HTMLButtonElement | null =>
+    card.querySelector<HTMLButtonElement>('[data-pkc-field="task-unschedule"]');
+
+  it('🔴 札の × を押すと、行から日付が外れる(行は消えない)', async () => {
+    const s = setup({ e1: '- [ ] 見積を送る @2026-08-23\n- [ ] べつの行\n' });
+    const card = cardsOf(s.root, '2026-08-23')[0];
+    expect(card, '札が出ていない(空振り)').toBeDefined();
+    const btn = off(card!);
+    expect(btn, '外す押し口が札に無い').not.toBeNull();
+    btn!.click();
+    await tick();
+    expect(s.store['e1'], '日付が外れていない').not.toContain('@2026-08-23');
+    // ⚠ **対照群** ── 行そのものは残る(「消す」ではなく「外す」)
+    expect(s.store['e1'], '行ごと消えた').toContain('- [ ] 見積を送る');
+    expect(s.store['e1'], '関係のない行まで動いた').toContain('- [ ] べつの行');
+  });
+
+  /**
+   * 🔴 **これが #498 の芯** ── 繰り返しは**掴んでも動かせない**(断られる)ので、
+   *   × が無いと**外す道が 1 つも無い**。
+   * ⚠ 同じ it に**掴んだら断られる**ほうも置く ── 置かないと
+   *   「たまたま両方できる札」を見ているだけかもしれない(非対称が要点である)。
+   */
+  it('🔴 繰り返しの札も外せる(掴んでは動かせないのに)', async () => {
+    const s = setup({ e1: '- [ ] 週次 @2026-08-24 毎週\n' });
+    const card = cardsOf(s.root, '2026-08-24')[0];
+    expect(card, '繰り返しの札が出ていない(空振り)').toBeDefined();
+    expect(card!.getAttribute('data-pkc-task-repeat'), '繰り返しの印が無い').toBe('week');
+
+    // ⚠ 対照群:掴んで落とすと**断られる**(この非対称が問題そのもの)
+    const undated = s.q<HTMLElement>('[data-pkc-drop-date=""]');
+    if (undated !== null) {
+      dragTo(card!, undated);
+      await tick();
+      expect(s.store['e1'], '掴んで外せてしまった(前提が変わっている)').toContain('毎週');
+    }
+
+    off(card!)!.click();
+    await tick();
+    expect(s.store['e1'], '繰り返しが外れていない').not.toContain('@2026-08-24');
+    expect(s.store['e1'], '刻みだけ残った').not.toContain('毎週');
+    expect(s.store['e1'], '行ごと消えた').toContain('- [ ] 週次');
+  });
+
+  /**
+   * 🔴 **ノート 1 件の予定**(frontmatter の `date:`)も外せる ── 単位が 2 つある
+   *   のに片方だけ外せる形にしない(掴んで落とす経路と同じ扱い)。
+   */
+  it('🔴 ノート 1 件の予定も外せる', async () => {
+    /**
+     * ⚠ **観測点は保存された本文**にする(この file の頭の戒め / 隣の落とす test と
+     *   同じ作法)── frontmatter を持たない fixture だと書換が当たらず、
+     *   「外れていない」が**実装ではなく台の都合**で出る。
+     */
+    const s = setup({ e9: '---\ndate: 2026-08-23\n---\n\n本文\n' }, { e9: '2026-08-23' });
+    const card = cardsOf(s.root, '2026-08-23')[0];
+    expect(card, 'ノートの札が出ていない(空振り)').toBeDefined();
+    expect(card!.hasAttribute('data-pkc-whole-note'), 'ノート 1 件の印が無い').toBe(true);
+    off(card!)!.click();
+    await tick(20);
+    expect(s.store['e9'], 'frontmatter の date が外れていない').not.toContain('date: 2026-08-23');
+    // ⚠ **対照群** ── 本文そのものは残る(「消す」ではなく「外す」)
+    expect(s.store['e9'], '本文ごと消えた').toContain('本文');
+  });
+
+  /**
+   * ⚠ **押す前に何が起きるか分かる**(user 指示 2026-08-21「画面で何が起きるかで書く」)。
+   * 🔑 繰り返しは**規則ごと**消えるので、同じ字にしてはいけない。
+   */
+  it('⚠ 繰り返しの札だけ、字が「この繰り返しをやめる」になる', () => {
+    const s = setup({ e1: '- [ ] 単発 @2026-08-23\n- [ ] 週次 @2026-08-24 毎週\n' });
+    const one = off(cardsOf(s.root, '2026-08-23')[0]!)!;
+    const rep = off(cardsOf(s.root, '2026-08-24')[0]!)!;
+    expect(one.getAttribute('aria-label')).toBe('予定から外す');
+    expect(rep.getAttribute('aria-label')).toBe('この繰り返しをやめる');
+    // ⚠ 説明も**別物**(「ノートは消えない」を両方で言う)
+    expect(one.title).toContain('ノートも本文も消えません');
+    expect(rep.title).toContain('毎週');
+  });
+
+  /**
+   * ⚠ **印は字で置かない**(束の見出しの `+` で踏んだ罠)── `textContent` に
+   *   入れると札の字に混ざり、写し・読み上げ・test が汚れる。
+   */
+  it('⚠ × は札の字に混ざらない', () => {
+    const s = setup({ e1: '- [ ] 見積を送る @2026-08-23\n' });
+    const card = cardsOf(s.root, '2026-08-23')[0]!;
+    expect(card.textContent ?? '', '印が札の字に混ざっている').not.toContain('×');
+    expect(card.textContent ?? '', '字が出ていない(空振り)').toContain('見積を送る');
+  });
+});

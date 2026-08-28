@@ -507,12 +507,34 @@ export class ScheduleRenderer {
     qDate.type = 'date';
     qDate.setAttribute('data-pkc-field', 'schedule-quick-date');
     qDate.setAttribute('aria-label', 'いつのやること');
+    /**
+     * 🔴 **最初から今日を入れておく**(#499。user 指摘 2026-08-28
+     * 「**カレンダー表示してるのに、「足す」のところにもカレンダーインプットが
+     * あったりで意味不明**」)。
+     *
+     * ⚠ 直す前は**空**だった。空のまま押すと `binder.ts` は
+     * **日付を書かずに**今日のノートへ足すので、🔴 **いま見ているカレンダーには
+     * 1 つも出てこない** ── しかも「日付のない項目」は既定で畳んでいるので、
+     * **何も起きなかったように見える**。
+     *
+     * 🔑 「カレンダーを見ながら足したら、見ているところに出る」を既定にする。
+     * ⚠ **日付なしで足す道は残る** ── 欄を空にしてから押せばよい
+     *   (だから「空なら今日を入れ直す」はしない。入れ直すと**空にできなくなる**)。
+     * ⚠ 束の見出しの `+`(その日を欄に入れる)は**そのまま生きる**。
+     */
+    qDate.value = dateKey(
+      this.now().getFullYear(),
+      this.now().getMonth() + 1,
+      this.now().getDate(),
+    );
     const qAdd = document.createElement('button');
     qAdd.type = 'button';
     qAdd.setAttribute('data-pkc-action', 'schedule-quick-add');
     qAdd.textContent = '足す';
-    // ⚠ **どこへ書くかを先に言う**(押してから「どこへ入った?」と思わせない)
-    qAdd.title = '今日のノートの末尾に、チェック項目として書きます';
+    // ⚠ **どこへ書くか**と**どの日に出るか**を両方言う(#499)── 日付の欄が
+    //    何を決めているのかが読めないと、「足したのに出てこない」になる
+    qAdd.title =
+      '今日のノートの末尾に、チェック項目として書きます。左の日付の日に出ます(空にすると日付なしで足します)';
     quick.append(qText, qDate, qAdd);
     const grid = document.createElement('div');
     grid.setAttribute('data-pkc-field', 'schedule-grid');

@@ -873,6 +873,12 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   // ⚠ 今日のノートの本文を書く(#402 ②)── 取込・書出しの最中に走らせない
   'schedule-quick-add',
   /**
+   * 🔴 **予定から外すのも本文を書く**(#498)── 行の `@…` を剥がす
+   *   (`SET_TASK_DATE`)か、frontmatter の `date:` を消す(`SET_ENTRY_DATE`)。
+   * 🔑 掴んで「日付なし」へ落とす経路と**同じ書込**なので、同じ門をくぐらせる。
+   */
+  'unschedule-task',
+  /**
    * 🔴 **ノート 1 件の日付も disk への書込**(#292 段④)── frontmatter を書く。
    * ⚠ 取り込みが entry を総入れ替えしている裏で frontmatter を書かせない、が理由。
    *   機械検査は `tests/repo-hygiene.test.ts`。
@@ -3776,6 +3782,41 @@ const ACTIONS: Record<string, ActionHandler> = {
       target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ??
       dispatcher.getState().selectedLid;
     if (lid) services.exportEntry?.(lid);
+  },
+  /**
+   * 🔴 **予定から外す**(#498。user 指摘 2026-08-27
+   * 「**予定表に出てくる消せない予定がキモい / 動線が直感的ではない**」)。
+   *
+   * ⚠ 直す前、外す道は「**掴んで『日付なし』へ落とす**」だけだった ──
+   *   発見できないうえ、**繰り返しは掴むと断られる**ので外せなかった。
+   *
+   * 🔑 **書込は落とす経路と同じ 1 本**(§7)── ここで別の書き方をしない:
+   *   - 行の予定 … `SET_TASK_DATE`(`date: null` = 記法ごと剥がす)
+   *   - ノート 1 件の予定 … `SET_ENTRY_DATE`(frontmatter の `date:` を消す)
+   *
+   * ⚠ **単位は札の属性から読む** ── `data-pkc-whole-note` が在れば後者である
+   *   (`patchTaskCard` が焼いている)。⚠ 行番号は**札ではなく中の印**に在る
+   *   (札にも置くと `[data-pkc-task-line]` を押す既存の経路に当たる、2026-08-23 の罠)。
+   */
+  'unschedule-task': (dispatcher, target) => {
+    const card = target.closest<HTMLElement>('[data-pkc-entry]');
+    const lid = card?.getAttribute('data-pkc-entry') ?? '';
+    if (card === null || lid === '') return;
+    if (card.hasAttribute('data-pkc-whole-note')) {
+      dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: null });
+      return;
+    }
+    const raw = card
+      .querySelector('[data-pkc-task-line]')
+      ?.getAttribute('data-pkc-task-line');
+    const line = Number(raw);
+    // ⚠ 読めなければ**何もしない**(当てずっぽうで別の行を書き換えない)
+    if (raw === null || raw === undefined || !Number.isInteger(line)) return;
+    /**
+     * ⚠ **`until` も外す** ── 記法まるごと消えるので、期間だけ残すと
+     *   「頼んでいない指示」になる(落とす経路と同じ渡し方)。
+     */
+    dispatcher.dispatch({ type: 'SET_TASK_DATE', lid, line, date: null, until: null });
   },
   'export-entry-html': (dispatcher, target, services) => {
     // ⚠ 解決規則は隣の `export-entry` / `delete-entry` と**同じ**にする ── 揃えないと

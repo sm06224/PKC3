@@ -2942,7 +2942,9 @@ li[data-pkc-row-slot] {
 }
 [data-pkc-region='schedule-cards'] > [data-pkc-entry] {
   display: grid;
-  grid-template-columns: auto 1fr;
+  /* ⚠ 3 列目は「予定から外す」(#498)── 幅は `auto` なので、
+   *    出ていないときも**同じ場所**が空く(字が動かない) */
+  grid-template-columns: auto 1fr auto;
   gap: 0 var(--s2);
   align-items: baseline;
   padding: 2px var(--s2);
@@ -2979,6 +2981,45 @@ li[data-pkc-row-slot] {
 [data-pkc-region='schedule-cards'] [data-pkc-task-done] [data-pkc-field='text'] {
   text-decoration: line-through;
   color: var(--muted);
+}
+
+/* ── 予定から外す(#498)────────────────────────────────
+ * user 指摘 2026-08-27:「**予定表に出てくる消せない予定がキモい。普通に考えて
+ * 動線が直感的ではない。誰も使わないと思う**」
+ *
+ * 🔴 直す前、外す道は「**掴んで『日付なし』へ落とす**」だけだった ── 発見できない。
+ * 🔑 **印は CSS で置く**(束の見出しの `+` と同じ理由)── `textContent` に入れると
+ * 札の字に混ざり、読み上げ・写し・test の突き合わせが汚れる。
+ *
+ * ⚠ **場所を空けたまま薄く出す**(`display: none` にも `opacity: 0` にもしない)。
+ * 🔴 **完全に隠さない**のは、#498 の訴えが「**消せない**」= **見つけられない**
+ * だからである ── マウスを乗せるまで見えない物は、乗せる前の user には存在しない。
+ * ⚠ 消すと、乗せた瞬間に**字が動く**(押そうとした物が逃げる)ので場所は空けたまま。
+ * ⚠ **触る画面でも出る**(`hover` を条件にしていないので `@media` が要らない)。
+ * ⚠ 鍵で辿り着いたときも濃くする(`:focus-visible`)。 */
+[data-pkc-region='schedule-cards'] [data-pkc-field='task-unschedule'] {
+  grid-column: 3;
+  grid-row: 1;
+  align-self: center;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0 var(--s1);
+  line-height: 1;
+  font-size: 14px;
+  /* ⚠ 薄いが**見える** ── 地の色に沈めない(見つけられないのが元の訴えである) */
+  opacity: 0.45;
+}
+[data-pkc-region='schedule-cards'] [data-pkc-field='task-unschedule']::before {
+  content: '\00d7';
+}
+[data-pkc-region='schedule-cards'] > [data-pkc-entry]:hover [data-pkc-field='task-unschedule'],
+[data-pkc-region='schedule-cards'] [data-pkc-field='task-unschedule']:focus-visible {
+  opacity: 1;
+}
+[data-pkc-region='schedule-cards'] [data-pkc-field='task-unschedule']:hover {
+  color: var(--danger, #b3261e);
 }
 
 /* ══ カレンダー(#276 / 2026-08-20 に面を作り直し)════════════════════
