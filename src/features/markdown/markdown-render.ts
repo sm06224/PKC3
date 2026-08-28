@@ -250,12 +250,12 @@ const defaultFence = md.renderer.rules.fence ??
 //    sibling combinator)── S2 Viewer popup / S4 entry-window は action-binder
 //    の無い独立 document のため、JS 配線ゼロで全 surface に効く方式を正とする。
 
-export type RenderableFenceLang = 'html' | 'mermaid' | 'chart' | 'csv' | 'tsv' | 'psv';
+export type RenderableFenceLang = 'html' | 'svg' | 'mermaid' | 'chart' | 'csv' | 'tsv' | 'psv';
 export type RenderableFenceMode = 'both' | 'render' | 'norender';
 
 /** ⚠ 公開しているのは `tests/docs-parity.test.ts` がマニュアルと突合するため。 */
 export const RENDERABLE_FENCE_LANGS: ReadonlySet<string> = new Set([
-  'html', 'mermaid', 'chart', 'csv', 'tsv', 'psv',
+  'html', 'svg', 'mermaid', 'chart', 'csv', 'tsv', 'psv',
 ]);
 
 export interface RenderableFence {
@@ -346,6 +346,22 @@ function buildRenderableSlotHtml(
 ): string | null {
   switch (fence.lang) {
     case 'html':
+    /**
+     * 🔴 **`svg` は `html` と同じ箱で描く**(#528 段⑥。user 要望 2026-08-28
+     * 「**HTML も plotly も SVG も…レンダリングできていた**」)。
+     *
+     * ⚠ 直す前、SVG は**本文に生で書いても ` ```svg ` の囲みに入れても字になった**
+     *   (実測 ── 出るのは `&lt;svg` である)。描けたのは ` ```html ` に入れたときだけで、
+     *   **それを知っている人しか図を貼れなかった**(UML と同じ形の落差である)。
+     * 🔑 **新しい門は 1 つも開けない** ── 中身は `<svg>` も `<script>` も書ける以上
+     *   HTML と危険度が同じなので、**同じ箱・同じ CSP** に通す。
+     *   ⚠ 別経路(本文へ直に差し込む)にすると、外部取得の同意も、止めた理由の行も、
+     *   高さ追従も**全部もう 1 組**要る(CLAUDE.md §7)。
+     * ⚠ **本文に生で書いた SVG は、今までどおり字のまま**である ── markdown の
+     *   生 HTML を通す判断は別の話で、ここでは変えない。
+     */
+    // eslint-disable-next-line no-fallthrough
+    case 'svg':
       // reform-2026-05 PR-2M:iframe sandbox 経由で HTML を直接 render。
       // sandbox="allow-scripts" のみ(allow-same-origin 無し)で cross-origin 隔離。
       return buildHtmlSandboxIframe(content, '', occurrence, allowExternalImages);

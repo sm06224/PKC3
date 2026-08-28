@@ -532,3 +532,69 @@ describe('箱が止めた「画像以外」の種別(#528 段③)', () => {
     expect(note).toContain('アプリとして登録');
   });
 });
+
+/**
+ * 🔴 **`svg` の囲みは、`html` と同じ箱で描く**(#528 段⑥、2026-08-28)。
+ *
+ * ⚠ 直す前の実測 ── SVG は**どう書いても字になった**:
+ *
+ * | 書き方 | iframe | 字として出る |
+ * |---|---|---|
+ * | 本文に生で書く | ✗ | ✅ |
+ * | ` ```svg ` の囲み | ✗ | ✅ |
+ * | ` ```html ` の囲み | ✅ | (原文表示) |
+ *
+ * つまり描けたのは「html に入れる」を**知っている人だけ**だった(UML と同じ落差)。
+ * 🔑 **新しい門は 1 つも開けない** ── 同じ箱・同じ CSP を通す。
+ */
+describe('svg の囲み(#528 段⑥)', () => {
+  const SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"></svg>';
+
+  it('🔴 箱に入る(字のままにならない)', () => {
+    const html = renderMarkdown('```svg\n' + SVG + '\n```\n', {});
+    expect(html, 'svg の囲みが箱にならない').toContain('data-pkc-html-render-id');
+  });
+
+  /**
+   * 🔴 **同じ箱・同じ CSP**(空振り防止も兼ねる)── 別の CSP を持ち始めたら、
+   *   外部取得の同意も、止めた理由の行も**もう 1 組**要ることになる。
+   */
+  it('🔴 CSP は html の囲みと 1 バイトも同じ', () => {
+    const asSvg = renderMarkdown('```svg\n' + SVG + '\n```\n', {});
+    const asHtml = renderMarkdown('```html\n' + SVG + '\n```\n', {});
+    expect(cspOf(asSvg)).toBe(cspOf(asHtml));
+  });
+
+  /**
+   * ⚠ **外部画像の同意は、svg でも同じように効く** ── 効かないと、
+   *   「svg なら外の絵を黙って取ってくる」抜け穴になる。
+   */
+  it('⚠ 外部画像の門は svg でも同じ', () => {
+    const svgClosed = imgSrcOf(renderMarkdown('```svg\n' + SVG + '\n```\n', {}));
+    const svgOpen = imgSrcOf(
+      renderMarkdown('```svg\n' + SVG + '\n```\n', { allowExternalImages: true }),
+    );
+    const htmlClosed = imgSrcOf(renderMarkdown('```html\n' + SVG + '\n```\n', {}));
+    const htmlOpen = imgSrcOf(
+      renderMarkdown('```html\n' + SVG + '\n```\n', { allowExternalImages: true }),
+    );
+    // 🔑 主張は**同じ門を通ること** ── 値そのものを打ち直すと、門が動いたとき
+    //    片方だけ直して両方が食い違う(CLAUDE.md §7)
+    expect(svgClosed).toBe(htmlClosed);
+    expect(svgOpen).toBe(htmlOpen);
+    // ⚠ 空振り防止 ── 同意の有無で**実際に値が動く**こと(2 つとも同じなら
+    //    「門が死んでいて、どちらも同じ」でも上は通る)
+    expect(svgClosed, '同意しても値が動かない(門が死んでいる)').not.toBe(svgOpen);
+  });
+
+  /**
+   * ⚠ **本文に生で書いた SVG は、今までどおり字のまま** ── 生 HTML を通すかは
+   *   別の判断であり、ここでは変えていない。⚠ この行が無いと、
+   *   「囲みを直したついでに生 HTML も通した」を誰も見ていないことになる。
+   */
+  it('⚠ 本文に生で書いた svg は、これまでどおり字のまま', () => {
+    const html = renderMarkdown(SVG + '\n', {});
+    expect(html).not.toContain('data-pkc-html-render-id');
+    expect(html, '生 HTML が通っている').toContain('&lt;svg');
+  });
+});

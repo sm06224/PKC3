@@ -45,3 +45,46 @@ test('csv 表と html sandbox iframe が可視高さを持つ', async ({ page })
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * 🔴 **`svg` の囲みが、実際に絵になる**(#528 段⑥、2026-08-28)。
+ *
+ * ⚠ **unit では箱の markup までしか見えない** ── 「箱に入った」と
+ *   「ブラウザが絵を描いた」は別の主張である。SVG が字のまま出ていても、
+ *   iframe が在れば unit は緑になる。
+ * 🔑 観測点は **箱の中で `<svg>` が実際に版面を持ったこと**(幅と高さ)。
+ * ⚠ **対照群を同じ it に置く** ── 同じ SVG を ` ```html ` に入れた箱と
+ *   **同じ大きさ**になること。片方だけ見ると「svg だけ特別扱いされて
+ *   別の描かれ方をした」を見抜けない。
+ */
+test('🔴 svg の囲みは、html と同じ箱で同じように絵になる(#528 段⑥)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  const SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="90" height="40"></svg>';
+  await createEntry(page, 'text');
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await ta.click();
+  await page.keyboard.type('```svg\n' + SVG + '\n```\n\n```html\n' + SVG + '\n```');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  const frames = page.locator('iframe[data-pkc-html-render-id]');
+  await expect(frames).toHaveCount(2);
+
+  // 🔴 箱の**中**で svg が版面を持ったか(字のまま出ていれば 0 になる)
+  const sizes: Array<{ w: number; h: number }> = [];
+  for (let i = 0; i < 2; i++) {
+    const frame = page.frameLocator('iframe[data-pkc-html-render-id]').nth(i);
+    const svg = frame.locator('svg');
+    await expect(svg).toBeAttached({ timeout: 10_000 });
+    const box = await svg.boundingBox();
+    sizes.push({ w: box?.width ?? 0, h: box?.height ?? 0 });
+  }
+  expect(sizes[0]!.w, `svg の囲みで絵が版面を持たない: ${JSON.stringify(sizes[0])}`).toBeGreaterThan(
+    0,
+  );
+  // 🔑 対照群 ── html の囲みと**同じ大きさ**(別の描かれ方をしていない)
+  expect(sizes[0]).toEqual(sizes[1]);
+
+  expect(errors, errors.join('\n')).toEqual([]);
+});

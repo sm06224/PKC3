@@ -88,7 +88,12 @@ import {
 } from '@features/markdown/paste-source';
 import { convertPastedPermalink } from '@features/link/permalink';
 import { resolveMime } from './attach';
-import { applyFormat, type FormatOp } from '@features/markdown/text-ops';
+import {
+  applyFormat,
+  DIAGRAM_TEMPLATES,
+  insertBlock,
+  type FormatOp,
+} from '@features/markdown/text-ops';
 import { insertSnippet, nextSnippetSlot } from '@features/snippet/snippet-expand';
 import { abbrBeforeCaret } from '@features/snippet/snippet-table';
 import { snippetMenu, snippetMenuNote } from '@features/snippet/snippet-menu';
@@ -2775,6 +2780,17 @@ const ACTIONS: Record<string, ActionHandler> = {
       const sel = { text: ta.value, start: ta.selectionStart, end: ta.selectionEnd };
       if (picked.kind === 'format') {
         writeBack(ta, applyFormat(sel, picked.op));
+        return;
+      }
+      /**
+       * 🔴 **UML の雛形**(#528 段①)。⚠ ここでも**組み立てない** ── 表から
+       *   雛形を引いて、挿すのは既にある `insertBlock` に渡す(上の注記と同じ理由)。
+       * ⚠ 表から消えた id は**黙って落とす**(組み込みの `FormatOp` と同じ作法)──
+       *   無い物を挿そうとして欄を空で書き戻すほうが悪い。
+       */
+      if (picked.kind === 'diagram') {
+        const tpl = DIAGRAM_TEMPLATES.find((d) => d.id === picked.id);
+        if (tpl !== undefined) writeBack(ta, insertBlock(sel, tpl.block));
         return;
       }
       const item = items.find((s) => s.lid === picked.lid);

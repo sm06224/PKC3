@@ -166,8 +166,72 @@ function template(withCaret: string): TemplateBlock {
 
 /** 表の雛形(2 列)。カーソルは最初のセル。 */
 export const TABLE_BLOCK = template(`| 項目 | 値 |\n|---|---|\n| ${CARET} |  |\n`);
-/** 図の雛形(mermaid)。 */
+/** 図の雛形(mermaid)。⚠ 「図」のボタンが入れるのはこれ ── **変えない**。 */
 export const MERMAID_BLOCK = template('```mermaid\ngraph TD\n  A-->B\n```\n');
+
+/**
+ * 🔴 **UML の雛形**(#528 段①。user 要望 2026-08-28「**うちは UML とかも
+ * できるようにしたいね**」)。
+ *
+ * ⚠ **描き手は前から描けた** ── mermaid は 22 種を受ける(実測。マニュアル
+ *   「どんな図が描けるか」に全数)。足りていなかったのは**入れる口**である:
+ *   「図」のボタンは `graph TD` しか入れないので、
+ *   **1 行目を書き換えられると知っている人しかクラス図を描けなかった**。
+ * 🔑 だから作るのは記法ではなく**動線**である(#491 と同じ型 ──
+ *   「無い」ではなく「在るのに辿れない」)。
+ *
+ * ⚠ **帯のボタンも鍵も増やさない。** 帯は既に 14 個で横に長く、
+ *   `onBar: false` の 4 つは**既定の鍵を 1 つずつ食う**(`Alt+Shift+…`)。
+ *   入口は**既にある「雛形を入れる」の一覧**にする ── そこは
+ *   「入れたい塊を選ぶ」用事そのもので、押し所も鍵も 1 つも増えない。
+ * ⚠ **22 種を全部は並べない。** 一覧は user 自身の雛形を探す場所でもあるので、
+ *   組み込みが 26 行になると本業を埋める。user が名指しした **UML の 4 種**に絞り、
+ *   残りは**マニュアルの全数表**が受け持つ(そちらは 1 行目の名前で引ける)。
+ *   🔑 これが覆る条件:user が「一覧から全部選びたい」と言ったとき、
+ *   または一覧が種類で畳める形になったとき。
+ *
+ * ⚠ 中身は**そのまま描ける最小形**にする(実測で確かめた)── 空の枠を入れると、
+ *   user は「書き方が分からないまま赤い理由だけ見る」ことになる。
+ */
+export interface DiagramTemplate {
+  readonly id: string;
+  readonly label: string;
+  readonly block: TemplateBlock;
+}
+
+export const DIAGRAM_TEMPLATES: readonly DiagramTemplate[] = [
+  {
+    id: 'class',
+    label: 'クラス図',
+    block: template(
+      '```mermaid\nclassDiagram\n  class 帳簿 {\n    +記帳()\n  }\n  帳簿 <|-- 出納帳\n```\n',
+    ),
+  },
+  {
+    id: 'sequence',
+    label: 'シーケンス図',
+    block: template(
+      '```mermaid\nsequenceDiagram\n  参加者 A ->> 参加者 B: お願いします\n' +
+        '  参加者 B -->> 参加者 A: できました\n```\n',
+    ),
+  },
+  {
+    id: 'state',
+    label: '状態遷移図',
+    block: template(
+      '```mermaid\nstateDiagram-v2\n  [*] --> 下書き\n  下書き --> 確認中: 出す\n' +
+        '  確認中 --> 完了: 通る\n  確認中 --> 下書き: 差し戻し\n  完了 --> [*]\n```\n',
+    ),
+  },
+  {
+    id: 'er',
+    label: 'ER 図',
+    block: template(
+      '```mermaid\nerDiagram\n  顧客 ||--o{ 注文 : "出す"\n' +
+        '  注文 ||--|{ 明細 : "含む"\n```\n',
+    ),
+  },
+];
 /** コード塊の雛形。カーソルは中。 */
 export const CODE_BLOCK = template(`\`\`\`\n${CARET}\n\`\`\`\n`);
 
