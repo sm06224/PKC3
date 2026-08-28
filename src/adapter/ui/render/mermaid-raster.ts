@@ -316,6 +316,24 @@ export function configFor(p: DiagramPalette): Parameters<
      */
     htmlLabels: false,
     flowchart: { htmlLabels: false },
+    /**
+     * 🔴 **`journey` だけは `htmlLabels` を読まない**(2026-08-28 実測、#528)。
+     * この図は `textPlacement` で描き分けており、既定が `'fo'`
+     * (= `<foreignObject>`)なので、上の 2 行が在っても **5 個残って焼けない**。
+     *
+     * 実測(製品の `configFor` 相当をそのまま当て、SVG → Image → canvas →
+     * `toBlob` まで通した ── 対照群込み):
+     * ```
+     *                     いまのまま            journey に tspan を足す
+     *   journey           fo 5 → SecurityError  fo 0 → PNG 36,344 B
+     *   timeline          fo 0 → PNG  5,213 B   fo 0 → PNG  5,213 B
+     *   sequenceDiagram   fo 0 → PNG  5,151 B   fo 0 → PNG  5,151 B
+     *   graph TD          fo 0 → PNG  1,861 B   fo 0 → PNG  1,861 B
+     * ```
+     * ⚠ `timeline` も既定は `'fo'` だが**実測で 0 個**(byte まで一致)なので
+     * 足さない ── 「これが無いと壊れる」と書く前に、外して壊れるのを見る。
+     */
+    journey: { textPlacement: 'tspan' },
     theme: 'base',
     themeVariables: {
       darkMode: p.dark,

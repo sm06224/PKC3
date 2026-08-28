@@ -512,3 +512,61 @@ test('🔴 本文のチェック欄は、保存できる面でだけ押せる (#
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * 🔴 **UML 4 種 + `journey` が焼ける**(#528。2026-08-28)。
+ *
+ * 🔑 全数調査で分かったのは「**UML は無いのではなく、知られていない**」だった ──
+ * `classDiagram` / `sequenceDiagram` / `stateDiagram-v2` / `erDiagram` は
+ * 今日そのまま PNG まで焼ける。⚠ ところがこの file の spec は**全部
+ * `graph TD`** で、**UML 4 種は 1 度も走っていなかった**(= 測っていない次元)。
+ *
+ * 🔴 そして走らせたら **`journey` だけが落ちた** ── `SecurityError:
+ * Tainted canvases may not be exported.`。この図は `htmlLabels` を読まず
+ * `textPlacement` の既定が `'fo'` なので、`<foreignObject>` が 5 個残っていた
+ * (直しは `mermaid-raster.ts` の `configFor`)。
+ *
+ * ⚠ 観測点は `state="ready"` **だけにしない** ── 器の属性は「描こうとした」まで
+ * しか言わない。**`<img>` が blob で、実際に画素を持っている**ところまで見る
+ * (`naturalWidth > 0`)。焼けなければ `failed` になるので、5 形とも別々に落ちる。
+ */
+const UML_FORMS: readonly (readonly [string, string])[] = [
+  ['classDiagram', 'classDiagram\n  class 帳簿 {\n    +記帳()\n  }\n  帳簿 <|-- 出納帳'],
+  ['sequenceDiagram', 'sequenceDiagram\n  受付->>台帳: 登録\n  台帳-->>受付: 控え'],
+  ['stateDiagram-v2', 'stateDiagram-v2\n  [*] --> 下書き\n  下書き --> 公開\n  公開 --> [*]'],
+  ['erDiagram', 'erDiagram\n  ノート ||--o{ 添付 : もつ'],
+  ['journey', 'journey\n  title 買い物\n  section 出かける\n    財布を持つ: 5: 私\n    店へ行く: 3: 私'],
+];
+
+test('🔴 UML 4 種と journey が、どれも PNG まで焼ける (#528)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('図の記法');
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill(UML_FORMS.map(([, src]) => '```mermaid\n' + src + '\n```').join('\n\n') + '\n');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+  const hosts = page.locator('[data-pkc-field="detail-body"] [data-pkc-mermaid-src]');
+  // 空振り防止: 器が 5 つ在る(1 つも出ていなければ以下は自明に通る)
+  await expect(hosts, '図の器が 5 つ出ていない').toHaveCount(UML_FORMS.length);
+
+  for (const [i, [name]] of UML_FORMS.entries()) {
+    const host = hosts.nth(i);
+    await expect(host, `${name} が焼けていない`).toHaveAttribute(
+      'data-pkc-mermaid-state',
+      'ready',
+      { timeout: 30000 },
+    );
+    const img = await host.evaluate((h) => {
+      const el = h.querySelector('img');
+      return { src: el?.getAttribute('src')?.slice(0, 5) ?? '', natural: el?.naturalWidth ?? 0 };
+    });
+    expect(img.src, `${name}: blob の PNG が置かれていない`).toBe('blob:');
+    expect(img.natural, `${name}: 画像が読めていない(焼きが失敗している)`).toBeGreaterThan(0);
+  }
+
+  expect(errors).toEqual([]);
+});
