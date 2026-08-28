@@ -240,7 +240,21 @@ jobs:
           done
           echo "applied $n qtbase patches"
           # ⚠ 下限は実数で置く(足したらここも直す ── 直さないと落ちるので忘れない)
-          test "$n" -eq 2
+          # 🔴 2 → 3(2026-08-28)。`qtbase-patch-backspace.py`(#433 の**直し**)。
+          #    user が実機の console を採ってくれたので、二重配送が**確定した**:
+          #      Key callback "Backspace" 9 → processKey as KeyEvent
+          #        → processKeyForInputContext          ← ① LO へ 1 回目
+          #      inputCallback inputType : "deleteContentBackward"
+          #                                             ← ② LO へ 2 回目
+          #    🔑 `input` が飛んでいる = ①が `preventDefault()` を呼んでいない
+          #    (= `processKeyForInputContext` が false)。それでも①は既に
+          #    `handleKeyEvent` を撃っているので、②の合成と合わせて **2 文字**消える。
+          #    ⚠ 直しは「②を消す」でも「①を早期 return させる」でもない ── どちらも
+          #    退行する(同じログの 2 打鍵目に `inputCallback` が無い = 隠し input が
+          #    空の回が在る)。**①が届けた回だけ②を黙らせる**形にしてある。
+          # ⚠ **Qt の cache 鍵は `qtbase-patch-*.py` の hash** なので、この 1 本を
+          #    足した時点で **Qt を host + wasm から焼き直す**(数時間)。
+          test "$n" -eq 3
 
       # 🔑 Qt6 は **host build が別に要る**(Qt5 には無かった要件)。
       # ⚠ `-no-gui` で建ててはいけない ── wasm 側で Gui/Widgets を建てるとき、host の
