@@ -235,3 +235,53 @@ describe('detail: PKC-Markdown text presenter (P3-3)', () => {
     expect(rendered?.textContent).not.toContain('vars.name:');
   });
 });
+
+/**
+ * 🔴 **「描けた」を外へ出す印**(#517)。
+ *
+ * ⚠ **これが無いと、目次側の test は自分が置いた印と話すだけになる** ──
+ *   実物が焼く綴りを 1 度も見ないので、`detail.ts` 側で印を落としても
+ *   両方緑のまま通る(#195 で踏んだ「両端が stub と話している」形)。
+ * 🔑 だからここは**実物の `DetailRenderer` に焼かせて**確かめる。
+ */
+describe('描けた印(#517)', () => {
+  it('🔴 描き終わると、本文の器に「この lid で描けた」印が付く', async () => {
+    const root = document.createElement('div');
+    const detail = new DetailRenderer(buildShell(root).detail);
+    detail.render(stateWithBody('# 見出し\n\n本文'));
+    await settle();
+    const host = root.querySelector('[data-pkc-field="detail-body"]');
+    expect(host, '本文の器が無い(空振り)').not.toBeNull();
+    expect(host!.getAttribute('data-pkc-painted'), '描けたのに印が無い').toBe('a');
+  });
+
+  it('🔴 描き直しの間は印が外れている(古い本文を「描けた」と読ませない)', async () => {
+    const root = document.createElement('div');
+    /**
+     * 🔴 **器を document へ繋ぐ**(変異試験 P13 が SURVIVED で教えた)。
+     *
+     * ⚠ 繋がないと `fresh` の判定(`!this.bodyHost?.isConnected`)が毎回真になり、
+     *   **描画のたびに器ごと作り直される** ── 印は「外したから」ではなく
+     *   「器が新品だから」無くなる。つまりこの test は
+     *   **`removeAttribute` を消しても緑**だった(§1「救い手が変わっただけ」)。
+     * 🔑 実物は器を使い回すので、繋いだ形が本物である。
+     */
+    document.body.append(root);
+    const detail = new DetailRenderer(buildShell(root).detail);
+    detail.render(stateWithBody('# 一\n\n本文'));
+    await settle();
+    const host = root.querySelector('[data-pkc-field="detail-body"]')!;
+    expect(host.getAttribute('data-pkc-painted')).toBe('a');
+    // 別の本文を描き始める ── **待たずに**見る(描き終わる前の一瞬が主張)
+    detail.render(stateWithBody('# 二\n\n本文'));
+    expect(
+      root.querySelector('[data-pkc-field="detail-body"]')!.getAttribute('data-pkc-painted'),
+      '描き直しの最中なのに「描けた」と言っている',
+    ).toBeNull();
+    await settle();
+    expect(
+      root.querySelector('[data-pkc-field="detail-body"]')!.getAttribute('data-pkc-painted'),
+      '描き終わったのに印が戻らない',
+    ).toBe('a');
+  });
+});

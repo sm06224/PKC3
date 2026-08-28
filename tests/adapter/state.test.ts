@@ -1092,3 +1092,67 @@ describe('外部画像の取り込みを本文へ当てる(#264 段①)', () => 
     expect(ask(booted(), { [IMG]: 'asset:k1' }, 'zzz').events).toEqual([]);
   });
 });
+
+/**
+ * 🔴 **予定の日付は、断るなら声に出して断る**(#516)。
+ *
+ * ⚠ 直す前は `phase !== 'ready'` で `events: []` を返して**黙って捨てて**いた ──
+ *   予定の面で札を掴んで日に落とすと、**札が黙って元に戻る**(成功でも失敗でも
+ *   ない見た目)。#513 / #515 は右ペインの 2 つを塞いだが、
+ *   **主の道(掴んで落とす / × )が残っていた**。
+ * 🔑 判定は reducer 1 か所(§7)── 撃つ口は `SET_ENTRY_DATE` が 4 か所、
+ *   `SET_TASK_DATE` が 2 か所あり、呼び側に配ると足すたびに取りこぼす。
+ */
+describe('編集中の日付は、黙って捨てない(#516)', () => {
+  const editing = (): ReturnType<typeof reduce>['state'] => {
+    let s = loadedA();
+    s = reduce(s, { type: 'START_EDIT' }).state;
+    return s;
+  };
+
+  it('🔴 ノートの日付 ── 付ける / 外すで動詞が変わる(押した場所と対で言う)', () => {
+    const s = editing();
+    expect(s.phase).toBe('editing'); // 前提の検算(台が editing になっていること)
+    const add = reduce(s, { type: 'SET_ENTRY_DATE', lid: 'a', date: '2026-09-01' });
+    expect(add.events, '編集中に裏で書いた').toEqual([]);
+    expect(add.state.error, '黙って捨てた').toContain('編集を終了してから');
+    expect(add.state.error, '何をしようとしたのか言っていない').toContain('日付を付けて');
+    const del = reduce(s, { type: 'SET_ENTRY_DATE', lid: 'a', date: null });
+    expect(del.state.error, '外すのに「付けて」と言った').toContain('日付を外して');
+  });
+
+  it('🔴 行の予定 ── ノートの日付と呼び名を分ける(別のものを探させない)', () => {
+    const s = editing();
+    const add = reduce(s, { type: 'SET_TASK_DATE', lid: 'a', line: 0, date: '2026-09-01', until: null });
+    expect(add.events).toEqual([]);
+    expect(add.state.error, '行なのに「ノートの」と言った').toContain('行に予定を付けて');
+    const del = reduce(s, { type: 'SET_TASK_DATE', lid: 'a', line: 0, date: null, until: null });
+    expect(del.state.error).toContain('行の予定を外して');
+  });
+
+  /**
+   * 🔴 **`phase` は `editing` だけではない**(#516 の「小さな嘘」)。
+   * ⚠ `error`(保存に失敗したときの保護)で「編集を終了してから」と出すと、
+   *   user は**存在しない編集を探す**。
+   */
+  it('🔴 保存に失敗しているときは「編集を終了してから」と言わない', () => {
+    // ⚠ error phase は「守るべき未達 commit が在る」ときだけ立つので、
+    //    書いて → commit(まだ disk へ届いていない)→ SYS_ERROR、の順で作る
+    let s = loadedA();
+    s = reduce(s, { type: 'START_EDIT' }).state;
+    s = reduce(s, { type: 'UPDATE_OPEN_BODY', body: '# A2' }).state;
+    s = reduce(s, { type: 'COMMIT_EDIT' }).state;
+    s = reduce(s, { type: 'SYS_ERROR', error: 'disk' }).state;
+    expect(s.phase, '前提が崩れている(error phase になっていない)').toBe('error');
+    const out = reduce(s, { type: 'SET_ENTRY_DATE', lid: 'a', date: '2026-09-01' });
+    expect(out.state.error, '編集していないのに「編集を終了」と言った').not.toContain('編集を終了');
+    expect(out.state.error).toContain('保存をやり直すか取り消してから');
+  });
+
+  it('⚠ 対照群 ── ready なら今までどおり本文へ書きに行く(門が全部を塞いでいない)', () => {
+    const s = loadedA();
+    const out = reduce(s, { type: 'SET_ENTRY_DATE', lid: 'a', date: '2026-09-01' });
+    expect(out.state.error, 'ready なのに断った').toBeNull();
+    expect(out.events.map((e) => e.type)).toContain('REQUEST_BODY_REWRITE');
+  });
+});

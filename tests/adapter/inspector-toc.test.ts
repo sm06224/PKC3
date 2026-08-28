@@ -67,6 +67,17 @@ function setup(body: string | null) {
   return { root, d };
 }
 
+/**
+ * 🔴 **押した後は 1 tick 待つ**(#517)。
+ *
+ * ⚠ `toc-jump` は **async** になった(本文が描けるのを待ってから探すため)ので、
+ *   同期の `it` から `click()` しただけでは**まだ何も起きていない** ──
+ *   assert は走るが実装がそこへ到達しておらず、**押しても飛ばない実装でも緑**になる
+ *   (CLAUDE.md §1「async にした瞬間、それを呼ぶ同期の test は全部空振りになる」)。
+ * 🔑 だから `click()` の後は必ずここを通す。
+ */
+const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
 const links = (root: HTMLElement): HTMLElement[] => [
   ...root.querySelectorAll<HTMLElement>('[data-pkc-action="toc-jump"]'),
 ];
@@ -138,11 +149,12 @@ describe('目次を押すと本文へ飛ぶ(#493)', () => {
     return made;
   }
 
-  it('🔴 本文のその見出しへ飛ぶ', () => {
+  it('🔴 本文のその見出しへ飛ぶ', async () => {
     const { root } = setup(BODY);
     const slugs = extractHeadingsFromMarkdown(BODY).map((h) => h.slug);
     const planted = plantBody(root, slugs);
     links(root)[2]!.click();
+    await settle();
     expect(planted[2]!.scrollIntoView, '押した見出しへ飛んでいない').toHaveBeenCalled();
     expect(planted[0]!.scrollIntoView, '別の見出しへ飛んだ').not.toHaveBeenCalled();
   });
@@ -154,7 +166,7 @@ describe('目次を押すと本文へ飛ぶ(#493)', () => {
    *   `getElementById` で引くと**本文ではないほう**に当たりうる。
    *   2026-08-08 に「id の重複 0 件」という守れない条件を書いて踏んだ場所である。
    */
-  it('🔴 同じ id が別の面にも在るとき、本文のほうへ飛ぶ', () => {
+  it('🔴 同じ id が別の面にも在るとき、本文のほうへ飛ぶ', async () => {
     const { root } = setup(BODY);
     const slug = extractHeadingsFromMarkdown(BODY)[0]!.slug;
     // ⚠ **本文より先に**別の面へ置く(`getElementById` は先頭を返す)
@@ -164,6 +176,7 @@ describe('目次を押すと本文へ飛ぶ(#493)', () => {
     root.querySelector('[data-pkc-region="inspector"]')!.prepend(other);
     const planted = plantBody(root, [slug]);
     links(root)[0]!.click();
+    await settle();
     expect(planted[0]!.scrollIntoView, '本文へ飛んでいない').toHaveBeenCalled();
     expect(other.scrollIntoView, '別の面の同じ id へ飛んだ').not.toHaveBeenCalled();
   });
@@ -172,9 +185,10 @@ describe('目次を押すと本文へ飛ぶ(#493)', () => {
    * 🔴 **飛び先が無い回は理由を出す**(1 面の編集中は本文が描かれていない)。
    * ⚠ 黙ると「押しても何も起きない」になる(#300 の型)。
    */
-  it('🔴 本文が描かれていなければ理由を出す(無言にしない)', () => {
+  it('🔴 本文が描かれていなければ理由を出す(無言にしない)', async () => {
     const { root, d } = setup(BODY);
     links(root)[0]!.click();
+    await settle();
     // ⚠ 編集していないのに「編集中は…」と出さない(レビュー指摘 ── 文言は phase で分ける)
     expect(d.getState().error ?? '', '押しても何も起きない').toContain('まだ出ていません');
     expect(d.getState().error ?? '', '編集していないのに編集の断り文が出た').not.toContain(
@@ -182,10 +196,11 @@ describe('目次を押すと本文へ飛ぶ(#493)', () => {
     );
   });
 
-  it('🔴 編集中は「編集中だから」と言う(1 面の編集では本文が描かれていない)', () => {
+  it('🔴 編集中は「編集中だから」と言う(1 面の編集では本文が描かれていない)', async () => {
     const { root, d } = setup(BODY);
     d.dispatch({ type: 'START_EDIT' });
     links(root)[0]!.click();
+    await settle();
     expect(d.getState().error ?? '', '押しても何も起きない').toContain('編集中');
   });
 
@@ -196,7 +211,7 @@ describe('目次を押すと本文へ飛ぶ(#493)', () => {
    *   display:none の要素への `scrollIntoView` が no-op ── 断りの分岐にも
    *   入らず、**無言の dead click** だった。
    */
-  it('🔴 畳んだ章の中の見出しへは、開いてから飛ぶ(#514)', () => {
+  it('🔴 畳んだ章の中の見出しへは、開いてから飛ぶ(#514)', async () => {
     const { root } = setup(BODY);
     const slugs = extractHeadingsFromMarkdown(BODY).map((h) => h.slug);
     const detail = root.querySelector<HTMLElement>('[data-pkc-region="detail"]')!;
@@ -214,6 +229,7 @@ describe('目次を押すと本文へ飛ぶ(#493)', () => {
     detail.append(chapter, para, section);
 
     links(root)[1]!.click();
+    await settle();
 
     expect(section.hidden, '開いていない(hidden のままでは飛べない)').toBe(false);
     expect(section.scrollIntoView, '飛んでいない').toHaveBeenCalled();
@@ -229,13 +245,14 @@ describe('目次を押すと本文へ飛ぶ(#493)', () => {
    * ⚠ 面は hidden で常駐する(center.ts)ので hit は見つかるが、
    *   隠れた面の中では `scrollIntoView` が no-op ── 無言の dead click だった。
    */
-  it('🔴 本文以外の面を開いたままなら、本文の面へ戻ってから飛ぶ(#514)', () => {
+  it('🔴 本文以外の面を開いたままなら、本文の面へ戻ってから飛ぶ(#514)', async () => {
     const { root, d } = setup(BODY);
     const slugs = extractHeadingsFromMarkdown(BODY).map((h) => h.slug);
     const planted = plantBody(root, slugs);
     d.dispatch({ type: 'SET_VIEW_MODE', mode: 'settings' });
 
     links(root)[0]!.click();
+    await settle();
 
     expect(d.getState().viewMode, '本文の面へ戻っていない').toBe('detail');
     expect(planted[0]!.scrollIntoView, '飛んでいない').toHaveBeenCalled();
@@ -246,7 +263,7 @@ describe('目次を押すと本文へ飛ぶ(#493)', () => {
    * `SET_VIEW_MODE` は履歴・ゴミ箱の panel を畳む副作用を持つ ──
    * 無条件に撃つと**目次を押しただけで履歴の一覧が閉じる**。
    */
-  it('🔴 本文の面で押したときは面の切替を撃たない(履歴の一覧が閉じない)', () => {
+  it('🔴 本文の面で押したときは面の切替を撃たない(履歴の一覧が閉じない)', async () => {
     const { root, d } = setup(BODY);
     const slugs = extractHeadingsFromMarkdown(BODY).map((h) => h.slug);
     const planted = plantBody(root, slugs);
@@ -256,6 +273,7 @@ describe('目次を押すと本文へ飛ぶ(#493)', () => {
     expect(d.getState().revisionPanel, '前提が崩れている(履歴が開いていない)').not.toBeNull();
 
     links(root)[0]!.click();
+    await settle();
 
     expect(planted[0]!.scrollIntoView, '飛んでいない').toHaveBeenCalled();
     expect(d.getState().revisionPanel, '目次を押しただけで履歴が閉じた').not.toBeNull();
@@ -266,13 +284,16 @@ describe('目次を押すと本文へ飛ぶ(#493)', () => {
    * ⚠ 畳みを管理する器は `detail-body-host` ── `hit.parentElement`(囲みの section)を
    *   渡すと外の畳みに届かず、#514 の無言がそのまま残る。
    */
-  it('🔴 囲みの中の見出しでも、外の畳みを開いて飛ぶ', () => {
+  it('🔴 囲みの中の見出しでも、外の畳みを開いて飛ぶ', async () => {
     const { root } = setup(BODY);
     const slugs = extractHeadingsFromMarkdown(BODY).map((h) => h.slug);
     const detail = root.querySelector<HTMLElement>('[data-pkc-region="detail"]')!;
     // 実物と同じ器(detail-body-host)の中に、畳んだ章と、囲みに包まれた節を置く
     const host = document.createElement('div');
     host.setAttribute('data-pkc-field', 'detail-body-host');
+    // ⚠ この台は「本文が描き終わっている」形なので、**描けた印も付ける**(#517)──
+    //    付けないと `waitPainted` が期限まで待ち、この test が別の理由で落ちる
+    host.setAttribute('data-pkc-painted', 'n1');
     const chapter = document.createElement('h1');
     chapter.id = slugs[0]!;
     chapter.setAttribute('data-pkc-folded', '');
@@ -287,9 +308,75 @@ describe('目次を押すと本文へ飛ぶ(#493)', () => {
     detail.append(host);
 
     links(root)[1]!.click();
+    await settle();
 
     expect(wrap.hidden, '囲みが開いていない(外の畳みに届いていない)').toBe(false);
     expect(section.scrollIntoView, '飛んでいない').toHaveBeenCalled();
     expect(chapter.hasAttribute('data-pkc-folded'), '畳みの印が残っている').toBe(false);
+  });
+});
+
+/**
+ * 🔴 **描き直しの途中でも、1 回の押しで届く**(#517)。
+ *
+ * ⚠ 本文の描画は worker の promise 越しなので、面を戻した直後は見出しが DOM に
+ *   無い ── 直す前はそこで「もう一度押してください」と断っていた
+ *   (**同じ押しを 2 回させる動線**)。
+ * 🔑 待つのは `data-pkc-painted` が今の lid になること。
+ */
+describe('描き直しを待ってから飛ぶ(#517)', () => {
+  const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+  function withHost(root: HTMLElement, slug: string, painted: string | null) {
+    const detail = root.querySelector<HTMLElement>('[data-pkc-region="detail"]')!;
+    const host = document.createElement('div');
+    host.setAttribute('data-pkc-field', 'detail-body-host');
+    if (painted !== null) host.setAttribute('data-pkc-painted', painted);
+    const h = document.createElement('h1');
+    h.id = slug;
+    h.scrollIntoView = vi.fn();
+    host.append(h);
+    detail.append(host);
+    return { host, h };
+  }
+
+  it('🔴 印がまだ来ていなければ待ち、来た瞬間に 1 回の押しで飛ぶ', async () => {
+    const { root } = setup(BODY);
+    const slug = extractHeadingsFromMarkdown(BODY)[0]!.slug;
+    const { host, h } = withHost(root, slug, null); // 描き直しの最中
+    root.querySelectorAll<HTMLElement>('[data-pkc-action="toc-jump"]')[0]!.click();
+    await settle();
+    expect(h.scrollIntoView, '描けていないのに飛んだ').not.toHaveBeenCalled();
+    // 本文が描き終わった
+    host.setAttribute('data-pkc-painted', 'n1');
+    await settle();
+    expect(h.scrollIntoView, '描けたのに飛ばない(2 回押させている)').toHaveBeenCalled();
+  });
+
+  it('⚠ 対照群 ── 既に描けているときは待たない(よくある道を遅くしない)', async () => {
+    const { root } = setup(BODY);
+    const slug = extractHeadingsFromMarkdown(BODY)[0]!.slug;
+    const { h } = withHost(root, slug, 'n1');
+    root.querySelectorAll<HTMLElement>('[data-pkc-action="toc-jump"]')[0]!.click();
+    await settle();
+    expect(h.scrollIntoView, '描けているのに待った').toHaveBeenCalled();
+  });
+
+  it('🔴 印が来ないままでも、期限で断り文が出る(永久に待たない)', async () => {
+    vi.useFakeTimers();
+    try {
+      const { root, d } = setup(BODY);
+      const slug = extractHeadingsFromMarkdown(BODY)[0]!.slug;
+      withHost(root, slug, null);
+      // ⚠ **見出しは消しておく** ── 期限切れの後に「見つからない」へ落ちることを見る
+      root.querySelector(`#${CSS.escape(slug)}`)!.remove();
+      root.querySelectorAll<HTMLElement>('[data-pkc-action="toc-jump"]')[0]!.click();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(d.getState().error ?? '', '期限で断らず、黙って止まった').toContain(
+        'まだ出ていません',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

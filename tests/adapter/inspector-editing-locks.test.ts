@@ -157,4 +157,48 @@ describe('編集中の右ペインの口(#513)', () => {
     expect(s.d.getState().error ?? '', '押した場所と文言が合っていない').toContain('日付を外');
     expect(s.d.getState().entryMetas.get('n1')!.date, '日付が外れた').toBe('2026-08-28');
   });
+
+  /**
+   * 🔴 **`phase` は `editing` だけではない**(#516 の「小さな嘘」)。
+   *
+   * ⚠ 直す前は `state.phase !== 'ready'` を一律「編集中は使えません ── 確定するか
+   *   取り消してください」と出していたので、**保存に失敗して保護に入った回**でも
+   *   同じ字が出ていた ── user は編集していないのに「確定するか取り消して」と
+   *   言われ、**存在しない編集を探す**。
+   * 🔑 字の出どころは `phaseDisabledNote` 1 か所(§7)。
+   */
+  it('🔴 保存に失敗しているときは「編集中」と言わない(存在しない編集を探させない)', () => {
+    const s = mounted({ date: '2026-08-28', withRelation: true });
+    // ⚠ error phase は「守るべき未達 commit が在る」ときだけ立つ ── その順で作る
+    s.d.dispatch({ type: 'START_EDIT' });
+    s.d.dispatch({ type: 'UPDATE_OPEN_BODY', body: '本文 2\n' });
+    s.d.dispatch({ type: 'COMMIT_EDIT' });
+    s.d.dispatch({ type: 'SYS_ERROR', error: 'disk' });
+    expect(s.d.getState().phase, '前提が崩れている(error phase になっていない)').toBe('error');
+    const set = s.q<HTMLButtonElement>('[data-pkc-action="set-entry-date"]');
+    expect(set.disabled, '保護中なのに押せる').toBe(true);
+    expect(set.title, '編集していないのに「編集中」と言った').not.toContain(REASON);
+    expect(set.title, '理由を言っていない').toContain('保存に失敗している');
+  });
+
+  it('🔴 断り文の側も phase で分ける(帯とボタンで別のことを言わない)', () => {
+    const s = mounted({ date: '2026-08-28' });
+    s.d.dispatch({ type: 'START_EDIT' });
+    s.d.dispatch({ type: 'UPDATE_OPEN_BODY', body: '本文 2\n' });
+    s.d.dispatch({ type: 'COMMIT_EDIT' });
+    s.d.dispatch({ type: 'SYS_ERROR', error: 'disk' });
+    const clear = s.q<HTMLButtonElement>('[data-pkc-action="clear-entry-date"]');
+    clear.disabled = false;
+    clear.click();
+    const said = s.d.getState().error ?? '';
+    expect(said, '編集していないのに「編集を終了」と言った').not.toContain('編集を終了');
+    expect(said, '押した場所と文言が合っていない').toContain('日付を外');
+    /**
+     * ⚠ **「本文が書き換わっていない」ことは、ここでは観測できない** ──
+     *   `entryMetas.date` は commit が本文から採り直すので、押す前も後も
+     *   同じ値になり、**門を外しても落ちない**(assert を書くと嘘になる)。
+     * 🔑 書込が起きないことは `tests/adapter/state.test.ts` の reducer 側で
+     *   **events が空であること**として見ている ── そちらが本物の観測点である。
+     */
+  });
 });

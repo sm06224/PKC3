@@ -200,6 +200,36 @@ export function viewModeLabel(view: ViewMode): string {
 }
 
 /**
+ * 🔴 **いま操作を受けられない理由**(#516)。`ready` なら `null`。
+ *
+ * ⚠ **`phase !== 'ready'` を「編集中」と読み替えない。** `phase` には
+ *   `'error'`(保存に失敗したときの保護)も `'initializing'` も在るので、
+ *   一律に「編集中は…」と出すと**嘘になる** ── user は編集していないのに
+ *   「確定するか取り消してください」と言われ、**存在しない編集を探す**。
+ * 🔑 断り文の出どころは**ここ 1 か所**にする(§7)── reducer と情報ペインで
+ *   別々に組み立てると、片方だけ直したときに食い違う。
+ */
+export function phaseBlockReason(phase: AppPhase): string | null {
+  if (phase === 'ready') return null;
+  if (phase === 'editing') return '編集を終了してから';
+  if (phase === 'error') return '保存をやり直すか取り消してから';
+  return '読み込みが終わってから';
+}
+
+/**
+ * 🔴 **押せないボタンの説明**(#516)。`ready` なら `null`。
+ * ⚠ 上の `phaseBlockReason` と**問いが違う**(あちらは帯の断り文、こちらは
+ *   ボタンに添える説明)。⚠ ただし**判定は同じ `phase`** なので、
+ *   両方をここへ並べて置く ── 片方だけ phase を増やし忘れるのを防ぐ。
+ */
+export function phaseDisabledNote(phase: AppPhase): string | null {
+  if (phase === 'ready') return null;
+  if (phase === 'editing') return '編集中は使えません ── 確定するか取り消してください';
+  if (phase === 'error') return '保存に失敗しているので使えません ── やり直すか取り消してください';
+  return '読み込み中は使えません';
+}
+
+/**
  * 🔴 **もう一度押したら本文へ戻る**(P8 段⑲ の規約を 1 か所へ寄せた。#277 段②-b)。
  *
  * 直す前の 設定 は行きっぱなしで、閉じる導線がどこにも無かった ── user から見ると
@@ -2634,8 +2664,32 @@ function reduceCore(
      * ⚠ `date: null` は**外す**(予定から落とす。消すのではない)。
      */
     case 'SET_TASK_DATE': {
-      // ready 限定(編集中の裏書換を作らない)。未知 lid は no-op
-      if (state.phase !== 'ready') return { state, events: [] };
+      /**
+       * 🔴 **断るなら、声に出して断る**(#516)。
+       *
+       * ⚠ 直す前は `events: []` で**黙って捨てて**いた ── 予定の面で札を掴んで
+       *   日に落とすと、**札が黙って元に戻る**(成功でも失敗でもない見た目)。
+       *   ⚠ 皮肉なことに `set-entry-date` の docstring 自身が
+       *   「**主の道は予定の面で掴んで落とすこと**」と書いており、
+       *   #513 / #515 で塞いだのは**主の道ではない 2 つ**だった。
+       * 🔑 **判定はここ 1 か所**にする(§7 ── `SET_VIEW_MODE` と同じ形)。
+       *   撃つ口は `SET_ENTRY_DATE` が 4 か所・`SET_TASK_DATE` が 2 か所あり、
+       *   呼び側に配ると**足すたびに取りこぼす**。
+       * 🔑 動詞は **`action.date` から導ける**(null = 外す)ので、1 か所でも
+       *   「外す / 付ける」を言い分けられる ── 呼び側ごとに文言を配らなくてよい。
+       * ⚠ **呼び名は分ける**(行の予定 / ノートの日付)── 一括りにすると
+       *   user は別のものを探す(#515 のレビューの指摘と同じ)。
+       */
+      const blocked = phaseBlockReason(state.phase);
+      if (blocked !== null)
+        return {
+          state: {
+            ...state,
+            error: `${blocked}${action.date === null ? '行の予定を外してください' : '行に予定を付けてください'}`,
+          },
+          events: [],
+        };
+      // 未知 lid は no-op(押した物が消えている ── 言うことが無い)
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
       return {
@@ -2828,8 +2882,17 @@ function reduceCore(
       };
     }
     case 'SET_ENTRY_DATE': {
-      // ready 限定(編集中の裏書換を作らない)。未知 lid は no-op
-      if (state.phase !== 'ready') return { state, events: [] };
+      // 🔴 **黙って捨てない**(#516)── 理由は上の `SET_TASK_DATE` に書いた
+      const blocked = phaseBlockReason(state.phase);
+      if (blocked !== null)
+        return {
+          state: {
+            ...state,
+            error: `${blocked}${action.date === null ? 'ノートの日付を外してください' : 'ノートに日付を付けてください'}`,
+          },
+          events: [],
+        };
+      // 未知 lid は no-op
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
       // ⚠ 同じ値なら何もしない(空の書込を投げない)
