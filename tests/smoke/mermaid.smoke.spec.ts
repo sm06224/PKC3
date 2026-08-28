@@ -634,3 +634,78 @@ test('🔴 一覧から選んだ UML の雛形は、そのまま図になる(#52
 
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+/**
+ * 🔴 **図を押すと別窓で実寸で開き、拡大縮小できる**(#527 案 A。user 指示 2026-08-28
+ * 「**別ウィンドウで実寸で開いて拡大縮小できるようにしてほしい**」)。
+ *
+ * ## 🔑 unit では原理的に見られない 3 つ
+ *
+ * 1. **別窓が本当に開くか**(happy-dom に窓は無い ── unit は差した偽物と話している)
+ * 2. 🔴 **実寸が「縮む前の大きさ」か** ── ここが**この機能が要る理由**である。
+ *    段組みでは段の高さに収めるため図を縮めてある(#527 の頭打ち)ので、
+ *    **画面の見かけより大きい**ことを見ないと「実寸で開いた」と言えない
+ * 3. **編集の面では奪わない** ── あちらは図を押すと**原文が開く**のが動線で、
+ *    ⚠ 実際、印を付けたまま測ったら**窓が開いて行は開かなかった**
+ *    (= 図の原文を直す道を丸ごと奪っていた)。実ブラウザで測って気づいた
+ */
+test('🔴 図を押すと別窓で実寸で開き、拡大縮小できる (#527 案 A)', async ({ page, context }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill('# 図\n\n```mermaid\ngraph TD\n  A["始め"]-->B["途中"]-->C["終わり"]\n```\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  const fig = page.locator('[data-pkc-field="detail-body"] [data-pkc-mermaid-src]');
+  await expect(fig).toHaveAttribute('data-pkc-mermaid-state', 'ready', { timeout: 30000 });
+
+  const img = page.locator('[data-pkc-field="detail-body"] [data-pkc-mermaid-src] img');
+  // ⚠ **押せることが画面に出ている**(カーソルと吹き出し)── 常設のボタンは増やさない
+  expect(await img.getAttribute('title'), '押せることが画面に出ていない').toContain('別の窓');
+  await expect(
+    page.locator('[data-pkc-field="detail-body"] [data-pkc-field="diagram-open"]'),
+    '常設のボタンが増えている(#501 と逆向き)',
+  ).toHaveCount(0);
+
+  // ① 押すと別窓が開く
+  const [win] = await Promise.all([context.waitForEvent('page'), img.click()]);
+  await win.waitForLoadState('domcontentloaded');
+
+  const g = await win.evaluate(() => {
+    const i = document.querySelector('[data-pkc-field="asset-window-image"]') as HTMLImageElement;
+    return {
+      natural: i?.naturalWidth ?? 0,
+      shown: Math.round(i?.getBoundingClientRect().width ?? 0),
+      bar: document.querySelector('[data-pkc-field="asset-window-zoom"]') !== null,
+    };
+  });
+  // ② 🔴 **実寸で出ている**(収めるために縮めていない)
+  expect(g.natural, '別窓の絵が読めていない(この検査は何も見ていない)').toBeGreaterThan(0);
+  expect(g.shown, `実寸で出ていない(実寸 ${g.natural} / 出ている ${g.shown})`).toBe(g.natural);
+  expect(g.bar, '拡大縮小の帯が無い').toBe(true);
+
+  // ③ 押すと本当に倍率が動く(帯が在るだけでは押せる証拠にならない)
+  await win.locator('[data-pkc-field="asset-window-zoom"] button', { hasText: '＋' }).click();
+  await expect
+    .poll(async () =>
+      win.evaluate(() =>
+        Math.round(
+          (
+            document.querySelector('[data-pkc-field="asset-window-image"]') as HTMLImageElement
+          ).getBoundingClientRect().width,
+        ),
+      ),
+    { message: '＋ を押しても大きくならない', timeout: 3_000 })
+    .toBeGreaterThan(g.shown);
+  await win.close();
+
+  /**
+   * ⚠ **編集の面(1 面)で奪っていないこと**は、この file では見られない ──
+   *   ここは `beforeEach` が **2 ペイン**を選んでいるので `editor-live` が存在しない
+   *   (1 稿目はここで測ろうとして落ち、それで気づいた)。
+   * 🔑 そちらは `live-editor.smoke.spec.ts`(既定 = 1 面)が守る。
+   */
+  expect(errors, errors.join('\n')).toEqual([]);
+});

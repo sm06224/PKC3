@@ -671,6 +671,7 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
+    ['2026-08-28-diagram-zoom', 'de5baf60'],
     ['2026-08-28-columns-inline-edit', 'd8b12951'],
     ['2026-08-28-uml-templates', '93cb2d2a'],
     ['2026-08-28-html-blocked-reason', '350d8307'],
@@ -690,7 +691,6 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-08-28-export-entry-html', '0a4896a5'],
     ['2026-08-28-columns-text-size', 'e518064e'],
     ['2026-08-28-paste-no-cap', '87111a1c'],
-    ['2026-08-28-read-columns', '5b5d0baf'],
     // ⚠ 配る前(まだ open な PR の中)に文面を直した ── 既読の user が居ないので
     //    新しい entry ではなく**この表を直す**(検査の文言どおり)
     // ⚠ 上限 20 を超えたので 2026-08-28 に落とした(原本は CHANGELOG)

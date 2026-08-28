@@ -1,5 +1,11 @@
 import { test, expect, type Page } from '@playwright/test';
-import { clickReal, modClickReal, createEntry, collectPageErrors } from './helpers';
+import {
+  clickReal,
+  modClickReal,
+  createEntry,
+  collectPageErrors,
+  gotoApp,
+} from './helpers';
 
 /**
  * 🔴 **1 面のライブエディタ**(2026-08-05。ライブエディタ S5。
@@ -1063,4 +1069,54 @@ test('🔴 末尾まで降りてから ↓ をもう 2 回 ── そこで初�
   ).toHaveValue('つぎの段落。');
 
   expect(errors).toEqual([]);
+});
+
+/**
+ * 🔴 **1 面では、図を押すと「その図の原文」が開く**(#527 案 A の反対側、2026-08-28)。
+ *
+ * ⚠ **これは実ブラウザに教わった穴である。** #527 案 A で「図を押すと別窓で実寸」を
+ *   入れたとき、印を**全部の面に**付けてしまい、測ったら
+ *   **窓が開いて行は開かなかった** ── つまり **1 面で図の原文を直す道を丸ごと奪って**いた。
+ * 🔑 読む面は「大きく見る」、1 面は「原文を直す」── **同じ絵でも面によって用が違う**。
+ * ⚠ 対照群として**窓が 1 枚も増えないこと**も見る ── 行が開いた上に窓も開く、
+ *   という二重発火を見逃さないため。
+ */
+test('🔴 1 面では、図を押すと原文が開く(別窓は開かない) (#527 案 A)', async ({
+  page,
+  context,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  const live = page.locator('[data-pkc-region="editor-live"]');
+  await clickReal(page, '[data-pkc-region="editor-live"]');
+  await live
+    .locator('[data-pkc-field="row-source"]')
+    .fill('# 図\n\n```mermaid\ngraph TD\n  A["始め"]-->B["終わり"]\n```\n');
+  await page.keyboard.press('Tab');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  // 読む面で焼き上がるのを待ってから、編集へ入る
+  await expect(
+    page.locator('[data-pkc-field="detail-body"] [data-pkc-mermaid-src]'),
+  ).toHaveAttribute('data-pkc-mermaid-state', 'ready', { timeout: 30000 });
+
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await expect(
+    page.locator('[data-pkc-region="editor-live"] [data-pkc-mermaid-src]'),
+  ).toHaveAttribute('data-pkc-mermaid-state', 'ready', { timeout: 30000 });
+
+  const img = page.locator('[data-pkc-region="editor-live"] [data-pkc-mermaid-src] img');
+  expect(
+    await img.getAttribute('data-pkc-action'),
+    '1 面でも図が別窓の押し所になっている(原文を直す道が消える)',
+  ).toBeNull();
+  await img.click();
+
+  const row = page.locator('[data-pkc-field="row-source"]');
+  await expect(row, '1 面で図を押しても原文が開かない').toBeVisible();
+  expect(await row.inputValue(), '開いたのが図の原文ではない').toContain('mermaid');
+  expect(context.pages().length, '行が開いたうえに別窓まで開いた').toBe(1);
+
+  expect(errors, errors.join('\n')).toEqual([]);
 });

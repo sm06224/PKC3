@@ -241,3 +241,137 @@ describe('添付の別窓', () => {
     expect(win.closed).toBe(true);
   });
 });
+
+/**
+ * 🔴 **図を実寸で見る**(#527 案 A。user 指示 2026-08-28
+ * 「**別ウィンドウで実寸で開いて拡大縮小できるようにしてほしい**」)。
+ *
+ * ⚠ **添付の見え方は 1 バイトも変えない**のが条件なので、
+ *   既定(`fit` を渡さない)と `'natural'` を**対で**見る ── 片方だけ見ると
+ *   「両方 natural になった」を見抜けない。
+ */
+describe('図の別窓(実寸 + 拡大縮小 ── #527 案 A)', () => {
+  const open = async (fit?: 'contain' | 'natural') => {
+    const win = fakeWindow();
+    await openAssetWindow({
+      kind: 'image',
+      lent: { url: 'blob:d', dispose: vi.fn() },
+      title: '図',
+      ...(fit === undefined ? {} : { fit }),
+      open: () => win,
+      // ⚠ PiP を明示で無効にしない ── 実装が `fit` で外していることを見たい
+      waitClose: () => new Promise(() => undefined),
+    });
+    return win;
+  };
+
+  it('🔴 既定は今までどおり「収めて見せる」(添付の見え方を変えない)', async () => {
+    const css = (await open()).document.querySelector('style')?.textContent ?? '';
+    expect(css, '既定なのに実寸になっている').toContain('object-fit:contain');
+    expect(css, '既定なのに上限が外れている').toContain('max-width:100%');
+  });
+
+  it('🔴 実寸のときは上限を当てない(縮めない)', async () => {
+    const css = (await open('natural')).document.querySelector('style')?.textContent ?? '';
+    expect(css, '実寸のはずが収める指定が残っている').not.toContain('object-fit:contain');
+    expect(css, '実寸のはずが上限で縮む').not.toContain('max-width:100%');
+    /**
+     * ⚠ **はみ出した分へ届くこと** ── 実寸は窓より大きいのが普通なので、
+     *   送れないと「大きく見えるが端が見えない」になる
+     *   (#527 / #523 で 2 度直した穴を、ここで作り直さない)。
+     */
+    expect(css, 'はみ出した所へ届く手段が無い').toContain('overflow:auto');
+  });
+
+  it('🔴 実寸のときだけ拡大縮小の帯が出る', async () => {
+    const withFit = await open('natural');
+    const bar = withFit.document.querySelector('[data-pkc-field="asset-window-zoom"]');
+    expect(bar, '拡大縮小の帯が無い').not.toBeNull();
+    /**
+     * 🔴 **ボタンで完結する**(不可侵指示「マウスだけで完結し、キーボードは近道」)
+     * ── `Ctrl+ホイール` だけにすると**キーボードが要る**ことになる。
+     */
+    const labels = [...bar!.querySelectorAll('button')].map((b) => b.textContent);
+    expect(labels, 'マウスだけで拡大縮小できない').toEqual(['−', '＋', '等倍']);
+    // ⚠ 対照群 ── 既定では出ない(添付の窓に帯を増やさない)
+    expect(
+      (await open()).document.querySelector('[data-pkc-field="asset-window-zoom"]'),
+      '添付の窓にも帯が出ている',
+    ).toBeNull();
+  });
+
+  /**
+   * 🔴 **押すと実際に倍率が動く**(帯が在るだけでは押せる証拠にならない)。
+   * ⚠ happy-dom は画像を読まないので `naturalWidth` は 0 ── **手で入れる**。
+   *   入れないと `apply()` が幅を書かず、**何を押しても 0 のまま**で
+   *   「動かない」と「そもそも測れていない」が区別できない(空振り)。
+   */
+  it('🔴 ＋ と − で幅が動き、等倍で戻る', async () => {
+    const win = await open('natural');
+    const img = win.document.querySelector<HTMLImageElement>(
+      '[data-pkc-field="asset-window-image"]',
+    )!;
+    Object.defineProperty(img, 'naturalWidth', { value: 400, configurable: true });
+    img.dispatchEvent(new Event('load'));
+    expect(img.style.width, '実寸が当たっていない(この検査は何も見ていない)').toBe('400px');
+
+    const press = (label: string): void => {
+      const b = [...win.document.querySelectorAll('button')].find((x) => x.textContent === label);
+      b?.dispatchEvent(new Event('click'));
+    };
+    press('＋');
+    expect(img.style.width, '＋ で大きくならない').toBe('500px');
+    press('−');
+    expect(img.style.width, '− で戻らない').toBe('400px');
+    press('−');
+    expect(img.style.width, '− で小さくならない').toBe('320px');
+    press('等倍');
+    expect(img.style.width, '等倍で実寸へ戻らない').toBe('400px');
+  });
+
+  /**
+   * ⚠ **0 倍にできない** ── 消えたら戻す手段が無くなる(押し所ごと消える)。
+   */
+  it('⚠ 小さくし続けても消えない', async () => {
+    const win = await open('natural');
+    const img = win.document.querySelector<HTMLImageElement>(
+      '[data-pkc-field="asset-window-image"]',
+    )!;
+    Object.defineProperty(img, 'naturalWidth', { value: 400, configurable: true });
+    img.dispatchEvent(new Event('load'));
+    const minus = [...win.document.querySelectorAll('button')].find((x) => x.textContent === '−')!;
+    for (let i = 0; i < 40; i++) minus.dispatchEvent(new Event('click'));
+    expect(Number.parseFloat(img.style.width), '小さくし続けたら消えた').toBeGreaterThan(0);
+  });
+
+  /**
+   * 🔴 **実寸のときは Document PiP を使わない**(#527 案 A)。
+   * ⚠ PiP の窓は小さく作られるので、「大きく見る」という目的そのものと逆になる
+   *   ── PDF を PiP から外してあるのと同じ理由である。
+   */
+  it('🔴 実寸のときは PiP を使わない(小さい窓では目的と逆)', async () => {
+    const pip = vi.fn(async () => fakeWindow());
+    const plain = fakeWindow();
+    await openAssetWindow({
+      kind: 'image',
+      lent: { url: 'blob:d', dispose: vi.fn() },
+      title: '図',
+      fit: 'natural',
+      requestPip: pip,
+      open: () => plain,
+      waitClose: () => new Promise(() => undefined),
+    });
+    expect(pip, '実寸なのに PiP の小さい窓へ出した').not.toHaveBeenCalled();
+    // ⚠ 対照群 ── 添付(既定)では今までどおり PiP を使う
+    const pip2 = vi.fn(async () => fakeWindow());
+    await openAssetWindow({
+      kind: 'image',
+      lent: { url: 'blob:a', dispose: vi.fn() },
+      title: 'a.png',
+      requestPip: pip2,
+      open: () => fakeWindow(),
+      waitClose: () => new Promise(() => undefined),
+    });
+    expect(pip2, '添付の窓が PiP を使わなくなった').toHaveBeenCalled();
+  });
+});
