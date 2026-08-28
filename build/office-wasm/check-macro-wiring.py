@@ -14,6 +14,17 @@
 | ② **登録** | `program/services/services.rdb` | 🔴 **0 件** |
 | ③ **実体** | `soffice.wasm` | 🔴 **0 件** |
 
+## 🔴 2026-08-28: `--disable-scripting` を外して焼いた結果(run 33137110175)
+
+| 段 | 前 | 後 |
+|---|---|---|
+| ① 定義 | 4/4 | **4/4** |
+| ② 登録 | **0/4** | 🟢 **3/3**(在りえない印を 1 つ外した ── 下の `REGISTRATION`) |
+| ③ 実体 | **0/4** | 🟢 **4/4**(印を実測で選び直した ── 下の `IMPLEMENTATION`) |
+
+⚠ **印を直すまでは「登録 3/4・実体 2/4」と出ていた** ── 揃っているのに
+揃っていないと読む形だった。**計器の誤りは、製品の欠陥の顔をして現れる。**
+
 🔑 **②が 0 件なのが決定的**である ── スクリプトの提供者が UNO に登録されて
 いないので、「ツール → マクロ」から**呼び出す先が解決できない**。
 ⚠ ①だけ在ると **メニューは出るのに動かない**(無言の dead click)。
@@ -44,33 +55,47 @@ from pathlib import Path
 
 # ── 段② 登録(UNO へ script provider が登録されているか)
 #    ⚠ `com.sun.star.script.provider` は**サービス名**、残りは実装名である。
+# 🔴 **2026-08-28: `ScriptProviderForBasicOnly` を外した ── そんな名前は上流に無い。**
+#    私が「それらしい名前」を並べただけだった。上流の実物
+#    (`scripting/source/basprov/basprov.cxx:149,160`)が名乗るのは 2 つで、
+#    どちらも下の `ScriptProviderForBasic` に含まれる:
+#      com.sun.star.comp.scripting.ScriptProviderForBasic
+#      com.sun.star.script.provider.ScriptProviderForBasic
+#    ⚠ **在りえない名前を数えると、揃っているのに「3/4」と出る** ── 進んでいる物を
+#    進んでいないように見せるので、直したのに直っていないと読む(#431 で 1 度読んだ)。
 REGISTRATION = (
     "ScriptProviderForBasic",
     "MasterScriptProviderFactory",
     "com.sun.star.script.provider",
-    "ScriptProviderForBasicOnly",
 )
 
 # ── 段③ 実体(Basic のエンジンがリンクされているか)
 #
-# 🔴 **印は「対照群で 0 件」であることを実測して選んだ**(2026-08-28)。
-#    ⚠ それらしい名前を並べるだけでは駄目 ── scripting **OFF** の一式で数えたら、
-#    `Sbx*` の一族は**軒並み 1 件**当たった(UNO の型名の側である):
+# 🔴 **印は「OFF で 0 件・ON で 1 件以上」を両側とも実測して選ぶ**(2026-08-28 に改訂)。
 #
-#    | 印 | scripting OFF での件数 | |
-#    |---|---|---|
-#    | `SbiRuntime` / `SbModule` / `StarBASIC` | **0** | ✅ 使える |
-#    | `SbiParser` / `SbiImage` / `SbMethod` / `SbUnoObject` | **0** | ✅ 使える |
-#    | `SbxObject` / `SbxArray` / `SbxVariable` / `SbxDimArray` | **1** | 🔴 使えない |
+#    ⚠ 1 稿目は **OFF 側しか測っていなかった**(ON の一式がまだ無かった)。
+#    その結果 `SbiRuntime` / `SbiParser` を入れてしまい、⚠ **ON でも 0 件**なので
+#    マクロが実際に入った回でも「2/4」と出た ── **入ったのに入っていないと読む**。
+#    🔑 対照群は**片側では足りない**:「OFF で 0」は必要条件でしかなく、
+#    「ON で出る」まで見て初めて**分ける印**になる(CLAUDE.md §1 の裏返し)。
 #
-#    ⚠ 1 件しか当たらない印を混ぜると、**入っていないのに「1/4 入った」**と出る
-#    ── 進んでいない物を進んで見せる向きなので、いちばん質が悪い。
+#    実測(OFF = `lo-wasm-imetrace` / LO 570a4c78、ON = run 33137110175 / LO 72012ca1):
+#
+#    | 印 | OFF | ON | |
+#    |---|---|---|---|
+#    | `SbModule` / `SbMethod` / `SbUnoObject` / `SbiImage` | **0** | **1** | ✅ 分かれる |
+#    | `StarBASIC` | **0** | **4** | ✅ 分かれる |
+#    | `SbiRuntime` / `SbiParser` | 0 | **0** | 🔴 どちらでも出ない(名前が wasm に残らない) |
+#    | `SbxObject` / `SbxVariable` / `SbxDimArray` | 1 | 1 | 🔴 別物に満たされている |
+#    | `SbxArray` | 1 | 2 | 🔴 同上(0 から始まらない) |
+#
 # 🔴 **`StarBasic`(小文字 asic)も使わない** ── 前回 67 件当たったのは UNO の型名側。
 IMPLEMENTATION = (
-    "SbiRuntime",
     "SbModule",
     "StarBASIC",
-    "SbiParser",
+    "SbiImage",
+    # ⚠ Basic ↔ UNO の橋。これが無いとマクロは書けても**アプリを動かせない**
+    "SbUnoObject",
 )
 
 # ── 段① 定義(詰め込んだ目録に Basic の資材が在るか)

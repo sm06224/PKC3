@@ -235,12 +235,16 @@ test('🔴 mac では Ctrl+英字 を Qt にも渡さない(文字だけが残�
  *
  * @param opts.badFont この名前のフォントで `FS.writeFile` を投げさせる(D-4 の検査)
  * @param opts.breakWasm `instantiateWasm` を実際に走らせて失敗させる(D-3 の検査)
- * @param opts.alienPack 目録に `cui/ui/querydialog.ui` を入れる(= 非 ODF を保存できる
- *   一式。#225)。⚠ 既定は**入れない** ── 古い一式のほうが既定である
+ * @param opts.alienPack 目録に確認ダイアログの `.ui` を入れる(= 非 ODF を保存できる
+ *   一式。#225)。⚠ 既定は**入れない** ── 古い一式のほうが既定である。
+ *   🔴 **在り処は 2 通りある**(2026-08-28、上流が `cui` → `svtools` へ移した):
+ *   `'svt'` = いま焼いた一式 / `'cui'` = **手元に取り置かれている古い一式**。
+ *   ⚠ 両方を走らせる ── 片方しか走らせないと、もう片方を切り捨てる変更が
+ *   **緑のまま通る**(CLAUDE.md §2「分岐の数だけ実際に走らせた記録を持つ」)。
  */
 async function seedFakePack(
   page: import('@playwright/test').Page,
-  opts: { badFont?: string; breakWasm?: boolean; alienPack?: boolean } = {},
+  opts: { badFont?: string; breakWasm?: boolean; alienPack?: 'svt' | 'cui' } = {},
 ): Promise<void> {
   await page.evaluate(async ({ badFont, breakWasm, alienPack }) => {
     const gz = async (s: string): Promise<Blob> =>
@@ -394,7 +398,7 @@ async function seedFakePack(
       CFG + '/modules/scalc/ui/recalcquerydialog.ui',
       CFG + '/sfx/ui/safemodequerydialog.ui',
     ];
-    if (alienPack) uiNames.push(CFG + '/cui/ui/querydialog.ui');
+    if (alienPack) uiNames.push(CFG + '/' + alienPack + '/ui/querydialog.ui');
     await put(
       'files',
       'soffice.data.js.metadata',
@@ -1687,7 +1691,7 @@ test('🔴 表示言語を変えたら、開き直す導線を出す', async ({ 
 async function openWithDoc(
   page: import('@playwright/test').Page,
   name: string,
-  opts: { alienPack?: boolean } = {},
+  opts: { alienPack?: 'svt' | 'cui' } = {},
 ): Promise<void> {
   await page.goto('/office/host.html');
   await seedFakePack(page, { alienPack: opts.alienPack });
@@ -1745,9 +1749,23 @@ test('🔴 対照群 ── 保存できる形式(.odt)では何も出さない'
  * 必ず入っている ── 判定を部分一致へ書き戻すと、この検査が落ちる。
  */
 test('🔴 確認ダイアログを持つ一式なら、.docx でも断らない', async ({ page }) => {
-  await openWithDoc(page, 'a.docx', { alienPack: true });
+  await openWithDoc(page, 'a.docx', { alienPack: 'svt' });
   await expect(page.locator('#nosave'), '保存できる一式なのに断りが出ている').toBeHidden();
   await expect(page.locator('#ro'), '保存できる一式なのに印が出ている').toBeHidden();
+});
+
+/**
+ * 🔴 **手元に取り置かれた古い一式を切り捨てない**(2026-08-28)。
+ *
+ * 上流が確認ダイアログを `cui/ui/` → `svt/ui/` へ移した。⚠ 一式は IDB に
+ * 取り置かれるので、**配り直しても入れ替えるまでは古い綴りのまま**である ──
+ * 新しい綴りだけを見るようにすると、その人は**保存できるのに断られる**。
+ * 🔑 上の 1 本と**対で読む** ── 片方だけだと、もう片方を落とす変更が緑で通る。
+ */
+test('🔴 古い在り処の確認ダイアログでも、.docx で断らない', async ({ page }) => {
+  await openWithDoc(page, 'a.docx', { alienPack: 'cui' });
+  await expect(page.locator('#nosave'), '古い一式を「保存できない」と言っている').toBeHidden();
+  await expect(page.locator('#ro'), '古い一式に読み取り専用の印が出ている').toBeHidden();
 });
 
 /**
@@ -1773,7 +1791,7 @@ test('🔴 office-format.js に判定の口が無い版が読まれたら、断�
     await route.fulfill({ status: 200, contentType: 'application/javascript', body });
   });
   // ⚠ **保存できる一式**を渡す ── それでも判定できないので断る、が正しい
-  await openWithDoc(page, 'a.docx', { alienPack: true });
+  await openWithDoc(page, 'a.docx', { alienPack: 'svt' });
   await expect(page.locator('#nosave'), '判定できないのに黙っている').toBeVisible();
   await expect(page.locator('#ro'), '判定できないのに印が出ていない').toBeVisible();
 });

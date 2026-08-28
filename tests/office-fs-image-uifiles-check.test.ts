@@ -23,7 +23,21 @@ import { join } from 'node:path';
 const SCRIPT = 'build/office-wasm/check-fs-image-uifiles.py';
 const YML = '.github/workflows/office-wasm-build.yml';
 const PREFIX = '    $(INSTROOT)/$(LIBO_SHARE_FOLDER)/config/soffice.cfg/';
-const ANCHOR = 'cui/ui/querydialog.ui';
+/**
+ * 🔴 **錨は script から読む。ここで綴り直さない**(CLAUDE.md §7)。
+ *
+ * ⚠ 2 か所に literal を置くと、片方だけ上流に追随して**両方緑のまま食い違う** ──
+ *   実際 2026-08-28 に上流が `cui/ui/` → `svt/ui/` へ移し、script を直したときに
+ *   ここが取り残された(この test が落ちて気づいた)。
+ * 🔑 綴りそのものは下の「錨の身元」1 本で pin する ── 機構の test は
+ *   **どんな綴りでも成り立つ**ように書く(値ではなく振る舞いを見る)。
+ */
+const ANCHOR = (() => {
+  const m = /^ANCHOR = "([^"]+)"$/m.exec(readFileSync(SCRIPT, 'utf-8'));
+  const got = m?.[1];
+  if (got === undefined) throw new Error(`${SCRIPT} から ANCHOR を読めない(綴りが変わった)`);
+  return got;
+})();
 
 /** 下限(900)を超える名前の束。⚠ 超えないと空振り防止のほうで落ちる。 */
 const names = (tag: string, n: number): string[] =>
@@ -129,6 +143,28 @@ describe('配った一式のダイアログ資源を検める', () => {
     expect(r.code, r.out).toBe(1);
     expect(r.out).toContain('配られたのに一覧に無い 1 件');
     expect(r.out).toContain(added);
+  });
+
+  /**
+   * 🔴 **錨の身元を 1 本で pin する。**(2026-08-28)
+   *
+   * ⚠ 上の `ANCHOR` は script から読むので、**script を書き換えれば黙って追随する** ──
+   *   それは「機構が動くこと」を見るには正しいが、**「正しい file を指しているか」は
+   *   誰も見ていない**ことになる(§1 の空振り)。だからここで綴りそのものを留める。
+   * 🔑 上流の実測(LO `570a4c78` → `72012ca1`):`cui/uiconfig/ui/querydialog.ui` は
+   *   **404** になり、実体は `svtools` へ移った ──
+   *   `include/svtools/querydialog.hxx` の `class QueryDialog` が
+   *   `u"svt/ui/querydialog.ui"` を読み、`svtools/UIConfig_svt.mk` が登録している。
+   *   配った一式でも確かめた(旧 `cui/ui/…` → 新 `svt/ui/…`)。
+   * ⚠ **また移ったらここが落ちる。** そのときは「保存が壊れた」と読む前に
+   *   上流の在り処を grep する(script の注記にその手順が書いてある)。
+   */
+  it('🔴 錨は、いま上流が読んでいる在り処を指している', () => {
+    expect(ANCHOR, '錨が上流の在り処と食い違っている').toBe('svt/ui/querydialog.ui');
+    const src = readFileSync(SCRIPT, 'utf-8');
+    // ⚠ 移動の履歴を消さない ── 消すと、次に落ちた人が同じ 1 時間を払う
+    expect(src, '古い在り処の記録が消えている').toContain('cui/ui/querydialog.ui');
+    expect(src, '落ちたときの調べ方が書かれていない').toContain('grep -rn');
   });
 
   /**

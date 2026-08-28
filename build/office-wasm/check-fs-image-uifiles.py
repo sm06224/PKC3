@@ -54,7 +54,26 @@ MARK = "/soffice.cfg/"
 # 防ぐ錨であり、同時に **#225 の当の file** である(ここが落ちたら保存が落ちる)。
 # 🔴 頭と尻を両方留める ── 尻だけだと `recalcquerydialog.ui` に、
 #    頭だけだと `querydialog.ui.bak` に当たる(CLAUDE.md §1、2026-08-24 に踏んだ)。
-ANCHOR = "cui/ui/querydialog.ui"
+#
+# 🔴 **2026-08-28: 上流がこの file を移したので、錨も移した。**
+#    実測(LO `570a4c78` → `72012ca1`):`cui/uiconfig/ui/querydialog.ui` は **404** になり、
+#    `cui/UIConfig_cui.mk` からも消えた。実体は **`svtools` へ移っている** ──
+#    `include/svtools/querydialog.hxx` の `class QueryDialog` が
+#    `GenericDialogController(pParent, u"svt/ui/querydialog.ui"_ustr, …)` を読み、
+#    `svtools/UIConfig_svt.mk` が登録している(= cfg 上の綴りは `svt/ui/`)。
+#    配った一式でも確かめた:旧 `cui/ui/…` 1 件 → 新 `svt/ui/…` 1 件。
+#
+# 🔑 **この錨が落ちたときの読み方**(次に上流が動かしたとき、ここを読む人へ):
+#    「保存が壊れた」と読む**前に**、`.ui` が**移っただけ**かを確かめる ──
+#    上流を `grep -rn 'querydialog.ui' include/ svtools/ cui/` で引き、
+#    `GenericDialogController(…, u"<どこか>/querydialog.ui"_ustr, …)` の綴りを見る。
+#    移っていたらここを直すだけでよい(ビルドは壊れていない)。
+#    ⚠ **移動を「消えた」と読むと、直っている物を追いかけて 1 回転捨てる。**
+ANCHOR = "svt/ui/querydialog.ui"
+
+# ⚠ かつての在り処。**判定には使わない**(受け入れると、また移ったときに気づけない)──
+#    落ちたときの案内に出すためだけに持つ。
+ANCHOR_WAS = ("cui/ui/querydialog.ui",)
 
 
 def _patch_module():
@@ -144,6 +163,17 @@ def main() -> int:
     if ANCHOR not in got:
         print(f"ERROR: {ANCHOR} が配る一式に無い ── 非 ODF の保存が"
               f"「一般的な I/O エラー」で落ちる(#225)", file=sys.stderr)
+        # 🔑 **「消えた」と「移った」を読み分ける材料をその場に出す。**
+        #    ⚠ これが無いと、次に読む人は「保存が壊れた」から調べ始める
+        #    (2026-08-28 に実際に上流が `cui/ui/` → `svt/ui/` へ移した)。
+        seen = sorted(n for n in got if n.endswith("/querydialog.ui"))
+        print(f"  一式に在る querydialog.ui: {seen if seen else '(1 件も無い)'}", file=sys.stderr)
+        for was in ANCHOR_WAS:
+            if was in got:
+                print(f"  ⚠ 古い在り処 {was} に在る ── 上流が**戻した**可能性がある",
+                      file=sys.stderr)
+        print("  🔑 上流を grep して在り処を確かめる:"
+              " grep -rn 'querydialog.ui' include/ svtools/ cui/", file=sys.stderr)
         fail = True
 
     if fail:
