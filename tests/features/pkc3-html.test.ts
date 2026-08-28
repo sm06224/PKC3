@@ -17,7 +17,6 @@ import type { ArchiveSource } from '../../src/features/export/pkc3-archive';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { DOCUMENT_GLOBAL_ATTRS } from '../../src/features/markdown/document-globals';
 import { WARN_CAP } from '../../src/features/export/warn-cap';
-import { MAX_FENCE_ASSET_BYTES } from '../../src/features/markdown/fence-asset';
 import { readFileSync } from 'node:fs';
 import { extractBodyCss } from '../../build/body-css';
 
@@ -1756,8 +1755,14 @@ describe('囲みが指す添付を焼き込む(#444 段②)', () => {
     expect(out.warnings.some((w) => w.includes('ast-gone'))).toBe(true);
   });
 
-  it('🔴 上限を超える添付は読まない(定常の話 ── 不可侵指示 2026-08-03)', async () => {
-    const big = new Uint8Array(MAX_FENCE_ASSET_BYTES + 1);
+  /**
+   * 🔴 **大きい添付も書き出しに乗る**(#492。user 指示 2026-08-27
+   * 「コードブロックフェンスでアセット埋め込みする際の上限バイトは不要」)。
+   * ⚠ かつて 2MB を超えると読まずに「大きすぎます」を出していた。
+   */
+  it('🔴 2MB を超える添付でも読んで書き出す(旧上限を撤廃した)', async () => {
+    const OLD_CAP = 2 * 1024 * 1024; // ⚠ 旧 `MAX_FENCE_ASSET_BYTES`(いまは存在しない)
+    const big = new Uint8Array(OLD_CAP + 1);
     big.fill(65);
     const out = await writePortableHtml(
       source({
@@ -1767,10 +1772,10 @@ describe('囲みが指す添付を焼き込む(#444 段②)', () => {
       NOW,
     );
     const html = await out.blob.text();
-    expect(html).toContain('data-pkc-fence-asset-pending');
-    expect(out.warnings.some((w) => w.includes('大きすぎます'))).toBe(true);
-    // ⚠ 空振り防止 ── 上限を外せば読めた大きさである(1 バイト超えているだけ)
-    expect(big.length).toBe(MAX_FENCE_ASSET_BYTES + 1);
+    // ⚠ 空振り防止 ── 旧上限を本当に超えている
+    expect(big.length, '入力が旧上限を超えていない').toBeGreaterThan(OLD_CAP);
+    expect(out.warnings.some((w) => w.includes('大きすぎます')), '大きさで断った').toBe(false);
+    expect(html, '読んだのに器のままになっている').not.toContain('data-pkc-fence-asset-pending');
   });
 
   it('⚠ 囲みが指していない添付は字にしない(全添付を読まない)', async () => {

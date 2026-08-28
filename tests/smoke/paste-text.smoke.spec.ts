@@ -71,6 +71,57 @@ async function openLiveRow(page: Page): Promise<void> {
 
 const ROW = '[data-pkc-region="editor-live"] [data-pkc-field="row-source"]';
 
+/**
+ * 🔴 **大きい Web ページでも貼れる**(#492。user 指示 2026-08-27
+ * 「**貼付やコードブロックフェンスでアセット埋め込みする際の上限バイトは不要。
+ * 現実問題、画像埋め込みのHTMLとか増えてるし、できないのは困る**」)。
+ *
+ * ⚠ かつて `text/html` が **1MB** を超えると**1 バイトも読まずに**平文へ落とし、
+ *   「大きすぎて読めませんでした」と出していた。画像を inline で持つ Web ページは
+ *   1MB を軽く超えるので、user はそこに当たり続けていた(2026-08-28 に再報告)。
+ *
+ * 🔴 **unit では原理的に届かない層**:1MB 超の HTML を**本物の `DOMParser`** で
+ *   解析して**実際に間に合うのか**。happy-dom の速さは Chromium の速さではない。
+ *
+ * 📏 実測(この箱、Chromium。押してから戻るまで = user が固まると感じる時間):
+ *   1MB **69ms** / 2MB **99ms** / 4MB **193ms** / 8MB **502ms** ── ほぼ線形。
+ *   🔑 **旧上限(1MB)が切っていたのは 69ms の地点**である = 守っていたものが無い。
+ */
+test('🔴 1MB を超えるウェブページでも、平文へ落とさず記法に戻る (#492)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await openLiveRow(page);
+
+  // 画像 inline 入りの Web ページを模す(data: URI が容量を食う実態に寄せる)
+  const img = `<img src="data:image/png;base64,${'A'.repeat(1200)}">`;
+  const unit = `<p>本文の段落です。${img}</p>`;
+  let html = '<h2>大きな見出し</h2>';
+  while (html.length < 1024 * 1024 + 1) html += unit;
+  // ⚠ **空振り防止** ── 旧上限を本当に超えている
+  expect(html.length, '入力が旧上限(1MB)を超えていない').toBeGreaterThan(1024 * 1024);
+
+  await pasteText(page, ROW, { html, plain: '平文に落ちたらこれが入る' });
+
+  const row = page.locator(ROW);
+  // 🔴 記法に戻っている = 読んだ(平文へ落ちていたら `##` は出ない)
+  await expect(row, '大きいだけで平文へ落とした(旧上限が残っている)').toHaveValue(
+    /## 大きな見出し/,
+    { timeout: 15_000 },
+  );
+  // ⚠ **対照群** ── 平文のほうが入っていない(取り違えていない)
+  await expect(row, '平文が入っている(横取りしていない)').not.toHaveValue(
+    /平文に落ちたらこれが入る/,
+  );
+  // 🔴 断り文を出していない
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '大きさを理由に断っている',
+  ).not.toContainText('大きすぎ');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
 test('🔴 ウェブページをコピーして貼ると、形のまま入って描かれる', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });

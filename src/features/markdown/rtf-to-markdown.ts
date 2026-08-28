@@ -90,8 +90,12 @@
  */
 import { escapeInline, gfmTable, isSafeHref, plainLooksLikeMarkdown } from './html-to-markdown';
 
-/** これより大きい `text/rtf` は**解析しない**(貼付でメインスレッドを止めない)。 */
-export const PASTE_RTF_MAX = 4 * 1024 * 1024;
+/**
+ * ⚠ **上限は撤廃した**(#492。user 指示 2026-08-27)── かつて 4MB を置き、
+ * 超えた貼付は**1 バイトも読まずに**平文へ落としていた。理由は
+ * 「貼付でメインスレッドを止めない」だったが、それは**こちら側の都合**である。
+ * 🔑 重い解析はワーカーへ逃がすのが筋(不可侵指示 2026-08-03。#492 段②)。
+ */
 
 /** クリップボードの 2 面。**両方**を見て介入するかを決める。 */
 export interface PastedRtf {
@@ -333,7 +337,7 @@ function paraIsCode(runs: readonly Run[]): boolean {
  */
 export function convertPastedRtf(clip: PastedRtf): string | null {
   const { rtf, plain } = clip;
-  if (rtf === '' || rtf.length > PASTE_RTF_MAX) return null;
+  if (rtf === '') return null;
   if (!/^\s*\{\s*\\rtf\d/.test(rtf)) return null;
   if (plainLooksLikeMarkdown(plain)) return null;
 

@@ -23,7 +23,6 @@ import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer, type AssetLender } from '../../src/adapter/ui/render/detail';
 import { stubRevisionOps } from '../helpers/revision-stub';
-import { MAX_FENCE_ASSET_BYTES } from '../../src/features/markdown/fence-asset';
 import { MarkdownClient } from '../../src/adapter/platform/render/markdown-client';
 import { initialState, reduce } from '../../src/adapter/state/app-state';
 
@@ -108,19 +107,28 @@ describe('#444 段① 囲みの中身を添付から取る', () => {
     expect(r.q('[data-pkc-fence-asset-pending]'), '器の字が残っている').toBeNull();
   });
 
-  it('🔴 大きすぎるものは読まず、**大きさを言う**', async () => {
+  /**
+   * 🔴 **大きくても読む**(#492。user 指示 2026-08-27)。
+   * ⚠ かつて 2MB を超えると**読まずに**「大きすぎます」を出していた。
+   */
+  it('🔴 2MB を超えるものでも読む(旧上限を撤廃した)', async () => {
+    const OLD_CAP = 2 * 1024 * 1024; // ⚠ 旧 `MAX_FENCE_ASSET_BYTES`(いまは存在しない)
     let read = 0;
-    const big = { size: MAX_FENCE_ASSET_BYTES + 1, text: async () => { read++; return 'x'; } };
+    const big = {
+      size: OLD_CAP + 1,
+      text: async () => {
+        read++;
+        return 'あ,い\n1,2';
+      },
+    };
     const r = setup(
       { e1: '```csv asset:ast-big\n```' },
       { lend: async () => null, getBlob: async () => big as unknown as Blob },
     );
     r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
-    await waitFor(() => r.q('[data-pkc-fence-asset-error]') !== null, '理由が出ない');
-    const why = r.q('[data-pkc-fence-asset-error]')!.textContent ?? '';
-    expect(why).toContain('大きすぎます');
-    expect(why, '上限が読めない').toContain('2.0 MB');
-    expect(read, '上限を超えているのに読んだ').toBe(0);
+    await waitFor(() => read > 0, '大きいだけで読まなかった');
+    expect(read, '読んでいない').toBe(1);
+    expect(r.q('[data-pkc-fence-asset-error]'), '大きさで断った').toBeNull();
   });
 
   it('⚠ 位置の印を、差し替えた要素へ写す(押した行の対応を失わない)', async () => {

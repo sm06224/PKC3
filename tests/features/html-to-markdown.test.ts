@@ -14,7 +14,6 @@ import {
   markdownFromBody,
   plainLooksLikeMarkdown,
   svgImage,
-  PASTE_HTML_MAX,
 } from '../../src/features/markdown/html-to-markdown';
 
 /** 本体だけを渡して変換する(介入判定を挟まない素の変換)。 */
@@ -210,10 +209,23 @@ describe('介入するかどうか(`convertPastedHtml`)', () => {
     expect(conv('<div>ただの文</div>', 'ちがう平文'), '形が無いのに横取りした').toBeNull();
   });
 
-  it('🔴 大きすぎる HTML は**解析しない**(貼付でメインスレッドを止めない)', () => {
-    const big = `<p>${'あ'.repeat(PASTE_HTML_MAX)}</p><h1>題</h1>`;
-    expect(big.length).toBeGreaterThan(PASTE_HTML_MAX);
-    expect(conv(big, 'x')).toBeNull();
+  /**
+   * 🔴 **大きくても読む**(#492。user 指示 2026-08-27
+   * 「上限バイトは不要 / 現実問題、画像埋め込みのHTMLとか増えてるし、できないのは困る」)。
+   *
+   * ⚠ かつて 1MB(`PASTE_HTML_MAX`)を超えると**1 バイトも読まずに**平文へ落としていた。
+   *   画像を inline で持つ Web ページは 1MB を軽く超えるので、user には
+   *   「大きすぎて読めませんでした」しか見えなかった。
+   * ⚠ **向きを裏返した検査**なので、空振り防止を置き直してある(#250 の教訓)──
+   *   ①入力が本当に旧上限を超えていること ②**読んだ証拠**(見出しが出ること)。
+   */
+  it('🔴 1MB を超える HTML でも解析する(旧上限を撤廃した)', () => {
+    const OLD_CAP = 1024 * 1024; // ⚠ 旧 `PASTE_HTML_MAX`(いまは存在しない)
+    const big = `<p>${'あ'.repeat(OLD_CAP)}</p><h1>題</h1>`;
+    expect(big.length, '入力が旧上限を超えていない(空振り)').toBeGreaterThan(OLD_CAP);
+    const out = conv(big, 'x');
+    expect(out, '大きいだけで読まなかった').not.toBeNull();
+    expect(out, '読んだが中身を落とした').toContain('# 題');
   });
 
   it('解析が失敗したら介入しない(黙って既定へ)', () => {
