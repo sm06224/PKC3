@@ -15,6 +15,7 @@
  */
 import { cacheKey, renderToPng, readPalette, type Raster, type RasterKey } from './mermaid-raster';
 import { ACTION_ICONS, iconSpan } from './icons';
+import { markViewBig } from './view-big';
 
 /** 1 つの器を埋めるのに要る情報。 */
 interface Pending {
@@ -242,17 +243,14 @@ export function hydrateDiagrams(
        *   ⚠ あちらは**図を押すとその原文が開く**(`RowSwap`)のが動線である。
        *   付けたまま測ったら、**窓が開いて行は開かなかった**
        *   ── つまり**図の原文を直す道を丸ごと奪っていた**。
-       *   🔑 判定はここ 1 か所(器がどちらの面に居るか)── 押し所の印も
-       *   カーソルも吹き出しも**まとめて付けない**ので、
-       *   「押せそうに見えるのに押せない」も起きない。
+       *   🔑 判定は `markViewBig` **1 か所**が持つ(2026-08-28 に本文の画像へ
+       *   広げたとき、ここに直書きすると同じ判定が 2 か所になった ── §7)。
        */
-      if (p.host.closest('[data-pkc-region="editor-live"]') === null) {
-        img.setAttribute('data-pkc-action', 'view-diagram');
-        img.style.cursor = 'zoom-in';
-        img.title = '押すと別の窓で実寸で開きます';
-      }
       p.host.textContent = '';
       p.host.append(img);
+      // ⚠ **繋いでから**印を付ける(`markViewBig` は面を `closest` で読むので、
+      //    繋ぐ前だと「どの面か」が分からない)
+      markViewBig(img);
       // ⚠ SVG で書き出せる種類だけ「保存」を出す(押せない導線を置かない)
       if (kind.savable) p.host.append(saveButton());
       p.host.setAttribute(`data-pkc-${kind.name}-state`, 'ready');

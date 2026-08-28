@@ -382,6 +382,78 @@ describe('編集中の面の asset hydrate(#250)', () => {
 });
 
 /**
+ * 🔴 **本文に貼った画像も、押すと別の窓で大きく見られる**(#527、2026-08-28)。
+ *
+ * ⚠ 図(mermaid)だけ先に着地させたので、**画像は押しても何も起きなかった** ──
+ * user の頼みは「対象は画像だけでなく**レンダリング結果全部**」である。
+ *
+ * 🔴 **面で分かれる**(ここが主張):
+ *
+ * | 面 | 絵を押すと |
+ * |---|---|
+ * | **読む面** | 別の窓で大きく見る(印が付く) |
+ * | **1 面の編集**(`editor-live`) | **その行の原文**が開く(印を付けない) |
+ *
+ * ⚠ 対照群(編集の面)を置かないと、**全部の面に印を付ける実装でも緑**になる
+ * ── それは 2026-08-28 に実ブラウザで踏んだ穴そのものである
+ * (窓が開いて行が開かず、**図の原文を直す道を丸ごと奪っていた**)。
+ */
+describe('本文の画像を別窓で大きく見る(#527)', () => {
+  afterEach(() => localStorage.removeItem('pkc3.editor-mode'));
+
+  const lender = (): AssetLender => ({
+    lend: async (key) => ({ url: `blob:${key}`, dispose: () => undefined }),
+    getBlob: async () => null,
+  });
+
+  it('🔴 読む面では、画像が押し所になる', async () => {
+    const { d, q } = setup({ e1: '![貼った絵](asset:k1)\n', e2: 'plain' }, lender());
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
+    await waitFor(
+      () => q('img[data-pkc-asset-key="k1"]')?.getAttribute('src') === 'blob:k1',
+      '読む面に画像が出ていない(この検査は何も見ていない)',
+    );
+    const img = q<HTMLImageElement>('img[data-pkc-asset-key="k1"]')!;
+    expect(img.getAttribute('data-pkc-action'), '押しても何も起きない').toBe('view-big');
+    // ⚠ **押せることが見えている**こと ── 印だけ付けて見た目が変わらないと、
+    //   user は押せると気づかない(押し所の印・カーソル・吹き出しは 1 組)
+    expect(img.style.cursor, '押せることが見た目に出ていない').toBe('zoom-in');
+    expect(img.title, '何が起きるか書いていない').toContain('別の窓');
+  });
+
+  it('🔴 1 面の編集では印を付けない(そこは原文が開く道である)', async () => {
+    localStorage.setItem('pkc3.editor-mode', 'live');
+    let s = reduce(initialState, {
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('e1')],
+      relations: [],
+    }).state;
+    s = reduce(s, { type: 'SELECT_ENTRY', lid: 'e1' }).state;
+    s = reduce(s, { type: 'BODY_LOADED', lid: 'e1', body: '![貼った絵](asset:k1)\n' }).state;
+    s = reduce(s, { type: 'START_EDIT' }).state;
+    const root = document.createElement('div');
+    document.body.append(root);
+    const detail = new DetailRenderer(buildShell(root).detail, lender(), new MarkdownClient());
+    detail.render(s);
+    await waitFor(
+      () =>
+        root.querySelector<HTMLImageElement>('img[data-pkc-asset-key="k1"]')?.getAttribute('src') ===
+        'blob:k1',
+      '編集の面に画像が出ていない(この検査は何も見ていない)',
+    );
+    const img = root.querySelector<HTMLImageElement>('img[data-pkc-asset-key="k1"]')!;
+    // ⚠ **器が編集の面に居ること**を先に確かめる(前提が崩れたまま緑にしない)
+    expect(
+      img.closest('[data-pkc-region="editor-live"]'),
+      '1 面の編集の面に居ない(この対照群は成り立っていない)',
+    ).not.toBeNull();
+    expect(img.hasAttribute('data-pkc-action'), '編集中に押すと原文でなく窓が開く').toBe(false);
+    expect(img.style.cursor, '押せそうに見えるのに押せない').not.toBe('zoom-in');
+  });
+});
+
+/**
  * 🔴 **編集中の面でも、借りた URL が積もらない**(#250 の着地前レビュー)。
  *
  * ⚠ 既存の寿命 test(上)は**読む面だけ**を見ており、今回足した 2 面の hydrate は

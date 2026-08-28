@@ -1820,32 +1820,35 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       })();
     },
     /**
-     * 🔴 **図を別窓で実寸で見る**(#527 案 A。user 指示 2026-08-28
+     * 🔴 **画面に出ている絵を、別窓で実寸で見る**(#527。user 指示 2026-08-28
      * 「**別ウィンドウで実寸で開いて拡大縮小できるようにしてほしい**」)。
+     * 図(mermaid)と**本文に貼った画像**の両方がここを通る。
      *
-     * ⚠ **焼き直さない** ── 画面に出ている PNG の bytes をそのまま渡す
+     * ⚠ **焼き直さない** ── 画面に出ている bytes をそのまま渡す
      *   (不可侵指示「SVG は書き出しのときだけ」)。
      * 🔴 **URL は貸し直す**(不可侵指示 2026-07-27「生成物は寿命終端で破棄」)──
      *   画面の `<img>` が握っている ObjectURL を**そのまま渡さない**。
      *   あちらは配色が変わった瞬間に revoke される(`mermaid-hydrate.ts`)ので、
      *   渡すと **別窓の絵が突然消える**。⚠ だから bytes を取り直して
      *   **別窓の寿命に紐づく URL** を作る(捨てるのは `openAssetWindow` が持つ)。
-     * ⚠ `windowName` は**図ごと**にしない ── 図に安定した id が無いので、
+     * ⚠ `windowName` は**絵ごと**にしない ── 図に安定した id が無いので、
      *   1 枚に固定して**開き直しは同じ窓へ**出す(積み上がらない)。
+     *   ⚠ 添付の窓(`viewAsset`)とは**別の名前**である ── 同じにすると、
+     *   添付を見ながら図を開いたときに**添付の窓が図に置き換わる**。
      */
-    viewDiagram: (src, title) => {
+    viewBig: (src, title) => {
       void (async () => {
         try {
           // ⚠ `blob:` の取り直しは同一 origin でしか通らない ── 通らなければ断る
-          const png = await (await fetch(src)).blob();
-          const url = URL.createObjectURL(png);
+          const bytes = await (await fetch(src)).blob();
+          const url = URL.createObjectURL(bytes);
           const win = await openAssetWindow({
             lent: { url, dispose: () => URL.revokeObjectURL(url) },
             title,
             kind: 'image',
             // 🔴 実寸で出し、拡大縮小できるようにする(既定の `'contain'` は添付用)
             fit: 'natural',
-            windowName: 'pkc3-diagram',
+            windowName: 'pkc3-view-big',
           });
           if (!win) {
             dispatcher.dispatch({
@@ -1854,7 +1857,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             });
           }
         } catch (e) {
-          dispatcher.dispatch({ type: 'OP_FAILED', error: `図を開けませんでした: ${String(e)}` });
+          dispatcher.dispatch({ type: 'OP_FAILED', error: `絵を開けませんでした: ${String(e)}` });
         }
       })();
     },

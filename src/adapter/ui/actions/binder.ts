@@ -446,16 +446,18 @@ export interface BinderServices {
    */
   viewAsset?(assetKey: string, name: string, mime: string): void;
   /**
-   * 🔴 **図を別窓で実寸で見る**(#527 案 A。user 指示 2026-08-28
+   * 🔴 **画面に出ている絵を、別窓で大きく見る**(#527。user 指示 2026-08-28
    * 「**別ウィンドウで実寸で開いて拡大縮小できるようにしてほしい**」)。
    *
-   * ⚠ `viewAsset` とは**別**である ── あちらは添付を鍵で引くが、こちらは
-   *   **もう画面に出ている PNG** をそのまま渡す(図は添付ではない)。
+   * ⚠ `viewAsset` とは**別**である ── あちらは添付を**鍵で引く**(添付の一覧から
+   *   押す道)。こちらは**もう画面に出ている絵**を渡す(図 / 本文に貼った画像)。
    * ⚠ **焼き直さない**(不可侵指示「SVG は書き出しのときだけ」)── 渡すのは
-   *   既に焼いてある bytes である。
+   *   既に画面に在る bytes である。
    * ⚠ 実体は adapter/platform 側(ObjectURL の寿命が絡むので binder は**呼ぶだけ**)。
+   * ⚠ 名前を `viewDiagram` から変えた(2026-08-28)── 本文に貼った**写真**にも
+   *   同じ道を使うので、「図」と呼ぶと**次に読む人が図だけだと思う**。
    */
-  viewDiagram?(src: string, title: string): void;
+  viewBig?(src: string, title: string): void;
   /** 未参照 asset の掃除(P4b)。確認・報告の UI も実体側の責務。 */
   purgeOrphanAssets?(): void;
   /** 注意の面を閉じる(P6c review H-2)。 */
@@ -3280,18 +3282,21 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (key !== null) services.dismissAlarm?.(key);
   },
   /**
-   * 🔴 **図を押したら、別窓で実寸で開く**(#527 案 A)。
+   * 🔴 **絵を押したら、別窓で大きく開く**(#527)。図(mermaid)と
+   * **本文に貼った画像**の両方が通る。
    *
-   * ⚠ **押し所は絵そのもの** ── ボタンを置くと図の数だけ常設の物が増える
+   * ⚠ **押し所は絵そのもの** ── ボタンを置くと絵の数だけ常設の物が増える
    *   (#501 と逆向き)。⚠ 押した絵の `src`(ObjectURL)を渡すだけで、
    *   **焼き直さない**。
    * ⚠ 題名は `alt` から採る ── 絵しか無い面で唯一の情報であり、
-   *   窓の題名として user に読める(`alt` は種類ごとに中身が書いてある)。
+   *   窓の題名として user に読める(図は種類、画像は user が書いた説明が入る)。
+   * 🔑 **どの絵に印を付けるかは `render/view-big.ts` が 1 か所で決める**
+   *   (編集の面では付けない ── あちらは原文が開くのが動線)。
    */
-  'view-diagram': (_dispatcher, target, services) => {
-    const img = target.closest<HTMLImageElement>('img[data-pkc-action="view-diagram"]');
+  'view-big': (_dispatcher, target, services) => {
+    const img = target.closest<HTMLImageElement>('img[data-pkc-action="view-big"]');
     if (!img || img.src === '') return;
-    services.viewDiagram?.(img.src, img.alt || '図');
+    services.viewBig?.(img.src, img.alt || '図');
   },
   /**
    * 図を保存する(P8 段⑦)。⚠ 画面は PNG だが、**書き出すのはベクタ**
