@@ -671,6 +671,7 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
+    ['2026-08-28-html-blocked-reason', '350d8307'],
     ['2026-08-28-column-rule', 'b79c168b'],
     ['2026-08-28-columns-cycle', '3a081472'],
     ['2026-08-28-columns-figure-fit', 'e56193ed'],
@@ -696,7 +697,6 @@ describe('お知らせの文面は固定(#220-7)', () => {
     // ['2026-08-27-heading-look', '160e73cd'],
     // ⚠ 上限 20 を超えたので 2026-08-28 に落とした(原本は CHANGELOG)
     // ['2026-08-27-paste-html-fence', '4e93ab87'],
-    ['2026-08-27-smart-membership', '96188f3b'],
     // ⚠ 上限 20 を超えたので 2026-08-28 に落とした(原本は CHANGELOG)
     // ['2026-08-27-collection-bar', 'c3788e4b'],
     // ⚠ 上限 20 を超えたので 2026-08-28 に落とした(原本は CHANGELOG)

@@ -43,6 +43,11 @@ import { parseFrontmatter, extractVars } from '../../src/features/markdown/front
  *      動いた golden は `snippet-figure-ref`(本文の画像)と `snippet-html-fence`(箱)。
  *      ⚠ `reform-stress-sample` の `pkc://asset/…` は**動かない** ── PKC 自身の
  *        scheme は要求を飛ばさないので「外」ではない(嘘の確認を出さないため)。
+ *      ⚠ **2026-08-28(#528 段③)に同じ箱がもう一度動いた**:見張りが
+ *        **画像以外の種別も**数えるようになった。直す前は `img-src` の違反だけを
+ *        数えて残りを捨てていたので、外の JavaScript / CSS / `fetch` が止まっても
+ *        **画面に 1 行も出ず**、CDN を前提にした中身は真っ白になった。
+ *        ⚠ 門は 1 つも開けていない(運ぶのは種別と件数だけ ── URL は載せない)。
  *   4. **行頭アラインの属性値を `end` → `opposite` にした**(2026-08-08、user 指摘)。
  *      裁定で `|>` の意味が「グローバルの寄せを反対にする」になった以上、logical end を
  *      表す `end` と同じ値にしておけない ── 説明的な形 `:::paragraph{align=end}` と

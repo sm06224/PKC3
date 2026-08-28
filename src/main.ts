@@ -2606,10 +2606,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 箱の画像を**同意する手段が無い**(聞く材料が無いので帯が出ない)。
    * ⚠ どのノートの箱かは **いま選んでいるノート**で決める ── 箱は選択中の
    *   ノートの本文にしか居ない(別ノートの箱は DOM に無い)。
+   *
+   * 🔴 **画像以外(`kinds`)もそのまま渡す**(#528 段③、2026-08-28)。
+   *   ⚠ 外部の JavaScript / CSS / `fetch` は**同意で開けられない**ので帯には
+   *     しないが、**止めたことは言う**(でないと CDN 前提の中身が真っ白になり、
+   *     理由が画面のどこにも無い)。⚠ この中継が種別を落としても、
+   *     受け側が optional なら tsc は黙る ── だから必須引数にしてある。
    */
-  installHtmlSandboxBlockedReporter((_iframe, blocked) => {
+  installHtmlSandboxBlockedReporter((_iframe, blocked, kinds) => {
     const lid = dispatcher.getState().selectedLid;
-    if (lid) center.noteBlockedBox(lid, blocked);
+    if (lid) center.noteBlockedBox(lid, blocked, kinds);
   });
   storeEffects = connectStoreEffects(dispatcher, createStorePort(client, cid), {
     // #148 組み込みタイル ── 一式が入っている端末にだけ Office のタイルを出す。

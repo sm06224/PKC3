@@ -296,7 +296,7 @@ describe('詳細ペインとの結線', () => {
     renderer.render(stateWith('```html\n<b>x</b>\n```\n'));
     await settle();
     expect(region.querySelector('[data-pkc-field="external-image-bar"]')).toBeNull();
-    renderer.noteBlockedBox('n1', 2);
+    renderer.noteBlockedBox('n1', 2, []);
     const bar = region.querySelector('[data-pkc-field="external-image-bar"]');
     expect(bar).not.toBeNull();
     expect(bar!.textContent).toContain('HTML の中で外部の画像が 2 件');
@@ -345,8 +345,68 @@ describe('詳細ペインとの結線', () => {
     const { region, renderer } = mount(policy);
     renderer.render(stateWith('```html\n<b>x</b>\n```\n'));
     await settle();
-    renderer.noteBlockedBox('other', 2);
+    renderer.noteBlockedBox('other', 2, []);
     expect(region.querySelector('[data-pkc-field="external-image-bar"]')).toBeNull();
+    region.remove();
+  });
+
+  /**
+   * 🔴 **画像以外が止まったことは、同意と関係なく出る**(#528 段③、2026-08-28)。
+   *
+   * ⚠ 外部の JavaScript / CSS / `fetch` は**同意で開けられない**ので、
+   *   「まだ答えていないか」で出し分けてはいけない ── 1 稿目はこの行を
+   *   同意の早期 return の**後ろ**に置いてしまい、一度「読み込まない」を
+   *   押した user には**二度と理由が出なかった**。
+   * 🔑 対照群を同じ it に置く(**帯のほうは出ない**)── 置かないと
+   *   「理由が出た」のか「同意の判定ごと壊れた」のか見分けられない。
+   */
+  it('答えた後でも、画像以外が止まった理由は出る(帯は出ない)', async () => {
+    const policy = new ExternalImagePolicy(fakeStore('ask'));
+    const { region, renderer } = mount(policy);
+    renderer.render(stateWith('```html\n<b>x</b>\n```\n'));
+    await settle();
+    policy.answer('n1', 'deny');
+    renderer.noteBlockedBox('n1', 0, ['script-src-elem', 'style-src-elem']);
+    const note = region.querySelector('[data-pkc-field="sandbox-blocked-note"]');
+    expect(note, '画像以外が止まった理由が 1 行も出ていない').not.toBeNull();
+    expect(note!.textContent).toContain('外部のプログラム');
+    expect(note!.textContent).toContain('外部の見た目');
+    // 対照群: 同意を聞く帯のほうは、答えた後なので出ない
+    expect(region.querySelector('[data-pkc-field="external-image-bar"]')).toBeNull();
+    region.remove();
+  });
+
+  /**
+   * ⚠ 申告は**同じ箱から何度も来る**(件数は累計)── 種別は**足していく**。
+   * 🔑 上書きにすると、後から来た申告で**先に止まった種別が消える**
+   *   (script が止まった後に CSS が止まると、script の行が画面から消える)。
+   */
+  it('種別は足していく(後から来た申告で前のが消えない)', async () => {
+    const policy = new ExternalImagePolicy(fakeStore('ask'));
+    const { region, renderer } = mount(policy);
+    renderer.render(stateWith('```html\n<b>x</b>\n```\n'));
+    await settle();
+    renderer.noteBlockedBox('n1', 0, ['script-src-elem']);
+    renderer.noteBlockedBox('n1', 0, ['connect-src']);
+    const note = region.querySelector('[data-pkc-field="sandbox-blocked-note"]');
+    expect(note!.textContent).toContain('外部のプログラム');
+    expect(note!.textContent).toContain('外部との通信');
+    region.remove();
+  });
+
+  /**
+   * ⚠ **画像の申告は種別に混ぜない** ── `img-src` は同意で開けられる別の話で、
+   *   帯のほうが受け持つ。混ざると「開けられません」と書いた行が
+   *   同意を聞く帯の**隣に並ぶ**ので、user は押す手を止める。
+   */
+  it('画像だけ止まった箱では、理由の行は出ない(帯だけ出る)', async () => {
+    const policy = new ExternalImagePolicy(fakeStore('ask'));
+    const { region, renderer } = mount(policy);
+    renderer.render(stateWith('```html\n<b>x</b>\n```\n'));
+    await settle();
+    renderer.noteBlockedBox('n1', 2, ['img-src']);
+    expect(region.querySelector('[data-pkc-field="sandbox-blocked-note"]')).toBeNull();
+    expect(region.querySelector('[data-pkc-field="external-image-bar"]')).not.toBeNull();
     region.remove();
   });
 
@@ -356,7 +416,7 @@ describe('詳細ペインとの結線', () => {
     renderer.render(stateWith('```html\n<b>x</b>\n```\n'));
     await settle();
     policy.answer('n1', 'deny');
-    renderer.noteBlockedBox('n1', 2);
+    renderer.noteBlockedBox('n1', 2, []);
     expect(region.querySelector('[data-pkc-field="external-image-bar"]')).toBeNull();
     region.remove();
   });

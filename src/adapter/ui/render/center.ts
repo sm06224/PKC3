@@ -231,8 +231,17 @@ export class CenterRouter {
     this.detail.invalidate();
   }
 
-  /** 箱が「画像を CSP で止めた」と申告してきた ── 帯だけ出し直す。 */
-  noteBlockedBox(lid: string, blocked: number): void {
-    this.detail.noteBlockedBox(lid, blocked);
+  /**
+   * 箱が「CSP で止めた」と申告してきた ── 帯だけ出し直す。
+   *
+   * 🔴 **`kinds` を optional にしない**(#528 段③、2026-08-28 に踏んだ)。
+   *   ⚠ 初稿は `detail` 側だけ `kinds: readonly string[] = []` と既定を持たせたので、
+   *     **この中継と `main.ts` が種別を落としたまま tsc が黙った** ── 箱は正しく
+   *     申告し、帯を組む側も正しく組むのに、**間の 2 段で消えて画面には何も出ない**。
+   *   🔑 必須にすると、配線を 1 段でも落とした瞬間に型で落ちる(CLAUDE.md §7
+   *     「待ちの口は optional にしない」の同じ形)。
+   */
+  noteBlockedBox(lid: string, blocked: number, kinds: readonly string[]): void {
+    this.detail.noteBlockedBox(lid, blocked, kinds);
   }
 }
