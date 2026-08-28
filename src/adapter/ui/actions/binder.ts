@@ -46,6 +46,8 @@ import { sectionAt } from '@features/markdown/append-target';
 import { isTextScale } from '@features/text-scale';
 import { chooseTextScale } from '@adapter/ui/render/text-scale';
 import { isReadColumns } from '@features/read-columns';
+import { isColumnRule } from '@features/column-rule';
+import { chooseColumnRule } from '@adapter/ui/render/column-rule';
 import { chooseReadColumns, cycleReadColumns } from '@adapter/ui/render/read-columns';
 import { appendModeOf } from '@adapter/ui/render/append-box';
 import { frontmatterLineCount } from '@features/markdown/frontmatter';
@@ -3964,6 +3966,17 @@ const ACTIONS: Record<string, ActionHandler> = {
         ? target.value
         : target.getAttribute('data-pkc-read-columns-value');
     if (v !== null && isReadColumns(v)) chooseReadColumns(document.documentElement, v);
+  },
+  /**
+   * 🔴 **段の境界線の濃さ**(#525)。⚠ 既定は現行そのままなので、
+   * 選ばない user の見え方は 1 バイトも変わらない。
+   */
+  'set-column-rule': (_dispatcher, target) => {
+    const v =
+      target instanceof HTMLSelectElement
+        ? target.value
+        : target.getAttribute('data-pkc-column-rule-value');
+    if (v !== null && isColumnRule(v)) chooseColumnRule(document.documentElement, v);
   },
   'set-flag': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)

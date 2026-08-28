@@ -19,6 +19,8 @@ import { PAGE_FORMATS } from '@features/page-format';
 import { currentPageFormat } from './page-format';
 import { EDITOR_MODES } from '@features/editor-mode';
 import { TEXT_SCALES } from '@features/text-scale';
+import { COLUMN_RULES } from '@features/column-rule';
+import { currentColumnRule } from './column-rule';
 import {
   effectiveColumns,
   minWidthForColumns,
@@ -280,6 +282,38 @@ export class SettingsRenderer {
       '表と図は段の幅まで縮むので、広く見たいときは段を減らしてください。' +
       '編集に入っている間は 1 段に戻ります。';
 
+    /**
+     * 🔴 **段の境界線の濃さ**(#525。user 報告 2026-08-28
+     * 「**段組の境界線を見たい。今は境界がわかりにくい**」)。
+     *
+     * ⚠ 実測すると、明るいテーマで**コントラスト 1.52 : 1** ── 文字以外の要素の
+     *   下限(3 : 1)を大きく下回っていた。
+     * 🔑 それでも**こちらで濃さを決めない** ── user 指示 2026-08-28
+     *   「**user が選べる形にできるなら、そちらを先に出す**」に従い、
+     *   **既定は現行そのまま**にして選べるようにする(#504 と同じ作法)。
+     */
+    const rt = document.createElement('dt');
+    rt.textContent = '段の境界線';
+    const rd = document.createElement('dd');
+    const rselect = document.createElement('select');
+    rselect.setAttribute('data-pkc-action', 'set-column-rule');
+    rselect.setAttribute('data-pkc-field', 'column-rule-select');
+    rselect.setAttribute('aria-label', '段の境界線');
+    for (const c of COLUMN_RULES) {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = c.label;
+      rselect.append(opt);
+    }
+    rd.append(rselect);
+    const rnote = document.createElement('p');
+    rnote.setAttribute('data-pkc-field', 'settings-note');
+    rnote.textContent =
+      '段組みで読んでいるときの、段と段のあいだの線です。' +
+      '既定は細い線で、いまと同じ見え方です。' +
+      '見分けにくいときは「はっきり」にしてください。1 段で読んでいるときは関係ありません。';
+    rd.append(rnote);
+
     const tnote = document.createElement('p');
     tnote.setAttribute('data-pkc-field', 'settings-note');
     // ⚠ **何が動いて、何が動かないか**を書く(押した後に探させない)
@@ -291,6 +325,8 @@ export class SettingsRenderer {
     dl.append(tt, td);
     cd.append(cnote);
     dl.append(ct, cd);
+    // ⚠ 段組みの**すぐ下**に置く(効くのは段組みのときだけなので、離すと結び付かない)
+    dl.append(rt, rd);
 
     /**
      * ✏️ **編集の仕方**(#104 第 2 弾。user 裁定 2026-08-08「既定でONかつ
@@ -934,6 +970,13 @@ export class SettingsRenderer {
     const cur = currentReadColumns(document.documentElement);
     if (select && select.value !== cur) select.value = cur;
     this.syncColumnsEffective(cur);
+    // ⚠ 段の線も**同じ 1 か所**で映す ── 器は 1 度しか組まないので、映さないと
+    //    別の面へ行って戻ったとき古い値が見える(§7)
+    const rule = this.region.querySelector<HTMLSelectElement>(
+      '[data-pkc-field="column-rule-select"]',
+    );
+    const curRule = currentColumnRule(document.documentElement);
+    if (rule && rule.value !== curRule) rule.value = curRule;
   }
 
   /**

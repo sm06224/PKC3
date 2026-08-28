@@ -1010,7 +1010,13 @@ select:focus-visible {
    */
   columns: calc(1em * 448 / 13) var(--pkc-read-cols, 1);
   column-gap: 16px;
-  column-rule: 1px solid var(--border);
+  /* 🔴 **段の境目の線**(#525)。⚠ **濃さは user が選ぶ**
+   * (`features/column-rule.ts` ── 既定 `thin` はこの予備の値そのまま)。
+   * ⚠ 予備の値を必ず書く ── 定義の無い `var()` は**宣言ごと捨てられる**ので、
+   *   書かないと**線が 1 本も出ない**(#465 / #466 で実際に出荷した穴)。
+   * ⚠ `--border` を直接濃くしてはいけない ── この変数は 90 か所で使われており、
+   *   画面全体の 1px 境界も見出しの下線も同じものである。 */
+  column-rule: var(--pkc-col-rule, 1px solid var(--border));
   overflow-x: auto;
   overflow-y: hidden;
   /* ⚠ 端まで送ったときに、後ろの面まで一緒に動かない */

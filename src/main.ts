@@ -9,6 +9,7 @@ import { connectStoreEffects, type StoreEffects } from '@adapter/state/store-eff
 import { tileSelectsEntry } from '@features/launcher/tiles';
 import { appEditorMode } from '@adapter/ui/render/editor-mode';
 import { applyTextScale, initialTextScale } from '@adapter/ui/render/text-scale';
+import { applyColumnRule, initialColumnRule } from '@adapter/ui/render/column-rule';
 import {
   applyReadColumns,
   initialReadColumns,
@@ -584,6 +585,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * ⚠ **保存しない**(当てるだけ)── 保存は user が選んだときだけ。
    */
   applyReadColumns(document.documentElement, initialReadColumns());
+  /**
+   * 🔴 **段の境界線の濃さも枠より先**(#525。理由は上と同じ)。
+   * ⚠ **保存しない**(当てるだけ)── 保存は user が選んだときだけ。
+   */
+  applyColumnRule(document.documentElement, initialColumnRule());
   const regions = buildShell(root);
   /**
    * 🔴 **縦のホイールを横送りへ読み替える**(#505)。⚠ これが無いと段組みは
