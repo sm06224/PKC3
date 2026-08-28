@@ -8,7 +8,7 @@
  * (`{\*\generator …}` / `{\stylesheet …}` / `{\listtext …}` / `\uN\'3f`)を写す。
  */
 import { describe, expect, it } from 'vitest';
-import { convertPastedRtf, PASTE_RTF_MAX } from '../../src/features/markdown/rtf-to-markdown';
+import { convertPastedRtf } from '../../src/features/markdown/rtf-to-markdown';
 
 /** 実物の頭 ── フォント表と生成器の印が必ず付く。 */
 const HEAD =
@@ -50,10 +50,17 @@ describe('介入しない場面', () => {
     expect(convertPastedRtf({ rtf: notRtf, plain: 'これは RTF ではない' })).toBeNull();
   });
 
-  it('大きすぎる RTF は解析しない(貼付でメインスレッドを止めない)', () => {
-    const huge = rtf(String.raw`\b ` + 'あ'.repeat(PASTE_RTF_MAX));
-    expect(huge.length).toBeGreaterThan(PASTE_RTF_MAX); // 空振り防止
-    expect(convertPastedRtf({ rtf: huge, plain: 'あ' })).toBeNull();
+  /**
+   * 🔴 **大きくても読む**(#492。user 指示 2026-08-27)。
+   * ⚠ かつて 4MB(`PASTE_RTF_MAX`)を超えると 1 バイトも読まなかった。
+   */
+  it('🔴 4MB を超える RTF でも解析する(旧上限を撤廃した)', () => {
+    const OLD_CAP = 4 * 1024 * 1024; // ⚠ 旧 `PASTE_RTF_MAX`(いまは存在しない)
+    const huge = rtf(String.raw`\b 見出し\b0\par ` + 'あ'.repeat(OLD_CAP));
+    expect(huge.length, '入力が旧上限を超えていない(空振り)').toBeGreaterThan(OLD_CAP);
+    const out = convertPastedRtf({ rtf: huge, plain: 'x' });
+    expect(out, '大きいだけで読まなかった').not.toBeNull();
+    expect(out, '読んだが中身を落とした').toContain('見出し');
   });
 
   it('🔴 平文が既に markdown 原文なら触らない(原文のほうが正確)', () => {

@@ -14,7 +14,6 @@ import { humanBytes } from '../../src/features/human-bytes';
 import { describe, expect, it } from 'vitest';
 import {
   FENCE_ASSET_PREFIX,
-  MAX_FENCE_ASSET_BYTES,
   takeFenceAsset,
 } from '../../src/features/markdown/fence-asset';
 import type { SourceRange } from '../../src/features/markdown/markdown-render';
@@ -64,7 +63,7 @@ describe('見出しから添付を読む', () => {
   it('大きさは読める字になる', () => {
     expect(humanBytes(512)).toBe('512 B');
     expect(humanBytes(2048)).toBe('2.0 KB');
-    expect(humanBytes(MAX_FENCE_ASSET_BYTES)).toBe('2.0 MB');
+    expect(humanBytes(2 * 1024 * 1024)).toBe('2.0 MB');
   });
 });
 

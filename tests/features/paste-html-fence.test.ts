@@ -16,7 +16,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   pastedHtmlFence,
-  PASTE_HTML_MAX,
 } from '../../src/features/markdown/html-to-markdown';
 import { choosePaste } from '../../src/features/markdown/paste-source';
 
@@ -63,9 +62,19 @@ describe('html をそのまま囲みにする', () => {
     expect(pastedHtmlFence(`  <meta charset='utf-8'>  `)).toBeNull();
   });
 
-  /** ⚠ 上限は変換と**同じ値**を使う(2 つ持たない)。 */
-  it('⚠ 大きすぎるものは囲みにしない', () => {
-    expect(pastedHtmlFence('<p>' + 'x'.repeat(PASTE_HTML_MAX) + '</p>')).toBeNull();
+  /**
+   * 🔴 **大きくても囲みにする**(#492。user 指示 2026-08-27)。
+   * ⚠ かつて 1MB を超えると囲みにもせず平文へ落としていた ──
+   *   この設定を選ぶ user は「変換すると落ちるものが在る」と言っているのだから、
+   *   **大きいページこそ**囲みにしたい相手である。
+   */
+  it('🔴 1MB を超えるものでも囲みにする(旧上限を撤廃した)', () => {
+    const OLD_CAP = 1024 * 1024; // ⚠ 旧 `PASTE_HTML_MAX`(いまは存在しない)
+    const html = '<p>' + 'x'.repeat(OLD_CAP) + '</p>';
+    expect(html.length, '入力が旧上限を超えていない(空振り)').toBeGreaterThan(OLD_CAP);
+    const out = pastedHtmlFence(html);
+    expect(out, '大きいだけで囲みにしなかった').not.toBeNull();
+    expect(out, '囲みの形になっていない').toContain('```');
   });
 });
 
@@ -121,25 +130,28 @@ describe('設定「ウェブページの形をそのまま」', () => {
   });
 
   /**
-   * 🔴 **「大きすぎ」と「中身が空」を混ぜない**(#487)。
+   * 🔴 **大きさで断らない**(#492。user 指示 2026-08-27)。
    *
-   * ⚠ 1 稿目のこの test は `htmlFence: null` を**上限の内側の大きさ**で作りながら
-   *   「大きすぎ」と出ることを期待していた ── **不正確な実装をそのまま留めていた**。
-   *   `null` の理由は 2 つある(上限超過 / `<meta charset>` を外したら空)ので、
-   *   **大きさを与えないと、どちらの話なのか決まらない**。
+   * ⚠ ここは 2026-08-27 まで**逆のことを守っていた**(#487「大きすぎたときは、そう書く」)。
+   *   user の指示はその手前で「**そもそも断るな**」である ── この設定を選ぶ user は
+   *   「変換すると落ちるものが在る」と言っているのだから、**大きいページこそ**
+   *   囲みにしたい相手である。
+   * ⚠ **向きを裏返したので、見るものも裏返した** ── 「呼んでいない」ではなく
+   *   **呼んで使ったこと**(`called` と `used`)を見る。
    */
-  it('⚠ 大きすぎたときは、そう書く', () => {
+  it('🔴 旧上限を超えていても、囲みにする', () => {
+    const OLD_CAP = 1024 * 1024; // ⚠ 旧 `PASTE_HTML_MAX`(いまは存在しない)
     const r = run({ htmlFence: '```html\n<p>a</p>\n```' }, {
-      html: 1024 * 1024 + 1,
+      html: OLD_CAP * 8,
       rtf: 0,
       plain: 50,
     });
-    expect(r.attempt.used).toBe('plain');
-    expect(r.attempt.skipped.some((s) => s.kind === 'html' && s.why.includes('大きすぎて'))).toBe(
-      true,
-    );
-    // 🔴 読んでいないなら、囲みを組もうともしていないはず
-    expect(r.called, '上限を超えたのに囲みを組もうとしている').not.toContain('htmlFence');
+    expect(r.attempt.used, '大きいだけで平文へ落とした').toBe('html-fence');
+    expect(r.called, '囲みを組もうとしていない').toContain('htmlFence');
+    expect(
+      r.attempt.skipped.some((s) => s.why.includes('大きすぎ')),
+      '大きさを理由に断っている',
+    ).toBe(false);
   });
 
   it('⚠ 上限の内側で空だったときは「空」と書く(大きすぎ とは書かない)', () => {

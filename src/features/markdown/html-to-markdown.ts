@@ -30,8 +30,19 @@ import { escapeAssetLabel, escapeAssetTarget } from '../asset/asset-ref-format';
 /** DOM の生成手段(worker / node には `DOMParser` が無いので注入可能にする)。 */
 export type HtmlParse = (html: string) => Document;
 
-/** これより大きい `text/html` は**解析しない**(貼付でメインスレッドを止めない)。 */
-export const PASTE_HTML_MAX = 1024 * 1024;
+/**
+ * ⚠ **上限は撤廃した**(#492。user 指示 2026-08-27
+ * 「**貼付やコードブロックフェンスでアセット埋め込みする際の上限バイトは不要。
+ * 現実問題、画像埋め込みのHTMLとか増えてるし、できないのは困る**」)。
+ *
+ * かつて `PASTE_HTML_MAX = 1MB` を置き、超えた貼付は**1 バイトも読まずに**
+ * 平文へ落としていた。⚠ 画像を inline で持つ今どきの Web ページは 1MB を
+ * 軽く超えるので、**user は「読めませんでした」しか見られなかった**。
+ *
+ * 🔑 置いてあった理由は「貼付でメインスレッドを止めない」だが、それは
+ *   **こちら側の都合**であって、貼れない理由にはならない ── 重い解析は
+ *   ワーカーへ逃がすのが筋である(不可侵指示 2026-08-03。#492 段②)。
+ */
 
 /** クリップボードの 2 面。**両方**を見て介入するかを決める。 */
 export interface PastedClipboard {
@@ -557,7 +568,7 @@ export function markdownFromBody(body: Element | null): string | null {
  * 🔑 落とすのは**先頭の 1 つだけ**(本文の途中に在るものは user の中身である)。
  */
 export function pastedHtmlFence(html: string): string | null {
-  if (html === '' || html.length > PASTE_HTML_MAX) return null;
+  if (html === '') return null;
   const body = html.replace(/^\s*<meta[^>]*charset[^>]*>\s*/i, '').trim();
   if (body === '') return null;
   /** 中身の ``` の最長連(0 なら 3 本でよい)。 */
@@ -579,7 +590,7 @@ export function convertPastedHtml(
   parse: HtmlParse = defaultParse,
 ): string | null {
   const { html, plain } = clip;
-  if (html === '' || html.length > PASTE_HTML_MAX) return null;
+  if (html === '') return null;
   if (plainLooksLikeMarkdown(plain)) return null;
 
   let doc: Document;

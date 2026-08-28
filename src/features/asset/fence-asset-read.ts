@@ -9,8 +9,6 @@
  * ⚠ ここは bytes を触るので `core` には置けない。⚠ 逆に DOM は 1 行も触らない
  *   ので adapter にも置かない ── 入口は「鍵 → Blob」の口 1 つだけである。
  */
-import { MAX_FENCE_ASSET_BYTES } from '../markdown/fence-asset';
-import { humanBytes } from '../human-bytes';
 
 /** 添付 1 件の読み。⚠ 失敗は**理由つき**で返す(黙って空にしない)。 */
 export type FenceAssetRead =
@@ -21,8 +19,9 @@ export type FenceAssetRead =
 export type FenceAssetBlobSource = (key: string) => Promise<Blob | null>;
 
 /**
- * 1 件読む。⚠ **大きすぎるものは読まない**(不可侵指示 2026-08-03「効くのは定常」)
- * ── 50MB の字を毎回運ぶと、開くたびにその分を払うことになる。黙って切らない。
+ * 1 件読む。
+ * ⚠ **大きさで断らない**(#492。user 指示 2026-08-27)── かつて 2MB を超えると
+ *   読まずに理由を出していたが、**user が置いた物を開けないほうが害が大きい**。
  */
 export async function readFenceAssetText(
   getBlob: FenceAssetBlobSource,
@@ -35,12 +34,6 @@ export async function readFenceAssetText(
     blob = null;
   }
   if (!blob) return { ok: false, why: 'その添付が見つかりません' };
-  if (blob.size > MAX_FENCE_ASSET_BYTES) {
-    return {
-      ok: false,
-      why: `大きすぎます(${humanBytes(blob.size)} / 上限 ${humanBytes(MAX_FENCE_ASSET_BYTES)})`,
-    };
-  }
   try {
     return { ok: true, text: await blob.text() };
   } catch {
