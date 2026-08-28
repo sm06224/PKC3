@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import { ContactsRenderer } from '../../src/adapter/ui/render/contacts';
 import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
-import type { ContactScan } from '../../src/features/contact/contact-card';
+import { CONTACT_LIMITS, type ContactScan } from '../../src/features/contact/contact-card';
 import { BROWSE_MODES, isBrowseMode } from '../../src/adapter/ui/render/browse-mode';
 import { BROWSE_TABS } from '../../src/adapter/ui/render/browse';
 import { BROWSE_ICONS } from '../../src/adapter/ui/render/icons';
@@ -20,6 +20,7 @@ const card = (lid: string, name: string, tels: string[] = [], emails: string[] =
   org,
   tels,
   emails,
+  birthday: '',
 });
 
 const scanOf = (cards: ReturnType<typeof card>[], truncated = false): ContactScan => ({
@@ -49,6 +50,43 @@ describe('連絡先の面(#278)', () => {
       note(paint({ contactScan: null, contactScanFailed: true })),
       '駄目だったのに「集めています」と出ている',
     ).toContain('集められませんでした');
+  });
+
+  /**
+   * 🔴 **同じ器に 2 回描かせる**(2 巡目の着地前レビュー 2026-08-28)。
+   *
+   * ⚠ 上の test は `paint()` を**別々に**呼ぶので、毎回新品の renderer になり
+   *   **早期 return の経路を 1 度も通っていなかった**(CLAUDE.md §2)。
+   *   実物は器を使い回す(`browse.ts` が `ContactsRenderer` を 1 個持つ)ので、
+   *   指紋が一致すると **DOM が 1 バイトも書き換わらない**。
+   * ⚠ 直す前の指紋は `scan === null` を先に見ていたため、
+   *   「まだ集めていない」と「初回が失敗した」が**同じ字**になり、
+   *   断り文が**一度も画面に出なかった**(= 永久に「集めています…」)。
+   */
+  it('🔴 集められなかったら、同じ器でも断り文に入れ替わる(永久に「集めています」にしない)', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const r = new ContactsRenderer(host);
+    r.render({ ...initialState, contactScan: null } as AppState);
+    expect(note(host)).toContain('集めています');
+    r.render({ ...initialState, contactScan: null, contactScanFailed: true } as AppState);
+    expect(note(host), '駄目だったのに「集めています」のまま止まった').toContain(
+      '集められませんでした',
+    );
+  });
+
+  /**
+   * 🔴 **押し先は原値から作る**(2 巡目の着地前レビュー 2026-08-28)。
+   * ⚠ 丸めた字から `mailto:` を作ると、字は正しく `…` で切れているのに
+   *   **押すと別の宛先へ送る**。`…` は `[^\s@]` に当たるので `mailHref` の
+   *   検査を**すり抜ける**(= 押せない口にもならない、いちばん気づけない形)。
+   */
+  it('🔴 丸めた字を押し先にしない(字は切る / href は原値)', () => {
+    const long = `taro@${'y'.repeat(140)}.example.com`;
+    const host = paint({ contactScan: scanOf([card('a', '山田', [], [long])]) });
+    const a = host.querySelector('[data-pkc-field="contact-mail"]')!;
+    expect(a.getAttribute('href'), '丸めた字が押し先に漏れた').toBe(`mailto:${long}`);
+    expect(a.textContent, '字は丸めてよい(画面が壊れる)').toContain('…');
   });
 
   it('🔴 1 件も無いときは、書き方を教える(黙って空にしない)', () => {
@@ -90,6 +128,32 @@ describe('連絡先の面(#278)', () => {
     expect(note(paint({ contactScan: scanOf([card('a', '山田', ['090'])], true) }))).toContain(
       '途中まで',
     );
+  });
+
+  /**
+   * 🔴 **丸めは画面の仕事**(着地前レビュー 2026-08-28)。
+   * ⚠ `ContactCard` が原値を持つようになったので、**面が丸めなければ
+   *   30 本の電話がそのまま並ぶ**(一覧が壊れる)。上の
+   *   `contact-card.test.ts`「原値を丸めない」と**対**である ──
+   *   片方だけだと、丸めが書き出しへ戻るか、一覧が壊れるかのどちらかへ倒れる。
+   */
+  it('🔴 並べすぎは画面で切り、切った数を言う(黙って落とさない)', () => {
+    const many = Array.from({ length: 12 }, (_, i) => `090-0000-${String(i).padStart(4, '0')}`);
+    const host = paint({ contactScan: scanOf([card('a', '山田', many)]) });
+    const ways = host.querySelector('[data-pkc-field="contact-ways"]')!;
+    expect(
+      ways.querySelectorAll('[data-pkc-field="contact-tel"]'),
+      '原値のまま全部並べた(一覧が壊れる)',
+    ).toHaveLength(CONTACT_LIMITS.each);
+    expect(
+      ways.querySelector('[data-pkc-field="contact-ways-more"]')?.textContent,
+      '切ったのに黙っている',
+    ).toContain(`ほか ${12 - CONTACT_LIMITS.each} 件`);
+  });
+
+  it('⚠ 収まっているときは「ほか N 件」を出さない', () => {
+    const host = paint({ contactScan: scanOf([card('a', '山田', ['090'], ['t@example.com'])]) });
+    expect(host.querySelector('[data-pkc-field="contact-ways-more"]')).toBeNull();
   });
 
   it('🔴 絞り込みが効き、当たらなければそう言う', () => {
@@ -144,6 +208,63 @@ describe('集めるのは「開いたとき」だけ(#278)', () => {
     expect(again.contactScan?.cards, '集め直しで一覧が消えた').toHaveLength(1);
   });
 
+  /**
+   * 🔴 **取り込んだら、その場で一覧が変わる**(2 巡目の動線レビュー 2026-08-28)。
+   *
+   * ⚠ 直す前は `SYS_BOOTED`(取込の `reload()` が通る)に **`contactScan` だけが
+   *   居なかった** ── 集計・予定・雛形は捨てて頼み直すのに、連絡先は素通り。
+   *   帰結:`.vcf` を 200 枚入れても一覧は「連絡先はまだありません」のままで、
+   *   帯だけが「200 件」と言う ── user は「入らなかった」と読み、
+   *   **同じ file をもう一度取り込んで 400 件になる**。
+   * ⚠ 集め直しの合図は「左のタブを連絡先へ切り替えたとき」**1 か所しか無い**ので、
+   *   タブを開いたままの user には永久に届かなかった。
+   */
+  it('🔴 再読込(取込)で連絡先を頼み直す ── ただし一度も開いていない人には撃たない', () => {
+    const booted = (base: AppState): ReturnType<typeof reduce> =>
+      reduce(base, { type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
+    const withScan = reduce(initialState, {
+      type: 'SET_CONTACT_SCAN',
+      scan: scanOf([card('a', '山田', ['090'])]),
+    }).state;
+    expect(
+      booted({ ...withScan, cid: 'c1' }).events,
+      '取り込んだのに集め直しを頼んでいない(一覧が古いまま)',
+    ).toContainEqual({ type: 'REQUEST_CONTACT_SCAN' });
+    // ⚠ 対照群 ── 一度も開いていない user に全ノートの走査を負わせない
+    expect(booted(initialState).events).not.toContainEqual({ type: 'REQUEST_CONTACT_SCAN' });
+  });
+
+  /**
+   * 🔴 **消えたノートの行を残さない**(同レビュー)。
+   * ⚠ **丸ごと捨てない** ── `SYS_BOOTED` は別タブが書くたびに飛ぶので、
+   *   捨てると一覧が「集めています…」へ落ちて**押そうとした行が飛ぶ**
+   *   (`REFRESH_CONTACT_SCAN` が「消さない」と書いている理由と同じ)。
+   */
+  it('🔴 再読込で、消えたノートの行だけが落ちる(生きている行は残る)', () => {
+    const withScan = reduce(initialState, {
+      type: 'SET_CONTACT_SCAN',
+      scan: scanOf([card('a', '山田', ['090']), card('b', '消えた', ['091'])]),
+    }).state;
+    const meta = {
+      lid: 'a',
+      title: '山田',
+      archetype: 'text',
+      entryOrder: 1,
+      status: null,
+      date: null,
+      archived: false,
+      bodyChars: null,
+    } as never;
+    const out = reduce(
+      { ...withScan, cid: 'c1' },
+      { type: 'SYS_BOOTED', cid: 'c1', metas: [meta], relations: [] },
+    );
+    expect(
+      out.state.contactScan?.cards.map((c) => c.lid),
+      '消えたノートの行が残った(押しても何も起きない)',
+    ).toEqual(['a']);
+  });
+
   it('🔴 集められなかったら、そう覚える(「まだ」と区別する)', () => {
     const failed = reduce(initialState, { type: 'CONTACT_SCAN_FAILED' }).state;
     expect(failed.contactScanFailed).toBe(true);
@@ -177,5 +298,42 @@ describe('探し方の全数(#278 段①)', () => {
       expect(BROWSE_ICONS[mode], `${mode} の図案が無い`).toBeDefined();
     }
     expect(isBrowseMode('しらない'), '知らない値を通した').toBe(false);
+  });
+});
+
+describe('vCard の書き出し(#278 段③)', () => {
+  it('🔴 ボタンは連絡先が見えているときだけ出て、件数を言う', () => {
+    const host = paint({
+      contactScan: scanOf([card('a', '山田', ['090']), card('b', '別人', [], ['b@x.jp'])]),
+    });
+    const btn = host.querySelector<HTMLButtonElement>('[data-pkc-field="contacts-export"]')!;
+    expect(btn, '書き出しの口が無い').not.toBeNull();
+    expect(btn.getAttribute('data-pkc-action')).toBe('export-vcards');
+    expect(btn.textContent).toBe('vCard で書き出す(2 件)');
+    // 0 件なら出さない(空の file を落とす口を見せない)
+    const empty = paint({ contactScan: scanOf([]) });
+    expect(empty.querySelector('[data-pkc-field="contacts-export"]')).toBeNull();
+  });
+
+  /**
+   * 🔴 **出ない物を言う**(着地前レビュー 2026-08-28)。⚠ 書き出しは
+   *   frontmatter の鍵だけを写すので、**本文に書いた住所やメモは出ない** ──
+   *   それを言わないと、user は「連絡先を書き出した」と思って
+   *   **元の .vcf を消す**(戻れない欠損になる)。
+   */
+  it('🔴 何が出ないかをボタン自身が言う(書き出したつもりで元を消させない)', () => {
+    const host = paint({ contactScan: scanOf([card('a', '山田', ['090'])]) });
+    const title = host.querySelector('[data-pkc-field="contacts-export"]')!.getAttribute('title')!;
+    expect(title, '出る物を言っていない').toContain('誕生日');
+    expect(title, '出ない物を言っていない').toMatch(/住所|メモ/);
+  });
+
+  it('🔴 絞り込み中は絞った件数を言う(画面と書き出しは同じ 1 つの規則 ── §7)', () => {
+    const host = paint({
+      contactScan: scanOf([card('a', '山田', ['090']), card('b', '別人', [], ['b@x.jp'])]),
+      filterQuery: '山田',
+    });
+    const btn = host.querySelector<HTMLButtonElement>('[data-pkc-field="contacts-export"]')!;
+    expect(btn.textContent, '絞ったのに全件の数を言っている').toBe('vCard で書き出す(1 件)');
   });
 });

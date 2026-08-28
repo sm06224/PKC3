@@ -12,13 +12,16 @@
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { isMarkdownFileName } from '@features/import/plain-markdown';
+import { isVcfFileName } from '@features/contact/vcard';
 import { importPkc2File, type ImportDeps } from './import-pkc2';
 import { importMarkdownFiles } from './import-markdown';
+import { importVcfFiles } from './import-vcf';
 
 /**
  * 選ばれたファイルを取り込む。
  *
  * - 全部 md → 1 件ずつ entry にする(段②)
+ * - 全部 .vcf → 連絡先を 1 枚ずつノートにする(#278 段③)
  * - それ以外 → PKC2 経路(1 件ずつしか受けない)
  *
  * ⚠ 混在は**断る**。「md だけ入って PKC2 が黙って落ちた」を作らない ──
@@ -31,11 +34,13 @@ export async function importFiles(
 ): Promise<number | null> {
   if (files.length === 0) return null;
   const md = files.filter((f) => isMarkdownFileName(f.name));
+  const vcf = files.filter((f) => isVcfFileName(f.name));
+  if (vcf.length === files.length) return importVcfFiles(dispatcher, deps, files);
   if (md.length === files.length) return importMarkdownFiles(dispatcher, deps, files);
-  if (md.length > 0) {
+  if (md.length > 0 || vcf.length > 0) {
     dispatcher.dispatch({
       type: 'OP_FAILED',
-      error: 'Markdown と PKC2 の書出しは分けて取り込んでください',
+      error: '種類の違うファイル(Markdown / vCard / PKC2 の書出し)は分けて取り込んでください',
     });
     return null;
   }

@@ -2969,6 +2969,11 @@ li[data-pkc-row-slot] {
   color: var(--muted);
   overflow-wrap: anywhere;
 }
+/* vCard の書き出し(#278 段③)── 一覧の下の控えめな 1 ボタン */
+[data-pkc-field='contacts-export'] {
+  margin-top: var(--s2);
+  align-self: flex-start;
+}
 
 /* ══ 予定(#292 段③、2026-08-23)══════════════════════════════════
  * 🔴 **左の列に置く**(user 指示「もう一つ PKC が開いて混乱する」)── 中央は

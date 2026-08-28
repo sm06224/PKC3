@@ -38,6 +38,8 @@ import {
   settingsPlanNote,
 } from '@features/settings/settings-file';
 import { downloadBlob } from '@adapter/platform/download';
+import { visibleContacts } from '@features/contact/contact-card';
+import { buildVcf } from '@features/contact/vcard';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
 import { insertText, OWN_MEANING } from '@adapter/ui/render/row-swap';
 import { sectionAt } from '@features/markdown/append-target';
@@ -3414,6 +3416,38 @@ const ACTIONS: Record<string, ActionHandler> = {
       settingsFileName(today),
       new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' }),
     );
+  },
+  /**
+   * 🔴 **連絡先を vCard で書き出す**(#278 段③)。
+   * 🔑 出るのは**いま見えている分だけ** ── 一覧の描画と**同じ 1 つ**の規則
+   *   (`visibleContacts`)を呼ぶ(§7。個人情報なので「画面は 3 件なのに
+   *   書き出しは 5 件」を絶対に作らない)。
+   * ⚠ 個人情報は**この 1 押しでしか出ない**(バックアップや他の書き出しに
+   *   自動で混ぜない ── issue #278「既定は含めない側」)。
+   */
+  'export-vcards': (dispatcher) => {
+    const st = dispatcher.getState();
+    const scan = st.contactScan;
+    const cards = scan === null ? [] : visibleContacts(scan.cards, st.filterQuery);
+    if (cards.length === 0) {
+      // ⚠ 無言で空の file を落とさない(export-settings と同じ向き)
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '書き出せる連絡先がありません' });
+      return;
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    downloadBlob(
+      `連絡先-${today}.vcf`,
+      new Blob([buildVcf(cards)], { type: 'text/vcard' }),
+    );
+    /**
+     * ⚠ **何が入っていないかを、押した後にも言う**(2 巡目の動線レビュー 2026-08-28)。
+     *   ボタンの説明(`title`)はマウスを乗せたときしか出ないので、触る画面や
+     *   字だけ見て押した user には届かない ── そのまま**元の .vcf を捨てる**恐れがある。
+     */
+    dispatcher.dispatch({
+      type: 'OP_NOTICE',
+      message: `連絡先 ${cards.length} 件を書き出しました(名前・所属・電話・メール・誕生日だけです)`,
+    });
   },
   /**
    * 🔴 **当てる**(#414)── ⚠ **下見に出したのと同じ物**を当てる。

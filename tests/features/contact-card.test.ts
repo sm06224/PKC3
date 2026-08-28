@@ -8,6 +8,7 @@ import {
   CONTACT_LIMITS,
   contactLine,
   contactOf,
+  displayWays,
   mailHref,
   matchContact,
   sortContacts,
@@ -53,13 +54,65 @@ describe('連絡先として読む(#278)', () => {
     expect(contactOf('a', '山田', fm('tel:\nemail: t@example.com'))?.tels).toEqual([]);
   });
 
-  it('⚠ 並べすぎ・長すぎは切る(一覧が壊れない)', () => {
+  /**
+   * 🔴 **丸めは `contactOf` の仕事ではない**(着地前レビュー 2026-08-28)。
+   *
+   * ⚠ 1 稿目はここで 8 件 / 120 字に切っており、その切った値が
+   *   **そのまま .vcf へ書き出されていた** ── 9 本目の電話は消え、
+   *   130 字のメールは `…` 付きで相手の端末に保存される。
+   * 🔑 だから **`ContactCard` は原値を持つ**(この test が守るのはそこ)。
+   *   丸めは `displayWays`(下の describe)である。
+   */
+  it('🔴 原値を丸めない ── 切るのは画面の仕事(書き出しに丸めを流さない)', () => {
     const many = Array.from({ length: 30 }, (_, i) => `  - 090-0000-${String(i).padStart(4, '0')}`);
     const c = contactOf('a', '山田', fm(`tel:\n${many.join('\n')}`));
-    expect(c?.tels).toHaveLength(CONTACT_LIMITS.each);
-    const long = 'x'.repeat(CONTACT_LIMITS.chars + 50);
+    expect(c?.tels, '原値が丸められている(書き出しに漏れる)').toHaveLength(30);
+    expect(c?.tels.at(-1)).toBe('090-0000-0029');
+    const long = `${'x'.repeat(CONTACT_LIMITS.chars + 50)}@example.com`;
     const c2 = contactOf('a', '山田', fm(`email: ${long}`));
-    expect(c2?.emails[0]?.length).toBeLessThanOrEqual(CONTACT_LIMITS.chars + 1);
+    expect(c2?.emails[0], '長い宛先が切られている').toBe(long);
+  });
+});
+
+/**
+ * 🔴 **画面の丸め**(#278 段③ の着地前レビュー 2026-08-28)。
+ *
+ * ⚠ 上の describe と**対**である ── 片方だけだと
+ *   「原値のまま画面に 30 本並ぶ」か「書き出しに `…` が漏れる」かの
+ *   どちらかへ倒れる。⚠ **切った件数を返すこと**も見る(黙って落とさない)。
+ */
+describe('画面に出す分だけ丸める(#278)', () => {
+  it('🔴 8 件で切り、切った数を返す', () => {
+    const many = Array.from({ length: 30 }, (_, i) => `090-0000-${String(i).padStart(4, '0')}`);
+    const out = displayWays(many);
+    expect(out.shown).toHaveLength(CONTACT_LIMITS.each);
+    expect(out.hidden, '切ったのに 0 と言った(user は「無い」と読む)').toBe(
+      30 - CONTACT_LIMITS.each,
+    );
+  });
+
+  /**
+   * 🔴 **字は丸めるが、原値は必ず添えて返す**(2 巡目の着地前レビュー 2026-08-28)。
+   * ⚠ 1 稿目は丸めた字を 1 本返すだけだったので、描画が `mailHref(丸めた字)` を
+   *   作っていた ── **押すと別の宛先へ送る**(`…` は `[^\s@]` に当たるので
+   *   `mailHref` の検査をすり抜け、押せない口にもならない)。
+   */
+  it('🔴 長い値は 120 字 + … にする ── ただし原値も返す(押し先を作るため)', () => {
+    const long = 'x'.repeat(CONTACT_LIMITS.chars + 50);
+    const out = displayWays([long]).shown[0]!;
+    expect(out.text).toBe(`${'x'.repeat(CONTACT_LIMITS.chars)}…`);
+    expect(out.raw, '原値を返していない(押し先が作れない)').toBe(long);
+    const exact = 'y'.repeat(CONTACT_LIMITS.chars);
+    const same = displayWays([exact]).shown[0]!;
+    expect(same.text, 'ちょうどの長さに … を足した').toBe(exact);
+    expect(same.raw).toBe(exact);
+  });
+
+  it('⚠ 収まっているときは 0 件と言う(要らない「ほか N 件」を出さない)', () => {
+    const out = displayWays(['090', 't@example.com']);
+    expect(out.hidden).toBe(0);
+    // ⚠ 丸めが要らない値でも `raw` は必ず在る(呼び側が `text` と使い分けられる)
+    expect(out.shown.map((w) => w.raw)).toEqual(['090', 't@example.com']);
   });
 });
 
@@ -92,7 +145,14 @@ describe('押せる宛先にする(#278)', () => {
 });
 
 describe('並べ方と絞り込み(#278)', () => {
-  const card = (lid: string, name: string, org = '', tels: string[] = [], emails: string[] = []) => ({
+  const card = (
+    lid: string,
+    name: string,
+    org = '',
+    tels: string[] = [],
+    emails: string[] = [],
+  ) => ({
+    birthday: '',
     lid,
     name,
     org,

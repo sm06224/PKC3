@@ -25,10 +25,10 @@
 import type { AppState } from '@adapter/state/app-state';
 import {
   contactLine,
+  displayWays,
   mailHref,
-  matchContact,
-  sortContacts,
   telHref,
+  visibleContacts,
   type ContactCard,
 } from '@features/contact/contact-card';
 
@@ -45,14 +45,26 @@ export class ContactsRenderer {
   render(state: AppState): void {
     const scan = state.contactScan;
     const query = state.filterQuery;
-    const cards =
-      scan === null ? [] : sortContacts(scan.cards.filter((c) => matchContact(c, query)));
+    // 🔑 書き出し(binder の `export-vcards`)と**同じ 1 つ**の規則(§7)
+    const cards = scan === null ? [] : visibleContacts(scan.cards, query);
     /**
      * ⚠ **指紋に「集めていない」も入れる** ── 入れないと、集め終わった瞬間に
      *   `0 件` の指紋と一致してしまい、**一覧が出ないまま**になる。
      */
     const print = [
-      scan === null ? 'pending' : state.contactScanFailed ? 'failed' : 'ok',
+      /**
+       * 🔴 **失敗を先に見る**(2 巡目の着地前レビュー 2026-08-28)。
+       *
+       * ⚠ 1 稿目は `scan === null` を先に見ていたので、**初回の走査が失敗した回**
+       *   (`CONTACT_SCAN_FAILED` は `contactScan` を触らないので `null` のまま)が
+       *   「まだ集めていない」と**同じ指紋**になり、下の早期 return で
+       *   **DOM が 1 バイトも書き換わらなかった** ── つまり
+       *   `noteText` が持っている「集められませんでした」は**一度も画面に出ない**。
+       *   user から見ると「集めています…」で**永久に止まる**。
+       * ⚠ 予定の面(`schedule.ts`)は `failed` を独立の項として持っており、
+       *   **そちらだけ正しかった**(= 設計判断ではなく取りこぼし)。
+       */
+      state.contactScanFailed ? 'failed' : scan === null ? 'pending' : 'ok',
       scan?.truncated === true ? 't' : '',
       query,
       cards
@@ -73,6 +85,23 @@ export class ContactsRenderer {
     list.setAttribute('data-pkc-field', 'contacts-list');
     for (const card of cards) list.append(this.row(card));
     this.host.append(list);
+
+    /**
+     * 🔴 **vCard の書き出し**(#278 段③)── 押した 1 回だけ、**見えている分**を
+     * .vcf 1 つに書く。⚠ 個人情報なので**明示の 1 押し**でしか出ない(自動で
+     * どこかへ含めない ── issue の「既定は含めない側」)。文言に件数を出す ──
+     * 絞り込み中に「全部出た」と誤読させない。
+     */
+    const exp = document.createElement('button');
+    exp.type = 'button';
+    exp.setAttribute('data-pkc-action', 'export-vcards');
+    exp.setAttribute('data-pkc-field', 'contacts-export');
+    exp.textContent = `vCard で書き出す(${cards.length} 件)`;
+    exp.title =
+      'いま見えている連絡先を .vcf ファイル 1 つに書き出します(絞り込み中は絞った分だけ)。' +
+      '出るのは名前・所属・電話・メール・誕生日です。' +
+      '住所やメモなど、本文に書いた残りは出ません。';
+    this.host.append(exp);
   }
 
   /**
@@ -104,10 +133,27 @@ export class ContactsRenderer {
     open.textContent = contactLine(card);
     li.append(open);
 
+    /**
+     * ⚠ **丸めるのはここだけ**(`displayWays`)。`ContactCard` は原値を持つ ──
+     *   書き出し(`buildVcf`)に画面の丸めが流れ込むと、**壊れた宛先を
+     *   在るものとして相手の端末が保存する**(CLAUDE.md §7)。
+     * ⚠ **切ったことは必ず言う** ── 黙って落とすと
+     *   「9 本目の電話は無い」と読まれる(`truncated` と同じ向き)。
+     */
     const ways = document.createElement('span');
     ways.setAttribute('data-pkc-field', 'contact-ways');
-    for (const tel of card.tels) ways.append(this.way(tel, telHref(tel), 'contact-tel'));
-    for (const mail of card.emails) ways.append(this.way(mail, mailHref(mail), 'contact-mail'));
+    const tels = displayWays(card.tels);
+    const mails = displayWays(card.emails);
+    // 🔴 **字は丸めた物、押し先は原値**(`DisplayWay` の注記 ── 2 巡目のレビュー)
+    for (const t of tels.shown) ways.append(this.way(t.text, telHref(t.raw), 'contact-tel'));
+    for (const m of mails.shown) ways.append(this.way(m.text, mailHref(m.raw), 'contact-mail'));
+    const hidden = tels.hidden + mails.hidden;
+    if (hidden > 0) {
+      const more = document.createElement('span');
+      more.setAttribute('data-pkc-field', 'contact-ways-more');
+      more.textContent = `ほか ${hidden} 件(ノートを開くと全部あります)`;
+      ways.append(more);
+    }
     li.append(ways);
     return li;
   }

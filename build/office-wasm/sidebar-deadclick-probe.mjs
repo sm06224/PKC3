@@ -338,6 +338,47 @@ async function main() {
       result.sidebar.menuClosed = !after.some((w) => key(w) === key(viewMenu));
       result.sidebar.verdictValid =
         !result.sidebar.unexpectedSubmenu && result.sidebar.menuClosed;
+      /**
+       * 🔴 **見せる向きと deck の開扉まで踏む**(2026-08-28 に追加)。
+       *
+       * ⚠ 上のトグル 1 回は、いまの一式では**「表示 → 非表示」しか踏まない** ──
+       * 起動時点でタブ帯が既に出ているからである。ところが **#167 の停止は
+       * deck / panel の `.ui` を実体化する側**(非表示 → 表示、さらに deck を開く)で
+       * 起きるので、**1 回のトグルでは当の経路を 1 度も通っていなかった**
+       * (CLAUDE.md §2「弱いのではなく走っていない」)。
+       * 🔑 だから **①もう 1 度トグルして戻し(見せる側)②タブ帯の最上段を押して
+       * プロパティ deck を開く**。⚠ ②まで来て初めてパネル資源の読込を踏む。
+       *
+       * ⚠ **この段は `if (viewMenu)` の中に置く。** 外へ出すと、
+       * **1 度目のトグルが起きなかった回**(メニューが開かない)にも走ってしまい、
+       * そのときタブ帯はまだ出たままなので **`sidebarShow` を名乗って隠す側を測る**
+       * ── 計器の名前が測っている対象と食い違う(CLAUDE.md §4)。
+       * ⚠ 前段で停止した回も測らない(対照群が崩れている)。
+       */
+      if (!result.sidebar.crashed) {
+        const s2 = (result.sidebarShow = {});
+        const viewMenu2 = await openMenu(C_VIEW, '08-view-menu2.png');
+        s2.menuOpened = Boolean(viewMenu2);
+        if (viewMenu2) {
+          await page.mouse.click(viewMenu2.x + C_SIDEBAR[0], viewMenu2.y + C_SIDEBAR[1]);
+          await page.waitForTimeout(8000);
+          await shoot('09-after-sidebar2.png');
+          s2.crashed = await page.evaluate(CRASHED);
+          s2.oob = oob();
+          s2.msg = await page.evaluate(MSG_TEXT);
+          if (!s2.crashed) {
+            // タブ帯の最上段(プロパティ deck)── 窓の右端、題名帯のすぐ下
+            await page.mouse.click(win.x + win.w - 20, win.y + 147);
+            await page.waitForTimeout(8000);
+            await shoot('10-after-deck.png');
+            s2.deckCrashed = await page.evaluate(CRASHED);
+            s2.deckOob = oob();
+            s2.deckMsg = await page.evaluate(MSG_TEXT);
+          }
+        } else {
+          s2.note = '2 度目の表示メニューが開かない ── この回の見せる側は判定不能';
+        }
+      }
     } else {
       result.sidebar.note = '表示メニューが開かない ── 座標(PKC3_S_VIEW)か dead click を疑う';
     }
@@ -387,6 +428,20 @@ async function main() {
     }
     result.oobInConsole = oob();
   } finally {
+    /**
+     * 🔴 **console は末尾 12 行だけでは足りない**(2026-08-28 に追加)。
+     *
+     * ⚠ `result.console` は末尾だけを載せるので、**停止の合図が早い段で出た回**は
+     * そこから押し出されて消える ── 「console にも出ていない」という
+     * **誤った読み**を作る(実際 2026-08-25 にそう読んだ)。
+     * 🔑 だから**全量を走査して FATAL 系だけを別に残す** ── 見るのは
+     * 「在るか / 無いか」なので、位置に依らない。⚠ 上限 5 件(器を溢れさせない)。
+     */
+    result.fatalInConsole = lines
+      .filter((l) =>
+        /Aborted\(|RuntimeError|table index is out of bounds|memory access out of bounds/.test(l),
+      )
+      .slice(0, 5);
     result.console = lines.slice(-12);
     const text = JSON.stringify(result, null, 1);
     console.log(text);

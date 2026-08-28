@@ -39,7 +39,11 @@ export const COLLECTION_COMMANDS: readonly CollectionCommand[] = [
   {
     action: 'import-file',
     label: '取り込む',
-    title: 'PKC2 の書き出し(HTML / ZIP)/ PKC3 のバックアップ(.pkc3.zip)/ Markdown を取り込みます',
+    // ⚠ **受けられる物はここに全部書く**(2 巡目の動線レビュー 2026-08-28)──
+    //    vCard を足したのにこの字が変わっておらず、user は「対応していない」と読む
+    //    (「在るのに見つけられないのは、こちらの動線の不備」── CLAUDE.md)
+    title:
+      'PKC2 の書き出し(HTML / ZIP)/ PKC3 のバックアップ(.pkc3.zip)/ Markdown / 連絡先(.vcf)を取り込みます',
   },
   { action: 'export-archive', label: 'バックアップ', title: '元に戻せる形で保存します' },
 ] as const;
