@@ -98,9 +98,34 @@ jobs:
   #   記述は見つけ次第その場で直す」)── 直すなら**注記ではなく job の中身**である。
   # ⚠ ここだけ `playwright install` を払う。上の注記のとおり、この step は
   #   22〜390 秒でぶれるので**速い lane と同じ budget に同居させない**。
+  #
+  # 🔴 **2026-08-28: 今度は install ではなく smoke 本体が budget を食い切った。**
+  #   ⚠ 上の 2026-08-19 の注記は「install 段で死んだ回は再実行が正しい対処であって、
+  #     test を疑う場面ではない」と書いているが、**この回には当てはまらない** ──
+  #     実測(run 33192366507): install は **30 秒**で終わり、
+  #     smoke 本体が **9 分 25 秒**走ったところで 10 分の job timeout に当たった。
+  #   🔑 **再実行では 1 度も直らない**(毎回同じだけ掛かる)。注記のとおりに
+  #     再実行していたら、runner を 2 回捨てて同じ赤を見ることになる。
+  #   ⚠ 原因は spec が増えたことで、**どれかが遅いのではない**
+  #     (手元のフル走行も 8.3 分 → **10.1 分**へ伸びていた)。
+  #
+  # 🔑 **だから timeout を上げるのではなく、2 つに割って並べる。**
+  #   ⚠ 上げるのは「CI を長くしない」(user 指示 2026-07-30)と逆向きで、
+  #     しかも **tripwire を鈍らせる**(次に本当に遅くなったとき鳴らない)。
+  #   ⚠ 割っても**1 件も減らさない** ── playwright の `--shard` は
+  #     spec を分けるだけで、2 つ合わせれば全量である。
+  #   ⚠ shard ごとに**別の runner**なので、`vite preview` の port も
+  #     `workers: 1` の直列も、そのまま安全に効く。
+  #   ⚠ `fail-fast: false` ── 片方が落ちても**もう片方を最後まで走らせる**
+  #     (走らなかった shard は「確かめていない」であって「緑」ではない。
+  #      2026-08-17 に nightly で踏んだ形)。
   smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -113,5 +138,6 @@ jobs:
       - run: VITE_PKC_KIND=dev npm run build
       - run: npx playwright install chromium --with-deps
       # ⚠ 名前も実態に合わせる(「最小」ではない ── 上の訂正を参照)
-      - name: Visual smoke (全量 ── もう 1 つのブラウザは nightly)
-        run: npm run test:smoke
+      # ⚠ 2 つ合わせて全量。どちらか片方だけ緑でも**全量が通ったことにはならない**
+      - name: Visual smoke (${{ matrix.shard }}/2 ── もう 1 つのブラウザは nightly)
+        run: npm run test:smoke -- --shard=${{ matrix.shard }}/2

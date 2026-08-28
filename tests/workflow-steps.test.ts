@@ -560,6 +560,51 @@ describe('PR gate の形(2026-08-18)', () => {
     expect(jobs.get('verify'), 'smoke が速い lane へ戻っている').not.toContain('test:smoke');
   });
 
+  /**
+   * 🔴 **shard は「全部で 1 つ」でなければならない**(2026-08-28)。
+   *
+   * ⚠ 2026-08-19 の cancel は `playwright install` が遅い回だったが、
+   *   **2026-08-28 の cancel は smoke 本体**だった(install 30 秒 /
+   *   smoke 9 分 25 秒 → 10 分の job timeout)。⚠ **再実行では直らない**ので、
+   *   2 つの runner に割って並べた。
+   *
+   * 🔑 守る主張は「**割っても 1 件も減らない**」である ── ⚠ 数字がずれると
+   *   **落ちた test が誰にも走らないまま緑になる**(いちばん質の悪い形):
+   *   `shard: [1]` に減らす / `--shard=1/3` にする / 片方の行を消す。
+   * ⚠ **`n/N` の N と、matrix の個数が一致していること**まで見る ──
+   *   片方だけ直すのがまさに事故の形である。
+   */
+  it('🔴 smoke の shard は、全部合わせて全量になる', () => {
+    const jobs = jobsOf(CI);
+    const smoke = jobs.get('smoke') ?? '';
+    // 空振り防止 ── job が取れていない形で「一致した」と言わない
+    expect(smoke, 'smoke の本文が取れていない').toContain('test:smoke');
+
+    const list = /shard:\s*\[([^\]]+)\]/.exec(smoke);
+    expect(list, 'matrix.shard の一覧が無い(割るのをやめた?)').not.toBeNull();
+    const shards = list![1]!.split(',').map((x) => Number(x.trim()));
+    expect(shards, 'shard の番号が数字でない').not.toContain(NaN);
+
+    const uses = [...smoke.matchAll(/--shard=\$\{\{\s*matrix\.shard\s*\}\}\/(\d+)/g)];
+    expect(uses.length, '`--shard=${{ matrix.shard }}/N` が 1 か所に無い').toBe(1);
+    const total = Number(uses[0]![1]);
+
+    // 🔴 ここが本題:matrix の個数 = 分母
+    expect(shards.length, `matrix は ${shards.length} 個なのに分母は ${total}`).toBe(total);
+    // ⚠ 番号は 1..N が 1 つずつ(重複・抜けを落とす)
+    expect([...shards].sort((a, b) => a - b)).toEqual(
+      Array.from({ length: total }, (_, i) => i + 1),
+    );
+
+    // ⚠ 片方が落ちても**もう片方を最後まで走らせる**(走らなかった shard は
+    //    「確かめていない」であって「緑」ではない ── 2026-08-17 の nightly)
+    expect(smoke, 'fail-fast を切っていない(片方が落ちたら残りが走らない)').toContain(
+      'fail-fast: false',
+    );
+    // ⚠ tripwire は残す(割ったのは budget を上げないためである)
+    expect(smoke, '速度予算の tripwire が消えている').toContain('timeout-minutes: 10');
+  });
+
   it('🔴 2 つは並列(直列にすると budget の問題が解けない)', () => {
     const jobs = jobsOf(CI);
     for (const [name, body] of jobs) {
