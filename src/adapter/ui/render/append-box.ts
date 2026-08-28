@@ -56,6 +56,8 @@ export class AppendBoxRenderer {
   private readonly target: HTMLSelectElement;
   /** 直前の追記を外す(#395 段①)。⚠ 追記が通ったときだけ出す。 */
   private readonly undo: HTMLButtonElement;
+  /** 打つ欄と押す物の行(#496)。⚠ 入り先の `<select>` は**この上**に出る。 */
+  private readonly row: HTMLElement;
   /** いま並べている入り先の指紋。⚠ 同じなら触らない(選んだ物が飛ばない)。 */
   private targetSig: string | null = null;
   private readonly lockBar: HTMLElement;
@@ -102,7 +104,26 @@ export class AppendBoxRenderer {
      */
     this.undo = iconButton('undo-append', '元に戻す');
     this.undo.title = '直前に追記した内容を、本文から取り除きます';
-    this.form.append(this.target, this.input, iconButton('append-entry', '追記'), this.undo);
+    /**
+     * 🔴 **入り先は「打つ欄の上の行」に置く**(#496。user 指示 2026-08-27
+     * 「**見出し選択リストはテキストボックスの上に置いて欲しい**」)。
+     *
+     * ⚠ 直す前は 4 つとも**横 1 列**で、`<select>` が先頭に居た ── `<select>` は
+     *   規則が 1 つも無く UA 既定の**内容依存幅**なので、見出しが長いノートでは
+     *   **64px → 765px**(実測 1440px 幅)まで伸びる。隣の `append-input` は
+     *   `flex: 1` なので、その差がまるごと打つ欄から奪われ、
+     *   **「追記」ボタンが右へ動く** = ノートを開くたびに押す物の位置が変わる。
+     * 🔑 行を分ければ、`<select>` が伸びても**打つ欄と押す物は動かない**
+     *   (幅を器に固定するのは `app.css` の側)。
+     * ⚠ **`<select>` を器で包まない** ── 見出しが 1 つも無いノートでは
+     *   `this.target.hidden = true` になるので、包むと**空の行が 1 本残る**
+     *   (押す物の無い帯を増やさない)。`this.form` を縦に組み、
+     *   `<select>` を直接その子にすれば、畳んだとき行ごと消える。
+     */
+    this.row = document.createElement('div');
+    this.row.setAttribute('data-pkc-field', 'append-row');
+    this.row.append(this.input, iconButton('append-entry', '追記'), this.undo);
+    this.form.append(this.target, this.row);
 
     this.lockBar = document.createElement('div');
     this.lockBar.setAttribute('data-pkc-field', 'append-lock');

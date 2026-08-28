@@ -116,6 +116,34 @@ describe('#395 段① 入り先の選択が画面に出る', () => {
     expect(sel(s).value, '既定が末尾でない(これまでの挙動が変わる)').toBe('');
   });
 
+  /**
+   * 🔴 **入り先は「打つ欄の行」の外に居る**(#496)。
+   *
+   * ⚠ 幅と上下は CSS の話なので unit では測れない(happy-dom は全部 0)──
+   *   ここで守れるのは**器の組み立て**だけである:`<select>` が
+   *   `append-row`(打つ欄と押す物の行)の**中に戻っていない**こと。
+   * 🔑 戻すと横 1 列に復帰し、見出しの長いノートで打つ欄が押しのけられる
+   *   (実測 64px → 765px)。幅と位置そのものは
+   *   `tests/smoke/append-ui.smoke.spec.ts` が実ブラウザで見る。
+   */
+  it('🔴 入り先は打つ欄の行の外に居る(横 1 列に戻っていない)', async () => {
+    const s = setup();
+    await open(s);
+    const form = s.q('[data-pkc-field="append-form"]')!;
+    const row = s.q('[data-pkc-field="append-row"]')!;
+    const target = sel(s);
+    expect(target.parentElement, '入り先が append-form の直下に居ない').toBe(form);
+    expect(row.contains(target), '入り先が打つ欄の行の中に戻っている').toBe(false);
+    // ⚠ 空振り防止 ── 打つ欄と押す物は**その行の中**に在る(器が空でない)
+    expect(row.contains(s.q('[data-pkc-field="append-input"]')!)).toBe(true);
+    expect(row.contains(s.q('[data-pkc-action="append-entry"]')!)).toBe(true);
+    // 🔑 **上に出す**ので、器の中で打つ欄より前に居る
+    expect(
+      form.firstElementChild,
+      '入り先が打つ欄より後ろに居る(上に出ない)',
+    ).toBe(target);
+  });
+
   it('⚠ 見出しが 1 つも無いノートでは畳む(選ぶ物が無い口を出さない)', async () => {
     const s = setup('ただの本文です。\n');
     await open(s);
