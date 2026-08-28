@@ -825,6 +825,10 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   // ⚠ 選んだ全部の本文を書く(#402 ①)── 取込・書出しの最中に走らせない
   'bulk-tag-add',
   'bulk-tag-remove',
+  // 🔑 いま開いている 1 件へのタグの付け外しも**本文を書く**(#494)──
+  //    実体は `BULK_TAG` なので、上の 2 つと同じ門をくぐらせる
+  'add-tag',
+  'untag-entry',
   // 🔑 スマートフォルダの条件と出し入れも**本文を書く**(#421 段①)
   'smart-cond-add',
   'smart-cond-remove',
@@ -2053,6 +2057,46 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'bulk-tag-add': (dispatcher, _target, _services, root) =>
     runBulkTag(dispatcher, root, 'add'),
+  /**
+   * 🔴 **いま開いているノートにタグを打つ**(#494)。
+   *
+   * > user 指摘 2026-08-27:「**直感的にここにタグを打つ!って感じの動作じゃなくて
+   * > yamlfrontmatter なのは問題だ。しかも設定動線がよくわからん**」
+   *
+   * 🔑 **書く口は増やさない** ── まとめて付ける経路(`BULK_TAG`)へ
+   *   **相手 1 件**で流す。frontmatter を組み直す規則を 2 つ作ると、片方だけが
+   *   #284 系の修理に追随して静かに食い違う(§7)。
+   * ⚠ 相手は `scopeLid` ではなく **`selectedLid`**(情報ペインが出しているのは
+   *   「いま選んでいる 1 件」である ── `filer` の帯とは別の面)。
+   */
+  'add-tag': (dispatcher, _target, _services, root) => {
+    const st = dispatcher.getState();
+    const lid = st.selectedLid;
+    if (lid === null) return;
+    const field = root.querySelector<HTMLInputElement>('[data-pkc-field="tag-add-input"]');
+    const tag = normalizeTag(field?.value ?? '');
+    if (tag === '') {
+      // ⚠ **無言で終わらせない**(欄は出ているのに何も起きない dead click になる)
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '足すタグを入力してください' });
+      return;
+    }
+    dispatcher.dispatch({ type: 'BULK_TAG', lids: [lid], tag, mode: 'add' });
+    // 🔑 通したら欄を空にする(次の 1 つを打てる)── ⚠ 断ったときは残す
+    if (field) field.value = '';
+  },
+  /**
+   * 🔴 **その札を外す**(#494)。⚠ 裁定 2026-08-23「**片道の操作を作らない**」──
+   * 打てるのに外せないと、間違えて付けたタグを消すために本文を開くことになる。
+   * ⚠ 相手のタグは**押した札が持つ**(`data-pkc-tag`)── 打つ欄の中身を読むと、
+   *   打ちかけの別の語を消すことになる。
+   */
+  'untag-entry': (dispatcher, target) => {
+    const st = dispatcher.getState();
+    const lid = st.selectedLid;
+    const tag = target.getAttribute('data-pkc-tag') ?? '';
+    if (lid === null || tag === '') return;
+    dispatcher.dispatch({ type: 'BULK_TAG', lids: [lid], tag, mode: 'remove' });
+  },
   'bulk-tag-remove': (dispatcher, _target, _services, root) =>
     runBulkTag(dispatcher, root, 'remove'),
   'delete-selected': (dispatcher, _target, services, root) => {
@@ -4555,6 +4599,21 @@ export function bindActions(
         run(el.getAttribute('data-pkc-action'), el);
         return;
       }
+    }
+    /**
+     * 🔴 **タグの欄は Enter で足せる**(#494)。
+     *
+     * ⚠ **これが無いと、user 指摘そのものが直らない** ── 「ここに打つ!って感じ」で
+     *   打った後に**押すボタンを探させる**のでは、動線は 1 手も減っていない。
+     * ⚠ 変換中の Enter では撃たない(`isComposing`)── 日本語のタグを打つ人は毎回踏む。
+     * ⚠ 欄の中だけ ── 画面全体の近道にしない(`append-input` と同じ作法)。
+     */
+    if (field === 'tag-add-input') {
+      if (ke.key === 'Enter' && !ke.isComposing && !ke.shiftKey && !ke.ctrlKey && !ke.metaKey) {
+        ke.preventDefault();
+        run('add-tag', ke.target as HTMLElement);
+      }
+      return;
     }
     // 追記欄: 既定は Ctrl/Cmd+Enter(欄の中だけ ── 画面全体の近道にしない)
     if (field === 'append-input') {

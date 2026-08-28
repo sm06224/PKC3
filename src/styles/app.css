@@ -1461,6 +1461,39 @@ li[data-pkc-row-slot] {
 [data-pkc-field='inspector-actions'] [data-pkc-action='delete-entry'] {
   color: var(--danger);
 }
+/**
+ * 🔴 **タグの行**(#494。user 指摘「**直感的にここにタグを打つ!って感じの動作**」)。
+ *
+ * 🔑 **札と打つ欄を同じ行に並べる** ── 「打つ場所」を探させないための配置である。
+ * ⚠ 地は無彩色のまま(user 指示 2026-08-03「色は情報にだけ使う」)── 札であることは
+ *   **並びと隙間**で分かる。
+ */
+[data-pkc-region='inspector'] dd[data-pkc-field='inspector-tags'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+[data-pkc-field='inspector-tag-chips'] {
+  display: contents;
+}
+/* ⚠ 名前と × は**くっつける**(離すと 2 つの物に見える)。 */
+[data-pkc-field='inspector-tag'] {
+  display: inline-flex;
+  align-items: center;
+}
+[data-pkc-field='tag-add'] {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+/* ⚠ 右の列は狭いので、欄は**縮む**(広げると押す物が折り返しの下へ落ちる)。 */
+[data-pkc-field='tag-add-input'] {
+  min-width: 0;
+  width: 6rem;
+  font-size: 12px;
+}
+
 [data-pkc-field='inspector-empty'] {
   padding: var(--s4);
   color: var(--muted);

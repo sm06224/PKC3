@@ -245,17 +245,38 @@ describe('タグの札(#182)', () => {
     expect(d.getState().filterQuery, '押しても探さない').toBe('買い物');
   });
 
+  /**
+   * 🔴 **観測点は「行の中の**札の入れ物**」である**(#494 で器を割ったときに直した)。
+   *
+   * ⚠ 行(`inspector-tags`)には**打つ欄も入る**ようになったので、行全体の
+   *   `textContent` を見ると「タグを足す」というボタンの字に**満たされる**
+   *   (CLAUDE.md §1「別の面の文字に満たされる」の小さい版)。
+   * 🔑 値は `inspector-tag-chips`、理由(`title`)は行 ── 見る場所を分ける。
+   */
+  const tagValue = (root: HTMLElement): string | null | undefined =>
+    root.querySelector('[data-pkc-field="inspector-tag-chips"]')?.textContent;
+  const tagRow = (root: HTMLElement): Element | null =>
+    root.querySelector('[data-pkc-field="inspector-tags"]');
+
+  it('⚠ 空振り防止 ── 値を見る場所と、打つ欄が別物である', () => {
+    const { d, root } = withInspector();
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '本文だけ\n' });
+    expect(tagValue(root), '札の入れ物が無い(以下の test が全部空振りする)').toBe('無し');
+    expect(
+      tagRow(root)?.textContent,
+      '行に打つ欄が出ていない(#494 が届いていない)',
+    ).toContain('タグを足す');
+  });
+
   it('本文が読めていないときは「タグ無し」と嘘を書かない', () => {
     const { root } = withInspector();
-    const box = root.querySelector('[data-pkc-field="inspector-tags"]');
-    expect(box?.textContent, '本文未読なのに断定している').toBe('—');
+    expect(tagValue(root), '本文未読なのに断定している').toBe('—');
   });
 
   it('タグの無い本文では「無し」と出る', () => {
     const { d, root } = withInspector();
     d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '本文だけ\n' });
-    const box = root.querySelector('[data-pkc-field="inspector-tags"]');
-    expect(box?.textContent).toBe('無し');
+    expect(tagValue(root)).toBe('無し');
   });
 
   /**
@@ -273,10 +294,11 @@ describe('タグの札(#182)', () => {
     const { d, root } = withInspector();
     // 閉じの `---` を失った本文 ── user がタグを書いたのに読めていない
     d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '---\ntags: [買い物]\n本文\n' });
-    const box = root.querySelector('[data-pkc-field="inspector-tags"]');
+    const box = root.querySelector('[data-pkc-field="inspector-tag-chips"]');
+    const row = tagRow(root);
     expect(box?.textContent, '読めていないのに「無し」と断定している').toBe('読めていません');
     // ⚠ 理由は `title` に(行が狭いので画面には短く)
-    expect(box?.getAttribute('title') ?? '', '何が起きたか読めない').toContain('閉じの ---');
+    expect(row?.getAttribute('title') ?? '', '何が起きたか読めない').toContain('閉じの ---');
     // ⚠ 空振り防止 ── 札は出ていない(出ていたら上の主張は無意味)
     expect(root.querySelectorAll('[data-pkc-action="filter-by-tag"]').length).toBe(0);
   });
@@ -341,11 +363,12 @@ describe('タグの札(#182)', () => {
       lid: 'n1',
       body: '---\nstatus: done\n---\n---\ntags: [買い物]\n本文\n',
     });
-    const box = root.querySelector('[data-pkc-field="inspector-tags"]');
+    const box = root.querySelector('[data-pkc-field="inspector-tag-chips"]');
+    const row = tagRow(root);
     expect(box?.textContent, '行の字で damage だと言い切っている').toBe('無し');
     // ⚠ **理由まで消してはいない**(裏返した検査が守るべき、元の懸念)
     expect(
-      box?.getAttribute('title') ?? '',
+      row?.getAttribute('title') ?? '',
       '理由がどこにも出ていない(乗せても分からない)',
     ).toContain('2 組目');
   });
@@ -357,20 +380,22 @@ describe('タグの札(#182)', () => {
   it('🔴 閉じが無い(確定)なら、行の字で「読めていません」と言う', () => {
     const { d, root } = withInspector();
     d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '---\ntags: [買い物]\n本文\n' });
-    const box = root.querySelector('[data-pkc-field="inspector-tags"]');
+    const box = root.querySelector('[data-pkc-field="inspector-tag-chips"]');
+    const row = tagRow(root);
     expect(box?.textContent, '確定している不具合まで黙った').toBe('読めていません');
   });
 
   it('🔴 cap を超えた文書の情報でも「無し」と断定しない', () => {
     const { d, root } = withInspector();
     d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: `---\nk: ${'あ'.repeat(20000)}\n---\n本文\n` });
-    const box = root.querySelector('[data-pkc-field="inspector-tags"]');
+    const box = root.querySelector('[data-pkc-field="inspector-tag-chips"]');
+    const row = tagRow(root);
     expect(box?.textContent, 'cap 超過で「無し」と断定している').toBe('読めていません');
     // ⚠ **画面へ出す字は user の言葉**(2 巡目レビュー B-5)
-    expect(box?.getAttribute('title') ?? '', '内部語がそのまま出ている').not.toMatch(
+    expect(row?.getAttribute('title') ?? '', '内部語がそのまま出ている').not.toMatch(
       /frontmatter|bytes|parse/,
     );
-    expect(box?.getAttribute('title') ?? '').toContain('大きすぎて');
+    expect(row?.getAttribute('title') ?? '').toContain('大きすぎて');
   });
 
   /**
@@ -381,11 +406,12 @@ describe('タグの札(#182)', () => {
     const { d, root } = withInspector();
     d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '---\ntags: [買い物]\n本文\n' });
     d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '---\ntags: [買い物]\n---\n本文\n' });
-    const box = root.querySelector('[data-pkc-field="inspector-tags"]');
+    const box = root.querySelector('[data-pkc-field="inspector-tag-chips"]');
+    const row = tagRow(root);
     expect(
       [...root.querySelectorAll('[data-pkc-action="filter-by-tag"]')].map((c) => c.textContent),
       '直したのに札が戻らない',
     ).toEqual(['買い物']);
-    expect(box?.getAttribute('title'), '古い理由が残っている').toBeNull();
+    expect(row?.getAttribute('title'), '古い理由が残っている').toBeNull();
   });
 });

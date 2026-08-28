@@ -93,6 +93,10 @@ export class InspectorRenderer {
   private buttons: Buttons = new Map();
   /** 相手の候補(#185)。⚠ 器は 1 度だけ組み、中身だけ差し替える。 */
   private candidates: HTMLDataListElement | null = null;
+  /** タグの候補(#494 段②)。⚠ 器は 1 度だけ組み、中身だけ差し替える。 */
+  private tagCandidates: HTMLDataListElement | null = null;
+  /** タグを打つ欄の器(#494)。⚠ 打てない状況では**畳む**(押せない物を出さない)。 */
+  private tagForm: HTMLElement | null = null;
   /** 同じノートに戻ったら同じ位置へ(P8 段⑫。溢れるのは題名が長いときだけ)。 */
   private readonly scroll: ScrollMemory;
   /** いま出しているノート。⚠ **切り替わったときだけ**スクロールを触る。 */
@@ -189,9 +193,34 @@ export class InspectorRenderer {
      * ⚠ 本文が読めていないとき(一覧を眺めているだけ)は**行ごと空** ── 嘘の
      *   「タグ無し」を出さない。
      */
-    const tagBox = this.rows.get('inspector-tags');
+    const tagBox = this.rows.get('inspector-tag-chips');
+    const tagBody = state.openBody?.lid === meta.lid ? state.openBody.body : null;
+    /**
+     * 🔴 **タグを書ける状態か**(#494)。⚠ **1 か所で決める** ── 札の × と
+     * 打つ欄で別々に数えると、片方だけ出る形が生まれる(§7)。
+     *
+     * 3 つとも要る:
+     * - **本文が読めている** ── 読めていないのに書くと、その場で組み直した
+     *   frontmatter で**元の並びを踏み潰す**
+     * - **`ready`** ── `BULK_TAG` は編集中は何もしない(reducer が弾く)ので、
+     *   出すと無言の dead click になる
+     * - **frontmatter が壊れていない** ── 閉じの `---` を失っている本文に
+     *   書き足すと #284 系の実害を広げる(直してから触る)
+     */
+    const canWriteTags =
+      tagBody !== null &&
+      state.phase === 'ready' &&
+      frontmatterProblem(tagBody)?.kind !== 'unreadable';
+    /**
+     * 🔴 **理由(`title`)は行そのものに置く**(#494 で器を割ったときに 1 度落とした)。
+     *
+     * ⚠ 札の入れ物へ付けると、**札が 1 枚も無いとき**(「無し」/「読めていません」)に
+     *   指す場所が実質消える ── 理由はまさにそのときに読みたい。
+     * 🔑 だから `title` は `dd`(行)、中身は `chips`(札の入れ物)と分ける。
+     */
+    const tagRow = this.rows.get('inspector-tags');
     if (tagBox) {
-      const body = state.openBody?.lid === meta.lid ? state.openBody.body : null;
+      const body = tagBody;
       const tags = body === null ? null : readTags(body);
       /**
        * 🔴 **読めていないときに「無し」と断定しない**(#284)。
@@ -208,7 +237,7 @@ export class InspectorRenderer {
        */
       const problem = body === null ? null : frontmatterProblem(body);
       tagBox.textContent = '';
-      tagBox.removeAttribute('title');
+      tagRow?.removeAttribute('title');
       /**
        * 🔴 **`trailing` では、実在するタグを隠さない**(2 巡目レビュー A-2)。
        *
@@ -219,13 +248,13 @@ export class InspectorRenderer {
        * 🔑 出せるものは出し、言うべきことは `title` に添える。
        */
       if (problem !== null && problem.kind === 'trailing' && tags !== null) {
-        tagBox.title = problem.detail;
+        if (tagRow) tagRow.title = problem.detail;
       }
       if (tags === null) {
         tagBox.textContent = '—';
       } else if (problem !== null && problem.kind === 'unreadable') {
         tagBox.textContent = '読めていません';
-        tagBox.title = problem.detail;
+        if (tagRow) tagRow.title = problem.detail;
       } else if (tags.length === 0) {
         /**
          * 🔴 **`trailing` でも行の字は「無し」のまま**(3 巡目レビュー ②。
@@ -251,16 +280,53 @@ export class InspectorRenderer {
         tagBox.textContent = '無し';
       } else {
         for (const tag of tags) {
-          const chip = document.createElement('button');
-          chip.type = 'button';
-          chip.setAttribute('data-pkc-action', 'filter-by-tag');
-          chip.setAttribute('data-pkc-tag', tag);
+          /**
+           * 🔴 **札は「探す」と「外す」の 2 つを持つ**(#494)。
+           *
+           * ⚠ 裁定 2026-08-23「**片道の操作を作らない**」── 打てるのに外せないと、
+           *   間違えて付けたタグを消すために**本文を開いて frontmatter を直す**
+           *   ことになる(それは動線を 1 つ失うのと同じである)。
+           * ⚠ ボタンの中にボタンは置けないので、**包む器**を 1 枚挟む
+           *   (関係の行と同じ形 ── 2 つ目の作法を作らない)。
+           */
+          const chip = document.createElement('span');
           chip.setAttribute('data-pkc-field', 'inspector-tag');
-          chip.title = `「${tag}」を含むノートを探します`;
-          chip.textContent = tag;
+          chip.setAttribute('data-pkc-tag', tag);
+          const find = document.createElement('button');
+          find.type = 'button';
+          find.setAttribute('data-pkc-action', 'filter-by-tag');
+          find.setAttribute('data-pkc-tag', tag);
+          find.setAttribute('data-pkc-field', 'inspector-tag-find');
+          find.title = `「${tag}」を含むノートを探します`;
+          find.textContent = tag;
+          chip.append(find);
+          /**
+           * ⚠ **外せるのは、いま書ける状態のときだけ** ── 編集中は本文の正本が
+           *   画面側に在るので、`BULK_TAG` は `phase === 'ready'` でしか動かない。
+           *   押せない物を出すと無言の dead click になるので、**出さない**。
+           */
+          if (canWriteTags) {
+            const off = iconButton('untag-entry', '外す');
+            off.setAttribute('data-pkc-tag', tag);
+            off.setAttribute('data-pkc-field', 'inspector-tag-off');
+            off.title = `このノートから「${tag}」を外します(ノートも本文の他の行も消えません)`;
+            chip.append(off);
+          }
           tagBox.append(chip);
         }
       }
+    }
+    /**
+     * 🔴 **打つ欄は「打てるときだけ」出す**(#494)。
+     *
+     * ⚠ 出しっぱなしにすると、①本文が読めていない(一覧を眺めているだけ)
+     *   ②編集中 ③frontmatter が壊れている、のどれでも押せる形になり、
+     *   **押しても何も起きない**(無言の dead click)。
+     * 🔑 畳む理由は `title` に残す ── 「消えた」ではなく「いまは打てない」と
+     *   読めるようにする。
+     */
+    if (this.tagForm) {
+      this.tagForm.hidden = !canWriteTags;
     }
     /**
      * 🔴 **関係を出す**(#185)。⚠ 出すのは**親子以外** ── 居場所は上の行が既に
@@ -657,6 +723,28 @@ export class InspectorRenderer {
       dd.setAttribute('data-pkc-field', field);
       dl.append(dt, dd);
       this.rows.set(field, dd);
+      // 🔴 **タグの行だけは器を 2 つに割る**(#494)── 下の注記を参照
+      if (field === 'inspector-tags') {
+        const chips = document.createElement('span');
+        chips.setAttribute('data-pkc-field', 'inspector-tag-chips');
+        const form = document.createElement('span');
+        form.setAttribute('data-pkc-field', 'tag-add');
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.setAttribute('data-pkc-field', 'tag-add-input');
+        input.setAttribute('list', 'pkc-tag-candidates');
+        input.placeholder = 'タグを打つ';
+        input.setAttribute('aria-label', 'このノートに足すタグ');
+        const cands = document.createElement('datalist');
+        cands.id = 'pkc-tag-candidates';
+        this.tagCandidates = cands;
+        const add = iconButton('add-tag', 'タグを足す');
+        add.title = 'このノートの本文にタグを足します(frontmatter の tags: に入ります)';
+        form.append(input, cands, add);
+        dd.append(chips, form);
+        this.rows.set('inspector-tag-chips', chips);
+        this.tagForm = form;
+      }
     };
     row('題名', 'inspector-title');
     row('種類', 'inspector-kind');
@@ -692,6 +780,27 @@ export class InspectorRenderer {
      * `setRow`(textContent 差し替え)ではなく専用の器を持つ。
      */
     row('タグ', 'inspector-tags');
+    /**
+     * 🔴 **タグを「その場で打つ」**(#494。user 指摘 2026-08-27
+     * 「**直感的にここにタグを打つ!って感じの動作じゃなくて yamlfrontmatter なのは
+     * 問題だ。しかも設定動線がよくわからん**」)。
+     *
+     * ⚠ **打つ口が無かったわけではない** ── 数えたら 3 経路あった:
+     *   ①本文の frontmatter に書く ②フォルダの面で行に印を付けて「タグを付ける」
+     *   ③スマートフォルダへ掴んで落とす。🔴 **どれも「いま開いているこのノート」の
+     *   口ではない** ── ②は別の面へ移って印を付ける必要があり、③は入れ物が要る。
+     *   ⚠ そして情報ペインのタグ行は**読み取り専用**だった(押すと「探す」だけ)。
+     *   だから user には「無い」に見えた ── **見つけられないのはこちらの動線の
+     *   不備であって、user の落ち度ではない**。
+     *
+     * 🔑 裁定 2026-08-23「**面は『映すだけ』にしない ── 双方向を既定にする**」の
+     *   とおり、**映している行そのものに打つ口を置く**(別の帯へ離すと、
+     *   「どこで打つのか」を探す動線がまた 1 つ増える)。
+     *
+     * ⚠ **器は 2 つに割る** ── 札は描き直しのたびに作り直すが、**打つ欄は
+     *   作り直さない**(作り直すと打ちかけの字と focus が消える ── 追記欄と
+     *   同じ理由。P8 段⑧)。
+     */
     /**
      * 🔴 **どのスマートフォルダに集まっているか**(#283 P1「所属の札」)。
      *

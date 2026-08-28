@@ -268,6 +268,12 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   /** 関係(#185)── 足すのは plus、消すのは close(既存の意味と揃える)。 */
   'add-relation': 'plus',
   'remove-relation': 'close',
+  /**
+   * タグ(#494)。⚠ **関係と同じ図案にする** ── どちらも「この 1 件に足す /
+   * この 1 件から外す」なので、別の図案にすると 2 種類の物として覚え直させる。
+   */
+  'add-tag': 'plus',
+  'untag-entry': 'close',
   /** 本文の置換(#191)── 書き換えるので鉛筆と同じ仲間の図案にする。 */
   'toggle-replace': 'pencil',
   'replace-all': 'check',
