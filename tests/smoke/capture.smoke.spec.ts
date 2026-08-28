@@ -36,6 +36,41 @@ test('ブックマークで開いた窓が、合図つきの 1 通だけを受�
   const errors = collectPageErrors(page);
 
   /**
+   * 🔴 **例外が出た「瞬間」の状態**(#387 診断第 3 段)。
+   *
+   * 既存の diag()(下)は**最後の assert 時点**の状態しか採れない ── 5 度の赤は
+   * どれも `(+118〜161ms)` = **序盤**に出ており、「その瞬間に窓が何枚で、記事の頁が
+   * 生きていたか」は残らなかった。ここでは `pageerror` の**その場**で採る。
+   *
+   * ⚠ handler の中の `page.evaluate` は「実行文脈がその瞬間に死んでいるか」を測る
+   *   当のもの ── 失敗したら失敗自体が手掛かりなので、落とさず印にする。
+   * ⚠ test は 1 ミリも緩めない ── 増えるのは赤の情報量だけ(緑の回はほぼ無費用)。
+   */
+  const t0 = Date.now();
+  const moments: string[] = [];
+  page.on('pageerror', () => {
+    const at = Date.now() - t0;
+    const pages = context.pages();
+    const urls = pages
+      .map((p) => {
+        try {
+          const u = new URL(p.url());
+          return `${u.pathname}${u.hash}`;
+        } catch {
+          return p.url();
+        }
+      })
+      .join(' ');
+    moments.push(`(+${at}ms) 窓 ${pages.length} 枚 [${urls}]`);
+    void page
+      .evaluate(() => `${location.pathname} readyState=${document.readyState}`)
+      .then(
+        (s) => moments.push(`(+${at}ms) 記事の頁は生きている: ${s}`),
+        (e) => moments.push(`(+${at}ms) 記事の頁の evaluate が落ちた: ${String(e).slice(0, 80)}`),
+      );
+  });
+
+  /**
    * 🔑 **flag を立てて開く**(既定は OFF ── 立てないと門が 1 つも開かない)。
    * ⚠ `addInitScript` は**全 frame**で走るので、sandbox の frame で
    *   `localStorage` が投げる分は握り潰す(他の smoke と同じ作法)。
@@ -171,7 +206,10 @@ test('ブックマークで開いた窓が、合図つきの 1 通だけを受�
     );
   };
   const state = await diag();
+  // ⚠ handler 内の evaluate の返りを拾い切る(赤の回だけ意味を持つ)
+  if (moments.length > 0) await new Promise((r) => setTimeout(r, 300));
+  const moment = moments.length > 0 ? ` / 瞬間 [${moments.join(' → ')}]` : '';
 
-  expect(errors, `記事の頁で例外 ── ${state}`).toEqual([]);
+  expect(errors, `記事の頁で例外 ── ${state}${moment}`).toEqual([]);
   expect(errorsPkc, `PKC3 で例外 ── ${state}`).toEqual([]);
 });
