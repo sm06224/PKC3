@@ -135,6 +135,51 @@ describe('parseVcf ── 読みは広く', () => {
    * 🔑 この module の宣言は「対応しない項目も捨てない」── 閉じの書き忘れで
    *   中身ごと捨てるのは、その宣言と正面から反する。
    */
+  /**
+   * 🔴 **文字が壊れていたら言う**(#534 ⑤)。
+   * ⚠ 直す前は `=ZZ`(16 進として読めない)が `"=ZZ"` のまま素通りし、
+   *   UTF-8 として読めないバイト列は `<U+FFFD>` のモジバケになったのに
+   *   **警告は 0 件**だった ── user は名前が化けた理由を知りようがない。
+   */
+  it('🔴 壊れた QP は黙って化けさせない(理由を言う)', () => {
+    const v = 'BEGIN:VCARD\r\nFN;ENCODING=QUOTED-PRINTABLE:=ZZ\r\nTEL:090\r\nEND:VCARD';
+    const { cards, warnings } = parseVcf(v);
+    expect(cards, '読めた分まで捨てた').toHaveLength(1);
+    expect(warnings.join(''), '化けたのに黙っている').toContain('文字が壊れている');
+  });
+
+  it('🔴 UTF-8 として読めないバイト列も言う(モジバケを黙って通さない)', () => {
+    // `=E5` だけ(3 バイト必要な先頭バイト 1 つ)── 復号すると U+FFFD になる
+    const v = 'BEGIN:VCARD\r\nFN;ENCODING=QUOTED-PRINTABLE:=E5\r\nTEL:090\r\nEND:VCARD';
+    expect(parseVcf(v).warnings.join('')).toContain('文字が壊れている');
+  });
+
+  it('⚠ 対照群 ── 正しい QP では言わない(嘘の狼を出さない)', () => {
+    const v =
+      'BEGIN:VCARD\r\nFN;ENCODING=QUOTED-PRINTABLE;CHARSET=UTF-8:=E5=B1=B1=E7=94=B0\r\nTEL:090\r\nEND:VCARD';
+    const { cards, warnings } = parseVcf(v);
+    expect(cards[0]!.name).toBe('山田');
+    expect(warnings.filter((w) => w.includes('文字が壊れている')), '正しいのに壊れと言った').toEqual([]);
+  });
+
+  /**
+   * 🔴 **中身の無いカードでノートを作らない**(#534 ④)。
+   * ⚠ `BEGIN` / `END` だけの塊は書き出しの区切りの名残として実在する。
+   *   ノートにすると**題名「連絡先 N」・本文が空**のノートが増えるだけである。
+   */
+  it('🔴 中身が 1 つも無いカードは飛ばす(空のノートを作らない)', () => {
+    const v = 'BEGIN:VCARD\r\nEND:VCARD\r\nBEGIN:VCARD\r\nFN:山田\r\nTEL:090\r\nEND:VCARD';
+    const { cards, warnings } = parseVcf(v);
+    expect(cards.map((c) => c.name), '空のカードでノートを作った').toEqual(['山田']);
+    expect(warnings.join(''), '黙って飛ばした').toContain('中身が無いので飛ばしました');
+  });
+
+  it('⚠ 対照群 ── 名前が無いだけのカードは飛ばさない(電話が在れば意味がある)', () => {
+    const { cards } = parseVcf('BEGIN:VCARD\r\nTEL:090\r\nEND:VCARD');
+    expect(cards, '電話だけのカードまで捨てた').toHaveLength(1);
+    expect(cards[0]!.tels).toEqual(['090']);
+  });
+
   it('🔴 END が無いまま終わっても、読めた分は取り込んで注意で言う', () => {
     const broken = 'BEGIN:VCARD\r\nFN:途中\r\nTEL:090';
     const { cards, warnings } = parseVcf(broken);

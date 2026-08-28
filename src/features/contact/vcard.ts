@@ -62,7 +62,22 @@ function unescapeValue(v: string): string {
 }
 
 /** QUOTED-PRINTABLE(2.1)を解く。⚠ UTF-8 のバイト列として復号する。 */
-function decodeQp(v: string): string {
+/**
+ * 🔴 **QP を解いた結果と、壊れていたかを一緒に返す**(#534 ⑤)。
+ *
+ * ⚠ 1 稿目は字だけ返していたので、`=ZZ` のような**壊れた 16 進**が
+ *   `"=ZZ"` のまま素通りし、UTF-8 として読めないバイト列は `<U+FFFD>` の
+ *   モジバケになった ── **警告は 0 件**だった。user から見ると
+ *   「名前が化けている理由がどこにも出ない」。
+ * 🔑 この module の宣言は「黙って失わない」なので、**化けたことも言う**。
+ */
+interface QpResult {
+  readonly text: string;
+  /** ⚠ 16 進として読めない `=` が在ったか、復号したバイト列が UTF-8 でなかったか。 */
+  readonly broken: boolean;
+}
+
+function decodeQp(v: string): QpResult {
   /**
    * 行末の `=`(ソフト改行)は折り返しの名残 ── 落とす。
    * ⚠ かつてここに `.replace(/=\r?\n/g, '')` も置いていたが、**no-op だった**
@@ -72,20 +87,25 @@ function decodeQp(v: string): string {
    */
   const joined = v.replace(/=$/, '');
   const bytes: number[] = [];
+  let broken = false;
   for (let i = 0; i < joined.length; i += 1) {
     const ch = joined[i]!;
     if (ch === '=' && /^[0-9A-Fa-f]{2}$/.test(joined.slice(i + 1, i + 3))) {
       bytes.push(parseInt(joined.slice(i + 1, i + 3), 16));
       i += 2;
     } else {
+      // ⚠ QP で `=` の次が 16 進でないのは**壊れている**(素の `=` は `=3D` と書く)
+      if (ch === '=') broken = true;
       // 素の ASCII 字はそのまま(UTF-8 では 1 バイト)
       bytes.push(ch.charCodeAt(0));
     }
   }
   try {
-    return new TextDecoder('utf-8', { fatal: false }).decode(new Uint8Array(bytes));
+    const text = new TextDecoder('utf-8', { fatal: false }).decode(new Uint8Array(bytes));
+    // ⚠ `fatal: false` は読めないバイトを U+FFFD にする ── **それも壊れの印**
+    return { text, broken: broken || text.includes('\uFFFD') };
   } catch {
-    return joined;
+    return { text: joined, broken: true };
   }
 }
 
@@ -202,6 +222,30 @@ interface VcfDraft {
   others: string[];
   /** 種別を落としたことを**このカードで既に言ったか**(200 枚で 200 行にしない)。 */
   typeSaid: boolean;
+  /** 文字の壊れを**このカードで既に言ったか**(同じ理由で 1 枚 1 行)。 */
+  qpSaid: boolean;
+}
+
+/**
+ * 🔴 **中身が 1 つも無いカードか**(#534 ④)。
+ *
+ * ⚠ `BEGIN:VCARD` / `END:VCARD` だけの塊は実在する(書き出しの区切りの名残)。
+ *   これをノートにすると、**題名「連絡先 N」・本文が空**のノートが増えるだけで、
+ *   user は「何これ」となる ── 捨ててよい唯一の形である。
+ * ⚠ **「名前が無い」だけでは捨てない** ── 電話が在れば連絡先として意味がある
+ *   (そちらは番号名を振る道が既に在る)。
+ */
+function isEmptyCard(cur: VcfDraft): boolean {
+  return (
+    cur.fn === '' &&
+    cur.n === '' &&
+    cur.org === '' &&
+    cur.birthday === '' &&
+    cur.tels.length === 0 &&
+    cur.emails.length === 0 &&
+    cur.notes.length === 0 &&
+    cur.others.length === 0
+  );
 }
 
 /**
@@ -251,21 +295,37 @@ export function parseVcf(text: string): VcfParseResult {
        *   閉じの書き忘れで**中身ごと**捨てるのは、その宣言と正面から反する。
        */
       if (cur !== null) {
-        warnings.push(`${cardNo()} 枚目: END:VCARD が無いまま次が始まりました(読めた分は取り込みました)`);
-        cards.push(finishCard(cur));
+        if (isEmptyCard(cur)) warnings.push(`${cardNo()} 枚目: 中身が無いので飛ばしました`);
+        else {
+          warnings.push(
+            `${cardNo()} 枚目: END:VCARD が無いまま次が始まりました(読めた分は取り込みました)`,
+          );
+          cards.push(finishCard(cur));
+        }
       }
-      cur = { fn: '', n: '', org: '', tels: [], emails: [], birthday: '', notes: [], others: [], typeSaid: false };
+      cur = { fn: '', n: '', org: '', tels: [], emails: [], birthday: '', notes: [], others: [], typeSaid: false, qpSaid: false };
       continue;
     }
     if (prop.name === 'END' && prop.value.trim().toUpperCase() === 'VCARD') {
-      if (cur !== null) cards.push(finishCard(cur));
+      if (cur !== null) {
+        // 🔴 中身の無いカードはノートを作らない(#534 ④)── ただし黙らない
+        if (isEmptyCard(cur)) warnings.push(`${cardNo()} 枚目: 中身が無いので飛ばしました`);
+        else cards.push(finishCard(cur));
+      }
       cur = null;
       continue;
     }
     if (cur === null) continue;
 
     const qp = prop.params.some((p) => p === 'ENCODING=QUOTED-PRINTABLE' || p === 'QUOTED-PRINTABLE');
-    const decoded = unescapeValue(qp ? decodeQp(prop.value) : prop.value).trim();
+    const qpOut = qp ? decodeQp(prop.value) : null;
+    if (qpOut?.broken === true && !cur.qpSaid) {
+      cur.qpSaid = true;
+      warnings.push(
+        `${cardNo()} 枚目: 文字が壊れている所がありました(元の .vcf の書き方が古いのかもしれません)`,
+      );
+    }
+    const decoded = unescapeValue(qpOut?.text ?? prop.value).trim();
     switch (prop.name) {
       case 'VERSION':
       case 'PRODID':
@@ -275,10 +335,10 @@ export function parseVcf(text: string): VcfParseResult {
         cur.fn = decoded;
         break;
       case 'N':
-        cur.n = nameFromN(qp ? decodeQp(prop.value) : prop.value);
+        cur.n = nameFromN(qpOut?.text ?? prop.value);
         break;
       case 'ORG':
-        cur.org = splitUnescaped(qp ? decodeQp(prop.value) : prop.value, ';')
+        cur.org = splitUnescaped(qpOut?.text ?? prop.value, ';')
           .map((s) => unescapeValue(s).trim())
           .filter(Boolean)
           .join(' ');
@@ -346,8 +406,13 @@ export function parseVcf(text: string): VcfParseResult {
   }
   if (cur !== null) {
     // ⚠ 上と同じ ── 閉じが無いだけで中身を捨てない(非対称を作らない)
-    warnings.push(`${cardNo()} 枚目: END:VCARD が無いまま終わりました(読めた分は取り込みました)`);
-    cards.push(finishCard(cur));
+    if (isEmptyCard(cur)) warnings.push(`${cardNo()} 枚目: 中身が無いので飛ばしました`);
+    else {
+      warnings.push(
+        `${cardNo()} 枚目: END:VCARD が無いまま終わりました(読めた分は取り込みました)`,
+      );
+      cards.push(finishCard(cur));
+    }
   }
   return { cards, warnings };
 }
