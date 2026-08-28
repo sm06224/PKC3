@@ -3587,9 +3587,25 @@ const ACTIONS: Record<string, ActionHandler> = {
      *   言わないと「全部出た」と思って元の .vcf を捨てる。
      */
     const cut = st.contactScan?.truncated === true ? '(多いので途中まで集めた分です)' : '';
+    /**
+     * 🔴 **外した宛先の件数は、必ず言う**(#536 ③、2026-08-28)。
+     *
+     * ⚠ 長すぎる値(1,000 字超)は **card に入る前に外して**ある
+     *   (`contact-card.ts` の `CONTACT_LIMITS.wire`)── 途中で切った宛先を
+     *   相手の端末に「在るもの」として保存させないためである。
+     * 🔴 だが**黙って外すと、それは「静かに失う」そのもの**である ──
+     *   user は宛先の欠けた連絡先を渡して、後で相手が連絡できないことに気づく。
+     * 🔑 だから**何件で外したかを言う**。⚠ 外したのは**その値だけ**なので、
+     *   同じ人の本物の電話番号やメールは**そのまま出ている**(そう読める字にする)。
+     */
+    const dropped = cards.filter((c) => c.overlong).length;
+    const bad =
+      dropped > 0
+        ? `。⚠ ${dropped} 件で、長すぎる電話・メール(1,000 字超)を外しました`
+        : '';
     dispatcher.dispatch({
       type: 'OP_NOTICE',
-      message: `連絡先 ${cards.length} 件を書き出しました${cut}(名前・所属・電話・メール・誕生日だけです)`,
+      message: `連絡先 ${cards.length} 件を書き出しました${cut}(名前・所属・電話・メール・誕生日だけです)${bad}`,
     });
   },
   /**

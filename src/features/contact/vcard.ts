@@ -541,6 +541,18 @@ export function buildVcf(cards: readonly ContactCard[]): string {
     // 🔑 取込が `birthday:` を書くので、**書き出しも書く**(往復を閉じる ──
     //    無いと「取り込んで書き出したら誕生日が消えた」になる)
     if (c.birthday !== '') lines.push(`BDAY:${escapeValue(c.birthday)}`);
+    /**
+     * ⚠ **ここに門は置かない**(#536 ③、2026-08-28)。
+     *
+     * 🔑 長すぎる宛先(1,000 字超)は **`contactOf` が card に入れる前に外して**いる
+     *   (`contact-card.ts` の `CONTACT_LIMITS.wire`。実測もそこ)── なので
+     *   `c.tels` / `c.emails` に**残っている値は全部そのまま書ける**。
+     * 🔴 **同じ規則を 2 か所に書かない**(CLAUDE.md §7)── 1 稿目はここに
+     *   `if (!c.overlong)` を置いて**その人の宛先を丸ごと書かない**形にしていたが、
+     *   ⚠ 1 つの長い落書きの巻き添えで**本物の電話番号まで .vcf から消えた**。
+     *   `overlong` は「外したことを**帯で言う**」ためだけの印であって、
+     *   ここで読む物ではない。
+     */
     for (const t of c.tels) lines.push(`TEL;TYPE=voice:${escapeValue(t)}`);
     for (const e of c.emails) lines.push(`EMAIL;TYPE=internet:${escapeValue(e)}`);
     lines.push('END:VCARD');

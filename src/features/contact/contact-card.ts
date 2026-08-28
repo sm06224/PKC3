@@ -66,6 +66,17 @@ export interface ContactCard {
    *   `buildVcf` が `BDAY:` を書けず、**往復すると誕生日が消えていた**。
    */
   readonly birthday: string;
+  /**
+   * 🔴 **長すぎるので外した宛先があるか**(#536 ③)。
+   *
+   * ⚠ **外したことを言うため**だけに在る ── 書き出しの帯が件数を出す。
+   *   ⚠ 黙って落とすのは「静かに失う」そのものである。
+   * 🔑 **外すのは値 1 つずつ**である(card ごとではない)── 1 稿目は card に印を付けて
+   *   `buildVcf` が**その人の電話とメールを丸ごと書かない**形にしていたが、
+   *   ⚠ **1 つの長い落書きと本物の電話番号が同じノートに在ると、本物のほうが消えた**。
+   *   `tels` / `emails` に**残っている値は全部そのまま書ける**、が今の約束である。
+   */
+  readonly overlong: boolean;
 }
 
 /** 走査の結果。⚠ **切ったかどうかを一緒に運ぶ**(黙って切らない ── `TaskScan` と同じ)。 */
@@ -93,6 +104,34 @@ export const CONTACT_LIMITS = {
   each: 8,
   /** 1 つの値の長さ。 */
   chars: 120,
+  /**
+   * 🔴 **worker → main を渡ってよい 1 値の長さ**(#536 ③、2026-08-28 に測って置いた)。
+   *
+   * ⚠ **画面の丸め(`chars`)とは別物**である ── あちらは「見せ方」、こちらは
+   *   「**渡す量**」。⚠ 混ぜると、#278 段③ で踏んだ「画面の丸めが .vcf へ漏れる」
+   *   を作り直す(CLAUDE.md §7「誤差の向きを決めて、両側に使い回さない」)。
+   *
+   * ## 🔑 実測が置き場を決めた(2026-08-28)
+   *
+   * 2000 件 × 宛先 2 本で、**1 値の長さ**を変えたときに渡る量:
+   *
+   * | 1 値 | 渡る量 |
+   * |---|---|
+   * | 20 字(現実的) | 0.27 MB |
+   * | 120 字 | 0.65 MB |
+   * | 1,000 字 | 4.01 MB |
+   * | **10,000 字** | 🔴 **38.34 MB** |
+   *
+   * ⚠ **件数の軸は問題ではなかった** ── 2000 件でも 0.27〜0.73 MB である。
+   *   効いているのは**長さ**だけなので、そこに門を置く。
+   * 🔑 1,000 字は「**本物の宛先なら絶対に超えない**」値である
+   *   (メールアドレスの上限は 254 字 / E.164 の電話番号は 15 桁)。
+   *   ⚠ だから外しても user の宛先は 1 つも失われない ── 失われるのは
+   *   「宛先ではない何か」だけである。
+   *   ⚠ **ただしそれは「値 1 つずつ外す」ときだけ成り立つ主張**である ──
+   *   card ごと落とすと、同じノートの本物の宛先まで巻き添えになる(下の `cut` の注記)。
+   */
+  wire: 1000,
 } as const;
 
 /**
@@ -166,9 +205,31 @@ export function displayWays(list: readonly string[]): {
  */
 export function contactOf(lid: string, title: string, body: string): ContactCard | null {
   const { meta } = parseFrontmatter(body);
-  const tels = values(meta[CONTACT_KEYS.tel]);
-  const emails = values(meta[CONTACT_KEYS.email]);
-  if (tels.length === 0 && emails.length === 0) return null;
+  const rawTels = values(meta[CONTACT_KEYS.tel]);
+  const rawEmails = values(meta[CONTACT_KEYS.email]);
+  if (rawTels.length === 0 && rawEmails.length === 0) return null;
+  /**
+   * 🔴 **渡る量に門を置く**(#536 ③)。⚠ 実測は `CONTACT_LIMITS.wire` の注記に在る
+   *   ── 効いているのは件数ではなく**1 値の長さ**である(10,000 字で 38MB)。
+   *
+   * 🔑 **切らずに、外す。** 途中で切った宛先を残すと、下流(.vcf / `tel:` / `mailto:`)が
+   *   **壊れた宛先を「在るもの」として扱う** ── 落ちるより悪い(#278 段③ と同じ形)。
+   * 🔴 **外すのは値 1 つずつ**である。⚠ card ごとに落とすと、**同じノートに在る本物の
+   *   電話番号まで消える** ── 1 稿目はそれをやっていた(自分で「失う本物の宛先は
+   *   0 件」と書いておきながら、mixed な 1 件で嘘になっていた)。
+   * ⚠ 連絡先かどうかの判定は**外す前**(`rawTels` / `rawEmails`)で済ませてある ──
+   *   落書きしか無いノートも一覧には出る(user が「ここに書いた」ことは事実なので、
+   *   黙って一覧から消さない)。
+   */
+  let overlong = false;
+  const cut = (list: readonly string[]): string[] =>
+    list.filter((v) => {
+      if (v.length <= CONTACT_LIMITS.wire) return true;
+      overlong = true;
+      return false;
+    });
+  const tels = cut(rawTels);
+  const emails = cut(rawEmails);
   /**
    * ⚠ `org:` は **1 つの字でも、並べて何個でも**書ける ── 取込は
    * vCard の `ORG:会社;部署` を `org: [会社, 部署]` として書く(#534 段②)。
@@ -176,7 +237,7 @@ export function contactOf(lid: string, title: string, body: string): ContactCard
    */
   const orgParts = values(meta[CONTACT_KEYS.org]);
   const birthday = values(meta[CONTACT_KEYS.birthday])[0] ?? '';
-  return { lid, name: title, org: orgParts.join(' '), orgParts, tels, emails, birthday };
+  return { lid, name: title, org: orgParts.join(' '), orgParts, tels, emails, birthday, overlong };
 }
 
 /**

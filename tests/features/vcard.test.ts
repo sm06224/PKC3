@@ -339,6 +339,7 @@ describe('buildVcf ── 書き出し', () => {
     tels: ['090-1234-5678'],
     emails: ['taro@example.com'],
     birthday: '',
+    overlong: false,
     ...over,
   });
 
