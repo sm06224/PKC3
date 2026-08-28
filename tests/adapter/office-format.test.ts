@@ -33,6 +33,7 @@ interface Api {
   SAVABLE_EXTS: string[];
   ALIEN_SAVABLE_EXTS: string[];
   ALIEN_DIALOG_MARK: string;
+  ALIEN_DIALOG_MARK_OLD: string;
   extOf(name: unknown): string;
   isSavable(name: unknown, alienOk?: unknown): boolean;
   packSavesAlien(metaText: unknown): boolean;
@@ -142,7 +143,15 @@ describe('一式が非 ODF を保存できるか', () => {
     `${P}/modules/scalc/ui/recalcquerydialog.ui","start":3,"end":4}`,
     `${P}/sfx/ui/safemodequerydialog.ui","start":5,"end":6}`,
   ].join(',');
-  const REAL = `${P}/cui/ui/querydialog.ui","start":7,"end":8}`;
+  /**
+   * 🔴 **本物は 2 通りある**(2026-08-28)。上流が `cui` → `svtools` へ移したので、
+   * 手元の一式は**どちらの綴りでもありうる**(一式は IDB に取り置かれるため、
+   * 配り直しても入れ替わるまでは古いままである)。
+   * ⚠ **どちらか片方だけを真にすると、その反対を持っている人が
+   *   「保存できるのにできないと言われる」** ── 実際 2026-08-28 にそうなりかけた。
+   */
+  const REAL = `${P}/svt/ui/querydialog.ui","start":7,"end":8}`;
+  const REAL_OLD = `${P}/cui/ui/querydialog.ui","start":7,"end":8}`;
 
   it('🔴 囮 3 つだけの目録では偽(部分一致で書いていたら必ず落ちる)', () => {
     expect(api.packSavesAlien(`{"files":[${DECOYS}]}`), '囮に満たされている').toBe(false);
@@ -152,6 +161,18 @@ describe('一式が非 ODF を保存できるか', () => {
     expect(api.packSavesAlien(`{"files":[${DECOYS},${REAL}]}`), '本物を見落としている').toBe(true);
     // ⚠ 並び順に依存しない
     expect(api.packSavesAlien(`{"files":[${REAL},${DECOYS}]}`)).toBe(true);
+  });
+
+  /**
+   * 🔴 **古い一式を持っている人を切り捨てない**(2026-08-28)。
+   * ⚠ 新しい綴りだけを見るように書き換えると、ここが落ちる ── そして
+   *   落ちなければ、**入れ替えていない user が保存できなくなる**。
+   */
+  it('🔴 古い在り処の一式でも真(取り置かれた一式を切り捨てない)', () => {
+    expect(
+      api.packSavesAlien(`{"files":[${DECOYS},${REAL_OLD}]}`),
+      '古い一式を「保存できない」と言っている',
+    ).toBe(true);
   });
 
   it('⚠ 前にも後ろにも延びた名前に満たされない', () => {
@@ -174,8 +195,16 @@ describe('一式が非 ODF を保存できるか', () => {
 
   it('🔴 印は「閉じ引用符まで」含む(前置きだけの一致で真にしない)', () => {
     // ⚠ 空振り防止 ── 印そのものが短くなっていないことを見る
-    expect(api.ALIEN_DIALOG_MARK.endsWith('"'), '印が閉じ引用符で終わっていない').toBe(true);
-    expect(api.ALIEN_DIALOG_MARK).toContain('/soffice.cfg/cui/ui/querydialog.ui');
+    for (const [name, mark] of [
+      ['新', api.ALIEN_DIALOG_MARK],
+      ['旧', api.ALIEN_DIALOG_MARK_OLD],
+    ] as const) {
+      expect(mark.endsWith('"'), `${name}: 印が閉じ引用符で終わっていない`).toBe(true);
+      expect(mark, `${name}: 印が短くなっている`).toContain('/ui/querydialog.ui');
+    }
+    // 🔑 **綴りそのものを留める** ── 上流の在り処と、切り捨てない古い在り処
+    expect(api.ALIEN_DIALOG_MARK).toContain('/soffice.cfg/svt/ui/querydialog.ui');
+    expect(api.ALIEN_DIALOG_MARK_OLD).toContain('/soffice.cfg/cui/ui/querydialog.ui');
   });
 });
 

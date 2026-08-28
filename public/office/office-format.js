@@ -35,11 +35,12 @@
  * **入れ替えていない人の手元では今も落ちる** ── そこで「保存できます」と言うと、
  * その人は**編集を失う**。
  * 🔑 だから `isSavable(name, alienOk)` は第 2 引数を取る ── `alienOk` は
- * **その一式が確認ダイアログ(`cui/ui/querydialog.ui`)を持っているか**である。
+ * **その一式が確認ダイアログ(`svt/ui/querydialog.ui`、古い一式では
+ * `cui/ui/querydialog.ui`)を持っているか**である。
  * ⚠ **渡されなければ `false` 扱い**(= 断る側へ倒す)。逆にしてはいけない。
  *
  * ⚠ 判定の材料は `host.html` が**一式そのもの**から採る(`soffice.data.js.metadata`
- * に `/soffice.cfg/cui/ui/querydialog.ui` が在るか)。pack.json に新しい欄を足さないので、
+ * に `/soffice.cfg/svt/ui/querydialog.ui`(古い一式では `cui/ui/…`)が在るか)。pack.json に新しい欄を足さないので、
  * **既に入れてある一式にも遡って効く**。
  * 🔴 **突き合わせは完全一致で行う** ── 部分一致(`querydialog.ui` を含むか)にすると、
  * 古い一式にも在る `vcl/ui/querydialog.ui` / `recalcquerydialog.ui` /
@@ -148,22 +149,45 @@
    * **古い一式にも在る別物**に満たされて**常に真**になる ──
    * `vcl/ui/querydialog.ui` / `modules/scalc/ui/recalcquerydialog.ui` /
    * `sfx/ui/safemodequerydialog.ui` の 3 つ(2026-08-24 に実際に踏みかけた)。
-   * 🔑 目録は `"filename":"…/soffice.cfg/cui/ui/querydialog.ui"` の形なので、
+   * 🔑 目録は `"filename":"…/soffice.cfg/svt/ui/querydialog.ui"` の形なので、
    * **閉じ引用符まで**含めて探せば、前にも後ろにも延びない。
+   *
+   * ## 🔴 2026-08-28: 上流が在り処を移したので、**両方**を受ける
+   *
+   * LO は `cui/uiconfig/ui/querydialog.ui` を消し、実体を `svtools` へ移した
+   * (`include/svtools/querydialog.hxx` の `class QueryDialog` が
+   * `u"svt/ui/querydialog.ui"` を読む / `svtools/UIConfig_svt.mk` が登録)。
+   * 実測:LO `570a4c78` の一式は `cui/ui/…`、`72012ca1` の一式は `svt/ui/…`。
+   *
+   * 🔴 **片方だけにしてはいけない。**
+   *   - 新しい綴りだけにすると:**古い一式を手元に持っている人**が、
+   *     保存できるのに「できません」と言われる(一式は IDB に取り置かれるので、
+   *     配り直しても入れ替わるまでは古いままである)
+   *   - 古い綴りだけにすると:**新しい一式を入れた人**が同じ目に遭う
+   *     ── ⚠ こちらは 2026-08-28 に**実際にそうなるところだった**
+   *
+   * 🔑 だから**どちらか 1 つでも在れば真**。⚠ ただし**完全一致は崩さない** ──
+   * 綴りを緩めて `querydialog.ui` の部分一致にすると、上の囮 3 つに満たされて
+   * **常に真**になる(= 保存できない一式で黙る = user が編集を失う)。
    *
    * ⚠ 読めない / 渡されないときは **false**(= 断りを出す側へ倒す)。
    */
-  var ALIEN_DIALOG_MARK = '/soffice.cfg/cui/ui/querydialog.ui"';
+  var ALIEN_DIALOG_MARK = '/soffice.cfg/svt/ui/querydialog.ui"';
+  /** かつての在り処(LO が `svtools` へ移す前)。⚠ **落とさない** ── 上の 🔴 を参照。 */
+  var ALIEN_DIALOG_MARK_OLD = '/soffice.cfg/cui/ui/querydialog.ui"';
 
   function packSavesAlien(metaText) {
     if (typeof metaText !== 'string' || metaText === '') return false;
-    return metaText.indexOf(ALIEN_DIALOG_MARK) >= 0;
+    return (
+      metaText.indexOf(ALIEN_DIALOG_MARK) >= 0 || metaText.indexOf(ALIEN_DIALOG_MARK_OLD) >= 0
+    );
   }
 
   root.PKC3OfficeFormat = {
     SAVABLE_EXTS: SAVABLE_EXTS,
     ALIEN_SAVABLE_EXTS: ALIEN_SAVABLE_EXTS,
     ALIEN_DIALOG_MARK: ALIEN_DIALOG_MARK,
+    ALIEN_DIALOG_MARK_OLD: ALIEN_DIALOG_MARK_OLD,
     extOf: extOf,
     isSavable: isSavable,
     packSavesAlien: packSavesAlien,

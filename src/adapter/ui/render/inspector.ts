@@ -48,6 +48,7 @@ import { iconButton } from './icons';
 import { formatStoredDate } from '@features/datetime/stored-date';
 // 居場所の解決は `features/relation/tree` が正本(ファイラの帯・パンくずと共有)
 import { readTags } from '@features/flavor/tags';
+import { extractHeadingsFromMarkdown } from '@features/markdown/markdown-toc';
 import { frontmatterProblem } from '@features/markdown/frontmatter';
 import { externalImageUrls } from '@features/asset/inline-url-adopt';
 import {
@@ -93,6 +94,10 @@ export class InspectorRenderer {
   private buttons: Buttons = new Map();
   /** 相手の候補(#185)。⚠ 器は 1 度だけ組み、中身だけ差し替える。 */
   private candidates: HTMLDataListElement | null = null;
+  /** タグの候補(#494 段②)。⚠ 器は 1 度だけ組み、中身だけ差し替える。 */
+  private tagCandidates: HTMLDataListElement | null = null;
+  /** タグを打つ欄の器(#494)。⚠ 打てない状況では**畳む**(押せない物を出さない)。 */
+  private tagForm: HTMLElement | null = null;
   /** 同じノートに戻ったら同じ位置へ(P8 段⑫。溢れるのは題名が長いときだけ)。 */
   private readonly scroll: ScrollMemory;
   /** いま出しているノート。⚠ **切り替わったときだけ**スクロールを触る。 */
@@ -189,9 +194,70 @@ export class InspectorRenderer {
      * ⚠ 本文が読めていないとき(一覧を眺めているだけ)は**行ごと空** ── 嘘の
      *   「タグ無し」を出さない。
      */
-    const tagBox = this.rows.get('inspector-tags');
-    if (tagBox) {
+    /**
+     * 🔴 **目次を出す**(#493)。⚠ **本文が読めているときだけ** ── 一覧を眺めて
+     * いるだけの状態で「目次 —」を出しても意味が無い。
+     * ⚠ **見出しが 0 件なら行ごと畳む**(`<dt>` も一緒に)── PKC2 と同じ作法。
+     * 🔑 押すと**本文のその見出しへ飛ぶ**(飛び先の id は `markdown-render` が
+     *   同じ `makeSlugCounter` で刻んでいる ── 綴りを 2 か所で作らない)。
+     */
+    const tocBox = this.rows.get('inspector-toc');
+    if (tocBox) {
       const body = state.openBody?.lid === meta.lid ? state.openBody.body : null;
+      const headings = body === null ? [] : extractHeadingsFromMarkdown(body);
+      tocBox.textContent = '';
+      // ⚠ `<dt>` は `<dd>` の直前 ── 値だけ畳むと**見出しだけ残る**(関係の図と同じ)
+      const dt = tocBox.previousElementSibling;
+      const empty = headings.length === 0;
+      tocBox.hidden = empty;
+      if (dt instanceof HTMLElement) dt.hidden = empty;
+      if (!empty) {
+        for (const h of headings) {
+          const item = document.createElement('div');
+          item.setAttribute('data-pkc-field', 'inspector-toc-item');
+          // ⚠ 深さは**属性**で出す(CSS が字下げする)── 空白を字で入れると
+          //    読み上げがその空白を読む
+          item.setAttribute('data-pkc-toc-level', String(h.level));
+          const go = document.createElement('button');
+          go.type = 'button';
+          go.setAttribute('data-pkc-action', 'toc-jump');
+          go.setAttribute('data-pkc-toc-slug', h.slug);
+          go.setAttribute('data-pkc-field', 'inspector-toc-link');
+          go.title = `本文の「${h.text}」へ移動します`;
+          go.textContent = h.text;
+          item.append(go);
+          tocBox.append(item);
+        }
+      }
+    }
+    const tagBox = this.rows.get('inspector-tag-chips');
+    const tagBody = state.openBody?.lid === meta.lid ? state.openBody.body : null;
+    /**
+     * 🔴 **タグを書ける状態か**(#494)。⚠ **1 か所で決める** ── 札の × と
+     * 打つ欄で別々に数えると、片方だけ出る形が生まれる(§7)。
+     *
+     * 3 つとも要る:
+     * - **本文が読めている** ── 読めていないのに書くと、その場で組み直した
+     *   frontmatter で**元の並びを踏み潰す**
+     * - **`ready`** ── `BULK_TAG` は編集中は何もしない(reducer が弾く)ので、
+     *   出すと無言の dead click になる
+     * - **frontmatter が壊れていない** ── 閉じの `---` を失っている本文に
+     *   書き足すと #284 系の実害を広げる(直してから触る)
+     */
+    const canWriteTags =
+      tagBody !== null &&
+      state.phase === 'ready' &&
+      frontmatterProblem(tagBody)?.kind !== 'unreadable';
+    /**
+     * 🔴 **理由(`title`)は行そのものに置く**(#494 で器を割ったときに 1 度落とした)。
+     *
+     * ⚠ 札の入れ物へ付けると、**札が 1 枚も無いとき**(「無し」/「読めていません」)に
+     *   指す場所が実質消える ── 理由はまさにそのときに読みたい。
+     * 🔑 だから `title` は `dd`(行)、中身は `chips`(札の入れ物)と分ける。
+     */
+    const tagRow = this.rows.get('inspector-tags');
+    if (tagBox) {
+      const body = tagBody;
       const tags = body === null ? null : readTags(body);
       /**
        * 🔴 **読めていないときに「無し」と断定しない**(#284)。
@@ -208,7 +274,7 @@ export class InspectorRenderer {
        */
       const problem = body === null ? null : frontmatterProblem(body);
       tagBox.textContent = '';
-      tagBox.removeAttribute('title');
+      tagRow?.removeAttribute('title');
       /**
        * 🔴 **`trailing` では、実在するタグを隠さない**(2 巡目レビュー A-2)。
        *
@@ -219,13 +285,13 @@ export class InspectorRenderer {
        * 🔑 出せるものは出し、言うべきことは `title` に添える。
        */
       if (problem !== null && problem.kind === 'trailing' && tags !== null) {
-        tagBox.title = problem.detail;
+        if (tagRow) tagRow.title = problem.detail;
       }
       if (tags === null) {
         tagBox.textContent = '—';
       } else if (problem !== null && problem.kind === 'unreadable') {
         tagBox.textContent = '読めていません';
-        tagBox.title = problem.detail;
+        if (tagRow) tagRow.title = problem.detail;
       } else if (tags.length === 0) {
         /**
          * 🔴 **`trailing` でも行の字は「無し」のまま**(3 巡目レビュー ②。
@@ -251,16 +317,53 @@ export class InspectorRenderer {
         tagBox.textContent = '無し';
       } else {
         for (const tag of tags) {
-          const chip = document.createElement('button');
-          chip.type = 'button';
-          chip.setAttribute('data-pkc-action', 'filter-by-tag');
-          chip.setAttribute('data-pkc-tag', tag);
+          /**
+           * 🔴 **札は「探す」と「外す」の 2 つを持つ**(#494)。
+           *
+           * ⚠ 裁定 2026-08-23「**片道の操作を作らない**」── 打てるのに外せないと、
+           *   間違えて付けたタグを消すために**本文を開いて frontmatter を直す**
+           *   ことになる(それは動線を 1 つ失うのと同じである)。
+           * ⚠ ボタンの中にボタンは置けないので、**包む器**を 1 枚挟む
+           *   (関係の行と同じ形 ── 2 つ目の作法を作らない)。
+           */
+          const chip = document.createElement('span');
           chip.setAttribute('data-pkc-field', 'inspector-tag');
-          chip.title = `「${tag}」を含むノートを探します`;
-          chip.textContent = tag;
+          chip.setAttribute('data-pkc-tag', tag);
+          const find = document.createElement('button');
+          find.type = 'button';
+          find.setAttribute('data-pkc-action', 'filter-by-tag');
+          find.setAttribute('data-pkc-tag', tag);
+          find.setAttribute('data-pkc-field', 'inspector-tag-find');
+          find.title = `「${tag}」を含むノートを探します`;
+          find.textContent = tag;
+          chip.append(find);
+          /**
+           * ⚠ **外せるのは、いま書ける状態のときだけ** ── 編集中は本文の正本が
+           *   画面側に在るので、`BULK_TAG` は `phase === 'ready'` でしか動かない。
+           *   押せない物を出すと無言の dead click になるので、**出さない**。
+           */
+          if (canWriteTags) {
+            const off = iconButton('untag-entry', '外す');
+            off.setAttribute('data-pkc-tag', tag);
+            off.setAttribute('data-pkc-field', 'inspector-tag-off');
+            off.title = `このノートから「${tag}」を外します(ノートも本文の他の行も消えません)`;
+            chip.append(off);
+          }
           tagBox.append(chip);
         }
       }
+    }
+    /**
+     * 🔴 **打つ欄は「打てるときだけ」出す**(#494)。
+     *
+     * ⚠ 出しっぱなしにすると、①本文が読めていない(一覧を眺めているだけ)
+     *   ②編集中 ③frontmatter が壊れている、のどれでも押せる形になり、
+     *   **押しても何も起きない**(無言の dead click)。
+     * 🔑 畳む理由は `title` に残す ── 「消えた」ではなく「いまは打てない」と
+     *   読めるようにする。
+     */
+    if (this.tagForm) {
+      this.tagForm.hidden = !canWriteTags;
     }
     /**
      * 🔴 **関係を出す**(#185)。⚠ 出すのは**親子以外** ── 居場所は上の行が既に
@@ -503,6 +606,28 @@ export class InspectorRenderer {
         this.candidates.append(more);
       }
     }
+    /**
+     * 🔴 **いま使われているタグを候補に出す**(#494 段②)。
+     *
+     * > issue の求め:「**既にあるタグから選べる**(打ち間違いで別のタグを増やさない)」
+     *
+     * ⚠ **候補は近道であって、打てる語の一覧ではない** ── `<datalist>` は
+     *   打った字をそのまま通すので、新しいタグは今までどおり打てる。
+     * ⚠ **自分が既に持っているタグは外す** ── 押しても「既に付いています」に
+     *   なるだけで、候補の場所を食う。
+     * ⚠ 集めるのは**焦点が当たったとき**(`binder` が `ASK_TAG_SUGGESTIONS` を撃つ)
+     *   ── ここで頼むと、ノートを選び替えるたびに全走査が走る。
+     */
+    if (this.tagCandidates) {
+      const mine = new Set(tagBody === null ? [] : readTags(tagBody));
+      this.tagCandidates.textContent = '';
+      for (const t of state.tagSuggestions ?? []) {
+        if (mine.has(t)) continue;
+        const opt = document.createElement('option');
+        opt.value = t;
+        this.tagCandidates.append(opt);
+      }
+    }
     this.setRow('inspector-created', formatStoredDate(meta.createdAt));
     this.setRow('inspector-updated', formatStoredDate(meta.updatedAt));
     this.paintDate(meta);
@@ -657,6 +782,28 @@ export class InspectorRenderer {
       dd.setAttribute('data-pkc-field', field);
       dl.append(dt, dd);
       this.rows.set(field, dd);
+      // 🔴 **タグの行だけは器を 2 つに割る**(#494)── 下の注記を参照
+      if (field === 'inspector-tags') {
+        const chips = document.createElement('span');
+        chips.setAttribute('data-pkc-field', 'inspector-tag-chips');
+        const form = document.createElement('span');
+        form.setAttribute('data-pkc-field', 'tag-add');
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.setAttribute('data-pkc-field', 'tag-add-input');
+        input.setAttribute('list', 'pkc-tag-candidates');
+        input.placeholder = 'タグを打つ';
+        input.setAttribute('aria-label', 'このノートに足すタグ');
+        const cands = document.createElement('datalist');
+        cands.id = 'pkc-tag-candidates';
+        this.tagCandidates = cands;
+        const add = iconButton('add-tag', 'タグを足す');
+        add.title = 'このノートの本文にタグを足します(frontmatter の tags: に入ります)';
+        form.append(input, cands, add);
+        dd.append(chips, form);
+        this.rows.set('inspector-tag-chips', chips);
+        this.tagForm = form;
+      }
     };
     row('題名', 'inspector-title');
     row('種類', 'inspector-kind');
@@ -688,10 +835,51 @@ export class InspectorRenderer {
      */
     row('日付', 'inspector-date');
     /**
+     * 🔴 **見出しから自動で作る目次**(#493)。
+     *
+     * > user 報告 2026-08-27:「**自動で見出しから生成された TOC が PKC2 にはあるけど、
+     * > PKC3 にはない**」
+     *
+     * ⚠ 「無い」のではなく「**手で `:::toc` と書かないと出ない**」だった ──
+     *   見出しの拾い出し(`extractHeadingsFromMarkdown`)も、h1〜h3 への id 刻みも
+     *   既に在り、**受け手だけが未実装**だった。実際 `markdown-render.ts` の
+     *   id を刻む節には「**right-pane の目次が飛べるように**」と書いてある。
+     *
+     * 🔑 **置き場は PKC2 が答えを持っていた** ── 好みで決めていない。
+     *   PKC2 は `renderer.ts:9056` で **meta ペイン(= 右の列)** に置き、
+     *   **見出しが 0 件なら丸ごと出さない**形だった(`docs/development/
+     *   table-of-contents-right-pane.md`)。user が既に知っている絵に揃える。
+     * ⚠ 右の列は混んでいる(#500)ので、**見出しを持たないノートでは行ごと畳む** ──
+     *   常設すると「押せない物」を毎回読ませることになる(#300 の小さい版)。
+     * ⚠ 値は押せる札なので `setRow` ではなく専用の器を持つ。
+     */
+    row('目次', 'inspector-toc');
+    /**
      * 🔴 **タグ**(#182 / 台帳 #180 の A-2)。⚠ 値は文字ではなく**押せる札**なので、
      * `setRow`(textContent 差し替え)ではなく専用の器を持つ。
      */
     row('タグ', 'inspector-tags');
+    /**
+     * 🔴 **タグを「その場で打つ」**(#494。user 指摘 2026-08-27
+     * 「**直感的にここにタグを打つ!って感じの動作じゃなくて yamlfrontmatter なのは
+     * 問題だ。しかも設定動線がよくわからん**」)。
+     *
+     * ⚠ **打つ口が無かったわけではない** ── 数えたら 3 経路あった:
+     *   ①本文の frontmatter に書く ②フォルダの面で行に印を付けて「タグを付ける」
+     *   ③スマートフォルダへ掴んで落とす。🔴 **どれも「いま開いているこのノート」の
+     *   口ではない** ── ②は別の面へ移って印を付ける必要があり、③は入れ物が要る。
+     *   ⚠ そして情報ペインのタグ行は**読み取り専用**だった(押すと「探す」だけ)。
+     *   だから user には「無い」に見えた ── **見つけられないのはこちらの動線の
+     *   不備であって、user の落ち度ではない**。
+     *
+     * 🔑 裁定 2026-08-23「**面は『映すだけ』にしない ── 双方向を既定にする**」の
+     *   とおり、**映している行そのものに打つ口を置く**(別の帯へ離すと、
+     *   「どこで打つのか」を探す動線がまた 1 つ増える)。
+     *
+     * ⚠ **器は 2 つに割る** ── 札は描き直しのたびに作り直すが、**打つ欄は
+     *   作り直さない**(作り直すと打ちかけの字と focus が消える ── 追記欄と
+     *   同じ理由。P8 段⑧)。
+     */
     /**
      * 🔴 **どのスマートフォルダに集まっているか**(#283 P1「所属の札」)。
      *
@@ -809,6 +997,19 @@ export class InspectorRenderer {
     btn('adopt-external-images', '外部の画像を取り込む');
     btn('export-entry', ENTRY_ACTION_LABELS['export-entry']!);
     /**
+     * 🔴 **相手に渡せる 1 枚**(#491)。
+     *
+     * > user 報告 2026-08-27:「右クリックで気づきましたが、
+     * > **書き出しに閲覧配布用HTMLがないのは残念**ですね」
+     *
+     * ⚠ 在ったのは**設定 → 書き出しと片づけ**の「閲覧用 HTML」だけで、
+     *   それは**コレクション全部**を 1 枚にする物だった ── ノート 1 件を
+     *   渡す口は**どこにも無かった**。
+     * 🔑 隣の `書き出す` の真横に置く ── 「渡したい」と思った人が
+     *   最初に見るのはこの群れである。
+     */
+    btn('export-entry-html', ENTRY_ACTION_LABELS['export-entry-html']!);
+    /**
      * 🔴 **このフォルダごと書き出す**(#399 ①)。
      *
      * ⚠ **フォルダのときだけ出す**(`render` で `hidden` を付け外しする)──
@@ -856,6 +1057,10 @@ export class InspectorRenderer {
  */
 const ACTION_TITLES: Record<string, string> = {
   'export-entry': 'このノートだけをバックアップ形式(.pkc3.zip)で保存します。取り込み直せます',
+  // 🔴 **`export-entry` との違いを説明で言い切る**(#400 段④ と同じ作法)──
+  //    どちらも「1 ノートを 1 file にする」ので、**何が違うか**を書かないと選べない
+  'export-entry-html':
+    'このノートを、ブラウザで開くだけで読める 1 枚の .html にします。PKC3 を持っていない相手にも渡せます。片道です(取り込み直せません)',
   // ⚠ **画面で起きることで書く**(user 指示 2026-08-21)── 「配下を再帰収集」ではなく
   //    「中に入っているものごと」。⚠ **外へ繋がる関連が落ちる**ことも先に言う
   'export-folder':

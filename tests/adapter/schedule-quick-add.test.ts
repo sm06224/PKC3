@@ -46,14 +46,14 @@ beforeEach(() => {
   document.body.textContent = '';
 });
 
-function setup(metas: EntryMeta[], bodies: Record<string, string>) {
+function setup(metas: EntryMeta[], bodies: Record<string, string>, now?: () => Date) {
   const root = document.createElement('div');
   document.body.append(root);
   const d = new Dispatcher();
   buildShell(root);
   const host = document.createElement('div');
   root.append(host);
-  const sched = new ScheduleRenderer(host);
+  const sched = new ScheduleRenderer(host, now);
   d.onState((s) => sched.render(s));
   bindActions(root, d);
   const disk = { ...bodies };
@@ -205,5 +205,79 @@ describe('#402 ② その日の束から足す', () => {
     const label = s.q('[data-pkc-field="schedule-group-text"]');
     expect(label, '束の見出しが出ていない(前提が崩れた)').not.toBeNull();
     expect(label!.textContent ?? '', '見出しの字に印が混ざっている').not.toContain('+');
+  });
+});
+/**
+ * 🔴 **カレンダーを見ながら「足す」と、見ているところに出る**(#499)。
+ *
+ * > user 指摘 2026-08-28:「**カレンダー表示してるのに、「足す」のところにも
+ * > カレンダーインプットがあったりで意味不明**」
+ *
+ * ⚠ 直す前は日付の欄が**空**だった ── そのまま押すと**日付を書かずに**足すので、
+ *   🔴 **いま見ているカレンダーには 1 つも出てこない**。しかも「日付のない項目」は
+ *   既定で畳んでいるので、**何も起きなかったように見える**。
+ *
+ * 🔑 ここで見るのは **disk に着いた本文に日付が入っているか**である ──
+ *   欄の見た目だけを見ると、「値は入っているのに書くとき使っていない」を見逃す。
+ */
+describe('#499 足すときの日付', () => {
+  /** ⚠ 実行した日で変わらないように、**今日を渡す**(`agenda.ts` と同じ作法)。 */
+  const AT = new Date('2026-08-28T10:00:00Z');
+  const AT_KEY = '2026-08-28';
+
+  it('🔴 日付の欄は最初から今日で埋まっている(空にしない)', async () => {
+    const s = setup([meta('t1', { title: TODAY })], { t1: 'メモ\n' }, () => AT);
+    await tick();
+    const field = s.q<HTMLInputElement>('[data-pkc-field="schedule-quick-date"]')!;
+    expect(field.value, '日付の欄が空のまま(押しても見ている所に出ない)').toBe(AT_KEY);
+  });
+
+  /**
+   * 🔴 **これが本題** ── 欄に触らずに押したら、**その日の予定として**書かれる。
+   * ⚠ `type()` を使わない ── あれは日付を空にしてしまうので、**直す前の姿**を
+   *   再現してしまい、この検査が何も見なくなる(空振り)。
+   */
+  it('🔴 欄に触らずに押すと、今日の予定として書かれる', async () => {
+    const s = setup([meta('t1', { title: TODAY })], { t1: 'メモ\n' }, () => AT);
+    await tick();
+    s.q<HTMLInputElement>('[data-pkc-field="schedule-quick-text"]')!.value = '見積を出す';
+    s.q('[data-pkc-action="schedule-quick-add"]')!.click();
+    await tick();
+    expect(s.disk['t1'], '日付が書かれていない(日付なしで足している)').toContain(
+      `- [ ] 見積を出す @${AT_KEY}`,
+    );
+  });
+
+  /**
+   * ⚠ **日付なしで足す道は残っている**(欄を空にしてから押す)。
+   * 🔑 これが無いと「既定を入れたら、日付なしのやることが作れなくなった」という
+   *   **動線を 1 つ減らす**直しになる(2026-08-23 の裁定)。
+   */
+  it('⚠ 欄を空にすれば、これまでどおり日付なしで足せる', async () => {
+    const s = setup([meta('t1', { title: TODAY })], { t1: 'メモ\n' }, () => AT);
+    await tick();
+    type(s, 'あとでやる'); // ⚠ `type` は日付を空にする = user が消したのと同じ
+    s.q('[data-pkc-action="schedule-quick-add"]')!.click();
+    await tick();
+    expect(s.disk['t1']).toContain('- [ ] あとでやる');
+    expect(s.disk['t1'], '空にしたのに日付が書かれた').not.toContain(`@${AT_KEY}`);
+  });
+
+  /**
+   * ⚠ 束の見出しの `+`(その日を欄に入れる)は**そのまま生きている** ──
+   *   既定を入れたことで上書きできなくなっていない。
+   */
+  it('⚠ 束の見出しの + は、これまでどおり欄の日付を差し替える', async () => {
+    const s = setup([meta('t1', { title: TODAY })], { t1: `- [ ] 先の予定 @2026-09-10\n` }, () => AT);
+    await tick();
+    const plus = s.q<HTMLButtonElement>(
+      '[data-pkc-action="schedule-quick-here"][data-pkc-quick-date="2026-09-10"]',
+    );
+    expect(plus, 'その日の + が出ていない(空振り)').not.toBeNull();
+    plus!.click();
+    expect(
+      s.q<HTMLInputElement>('[data-pkc-field="schedule-quick-date"]')!.value,
+      '+ を押しても欄が今日のまま',
+    ).toBe('2026-09-10');
   });
 });

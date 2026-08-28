@@ -70,7 +70,28 @@ export function createTaskCard(data: AgendaItem): HTMLElement {
   line.append(when, text);
   const note = document.createElement('span');
   note.setAttribute('data-pkc-field', 'note');
-  card.append(box, line, note);
+  /**
+   * 🔴 **予定から外す押し口**(#498。user 指摘 2026-08-27
+   * 「**予定表に出てくる消せない予定がキモい。普通に考えて動線が直感的ではない。
+   * 誰も使わないと思う**」)。
+   *
+   * ⚠ 直す前、札に在ったのは**印**と**字**の 2 つだけで、**外す口が 1 つも無かった**。
+   *   実際の外し方は「**掴んで『日付なし』へ落とす**」だけ ── 掴んで落とすのは
+   *   **発見できない操作**で、画面のどこにも書いていない。
+   *   🔴 そのうえ**繰り返しの予定は掴むと断られる**ので、
+   *   **いちばん目につくものが、いちばん外せなかった**。
+   *
+   * 🔑 2026-08-23 の裁定「**片道の操作を作らない。面から置けるなら、
+   *   面から外せなければならない**」の直接の適用である。
+   *
+   * ⚠ **印は字で置かない**(束の見出しの `+` で踏んだ罠)── `textContent` に
+   *   入れると札の字に混ざり、写しも読み上げも test も汚れる。名前は `aria-label`。
+   */
+  const off = document.createElement('button');
+  off.type = 'button';
+  off.setAttribute('data-pkc-action', 'unschedule-task');
+  off.setAttribute('data-pkc-field', 'task-unschedule');
+  card.append(box, line, note, off);
   patchTaskCard(card, data, '', null);
   return card;
 }
@@ -169,6 +190,26 @@ export function patchTaskCard(
   } else {
     card.removeAttribute('data-pkc-task-repeat');
     card.removeAttribute('data-pkc-task-date');
+  }
+  /**
+   * 🔴 **押す前に「何が起きるか」を字で言う**(#498。user 指示 2026-08-21
+   * 「画面で何が起きるかで書く」)。
+   *
+   * ⚠ **繰り返しだけ意味が違う** ── 繰り返しの回を 1 つだけ消すには
+   *   **例外日の記法**が要り、記法を増やさないのがこの設計の要である
+   *   (`repeat.ts` の頭)。だから外すと**規則ごと**消える ── そう書く。
+   * ⚠ どちらも**ノートも本文も消えない**(日付だけ外れる)ことを言う ──
+   *   「×」を見た user が「消える」と読むのは自然なので、そこを先に否定する。
+   */
+  const off = card.querySelector<HTMLButtonElement>('[data-pkc-field="task-unschedule"]');
+  if (off) {
+    const label = data.repeat === null ? '予定から外す' : 'この繰り返しをやめる';
+    if (off.getAttribute('aria-label') !== label) off.setAttribute('aria-label', label);
+    const why =
+      data.repeat === null
+        ? '予定から外します(ノートも本文も消えません。日付だけ外れます)'
+        : 'この繰り返しをやめます(本文の「@日付 毎週」が外れます。ノートは消えません)';
+    if (off.title !== why) off.title = why;
   }
   const text = card.querySelector('[data-pkc-field="text"]');
   // ⚠ 中身が空の項目もある(`- [ ]` だけの行)── 札は出すが、字は出ない

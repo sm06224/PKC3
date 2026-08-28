@@ -40,6 +40,17 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
   { action: 'copy-entry-ref', label: '参照をコピー' },
   { action: 'copy-plain-markdown', label: '素の Markdown' },
   { action: 'export-entry', label: '書き出す' },
+  /**
+   * 🔴 **相手に渡せる 1 枚**(#491。user 報告 2026-08-27
+   *   「右クリックで気づきましたが、**書き出しに閲覧配布用HTMLがないのは残念**ですね」)。
+   *
+   * ⚠ 隣の `書き出す` と**別の物**である ── あちらは取り込み直せる
+   *   `.pkc3.zip`(PKC3 を持っている人にしか開けない)、こちらは
+   *   **ブラウザで開くだけで読める片道の HTML** である。
+   * 🔑 **字は設定画面の同名ボタンと揃えた**(`commands.ts` の `export-html`)──
+   *   あちらは全部、こちらは 1 件。**同じ形の物に 2 つの呼び名を作らない**。
+   */
+  { action: 'export-entry-html', label: '閲覧用 HTML' },
   { action: 'show-history', label: '履歴' },
   { action: 'delete-entry', label: '削除' },
 ];

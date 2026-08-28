@@ -10,18 +10,21 @@
  */
 import {
   columnsFit,
+  READ_COLUMN_BASE_FONT_PX,
   DEFAULT_READ_COLUMNS,
   isReadColumns,
   readColumnsSpec,
   wheelToInline,
   type ReadColumns,
 } from '@features/read-columns';
+// ⚠ 綴りを写さない ── 見張る属性の正本は当てている側に在る(CLAUDE.md §7)
+import { TEXT_SCALE_ATTR } from './text-scale';
 
 const KEY = 'pkc3.read-columns';
 
 /** 🔴 **当たっている段数の印**。CSS が読み、smoke と設定画面が同じ物を見る。 */
 export const READ_COLUMNS_ATTR = 'data-pkc-read-columns';
-/** `app.css` の `columns: 448px var(--pkc-read-cols, 1)` と 1 対 1。 */
+/** `app.css` の `columns: calc(1em * 448 / 13) var(--pkc-read-cols, 1)` と 1 対 1。 */
 export const READ_COLUMNS_VAR = '--pkc-read-cols';
 /**
  * ⚠ かつて最小幅とすき間も変数で渡していたが、**変異試験 M9 / M14 が SURVIVED** で
@@ -144,8 +147,26 @@ export function fitColumnHeight(root: ParentNode, doc: Document = document): num
    * ⚠ CSS の `columns` に任せると段数だけ 1 へ落ちて**横送りが残る** ──
    *   ノート PC で「横スクロールで 1 段ずつめくる」画面になっていた(実測)。
    * 🔑 幅は印を付けても変わらない(印が変えるのは**高さ**)ので、ここで決めてよい。
+   *
+   * 🔴 **畳む境目も、文字の大きさに載せる**(#509)。
+   *
+   * ⚠ CSS 側は `calc(1em * 448 / 13)` で段の幅を決めているので、ここが
+   *   固定 448px のままだと**2 つが食い違う** ── 特大(17px)で
+   *   912px の器を「2 段置ける」と判断し、CSS は 586px の段を 1 本しか
+   *   置けないので、**横送りだけが残る**(#505 で 1 度出荷しかけた形)。
+   * 🔑 だから**器そのものの `font-size` を採る** ── CSS の `1em` と
+   *   同じ入力である(実測で `--pkc-text-size` と一致することを確かめた)。
    */
-  if (!columnsFit(host.clientWidth || before.width, count)) return off();
+  const fontPx = Number.parseFloat(getComputedStyle(host).fontSize);
+  if (
+    !columnsFit(
+      host.clientWidth || before.width,
+      count,
+      Number.isFinite(fontPx) && fontPx > 0 ? fontPx : READ_COLUMN_BASE_FONT_PX,
+    )
+  ) {
+    return off();
+  }
   pane.setAttribute(COLUMNS_ON_ATTR, '');
   /**
    * 🔴 **印を付けた「後で」採り直す**(#505。ここで 1 度外した)。
@@ -174,11 +195,27 @@ export function fitColumnHeight(root: ParentNode, doc: Document = document): num
 /**
  * 🔴 **段の高さを、器の変化に追随させる**(#505)。
  *
- * ⚠ 見張るものが **2 つ**要る。片方だけでは足りない:
+ * ⚠ 見張るものが **3 つ**要る。1 つでも欠けると足りない:
  *   ① **器の大きさ**(窓のリサイズ・ペインの畳み)── `ResizeObserver`
  *   ② 🔴 **本文の器の入れ替え**(ノートを開き直すと `detail.ts` が骨組みごと
  *      作り直す)── 新しい器には inline の高さが無いので、**そのままだと刈られる**。
  *      `MutationObserver` の `childList` で捕まえる
+ *   ③ 🔴 **判定の入力そのもの**(#509)── 段数(`data-pkc-read-columns`)と
+ *      **文字の大きさ**(`data-pkc-text-scale`)である。
+ *
+ *      🔴 **段数のほうは載っていなかった**(実測 2026-08-28)── これを外すと
+ *      「段数を選んだ直後」の印が**付かない**(器も骨組みも変わらないので①②が
+ *      鳴らない)。設定画面から本文へ戻る道では面が出入りして救われていたが、
+ *      **選んだ瞬間には効いていなかった**。
+ *
+ *      ⚠ **文字の大きさのほうは、外しても いまは壊れない**。素直に読むと
+ *      「器の外寸は変わらないから①は鳴らない」はずだが、**実測では鳴った**
+ *      (計装して数えたら `RO` が 2 回)── 面の高さが中身に追随しているためである。
+ *      🔑 それでも**残す**。段組み中の面は `flex: 1 1 0` = **追随しない**のが設計で
+ *      あり(上の CSS の①)、いま救っているのは**その設計が効き切っていない**
+ *      という偶然だからである。⚠ 消すなら「文字を変えても面が 1px も動かない」
+ *      test と対で消すこと ── そこが直った日に、症状は
+ *      **特大の user にだけ横送りが残る**という形で静かに戻る。
  *
  * ⚠ **面 1 枚と、その親の直下だけ**を見る(document 全体を見張らない ── 常駐を
  *   作らない)。⚠ 1 稿目は `root` を `subtree: true` で見ており、**画面のどこが
@@ -232,6 +269,23 @@ export function installColumnFit(root: HTMLElement, doc: Document = document): (
   outer?.observe(center, { childList: true });
 
   /**
+   * 🔴 **判定の入力が変わったら測り直す**(#509)。
+   *
+   * ⚠ **`style` は見張らない** ── `applyTextScale` は属性と CSS 変数を**対で**書く
+   *   ので、属性 1 つで足りる。`style` まで見ると、段の高さを入れる自分の書込
+   *   (`host.style.height`)とは別の要素とはいえ、見張る面が無駄に増える。
+   * ⚠ 見る先は `documentElement` ── `applyReadColumns` / `applyTextScale` が
+   *   当てる先そのものである(2 か所目の当て先を作らない)。
+   * ⚠ 属性の綴りも**写さない**(`TEXT_SCALE_ATTR` を引く)── 片方だけ改名されると
+   *   見張りが静かに外れ、症状は「特大のときだけ たまに横送りが残る」になる。
+   */
+  const rootAttrs = MO === undefined ? null : new MO(fit);
+  rootAttrs?.observe(doc.documentElement, {
+    attributes: true,
+    attributeFilter: [READ_COLUMNS_ATTR, TEXT_SCALE_ATTR],
+  });
+
+  /**
    * ⚠ かつて `resize` も聞いていたが、**変異試験 P が KILLED / Q が SURVIVED** で
    *   「窓を狭めたら `ResizeObserver` が先に鳴る」= 聞く必要が無いと分かった
    *   (2026-08-28)。⚠ 同じ物を 2 か所で見張らない(CLAUDE.md §7)。
@@ -241,6 +295,7 @@ export function installColumnFit(root: HTMLElement, doc: Document = document): (
     ro?.disconnect();
     inner?.disconnect();
     outer?.disconnect();
+    rootAttrs?.disconnect();
   };
 }
 

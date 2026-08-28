@@ -11,6 +11,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  COLUMN_PANES,
   PANES,
   decodeHidden,
   encodeHidden,
@@ -27,10 +28,28 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 
 describe('畳める面の規則', () => {
-  it('🔴 畳めるのは左右だけ ── 中央は一覧に無い', () => {
-    expect([...PANES]).toEqual(['sidebar', 'inspector']);
+  /**
+   * ⚠ **`append` が増えたのは #497**(user 指示「閲覧メインで使う時は消したい」)。
+   * 🔑 守る主張は変わっていない ── **本文そのものは畳めない**。
+   */
+  it('🔴 本文は畳めない ── 一覧に無い', () => {
+    expect([...PANES]).toEqual(['sidebar', 'inspector', 'append']);
     expect(isPaneId('center'), '中央が畳める側に入っている').toBe(false);
     expect(isPaneId('detail')).toBe(false);
+  });
+
+  /**
+   * 🔴 **列の帯は 2 本だけ**(#497)。⚠ `append` を `COLUMN_PANES` へ混ぜると
+   * `shell` が列の境目に**3 本目の縦帯**を立てる(追記欄は中央の中に在るのに)。
+   * ⚠ そして「両側を一度に畳む」鍵が**追記欄まで消す**ようになる ──
+   *   どちらも画面を見るまで気づけない形で壊れる。
+   */
+  it('🔴 列の境目に立つのは左右だけ ── 追記欄は混ざらない', () => {
+    expect([...COLUMN_PANES]).toEqual(['sidebar', 'inspector']);
+    expect(
+      (COLUMN_PANES as readonly string[]).includes('append'),
+      '追記欄が列の帯に混ざっている',
+    ).toBe(false);
   });
 
   it('押すたびに畳む・戻すが入れ替わる', () => {

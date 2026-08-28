@@ -17,6 +17,8 @@ import {
 } from '@adapter/ui/render/read-columns';
 import { appOpenInEdit } from '@adapter/ui/render/open-in-edit';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
+import { appPaneSizes, applyPaneSizes } from '@adapter/ui/render/pane-size';
+import { installPaneResize } from '@adapter/ui/render/pane-resize';
 import { appKeymap } from '@adapter/ui/render/keymap';
 import { wireShortcutHints } from '@adapter/ui/render/shortcut-hint';
 import { startEmbedBridge } from '@adapter/transport/embed-bridge';
@@ -601,6 +603,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   applyPaneVisibility(root, appPanes.getHidden());
   /**
+   * 🔴 **決めた大きさも起動時に戻す**(#497)。⚠ 畳んだ状態と**対**である ──
+   * 片方だけ戻すと「畳んだのは覚えているのに幅は既定」という半端な画面になる。
+   */
+  applyPaneSizes(root, appPaneSizes.get());
+  /** 🔴 掴んで大きさを変える配線(#497)。⚠ 外さない(アプリと同寿命)。 */
+  installPaneResize(root);
+  /**
    * 🔴 **別のタブで変えたキー割当を、このタブにも効かせる**(#256)。
    * ⚠ これが無いと「2 枚目のタブで割り当て直したのに、1 枚目は再読込まで古いまま」に
    * なる ── 割当は端末の手癖なので、タブごとに違うのは事故である。
@@ -1114,7 +1123,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     });
 
   const runExport = (
-    kind: ExportKind | { entryLid: string; as?: 'archive' | 'docx' | 'pptx' | 'folder' },
+    kind: ExportKind | { entryLid: string; as?: 'archive' | 'html' | 'docx' | 'pptx' | 'folder' },
   ): Promise<void> =>
     withAssetGate(async () => {
       const deps: ExportDeps = {
@@ -1214,14 +1223,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       // 1 ノートだけの書出しも**同じ実行部・同じ形式**を通る(P6f)──
       // 別経路にすると「1 件書出しだけ壊れている」が起きる
       if (typeof kind === 'object') {
-        // ⚠ 1 ノートの出口は 3 つ ── バックアップ(取り込み直せる)/ Word / PowerPoint
-        //    (後ろの 2 つは片道)
+        // ⚠ 1 ノートの出口は 4 つ ── バックアップ(取り込み直せる)/ **閲覧用 HTML** /
+        //    Word / PowerPoint(後ろの 3 つは片道)
         if (kind.as === 'docx') await exportEntryDocx(dispatcher, deps, kind.entryLid);
         else if (kind.as === 'pptx') await exportEntryPptx(dispatcher, deps, kind.entryLid);
         // 🔴 **フォルダごと**(#399 ①)── 同じ `deps`・同じ形式(.pkc3.zip)を通る。
         //    ⚠ 別経路にすると「フォルダ書出しだけ壊れている」が起きる(P6f と同じ理由)
         else if (kind.as === 'folder') await exportFolder(dispatcher, deps, kind.entryLid);
-        else await exportEntry(dispatcher, deps, kind.entryLid);
+        // 🔴 **相手に渡せる 1 枚**(#491)── 同じ `deps`・同じ絞り込み・同じ実行部を通る
+        else if (kind.as === 'html') await exportEntry(dispatcher, deps, kind.entryLid, 'html');
+        else await exportEntry(dispatcher, deps, kind.entryLid, 'archive');
       }
       else await exportArchive(dispatcher, deps, kind);
     });
@@ -2421,6 +2432,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         });
       }),
     exportEntry: (lid) => void runExport({ entryLid: lid }),
+    // 🔴 **このノートを、相手が開けるだけの 1 枚にする**(#491)
+    exportEntryHtml: (lid) => void runExport({ entryLid: lid, as: 'html' }),
     /** 🔴 このフォルダと配下をまとめて書き出す(#399 ①)。 */
     exportFolder: (lid) => void runExport({ entryLid: lid, as: 'folder' }),
     /**

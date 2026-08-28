@@ -165,8 +165,14 @@ export function taskCardsOf(lid: string, body: string): TaskCard[] {
  * (2026-08-19 のレビュー D-3)── 前提が崩れると**札が 1 枚黙って消える**
  * (同じ鍵が 2 回現れ、DOM が 1 個だけ置かれる)。その lid の札を**全部抜いて**、
  * **最初に居た位置へ**まとめて差し込む ── 連続でも飛んでいても同じ結果になる。
- * ⚠ 元々 1 枚も無かった lid は**入れない**(どこへ入れるべきか、ここでは
- * 分からない ── ノートの並びを知っているのは worker である)。次に面を開けば出る。
+ * 🔴 **元々 1 枚も無かった lid も受ける**(#499、2026-08-28 に直した)。
+ * ⚠ 直す前は「どこへ入れるべきか分からないので入れない。次に面を開けば出る」と
+ *   書いてあったが、**それが user 指摘の実体だった** ── 予定の面から「足す」を
+ *   押しても、本文には書かれるのに**面には 3 秒経っても出てこない**
+ *   (実ブラウザで実測)。「次に面を開けば出る」は、**面を開いたままの user**には
+ *   届かない理屈である。
+ * 🔑 入れる位置は**末尾**でよい ── 束ね方(`agenda.ts`)は日で並べ直すので、
+ *   この配列の並びは見え方に影響しない。
  * ⚠ 触る札が無いときは**同じ配列を返す** ── 呼び側(`refreshTaskCards`)が
  *   それを見て `TaskScan` ごと据え置くので、描画側の指紋が無駄に壊れない。
  * 🔴 **中身が変わっていないときも同じ配列を返す**(2026-08-20)。
@@ -182,12 +188,28 @@ export function replaceTaskCards(
   body: string,
 ): readonly TaskCard[] {
   const from = cards.findIndex((c) => c.lid === lid);
-  if (from < 0) return cards;
+  /**
+   * 🔴 **1 枚も持っていなかったノートも受ける**(#499。実測 2026-08-28)。
+   *
+   * ⚠ 直す前はここに `if (from < 0) return cards;` が在り、**そのノートの札が
+   *   1 枚も無いと何もしなかった** ── つまり
+   *   🔴 **予定を「新しく書いた」回だけ、画面に出てこない**。
+   *
+   * 実測(実ブラウザ):予定の面から「足す」を押すと、本文には
+   *   `- [ ] きょうの用事 @2026-08-28` が確かに書かれるのに、面は
+   *   **3 秒経っても「チェックの付いた行がまだありません」**のままだった
+   *   ── user 指摘「**カレンダー表示してるのに…意味不明**」の実体である。
+   *
+   * 🔑 直しは**差し込む位置**だけ ── 持っていなければ**末尾**へ足す
+   *   (束ね方は `agenda.ts` が日で並べ直すので、並びは見え方に影響しない)。
+   * ⚠ 何も増えない回は `sameCards` が同じ参照を返すので、**描き直しは増えない**。
+   */
+  const others = from < 0 ? cards : cards.filter((c) => c.lid !== lid);
   // ⚠ `from` は**元の並び**での最初の位置 ── 抜いた後の配列でも、そこより前に
   //    この lid の札は 1 枚も無いので、そのまま差し込み位置として使える
-  const others = cards.filter((c) => c.lid !== lid);
+  const at = from < 0 ? others.length : from;
   // 🔑 組み立ては `taskCardsOf` 1 本(上の docstring)── ここで組み直さない
-  const merged = [...others.slice(0, from), ...taskCardsOf(lid, body), ...others.slice(from)];
+  const merged = [...others.slice(0, at), ...taskCardsOf(lid, body), ...others.slice(at)];
   return sameCards(merged, cards) ? cards : merged;
 }
 

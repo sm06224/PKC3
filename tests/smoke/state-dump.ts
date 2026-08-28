@@ -58,6 +58,26 @@ export async function baseSnapshot(page: Page): Promise<Record<string, unknown>>
             ?.getAttribute('data-pkc-browse-pane') ?? null,
         editing: document.querySelectorAll('[data-pkc-field="editor-body"]').length > 0,
         dialogOpen: document.querySelectorAll('dialog[open]').length,
+        /**
+         * 🔴 **予定の面の状態の行**(#410 が「次の赤が理由を持ってくる形」として
+         *   名指しした唯一の値)。
+         *
+         * 🔑 この 1 行が **3 つを見分ける** ── 札が 0 枚だった回に、
+         *   どれだったのかが**これでしか分からない**:
+         *
+         *   | 出ている字 | 何が起きているか |
+         *   |---|---|
+         *   | `集めています…` | 走査が**まだ返っていない**(`taskScan === null`) |
+         *   | `予定を集められませんでした。…` | 走査が**落ちた**(`taskScanFailed`) |
+         *   | `チェックの付いた行が…` | 走査は**返った。中身が 0 件**だった |
+         *   | `日付を書いた予定が…` | 走査は返り、**日付の無い行だけ**だった |
+         *   | 空文字 | 走査は返り、**札は在るはず**(= 別の束 / 別の面を見ている) |
+         *
+         * ⚠ 空文字と「採れなかった」を混ぜない ── 面が無ければ `null` にする。
+         */
+        scanNote:
+          document.querySelector('[data-pkc-field="schedule-note"]')?.textContent?.slice(0, 120) ??
+          null,
       };
     });
   } catch (e) {

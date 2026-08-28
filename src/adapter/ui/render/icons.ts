@@ -237,6 +237,8 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'commit-edit': 'check',
   'cancel-edit': 'close',
   'export-entry': 'arrow-out',
+  // 🔑 全体の「閲覧用 HTML」(`export-html`)と**同じ図案** ── 同じ形の物である
+  'export-entry-html': 'globe',
   'show-history': 'clock',
   'delete-entry': 'trash',
   // まとめてゴミ箱へ(#240 段③)── 1 件の削除と**同じ図案**(同じ意味だから)
@@ -266,6 +268,12 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   /** 関係(#185)── 足すのは plus、消すのは close(既存の意味と揃える)。 */
   'add-relation': 'plus',
   'remove-relation': 'close',
+  /**
+   * タグ(#494)。⚠ **関係と同じ図案にする** ── どちらも「この 1 件に足す /
+   * この 1 件から外す」なので、別の図案にすると 2 種類の物として覚え直させる。
+   */
+  'add-tag': 'plus',
+  'untag-entry': 'close',
   /** 本文の置換(#191)── 書き換えるので鉛筆と同じ仲間の図案にする。 */
   'toggle-replace': 'pencil',
   'replace-all': 'check',

@@ -115,6 +115,14 @@ jobs:
     env:
       QT6DIR: /home/runner/qt-wasm/install
       LC_ALL: C.UTF-8
+      # 🔴 **マクロ(Basic)を開ける合図**(#431)。`patch-lo-scripting.py` が
+      #    configure.ac へ植えた `test "$PKC3_WASM_SCRIPTING" = yes || enable_scripting=no`
+      #    を、ここで満たす。⚠ 上流はこの名前を 1 度も読まないので、
+      #    **渡さなければ既定(scripting なし)のまま**である。
+      # 🔑 **job 単位で渡す理由は QT6DIR と同じ** ── configure step で export しても
+      #    `make` へ届かず、`make` は config_host.mk が古いと autogen を再実行するので、
+      #    そこで合図が消えると **scripting が黙って落ちる**(気づけるのは焼き上がりの後)。
+      PKC3_WASM_SCRIPTING: 'yes'
       # 🔑 **ccache は既に効いている**(run 31307638176 のログに
       #    `/usr/bin/ccache .../em++` が出ている)が、**残していなかった**ので
       #    毎回ゼロから 2h40m 掛かっていた。置き場を固定して cache に載せる。
@@ -232,7 +240,21 @@ jobs:
           done
           echo "applied $n qtbase patches"
           # ⚠ 下限は実数で置く(足したらここも直す ── 直さないと落ちるので忘れない)
-          test "$n" -eq 2
+          # 🔴 2 → 3(2026-08-28)。`qtbase-patch-backspace.py`(#433 の**直し**)。
+          #    user が実機の console を採ってくれたので、二重配送が**確定した**:
+          #      Key callback "Backspace" 9 → processKey as KeyEvent
+          #        → processKeyForInputContext          ← ① LO へ 1 回目
+          #      inputCallback inputType : "deleteContentBackward"
+          #                                             ← ② LO へ 2 回目
+          #    🔑 `input` が飛んでいる = ①が `preventDefault()` を呼んでいない
+          #    (= `processKeyForInputContext` が false)。それでも①は既に
+          #    `handleKeyEvent` を撃っているので、②の合成と合わせて **2 文字**消える。
+          #    ⚠ 直しは「②を消す」でも「①を早期 return させる」でもない ── どちらも
+          #    退行する(同じログの 2 打鍵目に `inputCallback` が無い = 隠し input が
+          #    空の回が在る)。**①が届けた回だけ②を黙らせる**形にしてある。
+          # ⚠ **Qt の cache 鍵は `qtbase-patch-*.py` の hash** なので、この 1 本を
+          #    足した時点で **Qt を host + wasm から焼き直す**(数時間)。
+          test "$n" -eq 3
 
       # 🔑 Qt6 は **host build が別に要る**(Qt5 には無かった要件)。
       # ⚠ `-no-gui` で建ててはいけない ── wasm 側で Gui/Widgets を建てるとき、host の
@@ -453,7 +475,17 @@ jobs:
           #    実測(自作の対照群):画像 20 枚の .docx が **51 秒 → 10 秒**。
           #    ⚠ 計装(`patch-lo-idles-trace.py`)からは**同じ行を外した** ──
           #    2 つの patch が同じ行を触ると、当てる順で錨が壊れる。
-          test "$n" -eq 13
+          # 🔴 13 → 14(2026-08-28)。`patch-lo-scripting.py`(#431 の**直し**)。
+          #    ⚠ #431 は「上流の conf に `--disable-scripting` が在るから」と書いて
+          #    いたが、**それは表面だった** ── 外して焼いても
+          #    `BUILD_TYPE` に `SCRIPTING` は入らない(run 33136349872 で実測)。
+          #    真因は 2 段:`configure.ac:1301` が Emscripten で `enable_wasm_strip=yes`
+          #    を無条件に立て、`configure.ac:3485` がその中で
+          #    **`enable_scripting=no` を無条件に上書き**する。
+          #    🔑 だから option では開かない。上流が読まない名前
+          #    (`PKC3_WASM_SCRIPTING`)を条件にして、**渡した回だけ**開ける。
+          #    ⚠ **既定は 1 バイトも変わらない**(job の env で渡している)。
+          test "$n" -eq 14
 
       # 🔴 **Qt と LO の「握手」を、リンクの 16 分前に確かめる**(2026-08-10)。
       #    LO は Qt の embind シンボルを名指しで export する。無いと
@@ -532,7 +564,41 @@ jobs:
           --disable-qt5
           --enable-qt6
           --disable-gen
-          --disable-scripting
+          # 🔴 **`--disable-scripting` を外した**(#431 段①。user 指示 2026-08-27
+          #    「いまだに動かないマクロ機能なども全部完璧で動かせるように」)。
+          #
+          # ⚠ これは**上流の既定**だった(`LibreOfficeWASM32.conf` の 4 行目)ので、
+          #    外すのは**上流と違う道を行く**ことである。だから ref(master)も
+          #    他の option も動かさない ── 変える主張は 1 つだけにする
+          #    (CLAUDE.md「1 度の実験が 2 つを主張していた」= #158 で 7 回転溶かした型)。
+          #
+          # 🔑 配った一式を数えた結果(#431):**登録も実体も 0 件**だった ──
+          #    `services.rdb` に `ScriptProviderForBasic` が無く、`soffice.wasm` に
+          #    `SbModule` / `SbiRuntime` が無い。⚠ 対話の口(`.ui`)だけ在るので、
+          #    **メニューは出るのに動かない**(無言の dead click)。
+          #
+          # 🔴 **この 1 行だけでは開かない**(2026-08-28 に焼いて判明。
+          #    run 33136349872 ── configure は成功したのに `BUILD_TYPE` に
+          #    `SCRIPTING` が入らなかった)。上流は `configure.ac:3485` で
+          #    **`enable_scripting=no` を無条件に上書き**するので、option では届かない。
+          #    🔑 実際に開けているのは `build/office-wasm/patch-lo-scripting.py` +
+          #    job の env `PKC3_WASM_SCRIPTING` である。⚠ **それでもこの行は要る** ──
+          #    patch は「無条件の上書き」を外すだけなので、conf に
+          #    `--disable-scripting` が残っていれば option 側で `no` のままになる。
+          #    **2 つ揃って初めて開く。**
+          #
+          # 🔴 **下の 3 行は「他を変えないため」に足している**(2026-08-28、焼く前に
+          #    `configure.ac` を読んで判明)。⚠ `--disable-scripting` は
+          #    **Java / .NET / Python を道連れに切っていた**:
+          #      - `configure.ac:3836` java  → `DISABLE_SCRIPTING` なら `with_java=no`
+          #      - `configure.ac:5937` .NET  → 同上
+          #      - `configure.ac:10682` python → 同上(無いと cross では **system python**)
+          #    つまり外すだけだと**3 つが既定で有効になり**、wasm には無い物を探しに行く。
+          #    🔑 明示して切るのは**変数を増やす**のではなく、**scripting 以外を
+          #    これまでどおりに保つ**ためである。
+          --without-java
+          --without-dotnet
+          --disable-python
           --with-package-format=emscripten
           --enable-emscripten-jspi
           --disable-emscripten-proxy-to-pthread
@@ -598,6 +664,30 @@ jobs:
           #    ⚠ 既定のままだと Qt5 用の組み合わせで建ち、走らせるまで気づけない
           grep -q '^export ENABLE_EMSCRIPTEN_JSPI=TRUE' config_host.mk
           grep -q '^export ENABLE_EMSCRIPTEN_PROXY_TO_PTHREAD=$' config_host.mk
+          # 🔴 **マクロ(Basic)が構成に入ったことを確かめる**(#431 段①、2026-08-28)。
+          #
+          # ⚠ 見るのは `DISABLE_SCRIPTING` **ではない** ── その名前は
+          #    `config_host.mk.in` に **1 行も無い**(実物を引いて確かめた。
+          #    configure は `SCPDEFS` と `BUILD_TYPE` にしか書かない)。
+          #    🔑 実体は **`BUILD_TYPE` に `SCRIPTING` が入ること**である
+          #    (`configure.ac:3540-3542`)。
+          #    ⚠ 在らない変数を grep すると「常に一致しない」検査になる(#158 の
+          #    `WITH_LANG` と同じ型)ので、**在る変数だけを見る**。
+          # 🔴 **落ちる前に、突き合わせる相手を印字する**(2026-08-28)。
+          #    ⚠ 前の回(run 33136349872)はこの grep だけが `exit 1` を返し、
+          #    **何と食い違ったのか 1 行も読めなかった** ── configure は成功していた
+          #    ので「ビルドが壊れた」にしか見えない。CLAUDE.md §6「失敗した事実を
+          #    食べない」の逆側:**落とすのはよいが、落ちた理由を残す**。
+          echo '--- BUILD_TYPE / scripting の実体 ---'
+          grep -E '^export BUILD_TYPE=' config_host.mk || echo '(BUILD_TYPE が無い)'
+          grep -E '^export (DISABLE_SCRIPTING|ENABLE_JAVA|DISABLE_PYTHON)=' config_host.mk \
+            || echo '(scripting 系の変数が 1 つも無い)'
+          grep -qE '^export BUILD_TYPE=.*\bSCRIPTING\b' config_host.mk
+          # 🔴 **道連れの 3 つが、これまでどおり切れていること**(変数を増やさない)。
+          #    ⚠ ここが立つと wasm に無い物を探しに行く ── 落ちるべき所で落とす。
+          grep -q '^export ENABLE_JAVA=$' config_host.mk
+          grep -q '^export DISABLE_PYTHON=TRUE' config_host.mk
+          grep -q '^ENABLE_DOTNET=$' config_host.mk
 
       # 🔴 **`| tail` を噛ませない**(2026-08-09 に踏んだ)。bash のパイプの終了コードは
       #    最後のコマンドのものなので、`make | tail` は **make が落ちても step が緑**になる。
@@ -696,6 +786,16 @@ jobs:
       #    ⚠ **両方向を見る** ── 「配られていない」は詰め込みの取りこぼし、
       #    「一覧に無いのに配られた」は**こちらの読み方が上流に追随できていない**合図。
       #    実測(2026-08-24、LO 770ef72c): 1,090 対 1,090 で両方向とも 0 件。
+      # 🔴 **2026-08-28: この検品が実際に鳴った ── そして製品の欠陥を 1 件釣った。**
+      #    上流が `cui/uiconfig/ui/querydialog.ui` を消し、実体を `svtools` へ移した
+      #    (cfg 上の綴りは `svt/ui/querydialog.ui`)。集合は 1,090 対 1,090 で一致した
+      #    ので、鳴ったのは**名指しの錨のほうだけ**である ── 錨を置いていなければ
+      #    **緑のまま通っていた**。
+      #    ⚠ 実害は焼きではなく**アプリ側**に在った:`public/office/office-format.js` の
+      #    `packSavesAlien` が古い綴りだけを見ており、新しい一式では
+      #    「この一式では .docx を保存できません」と**嘘の断り**を出すところだった。
+      #    🔑 いまは**両方の綴りを受ける**(一式は IDB に取り置かれるので、
+      #    配り直しても入れ替わるまでは古いままである)。
       - name: 検品(ダイアログの .ui が一覧どおり配られたか)
         if: ${{ !cancelled() }}
         run: |

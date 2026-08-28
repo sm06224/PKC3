@@ -671,13 +671,18 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
+    ['2026-08-28-auto-toc', 'e7625c9b'],
+    ['2026-08-28-tag-input', 'c547cffa'],
+    ['2026-08-28-pane-resize', 'aa8d38bf'],
+    ['2026-08-28-schedule-off-and-add', 'e2db86ac'],
+    ['2026-08-28-export-entry-html', '0a4896a5'],
+    ['2026-08-28-columns-text-size', 'e518064e'],
     ['2026-08-28-paste-no-cap', '87111a1c'],
     ['2026-08-28-read-columns', '5b5d0baf'],
     ['2026-08-28-text-scale', '784a1aae'],
     // ⚠ 配る前(まだ open な PR の中)に文面を直した ── 既読の user が居ないので
     //    新しい entry ではなく**この表を直す**(検査の文言どおり)
     ['2026-08-28-modifier-click', '95225dff'],
-    ['2026-08-27-capture-hold', '3afd708c'],
     ['2026-08-27-heading-look', '160e73cd'],
     ['2026-08-27-paste-html-fence', '4e93ab87'],
     ['2026-08-27-smart-membership', '96188f3b'],
@@ -687,16 +692,17 @@ describe('お知らせの文面は固定(#220-7)', () => {
     // ['2026-08-27-announce-one', 'ae4e7c46'],
     ['2026-08-27-kind-bar-fix', '838f7da7'],
     ['2026-08-27-context-menu', '7c81f33e'],
-    ['2026-08-27-browse-tab-fit', 'd6612fc1'],
     ['2026-08-27-contacts', '980fdf48'],
     // ⚠ 上限 20 を超えたので 2026-08-28 に落とした(原本は CHANGELOG)
     // ['2026-08-27-alarm', '9e03db35'],
     ['2026-08-27-work-timer', 'dff641ac'],
     ['2026-08-27-group-task', 'fd542f57'],
-    ['2026-08-27-body-media', '85074b55'],
-    ['2026-08-27-capture', 'a75acf51'],
-    ['2026-08-27-csv-formula', 'd4391bb4'],
-    ['2026-08-27-csv-cell-edit', '1feaf54d'],
+    // ⚠ 上限 20 を超えたので 2026-08-28 に落とした(原本は CHANGELOG)
+    // ['2026-08-27-capture', 'a75acf51'],
+    // ⚠ 上限 20 を超えたので 2026-08-28 に落とした(原本は CHANGELOG)
+    // ['2026-08-27-csv-formula', 'd4391bb4'],
+    // ⚠ 上限 20 を超えたので 2026-08-28 に落とした(原本は CHANGELOG)
+    // ['2026-08-27-csv-cell-edit', '1feaf54d'],
     // ⚠ 上限 20 を超えたので 2026-08-28 に落とした(原本は CHANGELOG)
     // ['2026-08-27-fence-asset-export', '5640b17c'],
     // ⚠ 上限 20 を超えたので 2026-08-28 に落とした(原本は CHANGELOG)

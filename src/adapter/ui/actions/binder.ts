@@ -91,7 +91,7 @@ import { snippetMenu, snippetMenuNote } from '@features/snippet/snippet-menu';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
 import { normalizeTag } from '@features/flavor/tags';
 import { isEntrySort, NATURAL_DESC } from '@features/filter/entry-sort';
-import { isPaneId, PANES } from '@features/pane-visibility';
+import { COLUMN_PANES, isPaneId } from '@features/pane-visibility';
 import { STRUCTURAL, isRelationKind } from '@features/relation/kinds';
 import { canEnterScope, getAncestorFolders } from '@features/relation/tree';
 import { planCopy } from '@features/relation/copy-plan';
@@ -598,6 +598,12 @@ export interface BinderServices {
   printNote?(lid: string): void;
   /** このノートだけをアーカイブとして書き出す(P6f)。 */
   exportEntry?(lid: string): void;
+  /**
+   * 🔴 **このノートを閲覧用 HTML(1 枚)で書き出す**(#491)。
+   * ⚠ 上の `exportEntry` と**別の物** ── あちらは取り込み直せる `.pkc3.zip`、
+   *   こちらは相手がブラウザで開くだけで読める片道の HTML である。
+   */
+  exportEntryHtml?(lid: string): void;
   /** 🔴 **このフォルダと配下**をアーカイブとして書き出す(#399 ①)。 */
   exportFolder?(lid: string): void;
   /**
@@ -819,6 +825,10 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   // ⚠ 選んだ全部の本文を書く(#402 ①)── 取込・書出しの最中に走らせない
   'bulk-tag-add',
   'bulk-tag-remove',
+  // 🔑 いま開いている 1 件へのタグの付け外しも**本文を書く**(#494)──
+  //    実体は `BULK_TAG` なので、上の 2 つと同じ門をくぐらせる
+  'add-tag',
+  'untag-entry',
   // 🔑 スマートフォルダの条件と出し入れも**本文を書く**(#421 段①)
   'smart-cond-add',
   'smart-cond-remove',
@@ -866,6 +876,12 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'open-today',
   // ⚠ 今日のノートの本文を書く(#402 ②)── 取込・書出しの最中に走らせない
   'schedule-quick-add',
+  /**
+   * 🔴 **予定から外すのも本文を書く**(#498)── 行の `@…` を剥がす
+   *   (`SET_TASK_DATE`)か、frontmatter の `date:` を消す(`SET_ENTRY_DATE`)。
+   * 🔑 掴んで「日付なし」へ落とす経路と**同じ書込**なので、同じ門をくぐらせる。
+   */
+  'unschedule-task',
   /**
    * 🔴 **ノート 1 件の日付も disk への書込**(#292 段④)── frontmatter を書く。
    * ⚠ 取り込みが entry を総入れ替えしている裏で frontmatter を書かせない、が理由。
@@ -1375,9 +1391,16 @@ export function runGlobalCommand(
      * 🔑 **両側を一度に畳む / 戻す**(PKC2 のフォーカスモード相当)。
      * ⚠ 押しボタン 2 つを続けて押す実装にしない ── 片方だけ畳まれている状態から
      *   押すと**入れ替わる**だけで、user が期待する「集中」にならない。
+     * 🔴 **数えるのは列だけ**(#497 で追記欄も畳めるようになった)── `PANES` で
+     *   数えると、この鍵が**追記欄まで一緒に消す**ようになる(頼まれていない)。
      */
     if (dry) return true;
-    const next = appPanes.getHidden().length === PANES.length ? [] : [...PANES];
+    const hidden = appPanes.getHidden();
+    const columnsHidden = COLUMN_PANES.filter((p) => hidden.includes(p));
+    const next =
+      columnsHidden.length === COLUMN_PANES.length
+        ? hidden.filter((p) => !(COLUMN_PANES as readonly string[]).includes(p))
+        : [...hidden, ...COLUMN_PANES];
     prevent();
     applyPaneVisibility(root, appPanes.setHidden(next));
     return true;
@@ -1605,6 +1628,37 @@ const ACTIONS: Record<string, ActionHandler> = {
    * タグ絞り込み機構を作らない(#181 の全文検索が frontmatter ごと引く)。
    * ⚠ 欄の値も state 経由で同期される(renderer が書き戻す)。
    */
+  /**
+   * 🔴 **目次から本文の見出しへ飛ぶ**(#493)。
+   *
+   * ⚠ **`getElementById` を使わない** ── 同じ id は画面の別の面にも在りうる
+   *   (マニュアルもヘルプも同じ `makeSlugCounter` で id を刻む)。2026-08-08 に
+   *   「id の重複 0 件」という**守れない条件**を書いて踏んだのと同じ場所である。
+   *   🔑 **本文の面(`detail`)の中だけ**を見る。
+   * ⚠ **属性の選択子で探さない** ── 印は日本語なので `#見出し` は CSS の識別子
+   *   として不正になりうる。h1〜h3 を舐めて `id` を等値で比べる(escape が要らない)。
+   * ⚠ **見つからなければ理由を出す** ── 1 面の編集中は本文が描かれていないので
+   *   飛び先が無い。黙ると「押しても何も起きない」になる(#300 の型)。
+   */
+  'toc-jump': (dispatcher, target) => {
+    const slug = target.getAttribute('data-pkc-toc-slug') ?? '';
+    if (slug === '') return;
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const detail = root.querySelector<HTMLElement>('[data-pkc-region="detail"]');
+    const hit = detail
+      ? [...detail.querySelectorAll<HTMLElement>('h1[id], h2[id], h3[id]')].find(
+          (h) => h.id === slug,
+        )
+      : undefined;
+    if (!hit) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '編集中は本文が表示されていないので移動できません(保存するか、2 ペインにしてください)',
+      });
+      return;
+    }
+    hit.scrollIntoView({ block: 'start' });
+  },
   'filter-by-tag': (dispatcher, target) => {
     const tag = target.getAttribute('data-pkc-tag');
     if (tag) dispatcher.dispatch({ type: 'SET_ENTRY_FILTER', query: tag });
@@ -2034,6 +2088,46 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'bulk-tag-add': (dispatcher, _target, _services, root) =>
     runBulkTag(dispatcher, root, 'add'),
+  /**
+   * 🔴 **いま開いているノートにタグを打つ**(#494)。
+   *
+   * > user 指摘 2026-08-27:「**直感的にここにタグを打つ!って感じの動作じゃなくて
+   * > yamlfrontmatter なのは問題だ。しかも設定動線がよくわからん**」
+   *
+   * 🔑 **書く口は増やさない** ── まとめて付ける経路(`BULK_TAG`)へ
+   *   **相手 1 件**で流す。frontmatter を組み直す規則を 2 つ作ると、片方だけが
+   *   #284 系の修理に追随して静かに食い違う(§7)。
+   * ⚠ 相手は `scopeLid` ではなく **`selectedLid`**(情報ペインが出しているのは
+   *   「いま選んでいる 1 件」である ── `filer` の帯とは別の面)。
+   */
+  'add-tag': (dispatcher, _target, _services, root) => {
+    const st = dispatcher.getState();
+    const lid = st.selectedLid;
+    if (lid === null) return;
+    const field = root.querySelector<HTMLInputElement>('[data-pkc-field="tag-add-input"]');
+    const tag = normalizeTag(field?.value ?? '');
+    if (tag === '') {
+      // ⚠ **無言で終わらせない**(欄は出ているのに何も起きない dead click になる)
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '足すタグを入力してください' });
+      return;
+    }
+    dispatcher.dispatch({ type: 'BULK_TAG', lids: [lid], tag, mode: 'add' });
+    // 🔑 通したら欄を空にする(次の 1 つを打てる)── ⚠ 断ったときは残す
+    if (field) field.value = '';
+  },
+  /**
+   * 🔴 **その札を外す**(#494)。⚠ 裁定 2026-08-23「**片道の操作を作らない**」──
+   * 打てるのに外せないと、間違えて付けたタグを消すために本文を開くことになる。
+   * ⚠ 相手のタグは**押した札が持つ**(`data-pkc-tag`)── 打つ欄の中身を読むと、
+   *   打ちかけの別の語を消すことになる。
+   */
+  'untag-entry': (dispatcher, target) => {
+    const st = dispatcher.getState();
+    const lid = st.selectedLid;
+    const tag = target.getAttribute('data-pkc-tag') ?? '';
+    if (lid === null || tag === '') return;
+    dispatcher.dispatch({ type: 'BULK_TAG', lids: [lid], tag, mode: 'remove' });
+  },
   'bulk-tag-remove': (dispatcher, _target, _services, root) =>
     runBulkTag(dispatcher, root, 'remove'),
   'delete-selected': (dispatcher, _target, services, root) => {
@@ -3771,6 +3865,49 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.getState().selectedLid;
     if (lid) services.exportEntry?.(lid);
   },
+  /**
+   * 🔴 **予定から外す**(#498。user 指摘 2026-08-27
+   * 「**予定表に出てくる消せない予定がキモい / 動線が直感的ではない**」)。
+   *
+   * ⚠ 直す前、外す道は「**掴んで『日付なし』へ落とす**」だけだった ──
+   *   発見できないうえ、**繰り返しは掴むと断られる**ので外せなかった。
+   *
+   * 🔑 **書込は落とす経路と同じ 1 本**(§7)── ここで別の書き方をしない:
+   *   - 行の予定 … `SET_TASK_DATE`(`date: null` = 記法ごと剥がす)
+   *   - ノート 1 件の予定 … `SET_ENTRY_DATE`(frontmatter の `date:` を消す)
+   *
+   * ⚠ **単位は札の属性から読む** ── `data-pkc-whole-note` が在れば後者である
+   *   (`patchTaskCard` が焼いている)。⚠ 行番号は**札ではなく中の印**に在る
+   *   (札にも置くと `[data-pkc-task-line]` を押す既存の経路に当たる、2026-08-23 の罠)。
+   */
+  'unschedule-task': (dispatcher, target) => {
+    const card = target.closest<HTMLElement>('[data-pkc-entry]');
+    const lid = card?.getAttribute('data-pkc-entry') ?? '';
+    if (card === null || lid === '') return;
+    if (card.hasAttribute('data-pkc-whole-note')) {
+      dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: null });
+      return;
+    }
+    const raw = card
+      .querySelector('[data-pkc-task-line]')
+      ?.getAttribute('data-pkc-task-line');
+    const line = Number(raw);
+    // ⚠ 読めなければ**何もしない**(当てずっぽうで別の行を書き換えない)
+    if (raw === null || raw === undefined || !Number.isInteger(line)) return;
+    /**
+     * ⚠ **`until` も外す** ── 記法まるごと消えるので、期間だけ残すと
+     *   「頼んでいない指示」になる(落とす経路と同じ渡し方)。
+     */
+    dispatcher.dispatch({ type: 'SET_TASK_DATE', lid, line, date: null, until: null });
+  },
+  'export-entry-html': (dispatcher, target, services) => {
+    // ⚠ 解決規則は隣の `export-entry` / `delete-entry` と**同じ**にする ── 揃えないと
+    //    「A を書き出して B を削除する」が成立する(review M-3 と同じ形)
+    const lid =
+      target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ??
+      dispatcher.getState().selectedLid;
+    if (lid) services.exportEntryHtml?.(lid);
+  },
   'export-folder': (dispatcher, target, services) => {
     // ⚠ 解決規則は隣の `export-entry` / `delete-entry` と**同じ**にする ── 揃えないと
     //    「A を書き出して B を削除する」が成立する(review M-3 と同じ形)
@@ -4493,6 +4630,25 @@ export function bindActions(
         run(el.getAttribute('data-pkc-action'), el);
         return;
       }
+    }
+    /**
+     * 🔴 **タグの欄は Enter で足せる**(#494)。
+     *
+     * ⚠ **これが無いと、user 指摘そのものが直らない** ── 「ここに打つ!って感じ」で
+     *   打った後に**押すボタンを探させる**のでは、動線は 1 手も減っていない。
+     * ⚠ **変換中の Enter では撃たない** ── 日本語のタグを打つ人は毎回踏む。
+     *   🔑 ただし `isComposing` は**この関数の入口で弾き済み**(上の `if (ke.isComposing) return;`)
+     *   ── ここで書き足すと **no-op** になる(変異試験 T2 が SURVIVED で教えた。
+     *   CLAUDE.md「『これが無いと壊れる』と書く前に、外して壊れるのを見る」)。
+     *   守りは `tests/adapter/inspector-tag-input.test.ts` が**振る舞いで**留めている。
+     * ⚠ 欄の中だけ ── 画面全体の近道にしない(`append-input` と同じ作法)。
+     */
+    if (field === 'tag-add-input') {
+      if (ke.key === 'Enter' && !ke.shiftKey && !ke.ctrlKey && !ke.metaKey) {
+        ke.preventDefault();
+        run('add-tag', ke.target as HTMLElement);
+      }
+      return;
     }
     // 追記欄: 既定は Ctrl/Cmd+Enter(欄の中だけ ── 画面全体の近道にしない)
     if (field === 'append-input') {
@@ -6049,6 +6205,23 @@ export function bindActions(
     if ((side !== 'left' && side !== 'right') || lid === null) return;
     dispatcher.dispatch({ type: 'DUAL_SET_CURSOR', side, lid });
   };
+  /**
+   * 🔴 **タグの欄に焦点が当たったら、候補を集めてもらう**(#494 段②)。
+   *
+   * ⚠ **常に集めない** ── 全ノートの frontmatter を舐めるので、タグを打たない人に
+   *   毎回払わせない。⚠ **打つたびにも集めない** ── 既に持っていれば reducer が
+   *   何もしない(`ASK_TAG_SUGGESTIONS`)。
+   * 🔑 **2 つの欄が同じ候補を使う**(§7)── 情報ペインの「その場で打つ」と、
+   *   フォルダの面の「まとめて付ける」。別々に集めると、同じ画面で
+   *   **候補が食い違う**。
+   */
+  const onTagFocusIn = (ev: Event): void => {
+    const el = (ev.target as HTMLElement | null)?.closest<HTMLElement>('[data-pkc-field]');
+    const field = el?.getAttribute('data-pkc-field');
+    if (field !== 'tag-add-input' && field !== 'bulk-tag') return;
+    dispatcher.dispatch({ type: 'ASK_TAG_SUGGESTIONS' });
+  };
+  root.addEventListener('focusin', onTagFocusIn);
   root.addEventListener('focusin', onDualFocusIn);
   root.addEventListener('focusout', onRenameBlur);
   doc.addEventListener('keydown', onShortcut);
@@ -6063,6 +6236,7 @@ export function bindActions(
     root.removeEventListener('mousedown', onMousedown);
     root.removeEventListener('input', onInput);
     root.removeEventListener('change', onChange);
+    root.removeEventListener('focusin', onTagFocusIn);
     root.removeEventListener('focusin', onDualFocusIn);
     root.removeEventListener('focusout', onRenameBlur);
     doc.removeEventListener('keydown', onShortcut);

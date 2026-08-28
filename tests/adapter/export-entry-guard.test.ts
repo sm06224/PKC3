@@ -88,7 +88,7 @@ describe('1 ノート書出し — 断るなら読む前に断る', () => {
     const { dispatcher, dispatched } = fakeDispatcher('editing');
     const d = deps(source({ getBody, listBodies }));
 
-    expect(await exportEntry(dispatcher, d, 'n1')).toBeNull();
+    expect(await exportEntry(dispatcher, d, 'n1', 'archive')).toBeNull();
     expect(getBody).not.toHaveBeenCalled();
     expect(listBodies).not.toHaveBeenCalled();
     expect(d.files).toHaveLength(0);
@@ -98,7 +98,7 @@ describe('1 ノート書出し — 断るなら読む前に断る', () => {
   it('ready なら読んで書き出す', async () => {
     const { dispatcher } = fakeDispatcher('ready');
     const d = deps(source());
-    expect(await exportEntry(dispatcher, d, 'n1')).toBe(1);
+    expect(await exportEntry(dispatcher, d, 'n1', 'archive')).toBe(1);
     expect(d.files[0]).toMatch(/\.pkc3\.zip$/);
   });
 });
@@ -348,7 +348,7 @@ describe('書き出しは、飛んでいる書込が着地してから読む', (
     const { src, settle } = lagging();
     const { d, got } = catching(src, settle);
     const { dispatcher } = fakeDispatcher('ready');
-    expect(await exportEntry(dispatcher, d, 'n1')).toBe(1);
+    expect(await exportEntry(dispatcher, d, 'n1', 'archive')).toBe(1);
     expect(await got[0]!.text(), '保存前の本文が入っている').toContain(NEW);
   });
 
