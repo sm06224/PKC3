@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -69,11 +70,47 @@ MARK = "/soffice.cfg/"
 #    `GenericDialogController(…, u"<どこか>/querydialog.ui"_ustr, …)` の綴りを見る。
 #    移っていたらここを直すだけでよい(ビルドは壊れていない)。
 #    ⚠ **移動を「消えた」と読むと、直っている物を追いかけて 1 回転捨てる。**
-ANCHOR = "svt/ui/querydialog.ui"
+#
+# 🔴 **2026-08-28(2 度目): 在り処は「枝によって違う」ので、字を焼き込むのをやめた。**
+#    LO **26.8**(安定枝、`63426ccd`)は **`cui/ui/querydialog.ui`** のまま、
+#    master(`72012ca1` 以降)は **`svt/ui/querydialog.ui`** ── **どちらも正しい**。
+#    ⚠ 字を 1 つ焼き込むと、**枝を替えた焼きが必ず落ちる**(実際 #511 の 26.8 の
+#    焼きが 3 時間 37 分かけて成功したのに、ここだけで赤になった)。
+#    🔑 だから**上流の実装から引く** ── `GenericDialogController(…, u"…/querydialog.ui"_ustr, …)`
+#    の綴りが、その枝で**実際に読まれる**在り処である(CLAUDE.md §8
+#    「上流の『入れる物』を数えるときは、file システムではなく**登録**を読む」の同型)。
+#    ⚠ 読めなかったときだけ、下の既知の綴りへ落ちる(**判定は止めない**)。
+ANCHOR_FALLBACK = ("svt/ui/querydialog.ui", "cui/ui/querydialog.ui")
 
-# ⚠ かつての在り処。**判定には使わない**(受け入れると、また移ったときに気づけない)──
-#    落ちたときの案内に出すためだけに持つ。
-ANCHOR_WAS = ("cui/ui/querydialog.ui",)
+# 実装から綴りを引くときに見る所。
+# 🔴 **file の一覧を手書きしない**(CLAUDE.md §8「**推測の表を作った時点で、
+#    読むべき物を読んでいない合図**」)── 在り処が枝で動くのに、置き場の表を
+#    焼き込んだら**同じ間違いをもう一段深くやる**だけである。
+# 🔑 **名前で探す** ── クラスの実体は `querydialog.hxx` / `.cxx` に在る(枝が変わっても
+#    module が変わるだけで、この名前は動いていない)。⚠ 全数 grep はしない
+#    (3 時間の焼きの後に数秒で終わること)。
+ANCHOR_DIRS = ("include", "svtools", "cui", "vcl", "svx")
+ANCHOR_GLOB = "querydialog.*"
+
+ANCHOR_RE = re.compile(r'u"([A-Za-z0-9_/]+/querydialog\.ui)"_ustr')
+
+
+def anchor_from_source(root: Path) -> tuple[str | None, str]:
+    """上流の実装から「実際に読まれる `.ui` の綴り」を引く。
+
+    @returns (綴り, どこから引いたか)。⚠ 引けなければ `(None, 理由)`。
+    """
+    for d in ANCHOR_DIRS:
+        base = root / d
+        if not base.is_dir():
+            continue
+        for f in sorted(base.rglob(ANCHOR_GLOB)):
+            if not f.is_file() or f.suffix not in (".hxx", ".cxx", ".hpp", ".cpp"):
+                continue
+            m = ANCHOR_RE.search(f.read_text(encoding="utf-8", errors="replace"))
+            if m:
+                return m.group(1), str(f.relative_to(root))
+    return None, f"{root} の {'/'.join(ANCHOR_DIRS)} に {ANCHOR_GLOB} が無い"
 
 
 def _patch_module():
@@ -160,25 +197,33 @@ def main() -> int:
         fail = True
 
     # 🔴 名指しの錨 ── #225 の当の file。集合の突合とは別に、これ 1 件は必ず主張する。
-    if ANCHOR not in got:
-        print(f"ERROR: {ANCHOR} が配る一式に無い ── 非 ODF の保存が"
+    #    🔑 **綴りは上流の実装から引く**(枝によって在り処が違うため ── 上の注記)。
+    anchor, whence = anchor_from_source(mk_path.resolve().parents[1])
+    if anchor is None:
+        # ⚠ 引けなかったことを**黙って通さない** ── どの綴りで判定したかを必ず出す。
+        #    🔑 **stdout に出す**(通った回にも読めるように ── 落ちた回だけ読める
+        #    診断は、「実装から引けている」という思い込みを直せない)
+        print(f"  ⚠ 実装から錨を引けなかった({whence})── 既知の綴りで見る")
+    else:
+        print(f"  錨は実装から引いた: {anchor}({whence})")
+    wanted = (anchor,) if anchor is not None else ANCHOR_FALLBACK
+    # ⚠ fallback のときは **どれか 1 つ**在れば良い(枝を跨いで焼くため)。
+    #    実装から引けたときは**その 1 つ**を要求する(移動を見逃さない)。
+    if not any(w in got for w in wanted):
+        print(f"ERROR: {' / '.join(wanted)} が配る一式に無い ── 非 ODF の保存が"
               f"「一般的な I/O エラー」で落ちる(#225)", file=sys.stderr)
         # 🔑 **「消えた」と「移った」を読み分ける材料をその場に出す。**
-        #    ⚠ これが無いと、次に読む人は「保存が壊れた」から調べ始める
-        #    (2026-08-28 に実際に上流が `cui/ui/` → `svt/ui/` へ移した)。
+        #    ⚠ これが無いと、次に読む人は「保存が壊れた」から調べ始める。
         seen = sorted(n for n in got if n.endswith("/querydialog.ui"))
         print(f"  一式に在る querydialog.ui: {seen if seen else '(1 件も無い)'}", file=sys.stderr)
-        for was in ANCHOR_WAS:
-            if was in got:
-                print(f"  ⚠ 古い在り処 {was} に在る ── 上流が**戻した**可能性がある",
-                      file=sys.stderr)
         print("  🔑 上流を grep して在り処を確かめる:"
               " grep -rn 'querydialog.ui' include/ svtools/ cui/", file=sys.stderr)
         fail = True
 
     if fail:
         return 1
-    print(f"  差は両方向とも 0 件 / {ANCHOR} も在る")
+    found = next(w for w in wanted if w in got)
+    print(f"  差は両方向とも 0 件 / {found} も在る")
     return 0
 
 

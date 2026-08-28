@@ -16,7 +16,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -29,15 +29,20 @@ const PREFIX = '    $(INSTROOT)/$(LIBO_SHARE_FOLDER)/config/soffice.cfg/';
  * ⚠ 2 か所に literal を置くと、片方だけ上流に追随して**両方緑のまま食い違う** ──
  *   実際 2026-08-28 に上流が `cui/ui/` → `svt/ui/` へ移し、script を直したときに
  *   ここが取り残された(この test が落ちて気づいた)。
- * 🔑 綴りそのものは下の「錨の身元」1 本で pin する ── 機構の test は
- *   **どんな綴りでも成り立つ**ように書く(値ではなく振る舞いを見る)。
+ *
+ * 🔴 **2026-08-28(2 度目): 綴りは 1 つではなくなった。**
+ *   LO **26.8**(安定枝)は `cui/ui/…`、master は `svt/ui/…` ── **枝で違う**。
+ *   script は**上流の実装から引く**ようになったので、ここは
+ *   **引けなかったときの既知の綴り**(`ANCHOR_FALLBACK`)を読む。
  */
-const ANCHOR = (() => {
-  const m = /^ANCHOR = "([^"]+)"$/m.exec(readFileSync(SCRIPT, 'utf-8'));
+const FALLBACK = (() => {
+  const m = /^ANCHOR_FALLBACK = \(([^)]+)\)$/m.exec(readFileSync(SCRIPT, 'utf-8'));
   const got = m?.[1];
-  if (got === undefined) throw new Error(`${SCRIPT} から ANCHOR を読めない(綴りが変わった)`);
-  return got;
+  if (got === undefined) throw new Error(`${SCRIPT} から ANCHOR_FALLBACK を読めない(綴りが変わった)`);
+  return [...got.matchAll(/"([^"]+)"/g)].map((x) => x[1]!);
 })();
+/** fixture に混ぜる 1 件(⚠ どれでもよい ── 機構の test は綴りに依らない)。 */
+const ANCHOR = FALLBACK[0]!;
 
 /** 下限(900)を超える名前の束。⚠ 超えないと空振り防止のほうで落ちる。 */
 const names = (tag: string, n: number): string[] =>
@@ -71,7 +76,16 @@ interface Run {
  * ⚠ **目録にも `.ui` 以外を混ぜる**(`.wasm` / フォント)── 同じ理由。
  */
 function run(listed: string[], delivered: string[]): Run {
-  const dir = mkdtempSync(join(tmpdir(), 'pkc3-uicheck-'));
+  return runIn(null, listed, delivered);
+}
+
+/**
+ * @param root 上流の木の根(⚠ script は `<mk の 2 つ上>` を根と見なすので、
+ *   mk を `<root>/static/fs.mk` に置く)。`null` なら**実装を読めない場所**で回す。
+ */
+function runIn(root: string | null, listed: string[], delivered: string[]): Run {
+  const dir = root === null ? mkdtempSync(join(tmpdir(), 'pkc3-uicheck-')) : root;
+  const keep = root !== null;
   try {
     const mk = [
       'PKC3_FS_IMAGE_FILES := \\',
@@ -100,8 +114,11 @@ function run(listed: string[], delivered: string[]): Run {
       ],
       remote_package_size: 1,
     };
-    const mkPath = join(dir, 'fs.mk');
-    const metaPath = join(dir, 'meta.json');
+    // ⚠ script は `mk の 2 つ上` を木の根と見なす ── 実物と同じ深さに置く
+    const mkDir = join(dir, 'static');
+    mkdirSync(mkDir, { recursive: true });
+    const mkPath = join(mkDir, 'fs.mk');
+    const metaPath = join(mkDir, 'meta.json');
     writeFileSync(mkPath, mk, 'utf-8');
     writeFileSync(metaPath, JSON.stringify(meta), 'utf-8');
     try {
@@ -115,7 +132,7 @@ function run(listed: string[], delivered: string[]): Run {
       return { code: err.status ?? -1, out: `${err.stdout ?? ''}${err.stderr ?? ''}` };
     }
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    if (!keep) rmSync(dir, { recursive: true, force: true });
   }
 }
 
@@ -159,12 +176,58 @@ describe('配った一式のダイアログ資源を検める', () => {
    * ⚠ **また移ったらここが落ちる。** そのときは「保存が壊れた」と読む前に
    *   上流の在り処を grep する(script の注記にその手順が書いてある)。
    */
-  it('🔴 錨は、いま上流が読んでいる在り処を指している', () => {
-    expect(ANCHOR, '錨が上流の在り処と食い違っている').toBe('svt/ui/querydialog.ui');
+  it('🔴 既知の綴りは、上流の 2 つの枝の両方を持っている', () => {
+    // 🔑 master(`svt/ui/`)と 26.8(`cui/ui/`)── **どちらも実在する在り処**である
+    expect(FALLBACK, '既知の綴りが片方しか無い(枝を替えた焼きが必ず落ちる)').toEqual([
+      'svt/ui/querydialog.ui',
+      'cui/ui/querydialog.ui',
+    ]);
     const src = readFileSync(SCRIPT, 'utf-8');
-    // ⚠ 移動の履歴を消さない ── 消すと、次に落ちた人が同じ 1 時間を払う
-    expect(src, '古い在り処の記録が消えている').toContain('cui/ui/querydialog.ui');
     expect(src, '落ちたときの調べ方が書かれていない').toContain('grep -rn');
+  });
+
+  /**
+   * 🔴 **綴りは上流の実装から引く**(2026-08-28、#511 の 26.8 の焼きで判明)。
+   *
+   * ⚠ 焼きは 3 時間 37 分かけて成功し、集合の突合も **1090 / 1090 で完全一致**
+   *   だったのに、**焼き込んだ錨 1 件だけ**で赤になった ── 26.8 は
+   *   `cui/ui/querydialog.ui` のままで、master が `svt/ui/` へ移していた。
+   * 🔑 だから「その枝の実装が**実際に読む**綴り」を引く。
+   *   ⚠ 引けたときは**その 1 つ**を要求する(移動を見逃さないため)。
+   */
+  it('🔴 実装から引いた綴りを要求する(別の枝の綴りでは通さない)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'pkc3-lo-'));
+    try {
+      mkdirSync(join(root, 'include', 'svtools'), { recursive: true });
+      writeFileSync(
+        join(root, 'include', 'svtools', 'querydialog.hxx'),
+        'GenericDialogController(pParent, u"svt/ui/querydialog.ui"_ustr, "Dialog")\n',
+        'utf-8',
+      );
+      // ⚠ 一式は **26.8 の綴り**しか持っていない ── 実装は `svt/ui/` を読むので落ちる
+      const listed = [...names('cui', 700), ...names('svx', 250), 'cui/ui/querydialog.ui'];
+      const r = runIn(root, listed, [...listed]);
+      expect(r.out, '実装から引いたことを言っていない').toContain('錨は実装から引いた');
+      expect(r.code, r.out).toBe(1);
+      expect(r.out).toContain('svt/ui/querydialog.ui');
+      // 🔴 **対照群** ── 実装の綴りが入っていれば通る(この検査が常に落ちるのではない)
+      const ok = [...names('cui', 700), ...names('svx', 250), 'svt/ui/querydialog.ui'];
+      expect(runIn(root, ok, [...ok]).code, '実装どおりの綴りなのに落ちた').toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * ⚠ **実装を読めない場所で回しても、判定は止めない**(既知の綴りへ落ちる)。
+   * 🔑 そのとき**どちらで判定したかを必ず言う** ── 黙って通すと、次に読む人が
+   *   「実装から引けている」と思い込む(#511 の 26.8 がまさにこの形で落ちた)。
+   */
+  it('⚠ 実装が読めないときは既知の綴りへ落ち、そう言う', () => {
+    const listed = [...names('cui', 700), ...names('svx', 250), 'cui/ui/querydialog.ui'];
+    const r = run(listed, [...listed]);
+    expect(r.out, '落ちたことを言っていない').toContain('実装から錨を引けなかった');
+    expect(r.code, r.out).toBe(0); // 26.8 の綴りでも通る
   });
 
   /**

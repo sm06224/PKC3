@@ -62,9 +62,33 @@ export interface HelpMarkdownPort {
   render(text: string, opts?: { currentContainerId?: string }): Promise<string>;
 }
 
+/**
+ * 🔴 **マニュアルを手放すまでの間**(#531 H3。ms)。
+ *
+ * ⚠ **「閉じたら捨てる」にしない** ── 実測(2026-08-28)で、入れ直しは
+ *   **279 / 245 / 243 / 244 ms** 掛かる。閉じるたびに捨てると、開き直すたびに
+ *   その時間を払う ── user 指示 2026-08-03 は「配る量」ではなく
+ *   **「その後の動作がメモリくったり、もっさりだと嫌」**であり、
+ *   **両方向とも**この指示に反する。
+ * 🔑 だから**しばらく使われなかったら手放す** ── 計算のワーカーと同じ形である
+ *   (`platform/worker-lease.ts`「ワーカーはしばらくつかわれないなら、キルと解放」)。
+ * ⚠ ワーカーの既定(30 秒)より**ずっと長く**した ── あちらは連続操作の合間だが、
+ *   ヘルプは「読んで、試して、また見に来る」ので、数分で戻ってくるのが普通である。
+ */
+export const HELP_MANUAL_IDLE_MS = 5 * 60_000;
+
 export class HelpRenderer {
   private built = false;
   private manualHost: HTMLElement | null = null;
+  /**
+   * 🔴 **マニュアルを描いてあるか**(#531 H3)。⚠ `built`(器を組んだか)とは**別**
+   *   である ── 器は捨てず、**中身だけ**を手放すので、2 つの状態が要る。
+   */
+  private manualDrawn = false;
+  /** 手放しの予約。⚠ 面を見せた瞬間に**必ず取り消す**(見ている物を消さない)。 */
+  private idleTimer: unknown = null;
+  /** 最後に描いたときのコンテナ id ── 入れ直すときも同じ材料で描く。 */
+  private lastCid = '';
   /** ショートカットの一覧(#256)。⚠ 器は捨てず、中身だけ書き換える。 */
   private keys: HTMLElement | null = null;
   private offKeymap: (() => void) | null = null;
@@ -85,7 +109,57 @@ export class HelpRenderer {
      * ここは `KEY_COMMANDS` + いまの割当を描くだけである。
      */
     private readonly keymap: KeymapStore = appKeymap,
+    /**
+     * 🔴 **時計**(#531 H3)。⚠ **注入できるようにする** ── 実時間を待つ test は
+     *   書けない(5 分待たせるか、待たずに「たぶん動く」と書くかの二択になる)。
+     *   `worker-lease.ts` が同じ理由で同じ形を持っている。
+     */
+    private readonly timers: {
+      set: (fn: () => void, ms: number) => unknown;
+      clear: (h: unknown) => void;
+    } = {
+      set: (fn, ms) => globalThis.setTimeout(fn, ms),
+      clear: (h) => globalThis.clearTimeout(h as ReturnType<typeof setTimeout>),
+    },
+    /** 手放すまでの間(ms)。⚠ test は短くする。 */
+    private readonly idleMs: number = HELP_MANUAL_IDLE_MS,
   ) {}
+
+  /**
+   * 🔴 **この面が見えなくなった**(#531 H3)── `CenterRouter` が面を入れ替えた
+   * ときに呼ぶ。
+   *
+   * ⚠ **その場では捨てない。** しばらく戻って来なかったときだけ手放す
+   *   (入れ直しは実測 243〜279ms ── 閉じるたびに払わせない)。
+   * 🔑 **器は捨てない** ── 捨てると、押される寸前のボタンが消える
+   *   (2026-08-07 に本文の面で実際に踏んだ。この file の冒頭にも書いてある)。
+   *   手放すのは**マニュアルの中身だけ**である(実測で 6,884 → 499 節点、
+   *   **6,385 節点(92.8%)**が返る)。
+   */
+  onHidden(): void {
+    // ⚠ 描いていないなら予約しない(空の器をもう一度空にしても何も返らない)
+    if (!this.manualDrawn || this.idleTimer !== null) return;
+    this.idleTimer = this.timers.set(() => {
+      this.idleTimer = null;
+      this.dropManual();
+    }, this.idleMs);
+  }
+
+  /** マニュアルの中身だけ手放す。⚠ **器と、その上の見出しは残す**。 */
+  private dropManual(): void {
+    const host = this.manualHost;
+    if (host === null || !this.manualDrawn) return;
+    this.manualDrawn = false;
+    // ⚠ 空にしない ── 次に開いたとき、描き終わるまでの数百 ms が**白紙**になる
+    host.textContent = 'マニュアルを読み込んでいます…';
+  }
+
+  /** 予約を取り消す。⚠ **見せる前**に呼ぶ(見ている物を消さないため)。 */
+  private cancelIdle(): void {
+    if (this.idleTimer === null) return;
+    this.timers.clear(this.idleTimer);
+    this.idleTimer = null;
+  }
 
   /**
    * @param currentContainerId いま開いているコンテナ(Issue #100 段①)。
@@ -93,7 +167,17 @@ export class HelpRenderer {
    *   コンテナを切り替える経路が入ったら、ここも作り直しの対象になる。
    */
   render(currentContainerId = ''): void {
-    if (this.built) return;
+    /**
+     * 🔴 **見せる前に予約を取り消す**(#531 H3)── ここを飛ばすと、
+     * 開いた直後に予約が満期を迎えて**読んでいる最中に中身が消える**。
+     */
+    this.cancelIdle();
+    if (this.built) {
+      // 🔴 **手放してあったら入れ直す**(#531 H3)。⚠ 器は在るので、
+      //    描き直すのは**中身だけ**である
+      if (!this.manualDrawn) void this.drawManual(currentContainerId || this.lastCid);
+      return;
+    }
     this.built = true;
     this.region.textContent = '';
 
@@ -231,6 +315,11 @@ export class HelpRenderer {
   private async drawManual(currentContainerId: string): Promise<void> {
     if (!this.manualHost) return;
     const host = this.manualHost;
+    // ⚠ 入れ直しのために材料を控える(#531 H3)── 2 度目は面から id が来ない
+    this.lastCid = currentContainerId;
+    // 🔴 **描き終える前に立てる**(#531 H3)── `await` の間にもう 1 度
+    //    入れ直しに来ると、**同じ物を 2 回描く**(ワーカーを 2 回起こす)
+    this.manualDrawn = true;
     if (!this.markdown) {
       host.textContent = MANUAL_TEXT;
       return;
