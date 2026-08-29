@@ -1127,6 +1127,27 @@ function navigateToLink(dispatcher: Dispatcher, raw: string | null): void {
  * @returns 開いたら true
  */
 /**
+ * 🔴 **畳みを管理している器を引く**(#598)。
+ *
+ * ⚠ **同じ器が 2 つの名前を持つ** ── 骨組みは `…-body-host` を付けるが、
+ * markdown を描いた瞬間に**同じ節点の名前が `…-body` へ上書きされる**
+ * (`detail.ts` の `renderMarkdownBody`)。だから本文の面で `…-body-host` だけを
+ * 探すと**必ず外す**。
+ * ⚠ 横に留めた枠は綴りが `split-` になる(押した物と効く先を食い違わせないための仕掛け)。
+ * 🔑 4 つとも受ける口を**ここ 1 か所**に置く ── 呼び側に綴りを写さない(§7)。
+ */
+const FOLD_HOST_SELECTOR = [
+  '[data-pkc-field="detail-body"]',
+  '[data-pkc-field="detail-body-host"]',
+  '[data-pkc-field="split-body"]',
+  '[data-pkc-field="split-body-host"]',
+].join(',');
+
+function foldHostOf(el: Element): HTMLElement | null {
+  return el.closest<HTMLElement>(FOLD_HOST_SELECTOR);
+}
+
+/**
  * 🔴 **読む面で押した所の原文の行**(#395 段③ / #495 が共有する 1 か所)。
  *
  * 🔑 行は読む面の刻印(`data-pkc-source-line`)から引く ── **新しい逆引きを
@@ -1970,13 +1991,16 @@ async function tocJump(dispatcher: Dispatcher, target: HTMLElement, slug: string
     }
     /**
      * 🔴 **畳んだ章の中なら、開いてから飛ぶ**(#514)── 覆っている畳みだけを開く。
-     * ⚠ host は**畳みを管理している器**(`detail-body-host` = `applyHeadingFold` が
-     *   受けるのと同じ器)で渡す ── `hit.parentElement` だと `:::` の囲みの中の
-     *   見出しで**別の器**を渡してしまい、外の畳みに届かない(レビュー指摘)。
+     * ⚠ host は**畳みを管理している器**(`applyHeadingFold` が受けるのと同じ器)で渡す
+     *   ── `hit.parentElement` だと `:::` の囲みの中の見出しで**別の器**を渡してしまい、
+     *   外の畳みに届かない。
+     * 🔴 **綴りは 1 つではない**(#598)── 1 稿目は `detail-body-host` だけを探して
+     *   いたが、md を描いた器は**同じ節点の名前が `detail-body` へ上書きされる**ので、
+     *   **本文の面では必ず外していた**(= いつも `hit.parentElement` に落ちていた)。
+     *   🔑 引く口は `foldHostOf` **1 本**(§7)。
      *   器が無い環境(unit の素の fixture)では parentElement へ落とす。
      */
-    const foldHost =
-      hit.closest<HTMLElement>('[data-pkc-field="detail-body-host"]') ?? hit.parentElement;
+    const foldHost = foldHostOf(hit) ?? hit.parentElement;
     if (foldHost !== null) revealBlock(foldHost, hit);
     hit.scrollIntoView({ block: 'start' });
 }
