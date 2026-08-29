@@ -317,6 +317,16 @@ npm run build && npm run test:smoke -- <spec>   # → 失敗メッセージを�
   **「見えている位置に本当に在るか」の検証は毎回やる**(検出力は下げていない)
 - **spec の最後に `expect(errors, errors.join('\n')).toEqual([])`**
   (pageerror / console.error 0 件)
+  - 🔴 **囲み(html / svg)を打鍵で入れない ── `fill` で一度に入れる**
+    (#561、2026-08-29)。分割編集の下書きは**打鍵の途中でも描かれる**ので、
+    `width="9` まで打って手が止まると、**閉じていない属性のまま**箱(`srcdoc`)へ届き、
+    ブラウザが `console.error` を出す ── 上の `toEqual([])` が**製品と無関係に**落ちる。
+    ⚠ **間欠にしか見えない**(打鍵の速さは環境で変わる)。
+    ⚠ 直すのは**入れ方**であって検査ではない ── 名指しで外すと、
+    「箱の中で本当に絵が壊れた」をもう見られなくなる
+  - 🔑 **赤には出所が付く**(`consoleOrigin`)── ` @ about:srcdoc` なら**箱の中**、
+    ` @ /assets/….js:118` なら**アプリ本体**である。⚠ `page.on('console')` は
+    **子 frame の分も上がる**ので、これが無いと 2 つが同じ顔になる
 - `emulateMedia` / `setViewportSize` を触る spec は**独立の spec file にする** ──
   他の spec の assert を汚す
 - **PR gate の総量を増やさない**(user 指示 2026-07-30「CI を長くしない」)。

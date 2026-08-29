@@ -6,7 +6,7 @@
  * - pageerror / console.error は各 spec の最後に 0 件を assert する
  */
 import { expect, type Locator, type Page } from '@playwright/test';
-import { firstAppFrame } from './page-errors';
+import { consoleOrigin, firstAppFrame } from './page-errors';
 
 export async function gotoApp(page: Page): Promise<void> {
   await page.goto('/');
@@ -91,8 +91,13 @@ export function collectPageErrors(page: Page): string[] {
    *   どちらも同じ 1 行だけが残った)。
    * ⚠ 「流れの途中で出た」のと「最後の assert が済んだ後に出た」のは
    *   **別の話**なのに、いまの赤はどちらも同じに見える ── だから経過も添える。
-   * ⚠ 添えるのは **`pageerror` だけ** ── console 側は `KNOWN_CONSOLE_NOISE` が
-   *   **等値**で名指ししているので、飾ると外れなくなる。
+   * 🔴 **console 側にも「どの面から出たか」を添える**(#561、2026-08-29)。
+   *   ⚠ 1 稿目はここに「添えるのは `pageerror` だけ ── console は等値で名指しして
+   *   いるので飾ると外れなくなる」と書いていたが、**外し方の順番を変えれば両立する**
+   *   (等値の照合を**飾る前**にやる)。
+   * ⚠ これが無いと**箱の中とアプリの区別が付かない** ── #561 は
+   *   `<svg> attribute width: …` が **sandbox の `srcdoc` から**出ていたのに、
+   *   赤の 1 行はアプリの例外とまったく同じ顔をしていた。
    */
   const t0 = Date.now();
   page.on('pageerror', (e) =>
@@ -104,7 +109,8 @@ export function collectPageErrors(page: Page): string[] {
     // ⚠ **等値**で外す(部分一致にしない)── 部分一致にすると、同じ前置きを持つ
     //    別のエラーまで黙って消える
     if (KNOWN_CONSOLE_NOISE.includes(line)) return;
-    errors.push(line);
+    // 🔑 **外した後に飾る** ── 等値の名指し(上)は素の行に当てる
+    errors.push(`${line}${consoleOrigin(msg.location())} (+${Date.now() - t0}ms)`);
   });
   return errors;
 }
