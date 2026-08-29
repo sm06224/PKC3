@@ -144,8 +144,10 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    *
    * ⚠ これは**上書き**である ── 上の書き出し 5 つと違って新しい file を作らない。
    *   だから渡す物の群れの**外**、履歴のすぐ上に置く。
-   * ⚠ 行き先(ファイル名)は右ペインの説明が出している ── メニューは字だけなので、
-   *   **押す前に行き先が読めるのは右ペインだけ**である。
+   * 🔑 **行き先(ファイル名)はメニューの説明にも入る**({@link entryActionHint})──
+   *   押す前に「どのファイルを上書きするか」が読める。
+   *   ⚠ 2026-08-29 まではここに「読めるのは右ペインだけ」と書いてあったが、
+   *   説明を配るようにした時点で嘘になった(#587 C-1)。
    *   🔑 それでよい:この口が要るのは「file を開いて直して戻す」最中の user で、
    *   その人は**自分が何を開いたか知っている**。
    */
@@ -224,11 +226,33 @@ export function adoptImagesLabel(count: number): string {
  * 🔑 本文の上なら**開いていることが前提**なので、枚数は必ず数えられる。
  *   そして user から見ても筋が通る ── 画像は**いま見えている**。
  */
-export function bodyMenuActions(ctx: { readonly externalImages: number }): readonly EntryAction[] {
-  if (ctx.externalImages <= 0) return BODY_MENU_ACTIONS;
+export function bodyMenuActions(
+  ctx: { readonly externalImages: number },
+): readonly (EntryAction & { readonly hint: string })[] {
+  /**
+   * 🔴 **説明も配る**(2026-08-29 の動線レビュー 欠陥 2)。
+   *
+   * ⚠ #587 C-1 の 1 稿目は**行のメニューだけ**に説明を付けた。ところが
+   *   `adopt-external-images` は**本文の右クリックにしか無い**(マニュアル §4 が
+   *   「1 つだけ違います」と明記)── つまり **押すと外へ通信して本文を書き換える、
+   *   いちばん重い 1 個だけが黙ったまま**残っていた。
+   * 🔑 説明の量が操作の重さと**逆**になる ── 取り消せる「削除」には出て、
+   *   取り消しにくい「取り込む」には出ない、という形だった。
+   *
+   * ⚠ 字は新しく書かない。`ENTRY_ACTION_HINTS` に**既に在る**(情報ペインで出ている)
+   *   ものを、同じ操作の別の面へ配るだけである。
+   * ⚠ 説明を持たない 2 つ(段組み / 横に留める)は `''` のまま ──
+   *   `openContextMenu` が空を落とすので、**空の `title` は生えない**。
+   */
+  const withHint = (a: EntryAction): EntryAction & { readonly hint: string } => ({
+    ...a,
+    hint: ENTRY_ACTION_HINTS[a.action] ?? '',
+  });
+  const base = BODY_MENU_ACTIONS.map(withHint);
+  if (ctx.externalImages <= 0) return base;
   return [
-    ...BODY_MENU_ACTIONS,
-    { action: 'adopt-external-images', label: adoptImagesLabel(ctx.externalImages) },
+    ...base,
+    withHint({ action: 'adopt-external-images', label: adoptImagesLabel(ctx.externalImages) }),
   ];
 }
 
@@ -353,7 +377,13 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
   'copy-plain-markdown':
     'このノートの本文から PKC3 独自の記法を落として、素の Markdown として写します。他のツールへ貼るための形です(file は落ちません)',
   'show-history': '過去の版を一覧します',
-  'delete-entry': 'ゴミ箱へ移します(フォルダ画面から戻せます)',
+  // ⚠ **行き先は画面に在る名前で書く**(2026-08-29 の動線レビュー)── 直す前は
+  //    「フォルダ画面」と書いていたが、**その名前の画面は無い**(タブの字は「フォルダ」で、
+  //    `browse.ts` は「場所の名前にしない」と宣言している)。⚠ 消した直後のいちばん
+  //    焦っている場面で、案内された先に戻す物が無い ── しかも 2 ペインには
+  //    **同じ名前で逆の操作**(選んだ物をゴミ箱へ入れる)が在る。
+  //    🔑 字はマニュアル §6「左の列の **フォルダ** タブの中」に揃える。
+  'delete-entry': 'ゴミ箱へ移します(左の列の「フォルダ」タブの中のゴミ箱から戻せます)',
 };
 
 /**

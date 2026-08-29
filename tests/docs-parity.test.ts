@@ -71,7 +71,7 @@ const BINDER = readFileSync('src/adapter/ui/actions/binder.ts', 'utf-8');
  * ⚠ 元は `inspector.ts` に在ったが、**右クリックにも同じ説明を出す**ために移した ──
  *   ここを向け直さないと、検査は**移した先を 1 度も読まない**(在るのに無いと言う)。
  */
-const INSPECTOR = readFileSync('src/features/entry-actions.ts', 'utf-8');const MIGRATION = readFileSync('docs/migration-from-pkc2.md', 'utf-8');
+const ENTRY_ACTION_SRC = readFileSync('src/features/entry-actions.ts', 'utf-8');const MIGRATION = readFileSync('docs/migration-from-pkc2.md', 'utf-8');
 
 /** shell を 1 度だけ組んで、以後はこれを見る。 */
 const root = ((): HTMLElement => {
@@ -869,8 +869,8 @@ describe('導線の置き場所(P8 段⑱)', () => {
 
   it('🔴 1 件書き出しの説明が、実際に落ちる形式と合っている', () => {
     // 実装は可逆アーカイブ(.pkc3.zip)── かつて tooltip は「Markdown で保存します」だった
-    expect(INSPECTOR).toContain('.pkc3.zip');
-    expect(INSPECTOR, 'Markdown と嘘を書いている').not.toContain('Markdown で保存します');
+    expect(ENTRY_ACTION_SRC).toContain('.pkc3.zip');
+    expect(ENTRY_ACTION_SRC, 'Markdown と嘘を書いている').not.toContain('Markdown で保存します');
   });
 });
 

@@ -21,6 +21,7 @@ import { readFileSync } from 'node:fs';
 import {
   ADOPT_IMAGES_LABEL,
   adoptImagesLabel,
+  BODY_MENU_ACTIONS,
   bodyMenuActions,
   ENTRY_ACTION_HINTS,
   ENTRY_ACTION_LABELS,
@@ -233,14 +234,40 @@ describe('右クリックの説明(#587 C-1)', () => {
     expect(hist?.hint).toBe(ENTRY_ACTION_HINTS['show-history']);
   });
 
-  it('⚠ 説明の出どころは 1 つ ── 情報ペインが引く表と同じ物である', () => {
-    // 🔑 情報ペインは `ENTRY_ACTION_HINTS` を直に引く。右クリックは `hint` を受け取る
-    //    ── **同じ字**でなければ、片方だけ直る日が来る(§7)
+  /**
+   * ⚠ **これは「情報ペインと一致する」を見ていない**(着地前レビュー 🔴2 で訂正)。
+   *
+   * 1 稿目は docstring に「情報ペインが引く表と同じ物である」と書いていたが、
+   * 🔴 **左辺も右辺も `entryActionHint` を同じ引数で呼ぶ同語反復**だった ──
+   * `InspectorRenderer` を 1 度も import していないので、**原理的に確かめられない**。
+   * 🔑 その主張は `tests/adapter/inspector-titles.test.ts`(実物の DOM と突き合わせる)へ移した。
+   *
+   * ここが守るのは 1 つだけ:**配るときに別の操作の字とすり替えない**。
+   * ⚠ 弱いと自覚して置く(CLAUDE.md「取り出せないものは原文 pin で妥協するが、
+   * 弱いと自覚して使う」の同型)。
+   */
+  it('⚠ 配る説明は、その操作自身の字である(別の操作の字とすり替えない)', () => {
     for (const a of entryMenuActions({ archetype: 'text', linkedFile: null }))
       expect(a.hint, `${a.action} の説明が表と違う`).toBe(entryActionHint(a.action, {
         archetype: 'text',
         linkedFile: null,
       }));
+  });
+
+  /**
+   * 🔴 **本文の右クリックにも説明が届く**(動線レビュー 欠陥 2)。
+   * ⚠ `adopt-external-images` は**本文の右クリックにしか無い**(マニュアル §4)ので、
+   *   ここが黙ると「押すと外へ通信します」がどこにも出ない。
+   */
+  it('🔴 本文のメニューも説明を配る(外へ通信する 1 個を黙らせない)', () => {
+    const rows = bodyMenuActions({ externalImages: 3 });
+    const adopt = rows.find((a) => a.action === 'adopt-external-images');
+    expect(adopt?.hint, '外へ通信することが説明に無い').toContain('通信します');
+    // ⚠ **対照群** ── 説明を持たない 2 つは空のまま(何にでも字を付ける作りではない)
+    expect(
+      rows.filter((a) => a.hint === '').map((a) => a.action),
+      '説明を持たない項目の一覧が変わった',
+    ).toEqual(BODY_MENU_ACTIONS.map((a) => a.action));
   });
 
   it('⚠ 知らない綴りには空を返す(呼び側が例外で落ちない)', () => {

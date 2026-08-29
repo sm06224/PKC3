@@ -67,7 +67,6 @@ import { bodyLinkTargets } from '@features/entry-ref/body-links';
 import {
   ADOPT_IMAGES_LABEL,
   adoptImagesLabel,
-  ENTRY_ACTION_HINTS,
   ENTRY_ACTION_LABELS,
   entryActionHint,
 } from '@features/entry-actions';
@@ -199,7 +198,7 @@ export class InspectorRenderer {
     const refBtn = this.buttons.get('copy-entry-ref');
     /**
      * ⚠ **`title` はここで書かない**(2026-08-29 に外した)── 下の loop が
-     *   `ENTRY_ACTION_HINTS[action] ?? ''` で**必ず上書きする**ので、ここに書いた字は
+     *   `entryActionHint(...)` で**必ず上書きする**ので、ここに書いた字は
      *   **一度も画面に出ていなかった**(空の tooltip として配っていた)。
      * 🔑 説明は `ENTRY_ACTION_HINTS`(`features/entry-actions.ts`)に置く ──
      *   **右クリックも同じ所から引く**ので、出所は 1 か所である(§7 / #587 C-1)。
@@ -756,8 +755,20 @@ export class InspectorRenderer {
     if (folderBtn) folderBtn.hidden = meta.archetype !== 'folder';
     this.paintAdoptImages(state, meta.lid);
     for (const [action, b] of this.buttons) {
-      const why = ENTRY_ACTION_HINTS[action] ?? '';
-      const title = action === 'write-back-file' ? entryActionHint(action, { archetype: null, linkedFile: link }) : why;
+      /**
+       * 🔴 **判定は `entryActionHint` 1 か所**(着地前レビュー 🔴2)。
+       *
+       * ⚠ 直す前はここに **2 本目の「どれが動的か」**が生えていた
+       *   (`action === 'write-back-file'` の三項)。しかも `archetype: null` を
+       *   固定していたので、**情報ペインは文脈で変わる説明を永久に受け取れない** ──
+       *   2 つ目の動的な説明を足した日、**右クリックには届き、ここには届かない**。
+       * 🔑 いまの出力は 1 バイトも変わらない(`entryActionHint` は `write-back-file`
+       *   以外で `ctx` を読まない)。変わるのは**次に足したとき**である。
+       */
+      const title = entryActionHint(action, {
+        archetype: meta.archetype,
+        linkedFile: link,
+      });
       /**
        * 🔴 **居場所(`data-pkc-entry`)を必ず書き直す** ── ここを落とすと、
        * 選択を切り替えたあとのボタンが**前のノートを指したまま**になる。
