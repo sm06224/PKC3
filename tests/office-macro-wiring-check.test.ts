@@ -81,7 +81,7 @@ function pack(opts: {
 
 function run(dir: string): { code: number; out: string } {
   try {
-    return { code: 0, out: execFileSync('python3', [SCRIPT, dir], { encoding: 'utf-8' }) };
+    return { code: 0, out: execFileSync('python3', [SCRIPT, dir], { encoding: 'utf-8', stdio: 'pipe' }) };
   } catch (e) {
     const err = e as { status?: number; stdout?: string; stderr?: string };
     return { code: err.status ?? -1, out: `${err.stdout ?? ''}${err.stderr ?? ''}` };
