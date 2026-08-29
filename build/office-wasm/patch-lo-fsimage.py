@@ -210,6 +210,81 @@ BASICIDE_FILES = tuple(
 # 🔴 上流が入れ始めたら止める(二重に入れない / 直ったことに気づく)
 BASICIDE_ALREADY = "modules/BasicIDE"
 
+# 🔴 **テンプレート一式**(#591)── Impress の「Select a Template」が**空**だった。
+#
+# ## なぜ空だったか(2026-08-29 に上流を読んで確定)
+#
+# `configure.ac:3634-3639` は `--with-templates` を**渡さなかったとき**、
+# iOS / Android / **Emscripten** で `WITH_TEMPLATES` を空にする。すると
+# `extras/Package_tplpresnt.mk` の `ifneq ($(WITH_TEMPLATES),)` が偽になり、
+# `else` 側の **`gb_Package_add_empty_directory`** だけが走る ──
+# 🔑 **フォルダは作られるが中身が 0 件**。だから LO は素直に空の一覧を出していた。
+# ⚠ 「上流にテンプレートが無い」ではない(`.otp` は 23 件、`.ott`/`.otg` は 11 件在る)。
+#
+# 🔑 だから直しは 2 つで 1 組:
+#   ① 焼きの conf に `--with-templates=yes`(`configure.ac:3622` の `WITH_TEMPLATES=TRUE`
+#      が保たれる ── 実装を読んで確かめた)
+#   ② ここで wasm の詰め込み一覧へ足す(①だけでは instdir に出るだけで、配られない)
+#
+# ## ⚠ 名前を手で書かない(CLAUDE.md §8)
+#
+# 「ソースに在る」は「配られる」ではない ── **配り先を宣言しているのは `*.mk`** である。
+# だから上流の登録を**その場で読む**。手書きの表を作った時点で、上流が 1 件足した日に
+# 静かに欠ける(#225 で `sd` → `simpress`/`sdraw` の対応表を手書きして踏んだ形)。
+TEMPLATE_MKS = (
+    # (mk の path, add_files の呼び出し, 配り先の下に付く dir)
+    ("extras/Package_tplpresnt.mk", "gb_Package_add_files,extras_tplpresnt", "template/common/presnt"),
+    ("extras/Package_templates.mk", "gb_Package_add_files_with_dir,extras_templates", "template/common"),
+)
+# 🔴 上流が入れ始めたら止める(二重に入れない / 直ったことに気づく)
+TEMPLATE_ALREADY = "$(LIBO_SHARE_FOLDER)/template/"
+
+
+def template_files(core: Path) -> tuple[str, ...]:
+    """上流の登録から、配られるテンプレートの path を組む。
+
+    ⚠ **拾い漏れを「件数が合わない」で落とす** ── 正規表現の文字クラスから
+    ハイフンを落として `offimisc/Businesscard-with-logo.ott` を**取りこぼした**
+    (2026-08-29 に実際に踏んだ)。継続行(`\\` + 改行)の数と突き合わせれば、
+    次に同じ取りこぼしをしたとき**その場で止まる**。
+    """
+    out: list[str] = []
+    for rel, call, dest in TEMPLATE_MKS:
+        # ⚠ **名前で落とす** ── 素の `FileNotFoundError` を投げると、上流が file を
+        #    動かした日に**読めない traceback** だけが残る(何を探していたか分からない)
+        src = core / rel
+        if not src.is_file():
+            print(f"ERROR: 上流に {rel} が無い(登録の在り処が変わった)", file=sys.stderr)
+            raise SystemExit(1)
+        mk = src.read_text(encoding="utf-8")
+        if call not in mk:
+            print(f"ERROR: {rel} に {call} が無い(上流の形が変わった)", file=sys.stderr)
+            raise SystemExit(1)
+        seg = mk.split(call)[1].split("))")[0]
+        names = re.findall(r"^\s*([A-Za-z0-9_.\-/]+\.(?:otp|ott|otg))\s*\\", seg, re.M)
+        cont = seg.count("\\\n")
+        # ⚠ 継続行は「行き先の dir」の 1 行ぶん多い(`…,\` の行)
+        if len(names) != cont - 1:
+            print(
+                f"ERROR: {rel} の拾い漏れ ── 名前 {len(names)} 件 / 継続行 {cont} 行",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        # ⚠ **登録が空になったら止める** ── `cont - 1` との一致だけだと、上流が
+        #    一覧ごと空にした日に「0 件 == 0 件」で**静かに通る**
+        if not names:
+            print(f"ERROR: {rel} から 1 件も拾えなかった", file=sys.stderr)
+            raise SystemExit(1)
+        out += [f"$(INSTROOT)/$(LIBO_SHARE_FOLDER)/{dest}/{n}" for n in names]
+    # 🔑 **実数(23 / 11)はここで縛らない。** 縛るのは焼きの後条件のほう
+    #    (`office-wasm-build.yml` の「検品(テンプレートが配られたか)」)である ──
+    #    ⚠ ここは**上流の形**を守る所で、**配られたか**は目録を見ないと言えない
+    #    (#225「入力を守る検査と、出力が届いたかを見る検査は別物」)。
+    #    ⚠ 実数をここに書くと、上流が 1 件足しただけで焼きが止まる。
+    return tuple(out)
+
+
+
 LANG_BLOCK = """# PKC3: 日本語 UI の「言語の登録」を配る(#158)── 上流の一覧は en-US を名指しで
 # 焼いており、他言語の registry を 1 行も入れていない。configure にレバーは無い
 # (ENABLE_WASM_STRIP_LOCALES は死に変数 / --disable-wasm-strip は Emscripten で無効)。
@@ -313,6 +388,15 @@ def main() -> int:
     # 🔑 コメントを外した**実行行**で見る ── file 全体で問うと、上流が
     #    `# BasicIDE is stripped for wasm` のような散文を 1 行足しただけで
     #    焼くたびに落ちる(§1「範囲が広すぎて散文に満たされる」)。
+    # ⚠ テンプレートも同じ ── 上流が入れ始めたら、この分は要らない
+    if TEMPLATE_ALREADY in code_only:
+        print(
+            f"ERROR: 上流が既にテンプレートを入れている({TEMPLATE_ALREADY} が実行行に在る)\n"
+            "  → #591 の分は要らなくなった可能性がある。確かめてから外すこと",
+            file=sys.stderr,
+        )
+        return 1
+
     if BASICIDE_ALREADY in code_only:
         print(
             f"ERROR: 上流が既に Basic IDE を入れている({BASICIDE_ALREADY} が実行行に在る)\n"
@@ -341,7 +425,23 @@ def main() -> int:
         )
         + "\nendif # SCRIPTING ── Basic IDE(#431)\n"
     )
-    text = text.replace(ANCHOR_ALL, "\n" + basicide + "\n" + LANG_BLOCK + ANCHOR_ALL)
+    # 🔴 テンプレートは **`WITH_TEMPLATES` と同じ条件**で囲む(#591)。
+    #    ⚠ 囲まないと `--with-templates=yes` を渡さない焼きで
+    #      `gb_Deliver_deliver: file does not exist in instdir` が出て make ごと止まる
+    #      (#225 で条件つきの `.ui` を無条件に足して実際に踏んだ形)。
+    tpl_files = template_files(Path(sys.argv[1]))
+    templates = (
+        "ifneq ($(WITH_TEMPLATES),)\n"
+        + _block(
+            tpl_files,
+            "テンプレート一式(#591)── 上流の一覧に 1 件も無く、Impress の"
+            "「Select a Template」が**空のフォルダ**を出していた",
+        )
+        + "\nendif # WITH_TEMPLATES ── テンプレート(#591)\n"
+    )
+    text = text.replace(
+        ANCHOR_ALL, "\n" + basicide + "\n" + templates + "\n" + LANG_BLOCK + ANCHOR_ALL
+    )
     # .mo のブロックは all_files の**定義行の直後**へ(`+=` なので前に置くと上書きで消える)
     all_line_start = text.index(ANCHOR_ALL) + 1
     all_line_end = text.index("\n", all_line_start)
@@ -365,6 +465,19 @@ def main() -> int:
             if not (lo < at < hi):
                 print(f"ERROR: {f} が {who} のブロックの外に在る", file=sys.stderr)
                 return 1
+
+    # 🔴 テンプレートの後条件 ── **囲いの中に在る**ことまで見る(#591)。
+    #    ⚠ 囲いの外へ落ちると、`--with-templates=yes` を渡さない焼きが**make ごと止まる**
+    #      ── しかも症状は「テンプレートが無い」ではなく「ビルドが落ちた」に化ける。
+    t_open = text.index("ifneq ($(WITH_TEMPLATES),)")
+    t_close = text.index("endif # WITH_TEMPLATES ── テンプレート(#591)")
+    for f in tpl_files:
+        if text.count(f) != 1:
+            print(f"ERROR: {f} が 1 件でない", file=sys.stderr)
+            return 1
+        if not (t_open < text.index(f) < t_close):
+            print(f"ERROR: {f} が WITH_TEMPLATES の囲いの外に在る", file=sys.stderr)
+            return 1
 
     # 🔴 言語のブロックの後条件 ── 「入った」だけでなく「**正しい側に**入った」を見る。
     #    ⚠ registry(前提の側)は all_files の**前**、.mo(`+=` の側)は all_files の

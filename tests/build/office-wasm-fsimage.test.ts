@@ -145,13 +145,69 @@ function runPatcher(dir: string): Run {
   }
 }
 
+/**
+ * 🔴 **テンプレートの登録**(#591)── patcher はここを**読んで**一覧を組む。
+ *
+ * ⚠ 手書きの表を持たせない(CLAUDE.md §8「推測の表を作った時点で、読むべき物を
+ *   読んでいない合図」)。だから fixture も**上流と同じ形**にする。
+ * ⚠ **ハイフンを含む名前を必ず 1 つ入れる** ── 実装の 1 稿目は文字クラスから
+ *   ハイフンを落とし、`offimisc/Businesscard-with-logo.ott` を**取りこぼした**。
+ *   この 1 行が無いと、その取りこぼしが**緑のまま**通る。
+ */
+const PRESNT_MK = [
+  '$(eval $(call gb_Package_Package,extras_tplpresnt,$(gb_CustomTarget_workdir)/x))',
+  '',
+  'ifneq ($(WITH_TEMPLATES),)',
+  '',
+  '$(eval $(call gb_Package_add_files,extras_tplpresnt,$(LIBO_SHARE_FOLDER)/template/common/presnt,\\',
+  '\tCandy.otp \\',
+  '\tBlueprint_Plans.otp \\',
+  '))',
+  '',
+  'else',
+  '',
+  '$(eval $(call gb_Package_add_empty_directory,extras_tplpresnt,x))',
+  '',
+  'endif',
+  '',
+].join('\n');
+
+const TEMPLATES_MK = [
+  '$(eval $(call gb_Package_Package,extras_templates,$(gb_CustomTarget_workdir)/y))',
+  '',
+  '$(eval $(call gb_Package_add_files_with_dir,extras_templates,$(LIBO_SHARE_FOLDER)/template/common,\\',
+  '\tofficorr/Modern_business_letter_serif.ott \\',
+  '\toffimisc/Businesscard-with-logo.ott \\',
+  '\tdraw/bpmn.otg \\',
+  '))',
+  '',
+].join('\n');
+
+/** テンプレートの登録から、この fixture で入るはずの path(`/I` 正規化済み)。 */
+const TPL_EXPECTED = [
+  '/I/share/template/common/presnt/Candy.otp',
+  '/I/share/template/common/presnt/Blueprint_Plans.otp',
+  '/I/share/template/common/officorr/Modern_business_letter_serif.ott',
+  '/I/share/template/common/offimisc/Businesscard-with-logo.ott',
+  '/I/share/template/common/draw/bpmn.otg',
+];
+
 /** fixture を撒くだけ(patch は当てない)。 */
-function seed(source = UPSTREAM): string {
+function seed(source = UPSTREAM, extras: Record<string, string> = {}): string {
   const dir = mkdtempSync(join(tmpdir(), 'pkc3-fsimg-'));
   made.push(dir);
   mkdirSync(join(dir, 'static'), { recursive: true });
+  mkdirSync(join(dir, 'extras'), { recursive: true });
   writeFileSync(join(dir, MK), source);
   writeFileSync(join(dir, 'harness.mk'), HARNESS);
+  // ⚠ 既定では**両方**撒く。落とす test は `extras` で明示的に上書きする
+  const mks: Record<string, string> = {
+    'extras/Package_tplpresnt.mk': PRESNT_MK,
+    'extras/Package_templates.mk': TEMPLATES_MK,
+    ...extras,
+  };
+  for (const [rel, body] of Object.entries(mks))
+    if (body !== '') writeFileSync(join(dir, rel), body);
   return dir;
 }
 
@@ -440,5 +496,54 @@ describe('wasm 一式の詰め込み一覧(#135)', () => {
     expect(r.stderr).toContain('錨が 0 件');
     // ⚠ 落ちたときは書き換えていない
     expect(readFileSync(join(r.dir, MK), 'utf-8')).not.toContain('tablestyles.xml');
+  });
+
+  /**
+   * 🔴 **テンプレートが `WITH_TEMPLATES` の囲いの中に入る**(#591)。
+   *
+   * ⚠ 囲いの外へ落ちると、`--with-templates=yes` を渡さない焼きで
+   *   `gb_Deliver_deliver: file does not exist in instdir` が出て **make ごと止まる**
+   *   (#225 で条件つきの `.ui` を無条件に足して実際に踏んだ形)。
+   * 🔑 だから「入ったか」ではなく「**切ったときに消えるか**」で見る ──
+   *   囲いに入っていることは、**切って消えて初めて**証明される。
+   */
+  it('🔴 テンプレートは WITH_TEMPLATES の中に入る(切ると消える)', () => {
+    const r = apply();
+    expect(r.status, r.stderr).toBe(0);
+    const on = fileList(r.dir, { WITH_TEMPLATES: 'TRUE' });
+    for (const f of TPL_EXPECTED) expect(on, `${f} が入っていない`).toContain(f);
+    // 🔴 **対照群** ── 頼まない回は 1 件も入らない(= 囲いの中に在る証拠)
+    const off = fileList(r.dir);
+    for (const f of TPL_EXPECTED) expect(off, `${f} が囲いの外に在る`).not.toContain(f);
+  });
+
+  /**
+   * 🔴 **名前は上流の登録から採る。手書きの表を持たない**(CLAUDE.md §8)。
+   * ⚠ 実装の 1 稿目は正規表現の文字クラスからハイフンを落とし、
+   *   `offimisc/Businesscard-with-logo.ott` を**取りこぼした**(件数の突き合わせで判明)。
+   */
+  it('🔴 ハイフンを含む名前も拾う(取りこぼしを件数で落とす)', () => {
+    const r = apply();
+    expect(fileList(r.dir, { WITH_TEMPLATES: 'TRUE' })).toContain(
+      '/I/share/template/common/offimisc/Businesscard-with-logo.ott',
+    );
+  });
+
+  it('⚠ 上流の登録が消えていたら異常終了する(黙って 0 件にしない)', () => {
+    // ⚠ `''` を渡すと `seed` は**その file を撒かない**
+    const r = runPatcher(seed(UPSTREAM, { 'extras/Package_tplpresnt.mk': '' }));
+    expect(r.status, '登録が無いのに通った').not.toBe(0);
+    expect(r.stderr).toContain('extras/Package_tplpresnt.mk');
+  });
+
+  it('⚠ 上流が既にテンプレートを入れていたら異常終了する', () => {
+    const src = UPSTREAM.replace(
+      'gb_emscripten_fs_image_all_files = ',
+      'gb_emscripten_fs_image_files += $(INSTROOT)/$(LIBO_SHARE_FOLDER)/template/common/presnt/X.otp\n' +
+        'gb_emscripten_fs_image_all_files = ',
+    );
+    const r = apply(src);
+    expect(r.status, '二重に入れようとしたのに通った').not.toBe(0);
+    expect(r.stderr).toContain('上流が既にテンプレートを入れている');
   });
 });
