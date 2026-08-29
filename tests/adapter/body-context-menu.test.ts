@@ -685,3 +685,82 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
   });
 });
 
+
+/**
+ * 🔴 **メニューが出た後にノートが替わっても、別のノートに効かない**(#596 D)。
+ *
+ * ⚠ メニューが閉じるのは **押した / スクロールした / `Escape`** の 3 つだけなので、
+ * 出したまま本文が別のノートへ替わりうる。⚠ そのとき運んだ行は**別のノートに効く**
+ * ── 畳む / 編集に入る / 追記の入り先、どれも「押した物と効く先が食い違う」形になる。
+ */
+describe('メニューの身元(#596 D)', () => {
+  function rig() {
+    document.body.textContent = '';
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    const host = document.createElement('div');
+    host.setAttribute('data-pkc-field', 'detail-body');
+    host.innerHTML =
+      '<h2 data-pkc-source-line="0" id="h-a">章</h2>' +
+      '<p data-pkc-source-line="2" id="p-in">中身</p>';
+    root.append(host);
+    document.body.append(root);
+    const d = new Dispatcher();
+    bindActions(root, d, { showStatus: () => {} });
+    const meta = (lid: string): never =>
+      ({
+        lid,
+        title: lid,
+        archetype: 'text',
+        created_at: null,
+        updated_at: null,
+        entry_order: 1,
+        status: null,
+        date: null,
+        archived: 0,
+      }) as never;
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1'), meta('n2')], relations: [] });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '## 章\n\n中身\n' });
+    return {
+      root,
+      d,
+      host,
+      press: (action: string): void => {
+        root.querySelector<HTMLElement>(`${MENU} [data-pkc-action="${action}"]`)!.click();
+      },
+    };
+  }
+
+  it('🔴 ノートが替わった後に押しても、**畳まない**', () => {
+    const r = rig();
+    rightClick(r.root.querySelector('#h-a')!);
+    // ⚠ メニューは出たまま ── ここで本文が別のノートへ替わる
+    r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    r.d.dispatch({ type: 'BODY_LOADED', lid: 'n2', body: '## べつ\n' });
+    r.press('toggle-heading-fold');
+    expect(
+      (r.host.querySelector('#p-in') as HTMLElement).hidden,
+      '別のノートに替わったのに、前のノートの章を畳んだ',
+    ).toBe(false);
+  });
+
+  it('🔴 ノートが替わった後に押しても、**編集に入らない**', () => {
+    const r = rig();
+    rightClick(r.root.querySelector('#h-a')!);
+    r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    r.d.dispatch({ type: 'BODY_LOADED', lid: 'n2', body: '## べつ\n' });
+    r.press('edit-from-heading');
+    expect(r.d.getState().phase, '別のノートに替わったのに編集へ入った').toBe('ready');
+  });
+
+  it('🔴 **対照群** ── 替わっていなければ、これまでどおり効く', () => {
+    const r = rig();
+    rightClick(r.root.querySelector('#h-a')!);
+    r.press('toggle-heading-fold');
+    expect(
+      (r.host.querySelector('#p-in') as HTMLElement).hidden,
+      '同じノートなのに畳めない(身元の検査が強すぎる)',
+    ).toBe(true);
+  });
+});

@@ -49,7 +49,7 @@ import { buildVcf, isVcfFileName } from '@features/contact/vcard';
 import { isMarkdownFileName } from '@features/import/plain-markdown';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
 import { insertText, OWN_MEANING } from '@adapter/ui/render/row-swap';
-import { sectionAt } from '@features/markdown/append-target';
+import { listAppendTargets, sectionAt } from '@features/markdown/append-target';
 import { isTextScale } from '@features/text-scale';
 import { chooseTextScale } from '@adapter/ui/render/text-scale';
 import { isReadColumns } from '@features/read-columns';
@@ -1179,6 +1179,34 @@ function bodySourceLineAt(
 }
 
 /**
+ * 🔴 **追記した字が、畳んだ章の中に隠れないようにする**(#596 B)。
+ *
+ * ⚠ 見出しを畳んで目次のように読むのは**畳みのいちばん自然な使い方**だが、その状態で
+ * 追記すると、入った塊は描き直しのたびに `applyHeadingFold` が `hidden` にする ──
+ * user から見ると**書いたものが消える**(しかも「元に戻す」は追記欄の横にしか出ない)。
+ * 🔑 #514 が目次から飛ぶ前にやっていること(覆っている畳みを開く)の**追記版**である。
+ *
+ * ⚠ 入り先が「末尾」のときは**いちばん後ろの節**に入る ── そこが畳んでいれば同じく隠れる。
+ * ⚠ 印(slug)は `makeSlugCounter` で作られ、描画側の見出しの `id` と**同じ綴り**である
+ *   (`append-target.ts` の `AppendTarget` に明記)。だからここで突き合わせられる。
+ */
+function revealAppendTarget(dispatcher: Dispatcher, root: HTMLElement, slug: string): void {
+  const body = dispatcher.getState().openBody?.body ?? null;
+  const host = root.querySelector<HTMLElement>('[data-pkc-field="detail-body"]');
+  if (body === null || host === null) return;
+  const targets = listAppendTargets(body);
+  const want = slug === '' ? (targets.at(-1)?.slug ?? '') : slug;
+  if (want === '') return;
+  const heading = [...host.children].find(
+    (el) => headingLevel(el) > 0 && el.getAttribute('id') === want,
+  );
+  if (heading === undefined) return;
+  // ⚠ **自分の畳みと、外側の畳みの両方**を開く ── 片方だけだと入れ子で隠れたままになる
+  if (isHeadingFolded(heading)) toggleHeadingFold(heading);
+  revealBlock(host, heading);
+}
+
+/**
  * 🔴 **編集に入る口は 1 本**(#426 段②。着地前レビュー 🔴1)。
  *
  * ⚠ 直す前は `START_EDIT` を撃つ所が **3 か所**あり、門(飛んでいる書込を待つ /
@@ -1250,6 +1278,28 @@ function startEditAt(
  * ⚠ 綴りをあちこちに写さない(§7)── この関数と `onContextMenu` の 2 か所だけが知る。
  */
 const MENU_LINE_ATTR = 'data-pkc-menu-line';
+/**
+ * 🔴 **どのノートの行かも一緒に運ぶ**(#596 D)。
+ *
+ * ⚠ メニューが閉じるのは **押した / スクロールした / `Escape`** の 3 つだけなので、
+ *   出したまま本文が別のノートへ替わりうる(開いた直後は焦点がメニューの先頭ボタンに
+ *   移るので、鍵で移れる経路が 1 つでもあれば到達する)。
+ * ⚠ そのとき運んだ行は**別のノートに効く** ── 畳む / 編集に入る / 追記の入り先、
+ *   どれも「押した物と効く先が食い違う」いちばん静かな形になる。
+ * 🔑 **到達できるかを数え上げるより、行と一緒に身元を運ぶ** ── 受け手は
+ *   自分の身元を確かめてから動く(状態の購読を増やさないので、束ねる側の台も壊さない)。
+ */
+const MENU_LID_ATTR = 'data-pkc-menu-lid';
+
+/**
+ * メニューが出た時のノートと、いま開いているノートが同じか。
+ * ⚠ 印を持たない押し(見出しの頭のボタン等)は**素通し** ── そちらは押した物の
+ *   中に居るので、そもそも取り違えようがない。
+ */
+function menuStillFits(dispatcher: Dispatcher, target: Element): boolean {
+  const was = target.getAttribute(MENU_LID_ATTR);
+  return was === null || was === (dispatcher.getState().openBody?.lid ?? '');
+}
 
 function menuCarriedLine(target: Element): number | null {
   const raw = target.getAttribute(MENU_LINE_ATTR);
@@ -2983,6 +3033,11 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     const target =
       root.querySelector<HTMLSelectElement>('[data-pkc-field="append-target"]')?.value ?? '';
+    /**
+     * 🔑 **書いたものが見える所へ入るようにしてから撃つ**(#596 B)。
+     * ⚠ 撃った**後**では遅い ── 描き直しで `hidden` が付いてしまう。
+     */
+    revealAppendTarget(dispatcher, root, target);
     dispatcher.dispatch({
       type: 'APPEND_TO_ENTRY',
       lid,
@@ -3541,7 +3596,8 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 本文の中身は 1 バイトも変わらない(見え方だけ)ので、
    *   `BODY_WRITE_ACTIONS` には**載せない**(取り込み中でも畳んでよい)。
    */
-  'toggle-heading-fold': (_dispatcher, target) => {
+  'toggle-heading-fold': (dispatcher, target) => {
+    if (!menuStillFits(dispatcher, target)) return;
     /**
      * 🔴 **右クリックからも来る**(#426 段②)── そのとき押したボタンは
      * 器の直下に居るので、`closest` では見出しに当たらない。
@@ -3560,7 +3616,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'edit-from-heading': (dispatcher, target, services) => {
     const line = menuCarriedLine(target);
-    if (line === null) return;
+    if (line === null || !menuStillFits(dispatcher, target)) return;
     // 🔑 門は `startEditAt` **1 本**(飛んでいる書込を待つ / 別タブのロック / 返し)
     startEditAt(dispatcher, services, line);
   },
@@ -3572,7 +3628,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'append-at-heading': (dispatcher, target) => {
     const line = menuCarriedLine(target);
-    if (line === null) return;
+    if (line === null || !menuStillFits(dispatcher, target)) return;
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
     pickAppendTarget(dispatcher, root, line);
   },
@@ -6215,7 +6271,12 @@ export function bindActions(
               ...body,
             ],
         root.ownerDocument.activeElement,
-        line === null ? {} : { [MENU_LINE_ATTR]: String(line) },
+        line === null
+          ? {}
+          : {
+              [MENU_LINE_ATTR]: String(line),
+              [MENU_LID_ATTR]: dispatcher.getState().openBody?.lid ?? '',
+            },
       );
       return;
     }
