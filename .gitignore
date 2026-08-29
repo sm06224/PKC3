@@ -26,3 +26,10 @@ rust/target/
 
 # office wasm の配布一式(make-pages-bundle.mjs の出力。約 93MB、生成物なので追わない)
 dist-office-pages/
+
+# 🔴 Python の中間生成物(2026-08-29)。⚠ `5cafa46` で **13 file が誤って commit** され、
+# `.gitignore` にも無かったので、**patch script を 1 度動かすだけで作業ツリーが汚れる**
+# 状態だった(diff の雑音が本物の変更を隠す ── CLAUDE.md §9)。
+# 🔑 守りは `tests/repo-hygiene.test.ts` の「生成物を追跡しない」= 等値で 0 件を pin する。
+__pycache__/
+*.pyc

@@ -348,6 +348,43 @@ describe('wasm 一式の詰め込み一覧(#135)', () => {
    * ⚠ 上流が同じ file を入れたら**止まる** ── 二重に入れない。
    * 🔑 止まったときは「patch が要らなくなった」合図なので、消す判断ができる。
    */
+  /**
+   * 🔴 **Basic IDE の設定一式**(#431 段④)。
+   *
+   * ⚠ 上流の一覧には 1 件も無い ── wasm で scripting を切っていた時代の一覧なので、
+   * こちらが `PKC3_WASM_SCRIPTING=yes` で開けても**設定だけが付いてこない**。
+   * 実測では「ツール → マクロ」の子メニューは開き `Run Macro…` も開くのに、
+   * **`Edit Macros…` だけ無言**だった。
+   *
+   * 🔑 **門が 1 つだけ鳴る場面を 2 通り作る**(§1「N 個目だけが鳴る場面を N 通り」)──
+   * `BUILD_TYPE` に `SCRIPTING` が在る回と、無い回。
+   * ⚠ 無い回に入ってしまうと、`gb_Deliver_deliver` で **make ごと止まる**
+   * (#225 の 1 稿目で実際に 1 本潰した)ので、**0 件であることまで見る**。
+   */
+  it('\u{1f534} scripting を頼んだ回だけ Basic IDE の設定が入る（頼まない回は 0 件）', () => {
+    const before = apply();
+    expect(before.status, before.stderr).toBe(0);
+
+    const on = fileList(before.dir, { BUILD_TYPE: 'SCRIPTING WRITER CALC' });
+    const off = fileList(before.dir, { BUILD_TYPE: 'WRITER CALC' });
+    const pick = (l: string[]) => l.filter((f) => f.includes('/soffice.cfg/modules/BasicIDE/'));
+
+    // ⚠ 件数だけでなく**中身**を見る ── 同じ数だけ取り違えても件数は合う（§8）
+    expect(pick(on)).toContain('/I/share/config/soffice.cfg/modules/BasicIDE/menubar/menubar.xml');
+    expect(pick(on)).toContain(
+      '/I/share/config/soffice.cfg/modules/BasicIDE/ui/basicmacrodialog.ui',
+    );
+    expect(pick(on)).toContain('/I/share/config/soffice.cfg/modules/BasicIDE/toolbar/macrobar.xml');
+    // 登録（basctl/UIConfig_basicide.mk）の全数 = 2 + 1 + 1 + 8 + 22
+    expect(pick(on)).toHaveLength(34);
+
+    // 🔴 **対照群** ── 頼まなければ 1 件も入らない（入ると make が止まる）
+    expect(pick(off)).toEqual([]);
+
+    // ⚠ 空振り防止 ── パッチ前に既に在るなら、この test は何も測っていない
+    expect(pick(fileList(seed(), { BUILD_TYPE: 'SCRIPTING WRITER CALC' }))).toEqual([]);
+  });
+
   it('⚠ 上流が既に入れていたら異常終了する', () => {
     const r = apply();
     expect(r.status, r.stderr).toBe(0);

@@ -106,6 +106,14 @@ DEFINITION = (
     "scriptorganizer.ui",
 )
 
+# 🔑 **段④ の診断用**(合否には数えない ── 上の main() を参照)。
+# ⚠ path の頭と尻を両方留める ── 尻だけ留めると前に伸びた名前に当たる(#225、2026-08-24)。
+BASICIDE_MARKS = (
+    "/modules/BasicIDE/menubar/menubar.xml",
+    "/modules/BasicIDE/ui/basicmacrodialog.ui",
+    "/modules/BasicIDE/toolbar/macrobar.xml",
+)
+
 
 def count(blob: bytes, needle: str) -> int:
     """ASCII と UTF-16LE の**両方**で数える。
@@ -214,6 +222,25 @@ def main() -> int:
         got += 1 if c else 0
         print(f"   {'✅' if c else '❌'} {n:34} {c} 件")
     stages.append(("実体", got, len(IMPLEMENTATION)))
+
+    # ── 段④ の材料(**診断。合否には数えない**)────────────────────────
+    # 🔴 **確かめた事実の上にだけ後条件を書く**(CLAUDE.md §1、2026-08-14)。
+    #    「Basic IDE の設定を詰めれば `Edit Macros…` が開く」は**まだ仮説**である ──
+    #    焼いて開くのを見てから、ここを `stages` へ昇格させる。
+    #    ⚠ いま assert にすると、落ちたとき「実装が悪いのか、期待が間違いか」が
+    #      区別できない(3 回とも期待を疑うのが最後になった、あの形)。
+    #
+    # 実測(2026-08-29、`lo-63426ccd1d7c-run33196326615`):
+    #   ツール → マクロの子メニューは開き、`Run Macro…` は Macro Selector を出すが、
+    #   **`Edit Macros…` だけ無反応**(面 3 → 1 枚 / fault 0 件)。対照群
+    #   (`macro-run` suite)で「子メニューの項目は押せている」ことを確かめてある。
+    print("\n── 段④ の材料(診断 ── 合否には数えない)")
+    print("   🔑 Basic IDE の面が読む設定が、詰め込んだ目録に在るか(#431 段④)")
+    for n in BASICIDE_MARKS:
+        c = count(meta_b, n)
+        print(f"   {'🟢' if c else '⚠ '} {n:34} {c} 件")
+    print("   ⚠ 0 件のときに何が起きるか: LO は開けなければ SAL_WARN して return false")
+    print("      ── **無言で何も起きない**(#135 / #144 / #145 / #225 と同じ型)")
 
     print("\n── まとめ")
     for name, got_, all_ in stages:
