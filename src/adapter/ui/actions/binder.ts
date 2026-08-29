@@ -15,7 +15,12 @@
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { deliveredEntryOf, type ExtDeliveredEntry } from '@features/extension/ext-delivery';
 import { isLaunchableUrl } from '@features/launcher/tiles';
-import { revealBlock, toggleHeadingFold } from '../render/heading-fold';
+import {
+  headingAtSourceLine,
+  isHeadingFolded,
+  revealBlock,
+  toggleHeadingFold,
+} from '../render/heading-fold';
 import { quoteOnEnter } from '@features/markdown/quote-assist';
 import { renumberLists } from '@features/markdown/list-renumber';
 import { stripDialect } from '@features/markdown/strip-dialect';
@@ -119,7 +124,7 @@ import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
 import { appOpenInEdit, OpenInEditStore } from '@adapter/ui/render/open-in-edit';
 import { chordOf, findCommand, isMac, typesCharacter, KEY_COMMANDS } from '@features/keymap';
 import { paletteRows } from '@features/palette/palette-rows';
-import { bodyMenuActions, entryMenuActions } from '@features/entry-actions';
+import { bodyMenuActions, entryMenuActions, headingMenuActions } from '@features/entry-actions';
 import {
   closeContextMenu,
   contextMenuOpen,
@@ -1167,6 +1172,40 @@ function bodySourceLineAt(
   }
   const line = Number(mark.getAttribute('data-pkc-source-line'));
   return Number.isInteger(line) && line >= 0 ? line : null;
+}
+
+/**
+ * 🔴 **右クリックのメニューが運んできた「押した見出しの行」**(#426 段②)。
+ *
+ * ⚠ メニューの器は **root の直下**に出るので、押したボタンは押した物の中に居ない
+ * ── だから受け手は `closest` では**必ず外す**。🔑 開くときにボタンへ写した
+ * 行番号(`openContextMenu` の `carry`)を、ここで 1 か所だけ読む。
+ * ⚠ 綴りをあちこちに写さない(§7)── この関数と `onContextMenu` の 2 か所だけが知る。
+ */
+const MENU_LINE_ATTR = 'data-pkc-menu-line';
+
+function menuCarriedLine(target: Element): number | null {
+  const raw = target.getAttribute(MENU_LINE_ATTR);
+  if (raw === null) return null;
+  const line = Number(raw);
+  return Number.isInteger(line) && line >= 0 ? line : null;
+}
+
+/**
+ * メニューから押されたときの「その見出し」。
+ *
+ * 🔑 **押した所から辿れるならそちらが正しい**(見出しの頭の小さなボタン)。
+ * 辿れないときだけ、運んできた行から引き直す ── 🔴 順番はこの向きでなければ
+ * ならない(逆にすると、器の直下に居ない普通の押しまで行番号に頼ることになり、
+ * **描画が入れ替わった直後に別の見出しを畳む**)。
+ */
+function headingForAction(root: HTMLElement, target: Element): Element | null {
+  const direct = target.closest('h1,h2,h3,h4,h5,h6');
+  if (direct !== null) return direct;
+  const line = menuCarriedLine(target);
+  if (line === null) return null;
+  const host = root.querySelector<HTMLElement>('[data-pkc-field="detail-body"]');
+  return host === null ? null : headingAtSourceLine(host, line);
 }
 
 /**
@@ -3476,8 +3515,38 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   `BODY_WRITE_ACTIONS` には**載せない**(取り込み中でも畳んでよい)。
    */
   'toggle-heading-fold': (_dispatcher, target) => {
-    const heading = target.closest('h1,h2,h3,h4,h5,h6');
+    /**
+     * 🔴 **右クリックからも来る**(#426 段②)── そのとき押したボタンは
+     * 器の直下に居るので、`closest` では見出しに当たらない。
+     * 🔑 判定は `headingForAction` **1 本**(2 つ目の綴りを生やさない。§7)。
+     */
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const heading = headingForAction(root, target);
     if (heading !== null) toggleHeadingFold(heading);
+  },
+  /**
+   * 🔴 **その見出しから編集に入る**(#426 段②)。
+   *
+   * ⚠ 近道(`Ctrl` / `⌘` + クリック)は**そのまま残す** ── #426 の
+   * 「既存の操作を移さない。増やすだけ」。🔑 効き先も同じ `START_EDIT` である
+   * (別の入口に別の意味を持たせない)。
+   */
+  'edit-from-heading': (dispatcher, target) => {
+    const line = menuCarriedLine(target);
+    if (line === null) return;
+    dispatcher.dispatch({ type: 'START_EDIT', atLine: line });
+  },
+  /**
+   * 🔴 **その見出しを追記の入り先にする**(#426 段②)。
+   *
+   * ⚠ 断り文まで含めて `pickAppendTarget` **1 本**に任せる ── ここで
+   * 追記できるかを別に判定すると、近道(`Alt` + クリック)と食い違う日が来る。
+   */
+  'append-at-heading': (dispatcher, target) => {
+    const line = menuCarriedLine(target);
+    if (line === null) return;
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    pickAppendTarget(dispatcher, root, line);
   },
   /**
    * 🔴 **よく開くサイトをアプリ一覧に足す**(#401 ①)。
@@ -6066,11 +6135,30 @@ export function bindActions(
        *   「右ペインには出るのにメニューには出ない」が静かに生まれる(§7)。
        */
       const ob = dispatcher.getState().openBody;
+      const body = bodyMenuActions({ externalImages: ob ? externalImageUrls(ob.body).length : 0 });
+      /**
+       * 🔴 **見出しの上なら、見出しの 3 つを頭へ足す**(#426 段② の残り)。
+       *
+       * ⚠ **差し替えない** ── 見出しは本文の中に在るので、いまも本文のメニューが
+       *   出ている。差し替えると**見出しの上でだけ段組みを切り替えられなくなる**
+       *   (在る動線を 1 つ失う)。
+       * 🔑 行は `bodySourceLineAt` **1 本**で引く ── `Ctrl` / `Alt` の近道と
+       *   同じ関数なので、「近道では入れるのにメニューからは入れない」が生まれない。
+       * ⚠ 見出しが `host` の直下でないときは足さない ── 畳みの計算(`foldSpans`)が
+       *   直下の塊だけを数えているので、拾っても**押して何も起きない**。
+       */
+      const host = target.closest<HTMLElement>('[data-pkc-field="detail-body"]');
+      const h = target.closest('h1,h2,h3,h4,h5,h6');
+      const heading = h !== null && host !== null && h.parentElement === host ? h : null;
+      const line = heading === null ? null : bodySourceLineAt(dispatcher, target);
       openContextMenu(
         root,
         { x: ev.clientX, y: ev.clientY },
-        bodyMenuActions({ externalImages: ob ? externalImageUrls(ob.body).length : 0 }),
+        heading === null || line === null
+          ? body
+          : [...headingMenuActions({ folded: isHeadingFolded(heading) }), ...body],
         root.ownerDocument.activeElement,
+        line === null ? {} : { [MENU_LINE_ATTR]: String(line) },
       );
       return;
     }

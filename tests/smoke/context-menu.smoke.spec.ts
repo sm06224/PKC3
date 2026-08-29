@@ -338,3 +338,57 @@ test('🔴 本文を右クリックすると段組みを切り替えられる (#
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **見出しを右クリックすると、その章にできることが出る**(#426 段② の残り)。
+ *
+ * ## unit では原理的に届かない所
+ *
+ * この動線の肝は「**メニューの器は root の直下に出るので、押したボタンは
+ * 押した物の中に居ない**」ことである ── unit の合成 DOM でも再現はできるが、
+ * ⚠ **本物の右クリックで、本物の描画が焼いた刻印**(`data-pkc-source-line`)から
+ * 行が引けるかは、実物でしか見えない(fixture の刻印は手で書いた物である)。
+ * 🔑 だから見るのは**畳んだ結果、配下が実際に画面から消えるか**である。
+ */
+test('🔴 見出しを右クリックすると、その章を畳める (#426 段②)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill('## 第 1 章\n\nこの段落は第 1 章の中身です。\n\n## 第 2 章\n\n第 2 章の中身。\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-field="detail-body"]')).toBeVisible();
+
+  const inSection = page.locator('[data-pkc-field="detail-body"] p').first();
+  await expect(inSection, '章の中身が出ていない').toBeVisible();
+
+  // ① 見出しの上で右クリック
+  await page.locator('[data-pkc-field="detail-body"] h2').first().click({ button: 'right' });
+  const menu = page.locator(MENU);
+  await expect(menu, '見出しで右クリックしてもメニューが出ない').toBeVisible();
+  await expect(menu, '「ここから編集する」が出ていない').toContainText('ここから編集する');
+  await expect(menu, '「ここに追記する」が出ていない').toContainText('ここに追記する');
+  /**
+   * 🔴 **本文の物も残っている**(差し替えていない)── ここが落ちると、
+   * 見出しの上でだけ #522 の段組み切替が使えなくなる。
+   */
+  await expect(
+    menu.locator('button[data-pkc-action="cycle-read-columns"]'),
+    '見出しの上で段組みの切替が消えている',
+  ).toBeVisible();
+
+  // ② 畳む ── ⚠ **運べているか**の本命(押したボタンは見出しの中に居ない)
+  await menu.locator('button[data-pkc-action="toggle-heading-fold"]').click();
+  await expect(inSection, 'メニューから押しても章が畳まれない').toBeHidden();
+  await expect(page.locator(MENU), '押した後もメニューが残っている').toHaveCount(0);
+
+  // ③ もう一度出す(片道の操作にしない)
+  await page.locator('[data-pkc-field="detail-body"] h2').first().click({ button: 'right' });
+  await expect(menu, '畳んでいるのに「畳む」と書いてある').toContainText('中身を出す');
+  await menu.locator('button[data-pkc-action="toggle-heading-fold"]').click();
+  await expect(inSection, '畳んだものを出せない').toBeVisible();
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

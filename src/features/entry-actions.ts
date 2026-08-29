@@ -221,6 +221,52 @@ export function bodyMenuActions(ctx: { readonly externalImages: number }): reado
   ];
 }
 
+/**
+ * 🔴 **見出しを右クリックしたときに増える 3 つ**(#426 段② の残り)。
+ *
+ * ## ⚠ なぜ「増える」であって「差し替える」ではないか
+ *
+ * 見出しは**本文の中**に在るので、いまも右クリックすれば本文のメニューが出る
+ * (段組みを切り替える / 横に留める / 取り込む)。🔴 見出し用に**差し替える**と、
+ * 見出しの上でだけ段組みが切り替えられなくなる ── **いま在る動線を 1 つ失う**
+ * (user 裁定 2026-08-07「記法を減らすことは、user の動線を減らすことである」の向き)。
+ * 🔑 だから**頭へ足す**。押した物に近い順に並ぶので、読む順も素直である。
+ *
+ * ## 🔴 3 つとも「入口が 1 つしか無かった」物である
+ *
+ * | 出す物 | いままでの入口 | ⚠ |
+ * |---|---|---|
+ * | ここから編集する | `Ctrl`(`⌘`)+ クリック | **知らないと辿り着けない** |
+ * | ここに追記する | `Alt` + クリック | 同上 |
+ * | 中身を畳む / 出す | 見出しの頭の小さなボタン | 押し所が狭い |
+ *
+ * 🔑 近道は**残す**(増やすだけ。#426「既存の操作を移さない」)。
+ *
+ * ⚠ **「章の参照をコピー」はここに入れない** ── 見出しを指す断片の形が
+ * まだ無く、足すのは**記法を 1 つ増やす**ことなので、別に裁定を仰ぐ(#426)。
+ */
+export const HEADING_MENU_ACTIONS: readonly EntryAction[] = [
+  { action: 'edit-from-heading', label: 'ここから編集する' },
+  { action: 'append-at-heading', label: 'ここに追記する' },
+];
+
+/**
+ * 見出しの上で出す物。
+ *
+ * ⚠ **畳みの字は状態で変わる** ── 「畳む」と書いてあるのに開くのでは、
+ * 押す前に起きることが読めない(user 指示 2026-08-21「設問は画面で何が起きるかで書く」
+ * と同じ向き ── メニューの字も**起きること**で書く)。
+ */
+export function headingMenuActions(ctx: { readonly folded: boolean }): readonly EntryAction[] {
+  return [
+    ...HEADING_MENU_ACTIONS,
+    {
+      action: 'toggle-heading-fold',
+      label: ctx.folded ? 'この見出しの中身を出す' : 'この見出しの中身を畳む',
+    },
+  ];
+}
+
 /** 綴り → 字。⚠ 情報ペインはこちらを引く(並びは向こうが決める)。 */
 export const ENTRY_ACTION_LABELS: Readonly<Record<string, string>> = Object.fromEntries(
   ENTRY_MENU_ACTIONS.map((a) => [a.action, a.label]),

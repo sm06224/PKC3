@@ -43,12 +43,14 @@ export interface OpenMenu {
  * @param at 画面上の座標(右クリックした場所)
  * @param items 出す物。⚠ **空なら開かない**(空の箱を出さない)
  * @param restoreTo 閉じたときに焦点を返す先
+ * @param carry 押した物の身元(全ボタンへ属性として写す)。{@link OpenMenu} の説明を読む
  */
 export function openContextMenu(
   root: HTMLElement,
   at: { x: number; y: number },
   items: readonly MenuItem[],
   restoreTo: Element | null,
+  carry: Readonly<Record<string, string>> = {},
 ): OpenMenu | null {
   if (items.length === 0) return null;
   closeContextMenu(root);
@@ -62,6 +64,17 @@ export function openContextMenu(
     b.setAttribute('role', 'menuitem');
     b.type = 'button';
     b.textContent = it.label;
+    /**
+     * 🔴 **押した物の身元をボタンへ写す**(#426 段②)。
+     *
+     * ⚠ **メニューの器は root の直下に出る**ので、押したボタンは
+     * **押した物の中に居ない** ── `target.closest(...)` で辿る受け手は
+     * その時点で**必ず外す**。行の 6 つが無事だったのは、たまたま
+     * 「無ければ選んでいるノート」という逃げ道を持っていたからで、
+     * ⚠ **見出しにはその逃げ道が無い**(「選んでいる見出し」という状態は無い)。
+     * 🔑 だから開くときに写す ── 受け手は**自分の属性**を読めばよい。
+     */
+    for (const [k, v] of Object.entries(carry)) b.setAttribute(k, v);
     el.append(b);
   }
   root.append(el);
