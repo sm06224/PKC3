@@ -20,7 +20,9 @@ test('csv 表と html sandbox iframe が可視高さを持つ', async ({ page })
   await createEntry(page, 'text');
   const ta = page.locator('[data-pkc-field="editor-body"]');
   await ta.click();
-  await page.keyboard.type(
+  // 🔴 **一度に入れる**(#561、2026-08-29)── 下の svg と同じ理由。囲みの中身を
+  //    1 文字ずつ打つと、**打鍵の途中の書きかけ**が箱に届く。
+  await ta.fill(
     '```csv-render\n列A,列B\n1,2\n```\n\n```html\n<p style="height:120px">sandbox</p>\n```',
   );
   await clickReal(page, '[data-pkc-action="commit-edit"]');
@@ -65,7 +67,21 @@ test('🔴 svg の囲みは、html と同じ箱で同じように絵になる(#5
   await createEntry(page, 'text');
   const ta = page.locator('[data-pkc-field="editor-body"]');
   await ta.click();
-  await page.keyboard.type('```svg\n' + SVG + '\n```\n\n```html\n' + SVG + '\n```');
+  /**
+   * 🔴 **一度に入れる ── 1 文字ずつ打ってはいけない**(#561、2026-08-29)。
+   *
+   * ⚠ 分割編集の下書きは**打鍵の途中でも描かれる**ので、`width="9` まで打った
+   *   ところで手が止まると、**閉じていない属性のまま**箱(`srcdoc` の iframe)へ
+   *   届く。ブラウザは `<svg> attribute width: Expected length, "9…"` を
+   *   console へ出し、下の `expect(errors).toEqual([])` が**製品と無関係に**落ちる。
+   * 🔑 **実測で確かめた**(2026-08-29):`width="9` で 1.2 秒止めて打ち直す群は
+   *   **1 件**出し、止めずに打つ対照群は **0 件**。CI で 1 度だけ落ちたのは
+   *   この形である(⚠ 打鍵の速さは環境で変わるので、**間欠にしか見えない**)。
+   * ⚠ **お知らせの検査を緩めない** ── 緩めると「箱の中で本当に絵が壊れた」を
+   *   もう見られなくなる。直すのは**入れ方**であって、検査ではない。
+   * ⚠ 打鍵そのものの経路は `live-editor.smoke.spec.ts` が守っている。
+   */
+  await ta.fill('```svg\n' + SVG + '\n```\n\n```html\n' + SVG + '\n```');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
   const frames = page.locator('iframe[data-pkc-html-render-id]');

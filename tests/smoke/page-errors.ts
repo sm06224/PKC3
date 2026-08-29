@@ -60,3 +60,41 @@ export function firstAppFrame(stack: string | undefined | null): string {
   }
   return '';
 }
+
+/**
+ * 🔴 **console のエラーが「どの面から出たか」を 1 行だけ添える**(#561、2026-08-29)。
+ *
+ * ⚠ `page.on('console')` は**子 frame の分も上がる** ── PKC3 は html / svg の囲みを
+ *   **sandbox の iframe(`srcdoc`)**で描くので、**箱の中でブラウザが出したエラー**が
+ *   アプリのエラーと**同じ 1 行**になって見分けが付かない。
+ * 🔴 実際に踏んだ:CI で `Error: <svg> attribute width: Expected length, "9…` が出て、
+ *   赤からは**アプリが壊れたのか、囲みの中身がまだ書きかけだったのか**が読めなかった。
+ *   実測すると出所は `about:srcdoc` = **箱の中**だった(`url: 'about:srcdoc', line: 0`)。
+ * 🔑 だから **origin ではなく「どの document か」**を残す ── `about:srcdoc` なら箱の中、
+ *   `/assets/....js` ならアプリ本体である。
+ *
+ * ⚠ **port は落とす**(`firstAppFrame` と同じ理由 ── 走るたびに変わる字を残すと、
+ *   同じ赤が毎回違う字面になって前回と突き合わせられない)。
+ * ⚠ **採れなければ何も足さない**(「不明」と書かない ── 採れなかったのか、
+ *   そこが根なのかが区別できなくなる)。
+ * ⚠ 行番号は **0 のとき付けない** ── `about:srcdoc` は常に 0 で、付けると
+ *   「1 行目で起きた」と読める。
+ */
+export function consoleOrigin(
+  loc: { url?: string; lineNumber?: number } | null | undefined,
+): string {
+  const url = loc?.url;
+  if (url === undefined || url === '') return '';
+  const line = loc?.lineNumber;
+  const suffix = typeof line === 'number' && line > 0 ? `:${line}` : '';
+  // ⚠ `about:` / `blob:` / `data:` は**そのまま**が最も情報量が多い(箱の中の印である)
+  if (!/^https?:/i.test(url)) return ` @ ${url}${suffix}`;
+  let rest: string;
+  try {
+    const u = new URL(url);
+    rest = `${u.pathname}${u.search}`;
+  } catch {
+    rest = url;
+  }
+  return ` @ ${rest}${suffix}`;
+}
