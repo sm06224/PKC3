@@ -157,6 +157,25 @@ function viewPane(root: ParentNode): HTMLElement | null {
  *
  * @returns 実際に当てた高さ(px)。段組みでないときは `null`(inline の高さを外す)
  */
+/**
+ * 🔴 **最後に採れた「読む面」の採寸**(#551、2026-08-29)。
+ *
+ * ⚠ 設定画面が出ている間、読む面は `hidden` = **幅 0** である
+ *   (`center.ts` が面を排他で出し、`app.css` の `[hidden] { display: none !important }`)。
+ *   そのため設定の「いまの画面では N 段で出ています」は **常に空文字**だった
+ *   ── #526 で足した注記が、**配った日から 1 度も出ていなかった**(test も 0 件)。
+ * 🔑 **測る場所を 2 か所に作らない**(CLAUDE.md §7)── ここが既に測っているので、
+ *   その値を憶えて設定に読ませる。設定が独自に採寸すると、
+ *   「段組の判定」と「設定の表示」が**別々の規則**になる。
+ * ⚠ **採れた回だけ更新する** ── 0 を憶えると、畳んだ瞬間に嘘になる。
+ */
+let lastPaneMetrics: { width: number; fontPx: number } | null = null;
+
+/** 最後に採れた読む面の採寸(まだ 1 度も採れていなければ `null`)。 */
+export function lastReadPaneMetrics(): { width: number; fontPx: number } | null {
+  return lastPaneMetrics;
+}
+
 export function fitColumnHeight(root: ParentNode, doc: Document = document): number | null {
   /**
    * ⚠ **面は「読む面かどうか」に関わらず引く** ── 編集へ入ったときに印を
@@ -180,6 +199,14 @@ export function fitColumnHeight(root: ParentNode, doc: Document = document): num
   const before = pane.getBoundingClientRect();
   // ⚠ 採寸できない環境(happy-dom / 畳んだ面)では触らない ── 0px にすると本文が消える
   if (before.height === 0 || before.width === 0) return null;
+  /**
+   * 🔑 **採れた採寸を憶える**(#551)── 設定画面はここを読む。
+   * ⚠ 0 の回は上で返しているので、ここへ来た値は必ず有効である。
+   */
+  {
+    const fp = Number.parseFloat(getComputedStyle(host).fontSize);
+    if (Number.isFinite(fp) && fp > 0) lastPaneMetrics = { width: before.width, fontPx: fp };
+  }
   /**
    * 🔴 **2 段置けないなら段組みごと止める**(#505「狭い画面で壊れない」)。
    * ⚠ CSS の `columns` に任せると段数だけ 1 へ落ちて**横送りが残る** ──

@@ -29,7 +29,7 @@ import {
   type ReadColumns,
 } from '@features/read-columns';
 import { currentTextScale } from './text-scale';
-import { currentReadColumns } from './read-columns';
+import { currentReadColumns, lastReadPaneMetrics } from './read-columns';
 import { appEditorMode, EditorModeStore } from './editor-mode';
 import { appOpenInEdit, OpenInEditStore } from './open-in-edit';
 import { appAlarmEnabled, AlarmEnabledStore } from './alarm-enabled';
@@ -280,7 +280,7 @@ export class SettingsRenderer {
       '送りが横向きになり、マウスホイールはそのまま横へ送れます。' +
       '画面の幅が足りないときは自動で 1 段に戻ります。' +
       '表と図は段の幅まで縮むので、広く見たいときは段を減らしてください。' +
-      '編集に入っている間は 1 段に戻ります。';
+      '2 ペインで編集している間は 1 段に戻ります(その場の編集では段のままです)。';
 
     /**
      * 🔴 **段の境界線の濃さ**(#525。user 報告 2026-08-28
@@ -989,9 +989,28 @@ export class SettingsRenderer {
   private syncColumnsEffective(chosen: ReadColumns): void {
     const el = this.region.querySelector<HTMLElement>('[data-pkc-field="read-columns-effective"]');
     if (!el) return;
+    /**
+     * 🔴 **自分で採寸しない**(#551、2026-08-29 に判明)。
+     *
+     * ⚠ 1 稿目はここで `detail-body` を `getBoundingClientRect()` していたが、
+     *   **設定画面が出ている間、読む面は `hidden` = 幅 0** である
+     *   (面は排他 + `[hidden] { display: none !important }`)── つまり
+     *   **必ず下の早期 return に落ち、この注記は配った日から 1 度も出ていなかった**。
+     *   ⚠ test も 0 件だったので、誰も鳴らなかった(#526 で足した機能が丸ごと死んでいた)。
+     * 🔑 段組の機構が**既に採っている**値を読む(`lastReadPaneMetrics`)──
+     *   測る場所を 2 か所に作らない(CLAUDE.md §7)。
+     * ⚠ **生きた採寸を優先する** ── 読む面が見えている場面(将来この注記を
+     *   別の面へ出すとき)では、憶えた値より今の値のほうが正しい。
+     */
     const host = document.querySelector<HTMLElement>('[data-pkc-field="detail-body"]');
-    const width = host?.getBoundingClientRect().width ?? 0;
-    const fontPx = host === null ? 0 : Number.parseFloat(getComputedStyle(host).fontSize);
+    const live = host?.getBoundingClientRect().width ?? 0;
+    const liveFont = host === null ? 0 : Number.parseFloat(getComputedStyle(host).fontSize);
+    const remembered = lastReadPaneMetrics();
+    const width = live > 0 ? live : (remembered?.width ?? 0);
+    const fontPx =
+      live > 0 && Number.isFinite(liveFont) && liveFont > 0
+        ? liveFont
+        : (remembered?.fontPx ?? 0);
     const count = readColumnsSpec(chosen).count;
     if (width <= 0 || !Number.isFinite(fontPx) || fontPx <= 0) {
       el.textContent = '';

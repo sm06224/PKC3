@@ -213,6 +213,21 @@ test('🔴 編集中に一覧の行を押すと、理由が画面に出る', asy
 
   // 編集に入る
   await clickReal(page, '[data-pkc-action="start-edit"]');
+  /**
+   * 🔴 **編集に入ったことを待つ**(#419、2026-08-29)。
+   *
+   * ⚠ `clickReal` は**押すだけ**で、面の入れ替えは**非同期**である。待たずに次へ進むと、
+   *   **まだ編集中でない**ので一覧の行は**ふつうに開けてしまい**、断り文が出ない ──
+   *   落ちるのは製品ではなく、この test が**前提を確かめていない**からである。
+   * ⚠ 直下の `status.isVisible()` は**待たない一読**なので、前提の代わりにならない
+   *   (編集に入っていても入っていなくても false で通る)。
+   * 🔑 双子の `context-menu.smoke.spec.ts:166-169` は**同じ検算を既に持っている** ──
+   *   こちらだけ落ちていたのは、その 1 行が無かったからである。
+   */
+  await expect(
+    page.locator('[data-pkc-field="editor-body"]'),
+    '編集に入っていない(前提が崩れた)',
+  ).toBeVisible();
   const status = page.locator('[data-pkc-region="status"]');
   expect(await status.isVisible(), '編集に入った時点で既に理由が出ている').toBe(false);
 

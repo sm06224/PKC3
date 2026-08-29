@@ -1015,3 +1015,41 @@ test('🔴 段組みのまま行を開いて打てて、箱が段からはみ出
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **設定の「いまの画面では N 段で出ています」が、実際に出る**(#526 / #551)。
+ *
+ * ⚠ **この注記は、配った日から 1 度も出ていませんでした**(2026-08-29 に判明)。
+ *   `syncColumnsEffective` が `detail-body` を採寸していたが、**設定画面が出ている間
+ *   読む面は `hidden` = 幅 0** なので、必ず早期 return で空文字になっていた。
+ *   ⚠ `grep read-columns-effective` は **src の 2 行だけ、test は 0 件** ──
+ *   誰も守っていなかったので、機能が丸ごと死んでいることに誰も気づけなかった。
+ *
+ * 🔑 **unit では原理的に届きません** ── happy-dom は採寸しないので、
+ *   直す前も直した後も「幅 0 → 空文字」で同じ結果になる。
+ *   実ブラウザで**字が出ること**を見るしかない。
+ */
+test('🔴 設定に「いま何段で出ているか」が実際に書かれる (#526 / #551)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  // ⚠ **段組が成立する幅**にする(912px 未満だと「足りない」側の字になる)
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await gotoApp(page);
+  // 🔑 この file の作法で本文を入れる(自前で `fill` しない ── 面の作りが違う)
+  await writeNote(page);
+
+  // 設定で 2 段にする(`setColumns` は届くことを確かめてから値を入れる)
+  await setColumns(page, '2');
+  // ⚠ 注記を読むのは**設定画面の上**である(`setColumns` は本文へ戻らない作りではない)
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+
+  const note = page.locator('[data-pkc-field="read-columns-effective"]');
+  const text = (await note.textContent()) ?? '';
+
+  // ① 🔴 **空でない**(ここが「配った日から出ていなかった」ことの検算)
+  expect(text.trim(), '🔴 注記が空 ── 読む面が hidden なので採寸できていない').not.toBe('');
+
+  // ② 🔴 **段数が書いてある**(空でないだけなら、別の字でも通ってしまう)
+  expect(text, `段数が書かれていない(出た字: ${text})`).toMatch(/\d+\s*段/);
+
+  expect(errors, 'ページ例外が出ている').toEqual([]);
+});
