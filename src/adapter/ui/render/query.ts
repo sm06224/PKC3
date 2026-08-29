@@ -24,7 +24,7 @@
  *   同じ規約。本文は右の情報ペインと、面の切替 1 回で見られる
  */
 import type { AppState } from '@adapter/state/app-state';
-import { QUERY_LIMITS, UNSET } from '@features/query/group-by';
+import { QUERY_LIMITS, TAGS_KEY, UNSET } from '@features/query/group-by';
 
 /** 未設定の組の表示名。⚠ features は字を持たない(層規約)ので adapter が決める。 */
 const UNSET_LABEL = '(未設定)';
@@ -115,7 +115,12 @@ export class QueryRenderer {
     picker.setAttribute('data-pkc-field', 'query-key');
     picker.setAttribute('data-pkc-action', 'set-query-key');
     picker.setAttribute('aria-label', '束ねる項目');
-    picker.title = 'frontmatter に書いた項目で束ねます';
+    /**
+     * 🔴 **数えている範囲と説明を合わせる**(2026-08-29 の動線レビュー)。
+     * ⚠ 段④ から **`tags` は本文の行に書いた分も数える**ので、
+     *   「frontmatter に書いた項目で束ねます」はもう合っていない。
+     */
+    picker.title = '本文の先頭に書いた項目と、本文の行に書いたタグで束ねます';
     label.append(picker);
     const refresh = document.createElement('button');
     refresh.type = 'button';
@@ -137,7 +142,17 @@ export class QueryRenderer {
     const keys = state.queryKeys?.keys ?? [];
     const wanted = [
       { value: '', label: keys.length === 0 ? '(束ねられる項目がありません)' : '(選んでください)' },
-      ...keys.map((k) => ({ value: k.key, label: `${k.key}(${k.count} 件)` })),
+      /**
+       * 🔴 **タグだけは日本語で出す**(2026-08-29 の動線レビュー)。
+       * ⚠ アプリの他の場所は全部「タグ」と書いてあるのに、ここだけ英字の `tags` で
+       *   出ていた ── 「タグごとに何件あるか」を探している user が、
+       *   **自分のタグのことだと結び付けられない**。
+       * ⚠ 他の項目は **user が書いた綴りのまま**(勝手に訳さない)。
+       */
+      ...keys.map((k) => ({
+        value: k.key,
+        label: `${k.key === TAGS_KEY ? 'タグ' : k.key}(${k.count} 件)`,
+      })),
     ];
     // ⚠ 中身が同じなら作り直さない(開いている最中に選択肢が飛ぶのを避ける)
     const same =
@@ -195,7 +210,7 @@ export class QueryRenderer {
       empty.setAttribute('data-pkc-field', 'query-empty');
       empty.textContent =
         (state.queryKeys?.keys.length ?? 0) === 0
-          ? '本文の先頭に「---」で囲んだ項目(例: author: 佐藤)を書くと、ここで束ねられます'
+          ? '本文の先頭に「---」で囲んだ項目(例: author: 佐藤)を書くか、本文の行に「#買い物」と書くと、ここで束ねられます'
           : '上の「束ね方」で項目を選ぶと、その項目の値ごとに束ねます';
       table.append(empty);
       return;

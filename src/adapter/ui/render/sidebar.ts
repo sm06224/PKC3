@@ -47,6 +47,8 @@ export class SidebarRenderer {
   private readonly navBack: HTMLButtonElement | null;
   private readonly navForward: HTMLButtonElement | null;
   private lastHistory: AppState['selectionHistory'] | null = null;
+  /** 0 件のときの字と戻り道。⚠ 器の外に置く(行の数え方を壊さない)。 */
+  private emptyNote: HTMLElement | null = null;
   /** 種類の札(#411)。⚠ **器だけ** shell が持ち、中身はここが描く。 */
   private lastKinds: ReadonlySet<string> | null = null;
   /** 前回描いた札の姿。⚠ **数まで含めて**比べる(数だけ変わる回がある)。 */
@@ -156,6 +158,40 @@ export class SidebarRenderer {
         this.rows.delete(lid);
         this.rowMeta.delete(lid);
       }
+    }
+
+    /**
+     * 🔴 **0 件のときに、そう言って戻り道を出す**(2026-08-29 の動線レビュー)。
+     *
+     * ⚠ フォルダ・アプリ・連絡先の面には 0 件の字が出るのに、**既定の一覧タブだけ
+     *   何も出なかった** ── 行が全部消えたように見え、しかも
+     *   **自分が打っていない語**(タグの札を押した直後)が探す欄に入っているので、
+     *   戻し方が画面から読み取れない。
+     * 🔑 形は連絡先(#536 ②)と**同じ**にする ── 「絞りを外す」で、その場で戻れる。
+     * ⚠ 本当にノートが 0 件のときは出さない(外す物が無い ── dead click を作らない)。
+     */
+    this.emptyNote?.remove();
+    this.emptyNote = null;
+    if (visible.length === 0 && alive.size > 0) {
+      const box = document.createElement('div');
+      box.setAttribute('data-pkc-field', 'entry-list-empty');
+      const p = document.createElement('p');
+      p.textContent =
+        state.filterQuery === ''
+          ? '絞り込みに一致するものがありません'
+          : `「${state.filterQuery}」に一致するものがありません`;
+      box.append(p);
+      if (state.filterQuery !== '' || state.kindFilter.size > 0) {
+        const clear = document.createElement('button');
+        clear.type = 'button';
+        clear.setAttribute('data-pkc-action', 'clear-entry-filter');
+        clear.setAttribute('data-pkc-field', 'entry-list-clear-filter');
+        clear.textContent = '絞りを外す';
+        clear.title = '絞り込みを空にして、ノートを全部出します。';
+        box.append(clear);
+      }
+      this.list.after(box);
+      this.emptyNote = box;
     }
 
     let cursor: ChildNode | null = this.list.firstChild;

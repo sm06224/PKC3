@@ -221,6 +221,54 @@ describe('entries の後付け列(#277 段②)', () => {
   });
 
   /**
+   * 🔴 **旧ビルドが書き換えた行も、次の open で引き直す**(2026-08-29 の着地後レビュー)。
+   *
+   * ⚠ `/`(本番)と `/dev/` は同じ DB を触るので、**旧ビルドが既存行を保存すると
+   *   索引だけ古いまま**になる ── 旧ビルドの UPSERT は `body_tags` を更新せず、
+   *   NULL にも戻らないので `NEEDS_BACKFILL` に当たらない。
+   * ⚠ 症状は「旧ビルドで消したタグが、新ビルドの集計とフォルダに残り続ける」。
+   * 🔑 だから**最後に揃えた時刻より後に編集された行**を引き直す
+   *   (どの writer も `updated_at` は必ず動かす)。
+   */
+  it('🔴 旧ビルドが書き換えた行(索引が据え置き)も、次の open で直る', () => {
+    const db = oldDb([['o1', '# 章\n\n#請求\n']]);
+    applySchema(db); // 1 度目 ── 索引が埋まり、揃えた時刻が残る
+    expect(bodyTagsOf(db, 'o1'), '前提が崩れている').toEqual(['請求']);
+    /**
+     * 🔑 旧ビルドの保存を再現する ── **本文からタグを消し、`updated_at` は動かすが、
+     *   `body_tags` は据え置く**(旧ビルドの UPSERT はこの列を知らない)。
+     */
+    db.exec({
+      sql: `UPDATE entries SET body = '# 章\n\n本文\n', updated_at = ? WHERE lid = 'o1'`,
+      bind: [new Date(Date.now() + 60_000).toISOString()],
+    });
+    expect(bodyTagsOf(db, 'o1'), '前提が崩れている(据え置けていない)').toEqual(['請求']);
+    applySchema(db); // 2 度目
+    expect(
+      bodyTagsOf(db, 'o1'),
+      '旧ビルドが消したタグが索引に残っている(集計とフォルダに出続ける)',
+    ).toEqual([]);
+    db.close();
+  });
+
+  it('⚠ 対照群: 触っていない行は、2 度目の open で読み直さない', () => {
+    const db = oldDb([['o2', '# 章\n\n#請求\n']]);
+    applySchema(db);
+    // 🔑 値だけ手で壊す(`updated_at` は動かさない)── 引き直さないなら壊れたまま
+    db.exec({ sql: `UPDATE entries SET body_tags = '|よそ者|' WHERE lid = 'o2'` });
+    const before = Number(db.selectValue('SELECT total_changes()') ?? 0);
+    applySchema(db);
+    const after = Number(db.selectValue('SELECT total_changes()') ?? 0);
+    expect(
+      bodyTagsOf(db, 'o2'),
+      '編集していない行まで毎回読み直している(全本文を舐める)',
+    ).toEqual(['よそ者']);
+    // ⚠ 書いてよいのは版の印と時刻の 2 行だけ
+    expect(after - before, '編集していない行を書いた').toBeLessThanOrEqual(2);
+    db.close();
+  });
+
+  /**
    * 🔴 **引き直しは「変わる行だけ」書く**(2026-08-29、変異試験 M12 が SURVIVED で教えた)。
    *
    * ⚠ `entries` の UPDATE は FTS の trigger(delete + insert)を撃つので、
@@ -240,11 +288,11 @@ describe('entries の後付け列(#277 段②)', () => {
     const before = Number(db.selectValue('SELECT total_changes()') ?? 0);
     applySchema(db);
     const after = Number(db.selectValue('SELECT total_changes()') ?? 0);
-    // ⚠ 書いてよいのは**版の印 1 行だけ**(entries は 1 行も触らない)
+    // ⚠ 書いてよいのは**印の 2 行だけ**(版と、揃えた時刻)── entries は 1 行も触らない
     expect(
       after - before,
       '値が同じ行まで書いている(FTS の索引を全件 churn する)',
-    ).toBeLessThanOrEqual(1);
+    ).toBeLessThanOrEqual(2);
     // ⚠ 空振り防止 ── そもそも引き直しが走ったことを確かめる
     expect(
       db.selectValue(`SELECT v FROM settings WHERE scope = '__derive__' AND k = 'body_tags'`),

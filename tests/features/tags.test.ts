@@ -10,6 +10,8 @@ import {
   encodeTags,
   decodeTags,
   sameTag,
+  normalizeTag,
+  withTag,
   MAX_TAGS,
   MAX_TAG_CHARS,
 } from '../../src/features/flavor/tags';
@@ -86,5 +88,38 @@ describe('抽出列への符号化', () => {
 
   it('タグに区切り文字が入っていても壊れない', () => {
     expect(decodeTags(encodeTags(['a|b']))).toEqual(['a b']);
+  });
+});
+
+/**
+ * 🔴 **見えている字をそのまま打てば、同じタグになる**(2026-08-29 の動線レビュー)。
+ *
+ * ⚠ 本文では `#買い物` という札で見えるのに、情報ペインとスマートフォルダの条件では
+ *   `買い物` で出る ── そのまま `#買い物` と打つと**別のタグ**が作られていた
+ *   (集計では別の組、条件には入らない。書けてしまうので理由も出ない)。
+ */
+describe('打つ側は井桁を受け止める(#550)', () => {
+  it('🔴 「#買い物」と打っても「買い物」と同じタグになる', () => {
+    expect(normalizeTag('#買い物')).toBe('買い物');
+    expect(sameTag(normalizeTag('#買い物'), '買い物')).toBe(true);
+  });
+
+  it('⚠ 対照群: 井桁の無い字はこれまでどおり', () => {
+    expect(normalizeTag('  買い物  ')).toBe('買い物');
+  });
+
+  it('⚠ 井桁と空白が混じっても同じ', () => {
+    expect(normalizeTag('# 買い物')).toBe('買い物');
+    expect(normalizeTag('##買い物')).toBe('買い物');
+  });
+
+  it('⚠ 途中の井桁は落とさない(名前の一部である)', () => {
+    expect(normalizeTag('C#')).toBe('C#');
+    expect(normalizeTag('買い物#2')).toBe('買い物#2');
+  });
+
+  it('🔑 足すときにも効く(打った字が別のタグにならない)', () => {
+    expect(withTag(['買い物'], '#買い物', 'add'), '同じタグを 2 つ作った').toBeNull();
+    expect(withTag(['買い物'], '#買い物', 'remove'), '打った字で外せない').toEqual([]);
   });
 });

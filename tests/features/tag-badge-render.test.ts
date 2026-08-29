@@ -13,6 +13,8 @@
 import { describe, expect, it } from 'vitest';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { scanBodyTags } from '../../src/features/flavor/body-tags';
+import { bodyTags } from '../../src/features/flavor/entry-tags';
+import { sameTag } from '../../src/features/flavor/tags';
 import { bodyBelowFrontmatter } from '../../src/features/markdown/frontmatter';
 
 /**
@@ -121,11 +123,51 @@ describe('本文の中のタグ行を描く(#550 段③)', () => {
       ['csv の囲みのセル', '```csv\n#にせもの,ふつう\n```\n'],
       ['箇条書きの項目の継続行', '1. 本文\n   #買い物\n'],
       ['箇条書きの項目の継続行(空行つき)', '- 本文\n\n  #買い物\n'],
+      // ── C 群: 上限に当たる形(2026-08-29 の着地後レビュー。実測で食い違っていた) ──
+      ['41 字のタグ(上限は 40 字)', `#${'あ'.repeat(41)}\n`],
+      ['40 字ちょうどは通る(対照群)', `#${'あ'.repeat(40)}\n`],
+      [
+        '33 個目以降(1 ノートの上限は 32 個)',
+        `${Array.from({ length: 40 }, (_, i) => `#t${i}x`).join(' ')}\n`,
+      ],
+      [
+        '32 個ちょうどは全部通る(対照群)',
+        `${Array.from({ length: 32 }, (_, i) => `#u${i}x`).join(' ')}\n`,
+      ],
     ];
+    /**
+     * 🔴 **比べるのは「画面に出た札の集合」と「索引に入る集合」**(2026-08-29 に直した)。
+     *
+     * ⚠ 1 稿目は `scanBodyTags`(生の出現)と比べていたが、**索引へ入るのは
+     *   畳んだ後**である(`bodyTags` = 重複排除 + 1 ノート 32 個 + 1 名 40 字)。
+     *   だから**上限に当たる形では、生どうしが一致していても索引とはずれる** ──
+     *   実測:40 個書いたノートは札 40 枚 / 索引 32 件で、
+     *   **33 個目以降が黙って集計にもスマートフォルダにも入らなかった**。
+     * 🔑 user から見た不変量は「**画面で見えている札のとおりに集まる**」なので、
+     *   そちらを検査にする。
+     */
+    const foldShown = (names: readonly string[]): string[] => {
+      const out: string[] = [];
+      for (const n2 of names) if (!out.some((x) => sameTag(x, n2))) out.push(n2);
+      return out;
+    };
     for (const [name, body] of CASES) {
       it(name, () => {
+        expect(foldShown(renderedTags(body)), '画面の札と索引が食い違っている').toEqual(
+          bodyTags(body),
+        );
+        /**
+         * ⚠ **向きの違う 2 本目**(畳むと「画面が勝手に札を作る」型が隠れる)。
+         * 🔑 画面に出た札は、**必ず走査が拾った行のもの**である ── 上限で減ることは
+         *   あっても、走査に無い名前が画面に出てはいけない。
+         */
         const scanned = scanBodyTags(body).map((u) => u.name);
-        expect(renderedTags(body), '走査と画面が食い違っている').toEqual(scanned);
+        for (const shown of renderedTags(body)) {
+          expect(
+            scanned.some((x) => sameTag(x, shown)),
+            `走査に無い名前が画面に出ている: ${shown}`,
+          ).toBe(true);
+        }
       });
     }
 

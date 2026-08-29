@@ -294,6 +294,16 @@ export class FilerRenderer {
     const input = document.createElement('input');
     input.type = 'text';
     input.setAttribute('data-pkc-field', 'smart-cond');
+    /**
+     * 🔴 **ここにも候補を出す**(2026-08-29 の動線レビュー)。
+     *
+     * ⚠ タグを打つ欄は 3 つ在るのに、**この欄だけ候補が出ていなかった** ──
+     *   しかもここは**いちばん綴りを間違えてはいけない場所**である
+     *   (1 文字違うと 1 件も集まらず、「0 件のスマートフォルダ」として静かに残る)。
+     * 🔑 候補の口は情報ペインと**同じ 1 本**(`pkc-tag-candidates`)を使う ──
+     *   面ごとに違う候補が出るのを作らない(§7)。
+     */
+    input.setAttribute('list', 'pkc-tag-candidates');
     input.placeholder = 'タグ';
     input.setAttribute('aria-label', '集める条件にするタグ');
     const add = iconButton('smart-cond-add', '条件に足す');
