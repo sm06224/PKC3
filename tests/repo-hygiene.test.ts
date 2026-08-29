@@ -171,9 +171,20 @@ describe('リポジトリ衛生', () => {
   it('🔴 画面に書いた data-pkc-action に、受け手が全部いる', () => {
     const binder = readFileSync('src/adapter/ui/actions/binder.ts', 'utf-8');
     /**
-     * ⚠ **`ACTIONS` の表だけを見る**(file 全体を `includes` で見ない)── 説明文や
-     *   `BODY_WRITE_ACTIONS` の一覧に名前が在るだけで満たされてしまう
-     *   (CLAUDE.md「ガードは代替物で満たせない条件にする」)。
+     * ⚠ **`ACTIONS` から下だけを見る**(file 全体を `includes` で見ない)── 説明文に
+     *   名前が在るだけで満たされてしまう(CLAUDE.md「ガードは代替物で満たせない条件に」)。
+     *
+     * 🔴 **注釈の訂正**(2026-08-29、#582 の全数調査で判明)。ここは 1 稿目に
+     *   「**`ACTIONS` の表だけを見る**」と書いてあったが、**事実と違った** ──
+     *   `slice` は **file の末尾まで**取るので、表の**下**に在る別の表
+     *   (`SHORTCUT_BUTTON` / `FORMAT_OF` の **19 種**:`format-bold` `open-settings`
+     *   `toggle-sidebar` ほか)も一緒に入る。
+     * 🔑 **そして、入っていて正しい** ── それらも「押されたら何かが起きる」受け手だからで、
+     *   narrow すると `format-bold` などが「受け手がいない」と**偽陽性**になる。
+     * ⚠ つまり 1 稿目は**結果は正しく、理由が間違っていた**。理由を直しておかないと、
+     *   次に読む人が「表だけのはずなのに 197 種ある」で 30 分溶かす(実際に溶かした)。
+     * 🔑 **表の中だけ**を数えたいときは `scripts/action-outlets.mjs` の `receivers()`
+     *   (中括弧で終端を決める)を使うこと ── そちらは **183 種**を返す。
      */
     const table = binder.slice(binder.indexOf('const ACTIONS: Record<string, ActionHandler> = {'));
     const handlers = new Set([...table.matchAll(/^\s{2}'([a-z0-9-]+)':/gm)].map((m) => m[1]!));
