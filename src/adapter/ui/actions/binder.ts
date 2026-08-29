@@ -4495,6 +4495,37 @@ export function applyFormatTo(
 }
 
 /**
+ * 🔴 **caret へ書き込む道具は、押しても焦点を奪わない**(user 報告 2026-08-28)。
+ *
+ * > 「**インライン編集モードで雛形などの挿入ボタンを押しても何もおこらない /
+ * >  no-op 系動作か雛形のモーダルかなんかを描画しようとして
+ * >  インライン編集位置からフォーカスが外れてしまっている?**」
+ *
+ * 🔑 **user の見立てが当たっていた。** live の 1 面では、`mousedown` の既定動作が
+ * 入力欄の焦点を外す → `blur` が行の確定を走らせる → **`row-source` が DOM から消える**
+ * → `click` の時点で `formatTarget` が書き込む先を見つけられず、**無言で return** する。
+ * (`row-swap.ts` の `mousedown → blur(= 確定) → click` の注記と同じ順序である)
+ *
+ * ⚠ **2 列の面では起きない** ── `editor-body` は行と違って消えないので、焦点を
+ *   失っても選択位置が残る。だから「2 列で試すと動く」= **面によって違う**形だった。
+ *
+ * 🔴 **漏れた理由は「1 つずつ足していた」こと。** `format-text` と `insert-date`
+ *   (2026-08-23)は名指しで足されたが、**同じ形の `insert-entry-link` / `insert-snippet`
+ *   / `renumber-lists` は足されていなかった** ── CLAUDE.md「片側を直したら、対称の
+ *   反対側を必ず疑う」を踏んでいる。
+ * 🔑 だから**名指しの `||` をやめて集合にし**、「`formatTarget` を呼ぶ handler は
+ *   全部ここに居る」ことを `tests/adapter/caret-tools.test.ts` が**全数で**見る
+ *   ── 次に道具を足した人が、黙って漏らせない形にした。
+ */
+export const CARET_TOOLS: ReadonlySet<string> = new Set([
+  'format-text',
+  'insert-date',
+  'insert-entry-link',
+  'insert-snippet',
+  'renumber-lists',
+]);
+
+/**
  * 🔴 **記法を当てられる欄か**(#425 段②-b)。
  * ⚠ **欄の名前で見る**(面ではなく)── 2 列の本文と 1 面の行は別の面に在るが、
  *   どちらも記法を受ける。⚠ 題名は受けない(題名に太字を入れても意味が無い)。
@@ -4728,13 +4759,8 @@ export function bindActions(
    */
   const onMousedown = (ev: Event) => {
     const el = (ev.target as HTMLElement | null)?.closest<HTMLElement>('[data-pkc-action]');
-    /**
-     * ⚠ **日付の道具も同じ**(2026-08-23)── 押した瞬間に焦点が飛ぶと、
-     *   ダイアログを閉じたときに戻る先が**編集欄ではなくボタン**になり、
-     *   挿す場所(caret)が分からなくなる。
-     */
     const act = el?.getAttribute('data-pkc-action');
-    if (act === 'format-text' || act === 'insert-date') ev.preventDefault();
+    if (act !== null && act !== undefined && CARET_TOOLS.has(act)) ev.preventDefault();
   };
   const onInput = (ev: Event) => {
     if (isEditorBody(ev.target)) {
