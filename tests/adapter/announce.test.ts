@@ -26,7 +26,12 @@ import { stripComments } from '../helpers/css-blocks';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import type { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { initialState } from '../../src/adapter/state/app-state';
-import { NOTICES, NOTICE_SHOW_MAX, type Notice } from '../../src/features/notice/notice-log';
+import {
+  NOTICES,
+  NOTICE_SHOW_MAX,
+  recentNotices,
+  type Notice,
+} from '../../src/features/notice/notice-log';
 
 function memory(): NoticeStorage {
   const data: Record<string, string> = {};
@@ -773,6 +778,7 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
+    ['2026-08-29-split-open-at', 'a27dd7e0'],
     /**
      * ⚠ **この entry は main に在る = `/dev/` へは配ってある**(`a091456` / #595)。
      *   ⚠ だから「まだ配っていない」とは書けない ── 実測: `git tag --contains a091456`
@@ -804,7 +810,6 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-08-29-columns-folded-reason', '7cce7be1'],
     ['2026-08-29-in-body-tags', 'a5b7156f'],
     ['2026-08-28-help-manual-idle', 'c00593e0'],
-    ['2026-08-28-image-zoom-pan', 'bb6fd0b9'],
     // ⚠ 上限 20 を超えたので 2026-08-29 に落とした(原本は CHANGELOG)
     //['2026-08-28-uml-templates', '93cb2d2a'],
     // ⚠ 上限 20 を超えたので 2026-08-29 に落とした(原本は CHANGELOG)
@@ -976,5 +981,55 @@ describe('お知らせの文面は固定(#220-7)', () => {
         );
     }
     expect(drift).toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **登記表に在るのに、どこにも出ない entry を数える**(#596 E ── 案①)。
+ *
+ * ## なぜ要るか
+ *
+ * 登記表は **20 件**持つ(`NOTICE_KEEP_MAX`)が、帯もヘルプも **10 件**しか出さない
+ * (`recentNotices` の既定 = `NOTICE_SHOW_MAX`。⚠ **切るのはそこ 1 か所**なので、
+ * 面ごとの違いは無い)。つまり **11 件目より後ろは、アプリのどこからも読めない**。
+ *
+ * ⚠ **足した人には見えない** ── 1 件足すと、いちばん古い 1 件が**黙って窓の外へ出る**。
+ *   実際 2026-08-29 に「タグの見せ方」の知らせがそうなり、
+ *   **今日はじめて開いた user は二度と読めない**。
+ * 🔑 だから**等値で名指しする** ── 足した人は、この表を直すときに
+ *   **自分が何を押し出したか**を必ず見る(#596 E の「N 件が窓の外になります」を、
+ *   鳴らす代わりに**名前で**出す形)。
+ *
+ * ⚠ **件数だけでは足りない** ── 10 件のまま入れ替わっても数は動かない。
+ * 🔑 原本は `CHANGELOG.md` に在る(`docs-parity` が登記表 + `DROPPED` と等値で突き合わせる)
+ *   ── ここが見ているのは「**アプリから辿れるか**」であって、原本の有無ではない。
+ */
+describe('窓の外へ出たお知らせ(#596 E)', () => {
+  /** ⚠ 上から順に「古いほう」── 足したら**先頭に 1 件増える**。 */
+  const UNREACHABLE: readonly string[] = [
+    '2026-08-29-context-menu-export',
+    '2026-08-29-tag-polish',
+    '2026-08-29-tag-journey',
+    '2026-08-29-tag-parity',
+    '2026-08-29-tag-rollup',
+    '2026-08-29-contacts-clear-filter',
+    '2026-08-29-tag-badges',
+    '2026-08-29-columns-folded-reason',
+    '2026-08-29-in-body-tags',
+    '2026-08-28-help-manual-idle',
+  ];
+
+  it('🔴 どこにも出ない entry を等値で名指しする(押し出した人がその場で見る)', () => {
+    const shown = new Set(recentNotices(NOTICES).map((n) => n.id));
+    expect(
+      NOTICES.filter((n) => !shown.has(n.id)).map((n) => n.id),
+      'アプリから読めない entry が変わった ── 押し出したものを確かめて、この表を直す',
+    ).toEqual(UNREACHABLE);
+  });
+
+  it('⚠ 空振り防止 ── 出る側が本当に 10 件ある(窓そのものが壊れていない)', () => {
+    expect(recentNotices(NOTICES)).toHaveLength(NOTICE_SHOW_MAX);
+    // 🔴 **登記表 = 出る + 出ない**(数え落としが無い)
+    expect(NOTICES).toHaveLength(NOTICE_SHOW_MAX + UNREACHABLE.length);
   });
 });

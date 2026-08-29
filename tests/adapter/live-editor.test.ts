@@ -829,3 +829,71 @@ describe('文書の情報(frontmatter)の扱い(#284)', () => {
     ).toBeNull();
   });
 });
+
+/**
+ * 🔴 **2 ペイン編集でも「ここから編集する」が「ここから」になる**(#596 C)。
+ *
+ * ⚠ 直す前は `editOpenAt` を読むのが **1 面(ライブ)の描画だけ**で、2 ペインの側は
+ *   **1 度も読んでいなかった** ── 300 行のノートの真ん中の見出しを右クリックして
+ *   押しても、開くのは**原文の先頭**だった(`Ctrl`+クリックにも前から在った穴)。
+ * 🔑 **画面に出ている字は契約**である ──「ここから」と書いてある以上、守られていないと嘘になる。
+ */
+describe('2 ペイン編集の「ここから」(#596 C)', () => {
+  /** ⚠ 行を数え直さず、**その位置から始まる字**で確かめる。 */
+  const head = (ta: HTMLTextAreaElement): string =>
+    ta.value.slice(ta.selectionStart).split('\n')[0] ?? '';
+
+  function open2(body: string, atLine: number | null): HTMLTextAreaElement {
+    setLive(false);
+    const root = document.createElement('div');
+    document.body.append(root);
+    const detail = new DetailRenderer(buildShell(root).detail, null, new MarkdownClient(), () => {});
+    let s = reduce(initialState, {
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('a')],
+      relations: [],
+    }).state;
+    s = reduce(s, { type: 'SELECT_ENTRY', lid: 'a' }).state;
+    s = reduce(s, { type: 'BODY_LOADED', lid: 'a', body }).state;
+    s = reduce(s, { type: 'START_EDIT', ...(atLine === null ? {} : { atLine }) }).state;
+    detail.render(s);
+    const ta = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="editor-body"]');
+    expect(ta, '2 ペインの原文欄が出ていない(台の空振り)').not.toBeNull();
+    return ta!;
+  }
+
+  const LONG = ['# 題', '', '前置き', '', '## 決定事項', '', '中身', '', '## つぎ', ''].join('\n');
+
+  it('🔴 押した見出しの行から開く', () => {
+    // ⚠ `editOpenAt` は **frontmatter を剥がした側**の行(ここでは frontmatter 無し)
+    expect(head(open2(LONG, 4)), '押した見出しの行から開いていない').toBe('## 決定事項');
+  });
+
+  /**
+   * 🔴 **対照群** ── 頼まなければ飛ばない(何でも飛ぶ作りではない)。
+   *
+   * ⚠ **`selectionStart === 0` で見ない**(1 稿目はそう書いて落ちた)──
+   *   `.value` を代入した後の既定は**器が決める**(happy-dom は末尾に置く。実測 29)。
+   *   🔑 器の既定を pin すると、**製品ではなく happy-dom を検める** test になる。
+   *   だから見るのは「**狙った行へ行っていない**」ことにする。
+   */
+  it('🔴 **対照群** ── 行を渡さなければ、その見出しへは飛ばない', () => {
+    expect(head(open2(LONG, null)), '行を渡していないのに見出しへ飛んだ').not.toBe('## 決定事項');
+  });
+
+  /**
+   * 🔴 **frontmatter のぶんずらす**(#596 B で踏んだのと同じ罠)。
+   * ⚠ `editOpenAt` は剥がした側の行、`ta.value` は**剥がしていない本文** ──
+   *   ずらさないと、frontmatter を持つノートで**その行数だけ手前**が開く。
+   */
+  it('🔴 frontmatter があってもずれない', () => {
+    const body = ['---', 'tags: [会議]', '---', ...LONG.split('\n')].join('\n');
+    expect(head(open2(body, 4)), 'frontmatter のぶんずれている').toBe('## 決定事項');
+  });
+
+  it('⚠ 行が本文より後ろでも、編集には入れる(最後の行の先頭へ丸める)', () => {
+    const ta = open2(LONG, 999);
+    expect(ta.selectionStart, '丸めずに投げた / 範囲外へ出た').toBeLessThanOrEqual(ta.value.length);
+  });
+});

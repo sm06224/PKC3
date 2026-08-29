@@ -19,6 +19,7 @@ import {
   parseFrontmatter,
   extractVars,
 } from '@features/markdown/frontmatter';
+import { lineStartOffset, scrollTopForLine } from '@features/markdown/line-offset';
 import { hydrateMermaid, type MermaidScope } from './mermaid-hydrate';
 import { markViewBig } from './view-big';
 import { hydrateChart } from './chart-raster';
@@ -1140,6 +1141,20 @@ export class DetailRenderer {
     preview.setAttribute('data-pkc-prose', '');
     split.append(ta, preview);
     this.region.append(split);
+    /**
+     * 🔴 **2 ペインでも「ここから」を守る**(#596 C)。
+     *
+     * ⚠ 直す前は `editOpenAt` を読むのが **1 列編集の描画だけ**で、ここは
+     *   **1 度も読んでいなかった** ── 300 行のノートの真ん中の見出しを
+     *   右クリックして「ここから編集する」を押しても、開くのは**原文の先頭**だった。
+     *   ⚠ `Ctrl`+クリックにも前から在った穴である。
+     * 🔑 **画面に出ている字は契約** ──「ここから」と書いてある以上、守る。
+     *
+     * ⚠ **座標の基準が違う**(#596 B で踏んだのと同じ罠):`editOpenAt` は
+     *   **frontmatter を剥がした側**の行だが、`ta.value` は**剥がしていない本文**である。
+     *   ずらさないと、frontmatter を持つノートで**その行数だけ手前**が開く。
+     */
+    if (state.editOpenAt !== null) this.openSplitAt(ta, open.body, state.editOpenAt);
 
     /**
      * 🔑 **描くのはワーカー**(P8 段⑨。user 指示 2026-08-03「基本的に重い処理は
@@ -1231,6 +1246,32 @@ export class DetailRenderer {
    * ⚠ 原文の正本は `AppState.openBody.body`。ここが持つのは「窓」で、
    * 継ぎ足した本文は `onBodyChange` で外へ返す(dispatch はしない ── 層規約)。
    */
+  /**
+   * 原文の欄を、押した行から開く(#596 C)。
+   *
+   * ⚠ **焦点は当てない** ── ここは描画の途中で、焦点の持ち主は別に決まっている
+   *   (当てると、編集に入った直後の `Escape` の行き先が変わる)。
+   *   🔑 caret を置いて**送る**だけにする ── user が欄を押した瞬間からそこに居る。
+   * ⚠ 折り返しのぶんは見積もれないので、**1/3 上**に置いて画面の中に残す
+   *   ({@link scrollTopForLine} の注記)。
+   */
+  private openSplitAt(ta: HTMLTextAreaElement, body: string, at: number): void {
+    // ⚠ frontmatter のぶんを足して、`ta.value` と同じ基準へ揃える
+    const line = at + frontmatterLineCount(body);
+    const off = lineStartOffset(ta.value, line);
+    // ⚠ 範囲外は `setSelectionRange` が丸める(組み直しで短くなっていても落ちない)
+    ta.setSelectionRange(off, off);
+    const lh = Number.parseFloat(
+      ta.ownerDocument.defaultView?.getComputedStyle(ta).lineHeight ?? '',
+    );
+    ta.scrollTop = scrollTopForLine(
+      line,
+      // ⚠ `normal` は数にならない ── 既定を渡す(本文の行送りに近い値)
+      Number.isFinite(lh) && lh > 0 ? lh : 20,
+      ta.clientHeight,
+    );
+  }
+
   private renderLiveEditor(
     initialBody: string,
     /** ⚠ 読む面と同じ値を渡す(`renderEditor` が 1 か所で決める)。 */
