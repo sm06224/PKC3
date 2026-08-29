@@ -79,7 +79,30 @@ export class ContactsRenderer {
     note.setAttribute('data-pkc-field', 'contacts-note');
     note.textContent = this.noteText(state, cards.length);
     this.host.append(note);
-    if (cards.length === 0) return;
+    if (cards.length === 0) {
+      /**
+       * 🔴 **行き止まりを作らない**(#536 ②)。
+       *
+       * ⚠ 一覧タブで「会議」と打ったまま連絡先タブへ来ると、当たりが 0 件になり
+       *   **「vCard で書き出す」ボタンごと画面から消えていた** ── user は
+       *   「書き出しはどこへ行った」と探すことになる。
+       * 🔑 **押せないボタンを置くのではなく、進める道を出す** ── 行き止まりに
+       *   説明を貼るだけだと、user は**自分で一覧タブへ戻って絞りを消す**必要がある
+       *   (CLAUDE.md「片道の操作を作らない」「置かれ方が問題なら、置き直す」)。
+       * ⚠ 絞り込みが**無い**ときは出さない ── そのときは本当に連絡先が 0 件で、
+       *   外す物が無い(押しても何も起きないボタン = dead click を作らない)。
+       */
+      if (query !== '') {
+        const clear = document.createElement('button');
+        clear.type = 'button';
+        clear.setAttribute('data-pkc-action', 'clear-entry-filter');
+        clear.setAttribute('data-pkc-field', 'contacts-clear-filter');
+        clear.textContent = '絞りを外す';
+        clear.title = '一覧の絞り込みを空にして、連絡先を全部出します。';
+        this.host.append(clear);
+      }
+      return;
+    }
 
     const list = document.createElement('ul');
     list.setAttribute('data-pkc-field', 'contacts-list');

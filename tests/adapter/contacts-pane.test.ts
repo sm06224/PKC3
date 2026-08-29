@@ -359,3 +359,40 @@ describe('vCard の書き出し(#278 段③)', () => {
     expect(btn.textContent, '絞ったのに全件の数を言っている').toBe('vCard で書き出す(1 件)');
   });
 });
+
+/**
+ * 🔴 **絞り込みが残っていても、行き止まりにしない**(#536 ②)。
+ *
+ * ⚠ 一覧タブで「会議」と打ったまま連絡先タブへ来ると当たりが 0 件になり、
+ *   **「vCard で書き出す」ボタンごと画面から消えて**いた ── user は
+ *   「書き出しはどこへ行った」と探すことになる。
+ * 🔑 **押せないボタンではなく、進める道を出す**(CLAUDE.md「片道の操作を作らない」)。
+ */
+describe('🔴 絞り込みで 0 件のとき、外す道を出す(#536 ②)', () => {
+  const cards = [card('a', '山田太郎', ['090-1111-2222'])];
+  const clear = (host: HTMLElement): HTMLElement | null =>
+    host.querySelector('[data-pkc-field="contacts-clear-filter"]');
+
+  it('🔴 絞り込みで 0 件なら「絞りを外す」が出る', () => {
+    const host = paint({ contactScan: scanOf(cards), filterQuery: '当たらない語' });
+    // ⚠ **前提** ── 本当に 0 件である(1 件でも出ていたら以下は何も見ていない)
+    expect(rows(host), '前提が崩れた(絞り込みが効いていない)').toHaveLength(0);
+    const btn = clear(host);
+    expect(btn, '行き止まりのまま(進める道が無い)').not.toBeNull();
+    expect(btn!.getAttribute('data-pkc-action'), '受け手が繋がっていない').toBe(
+      'clear-entry-filter',
+    );
+  });
+
+  it('⚠ 絞り込みが無くて 0 件のときは出さない(押しても何も起きないボタンを作らない)', () => {
+    const host = paint({ contactScan: scanOf([]), filterQuery: '' });
+    expect(rows(host), '前提が崩れた').toHaveLength(0);
+    expect(clear(host), '外す物が無いのにボタンが出た').toBeNull();
+  });
+
+  it('⚠ 当たりが在るときは出さない(いつも出ている、で緑になっていない)', () => {
+    const host = paint({ contactScan: scanOf(cards), filterQuery: '山田' });
+    expect(rows(host), '前提が崩れた').toHaveLength(1);
+    expect(clear(host), '当たっているのに「絞りを外す」が出た').toBeNull();
+  });
+});

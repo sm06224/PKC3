@@ -74,6 +74,8 @@ export class BrowseRouter {
    * 使い回しているので、覚えないとタブを行き来しただけで位置が混ざる。
    */
   private readonly scroll: ScrollMemory;
+  /** 探す欄(面の外に在る ── どの面でも見えている)。 */
+  private readonly filterInput: HTMLInputElement | null;
   private last: BrowseMode;
 
   /**
@@ -109,6 +111,14 @@ export class BrowseRouter {
     //    初期が一覧でないときは**ここで隠す**(隠し忘れると 2 面が重なって出る)
     if (initial !== 'list') this.panes.list.hidden = true;
     this.scroll = new ScrollMemory(host);
+    /**
+     * 🔴 **探す欄は面の外にある**(2026-08-29、#536 ②)。⚠ 面の中の renderer に
+     *   同期を持たせると、**その面を開いていない間は古い字が残る** ──
+     *   すぐ下の `kindBar`(#478)と同じ理由である。
+     */
+    this.filterInput = sidebar.querySelector<HTMLInputElement>(
+      '[data-pkc-field="entry-filter"]',
+    );
     this.list = new SidebarRenderer(sidebar);
     this.kindBar = new KindBarRenderer(sidebar);
     this.filer = new FilerRenderer(this.panes.filer);
@@ -135,6 +145,12 @@ export class BrowseRouter {
     // 🔴 **札の帯は面に関係なく描く**(#478)── 面の中の renderer に持たせると、
     //    その面を開いていない間は**古い DOM のまま**になり、押しても嘘をつく。
     this.kindBar.render(state, mode);
+    /**
+     * 🔴 **絞りの字も面に関係なく合わせる**(#536 ②)。
+     * ⚠ 打鍵中は `value === filterQuery` なので書き戻しは起きない(caret を壊さない)。
+     */
+    if (this.filterInput !== null && this.filterInput.value !== state.filterQuery)
+      this.filterInput.value = state.filterQuery;
     // ⚠ 非 active な面には render を呼ばない(裏で毎 state 仕事をしない)
     if (mode === 'list') this.list.render(state);
     else if (mode === 'filer') this.filer.render(state);

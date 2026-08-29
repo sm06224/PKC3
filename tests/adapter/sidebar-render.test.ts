@@ -171,3 +171,31 @@ describe('sidebar differential rendering (P3-2 DoD)', () => {
     expect(after[1]).toBe(before[2]);
   });
 });
+
+/**
+ * 🔴 **探す欄は「面の外」にある ── どの面でも state に合う**(#536 ②、2026-08-29)。
+ *
+ * ⚠ 同期は 1 稿目まで `SidebarRenderer` が持っていたが、あれは
+ *   **一覧の面を開いているときしか走らない**(`browse.ts` が
+ *   `mode === 'list'` のときだけ呼ぶ)── そのため
+ *   **フォルダ / 連絡先 / 予定のタブで絞りが変わると、欄だけ古い字が残っていた**
+ *   (タグの札を押した直後がその形)。
+ * 🔑 #478「札の帯は面に関係なく描く」と同じ理由で、`browse.ts` へ移した。
+ */
+describe('🔴 探す欄は、どの面でも state に合う(#536 ②)', () => {
+  const field = (root: HTMLElement): HTMLInputElement =>
+    root.querySelector<HTMLInputElement>('[data-pkc-field="entry-filter"]')!;
+
+  it('一覧以外の面でも、絞りを変えると欄が追いつく', async () => {
+    const { BrowseRouter } = await import('../../src/adapter/ui/render/browse');
+    const root = document.createElement('div');
+    const regions = buildShell(root);
+    const b = new BrowseRouter(regions.sidebar, regions.sidebar, 'contacts', () => new Date());
+    b.render({ ...initialState, filterQuery: '会議' } as AppState, 'contacts');
+    expect(field(root).value, '一覧以外の面で欄が追いつかない').toBe('会議');
+
+    // 🔑 **外したときも追いつく**(片道にしない)
+    b.render({ ...initialState, filterQuery: '' } as AppState, 'contacts');
+    expect(field(root).value, '外したのに古い字が残っている').toBe('');
+  });
+});
