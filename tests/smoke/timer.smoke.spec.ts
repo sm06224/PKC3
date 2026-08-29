@@ -14,6 +14,69 @@ import { withStateOnFail } from './state-dump';
  *    ⚠ unit は DOM を持たないので、この欠陥は原理的に見えない
  * ③ **押した結果が本文の面に出るまで**(reducer → 書込 → 描画の全段)
  */
+/**
+ * 🔴 **狭い窓でも「止める」に手が届く**(2026-08-29。#582 の全数調査で見つけた欠陥②)。
+ *
+ * ## なぜ実ブラウザで見るのか
+ *
+ * ⚠ 直す前は `@media (max-width: 1100px)` / `(max-width: 720px)` の
+ *   `grid-template-areas` に **`timers` の行が無かった** ── 区画名の無い
+ *   `grid-area` は**暗黙のトラックへ落ちる**ので、帯が**右端の細い列**へ化けた。
+ *   実測では **480px で x=528**(窓の外)に出ており、**止める口が画面に無い**。
+ * 🔴 `app.css` の当のコメントが破れていた:「**止める口が消えると、マイクが回り続ける**」。
+ *
+ * ## ⚠ 字面の検査では届かない
+ *
+ * `announce.test.ts` は CSS の区画の**名前**を見るが、
+ * 「**押せる所に在るか**」は**版面を組んでみないと分からない**
+ * (CLAUDE.md「描画と状態は別物」── 視覚を持つ feature は実ブラウザで 1 件見る)。
+ *
+ * 🔑 観測点は **`elementFromPoint`** にする ── `toBeVisible()` は
+ *   「窓の外に出ている」も「他の帯と重なって押せない」も**通してしまう**。
+ */
+test('🔴 狭い窓でも、止める口が画面の中に在って押せる (#582)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 480, height: 800 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+
+  await clickReal(page, '[data-pkc-field="start-timer"]');
+  const bar = page.locator('[data-pkc-region="timer-bar"]');
+  await expect(bar, '押しても帯が出ない').toBeVisible();
+
+  const stop = bar.locator('[data-pkc-action="stop-timer"]');
+  const box = (await stop.boundingBox())!;
+  expect(box, '止める口の位置が採れない').not.toBeNull();
+
+  // ① 🔴 **窓の中に在る**(直す前は x=528 / 窓幅 480 = 外に出ていた)
+  const vw = page.viewportSize()!.width;
+  expect(box.x, `止める口が窓の外に出ている(x=${box.x} / 窓幅 ${vw})`).toBeGreaterThanOrEqual(0);
+  expect(
+    box.x + box.width,
+    `止める口が窓からはみ出している(右端 ${box.x + box.width} / 窓幅 ${vw})`,
+  ).toBeLessThanOrEqual(vw);
+
+  // ② 🔴 **その点を押すと本当に「止める」に当たる**(重なって覆われていない)
+  const hit = await page.evaluate(
+    ({ x, y }: { x: number; y: number }) => {
+      const el = document.elementFromPoint(x, y);
+      return el?.closest('[data-pkc-action]')?.getAttribute('data-pkc-action') ?? null;
+    },
+    { x: box.x + box.width / 2, y: box.y + box.height / 2 },
+  );
+  expect(hit, '止める口の上に別の物が重なっている(押しても止まらない)').toBe('stop-timer');
+
+  // ③ 🔴 **本文の下に在る**(横の暗黙の列へ化けていない)
+  const detail = (await page.locator('[data-pkc-region="detail"]').boundingBox())!;
+  expect(box.y, '帯が本文の下ではなく横に出ている').toBeGreaterThanOrEqual(detail.y);
+
+  // ④ ⚠ **押して実際に止まる**(位置だけ直っても、押せなければ意味がない)
+  await clickReal(page, '[data-pkc-action="stop-timer"]');
+  await expect(bar, '押しても止まらない').toBeHidden();
+
+  expect(errors, '例外が出た').toEqual([]);
+});
+
 test('🔴 計って止めると、開いていたノートの本文に作業時間が入る (#279)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });

@@ -22,7 +22,7 @@ import {
   type NoticeStorage,
 } from '../../src/adapter/platform/notice-store';
 import { buildShell } from '../../src/adapter/ui/render/shell';
-import { codeOnly } from '../helpers/code-only';
+import { stripComments } from '../helpers/css-blocks';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import type { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { initialState } from '../../src/adapter/state/app-state';
@@ -507,20 +507,23 @@ describe('🔴 帯の置き場', () => {
      *   (畳んだ版面から帯の行を落とすと、user は保存エラーを見られなくなる)。
      */
     /**
-     * \u26a0 **注釈を先に落とす**(2026-08-29)。ここは「行が**在る**」ことの主張なので、
-     *   CLAUDE.md \u00a71 の作法どおり**コメントは検査を満たしてしまう** ──
+     * ⚠ **注釈を先に落とす**(2026-08-29)。ここは「行が**在る**」ことの主張なので、
+     *   CLAUDE.md §1 の作法どおり**コメントは検査を満たしてしまう** ──
      *   区画の行を消しても、同じ名前を書いた注釈が残っていれば 1 行と数えられ、
      *   **緑のまま帯が版面から落ちる**。
+     * ⚠ 剥ぐのは **`stripComments`**(`css-blocks.ts`)── CSS の正本はこちらである。
+     *   `codeOnly` は JS/TS 用で、`url(//cdn/x.png)` のような `:` の付かない `//` を
+     *   **行末まで削る**(`code-only.ts` の docstring がそう戒めている)。
      */
-    const layouts = [...codeOnly(css).matchAll(/grid-template-areas:\s*([^;]+);/g)].map(
+    const layouts = [...stripComments(css).matchAll(/grid-template-areas:\s*([^;]+);/g)].map(
       (m) => m[1] ?? '',
     );
     expect(layouts, '版面を全部読めていない(空振り)').toHaveLength(6);
     /**
-     * \U0001f511 **名前は手で並べず、いちばん広い版面から引く** ── 1 行を丸ごと
+     * 🔑 **名前は手で並べず、いちばん広い版面から引く** ── 1 行を丸ごと
      *   占めている区画(全部のセルが同じ名前)が「全幅の帯」である。
-     * \u26a0 手で並べると、帯を足した人がここを広げ忘れる(実際 #413 で 3 本ぶん忘れた)。
-     * \u26a0 数は**実数で pin する** ── 引き方が壊れて 0 件になったら気づけない。
+     * ⚠ 手で並べると、帯を足した人がここを広げ忘れる(実際 #413 で 3 本ぶん忘れた)。
+     * ⚠ 数は**実数で pin する** ── 引き方が壊れて 0 件になったら気づけない。
      */
     const rowsOf = (areas: string): string[][] =>
       areas
@@ -534,21 +537,82 @@ describe('🔴 帯の置き場', () => {
       FULL_WIDTH_AREAS,
       '全幅の帯を引けていない(空振り)。帯を増減したらこの数も直す',
     ).toEqual(['capture', 'timers', 'alarms', 'announce', 'update', 'notices', 'status']);
+    /**
+     * 🔴 **宣言した名前が、どれも基準の版面に出ていること**(2026-08-29 の着地前レビュー)。
+     *
+     * ⚠ 上の `FULL_WIDTH_AREAS` は**基準の版面から**引くので、
+     *   「**基準にも書き忘れた**」型の事故(= #413 の一段深い形)には鳴らない。
+     * 🔑 だから**宣言の側**(`grid-area: x`)と突き合わせる ── 除外リストを
+     *   持たずに済む形にしてある(手で並べた瞬間、また広げ忘れる)。
+     */
+    const declared = new Set(
+      [...stripComments(css).matchAll(/grid-area:\s*([a-z-]+)\s*;/g)].map((m) => m[1]!),
+    );
+    const inBase = new Set(rowsOf(layouts[0] ?? '').flat());
+    expect(declared.size, '`grid-area:` を引けていない(空振り)').toBeGreaterThan(7);
+    expect(
+      [...declared].filter((n) => !inBase.has(n)).sort(),
+      '`grid-area:` で宣言したのに、基準の版面に置いていない区画がある(暗黙のトラックへ落ちる)',
+    ).toEqual([]);
+    /**
+     * 🔴 **伸びるのは本文の行だけ**(2026-08-29 の着地前レビュー、変異 M3)。
+     *
+     * ⚠ 上のセル検査は「どの行がどの区画か」しか見ないので、**行の並びを
+     *   入れ替える**変異が生き延びた ── `grid-template-rows` の `1fr` が
+     *   `detail` ではなく `capture` に当たると、**狭い窓で本文が中身の高さまで縮み**、
+     *   帯だけが伸びる。⚠ **区画の名前は 1 つも変わらない**ので、名前を見る検査は全部緑。
+     * 🔑 **`1fr` の位置と、`detail` を含む行の位置が一致すること**を見る。
+     * ⚠ `grid-template-rows` を書いていない版面は継承なので対象外 ── ただし
+     *   「1 つも見つからない」= 引き方が壊れた、なので**数を実数で pin する**。
+     */
+    const withRows = [
+      ...stripComments(css).matchAll(
+        /grid-template-areas:\s*([^;]+);\s*grid-template-rows:\s*([^;]+);/g,
+      ),
+    ];
+    expect(withRows.length, '行の丈を宣言している版面を引けていない(空振り)').toBe(1);
+    for (const m of withRows) {
+      const rows = rowsOf(m[1] ?? '');
+      const tracks = (m[2] ?? '').trim().split(/\s+/);
+      expect(tracks.length, '丈の数と区画の行数が合っていない').toBe(rows.length);
+      expect(
+        tracks.indexOf('1fr'),
+        '伸びる行が本文(detail)ではない ── 狭い窓で本文が縮み、帯だけが伸びる',
+      ).toBe(rows.findIndex((cells) => cells.includes('detail')));
+    }
     for (const areas of layouts) {
       /**
-       * \U0001f534 **全幅の帯は 7 本ある**(2026-08-29 に 3 → 7 へ広げた)。
+       * 🔴 **全幅の帯は 7 本ある**(2026-08-29 に 3 → 7 へ広げた)。
        *
-       * \u26a0 直す前は `announce` / `update` / `notices` の **3 つしか見ておらず**、
+       * ⚠ 直す前は `announce` / `update` / `notices` の **3 つしか見ておらず**、
        *   #413 で足した **`capture` / `timers` / `alarms` が誰にも守られていなかった** ──
        *   実際に 1100px 以下と 720px 以下の版面から 3 行とも落ちており、
        *   帯は暗黙の列へ化けて**互いに重なり、480px では画面の外**に出ていた
        *   (`app.css:287` の「止める口が消えると、マイクが回り続ける」が破れていた)。
-       * \U0001f511 **`grid-area:` を宣言している名前を数え上げて、その全部を見る**
+       * 🔑 **`grid-area:` を宣言している名前を数え上げて、その全部を見る**
        *   ── 名前を手で並べると、次に足した人がまたここを広げ忘れる。
        */
+      /**
+       * 🔴 **「行が在る」ではなく「行を丸ごと占めている」まで見る**
+       *   (2026-08-29 の着地前レビューが 3 つの変異で突いた)。
+       *
+       * ⚠ 直す前は `l.includes(name)` で**セルを 1 つも読んでいなかった**ので、
+       *   次がどれも**緑のまま**通った:
+       *   ① `'capture capture xx'` → 収録の帯が**画面幅の 2/3** になる
+       *   ② `'alarms gripl gripl'` → 非矩形になり**版面が丸ごと無効**になる
+       *   ③ 行の**並び**を入れ替える → `1fr` が本文以外に当たる(下の別 assert で見る)
+       * 🔑 セル数と中身の両方を等値で見る ── 「その名前だけが、器の端から端まで」。
+       */
+      const grid = rowsOf(areas);
+      const cols = grid[0]?.length ?? 0;
+      expect(cols, `版面のセルを読めていない(空振り)`).toBeGreaterThan(0);
       for (const name of FULL_WIDTH_AREAS) {
-        const rows = areas.split('\n').filter((l) => l.includes(name));
+        const rows = grid.filter((cells) => cells.includes(name));
         expect(rows, `${name} の行が 1 つではない版面がある`).toHaveLength(1);
+        expect(
+          rows[0],
+          `${name} が全幅を占めていない版面がある(帯が器の一部にしか出ない)`,
+        ).toEqual(Array.from({ length: cols }, () => name));
       }
     }
   });

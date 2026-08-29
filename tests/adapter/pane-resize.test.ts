@@ -184,11 +184,27 @@ describe('🔴 狭い版面でも戻し口が残る(2026-08-29)', () => {
      * ⚠ **「消す規則が在るか」ではなく「何を消しているか」を見る** ──
      *   面を名指ししない `pane-grip` が 1 つでも `display: none` なら、
      *   追記欄の帯も巻き添えになる。
+     *
+     * 🔴 **選択子を丸ごと一致で名指ししない**(2026-08-29 の着地前レビュー W-1)。
+     * ⚠ 直す前は `blocksFor(narrow, "[data-pkc-region='pane-grip']")` = **完全一致**だけを
+     *   見ていたので、**別の綴りで書いた規則**が素通りした ── 実際に
+     *   `[data-pkc-region='center'] [data-pkc-region='pane-grip'] { display: none }` を
+     *   足す変異が**緑のまま通り、直した片道が戻る**(追記欄の帯は `center` の子である)。
+     * 🔑 だから **`pane-grip` に当たる規則を全部集め、`display: none` を持つものが
+     *   1 つ残らず「横向きを除く」印を持っていること**を見る。
      */
-    const naked = blocksFor(narrow, "[data-pkc-region='pane-grip']");
+    const KEEP = "[data-pkc-axis='y']";
+    const hiding = [...stripComments(narrow).matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .flatMap((m) =>
+        m[1]!.split(',').map((sel) => ({ sel: sel.trim().replace(/\s+/g, ' '), body: m[2]! })),
+      )
+      .filter((r) => r.sel.includes("[data-pkc-region='pane-grip']"))
+      .filter((r) => decl('display', 'none').test(r.body));
+    // 空振り防止 ── 帯を畳む規則が 1 つも無いなら、引き方が壊れている
+    expect(hiding.length, '帯を畳む規則を引けていない(空振り)').toBeGreaterThan(0);
     expect(
-      naked.filter((b) => decl('display', 'none').test(b)),
-      '面を名指ししないまま帯を消している(追記欄の戻し口が巻き添えになる)',
+      hiding.filter((r) => !r.sel.includes(KEEP)).map((r) => r.sel),
+      '横向きを除かずに帯を消している規則がある(追記欄の戻し口が巻き添えになる)',
     ).toEqual([]);
   });
 
@@ -202,7 +218,7 @@ describe('🔴 狭い版面でも戻し口が残る(2026-08-29)', () => {
     expect(scoped.length, '左右の帯を畳む規則が無い').toBeGreaterThan(0);
     expect(
       scoped.some((b) => decl('display', 'none').test(b)),
-      '左右の帯が畳まれていない',
+      '左右の帯が畳まれていない ── 縦に折れて境目が無いので、こちらは畳んでよい',
     ).toBe(true);
   });
 });

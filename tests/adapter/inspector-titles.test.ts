@@ -1,6 +1,6 @@
 /** @vitest-environment happy-dom */
 /**
- * 🔴 **情報ペインのボタンは、全部「何が起きるか」を持っている**(2026-08-29)。
+ * 🔴 **情報ペインの「操作の帯」のボタンは、全部「何が起きるか」を持っている**(2026-08-29)。
  *
  * ## なぜ要るか
  *
@@ -39,13 +39,48 @@ beforeEach(() => {
   document.body.textContent = '';
 });
 
-/** 操作のボタンだけを見る(行や欄は `data-pkc-action` を持っていても対象外)。 */
+/**
+ * 🔴 **見るのは「操作の帯」だけ**(2026-08-29 の着地前レビュー R-3)。
+ *
+ * ⚠ 1 稿目は面の全ボタンを拾い、題名も「全部のボタンが」と書いていたが、
+ *   **主張が製品について偽**だった ── 関係の相手 / 参照元 / 集まり先に出る
+ *   `select-entry` のボタンは `title` を持たない(`inspector.ts:473 / :539 / :564`)。
+ *   ⚠ しかも台が `relations: []` / `backlinks: null` なので、**その 3 経路を
+ *   1 度も通っていなかった**(CLAUDE.md §2「弱いのではなく走っていない」)── 
+ *   つまり守っていたのは「この台が出す分は持っている」だけである。
+ * 🔑 **主張と観測範囲を揃える** ── あちらは**ノートの題名がそのまま字**なので、
+ *   説明が無くても押した結果が読める(押す = そのノートへ行く)。
+ *   説明が要るのは**動詞が短い操作の帯**のほうである。
+ */
 function actionButtons(root: HTMLElement): HTMLButtonElement[] {
-  return [...root.querySelectorAll<HTMLButtonElement>('[data-pkc-region="inspector"] button[data-pkc-action]')];
+  return [
+    ...root.querySelectorAll<HTMLButtonElement>(
+      '[data-pkc-field="inspector-actions"] button[data-pkc-action]',
+    ),
+  ];
 }
 
-describe('情報ペインのボタンの説明(2026-08-29)', () => {
-  it('🔴 全部のボタンが「何が起きるか」を持っている(空の tooltip が無い)', () => {
+/**
+ * 🔴 **操作の帯に出るボタン**(等値で pin する ── W-4)。
+ * ⚠ 台は**フォルダ**にしてある ── `export-folder` は種類で畳まれるので、
+ *   ノートで描くとその 1 つを**一度も見ない**(未実行の経路になる)。
+ */
+const EXPECTED_ACTIONS: readonly string[] = [
+  'copy-entry-ref',
+  'adopt-external-images',
+  'export-entry',
+  'export-entry-html',
+  'export-folder',
+  'export-entry-docx',
+  'export-entry-pptx',
+  'export-entry-pdf',
+  'copy-plain-markdown',
+  'show-history',
+  'delete-entry',
+];
+
+describe('情報ペインの操作の帯の説明(2026-08-29)', () => {
+  it('🔴 操作の帯のボタンが全部「何が起きるか」を持っている(空の tooltip が無い)', () => {
     const root = document.createElement('div');
     document.body.append(root);
     const inspector = new InspectorRenderer(buildShell(root).inspector);
@@ -60,8 +95,16 @@ describe('情報ペインのボタンの説明(2026-08-29)', () => {
     inspector.render(reduce(s, { type: 'SELECT_ENTRY', lid: 'n1' }).state);
 
     const btns = actionButtons(root);
-    // 空振り防止 ── 引けていないのに緑にならない
-    expect(btns.length, 'ボタンを引けていない(空振り)').toBeGreaterThanOrEqual(12);
+    /**
+     * 🔴 **等値で pin する**(2026-08-29 の着地前レビュー W-4)。
+     * ⚠ 1 稿目は `toBeGreaterThanOrEqual(12)` で、docstring は「増やした人が気づく」と
+     *   書いていたが、**床は増加も、3 つ消えたことも検出しない**。
+     * ⚠ 増減したらこの数を直すこと ── 直さないと落ちる = 忘れられない。
+     */
+    expect(
+      btns.map((b) => b.getAttribute('data-pkc-action')),
+      '操作の帯のボタンが変わった(増減したらこの表を直す)',
+    ).toEqual(EXPECTED_ACTIONS);
     const naked = btns
       .filter((b) => b.title.trim() === '')
       .map((b) => b.getAttribute('data-pkc-action'));
