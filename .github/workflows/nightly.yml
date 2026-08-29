@@ -83,6 +83,18 @@ jobs:
         id: smoke_headless_shell
         if: ${{ !cancelled() && steps.setup_ok.outputs.ok == '1' }}
         run: npm run test:smoke
+      # 🔴 **重い検査は夜だけ**(#528、2026-08-29)。マニュアルは 22 種を
+      #    「そのまま書けます」と言うのに、焼けることを見ていたのは 5 種だけだった。
+      #    ⚠ 22 枚を焼くのは重いので PR gate には入れない(smoke lane は 2026-08-28 に
+      #    10 分の門へ実際にぶつかっている)。**名前が揃っているか**は unit が PR gate で見る。
+      #    ⚠ guard は隣と同じ ── 1 つ落ちても止めないが、**仕込みが落ちた晩は走らない**
+      #    (走らせても「確かめていない」を「落ちた」と読ませるだけである)
+      - name: 図の全数 ── マニュアルの 22 種が焼けるか
+        id: smoke_diagrams_all
+        if: ${{ !cancelled() && steps.setup_ok.outputs.ok == '1' }}
+        env:
+          PKC3_HEAVY: '1'
+        run: npm run test:smoke -- tests/smoke/mermaid-all.smoke.spec.ts
       - name: Visual smoke (フル chromium ── 実挙動が違う箇所を突き合わせる)
         id: smoke_chromium
         if: ${{ !cancelled() && steps.setup_ok.outputs.ok == '1' }}

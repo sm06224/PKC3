@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
+import { MERMAID_FORMS } from '../fixtures/mermaid-forms';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -530,13 +531,26 @@ test('🔴 本文のチェック欄は、保存できる面でだけ押せる (#
  * しか言わない。**`<img>` が blob で、実際に画素を持っている**ところまで見る
  * (`naturalWidth > 0`)。焼けなければ `failed` になるので、5 形とも別々に落ちる。
  */
-const UML_FORMS: readonly (readonly [string, string])[] = [
-  ['classDiagram', 'classDiagram\n  class 帳簿 {\n    +記帳()\n  }\n  帳簿 <|-- 出納帳'],
-  ['sequenceDiagram', 'sequenceDiagram\n  受付->>台帳: 登録\n  台帳-->>受付: 控え'],
-  ['stateDiagram-v2', 'stateDiagram-v2\n  [*] --> 下書き\n  下書き --> 公開\n  公開 --> [*]'],
-  ['erDiagram', 'erDiagram\n  ノート ||--o{ 添付 : もつ'],
-  ['journey', 'journey\n  title 買い物\n  section 出かける\n    財布を持つ: 5: 私\n    店へ行く: 3: 私'],
-];
+/**
+ * 🔴 **字は 1 か所から引く**(2026-08-29、#528)── 書き出しは
+ * `tests/fixtures/mermaid-forms.ts` に 22 種ぶん在る。⚠ ここで書き直すと、
+ * 全数の側(nightly)と**違う物を測る**ことになる(§7)。
+ * 🔑 PR gate で回すのは**この 5 種だけ** ── 22 枚は重い(夜に回す)。
+ */
+const PICKED = ['classDiagram', 'sequenceDiagram', 'stateDiagram-v2', 'erDiagram', 'journey'];
+const UML_FORMS: readonly (readonly [string, string])[] = PICKED.map((name) => {
+  const f = MERMAID_FORMS.find((x) => x.name === name);
+  /**
+   * ⚠ **これは test に守られていない**(変異試験 D5 が SURVIVED で教えた)──
+   *   fixture から 1 件消しても、先に
+   *   `tests/features/mermaid-forms-parity.test.ts` が落ちるので、
+   *   ここへは到達しない。
+   * 🔑 買っているのは**そのときの読みやすさ**だけである ── 黙って 4 種で走るのではなく、
+   *   消えた名前を言って止まる。「これが無いと壊れる」とは**書かない**。
+   */
+  if (!f) throw new Error(`fixture に ${name} が無い(mermaid-forms.ts から消えた)`);
+  return [f.name, f.src] as const;
+});
 
 test('🔴 UML 4 種と journey が、どれも PNG まで焼ける (#528)', async ({ page }) => {
   const errors = collectPageErrors(page);

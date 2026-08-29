@@ -660,7 +660,7 @@ CommonMark に加えて、次が使えます。
 | `quadrantChart` | 4 象限 |
 | `xychart-beta` | 折れ線 / 棒 |
 | `radar-beta` | レーダー |
-| `sankey-beta` | 流量図(サンキー) |
+| `sankey-beta` | 流量図(サンキー)⚠ **名前は英数字で書いてください**(日本語だと描けません) |
 | `treemap-beta` | 面積で見る内訳 |
 | `block-beta` | ブロック図 |
 | `packet-beta` | ビット配置図 |
