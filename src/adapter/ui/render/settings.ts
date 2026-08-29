@@ -20,7 +20,9 @@ import { currentPageFormat } from './page-format';
 import { EDITOR_MODES } from '@features/editor-mode';
 import { TEXT_SCALES } from '@features/text-scale';
 import { COLUMN_RULES } from '@features/column-rule';
+import { TAG_BADGES } from '@features/tag-badge';
 import { currentColumnRule } from './column-rule';
+import { currentTagBadge } from './tag-badge';
 import {
   effectiveColumns,
   minWidthForColumns,
@@ -327,6 +329,38 @@ export class SettingsRenderer {
     dl.append(ct, cd);
     // ⚠ 段組みの**すぐ下**に置く(効くのは段組みのときだけなので、離すと結び付かない)
     dl.append(rt, rd);
+
+    /**
+     * 🔴 **本文の中のタグの見せ方**(#550 段③。user 要望「タグはバッジ化して表示が必要」)。
+     *
+     * ⚠ 既定は**札**(頼まれたことをやる)。ただし**その場で「文字のまま」へ戻せる**
+     *   ── user 指示 2026-08-28「正直変更はユーザーに委ねて欲しい」/
+     *   「**user が選べる形にできるなら、そちらを先に出す**」(#504 と同じ作法)。
+     * ⚠ タグごとに**色**を振る案は出していない ── user 指示 2026-08-03
+     *   「地は無彩色、色は情報にだけ使う」を覆す提案になるため。
+     */
+    const gt = document.createElement('dt');
+    gt.textContent = '本文のタグの見せ方';
+    const gd = document.createElement('dd');
+    const gselect = document.createElement('select');
+    gselect.setAttribute('data-pkc-action', 'set-tag-badge');
+    gselect.setAttribute('data-pkc-field', 'tag-badge-select');
+    gselect.setAttribute('aria-label', '本文のタグの見せ方');
+    for (const c of TAG_BADGES) {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = c.label;
+      gselect.append(opt);
+    }
+    gd.append(gselect);
+    const gnote = document.createElement('p');
+    gnote.setAttribute('data-pkc-field', 'settings-note');
+    gnote.textContent =
+      '本文の行に「#買い物 #家事」と書いた行の見え方です。押すとその場で効きます。' +
+      '札にすると本文の文章と見分けやすくなります。' +
+      '本文そのものは変わりません(書いた字はそのままです)。';
+    gd.append(gnote);
+    dl.append(gt, gd);
 
     /**
      * ✏️ **編集の仕方**(#104 第 2 弾。user 裁定 2026-08-08「既定でONかつ
@@ -977,6 +1011,12 @@ export class SettingsRenderer {
     );
     const curRule = currentColumnRule(document.documentElement);
     if (rule && rule.value !== curRule) rule.value = curRule;
+    // ⚠ タグの見せ方も**同じ 1 か所**で映す(理由は上と同じ)
+    const badge = this.region.querySelector<HTMLSelectElement>(
+      '[data-pkc-field="tag-badge-select"]',
+    );
+    const curBadge = currentTagBadge(document.documentElement);
+    if (badge && badge.value !== curBadge) badge.value = curBadge;
   }
 
   /**

@@ -47,7 +47,9 @@ import { isTextScale } from '@features/text-scale';
 import { chooseTextScale } from '@adapter/ui/render/text-scale';
 import { isReadColumns } from '@features/read-columns';
 import { isColumnRule } from '@features/column-rule';
+import { isTagBadge } from '@features/tag-badge';
 import { chooseColumnRule } from '@adapter/ui/render/column-rule';
+import { chooseTagBadge } from '@adapter/ui/render/tag-badge';
 import { chooseReadColumns, cycleReadColumns } from '@adapter/ui/render/read-columns';
 import { appendModeOf } from '@adapter/ui/render/append-box';
 import { frontmatterLineCount } from '@features/markdown/frontmatter';
@@ -4074,6 +4076,18 @@ const ACTIONS: Record<string, ActionHandler> = {
         ? target.value
         : target.getAttribute('data-pkc-column-rule-value');
     if (v !== null && isColumnRule(v)) chooseColumnRule(document.documentElement, v);
+  },
+  /**
+   * 🔴 **本文の中のタグの見せ方**(#550 段③)。⚠ user が「バッジ化して表示が必要」と
+   * 言っているので既定は札だが、**その場で「文字のまま」へ戻せる** ── 決めるのは user
+   * (user 指示 2026-08-28「正直変更はユーザーに委ねて欲しい」)。
+   */
+  'set-tag-badge': (_dispatcher, target) => {
+    const v =
+      target instanceof HTMLSelectElement
+        ? target.value
+        : target.getAttribute('data-pkc-tag-badge-value');
+    if (v !== null && isTagBadge(v)) chooseTagBadge(document.documentElement, v);
   },
   'set-flag': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
