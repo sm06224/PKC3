@@ -119,7 +119,7 @@ import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
 import { appOpenInEdit, OpenInEditStore } from '@adapter/ui/render/open-in-edit';
 import { chordOf, findCommand, isMac, typesCharacter, KEY_COMMANDS } from '@features/keymap';
 import { paletteRows } from '@features/palette/palette-rows';
-import { ENTRY_MENU_ACTIONS } from '@features/entry-actions';
+import { BODY_MENU_ACTIONS, ENTRY_MENU_ACTIONS } from '@features/entry-actions';
 import {
   closeContextMenu,
   contextMenuOpen,
@@ -3918,6 +3918,16 @@ const ACTIONS: Record<string, ActionHandler> = {
   'undo-import': (_dispatcher, _target, services) => {
     services.undoImport?.();
   },
+  /**
+   * 🔴 **段組みを回す**(#522 / #426 段②)。
+   *
+   * 🔑 **`Alt+C` と同じ関数を呼ぶだけ**(`cycleReadColumns`)── 段数の決め方も、
+   *   効かない幅のときの断り文も、あちらが 1 か所で持っている。
+   * ⚠ ここで数え直すと、鍵と右クリックで**別の段数**が出る(CLAUDE.md §7)。
+   */
+  'cycle-read-columns': (_dispatcher, _target, services, root) => {
+    cycleReadColumns(root, (text) => services.showStatus?.(text));
+  },
   'open-tile': (_dispatcher, target, services) => {
     const lid = target.closest('[data-pkc-tile]')?.getAttribute('data-pkc-tile');
     if (lid) services.openTile?.(lid);
@@ -5917,8 +5927,45 @@ export function bindActions(
 
     const row = target.closest('[data-pkc-entry]');
     const lid = row?.getAttribute('data-pkc-entry') ?? null;
-    // ⚠ 段① は**行の上だけ** ── 地の上では既定を出す(奪って何も出さない、を作らない)
-    if (row === null || lid === null || lid === '') return;
+    if (row === null || lid === null || lid === '') {
+      /**
+       * 🔴 **本文の上でも受ける**(#426 段② / #522)。
+       *
+       * ⚠ 段① は**行の上だけ**だったので、本文を右クリックしても何も出なかった。
+       *   user 指示 2026-08-28(#522)は「段組の切替を**コンテキストメニュー**に
+       *   用意したい」なので、**読んでいる面**で受ける。
+       *
+       * 🔑 **出す物は行と別の一覧**(`BODY_MENU_ACTIONS`)── 行を押したのは
+       *   「このノートに何かする」、本文を押したのは「**いま読んでいる見え方を
+       *   変える**」である。行の一覧をそのまま出すと、押した物と効く先が食い違う。
+       *
+       * 🔴 **「読んでいる本文」に限る**(実物の DOM を読んで直した)。
+       * ⚠ `[data-pkc-region="detail"]` は**中央の器**であって、その中には
+       *   設定 / フラグ / ヘルプ / 集計 / 2 ペインの面も**同居している**
+       *   (`center.ts` の `pane()` が `data-pkc-view-pane` で並べる)。
+       *   面で切ると、**設定画面を右クリックしても段組みのメニューが出る**。
+       * 🔑 だから見るのは**本文そのもの**(`detail-body`)── そこに書かれた字を
+       *   読んでいる人にだけ、読み方を変える口を出す。
+       * ⚠ 地の上・他の面ではこれまでどおり出さない(奪って何も出さない場所を増やさない)。
+       *
+       * ⚠ **ライブエディタ(`editor-live`)には出さない** ── そこも段組みは
+       *   効く(`columnScroller` が両方を見る)が、あそこは **contenteditable** なので、
+       *   奪うと**綴りの候補・切り取り・貼り付け**が消える(CLAUDE.md §10)。
+       *   🔑 編集中の近道は `Alt+C` が持っている ── **代わりが在るので奪わない**。
+       * ⚠ **編集中は出ない** ── そのとき本文は `textarea` で、上の除外が当たる。
+       * ⚠ リンク・図・選択範囲も同じく上の除外が当たる ── 段① が置いた門は、
+       *   **ここで初めて効き始める**(段① の test がそう予告している)。
+       */
+      if (target.closest('[data-pkc-field="detail-body"]') === null) return;
+      ev.preventDefault();
+      openContextMenu(
+        root,
+        { x: ev.clientX, y: ev.clientY },
+        BODY_MENU_ACTIONS,
+        root.ownerDocument.activeElement,
+      );
+      return;
+    }
 
     ev.preventDefault();
     // 🔴 選べなければ出さない(理由は `selectEntryOrExplain` が画面へ出している)
