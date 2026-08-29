@@ -103,11 +103,32 @@ test('🔴 本文を右クリックして横に留めると、2 つの枠が並�
   expect(two[1]!.x, '2 つ目は右に在る').toBeGreaterThan(two[0]!.x);
 
   // ② 🔴 枠ごとに送れる ── 留めた枠だけ送って、主が動かないこと
+  /**
+   * 🔴 **押す前に「送れる高さが在る」ことを待つ**(2026-08-29、CI で落ちて分かった)。
+   *
+   * ⚠ 1 稿目は `scrollTop = 200` を代入して、その後で「0 より大きい」を見ていた ──
+   * つまり**前提を assert せずに仮定していた**。本文は worker 越しに描かれるので、
+   * 器に中身が入る前に代入すると `scrollTop` は**黙って 0 に丸められる**。
+   * ⚠ 手元では 4 走とも緑で、CI(shard 2、同じ headless_shell)でだけ落ちた ──
+   * CI のほうが速いので、押す瞬間が描画より前へ寄ったのだと読む
+   * (CLAUDE.md 2026-08-27「CI は 25〜35% 速い。疑うのは待ち不足ではなく順番」)。
+   * 🔑 これは test を緩めているのではない ── **仮定していた前提を、待って確かめる**
+   * 形にしただけで、成り立たなければここで落ちる。
+   */
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => {
+          const el = document.querySelector('[data-pkc-split-lid]');
+          return el === null ? 0 : el.scrollHeight - el.clientHeight;
+        }),
+      { message: '留めた枠に送れる高さが無い(本文がまだ入っていない)' },
+    )
+    .toBeGreaterThan(0);
   await page.locator('[data-pkc-split-lid]').first().evaluate((el) => {
     (el as HTMLElement).scrollTop = 200;
   });
   const after = await frames(page);
-  // ⚠ 前提: 送れる長さが在る(0 のままなら②は空振り)
   expect(after[1]!.top, '留めた枠は送れた').toBeGreaterThan(0);
   expect(after[0]!.top, '主の枠は動いていない').toBe(0);
 
