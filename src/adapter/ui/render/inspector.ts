@@ -47,7 +47,8 @@ import { iconButton } from './icons';
 //    ここで独自に parse していた頃は、一覧に日付を出すときに規則が 2 つに増えた
 import { formatStoredDate } from '@features/datetime/stored-date';
 // 居場所の解決は `features/relation/tree` が正本(ファイラの帯・パンくずと共有)
-import { readTags } from '@features/flavor/tags';
+import { readTags, sameTag } from '@features/flavor/tags';
+import { collectEntryTags } from '@features/flavor/entry-tags';
 import { extractHeadingsFromMarkdown } from '@features/markdown/markdown-toc';
 import { frontmatterProblem } from '@features/markdown/frontmatter';
 import { externalImageUrls } from '@features/asset/inline-url-adopt';
@@ -374,6 +375,57 @@ export class InspectorRenderer {
             chip.append(off);
           }
           tagBox.append(chip);
+        }
+      }
+    }
+    /**
+     * 🔴 **本文の中に書いたタグを、どの見出しで付いたかと一緒に出す**(#550)。
+     *
+     * ⚠ **行ごと畳む**(1 つも無いノートでは出さない)── 右の列は混んでいるので、
+     *   常設すると「空の行」を毎回読ませることになる(#500)。
+     * ⚠ 本文が読めていないとき(一覧を眺めているだけ)も出さない ── 上の
+     *   「タグ」の行と同じ作法で、**知らないことを「無し」と言わない**。
+     */
+    const bodyTagBox = this.rows.get('inspector-body-tags');
+    if (bodyTagBox) {
+      const view = tagBody === null ? null : collectEntryTags(tagBody);
+      bodyTagBox.textContent = '';
+      const dt = bodyTagBox.previousElementSibling;
+      const empty = view === null || view.inBody.length === 0;
+      bodyTagBox.hidden = empty;
+      if (dt instanceof HTMLElement) dt.hidden = empty;
+      if (view !== null && !empty) {
+        for (const name of view.inBody) {
+          const chip = document.createElement('span');
+          chip.setAttribute('data-pkc-field', 'inspector-body-tag');
+          chip.setAttribute('data-pkc-tag', name);
+          const find = document.createElement('button');
+          find.type = 'button';
+          find.setAttribute('data-pkc-action', 'filter-by-tag');
+          find.setAttribute('data-pkc-tag', name);
+          find.setAttribute('data-pkc-field', 'inspector-body-tag-find');
+          find.title = `「${name}」を含むノートを探します`;
+          find.textContent = name;
+          chip.append(find);
+          /**
+           * 🔑 **どこに書いたか**を添える(user 要件の当のもの)。
+           * ⚠ 同じタグを何度書いても**場所は畳んで**出す ── 同じ見出しで 3 回書いた
+           *   ものを 3 回並べると、読む方が数える羽目になる。
+           * ⚠ 見出しの外に書いたものは「(見出しの外)」と言う ── 空欄にすると
+           *   「場所が採れなかった」のか「見出しが無い」のかが読めない。
+           */
+          const where = [
+            ...new Set(
+              view.uses
+                .filter((u) => sameTag(u.name, name))
+                .map((u) => (u.heading.length === 0 ? '見出しの外' : u.heading.join(' › '))),
+            ),
+          ];
+          const at = document.createElement('span');
+          at.setAttribute('data-pkc-field', 'inspector-body-tag-where');
+          at.textContent = `(${where.join(' / ')})`;
+          chip.append(at);
+          bodyTagBox.append(chip);
         }
       }
     }
@@ -916,6 +968,23 @@ export class InspectorRenderer {
      * `setRow`(textContent 差し替え)ではなく専用の器を持つ。
      */
     row('タグ', 'inspector-tags');
+    /**
+     * 🔴 **本文の中に書いたタグ**(#550。user 要望 2026-08-29
+     *   「**どの見出しや記事でタグがついたのかわかりやすくすべき**」)。
+     *
+     * ⚠ 上の「タグ」の行は **frontmatter だけ**を出す ── だから本文に
+     *   `#買い物` と書いて札が出ているノートでも、右の列は「**無し**」と言っていた
+     *   (2026-08-29 の着地後レビューで確定。**札の隣で嘘をつく**形)。
+     * 🔑 だから**別の行**にする ── user の要件は「2 種類を分ける」ことなので、
+     *   混ぜて 1 つにしない。
+     * ⚠ **「外す」は付けない** ── 外す口(`untag-entry`)は frontmatter しか
+     *   書き換えないので、本文のタグに付けると
+     *   「**0 件に外しました / 1 件は付いていませんでした**」という嘘の帯が出る。
+     *   本文に書いたものは本文で消す(そのために**どこに書いたか**を出す)。
+     * ⚠ 見出しへ**飛ばさない** ── 同じ見出しが 2 つあるノートで**別の場所へ飛ぶ**。
+     *   見出しで飛ぶのは、すぐ上の「目次」の行が担っている。
+     */
+    row('本文のタグ', 'inspector-body-tags');
     /**
      * 🔴 **タグを「その場で打つ」**(#494。user 指摘 2026-08-27
      * 「**直感的にここにタグを打つ!って感じの動作じゃなくて yamlfrontmatter なのは

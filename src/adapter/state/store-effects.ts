@@ -42,6 +42,8 @@ import type {
 } from '@features/query/group-by';
 // ⚠ 「未設定」の綴りは features 側の 1 か所(`''`)── ここで書き写さない(§7)
 import { TAGS_KEY, UNSET as QUERY_UNSET } from '@features/query/group-by';
+import { collectEntryTags } from '@features/flavor/entry-tags';
+import { sameTag } from '@features/flavor/tags';
 import type { TaskScan } from '@features/schedule/task-cards';
 import type { ContactScan } from '@features/contact/contact-card';
 import type { SnippetScan } from '@features/snippet/snippet-table';
@@ -1215,6 +1217,17 @@ export function connectStoreEffects(
           let wrote = 0;
           let skipped = 0;
           let failed = 0;
+          /**
+           * 🔴 **本文にも同じタグが書いてあると、外しても外れない**
+           *   (2026-08-29 の動線レビューで確定)。
+           *
+           * ⚠ 外す口が触るのは **frontmatter だけ**なので、本文の行に
+           *   `#買い物` と書いてあるノートは、外した後も**そのタグを持ったまま**である
+           *   (索引は文書タグと本文中タグを合わせて当てる)。
+           * ⚠ それを黙っていると「外したのに、まだそのタグで集まる」に見える ──
+           *   user は**壊れている**と読む。🔑 だから**数えて言う**。
+           */
+          let stillInBody = 0;
           for (const t of ev.targets) {
             if (disposed) return;
             try {
@@ -1234,6 +1247,9 @@ export function connectStoreEffects(
                 skipped++;
                 continue;
               }
+              // ⚠ 外した**後の本文**にまだ残っているか(= 本文の行に書いてある)
+              if (ev.mode === 'remove' && collectEntryTags(newBody).inBody.some((t2) => sameTag(t2, ev.tag)))
+                stillInBody++;
               const ext = extractMeta(t.archetype, newBody);
               const stamps = await store.persistEntry(
                 {
@@ -1278,6 +1294,12 @@ export function connectStoreEffects(
           if (skipped > 0)
             parts.push(ev.mode === 'add' ? `${skipped} 件は既に付いていました` : `${skipped} 件は付いていませんでした`);
           if (failed > 0) parts.push(`${failed} 件は書けませんでした(別の窓が書き替えた可能性があります)`);
+          /**
+           * 🔴 **外しきれていないことを言う**(2026-08-29)。⚠ 黙ると
+           *   「外したのに、まだそのタグで集まる」= 壊れて見える。
+           */
+          if (stillInBody > 0)
+            parts.push(`${stillInBody} 件は本文の中にも書いてあるので、まだこのタグが付いています`);
           dispatcher.dispatch({ type: 'OP_NOTICE', message: parts.join(' / ') });
         });
         break;

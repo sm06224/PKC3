@@ -2083,7 +2083,11 @@ function tagLineHtml(names: readonly string[], interactive: boolean): string {
         ` class="pkc-tag" data-pkc-tag="${escapeHtmlAttr(name)}"` +
         (interactive
           ? ' data-pkc-action="filter-by-tag" role="button" tabindex="0"' +
-            ` title="${escapeHtmlAttr(name)} が付いたノートを探す"`
+            // 🔴 **起きることをそのまま書く**(2026-08-29 の動線レビュー)。
+            // ⚠ 押すと**その語で一覧を絞る**(題名と本文を見る)ので、
+            //   「が付いたノートを探す」は嘘になる ── タグの無いノートも混ざる。
+            // ⚠ 情報ペインの札(`inspector.ts`)と**同じ字**にする(呼び名を 2 つ作らない)。
+            ` title="「${escapeHtmlAttr(name)}」を含むノートを探します"`
           : '');
       return `<span${attrs}>#${md.utils.escapeHtml(name)}</span>`;
     })
