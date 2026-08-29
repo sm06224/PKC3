@@ -1078,6 +1078,8 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    // ⚠ 上限 20 を超えたので 2026-08-29 に落とした(原本は CHANGELOG)
+    'ノート 1 件を、相手が開けるだけの HTML で渡せるようになりました',
     // ⚠ 上限 20 を超えたので 2026-08-28 に落とした(原本は CHANGELOG)
     '段組みが、文字の大きさに合わせて広がるようになりました',
     // ⚠ 上限 20 を超えたので 2026-08-28 に落とした(原本は CHANGELOG)

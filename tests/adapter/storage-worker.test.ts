@@ -20,6 +20,7 @@ import {
 import { contentHash64Hex } from '../../src/adapter/platform/storage/content-hash';
 import { parseFrontmatter } from '../../src/features/markdown/frontmatter';
 import { FRONTMATTER_SCAN_CHARS } from '../../src/features/query/group-by';
+import { createSmartScan, EMPTY_SMART } from '../../src/features/smart/smart-spec';
 
 type Op = StorageRequest['op'];
 
@@ -2382,6 +2383,70 @@ describe('スマートフォルダの走査(#421 段②)', () => {
     expect((await scan({ text: '請求書', kind: 'text' })).lids, '語のほうを見ていない').toEqual([
       'n-word',
     ]);
+  });
+
+  /**
+   * 🔴 **本文の中に書いたタグで当たる**(#550 段②。裁定 B ── 索引だけ)。
+   *
+   * ⚠ ここは 1 つ上の「窓より後ろのチェック項目」と**仕掛けが逆**である ──
+   *   あちらは**丸ごと読む**ことで当てるが、タグだけの条件では
+   *   **丸ごと読まない**(`needsFullBody` が false)。だから当たるとしたら
+   *   **保存時に集約した索引(`entries.body_tags`)を通った**からしかない。
+   * 🔑 その「しかない」を**前提として assert する** ── 前提が崩れたら
+   *   「当たらなかった」ではなく「**丸ごと読んでいる**」で落ちるようにする
+   *   (崩れたまま緑だと、この test は索引を 1 バイトも見ていないことになる)。
+   */
+  it('🔴 本文の窓より後ろに書いたタグで当たる(索引を通っている)', async () => {
+    /**
+     * ⚠ **前提** ── タグだけの条件は本文を丸ごと読まない。
+     *   崩れたら以下の主張は「索引が効いた」証拠にならない。
+     */
+    expect(
+      createSmartScan({ ...EMPTY_SMART, tags: ['末尾タグ'] }, 'self').needsFullBody,
+      '前提が崩れている(タグだけの条件で本文を丸ごと読んでいる)',
+    ).toBe(false);
+    const pad = 'あ'.repeat(FRONTMATTER_SCAN_CHARS + 500);
+    await put('n-bodytag', { archetype: 'text', entryOrder: 15 }, `${pad}\n\n#末尾タグ\n`);
+    const got = await scan({ tags: ['末尾タグ'] });
+    expect(got.lids, '本文の中に書いたタグで当たっていない').toEqual(['n-bodytag']);
+    /**
+     * ⚠ **対照群 2 つ** ── ①走査そのものは生きている(文書タグでは当たる)
+     *   ②書いていないタグでは当たらない(「何でも当たる」で緑になっていない)
+     */
+    expect((await scan({ tags: ['請求'] })).lids, '走査そのものが死んでいる').toContain('n-text');
+    expect((await scan({ tags: ['書いてないタグ'] })).lids, '当たらないはずのタグで当たった').toEqual(
+      [],
+    );
+  });
+
+  it('🔴 文書タグと本文中タグは AND で効く(同じ 1 本の並びとして扱われる)', async () => {
+    await put(
+      'n-both',
+      { archetype: 'text', entryOrder: 16 },
+      '---\ntags: [請求]\n---\n本文\n\n#至急\n',
+    );
+    expect((await scan({ tags: ['請求', '至急'] })).lids, '両方指定で当たらない').toEqual([
+      'n-both',
+    ]);
+    // ⚠ 片方しか持たないノートは落ちる(AND が OR になっていない)
+    expect((await scan({ tags: ['請求', '書いてないタグ'] })).lids, 'AND が OR になっている').toEqual(
+      [],
+    );
+  });
+
+  /**
+   * 🔴 **本文からタグ行を消したら、索引からも消える**(更新の側)。
+   *
+   * ⚠ 足す側だけを見ると、**一度でも書いたタグが永久に残る**実装で緑になる
+   *   (`UPSERT` が列を挙げ忘れても、初回の値が据え置かれる)。
+   */
+  it('🔴 本文からタグ行を消すと、当たらなくなる', async () => {
+    await put('n-gone', { archetype: 'text', entryOrder: 17 }, '本文\n\n#いったん\n');
+    expect((await scan({ tags: ['いったん'] })).lids, '前提が崩れている(足せていない)').toEqual([
+      'n-gone',
+    ]);
+    await put('n-gone', { archetype: 'text', entryOrder: 17 }, '本文だけ\n');
+    expect((await scan({ tags: ['いったん'] })).lids, '消したタグが索引に残っている').toEqual([]);
   });
 });
 

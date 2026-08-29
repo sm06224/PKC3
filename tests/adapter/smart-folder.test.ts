@@ -459,6 +459,34 @@ describe('タグを付けたら勝手に落ちる(user 要望 2026-08-26)', () =
     expect(s1.smartHits.get('s1')?.total).toBe(1);
   });
 
+  /**
+   * 🔴 **本文の中に書いたタグでも、その場で並ぶ**(#550 段②)。
+   *
+   * ⚠ ここが無いと、**保存直後だけ本文中タグが当たらず、集め直すと当たる**という
+   *   いちばん気づけない食い違いになる ── worker の走査は索引を読むのに、
+   *   保存直後の当て直しは `readTags`(frontmatter だけ)を読んでいたためである
+   *   (変異試験 MB が SURVIVED で教えた ── `.all` を `.doc` に落としても緑だった)。
+   * 🔑 **対照群を同じ it に置く**(文書タグでも並ぶ)── 置かないと、
+   *   「当て直しそのものが死んでいる」と区別が付かない。
+   */
+  it('🔴 本文の中に書いたタグでも、その場で並ぶ', () => {
+    const s0 = withHit(booted(), 's1', ['請求'], []);
+    const inBody = rewritten(s0, 'a', '# 章\n\n#請求\n');
+    expect(inBody.smartHits.get('s1')?.lids, '本文中タグで並ばない').toEqual(['a']);
+    // ⚠ **対照群** ── 文書タグでも並ぶ(当て直しそのものは生きている)
+    const inDoc = rewritten(s0, 'b', '---\ntags: [請求]\n---\nあ\n');
+    expect(inDoc.smartHits.get('s1')?.lids, '当て直しそのものが死んでいる').toEqual(['b']);
+    // ⚠ **逆向き** ── 書いていないタグでは並ばない(何でも並ぶで緑になっていない)
+    const none = rewritten(s0, 'c', '# 章\n\n#別のタグ\n');
+    expect(none.smartHits.get('s1')?.lids, '持っていないタグで並んだ').toEqual([]);
+  });
+
+  it('🔴 本文からタグ行を消すと、その場で消える(片道にしない)', () => {
+    const s0 = withHit(booted(), 's1', ['請求'], ['a']);
+    const s1 = rewritten(s0, 'a', '# 章\n\nただの本文\n');
+    expect(s1.smartHits.get('s1')?.lids, '本文中タグを消したのに残っている').toEqual([]);
+  });
+
   it('🔴 タグを外した瞬間に消える(片道にしない)', () => {
     const s0 = withHit(booted(), 's1', ['請求'], ['a']);
     const s1 = rewritten(s0, 'a', 'あ の本文だけ\n');

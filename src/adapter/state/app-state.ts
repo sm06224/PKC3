@@ -48,7 +48,7 @@ import {
   type SmartField,
   type SmartSpec,
 } from '@features/smart/smart-spec';
-import { readTags } from '@features/flavor/tags';
+import { collectEntryTags } from '@features/flavor/entry-tags';
 import {
   initialDual,
   paneOf,
@@ -4377,7 +4377,14 @@ function refreshSmartHits(
    *   下の `next ?? smartHits` が**同じ参照を返す**ので、外しても結果は変わらない。
    *   同じ答えを出す口を 2 つ置くと、片方を壊しても鳴らなくなる(§7)。
    */
-  const tags = readTags(body);
+  /**
+   * 🔴 **文書タグ + 本文中タグ**(#550 段②)。⚠ `readTags` を直に呼ぶと、
+   *   worker の走査(`tagsForMatch`)と**規則が 2 つ**になる ── 保存直後だけ
+   *   本文中タグが当たらず、集め直すと当たる、という一番気づけない食い違いになる。
+   * 🔑 両方とも `foldTags` の上に建っており、`tests/features/entry-tags.test.ts` の
+   *   parity test が「同じ答えを返すこと」を機械的に見ている。
+   */
+  const tags = collectEntryTags(body).all;
   const orderOf = (l: string): number =>
     entryMetas.get(l)?.entryOrder ?? Number.MAX_SAFE_INTEGER;
   let next: Map<string, SmartHitState> | null = null;

@@ -71,6 +71,22 @@ export const ENTRY_ADDED_COLUMNS: readonly { readonly name: string; readonly ddl
    * ⚠ 索引は**作らない**(絞り込みに使わない列である)。
    */
   { name: 'body_chars', ddl: 'INTEGER' },
+  /**
+   * 🔴 **本文の中に書いたタグを集約した索引**(#550 段②。裁定 B「索引だけ」)。
+   *
+   * 🔑 **列にする理由は heap である。** 本文中のタグは**どこに書かれてもよい**ので、
+   *   走査の側が当てるには**本文を丸ごと**読むしかない ── ところがスマートフォルダの
+   *   走査は、タグだけの条件なら**先頭の frontmatter だけ**を読む作りである
+   *   (#421 段④ `needsFullBody`)。列に集約しておけば、**その節約を壊さずに**
+   *   本文中タグで当てられる。
+   * ⚠ `task_total` / `body_chars` と**同じ作法**:NOT NULL にしない / 既定値を
+   *   入れない / NULL は「**まだ集約していない**」── 旧ビルドが書いた行を
+   *   次の open で埋め戻せる。
+   * ⚠ 中身は `encodeTags` の形(`|買い物|家事|`)── 前後に区切りが付くので、
+   *   `%|買い物|%` が `買い物リスト` を誤爆しない。
+   * ⚠ 索引は**作らない**(SQL では絞らず、走査の TS 側で当てる ── `body_chars` と同じ)。
+   */
+  { name: 'body_tags', ddl: 'TEXT' },
 ];
 
 export const REVISION_ADDED_COLUMNS: readonly string[] = [
@@ -127,6 +143,7 @@ export const SCHEMA_DDL: readonly string[] = [
      archived INTEGER NOT NULL DEFAULT 0,
      task_total INTEGER,
      body_chars INTEGER,
+     body_tags TEXT,
      body TEXT NOT NULL DEFAULT '',
      PRIMARY KEY (cid, lid)
    )`,
