@@ -70,8 +70,19 @@ const WHEN: Readonly<
  * ⚠ 並びは `ENTRY_MENU_ACTIONS` のまま ── 条件で消えるのは**行だけ**で、
  *   残った物の順番は動かない(業務画面の作法「同じものが常に同じ場所にある」)。
  */
-export function entryMenuActions(ctx: EntryMenuContext): readonly EntryAction[] {
-  return ENTRY_MENU_ACTIONS.filter((a) => a.when === undefined || WHEN[a.when](ctx));
+export function entryMenuActions(
+  ctx: EntryMenuContext,
+): readonly (EntryAction & { readonly hint: string })[] {
+  return ENTRY_MENU_ACTIONS.filter((a) => a.when === undefined || WHEN[a.when](ctx)).map((a) => ({
+    ...a,
+    /**
+     * 🔴 **説明も一緒に配る**(#587 改善 C-1)── 呼び側に引かせない。
+     *
+     * ⚠ 引かせる形(`ENTRY_ACTION_HINTS[a.action]`)にすると、**引き忘れても
+     *   何も落ちない**(説明が空のまま出るだけ)── まさにそれが直す前の姿である。
+     */
+    hint: entryActionHint(a.action, ctx),
+  }));
 }
 
 /**
@@ -291,3 +302,68 @@ export function headingMenuActions(ctx: {
 export const ENTRY_ACTION_LABELS: Readonly<Record<string, string>> = Object.fromEntries(
   ENTRY_MENU_ACTIONS.map((a) => [a.action, a.label]),
 );
+
+/**
+ * 🔴 **押せる操作の説明 ── ここも字の正本**(#587 改善 C-1)。
+ *
+ * ⚠ 元は `inspector.ts` に在った ── だから**情報ペインの 11 個は全部説明を持つのに、
+ *   右クリックの 9 個は 9 個とも空**だった(実測 2026-08-29)。**同じ字・同じ操作**である。
+ * 🔑 右クリックは「右の列を畳んだ人のための 2 本目の道」(マニュアル §4)なので、
+ *   **説明が要るのはむしろこちら**である。
+ *
+ * ⚠ `write-back-file` だけは行き先(ファイル名)が入るので {@link entryActionHint} が作る。
+ *
+ * 押せる操作の説明。⚠ **1 か所に持つ** ── 器を組む所と値を入れる所に別々に
+ * 書くと、片方だけ古くなる(この repo が何度も踏んでいる形)。
+ */
+export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
+  'export-entry': 'このノートだけをバックアップ形式(.pkc3.zip)で保存します。取り込み直せます',
+  // 🔴 **`export-entry` との違いを説明で言い切る**(#400 段④ と同じ作法)──
+  //    どちらも「1 ノートを 1 file にする」ので、**何が違うか**を書かないと選べない
+  'export-entry-html':
+    'このノートを、ブラウザで開くだけで読める 1 枚の .html にします。PKC3 を持っていない相手にも渡せます。片道です(取り込み直せません)',
+  // ⚠ **画面で起きることで書く**(user 指示 2026-08-21)── 「配下を再帰収集」ではなく
+  //    「中に入っているものごと」。⚠ **外へ繋がる関連が落ちる**ことも先に言う
+  'export-folder':
+    'このフォルダと、中に入っているものをまとめてバックアップ形式(.pkc3.zip)で保存します。取り込み直せます(外へ繋がる関係は入りません)',
+  // 🔴 **実装に合わせる**(2026-08-18)。直す前は「この版では画像は入りません」と
+  //    書いてあったが、画像も図もグラフも**入る**(`features/export/docx.ts` の VML /
+  //    `svg-emf.ts` のベクタ)。マニュアル(§5)もお知らせ 2 件も「入る」と言っており、
+  //    ⚠ **画面の説明だけが古いまま user に嘘をついていた**(押すのを諦めさせる向き)。
+  'export-entry-docx':
+    'このノートを Word 文書(.docx)で保存します。片道です(画像も、図はベクタで、グラフは絵で入ります)',
+  // ⚠ **切れ方を先に言う**(user 指示 2026-08-21「画面で何が起きるかで書く」)──
+  //    押してから「なぜ 12 枚もあるのか」と思わせない
+  'export-entry-pptx':
+    'このノートを PowerPoint(.pptx)で保存します。片道です。大見出し(#)が扉、中見出し(##・###)と `---` でスライドが切れます',
+  // ⚠ **起きることを書く**(user 指示 2026-08-21「画面で何が起きるかで書く」)──
+  //    押すと**ブラウザの印刷画面**が開く。PDF にするかはそこで user が選ぶ
+  'export-entry-pdf':
+    'このノートを紙の形に組んで、ブラウザの印刷画面を開きます。そこで「PDF として保存」を選べます(紙の大きさは設定で変えられます)',
+  // 🔴 **押すと外へ通信する**ことを先に言う(user 指示 2026-08-21「画面で何が起きるかで書く」)
+  //    ⚠ 「取り込みます」だけだと、**押した瞬間に相手のサーバーへ要求が飛ぶ**ことが読めない
+  'adopt-external-images':
+    '本文の外部の画像を、その置き場所から読んでこのノートの添付にします。押すとその置き場所へ通信します。読めたものだけ本文が添付を指すように変わります(読めなかったものは元の URL のまま残り、理由が出ます)',
+  // 🔴 **2026-08-29 に足した 2 つ** ── それまで `ACTION_TITLES` に鍵が無く、
+  //    loop の `?? ''` で **tooltip が空**のまま配っていた(説明を書いた行は在ったが、
+  //    その loop に上書きされて一度も出ていない)。⚠ 字が同じ `copy-` が 2 つ並ぶので、
+  //    **何が写るか**を書き分けないと選べない
+  'copy-entry-ref':
+    'このノートへのリンク([題名](entry:…))を写します。別のノートの本文に貼ると、押して飛べるようになります',
+  'copy-plain-markdown':
+    'このノートの本文から PKC3 独自の記法を落として、素の Markdown として写します。他のツールへ貼るための形です(file は落ちません)',
+  'show-history': '過去の版を一覧します',
+  'delete-entry': 'ゴミ箱へ移します(フォルダ画面から戻せます)',
+};
+
+/**
+ * その操作の説明。⚠ **行き先が入る物だけ、ここで作る**。
+ *
+ * ⚠ `write-back-file` を静的な字にすると、**どのファイルへ書き戻すのかが読めない**
+ *   ── 押す前に確かめられない(上書きは取り消せない)。
+ */
+export function entryActionHint(action: string, ctx: EntryMenuContext): string {
+  if (action === 'write-back-file')
+    return `開いた元のファイル(${ctx.linkedFile ?? ''})を、このノートの内容で上書きします`;
+  return ENTRY_ACTION_HINTS[action] ?? '';
+}

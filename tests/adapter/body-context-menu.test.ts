@@ -20,7 +20,7 @@
 import { describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/binder';
-import { BODY_MENU_ACTIONS } from '../../src/features/entry-actions';
+import { BODY_MENU_ACTIONS, ENTRY_ACTION_HINTS } from '../../src/features/entry-actions';
 import { sectionAt } from '../../src/features/markdown/append-target';
 import { applyHeadingFold } from '../../src/adapter/ui/render/heading-fold';
 
@@ -830,5 +830,45 @@ describe('メニューの身元(#596 D)', () => {
       (r.host.querySelector('#p-in') as HTMLElement).hidden,
       '同じノートなのに畳めない(身元の検査が強すぎる)',
     ).toBe(true);
+  });
+});
+
+/**
+ * 🔴 **右クリックの項目にも説明が出る**(#587 改善 C-1)。
+ *
+ * ⚠ ここは**配線を見る場所**である ── 表(`features/entry-actions.ts`)の test も、
+ *   描く側(`openContextMenu`)の test も、**相手の綴りを 1 度も見ない**
+ *   (CLAUDE.md §7「A と B が合意していることは、A の test にも B の test にも書けない」)。
+ *   🔑 だから**実物の右クリックから DOM の `title` まで**を 1 本で通す。
+ */
+describe('右クリックの説明(#587 C-1)', () => {
+  it('🔴 行を右クリックすると、出た項目が全部「何が起きるか」を持っている', () => {
+    const { root } = setup();
+    rightClick(root.querySelector('[data-pkc-entry="n1"]')!);
+    const items = [...root.querySelectorAll<HTMLElement>(`${MENU} button`)];
+    // ⚠ 空振り防止 ── 出ていないのに「全部持っている」が真になる形を潰す
+    expect(items.length, 'メニューが出ていない(台の空振り)').toBeGreaterThanOrEqual(9);
+    const silent = items
+      .filter((b) => (b.getAttribute('title') ?? '') === '')
+      .map((b) => b.getAttribute('data-pkc-action'));
+    expect(silent, '説明の無い項目が出ている').toEqual([]);
+  });
+
+  it('🔴 字は情報ペインと同じ表から来る(片方だけ直る日を作らない)', () => {
+    const { root } = setup();
+    rightClick(root.querySelector('[data-pkc-entry="n1"]')!);
+    const del = root.querySelector<HTMLElement>(`${MENU} [data-pkc-action="delete-entry"]`);
+    expect(del?.getAttribute('title')).toBe(ENTRY_ACTION_HINTS['delete-entry']);
+  });
+
+  it('⚠ **対照群** ── 説明を持たない項目には `title` を付けない(空の属性を生やさない)', () => {
+    const { root } = setup();
+    rightClick(root.querySelector('[data-pkc-field="para"]')!);
+    const items = [...root.querySelectorAll<HTMLElement>(`${MENU} button`)];
+    expect(items.length, '本文のメニューが出ていない(台の空振り)').toBeGreaterThanOrEqual(2);
+    expect(
+      items.filter((b) => b.hasAttribute('title')).map((b) => b.getAttribute('data-pkc-action')),
+      '説明を持たないのに空の title が生えている',
+    ).toEqual([]);
   });
 });

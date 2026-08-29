@@ -28,6 +28,14 @@ const REGION = 'context-menu';
 export interface MenuItem {
   readonly action: string;
   readonly label: string;
+  /**
+   * 🔴 **その操作の説明**(#587 改善 C-1)。⚠ 空なら**付けない**。
+   *
+   * ⚠ 直す前は情報ペインの 11 個だけが説明を持ち、**右クリックの 9 個は 9 個とも空**
+   *   だった ── 同じ字・同じ操作なのに、片方だけ黙っていた。
+   * 🔑 字も説明も出所は `features/entry-actions.ts` の 1 か所である(§7)。
+   */
+  readonly hint?: string;
 }
 
 export interface OpenMenu {
@@ -64,6 +72,9 @@ export function openContextMenu(
     b.setAttribute('role', 'menuitem');
     b.type = 'button';
     b.textContent = it.label;
+    // ⚠ 空の `title` を付けない ── 空文字でも属性は生えるので、
+    //    「説明が在る / 無い」を数える検査が**全件在る**と読んでしまう
+    if (it.hint !== undefined && it.hint !== '') b.title = it.hint;
     /**
      * 🔴 **押した物の身元をボタンへ写す**(#426 段②)。
      *

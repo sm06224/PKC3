@@ -774,7 +774,7 @@ describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
     // ⚠ 指紋を差し替えたのは **まだ配っていない entry** だから(同じ日に #596 B を足した)
-    ['2026-08-29-heading-context-menu', '769e2af5'],
+    ['2026-08-29-heading-context-menu', 'c0821b34'],
     ['2026-08-29-board-to-pptx', 'e6d0b4b3'],
     ['2026-08-29-narrow-no-hscroll', '8f325cfd'],
     // ⚠ 指紋を差し替えたのは **まだ配っていない entry** だから(着地前に文面を直した)

@@ -22,8 +22,10 @@ import {
   ADOPT_IMAGES_LABEL,
   adoptImagesLabel,
   bodyMenuActions,
+  ENTRY_ACTION_HINTS,
   ENTRY_ACTION_LABELS,
   ENTRY_MENU_ACTIONS,
+  entryActionHint,
   entryMenuActions,
 } from '../../src/features/entry-actions';
 
@@ -195,5 +197,53 @@ describe('条件つきの操作(#500 案 C)', () => {
     expect(ENTRY_ACTION_LABELS['write-back-file']).toBe('書き戻す');
     // ⚠ 取り込みは枚数を含むので表ではなく組み立て関数が持つ
     expect(adoptImagesLabel(1)).toContain(ADOPT_IMAGES_LABEL);
+  });
+});
+
+/**
+ * 🔴 **右クリックの項目も説明を持つ**(#587 改善 C-1)。
+ *
+ * ⚠ 直す前は**情報ペインの 11 個だけ**が説明を持ち、**右クリックの 9 個は 9 個とも空**
+ *   だった(実測 2026-08-29)。同じ字・同じ操作なのに、片方だけ黙っていた。
+ * 🔑 しかも右クリックは「右の列を畳んだ人のための 2 本目の道」(マニュアル §4)なので、
+ *   **説明が要るのはむしろこちら**である。
+ *
+ * ⚠ **「鍵が在るか」だけを見ない**(§1)── 値が空文字でも鍵は在る。
+ *   ここは**配られた側**(`entryMenuActions` の返り値)で、**中身が空でない**ことを見る。
+ */
+describe('右クリックの説明(#587 C-1)', () => {
+  /** ⚠ 条件つきの 2 つも出る文脈 ── これを使わないと 2 行が**一度も検められない**。 */
+  const ALL = { archetype: 'folder', linkedFile: 'メモ.md' } as const;
+
+  it('🔴 出る項目は 1 つ残らず説明を持つ(足した人がここで気づく)', () => {
+    const rows = entryMenuActions(ALL);
+    // ⚠ 空振り防止 ── 条件つきの 2 つを含めて全部出ている
+    expect(rows.length, '条件つきの行が出ていない(台の前提が崩れている)').toBe(
+      ENTRY_MENU_ACTIONS.length,
+    );
+    const silent = rows.filter((a) => a.hint === '').map((a) => a.action);
+    expect(silent, '説明が空のまま配られている項目がある').toEqual([]);
+  });
+
+  it('🔴 「書き戻す」だけは行き先を字に含める(押す前に確かめられる)', () => {
+    const back = entryMenuActions(ALL).find((a) => a.action === 'write-back-file');
+    expect(back?.hint, '上書き先のファイル名が説明に出ていない').toContain('メモ.md');
+    // ⚠ **対照群** ── 静的な物は文脈で変わらない(何でも差し込む作りではない)
+    const hist = entryMenuActions(ALL).find((a) => a.action === 'show-history');
+    expect(hist?.hint).toBe(ENTRY_ACTION_HINTS['show-history']);
+  });
+
+  it('⚠ 説明の出どころは 1 つ ── 情報ペインが引く表と同じ物である', () => {
+    // 🔑 情報ペインは `ENTRY_ACTION_HINTS` を直に引く。右クリックは `hint` を受け取る
+    //    ── **同じ字**でなければ、片方だけ直る日が来る(§7)
+    for (const a of entryMenuActions({ archetype: 'text', linkedFile: null }))
+      expect(a.hint, `${a.action} の説明が表と違う`).toBe(entryActionHint(a.action, {
+        archetype: 'text',
+        linkedFile: null,
+      }));
+  });
+
+  it('⚠ 知らない綴りには空を返す(呼び側が例外で落ちない)', () => {
+    expect(entryActionHint('no-such-action', { archetype: null, linkedFile: null })).toBe('');
   });
 });

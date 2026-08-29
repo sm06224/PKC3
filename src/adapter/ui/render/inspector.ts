@@ -64,7 +64,13 @@ export const RELATION_CANDIDATE_MAX = 200;
 import { getAncestorFolders } from '@features/relation/tree';
 import { BODY_LINK_KIND, renderRelationMap } from './relation-map';
 import { bodyLinkTargets } from '@features/entry-ref/body-links';
-import { ADOPT_IMAGES_LABEL, adoptImagesLabel, ENTRY_ACTION_LABELS } from '@features/entry-actions';
+import {
+  ADOPT_IMAGES_LABEL,
+  adoptImagesLabel,
+  ENTRY_ACTION_HINTS,
+  ENTRY_ACTION_LABELS,
+  entryActionHint,
+} from '@features/entry-actions';
 
 /** 素性の行(`data-pkc-field` → 値を入れる `<dd>`)。 */
 type Rows = Map<string, HTMLElement>;
@@ -193,9 +199,10 @@ export class InspectorRenderer {
     const refBtn = this.buttons.get('copy-entry-ref');
     /**
      * ⚠ **`title` はここで書かない**(2026-08-29 に外した)── 下の loop が
-     *   `ACTION_TITLES[action] ?? ''` で**必ず上書きする**ので、ここに書いた字は
+     *   `ENTRY_ACTION_HINTS[action] ?? ''` で**必ず上書きする**ので、ここに書いた字は
      *   **一度も画面に出ていなかった**(空の tooltip として配っていた)。
-     * 🔑 説明は `ACTION_TITLES` に置く ── 出所を 1 か所にする(§7)。
+     * 🔑 説明は `ENTRY_ACTION_HINTS`(`features/entry-actions.ts`)に置く ──
+     *   **右クリックも同じ所から引く**ので、出所は 1 か所である(§7 / #587 C-1)。
      */
     if (refBtn) refBtn.setAttribute('data-pkc-entry-ref', formatEntryLink(meta.title, meta.lid));
     /**
@@ -749,8 +756,8 @@ export class InspectorRenderer {
     if (folderBtn) folderBtn.hidden = meta.archetype !== 'folder';
     this.paintAdoptImages(state, meta.lid);
     for (const [action, b] of this.buttons) {
-      const why = ACTION_TITLES[action] ?? '';
-      const title = action === 'write-back-file' ? whyWriteBack(link) : why;
+      const why = ENTRY_ACTION_HINTS[action] ?? '';
+      const title = action === 'write-back-file' ? entryActionHint(action, { archetype: null, linkedFile: link }) : why;
       /**
        * 🔴 **居場所(`data-pkc-entry`)を必ず書き直す** ── ここを落とすと、
        * 選択を切り替えたあとのボタンが**前のノートを指したまま**になる。
@@ -1191,51 +1198,3 @@ export class InspectorRenderer {
   }
 }
 
-/**
- * 押せる操作の説明。⚠ **1 か所に持つ** ── 器を組む所と値を入れる所に別々に
- * 書くと、片方だけ古くなる(この repo が何度も踏んでいる形)。
- */
-const ACTION_TITLES: Record<string, string> = {
-  'export-entry': 'このノートだけをバックアップ形式(.pkc3.zip)で保存します。取り込み直せます',
-  // 🔴 **`export-entry` との違いを説明で言い切る**(#400 段④ と同じ作法)──
-  //    どちらも「1 ノートを 1 file にする」ので、**何が違うか**を書かないと選べない
-  'export-entry-html':
-    'このノートを、ブラウザで開くだけで読める 1 枚の .html にします。PKC3 を持っていない相手にも渡せます。片道です(取り込み直せません)',
-  // ⚠ **画面で起きることで書く**(user 指示 2026-08-21)── 「配下を再帰収集」ではなく
-  //    「中に入っているものごと」。⚠ **外へ繋がる関連が落ちる**ことも先に言う
-  'export-folder':
-    'このフォルダと、中に入っているものをまとめてバックアップ形式(.pkc3.zip)で保存します。取り込み直せます(外へ繋がる関係は入りません)',
-  // 🔴 **実装に合わせる**(2026-08-18)。直す前は「この版では画像は入りません」と
-  //    書いてあったが、画像も図もグラフも**入る**(`features/export/docx.ts` の VML /
-  //    `svg-emf.ts` のベクタ)。マニュアル(§5)もお知らせ 2 件も「入る」と言っており、
-  //    ⚠ **画面の説明だけが古いまま user に嘘をついていた**(押すのを諦めさせる向き)。
-  'export-entry-docx':
-    'このノートを Word 文書(.docx)で保存します。片道です(画像も、図はベクタで、グラフは絵で入ります)',
-  // ⚠ **切れ方を先に言う**(user 指示 2026-08-21「画面で何が起きるかで書く」)──
-  //    押してから「なぜ 12 枚もあるのか」と思わせない
-  'export-entry-pptx':
-    'このノートを PowerPoint(.pptx)で保存します。片道です。大見出し(#)が扉、中見出し(##・###)と `---` でスライドが切れます',
-  // ⚠ **起きることを書く**(user 指示 2026-08-21「画面で何が起きるかで書く」)──
-  //    押すと**ブラウザの印刷画面**が開く。PDF にするかはそこで user が選ぶ
-  'export-entry-pdf':
-    'このノートを紙の形に組んで、ブラウザの印刷画面を開きます。そこで「PDF として保存」を選べます(紙の大きさは設定で変えられます)',
-  // 🔴 **押すと外へ通信する**ことを先に言う(user 指示 2026-08-21「画面で何が起きるかで書く」)
-  //    ⚠ 「取り込みます」だけだと、**押した瞬間に相手のサーバーへ要求が飛ぶ**ことが読めない
-  'adopt-external-images':
-    '本文の外部の画像を、その置き場所から読んでこのノートの添付にします。押すとその置き場所へ通信します。読めたものだけ本文が添付を指すように変わります(読めなかったものは元の URL のまま残り、理由が出ます)',
-  // 🔴 **2026-08-29 に足した 2 つ** ── それまで `ACTION_TITLES` に鍵が無く、
-  //    loop の `?? ''` で **tooltip が空**のまま配っていた(説明を書いた行は在ったが、
-  //    その loop に上書きされて一度も出ていない)。⚠ 字が同じ `copy-` が 2 つ並ぶので、
-  //    **何が写るか**を書き分けないと選べない
-  'copy-entry-ref':
-    'このノートへのリンク([題名](entry:…))を写します。別のノートの本文に貼ると、押して飛べるようになります',
-  'copy-plain-markdown':
-    'このノートの本文から PKC3 独自の記法を落として、素の Markdown として写します。他のツールへ貼るための形です(file は落ちません)',
-  'show-history': '過去の版を一覧します',
-  'delete-entry': 'ゴミ箱へ移します(フォルダ画面から戻せます)',
-};
-
-/** 「書き戻す」だけは行き先(ファイル名)を文言に含める。 */
-function whyWriteBack(link: string | null): string {
-  return `開いた元のファイル(${link ?? ''})を、このノートの内容で上書きします`;
-}
