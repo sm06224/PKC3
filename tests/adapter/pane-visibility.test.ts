@@ -25,7 +25,7 @@ import {
 import { readFileSync } from 'node:fs';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
-import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { bindActions, SHORTCUT_BUTTON } from '../../src/adapter/ui/actions/binder';
 
 describe('畳める面の規則', () => {
   /**
@@ -247,5 +247,42 @@ describe('CSS(畳んだ列が本当に消えるか)', () => {
         `${pane}: 列の宣言そのものが無い(別名になっている)`,
       ).toBe(true);
     }
+  });
+
+  /**
+   * 🔴 **畳んでも、鍵の押し先が DOM から消えない**(#582 §6 の 4 つ目)。
+   *
+   * ⚠ いまこれが成り立っているのは **CSS で列を落として DOM に残す**実装の
+   *   おかげ ── **偶然である**。「畳んだペインを unmount する」最適化が入ると
+   *   **鍵が静かに全部死ぬ**(押しても無反応。⚠ しかも**どの test も鳴らない**)。
+   *
+   * ⚠ **「全 selector が解決する」では書けない**(#582 の doc の言い方は強すぎた)──
+   *   `insert-date` / `insert-snippet` / `start-edit` などは**編集中にしか無い**ので、
+   *   素の shell では畳む前から 0 件である。
+   * 🔑 だから見るのは差分:**開いているときに解決するものは、畳んでも解決する**。
+   */
+  it('🔴 全部畳んでも、鍵の押し先が DOM から消えない (#582)', () => {
+    // ⚠ `mounted()` は別の describe の中に在る ── ここで組む(器は同じ形)
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    buildShell(root);
+    bindActions(root, new Dispatcher());
+
+    const resolves = (): string[] =>
+      Object.entries(SHORTCUT_BUTTON)
+        .filter(([, sel]) => root.querySelector(sel) !== null)
+        .map(([cmd]) => cmd)
+        .sort();
+
+    const open = resolves();
+    // ⚠ 空振り防止 ── 開いた状態で十分な数が解決している(0 件なら差分は常に一致する)
+    expect(open.length, '開いた状態で 1 つも解決しない(台の空振り)').toBeGreaterThanOrEqual(8);
+
+    applyPaneVisibility(root, [...PANES]);
+    expect(
+      resolves(),
+      '畳んだら押し先が消えた ── 鍵が無反応になる(DOM から外す最適化が入った合図)',
+    ).toEqual(open);
   });
 });

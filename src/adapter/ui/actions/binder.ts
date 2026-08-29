@@ -4836,7 +4836,18 @@ const PKC_DRAG = 'application/x-pkc-lids';
  */
 const PKC_TASK_DRAG = 'application/x-pkc-task';
 
-const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
+/**
+ * 🔴 **鍵 → ボタン**の橋。⚠ **export しているのは、畳んだときの不変条件を
+ * 1 か所で検めるため**(#582 §6)。
+ *
+ * 🔑 守る主張は「**畳んでも、押せる口が DOM から消えない**」である ──
+ * いまそれが成り立っているのは **CSS で列を落として DOM に残す**実装のおかげで、
+ * ⚠ 「畳んだペインを unmount する」最適化が入ると**静かに全部死ぬ**
+ * (鍵を押しても無反応になり、しかも**どの test も鳴らない**)。
+ * だから `tests/adapter/pane-visibility.test.ts` が**開いた状態と畳んだ状態で
+ * 同じ数だけ解決すること**を見る。
+ */
+export const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
   /**
    * 🔴 **戻る / 進むは、押しボタンを通す**(2026-08-26 に特例からここへ移した)。
    *
