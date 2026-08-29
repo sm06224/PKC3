@@ -507,6 +507,35 @@ export function rasterSize(
   };
 }
 
+/**
+ * 🔴 **`<img>` へ渡す SVG に実寸を書き込む**(user 報告 2026-08-28 の直し)。
+ *
+ * ⚠ mermaid の SVG は `width="100%"` なので、**`<img>` が読む自然幅は 300px** になる
+ *   (すぐ下の `rasterize` の注記に残っている実測値)。実寸で開く窓へそのまま渡すと、
+ *   **巨大な図が 300px で開く** ── 「粗い」を直したつもりで「小さい」を作る。
+ *
+ * 🔑 だから `viewBox` の数を **`width` / `height` として書き戻す**。
+ *
+ * ⚠ **`rasterize` の「書き戻す必要は無い」と矛盾しない** ── あちらは
+ *   **canvas に描くとき**の話で、描く大きさを呼び側が決めるので自然幅を読まない。
+ *   こちらは **`<img>` が自然幅を読む**経路である(**経路が違う**)。
+ *
+ * ⚠ `viewBox` が読めない図は**触らない**(壊すより、そのまま渡すほうが安全)。
+ */
+export function svgWithIntrinsicSize(svg: string): string {
+  const box = svgViewBox(svg);
+  if (box === null) return svg;
+  // ⚠ 根の `<svg …>` だけを見る(中の `<svg>` や文字列の中の `<svg` に当てない)
+  const m = /<svg\b[^>]*>/.exec(svg);
+  if (m === null) return svg;
+  const tag = m[0];
+  const sized = tag
+    .replace(/\s(width|height)\s*=\s*"[^"]*"/g, '')
+    .replace(/\s(width|height)\s*=\s*'[^']*'/g, '')
+    .replace(/<svg\b/, `<svg width="${box.w}" height="${box.h}"`);
+  return svg.slice(0, m.index) + sized + svg.slice(m.index + tag.length);
+}
+
 export async function rasterize(svg: string, width: number, dpr: number): Promise<Raster> {
   // 🔴 **器より小さい図は引き伸ばさない**(P8 段⑱)。図の実寸で頭打ちにする
   //    ── 器いっぱいに広げると、小さい図が画面を占領して密度が落ちる
