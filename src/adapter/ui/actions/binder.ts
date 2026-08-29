@@ -1802,9 +1802,26 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (slug === '') return;
     void tocJump(dispatcher, target, slug);
   },
+  /**
+   * 🔴 **押した結果が見える所を開く**(2026-08-29 の動線レビュー)。
+   *
+   * ⚠ 左の列を畳んでいると、絞り込みは効いているのに**画面が 1 ドットも動かない**
+   *   ── user から見れば**無言の dead click** である(本文の札・情報ペインの札・
+   *   フォルダの札の 3 経路とも同じ形だった)。
+   * 🔑 だから**畳んでいたら開く** ── 押した人が見たいのは「そのタグのノート」であって、
+   *   閉じたままの列ではない。⚠ 開いているときは何もしない(勝手に畳まない)。
+   */
   'filter-by-tag': (dispatcher, target) => {
     const tag = target.getAttribute('data-pkc-tag');
-    if (tag) dispatcher.dispatch({ type: 'SET_ENTRY_FILTER', query: tag });
+    if (!tag) return;
+    dispatcher.dispatch({ type: 'SET_ENTRY_FILTER', query: tag });
+    const hidden = appPanes.getHidden();
+    if (!hidden.includes('sidebar')) return;
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    applyPaneVisibility(
+      root,
+      appPanes.setHidden(hidden.filter((p) => p !== 'sidebar')),
+    );
   },
   /**
    * 🔴 **選択の戻る・進む**(#190)。⚠ **行き先をここで決めない** ── 履歴は state が

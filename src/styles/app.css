@@ -1587,6 +1587,30 @@ li[data-pkc-row-slot] {
   font-size: 12px;
 }
 
+/**
+ * 🔴 **本文の中に書いたタグの行**(#550)。
+ *
+ * ⚠ 上の「タグ」の行と**同じ並べ方**にする(同じものは同じ形 ── 業務画面の方針)。
+ * ⚠ 地は無彩色のまま(user 指示 2026-08-03「色は情報にだけ使う」)。
+ * 🔑 **書いた場所は控えめに** ── 主役はタグの名前で、場所は「どこで付けたか」を
+ *   思い出すための添え字である。
+ */
+[data-pkc-region='inspector'] dd[data-pkc-field='inspector-body-tags'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+[data-pkc-field='inspector-body-tag'] {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+[data-pkc-field='inspector-body-tag-where'] {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 [data-pkc-field='inspector-empty'] {
   padding: var(--s4);
   color: var(--muted);
