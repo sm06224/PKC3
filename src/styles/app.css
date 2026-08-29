@@ -4498,6 +4498,15 @@ li[data-pkc-row-slot] {
     grid-template-areas:
       'sidebar   gripl detail'
       'inspector inspector inspector'
+      /* 🔴 **収録 / タイマー / 予定の 3 本を、狭い版面にも置く**(2026-08-29)。
+       * ⚠ 直す前は**この 3 行が無かった** ── 区画名の無い `grid-area` は
+       *   暗黙のトラックへ落ちるので、1100px 以下では帯が**右端の細い列**に化け、
+       *   3 本同時に出ると**互いに重なって「止める」が押せなかった**(実測)。
+       * ⚠ 480px では**画面の外**(x=528 / 幅 480)に出ていた ──
+       *   `app.css:287` の「止める口が消えると、マイクが回り続ける」が破れていた。 */
+      'capture   capture  capture'
+      'timers    timers   timers'
+      'alarms    alarms   alarms'
       'announce  announce announce'
       'update    update   update'
       'notices   notices  notices'
@@ -4522,8 +4531,13 @@ li[data-pkc-row-slot] {
 
 /* 狭い画面では 1 カラムへ折る */
 @media (max-width: 720px) {
-  /* ⚠ 縦に畳むので**境目が無い** ── 掴む帯は出さない(押せない導線を残さない) */
-  [data-pkc-region='pane-grip'] {
+  /* ⚠ 縦に畳むので**境目が無い** ── 掴む帯は出さない(押せない導線を残さない)。
+   * 🔴 **ただし横向きの帯(追記欄)は残す**(2026-08-29)── 1 列に折れても
+   *   本文と追記欄の境目は**縦に残っている**ので、上の理由が当たらない。
+   * ⚠ 消していたせいで**畳んだまま窓を狭めると二度と戻せなかった**:
+   *   追記欄には鍵が無く(`KEY_COMMANDS` に `toggle-append` は無い)、
+   *   畳んだ事実は `pkc3.panes` に残るので、**窓を広げるまで永久に戻らない**。 */
+  [data-pkc-region='pane-grip']:not([data-pkc-axis='y']) {
     display: none;
   }
   [data-pkc-region='shell'] {
@@ -4532,12 +4546,16 @@ li[data-pkc-row-slot] {
       'sidebar'
       'detail'
       'inspector'
+      /* 🔴 上の 1100px と同じ理由 ── 3 本の帯を版面に戻す(2026-08-29) */
+      'capture'
+      'timers'
+      'alarms'
       'announce'
       'update'
       'notices'
       'status';
-    /* ⚠ 7 区画(P11 でお知らせが 1 つ増えた)── 本文だけが伸びる */
-    grid-template-rows: auto 1fr auto auto auto auto auto;
+    /* ⚠ 10 区画(P11 でお知らせが 1 つ / #413 で帯が 3 つ増えた)── 本文だけが伸びる */
+    grid-template-rows: auto 1fr auto auto auto auto auto auto auto auto;
   }
   [data-pkc-region='sidebar'] {
     max-height: 30vh;

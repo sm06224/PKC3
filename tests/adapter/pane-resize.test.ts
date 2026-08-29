@@ -27,6 +27,8 @@ import { installPaneResize } from '../../src/adapter/ui/render/pane-resize';
 import { AppendBoxRenderer } from '../../src/adapter/ui/render/append-box';
 import { appPaneSizes } from '../../src/adapter/ui/render/pane-size';
 import { appPanes, applyPaneVisibility } from '../../src/adapter/ui/render/pane-visibility';
+import { readFileSync } from 'node:fs';
+import { blocksFor, decl, mediaBlock, stripComments } from '../helpers/css-blocks';
 
 let detach: (() => void) | null = null;
 
@@ -151,6 +153,57 @@ describe('掴んで大きさを変える(#497)', () => {
     drag(grip(root, 'sidebar'), 260, 0);
     expect(shellOf(root).hasAttribute('data-pkc-hidden-panes'), '戻っていない').toBe(false);
     expect(appPaneSizes.get().sidebar).toBe(260);
+  });
+});
+
+/**
+ * 🔴 **畳んだ面には、必ず戻し口が残っている**(2026-08-29。#582 の全数調査)。
+ *
+ * ⚠ 追記欄は **鍵を持っていない**(`KEY_COMMANDS` に `toggle-append` は無く、
+ *   `SHORTCUT_BUTTON` にも一覧と情報の 2 つしか無い)── つまり
+ *   **戻し口は掴む帯 1 本だけ**である。ところが `@media (max-width: 720px)` が
+ *   `[data-pkc-region='pane-grip']` を**面の区別なく**畳んでいたので、
+ *   🔴 **畳んだまま窓を狭めると、二度と戻せなかった**
+ *   (畳んだ事実は `pkc3.panes` に残るので、窓を広げるまで永久に戻らない)。
+ *
+ * 🔑 消してよい理由(「縦に畳むので**境目が無い**」)は**左右の帯にしか
+ *   当たらない** ── 追記欄の帯は横向き(`data-pkc-axis='y'`)で、1 列に折れても
+ *   本文との境目は縦に残っている。
+ *
+ * ⚠ CSS は**構文で**読む(CLAUDE.md §1 ── 5 回踏んでいる)。
+ */
+describe('🔴 狭い版面でも戻し口が残る(2026-08-29)', () => {
+  const css = (): string =>
+    stripComments(readFileSync('src/styles/app.css', 'utf-8'));
+
+  it('🔴 720px 以下でも、横向きの掴む帯(追記欄)は消さない', () => {
+    const narrow = mediaBlock(css(), '(max-width: 720px)').body;
+    // 空振り防止 ── 版面ごと引けていないのに緑にならない
+    expect(narrow, '720px の版面を引けていない(空振り)').toContain('grid-template-areas');
+    /**
+     * ⚠ **「消す規則が在るか」ではなく「何を消しているか」を見る** ──
+     *   面を名指ししない `pane-grip` が 1 つでも `display: none` なら、
+     *   追記欄の帯も巻き添えになる。
+     */
+    const naked = blocksFor(narrow, "[data-pkc-region='pane-grip']");
+    expect(
+      naked.filter((b) => decl('display', 'none').test(b)),
+      '面を名指ししないまま帯を消している(追記欄の戻し口が巻き添えになる)',
+    ).toEqual([]);
+  });
+
+  /**
+   * 🔴 **対照群** ── 左右の帯は 720px 以下で消えてよい(縦に折れて境目が無い)。
+   * ⚠ これが無いと「全部消さない」へ倒した変異を見分けられない。
+   */
+  it('🔴 左右の帯は 720px 以下で畳む(縦に折れて境目が無いので)', () => {
+    const narrow = mediaBlock(css(), '(max-width: 720px)').body;
+    const scoped = blocksFor(narrow, "[data-pkc-region='pane-grip']:not([data-pkc-axis='y'])");
+    expect(scoped.length, '左右の帯を畳む規則が無い').toBeGreaterThan(0);
+    expect(
+      scoped.some((b) => decl('display', 'none').test(b)),
+      '左右の帯が畳まれていない',
+    ).toBe(true);
   });
 });
 

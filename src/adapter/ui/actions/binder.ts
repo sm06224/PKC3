@@ -3119,21 +3119,6 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     dispatcher.dispatch({ type: 'TOGGLE_TASK', lid, line });
   },
-  'calendar-nav': (dispatcher, target) => {
-    // 遷移先は renderer が描画時に焼き込む(binder は「今の月」を推定しない)
-    const year = Number(target.getAttribute('data-pkc-nav-year'));
-    const month = Number(target.getAttribute('data-pkc-nav-month'));
-    if (!Number.isInteger(year) || !Number.isInteger(month)) return;
-    dispatcher.dispatch({ type: 'SET_CALENDAR_MONTH', year, month });
-  },
-  'calendar-today': (dispatcher) => {
-    const now = new Date();
-    dispatcher.dispatch({
-      type: 'SET_CALENDAR_MONTH',
-      year: now.getFullYear(),
-      month: now.getMonth() + 1,
-    });
-  },
   'toggle-show-archived': (dispatcher) =>
     dispatcher.dispatch({ type: 'TOGGLE_SHOW_ARCHIVED' }),
   /**
@@ -3800,13 +3785,52 @@ const ACTIONS: Record<string, ActionHandler> = {
       },
     );
   },
-  'copy-entry-ref': (_dispatcher, target, services) => {
-    const ref = target
+  /**
+   * 🔴 **貼れる 1 行を写す**(#427 段①)。
+   *
+   * ## ⚠ 押した物が持っていれば、それを使う
+   *
+   * 情報ペインのボタンは `data-pkc-entry-ref` を**押される前に**載せている
+   * (`inspector.ts`)── 押した後に選択が移っても**別のノートの参照**にならないためである。
+   *
+   * ## 🔴 持っていない相手には、隔の 6 つと同じ規則で組む(2026-08-29)
+   *
+   * ⚠ 直す前は `closest('[data-pkc-entry-ref]')` **だけ**を見ており、
+   *   右クリックのメニューからは**必ず `undefined`** だった
+   *   ── メニューのボタンは `data-pkc-action` しか持たず、器は
+   *   **root 直下**に出るので `[data-pkc-entry-ref]` の中に居ない。
+   *   しかも `return` だけなので**理由も出ない** = 無言の dead click。
+   *   ⚠ これは右クリックのメニューの**先頭の 1 行**である。
+   * 🔑 #578 で `adopt-external-images` を直したのと**同じ穴**なので、
+   *   同じ規則で解く──「押した物の中の行 → 無ければ選んでいるノート」。
+   * ⚠ 組み立ては `formatEntryLink` 1 本(§7)── `inspector.ts` が載せる字と
+   *   同じ関数であることを `tests/adapter/copy-entry-ref.test.ts` が pin する。
+   */
+  'copy-entry-ref': (dispatcher, target, services) => {
+    const carried = target
       .closest<HTMLElement>('[data-pkc-entry-ref]')
       ?.getAttribute('data-pkc-entry-ref');
-    if (ref === null || ref === undefined) return;
+    const st = dispatcher.getState();
+    const lid =
+      target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? st.selectedLid;
+    const meta = lid === null ? undefined : st.entryMetas.get(lid);
+    const ref =
+      carried ?? (meta === undefined || lid === null ? null : formatEntryLink(meta.title, lid));
+    // ⚠ **黙って止めない**(#513 と同じ作法)── 押したのに何も起きないのがいちばん困る
+    if (ref === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'ノートを選んでから押してください' });
+      return;
+    }
     services.copyText?.(ref);
     flashCopied(target);
+    /**
+     * ⚠ **光るだけでは、メニューから押した人に届かない**(2026-08-29)。
+     * 🔑 `data-pkc-flash` は 700ms の合図だが、右クリックのメニューは
+     *   押した瞬間に**畳まれる**(`onCloseMenu`)── 光る相手が消えるので、
+     *   成功しても**画面に何も残らない**(dead click と見分けが付かない)。
+     * ⚠ だから隣の `copy-plain-markdown` と**同じく状態の行にも出す**。
+     */
+    services.showStatus?.('参照を写しました');
   },
   /**
    * 🔴 **本文の外部画像を、押して手元へ取り込む**(#264 段①+②)。

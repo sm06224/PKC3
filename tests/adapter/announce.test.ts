@@ -22,6 +22,7 @@ import {
   type NoticeStorage,
 } from '../../src/adapter/platform/notice-store';
 import { buildShell } from '../../src/adapter/ui/render/shell';
+import { codeOnly } from '../helpers/code-only';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import type { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { initialState } from '../../src/adapter/state/app-state';
@@ -505,10 +506,47 @@ describe('🔴 帯の置き場', () => {
      * ⚠ **数を実数で pin する** ── 版面を足した人がここで必ず気づく
      *   (畳んだ版面から帯の行を落とすと、user は保存エラーを見られなくなる)。
      */
-    const layouts = [...css.matchAll(/grid-template-areas:\s*([^;]+);/g)].map((m) => m[1] ?? '');
+    /**
+     * \u26a0 **注釈を先に落とす**(2026-08-29)。ここは「行が**在る**」ことの主張なので、
+     *   CLAUDE.md \u00a71 の作法どおり**コメントは検査を満たしてしまう** ──
+     *   区画の行を消しても、同じ名前を書いた注釈が残っていれば 1 行と数えられ、
+     *   **緑のまま帯が版面から落ちる**。
+     */
+    const layouts = [...codeOnly(css).matchAll(/grid-template-areas:\s*([^;]+);/g)].map(
+      (m) => m[1] ?? '',
+    );
     expect(layouts, '版面を全部読めていない(空振り)').toHaveLength(6);
+    /**
+     * \U0001f511 **名前は手で並べず、いちばん広い版面から引く** ── 1 行を丸ごと
+     *   占めている区画(全部のセルが同じ名前)が「全幅の帯」である。
+     * \u26a0 手で並べると、帯を足した人がここを広げ忘れる(実際 #413 で 3 本ぶん忘れた)。
+     * \u26a0 数は**実数で pin する** ── 引き方が壊れて 0 件になったら気づけない。
+     */
+    const rowsOf = (areas: string): string[][] =>
+      areas
+        .split('\n')
+        .map((l) => l.trim().replace(/^'|'$/g, '').split(/\s+/).filter(Boolean))
+        .filter((cells) => cells.length > 0);
+    const FULL_WIDTH_AREAS = rowsOf(layouts[0] ?? '')
+      .filter((cells) => cells.length > 1 && cells.every((c) => c === cells[0]))
+      .map((cells) => cells[0]!);
+    expect(
+      FULL_WIDTH_AREAS,
+      '全幅の帯を引けていない(空振り)。帯を増減したらこの数も直す',
+    ).toEqual(['capture', 'timers', 'alarms', 'announce', 'update', 'notices', 'status']);
     for (const areas of layouts) {
-      for (const name of ['announce', 'update', 'notices']) {
+      /**
+       * \U0001f534 **全幅の帯は 7 本ある**(2026-08-29 に 3 → 7 へ広げた)。
+       *
+       * \u26a0 直す前は `announce` / `update` / `notices` の **3 つしか見ておらず**、
+       *   #413 で足した **`capture` / `timers` / `alarms` が誰にも守られていなかった** ──
+       *   実際に 1100px 以下と 720px 以下の版面から 3 行とも落ちており、
+       *   帯は暗黙の列へ化けて**互いに重なり、480px では画面の外**に出ていた
+       *   (`app.css:287` の「止める口が消えると、マイクが回り続ける」が破れていた)。
+       * \U0001f511 **`grid-area:` を宣言している名前を数え上げて、その全部を見る**
+       *   ── 名前を手で並べると、次に足した人がまたここを広げ忘れる。
+       */
+      for (const name of FULL_WIDTH_AREAS) {
         const rows = areas.split('\n').filter((l) => l.includes(name));
         expect(rows, `${name} の行が 1 つではない版面がある`).toHaveLength(1);
       }
@@ -671,6 +709,7 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
+    ['2026-08-29-reachable-controls', '77306ae3'],
     ['2026-08-29-office-26-8', '4f773942'],
     ['2026-08-29-split-frames', '6f5b67a5'],
     ['2026-08-29-body-context-columns', '6ca52dbd'],
@@ -691,7 +730,8 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-08-28-diagram-zoom', 'de5baf60'],
     ['2026-08-28-columns-inline-edit', 'd8b12951'],
     ['2026-08-28-uml-templates', '93cb2d2a'],
-    ['2026-08-28-html-blocked-reason', '350d8307'],
+    // ⚠ 上限 20 を超えたので 2026-08-29 に落とした(原本は CHANGELOG)
+    //['2026-08-28-html-blocked-reason', '350d8307'],
     // ⚠ 上限 20 を超えたので 2026-08-29 に落とした(原本は CHANGELOG)
     // ['2026-08-28-column-rule', 'b79c168b'],
     // ⚠ 上限 20 を超えたので 2026-08-29 に落とした(原本は CHANGELOG)

@@ -46,9 +46,14 @@ const OUTSIDE_ONLY: readonly string[] = ['format-bold', 'open-settings', 'toggle
  * 🔑 増えたら「**また静的に追えない出口を足した**」という合図
  * (減ったら、直したぶんをこの表から消すこと ── 消さないと落ちる = 忘れられない)。
  */
+/**
+ * ⚠ **2026-08-29 に 2 件減らした** ── `calendar-nav` / `calendar-today` は
+ *   #292 段⑤ で中央のカレンダーを外したときの**取り残し**で、`src` 全体に
+ *   焼く所が **0 件**、しかも `schedule-nav` / `schedule-today` と本体が同じだった。
+ * 🔑 `repo-hygiene` は**逆向き(焼いたのに受け手が無い)しか見ない**ので鳴らなかった
+ *   ── この表が、その向きの計器である。
+ */
 const UNRESOLVED: readonly string[] = [
-  'calendar-nav',
-  'calendar-today',
   'choose-office-pack',
   'dual-back',
   'dual-bookmark',
