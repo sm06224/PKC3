@@ -280,3 +280,61 @@ test('🔴 右ペインが届かないノートでも、右クリックから紙
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **本文の上で右クリックすると、段組みを切り替えられる**(#426 段② / #522)。
+ *
+ * user 指示 2026-08-28(#522):
+ *
+ * > **段組表示を表示変更導線をセンターペインもしくはショートカット、
+ * > コンテキストメニューに用意したいくらいには気に入った**
+ *
+ * ## unit では原理的に届かない 2 つ
+ *
+ * ① **本物の右クリック**(`button: 'right'`)── 本文の上でブラウザ既定を
+ *    奪えたかは、実ブラウザでしか見えない
+ * ② 🔴 **段組みが本当に効くか** ── `cycleReadColumns` は**器を採寸**して
+ *    「いま何段で出ているか」を決める。happy-dom には版面の幅が無いので、
+ *    unit は**属性が動いたことしか見られない**
+ */
+test('🔴 本文を右クリックすると段組みを切り替えられる (#426 段② / #522)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  const body = Array.from({ length: 30 }, (_, i) => `段落 ${i + 1}。これは段組みを見るための本文です。`).join('\n\n');
+  await page.locator('[data-pkc-field="editor-body"]').fill(`# 段組みの的\n\n${body}\n`);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-field="detail-body"]')).toBeVisible();
+
+  const before = await page.evaluate(() =>
+    document.documentElement.getAttribute('data-pkc-read-columns'),
+  );
+
+  // ① 本文の**段落の上**で右クリック(⚠ リンクや図の上ではない)
+  await page.locator('[data-pkc-field="detail-body"] p').first().click({ button: 'right' });
+  const menu = page.locator(MENU);
+  await expect(menu, '本文で右クリックしてもメニューが出ない').toBeVisible();
+  const cycle = menu.locator('button[data-pkc-action="cycle-read-columns"]');
+  await expect(cycle, '段組みの切替が出ていない').toBeVisible();
+  // ⚠ 行の一覧が出ていない(押した物と効く先が食い違わない)
+  await expect(
+    menu.locator('button[data-pkc-action="delete-entry"]'),
+    '本文のメニューに削除が出ている',
+  ).toHaveCount(0);
+
+  await cycle.click();
+
+  // ② **メニューの外**で確かめる ── 段数が動き、画面の下に何段か出る
+  await expect
+    .poll(async () =>
+      page.evaluate(() => document.documentElement.getAttribute('data-pkc-read-columns')),
+    )
+    .not.toBe(before);
+  await expect(page.locator('[data-pkc-region="status"]'), '何段になったか出ていない').toContainText(
+    '段組み',
+  );
+  await expect(page.locator(MENU), '押した後もメニューが残っている').toHaveCount(0);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
