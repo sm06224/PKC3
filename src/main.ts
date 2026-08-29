@@ -74,6 +74,7 @@ import {
 } from '@adapter/platform/storage/resolve-container-compat';
 import { buildShell, paintAlarmBar, paintCaptureBar, paintTimerBar } from '@adapter/ui/render/shell';
 import { showNotices, clearNotices } from '@adapter/ui/render/notices';
+import { createImportUndo, importPanel } from '@adapter/ui/actions/import-undo';
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
 import { createAnnounce, announceServices } from '@adapter/ui/render/announce';
 import { versionText } from '@adapter/ui/render/help';
@@ -1424,6 +1425,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     dispatcher.dispatch({ type: 'SET_OPEN_EXTENSIONS', open: appExtLinks.list() });
   });
 
+  /**
+   * 🔴 **取り込みの戻り道**(#535 ②)。⚠ 判断(何を憶え、何を出し、どう消すか)は
+   *   `import-undo.ts` に在る ── この file はどの test からも実行されないので、
+   *   ここに置くと取り違えが全 test 緑のまま通る(CLAUDE.md §2)。
+   */
+  const importUndo = createImportUndo({
+    dispatch: (a) => dispatcher.dispatch(a),
+    notify: (message) => showStatus(message),
+    clear: () => clearNotices(regions.notices),
+  });
+
   const importDeps: ImportDeps = {
       // ⚠ 生存 entry だけでは足りない ── ゴミ箱の lid(entries に居ないが
       // revisions を持つ)と衝突すると、その item がゴミ箱から消え、
@@ -1512,7 +1524,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       reload: () => reloadSnapshot(dispatcher, cid, loadSnapshot),
       notify: (message) => showStatus(message),
       // 注意は**全件**を専用面へ(1 行の status では 1 件目しか届かない)
-      report: (notes) => showNotices(regions.notices, '取込時の注意', notes),
+      // 🔴 **戻り道も同じ面に出す**(#535 ②)── 題と操作を決めるのは `import-undo.ts`
+      report: (notes) => {
+        const panel = importPanel(notes, importUndo.pending());
+        showNotices(regions.notices, panel.title, notes, panel.action);
+      },
+      // 🔴 **取り込んだ id を憶える**(#535 ②)── 戻せるのは直前の 1 回だけ
+      imported: (lids) => importUndo.remember(lids),
       // 🔴 **取り込んだノートを開く**(2026-08-05、user 報告「開いたら何も起きずに終わる」)。
       //    ⚠ `reload()` が早く返る場合があるので、素朴な dispatch では
       //    reducer に弾かれて黙って終わる ── 「居たら選ぶ、まだなら待つ」は
@@ -1545,6 +1563,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             // ⚠ **順番で結ぶ**(名前で結ばない)── 同名の別ファイルを同時に開くと
             //    名前では取り違える。`importMarkdownFiles` は files の順で lid を返す
             imported: (lids) => {
+              // ⚠ **上書きしているので、記憶も自分で呼ぶ**(#535 ②)──
+              //    ここを忘れると「OS から開いた md だけ戻せない」が静かに残る
+              importUndo.remember(lids);
               lids.forEach((lid, i) => {
                 const handle = handles[i];
                 const file = files[i];
@@ -2002,6 +2023,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // 整理との同時実行は attach と同じ危険。⚠ 振り分けは import-file.ts が持つ
     importFiles: (files) => void withAssetGate(() => runImport(files)),
     dismissNotices: () => clearNotices(regions.notices),
+    // 🔴 直前の取込をごみ箱へ(#535 ②)── 記憶も件数も `import-undo.ts` が持つ
+    undoImport: () => importUndo.undo(),
     /**
      * 🔴 **アプリの窓なら `× 閉じる` で窓ごと閉じる**(#300 段③ の直し)。
      * ⚠ 判断は `view-window.ts` ── ここは `window` を渡すだけである。

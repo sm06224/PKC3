@@ -4229,6 +4229,23 @@ function removeEntryFromState(
     selectedLid = vIdx < 0 ? null : (after[Math.min(vIdx, after.length - 1)] ?? null);
     if (selectedLid) events.push({ type: 'REQUEST_BODY', lid: selectedLid });
   }
+  // ⚠ 変化が無ければ**元の参照**のまま(下の docstring)
+  const taskCards = state.taskScan === null ? null : withoutLid(state.taskScan.cards, lid);
+  const scanTask =
+    state.taskScan === null || taskCards === state.taskScan.cards
+      ? state.taskScan
+      : { ...state.taskScan, cards: taskCards! };
+  const contactCards = state.contactScan === null ? null : withoutLid(state.contactScan.cards, lid);
+  const scanContact =
+    state.contactScan === null || contactCards === state.contactScan.cards
+      ? state.contactScan
+      : { ...state.contactScan, cards: contactCards! };
+  const snippetItems = state.snippetScan === null ? null : withoutLid(state.snippetScan.items, lid);
+  const scanSnippet =
+    state.snippetScan === null || snippetItems === state.snippetScan.items
+      ? state.snippetScan
+      : { ...state.snippetScan, items: snippetItems! };
+
   return {
     state: {
       ...state,
@@ -4258,6 +4275,21 @@ function removeEntryFromState(
       // ⚠ 元ファイルの紐づけも外す ── 消したノートに「書き戻す」を出したままだと、
       //    戻せなくなった器を指す導線が残る(復元したら開き直しで紐づく)
       linkedFiles: dropLink(state.linkedFiles, lid),
+      /**
+       * 🔴 **集めた一覧からも落とす**(#535 ②。実ブラウザの smoke が捕まえた)。
+       *
+       * ⚠ 直す前は **消したノートが「予定 / 連絡先 / 雛形」に残り続けて**いた ──
+       *   これらは worker が集めた断面で、`entryMetas` から作り直していないため。
+       *   snapshot を読み直す経路(`keepContacts`)には落とす処理が在ったのに、
+       *   **1 件消す経路には無かった** ── 片側だけ在る非対称だった。
+       * 🔑 **3 つとも同じ形**である(`cards` / `cards` / `items` が `lid` を持つ)。
+       *   ⚠ 1 つだけ直すと、次に触る人が残り 2 つで同じ症状を踏む。
+       * ⚠ **頼み直さない** ── worker を叩くと「別タブが書くたびに一覧が空へ飛ぶ」
+       *   (`REFRESH_CONTACT_SCAN` が明記している症状)。消えた分だけ落とす。
+       */
+      taskScan: scanTask,
+      contactScan: scanContact,
+      snippetScan: scanSnippet,
     },
     events,
   };
@@ -4301,6 +4333,19 @@ function keepContacts(
   if (!sameCid) return null;
   const cards = scan.cards.filter((c) => metas.has(c.lid));
   return cards.length === scan.cards.length ? scan : { ...scan, cards };
+}
+
+/**
+ * 🔴 **消えた lid を、集めた一覧から落とす**(#535 ②、2026-08-29)。
+ *
+ * ⚠ **変化が無ければ同じ配列を返す** ── 描画の指紋を無駄に壊さない
+ * (`keepLinks` / `keepContacts` と同じ作法)。
+ */
+function withoutLid<T extends { readonly lid: string }>(
+  items: readonly T[],
+  lid: string,
+): readonly T[] {
+  return items.some((i) => i.lid === lid) ? items.filter((i) => i.lid !== lid) : items;
 }
 
 /** 紐づけを 1 件外す(⚠ 持っていないなら**同じ参照**を返す ── 断面指紋を壊さない)。 */

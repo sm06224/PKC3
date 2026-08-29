@@ -39,7 +39,8 @@ import {
 } from '@features/settings/settings-file';
 import { downloadBlob } from '@adapter/platform/download';
 import { visibleContacts } from '@features/contact/contact-card';
-import { buildVcf } from '@features/contact/vcard';
+import { buildVcf, isVcfFileName } from '@features/contact/vcard';
+import { isMarkdownFileName } from '@features/import/plain-markdown';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
 import { insertText, OWN_MEANING } from '@adapter/ui/render/row-swap';
 import { sectionAt } from '@features/markdown/append-target';
@@ -661,6 +662,12 @@ export interface BinderServices {
   /** PKC2 ファイルの取込(P6b)。判別・変換・書込は実体側の責務。 */
   /** 取込(PKC2 の書出し / 素の Markdown)。振り分けは import-file.ts が持つ。 */
   importFiles?(files: File[]): void;
+  /**
+   * 🔴 **直前の取込をごみ箱へ戻す**(#535 ②)。
+   * ⚠ 「どれを取り込んだか」の記憶は `import-undo.ts` が持つ ── binder は
+   *   「押された」を伝えるだけ(件数も生死もここで数えない)。
+   */
+  undoImport?(): void;
 }
 
 function defaultTitle(dispatcher: Dispatcher, archetype: string): string {
@@ -3907,6 +3914,10 @@ const ACTIONS: Record<string, ActionHandler> = {
   'dismiss-notices': (_dispatcher, _target, services) => {
     services.dismissNotices?.();
   },
+  // 🔴 **直前の取込を取り消す**(#535 ②)── 消す規則も件数も実体側(`import-undo.ts`)
+  'undo-import': (_dispatcher, _target, services) => {
+    services.undoImport?.();
+  },
   'open-tile': (_dispatcher, target, services) => {
     const lid = target.closest('[data-pkc-tile]')?.getAttribute('data-pkc-tile');
     if (lid) services.openTile?.(lid);
@@ -5253,6 +5264,38 @@ export function bindActions(
    */
   const routeFiles = (files: readonly File[], target: EventTarget | null): boolean => {
     if (files.length === 0) return false;
+    /**
+     * 🔴 **落とした `.md` / `.vcf` は「取り込む」と同じ結果にする**(#535 ①)。
+     *
+     * ⚠ 直す前は**添付**になっていた ── スマホから出した `contacts.vcf` を
+     *   窓へ落とすのはいちばん自然な手なのに、**連絡先は 1 件も増えず、
+     *   要らない添付が 1 つ残る**。🔑 「取り込めなかった」ではなく
+     *   「**別のことが起きた**」ので、user は自分が何を間違えたのか分からない。
+     *
+     * 🔑 **判定は取込の振り分けと同じ関数**(`isMarkdownFileName` /
+     *   `isVcfFileName`)── ここで拡張子を書き直すと、
+     *   「落として入る物」と「選んで入る物」が食い違う(CLAUDE.md §7)。
+     *
+     * ⚠ **全部がその 2 種のときだけ**倒す ── 画像と混ざっていたら、
+     *   これまでどおり添付にする(`importFiles` は混在を断るので、
+     *   ここで倒すと**落としただけで断り文が出る**)。
+     * ⚠ 添付したい人の道は残っている ── 「添付」ボタンから選べば添付になる。
+     *   その旨は取込の帯が言う(片道にしないための対は #535 ② の「取り消す」)。
+     *
+     * 🔴 **編集中は倒さない**(着地前に自分の diff を読み直して見つけた回帰)。
+     * ⚠ 取込は `phase !== 'ready'` を**断る**ので、倒すと編集中に `.md` を落とした人は
+     *   「編集を終了してから取り込んでください」を読まされる ── **これまでは
+     *   添付できていた**ので、動線を 1 つ奪うことになる。
+     * 🔑 だから**取込が受けられるときだけ**倒し、そうでなければ**これまでどおり**添付。
+     */
+    if (
+      services.importFiles &&
+      dispatcher.getState().phase === 'ready' &&
+      files.every((f) => isMarkdownFileName(f.name) || isVcfFileName(f.name))
+    ) {
+      services.importFiles([...files]);
+      return true;
+    }
     const inBody = isBodyInput(target);
     const images = inBody ? files.filter(isImageFile) : [];
     const rest = files.filter((f) => !images.includes(f));

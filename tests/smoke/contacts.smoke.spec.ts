@@ -195,3 +195,79 @@ test('🔴 絞り込みで 0 件でも「絞りを外す」から戻れる (#536
 
   expect(errors, 'ページ例外が出ている').toEqual([]);
 });
+
+/**
+ * 🔴 **取り込みを取り消せる**(#535 ②)。
+ *
+ * ## unit では原理的に届かない ── **配線の両端が別々に test されている**から
+ *
+ * 「取り消す」を出すのは**注意の面**(`notices.ts`)、押されたら実行するのは
+ * **root の委譲**(`binder.ts`)、記憶を持つのは `import-undo.ts`、
+ * そして 3 つを結ぶのは **`main.ts`** である。
+ * ⚠ `main.ts` は**原文を読む test からしか実行されない**ので、
+ *   そこを消す変異は「字が在るか」でしか捕まらない(弱いと自覚した検査)。
+ * 🔑 だから**実物どうしを繋いで 1 本**通す(CLAUDE.md §7
+ *   「A と B が合意していることは、A の test にも B の test にも書けない」)。
+ *
+ * ⚠ 観測点は**面の外**にする ── 面が畳まれただけでは「消えた」と言えない。
+ *   連絡先の一覧が **1 → 0** に戻ることまで見る。
+ */
+test('🔴 取り込んだ直後に「取り消す」を押すと、入った分がごみ箱へ入る (#535 ②)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+
+  const vcf = [
+    'BEGIN:VCARD',
+    'VERSION:3.0',
+    'FN:取り消される人',
+    'TEL;TYPE=CELL:090-0000-0000',
+    'END:VCARD',
+    '',
+  ].join('\r\n');
+  await page.setInputFiles('[data-pkc-field="import-input"]', {
+    name: 'undo.vcf',
+    mimeType: '',
+    buffer: Buffer.from(vcf, 'utf8'),
+  });
+
+  await expect(page.locator('[data-pkc-region="status"]'), '取込完了の帯が出ない').toContainText(
+    '取込完了: 連絡先 1 件',
+    { timeout: 10_000 },
+  );
+
+  // 🔑 **注意が 0 件でも面が出る**(戻り道はそこに在る)
+  const undo = page.locator('[data-pkc-action="undo-import"]');
+  await expect(undo, '取り消す口が出ない(注意 0 件だと面ごと畳まれている)').toBeVisible({
+    timeout: 10_000,
+  });
+  // ⚠ 押す前の説明は「起きること」で書く
+  await expect(undo).toHaveAttribute('title', /ごみ箱/);
+
+  // 🔑 **前提** ── 取り消す前は連絡先に 1 件並んでいる(空振り防止)
+  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="contacts"]');
+  const pane = page.locator('[data-pkc-browse-pane="contacts"]');
+  await expect(pane.locator('[data-pkc-contact]'), '前提: 取り込んだ 1 件が並んでいない').toHaveCount(
+    1,
+    { timeout: 10_000 },
+  );
+
+  await undo.click();
+
+  // ⚠ **面の外**で確かめる ── 入った分が消えている
+  await expect(
+    pane.locator('[data-pkc-contact]'),
+    '取り消したのに連絡先が残っている',
+  ).toHaveCount(0, { timeout: 10_000 });
+  // 🔑 **どこへ行ったかを言っている**(黙って消さない)
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('ごみ箱');
+  // ⚠ 押した後に口が残らない(2 度目は何も消さないので、置いておくと dead click)
+  await expect(
+    page.locator('[data-pkc-action="undo-import"]'),
+    '取り消した後も口が残っている',
+  ).toHaveCount(0);
+
+  expect(errors, 'ページ例外が出ている').toEqual([]);
+});
