@@ -442,8 +442,14 @@ describe('お知らせの登記表', () => {
   it('⚠ 登記表が上限を超えておらず、上限の宣言も動いていない', () => {
     expect(NOTICES.length).toBeLessThanOrEqual(NOTICE_KEEP_MAX);
     expect(NOTICE_SHOW_MAX, '表示上限が変わった').toBe(10);
-    expect(NOTICE_KEEP_MAX, '保持上限が変わった').toBe(20);
-    expect(NOTICE_KEEP_MAX, '「表示の 2 倍」という宣言が崩れた').toBe(NOTICE_SHOW_MAX * 2);
+    expect(NOTICE_KEEP_MAX, '保持上限が変わった').toBe(10);
+    /**
+     * 🔴 **「表示の 2 倍」から「表示と同じ」へ変えた**(2026-08-29、#596 E)。
+     * ⚠ 2 倍だった理由は「**原本は残す**」だったが、その役目は `CHANGELOG.md` が
+     *   担っている ── 11 件目より後ろは**原本でもなく画面にも出ない重り**だった。
+     * 🔑 揃えたので不変条件が 1 つ増える:**登記表 = 画面に出るもの**。
+     */
+    expect(NOTICE_KEEP_MAX, '登記表 = 画面に出るもの、が崩れた').toBe(NOTICE_SHOW_MAX);
     expect(NOTICE_ITEMS_MAX, '項目数の上限が変わった').toBe(6);
     expect(NOTICE_ITEM_CHARS_MAX, '字数の上限が変わった').toBe(120);
     expect(NOTICE_ITEM_CHARS_MIN, '字数の下限が変わった').toBe(4);
