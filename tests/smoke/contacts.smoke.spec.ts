@@ -137,3 +137,61 @@ test('🔴 .vcf を取り込むと連絡先に並び、「vCard で書き出す�
 
   expect(errors, '例外が出ている').toEqual([]);
 });
+
+/**
+ * 🔴 **絞り込みが残っていても、行き止まりにしない**(#536 ②)。
+ *
+ * > 一覧タブで「会議」と打ったまま連絡先タブへ来ると当たりが 0 件になり、
+ * > **「vCard で書き出す」ボタンごと画面から消えて**いた。
+ *
+ * ⚠ **unit では「ボタンが在る」しか見られない** ── ここで見るのは
+ *   **押したら本当に戻るか**(絞りが state から消え、連絡先と書き出しの口が戻る)。
+ */
+test('🔴 絞り込みで 0 件でも「絞りを外す」から戻れる (#536 ②)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+
+  await createEntry(page, 'text');
+  const live = page.locator('[data-pkc-region="editor-live"]');
+  await clickReal(page, '[data-pkc-region="editor-live"]');
+  await live
+    .locator('[data-pkc-field="row-source"]')
+    .fill('---\ntel: 090-1234-5678\n---\n\n# 山田太郎\n\n本文。');
+  await page.keyboard.press('Tab');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="contacts"]');
+  const pane = page.locator('[data-pkc-browse-pane="contacts"]');
+  await expect(pane.locator('[data-pkc-contact]'), '前提が崩れた(連絡先が並ばない)').toHaveCount(1);
+  // ⚠ **前提** ── 絞り込みが無いうちは「絞りを外す」は出ていない
+  await expect(
+    pane.locator('[data-pkc-field="contacts-clear-filter"]'),
+    '絞り込みが無いのに「絞りを外す」が出ている',
+  ).toHaveCount(0);
+
+  // 🔴 当たらない語で絞る ── ここで書き出しの口ごと消えていた
+  await page.locator('[data-pkc-field="entry-filter"]').fill('当たらない語');
+  await expect(pane.locator('[data-pkc-contact]'), '絞り込みが効いていない').toHaveCount(0);
+  await expect(
+    pane.locator('[data-pkc-field="contacts-export"]'),
+    '前提が崩れた(書き出しの口が残っている)',
+  ).toHaveCount(0);
+
+  const clear = pane.locator('[data-pkc-field="contacts-clear-filter"]');
+  await expect(clear, '行き止まりのまま(進める道が無い)').toBeVisible();
+  await clickReal(page, '[data-pkc-field="contacts-clear-filter"]');
+
+  // 🔑 **押したら本当に戻る**(連絡先も、書き出しの口も)
+  await expect(pane.locator('[data-pkc-contact]'), '押しても連絡先が戻らない').toHaveCount(1);
+  await expect(
+    pane.locator('[data-pkc-field="contacts-export"]'),
+    '押しても書き出しの口が戻らない',
+  ).toBeVisible();
+  await expect(
+    page.locator('[data-pkc-field="entry-filter"]'),
+    '絞り込みの欄が空になっていない',
+  ).toHaveValue('');
+
+  expect(errors, 'ページ例外が出ている').toEqual([]);
+});

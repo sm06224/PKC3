@@ -671,6 +671,7 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
+    ['2026-08-29-contacts-clear-filter', 'b960c631'],
     ['2026-08-29-tag-badges', '4179d98c'],
     ['2026-08-29-columns-folded-reason', '7cce7be1'],
     ['2026-08-29-in-body-tags', 'a5b7156f'],
@@ -690,7 +691,8 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-08-28-vcard', '66c7c19b'],
     ['2026-08-28-place-board', 'd34bbe2c'],
     ['2026-08-28-auto-toc', 'e7625c9b'],
-    ['2026-08-28-tag-input', 'c547cffa'],
+    // ⚠ 上限 20 を超えたので 2026-08-29 に落とした(原本は CHANGELOG)
+    // ['2026-08-28-tag-input', 'c547cffa'],
     // ⚠ 上限 20 を超えたので 2026-08-29 に落とした(原本は CHANGELOG)
     // ['2026-08-28-pane-resize', 'aa8d38bf'],
     // ⚠ 上限 20 を超えたので 2026-08-29 に落とした(原本は CHANGELOG)

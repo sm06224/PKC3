@@ -4082,6 +4082,14 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 言っているので既定は札だが、**その場で「文字のまま」へ戻せる** ── 決めるのは user
    * (user 指示 2026-08-28「正直変更はユーザーに委ねて欲しい」)。
    */
+  /**
+   * 🔴 **絞り込みを外す**(#536 ②)。⚠ 行き止まりに説明を貼るのではなく、
+   * **その場で進める道**を出すための受け手である(CLAUDE.md「片道の操作を作らない」)。
+   * 🔑 撃つのは既存の `SET_ENTRY_FILTER` ── 絞りの正本は 1 つのままにする(§7)。
+   */
+  'clear-entry-filter': (dispatcher) => {
+    dispatcher.dispatch({ type: 'SET_ENTRY_FILTER', query: '' });
+  },
   'set-tag-badge': (_dispatcher, target) => {
     const v =
       target instanceof HTMLSelectElement

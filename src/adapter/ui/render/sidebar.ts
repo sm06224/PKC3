@@ -43,8 +43,6 @@ export class SidebarRenderer {
   private lastSortDesc = false;
   private lastFilter: string | null = null;
 
-  /** 絞り込み欄。⚠ **state が正** ── 欄の値は state に合わせて書き戻す。 */
-  private readonly filterInput: HTMLInputElement | null;
   /** 戻る・進む(#190)。⚠ **押せないときは殺す** ── dead click を作らない。 */
   private readonly navBack: HTMLButtonElement | null;
   private readonly navForward: HTMLButtonElement | null;
@@ -59,9 +57,6 @@ export class SidebarRenderer {
     );
     if (!list) throw new Error('sidebar shell missing entry-list region');
     this.list = list;
-    this.filterInput = sidebarRegion.querySelector<HTMLInputElement>(
-      '[data-pkc-field="entry-filter"]',
-    );
     this.navBack = sidebarRegion.querySelector<HTMLButtonElement>(
       '[data-pkc-action="nav-back"]',
     );
@@ -96,11 +91,16 @@ export class SidebarRenderer {
     const historyChanged = state.selectionHistory !== this.lastHistory;
     if (!listChanged && !selectionChanged && !historyChanged) return; // 指紋一致 ── DOM に触れない
 
-    // 🔑 欄の値を state に合わせる(review M-2)。新規作成が絞り込みを解除する
-    // ので、**欄だけ文字が残る**と「効いていないのに書いてある」嘘になる。
-    // ⚠ 打鍵中は `value === filterQuery` なので書き戻しは起きない(caret を壊さない)
-    if (this.filterInput && this.filterInput.value !== state.filterQuery)
-      this.filterInput.value = state.filterQuery;
+    /**
+     * 🔴 **欄の同期は、ここではなく `browse.ts` が持つ**(2026-08-29、#536 ② で判明)。
+     *
+     * ⚠ この renderer は**一覧の面を開いているときしか走らない**
+     *   (`browse.ts` が `mode === 'list'` のときだけ呼ぶ)── ところが
+     *   **探す欄は面の外**にあって、どの面でも見えている。
+     *   だから**フォルダ / 連絡先 / 予定のタブで絞りが変わると、欄だけ古い字が残る**
+     *   (タグの札を押した直後がその形だった)。
+     * 🔑 #478 の「**札の帯は面に関係なく描く**」と同じ理由である。
+     */
 
     if (listChanged) this.reconcileRows(state);
     if (listChanged || selectionChanged) this.patchSelection(state.selectedLid);
