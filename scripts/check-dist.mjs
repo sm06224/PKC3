@@ -16,7 +16,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { inspectDist } from './dist-inspect.mjs';
+import { inspectDist, PORTABLE_TEMPLATE } from './dist-inspect.mjs';
 
 /**
  * 検品する directory。既定は `dist/`。
@@ -80,6 +80,19 @@ const SHIPPED_CAP_KB = 7000;
  */
 const SHIPPED_FLOOR_KB = { dev: 3500, product: 800 };
 
+/**
+ * 🔴 **「持ち歩ける 1 枚」の雛形だけの予算**(#400 段④。2026-08-29 に本番を止めて足した)。
+ *
+ * ⚠ これは**アプリの配る量ではない** ── 訪問者は落とさない(押したときだけ取りに行く)。
+ *   だから上の cap には数えないが、**数えないことと見ないことは別**である。
+ * 🔑 実測 **7051.7 KB**(2026-08-29、`VITE_PKC_KIND=product npm run build:portable`)。
+ *   アプリ本体(6512.1 KB)を 1 枚へ inline するので、binary が base64 で膨らむぶん大きい。
+ * ⚠ 余裕は約 1950 KB ── **誤取込 1 本(数百 KB〜MB)は止まる**。
+ *   下限は「空 / 途中で切れた雛形」だけを狙う(実測の半分以下)。
+ */
+const PORTABLE_CAP_KB = 9000;
+const PORTABLE_FLOOR_KB = 3000;
+
 /** 中身を読む対象(テキストの生成物だけ。wasm は読まない)。 */
 const TEXTUAL = /\.(?:js|mjs|cjs|css|html|webmanifest|json)$/;
 
@@ -117,6 +130,9 @@ try {
 
 const text = new Map();
 for (const f of files) {
+  // ⚠ **雛形は読まない**(7 MB の 1 枚)── 規則はこの file の中身を 1 つも見ないので、
+  //    読むのは丸ごと無駄である(そして inline map の走査が誤検知しうる)
+  if (f.path === PORTABLE_TEMPLATE) continue;
   if (!f.path.endsWith('.map') && TEXTUAL.test(f.path)) {
     text.set(f.path, readFileSync(join(DIST, f.path), 'utf-8'));
   }
@@ -126,6 +142,8 @@ const { lines, errors } = inspectDist({
   kind,
   capKb: SHIPPED_CAP_KB,
   floorKb: SHIPPED_FLOOR_KB[kind],
+  sidecarCapKb: PORTABLE_CAP_KB,
+  sidecarFloorKb: PORTABLE_FLOOR_KB,
   files,
   text,
 });

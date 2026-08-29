@@ -50,7 +50,11 @@ function setup(over: Partial<BinderServices> = {}) {
      */
     '<div data-pkc-view-pane="settings"><p data-pkc-field="settei">設定の中身</p></div>' +
     '</div>' +
-    '<div data-pkc-region="entry-list"><li data-pkc-entry="n1">行</li></div>' +
+    '<div data-pkc-region="entry-list">' +
+    '<li data-pkc-entry="n1">行</li>' +
+    // 🔴 **フォルダの行**(#500 案 C)── 条件つきの物が出る側の対照群
+    '<li data-pkc-entry="f1">フォルダ</li>' +
+    '</div>' +
     '<div data-pkc-region="jinou">地の上</div>';
   document.body.append(root);
   const said: string[] = [];
@@ -76,6 +80,17 @@ function setup(over: Partial<BinderServices> = {}) {
         date: null,
         archived: 0,
       } as never,
+      {
+        lid: 'f1',
+        title: 'フォルダ',
+        archetype: 'folder',
+        created_at: null,
+        updated_at: null,
+        entry_order: 2,
+        status: null,
+        date: null,
+        archived: 0,
+      } as never,
     ],
     relations: [],
   });
@@ -83,6 +98,7 @@ function setup(over: Partial<BinderServices> = {}) {
   return {
     root,
     said,
+    dispatcher,
     para: root.querySelector('[data-pkc-field="para"]')!,
     link: root.querySelector('a')!,
     img: root.querySelector('img')!,
@@ -173,5 +189,104 @@ describe('本文の右クリック(#426 段② / #522)', () => {
       b.getAttribute('data-pkc-action'),
     );
     expect(acts, '行の右クリックが本文の一覧に変わった').toContain('delete-entry');
+  });
+});
+
+/**
+ * 🔴 **右ペインが唯一の入口だった、残りの 3 つ**(#500 案 C、2026-08-29)。
+ *
+ * 純関数の側(`tests/features/entry-actions.test.ts`)は「**どれを出すか**」を見る。
+ * ⚠ こちらが見るのは「**押して実際に走るか**」である ── 出す物を決めただけでは
+ *   足りない:右クリックのメニューのボタンは `data-pkc-action` **しか持たない**ので、
+ *   `data-pkc-entry` を直に読む受け手に渡すと**押しても無言**になる
+ *   (`adopt-external-images` が実際にその形だった)。
+ */
+describe('条件つきの操作が、右クリックから走る(#500 案 C)', () => {
+  const actionsOf = (menu: Element | null): string[] =>
+    [...(menu?.querySelectorAll('button[data-pkc-action]') ?? [])].map(
+      (b) => b.getAttribute('data-pkc-action') ?? '',
+    );
+
+  it('🔴 フォルダの行では「フォルダを書き出す」が出て、押すと走る', () => {
+    const called: string[] = [];
+    const s = setup({ exportFolder: (lid) => called.push(lid) });
+    rightClick(s.root.querySelector('[data-pkc-entry="f1"]')!);
+    expect(actionsOf(s.menu()), 'フォルダなのに出ていない').toContain('export-folder');
+    s.menu()!.querySelector<HTMLElement>('[data-pkc-action="export-folder"]')!.click();
+    // 🔴 **押した物ではなく、選んだ物へ効く** ── メニューは行の外に居るので
+    //    `data-pkc-entry` を持たない。解決規則が隣と揃っていないとここが空になる
+    expect(called, '押しても走らない(無言の dead click)').toEqual(['f1']);
+  });
+
+  it('⚠ ふつうのノートの行では出ない(押すと必ず失敗する物を出さない)', () => {
+    const s = setup();
+    rightClick(s.root.querySelector('[data-pkc-entry="n1"]')!);
+    expect(actionsOf(s.menu())).not.toContain('export-folder');
+    // ⚠ 空振り防止 ── メニュー自体は出ている
+    expect(actionsOf(s.menu()), 'そもそもメニューが出ていない').toContain('delete-entry');
+  });
+
+  it('🔴 元ファイルを開いた行では「書き戻す」が出て、押すと走る', () => {
+    const called: string[] = [];
+    const s = setup({ writeBackFile: (lid) => called.push(lid) });
+    // ⚠ **フォルダではない行**で見る ── folder の門に救われない場面
+    s.dispatcher.dispatch({ type: 'FILE_LINKED', lid: 'n1', name: 'memo.md' });
+    rightClick(s.root.querySelector('[data-pkc-entry="n1"]')!);
+    expect(actionsOf(s.menu()), '元ファイルが在るのに出ていない').toContain('write-back-file');
+    s.menu()!.querySelector<HTMLElement>('[data-pkc-action="write-back-file"]')!.click();
+    expect(called, '押しても走らない').toEqual(['n1']);
+  });
+
+  it('⚠ 元ファイルを開いていない行では出ない(上書きの口を常設しない)', () => {
+    const s = setup();
+    rightClick(s.root.querySelector('[data-pkc-entry="n1"]')!);
+    expect(actionsOf(s.menu())).not.toContain('write-back-file');
+  });
+
+  it('🔴 本文に外部の画像が在ると、メニューに枚数つきで出て、押すと取りに行く', async () => {
+    const asked: string[][] = [];
+    const s = setup({
+      adoptUrls: (urls) => {
+        asked.push([...urls]);
+        return Promise.resolve({ adopted: new Map(), failures: [] });
+      },
+    });
+    // 本文を開く(`BODY_LOADED` は選んでいる 1 件にしか入らない)
+    s.dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    s.dispatcher.dispatch({
+      type: 'BODY_LOADED',
+      lid: 'n1',
+      body: '![a](https://example.com/a.png)\n\n![b](https://example.com/b.png)',
+    });
+    rightClick(s.para);
+    const menu = s.menu();
+    expect(actionsOf(menu), '外部の画像が 2 枚あるのに出ていない').toContain(
+      'adopt-external-images',
+    );
+    // 🔴 **枚数が字に出ている**(押すとその数だけ外へ通信する)
+    expect(
+      menu!.querySelector('[data-pkc-action="adopt-external-images"]')?.textContent,
+    ).toContain('2 枚');
+
+    menu!.querySelector<HTMLElement>('[data-pkc-action="adopt-external-images"]')!.click();
+    /**
+     * 🔴 **ここが本命** ── 直す前の受け手は `target.getAttribute('data-pkc-entry')`
+     *   だけを見ていたので、メニューから押すと `lid` が `null` になり、
+     *   **1 バイトも通信せずに黙って返っていた**。
+     */
+    expect(asked, '押しても取りに行かない(無言の dead click)').toEqual([
+      ['https://example.com/a.png', 'https://example.com/b.png'],
+    ]);
+    expect(s.said.join(''), '押した合図が出ていない').toContain('2 枚');
+  });
+
+  it('⚠ 外部の画像が無い本文では出ない(押しても何も起きない物を出さない)', () => {
+    const s = setup();
+    s.dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    s.dispatcher.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: 'ただの本文' });
+    rightClick(s.para);
+    expect(actionsOf(s.menu())).not.toContain('adopt-external-images');
+    // ⚠ 空振り防止 ── 本文のメニュー自体は出ている
+    expect(actionsOf(s.menu()), 'そもそも出ていない').toContain('cycle-read-columns');
   });
 });

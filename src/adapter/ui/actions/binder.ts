@@ -119,7 +119,7 @@ import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
 import { appOpenInEdit, OpenInEditStore } from '@adapter/ui/render/open-in-edit';
 import { chordOf, findCommand, isMac, typesCharacter, KEY_COMMANDS } from '@features/keymap';
 import { paletteRows } from '@features/palette/palette-rows';
-import { BODY_MENU_ACTIONS, ENTRY_MENU_ACTIONS } from '@features/entry-actions';
+import { bodyMenuActions, entryMenuActions } from '@features/entry-actions';
 import {
   closeContextMenu,
   contextMenuOpen,
@@ -3825,7 +3825,19 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ **入らなかったものは理由を言う**(段②)── 黙って元のままにしない。
    */
   'adopt-external-images': (dispatcher, target, services) => {
-    const lid = target.getAttribute('data-pkc-entry');
+    /**
+     * 🔴 **解決規則を隣と揃える**(#500 案 C。`export-folder` と同じ理由)。
+     *
+     * ⚠ 直す前は `target.getAttribute('data-pkc-entry')` **だけ**を見ていた ──
+     *   右クリックのメニューのボタンは `data-pkc-action` しか持たない(器は
+     *   root 直下に出るので `[data-pkc-entry]` の**中に居ない**)ので、
+     *   そのままメニューへ出すと **`lid` が `null` = 押しても無言**になる。
+     * 🔑 隣の `export-folder` / `write-back-file` / `delete-entry` と同じく、
+     *   「押した物の中の行 → 無ければ選んでいるノート」で解く。
+     */
+    const lid =
+      target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ??
+      dispatcher.getState().selectedLid;
     const adopt = services.adoptUrls;
     if (lid === null || adopt === undefined) return;
     const st = dispatcher.getState();
@@ -5977,10 +5989,20 @@ export function bindActions(
        */
       if (target.closest('[data-pkc-field="detail-body"]') === null) return;
       ev.preventDefault();
+      /**
+       * 🔴 **外部の画像は、ここでだけ数えられる**(#500 案 C)。
+       *
+       * ⚠ `detail-body` に描かれているのは `openBody`(主の枠)である ──
+       *   横に留めた枠は `split-body` なので、ここには当たらない。
+       * 🔑 だから枚数は `openBody` から数えてよい。⚠ 数え方は情報ペインと
+       *   **同じ関数**(`externalImageUrls`)を使う ── 別の規則を書くと、
+       *   「右ペインには出るのにメニューには出ない」が静かに生まれる(§7)。
+       */
+      const ob = dispatcher.getState().openBody;
       openContextMenu(
         root,
         { x: ev.clientX, y: ev.clientY },
-        BODY_MENU_ACTIONS,
+        bodyMenuActions({ externalImages: ob ? externalImageUrls(ob.body).length : 0 }),
         root.ownerDocument.activeElement,
       );
       return;
@@ -5992,10 +6014,22 @@ export function bindActions(
       closeContextMenu(root);
       return;
     }
+    /**
+     * 🔴 **条件つきの 2 つを、この 1 件で判定する**(#500 案 C)。
+     *
+     * ⚠ 材料は `entryMetas` と `linkedFiles` だけ ── **本文は読まない**
+     *   (右クリックで worker を叩く経路を増やさない)。
+     * ⚠ `selectEntryOrExplain` を通った**後**に読む ── 選び直した結果の state を
+     *   見ないと、1 つ前のノートの種類で判定することになる。
+     */
+    const st = dispatcher.getState();
     openContextMenu(
       root,
       { x: ev.clientX, y: ev.clientY },
-      ENTRY_MENU_ACTIONS,
+      entryMenuActions({
+        archetype: st.entryMetas.get(lid)?.archetype ?? null,
+        linkedFile: st.linkedFiles.get(lid) ?? null,
+      }),
       root.ownerDocument.activeElement,
     );
   };

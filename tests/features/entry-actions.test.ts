@@ -18,7 +18,14 @@
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { ENTRY_ACTION_LABELS, ENTRY_MENU_ACTIONS } from '../../src/features/entry-actions';
+import {
+  ADOPT_IMAGES_LABEL,
+  adoptImagesLabel,
+  bodyMenuActions,
+  ENTRY_ACTION_LABELS,
+  ENTRY_MENU_ACTIONS,
+  entryMenuActions,
+} from '../../src/features/entry-actions';
 
 /** `binder.ts` の受け手の表を読む。⚠ 集め方は `repo-hygiene` と**同じ形**にする。 */
 function handlers(): ReadonlySet<string> {
@@ -103,5 +110,90 @@ describe('右ペインが唯一の入口だった 3 つ(#500)', () => {
     for (const a of ['export-entry-docx', 'export-entry-pptx', 'export-entry-pdf']) {
       expect(at(a), `${a} が履歴より下に居る`).toBeLessThan(at('show-history'));
     }
+  });
+});
+
+/**
+ * 🔴 **右ペインが唯一の入口だった、残りの 3 つ**(#500 案 C、2026-08-29)。
+ *
+ * 上の 3 つ(Word / PowerPoint / PDF)は**いつでも押せる**ので表へ足すだけで済んだ。
+ * ⚠ 残る 3 つは**条件つき**である ── フォルダのときだけ / 元ファイルが在るときだけ /
+ *   外部の画像が在るときだけ。だから「常に出して、押したら失敗する」形にはできない
+ *   (#399 ① で確かめてある:ノートで `フォルダを書き出す` を押すと必ず失敗する)。
+ *
+ * 🔑 **門を 2 つ置いたので、2 つ目だけが鳴る場面を 2 通り作る**
+ *   (CLAUDE.md §1、2026-08-24 の #225 で変異試験 2 件が SURVIVED した型)──
+ *   両方を同時に満たす fixture 1 本だと、**片方の門を殺しても、もう片方が救って
+ *   落ち続ける**。
+ */
+describe('条件つきの操作(#500 案 C)', () => {
+  const NOTE = { archetype: 'text', linkedFile: null };
+  const acts = (ctx: { archetype: string | null; linkedFile: string | null }): string[] =>
+    entryMenuActions(ctx).map((a) => a.action);
+
+  it('🔴 フォルダのときだけ「フォルダを書き出す」が出る', () => {
+    // ⚠ **元ファイルは無い**まま見る ── linked の門に救われない場面
+    expect(acts({ archetype: 'folder', linkedFile: null })).toContain('export-folder');
+    expect(acts(NOTE), 'ふつうのノートで出ている(押すと必ず失敗する)').not.toContain(
+      'export-folder',
+    );
+    // ⚠ 種類が分からないときは**出さない側**へ倒す
+    expect(acts({ archetype: null, linkedFile: null })).not.toContain('export-folder');
+  });
+
+  it('🔴 元ファイルを開いているときだけ「書き戻す」が出る', () => {
+    // ⚠ **フォルダではない**まま見る ── folder の門に救われない場面
+    expect(acts({ archetype: 'text', linkedFile: 'memo.md' })).toContain('write-back-file');
+    expect(acts(NOTE), '開いていないのに上書きの口を出している').not.toContain('write-back-file');
+  });
+
+  it('⚠ 条件つきの物を外しても、並びは動かない(削除はいつでも最後)', () => {
+    for (const ctx of [
+      NOTE,
+      { archetype: 'folder', linkedFile: null },
+      { archetype: 'text', linkedFile: 'memo.md' },
+      { archetype: 'folder', linkedFile: 'memo.md' },
+    ]) {
+      const a = acts(ctx);
+      expect(a[a.length - 1], `${JSON.stringify(ctx)} で削除が最後ではない`).toBe('delete-entry');
+      // ⚠ 空振り防止 ── 条件つきを外しても、常設の物は全部残っている
+      expect(a).toContain('export-entry');
+      expect(a).toContain('show-history');
+    }
+  });
+
+  it('🔑 「書き戻す」は書き出しの群れの外(履歴のすぐ上)に居る', () => {
+    /**
+     * ⚠ これは**上書き**であって、新しい file を作る隣の 5 つとは別の物である。
+     *   混ぜて置くと、渡すつもりで押した人が**元ファイルを潰す**。
+     */
+    const a = acts({ archetype: 'text', linkedFile: 'memo.md' });
+    expect(a.indexOf('write-back-file')).toBeGreaterThan(a.indexOf('export-entry-pdf'));
+    expect(a.indexOf('write-back-file')).toBeLessThan(a.indexOf('show-history'));
+  });
+
+  it('🔴 外部の画像が在るときだけ、本文のメニューに取り込みが出る', () => {
+    const zero = bodyMenuActions({ externalImages: 0 }).map((a) => a.action);
+    expect(zero, '0 枚なのに出ている(押しても何も起きない)').not.toContain(
+      'adopt-external-images',
+    );
+    // ⚠ 空振り防止 ── 0 枚でも本来の 2 つは出ている
+    expect(zero.length, '本文のメニューが空(空振り)').toBeGreaterThanOrEqual(2);
+
+    const three = bodyMenuActions({ externalImages: 3 });
+    const found = three.find((a) => a.action === 'adopt-external-images');
+    expect(found, '3 枚あるのに出ていない').toBeDefined();
+    // 🔴 **枚数を字に出す** ── 押すとその数だけ外へ通信するので、押す前に規模を見せる
+    expect(found?.label).toBe('外部の画像を取り込む(3 枚)');
+    // ⚠ 足すのは**末尾** ── 既に在る 2 つの位置を動かさない
+    expect(three.map((a) => a.action).slice(0, zero.length)).toEqual(zero);
+  });
+
+  it('⚠ 字は表から来る(情報ペインと食い違わない)', () => {
+    // 🔑 上の「字は 1 か所から来る」検査が条件つきの 2 行も見るようになっている
+    expect(ENTRY_ACTION_LABELS['export-folder']).toBe('フォルダを書き出す');
+    expect(ENTRY_ACTION_LABELS['write-back-file']).toBe('書き戻す');
+    // ⚠ 取り込みは枚数を含むので表ではなく組み立て関数が持つ
+    expect(adoptImagesLabel(1)).toContain(ADOPT_IMAGES_LABEL);
   });
 });
