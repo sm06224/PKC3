@@ -176,6 +176,57 @@ export function lastReadPaneMetrics(): { width: number; fontPx: number } | null 
   return lastPaneMetrics;
 }
 
+/**
+ * 🔴 **段組みが畳まれたことを、user に言う**(#551。user 報告 2026-08-29)。
+ *
+ * > user の言葉:「**段組表示の際、左右のペインサイズを変化させると、
+ * >  段組の境界線が壊れる**」
+ *
+ * ⚠ 実測すると「線が壊れる」ではなく **段組みごと黙って消えていた** ──
+ *   仕切りを動かして器が 912px を割った瞬間、`columnsFit` が false になり、
+ *   縦送りの 1 本の長文へ戻る。**予告も説明も画面に 1 文字も出ない**。
+ * 🔑 畳むこと自体は**正しい設計**である(#505。CSS 任せだと段数だけ 1 に落ちて
+ *   横送りが残る)── 直すのは**黙っていること**のほうである。
+ *   CLAUDE.md「欠陥の多くは**さっきまでやっていたことが消える**形で出る」。
+ *
+ * ⚠ **新しい見え方を作らない** ── 出すのは `cycleReadColumns` が既に使っている
+ *   画面下の帯で、文言もそちらと同じ形にする(要る幅を px で言う)。
+ */
+let foldNotify: ((text: string) => void) | null = null;
+
+/** 段組みの状態。 */
+type FoldState = 'columns' | 'folded' | 'single';
+
+/** 段組みの状態。⚠ `null` = まだ 1 度も判定していない(起動直後)。 */
+let foldState: FoldState | null = null;
+
+/** 帯へ出す口を配る(`main.ts` が起動時に 1 度だけ呼ぶ)。 */
+export function setColumnFoldNotify(fn: ((text: string) => void) | null): void {
+  foldNotify = fn;
+}
+
+/** ⚠ test 用 ── 状態を「まだ判定していない」へ戻す。 */
+export function resetColumnFoldState(): void {
+  foldState = null;
+}
+
+/**
+ * 状態が**変わったときだけ**言う。
+ *
+ * ⚠ **起動直後は言わない**(`prev === null`)── 狭い画面で開いただけで
+ *   帯が出ると、user は「自分が何かした」と読む。
+ * ⚠ **1 段を選んでいるときは言わない** ── 畳まれたのではなく、そう選んでいる。
+ * ⚠ 面が居ない・採寸できない回は**状態を触らない**(2 ペイン編集へ入って
+ *   戻ってきただけで帯が出るのを防ぐ)。
+ */
+function noteFoldState(next: FoldState, say: (prev: FoldState) => string | null): void {
+  const prev = foldState;
+  foldState = next;
+  if (prev === null || prev === next || foldNotify === null) return;
+  const text = say(prev);
+  if (text !== null) foldNotify(text);
+}
+
 export function fitColumnHeight(root: ParentNode, doc: Document = document): number | null {
   /**
    * ⚠ **面は「読む面かどうか」に関わらず引く** ── 編集へ入ったときに印を
@@ -223,15 +274,35 @@ export function fitColumnHeight(root: ParentNode, doc: Document = document): num
    *   同じ入力である(実測で `--pkc-text-size` と一致することを確かめた)。
    */
   const fontPx = Number.parseFloat(getComputedStyle(host).fontSize);
-  if (
-    !columnsFit(
-      host.clientWidth || before.width,
-      count,
-      Number.isFinite(fontPx) && fontPx > 0 ? fontPx : READ_COLUMN_BASE_FONT_PX,
-    )
-  ) {
+  const fp = Number.isFinite(fontPx) && fontPx > 0 ? fontPx : READ_COLUMN_BASE_FONT_PX;
+  const paneWidth = host.clientWidth || before.width;
+  if (!columnsFit(paneWidth, count, fp)) {
+    /**
+     * ⚠ 要る幅は **2 段ぶん**で言う ── `columnsFit` が 2 段で判定しているので、
+     *   ここで 3 段ぶんの数を出すと**帯だけ別の規則**になる(§7)。
+     */
+    noteFoldState(count <= 1 ? 'single' : 'folded', () =>
+      count <= 1
+        ? null
+        : `幅が足りないので段組みをやめました(${count} 段には ${Math.ceil(
+            minWidthForColumns(2, fp),
+          )}px 以上の幅が要ります)`,
+    );
     return off();
   }
+  /**
+   * ⚠ **「戻しました」は、幅で畳まれていたときだけ**(2026-08-29、着地前の smoke が
+   *   既存の test を落として教えた)。1 稿目は**あらゆる遷移**で言っていたので、
+   *   user が `Alt+C` で 1 段 → 2 段 と選んだ直後にも出て、
+   *   🔴 **`cycleReadColumns` が出した「本文の段組み: 2 段」を上書きしていた**
+   *   ── 押した答えが消える、いちばん困る形である(CLAUDE.md §10)。
+   * 🔑 判定は `prev === 'folded'` 1 つ ── 自分で選んだ結果には黙る。
+   */
+  noteFoldState('columns', (prev) => {
+    if (prev !== 'folded') return null;
+    const eff = effectiveColumns(paneWidth, count, fp);
+    return `段組みに戻しました(${eff} 段)`;
+  });
   pane.setAttribute(COLUMNS_ON_ATTR, '');
   /**
    * 🔴 **印を付けた「後で」採り直す**(#505。ここで 1 度外した)。

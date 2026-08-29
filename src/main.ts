@@ -14,6 +14,7 @@ import {
   applyReadColumns,
   initialReadColumns,
   installColumnFit,
+  setColumnFoldNotify,
   installColumnWheel,
 } from '@adapter/ui/render/read-columns';
 import { appOpenInEdit } from '@adapter/ui/render/open-in-edit';
@@ -842,6 +843,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     noticeLine = text;
     paint();
   };
+
+  /**
+   * 🔴 **段組みが畳まれたら、帯で言う**(#551)。⚠ 起動時ではなく**ここ**で配る ──
+   *   `installColumnFit` を呼ぶ時点では `showStatus` がまだ無い。
+   * 🔑 口は 1 つだけ(`read-columns.ts` が判定を持つ)── 呼び側が独自に
+   *   「畳まれたか」を数え直すと、帯と実際の面が食い違う(CLAUDE.md §7)。
+   */
+  setColumnFoldNotify(showStatus);
+
   /**
    * 🔴 **外からの依頼を受ける口**(#189 / C-4 と #194 / C-3)。
    *

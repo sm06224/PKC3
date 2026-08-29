@@ -1053,3 +1053,48 @@ test('🔴 設定に「いま何段で出ているか」が実際に書かれる
 
   expect(errors, 'ページ例外が出ている').toEqual([]);
 });
+
+/**
+ * 🔴 **段組みが畳まれたら、理由を画面に出す**(#551。user 報告 2026-08-29)。
+ *
+ * > 「**段組表示の際、左右のペインサイズを変化させると、段組の境界線が壊れる**」
+ *
+ * ⚠ 実測すると「線が壊れる」ではなく **段組みごと黙って消えていた** ──
+ *   器が 912px を割った瞬間に縦送りへ戻り、**予告も説明も 1 文字も出ない**。
+ * 🔑 畳むこと自体は正しい設計(#505)なので、直すのは**黙っていること**である。
+ *
+ * ⚠ **unit では原理的に届かない部分がある** ── happy-dom は採寸しないので、
+ *   矩形を手で置いた unit は「窓を縮めたら畳まれる」という**当の出来事**を
+ *   1 度も通らない。ここは**本物の器の幅**で通す。
+ */
+test('🔴 窓を狭めて段組みが畳まれると、理由が帯に出る (#551)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 2560, height: 900 });
+  await gotoApp(page);
+  await writeNote(page);
+  await setColumns(page, '2');
+
+  /** ⚠ **前提** ── いま本当に段組みで出ている(空振り防止)。 */
+  await expect(
+    page.locator('[data-pkc-view-pane="detail"]'),
+    '前提が崩れた(そもそも段組みになっていない)',
+  ).toHaveAttribute('data-pkc-columns-on', '');
+
+  const status = page.locator('[data-pkc-region="status"]');
+  // ⚠ 縮める**前**に帯が出ていないこと(後で出た文字が最初から在った、を作らない)
+  await expect(status).not.toContainText('幅が足りない');
+
+  // 🔴 912px を割る幅へ縮める
+  await page.setViewportSize({ width: 700, height: 900 });
+  await expect(status, '畳まれたのに理由が出ない').toContainText('幅が足りない');
+  await expect(
+    page.locator('[data-pkc-view-pane="detail"]'),
+    '帯は出たが段組みは畳まれていない(帯が嘘)',
+  ).not.toHaveAttribute('data-pkc-columns-on', '');
+
+  // 🔑 **戻る道も見る**(片道にしない)
+  await page.setViewportSize({ width: 2560, height: 900 });
+  await expect(status, '戻ったのに黙っている').toContainText('段組みに戻しました');
+
+  expect(errors, 'ページ例外が出ている').toEqual([]);
+});

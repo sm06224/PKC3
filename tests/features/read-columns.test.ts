@@ -33,6 +33,8 @@ import {
 import { TEXT_SCALES } from '../../src/features/text-scale';
 import {
   applyReadColumns,
+  resetColumnFoldState,
+  setColumnFoldNotify,
   chooseReadColumns,
   columnScroller,
   currentReadColumns,
@@ -877,5 +879,157 @@ describe('main.ts の配線(原文 pin)', () => {
     expect(code, 'ホイールの読み替えを張っていない(マウスだけで読めない)').toMatch(
       /installColumnWheel\(root\)/,
     );
+  });
+});
+
+/**
+ * 🔴 **段組みが畳まれたら、user に言う**(#551。user 報告 2026-08-29)。
+ *
+ * > 「**段組表示の際、左右のペインサイズを変化させると、段組の境界線が壊れる**」
+ *
+ * ⚠ 実測すると「線が壊れる」ではなく **段組みごと黙って消えていた**。
+ *   畳むこと自体は正しい設計(#505)なので、直すのは**黙っていること**である。
+ * 🔑 happy-dom は採寸しないので、面と器の矩形を手で置く
+ *   (置かないと `before.height === 0` の早期 return に落ちて**空振り**になる)。
+ */
+describe('🔴 段組みを畳んだら理由を言う(#551)', () => {
+  const setup = (): { root: HTMLElement; live: HTMLElement; wide: (w: number) => void } => {
+    const root = document.createElement('div');
+    const pane = document.createElement('div');
+    pane.setAttribute('data-pkc-view-pane', 'detail');
+    // ⚠ `columnScroller` / `viewPane` は**この印つきの面**しか引かない
+    pane.setAttribute('data-pkc-detail-mode', 'editor');
+    const live = document.createElement('div');
+    live.setAttribute('data-pkc-region', 'editor-live');
+    pane.append(live);
+    root.append(pane);
+    document.body.append(root);
+    const wide = (w: number): void => {
+      for (const el of [pane, live])
+        Object.defineProperty(el, 'getBoundingClientRect', {
+          value: () => ({ top: 0, bottom: 600, left: 0, right: w, width: w, height: 600 }),
+          configurable: true,
+        });
+      Object.defineProperty(live, 'clientWidth', { value: w, configurable: true });
+    };
+    return { root, live, wide };
+  };
+
+  beforeEach(() => {
+    resetColumnFoldState();
+    setColumnFoldNotify(null);
+  });
+
+  it('🔴 広い → 狭い で「幅が足りない」と出て、要る幅を px で言う', () => {
+    const said: string[] = [];
+    setColumnFoldNotify((t) => said.push(t));
+    const { root, wide } = setup();
+    applyReadColumns(document.documentElement, '3');
+
+    wide(1400);
+    fitColumnHeight(root, document);
+    // ⚠ **起動直後は言わない**(自分が何かしたと読ませない)
+    expect(said, '1 度目で帯が出た(起動直後は黙る約束)').toEqual([]);
+
+    wide(700); // 912px を割る
+    fitColumnHeight(root, document);
+    expect(said, '畳んだのに黙っている').toHaveLength(1);
+    expect(said[0], '理由になっていない').toContain('幅が足りない');
+    /**
+     * 🔑 **帯が言う数字が、本当の境目かを別の観測で当てる**(CLAUDE.md §1)。
+     *
+     * ⚠ `minWidthForColumns(2, fontPx)` と突き合わせるのは
+     *   **実装と同じ綴りの別の綴り**なので、同じ盲点を共有する。
+     *   そこで**その幅で実際に戻るか / 1px 足りないと戻らないか**を見る。
+     */
+    const need = Number(/(\d+)px/.exec(said[0] ?? '')?.[1] ?? '0');
+    expect(need, '要る幅を px で言っていない').toBeGreaterThan(0);
+
+    wide(need - 1);
+    fitColumnHeight(root, document);
+    expect(said, '言った幅より 1px 狭いのに段組みが戻った').toHaveLength(1);
+
+    wide(need);
+    fitColumnHeight(root, document);
+    expect(said, '言った幅ちょうどで戻らない(帯の数字が嘘)').toHaveLength(2);
+    expect(said[1], '戻したと言っていない').toContain('戻しました');
+  });
+
+  it('🔴 狭い → 広い で「戻した」と出る(片道にしない)', () => {
+    const said: string[] = [];
+    setColumnFoldNotify((t) => said.push(t));
+    const { root, wide } = setup();
+    applyReadColumns(document.documentElement, '2');
+    wide(1400);
+    fitColumnHeight(root, document);
+    wide(700);
+    fitColumnHeight(root, document);
+    said.length = 0;
+    wide(1400);
+    fitColumnHeight(root, document);
+    expect(said, '戻ったのに黙っている').toHaveLength(1);
+    expect(said[0], '戻したと言っていない').toContain('戻しました');
+  });
+
+  it('⚠ 同じ状態が続く間は黙る(仕切りを動かすたびに帯を出さない)', () => {
+    const said: string[] = [];
+    setColumnFoldNotify((t) => said.push(t));
+    const { root, wide } = setup();
+    applyReadColumns(document.documentElement, '2');
+    wide(700);
+    fitColumnHeight(root, document);
+    said.length = 0;
+    wide(690);
+    fitColumnHeight(root, document);
+    wide(680);
+    fitColumnHeight(root, document);
+    expect(said, '同じ状態で帯が出た').toEqual([]);
+  });
+
+  /**
+   * 🔴 **自分で選んだ結果には黙る**(2026-08-29、着地前の smoke が教えた)。
+   *
+   * ⚠ 1 稿目は**あらゆる遷移**で「戻しました」と言っていたので、
+   *   `Alt+C` で 1 段 → 2 段 と選んだ直後にも出て、
+   *   **`cycleReadColumns` が出した「本文の段組み: 2 段」を上書きしていた**
+   *   ── 押した答えが消える形である。
+   */
+  it('🔴 1 段 → 2 段 と自分で選んだときは「戻しました」と言わない', () => {
+    const said: string[] = [];
+    setColumnFoldNotify((t) => said.push(t));
+    const { root, wide } = setup();
+    applyReadColumns(document.documentElement, '1');
+    wide(1400);
+    fitColumnHeight(root, document);
+    said.length = 0;
+    applyReadColumns(document.documentElement, '2');
+    fitColumnHeight(root, document);
+    expect(said, '自分で選んだのに「戻しました」と言った(押した答えを上書きする)').toEqual([]);
+  });
+
+  it('⚠ 1 段を選んでいるときは言わない(畳まれたのではなく、そう選んでいる)', () => {
+    const said: string[] = [];
+    setColumnFoldNotify((t) => said.push(t));
+    const { root, wide } = setup();
+    applyReadColumns(document.documentElement, '2');
+    wide(1400);
+    fitColumnHeight(root, document);
+    applyReadColumns(document.documentElement, '1');
+    wide(1400);
+    fitColumnHeight(root, document);
+    expect(said, '自分で 1 段を選んだのに帯が出た').toEqual([]);
+  });
+
+  it('⚠ 面が居ない回は状態を触らない(2 ペイン編集から戻って帯が出ない)', () => {
+    const said: string[] = [];
+    setColumnFoldNotify((t) => said.push(t));
+    const { root, live, wide } = setup();
+    applyReadColumns(document.documentElement, '2');
+    wide(1400);
+    fitColumnHeight(root, document);
+    said.length = 0;
+    live.remove(); // 器が消える = 2 ペインへ入った
+    fitColumnHeight(root, document);
+    expect(said, '面が消えただけで帯が出た').toEqual([]);
   });
 });
