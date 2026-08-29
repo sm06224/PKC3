@@ -12,7 +12,7 @@
  * container に入れると export に同乗し、**書き出した HTML を渡した相手に
  * お知らせが出なくなる**(PKC2 が実際にその形になっている)。
  */
-import { NOTICE_KEEP_MAX } from '@features/notice/notice-log';
+import { NOTICES, NOTICE_SEEN_MAX } from '@features/notice/notice-log';
 
 const SEEN_KEY = 'pkc3.notices.seen';
 const OFF_KEY = 'pkc3.notices.off';
@@ -94,13 +94,31 @@ export class NoticeStore {
   /**
    * 見たものとして記録する。
    * ⚠ **内容が変わらないなら書かない**(無用な書込をしない)。
-   * ⚠ 上限を超えたら **id の降順(= 新しい順)で残す** ── 投入順ではない。
-   *   古い id を落とすのが目的なので、並べ替えの鍵は id である。
+   *
+   * ## 🔴 いま登記表に在る id は、席が足りなくても落とさない(2026-08-29)
+   *
+   * ⚠ 元は「**id の降順で残す**」だけで、コメントは「= 新しい順」と書いていたが、
+   *   これは**日付が違う id にしか当たらない**。同じ日の id どうしでは
+   *   **slug の綴り順**で並ぶので、`recentNotices` の並べ替え(日付だけ・安定)と
+   *   食い違う ── 実際 2026-08-29 の登記表は 10 件とも同じ日付である。
+   *
+   * ⚠ 食い違うと何が起きるか:既読には**登記表から落ちた id も残る**ので、
+   *   その id が綴り順で上に来ると、**いま出ている id が席から押し出される**。
+   *   押し出された 1 件は未読へ戻り、user が閉じても下の `same` 判定で
+   *   書込が起きないため、**毎起動そのお知らせが出続ける**。
+   *
+   * 🔑 だから席の取り合いそのものを消す ── **登記表に在る id を先に残し**、
+   *   残りの席を「落ちた id」で埋める(どちらの中も id の降順)。
+   *   ⚠ 席数(`NOTICE_SEEN_MAX`)は余裕であって、これが正しさを担っているのではない。
    */
   markSeen(ids: readonly string[]): void {
-    const merged = [...new Set([...this.seen, ...ids])]
-      .sort((a, b) => (a < b ? 1 : a > b ? -1 : 0))
-      .slice(0, NOTICE_KEEP_MAX);
+    const live = new Set(NOTICES.map((n) => n.id));
+    const byId = (a: string, b: string): number => (a < b ? 1 : a > b ? -1 : 0);
+    const all = [...new Set([...this.seen, ...ids])];
+    const merged = [
+      ...all.filter((id) => live.has(id)).sort(byId),
+      ...all.filter((id) => !live.has(id)).sort(byId),
+    ].slice(0, NOTICE_SEEN_MAX);
     const same =
       merged.length === this.seen.length && merged.every((v, i) => v === this.seen[i]);
     if (same) return;

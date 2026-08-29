@@ -35,6 +35,7 @@ import {
   NOTICE_ITEM_CHARS_MAX,
   NOTICE_ITEM_CHARS_MIN,
   NOTICE_KEEP_MAX,
+  NOTICE_SEEN_MAX,
   NOTICE_SHOW_MAX,
   noticeDate,
 } from '../../src/features/notice/notice-log';
@@ -450,6 +451,18 @@ describe('お知らせの登記表', () => {
      * 🔑 揃えたので不変条件が 1 つ増える:**登記表 = 画面に出るもの**。
      */
     expect(NOTICE_KEEP_MAX, '登記表 = 画面に出るもの、が崩れた').toBe(NOTICE_SHOW_MAX);
+    /**
+     * 🔴 **既読の席は、表示件数より必ず多い**(2026-08-29 の着地前レビュー A)。
+     * ⚠ 元は登記表の上限を既読にも使い回しており、20 → 10 に下げた瞬間に
+     *   **読んだお知らせが毎起動よみがえる**ところだった(実際に再現した)。
+     * ⚠ 等値ではなく**不等式**で pin する ── 「同じ数にしてはいけない」が主張である。
+     * 🔑 押し出されないことそのものは `tests/adapter/notice-store.test.ts` が見る
+     *   ── ここが見ているのは**宣言**であって、挙動ではない。
+     */
+    expect(
+      NOTICE_SEEN_MAX,
+      '既読の席が表示件数以下 ── 落ちた id が生きている id を押し出す',
+    ).toBeGreaterThan(NOTICE_SHOW_MAX);
     expect(NOTICE_ITEMS_MAX, '項目数の上限が変わった').toBe(6);
     expect(NOTICE_ITEM_CHARS_MAX, '字数の上限が変わった').toBe(120);
     expect(NOTICE_ITEM_CHARS_MIN, '字数の下限が変わった').toBe(4);

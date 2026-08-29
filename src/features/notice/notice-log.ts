@@ -48,6 +48,28 @@ export const NOTICE_SHOW_MAX = 10;
  */
 export const NOTICE_KEEP_MAX = 10;
 
+/**
+ * 🔴 **既読の集合に残す id の件数**(`adapter/platform/notice-store.ts`)。
+ *
+ * ⚠ **登記表の上限とは別物である。** 2026-08-29 まで `NOTICE_KEEP_MAX` を使い回して
+ *   いたが、登記表を 20 → 10 へ下げた瞬間に**読んだお知らせが毎起動よみがえる**
+ *   ところだった(着地前レビューが拾った。再現は
+ *   `tests/adapter/notice-store.test.ts`「登記表から落ちた id が…」)。
+ *
+ * ## なぜ表示件数より大きくないといけないか
+ *
+ * 既読の集合には**登記表から落ちた id も残る**(user はそれを読んだので)。
+ * だから必要な席は「いま出る 10 件」+「落ちた id のうち user が読んだ分」であり、
+ * 表示件数と同じにすると**落ちた id が生きている id を押し出す**。
+ * 押し出された 1 件は未読へ戻り、閉じても `same` 判定で書込が起きないので
+ * **同じ 1 件が毎起動出続ける**(localStorage を消すまで止まらない)。
+ *
+ * 🔑 席の数だけに頼らず、`markSeen` は**登記表に在る id を先に残す**
+ *   ── 席が足りなくなる形そのものを消してある(CLAUDE.md
+ *   「衝突は、検出するより起こらなくするほうが強い」)。ここは**余裕**である。
+ */
+export const NOTICE_SEEN_MAX = NOTICE_SHOW_MAX * 2;
+
 /** 1 entry の項目数の上限(PKC2 は 22 項目の壁ができた)。 */
 export const NOTICE_ITEMS_MAX = 6;
 /** 1 項目の字数(下限も置く ── 空の行が user に出るのを止める)。 */
@@ -214,7 +236,7 @@ export const NOTICES: readonly Notice[] = [
 ];
 
 /**
- * ⚠ **落としたぶんの原本は `CHANGELOG.md` に在る**(上限 20 件を超えると古いほうから落ちる)。
+ * ⚠ **落としたぶんの原本は `CHANGELOG.md` に在る**(`NOTICE_KEEP_MAX` を超えると古いほうから落ちる)。
  * 突合は `tests/docs-parity.test.ts` の `DROPPED`(落とした題名の既知リスト)が持つ ──
  * 「登記表 + 落ちた分 = CHANGELOG」を**等値**で見るので、落としたのに書き忘れると CI が落ちる。
  *

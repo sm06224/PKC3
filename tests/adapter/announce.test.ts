@@ -1032,12 +1032,21 @@ describe('登記表と画面のずれ(#596 E)', () => {
    * ⚠ これが無いと「登記表を 11 件にしても誰も鳴らない」── 上の検査は
    *   `recentNotices` を通すので、**11 件目が黙って落ちる**だけである。
    */
-  it('🔴 上限を 1 件超えると、その 1 件は読めなくなる(だから超えさせない)', () => {
+  it('🔴 上限を 1 件超えると、いちばん古い 1 件が読めなくなる(だから超えさせない)', () => {
+    /**
+     * ⚠ **足すのは先頭である**(2026-08-29 の着地前レビュー C)。
+     *   1 稿目は末尾へ足していたが、手順書は「`NOTICES` の**先頭**に 1 件足す」
+     *   (`.claude/skills/notice-writing/SKILL.md`)── 末尾に足す形は**現実には起きない**。
+     * 🔑 そして実際に落ちるのは「足した分」ではなく **いちばん古い既存の 1 件**である
+     *   ── 足した人から見て**自分が押し出した物が見えない**のが、この欠陥の顔だった。
+     */
     const over = [
+      { id: '2026-09-01-over', title: '新しく足した分', items: ['先頭に足しました。'] },
       ...NOTICES,
-      { id: '2026-01-01-over', title: 'あふれた分', items: ['これは読めなくなります。'] },
     ];
     const shown = new Set(recentNotices(over).map((n) => n.id));
-    expect(over.filter((n) => !shown.has(n.id)).map((n) => n.id)).toEqual(['2026-01-01-over']);
+    expect(over.filter((n) => !shown.has(n.id)).map((n) => n.id)).toEqual([
+      NOTICES[NOTICES.length - 1]!.id,
+    ]);
   });
 });

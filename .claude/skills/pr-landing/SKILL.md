@@ -307,7 +307,7 @@ ls node_modules/.bin/vitest >/dev/null 2>&1 || npm ci
 2. お知らせを 1 件足す。⚠ **記法を書かない**(`**` / バッククォート / `](` は
    `tests/adapter/help-pane.test.ts` が止める ── 素のテキストとして出るため)
 3. `CHANGELOG.md` に**同じ見出し**で足す(`tests/docs-parity.test.ts` が対応を縛る)
-4. 登記表が **20 件(`NOTICE_KEEP_MAX`)を超えたら、いちばん古い 1 件を落とし**、
+4. 登記表が **`NOTICE_KEEP_MAX`(10 件 = 画面に出る数)を超えたら、いちばん古い 1 件を落とし**、
    その題名を `docs-parity.test.ts` の `DROPPED` へ 1 行足す
 5. `tests/adapter/announce.test.ts` の `KNOWN` を更新
    (足した 1 件の digest を登録 / 落とした 1 件を削除。件数が一致しないと落ちる)
