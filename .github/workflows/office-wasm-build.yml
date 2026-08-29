@@ -803,6 +803,19 @@ jobs:
             ~/lo-core/static/CustomTarget_emscripten_fs_image.mk \
             ~/lo-core/workdir/installation/LibreOffice/emscripten/soffice.data.js.metadata
 
+      # 🔴 **マクロが配った物に入っているか**(#431。2026-08-29 に足した)。
+      #    ⚠ 入力側(`PKC3_WASM_SCRIPTING` / `BUILD_TYPE`)は `:125` で見ているのに、
+      #    **出力側は 1 度も見ていなかった** ── `check-macro-wiring.py` は
+      #    在るのに、呼んでいたのは自分の test だけ(`grep` で 0 件)。
+      #    🔑 CLAUDE.md §8「**入力を守る検査と、出力が届いたかを見る検査は別物**」──
+      #    前者だけだと「直した」が**自己証明されて固定**される。
+      #    ⚠ 上の `.ui` は既に出力側を見ている ── **対称の反対側**がこれである。
+      - name: 検品(マクロが配った一式に入っているか)
+        if: ${{ !cancelled() }}
+        run: |
+          python3 "$GITHUB_WORKSPACE"/build/office-wasm/check-macro-wiring.py \
+            ~/lo-core/workdir/installation/LibreOffice/emscripten
+
       # 🔴 **手元で回せるようにする**(user 指示 2026-08-10
       #    「ビルド通ってるんだから、あなたの環境に落として試せばいいんじゃない?」)。
       #    ⚠ **artifact は API 経由でしか落とせず、この箱からは api.github.com が 403**。
