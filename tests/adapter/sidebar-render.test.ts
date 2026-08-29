@@ -199,3 +199,88 @@ describe('🔴 探す欄は、どの面でも state に合う(#536 ②)', () => 
     expect(field(root).value, '外したのに古い字が残っている').toBe('');
   });
 });
+
+/**
+ * 🔴 **0 件のときに、そう言って戻り道を出す**(2026-08-29 の動線レビュー)。
+ *
+ * ⚠ フォルダ・アプリ・連絡先の面には 0 件の字が出るのに、**既定の一覧タブだけ
+ *   何も出なかった** ── 行が全部消えたように見え、しかも
+ *   **自分が打っていない語**(タグの札を押した直後)が探す欄に入っているので、
+ *   戻し方が画面から読み取れない。
+ */
+describe('🔴 一覧が 0 件のとき、理由と戻り道を出す(#550)', () => {
+  const box = (root: HTMLElement): HTMLElement | null =>
+    root.querySelector<HTMLElement>('[data-pkc-field="entry-list-empty"]');
+  const clear = (root: HTMLElement): HTMLElement | null =>
+    root.querySelector<HTMLElement>('[data-pkc-field="entry-list-clear-filter"]');
+
+  function shown(filterQuery: string, kinds: ReadonlySet<string> = new Set()): HTMLElement {
+    const root = document.createElement('div');
+    const regions = buildShell(root);
+    const sidebar = new SidebarRenderer(regions.sidebar);
+    const state = bootedState([meta('a', 1, '買い物メモ'), meta('b', 2, '会議録')]);
+    sidebar.render({ ...state, filterQuery, kindFilter: kinds });
+    return root;
+  }
+
+  it('🔴 絞って 0 件なら、その語を挙げて言う', () => {
+    const root = shown('存在しない語');
+    expect(box(root)?.textContent, '0 件の字が出ていない').toContain('存在しない語');
+    expect(clear(root), '戻り道が無い').not.toBeNull();
+  });
+
+  it('⚠ 対照群: 1 件でも当たれば出さない', () => {
+    const root = shown('買い物');
+    expect(box(root), '当たっているのに 0 件の字が出た').toBeNull();
+  });
+
+  it('⚠ 対照群: 絞っていなければ出さない(ノートが在るのに空と言わない)', () => {
+    const root = shown('');
+    expect(box(root), '絞っていないのに 0 件の字が出た').toBeNull();
+  });
+
+  it('🔑 種類の札だけで 0 件になったときも、戻り道を出す', () => {
+    // ⚠ ここで出さないと、種類で絞った user は戻し方が画面から読めない
+    const root = shown('', new Set(['form']));
+    expect(box(root), '種類で 0 件になったのに何も出ない').not.toBeNull();
+    expect(clear(root), '戻り道が無い').not.toBeNull();
+  });
+
+  /**
+   * 🔴 **押したら本当に外れる**(2026-08-29)。⚠ 絞りは 2 種類ある(語と種類の札)ので、
+   *   語だけ空にすると**種類で 0 件の user が押しても何も起きない**= dead click。
+   */
+  it('🔴 種類だけで絞っているときに押すと、ちゃんと外れる(dead click にしない)', async () => {
+    const { Dispatcher } = await import('../../src/adapter/state/dispatcher');
+    const { bindActions } = await import('../../src/adapter/ui/actions/binder');
+    const root = document.createElement('div');
+    document.body.append(root);
+    const regions = buildShell(root);
+    const sidebar = new SidebarRenderer(regions.sidebar);
+    const d = new Dispatcher();
+    d.onState((st) => sidebar.render(st));
+    bindActions(root, d);
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('a', 1, '買い物メモ')],
+      relations: [],
+    });
+    d.dispatch({ type: 'TOGGLE_KIND_FILTER', archetype: 'form' });
+    // ⚠ **前提** ── 種類で 0 件になっている(ここが崩れると何も見ていない)
+    expect(d.getState().kindFilter.size, '前提が崩れている').toBe(1);
+    const btn = root.querySelector<HTMLElement>('[data-pkc-field="entry-list-clear-filter"]');
+    expect(btn, '種類で 0 件なのに戻り道が無い').not.toBeNull();
+    btn!.click();
+    expect(d.getState().kindFilter.size, '押しても種類の絞りが残っている(dead click)').toBe(0);
+    expect(d.getState().filterQuery, '語の絞りも空になっていない').toBe('');
+  });
+
+  it('⚠ ノートが 1 件も無い器では出さない(外す物が無い)', () => {
+    const root = document.createElement('div');
+    const regions = buildShell(root);
+    const sidebar = new SidebarRenderer(regions.sidebar);
+    sidebar.render({ ...bootedState([]), filterQuery: 'x' });
+    expect(box(root), 'ノートが無いのに「絞りを外す」を出した(dead click)').toBeNull();
+  });
+});

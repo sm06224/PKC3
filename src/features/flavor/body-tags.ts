@@ -30,6 +30,7 @@
  */
 
 import { frontmatterLineCount } from '../markdown/frontmatter';
+import { MAX_TAG_CHARS } from './tags';
 
 /** fence の開き閉じ。⚠ `task-count.ts` と同じ形にする(判定を散らさない)。 */
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
@@ -116,6 +117,15 @@ export function parseTagLine(line: string): string[] | null {
     if (name === '' || !HAS_NON_DIGIT.test(name)) continue;
     // ⚠ 索引の区切りを名前に含むものは**タグにしない**(往復で化けるため。上の注記)
     if (TAG_SEP_IN_NAME.test(name)) continue;
+    /**
+     * 🔴 **長すぎる名前はタグにしない**(2026-08-29 の着地後レビュー。実測で確認)。
+     *
+     * ⚠ 索引は `MAX_TAG_CHARS`(40 字)で落とすのに、**画面はそのまま札にしていた** ──
+     *   41 字のタグは「札は押せる形で出るのに、スマートフォルダにも集計にも
+     *   1 件も入らない」という**黙った取りこぼし**になっていた。
+     * 🔑 判定はここ 1 か所なので、**落とすなら札にもしない**(見れば効いていないと分かる)。
+     */
+    if ([...name].length > MAX_TAG_CHARS) continue;
     names.push(name);
   }
   // ⚠ **1 つも残らなければタグ行ではない**(`#117 #121` だけの行は本文のまま)

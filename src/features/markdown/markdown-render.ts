@@ -24,6 +24,7 @@
 
 import MarkdownIt from 'markdown-it';
 import { parseTagLine } from '../flavor/body-tags';
+import { MAX_TAGS, sameTag } from '../flavor/tags';
 // ⚠ v15 で型は本体 package が同梱するようになり、`markdown-it/lib/**` の
 // 部分 path は exports map から**消えた**(v14 では `@types/markdown-it` が
 // `lib/token.mjs` を生やしていた)。型は本入口から名前付きで取る。
@@ -2013,6 +2014,23 @@ md.core.ruler.after('inline', 'pkc-tagline', function (state) {
    * 🔑 だから「いま引用・箇条書きの中か」を数えて、中では当てない。
    */
   let depth = 0;
+  /**
+   * 🔴 **1 ノートのタグ数の上限を、画面でも守る**(2026-08-29 の着地後レビュー。実測)。
+   *
+   * ⚠ 索引は `foldTags` が `MAX_TAGS`(32 個)で切るのに、**画面は切っていなかった** ──
+   *   40 個書いたノートは「札は 40 枚出るのに索引は 32 件」で、
+   *   **33 個目以降は黙って集計にもスマートフォルダにも入らない**。
+   * 🔑 走査は本文の**行の順**に拾って畳むので、ここも**同じ順で数える**と一致する
+   *   (突き合わせは `sameTag` ── 表示は原文、比較は大小無視)。
+   * ⚠ 上限に当たった名前は**札にしない** ── 出すと「押せるのに集まらない」に戻る。
+   */
+  const taken: string[] = [];
+  const keepName = (name: string): boolean => {
+    if (taken.some((t) => sameTag(t, name))) return true;
+    if (taken.length >= MAX_TAGS) return false;
+    taken.push(name);
+    return true;
+  };
   const tokens = state.tokens;
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i]!;
@@ -2044,8 +2062,10 @@ md.core.ruler.after('inline', 'pkc-tagline', function (state) {
     const flush = (): void => {
       // ⚠ タグ行は**素の文字だけ**でできている(`#` に inline 規則は当たらない)
       const only = run.length === 1 ? run[0]! : null;
-      const names = only !== null && only.type === 'text' ? parseTagLine(only.content) : null;
-      if (names !== null) {
+      const parsed = only !== null && only.type === 'text' ? parseTagLine(only.content) : null;
+      // ⚠ 上限を超えた名前は落とす。⚠ **1 つも残らなければタグ行ではない**(素の文に戻す)
+      const names = parsed === null ? null : parsed.filter((x) => keepName(x));
+      if (names !== null && names.length > 0) {
         const tok = new state.Token('html_inline', '', 0);
         tok.content = tagLineHtml(names, interactive);
         out.push(tok);

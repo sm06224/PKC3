@@ -131,10 +131,41 @@ describe('集計の面(#184)', () => {
     expect([...picker.options].map((o) => o.textContent)).toEqual([
       '(選んでください)',
       'author(3 件)',
-      'tags(2 件)',
+      /**
+       * 🔴 **タグだけは日本語で出す**(2026-08-29 の動線レビュー)。
+       * ⚠ アプリの他の場所は全部「タグ」と書いてあるのに、ここだけ英字の `tags` で
+       *   出ていた ── 「タグごとに何件あるか」を探している user が、
+       *   **自分のタグのことだと結び付けられない**。
+       * ⚠ **値は `tags` のまま**(下の行で確かめる)── 選んだ結果は変わらない。
+       */
+      'タグ(2 件)',
     ]);
     expect(picker.disabled).toBe(false);
     expect(q('[data-pkc-field="query-note"]')!.textContent).toContain('4 件のノートを見ました');
+  });
+
+  it('🔑 「タグ」と出しても、選ぶ値は tags のまま(挙動は変えない)', async () => {
+    const { q, qa } = setup();
+    openQuery(qa);
+    await tick();
+    const picker = q<HTMLSelectElement>('[data-pkc-field="query-key"]')!;
+    const tagOpt = [...picker.options].find((o) => o.textContent?.startsWith('タグ'));
+    expect(tagOpt?.value, '値まで日本語になっている(選べなくなる)').toBe('tags');
+    // ⚠ 対照群 ── 他の項目は user が書いた綴りのまま(勝手に訳さない)
+    expect([...picker.options].map((o) => o.textContent)).toContain('author(3 件)');
+  });
+
+  it('🔴 説明が、数えている範囲と合っている(段④ で本文の行も数える)', async () => {
+    const { q, qa } = setup();
+    openQuery(qa);
+    await tick();
+    const picker = q<HTMLSelectElement>('[data-pkc-field="query-key"]')!;
+    expect(picker.title, '「frontmatter だけ」と言っている(もう合っていない)').not.toContain(
+      'frontmatter に書いた項目で束ねます',
+    );
+    expect(picker.title, '本文の行に書いたタグを数えることが書かれていない').toContain(
+      '本文の行に書いたタグ',
+    );
   });
 
   it('🔴 項目を選ぶと、値ごとに束ねた表が出る(件数と行まで)', async () => {

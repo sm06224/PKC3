@@ -4105,7 +4105,16 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔑 撃つのは既存の `SET_ENTRY_FILTER` ── 絞りの正本は 1 つのままにする(§7)。
    */
   'clear-entry-filter': (dispatcher) => {
+    /**
+     * 🔴 **絞りは 2 種類ある**(2026-08-29)── 語(`filterQuery`)と種類の札
+     *   (`kindFilter`)。⚠ 語だけ空にすると、**種類で 0 件になっている user が
+     *   押しても何も起きない**(この口を出す条件は「どちらかが在る」なので、
+     *   片方だけ消すと dead click を作る)。
+     * ⚠ 種類が空のときに `CLEAR_KIND_FILTER` を撃っても reducer が同じ state を返すので、
+     *   余計な描画にはならない。
+     */
     dispatcher.dispatch({ type: 'SET_ENTRY_FILTER', query: '' });
+    dispatcher.dispatch({ type: 'CLEAR_KIND_FILTER' });
   },
   'set-tag-badge': (_dispatcher, target) => {
     const v =

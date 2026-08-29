@@ -186,6 +186,25 @@ describe('中身は条件で決まる(#421 段①)', () => {
    * ⚠ **速い機械では出ない** ── 走査が返るのが打つより先だからである
    *   (手元では 3/3 緑、CI では 2/3 赤)。だから**時間ではなく順番**で見る。
    */
+  /**
+   * 🔴 **条件の欄にも候補を出す**(2026-08-29 の動線レビュー)。
+   *
+   * ⚠ タグを打つ欄は 3 つ在るのに、**この欄だけ候補が出ていなかった** ──
+   *   しかもここは**いちばん綴りを間違えてはいけない場所**である
+   *   (1 文字違うと 1 件も集まらず、「0 件のスマートフォルダ」として静かに残る)。
+   * 🔑 候補の口は情報ペインと**同じ 1 本**(`pkc-tag-candidates`)── 面ごとに
+   *   違う候補が出るのを作らない(§7)。
+   */
+  it('🔴 条件の欄に、使っているタグの候補が出る', () => {
+    const r = mount();
+    r.render(reduce(booted(), { type: 'SET_SCOPE', lid: 's1' }).state);
+    const field = region.querySelector<HTMLInputElement>('[data-pkc-field="smart-cond"]')!;
+    expect(
+      field.getAttribute('list'),
+      '条件の欄だけ候補が出ない(いちばん綴りを間違えてはいけない場所)',
+    ).toBe('pkc-tag-candidates');
+  });
+
   it('🔴 集めている最中に打った条件が、走査の返りで消えない', () => {
     const r = mount();
     let s = reduce(booted(), { type: 'SET_SCOPE', lid: 's1' }).state;

@@ -372,19 +372,43 @@ function syncFtsIndex(database: Database): void {
 const BODY_TAGS_RULE = '2';
 const DERIVE_SCOPE = '__derive__';
 
+/**
+ * 🔴 **旧ビルドが書いた行は、索引が据え置かれる**(2026-08-29 の着地後レビュー)。
+ *
+ * ⚠ `/`(本番)と `/dev/` は**同じ origin・同じ DB 名**なので、同じ DB を触る。
+ *   旧ビルドの UPSERT は `body_tags` を更新しないので、**既存行を書き換えると
+ *   索引だけ古いまま**になる ── 新規行は NULL なので埋め戻しが直すが、
+ *   据え置かれた行は `NEEDS_BACKFILL` に当たらず**二度と拾われない**。
+ * ⚠ 症状: 旧ビルドで `#請求` を消しても、新ビルドの集計とスマートフォルダには
+ *   **残り続ける**(逆に旧ビルドで足したタグは永久に集まらない)。
+ * 🔑 だから**最後に索引を揃えた時刻**を憶え、次に開いたとき
+ *   **それ以降に編集された行だけ**引き直す ── どの writer も `updated_at` は
+ *   必ず動かすので、旧ビルドの書込にも効く。実費は「前回の open 以降に
+ *   編集された行」だけである。
+ */
 function redriveBodyTags(database: Database): void {
   const cur = database.selectValue(
     `SELECT v FROM settings WHERE scope = ? AND k = 'body_tags'`,
     [DERIVE_SCOPE],
   );
-  if (cur === BODY_TAGS_RULE) return;
+  const since =
+    cur === BODY_TAGS_RULE
+      ? ((database.selectValue(`SELECT v FROM settings WHERE scope = ? AND k = 'body_tags_at'`, [
+          DERIVE_SCOPE,
+        ]) as string | undefined) ?? '')
+      : null;
+  // ⚠ `since === null` = 規則が変わった(全件)/ 文字列 = その時刻より後だけ
+  const stamp = new Date().toISOString();
   let after: { cid: string; lid: string } | undefined;
   for (;;) {
+    // ⚠ 時刻で絞るときも `updated_at` が NULL の行は見る(一度も保存していない行)
+    const fresh = since === null ? '' : ` AND (updated_at IS NULL OR updated_at > '${since}')`;
     const rows = database.selectObjects(
       after === undefined
-        ? `SELECT cid, lid, body, body_tags FROM entries ORDER BY cid, lid LIMIT ${BACKFILL_CHUNK}`
+        ? `SELECT cid, lid, body, body_tags FROM entries WHERE 1${fresh}
+             ORDER BY cid, lid LIMIT ${BACKFILL_CHUNK}`
         : `SELECT cid, lid, body, body_tags FROM entries
-             WHERE (cid > ? OR (cid = ? AND lid > ?)) ORDER BY cid, lid LIMIT ${BACKFILL_CHUNK}`,
+             WHERE (cid > ? OR (cid = ? AND lid > ?))${fresh} ORDER BY cid, lid LIMIT ${BACKFILL_CHUNK}`,
       after === undefined ? [] : [after.cid, after.cid, after.lid],
     ) as Array<{ cid: string; lid: string; body: string | null; body_tags: string | null }>;
     if (rows.length === 0) break;
@@ -405,6 +429,12 @@ function redriveBodyTags(database: Database): void {
     sql: `INSERT INTO settings(scope, k, v) VALUES (?, 'body_tags', ?)
             ON CONFLICT(scope, k) DO UPDATE SET v = excluded.v`,
     bind: [DERIVE_SCOPE, BODY_TAGS_RULE],
+  });
+  // 🔑 **揃えた時刻を残す** ── 次の open は「これより後に編集された行」だけを見る
+  database.exec({
+    sql: `INSERT INTO settings(scope, k, v) VALUES (?, 'body_tags_at', ?)
+            ON CONFLICT(scope, k) DO UPDATE SET v = excluded.v`,
+    bind: [DERIVE_SCOPE, stamp],
   });
 }
 
