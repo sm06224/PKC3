@@ -773,6 +773,7 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
+    ['2026-08-29-split-open-at', 'a27dd7e0'],
     /**
      * ⚠ **この entry は main に在る = `/dev/` へは配ってある**(`a091456` / #595)。
      *   ⚠ だから「まだ配っていない」とは書けない ── 実測: `git tag --contains a091456`
@@ -804,7 +805,6 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-08-29-columns-folded-reason', '7cce7be1'],
     ['2026-08-29-in-body-tags', 'a5b7156f'],
     ['2026-08-28-help-manual-idle', 'c00593e0'],
-    ['2026-08-28-image-zoom-pan', 'bb6fd0b9'],
     // ⚠ 上限 20 を超えたので 2026-08-29 に落とした(原本は CHANGELOG)
     //['2026-08-28-uml-templates', '93cb2d2a'],
     // ⚠ 上限 20 を超えたので 2026-08-29 に落とした(原本は CHANGELOG)
