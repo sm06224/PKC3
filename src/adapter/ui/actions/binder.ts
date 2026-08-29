@@ -1472,6 +1472,28 @@ export function runGlobalCommand(
     if (!input) return false; // 欄が無い面では何も起きない(ブラウザの検索に譲る)
     if (dry) return true;
     prevent();
+    /**
+     * 🔴 **畳んでいるなら、先に戻してから焦点を入れる**(#583)。
+     *
+     * ⚠ 直す前は `focus()` を撃つだけだった ── **畳んだペインは DOM から消えず、
+     *   CSS で列が落ちるだけ**なので `querySelector` は**見つけてしまい**、
+     *   見えない要素に焦点を入れて**何も起きなかった**(実測: 焦点は `BODY` のまま)。
+     *   🔴 しかも `prevent()` が先なので、**鍵を食ったうえで無反応**である。
+     * 🔴 そして `dry` は `true` を返し続けるので、**パレットは「押せる」と嘘をついていた**
+     *   (畳む前も後も `disabled=false`)。
+     *
+     * 🔑 **戻してから入れる**を選んだ理由:user が押したのは「**探したい**」であって
+     *   「畳んだままにしたい」ではない。⚠ 「押せません」と断るのは**次善** ──
+     *   断ると user は自分でペインを戻す手を探すことになり、**手数が増えるだけ**である。
+     * 🔑 これで `dry` の `true` が**嘘でなくなる** ── どの状態でも実際に効く。
+     */
+    const hidden = appPanes.getHidden();
+    if (hidden.includes('sidebar')) {
+      applyPaneVisibility(
+        root,
+        appPanes.setHidden(hidden.filter((x) => x !== 'sidebar')),
+      );
+    }
     input.focus();
     input.select();
     return true;

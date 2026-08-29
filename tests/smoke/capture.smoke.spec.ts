@@ -90,6 +90,34 @@ test('ブックマークで開いた窓が、合図つきの 1 通だけを受�
    * ⚠ マニュアルに載せた 1 行と**同じ手順**を踏む ── 手順が食い違うと、
    *   ここが緑でも user の手元では動かない。
    */
+  /**
+   * 🔴 **`window.open` を何回呼んだか数える**(#387 診断第 5 段。2026-08-29)。
+   *
+   * ## なぜこの観測点か
+   *
+   * 2026-08-29 の赤で、**両立しない 2 つ**が同時に成り立っていた:
+   * - 例外は `<anonymous>:3:22` = **この関数の 3 行目 = 下の `window.open`**
+   * - それでいて **合図も返事も帯も揃っており、流れは最後まで成功**していた
+   *
+   * ⚠ もし `window.open` が投げて終わったなら `w` は手に入らず、
+   *   `e.source !== w` が永久に真になって**合図は 0 字のはず**である。
+   * 🔑 つまり「**使えた窓**」と「**投げた呼び出し**」は別 ── 考えられるのは
+   *   ① 同じ行が **2 回走った** ② **窓を作ったうえで例外も上げた** の 2 つ。
+   *
+   * 🔑 **数えれば割れる**:2 なら①、1 なら②。
+   * ⚠ 原因はまだ書かない(CLAUDE.md §4)── これは**次の赤に理由を持たせる**ためだけの計器である。
+   * ⚠ 緑の回はほぼ無費用(整数を 1 つ増やすだけ)。
+   */
+  await page.evaluate(() => {
+    const w = window as unknown as { __pkcOpenCalls?: number };
+    w.__pkcOpenCalls = 0;
+    const real = window.open.bind(window);
+    window.open = ((...args: Parameters<typeof window.open>) => {
+      w.__pkcOpenCalls = (w.__pkcOpenCalls ?? 0) + 1;
+      return real(...args);
+    }) as typeof window.open;
+  });
+
   const opened = await page.evaluate(async () => {
     const base = location.href.split('#')[0]!.split('?')[0]!;
     const w = window.open(base + '#pkc?capture=1');
@@ -209,7 +237,23 @@ test('ブックマークで開いた窓が、合図つきの 1 通だけを受�
   // ⚠ handler 内の evaluate の返りを拾い切る(赤の回だけ意味を持つ)
   if (moments.length > 0) await new Promise((r) => setTimeout(r, 300));
   const moment = moments.length > 0 ? ` / 瞬間 [${moments.join(' → ')}]` : '';
+  /**
+   * 🔴 **`window.open` を何回呼んだか**(#387 診断第 5 段)── 赤の回に
+   *   ①「同じ行が 2 回走った」②「窓を作ったうえで例外も上げた」を**割る**。
+   * ⚠ 読めなかった回は `?` と出す(採れないことも情報である)。
+   */
+  const calls = await page
+    .evaluate(() => (window as unknown as { __pkcOpenCalls?: number }).__pkcOpenCalls ?? null)
+    .catch(() => null);
+  const opens = ` / window.open ${calls ?? '?'} 回`;
+  /**
+   * ⚠ **計器そのものの空振り防止** ── 壊れていたら「赤の日」に初めて分かる、では遅い。
+   * 🔑 緑の回は**必ず 1 回**である(この spec は `window.open` を 1 か所しか持たない)。
+   *   ⚠ ここが 2 になったら、それは**製品ではなく赤の正体**である
+   *   ── そのときは `#387` の①(同じ行が 2 回走った)が確定する。
+   */
+  expect(calls, '計器が働いていない(window.open を数えられていない)').toBe(1);
 
-  expect(errors, `記事の頁で例外 ── ${state}${moment}`).toEqual([]);
+  expect(errors, `記事の頁で例外 ── ${state}${opens}${moment}`).toEqual([]);
   expect(errorsPkc, `PKC3 で例外 ── ${state}`).toEqual([]);
 });

@@ -77,6 +77,84 @@ test('🔴 狭い窓でも、止める口が画面の中に在って押せる (#
   expect(errors, '例外が出た').toEqual([]);
 });
 
+/**
+ * 🔴 **2 本目からが本番**(#586。2026-08-29 に実測で原因確定)。
+ *
+ * ⚠ 上の spec は **1 本しか走らせていない**ので、これを見逃していた ──
+ *   素の `1fr` は **`minmax(auto, 1fr)`** なので、**帯の最小幅が列を押し広げる**。
+ *   実測: 480px の窓で **1 本 480 → 2 本 571 → 3 本 845px**、
+ *   3 本目では**録音の「止める」まで画面の外**へ出ていた。
+ * 🔑 「直したはずの欠陥が、2 本目で戻る」型なので **数を増やして見る**
+ *   (CLAUDE.md「fixture のゼロ件の次元は測っていない次元」の **1 件版**)。
+ *
+ * ⚠ **合成の台で代用しない**(1 度これで外した)── 幅の広い子を差し込む形は
+ *   「列を留めても自分が溢れる」ので、**直す前も後も同じように落ちる**。
+ *   実物の帯で測ること。
+ */
+test('🔴 狭い窓でタイマーを 2 本走らせても、画面が横に広がらない (#586)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 480, height: 800 });
+  await gotoApp(page);
+  const vw = page.viewportSize()!.width;
+  const stops = page.locator('[data-pkc-action="stop-timer"]');
+
+  /**
+   * ⚠ **お知らせの帯を先に畳む** ── 480px では **253px** を占め、
+   *   下の「保存」を覆ってしまう(user も最初にこれを閉じる)。
+   * 🔑 ここで畳まないと、この台は**製品ではなく帯に阻まれて**落ちる。
+   */
+  const dismiss = page.locator('[data-pkc-action="dismiss-announce"]');
+  while ((await dismiss.count()) > 0) {
+    await clickReal(page, '[data-pkc-action="dismiss-announce"]');
+    await page.waitForTimeout(120);
+  }
+
+  /**
+   * ⚠ **計るのは「いま開いているノート」1 件につき 1 本**なので、2 本走らせるには
+   *   ノートを 2 件作り、**そのつど編集から出る**必要がある。
+   * ⚠ **保存は追記欄の側を押す** ── 編集の帯の側は狭い窓で**追記欄に覆われていて
+   *   押せない**(#588)。⚠ ここを `.first()` で掴むと、この台は静かに空振りする。
+   */
+  const saveInAppend = page
+    .locator('[data-pkc-region="append"] [data-pkc-action="commit-edit"]')
+    .first();
+  for (let i = 0; i < 2; i += 1) {
+    await createEntry(page, 'text');
+    if ((await saveInAppend.count()) > 0) await clickReal(page, saveInAppend);
+    await clickReal(page, '[data-pkc-field="start-timer"]');
+    await expect(stops, `${i + 1} 本目が始まらない(台の空振り)`).toHaveCount(i + 1);
+  }
+
+  // 🔴 **版面が窓より広がらない**(直す前は 2 本で 571px = 窓の 1.19 倍)
+  const wide = await page.evaluate(() => document.documentElement.scrollWidth);
+  expect(wide, `画面が横に広がっている(${wide}px / 窓幅 ${vw})`).toBeLessThanOrEqual(vw);
+
+  /**
+   * 🔴 **1 本目の「止める」は、いつでも画面の中に在って押せる**。
+   *
+   * ⚠ **2 本目以降はここでは見ません** ── 帯の中で横に流れる作りなので
+   *   (`app.css` の `overflow-x: auto`)、2 本目は **x=595** に置かれ、
+   *   **帯を横へ払わないと届きません**。
+   * 🔑 それを「良い」とするかは**動線の判断**であって、この修理の範囲外です
+   *   ── **#586 の残り半分**として起票してあります(#587 の改善 B「帯を 1 本に
+   *   まとめる」が答えの候補)。⚠ ここで assert すると、**直っていないものを
+   *   直ったことにする**か、**この spec が永久に赤**かのどちらかになります。
+   */
+  const first = await stops.first().evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    return {
+      right: Math.round(r.x + r.width),
+      hit: at?.closest('[data-pkc-action]')?.getAttribute('data-pkc-action') ?? null,
+    };
+  });
+  expect(first.right, `1 本目の止める口が窓からはみ出している(${first.right} / 窓 ${vw})`)
+    .toBeLessThanOrEqual(vw);
+  expect(first.hit, '1 本目の止める口の上に別の物が重なっている').toBe('stop-timer');
+
+  expect(errors, '例外が出た').toEqual([]);
+});
+
 test('🔴 計って止めると、開いていたノートの本文に作業時間が入る (#279)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });

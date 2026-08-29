@@ -153,6 +153,48 @@ test('🔴 近道はブラウザの既定を止める(保存ダイアログ / �
  * ⚠ そして **mac では `Alt+字` が記号を打つ** ── 既定を止められているか
  *   (本文に `˙` が混ざらないか)も、ここでしか見えない。
  */
+/**
+ * 🔴 **一覧を畳んでいても `Ctrl+F` が効く**(#583)。
+ *
+ * ## unit では原理的に届かない
+ *
+ * ⚠ happy-dom は版面を組まないので、**`display: none` の欄にも `focus()` が通り**、
+ *   `activeElement` になってしまう ── 「**畳んでいると入らない**」は
+ *   **実ブラウザでしか見えません**(unit が守れるのは「戻す側」だけ)。
+ *
+ * ## 直す前に何が起きていたか(実測)
+ *
+ * | | 焦点はどこへ |
+ * |---|---|
+ * | 畳む前 | `entry-filter` ✅ |
+ * | 🔴 畳んだ後 | **`BODY`**(どこにも入らない) |
+ *
+ * 🔴 しかも `prevent()` が先なので、**鍵を食ったうえで無反応**だった
+ * (ブラウザ既定の検索にも譲れない)。
+ */
+test('🔴 一覧を畳んでいても Ctrl+F で絞り込みの欄へ入る (#583)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+  const filter = page.locator('[data-pkc-field="entry-filter"]');
+  const focused = () =>
+    page.evaluate(() => document.activeElement?.getAttribute('data-pkc-field') ?? document.activeElement?.tagName ?? null);
+
+  // 対照群 ── 畳む前は効く
+  await page.keyboard.press('ControlOrMeta+f');
+  expect(await focused(), '畳む前から効いていない(台の空振り)').toBe('entry-filter');
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+
+  // 🔴 畳んでから押す
+  await clickReal(page, '[data-pkc-region="pane-grip"][data-pkc-pane="sidebar"]');
+  await expect(filter, '畳めていない(台の空振り)').toBeHidden();
+  await page.keyboard.press('ControlOrMeta+f');
+  expect(await focused(), '畳んでいると焦点が入らない(鍵を食って無反応)').toBe('entry-filter');
+  // 🔑 **見えるようになっている**(見えない欄に焦点だけ入れて終わりにしない)
+  await expect(filter, '一覧が畳まれたまま焦点だけ入れている').toBeVisible();
+
+  expect(errors, '例外が出た').toEqual([]);
+});
+
 test('🔴 帯に無い記法が、鍵で本文に入る (#425)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });

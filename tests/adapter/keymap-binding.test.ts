@@ -21,6 +21,7 @@ import { buildKeymapPanel, CONTEXT_LABELS as LABEL_OF } from '../../src/adapter/
 import { HelpRenderer } from '../../src/adapter/ui/render/help';
 import { KEY_COMMANDS, chordLabel } from '../../src/features/keymap';
 import { RowSwap } from '../../src/adapter/ui/render/row-swap';
+import { appPanes, applyPaneVisibility } from '../../src/adapter/ui/render/pane-visibility';
 import {
   confirmInApp,
   resetAppDialogForTest,
@@ -145,6 +146,47 @@ describe('画面への配線', () => {
     target.dispatchEvent(
       new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init }),
     );
+
+  /**
+   * 🔴 **一覧を畳んでいても `Ctrl+F` が効く**(#583)。
+   *
+   * ⚠ 直す前は `focus()` を撃つだけだった ── **畳んだペインは DOM から消えず、
+   *   CSS で列が落ちるだけ**なので `querySelector` は**見つけてしまい**、
+   *   見えない要素に焦点を入れて**何も起きなかった**(実測: 焦点は `BODY` のまま)。
+   *   🔴 しかも `prevent()` が先なので、**鍵を食ったうえで無反応**である。
+   * 🔑 直したあとは「**先に戻してから入れる**」── user が押したのは「探したい」で
+   *   あって「畳んだままにしたい」ではない。
+   *
+   * ⚠ **対照群を同じ it に置く**(畳んでいないときも効く)── 置かないと、
+   *   「畳みの扱いを足したのに、別の理由で効かなくなった」を次に見抜けない。
+   */
+  it('🔴 一覧を畳んでいても Ctrl+F で絞り込みの欄へ入る(#583)', () => {
+    const { root } = mounted();
+    const filter = root.querySelector<HTMLInputElement>('[data-pkc-field="entry-filter"]')!;
+    expect(filter, '絞り込みの欄が無い(台の空振り)').not.toBeNull();
+
+    // 対照群 ── 畳んでいないときは、これまでどおり効く
+    press('f', { code: 'KeyF', ctrlKey: true });
+    expect(document.activeElement, '畳む前から効いていない').toBe(filter);
+    filter.blur();
+
+    // 🔴 畳んでから押す
+    applyPaneVisibility(root, appPanes.setHidden(['sidebar']));
+    expect(appPanes.getHidden(), '畳めていない(台の空振り)').toContain('sidebar');
+    press('f', { code: 'KeyF', ctrlKey: true });
+    /**
+     * ⚠ **この行は変異を殺しません**(正直に書く)── happy-dom は版面を組まないので、
+     *   `display: none` の要素にも `focus()` が通り、`activeElement` になる。
+     *   🔑 **実機で「入らない」ことを見るのは smoke** の側である
+     *   (`tests/smoke/keymap.smoke.spec.ts`)。
+     */
+    expect(document.activeElement, '焦点が欄に入っていない').toBe(filter);
+    /**
+     * 🔴 **殺しているのはこちら** ── 「戻してから入れる」の**戻す側**。
+     * ⚠ 見えない欄に焦点だけ入れて終わりにすると、user からは**無反応**に見える。
+     */
+    expect(appPanes.getHidden(), '一覧が畳まれたまま焦点だけ入れている').not.toContain('sidebar');
+  });
 
   it('既定の Ctrl+N でノートができる', () => {
     const { d } = mounted();

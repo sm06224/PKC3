@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
@@ -266,32 +266,65 @@ test('🔴 お知らせは 1 件ずつ出て、「次へ」で送れる', async 
  * ⚠ 空振り防止 ── 本文が実際に溢れていることを先に確かめる。溢れていない画面では
  * 「見えている」は自明で、この test は何も守らない。
  */
+/**
+ * 🔴 **本文が「溢れているが、送れる」版面を探す**(2026-08-29)。
+ *
+ * ## なぜ要るか
+ *
+ * ⚠ 直す前は `height: 520` を**固定で書いて**いた ── その値は
+ *   「そのとき先頭に出ていたお知らせの本文が 123px だったから」決まっていた。
+ * 🔴 だから**お知らせを 1 件足しただけで CI が落ちた**(2026-08-29、実際に踏んだ)──
+ *   新しい先頭が短く(本文 67px)、`30vh` に収まってしまい、
+ *   空振り防止が「見切れ得ないので検査にならない」で止まった。
+ *   ⚠ **検査は正しく、台が登記表の中身に寄りかかっていた。**
+ *
+ * ## ⚠ 比では決まらない ── だから探す
+ *
+ * 帯の上限は `30vh` だが、その中を**題名とボタンが食う**ので、
+ * 本文に残る高さは単純な比にならない。実測(本文 67px のとき):
+ *
+ * | 版面 | 本文の client | 送れるか |
+ * |---|---|---|
+ * | 900 / 500 | 67 | ❌ 溢れない |
+ * | 360 | 32 | ✅ |
+ * | 240 | **0** | ❌ **高さ 0 なので送れない** |
+ *
+ * 🔴 だから「溢れている」だけでは足りない ── **`0 < client < scroll`** を探す。
+ * ⚠ 見つからなければ**そう言って落ちる**(測った表を添えて)。黙って通さない。
+ */
+async function shrinkUntilOverflow(page: Page): Promise<{ scroll: number; client: number }> {
+  const measure = () =>
+    page.evaluate(() => {
+      const b = document.querySelector('[data-pkc-field="announce-body"]');
+      return b instanceof HTMLElement ? { scroll: b.scrollHeight, client: b.clientHeight } : null;
+    });
+  const tried: string[] = [];
+  // ⚠ **幅は変えない**(折り返しが変わると本文の高さも変わる)
+  for (const height of [520, 460, 400, 360, 320, 300, 280]) {
+    await page.setViewportSize({ width: 1280, height });
+    await page.waitForTimeout(120);
+    const box = await measure();
+    if (box === null) continue;
+    tried.push(`${height}→client ${box.client}/scroll ${box.scroll}`);
+    // 🔑 溢れていて、かつ**送れるだけの高さが残っている**
+    if (box.client > 8 && box.scroll > box.client + 1) return box;
+  }
+  throw new Error(
+    `送れる形で溢れる版面が見つからない ── 見切れ得ないので検査にならない。[${tried.join(' / ')}]`,
+  );
+}
+
 test('🔴 お知らせが溢れていても、閉じるはスクロールせずに押せる', async ({ page }) => {
   const errors = collectPageErrors(page);
-  /**
-   * ⚠ **低い版面で見る**(#475、2026-08-27)。帯は**1 件ずつ**出すようになったので、
-   *   1280x900 では 1 件が丸ごと収まり(実測 band 199 / body 123 = client 123)、
-   *   **溢れが起きない** ── そこで測ると下の空振り防止で止まる。
-   * 🔑 溢れは**器の高さ**で起こす(30vh)。実測の分かれ目は 620px で、
-   *   520px なら body 123 に対し器は 80 ── 確実に溢れる。
-   * ⚠ **溢れ得ない版面で測らない**のが要点であって、値そのものは目的ではない。
-   */
-  await page.setViewportSize({ width: 1280, height: 520 });
+  // ⚠ 幅は固定、高さは**中身から決める**(上の docstring)
+  await page.setViewportSize({ width: 1280, height: 900 });
   await gotoApp(page);
 
   const band = page.locator('[data-pkc-region="announce"]');
   await expect(band, '起動時にお知らせが出ていない').toBeVisible({ timeout: 10_000 });
 
   // ⚠ **溢れているか**を先に見る(この次元がゼロなら、以下は測っていないのと同じ)
-  const box = await page.evaluate(() => {
-    const b = document.querySelector('[data-pkc-field="announce-body"]');
-    return b instanceof HTMLElement ? { scroll: b.scrollHeight, client: b.clientHeight } : null;
-  });
-  expect(box, '流れる本文の箱が無い').not.toBeNull();
-  expect(
-    box!.scroll,
-    `本文が溢れていない(${box!.scroll} ≤ ${box!.client})── 見切れ得ないので検査にならない`,
-  ).toBeGreaterThan(box!.client + 1);
+  await shrinkUntilOverflow(page);
 
   // 🔴 **スクロールさせずに**、その場で当たるか
   const hit = await page.evaluate(() => {
@@ -367,25 +400,22 @@ test('🔴 お知らせが溢れていても、閉じるはスクロールせず
  */
 test('🔴 お知らせの中を送っても、閉じるはそこから動かない', async ({ page }) => {
   const errors = collectPageErrors(page);
-  // ⚠ 上と同じ理由で低い版面(1 件ずつになったので 900px では溢れない)
-  await page.setViewportSize({ width: 1280, height: 520 });
+  // ⚠ 上と同じく、高さは**中身から決める**(登記表の中身に寄りかからない)
+  await page.setViewportSize({ width: 1280, height: 900 });
   await gotoApp(page);
 
   const band = page.locator('[data-pkc-region="announce"]');
   await expect(band, '起動時にお知らせが出ていない').toBeVisible({ timeout: 10_000 });
   const body = page.locator('[data-pkc-field="announce-body"]');
-  const box = await body.boundingBox();
-  expect(box, '流れる本文の箱が無い').not.toBeNull();
   /**
    * ⚠ **空振り防止**(レビュー 2026-08-14)。本文が溢れていない画面では
    * `scrollTop` は 0 のままなので、「ホイールで送れない」という**原因を
    * 取り違えたメッセージ**で落ちる ── 登記表が減っただけのときに、
    * CSS の欠陥だと読んでしまう。
    */
-  const fit = await body.evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight }));
-  expect(fit.scroll, `本文が溢れていない(${fit.scroll} ≤ ${fit.client})`).toBeGreaterThan(
-    fit.client + 1,
-  );
+  await shrinkUntilOverflow(page);
+  const box = await body.boundingBox();
+  expect(box, '流れる本文の箱が無い').not.toBeNull();
 
   const before = await page.locator('[data-pkc-action="dismiss-announce"]').boundingBox();
   expect(before, '閉じるが画面に出ていない').not.toBeNull();
