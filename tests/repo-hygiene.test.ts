@@ -171,9 +171,20 @@ describe('リポジトリ衛生', () => {
   it('🔴 画面に書いた data-pkc-action に、受け手が全部いる', () => {
     const binder = readFileSync('src/adapter/ui/actions/binder.ts', 'utf-8');
     /**
-     * ⚠ **`ACTIONS` の表だけを見る**(file 全体を `includes` で見ない)── 説明文や
-     *   `BODY_WRITE_ACTIONS` の一覧に名前が在るだけで満たされてしまう
-     *   (CLAUDE.md「ガードは代替物で満たせない条件にする」)。
+     * ⚠ **`ACTIONS` から下だけを見る**(file 全体を `includes` で見ない)── 説明文に
+     *   名前が在るだけで満たされてしまう(CLAUDE.md「ガードは代替物で満たせない条件に」)。
+     *
+     * 🔴 **注釈の訂正**(2026-08-29、#582 の全数調査で判明)。ここは 1 稿目に
+     *   「**`ACTIONS` の表だけを見る**」と書いてあったが、**事実と違った** ──
+     *   `slice` は **file の末尾まで**取るので、表の**下**に在る別の表
+     *   (`SHORTCUT_BUTTON` / `FORMAT_OF` の **19 種**:`format-bold` `open-settings`
+     *   `toggle-sidebar` ほか)も一緒に入る。
+     * 🔑 **そして、入っていて正しい** ── それらも「押されたら何かが起きる」受け手だからで、
+     *   narrow すると `format-bold` などが「受け手がいない」と**偽陽性**になる。
+     * ⚠ つまり 1 稿目は**結果は正しく、理由が間違っていた**。理由を直しておかないと、
+     *   次に読む人が「表だけのはずなのに 197 種ある」で 30 分溶かす(実際に溶かした)。
+     * 🔑 **表の中だけ**を数えたいときは `scripts/action-outlets.mjs` の `receivers()`
+     *   (中括弧で終端を決める)を使うこと ── そちらは **183 種**を返す。
      */
     const table = binder.slice(binder.indexOf('const ACTIONS: Record<string, ActionHandler> = {'));
     const handlers = new Set([...table.matchAll(/^\s{2}'([a-z0-9-]+)':/gm)].map((m) => m[1]!));
@@ -880,5 +891,44 @@ describe('🔴 test が起こす子プロセスは stdio を明示する(#558)',
     expect(sitesIn(ok, 'f')[0]!.call.includes('stdio'), '在るのに無いと読んだ').toBe(true);
     // ⚠ 行番号は**原文の行**(コメントを落とさないので、ずれない)
     expect(sitesIn(`// a\n// b\n${bare}`, 'f')[0]!.where, '行番号がずれている').toBe('f:3');
+  });
+
+});
+
+/**
+ * 🔴 **smoke の spec が黙って消えないようにする**(2026-08-29 に実際に消した)。
+ *
+ * ## なぜ要るか
+ *
+ * ⚠ CLAUDE.md §9 は「**test file を切り落としても suite は緑になる**」を戒め、
+ *   気づけたのは **test の件数**だけだった、と書いている。
+ * 🔴 **ところがその件数は `npm test`(unit)のもので、smoke を 1 件も数えていない。**
+ *   実際 2026-08-29 に、spec を 1 つ外すつもりで
+ *   **その下に在った `#279` の test 66 行ごと**切り落としたが、
+ *   `npm test` は **6966 件のまま緑**だった(気づいたのは lint の
+ *   「import が使われていない」だけ ── 使っていた行を消したからである)。
+ *
+ * ## 🔑 数を実数で pin する
+ *
+ * ⚠ spec を足したらこの数を直す ── 直さないと落ちる = **忘れられない**
+ *   (`KNOWN_DEAD` / `EXPECTED_ACTIONS` / お知らせの `KNOWN` と同じ作法)。
+ * ⚠ **file 数も見る** ── 1 file を丸ごと消しても、他が増えていれば総数は合いうる。
+ */
+describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
+  it('🔴 spec の file 数と test の件数が変わっていない', () => {
+    const files = readdirSync('tests/smoke')
+      .filter((f) => f.endsWith('.spec.ts'))
+      .sort();
+    const counts = files.map(
+      (f) =>
+        (readFileSync(`tests/smoke/${f}`, 'utf-8').match(/^\s*test(?:\.skip)?\(/gm) ?? []).length,
+    );
+    // 空振り防止 ── 数え方が壊れて 0 件になったら気づけない
+    expect(counts.filter((n) => n === 0), 'test を 1 件も引けない spec がある').toEqual([]);
+    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(76);
+    expect(
+      counts.reduce((a, b) => a + b, 0),
+      'smoke の test が増減した(足したらこの数を直す)',
+    ).toBe(354);
   });
 });

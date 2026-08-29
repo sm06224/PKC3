@@ -2050,9 +2050,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * ⚠ **結果を出す** ── コピーは押しても画面が変わらない操作なので、
      *    黙って終わると成功したのか分からない
      */
-    copyText: (text) => {
+    copyText: (text, done) => {
       void copyPlainText(text).then((ok) => {
-        showStatus(ok ? '参照をコピーしました(本文に貼れます)' : 'コピーできませんでした');
+        /**
+         * 🔴 **押した側から「何を写したか」を受け取る**(2026-08-29 の動線レビュー 欠陥 2)。
+         * ⚠ 直す前は**どれを押しても**「参照をコピーしました」と出ていた ──
+         *   本文を全部写す `copy-plain-markdown` でもそう出ており、**字が嘘**だった。
+         * ⚠ 既定は**参照と言わない**汎用にする(渡し忘れても嘘にならない側へ倒す)。
+         */
+        showStatus(ok ? (done ?? 'コピーしました') : 'コピーできませんでした');
       });
     },
     /**

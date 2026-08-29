@@ -645,7 +645,18 @@ export interface BinderServices {
   /** ⚠ **Promise を返す** ── 押した側が「終わった」を知らないと待ちを出せない。 */
   exportDiagram?(source: string, index: number): void | Promise<void>;
   /** 文字列をクリップボードへ(P8 段⑱)。⚠ 失敗も可視で終える。 */
-  copyText?(text: string): void;
+  /**
+   * clipboard へ写す。
+   *
+   * 🔴 **`done` に「何を写したか」を渡す**(2026-08-29 の動線レビュー 欠陥 2)。
+   * ⚠ 渡さないと `main.ts` の既定文(「参照をコピーしました」)が出る ── それは
+   *   **参照以外を写したときに嘘になる**(実際 `copy-plain-markdown` は本文を全部
+   *   写しているのに「参照をコピーしました(本文に貼れます)」と出ていた)。
+   * ⚠ **押した側で `showStatus` を撃っても勝てない** ── clipboard の書込は非同期で、
+   *   その `.then` が**後から必ず上書きする**(実測 12ms で入れ替わっていた)。
+   *   🔑 だから字は**この口から渡す**。2 か所で撃たない。
+   */
+  copyText?(text: string, done?: string): void;
   /**
    * 添付 gate(書出し / 取込 / 整理)が実行中か。
    * ⚠ **破壊的操作を止めるために要る**(P6f review M-2)── 「書き出す」と「削除」を
@@ -3119,21 +3130,6 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     dispatcher.dispatch({ type: 'TOGGLE_TASK', lid, line });
   },
-  'calendar-nav': (dispatcher, target) => {
-    // 遷移先は renderer が描画時に焼き込む(binder は「今の月」を推定しない)
-    const year = Number(target.getAttribute('data-pkc-nav-year'));
-    const month = Number(target.getAttribute('data-pkc-nav-month'));
-    if (!Number.isInteger(year) || !Number.isInteger(month)) return;
-    dispatcher.dispatch({ type: 'SET_CALENDAR_MONTH', year, month });
-  },
-  'calendar-today': (dispatcher) => {
-    const now = new Date();
-    dispatcher.dispatch({
-      type: 'SET_CALENDAR_MONTH',
-      year: now.getFullYear(),
-      month: now.getMonth() + 1,
-    });
-  },
   'toggle-show-archived': (dispatcher) =>
     dispatcher.dispatch({ type: 'TOGGLE_SHOW_ARCHIVED' }),
   /**
@@ -3442,8 +3438,13 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版では写せません' });
       return;
     }
-    services.copyText(plain);
-    services.showStatus?.('素の Markdown として写しました');
+    /**
+     * 🔴 **字は `copyText` に渡す**(2026-08-29 の動線レビュー 欠陥 2)。
+     * ⚠ 直す前はここで `showStatus` を撃っていたが、clipboard の `.then` が
+     *   **後から「参照をコピーしました(本文に貼れます)」で上書き**していた ──
+     *   本文を全部写しているのに**参照を写したと言われる**(実測)。
+     */
+    services.copyText(plain, '素の Markdown をコピーしました(他のツールに貼れます)');
     void target;
   },
   /**
@@ -3576,13 +3577,18 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: 'ノートがまだありません' });
       return;
     }
-    services.copyText?.(out.text);
-    flashCopied(target);
-    services.showStatus?.(
+    /**
+     * 🔴 **字は `copyText` に渡す**(2026-08-29 の動線レビュー 欠陥 2)── ここも
+     *   `showStatus` を後から上書きされていた(件数まで出していたのに、user が
+     *   読むのは「参照をコピーしました」だった)。
+     */
+    services.copyText?.(
+      out.text,
       out.shown === out.total
         ? `構成 ${out.total} 件をコピーしました`
         : `構成 ${out.total} 件のうち ${out.shown} 件をコピーしました`,
     );
+    flashCopied(target);
   },
   /**
    * 🔴 **整理案を当てる**(#429 段③)。
@@ -3800,12 +3806,51 @@ const ACTIONS: Record<string, ActionHandler> = {
       },
     );
   },
-  'copy-entry-ref': (_dispatcher, target, services) => {
-    const ref = target
+  /**
+   * 🔴 **貼れる 1 行を写す**(#427 段①)。
+   *
+   * ## ⚠ 押した物が持っていれば、それを使う
+   *
+   * 情報ペインのボタンは `data-pkc-entry-ref` を**押される前に**載せている
+   * (`inspector.ts`)── 押した後に選択が移っても**別のノートの参照**にならないためである。
+   *
+   * ## 🔴 持っていない相手には、隔の 6 つと同じ規則で組む(2026-08-29)
+   *
+   * ⚠ 直す前は `closest('[data-pkc-entry-ref]')` **だけ**を見ており、
+   *   右クリックのメニューからは**必ず `undefined`** だった
+   *   ── メニューのボタンは `data-pkc-action` しか持たず、器は
+   *   **root 直下**に出るので `[data-pkc-entry-ref]` の中に居ない。
+   *   しかも `return` だけなので**理由も出ない** = 無言の dead click。
+   *   ⚠ これは右クリックのメニューの**先頭の 1 行**である。
+   * 🔑 #578 で `adopt-external-images` を直したのと**同じ穴**なので、
+   *   同じ規則で解く──「押した物の中の行 → 無ければ選んでいるノート」。
+   * ⚠ 組み立ては `formatEntryLink` 1 本(§7)── `inspector.ts` が載せる字と
+   *   同じ関数であることを `tests/adapter/copy-entry-ref.test.ts` が pin する。
+   */
+  'copy-entry-ref': (dispatcher, target, services) => {
+    const carried = target
       .closest<HTMLElement>('[data-pkc-entry-ref]')
       ?.getAttribute('data-pkc-entry-ref');
-    if (ref === null || ref === undefined) return;
-    services.copyText?.(ref);
+    const st = dispatcher.getState();
+    const lid =
+      target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? st.selectedLid;
+    const meta = lid === null ? undefined : st.entryMetas.get(lid);
+    const ref =
+      carried ?? (meta === undefined || lid === null ? null : formatEntryLink(meta.title, lid));
+    // ⚠ **黙って止めない**(#513 と同じ作法)── 押したのに何も起きないのがいちばん困る
+    if (ref === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'ノートを選んでから押してください' });
+      return;
+    }
+    /**
+     * ⚠ **光るだけでは、メニューから押した人に届かない**(2026-08-29)。
+     * 🔑 `data-pkc-flash` は 700ms の合図だが、右クリックのメニューは
+     *   押した瞬間に**畳まれる**(`onCloseMenu`)── 光る相手が消えるので、
+     *   成功しても**画面に何も残らない**(dead click と見分けが付かない)。
+     * 🔴 **字は `copyText` に渡す**(動線レビュー 欠陥 2)── ここで `showStatus` を
+     *   撃っても、clipboard の `.then` が**12ms 後に上書きする**(実測)。
+     */
+    services.copyText?.(ref, 'ノートへのリンクをコピーしました(本文に貼れます)');
     flashCopied(target);
   },
   /**
@@ -3895,7 +3940,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       .closest<HTMLElement>('[data-pkc-asset-ref]')
       ?.getAttribute('data-pkc-asset-ref');
     if (!ref) return;
-    services.copyText?.(ref);
+    services.copyText?.(ref, '添付の参照をコピーしました(本文に貼れます)');
     /**
      * 🔴 **押した手応えを出す**(#427 段①で気づいた ── 対称の反対側)。
      * ⚠ 直す前は**この 2 つだけ合図が無かった** ── 本文のコピー

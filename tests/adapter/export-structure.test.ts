@@ -33,7 +33,16 @@ function setup(metas: EntryMeta[]) {
   const errors: string[] = [];
   d.onEvent?.(() => {});
   bindActions(root, d, {
-    copyText: (t: string) => copied.push(t),
+    /**
+     * ⚠ **本物と同じ意味論にする**(2026-08-29。CLAUDE.md §3「stub は本物の
+     *   意味論を真似る」)── `main.ts` の `copyText` は clipboard へ書いたあと
+     *   **`done` を状態の行に出す**。stub がそこを落とすと、
+     *   「字が出ていない」欠陥を**この test は永久に見られない**。
+     */
+    copyText: (t: string, done?: string) => {
+      copied.push(t);
+      status.push(done ?? 'コピーしました');
+    },
     showStatus: (t: string) => status.push(t),
   });
   d.onState(() => {

@@ -36,6 +36,7 @@ import {
   NOTICE_ITEM_CHARS_MIN,
   NOTICE_KEEP_MAX,
   NOTICE_SHOW_MAX,
+  noticeDate,
 } from '../../src/features/notice/notice-log';
 
 let region: HTMLElement;
@@ -91,7 +92,22 @@ describe('ヘルプの面', () => {
     );
     expect(ids.length, 'お知らせが 1 件も出ていない(fixture の空振り)').toBeGreaterThan(0);
     expect(ids.length).toBeLessThanOrEqual(NOTICE_SHOW_MAX);
-    expect([...ids].sort().reverse(), '新しい順に並んでいない').toEqual(ids);
+    /**
+     * 🔴 **「新しい順」は日付の順である**(2026-08-29 の動線レビュー 欠陥 5)。
+     *
+     * ⚠ 直す前は `[...ids].sort().reverse()` = **id 全体の綴り順**を要求していたので、
+     *   実装が「同じ日は**英語スラッグの綴り順**」で並ぶことを**この test が pin していた** ──
+     *   その結果、いちばん実害の大きい知らせが **7 番目**へ回り、user は
+     *   「次へ」を 6 回押さないと読めなかった(実測)。
+     * 🔑 見るのは 2 つ:①**日付が新しい順**であること
+     *   ②**同じ日は登記表に書いた順**であること(登記表は先頭に足す規約)。
+     */
+    const dates = ids.map(noticeDate);
+    expect([...dates].sort().reverse(), '日付が新しい順に並んでいない').toEqual(dates);
+    const order = new Map(NOTICES.map((n, i) => [n.id, i]));
+    const ranks = ids.map((id) => order.get(id) ?? -1);
+    expect(ranks, '登記表に無いお知らせが出ている(空振り)').not.toContain(-1);
+    expect([...ranks].sort((a, b) => a - b), '同じ日が登記表の順で出ていない').toEqual(ranks);
     // 日付は id から引く(field を二重に持たない)
     const first = region.querySelector('[data-pkc-field="notice-title"]')?.textContent ?? '';
     expect(first, '日付が出ていない').toMatch(/^\d{4}-\d{2}-\d{2} /);
