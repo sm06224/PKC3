@@ -249,6 +249,27 @@
   --read-w: 42rem;
 
   /**
+   * 🔴 **本文の中のタグの札**(#550 段③)。⚠ **既定はここ**(= 薄い灰色の下地の札)。
+   *
+   * 🔑 **ここに置く理由は「書き出しへ運ばれる」から**である ── 書き出し HTML の
+   *   CSS は `app.css` の**本文の規則 + それが参照する token** だけを焼く
+   *   (`build/body-css.ts`)。⚠ 定義が `app.css` の `[data-pkc-tag-badge='…']`
+   *   側にしか無いと、**書き出した HTML では札にならない**
+   *   (`tests/build/body-css.test.ts` が「定義の無いトークン」で鳴った)。
+   * ⚠ 見せ方の切り替えは `app.css` の `[data-pkc-tag-badge='…']` が**上書き**する ──
+   *   そちらは端末ごとの好みなので、書き出しには**運ばない**(いつも既定の札で出る)。
+   * ⚠ 色は `--fg` から作る(新しい色を発明しない ── `column-rule` と同じ作法)。
+   */
+  --pkc-tag-bg: color-mix(in srgb, var(--fg) 9%, transparent);
+  --pkc-tag-bg-hover: color-mix(in srgb, var(--fg) 16%, transparent);
+  --pkc-tag-border: 0;
+  --pkc-tag-radius: 4px;
+  --pkc-tag-pad: 1px 8px;
+  --pkc-tag-size: 0.86em;
+  --pkc-tag-line: 1.7;
+  --pkc-tag-gap: 6px;
+
+  /**
    * 🔴 **見出しの左端の帯の色**(user 提案 2026-08-27「左端に幅の狭いインデックス
    * カラーつけるとか?(Word みたいな?)」)。
    *

@@ -1616,49 +1616,60 @@ li[data-pkc-row-slot] {
  * ⚠ 見せ方の切り替え(`[data-pkc-tag-badge='…']`)は**運ばれない**ままでよい ──
  *   書き出しは**いつも既定の札**で出る(端末ごとの好みは持って行かない)。
  */
+/**
+ * 🔴 **見せ方の差は「変数」で持つ**(2026-08-29、`tests/build/body-css.test.ts` が
+ *   捕まえた)。
+ *
+ * ⚠ 1 稿目は `[data-pkc-tag-badge='outline'] .pkc-md-rendered .pkc-tag { … }` と
+ *   書いていたが、**書き出しへ運ばれるのは `.pkc-md-rendered` で始まる規則だけ**
+ *   (`build/body-css.ts` の `isBodyRule`)── **4 本が落ちて**、検査が
+ *   「本文のセレクタが減っている」と鳴った。
+ * 🔑 `column-rule`(`--pkc-col-rule`)と**同じ形**にする ── 本文の規則は 1 本にし、
+ *   差は `<html>` に当てた変数で切り替える。
+ * ⚠ **既定の値は `tokens.css` に置く** ── そちらは書き出しへ運ばれるので、
+ *   書き出した HTML では**いつも札**で出る(端末ごとの好みは持って行かない)。
+ */
 .pkc-md-rendered .pkc-tagline {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--pkc-tag-gap);
 }
 .pkc-md-rendered .pkc-tag {
   display: inline-flex;
   align-items: center;
-  padding: 1px 8px;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--fg) 9%, transparent);
-  font-size: 0.86em;
-  line-height: 1.7;
+  padding: var(--pkc-tag-pad);
+  border: var(--pkc-tag-border);
+  border-radius: var(--pkc-tag-radius);
+  background: var(--pkc-tag-bg);
+  font-size: var(--pkc-tag-size);
+  line-height: var(--pkc-tag-line);
 }
 /* ⚠ 押せる面だけ指の形にする(`interactiveTags` が付けた印で見分ける)。 */
 .pkc-md-rendered .pkc-tag[data-pkc-action] {
   cursor: pointer;
 }
 .pkc-md-rendered .pkc-tag[data-pkc-action]:hover {
-  background: color-mix(in srgb, var(--fg) 16%, transparent);
+  background: var(--pkc-tag-bg-hover);
 }
 /* 枠だけ(下地なし)。 */
-[data-pkc-tag-badge='outline'] .pkc-md-rendered .pkc-tag {
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 0 9px;
-}
-[data-pkc-tag-badge='outline'] .pkc-md-rendered .pkc-tag[data-pkc-action]:hover {
-  background: color-mix(in srgb, var(--fg) 8%, transparent);
+[data-pkc-tag-badge='outline'] {
+  --pkc-tag-bg: none;
+  --pkc-tag-bg-hover: color-mix(in srgb, var(--fg) 8%, transparent);
+  --pkc-tag-border: 1px solid var(--border);
+  --pkc-tag-radius: 999px;
+  --pkc-tag-pad: 0 9px;
 }
 /* 文字のまま(いままでと同じ見え方)。⚠ 隙間だけは残す ── 潰すと語が繋がって読める。 */
-[data-pkc-tag-badge='plain'] .pkc-md-rendered .pkc-tag {
-  background: none;
-  border: 0;
-  border-radius: 0;
-  padding: 0;
-  font-size: inherit;
-  line-height: inherit;
-}
-[data-pkc-tag-badge='plain'] .pkc-md-rendered .pkc-tagline {
-  gap: 0.5em;
+[data-pkc-tag-badge='plain'] {
+  --pkc-tag-bg: none;
+  --pkc-tag-bg-hover: none;
+  --pkc-tag-border: 0;
+  --pkc-tag-radius: 0;
+  --pkc-tag-pad: 0;
+  --pkc-tag-size: inherit;
+  --pkc-tag-line: inherit;
+  --pkc-tag-gap: 0.5em;
 }
 
 /* 🔑 **本文の読み幅に上限を置く**(P9 段②)。Full HD では 1 行が 1172px =
