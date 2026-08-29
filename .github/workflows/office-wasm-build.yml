@@ -604,6 +604,16 @@ jobs:
           --disable-emscripten-proxy-to-pthread
           --with-wasm-module=calc writer impress
           --with-lang=en-US ja
+          # 🔴 **テンプレートを建てる**(#591)。⚠ 渡さないと、上流の `configure.ac` が
+          #    iOS / Android / **Emscripten** で `WITH_TEMPLATES` を空にするので
+          #    (`configure.ac:3634-3639`)、`extras/Package_tplpresnt.mk` は
+          #    `else` 側の `gb_Package_add_empty_directory` だけを走らせる ──
+          #    🔑 **フォルダは作られて中身が 0 件**になり、Impress の
+          #    「Select a Template」が**空の一覧**を出していた。
+          #    ⚠ 「上流にテンプレートが無い」ではない(.otp 23 件 / .ott .otg 11 件)。
+          #    ⚠ `=yes` は `configure.ac:3622` の `WITH_TEMPLATES=TRUE` を**保つ**枝である
+          #      (実装を読んで確かめた ── 別の所で弾かれない)。
+          --with-templates=yes
           CONF
           . ~/emsdk/emsdk_env.sh
           # 🔴 **出力を残す**(2026-08-14)。⚠ `make` には `tee` が在るのに
@@ -775,6 +785,26 @@ jobs:
           echo "日本語 翻訳(.mo): $mo 件 / 言語の登録(Langpack-ja.xcd): $pack 件"
           test "$mo" -gt 0
           test "$pack" -gt 0
+
+      # 🔴 **テンプレートが実際に詰め込まれたか**(#591)。
+      #    ⚠ 入力(`*.mk` に足したか)を守る検査は `patch-lo-fsimage.py` の後条件が持つ。
+      #    こちらは**出力**(目録に在るか)── **別物**である(#225 の教訓:
+      #    入力だけ守ると「直した」が自己証明されて固定される)。
+      #    ⚠ **下限を置く** ── 0 件でも「grep が 0 を返した」だけでは落ちない書き方に
+      #    すると、空フォルダに戻った日に**静かに元の症状へ帰る**。
+      - name: 検品(テンプレートが配られたか / #591)
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          # ⚠ **`working-directory: ~/lo-core` と書かない** ── Actions は `~` を展開せず、
+          #    そのままの綴りの dir を探して落ちる(この repo の他の step は全部 `cd`)
+          meta=~/lo-core/workdir/installation/LibreOffice/emscripten/soffice.data.js.metadata
+          otp=$( (grep -o 'template/common/presnt/[A-Za-z0-9_]*\.otp' "$meta" || true) | wc -l)
+          ott=$( (grep -o 'template/common/[a-z0-9]*/[A-Za-z0-9_-]*\.\(ott\|otg\)' "$meta" || true) | wc -l)
+          echo "Impress のテンプレート(.otp): $otp 件 / その他(.ott/.otg): $ott 件"
+          # ⚠ 上流の実数は 23 / 11。取りこぼしを見たいので**実数より少し下**に置く
+          test "$otp" -ge 20
+          test "$ott" -ge 8
 
       # 🔴 **配る物そのものを検める**(#225。2026-08-24)。
       #    非 ODF の保存が「一般的な I/O エラー」で落ちていた原因は、確認ダイアログの

@@ -474,6 +474,20 @@ describe('office-wasm のパッチ', () => {
       );
       // 空振り防止 ── heredoc を本当に読めているか(読めていれば必ずこれが在る)
       expect(conf?.[1], 'heredoc の抜き出しが壊れている').toContain('--with-lang=');
+      /**
+       * 🔴 **テンプレートを建てる指示が消えていない**(#591)。
+       *
+       * ⚠ 渡さないと、上流の `configure.ac:3634-3639` が iOS / Android / **Emscripten** で
+       *   `WITH_TEMPLATES` を空にし、`extras/Package_tplpresnt.mk` は `else` 側の
+       *   `gb_Package_add_empty_directory` だけを走らせる ──
+       *   🔑 **フォルダは作られて中身が 0 件**になり、Impress の「Select a Template」が
+       *   **空の一覧**を出す(それが #591 の症状だった)。
+       * ⚠ **消えても焼きは通る**(make は止まらない)ので、鳴る計器はここしか無い。
+       * ⚠ **heredoc の中だけ**を見る ── file 全体で探すと、上の解説コメントに満たされる。
+       */
+      expect(conf?.[1], 'テンプレートを建てる --with-templates=yes が消えている').toContain(
+        '--with-templates=yes',
+      );
       // ② 🔴 **配る物に入ったか**(0 件なら落とす)
       // 🔑 観測点は**代替物で満たせない形**にする(2026-08-14 に絞り込んだ)──
       //    `/ja/` だけだと無関係な path(フォント等)に満たされる。見るのは
