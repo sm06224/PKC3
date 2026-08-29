@@ -137,7 +137,68 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
       .replace(/\s+/g, ' ')
       .slice(0, 200),
   );
-  await page.setInputFiles('[data-pkc-field="import-input"]', FILE());
+  /**
+   * 🔴 **2 度目は「整理」に断られることがある**(#382 の真因。2026-08-29 に判明)。
+   *
+   * ## 何が起きていたか
+   *
+   * CI の赤が診断つきで出て、状態行がこう言っていた:
+   *
+   * ```
+   * 取込完了: 2 件 — ⚠ エラー: 添付の取込 / 整理が実行中です。完了してから、もう一度選び直してください
+   * ```
+   *
+   * 🔑 **2 度目の取込は走っていなかった** ── `createAssetGate`
+   * (`src/adapter/ui/actions/asset-gate.ts`)が**入口で断っていた**。
+   * すぐ上の `purge-orphan-assets` は `void withAssetGate(...)` の**投げっぱなし**で、
+   * ダイアログに答えても `outstanding` はまだ 1 のことがある ──
+   * その窓に `setInputFiles` が入ると断られる。
+   *
+   * ⚠ **立てていた仮説 3 つは全部外れていた**(衝突検査の穴 #328 /
+   *   隠し input の扱い / 掃除ダイアログが塞ぐ)。診断を足していなければ、
+   *   在りもしない #328 の穴を追っていた。
+   *
+   * ## だから待ちを伸ばさない ── **断り文どおり「もう一度選び直す」**
+   *
+   * ⚠ 断られた回は**何秒待っても 2 件のまま**なので、timeout を伸ばしても直らない
+   *   (実際 5 秒 → 20 秒に伸ばして同じ所で落ちた)。
+   * 🔑 user が読む指示が「完了してから、もう一度選び直してください」なので、
+   *   **test も同じことをする**。⚠ ただし**黙って繰り返さない** ──
+   *   断られた事実を数え、最後まで断られたら**その旨で**落とす
+   *   (「件数が増えない」ではなく「N 回とも断られた」と読めるようにする)。
+   */
+  const GATE_BUSY = '添付の取込 / 整理が実行中です';
+  /**
+   * ⚠ **抜ける条件は「断られなくなった」ではなく「4 件になった」にする。**
+   * 断り文は**次の描画まで状態行に残る**ので、直前の断りを見て
+   * 「まだ断られている」と読むと、**成功した回まで輪の中に閉じ込める**。
+   * 🔑 目的そのもの(件数)を条件にすれば、その取り違えは起きない。
+   * ⚠ そして**断られていないのに増えない回は、輪を出て下の診断へ落とす** ──
+   *   それは #382 とは別の赤(#328 の衝突検査の穴など)である。
+   */
+  const GATE_DEADLINE_MS = 25_000;
+  const until = Date.now() + GATE_DEADLINE_MS;
+  let refusals = 0;
+  for (;;) {
+    await page.setInputFiles('[data-pkc-field="import-input"]', FILE());
+    const grew = await expect(rows)
+      .toHaveCount(4, { timeout: 2_000 })
+      .then(() => true, () => false);
+    if (grew) break;
+    const status = await page.evaluate(
+      () => document.querySelector('[data-pkc-region="status"]')?.textContent ?? '',
+    );
+    if (!status.includes(GATE_BUSY)) break; // 断られていない = 本物の赤。下の診断に任せる
+    refusals += 1;
+    if (Date.now() > until) {
+      throw new Error(
+        `2 度目の取込が ${refusals} 回とも「${GATE_BUSY}」で断られた（${GATE_DEADLINE_MS}ms）`,
+      );
+    }
+    await page.waitForTimeout(400);
+  }
+  // ⚠ 空振り防止ではなく**記録**である ── 0 でも赤にしない(断られない回もある)
+  if (refusals > 0) console.log(`[#382] 2 度目の取込が ${refusals} 回断られ、選び直した`);
   /**
    * 🔴 **落ちたとき、理由が分かる形にする**(2026-08-25)。
    *
