@@ -92,8 +92,26 @@ export const PPTX_LIST_DEPTH_MAX = 8;
  * 本文の文字は 1 つの箱に流し込めるが、**表と画像は位置と大きさが要る** ──
  * docx(本文の流れ)との一番大きな違いがここである(設計 doc §5)。
  */
+/**
+ * 🔴 **自由配置の板の 1 枚**(#530 段①)。位置は**板の左上からの px**。
+ * ⚠ `w` / `h` が `null` なら、板の中で**いちばん大きい枠**に合わせる
+ * (描画側の既定を数え直さない ── ここは「無いものは無い」で持つ)。
+ */
+export interface BoardItem {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number | null;
+  readonly h: number | null;
+  readonly lines: readonly SlideLine[];
+}
+
 export type SlideBox =
   | { readonly kind: 'table'; readonly rows: readonly (readonly ExportCell[])[] }
+  /**
+   * 🔴 **板ごと 1 つの箱**(#530 段①)。⚠ 中身は**縦に積まない** ──
+   * 置いた場所のまま並べるのが、この機能の全部である。
+   */
+  | { readonly kind: 'board'; readonly items: readonly BoardItem[] }
   | {
       readonly kind: 'image';
       readonly media: string;
@@ -167,7 +185,36 @@ export function splitIntoSlides(
     return s;
   };
 
-  for (const b of blocks) {
+  for (let i = 0; i < blocks.length; i += 1) {
+    const b = blocks[i]!;
+    /**
+     * 🔴 **板は 1 枚で 1 スライド**(#530 段① / 設計 doc §4.3)。
+     *
+     * ⚠ 途中で切ると**意味が壊れる** ── 板は 1 つの絵だからである。
+     * 🔑 直前の見出しが**まだ中身を持っていない**なら、その題をこの板の題にする
+     * (「## 体制図」の直後に板を置く、がいちばん普通の書き方である)。
+     * ⚠ 続けて並んだ板の塊は**同じ 1 枚**に載せる(それが「板」の単位)。
+     */
+    if (b.kind === 'place') {
+      const items: BoardItem[] = [];
+      while (i < blocks.length) {
+        const p = blocks[i]!;
+        if (p.kind !== 'place') break;
+        const inner = blocks.slice(i + 1, i + 1 + p.span);
+        items.push({
+          x: p.x, y: p.y, w: p.w, h: p.h,
+          lines: inner.flatMap((x) => blockToLines(x)),
+        });
+        i += 1 + p.span;
+      }
+      i -= 1; // ⚠ `for` の増分ぶん戻す(次の塊を飛ばさない)
+      const reuse =
+        current !== null && current.lines.length === 0 && current.boxes.length === 0;
+      if (!reuse) current = open('content', '');
+      current!.boxes.push({ kind: 'board', items });
+      current = null; // ⚠ 板の後ろの本文を、板の上へ流し込まない
+      continue;
+    }
     if (b.kind === 'h' && b.level === 1) {
       current = open('section', plain(b.runs));
       continue;
@@ -376,8 +423,44 @@ const GAP = inch(0.15);
  * ⚠ 段③ は等分だったので、**1 行しか本文が無くても枠の 1/3 を取っていた**
  * (焼いて目で見て分かった)。⚠ 中身の量で配れば、余りは下の空きになる。
  */
+/**
+ * 🔴 **板が占める px の範囲**(#530 段①)。
+ *
+ * ⚠ `w` / `h` が無い枠は、**板の中でいちばん大きい枠**に合わせる ──
+ * 描画側の既定を数え直すと、画面と生成物がずれる(CLAUDE.md §7)。
+ * 🔑 1 枚も大きさを持たないときだけ、最後の手として `DEFAULT_CARD` を使う。
+ */
+const DEFAULT_CARD = { w: 240, h: 96 } as const;
+
+export function boardBounds(items: readonly BoardItem[]): {
+  w: number;
+  h: number;
+  card: { w: number; h: number };
+} {
+  const ws = items.map((i) => i.w).filter((v): v is number => v !== null && v > 0);
+  const hs = items.map((i) => i.h).filter((v): v is number => v !== null && v > 0);
+  const card = {
+    w: ws.length > 0 ? Math.max(...ws) : DEFAULT_CARD.w,
+    h: hs.length > 0 ? Math.max(...hs) : DEFAULT_CARD.h,
+  };
+  let right = 1;
+  let bottom = 1;
+  for (const it of items) {
+    right = Math.max(right, it.x + (it.w ?? card.w));
+    bottom = Math.max(bottom, it.y + (it.h ?? card.h));
+  }
+  return { w: right, h: bottom, card };
+}
+
 function naturalH(b: SlideBox, w: number): number {
   if (b.kind === 'table') return Math.max(1, b.rows.length) * ROW_H;
+  if (b.kind === 'board') {
+    const box = boardBounds(b.items);
+    // ⚠ 幅にだけ合わせたときの高さ(縦は `putBoxes` が改めて縮める)
+    const wEmu = box.w * EMU_PER_PX;
+    const hEmu = box.h * EMU_PER_PX;
+    return Math.max(1, Math.round(hEmu * Math.min(1, w / Math.max(1, wEmu))));
+  }
   const wEmu = b.widthPx * EMU_PER_PX;
   const hEmu = b.heightPx * EMU_PER_PX;
   // ⚠ 幅にだけ合わせたときの高さ(縦は `fit` が改めて見る)
@@ -530,6 +613,65 @@ function picXml(id: number, rect: Rect, relId: string, alt: string): string {
  * (2 か所で別々に組むと、片方だけ直す事故が起きる ── CLAUDE.md §7)。
  * ⚠ 同じ URL は 1 つの id に畳む(rels を無駄に増やさない)。
  */
+/**
+ * 🔴 **板を「置いたとおりの場所の図形」にする**(#530 段①)。
+ *
+ * ## 何をしているか
+ *
+ * 板の px の座標を、**枠に収まるよう同じ率で縮めて** EMU へ写す。
+ * ⚠ **引き伸ばさない**(`Math.min(1, …)`)── 小さい板を画面いっぱいに広げると、
+ * 字だけが相対的に小さくなって読めなくなる(`fit` と同じ作法)。
+ *
+ * ## 🔑 大きすぎる板は「縮める」(裁定 A の既定)
+ *
+ * 設計 doc §4.2 の 3 択のうち **①縮める**を採る ── 叩き台なので
+ * **全体が見える**ほうが価値が高い。⚠ ②はみ出させると端が切れ、
+ * ③複数スライドに割ると **1 つの絵が途中で切れる**。
+ *
+ * ⚠ 縦横比は保つ(縮む率は 1 つ)。余った分は**中央**へ寄せる。
+ *
+ * @param base 図形 id の始まり。⚠ 板は 1 枚で 1 スライドなので、
+ *   他の箱と衝突しない**離れた番号**から採る(題名は 2 / 本文は 3)。
+ */
+function boardShapes(
+  base: number,
+  frame: Rect,
+  items: readonly BoardItem[],
+  linkOf: (r: ExportRun) => string | undefined,
+): string[] {
+  if (items.length === 0) return [];
+  const box = boardBounds(items);
+  const wEmu = box.w * EMU_PER_PX;
+  const hEmu = box.h * EMU_PER_PX;
+  // ⚠ 大きいときだけ縮める(小さい板を引き伸ばさない)
+  const k = Math.min(1, frame.w / Math.max(1, wEmu), frame.h / Math.max(1, hEmu));
+  const usedW = Math.round(wEmu * k);
+  const usedH = Math.round(hEmu * k);
+  const originX = frame.x + Math.max(0, Math.floor((frame.w - usedW) / 2));
+  const originY = frame.y + Math.max(0, Math.floor((frame.h - usedH) / 2));
+  const out: string[] = [];
+  items.forEach((it, n) => {
+    const w = it.w ?? box.card.w;
+    const h = it.h ?? box.card.h;
+    out.push(
+      textBox(
+        // ⚠ 番号は離す ── 題名(2)/ 本文(3)と衝突させない
+        base + 100 + n,
+        `板 ${n + 1}`,
+        {
+          x: originX + Math.round(it.x * EMU_PER_PX * k),
+          y: originY + Math.round(it.y * EMU_PER_PX * k),
+          w: Math.max(1, Math.round(w * EMU_PER_PX * k)),
+          h: Math.max(1, Math.round(h * EMU_PER_PX * k)),
+        },
+        it.lines.map((l) => lineXml(l, SZ.body, linkOf)).join(''),
+        't',
+      ),
+    );
+  });
+  return out;
+}
+
 function slideXml(s: SlideDraft): { xml: string; rels: SlideRel[] } {
   // ⚠ rId1 は型紙(slideLayout)なので、ここは **rId2 から**。
   //    🔑 リンクと画像で**同じ採番**を使う ── 別々に数えると衝突する
@@ -551,7 +693,9 @@ function slideXml(s: SlideDraft): { xml: string; rels: SlideRel[] } {
     s.boxes.forEach((b, i) => {
       const rect = rects[i]!;
       if (b.kind === 'table') shapes.push(tableXml(first + i, rect, b.rows));
-      else {
+      else if (b.kind === 'board') {
+        for (const sp of boardShapes(first + i, rect, b.items, linkOf)) shapes.push(sp);
+      } else {
         shapes.push(picXml(
           first + i, fit(rect, b.widthPx, b.heightPx), relFor('image', b.media), b.alt,
         ));
