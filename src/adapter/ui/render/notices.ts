@@ -10,21 +10,45 @@
  * user が閉じるまで残す(status footer は次の操作で上書きされて消えるので、
  * 「取り込んだ後に読み返す」ができない)。
  */
-export function showNotices(region: HTMLElement, title: string, notes: readonly string[]): void {
+import type { NoticeAction } from '../actions/import-undo';
+
+export function showNotices(
+  region: HTMLElement,
+  title: string,
+  notes: readonly string[],
+  action: NoticeAction | null = null,
+): void {
   region.textContent = '';
-  if (notes.length === 0) {
+  /**
+   * ⚠ **操作が在るときは、注意が 0 件でも出す**(#535 ②)── 取り込みの戻り道は
+   *   「注意が出たときだけ在る」ものではない。⚠ 逆に**どちらも無ければ出さない**
+   *   (空の箱を置かない)。
+   */
+  if (notes.length === 0 && action === null) {
     region.hidden = true;
     return;
   }
 
   const head = document.createElement('div');
   head.setAttribute('data-pkc-field', 'notices-title');
-  head.textContent = `${title}(${notes.length} 件)`;
+  // ⚠ 件数は**注意の数** ── 0 件のときに「(0 件)」と出さない
+  head.textContent = notes.length > 0 ? `${title}(${notes.length} 件)` : title;
+
+  if (action !== null) {
+    const act = document.createElement('button');
+    act.type = 'button';
+    act.setAttribute('data-pkc-action', action.action);
+    act.setAttribute('data-pkc-field', 'notices-action');
+    act.title = action.title;
+    act.textContent = action.label;
+    head.append(act);
+  }
 
   const close = document.createElement('button');
   close.type = 'button';
   close.setAttribute('data-pkc-action', 'dismiss-notices');
   close.textContent = '閉じる';
+  // ⚠ **閉じるは最後** ── 押し慣れた場所(いちばん右)を動かさない
   head.append(close);
 
   const list = document.createElement('ul');

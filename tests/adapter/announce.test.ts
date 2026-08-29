@@ -671,6 +671,9 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
+    ['2026-08-29-deleted-stays-in-lists', '12a531b6'],
+    // ⚠ 指紋を差し替えたのは **まだ配っていない entry** だから(着地前に文面を直した)
+    ['2026-08-29-import-drop-undo', 'c93f2f64'],
     ['2026-08-29-context-menu-export', '8ca9b28a'],
     ['2026-08-29-tag-polish', 'e9da20c1'],
     ['2026-08-29-tag-journey', '1a7bb721'],
@@ -689,8 +692,10 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-08-28-column-rule', 'b79c168b'],
     ['2026-08-28-columns-cycle', '3a081472'],
     ['2026-08-28-columns-figure-fit', 'e56193ed'],
-    ['2026-08-28-row-step', 'ffa53f95'],
-    ['2026-08-28-uml-diagrams', 'd33aee7d'],
+    // ⚠ 上限 20 を超えたので 2026-08-29 に落とした(原本は CHANGELOG / 突合は docs-parity の DROPPED)
+    // ['2026-08-28-row-step', 'ffa53f95'],
+    // ⚠ 上限 20 を超えたので 2026-08-29 に落とした(原本は CHANGELOG / 突合は docs-parity の DROPPED)
+    // ['2026-08-28-uml-diagrams', 'd33aee7d'],
     // ⚠ 上限 20 を超えたので 2026-08-29 に落とした(原本は CHANGELOG / 突合は docs-parity の DROPPED)
     // ['2026-08-28-vcard-followups', '901076e3'],
     // ⚠ 上限 20 を超えたので 2026-08-29 に落とした(原本は CHANGELOG)
