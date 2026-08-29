@@ -38,11 +38,47 @@ const HEADING = /^ {0,3}(#{1,6})[ \t]+(.*)$/;
 /**
  * タグ行の候補。⚠ **区切りは「空白文字種」** ── 半角 / 全角 / タブ。
  * ⚠ 全角空白は `\u3000` と**escape で**書く(生バイトを埋めない ── repo-hygiene が止める)(`\s` は環境で揺れるので使わない)。
+ *
+ * 🔴 **markdown が「コード」にする下げ方だけを外す**(2026-08-29、描画との
+ *   parity test が教えた)。
+ * ⚠ 1 稿目は `^[ \t\u3000]*` = **いくつでも**だったので、**半角 4 つ下げた行**
+ *   (markdown では**コードブロック**)まで拾っていた ── 画面にはコードとして
+ *   出るのに**索引にはタグとして入る**、という食い違いになる。
+ * ⚠ ただし `{0,3}` に縮めるのは**やりすぎだった** ── 全角空白で書き始めた行
+ *   (日本語では普通に打つ)まで落ちた。**全角空白は markdown の字下げではない**
+ *   ので、そのまま本文の段落になる ── 落とすと**書き方を 1 つ奪う**
+ *   (CLAUDE.md「記法を減らすことは、user の動線を減らすこと」)。
+ * 🔑 だから**外すのは 2 つだけ**:行頭の**半角 4 つ**と**タブ**
+ *   (どちらも markdown がコードにする形)。
  */
-const TAG_LINE = /^[ \t\u3000]*(#[^\s\u3000]+(?:[ \t\u3000]+#[^\s\u3000]+)*)[ \t\u3000]*$/;
+const TAG_LINE =
+  /^(?! {4})(?!\t)[ \u3000]*(#[^\s\u3000]+(?:[ \t\u3000]+#[^\s\u3000]+)*)[ \t\u3000]*$/;
 
 /** 名前に数字以外が 1 文字でもあるか。⚠ 無いものはタグにしない(上の注記)。 */
 const HAS_NON_DIGIT = /[^0-9]/;
+
+/**
+ * 🔴 **1 行がタグ行か**(#550 段③)。タグ行なら**名前の並び**、違うなら `null`。
+ *
+ * 🔑 **判定はここ 1 か所**である ── 走査(`scanBodyTags`)と描画(markdown の
+ *   ブロック規則)が**別々に書くと、集まるタグと画面のバッジが静かに食い違う**
+ *   (CLAUDE.md §7「同じ問いに答える口が 2 つ」)。
+ * ⚠ **fence の中かどうかは見ない** ── それは行 1 本では決まらないので、
+ *   呼び側(走査 / markdown-it)がそれぞれの文脈で判断する。
+ */
+export function parseTagLine(line: string): string[] | null {
+  const t = TAG_LINE.exec(line);
+  if (t === null) return null;
+  const names: string[] = [];
+  for (const tok of t[1]!.split(/[ \t\u3000]+/)) {
+    const name = tok.slice(1);
+    // ⚠ 数字だけの名前は**タグにしない**(`#117 #121` のような番号の行を守る)
+    if (name === '' || !HAS_NON_DIGIT.test(name)) continue;
+    names.push(name);
+  }
+  // ⚠ **1 つも残らなければタグ行ではない**(`#117 #121` だけの行は本文のまま)
+  return names.length === 0 ? null : names;
+}
 
 /** 本文の中で見つけたタグ 1 個。 */
 export interface BodyTag {
@@ -88,15 +124,10 @@ export function scanBodyTags(body: string): BodyTag[] {
       path[level - 1] = h[2]!.trim();
       continue;
     }
-    const t = TAG_LINE.exec(raw);
-    if (t === null) continue;
+    const names = parseTagLine(raw);
+    if (names === null) continue;
     const heading = path.filter((x) => x !== undefined && x !== '');
-    for (const tok of t[1]!.split(/[ \t\u3000]+/)) {
-      const name = tok.slice(1);
-      // ⚠ 数字だけの名前は**タグにしない**(`#117 #121` のような番号の行を守る)
-      if (name === '' || !HAS_NON_DIGIT.test(name)) continue;
-      out.push({ name, line: i, heading });
-    }
+    for (const name of names) out.push({ name, line: i, heading });
   }
   return out;
 }

@@ -109,6 +109,9 @@ const CORPUS: ReadonlyArray<readonly [string, string]> = [
     '```chart\n{"type":"bar","labels":["1月"],"datasets":[{"label":"売上","data":[10]}]}\n```\n',
   ],
   ['カード埋め込み', '@[card](entry:abc)\n'],
+  // 🔴 本文の中に書いたタグ行(#550 段③)── バッジの CSS が誰にも当たらないと、
+  //    user が「バッジ化して欲しい」と言ったものが**ただの文字で出る**
+  ['本文の中のタグ', '#買い物 #家事\n'],
   ['本文の取り込み', '![別のノート](entry:abc)\n'],
   ['format ブロック', ':::format{class=highlight indent=2 align=center}\n中身\n:::\n'],
   // 🔴 板の塊(#283 P4)── `.pkc-place` は user が書く class だが、

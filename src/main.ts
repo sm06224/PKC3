@@ -10,6 +10,7 @@ import { tileSelectsEntry } from '@features/launcher/tiles';
 import { appEditorMode } from '@adapter/ui/render/editor-mode';
 import { applyTextScale, initialTextScale } from '@adapter/ui/render/text-scale';
 import { applyColumnRule, initialColumnRule } from '@adapter/ui/render/column-rule';
+import { applyTagBadge, initialTagBadge } from '@adapter/ui/render/tag-badge';
 import {
   applyReadColumns,
   initialReadColumns,
@@ -591,6 +592,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * ⚠ **保存しない**(当てるだけ)── 保存は user が選んだときだけ。
    */
   applyColumnRule(document.documentElement, initialColumnRule());
+  /**
+   * 🔴 **本文の中のタグの見せ方を戻す**(#550 段③)。⚠ 段の境界線と**同じ作法** ──
+   *   印を 1 つ当てるだけで、描き直しは要らない(骨組みは markdown が常に出す)。
+   */
+  applyTagBadge(document.documentElement, initialTagBadge());
   const regions = buildShell(root);
   /**
    * 🔴 **縦のホイールを横送りへ読み替える**(#505)。⚠ これが無いと段組みは

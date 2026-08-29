@@ -23,6 +23,7 @@
  */
 
 import MarkdownIt from 'markdown-it';
+import { parseTagLine } from '../flavor/body-tags';
 // ⚠ v15 で型は本体 package が同梱するようになり、`markdown-it/lib/**` の
 // 部分 path は exports map から**消えた**(v14 では `@types/markdown-it` が
 // `lib/token.mjs` を生やしていた)。型は本入口から名前付きで取る。
@@ -1964,6 +1965,91 @@ md.core.ruler.after('inline', 'pkc-card', function (state) {
 // The `pkc-task-item` class is added to the <li> so CSS can
 // remove the bullet marker.
 
+/**
+ * 🔴 **本文の中のタグ行を、バッジで出す**(#550 段③。user 要望 2026-08-29)。
+ *
+ * > 「**そして、タグはバッジ化して表示が必要**」
+ *
+ * 🔑 **タグ行かどうかの判定は `parseTagLine` 1 本**である ── 走査
+ *   (`scanBodyTags` → 索引 → スマートフォルダ)と**同じ関数**を呼ぶ。
+ *   ⚠ ここに独自の正規表現を書くと、**集まるタグと画面のバッジが静かに食い違う**
+ *   (CLAUDE.md §7)。
+ *
+ * ⚠ **行単位で見る** ── 走査は**原文の行**を見るので、
+ *   `本文\n#買い物` のように**段落の 2 行目**に書かれたタグ行も拾う。
+ *   だからここも `softbreak` で区切った**走ごと**に当てる
+ *   (段落まるごとにしか当てないと、その形だけバッジが出ずに食い違う)。
+ *
+ * ⚠ **押せるのは受け手が居る面だけ**(`interactiveTags`)── 書き出した HTML では
+ *   押しても何も起きないので、属性を 1 つも出さない(dead click を配らない)。
+ */
+md.core.ruler.after('inline', 'pkc-tagline', function (state) {
+  const interactive = (state.env as { interactiveTags?: boolean }).interactiveTags === true;
+  /**
+   * 🔴 **引用と箇条書きの中では当てない**(2026-08-29、走査との parity test が教えた)。
+   *
+   * ⚠ 走査は**原文の行**を見るので、`> #買い物` / `- #買い物` は
+   *   行頭が `#` ではなく**タグ行ではない**。ところが描画側はブロックの印を
+   *   食べた**後**の中身を見るので、そのままだと**札になる** ──
+   *   🔴 **画面には札が出るのに、押しても 1 件も出てこない**という食い違いになる。
+   * 🔑 だから「いま引用・箇条書きの中か」を数えて、中では当てない。
+   */
+  let depth = 0;
+  for (const token of state.tokens) {
+    if (token.type === 'blockquote_open' || token.type === 'list_item_open') depth += 1;
+    else if (token.type === 'blockquote_close' || token.type === 'list_item_close') depth -= 1;
+    if (depth > 0) continue;
+    if (token.type !== 'inline') continue;
+    const children = token.children;
+    if (!children) continue;
+    const out: typeof children = [];
+    let run: typeof children = [];
+    let changed = false;
+    const flush = (): void => {
+      // ⚠ タグ行は**素の文字だけ**でできている(`#` に inline 規則は当たらない)
+      const only = run.length === 1 ? run[0]! : null;
+      const names = only !== null && only.type === 'text' ? parseTagLine(only.content) : null;
+      if (names !== null) {
+        const tok = new state.Token('html_inline', '', 0);
+        tok.content = tagLineHtml(names, interactive);
+        out.push(tok);
+        changed = true;
+      } else {
+        out.push(...run);
+      }
+      run = [];
+    };
+    for (const t of children) {
+      if (t.type === 'softbreak') {
+        flush();
+        out.push(t);
+        continue;
+      }
+      run.push(t);
+    }
+    flush();
+    // ⚠ 当たらなかった段落は**触らない**(token の同一性を無駄に壊さない)
+    if (changed) token.children = out;
+  }
+  return true;
+});
+
+/** バッジ 1 行の HTML。⚠ 属性も本文も**必ず escape する**。 */
+function tagLineHtml(names: readonly string[], interactive: boolean): string {
+  const chips = names
+    .map((name) => {
+      const attrs =
+        ` class="pkc-tag" data-pkc-tag="${escapeHtmlAttr(name)}"` +
+        (interactive
+          ? ' data-pkc-action="filter-by-tag" role="button" tabindex="0"' +
+            ` title="${escapeHtmlAttr(name)} が付いたノートを探す"`
+          : '');
+      return `<span${attrs}>#${md.utils.escapeHtml(name)}</span>`;
+    })
+    .join('');
+  return `<span class="pkc-tagline" data-pkc-tagline>${chips}</span>`;
+}
+
 md.core.ruler.after('inline', 'pkc-task-list', function (state) {
   const tokens = state.tokens;
   let taskIndex = 0;
@@ -2073,6 +2159,15 @@ export interface RenderMarkdownOptions {
    *   印刷は受け手が居ないので、**押せないまま**にする。
    */
   readonly interactiveTasks?: boolean;
+  /**
+   * 🔴 **本文中のタグを押せる形で出すか**(#550 段③。既定 `false` = 押せない)。
+   *
+   * ⚠ **受け手(`filter-by-tag`)が居る面だけ** `true` にする ── `interactiveTasks` と
+   *   同じ理由で、押せるのに何も起きないと**dead click** になる。書き出した HTML・
+   *   印刷・可搬 1 枚は受け手が居ないので**押せないまま**にする。
+   * ⚠ 渡さなければ属性は 1 つも出ない = 書き出しの goldens は 1 バイトも動かない。
+   */
+  readonly interactiveTags?: boolean;
   /**
    * 🔴 **チェックの印が指す行を、原文の行へ戻すためのずらし**(N1)。
    *
@@ -5075,6 +5170,7 @@ export function renderMarkdown(
     allowExternalImages: boolean;
     interactiveTasks: boolean;
     interactiveCells: boolean;
+    interactiveTags: boolean;
     taskLineOffset: number;
     lineMap?: number[];
     fenceAssets?: Readonly<Record<string, string>>;
@@ -5088,6 +5184,8 @@ export function renderMarkdown(
     interactiveTasks: opts.interactiveTasks === true,
     // 🔴 表のセルを押せる形で出すか(#418 段①)。既定は押せない
     interactiveCells: opts.interactiveCells === true,
+    // 🔴 本文中のタグを押せる形で出すか(#550 段③)。既定は押せない
+    interactiveTags: opts.interactiveTags === true,
     // 🔴 剥がして描く面だけがずらす(既定 0)。理由は上の option の注記
     taskLineOffset: Number.isInteger(opts.taskLineOffset) ? (opts.taskLineOffset as number) : 0,
   };

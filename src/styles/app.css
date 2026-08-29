@@ -1597,6 +1597,70 @@ li[data-pkc-row-slot] {
   overflow-wrap: anywhere;
 }
 
+/**
+ * 🔴 **本文の中に書いたタグ行**(#550 段③。user 要望「タグはバッジ化して表示が必要」)。
+ *
+ * ⚠ **色は使わない**(user 指示 2026-08-03「地は無彩色、色は情報にだけ使う」)──
+ *   下地は `--fg` を薄めて作る。🔑 `color-mix` は**全テーマで同じ式**が効くので、
+ *   9 テーマぶんの表を作らずに済む(`column-rule.ts` と同じ作法)。
+ * ⚠ **既定(印が無いとき)も札**にする ── 書き出した HTML には印が付かないので、
+ *   ここを素にすると**画面と書き出しで見え方が変わる**。
+ */
+/**
+ * 🔴 **既定の札は `.pkc-md-rendered` から書く**(2026-08-29 に気づいた)。
+ *
+ * ⚠ 書き出し HTML へ運ばれるのは **`.pkc-md-rendered` 起点の規則だけ**である
+ *   (`build/body-css.ts` の `isBodyRule`)── 素の `.pkc-tagline` で書くと
+ *   **書き出した HTML では札にならず、ただの字で出る**。
+ *   🔑 お知らせに「書き出しでも札で出ます」と書いたので、**そこが嘘になる**所だった。
+ * ⚠ 見せ方の切り替え(`[data-pkc-tag-badge='…']`)は**運ばれない**ままでよい ──
+ *   書き出しは**いつも既定の札**で出る(端末ごとの好みは持って行かない)。
+ */
+.pkc-md-rendered .pkc-tagline {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.pkc-md-rendered .pkc-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
+  font-size: 0.86em;
+  line-height: 1.7;
+}
+/* ⚠ 押せる面だけ指の形にする(`interactiveTags` が付けた印で見分ける)。 */
+.pkc-md-rendered .pkc-tag[data-pkc-action] {
+  cursor: pointer;
+}
+.pkc-md-rendered .pkc-tag[data-pkc-action]:hover {
+  background: color-mix(in srgb, var(--fg) 16%, transparent);
+}
+/* 枠だけ(下地なし)。 */
+[data-pkc-tag-badge='outline'] .pkc-md-rendered .pkc-tag {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 9px;
+}
+[data-pkc-tag-badge='outline'] .pkc-md-rendered .pkc-tag[data-pkc-action]:hover {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+/* 文字のまま(いままでと同じ見え方)。⚠ 隙間だけは残す ── 潰すと語が繋がって読める。 */
+[data-pkc-tag-badge='plain'] .pkc-md-rendered .pkc-tag {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  font-size: inherit;
+  line-height: inherit;
+}
+[data-pkc-tag-badge='plain'] .pkc-md-rendered .pkc-tagline {
+  gap: 0.5em;
+}
+
 /* 🔑 **本文の読み幅に上限を置く**(P9 段②)。Full HD では 1 行が 1172px =
  * 全角 90 文字まで伸びていて、読み返すのが辛かった。
  *
