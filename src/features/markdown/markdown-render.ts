@@ -1983,6 +1983,24 @@ md.core.ruler.after('inline', 'pkc-card', function (state) {
  * ⚠ **押せるのは受け手が居る面だけ**(`interactiveTags`)── 書き出した HTML では
  *   押しても何も起きないので、属性を 1 つも出さない(dead click を配らない)。
  */
+/**
+ * 🔴 **タグ行を当てない入れ子**(2026-08-29)。引用・箇条書き・脚注の中では当てない。
+ * ⚠ 走査(`scanBodyTags`)は**原文の行**を見るので、`> #買い物` / `- #買い物` /
+ *   `[^1]: #買い物` はタグ行ではない ── ここで数えないと**画面にだけ札が出る**。
+ */
+const NESTED_OPEN = new Set([
+  'blockquote_open',
+  'list_item_open',
+  'footnote_open',
+  'footnote_reference_open',
+]);
+const NESTED_CLOSE = new Set([
+  'blockquote_close',
+  'list_item_close',
+  'footnote_close',
+  'footnote_reference_close',
+]);
+
 md.core.ruler.after('inline', 'pkc-tagline', function (state) {
   const interactive = (state.env as { interactiveTags?: boolean }).interactiveTags === true;
   /**
@@ -1995,11 +2013,29 @@ md.core.ruler.after('inline', 'pkc-tagline', function (state) {
    * 🔑 だから「いま引用・箇条書きの中か」を数えて、中では当てない。
    */
   let depth = 0;
-  for (const token of state.tokens) {
-    if (token.type === 'blockquote_open' || token.type === 'list_item_open') depth += 1;
-    else if (token.type === 'blockquote_close' || token.type === 'list_item_close') depth -= 1;
+  const tokens = state.tokens;
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i]!;
+    /**
+     * ⚠ **脚注は `footnote_reference_*` で来る** ── この規則は `footnote_tail` の
+     *   **前**に走る(どちらも `after('inline')` で、後から足したほうが先に来る)ので、
+     *   最終形の `footnote_open` ではなく**定義そのものの印**を数える
+     *   (2026-08-29、token の並びを実測して直した)。
+     */
+    if (NESTED_OPEN.has(token.type)) depth += 1;
+    else if (NESTED_CLOSE.has(token.type)) depth -= 1;
     if (depth > 0) continue;
     if (token.type !== 'inline') continue;
+    /**
+     * 🔴 **段落の直下だけ**(2026-08-29 の着地後レビュー。**実物で再現した**)。
+     *
+     * ⚠ `inline` の token は**段落だけのものではない** ── 見出し・**表のセル**・
+     *   脚注の中身も同じ形で来る。だから直前の block token を見ないと、
+     *   `| #タグ | x |` の**セルが札になる**(画面には札、索引には入らない)。
+     * 🔑 タグ行の規則は「**独立した行**」なので、段落の中身だけが対象である。
+     * ⚠ 見出しは `heading_open` なのでここで自然に外れる(`# 見出し` は見出しのまま)。
+     */
+    if (tokens[i - 1]?.type !== 'paragraph_open') continue;
     const children = token.children;
     if (!children) continue;
     const out: typeof children = [];
@@ -2020,7 +2056,12 @@ md.core.ruler.after('inline', 'pkc-tagline', function (state) {
       run = [];
     };
     for (const t of children) {
-      if (t.type === 'softbreak') {
+      /**
+       * ⚠ **改行は 2 種類ある** ── 行末に半角 2 つを書くと `hardbreak` になる。
+       *   ここで割らないと、**その次の行が前の行と 1 つの run** になり、
+       *   **索引には入るのに画面には札が出ない**(2026-08-29 に実測)。
+       */
+      if (t.type === 'softbreak' || t.type === 'hardbreak') {
         flush();
         out.push(t);
         continue;

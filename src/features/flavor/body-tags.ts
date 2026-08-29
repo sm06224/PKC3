@@ -29,11 +29,38 @@
  *   だけで(必要なら `#no117` と書ける)、得るのは**既存の本文を 1 行も壊さない**こと。
  */
 
+import { frontmatterLineCount } from '../markdown/frontmatter';
+
 /** fence の開き閉じ。⚠ `task-count.ts` と同じ形にする(判定を散らさない)。 */
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 
 /** ATX 見出し。⚠ **井桁のあとに空白が要る** ── ここがタグ行との分かれ目である。 */
 const HEADING = /^ {0,3}(#{1,6})[ \t]+(.*)$/;
+
+/**
+ * 🔴 **画面に出ない囲み**(2026-08-29 の着地後レビュー。**実物で再現した**)。
+ *
+ * ⚠ `%%%` のコメントと `:::comment` は**描かれない** ── なのに走査だけが拾うと、
+ *   「**隠したはずのタグでフォルダに集まる**」という食い違いになる。
+ * ⚠ `:::if{format=…}` は**画面(html)以外**の指定なら描かれない。走査は画面と
+ *   同じ側に立つので、`html` 以外は飛ばす。
+ * 🔑 判定の向きは 1 つ:**画面に札として出るものだけを索引に入れる**
+ *   ── user が**見て消せるもの**だけを集める。
+ */
+const COMMENT_FENCE = /^ {0,3}%%%\s*$/;
+const CONTAINER_OPEN = /^ {0,3}:::+\s*([A-Za-z][\w-]*)?(\{[^}]*\})?\s*$/;
+const CONTAINER_CLOSE = /^ {0,3}:::+\s*$/;
+/** `:::if{format=html}` の中身だけが画面に出る(それ以外は飛ばす)。 */
+const IF_FORMAT = /format\s*=\s*([A-Za-z0-9_-]+)/;
+
+/**
+ * 🔴 **箇条書きの印**(2026-08-29)。⚠ 中身は**項目の中**なので、画面は札にしない。
+ *
+ * ⚠ `- #買い物` は行頭が `#` ではないので元から当たらないが、
+ *   **項目の 2 行目**(`1. 本文` の次の `   #買い物`)は下げを外すと当たってしまう ──
+ *   画面は項目の中なので札にせず、**索引にだけ入る**食い違いになる(実測)。
+ */
+const LIST_MARKER = /^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/;
 
 /**
  * タグ行の候補。⚠ **区切りは「空白文字種」** ── 半角 / 全角 / タブ。
@@ -58,6 +85,19 @@ const TAG_LINE =
 const HAS_NON_DIGIT = /[^0-9]/;
 
 /**
+ * 🔴 **索引の区切りに使う字は、名前に入れられない**(2026-08-29 に実測)。
+ *
+ * ⚠ 索引の列は `|` で連結する(`tags.ts` の `encodeTags`)ので、名前に `|` が
+ *   入っていると**往復で別の名前に化ける** ── 実測: `#設計|検討` は
+ *   画面の札が `設計|検討`、索引の往復が `設計 検討`。
+ *   帰結は「**保存した直後だけ**スマートフォルダに並び、次の起動で黙って消える」。
+ * 🔑 だから `#117` と同じ扱いにする ── **その語をタグにしない**(本文の字は
+ *   1 バイトも変えない)。⚠ 直すのは「片方を合わせる」ではなく
+ *   **食い違いが起きない形にする**(CLAUDE.md §7「起こらなくするほうが強い」)。
+ */
+const TAG_SEP_IN_NAME = /\|/;
+
+/**
  * 🔴 **1 行がタグ行か**(#550 段③)。タグ行なら**名前の並び**、違うなら `null`。
  *
  * 🔑 **判定はここ 1 か所**である ── 走査(`scanBodyTags`)と描画(markdown の
@@ -74,6 +114,8 @@ export function parseTagLine(line: string): string[] | null {
     const name = tok.slice(1);
     // ⚠ 数字だけの名前は**タグにしない**(`#117 #121` のような番号の行を守る)
     if (name === '' || !HAS_NON_DIGIT.test(name)) continue;
+    // ⚠ 索引の区切りを名前に含むものは**タグにしない**(往復で化けるため。上の注記)
+    if (TAG_SEP_IN_NAME.test(name)) continue;
     names.push(name);
   }
   // ⚠ **1 つも残らなければタグ行ではない**(`#117 #121` だけの行は本文のまま)
@@ -105,26 +147,107 @@ export function scanBodyTags(body: string): BodyTag[] {
   let fence: { ch: string; len: number } | null = null;
   /** 見出しの道筋。添字 = レベル-1。 */
   const path: string[] = [];
+  /**
+   * 🔴 **画面に出ない囲みの深さ**(2026-08-29)。0 より大きい間は 1 つも拾わない。
+   * ⚠ 数える対象は `%%%` と、描かれない `:::` の囲み(`comment` /
+   *   `if{format≠html}`)だけ ── 描かれる囲み(`note` など)の中身は画面に出るので数えない。
+   */
+  let hidden = 0;
+  /** いま開いている `:::` の入れ子。⚠ 閉じで hidden を戻すために、隠したかを覚える。 */
+  const containers: boolean[] = [];
+  /**
+   * 🔴 **frontmatter の中は見ない**(2026-08-29 の着地後レビュー。**実物で再現した**)。
+   *
+   * ⚠ `---` の中に `#下書き` と書くのは YAML のコメントとして**正しい書き方**だが、
+   *   走査だけが拾うと **user に消せない幽霊タグ**になる ── 画面(本文の面は
+   *   `bodyBelowFrontmatter` を描く)にも情報ペインにも出ないので、
+   *   **どこを直せば消えるのか分からない**。
+   * 🔑 行数は `frontmatterLineCount` から引く(切り方を 2 か所に書かない ── §7)。
+   */
+  const skipTop = frontmatterLineCount(body);
+  /**
+   * 🔴 **段落の続きかどうか**(2026-08-29)。markdown は
+   *   **空行の直後**の半角 4 つ下げだけをコードにする ── 段落の 2 行目を下げても
+   *   それは同じ段落の続きで、画面には**札が出る**。
+   * ⚠ ここを見ないと「画面に札、索引に無し」になる(実測済み)。
+   */
+  let prevBlank = true;
+  /** いま箇条書きの中か。⚠ 項目の続きの行は、画面では項目の中身になる。 */
+  let inList = false;
   for (let i = 0; i < lines.length; i += 1) {
     const raw = lines[i]!;
+    if (i < skipTop) {
+      prevBlank = true;
+      continue;
+    }
     const f = FENCE.exec(raw);
     if (f !== null) {
       const mark = f[1]!;
       if (fence === null) fence = { ch: mark[0]!, len: mark.length };
       // ⚠ 閉じは**同じ文字で同じ数以上**(短い ``` では ```` は閉じない)
       else if (mark[0] === fence.ch && mark.length >= fence.len) fence = null;
+      prevBlank = false;
       continue;
     }
-    if (fence !== null) continue;
+    if (fence !== null) {
+      prevBlank = false;
+      continue;
+    }
+    if (COMMENT_FENCE.test(raw)) {
+      // ⚠ `%%%` は開きと閉じが同じ字 ── 入っていれば出る、出ていれば入る
+      hidden = hidden > 0 ? hidden - 1 : hidden + 1;
+      prevBlank = false;
+      continue;
+    }
+    const co = CONTAINER_OPEN.exec(raw);
+    if (co !== null && co[1] !== undefined) {
+      const name = co[1];
+      const attrs = co[2] ?? '';
+      const fmt = IF_FORMAT.exec(attrs)?.[1];
+      // ⚠ 隠すのは 2 つだけ ── コメントと、画面(html)以外を指した `if`
+      const hide = name === 'comment' || (name === 'if' && fmt !== undefined && fmt !== 'html');
+      containers.push(hide);
+      if (hide) hidden += 1;
+      prevBlank = false;
+      continue;
+    }
+    if (CONTAINER_CLOSE.test(raw)) {
+      const wasHidden = containers.pop();
+      if (wasHidden === true) hidden -= 1;
+      prevBlank = false;
+      continue;
+    }
+    if (raw.trim() === '') {
+      prevBlank = true;
+      continue;
+    }
+    if (LIST_MARKER.test(raw)) {
+      inList = true;
+      prevBlank = false;
+      continue;
+    }
+    if (inList) {
+      // ⚠ 下げてある行は**項目の中身**。下げていない行は、空行の後なら箇条書きの外
+      if (/^[ \t]/.test(raw) || !prevBlank) {
+        prevBlank = false;
+        continue;
+      }
+      inList = false;
+    }
     const h = HEADING.exec(raw);
     if (h !== null) {
       const level = h[1]!.length;
       // ⚠ 深い側を捨ててから積む(見出しが浅くなったら、その下は道筋から外れる)
       path.length = level - 1;
       path[level - 1] = h[2]!.trim();
+      prevBlank = false;
       continue;
     }
-    const names = parseTagLine(raw);
+    // ⚠ 段落の**続き**なら、markdown は下げをコードにしない ── 下げを外して当てる
+    const target = prevBlank ? raw : raw.replace(/^[ \t]+/, '');
+    prevBlank = false;
+    if (hidden > 0) continue;
+    const names = parseTagLine(target);
     if (names === null) continue;
     const heading = path.filter((x) => x !== undefined && x !== '');
     for (const name of names) out.push({ name, line: i, heading });

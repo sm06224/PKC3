@@ -351,6 +351,63 @@ function syncFtsIndex(database: Database): void {
   database.exec(`INSERT INTO entries_fts(entries_fts) VALUES ('rebuild')`);
 }
 
+/**
+ * 🔴 **タグの拾い方を直したら、既に索引に入っている行も引き直す**(#550、2026-08-29)。
+ *
+ * ⚠ 埋め戻し(`backfillDerivedColumns`)が拾うのは **NULL の行だけ**なので、
+ *   規則を直しても**既存のノートは古い値のまま**である ── 実害は
+ *   「`---` の中に書いた `#下書き` が**消えない幽霊タグ**として残る」形で出る
+ *   (画面にも情報ペインにも出ないので、user は消し方を見つけられない)。
+ * 🔑 だから**規則に版**を持たせ、版が変わったときだけ 1 度引き直す。
+ *
+ * ⚠ **全行を NULL にしてから埋め戻す形は採らない** ── `entries` の UPDATE は
+ *   FTS の trigger(delete + insert)を全行に撃つので、**索引の churn が 2 周**する。
+ *   ここでは **値が変わる行だけ**書くので、たいていのノート(タグを書いていない)は
+ *   1 バイトも触らない。
+ * ⚠ 走るのは `syncFtsIndex` の**後**(2026-08-20 の起動不能と同じ順序の約束)。
+ * ⚠ 旧ビルドはこの印を知らないので、行き来すると古い規則で書き直されうる ──
+ *   そのときは次に新ビルドで開いても版が一致してしまう(既知の限界。
+ *   本文を保存し直せば正しくなる)。
+ */
+const BODY_TAGS_RULE = '2';
+const DERIVE_SCOPE = '__derive__';
+
+function redriveBodyTags(database: Database): void {
+  const cur = database.selectValue(
+    `SELECT v FROM settings WHERE scope = ? AND k = 'body_tags'`,
+    [DERIVE_SCOPE],
+  );
+  if (cur === BODY_TAGS_RULE) return;
+  let after: { cid: string; lid: string } | undefined;
+  for (;;) {
+    const rows = database.selectObjects(
+      after === undefined
+        ? `SELECT cid, lid, body, body_tags FROM entries ORDER BY cid, lid LIMIT ${BACKFILL_CHUNK}`
+        : `SELECT cid, lid, body, body_tags FROM entries
+             WHERE (cid > ? OR (cid = ? AND lid > ?)) ORDER BY cid, lid LIMIT ${BACKFILL_CHUNK}`,
+      after === undefined ? [] : [after.cid, after.cid, after.lid],
+    ) as Array<{ cid: string; lid: string; body: string | null; body_tags: string | null }>;
+    if (rows.length === 0) break;
+    for (const r of rows) {
+      const want = encodeTags(bodyTags(r.body ?? ''));
+      // ⚠ **変わる行だけ**書く(FTS の trigger を無駄に撃たない)
+      if (r.body_tags === want) continue;
+      database.exec({
+        sql: `UPDATE entries SET body_tags = ? WHERE cid = ? AND lid = ?`,
+        bind: [want, r.cid, r.lid],
+      });
+    }
+    const last = rows[rows.length - 1]!;
+    after = { cid: last.cid, lid: last.lid };
+    if (rows.length < BACKFILL_CHUNK) break;
+  }
+  database.exec({
+    sql: `INSERT INTO settings(scope, k, v) VALUES (?, 'body_tags', ?)
+            ON CONFLICT(scope, k) DO UPDATE SET v = excluded.v`,
+    bind: [DERIVE_SCOPE, BODY_TAGS_RULE],
+  });
+}
+
 function backfillDerivedColumns(database: Database): void {
   /**
    * 🔴 **回数の上限を、書込の成功と無関係に置く**(2026-08-20 の変異試験で判明)。
@@ -519,6 +576,8 @@ export function applySchema(database: Database): void {
       database.selectValue(`SELECT 1 FROM entries WHERE ${NEEDS_BACKFILL} LIMIT 1`) !== undefined
     )
       backfillDerivedColumns(database);
+    // 🔴 **タグの規則を直したら既存行も引き直す**(#550。上の注記)
+    redriveBodyTags(database);
     database.exec(`PRAGMA user_version = ${DB_SCHEMA_VERSION}`);
     database.exec('COMMIT');
   } catch (err) {

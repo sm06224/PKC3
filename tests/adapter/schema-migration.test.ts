@@ -196,6 +196,77 @@ describe('entries の後付け列(#277 段②)', () => {
   });
 
   /**
+   * 🔴 **拾い方を直したら、既に索引に入っている行も引き直す**(#550、2026-08-29)。
+   *
+   * ⚠ 埋め戻しが拾うのは **NULL の行だけ**なので、規則を直しても
+   *   **既存のノートは古い値のまま**である ── 実害は
+   *   「`---` の中に書いた `#下書き` が**消えない幽霊タグ**として残る」形
+   *   (画面にも情報ペインにも出ないので、user は消し方を見つけられない)。
+   * 🔑 だから規則に版を持たせ、版が違うときだけ 1 度引き直す。
+   */
+  it('🔴 古い規則で入っていた索引が、開き直すと引き直される', () => {
+    const db = oldDb([['r-fm', '---\ntitle: x\n#下書き\n---\n\n本文\n']]);
+    applySchema(db); // 1 度目 ── いまの規則で埋まる
+    // ⚠ **前提** ── いまの規則では frontmatter の中を拾わない
+    expect(bodyTagsOf(db, 'r-fm'), '前提が崩れている(いまの規則が拾っている)').toEqual([]);
+    // 🔑 古いビルドが書いた状態を作る(幽霊タグ + 版の印を古くする)
+    db.exec({
+      sql: `UPDATE entries SET body_tags = '|下書き|' WHERE lid = 'r-fm'`,
+    });
+    db.exec(`DELETE FROM settings WHERE scope = '__derive__'`);
+    expect(bodyTagsOf(db, 'r-fm'), '前提が崩れている(幽霊タグを置けていない)').toEqual(['下書き']);
+    applySchema(db); // 2 度目 ── 版が違うので引き直す
+    expect(bodyTagsOf(db, 'r-fm'), '古い規則の索引が残っている(引き直していない)').toEqual([]);
+    db.close();
+  });
+
+  /**
+   * 🔴 **引き直しは「変わる行だけ」書く**(2026-08-29、変異試験 M12 が SURVIVED で教えた)。
+   *
+   * ⚠ `entries` の UPDATE は FTS の trigger(delete + insert)を撃つので、
+   *   値が同じ行まで書くと**索引を全件 churn** する。
+   * 🔑 観測点は **`total_changes()`**(この接続で書き換えた行数の累計)── 「速い」ではなく
+   *   **触った行数**で見る(CLAUDE.md「これが無いと壊れると書いたら、外して壊れるのを見る」)。
+   */
+  it('🔴 引き直しても、値が変わらない行は 1 行も書かない', () => {
+    const db = oldDb([
+      ['k1', '#買い物\n'],
+      ['k2', '本文だけ\n'],
+      ['k3', '# 章\n\n#家事\n'],
+    ]);
+    applySchema(db); // 1 度目 ── いまの規則で埋まる
+    // 🔑 版の印だけ消す ── 値は既に正しいので、引き直しても書く行は 0 のはず
+    db.exec(`DELETE FROM settings WHERE scope = '__derive__'`);
+    const before = Number(db.selectValue('SELECT total_changes()') ?? 0);
+    applySchema(db);
+    const after = Number(db.selectValue('SELECT total_changes()') ?? 0);
+    // ⚠ 書いてよいのは**版の印 1 行だけ**(entries は 1 行も触らない)
+    expect(
+      after - before,
+      '値が同じ行まで書いている(FTS の索引を全件 churn する)',
+    ).toBeLessThanOrEqual(1);
+    // ⚠ 空振り防止 ── そもそも引き直しが走ったことを確かめる
+    expect(
+      db.selectValue(`SELECT v FROM settings WHERE scope = '__derive__' AND k = 'body_tags'`),
+      '引き直しが走っていない(空振り)',
+    ).toBeDefined();
+    db.close();
+  });
+
+  it('⚠ 版が同じなら引き直さない(毎回の起動で全件を舐めない)', () => {
+    const db = oldDb([['r-keep', '#買い物\n']]);
+    applySchema(db);
+    // 🔑 版はそのままに、値だけ手で壊す ── 引き直さないなら壊れたまま残るはず
+    db.exec({ sql: `UPDATE entries SET body_tags = '|よそ者|' WHERE lid = 'r-keep'` });
+    applySchema(db);
+    expect(
+      bodyTagsOf(db, 'r-keep'),
+      '版が同じなのに全件を引き直している(毎回の起動で全本文を読む)',
+    ).toEqual(['よそ者']);
+    db.close();
+  });
+
+  /**
    * ⚠ **埋め戻しは user の編集ではない** ── `updated_at` を触ると
    *   「今日ぜんぶ更新された」ように見える(情報列の嘘)。
    */
