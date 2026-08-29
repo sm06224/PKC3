@@ -33,6 +33,13 @@ function stateWith(body: string): AppState {
     entryMetas: new Map([[LID, { lid: LID, title: '題', archetype: 'text' }]]),
     revisionPanel: null,
     error: null,
+    /**
+     * ⚠ **`splitLids` を落とさない**(#505 段②)── 読む面はこれを毎回読むので、
+     * 抜けると `undefined.every` で落ちる。`as unknown as AppState` の台は
+     * **実物の形を写す責任**がこちら側に在る。
+     */
+    splitLids: [],
+    splitBodies: new Map<string, string>(),
     viewMode: 'detail',
   } as unknown as AppState;
 }

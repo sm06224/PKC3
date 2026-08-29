@@ -133,6 +133,12 @@ export function columnScroller(root: ParentNode): HTMLElement | null {
  *   本文の器を見つけられたかで決まる(2 ペインは見つからない)。
  */
 function viewPane(root: ParentNode): HTMLElement | null {
+  /**
+   * ⚠ **印は面に付く**(#505 段②)── 器を 1 段深くしたときに 1 度外れかけたが、
+   * 直したのは**焼く先**のほう(`DetailRenderer` の `markOn`)である。
+   * 🔑 面の外から読む物(ここと `app.css` の直接の子セレクタ)が 2 つ在るので、
+   * **印を面へ焼く**のが正しい ── ここで `closest` を書くと、CSS 側は救われない。
+   */
   return root.querySelector<HTMLElement>(
     '[data-pkc-view-pane="detail"][data-pkc-detail-mode="view"],' +
       '[data-pkc-view-pane="detail"][data-pkc-detail-mode="editor"]',

@@ -5123,3 +5123,67 @@ li[data-pkc-row-slot] {
   font-size: 0.8em;
   line-height: 1.6;
 }
+
+/**
+ * 🔴 **読む面を横に並べる**(#505 段②。user 指示 2026-08-28
+ * 「ウルトラワイドモニター用に閲覧時にセンターペインを任意分割して、
+ * **複数ドキュメントを開いたり**…」)。
+ *
+ * ⚠ **何も留めていなければ、この規則は 1 つも当たらない** ── 器(`split-row`)を
+ * 作るのは留めたときだけで、印(`data-pkc-split`)もそのとき立つ。
+ * つまり既定の画面は 1 バイトも変わらない。
+ *
+ * 🔴 **並べている間だけ、面を箱の高さで止める。**
+ * 読む面の既定は `flex: 1 0 auto`(中身の高さまで伸ばす ── 貼り付く帯を
+ * 箱の外へ出さないため。上の #505 段① の隣に理由が在る)。⚠ 伸びたままだと
+ * **枠が自分で送れず、外の器 1 本が全部を動かす** ── 片方を読み進めると
+ * もう片方も動いてしまい、「突き合わせながら読む」が成立しない。
+ */
+[data-pkc-region='detail'] > [data-pkc-view-pane='detail'][data-pkc-split='on'] {
+  flex: 1 1 0;
+  min-height: 0;
+}
+/**
+ * 🔴 **並べていないときは、器そのものを「無い」ことにする**(2026-08-29)。
+ *
+ * ⚠ 器(`split-row` / 主の枠)は最初から在る ── 主の `DetailRenderer` が器を
+ * 握るので、後から差し替えられないからである。
+ * ⚠ ところが**印で CSS を締めるだけでは足りなかった**:器が箱として残ると、
+ * 本文・帯・追記が**面の直接の子でなくなる** ── flex の伸び方と
+ * `position: sticky` の貼り付き先が変わり、フル smoke が **3 件**
+ * (版面の 3 列 / 打鍵後の送り / 塊を跨ぐ選択)で落ちた。
+ * 🔑 `display: contents` は**箱を消して子を親の直下に置く** ── だから
+ * 何も留めていない画面は、DOM が 1 段深くなっても**組み方が 1 バイトも変わらない**。
+ */
+[data-pkc-view-pane='detail']:not([data-pkc-split='on']) [data-pkc-region='split-row'],
+/* ⚠ 主の器は印(`data-pkc-region`)が付いていないときだけ消す ── 付いている =
+   並べているので、下の規則が枠として組む(2 つが同時に当たることはない) */
+[data-pkc-split-main]:not([data-pkc-region]) {
+  display: contents;
+}
+[data-pkc-view-pane='detail'][data-pkc-split='on'] [data-pkc-region='split-row'] {
+  display: flex;
+  gap: var(--s5);
+  flex: 1 1 auto;
+  /* ⚠ これが無いと flex の既定(auto)で縮まず、枠の overflow が効かない */
+  min-height: 0;
+}
+[data-pkc-view-pane='detail'][data-pkc-split='on'] [data-pkc-region='split-frame'] {
+  /* ⚠ `1 1 0` ── 中身の量で幅が変わらない(長い方が勝つ画面にしない) */
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: auto;
+}
+/* 留めた枠だけ境目を引く(主の枠の左端には引かない) */
+[data-pkc-view-pane='detail'][data-pkc-split='on'] [data-pkc-split-lid] {
+  border-left: 1px solid var(--border);
+  padding-left: var(--s5);
+}
+[data-pkc-region='split-frame-bar'] {
+  display: flex;
+  justify-content: flex-end;
+}
+[data-pkc-region='split-frame-bar'] button {
+  color: var(--muted);
+  font-size: 12px;
+}

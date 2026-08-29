@@ -824,6 +824,35 @@ export function connectStoreEffects(
        * ⚠ **読めなかったら黙って終える** ── 下見は補助なので、失敗を帯に出すと
        *   フォルダを送るたびに赤い字が出ることになる(user は何もできない)。
        */
+      /**
+       * 🔴 **留めた枠の本文を読む**(#505 段②)。
+       *
+       * ⚠ 下見(`REQUEST_DUAL_PREVIEW`)と違い、**切り詰めない** ── 枠に出るのは
+       * 「読むための本文」そのものであり、途中で切れたら並べる意味が無い。
+       * 🔑 読む口は同じ `store.getBody`、**同じ直列の列**に並べる(2026-08-17 の
+       * 「読みが書込を追い越す」を繰り返さない)。
+       */
+      case 'REQUEST_SPLIT_BODY':
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            const body = await store.getBody(ev.lid);
+            if (disposed) return;
+            /**
+             * 🔴 **入れ物ごと消えていたら、留めを外す**(自己修復)。
+             * ⚠ 黙って空の枠を出し続けない ── user から見れば「開かない枠」である。
+             * 🔑 `SPLIT_RESTORED` が知らない lid を落とさないのは、ここが拾うからである。
+             */
+            if (body === null) {
+              dispatcher.dispatch({ type: 'UNPIN_SPLIT_ENTRY', lid: ev.lid });
+              return;
+            }
+            dispatcher.dispatch({ type: 'SPLIT_BODY_LOADED', lid: ev.lid, body });
+          } catch {
+            // ⚠ 読めなかっただけ ── 留めは外さない(次に開いたときにもう一度読む)
+          }
+        });
+        break;
       case 'REQUEST_DUAL_PREVIEW':
         enqueue(async () => {
           if (disposed) return;

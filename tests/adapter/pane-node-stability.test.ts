@@ -69,6 +69,9 @@ function stateOf(metas: EntryMeta[], over: Partial<AppState> = {}): AppState {
     selectionAnchor: null,
     // #195 段②-b: 開いている拡張。⚠ 上と同じ理由で**明示で置く**
     openExtensions: [],
+    // #505 段②: 横に並べた枠。⚠ 上と同じ理由で**明示で置く**(読む面が毎回読む)
+    splitLids: [],
+    splitBodies: new Map<string, string>(),
     ...over,
   } as unknown as AppState;
 }
