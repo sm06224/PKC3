@@ -463,6 +463,15 @@ describe('お知らせの登記表', () => {
       NOTICE_SEEN_MAX,
       '既読の席が表示件数以下 ── 落ちた id が生きている id を押し出す',
     ).toBeGreaterThan(NOTICE_SHOW_MAX);
+    /**
+     * ⚠ **上限側にも門を置く**(2 巡目レビュー)── 席は localStorage に積む数なので、
+     *   増やす方向には**鳴る計器が 1 つも無かった**(`* 50` にする変異が SURVIVED)。
+     * 🔑 CLAUDE.md「tripwire は上限だけでなく下限も置く」の**裏返し**である。
+     */
+    expect(
+      NOTICE_SEEN_MAX,
+      '既読の席が増えすぎ ── localStorage に読まれない id を積み続ける',
+    ).toBeLessThanOrEqual(NOTICE_SHOW_MAX * 4);
     expect(NOTICE_ITEMS_MAX, '項目数の上限が変わった').toBe(6);
     expect(NOTICE_ITEM_CHARS_MAX, '字数の上限が変わった').toBe(120);
     expect(NOTICE_ITEM_CHARS_MIN, '字数の下限が変わった').toBe(4);

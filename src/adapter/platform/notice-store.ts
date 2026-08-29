@@ -12,7 +12,12 @@
  * container に入れると export に同乗し、**書き出した HTML を渡した相手に
  * お知らせが出なくなる**(PKC2 が実際にその形になっている)。
  */
-import { NOTICES, NOTICE_SEEN_MAX } from '@features/notice/notice-log';
+import {
+  NOTICES,
+  NOTICE_SEEN_MAX,
+  recentNotices,
+  type Notice,
+} from '@features/notice/notice-log';
 
 const SEEN_KEY = 'pkc3.notices.seen';
 const OFF_KEY = 'pkc3.notices.off';
@@ -107,16 +112,32 @@ export class NoticeStore {
    *   押し出された 1 件は未読へ戻り、user が閉じても下の `same` 判定で
    *   書込が起きないため、**毎起動そのお知らせが出続ける**。
    *
-   * 🔑 だから席の取り合いそのものを消す ── **登記表に在る id を先に残し**、
-   *   残りの席を「落ちた id」で埋める(どちらの中も id の降順)。
-   *   ⚠ 席数(`NOTICE_SEEN_MAX`)は余裕であって、これが正しさを担っているのではない。
+   * 🔑 だから席の取り合いそのものを消す ── **いま画面に出る id を先に残し**、
+   *   残りの席を「出ていない id」で埋める(そちらは id の降順 = 新しい順)。
+   *
+   * ## 🔑 守るのは「登記表に在るもの」ではなく「**画面に出るもの**」(2 巡目レビュー)
+   *
+   * ⚠ 1 稿目は `NOTICES` をそのまま守っていたが、それだと
+   *   「`NOTICES.length <= NOTICE_SEEN_MAX`」が**別 file の test 3 本**に支えられて
+   *   初めて成り立つ。`recentNotices` を通せば `live.size <= NOTICE_SHOW_MAX` が
+   *   **構造的に**保証されるので、`NOTICE_SEEN_MAX > NOTICE_SHOW_MAX` の宣言だけで
+   *   十分条件になる ── 席が足りなくなる形が**式の上で**消える。
+   *
+   * ⚠ **`live` 側を並べ替えない** ── 全部残るので順は結果を 1 バイトも変えない。
+   *   1 稿目は `.sort(byId)` を書いて「どちらの中も id の降順」と注釈していたが、
+   *   変異試験で **SURVIVED**(= no-op)だった。CLAUDE.md
+   *   「『これが無いと壊れる』と書いた規則が no-op だった」を踏むところだった。
+   *
+   * ⚠ **登記表は引数で受ける** ── 画面に出す側(`announce.ts`)は `main.ts` から
+   *   渡された配列を使うので、ここが module 直輸入の `NOTICES` を見ていると
+   *   **2 つの登記表が食い違いうる**(CLAUDE.md §7)。既定はいままでどおり。
    */
-  markSeen(ids: readonly string[]): void {
-    const live = new Set(NOTICES.map((n) => n.id));
+  markSeen(ids: readonly string[], registry: readonly Notice[] = NOTICES): void {
+    const live = new Set(recentNotices(registry).map((n) => n.id));
     const byId = (a: string, b: string): number => (a < b ? 1 : a > b ? -1 : 0);
     const all = [...new Set([...this.seen, ...ids])];
     const merged = [
-      ...all.filter((id) => live.has(id)).sort(byId),
+      ...all.filter((id) => live.has(id)),
       ...all.filter((id) => !live.has(id)).sort(byId),
     ].slice(0, NOTICE_SEEN_MAX);
     const same =

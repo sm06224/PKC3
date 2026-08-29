@@ -28,6 +28,7 @@ import type { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { initialState } from '../../src/adapter/state/app-state';
 import {
   NOTICES,
+  NOTICE_SEEN_MAX,
   NOTICE_SHOW_MAX,
   recentNotices,
   type Notice,
@@ -119,6 +120,37 @@ describe('お知らせの帯', () => {
     expect([...store.seenIds()].sort(), '全部を読んだのに既読になっていない').toEqual(
       NOTES.map((n) => n.id).sort(),
     );
+  });
+
+  /**
+   * 🔴 **帯が出した登記表が、そのまま既読の席を守る側へ渡る**
+   * (2026-08-29 の変異試験 M7 が SURVIVED で教えた)。
+   *
+   * ⚠ 既定の配線では帯が出すのも席を守るのも `NOTICES` なので、**渡し忘れても
+   *   結果が同じ**になり、既存の台では 1 度も見えなかった
+   *   (CLAUDE.md §7「同じ値が 2 か所にある」/ 2026-08-27「前も後も通るなら守っていない」)。
+   * 🔑 だから **`NOTICES` に 1 件も入っていない登記表**で帯を組み、
+   *   閉じたあとに**その分が既読の席に残っている**ことを見る。
+   *   ⚠ 渡っていなければ「登記表に無い id」として真っ先に捨てられる。
+   */
+  it('🔴 帯に渡した登記表が、既読の席を守る側にも渡る', () => {
+    const store = new NoticeStore(memory());
+    const a = createAnnounce(region, store, NOTES);
+    // 席を溢れさせる ── 溢れなければ取捨が起きず、渡し忘れても結果が同じ(空振り)
+    const top = NOTES.map((n) => n.id).sort().at(-1) ?? '';
+    store.markSeen(
+      Array.from({ length: NOTICE_SEEN_MAX }, (_, i) => `${top}-zz${i}`),
+      NOTES,
+    );
+    a.present();
+    a.dismiss();
+
+    const seen = new Set(store.seenIds());
+    expect(store.seenIds(), '切り詰めが起きていない(台の空振り)').toHaveLength(NOTICE_SEEN_MAX);
+    expect(
+      NOTES.filter((n) => !seen.has(n.id)).map((n) => n.id),
+      '帯に出した分が既読から落ちた ── 登記表が渡っていない',
+    ).toEqual([]);
   });
 
   /**

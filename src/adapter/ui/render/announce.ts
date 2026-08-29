@@ -197,7 +197,9 @@ export function createAnnounce(
       const current = shown[0];
       if (!current) return;
       const had = region.contains(document.activeElement);
-      store.markSeen([current.id]);
+      // ⚠ **出す側の登記表を渡す**(#605 の 2 巡目レビュー)── 既読の席を守る側が
+      //   module 直輸入の `NOTICES` を見ていると、2 つの登記表が食い違いうる(§7)
+      store.markSeen([current.id], all);
       paint();
       if (!had) return;
       const back = region.querySelector(
@@ -207,7 +209,10 @@ export function createAnnounce(
     },
 
     dismiss() {
-      store.markSeen(shown.map((x) => x.id));
+      store.markSeen(
+        shown.map((x) => x.id),
+        all,
+      );
       clear();
     },
 
@@ -217,7 +222,10 @@ export function createAnnounce(
 
     mute() {
       // ⚠ **既読にもする** ── 戻したときに、もう読んだ物が出直さない
-      store.markSeen(shown.map((x) => x.id));
+      store.markSeen(
+        shown.map((x) => x.id),
+        all,
+      );
       store.setEnabled(false);
       clear();
     },

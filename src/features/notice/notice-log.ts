@@ -236,7 +236,8 @@ export const NOTICES: readonly Notice[] = [
 ];
 
 /**
- * ⚠ **落としたぶんの原本は `CHANGELOG.md` に在る**(`NOTICE_KEEP_MAX` を超えると古いほうから落ちる)。
+ * ⚠ **落としたぶんの原本は `CHANGELOG.md` に在る**。⚠ 落ちるのは**自動ではない** ──
+ * `NOTICE_KEEP_MAX` を超えたら**人が古い 1 件を消す**(手順は `.claude/skills/notice-writing/`)。
  * 突合は `tests/docs-parity.test.ts` の `DROPPED`(落とした題名の既知リスト)が持つ ──
  * 「登記表 + 落ちた分 = CHANGELOG」を**等値**で見るので、落としたのに書き忘れると CI が落ちる。
  *
