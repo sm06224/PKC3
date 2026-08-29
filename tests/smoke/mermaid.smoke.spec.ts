@@ -774,3 +774,68 @@ test('🔴 図を押して開く別窓は、焼いた PNG ではなくベクタ 
 
   expect(errors, 'ページ例外が出ている').toEqual([]);
 });
+
+/**
+ * 🔴 **grafu の拡大窓も、画面の小さい PNG ではない**(user 報告 2026-08-28 の続き)。
+ *
+ * ⚠ 1 稿目の直しは `data-pkc-mermaid-src` **だけ**を見ていたので、
+ *   **grafu は小さい PNG が開いたまま**だった ── user の「ぽしょぽしょ」が
+ *   grafu では直っていなかった(2026-08-29 の棚卸しで判明)。
+ *
+ * 🔑 **図と grafu で直し方が違う**:
+ *   ・mermaid は SVG を吐く → **ベクタ**にできる
+ *   ・chart.js は**ベクタを吐かない**(`chart-raster.ts` の `savable: false`)
+ *     → **大きく焼き直す**しかない
+ *
+ * ⚠ だから観測点も違う。ここで見るのは MIME ではなく **画素の幅**である
+ *   (どちらも image/png なので、MIME では 1 バイトも区別できない)。
+ */
+test('🔴 grafu を押して開く別窓は、画面より大きく焼き直されている (#527 / user 報告)', async ({
+  page,
+  context,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill(
+      '```chart\n{"type":"bar","labels":["1月","2月","3月"],' +
+        '"datasets":[{"label":"売上","data":[10,20,30]}]}\n```\n',
+    );
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  const host = page.locator('[data-pkc-field="detail-body"] [data-pkc-chart-src]');
+  // ⚠ 状態属性は種類ごとに違う(`data-pkc-<name>-state`)── grafu は `chart`
+  await expect(host).toHaveAttribute('data-pkc-chart-state', 'ready', { timeout: 30000 });
+
+  // ⚠ **前提の検算** ── 本文に置かれているのは焼いた PNG である
+  const body = await host.evaluate(async (h) => {
+    const i = h.querySelector('img');
+    return i === null
+      ? null
+      : { natural: i.naturalWidth, type: (await (await fetch(i.src)).blob()).type };
+  });
+  expect(body, '前提が崩れている ── grafu の絵が置かれていない').not.toBeNull();
+  const bodyPng = body!;
+  expect(bodyPng.type, '前提が崩れている ── grafu が PNG ではない').toBe('image/png');
+
+  const [win] = await Promise.all([context.waitForEvent('page'), host.locator('img').click()]);
+  await win.waitForSelector('[data-pkc-field="asset-window-image"]', { timeout: 20_000 });
+  const shown = await win.evaluate(async () => {
+    const i = document.querySelector('[data-pkc-field="asset-window-image"]') as HTMLImageElement;
+    if (!i.complete) await new Promise((ok) => i.addEventListener('load', ok, { once: true }));
+    return { natural: i.naturalWidth, type: (await (await fetch(i.src)).blob()).type };
+  });
+
+  // ① 空振り防止 ── 窓の絵が読めていること
+  expect(shown.natural, '窓の絵が読めていない(この検査は何も見ていない)').toBeGreaterThan(0);
+
+  // ② 🔴 **画面より大きく焼き直されている**(ここが user の報告そのもの)
+  expect(
+    shown.natural,
+    `画面の焼きをそのまま開いている(窓 ${shown.natural} / 本文 ${bodyPng.natural})`,
+  ).toBeGreaterThan(bodyPng.natural);
+
+  expect(errors, 'ページ例外が出ている').toEqual([]);
+});

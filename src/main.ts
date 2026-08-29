@@ -1836,7 +1836,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   ⚠ 添付の窓(`viewAsset`)とは**別の名前**である ── 同じにすると、
      *   添付を見ながら図を開いたときに**添付の窓が図に置き換わる**。
      */
-    viewBig: (src, title, diagramSource) => {
+    viewBig: (src, title, diagram) => {
       void (async () => {
         try {
           /**
@@ -1849,14 +1849,36 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
            * ⚠ **実寸を書き込んでから渡す**(`svgWithIntrinsicSize`)── mermaid の SVG は
            *   `<img>` が読む自然幅が 300px なので、そのままだと「実寸」が 300px になる。
            */
+          /**
+           * ⚠ **図と grafu で作り直し方が違う**(2026-08-29)。
+           * 🔑 mermaid は SVG を吐くので**ベクタ**で開ける ── どこまで拡大しても鮮明。
+           * 🔴 **chart.js はベクタを吐かない**(`chart-raster.ts` の `savable: false`)ので、
+           *   ベクタにはできない ── 代わりに**大きく焼き直す**。画面の器の幅で焼いた
+           *   PNG をそのまま拡大すると粗いが、実寸で焼き直せば拡大に耐える。
+           */
           const bytes =
-            diagramSource === undefined
+            diagram === undefined
               ? // ⚠ `blob:` の取り直しは同一 origin でしか通らない ── 通らなければ断る
                 await (await fetch(src)).blob()
-              : new Blob(
-                  [svgWithIntrinsicSize(await renderToSvg(diagramSource, readPalette()))],
-                  { type: 'image/svg+xml' },
-                );
+              : diagram.kind === 'mermaid'
+                ? new Blob([svgWithIntrinsicSize(await renderToSvg(diagram.source, readPalette()))], {
+                    type: 'image/svg+xml',
+                  })
+                : // 🔴 **grafu は大きく焼き直す** ── ベクタにできないので実寸で焼く。
+                  //   ⚠ 既存の焼き経路(`CHART_KIND.render`)を使う ── ここで chart.js を
+                  //   直に叩くと配色と鍵の作り方が 2 か所になる(CLAUDE.md §7)。
+                  //   ⚠ dpr は 2 固定(紙の `renderFigure` と同じ理由 ── 端末ごとに
+                  //   違う解像度の絵にしない)。
+                  (
+                    await CHART_KIND.render({
+                      source: diagram.source,
+                      kind: 'chart',
+                      theme: document.documentElement.getAttribute('data-pkc-theme') ?? 'light',
+                      palette: readPalette(),
+                      width: 2048,
+                      dpr: 2,
+                    })
+                  ).png;
           const url = URL.createObjectURL(bytes);
           const win = await openAssetWindow({
             lent: { url, dispose: () => URL.revokeObjectURL(url) },
