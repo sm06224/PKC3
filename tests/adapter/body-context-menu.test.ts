@@ -685,3 +685,150 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
   });
 });
 
+
+/**
+ * 🔴 **メニューが出た後にノートが替わっても、別のノートに効かない**(#596 D)。
+ *
+ * ⚠ メニューが閉じるのは **押した / スクロールした / `Escape`** の 3 つだけなので、
+ * 出したまま本文が別のノートへ替わりうる。⚠ そのとき運んだ行は**別のノートに効く**
+ * ── 畳む / 編集に入る / 追記の入り先、どれも「押した物と効く先が食い違う」形になる。
+ */
+describe('メニューの身元(#596 D)', () => {
+  function rig() {
+    document.body.textContent = '';
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    const host = document.createElement('div');
+    host.setAttribute('data-pkc-field', 'detail-body');
+    host.innerHTML =
+      '<h2 data-pkc-source-line="0" id="h-a">章</h2>' +
+      '<p data-pkc-source-line="2" id="p-in">中身</p>';
+    root.append(host);
+    document.body.append(root);
+    const d = new Dispatcher();
+    bindActions(root, d, { showStatus: () => {} });
+    const meta = (lid: string): never =>
+      ({
+        lid,
+        title: lid,
+        archetype: 'text',
+        created_at: null,
+        updated_at: null,
+        entry_order: 1,
+        status: null,
+        date: null,
+        archived: 0,
+      }) as never;
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1'), meta('n2')], relations: [] });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '## 章\n\n中身\n' });
+    return {
+      root,
+      d,
+      host,
+      press: (action: string): void => {
+        root.querySelector<HTMLElement>(`${MENU} [data-pkc-action="${action}"]`)!.click();
+      },
+    };
+  }
+
+  it('🔴 ノートが替わった後に押しても、**畳まない**', () => {
+    const r = rig();
+    rightClick(r.root.querySelector('#h-a')!);
+    // ⚠ メニューは出たまま ── ここで本文が別のノートへ替わる
+    r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    r.d.dispatch({ type: 'BODY_LOADED', lid: 'n2', body: '## べつ\n' });
+    r.press('toggle-heading-fold');
+    expect(
+      (r.host.querySelector('#p-in') as HTMLElement).hidden,
+      '別のノートに替わったのに、前のノートの章を畳んだ',
+    ).toBe(false);
+  });
+
+  it('🔴 ノートが替わった後に押しても、**編集に入らない**', () => {
+    const r = rig();
+    rightClick(r.root.querySelector('#h-a')!);
+    r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    r.d.dispatch({ type: 'BODY_LOADED', lid: 'n2', body: '## べつ\n' });
+    r.press('edit-from-heading');
+    expect(r.d.getState().phase, '別のノートに替わったのに編集へ入った').toBe('ready');
+  });
+
+  it('🔴 断るときは**理由を出す**(押して無言にしない)', () => {
+    const r = rig();
+    rightClick(r.root.querySelector('#h-a')!);
+    r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    r.d.dispatch({ type: 'BODY_LOADED', lid: 'n2', body: '## べつ\n' });
+    r.press('toggle-heading-fold');
+    /**
+     * ⚠ 押した瞬間にメニューは畳まれるので、黙って返すと user から見て
+     * 「メニューが消えて何も起きない」= dead click になる(着地前レビュー ⚠6)。
+     */
+    expect(r.d.getState().notice ?? '', '断った理由が出ていない').toContain('別のノート');
+  });
+
+  /**
+   * 🔴 **本文を右クリックしたときも身元を運ぶ**(着地前レビュー ⚠5)。
+   * ⚠ そこに載る「外部の画像を取り込む」は**外へ通信して本文を書き換える**ので、
+   *   取り違えの実害がいちばん大きい。⚠ しかもボタンの**字**(枚数)は
+   *   メニューを組んだ時のノートのものである。
+   */
+  it('🔴 本文の右クリックでも身元を運び、取り込みも同じ門をくぐる', () => {
+    document.body.textContent = '';
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    const host = document.createElement('div');
+    host.setAttribute('data-pkc-field', 'detail-body');
+    host.innerHTML = '<p data-pkc-source-line="0" id="p-x">ふつうの段落</p>';
+    root.append(host);
+    document.body.append(root);
+    const d = new Dispatcher();
+    const meta = (lid: string): never =>
+      ({
+        lid,
+        title: lid,
+        archetype: 'text',
+        created_at: null,
+        updated_at: null,
+        entry_order: 1,
+        status: null,
+        date: null,
+        archived: 0,
+      }) as never;
+    let fetched = 0;
+    bindActions(root, d, {
+      showStatus: () => {},
+      fetchExternalImage: () => {
+        fetched += 1;
+        return Promise.resolve(null);
+      },
+    } as never);
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1'), meta('n2')], relations: [] });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '![そと](https://example.com/a.png)\n' });
+
+    rightClick(root.querySelector('#p-x')!);
+    const btn = root.querySelector<HTMLElement>(`${MENU} [data-pkc-action="adopt-external-images"]`);
+    expect(btn, '取り込みが出ていない(台の前提が崩れている)').not.toBeNull();
+    expect(btn!.getAttribute('data-pkc-menu-lid'), '本文の右クリックで身元を運んでいない').toBe(
+      'n1',
+    );
+
+    // ⚠ ここで別のノートへ替わる
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n2', body: '![べつ](https://example.com/b.png)\n' });
+    btn!.click();
+    expect(fetched, '替わった後のノートの画像を取りに行った').toBe(0);
+    expect(d.getState().notice ?? '', '断った理由が出ていない').toContain('別のノート');
+  });
+
+  it('🔴 **対照群** ── 替わっていなければ、これまでどおり効く', () => {
+    const r = rig();
+    rightClick(r.root.querySelector('#h-a')!);
+    r.press('toggle-heading-fold');
+    expect(
+      (r.host.querySelector('#p-in') as HTMLElement).hidden,
+      '同じノートなのに畳めない(身元の検査が強すぎる)',
+    ).toBe(true);
+  });
+});

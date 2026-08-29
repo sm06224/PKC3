@@ -49,7 +49,7 @@ import { buildVcf, isVcfFileName } from '@features/contact/vcard';
 import { isMarkdownFileName } from '@features/import/plain-markdown';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
 import { insertText, OWN_MEANING } from '@adapter/ui/render/row-swap';
-import { sectionAt } from '@features/markdown/append-target';
+import { resolveAppendAt, sectionAt } from '@features/markdown/append-target';
 import { isTextScale } from '@features/text-scale';
 import { chooseTextScale } from '@adapter/ui/render/text-scale';
 import { isReadColumns } from '@features/read-columns';
@@ -1127,6 +1127,27 @@ function navigateToLink(dispatcher: Dispatcher, raw: string | null): void {
  * @returns 開いたら true
  */
 /**
+ * 🔴 **畳みを管理している器を引く**(#598)。
+ *
+ * ⚠ **同じ器が 2 つの名前を持つ** ── 骨組みは `…-body-host` を付けるが、
+ * markdown を描いた瞬間に**同じ節点の名前が `…-body` へ上書きされる**
+ * (`detail.ts` の `renderMarkdownBody`)。だから本文の面で `…-body-host` だけを
+ * 探すと**必ず外す**。
+ * ⚠ 横に留めた枠は綴りが `split-` になる(押した物と効く先を食い違わせないための仕掛け)。
+ * 🔑 4 つとも受ける口を**ここ 1 か所**に置く ── 呼び側に綴りを写さない(§7)。
+ */
+const FOLD_HOST_SELECTOR = [
+  '[data-pkc-field="detail-body"]',
+  '[data-pkc-field="detail-body-host"]',
+  '[data-pkc-field="split-body"]',
+  '[data-pkc-field="split-body-host"]',
+].join(',');
+
+function foldHostOf(el: Element): HTMLElement | null {
+  return el.closest<HTMLElement>(FOLD_HOST_SELECTOR);
+}
+
+/**
  * 🔴 **読む面で押した所の原文の行**(#395 段③ / #495 が共有する 1 か所)。
  *
  * 🔑 行は読む面の刻印(`data-pkc-source-line`)から引く ── **新しい逆引きを
@@ -1176,6 +1197,67 @@ function bodySourceLineAt(
   }
   const line = Number(mark.getAttribute('data-pkc-source-line'));
   return Number.isInteger(line) && line >= 0 ? line : null;
+}
+
+/**
+ * 🔴 **追記した字が、畳んだ章の中に隠れないようにする**(#596 B)。
+ *
+ * ⚠ 見出しを畳んで目次のように読むのは**畳みのいちばん自然な使い方**だが、その状態で
+ * 追記すると、入った塊は描き直しのたびに `applyHeadingFold` が `hidden` にする ──
+ * user から見ると**書いたものが消える**(しかも「元に戻す」は追記欄の横にしか出ない)。
+ * 🔑 #514 が目次から飛ぶ前にやっていること(覆っている畳みを開く)の**追記版**である。
+ *
+ * ## 🔴 印(slug)では引かない ── **綴りが一致しない**
+ *
+ * ⚠ 1 稿目は「入り先の印は、描画側の見出しの `id` と同じ綴り」と思って突き合わせていた。
+ * **偽である**(着地前レビュー 🔴1。実測で確かめた)── 2 つは `makeSlugCounter` を
+ * 共有しているだけで、**読む文字列が違う**:
+ * 入り先の一覧は**原文の行**を正規表現で読み、描画側は**前処理を通った token** を読む。
+ * ⚠ 実測:`決定事項`(setext の h1)の下に `## 決定事項` が在る本文で、
+ * 入り先の印は `決定事項` なのに描画側の `id` は `決定事項-1` ── **別の章が開く**。
+ *
+ * 🔑 だから**行で引く**。`resolveAppendAt` が「入る行」を返すので、
+ * その**手前で終わっている塊**を器の直下から探し、それを覆う畳みを開く。
+ * ⚠ 塊は `data-pkc-source-end`(無ければ `-line`)で範囲を持っている。
+ *
+ * ## ⚠ 入れ子の畳みは「外側」ではなく**内側**が効く
+ *
+ * ⚠ 1 稿目のコメントは「自分の畳みと外側の畳みの両方」と書いていたが、実際に隠すのは
+ * **内側**である ── `## A / a / ### A-1 / b` に「A」を選んで追記すると、入る所は
+ * **`### A-1` の span の中**なので、A を開いても隠れたままになる。
+ * 🔑 `revealBlock` は**その塊を覆う畳みを全部**開く(内も外も)ので、
+ * 塊さえ正しく引ければ 1 本で解ける。
+ */
+function revealAppendTarget(dispatcher: Dispatcher, root: HTMLElement, slug: string): void {
+  const body = dispatcher.getState().openBody?.body ?? null;
+  const host = root.querySelector<HTMLElement>('[data-pkc-field="detail-body"]');
+  if (body === null || host === null) return;
+  // ⚠ 「末尾」は文書のいちばん後ろ ── 行数を渡せば、どの塊よりも後ろになる
+  const at = slug === '' ? body.split('\n').length : resolveAppendAt(body, slug);
+  if (at === null) return;
+  /**
+   * ⚠ **原文の行 → 描く面の行** ── 描く面は frontmatter を剥がした側を見ている。
+   * ずらす値は `frontmatterLineCount` 1 つ(`pickAppendTarget` と同じ規律)。
+   */
+  const line = at - frontmatterLineCount(body);
+  let block: Element | null = null;
+  for (const el of host.children) {
+    const raw = el.getAttribute('data-pkc-source-end') ?? el.getAttribute('data-pkc-source-line');
+    const end = Number(raw);
+    if (!Number.isInteger(end) || end >= line) continue;
+    block = el;
+  }
+  if (block === null) return;
+  /**
+   * 🔑 **`revealBlock` 1 本で足りる**(変異 Q2 / Q4 が生き延びて確かめた)。
+   *
+   * ⚠ 1 稿目は「塊が畳んだ見出しそのものなら、自分の畳みは `revealBlock` が
+   * 開かない(span の外)」として 1 行足していたが、**外して壊れる形が作れなかった**:
+   * 入る所の直前の塊が見出しになるのは**その章に中身が 1 つも無いとき**だけで、
+   * ⚠ 中身の無い章は `foldSpans` が span を作らない = **そもそも畳めない**。
+   * 🔑 だから消した(CLAUDE.md「これが無いと壊れる、と書く前に外して壊れるのを見る」)。
+   */
+  revealBlock(host, block);
 }
 
 /**
@@ -1250,6 +1332,47 @@ function startEditAt(
  * ⚠ 綴りをあちこちに写さない(§7)── この関数と `onContextMenu` の 2 か所だけが知る。
  */
 const MENU_LINE_ATTR = 'data-pkc-menu-line';
+/**
+ * 🔴 **どのノートの行かも一緒に運ぶ**(#596 D)。
+ *
+ * ⚠ メニューが閉じるのは **押した / スクロールした / `Escape`** の 3 つだけなので、
+ *   出したまま本文が別のノートへ替わりうる(開いた直後は焦点がメニューの先頭ボタンに
+ *   移るので、鍵で移れる経路が 1 つでもあれば到達する)。
+ * ⚠ そのとき運んだ行は**別のノートに効く** ── 畳む / 編集に入る / 追記の入り先、
+ *   どれも「押した物と効く先が食い違う」いちばん静かな形になる。
+ * 🔑 **到達できるかを数え上げるより、行と一緒に身元を運ぶ** ── 受け手は
+ *   自分の身元を確かめてから動く(状態の購読を増やさないので、束ねる側の台も壊さない)。
+ */
+const MENU_LID_ATTR = 'data-pkc-menu-lid';
+
+/**
+ * メニューが出た時のノートと、いま開いているノートが同じか。
+ * ⚠ 印を持たない押し(見出しの頭のボタン等)は**素通し** ── そちらは押した物の
+ *   中に居るので、そもそも取り違えようがない。
+ */
+function menuStillFits(dispatcher: Dispatcher, target: Element): boolean {
+  const was = target.getAttribute(MENU_LID_ATTR);
+  return was === null || was === (dispatcher.getState().openBody?.lid ?? '');
+}
+
+/**
+ * 身元が合わなければ**理由を出して**断る。
+ *
+ * ⚠ 押した瞬間にメニューは畳まれる(`onCloseMenu`)ので、黙って `return` すると
+ * user から見て「**メニューが消えて何も起きない**」= dead click になる
+ * (着地前レビュー ⚠6)。同じ file の `pickAppendTarget` / `startEditAt` は
+ * 断るときに理由を出している ── ここだけ無言にしない。
+ *
+ * @returns 断ったか(`true` なら呼び手は何もしない)
+ */
+function refuseStaleMenu(dispatcher: Dispatcher, target: Element): boolean {
+  if (menuStillFits(dispatcher, target)) return false;
+  dispatcher.dispatch({
+    type: 'OP_NOTICE',
+    message: '別のノートに切り替わったので、出ていたメニューは効きません',
+  });
+  return true;
+}
 
 function menuCarriedLine(target: Element): number | null {
   const raw = target.getAttribute(MENU_LINE_ATTR);
@@ -1868,13 +1991,16 @@ async function tocJump(dispatcher: Dispatcher, target: HTMLElement, slug: string
     }
     /**
      * 🔴 **畳んだ章の中なら、開いてから飛ぶ**(#514)── 覆っている畳みだけを開く。
-     * ⚠ host は**畳みを管理している器**(`detail-body-host` = `applyHeadingFold` が
-     *   受けるのと同じ器)で渡す ── `hit.parentElement` だと `:::` の囲みの中の
-     *   見出しで**別の器**を渡してしまい、外の畳みに届かない(レビュー指摘)。
+     * ⚠ host は**畳みを管理している器**(`applyHeadingFold` が受けるのと同じ器)で渡す
+     *   ── `hit.parentElement` だと `:::` の囲みの中の見出しで**別の器**を渡してしまい、
+     *   外の畳みに届かない。
+     * 🔴 **綴りは 1 つではない**(#598)── 1 稿目は `detail-body-host` だけを探して
+     *   いたが、md を描いた器は**同じ節点の名前が `detail-body` へ上書きされる**ので、
+     *   **本文の面では必ず外していた**(= いつも `hit.parentElement` に落ちていた)。
+     *   🔑 引く口は `foldHostOf` **1 本**(§7)。
      *   器が無い環境(unit の素の fixture)では parentElement へ落とす。
      */
-    const foldHost =
-      hit.closest<HTMLElement>('[data-pkc-field="detail-body-host"]') ?? hit.parentElement;
+    const foldHost = foldHostOf(hit) ?? hit.parentElement;
     if (foldHost !== null) revealBlock(foldHost, hit);
     hit.scrollIntoView({ block: 'start' });
 }
@@ -2983,6 +3109,19 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     const target =
       root.querySelector<HTMLSelectElement>('[data-pkc-field="append-target"]')?.value ?? '';
+    /**
+     * 🔑 **書いたものが見える所へ入るようにする**(#596 B)。
+     *
+     * ⚠ 1 稿目は「撃った**後**では遅い(描き直しで `hidden` が付く)」と書いていたが、
+     * **外して壊れることを 1 度も見ていなかった**(着地前レビュー ⚠4)── 本文の描き直しは
+     * worker の promise 越しなので、同期の「後」との間に描き直しは挟まらない。
+     * 🔑 前に置いてあるのは**畳みだけを先に解いておくと、届いた瞬間に見える**からで、
+     * 「後では遅い」からではない。
+     * ⚠ そのぶん**断られた回でも畳みが開く** ── 空のまま押した回などは、
+     * 何も足されないのに章だけ開く。⚠ 実害は「開きすぎ」だけなので受け入れる
+     * (閉じ直すのは押し所 1 つ)。
+     */
+    revealAppendTarget(dispatcher, root, target);
     dispatcher.dispatch({
       type: 'APPEND_TO_ENTRY',
       lid,
@@ -3541,7 +3680,8 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 本文の中身は 1 バイトも変わらない(見え方だけ)ので、
    *   `BODY_WRITE_ACTIONS` には**載せない**(取り込み中でも畳んでよい)。
    */
-  'toggle-heading-fold': (_dispatcher, target) => {
+  'toggle-heading-fold': (dispatcher, target) => {
+    if (refuseStaleMenu(dispatcher, target)) return;
     /**
      * 🔴 **右クリックからも来る**(#426 段②)── そのとき押したボタンは
      * 器の直下に居るので、`closest` では見出しに当たらない。
@@ -3560,7 +3700,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'edit-from-heading': (dispatcher, target, services) => {
     const line = menuCarriedLine(target);
-    if (line === null) return;
+    if (line === null || refuseStaleMenu(dispatcher, target)) return;
     // 🔑 門は `startEditAt` **1 本**(飛んでいる書込を待つ / 別タブのロック / 返し)
     startEditAt(dispatcher, services, line);
   },
@@ -3572,7 +3712,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'append-at-heading': (dispatcher, target) => {
     const line = menuCarriedLine(target);
-    if (line === null) return;
+    if (line === null || refuseStaleMenu(dispatcher, target)) return;
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
     pickAppendTarget(dispatcher, root, line);
   },
@@ -3989,6 +4129,16 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ **入らなかったものは理由を言う**(段②)── 黙って元のままにしない。
    */
   'adopt-external-images': (dispatcher, target, services) => {
+    /**
+     * 🔴 **メニューの身元を先に確かめる**(#596 D。着地前レビュー ⚠5)。
+     *
+     * ⚠ この受け手は**押した時点の `openBody` から取り直す**が、ボタンの**字**は
+     *   メニューを組んだ時の枚数で焼かれている ── メニューを出したまま本文が
+     *   替わると、「(3 枚)」と書いてあるのに**別のノートの 12 枚**を外へ取りに行き、
+     *   そのノートの本文を書き換える。
+     * 🔑 同じメニューに載る 3 つと**同じ門**をくぐらせる。
+     */
+    if (refuseStaleMenu(dispatcher, target)) return;
     /**
      * 🔴 **解決規則を隣と揃える**(#500 案 C。`export-folder` と同じ理由)。
      *
@@ -6215,7 +6365,18 @@ export function bindActions(
               ...body,
             ],
         root.ownerDocument.activeElement,
-        line === null ? {} : { [MENU_LINE_ATTR]: String(line) },
+        /**
+         * 🔴 **身元は常に運ぶ**(着地前レビュー ⚠5)。⚠ 1 稿目は見出しのときだけ
+         * 積んでいたので、**本文を右クリックしたときは lid を運んでいなかった** ──
+         * そこに載る `adopt-external-images` は**外へ通信して本文を書き換える**ので、
+         * 取り違えの実害がいちばん大きい。行は見出しのときだけでよい。
+         */
+        line === null
+          ? { [MENU_LID_ATTR]: dispatcher.getState().openBody?.lid ?? '' }
+          : {
+              [MENU_LINE_ATTR]: String(line),
+              [MENU_LID_ATTR]: dispatcher.getState().openBody?.lid ?? '',
+            },
       );
       return;
     }

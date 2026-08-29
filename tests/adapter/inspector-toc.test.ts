@@ -281,7 +281,7 @@ describe('目次を押すと本文へ飛ぶ(#493)', () => {
 
   /**
    * 🔴 **囲み(`:::`)の中の見出しでも、外の畳みを開いて飛ぶ**(レビュー指摘)。
-   * ⚠ 畳みを管理する器は `detail-body-host` ── `hit.parentElement`(囲みの section)を
+   * ⚠ 畳みを管理する器は **`detail-body`**(#598)── `hit.parentElement`(囲みの section)を
    *   渡すと外の畳みに届かず、#514 の無言がそのまま残る。
    */
   it('🔴 囲みの中の見出しでも、外の畳みを開いて飛ぶ', async () => {
@@ -290,7 +290,10 @@ describe('目次を押すと本文へ飛ぶ(#493)', () => {
     const detail = root.querySelector<HTMLElement>('[data-pkc-region="detail"]')!;
     // 実物と同じ器(detail-body-host)の中に、畳んだ章と、囲みに包まれた節を置く
     const host = document.createElement('div');
-    host.setAttribute('data-pkc-field', 'detail-body-host');
+    // 🔴 **実物と同じ綴り**(#598)── 骨組みは `-host` を付けるが、markdown を
+    //    描いた瞬間に `detail-body` へ**上書きされる**。台が `-host` のままだと、
+    //    実装が本文の面で器を外していても**緑になる**(実際に外していた)。
+    host.setAttribute('data-pkc-field', 'detail-body');
     // ⚠ この台は「本文が描き終わっている」形なので、**描けた印も付ける**(#517)──
     //    付けないと `waitPainted` が期限まで待ち、この test が別の理由で落ちる
     host.setAttribute('data-pkc-painted', 'n1');
@@ -330,7 +333,10 @@ describe('描き直しを待ってから飛ぶ(#517)', () => {
   function withHost(root: HTMLElement, slug: string, painted: string | null) {
     const detail = root.querySelector<HTMLElement>('[data-pkc-region="detail"]')!;
     const host = document.createElement('div');
-    host.setAttribute('data-pkc-field', 'detail-body-host');
+    // 🔴 **実物と同じ綴り**(#598)── 骨組みは `-host` を付けるが、markdown を
+    //    描いた瞬間に `detail-body` へ**上書きされる**。台が `-host` のままだと、
+    //    実装が本文の面で器を外していても**緑になる**(実際に外していた)。
+    host.setAttribute('data-pkc-field', 'detail-body');
     if (painted !== null) host.setAttribute('data-pkc-painted', painted);
     const h = document.createElement('h1');
     h.id = slug;
