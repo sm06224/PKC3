@@ -144,6 +144,55 @@ const SHOT = process.env.PKC3_SHOT ?? '';
 /** 🔴 開いた状態で IME の門を読むか(#156 段②)。⚠ 既定は読まない。 */
 const IME = process.env.PKC3_IME === '1';
 /**
+ * 🔴 **焦点を 1 度動かして、診断属性を採り直させる**(#156、2026-08-29)。
+ *
+ * ⚠ `data-pkc-ime` は `QWasmInputContext::updateInputElement()` の中でしか
+ * 書かれず、そこを `update()` から呼ぶ hunk は 2026-08-16 に外してある
+ * (文書を開くと固まる退行の原因だった)。だから素で読むと
+ * **「最後に `updateInputElement()` が走った時点の値」**しか返らない ──
+ * `accept0` は「いまも偽」ではなく **判定不能**である(CLAUDE.md §4「計器が古い値を返す」)。
+ *
+ * 🔑 ところが `updateInputElement()` は **`setFocusObject()` からも呼ばれる**
+ * (`qtbase-patch-ime-panel.py` が外した hunk の直上にそう書いてある)。
+ * つまり**焦点を 1 度動かせば採り直される** ── Qt を焼き直さずに新しい値が読める。
+ *
+ * ## 🔴 対照群を必ず置く ── 検索バー
+ *
+ * ⚠ 「焦点を動かしたのに `accept0` のまま」は 2 通りに読めてしまう:
+ *   (a) 受付可否が本当に偽 / (b) **この採り直しの経路ごと死んでいる**。
+ * 🔑 `Ctrl+F` の検索バーは**本物の入力欄**なので、そこで `accept1` にならなければ
+ * (b) である ── つまり**この計器では何も言えない**と分かる(それも読める信号である)。
+ *
+ * ⚠ **検索バーが実際に開いたことを版面の絵で確かめる**(開かなかった回の値を読まない)。
+ *
+ * ## 🔴 実測(2026-08-29)── **(b) だった。この門はもう回さなくてよい**
+ *
+ * 一式 `lo-63426ccd1d7c-run33196326615`(直し `patch-lo-ime-update.py` 入り)、
+ * 文書が開き(`docOpen` / `loTitle`)、`landed: true` / `caretInBody: true` の回:
+ *
+ * | 段 | `data-pkc-ime` |
+ * |---|---|
+ * | キャレットが本文に在る | `obj1-win1-panel1-accept0` |
+ * | **検索バーを開いた**(`findOpened: true`) | 🔴 `accept0` |
+ * | 本文へ戻した | `accept0` |
+ *
+ * 🔑 **対照群が答えを出した** ── 検索バーは本物の入力欄なのに `accept0` のまま。
+ * つまり **(b) 採り直しの経路ごと死んでいる**。
+ * ⚠ 読みは「LO wasm は**全部を 1 枚の Qt ウィジェットに描く**ので、文書内で焦点が
+ * 動いても Qt の焦点オブジェクトは変わらず、`setFocusObject()` が発火しない」──
+ * 実際 `obj1-win1-panel1` は起動から最後まで**4 回とも 1 バイト違わなかった**。
+ * ⚠ **これは推測である**(1 枚のウィジェットであることを直に観測してはいない)が、
+ * どちらに転んでも結論は同じ:**この計器では受付可否を読めない**。
+ *
+ * 🔑 残る道は `patch-lo-ime-update.py` の docstring が挙げている
+ * 「`QWasmInputContext::update()` の中で値と**呼ばれた回数**を素の C++ 変数に書き、
+ * `EMSCRIPTEN_KEEPALIVE` で JS から読む」計器だけ ── ⚠ **qtbase の patch なので
+ * Qt を host + wasm から焼き直す(数時間)**。しかもそれが答えるのは
+ * 「門が開いたか」までで、**実 IME で候補窓が出るか**は実機でしか分からない
+ * (#438 の Q3 がその依頼である)。
+ */
+const IME_REFOCUS = process.env.PKC3_IME_REFOCUS === '1';
+/**
  * 🔴 **スレッドの内訳を読む**(#199 の「次の一手 ①」)。⚠ **既定では何もしない。**
  * ⚠ `PKC3_IME` とは別の口である ── あちらは版面を押して打つので、
  *   「詰まっている最中」を見たいこちらと**混ぜてはいけない**。
@@ -802,6 +851,25 @@ try {
         result.ime.caretInBody = swapped(afterFrames, selFrames);
         result.ime.landed = swapped(beforeFrames, afterFrames);
         result.ime.frames = { before: beforeFrames?.length ?? null, after: afterFrames?.length ?? null };
+        if (IME_REFOCUS) {
+          /** 診断属性だけ抜く(入力要素は 1 つなので、書かれている物を拾う)。 */
+          const attr = (deep) => (Array.isArray(deep?.inputs)
+            ? (deep.inputs.find((i) => typeof i.ime === 'string')?.ime ?? null) : null);
+          const r = { atCaret: attr(await page.evaluate(IME_DEEP)) };
+          const beforeFind = await frames();
+          await page.keyboard.press('Control+f');
+          await page.waitForTimeout(2500);
+          const afterFind = await frames();
+          // ⚠ 開かなかった回の値は読まない(判定不能として残す)
+          r.findOpened = swapped(beforeFind, afterFind);
+          r.findBar = attr(await page.evaluate(IME_DEEP));
+          await page.keyboard.press('Escape');
+          await page.waitForTimeout(1500);
+          await page.mouse.click(box.x + box.w * 0.4, box.y + box.h * 0.35);
+          await page.waitForTimeout(2500);
+          r.backInBody = attr(await page.evaluate(IME_DEEP));
+          result.ime.refocus = r;
+        }
       }
       result.ime.after = await page.evaluate(IME_DEEP);
       // 🔑 最後にまとめて読む(console の取りこぼしに左右されない本命の出口)
