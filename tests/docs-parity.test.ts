@@ -66,7 +66,12 @@ const SHELL = readFileSync('src/adapter/ui/render/shell.ts', 'utf-8');
 const COMMANDS = readFileSync('src/adapter/ui/render/commands.ts', 'utf-8');
 const DETAIL = readFileSync('src/adapter/ui/render/detail.ts', 'utf-8');
 const BINDER = readFileSync('src/adapter/ui/actions/binder.ts', 'utf-8');
-const INSPECTOR = readFileSync('src/adapter/ui/render/inspector.ts', 'utf-8');const MIGRATION = readFileSync('docs/migration-from-pkc2.md', 'utf-8');
+/**
+ * 🔴 **説明の正本は `features/entry-actions.ts`**(2026-08-29、#587 C-1)。
+ * ⚠ 元は `inspector.ts` に在ったが、**右クリックにも同じ説明を出す**ために移した ──
+ *   ここを向け直さないと、検査は**移した先を 1 度も読まない**(在るのに無いと言う)。
+ */
+const ENTRY_ACTION_SRC = readFileSync('src/features/entry-actions.ts', 'utf-8');const MIGRATION = readFileSync('docs/migration-from-pkc2.md', 'utf-8');
 
 /** shell を 1 度だけ組んで、以後はこれを見る。 */
 const root = ((): HTMLElement => {
@@ -864,8 +869,8 @@ describe('導線の置き場所(P8 段⑱)', () => {
 
   it('🔴 1 件書き出しの説明が、実際に落ちる形式と合っている', () => {
     // 実装は可逆アーカイブ(.pkc3.zip)── かつて tooltip は「Markdown で保存します」だった
-    expect(INSPECTOR).toContain('.pkc3.zip');
-    expect(INSPECTOR, 'Markdown と嘘を書いている').not.toContain('Markdown で保存します');
+    expect(ENTRY_ACTION_SRC).toContain('.pkc3.zip');
+    expect(ENTRY_ACTION_SRC, 'Markdown と嘘を書いている').not.toContain('Markdown で保存します');
   });
 });
 
@@ -997,7 +1002,7 @@ describe('情報ペインの説明が実装と合っている(2026-08-18)', () =
    * 解説コメントに旧文言(「この版では画像は入りません」)が入っているので、
    * file 全体を見ると**直したのに必ず落ちる**。CLAUDE.md §1「見るのは実行する行」。
    */
-  const TITLES = codeOnly(readFileSync('src/adapter/ui/render/inspector.ts', 'utf8'));
+  const TITLES = codeOnly(readFileSync('src/features/entry-actions.ts', 'utf8'));
 
   it('🔴 Word の説明が「入らない」と言っていない(実装は入れている)', () => {
     // 空振り防止 ── ①説明そのものが在る ②コメント落としで本体まで消していない

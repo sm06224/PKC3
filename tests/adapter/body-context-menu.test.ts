@@ -20,7 +20,8 @@
 import { describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/binder';
-import { BODY_MENU_ACTIONS } from '../../src/features/entry-actions';
+import { BODY_MENU_ACTIONS, ENTRY_ACTION_HINTS } from '../../src/features/entry-actions';
+import { openContextMenu } from '../../src/adapter/ui/render/context-menu';
 import { sectionAt } from '../../src/features/markdown/append-target';
 import { applyHeadingFold } from '../../src/adapter/ui/render/heading-fold';
 
@@ -269,6 +270,21 @@ describe('条件つきの操作が、右クリックから走る(#500 案 C)', (
     expect(
       menu!.querySelector('[data-pkc-action="adopt-external-images"]')?.textContent,
     ).toContain('2 枚');
+    /**
+     * 🔴 **押す前に「外へ通信する」と読める**(着地前レビュー ⚠3 / 動線レビュー 欠陥 2)。
+     *
+     * ⚠ #587 C-1 の 1 稿目は**行のメニューだけ**に説明を付けたので、
+     *   **押すと外へ通信して本文を書き換える、いちばん重い 1 個**が黙ったままだった
+     *   ── 取り消せる「削除」には説明が出て、取り消しにくいこれには出ない、という
+     *   **説明の量が操作の重さと逆**になる形。
+     * ⚠ この行が無いと、`bodyMenuActions` から `hint` を落とす変異が生き延びる
+     *   (下の「説明を持たない項目には title を付けない」は、この項目が出ない
+     *   fixture なので**この沈黙を pin していない**)。
+     */
+    expect(
+      menu!.querySelector('[data-pkc-action="adopt-external-images"]')?.getAttribute('title'),
+      '外へ通信することが押す前に読めない',
+    ).toBe(ENTRY_ACTION_HINTS['adopt-external-images']);
 
     menu!.querySelector<HTMLElement>('[data-pkc-action="adopt-external-images"]')!.click();
     /**
@@ -830,5 +846,80 @@ describe('メニューの身元(#596 D)', () => {
       (r.host.querySelector('#p-in') as HTMLElement).hidden,
       '同じノートなのに畳めない(身元の検査が強すぎる)',
     ).toBe(true);
+  });
+});
+
+/**
+ * 🔴 **右クリックの項目にも説明が出る**(#587 改善 C-1)。
+ *
+ * ⚠ ここは**配線を見る場所**である ── 表(`features/entry-actions.ts`)の test も、
+ *   描く側(`openContextMenu`)の test も、**相手の綴りを 1 度も見ない**
+ *   (CLAUDE.md §7「A と B が合意していることは、A の test にも B の test にも書けない」)。
+ *   🔑 だから**実物の右クリックから DOM の `title` まで**を 1 本で通す。
+ */
+describe('右クリックの説明(#587 C-1)', () => {
+  it('🔴 行を右クリックすると、出た項目が全部「何が起きるか」を持っている', () => {
+    const { root } = setup();
+    rightClick(root.querySelector('[data-pkc-entry="n1"]')!);
+    const items = [...root.querySelectorAll<HTMLElement>(`${MENU} button`)];
+    // ⚠ 空振り防止 ── 出ていないのに「全部持っている」が真になる形を潰す
+    expect(items.length, 'メニューが出ていない(台の空振り)').toBeGreaterThanOrEqual(9);
+    const silent = items
+      .filter((b) => (b.getAttribute('title') ?? '') === '')
+      .map((b) => b.getAttribute('data-pkc-action'));
+    expect(silent, '説明の無い項目が出ている').toEqual([]);
+  });
+
+  it('🔴 字は情報ペインと同じ表から来る(片方だけ直る日を作らない)', () => {
+    const { root } = setup();
+    rightClick(root.querySelector('[data-pkc-entry="n1"]')!);
+    const del = root.querySelector<HTMLElement>(`${MENU} [data-pkc-action="delete-entry"]`);
+    expect(del?.getAttribute('title')).toBe(ENTRY_ACTION_HINTS['delete-entry']);
+  });
+
+  it('⚠ **対照群** ── 説明を持たない項目には `title` を付けない(空の属性を生やさない)', () => {
+    const { root } = setup();
+    rightClick(root.querySelector('[data-pkc-field="para"]')!);
+    const items = [...root.querySelectorAll<HTMLElement>(`${MENU} button`)];
+    expect(items.length, '本文のメニューが出ていない(台の空振り)').toBeGreaterThanOrEqual(2);
+    expect(
+      items.filter((b) => b.hasAttribute('title')).map((b) => b.getAttribute('data-pkc-action')),
+      '説明を持たないのに空の title が生えている',
+    ).toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **説明の有無で `title` を出し分ける規則そのもの**(着地前レビュー ⚠4)。
+ *
+ * ⚠ `openContextMenu` には**直の unit が 1 つも無かった** ── だから
+ *   `it.hint !== ''` を外す変異は**どの test にも殺されなかった**
+ *   (実物を通る台では `hint` が全部非空 / 全部 `undefined` のどちらかで、
+ *   **空文字が届く場面を 1 度も作っていない**)。
+ * 🔑 CLAUDE.md §1「『これが無いと壊れる』と書いた規則が no-op だった」の形なので、
+ *   規則が効く**唯一の場面**(空文字)をここで作る。
+ */
+describe('メニューの説明の出し分け(#587 C-1)', () => {
+  it('🔴 空の説明には `title` 属性そのものを生やさない(対照群つき)', () => {
+    document.body.textContent = '';
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    openContextMenu(
+      root,
+      { x: 0, y: 0 },
+      [
+        { action: 'a', label: 'あ', hint: '' },
+        { action: 'b', label: 'い', hint: '説明' },
+        { action: 'c', label: 'う' },
+      ],
+      null,
+    );
+    const at = (n: string): HTMLElement =>
+      root.querySelector<HTMLElement>(`${MENU} [data-pkc-action="${n}"]`)!;
+    expect(at('a').hasAttribute('title'), '空の説明で title が生えている').toBe(false);
+    expect(at('c').hasAttribute('title'), '説明を渡していないのに title が生えている').toBe(false);
+    // ⚠ 対照群 ── これが無いと「何も付けない」実装でも緑になる
+    expect(at('b').getAttribute('title'), '説明が付いていない(台の空振り)').toBe('説明');
   });
 });

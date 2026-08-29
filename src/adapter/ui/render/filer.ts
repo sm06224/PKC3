@@ -415,7 +415,8 @@ export class FilerRenderer {
       count.setAttribute('data-pkc-field', 'filer-bulk-count');
       count.textContent = `${marks.length} 件を選んでいます`;
       const del = iconButton('delete-selected', 'まとめてゴミ箱へ');
-      del.title = `選んでいる ${marks.length} 件をゴミ箱へ入れます(フォルダ画面から戻せます)`;
+      // ⚠ 行き先は画面に在る名前で(上の `delete-entry` と同じ直し ── **対称の反対側**)
+      del.title = `選んでいる ${marks.length} 件をゴミ箱へ入れます(左の列の「フォルダ」タブの中のゴミ箱から戻せます)`;
       const clear = document.createElement('button');
       clear.type = 'button';
       clear.setAttribute('data-pkc-action', 'clear-selection');

@@ -5,7 +5,8 @@
  * ## なぜ要るか
  *
  * `InspectorRenderer.render` は最後に **全ボタンの `title` を
- * `ACTION_TITLES[action] ?? ''` で上書きする** ── 表に鍵が無い操作は
+ * `entryActionHint(action, …)` で上書きする**(表の実体は `features/entry-actions.ts` の
+ * `ENTRY_ACTION_HINTS`。⚠ 2026-08-29 まで `inspector.ts` の `ACTION_TITLES` だった)── 表に鍵が無い操作は
  * **説明が空のまま**配られる。⚠ 実際 `copy-entry-ref` / `copy-plain-markdown` の
  * 2 つがそうなっていた(前者は `render` の中で説明を代入する行が在ったのに、
  * この上書きに**必ず負ける**ので一度も画面に出ていない)。
@@ -21,6 +22,7 @@ import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { initialState, reduce } from '../../src/adapter/state/app-state';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
+import { entryMenuActions } from '../../src/features/entry-actions';
 
 const meta = (lid: string, title: string, archetype: EntryMeta['archetype']): EntryMeta => ({
   lid,
@@ -134,5 +136,46 @@ describe('情報ペインの操作の帯の説明(2026-08-29)', () => {
     expect(t('copy-entry-ref'), '2 つの説明が同じ(どちらを押すか決められない)').not.toBe(
       t('copy-plain-markdown'),
     );
+  });
+
+  /**
+   * 🔴 **情報ペインと右クリックが、同じ操作に同じ説明を出す**(着地前レビュー 🔴2)。
+   *
+   * ⚠ この主張は **`entry-actions.ts` の test にも `inspector.ts` の test にも書けない**
+   *   ── 片方は表を、もう片方は DOM を見るので、**その間の配線**は誰も通らない
+   *   (CLAUDE.md §7「合意を見る場所を別に 1 つ作る」)。
+   * ⚠ 1 稿目の parity は `entryMenuActions().hint` を `entryActionHint()` と比べており、
+   *   **同じ関数を同じ引数で 2 回呼ぶ同語反復**だった(レビューが拾った)。
+   * 🔑 ここは**実物の情報ペインが描いた `title`** と、**右クリックが配る `hint`** を突き合わせる。
+   *
+   * ⚠ 実害の形:情報ペインは以前 `archetype: null` を固定して渡していたので、
+   *   種類で変わる説明を足した日に**右クリックだけが新しい字を出す**
+   *   ── 同じボタンが面によって別のことを言う。
+   */
+  it('🔴 情報ペインの説明と、右クリックの説明が一致する', () => {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const inspector = new InspectorRenderer(buildShell(root).inspector);
+    const s = reduce(initialState, {
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      // ⚠ **フォルダにする** ── 種類で畳まれる `export-folder` を突き合わせに含める
+      metas: [meta('n1', '議事録', 'folder')],
+      relations: [],
+    }).state;
+    inspector.render(reduce(s, { type: 'SELECT_ENTRY', lid: 'n1' }).state);
+
+    const hints = new Map(
+      entryMenuActions({ archetype: 'folder', linkedFile: null }).map((a) => [a.action, a.hint]),
+    );
+    const shared = actionButtons(root).filter((b) =>
+      hints.has(b.getAttribute('data-pkc-action') ?? ''),
+    );
+    // ⚠ 空振り防止 ── 突き合わせが 0 件でも「全部一致」は真になる
+    expect(shared.length, '両方の面に在る操作が拾えていない(台の空振り)').toBeGreaterThanOrEqual(8);
+    for (const b of shared) {
+      const a = b.getAttribute('data-pkc-action') ?? '';
+      expect(b.title, `${a} の説明が面で食い違っている`).toBe(hints.get(a));
+    }
   });
 });
