@@ -6,7 +6,7 @@
  * - pageerror / console.error は各 spec の最後に 0 件を assert する
  */
 import { expect, type Locator, type Page } from '@playwright/test';
-import { consoleOrigin, firstAppFrame } from './page-errors';
+import { consoleOrigin, firstAppFrame, rawFrame } from './page-errors';
 
 export async function gotoApp(page: Page): Promise<void> {
   await page.goto('/');
@@ -100,9 +100,17 @@ export function collectPageErrors(page: Page): string[] {
    *   赤の 1 行はアプリの例外とまったく同じ顔をしていた。
    */
   const t0 = Date.now();
-  page.on('pageerror', (e) =>
-    errors.push(`pageerror: ${e.message}${firstAppFrame(e.stack)} (+${Date.now() - t0}ms)`),
-  );
+  page.on('pageerror', (e) => {
+    /**
+     * 🔴 **名指しできなくても stack を捨てない**(#387、2026-08-29)。
+     * ⚠ 4 度観測して 4 度とも `@ path:line` が付かなかった ── そのとき
+     *   「stack が空」なのか「`<anonymous>` だけ」なのかが**区別できていない**。
+     * 🔑 名指しできた回はこれまでどおり、できなかった回だけ**採れた 1 行**を添える。
+     */
+    const named = firstAppFrame(e.stack);
+    const where = named !== '' ? named : rawFrame(e.stack);
+    errors.push(`pageerror: ${e.message}${where} (+${Date.now() - t0}ms)`);
+  });
   page.on('console', (msg) => {
     if (msg.type() !== 'error') return;
     const line = `console.error: ${msg.text()}`;

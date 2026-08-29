@@ -5,7 +5,7 @@
  *   実ブラウザでしか確かめられないと、間欠の赤でしか直せなくなる。
  */
 import { describe, expect, it } from 'vitest';
-import { consoleOrigin, firstAppFrame } from './page-errors';
+import { consoleOrigin, firstAppFrame, rawFrame } from './page-errors';
 
 /** 実 Chromium の stack(#387 の 2 度目の観測から形を写した)。 */
 const REAL = [
@@ -98,5 +98,46 @@ describe('console の出所を 1 行だけ添える(#561)', () => {
 
   it('⚠ 壊れた URL でもそのまま返す(採れたものは捨てない)', () => {
     expect(consoleOrigin({ url: 'http://[bad/x.js', lineNumber: 3 })).toContain('http://[bad/x.js');
+  });
+});
+
+/**
+ * 🔴 **名指しできなくても stack を捨てない**(#387)。
+ *
+ * ⚠ #387 は **4 度観測して 4 度とも** `@ path:line` が付かなかった ── そのとき
+ *   「stack が空」なのか「`<anonymous>` だけ」なのかが**区別できていない**。
+ */
+describe('名指しできない stack でも 1 行残す(#387)', () => {
+  it('🔴 `<anonymous>` だけの stack でも、採れた 1 行を返す', () => {
+    const stack = ["TypeError: x", '    at <anonymous>:1:1', '    at Array.forEach (<anonymous>)'].join(
+      '\n',
+    );
+    // ⚠ 名指しの側は**これまでどおり空**(役割を変えていない)
+    expect(firstAppFrame(stack)).toBe('');
+    expect(rawFrame(stack)).toBe(' @? at <anonymous>:1:1');
+  });
+
+  it('⚠ 題名の行は返さない(`e.message` で既に出ている)', () => {
+    expect(rawFrame('TypeError: 何か'), '題名を 2 度出している').toBe('');
+  });
+
+  it('🔴 stack が無ければ何も足さない(「不明」と書かない)', () => {
+    expect(rawFrame(undefined)).toBe('');
+    expect(rawFrame(null)).toBe('');
+    expect(rawFrame('')).toBe('');
+  });
+
+  it('⚠ 長い行は切る(注入コードは 1 行が数千字になる)', () => {
+    const long = `    at ${'x'.repeat(500)}`;
+    const got = rawFrame(long);
+    expect(got.length, '赤が読めない長さになっている').toBeLessThan(100);
+    expect(got.endsWith('…'), '切ったことが分からない').toBe(true);
+  });
+
+  it('🔑 名指しできる stack では、こちらは使わない側が勝つ(呼び側の約束)', () => {
+    // ⚠ 2 つの口が両方 1 行返す ── 呼び側は**名指しを優先**する(helpers.ts)
+    const stack = '    at fn (http://localhost:1/a.js:2:3)';
+    expect(firstAppFrame(stack)).toBe(' @ /a.js:2:3');
+    expect(rawFrame(stack)).not.toBe('');
   });
 });

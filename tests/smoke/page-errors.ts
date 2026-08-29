@@ -41,6 +41,30 @@
  * ⚠ origin は落として **path:line:col** だけにする ── port は走るたびに変わるので、
  *   残すと**同じ赤が毎回違う字面**になり、突き合わせられない。
  */
+/**
+ * 🔴 **名指しできなくても、stack を捨てない**(#387、2026-08-29 の 4 度目の観測)。
+ *
+ * ⚠ `firstAppFrame` は「URL を持つ frame が無ければ**何も足さない**」ので、
+ *   #387 の赤は 4 回とも `pageerror: … (+Nms)` の 1 行だけだった ──
+ *   **「stack が空だった」のか「`<anonymous>` だけだったのか」が区別できない**。
+ *   これは同じ file の docstring が予告していた限界そのものである。
+ * 🔑 だから**採れた 1 行をそのまま**残す ── 「不明」とは書かない
+ *   (書くと *採れなかった* のか *そこが根* なのかが混ざる、という §4 の規律)。
+ * ⚠ **1 行だけ**にする(赤が読みにくいこと自体が次の見落としになる)。
+ * ⚠ 例外の**題名の行は飛ばす**(`TypeError: …` は `e.message` で既に出ている)。
+ * ⚠ 長すぎる行は切る ── 注入コードは 1 行が数千字になることがある。
+ */
+export function rawFrame(stack: string | undefined | null): string {
+  if (!stack) return '';
+  for (const line of stack.split('\n')) {
+    const t = line.trim();
+    // ⚠ frame の行だけを見る(題名の行・空行は飛ばす)
+    if (t === '' || !t.startsWith('at ')) continue;
+    return ` @? ${t.length > 80 ? `${t.slice(0, 80)}…` : t}`;
+  }
+  return '';
+}
+
 export function firstAppFrame(stack: string | undefined | null): string {
   if (!stack) return '';
   for (const line of stack.split('\n')) {
