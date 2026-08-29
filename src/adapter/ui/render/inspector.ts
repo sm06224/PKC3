@@ -1147,18 +1147,18 @@ export class InspectorRenderer {
     btn('export-folder', 'フォルダを書き出す');
     // 🔴 **Word で出す**(#187 段①)。⚠ 隣の「書き出す」と**別の物**である ──
     //    あちらは取り込み直せるバックアップ、こちらは片道の Word 文書
-    btn('export-entry-docx', 'Word');
+    btn('export-entry-docx', ENTRY_ACTION_LABELS['export-entry-docx']!);
     /**
      * 🔴 **PowerPoint で出す**(#187 段⑤)。⚠ Word と**切れ方が違う** ──
      *   見出しでスライドが切れるので、説明にもそう書く(押す前に分かるように)。
      */
-    btn('export-entry-pptx', 'PowerPoint');
+    btn('export-entry-pptx', ENTRY_ACTION_LABELS['export-entry-pptx']!);
     /**
      * 🔴 **紙に出す(= PDF)**(#187、2026-08-23)。⚠ 隣の 2 つと違い、
      *   **file は落ちない** ── ブラウザの印刷画面が開き、そこで user が
      *   「PDF として保存」を選ぶ。⚠ だから文言に「保存します」と書かない。
      */
-    btn('export-entry-pdf', 'PDF');
+    btn('export-entry-pdf', ENTRY_ACTION_LABELS['export-entry-pdf']!);
     /**
      * 🔴 **素の Markdown で写す**(#396)。
      *

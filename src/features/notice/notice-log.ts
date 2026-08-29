@@ -90,6 +90,16 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-08-29-context-menu-export',
+    title: 'Word / PowerPoint / PDF が、右クリックからも出せるようになりました',
+    items: [
+      '一覧やフォルダの行を右クリックすると、Word・PowerPoint・PDF が並ぶようになりました。',
+      'この 3 つは右の情報ペインの帯にしかなかったので、見出しが 10 個ほどあるノートでは帯が下へ流れて届きませんでした。',
+      '右の情報ペインを畳んでいる場合も、右クリックから押せます。これまでは画面から消えていました。',
+      '右の情報ペインの並びと見た目は 1 つも変えていません。これまでどおりの場所にそのまま在ります。',
+    ],
+  },
+  {
     id: '2026-08-29-tag-polish',
     title: 'タグの取りこぼしと呼び名をそろえました',
     items: [
@@ -288,21 +298,15 @@ export const NOTICES: readonly Notice[] = [
       '体験の流れ(journey)だけ、これまで図にならず「Tainted canvases」という英語の理由が出ていました。描けるようになりました。',
     ],
   },
-  {
-    id: '2026-08-28-vcard-followups',
-    title: '連絡先の取り込みが、失ったものをきちんと言うようになりました',
-    items: [
-      '取り込む前に編集中だと、これまではファイルを選んだ後で断られていました。いまはボタンを押した時点で「編集を終了してから」と出ます。',
-      '文字が壊れている .vcf を取り込むと、これまでは名前が黙って化けていました。いまは「文字が壊れている所がありました」と注意が出ます。',
-      '中身が何も無いカードは、空のノートを作らずに飛ばします(そのときも注意が出ます)。',
-      '連絡先が多くて途中までしか集められていないときは、「vCard で書き出す」のボタンと、書き出した後の帯でもそう言います。全部だと思って元のファイルを消さないためです。',
-    ],
-  },
 ];
 
 /**
- * ⚠ **落としたぶんの原本は CHANGELOG に在る**(上限 20 件を超えたので、古いほうから
- *   `2026-08-16-office-save-to-pkc` / `2026-08-17-office-save-same-note`(2026-08-19)、
- *   `2026-08-19-dual-pane-app`(2026-08-22)、
- *   `2026-08-17-word-export`(2026-08-20)、`2026-08-17-word-export-images` / `2026-08-17-word-export-figures`(2026-08-20)、`2026-08-17-word-export-page` / `2026-08-18-settings-commands` / `2026-08-18-word-vector-figures`(2026-08-21)、`2026-08-18-paste-and-drop` / `2026-08-18-shortcut-keys` / `2026-08-18-folder-first` / `2026-08-18-figures-and-folders` / `2026-08-18-open-and-rows`(2026-08-22)、`2026-08-19-container-id` / `2026-08-19-dual-keyboard` / `2026-08-20-calendar-lines` / `2026-08-20-kanban-done-fold`(2026-08-23)、`2026-08-20-boot-and-search` / `2026-08-21-auto-pair-skip` / `2026-08-21-app-dialog`(2026-08-24)、`2026-08-22-calendar-and-fixes`(2026-08-24)、`2026-08-22-frontmatter-repair` / `2026-08-22-pane-flow` / `2026-08-22-apps-in-windows` / `2026-08-22-window-overlap` / `2026-08-23-persist-state` / `2026-08-23-print-pdf` / `2026-08-23-repair-window-writes` / `2026-08-23-backlinks` / `2026-08-23-today-note` / `2026-08-23-office-restart` / `2026-08-23-office-format-notice` / `2026-08-24-pptx-export` / `2026-08-24-paste-permalink` / `2026-08-24-markdown-to-pandoc` / `2026-08-24-schedule-range`(2026-08-25)、`2026-08-24-dual-new-note` / `2026-08-24-office-save-formats` / `2026-08-25-relation-map` / `2026-08-25-bookmark-capture` / `2026-08-25-relation-map-body-links` / `2026-08-25-repeating-tasks` / `2026-08-25-snippets` / `2026-08-25-snippet-menu` / `2026-08-25-append-into-section` / `2026-08-25-revision-diff` / `2026-08-25-cross-pane` / `2026-08-25-ext-write-back`(2026-08-26)、`2026-08-25-portable-html`(2026-08-26)、`2026-08-25-rich-text-paste`(2026-08-27)、`2026-08-26-off-bar-formats` / `2026-08-26-export-structure` / `2026-08-26-shrink-photos` / `2026-08-26-apply-plan` / `2026-08-26-storage-profile` / `2026-08-26-smart-text` / `2026-08-26-smart-tasks` / `2026-08-26-palette-format` / `2026-08-26-settings-file` / `2026-08-26-adopt-external-images`(2026-08-27)、`2026-08-27-body-media` / `2026-08-27-browse-tab-fit` / `2026-08-27-capture-hold`(2026-08-28)、`2026-08-27-group-task`(2026-08-28)、`2026-08-27-work-timer`(2026-08-28)を落とした)。`tests/docs-parity.test.ts` の `DROPPED` がその突合を持つ。
+ * ⚠ **落としたぶんの原本は `CHANGELOG.md` に在る**(上限 20 件を超えると古いほうから落ちる)。
+ * 突合は `tests/docs-parity.test.ts` の `DROPPED`(落とした題名の既知リスト)が持つ ──
+ * 「登記表 + 落ちた分 = CHANGELOG」を**等値**で見るので、落としたのに書き忘れると CI が落ちる。
+ *
+ * 🔴 **ここに id の写しを持たない**(2026-08-29)。⚠ 以前はこのコメントが落とした id を
+ *   並べていたが、**66 件で更新が止まり、実際は 148 件**だった ── 誰も読まない 3 つ目の
+ *   台帳になっていた(CLAUDE.md §7「同じ値が複数の場所にある」)。
+ *   🔑 **育つ一覧は、機械が突き合わせている所にだけ置く。**
  */
