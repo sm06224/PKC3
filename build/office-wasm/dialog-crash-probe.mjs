@@ -293,6 +293,65 @@ const SUITES = {
       wait: 25_000,
     },
   ],
+  /**
+   * #431 段④ ── **マクロは押して動くか**。
+   *
+   * 段①②③(定義 / 登録 / 実体)は `check-macro-wiring.py` で
+   * 4/4・3/3・4/4 を実測済である。⚠ **揃っていても動くとは限らない**
+   * (#225 で「名前は在るのに実行時に落ちる」を踏んだ)ので、**押す**ところまで見る。
+   *
+   * 座標は 1280x720 の `__shots-dialog/03-tools-menu.png` から採った ──
+   * `Macros` は y=592 に在り、**灰色ではない**(`Thesaurus...` / `ImageMap` /
+   * `Calculate` は灰色)ので、項目自体は生きている。
+   *
+   * 🔑 見るところは screenshot で見る(`landed` だけで読まない):
+   *   ① `Macros` を押して**子メニューが開くか**(無言の dead click でないか)
+   *   ② そのとき fault が発火しないか
+   */
+  macro: [
+    ...OPEN_DOC,
+    { id: 'tools-menu', at: [472, 37], why: 'Tools メニューを開く', control: false },
+    {
+      id: 'macros-submenu',
+      at: [56, 592],
+      why: '🔴 Macros ── 子メニューが開くか(#431 段④-1)',
+      control: false,
+      wait: 8_000,
+    },
+    {
+      id: 'edit-macros',
+      at: [490, 619],
+      why: '🔴 Edit Macros... ── Basic IDE が開くか(#431 段④-2)',
+      control: false,
+      wait: 25_000,
+    },
+  ],
+  /**
+   * #431 段④ の**対照群**。⚠ `macro` で `Edit Macros...` が無反応に見えたとき、
+   * 「製品が動かない」と読む前に **子メニューの項目を押せているのか**を確かめる。
+   *
+   * 🔑 `Run Macro...`(1 つ上の行)を押す ── こちらが開けば、押せてはいる
+   * (= `Edit Macros...` 固有の話)。こちらも無反応なら、**計器の側**である
+   * (子メニューの項目にクリックが入っていない)。
+   */
+  'macro-run': [
+    ...OPEN_DOC,
+    { id: 'tools-menu', at: [472, 37], why: 'Tools メニューを開く', control: false },
+    {
+      id: 'macros-submenu',
+      at: [56, 592],
+      why: 'Macros ── 子メニューを開く',
+      control: false,
+      wait: 8_000,
+    },
+    {
+      id: 'run-macro',
+      at: [490, 592],
+      why: '🔴 Run Macro... ── 選択ダイアログが開くか(対照群)',
+      control: false,
+      wait: 25_000,
+    },
+  ],
 };
 
 const SUITE = process.env.PKC3_PROBE_SUITE ?? 'dialog';
