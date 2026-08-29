@@ -142,8 +142,17 @@ describe('ノートの参照をコピー(#427 段①)', () => {
     const d = new Dispatcher();
     const copied: string[] = [];
     const said: string[] = [];
+    /**
+     * ⚠ **本物と同じ意味論にする**(2026-08-29。CLAUDE.md §3)── `main.ts` の
+     *   `copyText` は clipboard へ書いたあと **`done` を状態の行に出す**。
+     * 🔴 押した側で `showStatus` を撃っても**勝てない**(clipboard の `.then` が
+     *   12ms 後に上書きする ── 実測)ので、字は**この口から**渡っているかを見る。
+     */
     bindActions(root, d, {
-      copyText: (t: string) => copied.push(t),
+      copyText: (t: string, done?: string) => {
+        copied.push(t);
+        said.push(done ?? 'コピーしました');
+      },
       showStatus: (t: string) => said.push(t),
     });
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: METAS, relations: [] });
@@ -180,7 +189,14 @@ describe('ノートの参照をコピー(#427 段①)', () => {
      * 🔴 **光るだけでは届かない** ── メニューは押した瞬間に畳まれるので、
      *   `data-pkc-flash` を付ける相手が消える。**状態の行に出す**まで見る。
      */
-    expect(said, 'メニューから押すと、成功しても画面に何も残らない').toEqual(['参照を写しました']);
+    /**
+     * 🔴 **既定の汎用文で終わらせない**(2026-08-29 の動線レビュー 欠陥 2)。
+     * ⚠ 「コピーしました」だけだと、隣の「素の Markdown」と**押した後の答えが同じ**に
+     *   なる ── 2 つを見分けさせるのが目的なのに、見分けが付かない。
+     */
+    expect(said, 'メニューから押すと、成功しても画面に何も残らない').toEqual([
+      'ノートへのリンクをコピーしました(本文に貼れます)',
+    ]);
   });
 
   /**

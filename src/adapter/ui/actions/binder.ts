@@ -645,7 +645,18 @@ export interface BinderServices {
   /** ⚠ **Promise を返す** ── 押した側が「終わった」を知らないと待ちを出せない。 */
   exportDiagram?(source: string, index: number): void | Promise<void>;
   /** 文字列をクリップボードへ(P8 段⑱)。⚠ 失敗も可視で終える。 */
-  copyText?(text: string): void;
+  /**
+   * clipboard へ写す。
+   *
+   * 🔴 **`done` に「何を写したか」を渡す**(2026-08-29 の動線レビュー 欠陥 2)。
+   * ⚠ 渡さないと `main.ts` の既定文(「参照をコピーしました」)が出る ── それは
+   *   **参照以外を写したときに嘘になる**(実際 `copy-plain-markdown` は本文を全部
+   *   写しているのに「参照をコピーしました(本文に貼れます)」と出ていた)。
+   * ⚠ **押した側で `showStatus` を撃っても勝てない** ── clipboard の書込は非同期で、
+   *   その `.then` が**後から必ず上書きする**(実測 12ms で入れ替わっていた)。
+   *   🔑 だから字は**この口から渡す**。2 か所で撃たない。
+   */
+  copyText?(text: string, done?: string): void;
   /**
    * 添付 gate(書出し / 取込 / 整理)が実行中か。
    * ⚠ **破壊的操作を止めるために要る**(P6f review M-2)── 「書き出す」と「削除」を
@@ -3427,8 +3438,13 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版では写せません' });
       return;
     }
-    services.copyText(plain);
-    services.showStatus?.('素の Markdown として写しました');
+    /**
+     * 🔴 **字は `copyText` に渡す**(2026-08-29 の動線レビュー 欠陥 2)。
+     * ⚠ 直す前はここで `showStatus` を撃っていたが、clipboard の `.then` が
+     *   **後から「参照をコピーしました(本文に貼れます)」で上書き**していた ──
+     *   本文を全部写しているのに**参照を写したと言われる**(実測)。
+     */
+    services.copyText(plain, '素の Markdown をコピーしました(他のツールに貼れます)');
     void target;
   },
   /**
@@ -3561,13 +3577,18 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: 'ノートがまだありません' });
       return;
     }
-    services.copyText?.(out.text);
-    flashCopied(target);
-    services.showStatus?.(
+    /**
+     * 🔴 **字は `copyText` に渡す**(2026-08-29 の動線レビュー 欠陥 2)── ここも
+     *   `showStatus` を後から上書きされていた(件数まで出していたのに、user が
+     *   読むのは「参照をコピーしました」だった)。
+     */
+    services.copyText?.(
+      out.text,
       out.shown === out.total
         ? `構成 ${out.total} 件をコピーしました`
         : `構成 ${out.total} 件のうち ${out.shown} 件をコピーしました`,
     );
+    flashCopied(target);
   },
   /**
    * 🔴 **整理案を当てる**(#429 段③)。
@@ -3821,16 +3842,16 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: 'ノートを選んでから押してください' });
       return;
     }
-    services.copyText?.(ref);
-    flashCopied(target);
     /**
      * ⚠ **光るだけでは、メニューから押した人に届かない**(2026-08-29)。
      * 🔑 `data-pkc-flash` は 700ms の合図だが、右クリックのメニューは
      *   押した瞬間に**畳まれる**(`onCloseMenu`)── 光る相手が消えるので、
      *   成功しても**画面に何も残らない**(dead click と見分けが付かない)。
-     * ⚠ だから隣の `copy-plain-markdown` と**同じく状態の行にも出す**。
+     * 🔴 **字は `copyText` に渡す**(動線レビュー 欠陥 2)── ここで `showStatus` を
+     *   撃っても、clipboard の `.then` が**12ms 後に上書きする**(実測)。
      */
-    services.showStatus?.('参照を写しました');
+    services.copyText?.(ref, 'ノートへのリンクをコピーしました(本文に貼れます)');
+    flashCopied(target);
   },
   /**
    * 🔴 **本文の外部画像を、押して手元へ取り込む**(#264 段①+②)。
@@ -3919,7 +3940,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       .closest<HTMLElement>('[data-pkc-asset-ref]')
       ?.getAttribute('data-pkc-asset-ref');
     if (!ref) return;
-    services.copyText?.(ref);
+    services.copyText?.(ref, '添付の参照をコピーしました(本文に貼れます)');
     /**
      * 🔴 **押した手応えを出す**(#427 段①で気づいた ── 対称の反対側)。
      * ⚠ 直す前は**この 2 つだけ合図が無かった** ── 本文のコピー
